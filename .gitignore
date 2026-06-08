@@ -46,7 +46,14 @@ out/
 *.tsbuildinfo
 
 # ---- Buf / Proto generated ----
-gen/
+# Generic build output dirs (per-app) stay ignored...
+**/gen/
+# ...but the shared proto stubs are committed: they ARE the cross-language
+# API contract and are required for an out-of-the-box build (the codegen
+# toolchain is non-trivial behind a corporate TLS proxy). See ADR-0002.
+!packages/proto/gen/
+!packages/proto/gen/**
+packages/proto/gen/**/__pycache__/
 
 # ---- Local data ----
 .data/

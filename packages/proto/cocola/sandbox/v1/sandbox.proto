@@ -6,11 +6,18 @@ option go_package = "github.com/cocola-project/cocola/packages/proto/gen/go/coco
 
 // SandboxService is implemented by sandbox-manager and called by agent-runtime.
 //
-// The wire contract is intentionally minimal in M0 — Exec/Files/Pause/Resume
-// fill in M1 alongside the DockerProvider. We commit the service stub now so
-// import paths are stable across the codebase from day one.
+// M1 fills in the full lifecycle (Exec streaming, file IO, pause/resume) on top
+// of the M0 Create/Destroy/Health stubs. The wire contract maps 1:1 onto the
+// SandboxProvider Go interface so any backend (Docker today; K8s+gVisor later)
+// is swappable without touching the service layer.
 service SandboxService {
   rpc Create(CreateRequest) returns (CreateResponse);
+  // Exec streams stdout/stderr chunks followed by a terminal EXIT (or ERROR) event.
+  rpc Exec(ExecRequest) returns (stream ExecEvent);
+  rpc WriteFile(WriteFileRequest) returns (WriteFileResponse);
+  rpc ReadFile(ReadFileRequest) returns (ReadFileResponse);
+  rpc Pause(PauseRequest) returns (PauseResponse);
+  rpc Resume(ResumeRequest) returns (ResumeResponse);
   rpc Destroy(DestroyRequest) returns (DestroyResponse);
   rpc Health(HealthRequest) returns (HealthResponse);
 }
@@ -39,6 +46,50 @@ message Sandbox {
 
 message CreateRequest { SandboxSpec spec = 1; }
 message CreateResponse { Sandbox sandbox = 1; }
+
+message ExecRequest {
+  string sandbox_id = 1;
+  repeated string cmd = 2;
+  string cwd = 3;
+  map<string, string> env = 4;
+  bytes stdin = 5;
+  int32 timeout_secs = 6; // 0 = provider default
+}
+
+enum ExecEventKind {
+  EXEC_EVENT_KIND_UNSPECIFIED = 0;
+  EXEC_EVENT_KIND_STDOUT = 1;
+  EXEC_EVENT_KIND_STDERR = 2;
+  EXEC_EVENT_KIND_EXIT = 3;
+  EXEC_EVENT_KIND_ERROR = 4;
+}
+
+message ExecEvent {
+  ExecEventKind kind = 1;
+  bytes stdout = 2;
+  bytes stderr = 3;
+  int32 exit_code = 4;
+  string error = 5;
+}
+
+message WriteFileRequest {
+  string sandbox_id = 1;
+  string path = 2;
+  bytes data = 3;
+}
+message WriteFileResponse {}
+
+message ReadFileRequest {
+  string sandbox_id = 1;
+  string path = 2;
+}
+message ReadFileResponse { bytes data = 1; }
+
+message PauseRequest { string sandbox_id = 1; }
+message PauseResponse {}
+
+message ResumeRequest { string sandbox_id = 1; }
+message ResumeResponse {}
 
 message DestroyRequest { string sandbox_id = 1; }
 message DestroyResponse {}

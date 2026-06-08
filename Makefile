@@ -26,7 +26,7 @@ dev-ps: ## Show local infra status
 	docker compose -f deploy/docker-compose/docker-compose.dev.yml ps
 
 # -------------------------------------------------------------------- proto
-.PHONY: proto-lint proto-gen proto-breaking
+.PHONY: proto-lint proto-gen proto-breaking proto-gen-py
 proto-lint: ## Lint .proto files via buf
 	cd packages/proto && buf lint
 
@@ -35,6 +35,9 @@ proto-gen: ## Generate stubs via buf
 
 proto-breaking: ## Check breaking changes against main
 	cd packages/proto && buf breaking --against '.git#branch=main'
+
+proto-gen-py: ## Generate Python stubs (containerized; corporate-TLS safe)
+	scripts/proto-gen-py.sh
 
 # -------------------------------------------------------------------- go
 .PHONY: go-tidy go-build go-test go-lint
@@ -80,6 +83,21 @@ web-build: ## Build Next.js production bundle
 
 web-lint: ## Lint web code
 	cd apps/web && pnpm lint
+
+# -------------------------------------------------------------------- sandbox (M1)
+# The sandbox-manager Go build is run inside a Linux golang container. The
+# corporate-managed macOS host blocks both the native TLS verifier and writing
+# ".gitmodules" files, so a host-native `go build` cannot resolve modules.
+# scripts/sandbox-build.sh encapsulates the working recipe.
+.PHONY: sandbox-build sandbox-run sandbox-e2e
+sandbox-build: ## Build sandbox-manager + sandbox-cli (containerized)
+	scripts/sandbox-build.sh
+
+sandbox-run: sandbox-build ## Run sandbox-manager locally (Docker provider)
+	COCOLA_SANDBOX_PROVIDER=docker ./bin/sandbox-manager
+
+sandbox-e2e: ## Full M1 smoke test: Go CLI + Python runtime demos
+	scripts/sandbox-e2e.sh
 
 # -------------------------------------------------------------------- aggregate
 .PHONY: install test lint clean
