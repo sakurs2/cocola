@@ -1,0 +1,47 @@
+syntax = "proto3";
+
+package cocola.sandbox.v1;
+
+option go_package = "github.com/cocola-project/cocola/packages/proto/gen/go/cocola/sandbox/v1;sandboxv1";
+
+// SandboxService is implemented by sandbox-manager and called by agent-runtime.
+//
+// The wire contract is intentionally minimal in M0 — Exec/Files/Pause/Resume
+// fill in M1 alongside the DockerProvider. We commit the service stub now so
+// import paths are stable across the codebase from day one.
+service SandboxService {
+  rpc Create(CreateRequest) returns (CreateResponse);
+  rpc Destroy(DestroyRequest) returns (DestroyResponse);
+  rpc Health(HealthRequest) returns (HealthResponse);
+}
+
+message Resources {
+  double cpu_cores = 1;
+  int64 memory_mib = 2;
+  int64 disk_mib = 3;
+}
+
+message SandboxSpec {
+  string user_id = 1;
+  string session_id = 2;
+  string image = 3;
+  map<string, string> env = 4;
+  Resources resources = 5;
+  repeated string egress_allowlist = 6;
+}
+
+message Sandbox {
+  string id = 1;
+  string user_id = 2;
+  string session_id = 3;
+  string endpoint = 4;
+}
+
+message CreateRequest { SandboxSpec spec = 1; }
+message CreateResponse { Sandbox sandbox = 1; }
+
+message DestroyRequest { string sandbox_id = 1; }
+message DestroyResponse {}
+
+message HealthRequest { string sandbox_id = 1; }
+message HealthResponse { bool healthy = 1; string detail = 2; }

@@ -1,0 +1,25 @@
+# Architecture Decision Records
+
+This directory captures the **why** behind structural decisions in cocola. Each
+ADR is immutable once accepted; supersede it with a new ADR rather than editing
+in place.
+
+## Why ADRs
+
+Code shows *what* and *how*. ADRs preserve *why* — invaluable when:
+- new contributors ask "why isn't this Service X?"
+- you revisit a decision 6 months later
+- a tech option's tradeoffs shift
+
+## Filing a new ADR
+
+1. Copy `template.md` to `NNNN-short-kebab-title.md` (next sequence number).
+2. Fill in: Context → Decision → Consequences.
+3. Open a PR. Discussion happens on the PR, not by editing the ADR.
+4. On merge, status flips to `Accepted`.
+
+## Index
+
+| # | Title | Status |
+|---|---|---|
+| 0001 | Tech stack: Go + Python hybrid, Next.js frontend | Accepted |

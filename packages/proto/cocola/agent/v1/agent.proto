@@ -1,0 +1,27 @@
+syntax = "proto3";
+
+package cocola.agent.v1;
+
+option go_package = "github.com/cocola-project/cocola/packages/proto/gen/go/cocola/agent/v1;agentv1";
+
+// AgentRuntimeService is called by gateway. Stream returns agent events.
+//
+// Event envelope is intentionally generic so we can add new event kinds (e.g.
+// `thinking`, `permission_request`) without breaking the schema. Consumers
+// must tolerate unknown kinds gracefully.
+service AgentRuntimeService {
+  rpc Query(QueryRequest) returns (stream AgentEvent);
+}
+
+message QueryRequest {
+  string user_id = 1;
+  string session_id = 2;
+  string prompt = 3;
+  string sandbox_id = 4;
+  int32 max_turns = 5;
+}
+
+message AgentEvent {
+  string kind = 1;         // text | tool_use | tool_result | error | done | ...
+  map<string, string> data = 2;  // simple key/value payload; complex payloads land in M2
+}

@@ -1,0 +1,87 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+# Cancel superseded runs on the same PR — saves minutes when pushing rapidly.
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  # ------------------------------------------------------------------ proto
+  proto:
+    name: proto / buf
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: bufbuild/buf-setup-action@v1
+        with:
+          version: "1.35.1"
+      - name: buf lint
+        working-directory: packages/proto
+        run: buf lint
+
+  # ------------------------------------------------------------------ go
+  go:
+    name: go / build + test + lint
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.22"
+          cache: true
+      - name: go vet (workspace)
+        run: go vet ./...
+      - name: go test (workspace)
+        run: go test ./...
+      - uses: golangci/golangci-lint-action@v6
+        with:
+          version: v1.59
+          args: --timeout=5m
+
+  # ------------------------------------------------------------------ python
+  python:
+    name: python / ruff + pytest
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        app: [agent-runtime, llm-gateway]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: install uv
+        run: pip install uv
+      - name: install deps
+        working-directory: apps/${{ matrix.app }}
+        run: uv sync --all-extras
+      - name: ruff
+        run: |
+          pip install ruff
+          ruff check apps/${{ matrix.app }} packages/py-common
+      - name: pytest
+        working-directory: apps/${{ matrix.app }}
+        run: uv run pytest -q
+
+  # ------------------------------------------------------------------ web
+  web:
+    name: web / build + lint
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 9
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm --filter @cocola/web lint
+      - run: pnpm --filter @cocola/web build

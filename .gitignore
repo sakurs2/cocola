@@ -1,0 +1,54 @@
+# ---- OS ----
+.DS_Store
+Thumbs.db
+
+# ---- Editor ----
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+
+# ---- Env / Secrets ----
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+
+# ---- Go ----
+bin/
+vendor/
+*.test
+*.out
+coverage.txt
+
+# ---- Python ----
+__pycache__/
+*.py[cod]
+*$py.class
+.venv/
+venv/
+.eggs/
+*.egg-info/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+dist/
+build/
+
+# ---- Node / TS ----
+node_modules/
+.next/
+out/
+.turbo/
+.pnpm-store/
+*.tsbuildinfo
+
+# ---- Buf / Proto generated ----
+gen/
+
+# ---- Local data ----
+.data/
+tmp/
+*.log

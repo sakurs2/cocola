@@ -1,0 +1,22 @@
+syntax = "proto3";
+
+package cocola.common.v1;
+
+option go_package = "github.com/cocola-project/cocola/packages/proto/gen/go/cocola/common/v1;commonv1";
+
+// Mirrors the language-specific error envelopes in go-common/errors and
+// py-common/errors. Keep enum values stable; never reuse a removed value.
+enum ErrorCode {
+  ERROR_CODE_UNSPECIFIED = 0;
+  ERROR_CODE_INVALID_ARGUMENT = 1;
+  ERROR_CODE_NOT_FOUND = 2;
+  ERROR_CODE_PERMISSION_DENIED = 3;
+  ERROR_CODE_UNAVAILABLE = 4;
+  ERROR_CODE_INTERNAL = 5;
+}
+
+message Error {
+  ErrorCode code = 1;
+  string message = 2;
+  map<string, string> details = 3;
+}

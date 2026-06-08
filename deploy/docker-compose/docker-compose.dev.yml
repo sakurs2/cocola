@@ -1,0 +1,81 @@
+# Local development infrastructure for cocola.
+# Intentionally minimal — only what M0–M3 needs. K8s manifests live in deploy/k8s.
+#
+# Usage:
+#   make dev-up      # start everything
+#   make dev-down    # stop
+#   make dev-logs    # tail logs
+
+name: cocola-dev
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: cocola-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: cocola
+      POSTGRES_PASSWORD: cocola_dev_pw
+      POSTGRES_DB: cocola
+    ports:
+      - "5432:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U cocola -d cocola"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  redis:
+    image: redis:7-alpine
+    container_name: cocola-redis
+    restart: unless-stopped
+    command: ["redis-server", "--appendonly", "yes"]
+    ports:
+      - "6379:6379"
+    volumes:
+      - redisdata:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  minio:
+    image: minio/minio:latest
+    container_name: cocola-minio
+    restart: unless-stopped
+    command: server /data --console-address ":9001"
+    environment:
+      MINIO_ROOT_USER: cocola
+      MINIO_ROOT_PASSWORD: cocola_dev_pw
+    ports:
+      - "9000:9000"   # S3 API
+      - "9001:9001"   # web console
+    volumes:
+      - miniodata:/data
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:9000/minio/health/live"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  # MinIO bucket bootstrap — runs once, creates the default bucket.
+  minio-init:
+    image: minio/mc:latest
+    container_name: cocola-minio-init
+    depends_on:
+      minio:
+        condition: service_healthy
+    entrypoint: >
+      sh -c "
+      mc alias set local http://minio:9000 cocola cocola_dev_pw &&
+      mc mb --ignore-existing local/cocola &&
+      mc anonymous set download local/cocola/public || true
+      "
+
+volumes:
+  pgdata:
+  redisdata:
+  miniodata:
