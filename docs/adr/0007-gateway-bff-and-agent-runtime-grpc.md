@@ -83,3 +83,22 @@ implementation, byte-compatible with the Python gateway's `auth/jwt.py`.
 - **Followups** — wire the admin-api jti denylist into gateway verification;
   add gateway↔agent-runtime mTLS (M6); add an integration test that runs both
   servers over a loopback socket; surface per-request quota checks at the BFF.
+
+## Addendum — real LLM链路 token passthrough (M4 收口 verified)
+
+The real-LLM seam is now wired and proven hermetically. agent-runtime's
+composition root flips from EchoProvider to `ClaudeAgentSDKProvider` when
+`COCOLA_LLM_BASE_URL` is set; the provider injects `ANTHROPIC_BASE_URL` (→ the
+cocola llm-gateway) and `ANTHROPIC_API_KEY` (→ the cocola-issued token) into the
+SDK subprocess via `_build_env()` — pure env injection, zero SDK code changes.
+
+The contract that closes M4: **the token the gateway verifies IS the token the
+SDK presents.** `apps/llm-gateway/tests/test_token_passthrough_e2e.py` proves it
+without a real SDK subprocess or a bound port (ADR-0004: FakeUpstream only). A
+fake `query_fn` stands in for `claude_agent_sdk.query`; instead of spawning the
+CLI it reads exactly `provider._build_env()` and drives the gateway's ASGI app
+in-process, sending the token as `x-api-key`. The gateway verifies it, routes
+through FakeUpstream, returns an Anthropic response, and the real provider maps
+it back to generic `AgentEvent`s. The test asserts billing is attributed to the
+token subject (the SDK key was the verified token) and that an unsigned token
+surfaces as an error with no model call and no billing.

@@ -97,6 +97,26 @@ make dev-down
 >   -H "content-type: application/json" \
 >   -d '{"prompt":"hello","session_id":"s1"}'
 > ```
+>
+> **接入真实 LLM 链路**：给 agent-runtime 设置 `COCOLA_LLM_BASE_URL`，它即从
+> EchoProvider 切换到 `ClaudeAgentSDKProvider`，把 Claude Agent SDK 指向 cocola
+> 的 llm-gateway（`ANTHROPIC_BASE_URL`），并把 cocola 令牌作为 SDK 的
+> `ANTHROPIC_API_KEY` 注入子进程。**校验令牌与 SDK 令牌是同一个**——网关收到
+> SDK 发来的 `x-api-key` 后离线校验、按令牌主体计费，M4 的设计在此收口。纯环境
+> 变量注入，零 SDK 改动。
+>
+> ```bash
+> # agent-runtime 接到 llm-gateway（缺省 :8080），令牌即 SDK 的 API Key
+> export COCOLA_LLM_BASE_URL=http://127.0.0.1:8080
+> export COCOLA_AGENT_API_KEY=<cocola 签发令牌>
+> export COCOLA_ANTHROPIC_MODEL=default        # 网关 registry 解析为真实模型
+> cd apps/agent-runtime && uv run python -m cocola_agent_runtime
+> # llm-gateway 侧用真实上游：COCOLA_LLM_PROVIDER=anthropic + COCOLA_ANTHROPIC_API_KEY
+> ```
+>
+> 令牌透传契约由 `apps/llm-gateway/tests/test_token_passthrough_e2e.py` 无网络
+> 验证：真实 provider 用 `_build_env()` 注入的令牌驱动网关 ASGI（FakeUpstream），
+> 响应经 provider 映射回 `AgentEvent` 流回。
 
 ## 路线图
 
