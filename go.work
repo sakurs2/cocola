@@ -2,7 +2,6 @@ go 1.22
 
 use (
     ./apps/gateway
-    ./apps/sandbox-manager
     ./apps/admin-api
     ./packages/go-common
     ./packages/proto/gen/go
