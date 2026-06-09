@@ -22,6 +22,9 @@ vendor/
 *.test
 *.out
 coverage.txt
+# Compiled service/CLI binaries dropped at an app root by `go build .`
+/apps/admin-api/admin-api
+/apps/admin-api/admin-mint
 
 # ---- Python ----
 __pycache__/
