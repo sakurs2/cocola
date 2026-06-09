@@ -48,6 +48,25 @@ for arg in "$@"; do
 done
 
 # ----------------------------------------------------------------- config
+# Auto-load repo-root .env if present, so `make up-all` can pick up your real
+# model endpoint/key without manual exports. Existing env wins over the file
+# (so a one-off `COCOLA_LLM_PROVIDER=fake make up` still overrides .env).
+if [[ -f "$ROOT/.env" ]]; then
+  echo "==> loading $ROOT/.env"
+  set -a
+  # shellcheck disable=SC1091
+  while IFS= read -r line; do
+    [[ "$line" =~ ^[[:space:]]*# ]] && continue
+    [[ -z "${line// }" ]] && continue
+    key="${line%%=*}"
+    # Only set vars that are not already present in the environment.
+    if [[ -z "${!key:-}" ]]; then
+      eval "export $line"
+    fi
+  done < "$ROOT/.env"
+  set +a
+fi
+
 export COCOLA_AUTH_SECRET="${COCOLA_AUTH_SECRET:-local-dev-secret}"
 
 AGENT_HOST="${COCOLA_AGENT_HOST:-127.0.0.1}"
@@ -109,11 +128,27 @@ if [[ "$WITH_LLM" == "1" ]]; then
   echo "    agent-runtime will route the SDK at $COCOLA_LLM_BASE_URL"
 fi
 
+# ----------------------------------------------------------------- dev token
+# Minted up front: in the real-LLM path the agent-runtime must present a VALID
+# cocola token to the gateway as ANTHROPIC_API_KEY (the gateway verifies it with
+# the shared COCOLA_AUTH_SECRET). The default "cocola-local" is not a token and
+# would be rejected, so we reuse this minted one. The same token is printed in
+# the banner for curl / the web UI.
+echo "==> minting a dev token (admin-mint)"
+TOKEN="$(go run ./apps/admin-api/cmd/admin-mint -user emp-42 -tenant team-platform -ttl 3600)"
+
+# With a real LLM upstream the SDK's key must be a real token; with EchoProvider
+# (no llm-gateway) it is never used, so leave the harmless default.
+AGENT_API_KEY="cocola-local"
+[[ "$WITH_LLM" == "1" ]] && AGENT_API_KEY="$TOKEN"
+
 # ----------------------------------------------------------------- agent-runtime
 (
   cd apps/agent-runtime
   COCOLA_AGENT_HOST="$AGENT_HOST" COCOLA_AGENT_PORT="$AGENT_PORT" \
   COCOLA_LLM_BASE_URL="${COCOLA_LLM_BASE_URL:-}" \
+  COCOLA_AGENT_API_KEY="$AGENT_API_KEY" \
+  COCOLA_ANTHROPIC_MODEL="${COCOLA_LLM_DEFAULT_ALIAS:-cocola-default}" \
   COCOLA_SANDBOX_ADDR="${COCOLA_SANDBOX_ADDR:-}" \
     setsid uv run python -m cocola_agent_runtime
 ) >"$(log_redirect agent-runtime)" 2>&1 &
@@ -142,10 +177,6 @@ if [[ "$WITH_WEB" == "1" ]]; then
   wait_port "127.0.0.1" "$WEB_PORT" "web" 240
 fi
 
-# ----------------------------------------------------------------- dev token
-echo "==> minting a dev token (admin-mint)"
-TOKEN="$(go run ./apps/admin-api/cmd/admin-mint -user emp-42 -tenant team-platform -ttl 3600)"
-
 # ----------------------------------------------------------------- ready banner
 echo
 echo "======================================================================"
@@ -153,7 +184,9 @@ echo " cocola dev stack is UP"
 echo "----------------------------------------------------------------------"
 echo " gateway   : http://$GATEWAY_ADDR   (POST /v1/chat, SSE)"
 echo " agent-rt  : $AGENT_ADDR (gRPC)"
-[[ "$WITH_LLM" == "1" ]] && echo " llm-gw    : http://$LLM_HOST:$LLM_PORT"
+[[ "$WITH_LLM" == "1" ]] && echo " llm-gw    : http://$LLM_HOST:$LLM_PORT  (provider: ${COCOLA_LLM_PROVIDER:-fake})"
+[[ "$WITH_LLM" == "1" && -n "${COCOLA_LLM_CONFIG:-}" ]] && echo " llm-cfg   : ${COCOLA_LLM_CONFIG}"
+[[ "$WITH_LLM" == "1" && -z "${COCOLA_LLM_CONFIG:-}" ]] && echo " llm-up    : ${COCOLA_ANTHROPIC_BASE_URL:-${COCOLA_OPENAI_BASE_URL:-<provider default>}}"
 [[ "$WITH_WEB" == "1" ]] && echo " web       : http://127.0.0.1:$WEB_PORT  (paste the token below)"
 echo "----------------------------------------------------------------------"
 echo " dev token : $TOKEN"

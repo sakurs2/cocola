@@ -75,6 +75,30 @@ make up-all    # + llm-gateway（真实 Claude Agent SDK 链路）+ 前端
 > `COCOLA_LLM_BASE_URL` 指向它，规避端口冲突。需要绑定沙箱时先导出
 > `COCOLA_SANDBOX_ADDR`，脚本会透传给 agent-runtime。
 
+#### 接入你购买的模型(全链路真实测试)
+
+`make up`(Echo)不需要任何模型。要跑真实模型,把上游配置写进仓库根的 `.env`
+(已被 `.gitignore` 忽略),`run-stack.sh` 启动时会自动加载它:
+
+```bash
+cp .env.example .env
+# 编辑 .env:填入你购买的 Anthropic 兼容服务
+#   COCOLA_LLM_PROVIDER=anthropic
+#   COCOLA_ANTHROPIC_BASE_URL=https://你的服务域名
+#   COCOLA_ANTHROPIC_API_KEY=sk-ant-xxxx
+make up-all      # 自动拉起 llm-gateway 接到你的上游 + 真实 SDK 链路 + 前端
+```
+
+需要多模型 / 别名与真实模型解耦 / 自定义计费时,改用配置文件:复制
+`deploy/llm-config.example.json` 为 `deploy/llm-config.json`,在 `.env` 里设
+`COCOLA_LLM_CONFIG=deploy/llm-config.json`。密钥始终走 `api_key_env` 间接引用,
+绝不写进配置文件(ADR-0004 硬约束)。
+
+> 鉴权闭环:`run-stack.sh` 在真实 LLM 模式下,会把 `admin-mint` 签出的令牌同时
+> 注入 agent-runtime 作为 SDK 的 `ANTHROPIC_API_KEY`——网关用同一个
+> `COCOLA_AUTH_SECRET` 离线校验它并按令牌主体计费,无需手动配 key。agent 发给
+> 网关的模型别名固定为 `cocola-default`(与 env / 文件两种配法注册的 route 对齐)。
+
 
 > 当前里程碑：**后端 MVP 打通** — 已完成 M0–M5 及端到端后端 MVP。Go 控制面（admin-api）签发 / 吊销 cocola
 > 签发的令牌（即 Claude Agent SDK 的 `ANTHROPIC_API_KEY`），并按周期 token 配额

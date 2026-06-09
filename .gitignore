@@ -65,3 +65,6 @@ tmp/
 
 # run-stack.sh per-service logs (local dev stack)
 .run-logs/
+
+# real llm-gateway upstream config (contains your endpoint); keep only the .example
+deploy/llm-config.json

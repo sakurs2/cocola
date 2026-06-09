@@ -1,0 +1,28 @@
+{
+  "_comment": [
+    "cocola llm-gateway 上游配置示例 (Anthropic 兼容)。",
+    "用法: 复制为 deploy/llm-config.json, 填入你购买服务的 base_url, 然后",
+    "  export COCOLA_LLM_CONFIG=deploy/llm-config.json",
+    "  export COCOLA_ANTHROPIC_API_KEY=sk-ant-xxxx   # 密钥只走环境变量, 绝不写进本文件",
+    "  make up-all",
+    "ADR-0004 硬约束: endpoint 可入文件, 但 api_key 永远经 api_key_env 间接引用, 不落盘。",
+    "default_alias 是 agent-runtime 经 COCOLA_ANTHROPIC_MODEL 发来的别名;",
+    "real_model 是网关转发给你上游的真实模型名 —— 二者解耦, 这正是用文件而非纯 env 的原因。"
+  ],
+  "default_alias": "cocola-default",
+  "providers": {
+    "myvendor": {
+      "type": "anthropic",
+      "base_url": "https://你购买服务的域名",
+      "api_key_env": "COCOLA_ANTHROPIC_API_KEY"
+    }
+  },
+  "routes": {
+    "cocola-default": {
+      "provider": "myvendor",
+      "real_model": "claude-3-5-sonnet-20241022",
+      "input_per_1k": 0.003,
+      "output_per_1k": 0.015
+    }
+  }
+}
