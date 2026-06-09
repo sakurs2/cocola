@@ -148,19 +148,20 @@ the admin-api useful in deployments that haven't turned on signed-token auth yet
   audited, all behind one swappable `Store`. Cross-language identity interop is
   proven by an e2e (Go mint → Python verify). Token minting is optional, so the
   service is useful before signed-token auth is enabled.
-- **Negative:** the gateway now consults the denylist on the hot path, but does
-  not *yet* read quota overrides there (M6); the stores (admin-api and the
-  gateway's denylist) are in-memory, so revocations/overrides/skills are
-  process-local until M7 wires a shared backend (Redis/PG); admin auth is a
-  single shared key with no per-operator RBAC; the Skill-Market has a catalog
-  but no runtime loader yet.
+- **Negative:** admin auth is still a single shared key with no per-operator
+  RBAC; the stores remain in-memory for *durability* (a restart loses records)
+  until M7 wires a persistent backend (PG). The fleet-wide propagation gaps that
+  stood here are closed — see the addenda: the gateway reads quota overrides and
+  the denylist on the hot path, the admin-api publishes both to a shared Redis so
+  revokes/overrides take effect across processes, and the agent-runtime has a
+  skill loader consuming `Enabled` entries.
 - **Follow-ups:**
-  - **M6:** gateway-side quota-override read (single cached control-plane read,
-    off the per-request path); a shared denylist backend so the in-process
-    cache reads what the admin-api writes fleet-wide; agent-runtime skill loader
-    consuming `Enabled` entries.
-  - **M7:** PostgreSQL `Store` implementation (+ Redis cache) behind the
-    existing interface; durable audit log.
+  - **M6 (done):** gateway-side quota-override read + denylist consumption on the
+    hot path; admin-api publishing both to a shared Redis (fleet-wide propagation);
+    agent-runtime skill loader consuming `Enabled` entries. See the addenda below.
+  - **M7:** PostgreSQL `Store` implementation (Redis is already the propagation
+    backend) behind the existing interface for *durability*; durable audit log;
+    a live cross-process Redis e2e once a real backend is available.
   - **Per-operator admin identities + RBAC** replacing the shared admin key.
   - Optional **RS256/JWKS** if a non-cocola token issuer is ever introduced
     (the Go and Python codecs swap in lockstep, guarded by the same e2e).
@@ -257,3 +258,79 @@ separate in-memory stores. Pointing both at the same Redis (admin-api writes on
 `PUT /admin/quotas`, gateways read via `RedisOverrideStore`) makes an override
 take effect fleet-wide — the wiring is in place (`COCOLA_LLM_REDIS_URL` plus
 `COCOLA_QUOTA_OVERRIDE_CACHE_TTL_SECS`), the durability decision is M7's.
+
+
+## Addendum: shared-Redis fleet-wide propagation (admin-api publishes what gateways read)
+
+Both addenda above ended on the same open gap: the admin-api owns the
+authoritative records, but its denylist and override stores were separate
+in-memory stores from the gateway's `RevocationStore` / `OverrideStore`, so a
+revoke or override only took effect within a process. The gateway already
+*reads* the shared keys (`RedisRevocationStore` -> SET `cocola:revoked`,
+`RedisOverrideStore` -> HASH `cocola:quota:override`); the missing half was the
+admin-api *writing* them. That half is now done, so a revoke/override takes
+effect **fleet-wide**.
+
+The bridge is a **`store.Mirror` decorator**, not a change to the service or
+handlers. `NewMirror(inner Store, pub Publisher)` wraps the authoritative store;
+the three fleet-visible mutations (`RevokeToken`, `SetQuota`, `DeleteQuota`)
+call the inner store first and, **only if that write succeeds**, best-effort
+publish to Redis via a small `Publisher` interface. A publish failure never
+fails the admin operation — the authoritative write already landed — it is
+routed to an injectable `OnPublishError` hook and logged, mirroring the
+audit-log convention. If no publisher is configured, `NewMirror` returns the
+inner store unchanged, so dev/CI boots stay zero-dependency exactly as before.
+
+The publisher itself is an isolated `internal/redispub` package over raw
+go-redis (the project's `go-common/redis.KV` deliberately exposes only
+Get/Set/Del-style ops, not the SADD/HSET this needs). It writes the **same keys
+and field encoding the gateway reads**: SET `cocola:revoked` (SADD on revoke),
+HASH `cocola:quota:override` field `scope/subject` (HSET on set, HDEL on
+delete). That cross-language key contract is the load-bearing invariant, so it
+is pinned by a Go unit test (`redispub_test.go`) against the gateway's literals;
+the gateway side has the matching constants. `main.go` builds the publisher only
+when `COCOLA_REDIS_ADDR` is set (with `COCOLA_REDIS_PASSWORD/DB/POOL_SIZE`),
+Pings on boot, and logs loudly when publishing is **disabled** so a
+misconfigured deployment is obvious rather than silently process-local.
+
+Because a live cross-process Redis is not available in this build sandbox, the
+publish path is validated by the `mirror_test.go` fake-publisher unit tests
+(publish happens only after a successful store write; a store error suppresses
+the publish; a publish error is best-effort and surfaces via `OnPublishError`)
+plus the pinned key-contract test; the gateway's existing Redis-store tests
+cover the read side. A live end-to-end across two processes is left to a
+deployment with a real Redis. Durability/tiering remains M7's call — this
+addendum only connects the two existing seams onto one backend.
+
+
+## Addendum: agent-runtime skill loader (the runtime consumes `Enabled` entries)
+
+The Skill-Market decision above established the admin-owned catalog and noted the
+runtime-side loader as a deliberate follow-up. That loader now exists, so
+toggling a skill in the control plane changes what the agent can do with **no
+runtime redeploy**.
+
+The loader mirrors the runtime's existing seams (`agent_provider`,
+`claude_sdk_provider`): a small `SkillCatalog` Protocol the runtime depends on, a
+production `AdminSkillCatalog` that GETs `/admin/skills?enabled=true` (sending the
+admin key as a bearer token when configured), and a `StaticSkillCatalog` for
+tests. The HTTP transport is an **injectable `Fetcher` callable** defaulting to
+stdlib `urllib`, so the package imports without httpx (which the runtime venv
+does not carry) and unit tests never open a socket. A fetch or parse failure
+**degrades to an empty list** (logged): a control-plane blip must not break
+session startup — the agent simply runs with no market skills until the next
+refresh. The loader re-filters to enabled-with-id entries defensively, so a
+catalog change can never leak a disabled skill into a session.
+
+Consumption is transport-neutral by design. Rather than coupling to a specific
+SDK tool-registration API (which varies by SDK version), `skills_system_preamble`
+renders the enabled skills into the system prompt, and `apply_skills_to_options`
+folds that preamble into a copy of the base `AgentOptions` (preserving any base
+system prompt). This is the seam the M2 gRPC server calls when it builds options
+for a session; mapping a skill's `entrypoint` to a concrete SDK tool / MCP server
+is a later refinement, but listing enabled skills is what makes them observable
+to the agent today. The loader is covered by hermetic unit tests
+(`tests/test_skill_loader.py`): JSON->Skill mapping, the defensive filter, the
+bearer header, graceful degrade on transport/parse error, and the
+options-merge behavior.
+

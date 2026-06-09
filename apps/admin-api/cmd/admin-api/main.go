@@ -14,12 +14,20 @@
 //	                           400); the rest of the admin surface still works.
 //	COCOLA_AUTH_ISSUER         `iss` stamped on minted tokens (default "cocola").
 //	COCOLA_AUTH_TOKEN_TTL_SECS default token lifetime in seconds (default 30d).
+//	COCOLA_REDIS_ADDR          host:port of the shared Redis. When set, revokes
+//	                           and quota overrides are published to the keys the
+//	                           gateway reads, so they take effect fleet-wide.
+//	                           Empty => single-process (publish disabled).
+//	COCOLA_REDIS_PASSWORD / COCOLA_REDIS_DB / COCOLA_REDIS_POOL_SIZE tune it.
 //
 // Persistence is in-memory for M5 (process-local); the PostgreSQL backend
-// lands in M7 behind the same store.Store interface — no handler change.
+// lands in M7 behind the same store.Store interface — no handler change. The
+// shared-Redis publish above is the propagation seam that makes the two
+// gateway-read resources (revocations, quota overrides) fleet-wide today.
 package main
 
 import (
+	"context"
 	"errors"
 	"net/http"
 	"os"
@@ -27,6 +35,7 @@ import (
 	"time"
 
 	"github.com/cocola-project/cocola/apps/admin-api/internal/httpapi"
+	"github.com/cocola-project/cocola/apps/admin-api/internal/redispub"
 	"github.com/cocola-project/cocola/apps/admin-api/internal/service"
 	"github.com/cocola-project/cocola/apps/admin-api/internal/store"
 	"github.com/cocola-project/cocola/apps/admin-api/internal/token"
@@ -56,8 +65,40 @@ func main() {
 		log.Warn("admin auth DISABLED (no COCOLA_ADMIN_KEY) — all callers are dev-admin")
 	}
 
-	mem := store.NewMemory()
-	svc := service.New(mem, iss, time.Now)
+	var st store.Store = store.NewMemory()
+
+	// Optional shared-Redis publishing: when COCOLA_REDIS_ADDR is set, mirror
+	// revokes + quota overrides to the keys the gateway reads so they apply
+	// fleet-wide. Best-effort — a publish failure is logged, never fatal, since
+	// the authoritative write already landed in the store.
+	redisAddr := os.Getenv("COCOLA_REDIS_ADDR")
+	if redisAddr != "" {
+		cfg := redispub.Config{
+			Addr:     redisAddr,
+			Password: os.Getenv("COCOLA_REDIS_PASSWORD"),
+			DB:       getenvInt("COCOLA_REDIS_DB", 0),
+			PoolSize: getenvInt("COCOLA_REDIS_POOL_SIZE", 10),
+		}
+		dctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		pub, err := redispub.New(dctx, cfg)
+		cancel()
+		if err != nil {
+			log.Sugar().Fatalf("connect shared Redis at %s: %v", redisAddr, err)
+		}
+		defer func() { _ = pub.Close() }()
+		mirror := store.NewMirror(st, pub)
+		if m, ok := mirror.(*store.Mirror); ok {
+			m.OnPublishError = func(op string, e error) {
+				log.Sugar().Errorw("shared-redis publish failed", "op", op, "err", e)
+			}
+		}
+		st = mirror
+		log.Sugar().Infow("shared-redis publishing enabled", "addr", redisAddr)
+	} else {
+		log.Warn("shared-redis publishing DISABLED (no COCOLA_REDIS_ADDR) — revokes/overrides are process-local")
+	}
+
+	svc := service.New(st, iss, time.Now)
 	api := httpapi.New(svc, adminKey)
 
 	srv := &http.Server{
