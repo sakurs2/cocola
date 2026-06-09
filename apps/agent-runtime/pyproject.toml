@@ -5,6 +5,7 @@ description = "Agent runtime — orchestrates Claude Code Agent SDK sessions and
 requires-python = ">=3.11"
 dependencies = [
     "cocola-common",
+    "cocola-proto",
     "claude-agent-sdk>=0.1.0",
     "grpcio>=1.64",
     "protobuf>=6.30",
@@ -28,6 +29,7 @@ packages = ["cocola_agent_runtime"]
 
 [tool.uv.sources]
 cocola-common = { path = "../../packages/py-common", editable = true }
+cocola-proto = { path = "../../packages/proto/gen/python", editable = true }
 
 [tool.pytest.ini_options]
 asyncio_mode = "auto"

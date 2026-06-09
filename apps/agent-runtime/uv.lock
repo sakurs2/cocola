@@ -150,6 +150,7 @@ dependencies = [
     { name = "anyio" },
     { name = "claude-agent-sdk" },
     { name = "cocola-common" },
+    { name = "cocola-proto" },
     { name = "grpcio" },
     { name = "protobuf" },
     { name = "pydantic" },
@@ -167,6 +168,7 @@ requires-dist = [
     { name = "anyio", specifier = ">=4.3" },
     { name = "claude-agent-sdk", specifier = ">=0.1.0" },
     { name = "cocola-common", editable = "../../packages/py-common" },
+    { name = "cocola-proto", editable = "../../packages/proto/gen/python" },
     { name = "grpcio", specifier = ">=1.64" },
     { name = "protobuf", specifier = ">=6.30" },
     { name = "pydantic", specifier = ">=2.7" },
@@ -189,6 +191,21 @@ dependencies = [
 requires-dist = [
     { name = "pydantic", specifier = ">=2.7" },
     { name = "structlog", specifier = ">=24.1" },
+]
+
+[[package]]
+name = "cocola-proto"
+version = "0.0.1"
+source = { editable = "../../packages/proto/gen/python" }
+dependencies = [
+    { name = "grpcio" },
+    { name = "protobuf" },
+]
+
+[package.metadata]
+requires-dist = [
+    { name = "grpcio", specifier = ">=1.64" },
+    { name = "protobuf", specifier = ">=6.30" },
 ]
 
 [[package]]
