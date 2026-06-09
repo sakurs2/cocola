@@ -116,11 +116,23 @@ wait_port() {
   return 1
 }
 
+# ----------------------------------------------------------- process groups
+# We run each service in its own process group so Ctrl-C can kill the whole
+# tree (go run / uv run fork child binaries). setsid does this on Linux but is
+# absent on macOS, so fall back to shell job control (set -m), which also puts
+# every `&` job in its own process group. cleanup() does `kill -- -$pid`.
+if command -v setsid >/dev/null 2>&1; then
+  SETSID="setsid"
+else
+  SETSID=""
+  set -m
+fi
+
 # ----------------------------------------------------------------- llm-gateway
 if [[ "$WITH_LLM" == "1" ]]; then
   ( cd apps/llm-gateway && \
     COCOLA_LLM_HOST="$LLM_HOST" COCOLA_LLM_PORT="$LLM_PORT" \
-    setsid uv run python -m cocola_llm_gateway ) >"$(log_redirect llm-gateway)" 2>&1 &
+    $SETSID uv run python -m cocola_llm_gateway ) >"$(log_redirect llm-gateway)" 2>&1 &
   PIDS+=("$!")
   echo "==> starting llm-gateway on $LLM_HOST:$LLM_PORT (provider: ${COCOLA_LLM_PROVIDER:-fake})"
   wait_port "$LLM_HOST" "$LLM_PORT" "llm-gateway"
@@ -150,7 +162,7 @@ AGENT_API_KEY="cocola-local"
   COCOLA_AGENT_API_KEY="$AGENT_API_KEY" \
   COCOLA_ANTHROPIC_MODEL="${COCOLA_LLM_DEFAULT_ALIAS:-cocola-default}" \
   COCOLA_SANDBOX_ADDR="${COCOLA_SANDBOX_ADDR:-}" \
-    setsid uv run python -m cocola_agent_runtime
+    $SETSID uv run python -m cocola_agent_runtime
 ) >"$(log_redirect agent-runtime)" 2>&1 &
 PIDS+=("$!")
 echo "==> starting agent-runtime on $AGENT_ADDR (log: .run-logs/agent-runtime.log)"
@@ -159,7 +171,7 @@ wait_port "$AGENT_HOST" "$AGENT_PORT" "agent-runtime"
 # ----------------------------------------------------------------- gateway
 (
   COCOLA_GATEWAY_ADDR="$GATEWAY_ADDR" COCOLA_AGENT_ADDR="$AGENT_ADDR" \
-    setsid go run ./apps/gateway/cmd/gateway
+    $SETSID go run ./apps/gateway/cmd/gateway
 ) >"$(log_redirect gateway)" 2>&1 &
 PIDS+=("$!")
 echo "==> starting gateway on $GATEWAY_ADDR -> $AGENT_ADDR (log: .run-logs/gateway.log)"
@@ -170,7 +182,7 @@ if [[ "$WITH_WEB" == "1" ]]; then
   (
     cd apps/web
     COCOLA_GATEWAY_URL="http://$GATEWAY_ADDR" \
-      setsid pnpm dev --port "$WEB_PORT"
+      $SETSID pnpm dev --port "$WEB_PORT"
   ) >"$(log_redirect web)" 2>&1 &
   PIDS+=("$!")
   echo "==> starting web on http://127.0.0.1:$WEB_PORT (log: .run-logs/web.log)"
