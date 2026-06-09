@@ -26,6 +26,7 @@ a hermetic/no-port test. So the concrete `query` callable is injectable
 SDK-shaped messages (optionally driving the gateway over ASGI in-process). The
 mapping logic below is identical either way.
 """
+
 from __future__ import annotations
 
 from collections.abc import AsyncIterator
@@ -33,6 +34,7 @@ from dataclasses import dataclass, field
 from typing import Any, Callable, Optional
 
 from cocola_agent_runtime.agent_provider import AgentEvent, AgentOptions
+from cocola_agent_runtime.sandbox_binder import SandboxExecutor
 
 
 @dataclass
@@ -67,8 +69,18 @@ class ClaudeAgentSDKProvider:
 
     name = "claude-agent-sdk"
 
-    def __init__(self, config: ClaudeSDKConfig, *, query_fn: Optional[QueryFn] = None):
+    def __init__(
+        self,
+        config: ClaudeSDKConfig,
+        *,
+        query_fn: Optional[QueryFn] = None,
+        executor: Optional["SandboxExecutor"] = None,
+    ):
         self._config = config
+        # When set, the agent's bash/file tools are routed into the session's
+        # bound sandbox via an in-process MCP server (see sandbox_tools). When
+        # None, the agent runs with only its built-in tools (no sandbox IO).
+        self._executor = executor
         # Lazy import so the package imports cleanly even if the SDK/CLI is not
         # installed (e.g. in unit tests that inject query_fn).
         if query_fn is not None:
@@ -90,12 +102,28 @@ class ClaudeAgentSDKProvider:
         # Imported here (not module top) so unit tests need no SDK install.
         import claude_agent_sdk
 
-        return claude_agent_sdk.ClaudeAgentOptions(
+        kwargs: dict[str, Any] = dict(
             model=self._config.model,
             system_prompt=options.system_prompt,
             max_turns=options.max_turns or self._config.max_turns,
             env=self._build_env(),
         )
+        # Make the bound sandbox the agent's hands: mount sandbox-backed bash /
+        # file tools as an in-process MCP server, pinned to this session's
+        # sandbox. Only when we both have an executor and a bound sandbox_id —
+        # otherwise the agent would have tools pointing at nothing.
+        if self._executor is not None and options.sandbox_id:
+            from cocola_agent_runtime.sandbox_tools import (
+                SERVER_NAME,
+                build_sandbox_mcp_server,
+            )
+
+            server, allowed = build_sandbox_mcp_server(
+                self._executor, options.sandbox_id
+            )
+            kwargs["mcp_servers"] = {SERVER_NAME: server}
+            kwargs["allowed_tools"] = allowed
+        return claude_agent_sdk.ClaudeAgentOptions(**kwargs)
 
     async def query(
         self,
@@ -154,8 +182,10 @@ def _message_to_events(message: Any) -> list[AgentEvent]:
         events.append(
             AgentEvent(
                 kind="system",
-                data={"subtype": getattr(message, "subtype", ""),
-                      "data": getattr(message, "data", {})},
+                data={
+                    "subtype": getattr(message, "subtype", ""),
+                    "data": getattr(message, "data", {}),
+                },
             )
         )
     # UserMessage (tool results fed back) is internal to the loop; we skip it.
@@ -167,17 +197,31 @@ def _block_to_events(block: Any) -> list[AgentEvent]:
     if cls == "TextBlock":
         return [AgentEvent(kind="text", data={"text": getattr(block, "text", "")})]
     if cls == "ThinkingBlock":
-        return [AgentEvent(kind="thinking", data={"thinking": getattr(block, "thinking", "")})]
+        return [
+            AgentEvent(
+                kind="thinking", data={"thinking": getattr(block, "thinking", "")}
+            )
+        ]
     if cls == "ToolUseBlock":
-        return [AgentEvent(kind="tool_use", data={
-            "id": getattr(block, "id", ""),
-            "name": getattr(block, "name", ""),
-            "input": getattr(block, "input", {}),
-        })]
+        return [
+            AgentEvent(
+                kind="tool_use",
+                data={
+                    "id": getattr(block, "id", ""),
+                    "name": getattr(block, "name", ""),
+                    "input": getattr(block, "input", {}),
+                },
+            )
+        ]
     if cls == "ToolResultBlock":
-        return [AgentEvent(kind="tool_result", data={
-            "tool_use_id": getattr(block, "tool_use_id", ""),
-            "content": getattr(block, "content", None),
-            "is_error": bool(getattr(block, "is_error", False)),
-        })]
+        return [
+            AgentEvent(
+                kind="tool_result",
+                data={
+                    "tool_use_id": getattr(block, "tool_use_id", ""),
+                    "content": getattr(block, "content", None),
+                    "is_error": bool(getattr(block, "is_error", False)),
+                },
+            )
+        ]
     return []

@@ -125,10 +125,56 @@ from the runtime.
 - Composition root: `COCOLA_SANDBOX_ADDR` selects the binder; unset keeps the
   zero-config boot (sessions run with no bound sandbox), mirroring how
   `COCOLA_LLM_BASE_URL` / `COCOLA_ADMIN_BASE_URL` gate their features.
-- **Deliberately deferred**: the runtime does not yet route the SDK's tool
-  execution (bash/file IO) through the bound sandbox's `Exec`/`WriteFile`/
-  `ReadFile`. That requires registering sandbox-backed tools with the Claude
-  Agent SDK and is the next slice; binding the session is the prerequisite that
-  makes those calls have a target. Release is also left to the M2 reaper/lease
-  rather than forced at stream end, so a sandbox survives across a session's
-  multiple `Query` turns.
+- **Then deferred, now done** (see next addendum): the runtime did not yet route
+  the SDK's tool execution (bash/file IO) through the bound sandbox. Binding the
+  session was the prerequisite that gives those calls a target. Release is still
+  left to the M2 reaper/lease rather than forced at stream end, so a sandbox
+  survives across a session's multiple `Query` turns.
+
+
+## Addendum — make the sandbox actually used: SDK tools execute inside it
+
+Binding gave the session a sandbox; this step makes the agent's *hands* land in
+it. The Claude Agent SDK owns the ReAct loop and decides when to run a command or
+touch a file, but those tool calls must execute inside the session's real sandbox
+— not on the agent-runtime host. We reuse the SDK's **in-process MCP** mechanism
+rather than inventing a tool transport:
+
+    tool(...)                  -> declare a tool (name, schema, async handler)
+    create_sdk_mcp_server(...) -> bundle tools into an in-process MCP server
+                                  (runs in THIS process — no subprocess, no port)
+    ClaudeAgentOptions(mcp_servers=..., allowed_tools=...) -> mount it
+
+- **Executor seam** (`sandbox_binder.SandboxExecutor`, Protocol) is orthogonal to
+  the binder: the binder answers "which sandbox is this session on?", the
+  executor answers "run this command / read / write a file in that sandbox".
+  Same shape as everything else — Protocol + production (`SandboxManagerExecutor`,
+  anyio-bridged over the existing blocking `SandboxClient.exec`/`read_file`/
+  `write_file`) + static (`StaticSandboxExecutor`, in-memory for tests). Bytes are
+  decoded to text at this boundary so the tool layer stays encoding-free. The
+  executor is stateless w.r.t. sessions (sandbox_id is an explicit arg), so one
+  instance is shared across every concurrent session.
+- **Tool layer** (`sandbox_tools.py`): `sandbox_tool_defs(executor, sandbox_id)`
+  produces three SDK-agnostic `ToolDef`s — `bash`, `read_file`, `write_file` —
+  whose handlers call the executor against the closed-over `sandbox_id` (the agent
+  never sees or can spoof which sandbox it runs in). Handlers return the SDK's
+  tool-result shape (`{"content":[{"type":"text","text":...}], "is_error":bool}`).
+  A sandbox-level failure (executor `error` / transport raise) is a tool *error*;
+  a command that ran but exited non-zero is NOT — the agent sees the exit code and
+  streams and decides, mirroring a real shell. `build_sandbox_mcp_server` is the
+  only place the SDK is imported, bundling the defs into the in-process server and
+  returning it plus the `mcp__cocola_sandbox__*` allow-list.
+- **Provider** (`ClaudeAgentSDKProvider`) takes an optional executor and, only
+  when it has both an executor and a bound `sandbox_id`, mounts the server on
+  `ClaudeAgentOptions(mcp_servers=..., allowed_tools=...)`. No executor or no
+  bound sandbox → no sandbox tools (the agent would otherwise hold tools pointing
+  at nothing).
+- **Composition root**: `_build_executor()` is gated on the same
+  `COCOLA_SANDBOX_ADDR` as the binder, so binding and execution turn on together;
+  unset keeps the zero-config boot.
+- **Testability**: the tool-def/handler/mapping logic needs no SDK import (only
+  mounting does), so it is unit-tested by driving handlers with
+  `StaticSandboxExecutor` — asserting each tool routes to the right method with
+  the right args, results map to the SDK shape, and failures become tool errors
+  without raising. Provider tests assert the server mounts only when both executor
+  and bound sandbox are present. No subprocess, no socket, no model.

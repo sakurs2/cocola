@@ -20,6 +20,13 @@ hermetic tests.
     cheap and stateless.
   - `StaticSandboxBinder` — in-memory, for tests/dev (no sandbox-manager needed).
 
+Step "make the sandbox actually used" adds a second, orthogonal seam: an
+`SandboxExecutor` that turns the agent's tool calls (bash / file IO) into real
+work inside the *bound* sandbox. The binder answers "which sandbox is this
+session on?"; the executor answers "run this command / read this file in that
+sandbox". Same shape as the binder — Protocol + production (gRPC, anyio-bridged)
++ static (in-memory) — so the SDK tool layer depends only on the Protocol.
+
 Failure policy: acquiring a sandbox is best-effort at this layer's CALLER. The
 binder itself raises on transport failure; the server decides whether a missing
 sandbox is fatal (it emits a terminal `error` event rather than crashing). This
@@ -127,3 +134,165 @@ class StaticSandboxBinder:
 
     async def release(self, *, session_id: str) -> None:
         self.released.append(session_id)
+
+
+@dataclass(frozen=True)
+class ExecOutcome:
+    """Transport-neutral result of running a command in a sandbox.
+
+    A decoded view of the proto `ExecEvent` stream (`SandboxClient.exec`): bytes
+    are decoded to text here so the SDK tool layer never juggles encodings. An
+    empty `error` means the command ran (even if it exited non-zero); a non-empty
+    `error` means the sandbox itself could not run it.
+    """
+
+    exit_code: int = 0
+    stdout: str = ""
+    stderr: str = ""
+    error: str = ""
+
+    @property
+    def ok(self) -> bool:
+        return not self.error and self.exit_code == 0
+
+
+class SandboxExecutor(Protocol):
+    """The SDK tool layer depends on this Protocol only, never a concrete client.
+
+    All methods take an explicit `sandbox_id`: the executor is stateless w.r.t.
+    sessions (the binder owns the session->sandbox mapping), so one executor is
+    safely shared across every concurrent session.
+    """
+
+    async def exec(
+        self,
+        *,
+        sandbox_id: str,
+        cmd: list[str],
+        cwd: str = "",
+        env: dict | None = None,
+        stdin: str = "",
+        timeout_secs: int = 0,
+    ) -> ExecOutcome:
+        """Run a command to completion inside the sandbox."""
+        ...
+
+    async def read_file(self, *, sandbox_id: str, path: str) -> str:
+        """Read a UTF-8 text file from the sandbox."""
+        ...
+
+    async def write_file(self, *, sandbox_id: str, path: str, content: str) -> None:
+        """Write a UTF-8 text file into the sandbox."""
+        ...
+
+
+class SandboxManagerExecutor:
+    """SandboxExecutor backed by sandbox-manager over gRPC.
+
+    Bridges the blocking `SandboxClient` (Exec/ReadFile/WriteFile) to the async
+    agent loop with `anyio.to_thread`, exactly like `SandboxManagerBinder`. A
+    fresh short-lived channel per call keeps it stateless and concurrency-safe;
+    bytes are decoded to text at this boundary so callers stay encoding-free.
+    """
+
+    def __init__(self, addr: str) -> None:
+        self._addr = addr
+
+    async def exec(
+        self,
+        *,
+        sandbox_id: str,
+        cmd: list[str],
+        cwd: str = "",
+        env: dict | None = None,
+        stdin: str = "",
+        timeout_secs: int = 0,
+    ) -> ExecOutcome:
+        def _call() -> ExecOutcome:
+            with SandboxClient(addr=self._addr) as sb:
+                res = sb.exec(
+                    sandbox_id,
+                    cmd,
+                    cwd=cwd,
+                    env=env or {},
+                    stdin=stdin.encode("utf-8"),
+                    timeout_secs=timeout_secs,
+                )
+            return ExecOutcome(
+                exit_code=res.exit_code,
+                stdout=res.stdout.decode("utf-8", "replace"),
+                stderr=res.stderr.decode("utf-8", "replace"),
+                error=res.error,
+            )
+
+        return await anyio.to_thread.run_sync(_call)
+
+    async def read_file(self, *, sandbox_id: str, path: str) -> str:
+        def _call() -> str:
+            with SandboxClient(addr=self._addr) as sb:
+                return sb.read_file(sandbox_id, path).decode("utf-8", "replace")
+
+        return await anyio.to_thread.run_sync(_call)
+
+    async def write_file(self, *, sandbox_id: str, path: str, content: str) -> None:
+        def _call() -> None:
+            with SandboxClient(addr=self._addr) as sb:
+                sb.write_file(sandbox_id, path, content.encode("utf-8"))
+
+        await anyio.to_thread.run_sync(_call)
+
+
+class StaticSandboxExecutor:
+    """In-memory SandboxExecutor for tests and dev (no sandbox-manager needed).
+
+    Keeps a per-sandbox virtual filesystem and records every call so tests can
+    assert the SDK tool layer routes to the right method with the right args.
+    `exec` echoes the command by default; pass `exec_handler` to script output.
+    """
+
+    def __init__(
+        self,
+        *,
+        exec_handler=None,
+        fail_with: Exception | None = None,
+    ) -> None:
+        self._exec_handler = exec_handler
+        self._fail = fail_with
+        self.exec_calls: list[dict] = []
+        self.reads: list[tuple[str, str]] = []
+        self.writes: list[tuple[str, str, str]] = []
+        self.files: dict[tuple[str, str], str] = {}
+
+    async def exec(
+        self,
+        *,
+        sandbox_id: str,
+        cmd: list[str],
+        cwd: str = "",
+        env: dict | None = None,
+        stdin: str = "",
+        timeout_secs: int = 0,
+    ) -> ExecOutcome:
+        if self._fail is not None:
+            raise self._fail
+        self.exec_calls.append(
+            {"sandbox_id": sandbox_id, "cmd": cmd, "cwd": cwd, "env": env or {}}
+        )
+        if self._exec_handler is not None:
+            return self._exec_handler(sandbox_id, cmd)
+        return ExecOutcome(exit_code=0, stdout="ran: " + " ".join(cmd))
+
+    async def read_file(self, *, sandbox_id: str, path: str) -> str:
+        if self._fail is not None:
+            raise self._fail
+        self.reads.append((sandbox_id, path))
+        try:
+            return self.files[(sandbox_id, path)]
+        except KeyError:
+            raise FileNotFoundError(path) from None
+
+    async def write_file(self, *, sandbox_id: str, path: str, content: str) -> None:
+        if self._fail is not None:
+            raise self._fail
+        self.writes.append((sandbox_id, path, content))
+        self.files[(sandbox_id, path)] = content

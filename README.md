@@ -127,6 +127,15 @@ make dev-down
 > ```bash
 > export COCOLA_SANDBOX_ADDR=127.0.0.1:50051   # sandbox-manager gRPC 地址
 > ```
+>
+> **让沙箱真正被用起来**:同一个 `COCOLA_SANDBOX_ADDR` 还会把 Agent 的
+> bash / 文件读写工具落到所绑定的沙箱里执行——通过 Claude Agent SDK 的进程内
+> MCP 机制(`create_sdk_mcp_server`,无子进程、无端口)注册 `bash`/`read_file`/
+> `write_file` 三个工具,handler 经 `SandboxExecutor`(anyio 桥接既有
+> `SandboxClient` 的 Exec/Read/WriteFile)在会话绑定的 `sandbox_id` 上运行。命令
+> 跑通但非零退出会把退出码与 stdout/stderr 交还模型自行决断(类真实 shell);
+> 仅沙箱级失败才算工具错误。仅在「有 executor 且会话已绑定沙箱」时挂载,避免
+> Agent 持有指向空的工具。
 
 ## 路线图
 
