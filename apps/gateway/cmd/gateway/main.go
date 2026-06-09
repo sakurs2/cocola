@@ -1,18 +1,58 @@
 // gateway is the public-facing BFF. Responsibilities:
-//   - HTTP/WebSocket termination from the web client
-//   - Auth (delegates to admin-api in M4)
-//   - Routing requests to agent-runtime via gRPC
-//   - Streaming agent events back over SSE/WS
+//   - HTTP termination from the web client
+//   - Auth: verifies cocola-signed HS256 tokens (shared go-common/token codec)
+//   - Routing prompts to agent-runtime over gRPC
+//   - Streaming agent events back to the browser over SSE
 //
-// M0 only proves wiring: print a banner and exit cleanly.
+// Configuration is env-driven (M3 will move this behind go-common/config):
+//
+//	COCOLA_GATEWAY_ADDR     listen address           (default :8080)
+//	COCOLA_AGENT_ADDR       agent-runtime gRPC addr  (default 127.0.0.1:50061)
+//	COCOLA_AUTH_SECRET      HS256 secret; empty => auth disabled (dev only)
+//	COCOLA_AUTH_ISSUER      expected token issuer    (default cocola)
+//	COCOLA_AUTH_ALLOW_ANON  "1" to accept blank tokens as dev-user (dev only)
 package main
 
 import (
+	"net/http"
+	"os"
+
+	"github.com/cocola-project/cocola/apps/gateway/internal/agent"
+	"github.com/cocola-project/cocola/apps/gateway/internal/auth"
+	"github.com/cocola-project/cocola/apps/gateway/internal/httpapi"
 	"github.com/cocola-project/cocola/packages/go-common/logger"
 )
+
+func env(key, def string) string {
+	if v := os.Getenv(key); v != "" {
+		return v
+	}
+	return def
+}
 
 func main() {
 	log := logger.Must()
 	defer func() { _ = log.Sync() }()
-	log.Info("cocola gateway (M0 stub) starting")
+
+	addr := env("COCOLA_GATEWAY_ADDR", ":8080")
+	agentAddr := env("COCOLA_AGENT_ADDR", "127.0.0.1:50061")
+
+	client, err := agent.Dial(agentAddr)
+	if err != nil {
+		log.Fatal("cannot dial agent-runtime: " + err.Error())
+	}
+	defer func() { _ = client.Close() }()
+
+	verifier := auth.NewVerifier(auth.Config{
+		Secret:         os.Getenv("COCOLA_AUTH_SECRET"),
+		Issuer:         env("COCOLA_AUTH_ISSUER", "cocola"),
+		AllowAnonymous: os.Getenv("COCOLA_AUTH_ALLOW_ANON") == "1",
+	})
+	api := httpapi.New(client, verifier, log)
+
+	log.Info("cocola gateway listening on " + addr + " (agent-runtime: " + agentAddr + ")")
+	srv := &http.Server{Addr: addr, Handler: api.Handler()}
+	if err := srv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
+		log.Fatal("gateway server error: " + err.Error())
+	}
 }

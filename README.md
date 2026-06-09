@@ -57,7 +57,7 @@ make dev-up
 make dev-down
 ```
 
-> 当前里程碑：**M5 Admin API + Skill Market** — 已完成 M0–M5。Go 控制面（admin-api）现在签发 / 吊销 cocola
+> 当前里程碑：**后端 MVP 打通** — 已完成 M0–M5 及端到端后端 MVP。Go 控制面（admin-api）签发 / 吊销 cocola
 > 签发的令牌（即 Claude Agent SDK 的 `ANTHROPIC_API_KEY`），并按周期 token 配额
 > 限流。详见 `docs/adr/`。
 >
@@ -78,6 +78,25 @@ make dev-down
 > # 跨语言互通校验（Go 签发 -> Python 校验）：
 > apps/llm-gateway/.venv/bin/python scripts/admin-m5-e2e.py
 > ```
+>
+> **后端 MVP（端到端链路）**：前端 → gateway（BFF，HTTP/SSE + 令牌校验）→
+> agent-runtime（gRPC）→ llm-gateway / sandbox-manager → 事件流式回传。
+> agent-runtime 暴露 `AgentRuntimeService.Query` 服务端流式 RPC；gateway 作为
+> BFF 校验 cocola 令牌（复用 `packages/go-common/token` 同一套 HS256 编解码，
+> 与 admin-api 共享，不重复造轮子），并把 Agent 事件以 SSE 推给浏览器。
+>
+> ```bash
+> # 启动 agent-runtime gRPC 服务（缺省 :50061；未配置 LLM 时回退 EchoProvider）
+> cd apps/agent-runtime && uv run python -m cocola_agent_runtime
+> # 启动 gateway BFF（缺省 :8080，转发至 127.0.0.1:50061）
+> export COCOLA_AUTH_SECRET=<与签发方共享的密钥>   # 缺省则鉴权关闭（仅本地）
+> go run ./apps/gateway/cmd/gateway
+> # 发起一次对话（SSE 流式返回）
+> curl -N -X POST localhost:8080/v1/chat \
+>   -H "authorization: Bearer <令牌>" \
+>   -H "content-type: application/json" \
+>   -d '{"prompt":"hello","session_id":"s1"}'
+> ```
 
 ## 路线图
 
@@ -89,6 +108,7 @@ make dev-down
 | M3 | LLM Gateway：Anthropic 兼容代理（承接 Claude Agent SDK）+ 计费账本 | ✅ |
 | M4 | Auth + Token 配额：cocola 签发令牌即 SDK API Key（HS256 离线校验）+ 周期化 token 配额（按用户日 / 租户月，超额 429） | ✅ |
 | M5 | Admin API + Skill Market：Go 控制面（令牌签发 / 吊销denylist + 动态 per-subject 配额覆盖 + Skill 目录 CRUD + 审计日志），令牌编解码与 Python 网关跨语言互通（HS256 字节级一致） | ✅ |
+| **MVP** | **后端端到端打通：agent-runtime gRPC 服务（`AgentRuntimeService.Query` 服务端流式）+ gateway BFF（HTTP/SSE + 令牌校验，复用 go-common/token 共享 HS256 编解码）** | ✅ |
 | M6 | K8s + gVisor Provider | ⏳ |
 | M7 | 持久化数据分层、Vault 接入 | ⏳ |
 | M8 | 可观测性与压测 | ⏳ |

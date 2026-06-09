@@ -15,7 +15,7 @@ import (
 
 	"github.com/cocola-project/cocola/apps/admin-api/internal/service"
 	"github.com/cocola-project/cocola/apps/admin-api/internal/store"
-	"github.com/cocola-project/cocola/apps/admin-api/internal/token"
+	"github.com/cocola-project/cocola/packages/go-common/token"
 )
 
 // fixedClock returns a deterministic time so audit/issued timestamps are stable.

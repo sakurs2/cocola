@@ -38,7 +38,7 @@ import (
 	"github.com/cocola-project/cocola/apps/admin-api/internal/redispub"
 	"github.com/cocola-project/cocola/apps/admin-api/internal/service"
 	"github.com/cocola-project/cocola/apps/admin-api/internal/store"
-	"github.com/cocola-project/cocola/apps/admin-api/internal/token"
+	"github.com/cocola-project/cocola/packages/go-common/token"
 	"github.com/cocola-project/cocola/packages/go-common/logger"
 )
 

@@ -1,9 +1,12 @@
 // Package token mints and inspects the cocola-signed HS256 JWTs that ARE the
-// Claude Agent SDK's ANTHROPIC_API_KEY. This is the Go counterpart of the
-// Python gateway's auth/jwt.py: the wire format (compact JWS, base64url without
-// padding, header {"alg":"HS256","typ":"JWT"}, claims sub/ten/iat/exp/iss) is
-// byte-compatible, so a token minted here verifies in the gateway and vice
-// versa. The cross-language interop e2e proves it.
+// Claude Agent SDK's ANTHROPIC_API_KEY. It is shared go-common code: admin-api
+// mints tokens with it and the gateway BFF verifies them with the SAME codec,
+// so there is exactly one HS256 implementation on the Go side (no third
+// hand-rolled copy). This is the Go counterpart of the Python gateway's
+// auth/jwt.py: the wire format (compact JWS, base64url without padding, header
+// {"alg":"HS256","typ":"JWT"}, claims sub/ten/iat/exp/iss) is byte-compatible,
+// so a token minted here verifies in the gateway and vice versa. The
+// cross-language interop e2e proves it.
 //
 // Why hand-rolled HS256 again (instead of a JWT library)? Symmetric signing of
 // compact JWS is a few lines of crypto/hmac+sha256; matching the Python side

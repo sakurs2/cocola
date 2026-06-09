@@ -15,7 +15,7 @@ import (
 	"os"
 	"time"
 
-	"github.com/cocola-project/cocola/apps/admin-api/internal/token"
+	"github.com/cocola-project/cocola/packages/go-common/token"
 )
 
 func main() {

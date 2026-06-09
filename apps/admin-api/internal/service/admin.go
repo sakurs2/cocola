@@ -17,7 +17,7 @@ import (
 	"time"
 
 	"github.com/cocola-project/cocola/apps/admin-api/internal/store"
-	"github.com/cocola-project/cocola/apps/admin-api/internal/token"
+	"github.com/cocola-project/cocola/packages/go-common/token"
 )
 
 // Sentinel errors mapped to HTTP codes by the handler layer.

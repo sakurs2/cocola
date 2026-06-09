@@ -1,0 +1,98 @@
+// Package agent is the gateway's client to the agent-runtime gRPC service. It
+// exposes a narrow Streamer interface so the HTTP/SSE layer depends on an
+// abstraction (real gRPC in prod, a fake in tests) rather than the generated
+// stubs directly.
+package agent
+
+import (
+	"context"
+	"errors"
+	"fmt"
+	"io"
+
+	"google.golang.org/grpc"
+	"google.golang.org/grpc/credentials/insecure"
+
+	agentv1 "github.com/cocola-project/cocola/packages/proto/gen/go/cocola/agent/v1"
+)
+
+// Event is the transport-neutral shape the HTTP layer streams to the client. It
+// mirrors the proto AgentEvent (a kind + flat string map) without leaking the
+// generated type past this package.
+type Event struct {
+	Kind string            `json:"kind"`
+	Data map[string]string `json:"data,omitempty"`
+}
+
+// Query is the resolved request the gateway forwards to agent-runtime. The
+// caller (HTTP layer) fills UserID/SessionId from the verified identity, never
+// from client-supplied fields.
+type Query struct {
+	UserID    string
+	SessionID string
+	Prompt    string
+	SandboxID string
+	MaxTurns  int32
+}
+
+// Streamer runs one agent query and pushes each event to onEvent in order. It
+// returns when the stream ends (nil) or on the first transport/agent error. The
+// abstraction is what makes the SSE handler unit-testable without a real server.
+type Streamer interface {
+	Stream(ctx context.Context, q Query, onEvent func(Event) error) error
+}
+
+// Client is the gRPC-backed Streamer. Build it with Dial.
+type Client struct {
+	conn *grpc.ClientConn
+	rpc  agentv1.AgentRuntimeServiceClient
+}
+
+// Dial opens a lazy connection to the agent-runtime at addr (it connects on
+// first RPC, not here). The connection
+// is plaintext: agent-runtime is an internal service reached over the cluster
+// network, not the public internet (TLS/mTLS is an M6 hardening item).
+func Dial(addr string) (*Client, error) {
+	conn, err := grpc.Dial(addr, grpc.WithTransportCredentials(insecure.NewCredentials()))
+	if err != nil {
+		return nil, fmt.Errorf("agent: dial %q: %w", addr, err)
+	}
+	return &Client{conn: conn, rpc: agentv1.NewAgentRuntimeServiceClient(conn)}, nil
+}
+
+// Close releases the underlying connection.
+func (c *Client) Close() error {
+	if c.conn == nil {
+		return nil
+	}
+	return c.conn.Close()
+}
+
+// Stream forwards q to agent-runtime and relays each AgentEvent to onEvent. A
+// context cancel (client disconnect, deadline) aborts the RPC promptly.
+func (c *Client) Stream(ctx context.Context, q Query, onEvent func(Event) error) error {
+	stream, err := c.rpc.Query(ctx, &agentv1.QueryRequest{
+		UserId:    q.UserID,
+		SessionId: q.SessionID,
+		Prompt:    q.Prompt,
+		SandboxId: q.SandboxID,
+		MaxTurns:  q.MaxTurns,
+	})
+	if err != nil {
+		return fmt.Errorf("agent: query: %w", err)
+	}
+	for {
+		msg, err := stream.Recv()
+		if err != nil {
+			// io.EOF is the normal end-of-stream; surface it as nil.
+			if errors.Is(err, io.EOF) {
+				return nil
+			}
+			return err
+		}
+		ev := Event{Kind: msg.GetKind(), Data: msg.GetData()}
+		if err := onEvent(ev); err != nil {
+			return err
+		}
+	}
+}

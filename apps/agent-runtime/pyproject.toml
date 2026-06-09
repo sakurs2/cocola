@@ -7,6 +7,7 @@ dependencies = [
     "cocola-common",
     "claude-agent-sdk>=0.1.0",
     "grpcio>=1.64",
+    "protobuf>=6.30",
     "anyio>=4.3",
     "pydantic>=2.7",
 ]
