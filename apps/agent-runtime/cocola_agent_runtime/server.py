@@ -33,6 +33,7 @@ from cocola.agent.v1 import agent_pb2_grpc as pb_grpc
 from cocola_common import get_logger
 
 from cocola_agent_runtime.agent_provider import AgentEvent, AgentOptions, AgentProvider
+from cocola_agent_runtime.sandbox_binder import SandboxBinder
 from cocola_agent_runtime.skill_loader import SkillCatalog, apply_skills_to_options
 
 log = get_logger("cocola.agent-runtime.server")
@@ -69,9 +70,11 @@ class AgentRuntimeServicer(pb_grpc.AgentRuntimeServiceServicer):
         provider: AgentProvider,
         *,
         skills: SkillCatalog | None = None,
+        binder: SandboxBinder | None = None,
     ) -> None:
         self._provider = provider
         self._skills = skills
+        self._binder = binder
 
     async def Query(self, request, context):  # noqa: N802 - gRPC-generated name
         """Server-streaming RPC: run one agent turn, stream events back.
@@ -81,10 +84,50 @@ class AgentRuntimeServicer(pb_grpc.AgentRuntimeServiceServicer):
         a `done` here: the provider is responsible for its own terminal event
         (ClaudeAgentSDKProvider yields `done`); on error we substitute one.
         """
+        sandbox_id = request.sandbox_id or None
+
+        # Bind the session to a real sandbox when a binder is wired and the
+        # caller did not pin one. Acquire is create-or-reuse (M2): the same
+        # session converges on one sandbox and the call renews its lease. A bind
+        # failure is surfaced as a terminal `error` event rather than crashing
+        # the stream, and the agent does not run without its execution sandbox.
+        if self._binder is not None and sandbox_id is None:
+            try:
+                box = await self._binder.acquire(
+                    session_id=request.session_id, user_id=request.user_id
+                )
+            except Exception as exc:  # noqa: BLE001 - bind failure -> clean terminal event
+                log.warning(
+                    "sandbox acquire failed",
+                    session_id=request.session_id,
+                    error=str(exc),
+                )
+                await context.write(
+                    pb.AgentEvent(
+                        kind="error",
+                        data={"error": f"sandbox acquire failed: {exc}"},
+                    )
+                )
+                return
+            sandbox_id = box.id
+            # Make the binding observable to the BFF/client.
+            await context.write(
+                event_to_proto(
+                    AgentEvent(
+                        kind="sandbox",
+                        data={
+                            "sandbox_id": box.id,
+                            "endpoint": box.endpoint,
+                            "reused": box.reused,
+                        },
+                    )
+                )
+            )
+
         opts = AgentOptions(
             user_id=request.user_id,
             session_id=request.session_id,
-            sandbox_id=request.sandbox_id or None,
+            sandbox_id=sandbox_id,
             max_turns=request.max_turns or 30,
         )
         if self._skills is not None:
@@ -94,7 +137,7 @@ class AgentRuntimeServicer(pb_grpc.AgentRuntimeServiceServicer):
             "agent query",
             user_id=request.user_id,
             session_id=request.session_id,
-            has_sandbox=bool(request.sandbox_id),
+            has_sandbox=bool(sandbox_id),
         )
         try:
             async for event in self._provider.query(request.prompt, opts):

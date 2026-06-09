@@ -11,6 +11,7 @@ Env (all optional; sensible local defaults):
     COCOLA_AGENT_API_KEY                     cocola-issued token the SDK presents (dev default)
     COCOLA_ADMIN_BASE_URL                    admin-api root for the Skill-Market catalog
     COCOLA_ADMIN_KEY                         admin bearer key (if admin-api auth is on)
+    COCOLA_SANDBOX_ADDR                      sandbox-manager gRPC addr (binds session->sandbox)
 
 Provider selection: with COCOLA_LLM_BASE_URL set we drive the real Claude Agent
 SDK routed through the gateway; without it we fall back to EchoProvider so a
@@ -28,6 +29,7 @@ from cocola_common import get_logger
 
 from cocola_agent_runtime.agent_provider import AgentProvider
 from cocola_agent_runtime.echo_provider import EchoProvider
+from cocola_agent_runtime.sandbox_binder import SandboxBinder, SandboxManagerBinder
 from cocola_agent_runtime.server import AgentRuntimeServicer
 from cocola_agent_runtime.skill_loader import AdminSkillCatalog, SkillCatalog
 
@@ -65,12 +67,25 @@ def _build_skill_catalog() -> SkillCatalog | None:
     return AdminSkillCatalog(admin_base, admin_key=os.getenv("COCOLA_ADMIN_KEY", ""))
 
 
+def _build_binder() -> SandboxBinder | None:
+    addr = os.getenv("COCOLA_SANDBOX_ADDR", "").strip()
+    if not addr:
+        log.warning("COCOLA_SANDBOX_ADDR unset; sessions run without a bound sandbox")
+        return None
+    log.info("sandbox binding enabled", sandbox_addr=addr)
+    return SandboxManagerBinder(addr)
+
+
 async def serve() -> None:
     host = os.getenv("COCOLA_AGENT_HOST", "0.0.0.0")
     port = int(os.getenv("COCOLA_AGENT_PORT", "50061"))
     addr = f"{host}:{port}"
 
-    servicer = AgentRuntimeServicer(_build_provider(), skills=_build_skill_catalog())
+    servicer = AgentRuntimeServicer(
+        _build_provider(),
+        skills=_build_skill_catalog(),
+        binder=_build_binder(),
+    )
     server = grpc.aio.server()
     pb_grpc.add_AgentRuntimeServiceServicer_to_server(servicer, server)
     server.add_insecure_port(addr)

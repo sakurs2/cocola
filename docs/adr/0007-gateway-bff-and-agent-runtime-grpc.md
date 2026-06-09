@@ -102,3 +102,33 @@ through FakeUpstream, returns an Anthropic response, and the real provider maps
 it back to generic `AgentEvent`s. The test asserts billing is attributed to the
 token subject (the SDK key was the verified token) and that an unsigned token
 surfaces as an error with no model call and no billing.
+
+## Addendum — session↔sandbox binding in the Query path (step 3)
+
+agent-runtime now binds a session to a real sandbox inside `Query`, instead of
+merely passing through whatever `sandbox_id` the caller supplied. The sandbox
+lifecycle itself was already closed in M2 on the sandbox-manager side (Acquire =
+create-or-reuse + lease renew, Heartbeat, Release); step 3 reuses that contract
+from the runtime.
+
+- `SandboxBinder` (Protocol) is the only thing the servicer depends on — same
+  composition-root pattern as `AgentProvider` / `SkillCatalog`.
+  `SandboxManagerBinder` wraps the existing blocking `SandboxClient` and bridges
+  it to the async server via `anyio.to_thread` (exactly as the client docstring
+  foretold), opening a short-lived channel per call since Acquire is idempotent.
+- In `Query`: if a binder is wired and the caller did not pin a sandbox, the
+  servicer acquires one for the session, injects the real id into `AgentOptions`,
+  and emits an observable `sandbox` event before any agent output. A caller-pinned
+  `sandbox_id` is respected verbatim (no acquire). A bind failure becomes a
+  terminal `error` event and the provider never runs — the agent does not execute
+  without its sandbox.
+- Composition root: `COCOLA_SANDBOX_ADDR` selects the binder; unset keeps the
+  zero-config boot (sessions run with no bound sandbox), mirroring how
+  `COCOLA_LLM_BASE_URL` / `COCOLA_ADMIN_BASE_URL` gate their features.
+- **Deliberately deferred**: the runtime does not yet route the SDK's tool
+  execution (bash/file IO) through the bound sandbox's `Exec`/`WriteFile`/
+  `ReadFile`. That requires registering sandbox-backed tools with the Claude
+  Agent SDK and is the next slice; binding the session is the prerequisite that
+  makes those calls have a target. Release is also left to the M2 reaper/lease
+  rather than forced at stream end, so a sandbox survives across a session's
+  multiple `Query` turns.

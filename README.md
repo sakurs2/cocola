@@ -117,6 +117,16 @@ make dev-down
 > 令牌透传契约由 `apps/llm-gateway/tests/test_token_passthrough_e2e.py` 无网络
 > 验证：真实 provider 用 `_build_env()` 注入的令牌驱动网关 ASGI（FakeUpstream），
 > 响应经 provider 映射回 `AgentEvent` 流回。
+>
+> **绑定会话沙箱**：给 agent-runtime 设置 `COCOLA_SANDBOX_ADDR` 指向
+> sandbox-manager,`Query` 即在会话首次进入时 `Acquire` 一个沙箱(create-or-reuse
+> + 续租,M2 闭环),把真实 `sandbox_id` 注入会话并以 `sandbox` 事件流式回传供前端
+> 观测。调用方显式传入 `sandbox_id` 时按原样尊重;绑定失败则以终止 `error` 事件
+> 结束、Agent 不在缺沙箱时运行。未配置则会话不绑定沙箱(零配置启动)。
+>
+> ```bash
+> export COCOLA_SANDBOX_ADDR=127.0.0.1:50051   # sandbox-manager gRPC 地址
+> ```
 
 ## 路线图
 
