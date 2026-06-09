@@ -57,7 +57,14 @@ func Dial(addr string) (*Client, error) {
 	if err != nil {
 		return nil, fmt.Errorf("agent: dial %q: %w", addr, err)
 	}
-	return &Client{conn: conn, rpc: agentv1.NewAgentRuntimeServiceClient(conn)}, nil
+	return NewClient(conn), nil
+}
+
+// NewClient wraps an already-established gRPC connection. Dial uses it for the
+// production path; tests inject a bufconn-backed conn to exercise the real stub
+// + streaming serialization without binding a port.
+func NewClient(conn *grpc.ClientConn) *Client {
+	return &Client{conn: conn, rpc: agentv1.NewAgentRuntimeServiceClient(conn)}
 }
 
 // Close releases the underlying connection.
