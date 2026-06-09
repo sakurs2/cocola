@@ -12,7 +12,7 @@ talks to it over stdio. That CLI is what actually opens HTTP connections to the
 model endpoint, and it reads the endpoint from the environment:
 
     ANTHROPIC_BASE_URL   -> where to send /v1/messages   (our gateway)
-    ANTHROPIC_API_KEY    -> bearer the gateway validates  (cocola-issued)
+    ANTHROPIC_AUTH_TOKEN -> bearer the gateway validates  (cocola-issued)
 
 So redirecting the SDK to cocola is purely an env injection — zero SDK code
 changes, zero monkeypatching. Point the base URL at the gateway and every model
@@ -91,9 +91,20 @@ class ClaudeAgentSDKProvider:
             self._query = claude_agent_sdk.query
 
     def _build_env(self) -> dict[str, str]:
+        # Claude Code distinguishes two auth modes that map to different HTTP
+        # headers (verified against the CLI docs):
+        #   ANTHROPIC_API_KEY    -> sent as `x-api-key`        (direct Anthropic)
+        #   ANTHROPIC_AUTH_TOKEN -> sent as `Authorization: Bearer`
+        #                                                      (custom gateway)
+        # cocola routes the SDK at its own gateway with a cocola-issued JWT, not
+        # a real `sk-ant-` key. Putting that JWT in ANTHROPIC_API_KEY makes the
+        # CLI treat it as an Anthropic key and reject/retry it (HTTP 401). The
+        # gateway-proxy mode is exactly what ANTHROPIC_AUTH_TOKEN is for, so we
+        # present the credential there. The gateway's _bearer() accepts both
+        # `Authorization` and `x-api-key`, so this stays compatible.
         env = {
             "ANTHROPIC_BASE_URL": self._config.base_url,
-            "ANTHROPIC_API_KEY": self._config.api_key,
+            "ANTHROPIC_AUTH_TOKEN": self._config.api_key,
         }
         env.update(self._config.extra_env)
         return env

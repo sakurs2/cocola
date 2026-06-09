@@ -104,4 +104,8 @@ def test_build_env_injects_base_url_and_key():
     prov = ClaudeAgentSDKProvider(cfg, query_fn=lambda **kw: iter(()))
     env = prov._build_env()
     assert env["ANTHROPIC_BASE_URL"] == "http://gw:9000"
-    assert env["ANTHROPIC_API_KEY"] == "K"
+    # cocola routes the SDK at its own gateway with a cocola-issued JWT, so the
+    # credential goes in ANTHROPIC_AUTH_TOKEN (Authorization: Bearer), NOT
+    # ANTHROPIC_API_KEY (x-api-key, reserved for direct Anthropic keys).
+    assert env["ANTHROPIC_AUTH_TOKEN"] == "K"
+    assert "ANTHROPIC_API_KEY" not in env
