@@ -16,7 +16,9 @@ optional `now` for tests. Claims we use:
     iat  -> issued-at    (unix seconds)
     exp  -> expiry       (unix seconds; optional — omit for non-expiring tokens)
     iss  -> issuer       (defaults to "cocola")
+    jti  -> token id     (per-token id; the revocation denylist key)
 """
+
 from __future__ import annotations
 
 import base64
@@ -115,6 +117,9 @@ class Identity:
     tenant_id: str = ""
     issued_at: float = 0.0
     expires_at: float | None = None
+    # token_id is the `jti` claim: the per-token id used to consult the
+    # revocation denylist. "" when the token predates jti or auth is disabled.
+    token_id: str = ""
 
     @property
     def is_authenticated(self) -> bool:

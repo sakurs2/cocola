@@ -1,4 +1,5 @@
 """Auth: JWT encode/decode + Issuer/Verifier semantics."""
+
 import time
 
 import pytest
@@ -129,3 +130,27 @@ def test_non_expiring_token():
 def _pair(secret="test-secret"):
     cfg = AuthConfig(secret=secret, issuer="cocola", default_ttl_s=3600)
     return Issuer(cfg), Verifier(cfg)
+
+
+def test_issued_token_carries_jti():
+    iss, vrf = _pair()
+    tok = iss.issue("emp-7")
+    ident = vrf.verify(tok)
+    assert ident.token_id, "verified identity must expose a jti token_id"
+    # jti is 12 random bytes hex == 24 hex chars (byte-compatible with Go).
+    assert len(ident.token_id) == 24
+
+
+def test_jti_is_unique_per_issue():
+    iss, vrf = _pair()
+    a = vrf.verify(iss.issue("emp-7")).token_id
+    b = vrf.verify(iss.issue("emp-7")).token_id
+    assert a and b and a != b
+
+
+def test_token_without_jti_has_blank_token_id():
+    # A validly-signed legacy token (no jti) verifies but exposes no token_id,
+    # so the denylist gate simply skips it.
+    vrf = Verifier(AuthConfig(secret="s", issuer="cocola"))
+    tok = _jwt.encode({"sub": "emp-1", "iss": "cocola", "iat": 1000}, "s")
+    assert vrf.verify(tok).token_id == ""

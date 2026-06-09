@@ -10,7 +10,24 @@ The token cocola issues IS the ANTHROPIC_API_KEY the Claude Agent SDK presents;
 the gateway verifies it offline (shared HS256 secret) and attributes usage +
 quota to the resolved user. See ADR-0005.
 """
+
 from cocola_llm_gateway.auth.identity import AuthConfig, Issuer, Verifier
 from cocola_llm_gateway.auth.jwt import Identity, JWTError
+from cocola_llm_gateway.auth.revocation import (
+    MemoryRevocationStore,
+    RedisRevocationStore,
+    RevocationStore,
+    TTLCachedRevocation,
+)
 
-__all__ = ["Identity", "JWTError", "AuthConfig", "Issuer", "Verifier"]
+__all__ = [
+    "Identity",
+    "JWTError",
+    "AuthConfig",
+    "Issuer",
+    "Verifier",
+    "RevocationStore",
+    "MemoryRevocationStore",
+    "RedisRevocationStore",
+    "TTLCachedRevocation",
+]

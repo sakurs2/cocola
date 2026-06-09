@@ -1,6 +1,10 @@
 package token
 
-import "time"
+import (
+	"crypto/rand"
+	"encoding/hex"
+	"time"
+)
 
 // Issuer mints tokens for employees using a fixed secret + issuer + default TTL.
 // It is the Go equivalent of the Python gateway's auth.Issuer, exposed over the
@@ -39,7 +43,7 @@ func (i *Issuer) Issue(userID, tenant string, ttl time.Duration, now int64) (str
 	if ttl == 0 {
 		effective = i.defaultTTL
 	}
-	c := Claims{Subject: userID, Tenant: tenant, IssuedAt: iat, Issuer: i.issuer}
+	c := Claims{Subject: userID, Tenant: tenant, IssuedAt: iat, Issuer: i.issuer, ID: newJTI()}
 	if effective > 0 {
 		c.Expires = iat + int64(effective.Seconds())
 	}
@@ -52,3 +56,11 @@ func (i *Issuer) Issue(userID, tenant string, ttl time.Duration, now int64) (str
 
 // Issuer name accessor (used when persisting token metadata).
 func (i *Issuer) Name() string { return i.issuer }
+
+// newJTI mints a random token id embedded as the jti claim. It is also the key
+// the revocation denylist uses, so it must be unique per issued token.
+func newJTI() string {
+	var b [12]byte
+	_, _ = rand.Read(b[:])
+	return hex.EncodeToString(b[:])
+}

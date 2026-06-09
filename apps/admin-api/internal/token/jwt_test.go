@@ -77,6 +77,26 @@ func TestIssuerIssue(t *testing.T) {
 	}
 }
 
+func TestIssuerStampsUniqueJTI(t *testing.T) {
+	iss := NewIssuer("s", "cocola", time.Hour)
+	tok1, c1, _ := iss.Issue("emp-7", "", 0, 1000)
+	_, c2, _ := iss.Issue("emp-7", "", 0, 1000)
+	if c1.ID == "" {
+		t.Fatal("issued token must carry a jti")
+	}
+	if c1.ID == c2.ID {
+		t.Fatalf("each token must get a unique jti, got duplicate %q", c1.ID)
+	}
+	// The jti must survive the roundtrip so the gateway can read it back.
+	back, err := Decode(tok1, "s", 1001)
+	if err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if back.ID != c1.ID {
+		t.Fatalf("jti roundtrip mismatch: claims=%q decoded=%q", c1.ID, back.ID)
+	}
+}
+
 func TestIssuerNonExpiring(t *testing.T) {
 	iss := NewIssuer("s", "cocola", time.Hour)
 	_, c, err := iss.Issue("emp-1", "", -1, 1000) // negative ttl => non-expiring

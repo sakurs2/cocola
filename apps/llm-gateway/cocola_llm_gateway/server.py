@@ -19,6 +19,7 @@ The app is built by `create_app(service)` so tests can inject a service backed
 by FakeUpstream + MemoryLedger + a Verifier/Enforcer and drive it via httpx
 ASGITransport — no real network, no bound port.
 """
+
 from __future__ import annotations
 
 from fastapi import FastAPI, Request
@@ -32,6 +33,7 @@ from cocola_llm_gateway.anthropic_codec import (
 )
 from cocola_llm_gateway.auth import Identity, JWTError, Verifier
 from cocola_llm_gateway.auth.identity import AuthConfig
+from cocola_llm_gateway.auth.revocation import RevocationStore
 from cocola_llm_gateway.quota import QuotaExceeded
 from cocola_llm_gateway.service import GatewayService
 
@@ -56,11 +58,20 @@ def _bearer(request: Request) -> str | None:
     return request.headers.get("authorization") or request.headers.get("x-api-key")
 
 
-def create_app(service: GatewayService, *, verifier: Verifier | None = None) -> FastAPI:
+def create_app(
+    service: GatewayService,
+    *,
+    verifier: Verifier | None = None,
+    revocation: RevocationStore | None = None,
+) -> FastAPI:
     app = FastAPI(title="cocola-llm-gateway", version="0.0.1")
     # Default to a disabled verifier (no secret) so existing zero-config callers
     # and tests that don't care about auth keep working as the dev identity.
     vrf = verifier or Verifier(AuthConfig())
+    # Optional revocation denylist. When present, a verified token whose `jti`
+    # has been revoked is rejected even before its `exp` — this closes the gap
+    # left by stateless offline verification (see ADR-0006).
+    deny = revocation
 
     def _identity(request: Request) -> Identity:
         ident = vrf.verify(_bearer(request))
@@ -76,6 +87,18 @@ def create_app(service: GatewayService, *, verifier: Verifier | None = None) -> 
                     user_id=user or ident.user_id,
                     tenant_id=tenant or ident.tenant_id,
                 )
+        return ident
+
+    async def _authenticate(request: Request) -> Identity:
+        """Resolve identity and enforce the revocation denylist.
+
+        Raises JWTError if the token is missing/invalid (from the verifier) or
+        if its `jti` is on the denylist. Callers map JWTError -> 401.
+        """
+        ident = _identity(request)
+        if deny is not None and ident.token_id:
+            if await deny.is_revoked(ident.token_id):
+                raise JWTError("token revoked")
         return ident
 
     @app.get("/healthz")
@@ -94,9 +117,9 @@ def create_app(service: GatewayService, *, verifier: Verifier | None = None) -> 
         except Exception:
             return _err(ErrorCode.INVALID_ARGUMENT, "request body must be JSON")
 
-        # 1) Identity — reject bad/missing tokens before doing any work.
+        # 1) Identity — reject bad/missing/revoked tokens before doing any work.
         try:
-            identity = _identity(request)
+            identity = await _authenticate(request)
         except JWTError as e:
             return _auth_err(str(e))
 
@@ -118,7 +141,8 @@ def create_app(service: GatewayService, *, verifier: Verifier | None = None) -> 
             body,
             resolved_model=resolved_model,
             user_id=identity.user_id,
-            session_id=request.headers.get("x-cocola-session", "").strip() or identity.user_id,
+            session_id=request.headers.get("x-cocola-session", "").strip()
+            or identity.user_id,
         )
         wants_stream = bool(body.get("stream", False))
 
@@ -153,7 +177,7 @@ def create_app(service: GatewayService, *, verifier: Verifier | None = None) -> 
         # admin reads are deferred to the admin-api (M5). With auth disabled
         # (dev), honor the query param for back-compat with existing dev flows.
         try:
-            identity = _identity(request)
+            identity = await _authenticate(request)
         except JWTError as e:
             return _auth_err(str(e))
         if vrf.config.enabled:
@@ -175,7 +199,7 @@ def create_app(service: GatewayService, *, verifier: Verifier | None = None) -> 
     @app.get("/v1/quota")
     async def quota(request: Request):
         try:
-            identity = _identity(request)
+            identity = await _authenticate(request)
         except JWTError as e:
             return _auth_err(str(e))
         statuses = await service.quota_status(identity)
@@ -222,7 +246,10 @@ def _err(code: ErrorCode, message: str) -> JSONResponse:
 def _auth_err(message: str) -> JSONResponse:
     # Anthropic-compatible error shape so the SDK surfaces it cleanly.
     return JSONResponse(
-        {"type": "error", "error": {"type": "authentication_error", "message": message}},
+        {
+            "type": "error",
+            "error": {"type": "authentication_error", "message": message},
+        },
         status_code=401,
     )
 

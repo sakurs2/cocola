@@ -12,8 +12,6 @@ package service
 
 import (
 	"context"
-	"crypto/rand"
-	"encoding/hex"
 	"errors"
 	"strconv"
 	"time"
@@ -48,12 +46,6 @@ func New(s store.Store, iss *token.Issuer, now Clock) *Admin {
 	return &Admin{store: s, issuer: iss, now: now}
 }
 
-func newID() string {
-	var b [12]byte
-	_, _ = rand.Read(b[:])
-	return hex.EncodeToString(b[:])
-}
-
 // ---- Tokens ----
 
 // IssueTokenInput describes a mint request.
@@ -85,7 +77,9 @@ func (a *Admin) IssueToken(ctx context.Context, in IssueTokenInput) (IssueTokenR
 		return IssueTokenResult{}, ErrInvalidArg
 	}
 	rec := store.TokenRecord{
-		ID:        newID(),
+		// Use the token's own jti as the record id so the denylist key the
+		// gateway reads back from a verified token matches this record exactly.
+		ID:        claims.ID,
 		UserID:    claims.Subject,
 		TenantID:  claims.Tenant,
 		Issuer:    claims.Issuer,

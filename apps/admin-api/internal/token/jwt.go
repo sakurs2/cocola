@@ -35,6 +35,11 @@ type Claims struct {
 	IssuedAt int64  `json:"iat,omitempty"`
 	Expires  int64  `json:"exp,omitempty"`
 	Issuer   string `json:"iss,omitempty"`
+	// ID is the JWT ID (jti): a per-token opaque identifier. It is the key the
+	// admin-api's revocation denylist uses and the gateway reads back from a
+	// verified token to check "has this specific token been revoked?". Without
+	// it, a leaked-but-unexpired token could not be killed before exp.
+	ID string `json:"jti,omitempty"`
 }
 
 type header struct {

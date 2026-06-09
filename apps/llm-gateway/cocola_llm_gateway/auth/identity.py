@@ -15,8 +15,10 @@ Design notes:
   a token (mirrors the old mock-header behavior), but it is OFF unless explicitly
   enabled, so production never silently accepts anonymous callers.
 """
+
 from __future__ import annotations
 
+import secrets
 import time
 from dataclasses import dataclass
 
@@ -67,7 +69,13 @@ class Issuer:
             raise JWTError("user_id is required to issue a token")
         iat = int(time.time() if now is None else now)
         ttl = self._cfg.default_ttl_s if ttl_s is None else ttl_s
-        claims: dict = {"sub": user_id, "ten": tenant_id, "iat": iat, "iss": self._cfg.issuer}
+        claims: dict = {
+            "sub": user_id,
+            "ten": tenant_id,
+            "iat": iat,
+            "iss": self._cfg.issuer,
+            "jti": _new_jti(),
+        }
         if ttl and ttl > 0:
             claims["exp"] = iat + ttl
         return _jwt.encode(claims, self._cfg.secret)
@@ -113,7 +121,10 @@ class Verifier:
             user_id=str(sub),
             tenant_id=str(claims.get("ten") or ""),
             issued_at=float(claims.get("iat") or 0.0),
-            expires_at=(float(claims["exp"]) if claims.get("exp") is not None else None),
+            expires_at=(
+                float(claims["exp"]) if claims.get("exp") is not None else None
+            ),
+            token_id=str(claims.get("jti") or ""),
         )
 
 
@@ -125,3 +136,13 @@ def _strip_bearer(raw: str | None) -> str:
     if s.lower().startswith("bearer "):
         return s[7:].strip()
     return s
+
+
+def _new_jti() -> str:
+    """Mint a random token id for the `jti` claim.
+
+    12 random bytes rendered as 24 hex chars, byte-compatible with the Go
+    issuer's newJTI so a token minted by either side carries the same shape.
+    This id is also persisted as the admin-api TokenRecord.ID (the denylist key).
+    """
+    return secrets.token_hex(12)

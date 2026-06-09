@@ -114,6 +114,10 @@ func TestTokenLifecycle(t *testing.T) {
 	if claims.Subject != "alice" {
 		t.Fatalf("decoded sub: want alice, got %q", claims.Subject)
 	}
+	// The denylist closes only if the token's jti IS the persisted record id.
+	if claims.ID == "" || claims.ID != issued.Record.ID {
+		t.Fatalf("jti must equal record id: jti=%q record=%q", claims.ID, issued.Record.ID)
+	}
 
 	// list -> 1 entry
 	rec = do(t, r, http.MethodGet, "/admin/tokens", "k", nil)

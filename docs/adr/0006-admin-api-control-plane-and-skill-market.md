@@ -76,11 +76,10 @@ answer to ADR-0005's revocation follow-up: a **denylist keyed by an opaque token
 id**, not key rotation. Rotation is just "issue new + revoke old" with the same
 two endpoints.
 
-> Note: wiring the gateway to *poll/consult* the denylist on the hot path is the
-> remaining half (a small verifier change + a cache); M5 ships the authoritative
-> source of truth and the e2e proves minting interop. The gateway-side denylist
-> check is tracked as an M6 follow-up so the hot path keeps a single, cached
-> read rather than a per-request control-plane call.
+> Update (denylist closed loop, 2026-06-09): the gateway now *consults* the
+> denylist on the hot path — see "Addendum" below. The remaining-half note that
+> stood here (deferring consumption to M6) is superseded; the consumption side
+> shipped together with the `jti` claim that keys it.
 
 ### Dynamic, per-subject quota overrides
 
@@ -148,17 +147,61 @@ the admin-api useful in deployments that haven't turned on signed-token auth yet
   audited, all behind one swappable `Store`. Cross-language identity interop is
   proven by an e2e (Go mint → Python verify). Token minting is optional, so the
   service is useful before signed-token auth is enabled.
-- **Negative:** the gateway does not *yet* consult the denylist or quota
-  overrides on the hot path (M6); the store is in-memory, so revocations/
-  overrides/skills are process-local until M7 makes them durable; admin auth is
-  a single shared key with no per-operator RBAC; the Skill-Market has a catalog
+- **Negative:** the gateway now consults the denylist on the hot path, but does
+  not *yet* read quota overrides there (M6); the stores (admin-api and the
+  gateway's denylist) are in-memory, so revocations/overrides/skills are
+  process-local until M7 wires a shared backend (Redis/PG); admin auth is a
+  single shared key with no per-operator RBAC; the Skill-Market has a catalog
   but no runtime loader yet.
 - **Follow-ups:**
-  - **M6:** gateway-side denylist check + quota-override read (single cached
-    control-plane read, off the per-request path); agent-runtime skill loader
+  - **M6:** gateway-side quota-override read (single cached control-plane read,
+    off the per-request path); a shared denylist backend so the in-process
+    cache reads what the admin-api writes fleet-wide; agent-runtime skill loader
     consuming `Enabled` entries.
   - **M7:** PostgreSQL `Store` implementation (+ Redis cache) behind the
     existing interface; durable audit log.
   - **Per-operator admin identities + RBAC** replacing the shared admin key.
   - Optional **RS256/JWKS** if a non-cocola token issuer is ever introduced
     (the Go and Python codecs swap in lockstep, guarded by the same e2e).
+
+
+## Addendum: denylist closed loop (`jti` + gateway gate)
+
+The original M5 shipped the denylist's *source of truth* (the admin-api endpoints
+above) but left the gateway-side *consumption* for later. That half is now done,
+closing ADR-0005's revocation follow-up end to end.
+
+The gap was structural: the admin-api keys revocation by `TokenRecord.ID`, but
+the issued tokens carried no token id, so a verifier had nothing to match against
+the denylist. The fix threads a standard **`jti` (JWT ID) claim** through both
+codecs:
+
+- **Both issuers stamp a random `jti`** (12 bytes → 24 hex chars) on every token,
+  in lockstep across the language boundary (Go `newJTI`, Python `_new_jti`). The
+  admin-api persists `TokenRecord.ID == claims.jti`, so **the denylist key and
+  the token's `jti` are the same value** — no mapping table.
+- **The Python verifier extracts `jti` into `Identity.token_id`.** A legacy token
+  without `jti` verifies as before but exposes an empty `token_id`, so the gate
+  simply skips it (no false rejections).
+
+On the gateway hot path, a new `RevocationStore` seam mirrors the `QuotaStore`
+pattern (Protocol + `MemoryRevocationStore` + `RedisRevocationStore`), wrapped by
+a `TTLCachedRevocation` so the per-request check is an in-process set-membership
+test most of the time, with a few-seconds staleness bound (never past `exp`).
+`create_app(..., revocation=...)` gates **all three identity-bearing surfaces**
+(`/v1/messages`, `/v1/usage`, `/v1/quota`): a verified-but-revoked token is
+rejected with `401 authentication_error "token revoked"` before any work happens.
+The gate is only active when auth is enabled (tokens carry a `jti`) and a store
+is wired; with neither, behavior is unchanged.
+
+`scripts/admin-revocation-e2e.py` is the acceptance proof: a token **minted in
+Go** is verified in Python, passes while absent from the denylist, then — after a
+revoke adds its `jti` — is rejected on all three surfaces while still within its
+`exp`.
+
+What remains for M6/M7 is the **shared backend**: today the admin-api's denylist
+and the gateway's `RevocationStore` are separate in-memory stores, so they agree
+only within a process. Pointing both at the same Redis (admin-api writes on
+`DELETE /admin/tokens/{id}`, gateways read via `RedisRevocationStore`) makes a
+revoke take effect fleet-wide — the wiring is in place (`COCOLA_LLM_REDIS_URL`),
+the durability decision is M7's.
