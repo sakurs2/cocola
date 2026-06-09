@@ -137,6 +137,23 @@ make dev-down
 > 仅沙箱级失败才算工具错误。仅在「有 executor 且会话已绑定沙箱」时挂载,避免
 > Agent 持有指向空的工具。
 
+> **前端最小聊天测试页(仅测试工具)**:`apps/web` 提供一个最小流式聊天页,
+> 用途是从浏览器端到端验证后端链路,**不是产品 UI**(产品前端待后端完全稳定后
+> 再打造)。页面用 `fetch` + `ReadableStream` 手动解析 SSE(网关是 `POST` + Bearer
+> 令牌,`EventSource` 只能 GET 且不能带头,故不可用)。由于网关不返回 CORS 头,
+> 页面经同源 Next.js 路由 `app/api/chat/route.ts` 反代到网关 `POST /v1/chat`,
+> 把 SSE 原样透传;网关地址由服务端 `COCOLA_GATEWAY_URL` 配置,不暴露给浏览器。
+>
+> ```bash
+> # 先起 agent-runtime 与 gateway(见上),再起前端
+> export COCOLA_GATEWAY_URL=http://127.0.0.1:8080   # route.ts 反代目标(缺省即此)
+> pnpm install
+> pnpm --filter @cocola/web dev                     # http://localhost:3000
+> ```
+>
+> 页面提供令牌 / session / prompt 输入框与原始事件流日志,可直接观测
+> `text` / `thinking` / `sandbox` / `error` 等事件;未知 kind 回退原始 JSON。
+
 ## 路线图
 
 | 里程碑 | 内容 | 状态 |
