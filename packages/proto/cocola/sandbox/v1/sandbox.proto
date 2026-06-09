@@ -20,6 +20,18 @@ service SandboxService {
   rpc Resume(ResumeRequest) returns (ResumeResponse);
   rpc Destroy(DestroyRequest) returns (DestroyResponse);
   rpc Health(HealthRequest) returns (HealthResponse);
+
+  // --- M2: session<->sandbox binding lifecycle ---------------------------
+  // Acquire returns the sandbox bound to a session, creating (or resuming) one
+  // on first touch. Concurrent calls for the same session converge on a single
+  // sandbox. This is the entry point agent-runtime uses instead of raw Create.
+  rpc Acquire(AcquireRequest) returns (AcquireResponse);
+  // Heartbeat renews a sandbox's lease so the reaper does not reclaim it while
+  // a long-running task holds it between Acquire calls.
+  rpc Heartbeat(HeartbeatRequest) returns (HeartbeatResponse);
+  // Release explicitly unbinds and destroys a session's sandbox immediately,
+  // skipping the lease grace period (clean session end).
+  rpc Release(ReleaseRequest) returns (ReleaseResponse);
 }
 
 message Resources {
@@ -96,3 +108,24 @@ message DestroyResponse {}
 
 message HealthRequest { string sandbox_id = 1; }
 message HealthResponse { bool healthy = 1; string detail = 2; }
+
+// --- M2 binding messages -------------------------------------------------
+
+message AcquireRequest {
+  string session_id = 1;
+  string user_id = 2;
+  string image = 3;
+  map<string, string> env = 4;
+}
+message AcquireResponse {
+  Sandbox sandbox = 1;
+  // reused is true when an existing sandbox was returned (hit), false on a
+  // fresh create (miss). Lets callers observe pool behaviour.
+  bool reused = 2;
+}
+
+message HeartbeatRequest { string sandbox_id = 1; }
+message HeartbeatResponse {}
+
+message ReleaseRequest { string session_id = 1; }
+message ReleaseResponse {}

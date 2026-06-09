@@ -27,6 +27,9 @@ const (
 	SandboxService_Resume_FullMethodName    = "/cocola.sandbox.v1.SandboxService/Resume"
 	SandboxService_Destroy_FullMethodName   = "/cocola.sandbox.v1.SandboxService/Destroy"
 	SandboxService_Health_FullMethodName    = "/cocola.sandbox.v1.SandboxService/Health"
+	SandboxService_Acquire_FullMethodName   = "/cocola.sandbox.v1.SandboxService/Acquire"
+	SandboxService_Heartbeat_FullMethodName = "/cocola.sandbox.v1.SandboxService/Heartbeat"
+	SandboxService_Release_FullMethodName   = "/cocola.sandbox.v1.SandboxService/Release"
 )
 
 // SandboxServiceClient is the client API for SandboxService service.
@@ -42,6 +45,17 @@ type SandboxServiceClient interface {
 	Resume(ctx context.Context, in *ResumeRequest, opts ...grpc.CallOption) (*ResumeResponse, error)
 	Destroy(ctx context.Context, in *DestroyRequest, opts ...grpc.CallOption) (*DestroyResponse, error)
 	Health(ctx context.Context, in *HealthRequest, opts ...grpc.CallOption) (*HealthResponse, error)
+	// --- M2: session<->sandbox binding lifecycle ---------------------------
+	// Acquire returns the sandbox bound to a session, creating (or resuming) one
+	// on first touch. Concurrent calls for the same session converge on a single
+	// sandbox. This is the entry point agent-runtime uses instead of raw Create.
+	Acquire(ctx context.Context, in *AcquireRequest, opts ...grpc.CallOption) (*AcquireResponse, error)
+	// Heartbeat renews a sandbox's lease so the reaper does not reclaim it while
+	// a long-running task holds it between Acquire calls.
+	Heartbeat(ctx context.Context, in *HeartbeatRequest, opts ...grpc.CallOption) (*HeartbeatResponse, error)
+	// Release explicitly unbinds and destroys a session's sandbox immediately,
+	// skipping the lease grace period (clean session end).
+	Release(ctx context.Context, in *ReleaseRequest, opts ...grpc.CallOption) (*ReleaseResponse, error)
 }
 
 type sandboxServiceClient struct {
@@ -147,6 +161,33 @@ func (c *sandboxServiceClient) Health(ctx context.Context, in *HealthRequest, op
 	return out, nil
 }
 
+func (c *sandboxServiceClient) Acquire(ctx context.Context, in *AcquireRequest, opts ...grpc.CallOption) (*AcquireResponse, error) {
+	out := new(AcquireResponse)
+	err := c.cc.Invoke(ctx, SandboxService_Acquire_FullMethodName, in, out, opts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *sandboxServiceClient) Heartbeat(ctx context.Context, in *HeartbeatRequest, opts ...grpc.CallOption) (*HeartbeatResponse, error) {
+	out := new(HeartbeatResponse)
+	err := c.cc.Invoke(ctx, SandboxService_Heartbeat_FullMethodName, in, out, opts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *sandboxServiceClient) Release(ctx context.Context, in *ReleaseRequest, opts ...grpc.CallOption) (*ReleaseResponse, error) {
+	out := new(ReleaseResponse)
+	err := c.cc.Invoke(ctx, SandboxService_Release_FullMethodName, in, out, opts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 // SandboxServiceServer is the server API for SandboxService service.
 // All implementations must embed UnimplementedSandboxServiceServer
 // for forward compatibility
@@ -160,6 +201,17 @@ type SandboxServiceServer interface {
 	Resume(context.Context, *ResumeRequest) (*ResumeResponse, error)
 	Destroy(context.Context, *DestroyRequest) (*DestroyResponse, error)
 	Health(context.Context, *HealthRequest) (*HealthResponse, error)
+	// --- M2: session<->sandbox binding lifecycle ---------------------------
+	// Acquire returns the sandbox bound to a session, creating (or resuming) one
+	// on first touch. Concurrent calls for the same session converge on a single
+	// sandbox. This is the entry point agent-runtime uses instead of raw Create.
+	Acquire(context.Context, *AcquireRequest) (*AcquireResponse, error)
+	// Heartbeat renews a sandbox's lease so the reaper does not reclaim it while
+	// a long-running task holds it between Acquire calls.
+	Heartbeat(context.Context, *HeartbeatRequest) (*HeartbeatResponse, error)
+	// Release explicitly unbinds and destroys a session's sandbox immediately,
+	// skipping the lease grace period (clean session end).
+	Release(context.Context, *ReleaseRequest) (*ReleaseResponse, error)
 	mustEmbedUnimplementedSandboxServiceServer()
 }
 
@@ -190,6 +242,15 @@ func (UnimplementedSandboxServiceServer) Destroy(context.Context, *DestroyReques
 }
 func (UnimplementedSandboxServiceServer) Health(context.Context, *HealthRequest) (*HealthResponse, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method Health not implemented")
+}
+func (UnimplementedSandboxServiceServer) Acquire(context.Context, *AcquireRequest) (*AcquireResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method Acquire not implemented")
+}
+func (UnimplementedSandboxServiceServer) Heartbeat(context.Context, *HeartbeatRequest) (*HeartbeatResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method Heartbeat not implemented")
+}
+func (UnimplementedSandboxServiceServer) Release(context.Context, *ReleaseRequest) (*ReleaseResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method Release not implemented")
 }
 func (UnimplementedSandboxServiceServer) mustEmbedUnimplementedSandboxServiceServer() {}
 
@@ -351,6 +412,60 @@ func _SandboxService_Health_Handler(srv interface{}, ctx context.Context, dec fu
 	return interceptor(ctx, in, info, handler)
 }
 
+func _SandboxService_Acquire_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(AcquireRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(SandboxServiceServer).Acquire(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: SandboxService_Acquire_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(SandboxServiceServer).Acquire(ctx, req.(*AcquireRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _SandboxService_Heartbeat_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(HeartbeatRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(SandboxServiceServer).Heartbeat(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: SandboxService_Heartbeat_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(SandboxServiceServer).Heartbeat(ctx, req.(*HeartbeatRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _SandboxService_Release_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(ReleaseRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(SandboxServiceServer).Release(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: SandboxService_Release_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(SandboxServiceServer).Release(ctx, req.(*ReleaseRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 // SandboxService_ServiceDesc is the grpc.ServiceDesc for SandboxService service.
 // It's only intended for direct use with grpc.RegisterService,
 // and not to be introspected or modified (even as a copy)
@@ -385,6 +500,18 @@ var SandboxService_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "Health",
 			Handler:    _SandboxService_Health_Handler,
+		},
+		{
+			MethodName: "Acquire",
+			Handler:    _SandboxService_Acquire_Handler,
+		},
+		{
+			MethodName: "Heartbeat",
+			Handler:    _SandboxService_Heartbeat_Handler,
+		},
+		{
+			MethodName: "Release",
+			Handler:    _SandboxService_Release_Handler,
 		},
 	},
 	Streams: []grpc.StreamDesc{

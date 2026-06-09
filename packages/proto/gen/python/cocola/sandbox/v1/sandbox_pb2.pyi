@@ -185,3 +185,50 @@ class HealthResponse(_message.Message):
     healthy: bool
     detail: str
     def __init__(self, healthy: _Optional[bool] = ..., detail: _Optional[str] = ...) -> None: ...
+
+class AcquireRequest(_message.Message):
+    __slots__ = ("session_id", "user_id", "image", "env")
+    class EnvEntry(_message.Message):
+        __slots__ = ("key", "value")
+        KEY_FIELD_NUMBER: _ClassVar[int]
+        VALUE_FIELD_NUMBER: _ClassVar[int]
+        key: str
+        value: str
+        def __init__(self, key: _Optional[str] = ..., value: _Optional[str] = ...) -> None: ...
+    SESSION_ID_FIELD_NUMBER: _ClassVar[int]
+    USER_ID_FIELD_NUMBER: _ClassVar[int]
+    IMAGE_FIELD_NUMBER: _ClassVar[int]
+    ENV_FIELD_NUMBER: _ClassVar[int]
+    session_id: str
+    user_id: str
+    image: str
+    env: _containers.ScalarMap[str, str]
+    def __init__(self, session_id: _Optional[str] = ..., user_id: _Optional[str] = ..., image: _Optional[str] = ..., env: _Optional[_Mapping[str, str]] = ...) -> None: ...
+
+class AcquireResponse(_message.Message):
+    __slots__ = ("sandbox", "reused")
+    SANDBOX_FIELD_NUMBER: _ClassVar[int]
+    REUSED_FIELD_NUMBER: _ClassVar[int]
+    sandbox: Sandbox
+    reused: bool
+    def __init__(self, sandbox: _Optional[_Union[Sandbox, _Mapping]] = ..., reused: _Optional[bool] = ...) -> None: ...
+
+class HeartbeatRequest(_message.Message):
+    __slots__ = ("sandbox_id",)
+    SANDBOX_ID_FIELD_NUMBER: _ClassVar[int]
+    sandbox_id: str
+    def __init__(self, sandbox_id: _Optional[str] = ...) -> None: ...
+
+class HeartbeatResponse(_message.Message):
+    __slots__ = ()
+    def __init__(self) -> None: ...
+
+class ReleaseRequest(_message.Message):
+    __slots__ = ("session_id",)
+    SESSION_ID_FIELD_NUMBER: _ClassVar[int]
+    session_id: str
+    def __init__(self, session_id: _Optional[str] = ...) -> None: ...
+
+class ReleaseResponse(_message.Message):
+    __slots__ = ()
+    def __init__(self) -> None: ...

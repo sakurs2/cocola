@@ -31,6 +31,14 @@ class ExecResult:
 
 
 @dataclass
+class AcquireResult:
+    """Result of an Acquire call: the bound sandbox plus a reuse flag."""
+
+    sandbox: "pb.Sandbox"
+    reused: bool = False
+
+
+@dataclass
 class SandboxClient:
     """Blocking gRPC client. Suitable for scripts and the e2e demo.
 
@@ -117,6 +125,37 @@ class SandboxClient:
         return self.stub.ReadFile(
             pb.ReadFileRequest(sandbox_id=sandbox_id, path=path)
         ).data
+
+    def acquire(
+        self,
+        session_id: str,
+        user_id: str = "",
+        image: str = "",
+        env: dict[str, str] | None = None,
+    ) -> AcquireResult:
+        """Bind a session to a sandbox (create-or-reuse).
+
+        This is the session-aware entrypoint the Agent loop should use instead
+        of create(): the same session_id always converges on the same sandbox,
+        and the call renews the lease so the reaper keeps it alive.
+        """
+        resp = self.stub.Acquire(
+            pb.AcquireRequest(
+                session_id=session_id,
+                user_id=user_id,
+                image=image,
+                env=env or {},
+            )
+        )
+        return AcquireResult(sandbox=resp.sandbox, reused=resp.reused)
+
+    def heartbeat(self, sandbox_id: str) -> None:
+        """Renew the lease for a bound sandbox so it is not reclaimed."""
+        self.stub.Heartbeat(pb.HeartbeatRequest(sandbox_id=sandbox_id))
+
+    def release(self, session_id: str) -> None:
+        """Explicitly release a session's sandbox (unbind + destroy)."""
+        self.stub.Release(pb.ReleaseRequest(session_id=session_id))
 
     def destroy(self, sandbox_id: str) -> None:
         self.stub.Destroy(pb.DestroyRequest(sandbox_id=sandbox_id))

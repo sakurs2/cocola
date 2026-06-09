@@ -80,6 +80,21 @@ class SandboxServiceStub:
                 request_serializer=cocola_dot_sandbox_dot_v1_dot_sandbox__pb2.HealthRequest.SerializeToString,
                 response_deserializer=cocola_dot_sandbox_dot_v1_dot_sandbox__pb2.HealthResponse.FromString,
                 _registered_method=True)
+        self.Acquire = channel.unary_unary(
+                '/cocola.sandbox.v1.SandboxService/Acquire',
+                request_serializer=cocola_dot_sandbox_dot_v1_dot_sandbox__pb2.AcquireRequest.SerializeToString,
+                response_deserializer=cocola_dot_sandbox_dot_v1_dot_sandbox__pb2.AcquireResponse.FromString,
+                _registered_method=True)
+        self.Heartbeat = channel.unary_unary(
+                '/cocola.sandbox.v1.SandboxService/Heartbeat',
+                request_serializer=cocola_dot_sandbox_dot_v1_dot_sandbox__pb2.HeartbeatRequest.SerializeToString,
+                response_deserializer=cocola_dot_sandbox_dot_v1_dot_sandbox__pb2.HeartbeatResponse.FromString,
+                _registered_method=True)
+        self.Release = channel.unary_unary(
+                '/cocola.sandbox.v1.SandboxService/Release',
+                request_serializer=cocola_dot_sandbox_dot_v1_dot_sandbox__pb2.ReleaseRequest.SerializeToString,
+                response_deserializer=cocola_dot_sandbox_dot_v1_dot_sandbox__pb2.ReleaseResponse.FromString,
+                _registered_method=True)
 
 
 class SandboxServiceServicer:
@@ -140,6 +155,32 @@ class SandboxServiceServicer:
         context.set_details('Method not implemented!')
         raise NotImplementedError('Method not implemented!')
 
+    def Acquire(self, request, context):
+        """--- M2: session<->sandbox binding lifecycle ---------------------------
+        Acquire returns the sandbox bound to a session, creating (or resuming) one
+        on first touch. Concurrent calls for the same session converge on a single
+        sandbox. This is the entry point agent-runtime uses instead of raw Create.
+        """
+        context.set_code(grpc.StatusCode.UNIMPLEMENTED)
+        context.set_details('Method not implemented!')
+        raise NotImplementedError('Method not implemented!')
+
+    def Heartbeat(self, request, context):
+        """Heartbeat renews a sandbox's lease so the reaper does not reclaim it while
+        a long-running task holds it between Acquire calls.
+        """
+        context.set_code(grpc.StatusCode.UNIMPLEMENTED)
+        context.set_details('Method not implemented!')
+        raise NotImplementedError('Method not implemented!')
+
+    def Release(self, request, context):
+        """Release explicitly unbinds and destroys a session's sandbox immediately,
+        skipping the lease grace period (clean session end).
+        """
+        context.set_code(grpc.StatusCode.UNIMPLEMENTED)
+        context.set_details('Method not implemented!')
+        raise NotImplementedError('Method not implemented!')
+
 
 def add_SandboxServiceServicer_to_server(servicer, server):
     rpc_method_handlers = {
@@ -182,6 +223,21 @@ def add_SandboxServiceServicer_to_server(servicer, server):
                     servicer.Health,
                     request_deserializer=cocola_dot_sandbox_dot_v1_dot_sandbox__pb2.HealthRequest.FromString,
                     response_serializer=cocola_dot_sandbox_dot_v1_dot_sandbox__pb2.HealthResponse.SerializeToString,
+            ),
+            'Acquire': grpc.unary_unary_rpc_method_handler(
+                    servicer.Acquire,
+                    request_deserializer=cocola_dot_sandbox_dot_v1_dot_sandbox__pb2.AcquireRequest.FromString,
+                    response_serializer=cocola_dot_sandbox_dot_v1_dot_sandbox__pb2.AcquireResponse.SerializeToString,
+            ),
+            'Heartbeat': grpc.unary_unary_rpc_method_handler(
+                    servicer.Heartbeat,
+                    request_deserializer=cocola_dot_sandbox_dot_v1_dot_sandbox__pb2.HeartbeatRequest.FromString,
+                    response_serializer=cocola_dot_sandbox_dot_v1_dot_sandbox__pb2.HeartbeatResponse.SerializeToString,
+            ),
+            'Release': grpc.unary_unary_rpc_method_handler(
+                    servicer.Release,
+                    request_deserializer=cocola_dot_sandbox_dot_v1_dot_sandbox__pb2.ReleaseRequest.FromString,
+                    response_serializer=cocola_dot_sandbox_dot_v1_dot_sandbox__pb2.ReleaseResponse.SerializeToString,
             ),
     }
     generic_handler = grpc.method_handlers_generic_handler(
@@ -406,6 +462,87 @@ class SandboxService:
             '/cocola.sandbox.v1.SandboxService/Health',
             cocola_dot_sandbox_dot_v1_dot_sandbox__pb2.HealthRequest.SerializeToString,
             cocola_dot_sandbox_dot_v1_dot_sandbox__pb2.HealthResponse.FromString,
+            options,
+            channel_credentials,
+            insecure,
+            call_credentials,
+            compression,
+            wait_for_ready,
+            timeout,
+            metadata,
+            _registered_method=True)
+
+    @staticmethod
+    def Acquire(request,
+            target,
+            options=(),
+            channel_credentials=None,
+            call_credentials=None,
+            insecure=False,
+            compression=None,
+            wait_for_ready=None,
+            timeout=None,
+            metadata=None):
+        return grpc.experimental.unary_unary(
+            request,
+            target,
+            '/cocola.sandbox.v1.SandboxService/Acquire',
+            cocola_dot_sandbox_dot_v1_dot_sandbox__pb2.AcquireRequest.SerializeToString,
+            cocola_dot_sandbox_dot_v1_dot_sandbox__pb2.AcquireResponse.FromString,
+            options,
+            channel_credentials,
+            insecure,
+            call_credentials,
+            compression,
+            wait_for_ready,
+            timeout,
+            metadata,
+            _registered_method=True)
+
+    @staticmethod
+    def Heartbeat(request,
+            target,
+            options=(),
+            channel_credentials=None,
+            call_credentials=None,
+            insecure=False,
+            compression=None,
+            wait_for_ready=None,
+            timeout=None,
+            metadata=None):
+        return grpc.experimental.unary_unary(
+            request,
+            target,
+            '/cocola.sandbox.v1.SandboxService/Heartbeat',
+            cocola_dot_sandbox_dot_v1_dot_sandbox__pb2.HeartbeatRequest.SerializeToString,
+            cocola_dot_sandbox_dot_v1_dot_sandbox__pb2.HeartbeatResponse.FromString,
+            options,
+            channel_credentials,
+            insecure,
+            call_credentials,
+            compression,
+            wait_for_ready,
+            timeout,
+            metadata,
+            _registered_method=True)
+
+    @staticmethod
+    def Release(request,
+            target,
+            options=(),
+            channel_credentials=None,
+            call_credentials=None,
+            insecure=False,
+            compression=None,
+            wait_for_ready=None,
+            timeout=None,
+            metadata=None):
+        return grpc.experimental.unary_unary(
+            request,
+            target,
+            '/cocola.sandbox.v1.SandboxService/Release',
+            cocola_dot_sandbox_dot_v1_dot_sandbox__pb2.ReleaseRequest.SerializeToString,
+            cocola_dot_sandbox_dot_v1_dot_sandbox__pb2.ReleaseResponse.FromString,
             options,
             channel_credentials,
             insecure,

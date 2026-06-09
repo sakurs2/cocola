@@ -16,6 +16,8 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"sort"
+	"sync"
 	"time"
 
 	"google.golang.org/grpc"
@@ -29,7 +31,7 @@ func main() {
 	flag.Parse()
 	args := flag.Args()
 	if len(args) == 0 {
-		fmt.Fprintln(os.Stderr, "usage: sandbox-cli [-addr :50051] <demo|create|exec|destroy> ...")
+		fmt.Fprintln(os.Stderr, "usage: sandbox-cli [-addr :50051] <demo|create|exec|destroy|bench> ...")
 		os.Exit(2)
 	}
 
@@ -70,6 +72,14 @@ func main() {
 		}
 		mustDestroy(cli, *id)
 		fmt.Println("destroyed", *id)
+	case "bench":
+		fs := flag.NewFlagSet("bench", flag.ExitOnError)
+		sessions := fs.Int("sessions", 50, "number of distinct sessions")
+		perSession := fs.Int("per-session", 4, "concurrent Acquire calls per session")
+		image := fs.String("image", "", "image (default provider image)")
+		cleanup := fs.Bool("cleanup", true, "Release every session sandbox at the end")
+		_ = fs.Parse(args[1:])
+		runBench(cli, *sessions, *perSession, *image, *cleanup)
 	default:
 		fatal("unknown subcommand %q", args[0])
 	}
@@ -142,6 +152,128 @@ func mustDestroy(cli sandboxv1.SandboxServiceClient, id string) {
 	if _, err := cli.Destroy(ctx, &sandboxv1.DestroyRequest{SandboxId: id}); err != nil {
 		fatal("destroy: %v", err)
 	}
+}
+
+
+// runBench is the M2 acceptance harness: it fires -sessions distinct sessions,
+// each issuing -per-session CONCURRENT Acquire calls, and asserts the two M2
+// invariants:
+//   1. intra-session convergence: all concurrent acquires for one session
+//      return the SAME sandbox id (the distributed lock + double-check work).
+//   2. inter-session isolation: the number of distinct sandboxes equals the
+//      number of sessions (no cross-session sharing, no duplicate creates).
+func runBench(cli sandboxv1.SandboxServiceClient, sessions, perSession int, image string, cleanup bool) {
+	if sessions <= 0 || perSession <= 0 {
+		fatal("bench requires -sessions>0 and -per-session>0")
+	}
+	fmt.Printf("[bench] %d sessions x %d concurrent acquires = %d calls\n",
+		sessions, perSession, sessions*perSession)
+
+	type result struct {
+		session string
+		ids     []string // one per concurrent acquire
+		reused  int
+	}
+	results := make([]result, sessions)
+
+	start := time.Now()
+	var outer sync.WaitGroup
+	for i := 0; i < sessions; i++ {
+		outer.Add(1)
+		go func(i int) {
+			defer outer.Done()
+			sess := fmt.Sprintf("bench-session-%03d", i)
+			ids := make([]string, perSession)
+			reused := make([]bool, perSession)
+			var inner sync.WaitGroup
+			for j := 0; j < perSession; j++ {
+				inner.Add(1)
+				go func(j int) {
+					defer inner.Done()
+					ctx, cancel := context.WithTimeout(context.Background(), 180*time.Second)
+					defer cancel()
+					resp, err := cli.Acquire(ctx, &sandboxv1.AcquireRequest{
+						SessionId: sess,
+						UserId:    "bench-user",
+						Image:     image,
+					})
+					if err != nil {
+						fatal("acquire %s: %v", sess, err)
+					}
+					ids[j] = resp.GetSandbox().GetId()
+					reused[j] = resp.GetReused()
+				}(j)
+			}
+			inner.Wait()
+			r := result{session: sess, ids: ids}
+			for _, ru := range reused {
+				if ru {
+					r.reused++
+				}
+			}
+			results[i] = r
+		}(i)
+	}
+	outer.Wait()
+	elapsed := time.Since(start)
+
+	// --- Verify invariants ------------------------------------------------
+	distinct := map[string]string{} // sandboxID -> session that owns it
+	intraViolations := 0
+	crossViolations := 0
+	totalReused := 0
+	for _, r := range results {
+		first := r.ids[0]
+		for _, id := range r.ids {
+			if id != first {
+				intraViolations++
+			}
+			if owner, seen := distinct[id]; seen && owner != r.session {
+				crossViolations++
+			}
+			distinct[id] = r.session
+		}
+		totalReused += r.reused
+	}
+
+	uniqueIDs := make([]string, 0, len(distinct))
+	for id := range distinct {
+		uniqueIDs = append(uniqueIDs, id)
+	}
+	sort.Strings(uniqueIDs)
+
+	fmt.Printf("[bench] elapsed=%s distinct_sandboxes=%d reused_acquires=%d/%d\n",
+		elapsed, len(uniqueIDs), totalReused, sessions*perSession)
+	fmt.Printf("[bench] intra-session violations=%d (want 0)\n", intraViolations)
+	fmt.Printf("[bench] cross-session violations=%d (want 0)\n", crossViolations)
+
+	ok := intraViolations == 0 && crossViolations == 0 && len(uniqueIDs) == sessions
+	if len(uniqueIDs) != sessions {
+		fmt.Printf("[bench] FAIL: distinct sandbox count %d != session count %d\n",
+			len(uniqueIDs), sessions)
+	}
+
+	if cleanup {
+		fmt.Println("[bench] cleanup: releasing all session sandboxes")
+		var wg sync.WaitGroup
+		for _, r := range results {
+			wg.Add(1)
+			go func(sess string) {
+				defer wg.Done()
+				ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+				defer cancel()
+				_, _ = cli.Release(ctx, &sandboxv1.ReleaseRequest{SessionId: sess})
+			}(r.session)
+		}
+		wg.Wait()
+	}
+
+	if ok {
+		fmt.Println("BENCH OK")
+		return
+	}
+	fmt.Println("BENCH FAIL")
+	os.Exit(1)
 }
 
 func fatal(format string, a ...any) {

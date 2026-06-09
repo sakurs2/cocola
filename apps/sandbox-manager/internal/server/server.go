@@ -6,10 +6,12 @@ package server
 
 import (
 	"context"
+	"errors"
 
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 
+	"github.com/cocola-project/cocola/apps/sandbox-manager/internal/orchestrator"
 	"github.com/cocola-project/cocola/apps/sandbox-manager/internal/provider"
 	sandboxv1 "github.com/cocola-project/cocola/packages/proto/gen/go/cocola/sandbox/v1"
 )
@@ -18,10 +20,15 @@ import (
 type Server struct {
 	sandboxv1.UnimplementedSandboxServiceServer
 	p provider.SandboxProvider
+	b *orchestrator.Binder // optional; nil disables session-binding RPCs
 }
 
-// New wires a provider into the gRPC server.
-func New(p provider.SandboxProvider) *Server { return &Server{p: p} }
+// New wires a provider into the gRPC server. The binder is optional: when nil,
+// the raw Create/Exec/... surface still works but Acquire/Heartbeat/Release
+// return Unimplemented. Production wiring always supplies a binder.
+func New(p provider.SandboxProvider, b *orchestrator.Binder) *Server {
+	return &Server{p: p, b: b}
+}
 
 // Create provisions a sandbox.
 func (s *Server) Create(ctx context.Context, req *sandboxv1.CreateRequest) (*sandboxv1.CreateResponse, error) {
@@ -137,6 +144,54 @@ func (s *Server) Health(ctx context.Context, req *sandboxv1.HealthRequest) (*san
 		return nil, status.Errorf(codes.Internal, "health: %v", err)
 	}
 	return &sandboxv1.HealthResponse{Healthy: hs.Healthy, Detail: hs.Detail}, nil
+}
+
+// Acquire binds a session to a sandbox (reusing/resuming when possible).
+func (s *Server) Acquire(ctx context.Context, req *sandboxv1.AcquireRequest) (*sandboxv1.AcquireResponse, error) {
+	if s.b == nil {
+		return nil, status.Error(codes.Unimplemented, "binder not configured")
+	}
+	if req.GetSessionId() == "" {
+		return nil, status.Error(codes.InvalidArgument, "session_id is required")
+	}
+	res, err := s.b.AcquireWithOutcome(ctx, orchestrator.AcquireSpec{
+		SessionID: req.GetSessionId(),
+		UserID:    req.GetUserId(),
+		Image:     req.GetImage(),
+		Env:       req.GetEnv(),
+	})
+	if err != nil {
+		return nil, status.Errorf(codes.Internal, "acquire: %v", err)
+	}
+	return &sandboxv1.AcquireResponse{
+		Sandbox: toProtoSandbox(res.Sandbox),
+		Reused:  res.Reused,
+	}, nil
+}
+
+// Heartbeat renews a sandbox's lease.
+func (s *Server) Heartbeat(ctx context.Context, req *sandboxv1.HeartbeatRequest) (*sandboxv1.HeartbeatResponse, error) {
+	if s.b == nil {
+		return nil, status.Error(codes.Unimplemented, "binder not configured")
+	}
+	if err := s.b.Heartbeat(ctx, req.GetSandboxId()); err != nil {
+		if errors.Is(err, orchestrator.ErrUnknownSandbox) {
+			return nil, status.Error(codes.NotFound, "unknown sandbox")
+		}
+		return nil, status.Errorf(codes.Internal, "heartbeat: %v", err)
+	}
+	return &sandboxv1.HeartbeatResponse{}, nil
+}
+
+// Release unbinds and destroys a session's sandbox immediately.
+func (s *Server) Release(ctx context.Context, req *sandboxv1.ReleaseRequest) (*sandboxv1.ReleaseResponse, error) {
+	if s.b == nil {
+		return nil, status.Error(codes.Unimplemented, "binder not configured")
+	}
+	if err := s.b.Release(ctx, req.GetSessionId()); err != nil {
+		return nil, status.Errorf(codes.Internal, "release: %v", err)
+	}
+	return &sandboxv1.ReleaseResponse{}, nil
 }
 
 func toProtoSandbox(sb *provider.Sandbox) *sandboxv1.Sandbox {

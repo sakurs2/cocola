@@ -9,16 +9,19 @@
 package main
 
 import (
+	"context"
 	"net"
 	"os"
 
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/reflection"
 
+	"github.com/cocola-project/cocola/apps/sandbox-manager/internal/orchestrator"
 	"github.com/cocola-project/cocola/apps/sandbox-manager/internal/provider"
 	"github.com/cocola-project/cocola/apps/sandbox-manager/internal/provider/docker"
 	"github.com/cocola-project/cocola/apps/sandbox-manager/internal/server"
 	"github.com/cocola-project/cocola/packages/go-common/logger"
+	rds "github.com/cocola-project/cocola/packages/go-common/redis"
 	sandboxv1 "github.com/cocola-project/cocola/packages/proto/gen/go/cocola/sandbox/v1"
 )
 
@@ -34,17 +37,41 @@ func main() {
 		log.Sugar().Fatalf("init provider %q: %v", backend, err)
 	}
 
+	// Wire the session<->sandbox binder over Redis. If Redis is unreachable we
+	// degrade gracefully: the raw provider RPCs still work, only the binding
+	// RPCs (Acquire/Heartbeat/Release) return Unimplemented. This keeps local
+	// single-process debugging possible without standing up Redis.
+	ctx := context.Background()
+	var binder *orchestrator.Binder
+	kv, rerr := rds.New(ctx, rds.ConfigFromEnv())
+	if rerr != nil {
+		log.Sugar().Warnw("redis unavailable; session-binding RPCs disabled",
+			"err", rerr)
+	} else {
+		defer func() { _ = kv.Close() }()
+		metrics := orchestrator.NewMetrics()
+		cfg := orchestrator.ConfigFromEnv()
+		binder = orchestrator.NewBinder(kv, p, cfg).WithMetrics(metrics)
+		go binder.RunReaper(ctx) // background two-stage Pause-then-Destroy GC
+		eff := binder.EffectiveConfig()
+		log.Sugar().Infow("session<->sandbox binder enabled",
+			"lease_ttl", eff.LeaseTTL,
+			"heartbeat_every", eff.HeartbeatEvery,
+			"destroy_grace", eff.DestroyGrace,
+			"reaper_every", eff.ReaperEvery)
+	}
+
 	lis, err := net.Listen("tcp", addr)
 	if err != nil {
 		log.Sugar().Fatalf("listen %s: %v", addr, err)
 	}
 
 	gs := grpc.NewServer()
-	sandboxv1.RegisterSandboxServiceServer(gs, server.New(p))
+	sandboxv1.RegisterSandboxServiceServer(gs, server.New(p, binder))
 	reflection.Register(gs) // enables grpcurl describe/list for local debugging
 
 	log.Sugar().Infow("cocola sandbox-manager listening",
-		"milestone", "M1", "addr", addr, "provider", backend)
+		"milestone", "M2", "addr", addr, "provider", backend)
 	if err := gs.Serve(lis); err != nil {
 		log.Sugar().Fatalf("serve: %v", err)
 	}

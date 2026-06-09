@@ -89,7 +89,7 @@ web-lint: ## Lint web code
 # corporate-managed macOS host blocks both the native TLS verifier and writing
 # ".gitmodules" files, so a host-native `go build` cannot resolve modules.
 # scripts/sandbox-build.sh encapsulates the working recipe.
-.PHONY: sandbox-build sandbox-run sandbox-e2e
+.PHONY: sandbox-build sandbox-run sandbox-e2e sandbox-m2-e2e
 sandbox-build: ## Build sandbox-manager + sandbox-cli (containerized)
 	scripts/sandbox-build.sh
 
@@ -98,6 +98,9 @@ sandbox-run: sandbox-build ## Run sandbox-manager locally (Docker provider)
 
 sandbox-e2e: ## Full M1 smoke test: Go CLI + Python runtime demos
 	scripts/sandbox-e2e.sh
+
+sandbox-m2-e2e: ## M2 acceptance: 50-session concurrency bench (needs Redis)
+	scripts/sandbox-m2-e2e.sh
 
 # -------------------------------------------------------------------- aggregate
 .PHONY: install test lint clean

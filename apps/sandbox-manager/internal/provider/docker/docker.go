@@ -179,7 +179,7 @@ func (p *Provider) Create(ctx context.Context, spec provider.SandboxSpec) (*prov
 // Exec runs a command inside the sandbox and streams stdout/stderr, terminating
 // with an Exit (or Error) event.
 func (p *Provider) Exec(ctx context.Context, sid string, req provider.ExecRequest) (<-chan provider.ExecEvent, error) {
-	rec, err := p.lookup(sid)
+	rec, err := p.resolve(ctx, sid)
 	if err != nil {
 		return nil, err
 	}
@@ -259,7 +259,7 @@ func (p *Provider) Exec(ctx context.Context, sid string, req provider.ExecReques
 
 // WriteFile copies a single file into the sandbox via a tar stream.
 func (p *Provider) WriteFile(ctx context.Context, sid, path string, data []byte) error {
-	rec, err := p.lookup(sid)
+	rec, err := p.resolve(ctx, sid)
 	if err != nil {
 		return err
 	}
@@ -286,7 +286,7 @@ func (p *Provider) WriteFile(ctx context.Context, sid, path string, data []byte)
 
 // ReadFile copies a single file out of the sandbox via a tar stream.
 func (p *Provider) ReadFile(ctx context.Context, sid, path string) ([]byte, error) {
-	rec, err := p.lookup(sid)
+	rec, err := p.resolve(ctx, sid)
 	if err != nil {
 		return nil, err
 	}
@@ -309,7 +309,7 @@ func (p *Provider) ReadFile(ctx context.Context, sid, path string) ([]byte, erro
 
 // Pause freezes all processes in the sandbox (cgroup freezer).
 func (p *Provider) Pause(ctx context.Context, sid string) error {
-	rec, err := p.lookup(sid)
+	rec, err := p.resolve(ctx, sid)
 	if err != nil {
 		return err
 	}
@@ -318,7 +318,7 @@ func (p *Provider) Pause(ctx context.Context, sid string) error {
 
 // Resume thaws a paused sandbox.
 func (p *Provider) Resume(ctx context.Context, sid string) error {
-	rec, err := p.lookup(sid)
+	rec, err := p.resolve(ctx, sid)
 	if err != nil {
 		return err
 	}
@@ -328,7 +328,7 @@ func (p *Provider) Resume(ctx context.Context, sid string) error {
 // Destroy force-removes the sandbox container. Host volumes are intentionally
 // retained (cross-session userdata persistence is the whole point).
 func (p *Provider) Destroy(ctx context.Context, sid string) error {
-	rec, err := p.lookup(sid)
+	rec, err := p.resolve(ctx, sid)
 	if err != nil {
 		return err
 	}
@@ -343,7 +343,7 @@ func (p *Provider) Destroy(ctx context.Context, sid string) error {
 
 // Health inspects the underlying container.
 func (p *Provider) Health(ctx context.Context, sid string) (*provider.HealthStatus, error) {
-	rec, err := p.lookup(sid)
+	rec, err := p.resolve(ctx, sid)
 	if err != nil {
 		return nil, err
 	}
@@ -361,13 +361,43 @@ func (p *Provider) Health(ctx context.Context, sid string) (*provider.HealthStat
 
 // --- helpers ---------------------------------------------------------------
 
-func (p *Provider) lookup(sid string) (*record, error) {
+// resolve maps a sandbox id to its container record. It checks the in-process
+// cache first (fast path for sandboxes this replica created), then falls back to
+// a Docker label query (cocola.sandbox_id). The fallback is what makes
+// sandbox-manager horizontally scalable and restart-safe: any replica can
+// Pause/Resume/Destroy/Health a sandbox created by any other replica, because
+// the container itself carries the binding labels.
+func (p *Provider) resolve(ctx context.Context, sid string) (*record, error) {
 	p.mu.RLock()
 	rec, ok := p.sandboxes[sid]
 	p.mu.RUnlock()
-	if !ok {
+	if ok {
+		return rec, nil
+	}
+
+	cs, err := p.cli.ContainerList(ctx, container.ListOptions{
+		All: true,
+		Filters: filters.NewArgs(
+			filters.Arg("label", labelManaged+"=true"),
+			filters.Arg("label", labelSandboxID+"="+sid),
+		),
+	})
+	if err != nil {
+		return nil, fmt.Errorf("docker: container list: %w", err)
+	}
+	if len(cs) == 0 {
 		return nil, fmt.Errorf("docker: sandbox not found: %s", sid)
 	}
+	c := cs[0]
+	rec = &record{
+		containerID: c.ID,
+		userID:      c.Labels[labelUserID],
+		sessionID:   c.Labels[labelSessionID],
+	}
+	// Re-populate the cache so subsequent ops on this replica hit the fast path.
+	p.mu.Lock()
+	p.sandboxes[sid] = rec
+	p.mu.Unlock()
 	return rec, nil
 }
 
