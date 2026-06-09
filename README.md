@@ -65,9 +65,9 @@ make dev-down
 | 里程碑 | 内容 | 状态 |
 |---|---|---|
 | M0 | Monorepo 地基、本地开发依赖 | ✅ |
-| M1 | SandboxProvider 抽象 + Docker 实现 | ⏳ |
-| M2 | Agent Runtime 最小闭环 | ⏳ |
-| M3 | LLM Gateway + 计费 | ⏳ |
+| M1 | SandboxProvider 抽象 + Docker 实现 | ✅ |
+| M2 | 会话↔沙箱绑定 + 租约/两段式 GC（Agent Runtime 闭环） | ✅ |
+| M3 | LLM Gateway：Anthropic 兼容代理（承接 Claude Agent SDK）+ 计费账本 | ✅ |
 | M4 | Gateway + Auth + 用户体系 | ⏳ |
 | M5 | Admin API + Skill Market | ⏳ |
 | M6 | K8s + gVisor Provider | ⏳ |

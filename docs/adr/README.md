@@ -23,3 +23,6 @@ Code shows *what* and *how*. ADRs preserve *why* — invaluable when:
 | # | Title | Status |
 |---|---|---|
 | 0001 | Tech stack: Go + Python hybrid, Next.js frontend | Accepted |
+| 0002 | Sandbox provider abstraction | Accepted |
+| 0003 | Redis-backed session↔sandbox binding with lease + two-stage GC | Accepted |
+| 0004 | LLM gateway as an Anthropic-compatible proxy in front of the Claude Agent SDK, with a metering ledger | Accepted |

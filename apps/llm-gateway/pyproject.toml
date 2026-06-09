@@ -9,11 +9,13 @@ dependencies = [
     "pydantic>=2.7",
     "fastapi>=0.110",
     "uvicorn>=0.29",
+    "redis>=5.0",
 ]
 
 [project.optional-dependencies]
 dev = [
     "pytest>=8.2",
+    "pytest-asyncio>=0.23",
     "ruff>=0.4",
 ]
 
@@ -26,3 +28,6 @@ packages = ["cocola_llm_gateway"]
 
 [tool.uv.sources]
 cocola-common = { path = "../../packages/py-common", editable = true }
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"

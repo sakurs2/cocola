@@ -27,3 +27,6 @@ packages = ["cocola_agent_runtime"]
 
 [tool.uv.sources]
 cocola-common = { path = "../../packages/py-common", editable = true }
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
