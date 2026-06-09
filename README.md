@@ -57,8 +57,17 @@ make dev-up
 make dev-down
 ```
 
-> 当前里程碑：**M0 地基** — 仅包含 monorepo 结构、共享库雏形、本地依赖编排。
-> 业务功能将在 M1 开始逐步落地，详见 `docs/adr/`。
+> 当前里程碑：**M4 Auth + Token 配额** — 已完成 M0–M4。LLM 网关现在校验 cocola
+> 签发的令牌（即 Claude Agent SDK 的 `ANTHROPIC_API_KEY`），并按周期 token 配额
+> 限流。详见 `docs/adr/`。
+>
+> 为员工签发令牌（令牌即 SDK 的 API Key）：
+>
+> ```bash
+> export COCOLA_AUTH_SECRET=<gateway 与签发方共享的密钥>
+> python -m cocola_llm_gateway.issue_token --user emp-12345 --tenant team-platform --ttl-days 30
+> # 启用配额：COCOLA_QUOTA_USER_DAILY_TOKENS / COCOLA_QUOTA_TENANT_MONTHLY_TOKENS
+> ```
 
 ## 路线图
 
@@ -68,7 +77,7 @@ make dev-down
 | M1 | SandboxProvider 抽象 + Docker 实现 | ✅ |
 | M2 | 会话↔沙箱绑定 + 租约/两段式 GC（Agent Runtime 闭环） | ✅ |
 | M3 | LLM Gateway：Anthropic 兼容代理（承接 Claude Agent SDK）+ 计费账本 | ✅ |
-| M4 | Gateway + Auth + 用户体系 | ⏳ |
+| M4 | Auth + Token 配额：cocola 签发令牌即 SDK API Key（HS256 离线校验）+ 周期化 token 配额（按用户日 / 租户月，超额 429） | ✅ |
 | M5 | Admin API + Skill Market | ⏳ |
 | M6 | K8s + gVisor Provider | ⏳ |
 | M7 | 持久化数据分层、Vault 接入 | ⏳ |

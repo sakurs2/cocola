@@ -24,6 +24,11 @@ from __future__ import annotations
 import json
 import os
 from dataclasses import dataclass
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from cocola_llm_gateway.auth.identity import AuthConfig
+    from cocola_llm_gateway.quota.policy import QuotaPolicy
 
 from cocola_common import CocolaError, ErrorCode, get_logger
 from cocola_llm_gateway.registry import ModelRoute, Pricing, Registry
@@ -209,3 +214,46 @@ def gateway_config_from_env() -> GatewayConfig:
         max_retries=int(os.getenv("COCOLA_LLM_MAX_RETRIES", "2")),
         rate_limit_rps=float(os.getenv("COCOLA_LLM_RATE_LIMIT_RPS", "0")),
     )
+
+
+# --------------------------------------------------------------------------- #
+# M4: auth + quota configuration
+# --------------------------------------------------------------------------- #
+
+
+def auth_config_from_env() -> "AuthConfig":
+    """Build AuthConfig from env.
+
+    COCOLA_AUTH_SECRET           HS256 signing secret. Empty => auth disabled
+                                 (everyone resolves to the dev identity).
+    COCOLA_AUTH_ISSUER           expected `iss` claim (default "cocola").
+    COCOLA_AUTH_TOKEN_TTL_SECS   default lifetime when issuing (default 30d).
+    COCOLA_AUTH_DEV_ANON         "1"/"true" => blank token -> dev identity even
+                                 when a secret is set (local convenience only).
+    """
+    from cocola_llm_gateway.auth.identity import AuthConfig
+
+    return AuthConfig(
+        secret=os.getenv("COCOLA_AUTH_SECRET", "").strip(),
+        issuer=os.getenv("COCOLA_AUTH_ISSUER", "cocola").strip() or "cocola",
+        default_ttl_s=int(os.getenv("COCOLA_AUTH_TOKEN_TTL_SECS", str(30 * 24 * 3600))),
+        dev_allow_anonymous=_envflag("COCOLA_AUTH_DEV_ANON"),
+    )
+
+
+def quota_policy_from_env() -> "QuotaPolicy":
+    """Build QuotaPolicy from env. A limit of 0 disables that layer.
+
+    COCOLA_QUOTA_USER_DAILY_TOKENS     per-user daily token cap (0 => unlimited).
+    COCOLA_QUOTA_TENANT_MONTHLY_TOKENS per-tenant monthly token cap (0 => unlimited).
+    """
+    from cocola_llm_gateway.quota.policy import QuotaPolicy
+
+    return QuotaPolicy(
+        user_daily_tokens=int(os.getenv("COCOLA_QUOTA_USER_DAILY_TOKENS", "0")),
+        tenant_monthly_tokens=int(os.getenv("COCOLA_QUOTA_TENANT_MONTHLY_TOKENS", "0")),
+    )
+
+
+def _envflag(name: str) -> bool:
+    return os.getenv(name, "").strip().lower() in ("1", "true", "yes", "on")

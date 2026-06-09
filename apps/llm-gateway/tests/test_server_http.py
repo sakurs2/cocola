@@ -3,10 +3,8 @@
 These are the regression guard for the streaming/non-streaming billing bug:
 both paths MUST write exactly one usage record per call.
 """
-import json
 
 import httpx
-import pytest
 
 from cocola_llm_gateway.server import create_app
 from tests.conftest import build_service

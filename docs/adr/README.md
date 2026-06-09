@@ -26,3 +26,4 @@ Code shows *what* and *how*. ADRs preserve *why* — invaluable when:
 | 0002 | Sandbox provider abstraction | Accepted |
 | 0003 | Redis-backed session↔sandbox binding with lease + two-stage GC | Accepted |
 | 0004 | LLM gateway as an Anthropic-compatible proxy in front of the Claude Agent SDK, with a metering ledger | Accepted |
+| 0005 | Identity as a cocola-signed token (the SDK's API key) + period-windowed token quota | Accepted |
