@@ -41,9 +41,13 @@ from cocola_llm_gateway.config import (
 from cocola_llm_gateway.middleware import ResiliencePolicy
 from cocola_llm_gateway.quota import (
     Enforcer,
+    MemoryOverrideStore,
     MemoryQuotaStore,
+    OverrideStore,
     QuotaStore,
+    RedisOverrideStore,
     RedisQuotaStore,
+    TTLCachedOverrides,
 )
 from cocola_llm_gateway.quota.policy import QuotaPolicy
 from cocola_llm_gateway.service import GatewayService
@@ -69,17 +73,41 @@ def build_quota_store() -> QuotaStore:
     return MemoryQuotaStore()
 
 
+def build_override_store() -> OverrideStore | None:
+    """Build the per-subject quota override store.
+
+    Mirrors the quota store selection: a shared Redis hash in production (the
+    admin-api writes it on PUT /admin/quotas, every gateway replica reads it), an
+    in-process table for single-process dev. A tiny TTL cache keeps the quota
+    path off the backend most of the time.
+    """
+    url = os.getenv("COCOLA_LLM_REDIS_URL", "").strip()
+    if url:
+        log.info("quota overrides: redis", url=url)
+        inner: OverrideStore = RedisOverrideStore.from_url(url)
+    else:
+        log.info("quota overrides: in-memory (set COCOLA_LLM_REDIS_URL to share fleet-wide)")
+        inner = MemoryOverrideStore()
+    ttl = float(os.getenv("COCOLA_QUOTA_OVERRIDE_CACHE_TTL_SECS", "5"))
+    return TTLCachedOverrides(inner, ttl_s=ttl)
+
+
 def build_enforcer(policy: QuotaPolicy | None = None) -> Enforcer | None:
     policy = policy or quota_policy_from_env()
-    if not policy.any_enabled:
+    overrides = build_override_store()
+    # With overrides wired the enforcer is useful even when no static cap is set:
+    # an operator can cap a single subject the env default leaves unlimited. Only
+    # skip entirely when there are neither static caps nor an override source.
+    if not policy.any_enabled and overrides is None:
         log.info("quota: disabled (no token caps configured)")
         return None
     log.info(
         "quota: enabled",
         user_daily=policy.user_daily_tokens,
         tenant_monthly=policy.tenant_monthly_tokens,
+        overrides=overrides is not None,
     )
-    return Enforcer(policy, build_quota_store())
+    return Enforcer(policy, build_quota_store(), overrides=overrides)
 
 
 def build_service() -> GatewayService:

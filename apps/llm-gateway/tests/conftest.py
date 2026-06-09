@@ -35,11 +35,15 @@ def build_service(reply="hello world from fake", *, enforcer=None):
     return svc, ledger
 
 
-def build_enforcer(*, user_daily=0, tenant_monthly=0):
-    """A MemoryQuotaStore-backed enforcer. Returns (enforcer, store)."""
+def build_enforcer(*, user_daily=0, tenant_monthly=0, overrides=None):
+    """A MemoryQuotaStore-backed enforcer. Returns (enforcer, store).
+
+    `overrides` is an optional OverrideStore wired in to exercise per-subject
+    quota overrides through the HTTP layer.
+    """
     pol = QuotaPolicy(user_daily_tokens=user_daily, tenant_monthly_tokens=tenant_monthly)
     store = MemoryQuotaStore()
-    return Enforcer(pol, store), store
+    return Enforcer(pol, store, overrides=overrides), store
 
 
 def auth_pair(secret="test-secret", **kw):

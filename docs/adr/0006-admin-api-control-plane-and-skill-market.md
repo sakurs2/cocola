@@ -87,8 +87,9 @@ two endpoints.
 override; `GET`/`DELETE` round it out. This is the data the gateway's quota
 `Enforcer` (ADR-0005) reads to **supersede its static env caps per
 user/tenant** — the dynamic-quota follow-up. M5 owns the authoritative override
-store + API; the gateway reading overrides (with a Redis cache) joins the
-denylist consumption in M6, after M7 makes the store durable.
+store + API; the gateway now *reads* those overrides on the quota path (with a
+small TTL cache) — see the quota-override addendum below. The deferral note that
+stood here is superseded; the consumption side shipped with the override seam.
 
 ### Skill-Market as an admin-owned catalog
 
@@ -205,3 +206,54 @@ only within a process. Pointing both at the same Redis (admin-api writes on
 `DELETE /admin/tokens/{id}`, gateways read via `RedisRevocationStore`) makes a
 revoke take effect fleet-wide — the wiring is in place (`COCOLA_LLM_REDIS_URL`),
 the durability decision is M7's.
+
+
+## Addendum: dynamic quota-override consumption (gateway reads the source of truth)
+
+The original M5 shipped the override's *source of truth* (`PUT/GET/DELETE
+/admin/quotas` above) but left the gateway-side *consumption* for M6. That half
+is now done, closing ADR-0005's dynamic-quota follow-up end to end: an admin
+override now actually changes what the gateway enforces, per subject.
+
+The contract that bridges the two sides is the override's tri-state answer,
+matched on both sides:
+
+- **no override -> `None`** -> fall back to the static env cap (QuotaPolicy
+  default for that scope),
+- **override `N>0`** -> the per-subject cap,
+- **override `0`** -> *explicitly unlimited* for that subject.
+
+This mirrors the Go `QuotaOverride` exactly (a `Limit` of 0 means "explicitly
+unlimited") and the policy's existing `limit <= 0 == unlimited`. The Python
+return type is `int | None`: `None` and `0` are different answers — `None` says
+"I have nothing to say, use the default"; `0` says "this subject is uncapped".
+
+On the gateway side a new `OverrideStore` seam mirrors the `QuotaStore` /
+`RevocationStore` pattern (Protocol + `MemoryOverrideStore` +
+`RedisOverrideStore`, the latter a single HASH `cocola:quota:override` keyed
+`scope/subject`), wrapped by `TTLCachedOverrides` so the per-request lookup is an
+in-process dict hit most of the time, with a few-seconds staleness bound. The
+cache stores both "has an override" and "no override", so an uncapped subject
+does not hit the backend on every call.
+
+The `Enforcer` (ADR-0005) gained an optional `overrides` field. Before checking
+or committing a layer it resolves the *effective* limit via `_limit_for(scope,
+subject, default)`: the override if present, else the static default. A subtle
+consequence is that overrides can **enable a cap the static policy leaves
+unlimited**, so the enforcer can no longer short-circuit on the policy alone —
+`_maybe_active` is `policy.any_enabled or overrides is not None`. Each layer is
+still enforced only when its effective `limit > 0`, so an override of `0`
+correctly disables that layer for the subject.
+
+`scripts/admin-quota-override-e2e.py` is the acceptance proof: a token **minted
+in Go** is attributed to a subject; with no static cap and no override the
+subject is unlimited; an admin override of `5` then caps it (first call `200`,
+next `429`); raising it to `100000` lets calls pass and `/v1/quota` reports the
+override limit; an override of `0` marks the subject explicitly unlimited again.
+
+What remains for M6/M7 is the **shared backend** (the same gap as the denylist):
+today the admin-api's override store and the gateway's `OverrideStore` are
+separate in-memory stores. Pointing both at the same Redis (admin-api writes on
+`PUT /admin/quotas`, gateways read via `RedisOverrideStore`) makes an override
+take effect fleet-wide — the wiring is in place (`COCOLA_LLM_REDIS_URL` plus
+`COCOLA_QUOTA_OVERRIDE_CACHE_TTL_SECS`), the durability decision is M7's.

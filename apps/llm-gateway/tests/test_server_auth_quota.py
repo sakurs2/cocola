@@ -1,6 +1,7 @@
 """HTTP-level auth + quota tests over httpx.ASGITransport (in-process)."""
 import httpx
 
+from cocola_llm_gateway.quota import MemoryOverrideStore
 from cocola_llm_gateway.server import create_app
 from tests.conftest import auth_pair, build_enforcer, build_service
 
@@ -155,3 +156,36 @@ async def test_disabled_auth_allows_anonymous():
     async with _client(create_app(svc)) as c:  # no verifier => disabled
         r = await c.post("/v1/messages", json=_MSG)
         assert r.status_code == 200
+
+
+async def test_per_subject_override_enforced_over_http():
+    # No static cap, but an override caps emp-vip to a tiny budget. The first
+    # call overshoots; the second is rejected with 429.
+    ov = MemoryOverrideStore({("user", "emp-vip"): 5})
+    enf, _ = build_enforcer(overrides=ov)  # no static caps
+    svc, _ = build_service(reply="well over five tokens of reply text here", enforcer=enf)
+    iss, vrf = auth_pair()
+    tok = iss.issue("emp-vip")
+    async with _client(create_app(svc, verifier=vrf)) as c:
+        r1 = await c.post("/v1/messages", json=_MSG, headers={"x-api-key": tok})
+        assert r1.status_code == 200
+        r2 = await c.post("/v1/messages", json=_MSG, headers={"x-api-key": tok})
+        assert r2.status_code == 429
+        assert r2.json()["error"]["scope"] == "user"
+
+
+async def test_override_supersedes_static_cap_over_http():
+    # Static default would cap at 5; an override lifts emp-rich to a high cap so
+    # repeated calls all pass and /v1/quota reports the override limit.
+    ov = MemoryOverrideStore({("user", "emp-rich"): 100000})
+    enf, _ = build_enforcer(user_daily=5, overrides=ov)
+    svc, _ = build_service(reply="hello world", enforcer=enf)
+    iss, vrf = auth_pair()
+    tok = iss.issue("emp-rich")
+    async with _client(create_app(svc, verifier=vrf)) as c:
+        for _ in range(3):
+            r = await c.post("/v1/messages", json=_MSG, headers={"x-api-key": tok})
+            assert r.status_code == 200
+        q = await c.get("/v1/quota", headers={"x-api-key": tok})
+        scopes = {sc["scope"]: sc for sc in q.json()["scopes"]}
+        assert scopes["user"]["limit"] == 100000
