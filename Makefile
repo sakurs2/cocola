@@ -102,6 +102,24 @@ sandbox-e2e: ## Full M1 smoke test: Go CLI + Python runtime demos
 sandbox-m2-e2e: ## M2 acceptance: 50-session concurrency bench (needs Redis)
 	scripts/sandbox-m2-e2e.sh
 
+# -------------------------------------------------------------------- dev stack
+# One-click local app stack (NOT the infra in dev-up; that is PostgreSQL/Redis/
+# MinIO). `up` boots agent-runtime + gateway with the EchoProvider so a
+# zero-config `make up` serves the full SSE path. Flags layer on the rest:
+#   make up           agent-runtime + gateway (Echo)
+#   make up-web       + the browser test tool (:3000)
+#   make up-all       + llm-gateway (real Claude Agent SDK path) + web
+# All run in the foreground; Ctrl-C tears every child down (trap cleanup).
+.PHONY: up up-web up-all
+up: ## Boot local app stack: agent-runtime + gateway (Echo)
+	bash scripts/run-stack.sh
+
+up-web: ## ... + the Next.js browser test tool on :3000
+	bash scripts/run-stack.sh --with-web
+
+up-all: ## ... + llm-gateway (real SDK path) + web
+	bash scripts/run-stack.sh --all
+
 # -------------------------------------------------------------------- aggregate
 .PHONY: install test lint clean
 install: go-tidy py-install web-install ## Install all deps

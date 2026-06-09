@@ -62,3 +62,6 @@ packages/proto/gen/**/__pycache__/
 .data/
 tmp/
 *.log
+
+# run-stack.sh per-service logs (local dev stack)
+.run-logs/

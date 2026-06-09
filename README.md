@@ -57,6 +57,25 @@ make dev-up
 make dev-down
 ```
 
+### 一键拉起整套本地应用栈
+
+依赖（数据库等）用 `make dev-up`；**应用进程**用 `make up`。后者由
+`scripts/run-stack.sh` 编排，零配置即拉起 agent-runtime + gateway（回退
+EchoProvider），自动等待端口就绪、签发一个开发令牌、并在 `Ctrl-C` 时一次性
+回收所有子进程（`trap cleanup`）。各服务日志落在 `.run-logs/<服务名>.log`。
+
+```bash
+make up        # agent-runtime + gateway（Echo，零配置，最快验证 SSE 链路）
+make up-web    # + 前端浏览器测试页（:3000，直接粘贴打印出的令牌）
+make up-all    # + llm-gateway（真实 Claude Agent SDK 链路）+ 前端
+```
+
+> 端口约定：gateway BFF 与 llm-gateway 默认都监听 `8080`，编排脚本把
+> llm-gateway 改钉到 `8081`（`COCOLA_LLM_PORT`）并让 agent-runtime 的
+> `COCOLA_LLM_BASE_URL` 指向它，规避端口冲突。需要绑定沙箱时先导出
+> `COCOLA_SANDBOX_ADDR`，脚本会透传给 agent-runtime。
+
+
 > 当前里程碑：**后端 MVP 打通** — 已完成 M0–M5 及端到端后端 MVP。Go 控制面（admin-api）签发 / 吊销 cocola
 > 签发的令牌（即 Claude Agent SDK 的 `ANTHROPIC_API_KEY`），并按周期 token 配额
 > 限流。详见 `docs/adr/`。

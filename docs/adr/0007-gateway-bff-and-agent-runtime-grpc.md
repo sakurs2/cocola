@@ -178,3 +178,23 @@ rather than inventing a tool transport:
   the right args, results map to the SDK shape, and failures become tool errors
   without raising. Provider tests assert the server mounts only when both executor
   and bound sandbox are present. No subprocess, no socket, no model.
+
+
+## Local orchestration (`make up`)
+
+The two-process topology above is wired together for local dev by
+`scripts/run-stack.sh` (Makefile: `up` / `up-web` / `up-all`). It is a foreground
+process supervisor, not a daemon: it starts each service in its own process group
+(`setsid`), waits on the listen port with `nc -z` before moving on, mints a dev
+token via `admin-mint`, and on `Ctrl-C` kills every child group via a single
+`trap cleanup EXIT INT TERM`. Logs are split per service under `.run-logs/`.
+
+Two seams matter. First, the **port-8080 collision**: the gateway BFF and the
+llm-gateway both default to 8080, so the orchestrator pins llm-gateway to 8081
+(`COCOLA_LLM_PORT`) and points agent-runtime's `COCOLA_LLM_BASE_URL` at it.
+Second, **progressive enablement** mirrors the composition-root switches:
+`make up` boots only agent-runtime + gateway (EchoProvider, zero config);
+`--with-llm` adds the real Claude Agent SDK path; `--with-web` adds the Step-4
+browser test tool; an exported `COCOLA_SANDBOX_ADDR` is passed through so the same
+single command can exercise the bound-sandbox tool path. This keeps "clone and
+run one command" true without baking any service into an always-on dependency.
