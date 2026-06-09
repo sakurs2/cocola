@@ -102,7 +102,9 @@ class Verifier:
             raise JWTError("missing bearer token")
 
         claims = _jwt.decode(token, self._cfg.secret, now=now)
-        if self._cfg.issuer and claims.get("iss") not in (None, self._cfg.issuer):
+        # If an issuer is configured, the token MUST carry a matching `iss`.
+        # A missing `iss` is rejected too: no bare-/foreign-token exemption.
+        if self._cfg.issuer and claims.get("iss") != self._cfg.issuer:
             raise JWTError("issuer mismatch")
         sub = claims.get("sub") or ""
         if not sub:

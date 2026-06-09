@@ -102,6 +102,22 @@ def test_issuer_mismatch_rejected():
         vrf.verify(tok)
 
 
+def test_missing_issuer_claim_rejected_when_issuer_configured():
+    # A validly-signed token with NO `iss` claim must be rejected when the
+    # verifier is configured with an issuer (no bare-token exemption).
+    vrf = Verifier(AuthConfig(secret="s", issuer="cocola"))
+    tok = _jwt.encode({"sub": "emp-1", "iat": 1000}, "s")  # note: no `iss`
+    with pytest.raises(JWTError):
+        vrf.verify(tok)
+
+
+def test_no_issuer_configured_accepts_any_iss():
+    # When the verifier has no issuer configured, the iss check is skipped.
+    vrf = Verifier(AuthConfig(secret="s", issuer=""))
+    tok = _jwt.encode({"sub": "emp-1", "iss": "whoever"}, "s")
+    assert vrf.verify(tok).user_id == "emp-1"
+
+
 def test_non_expiring_token():
     iss, vrf = _pair()
     tok = iss.issue("emp-1", ttl_s=0)

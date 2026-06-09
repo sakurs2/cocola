@@ -100,6 +100,46 @@ async def test_no_quota_means_unlimited():
         assert q.json()["scopes"] == []
 
 
+async def test_usage_requires_token_when_auth_enabled():
+    svc, _ = build_service()
+    _, vrf = auth_pair()
+    async with _client(create_app(svc, verifier=vrf)) as c:
+        r = await c.get("/v1/usage")  # no token
+        assert r.status_code == 401
+        assert r.json()["error"]["type"] == "authentication_error"
+
+
+async def test_usage_only_returns_own_records_when_auth_enabled():
+    # emp-A spends; emp-B must not be able to read emp-A's usage by passing
+    # ?user_id=emp-A — the verified token is authoritative.
+    svc, _ = build_service(reply="hello world")
+    iss, vrf = auth_pair()
+    tok_a = iss.issue("emp-A")
+    tok_b = iss.issue("emp-B")
+    async with _client(create_app(svc, verifier=vrf)) as c:
+        await c.post("/v1/messages", json=_MSG, headers={"x-api-key": tok_a})
+        # emp-B tries to peek at emp-A's usage via the query param.
+        r = await c.get("/v1/usage?user_id=emp-A", headers={"x-api-key": tok_b})
+        assert r.status_code == 200
+        body = r.json()
+        # Scoped to emp-B (the token subject): no emp-A records leak through.
+        assert body["recent"] == []
+        assert body["user_aggregate"]["calls"] == 0
+        # emp-A reads their own usage and sees the call.
+        r2 = await c.get("/v1/usage?user_id=ignored", headers={"x-api-key": tok_a})
+        assert r2.json()["user_aggregate"]["calls"] == 1
+
+
+async def test_usage_honors_query_user_when_auth_disabled():
+    # Back-compat: with auth OFF, the query param still selects the subject.
+    svc, _ = build_service(reply="x")
+    async with _client(create_app(svc)) as c:  # no verifier => disabled
+        await c.post("/v1/messages", json=_MSG, headers={"x-cocola-user": "legacy-u"})
+        r = await c.get("/v1/usage?user_id=legacy-u")
+        assert r.status_code == 200
+        assert r.json()["user_aggregate"]["calls"] == 1
+
+
 async def test_healthz_reports_auth_state():
     svc, _ = build_service()
     _, vrf = auth_pair()

@@ -147,7 +147,19 @@ def create_app(service: GatewayService, *, verifier: Verifier | None = None) -> 
 
     @app.get("/v1/usage")
     async def usage(request: Request):
-        user_id = request.query_params.get("user_id", "")
+        # Billing reads expose token usage, so they require identity. A caller
+        # may only read their OWN usage; with auth ENABLED the verified token is
+        # authoritative and any client-supplied user_id is ignored. Cross-user /
+        # admin reads are deferred to the admin-api (M5). With auth disabled
+        # (dev), honor the query param for back-compat with existing dev flows.
+        try:
+            identity = _identity(request)
+        except JWTError as e:
+            return _auth_err(str(e))
+        if vrf.config.enabled:
+            user_id = identity.user_id
+        else:
+            user_id = request.query_params.get("user_id", "") or identity.user_id
         session_id = request.query_params.get("session_id", "")
         limit = int(request.query_params.get("limit", "20"))
         recent = await service.ledger.recent(user_id=user_id, limit=limit)

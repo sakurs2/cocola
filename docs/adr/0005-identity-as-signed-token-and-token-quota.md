@@ -73,10 +73,14 @@ cost actually becomes known:
   user's response.
 
 Because the exact cost of a request is unknown until it finishes, a request is
-allowed to *start* as long as the subject is under cap; it may overshoot once,
-and the *next* request is then blocked. For an internal employee budget this is
-the right trade-off — it needs **no pre-hold and no debiting**, just an integer
-counter and a comparison.
+allowed to *start* as long as the subject is under cap; the *next* request is
+then blocked. Overshoot is bounded by concurrency, not fixed at one: a single
+serial caller overshoots by at most one request's tokens, but N requests racing
+through `check` before any `commit` lands can overshoot by up to ~N requests'
+worth. For an internal employee budget this is the right trade-off — it needs
+**no pre-hold and no debiting**, just an integer counter and a comparison. If
+tight per-request enforcement is ever required, the seam can move to an atomic
+check-and-reserve.
 
 Two independent layers, either of which is disabled when its limit is ≤ 0:
 
@@ -143,8 +147,9 @@ invalid token is rejected with **401**.
   attributed to a real employee/team; over-budget callers are stopped with a
   spec-compliant 429 the SDK understands; quotas roll over automatically; the
   whole path stays hermetically testable; zero-config dev boots still work.
-- **Negative:** a single request may overshoot its cap by up to one call's worth
-  of tokens (accepted by design); HS256 means the signing secret must be shared
+- **Negative:** a caller may overshoot its cap by up to the tokens of whatever
+  requests are in flight (one for a serial caller, ~N under N-way concurrency;
+  accepted by design); HS256 means the signing secret must be shared
   by issuer and gateway (fine while both are cocola); quota is configured
   statically via env today (no runtime/per-user override yet).
 - **Follow-ups:**

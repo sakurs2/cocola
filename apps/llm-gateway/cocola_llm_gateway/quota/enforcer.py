@@ -7,10 +7,14 @@ The two-phase shape mirrors how token usage actually becomes known:
       (monthly). If either is already at/over its cap, raise QuotaExceeded so the
       HTTP layer can return 429 *before* opening an upstream stream. Because the
       exact token cost of a request isn't known until it completes, we permit a
-      request to start as long as the subject is still under cap — a single
-      request may overshoot slightly, then the next one is blocked. For an
-      internal employee budget this is the right trade-off (no pre-hold, no
-      debiting, simple and predictable).
+      request to start as long as the subject is still under cap, then the next
+      one is blocked. Overshoot is therefore bounded by what is in flight: a
+      single serial caller overshoots by at most one request's tokens, while N
+      concurrent requests can all pass `check` before any `commit` lands and
+      overshoot by up to ~N requests' worth. For an internal employee budget
+      this is the right trade-off (no pre-hold, no debiting, simple and
+      predictable); if tight per-request enforcement is ever needed, switch to
+      an atomic check-and-reserve.
 
   commit(identity, tokens)  -- AFTER the call, from the metering hook.
       Atomically adds the real total tokens to both counters. Best-effort: a
