@@ -102,7 +102,7 @@ class RedisOverrideStore:
         self._key = key
 
     @classmethod
-    def from_url(cls, url: str) -> "RedisOverrideStore":
+    def from_url(cls, url: str) -> RedisOverrideStore:
         from redis import asyncio as aioredis
 
         client = aioredis.from_url(url, encoding="utf-8", decode_responses=True)
@@ -150,9 +150,7 @@ class TTLCachedOverrides:
         self._cache: dict[str, tuple[int | None, float]] = {}
         self._lock = asyncio.Lock()
 
-    async def get(
-        self, scope: str, subject: str, *, now: float | None = None
-    ) -> int | None:
+    async def get(self, scope: str, subject: str, *, now: float | None = None) -> int | None:
         if not subject:
             return None
         k = _key(scope, subject)

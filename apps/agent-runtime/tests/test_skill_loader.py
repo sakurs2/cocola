@@ -7,6 +7,7 @@ survive the defensive re-filter, (c) any transport/parse error degrades to an
 empty list instead of breaking session startup, and (d) the system-prompt
 preamble renders (and stays empty when there are no skills).
 """
+
 import json
 
 from cocola_agent_runtime.agent_provider import AgentOptions
@@ -99,10 +100,12 @@ def test_preamble_empty_when_no_skills():
 
 
 def test_preamble_renders_enabled():
-    out = skills_system_preamble([
-        Skill(id="web", name="Web Search", version="1.2", description="search the web"),
-        Skill(id="calc", name=""),
-    ])
+    out = skills_system_preamble(
+        [
+            Skill(id="web", name="Web Search", version="1.2", description="search the web"),
+            Skill(id="calc", name=""),
+        ]
+    )
     assert "Web Search v1.2" in out
     assert "search the web" in out
     assert "- calc" in out

@@ -39,7 +39,6 @@ from cocola_agent_runtime.claude_sdk_provider import (  # noqa: E402
     ClaudeAgentSDKProvider,
     ClaudeSDKConfig,
 )
-
 from cocola_llm_gateway.server import create_app  # noqa: E402
 from tests.conftest import auth_pair, build_service  # noqa: E402
 
@@ -91,23 +90,17 @@ def _sdk_query_via_gateway(app, provider):
         async with httpx.AsyncClient(transport=asgi, base_url=base_url) as c:
             r = await c.post("/v1/messages", json=body, headers={"x-api-key": api_key})
         if r.status_code != 200:
-            yield AssistantMessage(
-                content=[], error=f"gateway {r.status_code}: {r.text}"
-            )
+            yield AssistantMessage(content=[], error=f"gateway {r.status_code}: {r.text}")
             return
         payload = r.json()
         text = "".join(
-            b.get("text", "")
-            for b in payload.get("content", [])
-            if b.get("type") == "text"
+            b.get("text", "") for b in payload.get("content", []) if b.get("type") == "text"
         )
         yield AssistantMessage(
             content=[TextBlock(text)],
             model=payload.get("model", provider._config.model),
         )
-        yield ResultMessage(
-            num_turns=1, session_id=payload.get("id", "S1"), result=text
-        )
+        yield ResultMessage(num_turns=1, session_id=payload.get("id", "S1"), result=text)
 
     return fake_query
 
@@ -151,9 +144,7 @@ async def test_gateway_rejects_unsigned_token_surfaces_error():
     _, vrf = auth_pair()  # auth ENABLED
     app = create_app(svc, verifier=vrf)
 
-    prov = _provider_wired_to(
-        app, base_url="http://cocola-gateway:8080", token="bogus.token.sig"
-    )
+    prov = _provider_wired_to(app, base_url="http://cocola-gateway:8080", token="bogus.token.sig")
     opts = AgentOptions(user_id="x", session_id="S1")
     events = [(e.kind, e.data) async for e in prov.query("hi", opts)]
     kinds = [k for k, _ in events]
@@ -169,9 +160,7 @@ async def test_gateway_rejects_unsigned_token_surfaces_error():
 def test_env_injection_matches_config():
     # The env-layer half of the contract: base_url -> ANTHROPIC_BASE_URL and the
     # cocola token -> ANTHROPIC_API_KEY (never a real Anthropic key).
-    cfg = ClaudeSDKConfig(
-        base_url="http://gw:8080", model="default", api_key="cocola-tok"
-    )
+    cfg = ClaudeSDKConfig(base_url="http://gw:8080", model="default", api_key="cocola-tok")
     prov = ClaudeAgentSDKProvider(cfg, query_fn=lambda **kw: iter(()))
     env = prov._build_env()
     assert env["ANTHROPIC_BASE_URL"] == "http://gw:8080"

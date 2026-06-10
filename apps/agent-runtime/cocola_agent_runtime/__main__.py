@@ -45,9 +45,7 @@ log = get_logger("cocola.agent-runtime")
 def _build_provider(executor: SandboxExecutor | None) -> AgentProvider:
     base_url = os.getenv("COCOLA_LLM_BASE_URL", "").strip()
     if not base_url:
-        log.warning(
-            "COCOLA_LLM_BASE_URL unset; using EchoProvider (no real model calls)"
-        )
+        log.warning("COCOLA_LLM_BASE_URL unset; using EchoProvider (no real model calls)")
         return EchoProvider()
     # Imported lazily so an Echo boot needs neither the SDK nor the CLI present.
     from cocola_agent_runtime.claude_sdk_provider import (

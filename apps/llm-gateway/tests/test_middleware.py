@@ -1,12 +1,22 @@
 from collections.abc import AsyncIterator
 
 from cocola_llm_gateway.middleware import ResiliencePolicy, ResilientStreamer
-from cocola_llm_gateway.types import ChatMessage, ChatParams, ChatRequest, StreamEvent, StreamEventType
+from cocola_llm_gateway.types import (
+    ChatMessage,
+    ChatParams,
+    ChatRequest,
+    StreamEvent,
+    StreamEventType,
+)
 
 
 def _req(user="U1"):
-    return ChatRequest(model="m", messages=[ChatMessage(role="user", content="hi")],
-                       params=ChatParams(), user_id=user)
+    return ChatRequest(
+        model="m",
+        messages=[ChatMessage(role="user", content="hi")],
+        params=ChatParams(),
+        user_id=user,
+    )
 
 
 class _Provider:
@@ -34,11 +44,15 @@ async def _drain(streamer, req):
 
 
 async def test_passthrough_success():
-    p = _Provider([[
-        StreamEvent(StreamEventType.MESSAGE_START),
-        StreamEvent(StreamEventType.CONTENT_DELTA, text="ok"),
-        StreamEvent(StreamEventType.MESSAGE_STOP),
-    ]])
+    p = _Provider(
+        [
+            [
+                StreamEvent(StreamEventType.MESSAGE_START),
+                StreamEvent(StreamEventType.CONTENT_DELTA, text="ok"),
+                StreamEvent(StreamEventType.MESSAGE_STOP),
+            ]
+        ]
+    )
     s = ResilientStreamer(p, ResiliencePolicy(max_retries=2))
     out = await _drain(s, _req())
     assert p.calls == 1
@@ -46,12 +60,16 @@ async def test_passthrough_success():
 
 
 async def test_retry_before_first_byte_then_recovers():
-    p = _Provider([
-        [StreamEvent(StreamEventType.ERROR, error="boom", code="x")],
-        [StreamEvent(StreamEventType.MESSAGE_START),
-         StreamEvent(StreamEventType.CONTENT_DELTA, text="ok"),
-         StreamEvent(StreamEventType.MESSAGE_STOP)],
-    ])
+    p = _Provider(
+        [
+            [StreamEvent(StreamEventType.ERROR, error="boom", code="x")],
+            [
+                StreamEvent(StreamEventType.MESSAGE_START),
+                StreamEvent(StreamEventType.CONTENT_DELTA, text="ok"),
+                StreamEvent(StreamEventType.MESSAGE_STOP),
+            ],
+        ]
+    )
     s = ResilientStreamer(p, ResiliencePolicy(max_retries=2, backoff_base_s=0))
     out = await _drain(s, _req())
     assert p.calls == 2
@@ -69,11 +87,15 @@ async def test_retry_exhaustion_surfaces_error():
 
 async def test_no_retry_after_content_emitted():
     # MESSAGE_START counts as produced content -> a later ERROR is NOT retried.
-    p = _Provider([[
-        StreamEvent(StreamEventType.MESSAGE_START),
-        StreamEvent(StreamEventType.CONTENT_DELTA, text="partial"),
-        StreamEvent(StreamEventType.ERROR, error="mid", code="x"),
-    ]])
+    p = _Provider(
+        [
+            [
+                StreamEvent(StreamEventType.MESSAGE_START),
+                StreamEvent(StreamEventType.CONTENT_DELTA, text="partial"),
+                StreamEvent(StreamEventType.ERROR, error="mid", code="x"),
+            ]
+        ]
+    )
     s = ResilientStreamer(p, ResiliencePolicy(max_retries=5, backoff_base_s=0))
     out = await _drain(s, _req())
     assert p.calls == 1  # never retried mid-stream
@@ -81,10 +103,14 @@ async def test_no_retry_after_content_emitted():
 
 
 async def test_rate_limit_blocks_second_call():
-    p = _Provider([[
-        StreamEvent(StreamEventType.MESSAGE_START),
-        StreamEvent(StreamEventType.MESSAGE_STOP),
-    ]])
+    p = _Provider(
+        [
+            [
+                StreamEvent(StreamEventType.MESSAGE_START),
+                StreamEvent(StreamEventType.MESSAGE_STOP),
+            ]
+        ]
+    )
     # rate 1 rps, burst 1: first allowed, immediate second denied.
     s = ResilientStreamer(p, ResiliencePolicy(rate_limit_rps=1, rate_burst=1))
     out1 = await _drain(s, _req("U1"))

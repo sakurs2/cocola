@@ -9,6 +9,7 @@ increment that also (re)applies the window TTL so the key disappears after the
 period ends — rollover needs no cron. `get` is a cheap read used both for the
 pre-call check and the `/v1/quota` ops surface.
 """
+
 from __future__ import annotations
 
 import asyncio
@@ -30,8 +31,7 @@ class QuotaStore(Protocol):
         """
         ...
 
-    async def aclose(self) -> None:
-        ...
+    async def aclose(self) -> None: ...
 
 
 class MemoryQuotaStore:
@@ -70,7 +70,7 @@ class RedisQuotaStore:
         self._r = client
 
     @classmethod
-    def from_url(cls, url: str) -> "RedisQuotaStore":
+    def from_url(cls, url: str) -> RedisQuotaStore:
         from redis import asyncio as aioredis
 
         client = aioredis.from_url(url, encoding="utf-8", decode_responses=True)

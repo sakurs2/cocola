@@ -34,9 +34,9 @@ import json
 import pathlib
 import shutil
 import tempfile
-from collections.abc import AsyncIterator
+from collections.abc import AsyncIterator, Callable
 from dataclasses import dataclass, field
-from typing import Any, Callable, Optional
+from typing import Any
 
 from cocola_agent_runtime.agent_provider import AgentEvent, AgentOptions
 from cocola_agent_runtime.sandbox_binder import SandboxExecutor
@@ -78,11 +78,11 @@ class ClaudeAgentSDKProvider:
         self,
         config: ClaudeSDKConfig,
         *,
-        query_fn: Optional[QueryFn] = None,
-        executor: Optional["SandboxExecutor"] = None,
+        query_fn: QueryFn | None = None,
+        executor: SandboxExecutor | None = None,
     ):
         self._config = config
-        self._iso_config_dir: Optional[str] = None
+        self._iso_config_dir: str | None = None
         # When set, the agent's bash/file tools are routed into the session's
         # bound sandbox via an in-process MCP server (see sandbox_tools). When
         # None, the agent runs with only its built-in tools (no sandbox IO).
@@ -168,9 +168,7 @@ class ClaudeAgentSDKProvider:
                 build_sandbox_mcp_server,
             )
 
-            server, allowed = build_sandbox_mcp_server(
-                self._executor, options.sandbox_id
-            )
+            server, allowed = build_sandbox_mcp_server(self._executor, options.sandbox_id)
             kwargs["mcp_servers"] = {SERVER_NAME: server}
             kwargs["allowed_tools"] = allowed
         return claude_agent_sdk.ClaudeAgentOptions(**kwargs)
@@ -247,11 +245,7 @@ def _block_to_events(block: Any) -> list[AgentEvent]:
     if cls == "TextBlock":
         return [AgentEvent(kind="text", data={"text": getattr(block, "text", "")})]
     if cls == "ThinkingBlock":
-        return [
-            AgentEvent(
-                kind="thinking", data={"thinking": getattr(block, "thinking", "")}
-            )
-        ]
+        return [AgentEvent(kind="thinking", data={"thinking": getattr(block, "thinking", "")})]
     if cls == "ToolUseBlock":
         return [
             AgentEvent(

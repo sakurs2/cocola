@@ -1,4 +1,5 @@
 """Canonical error envelope for Python services. Mirrors go-common/errors."""
+
 from __future__ import annotations
 
 from enum import Enum

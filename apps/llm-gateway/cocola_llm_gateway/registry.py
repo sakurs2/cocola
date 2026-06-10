@@ -19,11 +19,13 @@ The registry holds provider *instances*; the composition root (config.build_*)
 constructs the concrete providers and hands them in. The registry never imports
 a concrete provider class — it depends only on the UpstreamProvider Protocol.
 """
+
 from __future__ import annotations
 
 from dataclasses import dataclass, field
 
 from cocola_common import CocolaError, ErrorCode
+
 from cocola_llm_gateway.upstream.base import UpstreamProvider
 
 

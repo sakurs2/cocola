@@ -51,8 +51,8 @@ services:
       MINIO_ROOT_USER: cocola
       MINIO_ROOT_PASSWORD: cocola_dev_pw
     ports:
-      - "9000:9000"   # S3 API
-      - "9001:9001"   # web console
+      - "9000:9000" # S3 API
+      - "9001:9001" # web console
     volumes:
       - miniodata:/data
     healthcheck:

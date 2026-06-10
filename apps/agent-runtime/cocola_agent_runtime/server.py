@@ -143,7 +143,5 @@ class AgentRuntimeServicer(pb_grpc.AgentRuntimeServiceServicer):
             async for event in self._provider.query(request.prompt, opts):
                 await context.write(event_to_proto(event))
         except Exception as exc:  # noqa: BLE001 - turn any provider fault into a clean terminal event
-            log.warning(
-                "agent query failed", session_id=request.session_id, error=str(exc)
-            )
+            log.warning("agent query failed", session_id=request.session_id, error=str(exc))
             await context.write(pb.AgentEvent(kind="error", data={"error": str(exc)}))

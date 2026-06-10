@@ -13,6 +13,7 @@ Exit codes: 0 ok, 2 usage/secret error.
 This is the M4 issuance path. A future admin-api HTTP endpoint (Go) will wrap the
 same Issuer for self-service token minting (see roadmap follow-ups).
 """
+
 from __future__ import annotations
 
 import argparse

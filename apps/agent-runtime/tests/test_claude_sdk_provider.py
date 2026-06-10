@@ -5,6 +5,7 @@ messages (duck-typed by class name) and we assert they map to the runtime's
 generic AgentEvent vocabulary. This keeps the test hermetic — no subprocess,
 no network, no model.
 """
+
 from dataclasses import dataclass, field
 
 from cocola_agent_runtime.agent_provider import AgentOptions
@@ -73,12 +74,14 @@ async def test_maps_text_and_appends_done():
 
 
 async def test_maps_tool_use_and_thinking():
-    msg = AssistantMessage(content=[
-        ThinkingBlock(thinking="hmm"),
-        ToolUseBlock(id="t1", name="bash", input={"cmd": "ls"}),
-        TextBlock("after tool"),
-    ])
-    out = await _run(prov := _provider([msg]))
+    msg = AssistantMessage(
+        content=[
+            ThinkingBlock(thinking="hmm"),
+            ToolUseBlock(id="t1", name="bash", input={"cmd": "ls"}),
+            TextBlock("after tool"),
+        ]
+    )
+    out = await _run(_provider([msg]))
     kinds = [k for k, _ in out]
     assert kinds == ["thinking", "tool_use", "text", "done"]
     tu = next(d for k, d in out if k == "tool_use")

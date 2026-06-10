@@ -9,8 +9,8 @@ import (
 	"strconv"
 	"time"
 
-	rds "github.com/cocola-project/cocola/packages/go-common/redis"
 	"github.com/cocola-project/cocola/apps/sandbox-manager/internal/provider"
+	rds "github.com/cocola-project/cocola/packages/go-common/redis"
 )
 
 // Config tunes the binder's lifecycle behaviour. Zero values fall back to the
@@ -305,5 +305,13 @@ func (b *Binder) unbind(ctx context.Context, sessionID, sandboxID string) error 
 	return err
 }
 
-func (b *Binder) recordHit()                  { if b.metrics != nil { b.metrics.recordHit() } }
-func (b *Binder) recordMiss(d time.Duration)  { if b.metrics != nil { b.metrics.recordMiss(d) } }
+func (b *Binder) recordHit() {
+	if b.metrics != nil {
+		b.metrics.recordHit()
+	}
+}
+func (b *Binder) recordMiss(d time.Duration) {
+	if b.metrics != nil {
+		b.metrics.recordMiss(d)
+	}
+}

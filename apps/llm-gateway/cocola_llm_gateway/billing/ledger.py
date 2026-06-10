@@ -9,6 +9,7 @@ The interface is storage-agnostic on purpose: tests use the in-memory impl, prod
 uses Redis, and a future SQL/warehouse sink (M7) can implement the same
 Protocol. Business logic (the metering hook) depends only on `Ledger`.
 """
+
 from __future__ import annotations
 
 import time
@@ -23,14 +24,14 @@ class UsageRecord:
     request_id: str
     user_id: str
     session_id: str
-    alias: str            # caller-facing model alias
-    real_model: str       # resolved upstream model id
-    provider: str         # upstream provider name
+    alias: str  # caller-facing model alias
+    real_model: str  # resolved upstream model id
+    provider: str  # upstream provider name
     prompt_tokens: int
     completion_tokens: int
     cost_usd: float
     ts_unix: float = field(default_factory=lambda: time.time())
-    status: str = "ok"    # ok | error
+    status: str = "ok"  # ok | error
     error: str = ""
 
     @property
@@ -75,5 +76,4 @@ class Ledger(Protocol):
         """Return rolled-up totals for a session."""
         ...
 
-    async def aclose(self) -> None:
-        ...
+    async def aclose(self) -> None: ...

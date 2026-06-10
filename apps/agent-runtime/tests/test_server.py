@@ -109,9 +109,7 @@ async def test_query_folds_enabled_skills_into_options():
 
 async def test_query_maps_request_fields_to_options():
     prov = ListProvider([AgentEvent(kind="done", data={})])
-    req = FakeRequest(
-        user_id="emp-9", session_id="sess-7", sandbox_id="box-1", max_turns=5
-    )
+    req = FakeRequest(user_id="emp-9", session_id="sess-7", sandbox_id="box-1", max_turns=5)
     await AgentRuntimeServicer(prov).Query(req, FakeContext())
     o = prov.seen_options
     assert o.user_id == "emp-9" and o.session_id == "sess-7"

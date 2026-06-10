@@ -154,14 +154,13 @@ func mustDestroy(cli sandboxv1.SandboxServiceClient, id string) {
 	}
 }
 
-
 // runBench is the M2 acceptance harness: it fires -sessions distinct sessions,
 // each issuing -per-session CONCURRENT Acquire calls, and asserts the two M2
 // invariants:
-//   1. intra-session convergence: all concurrent acquires for one session
-//      return the SAME sandbox id (the distributed lock + double-check work).
-//   2. inter-session isolation: the number of distinct sandboxes equals the
-//      number of sessions (no cross-session sharing, no duplicate creates).
+//  1. intra-session convergence: all concurrent acquires for one session
+//     return the SAME sandbox id (the distributed lock + double-check work).
+//  2. inter-session isolation: the number of distinct sandboxes equals the
+//     number of sessions (no cross-session sharing, no duplicate creates).
 func runBench(cli sandboxv1.SandboxServiceClient, sessions, perSession int, image string, cleanup bool) {
 	if sessions <= 0 || perSession <= 0 {
 		fatal("bench requires -sessions>0 and -per-session>0")

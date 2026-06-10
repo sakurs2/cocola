@@ -22,10 +22,10 @@ ASGITransport — no real network, no bound port.
 
 from __future__ import annotations
 
+from cocola_common import CocolaError, ErrorCode, get_logger
 from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse, StreamingResponse
 
-from cocola_common import CocolaError, ErrorCode, get_logger
 from cocola_llm_gateway.anthropic_codec import (
     collect_to_anthropic_response,
     stream_to_anthropic_sse,
@@ -96,9 +96,8 @@ def create_app(
         if its `jti` is on the denylist. Callers map JWTError -> 401.
         """
         ident = _identity(request)
-        if deny is not None and ident.token_id:
-            if await deny.is_revoked(ident.token_id):
-                raise JWTError("token revoked")
+        if deny is not None and ident.token_id and await deny.is_revoked(ident.token_id):
+            raise JWTError("token revoked")
         return ident
 
     @app.get("/healthz")
@@ -141,8 +140,7 @@ def create_app(
             body,
             resolved_model=resolved_model,
             user_id=identity.user_id,
-            session_id=request.headers.get("x-cocola-session", "").strip()
-            or identity.user_id,
+            session_id=request.headers.get("x-cocola-session", "").strip() or identity.user_id,
         )
         wants_stream = bool(body.get("stream", False))
 

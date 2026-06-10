@@ -39,9 +39,9 @@ from dataclasses import dataclass
 from typing import Protocol
 
 import anyio
+from cocola_common import get_logger
 
 from cocola_agent_runtime.sandbox_client import SandboxClient
-from cocola_common import get_logger
 
 log = get_logger("cocola.agent-runtime.sandbox")
 
@@ -90,9 +90,7 @@ class SandboxManagerBinder:
     ) -> BoundSandbox:
         def _call() -> BoundSandbox:
             with SandboxClient(addr=self._addr) as sb:
-                res = sb.acquire(
-                    session_id=session_id, user_id=user_id, image=image, env=env or {}
-                )
+                res = sb.acquire(session_id=session_id, user_id=user_id, image=image, env=env or {})
             box = res.sandbox
             return BoundSandbox(id=box.id, endpoint=box.endpoint, reused=res.reused)
 
@@ -128,9 +126,7 @@ class StaticSandboxBinder:
         self.acquired.append(session_id)
         reused = session_id in self._seen
         self._seen.add(session_id)
-        return BoundSandbox(
-            id=f"box-{session_id}", endpoint="inmem://local", reused=reused
-        )
+        return BoundSandbox(id=f"box-{session_id}", endpoint="inmem://local", reused=reused)
 
     async def release(self, *, session_id: str) -> None:
         self.released.append(session_id)
@@ -275,9 +271,7 @@ class StaticSandboxExecutor:
     ) -> ExecOutcome:
         if self._fail is not None:
             raise self._fail
-        self.exec_calls.append(
-            {"sandbox_id": sandbox_id, "cmd": cmd, "cwd": cwd, "env": env or {}}
-        )
+        self.exec_calls.append({"sandbox_id": sandbox_id, "cmd": cmd, "cwd": cwd, "env": env or {}})
         if self._exec_handler is not None:
             return self._exec_handler(sandbox_id, cmd)
         return ExecOutcome(exit_code=0, stdout="ran: " + " ".join(cmd))

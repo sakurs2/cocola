@@ -1,5 +1,4 @@
 import pytest
-
 from cocola_common import CocolaError, ErrorCode
 from cocola_llm_gateway.types import ChatMessage, ChatParams, ChatRequest, StreamEventType
 from tests.conftest import build_service
@@ -48,7 +47,7 @@ async def test_metering_fires_even_when_consumer_stops_early():
     svc, ledger = build_service(reply="abcdef")
     agen = svc.chat_stream(_req(), requested_alias="default").__aiter__()
     await agen.__anext__()  # consume just the first event
-    await agen.aclose()     # consumer abandons the stream
+    await agen.aclose()  # consumer abandons the stream
     recent = await ledger.recent(user_id="U1")
     assert len(recent) == 1
     # Aborted before MESSAGE_DELTA -> completion_tokens may be 0 but a record exists.

@@ -60,9 +60,7 @@ async def test_query_acquires_sandbox_when_unpinned():
     )
     binder = StaticSandboxBinder()
     ctx = FakeContext()
-    await AgentRuntimeServicer(prov, binder=binder).Query(
-        FakeRequest(session_id="S9"), ctx
-    )
+    await AgentRuntimeServicer(prov, binder=binder).Query(FakeRequest(session_id="S9"), ctx)
 
     # Acquired exactly once for this session.
     assert binder.acquired == ["S9"]
@@ -81,9 +79,7 @@ async def test_caller_pinned_sandbox_is_respected():
     prov = RecordingProvider()
     binder = StaticSandboxBinder()
     ctx = FakeContext()
-    await AgentRuntimeServicer(prov, binder=binder).Query(
-        FakeRequest(sandbox_id="pinned-box"), ctx
-    )
+    await AgentRuntimeServicer(prov, binder=binder).Query(FakeRequest(sandbox_id="pinned-box"), ctx)
     # No acquire happened; the pinned id flows through unchanged.
     assert binder.acquired == []
     assert prov.seen_options.sandbox_id == "pinned-box"

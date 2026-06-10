@@ -1,6 +1,6 @@
 """HTTP-level auth + quota tests over httpx.ASGITransport (in-process)."""
-import httpx
 
+import httpx
 from cocola_llm_gateway.quota import MemoryOverrideStore
 from cocola_llm_gateway.server import create_app
 from tests.conftest import auth_pair, build_enforcer, build_service

@@ -1,7 +1,6 @@
 """Revocation denylist: store impls, TTL cache, and the gateway gate."""
 
 import httpx
-
 from cocola_llm_gateway.auth import MemoryRevocationStore, TTLCachedRevocation
 from cocola_llm_gateway.server import create_app
 from tests.conftest import auth_pair, build_service
@@ -15,9 +14,7 @@ _MSG = {
 
 
 def _client(app):
-    return httpx.AsyncClient(
-        transport=httpx.ASGITransport(app=app), base_url="http://t"
-    )
+    return httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://t")
 
 
 # ---- store ----

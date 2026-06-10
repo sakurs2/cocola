@@ -14,6 +14,7 @@ is truly provider-agnostic.
 HARD CONSTRAINT (ADR-0004): base_url / api_key from config only; the default is
 the public OpenAI URL purely for BYO-key local runs, never an internal endpoint.
 """
+
 from __future__ import annotations
 
 import json
@@ -21,8 +22,8 @@ from collections.abc import AsyncIterator
 from dataclasses import dataclass
 
 import httpx
-
 from cocola_common import ErrorCode
+
 from cocola_llm_gateway.types import ChatRequest, StreamEvent, StreamEventType, Usage
 from cocola_llm_gateway.upstream.errors import UpstreamError
 
@@ -92,7 +93,9 @@ class OpenAICompatUpstream:
         except httpx.TimeoutException as e:
             yield StreamEvent(StreamEventType.ERROR, error=f"upstream timeout: {e}", code="timeout")
         except httpx.HTTPError as e:
-            yield StreamEvent(StreamEventType.ERROR, error=f"upstream transport error: {e}", code="transport")
+            yield StreamEvent(
+                StreamEventType.ERROR, error=f"upstream transport error: {e}", code="transport"
+            )
 
     async def _parse_stream(self, resp: httpx.Response, model: str) -> AsyncIterator[StreamEvent]:
         """OpenAI streams `data: {json}` lines (no event: field), terminated by
@@ -136,7 +139,9 @@ class OpenAICompatUpstream:
         if not saw_usage:
             completion_tokens = chunks
         if prompt_tokens:
-            yield StreamEvent(StreamEventType.MESSAGE_START, usage=Usage(prompt_tokens=prompt_tokens), model=model)
+            yield StreamEvent(
+                StreamEventType.MESSAGE_START, usage=Usage(prompt_tokens=prompt_tokens), model=model
+            )
         yield StreamEvent(
             StreamEventType.MESSAGE_DELTA,
             usage=Usage(completion_tokens=completion_tokens),

@@ -11,11 +11,10 @@ on PYTHONPATH (the Makefile / demo wire it up).
 
 from __future__ import annotations
 
+from collections.abc import Iterator
 from dataclasses import dataclass, field
-from typing import Iterator
 
 import grpc
-
 from cocola.sandbox.v1 import sandbox_pb2 as pb
 from cocola.sandbox.v1 import sandbox_pb2_grpc as pb_grpc
 
@@ -34,7 +33,7 @@ class ExecResult:
 class AcquireResult:
     """Result of an Acquire call: the bound sandbox plus a reuse flag."""
 
-    sandbox: "pb.Sandbox"
+    sandbox: pb.Sandbox
     reused: bool = False
 
 
@@ -50,7 +49,7 @@ class SandboxClient:
     _channel: grpc.Channel | None = field(default=None, init=False, repr=False)
     _stub: pb_grpc.SandboxServiceStub | None = field(default=None, init=False, repr=False)
 
-    def __enter__(self) -> "SandboxClient":
+    def __enter__(self) -> SandboxClient:
         self._channel = grpc.insecure_channel(self.addr)
         self._stub = pb_grpc.SandboxServiceStub(self._channel)
         return self
@@ -117,14 +116,10 @@ class SandboxClient:
         return result
 
     def write_file(self, sandbox_id: str, path: str, data: bytes) -> None:
-        self.stub.WriteFile(
-            pb.WriteFileRequest(sandbox_id=sandbox_id, path=path, data=data)
-        )
+        self.stub.WriteFile(pb.WriteFileRequest(sandbox_id=sandbox_id, path=path, data=data))
 
     def read_file(self, sandbox_id: str, path: str) -> bytes:
-        return self.stub.ReadFile(
-            pb.ReadFileRequest(sandbox_id=sandbox_id, path=path)
-        ).data
+        return self.stub.ReadFile(pb.ReadFileRequest(sandbox_id=sandbox_id, path=path)).data
 
     def acquire(
         self,

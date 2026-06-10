@@ -16,6 +16,7 @@ Steps:
 
 Run:  apps/llm-gateway/.venv/bin/python scripts/admin-m5-e2e.py
 """
+
 import os
 import subprocess
 import sys
@@ -41,9 +42,23 @@ def go_mint(secret, user, tenant, issuer="cocola", ttl=3600):
     """Run the Go admin-mint CLI and return the compact JWS it prints."""
     env = {**GOENV, "COCOLA_AUTH_SECRET": secret}
     out = subprocess.run(
-        [GOBIN, "run", "./cmd/admin-mint",
-         "-user", user, "-tenant", tenant, "-issuer", issuer, "-ttl", str(ttl)],
-        cwd=ADMIN_API, env=env, capture_output=True, text=True,
+        [
+            GOBIN,
+            "run",
+            "./cmd/admin-mint",
+            "-user",
+            user,
+            "-tenant",
+            tenant,
+            "-issuer",
+            issuer,
+            "-ttl",
+            str(ttl),
+        ],
+        cwd=ADMIN_API,
+        env=env,
+        capture_output=True,
+        text=True,
     )
     if out.returncode != 0:
         raise RuntimeError("admin-mint failed: " + out.stderr.strip())
@@ -56,14 +71,15 @@ def main():
     # 1+2) Mint in Go.
     tok = go_mint(SECRET, "emp-42", "team-a")
     assert tok.count(".") == 2, "not a compact JWS: " + repr(tok)
-    print("go-mint    : minted token (%d chars, 3 segments)" % len(tok))
+    print(f"go-mint    : minted token ({len(tok)} chars, 3 segments)")
 
     # 3) Verify in Python - the cross-language proof.
     ident = verifier.verify(tok)
     assert ident.user_id == "emp-42", ident
     assert ident.tenant_id == "team-a", ident
-    print("interop    : Go token verified in Python -> user=%s tenant=%s"
-          % (ident.user_id, ident.tenant_id))
+    print(
+        f"interop    : Go token verified in Python -> user={ident.user_id} tenant={ident.tenant_id}"
+    )
 
     # 4) Wrong secret -> rejected.
     bad = go_mint("a-different-secret", "emp-42", "team-a")

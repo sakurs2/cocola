@@ -1,4 +1,5 @@
 """Structured logging factory. Wraps structlog so services never import it directly."""
+
 from __future__ import annotations
 
 import logging

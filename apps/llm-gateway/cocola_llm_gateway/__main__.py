@@ -11,11 +11,12 @@ Point the Claude Agent SDK at it with:
     ANTHROPIC_BASE_URL=http://<host>:<port>
     ANTHROPIC_API_KEY=<cocola-issued token>   # see: python -m cocola_llm_gateway.issue_token
 """
+
 from __future__ import annotations
 
 import uvicorn
-
 from cocola_common import get_logger
+
 from cocola_llm_gateway.bootstrap import build_service, build_verifier
 from cocola_llm_gateway.config import gateway_config_from_env
 from cocola_llm_gateway.server import create_app

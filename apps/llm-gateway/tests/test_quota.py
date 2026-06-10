@@ -1,6 +1,6 @@
 """Quota: policy windows, store counters, and the enforcer gate/commit."""
-import pytest
 
+import pytest
 from cocola_llm_gateway.auth import Identity
 from cocola_llm_gateway.quota import (
     Enforcer,

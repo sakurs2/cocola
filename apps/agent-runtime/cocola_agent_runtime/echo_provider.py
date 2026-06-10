@@ -1,4 +1,5 @@
 """Trivial AgentProvider used in M0 to prove wiring without external deps."""
+
 from __future__ import annotations
 
 from collections.abc import AsyncIterator

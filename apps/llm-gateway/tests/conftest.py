@@ -3,8 +3,8 @@
 Everything here is hermetic — no real model, no Redis, no bound port. HTTP is
 exercised via httpx.ASGITransport (in-process).
 """
-import pytest
 
+import pytest
 from cocola_llm_gateway.auth import AuthConfig, Issuer, Verifier
 from cocola_llm_gateway.billing.memory import MemoryLedger
 from cocola_llm_gateway.middleware import ResiliencePolicy

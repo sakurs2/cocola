@@ -10,6 +10,7 @@ stream of normalized `StreamEvent`s. Everything cross-cutting — routing,
 retries, rate limiting, billing — lives OUTSIDE the provider (in middleware /
 hooks). Providers stay dumb and vendor-specific; business logic stays in hooks.
 """
+
 from __future__ import annotations
 
 from collections.abc import AsyncIterator

@@ -3,6 +3,7 @@
 Thread/task-safe via an asyncio lock. Not durable — process restart loses data,
 which is fine for tests and the default zero-dependency dev boot.
 """
+
 from __future__ import annotations
 
 import asyncio

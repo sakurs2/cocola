@@ -18,25 +18,24 @@ Flow:  prompt -> ClaudeAgentSDKProvider -> fake CLI -> gateway (ASGI) ->
 
 Run:  PYTHONPATH=apps/agent-runtime apps/llm-gateway/.venv/bin/python scripts/llm-m3-e2e.py
 """
+
 import asyncio
 import json
 import sys
 from dataclasses import dataclass, field
 
 import httpx
-
+from cocola_agent_runtime.agent_provider import AgentOptions
+from cocola_agent_runtime.claude_sdk_provider import (
+    ClaudeAgentSDKProvider,
+    ClaudeSDKConfig,
+)
 from cocola_llm_gateway.billing.memory import MemoryLedger
 from cocola_llm_gateway.middleware import ResiliencePolicy
 from cocola_llm_gateway.registry import ModelRoute, Pricing, Registry
 from cocola_llm_gateway.server import create_app
 from cocola_llm_gateway.service import GatewayService
 from cocola_llm_gateway.upstream.fake import FakeUpstream
-
-from cocola_agent_runtime.agent_provider import AgentOptions
-from cocola_agent_runtime.claude_sdk_provider import (
-    ClaudeAgentSDKProvider,
-    ClaudeSDKConfig,
-)
 
 
 @dataclass
@@ -71,16 +70,23 @@ def make_fake_cli_query(app, user_id, session_id):
         async with httpx.AsyncClient(transport=asgi, base_url="http://gw") as client:
             text_parts, event = [], None
             async with client.stream(
-                "POST", "/v1/messages",
-                json={"model": "default", "max_tokens": 64, "stream": True,
-                      "messages": [{"role": "user", "content": prompt}]},
+                "POST",
+                "/v1/messages",
+                json={
+                    "model": "default",
+                    "max_tokens": 64,
+                    "stream": True,
+                    "messages": [{"role": "user", "content": prompt}],
+                },
                 headers={"x-cocola-user": user_id, "x-cocola-session": session_id},
             ) as resp:
                 async for line in resp.aiter_lines():
                     if line.startswith("event:"):
                         event = line.split(":", 1)[1].strip()
                     elif line.startswith("data:") and event == "content_block_delta":
-                        text_parts.append(json.loads(line.split(":", 1)[1].strip())["delta"]["text"])
+                        text_parts.append(
+                            json.loads(line.split(":", 1)[1].strip())["delta"]["text"]
+                        )
             yield AssistantMessage(content=[TextBlock("".join(text_parts))])
             yield ResultMessage(session_id=session_id)
 
@@ -92,15 +98,18 @@ async def main() -> int:
     routes = {"default": ModelRoute("default", "fake", "fake-1", Pricing(0.003, 0.015))}
     reg = Registry({"fake": fake}, routes, default_alias="default")
     ledger = MemoryLedger()
-    svc = GatewayService(registry=reg, ledger=ledger,
-                         policy=ResiliencePolicy(timeout_s=10, max_retries=2))
+    svc = GatewayService(
+        registry=reg, ledger=ledger, policy=ResiliencePolicy(timeout_s=10, max_retries=2)
+    )
     app = create_app(svc)
 
     cfg = ClaudeSDKConfig(base_url="http://gw", model="default", api_key="cocola-e2e")
     prov = ClaudeAgentSDKProvider(cfg, query_fn=make_fake_cli_query(app, "U1", "S1"))
 
-    out = [(e.kind, e.data) async for e in
-           prov.query("ping the gateway", AgentOptions(user_id="U1", session_id="S1"))]
+    out = [
+        (e.kind, e.data)
+        async for e in prov.query("ping the gateway", AgentOptions(user_id="U1", session_id="S1"))
+    ]
 
     texts = [d["text"] for k, d in out if k == "text"]
     assert texts == ["hello from cocola gateway"], texts
@@ -114,8 +123,10 @@ async def main() -> int:
 
     await reg.aclose()
     print(f"agent text : {texts[0]!r}")
-    print(f"billed     : calls={agg.calls} in={agg.prompt_tokens} "
-          f"out={agg.completion_tokens} cost=${agg.cost_usd:.6f}")
+    print(
+        f"billed     : calls={agg.calls} in={agg.prompt_tokens} "
+        f"out={agg.completion_tokens} cost=${agg.cost_usd:.6f}"
+    )
     print("M3 E2E OK")
     return 0
 

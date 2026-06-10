@@ -13,7 +13,7 @@ choice here:
    context/turn management, and sub-agent orchestration are delegated wholesale
    to the **Claude Code Agent SDK** (`claude_agent_sdk`). The SDK spawns the
    Claude Code CLI as a child process; that CLI is what actually opens HTTP
-   connections to a model endpoint. cocola's job is *not* to re-implement any of
+   connections to a model endpoint. cocola's job is _not_ to re-implement any of
    that — it is to sit between the SDK and the model so we can route, meter, and
    (later) bill every call.
 2. **The platform must be self-hostable and vendor-swappable.** An operator must
@@ -69,7 +69,7 @@ Upstreams implement a single Protocol (`chat_stream(req) -> AsyncIterator[
 StreamEvent]`, `aclose()`), mirroring M2's `SandboxProvider` seam. Three
 adapters ship:
 
-- **`FakeUpstream`** — deterministic, in-process, no network; the *only* provider
+- **`FakeUpstream`** — deterministic, in-process, no network; the _only_ provider
   unit tests are allowed to use.
 - **`AnthropicUpstream`** — passthrough to a real Anthropic-compatible endpoint;
   base URL + key are config-injected.
@@ -87,17 +87,17 @@ to `(provider, real upstream model id, per-1K-token pricing)`. Resolution order:
 explicit request alias → configured default → unknown ⇒ `NOT_FOUND` (callers
 never silently get the wrong model). Re-pointing an alias from one vendor/model
 to another is a config edit; the registry never imports a concrete provider
-class. The composition root (`config.py` / `bootstrap.py`) is the *only* place
+class. The composition root (`config.py` / `bootstrap.py`) is the _only_ place
 that constructs concrete providers and reads secrets.
 
 ### Resilience is middleware; metering is a hook — neither is in a provider
 
 - **`ResilientStreamer`** wraps any provider stream with per-key rate limiting,
   a wall-clock timeout, and retry. **Streaming-retry correctness rule:** retry
-  only *before the first byte* is emitted. Once any content has streamed to the
+  only _before the first byte_ is emitted. Once any content has streamed to the
   client we cannot replay it, so a mid-stream failure surfaces as a terminal
   `ERROR` event rather than a retry.
-- **Metering** is a hook wrapped *around* the stream in the service layer: it
+- **Metering** is a hook wrapped _around_ the stream in the service layer: it
   passes events through unchanged while accumulating `Usage`, then writes exactly
   one `UsageRecord` in a `finally`. A billing failure is logged and swallowed —
   it must never break the user's stream.
@@ -120,7 +120,7 @@ per-user/per-session aggregates in a single Lua script for atomicity.
   (the project forbids listening sockets in the sandbox). The cross-package e2e
   (`scripts/llm-m3-e2e.py`) drives the full path
   `prompt → ClaudeAgentSDKProvider → (fake CLI) → gateway → FakeUpstream →
-  Anthropic SSE → AgentEvents` and asserts the ledger recorded the call.
+Anthropic SSE → AgentEvents` and asserts the ledger recorded the call.
 
 ## Alternatives considered
 

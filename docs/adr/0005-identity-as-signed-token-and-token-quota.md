@@ -7,8 +7,8 @@
 ## Context
 
 M3 left the model layer working but anonymous: identity was a mock request
-header (`x-cocola-user` / `x-cocola-session`) and the billing ledger *recorded*
-token usage without ever *limiting* it. M4 makes the gateway know **who** is
+header (`x-cocola-user` / `x-cocola-session`) and the billing ledger _recorded_
+token usage without ever _limiting_ it. M4 makes the gateway know **who** is
 calling and **stop** a caller who has burned through their budget.
 
 Two constraints shape the design:
@@ -16,7 +16,7 @@ Two constraints shape the design:
 1. **cocola is deployed internally for employees, not sold.** There is no money,
    no balance, no invoicing. The only thing we must enforce is a **token
    budget** — "this employee/team may use at most N tokens per period". So M4 is
-   *quota*, deliberately **not** billing/debiting. (This narrows the original M4
+   _quota_, deliberately **not** billing/debiting. (This narrows the original M4
    scope, which had assumed paid multi-tenancy.)
 
 2. **The credential the gateway actually receives is dictated by the Claude Code
@@ -24,7 +24,7 @@ Two constraints shape the design:
    reads from the environment — `ANTHROPIC_API_KEY` — and sends it on every
    `POST /v1/messages` (as `x-api-key`). cocola already injects that env var when
    it launches the SDK (`ClaudeAgentSDKProvider._build_env`). So the natural
-   place to put identity is *inside that value*: make the API key a
+   place to put identity is _inside that value_: make the API key a
    cocola-signed token.
 
 ## Decision
@@ -39,7 +39,7 @@ Its claims carry the identity:
 The gateway verifies the token **offline** with a shared **HS256** secret —
 no per-request network call, no session store — and resolves it to an
 `Identity(user_id, tenant_id)` that replaces the mock headers as the subject for
-billing *and* quota. An invalid/expired/missing token returns an
+billing _and_ quota. An invalid/expired/missing token returns an
 Anthropic-compatible **401** (`authentication_error`) so the SDK surfaces it
 cleanly.
 
@@ -73,7 +73,7 @@ cost actually becomes known:
   user's response.
 
 Because the exact cost of a request is unknown until it finishes, a request is
-allowed to *start* as long as the subject is under cap; the *next* request is
+allowed to _start_ as long as the subject is under cap; the _next_ request is
 then blocked. Overshoot is bounded by concurrency, not fixed at one: a single
 serial caller overshoots by at most one request's tokens, but N requests racing
 through `check` before any `commit` lands can overshoot by up to ~N requests'

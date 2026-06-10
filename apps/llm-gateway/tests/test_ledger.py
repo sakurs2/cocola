@@ -1,14 +1,19 @@
 import pytest
-
-from cocola_llm_gateway.billing.memory import MemoryLedger
 from cocola_llm_gateway.billing.ledger import UsageRecord
+from cocola_llm_gateway.billing.memory import MemoryLedger
 
 
 def _rec(user="U1", session="S1", p=3, c=6, cost=0.0045):
     return UsageRecord(
-        request_id="r1", user_id=user, session_id=session,
-        alias="default", real_model="fake-1", provider="fake",
-        prompt_tokens=p, completion_tokens=c, cost_usd=cost,
+        request_id="r1",
+        user_id=user,
+        session_id=session,
+        alias="default",
+        real_model="fake-1",
+        provider="fake",
+        prompt_tokens=p,
+        completion_tokens=c,
+        cost_usd=cost,
     )
 
 

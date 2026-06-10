@@ -8,8 +8,8 @@ import (
 	"testing"
 	"time"
 
-	rds "github.com/cocola-project/cocola/packages/go-common/redis"
 	"github.com/cocola-project/cocola/apps/sandbox-manager/internal/provider"
+	rds "github.com/cocola-project/cocola/packages/go-common/redis"
 )
 
 // fakeProvider is a minimal in-memory SandboxProvider for binder tests. It only
@@ -31,19 +31,32 @@ func (f *fakeProvider) Create(ctx context.Context, spec provider.SandboxSpec) (*
 	return &provider.Sandbox{ID: id, UserID: spec.UserID, SessionID: spec.SessionID}, nil
 }
 func (f *fakeProvider) Pause(ctx context.Context, sid string) error {
-	f.mu.Lock(); defer f.mu.Unlock(); f.state[sid] = "paused"; return nil
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.state[sid] = "paused"
+	return nil
 }
 func (f *fakeProvider) Resume(ctx context.Context, sid string) error {
-	f.mu.Lock(); defer f.mu.Unlock(); f.state[sid] = "active"; return nil
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.state[sid] = "active"
+	return nil
 }
 func (f *fakeProvider) Destroy(ctx context.Context, sid string) error {
-	f.mu.Lock(); defer f.mu.Unlock(); f.state[sid] = "destroyed"; return nil
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.state[sid] = "destroyed"
+	return nil
 }
 func (f *fakeProvider) Exec(ctx context.Context, sid string, req provider.ExecRequest) (<-chan provider.ExecEvent, error) {
 	return nil, nil
 }
-func (f *fakeProvider) WriteFile(ctx context.Context, sid, path string, data []byte) error { return nil }
-func (f *fakeProvider) ReadFile(ctx context.Context, sid, path string) ([]byte, error)     { return nil, nil }
+func (f *fakeProvider) WriteFile(ctx context.Context, sid, path string, data []byte) error {
+	return nil
+}
+func (f *fakeProvider) ReadFile(ctx context.Context, sid, path string) ([]byte, error) {
+	return nil, nil
+}
 func (f *fakeProvider) Health(ctx context.Context, sid string) (*provider.HealthStatus, error) {
 	return &provider.HealthStatus{Healthy: true}, nil
 }

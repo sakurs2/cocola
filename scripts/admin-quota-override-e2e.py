@@ -22,13 +22,13 @@ Steps:
 
 Run:  apps/llm-gateway/.venv/bin/python scripts/admin-quota-override-e2e.py
 """
+
 import asyncio
 import os
 import subprocess
 import sys
 
 import httpx
-
 from cocola_llm_gateway.auth import AuthConfig, Verifier
 from cocola_llm_gateway.quota import Enforcer, MemoryOverrideStore, MemoryQuotaStore
 from cocola_llm_gateway.quota.policy import QuotaPolicy
@@ -59,9 +59,23 @@ MSG = {
 def go_mint(secret, user, tenant, issuer="cocola", ttl=3600):
     env = {**GOENV, "COCOLA_AUTH_SECRET": secret}
     out = subprocess.run(
-        [GOBIN, "run", "./cmd/admin-mint",
-         "-user", user, "-tenant", tenant, "-issuer", issuer, "-ttl", str(ttl)],
-        cwd=ADMIN_API, env=env, capture_output=True, text=True,
+        [
+            GOBIN,
+            "run",
+            "./cmd/admin-mint",
+            "-user",
+            user,
+            "-tenant",
+            tenant,
+            "-issuer",
+            issuer,
+            "-ttl",
+            str(ttl),
+        ],
+        cwd=ADMIN_API,
+        env=env,
+        capture_output=True,
+        text=True,
     )
     if out.returncode != 0:
         raise RuntimeError("admin-mint failed: " + out.stderr.strip())
@@ -77,16 +91,20 @@ async def run():
 
     # 1) Mint in Go.
     tok = go_mint(SECRET, "emp-vip", "team-r")
-    print("go-mint    : minted token (%d chars)" % len(tok))
+    print(f"go-mint    : minted token ({len(tok)} chars)")
 
     # 2) Verify in Python; attribute to the subject.
     ident = verifier.verify(tok)
     assert ident.user_id == "emp-vip", ident.user_id
-    print("interop    : verified Go token -> user=%s" % ident.user_id)
+    print(f"interop    : verified Go token -> user={ident.user_id}")
 
     # 3) No static cap, override table present but empty -> unlimited.
     overrides = MemoryOverrideStore()
-    enf = Enforcer(QuotaPolicy(user_daily_tokens=0, tenant_monthly_tokens=0), MemoryQuotaStore(), overrides=overrides)
+    enf = Enforcer(
+        QuotaPolicy(user_daily_tokens=0, tenant_monthly_tokens=0),
+        MemoryQuotaStore(),
+        overrides=overrides,
+    )
     svc, _ = build_service(reply="well over five tokens of reply text here", enforcer=enf)
     app = create_app(svc, verifier=verifier)
     async with client(app) as c:

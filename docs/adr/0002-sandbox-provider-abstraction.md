@@ -20,7 +20,7 @@ Forces at play:
 
 - The orchestration substrate (Docker Engine API vs. K8s API vs. a vendor REST
   API) is wildly different per backend and pulls in heavy, conflicting SDKs.
-- M1 must ship a working loop *now* without committing the codebase to K8s.
+- M1 must ship a working loop _now_ without committing the codebase to K8s.
 - We promised second-developers a stack where adding a backend is local and
   additive, not a cross-cutting refactor.
 

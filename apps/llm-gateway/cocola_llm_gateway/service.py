@@ -19,12 +19,14 @@ Neither billing nor quota may break the user's stream: a ledger or counter write
 failure is logged and swallowed. Records/commits happen even on error/partial
 streams so usage is captured for whatever the upstream already produced.
 """
+
 from __future__ import annotations
 
 import uuid
 from collections.abc import AsyncIterator
 
 from cocola_common import get_logger
+
 from cocola_llm_gateway.auth.jwt import Identity
 from cocola_llm_gateway.billing.ledger import Ledger, UsageRecord
 from cocola_llm_gateway.middleware import RateLimiter, ResiliencePolicy, ResilientStreamer
@@ -107,9 +109,10 @@ class GatewayService:
 
         try:
             async for ev in streamer.chat_stream(req):
-                if ev.type is StreamEventType.MESSAGE_START and ev.usage is not None:
-                    usage.merge(ev.usage)
-                elif ev.type is StreamEventType.MESSAGE_DELTA and ev.usage is not None:
+                if ev.usage is not None and ev.type in (
+                    StreamEventType.MESSAGE_START,
+                    StreamEventType.MESSAGE_DELTA,
+                ):
                     usage.merge(ev.usage)
                 elif ev.type is StreamEventType.ERROR:
                     status = "error"

@@ -3,7 +3,6 @@
 import time
 
 import pytest
-
 from cocola_llm_gateway.auth import AuthConfig, Issuer, JWTError, Verifier
 from cocola_llm_gateway.auth import jwt as _jwt
 

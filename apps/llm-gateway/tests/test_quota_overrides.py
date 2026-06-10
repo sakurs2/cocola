@@ -1,7 +1,6 @@
 """Per-subject quota overrides: store, TTL cache, and enforcer integration."""
 
 import pytest
-
 from cocola_llm_gateway.auth import Identity
 from cocola_llm_gateway.quota import (
     Enforcer,
@@ -11,7 +10,6 @@ from cocola_llm_gateway.quota import (
     QuotaPolicy,
     TTLCachedOverrides,
 )
-
 
 # ---- store ----
 

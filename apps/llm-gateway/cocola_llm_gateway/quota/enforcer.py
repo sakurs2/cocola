@@ -24,6 +24,7 @@ The two-phase shape mirrors how token usage actually becomes known:
 When the policy disables a layer (limit <= 0) that layer is skipped entirely —
 no reads, no writes.
 """
+
 from __future__ import annotations
 
 from dataclasses import dataclass
@@ -31,13 +32,13 @@ from dataclasses import dataclass
 from cocola_common import get_logger
 
 from cocola_llm_gateway.auth.jwt import Identity
+from cocola_llm_gateway.quota.overrides import OverrideStore
 from cocola_llm_gateway.quota.policy import (
     QuotaPolicy,
     QuotaStatus,
     day_window,
     month_window,
 )
-from cocola_llm_gateway.quota.overrides import OverrideStore
 from cocola_llm_gateway.quota.store import QuotaStore
 
 log = get_logger("cocola.llm-gateway.quota")

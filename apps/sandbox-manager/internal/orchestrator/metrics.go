@@ -9,7 +9,7 @@ import (
 
 // Metrics is a tiny, dependency-free sink for the three M2 acceptance signals:
 //   - pool_hit_rate:        hits / (hits+misses) — how often a session reused a
-//                           sandbox instead of cold-creating.
+//     sandbox instead of cold-creating.
 //   - create_p99:           p99 of provider create latency on the miss path.
 //   - active_sandbox_count: live (non-paused) sandboxes, sampled by the reaper.
 //
@@ -46,12 +46,12 @@ func (m *Metrics) setActive(n int64) { m.active.Store(n) }
 
 // Snapshot is an immutable view of the metrics at a point in time.
 type Snapshot struct {
-	Hits         int64
-	Misses       int64
-	HitRate      float64
-	ActiveCount  int64
-	CreateP99Ms  float64
-	CreateP50Ms  float64
+	Hits        int64
+	Misses      int64
+	HitRate     float64
+	ActiveCount int64
+	CreateP99Ms float64
+	CreateP50Ms float64
 }
 
 // Snapshot computes the current values. Safe for concurrent use.

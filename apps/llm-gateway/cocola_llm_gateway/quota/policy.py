@@ -13,11 +13,12 @@ Windows are computed in UTC so a counter key is stable regardless of where the
 gateway runs. The key embeds the period so rollover is automatic: a new day/
 month simply reads a fresh, zero counter — no cron, no reset job.
 """
+
 from __future__ import annotations
 
 import time
 from dataclasses import dataclass
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 
 @dataclass(frozen=True, slots=True)
@@ -47,7 +48,7 @@ def day_window(now: float | None = None) -> tuple[str, int]:
     (plus a small slack) so the counter key self-expires shortly after rollover.
     """
     t = time.time() if now is None else now
-    dt = datetime.fromtimestamp(t, tz=timezone.utc)
+    dt = datetime.fromtimestamp(t, tz=UTC)
     period = dt.strftime("%Y%m%d")
     end = dt.replace(hour=23, minute=59, second=59, microsecond=0)
     ttl = int(end.timestamp() - t) + 60
@@ -61,10 +62,12 @@ def month_window(now: float | None = None) -> tuple[str, int]:
     counting to the first of next month) plus slack.
     """
     t = time.time() if now is None else now
-    dt = datetime.fromtimestamp(t, tz=timezone.utc)
+    dt = datetime.fromtimestamp(t, tz=UTC)
     period = dt.strftime("%Y%m")
     if dt.month == 12:
-        nxt = dt.replace(year=dt.year + 1, month=1, day=1, hour=0, minute=0, second=0, microsecond=0)
+        nxt = dt.replace(
+            year=dt.year + 1, month=1, day=1, hour=0, minute=0, second=0, microsecond=0
+        )
     else:
         nxt = dt.replace(month=dt.month + 1, day=1, hour=0, minute=0, second=0, microsecond=0)
     ttl = int(nxt.timestamp() - t) + 60
@@ -75,11 +78,11 @@ def month_window(now: float | None = None) -> tuple[str, int]:
 class QuotaStatus:
     """Snapshot of one scope's quota standing (for reads / 429 responses)."""
 
-    scope: str          # "user" | "tenant"
-    subject: str        # user_id or tenant_id
-    period: str         # window id, e.g. "20260609"
-    used: int           # tokens used in this window
-    limit: int          # configured cap (0 => unlimited)
+    scope: str  # "user" | "tenant"
+    subject: str  # user_id or tenant_id
+    period: str  # window id, e.g. "20260609"
+    used: int  # tokens used in this window
+    limit: int  # configured cap (0 => unlimited)
 
     @property
     def unlimited(self) -> bool:

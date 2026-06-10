@@ -56,9 +56,7 @@ async def test_bash_nonzero_exit_is_not_a_tool_error():
 
 
 async def test_bash_sandbox_error_is_a_tool_error():
-    ex = StaticSandboxExecutor(
-        exec_handler=lambda sid, cmd: ExecOutcome(error="sandbox gone")
-    )
+    ex = StaticSandboxExecutor(exec_handler=lambda sid, cmd: ExecOutcome(error="sandbox gone"))
     defs = sandbox_tool_defs(ex, "box-S1")
     res = await _by_name(defs)["bash"].handler({"command": "ls"})
     assert res["is_error"] is True

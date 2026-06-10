@@ -4,6 +4,7 @@ Concrete providers (`ClaudeAgentSDKProvider`, `EchoProvider`, …) MUST implemen
 this Protocol. The runtime server depends on the Protocol only, never on a
 concrete class — this is what makes the runtime LLM-agnostic and testable.
 """
+
 from __future__ import annotations
 
 from collections.abc import AsyncIterator
@@ -33,5 +34,4 @@ class AgentProvider(Protocol):
         self,
         prompt: str,
         options: AgentOptions,
-    ) -> AsyncIterator[AgentEvent]:
-        ...
+    ) -> AsyncIterator[AgentEvent]: ...

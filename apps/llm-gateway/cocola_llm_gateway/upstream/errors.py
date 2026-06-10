@@ -5,6 +5,7 @@ JSON decode errors). We collapse them into one type with a stable code so
 middleware and the HTTP layer can map consistently to client-facing errors
 without importing vendor packages.
 """
+
 from __future__ import annotations
 
 from cocola_common import ErrorCode

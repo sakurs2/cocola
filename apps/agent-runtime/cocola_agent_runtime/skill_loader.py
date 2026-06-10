@@ -17,17 +17,19 @@ Only `Enabled` entries are ever returned — the admin-api already filters via
 `?enabled=true`, and we filter again defensively so a catalog change cannot leak
 a disabled skill into a session.
 """
+
 from __future__ import annotations
 
 import dataclasses
 import json
 import urllib.request
-from collections.abc import Sequence
+from collections.abc import Callable, Sequence
 from dataclasses import dataclass
-from typing import Callable, Protocol
+from typing import Protocol
+
+from cocola_common import get_logger
 
 from cocola_agent_runtime.agent_provider import AgentOptions
-from cocola_common import get_logger
 
 log = get_logger("cocola.agent-runtime.skills")
 
@@ -48,7 +50,7 @@ class Skill:
     entrypoint: str = ""
 
     @classmethod
-    def from_json(cls, d: dict) -> "Skill":
+    def from_json(cls, d: dict) -> Skill:
         return cls(
             id=str(d.get("id", "")),
             name=str(d.get("name", "")),
@@ -150,9 +152,7 @@ def skills_system_preamble(skills: Sequence[Skill]) -> str:
     return "\n".join(lines)
 
 
-def apply_skills_to_options(
-    options: AgentOptions, catalog: SkillCatalog
-) -> AgentOptions:
+def apply_skills_to_options(options: AgentOptions, catalog: SkillCatalog) -> AgentOptions:
     """Return a copy of `options` with the enabled-skills preamble merged in.
 
     This is the runtime's consumption seam: the M2 gRPC server builds base

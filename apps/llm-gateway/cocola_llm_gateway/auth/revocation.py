@@ -76,7 +76,7 @@ class RedisRevocationStore:
         self._key = key
 
     @classmethod
-    def from_url(cls, url: str) -> "RedisRevocationStore":
+    def from_url(cls, url: str) -> RedisRevocationStore:
         from redis import asyncio as aioredis
 
         client = aioredis.from_url(url, encoding="utf-8", decode_responses=True)

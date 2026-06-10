@@ -6,7 +6,8 @@ in place.
 
 ## Why ADRs
 
-Code shows *what* and *how*. ADRs preserve *why* — invaluable when:
+Code shows _what_ and _how_. ADRs preserve _why_ — invaluable when:
+
 - new contributors ask "why isn't this Service X?"
 - you revisit a decision 6 months later
 - a tech option's tradeoffs shift
@@ -20,11 +21,11 @@ Code shows *what* and *how*. ADRs preserve *why* — invaluable when:
 
 ## Index
 
-| # | Title | Status |
-|---|---|---|
-| 0001 | Tech stack: Go + Python hybrid, Next.js frontend | Accepted |
-| 0002 | Sandbox provider abstraction | Accepted |
-| 0003 | Redis-backed session↔sandbox binding with lease + two-stage GC | Accepted |
+| #    | Title                                                                                                 | Status   |
+| ---- | ----------------------------------------------------------------------------------------------------- | -------- |
+| 0001 | Tech stack: Go + Python hybrid, Next.js frontend                                                      | Accepted |
+| 0002 | Sandbox provider abstraction                                                                          | Accepted |
+| 0003 | Redis-backed session↔sandbox binding with lease + two-stage GC                                        | Accepted |
 | 0004 | LLM gateway as an Anthropic-compatible proxy in front of the Claude Agent SDK, with a metering ledger | Accepted |
-| 0005 | Identity as a cocola-signed token (the SDK's API key) + period-windowed token quota | Accepted |
-| 0006 | Admin-api control plane (Go) + Skill-Market catalog, with token revocation and dynamic quota | Accepted |
+| 0005 | Identity as a cocola-signed token (the SDK's API key) + period-windowed token quota                   | Accepted |
+| 0006 | Admin-api control plane (Go) + Skill-Market catalog, with token revocation and dynamic quota          | Accepted |

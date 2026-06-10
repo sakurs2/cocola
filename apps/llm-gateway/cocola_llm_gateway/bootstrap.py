@@ -23,6 +23,7 @@ from __future__ import annotations
 import os
 
 from cocola_common import get_logger
+
 from cocola_llm_gateway.auth import Verifier
 from cocola_llm_gateway.auth.revocation import (
     MemoryRevocationStore,
@@ -128,9 +129,7 @@ def build_verifier() -> Verifier:
     if cfg.enabled:
         log.info("auth: enabled", issuer=cfg.issuer, dev_anon=cfg.dev_allow_anonymous)
     else:
-        log.warning(
-            "auth: DISABLED (no COCOLA_AUTH_SECRET) — all callers are the dev identity"
-        )
+        log.warning("auth: DISABLED (no COCOLA_AUTH_SECRET) — all callers are the dev identity")
     return Verifier(cfg)
 
 
@@ -151,9 +150,7 @@ def build_revocation() -> RevocationStore | None:
         log.info("revocation: redis denylist", url=url)
         inner: RevocationStore = RedisRevocationStore.from_url(url)
     else:
-        log.info(
-            "revocation: in-memory denylist (set COCOLA_LLM_REDIS_URL to share fleet-wide)"
-        )
+        log.info("revocation: in-memory denylist (set COCOLA_LLM_REDIS_URL to share fleet-wide)")
         inner = MemoryRevocationStore()
     ttl = float(os.getenv("COCOLA_REVOCATION_CACHE_TTL_SECS", "5"))
     return TTLCachedRevocation(inner, ttl_s=ttl)

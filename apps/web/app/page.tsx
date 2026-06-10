@@ -151,10 +151,7 @@ export default function Home() {
         ) : (
           <ol className="flex flex-col gap-1">
             {events.map((ev, i) => (
-              <li
-                key={i}
-                className="rounded border border-neutral-200 bg-white px-3 py-2 text-sm"
-              >
+              <li key={i} className="rounded border border-neutral-200 bg-white px-3 py-2 text-sm">
                 <span className="mr-2 rounded bg-neutral-100 px-1.5 py-0.5 font-mono text-xs text-neutral-700">
                   {ev.kind}
                 </span>
@@ -173,10 +170,8 @@ export default function Home() {
 function EventBody({ ev }: { ev: AgentEvent }) {
   const d = ev.data ?? {};
   if (ev.kind === "text") return <span>{d.text}</span>;
-  if (ev.kind === "thinking")
-    return <span className="text-neutral-500 italic">{d.thinking}</span>;
-  if (ev.kind === "error")
-    return <span className="text-red-600">{d.error}</span>;
+  if (ev.kind === "thinking") return <span className="text-neutral-500 italic">{d.thinking}</span>;
+  if (ev.kind === "error") return <span className="text-red-600">{d.error}</span>;
   if (ev.kind === "sandbox")
     return (
       <span className="text-neutral-600 font-mono text-xs">
@@ -184,9 +179,5 @@ function EventBody({ ev }: { ev: AgentEvent }) {
       </span>
     );
   if (Object.keys(d).length === 0) return null;
-  return (
-    <span className="font-mono text-xs text-neutral-600">
-      {JSON.stringify(d)}
-    </span>
-  );
+  return <span className="font-mono text-xs text-neutral-600">{JSON.stringify(d)}</span>;
 }

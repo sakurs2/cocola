@@ -4,6 +4,7 @@ Source of truth for all gRPC service contracts. Generated stubs are NOT committe
 (see `.gitignore` → `gen/`); CI runs `make proto-gen` and publishes artifacts.
 
 ## Layout
+
 ```
 cocola/
   common/v1/   # shared messages (Error, Pagination, AuditMeta, …)
@@ -12,6 +13,7 @@ cocola/
 ```
 
 ## Conventions
+
 - Always `v1`, `v2`, … never unversioned.
 - `service` names are PascalCase noun + "Service".
 - One `.proto` file per top-level service to keep generated code paths predictable.

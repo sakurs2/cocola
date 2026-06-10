@@ -121,9 +121,7 @@ class Verifier:
             user_id=str(sub),
             tenant_id=str(claims.get("ten") or ""),
             issued_at=float(claims.get("iat") or 0.0),
-            expires_at=(
-                float(claims["exp"]) if claims.get("exp") is not None else None
-            ),
+            expires_at=(float(claims["exp"]) if claims.get("exp") is not None else None),
             token_id=str(claims.get("jti") or ""),
         )
 

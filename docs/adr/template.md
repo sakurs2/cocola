@@ -7,7 +7,7 @@
 ## Context
 
 What problem are we solving? What forces are at play (functional, non-functional,
-business constraints)? What did we explicitly *not* address?
+business constraints)? What did we explicitly _not_ address?
 
 ## Decision
 
@@ -17,6 +17,7 @@ reader can understand the choice without reading the rejected options.
 ## Alternatives Considered
 
 For each non-trivial alternative:
+
 - **Option A** — what it is, why we rejected it (pros / cons).
 - **Option B** — …
 

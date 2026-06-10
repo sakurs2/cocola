@@ -13,6 +13,7 @@ Public surface:
 
 See ADR-0005.
 """
+
 from cocola_llm_gateway.quota.enforcer import Enforcer, QuotaExceeded
 from cocola_llm_gateway.quota.overrides import (
     MemoryOverrideStore,

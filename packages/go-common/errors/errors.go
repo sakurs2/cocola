@@ -8,12 +8,12 @@ import "fmt"
 type Code string
 
 const (
-	CodeUnknown        Code = "UNKNOWN"
-	CodeInvalidArg     Code = "INVALID_ARGUMENT"
-	CodeNotFound       Code = "NOT_FOUND"
+	CodeUnknown          Code = "UNKNOWN"
+	CodeInvalidArg       Code = "INVALID_ARGUMENT"
+	CodeNotFound         Code = "NOT_FOUND"
 	CodePermissionDenied Code = "PERMISSION_DENIED"
-	CodeUnavailable    Code = "UNAVAILABLE"
-	CodeInternal       Code = "INTERNAL"
+	CodeUnavailable      Code = "UNAVAILABLE"
+	CodeInternal         Code = "INTERNAL"
 )
 
 // Error is the standard application error.

@@ -16,6 +16,7 @@ SSE event sequence we emit (matching Anthropic's documented order):
     message_start -> content_block_start -> (content_block_delta)* ->
     content_block_stop -> message_delta -> message_stop
 """
+
 from __future__ import annotations
 
 import json
@@ -183,13 +184,18 @@ async def stream_to_anthropic_sse(
         if not started:
             started = True
             frames.append(
-                sse_frame("message_start", _message_start_payload(message_id, model, usage or Usage()))
+                sse_frame(
+                    "message_start", _message_start_payload(message_id, model, usage or Usage())
+                )
             )
             frames.append(
                 sse_frame(
                     "content_block_start",
-                    {"type": "content_block_start", "index": 0,
-                     "content_block": {"type": "text", "text": ""}},
+                    {
+                        "type": "content_block_start",
+                        "index": 0,
+                        "content_block": {"type": "text", "text": ""},
+                    },
                 )
             )
             block_open = True
@@ -213,8 +219,11 @@ async def stream_to_anthropic_sse(
                     yield f
                 yield sse_frame(
                     "content_block_delta",
-                    {"type": "content_block_delta", "index": 0,
-                     "delta": {"type": "text_delta", "text": ev.text}},
+                    {
+                        "type": "content_block_delta",
+                        "index": 0,
+                        "delta": {"type": "text_delta", "text": ev.text},
+                    },
                 )
             elif ev.type is StreamEventType.MESSAGE_DELTA:
                 if ev.usage is not None:
@@ -227,11 +236,15 @@ async def stream_to_anthropic_sse(
                     yield f
                 yield sse_frame(
                     "error",
-                    {"type": "error",
-                     "error": {"type": ev.code or "api_error", "message": ev.error}},
+                    {
+                        "type": "error",
+                        "error": {"type": ev.code or "api_error", "message": ev.error},
+                    },
                 )
                 if block_open:
-                    yield sse_frame("content_block_stop", {"type": "content_block_stop", "index": 0})
+                    yield sse_frame(
+                        "content_block_stop", {"type": "content_block_stop", "index": 0}
+                    )
                 yield sse_frame("message_stop", {"type": "message_stop"})
                 errored = True
                 break
@@ -252,9 +265,11 @@ async def stream_to_anthropic_sse(
         yield sse_frame("content_block_stop", {"type": "content_block_stop", "index": 0})
     yield sse_frame(
         "message_delta",
-        {"type": "message_delta",
-         "delta": {"stop_reason": finish_reason, "stop_sequence": None},
-         "usage": {"output_tokens": out_tokens}},
+        {
+            "type": "message_delta",
+            "delta": {"stop_reason": finish_reason, "stop_sequence": None},
+            "usage": {"output_tokens": out_tokens},
+        },
     )
     yield sse_frame("message_stop", {"type": "message_stop"})
 

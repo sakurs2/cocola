@@ -1,4 +1,5 @@
 """Configuration primitives. Concrete loaders arrive in M3."""
+
 from __future__ import annotations
 
 from enum import Enum

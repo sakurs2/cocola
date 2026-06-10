@@ -17,7 +17,7 @@ Two gaps had to close to reach a backend MVP:
 
 1. **agent-runtime had no network surface.** It was a library + an M0 banner
    `__main__`. The proto already declared `AgentRuntimeService.Query` as a
-   *server-streaming* RPC, but nothing served it.
+   _server-streaming_ RPC, but nothing served it.
 2. **gateway was an M0 stub.** It needed to terminate HTTP, verify cocola
    tokens, dial agent-runtime over gRPC, and relay the event stream to the
    client.
@@ -47,7 +47,7 @@ another user. The agent client is hidden behind a narrow `Streamer` interface,
 making the SSE handler testable with a fake.
 
 **The HS256 token codec is promoted to `packages/go-common/token`.** admin-api
-mints tokens and gateway verifies them with the *same* codec — one Go
+mints tokens and gateway verifies them with the _same_ codec — one Go
 implementation, byte-compatible with the Python gateway's `auth/jwt.py`.
 
 ## Alternatives Considered
@@ -76,7 +76,7 @@ implementation, byte-compatible with the Python gateway's `auth/jwt.py`.
   Both new surfaces have hermetic unit tests. One token codec is shared by every
   Go service, eliminating drift. SSE adds zero new dependencies.
 - **Negative / accepted risk** — gateway↔agent-runtime is plaintext gRPC (internal
-  network trust); TLS/mTLS is deferred to M6. Token *revocation* (jti denylist
+  network trust); TLS/mTLS is deferred to M6. Token _revocation_ (jti denylist
   lookup) is not yet enforced on the gateway hot path — only signature + expiry +
   issuer are checked. SSE is one-directional, so mid-stream client→agent
   interrupts beyond a connection close are out of scope.
@@ -131,10 +131,9 @@ from the runtime.
   left to the M2 reaper/lease rather than forced at stream end, so a sandbox
   survives across a session's multiple `Query` turns.
 
-
 ## Addendum — make the sandbox actually used: SDK tools execute inside it
 
-Binding gave the session a sandbox; this step makes the agent's *hands* land in
+Binding gave the session a sandbox; this step makes the agent's _hands_ land in
 it. The Claude Agent SDK owns the ReAct loop and decides when to run a command or
 touch a file, but those tool calls must execute inside the session's real sandbox
 — not on the agent-runtime host. We reuse the SDK's **in-process MCP** mechanism
@@ -159,7 +158,7 @@ rather than inventing a tool transport:
   whose handlers call the executor against the closed-over `sandbox_id` (the agent
   never sees or can spoof which sandbox it runs in). Handlers return the SDK's
   tool-result shape (`{"content":[{"type":"text","text":...}], "is_error":bool}`).
-  A sandbox-level failure (executor `error` / transport raise) is a tool *error*;
+  A sandbox-level failure (executor `error` / transport raise) is a tool _error_;
   a command that ran but exited non-zero is NOT — the agent sees the exit code and
   streams and decides, mirroring a real shell. `build_sandbox_mcp_server` is the
   only place the SDK is imported, bundling the defs into the in-process server and
@@ -178,7 +177,6 @@ rather than inventing a tool transport:
   the right args, results map to the SDK shape, and failures become tool errors
   without raising. Provider tests assert the server mounts only when both executor
   and bound sandbox are present. No subprocess, no socket, no model.
-
 
 ## Local orchestration (`make up`)
 

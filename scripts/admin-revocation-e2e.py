@@ -19,13 +19,13 @@ Steps:
 
 Run:  apps/llm-gateway/.venv/bin/python scripts/admin-revocation-e2e.py
 """
+
 import asyncio
 import os
 import subprocess
 import sys
 
 import httpx
-
 from cocola_llm_gateway.auth import AuthConfig, MemoryRevocationStore, Verifier
 from cocola_llm_gateway.server import create_app
 from tests.conftest import build_service
@@ -54,9 +54,23 @@ MSG = {
 def go_mint(secret, user, tenant, issuer="cocola", ttl=3600):
     env = {**GOENV, "COCOLA_AUTH_SECRET": secret}
     out = subprocess.run(
-        [GOBIN, "run", "./cmd/admin-mint",
-         "-user", user, "-tenant", tenant, "-issuer", issuer, "-ttl", str(ttl)],
-        cwd=ADMIN_API, env=env, capture_output=True, text=True,
+        [
+            GOBIN,
+            "run",
+            "./cmd/admin-mint",
+            "-user",
+            user,
+            "-tenant",
+            tenant,
+            "-issuer",
+            issuer,
+            "-ttl",
+            str(ttl),
+        ],
+        cwd=ADMIN_API,
+        env=env,
+        capture_output=True,
+        text=True,
     )
     if out.returncode != 0:
         raise RuntimeError("admin-mint failed: " + out.stderr.strip())
@@ -72,13 +86,13 @@ async def run():
 
     # 1) Mint in Go.
     tok = go_mint(SECRET, "emp-77", "team-r")
-    print("go-mint    : minted token (%d chars)" % len(tok))
+    print(f"go-mint    : minted token ({len(tok)} chars)")
 
     # 2) Verify in Python; the Go-minted token must carry a jti.
     ident = verifier.verify(tok)
     jti = ident.token_id
     assert jti, "Go-minted token has no jti -> denylist key missing"
-    print("interop    : verified Go token -> user=%s jti=%s" % (ident.user_id, jti))
+    print(f"interop    : verified Go token -> user={ident.user_id} jti={jti}")
 
     # 3) Denylist present but EMPTY -> request passes.
     svc, _ = build_service(reply="ok")

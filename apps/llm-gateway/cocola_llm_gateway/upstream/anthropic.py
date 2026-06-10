@@ -10,6 +10,7 @@ Nothing about any endpoint is hardcoded here; the defaults below are the public
 Anthropic values and exist purely so a developer with their own key can run it,
 never to point at an internal inference endpoint.
 """
+
 from __future__ import annotations
 
 import json
@@ -17,8 +18,8 @@ from collections.abc import AsyncIterator
 from dataclasses import dataclass
 
 import httpx
-
 from cocola_common import ErrorCode
+
 from cocola_llm_gateway.types import ChatRequest, StreamEvent, StreamEventType, Usage
 from cocola_llm_gateway.upstream.errors import UpstreamError
 
@@ -123,7 +124,9 @@ class AnthropicUpstream:
         except httpx.TimeoutException as e:
             yield StreamEvent(StreamEventType.ERROR, error=f"upstream timeout: {e}", code="timeout")
         except httpx.HTTPError as e:
-            yield StreamEvent(StreamEventType.ERROR, error=f"upstream transport error: {e}", code="transport")
+            yield StreamEvent(
+                StreamEventType.ERROR, error=f"upstream transport error: {e}", code="transport"
+            )
 
     async def _parse_stream(self, resp: httpx.Response) -> AsyncIterator[StreamEvent]:
         """Parse Anthropic SSE frames into normalized StreamEvents."""

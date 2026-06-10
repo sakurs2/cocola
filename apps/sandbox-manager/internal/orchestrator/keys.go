@@ -17,16 +17,16 @@ const keyPrefix = "cocola:sb:"
 
 // Default lifecycle timings. The user picked these:
 //   - leaseTTL:       a sandbox whose lease is not renewed within this window is
-//                     considered idle and becomes eligible for stage-1 reclaim.
+//     considered idle and becomes eligible for stage-1 reclaim.
 //   - heartbeatEvery: how often the heartbeat worker renews live leases. Must be
-//                     comfortably less than leaseTTL (here 1/3) so a single
-//                     missed tick never expires a healthy lease.
+//     comfortably less than leaseTTL (here 1/3) so a single
+//     missed tick never expires a healthy lease.
 //   - destroyGrace:   after a sandbox is Paused (stage 1), how long it lingers
-//                     before it is Destroyed (stage 2). A re-acquire during this
-//                     window resurrects it (Resume) instead of paying a cold
-//                     create.
+//     before it is Destroyed (stage 2). A re-acquire during this
+//     window resurrects it (Resume) instead of paying a cold
+//     create.
 //   - lockTTL:        safety cap on the per-session create lock so a crashed
-//                     holder cannot wedge a session forever.
+//     holder cannot wedge a session forever.
 const (
 	DefaultLeaseTTL       = 60 * time.Second
 	DefaultHeartbeatEvery = 20 * time.Second
@@ -36,27 +36,32 @@ const (
 )
 
 // convKey maps a session id to its bound sandbox id (forward lookup).
-//   cocola:sb:conv:{session} -> sandbox_id
+//
+//	cocola:sb:conv:{session} -> sandbox_id
 func convKey(sessionID string) string { return keyPrefix + "conv:" + sessionID }
 
 // revKey maps a sandbox id back to its session id (reverse lookup, used on
 // reclaim to clean the forward entry without a scan).
-//   cocola:sb:rev:{sandbox} -> session_id
+//
+//	cocola:sb:rev:{sandbox} -> session_id
 func revKey(sandboxID string) string { return keyPrefix + "rev:" + sandboxID }
 
 // lockKey guards the create-and-bind critical section for a session.
-//   cocola:sb:lock:{session} -> lock token
+//
+//	cocola:sb:lock:{session} -> lock token
 func lockKey(sessionID string) string { return keyPrefix + "lock:" + sessionID }
 
 // leaseKey is the heartbeat-renewed liveness marker for a sandbox. It carries a
 // TTL; when it disappears the reaper treats the sandbox as idle.
-//   cocola:sb:lease:{sandbox} -> "1"  (EX leaseTTL)
+//
+//	cocola:sb:lease:{sandbox} -> "1"  (EX leaseTTL)
 func leaseKey(sandboxID string) string { return keyPrefix + "lease:" + sandboxID }
 
 // metaPrefix is the scan root for the durable per-sandbox registry record. Meta
 // keys deliberately carry NO TTL: they are the reaper's source of truth for
 // what exists. The lease (which does expire) is what signals idleness.
-//   cocola:sb:meta:{sandbox} -> JSON(meta)
+//
+//	cocola:sb:meta:{sandbox} -> JSON(meta)
 const metaPrefix = keyPrefix + "meta:"
 
 func metaKey(sandboxID string) string { return metaPrefix + sandboxID }

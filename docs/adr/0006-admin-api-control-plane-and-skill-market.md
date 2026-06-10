@@ -26,7 +26,7 @@ Three forces shape the design:
 1. **The identity language is already fixed (ADR-0005).** Tokens are compact
    HS256 JWS with `sub/ten/iat/exp/iss`, verified offline by the Python gateway.
    Anything that mints tokens must produce **byte-identical** output the gateway
-   already accepts — across a *language boundary* (Go issuer → Python verifier).
+   already accepts — across a _language boundary_ (Go issuer → Python verifier).
 
 2. **No persistence decision is due yet.** ADR (M7) owns the PostgreSQL/Redis
    tiering. M5 must not pre-empt it, but must not hard-code a backend either.
@@ -63,7 +63,7 @@ byte-compatible with the gateway's `auth/jwt.py`: same header
 `{"alg":"HS256","typ":"JWT"}`, same compact `b64url(header).b64url(payload).
 b64url(sig)`, base64url **without padding**, constant-time compare on verify.
 The same rationale as ADR-0005 applies (no third-party JWT surface; one module
-to swap for RS256/JWKS later) — now it must also hold *across languages*. The
+to swap for RS256/JWKS later) — now it must also hold _across languages_. The
 cross-language e2e (`scripts/admin-m5-e2e.py`) is the guard: a token **minted in
 Go** is **verified in Python**, and tokens with a wrong secret or foreign issuer
 are rejected. This is the M5 acceptance proof.
@@ -76,7 +76,7 @@ answer to ADR-0005's revocation follow-up: a **denylist keyed by an opaque token
 id**, not key rotation. Rotation is just "issue new + revoke old" with the same
 two endpoints.
 
-> Update (denylist closed loop, 2026-06-09): the gateway now *consults* the
+> Update (denylist closed loop, 2026-06-09): the gateway now _consults_ the
 > denylist on the hot path — see "Addendum" below. The remaining-half note that
 > stood here (deferring consumption to M6) is superseded; the consumption side
 > shipped together with the `jti` claim that keys it.
@@ -87,7 +87,7 @@ two endpoints.
 override; `GET`/`DELETE` round it out. This is the data the gateway's quota
 `Enforcer` (ADR-0005) reads to **supersede its static env caps per
 user/tenant** — the dynamic-quota follow-up. M5 owns the authoritative override
-store + API; the gateway now *reads* those overrides on the quota path (with a
+store + API; the gateway now _reads_ those overrides on the quota path (with a
 small TTL cache) — see the quota-override addendum below. The deferral note that
 stood here is superseded; the consumption side shipped with the override seam.
 
@@ -130,7 +130,7 @@ the admin-api useful in deployments that haven't turned on signed-token auth yet
   internal tool needs today. A static key + audit trail is sufficient and
   upgradeable.
 - **Key rotation instead of a denylist for revocation.** Rotating the signing
-  secret invalidates *every* token at once — too blunt for "revoke one
+  secret invalidates _every_ token at once — too blunt for "revoke one
   employee's token". A per-id denylist revokes precisely; rotation remains
   available as "issue new + revoke old".
 - **A shared Go/Python JWT library via codegen or cgo.** Over-engineered for ~40
@@ -143,13 +143,13 @@ the admin-api useful in deployments that haven't turned on signed-token auth yet
 ## Consequences
 
 - **Positive:** cocola has a control plane that closes ADR-0005's four
-  follow-ups' *source of truth* — self-service minting, precise revocation
+  follow-ups' _source of truth_ — self-service minting, precise revocation
   (denylist), dynamic per-subject quota, and a curated Skill-Market — all
   audited, all behind one swappable `Store`. Cross-language identity interop is
   proven by an e2e (Go mint → Python verify). Token minting is optional, so the
   service is useful before signed-token auth is enabled.
 - **Negative:** admin auth is still a single shared key with no per-operator
-  RBAC; the stores remain in-memory for *durability* (a restart loses records)
+  RBAC; the stores remain in-memory for _durability_ (a restart loses records)
   until M7 wires a persistent backend (PG). The fleet-wide propagation gaps that
   stood here are closed — see the addenda: the gateway reads quota overrides and
   the denylist on the hot path, the admin-api publishes both to a shared Redis so
@@ -160,17 +160,16 @@ the admin-api useful in deployments that haven't turned on signed-token auth yet
     hot path; admin-api publishing both to a shared Redis (fleet-wide propagation);
     agent-runtime skill loader consuming `Enabled` entries. See the addenda below.
   - **M7:** PostgreSQL `Store` implementation (Redis is already the propagation
-    backend) behind the existing interface for *durability*; durable audit log;
+    backend) behind the existing interface for _durability_; durable audit log;
     a live cross-process Redis e2e once a real backend is available.
   - **Per-operator admin identities + RBAC** replacing the shared admin key.
   - Optional **RS256/JWKS** if a non-cocola token issuer is ever introduced
     (the Go and Python codecs swap in lockstep, guarded by the same e2e).
 
-
 ## Addendum: denylist closed loop (`jti` + gateway gate)
 
-The original M5 shipped the denylist's *source of truth* (the admin-api endpoints
-above) but left the gateway-side *consumption* for later. That half is now done,
+The original M5 shipped the denylist's _source of truth_ (the admin-api endpoints
+above) but left the gateway-side _consumption_ for later. That half is now done,
 closing ADR-0005's revocation follow-up end to end.
 
 The gap was structural: the admin-api keys revocation by `TokenRecord.ID`, but
@@ -208,11 +207,10 @@ only within a process. Pointing both at the same Redis (admin-api writes on
 revoke take effect fleet-wide — the wiring is in place (`COCOLA_LLM_REDIS_URL`),
 the durability decision is M7's.
 
-
 ## Addendum: dynamic quota-override consumption (gateway reads the source of truth)
 
-The original M5 shipped the override's *source of truth* (`PUT/GET/DELETE
-/admin/quotas` above) but left the gateway-side *consumption* for M6. That half
+The original M5 shipped the override's _source of truth_ (`PUT/GET/DELETE
+/admin/quotas` above) but left the gateway-side _consumption_ for M6. That half
 is now done, closing ADR-0005's dynamic-quota follow-up end to end: an admin
 override now actually changes what the gateway enforces, per subject.
 
@@ -222,7 +220,7 @@ matched on both sides:
 - **no override -> `None`** -> fall back to the static env cap (QuotaPolicy
   default for that scope),
 - **override `N>0`** -> the per-subject cap,
-- **override `0`** -> *explicitly unlimited* for that subject.
+- **override `0`** -> _explicitly unlimited_ for that subject.
 
 This mirrors the Go `QuotaOverride` exactly (a `Limit` of 0 means "explicitly
 unlimited") and the policy's existing `limit <= 0 == unlimited`. The Python
@@ -238,7 +236,7 @@ cache stores both "has an override" and "no override", so an uncapped subject
 does not hit the backend on every call.
 
 The `Enforcer` (ADR-0005) gained an optional `overrides` field. Before checking
-or committing a layer it resolves the *effective* limit via `_limit_for(scope,
+or committing a layer it resolves the _effective_ limit via `_limit_for(scope,
 subject, default)`: the override if present, else the static default. A subtle
 consequence is that overrides can **enable a cap the static policy leaves
 unlimited**, so the enforcer can no longer short-circuit on the policy alone —
@@ -259,16 +257,15 @@ separate in-memory stores. Pointing both at the same Redis (admin-api writes on
 take effect fleet-wide — the wiring is in place (`COCOLA_LLM_REDIS_URL` plus
 `COCOLA_QUOTA_OVERRIDE_CACHE_TTL_SECS`), the durability decision is M7's.
 
-
 ## Addendum: shared-Redis fleet-wide propagation (admin-api publishes what gateways read)
 
 Both addenda above ended on the same open gap: the admin-api owns the
 authoritative records, but its denylist and override stores were separate
 in-memory stores from the gateway's `RevocationStore` / `OverrideStore`, so a
 revoke or override only took effect within a process. The gateway already
-*reads* the shared keys (`RedisRevocationStore` -> SET `cocola:revoked`,
+_reads_ the shared keys (`RedisRevocationStore` -> SET `cocola:revoked`,
 `RedisOverrideStore` -> HASH `cocola:quota:override`); the missing half was the
-admin-api *writing* them. That half is now done, so a revoke/override takes
+admin-api _writing_ them. That half is now done, so a revoke/override takes
 effect **fleet-wide**.
 
 The bridge is a **`store.Mirror` decorator**, not a change to the service or
@@ -302,7 +299,6 @@ cover the read side. A live end-to-end across two processes is left to a
 deployment with a real Redis. Durability/tiering remains M7's call — this
 addendum only connects the two existing seams onto one backend.
 
-
 ## Addendum: agent-runtime skill loader (the runtime consumes `Enabled` entries)
 
 The Skill-Market decision above established the admin-owned catalog and noted the
@@ -333,4 +329,3 @@ to the agent today. The loader is covered by hermetic unit tests
 (`tests/test_skill_loader.py`): JSON->Skill mapping, the defensive filter, the
 bearer header, graceful degrade on transport/parse error, and the
 options-merge behavior.
-

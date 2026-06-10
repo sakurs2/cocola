@@ -29,11 +29,16 @@ def test_to_chat_request_lifts_system_and_keeps_alias():
 def test_to_chat_request_flattens_block_content():
     body = {
         "model": "m",
-        "messages": [{"role": "user", "content": [
-            {"type": "text", "text": "a"},
-            {"type": "image", "source": {}},
-            {"type": "text", "text": "b"},
-        ]}],
+        "messages": [
+            {
+                "role": "user",
+                "content": [
+                    {"type": "text", "text": "a"},
+                    {"type": "image", "source": {}},
+                    {"type": "text", "text": "b"},
+                ],
+            }
+        ],
     }
     req = to_chat_request(body, resolved_model="m")
     assert req.messages[-1].content == "ab"
@@ -44,17 +49,24 @@ async def test_stream_to_sse_event_order():
         StreamEvent(StreamEventType.MESSAGE_START, usage=Usage(prompt_tokens=2), model="m"),
         StreamEvent(StreamEventType.CONTENT_DELTA, text="he"),
         StreamEvent(StreamEventType.CONTENT_DELTA, text="llo"),
-        StreamEvent(StreamEventType.MESSAGE_DELTA, usage=Usage(completion_tokens=2),
-                    finish_reason="end_turn"),
+        StreamEvent(
+            StreamEventType.MESSAGE_DELTA,
+            usage=Usage(completion_tokens=2),
+            finish_reason="end_turn",
+        ),
         StreamEvent(StreamEventType.MESSAGE_STOP),
     ]
     frames = b"".join([f async for f in stream_to_anthropic_sse(_events(seq), fallback_model="m")])
     text = frames.decode()
     order = [ln.split(":", 1)[1].strip() for ln in text.splitlines() if ln.startswith("event:")]
     assert order == [
-        "message_start", "content_block_start",
-        "content_block_delta", "content_block_delta",
-        "content_block_stop", "message_delta", "message_stop",
+        "message_start",
+        "content_block_start",
+        "content_block_delta",
+        "content_block_delta",
+        "content_block_stop",
+        "message_delta",
+        "message_stop",
     ]
     assert '"text": "he"' in text and '"text": "llo"' in text
 
@@ -66,7 +78,9 @@ async def test_sse_closes_source_generator():
 
     async def gen():
         try:
-            yield StreamEvent(StreamEventType.MESSAGE_START, usage=Usage(prompt_tokens=1), model="m")
+            yield StreamEvent(
+                StreamEventType.MESSAGE_START, usage=Usage(prompt_tokens=1), model="m"
+            )
             yield StreamEvent(StreamEventType.CONTENT_DELTA, text="x")
             yield StreamEvent(StreamEventType.MESSAGE_STOP)
             yield StreamEvent(StreamEventType.CONTENT_DELTA, text="never")
@@ -82,7 +96,9 @@ async def test_collect_closes_source_generator():
 
     async def gen():
         try:
-            yield StreamEvent(StreamEventType.MESSAGE_START, usage=Usage(prompt_tokens=1), model="m")
+            yield StreamEvent(
+                StreamEventType.MESSAGE_START, usage=Usage(prompt_tokens=1), model="m"
+            )
             yield StreamEvent(StreamEventType.CONTENT_DELTA, text="hi")
             yield StreamEvent(StreamEventType.MESSAGE_STOP)
         finally:

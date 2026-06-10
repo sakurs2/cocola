@@ -19,6 +19,7 @@ endpoint).
 
 HARD CONSTRAINT (ADR-0004): no endpoint/key is hardcoded; all come from config.
 """
+
 from __future__ import annotations
 
 import json
@@ -31,6 +32,7 @@ if TYPE_CHECKING:
     from cocola_llm_gateway.quota.policy import QuotaPolicy
 
 from cocola_common import CocolaError, ErrorCode, get_logger
+
 from cocola_llm_gateway.registry import ModelRoute, Pricing, Registry
 from cocola_llm_gateway.upstream.anthropic import AnthropicConfig, AnthropicUpstream
 from cocola_llm_gateway.upstream.base import UpstreamProvider
@@ -57,7 +59,8 @@ def _build_from_dict(spec: dict) -> Registry:
       {
         "default_alias": "cocola-default",
         "providers": {
-          "anthropic": {"type": "anthropic", "base_url": "...", "api_key_env": "COCOLA_ANTHROPIC_API_KEY"},
+          "anthropic": {"type": "anthropic", "base_url": "...",
+                        "api_key_env": "COCOLA_ANTHROPIC_API_KEY"},
           "fake": {"type": "fake"}
         },
         "routes": {
@@ -202,7 +205,7 @@ def _load_yaml(text: str) -> dict:
             ErrorCode.INVALID_ARGUMENT,
             "YAML config requires pyyaml; use a .json config or install pyyaml",
             cause=e,
-        )
+        ) from e
     return yaml.safe_load(text)
 
 
@@ -221,7 +224,7 @@ def gateway_config_from_env() -> GatewayConfig:
 # --------------------------------------------------------------------------- #
 
 
-def auth_config_from_env() -> "AuthConfig":
+def auth_config_from_env() -> AuthConfig:
     """Build AuthConfig from env.
 
     COCOLA_AUTH_SECRET           HS256 signing secret. Empty => auth disabled
@@ -241,7 +244,7 @@ def auth_config_from_env() -> "AuthConfig":
     )
 
 
-def quota_policy_from_env() -> "QuotaPolicy":
+def quota_policy_from_env() -> QuotaPolicy:
     """Build QuotaPolicy from env. A limit of 0 disables that layer.
 
     COCOLA_QUOTA_USER_DAILY_TOKENS     per-user daily token cap (0 => unlimited).

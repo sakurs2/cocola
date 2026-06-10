@@ -16,6 +16,7 @@ a half-counted call.
 This mirrors the M2 go-common/redis approach: an async client wrapper, graceful
 behavior on absence (the caller falls back to MemoryLedger if Redis is down).
 """
+
 from __future__ import annotations
 
 import json
@@ -59,13 +60,13 @@ def _agg_from_hash(h: dict) -> Aggregate:
 
 
 class RedisLedger:
-    def __init__(self, client: "aioredis.Redis", *, detail_ttl_s: int = 7 * 24 * 3600):
+    def __init__(self, client: aioredis.Redis, *, detail_ttl_s: int = 7 * 24 * 3600):
         self._r = client
         self._ttl = detail_ttl_s
         self._record_sha: str | None = None
 
     @classmethod
-    def from_url(cls, url: str, **kw) -> "RedisLedger":
+    def from_url(cls, url: str, **kw) -> RedisLedger:
         client = aioredis.from_url(url, encoding="utf-8", decode_responses=True)
         return cls(client, **kw)
 

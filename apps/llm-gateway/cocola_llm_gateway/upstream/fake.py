@@ -10,6 +10,7 @@ Token accounting is intentionally simple and stable: prompt_tokens ~ whitespace
 word count of the input, completion_tokens == number of streamed chunks. Tests
 assert on these exact numbers, so the heuristic must stay deterministic.
 """
+
 from __future__ import annotations
 
 import asyncio

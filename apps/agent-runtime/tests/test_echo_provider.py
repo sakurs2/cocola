@@ -1,6 +1,6 @@
 """Smoke test for M0 plumbing."""
-import pytest
 
+import pytest
 from cocola_agent_runtime.agent_provider import AgentOptions
 from cocola_agent_runtime.echo_provider import EchoProvider
 

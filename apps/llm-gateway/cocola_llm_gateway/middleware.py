@@ -18,6 +18,7 @@ Composition: `stream = ResilientStreamer(provider, policy).chat_stream(req)`.
 The result is itself an async iterator of StreamEvent, so it is a drop-in for a
 raw provider from the server's perspective.
 """
+
 from __future__ import annotations
 
 import asyncio
@@ -26,6 +27,7 @@ from collections.abc import AsyncIterator
 from dataclasses import dataclass
 
 from cocola_common import get_logger
+
 from cocola_llm_gateway.types import ChatRequest, StreamEvent, StreamEventType
 from cocola_llm_gateway.upstream.base import UpstreamProvider
 from cocola_llm_gateway.upstream.errors import UpstreamError
@@ -36,10 +38,10 @@ log = get_logger("cocola.llm-gateway.middleware")
 @dataclass
 class ResiliencePolicy:
     timeout_s: float = 90.0
-    max_retries: int = 2          # attempts beyond the first, pre-first-byte only
-    backoff_base_s: float = 0.2   # exponential: base * 2**attempt
-    rate_limit_rps: float = 0.0   # 0 disables; otherwise tokens/sec per key
-    rate_burst: int = 0           # bucket capacity; defaults to ceil(rps) if 0
+    max_retries: int = 2  # attempts beyond the first, pre-first-byte only
+    backoff_base_s: float = 0.2  # exponential: base * 2**attempt
+    rate_limit_rps: float = 0.0  # 0 disables; otherwise tokens/sec per key
+    rate_burst: int = 0  # bucket capacity; defaults to ceil(rps) if 0
 
 
 class _TokenBucket:
@@ -88,8 +90,12 @@ def _rate_key(req: ChatRequest) -> str:
 
 
 class ResilientStreamer:
-    def __init__(self, provider: UpstreamProvider, policy: ResiliencePolicy,
-                 limiter: RateLimiter | None = None):
+    def __init__(
+        self,
+        provider: UpstreamProvider,
+        policy: ResiliencePolicy,
+        limiter: RateLimiter | None = None,
+    ):
         self._provider = provider
         self._policy = policy
         self._limiter = limiter or RateLimiter(policy.rate_limit_rps, policy.rate_burst)
@@ -126,10 +132,12 @@ class ResilientStreamer:
                 log.info("retrying upstream", attempt=attempt, delay_s=delay, reason=str(rs))
                 await asyncio.sleep(delay)
                 continue
-            except asyncio.TimeoutError:
-                yield StreamEvent(StreamEventType.ERROR,
-                                  error=f"gateway timeout after {self._policy.timeout_s}s",
-                                  code="timeout")
+            except TimeoutError:
+                yield StreamEvent(
+                    StreamEventType.ERROR,
+                    error=f"gateway timeout after {self._policy.timeout_s}s",
+                    code="timeout",
+                )
                 return
             except UpstreamError as e:
                 if not produced_content and e.retryable and attempt < self._policy.max_retries:
@@ -140,7 +148,9 @@ class ResilientStreamer:
                 return
             except Exception as e:  # normalize anything else
                 log.warning("unexpected upstream error", error=repr(e))
-                yield StreamEvent(StreamEventType.ERROR, error=f"internal error: {e}", code="internal")
+                yield StreamEvent(
+                    StreamEventType.ERROR, error=f"internal error: {e}", code="internal"
+                )
                 return
 
     async def _run_once(self, req: ChatRequest) -> AsyncIterator[StreamEvent]:
@@ -154,7 +164,7 @@ class ResilientStreamer:
         while True:
             remaining = deadline - time.monotonic()
             if remaining <= 0:
-                raise asyncio.TimeoutError()
+                raise TimeoutError()
             try:
                 ev = await asyncio.wait_for(agen.__anext__(), timeout=remaining)
             except StopAsyncIteration:

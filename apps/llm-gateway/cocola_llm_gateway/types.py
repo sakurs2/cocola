@@ -16,6 +16,7 @@ Design rules:
 - `Usage` is the billing source of truth. Upstreams populate it from whatever
   the vendor reports; the metering hook reads it at stream end.
 """
+
 from __future__ import annotations
 
 from dataclasses import dataclass, field
@@ -99,7 +100,7 @@ class Usage:
     def total_tokens(self) -> int:
         return self.prompt_tokens + self.completion_tokens
 
-    def merge(self, other: "Usage") -> None:
+    def merge(self, other: Usage) -> None:
         """Anthropic reports input tokens in message_start and output tokens
         incrementally in message_delta; we accumulate into one Usage."""
         self.prompt_tokens = max(self.prompt_tokens, other.prompt_tokens)

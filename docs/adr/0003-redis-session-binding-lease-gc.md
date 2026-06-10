@@ -6,7 +6,7 @@
 
 ## Context
 
-A logical chat *session* must map to exactly one live *sandbox* across its
+A logical chat _session_ must map to exactly one live _sandbox_ across its
 lifetime: every turn of a conversation has to land in the same container so the
 workspace (`/workspace/<session_id>`), installed packages, and process state
 persist between turns. M1 gave us a stateless `Create/Exec/Destroy` surface with
@@ -18,7 +18,7 @@ Three forces shape the design:
 1. **Horizontal scale.** `sandbox-manager` must run as N stateless replicas
    behind a load balancer. Any replica may receive any request for any session,
    so the binding map cannot live in process memory — it must be shared state.
-2. **Concurrency safety.** When a burst of requests for a *brand-new* session
+2. **Concurrency safety.** When a burst of requests for a _brand-new_ session
    arrives simultaneously (e.g. a client opens several tabs, or retries), they
    must converge on **one** sandbox, not race to create duplicates. 50 concurrent
    sessions must produce exactly 50 sandboxes.
@@ -38,14 +38,14 @@ holds **no** per-session state in memory, so replicas are interchangeable.
 
 Key model (prefix `cocola:sb:`):
 
-| Key | Value | TTL | Purpose |
-|---|---|---|---|
-| `conv:{session}` | sandbox id | none | forward lookup (session → sandbox) |
-| `rev:{sandbox}` | session id | none | reverse lookup for cleanup |
-| `meta:{sandbox}` | JSON record | none | durable registry; reaper's source of truth |
-| `lock:{session}` | owner token | `LockTTL` 30s | guards create-and-bind critical section |
-| `lease:{sandbox}` | `"1"` | `LeaseTTL` 60s | heartbeat-renewed liveness signal |
-| `reaplock:{sandbox}` | owner token | 5s | one-replica-per-sandbox reap guard |
+| Key                  | Value       | TTL            | Purpose                                    |
+| -------------------- | ----------- | -------------- | ------------------------------------------ |
+| `conv:{session}`     | sandbox id  | none           | forward lookup (session → sandbox)         |
+| `rev:{sandbox}`      | session id  | none           | reverse lookup for cleanup                 |
+| `meta:{sandbox}`     | JSON record | none           | durable registry; reaper's source of truth |
+| `lock:{session}`     | owner token | `LockTTL` 30s  | guards create-and-bind critical section    |
+| `lease:{sandbox}`    | `"1"`       | `LeaseTTL` 60s | heartbeat-renewed liveness signal          |
+| `reaplock:{sandbox}` | owner token | 5s             | one-replica-per-sandbox reap guard         |
 
 `conv/rev/meta` are durable; only `lease` (and the locks) expire. Idleness is
 signalled by the **absence** of a lease, never by deleting meta — so the reaper
@@ -67,10 +67,10 @@ Lua script so a crash can never leave a half-written binding.
   `Acquire` renews on every hit; long-running tasks that hold a sandbox between
   acquires call `Heartbeat`. `HeartbeatEvery` (20s) is one third of `LeaseTTL`
   (60s), so a single missed pulse never expires a healthy lease.
-- **Stage 1 — Pause (idle).** When an *active* sandbox's lease lapses, the reaper
+- **Stage 1 — Pause (idle).** When an _active_ sandbox's lease lapses, the reaper
   `Pause`s it (container freeze) and marks it `paused`. The workspace is
   preserved.
-- **Stage 2 — Destroy (expired).** A *paused* sandbox left untouched for
+- **Stage 2 — Destroy (expired).** A _paused_ sandbox left untouched for
   `DestroyGrace` (120s) is `Destroy`ed and fully unbound.
 - **Resurrection.** Any `Acquire`/`Heartbeat` on a paused sandbox `Resume`s it
   and flips it back to active — a returning user pays a cheap resume, not a cold

@@ -1,5 +1,4 @@
 import pytest
-
 from cocola_common import CocolaError, ErrorCode
 from cocola_llm_gateway.registry import ModelRoute, Pricing, Registry
 from cocola_llm_gateway.upstream.fake import FakeUpstream
