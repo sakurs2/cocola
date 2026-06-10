@@ -87,20 +87,91 @@ mkdir -p "$LOG_DIR"
 
 PIDS=()
 
+# Ports this script owns. Teardown frees every one of them as a hard backstop:
+# go run / uv run / pnpm dev fork the real listeners as grandchildren that get
+# reparented to launchd on macOS, escaping our process group -- so killing the
+# group is NOT enough to guarantee the port is released. Freeing by port is.
+OWNED_PORTS=("$AGENT_PORT" "$GATEWAY_PORT")
+[[ "$WITH_LLM" == "1" ]] && OWNED_PORTS+=("$LLM_PORT")
+[[ "$WITH_WEB" == "1" ]] && OWNED_PORTS+=("$WEB_PORT")
+
 log_redirect() { printf '%s/%s.log' "$LOG_DIR" "$1"; }
 
+# Graceful, deterministic teardown. The contract: when this returns, NONE of our
+# ports stay occupied. Three phases, escalating only as needed:
+#   1. SIGTERM each service process group  -> lets go/uv/node flush & exit.
+#   2. wait briefly for them to die on their own.
+#   3. SIGKILL any survivor groups, then free every owned port by force.
+# Phase 3 port sweep is the backstop that catches reparented grandchildren the
+# process-group signal cannot reach (the real cause of "exited but port busy").
+_SHUTTING_DOWN=0
 cleanup() {
+  # The trap fires for INT/TERM and again for the subsequent EXIT; run once.
+  [[ "$_SHUTTING_DOWN" == "1" ]] && return
+  _SHUTTING_DOWN=1
+  trap '' INT TERM   # ignore repeat Ctrl-C while we tear down
+
   echo
   echo "==> shutting down dev stack"
+
+  # Phase 1: polite SIGTERM to each process group (fall back to the bare pid).
   for pid in "${PIDS[@]:-}"; do
     [[ -n "$pid" ]] || continue
-    # Kill the whole process group so go-run / uv child procs die too.
-    kill -- "-$pid" >>"$LOG_DIR/cleanup.log" 2>&1 || kill "$pid" >>"$LOG_DIR/cleanup.log" 2>&1 || true
+    kill -TERM -- "-$pid" 2>>"$LOG_DIR/cleanup.log" \
+      || kill -TERM "$pid" 2>>"$LOG_DIR/cleanup.log" || true
   done
+
+  # Phase 2: give them up to ~3s to exit cleanly.
+  for ((i=0; i<15; i++)); do
+    alive=0
+    for pid in "${PIDS[@]:-}"; do
+      [[ -n "$pid" ]] || continue
+      kill -0 "$pid" 2>>"$LOG_DIR/cleanup.log" && alive=1
+    done
+    [[ "$alive" == "0" ]] && break
+    sleep 0.2
+  done
+
+  # Phase 3a: SIGKILL any process groups still standing.
+  for pid in "${PIDS[@]:-}"; do
+    [[ -n "$pid" ]] || continue
+    kill -KILL -- "-$pid" 2>>"$LOG_DIR/cleanup.log" \
+      || kill -KILL "$pid" 2>>"$LOG_DIR/cleanup.log" || true
+  done
+
+  # Phase 3b: backstop -- guarantee every port we own is released, whatever still
+  # holds it (reparented children are unreachable via the process group).
+  for port in "${OWNED_PORTS[@]:-}"; do
+    [[ -n "$port" ]] || continue
+    free_port "$port" "teardown" >>"$LOG_DIR/cleanup.log" 2>&1 || true
+  done
+
   wait 2>>"$LOG_DIR/cleanup.log" || true
-  echo "==> done."
+  echo "==> done. all owned ports released."
 }
 trap cleanup EXIT INT TERM
+
+# Free a TCP port before we bind it. A previous run that crashed (or a stray
+# diagnostic process) can leave a server squatting one of our ports; the new
+# child then fails to bind and the request silently flows to the WRONG process
+# (this actually bit us: a stale llm-gateway on 8081 swallowed traffic so the
+# real one logged nothing). Kill any listener on the port up front. macOS-safe:
+# resolve PIDs via lsof, then SIGTERM, escalate to SIGKILL if still alive.
+free_port() {
+  local port="$1" name="$2" pids
+  pids="$(lsof -ti "TCP:$port" -s "TCP:LISTEN" 2>/dev/null || true)"
+  [[ -z "$pids" ]] && return 0
+  echo "==> port $port ($name) busy; freeing stale listener(s): $pids"
+  # shellcheck disable=SC2086
+  kill $pids 2>/dev/null || true
+  for ((i=0; i<10; i++)); do
+    pids="$(lsof -ti "TCP:$port" -s "TCP:LISTEN" 2>/dev/null || true)"
+    [[ -z "$pids" ]] && return 0
+    sleep 0.3
+  done
+  # shellcheck disable=SC2086
+  kill -9 $pids 2>/dev/null || true
+}
 
 # Wait until a TCP port accepts a connection. Uses nc (preinstalled on macOS).
 wait_port() {
@@ -130,6 +201,7 @@ fi
 
 # ----------------------------------------------------------------- llm-gateway
 if [[ "$WITH_LLM" == "1" ]]; then
+  free_port "$LLM_PORT" llm-gateway
   ( cd apps/llm-gateway && \
     COCOLA_LLM_HOST="$LLM_HOST" COCOLA_LLM_PORT="$LLM_PORT" \
     $SETSID uv run python -m cocola_llm_gateway ) >"$(log_redirect llm-gateway)" 2>&1 &
@@ -155,6 +227,7 @@ AGENT_API_KEY="cocola-local"
 [[ "$WITH_LLM" == "1" ]] && AGENT_API_KEY="$TOKEN"
 
 # ----------------------------------------------------------------- agent-runtime
+free_port "$AGENT_PORT" agent-runtime
 (
   cd apps/agent-runtime
   COCOLA_AGENT_HOST="$AGENT_HOST" COCOLA_AGENT_PORT="$AGENT_PORT" \
@@ -169,6 +242,7 @@ echo "==> starting agent-runtime on $AGENT_ADDR (log: .run-logs/agent-runtime.lo
 wait_port "$AGENT_HOST" "$AGENT_PORT" "agent-runtime"
 
 # ----------------------------------------------------------------- gateway
+free_port "$GATEWAY_PORT" gateway
 (
   COCOLA_GATEWAY_ADDR="$GATEWAY_ADDR" COCOLA_AGENT_ADDR="$AGENT_ADDR" \
     $SETSID go run ./apps/gateway/cmd/gateway
@@ -179,6 +253,7 @@ wait_port "$GATEWAY_HOST" "$GATEWAY_PORT" "gateway"
 
 # ----------------------------------------------------------------- web (opt-in)
 if [[ "$WITH_WEB" == "1" ]]; then
+  free_port "$WEB_PORT" web
   (
     cd apps/web
     COCOLA_GATEWAY_URL="http://$GATEWAY_ADDR" \
