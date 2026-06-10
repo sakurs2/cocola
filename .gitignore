@@ -73,3 +73,4 @@ tmp/*
 
 # real llm-gateway upstream config (contains your endpoint); keep only the .example
 deploy/llm-config.json
+.drawio-tmp
