@@ -9,6 +9,7 @@
     "lint": "pnpm -r lint"
   },
   "devDependencies": {
+    "prettier": "^3.8.4",
     "typescript": "^5.4.5"
   }
 }

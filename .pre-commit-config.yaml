@@ -1,0 +1,59 @@
+# cocola pre-commit hooks
+# 设计原则：
+#   - 全部使用 repo: local，调用本机工具，避免在企业 TLS 代理下从 GitHub
+#     拉取远程 hook 仓库失败（buf / go modules 已知会被拦截）。
+#   - 默认只做「格式化 + 轻量 lint」，保证快、确定、可自动修复。
+#   - 安装：pip install pre-commit && pre-commit install
+#           （或 uv tool install pre-commit）
+#   - 一次性全量跑：pre-commit run --all-files
+fail_fast: false
+default_stages: [pre-commit]
+
+repos:
+  - repo: local
+    hooks:
+      # ---------------- 通用卫生 ----------------
+      - id: trailing-whitespace
+        name: trim trailing whitespace
+        entry: python3 scripts/hooks/fix_whitespace.py
+        language: system
+        types: [text]
+        exclude: '(^|/)(packages/proto/gen/|tmp/)|\.md$'
+
+      # ---------------- Python: ruff ----------------
+      - id: ruff-format
+        name: ruff format (python)
+        entry: ruff format
+        language: system
+        types_or: [python, pyi]
+        exclude: '(^|/)(packages/proto/gen/)'
+      - id: ruff-check
+        name: ruff check --fix (python)
+        entry: ruff check --fix
+        language: system
+        types_or: [python, pyi]
+        exclude: '(^|/)(packages/proto/gen/)'
+
+      # ---------------- Go: gofmt ----------------
+      - id: gofmt
+        name: gofmt (go)
+        entry: gofmt -w -s
+        language: system
+        types: [go]
+        exclude: '(^|/)(gen/)|\.pb\.go$'
+
+      # ---------------- 前端 / 配置文件: prettier ----------------
+      - id: prettier
+        name: prettier (ts/tsx/js/json/css/md/yaml)
+        entry: bash scripts/hooks/prettier.sh
+        language: system
+        types_or: [ts, tsx, javascript, jsx, json, css, scss, markdown, yaml]
+        exclude: '(^|/)(packages/proto/gen/)|pnpm-lock\.yaml$|apps/web/tsconfig\.json$'
+
+      # ---------------- Proto: buf format（可选，缺工具自动跳过）----------------
+      - id: buf-format
+        name: buf format (proto)
+        entry: bash scripts/hooks/buf_format.sh
+        language: system
+        files: '\.proto$'
+        pass_filenames: true

@@ -1,0 +1,10 @@
+# Root ruff config: applies to apps/agent-runtime, apps/llm-gateway, and any
+# Python without a nearer [tool.ruff]. Kept in sync with
+# packages/py-common/pyproject.toml ([tool.ruff]).
+line-length = 100
+target-version = "py311"
+
+extend-exclude = ["packages/proto/gen", "**/__pycache__"]
+
+[lint]
+select = ["E", "F", "I", "UP", "B", "SIM"]

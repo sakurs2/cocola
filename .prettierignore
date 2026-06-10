@@ -1,0 +1,12 @@
+node_modules/
+.next/
+out/
+dist/
+build/
+packages/proto/gen/
+pnpm-lock.yaml
+*.log
+tmp/
+.data/
+.run-logs/
+apps/web/tsconfig.json

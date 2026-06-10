@@ -55,6 +55,13 @@ go-test: ## Run all Go tests
 go-lint: ## Run golangci-lint
 	golangci-lint run ./...
 
+go-format: ## Format Go code (gofmt -w -s)
+	@gofmt -w -s $$(git ls-files '*.go' | grep -v -E '(/gen/|\.pb\.go$$)')
+
+go-format-check: ## Check gofmt formatting (lists offenders, non-zero if any)
+	@out=$$(gofmt -l -s $$(git ls-files '*.go' | grep -v -E '(/gen/|\.pb\.go$$)')); \
+		if [ -n "$$out" ]; then echo "gofmt needed:"; echo "$$out"; exit 1; fi
+
 # -------------------------------------------------------------------- python
 .PHONY: py-install py-test py-lint py-format
 py-install: ## Install Python deps (uv sync)
@@ -65,10 +72,10 @@ py-test: ## Run Python tests
 	@for a in $(PY_APPS); do (cd apps/$$a && uv run pytest); done
 
 py-lint: ## Lint Python code (ruff)
-	ruff check apps/agent-runtime apps/llm-gateway packages/py-common
+	ruff check apps/agent-runtime apps/llm-gateway packages/py-common scripts
 
 py-format: ## Format Python code (ruff format)
-	ruff format apps/agent-runtime apps/llm-gateway packages/py-common
+	ruff format apps/agent-runtime apps/llm-gateway packages/py-common scripts
 
 # -------------------------------------------------------------------- frontend
 .PHONY: web-install web-dev web-build web-lint
@@ -83,6 +90,12 @@ web-build: ## Build Next.js production bundle
 
 web-lint: ## Lint web code
 	cd apps/web && pnpm lint
+
+web-format: ## Format web/ts/json/md/yaml with prettier
+	node_modules/.bin/prettier --write --ignore-unknown "apps/web/**/*.{ts,tsx,js,jsx,css,json,md}" "packages/ts-common/**/*.ts"
+
+web-format-check: ## Check prettier formatting (no write)
+	node_modules/.bin/prettier --check --ignore-unknown "apps/web/**/*.{ts,tsx,js,jsx,css,json,md}" "packages/ts-common/**/*.ts"
 
 # -------------------------------------------------------------------- sandbox (M1)
 # The sandbox-manager Go build is run inside a Linux golang container. The
@@ -121,12 +134,22 @@ up-all: ## ... + llm-gateway (real SDK path) + web
 	bash scripts/run-stack.sh --all
 
 # -------------------------------------------------------------------- aggregate
-.PHONY: install test lint clean
+.PHONY: install test lint format format-check precommit-install clean
 install: go-tidy py-install web-install ## Install all deps
 
 test: go-test py-test ## Run all tests
 
 lint: go-lint py-lint web-lint proto-lint ## Run all linters
+
+format: go-format py-format web-format ## Auto-format all languages (Go/Python/web)
+
+format-check: go-format-check web-format-check ## Verify formatting without writing (CI)
+	ruff format --check apps/agent-runtime apps/llm-gateway packages/py-common scripts
+	ruff check apps/agent-runtime apps/llm-gateway packages/py-common scripts
+
+precommit-install: ## Install the git pre-commit hook (pip/uv install pre-commit first)
+	pre-commit install
+	@echo "pre-commit hook installed. Run 'pre-commit run --all-files' to format everything."
 
 clean: ## Remove build artifacts
 	rm -rf bin/ apps/web/.next apps/web/out
