@@ -166,6 +166,7 @@ def create_app(
                 event_stream, fallback_model=resolved_model
             )
         except Exception as e:
+            log.warning("upstream drain failed", error=repr(e))
             return _err(ErrorCode.UNAVAILABLE, f"upstream error: {e}")
         return JSONResponse(payload)
 

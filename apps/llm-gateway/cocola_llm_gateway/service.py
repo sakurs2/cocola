@@ -114,6 +114,11 @@ class GatewayService:
                 elif ev.type is StreamEventType.ERROR:
                     status = "error"
                     error = ev.error
+                    log.warning(
+                        "upstream stream error",
+                        error=ev.error,
+                        code=getattr(ev, "code", None),
+                    )
                 yield ev
         finally:
             # Always record + commit, even on partial/error streams.

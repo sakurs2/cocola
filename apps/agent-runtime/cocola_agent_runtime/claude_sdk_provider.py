@@ -29,6 +29,11 @@ mapping logic below is identical either way.
 
 from __future__ import annotations
 
+import atexit
+import json
+import pathlib
+import shutil
+import tempfile
 from collections.abc import AsyncIterator
 from dataclasses import dataclass, field
 from typing import Any, Callable, Optional
@@ -77,6 +82,7 @@ class ClaudeAgentSDKProvider:
         executor: Optional["SandboxExecutor"] = None,
     ):
         self._config = config
+        self._iso_config_dir: Optional[str] = None
         # When set, the agent's bash/file tools are routed into the session's
         # bound sandbox via an in-process MCP server (see sandbox_tools). When
         # None, the agent runs with only its built-in tools (no sandbox IO).
@@ -90,6 +96,31 @@ class ClaudeAgentSDKProvider:
 
             self._query = claude_agent_sdk.query
 
+    def _isolated_config_dir(self) -> str:
+        """Return a private, empty Claude config dir, creating it once.
+
+        Why this exists (the 503 bug): Claude Code applies the `env` block from
+        the user's *global* ``~/.claude/settings.json`` with HIGHER precedence
+        than the process environment we inject. A developer running cocola will
+        almost always have a real Anthropic/proxy endpoint pinned there
+        (``ANTHROPIC_BASE_URL``, ``ANTHROPIC_AUTH_TOKEN``, model overrides...),
+        so our ``ANTHROPIC_BASE_URL=<cocola gateway>`` got silently overridden
+        and every model call shot straight past cocola to that endpoint —
+        which doesn't know cocola's model aliases and returns 503.
+
+        Empirically (and per the SDK/CLI source) neither ``--setting-sources=``
+        nor ``--settings <json>`` overrides that global env block. The only
+        reliable fix is to point the CLI at a *different* config dir that has no
+        settings, via ``CLAUDE_CONFIG_DIR`` / ``ANTHROPIC_CONFIG_DIR``. Then our
+        injected env is authoritative and traffic flows through cocola.
+        """
+        if self._iso_config_dir is None:
+            d = tempfile.mkdtemp(prefix="cocola-claude-config-")
+            (pathlib.Path(d) / "settings.json").write_text(json.dumps({}))
+            self._iso_config_dir = d
+            atexit.register(shutil.rmtree, d, ignore_errors=True)
+        return self._iso_config_dir
+
     def _build_env(self) -> dict[str, str]:
         # Claude Code distinguishes two auth modes that map to different HTTP
         # headers (verified against the CLI docs):
@@ -102,9 +133,17 @@ class ClaudeAgentSDKProvider:
         # gateway-proxy mode is exactly what ANTHROPIC_AUTH_TOKEN is for, so we
         # present the credential there. The gateway's _bearer() accepts both
         # `Authorization` and `x-api-key`, so this stays compatible.
+        iso = self._isolated_config_dir()
         env = {
             "ANTHROPIC_BASE_URL": self._config.base_url,
             "ANTHROPIC_AUTH_TOKEN": self._config.api_key,
+            # Isolate from the user's global ~/.claude/settings.json `env` block,
+            # which otherwise overrides ANTHROPIC_BASE_URL and breaks routing.
+            "CLAUDE_CONFIG_DIR": iso,
+            "ANTHROPIC_CONFIG_DIR": iso,
+            # The isolated config drops the user's disable flag; re-assert it so
+            # the CLI does not phone home to api.anthropic.com for telemetry.
+            "CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC": "1",
         }
         env.update(self._config.extra_env)
         return env
