@@ -60,8 +60,13 @@ packages/proto/gen/**/__pycache__/
 
 # ---- Local data ----
 .data/
-tmp/
+# ignore tmp/ contents (use tmp/* so git still recurses into tmp/ and the
+# re-include below can take effect; `tmp/` would exclude the dir wholesale)
+tmp/*
 *.log
+# ...except the multi-agent dev change-log: it is committed on purpose so
+# collaborators (human or AI) can read project history after a fresh clone.
+!tmp/dev/
 
 # run-stack.sh per-service logs (local dev stack)
 .run-logs/
