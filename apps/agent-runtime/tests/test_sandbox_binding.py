@@ -168,3 +168,61 @@ async def test_manager_binder_bridges_blocking_client(monkeypatch):
 
     await binder.release(session_id="S2")
     assert captured["release"] == "S2"
+
+
+async def test_manager_binder_applies_provisioning_defaults(monkeypatch):
+    """Route A defaults (image + injected creds) flow into Acquire.
+
+    A binder configured with a default image/env must apply them when the caller
+    pins neither -- this is the seam that makes a session sandbox the Claude-Code
+    brain image and carries ANTHROPIC_* into the sandbox ENV at creation.
+    """
+    import cocola_agent_runtime.sandbox_binder as mod
+
+    @dataclass
+    class _Box:
+        id: str
+        endpoint: str
+
+    @dataclass
+    class _Acq:
+        sandbox: object
+        reused: bool
+
+    captured = {}
+
+    class FakeClient:
+        def __init__(self, addr=""):
+            pass
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *a):
+            return False
+
+        def acquire(self, session_id, user_id="", image="", env=None):
+            captured["image"] = image
+            captured["env"] = env
+            return _Acq(sandbox=_Box(id="b", endpoint="e"), reused=False)
+
+    monkeypatch.setattr(mod, "SandboxClient", FakeClient)
+
+    binder = SandboxManagerBinder(
+        "addr",
+        default_image="cocola/sandbox-runtime:dev",
+        default_env={"ANTHROPIC_BASE_URL": "http://gw:8081", "ANTHROPIC_MODEL": "cocola-default"},
+    )
+    await binder.acquire(session_id="S3", user_id="u")
+    # Defaults applied when the caller pins neither image nor env.
+    assert captured["image"] == "cocola/sandbox-runtime:dev"
+    assert captured["env"]["ANTHROPIC_BASE_URL"] == "http://gw:8081"
+    assert captured["env"]["ANTHROPIC_MODEL"] == "cocola-default"
+
+    # An explicit per-call value overrides the default; env is merged.
+    await binder.acquire(
+        session_id="S4", user_id="u", image="other:img", env={"ANTHROPIC_MODEL": "fast"}
+    )
+    assert captured["image"] == "other:img"
+    assert captured["env"]["ANTHROPIC_BASE_URL"] == "http://gw:8081"  # default kept
+    assert captured["env"]["ANTHROPIC_MODEL"] == "fast"  # per-call wins

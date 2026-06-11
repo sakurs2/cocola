@@ -84,15 +84,33 @@ class SandboxManagerBinder:
     this object stateless and safe to share across concurrent sessions.
     """
 
-    def __init__(self, addr: str) -> None:
+    def __init__(
+        self,
+        addr: str,
+        *,
+        default_image: str = "",
+        default_env: dict | None = None,
+    ) -> None:
         self._addr = addr
+        # Route A provisioning defaults (ADR-0009): when a caller does not pin an
+        # image/env, the session sandbox is created from these. This is the seam
+        # that makes a session sandbox the Claude-Code brain image and carries
+        # the model credentials (ANTHROPIC_*) into the sandbox ENV at creation --
+        # never via the prompt channel. An explicit per-call value still wins.
+        self._default_image = default_image
+        self._default_env = dict(default_env or {})
 
     async def acquire(
         self, *, session_id: str, user_id: str, image: str = "", env: dict | None = None
     ) -> BoundSandbox:
+        eff_image = image or self._default_image
+        eff_env = {**self._default_env, **(env or {})}
+
         def _call() -> BoundSandbox:
             with SandboxClient(addr=self._addr) as sb:
-                res = sb.acquire(session_id=session_id, user_id=user_id, image=image, env=env or {})
+                res = sb.acquire(
+                    session_id=session_id, user_id=user_id, image=eff_image, env=eff_env
+                )
             box = res.sandbox
             return BoundSandbox(id=box.id, endpoint=box.endpoint, reused=res.reused)
 

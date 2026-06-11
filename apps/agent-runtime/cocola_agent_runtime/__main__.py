@@ -15,6 +15,11 @@ Env (all optional; sensible local defaults):
                                              AND routes the agent's bash/file tools into it)
     COCOLA_AGENT_ROUTE                       "A" => run agent inside the sandbox via the shim
                                              (Route A, ADR-0009); default/unset => Route B
+    COCOLA_SANDBOX_IMAGE                      Route A brain image for the session sandbox
+                                             (e.g. cocola/sandbox-runtime); empty => provider default
+    COCOLA_SANDBOX_LLM_BASE_URL              gateway root injected into the sandbox as ANTHROPIC_BASE_URL
+    COCOLA_SANDBOX_LLM_TOKEN                 cocola token injected as ANTHROPIC_AUTH_TOKEN
+    COCOLA_SANDBOX_MODEL_ALIAS              gateway model alias injected as ANTHROPIC_MODEL / _SMALL_FAST_MODEL
 
 Provider selection: with COCOLA_LLM_BASE_URL set we drive the real Claude Agent
 SDK routed through the gateway; without it we fall back to EchoProvider so a
@@ -99,13 +104,51 @@ def _build_skill_catalog() -> SkillCatalog | None:
     return AdminSkillCatalog(admin_base, admin_key=os.getenv("COCOLA_ADMIN_KEY", ""))
 
 
+def _sandbox_provisioning() -> tuple[str, dict[str, str]]:
+    """Route A (ADR-0009) sandbox image + the ENV injected at creation time.
+
+    The session sandbox runs the WHOLE Claude Code brain, so it must be created
+    from the brain image (COCOLA_SANDBOX_IMAGE, e.g. cocola/sandbox-runtime)
+    rather than the provider's default alpine, and it must carry the model
+    credentials so the in-sandbox `claude` CLI can reach the llm-gateway:
+
+      ANTHROPIC_BASE_URL   <- COCOLA_SANDBOX_LLM_BASE_URL (the gateway root)
+      ANTHROPIC_AUTH_TOKEN <- COCOLA_SANDBOX_LLM_TOKEN (the cocola-issued token)
+      ANTHROPIC_MODEL / ANTHROPIC_SMALL_FAST_MODEL <- COCOLA_SANDBOX_MODEL_ALIAS
+          (both the main and the fast model resolve to a known gateway alias;
+           the registry 404s unknown aliases, so an unset fast model would fail)
+
+    Credentials live in the sandbox ENV, never in the prompt channel. Empty
+    values are dropped so a partially-configured boot doesn't inject blanks.
+    """
+    image = os.getenv("COCOLA_SANDBOX_IMAGE", "").strip()
+    env: dict[str, str] = {}
+    base_url = os.getenv("COCOLA_SANDBOX_LLM_BASE_URL", "").strip()
+    if base_url:
+        env["ANTHROPIC_BASE_URL"] = base_url
+    token = os.getenv("COCOLA_SANDBOX_LLM_TOKEN", "").strip()
+    if token:
+        env["ANTHROPIC_AUTH_TOKEN"] = token
+    alias = os.getenv("COCOLA_SANDBOX_MODEL_ALIAS", "").strip()
+    if alias:
+        env["ANTHROPIC_MODEL"] = alias
+        env["ANTHROPIC_SMALL_FAST_MODEL"] = alias
+    return image, env
+
+
 def _build_binder() -> SandboxBinder | None:
     addr = os.getenv("COCOLA_SANDBOX_ADDR", "").strip()
     if not addr:
         log.warning("COCOLA_SANDBOX_ADDR unset; sessions run without a bound sandbox")
         return None
-    log.info("sandbox binding enabled", sandbox_addr=addr)
-    return SandboxManagerBinder(addr)
+    image, env = _sandbox_provisioning()
+    log.info(
+        "sandbox binding enabled",
+        sandbox_addr=addr,
+        sandbox_image=image or "(provider default)",
+        creds_injected=bool(env.get("ANTHROPIC_BASE_URL")),
+    )
+    return SandboxManagerBinder(addr, default_image=image, default_env=env)
 
 
 def _build_executor() -> SandboxExecutor | None:

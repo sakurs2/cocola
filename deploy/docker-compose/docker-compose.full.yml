@@ -66,10 +66,18 @@ services:
       COCOLA_LLM_HOST: "0.0.0.0"
       COCOLA_LLM_PORT: "8080"
       COCOLA_LLM_REDIS_URL: "redis://redis:6379/0"
-      # No COCOLA_LLM_CONFIG -> built-in FakeUpstream (dev). Mount a real config
-      # and set COCOLA_LLM_CONFIG to route to live providers.
+      # Real model: provider + endpoint + key + model come from the repo-root
+      # .env via compose substitution. Default to "fake" so a bare `up` (no
+      # --env-file) still boots zero-config. We deliberately do NOT forward
+      # COCOLA_AUTH_SECRET here: that would switch gateway auth ON and break the
+      # dev anonymous-token flow; auth enablement is a separate milestone.
+      COCOLA_LLM_PROVIDER: "${COCOLA_LLM_PROVIDER:-fake}"
+      COCOLA_LLM_DEFAULT_ALIAS: "cocola-default"
+      COCOLA_ANTHROPIC_BASE_URL: "${COCOLA_ANTHROPIC_BASE_URL:-}"
+      COCOLA_ANTHROPIC_API_KEY: "${COCOLA_ANTHROPIC_API_KEY:-}"
+      COCOLA_ANTHROPIC_MODEL: "${COCOLA_ANTHROPIC_MODEL:-}"
     ports:
-      - "8081:8080"   # host 8081 to avoid clashing with gateway on 8080
+      - "18091:8080"  # host 18091; avoids clash with gateway (8080) and any stray :8081 listener
     healthcheck:
       test: ["CMD", "python", "-c", "import urllib.request,sys; sys.exit(0) if urllib.request.urlopen('http://localhost:8080/healthz').status==200 else sys.exit(1)"]
       interval: 5s
@@ -115,8 +123,22 @@ services:
       COCOLA_AGENT_PORT: "50061"
       COCOLA_SANDBOX_ADDR: "sandbox-manager:50051"
       COCOLA_ADMIN_BASE_URL: "http://admin-api:8090"
-      # COCOLA_LLM_BASE_URL unset -> EchoProvider (dev). Point it at
-      # http://llm-gateway:8080 to drive the real Claude Agent SDK.
+      # Route A (ADR-0009): the agent-runtime slim image has no node/claude CLI,
+      # so the Claude Code brain runs INSIDE the user's sandbox (the
+      # cocola/sandbox-runtime image, which bakes node + claude + the shim).
+      # agent-runtime is then a pure control-plane router.
+      COCOLA_AGENT_ROUTE: "${COCOLA_AGENT_ROUTE:-A}"
+      # The session sandbox is created from the brain image and gets the model
+      # credentials injected at creation (never via the prompt). The in-sandbox
+      # claude CLI reaches the gateway over the HOST-published port: sandboxes
+      # are created by sandbox-manager via DooD on the host daemon, so they land
+      # on the host bridge, not this compose network. host.docker.internal:18091
+      # -> llm-gateway:8080. ANTHROPIC_AUTH_TOKEN is a dev token (gateway auth
+      # is off); ANTHROPIC_MODEL resolves to the gateway's default alias.
+      COCOLA_SANDBOX_IMAGE: "${COCOLA_SANDBOX_IMAGE:-cocola/sandbox-runtime:dev}"
+      COCOLA_SANDBOX_LLM_BASE_URL: "${COCOLA_SANDBOX_LLM_BASE_URL:-http://host.docker.internal:18091}"
+      COCOLA_SANDBOX_LLM_TOKEN: "${COCOLA_SANDBOX_LLM_TOKEN:-cocola-local}"
+      COCOLA_SANDBOX_MODEL_ALIAS: "${COCOLA_SANDBOX_MODEL_ALIAS:-cocola-default}"
     ports:
       - "50061:50061"
 
