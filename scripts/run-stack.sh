@@ -235,6 +235,7 @@ free_port "$AGENT_PORT" agent-runtime
   COCOLA_AGENT_API_KEY="$AGENT_API_KEY" \
   COCOLA_ANTHROPIC_MODEL="${COCOLA_LLM_DEFAULT_ALIAS:-cocola-default}" \
   COCOLA_SANDBOX_ADDR="${COCOLA_SANDBOX_ADDR:-}" \
+  COCOLA_AGENT_ROUTE="${COCOLA_AGENT_ROUTE:-}" \
     $SETSID uv run python -m cocola_agent_runtime
 ) >"$(log_redirect agent-runtime)" 2>&1 &
 PIDS+=("$!")

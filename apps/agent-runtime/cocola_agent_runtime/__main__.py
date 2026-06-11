@@ -13,6 +13,8 @@ Env (all optional; sensible local defaults):
     COCOLA_ADMIN_KEY                         admin bearer key (if admin-api auth is on)
     COCOLA_SANDBOX_ADDR                      sandbox-manager gRPC addr (binds session->sandbox
                                              AND routes the agent's bash/file tools into it)
+    COCOLA_AGENT_ROUTE                       "A" => run agent inside the sandbox via the shim
+                                             (Route A, ADR-0009); default/unset => Route B
 
 Provider selection: with COCOLA_LLM_BASE_URL set we drive the real Claude Agent
 SDK routed through the gateway; without it we fall back to EchoProvider so a
@@ -43,6 +45,25 @@ log = get_logger("cocola.agent-runtime")
 
 
 def _build_provider(executor: SandboxExecutor | None) -> AgentProvider:
+    # Route A (ADR-0009): run the WHOLE Claude Code brain inside the user's own
+    # sandbox via the in-sandbox stdio shim. agent-runtime is then a pure
+    # control-plane router. Gated behind an explicit env switch so the default
+    # stays Route B -- this makes the cut-over a grey-launch with a one-line
+    # rollback (unset COCOLA_AGENT_ROUTE). Route A needs a real sandbox to run
+    # in; without an executor there is nowhere to put the brain, so we fall back.
+    route = os.getenv("COCOLA_AGENT_ROUTE", "").strip().upper()
+    if route == "A":
+        if executor is None:
+            log.warning(
+                "COCOLA_AGENT_ROUTE=A but no sandbox executor "
+                "(COCOLA_SANDBOX_ADDR unset); falling back to Route B"
+            )
+        else:
+            from cocola_agent_runtime.shim_provider import InSandboxShimProvider
+
+            log.info("using InSandboxShimProvider (Route A: brain in sandbox)")
+            return InSandboxShimProvider(executor)
+
     base_url = os.getenv("COCOLA_LLM_BASE_URL", "").strip()
     if not base_url:
         log.warning("COCOLA_LLM_BASE_URL unset; using EchoProvider (no real model calls)")

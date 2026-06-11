@@ -1,0 +1,155 @@
+"""InSandboxShimProvider tests (Route A, ADR-0009).
+
+Hermetic: no Docker, no gRPC, no real shim. A StaticSandboxExecutor scripts the
+in-sandbox shim's NDJSON stdout (including a tool_use turn and a line split
+across two byte chunks), and we assert the provider:
+
+  - maps shim NDJSON events to the generic AgentEvent taxonomy, in order;
+  - reassembles a JSON line that was split mid-line across exec chunks;
+  - captures the session_id from `done` and reuses it as `resume` next turn;
+  - turns a shim error / non-zero exit into a clean terminal error event;
+  - refuses to run Route A without a bound sandbox_id.
+"""
+
+from __future__ import annotations
+
+import json
+
+from cocola_agent_runtime.agent_provider import AgentOptions
+from cocola_agent_runtime.sandbox_binder import ExecChunk, StaticSandboxExecutor
+from cocola_agent_runtime.shim_provider import InSandboxShimProvider
+
+
+def _ndjson(*objs: dict) -> str:
+    return "".join(json.dumps(o, separators=(",", ":")) + "\n" for o in objs)
+
+
+async def _drain(provider, prompt, options):
+    return [ev async for ev in provider.query(prompt, options)]
+
+
+async def test_maps_tool_use_turn_and_reassembles_split_line():
+    # A realistic shim turn: start (dropped), a text block, a tool_use, a
+    # tool_result, then a done carrying the session_id. We deliberately chop the
+    # stdout into chunks that split a JSON line in the middle to exercise the
+    # line-reassembly buffer.
+    full = _ndjson(
+        {"type": "start", "ts": 1.0},
+        {"type": "text", "text": "Let me check the weather."},
+        {"type": "tool_use", "id": "tu_1", "name": "Bash", "input": {"cmd": "date"}},
+        {"type": "tool_result", "tool_use_id": "tu_1", "is_error": False},
+        {"type": "done", "session_id": "sess-abc", "ts": 2.0},
+    )
+    cut = len(full) // 2  # almost certainly lands inside a line
+
+    def stream_handler(sandbox_id, cmd, stdin):
+        yield ExecChunk(kind="stdout", data=full[:cut])
+        yield ExecChunk(kind="stdout", data=full[cut:])
+        yield ExecChunk(kind="exit", exit_code=0)
+
+    execu = StaticSandboxExecutor(stream_handler=stream_handler)
+    provider = InSandboxShimProvider(execu)
+    opts = AgentOptions(user_id="U1", session_id="S1", sandbox_id="box-1")
+
+    events = await _drain(provider, "weather?", opts)
+    kinds = [e.kind for e in events]
+
+    # start is dropped; we synthesize exactly one terminal done.
+    assert kinds == ["text", "tool_use", "tool_result", "done"], kinds
+    assert events[0].data["text"] == "Let me check the weather."
+    assert events[1].data == {"id": "tu_1", "name": "Bash", "input": {"cmd": "date"}}
+    assert events[2].data["tool_use_id"] == "tu_1"
+    assert events[-1].data == {"session_id": "sess-abc"}
+
+    # The shim was driven via the shim entrypoint with our Request JSON on stdin.
+    assert execu.stream_calls[0]["cmd"] == ["/opt/cocola/shim/entrypoint.sh"]
+    sent = json.loads(execu.stream_calls[0]["stdin"])
+    assert sent["prompt"] == "weather?"
+    assert "resume" not in sent  # first turn has nothing to resume
+
+
+async def test_session_id_is_reused_as_resume_next_turn():
+    def make_handler(session_id):
+        def stream_handler(sandbox_id, cmd, stdin):
+            yield ExecChunk(
+                kind="stdout",
+                data=_ndjson(
+                    {"type": "text", "text": "ok"},
+                    {"type": "done", "session_id": session_id},
+                ),
+            )
+            yield ExecChunk(kind="exit", exit_code=0)
+
+        return stream_handler
+
+    execu = StaticSandboxExecutor(stream_handler=make_handler("sess-1"))
+    provider = InSandboxShimProvider(execu)
+    opts = AgentOptions(user_id="U1", session_id="S1", sandbox_id="box-1")
+
+    await _drain(provider, "first", opts)
+    # Second turn on the SAME session must carry resume=sess-1.
+    execu._stream_handler = make_handler("sess-2")
+    await _drain(provider, "second", opts)
+
+    second_req = json.loads(execu.stream_calls[1]["stdin"])
+    assert second_req["resume"] == "sess-1"
+
+
+async def test_nonzero_exit_becomes_terminal_error():
+    def stream_handler(sandbox_id, cmd, stdin):
+        yield ExecChunk(kind="stderr", data="boom: cli not found\n")
+        yield ExecChunk(kind="exit", exit_code=2)
+
+    execu = StaticSandboxExecutor(stream_handler=stream_handler)
+    provider = InSandboxShimProvider(execu)
+    opts = AgentOptions(user_id="U1", session_id="S1", sandbox_id="box-1")
+
+    events = await _drain(provider, "hi", opts)
+    kinds = [e.kind for e in events]
+    assert "error" in kinds
+    err = next(e for e in events if e.kind == "error")
+    assert "shim exited 2" in err.data["error"]
+    assert "boom" in err.data.get("stderr", "")
+    assert kinds[-1] == "done"  # still terminated cleanly
+
+
+async def test_shim_error_event_is_relayed():
+    def stream_handler(sandbox_id, cmd, stdin):
+        yield ExecChunk(
+            kind="stdout",
+            data=_ndjson(
+                {"type": "error", "stage": "run", "error": "model refused"},
+            ),
+        )
+        yield ExecChunk(kind="exit", exit_code=1)
+
+    execu = StaticSandboxExecutor(stream_handler=stream_handler)
+    provider = InSandboxShimProvider(execu)
+    opts = AgentOptions(user_id="U1", session_id="S1", sandbox_id="box-1")
+
+    events = await _drain(provider, "hi", opts)
+    errs = [e for e in events if e.kind == "error"]
+    assert any("model refused" in e.data.get("error", "") for e in errs)
+
+
+async def test_requires_bound_sandbox():
+    execu = StaticSandboxExecutor()
+    provider = InSandboxShimProvider(execu)
+    opts = AgentOptions(user_id="U1", session_id="S1", sandbox_id=None)
+
+    events = await _drain(provider, "hi", opts)
+    kinds = [e.kind for e in events]
+    assert kinds == ["error", "done"], kinds
+    assert "requires a bound sandbox" in events[0].data["error"]
+    assert execu.stream_calls == []  # never touched the sandbox
+
+
+async def test_exec_stream_default_echoes_command():
+    # Guards the StaticSandboxExecutor.exec_stream default path used by other
+    # tests/dev: echo the command on stdout, then exit 0.
+    execu = StaticSandboxExecutor()
+    chunks = [c async for c in execu.exec_stream(sandbox_id="box-1", cmd=["echo", "hi"])]
+    assert chunks[0].kind == "stdout"
+    assert chunks[0].data == "ran: echo hi"
+    assert chunks[-1].kind == "exit"
+    assert chunks[-1].exit_code == 0
