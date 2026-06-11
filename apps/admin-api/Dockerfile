@@ -11,6 +11,7 @@ FROM golang:1.25-alpine AS build
 WORKDIR /src
 COPY apps/admin-api      ./apps/admin-api
 COPY packages/go-common  ./packages/go-common
+COPY db                  ./db
 WORKDIR /src/apps/admin-api
 # GOWORK=off: build this module standalone via its own go.mod + replace.
 RUN GOWORK=off CGO_ENABLED=0 GOOS=linux go build \

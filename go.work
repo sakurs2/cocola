@@ -3,6 +3,7 @@ go 1.22
 use (
     ./apps/gateway
     ./apps/admin-api
+    ./db
     ./packages/go-common
     ./packages/proto/gen/go
 )

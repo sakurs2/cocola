@@ -65,7 +65,29 @@ func main() {
 		log.Warn("admin auth DISABLED (no COCOLA_ADMIN_KEY) — all callers are dev-admin")
 	}
 
-	var st store.Store = store.NewMemory()
+	// Persistence backend (M7): when COCOLA_PG_DSN is set we run the embedded
+	// goose migrations and use the Postgres store; otherwise we fall back to the
+	// in-memory store so a bare dev boot stays zero-dependency. The choice is
+	// invisible to the service/handlers -- both satisfy store.Store.
+	var st store.Store
+	if dsn := os.Getenv("COCOLA_PG_DSN"); dsn != "" {
+		mctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+		if err := store.Migrate(mctx, dsn); err != nil {
+			cancel()
+			log.Sugar().Fatalf("apply migrations: %v", err)
+		}
+		pg, err := store.NewPostgres(mctx, dsn)
+		cancel()
+		if err != nil {
+			log.Sugar().Fatalf("connect postgres: %v", err)
+		}
+		defer pg.Close()
+		st = pg
+		log.Sugar().Infow("persistence backend: postgres")
+	} else {
+		st = store.NewMemory()
+		log.Warn("persistence backend: in-memory (no COCOLA_PG_DSN) — data is process-local and lost on restart")
+	}
 
 	// Optional shared-Redis publishing: when COCOLA_REDIS_ADDR is set, mirror
 	// revokes + quota overrides to the keys the gateway reads so they apply
