@@ -176,6 +176,10 @@ services:
       NODE_ENV: "production"
       # The browser talks to the gateway; expose its public URL to the app.
       NEXT_PUBLIC_GATEWAY_URL: "http://localhost:8080"
+      # The web server-side SSE proxy (app/api/chat/route.ts) calls the gateway
+      # from INSIDE the compose network, so it must use the service name, not
+      # 127.0.0.1 (which would resolve to the web container itself).
+      COCOLA_GATEWAY_URL: "http://gateway:8080"
     ports:
       - "3000:3000"
 
