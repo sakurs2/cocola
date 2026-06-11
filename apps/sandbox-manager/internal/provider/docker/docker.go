@@ -19,6 +19,7 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"log/slog"
 	"os"
 	"path/filepath"
 	"strings"
@@ -51,6 +52,16 @@ const (
 	guestUserData  = "/data/userdata"
 	guestWorkspace = "/workspace"
 	guestPlugins   = "/data/plugins"
+	// guestClaudeConfig is CLAUDE_CONFIG_DIR inside the brain image
+	// (deploy/sandbox-runtime/Dockerfile): ~/.claude holds Claude Code's
+	// on-disk session files (projects/<proj>/<uuid>.jsonl). Binding it onto a
+	// per-user host dir is the SUFFICIENT condition for --resume to survive a
+	// sandbox recreation (ADR-0008 T2, cross-session).
+	guestClaudeConfig = "/home/cocola/.claude"
+	// sandboxUID is the non-root uid the brain image runs as (Dockerfile:
+	// useradd -u 10001 cocola). A fresh bind-mount is root-owned, so we chown it
+	// to this uid or the in-sandbox claude CLI cannot write its session files.
+	sandboxUID = 10001
 )
 
 // Provider is a Docker-backed SandboxProvider.
@@ -123,10 +134,19 @@ func (p *Provider) Create(ctx context.Context, spec provider.SandboxSpec) (*prov
 	userDir := filepath.Join(p.root, "userdata", safe(spec.UserID))
 	sessDir := filepath.Join(p.root, "workspace", safe(spec.SessionID))
 	pluginDir := filepath.Join(p.root, "plugins")
-	for _, d := range []string{userDir, sessDir, pluginDir} {
+	// Per-user ~/.claude (cross-session): persists Claude Code's on-disk session
+	// files so a follow-up turn can --resume even after the sandbox is recreated.
+	claudeDir := filepath.Join(p.root, "claude", safe(spec.UserID))
+	for _, d := range []string{userDir, sessDir, pluginDir, claudeDir} {
 		if err := os.MkdirAll(d, 0o755); err != nil {
 			return nil, fmt.Errorf("docker: mkdir %s: %w", d, err)
 		}
+	}
+	// The brain runs as the non-root cocola user; a fresh bind-mount is
+	// root-owned, so chown ~/.claude or the claude CLI cannot persist sessions.
+	// Best-effort: a pre-existing dir owned by the right uid is the common case.
+	if err := os.Chown(claudeDir, sandboxUID, sandboxUID); err != nil {
+		slog.Warn("docker: chown claude dir", "dir", claudeDir, "err", err)
 	}
 
 	env := make([]string, 0, len(spec.Env))
@@ -139,6 +159,7 @@ func (p *Provider) Create(ctx context.Context, spec provider.SandboxSpec) (*prov
 			{Type: mount.TypeBind, Source: userDir, Target: guestUserData + "/" + safe(spec.UserID)},
 			{Type: mount.TypeBind, Source: sessDir, Target: guestWorkspace + "/" + safe(spec.SessionID)},
 			{Type: mount.TypeBind, Source: pluginDir, Target: guestPlugins, ReadOnly: true},
+			{Type: mount.TypeBind, Source: claudeDir, Target: guestClaudeConfig},
 		},
 		Resources: container.Resources{
 			NanoCPUs: int64(spec.Resources.CPUCores * 1e9),

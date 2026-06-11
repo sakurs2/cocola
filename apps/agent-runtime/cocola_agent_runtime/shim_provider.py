@@ -35,6 +35,7 @@ from cocola_common import get_logger
 
 from cocola_agent_runtime.agent_provider import AgentEvent, AgentOptions
 from cocola_agent_runtime.sandbox_binder import SandboxExecutor
+from cocola_agent_runtime.session_map import MemorySessionMap, SessionMap
 
 log = get_logger("cocola.agent-runtime.shim")
 
@@ -106,25 +107,33 @@ def _shim_event_to_agent_events(ev: dict) -> list[AgentEvent]:
 class InSandboxShimProvider:
     """AgentProvider that runs the agent inside the bound sandbox via the shim.
 
-    `session_resume` is an in-process session_id -> shim-session-id map so a
-    follow-up turn on the same session can `--resume` the on-disk Claude session
-    (persisted on the per-user volume, ADR-0008). This is deliberately in-memory
-    for now; durable persistence is a later step.
+    The resume binding (cocola session_id -> claude_session_id) lives in a
+    `SessionMap`. With a Postgres-backed map it survives an agent-runtime
+    restart, so a follow-up turn `--resume`s the on-disk Claude session
+    (persisted on the agent volume, ADR-0008). The map is a pure INDEX: the
+    SUFFICIENT condition for resume is the on-disk `~/.claude` session file; the
+    map only records which id to reopen. Defaults to an in-process map so a
+    zero-dependency dev boot still resumes within one process lifetime.
     """
 
-    def __init__(self, executor: SandboxExecutor, *, default_max_turns: int = 20) -> None:
+    def __init__(
+        self,
+        executor: SandboxExecutor,
+        *,
+        default_max_turns: int = 20,
+        session_map: SessionMap | None = None,
+    ) -> None:
         self._executor = executor
         self._default_max_turns = default_max_turns
-        self._session_resume: dict[str, str] = {}
+        self._session_map: SessionMap = session_map or MemorySessionMap()
 
-    def _build_request(self, prompt: str, options: AgentOptions) -> str:
+    def _build_request(self, prompt: str, options: AgentOptions, resume: str | None) -> str:
         req: dict = {
             "prompt": prompt,
             "max_turns": options.max_turns or self._default_max_turns,
         }
         if options.system_prompt:
             req["system_prompt"] = options.system_prompt
-        resume = self._session_resume.get(options.session_id)
         if resume:
             req["resume"] = resume
         return json.dumps(req, ensure_ascii=False, separators=(",", ":"))
@@ -148,7 +157,8 @@ class InSandboxShimProvider:
             yield AgentEvent(kind="done", data={})
             return
 
-        request_json = self._build_request(prompt, options)
+        resume = await self._session_map.get(options.session_id)
+        request_json = self._build_request(prompt, options, resume)
         buf = ""  # holds an incomplete trailing NDJSON line across chunks
         stderr_tail = ""
         last_session_id: str | None = None
@@ -227,9 +237,23 @@ class InSandboxShimProvider:
             saw_error = True
             yield AgentEvent(kind="error", data={"error": f"shim transport error: {exc}"})
 
-        # Persist the session<->shim-session binding for a later --resume.
+        # Persist the session<->claude-session index for a later --resume. A
+        # Postgres-backed map makes this survive an agent-runtime restart; the
+        # write is best-effort so a transient index fault never fails the turn.
         if last_session_id:
-            self._session_resume[options.session_id] = last_session_id
+            try:
+                await self._session_map.put(
+                    options.session_id,
+                    last_session_id,
+                    user_id=options.user_id,
+                    sandbox_id=options.sandbox_id or "",
+                )
+            except Exception as exc:  # noqa: BLE001 - index write is best-effort
+                log.warning(
+                    "session-map put failed",
+                    session_id=options.session_id,
+                    error=repr(exc),
+                )
 
         yield AgentEvent(
             kind="done",

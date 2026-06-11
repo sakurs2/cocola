@@ -16,10 +16,12 @@ Env (all optional; sensible local defaults):
     COCOLA_AGENT_ROUTE                       "A" => run agent inside the sandbox via the shim
                                              (Route A, ADR-0009); default/unset => Route B
     COCOLA_SANDBOX_IMAGE                      Route A brain image for the session sandbox
-                                             (e.g. cocola/sandbox-runtime); empty => provider default
-    COCOLA_SANDBOX_LLM_BASE_URL              gateway root injected into the sandbox as ANTHROPIC_BASE_URL
+                                             (e.g. cocola/sandbox-runtime); empty => default
+    COCOLA_SANDBOX_LLM_BASE_URL              gateway root injected as ANTHROPIC_BASE_URL
     COCOLA_SANDBOX_LLM_TOKEN                 cocola token injected as ANTHROPIC_AUTH_TOKEN
-    COCOLA_SANDBOX_MODEL_ALIAS              gateway model alias injected as ANTHROPIC_MODEL / _SMALL_FAST_MODEL
+    COCOLA_SANDBOX_MODEL_ALIAS               alias injected as ANTHROPIC_MODEL / _SMALL_FAST_MODEL
+    COCOLA_PG_DSN                            Postgres DSN; enables the durable session->claude
+                                             resume index (else in-process, lost on restart)
 
 Provider selection: with COCOLA_LLM_BASE_URL set we drive the real Claude Agent
 SDK routed through the gateway; without it we fall back to EchoProvider so a
@@ -49,6 +51,26 @@ from cocola_agent_runtime.skill_loader import AdminSkillCatalog, SkillCatalog
 log = get_logger("cocola.agent-runtime")
 
 
+def _build_session_map():
+    """session_id -> claude_session_id index for Route A --resume continuation.
+
+    Postgres-backed when COCOLA_PG_DSN is set (survives an agent-runtime
+    restart, so paired with the persistent ~/.claude volume a follow-up turn
+    resumes the real conversation); otherwise an in-process map so a
+    zero-dependency dev boot still works within one process lifetime.
+    """
+    dsn = os.getenv("COCOLA_PG_DSN", "").strip()
+    if dsn:
+        from cocola_agent_runtime.session_map import PostgresSessionMap
+
+        log.info("session-map: Postgres (durable resume index)")
+        return PostgresSessionMap(dsn)
+    from cocola_agent_runtime.session_map import MemorySessionMap
+
+    log.warning("COCOLA_PG_DSN unset; session-map is in-process (resume lost on restart)")
+    return MemorySessionMap()
+
+
 def _build_provider(executor: SandboxExecutor | None) -> AgentProvider:
     # Route A (ADR-0009): run the WHOLE Claude Code brain inside the user's own
     # sandbox via the in-sandbox stdio shim. agent-runtime is then a pure
@@ -66,8 +88,9 @@ def _build_provider(executor: SandboxExecutor | None) -> AgentProvider:
         else:
             from cocola_agent_runtime.shim_provider import InSandboxShimProvider
 
+            session_map = _build_session_map()
             log.info("using InSandboxShimProvider (Route A: brain in sandbox)")
-            return InSandboxShimProvider(executor)
+            return InSandboxShimProvider(executor, session_map=session_map)
 
     base_url = os.getenv("COCOLA_LLM_BASE_URL", "").strip()
     if not base_url:

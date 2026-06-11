@@ -68,6 +68,12 @@ services:
       - "50051:50051"
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock
+      # COCOLA_DATA_ROOT holds every per-session/per-user sandbox volume,
+      # including <root>/claude/<user_id> which is bind-mounted into each Route A
+      # sandbox at /home/cocola/.claude (CLAUDE_CONFIG_DIR). That on-disk Claude
+      # session store is the SUFFICIENT condition for --resume to survive a
+      # sandbox recreation (M7, ADR-0008 T2); the session_map table in Postgres
+      # is only the index that says which claude_session_id to resume.
       - "${COCOLA_DATA_ROOT:-/var/lib/cocola/sandboxes}:${COCOLA_DATA_ROOT:-/var/lib/cocola/sandboxes}"
 
   llm-gateway:
