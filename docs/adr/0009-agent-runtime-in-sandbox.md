@@ -1,7 +1,7 @@
 # ADR-0009: Run the Claude Code agent runtime *inside* each user's sandbox
 
-- Status: Proposed
-- Date: 2026-06-10
+- Status: Accepted (Route A 已落地，见文末「实现进展」；Route B 保留为 fallback)
+- Date: 2026-06-10 (accepted 2026-06-11)
 - Deciders: @wangjiahui
 - Revises: ADR-0007 (gateway BFF + agent-runtime gRPC), ADR-0004 (LLM gateway proxy)
 
@@ -144,3 +144,24 @@ updated ADR-0008.
   - Enforce `Networking.EgressAllowlist` end-to-end (sandbox → llm-gateway only).
   - Run a gVisor (runsc) compatibility spike for Node/Claude Code before full
     build-out (see ADR-0008 backend choice).
+
+## 实现进展（2026-06-11）
+
+Route A 已在本地全栈（docker-compose.full）端到端落地并通过真实模型验证：
+
+- **沙箱基础镜像** `cocola/sandbox-runtime:dev`：Node + claude CLI +
+  claude-agent-sdk + stdio shim（`/opt/cocola/shim/entrypoint.sh`）。已就绪。
+- **agent-runtime 控制面路由**：`COCOLA_AGENT_ROUTE=A` 启用
+  `InSandboxShimProvider`，经 `exec_stream` 把 prompt 喂给沙箱内 shim、把
+  NDJSON 事件流回传。Route B（`ClaudeAgentSDKProvider`）保留为 fallback。
+- **凭证注入**：composition root 把沙箱镜像 + `ANTHROPIC_BASE_URL/AUTH_TOKEN/
+  MODEL` 经 SandboxSpec 注入沙箱 ENV（绝不走 prompt 通道）。沙箱内 CLI 经宿主
+  发布端口回连 llm-gateway 出网。
+- **已验证**：Web 对话、纯文本回复、原生 Bash 工具调用、真实
+  `/v1/messages` 出网计费，均正常。
+
+仍未做（保持本 ADR 的 Follow-ups 状态）：
+
+- **egress allowlist 尚未强制**（沙箱目前可任意出网）—— 上线前必做的硬化项。
+- `sandbox_tools.py` 与 Route-B MCP 路径**尚未删除**（仍作为 fallback 保留）。
+- gVisor 兼容性 spike、K8s provider（M6）未开始。
