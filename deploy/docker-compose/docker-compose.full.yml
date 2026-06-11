@@ -33,6 +33,23 @@ services:
       timeout: 3s
       retries: 10
 
+  postgres:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: cocola
+      POSTGRES_PASSWORD: cocola_dev_pw
+      POSTGRES_DB: cocola
+    ports:
+      - "5432:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U cocola -d cocola"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
   sandbox-manager:
     build:
       context: ../..
@@ -62,6 +79,8 @@ services:
     depends_on:
       redis:
         condition: service_healthy
+      postgres:
+        condition: service_healthy
     environment:
       COCOLA_LLM_HOST: "0.0.0.0"
       COCOLA_LLM_PORT: "8080"
@@ -76,6 +95,10 @@ services:
       COCOLA_ANTHROPIC_BASE_URL: "${COCOLA_ANTHROPIC_BASE_URL:-}"
       COCOLA_ANTHROPIC_API_KEY: "${COCOLA_ANTHROPIC_API_KEY:-}"
       COCOLA_ANTHROPIC_MODEL: "${COCOLA_ANTHROPIC_MODEL:-}"
+      # M7 persistence: when COCOLA_PG_DSN is set the service persists to
+      # Postgres; unset -> in-memory (zero-dep dev boot). Full stack ships
+      # a postgres node, so we default the DSN to it.
+      COCOLA_PG_DSN: "${COCOLA_PG_DSN:-postgres://cocola:cocola_dev_pw@postgres:5432/cocola?sslmode=disable}"
     ports:
       - "18091:8080"  # host 18091; avoids clash with gateway (8080) and any stray :8081 listener
     healthcheck:
@@ -93,10 +116,14 @@ services:
     depends_on:
       redis:
         condition: service_healthy
+      postgres:
+        condition: service_healthy
     environment:
       COCOLA_ADMIN_ADDR: ":8090"
       COCOLA_REDIS_ADDR: "redis:6379"
       # COCOLA_ADMIN_KEY / COCOLA_AUTH_SECRET unset -> dev mode (auth off).
+      # M7 persistence: DSN set -> Postgres repository; unset -> in-memory.
+      COCOLA_PG_DSN: "${COCOLA_PG_DSN:-postgres://cocola:cocola_dev_pw@postgres:5432/cocola?sslmode=disable}"
     ports:
       - "8090:8090"
     healthcheck:
@@ -117,6 +144,8 @@ services:
       llm-gateway:
         condition: service_healthy
       admin-api:
+        condition: service_healthy
+      postgres:
         condition: service_healthy
     environment:
       COCOLA_AGENT_HOST: "0.0.0.0"
@@ -139,6 +168,9 @@ services:
       COCOLA_SANDBOX_LLM_BASE_URL: "${COCOLA_SANDBOX_LLM_BASE_URL:-http://host.docker.internal:18091}"
       COCOLA_SANDBOX_LLM_TOKEN: "${COCOLA_SANDBOX_LLM_TOKEN:-cocola-local}"
       COCOLA_SANDBOX_MODEL_ALIAS: "${COCOLA_SANDBOX_MODEL_ALIAS:-cocola-default}"
+      # M7 persistence: session_map persists to Postgres when DSN set;
+      # unset -> in-process map (lost on restart).
+      COCOLA_PG_DSN: "${COCOLA_PG_DSN:-postgres://cocola:cocola_dev_pw@postgres:5432/cocola?sslmode=disable}"
     ports:
       - "50061:50061"
 
@@ -185,3 +217,4 @@ services:
 
 volumes:
   redisdata:
+  pgdata:
