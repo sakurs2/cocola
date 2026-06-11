@@ -60,13 +60,11 @@ packages/proto/gen/**/__pycache__/
 
 # ---- Local data ----
 .data/
-# ignore tmp/ contents (use tmp/* so git still recurses into tmp/ and the
-# re-include below can take effect; `tmp/` would exclude the dir wholesale)
-tmp/*
+# ignore tmp/ contents wholesale (scratch space, never committed).
+# The multi-agent dev change-log now lives in docs/archive/ (a normal tracked
+# directory), so tmp/ no longer needs any re-include exception.
+tmp/
 *.log
-# ...except the multi-agent dev change-log: it is committed on purpose so
-# collaborators (human or AI) can read project history after a fresh clone.
-!tmp/dev/
 
 # run-stack.sh per-service logs (local dev stack)
 .run-logs/
