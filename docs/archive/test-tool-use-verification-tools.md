@@ -51,3 +51,21 @@
 2. 活体上游:`run-stack.sh --with-llm`(配真实上游)后
    `TOKEN=<dev-token> bash scripts/llm-tooluse-probe.sh`
 3. 全沙箱:`scripts/sandbox-runtime-verify.sh`(需 Docker + gateway 环境)。
+
+## 何时该跑 sandbox-runtime-verify(与前 3 档的分工)
+
+前 3 档(单测 / hermetic e2e / live probe)用 FakeUpstream 或薄链路证明
+**网关编解码层逻辑正确**:tool_use 帧透传、非流式重建、tools 抵达上游、
+计费独立。它们秒级、零(或轻)依赖,是平时回归的主力。
+
+`sandbox-runtime-verify.sh` 是**唯一证明真实端到端链路**的一档:Route-A
+容器内的 Claude CLI 经 shim → 网关 → 真模型,真的发出 tool_use 才能写出
+`proof.txt`——若工具字段被丢,文件不会出现。代价是重依赖(本机 Docker +
+构建 sandbox 镜像 + 真实 ANTHROPIC_BASE_URL/AUTH_TOKEN)。
+
+因此**不必每次回归都跑**,只在以下两个时机跑一次留证据:
+
+1. 改动 sandbox 镜像 / shim / 网关 egress 相关代码时;
+2. 把 ADR-0010 收口为"真上线可用"前的验收。
+
+平时改网关 codec 逻辑,跑前 2 档即可。
