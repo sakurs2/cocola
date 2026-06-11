@@ -88,6 +88,15 @@ func New(opts ...Option) (*Provider, error) {
 		root:      filepath.Join(home, ".cocola", "sandboxes"),
 		sandboxes: map[string]*record{},
 	}
+	// COCOLA_SANDBOX_ROOT pins the host volume root to an explicit absolute path.
+	// This is essential under DooD (sandbox-manager itself in a container talking
+	// to the host Docker daemon): bind-mount Source paths are resolved by the host
+	// daemon, so the root must be a path that is identical inside the container and
+	// on the host (path isomorphism). It is also the seam for pointing the root at
+	// an NFS/NAS mount in production. Empty -> fall back to $HOME/.cocola/sandboxes.
+	if r := os.Getenv("COCOLA_SANDBOX_ROOT"); r != "" {
+		p.root = r
+	}
 	for _, o := range opts {
 		o(p)
 	}

@@ -115,6 +115,10 @@ sandbox-e2e: ## Full M1 smoke test: Go CLI + Python runtime demos
 sandbox-m2-e2e: ## M2 acceptance: 50-session concurrency bench (needs Redis)
 	scripts/sandbox-m2-e2e.sh
 
+.PHONY: demo-minimal
+demo-minimal: ## M-minimal: fully containerised control plane + sandbox + persistence demo
+	bash scripts/demo-minimal.sh
+
 # -------------------------------------------------------------------- dev stack
 # One-click local app stack (NOT the infra in dev-up; that is PostgreSQL/Redis/
 # MinIO). `up` boots agent-runtime + gateway with the EchoProvider so a
