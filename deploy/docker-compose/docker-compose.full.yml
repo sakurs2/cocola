@@ -1,0 +1,161 @@
+# cocola full stack: all service nodes containerised (RocketMQ-style).
+#
+# One command brings up the entire control plane + data plane:
+#   docker compose -f deploy/docker-compose/docker-compose.full.yml up -d
+#
+# Topology:
+#   web -> gateway -> agent-runtime -> {sandbox-manager, llm-gateway, admin-api}
+#   admin-api / llm-gateway <-> redis (revokes, quota, billing)
+#   sandbox-manager -> host docker daemon (DooD) to create user sandboxes
+#
+# Dev defaults: auth is OFF (no COCOLA_AUTH_SECRET / COCOLA_ADMIN_KEY) and the
+# agent uses EchoProvider (no COCOLA_LLM_BASE_URL) so the stack runs zero-config.
+# Flip to production by injecting those env vars -- no code change.
+#
+# DooD path isomorphism (see m-minimal plan): COCOLA_SANDBOX_ROOT must be the
+# SAME absolute path inside sandbox-manager and on the host, so the host daemon
+# resolves the user-sandbox bind mounts. Mounted source==target below.
+
+name: cocola
+
+services:
+  redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+    command: ["redis-server", "--appendonly", "yes"]
+    ports:
+      - "6379:6379"
+    volumes:
+      - redisdata:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  sandbox-manager:
+    build:
+      context: ../..
+      dockerfile: apps/sandbox-manager/Dockerfile
+    image: cocola/sandbox-manager:dev
+    restart: unless-stopped
+    depends_on:
+      redis:
+        condition: service_healthy
+    environment:
+      COCOLA_SANDBOX_ADDR: ":50051"
+      COCOLA_SANDBOX_PROVIDER: "docker"
+      COCOLA_REDIS_ADDR: "redis:6379"
+      COCOLA_SANDBOX_ROOT: "${COCOLA_DATA_ROOT:-/var/lib/cocola/sandboxes}"
+    ports:
+      - "50051:50051"
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+      - "${COCOLA_DATA_ROOT:-/var/lib/cocola/sandboxes}:${COCOLA_DATA_ROOT:-/var/lib/cocola/sandboxes}"
+
+  llm-gateway:
+    build:
+      context: ../..
+      dockerfile: apps/llm-gateway/Dockerfile
+    image: cocola/llm-gateway:dev
+    restart: unless-stopped
+    depends_on:
+      redis:
+        condition: service_healthy
+    environment:
+      COCOLA_LLM_HOST: "0.0.0.0"
+      COCOLA_LLM_PORT: "8080"
+      COCOLA_LLM_REDIS_URL: "redis://redis:6379/0"
+      # No COCOLA_LLM_CONFIG -> built-in FakeUpstream (dev). Mount a real config
+      # and set COCOLA_LLM_CONFIG to route to live providers.
+    ports:
+      - "8081:8080"   # host 8081 to avoid clashing with gateway on 8080
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request,sys; sys.exit(0) if urllib.request.urlopen('http://localhost:8080/healthz').status==200 else sys.exit(1)"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+
+  admin-api:
+    build:
+      context: ../..
+      dockerfile: apps/admin-api/Dockerfile
+    image: cocola/admin-api:dev
+    restart: unless-stopped
+    depends_on:
+      redis:
+        condition: service_healthy
+    environment:
+      COCOLA_ADMIN_ADDR: ":8090"
+      COCOLA_REDIS_ADDR: "redis:6379"
+      # COCOLA_ADMIN_KEY / COCOLA_AUTH_SECRET unset -> dev mode (auth off).
+    ports:
+      - "8090:8090"
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost:8090/healthz"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+
+  agent-runtime:
+    build:
+      context: ../..
+      dockerfile: apps/agent-runtime/Dockerfile
+    image: cocola/agent-runtime:dev
+    restart: unless-stopped
+    depends_on:
+      sandbox-manager:
+        condition: service_started
+      llm-gateway:
+        condition: service_healthy
+      admin-api:
+        condition: service_healthy
+    environment:
+      COCOLA_AGENT_HOST: "0.0.0.0"
+      COCOLA_AGENT_PORT: "50061"
+      COCOLA_SANDBOX_ADDR: "sandbox-manager:50051"
+      COCOLA_ADMIN_BASE_URL: "http://admin-api:8090"
+      # COCOLA_LLM_BASE_URL unset -> EchoProvider (dev). Point it at
+      # http://llm-gateway:8080 to drive the real Claude Agent SDK.
+    ports:
+      - "50061:50061"
+
+  gateway:
+    build:
+      context: ../..
+      dockerfile: apps/gateway/Dockerfile
+    image: cocola/gateway:dev
+    restart: unless-stopped
+    depends_on:
+      agent-runtime:
+        condition: service_started
+    environment:
+      COCOLA_GATEWAY_ADDR: ":8080"
+      COCOLA_AGENT_ADDR: "agent-runtime:50061"
+      COCOLA_AUTH_ALLOW_ANON: "1"   # dev: accept blank tokens as dev-user
+    ports:
+      - "8080:8080"
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost:8080/healthz"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+
+  web:
+    build:
+      context: ../..
+      dockerfile: apps/web/Dockerfile
+    image: cocola/web:dev
+    restart: unless-stopped
+    depends_on:
+      gateway:
+        condition: service_healthy
+    environment:
+      NODE_ENV: "production"
+      # The browser talks to the gateway; expose its public URL to the app.
+      NEXT_PUBLIC_GATEWAY_URL: "http://localhost:8080"
+    ports:
+      - "3000:3000"
+
+volumes:
+  redisdata:
