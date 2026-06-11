@@ -22,6 +22,7 @@ from cocola_llm_gateway.quota.overrides import (
     TTLCachedOverrides,
 )
 from cocola_llm_gateway.quota.policy import QuotaPolicy, QuotaStatus, day_window, month_window
+from cocola_llm_gateway.quota.postgres_store import MirroredQuotaStore, PostgresQuotaStore
 from cocola_llm_gateway.quota.store import MemoryQuotaStore, QuotaStore, RedisQuotaStore
 
 __all__ = [
@@ -30,6 +31,8 @@ __all__ = [
     "QuotaStore",
     "MemoryQuotaStore",
     "RedisQuotaStore",
+    "PostgresQuotaStore",
+    "MirroredQuotaStore",
     "OverrideStore",
     "MemoryOverrideStore",
     "RedisOverrideStore",

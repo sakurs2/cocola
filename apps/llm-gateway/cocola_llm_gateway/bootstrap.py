@@ -3,12 +3,15 @@
 Separated from server.py so tests can build their own service/verifier with
 fakes and call create_app() directly, while production goes through here.
 
-Ledger selection:
-  - COCOLA_LLM_REDIS_URL set  -> RedisLedger (durable aggregates)
+Ledger selection (M7 adds Postgres as the durable accounting truth):
+  - COCOLA_PG_DSN set         -> PostgresLedger (durable, survives restart)
+  - else COCOLA_LLM_REDIS_URL -> RedisLedger (durable aggregates, TTL'd detail)
   - otherwise                 -> MemoryLedger (graceful default; warns)
 
-Quota store selection mirrors the ledger:
-  - COCOLA_LLM_REDIS_URL set  -> RedisQuotaStore (shared, period-windowed)
+Quota store selection:
+  - COCOLA_PG_DSN + Redis     -> MirroredQuotaStore (PG durable, Redis fast-path)
+  - COCOLA_PG_DSN only        -> PostgresQuotaStore (durable)
+  - COCOLA_LLM_REDIS_URL only -> RedisQuotaStore (shared, period-windowed)
   - otherwise                 -> MemoryQuotaStore
 The enforcer is only attached when a quota layer is enabled (limit > 0); with no
 caps configured the service skips quota work entirely.
@@ -33,6 +36,7 @@ from cocola_llm_gateway.auth.revocation import (
 )
 from cocola_llm_gateway.billing import MemoryLedger, RedisLedger
 from cocola_llm_gateway.billing.ledger import Ledger
+from cocola_llm_gateway.billing.postgres_ledger import PostgresLedger
 from cocola_llm_gateway.config import (
     auth_config_from_env,
     gateway_config_from_env,
@@ -51,22 +55,39 @@ from cocola_llm_gateway.quota import (
     TTLCachedOverrides,
 )
 from cocola_llm_gateway.quota.policy import QuotaPolicy
+from cocola_llm_gateway.quota.postgres_store import MirroredQuotaStore, PostgresQuotaStore
 from cocola_llm_gateway.service import GatewayService
 
 log = get_logger("cocola.llm-gateway.bootstrap")
 
 
 def build_ledger() -> Ledger:
+    # Postgres is the durable accounting truth (M7); it wins when configured.
+    dsn = os.getenv("COCOLA_PG_DSN", "").strip()
+    if dsn:
+        log.info("billing ledger: postgres (durable accounting truth)")
+        return PostgresLedger(dsn)
     url = os.getenv("COCOLA_LLM_REDIS_URL", "").strip()
     if url:
         log.info("billing ledger: redis", url=url)
         return RedisLedger.from_url(url)
-    log.info("billing ledger: in-memory (set COCOLA_LLM_REDIS_URL for durable billing)")
+    log.info("billing ledger: in-memory (set COCOLA_PG_DSN for durable billing)")
     return MemoryLedger()
 
 
 def build_quota_store() -> QuotaStore:
+    # Durable counters in Postgres (M7). When Redis is ALSO configured it becomes
+    # the fast-path mirror (read-through / write-through to PG); with PG only, the
+    # PG store is used directly; with neither, in-memory.
+    dsn = os.getenv("COCOLA_PG_DSN", "").strip()
     url = os.getenv("COCOLA_LLM_REDIS_URL", "").strip()
+    if dsn:
+        durable = PostgresQuotaStore(dsn)
+        if url:
+            log.info("quota store: postgres (durable) + redis (fast-path mirror)", url=url)
+            return MirroredQuotaStore(RedisQuotaStore.from_url(url), durable)
+        log.info("quota store: postgres (durable)")
+        return durable
     if url:
         log.info("quota store: redis", url=url)
         return RedisQuotaStore.from_url(url)
