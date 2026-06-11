@@ -43,6 +43,11 @@ class ChatMessage(BaseModel):
 
     role: Role
     content: str
+    # ADR-0010: when the inbound message carried a non-text Anthropic content
+    # block array (tool_use / tool_result / image), the *raw* array is preserved
+    # here verbatim for loss-free passthrough. `content` still holds the
+    # text-flattened form for billing word-count and text-only providers.
+    content_blocks: list[dict[str, Any]] | None = None
 
 
 class ChatParams(BaseModel):
@@ -54,6 +59,10 @@ class ChatParams(BaseModel):
     top_p: float | None = Field(default=None, ge=0.0, le=1.0)
     stop: list[str] = Field(default_factory=list)
     stream: bool = Field(default=True)
+    # ADR-0010: opaque Anthropic tool definitions / choice, forwarded verbatim.
+    # Default empty/None keeps text-only providers and existing tests unchanged.
+    tools: list[dict[str, Any]] = Field(default_factory=list)
+    tool_choice: dict[str, Any] | None = None
 
 
 class ChatRequest(BaseModel):
@@ -86,6 +95,10 @@ class StreamEventType(str, Enum):
     MESSAGE_DELTA = "message_delta"
     MESSAGE_STOP = "message_stop"
     ERROR = "error"
+    # ADR-0010: relay an upstream Anthropic content-block frame verbatim
+    # (content_block_start / _delta incl. input_json_delta / _stop) so tool_use
+    # blocks survive end to end. `extra["frame"]` holds the raw Anthropic JSON.
+    PASSTHROUGH = "passthrough"
 
 
 @dataclass(slots=True)

@@ -46,7 +46,11 @@ def _build_payload(req: ChatRequest) -> dict:
             # Concatenate multiple system turns defensively.
             system_text = f"{system_text}\n{m.content}".strip() if system_text else m.content
         else:
-            msgs.append({"role": m.role, "content": m.content})
+            # ADR-0010: when the normalized message preserved a raw Anthropic
+            # content-block array (tool_use / tool_result / image), send it
+            # verbatim; otherwise fall back to the plain text content.
+            content: object = m.content_blocks if m.content_blocks is not None else m.content
+            msgs.append({"role": m.role, "content": content})
 
     payload: dict = {
         "model": req.model,
@@ -62,6 +66,12 @@ def _build_payload(req: ChatRequest) -> dict:
         payload["top_p"] = req.params.top_p
     if req.params.stop:
         payload["stop_sequences"] = req.params.stop
+    # ADR-0010: forward tool definitions / choice opaquely so the upstream can
+    # actually emit tool_use. Without this the model never sees the tools.
+    if req.params.tools:
+        payload["tools"] = req.params.tools
+    if req.params.tool_choice is not None:
+        payload["tool_choice"] = req.params.tool_choice
     return payload
 
 
@@ -160,11 +170,17 @@ class AnthropicUpstream:
                 usage=Usage(prompt_tokens=int(usage.get("input_tokens", 0))),
                 model=str(msg.get("model", "")),
             )
+        if etype == "content_block_start":
+            # ADR-0010: relay verbatim so tool_use blocks (and their id/name)
+            # survive to the client.
+            return StreamEvent(StreamEventType.PASSTHROUGH, extra={"frame": data})
         if etype == "content_block_delta":
-            delta = data.get("delta", {})
-            if delta.get("type") == "text_delta":
-                return StreamEvent(StreamEventType.CONTENT_DELTA, text=str(delta.get("text", "")))
-            return None
+            # ADR-0010: relay every content_block_delta verbatim (text_delta AND
+            # input_json_delta for tool_use args). The downstream codec frames
+            # it back into the Anthropic SSE stream unchanged.
+            return StreamEvent(StreamEventType.PASSTHROUGH, extra={"frame": data})
+        if etype == "content_block_stop":
+            return StreamEvent(StreamEventType.PASSTHROUGH, extra={"frame": data})
         if etype == "message_delta":
             usage = data.get("usage", {})
             delta = data.get("delta", {})
@@ -182,7 +198,7 @@ class AnthropicUpstream:
                 error=str(err.get("message", "upstream error")),
                 code=str(err.get("type", "api_error")),
             )
-        # ping, content_block_start/stop, etc. are not needed downstream.
+        # ping and other housekeeping frames are not needed downstream.
         return None
 
     async def aclose(self) -> None:
