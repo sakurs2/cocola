@@ -10,7 +10,10 @@
 #                 workspace / auth env wired. (no network)
 #   3. query   : a real turn through the in-sandbox stdio shim -> reaches the
 #                llm-gateway (egress) AND exercises native bash/file IO inside
-#                the container. Requires ANTHROPIC_BASE_URL + ANTHROPIC_AUTH_TOKEN.
+#                the container. This is also the live TOOL-USE round-trip
+#                (ADR-0010): the model can only write proof.txt by emitting a
+#                tool_use that the gateway forwarded -- if tools were dropped the
+#                file never appears. Requires ANTHROPIC_BASE_URL + ANTHROPIC_AUTH_TOKEN.
 #   4. persist : the per-user volume keeps ~/.claude across a container destroy
 #                + recreate, and `--resume <session_id>` restores the session.
 #
@@ -24,7 +27,7 @@
 # Env knobs:
 #   IMAGE           image tag to build/use      (default cocola/sandbox-runtime:dev)
 #   DOCKER_RUNTIME  container runtime           (default runc; set runsc for gVisor)
-#   MODEL           model id for the query turn (default claude-3-5-sonnet-20241022)
+#   MODEL           model alias for the query turn (default cocola-default)
 #   SKIP_BUILD=1    reuse an existing image
 #   SKIP_QUERY=1    skip the live model turn (no gateway needed)
 set -euo pipefail
@@ -92,13 +95,22 @@ echo "$SELF" | grep -qv '"claude_agent_sdk":"missing' && ok "claude-agent-sdk im
 # ---- 3. real query: egress + native bash/file IO -------------------------
 if [ "${SKIP_QUERY:-0}" != "1" ] && [ -n "${ANTHROPIC_BASE_URL:-}" ] && [ -n "${ANTHROPIC_AUTH_TOKEN:-}" ]; then
   note "live turn: reach the gateway AND run native bash/file IO in-sandbox"
+  note "  (this is the end-to-end TOOL-USE round-trip -- ADR-0010)"
   REQ='{"prompt":"Use the Bash tool to write the text COCOLA_OK into /workspace/proof.txt, then read it back and tell me its contents.","max_turns":8}'
   OUT="$(printf '%s' "$REQ" | docker exec -i "$CTR" /opt/cocola/shim/entrypoint.sh || true)"
   echo "$OUT" | tail -20
   SESSION_ID="$(echo "$OUT" | grep '"type":"done"' | sed -n 's/.*"session_id":"\([^"]*\)".*/\1/p' | head -1)"
   echo "$OUT" | grep -q '"type":"result"' && ok "model turn produced a result event" || bad "no result event (gateway/egress?)"
+  # The shim surfaces tool activity as tool_use / tool events in its NDJSON. If
+  # the gateway had dropped `tools` (the M3 regression), the model could never
+  # call Bash and we'd see neither a tool_use event nor the file.
+  if echo "$OUT" | grep -Eq '"(tool_use|tool)"|"name":[ ]*"Bash"'; then
+    ok "shim stream shows a tool_use turn (tools survived the gateway)"
+  else
+    bad "no tool_use in the shim stream (tools dropped at the gateway?)"
+  fi
   if docker exec -i "$CTR" cat /workspace/proof.txt 2>/dev/null | grep -q COCOLA_OK; then
-    ok "native bash wrote proof.txt inside the sandbox"
+    ok "native bash wrote proof.txt inside the sandbox (tool_use executed end to end)"
   else
     bad "proof.txt not written by native bash"
   fi
