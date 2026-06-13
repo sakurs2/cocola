@@ -14,10 +14,20 @@
 // plus a read-only plugins mount. This makes hibernate cheap and safe: Pause
 // deletes the Pod but keeps the PVCs; Resume recreates the Pod against the same
 // PVCs so `claude --resume` continues the conversation.
+//
+// Hibernate vs Docker (why a binding ConfigMap exists): the Docker provider can
+// pause/unpause a frozen container in place, so its label query always finds the
+// container. In K8s, Pause DELETES the Pod, so a Pod label-selector can no longer
+// resolve a paused sandbox — which would break cross-replica Resume. To keep the
+// horizontal-scale promise, Create also writes a small per-sandbox ConfigMap (the
+// "binding") that carries the four labels plus everything needed to rebuild the
+// Pod. The binding survives hibernate and is the durable, cross-replica source of
+// truth; resolve() reads it, and Resume() rebuilds the Pod from it.
 package k8s
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"os"
 	"strings"
@@ -25,9 +35,9 @@ import (
 	"time"
 
 	corev1 "k8s.io/api/core/v1"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	"k8s.io/apimachinery/pkg/labels"
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/rest"
 	"k8s.io/client-go/tools/clientcmd"
@@ -42,7 +52,7 @@ const ProviderName = "k8s"
 
 // Labels mirror the Docker provider's so the cross-replica resolve story is
 // identical: any sandbox-manager replica can act on any sandbox because the Pod
-// itself carries the binding metadata.
+// (and its binding ConfigMap) carries the binding metadata.
 const (
 	labelManaged   = "cocola.bytedance.com/managed"
 	labelSandboxID = "cocola.bytedance.com/sandbox-id"
@@ -80,14 +90,25 @@ type Provider struct {
 	gatewayDNS   string // in-cluster llm-gateway base URL for egress allowlist
 
 	mu        sync.RWMutex
-	sandboxes map[string]*record // sandbox_id -> pod record (fast-path cache)
+	sandboxes map[string]*record // sandbox_id -> binding (fast-path cache)
+}
+
+// binding is the durable, self-contained description of a sandbox: everything
+// Resume needs to rebuild an identical Pod after hibernate. It is cached in
+// memory and persisted in the per-sandbox ConfigMap.
+type binding struct {
+	SandboxID string             `json:"sandbox_id"`
+	UserID    string             `json:"user_id"`
+	SessionID string             `json:"session_id"`
+	Image     string             `json:"image"`
+	Env       map[string]string  `json:"env,omitempty"`
+	Resources provider.Resources `json:"resources"`
 }
 
 // record is the cached binding for a sandbox this replica has already resolved.
 type record struct {
-	podName   string
-	userID    string
-	sessionID string
+	podName string
+	bind    binding
 }
 
 // Option configures the Provider.
@@ -144,13 +165,25 @@ func buildClientset() (kubernetes.Interface, error) {
 	return kubernetes.NewForConfig(cfg)
 }
 
-// Create provisions the two PVCs (if absent) and starts a long-lived idle Pod
-// under gVisor that the agent can exec into.
+// Create provisions the two PVCs (if absent), persists the binding ConfigMap,
+// and starts a long-lived idle Pod under gVisor that the agent can exec into.
 func (p *Provider) Create(ctx context.Context, spec provider.SandboxSpec) (*provider.Sandbox, error) {
 	sid := "sbx-" + uuid.NewString()
+	img := spec.Image
+	if img == "" {
+		img = p.image
+	}
+	b := binding{
+		SandboxID: sid,
+		UserID:    spec.UserID,
+		SessionID: spec.SessionID,
+		Image:     img,
+		Env:       spec.Env,
+		Resources: spec.Resources,
+	}
+
 	userClaim := userPVCName(spec.UserID)
 	sessClaim := sessionPVCName(spec.SessionID)
-
 	if err := p.ensurePVC(ctx, userClaim, spec.Resources.DiskMiB); err != nil {
 		return nil, err
 	}
@@ -158,13 +191,17 @@ func (p *Provider) Create(ctx context.Context, spec provider.SandboxSpec) (*prov
 		return nil, err
 	}
 
-	pod := p.podSpec(sid, spec, userClaim, sessClaim)
+	if err := p.writeBinding(ctx, b); err != nil {
+		return nil, err
+	}
+
+	pod := p.podSpec(b)
 	if _, err := p.cli.CoreV1().Pods(p.namespace).Create(ctx, pod, metav1.CreateOptions{}); err != nil {
 		return nil, fmt.Errorf("k8s: create pod: %w", err)
 	}
 
 	p.mu.Lock()
-	p.sandboxes[sid] = &record{podName: podName(sid), userID: spec.UserID, sessionID: spec.SessionID}
+	p.sandboxes[sid] = &record{podName: podName(sid), bind: b}
 	p.mu.Unlock()
 
 	return &provider.Sandbox{
@@ -175,19 +212,16 @@ func (p *Provider) Create(ctx context.Context, spec provider.SandboxSpec) (*prov
 	}, nil
 }
 
-// podSpec builds the sandbox Pod: gVisor runtime, two PVC mounts + RO plugins,
-// the four binding labels, injected env, non-root securityContext, and an idle
-// command so the container stays alive for exec.
-func (p *Provider) podSpec(sid string, spec provider.SandboxSpec, userClaim, sessClaim string) *corev1.Pod {
-	img := spec.Image
-	if img == "" {
-		img = p.image
-	}
-	uid := safe(spec.UserID)
-	sess := safe(spec.SessionID)
+// podSpec builds the sandbox Pod from a binding: gVisor runtime, two PVC mounts +
+// RO plugins, the four binding labels, injected env, non-root securityContext,
+// and an idle command so the container stays alive for exec. Because it is driven
+// entirely by the binding, Create and Resume produce byte-identical Pods.
+func (p *Provider) podSpec(b binding) *corev1.Pod {
+	uid := safe(b.UserID)
+	sess := safe(b.SessionID)
 
-	env := make([]corev1.EnvVar, 0, len(spec.Env))
-	for k, v := range spec.Env {
+	env := make([]corev1.EnvVar, 0, len(b.Env))
+	for k, v := range b.Env {
 		env = append(env, corev1.EnvVar{Name: k, Value: v})
 	}
 
@@ -196,11 +230,11 @@ func (p *Provider) podSpec(sid string, spec provider.SandboxSpec, userClaim, ses
 
 	pod := &corev1.Pod{
 		ObjectMeta: metav1.ObjectMeta{
-			Name:      podName(sid),
+			Name:      podName(b.SandboxID),
 			Namespace: p.namespace,
 			Labels: map[string]string{
 				labelManaged:   "true",
-				labelSandboxID: sid,
+				labelSandboxID: b.SandboxID,
 				labelUserID:    uid,
 				labelSessionID: sess,
 			},
@@ -214,11 +248,11 @@ func (p *Provider) podSpec(sid string, spec provider.SandboxSpec, userClaim, ses
 			},
 			Containers: []corev1.Container{{
 				Name:       containerName,
-				Image:      img,
+				Image:      b.Image,
 				Command:    []string{"sh", "-c", "trap : TERM INT; sleep infinity & wait"},
 				WorkingDir: guestWorkspace + "/" + sess,
 				Env:        env,
-				Resources:  resourceReqs(spec.Resources),
+				Resources:  resourceReqs(b.Resources),
 				VolumeMounts: []corev1.VolumeMount{
 					{Name: "userdata", MountPath: guestUserData + "/" + uid, SubPath: "userdata"},
 					{Name: "userdata", MountPath: guestClaudeConfig, SubPath: "claude"},
@@ -228,10 +262,10 @@ func (p *Provider) podSpec(sid string, spec provider.SandboxSpec, userClaim, ses
 			}},
 			Volumes: []corev1.Volume{
 				{Name: "userdata", VolumeSource: corev1.VolumeSource{
-					PersistentVolumeClaim: &corev1.PersistentVolumeClaimVolumeSource{ClaimName: userClaim},
+					PersistentVolumeClaim: &corev1.PersistentVolumeClaimVolumeSource{ClaimName: userPVCName(b.UserID)},
 				}},
 				{Name: "workspace", VolumeSource: corev1.VolumeSource{
-					PersistentVolumeClaim: &corev1.PersistentVolumeClaimVolumeSource{ClaimName: sessClaim},
+					PersistentVolumeClaim: &corev1.PersistentVolumeClaimVolumeSource{ClaimName: sessionPVCName(b.SessionID)},
 				}},
 				{Name: "plugins", VolumeSource: corev1.VolumeSource{
 					PersistentVolumeClaim: &corev1.PersistentVolumeClaimVolumeSource{ClaimName: pluginsPVC, ReadOnly: true},
@@ -295,16 +329,90 @@ func resourceReqs(r provider.Resources) corev1.ResourceRequirements {
 	return corev1.ResourceRequirements{Limits: lim}
 }
 
-// Destroy deletes the sandbox Pod. The user PVC is intentionally retained
-// (cross-session persistence); the session PVC is left for the orchestrator's
-// Release path to reclaim alongside the binding.
+// Pause hibernates the sandbox by deleting its Pod while keeping both PVCs and
+// the binding ConfigMap. This is the K8s analogue of Docker's freeze, but cheaper
+// at rest: a hibernated sandbox consumes no CPU/memory, only disk. Pause is
+// idempotent — deleting an already-absent Pod is treated as success.
+func (p *Provider) Pause(ctx context.Context, sid string) error {
+	rec, err := p.resolve(ctx, sid)
+	if err != nil {
+		return err
+	}
+	if err := p.cli.CoreV1().Pods(p.namespace).Delete(ctx, rec.podName, metav1.DeleteOptions{}); err != nil {
+		if apierrors.IsNotFound(err) {
+			return nil // already hibernated
+		}
+		return fmt.Errorf("k8s: pause (delete pod): %w", err)
+	}
+	return nil
+}
+
+// Resume wakes a hibernated sandbox by recreating the Pod from the durable
+// binding, remounting the same PVCs so the in-sandbox state (including
+// ~/.claude session files) is exactly where it was left. Resume is idempotent —
+// if the Pod already exists (sandbox never hibernated), it is a no-op.
+func (p *Provider) Resume(ctx context.Context, sid string) error {
+	rec, err := p.resolve(ctx, sid)
+	if err != nil {
+		return err
+	}
+	// PVCs are normally still present, but ensure them defensively in case the
+	// session claim was reclaimed; reuse keeps existing data intact.
+	if err := p.ensurePVC(ctx, userPVCName(rec.bind.UserID), rec.bind.Resources.DiskMiB); err != nil {
+		return err
+	}
+	if err := p.ensurePVC(ctx, sessionPVCName(rec.bind.SessionID), rec.bind.Resources.DiskMiB); err != nil {
+		return err
+	}
+	pod := p.podSpec(rec.bind)
+	if _, err := p.cli.CoreV1().Pods(p.namespace).Create(ctx, pod, metav1.CreateOptions{}); err != nil {
+		if apierrors.IsAlreadyExists(err) {
+			return nil // already running
+		}
+		return fmt.Errorf("k8s: resume (create pod): %w", err)
+	}
+	return nil
+}
+
+// Health reports whether the sandbox Pod is running and Ready. A hibernated (or
+// not-yet-created) sandbox has no Pod and is reported unhealthy with a detail
+// string rather than an error, so callers can distinguish "asleep" from "broken".
+func (p *Provider) Health(ctx context.Context, sid string) (*provider.HealthStatus, error) {
+	pod, err := p.cli.CoreV1().Pods(p.namespace).Get(ctx, podName(sid), metav1.GetOptions{})
+	if err != nil {
+		if apierrors.IsNotFound(err) {
+			return &provider.HealthStatus{Healthy: false, Detail: "pod absent (paused or not created)"}, nil
+		}
+		return nil, fmt.Errorf("k8s: get pod: %w", err)
+	}
+	if pod.Status.Phase != corev1.PodRunning {
+		return &provider.HealthStatus{Healthy: false, Detail: fmt.Sprintf("phase=%s", pod.Status.Phase)}, nil
+	}
+	for _, c := range pod.Status.Conditions {
+		if c.Type == corev1.PodReady && c.Status == corev1.ConditionTrue {
+			return &provider.HealthStatus{Healthy: true, Detail: "running"}, nil
+		}
+	}
+	return &provider.HealthStatus{Healthy: false, Detail: "running but not ready"}, nil
+}
+
+// Destroy deletes the sandbox Pod and its binding ConfigMap. The user PVC is
+// intentionally retained (cross-session persistence); the session PVC is left
+// for the orchestrator's Release path to reclaim alongside the binding.
 func (p *Provider) Destroy(ctx context.Context, sid string) error {
 	rec, err := p.resolve(ctx, sid)
 	if err != nil {
 		return err
 	}
 	if err := p.cli.CoreV1().Pods(p.namespace).Delete(ctx, rec.podName, metav1.DeleteOptions{}); err != nil {
-		return fmt.Errorf("k8s: delete pod: %w", err)
+		if !apierrors.IsNotFound(err) {
+			return fmt.Errorf("k8s: delete pod: %w", err)
+		}
+	}
+	if err := p.cli.CoreV1().ConfigMaps(p.namespace).Delete(ctx, bindingName(sid), metav1.DeleteOptions{}); err != nil {
+		if !apierrors.IsNotFound(err) {
+			return fmt.Errorf("k8s: delete binding: %w", err)
+		}
 	}
 	p.mu.Lock()
 	delete(p.sandboxes, sid)
@@ -312,13 +420,57 @@ func (p *Provider) Destroy(ctx context.Context, sid string) error {
 	return nil
 }
 
+// --- binding persistence ---------------------------------------------------
+
+// writeBinding persists the sandbox binding as a labelled ConfigMap so any
+// replica can resolve and rebuild the sandbox even after the Pod is gone.
+func (p *Provider) writeBinding(ctx context.Context, b binding) error {
+	raw, err := json.Marshal(b)
+	if err != nil {
+		return fmt.Errorf("k8s: marshal binding: %w", err)
+	}
+	cm := &corev1.ConfigMap{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      bindingName(b.SandboxID),
+			Namespace: p.namespace,
+			Labels: map[string]string{
+				labelManaged:   "true",
+				labelSandboxID: b.SandboxID,
+				labelUserID:    safe(b.UserID),
+				labelSessionID: safe(b.SessionID),
+			},
+		},
+		Data: map[string]string{"binding": string(raw)},
+	}
+	if _, err := p.cli.CoreV1().ConfigMaps(p.namespace).Create(ctx, cm, metav1.CreateOptions{}); err != nil {
+		if apierrors.IsAlreadyExists(err) {
+			return nil
+		}
+		return fmt.Errorf("k8s: create binding: %w", err)
+	}
+	return nil
+}
+
+// readBinding loads a binding ConfigMap by sandbox id.
+func (p *Provider) readBinding(ctx context.Context, sid string) (binding, error) {
+	var b binding
+	cm, err := p.cli.CoreV1().ConfigMaps(p.namespace).Get(ctx, bindingName(sid), metav1.GetOptions{})
+	if err != nil {
+		return b, err
+	}
+	if err := json.Unmarshal([]byte(cm.Data["binding"]), &b); err != nil {
+		return b, fmt.Errorf("k8s: unmarshal binding: %w", err)
+	}
+	return b, nil
+}
+
 // --- helpers ---------------------------------------------------------------
 
-// resolve maps a sandbox id to its Pod record. Fast path: the in-process cache
-// for sandboxes this replica created. Fallback: a label-selector List, which is
-// what makes sandbox-manager horizontally scalable and restart-safe — any
-// replica can act on a sandbox created by any other replica because the Pod
-// itself carries the binding labels.
+// resolve maps a sandbox id to its record. Fast path: the in-process cache for
+// sandboxes this replica created. Fallback: read the durable binding ConfigMap,
+// which is what makes sandbox-manager horizontally scalable and hibernate-safe —
+// any replica can act on a sandbox (even a paused one with no Pod) because the
+// binding ConfigMap carries the full description.
 func (p *Provider) resolve(ctx context.Context, sid string) (*record, error) {
 	p.mu.RLock()
 	rec, ok := p.sandboxes[sid]
@@ -327,23 +479,14 @@ func (p *Provider) resolve(ctx context.Context, sid string) (*record, error) {
 		return rec, nil
 	}
 
-	sel := labels.SelectorFromSet(labels.Set{
-		labelManaged:   "true",
-		labelSandboxID: sid,
-	}).String()
-	pods, err := p.cli.CoreV1().Pods(p.namespace).List(ctx, metav1.ListOptions{LabelSelector: sel})
+	b, err := p.readBinding(ctx, sid)
 	if err != nil {
-		return nil, fmt.Errorf("k8s: list pods: %w", err)
+		if apierrors.IsNotFound(err) {
+			return nil, fmt.Errorf("k8s: sandbox not found: %s", sid)
+		}
+		return nil, fmt.Errorf("k8s: resolve %s: %w", sid, err)
 	}
-	if len(pods.Items) == 0 {
-		return nil, fmt.Errorf("k8s: sandbox not found: %s", sid)
-	}
-	pod := pods.Items[0]
-	rec = &record{
-		podName:   pod.Name,
-		userID:    pod.Labels[labelUserID],
-		sessionID: pod.Labels[labelSessionID],
-	}
+	rec = &record{podName: podName(sid), bind: b}
 	p.mu.Lock()
 	p.sandboxes[sid] = rec
 	p.mu.Unlock()
@@ -351,6 +494,7 @@ func (p *Provider) resolve(ctx context.Context, sid string) (*record, error) {
 }
 
 func podName(sid string) string        { return "cocola-" + sid }
+func bindingName(sid string) string    { return "cocola-bind-" + sid }
 func userPVCName(userID string) string { return "cocola-user-" + safe(userID) }
 func sessionPVCName(s string) string   { return "cocola-sess-" + safe(s) }
 
