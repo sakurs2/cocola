@@ -26,6 +26,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/docker/docker/api/types"
 	"github.com/docker/docker/api/types/container"
 	"github.com/docker/docker/api/types/filters"
 	"github.com/docker/docker/api/types/image"
@@ -206,6 +207,37 @@ func (p *Provider) Create(ctx context.Context, spec provider.SandboxSpec) (*prov
 	}, nil
 }
 
+// containerThawer is the narrow slice of the Docker client that thawIfPaused
+// needs. Defining it here (rather than depending on *client.Client) keeps the
+// self-heal logic unit-testable with a tiny fake and no live daemon.
+type containerThawer interface {
+	ContainerInspect(ctx context.Context, containerID string) (types.ContainerJSON, error)
+	ContainerUnpause(ctx context.Context, containerID string) error
+}
+
+// thawIfPaused unfreezes a sandbox container that the reaper Paused during
+// stage-1 idle reclaim. Exec against a frozen (cgroup-freezer) container blocks
+// the new process until the caller's deadline, surfacing as a misleading
+// "context deadline exceeded"; reusing a paused sandbox in a later turn is
+// legitimate, so we thaw first. A non-paused (or vanished) container is a no-op
+// here -- an already-destroyed sandbox is reported by the downstream exec call.
+func thawIfPaused(ctx context.Context, cli containerThawer, containerID, sid string) error {
+	insp, err := cli.ContainerInspect(ctx, containerID)
+	if err != nil {
+		// Inspect failures are not fatal to exec: let the exec path produce the
+		// authoritative error (e.g. no-such-container) instead of masking it.
+		return nil
+	}
+	if insp.State == nil || !insp.State.Paused {
+		return nil
+	}
+	if err := cli.ContainerUnpause(ctx, containerID); err != nil {
+		return fmt.Errorf("docker: unpause before exec: %w", err)
+	}
+	slog.Info("docker: thawed paused sandbox before exec", "sandbox_id", sid)
+	return nil
+}
+
 // Exec runs a command inside the sandbox and streams stdout/stderr, terminating
 // with an Exit (or Error) event.
 func (p *Provider) Exec(ctx context.Context, sid string, req provider.ExecRequest) (<-chan provider.ExecEvent, error) {
@@ -215,6 +247,15 @@ func (p *Provider) Exec(ctx context.Context, sid string, req provider.ExecReques
 	}
 	if len(req.Cmd) == 0 {
 		return nil, fmt.Errorf("docker: empty command")
+	}
+
+	// Self-heal: the reaper Pauses idle sandboxes (stage-1 reclaim), but exec
+	// against a frozen container hangs until the caller's deadline because the
+	// cgroup freezer blocks the new process. A later turn legitimately reuses
+	// the same sandbox, so thaw it here before exec instead of dying with a
+	// context-deadline-exceeded.
+	if err := thawIfPaused(ctx, p.cli, rec.containerID, sid); err != nil {
+		return nil, err
 	}
 
 	env := make([]string, 0, len(req.Env))
