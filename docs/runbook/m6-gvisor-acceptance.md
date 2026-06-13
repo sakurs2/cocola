@@ -71,6 +71,66 @@
 
 ---
 
+## 0.5 在云服务器上 build 镜像并导入 k3s
+
+k3s 用的是**自带 containerd**(不是 docker),`docker build` 出来的镜像 k3s 默认
+看不到——必须显式导入。两条必备镜像:沙箱运行时 `cocola/sandbox-runtime:dev`
+(大脑 + claude CLI)与控制面 `cocola/sandbox-manager:dev`;真实 query 还要
+`cocola/llm-gateway:dev`。
+
+> 前提:云服务器已装 git + docker(或 nerdctl)。仓库 clone 到服务器上,
+> **下面命令都在仓库根目录执行**(sandbox-manager 的 Dockerfile 要求 context=根)。
+
+```sh
+# 1) 沙箱运行时镜像(context = deploy/sandbox-runtime)
+#    可选:先 vendor 离线 CLI tgz 放到 deploy/sandbox-runtime/offline/ 以免装包走网
+docker build -t cocola/sandbox-runtime:dev deploy/sandbox-runtime
+
+# 2) 控制面 sandbox-manager(context 必须是仓库根,因 go.mod 用相对 replace)
+docker build -f apps/sandbox-manager/Dockerfile -t cocola/sandbox-manager:dev .
+
+# 3) llm-gateway(真实 query 上游)
+docker build -f apps/llm-gateway/Dockerfile -t cocola/llm-gateway:dev .
+```
+
+把镜像导入 k3s 的 containerd(二选一):
+
+```sh
+# 方式 A:docker save -> k3s ctr import(最通用)
+for img in cocola/sandbox-runtime:dev cocola/sandbox-manager:dev cocola/llm-gateway:dev; do
+  docker save "$img" | sudo k3s ctr images import -
+done
+sudo k3s ctr images ls | grep cocola      # 期望看到三个 cocola/* 镜像
+
+# 方式 B:若用 nerdctl 直接构建到 k3s 的 containerd(namespace k8s.io),可跳过导入
+#   sudo nerdctl --namespace k8s.io build ...
+```
+
+> 架构对齐:云服务器是 x86_64 时,以上 build 天然产出 amd64 镜像,与节点匹配。
+> 清单里 `imagePullPolicy: IfNotPresent`,镜像已在本地 containerd 即不会去远端拉。
+> (镜像也可放进 `/var/lib/rancher/k3s/agent/images/` 让 k3s 启动时自动导入。)
+
+---
+
+## 0.6 部署测试依赖(redis + llm-gateway)
+
+`deploy/k8s/*` 按设计只含**沙箱平面**;真实 query(§3.2)需要上游网关。
+`deploy/k8s/05-deps-redis-llm-gateway.yaml` 把 `redis` 与 `llm-gateway` 部署到
+`cocola` 命名空间,Service DNS 正好对上 `04-sandbox-manager.yaml` 里引用的
+`redis.cocola.svc...:6379` 与 `llm-gateway.cocola.svc...:8080`。
+
+```sh
+kubectl apply -f deploy/k8s/05-deps-redis-llm-gateway.yaml
+kubectl -n cocola rollout status deploy/redis
+kubectl -n cocola rollout status deploy/llm-gateway
+```
+
+- **不配真实模型**:llm-gateway 默认 `COCOLA_LLM_PROVIDER=fake`,返回固定应答
+  ——足以验证 Route-A **网络通路**(沙箱 -> service DNS -> 网关 -> 回包)。
+- **要验真实模型回复**:创建 `cocola-llm` Secret 后重启网关(见 §6)。
+
+---
+
 ## 1. 部署沙箱平面
 
 ```sh
@@ -224,6 +284,26 @@ kubectl -n cocola get pods -l app=sandbox-manager
 - [ ] **4** 删 Pod 后 PVC + binding 保留;Resume 重建重挂;`keep.txt` 续上;
       `claude --resume` 接回会话上下文。
 - [ ] 全绿 -> 把 README 路线图 M6 行从 🚧 改为 ✅。
+
+---
+
+## 5.5 配置真实模型(可选,验真实回复时)
+
+llm-gateway 默认 `fake` provider 即可验证通路。要让 §3.2 返回**真实模型回复**,
+建一个 `cocola-llm` Secret(密钥只走 Secret,绝不写进清单/镜像),然后重启网关:
+
+```sh
+kubectl -n cocola create secret generic cocola-llm \
+  --from-literal=provider=anthropic \
+  --from-literal=anthropic_base_url=https://<你购买服务的域名> \
+  --from-literal=anthropic_api_key=sk-ant-xxxx \
+  --from-literal=anthropic_model=claude-3-5-sonnet-20241022
+kubectl -n cocola rollout restart deploy/llm-gateway
+```
+
+> `05-deps-redis-llm-gateway.yaml` 里这些 env 用 `secretKeyRef ... optional: true`
+> 引用该 Secret:不存在则回落 `fake`,存在则走真实上游。base_url 后端 SDK 会自动
+> 追加 `/v1/messages`。
 
 ---
 

@@ -27,6 +27,7 @@ kubectl apply -f deploy/k8s/01-runtimeclass.yaml
 kubectl apply -f deploy/k8s/02-rbac.yaml
 kubectl apply -f deploy/k8s/03-sandbox-base.yaml   # populate the plugins PVC out of band
 kubectl apply -f deploy/k8s/04-sandbox-manager.yaml
+kubectl apply -f deploy/k8s/05-deps-redis-llm-gateway.yaml  # test-time deps (redis+llm-gateway); see runbook
 ```
 
 ## Apply (Helm)
