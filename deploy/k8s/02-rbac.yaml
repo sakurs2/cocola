@@ -1,0 +1,42 @@
+# RBAC for sandbox-manager. The provider drives the sandbox namespace entirely
+# through the API server, so its ServiceAccount needs CRUD on the four object
+# kinds it manages there — and nothing else (least privilege).
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: sandbox-manager
+  namespace: cocola
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: sandbox-manager
+  namespace: cocola-sandboxes
+rules:
+  - apiGroups: [""]
+    resources: ["pods", "persistentvolumeclaims", "configmaps"]
+    verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
+  - apiGroups: [""]
+    resources: ["pods/exec"]
+    verbs: ["create", "get"]
+  - apiGroups: [""]
+    resources: ["pods/status"]
+    verbs: ["get"]
+  - apiGroups: ["networking.k8s.io"]
+    resources: ["networkpolicies"]
+    verbs: ["get", "list", "create", "update", "patch", "delete"]
+---
+# RoleBinding lives in cocola-sandboxes but references the SA in cocola.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: sandbox-manager
+  namespace: cocola-sandboxes
+subjects:
+  - kind: ServiceAccount
+    name: sandbox-manager
+    namespace: cocola
+roleRef:
+  kind: Role
+  name: sandbox-manager
+  apiGroup: rbac.authorization.k8s.io

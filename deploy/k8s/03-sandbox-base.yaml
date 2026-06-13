@@ -1,0 +1,33 @@
+# Baseline objects in the sandbox namespace.
+#
+# 1. plugins PVC: the shared, read-only skills/plugins volume every sandbox Pod
+#    mounts at /data/plugins (provider const pluginsPVC = "cocola-plugins"). It is
+#    pre-provisioned and populated out of band (an init Job or a ReadWriteMany
+#    volume); sandboxes only ever read it.
+# 2. default-deny egress: a namespace-wide backstop so that even a sandbox Pod
+#    created outside the provider (or before its per-sandbox policy lands) cannot
+#    reach the network. The provider's per-sandbox NetworkPolicy then *adds*
+#    allowances on top.
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: cocola-plugins
+  namespace: cocola-sandboxes
+  labels:
+    cocola.bytedance.com/managed: "true"
+spec:
+  accessModes: ["ReadOnlyMany"]
+  resources:
+    requests:
+      storage: 5Gi
+  # storageClassName: <set to a RWX-capable class if your cluster requires one>
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: cocola-default-deny-egress
+  namespace: cocola-sandboxes
+spec:
+  podSelector: {}
+  policyTypes: ["Egress"]
+  # No egress rules => deny all. Per-sandbox policies add allowances.

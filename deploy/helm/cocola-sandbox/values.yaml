@@ -1,0 +1,39 @@
+# Values for the cocola-sandbox chart.
+namespaces:
+  controlPlane: cocola
+  sandboxes: cocola-sandboxes
+  create: true
+
+runtimeClass:
+  # Install the gVisor RuntimeClass. Disable if the cluster already defines it
+  # (e.g. GKE Sandbox provides "gvisor"); then point sandbox.runtimeClass at it.
+  install: true
+  name: runsc
+  handler: runsc
+
+sandboxManager:
+  image: cocola/sandbox-manager:dev
+  imagePullPolicy: IfNotPresent
+  replicas: 2
+  resources:
+    requests:
+      cpu: 100m
+      memory: 128Mi
+    limits:
+      cpu: 500m
+      memory: 256Mi
+
+sandbox:
+  # Env consumed by the K8s provider inside sandbox-manager.
+  runtimeClass: runsc
+  image: cocola/sandbox-runtime:dev
+  storageClass: "" # empty => cluster default StorageClass
+  llmBaseURL: http://llm-gateway.cocola.svc.cluster.local:8080
+  redisAddr: redis.cocola.svc.cluster.local:6379
+  pluginsPVC:
+    create: true
+    name: cocola-plugins
+    size: 5Gi
+    storageClass: ""
+  # Namespace-wide default-deny egress backstop (per-sandbox policies add allowances).
+  defaultDenyEgress: true

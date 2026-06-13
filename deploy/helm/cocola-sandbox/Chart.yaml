@@ -1,0 +1,6 @@
+apiVersion: v2
+name: cocola-sandbox
+description: cocola sandbox-manager with the Kubernetes + gVisor sandbox provider
+type: application
+version: 0.1.0
+appVersion: "0.1.0"

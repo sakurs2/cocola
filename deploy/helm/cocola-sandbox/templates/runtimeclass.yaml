@@ -1,0 +1,9 @@
+{{- if .Values.runtimeClass.install }}
+apiVersion: node.k8s.io/v1
+kind: RuntimeClass
+metadata:
+  name: {{ .Values.runtimeClass.name }}
+  labels:
+    {{- include "cocola-sandbox.labels" . | nindent 4 }}
+handler: {{ .Values.runtimeClass.handler }}
+{{- end }}

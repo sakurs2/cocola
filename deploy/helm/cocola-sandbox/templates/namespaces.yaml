@@ -1,0 +1,17 @@
+{{- if .Values.namespaces.create }}
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: {{ .Values.namespaces.controlPlane }}
+  labels:
+    {{- include "cocola-sandbox.labels" . | nindent 4 }}
+    cocola.bytedance.com/part-of: control-plane
+---
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: {{ .Values.namespaces.sandboxes }}
+  labels:
+    {{- include "cocola-sandbox.labels" . | nindent 4 }}
+    cocola.bytedance.com/part-of: sandboxes
+{{- end }}

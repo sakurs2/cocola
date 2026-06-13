@@ -1,0 +1,73 @@
+# sandbox-manager control-plane Deployment + Service.
+#
+# Unlike the docker-compose deployment (which mounts the host docker socket for
+# DooD), the K8s deployment drives sandboxes purely through the API server using
+# the in-cluster ServiceAccount. COCOLA_SANDBOX_PROVIDER=k8s selects the K8s
+# provider; COCOLA_SANDBOX_LLM_BASE_URL points at the in-cluster gateway Service
+# DNS (Route A) instead of host.docker.internal.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: sandbox-manager
+  namespace: cocola
+  labels:
+    app: sandbox-manager
+spec:
+  replicas: 2 # horizontally scalable: any replica resolves any sandbox via its binding ConfigMap
+  selector:
+    matchLabels:
+      app: sandbox-manager
+  template:
+    metadata:
+      labels:
+        app: sandbox-manager
+    spec:
+      serviceAccountName: sandbox-manager
+      containers:
+        - name: sandbox-manager
+          image: cocola/sandbox-manager:dev
+          imagePullPolicy: IfNotPresent
+          ports:
+            - containerPort: 50051
+          env:
+            - name: COCOLA_SANDBOX_ADDR
+              value: ":50051"
+            - name: COCOLA_SANDBOX_PROVIDER
+              value: "k8s"
+            - name: COCOLA_K8S_NAMESPACE
+              value: "cocola-sandboxes"
+            - name: COCOLA_K8S_RUNTIME_CLASS
+              value: "runsc"
+            # COCOLA_K8S_STORAGE_CLASS: optional; empty => cluster default.
+            - name: COCOLA_K8S_IMAGE
+              value: "cocola/sandbox-runtime:dev"
+            # In-cluster gateway DNS replaces host.docker.internal for Route A.
+            - name: COCOLA_SANDBOX_LLM_BASE_URL
+              value: "http://llm-gateway.cocola.svc.cluster.local:8080"
+            - name: COCOLA_REDIS_ADDR
+              value: "redis.cocola.svc.cluster.local:6379"
+          readinessProbe:
+            tcpSocket:
+              port: 50051
+            initialDelaySeconds: 3
+            periodSeconds: 10
+          resources:
+            requests:
+              cpu: "100m"
+              memory: "128Mi"
+            limits:
+              cpu: "500m"
+              memory: "256Mi"
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: sandbox-manager
+  namespace: cocola
+spec:
+  selector:
+    app: sandbox-manager
+  ports:
+    - name: grpc
+      port: 50051
+      targetPort: 50051
