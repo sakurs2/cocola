@@ -9,6 +9,7 @@ import (
 	"time"
 
 	corev1 "k8s.io/api/core/v1"
+	networkingv1 "k8s.io/api/networking/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/client-go/kubernetes/fake"
 	utilexec "k8s.io/client-go/util/exec"
@@ -459,5 +460,78 @@ func TestWriteReadFile_RoundTrip(t *testing.T) {
 	}
 	if string(got) != string(want) {
 		t.Fatalf("round trip mismatch: got %q want %q", got, want)
+	}
+}
+
+func getNetpol(t *testing.T, cs *fake.Clientset, sid string) *networkingv1.NetworkPolicy {
+	t.Helper()
+	np, err := cs.NetworkingV1().NetworkPolicies("test-ns").Get(context.Background(), netpolName(sid), metav1.GetOptions{})
+	if err != nil {
+		t.Fatalf("get networkpolicy: %v", err)
+	}
+	return np
+}
+
+func TestCreate_EmptyAllowlistDeniesAllEgress(t *testing.T) {
+	p, cs := newTestProvider(t)
+	sb, err := p.Create(context.Background(), provider.SandboxSpec{UserID: "u", SessionID: "s"})
+	if err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+	np := getNetpol(t, cs, sb.ID)
+	// Egress policy type present but NO rules => deny all outbound.
+	if len(np.Spec.PolicyTypes) != 1 || np.Spec.PolicyTypes[0] != networkingv1.PolicyTypeEgress {
+		t.Fatalf("expected Egress policy type, got %v", np.Spec.PolicyTypes)
+	}
+	if len(np.Spec.Egress) != 0 {
+		t.Fatalf("empty allowlist must yield 0 egress rules (deny all), got %d", len(np.Spec.Egress))
+	}
+	if np.Spec.PodSelector.MatchLabels[labelSandboxID] != sb.ID {
+		t.Fatal("networkpolicy must select the sandbox pod by sandbox-id")
+	}
+}
+
+func TestCreate_AllowlistAddsDNSClusterAndCIDR(t *testing.T) {
+	p, cs := newTestProvider(t)
+	sb, err := p.Create(context.Background(), provider.SandboxSpec{
+		UserID: "u", SessionID: "s",
+		Networking: provider.Networking{EgressAllowlist: []string{"10.0.0.0/8", "1.2.3.4", "example.com"}},
+	})
+	if err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+	np := getNetpol(t, cs, sb.ID)
+	// Expect: DNS rule + in-cluster rule + one ipBlock rule (2 valid IP/CIDR;
+	// the domain is skipped). The domain entry must NOT crash or appear as a peer.
+	if len(np.Spec.Egress) != 3 {
+		t.Fatalf("expected 3 egress rules (dns, cluster, ipblocks), got %d", len(np.Spec.Egress))
+	}
+	var cidrs []string
+	for _, r := range np.Spec.Egress {
+		for _, peer := range r.To {
+			if peer.IPBlock != nil {
+				cidrs = append(cidrs, peer.IPBlock.CIDR)
+			}
+		}
+	}
+	wantCIDR := map[string]bool{"10.0.0.0/8": true, "1.2.3.4/32": true}
+	if len(cidrs) != 2 {
+		t.Fatalf("expected 2 ipBlock peers, got %v", cidrs)
+	}
+	for _, c := range cidrs {
+		if !wantCIDR[c] {
+			t.Fatalf("unexpected CIDR peer %q", c)
+		}
+	}
+}
+
+func TestDestroy_DeletesNetworkPolicy(t *testing.T) {
+	p, cs := newTestProvider(t)
+	sb, _ := p.Create(context.Background(), provider.SandboxSpec{UserID: "u", SessionID: "s"})
+	if err := p.Destroy(context.Background(), sb.ID); err != nil {
+		t.Fatalf("Destroy: %v", err)
+	}
+	if _, err := cs.NetworkingV1().NetworkPolicies("test-ns").Get(context.Background(), netpolName(sb.ID), metav1.GetOptions{}); err == nil {
+		t.Fatal("networkpolicy should be deleted on Destroy")
 	}
 }

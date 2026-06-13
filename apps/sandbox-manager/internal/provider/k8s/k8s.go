@@ -34,6 +34,7 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
+	"net"
 	"os"
 	"path"
 	"strings"
@@ -41,9 +42,11 @@ import (
 	"time"
 
 	corev1 "k8s.io/api/core/v1"
+	networkingv1 "k8s.io/api/networking/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/util/intstr"
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/kubernetes/scheme"
 	"k8s.io/client-go/rest"
@@ -228,6 +231,11 @@ func (p *Provider) Create(ctx context.Context, spec provider.SandboxSpec) (*prov
 	}
 
 	if err := p.writeBinding(ctx, b); err != nil {
+		return nil, err
+	}
+
+	// Enforce egress before the Pod can run: empty allowlist = deny all (ADR-0009).
+	if err := p.ensureNetworkPolicy(ctx, sid, spec.Networking.EgressAllowlist); err != nil {
 		return nil, err
 	}
 
@@ -448,6 +456,11 @@ func (p *Provider) Destroy(ctx context.Context, sid string) error {
 	if err := p.cli.CoreV1().ConfigMaps(p.namespace).Delete(ctx, bindingName(sid), metav1.DeleteOptions{}); err != nil {
 		if !apierrors.IsNotFound(err) {
 			return fmt.Errorf("k8s: delete binding: %w", err)
+		}
+	}
+	if err := p.cli.NetworkingV1().NetworkPolicies(p.namespace).Delete(ctx, netpolName(sid), metav1.DeleteOptions{}); err != nil {
+		if !apierrors.IsNotFound(err) {
+			return fmt.Errorf("k8s: delete networkpolicy: %w", err)
 		}
 	}
 	p.mu.Lock()
@@ -683,6 +696,103 @@ func (e *spdyExecutor) stream(ctx context.Context, namespace, pod, containerName
 	})
 }
 
+// --- egress enforcement ----------------------------------------------------
+
+// ensureNetworkPolicy materialises the sandbox's egress posture as a
+// NetworkPolicy selecting the sandbox Pod by its sandbox-id label (ADR-0009:
+// egress lockdown is mandatory). Semantics mirror the Docker provider's
+// NetworkMode=none default:
+//
+//   - empty allowlist  -> PolicyTypes:[Egress] with NO egress rules = deny all
+//     outbound traffic (the safe default).
+//   - non-empty        -> allow DNS (so names resolve), allow in-cluster egress
+//     (so the llm-gateway Service is reachable for Route A), and add one ipBlock
+//     peer per CIDR/IP entry in the allowlist.
+//
+// Note: NetworkPolicy matches on IP/CIDR and label selectors, not DNS names.
+// Domain-style allowlist entries cannot be enforced by a vanilla CNI here; they
+// are skipped at this layer (a DNS-aware CNI such as Cilium would be required to
+// pin them) and logged, while CIDR entries are enforced precisely.
+func (p *Provider) ensureNetworkPolicy(ctx context.Context, sid string, allowlist []string) error {
+	np := &networkingv1.NetworkPolicy{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      netpolName(sid),
+			Namespace: p.namespace,
+			Labels: map[string]string{
+				labelManaged:   "true",
+				labelSandboxID: sid,
+			},
+		},
+		Spec: networkingv1.NetworkPolicySpec{
+			PodSelector: metav1.LabelSelector{
+				MatchLabels: map[string]string{labelSandboxID: sid},
+			},
+			PolicyTypes: []networkingv1.PolicyType{networkingv1.PolicyTypeEgress},
+			Egress:      p.egressRules(sid, allowlist),
+		},
+	}
+	// Idempotent: replace any stale policy from a previous incarnation.
+	if _, err := p.cli.NetworkingV1().NetworkPolicies(p.namespace).Create(ctx, np, metav1.CreateOptions{}); err != nil {
+		if !apierrors.IsAlreadyExists(err) {
+			return fmt.Errorf("k8s: create networkpolicy: %w", err)
+		}
+		if _, uerr := p.cli.NetworkingV1().NetworkPolicies(p.namespace).Update(ctx, np, metav1.UpdateOptions{}); uerr != nil {
+			return fmt.Errorf("k8s: update networkpolicy: %w", uerr)
+		}
+	}
+	return nil
+}
+
+// egressRules builds the egress rule set for an allowlist. Empty -> nil (deny all).
+func (p *Provider) egressRules(sid string, allowlist []string) []networkingv1.NetworkPolicyEgressRule {
+	if len(allowlist) == 0 {
+		return nil // deny all egress
+	}
+	dnsUDP := corev1.ProtocolUDP
+	dnsTCP := corev1.ProtocolTCP
+	dnsPort := intstr.FromInt(53)
+	rules := []networkingv1.NetworkPolicyEgressRule{
+		// DNS resolution.
+		{Ports: []networkingv1.NetworkPolicyPort{
+			{Protocol: &dnsUDP, Port: &dnsPort},
+			{Protocol: &dnsTCP, Port: &dnsPort},
+		}},
+		// In-cluster egress so the llm-gateway Service is reachable (Route A).
+		{To: []networkingv1.NetworkPolicyPeer{
+			{NamespaceSelector: &metav1.LabelSelector{}},
+		}},
+	}
+	var ipPeers []networkingv1.NetworkPolicyPeer
+	for _, entry := range allowlist {
+		cidr := entry
+		if !strings.Contains(cidr, "/") {
+			if ip := net.ParseIP(entry); ip != nil {
+				if ip.To4() != nil {
+					cidr = entry + "/32"
+				} else {
+					cidr = entry + "/128"
+				}
+			} else {
+				// Domain name — cannot be expressed as an ipBlock here.
+				slog.Warn("k8s: egress allowlist domain not enforceable by NetworkPolicy (needs DNS-aware CNI), skipping",
+					"sandbox_id", sid, "entry", entry)
+				continue
+			}
+		}
+		if _, _, err := net.ParseCIDR(cidr); err != nil {
+			slog.Warn("k8s: invalid egress CIDR, skipping", "sandbox_id", sid, "entry", entry)
+			continue
+		}
+		ipPeers = append(ipPeers, networkingv1.NetworkPolicyPeer{
+			IPBlock: &networkingv1.IPBlock{CIDR: cidr},
+		})
+	}
+	if len(ipPeers) > 0 {
+		rules = append(rules, networkingv1.NetworkPolicyEgressRule{To: ipPeers})
+	}
+	return rules
+}
+
 // --- binding persistence ---------------------------------------------------
 
 // writeBinding persists the sandbox binding as a labelled ConfigMap so any
@@ -758,6 +868,7 @@ func (p *Provider) resolve(ctx context.Context, sid string) (*record, error) {
 
 func podName(sid string) string        { return "cocola-" + sid }
 func bindingName(sid string) string    { return "cocola-bind-" + sid }
+func netpolName(sid string) string     { return "cocola-egress-" + sid }
 func userPVCName(userID string) string { return "cocola-user-" + safe(userID) }
 func sessionPVCName(s string) string   { return "cocola-sess-" + safe(s) }
 
