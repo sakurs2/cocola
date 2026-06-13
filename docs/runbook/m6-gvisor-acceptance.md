@@ -1,7 +1,7 @@
 # M6 验收 Runbook：K8s + gVisor 沙箱端到端验收(Layer C)
 
-> 适用对象:有一套带 **gVisor**(`runsc`)RuntimeClass 的 Kubernetes 集群,
-> 或在 Linux 云服务器 / macOS 上的 Linux 虚拟机里现搭一套。
+> 适用对象:一台 **Linux 云服务器**(最贴近生产,本仓首选路径),在其上用
+> k3s + gVisor 搭一套带 `runsc` RuntimeClass 的单机 Kubernetes。
 > 目标:跑通 ADR-0008/ADR-0009 的验收门——`runsc` 下大脑可运行、egress 被锁定、
 > 原生 bash/file IO 正常、删 Pod 重挂 PVC 后 `claude --resume` 能续接上下文。
 >
@@ -21,34 +21,53 @@
 
 1. 集群 v1.29+,`kubectl` 已指向目标 context(`kubectl config current-context`)。
 2. **节点装了 gVisor**:`containerd-shim-runsc-v1` 在节点上且已在 containerd
-   注册,handler 名与 `01-runtimeclass.yaml` 的 `runsc` 一致。托管集群常是
-   节点池开关(如 GKE Sandbox)。
-3. **CNI 强制 NetworkPolicy**(Calico / Cilium 等)。域名级 allowlist 还需
-   DNS-aware CNI(Cilium);纯 CIDR/IP 在任意支持策略的 CNI 上即可。
+   注册,handler 名与 `01-runtimeclass.yaml` 的 `runsc` 一致。
+3. **CNI 强制 NetworkPolicy**。**k3s 默认即满足**:它在 flannel 之外自带一个
+   kube-router 的 NetworkPolicy 控制器,NetworkPolicy 开箱强制(域名级 allowlist
+   仍需 DNS-aware CNI 如 Cilium;纯 CIDR/IP 在 k3s 默认下即可)。
 4. 控制面依赖(redis / llm-gateway)已按 `04-sandbox-manager.yaml` 里的
    in-cluster DNS 名就绪。
 
-### 没有现成集群?三选一最快路径
+### 在 Linux 云服务器上搭 k3s + gVisor(单机即可,推荐)
 
-- **A. Linux 云服务器单机 k3s + gVisor**(推荐,最贴近生产):
-  1. 装 k3s(自带 containerd):下载官方安装脚本(get.k3s.io),先通读再执行
-     (不要直接管道进 shell)。
-  2. 装 gVisor 并注册 containerd runsc handler:从 gVisor 官方 release 路径
-     `storage.googleapis.com/gvisor/releases/release/latest/$(uname -m)`
-     下载 `runsc` 与 `containerd-shim-runsc-v1`,`chmod +x` 后放到节点 PATH
-     里的系统 bin 目录(如本地 bin 目录)。
-  3. 在 k3s 内置 containerd 的 `config.toml.tmpl` 追加 runsc runtime:
-     `plugins."io.containerd.grpc.v1.cri".containerd.runtimes.runsc.runtime_type = "io.containerd.runsc.v1"`,
-     然后 `sudo systemctl restart k3s`。
-  4. 把 KUBECONFIG 指向 k3s 默认 kubeconfig(k3s 数据目录下的
-     `rancher/k3s/k3s.yaml`)。
-  > k3s 默认 CNI flannel **不强制 NetworkPolicy**,验 egress 那步需换
-  > Calico/Cilium。
-- **B. minikube + gVisor 插件**(快速试):
-  `minikube start --container-runtime=containerd` 后
-  `minikube addons enable gvisor`。
-- **C. GKE Sandbox**:建带 "GKE Sandbox" 的节点池,RuntimeClass 名通常是
-  `gvisor`——此时部署时设 `runtimeClass.install=false`、`sandbox.runtimeClass=gvisor`。
+> gVisor 默认 platform 是 **systrap**:纯用户态(seccomp + 信号),**不需要嵌套
+> 虚拟化**,普通云主机直接能跑。仅当云主机暴露了 KVM 设备(`/dev/kvm`)时,
+> 才可选 KVM platform 提速——对验收非必需。
+
+1. **装 k3s**(自带 containerd + flannel + kube-router NetworkPolicy 控制器):
+   下载官方安装脚本(get.k3s.io),先通读再执行(不要直接管道进 shell)。
+   装完确认:`kubectl get nodes` 为 Ready;NetworkPolicy 默认强制,无需换 CNI。
+
+2. **装 gVisor 二进制**:从 gVisor 官方 release 路径
+   `storage.googleapis.com/gvisor/releases/release/latest/$(uname -m)` 下载
+   `runsc` 与 `containerd-shim-runsc-v1`,`chmod +x` 后放到节点 PATH 上的
+   系统 bin 目录(`/usr/local/bin`)。systrap 为默认 platform,无需额外配置。
+
+3. **把 runsc 注册进 k3s 的 containerd**:k3s 用模板文件生成 containerd 配置,
+   不要直接改生成出来的 `config.toml`,而是写模板(改完 `systemctl restart k3s`
+   生效):
+   - 新版 k3s(containerd 2.x / cri v1):模板路径
+     `/var/lib/rancher/k3s/agent/etc/containerd/config-v3.toml.tmpl`,内容追加:
+     ```toml
+     {{ template "base" . }}
+     [plugins.'io.containerd.cri.v1.runtime'.containerd.runtimes.runsc]
+       runtime_type = "io.containerd.runsc.v1"
+     ```
+   - 旧版 k3s(containerd 1.x):模板路径
+     `/var/lib/rancher/k3s/agent/etc/containerd/config.toml.tmpl`,内容追加:
+     ```toml
+     {{ template "base" . }}
+     [plugins."io.containerd.grpc.v1.cri".containerd.runtimes.runsc]
+       runtime_type = "io.containerd.runsc.v1"
+     ```
+   > runtime 名 `runsc` 必须与 `deploy/k8s/01-runtimeclass.yaml` 的 handler 一致。
+
+4. **KUBECONFIG**:指向 k3s 默认 kubeconfig `/etc/rancher/k3s/k3s.yaml`(远程操作时把
+   其中 server 地址改成云服务器公网/内网 IP)。
+
+> 备选(非云服务器场景):minikube `--container-runtime=containerd` +
+> `minikube addons enable gvisor`;或 GKE Sandbox 节点池(RuntimeClass 名通常是
+> `gvisor`,部署时设 `runtimeClass.install=false`、`sandbox.runtimeClass=gvisor`)。
 
 ---
 
@@ -212,9 +231,10 @@ kubectl -n cocola get pods -l app=sandbox-manager
 
 | 现象 | 多半原因 | 处理 |
 |---|---|---|
-| 沙箱 Pod 卡 `Pending`/`ContainerCreating` | 节点无 gVisor / RuntimeClass handler 不匹配 | 装 `containerd-shim-runsc-v1` 并核对 handler 名 |
-| Pod 起得来但 `claude` 报 syscall 错 | gVisor 拦了某调用 | 记录失败 syscall,评估基础镜像 / runsc 版本 |
-| egress 没被拦(公网秒回) | CNI 不强制 NetworkPolicy | 换 Calico/Cilium |
+| 沙箱 Pod 卡 `Pending`/`ContainerCreating` | 节点无 gVisor / RuntimeClass handler 不匹配 | 装 `containerd-shim-runsc-v1` 并核对 handler 名(模板 runtime 名 = `runsc`) |
+| Pod 起得来但 `claude` 报 syscall 错 | gVisor 拦了某调用 | 记录失败 syscall,评估基础镜像 / runsc 版本;或试不同 platform |
+| egress 没被拦(公网秒回) | CNI 不强制 NetworkPolicy(纯上游 flannel、部分托管 CNI) | k3s 自带 kube-router 控制器默认强制;托管集群确认 CNI 支持 NetworkPolicy |
 | 域名级 allowlist 不生效 | 纯 NetworkPolicy 不支持域名 | 用 DNS-aware CNI(Cilium),否则只用 CIDR/IP |
 | Resume 后文件丢 | storageClass 非持久 / PVC 未重挂 | 确认 PVC `Bound` 且 `ReadWriteOnce` 节点亲和满足 |
 | 跨副本 Resume 失败 | 误以为靠内存态 | 确认 binding ConfigMap 存在,resolve 走的是它 |
+| `runsc` 报需要 KVM/嵌套虚拟化 | 误用 KVM platform | 用默认 systrap platform(无需嵌套虚拟化) |
