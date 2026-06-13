@@ -77,6 +77,65 @@ func TestCreate_StartsPodWithLabelsAndPVCs(t *testing.T) {
 	}
 }
 
+func TestCreate_DefaultRunc_NoRuntimeClass(t *testing.T) {
+	p, cs := newTestProvider(t)
+	// Default provider leaves runtimeClass empty -> plain runc, no RuntimeClassName.
+	if _, err := p.Create(context.Background(), provider.SandboxSpec{
+		UserID:    "user-A",
+		SessionID: "sess-1",
+	}); err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+	pods, _ := cs.CoreV1().Pods("test-ns").List(context.Background(), metav1.ListOptions{})
+	if len(pods.Items) != 1 {
+		t.Fatalf("expected 1 pod, got %d", len(pods.Items))
+	}
+	if rc := pods.Items[0].Spec.RuntimeClassName; rc != nil {
+		t.Fatalf("expected no RuntimeClassName (runc), got %q", *rc)
+	}
+}
+
+func TestCreate_UserNamespacesEnabledByDefault(t *testing.T) {
+	p, cs := newTestProvider(t)
+	// Default COCOLA_K8S_HOST_USERS=false -> hostUsers=false enables user namespaces.
+	if _, err := p.Create(context.Background(), provider.SandboxSpec{
+		UserID:    "user-A",
+		SessionID: "sess-1",
+	}); err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+	pods, _ := cs.CoreV1().Pods("test-ns").List(context.Background(), metav1.ListOptions{})
+	hu := pods.Items[0].Spec.HostUsers
+	if hu == nil || *hu != false {
+		t.Fatalf("expected Spec.HostUsers=false (userns), got %v", hu)
+	}
+}
+
+func TestParseHostUsers(t *testing.T) {
+	cases := map[string]*bool{
+		"false":   boolPtr(false),
+		"FALSE":   boolPtr(false),
+		"0":       boolPtr(false),
+		"true":    boolPtr(true),
+		"1":       boolPtr(true),
+		"":        nil,
+		"default": nil,
+	}
+	for in, want := range cases {
+		got := parseHostUsers(in)
+		switch {
+		case want == nil && got != nil:
+			t.Fatalf("parseHostUsers(%q) = %v, want nil", in, *got)
+		case want != nil && got == nil:
+			t.Fatalf("parseHostUsers(%q) = nil, want %v", in, *want)
+		case want != nil && got != nil && *want != *got:
+			t.Fatalf("parseHostUsers(%q) = %v, want %v", in, *got, *want)
+		}
+	}
+}
+
+func boolPtr(b bool) *bool { return &b }
+
 func TestCreate_ReusesExistingUserPVC(t *testing.T) {
 	p, cs := newTestProvider(t)
 

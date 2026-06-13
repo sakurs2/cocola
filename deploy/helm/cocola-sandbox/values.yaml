@@ -5,9 +5,11 @@ namespaces:
   create: true
 
 runtimeClass:
-  # Install the gVisor RuntimeClass. Disable if the cluster already defines it
-  # (e.g. GKE Sandbox provides "gvisor"); then point sandbox.runtimeClass at it.
-  install: true
+  # OPTIONAL gVisor RuntimeClass. Default isolation is runc + user namespaces,
+  # which needs no RuntimeClass at all, so this is off by default. Enable only
+  # if you install the gVisor shim on every node and set sandbox.runtimeClass
+  # to its name (e.g. "runsc", or "gvisor" on GKE Sandbox).
+  install: false
   name: runsc
   handler: runsc
 
@@ -25,7 +27,13 @@ sandboxManager:
 
 sandbox:
   # Env consumed by the K8s provider inside sandbox-manager.
-  runtimeClass: runsc
+  # runtimeClass empty => plain runc (no RuntimeClassName). Set to "runsc"
+  # (or your cluster's gVisor class) to opt into the gVisor enhancement.
+  runtimeClass: ""
+  # hostUsers=false enables Kubernetes user namespaces (default-on since 1.33),
+  # mapping container root to a non-privileged host uid. "true" disables it;
+  # "default" defers to the cluster.
+  hostUsers: "false"
   image: cocola/sandbox-runtime:dev
   storageClass: "" # empty => cluster default StorageClass
   llmBaseURL: http://llm-gateway.cocola.svc.cluster.local:8080

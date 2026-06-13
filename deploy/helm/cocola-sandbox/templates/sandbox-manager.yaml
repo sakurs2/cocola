@@ -33,6 +33,8 @@ spec:
               value: {{ .Values.namespaces.sandboxes | quote }}
             - name: COCOLA_K8S_RUNTIME_CLASS
               value: {{ .Values.sandbox.runtimeClass | quote }}
+            - name: COCOLA_K8S_HOST_USERS
+              value: {{ .Values.sandbox.hostUsers | quote }}
             - name: COCOLA_K8S_IMAGE
               value: {{ .Values.sandbox.image | quote }}
             {{- with .Values.sandbox.storageClass }}

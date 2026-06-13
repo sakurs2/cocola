@@ -1,5 +1,8 @@
-// Package k8s implements SandboxProvider on top of Kubernetes, with each sandbox
-// running as a Pod under the gVisor runtime (RuntimeClass=runsc) for strong
+// Package k8s implements SandboxProvider on top of Kubernetes. By default each
+// sandbox runs as a plain runc Pod with Kubernetes user namespaces enabled
+// (hostUsers=false, container root mapped to a non-privileged host uid), which
+// needs zero node-level installation. gVisor is an optional enhancement: set
+// COCOLA_K8S_RUNTIME_CLASS=runsc to pin a RuntimeClass for userspace-kernel
 // isolation. It is the production counterpart to the Docker provider: same
 // interface, same implicit contracts (provider-minted sandbox ids, the four
 // cocola labels for cross-replica resolve, cross-session user persistence), but
@@ -75,7 +78,7 @@ const (
 const (
 	defaultImage        = "alpine:3.20"
 	defaultNamespace    = "cocola-sandboxes"
-	defaultRuntimeClass = "runsc" // gVisor
+	gvisorRuntimeClass  = "runsc" // optional gVisor RuntimeClass (COCOLA_K8S_RUNTIME_CLASS=runsc)
 	defaultExecTimeout  = 60 * time.Second
 	defaultReadyTimeout = 30 * time.Second
 
@@ -98,7 +101,8 @@ type Provider struct {
 	namespace string
 
 	image        string
-	runtimeClass string
+	runtimeClass string // empty -> runc (no RuntimeClassName); set to "runsc" to opt into gVisor
+	hostUsers    *bool  // false -> map container root to a non-priv host uid (userns); nil -> cluster default
 	storageClass string // empty -> cluster default StorageClass
 	gatewayDNS   string // in-cluster llm-gateway base URL for egress allowlist
 
@@ -159,7 +163,8 @@ func New(opts ...Option) (*Provider, error) {
 	p := &Provider{
 		namespace:    envOr("COCOLA_K8S_NAMESPACE", defaultNamespace),
 		image:        envOr("COCOLA_K8S_IMAGE", defaultImage),
-		runtimeClass: envOr("COCOLA_K8S_RUNTIME_CLASS", defaultRuntimeClass),
+		runtimeClass: os.Getenv("COCOLA_K8S_RUNTIME_CLASS"), // empty default -> plain runc
+		hostUsers:    parseHostUsers(envOr("COCOLA_K8S_HOST_USERS", "false")),
 		storageClass: os.Getenv("COCOLA_K8S_STORAGE_CLASS"),
 		gatewayDNS:   os.Getenv("COCOLA_SANDBOX_LLM_BASE_URL"),
 		readyTimeout: defaultReadyTimeout,
@@ -256,9 +261,10 @@ func (p *Provider) Create(ctx context.Context, spec provider.SandboxSpec) (*prov
 	}, nil
 }
 
-// podSpec builds the sandbox Pod from a binding: gVisor runtime, two PVC mounts +
-// RO plugins, the four binding labels, injected env, non-root securityContext,
-// and an idle command so the container stays alive for exec. Because it is driven
+// podSpec builds the sandbox Pod from a binding: runc by default (optionally a
+// RuntimeClass when set), user namespaces (hostUsers), two PVC mounts + RO
+// plugins, the four binding labels, injected env, non-root securityContext, and
+// an idle command so the container stays alive for exec. Because it is driven
 // entirely by the binding, Create and Resume produce byte-identical Pods.
 func (p *Provider) podSpec(b binding) *corev1.Pod {
 	uid := safe(b.UserID)
@@ -319,6 +325,9 @@ func (p *Provider) podSpec(b binding) *corev1.Pod {
 	}
 	if runtimeClass != "" {
 		pod.Spec.RuntimeClassName = &runtimeClass
+	}
+	if p.hostUsers != nil {
+		pod.Spec.HostUsers = p.hostUsers
 	}
 	return pod
 }
@@ -879,6 +888,24 @@ func safe(s string) string {
 	r := strings.NewReplacer("/", "-", "..", "-", " ", "-", "_", "-")
 	out := strings.ToLower(r.Replace(s))
 	return out
+}
+
+// parseHostUsers maps COCOLA_K8S_HOST_USERS to a *bool for pod.Spec.HostUsers.
+// "false" (the default) enables user namespaces by mapping container root to a
+// non-privileged host uid (Kubernetes >= 1.33, default-on). "true" shares the
+// host user namespace. Any other value (e.g. "", "default") returns nil, leaving
+// the cluster default in effect.
+func parseHostUsers(v string) *bool {
+	switch strings.ToLower(strings.TrimSpace(v)) {
+	case "false", "0", "no":
+		b := false
+		return &b
+	case "true", "1", "yes":
+		b := true
+		return &b
+	default:
+		return nil
+	}
 }
 
 func envOr(k, def string) string {

@@ -36,8 +36,17 @@ spec:
               value: "k8s"
             - name: COCOLA_K8S_NAMESPACE
               value: "cocola-sandboxes"
+            # Isolation defaults to plain runc + Kubernetes user namespaces
+            # (zero node-level install). To opt into gVisor, install the runsc
+            # shim on every node (see deploy/k8s/01-runtimeclass.yaml) and set
+            # COCOLA_K8S_RUNTIME_CLASS to "runsc".
             - name: COCOLA_K8S_RUNTIME_CLASS
-              value: "runsc"
+              value: ""
+            # hostUsers=false maps container root to a non-privileged host uid
+            # (user namespaces, default-on since Kubernetes 1.33). Set "true" to
+            # disable, or "default" to defer to the cluster.
+            - name: COCOLA_K8S_HOST_USERS
+              value: "false"
             # COCOLA_K8S_STORAGE_CLASS: optional; empty => cluster default.
             - name: COCOLA_K8S_IMAGE
               value: "cocola/sandbox-runtime:dev"
