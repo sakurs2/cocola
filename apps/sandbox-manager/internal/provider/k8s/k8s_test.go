@@ -2,11 +2,16 @@ package k8s
 
 import (
 	"context"
+	"errors"
+	"io"
+	"strings"
 	"testing"
+	"time"
 
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/client-go/kubernetes/fake"
+	utilexec "k8s.io/client-go/util/exec"
 
 	"github.com/cocola-project/cocola/apps/sandbox-manager/internal/provider"
 )
@@ -276,5 +281,183 @@ func TestResolve_CrossReplica(t *testing.T) {
 	pods, _ := cs.CoreV1().Pods("test-ns").List(context.Background(), metav1.ListOptions{})
 	if len(pods.Items) != 1 {
 		t.Fatalf("expected replica B to recreate the pod, got %d", len(pods.Items))
+	}
+}
+
+// fakeExecutor records the last exec call and produces scripted stdout. If a tar
+// handler is set it is invoked so WriteFile/ReadFile round-trips can be tested.
+type fakeExecutor struct {
+	lastCmd  []string
+	lastPod  string
+	stdout   []byte
+	err      error
+	onStream func(cmd []string, stdin io.Reader, stdout, stderr io.Writer) error
+}
+
+func (f *fakeExecutor) stream(_ context.Context, _, pod, _ string, cmd []string, stdin io.Reader, stdout, stderr io.Writer) error {
+	f.lastCmd = cmd
+	f.lastPod = pod
+	if f.onStream != nil {
+		return f.onStream(cmd, stdin, stdout, stderr)
+	}
+	if len(f.stdout) > 0 {
+		_, _ = stdout.Write(f.stdout)
+	}
+	return f.err
+}
+
+func newProviderWithExec(t *testing.T, fe *fakeExecutor) (*Provider, *fake.Clientset) {
+	t.Helper()
+	cs := fake.NewSimpleClientset()
+	p, err := New(WithClientset(cs), WithNamespace("test-ns"), WithExecutor(fe))
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	p.readyTimeout = 2 * time.Second
+	return p, cs
+}
+
+// markRunning forces a Pod to Running+Ready in the fake clientset so ensureRunning
+// sees it as healthy without a scheduler.
+func markRunning(t *testing.T, cs *fake.Clientset, sid string) {
+	t.Helper()
+	pod, err := cs.CoreV1().Pods("test-ns").Get(context.Background(), podName(sid), metav1.GetOptions{})
+	if err != nil {
+		t.Fatalf("get pod: %v", err)
+	}
+	pod.Status.Phase = corev1.PodRunning
+	pod.Status.Conditions = []corev1.PodCondition{{Type: corev1.PodReady, Status: corev1.ConditionTrue}}
+	if _, err := cs.CoreV1().Pods("test-ns").UpdateStatus(context.Background(), pod, metav1.UpdateOptions{}); err != nil {
+		t.Fatalf("UpdateStatus: %v", err)
+	}
+}
+
+func collect(ch <-chan provider.ExecEvent) (string, string, int32, error) {
+	var so, se strings.Builder
+	var exit int32
+	var streamErr error
+	for ev := range ch {
+		switch ev.Kind {
+		case provider.ExecEventStdout:
+			so.Write(ev.Stdout)
+		case provider.ExecEventStderr:
+			se.Write(ev.Stderr)
+		case provider.ExecEventExit:
+			exit = ev.Exit
+		case provider.ExecEventError:
+			streamErr = ev.Err
+		}
+	}
+	return so.String(), se.String(), exit, streamErr
+}
+
+func TestExec_StreamsStdoutAndExit(t *testing.T) {
+	fe := &fakeExecutor{stdout: []byte("hello\n")}
+	p, cs := newProviderWithExec(t, fe)
+	sb, _ := p.Create(context.Background(), provider.SandboxSpec{UserID: "u", SessionID: "s"})
+	markRunning(t, cs, sb.ID)
+
+	ch, err := p.Exec(context.Background(), sb.ID, provider.ExecRequest{Cmd: []string{"echo", "hello"}})
+	if err != nil {
+		t.Fatalf("Exec: %v", err)
+	}
+	so, _, exit, serr := collect(ch)
+	if serr != nil {
+		t.Fatalf("stream error: %v", serr)
+	}
+	if so != "hello\n" || exit != 0 {
+		t.Fatalf("stdout=%q exit=%d", so, exit)
+	}
+	if fe.lastPod != podName(sb.ID) {
+		t.Fatalf("exec targeted wrong pod: %q", fe.lastPod)
+	}
+}
+
+func TestExec_NonZeroExitReportedAsExitEvent(t *testing.T) {
+	fe := &fakeExecutor{err: utilexec.CodeExitError{Err: errors.New("boom"), Code: 7}}
+	p, cs := newProviderWithExec(t, fe)
+	sb, _ := p.Create(context.Background(), provider.SandboxSpec{UserID: "u", SessionID: "s"})
+	markRunning(t, cs, sb.ID)
+
+	ch, _ := p.Exec(context.Background(), sb.ID, provider.ExecRequest{Cmd: []string{"false"}})
+	_, _, exit, serr := collect(ch)
+	if serr != nil {
+		t.Fatalf("non-zero exit must not be a stream error: %v", serr)
+	}
+	if exit != 7 {
+		t.Fatalf("exit = %d, want 7", exit)
+	}
+}
+
+// TestExec_SelfHealResumesHibernatedPod is the K8s analogue of the Docker
+// thaw-before-exec regression: the reaper deleted the Pod, but Exec must resume
+// it transparently and still run the command.
+func TestExec_SelfHealResumesHibernatedPod(t *testing.T) {
+	fe := &fakeExecutor{stdout: []byte("awake\n")}
+	p, cs := newProviderWithExec(t, fe)
+	sb, _ := p.Create(context.Background(), provider.SandboxSpec{UserID: "u", SessionID: "s"})
+	// Hibernate: Pod is gone.
+	if err := p.Pause(context.Background(), sb.ID); err != nil {
+		t.Fatalf("Pause: %v", err)
+	}
+
+	// Resume (called inside Exec) recreates the Pod, but the fake scheduler won't
+	// mark it Ready — so poll for the recreated Pod and patch it Running+Ready,
+	// emulating the kubelet, while Exec blocks in ensureRunning.
+	go func() {
+		// Poll until the resumed Pod exists, then mark it Running+Ready.
+		for i := 0; i < 40; i++ {
+			if _, err := cs.CoreV1().Pods("test-ns").Get(context.Background(), podName(sb.ID), metav1.GetOptions{}); err == nil {
+				markRunning(t, cs, sb.ID)
+				return
+			}
+			time.Sleep(20 * time.Millisecond)
+		}
+	}()
+
+	ch, err := p.Exec(context.Background(), sb.ID, provider.ExecRequest{Cmd: []string{"echo", "awake"}})
+	if err != nil {
+		t.Fatalf("Exec (self-heal): %v", err)
+	}
+	so, _, exit, serr := collect(ch)
+	if serr != nil || exit != 0 || so != "awake\n" {
+		t.Fatalf("self-heal exec: stdout=%q exit=%d err=%v", so, exit, serr)
+	}
+	pods, _ := cs.CoreV1().Pods("test-ns").List(context.Background(), metav1.ListOptions{})
+	if len(pods.Items) != 1 {
+		t.Fatalf("expected pod resumed, got %d", len(pods.Items))
+	}
+}
+
+func TestWriteReadFile_RoundTrip(t *testing.T) {
+	want := []byte("file-contents-123")
+	// Simulate the in-Pod tar by capturing the WriteFile archive and replaying it
+	// on ReadFile, so the provider's own tar framing is exercised end to end.
+	var stored []byte
+	fe := &fakeExecutor{onStream: func(cmd []string, stdin io.Reader, stdout, stderr io.Writer) error {
+		switch {
+		case len(cmd) > 1 && cmd[0] == "tar" && cmd[1] == "-x": // WriteFile
+			data, _ := io.ReadAll(stdin)
+			stored = data
+			return nil
+		case len(cmd) > 1 && cmd[0] == "tar" && cmd[1] == "-c": // ReadFile
+			_, _ = stdout.Write(stored)
+			return nil
+		}
+		return errors.New("unexpected cmd")
+	}}
+	p, cs := newProviderWithExec(t, fe)
+	sb, _ := p.Create(context.Background(), provider.SandboxSpec{UserID: "u", SessionID: "s"})
+	markRunning(t, cs, sb.ID)
+
+	if err := p.WriteFile(context.Background(), sb.ID, "/workspace/s/note.txt", want); err != nil {
+		t.Fatalf("WriteFile: %v", err)
+	}
+	got, err := p.ReadFile(context.Background(), sb.ID, "/workspace/s/note.txt")
+	if err != nil {
+		t.Fatalf("ReadFile: %v", err)
+	}
+	if string(got) != string(want) {
+		t.Fatalf("round trip mismatch: got %q want %q", got, want)
 	}
 }

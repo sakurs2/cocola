@@ -26,10 +26,16 @@
 package k8s
 
 import (
+	"archive/tar"
+	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
+	"io"
+	"log/slog"
 	"os"
+	"path"
 	"strings"
 	"sync"
 	"time"
@@ -39,8 +45,11 @@ import (
 	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/client-go/kubernetes"
+	"k8s.io/client-go/kubernetes/scheme"
 	"k8s.io/client-go/rest"
 	"k8s.io/client-go/tools/clientcmd"
+	"k8s.io/client-go/tools/remotecommand"
+	utilexec "k8s.io/client-go/util/exec"
 
 	"github.com/google/uuid"
 
@@ -65,6 +74,7 @@ const (
 	defaultNamespace    = "cocola-sandboxes"
 	defaultRuntimeClass = "runsc" // gVisor
 	defaultExecTimeout  = 60 * time.Second
+	defaultReadyTimeout = 30 * time.Second
 
 	guestUserData     = "/data/userdata"
 	guestWorkspace    = "/workspace"
@@ -89,8 +99,19 @@ type Provider struct {
 	storageClass string // empty -> cluster default StorageClass
 	gatewayDNS   string // in-cluster llm-gateway base URL for egress allowlist
 
+	restConfig   *rest.Config  // for building SPDY exec streams (nil in tests)
+	exec         podExecutor   // Pod exec subresource (injectable for tests)
+	readyTimeout time.Duration // how long Exec waits for a resumed Pod to be Ready
+
 	mu        sync.RWMutex
 	sandboxes map[string]*record // sandbox_id -> binding (fast-path cache)
+}
+
+// podExecutor abstracts the Kubernetes Pod exec subresource. Production uses a
+// SPDY stream; tests inject a fake because the fake clientset cannot serve the
+// streaming exec protocol.
+type podExecutor interface {
+	stream(ctx context.Context, namespace, pod, container string, cmd []string, stdin io.Reader, stdout, stderr io.Writer) error
 }
 
 // binding is the durable, self-contained description of a sandbox: everything
@@ -122,6 +143,12 @@ func WithClientset(cli kubernetes.Interface) Option {
 	return func(p *Provider) { p.cli = cli }
 }
 
+// WithExecutor injects a Pod executor (used by tests; the fake clientset cannot
+// serve the streaming exec subresource).
+func WithExecutor(e podExecutor) Option {
+	return func(p *Provider) { p.exec = e }
+}
+
 // New constructs a Kubernetes provider. It uses the in-cluster ServiceAccount
 // config when running inside the cluster, falling back to COCOLA_K8S_KUBECONFIG
 // (or the default kubeconfig path) for out-of-cluster development.
@@ -132,25 +159,33 @@ func New(opts ...Option) (*Provider, error) {
 		runtimeClass: envOr("COCOLA_K8S_RUNTIME_CLASS", defaultRuntimeClass),
 		storageClass: os.Getenv("COCOLA_K8S_STORAGE_CLASS"),
 		gatewayDNS:   os.Getenv("COCOLA_SANDBOX_LLM_BASE_URL"),
+		readyTimeout: defaultReadyTimeout,
 		sandboxes:    map[string]*record{},
 	}
 	for _, o := range opts {
 		o(p)
 	}
 	if p.cli == nil {
-		cli, err := buildClientset()
+		cli, cfg, err := buildClientset()
 		if err != nil {
 			return nil, err
 		}
 		p.cli = cli
+		p.restConfig = cfg
+	}
+	// Default to the real SPDY executor unless a test injected one.
+	if p.exec == nil && p.restConfig != nil {
+		p.exec = &spdyExecutor{cfg: p.restConfig}
 	}
 	return p, nil
 }
 
 // buildClientset prefers in-cluster config, then an explicit/!default kubeconfig.
-func buildClientset() (kubernetes.Interface, error) {
+// It also returns the *rest.Config so the provider can build SPDY exec streams.
+func buildClientset() (kubernetes.Interface, *rest.Config, error) {
 	if cfg, err := rest.InClusterConfig(); err == nil {
-		return kubernetes.NewForConfig(cfg)
+		cli, cerr := kubernetes.NewForConfig(cfg)
+		return cli, cfg, cerr
 	}
 	kubeconfig := os.Getenv("COCOLA_K8S_KUBECONFIG")
 	if kubeconfig == "" {
@@ -160,9 +195,10 @@ func buildClientset() (kubernetes.Interface, error) {
 	}
 	cfg, err := clientcmd.BuildConfigFromFlags("", kubeconfig)
 	if err != nil {
-		return nil, fmt.Errorf("k8s: build config: %w", err)
+		return nil, nil, fmt.Errorf("k8s: build config: %w", err)
 	}
-	return kubernetes.NewForConfig(cfg)
+	cli, cerr := kubernetes.NewForConfig(cfg)
+	return cli, cfg, cerr
 }
 
 // Create provisions the two PVCs (if absent), persists the binding ConfigMap,
@@ -418,6 +454,233 @@ func (p *Provider) Destroy(ctx context.Context, sid string) error {
 	delete(p.sandboxes, sid)
 	p.mu.Unlock()
 	return nil
+}
+
+// Exec runs a command inside the sandbox Pod via the exec subresource and streams
+// stdout/stderr back as ExecEvents, mirroring the Docker provider's contract.
+//
+// Self-heal (K8s analogue of Docker's thawIfPaused): the reaper hibernates idle
+// sandboxes by deleting the Pod. A later turn legitimately reuses the same
+// sandbox, so Exec transparently Resumes a missing Pod and waits for it to become
+// Ready before streaming, instead of failing with "pod not found".
+func (p *Provider) Exec(ctx context.Context, sid string, req provider.ExecRequest) (<-chan provider.ExecEvent, error) {
+	rec, err := p.resolve(ctx, sid)
+	if err != nil {
+		return nil, err
+	}
+	if len(req.Cmd) == 0 {
+		return nil, fmt.Errorf("k8s: empty command")
+	}
+	if p.exec == nil {
+		return nil, fmt.Errorf("k8s: no pod executor configured")
+	}
+	if err := p.ensureRunning(ctx, sid); err != nil {
+		return nil, err
+	}
+
+	cmd := req.Cmd
+	// Honour Cwd/Env without a custom shell contract: prefix with `env -C`.
+	if req.Cwd != "" || len(req.Env) > 0 {
+		wrapped := []string{"env"}
+		if req.Cwd != "" {
+			wrapped = append(wrapped, "-C", req.Cwd)
+		}
+		for k, v := range req.Env {
+			wrapped = append(wrapped, k+"="+v)
+		}
+		cmd = append(wrapped, req.Cmd...)
+	}
+
+	timeout := defaultExecTimeout
+	if req.Timeout > 0 {
+		timeout = time.Duration(req.Timeout) * time.Second
+	}
+
+	out := make(chan provider.ExecEvent, 32)
+	go func() {
+		defer close(out)
+		runCtx, cancel := context.WithTimeout(ctx, timeout)
+		defer cancel()
+
+		var stdin io.Reader
+		if len(req.Stdin) > 0 {
+			stdin = bytes.NewReader(req.Stdin)
+		}
+		stdoutW := &chanWriter{kind: provider.ExecEventStdout, out: out}
+		stderrW := &chanWriter{kind: provider.ExecEventStderr, out: out}
+
+		err := p.exec.stream(runCtx, p.namespace, rec.podName, containerName, cmd, stdin, stdoutW, stderrW)
+		if err == nil {
+			out <- provider.ExecEvent{Kind: provider.ExecEventExit, Exit: 0}
+			return
+		}
+		// remotecommand surfaces a non-zero exit as CodeExitError; treat that as a
+		// normal Exit event, anything else as a stream error.
+		var codeErr utilexec.CodeExitError
+		if errors.As(err, &codeErr) {
+			out <- provider.ExecEvent{Kind: provider.ExecEventExit, Exit: int32(codeErr.Code)}
+			return
+		}
+		out <- provider.ExecEvent{Kind: provider.ExecEventError, Err: err}
+	}()
+	return out, nil
+}
+
+// ensureRunning resumes a hibernated sandbox and blocks until its Pod is Ready
+// (or the ready timeout elapses). If the Pod is already running it returns fast.
+func (p *Provider) ensureRunning(ctx context.Context, sid string) error {
+	hs, err := p.Health(ctx, sid)
+	if err != nil {
+		return err
+	}
+	if hs.Healthy {
+		return nil
+	}
+	if err := p.Resume(ctx, sid); err != nil {
+		return err
+	}
+	slog.Info("k8s: resumed hibernated sandbox before exec", "sandbox_id", sid)
+
+	deadline := time.Now().Add(p.readyTimeout)
+	for {
+		hs, err := p.Health(ctx, sid)
+		if err != nil {
+			return err
+		}
+		if hs.Healthy {
+			return nil
+		}
+		if time.Now().After(deadline) {
+			return fmt.Errorf("k8s: sandbox %s not ready after resume: %s", sid, hs.Detail)
+		}
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-time.After(500 * time.Millisecond):
+		}
+	}
+}
+
+// WriteFile streams a single file into the sandbox by piping a tar archive to
+// `tar -x` running inside the Pod (the exec subresource has no copy API).
+func (p *Provider) WriteFile(ctx context.Context, sid, filePath string, data []byte) error {
+	rec, err := p.resolve(ctx, sid)
+	if err != nil {
+		return err
+	}
+	if p.exec == nil {
+		return fmt.Errorf("k8s: no pod executor configured")
+	}
+	if err := p.ensureRunning(ctx, sid); err != nil {
+		return err
+	}
+	dir := path.Dir(filePath)
+	base := path.Base(filePath)
+
+	var buf bytes.Buffer
+	tw := tar.NewWriter(&buf)
+	if err := tw.WriteHeader(&tar.Header{Name: base, Mode: 0o644, Size: int64(len(data))}); err != nil {
+		return fmt.Errorf("k8s: tar header: %w", err)
+	}
+	if _, err := tw.Write(data); err != nil {
+		return fmt.Errorf("k8s: tar write: %w", err)
+	}
+	if err := tw.Close(); err != nil {
+		return fmt.Errorf("k8s: tar close: %w", err)
+	}
+	var stderr bytes.Buffer
+	cmd := []string{"tar", "-x", "-m", "-f", "-", "-C", dir}
+	if err := p.exec.stream(ctx, p.namespace, rec.podName, containerName, cmd, &buf, io.Discard, &stderr); err != nil {
+		return fmt.Errorf("k8s: write file (tar -x): %w: %s", err, stderr.String())
+	}
+	return nil
+}
+
+// ReadFile streams a single file out of the sandbox by running `tar -c` inside
+// the Pod and reading the archive from stdout.
+func (p *Provider) ReadFile(ctx context.Context, sid, filePath string) ([]byte, error) {
+	rec, err := p.resolve(ctx, sid)
+	if err != nil {
+		return nil, err
+	}
+	if p.exec == nil {
+		return nil, fmt.Errorf("k8s: no pod executor configured")
+	}
+	if err := p.ensureRunning(ctx, sid); err != nil {
+		return nil, err
+	}
+	dir := path.Dir(filePath)
+	base := path.Base(filePath)
+
+	var stdout, stderr bytes.Buffer
+	cmd := []string{"tar", "-c", "-f", "-", "-C", dir, base}
+	if err := p.exec.stream(ctx, p.namespace, rec.podName, containerName, cmd, nil, &stdout, &stderr); err != nil {
+		return nil, fmt.Errorf("k8s: read file (tar -c): %w: %s", err, stderr.String())
+	}
+	tr := tar.NewReader(&stdout)
+	if _, err := tr.Next(); err != nil {
+		return nil, fmt.Errorf("k8s: tar next: %w", err)
+	}
+	data, err := io.ReadAll(tr)
+	if err != nil {
+		return nil, fmt.Errorf("k8s: tar read: %w", err)
+	}
+	return data, nil
+}
+
+// chanWriter adapts an io.Writer onto the ExecEvent channel so streamed bytes are
+// delivered incrementally.
+type chanWriter struct {
+	kind provider.ExecEventKind
+	out  chan<- provider.ExecEvent
+}
+
+func (w *chanWriter) Write(b []byte) (int, error) {
+	cp := make([]byte, len(b))
+	copy(cp, b)
+	switch w.kind {
+	case provider.ExecEventStderr:
+		w.out <- provider.ExecEvent{Kind: provider.ExecEventStderr, Stderr: cp}
+	default:
+		w.out <- provider.ExecEvent{Kind: provider.ExecEventStdout, Stdout: cp}
+	}
+	return len(b), nil
+}
+
+// spdyExecutor is the production podExecutor: it POSTs to the Pod exec subresource
+// and upgrades the connection to a bidirectional SPDY stream.
+type spdyExecutor struct {
+	cfg *rest.Config
+}
+
+func (e *spdyExecutor) stream(ctx context.Context, namespace, pod, containerName string, cmd []string, stdin io.Reader, stdout, stderr io.Writer) error {
+	cli, err := kubernetes.NewForConfig(e.cfg)
+	if err != nil {
+		return fmt.Errorf("k8s: exec clientset: %w", err)
+	}
+	req := cli.CoreV1().RESTClient().Post().
+		Resource("pods").
+		Name(pod).
+		Namespace(namespace).
+		SubResource("exec").
+		VersionedParams(&corev1.PodExecOptions{
+			Container: containerName,
+			Command:   cmd,
+			Stdin:     stdin != nil,
+			Stdout:    true,
+			Stderr:    true,
+			TTY:       false,
+		}, scheme.ParameterCodec)
+
+	exec, err := remotecommand.NewSPDYExecutor(e.cfg, "POST", req.URL())
+	if err != nil {
+		return fmt.Errorf("k8s: new spdy executor: %w", err)
+	}
+	return exec.StreamWithContext(ctx, remotecommand.StreamOptions{
+		Stdin:  stdin,
+		Stdout: stdout,
+		Stderr: stderr,
+	})
 }
 
 // --- binding persistence ---------------------------------------------------
