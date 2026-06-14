@@ -75,6 +75,11 @@ type Binder struct {
 	p   provider.SandboxProvider
 	cfg Config
 
+	// net is the egress policy injected into every provider.Create. The zero
+	// value (nil allowlist) leaves each provider on its own default; callers
+	// tighten it via WithNetworking (see NetworkingFromEnv).
+	net provider.Networking
+
 	// metrics is optional; nil means "don't record".
 	metrics *Metrics
 }
@@ -92,6 +97,13 @@ func (b *Binder) EffectiveConfig() Config { return b.cfg }
 // WithMetrics attaches a metrics sink. Returns the binder for chaining.
 func (b *Binder) WithMetrics(m *Metrics) *Binder {
 	b.metrics = m
+	return b
+}
+
+// WithNetworking sets the egress policy injected into every sandbox the binder
+// creates. Returns the binder for chaining.
+func (b *Binder) WithNetworking(n provider.Networking) *Binder {
+	b.net = n
 	return b
 }
 
@@ -167,10 +179,11 @@ func (b *Binder) AcquireWithOutcome(ctx context.Context, spec AcquireSpec) (Outc
 
 	start := time.Now()
 	sb, err := b.p.Create(ctx, provider.SandboxSpec{
-		UserID:    spec.UserID,
-		SessionID: spec.SessionID,
-		Image:     spec.Image,
-		Env:       spec.Env,
+		UserID:     spec.UserID,
+		SessionID:  spec.SessionID,
+		Image:      spec.Image,
+		Env:        spec.Env,
+		Networking: b.net,
 	})
 	if err != nil {
 		return Outcome{}, fmt.Errorf("provider create: %w", err)

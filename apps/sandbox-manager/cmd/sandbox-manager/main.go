@@ -71,7 +71,10 @@ func main() {
 		// collector reads Snapshot() lazily at scrape time).
 		reg.MustRegister(obs.NewBinderCollector(bm, prometheus.Labels{"service": "sandbox-manager"}))
 		cfg := orchestrator.ConfigFromEnv()
-		binder = orchestrator.NewBinder(kv, p, cfg).WithMetrics(bm)
+		net := orchestrator.NetworkingFromEnv()
+		binder = orchestrator.NewBinder(kv, p, cfg).
+			WithMetrics(bm).
+			WithNetworking(net)
 		go binder.RunReaper(ctx) // background two-stage Pause-then-Destroy GC
 		eff := binder.EffectiveConfig()
 		log.Sugar().Infow("session<->sandbox binder enabled",
