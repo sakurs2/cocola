@@ -1,9 +1,9 @@
-go 1.22
+go 1.23.0
 
 use (
-    ./apps/gateway
-    ./apps/admin-api
-    ./db
-    ./packages/go-common
-    ./packages/proto/gen/go
+	./apps/admin-api
+	./apps/gateway
+	./db
+	./packages/go-common
+	./packages/proto/gen/go
 )
