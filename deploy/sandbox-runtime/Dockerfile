@@ -48,6 +48,7 @@ ENV DEBIAN_FRONTEND=noninteractive \
 # ---- base OS + toolchain -------------------------------------------------
 RUN apt-get update && apt-get install -y --no-install-recommends \
         ca-certificates curl git ripgrep jq bash coreutils tini \
+        iptables ipset \
         python${PYTHON_VERSION} python3-pip python3-venv \
     && ln -sf /usr/bin/python${PYTHON_VERSION} /usr/local/bin/python3 \
     && ln -sf /usr/bin/python${PYTHON_VERSION} /usr/local/bin/python \
@@ -87,6 +88,16 @@ RUN set -eux; \
 RUN uv venv --python 3.11 /opt/cocola/venv \
     && uv pip install --python /opt/cocola/venv/bin/python --no-cache "${CLAUDE_AGENT_SDK_SPEC}"
 
+# ---- egress firewall (ADR-0009 hardening) --------------------------------
+# init-firewall.sh installs an iptables+ipset default-DROP egress allowlist; the
+# container entrypoint runs it as root at start, BEFORE any user exec lands.
+# User code execs as the non-root cocola user (no NET_ADMIN), so it cannot alter
+# the rules. Requires the container to be started with CAP_NET_ADMIN, which the
+# Docker provider grants only when an egress policy is configured.
+COPY init-firewall.sh /opt/cocola/init-firewall.sh
+COPY firewall-entrypoint.sh /opt/cocola/firewall-entrypoint.sh
+RUN chmod +x /opt/cocola/init-firewall.sh /opt/cocola/firewall-entrypoint.sh
+
 # ---- the stdio shim ------------------------------------------------------
 COPY shim/ /opt/cocola/shim/
 RUN chmod +x /opt/cocola/shim/entrypoint.sh
@@ -98,7 +109,12 @@ RUN useradd -m -u 10001 -s /bin/bash cocola \
     && mkdir -p /home/cocola/.claude /workspace \
     && chown -R cocola:cocola /home/cocola /workspace /opt/cocola
 
-USER cocola
+# NOTE: the container's main process runs as ROOT so firewall-entrypoint.sh can
+# install the egress firewall (needs NET_ADMIN). This is NOT a privilege
+# regression: user/agent code never runs as the container's main process -- it
+# arrives via exec (docker exec / kubectl exec), which the sandbox-manager pins
+# to the non-root cocola user (uid 10001). The keep-alive entrypoint does
+# nothing exploitable.
 WORKDIR /workspace
 
 # CLAUDE_CONFIG_DIR points at the per-user volume so memory/sessions persist.
@@ -112,4 +128,4 @@ ENV CLAUDE_CONFIG_DIR=/home/cocola/.claude \
 # the container alive (session-lived per ADR-0009); the shim is invoked on
 # demand via `docker exec ... /opt/cocola/shim/entrypoint.sh`.
 ENTRYPOINT ["/usr/bin/tini", "--"]
-CMD ["bash", "-lc", "trap : TERM INT; sleep infinity & wait"]
+CMD ["/opt/cocola/firewall-entrypoint.sh"]

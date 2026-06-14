@@ -3,9 +3,14 @@ package docker
 import (
 	"context"
 	"errors"
+	"slices"
+	"strings"
 	"testing"
 
 	"github.com/docker/docker/api/types"
+	"github.com/docker/docker/api/types/container"
+
+	"github.com/cocola-project/cocola/apps/sandbox-manager/internal/provider"
 )
 
 // fakeThawer is a minimal containerThawer that records calls and replays the
@@ -86,5 +91,86 @@ func TestThawIfPaused_UnpauseErrorIsReturned(t *testing.T) {
 	err := thawIfPaused(context.Background(), f, "cid-5", "sbx-5")
 	if err == nil {
 		t.Fatal("expected unpause error to propagate, got nil")
+	}
+}
+
+func hasEnv(env []string, key string) (string, bool) {
+	for _, e := range env {
+		if strings.HasPrefix(e, key+"=") {
+			return strings.TrimPrefix(e, key+"="), true
+		}
+	}
+	return "", false
+}
+
+func TestApplyEgressPolicy_NilAllowlistIsWideOpenKeepAlive(t *testing.T) {
+	hc := &container.HostConfig{}
+	env := []string{"FOO=bar"}
+	cmd, execUser := applyEgressPolicy(hc, &env, provider.Networking{EgressAllowlist: nil})
+
+	if len(cmd) == 0 || cmd[0] != "sh" {
+		t.Fatalf("nil allowlist should keep the legacy keep-alive cmd, got %v", cmd)
+	}
+	if execUser != "" {
+		t.Fatalf("nil allowlist must not pin an exec user, got %q", execUser)
+	}
+	if len(hc.CapAdd) != 0 {
+		t.Fatalf("nil allowlist must not add caps, got %v", hc.CapAdd)
+	}
+	if len(hc.ExtraHosts) != 0 {
+		t.Fatalf("nil allowlist must not add extra hosts, got %v", hc.ExtraHosts)
+	}
+	if _, ok := hasEnv(env, "COCOLA_EGRESS_ALLOWLIST"); ok {
+		t.Fatalf("nil allowlist must not inject COCOLA_EGRESS_ALLOWLIST")
+	}
+	if hc.NetworkMode != "" {
+		t.Fatalf("nil allowlist must not set NetworkMode, got %q", hc.NetworkMode)
+	}
+}
+
+func TestApplyEgressPolicy_EmptyAllowlistInstallsBaselineFirewall(t *testing.T) {
+	hc := &container.HostConfig{}
+	env := []string{}
+	cmd, execUser := applyEgressPolicy(hc, &env, provider.Networking{EgressAllowlist: []string{}})
+
+	if len(cmd) != 1 || cmd[0] != firewallEntrypoint {
+		t.Fatalf("empty (non-nil) allowlist should run the firewall entrypoint, got %v", cmd)
+	}
+	if execUser != sandboxUser {
+		t.Fatalf("firewall path must pin exec to %q, got %q", sandboxUser, execUser)
+	}
+	if !slices.Contains(hc.CapAdd, "NET_ADMIN") {
+		t.Fatalf("firewall needs NET_ADMIN, caps=%v", hc.CapAdd)
+	}
+	if hc.NetworkMode == "none" {
+		t.Fatalf("empty allowlist must NOT use NetworkMode=none (would cut the gateway)")
+	}
+	v, ok := hasEnv(env, "COCOLA_EGRESS_ALLOWLIST")
+	if !ok || v != "" {
+		t.Fatalf("empty allowlist should inject an empty COCOLA_EGRESS_ALLOWLIST, got %q ok=%v", v, ok)
+	}
+}
+
+func TestApplyEgressPolicy_NonEmptyAllowlistEnforced(t *testing.T) {
+	hc := &container.HostConfig{}
+	env := []string{}
+	allow := []string{"api.example.com", "10.0.0.0/8", "host.docker.internal"}
+	cmd, execUser := applyEgressPolicy(hc, &env, provider.Networking{EgressAllowlist: allow})
+
+	if len(cmd) != 1 || cmd[0] != firewallEntrypoint {
+		t.Fatalf("non-empty allowlist should run the firewall entrypoint, got %v", cmd)
+	}
+	if execUser != sandboxUser {
+		t.Fatalf("firewall path must pin exec to %q, got %q", sandboxUser, execUser)
+	}
+	if !slices.Contains(hc.CapAdd, "NET_ADMIN") {
+		t.Fatalf("firewall needs NET_ADMIN, caps=%v", hc.CapAdd)
+	}
+	if !slices.Contains(hc.ExtraHosts, "host.docker.internal:host-gateway") {
+		t.Fatalf("gateway host must be mapped for in-container resolution, hosts=%v", hc.ExtraHosts)
+	}
+	v, ok := hasEnv(env, "COCOLA_EGRESS_ALLOWLIST")
+	if !ok || v != "api.example.com,10.0.0.0/8,host.docker.internal" {
+		t.Fatalf("allowlist env mismatch: %q ok=%v", v, ok)
 	}
 }

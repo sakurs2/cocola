@@ -12,12 +12,34 @@ no MCP forwarding seam.
 
 ```
 deploy/sandbox-runtime/
-  Dockerfile            # Node 22 + Python 3.11/uv + Claude Code CLI + shim
-  offline/              # optional: vendored `npm pack` tgz for offline builds
+  Dockerfile               # Node 22 + Python 3.11/uv + Claude Code CLI + shim
+  init-firewall.sh         # iptables+ipset egress allowlist (ADR-0009)
+  firewall-entrypoint.sh   # runs the firewall as root, then keep-alives
+  offline/                 # optional: vendored `npm pack` tgz for offline builds
   shim/
-    agent_shim.py       # stdio shim: one JSON request -> NDJSON event stream
-    entrypoint.sh       # stable launcher path the control plane execs into
+    agent_shim.py          # stdio shim: one JSON request -> NDJSON event stream
+    entrypoint.sh          # stable launcher path the control plane execs into
 ```
+
+## Egress firewall (ADR-0009 hardening)
+
+The sandbox runs untrusted user/agent code, so its outbound network is
+locked down to a **default-deny + allowlist** posture (the same iptables+ipset
+shape as Anthropic's Claude Code devcontainer `init-firewall.sh`):
+
+- The container's **main process runs as root** so `firewall-entrypoint.sh` can
+  install the rules (needs `NET_ADMIN`) *before* any `exec` lands. User/agent
+  code never runs as that main process -- it arrives via `docker exec` /
+  `kubectl exec`, which sandbox-manager pins to the non-root `cocola` user
+  (uid 10001) without `NET_ADMIN`, so it cannot alter the rules.
+- **Baseline (always allowed):** loopback, established/related, DNS, plus the
+  llm-gateway host (Route A's lifeline; folded in by the orchestrator from
+  `COCOLA_SANDBOX_LLM_BASE_URL`).
+- **Allowlist:** `COCOLA_EGRESS_ALLOWLIST` (comma/space-separated domains/CIDRs)
+  is resolved and added on top. Everything else is dropped.
+- The firewall is only installed when sandbox-manager configures an egress
+  policy (it passes `CAP_NET_ADMIN` + the env). The legacy alpine demo image,
+  with no policy, stays on the plain keep-alive command.
 
 ## How the control plane drives it (STDIO, never a port)
 

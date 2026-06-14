@@ -46,6 +46,12 @@ const (
 	labelSandboxID = "cocola.sandbox_id"
 	labelUserID    = "cocola.user_id"
 	labelSessionID = "cocola.session_id"
+	// labelExecUser records the user every Exec must run as. Empty = the image
+	// default (legacy alpine/M1, runs as its own default user). Set to the
+	// non-root sandbox user when the egress firewall is active (the container's
+	// main process is root, so exec must be pinned back). Stored as a label so
+	// the pin survives a record rebuilt from Docker on another replica.
+	labelExecUser = "cocola.exec_user"
 
 	defaultImage       = "alpine:3.20"
 	defaultExecTimeout = 60 * time.Second
@@ -63,6 +69,15 @@ const (
 	// useradd -u 10001 cocola). A fresh bind-mount is root-owned, so we chown it
 	// to this uid or the in-sandbox claude CLI cannot write its session files.
 	sandboxUID = 10001
+	// sandboxUser is the non-root user every Exec runs as. The container's main
+	// process runs as root (so the entrypoint can install the egress firewall,
+	// which needs NET_ADMIN), so we MUST pin exec back to this user -- otherwise
+	// user/agent code would inherit root. Matches the Dockerfile's cocola user.
+	sandboxUser = "cocola"
+	// firewallEntrypoint is the in-image script that installs the egress firewall
+	// as root then keep-alives the container. Used only when an egress policy is
+	// configured (see Create). Defined in deploy/sandbox-runtime/Dockerfile.
+	firewallEntrypoint = "/opt/cocola/firewall-entrypoint.sh"
 )
 
 // Provider is a Docker-backed SandboxProvider.
@@ -78,6 +93,7 @@ type record struct {
 	containerID string
 	userID      string
 	sessionID   string
+	execUser    string // user to pin Exec to; empty = image default
 }
 
 // Option configures the Provider.
@@ -118,6 +134,33 @@ func New(opts ...Option) (*Provider, error) {
 		return nil, fmt.Errorf("docker: ping daemon: %w", err)
 	}
 	return p, nil
+}
+
+// applyEgressPolicy translates the sandbox egress policy into Docker HostConfig
+// mutations and the container command, returning the command to run.
+//
+// Semantics (ADR-0009; see docs/plan/hardening-sandbox-egress-allowlist.md):
+//   - nil allowlist -> "no policy configured": legacy wide-open keep-alive
+//     (the alpine default image / M1 demos). HostConfig untouched.
+//   - non-nil allowlist (the production path; the orchestrator always folds in
+//     the llm-gateway host) -> firewall entrypoint: grant NET_ADMIN, map
+//     host.docker.internal so the in-container firewall can resolve+allow the
+//     gateway, and pass the allowlist down via COCOLA_EGRESS_ALLOWLIST. An empty
+//     (non-nil) allowlist installs the DNS-only baseline -- secure by default,
+//     never wide-open, never NetworkMode=none (which would cut the gateway off).
+//
+// Returns the container command plus the user every Exec must be pinned to
+// (empty = image default; the non-root sandbox user when the firewall is on,
+// since the container main process then runs as root).
+func applyEgressPolicy(hostCfg *container.HostConfig, env *[]string, net provider.Networking) (cmd []string, execUser string) {
+	keepAlive := []string{"sh", "-c", "trap : TERM INT; sleep infinity & wait"}
+	if net.EgressAllowlist == nil {
+		return keepAlive, ""
+	}
+	hostCfg.CapAdd = append(hostCfg.CapAdd, "NET_ADMIN")
+	hostCfg.ExtraHosts = append(hostCfg.ExtraHosts, "host.docker.internal:host-gateway")
+	*env = append(*env, "COCOLA_EGRESS_ALLOWLIST="+strings.Join(net.EgressAllowlist, ","))
+	return []string{firewallEntrypoint}, sandboxUser
 }
 
 // Create pulls the image (if absent), provisions the three-tier host dirs, and
@@ -166,23 +209,24 @@ func (p *Provider) Create(ctx context.Context, spec provider.SandboxSpec) (*prov
 			NanoCPUs: int64(spec.Resources.CPUCores * 1e9),
 			Memory:   spec.Resources.MemoryMiB * 1024 * 1024,
 		},
-		// M1 keeps egress wide-open; the egress allowlist is enforced by the
-		// K8s+gVisor provider via NetworkPolicy. We record intent only here.
 	}
-	if spec.Networking.EgressAllowlist != nil && len(spec.Networking.EgressAllowlist) == 0 {
-		hostCfg.NetworkMode = "none"
-	}
+
+	// Egress enforcement (ADR-0009): mutate hostCfg + env + pick the container
+	// command based on the configured policy. Extracted into a pure helper so the
+	// decision is unit-testable without a live daemon.
+	cmd, execUser := applyEgressPolicy(hostCfg, &env, spec.Networking)
 
 	cfg := &container.Config{
 		Image:      img,
 		Env:        env,
-		Cmd:        []string{"sh", "-c", "trap : TERM INT; sleep infinity & wait"},
+		Cmd:        cmd,
 		WorkingDir: guestWorkspace + "/" + safe(spec.SessionID),
 		Labels: map[string]string{
 			labelManaged:   "true",
 			labelSandboxID: sid,
 			labelUserID:    spec.UserID,
 			labelSessionID: spec.SessionID,
+			labelExecUser:  execUser,
 		},
 	}
 
@@ -196,7 +240,7 @@ func (p *Provider) Create(ctx context.Context, spec provider.SandboxSpec) (*prov
 	}
 
 	p.mu.Lock()
-	p.sandboxes[sid] = &record{containerID: created.ID, userID: spec.UserID, sessionID: spec.SessionID}
+	p.sandboxes[sid] = &record{containerID: created.ID, userID: spec.UserID, sessionID: spec.SessionID, execUser: execUser}
 	p.mu.Unlock()
 
 	return &provider.Sandbox{
@@ -263,6 +307,11 @@ func (p *Provider) Exec(ctx context.Context, sid string, req provider.ExecReques
 		env = append(env, k+"="+v)
 	}
 	execCfg := container.ExecOptions{
+		// Pin to the sandbox's exec user. When the egress firewall is active the
+		// container main process runs as root, so this is the non-root cocola
+		// user (else exec'd code would inherit root). Empty for legacy images
+		// (alpine/M1) -> Docker uses the image's own default user.
+		User:         rec.execUser,
 		Cmd:          req.Cmd,
 		Env:          env,
 		WorkingDir:   req.Cwd,
@@ -464,6 +513,7 @@ func (p *Provider) resolve(ctx context.Context, sid string) (*record, error) {
 		containerID: c.ID,
 		userID:      c.Labels[labelUserID],
 		sessionID:   c.Labels[labelSessionID],
+		execUser:    c.Labels[labelExecUser],
 	}
 	// Re-populate the cache so subsequent ops on this replica hit the fast path.
 	p.mu.Lock()

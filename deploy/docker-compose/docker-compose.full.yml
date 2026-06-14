@@ -64,6 +64,15 @@ services:
       COCOLA_SANDBOX_PROVIDER: "docker"
       COCOLA_REDIS_ADDR: "redis:6379"
       COCOLA_SANDBOX_ROOT: "${COCOLA_DATA_ROOT:-/var/lib/cocola/sandboxes}"
+      # Egress hardening (ADR-0009). sandbox-manager reads these to build each
+      # sandbox's firewall allowlist: the llm-gateway host is auto-folded in from
+      # COCOLA_SANDBOX_LLM_BASE_URL so Route A can always reach the gateway; any
+      # extra domains/CIDRs the agent needs go in COCOLA_SANDBOX_EGRESS_ALLOWLIST
+      # (comma-separated). Setting these switches every sandbox to default-deny +
+      # allowlist; leaving COCOLA_SANDBOX_EGRESS_ALLOWLIST unset still installs
+      # the DNS+gateway baseline (secure by default).
+      COCOLA_SANDBOX_LLM_BASE_URL: "${COCOLA_SANDBOX_LLM_BASE_URL:-http://host.docker.internal:18091}"
+      COCOLA_SANDBOX_EGRESS_ALLOWLIST: "${COCOLA_SANDBOX_EGRESS_ALLOWLIST:-}"
     ports:
       - "50051:50051"
     volumes:
