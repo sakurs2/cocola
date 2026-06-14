@@ -1,7 +1,9 @@
 # M6 验收 Runbook：K8s 沙箱端到端验收(Layer C)
 
-> 适用对象:一台 **Linux 云服务器**(最贴近生产,本仓首选路径),在其上用
-> **k3s**(版本 1.35.5 实测)搭一套单机 Kubernetes。
+> 适用对象:任意 **CNCF 一致性 Kubernetes(v1.33+)**。Provider 用标准 client-go
+> 与 API Server 通信,**与发行版无关**——生产首选一台 **Linux 云服务器 + k3s**
+> (1.35.5 实测),本地开发首选 **macOS/Linux + k3d**(见下方「本地开发」)。同一套
+> manifests 两边通用,代码零改动。
 >
 > **默认隔离 = 普通 runc + Kubernetes 用户命名空间(`hostUsers: false`)**:
 > 容器 root 被映射成宿主机上的非特权 uid,**节点零安装**——不需要装 gVisor、
@@ -35,6 +37,30 @@
    仍需 DNS-aware CNI 如 Cilium;纯 CIDR/IP 在 k3s 默认下即可)。
 4. 控制面依赖(redis / llm-gateway)已按 `04-sandbox-manager.yaml` 里的
    in-cluster DNS 名就绪。
+
+### 本地开发:macOS / Linux 用 k3d(推荐,跨平台统一)
+
+[k3d](https://k3d.io) 把**与生产相同的 k3s 发行版**包进 Docker 里跑,因此本地验过的
+manifests/NetworkPolicy 几乎零意外搬到生产裸装 k3s(同一套内置 containerd、flannel、
+kube-router NetworkPolicy)。三步起一套:
+
+```sh
+# 0) 前置:Docker(Docker Desktop / OrbStack)+ k3d + kubectl
+#    brew install k3d kubectl
+# 1) 起单节点集群(自动写入并切换 kubeconfig context)
+k3d cluster create cocola --servers 1
+kubectl config current-context     # -> k3d-cocola
+kubectl get nodes                  # -> Ready;kubectl version 服务端 >= 1.33
+# 2) 镜像导入 k3d(k3d 用自带 containerd,docker build 的镜像需显式导入)
+k3d image import cocola/sandbox-runtime:dev cocola/sandbox-manager:dev cocola/llm-gateway:dev -c cocola
+# 用完销毁:k3d cluster delete cocola
+```
+
+> **macOS 内核注意**:`hostUsers: false`(用户命名空间)依赖 Linux kernel >= 5.19。
+> Mac 上 K8s 节点其实跑在一个 Linux VM(Docker Desktop / OrbStack / Lima 提供),
+> 内核是该 VM 的、不是 macOS 的,通常已满足;§2a 的 `uid_map` 自检会确认这一点。
+> k3d 的镜像导入用 `k3d image import ...`(取代下文 k3s 的 `k3s ctr images import`),
+> 其余 build/apply/验收步骤与 k3s 路径完全一致。
 
 ### 在 Linux 云服务器上搭 k3s(单机即可,推荐)
 
@@ -162,6 +188,7 @@ kubectl -n cocola-sandboxes run userns-probe --rm -it --restart=Never \
   --image=alpine:3.20 -- sh -c 'id; cat /proc/self/uid_map'
 # 期望:容器内 id 为 uid=0(root);uid_map 形如 "0  <大基址>  65536"
 #       —— 容器 0 被映射到宿主机一个非 0 的高位 uid(用户命名空间生效)。
+#     (macOS/k3d 下,这一步同时验证了承载节点的 Linux VM 内核 userns 已就绪。)
 ```
 
 ```sh

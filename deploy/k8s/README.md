@@ -10,10 +10,16 @@ per-sandbox NetworkPolicy for egress lockdown.
 
 ## Prerequisites
 
-- A Kubernetes cluster **v1.33+** (user namespaces are default-on since 1.33;
-  k3s 1.35.5 works out of the box) with a reasonably modern kernel (>= 5.19).
-  No node-level sandbox installation is required for the default runc + userns
-  path.
+- **Any** CNCF-conformant Kubernetes cluster **v1.33+** (user namespaces are
+  default-on since 1.33) with a reasonably modern kernel (>= 5.19). The Provider
+  talks to the API server via standard client-go, so the distribution does not
+  matter: local **k3d / kind / minikube / OrbStack / Docker Desktop** for dev,
+  **k3s** (1.35.5 verified) or any managed cluster (EKS/GKE/AKS) for prod — same
+  manifests, no code change. No node-level sandbox installation is required for
+  the default runc + userns path.
+  > On macOS the K8s node always runs inside a Linux VM (provided by Docker
+  > Desktop / OrbStack / Lima), so the >= 5.19 kernel requirement is satisfied by
+  > that VM, not by macOS itself.
 - A **CNI that enforces NetworkPolicy**. k3s already ships a kube-router policy
   controller that enforces NetworkPolicy by default. Domain-based allowlist
   entries additionally require a DNS-aware CNI (e.g. Cilium); plain CIDR/IP
@@ -24,6 +30,36 @@ per-sandbox NetworkPolicy for egress lockdown.
 - The control-plane services (redis, llm-gateway, etc.) reachable at the
   in-cluster DNS names referenced in `04-sandbox-manager.yaml`. This directory
   ships only the sandbox plane; the rest of the stack is deployed separately.
+
+## Local development on macOS/Linux (k3d, recommended)
+
+[k3d](https://k3d.io) runs the **same k3s distribution** you use in production,
+but wrapped in Docker — so a manifest verified locally behaves identically on a
+bare-metal k3s server (same built-in containerd, flannel, kube-router
+NetworkPolicy). Three steps:
+
+```sh
+# 0) prerequisites: Docker (Docker Desktop / OrbStack) + k3d + kubectl
+#    brew install k3d kubectl
+
+# 1) create a single-node cluster (kubeconfig context is set automatically)
+k3d cluster create cocola --servers 1
+kubectl config current-context        # -> k3d-cocola
+kubectl get nodes                     # -> Ready
+
+# 2) build images locally, then import them INTO the k3d cluster
+#    (k3d uses its own containerd; `docker build` images are not visible until imported)
+docker build -t cocola/sandbox-runtime:dev deploy/sandbox-runtime
+docker build -f apps/sandbox-manager/Dockerfile -t cocola/sandbox-manager:dev .
+docker build -f apps/llm-gateway/Dockerfile  -t cocola/llm-gateway:dev .
+k3d image import cocola/sandbox-runtime:dev cocola/sandbox-manager:dev cocola/llm-gateway:dev -c cocola
+
+# 3) apply the manifests (see below). Tear down with:  k3d cluster delete cocola
+```
+
+> Why not k3s directly on macOS? k3s is Linux-only — on a Mac it would still
+> need a Linux VM. k3d gives you that VM-backed k3s with a one-line create, and
+> `k3d image import` replaces the `k3s ctr images import` dance.
 
 ## Apply (raw manifests)
 
