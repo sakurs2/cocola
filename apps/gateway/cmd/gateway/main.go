@@ -11,6 +11,8 @@
 //	COCOLA_AUTH_SECRET      HS256 secret; empty => auth disabled (dev only)
 //	COCOLA_AUTH_ISSUER      expected token issuer    (default cocola)
 //	COCOLA_AUTH_ALLOW_ANON  "1" to accept blank tokens as dev-user (dev only)
+//	COCOLA_METRICS_ADDR     observability listen address; empty => disabled
+//	                        (default :9091, serving /metrics and /healthz)
 package main
 
 import (
@@ -21,6 +23,7 @@ import (
 	"github.com/cocola-project/cocola/apps/gateway/internal/auth"
 	"github.com/cocola-project/cocola/apps/gateway/internal/httpapi"
 	"github.com/cocola-project/cocola/packages/go-common/logger"
+	"github.com/cocola-project/cocola/packages/go-common/metrics"
 )
 
 func env(key, def string) string {
@@ -48,7 +51,20 @@ func main() {
 		Issuer:         env("COCOLA_AUTH_ISSUER", "cocola"),
 		AllowAnonymous: os.Getenv("COCOLA_AUTH_ALLOW_ANON") == "1",
 	})
-	api := httpapi.New(client, verifier, log)
+	// Observability: a shared metrics registry instruments the public routes and
+	// is also exposed on a dedicated port so a scrape never competes with user
+	// traffic. COCOLA_METRICS_ADDR="" disables both the port and instrumentation.
+	reg := metrics.New("gateway")
+	api := httpapi.New(client, verifier, log).WithMetrics(reg)
+	if metricsAddr := env("COCOLA_METRICS_ADDR", ":9091"); metricsAddr != "" {
+		go func() {
+			log.Info("cocola gateway metrics on " + metricsAddr + " (/metrics, /healthz)")
+			msrv := &http.Server{Addr: metricsAddr, Handler: reg.Mux()}
+			if err := msrv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
+				log.Warn("gateway metrics server error: " + err.Error())
+			}
+		}()
+	}
 
 	log.Info("cocola gateway listening on " + addr + " (agent-runtime: " + agentAddr + ")")
 	srv := &http.Server{Addr: addr, Handler: api.Handler()}

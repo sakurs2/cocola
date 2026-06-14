@@ -19,6 +19,8 @@
 //	                           gateway reads, so they take effect fleet-wide.
 //	                           Empty => single-process (publish disabled).
 //	COCOLA_REDIS_PASSWORD / COCOLA_REDIS_DB / COCOLA_REDIS_POOL_SIZE tune it.
+//	COCOLA_METRICS_ADDR        observability listen address; empty => disabled
+//	                           (default ":9093", serving /metrics and /healthz).
 //
 // Persistence is in-memory for M5 (process-local); the PostgreSQL backend
 // lands in M7 behind the same store.Store interface — no handler change. The
@@ -39,6 +41,7 @@ import (
 	"github.com/cocola-project/cocola/apps/admin-api/internal/service"
 	"github.com/cocola-project/cocola/apps/admin-api/internal/store"
 	"github.com/cocola-project/cocola/packages/go-common/logger"
+	"github.com/cocola-project/cocola/packages/go-common/metrics"
 	"github.com/cocola-project/cocola/packages/go-common/token"
 )
 
@@ -121,7 +124,20 @@ func main() {
 	}
 
 	svc := service.New(st, iss, time.Now)
-	api := httpapi.New(svc, adminKey)
+
+	// Observability: a shared registry instruments every route and is exposed on
+	// a dedicated port so scrapes never compete with operator traffic.
+	reg := metrics.New("admin-api")
+	api := httpapi.New(svc, adminKey).WithMetrics(reg)
+	if metricsAddr := getenv("COCOLA_METRICS_ADDR", ":9093"); metricsAddr != "" {
+		go func() {
+			log.Sugar().Infow("admin-api metrics", "addr", metricsAddr)
+			msrv := &http.Server{Addr: metricsAddr, Handler: reg.Mux(), ReadHeaderTimeout: 10 * time.Second}
+			if err := msrv.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
+				log.Sugar().Warnw("admin-api metrics server error", "err", err)
+			}
+		}()
+	}
 
 	srv := &http.Server{
 		Addr:              addr,

@@ -11,17 +11,21 @@ package main
 import (
 	"context"
 	"net"
+	"net/http"
 	"os"
 
+	"github.com/prometheus/client_golang/prometheus"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/reflection"
 
+	"github.com/cocola-project/cocola/apps/sandbox-manager/internal/obs"
 	"github.com/cocola-project/cocola/apps/sandbox-manager/internal/orchestrator"
 	"github.com/cocola-project/cocola/apps/sandbox-manager/internal/provider"
 	"github.com/cocola-project/cocola/apps/sandbox-manager/internal/provider/docker"
 	"github.com/cocola-project/cocola/apps/sandbox-manager/internal/provider/k8s"
 	"github.com/cocola-project/cocola/apps/sandbox-manager/internal/server"
 	"github.com/cocola-project/cocola/packages/go-common/logger"
+	"github.com/cocola-project/cocola/packages/go-common/metrics"
 	rds "github.com/cocola-project/cocola/packages/go-common/redis"
 	sandboxv1 "github.com/cocola-project/cocola/packages/proto/gen/go/cocola/sandbox/v1"
 )
@@ -32,6 +36,10 @@ func main() {
 
 	addr := getenv("COCOLA_SANDBOX_ADDR", ":50051")
 	backend := getenv("COCOLA_SANDBOX_PROVIDER", docker.ProviderName)
+
+	// Observability registry: shared by the gRPC interceptors below and the
+	// binder collector bridge. Exposed on a dedicated port at the end of main.
+	reg := metrics.New("sandbox-manager")
 
 	p, err := newProvider(backend)
 	if err != nil {
@@ -50,9 +58,12 @@ func main() {
 			"err", rerr)
 	} else {
 		defer func() { _ = kv.Close() }()
-		metrics := orchestrator.NewMetrics()
+		bm := orchestrator.NewMetrics()
+		// Bridge the in-memory binder sink into Prometheus (no rewrite; the
+		// collector reads Snapshot() lazily at scrape time).
+		reg.MustRegister(obs.NewBinderCollector(bm, prometheus.Labels{"service": "sandbox-manager"}))
 		cfg := orchestrator.ConfigFromEnv()
-		binder = orchestrator.NewBinder(kv, p, cfg).WithMetrics(metrics)
+		binder = orchestrator.NewBinder(kv, p, cfg).WithMetrics(bm)
 		go binder.RunReaper(ctx) // background two-stage Pause-then-Destroy GC
 		eff := binder.EffectiveConfig()
 		log.Sugar().Infow("session<->sandbox binder enabled",
@@ -67,9 +78,22 @@ func main() {
 		log.Sugar().Fatalf("listen %s: %v", addr, err)
 	}
 
-	gs := grpc.NewServer()
+	gs := grpc.NewServer(
+		grpc.UnaryInterceptor(reg.UnaryServerInterceptor()),
+		grpc.StreamInterceptor(reg.StreamServerInterceptor()),
+	)
 	sandboxv1.RegisterSandboxServiceServer(gs, server.New(p, binder))
 	reflection.Register(gs) // enables grpcurl describe/list for local debugging
+
+	if metricsAddr := getenv("COCOLA_METRICS_ADDR", ":9092"); metricsAddr != "" {
+		go func() {
+			log.Sugar().Infow("sandbox-manager metrics", "addr", metricsAddr)
+			msrv := &http.Server{Addr: metricsAddr, Handler: reg.Mux()}
+			if err := msrv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
+				log.Sugar().Warnw("sandbox-manager metrics server error", "err", err)
+			}
+		}()
+	}
 
 	log.Sugar().Infow("cocola sandbox-manager listening",
 		"milestone", "M2", "addr", addr, "provider", backend)

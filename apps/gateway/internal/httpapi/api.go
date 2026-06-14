@@ -18,6 +18,7 @@ import (
 	"github.com/cocola-project/cocola/apps/gateway/internal/agent"
 	"github.com/cocola-project/cocola/apps/gateway/internal/auth"
 	"github.com/cocola-project/cocola/packages/go-common/logger"
+	"github.com/cocola-project/cocola/packages/go-common/metrics"
 )
 
 // API wires the BFF dependencies. The agent.Streamer is an interface so tests
@@ -26,6 +27,7 @@ type API struct {
 	streamer agent.Streamer
 	verifier *auth.Verifier
 	log      logger.Logger
+	metrics  *metrics.Registry // optional; nil => no instrumentation (tests)
 }
 
 // New builds the BFF API.
@@ -33,14 +35,30 @@ func New(streamer agent.Streamer, verifier *auth.Verifier, log logger.Logger) *A
 	return &API{streamer: streamer, verifier: verifier, log: log}
 }
 
+// WithMetrics enables RED instrumentation on the public routes. The registry is
+// shared with the observability port mounted in main; passing nil (the default)
+// leaves the API uninstrumented, which keeps unit tests dependency-light.
+func (a *API) WithMetrics(reg *metrics.Registry) *API { a.metrics = reg; return a }
+
+// instrument wraps a handler with the RED middleware under a fixed route label,
+// or returns it unchanged when metrics are disabled.
+func (a *API) instrument(route string, h http.Handler) http.Handler {
+	if a.metrics == nil {
+		return h
+	}
+	return a.metrics.HTTPMiddleware(route, h)
+}
+
 // Handler returns the fully-wired http.Handler (stdlib mux; the BFF has a tiny
 // route set so chi would be overkill here).
 func (a *API) Handler() http.Handler {
 	mux := http.NewServeMux()
-	mux.HandleFunc("GET /healthz", a.health)
+	mux.Handle("GET /healthz", a.instrument("GET /healthz", http.HandlerFunc(a.health)))
 	// Auth-guarded chat endpoint. The mux dispatches by method+path; the
-	// verifier middleware wraps just this handler.
-	mux.Handle("POST /v1/chat", a.verifier.Middleware(writeErr)(http.HandlerFunc(a.chat)))
+	// verifier middleware wraps just this handler, and the RED middleware wraps
+	// the whole chain so latency includes auth.
+	mux.Handle("POST /v1/chat", a.instrument("POST /v1/chat",
+		a.verifier.Middleware(writeErr)(http.HandlerFunc(a.chat))))
 	return mux
 }
 

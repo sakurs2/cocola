@@ -23,12 +23,14 @@ import (
 
 	"github.com/cocola-project/cocola/apps/admin-api/internal/service"
 	"github.com/cocola-project/cocola/apps/admin-api/internal/store"
+	"github.com/cocola-project/cocola/packages/go-common/metrics"
 )
 
 // API holds the dependencies the handlers need.
 type API struct {
 	svc      *service.Admin
-	adminKey string // when "", admin auth is disabled
+	adminKey string            // when "", admin auth is disabled
+	metrics  *metrics.Registry // optional; nil => no instrumentation (tests)
 }
 
 // New builds the API. adminKey "" disables auth (dev/test).
@@ -36,9 +38,28 @@ func New(svc *service.Admin, adminKey string) *API {
 	return &API{svc: svc, adminKey: adminKey}
 }
 
+// WithMetrics enables RED instrumentation on every route. The label is chi's
+// matched route pattern (e.g. "/admin/tokens/{id}"), resolved post-routing, so
+// path params never inflate label cardinality. nil leaves the API
+// uninstrumented (the default in unit tests).
+func (a *API) WithMetrics(reg *metrics.Registry) *API { a.metrics = reg; return a }
+
 // Router returns the fully-wired chi router.
 func (a *API) Router() http.Handler {
 	r := chi.NewRouter()
+
+	// RED instrumentation first so it spans auth + handler. The route label is
+	// chi's matched pattern, available after routing via RouteContext.
+	if a.metrics != nil {
+		r.Use(func(next http.Handler) http.Handler {
+			return a.metrics.HTTPHandler(func(req *http.Request) string {
+				if rc := chi.RouteContext(req.Context()); rc != nil {
+					return req.Method + " " + rc.RoutePattern()
+				}
+				return ""
+			}, next)
+		})
+	}
 
 	r.Get("/healthz", a.health)
 

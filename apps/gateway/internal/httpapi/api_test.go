@@ -2,6 +2,7 @@ package httpapi
 
 import (
 	"context"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -10,6 +11,7 @@ import (
 	"github.com/cocola-project/cocola/apps/gateway/internal/agent"
 	"github.com/cocola-project/cocola/apps/gateway/internal/auth"
 	"github.com/cocola-project/cocola/packages/go-common/logger"
+	"github.com/cocola-project/cocola/packages/go-common/metrics"
 	"github.com/cocola-project/cocola/packages/go-common/token"
 )
 
@@ -155,5 +157,43 @@ func TestChatRequiresAuthWhenEnabled(t *testing.T) {
 	h.ServeHTTP(rec, req)
 	if rec.Code != http.StatusUnauthorized {
 		t.Fatalf("want 401 without token, got %d", rec.Code)
+	}
+}
+
+// TestMetricsInstrumentation proves WithMetrics records the chat route into the
+// shared registry, exposed via the metrics Mux. Auth is disabled so the request
+// reaches the handler and is counted with code 200.
+func TestMetricsInstrumentation(t *testing.T) {
+	fs := &fakeStreamer{script: []agent.Event{{Kind: "done"}}}
+	v := auth.NewVerifier(auth.Config{})
+	reg := metrics.New("gateway-test")
+	h := New(fs, v, logger.Must()).WithMetrics(reg).Handler()
+
+	req := httptest.NewRequest("POST", "/v1/chat", strings.NewReader(`{"prompt":"hi"}`))
+	rec := httptest.NewRecorder()
+	h.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("want 200, got %d", rec.Code)
+	}
+
+	srv := httptest.NewServer(reg.Mux())
+	defer srv.Close()
+	resp, err := http.Get(srv.URL + "/metrics")
+	if err != nil {
+		t.Fatalf("scrape: %v", err)
+	}
+	defer func() { _ = resp.Body.Close() }()
+	body, _ := io.ReadAll(resp.Body)
+	out := string(body)
+
+	for _, want := range []string{
+		`service="gateway-test"`,
+		`transport="http"`,
+		`method="POST /v1/chat"`,
+		`code="200"`,
+	} {
+		if !strings.Contains(out, want) {
+			t.Fatalf("metrics missing %q in:\n%s", want, out)
+		}
 	}
 }

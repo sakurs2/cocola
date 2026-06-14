@@ -11,6 +11,17 @@ import (
 // caller supplies (NOT the raw path) to avoid unbounded label cardinality from
 // path params. Pass a stable label such as "POST /v1/messages".
 func (r *Registry) HTTPMiddleware(route string, next http.Handler) http.Handler {
+	return r.HTTPHandler(func(*http.Request) string { return route }, next)
+}
+
+// HTTPHandler is the general form of HTTPMiddleware: instead of a fixed route
+// label it takes a labeler evaluated AFTER the request is served. This lets a
+// router (chi, or the stdlib mux's req.Pattern) report the matched route
+// template — which is only known post-routing — while still bounding label
+// cardinality. The labeler MUST return a low-cardinality, stable string (a
+// route template, never a raw path with IDs); return "" and the request is
+// recorded under the "unmatched" bucket.
+func (r *Registry) HTTPHandler(routeFn func(*http.Request) string, next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
 		r.inflight.WithLabelValues("http").Inc()
 		defer r.inflight.WithLabelValues("http").Dec()
@@ -18,6 +29,10 @@ func (r *Registry) HTTPMiddleware(route string, next http.Handler) http.Handler 
 		sw := &statusWriter{ResponseWriter: w, status: http.StatusOK}
 		start := time.Now()
 		next.ServeHTTP(sw, req)
+		route := routeFn(req)
+		if route == "" {
+			route = "unmatched"
+		}
 		r.observeRequest("http", route, strconv.Itoa(sw.status), time.Since(start).Seconds())
 	})
 }
