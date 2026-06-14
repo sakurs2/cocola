@@ -30,7 +30,7 @@ Code shows _what_ and _how_. ADRs preserve _why_ — invaluable when:
 | 0005 | Identity as a cocola-signed token (the SDK's API key) + period-windowed token quota                   | Accepted |
 | 0006 | Admin-api control plane (Go) + Skill-Market catalog, with token revocation and dynamic quota          | Accepted |
 | 0007 | Gateway BFF + agent-runtime gRPC split                                                                | Accepted |
-| 0008 | Persistence layering, lifecycle, and sandbox backend (K8s + gVisor)                                  | Proposed |
-| 0009 | Run the Claude Code agent runtime inside each user's sandbox (Route A)                               | Proposed |
+| 0008 | Persistence layering, lifecycle, and sandbox backend (K8s + gVisor)                                  | Accepted |
+| 0009 | Run the Claude Code agent runtime inside each user's sandbox (Route A)                               | Accepted |
 | 0010 | Gateway tool-use passthrough (Anthropic rich-payload)                                                | Accepted |
 | 0011 | Observability three pillars (RED metrics + OTel tracing) and load-testing baseline                   | Accepted |

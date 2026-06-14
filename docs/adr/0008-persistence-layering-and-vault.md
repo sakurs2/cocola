@@ -1,7 +1,7 @@
 # ADR-0008: Persistence layering, lifecycle, and sandbox backend (K8s + gVisor)
 
-- Status: Proposed
-- Date: 2026-06-10
+- Status: Accepted (持久化分层与 K8s/gVisor 后端已随 M6/M7 落地；Vault 密钥托管留待后续)
+- Date: 2026-06-10 (accepted 2026-06-14)
 - Deciders: @wangjiahui
 - Depends on: ADR-0009 (runtime runs inside each user's sandbox)
 
