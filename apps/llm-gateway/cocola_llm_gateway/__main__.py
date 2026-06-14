@@ -15,7 +15,7 @@ Point the Claude Agent SDK at it with:
 from __future__ import annotations
 
 import uvicorn
-from cocola_common import get_logger
+from cocola_common import Registry, get_logger
 
 from cocola_llm_gateway.bootstrap import build_service, build_verifier
 from cocola_llm_gateway.config import gateway_config_from_env
@@ -27,7 +27,10 @@ def main() -> None:
     gcfg = gateway_config_from_env()
     service = build_service()
     verifier = build_verifier()
-    app = create_app(service, verifier=verifier)
+    # /metrics is mounted on this same app (no extra port). Always on; scraping
+    # is cheap and the metric set is bounded.
+    metrics = Registry("llm-gateway")
+    app = create_app(service, verifier=verifier, metrics=metrics)
     log.info(
         "cocola-llm-gateway starting",
         milestone="M4",

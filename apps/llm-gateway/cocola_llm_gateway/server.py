@@ -22,7 +22,7 @@ ASGITransport — no real network, no bound port.
 
 from __future__ import annotations
 
-from cocola_common import CocolaError, ErrorCode, get_logger
+from cocola_common import CocolaError, ErrorCode, Registry, get_logger, instrument_fastapi
 from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse, StreamingResponse
 
@@ -63,8 +63,15 @@ def create_app(
     *,
     verifier: Verifier | None = None,
     revocation: RevocationStore | None = None,
+    metrics: Registry | None = None,
 ) -> FastAPI:
     app = FastAPI(title="cocola-llm-gateway", version="0.0.1")
+    # Observability: when a registry is supplied, wire the pure-ASGI RED
+    # middleware (SSE-safe — it never buffers the body) and mount /metrics on
+    # this same app, so no extra port is opened (see <network_security>). nil
+    # leaves the app uninstrumented, keeping unit tests dependency-light.
+    if metrics is not None:
+        instrument_fastapi(app, metrics)
     # Default to a disabled verifier (no secret) so existing zero-config callers
     # and tests that don't care about auth keep working as the dev identity.
     vrf = verifier or Verifier(AuthConfig())

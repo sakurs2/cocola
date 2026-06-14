@@ -11,5 +11,12 @@ milestones to avoid pulling heavy deps into the M0 import graph.
 
 from cocola_common.errors import CocolaError, ErrorCode
 from cocola_common.logger import get_logger
+from cocola_common.metrics import Registry, instrument_fastapi
 
-__all__ = ["get_logger", "CocolaError", "ErrorCode"]
+__all__ = [
+    "get_logger",
+    "CocolaError",
+    "ErrorCode",
+    "Registry",
+    "instrument_fastapi",
+]

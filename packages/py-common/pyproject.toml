@@ -6,6 +6,7 @@ requires-python = ">=3.11"
 dependencies = [
     "pydantic>=2.7",
     "structlog>=24.1",
+    "prometheus-client>=0.20",
 ]
 
 [build-system]

@@ -35,7 +35,8 @@ import os
 
 import grpc
 from cocola.agent.v1 import agent_pb2_grpc as pb_grpc
-from cocola_common import get_logger
+from cocola_common import Registry, get_logger
+from cocola_common.metrics_grpc import PrometheusServerInterceptor
 
 from cocola_agent_runtime.agent_provider import AgentProvider
 from cocola_agent_runtime.echo_provider import EchoProvider
@@ -196,9 +197,22 @@ async def serve() -> None:
         skills=_build_skill_catalog(),
         binder=_build_binder(),
     )
-    server = grpc.aio.server()
+    # Observability: RED metrics for every RPC. agent-runtime has no HTTP server
+    # of its own, so unlike the llm-gateway it exposes /metrics on a dedicated
+    # port via the prometheus_client WSGI server. COCOLA_METRICS_PORT="" (or 0)
+    # disables it; per <network_security> the listener only ever runs here, in
+    # the real composition root, never in tests.
+    metrics = Registry("agent-runtime")
+    server = grpc.aio.server(interceptors=[PrometheusServerInterceptor(metrics)])
     pb_grpc.add_AgentRuntimeServiceServicer_to_server(servicer, server)
     server.add_insecure_port(addr)
+
+    metrics_port = int(os.getenv("COCOLA_METRICS_PORT", "9094"))
+    if metrics_port:
+        from prometheus_client import start_http_server
+
+        start_http_server(metrics_port, registry=metrics.registry)
+        log.info("cocola-agent-runtime metrics", port=metrics_port)
 
     await server.start()
     log.info("cocola-agent-runtime serving", addr=addr)
