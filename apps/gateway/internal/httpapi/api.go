@@ -19,6 +19,7 @@ import (
 	"github.com/cocola-project/cocola/apps/gateway/internal/auth"
 	"github.com/cocola-project/cocola/packages/go-common/logger"
 	"github.com/cocola-project/cocola/packages/go-common/metrics"
+	"github.com/cocola-project/cocola/packages/go-common/tracing"
 )
 
 // API wires the BFF dependencies. The agent.Streamer is an interface so tests
@@ -59,7 +60,11 @@ func (a *API) Handler() http.Handler {
 	// the whole chain so latency includes auth.
 	mux.Handle("POST /v1/chat", a.instrument("POST /v1/chat",
 		a.verifier.Middleware(writeErr)(http.HandlerFunc(a.chat))))
-	return mux
+	// Tracing: wrap the whole mux so an inbound W3C traceparent is extracted and
+	// a server span is started before auth/handlers run; the span context then
+	// flows into the agent gRPC call (client stats handler) for an end-to-end
+	// trace. No-op overhead when tracing is disabled.
+	return tracing.HTTPHandler("gateway.http", mux)
 }
 
 func (a *API) health(w http.ResponseWriter, _ *http.Request) {

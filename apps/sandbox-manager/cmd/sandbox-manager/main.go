@@ -27,12 +27,20 @@ import (
 	"github.com/cocola-project/cocola/packages/go-common/logger"
 	"github.com/cocola-project/cocola/packages/go-common/metrics"
 	rds "github.com/cocola-project/cocola/packages/go-common/redis"
+	"github.com/cocola-project/cocola/packages/go-common/tracing"
 	sandboxv1 "github.com/cocola-project/cocola/packages/proto/gen/go/cocola/sandbox/v1"
 )
 
 func main() {
 	log := logger.Must()
 	defer func() { _ = log.Sync() }()
+
+	stopTracing, terr := tracing.Init(context.Background(), tracing.ConfigFromEnv("sandbox-manager"))
+	if terr != nil {
+		log.Sugar().Warnw("tracing init failed", "err", terr)
+	} else {
+		defer func() { _ = stopTracing(context.Background()) }()
+	}
 
 	addr := getenv("COCOLA_SANDBOX_ADDR", ":50051")
 	backend := getenv("COCOLA_SANDBOX_PROVIDER", docker.ProviderName)
@@ -81,6 +89,7 @@ func main() {
 	gs := grpc.NewServer(
 		grpc.UnaryInterceptor(reg.UnaryServerInterceptor()),
 		grpc.StreamInterceptor(reg.StreamServerInterceptor()),
+		tracing.GRPCServerStatsHandler(),
 	)
 	sandboxv1.RegisterSandboxServiceServer(gs, server.New(p, binder))
 	reflection.Register(gs) // enables grpcurl describe/list for local debugging

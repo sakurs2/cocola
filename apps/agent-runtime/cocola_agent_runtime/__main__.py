@@ -33,10 +33,12 @@ from __future__ import annotations
 import asyncio
 import os
 
+import cocola_common
 import grpc
 from cocola.agent.v1 import agent_pb2_grpc as pb_grpc
 from cocola_common import Registry, get_logger
 from cocola_common.metrics_grpc import PrometheusServerInterceptor
+from cocola_common.tracing import grpc_aio_server_interceptor
 
 from cocola_agent_runtime.agent_provider import AgentProvider
 from cocola_agent_runtime.echo_provider import EchoProvider
@@ -203,7 +205,17 @@ async def serve() -> None:
     # disables it; per <network_security> the listener only ever runs here, in
     # the real composition root, never in tests.
     metrics = Registry("agent-runtime")
-    server = grpc.aio.server(interceptors=[PrometheusServerInterceptor(metrics)])
+    # Tracing (ADR-0011): OFF unless COCOLA_OTEL_ENABLED. init() installs the
+    # propagator (inbound traceparent -> log correlation) always; when enabled it
+    # also stands up the OTLP exporter. The aio server interceptor produces a
+    # server span per RPC and is None (skipped) when tracing is off.
+    tracing_cfg = cocola_common.config_from_env("agent-runtime")
+    stop_tracing = cocola_common.init(tracing_cfg)
+    interceptors = [PrometheusServerInterceptor(metrics)]
+    otel_interceptor = grpc_aio_server_interceptor(tracing_cfg)
+    if otel_interceptor is not None:
+        interceptors.append(otel_interceptor)
+    server = grpc.aio.server(interceptors=interceptors)
     pb_grpc.add_AgentRuntimeServiceServicer_to_server(servicer, server)
     server.add_insecure_port(addr)
 
@@ -216,7 +228,10 @@ async def serve() -> None:
 
     await server.start()
     log.info("cocola-agent-runtime serving", addr=addr)
-    await server.wait_for_termination()
+    try:
+        await server.wait_for_termination()
+    finally:
+        await stop_tracing()
 
 
 def main() -> None:

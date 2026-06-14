@@ -13,6 +13,7 @@ import (
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials/insecure"
 
+	"github.com/cocola-project/cocola/packages/go-common/tracing"
 	agentv1 "github.com/cocola-project/cocola/packages/proto/gen/go/cocola/agent/v1"
 )
 
@@ -53,7 +54,13 @@ type Client struct {
 // is plaintext: agent-runtime is an internal service reached over the cluster
 // network, not the public internet (TLS/mTLS is an M6 hardening item).
 func Dial(addr string) (*Client, error) {
-	conn, err := grpc.Dial(addr, grpc.WithTransportCredentials(insecure.NewCredentials()))
+	// Trace propagation: the client stats handler injects the current span's
+	// W3C traceparent into outbound gRPC metadata, carrying the trace from the
+	// gateway into agent-runtime. No-op when tracing is disabled.
+	conn, err := grpc.Dial(addr,
+		grpc.WithTransportCredentials(insecure.NewCredentials()),
+		tracing.GRPCClientDialOption(),
+	)
 	if err != nil {
 		return nil, fmt.Errorf("agent: dial %q: %w", addr, err)
 	}

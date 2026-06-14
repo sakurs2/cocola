@@ -8,6 +8,21 @@ import sys
 import structlog
 
 
+def _add_trace_context(_logger, _method_name, event_dict):
+    """structlog processor: stamp the active OTel trace_id/span_id onto each line.
+
+    Cheap and safe with tracing OFF: when there is no recording span the helper
+    returns ``{}`` and nothing is added, so logs stay clean in zero-config dev
+    while becoming trace-correlatable the moment OTel is enabled (ADR-0011).
+    """
+    from cocola_common.tracing import trace_fields
+
+    fields = trace_fields()
+    if fields:
+        event_dict.update(fields)
+    return event_dict
+
+
 def get_logger(name: str, level: str = "INFO") -> structlog.stdlib.BoundLogger:
     """Return a JSON-emitting structured logger bound to `name`.
 
@@ -21,6 +36,7 @@ def get_logger(name: str, level: str = "INFO") -> structlog.stdlib.BoundLogger:
     structlog.configure(
         processors=[
             structlog.stdlib.add_log_level,
+            _add_trace_context,
             structlog.processors.TimeStamper(fmt="iso"),
             structlog.processors.StackInfoRenderer(),
             structlog.processors.format_exc_info,

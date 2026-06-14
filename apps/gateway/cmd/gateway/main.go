@@ -16,6 +16,7 @@
 package main
 
 import (
+	"context"
 	"net/http"
 	"os"
 
@@ -24,6 +25,7 @@ import (
 	"github.com/cocola-project/cocola/apps/gateway/internal/httpapi"
 	"github.com/cocola-project/cocola/packages/go-common/logger"
 	"github.com/cocola-project/cocola/packages/go-common/metrics"
+	"github.com/cocola-project/cocola/packages/go-common/tracing"
 )
 
 func env(key, def string) string {
@@ -36,6 +38,16 @@ func env(key, def string) string {
 func main() {
 	log := logger.Must()
 	defer func() { _ = log.Sync() }()
+
+	// Tracing: OFF unless COCOLA_OTEL_ENABLED. When off, only the W3C propagator
+	// is installed (inbound traceparent still honoured for log correlation) and
+	// stop is a no-op — zero overhead, behaviour identical to pre-M8.
+	stop, terr := tracing.Init(context.Background(), tracing.ConfigFromEnv("gateway"))
+	if terr != nil {
+		log.Warn("tracing init failed: " + terr.Error())
+	} else {
+		defer func() { _ = stop(context.Background()) }()
+	}
 
 	addr := env("COCOLA_GATEWAY_ADDR", ":8080")
 	agentAddr := env("COCOLA_AGENT_ADDR", "127.0.0.1:50061")

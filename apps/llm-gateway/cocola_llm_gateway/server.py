@@ -22,7 +22,15 @@ ASGITransport — no real network, no bound port.
 
 from __future__ import annotations
 
-from cocola_common import CocolaError, ErrorCode, Registry, get_logger, instrument_fastapi
+from cocola_common import (
+    CocolaError,
+    ErrorCode,
+    Registry,
+    TracingConfig,
+    get_logger,
+    instrument_fastapi,
+    instrument_fastapi_tracing,
+)
 from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse, StreamingResponse
 
@@ -64,8 +72,14 @@ def create_app(
     verifier: Verifier | None = None,
     revocation: RevocationStore | None = None,
     metrics: Registry | None = None,
+    tracing: TracingConfig | None = None,
 ) -> FastAPI:
     app = FastAPI(title="cocola-llm-gateway", version="0.0.1")
+    # Distributed tracing (ADR-0011): server spans for every request, OFF unless
+    # COCOLA_OTEL_ENABLED. The instrumentor is SSE-safe; with tracing disabled
+    # this is a no-op so tests stay dependency-light.
+    if tracing is not None:
+        instrument_fastapi_tracing(app, tracing)
     # Observability: when a registry is supplied, wire the pure-ASGI RED
     # middleware (SSE-safe — it never buffers the body) and mount /metrics on
     # this same app, so no extra port is opened (see <network_security>). nil

@@ -32,3 +32,5 @@ Code shows _what_ and _how_. ADRs preserve _why_ — invaluable when:
 | 0007 | Gateway BFF + agent-runtime gRPC split                                                                | Accepted |
 | 0008 | Persistence layering, lifecycle, and sandbox backend (K8s + gVisor)                                  | Proposed |
 | 0009 | Run the Claude Code agent runtime inside each user's sandbox (Route A)                               | Proposed |
+| 0010 | Gateway tool-use passthrough (Anthropic rich-payload)                                                | Accepted |
+| 0011 | Observability three pillars (RED metrics + OTel tracing) and load-testing baseline                   | Accepted |

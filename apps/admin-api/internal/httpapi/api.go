@@ -24,6 +24,7 @@ import (
 	"github.com/cocola-project/cocola/apps/admin-api/internal/service"
 	"github.com/cocola-project/cocola/apps/admin-api/internal/store"
 	"github.com/cocola-project/cocola/packages/go-common/metrics"
+	"github.com/cocola-project/cocola/packages/go-common/tracing"
 )
 
 // API holds the dependencies the handlers need.
@@ -91,7 +92,10 @@ func (a *API) Router() http.Handler {
 		r.Get("/audit", a.listAudit)
 	})
 
-	return r
+	// Tracing: wrap the whole router so an inbound W3C traceparent is extracted
+	// and a server span is started before auth/handlers run. No-op when tracing
+	// is disabled.
+	return tracing.HTTPHandler("admin-api.http", r)
 }
 
 // ---- middleware ----

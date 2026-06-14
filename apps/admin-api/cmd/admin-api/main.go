@@ -43,11 +43,21 @@ import (
 	"github.com/cocola-project/cocola/packages/go-common/logger"
 	"github.com/cocola-project/cocola/packages/go-common/metrics"
 	"github.com/cocola-project/cocola/packages/go-common/token"
+	"github.com/cocola-project/cocola/packages/go-common/tracing"
 )
 
 func main() {
 	log := logger.Must()
 	defer func() { _ = log.Sync() }()
+
+	// Tracing: OFF unless COCOLA_OTEL_ENABLED; otherwise only the W3C propagator
+	// is installed and stop is a no-op (zero overhead, behaviour as pre-M8).
+	stop, terr := tracing.Init(context.Background(), tracing.ConfigFromEnv("admin-api"))
+	if terr != nil {
+		log.Warn("tracing init failed: " + terr.Error())
+	} else {
+		defer func() { _ = stop(context.Background()) }()
+	}
 
 	addr := getenv("COCOLA_ADMIN_ADDR", ":8090")
 	adminKey := os.Getenv("COCOLA_ADMIN_KEY")

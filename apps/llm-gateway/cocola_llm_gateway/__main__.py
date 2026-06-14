@@ -14,6 +14,7 @@ Point the Claude Agent SDK at it with:
 
 from __future__ import annotations
 
+import cocola_common
 import uvicorn
 from cocola_common import Registry, get_logger
 
@@ -30,7 +31,12 @@ def main() -> None:
     # /metrics is mounted on this same app (no extra port). Always on; scraping
     # is cheap and the metric set is bounded.
     metrics = Registry("llm-gateway")
-    app = create_app(service, verifier=verifier, metrics=metrics)
+    # Tracing (ADR-0011): OFF unless COCOLA_OTEL_ENABLED. init() always installs
+    # the propagator (so inbound traceparent correlates logs) and returns a
+    # stopper; the FastAPI instrumentor is wired inside create_app.
+    tracing_cfg = cocola_common.config_from_env("llm-gateway")
+    cocola_common.init(tracing_cfg)
+    app = create_app(service, verifier=verifier, metrics=metrics, tracing=tracing_cfg)
     log.info(
         "cocola-llm-gateway starting",
         milestone="M4",
