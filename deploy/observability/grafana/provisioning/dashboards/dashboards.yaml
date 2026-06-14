@@ -1,0 +1,13 @@
+# Load every dashboard JSON baked under /var/lib/grafana/dashboards so the RED
+# overview shows up on first boot with no manual import (ADR-0011).
+apiVersion: 1
+
+providers:
+  - name: cocola
+    orgId: 1
+    folder: cocola
+    type: file
+    disableDeletion: false
+    editable: true
+    options:
+      path: /var/lib/grafana/dashboards

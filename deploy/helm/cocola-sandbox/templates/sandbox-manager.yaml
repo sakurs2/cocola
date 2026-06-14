@@ -24,6 +24,10 @@ spec:
           imagePullPolicy: {{ .Values.sandboxManager.imagePullPolicy }}
           ports:
             - containerPort: 50051
+            {{- if .Values.observability.metrics.enabled }}
+            - name: metrics
+              containerPort: {{ .Values.observability.metrics.port }}
+            {{- end }}
           env:
             - name: COCOLA_SANDBOX_ADDR
               value: ":50051"
@@ -45,6 +49,20 @@ spec:
               value: {{ .Values.sandbox.llmBaseURL | quote }}
             - name: COCOLA_REDIS_ADDR
               value: {{ .Values.sandbox.redisAddr | quote }}
+            {{- if .Values.observability.metrics.enabled }}
+            - name: COCOLA_METRICS_ADDR
+              value: ":{{ .Values.observability.metrics.port }}"
+            {{- end }}
+            {{- if .Values.observability.tracing.enabled }}
+            - name: COCOLA_OTEL_ENABLED
+              value: "1"
+            - name: COCOLA_OTEL_EXPORTER_OTLP_ENDPOINT
+              value: {{ .Values.observability.tracing.endpoint | quote }}
+            - name: COCOLA_OTEL_EXPORTER_INSECURE
+              value: {{ .Values.observability.tracing.insecure | quote }}
+            - name: COCOLA_OTEL_SAMPLER_RATIO
+              value: {{ .Values.observability.tracing.samplerRatio | quote }}
+            {{- end }}
           readinessProbe:
             tcpSocket:
               port: 50051
@@ -67,3 +85,8 @@ spec:
     - name: grpc
       port: 50051
       targetPort: 50051
+    {{- if .Values.observability.metrics.enabled }}
+    - name: metrics
+      port: {{ .Values.observability.metrics.port }}
+      targetPort: metrics
+    {{- end }}

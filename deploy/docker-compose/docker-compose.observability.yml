@@ -1,0 +1,132 @@
+# cocola observability stack: Prometheus + Grafana + Tempo (+ optional OTel Collector).
+#
+# This is a SIDE-CAR compose that attaches to the network created by the main
+# stack (docker-compose.full.yml, project name `cocola` => network `cocola_default`).
+# Bring the app up first, then layer observability on top:
+#
+#   docker compose -f deploy/docker-compose/docker-compose.full.yml up -d
+#   docker compose -f deploy/docker-compose/docker-compose.observability.yml up -d
+#
+# Prometheus scrapes each service over the shared network using its compose DNS
+# name + metrics port (see deploy/observability/prometheus/prometheus.yml and
+# ADR-0011). Containers reach each other on ANY port over the docker network, so
+# the services do NOT need to publish their metrics ports to the host.
+#
+# Tracing is OFF by default in the services. Turn it on by injecting
+# COCOLA_OTEL_ENABLED=1 (+ endpoint) into the app containers; spans then flow to
+# Tempo's OTLP receiver (tempo:4318). The OTel Collector is OPTIONAL fan-in and
+# only starts under the `collector` profile:
+#
+#   docker compose -f deploy/docker-compose/docker-compose.observability.yml \
+#     --profile collector up -d
+#
+# UIs (published to the host):
+#   Grafana     http://localhost:3001  (admin/admin, anon viewer enabled)
+#   Prometheus  http://localhost:9090
+#   Tempo       http://localhost:3200  (API; query via Grafana)
+
+name: cocola-observability
+
+services:
+  prometheus:
+    image: prom/prometheus:v2.54.1
+    restart: unless-stopped
+    command:
+      - "--config.file=/etc/prometheus/prometheus.yml"
+      - "--storage.tsdb.path=/prometheus"
+      - "--storage.tsdb.retention.time=72h"
+      - "--web.enable-lifecycle"
+    volumes:
+      - ../observability/prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - promdata:/prometheus
+    ports:
+      - "9090:9090"
+    networks:
+      - default
+      - cocola
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost:9090/-/healthy"]
+      interval: 10s
+      timeout: 3s
+      retries: 10
+
+  tempo:
+    image: grafana/tempo:2.6.0
+    restart: unless-stopped
+    command: ["-config.file=/etc/tempo/tempo.yaml"]
+    volumes:
+      - ../observability/tempo/tempo.yaml:/etc/tempo/tempo.yaml:ro
+      - tempodata:/var/tempo
+    ports:
+      - "3200:3200"   # Tempo HTTP API / Grafana datasource
+      - "4318:4318"   # OTLP/HTTP receiver (services -> Tempo)
+      - "4317:4317"   # OTLP/gRPC receiver
+    networks:
+      - default
+      - cocola
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost:3200/ready"]
+      interval: 10s
+      timeout: 3s
+      retries: 20
+
+  grafana:
+    image: grafana/grafana:11.2.0
+    restart: unless-stopped
+    depends_on:
+      prometheus:
+        condition: service_healthy
+    environment:
+      GF_SECURITY_ADMIN_USER: "admin"
+      GF_SECURITY_ADMIN_PASSWORD: "admin"
+      GF_AUTH_ANONYMOUS_ENABLED: "true"
+      GF_AUTH_ANONYMOUS_ORG_ROLE: "Viewer"
+      GF_USERS_DEFAULT_THEME: "light"
+    volumes:
+      - ../observability/grafana/provisioning:/etc/grafana/provisioning:ro
+      - ../observability/grafana/dashboards:/var/lib/grafana/dashboards:ro
+      - grafanadata:/var/lib/grafana
+    ports:
+      - "3001:3000"
+    networks:
+      - default
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost:3000/api/health"]
+      interval: 10s
+      timeout: 3s
+      retries: 20
+
+  # Optional fan-in collector. Only starts under `--profile collector`; point the
+  # services at otel-collector:4318 instead of tempo:4318 when you want batching,
+  # tail sampling, or multi-backend export. Forwards to Tempo by default.
+  otel-collector:
+    image: otel/opentelemetry-collector-contrib:0.109.0
+    restart: unless-stopped
+    profiles: ["collector"]
+    command: ["--config=/etc/otelcol/config.yaml"]
+    volumes:
+      - ../observability/otel-collector/config.yaml:/etc/otelcol/config.yaml:ro
+    ports:
+      - "14318:4318"  # OTLP/HTTP (host) -> collector
+      - "14317:4317"  # OTLP/gRPC (host) -> collector
+    depends_on:
+      tempo:
+        condition: service_healthy
+    networks:
+      - default
+      - cocola
+
+volumes:
+  promdata:
+  grafanadata:
+  tempodata:
+
+networks:
+  # This compose's own network (Grafana <-> Prometheus <-> Tempo).
+  default:
+  # The main stack's network, joined as EXTERNAL so Prometheus can scrape the
+  # app services by their compose DNS names. Created by docker-compose.full.yml
+  # (project `cocola` => `cocola_default`). Start the app stack first.
+  cocola:
+    external: true
+    name: cocola_default

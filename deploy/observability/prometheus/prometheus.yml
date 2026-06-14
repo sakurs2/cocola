@@ -1,0 +1,50 @@
+# cocola fleet scrape config.
+#
+# All five services emit the SAME RED contract (ADR-0011, M8 S1-S3):
+#   cocola_requests_total / cocola_request_duration_seconds /
+#   cocola_requests_in_flight, each carrying a `service` label. Prometheus only
+#   needs to know WHERE to scrape; the `service` label comes from the metrics
+#   themselves, so one job per service is enough and the dashboard groups by it.
+#
+# Targets use docker-compose service DNS names; the ports match each service's
+# COCOLA_METRICS_ADDR / COCOLA_METRICS_PORT default:
+#   gateway          :9091   (go-common metrics port)
+#   sandbox-manager  :9092
+#   admin-api        :9093
+#   agent-runtime    :9094   (prometheus_client WSGI port)
+#   llm-gateway      :8080   (/metrics mounted on the app, no extra port)
+#
+# When running the services OUTSIDE this compose (bare metal / k8s) override the
+# targets via your own file or relabeling; the metric contract is identical.
+
+global:
+  scrape_interval: 15s
+  scrape_timeout: 10s
+  external_labels:
+    cluster: cocola-local
+
+scrape_configs:
+  - job_name: gateway
+    static_configs:
+      - targets: ["gateway:9091"]
+
+  - job_name: sandbox-manager
+    static_configs:
+      - targets: ["sandbox-manager:9092"]
+
+  - job_name: admin-api
+    static_configs:
+      - targets: ["admin-api:9093"]
+
+  - job_name: agent-runtime
+    static_configs:
+      - targets: ["agent-runtime:9094"]
+
+  - job_name: llm-gateway
+    metrics_path: /metrics
+    static_configs:
+      - targets: ["llm-gateway:8080"]
+
+  - job_name: prometheus
+    static_configs:
+      - targets: ["localhost:9090"]

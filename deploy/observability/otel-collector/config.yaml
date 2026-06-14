@@ -1,0 +1,39 @@
+# OPTIONAL OTel Collector — a fan-in point between the services and Tempo.
+#
+# Services can push OTLP straight to Tempo (set COCOLA_OTEL_EXPORTER_OTLP_
+# ENDPOINT=tempo:4318); the collector is only worth running when you want a
+# single place to batch, tail-sample, or re-route spans without touching each
+# service's env. It is gated behind the compose `collector` profile so the
+# default `up` stays lean (Prometheus + Grafana + Tempo).
+#
+# Point services at it with COCOLA_OTEL_EXPORTER_OTLP_ENDPOINT=otel-collector:4318.
+
+receivers:
+  otlp:
+    protocols:
+      http:
+        endpoint: 0.0.0.0:4318
+      grpc:
+        endpoint: 0.0.0.0:4317
+
+processors:
+  batch:
+    timeout: 5s
+    send_batch_size: 1024
+  memory_limiter:
+    check_interval: 5s
+    limit_mib: 256
+    spike_limit_mib: 64
+
+exporters:
+  otlp/tempo:
+    endpoint: tempo:4317
+    tls:
+      insecure: true
+
+service:
+  pipelines:
+    traces:
+      receivers: [otlp]
+      processors: [memory_limiter, batch]
+      exporters: [otlp/tempo]

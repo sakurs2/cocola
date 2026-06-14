@@ -1,0 +1,25 @@
+# Grafana auto-provisioned datasources (ADR-0011). Prometheus is the metrics
+# store, Tempo the trace store; trace-to-logs / logs-to-trace correlation is
+# left to the deployment's log stack. The RED dashboard reads Prometheus; the
+# Explore view reads Tempo for trace lookups by trace_id (which the services
+# stamp onto every log line).
+apiVersion: 1
+
+datasources:
+  - name: Prometheus
+    type: prometheus
+    access: proxy
+    url: http://prometheus:9090
+    isDefault: true
+    jsonData:
+      timeInterval: 15s
+
+  - name: Tempo
+    type: tempo
+    access: proxy
+    url: http://tempo:3200
+    jsonData:
+      # Surface span-level metrics + service graph when present; harmless if the
+      # OTel Collector's spanmetrics pipeline is not enabled.
+      tracesToMetrics:
+        datasourceUid: prometheus

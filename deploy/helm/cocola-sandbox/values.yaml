@@ -25,6 +25,27 @@ sandboxManager:
       cpu: 500m
       memory: 256Mi
 
+# Observability switch shared by the sandbox-manager Deployment.
+# metrics: scrape endpoint (go-common metrics server). Default ON; the chart
+#   exposes the port + ServiceMonitor so a Prometheus Operator can discover it.
+# tracing: OTel export. Default OFF (matches ADR-0011: zero overhead unless
+#   explicitly enabled). Flip enabled=true + point endpoint at your collector
+#   / Tempo OTLP-HTTP receiver to light up distributed traces.
+observability:
+  metrics:
+    enabled: true
+    port: 9092
+    # Emit a Prometheus-Operator ServiceMonitor. Leave false on clusters
+    # without the Operator CRDs installed.
+    serviceMonitor: false
+    interval: 15s
+  tracing:
+    enabled: false
+    # Go-style host:port; the service normalises it to an OTLP/HTTP URL.
+    endpoint: "tempo.observability.svc.cluster.local:4318"
+    insecure: true
+    samplerRatio: "0.05"
+
 sandbox:
   # Env consumed by the K8s provider inside sandbox-manager.
   # runtimeClass empty => plain runc (no RuntimeClassName). Set to "runsc"
