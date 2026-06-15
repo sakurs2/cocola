@@ -114,11 +114,8 @@ def _build_provider(executor: SandboxExecutor | None) -> AgentProvider:
         "using ClaudeAgentSDKProvider",
         base_url=base_url,
         model=cfg.model,
-        sandbox_tools=executor is not None,
     )
-    # The same executor handles every session; the bound sandbox_id (per-session)
-    # is threaded through AgentOptions, so one executor is safe to share.
-    return ClaudeAgentSDKProvider(cfg, executor=executor)
+    return ClaudeAgentSDKProvider(cfg)
 
 
 def _build_skill_catalog() -> SkillCatalog | None:
@@ -178,9 +175,10 @@ def _build_binder() -> SandboxBinder | None:
 
 
 def _build_executor() -> SandboxExecutor | None:
-    # Same switch as the binder: with a sandbox-manager addr the agent's bash /
-    # file tools execute inside the bound sandbox; without it the agent has no
-    # sandbox IO at all (and binding is off too), so there is nothing to route.
+    # Same switch as the binder. Route A's InSandboxShimProvider drives the
+    # in-sandbox brain over this executor's streaming exec; without a
+    # sandbox-manager addr there is no sandbox to run the brain in, so Route A
+    # falls back (and binding is off too).
     addr = os.getenv("COCOLA_SANDBOX_ADDR", "").strip()
     if not addr:
         return None

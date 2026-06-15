@@ -39,7 +39,6 @@ from dataclasses import dataclass, field
 from typing import Any
 
 from cocola_agent_runtime.agent_provider import AgentEvent, AgentOptions
-from cocola_agent_runtime.sandbox_binder import SandboxExecutor
 
 
 @dataclass
@@ -79,14 +78,9 @@ class ClaudeAgentSDKProvider:
         config: ClaudeSDKConfig,
         *,
         query_fn: QueryFn | None = None,
-        executor: SandboxExecutor | None = None,
     ):
         self._config = config
         self._iso_config_dir: str | None = None
-        # When set, the agent's bash/file tools are routed into the session's
-        # bound sandbox via an in-process MCP server (see sandbox_tools). When
-        # None, the agent runs with only its built-in tools (no sandbox IO).
-        self._executor = executor
         # Lazy import so the package imports cleanly even if the SDK/CLI is not
         # installed (e.g. in unit tests that inject query_fn).
         if query_fn is not None:
@@ -158,19 +152,11 @@ class ClaudeAgentSDKProvider:
             max_turns=options.max_turns or self._config.max_turns,
             env=self._build_env(),
         )
-        # Make the bound sandbox the agent's hands: mount sandbox-backed bash /
-        # file tools as an in-process MCP server, pinned to this session's
-        # sandbox. Only when we both have an executor and a bound sandbox_id —
-        # otherwise the agent would have tools pointing at nothing.
-        if self._executor is not None and options.sandbox_id:
-            from cocola_agent_runtime.sandbox_tools import (
-                SERVER_NAME,
-                build_sandbox_mcp_server,
-            )
-
-            server, allowed = build_sandbox_mcp_server(self._executor, options.sandbox_id)
-            kwargs["mcp_servers"] = {SERVER_NAME: server}
-            kwargs["allowed_tools"] = allowed
+        # Route A (ADR-0009) runs the whole Claude Code brain inside the user's
+        # own sandbox, so its NATIVE Bash/Read/Write tools are already isolated.
+        # The old Route-B MCP forwarding seam (sandbox_tools.py) that proxied
+        # the agent's tools into a remote sandbox has been removed — the agent
+        # here runs with its built-in toolset only.
         return claude_agent_sdk.ClaudeAgentOptions(**kwargs)
 
     async def query(
