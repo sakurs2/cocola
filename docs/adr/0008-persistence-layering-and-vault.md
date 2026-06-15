@@ -1,6 +1,6 @@
 # ADR-0008: Persistence layering, lifecycle, and sandbox backend (K8s + gVisor)
 
-- Status: Accepted (持久化分层与 K8s/gVisor 后端已随 M6/M7 落地；Vault 密钥托管留待后续)
+- Status: Accepted (持久化分层与 K8s/gVisor 后端已随 M6/M7 落地；Vault 密钥托管集成方式已定并落地代码侧 + K8s 清单 (2026-06-15)，真链路注入待目标集群)
 - Date: 2026-06-10 (accepted 2026-06-14)
 - Deciders: @wangjiahui
 - Depends on: ADR-0009 (runtime runs inside each user's sandbox)
@@ -148,6 +148,15 @@ Note the interaction with ADR-0009: Route A injects credentials into the sandbox
 so secret delivery and the egress lockdown (sandbox → llm-gateway only) are two
 halves of the same boundary.
 
+**实现进展 (2026-06-15) — 集成方式已定:`*_FILE` 间接 + Vault Agent Sidecar。**
+应用不连 Vault、不带 Vault SDK:读机密时优先看 `<NAME>_FILE` 文件(Vault Agent
+渲染到 `/vault/secrets/*`),否则回落 `<NAME>` env(dev `.env` 流不变)。这是
+业界标准约定(Postgres 镜像 / Docker secrets / Vault Agent template 同款),把
+token 续租/审计交给成熟 sidecar。代码缝口(Go `config.SecretFromEnv` + Python
+`read_secret_env`,覆盖 `COCOLA_AUTH_SECRET` / `COCOLA_ADMIN_KEY` / 上游 key)
+与 K8s 注入清单(`deploy/k8s/06-vault-secrets.yaml`)已落地;runbook 见
+`docs/runbook/secrets-vault.md`。真链路注入验收待目标集群。
+
 ### 6. Storage backends
 
 - **Metadata → PostgreSQL.** `user` / `session` / `volume` and their bindings,
@@ -199,6 +208,6 @@ halves of the same boundary.
 - **Follow-ups:** Postgres schema + migrations (M7); Docker bind-mount per-user
   + per-session dirs with `~/.claude` bound into the user dir, system paths
   read-only (M7); Vault Sidecar/CSI wiring + converge secrets, including the user
-  volume's `secrets/` subdir (M7); K8s PVCs (user + session) + scale-to-zero
+  volume's `secrets/` subdir (M7) — **代码缝口 + K8s 注入清单已落地 (2026-06-15)，真链路验收待集群**; K8s PVCs (user + session) + scale-to-zero
   hibernate + warm pool (M6); gVisor compatibility spike (pre-prod gVisor
   cutover); T2 version/GC policy in object store (M7+).
