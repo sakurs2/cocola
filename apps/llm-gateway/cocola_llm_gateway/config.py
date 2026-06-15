@@ -42,6 +42,29 @@ from cocola_llm_gateway.upstream.openai_compat import OpenAICompatConfig, OpenAI
 log = get_logger("cocola.llm-gateway.config")
 
 
+def read_secret_env(name: str) -> str:
+    """Resolve a secret via the "_FILE" indirection convention, else plain env.
+
+    If "<name>_FILE" is set, the secret is read from that file path (a trailing
+    newline is trimmed, since templating tools commonly append one); otherwise
+    we fall back to the "<name>" env var. This is the only seam the gateway needs
+    to be Vault-ready WITHOUT a Vault SDK dependency (ADR-0008 §5): a Vault Agent
+    Sidecar renders the secret to e.g. /vault/secrets/auth_secret and the
+    operator points "<name>_FILE" at it, so the app just reads a file. With no
+    "_FILE" set, behavior is identical to os.getenv, so the dev .env flow is
+    unchanged. An unreadable file degrades to the env fallback rather than
+    crashing on a transient mount gap.
+    """
+    path = os.getenv(name + "_FILE", "").strip()
+    if path:
+        try:
+            with open(path, encoding="utf-8") as fh:
+                return fh.read().rstrip("\r\n")
+        except OSError:
+            log.warning("secret file unreadable; falling back to env", name=name, path=path)
+    return os.getenv(name, "")
+
+
 @dataclass
 class GatewayConfig:
     host: str = "127.0.0.1"
@@ -99,7 +122,7 @@ def _resolve_secret(cfg: dict, inline_key: str, env_key_field: str) -> str:
     """
     env_name = cfg.get(env_key_field)
     if env_name:
-        return os.getenv(env_name, "")
+        return read_secret_env(env_name)
     return cfg.get(inline_key, "")
 
 
@@ -237,7 +260,7 @@ def auth_config_from_env() -> AuthConfig:
     from cocola_llm_gateway.auth.identity import AuthConfig
 
     return AuthConfig(
-        secret=os.getenv("COCOLA_AUTH_SECRET", "").strip(),
+        secret=read_secret_env("COCOLA_AUTH_SECRET").strip(),
         issuer=os.getenv("COCOLA_AUTH_ISSUER", "cocola").strip() or "cocola",
         default_ttl_s=int(os.getenv("COCOLA_AUTH_TOKEN_TTL_SECS", str(30 * 24 * 3600))),
         dev_allow_anonymous=_envflag("COCOLA_AUTH_DEV_ANON"),

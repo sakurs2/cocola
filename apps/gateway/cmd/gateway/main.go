@@ -23,6 +23,7 @@ import (
 	"github.com/cocola-project/cocola/apps/gateway/internal/agent"
 	"github.com/cocola-project/cocola/apps/gateway/internal/auth"
 	"github.com/cocola-project/cocola/apps/gateway/internal/httpapi"
+	"github.com/cocola-project/cocola/packages/go-common/config"
 	"github.com/cocola-project/cocola/packages/go-common/logger"
 	"github.com/cocola-project/cocola/packages/go-common/metrics"
 	"github.com/cocola-project/cocola/packages/go-common/tracing"
@@ -59,7 +60,7 @@ func main() {
 	defer func() { _ = client.Close() }()
 
 	verifier := auth.NewVerifier(auth.Config{
-		Secret:         os.Getenv("COCOLA_AUTH_SECRET"),
+		Secret:         config.SecretFromEnv("COCOLA_AUTH_SECRET"),
 		Issuer:         env("COCOLA_AUTH_ISSUER", "cocola"),
 		AllowAnonymous: os.Getenv("COCOLA_AUTH_ALLOW_ANON") == "1",
 	})

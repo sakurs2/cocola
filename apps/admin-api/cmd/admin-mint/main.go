@@ -15,6 +15,7 @@ import (
 	"os"
 	"time"
 
+	"github.com/cocola-project/cocola/packages/go-common/config"
 	"github.com/cocola-project/cocola/packages/go-common/token"
 )
 
@@ -25,7 +26,7 @@ func main() {
 	issuer := flag.String("issuer", "cocola", "iss claim")
 	flag.Parse()
 
-	secret := os.Getenv("COCOLA_AUTH_SECRET")
+	secret := config.SecretFromEnv("COCOLA_AUTH_SECRET")
 	if secret == "" {
 		fmt.Fprintln(os.Stderr, "error: COCOLA_AUTH_SECRET must be set")
 		os.Exit(2)

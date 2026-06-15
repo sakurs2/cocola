@@ -40,6 +40,7 @@ import (
 	"github.com/cocola-project/cocola/apps/admin-api/internal/redispub"
 	"github.com/cocola-project/cocola/apps/admin-api/internal/service"
 	"github.com/cocola-project/cocola/apps/admin-api/internal/store"
+	"github.com/cocola-project/cocola/packages/go-common/config"
 	"github.com/cocola-project/cocola/packages/go-common/logger"
 	"github.com/cocola-project/cocola/packages/go-common/metrics"
 	"github.com/cocola-project/cocola/packages/go-common/token"
@@ -60,8 +61,8 @@ func main() {
 	}
 
 	addr := getenv("COCOLA_ADMIN_ADDR", ":8090")
-	adminKey := os.Getenv("COCOLA_ADMIN_KEY")
-	secret := os.Getenv("COCOLA_AUTH_SECRET")
+	adminKey := config.SecretFromEnv("COCOLA_ADMIN_KEY")
+	secret := config.SecretFromEnv("COCOLA_AUTH_SECRET")
 	issuerName := getenv("COCOLA_AUTH_ISSUER", "cocola")
 	ttl := time.Duration(getenvInt("COCOLA_AUTH_TOKEN_TTL_SECS", 30*24*3600)) * time.Second
 
