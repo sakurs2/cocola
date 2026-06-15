@@ -46,6 +46,18 @@ message SandboxSpec {
   string image = 3;
   map<string, string> env = 4;
   Resources resources = 5;
+  // egress_allowlist controls the sandbox's outbound network policy (ADR-0009).
+  // The provider distinguishes "unset" from "set but empty":
+  //   - unset  -> no egress policy configured; legacy wide-open behaviour.
+  //   - set    -> egress firewall is enforced. A DNS + in-cluster llm-gateway
+  //               baseline is ALWAYS allowed (so the gateway is never cut off);
+  //               every additional CIDR/IP entry widens that baseline. Domain
+  //               entries need a DNS-aware CNI (e.g. Cilium toFQDNs) to be
+  //               pinned precisely; a vanilla CNI / iptables layer skips them.
+  // NOTE: proto3 cannot tell an empty repeated field from an absent one on the
+  // wire, so callers that want the enforced-with-baseline posture must route an
+  // explicitly-configured allowlist (the orchestrator always folds in the
+  // gateway host, guaranteeing a non-empty list in practice).
   repeated string egress_allowlist = 6;
 }
 
