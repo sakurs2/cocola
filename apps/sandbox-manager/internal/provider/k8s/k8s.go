@@ -239,9 +239,15 @@ func (p *Provider) Create(ctx context.Context, spec provider.SandboxSpec) (*prov
 		return nil, err
 	}
 
-	// Enforce egress before the Pod can run: empty allowlist = deny all (ADR-0009).
-	if err := p.ensureNetworkPolicy(ctx, sid, spec.Networking.EgressAllowlist); err != nil {
-		return nil, err
+	// Enforce egress before the Pod can run (ADR-0009). Semantics mirror the
+	// Docker provider: a nil allowlist means "no egress policy configured"
+	// (legacy wide-open default — no NetworkPolicy is created); a non-nil
+	// allowlist (including an empty one) activates the firewall with the
+	// DNS + in-cluster (llm-gateway) baseline always allowed.
+	if spec.Networking.EgressAllowlist != nil {
+		if err := p.ensureNetworkPolicy(ctx, sid, spec.Networking.EgressAllowlist); err != nil {
+			return nil, err
+		}
 	}
 
 	pod := p.podSpec(b)
@@ -709,19 +715,24 @@ func (e *spdyExecutor) stream(ctx context.Context, namespace, pod, containerName
 
 // ensureNetworkPolicy materialises the sandbox's egress posture as a
 // NetworkPolicy selecting the sandbox Pod by its sandbox-id label (ADR-0009:
-// egress lockdown is mandatory). Semantics mirror the Docker provider's
-// NetworkMode=none default:
+// egress lockdown is mandatory). It is only called when an egress policy is
+// configured (non-nil allowlist); the secure default is a baseline, not a
+// full deny:
 //
-//   - empty allowlist  -> PolicyTypes:[Egress] with NO egress rules = deny all
-//     outbound traffic (the safe default).
-//   - non-empty        -> allow DNS (so names resolve), allow in-cluster egress
-//     (so the llm-gateway Service is reachable for Route A), and add one ipBlock
+//   - empty allowlist  -> baseline only: allow DNS (so names resolve) and
+//     in-cluster egress (so the llm-gateway Service stays reachable for
+//     Route A). All other outbound traffic is dropped. Crucially this does
+//     NOT cut off the gateway — an empty allowlist still yields a working
+//     sandbox that can only talk to DNS + the gateway.
+//   - non-empty        -> the same DNS + in-cluster baseline, plus one ipBlock
 //     peer per CIDR/IP entry in the allowlist.
 //
 // Note: NetworkPolicy matches on IP/CIDR and label selectors, not DNS names.
 // Domain-style allowlist entries cannot be enforced by a vanilla CNI here; they
-// are skipped at this layer (a DNS-aware CNI such as Cilium would be required to
-// pin them) and logged, while CIDR entries are enforced precisely.
+// are skipped at this layer and logged, while CIDR entries are enforced
+// precisely. To pin domains exactly, deploy a DNS-aware CNI (e.g. Cilium's
+// CiliumNetworkPolicy with toFQDNs); see deploy/helm values for the extension
+// point.
 func (p *Provider) ensureNetworkPolicy(ctx context.Context, sid string, allowlist []string) error {
 	np := &networkingv1.NetworkPolicy{
 		ObjectMeta: metav1.ObjectMeta{
@@ -752,11 +763,10 @@ func (p *Provider) ensureNetworkPolicy(ctx context.Context, sid string, allowlis
 	return nil
 }
 
-// egressRules builds the egress rule set for an allowlist. Empty -> nil (deny all).
+// egressRules builds the egress rule set for an allowlist. The DNS + in-cluster
+// (llm-gateway) baseline is ALWAYS returned — including for an empty allowlist —
+// so the gateway is never cut off; CIDR/IP entries are appended as ipBlock peers.
 func (p *Provider) egressRules(sid string, allowlist []string) []networkingv1.NetworkPolicyEgressRule {
-	if len(allowlist) == 0 {
-		return nil // deny all egress
-	}
 	dnsUDP := corev1.ProtocolUDP
 	dnsTCP := corev1.ProtocolTCP
 	dnsPort := intstr.FromInt(53)

@@ -531,19 +531,46 @@ func getNetpol(t *testing.T, cs *fake.Clientset, sid string) *networkingv1.Netwo
 	return np
 }
 
-func TestCreate_EmptyAllowlistDeniesAllEgress(t *testing.T) {
+func TestCreate_NilAllowlistCreatesNoPolicy(t *testing.T) {
+	// nil allowlist = "no egress policy configured" (legacy wide-open default):
+	// the provider must NOT create a NetworkPolicy at all (ADR-0009 hardening).
 	p, cs := newTestProvider(t)
 	sb, err := p.Create(context.Background(), provider.SandboxSpec{UserID: "u", SessionID: "s"})
 	if err != nil {
 		t.Fatalf("Create: %v", err)
 	}
+	if _, err := cs.NetworkingV1().NetworkPolicies("test-ns").Get(
+		context.Background(), netpolName(sb.ID), metav1.GetOptions{}); err == nil {
+		t.Fatal("nil allowlist must not create a NetworkPolicy")
+	}
+}
+
+func TestCreate_EmptyAllowlistAppliesBaseline(t *testing.T) {
+	// Empty (non-nil) allowlist = firewall active with the secure baseline:
+	// DNS + in-cluster (llm-gateway) egress are allowed so the gateway is never
+	// cut off; everything else is dropped. There must be NO ipBlock peers.
+	p, cs := newTestProvider(t)
+	sb, err := p.Create(context.Background(), provider.SandboxSpec{
+		UserID: "u", SessionID: "s",
+		Networking: provider.Networking{EgressAllowlist: []string{}},
+	})
+	if err != nil {
+		t.Fatalf("Create: %v", err)
+	}
 	np := getNetpol(t, cs, sb.ID)
-	// Egress policy type present but NO rules => deny all outbound.
 	if len(np.Spec.PolicyTypes) != 1 || np.Spec.PolicyTypes[0] != networkingv1.PolicyTypeEgress {
 		t.Fatalf("expected Egress policy type, got %v", np.Spec.PolicyTypes)
 	}
-	if len(np.Spec.Egress) != 0 {
-		t.Fatalf("empty allowlist must yield 0 egress rules (deny all), got %d", len(np.Spec.Egress))
+	// Baseline = DNS rule + in-cluster rule; no ipBlock peers.
+	if len(np.Spec.Egress) != 2 {
+		t.Fatalf("empty allowlist must yield 2 baseline egress rules (dns, cluster), got %d", len(np.Spec.Egress))
+	}
+	for _, r := range np.Spec.Egress {
+		for _, peer := range r.To {
+			if peer.IPBlock != nil {
+				t.Fatalf("empty allowlist must not produce ipBlock peers, got %q", peer.IPBlock.CIDR)
+			}
+		}
 	}
 	if np.Spec.PodSelector.MatchLabels[labelSandboxID] != sb.ID {
 		t.Fatal("networkpolicy must select the sandbox pod by sandbox-id")
