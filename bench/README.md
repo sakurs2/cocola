@@ -60,24 +60,68 @@ CONC=50 DURATION=30s bench/ghz/agent_query.sh
 ghz 直接吃 `packages/proto` 里的 `.proto`,无需服务端反射。输出含 RPS、
 P50/P90/P99 及状态码分布。
 
-## 3. 容量基线(待回填)
+## 3. 容量基线(首版,2026-06-16)
 
-> 下表为**模板**。在目标硬件上按"1.单服务隔离压 → 2.全链路压"两步跑出数据后回填,
-> 并附 commit / 硬件 / 镜像 tag。EchoProvider 路径测的是**框架开销上限**(无真实
-> LLM/沙箱延迟);接真实 provider 后另立一行。
+> EchoProvider 路径测的是**框架 + 沙箱编排开销**(LLM 调用被 echo 替掉,但沙箱
+> 仍真实创建);接真实 provider 后另立一组"真实路径"基线行。
 
-| 日期 | 硬件 | 路径 | 工具 | 并发 | RPS | P50 | P99 | 错误率 | 备注 |
-| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| _待测_ | _e.g. M2/8c16g_ | gateway SSE | k6 | 20 | _?_ | _?_ | _?_ | _?_ | EchoProvider |
-| _待测_ | 同上 | agent-runtime Query | ghz | 20 | _?_ | _?_ | _?_ | _?_ | EchoProvider |
+**环境**:Docker Desktop VM `linux/aarch64`,12 vCPU / 8 GiB;全栈
+`docker-compose.full.yml`(auth OFF + EchoProvider,Docker sandbox provider);
+k6/ghz 经官方容器(`grafana/k6`、`ghcr.io/bojand/ghz`)接入 `cocola_default`
+网络,以服务名压测。压测 commit:见本次提交。
 
-回填步骤:
+### 3.1 稳态吞吐(20 并发)
 
-1. **单服务隔离**:只起被测服务 + 其直接依赖,排除上下游噪声,确定单点天花板。
-2. **全链路**:起全栈,从 gateway 压,观察瓶颈服务(Grafana 里哪个 `service`
-   先到 P99 拐点 / in-flight 堆积)。
-3. **定容量**:取 P99 仍在阈值内的最大 RPS 为单实例额定容量,按 SLO 留 buffer。
-4. 把数字 + 环境写回上表,随 commit 留痕。
+| 日期 | 硬件 | 路径 | 工具 | 并发 | 样本 | RPS | P50 | P95 | P99 | 错误率 | 备注 |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| 2026-06-16 | aarch64 12c/8g | gateway SSE | k6 | 20 VU | 167 | 3.56 | 5.12s | 6.13s | — | 0% | EchoProvider,每迭代新 session |
+| 2026-06-16 | 同上 | agent-runtime Query | ghz | 20 | 200 | 5.57 | 3.47s | 4.68s | 5.08s | 0% | EchoProvider,每请求新 session |
+
+> 20 并发下两路径均 **0 错误**。延迟主要被「每请求新建沙箱(冷启)+ 并发排队」
+> 拉高:k6 经 gateway→agent-runtime 多一跳且 SSE 整流读完,故 P50 高于 ghz 直压。
+> 烟测(1 VU)下 SSE 全流 med ~0.95s、TTFB ~0.1ms(gateway 立即 flush 头),
+> 印证瓶颈在下游沙箱编排而非网关。
+
+### 3.2 沙箱冷启 vs 复用(warm pool 决策输入,单并发排队外)
+
+同一 `session_id` 复用已有沙箱,新 `session_id` 触发创建。单并发逐请求计时:
+
+| 路径 | 首请求(冷启,建沙箱) | 稳态(复用沙箱) | 冷启净增量 |
+| --- | --- | --- | --- |
+| 复用同 session ×6 | 1.69s(#1) | ~0.62–0.67s(#2–6) | — |
+| 每次新 session ×6 | ~1.0–1.16s(均值 ~1.08s) | — | **≈ 0.44s / 请求** vs 复用 ~0.64s |
+
+> **结论(喂给 #13 warm pool)**:Docker provider 下沙箱冷启给每个新会话**首请求**
+> 叠加约 **0.4–1.0s**(视是否已有暖容器)。warm pool 预热若能让新会话直接领到
+> 暖沙箱,可把这部分从用户首响应延迟中抹掉。注:本机为 Docker provider;K8s +
+> gVisor 冷启更重(镜像 1.9GB + runsc 初始化),真实增量需在目标集群复测(#15)。
+> 编排层观察到沙箱创建后转 **Paused**(每个仅 ~3.4 MiB),且空闲后被 GC 回收
+> (压测产生的 ~20 个沙箱在数分钟内归零),说明保活成本低、回收有效。
+
+### 3.3 复现步骤
+
+1. 起栈:`docker compose -f deploy/docker-compose/docker-compose.full.yml up -d`
+   (可选叠 `docker-compose.observability.yml`)。
+2. 工具:本机无 k6/ghz 时用官方容器(见上),或 `brew install k6 ghz`。
+3. k6:`docker run --rm --network cocola_default -v "$PWD/bench/k6:/scripts:ro"
+   -e BASE_URL=http://gateway:8080 -e VUS=20 -e DURATION=30s grafana/k6 run
+   /scripts/gateway_sse.js`。
+4. ghz:`docker run --rm --network cocola_default -v "$PWD/packages/proto:/proto:ro"
+   ghcr.io/bojand/ghz --proto cocola/agent/v1/agent.proto --import-paths /proto
+   --call cocola.agent.v1.AgentRuntimeService.Query
+   -d '{"prompt":"ping","session_id":"ghz-{{.RequestNumber}}","max_turns":1}'
+   -c 20 -n 200 --insecure agent-runtime:50061`。
+5. 定容量:取 P99 仍在 SLO 内(默认 `sse_ttfb_ms p95<2s`、错误率<1%)的最大 RPS
+   为单实例额定容量,按 SLO 留 buffer。
+
+### 3.4 已知缺口 / 后续
+
+- **Prometheus 跨网抓取**:观测栈起后,服务 metrics 端口(9091–9094)在
+  Prometheus 里 `up=0`(scrape 目标端口/网络待校准);本次基线以 k6/ghz 自带
+  统计为权威数据源,Grafana RED 看板的端到端联通留作 S5 收尾项单独修。
+- **真实路径基线**:接真实 LLM provider 后补一组(含真实 token 时延)。
+- **K8s + gVisor 基线**:冷启 p99 在目标集群复测(与 #15 同批),用于校准
+  warm pool 容量与预热个数。
 
 ## 约束
 
