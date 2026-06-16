@@ -20,6 +20,7 @@ import (
 
 	"github.com/cocola-project/cocola/apps/sandbox-manager/internal/obs"
 	"github.com/cocola-project/cocola/apps/sandbox-manager/internal/orchestrator"
+	"github.com/cocola-project/cocola/apps/sandbox-manager/internal/orchestrator/warmpool"
 	"github.com/cocola-project/cocola/apps/sandbox-manager/internal/provider"
 	"github.com/cocola-project/cocola/apps/sandbox-manager/internal/provider/docker"
 	"github.com/cocola-project/cocola/apps/sandbox-manager/internal/provider/k8s"
@@ -75,6 +76,17 @@ func main() {
 		binder = orchestrator.NewBinder(kv, p, cfg).
 			WithMetrics(bm).
 			WithNetworking(net)
+
+		// Warm pool (ADR-0008 §3): optional, OFF unless COCOLA_WARMPOOL_ENABLED.
+		// When on, a new session adopts a pre-warmed sandbox instead of paying
+		// the cold-create cost. Pure optimisation — an empty/disabled pool or an
+		// adopt failure degrades silently to a normal create. Requires the
+		// provider to implement the optional provider.Adopter capability;
+		// otherwise warm boxes stay un-adoptable and every miss cold-creates.
+		poolImg := getenv("COCOLA_SANDBOX_IMAGE", "")
+		pool := warmpool.New(kv, p, warmpool.ConfigFromEnv(poolImg)).WithNetworking(net)
+		binder.WithWarmPool(pool)
+
 		go binder.RunReaper(ctx) // background two-stage Pause-then-Destroy GC
 		eff := binder.EffectiveConfig()
 		log.Sugar().Infow("session<->sandbox binder enabled",
@@ -82,6 +94,18 @@ func main() {
 			"heartbeat_every", eff.HeartbeatEvery,
 			"destroy_grace", eff.DestroyGrace,
 			"reaper_every", eff.ReaperEvery)
+
+		if pool.Enabled() {
+			if _, ok := p.(provider.Adopter); !ok {
+				log.Sugar().Warnw("warm pool enabled but provider can't adopt; warm boxes won't be used",
+					"provider", backend)
+			}
+			go pool.Run(ctx) // background refill + age-out loop
+			pc := pool.EffectiveConfig()
+			log.Sugar().Infow("warm pool enabled",
+				"min_idle", pc.MinIdle, "max", pc.Max,
+				"refill_every", pc.RefillEvery, "max_lifetime", pc.MaxLifetime)
+		}
 	}
 
 	lis, err := net.Listen("tcp", addr)

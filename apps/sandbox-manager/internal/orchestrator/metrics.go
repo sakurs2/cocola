@@ -19,6 +19,7 @@ import (
 type Metrics struct {
 	hits   atomic.Int64
 	misses atomic.Int64
+	pooled atomic.Int64 // misses served from the warm pool (adopt instead of cold create)
 	active atomic.Int64
 
 	mu        sync.Mutex
@@ -31,6 +32,10 @@ func NewMetrics() *Metrics { return &Metrics{} }
 const maxCreateObs = 4096
 
 func (m *Metrics) recordHit() { m.hits.Add(1) }
+
+// recordPooled counts a miss satisfied by adopting a warm-pool sandbox. It is
+// NOT a reuse hit (a different session), but it skipped the cold-create cost.
+func (m *Metrics) recordPooled() { m.pooled.Add(1) }
 
 func (m *Metrics) recordMiss(d time.Duration) {
 	m.misses.Add(1)
@@ -50,6 +55,7 @@ type Snapshot struct {
 	Misses      int64
 	HitRate     float64
 	ActiveCount int64
+	PooledCount int64
 	CreateP99Ms float64
 	CreateP50Ms float64
 }
@@ -75,6 +81,7 @@ func (m *Metrics) Snapshot() Snapshot {
 		Misses:      misses,
 		HitRate:     rate,
 		ActiveCount: m.active.Load(),
+		PooledCount: m.pooled.Load(),
 		CreateP99Ms: pct(obs, 0.99),
 		CreateP50Ms: pct(obs, 0.50),
 	}

@@ -9,6 +9,7 @@ import (
 	"strconv"
 	"time"
 
+	"github.com/cocola-project/cocola/apps/sandbox-manager/internal/orchestrator/warmpool"
 	"github.com/cocola-project/cocola/apps/sandbox-manager/internal/provider"
 	rds "github.com/cocola-project/cocola/packages/go-common/redis"
 )
@@ -82,6 +83,10 @@ type Binder struct {
 
 	// metrics is optional; nil means "don't record".
 	metrics *Metrics
+
+	// pool is the optional warm pool. nil (or a disabled pool) means every miss
+	// cold-creates exactly as before — the pool is a pure latency optimisation.
+	pool *warmpool.Pool
 }
 
 // NewBinder constructs a Binder. The provider is the same abstraction the gRPC
@@ -104,6 +109,13 @@ func (b *Binder) WithMetrics(m *Metrics) *Binder {
 // creates. Returns the binder for chaining.
 func (b *Binder) WithNetworking(n provider.Networking) *Binder {
 	b.net = n
+	return b
+}
+
+// WithWarmPool attaches a warm pool. When set and enabled, a miss first tries to
+// adopt a pre-warmed sandbox before cold-creating. Returns the binder for chaining.
+func (b *Binder) WithWarmPool(p *warmpool.Pool) *Binder {
+	b.pool = p
 	return b
 }
 
@@ -177,6 +189,29 @@ func (b *Binder) AcquireWithOutcome(ctx context.Context, spec AcquireSpec) (Outc
 		return Outcome{Sandbox: sb, Reused: true}, nil
 	}
 
+	// --- Warm-pool fast adopt (pure optimisation) -----------------------
+	// Try to take a pre-warmed sandbox and re-target it to this user/session.
+	// ANY failure here degrades silently to a normal cold Create below, so the
+	// pool can never become a new failure mode.
+	if sb, pooled := b.tryAdopt(ctx, spec); pooled {
+		m := meta{
+			SandboxID:   sb.ID,
+			SessionID:   spec.SessionID,
+			UserID:      spec.UserID,
+			Image:       spec.Image,
+			State:       StateActive,
+			CreatedUnix: time.Now().Unix(),
+		}
+		if err := b.bind(ctx, m); err != nil {
+			// Bind failed after adopt: destroy the orphan, then fall through to
+			// a clean cold Create rather than leaking the warm box.
+			_ = b.p.Destroy(ctx, sb.ID)
+		} else {
+			b.recordPooled()
+			return Outcome{Sandbox: sb, Reused: false}, nil
+		}
+	}
+
 	start := time.Now()
 	sb, err := b.p.Create(ctx, provider.SandboxSpec{
 		UserID:     spec.UserID,
@@ -205,6 +240,46 @@ func (b *Binder) AcquireWithOutcome(ctx context.Context, spec AcquireSpec) (Outc
 
 	b.recordMiss(time.Since(start))
 	return Outcome{Sandbox: sb, Reused: false}, nil
+}
+
+// tryAdopt attempts to satisfy a miss from the warm pool instead of cold
+// creating. It returns (sandbox, true) only when a pooled box was checked out
+// AND successfully re-targeted to spec's user/session. Every failure path
+// returns (nil, false) so the caller degrades to a normal Create — the pool is
+// strictly a latency optimisation and never a new failure mode.
+//
+// Adopt requires the provider to implement the optional provider.Adopter
+// capability (remount the per-user volume / inject session env onto an already
+// running, user-agnostic box). Providers without it leave warm boxes
+// un-adoptable: we return the box to nowhere by destroying it and fall back, so
+// we never bind a sandbox that still carries no user identity.
+func (b *Binder) tryAdopt(ctx context.Context, spec AcquireSpec) (*provider.Sandbox, bool) {
+	if b.pool == nil || !b.pool.Enabled() {
+		return nil, false
+	}
+	adopter, ok := b.p.(provider.Adopter)
+	if !ok {
+		return nil, false // backend can't remount; warm boxes aren't adoptable
+	}
+	sb, hit, err := b.pool.Checkout(ctx)
+	if err != nil || !hit || sb == nil {
+		return nil, false
+	}
+	if err := adopter.Adopt(ctx, sb.ID, provider.SandboxSpec{
+		UserID:     spec.UserID,
+		SessionID:  spec.SessionID,
+		Image:      spec.Image,
+		Env:        spec.Env,
+		Networking: b.net,
+	}); err != nil {
+		// Adoption failed on a box already removed from the pool: destroy it so
+		// it doesn't leak, then fall back to a cold Create.
+		_ = b.p.Destroy(ctx, sb.ID)
+		return nil, false
+	}
+	sb.UserID = spec.UserID
+	sb.SessionID = spec.SessionID
+	return sb, true
 }
 
 // lookup resolves the forward mapping to a provider.Sandbox. The second return
@@ -326,5 +401,10 @@ func (b *Binder) recordHit() {
 func (b *Binder) recordMiss(d time.Duration) {
 	if b.metrics != nil {
 		b.metrics.recordMiss(d)
+	}
+}
+func (b *Binder) recordPooled() {
+	if b.metrics != nil {
+		b.metrics.recordPooled()
 	}
 }

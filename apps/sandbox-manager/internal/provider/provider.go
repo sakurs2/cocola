@@ -93,6 +93,17 @@ var (
 	registry   = map[string]SandboxProvider{}
 )
 
+// Adopter is an OPTIONAL capability: a provider that can re-target a sandbox
+// created user-agnostically (by the warm pool) to a concrete user/session —
+// e.g. mounting the per-user volume and injecting session env. Providers that
+// cannot remount after create simply do not implement it; the orchestrator then
+// treats a warm box as un-adoptable and falls back to a cold Create. Keeping it
+// optional preserves the ADR-0002 rule that the core interface is the contract.
+type Adopter interface {
+	// Adopt re-targets the already-running sandbox sid for spec's user/session.
+	Adopt(ctx context.Context, sid string, spec SandboxSpec) error
+}
+
 // Register a provider under the given name. Panics on duplicate keys.
 func Register(name string, p SandboxProvider) {
 	registryMu.Lock()

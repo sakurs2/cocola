@@ -15,9 +15,10 @@ import (
 // fakeProvider is a minimal in-memory SandboxProvider for binder tests. It only
 // implements the lifecycle methods the binder touches; the rest are stubs.
 type fakeProvider struct {
-	creates atomic.Int64
-	mu      sync.Mutex
-	state   map[string]string // sandbox id -> "active"|"paused"|"destroyed"
+	creates  atomic.Int64
+	destroys atomic.Int64
+	mu       sync.Mutex
+	state    map[string]string // sandbox id -> "active"|"paused"|"destroyed"
 }
 
 func newFakeProvider() *fakeProvider { return &fakeProvider{state: map[string]string{}} }
@@ -43,6 +44,7 @@ func (f *fakeProvider) Resume(ctx context.Context, sid string) error {
 	return nil
 }
 func (f *fakeProvider) Destroy(ctx context.Context, sid string) error {
+	f.destroys.Add(1)
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.state[sid] = "destroyed"
