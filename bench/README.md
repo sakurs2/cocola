@@ -121,7 +121,9 @@ k6/ghz 经官方容器(`grafana/k6`、`ghcr.io/bojand/ghz`)接入 `cocola_defaul
   统计为权威数据源,Grafana RED 看板的端到端联通留作 S5 收尾项单独修。
 - **真实路径基线**:接真实 LLM provider 后补一组(含真实 token 时延)。
 - **K8s + gVisor 基线**:冷启 p99 在目标集群复测(与 #15 同批),用于校准
-  warm pool 容量与预热个数。
+  warm pool 容量与预热个数。复测脚本见 `deploy/k8s/verify-gvisor.sh`
+  (探针 5,`RUN_COLDSTART=1`,跑「开/关节点镜像预拉」两组对照);跑通后把
+  runsc 下的冷启数据连同预拉收益回填到上面 §3.2 表。
 
 ## 约束
 
