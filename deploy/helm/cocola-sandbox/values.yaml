@@ -87,3 +87,36 @@ sandbox:
   #       - toEndpoints: [{matchLabels: {k8s:io.kubernetes.pod.namespace: cocola}}]
   # This chart does not require Cilium; the above is the documented extension point.
   egressAllowlist: ""
+
+
+# Node image warmer (ADR-0012). A DaemonSet that pre-pulls the large (~1.9 GB)
+# sandbox runtime image onto every candidate node, so a new sandbox Pod skips the
+# image pull on cold start — the K8s warm-pool path (the engine cannot adopt +
+# remount a pre-warmed Pod because Pod volumes are immutable post-create). OFF by
+# default to keep the chart zero-node-install; enable on clusters where you want
+# to hide cold-start latency under load.
+imageWarmer:
+  enabled: false
+  # Image to warm. Empty => falls back to sandbox.image (keeps them from drifting).
+  image: ""
+  imagePullPolicy: IfNotPresent
+  # Tiny long-lived container that keeps the pulled image pinned in the node cache.
+  pauseImage: registry.k8s.io/pause:3.9
+  # Scope the warmer to the node pool your sandboxes schedule onto. Leave empty to
+  # warm every node.
+  nodeSelector: {}
+  tolerations: []
+  initResources:
+    requests:
+      cpu: 10m
+      memory: 16Mi
+    limits:
+      cpu: 50m
+      memory: 32Mi
+  pauseResources:
+    requests:
+      cpu: 10m
+      memory: 8Mi
+    limits:
+      cpu: 20m
+      memory: 16Mi

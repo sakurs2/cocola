@@ -1,0 +1,80 @@
+# Image warmer — node-level pre-pull of the sandbox runtime image (ADR-0012).
+#
+# WHY: cocola's Route-A sandbox image is large (~1.9 GB: Node + Claude Code).
+# On K8s the biggest slice of a cold start is pulling that image onto whatever
+# node the new sandbox Pod lands on. ADR-0012 records that the warm pool cannot
+# "adopt + remount" a pre-warmed Pod (Pod volumes are immutable post-create), so
+# the K8s pre-warm path is instead to keep the image *already present* on every
+# candidate node. A new sandbox Pod then skips the pull entirely.
+#
+# HOW: a DaemonSet runs one Pod per (matching) node. An initContainer references
+# the sandbox image with command ["true"] — scheduling the Pod forces kubelet to
+# pull the image onto the node; the initContainer then exits 0 immediately. A
+# tiny long-lived `pause` main container keeps the DaemonSet Pod Running so the
+# image stays pinned in the node's image cache (the standard community pre-pull
+# pattern, e.g. kubernetes-image-puller / warm-image).
+#
+# NOTE on egress: image pulls are performed by kubelet/containerd, NOT by Pod
+# network traffic, so the cocola-sandboxes default-deny-egress NetworkPolicy does
+# NOT block pulling. This DaemonSet can safely live in cocola-sandboxes; its Pods
+# need no network of their own (initContainer runs `true`, main container sleeps).
+#
+# OPTIONAL: this is OFF by default in the Helm chart (imageWarmer.enabled=false),
+# matching cocola's "zero node-level install" default. Apply this raw manifest
+# only if you want node image warming; edit the image refs to match your build.
+apiVersion: apps/v1
+kind: DaemonSet
+metadata:
+  name: cocola-image-warmer
+  namespace: cocola-sandboxes
+  labels:
+    cocola.bytedance.com/managed: "true"
+    app.kubernetes.io/name: cocola-image-warmer
+spec:
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: cocola-image-warmer
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: cocola-image-warmer
+        cocola.bytedance.com/managed: "true"
+    spec:
+      # Pre-pull should not preempt real workloads and may run on otherwise
+      # cordoned/tainted sandbox nodes; keep priority low and tolerate nothing
+      # extra by default. Uncomment nodeSelector/tolerations to scope the warmer
+      # to the exact node pool your sandboxes schedule onto.
+      # nodeSelector:
+      #   cocola.bytedance.com/sandbox-node: "true"
+      # tolerations:
+      #   - key: cocola.bytedance.com/sandbox
+      #     operator: Exists
+      terminationGracePeriodSeconds: 1
+      automountServiceAccountToken: false
+      initContainers:
+        # One initContainer per image to warm. The command just exits 0; the act
+        # of scheduling with this image is what triggers the node-local pull.
+        - name: pull-sandbox-runtime
+          image: cocola/sandbox-runtime:dev # MUST match the provider's sandbox image
+          imagePullPolicy: IfNotPresent
+          command: ["true"]
+          resources:
+            requests:
+              cpu: 10m
+              memory: 16Mi
+            limits:
+              cpu: 50m
+              memory: 32Mi
+      containers:
+        # Tiny long-lived container so the Pod stays Running and the pulled image
+        # stays pinned in the node image cache.
+        - name: pause
+          image: registry.k8s.io/pause:3.9
+          imagePullPolicy: IfNotPresent
+          resources:
+            requests:
+              cpu: 10m
+              memory: 8Mi
+            limits:
+              cpu: 20m
+              memory: 16Mi
