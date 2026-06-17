@@ -106,11 +106,19 @@ Reusing and extending ADR-0003's lease/GC:
   session" cost, cheaper than a clean cold start, slightly heavier than a
   MicroVM in-place unfreeze. This RAM-lost / disk-kept gap is the explicit,
   accepted cost of choosing K8s over MicroVM.
-- **Warm pool.** A background pool of pre-pulled, pre-warmed Pods removes
-  image-pull + boot latency from the request path under load. Tiers: idle pool →
-  bind on demand → return/destroy → async refill. Suggested starting params
-  (tunable, mirroring reference practice): idle cooldown ~30 min with renew-on-
-  activity, hard max lifetime ~2 days.
+- **Warm pool.** A background pool of pre-pulled, pre-warmed sandboxes removes
+  image-pull + boot latency from the request path under load. The backend-agnostic
+  engine (idle pool → return/destroy → async refill) landed in #13. **Revised by
+  ADR-0012:** the "bind on demand" step — adopt a user-agnostic warm box and
+  *remount* the per-user volume onto it — is **not implementable on either current
+  backend** (Docker bind-mounts are fixed at ContainerCreate; K8s Pod spec volumes
+  are immutable post-create). The optional `provider.Adopter` seam is kept but has
+  no backend implementation today and degrades silently to a normal cold Create.
+  The actual K8s warm-pool path is therefore **node-level image pre-pull (a
+  DaemonSet image warmer)**, which kills the largest cold-start cost (the 1.9 GB
+  image pull) without touching the volume model. See ADR-0012 for the full
+  decision. Suggested starting params (tunable, mirroring reference practice):
+  idle cooldown ~30 min with renew-on-activity, hard max lifetime ~2 days.
 
 ### 4. Sandbox backend: K8s + gVisor (runsc) first; provider stays pluggable
 
