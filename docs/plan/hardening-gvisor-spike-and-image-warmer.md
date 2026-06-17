@@ -80,6 +80,21 @@
 4. hibernate→resume(删 Pod 留 PVC→重建重挂)后 `claude --resume` 继续会话;
 5. 冷启动逐请求计时(对照 §3.2 基线),量化 runsc + 1.9GB 镜像的真实冷启增量,
    以及**开/关节点预拉**两组对照,验证预拉收益。
+6. **runsc checkpoint/restore 探针(吸收 Agent Substrate 思路,挑战 ADR-0008
+   「RAM 必丢」假设)**:在 runsc Pod 内对运行中的 Route-A 进程执行
+   `runsc checkpoint` 出快照、`runsc restore` 拉起,验证我们的镜像能否做到
+   **「连易失 RAM 一起保留」的 resume**,而非现状的「删 Pod 留 PVC + `claude
+   --resume` 重放」。Agent Substrate 已在 gVisor 上用专门的 ateom-gvisor 组件跑
+   通 runsc checkpoint/restore 实现亚秒级、全状态(含 RAM)的 suspend/resume[[Agent Substrate README]](https://github.com/agent-substrate/substrate),
+   证明此路线可行。验收要点:① checkpoint/restore 在我们镜像上无报错;② restore
+   后进程内存态(如未落盘的会话上下文)完整;③ 计时对照「PVC 重挂 + 重放」与
+   「checkpoint/restore」两种 resume 的延迟差。
+   **若探针通过**:cocola 的 hibernate/resume 可从 disk-kept 升级为 RAM-kept,
+   收益大于节点预拉;需回写 ADR-0008 §3 的「RAM-lost / disk-kept」结论并评估
+   是否新增一种 resume 模式。**若不通过**:维持现状,记录失败原因。
+   注:本探针仅借鉴其技术路线,不引入 Agent Substrate 本体(其自带控制面 + CRD +
+   Envoy,且自述 v0.0.0「VERY early、不可生产、API 必变」,与 cocola 生产定位
+   冲突);整体集成评估另立 followup,见 §5 注。
 
 ### 4.3 分层(对齐 M6 的 A/B/C 套路)
 
@@ -103,6 +118,15 @@
 
 每个 S 阶段独立提交,各带 `docs/archive/` changelog,不带 `.claude/`,不跳 git hooks。
 
+> **注(Agent Substrate 整体集成评估,followup)**:Agent Substrate
+> (github.com/agent-substrate/substrate)与 cocola 同问题域,其 actor↔worker
+> 多路复用 + runsc checkpoint/restore 能力很强,但自述 v0.0.0「VERY early、不可
+> 生产、API 必变」[[Agent Substrate README]](https://github.com/agent-substrate/substrate),
+> 现阶段不整体并入。短期仅在 §4.2 探针 6 吸收其 checkpoint/restore 路线;中期待其
+> 成熟后,按 ADR-0002 评估封装为可插拔 `SubstrateProvider`(实现 8 方法,
+> Pause/Resume 映射其 actor suspend/resume)。该评估另立独立 task 跟踪,不属本
+> 任务范围。
+
 ## 6. 风险
 
 - **runsc + Node 兼容坑**:Node 重 runtime 在 gVisor 下偶有 syscall 不支持;属
@@ -112,6 +136,9 @@
 - **本机无 gVisor**:macOS Docker Desktop 跑不了真 runsc,Layer C 必须留到目标
   集群;A/B 不受阻。
 - **预拉镜像与 provider 镜像漂移**:用同一 `sandbox.image` 变量消除,S1 即固化。
+- **checkpoint/restore 路线不确定**:runsc checkpoint/restore 对 Node 这类重
+  runtime 不保证可行,且本机无 gVisor 无法预验,仅能 Layer C 实测(探针 6)。
+  不通过则维持现状,不阻塞其余验收。
 
 ## 7. 验收标准
 
