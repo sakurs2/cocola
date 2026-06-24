@@ -35,3 +35,4 @@ Code shows _what_ and _how_. ADRs preserve _why_ — invaluable when:
 | 0010 | Gateway tool-use passthrough (Anthropic rich-payload)                                                | Accepted |
 | 0011 | Observability three pillars (RED metrics + OTel tracing) and load-testing baseline                   | Accepted |
 | 0012 | Warm-pool pre-warm strategy under the PVC/bind-mount volume model (amends ADR-0008 §3)               | Accepted |
+| 0013 | OpenSandbox as a pluggable SandboxProvider backend (not a sandbox-layer replacement)                  | Proposed |
