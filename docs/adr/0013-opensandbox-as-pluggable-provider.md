@@ -1,7 +1,7 @@
 # ADR-0013: 将 OpenSandbox 作为可插拔 SandboxProvider 后端(而非替换沙箱层)
 
-- Status: Proposed
-- Date: 2026-06-24
+- Status: Proposed（PoC P0–P2 已完成离线验证;Status 待真 server 端到端实测后转 Accepted）
+- Date: 2026-06-24（PoC 回填 2026-06-26）
 - Deciders: @cocola-maintainers
 - Depends on: ADR-0002（SandboxProvider 抽象铁律）、ADR-0008（持久化分层与 K8s/gVisor 后端）、ADR-0012（warm pool 预热策略)
 
@@ -79,6 +79,40 @@ FastAPI server,把 8 个核心方法映射到 `/v1/sandboxes` 生命周期。不
   Apache-2.0 的项目,放弃复用其成熟代码、只抄思路再自己写一遍,恰恰是「造轮子」。
   保留为 B 不成立时的退路,非首选。
 
+## PoC Findings（#18 / P0–P2,2026-06-26 回填）
+
+落地由 #19(P0)/#20(P1)/#21(P2)三段 PoC 驱动。受「沙箱内禁止起监听进程」约束,
+PoC 全程未启动任何 OpenSandbox server/execd,改以**源码 + OpenAPI 规约静态走查**
+(下载 tarball)+ **RoundTripper / SSE stub 单测**完成验证,真 server 端到端实测
+(resume 延迟、能力归属)留待合规环境。三个关键未知全部得到正向结论:
+
+1. **Exec 流式语义——已解除风险(原列为最大未知)。** OpenSandbox 的 exec 不在
+   lifecycle server 上,而在每个沙箱内的独立 **execd** 服务;调用是两步:先经
+   lifecycle `GET /v1/sandboxes/{id}/endpoints/44772` 解析出 execd 可达地址 + 鉴权头
+   (`X-EXECD-ACCESS-TOKEN`),再对 `{execd}/command` 发起 `Accept: text/event-stream`
+   的 SSE/NDJSON 流。其事件类型(`stdout`/`stderr`/`error`/`execution_complete`/
+   `init`/`ping`)可**无损**桥接到 cocola 的 `<-chan ExecEvent`:stdout/stderr 直映,
+   `error` 的 evalue 能 `Atoi` 时映射为退出码(否则为错误事件),`execution_complete`
+   在无错时补 exit 0。结论:cocola 的流式 Exec 契约**完全可满足**,无降级。
+
+2. **生命周期映射——一一对应已确认。** Create→`POST /v1/sandboxes`、
+   Health→`GET /v1/sandboxes/{id}`、Destroy→`DELETE …`、Pause→`POST …/pause`、
+   Resume→`POST …/resume`,与 cocola 8 方法近乎同构。
+
+3. **能力重叠属实——`CreateSandboxRequest` 内建 `NetworkPolicy`(↔ cocola egress)、
+   `CredentialProxy`(↔ #12 Vault)、`Volumes`(↔ K8s 卷模型)、`SnapshotID`。**
+   归属取舍仍留待真环境实测,PoC 已确认字段层面可承接 cocola 的 egress allowlist
+   映射(default-deny + per-domain allow)。
+
+PoC 产出(均不改动现有 provider):`provider/opensandbox` 包实现 Create/Health/
+Destroy/Exec(流式)/Pause/Resume 六方法 + `newProvider` 工厂接线;WriteFile/ReadFile
+(映射 execd 上传/下载)留为 `errNotImplemented`,不在流式 exec 关键路径上。REST
+客户端与 SSE 桥接均为 **stdlib-only(零外部依赖)**,17 个单测(含 SSE 流桥接、
+退出码解析、Pause/Resume 端点断言)全绿,`-race` 干净。
+
+详见 `docs/archive/opensandbox-poc-p0-research.md`、`…-p1-provider-skeleton.md`、
+`…-p2-exec-pause-resume.md`。
+
 ## Consequences
 
 - **Positive**
@@ -91,18 +125,21 @@ FastAPI server,把 8 个核心方法映射到 `/v1/sandboxes` 生命周期。不
 - **Negative / 接受的代价**
   - 引入一条 **Go ↔ Python(FastAPI)进程边界**:启用该后端时部署拓扑要多一个
     OpenSandbox server 组件,需评估运维成本与可接受性。
-  - **Exec 流式语义存在映射风险**:cocola 的 `Exec` 返回 `<-chan ExecEvent`(流式),
-    需确认 OpenSandbox REST 是否提供等价的流式 exec/attach,否则映射有损——列为 PoC
-    的关键验证项。
+  - ~~**Exec 流式语义存在映射风险**~~ → **PoC 已解除**:execd 的 SSE/NDJSON
+    `/command` 流可无损桥接到 cocola 的 `<-chan ExecEvent`(见 PoC Findings 第 1 条);
+    代价是 Exec 需多一跳 `GET …/endpoints/44772` 解析 execd 地址。
   - **能力重叠需治理**:Vault / egress 与 cocola 已有实现的取舍未在本 ADR 定死,
     存在「双重管控」隐患,留待 PoC。
   - **快照可移植性未知**:其 K8s pause/resume 依赖自定义 CRD,需确认与 cocola 现有
     namespace / NetworkPolicy 模型兼容。
 
 - **Followups**
-  - 新建 PoC task:实现 `provider/opensandbox` 最小骨架(Create / Health / Destroy
-    三方法打通 REST),验证进程边界、生命周期映射、Exec 流式语义三个关键未知;
-    PoC 前不动任何现有 provider 代码。
-  - PoC 数据回填后,再决定是否扩大到 8 方法全实现,以及 Vault / egress 能力归属。
+  - ~~新建 PoC task:实现 `provider/opensandbox` 最小骨架~~ → **已完成**
+    (#18/#19/#20/#21):Create/Health/Destroy/Exec/Pause/Resume 六方法落地 + 单测;
+    进程边界、生命周期映射、Exec 流式语义三个关键未知均已离线验证通过。
+  - **待真 server 端到端实测**:启用 OpenSandbox server 跑通 Create→Exec→Pause→
+    Resume→Destroy 全链路,实测 resume 延迟(对照 #15 RAM-kept resume 诉求),
+    并据此决定 Vault / egress 能力归属、是否补齐 WriteFile/ReadFile,最终将本 ADR
+    Status 转为 Accepted 或修订。
   - 与 #17(Agent Substrate 评估)并列跟踪;二者同为「外部运行时按 ADR-0002 封装为
     可插拔后端」的候选,本 ADR 为该模式的首个具体实例。

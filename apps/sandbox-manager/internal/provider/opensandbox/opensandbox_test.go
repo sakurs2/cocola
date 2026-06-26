@@ -190,27 +190,206 @@ func TestDestroy_DeletesAndDropsMapping(t *testing.T) {
 	}
 }
 
-func TestDeferredMethods_ReturnNotImplemented(t *testing.T) {
+func TestDeferredFileMethods_ReturnNotImplemented(t *testing.T) {
 	p := newStub(t, func(r *http.Request) (*http.Response, error) {
-		t.Fatal("deferred methods must not issue HTTP calls")
+		t.Fatal("deferred file methods must not issue HTTP calls")
 		return nil, nil
 	})
 	ctx := context.Background()
 
-	if _, err := p.Exec(ctx, "sbx", provider.ExecRequest{}); !errors.Is(err, errNotImplemented) {
-		t.Errorf("Exec err = %v, want errNotImplemented", err)
-	}
 	if err := p.WriteFile(ctx, "sbx", "/tmp/x", nil); !errors.Is(err, errNotImplemented) {
 		t.Errorf("WriteFile err = %v, want errNotImplemented", err)
 	}
 	if _, err := p.ReadFile(ctx, "sbx", "/tmp/x"); !errors.Is(err, errNotImplemented) {
 		t.Errorf("ReadFile err = %v, want errNotImplemented", err)
 	}
-	if err := p.Pause(ctx, "sbx"); !errors.Is(err, errNotImplemented) {
-		t.Errorf("Pause err = %v, want errNotImplemented", err)
+}
+
+func TestPause_PostsPauseEndpoint(t *testing.T) {
+	var gotMethod, gotPath string
+	p := newStub(t, func(r *http.Request) (*http.Response, error) {
+		gotMethod, gotPath = r.Method, r.URL.Path
+		return jsonResp(http.StatusOK, ""), nil
+	})
+	if err := p.Pause(context.Background(), "sbx-7"); err != nil {
+		t.Fatalf("Pause: %v", err)
 	}
-	if err := p.Resume(ctx, "sbx"); !errors.Is(err, errNotImplemented) {
-		t.Errorf("Resume err = %v, want errNotImplemented", err)
+	if gotMethod != http.MethodPost || gotPath != "/v1/sandboxes/sbx-7/pause" {
+		t.Errorf("request = %s %s, want POST /v1/sandboxes/sbx-7/pause", gotMethod, gotPath)
+	}
+}
+
+func TestResume_PostsResumeEndpoint(t *testing.T) {
+	var gotMethod, gotPath string
+	p := newStub(t, func(r *http.Request) (*http.Response, error) {
+		gotMethod, gotPath = r.Method, r.URL.Path
+		return jsonResp(http.StatusOK, ""), nil
+	})
+	if err := p.Resume(context.Background(), "sbx-7"); err != nil {
+		t.Fatalf("Resume: %v", err)
+	}
+	if gotMethod != http.MethodPost || gotPath != "/v1/sandboxes/sbx-7/resume" {
+		t.Errorf("request = %s %s, want POST /v1/sandboxes/sbx-7/resume", gotMethod, gotPath)
+	}
+}
+
+// sseResp builds an SSE/NDJSON streaming response from a body string.
+func sseResp(body string) *http.Response {
+	h := make(http.Header)
+	h.Set("Content-Type", "text/event-stream")
+	return &http.Response{
+		StatusCode: http.StatusOK,
+		Body:       io.NopCloser(strings.NewReader(body)),
+		Header:     h,
+	}
+}
+
+// drainExec collects all events from an Exec channel into a slice.
+func drainExec(ch <-chan provider.ExecEvent) []provider.ExecEvent {
+	var evs []provider.ExecEvent
+	for e := range ch {
+		evs = append(evs, e)
+	}
+	return evs
+}
+
+// TestExec_BridgesSSEStream wires Exec end to end against a stub that first
+// resolves the execd endpoint (GET .../endpoints/44772) and then serves an
+// NDJSON exec stream. It verifies the two-step flow, the command body, and the
+// stdout/stderr/exit bridging onto cocola's ExecEvent channel.
+func TestExec_BridgesSSEStream(t *testing.T) {
+	var endpointHit, commandHit bool
+	var gotCmdBody, gotAccept, gotExecdToken string
+	p := newStub(t, func(r *http.Request) (*http.Response, error) {
+		switch {
+		case r.Method == http.MethodGet && strings.Contains(r.URL.Path, "/endpoints/44772"):
+			endpointHit = true
+			return jsonResp(http.StatusOK, `{"endpoint":"http://execd.test:44772","headers":{"X-EXECD-ACCESS-TOKEN":"etok"}}`), nil
+		case r.Method == http.MethodPost && r.URL.Path == "/command":
+			commandHit = true
+			gotAccept = r.Header.Get("Accept")
+			gotExecdToken = r.Header.Get("X-EXECD-ACCESS-TOKEN")
+			b, _ := io.ReadAll(r.Body)
+			gotCmdBody = string(b)
+			stream := `{"type":"stdout","text":"hello\n"}` + "\n" +
+				`{"type":"stderr","text":"warn\n"}` + "\n" +
+				`{"type":"execution_complete","exit_code":0}` + "\n"
+			return sseResp(stream), nil
+		default:
+			t.Fatalf("unexpected request %s %s", r.Method, r.URL.Path)
+			return nil, nil
+		}
+	})
+
+	ch, err := p.Exec(context.Background(), "sbx-1", provider.ExecRequest{
+		Cmd: []string{"echo", "hi"},
+		Cwd: "/work",
+		Env: map[string]string{"FOO": "bar"},
+	})
+	if err != nil {
+		t.Fatalf("Exec: %v", err)
+	}
+	evs := drainExec(ch)
+
+	if !endpointHit || !commandHit {
+		t.Fatalf("expected endpoint+command hits, got endpoint=%v command=%v", endpointHit, commandHit)
+	}
+	if gotAccept != "text/event-stream" {
+		t.Errorf("Accept = %q, want text/event-stream", gotAccept)
+	}
+	if gotExecdToken != "etok" {
+		t.Errorf("execd token header = %q, want etok (from endpoint headers)", gotExecdToken)
+	}
+	for _, want := range []string{`"command":"echo hi"`, `"cwd":"/work"`, `"FOO":"bar"`} {
+		if !strings.Contains(gotCmdBody, want) {
+			t.Errorf("command body missing %s\nbody: %s", want, gotCmdBody)
+		}
+	}
+
+	if len(evs) != 3 {
+		t.Fatalf("got %d events, want 3: %+v", len(evs), evs)
+	}
+	if evs[0].Kind != provider.ExecEventStdout || string(evs[0].Stdout) != "hello\n" {
+		t.Errorf("event[0] = %+v, want stdout hello", evs[0])
+	}
+	if evs[1].Kind != provider.ExecEventStderr || string(evs[1].Stderr) != "warn\n" {
+		t.Errorf("event[1] = %+v, want stderr warn", evs[1])
+	}
+	if evs[2].Kind != provider.ExecEventExit || evs[2].Exit != 0 {
+		t.Errorf("event[2] = %+v, want exit 0", evs[2])
+	}
+}
+
+// TestExec_ErrorEventMapsToExitCode verifies that an "error" event whose value
+// is a numeric exit code surfaces as ExecEventExit, not ExecEventError.
+func TestExec_ErrorEventMapsToExitCode(t *testing.T) {
+	p := newStub(t, func(r *http.Request) (*http.Response, error) {
+		if strings.Contains(r.URL.Path, "/endpoints/44772") {
+			return jsonResp(http.StatusOK, `{"endpoint":"http://execd.test:44772"}`), nil
+		}
+		stream := `{"type":"stdout","text":"x"}` + "\n" + `{"type":"error","evalue":"3"}` + "\n"
+		return sseResp(stream), nil
+	})
+	ch, err := p.Exec(context.Background(), "sbx-1", provider.ExecRequest{Cmd: []string{"false"}})
+	if err != nil {
+		t.Fatalf("Exec: %v", err)
+	}
+	evs := drainExec(ch)
+	last := evs[len(evs)-1]
+	if last.Kind != provider.ExecEventExit || last.Exit != 3 {
+		t.Errorf("last event = %+v, want exit 3", last)
+	}
+}
+
+// TestExec_NonNumericErrorMapsToErrorEvent verifies that a non-numeric error
+// value surfaces as ExecEventError.
+func TestExec_NonNumericErrorMapsToErrorEvent(t *testing.T) {
+	p := newStub(t, func(r *http.Request) (*http.Response, error) {
+		if strings.Contains(r.URL.Path, "/endpoints/44772") {
+			return jsonResp(http.StatusOK, `{"endpoint":"http://execd.test:44772"}`), nil
+		}
+		return sseResp(`{"type":"error","error":{"evalue":"command not found","ename":"ExecError"}}` + "\n"), nil
+	})
+	ch, err := p.Exec(context.Background(), "sbx-1", provider.ExecRequest{Cmd: []string{"nope"}})
+	if err != nil {
+		t.Fatalf("Exec: %v", err)
+	}
+	evs := drainExec(ch)
+	last := evs[len(evs)-1]
+	if last.Kind != provider.ExecEventError || last.Err == nil || !strings.Contains(last.Err.Error(), "command not found") {
+		t.Errorf("last event = %+v, want error 'command not found'", last)
+	}
+}
+
+// TestExec_EmptyCommandRejected ensures Exec validates input before issuing any
+// HTTP call.
+func TestExec_EmptyCommandRejected(t *testing.T) {
+	p := newStub(t, func(r *http.Request) (*http.Response, error) {
+		t.Fatal("empty command must not issue HTTP calls")
+		return nil, nil
+	})
+	if _, err := p.Exec(context.Background(), "sbx", provider.ExecRequest{}); err == nil {
+		t.Fatal("expected error on empty command, got nil")
+	}
+}
+
+// TestExec_StreamEndSynthesizesExit verifies a stream that ends without an
+// explicit terminal event still yields a final ExecEventExit{0}.
+func TestExec_StreamEndSynthesizesExit(t *testing.T) {
+	p := newStub(t, func(r *http.Request) (*http.Response, error) {
+		if strings.Contains(r.URL.Path, "/endpoints/44772") {
+			return jsonResp(http.StatusOK, `{"endpoint":"http://execd.test:44772"}`), nil
+		}
+		return sseResp(`{"type":"stdout","text":"only output"}` + "\n"), nil
+	})
+	ch, err := p.Exec(context.Background(), "sbx-1", provider.ExecRequest{Cmd: []string{"echo"}})
+	if err != nil {
+		t.Fatalf("Exec: %v", err)
+	}
+	evs := drainExec(ch)
+	last := evs[len(evs)-1]
+	if last.Kind != provider.ExecEventExit || last.Exit != 0 {
+		t.Errorf("last event = %+v, want synthesized exit 0", last)
 	}
 }
 
