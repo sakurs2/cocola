@@ -24,6 +24,7 @@ import (
 	"github.com/cocola-project/cocola/apps/sandbox-manager/internal/provider"
 	"github.com/cocola-project/cocola/apps/sandbox-manager/internal/provider/docker"
 	"github.com/cocola-project/cocola/apps/sandbox-manager/internal/provider/k8s"
+	"github.com/cocola-project/cocola/apps/sandbox-manager/internal/provider/opensandbox"
 	"github.com/cocola-project/cocola/apps/sandbox-manager/internal/server"
 	"github.com/cocola-project/cocola/packages/go-common/logger"
 	"github.com/cocola-project/cocola/packages/go-common/metrics"
@@ -147,6 +148,8 @@ func newProvider(name string) (provider.SandboxProvider, error) {
 		return docker.New()
 	case k8s.ProviderName:
 		return k8s.New()
+	case opensandbox.ProviderName:
+		return opensandbox.New()
 	default:
 		// Allow providers that self-registered via Register() in their init().
 		if p := provider.Get(name); p != nil {
