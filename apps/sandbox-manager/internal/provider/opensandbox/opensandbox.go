@@ -82,7 +82,16 @@ var errNotImplemented = errors.New("opensandbox: file transfer (WriteFile/ReadFi
 type Provider struct {
 	baseURL string // includes the /v1 version prefix, e.g. http://host:8090/v1
 	apiKey  string
-	http    *http.Client // bounded client for lifecycle REST calls
+
+	// useServerProxy controls how the execd endpoint is reached. When true
+	// (the default), Exec asks the server for a server-proxied endpoint URL
+	// (`{server}/sandboxes/{id}/proxy/{port}`), which is reachable by any client
+	// that can reach the server. When false the server returns the sandbox's
+	// direct endpoint (e.g. host.docker.internal:PORT), which is only reachable
+	// from inside the sandbox network -- appropriate only when sandbox-manager is
+	// co-located with the sandboxes.
+	useServerProxy bool
+	http           *http.Client // bounded client for lifecycle REST calls
 
 	// stream is used for the long-lived execd SSE connection. It has no
 	// client-level timeout: each Exec governs its own lifetime via the
@@ -102,6 +111,11 @@ func WithBaseURL(u string) Option { return func(p *Provider) { p.baseURL = strin
 
 // WithAPIKey overrides the API key.
 func WithAPIKey(k string) Option { return func(p *Provider) { p.apiKey = k } }
+
+// WithServerProxy controls whether Exec reaches execd via the server proxy
+// (true, default) or the sandbox's direct endpoint (false). Direct only works
+// when the caller shares the sandbox network.
+func WithServerProxy(v bool) Option { return func(p *Provider) { p.useServerProxy = v } }
 
 // WithHTTPClient injects a custom http.Client used for BOTH the lifecycle REST
 // calls and the execd SSE stream. This is the seam unit tests use to supply a
@@ -123,6 +137,10 @@ func New(opts ...Option) (*Provider, error) {
 		http:    &http.Client{Timeout: defaultHTTPTimeout},
 		stream:  &http.Client{}, // no timeout: Exec context governs lifetime
 		ids:     map[string]string{},
+		// Default to the always-reachable server-proxy endpoint. Opt out via
+		// COCOLA_OPENSANDBOX_DIRECT_EXEC=1 (or WithServerProxy(false)) only when
+		// sandbox-manager runs inside the sandbox network.
+		useServerProxy: !envTruthy("COCOLA_OPENSANDBOX_DIRECT_EXEC"),
 	}
 	for _, o := range opts {
 		o(p)
@@ -151,6 +169,7 @@ type networkPolicy struct {
 
 type createSandboxRequest struct {
 	Image          *imageSpec        `json:"image,omitempty"`
+	Entrypoint     []string          `json:"entrypoint,omitempty"`
 	ResourceLimits map[string]string `json:"resourceLimits,omitempty"`
 	Env            map[string]string `json:"env,omitempty"`
 	Metadata       map[string]string `json:"metadata,omitempty"`
@@ -210,6 +229,11 @@ func (p *Provider) Create(ctx context.Context, spec provider.SandboxSpec) (*prov
 	}
 	if spec.Image != "" {
 		req.Image = &imageSpec{URI: spec.Image}
+		// OpenSandbox requires a non-empty entrypoint whenever an image is given.
+		// cocola sandboxes are long-lived (create once, then Exec into them), so we
+		// launch the entry process as a no-op blocker and drive real work via Exec.
+		// This mirrors the server's own snapshot-mode default (["tail","-f","/dev/null"]).
+		req.Entrypoint = []string{"tail", "-f", "/dev/null"}
 	}
 	if rl := mapResources(spec.Resources); len(rl) > 0 {
 		req.ResourceLimits = rl
@@ -312,8 +336,13 @@ func (p *Provider) Exec(ctx context.Context, sid string, req provider.ExecReques
 		return nil, fmt.Errorf("opensandbox: resolve execd: %w", err)
 	}
 
+	// cocola ExecRequest.Cmd is an argv (like docker exec), but execd's
+	// /command takes a single shell string and re-parses it with a shell.
+	// Naively space-joining would double-shell (e.g. ["sh","-c","a; b"] would
+	// be reparsed so that only "a" runs under the inner sh). Shell-quote each
+	// argv element so execd's shell reconstructs the exact argv we intended.
 	body := runCommandRequest{
-		Command: strings.Join(req.Cmd, " "),
+		Command: shellJoin(req.Cmd),
 		Cwd:     req.Cwd,
 		Envs:    req.Env,
 	}
@@ -403,6 +432,36 @@ func (p *Provider) ReadFile(ctx context.Context, sid, path string) ([]byte, erro
 
 // mapResources converts cocola Resources to OpenSandbox resourceLimits.
 // CPU cores -> milli-cpu string (e.g. 0.5 -> "500m"); memory MiB -> "<n>Mi".
+// shellJoin renders an argv as a single POSIX-shell command string by
+// single-quoting each element, so a shell re-parsing the string reproduces
+// the original argv exactly. Used to feed execd's string-based /command API
+// without double-shelling.
+func shellJoin(argv []string) string {
+	parts := make([]string, len(argv))
+	for i, a := range argv {
+		parts[i] = shellQuote(a)
+	}
+	return strings.Join(parts, " ")
+}
+
+// shellQuote wraps s in single quotes, escaping any embedded single quotes
+// via the standard '\” idiom. The result is safe to paste into a POSIX shell
+// as one word. An empty string becomes ” so it is not dropped.
+func shellQuote(s string) string {
+	return "'" + strings.ReplaceAll(s, "'", "'\\''") + "'"
+}
+
+// envTruthy reports whether an env var is set to a truthy value (1/true/yes/on,
+// case-insensitive). Empty/unset is false.
+func envTruthy(key string) bool {
+	switch strings.ToLower(strings.TrimSpace(os.Getenv(key))) {
+	case "1", "true", "yes", "on":
+		return true
+	default:
+		return false
+	}
+}
+
 func mapResources(r provider.Resources) map[string]string {
 	out := map[string]string{}
 	if r.CPUCores > 0 {
@@ -421,6 +480,12 @@ func mapResources(r provider.Resources) map[string]string {
 func (p *Provider) resolveExecd(ctx context.Context, osbID string) (string, map[string]string, error) {
 	var ep endpointInfo
 	path := fmt.Sprintf("/sandboxes/%s/endpoints/%d", osbID, execdPort)
+	if p.useServerProxy {
+		// Ask for a server-proxied URL ({server}/sandboxes/{id}/proxy/{port}),
+		// reachable by any client that can reach the server -- unlike the direct
+		// endpoint, which resolves to an in-network host (e.g. host.docker.internal).
+		path += "?use_server_proxy=true"
+	}
 	if err := p.do(ctx, http.MethodGet, path, nil, &ep); err != nil {
 		return "", nil, err
 	}

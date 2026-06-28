@@ -25,6 +25,7 @@ coverage.txt
 # Compiled service/CLI binaries dropped at an app root by `go build .`
 /apps/admin-api/admin-api
 /apps/admin-api/admin-mint
+/apps/sandbox-manager/opensandbox-verify
 
 # ---- Python ----
 __pycache__/

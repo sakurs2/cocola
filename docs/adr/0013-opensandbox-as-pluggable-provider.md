@@ -1,7 +1,7 @@
 # ADR-0013: 将 OpenSandbox 作为可插拔 SandboxProvider 后端(而非替换沙箱层)
 
-- Status: Proposed（PoC P0–P2 已完成离线验证;Status 待真 server 端到端实测后转 Accepted）
-- Date: 2026-06-24（PoC 回填 2026-06-26）
+- Status: Accepted（PoC P0–P2 离线验证 + 真 server 端到端实测于 2026-06-28 全链路通过）
+- Date: 2026-06-24（PoC 回填 2026-06-26;真 server 实测回填 2026-06-28）
 - Deciders: @cocola-maintainers
 - Depends on: ADR-0002（SandboxProvider 抽象铁律）、ADR-0008（持久化分层与 K8s/gVisor 后端）、ADR-0012（warm pool 预热策略)
 
@@ -137,9 +137,20 @@ Destroy/Exec(流式)/Pause/Resume 六方法 + `newProvider` 工厂接线;WriteFi
   - ~~新建 PoC task:实现 `provider/opensandbox` 最小骨架~~ → **已完成**
     (#18/#19/#20/#21):Create/Health/Destroy/Exec/Pause/Resume 六方法落地 + 单测;
     进程边界、生命周期映射、Exec 流式语义三个关键未知均已离线验证通过。
-  - **待真 server 端到端实测**:启用 OpenSandbox server 跑通 Create→Exec→Pause→
-    Resume→Destroy 全链路,实测 resume 延迟(对照 #15 RAM-kept resume 诉求),
-    并据此决定 Vault / egress 能力归属、是否补齐 WriteFile/ReadFile,最终将本 ADR
-    Status 转为 Accepted 或修订。
+  - ~~待真 server 端到端实测~~ → **已完成(2026-06-28,本机 OrbStack/Docker)**:
+    启用 OpenSandbox server(一站式 `make verify-opensandbox-full`,
+    `deploy/docker-compose/docker-compose.opensandbox.yml` + `cmd/opensandbox-verify`
+    harness),Create→Health→Exec(流式,含退出码 / ~1MiB stdout / 多行)→文件往返→
+    Pause→Resume→Destroy **全链路一次通过(`VERIFY OK — all stages passed`)**。
+    实测 resume:Resume 调用 ~10ms 受理、~13ms 内回到 Running,Pause 前写入的标记文件在
+    Resume 后仍在——为 #15 的 RAM-kept resume 提供了实测量级佐证。实测中暴露并修复了 4 个
+    「仅真 server 才触发」的缺陷:(1)create 必须带非空 `entrypoint`(provider 注入
+    `["tail","-f","/dev/null"]`,长生命周期沙箱模型);(2)有 image 时必须带
+    `resourceLimits`(harness `-cpu/-mem` 默认值 0.5/512);(3)bridge 网络下 execd 端点
+    需走 server proxy(`?use_server_proxy=true`,默认开,可经 `COCOLA_OPENSANDBOX_DIRECT_EXEC`
+    退回直连);(4)execd `/command` 收单条 shell 字符串会二次 shell 解析,argv 必须
+    逐元素单引号转义(`shellJoin`)而非朴素空格拼接。详见
+    `docs/archive/fix-opensandbox-real-server-e2e.md`。Vault / egress 能力归属与
+    WriteFile/ReadFile 补齐维持原决策(暂留 cocola 侧 / `errNotImplemented`),不阻塞本 ADR。
   - 与 #17(Agent Substrate 评估)并列跟踪;二者同为「外部运行时按 ADR-0002 封装为
     可插拔后端」的候选,本 ADR 为该模式的首个具体实例。

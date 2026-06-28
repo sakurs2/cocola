@@ -103,7 +103,7 @@ func TestCreate_HappyPath(t *testing.T) {
 		t.Errorf("content-type = %q, want application/json", gotCT)
 	}
 	// Body assertions: resource + egress mapping landed on the wire.
-	for _, want := range []string{`"uri":"cocola/sandbox-runtime:dev"`, `"cpu":"500m"`, `"memory":"512Mi"`, `"defaultAction":"deny"`, `"target":"api.anthropic.com"`} {
+	for _, want := range []string{`"uri":"cocola/sandbox-runtime:dev"`, `"entrypoint":["tail","-f","/dev/null"]`, `"cpu":"500m"`, `"memory":"512Mi"`, `"defaultAction":"deny"`, `"target":"api.anthropic.com"`} {
 		if !strings.Contains(gotBody, want) {
 			t.Errorf("request body missing %s\nbody: %s", want, gotBody)
 		}
@@ -300,7 +300,7 @@ func TestExec_BridgesSSEStream(t *testing.T) {
 	if gotExecdToken != "etok" {
 		t.Errorf("execd token header = %q, want etok (from endpoint headers)", gotExecdToken)
 	}
-	for _, want := range []string{`"command":"echo hi"`, `"cwd":"/work"`, `"FOO":"bar"`} {
+	for _, want := range []string{`"command":"'echo' 'hi'"`, `"cwd":"/work"`, `"FOO":"bar"`} {
 		if !strings.Contains(gotCmdBody, want) {
 			t.Errorf("command body missing %s\nbody: %s", want, gotCmdBody)
 		}
@@ -400,5 +400,23 @@ func TestMapResources(t *testing.T) {
 	}
 	if len(mapResources(provider.Resources{})) != 0 {
 		t.Error("zero resources should map to empty limits")
+	}
+}
+
+func TestShellJoin(t *testing.T) {
+	cases := []struct {
+		in   []string
+		want string
+	}{
+		{[]string{"echo", "hi"}, "'echo' 'hi'"},
+		{[]string{"sh", "-c", "echo a; uname -a"}, "'sh' '-c' 'echo a; uname -a'"},
+		{[]string{"sh", "-c", "exit 3"}, "'sh' '-c' 'exit 3'"},
+		{[]string{"echo", "it's"}, "'echo' 'it'\\''s'"},
+		{[]string{"echo", ""}, "'echo' ''"},
+	}
+	for _, c := range cases {
+		if got := shellJoin(c.in); got != c.want {
+			t.Errorf("shellJoin(%q) = %q, want %q", c.in, got, c.want)
+		}
 	}
 }

@@ -20,8 +20,8 @@
 // Flags:
 //
 //	-image    OCI image for the sandbox (default: python:3.12-slim)
-//	-cpu      CPU cores (e.g. 0.5); 0 = provider default
-//	-mem      memory MiB (e.g. 512); 0 = provider default
+//	-cpu      CPU cores (default 0.5; 0 = omit — but the server requires resourceLimits)
+//	-mem      memory MiB (default 512; 0 = omit — but the server requires resourceLimits)
 //	-egress   comma-separated egress allowlist domains; empty = no egress policy
 //	-timeout  overall wall-clock budget for the whole run (default 5m)
 //	-keep     do NOT Destroy at the end (leave the sandbox for manual poking)
@@ -49,8 +49,8 @@ const defaultImage = "python:3.12-slim"
 
 func main() {
 	image := flag.String("image", defaultImage, "OCI image to launch the sandbox from")
-	cpu := flag.Float64("cpu", 0, "CPU cores, e.g. 0.5 (0 = provider default)")
-	mem := flag.Int64("mem", 0, "memory MiB, e.g. 512 (0 = provider default)")
+	cpu := flag.Float64("cpu", 0.5, "CPU cores, e.g. 0.5 (0 = omit, but the server requires resourceLimits)")
+	mem := flag.Int64("mem", 512, "memory MiB, e.g. 512 (0 = omit, but the server requires resourceLimits)")
 	egress := flag.String("egress", "", "comma-separated egress allowlist domains")
 	timeout := flag.Duration("timeout", 5*time.Minute, "overall wall-clock budget")
 	keep := flag.Bool("keep", false, "do not Destroy the sandbox at the end")
