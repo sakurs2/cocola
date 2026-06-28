@@ -102,9 +102,20 @@ web-format-check: ## Check prettier formatting (no write)
 # corporate-managed macOS host blocks both the native TLS verifier and writing
 # ".gitmodules" files, so a host-native `go build` cannot resolve modules.
 # scripts/sandbox-build.sh encapsulates the working recipe.
-.PHONY: sandbox-build sandbox-run sandbox-e2e sandbox-m2-e2e
+.PHONY: sandbox-build sandbox-run sandbox-e2e sandbox-m2-e2e verify-opensandbox
 sandbox-build: ## Build sandbox-manager + sandbox-cli (containerized)
 	scripts/sandbox-build.sh
+
+# sandbox-manager is a standalone Go module deliberately kept OUT of go.work
+# (its grpc/go 1.25 dependency graph would force-upgrade the other modules via
+# workspace MVS and break their offline builds). So every sandbox-manager go
+# command must run from inside the module with GOWORK=off. This target wraps the
+# manual OpenSandbox provider verification harness (cmd/opensandbox-verify) so a
+# developer can just `make verify-opensandbox` instead of remembering the dance.
+# Requires COCOLA_OPENSANDBOX_URL (and COCOLA_OPENSANDBOX_API_KEY if the server
+# enables auth) in the environment. Extra flags pass through via ARGS=.
+verify-opensandbox: ## Run the OpenSandbox provider e2e harness (needs COCOLA_OPENSANDBOX_URL)
+	cd apps/sandbox-manager && GOWORK=off go run ./cmd/opensandbox-verify $(ARGS)
 
 sandbox-run: sandbox-build ## Run sandbox-manager locally (Docker provider)
 	COCOLA_SANDBOX_PROVIDER=docker ./bin/sandbox-manager
