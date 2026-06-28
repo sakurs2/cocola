@@ -102,7 +102,7 @@ web-format-check: ## Check prettier formatting (no write)
 # corporate-managed macOS host blocks both the native TLS verifier and writing
 # ".gitmodules" files, so a host-native `go build` cannot resolve modules.
 # scripts/sandbox-build.sh encapsulates the working recipe.
-.PHONY: sandbox-build sandbox-run sandbox-e2e sandbox-m2-e2e verify-opensandbox
+.PHONY: sandbox-build sandbox-run sandbox-e2e sandbox-m2-e2e verify-opensandbox verify-opensandbox-full opensandbox-up opensandbox-down
 sandbox-build: ## Build sandbox-manager + sandbox-cli (containerized)
 	scripts/sandbox-build.sh
 
@@ -116,6 +116,31 @@ sandbox-build: ## Build sandbox-manager + sandbox-cli (containerized)
 # enables auth) in the environment. Extra flags pass through via ARGS=.
 verify-opensandbox: ## Run the OpenSandbox provider e2e harness (needs COCOLA_OPENSANDBOX_URL)
 	cd apps/sandbox-manager && GOWORK=off go run ./cmd/opensandbox-verify $(ARGS)
+
+# One-stop e2e: stand up a real OpenSandbox server (the device under test) on
+# :8090 via docker compose, wait for it to report healthy, then run the harness
+# against it. The server is left running afterwards so you can re-run the harness
+# or inspect it; tear it down with `make opensandbox-down`. Requires a running
+# Docker daemon. Auth is off by default (no API key needed).
+OPENSANDBOX_COMPOSE := deploy/docker-compose/docker-compose.opensandbox.yml
+verify-opensandbox-full: opensandbox-up ## Deploy a local OpenSandbox server, then run the e2e harness
+	COCOLA_OPENSANDBOX_URL=$${COCOLA_OPENSANDBOX_URL:-http://localhost:8090/v1} \
+		$(MAKE) verify-opensandbox
+
+opensandbox-up: ## Start a local OpenSandbox server on :8090 and wait for /health
+	docker compose -f $(OPENSANDBOX_COMPOSE) up -d
+	@echo "waiting for OpenSandbox server /health on :8090 ..."
+	@for i in $$(seq 1 60); do \
+		if curl -fsS http://localhost:8090/health >/dev/null 2>&1; then \
+			echo "OpenSandbox server is healthy"; exit 0; fi; \
+		sleep 2; \
+	done; \
+	echo "ERROR: OpenSandbox server did not become healthy in time"; \
+	docker compose -f $(OPENSANDBOX_COMPOSE) logs --tail=50 opensandbox-server; \
+	exit 1
+
+opensandbox-down: ## Stop and remove the local OpenSandbox server
+	docker compose -f $(OPENSANDBOX_COMPOSE) down
 
 sandbox-run: sandbox-build ## Run sandbox-manager locally (Docker provider)
 	COCOLA_SANDBOX_PROVIDER=docker ./bin/sandbox-manager
