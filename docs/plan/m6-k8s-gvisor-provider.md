@@ -1,5 +1,9 @@
 # Plan: M6 K8s + gVisor Provider —— 让沙箱跑在 Kubernetes 上、用 gVisor 强隔离
 
+> ⚠️ **SUPERSEDED by ADR-0014(2026-06-28)**:自建 k8s+gVisor 沙箱后端已退役,
+> 主力后端改为 OpenSandbox(docker 保留为兜底)。本文件仅作历史记录,不再维护。
+
+
 > 状态:规划中(2026-06-13)。本文是落地方案,尚未动代码。
 
 ## 1. 目标与动机

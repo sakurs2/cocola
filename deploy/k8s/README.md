@@ -1,5 +1,9 @@
 # cocola on Kubernetes (sandbox provider)
 
+> ⚠️ **SUPERSEDED by ADR-0014(2026-06-28)**:自建 k8s+gVisor 沙箱后端已退役,
+> 主力后端改为 OpenSandbox(docker 保留为兜底)。本文件仅作历史记录,不再维护。
+
+
 These manifests deploy `sandbox-manager` with the **K8s** sandbox provider
 (`COCOLA_SANDBOX_PROVIDER=k8s`). By default each user sandbox runs as a plain
 **runc** Pod with **Kubernetes user namespaces** (`hostUsers: false`, container

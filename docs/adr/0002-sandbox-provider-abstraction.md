@@ -1,6 +1,6 @@
 # ADR-0002: SandboxProvider abstraction — no direct K8s/Docker coupling
 
-- Status: Accepted
+- Status: Accepted（抽象本身;但 K8s+gVisor 这一具体后端预期已由 ADR-0014 收敛——k8s provider 退役、OpenSandbox 为主力)
 - Date: 2026-06-09
 - Deciders: @wangjiahui
 

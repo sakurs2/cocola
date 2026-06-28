@@ -1,8 +1,7 @@
 // sandbox-manager owns the SandboxProvider abstraction. It receives Create/Exec/
 // Destroy gRPC calls from agent-runtime and dispatches to a concrete provider:
-//   - DockerProvider (M1)
-//   - K8sGVisorProvider (later)
-//   - E2BProvider / CubeSandboxProvider (community)
+//   - DockerProvider (zero-config local / fallback backend)
+//   - OpenSandboxProvider (primary backend; see ADR-0014)
 //
 // The provider is chosen at startup from COCOLA_SANDBOX_PROVIDER (default: docker).
 // Nothing below the provider factory knows which backend is in use.
@@ -23,7 +22,6 @@ import (
 	"github.com/cocola-project/cocola/apps/sandbox-manager/internal/orchestrator/warmpool"
 	"github.com/cocola-project/cocola/apps/sandbox-manager/internal/provider"
 	"github.com/cocola-project/cocola/apps/sandbox-manager/internal/provider/docker"
-	"github.com/cocola-project/cocola/apps/sandbox-manager/internal/provider/k8s"
 	"github.com/cocola-project/cocola/apps/sandbox-manager/internal/provider/opensandbox"
 	"github.com/cocola-project/cocola/apps/sandbox-manager/internal/server"
 	"github.com/cocola-project/cocola/packages/go-common/logger"
@@ -146,8 +144,6 @@ func newProvider(name string) (provider.SandboxProvider, error) {
 	switch name {
 	case docker.ProviderName:
 		return docker.New()
-	case k8s.ProviderName:
-		return k8s.New()
 	case opensandbox.ProviderName:
 		return opensandbox.New()
 	default:

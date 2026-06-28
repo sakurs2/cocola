@@ -1,5 +1,9 @@
 # M6 验收 Runbook：K8s 沙箱端到端验收(Layer C)
 
+> ⚠️ **SUPERSEDED by ADR-0014(2026-06-28)**:自建 k8s+gVisor 沙箱后端已退役,
+> 主力后端改为 OpenSandbox(docker 保留为兜底)。本文件仅作历史记录,不再维护。
+
+
 > 适用对象:任意 **CNCF 一致性 Kubernetes(v1.33+)**。Provider 用标准 client-go
 > 与 API Server 通信,**与发行版无关**——生产首选一台 **Linux 云服务器 + k3s**
 > (1.35.5 实测),本地开发首选 **macOS/Linux + k3d**(见下方「本地开发」)。同一套

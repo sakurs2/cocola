@@ -1,5 +1,9 @@
 # Plan: #15 gVisor(runsc)兼容性验收门 + K8s warm-pool 节点镜像预拉
 
+> ⚠️ **SUPERSEDED by ADR-0014(2026-06-28)**:自建 k8s+gVisor 沙箱后端已退役,
+> 主力后端改为 OpenSandbox(docker 保留为兜底)。本文件仅作历史记录,不再维护。
+
+
 > 状态:规划中(2026-06-17)。本文是落地方案,先于编码。
 > 关联:ADR-0009(runtime 进沙箱)、ADR-0008 §3(warm pool)、ADR-0012(warm
 > pool 在 PVC/bind-mount 模型下改走节点镜像预拉)、ADR-0002(SandboxProvider

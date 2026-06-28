@@ -154,3 +154,6 @@ Destroy/Exec(流式)/Pause/Resume 六方法 + `newProvider` 工厂接线;WriteFi
     WriteFile/ReadFile 补齐维持原决策(暂留 cocola 侧 / `errNotImplemented`),不阻塞本 ADR。
   - 与 #17(Agent Substrate 评估)并列跟踪;二者同为「外部运行时按 ADR-0002 封装为
     可插拔后端」的候选,本 ADR 为该模式的首个具体实例。
+  - **后续(ADR-0014)**:基于本 ADR 的真 server e2e 结论,已决定将 OpenSandbox 定为
+    **主力沙箱后端**、退役自建 k8s provider(docker 保留为零配置兜底),#17 一并关闭。
+    可插拔架构(ADR-0002)保留不变。
