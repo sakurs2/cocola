@@ -26,6 +26,14 @@
 //	-timeout  overall wall-clock budget for the whole run (default 5m)
 //	-keep     do NOT Destroy at the end (leave the sandbox for manual poking)
 //	-skip-pause  skip the Pause/Resume stage (some runtimes don't support it yet)
+//	-persist     run the cross-destroy-recreate volume persistence stage (stage 6)
+//
+// Stage 6 (-persist) proves the ADR-0008 dual-volume mapping: it creates a
+// sandbox, writes markers to the user volume, the .claude subPath and the
+// session workspace, destroys it, recreates one for the SAME user/session, and
+// reads all three markers back — verifying user files (T2), Claude state and
+// the session workspace (T1b) survive a container destroy, plus uid write
+// access to ~/.claude.
 //
 // Exit code is 0 only if every stage the harness ran succeeded.
 package main
@@ -55,6 +63,7 @@ func main() {
 	timeout := flag.Duration("timeout", 5*time.Minute, "overall wall-clock budget")
 	keep := flag.Bool("keep", false, "do not Destroy the sandbox at the end")
 	skipPause := flag.Bool("skip-pause", false, "skip the Pause/Resume stage")
+	persist := flag.Bool("persist", false, "run the cross-destroy-recreate volume persistence stage (real server only)")
 	flag.Parse()
 
 	// Construct the provider straight from env (COCOLA_OPENSANDBOX_URL /
@@ -187,6 +196,17 @@ func main() {
 		}
 	}
 
+	// ---- Stage 6: cross-destroy-recreate volume persistence -----------------
+	// The whole point of volume mapping: data on the user volume (T2) and the
+	// session workspace (T1b) must survive a sandbox being destroyed and a fresh
+	// one created for the same user/session. Self-contained (own create/destroy
+	// pair) so it never disturbs the main sandbox above. Real-server only.
+	if *persist {
+		verifyPersistence(ctx, p, run, *image, *cpu, *mem)
+	} else {
+		fmt.Println("\n[persist] volume persistence stage skipped (pass -persist to run)")
+	}
+
 	// ---- Summary -------------------------------------------------------------
 	fmt.Println()
 	if run.failures == 0 {
@@ -284,6 +304,102 @@ func waitRunning(ctx context.Context, p *opensandbox.Provider, sid string, budge
 		}
 	}
 	return fmt.Errorf("timeout after %s (last state: %s)", budget, last)
+}
+
+// verifyPersistence proves the volume mapping persists data across a full
+// destroy/recreate cycle. It uses a FIXED user/session pair so both sandboxes
+// map to the same cocola-user-* / cocola-session-* volumes, then:
+//
+//	create A -> write markers to the user volume, .claude (subPath) and the
+//	            session workspace -> destroy A -> create B (same ids) ->
+//	            read the three markers back.
+//
+// All three must survive: user files (T2), Claude state (.claude subPath of the
+// user volume), and the session workspace (T1b). It also exercises the uid
+// acceptance item by writing under /home/cocola/.claude as the sandbox user.
+func verifyPersistence(ctx context.Context, p *opensandbox.Provider, run *runner, image string, cpu float64, mem int64) {
+	stage("6. volume persistence (destroy -> recreate)")
+	spec := provider.SandboxSpec{
+		UserID:    "persist-user",
+		SessionID: "persist-session",
+		Image:     image,
+		Resources: provider.Resources{CPUCores: cpu, MemoryMiB: mem},
+	}
+	const (
+		userMarker   = "cocola-persist-user-1"
+		claudeMarker = "cocola-persist-claude-1"
+		sessMarker   = "cocola-persist-sess-1"
+		userFile     = "/data/userdata/persist-user/marker.txt"
+		claudeFile   = "/home/cocola/.claude/marker.txt"
+		sessFile     = "/workspace/persist-session/marker.txt"
+	)
+
+	// --- Round A: create + write ---
+	a, err := p.Create(ctx, spec)
+	if err != nil {
+		fmt.Printf("   create A FAILED: %v\n", err)
+		run.fail("persist:create-a")
+		return
+	}
+	if err := waitRunning(ctx, p, a.ID, 90*time.Second); err != nil {
+		fmt.Printf("   A never Running: %v\n", err)
+		run.fail("persist:running-a")
+		_ = destroy(p, a.ID)
+		return
+	}
+	run.exec("6a. write user-volume marker", a.ID, provider.ExecRequest{
+		Cmd: []string{"sh", "-c", "echo " + userMarker + " > " + userFile},
+	}, 0)
+	run.exec("6b. write .claude marker (subPath + uid write)", a.ID, provider.ExecRequest{
+		Cmd: []string{"sh", "-c", "echo " + claudeMarker + " > " + claudeFile},
+	}, 0)
+	run.exec("6c. write session-workspace marker", a.ID, provider.ExecRequest{
+		Cmd: []string{"sh", "-c", "echo " + sessMarker + " > " + sessFile},
+	}, 0)
+
+	// --- Destroy A ---
+	if err := destroy(p, a.ID); err != nil {
+		fmt.Printf("   destroy A FAILED: %v\n", err)
+		run.fail("persist:destroy-a")
+		return
+	}
+	fmt.Println("   destroyed A; recreating with same user/session ...")
+
+	// --- Round B: recreate + read back ---
+	b, err := p.Create(ctx, spec)
+	if err != nil {
+		fmt.Printf("   create B FAILED: %v\n", err)
+		run.fail("persist:create-b")
+		return
+	}
+	defer func() {
+		if err := destroy(p, b.ID); err != nil {
+			fmt.Printf("   destroy B FAILED: %v\n", err)
+			run.fail("persist:destroy-b")
+		}
+	}()
+	if err := waitRunning(ctx, p, b.ID, 90*time.Second); err != nil {
+		fmt.Printf("   B never Running: %v\n", err)
+		run.fail("persist:running-b")
+		return
+	}
+	run.exec("6d. user marker survived", b.ID, provider.ExecRequest{
+		Cmd: []string{"sh", "-c", "cat " + userFile},
+	}, 0)
+	run.exec("6e. .claude marker survived", b.ID, provider.ExecRequest{
+		Cmd: []string{"sh", "-c", "cat " + claudeFile},
+	}, 0)
+	run.exec("6f. session marker survived", b.ID, provider.ExecRequest{
+		Cmd: []string{"sh", "-c", "cat " + sessFile},
+	}, 0)
+	fmt.Printf("   (expect 6d=%q 6e=%q 6f=%q)\n", userMarker, claudeMarker, sessMarker)
+}
+
+// destroy is a short-budget Destroy helper for the persistence stage.
+func destroy(p *opensandbox.Provider, sid string) error {
+	dctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+	defer cancel()
+	return p.Destroy(dctx, sid)
 }
 
 func splitCSV(s string) []string {

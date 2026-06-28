@@ -7,7 +7,10 @@
 // SandboxProvider interface or the docker/k8s backends (ADR-0002).
 //
 // Scope: Create / Health / Destroy / Exec / Pause / Resume are implemented
-// against the REST + execd APIs. Exec resolves the per-sandbox execd endpoint
+// against the REST + execd APIs. Create maps cocola's two-volume filesystem
+// model (ADR-0008) onto OpenSandbox volumes (see mapVolumes): per-user
+// persistent volume (+ .claude subPath), per-session workspace, read-only
+// platform skills. Exec resolves the per-sandbox execd endpoint
 // (lifecycle GET /sandboxes/{id}/endpoints/44772) and bridges its SSE/NDJSON
 // command stream into cocola's <-chan ExecEvent. Pause/Resume map to the
 // lifecycle POST .../pause and .../resume endpoints. WriteFile / ReadFile remain
@@ -70,6 +73,30 @@ const defaultExecTimeout = 5 * time.Minute
 // execEventBuffer sizes the Exec result channel so a fast-producing SSE stream
 // does not block on a momentarily slow consumer. Matches the docker backend.
 const execEventBuffer = 32
+
+// Guest path contract: these MUST match the docker provider (docker.go) and the
+// brain image (deploy/sandbox-runtime/Dockerfile). Both backends mount the same
+// brain image, so the in-container paths are a shared contract, not a per-
+// provider choice. ADR-0008 maps each to a filesystem tier.
+const (
+	// guestUserData is the per-user persistent root (ADR-0008 T2). The user
+	// volume mounts at guestUserData/<userID>.
+	guestUserData = "/data/userdata"
+	// guestWorkspace is the per-session ephemeral workspace root (ADR-0008 T1b).
+	guestWorkspace = "/workspace"
+	// guestPlugins is the read-only platform-skill mount.
+	guestPlugins = "/data/plugins"
+	// guestClaudeConfig is CLAUDE_CONFIG_DIR in the brain image: ~/.claude holds
+	// Claude Code on-disk session files that --resume depends on (ADR-0008 T2).
+	// It is consolidated into the user volume via subPath (see mapVolumes).
+	guestClaudeConfig = "/home/cocola/.claude"
+	// claudeSubPath is the directory inside the user volume that backs
+	// guestClaudeConfig, keeping Claude state and user files in one volume.
+	claudeSubPath = ".claude"
+	// pluginsClaimName is the shared, pre-provisioned platform-skill volume.
+	// It is mounted read-only into every sandbox.
+	pluginsClaimName = "cocola-plugins"
+)
 
 // errNotImplemented marks the methods deferred to P2. Returning a clear sentinel
 // (rather than panicking) keeps the provider safe to register: selecting it only
@@ -174,6 +201,32 @@ type createSandboxRequest struct {
 	Env            map[string]string `json:"env,omitempty"`
 	Metadata       map[string]string `json:"metadata,omitempty"`
 	NetworkPolicy  *networkPolicy    `json:"networkPolicy,omitempty"`
+	Volumes        []volumeSpec      `json:"volumes,omitempty"`
+}
+
+// volumeSpec is one entry of CreateSandboxRequest.volumes. Exactly one backend
+// (here always PVC) is set; the common fields MountPath/ReadOnly/SubPath apply
+// regardless of backend. cocola only uses the pvc backend (Docker named volume
+// locally, K8s PVC in prod) — see docs/plan/opensandbox-volume-mapping.md.
+type volumeSpec struct {
+	PVC       *pvcBackend `json:"pvc,omitempty"`
+	MountPath string      `json:"mountPath"`
+	ReadOnly  bool        `json:"readOnly,omitempty"`
+	SubPath   string      `json:"subPath,omitempty"`
+}
+
+// pvcBackend is the OpenSandbox PVC volume backend. ClaimName names the volume
+// (K8s PVC name / Docker named-volume name). CreateIfNotExists lets the server
+// provision it on first use so cocola need not pre-create per-user/session
+// volumes. Storage/StorageClass/AccessModes/DeleteOnSandboxTermination are
+// passed through only when set.
+type pvcBackend struct {
+	ClaimName                  string   `json:"claimName"`
+	CreateIfNotExists          bool     `json:"createIfNotExists,omitempty"`
+	Storage                    string   `json:"storage,omitempty"`
+	StorageClass               string   `json:"storageClass,omitempty"`
+	AccessModes                []string `json:"accessModes,omitempty"`
+	DeleteOnSandboxTermination bool     `json:"deleteOnSandboxTermination,omitempty"`
 }
 
 type sandboxStatus struct {
@@ -238,6 +291,10 @@ func (p *Provider) Create(ctx context.Context, spec provider.SandboxSpec) (*prov
 	if rl := mapResources(spec.Resources); len(rl) > 0 {
 		req.ResourceLimits = rl
 	}
+	// Volume mapping: translate cocola's two-volume filesystem model (ADR-0008)
+	// into OpenSandbox volumes — per-user persistent volume (+ .claude subPath),
+	// per-session workspace, read-only platform skills. See mapVolumes.
+	req.Volumes = mapVolumes(spec.UserID, spec.SessionID)
 	// Egress mapping: cocola's allowlist -> OpenSandbox networkPolicy
 	// (default-deny + per-domain allow). Whether cocola's own egress
 	// NetworkPolicy or OpenSandbox's takes ownership is a P2 decision; the
@@ -460,6 +517,79 @@ func envTruthy(key string) bool {
 	default:
 		return false
 	}
+}
+
+// mapVolumes translates cocola's two-volume filesystem model (ADR-0008) into the
+// OpenSandbox volumes list. It mirrors the docker provider's four mount points
+// (docker.go) so both backends present an identical filesystem to the same brain
+// image:
+//
+//   - user files (T2):   pvc cocola-user-<uid>            -> /data/userdata/<uid>
+//   - Claude state (T2):  same user volume, subPath .claude -> /home/cocola/.claude
+//   - workspace (T1b):    pvc cocola-session-<sid>        -> /workspace/<sid>
+//   - platform skills:    pvc cocola-plugins (shared)     -> /data/plugins (RO)
+//
+// The user volume is mounted twice (root + .claude subPath) so user files and
+// Claude session state live in one volume — one quota/backup/migration unit per
+// user. No other path is declared, so everything else is the container's
+// ephemeral overlay ("nothing else persists by default", ADR-0008).
+//
+// CreateIfNotExists lets the server provision per-user/session volumes lazily.
+// The session volume is NOT DeleteOnSandboxTermination: cocola's orchestrator
+// GCs it, so the workspace survives a hibernate (destroy container, keep volume)
+// — the ADR-0008 "destroy container + keep volume" resume model.
+func mapVolumes(userID, sessionID string) []volumeSpec {
+	uid := safe(userID)
+	sid := safe(sessionID)
+	userClaim := "cocola-user-" + uid
+	return []volumeSpec{
+		{
+			PVC:       &pvcBackend{ClaimName: userClaim, CreateIfNotExists: true},
+			MountPath: guestUserData + "/" + uid,
+		},
+		{
+			PVC:       &pvcBackend{ClaimName: userClaim, CreateIfNotExists: true},
+			MountPath: guestClaudeConfig,
+			SubPath:   claudeSubPath,
+		},
+		{
+			PVC:       &pvcBackend{ClaimName: "cocola-session-" + sid, CreateIfNotExists: true},
+			MountPath: guestWorkspace + "/" + sid,
+		},
+		{
+			PVC:       &pvcBackend{ClaimName: pluginsClaimName},
+			MountPath: guestPlugins,
+			ReadOnly:  true,
+		},
+	}
+}
+
+// safe sanitises a cocola identifier into an OpenSandbox-legal volume/path
+// segment. OpenSandbox claim names must match ^[a-z0-9]([-a-z0-9]*[a-z0-9])?$
+// (<=253). We lower-case, replace every illegal char with '-', collapse runs,
+// trim leading/trailing '-', and fall back to "x" for an empty result so a
+// claim name like "cocola-user-<sanitised>" is always valid. Mirrors the intent
+// of the docker provider's safe() but targets DNS-label rules, not filesystem.
+func safe(s string) string {
+	var b strings.Builder
+	prevDash := false
+	for _, r := range strings.ToLower(s) {
+		ok := (r >= 'a' && r <= 'z') || (r >= '0' && r <= '9')
+		if ok {
+			b.WriteRune(r)
+			prevDash = false
+			continue
+		}
+		if !prevDash {
+			b.WriteByte('-')
+			prevDash = true
+		}
+	}
+	out := strings.Trim(b.String(), "-")
+	if out == "" {
+		return "x"
+	}
+	return out
 }
 
 func mapResources(r provider.Resources) map[string]string {

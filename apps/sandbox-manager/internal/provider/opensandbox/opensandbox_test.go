@@ -4,9 +4,11 @@ package opensandbox
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"io"
 	"net/http"
+	"regexp"
 	"strings"
 	"testing"
 
@@ -418,5 +420,121 @@ func TestShellJoin(t *testing.T) {
 		if got := shellJoin(c.in); got != c.want {
 			t.Errorf("shellJoin(%q) = %q, want %q", c.in, got, c.want)
 		}
+	}
+}
+
+
+func TestSafe(t *testing.T) {
+	cases := []struct{ in, want string }{
+		{"u1", "u1"},
+		{"User_123", "user-123"},
+		{"a..b/c", "a-b-c"},
+		{"--Foo--", "foo"},
+		{"已删除", "x"}, // all non-ASCII collapses then trims to empty -> fallback
+		{"", "x"},
+		{"A___B", "a-b"},
+	}
+	for _, c := range cases {
+		if got := safe(c.in); got != c.want {
+			t.Errorf("safe(%q) = %q, want %q", c.in, got, c.want)
+		}
+	}
+	// Result must satisfy OpenSandbox claim-name rules when prefixed.
+	re := regexp.MustCompile(`^[a-z0-9]([-a-z0-9]*[a-z0-9])?$`)
+	for _, in := range []string{"u1", "User_123", "a..b/c", "已删除", ""} {
+		claim := "cocola-user-" + safe(in)
+		if !re.MatchString(claim) {
+			t.Errorf("claim %q (from %q) is not a legal volume name", claim, in)
+		}
+	}
+}
+
+func TestMapVolumes(t *testing.T) {
+	vols := mapVolumes("u1", "s1")
+	if len(vols) != 4 {
+		t.Fatalf("mapVolumes returned %d volumes, want 4", len(vols))
+	}
+
+	// 0: user files volume at /data/userdata/<uid>, RW, no subPath.
+	if v := vols[0]; v.PVC == nil || v.PVC.ClaimName != "cocola-user-u1" ||
+		!v.PVC.CreateIfNotExists || v.MountPath != "/data/userdata/u1" ||
+		v.ReadOnly || v.SubPath != "" {
+		t.Errorf("user volume = %+v (pvc %+v)", v, v.PVC)
+	}
+	// 1: .claude as subPath of the SAME user volume.
+	if v := vols[1]; v.PVC == nil || v.PVC.ClaimName != "cocola-user-u1" ||
+		v.MountPath != "/home/cocola/.claude" || v.SubPath != ".claude" || v.ReadOnly {
+		t.Errorf("claude volume = %+v (pvc %+v)", v, v.PVC)
+	}
+	// .claude must reuse the user claim, never a separate volume.
+	if vols[0].PVC.ClaimName != vols[1].PVC.ClaimName {
+		t.Errorf("claude volume claim %q != user volume claim %q", vols[1].PVC.ClaimName, vols[0].PVC.ClaimName)
+	}
+	// 2: session workspace, RW, must NOT delete on termination (cocola GC).
+	if v := vols[2]; v.PVC == nil || v.PVC.ClaimName != "cocola-session-s1" ||
+		!v.PVC.CreateIfNotExists || v.PVC.DeleteOnSandboxTermination ||
+		v.MountPath != "/workspace/s1" || v.ReadOnly {
+		t.Errorf("session volume = %+v (pvc %+v)", v, v.PVC)
+	}
+	// 3: shared platform-skill volume, read-only, no createIfNotExists.
+	if v := vols[3]; v.PVC == nil || v.PVC.ClaimName != "cocola-plugins" ||
+		v.PVC.CreateIfNotExists || v.MountPath != "/data/plugins" || !v.ReadOnly {
+		t.Errorf("plugins volume = %+v (pvc %+v)", v, v.PVC)
+	}
+}
+
+func TestMapVolumes_SanitisesIDs(t *testing.T) {
+	vols := mapVolumes("User_A/B", "Sess..1")
+	if vols[0].PVC.ClaimName != "cocola-user-user-a-b" {
+		t.Errorf("user claim = %q, want cocola-user-user-a-b", vols[0].PVC.ClaimName)
+	}
+	if vols[0].MountPath != "/data/userdata/user-a-b" {
+		t.Errorf("user mountPath = %q", vols[0].MountPath)
+	}
+	if vols[2].PVC.ClaimName != "cocola-session-sess-1" {
+		t.Errorf("session claim = %q, want cocola-session-sess-1", vols[2].PVC.ClaimName)
+	}
+	if vols[2].MountPath != "/workspace/sess-1" {
+		t.Errorf("session mountPath = %q", vols[2].MountPath)
+	}
+}
+
+// TestCreate_SendsVolumes asserts the mapped volumes reach the wire on Create.
+func TestCreate_SendsVolumes(t *testing.T) {
+	var body createSandboxRequest
+	p := newStub(t, func(r *http.Request) (*http.Response, error) {
+		_ = json.NewDecoder(r.Body).Decode(&body)
+		return jsonResp(http.StatusOK, `{"id":"sbx-9","status":{"state":"Pending"}}`), nil
+	})
+	if _, err := p.Create(context.Background(), provider.SandboxSpec{
+		UserID: "u1", SessionID: "s1", Image: "img",
+	}); err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+	if len(body.Volumes) != 4 {
+		t.Fatalf("wire volumes = %d, want 4\nbody=%+v", len(body.Volumes), body)
+	}
+	want := map[string]bool{
+		"/data/userdata/u1":     false,
+		"/home/cocola/.claude":  false,
+		"/workspace/s1":         false,
+		"/data/plugins":         true, // readOnly
+	}
+	for _, v := range body.Volumes {
+		ro, ok := want[v.MountPath]
+		if !ok {
+			t.Errorf("unexpected volume mountPath %q", v.MountPath)
+			continue
+		}
+		if v.ReadOnly != ro {
+			t.Errorf("%s readOnly = %v, want %v", v.MountPath, v.ReadOnly, ro)
+		}
+		if v.PVC == nil || v.PVC.ClaimName == "" {
+			t.Errorf("%s missing pvc claimName", v.MountPath)
+		}
+		delete(want, v.MountPath)
+	}
+	if len(want) != 0 {
+		t.Errorf("missing volumes on wire: %v", want)
 	}
 }
