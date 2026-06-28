@@ -24,7 +24,7 @@ services:
     restart: unless-stopped
     command: ["redis-server", "--appendonly", "yes"]
     ports:
-      - "6379:6379"
+      - "${COCOLA_REDIS_HOST_PORT:-6379}:6379"
     volumes:
       - redisdata:/data
     healthcheck:
@@ -41,7 +41,7 @@ services:
       POSTGRES_PASSWORD: cocola_dev_pw
       POSTGRES_DB: cocola
     ports:
-      - "5432:5432"
+      - "${COCOLA_PG_HOST_PORT:-5432}:5432"
     volumes:
       - pgdata:/var/lib/postgresql/data
     healthcheck:
@@ -61,7 +61,17 @@ services:
         condition: service_healthy
     environment:
       COCOLA_SANDBOX_ADDR: ":50051"
-      COCOLA_SANDBOX_PROVIDER: "docker"
+      # Sandbox backend (ADR-0013/0014): "docker" (default, DooD on the host
+      # daemon) or "opensandbox" (talks to an OpenSandbox server). Override via
+      # repo-root .env. When opensandbox, the server is NOT on this compose
+      # network -- it is published on the host -- so point the URL at
+      # host.docker.internal:<host_port>/v1 (note the /v1 suffix).
+      COCOLA_SANDBOX_PROVIDER: "${COCOLA_SANDBOX_PROVIDER:-docker}"
+      COCOLA_OPENSANDBOX_URL: "${COCOLA_OPENSANDBOX_URL:-}"
+      COCOLA_OPENSANDBOX_API_KEY: "${COCOLA_OPENSANDBOX_API_KEY:-}"
+      COCOLA_OPENSANDBOX_DEFAULT_CPU: "${COCOLA_OPENSANDBOX_DEFAULT_CPU:-}"
+      COCOLA_OPENSANDBOX_DEFAULT_MEMORY: "${COCOLA_OPENSANDBOX_DEFAULT_MEMORY:-}"
+      COCOLA_OPENSANDBOX_DIRECT_EXEC: "${COCOLA_OPENSANDBOX_DIRECT_EXEC:-}"
       COCOLA_REDIS_ADDR: "redis:6379"
       COCOLA_SANDBOX_ROOT: "${COCOLA_DATA_ROOT:-/var/lib/cocola/sandboxes}"
       # Egress hardening (ADR-0009). sandbox-manager reads these to build each
@@ -74,7 +84,7 @@ services:
       COCOLA_SANDBOX_LLM_BASE_URL: "${COCOLA_SANDBOX_LLM_BASE_URL:-http://host.docker.internal:18091}"
       COCOLA_SANDBOX_EGRESS_ALLOWLIST: "${COCOLA_SANDBOX_EGRESS_ALLOWLIST:-}"
     ports:
-      - "50051:50051"
+      - "${COCOLA_SANDBOX_HOST_PORT:-50051}:50051"
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock
       # COCOLA_DATA_ROOT holds every per-session/per-user sandbox volume,
@@ -115,7 +125,7 @@ services:
       # a postgres node, so we default the DSN to it.
       COCOLA_PG_DSN: "${COCOLA_PG_DSN:-postgres://cocola:cocola_dev_pw@postgres:5432/cocola?sslmode=disable}"
     ports:
-      - "18091:8080"  # host 18091; avoids clash with gateway (8080) and any stray :8081 listener
+      - "${COCOLA_LLM_HOST_PORT:-18091}:8080"  # host 18091; avoids clash with gateway (8080) and any stray :8081 listener
     healthcheck:
       test: ["CMD", "python", "-c", "import urllib.request,sys; sys.exit(0) if urllib.request.urlopen('http://localhost:8080/healthz').status==200 else sys.exit(1)"]
       interval: 5s
@@ -140,7 +150,11 @@ services:
       # M7 persistence: DSN set -> Postgres repository; unset -> in-memory.
       COCOLA_PG_DSN: "${COCOLA_PG_DSN:-postgres://cocola:cocola_dev_pw@postgres:5432/cocola?sslmode=disable}"
     ports:
-      - "8090:8090"
+      # Host port defaults to 8092 (NOT 8090) so the full stack can run alongside
+      # docker-compose.opensandbox.yml, whose OpenSandbox server owns host :8090.
+      # The in-container port stays :8090; agent-runtime reaches it by service
+      # name (http://admin-api:8090), so this remap is host-side only.
+      - "${COCOLA_ADMIN_HOST_PORT:-8092}:8090"
     healthcheck:
       test: ["CMD", "wget", "-qO-", "http://localhost:8090/healthz"]
       interval: 5s
@@ -187,7 +201,7 @@ services:
       # unset -> in-process map (lost on restart).
       COCOLA_PG_DSN: "${COCOLA_PG_DSN:-postgres://cocola:cocola_dev_pw@postgres:5432/cocola?sslmode=disable}"
     ports:
-      - "50061:50061"
+      - "${COCOLA_AGENT_HOST_PORT:-50061}:50061"
 
   gateway:
     build:
@@ -203,7 +217,7 @@ services:
       COCOLA_AGENT_ADDR: "agent-runtime:50061"
       COCOLA_AUTH_ALLOW_ANON: "1"   # dev: accept blank tokens as dev-user
     ports:
-      - "8080:8080"
+      - "${COCOLA_GATEWAY_HOST_PORT:-8080}:8080"
     healthcheck:
       test: ["CMD", "wget", "-qO-", "http://localhost:8080/healthz"]
       interval: 5s
@@ -228,7 +242,7 @@ services:
       # 127.0.0.1 (which would resolve to the web container itself).
       COCOLA_GATEWAY_URL: "http://gateway:8080"
     ports:
-      - "3000:3000"
+      - "${COCOLA_WEB_HOST_PORT:-3000}:3000"
 
 volumes:
   redisdata:

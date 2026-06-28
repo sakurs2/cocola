@@ -22,7 +22,10 @@ services:
     container_name: cocola-opensandbox-server
     restart: unless-stopped
     ports:
-      - "8090:8090"
+      # Host port is parameterized so this can coexist with other stacks. The
+      # in-container port stays 8090 (see [server].port below). Point the
+      # provider at host.docker.internal:${COCOLA_OPENSANDBOX_HOST_PORT}/v1.
+      - "${COCOLA_OPENSANDBOX_HOST_PORT:-8090}:8090"
     volumes:
       # Docker runtime drives sandboxes as sibling containers on the host daemon.
       - /var/run/docker.sock:/var/run/docker.sock
