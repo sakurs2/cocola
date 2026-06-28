@@ -8,11 +8,20 @@ own container*. The agent's brain and hands both live here, so native
 Bash/Read/Write/Edit are isolated to this filesystem by construction; there is
 no MCP forwarding seam.
 
+The image is built **`FROM opensandbox/code-interpreter`** -- OpenSandbox's
+official multi-language runtime (Node 22 + uv + Python already inside), which
+is also cocola's sandbox backend (see `docs/adr/0014-...`). cocola reuses it
+and layers only the pieces it lacks (Claude Code CLI + `claude-agent-sdk` venv
++ the stdio shim + the egress-firewall toolchain). This honours cocola's
+"prefer upstream over reinventing" rule while keeping the CLI **build-time
+baked** (ADR-0009 sec.3): nothing is installed on container start. Override the
+base with `--build-arg OPENSANDBOX_BASE=...` for a pinned/offline mirror.
+
 ## Layout
 
 ```
 deploy/sandbox-runtime/
-  Dockerfile               # Node 22 + Python 3.11/uv + Claude Code CLI + shim
+  Dockerfile               # FROM opensandbox/code-interpreter + Claude Code CLI + SDK venv + shim
   init-firewall.sh         # iptables+ipset egress allowlist (ADR-0009)
   firewall-entrypoint.sh   # runs the firewall as root, then keep-alives
   offline/                 # optional: vendored `npm pack` tgz for offline builds

@@ -9,14 +9,20 @@
 # isolated to this filesystem, so there is no MCP forwarding seam.
 #
 # Design rules honoured by this image:
+#   - The base is OpenSandbox's official `code-interpreter` image (Node 22 + uv
+#     + Python already inside), reused per cocola's "prefer upstream over
+#     reinventing the wheel" rule. cocola layers only what the base lacks.
 #   - The CLI is PRE-BAKED, never installed at runtime (ADR-0009 sec.3). An
 #     offline `npm pack` tgz under ./offline/ is used when present, so the build
 #     survives networks with no registry access; otherwise it falls back to the
-#     configured registry.
+#     configured registry. (Base inheritance does NOT relax this: claude is
+#     baked at build time, not installed on container start.)
 #   - The shim is driven over STDIO (one request -> streamed NDJSON events ->
 #     exit). It does NOT open a listening socket. The control-plane (agent-
 #     runtime router) talks to it via `docker exec` / `kubectl exec` stdio.
 #     This matches cocola's hard rule: a sandbox never binds a network port.
+#     (The base image's default entrypoint would start a Jupyter server; cocola
+#     OVERRIDES both ENTRYPOINT and CMD below, so that never runs.)
 #   - Persistence is via mounted volumes (ADR-0008): CLAUDE_CONFIG_DIR lives on
 #     the per-user volume so `~/.claude` (memory/sessions/projects) survives
 #     hibernate; the session workspace is a separate mounted volume.
@@ -27,17 +33,24 @@
 #   mv anthropic-ai-claude-code-*.tgz deploy/sandbox-runtime/offline/
 #   docker build -t cocola/sandbox-runtime:dev deploy/sandbox-runtime
 #
-# Build args let CI pin versions and swap the npm registry for offline mirrors.
-ARG NODE_MAJOR=22
-ARG PYTHON_VERSION=3.11
+# Build args let CI pin versions and swap the npm registry / base image for
+# offline mirrors. The base is OpenSandbox's official code-interpreter image,
+# which already ships Node 22, uv and Python -- reused per cocola's "prefer
+# upstream over reinventing" rule (see Plan + ADR-0014). Claude Code itself is
+# still PRE-BAKED at build time (never installed at runtime), so ADR-0009
+# sec.3 still holds.
+ARG OPENSANDBOX_BASE=opensandbox/code-interpreter:v1.1.0
+# NB: the base image sets ENV PYTHON_VERSION=3.14, which would shadow a same-
+# named ARG at RUN expansion -- so the venv Python arg is deliberately named
+# COCOLA_VENV_PYTHON to stay deterministic regardless of the base default.
+ARG COCOLA_VENV_PYTHON=3.12
 ARG NPM_REGISTRY=https://registry.npmjs.org
 # Pin a known-good agent SDK range. >=0.2.x is not on PyPI yet; 0.1.x is.
 ARG CLAUDE_AGENT_SDK_SPEC=claude-agent-sdk>=0.2.0
 
-FROM ubuntu:22.04
+FROM ${OPENSANDBOX_BASE}
 
-ARG NODE_MAJOR
-ARG PYTHON_VERSION
+ARG COCOLA_VENV_PYTHON
 ARG NPM_REGISTRY
 ARG CLAUDE_AGENT_SDK_SPEC
 
@@ -45,23 +58,15 @@ ENV DEBIAN_FRONTEND=noninteractive \
     LANG=C.UTF-8 \
     LC_ALL=C.UTF-8
 
-# ---- base OS + toolchain -------------------------------------------------
+# ---- extra tools the base image lacks ------------------------------------
+# The base already provides Node 22 + npm, uv, Python 3.12 (+ venv), git, curl.
+# cocola only needs to add the pieces the base omits: tini (PID-1 reaper), the
+# egress-firewall toolchain (iptables/ipset) and the agent's search helpers
+# (ripgrep/jq). Node/uv/python install steps are GONE -- inherited from base.
 RUN apt-get update && apt-get install -y --no-install-recommends \
-        ca-certificates curl git ripgrep jq bash coreutils tini \
-        iptables ipset \
-        python${PYTHON_VERSION} python3-pip python3-venv \
-    && ln -sf /usr/bin/python${PYTHON_VERSION} /usr/local/bin/python3 \
-    && ln -sf /usr/bin/python${PYTHON_VERSION} /usr/local/bin/python \
-    && rm -rf /var/lib/apt/lists/*
-
-# ---- Node.js (Claude Code runtime) --------------------------------------
-RUN curl -fsSL https://deb.nodesource.com/setup_${NODE_MAJOR}.x | bash - \
-    && apt-get install -y --no-install-recommends nodejs \
+        ca-certificates tini iptables ipset ripgrep jq \
     && rm -rf /var/lib/apt/lists/* \
     && npm config set registry "${NPM_REGISTRY}"
-
-# ---- uv (Python package/venv manager, per project convention) -----------
-RUN curl -LsSf https://astral.sh/uv/install.sh | env UV_INSTALL_DIR=/usr/local/bin sh
 
 # ---- Claude Code CLI: offline tgz first, registry fallback --------------
 # Anything matching offline/*claude-code*.tgz is installed without the network;
@@ -81,11 +86,10 @@ RUN set -eux; \
     claude --version
 
 # ---- Python agent SDK in a uv-managed venv (matches the shim interpreter) -
-# Install into a dedicated venv so the SDK never depends on the system Python
-# / pip version skew: ubuntu's pip3 targets 3.10, but the shim runs on 3.11,
-# so a `pip3 install` lands in the wrong site-packages and the import fails.
-# The shim's entrypoint execs this venv's python directly.
-RUN uv venv --python 3.11 /opt/cocola/venv \
+# Install into a dedicated venv (uv-managed, per project convention) so the SDK
+# never depends on system Python / pip skew. The shim's entrypoint execs this
+# venv's python directly, so its version is independent of the base image's.
+RUN uv venv --python "${COCOLA_VENV_PYTHON}" /opt/cocola/venv \
     && uv pip install --python /opt/cocola/venv/bin/python --no-cache "${CLAUDE_AGENT_SDK_SPEC}"
 
 # ---- egress firewall (ADR-0009 hardening) --------------------------------
@@ -126,6 +130,7 @@ ENV CLAUDE_CONFIG_DIR=/home/cocola/.claude \
 
 # tini reaps the `claude` CLI subprocesses the SDK spawns. Default command keeps
 # the container alive (session-lived per ADR-0009); the shim is invoked on
-# demand via `docker exec ... /opt/cocola/shim/entrypoint.sh`.
+# demand via `docker exec ... /opt/cocola/shim/entrypoint.sh`. Both ENTRYPOINT
+# and CMD override the base image's Jupyter launcher, so no port is ever bound.
 ENTRYPOINT ["/usr/bin/tini", "--"]
 CMD ["/opt/cocola/firewall-entrypoint.sh"]
