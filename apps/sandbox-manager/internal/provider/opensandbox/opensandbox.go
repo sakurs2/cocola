@@ -209,6 +209,10 @@ type createSandboxRequest struct {
 // regardless of backend. cocola only uses the pvc backend (Docker named volume
 // locally, K8s PVC in prod) — see docs/plan/opensandbox-volume-mapping.md.
 type volumeSpec struct {
+	// Name is a per-request unique volume identifier (server-required). Two
+	// entries may share the same PVC ClaimName (the user volume is mounted at
+	// its root and again via .claude subPath) but each needs a distinct Name.
+	Name      string      `json:"name"`
 	PVC       *pvcBackend `json:"pvc,omitempty"`
 	MountPath string      `json:"mountPath"`
 	ReadOnly  bool        `json:"readOnly,omitempty"`
@@ -544,19 +548,23 @@ func mapVolumes(userID, sessionID string) []volumeSpec {
 	userClaim := "cocola-user-" + uid
 	return []volumeSpec{
 		{
+			Name:      "user",
 			PVC:       &pvcBackend{ClaimName: userClaim, CreateIfNotExists: true},
 			MountPath: guestUserData + "/" + uid,
 		},
 		{
+			Name:      "claude",
 			PVC:       &pvcBackend{ClaimName: userClaim, CreateIfNotExists: true},
 			MountPath: guestClaudeConfig,
 			SubPath:   claudeSubPath,
 		},
 		{
+			Name:      "session",
 			PVC:       &pvcBackend{ClaimName: "cocola-session-" + sid, CreateIfNotExists: true},
 			MountPath: guestWorkspace + "/" + sid,
 		},
 		{
+			Name:      "plugins",
 			PVC:       &pvcBackend{ClaimName: pluginsClaimName},
 			MountPath: guestPlugins,
 			ReadOnly:  true,

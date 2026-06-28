@@ -2,7 +2,7 @@
 
 日期: 2026-06-28
 关联: ADR-0008(持久化分层与双卷模型)、ADR-0014(OpenSandbox 主力)、ADR-0002(provider 接口)
-状态: 已实现(代码改动面完成、单测绿;真 server 跨 destroy-recreate 持久化 + uid 写权限待跑 `-persist`)
+状态: 已完成并真 server 验收通过(2026-06-28 本机 OpenSandbox server `-persist` 全绿:用户卷/.claude subPath/会话卷跨 destroy-recreate 持久化 + uid 写权限均通过;Docker named volume 多 subPath 挂载确认可用)
 
 ## 目标
 

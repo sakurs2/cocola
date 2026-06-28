@@ -481,6 +481,18 @@ func TestMapVolumes(t *testing.T) {
 		v.PVC.CreateIfNotExists || v.MountPath != "/data/plugins" || !v.ReadOnly {
 		t.Errorf("plugins volume = %+v (pvc %+v)", v, v.PVC)
 	}
+	// Every volume needs a non-empty, request-unique Name (server-required:
+	// real OpenSandbox 422s on a missing volumes[*].name).
+	seen := map[string]bool{}
+	for i, v := range vols {
+		if v.Name == "" {
+			t.Errorf("volume %d has empty Name", i)
+		}
+		if seen[v.Name] {
+			t.Errorf("duplicate volume Name %q", v.Name)
+		}
+		seen[v.Name] = true
+	}
 }
 
 func TestMapVolumes_SanitisesIDs(t *testing.T) {
