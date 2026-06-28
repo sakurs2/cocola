@@ -13,13 +13,13 @@
 //
 //	export COCOLA_OPENSANDBOX_URL="http://localhost:8090/v1"
 //	export COCOLA_OPENSANDBOX_API_KEY="..."        # omit if server.api_key empty
-//	go run ./cmd/opensandbox-verify                 # full lifecycle, default image
+//	go run ./cmd/opensandbox-verify                 # full lifecycle, default image (python:3.12-slim)
 //	go run ./cmd/opensandbox-verify -image python:3.12-slim -keep
 //	go run ./cmd/opensandbox-verify -cpu 0.5 -mem 512 -egress pypi.org,files.pythonhosted.org
 //
 // Flags:
 //
-//	-image    OCI image for the sandbox (default: the server's default image)
+//	-image    OCI image for the sandbox (default: python:3.12-slim)
 //	-cpu      CPU cores (e.g. 0.5); 0 = provider default
 //	-mem      memory MiB (e.g. 512); 0 = provider default
 //	-egress   comma-separated egress allowlist domains; empty = no egress policy
@@ -42,8 +42,13 @@ import (
 	"github.com/cocola-project/cocola/apps/sandbox-manager/internal/provider/opensandbox"
 )
 
+// defaultImage is the OCI image the harness launches when -image is not given.
+// OpenSandbox requires the create request to carry exactly one of image or
+// snapshotId (there is no server-side default image), so we must always send one.
+const defaultImage = "python:3.12-slim"
+
 func main() {
-	image := flag.String("image", "", "OCI image (default: server default image)")
+	image := flag.String("image", defaultImage, "OCI image to launch the sandbox from")
 	cpu := flag.Float64("cpu", 0, "CPU cores, e.g. 0.5 (0 = provider default)")
 	mem := flag.Int64("mem", 0, "memory MiB, e.g. 512 (0 = provider default)")
 	egress := flag.String("egress", "", "comma-separated egress allowlist domains")
