@@ -400,8 +400,22 @@ func TestMapResources(t *testing.T) {
 	if got["cpu"] != "2000m" || got["memory"] != "1024Mi" {
 		t.Errorf("mapResources = %v, want cpu=2000m memory=1024Mi", got)
 	}
-	if len(mapResources(provider.Resources{})) != 0 {
-		t.Error("zero resources should map to empty limits")
+	// Zero resources must NOT yield empty limits: OpenSandbox rejects a
+	// non-pooled create without resourceLimits, and the on-demand path
+	// (binder -> Create, ADR-0015) sets no Resources. The provider supplies a
+	// default floor so /v1/chat never 422s. See mapResources / envOr.
+	def := mapResources(provider.Resources{})
+	if def["cpu"] != defaultCPU || def["memory"] != defaultMemory {
+		t.Errorf("zero resources = %v, want cpu=%s memory=%s (default floor)", def, defaultCPU, defaultMemory)
+	}
+}
+
+func TestMapResources_EnvOverride(t *testing.T) {
+	t.Setenv("COCOLA_OPENSANDBOX_DEFAULT_CPU", "250m")
+	t.Setenv("COCOLA_OPENSANDBOX_DEFAULT_MEMORY", "256Mi")
+	got := mapResources(provider.Resources{})
+	if got["cpu"] != "250m" || got["memory"] != "256Mi" {
+		t.Errorf("env-overridden defaults = %v, want cpu=250m memory=256Mi", got)
 	}
 }
 
@@ -422,7 +436,6 @@ func TestShellJoin(t *testing.T) {
 		}
 	}
 }
-
 
 func TestSafe(t *testing.T) {
 	cases := []struct{ in, want string }{
@@ -527,10 +540,10 @@ func TestCreate_SendsVolumes(t *testing.T) {
 		t.Fatalf("wire volumes = %d, want 4\nbody=%+v", len(body.Volumes), body)
 	}
 	want := map[string]bool{
-		"/data/userdata/u1":     false,
-		"/home/cocola/.claude":  false,
-		"/workspace/s1":         false,
-		"/data/plugins":         true, // readOnly
+		"/data/userdata/u1":    false,
+		"/home/cocola/.claude": false,
+		"/workspace/s1":        false,
+		"/data/plugins":        true, // readOnly
 	}
 	for _, v := range body.Volumes {
 		ro, ok := want[v.MountPath]

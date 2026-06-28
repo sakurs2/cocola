@@ -96,6 +96,15 @@ const (
 	// pluginsClaimName is the shared, pre-provisioned platform-skill volume.
 	// It is mounted read-only into every sandbox.
 	pluginsClaimName = "cocola-plugins"
+	// defaultCPU / defaultMemory are applied when a SandboxSpec carries no
+	// Resources. OpenSandbox rejects a non-pooled create without resourceLimits
+	// ("resourceLimits is required when poolRef is not provided"), and the
+	// on-demand allocation path (binder -> Create, ADR-0015) sets no Resources,
+	// so the provider must supply a sane floor itself. Override via
+	// COCOLA_OPENSANDBOX_DEFAULT_CPU / _DEFAULT_MEMORY (raw resourceLimits
+	// strings, e.g. "500m" / "512Mi").
+	defaultCPU    = "500m"
+	defaultMemory = "512Mi"
 )
 
 // errNotImplemented marks the methods deferred to P2. Returning a clear sentinel
@@ -604,11 +613,23 @@ func mapResources(r provider.Resources) map[string]string {
 	out := map[string]string{}
 	if r.CPUCores > 0 {
 		out["cpu"] = fmt.Sprintf("%dm", int64(r.CPUCores*1000))
+	} else {
+		out["cpu"] = envOr("COCOLA_OPENSANDBOX_DEFAULT_CPU", defaultCPU)
 	}
 	if r.MemoryMiB > 0 {
 		out["memory"] = fmt.Sprintf("%dMi", r.MemoryMiB)
+	} else {
+		out["memory"] = envOr("COCOLA_OPENSANDBOX_DEFAULT_MEMORY", defaultMemory)
 	}
 	return out
+}
+
+// envOr returns the env var value if set & non-empty, else def.
+func envOr(key, def string) string {
+	if v := strings.TrimSpace(os.Getenv(key)); v != "" {
+		return v
+	}
+	return def
 }
 
 // resolveExecd asks the lifecycle endpoints API for the reachable execd URL of
