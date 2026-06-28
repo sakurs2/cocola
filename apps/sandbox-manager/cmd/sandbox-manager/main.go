@@ -96,7 +96,12 @@ func main() {
 
 		if pool.Enabled() {
 			if _, ok := p.(provider.Adopter); !ok {
-				log.Sugar().Warnw("warm pool enabled but provider can't adopt; warm boxes won't be used",
+				// ADR-0015: on the current primary backend (OpenSandbox) no
+				// provider implements Adopter, so an enabled pool just spins
+				// (warm → checkout → can't remount → destroy → cold create).
+				// cocola defaults to on-demand cold-start allocation; keep the
+				// pool OFF here. The seam stays for a future hot-mount backend.
+				log.Sugar().Warnw("warm pool enabled but provider can't adopt; pool will spin with no benefit — recommend disabling (COCOLA_WARMPOOL_ENABLED) on this backend, see ADR-0015",
 					"provider", backend)
 			}
 			go pool.Run(ctx) // background refill + age-out loop

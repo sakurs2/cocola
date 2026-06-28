@@ -1,6 +1,6 @@
 # ADR-0012: warm pool 在 PVC/bind-mount 卷模型下的预热策略修订
 
-- Status: Accepted
+- Status: Accepted（在 OpenSandbox 成为唯一主后端后由 ADR-0015 再次收敛，见文末）
 - Date: 2026-06-17
 - Deciders: @cocola-maintainers
 - Amends: ADR-0008 §3「Warm pool」
@@ -103,3 +103,11 @@ ADR-0008 §3 把 warm pool 描述为「idle pool → **bind on demand** → retu
     + runsc 下冷启动实测(对照 #14 EchoProvider 基线量化收益,Layer C 待真集群)。
   - 修订 ADR-0008 §3 的 warm pool 段落,指向本 ADR。
   - 更新 README 路线图,补上 warm pool(#13)与 #15 的位置。
+
+## Amendment (2026-06-28, ADR-0015)
+
+本 ADR 的两个前提已随 ADR-0014（退役 k8s provider、OpenSandbox 定为唯一主后端）变化:
+① 「DaemonSet 节点镜像预拉」是 K8s 专属主路径,k8s provider 删除后在 OpenSandbox-only
+部署里无载体;② 实测 OpenSandbox 运行中沙箱 API 不提供增删卷端点,adopt-by-remount
+在唯一主后端上依旧不可实现。故 cocola **默认走按需冷启动分配**,warm pool 降级为默认
+关闭的可选优化(当前无后端可 adopt)。完整决策见 ADR-0015。
