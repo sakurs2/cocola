@@ -13,10 +13,10 @@
 // platform skills. Exec resolves the per-sandbox execd endpoint
 // (lifecycle GET /sandboxes/{id}/endpoints/44772) and bridges its SSE/NDJSON
 // command stream into cocola's <-chan ExecEvent. Pause/Resume map to the
-// lifecycle POST .../pause and .../resume endpoints. WriteFile / ReadFile remain
-// deferred (return errNotImplemented): they map to execd multipart upload /
-// ranged download against the same resolved endpoint and are not on the P2
-// streaming-exec critical path. See docs/archive/opensandbox-poc-p0-research.md
+// lifecycle POST .../pause and .../resume endpoints. WriteFile / ReadFile map to
+// execd's multipart POST /files/upload and GET /files/download against the same
+// resolved endpoint, completing all 8 SandboxProvider methods. See
+// docs/archive/opensandbox-poc-p0-research.md
 // for the full REST<->interface mapping that this package is built against.
 //
 // The REST client here is deliberately stdlib-only (net/http + encoding/json)
@@ -34,11 +34,15 @@ import (
 	"context"
 	"encoding/base64"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"io"
+	"io/fs"
+	"mime/multipart"
 	"net/http"
+	"net/textproto"
+	neturl "net/url"
 	"os"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"sync"
@@ -135,11 +139,6 @@ const (
 	sandboxExecUser = "cocola"
 )
 
-// errNotImplemented marks the methods deferred to P2. Returning a clear sentinel
-// (rather than panicking) keeps the provider safe to register: selecting it only
-// fails the operations not yet built, never the process.
-var errNotImplemented = errors.New("opensandbox: file transfer (WriteFile/ReadFile) not implemented in this PoC; maps to execd upload/download")
-
 // Provider is an OpenSandbox-backed SandboxProvider. It holds no sandbox state
 // of its own beyond a cocola-sid -> opensandbox-id map; the OpenSandbox server
 // is the source of truth for lifecycle.
@@ -216,7 +215,7 @@ func New(opts ...Option) (*Provider, error) {
 		// connection-state bug at negligible cost (each exec already lives for
 		// minutes, so per-exec connection setup is noise).
 		stream: &http.Client{Transport: &http.Transport{DisableKeepAlives: true}},
-		ids:     map[string]string{},
+		ids:    map[string]string{},
 		// Default to the always-reachable server-proxy endpoint. Opt out via
 		// COCOLA_OPENSANDBOX_DIRECT_EXEC=1 (or WithServerProxy(false)) only when
 		// sandbox-manager runs inside the sandbox network.
@@ -684,18 +683,142 @@ func (p *Provider) waitExecdReady(ctx context.Context, execdURL string, headers 
 	}
 }
 
-// WriteFile is not implemented in this PoC. It maps to an execd multipart
-// upload against the resolved execd endpoint and is off the streaming-exec
-// critical path.
-func (p *Provider) WriteFile(ctx context.Context, sid, path string, data []byte) error {
-	return errNotImplemented
+// fileMetadata is the JSON metadata part of an execd POST /files/upload request
+// (spec: FileMetadata). owner/group are omitted when empty so the upload keeps
+// execd's default ownership; mode is the octal permission integer (0o644 -> 644).
+type fileMetadata struct {
+	Path  string `json:"path"`
+	Owner string `json:"owner,omitempty"`
+	Group string `json:"group,omitempty"`
+	Mode  int    `json:"mode,omitempty"`
 }
 
-// ReadFile is not implemented in this PoC. It maps to an execd ranged download
-// against the resolved execd endpoint and is off the streaming-exec critical
-// path.
+// WriteFile uploads data to path inside the sandbox via execd's multipart
+// POST /files/upload. The request carries an ordered metadata part (JSON
+// FileMetadata, contentType application/json) followed by the file bytes
+// (octet-stream). Ownership is set to the Exec user (default "cocola") so files
+// written by the control plane are readable by the in-sandbox claude process,
+// which runs as that same non-root user; an empty execUser leaves ownership at
+// execd's default. Mirrors the docker provider's CopyToContainer semantics
+// (whole-file write by absolute path). The endpoint, auth headers, and a thaw
+// of a paused sandbox are resolved through the same chain Exec uses.
+func (p *Provider) WriteFile(ctx context.Context, sid, path string, data []byte) error {
+	osbID, err := p.resolve(sid)
+	if err != nil {
+		return err
+	}
+	if err := p.thawIfPaused(ctx, osbID); err != nil {
+		return err
+	}
+	execdURL, headers, err := p.resolveExecd(ctx, osbID)
+	if err != nil {
+		return fmt.Errorf("opensandbox: resolve execd: %w", err)
+	}
+
+	meta := fileMetadata{Path: path, Mode: 0o644}
+	if p.execUser != "" {
+		meta.Owner = p.execUser
+		meta.Group = p.execUser
+	}
+	metaJSON, err := json.Marshal(meta)
+	if err != nil {
+		return fmt.Errorf("opensandbox: marshal file metadata: %w", err)
+	}
+
+	var body bytes.Buffer
+	mw := multipart.NewWriter(&body)
+	// metadata part: execd reads it as application/json. CreateFormFile would
+	// pin octet-stream, so build the part header by hand.
+	metaHdr := textproto.MIMEHeader{}
+	metaHdr.Set("Content-Disposition", `form-data; name="metadata"`)
+	metaHdr.Set("Content-Type", "application/json")
+	mp, err := mw.CreatePart(metaHdr)
+	if err != nil {
+		return fmt.Errorf("opensandbox: create metadata part: %w", err)
+	}
+	if _, err := mp.Write(metaJSON); err != nil {
+		return fmt.Errorf("opensandbox: write metadata part: %w", err)
+	}
+	// file part: the bytes themselves, as octet-stream.
+	fileHdr := textproto.MIMEHeader{}
+	fileHdr.Set("Content-Disposition", fmt.Sprintf(`form-data; name="file"; filename=%q`, filepath.Base(path)))
+	fileHdr.Set("Content-Type", "application/octet-stream")
+	fp, err := mw.CreatePart(fileHdr)
+	if err != nil {
+		return fmt.Errorf("opensandbox: create file part: %w", err)
+	}
+	if _, err := fp.Write(data); err != nil {
+		return fmt.Errorf("opensandbox: write file part: %w", err)
+	}
+	if err := mw.Close(); err != nil {
+		return fmt.Errorf("opensandbox: close multipart writer: %w", err)
+	}
+
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, execdURL+"/files/upload", &body)
+	if err != nil {
+		return fmt.Errorf("opensandbox: new upload request: %w", err)
+	}
+	req.Header.Set("Content-Type", mw.FormDataContentType())
+	for k, v := range headers {
+		req.Header.Set(k, v)
+	}
+	resp, err := p.stream.Do(req)
+	if err != nil {
+		return fmt.Errorf("opensandbox: upload %s: %w", path, err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		rb, _ := io.ReadAll(io.LimitReader(resp.Body, 4096))
+		return fmt.Errorf("opensandbox: upload %s: status %d: %s", path, resp.StatusCode, strings.TrimSpace(string(rb)))
+	}
+	return nil
+}
+
+// ReadFile downloads the whole file at path from inside the sandbox via execd's
+// GET /files/download?path=. It reads the full object (no Range / offset-limit
+// line reads), mirroring the docker provider's CopyFromContainer semantics. A
+// 404 is wrapped as fs.ErrNotExist so callers can distinguish "missing" from a
+// transport error. The endpoint, auth headers, and a thaw of a paused sandbox
+// are resolved through the same chain Exec uses.
 func (p *Provider) ReadFile(ctx context.Context, sid, path string) ([]byte, error) {
-	return nil, errNotImplemented
+	osbID, err := p.resolve(sid)
+	if err != nil {
+		return nil, err
+	}
+	if err := p.thawIfPaused(ctx, osbID); err != nil {
+		return nil, err
+	}
+	execdURL, headers, err := p.resolveExecd(ctx, osbID)
+	if err != nil {
+		return nil, fmt.Errorf("opensandbox: resolve execd: %w", err)
+	}
+
+	q := neturl.Values{}
+	q.Set("path", path)
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, execdURL+"/files/download?"+q.Encode(), nil)
+	if err != nil {
+		return nil, fmt.Errorf("opensandbox: new download request: %w", err)
+	}
+	for k, v := range headers {
+		req.Header.Set(k, v)
+	}
+	resp, err := p.stream.Do(req)
+	if err != nil {
+		return nil, fmt.Errorf("opensandbox: download %s: %w", path, err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode == http.StatusNotFound {
+		return nil, fmt.Errorf("opensandbox: download %s: %w", path, fs.ErrNotExist)
+	}
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		rb, _ := io.ReadAll(io.LimitReader(resp.Body, 4096))
+		return nil, fmt.Errorf("opensandbox: download %s: status %d: %s", path, resp.StatusCode, strings.TrimSpace(string(rb)))
+	}
+	data, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return nil, fmt.Errorf("opensandbox: read download body %s: %w", path, err)
+	}
+	return data, nil
 }
 
 // --- helpers -----------------------------------------------------------------

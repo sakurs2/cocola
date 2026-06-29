@@ -7,6 +7,9 @@ import (
 	"encoding/json"
 	"errors"
 	"io"
+	"io/fs"
+	"mime"
+	"mime/multipart"
 	"net/http"
 	"regexp"
 	"strings"
@@ -192,21 +195,6 @@ func TestDestroy_DeletesAndDropsMapping(t *testing.T) {
 	p.mu.RUnlock()
 	if exists {
 		t.Error("id mapping should be dropped after Destroy")
-	}
-}
-
-func TestDeferredFileMethods_ReturnNotImplemented(t *testing.T) {
-	p := newStub(t, func(r *http.Request) (*http.Response, error) {
-		t.Fatal("deferred file methods must not issue HTTP calls")
-		return nil, nil
-	})
-	ctx := context.Background()
-
-	if err := p.WriteFile(ctx, "sbx", "/tmp/x", nil); !errors.Is(err, errNotImplemented) {
-		t.Errorf("WriteFile err = %v, want errNotImplemented", err)
-	}
-	if _, err := p.ReadFile(ctx, "sbx", "/tmp/x"); !errors.Is(err, errNotImplemented) {
-		t.Errorf("ReadFile err = %v, want errNotImplemented", err)
 	}
 }
 
@@ -899,5 +887,162 @@ func TestExec_WaitsForExecdReady(t *testing.T) {
 	}
 	if !sawOK {
 		t.Errorf("did not see real command output; events=%+v", evs)
+	}
+}
+
+// fileStub builds a Provider wired for the file-transfer tests. handler serves
+// the lifecycle GET /sandboxes/{id} (used by thawIfPaused), the endpoints
+// resolution, and the execd /files/* call under test.
+func fileStub(t *testing.T, handler roundTripFunc) *Provider {
+	t.Helper()
+	p, err := New(
+		WithBaseURL("http://opensandbox.test/v1"),
+		WithAPIKey("test-key"),
+		WithHTTPClient(&http.Client{Transport: handler}),
+	)
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	return p
+}
+
+// TestWriteFile_PostsMultipart asserts WriteFile hits execd's
+// POST /files/upload with a two-part multipart body whose metadata part carries
+// the target path (and the Exec user as owner) and whose file part carries the
+// exact input bytes.
+func TestWriteFile_PostsMultipart(t *testing.T) {
+	var (
+		gotMethod string
+		gotPath   string
+		gotCT     string
+		metaPath  string
+		metaOwner string
+		fileBytes []byte
+	)
+	p := fileStub(t, func(r *http.Request) (*http.Response, error) {
+		switch {
+		case r.Method == http.MethodGet && strings.HasSuffix(r.URL.Path, "/sandboxes/sbx-1"):
+			return jsonResp(http.StatusOK, `{"id":"sbx-1","status":{"state":"Running"}}`), nil
+		case r.Method == http.MethodGet && strings.Contains(r.URL.Path, "/endpoints/44772"):
+			return jsonResp(http.StatusOK, `{"endpoint":"http://execd.test:44772"}`), nil
+		case r.URL.Path == "/files/upload":
+			gotMethod = r.Method
+			gotPath = r.URL.Path
+			gotCT = r.Header.Get("Content-Type")
+			_, params, err := mime.ParseMediaType(gotCT)
+			if err != nil {
+				t.Fatalf("parse content-type %q: %v", gotCT, err)
+			}
+			mr := multipart.NewReader(r.Body, params["boundary"])
+			for {
+				part, err := mr.NextPart()
+				if err == io.EOF {
+					break
+				}
+				if err != nil {
+					t.Fatalf("next part: %v", err)
+				}
+				switch part.FormName() {
+				case "metadata":
+					var meta fileMetadata
+					if err := json.NewDecoder(part).Decode(&meta); err != nil {
+						t.Fatalf("decode metadata: %v", err)
+					}
+					metaPath = meta.Path
+					metaOwner = meta.Owner
+				case "file":
+					b, _ := io.ReadAll(part)
+					fileBytes = b
+				default:
+					t.Fatalf("unexpected part %q", part.FormName())
+				}
+			}
+			return jsonResp(http.StatusOK, ""), nil
+		default:
+			t.Fatalf("unexpected request %s %s", r.Method, r.URL.Path)
+			return nil, nil
+		}
+	})
+
+	want := []byte("hello cocola\n")
+	if err := p.WriteFile(context.Background(), "sbx-1", "/workspace/out.txt", want); err != nil {
+		t.Fatalf("WriteFile: %v", err)
+	}
+	if gotMethod != http.MethodPost || gotPath != "/files/upload" {
+		t.Errorf("hit %s %s, want POST /files/upload", gotMethod, gotPath)
+	}
+	if !strings.HasPrefix(gotCT, "multipart/form-data") {
+		t.Errorf("Content-Type = %q, want multipart/form-data", gotCT)
+	}
+	if metaPath != "/workspace/out.txt" {
+		t.Errorf("metadata.path = %q, want /workspace/out.txt", metaPath)
+	}
+	if metaOwner != "cocola" {
+		t.Errorf("metadata.owner = %q, want cocola (Exec user)", metaOwner)
+	}
+	if string(fileBytes) != string(want) {
+		t.Errorf("file part = %q, want %q", fileBytes, want)
+	}
+}
+
+// TestReadFile_GetsDownload asserts ReadFile hits GET /files/download?path=
+// and returns the body bytes verbatim.
+func TestReadFile_GetsDownload(t *testing.T) {
+	var gotQueryPath string
+	want := []byte("file contents 123\n")
+	p := fileStub(t, func(r *http.Request) (*http.Response, error) {
+		switch {
+		case r.Method == http.MethodGet && strings.HasSuffix(r.URL.Path, "/sandboxes/sbx-1"):
+			return jsonResp(http.StatusOK, `{"id":"sbx-1","status":{"state":"Running"}}`), nil
+		case r.Method == http.MethodGet && strings.Contains(r.URL.Path, "/endpoints/44772"):
+			return jsonResp(http.StatusOK, `{"endpoint":"http://execd.test:44772"}`), nil
+		case r.Method == http.MethodGet && r.URL.Path == "/files/download":
+			gotQueryPath = r.URL.Query().Get("path")
+			return &http.Response{
+				StatusCode: http.StatusOK,
+				Body:       io.NopCloser(strings.NewReader(string(want))),
+				Header:     make(http.Header),
+			}, nil
+		default:
+			t.Fatalf("unexpected request %s %s", r.Method, r.URL.Path)
+			return nil, nil
+		}
+	})
+
+	got, err := p.ReadFile(context.Background(), "sbx-1", "/workspace/data.csv")
+	if err != nil {
+		t.Fatalf("ReadFile: %v", err)
+	}
+	if gotQueryPath != "/workspace/data.csv" {
+		t.Errorf("download path query = %q, want /workspace/data.csv", gotQueryPath)
+	}
+	if string(got) != string(want) {
+		t.Errorf("ReadFile = %q, want %q", got, want)
+	}
+}
+
+// TestReadFile_NotFound asserts a 404 from execd surfaces as fs.ErrNotExist so
+// callers can distinguish a missing file from a transport failure.
+func TestReadFile_NotFound(t *testing.T) {
+	p := fileStub(t, func(r *http.Request) (*http.Response, error) {
+		switch {
+		case r.Method == http.MethodGet && strings.HasSuffix(r.URL.Path, "/sandboxes/sbx-1"):
+			return jsonResp(http.StatusOK, `{"id":"sbx-1","status":{"state":"Running"}}`), nil
+		case r.Method == http.MethodGet && strings.Contains(r.URL.Path, "/endpoints/44772"):
+			return jsonResp(http.StatusOK, `{"endpoint":"http://execd.test:44772"}`), nil
+		case r.Method == http.MethodGet && r.URL.Path == "/files/download":
+			return jsonResp(http.StatusNotFound, `{"error":"not found"}`), nil
+		default:
+			t.Fatalf("unexpected request %s %s", r.Method, r.URL.Path)
+			return nil, nil
+		}
+	})
+
+	_, err := p.ReadFile(context.Background(), "sbx-1", "/workspace/missing.txt")
+	if err == nil {
+		t.Fatal("expected error for 404, got nil")
+	}
+	if !errors.Is(err, fs.ErrNotExist) {
+		t.Errorf("error = %v, want wrapping fs.ErrNotExist", err)
 	}
 }
