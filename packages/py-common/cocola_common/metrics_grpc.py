@@ -11,6 +11,7 @@ Service/Query"), a bounded set; "code" is the StatusCode name (e.g. "OK",
 
 from __future__ import annotations
 
+import inspect
 import time
 
 import grpc
@@ -59,7 +60,13 @@ class PrometheusServerInterceptor(ServerInterceptor):
             return wrapper
 
         def _wrap_unary_stream(behavior):
-            async def wrapper(request, context):
+            # grpc.aio supports two server-streaming handler styles: an async
+            # generator that yields responses, or a coroutine that streams via
+            # context.write() and returns None. Preserve the original arity so
+            # both are handled (cocola's Query uses the context.write() style).
+            is_asyncgen = inspect.isasyncgenfunction(behavior)
+
+            async def gen_wrapper(request, context):
                 reg.inflight_inc("grpc")
                 start = time.perf_counter()
                 code = "OK"
@@ -78,7 +85,25 @@ class PrometheusServerInterceptor(ServerInterceptor):
                     reg.observe_request("grpc", method, code, time.perf_counter() - start)
                     reg.inflight_dec("grpc")
 
-            return wrapper
+            async def coro_wrapper(request, context):
+                reg.inflight_inc("grpc")
+                start = time.perf_counter()
+                code = "OK"
+                try:
+                    return await behavior(request, context)
+                except grpc.RpcError as exc:
+                    code = _code_name(getattr(exc, "code", lambda: None)())
+                    raise
+                except Exception:
+                    code = "UNKNOWN"
+                    raise
+                finally:
+                    if code == "OK":
+                        code = _code_name(context.code())
+                    reg.observe_request("grpc", method, code, time.perf_counter() - start)
+                    reg.inflight_dec("grpc")
+
+            return gen_wrapper if is_asyncgen else coro_wrapper
 
         # Rebuild the handler preserving its (de)serializers and arity. Only the
         # two server-side arities cocola uses are wrapped; others pass through.

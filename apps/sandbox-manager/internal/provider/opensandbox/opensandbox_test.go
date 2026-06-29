@@ -37,6 +37,9 @@ func newStub(t *testing.T, handler roundTripFunc) *Provider {
 		WithBaseURL("http://opensandbox.test/v1"),
 		WithAPIKey("test-key"),
 		WithHTTPClient(&http.Client{Transport: handler}),
+		// Disable the non-root drop by default so tests can assert the inner
+		// command body directly; TestExec_RunsAsExecUser* cover the wrap.
+		WithExecUser(""),
 	)
 	if err != nil {
 		t.Fatalf("New: %v", err)
@@ -264,6 +267,8 @@ func TestExec_BridgesSSEStream(t *testing.T) {
 	var gotCmdBody, gotAccept, gotExecdToken string
 	p := newStub(t, func(r *http.Request) (*http.Response, error) {
 		switch {
+		case r.Method == http.MethodGet && strings.HasSuffix(r.URL.Path, "/sandboxes/sbx-1"):
+			return jsonResp(http.StatusOK, `{"id":"sbx-1","status":{"state":"Running"}}`), nil
 		case r.Method == http.MethodGet && strings.Contains(r.URL.Path, "/endpoints/44772"):
 			endpointHit = true
 			return jsonResp(http.StatusOK, `{"endpoint":"http://execd.test:44772","headers":{"X-EXECD-ACCESS-TOKEN":"etok"}}`), nil
@@ -319,6 +324,208 @@ func TestExec_BridgesSSEStream(t *testing.T) {
 	}
 	if evs[2].Kind != provider.ExecEventExit || evs[2].Exit != 0 {
 		t.Errorf("event[2] = %+v, want exit 0", evs[2])
+	}
+}
+
+// TestExec_StdinPipedAsBase64 verifies that ExecRequest.Stdin is delivered to
+// the command despite execd's /command API having no stdin field: the provider
+// base64-encodes the bytes and pipes them in-shell into the real command. This
+// is what makes the Route A shim (which reads its Request JSON from stdin) work
+// over the OpenSandbox backend.
+func TestExec_StdinPipedAsBase64(t *testing.T) {
+	var gotCmdBody string
+	p := newStub(t, func(r *http.Request) (*http.Response, error) {
+		switch {
+		case r.Method == http.MethodGet && strings.HasSuffix(r.URL.Path, "/sandboxes/sbx-1"):
+			return jsonResp(http.StatusOK, `{"id":"sbx-1","status":{"state":"Running"}}`), nil
+		case r.Method == http.MethodGet && strings.Contains(r.URL.Path, "/endpoints/44772"):
+			return jsonResp(http.StatusOK, `{"endpoint":"http://execd.test:44772"}`), nil
+		case r.Method == http.MethodPost && r.URL.Path == "/command":
+			b, _ := io.ReadAll(r.Body)
+			gotCmdBody = string(b)
+			return sseResp(`{"type":"execution_complete","exit_code":0}` + "\n"), nil
+		default:
+			t.Fatalf("unexpected request %s %s", r.Method, r.URL.Path)
+			return nil, nil
+		}
+	})
+
+	ch, err := p.Exec(context.Background(), "sbx-1", provider.ExecRequest{
+		Cmd:   []string{"/opt/cocola/shim/entrypoint.sh"},
+		Stdin: []byte(`{"prompt":"hi"}`),
+	})
+	if err != nil {
+		t.Fatalf("Exec: %v", err)
+	}
+	_ = drainExec(ch)
+
+	// The command must base64-decode the exact stdin bytes and pipe them into
+	// the shell-quoted argv. JSON-escaped, the pipe and quotes survive as-is.
+	wantPipe := `printf %s 'eyJwcm9tcHQiOiJoaSJ9' | base64 -d | '/opt/cocola/shim/entrypoint.sh'`
+	if !strings.Contains(gotCmdBody, wantPipe) {
+		t.Errorf("command body missing stdin pipe\n  want substring: %s\n  body: %s", wantPipe, gotCmdBody)
+	}
+}
+
+// TestExec_NoStdinNoPipe verifies the stdin pipe is only added when Stdin is
+// non-empty: a plain command must not be wrapped.
+func TestExec_NoStdinNoPipe(t *testing.T) {
+	var gotCmdBody string
+	p := newStub(t, func(r *http.Request) (*http.Response, error) {
+		switch {
+		case r.Method == http.MethodGet && strings.HasSuffix(r.URL.Path, "/sandboxes/sbx-1"):
+			return jsonResp(http.StatusOK, `{"id":"sbx-1","status":{"state":"Running"}}`), nil
+		case r.Method == http.MethodGet && strings.Contains(r.URL.Path, "/endpoints/44772"):
+			return jsonResp(http.StatusOK, `{"endpoint":"http://execd.test:44772"}`), nil
+		case r.Method == http.MethodPost && r.URL.Path == "/command":
+			b, _ := io.ReadAll(r.Body)
+			gotCmdBody = string(b)
+			return sseResp(`{"type":"execution_complete","exit_code":0}` + "\n"), nil
+		default:
+			t.Fatalf("unexpected request %s %s", r.Method, r.URL.Path)
+			return nil, nil
+		}
+	})
+
+	ch, err := p.Exec(context.Background(), "sbx-1", provider.ExecRequest{
+		Cmd: []string{"echo", "hi"},
+	})
+	if err != nil {
+		t.Fatalf("Exec: %v", err)
+	}
+	_ = drainExec(ch)
+
+	if strings.Contains(gotCmdBody, "base64 -d") {
+		t.Errorf("command body unexpectedly wrapped with stdin pipe: %s", gotCmdBody)
+	}
+	if !strings.Contains(gotCmdBody, `"command":"'echo' 'hi'"`) {
+		t.Errorf("command body missing plain argv: %s", gotCmdBody)
+	}
+}
+
+// execStub is like newStub but keeps the configured execUser (default "cocola"),
+// so the runuser privilege-drop wrap is exercised.
+func execStub(t *testing.T, handler roundTripFunc) *Provider {
+	t.Helper()
+	p, err := New(
+		WithBaseURL("http://opensandbox.test/v1"),
+		WithAPIKey("test-key"),
+		WithHTTPClient(&http.Client{Transport: handler}),
+	)
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	return p
+}
+
+// TestExec_RunsAsExecUser asserts that, with the default execUser, the command
+// body re-execs the (stdin-piped) pipeline as the non-root brain user via
+// runuser. execd runs /command as root and the in-sandbox claude CLI refuses
+// --dangerously-skip-permissions under root, so this drop is mandatory.
+func TestExec_RunsAsExecUser(t *testing.T) {
+	var gotCmdBody string
+	p := execStub(t, func(r *http.Request) (*http.Response, error) {
+		switch {
+		case r.Method == http.MethodGet && strings.HasSuffix(r.URL.Path, "/sandboxes/sbx-1"):
+			return jsonResp(http.StatusOK, `{"id":"sbx-1","status":{"state":"Running"}}`), nil
+		case r.Method == http.MethodGet && strings.Contains(r.URL.Path, "/endpoints/44772"):
+			return jsonResp(http.StatusOK, `{"endpoint":"http://execd.test:44772"}`), nil
+		case r.Method == http.MethodPost && r.URL.Path == "/command":
+			b, _ := io.ReadAll(r.Body)
+			gotCmdBody = string(b)
+			return sseResp(`{"type":"execution_complete","exit_code":0}` + "\n"), nil
+		default:
+			t.Fatalf("unexpected request %s %s", r.Method, r.URL.Path)
+			return nil, nil
+		}
+	})
+
+	ch, err := p.Exec(context.Background(), "sbx-1", provider.ExecRequest{
+		Cmd:   []string{"/opt/cocola/shim/entrypoint.sh"},
+		Stdin: []byte(`{"prompt":"hi"}`),
+	})
+	if err != nil {
+		t.Fatalf("Exec: %v", err)
+	}
+	_ = drainExec(ch)
+
+	// The decoded stdin is piped INTO runuser, which forwards it to the shim.
+	// Flat pipeline, no nested bash -c (nesting broke shell parsing).
+	wantPipe := `printf %s 'eyJwcm9tcHQiOiJoaSJ9' | base64 -d | runuser -u 'cocola' -- '/opt/cocola/shim/entrypoint.sh'`
+	if !strings.Contains(gotCmdBody, wantPipe) {
+		t.Errorf("command body missing runuser-piped stdin\n  want substring: %s\n  body: %s", wantPipe, gotCmdBody)
+	}
+}
+
+// TestExec_RunsAsExecUserNoStdin asserts the drop applies even without stdin.
+func TestExec_RunsAsExecUserNoStdin(t *testing.T) {
+	var gotCmdBody string
+	p := execStub(t, func(r *http.Request) (*http.Response, error) {
+		switch {
+		case r.Method == http.MethodGet && strings.HasSuffix(r.URL.Path, "/sandboxes/sbx-1"):
+			return jsonResp(http.StatusOK, `{"id":"sbx-1","status":{"state":"Running"}}`), nil
+		case r.Method == http.MethodGet && strings.Contains(r.URL.Path, "/endpoints/44772"):
+			return jsonResp(http.StatusOK, `{"endpoint":"http://execd.test:44772"}`), nil
+		case r.Method == http.MethodPost && r.URL.Path == "/command":
+			b, _ := io.ReadAll(r.Body)
+			gotCmdBody = string(b)
+			return sseResp(`{"type":"execution_complete","exit_code":0}` + "\n"), nil
+		default:
+			t.Fatalf("unexpected request %s %s", r.Method, r.URL.Path)
+			return nil, nil
+		}
+	})
+
+	ch, err := p.Exec(context.Background(), "sbx-1", provider.ExecRequest{
+		Cmd: []string{"claude", "--version"},
+	})
+	if err != nil {
+		t.Fatalf("Exec: %v", err)
+	}
+	_ = drainExec(ch)
+
+	if !strings.Contains(gotCmdBody, `"command":"runuser -u 'cocola' -- 'claude' '--version'"`) {
+		t.Errorf("command body missing runuser-wrapped argv: %s", gotCmdBody)
+	}
+	if strings.Contains(gotCmdBody, "base64 -d") {
+		t.Errorf("command body unexpectedly piped stdin: %s", gotCmdBody)
+	}
+}
+
+// TestExec_ExecUserEnvDisablesDrop confirms COCOLA_OPENSANDBOX_EXEC_USER="root"
+// disables the privilege drop (runs as execd's default user).
+func TestExec_ExecUserEnvDisablesDrop(t *testing.T) {
+	t.Setenv("COCOLA_OPENSANDBOX_EXEC_USER", "root")
+	var gotCmdBody string
+	p := execStub(t, func(r *http.Request) (*http.Response, error) {
+		switch {
+		case r.Method == http.MethodGet && strings.HasSuffix(r.URL.Path, "/sandboxes/sbx-1"):
+			return jsonResp(http.StatusOK, `{"id":"sbx-1","status":{"state":"Running"}}`), nil
+		case r.Method == http.MethodGet && strings.Contains(r.URL.Path, "/endpoints/44772"):
+			return jsonResp(http.StatusOK, `{"endpoint":"http://execd.test:44772"}`), nil
+		case r.Method == http.MethodPost && r.URL.Path == "/command":
+			b, _ := io.ReadAll(r.Body)
+			gotCmdBody = string(b)
+			return sseResp(`{"type":"execution_complete","exit_code":0}` + "\n"), nil
+		default:
+			t.Fatalf("unexpected request %s %s", r.Method, r.URL.Path)
+			return nil, nil
+		}
+	})
+
+	ch, err := p.Exec(context.Background(), "sbx-1", provider.ExecRequest{
+		Cmd: []string{"echo", "hi"},
+	})
+	if err != nil {
+		t.Fatalf("Exec: %v", err)
+	}
+	_ = drainExec(ch)
+
+	if strings.Contains(gotCmdBody, "runuser") {
+		t.Errorf("EXEC_USER=root should disable the drop, got: %s", gotCmdBody)
+	}
+	if !strings.Contains(gotCmdBody, `"command":"'echo' 'hi'"`) {
+		t.Errorf("command body missing plain argv: %s", gotCmdBody)
 	}
 }
 
@@ -561,5 +768,136 @@ func TestCreate_SendsVolumes(t *testing.T) {
 	}
 	if len(want) != 0 {
 		t.Errorf("missing volumes on wire: %v", want)
+	}
+}
+
+// TestExec_StdoutNewlineFraming verifies the provider restores newline framing
+// on stdout events. execd line-buffers the child's stdout and emits one event
+// per line with the trailing newline STRIPPED; the downstream consumer
+// (agent-runtime shim_provider) reassembles NDJSON by splitting on "\n", so
+// without re-appended newlines its JSON objects concatenate with no delimiter
+// and none are ever parsed (the empty-output bug). Each stdout event must carry
+// exactly one trailing newline regardless of whether execd stripped it.
+func TestExec_StdoutNewlineFraming(t *testing.T) {
+	p := newStub(t, func(r *http.Request) (*http.Response, error) {
+		switch {
+		case r.Method == http.MethodGet && strings.HasSuffix(r.URL.Path, "/sandboxes/sbx-1"):
+			return jsonResp(http.StatusOK, `{"id":"sbx-1","status":{"state":"Running"}}`), nil
+		case r.Method == http.MethodGet && strings.Contains(r.URL.Path, "/endpoints/44772"):
+			return jsonResp(http.StatusOK, `{"endpoint":"http://execd.test:44772"}`), nil
+		case r.Method == http.MethodPost && r.URL.Path == "/command":
+			// Two NDJSON lines, neither with a trailing newline inside the
+			// event "text" field -- exactly how execd delivers them.
+			stream := `{"type":"stdout","text":"{\"type\":\"text\",\"text\":\"a\"}"}` + "\n" +
+				`{"type":"stdout","text":"{\"type\":\"done\"}"}` + "\n" +
+				`{"type":"execution_complete","exit_code":0}` + "\n"
+			return sseResp(stream), nil
+		default:
+			t.Fatalf("unexpected request %s %s", r.Method, r.URL.Path)
+			return nil, nil
+		}
+	})
+
+	ch, err := p.Exec(context.Background(), "sbx-1", provider.ExecRequest{Cmd: []string{"x"}})
+	if err != nil {
+		t.Fatalf("Exec: %v", err)
+	}
+	evs := drainExec(ch)
+
+	var stdout []string
+	for _, e := range evs {
+		if e.Kind == provider.ExecEventStdout {
+			stdout = append(stdout, string(e.Stdout))
+		}
+	}
+	if len(stdout) != 2 {
+		t.Fatalf("got %d stdout events, want 2: %q", len(stdout), stdout)
+	}
+	for i, s := range stdout {
+		if !strings.HasSuffix(s, "\n") {
+			t.Errorf("stdout[%d] = %q, want trailing newline", i, s)
+		}
+		if strings.Count(s, "\n") != 1 {
+			t.Errorf("stdout[%d] = %q, want exactly one newline", i, s)
+		}
+	}
+	// Concatenating the bridged stdout must yield newline-delimited NDJSON the
+	// consumer can split back into the original two objects.
+	joined := strings.Join(stdout, "")
+	lines := strings.Split(strings.TrimRight(joined, "\n"), "\n")
+	if len(lines) != 2 {
+		t.Fatalf("reassembled %d lines, want 2: %q", len(lines), lines)
+	}
+	for _, ln := range lines {
+		var obj map[string]any
+		if err := json.Unmarshal([]byte(ln), &obj); err != nil {
+			t.Errorf("reassembled line is not valid JSON: %q (%v)", ln, err)
+		}
+	}
+}
+
+// TestExec_WaitsForExecdReady verifies the cold-start readiness gate: a freshly
+// started/resumed container reports Running before execd binds its socket, in
+// which case the server proxy returns 500 "Server disconnected". Exec must probe
+// with an idempotent no-op until execd answers 2xx, then run the real command --
+// rather than failing or running the (possibly non-idempotent) command against a
+// not-yet-ready execd.
+func TestExec_WaitsForExecdReady(t *testing.T) {
+	var probeCount, realRan int
+	var ranTrueProbe bool
+	p := newStub(t, func(r *http.Request) (*http.Response, error) {
+		switch {
+		case r.Method == http.MethodGet && strings.HasSuffix(r.URL.Path, "/sandboxes/sbx-1"):
+			return jsonResp(http.StatusOK, `{"id":"sbx-1","status":{"state":"Running"}}`), nil
+		case r.Method == http.MethodGet && strings.Contains(r.URL.Path, "/endpoints/44772"):
+			return jsonResp(http.StatusOK, `{"endpoint":"http://execd.test:44772"}`), nil
+		case r.Method == http.MethodPost && r.URL.Path == "/command":
+			b, _ := io.ReadAll(r.Body)
+			body := string(b)
+			if strings.Contains(body, `"command":"true"`) {
+				ranTrueProbe = true
+				probeCount++
+				// First probe: execd not yet listening -> proxy 500.
+				if probeCount == 1 {
+					return jsonResp(http.StatusInternalServerError,
+						`Server disconnected without sending a response`), nil
+				}
+				// Second probe: execd is up.
+				return sseResp(`{"type":"execution_complete","exit_code":0}` + "\n"), nil
+			}
+			// The real command runs only after readiness succeeds.
+			realRan++
+			return sseResp(`{"type":"stdout","text":"ok"}` + "\n" +
+				`{"type":"execution_complete","exit_code":0}` + "\n"), nil
+		default:
+			t.Fatalf("unexpected request %s %s", r.Method, r.URL.Path)
+			return nil, nil
+		}
+	})
+
+	ch, err := p.Exec(context.Background(), "sbx-1", provider.ExecRequest{Cmd: []string{"real"}})
+	if err != nil {
+		t.Fatalf("Exec: %v", err)
+	}
+	evs := drainExec(ch)
+
+	if !ranTrueProbe {
+		t.Fatal("expected an idempotent `true` readiness probe before the real command")
+	}
+	if probeCount < 2 {
+		t.Errorf("probeCount = %d, want >= 2 (first 500 must be retried)", probeCount)
+	}
+	if realRan != 1 {
+		t.Errorf("real command ran %d times, want exactly 1", realRan)
+	}
+	// The real command's stdout must survive (proves we ran it, not the probe).
+	var sawOK bool
+	for _, e := range evs {
+		if e.Kind == provider.ExecEventStdout && strings.Contains(string(e.Stdout), "ok") {
+			sawOK = true
+		}
+	}
+	if !sawOK {
+		t.Errorf("did not see real command output; events=%+v", evs)
 	}
 }

@@ -20,9 +20,15 @@ class FakeContext:
 
     def __init__(self):
         self._code = None
+        self.written = []
 
     def code(self):
         return self._code
+
+    async def write(self, msg):
+        # grpc.aio coroutine-style streaming: the runtime's Query streams via
+        # context.write() and returns None (it is not an async generator).
+        self.written.append(msg)
 
 
 def _details(method: str):
@@ -85,6 +91,65 @@ async def test_unary_stream_records_ok():
     )
     assert n == 1.0
     # in-flight returned to zero
+    inflight = _sample(
+        reg,
+        "cocola_requests_in_flight",
+        {"service": "agent-runtime-test", "transport": "grpc"},
+    )
+    assert inflight == 0.0
+
+
+async def test_unary_stream_coroutine_handler_records_ok():
+    """The runtime's Query is a *coroutine* that streams via context.write() and
+    returns None, not an async generator. The interceptor must support this
+    arity too (regression: 'async for' requires __aiter__, got coroutine)."""
+    reg = Registry("agent-runtime-test")
+    interceptor = PrometheusServerInterceptor(reg)
+
+    async def behavior(request, context):
+        await context.write("a")
+        await context.write("b")
+        # returns None — no yield
+
+    wrapped = await _intercept_unary_stream(interceptor, METHOD, behavior)
+    ctx = FakeContext()
+    result = await wrapped.unary_stream("req", ctx)
+
+    assert result is None
+    assert ctx.written == ["a", "b"]  # streaming preserved through the wrapper
+    count = _sample(
+        reg,
+        "cocola_requests_total",
+        {"service": "agent-runtime-test", "transport": "grpc", "method": METHOD, "code": "OK"},
+    )
+    assert count == 1.0
+    inflight = _sample(
+        reg,
+        "cocola_requests_in_flight",
+        {"service": "agent-runtime-test", "transport": "grpc"},
+    )
+    assert inflight == 0.0
+
+
+async def test_unary_stream_coroutine_handler_records_unknown_on_error():
+    reg = Registry("agent-runtime-test")
+    interceptor = PrometheusServerInterceptor(reg)
+
+    async def behavior(request, context):
+        await context.write("partial")
+        raise RuntimeError("boom")
+
+    wrapped = await _intercept_unary_stream(interceptor, METHOD, behavior)
+
+    with pytest.raises(RuntimeError, match="boom"):
+        await wrapped.unary_stream("req", FakeContext())
+
+    count = _sample(
+        reg,
+        "cocola_requests_total",
+        {"service": "agent-runtime-test", "transport": "grpc", "method": METHOD, "code": "UNKNOWN"},
+    )
+    assert count == 1.0
     inflight = _sample(
         reg,
         "cocola_requests_in_flight",

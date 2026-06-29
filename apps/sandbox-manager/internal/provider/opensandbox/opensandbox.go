@@ -32,6 +32,7 @@ import (
 	"bufio"
 	"bytes"
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -70,6 +71,25 @@ const execdAuthHeader = "X-EXECD-ACCESS-TOKEN"
 // defaultExecTimeout caps a single Exec when the caller leaves req.Timeout at 0.
 const defaultExecTimeout = 5 * time.Minute
 
+// resumeWaitTimeout / resumePollInterval bound the wait for a thawed sandbox to
+// report Running before Exec opens the execd stream (see thawIfPaused).
+const (
+	resumeWaitTimeout  = 30 * time.Second
+	resumePollInterval = 250 * time.Millisecond
+)
+
+// execReadyTimeout / execReadyPollInterval bound the wait for execd to start
+// accepting commands after the container reports Running. A freshly started
+// (or freshly resumed) sandbox container races: the lifecycle state flips to
+// Running the instant the container process starts, but execd has not yet bound
+// its listening socket, so the server proxy returns 500 "Server disconnected
+// without sending a response" for that brief window. waitExecdReady probes with
+// an idempotent no-op command until execd answers (see waitExecdReady).
+const (
+	execReadyTimeout      = 30 * time.Second
+	execReadyPollInterval = 300 * time.Millisecond
+)
+
 // execEventBuffer sizes the Exec result channel so a fast-producing SSE stream
 // does not block on a momentarily slow consumer. Matches the docker backend.
 const execEventBuffer = 32
@@ -105,6 +125,14 @@ const (
 	// strings, e.g. "500m" / "512Mi").
 	defaultCPU    = "500m"
 	defaultMemory = "512Mi"
+	// sandboxExecUser is the non-root user every Exec runs as, matching the
+	// brain image's Dockerfile (useradd -u 10001 cocola). execd runs the
+	// /command body as root by default; the claude CLI refuses
+	// --dangerously-skip-permissions under root for safety, so the control
+	// plane MUST drop to this user -- mirroring the docker provider, which pins
+	// `docker exec --user cocola`. Overridable via COCOLA_OPENSANDBOX_EXEC_USER
+	// (empty disables the drop, i.e. run as the image default / root).
+	sandboxExecUser = "cocola"
 )
 
 // errNotImplemented marks the methods deferred to P2. Returning a clear sentinel
@@ -137,6 +165,10 @@ type Provider struct {
 
 	mu  sync.RWMutex
 	ids map[string]string // cocola sandbox id -> opensandbox id
+
+	// execUser is the OS user every Exec drops to (default "cocola", uid 10001).
+	// Empty runs commands as execd's default (root). See sandboxExecUser.
+	execUser string
 }
 
 // Option configures the Provider.
@@ -152,6 +184,10 @@ func WithAPIKey(k string) Option { return func(p *Provider) { p.apiKey = k } }
 // (true, default) or the sandbox's direct endpoint (false). Direct only works
 // when the caller shares the sandbox network.
 func WithServerProxy(v bool) Option { return func(p *Provider) { p.useServerProxy = v } }
+
+// WithExecUser overrides the OS user Exec drops to (default "cocola"). An empty
+// string disables the privilege drop, running commands as execd's default user.
+func WithExecUser(u string) Option { return func(p *Provider) { p.execUser = u } }
 
 // WithHTTPClient injects a custom http.Client used for BOTH the lifecycle REST
 // calls and the execd SSE stream. This is the seam unit tests use to supply a
@@ -171,12 +207,24 @@ func New(opts ...Option) (*Provider, error) {
 		baseURL: strings.TrimRight(os.Getenv("COCOLA_OPENSANDBOX_URL"), "/"),
 		apiKey:  os.Getenv("COCOLA_OPENSANDBOX_API_KEY"),
 		http:    &http.Client{Timeout: defaultHTTPTimeout},
-		stream:  &http.Client{}, // no timeout: Exec context governs lifetime
+		// No timeout: the Exec context governs stream lifetime. Keep-alives are
+		// DISABLED on purpose: the OpenSandbox server proxy ({server}/sandboxes/
+		// {id}/proxy/{port}) mishandles connection reuse for streaming exec -- a
+		// pooled connection from the waitExecdReady probe, reused for the real
+		// command, truncates the command's SSE stream after ~1s (only an empty
+		// EXIT is seen). A fresh connection per request sidesteps the proxy's
+		// connection-state bug at negligible cost (each exec already lives for
+		// minutes, so per-exec connection setup is noise).
+		stream: &http.Client{Transport: &http.Transport{DisableKeepAlives: true}},
 		ids:     map[string]string{},
 		// Default to the always-reachable server-proxy endpoint. Opt out via
 		// COCOLA_OPENSANDBOX_DIRECT_EXEC=1 (or WithServerProxy(false)) only when
 		// sandbox-manager runs inside the sandbox network.
 		useServerProxy: !envTruthy("COCOLA_OPENSANDBOX_DIRECT_EXEC"),
+		// Drop privileges to the brain image's non-root user by default so the
+		// in-sandbox claude CLI accepts --dangerously-skip-permissions. Override
+		// (incl. "" to disable) via COCOLA_OPENSANDBOX_EXEC_USER.
+		execUser: execUserFromEnv(),
 	}
 	for _, o := range opts {
 		o(p)
@@ -401,9 +449,26 @@ func (p *Provider) Exec(ctx context.Context, sid string, req provider.ExecReques
 		return nil, fmt.Errorf("opensandbox: empty command")
 	}
 
+	// On-demand allocation (ADR-0015) pauses an idle sandbox between turns to
+	// free memory; execd in a paused container accepts the POST but the frozen
+	// process never runs, so the stream returns empty (no stdout, no error).
+	// Thaw before exec -- mirrors the docker provider's thawIfPaused.
+	if err := p.thawIfPaused(ctx, osbID); err != nil {
+		return nil, err
+	}
+
 	execdURL, headers, err := p.resolveExecd(ctx, osbID)
 	if err != nil {
 		return nil, fmt.Errorf("opensandbox: resolve execd: %w", err)
+	}
+
+	// A freshly started or freshly resumed container reports Running before
+	// execd has bound its listening socket; an exec in that window gets a 500
+	// "Server disconnected" from the server proxy. The real command may be
+	// non-idempotent (e.g. it drives the brain), so probe readiness first with
+	// an idempotent no-op until execd answers.
+	if err := p.waitExecdReady(ctx, execdURL, headers); err != nil {
+		return nil, err
 	}
 
 	// cocola ExecRequest.Cmd is an argv (like docker exec), but execd's
@@ -411,8 +476,36 @@ func (p *Provider) Exec(ctx context.Context, sid string, req provider.ExecReques
 	// Naively space-joining would double-shell (e.g. ["sh","-c","a; b"] would
 	// be reparsed so that only "a" runs under the inner sh). Shell-quote each
 	// argv element so execd's shell reconstructs the exact argv we intended.
+	command := shellJoin(req.Cmd)
+
+	// Drop privileges to the non-root brain user. execd runs the /command body
+	// as root; the in-sandbox claude CLI refuses --dangerously-skip-permissions
+	// under root, so we re-exec the command as p.execUser via runuser. runuser
+	// runs the argv DIRECTLY (no nested shell), preserves the environment --
+	// including the injected ANTHROPIC_* creds -- and sets HOME to the user's
+	// home so ~/.claude resolves. This mirrors the docker provider's
+	// `docker exec --user cocola`. Empty execUser keeps the execd default user.
+	if p.execUser != "" {
+		command = fmt.Sprintf("runuser -u %s -- %s", shellQuote(p.execUser), command)
+	}
+
+	// execd's /command API has no stdin field (specs/execd-api.yaml
+	// RunCommandRequest is command/cwd/envs/timeout/uid/gid only), so cocola's
+	// ExecRequest.Stdin cannot be delivered natively. The Route A shim reads its
+	// one-shot Request JSON from stdin, so we MUST feed it. Since the command is
+	// re-parsed by a shell, we pipe stdin in-shell: base64-encode the bytes
+	// (binary-safe, and the base64 alphabet needs no shell quoting) and decode
+	// them back through a pipe INTO the command. The pipe is prepended AFTER the
+	// runuser wrap so the bytes flow into runuser's stdin, which forwards them to
+	// the target process -- a single, flat shell pipeline with no nested
+	// `bash -c` quoting (nesting broke shell parsing: "unexpected EOF").
+	if len(req.Stdin) > 0 {
+		b64 := base64.StdEncoding.EncodeToString(req.Stdin)
+		command = fmt.Sprintf("printf %%s '%s' | base64 -d | %s", b64, command)
+	}
+
 	body := runCommandRequest{
-		Command: shellJoin(req.Cmd),
+		Command: command,
 		Cwd:     req.Cwd,
 		Envs:    req.Env,
 	}
@@ -484,6 +577,113 @@ func (p *Provider) Resume(ctx context.Context, sid string) error {
 	return p.do(ctx, http.MethodPost, "/sandboxes/"+osbID+"/resume", nil, nil)
 }
 
+// thawIfPaused resumes a paused sandbox (by opensandbox id) and waits for it to
+// report Running before Exec opens the execd stream. execd in a Paused container
+// silently swallows commands (the process is frozen), so an exec against a
+// paused sandbox would hang/return empty -- the on-demand allocation model
+// (ADR-0015) pauses idle sandboxes between turns, so this is the common case for
+// any follow-up turn. A failed status read is non-fatal: let the exec path
+// surface the authoritative error rather than masking it here.
+func (p *Provider) thawIfPaused(ctx context.Context, osbID string) error {
+	var info sandboxInfo
+	if err := p.do(ctx, http.MethodGet, "/sandboxes/"+osbID, nil, &info); err != nil {
+		return nil // inspect failure is not fatal; exec produces the real error
+	}
+	switch info.Status.State {
+	case "Running":
+		return nil
+	case "Paused", "Pausing":
+		// resume below
+	default:
+		// Pending/Stopping/Terminated/Failed: not our case to fix; let exec
+		// surface the authoritative error.
+		return nil
+	}
+	if err := p.do(ctx, http.MethodPost, "/sandboxes/"+osbID+"/resume", nil, nil); err != nil {
+		return fmt.Errorf("opensandbox: resume before exec: %w", err)
+	}
+	// Wait (bounded) for Running -- resume may be asynchronous.
+	deadline := time.Now().Add(resumeWaitTimeout)
+	for time.Now().Before(deadline) {
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-time.After(resumePollInterval):
+		}
+		var st sandboxInfo
+		if err := p.do(ctx, http.MethodGet, "/sandboxes/"+osbID, nil, &st); err != nil {
+			continue
+		}
+		if st.Status.State == "Running" {
+			return nil
+		}
+	}
+	// Timed out waiting; proceed anyway and let exec report the truth.
+	return nil
+}
+
+// waitExecdReady probes execd with an idempotent no-op command until it answers
+// with a success status, bounding the wait by execReadyTimeout. It closes the
+// readiness race window described at execReadyTimeout: a container can report
+// Running before execd binds its socket, in which case the server proxy returns
+// 500 "Server disconnected without sending a response" (or the dial fails). Both
+// are treated as not-yet-ready and retried. A 2xx means execd is accepting
+// commands; the probe body is drained and discarded. Any non-5xx, non-success
+// status is returned as a real error (execd is up but rejecting). On timeout the
+// last observed error is returned so the caller surfaces the true cause.
+func (p *Provider) waitExecdReady(ctx context.Context, execdURL string, headers map[string]string) error {
+	// `true` is a shell builtin that always exits 0 with no output -- the
+	// cheapest possible idempotent probe.
+	b, _ := json.Marshal(runCommandRequest{Command: "true"})
+	deadline := time.Now().Add(execReadyTimeout)
+	var lastErr error
+	for {
+		probeCtx, cancel := context.WithTimeout(ctx, execReadyPollInterval*4)
+		req, err := http.NewRequestWithContext(probeCtx, http.MethodPost, execdURL+"/command", bytes.NewReader(b))
+		if err != nil {
+			cancel()
+			return fmt.Errorf("opensandbox: execd readiness probe: %w", err)
+		}
+		req.Header.Set("Content-Type", "application/json")
+		req.Header.Set("Accept", "text/event-stream")
+		for k, v := range headers {
+			req.Header.Set(k, v)
+		}
+		resp, err := p.stream.Do(req)
+		if err != nil {
+			lastErr = err
+		} else {
+			status := resp.StatusCode
+			io.Copy(io.Discard, io.LimitReader(resp.Body, 64*1024))
+			resp.Body.Close()
+			switch {
+			case status >= 200 && status < 300:
+				cancel()
+				return nil
+			case status >= 500:
+				// execd not yet listening: proxy reports the upstream as down.
+				lastErr = fmt.Errorf("opensandbox: execd not ready: status %d", status)
+			default:
+				// 4xx etc: execd is up but rejecting -- a real error.
+				cancel()
+				return fmt.Errorf("opensandbox: execd readiness probe: status %d", status)
+			}
+		}
+		cancel()
+		if !time.Now().Before(deadline) {
+			if lastErr == nil {
+				lastErr = fmt.Errorf("opensandbox: execd not ready after %s", execReadyTimeout)
+			}
+			return fmt.Errorf("opensandbox: wait execd ready: %w", lastErr)
+		}
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-time.After(execReadyPollInterval):
+		}
+	}
+}
+
 // WriteFile is not implemented in this PoC. It maps to an execd multipart
 // upload against the resolved execd endpoint and is off the streaming-exec
 // critical path.
@@ -530,6 +730,23 @@ func envTruthy(key string) bool {
 	default:
 		return false
 	}
+}
+
+// execUserFromEnv resolves the Exec privilege-drop user from the environment.
+// Unset -> the default brain user (sandboxExecUser). Set-but-empty (or the
+// literal "root") -> "" so Exec runs as execd's default user; any other value
+// is used verbatim. This lets operators disable the drop for non-cocola images
+// without recompiling, while keeping the secure default for the brain image.
+func execUserFromEnv() string {
+	v, ok := os.LookupEnv("COCOLA_OPENSANDBOX_EXEC_USER")
+	if !ok {
+		return sandboxExecUser
+	}
+	v = strings.TrimSpace(v)
+	if v == "" || strings.EqualFold(v, "root") {
+		return ""
+	}
+	return v
 }
 
 // mapVolumes translates cocola's two-volume filesystem model (ADR-0008) into the
@@ -758,7 +975,17 @@ func processSSEPayload(payload string, out chan<- provider.ExecEvent) bool {
 
 	switch ev.Type {
 	case "stdout":
-		out <- provider.ExecEvent{Kind: provider.ExecEventStdout, Stdout: []byte(ev.Text)}
+		// execd line-buffers the child's stdout and emits one event per line
+		// with the trailing newline stripped. The downstream consumer
+		// (agent-runtime shim_provider) reassembles NDJSON by splitting on
+		// "\n", exactly as it does for the docker provider whose raw
+		// `docker exec` stream preserves newlines. Restore the newline so both
+		// backends present an identical newline-delimited byte stream;
+		// otherwise the shim's JSON objects concatenate with no delimiter and
+		// none are ever parsed. We normalise to exactly one trailing newline
+		// in case a future execd build stops stripping it.
+		text := strings.TrimRight(ev.Text, "\n") + "\n"
+		out <- provider.ExecEvent{Kind: provider.ExecEventStdout, Stdout: []byte(text)}
 	case "stderr":
 		out <- provider.ExecEvent{Kind: provider.ExecEventStderr, Stderr: []byte(ev.Text)}
 	case "error":

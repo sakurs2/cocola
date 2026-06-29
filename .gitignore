@@ -75,3 +75,6 @@ deploy/llm-config.json
 .drawio-tmp
 # M-minimal demo runtime data (sandbox volumes, never committed)
 .cocola-data/
+
+# Local Claude Code agent state (never committed)
+.claude/
