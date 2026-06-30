@@ -1,6 +1,6 @@
 # ADR-0015: 默认按需冷启动分配,warm pool 降级为可选优化(OpenSandbox-only 语境)
 
-- Status: Accepted
+- Status: Accepted（"默认按需分配"仍有效;"warm pool 保留为可选"部分已由 ADR-0016 收敛——能力已移除）
 - Date: 2026-06-28
 - Deciders: @cocola-maintainers
 - Amends: ADR-0008 §3「Warm pool」、ADR-0012(在 OpenSandbox 成为唯一主后端后再次收敛)
@@ -99,3 +99,11 @@ provider 已删除**。这让 ADR-0012 的两个前提都需要重新校准:
     分配主路径对话闭环(本 ADR 关联任务 #28)。
   - 未来若需 OpenSandbox 预热收益:起 ADR 评估「按 (user,session) 预测性预创建」。
   - README 路线图:把 warm pool 标注为「可选、默认关闭」。
+
+## Amendment (2026-06-30, ADR-0016)
+
+本 ADR 的策略表态(**按需冷启动分配为默认且唯一主路径**)继续有效。但其备选 D
+「保留 warm pool 全部代码」已由 **ADR-0016 推翻**:warm pool 能力(warmpool 包、
+`provider.Adopter` 缝口、binder 的 tryAdopt、metrics 的 pooled 维度、main.go 接线与
+`COCOLA_WARMPOOL_*` env)已整体移除。理由:OpenSandbox 上的不兼容是永久性的、保留缝口
+只带来维护负担、未来真要预热收益需另起机制(预测性预创建)。详见 ADR-0016。

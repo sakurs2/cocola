@@ -34,6 +34,8 @@ Code shows _what_ and _how_. ADRs preserve _why_ — invaluable when:
 | 0009 | Run the Claude Code agent runtime inside each user's sandbox (Route A)                               | Accepted |
 | 0010 | Gateway tool-use passthrough (Anthropic rich-payload)                                                | Accepted |
 | 0011 | Observability three pillars (RED metrics + OTel tracing) and load-testing baseline                   | Accepted |
-| 0012 | Warm-pool pre-warm strategy under the PVC/bind-mount volume model (amends ADR-0008 §3)               | Accepted |
+| 0012 | Warm-pool pre-warm strategy under the PVC/bind-mount volume model (amends ADR-0008 §3)               | Superseded by 0016 |
 | 0013 | OpenSandbox as a pluggable SandboxProvider backend (not a sandbox-layer replacement)                  | Accepted |
 | 0014 | OpenSandbox as the primary sandbox backend; retire k8s provider (docker kept as fallback)            | Accepted |
+| 0015 | On-demand cold-start allocation as default; warm pool kept as optional (OpenSandbox-only)             | Accepted (amended by 0016) |
+| 0016 | Remove the warm pool capability entirely (supersedes 0012; amends 0015)                              | Accepted |

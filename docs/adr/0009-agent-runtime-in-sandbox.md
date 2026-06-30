@@ -131,7 +131,8 @@ updated ADR-0008.
   perimeter.
 - **Negative / accepted risk** — the sandbox image gets heavy (Node + Claude Code
   + Python), so cold start grows from container-spawn to seconds; mitigated by
-  the lazy-start + hibernate + warm-pool strategy in ADR-0008. Credentials now
+  the lazy-start + hibernate strategy in ADR-0008 (the warm-pool part was later
+  removed — see ADR-0016; on-demand cold-start is the only allocation path). Credentials now
   live inside the untrusted-code container, so **egress lockdown is mandatory,
   not optional**. `agent-runtime` must be rebuilt as a router (revises ADR-0007),
   and llm-gateway must accept traffic originating from sandboxes (revises

@@ -1,6 +1,6 @@
 # ADR-0012: warm pool 在 PVC/bind-mount 卷模型下的预热策略修订
 
-- Status: Accepted（在 OpenSandbox 成为唯一主后端后由 ADR-0015 再次收敛，见文末）
+- Status: Superseded by ADR-0016（warm pool 能力已整体移除;期间经 ADR-0015 收敛,见文末）
 - Date: 2026-06-17
 - Deciders: @cocola-maintainers
 - Amends: ADR-0008 §3「Warm pool」
@@ -111,3 +111,10 @@ ADR-0008 §3 把 warm pool 描述为「idle pool → **bind on demand** → retu
 部署里无载体;② 实测 OpenSandbox 运行中沙箱 API 不提供增删卷端点,adopt-by-remount
 在唯一主后端上依旧不可实现。故 cocola **默认走按需冷启动分配**,warm pool 降级为默认
 关闭的可选优化(当前无后端可 adopt)。完整决策见 ADR-0015。
+
+## Superseded (2026-06-30, ADR-0016)
+
+warm pool 能力已由 ADR-0016 **整体移除**(代码 + 文档):OpenSandbox 运行中沙箱无热挂卷
+API,adopt-by-remount 永久不可实现;自托管中小并发的冷启动可接受;保留缝口只带来维护
+负担,且未来若需预热收益要的是另一套机制(预测性预创建)。本 ADR 及其修订仅作历史保留。
+完整决策见 ADR-0016。

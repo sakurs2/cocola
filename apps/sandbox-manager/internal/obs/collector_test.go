@@ -34,10 +34,10 @@ func TestBinderCollector_EmitsSnapshot(t *testing.T) {
 # HELP cocola_sandbox_active_count Live (non-paused) sandboxes, sampled by the reaper.
 # TYPE cocola_sandbox_active_count gauge
 cocola_sandbox_active_count{service="sandbox-manager"} 5
-# HELP cocola_sandbox_pool_hit_rate Sandbox pool reuse rate: hits/(hits+misses).
+# HELP cocola_sandbox_pool_hit_rate Session->sandbox reuse rate: hits/(hits+misses).
 # TYPE cocola_sandbox_pool_hit_rate gauge
 cocola_sandbox_pool_hit_rate{service="sandbox-manager"} 0.7
-# HELP cocola_sandbox_pool_hits_total Sessions that reused a warm sandbox.
+# HELP cocola_sandbox_pool_hits_total Sessions that reused their existing sandbox.
 # TYPE cocola_sandbox_pool_hits_total counter
 cocola_sandbox_pool_hits_total{service="sandbox-manager"} 7
 # HELP cocola_sandbox_pool_misses_total Sessions that cold-created a sandbox.

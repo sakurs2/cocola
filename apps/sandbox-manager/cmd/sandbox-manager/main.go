@@ -19,7 +19,6 @@ import (
 
 	"github.com/cocola-project/cocola/apps/sandbox-manager/internal/obs"
 	"github.com/cocola-project/cocola/apps/sandbox-manager/internal/orchestrator"
-	"github.com/cocola-project/cocola/apps/sandbox-manager/internal/orchestrator/warmpool"
 	"github.com/cocola-project/cocola/apps/sandbox-manager/internal/provider"
 	"github.com/cocola-project/cocola/apps/sandbox-manager/internal/provider/docker"
 	"github.com/cocola-project/cocola/apps/sandbox-manager/internal/provider/opensandbox"
@@ -76,16 +75,11 @@ func main() {
 			WithMetrics(bm).
 			WithNetworking(net)
 
-		// Warm pool (ADR-0008 §3): optional, OFF unless COCOLA_WARMPOOL_ENABLED.
-		// When on, a new session adopts a pre-warmed sandbox instead of paying
-		// the cold-create cost. Pure optimisation — an empty/disabled pool or an
-		// adopt failure degrades silently to a normal create. Requires the
-		// provider to implement the optional provider.Adopter capability;
-		// otherwise warm boxes stay un-adoptable and every miss cold-creates.
-		poolImg := getenv("COCOLA_SANDBOX_IMAGE", "")
-		pool := warmpool.New(kv, p, warmpool.ConfigFromEnv(poolImg)).WithNetworking(net)
-		binder.WithWarmPool(pool)
-
+		// Allocation is on-demand cold-start only (ADR-0015/0016): every miss
+		// cold-creates a sandbox and mounts the per-user + per-session volumes at
+		// create time. The warm pool capability was removed in ADR-0016 — see
+		// that ADR for the rationale (OpenSandbox exposes no hot-mount-volume API,
+		// so adopt-by-remount was permanently infeasible on the only backend).
 		go binder.RunReaper(ctx) // background two-stage Pause-then-Destroy GC
 		eff := binder.EffectiveConfig()
 		log.Sugar().Infow("session<->sandbox binder enabled",
@@ -93,23 +87,6 @@ func main() {
 			"heartbeat_every", eff.HeartbeatEvery,
 			"destroy_grace", eff.DestroyGrace,
 			"reaper_every", eff.ReaperEvery)
-
-		if pool.Enabled() {
-			if _, ok := p.(provider.Adopter); !ok {
-				// ADR-0015: on the current primary backend (OpenSandbox) no
-				// provider implements Adopter, so an enabled pool just spins
-				// (warm → checkout → can't remount → destroy → cold create).
-				// cocola defaults to on-demand cold-start allocation; keep the
-				// pool OFF here. The seam stays for a future hot-mount backend.
-				log.Sugar().Warnw("warm pool enabled but provider can't adopt; pool will spin with no benefit — recommend disabling (COCOLA_WARMPOOL_ENABLED) on this backend, see ADR-0015",
-					"provider", backend)
-			}
-			go pool.Run(ctx) // background refill + age-out loop
-			pc := pool.EffectiveConfig()
-			log.Sugar().Infow("warm pool enabled",
-				"min_idle", pc.MinIdle, "max", pc.Max,
-				"refill_every", pc.RefillEvery, "max_lifetime", pc.MaxLifetime)
-		}
 	}
 
 	lis, err := net.Listen("tcp", addr)

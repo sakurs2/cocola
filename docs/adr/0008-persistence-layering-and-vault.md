@@ -118,7 +118,7 @@ Reusing and extending ADR-0003's lease/GC:
   DaemonSet image warmer)**, which kills the largest cold-start cost (the 1.9 GB
   image pull) without touching the volume model. See ADR-0012 for the full
   decision. Suggested starting params (tunable, mirroring reference practice):
-  idle cooldown ~30 min with renew-on-activity, hard max lifetime ~2 days. **Further revised by ADR-0015:** after ADR-0014 made OpenSandbox the sole primary backend (k8s provider removed), the DaemonSet image-pre-pull path no longer applies, and OpenSandbox exposes no API to hot-mount volumes onto a running sandbox; cocola therefore **defaults to on-demand cold-start allocation** and warm pool is an OFF-by-default optional optimisation with no adopting backend today. See ADR-0015.
+  idle cooldown ~30 min with renew-on-activity, hard max lifetime ~2 days. **Further revised by ADR-0015:** after ADR-0014 made OpenSandbox the sole primary backend (k8s provider removed), the DaemonSet image-pre-pull path no longer applies, and OpenSandbox exposes no API to hot-mount volumes onto a running sandbox; cocola therefore **defaults to on-demand cold-start allocation** and warm pool is an OFF-by-default optional optimisation with no adopting backend today. See ADR-0015. **Finally removed by ADR-0016:** the warm pool capability was deleted entirely (code + docs) — on-demand cold-start is now the only allocation path.
 
 ### 4. Sandbox backend: K8s + gVisor (runsc) first; provider stays pluggable
 

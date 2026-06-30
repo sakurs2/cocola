@@ -3,7 +3,7 @@
 - Status: Accepted（PoC P0–P2 离线验证 + 真 server 端到端实测于 2026-06-28 全链路通过）
 - Date: 2026-06-24（PoC 回填 2026-06-26;真 server 实测回填 2026-06-28）
 - Deciders: @cocola-maintainers
-- Depends on: ADR-0002（SandboxProvider 抽象铁律）、ADR-0008（持久化分层与 K8s/gVisor 后端）、ADR-0012（warm pool 预热策略)
+- Depends on: ADR-0002（SandboxProvider 抽象铁律）、ADR-0008（持久化分层与 K8s/gVisor 后端）、ADR-0012（warm pool 预热策略,已由 ADR-0016 移除)
 
 ## Context
 
@@ -119,7 +119,8 @@ Destroy/Exec(流式)/Pause/Resume 六方法 + `newProvider` 工厂接线;WriteFi
   - 直接复用 OpenSandbox 已生产化的 Docker/K8s 运行时、gVisor 隔离、SandboxSnapshot
     快照,避免在 cocola 内重复造同类能力。
   - `SandboxProvider` 核心接口、docker/k8s 后端、warm-pool 引擎与降级逻辑全部无需
-    改动——本 ADR 是新增可选后端,不是回退或重写。
+    改动——本 ADR 是新增可选后端,不是回退或重写。(注:warm-pool 引擎此后已由
+    ADR-0016 整体移除,与本 ADR 的"可插拔后端"结论无关。)
   - 为 #15 悬而未决的 RAM-kept resume 提供了一条可验证的现成实现路径。
 
 - **Negative / 接受的代价**

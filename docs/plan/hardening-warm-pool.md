@@ -1,5 +1,10 @@
 # Plan: Warm Pool 预热池 —— 隐藏 Route-A 沙箱冷启动延迟
 
+> ⛔ **已废弃(2026-06-30)。** warm pool 能力已由 **ADR-0016** 整体移除(代码 + 文档):
+> OpenSandbox 运行中沙箱无热挂卷 API,adopt-by-remount 永久不可实现;自托管中小并发的
+> 冷启动可接受。本文仅作历史保留,不再作为待办落地方案。
+
+
 > 状态:规划中(2026-06-16)。本文是落地方案,**先评审、未动代码**。
 > 关联:ADR-0008 §3「Warm pool」、§4 与 Consequences「cold start the thing the
 > warm pool must hide」;ADR-0009 Consequences「mitigated by lazy-start +

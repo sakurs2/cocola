@@ -1,11 +1,12 @@
 package orchestrator
 
 // Live binder->real-OpenSandbox integration check for the ON-DEMAND allocation
-// path (ADR-0015). Skipped unless COCOLA_OPENSANDBOX_URL is set, so the normal
-// hermetic suite is unaffected. This exercises the exact slow path a /v1/chat
-// turn drives: AcquireWithOutcome -> per-session lock -> provider.Create (with
-// mapVolumes double-volume mount) -> bind; then the fast path (reuse) and a real
-// Exec inside the bound box. No warm pool, no listeners started.
+// path (ADR-0015/0016). Skipped unless COCOLA_OPENSANDBOX_URL is set, so the
+// normal hermetic suite is unaffected. This exercises the exact slow path a
+// /v1/chat turn drives: AcquireWithOutcome -> per-session lock -> provider.Create
+// (with mapVolumes double-volume mount) -> bind; then the fast path (reuse) and a
+// real Exec inside the bound box. On-demand cold-start is the only allocation
+// path (warm pool removed in ADR-0016); no listeners started.
 
 import (
 	"context"
@@ -27,13 +28,6 @@ func TestLive_OnDemandAllocation_OpenSandbox(t *testing.T) {
 	if err != nil {
 		t.Fatalf("opensandbox.New: %v", err)
 	}
-	// Confirm the chosen primary backend does NOT implement Adopter — i.e. warm
-	// pool would only spin here, which is exactly why ADR-0015 makes on-demand
-	// allocation the default path.
-	if _, ok := provider.SandboxProvider(p).(provider.Adopter); ok {
-		t.Fatalf("expected OpenSandbox to NOT implement Adopter (ADR-0015)")
-	}
-
 	b := NewBinder(rds.NewFake(), p, Config{
 		LeaseTTL:       30 * time.Second,
 		HeartbeatEvery: 10 * time.Second,

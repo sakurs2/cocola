@@ -42,8 +42,8 @@ func NewBinderCollector(src snapshotter, constLabels prometheus.Labels) *BinderC
 	}
 	return &BinderCollector{
 		src:         src,
-		hitRate:     d("cocola_sandbox_pool_hit_rate", "Sandbox pool reuse rate: hits/(hits+misses)."),
-		hits:        d("cocola_sandbox_pool_hits_total", "Sessions that reused a warm sandbox."),
+		hitRate:     d("cocola_sandbox_pool_hit_rate", "Session->sandbox reuse rate: hits/(hits+misses)."),
+		hits:        d("cocola_sandbox_pool_hits_total", "Sessions that reused their existing sandbox."),
 		misses:      d("cocola_sandbox_pool_misses_total", "Sessions that cold-created a sandbox."),
 		active:      d("cocola_sandbox_active_count", "Live (non-paused) sandboxes, sampled by the reaper."),
 		createP50Ms: d("cocola_sandbox_create_p50_milliseconds", "p50 of provider create latency on the miss path."),
