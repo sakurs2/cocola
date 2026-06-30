@@ -53,3 +53,11 @@ provider 接口全部实装。
 - 不实现 Range / 按行 offset-limit 下载(execd 支持,本次不需要)。
 - 不做远端目录创建(mkdir)、不引入 opensandbox SDK(维持 stdlib-only REST 客户端)。
 - 不在文件操作前加 execd 就绪探针(对齐 docker provider)。
+
+## 后续:verify harness 接入原生文件往返(cmd/opensandbox-verify)
+此前 Stage 4 仅用 shell exec 做文件往返(WriteFile/ReadFile 还是占位)。本次新增
+**Stage 4n**:直接调 provider 的 WriteFile/ReadFile,独立于 shell——
+- 写入字节 → 读回比对字节一致;
+- 对不存在路径读取,断言返回 `fs.ErrNotExist`。
+失败计入既有 pass/fail 汇总,真 server 跑一遍即可回归原生文件 API。
+`gofmt` 干净、`GOWORK=off go build/vet` 全绿。

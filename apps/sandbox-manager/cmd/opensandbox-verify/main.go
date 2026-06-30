@@ -39,9 +39,12 @@
 package main
 
 import (
+	"bytes"
 	"context"
+	"errors"
 	"flag"
 	"fmt"
+	"io/fs"
 	"os"
 	"strings"
 	"time"
@@ -143,9 +146,9 @@ func main() {
 	}, 0)
 
 	// ---- Stage 4: write-then-read via Exec ----------------------------------
-	// WriteFile/ReadFile are deferred in the PoC, so the harness proves
-	// round-trip file IO through shell exec instead (the same capability the
-	// runtime relies on today).
+	// A shell-level round-trip (the capability the runtime has always relied
+	// on); Stage 4n below exercises the native WriteFile/ReadFile provider
+	// methods over the same execd endpoint.
 	stage("4. file round-trip via exec")
 	const marker = "cocola-verify-marker-42"
 	run.exec("4a. write file", sid, provider.ExecRequest{
@@ -155,6 +158,13 @@ func main() {
 		Cmd: []string{"sh", "-c", "cat /tmp/cocola-verify.txt"},
 	}, 0)
 	fmt.Printf("   (expect 4b stdout to contain %q)\n", marker)
+
+	// ---- Stage 4n: native WriteFile / ReadFile ------------------------------
+	// Exercise the provider's own file API (execd multipart upload + download),
+	// independent of shell exec: write bytes, read them back, and confirm a
+	// missing path surfaces fs.ErrNotExist.
+	stage("4n. native WriteFile / ReadFile")
+	run.fileRoundTrip(sid, "/tmp/cocola-native.txt", []byte(marker+"\n"))
 
 	// ---- Stage 5: Pause / Resume + latency ----------------------------------
 	if *skipPause {
@@ -278,6 +288,45 @@ func (r *runner) exec(label, sid string, req provider.ExecRequest, wantExit int3
 		r.fail(label)
 	default:
 		fmt.Printf("     -> OK (exit=%d)\n", gotExit)
+	}
+}
+
+// fileRoundTrip exercises the native WriteFile/ReadFile provider methods:
+// write want to path, read it back and compare bytes, then confirm a bogus
+// path returns fs.ErrNotExist. Each check feeds the shared pass/fail tally.
+func (r *runner) fileRoundTrip(sid, path string, want []byte) {
+	fmt.Printf("  [4n.write] WriteFile %s (%dB)\n", path, len(want))
+	if err := r.p.WriteFile(r.ctx, sid, path, want); err != nil {
+		fmt.Printf("     -> FAIL: WriteFile: %v\n", err)
+		r.fail("4n.write")
+		return
+	}
+	fmt.Println("     -> OK")
+
+	fmt.Printf("  [4n.read] ReadFile %s\n", path)
+	got, err := r.p.ReadFile(r.ctx, sid, path)
+	switch {
+	case err != nil:
+		fmt.Printf("     -> FAIL: ReadFile: %v\n", err)
+		r.fail("4n.read")
+	case !bytes.Equal(got, want):
+		fmt.Printf("     -> FAIL: bytes mismatch: got %q want %q\n", got, want)
+		r.fail("4n.read")
+	default:
+		fmt.Printf("     -> OK (%dB, content matches)\n", len(got))
+	}
+
+	missing := path + ".does-not-exist"
+	fmt.Printf("  [4n.missing] ReadFile %s (expect fs.ErrNotExist)\n", missing)
+	switch _, err := r.p.ReadFile(r.ctx, sid, missing); {
+	case errors.Is(err, fs.ErrNotExist):
+		fmt.Println("     -> OK (fs.ErrNotExist)")
+	case err != nil:
+		fmt.Printf("     -> FAIL: wrong error: %v\n", err)
+		r.fail("4n.missing")
+	default:
+		fmt.Println("     -> FAIL: missing path returned no error")
+		r.fail("4n.missing")
 	}
 }
 
