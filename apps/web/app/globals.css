@@ -1,3 +1,9 @@
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
+
+/* Full-height shell so the chat thread (h-screen) fills the viewport. */
+html,
+body {
+  height: 100%;
+}
