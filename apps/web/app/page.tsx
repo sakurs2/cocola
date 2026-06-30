@@ -15,7 +15,7 @@ import { Thread } from "@/components/assistant-ui/thread";
 export default function Home() {
   return (
     <CocolaRuntimeProvider>
-      <div className="flex h-screen flex-col">
+      <div className="flex h-screen flex-col bg-background text-foreground">
         <SessionBar />
         <div className="min-h-0 flex-1">
           <Thread />
@@ -31,9 +31,9 @@ export default function Home() {
 function SessionBar() {
   const { token, setToken, sessionId, setSessionId, sandbox } = useCocola();
   return (
-    <header className="flex flex-wrap items-center gap-x-4 gap-y-2 border-b border-neutral-200 bg-white px-4 py-2">
+    <header className="flex flex-wrap items-center gap-x-4 gap-y-2 border-b border-border bg-background px-4 py-2">
       <div className="flex items-center gap-2">
-        <span className="text-sm font-semibold text-neutral-900">cocola</span>
+        <span className="text-sm font-semibold text-foreground">cocola</span>
         {sandbox ? (
           <span
             className="rounded-full bg-emerald-50 px-2 py-0.5 font-mono text-[11px] text-emerald-700"
@@ -42,7 +42,7 @@ function SessionBar() {
             sandbox {sandbox.sandboxId.slice(0, 8) || "—"} {sandbox.reused ? "(reused)" : "(new)"}
           </span>
         ) : (
-          <span className="rounded-full bg-neutral-100 px-2 py-0.5 font-mono text-[11px] text-neutral-500">
+          <span className="rounded-full bg-muted px-2 py-0.5 font-mono text-[11px] text-muted-foreground">
             no sandbox yet
           </span>
         )}
@@ -50,14 +50,14 @@ function SessionBar() {
 
       <div className="ml-auto flex items-center gap-2">
         <input
-          className="w-56 rounded border border-neutral-300 px-2 py-1 font-mono text-xs"
+          className="w-56 rounded border border-input bg-background px-2 py-1 font-mono text-xs outline-none focus:border-ring"
           value={token}
           onChange={(e) => setToken(e.target.value)}
           placeholder="Bearer token (blank if auth off)"
           aria-label="Bearer token"
         />
         <input
-          className="w-24 rounded border border-neutral-300 px-2 py-1 font-mono text-xs"
+          className="w-24 rounded border border-input bg-background px-2 py-1 font-mono text-xs outline-none focus:border-ring"
           value={sessionId}
           onChange={(e) => setSessionId(e.target.value)}
           placeholder="session id"
