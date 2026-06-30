@@ -727,10 +727,12 @@ func (p *Provider) WriteFile(ctx context.Context, sid, path string, data []byte)
 
 	var body bytes.Buffer
 	mw := multipart.NewWriter(&body)
-	// metadata part: execd reads it as application/json. CreateFormFile would
-	// pin octet-stream, so build the part header by hand.
+	// metadata part: execd reads it via multipart FormFile("metadata"), so the
+	// part MUST carry a filename (a nameless part is parsed as a plain form
+	// value and FormFile then reports "metadata file is missing"). We also pin
+	// application/json; CreateFormFile would force octet-stream.
 	metaHdr := textproto.MIMEHeader{}
-	metaHdr.Set("Content-Disposition", `form-data; name="metadata"`)
+	metaHdr.Set("Content-Disposition", `form-data; name="metadata"; filename="metadata.json"`)
 	metaHdr.Set("Content-Type", "application/json")
 	mp, err := mw.CreatePart(metaHdr)
 	if err != nil {

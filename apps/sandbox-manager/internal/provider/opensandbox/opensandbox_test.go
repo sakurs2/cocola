@@ -912,12 +912,13 @@ func fileStub(t *testing.T, handler roundTripFunc) *Provider {
 // exact input bytes.
 func TestWriteFile_PostsMultipart(t *testing.T) {
 	var (
-		gotMethod string
-		gotPath   string
-		gotCT     string
-		metaPath  string
-		metaOwner string
-		fileBytes []byte
+		gotMethod    string
+		gotPath      string
+		gotCT        string
+		metaPath     string
+		metaOwner    string
+		metaFilename string
+		fileBytes    []byte
 	)
 	p := fileStub(t, func(r *http.Request) (*http.Response, error) {
 		switch {
@@ -944,6 +945,7 @@ func TestWriteFile_PostsMultipart(t *testing.T) {
 				}
 				switch part.FormName() {
 				case "metadata":
+					metaFilename = part.FileName()
 					var meta fileMetadata
 					if err := json.NewDecoder(part).Decode(&meta); err != nil {
 						t.Fatalf("decode metadata: %v", err)
@@ -979,6 +981,12 @@ func TestWriteFile_PostsMultipart(t *testing.T) {
 	}
 	if metaOwner != "cocola" {
 		t.Errorf("metadata.owner = %q, want cocola (Exec user)", metaOwner)
+	}
+	// Regression: execd reads the metadata part via FormFile, so it MUST carry
+	// a filename; a nameless part is parsed as a plain form value and execd
+	// rejects the upload with "metadata file is missing" (400).
+	if metaFilename == "" {
+		t.Errorf("metadata part has no filename; execd FormFile would reject it")
 	}
 	if string(fileBytes) != string(want) {
 		t.Errorf("file part = %q, want %q", fileBytes, want)
