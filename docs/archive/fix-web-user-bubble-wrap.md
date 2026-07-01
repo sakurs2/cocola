@@ -3,21 +3,33 @@
 日期：2026-07-01 · 关联：feat-web-ui-openwebui-look.md(Open WebUI 观感改造)
 
 ## 现象
-窄视口下,用户发送的短词(如 "hello")在气泡内被从单词中间强行折成两行
-("he" / "llo")。
+用户发送的短词(如 "hello")在气泡内被从单词中间强行折成两行("he" / "llo")。
 
-## 根因
-用户气泡用了 `break-words`(`overflow-wrap: break-word`)。该值不参与元素最小
-内容宽度计算,当气泡被 grid 列压窄到比单词还窄时,会在字母间强行断行。而气泡的
-`max-w-[80%]` 本应让它自然收窄而非劈开短词。
+## 根因(修订)
+> 说明：本文件曾记录过一次"改 overflow-wrap 即可"的修复,但那次未能解决问题——
+> 下面是复盘后确认的真正根因。
+
+用户气泡自身用了**百分比** `max-w-[80%]`,而它所在的 grid 列宽是 `auto`——列宽
+由内容决定,气泡的百分比 `max-width` 又相对该列宽计算,形成循环依赖。
+
+按 CSS 规范,这种"百分比 max-width 依赖于收缩包裹(shrink-to-fit)列宽"的情况下,
+浏览器解析时先把百分比 `max-width` 当作 `none` 算出列的 `max-content` 宽度
+(= "hello" 的完整宽度),再对气泡套用 80%。于是气泡的实际 `max-width`
+= 0.8 × "hello" 宽度 < "hello" 宽度,单词放不下 → 被拦腰断开。
+
+叠加 `[overflow-wrap:anywhere]` 只会让它"更愿意断",反而加重现象。这偏离了官方
+assistant-ui 用户气泡的写法。
 
 ## 改动(apps/web)
-- `components/assistant-ui/thread.tsx` —— 用户气泡换行策略由 `break-words` 改为
-  `[overflow-wrap:anywhere]` + `whitespace-pre-wrap`。`anywhere` 会把字内断点计入
-  最小内容宽度,使气泡优先靠 `max-w-[80%]` 收窄,仅在超长无空格串确实放不下时
-  才断行;`whitespace-pre-wrap` 保留用户输入里的换行与连续空格。
+- `components/assistant-ui/thread.tsx` —— 用户气泡的 `max-width` 由百分比
+  `max-w-[80%]` 改为**固定长度** `max-w-[calc(var(--thread-max-width)*0.8)]`
+  (对齐官方 assistant-ui 写法)。该长度不依赖列宽,气泡在放得下短词的前提下自然
+  收窄,短词不再被压断。换行策略回归 `break-words` + `whitespace-pre-wrap`:
+  `break-words` 仅在真正的超长无空格串(如长 URL)时断行,`whitespace-pre-wrap`
+  保留用户输入的换行与连续空格。
 
 ## 校验
+- prettier PASS(code style 一致)
 - lint PASS(next lint,无告警)
 - build PASS(146 kB / 233 kB,与既有一致)
 
