@@ -42,6 +42,7 @@ from cocola_common.tracing import grpc_aio_server_interceptor
 
 from cocola_agent_runtime.agent_provider import AgentProvider
 from cocola_agent_runtime.echo_provider import EchoProvider
+from cocola_agent_runtime.objstore import fetcher_from_env
 from cocola_agent_runtime.sandbox_binder import (
     SandboxBinder,
     SandboxExecutor,
@@ -197,6 +198,7 @@ async def serve() -> None:
         skills=_build_skill_catalog(),
         binder=_build_binder(),
         executor=executor,
+        objstore=fetcher_from_env(),
     )
     # Observability: RED metrics for every RPC. agent-runtime has no HTTP server
     # of its own, so unlike the llm-gateway it exposes /metrics on a dedicated

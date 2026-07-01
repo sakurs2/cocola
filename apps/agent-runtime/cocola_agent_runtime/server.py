@@ -25,22 +25,36 @@ Design choices, all to avoid reinventing what we already have:
 
 from __future__ import annotations
 
+import asyncio
 import json
 import os
 import pathlib
 import posixpath
 import tempfile
-from typing import Any
+from typing import Any, NamedTuple
 
 from cocola.agent.v1 import agent_pb2 as pb
 from cocola.agent.v1 import agent_pb2_grpc as pb_grpc
 from cocola_common import get_logger
 
 from cocola_agent_runtime.agent_provider import AgentEvent, AgentOptions, AgentProvider
+from cocola_agent_runtime.objstore import Fetcher
 from cocola_agent_runtime.sandbox_binder import SandboxBinder, SandboxExecutor
 from cocola_agent_runtime.skill_loader import SkillCatalog, apply_skills_to_options
 
 log = get_logger("cocola.agent-runtime.server")
+
+
+class _ResolvedAttachment(NamedTuple):
+    """An attachment with its bytes in hand, whatever the delivery path.
+
+    filename is the raw (unsanitized) upload name; content is the full bytes,
+    either from the inline push (small files) or pulled from the object store
+    (large files, ADR-0017 P1a). Provisioning sanitizes the name at write time.
+    """
+
+    filename: str
+    content: bytes
 
 
 def _sanitize_filename(name: str) -> str:
@@ -102,6 +116,7 @@ class AgentRuntimeServicer(pb_grpc.AgentRuntimeServiceServicer):
         skills: SkillCatalog | None = None,
         binder: SandboxBinder | None = None,
         executor: SandboxExecutor | None = None,
+        objstore: Fetcher | None = None,
     ) -> None:
         self._provider = provider
         self._skills = skills
@@ -111,6 +126,12 @@ class AgentRuntimeServicer(pb_grpc.AgentRuntimeServiceServicer):
         # wired, attachments are dropped with a warning rather than failing the
         # turn -- the same posture as running without a binder.
         self._executor = executor
+        # Object store to pull large (key-only) attachments from on the model's
+        # behalf (ADR-0017 P1a). The gateway uploads every file and ships large
+        # ones as an oss_key with no inline bytes; here we materialize those
+        # before provisioning. Optional: unset => a key-only attachment surfaces
+        # as a clean provisioning error rather than a silent empty file.
+        self._objstore = objstore
 
     async def Query(self, request, context):  # noqa: N802 - gRPC-generated name
         """Server-streaming RPC: run one agent turn, stream events back.
@@ -243,12 +264,41 @@ class AgentRuntimeServicer(pb_grpc.AgentRuntimeServiceServicer):
         if not attachments:
             return "", None
 
+        # Materialize any key-only (large) attachments by pulling their bytes
+        # from the object store on the model's behalf (ADR-0017 P1a), so both
+        # delivery routes below see a uniform "filename + bytes in hand" shape.
+        resolved = await self._materialize_attachments(attachments)
+
         if self._executor is not None and sandbox_id:
-            preamble = await self._provision_into_sandbox(sandbox_id, attachments)
+            preamble = await self._provision_into_sandbox(sandbox_id, resolved)
             return preamble, None
 
-        preamble, workspace = self._provision_onto_host(session_id, attachments)
+        preamble, workspace = self._provision_onto_host(session_id, resolved)
         return preamble, workspace
+
+    async def _materialize_attachments(self, attachments) -> list[_ResolvedAttachment]:
+        """Resolve every attachment to (filename, bytes).
+
+        Small files arrive with inline ``content``; large files arrive as an
+        ``oss_key`` with empty content and are pulled via the object-store
+        fetcher. get_object is a blocking SDK call, so it runs in a worker thread
+        to avoid stalling the event loop. A missing fetcher or a fetch failure
+        for a key-only file raises -- the caller turns it into a clean terminal
+        `error` event rather than provisioning an empty file.
+        """
+        resolved: list[_ResolvedAttachment] = []
+        for att in attachments:
+            content = bytes(att.content)
+            oss_key = getattr(att, "oss_key", "")
+            if not content and oss_key:
+                if self._objstore is None:
+                    raise RuntimeError(
+                        f"attachment {att.filename!r} is object-store only "
+                        f"(key={oss_key}) but no object store is configured"
+                    )
+                content = await asyncio.to_thread(self._objstore.get, oss_key)
+            resolved.append(_ResolvedAttachment(filename=att.filename, content=content))
+        return resolved
 
     async def _provision_into_sandbox(self, sandbox_id, attachments) -> str:
         """Route A: write attachments into the bound sandbox's ./uploads/."""
