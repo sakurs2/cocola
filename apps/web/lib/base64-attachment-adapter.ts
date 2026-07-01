@@ -11,8 +11,12 @@
 // FileMessagePart carrying the RAW base64 bytes + filename + mime, so onNew can
 // forward {filename, content_b64, mime} verbatim over the wire.
 //
-// P0 scope (docs/plan/web-file-upload.md §3.3): inline only, single-file size
-// cap, accept whitelist. Binary-large / OSS-backed uploads are P1.
+// Scope (ADR-0017): the client still inlines every attachment as base64 in the
+// POST body; the gateway is the one that uploads to MinIO (source of truth) and
+// splits small/large by COCOLA_ATTACHMENT_INLINE_MAX_BYTES. So this cap is NOT
+// the small/large split threshold -- it is the hard ceiling on what a single
+// upload may carry over the client->gateway JSON hop. Client-side presigned
+// direct-to-OSS upload (which would lift this ceiling) is P1b/TODO.
 
 import type {
   AttachmentAdapter,
@@ -20,8 +24,17 @@ import type {
   PendingAttachment,
 } from "@assistant-ui/react";
 
-// 1 MB inline cap (base64 inflates ~33%, still well within a JSON POST body).
-const MAX_BYTES = 1024 * 1024;
+// Hard upload ceiling, configurable so it is not baked in (mirrors the
+// gateway's own configurable threshold, ADR-0017). NEXT_PUBLIC_ so it reaches
+// this browser-side adapter; a non-positive/invalid value falls back to 32 MiB
+// (comfortably above the 16 MiB default split so both delivery paths -- inline
+// and backend-pull -- are reachable from the UI).
+const DEFAULT_MAX_BYTES = 32 * 1024 * 1024;
+function resolveMaxBytes(): number {
+  const raw = Number(process.env.NEXT_PUBLIC_ATTACHMENT_MAX_BYTES);
+  return Number.isFinite(raw) && raw > 0 ? raw : DEFAULT_MAX_BYTES;
+}
+const MAX_BYTES = resolveMaxBytes();
 
 // Text / code / common images. Kept permissive but explicit; binary blobs are
 // rejected at add() time in P0.

@@ -293,6 +293,13 @@ services:
       NODE_ENV: "production"
       # The browser talks to the gateway; expose its public URL to the app.
       NEXT_PUBLIC_GATEWAY_URL: "http://localhost:8080"
+      # Hard ceiling on a single attachment carried inline over the browser->
+      # gateway JSON hop (ADR-0017). NOT the small/large split threshold -- the
+      # gateway splits by COCOLA_ATTACHMENT_INLINE_MAX_BYTES and backend-pulls
+      # large ones. Default 32MiB (> the 16MiB split, so both paths are UI-
+      # reachable). NEXT_PUBLIC_ is inlined at build time, so override here only
+      # takes effect on a rebuild.
+      NEXT_PUBLIC_ATTACHMENT_MAX_BYTES: "${NEXT_PUBLIC_ATTACHMENT_MAX_BYTES:-33554432}"
       # The web server-side SSE proxy (app/api/chat/route.ts) calls the gateway
       # from INSIDE the compose network, so it must use the service name, not
       # 127.0.0.1 (which would resolve to the web container itself).
