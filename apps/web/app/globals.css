@@ -3,11 +3,11 @@
 @tailwind utilities;
 
 /*
- * shadcn-style design tokens. The assistant-ui Thread / Button / Markdown
- * components are authored against these semantic colors (bg-background,
- * text-muted-foreground, border-border, …); tailwind.config.ts maps the
- * Tailwind color names onto these CSS variables. Values are the canonical
- * shadcn "slate" palette (HSL channels, no hsl() wrapper).
+ * shadcn-style design tokens. The assistant-ui Thread / Button / Markdown /
+ * sidebar components are authored against these semantic colors (bg-background,
+ * text-muted-foreground, border-border, bg-sidebar, …); tailwind.config.ts maps
+ * the Tailwind color names onto these CSS variables. The .dark palette targets
+ * an Open WebUI style near-black look; light values kept for completeness.
  */
 @layer base {
   :root {
@@ -31,28 +31,41 @@
     --input: 214.3 31.8% 91.4%;
     --ring: 222.2 84% 4.9%;
     --radius: 0.5rem;
+
+    --sidebar: 0 0% 98%;
+    --sidebar-foreground: 222.2 84% 4.9%;
+    --sidebar-border: 214.3 31.8% 91.4%;
+    --sidebar-accent: 210 40% 96.1%;
+    --sidebar-accent-foreground: 222.2 47.4% 11.2%;
   }
 
   .dark {
-    --background: 222.2 84% 4.9%;
-    --foreground: 210 40% 98%;
-    --card: 222.2 84% 4.9%;
-    --card-foreground: 210 40% 98%;
-    --popover: 222.2 84% 4.9%;
-    --popover-foreground: 210 40% 98%;
-    --primary: 210 40% 98%;
-    --primary-foreground: 222.2 47.4% 11.2%;
-    --secondary: 217.2 32.6% 17.5%;
-    --secondary-foreground: 210 40% 98%;
-    --muted: 217.2 32.6% 17.5%;
-    --muted-foreground: 215 20.2% 65.1%;
-    --accent: 217.2 32.6% 17.5%;
-    --accent-foreground: 210 40% 98%;
-    --destructive: 0 62.8% 30.6%;
-    --destructive-foreground: 210 40% 98%;
-    --border: 217.2 32.6% 17.5%;
-    --input: 217.2 32.6% 17.5%;
-    --ring: 212.7 26.8% 83.9%;
+    /* Open WebUI near-black palette: bg #141414, surface #212121, border #2a2a2a */
+    --background: 0 0% 8%;
+    --foreground: 0 0% 98%;
+    --card: 0 0% 13%;
+    --card-foreground: 0 0% 98%;
+    --popover: 0 0% 13%;
+    --popover-foreground: 0 0% 98%;
+    --primary: 0 0% 98%;
+    --primary-foreground: 0 0% 9%;
+    --secondary: 0 0% 16%;
+    --secondary-foreground: 0 0% 98%;
+    --muted: 0 0% 16%;
+    --muted-foreground: 0 0% 60%;
+    --accent: 0 0% 16%;
+    --accent-foreground: 0 0% 98%;
+    --destructive: 0 62.8% 45%;
+    --destructive-foreground: 0 0% 98%;
+    --border: 0 0% 16%;
+    --input: 0 0% 13%;
+    --ring: 0 0% 45%;
+
+    --sidebar: 0 0% 6%;
+    --sidebar-foreground: 0 0% 88%;
+    --sidebar-border: 0 0% 14%;
+    --sidebar-accent: 0 0% 16%;
+    --sidebar-accent-foreground: 0 0% 98%;
   }
 }
 

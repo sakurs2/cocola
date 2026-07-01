@@ -3,8 +3,8 @@ import animate from "tailwindcss-animate";
 
 // Tailwind v3 config wired to the shadcn CSS variables defined in
 // app/globals.css. The assistant-ui components reference these semantic color
-// names (bg-background, text-muted-foreground, border-border, …) plus the
-// radius scale; without this mapping those classes resolve to nothing.
+// names (bg-background, text-muted-foreground, border-border, bg-sidebar, …)
+// plus the radius scale; without this mapping those classes resolve to nothing.
 const config: Config = {
   darkMode: ["class"],
   content: ["./app/**/*.{ts,tsx}", "./components/**/*.{ts,tsx}", "./lib/**/*.{ts,tsx}"],
@@ -43,6 +43,13 @@ const config: Config = {
         card: {
           DEFAULT: "hsl(var(--card))",
           foreground: "hsl(var(--card-foreground))",
+        },
+        sidebar: {
+          DEFAULT: "hsl(var(--sidebar))",
+          foreground: "hsl(var(--sidebar-foreground))",
+          border: "hsl(var(--sidebar-border))",
+          accent: "hsl(var(--sidebar-accent))",
+          "accent-foreground": "hsl(var(--sidebar-accent-foreground))",
         },
       },
       borderRadius: {

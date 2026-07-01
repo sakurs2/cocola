@@ -7,20 +7,26 @@ import {
   ThreadPrimitive,
   type ToolCallMessagePartProps,
 } from "@assistant-ui/react";
-import { ArrowDownIcon, CopyIcon, SendHorizontalIcon, Square } from "lucide-react";
+import {
+  ArrowDownIcon,
+  CopyIcon,
+  MessagesSquare,
+  SendHorizontalIcon,
+  Square,
+  Zap,
+} from "lucide-react";
 import type { FC } from "react";
 import { TooltipIconButton } from "@/components/assistant-ui/tooltip-icon-button";
 import { MarkdownText } from "@/components/assistant-ui/markdown-text";
 import { cn } from "@/lib/utils";
 
-// shadcn-style product Thread for cocola, authored against the design tokens in
-// app/globals.css so it matches the official assistant-ui look on Tailwind v3.
-//
-// Wires assistant-ui primitives to local styling: text renders as Markdown,
-// reasoning as a dimmed block, and tool calls as collapsible cards (name + args
-// + result) matching the backend AgentEvent vocabulary. Only the ExternalStore
+// Open WebUI style product Thread for cocola, authored against the design
+// tokens in app/globals.css (dark palette). Empty state centers a logo + model
+// name over a pill composer with a "Suggested" list; once a conversation
+// starts, the composer docks to the bottom. Only the ExternalStore
 // capabilities the adapter implements are surfaced (send / cancel) — no
-// attachment or branch controls, since the runtime does not support them.
+// attachment, voice or branch controls, since the runtime does not support
+// them.
 
 export const Thread: FC = () => {
   return (
@@ -42,10 +48,14 @@ export const Thread: FC = () => {
           <div className="min-h-8 flex-grow" />
         </ThreadPrimitive.If>
 
-        <div className="sticky bottom-0 mt-3 flex w-full max-w-[var(--thread-max-width)] flex-col items-center justify-end rounded-t-lg bg-background pb-4">
-          <ScrollToBottom />
-          <Composer />
-        </div>
+        {/* Docked composer, only while a conversation is in progress. On the
+            empty state the composer lives centered inside ThreadWelcome. */}
+        <ThreadPrimitive.If empty={false}>
+          <div className="sticky bottom-0 mt-3 flex w-full max-w-[var(--thread-max-width)] flex-col items-center justify-end rounded-t-lg bg-background pb-4">
+            <ScrollToBottom />
+            <Composer />
+          </div>
+        </ThreadPrimitive.If>
       </ThreadPrimitive.Viewport>
     </ThreadPrimitive.Root>
   );
@@ -63,44 +73,67 @@ const ScrollToBottom: FC = () => (
   </ThreadPrimitive.ScrollToBottom>
 );
 
-const SUGGESTIONS = [
-  "What can you help me with?",
-  "Summarize the latest changes in this repo",
-  "Write a unit test for the runtime adapter",
-  "Explain how the SSE proxy works",
+const SUGGESTIONS: { title: string; subtitle: string; prompt: string }[] = [
+  {
+    title: "Show me a code snippet",
+    subtitle: "of a website's sticky header",
+    prompt: "Show me a code snippet of a website's sticky header",
+  },
+  {
+    title: "Summarize the latest changes",
+    subtitle: "in this repo",
+    prompt: "Summarize the latest changes in this repo",
+  },
+  {
+    title: "Explain how the SSE proxy works",
+    subtitle: "in the cocola gateway",
+    prompt: "Explain how the SSE proxy works in the cocola gateway",
+  },
 ];
 
 const ThreadWelcome: FC = () => (
   <ThreadPrimitive.Empty>
-    <div className="flex w-full max-w-[var(--thread-max-width)] flex-grow flex-col">
-      <div className="flex w-full flex-grow flex-col items-center justify-center">
-        <p className="mt-4 text-2xl font-semibold text-foreground">How can I help you today?</p>
-        <p className="mt-2 text-sm text-muted-foreground">
-          Ask anything — the agent runs in your own sandbox.
-        </p>
+    <div className="flex w-full max-w-[var(--thread-max-width)] flex-grow flex-col items-center justify-center">
+      <div className="flex items-center gap-3">
+        <div className="flex size-9 items-center justify-center rounded-full bg-foreground text-background">
+          <MessagesSquare className="size-5" />
+        </div>
+        <p className="text-3xl font-semibold text-foreground">gpt-4.1-nano</p>
       </div>
-      <div className="mt-6 grid w-full gap-2 sm:grid-cols-2">
-        {SUGGESTIONS.map((prompt) => (
-          <ThreadPrimitive.Suggestion
-            key={prompt}
-            prompt={prompt}
-            send
-            className="flex items-center justify-start rounded-lg border border-border bg-card p-3 text-left text-sm text-muted-foreground transition-colors hover:bg-accent hover:text-accent-foreground"
-          >
-            {prompt}
-          </ThreadPrimitive.Suggestion>
-        ))}
+
+      <div className="mt-8 w-full">
+        <Composer />
+      </div>
+
+      <div className="mt-6 w-full">
+        <div className="mb-2 flex items-center gap-1.5 px-1 text-sm text-muted-foreground">
+          <Zap className="size-3.5" />
+          Suggested
+        </div>
+        <div className="flex flex-col">
+          {SUGGESTIONS.map(({ title, subtitle, prompt }) => (
+            <ThreadPrimitive.Suggestion
+              key={title}
+              prompt={prompt}
+              send
+              className="flex flex-col items-start gap-0.5 rounded-lg px-2 py-2.5 text-left transition-colors hover:bg-muted"
+            >
+              <span className="text-sm font-medium text-foreground">{title}</span>
+              <span className="text-xs text-muted-foreground">{subtitle}</span>
+            </ThreadPrimitive.Suggestion>
+          ))}
+        </div>
       </div>
     </div>
   </ThreadPrimitive.Empty>
 );
 
 const Composer: FC = () => (
-  <ComposerPrimitive.Root className="flex w-full flex-wrap items-end rounded-3xl border border-input bg-background px-3 py-1.5 shadow-sm transition-colors focus-within:border-ring">
+  <ComposerPrimitive.Root className="flex w-full flex-wrap items-end rounded-[2rem] border border-input bg-card px-3 py-1.5 shadow-sm transition-colors focus-within:border-ring">
     <ComposerPrimitive.Input
       rows={1}
       autoFocus
-      placeholder="Send a message…"
+      placeholder="How can I help you today?"
       className="max-h-40 flex-grow resize-none border-none bg-transparent px-2 py-3 text-sm outline-none placeholder:text-muted-foreground focus:ring-0 disabled:cursor-not-allowed"
     />
     <ComposerAction />
