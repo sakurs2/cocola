@@ -18,6 +18,8 @@ import grpc
 from cocola.sandbox.v1 import sandbox_pb2 as pb
 from cocola.sandbox.v1 import sandbox_pb2_grpc as pb_grpc
 
+from cocola_agent_runtime.grpc_limits import channel_options
+
 
 @dataclass
 class ExecResult:
@@ -50,7 +52,10 @@ class SandboxClient:
     _stub: pb_grpc.SandboxServiceStub | None = field(default=None, init=False, repr=False)
 
     def __enter__(self) -> SandboxClient:
-        self._channel = grpc.insecure_channel(self.addr)
+        # Raise the message ceiling above gRPC's 4 MiB default: WriteFile
+        # carries the full attachment bytes into the sandbox, which can
+        # exceed 4 MiB (COCOLA_GRPC_MAX_MESSAGE_BYTES, default 64 MiB).
+        self._channel = grpc.insecure_channel(self.addr, options=channel_options())
         self._stub = pb_grpc.SandboxServiceStub(self._channel)
         return self
 

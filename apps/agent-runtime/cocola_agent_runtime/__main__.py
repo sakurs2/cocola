@@ -42,6 +42,7 @@ from cocola_common.tracing import grpc_aio_server_interceptor
 
 from cocola_agent_runtime.agent_provider import AgentProvider
 from cocola_agent_runtime.echo_provider import EchoProvider
+from cocola_agent_runtime.grpc_limits import channel_options
 from cocola_agent_runtime.objstore import fetcher_from_env
 from cocola_agent_runtime.sandbox_binder import (
     SandboxBinder,
@@ -216,7 +217,11 @@ async def serve() -> None:
     otel_interceptor = grpc_aio_server_interceptor(tracing_cfg)
     if otel_interceptor is not None:
         interceptors.append(otel_interceptor)
-    server = grpc.aio.server(interceptors=interceptors)
+    # Raise the single-message ceiling above gRPC's 4 MiB default so
+    # inline attachment bytes (up to the ADR-0017 split threshold) and
+    # the sandbox WriteFile hop are not rejected as ResourceExhausted
+    # (COCOLA_GRPC_MAX_MESSAGE_BYTES, default 64 MiB).
+    server = grpc.aio.server(interceptors=interceptors, options=channel_options())
     pb_grpc.add_AgentRuntimeServiceServicer_to_server(servicer, server)
     server.add_insecure_port(addr)
 

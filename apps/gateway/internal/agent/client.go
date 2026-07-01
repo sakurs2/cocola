@@ -9,6 +9,8 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"os"
+	"strconv"
 
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials/insecure"
@@ -65,6 +67,21 @@ type Client struct {
 	rpc  agentv1.AgentRuntimeServiceClient
 }
 
+// defaultMaxMessageBytes is 64 MiB -- comfortably above the 32 MiB frontend
+// upload cap, leaving headroom for base64/proto framing overhead.
+const defaultMaxMessageBytes = 64 * 1024 * 1024
+
+// maxMessageBytes resolves the configured gRPC single-message ceiling. A
+// non-positive/invalid COCOLA_GRPC_MAX_MESSAGE_BYTES falls back to the default.
+func maxMessageBytes() int {
+	if v := os.Getenv("COCOLA_GRPC_MAX_MESSAGE_BYTES"); v != "" {
+		if n, err := strconv.Atoi(v); err == nil && n > 0 {
+			return n
+		}
+	}
+	return defaultMaxMessageBytes
+}
+
 // Dial opens a lazy connection to the agent-runtime at addr (it connects on
 // first RPC, not here). The connection
 // is plaintext: agent-runtime is an internal service reached over the cluster
@@ -73,9 +90,19 @@ func Dial(addr string) (*Client, error) {
 	// Trace propagation: the client stats handler injects the current span's
 	// W3C traceparent into outbound gRPC metadata, carrying the trace from the
 	// gateway into agent-runtime. No-op when tracing is disabled.
+	// Raise the single-message ceiling above gRPC's 4 MiB default so inline
+	// attachment bytes (up to the ADR-0017 split threshold) are not rejected
+	// as ResourceExhausted on the way to agent-runtime. This is a transport
+	// safety cap, distinct from the inline/backend-pull split threshold;
+	// configurable via COCOLA_GRPC_MAX_MESSAGE_BYTES (default 64 MiB).
+	maxMsg := maxMessageBytes()
 	conn, err := grpc.Dial(addr,
 		grpc.WithTransportCredentials(insecure.NewCredentials()),
 		tracing.GRPCClientDialOption(),
+		grpc.WithDefaultCallOptions(
+			grpc.MaxCallRecvMsgSize(maxMsg),
+			grpc.MaxCallSendMsgSize(maxMsg),
+		),
 	)
 	if err != nil {
 		return nil, fmt.Errorf("agent: dial %q: %w", addr, err)

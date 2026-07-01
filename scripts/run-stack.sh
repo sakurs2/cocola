@@ -212,6 +212,34 @@ if [[ "$WITH_LLM" == "1" ]]; then
   echo "    agent-runtime will route the SDK at $COCOLA_LLM_BASE_URL"
 fi
 
+# ----------------------------------------------------------------- MinIO (attachments)
+# P1a attachment storage (ADR-0017): the gateway uploads every file to MinIO and
+# agent-runtime backend-pulls large ones. run-stack runs services NATIVELY, so
+# (unlike docker-compose.full.yml) MinIO is not wired implicitly -- we bring it
+# up via the dev compose file and export COCOLA_MINIO_* here. The gateway and
+# agent-runtime subshells inherit this exported env and activate the object
+# store; without it the gateway stays inline-only and large files fail. MinIO
+# shares the dev-infra lifecycle (stop with `make dev-down`), not this script's.
+# Skips cleanly when docker is unavailable or COCOLA_SKIP_MINIO=1.
+if [[ "${COCOLA_SKIP_MINIO:-0}" != "1" ]] && command -v docker >/dev/null 2>&1; then
+  echo "==> starting MinIO (attachments) via docker-compose.dev.yml"
+  if docker compose -f deploy/docker-compose/docker-compose.dev.yml up -d minio minio-init \
+       >"$(log_redirect minio)" 2>&1 && wait_port 127.0.0.1 9000 "minio" 60; then
+    export COCOLA_MINIO_ENDPOINT="${COCOLA_MINIO_ENDPOINT:-127.0.0.1:9000}"
+    export COCOLA_MINIO_ACCESS_KEY="${COCOLA_MINIO_ACCESS_KEY:-cocola}"
+    export COCOLA_MINIO_SECRET_KEY="${COCOLA_MINIO_SECRET_KEY:-cocola_dev_pw}"
+    export COCOLA_MINIO_BUCKET="${COCOLA_MINIO_BUCKET:-cocola}"
+    export COCOLA_ATTACHMENT_INLINE_MAX_BYTES="${COCOLA_ATTACHMENT_INLINE_MAX_BYTES:-16777216}"
+    MINIO_CONSOLE="http://127.0.0.1:9001"
+    echo "    MinIO up: S3 ${COCOLA_MINIO_ENDPOINT}, console ${MINIO_CONSOLE} (cocola / cocola_dev_pw)"
+  else
+    echo "!! MinIO failed to start/ready; continuing inline-only (see .run-logs/minio.log)" >&2
+    echo "   large attachments will be capped; run \`make dev-up\` manually or set COCOLA_SKIP_MINIO=1 to silence." >&2
+  fi
+else
+  echo "==> MinIO skipped (COCOLA_SKIP_MINIO=1 or docker unavailable); attachments stay inline-only"
+fi
+
 # ----------------------------------------------------------------- dev token
 # Minted up front: in the real-LLM path the agent-runtime must present a VALID
 # cocola token to the gateway as ANTHROPIC_API_KEY (the gateway verifies it with
@@ -276,6 +304,7 @@ echo " agent-rt  : $AGENT_ADDR (gRPC)"
 [[ "$WITH_LLM" == "1" && -n "${COCOLA_LLM_CONFIG:-}" ]] && echo " llm-cfg   : ${COCOLA_LLM_CONFIG}"
 [[ "$WITH_LLM" == "1" && -z "${COCOLA_LLM_CONFIG:-}" ]] && echo " llm-up    : ${COCOLA_ANTHROPIC_BASE_URL:-${COCOLA_OPENAI_BASE_URL:-<provider default>}}"
 [[ "$WITH_WEB" == "1" ]] && echo " web       : http://127.0.0.1:$WEB_PORT  (paste the token below)"
+[[ -n "${MINIO_CONSOLE:-}" ]] && echo " minio     : ${MINIO_CONSOLE}  (console; cocola / cocola_dev_pw)"
 echo "----------------------------------------------------------------------"
 echo " dev token : $TOKEN"
 echo "----------------------------------------------------------------------"

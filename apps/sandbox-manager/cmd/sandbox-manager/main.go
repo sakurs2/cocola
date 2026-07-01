@@ -12,6 +12,7 @@ import (
 	"net"
 	"net/http"
 	"os"
+	"strconv"
 
 	"github.com/prometheus/client_golang/prometheus"
 	"google.golang.org/grpc"
@@ -94,10 +95,16 @@ func main() {
 		log.Sugar().Fatalf("listen %s: %v", addr, err)
 	}
 
+	// Raise the single-message ceiling above gRPC's 4 MiB default: WriteFile
+	// carries the full attachment bytes into the sandbox, which can exceed
+	// 4 MiB (COCOLA_GRPC_MAX_MESSAGE_BYTES, default 64 MiB).
+	maxMsg := maxMessageBytes()
 	gs := grpc.NewServer(
 		grpc.UnaryInterceptor(reg.UnaryServerInterceptor()),
 		grpc.StreamInterceptor(reg.StreamServerInterceptor()),
 		tracing.GRPCServerStatsHandler(),
+		grpc.MaxRecvMsgSize(maxMsg),
+		grpc.MaxSendMsgSize(maxMsg),
 	)
 	sandboxv1.RegisterSandboxServiceServer(gs, server.New(p, binder))
 	reflection.Register(gs) // enables grpcurl describe/list for local debugging
@@ -135,6 +142,21 @@ func newProvider(name string) (provider.SandboxProvider, error) {
 		}
 		return docker.New()
 	}
+}
+
+// defaultMaxMessageBytes is 64 MiB -- above the 32 MiB frontend upload cap,
+// with headroom for base64/proto framing overhead.
+const defaultMaxMessageBytes = 64 * 1024 * 1024
+
+// maxMessageBytes resolves the configured gRPC single-message ceiling. A
+// non-positive/invalid COCOLA_GRPC_MAX_MESSAGE_BYTES falls back to the default.
+func maxMessageBytes() int {
+	if v := os.Getenv("COCOLA_GRPC_MAX_MESSAGE_BYTES"); v != "" {
+		if n, err := strconv.Atoi(v); err == nil && n > 0 {
+			return n
+		}
+	}
+	return defaultMaxMessageBytes
 }
 
 func getenv(k, def string) string {
