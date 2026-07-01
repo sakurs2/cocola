@@ -5,6 +5,7 @@ go 1.23.0
 require (
 	github.com/cocola-project/cocola/packages/go-common v0.0.0
 	github.com/cocola-project/cocola/packages/proto/gen/go v0.0.0
+	github.com/google/uuid v1.6.0
 	github.com/minio/minio-go/v7 v7.0.80
 	google.golang.org/grpc v1.65.0
 )
@@ -19,7 +20,6 @@ require (
 	github.com/go-logr/logr v1.4.2 // indirect
 	github.com/go-logr/stdr v1.2.2 // indirect
 	github.com/goccy/go-json v0.10.3 // indirect
-	github.com/google/uuid v1.6.0 // indirect
 	github.com/grpc-ecosystem/grpc-gateway/v2 v2.20.0 // indirect
 	github.com/klauspost/compress v1.17.11 // indirect
 	github.com/klauspost/cpuid/v2 v2.2.8 // indirect

@@ -16,12 +16,20 @@ import (
 	"net/http"
 	"strings"
 
+	"github.com/google/uuid"
+
 	"github.com/cocola-project/cocola/apps/gateway/internal/agent"
 	"github.com/cocola-project/cocola/apps/gateway/internal/auth"
+	"github.com/cocola-project/cocola/apps/gateway/internal/objstore"
 	"github.com/cocola-project/cocola/packages/go-common/logger"
 	"github.com/cocola-project/cocola/packages/go-common/metrics"
 	"github.com/cocola-project/cocola/packages/go-common/tracing"
 )
+
+// DefaultInlineMaxBytes is the attachment size threshold used when none is
+// configured: files at or below it are pushed inline into the sandbox, larger
+// ones are delivered key-only and pulled by agent-runtime (ADR-0017 P1a).
+const DefaultInlineMaxBytes int64 = 16 * 1024 * 1024
 
 // API wires the BFF dependencies. The agent.Streamer is an interface so tests
 // can inject a fake without a real agent-runtime.
@@ -30,6 +38,11 @@ type API struct {
 	verifier *auth.Verifier
 	log      logger.Logger
 	metrics  *metrics.Registry // optional; nil => no instrumentation (tests)
+	// store is the attachment source-of-truth object store. nil => P0 path:
+	// attachments are pushed inline only, no upload (feature stays dark until
+	// MinIO is configured). inlineMaxBytes is the small/large split threshold.
+	store          objstore.Store
+	inlineMaxBytes int64
 }
 
 // New builds the BFF API.
@@ -41,6 +54,21 @@ func New(streamer agent.Streamer, verifier *auth.Verifier, log logger.Logger) *A
 // shared with the observability port mounted in main; passing nil (the default)
 // leaves the API uninstrumented, which keeps unit tests dependency-light.
 func (a *API) WithMetrics(reg *metrics.Registry) *API { a.metrics = reg; return a }
+
+// WithObjStore enables the attachment source-of-truth path: every uploaded file
+// is PutObject'd to the store, then split by inlineMaxBytes — files at or below
+// it keep their inline bytes AND carry the object key; larger files are
+// delivered key-only and pulled by agent-runtime on the model's behalf
+// (ADR-0017 P1a). A non-positive threshold falls back to DefaultInlineMaxBytes.
+// Passing a nil store leaves the API on the P0 inline-only path.
+func (a *API) WithObjStore(store objstore.Store, inlineMaxBytes int64) *API {
+	a.store = store
+	if inlineMaxBytes <= 0 {
+		inlineMaxBytes = DefaultInlineMaxBytes
+	}
+	a.inlineMaxBytes = inlineMaxBytes
+	return a
+}
 
 // instrument wraps a handler with the RED middleware under a fixed route label,
 // or returns it unchanged when metrics are disabled.
@@ -137,11 +165,30 @@ func (a *API) chat(w http.ResponseWriter, r *http.Request) {
 			a.log.Warn("dropping attachment with invalid base64 content")
 			continue
 		}
-		atts = append(atts, agent.Attachment{
+		att := agent.Attachment{
 			Filename: req.Attachments[i].Filename,
 			Content:  content,
 			Mime:     req.Attachments[i].Mime,
-		})
+			Size:     int64(len(content)),
+		}
+		// Source-of-truth upload + threshold split (ADR-0017 P1a). When the
+		// store is unconfigured (nil) we stay on the P0 inline-only path. A
+		// PutObject failure degrades gracefully to inline delivery for that
+		// file rather than dropping it, since the bytes are still in hand.
+		if a.store != nil {
+			key := objectKey(req.SessionID, att.Filename)
+			if err := a.store.Put(r.Context(), key, content, att.Mime); err != nil {
+				a.log.Warn("attachment object-store upload failed, delivering inline: " + err.Error())
+			} else {
+				att.OssKey = key
+				if att.Size > a.inlineMaxBytes {
+					// Large file: hand agent-runtime the key only; it pulls the
+					// bytes from the store before the run (backend-pull).
+					att.Content = nil
+				}
+			}
+		}
+		atts = append(atts, att)
 	}
 
 	q := agent.Query{
@@ -196,4 +243,31 @@ func writeErr(w http.ResponseWriter, status int, code, msg string) {
 	b.Error.Code = code
 	b.Error.Message = msg
 	writeJSON(w, status, b)
+}
+
+// objectKey builds a collision-proof, traversal-safe key for an attachment:
+// attachments/<session>/<uuid>-<name>. The uuid guarantees uniqueness even for
+// identical filenames across turns; both the session and name segments are
+// sanitized to basenames so a crafted value cannot escape the prefix.
+func objectKey(sessionID, filename string) string {
+	return fmt.Sprintf("attachments/%s/%s-%s",
+		sanitizeKeySegment(sessionID), uuid.NewString(), sanitizeKeySegment(filename))
+}
+
+// sanitizeKeySegment reduces a value to a safe single path segment, mirroring
+// the agent-runtime _sanitize_filename defense: take the basename, drop NULs,
+// leading dots and residual separators, and fall back to a fixed token.
+func sanitizeKeySegment(name string) string {
+	base := strings.ReplaceAll(name, "\\", "/")
+	if i := strings.LastIndex(base, "/"); i >= 0 {
+		base = base[i+1:]
+	}
+	base = strings.TrimSpace(base)
+	base = strings.ReplaceAll(base, "\x00", "")
+	base = strings.TrimLeft(base, ".")
+	base = strings.ReplaceAll(base, "/", "_")
+	if base == "" {
+		return "file"
+	}
+	return base
 }

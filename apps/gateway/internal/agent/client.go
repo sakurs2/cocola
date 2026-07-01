@@ -44,6 +44,12 @@ type Attachment struct {
 	Filename string
 	Content  []byte
 	Mime     string
+	// OssKey is the object-storage key (source of truth) set for every upload
+	// once MinIO is configured. Size is the original byte length. For large
+	// files Content is empty and agent-runtime pulls the bytes via OssKey
+	// (ADR-0017 P1a); for small files both Content and OssKey are populated.
+	OssKey string
+	Size   int64
 }
 
 // Streamer runs one agent query and pushes each event to onEvent in order. It
@@ -101,6 +107,8 @@ func (c *Client) Stream(ctx context.Context, q Query, onEvent func(Event) error)
 			Filename: q.Attachments[i].Filename,
 			Content:  q.Attachments[i].Content,
 			Mime:     q.Attachments[i].Mime,
+			OssKey:   q.Attachments[i].OssKey,
+			Size:     q.Attachments[i].Size,
 		})
 	}
 	stream, err := c.rpc.Query(ctx, &agentv1.QueryRequest{

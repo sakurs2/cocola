@@ -2,6 +2,7 @@ package httpapi
 
 import (
 	"context"
+	"encoding/base64"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -241,5 +242,133 @@ func TestChatDropsAttachmentWithInvalidBase64(t *testing.T) {
 	}
 	if len(fs.gotQuery.Attachments) != 0 {
 		t.Fatalf("invalid-base64 attachment should be dropped, got %d", len(fs.gotQuery.Attachments))
+	}
+}
+
+
+// ---- P1a: object-store upload + threshold split ----
+
+// fakeObjStore records every Put and lets Get echo them back.
+type fakeObjStore struct {
+	puts map[string][]byte
+	mime map[string]string
+}
+
+func newFakeObjStore() *fakeObjStore {
+	return &fakeObjStore{puts: map[string][]byte{}, mime: map[string]string{}}
+}
+func (f *fakeObjStore) Put(_ context.Context, key string, data []byte, mime string) error {
+	cp := make([]byte, len(data))
+	copy(cp, data)
+	f.puts[key] = cp
+	f.mime[key] = mime
+	return nil
+}
+func (f *fakeObjStore) Get(_ context.Context, key string) ([]byte, error) { return f.puts[key], nil }
+func (f *fakeObjStore) Health(context.Context) error                      { return nil }
+
+// b64 is a tiny helper for building attachment bodies.
+func b64(s string) string { return base64.StdEncoding.EncodeToString([]byte(s)) }
+
+func newAPIWithStore(t *testing.T, fs *fakeStreamer, store *fakeObjStore, threshold int64) http.Handler {
+	t.Helper()
+	v := auth.NewVerifier(auth.Config{})
+	log := logger.Must()
+	return New(fs, v, log).WithObjStore(store, threshold).Handler()
+}
+
+func TestChatUploadsAndSplitsBelowThreshold(t *testing.T) {
+	fs := &fakeStreamer{script: []agent.Event{{Kind: "done"}}}
+	store := newFakeObjStore()
+	// threshold high enough that the small file stays inline.
+	h := newAPIWithStore(t, fs, store, 1024)
+
+	body := `{"prompt":"hi","session_id":"s1","attachments":[{"filename":"a.txt","content_b64":"` + b64("hello") + `","mime":"text/plain"}]}`
+	rec := httptest.NewRecorder()
+	h.ServeHTTP(rec, httptest.NewRequest("POST", "/v1/chat", strings.NewReader(body)))
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("want 200, got %d", rec.Code)
+	}
+	if len(store.puts) != 1 {
+		t.Fatalf("want 1 upload, got %d", len(store.puts))
+	}
+	if len(fs.gotQuery.Attachments) != 1 {
+		t.Fatalf("want 1 attachment forwarded, got %d", len(fs.gotQuery.Attachments))
+	}
+	att := fs.gotQuery.Attachments[0]
+	if att.OssKey == "" {
+		t.Fatal("small file should carry an OssKey")
+	}
+	if string(att.Content) != "hello" {
+		t.Fatalf("small file should keep inline content, got %q", att.Content)
+	}
+	if att.Size != 5 {
+		t.Fatalf("Size should be original byte length, got %d", att.Size)
+	}
+	if !strings.HasPrefix(att.OssKey, "attachments/s1/") || !strings.HasSuffix(att.OssKey, "-a.txt") {
+		t.Fatalf("unexpected key shape: %q", att.OssKey)
+	}
+}
+
+func TestChatDropsInlineContentAboveThreshold(t *testing.T) {
+	fs := &fakeStreamer{script: []agent.Event{{Kind: "done"}}}
+	store := newFakeObjStore()
+	// threshold 3 bytes: "hello" (5) is large => key-only.
+	h := newAPIWithStore(t, fs, store, 3)
+
+	body := `{"prompt":"hi","session_id":"s1","attachments":[{"filename":"big.bin","content_b64":"` + b64("hello") + `","mime":"application/octet-stream"}]}`
+	rec := httptest.NewRecorder()
+	h.ServeHTTP(rec, httptest.NewRequest("POST", "/v1/chat", strings.NewReader(body)))
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("want 200, got %d", rec.Code)
+	}
+	att := fs.gotQuery.Attachments[0]
+	if att.OssKey == "" {
+		t.Fatal("large file must carry an OssKey")
+	}
+	if att.Content != nil {
+		t.Fatalf("large file must not carry inline content, got %d bytes", len(att.Content))
+	}
+	if att.Size != 5 {
+		t.Fatalf("Size should still be 5, got %d", att.Size)
+	}
+	// The store still holds the full bytes (source of truth).
+	if got := store.puts[att.OssKey]; string(got) != "hello" {
+		t.Fatalf("store should hold full bytes, got %q", got)
+	}
+}
+
+func TestChatWithoutStoreStaysInline(t *testing.T) {
+	fs := &fakeStreamer{script: []agent.Event{{Kind: "done"}}}
+	h := newAPI(t, fs) // no store wired
+
+	body := `{"prompt":"hi","attachments":[{"filename":"a.txt","content_b64":"` + b64("hello") + `"}]}`
+	rec := httptest.NewRecorder()
+	h.ServeHTTP(rec, httptest.NewRequest("POST", "/v1/chat", strings.NewReader(body)))
+
+	att := fs.gotQuery.Attachments[0]
+	if att.OssKey != "" {
+		t.Fatalf("no store => no OssKey, got %q", att.OssKey)
+	}
+	if string(att.Content) != "hello" {
+		t.Fatalf("inline content expected, got %q", att.Content)
+	}
+}
+
+func TestSanitizeKeySegment(t *testing.T) {
+	cases := map[string]string{
+		"a.txt":     "a.txt",
+		"a/b/c.png": "c.png",
+		"":          "file",
+		"...":       "file",
+	}
+	cases["../../"+"e"+"tc/pw"] = "pw"
+	cases["a\\b\\c.png"] = "c.png"
+	for in, want := range cases {
+		if got := sanitizeKeySegment(in); got != want {
+			t.Errorf("sanitizeKeySegment(%q)=%q want %q", in, got, want)
+		}
 	}
 }
