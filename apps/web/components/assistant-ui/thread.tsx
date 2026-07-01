@@ -162,9 +162,9 @@ const ComposerAttachments: FC = () => (
   <ComposerPrimitive.Attachments
     components={{
       Attachment: () => (
-        <AttachmentPrimitive.Root className="relative flex items-center gap-2 rounded-lg border border-border bg-muted px-3 py-1.5 text-xs text-foreground">
+        <AttachmentPrimitive.Root className="relative flex w-fit max-w-full self-start items-center gap-2 rounded-lg border border-border bg-muted px-3 py-1.5 text-xs text-foreground">
           <PaperclipIcon className="size-3.5 shrink-0 text-muted-foreground" />
-          <span className="max-w-[12rem] truncate">
+          <span className="max-w-[16rem] truncate">
             <AttachmentPrimitive.Name />
           </span>
           <AttachmentPrimitive.Remove asChild>
@@ -215,9 +215,9 @@ const UserMessage: FC = () => (
       <MessagePrimitive.Attachments
         components={{
           Attachment: () => (
-            <AttachmentPrimitive.Root className="flex items-center gap-2 rounded-lg border border-border bg-muted/60 px-3 py-1.5 text-xs text-foreground">
+            <AttachmentPrimitive.Root className="flex w-fit max-w-full items-center gap-2 rounded-lg border border-border bg-muted/60 px-3 py-1.5 text-xs text-foreground">
               <PaperclipIcon className="size-3.5 shrink-0 text-muted-foreground" />
-              <span className="max-w-[12rem] truncate">
+              <span className="max-w-[16rem] truncate">
                 <AttachmentPrimitive.Name />
               </span>
             </AttachmentPrimitive.Root>
