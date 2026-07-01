@@ -12,19 +12,22 @@
   模型可直接按路径读取。
 - 复用 assistant-ui 现成的 attachment UI/adapter 体系,不自造上传组件。
 
-### 非目标(本 Plan 不做)
-- **B. 按需拉取(pull)**:给 agent 一个下载工具、由模型决定何时取文件 —— 留作 TODO。
-- **OSS 持久化(P1)**:上传落 MinIO、消息存 object key、跨会话可回溯 —— 留作 P1,
-  本 Plan 只做 P0。
+### 非目标(P0 本次不做,P1 设计见 §6)
+- **OSS 真源 + 大小分流**:上传落 MinIO、消息存 key、按阈值分流大小文件 —— P1(§6),
+  本次 P0 只做内联+直接写盘。
+- **B. 工具型 pull**:给 agent 一个下载工具、由模型决定何时取 —— P2 TODO;
+  大文件在 P1 用"后端代 pull"覆盖,不引入 agent 工具面。
 - 大文件/分片上传、断点续传、多模态图片走 Claude vision —— 不在范围。
 
 ## 2. 决策(摘要,详见 ADR-0017)
 - **真源归属(终态)**:MinIO 做 source of truth,沙箱工作区是一次性 working copy。
   依据:代码执行沙箱 ephemeral(ADR-0003 lease+GC;ADR-0008 T1a/T1b),
   只存沙箱会随会话蒸发,历史附件点不开。
-- **送达沙箱方式**:选 **A. 后端预置(push)**,与 OpenAI Code Interpreter 挂载、
-  E2B `files.write()` 一致;**B. pull 留 TODO**。
-- **分阶段**:P0 先直接 WriteFile 进沙箱(不接 OSS)跑通链路;P1 再插入 MinIO 做真源。
+- **送达沙箱方式**:始终选 **A. 后端预置(push)**,与 OpenAI Code Interpreter 挂载、
+  E2B `files.write()` 一致;agent 侧零改动、不新增工具面。大文件在 P1 用"后端代 pull"
+  (后端取 OSS 字节再写盘)覆盖;**B. 工具型 pull 降级为 P2 TODO**。
+- **分阶段**:P0 先直接 WriteFile 进沙箱(不接 OSS)跑通链路;P1 插入 MinIO 做真源 +
+  按可配置阈值(默认 16MiB)分流大小文件(见 §6)。
 
 ## 3. P0 范围:直接 WriteFile 进沙箱(本次实现)
 
@@ -92,8 +95,24 @@ composer 选文件
 5. 端到端联调验收(Echo → 真实模型)。
 6. 写 ADR-0017,回链 ADR-0008,标注 B/OSS 为 TODO。
 
-## 6. TODO(P1 及以后,不在本 Plan)
-- [ ] B. 按需拉取工具(pull):给 agent 一个从 workspace/OSS 取文件的工具。
-- [ ] OSS(MinIO)做真源:上传落 bucket、消息存 object key、agent 前从 OSS 拉进沙箱。
-- [ ] 大文件/二进制/分片、presign 直传、bucket 生命周期与配额。
+## 6. 下一步:P1 混合送达(已细化设计,详见 ADR-0017)
+
+送达方式**始终是 push**(后端把文件写进沙箱),agent 侧零改动、不新增工具面。
+P1 在此基础上换真源 + 按大小分流:
+
+### P1a — OSS(MinIO)做真源
+- [ ] 上传落 MinIO bucket;消息只存 object key + 元信息(名/大小/mime),支撑历史回看。
+- [ ] agent 运行前从 OSS 拉字节 → WriteFile 进 `uploads/`(沿用现有 push 落盘)。
+
+### P1b — 可配置阈值分流(默认 16MiB,不写死)
+- [ ] 阈值经 `COCOLA_ATTACHMENT_INLINE_MAX_BYTES` 配置(默认 16*1024*1024)。
+- [ ] 阈值以下:沿用 P0 内联 base64 + 后端预置直接写盘。
+- [ ] 阈值以上:消息存 key,agent 运行前由**后端代 pull**(取 OSS 字节)再写进 `uploads/`。
+- [ ] 前端 / gateway / agent-runtime 三处上限读**同一配置源**,避免各写各的。
+- [ ] 两条路对模型都是"文件已在工作区、按路径读",prompt 前言统一。
+
+## 7. TODO(P2 及以后)
+- [ ] **P2**:B. 工具型 pull —— 仅当出现模型按需访问超大文件/数据集的明确诉求再补。
+- [ ] 大文件/分片上传、断点续传、presign 直传、bucket 生命周期与配额。
+- [ ] 多模态图片走 Claude vision。
 - [ ] 历史消息附件回看(依赖 OSS 持久化)。

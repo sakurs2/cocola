@@ -38,14 +38,25 @@
   content bytes, mime}`)→ agent-runtime 在 acquire 后、query 前 `mkdir -p uploads` +
   `write_file` 落盘 + 前言。文件名 sanitize 防路径逃逸;单文件 1MB 上限 + accept 白名单;
   预置失败发终止 `error` 事件不裸崩。
-- **P1(TODO)**:在 push 链路里插入 MinIO 做真源 —— 上传落 bucket、消息存 object key、
-  agent 运行前从 OSS 拉进沙箱;支撑历史附件回看。
+- **P1(下一步,本次细化设计)**:在 push 链路里插入 MinIO 做真源,并按大小分流,
+  但**送达方式始终是 push(后端写进沙箱),agent 侧零改动、不新增工具面**:
+  1. 上传一律落 MinIO bucket,消息只存 object key + 元信息(名/大小/mime),支撑历史回看。
+  2. **按可配置阈值(默认 16MB)分流**——阈值以下:沿用 P0 内联+后端预置直接写进
+     `uploads/`;阈值以上:消息存 key,agent 运行前由**后端代 pull**(从 OSS 取字节)
+     再 WriteFile 进 `uploads/`。两条路对模型都是"文件已在工作区、按路径读"。
+  3. 阈值经环境变量配置(`COCOLA_ATTACHMENT_INLINE_MAX_BYTES`,默认 16MiB=16*1024*1024),
+     **不写死**;前端/网关/agent-runtime 三处上限读同一配置源,避免各写各的。
+- **P2(TODO)**:B. pull 工具 —— 仅当出现"模型按需访问超大文件/数据集"的明确诉求时,
+  再给 agent 一个下载工具;在此之前后端代 pull 已覆盖大文件送达。
 
 ## Alternatives Considered
 
-- **送达 B. 按需拉取(pull)** —— 给 agent 一个下载工具,由模型决定何时取文件。
-  拒绝(留 TODO):P0 下模型未必知道该主动取、增加一轮工具调用延迟与失败面;push 语义
-  更贴近"用户附了个文件"的直觉。未来若需按需大文件访问再补。
+- **送达 B. 按需拉取(pull),模型持下载工具** —— 给 agent 一个下载工具,由模型决定何时取。
+  拒绝作为大文件方案(降级为 P2 TODO):模型未必知道该主动取、增加一轮工具调用延迟与失败面;
+  push 语义更贴近"用户附了个文件"的直觉。**大文件改用"后端代 pull"覆盖**——后端拿 object key
+  从 OSS 取字节再 WriteFile 进沙箱,对模型仍是"文件已在工作区",既拿到大文件按需(不无脑内联
+  撑爆请求体),又不引入 agent 工具面与模型决策不确定性。工具型 pull 仅在未来超大文件/数据集
+  的明确诉求下再补。
 - **真源只存沙箱(不接 OSS)** —— 拒绝作为终态:沙箱 ephemeral,历史附件会蒸发。
   但作为 **P0 过渡** 接受,因为它最快跑通端到端、暴露契约问题,OSS 可后插不改上层。
 - **附件走独立上传端点 + presign 直传** —— 拒绝(P0):内联 base64 对小文件足够简单,
@@ -61,8 +72,10 @@
 - **Negative / 接受的风险**:P0 内联 base64 使请求体膨胀 ~33%,故设 1MB 硬上限,
   大文件在 P1 前不可用;P0 附件只活在沙箱内,会话结束即丢,历史消息附件点不开
   (P1 接 OSS 前的已知缺口)。
-- **Followups(TODO,见 Plan §6)**:
-  - [ ] B. pull 工具:给 agent 从 workspace/OSS 取文件的能力。
-  - [ ] OSS(MinIO)做真源 + object key 存库 + 运行前拉入沙箱。
-  - [ ] 大文件/二进制/分片、presign 直传、bucket 生命周期与配额。
-  - [ ] 历史消息附件回看(依赖 OSS 持久化)。
+- **Followups(见 Plan §6)**:
+  - **P1a**:OSS(MinIO)做真源 + object key 存库 + 运行前拉入沙箱(送达仍 push)。
+  - **P1b**:按可配置阈值(默认 16MiB,`COCOLA_ATTACHMENT_INLINE_MAX_BYTES`)分流,
+    大文件走**后端代 pull**;三处上限读同一配置源,不写死。
+  - **P2(TODO)**:B. 工具型 pull —— 仅当出现模型按需访问超大文件/数据集的明确诉求再补。
+  - **TODO**:大文件/二进制/分片、presign 直传、bucket 生命周期与配额。
+  - **TODO**:历史消息附件回看(依赖 OSS 持久化)。
