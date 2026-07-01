@@ -6,24 +6,24 @@
 #
 #   web (Next.js) --(SSE proxy)--> gateway (Go BFF) --(gRPC)--> agent-runtime (Py)
 #                                                                   |
-#                                              COCOLA_LLM_BASE_URL  v
+#                              (Route A: brain runs inside sandbox) v
 #                                                          llm-gateway (Py, FastAPI)
 #
 # Always started:  agent-runtime + gateway   (zero-config, EchoProvider)
-# Opt-in:          llm-gateway  (--with-llm)  drives the real Claude Agent SDK path
+# Opt-in:          llm-gateway  (--with-llm)  the model upstream the sandbox brain hits
 #                  web          (--with-web)  the browser test tool from Step 4
 #                  --all        enables both
 #
 # Design notes
 #   * Port 8080 collision: the gateway BFF and the llm-gateway BOTH default to
-#     8080. We pin llm-gateway to COCOLA_LLM_PORT (default 8081) and point the
-#     agent-runtime COCOLA_LLM_BASE_URL at it, so they never fight.
-#   * Default route is A (brain-in-sandbox, ADR-0009). A sandbox-manager is NOT
-#     started here (its build is containerized), so for a REAL Route-A run you
-#     must export COCOLA_SANDBOX_ADDR pointing at one; we pass it through and the
-#     agent runs the whole Claude brain inside that sandbox. With no executor
-#     reachable, Route A degrades to Route B automatically (see agent-runtime
-#     _build_provider). To force the old central-SDK path, set COCOLA_AGENT_ROUTE=B.
+#     8080. We pin llm-gateway to COCOLA_LLM_PORT (default 8081) so they never
+#     fight; the sandbox brain reaches it via COCOLA_SANDBOX_LLM_BASE_URL.
+#   * Route A (brain-in-sandbox, ADR-0009) is the only real path. A
+#     sandbox-manager is NOT started here (its build is containerized), so for a
+#     REAL Route-A run you must export COCOLA_SANDBOX_ADDR pointing at one; we
+#     pass it through and the agent runs the whole Claude brain inside that
+#     sandbox. With no executor reachable, agent-runtime uses EchoProvider (no
+#     real model calls). The legacy Route B was decommissioned (see ADR-0009).
 #   * Every child logs to .run-logs/<name>.log; this script prints a token you
 #     can paste into the web UI or a curl call.
 #
@@ -211,8 +211,12 @@ if [[ "$WITH_LLM" == "1" ]]; then
   PIDS+=("$!")
   echo "==> starting llm-gateway on $LLM_HOST:$LLM_PORT (provider: ${COCOLA_LLM_PROVIDER:-fake})"
   wait_port "$LLM_HOST" "$LLM_PORT" "llm-gateway"
-  export COCOLA_LLM_BASE_URL="${COCOLA_LLM_BASE_URL:-http://$LLM_HOST:$LLM_PORT}"
-  echo "    agent-runtime will route the SDK at $COCOLA_LLM_BASE_URL"
+  # Route A: the sandbox's in-sandbox claude CLI reaches the gateway via
+  # COCOLA_SANDBOX_LLM_BASE_URL (injected at sandbox creation), not via the
+  # agent-runtime process env. Surface the URL so a real Route-A run can point
+  # the sandbox at it.
+  export COCOLA_SANDBOX_LLM_BASE_URL="${COCOLA_SANDBOX_LLM_BASE_URL:-http://$LLM_HOST:$LLM_PORT}"
+  echo "    llm-gateway up; sandbox brain should target $COCOLA_SANDBOX_LLM_BASE_URL"
 fi
 
 # ----------------------------------------------------------------- MinIO (attachments)
@@ -252,8 +256,9 @@ fi
 echo "==> minting a dev token (admin-mint)"
 TOKEN="$(go run ./apps/admin-api/cmd/admin-mint -user emp-42 -tenant team-platform -ttl 3600)"
 
-# With a real LLM upstream the SDK's key must be a real token; with EchoProvider
-# (no llm-gateway) it is never used, so leave the harmless default.
+# With a real LLM upstream the sandbox brain must present a real cocola token as
+# ANTHROPIC_AUTH_TOKEN; with EchoProvider (no llm-gateway) it is never used, so
+# leave the harmless default.
 AGENT_API_KEY="cocola-local"
 [[ "$WITH_LLM" == "1" ]] && AGENT_API_KEY="$TOKEN"
 
@@ -262,11 +267,9 @@ free_port "$AGENT_PORT" agent-runtime
 (
   cd apps/agent-runtime
   COCOLA_AGENT_HOST="$AGENT_HOST" COCOLA_AGENT_PORT="$AGENT_PORT" \
-  COCOLA_LLM_BASE_URL="${COCOLA_LLM_BASE_URL:-}" \
   COCOLA_AGENT_API_KEY="$AGENT_API_KEY" \
   COCOLA_ANTHROPIC_MODEL="${COCOLA_LLM_DEFAULT_ALIAS:-cocola-default}" \
   COCOLA_SANDBOX_ADDR="${COCOLA_SANDBOX_ADDR:-}" \
-  COCOLA_AGENT_ROUTE="${COCOLA_AGENT_ROUTE:-A}" \
     $SETSID uv run python -m cocola_agent_runtime
 ) >"$(log_redirect agent-runtime)" 2>&1 &
 PIDS+=("$!")

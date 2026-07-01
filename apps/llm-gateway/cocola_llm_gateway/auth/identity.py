@@ -6,9 +6,10 @@ sends (as ANTHROPIC_API_KEY) into an `Identity`; ops calls `Issuer.issue(...)`
 (via the `issue-token` CLI) to mint a token for an employee.
 
 Design notes:
-- The token *is* the API key. cocola injects it into the SDK subprocess env as
-  ANTHROPIC_API_KEY (see ClaudeAgentSDKProvider). There is no separate key store;
-  identity, expiry, and tenant live inside the signed JWT.
+- The token *is* the API key. cocola injects it into the user's sandbox env as
+  ANTHROPIC_AUTH_TOKEN (Route A), where the in-sandbox `claude` CLI presents it
+  to the gateway. There is no separate key store; identity, expiry, and tenant
+  live inside the signed JWT.
 - Verification is offline (shared HS256 secret) — no network call per request,
   which keeps the hot path fast and the gateway horizontally scalable.
 - A `dev_allow_anonymous` escape hatch lets local/fake boots work without minting

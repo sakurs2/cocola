@@ -24,8 +24,10 @@ AGENT_ADDR="${COCOLA_AGENT_ADDR:-127.0.0.1:50061}"
 GATEWAY_ADDR="${COCOLA_GATEWAY_ADDR:-127.0.0.1:8080}"
 NULL="/dev/null"
 
-# Leaving COCOLA_LLM_BASE_URL unset makes agent-runtime use EchoProvider, so
-# this runbook needs no real model. Point it at the llm-gateway to go live.
+# Leaving COCOLA_SANDBOX_ADDR unset makes agent-runtime use EchoProvider, so
+# this runbook needs no real model. For a real run set COCOLA_SANDBOX_ADDR to a
+# sandbox-manager (Route A, ADR-0009); the sandbox brain reaches the llm-gateway
+# via the injected COCOLA_SANDBOX_LLM_BASE_URL.
 
 cleanup() {
   [[ -n "${AGENT_PID:-}" ]] && kill "$AGENT_PID" 2>"$NULL" || true

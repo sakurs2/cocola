@@ -1,6 +1,6 @@
 """Defines the AgentProvider Protocol.
 
-Concrete providers (`ClaudeAgentSDKProvider`, `EchoProvider`, …) MUST implement
+Concrete providers (`InSandboxShimProvider`, `EchoProvider`, …) MUST implement
 this Protocol. The runtime server depends on the Protocol only, never on a
 concrete class — this is what makes the runtime LLM-agnostic and testable.
 """
@@ -17,10 +17,10 @@ class AgentOptions:
     user_id: str
     session_id: str
     sandbox_id: str | None = None
-    # Host working directory for a provider whose brain runs IN THIS PROCESS
-    # (e.g. ClaudeAgentSDKProvider in local dev). When set, the provider points
-    # the SDK's cwd here so its native Read/Bash tools resolve relative paths
-    # like ./uploads/. Unused by Route A (the in-sandbox brain has its own cwd).
+    # Host working directory for an in-process provider (one whose brain runs
+    # IN THIS PROCESS). When set, such a provider points its cwd here so native
+    # Read/Bash tools resolve relative paths like ./uploads/. Unused by Route A
+    # (the in-sandbox brain has its own cwd) and by EchoProvider.
     workspace: str | None = None
     system_prompt: str | None = None
     max_turns: int = 30

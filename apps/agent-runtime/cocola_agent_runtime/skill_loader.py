@@ -7,7 +7,7 @@ session it asks the admin-api for the *enabled* entries and exposes them to the
 agent, so flipping a skill on/off in the control plane changes what the agent
 can do — no runtime redeploy.
 
-Design mirrors the rest of the runtime (agent_provider, claude_sdk_provider):
+Design mirrors the rest of the runtime (agent_provider, shim_provider):
 a small Protocol the server depends on, a production HTTP implementation, and a
 static implementation for hermetic tests. The HTTP transport is an injectable
 callable (default: stdlib urllib) so unit tests never open a socket and the

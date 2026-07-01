@@ -117,10 +117,12 @@ per-user/per-session aggregates in a single Lua script for atomicity.
   internal inference endpoint is ever hardcoded.
 - Unit tests use `FakeUpstream` exclusively: no real model, no API key.
 - HTTP is exercised in-process via `httpx.ASGITransport` — **no bound port**
-  (the project forbids listening sockets in the sandbox). The cross-package e2e
-  (`scripts/llm-m3-e2e.py`) drives the full path
-  `prompt → ClaudeAgentSDKProvider → (fake CLI) → gateway → FakeUpstream →
-Anthropic SSE → AgentEvents` and asserts the ledger recorded the call.
+  (the project forbids listening sockets in the sandbox). `test_server_http.py`
+  and `test_server_auth_quota.py` drive `POST /v1/messages` through the gateway
+  to `FakeUpstream` and assert the ledger recorded the billed call. (The old
+  cross-package `scripts/llm-m3-e2e.py`, which drove the path through the
+  now-decommissioned Route B `ClaudeAgentSDKProvider`, was removed with Route B;
+  see ADR-0009「实现进展（2026-07-02）下线 Route B」.)
 
 ## Alternatives considered
 

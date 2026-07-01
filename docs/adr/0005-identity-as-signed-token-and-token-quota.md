@@ -114,10 +114,13 @@ enabled the verified token is authoritative and those headers are ignored.
 
 Auth and quota are exercised with `MemoryLedger` + `MemoryQuotaStore` + a
 `Verifier` over `httpx.ASGITransport` — no real model, no Redis, no bound port.
-The cross-package e2e (`scripts/llm-m4-e2e.py`) mints a token, drives the SDK
-provider through the gateway with a tiny cap, and asserts: authorized call is
-billed to the **token subject**, the next call is blocked with **429**, and an
-invalid token is rejected with **401**.
+`test_server_auth_quota.py` mints a token, drives `POST /v1/messages` through
+the gateway with a tiny cap, and asserts: an authorized call is billed to the
+**token subject**, the next call is blocked with **429**, and an invalid token
+is rejected with **401** — provider-independent coverage of the same contract.
+(The old cross-package `scripts/llm-m4-e2e.py`, which drove the path through the
+now-decommissioned Route B `ClaudeAgentSDKProvider`, was removed with Route B;
+see ADR-0009「实现进展（2026-07-02）下线 Route B」.)
 
 ## Alternatives considered
 

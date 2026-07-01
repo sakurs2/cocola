@@ -11,8 +11,8 @@ Design choices, all to avoid reinventing what we already have:
 
 - The servicer depends ONLY on the `AgentProvider` Protocol and the
   `SkillCatalog` Protocol, never on a concrete provider. Production injects
-  `ClaudeAgentSDKProvider` + `AdminSkillCatalog`; tests inject fakes. This is the
-  same composition-root pattern the rest of the runtime uses.
+  `InSandboxShimProvider` (Route A) + `AdminSkillCatalog`; tests inject fakes.
+  This is the same composition-root pattern the rest of the runtime uses.
 - The generic `AgentEvent` dataclass the provider yields maps 1:1 onto the proto
   `AgentEvent` (a `kind` string + a flat `map<string,string>` of data). Non-string
   payloads (tool input dicts, costs) are JSON/str-encoded into the map so the
@@ -139,7 +139,7 @@ class AgentRuntimeServicer(pb_grpc.AgentRuntimeServiceServicer):
         A provider error is surfaced as a terminal `error` event (not a dropped
         stream) so the BFF/client always sees a clean end. We do NOT also append
         a `done` here: the provider is responsible for its own terminal event
-        (ClaudeAgentSDKProvider yields `done`); on error we substitute one.
+        (the shim provider yields `done`); on error we substitute one.
         """
         sandbox_id = request.sandbox_id or None
 
@@ -254,10 +254,11 @@ class AgentRuntimeServicer(pb_grpc.AgentRuntimeServiceServicer):
           ./uploads/ in the session cwd (/workspace/<session_id>/, ADR-0008 T1b),
           resolved via `pwd` (provider-agnostic) with `mkdir -p uploads` in the
           same shell -- WriteFile (docker CopyToContainer) makes no parent dirs.
-        - Local dev (no executor/sandbox): the brain runs in THIS process
-          (ClaudeAgentSDKProvider). A sandbox write would be unreachable, so we
-          write into a per-session HOST dir and hand its path back as the cwd for
-          the SDK, whose native Read/Bash then resolve ./uploads/ against it.
+        - Local dev (no executor/sandbox): there is no bound sandbox to write
+          into, so we write into a per-session HOST dir and hand its path back as
+          the workspace cwd; an in-process provider's native Read/Bash would then
+          resolve ./uploads/ against it. (With Route B decommissioned the default
+          no-sandbox provider is EchoProvider, which makes no model calls.)
 
         Content is written binary-safe so images survive intact.
         """

@@ -8,9 +8,10 @@
 #   admin-api / llm-gateway <-> redis (revokes, quota, billing)
 #   sandbox-manager -> host docker daemon (DooD) to create user sandboxes
 #
-# Dev defaults: auth is OFF (no COCOLA_AUTH_SECRET / COCOLA_ADMIN_KEY) and the
-# agent uses EchoProvider (no COCOLA_LLM_BASE_URL) so the stack runs zero-config.
-# Flip to production by injecting those env vars -- no code change.
+# Dev defaults: auth is OFF (no COCOLA_AUTH_SECRET / COCOLA_ADMIN_KEY). The agent
+# runs Route A (ADR-0009): the Claude Code brain lives inside the user's sandbox
+# (COCOLA_SANDBOX_ADDR is set below); with no sandbox it degrades to EchoProvider.
+# Flip to production by injecting the auth env vars -- no code change.
 #
 # DooD path isomorphism (see m-minimal plan): COCOLA_SANDBOX_ROOT must be the
 # SAME absolute path inside sandbox-manager and on the host, so the host daemon
@@ -216,8 +217,9 @@ services:
       # Route A (ADR-0009): the agent-runtime slim image has no node/claude CLI,
       # so the Claude Code brain runs INSIDE the user's sandbox (the
       # cocola/sandbox-runtime image, which bakes node + claude + the shim).
-      # agent-runtime is then a pure control-plane router.
-      COCOLA_AGENT_ROUTE: "${COCOLA_AGENT_ROUTE:-A}"
+      # agent-runtime is then a pure control-plane router. Route A activates
+      # automatically because COCOLA_SANDBOX_ADDR (above) is set; there is no
+      # separate route switch (the legacy Route B was decommissioned).
       # The session sandbox is created from the brain image and gets the model
       # credentials injected at creation (never via the prompt). The in-sandbox
       # claude CLI reaches the gateway over the HOST-published port: sandboxes

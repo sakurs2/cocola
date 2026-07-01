@@ -118,7 +118,7 @@ def _build_options(req: dict[str, Any]):
 def _message_to_events(message: Any) -> list[dict[str, Any]]:
     """Map an SDK message to transport-neutral NDJSON events.
 
-    Mirrors the taxonomy agent-runtime already uses (claude_sdk_provider.py),
+    Mirrors the taxonomy agent-runtime already uses (shim_provider.py),
     so the router relays these straight through to the gateway/web SSE.
     """
     events: list[dict[str, Any]] = []

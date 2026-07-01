@@ -1,3 +1,10 @@
+> **状态（2026-07-02 更新）**：本 Plan 的保守边界「只删 MCP 缝合层、保留
+> `ClaudeAgentSDKProvider` 作为最小 fallback、不动 `COCOLA_AGENT_ROUTE` 开关」
+> 已被后续决策取代 —— Route A 全栈验证成功后，Route B 已于 2026-07-02 **整体下线**
+> （删 provider + 单测 + e2e、收敛 `_build_provider`、移除 `COCOLA_AGENT_ROUTE` 开关）。
+> 详见 ADR-0009「实现进展（2026-07-02）下线 Route B」与
+> `docs/archive/refactor-decommission-route-b.md`。本文档保留作历史记录。
+
 # Plan: 删除 Route-B MCP 转发缝合层（收敛攻击面）
 
 - 关联：ADR-0009 §1「Native tools are now safe — delete the MCP forwarding seam」、

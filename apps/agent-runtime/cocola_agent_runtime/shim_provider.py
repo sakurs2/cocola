@@ -1,8 +1,8 @@
 """InSandboxShimProvider -- the Route A agent provider (ADR-0009).
 
-Where `ClaudeAgentSDKProvider` (Route B) spawns the `claude` CLI *on the
-agent-runtime host* and forwards only bash/file tools into a sandbox, this
-provider runs the WHOLE Claude Code brain inside the user's own container. It
+Where the legacy central-SDK path (Route B, decommissioned) spawned the `claude`
+CLI *on the agent-runtime host* and forwarded only bash/file tools into a sandbox,
+this provider runs the WHOLE Claude Code brain inside the user's own container. It
 does that by driving the in-sandbox stdio shim
 (`/opt/cocola/shim/entrypoint.sh`, see deploy/sandbox-runtime/shim/agent_shim.py):
 
@@ -48,7 +48,7 @@ SHIM_ENTRYPOINT = "/opt/cocola/shim/entrypoint.sh"
 def _shim_event_to_agent_events(ev: dict) -> list[AgentEvent]:
     """Map one shim NDJSON event to zero or more AgentEvents.
 
-    Taxonomy is kept identical to ClaudeAgentSDKProvider so the gateway/web SSE
+    Taxonomy is kept identical to the sandbox shim protocol so the gateway/web SSE
     layer consumes both providers the same way. `start` is shim-internal framing
     and carries nothing the caller needs, so it is dropped.
     """

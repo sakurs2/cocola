@@ -6,15 +6,11 @@ and runs the async gRPC server. It deliberately holds no business logic.
 
 Env (all optional; sensible local defaults):
     COCOLA_AGENT_HOST / COCOLA_AGENT_PORT   where to listen (default 0.0.0.0:50061)
-    COCOLA_LLM_BASE_URL                      cocola llm-gateway root the SDK targets
-    COCOLA_ANTHROPIC_MODEL                   caller-facing model alias (default "default")
-    COCOLA_AGENT_API_KEY                     cocola-issued token the SDK presents (dev default)
     COCOLA_ADMIN_BASE_URL                    admin-api root for the Skill-Market catalog
     COCOLA_ADMIN_KEY                         admin bearer key (if admin-api auth is on)
-    COCOLA_SANDBOX_ADDR                      sandbox-manager gRPC addr (binds session->sandbox
-                                             AND routes the agent's bash/file tools into it)
-    COCOLA_AGENT_ROUTE                       "A" => run agent inside the sandbox via the shim
-                                             (Route A, ADR-0009); default/unset => Route B
+    COCOLA_SANDBOX_ADDR                      sandbox-manager gRPC addr (binds session->sandbox,
+                                             routes the agent's bash/file tools into it, AND
+                                             hosts the Route A brain; unset => EchoProvider)
     COCOLA_SANDBOX_IMAGE                      Route A brain image for the session sandbox
                                              (e.g. cocola/sandbox-runtime); empty => default
     COCOLA_SANDBOX_LLM_BASE_URL              gateway root injected as ANTHROPIC_BASE_URL
@@ -23,9 +19,11 @@ Env (all optional; sensible local defaults):
     COCOLA_PG_DSN                            Postgres DSN; enables the durable session->claude
                                              resume index (else in-process, lost on restart)
 
-Provider selection: with COCOLA_LLM_BASE_URL set we drive the real Claude Agent
-SDK routed through the gateway; without it we fall back to EchoProvider so a
-zero-config boot still serves the contract end to end (useful for wiring tests).
+Provider selection (ADR-0009, Route B decommissioned): Route A runs the whole
+Claude Code brain inside the user's own sandbox via the in-sandbox stdio shim,
+so it needs a reachable sandbox executor (COCOLA_SANDBOX_ADDR). With no executor
+we fall back to EchoProvider so a zero-config boot still serves the contract end
+to end (useful for wiring tests) -- no real model calls.
 """
 
 from __future__ import annotations
@@ -77,47 +75,28 @@ def _build_session_map():
 
 
 def _build_provider(executor: SandboxExecutor | None) -> AgentProvider:
-    # Route A (ADR-0009): run the WHOLE Claude Code brain inside the user's own
-    # sandbox via the in-sandbox stdio shim. agent-runtime is then a pure
-    # control-plane router. Gated behind an explicit env switch so the default
-    # stays Route B -- this makes the cut-over a grey-launch with a one-line
-    # rollback (unset COCOLA_AGENT_ROUTE). Route A needs a real sandbox to run
-    # in; without an executor there is nowhere to put the brain, so we fall back.
-    route = os.getenv("COCOLA_AGENT_ROUTE", "").strip().upper()
-    if route == "A":
-        if executor is None:
-            log.warning(
-                "COCOLA_AGENT_ROUTE=A but no sandbox executor "
-                "(COCOLA_SANDBOX_ADDR unset); falling back to Route B"
-            )
-        else:
-            from cocola_agent_runtime.shim_provider import InSandboxShimProvider
-
-            session_map = _build_session_map()
-            log.info("using InSandboxShimProvider (Route A: brain in sandbox)")
-            return InSandboxShimProvider(executor, session_map=session_map)
-
-    base_url = os.getenv("COCOLA_LLM_BASE_URL", "").strip()
-    if not base_url:
-        log.warning("COCOLA_LLM_BASE_URL unset; using EchoProvider (no real model calls)")
+    # Route A (ADR-0009) is the only real path: run the WHOLE Claude Code brain
+    # inside the user's own sandbox via the in-sandbox stdio shim, so agent-runtime
+    # is a pure control-plane router. Route A needs a reachable sandbox to run the
+    # brain in; without an executor (COCOLA_SANDBOX_ADDR unset) there is nowhere to
+    # put it, so we degrade to EchoProvider -- a zero-config, no-model boot that
+    # still serves the gRPC contract end to end (useful for wiring tests).
+    #
+    # The legacy central-SDK path (Route B, ClaudeAgentSDKProvider spawning the
+    # claude CLI on the agent-runtime host) was decommissioned; see ADR-0009 and
+    # docs/archive/refactor-decommission-route-b.md.
+    if executor is None:
+        log.warning(
+            "no sandbox executor (COCOLA_SANDBOX_ADDR unset); "
+            "using EchoProvider (no real model calls)"
+        )
         return EchoProvider()
-    # Imported lazily so an Echo boot needs neither the SDK nor the CLI present.
-    from cocola_agent_runtime.claude_sdk_provider import (
-        ClaudeAgentSDKProvider,
-        ClaudeSDKConfig,
-    )
 
-    cfg = ClaudeSDKConfig(
-        base_url=base_url,
-        model=os.getenv("COCOLA_ANTHROPIC_MODEL", "default"),
-        api_key=os.getenv("COCOLA_AGENT_API_KEY", "cocola-local"),
-    )
-    log.info(
-        "using ClaudeAgentSDKProvider",
-        base_url=base_url,
-        model=cfg.model,
-    )
-    return ClaudeAgentSDKProvider(cfg)
+    from cocola_agent_runtime.shim_provider import InSandboxShimProvider
+
+    session_map = _build_session_map()
+    log.info("using InSandboxShimProvider (Route A: brain in sandbox)")
+    return InSandboxShimProvider(executor, session_map=session_map)
 
 
 def _build_skill_catalog() -> SkillCatalog | None:
