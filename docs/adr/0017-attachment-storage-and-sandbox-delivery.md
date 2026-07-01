@@ -73,9 +73,34 @@
   大文件在 P1 前不可用;P0 附件只活在沙箱内,会话结束即丢,历史消息附件点不开
   (P1 接 OSS 前的已知缺口)。
 - **Followups(见 Plan §6)**:
-  - **P1a**:OSS(MinIO)做真源 + object key 存库 + 运行前拉入沙箱(送达仍 push)。
-  - **P1b**:按可配置阈值(默认 16MiB,`COCOLA_ATTACHMENT_INLINE_MAX_BYTES`)分流,
-    大文件走**后端代 pull**;三处上限读同一配置源,不写死。
+  - **P1a(✅ 已落地,2026-07)**:OSS(MinIO)做真源 + 按可配置阈值分流 + 运行前后端代 pull
+    进沙箱(送达仍 push)。合入范围与本 ADR 决策一致——见下方「P1a 实现纪要」。
+    P1b(阈值分流)已并入 P1a 一并实现,不再单列。
   - **P2(TODO)**:B. 工具型 pull —— 仅当出现模型按需访问超大文件/数据集的明确诉求再补。
   - **TODO**:大文件/二进制/分片、presign 直传、bucket 生命周期与配额。
-  - **TODO**:历史消息附件回看(依赖 OSS 持久化)。
+  - **TODO**:历史消息附件回看(依赖 OSS 持久化;object key 已存,回看 UI/接口待补)。
+  - **TODO**:前端上限对齐同一配置源(当前 gateway/agent-runtime 已同源读
+    `COCOLA_ATTACHMENT_INLINE_MAX_BYTES`,前端硬上限尚未接入该源)。
+
+## P1a 实现纪要(2026-07)
+
+按本 ADR「真源=对象存储、送达=push、大文件后端代 pull、阈值可配置不写死」逐步落地,
+每步独立提交并附 `docs/archive/` changelog:
+
+1. **proto**(Step1):`Attachment` 增 `oss_key` / `size`,重生成 Go/Py。
+2. **gateway objstore 客户端**(Step2):`internal/objstore` 封装 minio-go,
+   `Put/Get/Health`,`ConfigFromEnv` 读 `COCOLA_MINIO_*`(secret 支持 `_FILE`)。
+3. **gateway 落桶 + 阈值分流**(Step3):`/v1/chat` 每个附件先 `PutObject`(key=
+   `attachments/<session>/<uuid>-<name>`),再按 `COCOLA_ATTACHMENT_INLINE_MAX_BYTES`
+   (默认 16MiB)分流——阈值内保留 inline `content` + `oss_key`,超阈值仅带 `oss_key`。
+   优雅降级:未配置对象存储 → P0 纯内联;`Put` 失败 → 该文件回落内联。
+4. **agent-runtime 代 pull**(Step4):`cocola_agent_runtime/objstore.py` 的
+   `Fetcher`/`MinioFetcher`/`fetcher_from_env`;provision 前对「仅 oss_key」附件
+   `GetObject`(丢 worker 线程避免堵事件循环)取字节再写 `uploads/`。无 fetcher →
+   干净终止 `error` 事件而非静默空文件。模型侧零改动、无新工具面。
+5. **compose/env 接线**(Step5):full compose 补 `minio` + `minio-init` 节点,
+   gateway/agent-runtime 同源注入 `COCOLA_MINIO_*` + 阈值;`.env.example` 文档化。
+
+阈值三处同源:gateway 读 `COCOLA_ATTACHMENT_INLINE_MAX_BYTES`,agent-runtime 只按
+「有无 inline content」判定(与 gateway 分流结果一致),对象存储命名两端共用
+`COCOLA_MINIO_*`。前端硬上限接入同一配置源列为 TODO。
