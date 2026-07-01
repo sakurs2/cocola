@@ -159,8 +159,9 @@ const Composer: FC = () => (
 // carries the file name plus a remove control; the runtime holds the File until
 // send(), when Base64AttachmentAdapter turns it into a base64 FileMessagePart.
 const ComposerAttachments: FC = () => (
-  <ComposerPrimitive.Attachments
-    components={{
+  <div className="flex flex-wrap gap-1.5 empty:hidden [&:not(:empty)]:pb-1.5">
+    <ComposerPrimitive.Attachments
+      components={{
       Attachment: () => (
         <AttachmentPrimitive.Root className="relative flex w-fit max-w-full self-start items-center gap-2 rounded-lg border border-border bg-muted px-3 py-1.5 text-xs text-foreground">
           <PaperclipIcon className="size-3.5 shrink-0 text-muted-foreground" />
@@ -178,8 +179,9 @@ const ComposerAttachments: FC = () => (
           </AttachmentPrimitive.Remove>
         </AttachmentPrimitive.Root>
       ),
-    }}
-  />
+      }}
+    />
+  </div>
 );
 
 const ComposerAction: FC = () => (
@@ -212,18 +214,20 @@ const ComposerAction: FC = () => (
 const UserMessage: FC = () => (
   <MessagePrimitive.Root className="grid w-full max-w-[var(--thread-max-width)] auto-rows-auto grid-cols-[minmax(72px,1fr)_auto] gap-y-1 py-3">
     <div className="col-start-2 row-start-1 flex flex-col items-end gap-1.5">
-      <MessagePrimitive.Attachments
-        components={{
-          Attachment: () => (
-            <AttachmentPrimitive.Root className="flex w-fit max-w-full items-center gap-2 rounded-lg border border-border bg-muted/60 px-3 py-1.5 text-xs text-foreground">
-              <PaperclipIcon className="size-3.5 shrink-0 text-muted-foreground" />
-              <span className="max-w-[16rem] truncate">
-                <AttachmentPrimitive.Name />
-              </span>
-            </AttachmentPrimitive.Root>
-          ),
-        }}
-      />
+      <div className="flex flex-wrap justify-end gap-1.5 empty:hidden">
+        <MessagePrimitive.Attachments
+          components={{
+            Attachment: () => (
+              <AttachmentPrimitive.Root className="flex w-fit max-w-full items-center gap-2 rounded-lg border border-border bg-muted/60 px-3 py-1.5 text-xs text-foreground">
+                <PaperclipIcon className="size-3.5 shrink-0 text-muted-foreground" />
+                <span className="max-w-[16rem] truncate">
+                  <AttachmentPrimitive.Name />
+                </span>
+              </AttachmentPrimitive.Root>
+            ),
+          }}
+        />
+      </div>
       <MessagePrimitive.If hasContent>
         <div className="max-w-[calc(var(--thread-max-width)*0.8)] whitespace-pre-wrap break-words rounded-2xl bg-muted px-4 py-2 text-sm text-foreground">
           <MessagePrimitive.Parts />
