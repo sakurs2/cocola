@@ -50,17 +50,21 @@ export function AppSidebar() {
       )}
     >
       {/* Header: brand + collapse toggle */}
-      <div className="flex h-14 items-center gap-2 px-3">
-        <div className="flex size-7 shrink-0 items-center justify-center rounded-lg bg-foreground text-background">
-          <MessagesSquare className="size-4" />
-        </div>
-        {!collapsed && <span className="flex-1 truncate text-sm font-semibold">cocola</span>}
+      <div className={cn("flex h-14 items-center gap-2 px-3", collapsed && "justify-center px-0")}>
+        {!collapsed && (
+          <>
+            <div className="flex size-7 shrink-0 items-center justify-center rounded-lg bg-foreground text-background">
+              <MessagesSquare className="size-4" />
+            </div>
+            <span className="flex-1 truncate text-sm font-semibold">cocola</span>
+          </>
+        )}
         <button
           type="button"
           onClick={() => setCollapsed((v) => !v)}
           aria-label="Toggle sidebar"
           title="Toggle sidebar"
-          className="flex size-7 items-center justify-center rounded-md text-sidebar-foreground/70 hover:bg-sidebar-accent hover:text-sidebar-accent-foreground"
+          className="flex size-7 shrink-0 items-center justify-center rounded-md text-sidebar-foreground/70 hover:bg-sidebar-accent hover:text-sidebar-accent-foreground"
         >
           <PanelLeft className="size-4" />
         </button>
