@@ -39,3 +39,4 @@ Code shows _what_ and _how_. ADRs preserve _why_ — invaluable when:
 | 0014 | OpenSandbox as the primary sandbox backend; retire k8s provider (docker kept as fallback)            | Accepted |
 | 0015 | On-demand cold-start allocation as default; warm pool kept as optional (OpenSandbox-only)             | Accepted (amended by 0016) |
 | 0016 | Remove the warm pool capability entirely (supersedes 0012; amends 0015)                              | Accepted |
+| 0017 | Chat attachment storage layering + sandbox delivery (push model; P0 inline, OSS/pull as TODO)        | Accepted |
