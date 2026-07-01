@@ -19,6 +19,17 @@ message QueryRequest {
   string prompt = 3;
   string sandbox_id = 4;
   int32 max_turns = 5;
+  // User-uploaded files, pre-provisioned into the sandbox workspace before the
+  // agent runs (push model, ADR-0017). P0 carries small files inline; large
+  // binaries go through object storage in a later phase.
+  repeated Attachment attachments = 6;
+}
+
+// Attachment is a single user-uploaded file carried inline with the query.
+message Attachment {
+  string filename = 1;  // sanitized basename; landed under ./uploads/ in the workspace
+  bytes content = 2;    // raw file bytes
+  string mime = 3;      // best-effort MIME type from the browser
 }
 
 message AgentEvent {

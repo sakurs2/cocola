@@ -196,6 +196,7 @@ async def serve() -> None:
         _build_provider(executor),
         skills=_build_skill_catalog(),
         binder=_build_binder(),
+        executor=executor,
     )
     # Observability: RED metrics for every RPC. agent-runtime has no HTTP server
     # of its own, so unlike the llm-gateway it exposes /metrics on a dedicated

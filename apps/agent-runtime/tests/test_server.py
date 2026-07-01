@@ -9,7 +9,7 @@ skills are folded into the AgentOptions the provider receives.
 """
 
 import json
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 from cocola_agent_runtime.agent_provider import AgentEvent, AgentOptions
 from cocola_agent_runtime.server import AgentRuntimeServicer, event_to_proto
@@ -23,6 +23,7 @@ class FakeRequest:
     prompt: str = "hi"
     sandbox_id: str = ""
     max_turns: int = 0
+    attachments: list = field(default_factory=list)
 
 
 class FakeContext:

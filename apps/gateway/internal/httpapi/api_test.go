@@ -197,3 +197,49 @@ func TestMetricsInstrumentation(t *testing.T) {
 		}
 	}
 }
+
+// TestChatDecodesAndForwardsAttachments proves the BFF base64-decodes inline
+// attachment content to raw bytes and forwards filename/mime unchanged to the
+// agent layer (push model, ADR-0017). "aGVsbG8=" decodes to "hello".
+func TestChatDecodesAndForwardsAttachments(t *testing.T) {
+	fs := &fakeStreamer{script: []agent.Event{{Kind: "done"}}}
+	h := newAPI(t, fs)
+
+	body := `{"prompt":"hi","attachments":[{"filename":"a.txt","content_b64":"aGVsbG8=","mime":"text/plain"}]}`
+	req := httptest.NewRequest("POST", "/v1/chat", strings.NewReader(body))
+	rec := httptest.NewRecorder()
+	h.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("want 200, got %d", rec.Code)
+	}
+	if len(fs.gotQuery.Attachments) != 1 {
+		t.Fatalf("want 1 attachment forwarded, got %d", len(fs.gotQuery.Attachments))
+	}
+	att := fs.gotQuery.Attachments[0]
+	if att.Filename != "a.txt" || att.Mime != "text/plain" {
+		t.Fatalf("attachment metadata not forwarded: %+v", att)
+	}
+	if string(att.Content) != "hello" {
+		t.Fatalf("content not base64-decoded, got %q", att.Content)
+	}
+}
+
+// TestChatDropsAttachmentWithInvalidBase64 proves a malformed content_b64 is
+// skipped (dropped) rather than aborting the whole request.
+func TestChatDropsAttachmentWithInvalidBase64(t *testing.T) {
+	fs := &fakeStreamer{script: []agent.Event{{Kind: "done"}}}
+	h := newAPI(t, fs)
+
+	body := `{"prompt":"hi","attachments":[{"filename":"bad.bin","content_b64":"!!!not-base64!!!","mime":"application/octet-stream"}]}`
+	req := httptest.NewRequest("POST", "/v1/chat", strings.NewReader(body))
+	rec := httptest.NewRecorder()
+	h.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("want 200, got %d", rec.Code)
+	}
+	if len(fs.gotQuery.Attachments) != 0 {
+		t.Fatalf("invalid-base64 attachment should be dropped, got %d", len(fs.gotQuery.Attachments))
+	}
+}

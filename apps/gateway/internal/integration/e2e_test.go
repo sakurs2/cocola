@@ -32,15 +32,17 @@ import (
 // test can assert the user_id was derived from the token, not the body.
 type scriptedServer struct {
 	agentv1.UnimplementedAgentRuntimeServiceServer
-	gotUserID    string
-	gotPrompt    string
-	gotSessionID string
+	gotUserID      string
+	gotPrompt      string
+	gotSessionID   string
+	gotAttachments []*agentv1.Attachment
 }
 
 func (s *scriptedServer) Query(req *agentv1.QueryRequest, stream agentv1.AgentRuntimeService_QueryServer) error {
 	s.gotUserID = req.GetUserId()
 	s.gotPrompt = req.GetPrompt()
 	s.gotSessionID = req.GetSessionId()
+	s.gotAttachments = req.GetAttachments()
 	events := []*agentv1.AgentEvent{
 		{Kind: "text", Data: map[string]string{"text": "hello " + req.GetPrompt()}},
 		{Kind: "text", Data: map[string]string{"text": "world"}},
@@ -152,5 +154,42 @@ func TestEndToEndRejectsMissingToken(t *testing.T) {
 	}
 	if srv.gotPrompt != "" {
 		t.Fatal("agent-runtime must not be reached when auth fails")
+	}
+}
+
+// TestEndToEndForwardsAttachmentsAsBytes proves an inline attachment survives
+// the full edge->gRPC path: the BFF base64-decodes content_b64 to raw bytes and
+// the real generated stub delivers filename/mime/bytes to the server intact
+// (push model, ADR-0017). "aGVsbG8gd29ybGQ=" decodes to "hello world".
+func TestEndToEndForwardsAttachmentsAsBytes(t *testing.T) {
+	srv := &scriptedServer{}
+	conn, cleanup := startGRPC(t, srv)
+	defer cleanup()
+
+	h := buildHandler(t, conn)
+
+	tok, err := token.Encode(token.Claims{Subject: "emp-77", Issuer: "cocola"}, "test-secret")
+	if err != nil {
+		t.Fatalf("encode token: %v", err)
+	}
+
+	body := `{"prompt":"read it","attachments":[{"filename":"note.txt","content_b64":"aGVsbG8gd29ybGQ=","mime":"text/plain"}]}`
+	req := httptest.NewRequest("POST", "/v1/chat", strings.NewReader(body))
+	req.Header.Set("authorization", "Bearer "+tok)
+	rec := httptest.NewRecorder()
+	h.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("want 200, got %d (body=%q)", rec.Code, rec.Body.String())
+	}
+	if len(srv.gotAttachments) != 1 {
+		t.Fatalf("want 1 attachment at server, got %d", len(srv.gotAttachments))
+	}
+	att := srv.gotAttachments[0]
+	if att.GetFilename() != "note.txt" || att.GetMime() != "text/plain" {
+		t.Fatalf("attachment metadata not forwarded: filename=%q mime=%q", att.GetFilename(), att.GetMime())
+	}
+	if string(att.GetContent()) != "hello world" {
+		t.Fatalf("attachment bytes corrupted, got %q", att.GetContent())
 	}
 }

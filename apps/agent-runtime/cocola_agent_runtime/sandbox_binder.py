@@ -250,6 +250,10 @@ class SandboxExecutor(Protocol):
         """Write a UTF-8 text file into the sandbox."""
         ...
 
+    async def write_bytes(self, *, sandbox_id: str, path: str, data: bytes) -> None:
+        """Write raw bytes into the sandbox (binary-safe, e.g. an image)."""
+        ...
+
 
 class SandboxManagerExecutor:
     """SandboxExecutor backed by sandbox-manager over gRPC.
@@ -303,6 +307,13 @@ class SandboxManagerExecutor:
         def _call() -> None:
             with SandboxClient(addr=self._addr) as sb:
                 sb.write_file(sandbox_id, path, content.encode("utf-8"))
+
+        await anyio.to_thread.run_sync(_call)
+
+    async def write_bytes(self, *, sandbox_id: str, path: str, data: bytes) -> None:
+        def _call() -> None:
+            with SandboxClient(addr=self._addr) as sb:
+                sb.write_file(sandbox_id, path, data)
 
         await anyio.to_thread.run_sync(_call)
 
@@ -378,6 +389,7 @@ class StaticSandboxExecutor:
         self.stream_calls: list[dict] = []
         self.reads: list[tuple[str, str]] = []
         self.writes: list[tuple[str, str, str]] = []
+        self.byte_writes: list[tuple[str, str, bytes]] = []
         self.files: dict[tuple[str, str], str] = {}
 
     async def exec(
@@ -411,6 +423,12 @@ class StaticSandboxExecutor:
             raise self._fail
         self.writes.append((sandbox_id, path, content))
         self.files[(sandbox_id, path)] = content
+
+    async def write_bytes(self, *, sandbox_id: str, path: str, data: bytes) -> None:
+        if self._fail is not None:
+            raise self._fail
+        self.byte_writes.append((sandbox_id, path, data))
+        self.files[(sandbox_id, path)] = data.decode("utf-8", "replace")
 
     async def exec_stream(
         self,

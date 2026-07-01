@@ -13,7 +13,7 @@ directly with a StaticSandboxBinder and assert the binding lifecycle:
     thread, returning a transport-neutral BoundSandbox.
 """
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 from cocola_agent_runtime.agent_provider import AgentEvent, AgentOptions
 from cocola_agent_runtime.sandbox_binder import (
@@ -31,6 +31,7 @@ class FakeRequest:
     prompt: str = "hi"
     sandbox_id: str = ""
     max_turns: int = 0
+    attachments: list = field(default_factory=list)
 
 
 class FakeContext:

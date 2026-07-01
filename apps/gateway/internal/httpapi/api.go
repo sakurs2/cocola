@@ -10,6 +10,7 @@
 package httpapi
 
 import (
+	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"net/http"
@@ -75,10 +76,22 @@ func (a *API) health(w http.ResponseWriter, _ *http.Request) {
 // the verified identity, NOT from the body, so a caller cannot impersonate
 // another user. session_id and sandbox_id are caller-chosen routing hints.
 type chatRequest struct {
-	Prompt    string `json:"prompt"`
-	SessionID string `json:"session_id"`
-	SandboxID string `json:"sandbox_id"`
-	MaxTurns  int32  `json:"max_turns"`
+	Prompt      string          `json:"prompt"`
+	SessionID   string          `json:"session_id"`
+	SandboxID   string          `json:"sandbox_id"`
+	MaxTurns    int32           `json:"max_turns"`
+	Attachments []attachmentDTO `json:"attachments"`
+}
+
+// attachmentDTO is one user-uploaded file carried inline in the chat body.
+// Content is base64 because JSON has no binary type; the gateway decodes it to
+// raw bytes before forwarding over gRPC (proto `bytes`), which keeps images and
+// other binaries intact. This is the P0 inline transport (push model, ADR-0017);
+// large-file/OSS offload is a documented TODO.
+type attachmentDTO struct {
+	Filename   string `json:"filename"`
+	ContentB64 string `json:"content_b64"`
+	Mime       string `json:"mime"`
 }
 
 // chat is the SSE entrypoint: verify -> open agent stream -> flush events.
@@ -117,12 +130,27 @@ func (a *API) chat(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusOK)
 	flusher.Flush()
 
+	atts := make([]agent.Attachment, 0, len(req.Attachments))
+	for i := range req.Attachments {
+		content, derr := base64.StdEncoding.DecodeString(req.Attachments[i].ContentB64)
+		if derr != nil {
+			a.log.Warn("dropping attachment with invalid base64 content")
+			continue
+		}
+		atts = append(atts, agent.Attachment{
+			Filename: req.Attachments[i].Filename,
+			Content:  content,
+			Mime:     req.Attachments[i].Mime,
+		})
+	}
+
 	q := agent.Query{
-		UserID:    id.UserID,
-		SessionID: req.SessionID,
-		Prompt:    req.Prompt,
-		SandboxID: req.SandboxID,
-		MaxTurns:  req.MaxTurns,
+		UserID:      id.UserID,
+		SessionID:   req.SessionID,
+		Prompt:      req.Prompt,
+		SandboxID:   req.SandboxID,
+		MaxTurns:    req.MaxTurns,
+		Attachments: atts,
 	}
 
 	err := a.streamer.Stream(r.Context(), q, func(ev agent.Event) error {

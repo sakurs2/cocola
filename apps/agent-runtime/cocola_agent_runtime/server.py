@@ -26,6 +26,7 @@ Design choices, all to avoid reinventing what we already have:
 from __future__ import annotations
 
 import json
+import posixpath
 from typing import Any
 
 from cocola.agent.v1 import agent_pb2 as pb
@@ -33,10 +34,24 @@ from cocola.agent.v1 import agent_pb2_grpc as pb_grpc
 from cocola_common import get_logger
 
 from cocola_agent_runtime.agent_provider import AgentEvent, AgentOptions, AgentProvider
-from cocola_agent_runtime.sandbox_binder import SandboxBinder
+from cocola_agent_runtime.sandbox_binder import SandboxBinder, SandboxExecutor
 from cocola_agent_runtime.skill_loader import SkillCatalog, apply_skills_to_options
 
 log = get_logger("cocola.agent-runtime.server")
+
+
+def _sanitize_filename(name: str) -> str:
+    """Reduce an uploaded filename to a safe basename.
+
+    Defends the landing directory against path traversal and separator tricks:
+    take the basename only, strip any residual separators / parent refs / NULs,
+    and fall back to a fixed name when nothing usable remains. The file always
+    lands directly under ./uploads/ -- never above it.
+    """
+    base = posixpath.basename((name or "").replace("\\", "/")).strip()
+    base = base.replace("\x00", "").lstrip(".") or "file"
+    # Collapse anything still separator-like; basename already dropped dirs.
+    return base.replace("/", "_") or "file"
 
 
 def _stringify(value: Any) -> str:
@@ -71,10 +86,16 @@ class AgentRuntimeServicer(pb_grpc.AgentRuntimeServiceServicer):
         *,
         skills: SkillCatalog | None = None,
         binder: SandboxBinder | None = None,
+        executor: SandboxExecutor | None = None,
     ) -> None:
         self._provider = provider
         self._skills = skills
         self._binder = binder
+        # The executor writes user-uploaded attachments into the bound sandbox
+        # before the agent runs (push model, ADR-0017). Optional: when it is not
+        # wired, attachments are dropped with a warning rather than failing the
+        # turn -- the same posture as running without a binder.
+        self._executor = executor
 
     async def Query(self, request, context):  # noqa: N802 - gRPC-generated name
         """Server-streaming RPC: run one agent turn, stream events back.
@@ -124,6 +145,34 @@ class AgentRuntimeServicer(pb_grpc.AgentRuntimeServiceServicer):
                 )
             )
 
+        # Pre-provision user-uploaded attachments into the bound sandbox before
+        # the agent runs (push model, ADR-0017). We land them under ./uploads/
+        # in the session workspace and prepend a short preamble so the model
+        # knows the files exist and where to find them. A provisioning failure is
+        # surfaced as a terminal `error` event (like an acquire failure) rather
+        # than silently running the agent against files that never arrived.
+        prompt = request.prompt
+        if request.attachments:
+            try:
+                preamble = await self._provision_attachments(
+                    sandbox_id, list(request.attachments)
+                )
+            except Exception as exc:  # noqa: BLE001 - clean terminal event, no bare crash
+                log.warning(
+                    "attachment provisioning failed",
+                    session_id=request.session_id,
+                    error=str(exc),
+                )
+                await context.write(
+                    pb.AgentEvent(
+                        kind="error",
+                        data={"error": f"attachment provisioning failed: {exc}"},
+                    )
+                )
+                return
+            if preamble:
+                prompt = f"{preamble}\n\n{request.prompt}"
+
         opts = AgentOptions(
             user_id=request.user_id,
             session_id=request.session_id,
@@ -138,10 +187,63 @@ class AgentRuntimeServicer(pb_grpc.AgentRuntimeServiceServicer):
             user_id=request.user_id,
             session_id=request.session_id,
             has_sandbox=bool(sandbox_id),
+            attachments=len(request.attachments),
         )
         try:
-            async for event in self._provider.query(request.prompt, opts):
+            async for event in self._provider.query(prompt, opts):
                 await context.write(event_to_proto(event))
         except Exception as exc:  # noqa: BLE001 - turn any provider fault into a clean terminal event
             log.warning("agent query failed", session_id=request.session_id, error=str(exc))
             await context.write(pb.AgentEvent(kind="error", data={"error": str(exc)}))
+
+    async def _provision_attachments(self, sandbox_id, attachments) -> str:
+        """Write uploaded files into the sandbox workspace; return a prompt preamble.
+
+        Files land under ./uploads/ in the session workspace (the sandbox's cwd,
+        i.e. /workspace/<session_id>/ per ADR-0008 T1b). We resolve the absolute
+        cwd via `pwd` -- provider-agnostic, no need to reconstruct the manager's
+        session-id sanitizer -- and `mkdir -p uploads` in the same shell, because
+        the WriteFile transport (docker CopyToContainer) does not create parent
+        directories. Content is written binary-safe so images survive intact.
+
+        Returns a short natural-language preamble listing the landed paths, or ""
+        when there is nothing to provision (no attachments or no executor wired).
+        """
+        if not attachments:
+            return ""
+        if self._executor is None or not sandbox_id:
+            log.warning(
+                "attachments present but no executor/sandbox; dropping",
+                sandbox_id=sandbox_id or "",
+                count=len(attachments),
+            )
+            return ""
+
+        # One shell: create ./uploads and print the absolute workspace cwd.
+        res = await self._executor.exec(
+            sandbox_id=sandbox_id,
+            cmd=["sh", "-c", "mkdir -p uploads && pwd"],
+        )
+        if not res.ok:
+            raise RuntimeError(
+                f"prepare uploads dir failed (exit={res.exit_code}): "
+                f"{res.error or res.stderr}".strip()
+            )
+        cwd = res.stdout.strip() or "/workspace"
+        uploads_dir = posixpath.join(cwd, "uploads")
+
+        landed: list[str] = []
+        for att in attachments:
+            name = _sanitize_filename(att.filename)
+            abs_path = posixpath.join(uploads_dir, name)
+            await self._executor.write_bytes(
+                sandbox_id=sandbox_id, path=abs_path, data=bytes(att.content)
+            )
+            landed.append(f"./uploads/{name}")
+
+        listing = "\n".join(f"- {p}" for p in landed)
+        return (
+            "The user uploaded the following file(s) into your working directory. "
+            "Read them from these paths when relevant:\n"
+            f"{listing}"
+        )

@@ -29,11 +29,21 @@ type Event struct {
 // caller (HTTP layer) fills UserID/SessionId from the verified identity, never
 // from client-supplied fields.
 type Query struct {
-	UserID    string
-	SessionID string
-	Prompt    string
-	SandboxID string
-	MaxTurns  int32
+	UserID      string
+	SessionID   string
+	Prompt      string
+	SandboxID   string
+	MaxTurns    int32
+	Attachments []Attachment
+}
+
+// Attachment is one user-uploaded file forwarded to agent-runtime. Content is
+// raw bytes (already base64-decoded at the HTTP edge), mapping onto the proto
+// `bytes` field so binaries survive intact.
+type Attachment struct {
+	Filename string
+	Content  []byte
+	Mime     string
 }
 
 // Streamer runs one agent query and pushes each event to onEvent in order. It
@@ -85,12 +95,21 @@ func (c *Client) Close() error {
 // Stream forwards q to agent-runtime and relays each AgentEvent to onEvent. A
 // context cancel (client disconnect, deadline) aborts the RPC promptly.
 func (c *Client) Stream(ctx context.Context, q Query, onEvent func(Event) error) error {
+	atts := make([]*agentv1.Attachment, 0, len(q.Attachments))
+	for i := range q.Attachments {
+		atts = append(atts, &agentv1.Attachment{
+			Filename: q.Attachments[i].Filename,
+			Content:  q.Attachments[i].Content,
+			Mime:     q.Attachments[i].Mime,
+		})
+	}
 	stream, err := c.rpc.Query(ctx, &agentv1.QueryRequest{
-		UserId:    q.UserID,
-		SessionId: q.SessionID,
-		Prompt:    q.Prompt,
-		SandboxId: q.SandboxID,
-		MaxTurns:  q.MaxTurns,
+		UserId:      q.UserID,
+		SessionId:   q.SessionID,
+		Prompt:      q.Prompt,
+		SandboxId:   q.SandboxID,
+		MaxTurns:    q.MaxTurns,
+		Attachments: atts,
 	})
 	if err != nil {
 		return fmt.Errorf("agent: query: %w", err)
