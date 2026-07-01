@@ -26,7 +26,10 @@ Design choices, all to avoid reinventing what we already have:
 from __future__ import annotations
 
 import json
+import os
+import pathlib
 import posixpath
+import tempfile
 from typing import Any
 
 from cocola.agent.v1 import agent_pb2 as pb
@@ -52,6 +55,18 @@ def _sanitize_filename(name: str) -> str:
     base = base.replace("\x00", "").lstrip(".") or "file"
     # Collapse anything still separator-like; basename already dropped dirs.
     return base.replace("/", "_") or "file"
+
+
+def _uploads_preamble(landed: list[str]) -> str:
+    """Natural-language note telling the model where its uploads landed."""
+    if not landed:
+        return ""
+    listing = "\n".join(f"- {p}" for p in landed)
+    return (
+        "The user uploaded the following file(s) into your working directory. "
+        "Read them from these paths when relevant:\n"
+        f"{listing}"
+    )
 
 
 def _stringify(value: Any) -> str:
@@ -152,10 +167,11 @@ class AgentRuntimeServicer(pb_grpc.AgentRuntimeServiceServicer):
         # surfaced as a terminal `error` event (like an acquire failure) rather
         # than silently running the agent against files that never arrived.
         prompt = request.prompt
+        workspace: str | None = None
         if request.attachments:
             try:
-                preamble = await self._provision_attachments(
-                    sandbox_id, list(request.attachments)
+                preamble, workspace = await self._provision_attachments(
+                    sandbox_id, request.session_id, list(request.attachments)
                 )
             except Exception as exc:  # noqa: BLE001 - clean terminal event, no bare crash
                 log.warning(
@@ -177,6 +193,7 @@ class AgentRuntimeServicer(pb_grpc.AgentRuntimeServiceServicer):
             user_id=request.user_id,
             session_id=request.session_id,
             sandbox_id=sandbox_id,
+            workspace=workspace,
             max_turns=request.max_turns or 30,
         )
         if self._skills is not None:
@@ -196,29 +213,45 @@ class AgentRuntimeServicer(pb_grpc.AgentRuntimeServiceServicer):
             log.warning("agent query failed", session_id=request.session_id, error=str(exc))
             await context.write(pb.AgentEvent(kind="error", data={"error": str(exc)}))
 
-    async def _provision_attachments(self, sandbox_id, attachments) -> str:
-        """Write uploaded files into the sandbox workspace; return a prompt preamble.
+    async def _provision_attachments(
+        self, sandbox_id, session_id, attachments
+    ) -> tuple[str, str | None]:
+        """Land uploaded files where the agent brain can read them.
 
-        Files land under ./uploads/ in the session workspace (the sandbox's cwd,
-        i.e. /workspace/<session_id>/ per ADR-0008 T1b). We resolve the absolute
-        cwd via `pwd` -- provider-agnostic, no need to reconstruct the manager's
-        session-id sanitizer -- and `mkdir -p uploads` in the same shell, because
-        the WriteFile transport (docker CopyToContainer) does not create parent
-        directories. Content is written binary-safe so images survive intact.
+        Returns ``(preamble, workspace)``:
 
-        Returns a short natural-language preamble listing the landed paths, or ""
-        when there is nothing to provision (no attachments or no executor wired).
+        - ``preamble`` is a short natural-language note listing the landed
+          ``./uploads/<name>`` paths, or "" when there is nothing to provision.
+        - ``workspace`` is a HOST directory the in-process provider must adopt as
+          its cwd, or ``None`` when landing happened inside a sandbox (Route A,
+          the brain already runs with that cwd) or nothing was provisioned.
+
+        The delivery target follows WHERE the brain runs (ADR-0017):
+
+        - Route A (executor + sandbox bound): the brain runs INSIDE the sandbox,
+          so we write into its workspace over the executor. Files land under
+          ./uploads/ in the session cwd (/workspace/<session_id>/, ADR-0008 T1b),
+          resolved via `pwd` (provider-agnostic) with `mkdir -p uploads` in the
+          same shell -- WriteFile (docker CopyToContainer) makes no parent dirs.
+        - Local dev (no executor/sandbox): the brain runs in THIS process
+          (ClaudeAgentSDKProvider). A sandbox write would be unreachable, so we
+          write into a per-session HOST dir and hand its path back as the cwd for
+          the SDK, whose native Read/Bash then resolve ./uploads/ against it.
+
+        Content is written binary-safe so images survive intact.
         """
         if not attachments:
-            return ""
-        if self._executor is None or not sandbox_id:
-            log.warning(
-                "attachments present but no executor/sandbox; dropping",
-                sandbox_id=sandbox_id or "",
-                count=len(attachments),
-            )
-            return ""
+            return "", None
 
+        if self._executor is not None and sandbox_id:
+            preamble = await self._provision_into_sandbox(sandbox_id, attachments)
+            return preamble, None
+
+        preamble, workspace = self._provision_onto_host(session_id, attachments)
+        return preamble, workspace
+
+    async def _provision_into_sandbox(self, sandbox_id, attachments) -> str:
+        """Route A: write attachments into the bound sandbox's ./uploads/."""
         # One shell: create ./uploads and print the absolute workspace cwd.
         res = await self._executor.exec(
             sandbox_id=sandbox_id,
@@ -240,10 +273,35 @@ class AgentRuntimeServicer(pb_grpc.AgentRuntimeServiceServicer):
                 sandbox_id=sandbox_id, path=abs_path, data=bytes(att.content)
             )
             landed.append(f"./uploads/{name}")
+        return _uploads_preamble(landed)
 
-        listing = "\n".join(f"- {p}" for p in landed)
-        return (
-            "The user uploaded the following file(s) into your working directory. "
-            "Read them from these paths when relevant:\n"
-            f"{listing}"
+    def _provision_onto_host(self, session_id, attachments) -> tuple[str, str]:
+        """Local dev: write attachments into a per-session HOST workspace.
+
+        The workspace root is COCOLA_LOCAL_WORKSPACE_ROOT (default: a stable
+        `cocola-workspaces/` under the OS temp dir). Each session gets its own
+        subdir so concurrent sessions never collide, and ./uploads/ lives under
+        it -- the same relative layout the sandbox path uses, so the preamble is
+        identical regardless of where the brain runs.
+        """
+        root = os.getenv("COCOLA_LOCAL_WORKSPACE_ROOT", "").strip() or posixpath.join(
+            tempfile.gettempdir(), "cocola-workspaces"
         )
+        safe_session = _sanitize_filename(session_id or "session")
+        workspace = pathlib.Path(root) / safe_session
+        uploads_dir = workspace / "uploads"
+        uploads_dir.mkdir(parents=True, exist_ok=True)
+
+        landed: list[str] = []
+        for att in attachments:
+            name = _sanitize_filename(att.filename)
+            (uploads_dir / name).write_bytes(bytes(att.content))
+            landed.append(f"./uploads/{name}")
+
+        log.info(
+            "attachments landed on host workspace (no sandbox)",
+            session_id=session_id,
+            workspace=str(workspace),
+            count=len(landed),
+        )
+        return _uploads_preamble(landed), str(workspace)

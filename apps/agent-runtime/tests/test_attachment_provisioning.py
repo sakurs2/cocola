@@ -10,7 +10,8 @@ StaticSandboxBinder + StaticSandboxExecutor and assert the push model:
   - filenames are sanitized: path traversal / separators cannot escape uploads.
   - a provisioning failure becomes a terminal `error` event; the provider never
     runs (we do not run the agent against files that never arrived).
-  - no executor wired -> attachments are dropped (warn) and the turn proceeds.
+  - no executor/sandbox (local dev) -> files land in a per-session HOST
+    workspace and that dir is threaded to the provider as its cwd.
 """
 
 from dataclasses import dataclass, field
@@ -145,19 +146,50 @@ async def test_provisioning_failure_is_terminal_and_skips_provider():
     assert ex.byte_writes == []
 
 
-async def test_no_executor_drops_attachments_but_runs():
+async def test_no_executor_lands_on_host_and_sets_cwd(tmp_path, monkeypatch):
+    # Local dev: no executor/sandbox, so the brain runs IN-PROCESS. Attachments
+    # must land in a per-session HOST workspace under the configured root, and
+    # that dir must be handed to the provider as its cwd so ./uploads/ resolves.
+    monkeypatch.setenv("COCOLA_LOCAL_WORKSPACE_ROOT", str(tmp_path))
     prov = RecordingProvider()
     binder = StaticSandboxBinder()
     ctx = FakeContext()
     req = FakeRequest(
-        prompt="still answer", attachments=[FakeAttachment("a.txt", b"x")]
+        session_id="S7",
+        prompt="what does it say?",
+        attachments=[FakeAttachment("a.txt", b"hi"), FakeAttachment("p.png", b"\x89P")],
     )
-    # No executor wired: attachments are dropped, the turn proceeds unchanged.
+    # No executor wired.
     await AgentRuntimeServicer(prov, binder=binder).Query(req, ctx)
 
+    workspace = tmp_path / "S7"
+    uploads = workspace / "uploads"
+    assert (uploads / "a.txt").read_bytes() == b"hi"
+    assert (uploads / "p.png").read_bytes() == b"\x89P"  # binary-safe
+
     assert prov.ran is True
-    assert prov.seen_prompt == "still answer"  # no preamble
+    # Preamble prepended, then the user prompt; workspace threaded as cwd.
+    assert "./uploads/a.txt" in prov.seen_prompt
+    assert prov.seen_prompt.endswith("what does it say?")
+    assert prov.seen_options.workspace == str(workspace)
     assert [e.kind for e in ctx.written][-1] == "done"
+
+
+async def test_no_executor_defaults_workspace_root(tmp_path, monkeypatch):
+    # Without the env override the root falls back to a stable dir under the
+    # OS temp dir; the session subdir + uploads/ layout is unchanged.
+    monkeypatch.delenv("COCOLA_LOCAL_WORKSPACE_ROOT", raising=False)
+    monkeypatch.setattr("tempfile.gettempdir", lambda: str(tmp_path))
+    prov = RecordingProvider()
+    ctx = FakeContext()
+    req = FakeRequest(
+        session_id="S8", attachments=[FakeAttachment("d.txt", b"z")]
+    )
+    await AgentRuntimeServicer(prov, binder=StaticSandboxBinder()).Query(req, ctx)
+
+    expected = tmp_path / "cocola-workspaces" / "S8"
+    assert (expected / "uploads" / "d.txt").read_bytes() == b"z"
+    assert prov.seen_options.workspace == str(expected)
 
 
 async def test_no_attachments_is_a_noop():

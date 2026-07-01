@@ -152,6 +152,12 @@ class ClaudeAgentSDKProvider:
             max_turns=options.max_turns or self._config.max_turns,
             env=self._build_env(),
         )
+        # This provider's brain runs IN THIS PROCESS, not in the user's sandbox.
+        # When the server has landed uploaded attachments in a local per-session
+        # workspace (local-dev push model, ADR-0017) it passes that dir here so
+        # the SDK's native Read/Bash tools resolve ./uploads/ against it.
+        if options.workspace:
+            kwargs["cwd"] = options.workspace
         # Route A (ADR-0009) runs the whole Claude Code brain inside the user's
         # own sandbox, so its NATIVE Bash/Read/Write tools are already isolated.
         # The old Route-B MCP forwarding seam (sandbox_tools.py) that proxied

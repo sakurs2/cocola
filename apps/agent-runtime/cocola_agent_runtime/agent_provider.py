@@ -17,6 +17,11 @@ class AgentOptions:
     user_id: str
     session_id: str
     sandbox_id: str | None = None
+    # Host working directory for a provider whose brain runs IN THIS PROCESS
+    # (e.g. ClaudeAgentSDKProvider in local dev). When set, the provider points
+    # the SDK's cwd here so its native Read/Bash tools resolve relative paths
+    # like ./uploads/. Unused by Route A (the in-sandbox brain has its own cwd).
+    workspace: str | None = None
     system_prompt: str | None = None
     max_turns: int = 30
 
