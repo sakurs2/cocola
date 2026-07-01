@@ -28,6 +28,7 @@ import {
   type ReactNode,
 } from "react";
 import { parseFrames, type AgentEvent } from "@/lib/sse";
+import { Base64AttachmentAdapter } from "@/lib/base64-attachment-adapter";
 
 // ---- Local message model (carries cocola semantics) ------------------------
 
@@ -174,6 +175,10 @@ function convertMessage(message: UiMessage): ThreadMessageLike {
 
 // ---- Provider ---------------------------------------------------------------
 
+// The base64 adapter is stateless, so a single module-level instance is safe to
+// share across renders (avoids re-creating it and thrashing the runtime).
+const attachmentAdapter = new Base64AttachmentAdapter();
+
 export function CocolaRuntimeProvider({ children }: { children: ReactNode }) {
   const [messages, setMessages] = useState<UiMessage[]>([]);
   const [isRunning, setIsRunning] = useState(false);
@@ -198,7 +203,12 @@ export function CocolaRuntimeProvider({ children }: { children: ReactNode }) {
   }, []);
 
   const onNew = useCallback(
-    async (message: { content: readonly { type: string; text?: string }[] }) => {
+    async (message: {
+      content: readonly { type: string; text?: string }[];
+      attachments?: readonly {
+        content?: readonly { type: string; filename?: string; data?: string; mimeType?: string }[];
+      }[];
+    }) => {
       const text = message.content
         .filter(
           (p): p is { type: "text"; text: string } =>
@@ -206,6 +216,22 @@ export function CocolaRuntimeProvider({ children }: { children: ReactNode }) {
         )
         .map((p) => p.text)
         .join("\n");
+
+      // Collect inline file attachments. Our Base64AttachmentAdapter emits a
+      // single FileMessagePart per attachment carrying RAW base64 in `data`;
+      // flatten them into the push-model wire shape {filename, content_b64, mime}.
+      const attachments = (message.attachments ?? []).flatMap((att) =>
+        (att.content ?? [])
+          .filter(
+            (p): p is { type: "file"; filename?: string; data: string; mimeType?: string } =>
+              p.type === "file" && typeof p.data === "string",
+          )
+          .map((p) => ({
+            filename: p.filename ?? "file",
+            content_b64: p.data,
+            mime: p.mimeType ?? "application/octet-stream",
+          })),
+      );
 
       const assistantId = genId();
       setMessages((prev) => [
@@ -224,7 +250,11 @@ export function CocolaRuntimeProvider({ children }: { children: ReactNode }) {
             "content-type": "application/json",
             ...(token ? { authorization: `Bearer ${token}` } : {}),
           },
-          body: JSON.stringify({ prompt: text, session_id: sessionId }),
+          body: JSON.stringify({
+            prompt: text,
+            session_id: sessionId,
+            ...(attachments.length > 0 ? { attachments } : {}),
+          }),
           signal: ctrl.signal,
         });
         if (!res.body) throw new Error("no response body");
@@ -264,6 +294,9 @@ export function CocolaRuntimeProvider({ children }: { children: ReactNode }) {
     onNew,
     onCancel,
     convertMessage,
+    adapters: {
+      attachments: attachmentAdapter,
+    },
   });
 
   const ctx = useMemo<CocolaContextValue>(

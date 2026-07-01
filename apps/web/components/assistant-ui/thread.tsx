@@ -2,6 +2,7 @@
 
 import {
   ActionBarPrimitive,
+  AttachmentPrimitive,
   ComposerPrimitive,
   MessagePrimitive,
   ThreadPrimitive,
@@ -11,8 +12,10 @@ import {
   ArrowDownIcon,
   CopyIcon,
   MessagesSquare,
+  PaperclipIcon,
   SendHorizontalIcon,
   Square,
+  XIcon,
   Zap,
 } from "lucide-react";
 import type { FC } from "react";
@@ -23,10 +26,10 @@ import { cn } from "@/lib/utils";
 // Open WebUI style product Thread for cocola, authored against the design
 // tokens in app/globals.css (dark palette). Empty state centers a logo + model
 // name over a pill composer with a "Suggested" list; once a conversation
-// starts, the composer docks to the bottom. Only the ExternalStore
-// capabilities the adapter implements are surfaced (send / cancel) — no
-// attachment, voice or branch controls, since the runtime does not support
-// them.
+// starts, the composer docks to the bottom. Surfaces the ExternalStore
+// capabilities the adapter implements: send / cancel plus inline file
+// attachments (paperclip → chip → sent, backed by Base64AttachmentAdapter).
+// Voice and branch controls remain unsupported.
 
 export const Thread: FC = () => {
   return (
@@ -129,15 +132,54 @@ const ThreadWelcome: FC = () => (
 );
 
 const Composer: FC = () => (
-  <ComposerPrimitive.Root className="flex w-full flex-wrap items-end rounded-[2rem] border border-input bg-card px-3 py-1.5 shadow-sm transition-colors focus-within:border-ring">
-    <ComposerPrimitive.Input
-      rows={1}
-      autoFocus
-      placeholder="How can I help you today?"
-      className="max-h-40 flex-grow resize-none border-none bg-transparent px-2 py-3 text-sm outline-none placeholder:text-muted-foreground focus:ring-0 disabled:cursor-not-allowed"
-    />
-    <ComposerAction />
+  <ComposerPrimitive.Root className="flex w-full flex-col rounded-[1.5rem] border border-input bg-card px-3 py-1.5 shadow-sm transition-colors focus-within:border-ring">
+    <ComposerAttachments />
+    <div className="flex w-full items-end">
+      <ComposerPrimitive.AddAttachment asChild>
+        <TooltipIconButton
+          tooltip="Attach file"
+          variant="ghost"
+          className="my-1 size-8 shrink-0 rounded-full p-2 text-muted-foreground"
+        >
+          <PaperclipIcon className="h-4 w-4" />
+        </TooltipIconButton>
+      </ComposerPrimitive.AddAttachment>
+      <ComposerPrimitive.Input
+        rows={1}
+        autoFocus
+        placeholder="How can I help you today?"
+        className="max-h-40 flex-grow resize-none border-none bg-transparent px-2 py-3 text-sm outline-none placeholder:text-muted-foreground focus:ring-0 disabled:cursor-not-allowed"
+      />
+      <ComposerAction />
+    </div>
   </ComposerPrimitive.Root>
+);
+
+// Pending attachment chips shown inside the composer before send. Each chip
+// carries the file name plus a remove control; the runtime holds the File until
+// send(), when Base64AttachmentAdapter turns it into a base64 FileMessagePart.
+const ComposerAttachments: FC = () => (
+  <ComposerPrimitive.Attachments
+    components={{
+      Attachment: () => (
+        <AttachmentPrimitive.Root className="relative flex items-center gap-2 rounded-lg border border-border bg-muted px-3 py-1.5 text-xs text-foreground">
+          <PaperclipIcon className="size-3.5 shrink-0 text-muted-foreground" />
+          <span className="max-w-[12rem] truncate">
+            <AttachmentPrimitive.Name />
+          </span>
+          <AttachmentPrimitive.Remove asChild>
+            <button
+              type="button"
+              aria-label="Remove attachment"
+              className="ml-1 rounded-full p-0.5 text-muted-foreground transition-colors hover:bg-background hover:text-foreground"
+            >
+              <XIcon className="size-3.5" />
+            </button>
+          </AttachmentPrimitive.Remove>
+        </AttachmentPrimitive.Root>
+      ),
+    }}
+  />
 );
 
 const ComposerAction: FC = () => (
@@ -169,8 +211,24 @@ const ComposerAction: FC = () => (
 
 const UserMessage: FC = () => (
   <MessagePrimitive.Root className="grid w-full max-w-[var(--thread-max-width)] auto-rows-auto grid-cols-[minmax(72px,1fr)_auto] gap-y-1 py-3">
-    <div className="col-start-2 row-start-1 max-w-[calc(var(--thread-max-width)*0.8)] whitespace-pre-wrap break-words rounded-2xl bg-muted px-4 py-2 text-sm text-foreground">
-      <MessagePrimitive.Parts />
+    <div className="col-start-2 row-start-1 flex flex-col items-end gap-1.5">
+      <MessagePrimitive.Attachments
+        components={{
+          Attachment: () => (
+            <AttachmentPrimitive.Root className="flex items-center gap-2 rounded-lg border border-border bg-muted/60 px-3 py-1.5 text-xs text-foreground">
+              <PaperclipIcon className="size-3.5 shrink-0 text-muted-foreground" />
+              <span className="max-w-[12rem] truncate">
+                <AttachmentPrimitive.Name />
+              </span>
+            </AttachmentPrimitive.Root>
+          ),
+        }}
+      />
+      <MessagePrimitive.If hasContent>
+        <div className="max-w-[calc(var(--thread-max-width)*0.8)] whitespace-pre-wrap break-words rounded-2xl bg-muted px-4 py-2 text-sm text-foreground">
+          <MessagePrimitive.Parts />
+        </div>
+      </MessagePrimitive.If>
     </div>
   </MessagePrimitive.Root>
 );
