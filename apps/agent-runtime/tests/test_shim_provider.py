@@ -17,6 +17,7 @@ import json
 
 from cocola_agent_runtime.agent_provider import AgentOptions
 from cocola_agent_runtime.sandbox_binder import ExecChunk, StaticSandboxExecutor
+from cocola_agent_runtime.session_map import MemorySessionMap
 from cocola_agent_runtime.shim_provider import InSandboxShimProvider
 
 
@@ -153,3 +154,104 @@ async def test_exec_stream_default_echoes_command():
     assert chunks[0].data == "ran: echo hi"
     assert chunks[-1].kind == "exit"
     assert chunks[-1].exit_code == 0
+
+
+async def test_dangling_resume_retries_fresh_and_reindexes():
+    # A stored resume id that the sandbox no longer has: the first exec fails
+    # with a "no conversation found" marker and NO content; the provider must
+    # forget the stale id, retry the SAME turn WITHOUT resume, relay the fresh
+    # answer, and re-index the new session id -- the user never sees the exit.
+    calls = {"n": 0}
+
+    def stream_handler(sandbox_id, cmd, stdin):
+        calls["n"] += 1
+        req = json.loads(stdin)
+        if calls["n"] == 1:
+            # Attempt 1 carried the (now dangling) resume id and died.
+            assert req["resume"] == "sess-stale"
+            yield ExecChunk(
+                kind="stderr",
+                data="Error: No conversation found with session ID: sess-stale\n",
+            )
+            yield ExecChunk(kind="exit", exit_code=1)
+            return
+        # Attempt 2 is a fresh conversation (no resume) and succeeds.
+        assert "resume" not in req
+        yield ExecChunk(
+            kind="stdout",
+            data=_ndjson(
+                {"type": "text", "text": "fresh answer"},
+                {"type": "done", "session_id": "sess-new"},
+            ),
+        )
+        yield ExecChunk(kind="exit", exit_code=0)
+
+    smap = MemorySessionMap()
+    await smap.put("S1", "sess-stale")
+    execu = StaticSandboxExecutor(stream_handler=stream_handler)
+    provider = InSandboxShimProvider(execu, session_map=smap)
+    opts = AgentOptions(user_id="U1", session_id="S1", sandbox_id="box-1")
+
+    events = await _drain(provider, "hello", opts)
+    kinds = [e.kind for e in events]
+
+    # The dangling-resume failure is swallowed; the user sees only the retry.
+    assert kinds == ["text", "done"], kinds
+    assert events[0].data["text"] == "fresh answer"
+    assert events[-1].data == {"session_id": "sess-new"}
+    assert calls["n"] == 2  # exactly one retry
+    # The stale id was forgotten and replaced by the fresh one.
+    assert await smap.get("S1") == "sess-new"
+
+
+async def test_unrelated_failure_is_not_retried():
+    # A non-resume failure (e.g. the CLI is missing) must NOT trigger the fresh
+    # retry, even with a stored resume id -- we only replay for a dangling
+    # resume, and the real error must reach the user.
+    calls = {"n": 0}
+
+    def stream_handler(sandbox_id, cmd, stdin):
+        calls["n"] += 1
+        yield ExecChunk(kind="stderr", data="boom: cli not found\n")
+        yield ExecChunk(kind="exit", exit_code=127)
+
+    smap = MemorySessionMap()
+    await smap.put("S1", "sess-x")
+    execu = StaticSandboxExecutor(stream_handler=stream_handler)
+    provider = InSandboxShimProvider(execu, session_map=smap)
+    opts = AgentOptions(user_id="U1", session_id="S1", sandbox_id="box-1")
+
+    events = await _drain(provider, "hi", opts)
+    kinds = [e.kind for e in events]
+
+    assert calls["n"] == 1  # no retry
+    assert kinds == ["error", "done"], kinds
+    assert "shim exited 127" in events[0].data["error"]
+    # A non-dangling failure must NOT clobber the stored resume id.
+    assert await smap.get("S1") == "sess-x"
+
+
+async def test_dangling_resume_not_retried_when_content_already_streamed():
+    # If the shim streamed real content before dying with a resume-ish marker,
+    # replaying the turn would double the answer. We must NOT retry once any
+    # content was emitted; the deferred error still surfaces.
+    calls = {"n": 0}
+
+    def stream_handler(sandbox_id, cmd, stdin):
+        calls["n"] += 1
+        yield ExecChunk(kind="stdout", data=_ndjson({"type": "text", "text": "partial"}))
+        yield ExecChunk(kind="stderr", data="No conversation found with session ID: sess-stale\n")
+        yield ExecChunk(kind="exit", exit_code=1)
+
+    smap = MemorySessionMap()
+    await smap.put("S1", "sess-stale")
+    execu = StaticSandboxExecutor(stream_handler=stream_handler)
+    provider = InSandboxShimProvider(execu, session_map=smap)
+    opts = AgentOptions(user_id="U1", session_id="S1", sandbox_id="box-1")
+
+    events = await _drain(provider, "hi", opts)
+    kinds = [e.kind for e in events]
+
+    assert calls["n"] == 1  # no retry once content was streamed
+    assert kinds == ["text", "error", "done"], kinds
+    assert events[0].data["text"] == "partial"

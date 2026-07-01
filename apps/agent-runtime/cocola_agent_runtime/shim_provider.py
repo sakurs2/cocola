@@ -30,6 +30,7 @@ from __future__ import annotations
 
 import json
 from collections.abc import AsyncIterator
+from dataclasses import dataclass, field
 
 from cocola_common import get_logger
 
@@ -43,6 +44,31 @@ log = get_logger("cocola.agent-runtime.shim")
 # (deploy/sandbox-runtime/Dockerfile). Driven over `docker exec -i` / `kubectl
 # exec -i` STDIO -- never a listening port.
 SHIM_ENTRYPOINT = "/opt/cocola/shim/entrypoint.sh"
+
+# Substrings the claude CLI / Agent SDK emit when asked to `--resume` a session
+# id that has no on-disk conversation. The session_map is a pure INDEX (it only
+# records which id to reopen); the SUFFICIENT condition for resume is the
+# on-disk ~/.claude session file (ADR-0008). When the sandbox is fresh/recycled
+# or the file was GC'd, a stored id goes dangling and the shim exits non-zero
+# with one of these markers, surfacing an opaque "shim exited 1" to the user.
+# Matching one lets the provider degrade gracefully: forget the stale id and
+# retry the SAME turn as a fresh conversation (no --resume) -- see query().
+_RESUME_NOT_FOUND_MARKERS = (
+    "no conversation found with session id",
+    "no conversation found",
+    "session id not found",
+    "could not find session",
+    "no session found",
+    "session not found",
+)
+
+
+def _looks_like_resume_not_found(text: str) -> bool:
+    """True when *text* (a shim error / stderr tail) signals a dangling resume id."""
+    if not text:
+        return False
+    low = text.lower()
+    return any(marker in low for marker in _RESUME_NOT_FOUND_MARKERS)
 
 
 def _shim_event_to_agent_events(ev: dict) -> list[AgentEvent]:
@@ -104,6 +130,22 @@ def _shim_event_to_agent_events(ev: dict) -> list[AgentEvent]:
     return []
 
 
+@dataclass
+class _AttemptState:
+    """Mutable bookkeeping for ONE shim exec attempt.
+
+    Lets `_stream_attempt` relay content live while deferring the terminal
+    error/session decisions to `query`, which needs them to choose whether a
+    dangling-resume retry is warranted.
+    """
+
+    saw_content: bool = False
+    saw_error: bool = False
+    error_text: str = ""  # concatenated error/stderr text, for resume-not-found detection
+    last_session_id: str | None = None
+    errors: list[AgentEvent] = field(default_factory=list)
+
+
 class InSandboxShimProvider:
     """AgentProvider that runs the agent inside the bound sandbox via the shim.
 
@@ -148,6 +190,15 @@ class InSandboxShimProvider:
         Route A requires a bound sandbox: without `options.sandbox_id` there is
         nowhere to run the brain, so we emit a terminal error + done rather than
         silently falling back (the composition root decides routing, not us).
+
+        Graceful resume degradation: if a stored resume id is *dangling* (the
+        sandbox's on-disk ~/.claude has no such session -- fresh/recycled box or
+        a GC'd session file), the shim exits non-zero with a "no conversation
+        found" marker BEFORE emitting any content. Rather than surfacing an
+        opaque "shim exited 1", we forget the stale index entry and retry the
+        SAME turn once as a fresh conversation (no --resume). The retry is only
+        attempted when nothing was streamed yet, so the user never sees a
+        half-turn replayed.
         """
         if not options.sandbox_id:
             yield AgentEvent(
@@ -158,11 +209,95 @@ class InSandboxShimProvider:
             return
 
         resume = await self._session_map.get(options.session_id)
-        request_json = self._build_request(prompt, options, resume)
+
+        state = _AttemptState()
+        async for ev in self._stream_attempt(
+            self._build_request(prompt, options, resume), options, state
+        ):
+            yield ev
+
+        # A dangling resume fails cleanly (no content) with a recognizable
+        # marker -- the one case where replaying the turn is safe. Forget the
+        # stale id and retry fresh so the user gets a real answer instead of an
+        # opaque exit code.
+        if (
+            resume
+            and state.saw_error
+            and not state.saw_content
+            and _looks_like_resume_not_found(state.error_text)
+        ):
+            log.info(
+                "resume id dangling; forgetting it and retrying without resume",
+                session_id=options.session_id,
+                resume=resume,
+            )
+            try:
+                await self._session_map.delete(options.session_id)
+            except Exception as exc:  # noqa: BLE001 - index delete is best-effort
+                log.warning(
+                    "session-map delete failed",
+                    session_id=options.session_id,
+                    error=repr(exc),
+                )
+            state = _AttemptState()
+            async for ev in self._stream_attempt(
+                self._build_request(prompt, options, None), options, state
+            ):
+                yield ev
+
+        # Surface any deferred error(s) from the FINAL attempt (deferred so the
+        # retry decision above can inspect them before the user sees them).
+        for err in state.errors:
+            yield err
+
+        # Persist the session<->claude-session index for a later --resume. A
+        # Postgres-backed map makes this survive an agent-runtime restart; the
+        # write is best-effort so a transient index fault never fails the turn.
+        if state.last_session_id:
+            try:
+                await self._session_map.put(
+                    options.session_id,
+                    state.last_session_id,
+                    user_id=options.user_id,
+                    sandbox_id=options.sandbox_id or "",
+                )
+            except Exception as exc:  # noqa: BLE001 - index write is best-effort
+                log.warning(
+                    "session-map put failed",
+                    session_id=options.session_id,
+                    error=repr(exc),
+                )
+
+        yield AgentEvent(
+            kind="done",
+            data={"session_id": state.last_session_id} if state.last_session_id else {},
+        )
+        if state.saw_error:
+            log.info("shim turn completed with errors", session_id=options.session_id)
+
+    async def _stream_attempt(
+        self,
+        request_json: str,
+        options: AgentOptions,
+        state: _AttemptState,
+    ) -> AsyncIterator[AgentEvent]:
+        """Run ONE shim exec, relaying content live and DEFERRING terminal errors.
+
+        Content events (text/thinking/tool_use/tool_result/result/system) are
+        yielded as they arrive. Error signals -- a shim `error` event, an exec
+        transport error, or a non-zero exit -- are NOT yielded here; they are
+        recorded on `state` so the caller can decide whether a dangling-resume
+        retry is warranted before the user ever sees them. The terminal `done`
+        is likewise synthesized by the caller, once, after all attempts.
+        """
         buf = ""  # holds an incomplete trailing NDJSON line across chunks
         stderr_tail = ""
-        last_session_id: str | None = None
-        saw_error = False
+
+        def _record_error(ev: AgentEvent, text: str) -> None:
+            state.saw_error = True
+            state.errors.append(ev)
+            if text:
+                state.error_text = (state.error_text + "\n" + text)[-4000:]
 
         try:
             async for chunk in self._executor.exec_stream(
@@ -175,21 +310,25 @@ class InSandboxShimProvider:
                     stderr_tail = (stderr_tail + chunk.data)[-2000:]
                     continue
                 if chunk.kind == "error":
-                    saw_error = True
-                    yield AgentEvent(
-                        kind="error",
-                        data={"error": f"sandbox exec failed: {chunk.error}"},
+                    _record_error(
+                        AgentEvent(
+                            kind="error",
+                            data={"error": f"sandbox exec failed: {chunk.error}"},
+                        ),
+                        chunk.error,
                     )
                     continue
                 if chunk.kind == "exit":
                     if chunk.exit_code != 0:
-                        saw_error = True
-                        yield AgentEvent(
-                            kind="error",
-                            data={
-                                "error": f"shim exited {chunk.exit_code}",
-                                "stderr": stderr_tail,
-                            },
+                        _record_error(
+                            AgentEvent(
+                                kind="error",
+                                data={
+                                    "error": f"shim exited {chunk.exit_code}",
+                                    "stderr": stderr_tail,
+                                },
+                            ),
+                            stderr_tail,
                         )
                     continue
 
@@ -209,14 +348,16 @@ class InSandboxShimProvider:
                         continue
                     if ev.get("type") == "done":
                         if ev.get("session_id"):
-                            last_session_id = ev["session_id"]
-                        continue  # we synthesize the terminal `done` below
+                            state.last_session_id = ev["session_id"]
+                        continue  # caller synthesizes the terminal `done`
                     if ev.get("type") == "result" and ev.get("session_id"):
-                        last_session_id = ev["session_id"]
+                        state.last_session_id = ev["session_id"]
                     for out in _shim_event_to_agent_events(ev):
                         if out.kind == "error":
-                            saw_error = True
-                        yield out
+                            _record_error(out, out.data.get("error", ""))
+                        else:
+                            state.saw_content = True
+                            yield out
 
             # Flush a final unterminated line, if any (defensive).
             tail = buf.strip()
@@ -225,39 +366,18 @@ class InSandboxShimProvider:
                     ev = json.loads(tail)
                     if isinstance(ev, dict):
                         if ev.get("type") == "done" and ev.get("session_id"):
-                            last_session_id = ev["session_id"]
+                            state.last_session_id = ev["session_id"]
                         elif ev.get("type") != "done":
                             for out in _shim_event_to_agent_events(ev):
                                 if out.kind == "error":
-                                    saw_error = True
-                                yield out
+                                    _record_error(out, out.data.get("error", ""))
+                                else:
+                                    state.saw_content = True
+                                    yield out
                 except json.JSONDecodeError:
                     pass
         except Exception as exc:  # noqa: BLE001 - turn any transport fault into a clean error
-            saw_error = True
-            yield AgentEvent(kind="error", data={"error": f"shim transport error: {exc}"})
-
-        # Persist the session<->claude-session index for a later --resume. A
-        # Postgres-backed map makes this survive an agent-runtime restart; the
-        # write is best-effort so a transient index fault never fails the turn.
-        if last_session_id:
-            try:
-                await self._session_map.put(
-                    options.session_id,
-                    last_session_id,
-                    user_id=options.user_id,
-                    sandbox_id=options.sandbox_id or "",
-                )
-            except Exception as exc:  # noqa: BLE001 - index write is best-effort
-                log.warning(
-                    "session-map put failed",
-                    session_id=options.session_id,
-                    error=repr(exc),
-                )
-
-        yield AgentEvent(
-            kind="done",
-            data={"session_id": last_session_id} if last_session_id else {},
-        )
-        if saw_error:
-            log.info("shim turn completed with errors", session_id=options.session_id)
+            _record_error(
+                AgentEvent(kind="error", data={"error": f"shim transport error: {exc}"}),
+                str(exc),
+            )

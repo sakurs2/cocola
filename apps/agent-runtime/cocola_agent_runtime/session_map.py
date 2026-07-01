@@ -50,6 +50,9 @@ class SessionMap(Protocol):
     ) -> None:
         """Record the latest claude_session_id for a cocola session."""
 
+    async def delete(self, session_id: str) -> None:
+        """Forget a session's binding (e.g. a dangling/stale resume id)."""
+
     async def aclose(self) -> None:
         """Release any backing resources."""
 
@@ -69,6 +72,9 @@ class MemorySessionMap:
         if claude_session_id:
             self._d[session_id] = claude_session_id
 
+    async def delete(self, session_id: str) -> None:
+        self._d.pop(session_id, None)
+
     async def aclose(self) -> None:
         return None
 
@@ -84,6 +90,8 @@ DO UPDATE SET claude_session_id = EXCLUDED.claude_session_id,
              sandbox_id = EXCLUDED.sandbox_id,
              updated_at = now()
 """
+
+_DELETE = "DELETE FROM session_map WHERE session_id = %s"
 
 
 class PostgresSessionMap:
@@ -124,6 +132,11 @@ class PostgresSessionMap:
         await self._ready()
         async with self._pool.connection() as conn:
             await conn.execute(_PUT, (session_id, claude_session_id, user_id, sandbox_id))
+
+    async def delete(self, session_id: str) -> None:
+        await self._ready()
+        async with self._pool.connection() as conn:
+            await conn.execute(_DELETE, (session_id,))
 
     async def aclose(self) -> None:
         if self._opened:

@@ -36,6 +36,11 @@ async def _contract(store):
     # Empty claude_session_id is a no-op (never clobbers a good binding).
     await store.put("S1", "", user_id="U1")
     assert await store.get("S1") == "claude-bbb"
+    # delete forgets a binding (used to drop a dangling/stale resume id).
+    await store.delete("S1")
+    assert await store.get("S1") is None
+    # delete is idempotent: forgetting an unknown session is a no-op.
+    await store.delete("S-unknown")
 
 
 async def test_memory_session_map_contract():
