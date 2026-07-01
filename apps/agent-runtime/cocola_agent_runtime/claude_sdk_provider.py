@@ -81,6 +81,10 @@ class ClaudeAgentSDKProvider:
     ):
         self._config = config
         self._iso_config_dir: str | None = None
+        # Real SDK path drives token-by-token streaming; an injected fake yields
+        # whole SDK messages, so we keep the non-partial mapping there (tests
+        # assert a single `text` event per AssistantMessage).
+        self._include_partial = query_fn is None
         # Lazy import so the package imports cleanly even if the SDK/CLI is not
         # installed (e.g. in unit tests that inject query_fn).
         if query_fn is not None:
@@ -151,6 +155,11 @@ class ClaudeAgentSDKProvider:
             system_prompt=options.system_prompt,
             max_turns=options.max_turns or self._config.max_turns,
             env=self._build_env(),
+            # Ask the SDK to emit token-level `StreamEvent` deltas as they arrive
+            # instead of only a whole `AssistantMessage` at end-of-turn -- this is
+            # what makes the chat UI type out the answer live rather than pop it in
+            # one block. We de-duplicate the final full blocks below.
+            include_partial_messages=self._include_partial,
         )
         # This provider's brain runs IN THIS PROCESS, not in the user's sandbox.
         # When the server has landed uploaded attachments in a local per-session
@@ -178,7 +187,7 @@ class ClaudeAgentSDKProvider:
         """
         sdk_options = self._maybe_build_options(options)
         async for message in self._query(prompt=prompt, options=sdk_options):
-            for event in _message_to_events(message):
+            for event in _message_to_events(message, self._include_partial):
                 yield event
         yield AgentEvent(kind="done", data={})
 
@@ -191,17 +200,31 @@ class ClaudeAgentSDKProvider:
             return options
 
 
-def _message_to_events(message: Any) -> list[AgentEvent]:
+def _message_to_events(message: Any, include_partial: bool = False) -> list[AgentEvent]:
     """Map a single SDK message into zero or more AgentEvents.
 
     Uses duck-typing on class names so the mapping works against both the real
     SDK dataclasses and lightweight fakes that mimic their shape.
+
+    When ``include_partial`` is set, the SDK is streaming token deltas as
+    ``StreamEvent`` messages; we forward those as incremental ``text``/``thinking``
+    events AND drop the duplicate full ``TextBlock``/``ThinkingBlock`` from the
+    trailing ``AssistantMessage`` (tool_use / error still flow through) so the UI
+    receives each token exactly once.
     """
     events: list[AgentEvent] = []
     cls = type(message).__name__
 
+    if cls == "StreamEvent":
+        return _stream_event_to_events(getattr(message, "event", None))
+
     if cls == "AssistantMessage":
         for block in getattr(message, "content", []) or []:
+            block_cls = type(block).__name__
+            if include_partial and block_cls in ("TextBlock", "ThinkingBlock"):
+                # Already streamed token-by-token via StreamEvent; skip the
+                # end-of-turn full copy to avoid rendering the answer twice.
+                continue
             events.extend(_block_to_events(block))
         if getattr(message, "error", None):
             events.append(AgentEvent(kind="error", data={"error": str(message.error)}))
@@ -230,6 +253,29 @@ def _message_to_events(message: Any) -> list[AgentEvent]:
         )
     # UserMessage (tool results fed back) is internal to the loop; we skip it.
     return events
+
+
+def _stream_event_to_events(raw: Any) -> list[AgentEvent]:
+    """Map one raw Anthropic stream event (StreamEvent.event) to AgentEvents.
+
+    We care about `content_block_delta` frames, which carry incremental text or
+    thinking. `text_delta` -> a `text` event with the token; `thinking_delta` ->
+    a `thinking` event. Every other frame (message_start/stop, ping, block
+    start/stop, usage) is control noise the UI does not need, so we drop it.
+    """
+    if not isinstance(raw, dict):
+        return []
+    if raw.get("type") != "content_block_delta":
+        return []
+    delta = raw.get("delta") or {}
+    dtype = delta.get("type")
+    if dtype == "text_delta":
+        text = delta.get("text", "")
+        return [AgentEvent(kind="text", data={"text": text})] if text else []
+    if dtype == "thinking_delta":
+        thinking = delta.get("thinking", "")
+        return [AgentEvent(kind="thinking", data={"thinking": thinking})] if thinking else []
+    return []
 
 
 def _block_to_events(block: Any) -> list[AgentEvent]:
