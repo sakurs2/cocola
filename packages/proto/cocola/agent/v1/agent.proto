@@ -25,11 +25,21 @@ message QueryRequest {
   repeated Attachment attachments = 6;
 }
 
-// Attachment is a single user-uploaded file carried inline with the query.
+// Attachment is a single user-uploaded file delivered to the sandbox workspace
+// (push model, ADR-0017). MinIO/object storage is the source of truth; the
+// gateway uploads every file to a bucket and, by a configurable size threshold
+// (COCOLA_ATTACHMENT_INLINE_MAX_BYTES, default 16MiB), decides delivery:
+//   - small files: `content` carries the raw bytes inline (agent-runtime writes
+//     them straight into ./uploads/); `oss_key` is still set for history/replay.
+//   - large files: `content` is empty and only `oss_key` (+ `size`) travel; the
+//     agent-runtime back-end pulls the bytes from object storage before the run.
+// Either way the model just reads a local file — no agent-side tool involved.
 message Attachment {
   string filename = 1;  // sanitized basename; landed under ./uploads/ in the workspace
-  bytes content = 2;    // raw file bytes
+  bytes content = 2;    // raw file bytes; empty when the file is delivered via oss_key
   string mime = 3;      // best-effort MIME type from the browser
+  string oss_key = 4;   // object-storage key (source of truth); set for every upload
+  int64 size = 5;       // original byte length; drives threshold + logging
 }
 
 message AgentEvent {

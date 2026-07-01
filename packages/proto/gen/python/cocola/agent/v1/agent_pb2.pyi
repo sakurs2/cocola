@@ -23,14 +23,18 @@ class QueryRequest(_message.Message):
     def __init__(self, user_id: _Optional[str] = ..., session_id: _Optional[str] = ..., prompt: _Optional[str] = ..., sandbox_id: _Optional[str] = ..., max_turns: _Optional[int] = ..., attachments: _Optional[_Iterable[_Union[Attachment, _Mapping]]] = ...) -> None: ...
 
 class Attachment(_message.Message):
-    __slots__ = ("filename", "content", "mime")
+    __slots__ = ("filename", "content", "mime", "oss_key", "size")
     FILENAME_FIELD_NUMBER: _ClassVar[int]
     CONTENT_FIELD_NUMBER: _ClassVar[int]
     MIME_FIELD_NUMBER: _ClassVar[int]
+    OSS_KEY_FIELD_NUMBER: _ClassVar[int]
+    SIZE_FIELD_NUMBER: _ClassVar[int]
     filename: str
     content: bytes
     mime: str
-    def __init__(self, filename: _Optional[str] = ..., content: _Optional[bytes] = ..., mime: _Optional[str] = ...) -> None: ...
+    oss_key: str
+    size: int
+    def __init__(self, filename: _Optional[str] = ..., content: _Optional[bytes] = ..., mime: _Optional[str] = ..., oss_key: _Optional[str] = ..., size: _Optional[int] = ...) -> None: ...
 
 class AgentEvent(_message.Message):
     __slots__ = ("kind", "data")
