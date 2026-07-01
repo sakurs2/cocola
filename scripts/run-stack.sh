@@ -18,9 +18,12 @@
 #   * Port 8080 collision: the gateway BFF and the llm-gateway BOTH default to
 #     8080. We pin llm-gateway to COCOLA_LLM_PORT (default 8081) and point the
 #     agent-runtime COCOLA_LLM_BASE_URL at it, so they never fight.
-#   * A sandbox-manager is NOT started here (its build is containerized). If you
-#     export COCOLA_SANDBOX_ADDR we pass it through so the agent binds + routes
-#     bash/file tools into that sandbox.
+#   * Default route is A (brain-in-sandbox, ADR-0009). A sandbox-manager is NOT
+#     started here (its build is containerized), so for a REAL Route-A run you
+#     must export COCOLA_SANDBOX_ADDR pointing at one; we pass it through and the
+#     agent runs the whole Claude brain inside that sandbox. With no executor
+#     reachable, Route A degrades to Route B automatically (see agent-runtime
+#     _build_provider). To force the old central-SDK path, set COCOLA_AGENT_ROUTE=B.
 #   * Every child logs to .run-logs/<name>.log; this script prints a token you
 #     can paste into the web UI or a curl call.
 #
@@ -263,7 +266,7 @@ free_port "$AGENT_PORT" agent-runtime
   COCOLA_AGENT_API_KEY="$AGENT_API_KEY" \
   COCOLA_ANTHROPIC_MODEL="${COCOLA_LLM_DEFAULT_ALIAS:-cocola-default}" \
   COCOLA_SANDBOX_ADDR="${COCOLA_SANDBOX_ADDR:-}" \
-  COCOLA_AGENT_ROUTE="${COCOLA_AGENT_ROUTE:-}" \
+  COCOLA_AGENT_ROUTE="${COCOLA_AGENT_ROUTE:-A}" \
     $SETSID uv run python -m cocola_agent_runtime
 ) >"$(log_redirect agent-runtime)" 2>&1 &
 PIDS+=("$!")
