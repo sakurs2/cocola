@@ -243,9 +243,34 @@ const AssistantMessage: FC = () => (
           tools: { Fallback: ToolFallback },
         }}
       />
+      {/* Loading affordance: the runtime pushes an EMPTY assistant message the
+          moment a turn starts and only then streams text into it. Until the
+          first token lands the message has no content, so a "hasContent=false"
+          message that is still the last one is exactly the in-flight state.
+          Show typing dots there so the user sees the model is working. */}
+      <MessagePrimitive.If hasContent={false}>
+        <MessagePrimitive.If last>
+          <TypingIndicator />
+        </MessagePrimitive.If>
+      </MessagePrimitive.If>
     </div>
     <AssistantActionBar />
   </MessagePrimitive.Root>
+);
+
+// Three-dot "typing" pulse rendered while an assistant turn is in flight but no
+// text has streamed yet. Pure CSS (Tailwind animate-bounce + staggered delays);
+// aria-label keeps it announced to screen readers.
+const TypingIndicator: FC = () => (
+  <div
+    className="flex items-center gap-1 py-1"
+    role="status"
+    aria-label="Assistant is typing"
+  >
+    <span className="size-2 animate-bounce rounded-full bg-muted-foreground/60 [animation-delay:-0.3s]" />
+    <span className="size-2 animate-bounce rounded-full bg-muted-foreground/60 [animation-delay:-0.15s]" />
+    <span className="size-2 animate-bounce rounded-full bg-muted-foreground/60" />
+  </div>
 );
 
 const ReasoningPart: FC<{ text: string }> = ({ text }) => (
