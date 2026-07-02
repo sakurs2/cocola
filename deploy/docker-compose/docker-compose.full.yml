@@ -257,12 +257,20 @@ services:
     depends_on:
       agent-runtime:
         condition: service_started
+      postgres:
+        condition: service_healthy
       minio-init:
         condition: service_completed_successfully
     environment:
       COCOLA_GATEWAY_ADDR: ":8080"
       COCOLA_AGENT_ADDR: "agent-runtime:50061"
       COCOLA_AUTH_ALLOW_ANON: "1"   # dev: accept blank tokens as dev-user
+      # Conversation persistence (route A): the gateway mirrors each turn's
+      # rendered parts into Postgres so the sidebar can list past conversations
+      # and clicking one replays its history. Set -> persist; unset -> feature
+      # dark (chat still works, nothing is stored). Full stack ships a postgres
+      # node, so default the DSN to it (same value as the other services).
+      COCOLA_PG_DSN: "${COCOLA_PG_DSN:-postgres://cocola:cocola_dev_pw@postgres:5432/cocola?sslmode=disable}"
       # Attachment object store (ADR-0017 P1a): the gateway is the uploader --
       # every attachment is PutObject'd to MinIO (source of truth), then split by
       # threshold. Small (<= COCOLA_ATTACHMENT_INLINE_MAX_BYTES, default 16MiB)
