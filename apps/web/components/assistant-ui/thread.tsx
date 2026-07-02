@@ -324,9 +324,12 @@ const ToolCard: FC<{
 );
 
 const AssistantActionBar: FC = () => (
+  // Copy control stays resident: autohide="never" so the action bar is always
+  // visible under every assistant turn, not just on hover. hideWhenRunning is
+  // kept so it does not flash mid-stream, appearing once the turn settles.
   <ActionBarPrimitive.Root
     hideWhenRunning
-    autohide="not-last"
+    autohide="never"
     className="col-start-1 row-start-2 -ml-1 flex gap-1 text-muted-foreground"
   >
     <ActionBarPrimitive.Copy asChild>
