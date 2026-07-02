@@ -156,13 +156,17 @@ demo-minimal: ## M-minimal: fully containerised control plane + sandbox + persis
 	bash scripts/demo-minimal.sh
 
 # -------------------------------------------------------------------- dev stack
-# One-click local app stack (NOT the infra in dev-up; that is PostgreSQL/Redis/
-# MinIO). `up` boots agent-runtime + gateway with the EchoProvider so a
-# zero-config `make up` serves the full SSE path. Flags layer on the rest:
-#   make up           agent-runtime + gateway (Echo)
-#   make up-web       + the browser test tool (:3000)
-#   make up-all       + llm-gateway (real Claude Agent SDK path) + web
-# All run in the foreground; Ctrl-C tears every child down (trap cleanup).
+# Local app stack. Two tiers, ONE route (Route A):
+#   make up      native, foreground: agent-runtime + gateway, EchoProvider
+#                (zero-config, no sandbox) -- fast inner-loop debugging.
+#   make up-web  ... + the Next.js browser test tool (:3000).
+#   make up-all  FULL containerized Route A stack via scripts/start.sh
+#                (docker-compose.full.yml: 9 services, real model). When
+#                .env sets COCOLA_SANDBOX_PROVIDER=opensandbox, start.sh also
+#                brings up the standalone OpenSandbox server (:8090) and tears
+#                it down together. Manage with `bash scripts/start.sh --down`.
+# up/up-web run in the foreground (Ctrl-C tears children down); up-all runs
+# detached containers (stop via start.sh --stop/--down).
 .PHONY: up up-web up-all
 up: ## Boot local app stack: agent-runtime + gateway (Echo)
 	bash scripts/run-stack.sh
@@ -170,8 +174,8 @@ up: ## Boot local app stack: agent-runtime + gateway (Echo)
 up-web: ## ... + the Next.js browser test tool on :3000
 	bash scripts/run-stack.sh --with-web
 
-up-all: ## ... + llm-gateway (real SDK path) + web
-	bash scripts/run-stack.sh --all
+up-all: ## Full containerized Route A stack (start.sh + full.yml; OpenSandbox when .env selects it)
+	bash scripts/start.sh
 
 # -------------------------------------------------------------------- aggregate
 .PHONY: install test lint format format-check precommit-install clean
