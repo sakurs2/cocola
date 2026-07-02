@@ -33,7 +33,8 @@
 #   bash scripts/run-stack.sh --all      # + llm-gateway (real SDK path) + web
 #   bash scripts/run-stack.sh --hybrid   # REAL Route A: containerized backends
 #                                        # (sandbox-manager/llm-gateway/...) +
-#                                        # NATIVE app -- no image rebuild on edits
+#                                        # NATIVE app incl. web (:3000) -- no
+#                                        # image rebuild on edits
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
@@ -46,7 +47,7 @@ for arg in "$@"; do
   case "$arg" in
     --with-llm) WITH_LLM=1 ;;
     --with-web) WITH_WEB=1 ;;
-    --hybrid)   HYBRID=1 ;;
+    --hybrid)   HYBRID=1; WITH_WEB=1 ;;
     --all)      WITH_LLM=1; WITH_WEB=1 ;;
     -h|--help)
       grep '^#' "$0" | sed 's/^# \{0,1\}//'

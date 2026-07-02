@@ -163,7 +163,8 @@ demo-minimal: ## M-minimal: fully containerised control plane + sandbox + persis
 #   make up-hybrid REAL Route A with NO image rebuild on edits: the backends
 #                  (sandbox-manager/llm-gateway/redis/pg/minio/admin-api) run
 #                  CONTAINERIZED (a full.yml subset), while the app you iterate
-#                  on (agent-runtime + gateway) runs NATIVE in the foreground.
+#                  on (agent-runtime + gateway + web :3000) runs NATIVE in the
+#                  foreground.
 #                  Ctrl-C relaunches only the native app; warm backends survive.
 #                  Stop the backends with `bash scripts/start.sh --stop/--down`.
 #   make up-all    FULL containerized Route A stack via scripts/start.sh
@@ -180,7 +181,7 @@ up: ## Boot local app stack: agent-runtime + gateway (Echo)
 up-web: ## ... + the Next.js browser test tool on :3000
 	bash scripts/run-stack.sh --with-web
 
-up-hybrid: ## REAL Route A: containerized backends + native app (no image rebuild on edits)
+up-hybrid: ## REAL Route A: containerized backends + native app incl. web :3000 (no image rebuild)
 	bash scripts/run-stack.sh --hybrid
 
 up-all: ## Full containerized Route A stack (start.sh + full.yml; OpenSandbox when .env selects it)

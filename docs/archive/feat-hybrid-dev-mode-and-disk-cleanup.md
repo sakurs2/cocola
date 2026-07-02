@@ -17,7 +17,8 @@ route,仍是唯一的 Route A,只是它的一种「跑法」。
 后端容器化、app 原生,得到真实 Route A + 真实模型,且改 app 代码零重建镜像。
 
 - `scripts/run-stack.sh`
-  - 新增 `HYBRID` 变量与 `--hybrid` 旗标,以及用法头注释。
+  - 新增 `HYBRID` 变量与 `--hybrid` 旗标(顺带置 `WITH_WEB=1`,默认带上原生
+    web 前端 `:3000`,`pnpm dev` 改前端代码热更新),以及用法头注释。
   - 在 setsid 块之后插入 `hybrid_up()`:
     - 校验 docker 守护进程可用;
     - 若 provider 为 `opensandbox`(env 优先,其次读 `.env`)则先拉起独立
@@ -49,7 +50,7 @@ route,仍是唯一的 Route A,只是它的一种「跑法」。
 | 目标 | app | 后端 | 模型 | 改 app 代码 |
 |---|---|---|---|---|
 | `make up` / `up-web` | 原生前台 | 仅 MinIO | 无(EchoProvider) | 即时生效 |
-| `make up-hybrid` | 原生前台 | 容器化子集 | 真实 | **免重建镜像**,重启即生效 |
+| `make up-hybrid` | 原生前台(含 web :3000) | 容器化子集 | 真实 | **免重建镜像**,重启即生效 |
 | `make up-all` | 全容器 | 全容器 | 真实 | 需重建镜像 |
 
 ## 变更二:无用镜像/容器/卷清理
