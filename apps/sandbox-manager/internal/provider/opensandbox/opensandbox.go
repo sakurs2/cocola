@@ -1220,6 +1220,9 @@ func (p *Provider) do(ctx context.Context, method, path string, body, out any) e
 
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
 		b, _ := io.ReadAll(io.LimitReader(resp.Body, 4096))
+		if resp.StatusCode == http.StatusNotFound {
+			return fmt.Errorf("opensandbox: %s %s: status %d: %s: %w", method, path, resp.StatusCode, strings.TrimSpace(string(b)), fs.ErrNotExist)
+		}
 		return fmt.Errorf("opensandbox: %s %s: status %d: %s", method, path, resp.StatusCode, strings.TrimSpace(string(b)))
 	}
 	if out != nil {

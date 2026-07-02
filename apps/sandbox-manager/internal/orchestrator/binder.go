@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io/fs"
 	"os"
 	"strconv"
 	"time"
@@ -235,6 +236,16 @@ func (b *Binder) lookup(ctx context.Context, sessionID string) (*provider.Sandbo
 	// resumes on its existing workspace rather than cold-creating.
 	if m.State == StatePaused {
 		if err := b.p.Resume(ctx, sid); err != nil {
+			if errors.Is(err, fs.ErrNotExist) {
+				// The provider has already forgotten the paused sandbox (for
+				// example after an OpenSandbox/Docker restart) while our durable
+				// binding still points at it. Drop the stale binding and let
+				// Acquire create a fresh sandbox for the same session.
+				if unbindErr := b.unbind(ctx, m.SessionID, m.SandboxID); unbindErr != nil {
+					return nil, false, unbindErr
+				}
+				return nil, false, nil
+			}
 			return nil, false, fmt.Errorf("resume paused sandbox: %w", err)
 		}
 		m.State = StateActive

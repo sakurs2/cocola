@@ -3,6 +3,7 @@ package orchestrator
 import (
 	"context"
 	"fmt"
+	"io/fs"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -15,13 +16,19 @@ import (
 // fakeProvider is a minimal in-memory SandboxProvider for binder tests. It only
 // implements the lifecycle methods the binder touches; the rest are stubs.
 type fakeProvider struct {
-	creates  atomic.Int64
-	destroys atomic.Int64
-	mu       sync.Mutex
-	state    map[string]string // sandbox id -> "active"|"paused"|"destroyed"
+	creates   atomic.Int64
+	destroys  atomic.Int64
+	mu        sync.Mutex
+	state     map[string]string // sandbox id -> "active"|"paused"|"destroyed"
+	resumeErr map[string]error
 }
 
-func newFakeProvider() *fakeProvider { return &fakeProvider{state: map[string]string{}} }
+func newFakeProvider() *fakeProvider {
+	return &fakeProvider{
+		state:     map[string]string{},
+		resumeErr: map[string]error{},
+	}
+}
 
 func (f *fakeProvider) Create(ctx context.Context, spec provider.SandboxSpec) (*provider.Sandbox, error) {
 	n := f.creates.Add(1)
@@ -40,6 +47,9 @@ func (f *fakeProvider) Pause(ctx context.Context, sid string) error {
 func (f *fakeProvider) Resume(ctx context.Context, sid string) error {
 	f.mu.Lock()
 	defer f.mu.Unlock()
+	if err := f.resumeErr[sid]; err != nil {
+		return err
+	}
 	f.state[sid] = "active"
 	return nil
 }
@@ -234,5 +244,49 @@ func TestHeartbeatKeepsAlive(t *testing.T) {
 	fp.mu.Unlock()
 	if st != "active" {
 		t.Fatalf("expected sandbox to stay active under heartbeat, got %s", st)
+	}
+}
+
+func TestAcquireRecreatesWhenPausedSandboxDisappeared(t *testing.T) {
+	b, fp := newTestBinder(t)
+	ctx := context.Background()
+	spec := AcquireSpec{SessionID: "gone", UserID: "u"}
+
+	sb1, err := b.Acquire(ctx, spec)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	fp.mu.Lock()
+	fp.state[sb1.ID] = "destroyed"
+	fp.resumeErr[sb1.ID] = fs.ErrNotExist
+	fp.mu.Unlock()
+
+	if err := b.putMeta(ctx, meta{
+		SandboxID:   sb1.ID,
+		SessionID:   spec.SessionID,
+		UserID:      spec.UserID,
+		State:       StatePaused,
+		CreatedUnix: time.Now().Unix(),
+		PausedUnix:  time.Now().Unix(),
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	out, err := b.AcquireWithOutcome(ctx, spec)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if out.Reused {
+		t.Fatal("expected fresh sandbox after stale paused binding, got reused")
+	}
+	if out.Sandbox.ID == sb1.ID {
+		t.Fatalf("expected new sandbox id, got stale %s", out.Sandbox.ID)
+	}
+	if got := fp.creates.Load(); got != 2 {
+		t.Fatalf("expected 2 creates, got %d", got)
+	}
+	if sid, err := b.kv.Get(ctx, convKey(spec.SessionID)); err != nil || sid != out.Sandbox.ID {
+		t.Fatalf("forward binding = %q, %v; want %q", sid, err, out.Sandbox.ID)
 	}
 }

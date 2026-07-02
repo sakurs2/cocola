@@ -5,16 +5,20 @@ import {
   AttachmentPrimitive,
   ComposerPrimitive,
   MessagePrimitive,
+  type ReasoningMessagePartProps,
   ThreadPrimitive,
   type ToolCallMessagePartProps,
 } from "@assistant-ui/react";
 import {
   ArrowDownIcon,
+  BrainCircuit,
+  ChevronRight,
   CopyIcon,
   MessagesSquare,
   PaperclipIcon,
   SendHorizontalIcon,
   Square,
+  Wrench,
   XIcon,
   Zap,
 } from "lucide-react";
@@ -162,23 +166,23 @@ const ComposerAttachments: FC = () => (
   <div className="flex flex-wrap gap-1.5 empty:hidden [&:not(:empty)]:pb-1.5">
     <ComposerPrimitive.Attachments
       components={{
-      Attachment: () => (
-        <AttachmentPrimitive.Root className="relative flex w-fit max-w-full self-start items-center gap-2 rounded-lg border border-border bg-muted px-3 py-1.5 text-xs text-foreground">
-          <PaperclipIcon className="size-3.5 shrink-0 text-muted-foreground" />
-          <span className="max-w-[16rem] truncate">
-            <AttachmentPrimitive.Name />
-          </span>
-          <AttachmentPrimitive.Remove asChild>
-            <button
-              type="button"
-              aria-label="Remove attachment"
-              className="ml-1 rounded-full p-0.5 text-muted-foreground transition-colors hover:bg-background hover:text-foreground"
-            >
-              <XIcon className="size-3.5" />
-            </button>
-          </AttachmentPrimitive.Remove>
-        </AttachmentPrimitive.Root>
-      ),
+        Attachment: () => (
+          <AttachmentPrimitive.Root className="relative flex w-fit max-w-full self-start items-center gap-2 rounded-lg border border-border bg-muted px-3 py-1.5 text-xs text-foreground">
+            <PaperclipIcon className="size-3.5 shrink-0 text-muted-foreground" />
+            <span className="max-w-[16rem] truncate">
+              <AttachmentPrimitive.Name />
+            </span>
+            <AttachmentPrimitive.Remove asChild>
+              <button
+                type="button"
+                aria-label="Remove attachment"
+                className="ml-1 rounded-full p-0.5 text-muted-foreground transition-colors hover:bg-background hover:text-foreground"
+              >
+                <XIcon className="size-3.5" />
+              </button>
+            </AttachmentPrimitive.Remove>
+          </AttachmentPrimitive.Root>
+        ),
       }}
     />
   </div>
@@ -266,29 +270,42 @@ const AssistantMessage: FC = () => (
 // text has streamed yet. Pure CSS (Tailwind animate-bounce + staggered delays);
 // aria-label keeps it announced to screen readers.
 const TypingIndicator: FC = () => (
-  <div
-    className="flex items-center gap-1 py-1"
-    role="status"
-    aria-label="Assistant is typing"
-  >
+  <div className="flex items-center gap-1 py-1" role="status" aria-label="Assistant is typing">
     <span className="size-2 animate-bounce rounded-full bg-muted-foreground/60 [animation-delay:-0.3s]" />
     <span className="size-2 animate-bounce rounded-full bg-muted-foreground/60 [animation-delay:-0.15s]" />
     <span className="size-2 animate-bounce rounded-full bg-muted-foreground/60" />
   </div>
 );
 
-const ReasoningPart: FC<{ text: string }> = ({ text }) => (
-  <div className="my-2 border-l-2 border-border pl-3 text-sm italic text-muted-foreground">
-    {text}
-  </div>
+const ReasoningPart: FC<ReasoningMessagePartProps> = ({ text, status }) => (
+  <details className="aui-details group my-3 overflow-hidden rounded-lg border border-border bg-muted/30 text-sm">
+    <summary className="flex cursor-pointer select-none items-center gap-2 px-3 py-2 text-muted-foreground [&::-webkit-details-marker]:hidden">
+      <ChevronRight className="size-3.5 shrink-0 transition-transform group-open:rotate-90" />
+      <BrainCircuit className="size-3.5 shrink-0" />
+      <span className="font-medium text-foreground">Reasoning</span>
+      <span className="ml-auto rounded-full border border-border bg-background px-2 py-0.5 text-[11px] leading-4">
+        {status.type === "running" ? "Thinking" : "Done"}
+      </span>
+    </summary>
+    <div className="aui-details-body border-t border-border px-3 py-2.5 text-sm leading-6 text-muted-foreground">
+      {text}
+    </div>
+  </details>
 );
 
-const ToolFallback: FC<ToolCallMessagePartProps> = ({ toolName, argsText, result, isError }) => (
+const ToolFallback: FC<ToolCallMessagePartProps> = ({
+  toolName,
+  argsText,
+  result,
+  isError,
+  status,
+}) => (
   <ToolCard
     title={toolName}
-    args={argsText}
-    result={result === undefined ? undefined : String(result)}
+    args={formatPayload(argsText)}
+    result={formatPayload(result)}
     isError={isError}
+    status={status}
   />
 );
 
@@ -297,31 +314,122 @@ const ToolCard: FC<{
   args?: string;
   result?: string;
   isError?: boolean;
-}> = ({ title, args, result, isError }) => (
-  <details className="my-2 overflow-hidden rounded-lg border border-border bg-muted/50 text-sm">
-    <summary className="cursor-pointer select-none px-3 py-2 font-mono text-xs text-muted-foreground">
-      <span className="mr-2 rounded bg-muted px-1.5 py-0.5">tool</span>
-      {title}
-    </summary>
-    <div className="border-t border-border px-3 py-2">
-      {args ? (
-        <pre className="overflow-x-auto whitespace-pre-wrap break-words font-mono text-xs text-muted-foreground">
-          {args}
-        </pre>
-      ) : null}
-      {result !== undefined ? (
-        <pre
+  status: ToolCallMessagePartProps["status"];
+}> = ({ title, args, result, isError, status }) => {
+  const meta = getToolStatusMeta(status, isError, result !== undefined);
+
+  return (
+    <details
+      open={status.type === "running" || status.type === "requires-action" || isError}
+      className={cn(
+        "aui-details group my-3 overflow-hidden rounded-lg border bg-muted/30 text-sm",
+        isError ? "border-destructive/50" : "border-border",
+      )}
+    >
+      <summary className="flex cursor-pointer select-none items-center gap-2 px-3 py-2 text-muted-foreground [&::-webkit-details-marker]:hidden">
+        <ChevronRight className="size-3.5 shrink-0 transition-transform group-open:rotate-90" />
+        <span className="flex size-6 shrink-0 items-center justify-center rounded-md border border-border bg-background">
+          <Wrench className="size-3.5" />
+        </span>
+        <span className="min-w-0 truncate font-mono text-xs text-foreground">{title}</span>
+        <span
           className={cn(
-            "mt-2 overflow-x-auto whitespace-pre-wrap break-words border-t border-border pt-2 font-mono text-xs",
-            isError ? "text-destructive" : "text-muted-foreground",
+            "ml-auto rounded-full border px-2 py-0.5 text-[11px] leading-4",
+            meta.className,
           )}
         >
-          {result}
-        </pre>
-      ) : null}
+          {meta.label}
+        </span>
+      </summary>
+      <div className="aui-details-body grid gap-2 border-t border-border p-3">
+        {args ? <ToolPayload label="Arguments" tone="muted" value={args} /> : null}
+        {result !== undefined ? (
+          <ToolPayload
+            label={isError ? "Error" : "Result"}
+            tone={isError ? "error" : "muted"}
+            value={result}
+          />
+        ) : null}
+        {!args && result === undefined ? (
+          <p className="text-xs text-muted-foreground">Waiting for output...</p>
+        ) : null}
+      </div>
+    </details>
+  );
+};
+
+const ToolPayload: FC<{
+  label: string;
+  value: string;
+  tone: "muted" | "error";
+}> = ({ label, value, tone }) => (
+  <section className="overflow-hidden rounded-md border border-border bg-background/70">
+    <div className="border-b border-border px-2.5 py-1.5 font-mono text-[11px] uppercase text-muted-foreground">
+      {label}
     </div>
-  </details>
+    <pre
+      className={cn(
+        "max-h-72 overflow-auto whitespace-pre-wrap break-words p-2.5 font-mono text-xs leading-5",
+        tone === "error" ? "text-destructive" : "text-muted-foreground",
+      )}
+    >
+      {value}
+    </pre>
+  </section>
 );
+
+const getToolStatusMeta = (
+  status: ToolCallMessagePartProps["status"],
+  isError: boolean | undefined,
+  hasResult: boolean,
+) => {
+  if (isError) {
+    return {
+      label: "Error",
+      className: "border-destructive/40 bg-destructive/10 text-destructive",
+    };
+  }
+  if (status.type === "running") {
+    return {
+      label: "Running",
+      className: "border-border bg-background text-muted-foreground",
+    };
+  }
+  if (status.type === "requires-action") {
+    return {
+      label: "Action needed",
+      className: "border-primary/30 bg-primary/10 text-foreground",
+    };
+  }
+  if (status.type === "incomplete") {
+    return {
+      label: "Incomplete",
+      className: "border-destructive/40 bg-destructive/10 text-destructive",
+    };
+  }
+  return {
+    label: hasResult ? "Done" : "No output",
+    className: "border-border bg-background text-muted-foreground",
+  };
+};
+
+const formatPayload = (value: unknown): string | undefined => {
+  if (value === undefined) return undefined;
+  if (typeof value === "string") {
+    const trimmed = value.trim();
+    if (!trimmed) return undefined;
+    try {
+      return JSON.stringify(JSON.parse(trimmed), null, 2);
+    } catch {
+      return value;
+    }
+  }
+  try {
+    return JSON.stringify(value, null, 2);
+  } catch {
+    return String(value);
+  }
+};
 
 const AssistantActionBar: FC = () => (
   // Copy control stays resident: autohide="never" so the action bar is always
