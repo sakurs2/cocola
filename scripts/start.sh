@@ -165,7 +165,7 @@ main() {
       "${DC[@]}" build
       opensandbox_up
       log "启动整栈 ..."
-      "${DC[@]}" up -d
+      "${DC[@]}" up -d --remove-orphans
       wait_healthy && print_endpoints
       ;;
     up|"")
@@ -176,7 +176,7 @@ main() {
       fi
       opensandbox_up
       log "启动整栈 ..."
-      "${DC[@]}" up -d
+      "${DC[@]}" up -d --remove-orphans
       wait_healthy && print_endpoints
       ;;
     -h|--help)

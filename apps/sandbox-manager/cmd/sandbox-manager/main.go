@@ -13,6 +13,7 @@ import (
 	"net/http"
 	"os"
 	"strconv"
+	"time"
 
 	"github.com/prometheus/client_golang/prometheus"
 	"google.golang.org/grpc"
@@ -60,9 +61,13 @@ func main() {
 	// single-process debugging possible without standing up Redis.
 	ctx := context.Background()
 	var binder *orchestrator.Binder
-	kv, rerr := rds.New(ctx, rds.ConfigFromEnv())
+	// Retry the initial dial instead of a single shot: full.yml orders us after
+	// redis is healthy, but transient DNS/network races (or a slow-to-DNS bridge)
+	// would otherwise permanently disable binding RPCs until a manual restart.
+	// We wait up to COCOLA_REDIS_CONNECT_TIMEOUT (default 30s) before degrading.
+	kv, rerr := dialRedisWithRetry(ctx, log, redisConnectTimeout())
 	if rerr != nil {
-		log.Sugar().Warnw("redis unavailable; session-binding RPCs disabled",
+		log.Sugar().Warnw("redis unavailable after retries; session-binding RPCs disabled",
 			"err", rerr)
 	} else {
 		defer func() { _ = kv.Close() }()
@@ -157,6 +162,49 @@ func maxMessageBytes() int {
 		}
 	}
 	return defaultMaxMessageBytes
+}
+
+// redisConnectTimeout is the total budget for the initial Redis dial, retries
+// included. A non-positive/invalid COCOLA_REDIS_CONNECT_TIMEOUT falls back to
+// 30s. Set it to 0s-equivalent (e.g. "1ms") to effectively disable retrying.
+func redisConnectTimeout() time.Duration {
+	if v := os.Getenv("COCOLA_REDIS_CONNECT_TIMEOUT"); v != "" {
+		if d, err := time.ParseDuration(v); err == nil && d > 0 {
+			return d
+		}
+	}
+	return 30 * time.Second
+}
+
+// dialRedisWithRetry dials Redis, retrying on failure until the total budget is
+// exhausted. It returns the first successful client, or the last error if the
+// deadline passes. Each individual dial keeps rds.New's own 5s ping timeout.
+func dialRedisWithRetry(ctx context.Context, log logger.Logger, budget time.Duration) (*rds.Client, error) {
+	const interval = 2 * time.Second
+	deadline := time.Now().Add(budget)
+	attempt := 0
+	for {
+		attempt++
+		kv, err := rds.New(ctx, rds.ConfigFromEnv())
+		if err == nil {
+			if attempt > 1 {
+				log.Sugar().Infow("redis reachable", "attempt", attempt)
+			}
+			return kv, nil
+		}
+		if time.Now().Add(interval).After(deadline) {
+			return nil, err
+		}
+		log.Sugar().Infow("redis not ready; retrying",
+			"attempt", attempt, "err", err,
+			"retry_in", interval.String(),
+			"deadline_in", time.Until(deadline).Round(time.Second).String())
+		select {
+		case <-ctx.Done():
+			return nil, ctx.Err()
+		case <-time.After(interval):
+		}
+	}
 }
 
 func getenv(k, def string) string {
