@@ -14,13 +14,11 @@ import {
 import { cn } from "@/lib/utils";
 import { useCocola } from "@/app/runtime-provider";
 
-// Static, dependency-light sidebar mirroring the Open WebUI chrome (New Chat /
-// Search / Notes / Workspace + Channels / Folders / Chats). Deliberately NOT
-// wired to the backend — the cocola ExternalStore runtime only supports a
-// single thread (send/cancel), so history / folders / channels are decorative
-// shells until multi-thread persistence lands. Authored against the shadcn
-// sidebar structure from @assistant-ui/ui but hand-rolled (plain divs + a
-// useState collapse) to avoid pulling in Radix.
+// Sidebar mirroring the Open WebUI chrome. New Chat + the Chats list are wired
+// to the backend (conversation persistence, route A): Chats lists the user's
+// stored conversations and clicking one replays it into the thread. Search /
+// Notes / Workspace / Channels / Folders remain decorative shells. Hand-rolled
+// (plain divs + a useState collapse) to avoid pulling in Radix.
 
 type NavItem = { icon: typeof Plus; label: string };
 
@@ -39,11 +37,10 @@ const FOLDERS = [
   { emoji: "📕", label: "Study" },
 ];
 
-const CHATS_TODAY = ["Roman Concrete Durability"];
 
 export function AppSidebar() {
   const [collapsed, setCollapsed] = useState(false);
-  const { newConversation } = useCocola();
+  const { newConversation, conversations, loadConversation, activeConversationId } = useCocola();
 
   return (
     <aside
@@ -111,17 +108,26 @@ export function AppSidebar() {
             </div>
 
             <SectionLabel>Chats</SectionLabel>
-            <div className="px-2.5 pb-1 pt-1 text-xs font-medium text-sidebar-foreground/50">
-              Today
-            </div>
-            <div className="flex flex-col gap-0.5">
-              {CHATS_TODAY.map((title) => (
-                <SidebarButton key={title} collapsed={collapsed} title={title}>
-                  <FolderClosed className="size-4 shrink-0 opacity-0" />
-                  <span className="truncate">{title}</span>
-                </SidebarButton>
-              ))}
-            </div>
+            {conversations.length === 0 ? (
+              <div className="px-2.5 py-1 text-xs text-sidebar-foreground/50">
+                No conversations yet
+              </div>
+            ) : (
+              <div className="flex flex-col gap-0.5">
+                {conversations.map((c) => (
+                  <SidebarButton
+                    key={c.id}
+                    collapsed={collapsed}
+                    title={c.title || "Untitled"}
+                    active={c.id === activeConversationId}
+                    onClick={() => void loadConversation(c.id)}
+                  >
+                    <FolderClosed className="size-4 shrink-0 opacity-0" />
+                    <span className="truncate">{c.title || "Untitled"}</span>
+                  </SidebarButton>
+                ))}
+              </div>
+            )}
           </>
         )}
       </nav>
@@ -144,11 +150,13 @@ function SidebarButton({
   collapsed,
   title,
   onClick,
+  active,
 }: {
   children: React.ReactNode;
   collapsed: boolean;
   title: string;
   onClick?: () => void;
+  active?: boolean;
 }) {
   return (
     <button
@@ -157,6 +165,7 @@ function SidebarButton({
       onClick={onClick}
       className={cn(
         "flex h-8 items-center gap-2 rounded-md px-2.5 text-sm text-sidebar-foreground/90 transition-colors hover:bg-sidebar-accent hover:text-sidebar-accent-foreground",
+        active && "bg-sidebar-accent text-sidebar-accent-foreground",
         collapsed && "justify-center px-0",
       )}
     >

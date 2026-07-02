@@ -10,16 +10,20 @@
 package httpapi
 
 import (
+	"context"
 	"encoding/base64"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"strings"
+	"time"
 
 	"github.com/google/uuid"
 
 	"github.com/cocola-project/cocola/apps/gateway/internal/agent"
 	"github.com/cocola-project/cocola/apps/gateway/internal/auth"
+	"github.com/cocola-project/cocola/apps/gateway/internal/convo"
 	"github.com/cocola-project/cocola/apps/gateway/internal/objstore"
 	"github.com/cocola-project/cocola/packages/go-common/logger"
 	"github.com/cocola-project/cocola/packages/go-common/metrics"
@@ -43,6 +47,10 @@ type API struct {
 	// MinIO is configured). inlineMaxBytes is the small/large split threshold.
 	store          objstore.Store
 	inlineMaxBytes int64
+	// convo is the conversation-persistence store (route A UI-message mirror).
+	// nil => persistence is dark: chat still streams, but nothing is stored and
+	// the list/messages endpoints return empty. Enabled by COCOLA_PG_DSN in main.
+	convo convo.Store
 }
 
 // New builds the BFF API.
@@ -70,6 +78,12 @@ func (a *API) WithObjStore(store objstore.Store, inlineMaxBytes int64) *API {
 	return a
 }
 
+// WithConvoStore enables conversation persistence (route A): the chat handler
+// mirrors each turn's rendered messages into the store, and the read endpoints
+// serve a user's conversation list + history. Passing nil (the default) leaves
+// persistence dark. See docs/plan/conversation-persistence-history-rendering.md.
+func (a *API) WithConvoStore(store convo.Store) *API { a.convo = store; return a }
+
 // instrument wraps a handler with the RED middleware under a fixed route label,
 // or returns it unchanged when metrics are disabled.
 func (a *API) instrument(route string, h http.Handler) http.Handler {
@@ -89,6 +103,12 @@ func (a *API) Handler() http.Handler {
 	// the whole chain so latency includes auth.
 	mux.Handle("POST /v1/chat", a.instrument("POST /v1/chat",
 		a.verifier.Middleware(writeErr)(http.HandlerFunc(a.chat))))
+	// Conversation history (route A). Both are auth-guarded so a caller only ever
+	// sees their own conversations (ownership from the verified identity).
+	mux.Handle("GET /v1/conversations", a.instrument("GET /v1/conversations",
+		a.verifier.Middleware(writeErr)(http.HandlerFunc(a.listConversations))))
+	mux.Handle("GET /v1/conversations/{id}/messages", a.instrument("GET /v1/conversations/{id}/messages",
+		a.verifier.Middleware(writeErr)(http.HandlerFunc(a.conversationMessages))))
 	// Tracing: wrap the whole mux so an inbound W3C traceparent is extracted and
 	// a server span is started before auth/handlers run; the span context then
 	// flows into the agent gRPC call (client stats handler) for an end-to-end
@@ -200,7 +220,26 @@ func (a *API) chat(w http.ResponseWriter, r *http.Request) {
 		Attachments: atts,
 	}
 
+	// Persist the user turn (route A UI-message mirror). All persistence is a
+	// best-effort SIDE CHANNEL: any store error is logged and swallowed so it can
+	// never break the SSE stream the user is watching. Requires a session_id to
+	// key the conversation; if empty (dev/no-frontend), we skip persistence.
+	persist := a.convo != nil && req.SessionID != ""
+	if persist {
+		a.persistUserTurn(r.Context(), id, req)
+	}
+
+	// reducer mirrors the frontend's reducePart so the stored assistant message
+	// has the exact parts the browser renders. Only populated when persisting.
+	var reducer *convo.Reducer
+	if persist {
+		reducer = convo.NewReducer()
+	}
+
 	err := a.streamer.Stream(r.Context(), q, func(ev agent.Event) error {
+		if reducer != nil {
+			reducer.Apply(ev.Kind, ev.Data)
+		}
 		return writeSSE(w, flusher, ev)
 	})
 	if err != nil {
@@ -208,6 +247,131 @@ func (a *API) chat(w http.ResponseWriter, r *http.Request) {
 		_ = writeSSE(w, flusher, agent.Event{Kind: "error", Data: map[string]string{"error": err.Error()}})
 		a.log.Warn("agent stream ended with error: " + err.Error())
 	}
+
+	// Persist the assistant turn with whatever was aggregated (even a partial
+	// stream on error/abort is worth keeping so the history renders). Use a
+	// background context so a client disconnect (r.Context() cancelled) does not
+	// abort the write.
+	if persist {
+		a.persistAssistantTurn(context.Background(), req.SessionID, reducer.Parts())
+	}
+}
+
+// persistUserTurn upserts the conversation (title = truncated first prompt, set
+// once) and appends the user message. Best-effort: errors are logged only.
+func (a *API) persistUserTurn(ctx context.Context, id auth.Identity, req chatRequest) {
+	now := time.Now().UTC()
+	if err := a.convo.UpsertConversation(ctx, convo.Conversation{
+		ID:        req.SessionID,
+		UserID:    id.UserID,
+		TenantID:  id.TenantID,
+		Title:     titleFromPrompt(req.Prompt),
+		CreatedAt: now,
+		UpdatedAt: now,
+	}); err != nil {
+		a.log.Warn("persist conversation failed: " + err.Error())
+		return
+	}
+	if err := a.convo.InsertMessage(ctx, convo.Message{
+		ID:             uuid.NewString(),
+		ConversationID: req.SessionID,
+		Role:           "user",
+		Parts:          []convo.Part{{Type: convo.PartText, Text: req.Prompt}},
+		CreatedAt:      now,
+	}); err != nil {
+		a.log.Warn("persist user message failed: " + err.Error())
+	}
+}
+
+// persistAssistantTurn appends the aggregated assistant message and refreshes
+// the conversation's updated_at so it floats to the top of the sidebar. Skips a
+// truly empty turn (no parts) to avoid storing blank rows. Best-effort.
+func (a *API) persistAssistantTurn(ctx context.Context, sessionID string, parts []convo.Part) {
+	if len(parts) == 0 {
+		return
+	}
+	now := time.Now().UTC()
+	if err := a.convo.InsertMessage(ctx, convo.Message{
+		ID:             uuid.NewString(),
+		ConversationID: sessionID,
+		Role:           "assistant",
+		Parts:          parts,
+		CreatedAt:      now,
+	}); err != nil {
+		a.log.Warn("persist assistant message failed: " + err.Error())
+		return
+	}
+	// Refresh updated_at (UpsertConversation on an existing id updates only that).
+	if err := a.convo.UpsertConversation(ctx, convo.Conversation{ID: sessionID, UpdatedAt: now}); err != nil {
+		a.log.Warn("refresh conversation updated_at failed: " + err.Error())
+	}
+}
+
+// titleFromPrompt derives the MVP conversation title: the first line of the
+// prompt, trimmed and truncated to a display-friendly length (rune-safe).
+func titleFromPrompt(prompt string) string {
+	title := strings.TrimSpace(prompt)
+	if i := strings.IndexAny(title, "\r\n"); i >= 0 {
+		title = strings.TrimSpace(title[:i])
+	}
+	const maxRunes = 60
+	r := []rune(title)
+	if len(r) > maxRunes {
+		title = strings.TrimSpace(string(r[:maxRunes])) + "\u2026"
+	}
+	return title
+}
+
+// listConversations serves the sidebar: the caller's conversations, newest
+// first. When persistence is disabled it returns an empty list (never 500).
+func (a *API) listConversations(w http.ResponseWriter, r *http.Request) {
+	id, ok := auth.IdentityOf(r)
+	if !ok {
+		writeErr(w, http.StatusUnauthorized, "UNAUTHENTICATED", "missing identity")
+		return
+	}
+	if a.convo == nil {
+		writeJSON(w, http.StatusOK, []convo.Conversation{})
+		return
+	}
+	convs, err := a.convo.ListConversations(r.Context(), id.UserID)
+	if err != nil {
+		a.log.Warn("list conversations failed: " + err.Error())
+		writeErr(w, http.StatusInternalServerError, "INTERNAL", "could not list conversations")
+		return
+	}
+	writeJSON(w, http.StatusOK, convs)
+}
+
+// conversationMessages serves one conversation's history, but only if the
+// verified caller owns it (ownership miss => 404, no cross-user existence
+// oracle). Empty list when persistence is disabled.
+func (a *API) conversationMessages(w http.ResponseWriter, r *http.Request) {
+	id, ok := auth.IdentityOf(r)
+	if !ok {
+		writeErr(w, http.StatusUnauthorized, "UNAUTHENTICATED", "missing identity")
+		return
+	}
+	convID := r.PathValue("id")
+	if convID == "" {
+		writeErr(w, http.StatusBadRequest, "INVALID_ARGUMENT", "conversation id is required")
+		return
+	}
+	if a.convo == nil {
+		writeJSON(w, http.StatusOK, []convo.Message{})
+		return
+	}
+	msgs, err := a.convo.GetMessages(r.Context(), convID, id.UserID)
+	if err != nil {
+		if errors.Is(err, convo.ErrNotFound) {
+			writeErr(w, http.StatusNotFound, "NOT_FOUND", "conversation not found")
+			return
+		}
+		a.log.Warn("get conversation messages failed: " + err.Error())
+		writeErr(w, http.StatusInternalServerError, "INTERNAL", "could not load conversation")
+		return
+	}
+	writeJSON(w, http.StatusOK, msgs)
 }
 
 // writeSSE serializes one event as an SSE frame: "event: <kind>\ndata: <json>\n\n".

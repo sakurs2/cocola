@@ -13,6 +13,8 @@
 //	COCOLA_AUTH_ALLOW_ANON  "1" to accept blank tokens as dev-user (dev only)
 //	COCOLA_METRICS_ADDR     observability listen address; empty => disabled
 //	                        (default :9091, serving /metrics and /healthz)
+//	COCOLA_PG_DSN           Postgres DSN; enables conversation persistence
+//	                        (sidebar list + history). Unset => persistence dark.
 //
 // Attachment object storage (ADR-0017 P1a); unset endpoint/bucket => inline-only:
 //
@@ -32,6 +34,7 @@ import (
 
 	"github.com/cocola-project/cocola/apps/gateway/internal/agent"
 	"github.com/cocola-project/cocola/apps/gateway/internal/auth"
+	"github.com/cocola-project/cocola/apps/gateway/internal/convo"
 	"github.com/cocola-project/cocola/apps/gateway/internal/httpapi"
 	"github.com/cocola-project/cocola/apps/gateway/internal/objstore"
 	"github.com/cocola-project/cocola/packages/go-common/config"
@@ -102,6 +105,23 @@ func main() {
 				", inline<=" + strconv.FormatInt(threshold, 10) + "B)")
 		}
 	}
+	// Conversation persistence (route A UI-message mirror). Wired only when
+	// COCOLA_PG_DSN is set; otherwise persistence stays dark (chat still streams,
+	// the list/history endpoints return empty). We run migrations here too so a
+	// gateway+PG boot is self-sufficient; goose is idempotent and coexists with
+	// admin-api applying the same embedded schema.
+	if dsn := os.Getenv("COCOLA_PG_DSN"); dsn != "" {
+		if err := convo.Migrate(context.Background(), dsn); err != nil {
+			log.Warn("conversation persistence disabled (migrate failed): " + err.Error())
+		} else if cs, cerr := convo.NewPostgres(context.Background(), dsn); cerr != nil {
+			log.Warn("conversation persistence disabled (connect failed): " + cerr.Error())
+		} else {
+			api = api.WithConvoStore(cs)
+			defer cs.Close()
+			log.Info("conversation persistence enabled (postgres)")
+		}
+	}
+
 	if metricsAddr := env("COCOLA_METRICS_ADDR", ":9091"); metricsAddr != "" {
 		go func() {
 			log.Info("cocola gateway metrics on " + metricsAddr + " (/metrics, /healthz)")

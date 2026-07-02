@@ -1,0 +1,78 @@
+package convo
+
+import (
+	"context"
+	"sort"
+	"sync"
+)
+
+// Memory is the in-process Store used for tests and zero-dependency dev boots
+// (no COCOLA_PG_DSN). Value semantics: returned slices are freshly built so
+// callers cannot mutate shared state. Not durable — data is lost on restart.
+type Memory struct {
+	mu    sync.RWMutex
+	convs map[string]Conversation
+	msgs  map[string][]Message // conversation_id -> messages (append order)
+}
+
+var _ Store = (*Memory)(nil)
+
+// NewMemory returns an empty in-memory store.
+func NewMemory() *Memory {
+	return &Memory{
+		convs: make(map[string]Conversation),
+		msgs:  make(map[string][]Message),
+	}
+}
+
+func (m *Memory) UpsertConversation(_ context.Context, c Conversation) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if existing, ok := m.convs[c.ID]; ok {
+		// Refresh updated_at only; keep the original title (MVP: never overwrite).
+		existing.UpdatedAt = c.UpdatedAt
+		m.convs[c.ID] = existing
+		return nil
+	}
+	m.convs[c.ID] = c
+	return nil
+}
+
+func (m *Memory) InsertMessage(_ context.Context, msg Message) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.msgs[msg.ConversationID] = append(m.msgs[msg.ConversationID], msg)
+	return nil
+}
+
+func (m *Memory) ListConversations(_ context.Context, userID string) ([]Conversation, error) {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	out := make([]Conversation, 0)
+	for _, c := range m.convs {
+		if c.UserID == userID {
+			out = append(out, c)
+		}
+	}
+	// Most-recently-updated first; ties broken by id for determinism.
+	sort.Slice(out, func(i, j int) bool {
+		if out[i].UpdatedAt.Equal(out[j].UpdatedAt) {
+			return out[i].ID > out[j].ID
+		}
+		return out[i].UpdatedAt.After(out[j].UpdatedAt)
+	})
+	return out, nil
+}
+
+func (m *Memory) GetMessages(_ context.Context, convID, userID string) ([]Message, error) {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	c, ok := m.convs[convID]
+	if !ok || c.UserID != userID {
+		return nil, ErrNotFound
+	}
+	src := m.msgs[convID]
+	out := make([]Message, len(src))
+	copy(out, src)
+	return out, nil
+}

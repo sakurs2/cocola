@@ -1,0 +1,138 @@
+package httpapi
+
+import (
+	"context"
+	"encoding/json"
+	"net/http"
+	"net/http/httptest"
+	"strings"
+	"testing"
+
+	"github.com/cocola-project/cocola/apps/gateway/internal/agent"
+	"github.com/cocola-project/cocola/apps/gateway/internal/auth"
+	"github.com/cocola-project/cocola/apps/gateway/internal/convo"
+	"github.com/cocola-project/cocola/packages/go-common/logger"
+)
+
+// newAPIWithConvo builds a handler with persistence enabled (Memory store) so
+// we can assert both the write side (chat mirrors the turn) and the read side
+// (list/messages). Auth disabled => DevIdentity is the owner.
+func newAPIWithConvo(t *testing.T, fs *fakeStreamer, cs convo.Store) http.Handler {
+	t.Helper()
+	v := auth.NewVerifier(auth.Config{})
+	return New(fs, v, logger.Must()).WithConvoStore(cs).Handler()
+}
+
+// TestChatPersistsTurn: a chat with a session_id mirrors the user prompt and the
+// aggregated assistant reply into the store; the conversation then lists and its
+// messages read back with the right shape.
+func TestChatPersistsTurn(t *testing.T) {
+	fs := &fakeStreamer{script: []agent.Event{
+		{Kind: "text", Data: map[string]string{"text": "hel"}},
+		{Kind: "text", Data: map[string]string{"text": "lo"}},
+		{Kind: "tool_use", Data: map[string]string{"id": "t1", "name": "bash", "input": "{}"}},
+		{Kind: "tool_result", Data: map[string]string{"tool_use_id": "t1", "content": "done"}},
+		{Kind: "done", Data: map[string]string{"reason": "stop"}},
+	}}
+	cs := convo.NewMemory()
+	h := newAPIWithConvo(t, fs, cs)
+
+	// Fire the chat.
+	rec := httptest.NewRecorder()
+	h.ServeHTTP(rec, httptest.NewRequest("POST", "/v1/chat",
+		strings.NewReader(`{"prompt":"first question\nsecond line","session_id":"conv-1"}`)))
+	if rec.Code != http.StatusOK {
+		t.Fatalf("chat status = %d", rec.Code)
+	}
+
+	// List: one conversation, title = truncated first line.
+	rec = httptest.NewRecorder()
+	h.ServeHTTP(rec, httptest.NewRequest("GET", "/v1/conversations", nil))
+	if rec.Code != http.StatusOK {
+		t.Fatalf("list status = %d", rec.Code)
+	}
+	var convs []convo.Conversation
+	mustJSON(t, rec.Body.Bytes(), &convs)
+	if len(convs) != 1 || convs[0].ID != "conv-1" {
+		t.Fatalf("bad list: %+v", convs)
+	}
+	if convs[0].Title != "first question" {
+		t.Fatalf("title should be first line only, got %q", convs[0].Title)
+	}
+
+	// Messages: [user, assistant]; assistant has coalesced text + paired tool-call.
+	rec = httptest.NewRecorder()
+	h.ServeHTTP(rec, httptest.NewRequest("GET", "/v1/conversations/conv-1/messages", nil))
+	if rec.Code != http.StatusOK {
+		t.Fatalf("messages status = %d", rec.Code)
+	}
+	var msgs []convo.Message
+	mustJSON(t, rec.Body.Bytes(), &msgs)
+	if len(msgs) != 2 || msgs[0].Role != "user" || msgs[1].Role != "assistant" {
+		t.Fatalf("bad messages: %+v", msgs)
+	}
+	ap := msgs[1].Parts
+	if len(ap) != 2 || ap[0].Type != convo.PartText || ap[0].Text != "hello" {
+		t.Fatalf("assistant text not coalesced: %+v", ap)
+	}
+	if ap[1].Type != convo.PartToolCall || ap[1].Result == nil || *ap[1].Result != "done" {
+		t.Fatalf("assistant tool-call not paired: %+v", ap)
+	}
+}
+
+// TestChatWithoutSessionIDSkipsPersistence: no session_id => nothing stored, but
+// the stream still succeeds.
+func TestChatWithoutSessionIDSkipsPersistence(t *testing.T) {
+	cs := convo.NewMemory()
+	h := newAPIWithConvo(t, &fakeStreamer{script: []agent.Event{{Kind: "done"}}}, cs)
+	rec := httptest.NewRecorder()
+	h.ServeHTTP(rec, httptest.NewRequest("POST", "/v1/chat", strings.NewReader(`{"prompt":"hi"}`)))
+	if rec.Code != http.StatusOK {
+		t.Fatalf("chat status = %d", rec.Code)
+	}
+	got, _ := cs.ListConversations(context.Background(), "dev-user")
+	if len(got) != 0 {
+		t.Fatalf("expected no conversations without session_id, got %d", len(got))
+	}
+}
+
+// TestConversationsEndpointsWithoutStore: with persistence disabled, both read
+// endpoints return an empty list and never 500.
+func TestConversationsEndpointsWithoutStore(t *testing.T) {
+	v := auth.NewVerifier(auth.Config{})
+	h := New(&fakeStreamer{}, v, logger.Must()).Handler()
+
+	rec := httptest.NewRecorder()
+	h.ServeHTTP(rec, httptest.NewRequest("GET", "/v1/conversations", nil))
+	if rec.Code != http.StatusOK || strings.TrimSpace(rec.Body.String()) != "[]" {
+		t.Fatalf("want empty list, got %d %q", rec.Code, rec.Body.String())
+	}
+
+	rec = httptest.NewRecorder()
+	h.ServeHTTP(rec, httptest.NewRequest("GET", "/v1/conversations/whatever/messages", nil))
+	if rec.Code != http.StatusOK || strings.TrimSpace(rec.Body.String()) != "[]" {
+		t.Fatalf("want empty messages, got %d %q", rec.Code, rec.Body.String())
+	}
+}
+
+// TestConversationMessagesOwnershipMiss: a conversation owned by someone else
+// (or missing) returns 404, never leaks another user's history.
+func TestConversationMessagesOwnershipMiss(t *testing.T) {
+	cs := convo.NewMemory()
+	// Seed a conversation owned by a DIFFERENT user.
+	_ = cs.UpsertConversation(context.Background(), convo.Conversation{ID: "other", UserID: "someone-else"})
+	h := newAPIWithConvo(t, &fakeStreamer{}, cs)
+
+	rec := httptest.NewRecorder()
+	h.ServeHTTP(rec, httptest.NewRequest("GET", "/v1/conversations/other/messages", nil))
+	if rec.Code != http.StatusNotFound {
+		t.Fatalf("ownership miss should be 404, got %d", rec.Code)
+	}
+}
+
+func mustJSON(t *testing.T, b []byte, v any) {
+	t.Helper()
+	if err := json.Unmarshal(b, v); err != nil {
+		t.Fatalf("unmarshal: %v (body=%s)", err, string(b))
+	}
+}

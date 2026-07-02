@@ -22,6 +22,7 @@ import {
   createContext,
   useCallback,
   useContext,
+  useEffect,
   useMemo,
   useRef,
   useState,
@@ -56,6 +57,23 @@ export type SandboxInfo = {
   reused: boolean;
 };
 
+// One row in the sidebar conversation list (gateway GET /v1/conversations).
+export type ConversationSummary = {
+  id: string;
+  title: string;
+  updated_at: string;
+};
+
+// Wire shape of a persisted message (gateway GET /v1/conversations/{id}/messages).
+// Parts mirror UiPart exactly (that is the whole point of route A), so mapping
+// back into local state is a near-identity.
+type WireMessage = {
+  id: string;
+  role: "user" | "assistant";
+  parts: UiPart[];
+  created_at: string;
+};
+
 // ---- Session shell context (token / session_id / sandbox banner) -----------
 
 type CocolaContextValue = {
@@ -69,6 +87,13 @@ type CocolaContextValue = {
   // resume entry in the backend session_map, so Route A's claude CLI starts
   // from zero — this is the boundary that severs prior-turn history.
   newConversation: () => void;
+  // Persisted conversation list (sidebar) + loaders. conversations is refreshed
+  // after each turn and on mount; loadConversation replays a stored conversation
+  // into the thread and points session_id at it so follow-ups continue it.
+  conversations: ConversationSummary[];
+  refreshConversations: () => void;
+  loadConversation: (id: string) => Promise<void>;
+  activeConversationId: string;
 };
 
 const CocolaContext = createContext<CocolaContextValue | null>(null);
@@ -193,7 +218,11 @@ export function CocolaRuntimeProvider({ children }: { children: ReactNode }) {
   // context bleed once the session_map is durable, and no way to start over).
   const [sessionId, setSessionId] = useState(genId);
   const [sandbox, setSandbox] = useState<SandboxInfo | null>(null);
+  const [conversations, setConversations] = useState<ConversationSummary[]>([]);
   const abortRef = useRef<AbortController | null>(null);
+  // token in a ref so fetch helpers can read the latest without being deps.
+  const tokenRef = useRef(token);
+  tokenRef.current = token;
 
   const applyEvent = useCallback((assistantId: string, ev: AgentEvent) => {
     if (ev.kind === "sandbox") {
@@ -208,6 +237,24 @@ export function CocolaRuntimeProvider({ children }: { children: ReactNode }) {
     setMessages((prev) =>
       prev.map((m) => (m.id === assistantId ? { ...m, parts: reducePart(m.parts, ev) } : m)),
     );
+  }, []);
+
+  // Pull the sidebar conversation list from the gateway (scoped server-side to
+  // the verified identity). Best-effort: a failure just leaves the list as-is.
+  const refreshConversations = useCallback(() => {
+    const t = tokenRef.current;
+    void (async () => {
+      try {
+        const res = await fetch("/api/conversations", {
+          headers: { ...(t ? { authorization: `Bearer ${t}` } : {}) },
+        });
+        if (!res.ok) return;
+        const rows = (await res.json()) as ConversationSummary[];
+        if (Array.isArray(rows)) setConversations(rows);
+      } catch {
+        // ignore — sidebar list is non-critical
+      }
+    })();
   }, []);
 
   const onNew = useCallback(
@@ -286,14 +333,45 @@ export function CocolaRuntimeProvider({ children }: { children: ReactNode }) {
       } finally {
         setIsRunning(false);
         abortRef.current = null;
+        // The turn just persisted server-side (new conversation and/or a new
+        // title / updated_at). Refresh the sidebar so it surfaces.
+        refreshConversations();
       }
     },
-    [token, sessionId, applyEvent],
+    [token, sessionId, applyEvent, refreshConversations],
   );
 
   const onCancel = useCallback(async () => {
     abortRef.current?.abort();
     setIsRunning(false);
+  }, []);
+
+  // Replay a stored conversation into the thread: fetch its messages, map them
+  // back into local state, and point session_id at it so a follow-up turn
+  // continues the SAME conversation (and lets the backend --resume it).
+  const loadConversation = useCallback(async (id: string) => {
+    abortRef.current?.abort();
+    abortRef.current = null;
+    setIsRunning(false);
+    const t = tokenRef.current;
+    try {
+      const res = await fetch(`/api/conversations/${encodeURIComponent(id)}/messages`, {
+        headers: { ...(t ? { authorization: `Bearer ${t}` } : {}) },
+      });
+      if (!res.ok) return;
+      const rows = (await res.json()) as WireMessage[];
+      const loaded: UiMessage[] = (Array.isArray(rows) ? rows : []).map((m) => ({
+        id: m.id,
+        role: m.role,
+        parts: m.parts ?? [],
+        createdAt: m.created_at ? new Date(m.created_at).getTime() : Date.now(),
+      }));
+      setMessages(loaded);
+      setSandbox(null);
+      setSessionId(id);
+    } catch {
+      // ignore — leave the current thread untouched on failure
+    }
   }, []);
 
   // Start a fresh conversation. Aborts any in-flight stream, clears the local
@@ -308,6 +386,11 @@ export function CocolaRuntimeProvider({ children }: { children: ReactNode }) {
     setSessionId(genId());
   }, []);
 
+  // Initial + token-change load of the sidebar list.
+  useEffect(() => {
+    refreshConversations();
+  }, [refreshConversations, token]);
+
   const runtime = useExternalStoreRuntime<UiMessage>({
     messages,
     isRunning,
@@ -320,8 +403,19 @@ export function CocolaRuntimeProvider({ children }: { children: ReactNode }) {
   });
 
   const ctx = useMemo<CocolaContextValue>(
-    () => ({ token, setToken, sessionId, setSessionId, sandbox, newConversation }),
-    [token, sessionId, sandbox, newConversation],
+    () => ({
+      token,
+      setToken,
+      sessionId,
+      setSessionId,
+      sandbox,
+      newConversation,
+      conversations,
+      refreshConversations,
+      loadConversation,
+      activeConversationId: sessionId,
+    }),
+    [token, sessionId, sandbox, newConversation, conversations, refreshConversations, loadConversation],
   );
 
   return (
