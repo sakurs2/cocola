@@ -64,6 +64,11 @@ type CocolaContextValue = {
   sessionId: string;
   setSessionId: (v: string) => void;
   sandbox: SandboxInfo | null;
+  // Reset to a fresh conversation: clears messages + sandbox and rotates
+  // session_id to a NEW random id. A never-before-seen session_id has no
+  // resume entry in the backend session_map, so Route A's claude CLI starts
+  // from zero — this is the boundary that severs prior-turn history.
+  newConversation: () => void;
 };
 
 const CocolaContext = createContext<CocolaContextValue | null>(null);
@@ -183,7 +188,10 @@ export function CocolaRuntimeProvider({ children }: { children: ReactNode }) {
   const [messages, setMessages] = useState<UiMessage[]>([]);
   const [isRunning, setIsRunning] = useState(false);
   const [token, setToken] = useState("");
-  const [sessionId, setSessionId] = useState("s1");
+  // Lazy init: one random session_id per browser tab. NEVER a shared constant
+  // ("s1" made every client resume the SAME claude conversation — cross-user
+  // context bleed once the session_map is durable, and no way to start over).
+  const [sessionId, setSessionId] = useState(genId);
   const [sandbox, setSandbox] = useState<SandboxInfo | null>(null);
   const abortRef = useRef<AbortController | null>(null);
 
@@ -288,6 +296,18 @@ export function CocolaRuntimeProvider({ children }: { children: ReactNode }) {
     setIsRunning(false);
   }, []);
 
+  // Start a fresh conversation. Aborts any in-flight stream, clears the local
+  // message state and sandbox banner, and rotates session_id to a new random
+  // id so the backend cannot --resume the previous claude session.
+  const newConversation = useCallback(() => {
+    abortRef.current?.abort();
+    abortRef.current = null;
+    setIsRunning(false);
+    setMessages([]);
+    setSandbox(null);
+    setSessionId(genId());
+  }, []);
+
   const runtime = useExternalStoreRuntime<UiMessage>({
     messages,
     isRunning,
@@ -300,8 +320,8 @@ export function CocolaRuntimeProvider({ children }: { children: ReactNode }) {
   });
 
   const ctx = useMemo<CocolaContextValue>(
-    () => ({ token, setToken, sessionId, setSessionId, sandbox }),
-    [token, sessionId, sandbox],
+    () => ({ token, setToken, sessionId, setSessionId, sandbox, newConversation }),
+    [token, sessionId, sandbox, newConversation],
   );
 
   return (

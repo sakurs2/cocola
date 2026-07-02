@@ -12,6 +12,7 @@ import {
   LayoutGrid,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { useCocola } from "@/app/runtime-provider";
 
 // Static, dependency-light sidebar mirroring the Open WebUI chrome (New Chat /
 // Search / Notes / Workspace + Channels / Folders / Chats). Deliberately NOT
@@ -23,8 +24,9 @@ import { cn } from "@/lib/utils";
 
 type NavItem = { icon: typeof Plus; label: string };
 
+// "New Chat" is wired to the runtime (rotates session_id + clears messages);
+// the rest stay decorative until multi-thread persistence lands.
 const PRIMARY_NAV: NavItem[] = [
-  { icon: Plus, label: "New Chat" },
   { icon: Search, label: "Search" },
   { icon: NotebookPen, label: "Notes" },
   { icon: LayoutGrid, label: "Workspace" },
@@ -41,6 +43,7 @@ const CHATS_TODAY = ["Roman Concrete Durability"];
 
 export function AppSidebar() {
   const [collapsed, setCollapsed] = useState(false);
+  const { newConversation } = useCocola();
 
   return (
     <aside
@@ -73,6 +76,10 @@ export function AppSidebar() {
       <nav className="flex-1 overflow-y-auto px-2 pb-2">
         {/* Primary actions */}
         <div className="flex flex-col gap-0.5">
+          <SidebarButton collapsed={collapsed} title="New Chat" onClick={newConversation}>
+            <Plus className="size-4 shrink-0" />
+            {!collapsed && <span className="truncate">New Chat</span>}
+          </SidebarButton>
           {PRIMARY_NAV.map(({ icon: Icon, label }) => (
             <SidebarButton key={label} collapsed={collapsed} title={label}>
               <Icon className="size-4 shrink-0" />
@@ -136,15 +143,18 @@ function SidebarButton({
   children,
   collapsed,
   title,
+  onClick,
 }: {
   children: React.ReactNode;
   collapsed: boolean;
   title: string;
+  onClick?: () => void;
 }) {
   return (
     <button
       type="button"
       title={title}
+      onClick={onClick}
       className={cn(
         "flex h-8 items-center gap-2 rounded-md px-2.5 text-sm text-sidebar-foreground/90 transition-colors hover:bg-sidebar-accent hover:text-sidebar-accent-foreground",
         collapsed && "justify-center px-0",
