@@ -31,6 +31,9 @@
 #   bash scripts/run-stack.sh            # echo stack: agent-runtime + gateway
 #   bash scripts/run-stack.sh --with-web # + browser test tool on :3000
 #   bash scripts/run-stack.sh --all      # + llm-gateway (real SDK path) + web
+#   bash scripts/run-stack.sh --hybrid   # REAL Route A: containerized backends
+#                                        # (sandbox-manager/llm-gateway/...) +
+#                                        # NATIVE app -- no image rebuild on edits
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
@@ -38,10 +41,12 @@ cd "$ROOT"
 
 WITH_LLM=0
 WITH_WEB=0
+HYBRID=0
 for arg in "$@"; do
   case "$arg" in
     --with-llm) WITH_LLM=1 ;;
     --with-web) WITH_WEB=1 ;;
+    --hybrid)   HYBRID=1 ;;
     --all)      WITH_LLM=1; WITH_WEB=1 ;;
     -h|--help)
       grep '^#' "$0" | sed 's/^# \{0,1\}//'
@@ -202,6 +207,96 @@ else
   set -m
 fi
 
+# ----------------------------------------------------------------- hybrid mode
+# --hybrid bridges the two dev tiers: the DATA/CONTROL backends run CONTAINERIZED
+# (a docker-compose.full.yml subset) while the APP processes you iterate on --
+# agent-runtime + gateway (+ web) -- run NATIVELY below. You get a REAL Route A
+# (real sandbox-manager + real llm-gateway/model) with ZERO image rebuilds on
+# each code change: edit, Ctrl-C, `make up-hybrid` again -- the idempotent
+# `up -d` leaves the warm backends untouched and only your native app relaunches.
+#
+# Wiring (native app -> containerized backend, over host-published ports):
+#   agent-runtime -> sandbox-manager  127.0.0.1:50051  (COCOLA_SANDBOX_ADDR)
+#                 -> admin-api        127.0.0.1:8092   (COCOLA_ADMIN_BASE_URL)
+#                 -> postgres         127.0.0.1:5432   (COCOLA_PG_DSN)
+#                 -> minio            127.0.0.1:9000   (COCOLA_MINIO_*)
+#   sandbox brain -> llm-gateway  host.docker.internal:18091  (injected into the
+#                    sandbox at creation; sandboxes are DooD siblings on the host
+#                    daemon, so they reach the gateway over the host bridge)
+# Backends are NOT torn down on Ctrl-C (that is the point -- fast inner loop);
+# stop them with `bash scripts/start.sh --stop` / `--down` (same `cocola` project).
+hybrid_up() {
+  command -v docker >/dev/null 2>&1 || { echo "!! --hybrid needs docker; is Docker Desktop running?" >&2; exit 1; }
+  docker info >/dev/null 2>&1 || { echo "!! docker daemon unreachable; start Docker Desktop first." >&2; exit 1; }
+
+  local full="deploy/docker-compose/docker-compose.full.yml"
+  local env_args=()
+  if [[ -f "$ROOT/.env" ]]; then
+    env_args=(--env-file "$ROOT/.env")
+  else
+    echo "==> [hybrid] no .env; llm-gateway will use the fake provider (echo). Add .env for a real model."
+  fi
+
+  # Optional standalone OpenSandbox server (host :8090) when the backend is
+  # opensandbox (env wins over .env; default docker/DooD needs no server).
+  local provider="${COCOLA_SANDBOX_PROVIDER:-}"
+  if [[ -z "$provider" && -f "$ROOT/.env" ]]; then
+    provider="$(grep -E '^COCOLA_SANDBOX_PROVIDER=' "$ROOT/.env" | tail -1 | cut -d= -f2-)"
+  fi
+  provider="${provider:-docker}"
+  if [[ "$provider" == "opensandbox" ]]; then
+    local osb_port="${COCOLA_OPENSANDBOX_HOST_PORT:-8090}"
+    echo "==> [hybrid] bringing up OpenSandbox server (host :$osb_port)"
+    COCOLA_OPENSANDBOX_HOST_PORT="$osb_port" \
+      docker compose -f deploy/docker-compose/docker-compose.opensandbox.yml up -d \
+        >"$(log_redirect hybrid-opensandbox)" 2>&1 || true
+    for ((i=0; i<60; i++)); do
+      curl -fsS -m 3 "http://127.0.0.1:$osb_port/health" >/dev/null 2>&1 && break
+      sleep 2
+    done
+  fi
+
+  echo "==> [hybrid] starting containerized backends (redis/postgres/minio/sandbox-manager/llm-gateway/admin-api)"
+  echo "    (first run builds the backend images if missing; app code stays native -- no rebuild on edits)"
+  docker compose -f "$full" "${env_args[@]}" up -d \
+      redis postgres minio minio-init sandbox-manager llm-gateway admin-api \
+      >"$(log_redirect hybrid-backends)" 2>&1 \
+    || { echo "!! [hybrid] backend bring-up failed; see .run-logs/hybrid-backends.log" >&2; exit 1; }
+
+  local llm_host_port="${COCOLA_LLM_HOST_PORT:-18091}"
+  local admin_host_port="${COCOLA_ADMIN_HOST_PORT:-8092}"
+  wait_port 127.0.0.1 6379               "redis"           120
+  wait_port 127.0.0.1 5432               "postgres"        120
+  wait_port 127.0.0.1 9000               "minio"           120
+  wait_port 127.0.0.1 50051              "sandbox-manager" 120
+  wait_port 127.0.0.1 "$llm_host_port"   "llm-gateway"     120
+  wait_port 127.0.0.1 "$admin_host_port" "admin-api"       120
+
+  # Point the NATIVE app processes (launched below) at the containerized backends.
+  # host-published ports; existing env always wins so a one-off override sticks.
+  export COCOLA_SANDBOX_ADDR="${COCOLA_SANDBOX_ADDR:-127.0.0.1:50051}"
+  export COCOLA_SANDBOX_IMAGE="${COCOLA_SANDBOX_IMAGE:-cocola/sandbox-runtime:dev}"
+  export COCOLA_SANDBOX_LLM_BASE_URL="${COCOLA_SANDBOX_LLM_BASE_URL:-http://host.docker.internal:$llm_host_port}"
+  export COCOLA_SANDBOX_LLM_TOKEN="${COCOLA_SANDBOX_LLM_TOKEN:-cocola-local}"
+  export COCOLA_SANDBOX_MODEL_ALIAS="${COCOLA_SANDBOX_MODEL_ALIAS:-cocola-default}"
+  export COCOLA_ADMIN_BASE_URL="${COCOLA_ADMIN_BASE_URL:-http://127.0.0.1:$admin_host_port}"
+  export COCOLA_PG_DSN="${COCOLA_PG_DSN:-postgres://cocola:cocola_dev_pw@127.0.0.1:5432/cocola?sslmode=disable}"
+  export COCOLA_MINIO_ENDPOINT="${COCOLA_MINIO_ENDPOINT:-127.0.0.1:9000}"
+  export COCOLA_MINIO_ACCESS_KEY="${COCOLA_MINIO_ACCESS_KEY:-cocola}"
+  export COCOLA_MINIO_SECRET_KEY="${COCOLA_MINIO_SECRET_KEY:-cocola_dev_pw}"
+  export COCOLA_MINIO_BUCKET="${COCOLA_MINIO_BUCKET:-cocola}"
+  export COCOLA_ATTACHMENT_INLINE_MAX_BYTES="${COCOLA_ATTACHMENT_INLINE_MAX_BYTES:-16777216}"
+  # Web-UI dev ergonomics: blank token -> dev-user (matches the full stack).
+  export COCOLA_AUTH_ALLOW_ANON="${COCOLA_AUTH_ALLOW_ANON:-1}"
+  # MinIO is already containerized above; skip run-stack's own dev.yml MinIO.
+  export COCOLA_SKIP_MINIO=1
+  echo "==> [hybrid] backends ready; launching native app against real Route A"
+}
+
+if [[ "$HYBRID" == "1" ]]; then
+  hybrid_up
+fi
+
 # ----------------------------------------------------------------- llm-gateway
 if [[ "$WITH_LLM" == "1" ]]; then
   free_port "$LLM_PORT" llm-gateway
@@ -311,6 +406,8 @@ echo " agent-rt  : $AGENT_ADDR (gRPC)"
 [[ "$WITH_LLM" == "1" && -z "${COCOLA_LLM_CONFIG:-}" ]] && echo " llm-up    : ${COCOLA_ANTHROPIC_BASE_URL:-${COCOLA_OPENAI_BASE_URL:-<provider default>}}"
 [[ "$WITH_WEB" == "1" ]] && echo " web       : http://127.0.0.1:$WEB_PORT  (paste the token below)"
 [[ -n "${MINIO_CONSOLE:-}" ]] && echo " minio     : ${MINIO_CONSOLE}  (console; cocola / cocola_dev_pw)"
+[[ "$HYBRID" == "1" ]] && echo " backends  : containerized (redis/pg/minio/sandbox-manager/llm-gw:${COCOLA_LLM_HOST_PORT:-18091}/admin-api); REAL Route A"
+[[ "$HYBRID" == "1" ]] && echo " stop bk   : bash scripts/start.sh --stop   (backends survive Ctrl-C; app relaunches with no rebuild)"
 echo "----------------------------------------------------------------------"
 echo " dev token : $TOKEN"
 echo "----------------------------------------------------------------------"

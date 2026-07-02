@@ -156,23 +156,32 @@ demo-minimal: ## M-minimal: fully containerised control plane + sandbox + persis
 	bash scripts/demo-minimal.sh
 
 # -------------------------------------------------------------------- dev stack
-# Local app stack. Two tiers, ONE route (Route A):
-#   make up      native, foreground: agent-runtime + gateway, EchoProvider
-#                (zero-config, no sandbox) -- fast inner-loop debugging.
-#   make up-web  ... + the Next.js browser test tool (:3000).
-#   make up-all  FULL containerized Route A stack via scripts/start.sh
-#                (docker-compose.full.yml: 9 services, real model). When
-#                .env sets COCOLA_SANDBOX_PROVIDER=opensandbox, start.sh also
-#                brings up the standalone OpenSandbox server (:8090) and tears
-#                it down together. Manage with `bash scripts/start.sh --down`.
-# up/up-web run in the foreground (Ctrl-C tears children down); up-all runs
-# detached containers (stop via start.sh --stop/--down).
-.PHONY: up up-web up-all
+# Local app stack. Three tiers, ONE route (Route A):
+#   make up        native, foreground: agent-runtime + gateway, EchoProvider
+#                  (zero-config, no sandbox) -- fastest inner loop, NO model.
+#   make up-web    ... + the Next.js browser test tool (:3000).
+#   make up-hybrid REAL Route A with NO image rebuild on edits: the backends
+#                  (sandbox-manager/llm-gateway/redis/pg/minio/admin-api) run
+#                  CONTAINERIZED (a full.yml subset), while the app you iterate
+#                  on (agent-runtime + gateway) runs NATIVE in the foreground.
+#                  Ctrl-C relaunches only the native app; warm backends survive.
+#                  Stop the backends with `bash scripts/start.sh --stop/--down`.
+#   make up-all    FULL containerized Route A stack via scripts/start.sh
+#                  (docker-compose.full.yml: 9 services, real model). When
+#                  .env sets COCOLA_SANDBOX_PROVIDER=opensandbox, start.sh also
+#                  brings up the standalone OpenSandbox server (:8090) and tears
+#                  it down together. Manage with `bash scripts/start.sh --down`.
+# up/up-web/up-hybrid run in the foreground (Ctrl-C tears the NATIVE children
+# down); up-all runs detached containers (stop via start.sh --stop/--down).
+.PHONY: up up-web up-hybrid up-all
 up: ## Boot local app stack: agent-runtime + gateway (Echo)
 	bash scripts/run-stack.sh
 
 up-web: ## ... + the Next.js browser test tool on :3000
 	bash scripts/run-stack.sh --with-web
+
+up-hybrid: ## REAL Route A: containerized backends + native app (no image rebuild on edits)
+	bash scripts/run-stack.sh --hybrid
 
 up-all: ## Full containerized Route A stack (start.sh + full.yml; OpenSandbox when .env selects it)
 	bash scripts/start.sh
