@@ -184,10 +184,11 @@ def _build_from_env() -> Registry:
                     "type": "anthropic",
                     "base_url": os.getenv("COCOLA_ANTHROPIC_BASE_URL", AnthropicConfig.base_url),
                     "api_key_env": "COCOLA_ANTHROPIC_API_KEY",
-                    # Default OFF: some relays have a broken SSE endpoint but a
-                    # working non-stream one (see anthropic.py). Set
-                    # COCOLA_ANTHROPIC_STREAM=1 to force true SSE streaming.
-                    "stream": _envflag("COCOLA_ANTHROPIC_STREAM"),
+                    # Default ON: upstream SSE streaming is the primary path
+                    # (verified healthy). Set COCOLA_ANTHROPIC_STREAM=0 to fall
+                    # back to non-stream + locally synthesized events if a relay's
+                    # SSE endpoint breaks again (see anthropic.py).
+                    "stream": _envflag("COCOLA_ANTHROPIC_STREAM", default=True),
                 }
             },
             "routes": {
@@ -286,5 +287,8 @@ def quota_policy_from_env() -> QuotaPolicy:
     )
 
 
-def _envflag(name: str) -> bool:
-    return os.getenv(name, "").strip().lower() in ("1", "true", "yes", "on")
+def _envflag(name: str, *, default: bool = False) -> bool:
+    raw = os.getenv(name, "").strip().lower()
+    if not raw:
+        return default
+    return raw in ("1", "true", "yes", "on")
