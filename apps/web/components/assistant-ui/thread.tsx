@@ -12,6 +12,7 @@ import {
 import {
   ArrowDownIcon,
   BrainCircuit,
+  ChevronDown,
   ChevronRight,
   CopyIcon,
   MessagesSquare,
@@ -136,27 +137,44 @@ const ThreadWelcome: FC = () => (
 );
 
 const Composer: FC = () => (
-  <ComposerPrimitive.Root className="flex w-full flex-col rounded-[1.5rem] border border-input bg-card px-3 py-1.5 shadow-sm transition-colors focus-within:border-ring">
+  <ComposerPrimitive.Root className="flex w-full flex-col rounded-[1.5rem] border border-input bg-card px-3 py-2 shadow-sm transition-colors focus-within:border-ring">
     <ComposerAttachments />
-    <div className="flex w-full items-end">
-      <ComposerPrimitive.AddAttachment asChild>
-        <TooltipIconButton
-          tooltip="Attach file"
-          variant="ghost"
-          className="my-1 size-8 shrink-0 rounded-full p-2 text-muted-foreground"
-        >
-          <PaperclipIcon className="h-4 w-4" />
-        </TooltipIconButton>
-      </ComposerPrimitive.AddAttachment>
-      <ComposerPrimitive.Input
-        rows={1}
-        autoFocus
-        placeholder="How can I help you today?"
-        className="max-h-40 flex-grow resize-none border-none bg-transparent px-2 py-3 text-sm outline-none placeholder:text-muted-foreground focus:ring-0 disabled:cursor-not-allowed"
-      />
+    <ComposerPrimitive.Input
+      rows={1}
+      autoFocus
+      placeholder="Send a message... (@ to mention, / for commands)"
+      className="max-h-40 min-h-12 flex-grow resize-none border-none bg-transparent px-2 py-3 text-sm outline-none placeholder:text-muted-foreground focus:ring-0 disabled:cursor-not-allowed"
+    />
+    <div className="flex w-full items-center justify-between gap-2">
+      <div className="flex min-w-0 items-center gap-1.5">
+        <ComposerPrimitive.AddAttachment asChild>
+          <TooltipIconButton
+            tooltip="Attach file"
+            variant="ghost"
+            className="size-8 shrink-0 rounded-full p-2 text-muted-foreground"
+          >
+            <PaperclipIcon className="size-4" />
+          </TooltipIconButton>
+        </ComposerPrimitive.AddAttachment>
+        <ModelPicker />
+      </div>
       <ComposerAction />
     </div>
   </ComposerPrimitive.Root>
+);
+
+const ModelPicker: FC = () => (
+  <button
+    type="button"
+    className="flex min-w-0 items-center gap-2 rounded-full px-2 py-1.5 text-sm font-medium text-foreground transition-colors hover:bg-muted focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+    aria-label="Select model"
+  >
+    <span className="flex size-5 shrink-0 items-center justify-center rounded-full border border-border bg-background">
+      <BrainCircuit className="size-3.5 text-muted-foreground" />
+    </span>
+    <span className="truncate">gpt-4.1-nano</span>
+    <ChevronDown className="size-4 shrink-0 text-muted-foreground" />
+  </button>
 );
 
 // Pending attachment chips shown inside the composer before send. Each chip
