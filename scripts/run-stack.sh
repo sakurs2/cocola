@@ -301,8 +301,9 @@ hybrid_up() {
   done
   if [[ -n "$_conflict" ]]; then
     echo "!! --hybrid runs cocola services NATIVELY, but a containerized stack still holds their ports:$_conflict" >&2
-    echo "   stop the full stack first, then re-run --hybrid:  make dev-down" >&2
-    echo "   (leave only the sandbox deps -- OpenSandbox server + redis/pg/minio -- to this mode)" >&2
+    echo "   those app containers are the FULL stack (make up-all / start.sh). Stop it first, then re-run --hybrid:" >&2
+    echo "     bash scripts/start.sh --down     # tear down the full containerized stack" >&2
+    echo "   (this mode then brings up ONLY the sandbox deps -- OpenSandbox server + redis/pg/minio -- itself)" >&2
     exit 1
   fi
 
