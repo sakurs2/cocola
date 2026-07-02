@@ -89,7 +89,15 @@ GATEWAY_HOST="${COCOLA_GATEWAY_HOST:-127.0.0.1}"
 GATEWAY_PORT="${COCOLA_GATEWAY_PORT:-8080}"
 GATEWAY_ADDR="$GATEWAY_HOST:$GATEWAY_PORT"
 
-LLM_HOST="${COCOLA_LLM_HOST:-127.0.0.1}"
+# In --hybrid the sandbox brain runs INSIDE a container and reaches this gateway
+# over host.docker.internal (the Docker host bridge), NOT loopback. A gateway
+# bound to 127.0.0.1 is unreachable from the container -> the in-sandbox claude
+# CLI stalls on its first model call until the client gives up ("chat hangs with
+# no response"). So default the hybrid bind to 0.0.0.0; native-only modes keep
+# loopback. Either is still overridable via COCOLA_LLM_HOST.
+_llm_host_default="127.0.0.1"
+[[ "$HYBRID" == "1" ]] && _llm_host_default="0.0.0.0"
+LLM_HOST="${COCOLA_LLM_HOST:-$_llm_host_default}"
 LLM_PORT="${COCOLA_LLM_PORT:-8081}"   # NOT 8080: that is the gateway port.
 
 WEB_PORT="${COCOLA_WEB_PORT:-3000}"
@@ -399,7 +407,9 @@ if [[ "$WITH_LLM" == "1" ]]; then
     $SETSID uv run python -m cocola_llm_gateway ) >"$(log_redirect llm-gateway)" 2>&1 &
   PIDS+=("$!")
   echo "==> starting llm-gateway on $LLM_HOST:$LLM_PORT (provider: ${COCOLA_LLM_PROVIDER:-fake})"
-  wait_port "$LLM_HOST" "$LLM_PORT" "llm-gateway"
+  # nc -z 0.0.0.0 is unreliable; a 0.0.0.0 bind also answers on loopback, so probe there.
+  llm_probe_host="$LLM_HOST"; [[ "$LLM_HOST" == "0.0.0.0" ]] && llm_probe_host="127.0.0.1"
+  wait_port "$llm_probe_host" "$LLM_PORT" "llm-gateway"
   # Route A: the sandbox's in-sandbox claude CLI reaches the gateway via
   # COCOLA_SANDBOX_LLM_BASE_URL (injected at sandbox creation), not via the
   # agent-runtime process env. Surface the URL so a real Route-A run can point
