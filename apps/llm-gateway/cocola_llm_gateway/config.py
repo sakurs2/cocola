@@ -137,6 +137,7 @@ def _build_provider(name: str, cfg: dict) -> UpstreamProvider:
                 api_key=_resolve_secret(cfg, "api_key", "api_key_env"),
                 anthropic_version=cfg.get("anthropic_version", AnthropicConfig.anthropic_version),
                 timeout_s=float(cfg.get("timeout_s", AnthropicConfig.timeout_s)),
+                stream=bool(cfg.get("stream", AnthropicConfig.stream)),
             )
         )
     if ptype == "openai_compat":
@@ -183,6 +184,10 @@ def _build_from_env() -> Registry:
                     "type": "anthropic",
                     "base_url": os.getenv("COCOLA_ANTHROPIC_BASE_URL", AnthropicConfig.base_url),
                     "api_key_env": "COCOLA_ANTHROPIC_API_KEY",
+                    # Default OFF: some relays have a broken SSE endpoint but a
+                    # working non-stream one (see anthropic.py). Set
+                    # COCOLA_ANTHROPIC_STREAM=1 to force true SSE streaming.
+                    "stream": _envflag("COCOLA_ANTHROPIC_STREAM"),
                 }
             },
             "routes": {

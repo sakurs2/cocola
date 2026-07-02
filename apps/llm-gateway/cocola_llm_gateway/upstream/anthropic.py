@@ -31,9 +31,18 @@ class AnthropicConfig:
     anthropic_version: str = "2023-06-01"
     timeout_s: float = 60.0
     connect_timeout_s: float = 10.0
+    # When False, talk to the upstream in NON-streaming mode (POST once, read the
+    # whole JSON body) and re-synthesize the downstream StreamEvent sequence
+    # locally, so the gateway still presents a stream to its client. This exists
+    # because some Anthropic-compatible relays have a working non-stream endpoint
+    # but a broken SSE endpoint (it accepts the request, returns HTTP 200, then
+    # never emits a byte -> the gateway hangs until httpx times out). Config knob;
+    # default True preserves the historical streaming behavior. See
+    # docs/plan/anthropic-nonstream-fallback.md.
+    stream: bool = True
 
 
-def _build_payload(req: ChatRequest) -> dict:
+def _build_payload(req: ChatRequest, *, stream: bool) -> dict:
     """Re-encode a normalized ChatRequest into an Anthropic request body.
 
     The leading system turn (if any) is lifted back into the top-level `system`
@@ -56,7 +65,7 @@ def _build_payload(req: ChatRequest) -> dict:
         "model": req.model,
         "messages": msgs,
         "max_tokens": req.params.max_tokens,
-        "stream": True,
+        "stream": stream,
     }
     if system_text:
         payload["system"] = system_text
@@ -107,6 +116,7 @@ class AnthropicUpstream:
                 "AnthropicUpstream requires an api_key (set via config/env)",
             )
         self._cfg = cfg
+        self._stream = cfg.stream
         self._client = httpx.AsyncClient(
             base_url=cfg.base_url,
             timeout=httpx.Timeout(cfg.timeout_s, connect=cfg.connect_timeout_s),
@@ -118,7 +128,11 @@ class AnthropicUpstream:
         )
 
     async def chat_stream(self, req: ChatRequest) -> AsyncIterator[StreamEvent]:
-        payload = _build_payload(req)
+        if not self._stream:
+            async for ev in self._chat_nonstream(req):
+                yield ev
+            return
+        payload = _build_payload(req, stream=True)
         try:
             async with self._client.stream("POST", "/v1/messages", json=payload) as resp:
                 if resp.status_code >= 400:
@@ -137,6 +151,116 @@ class AnthropicUpstream:
             yield StreamEvent(
                 StreamEventType.ERROR, error=f"upstream transport error: {e}", code="transport"
             )
+
+    async def _chat_nonstream(self, req: ChatRequest) -> AsyncIterator[StreamEvent]:
+        """Non-streaming path: POST once, read the whole JSON, then re-synthesize
+        the same StreamEvent sequence the streaming path would have produced.
+
+        The upstream returns a complete Anthropic Messages object with a
+        `content: [block, ...]` array. We replay each block as the exact
+        PASSTHROUGH content_block_start/(delta)/stop frames the downstream codec
+        already understands (ADR-0010), so both text and tool_use blocks flow
+        through the identical reconstruction logic -- no codec change needed.
+        """
+        payload = _build_payload(req, stream=False)
+        try:
+            resp = await self._client.post("/v1/messages", json=payload)
+        except httpx.TimeoutException as e:
+            yield StreamEvent(StreamEventType.ERROR, error=f"upstream timeout: {e}", code="timeout")
+            return
+        except httpx.HTTPError as e:
+            yield StreamEvent(
+                StreamEventType.ERROR, error=f"upstream transport error: {e}", code="transport"
+            )
+            return
+
+        if resp.status_code >= 400:
+            body = resp.text
+            yield StreamEvent(
+                StreamEventType.ERROR,
+                error=f"upstream {resp.status_code}: {body[:500]}",
+                code="upstream_http_error",
+            )
+            return
+        try:
+            data = resp.json()
+        except json.JSONDecodeError as e:
+            yield StreamEvent(
+                StreamEventType.ERROR, error=f"upstream bad json: {e}", code="transport"
+            )
+            return
+
+        usage = data.get("usage", {}) or {}
+        yield StreamEvent(
+            StreamEventType.MESSAGE_START,
+            usage=Usage(prompt_tokens=int(usage.get("input_tokens", 0))),
+            model=str(data.get("model", "")),
+        )
+        for idx, block in enumerate(data.get("content", []) or []):
+            if not isinstance(block, dict):
+                continue
+            btype = block.get("type", "")
+            # content_block_start announces the block (text starts empty; tool_use
+            # carries id/name with empty input, matching the SSE shape).
+            if btype == "tool_use":
+                start_block = {
+                    "type": "tool_use",
+                    "id": block.get("id", ""),
+                    "name": block.get("name", ""),
+                    "input": {},
+                }
+            else:
+                start_block = {"type": btype or "text", "text": ""}
+            yield StreamEvent(
+                StreamEventType.PASSTHROUGH,
+                extra={
+                    "frame": {
+                        "type": "content_block_start",
+                        "index": idx,
+                        "content_block": start_block,
+                    }
+                },
+            )
+            if btype == "tool_use":
+                yield StreamEvent(
+                    StreamEventType.PASSTHROUGH,
+                    extra={
+                        "frame": {
+                            "type": "content_block_delta",
+                            "index": idx,
+                            "delta": {
+                                "type": "input_json_delta",
+                                "partial_json": json.dumps(
+                                    block.get("input", {}) or {}, separators=(",", ":")
+                                ),
+                            },
+                        }
+                    },
+                )
+            elif btype in ("", "text"):
+                yield StreamEvent(
+                    StreamEventType.PASSTHROUGH,
+                    extra={
+                        "frame": {
+                            "type": "content_block_delta",
+                            "index": idx,
+                            "delta": {
+                                "type": "text_delta",
+                                "text": str(block.get("text", "")),
+                            },
+                        }
+                    },
+                )
+            yield StreamEvent(
+                StreamEventType.PASSTHROUGH,
+                extra={"frame": {"type": "content_block_stop", "index": idx}},
+            )
+        yield StreamEvent(
+            StreamEventType.MESSAGE_DELTA,
+            usage=Usage(completion_tokens=int(usage.get("output_tokens", 0))),
+            finish_reason=str(data.get("stop_reason", "") or ""),
+        )
+        yield StreamEvent(StreamEventType.MESSAGE_STOP)
 
     async def _parse_stream(self, resp: httpx.Response) -> AsyncIterator[StreamEvent]:
         """Parse Anthropic SSE frames into normalized StreamEvents."""
