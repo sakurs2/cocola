@@ -111,7 +111,7 @@ func TestCreate_HappyPath(t *testing.T) {
 		t.Errorf("content-type = %q, want application/json", gotCT)
 	}
 	// Body assertions: resource + egress mapping landed on the wire.
-	for _, want := range []string{`"uri":"cocola/sandbox-runtime:dev"`, `"entrypoint":["tail","-f","/dev/null"]`, `"cpu":"500m"`, `"memory":"512Mi"`, `"defaultAction":"deny"`, `"target":"api.anthropic.com"`} {
+	for _, want := range []string{`"uri":"cocola/sandbox-runtime:dev"`, `"entrypoint":["sleep","infinity"]`, `"cpu":"500m"`, `"memory":"512Mi"`, `"defaultAction":"deny"`, `"target":"api.anthropic.com"`} {
 		if !strings.Contains(gotBody, want) {
 			t.Errorf("request body missing %s\nbody: %s", want, gotBody)
 		}
@@ -1052,5 +1052,31 @@ func TestReadFile_NotFound(t *testing.T) {
 	}
 	if !errors.Is(err, fs.ErrNotExist) {
 		t.Errorf("error = %v, want wrapping fs.ErrNotExist", err)
+	}
+}
+
+func TestChownEntrypoint(t *testing.T) {
+	// Empty exec user runs Exec as root -> no chown needed, bare blocker.
+	if got := chownEntrypoint("", "u1", "s1"); len(got) != 2 || got[0] != "sleep" || got[1] != "infinity" {
+		t.Fatalf("empty execUser entrypoint = %v, want [sleep infinity]", got)
+	}
+
+	// Non-empty exec user -> one-time chown of the three mounts, then exec blocker.
+	got := chownEntrypoint("cocola", "u1", "s1")
+	if len(got) != 3 || got[0] != "/bin/sh" || got[1] != "-c" {
+		t.Fatalf("entrypoint prefix = %v, want [/bin/sh -c ...]", got)
+	}
+	script := got[2]
+	for _, want := range []string{
+		"chown -R 'cocola':'cocola'",
+		"'/home/cocola/.claude'",
+		"'/data/userdata/u1'",
+		"'/workspace/s1'",
+		"|| true",
+		"exec sleep infinity",
+	} {
+		if !strings.Contains(script, want) {
+			t.Errorf("chown script missing %q\nscript: %s", want, script)
+		}
 	}
 }

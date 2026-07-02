@@ -343,10 +343,19 @@ func (p *Provider) Create(ctx context.Context, spec provider.SandboxSpec) (*prov
 	if spec.Image != "" {
 		req.Image = &imageSpec{URI: spec.Image}
 		// OpenSandbox requires a non-empty entrypoint whenever an image is given.
-		// cocola sandboxes are long-lived (create once, then Exec into them), so we
-		// launch the entry process as a no-op blocker and drive real work via Exec.
-		// This mirrors the server's own snapshot-mode default (["tail","-f","/dev/null"]).
-		req.Entrypoint = []string{"tail", "-f", "/dev/null"}
+		// cocola sandboxes are long-lived (create once, then Exec into them), so the
+		// entry process is a no-op idle-blocker and real work is driven via Exec.
+		//
+		// The entry process runs as root (the brain image has no USER directive), so
+		// we use it for a ONE-TIME chown of the freshly-provisioned, root-owned PVCs
+		// to the Exec user (uid 10001 cocola) before blocking. Without this, every
+		// Exec drops to non-root cocola (see execUser) and cannot write ~/.claude or
+		// its user/session volumes -- which breaks memory writes AND --resume session
+		// files (a dangling resume then degrades to a fresh conversation). The docker
+		// provider fixes this by chowning the host bind-mount; opensandbox volumes
+		// live inside the server runtime and are unreachable from here, and the server
+		// API exposes no fsGroup/securityContext, so the entrypoint is the only seam.
+		req.Entrypoint = chownEntrypoint(p.execUser, safe(spec.UserID), safe(spec.SessionID))
 	}
 	if rl := mapResources(spec.Resources); len(rl) > 0 {
 		req.ResourceLimits = rl
@@ -837,6 +846,26 @@ func shellJoin(argv []string) string {
 		parts[i] = shellQuote(a)
 	}
 	return strings.Join(parts, " ")
+}
+
+// chownEntrypoint builds the sandbox entry process. It is a no-op idle-blocker
+// (sleep infinity), optionally prefixed by a one-time chown of the mounted,
+// root-owned PVCs to execUser so the non-root Exec user can write them (see the
+// Create call site for the full rationale). uid/sid must already be safe()'d --
+// they compose the same guest mount paths as mapVolumes. When execUser is empty
+// Exec runs as root, so no chown is needed and we return a bare blocker.
+func chownEntrypoint(execUser, uid, sid string) []string {
+	if execUser == "" {
+		return []string{"sleep", "infinity"}
+	}
+	owner := shellQuote(execUser) + ":" + shellQuote(execUser)
+	paths := shellJoin([]string{
+		guestClaudeConfig,
+		guestUserData + "/" + uid,
+		guestWorkspace + "/" + sid,
+	})
+	script := "chown -R " + owner + " " + paths + " || true; exec sleep infinity"
+	return []string{"/bin/sh", "-c", script}
 }
 
 // shellQuote wraps s in single quotes, escaping any embedded single quotes
