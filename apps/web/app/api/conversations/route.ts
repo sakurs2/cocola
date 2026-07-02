@@ -4,6 +4,11 @@ import { NextRequest } from "next/server";
 // Mirrors api/chat/route.ts (the gateway sets no CORS and owns token
 // verification), but this is plain JSON, not SSE. The caller's bearer token is
 // forwarded verbatim; the gateway scopes the list to that verified identity.
+//
+// cache:"no-store" is REQUIRED: Next.js 14 persists GET fetch() responses in its
+// Data Cache by default, and `export const dynamic` only governs route render
+// caching -- NOT the inner fetch. Without this, an early empty-list response
+// ([]) gets cached and the sidebar stays empty forever even after rows exist.
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -15,6 +20,7 @@ export async function GET(req: NextRequest) {
   try {
     const upstream = await fetch(`${GATEWAY_URL}/v1/conversations`, {
       method: "GET",
+      cache: "no-store",
       headers: { ...(auth ? { authorization: auth } : {}) },
     });
     const body = await upstream.text();

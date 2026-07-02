@@ -3,6 +3,10 @@ import { NextRequest } from "next/server";
 // Same-origin proxy for one conversation's MESSAGES (history). The gateway
 // enforces ownership against the verified token, so a caller can only load
 // their own conversation; a miss returns 404 which we pass through unchanged.
+//
+// cache:"no-store" is REQUIRED for the same reason as the list route: Next.js
+// 14 persists GET fetch() in its Data Cache by default, which would freeze a
+// conversation's history at its first-seen state.
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -18,7 +22,7 @@ export async function GET(
   try {
     const upstream = await fetch(
       `${GATEWAY_URL}/v1/conversations/${encodeURIComponent(id)}/messages`,
-      { method: "GET", headers: { ...(auth ? { authorization: auth } : {}) } },
+      { method: "GET", cache: "no-store", headers: { ...(auth ? { authorization: auth } : {}) } },
     );
     const body = await upstream.text();
     return new Response(body, {
