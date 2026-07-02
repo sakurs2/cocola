@@ -156,37 +156,29 @@ demo-minimal: ## M-minimal: fully containerised control plane + sandbox + persis
 	bash scripts/demo-minimal.sh
 
 # -------------------------------------------------------------------- dev stack
-# Local app stack. Three tiers, ONE route (Route A):
-#   make up        native, foreground: agent-runtime + gateway, EchoProvider
-#                  (zero-config, no sandbox) -- fastest inner loop, NO model.
-#   make up-web    ... + the Next.js browser test tool (:3000).
-#   make up-hybrid THE debug mode. Only the sandbox's OWN container deps run in
-#                  containers -- the OpenSandbox server (:8090) + redis/pg/minio
-#                  (dev.yml). EVERY cocola service runs NATIVE in the foreground:
-#                  sandbox-manager :50051, llm-gateway :8081, admin-api :8092,
-#                  agent-runtime :50061, gateway :8080, web :3000. REAL Route A +
-#                  real model, ZERO image rebuild on edits.
-#                  Ctrl-C tears down the native services; the sandbox/infra
-#                  containers survive. Stop them with `make dev-down` (infra) and
-#                  `make opensandbox-down` (sandbox server).
-#   make up-all    FULL containerized Route A stack via scripts/start.sh
-#                  (docker-compose.full.yml: 9 services, real model). When
-#                  .env sets COCOLA_SANDBOX_PROVIDER=opensandbox, start.sh also
-#                  brings up the standalone OpenSandbox server (:8090) and tears
-#                  it down together. Manage with `bash scripts/start.sh --down`.
-# up/up-web/up-hybrid run in the foreground (Ctrl-C tears the NATIVE children
-# down); up-all runs detached containers (stop via start.sh --stop/--down).
-.PHONY: up up-web up-hybrid up-all
-up: ## Boot local app stack: agent-runtime + gateway (Echo)
+# Local app stack. ONE route (Route A), exactly TWO deploy modes:
+#   make up            Mode 1 (DEFAULT debug). Everything NATIVE except the
+#                      sandbox: only the OpenSandbox server (:8090) + redis/pg/
+#                      minio (dev.yml) run in containers; EVERY cocola service
+#                      runs NATIVE in the foreground -- sandbox-manager :50051,
+#                      llm-gateway :8081, admin-api :8092, agent-runtime :50061,
+#                      gateway :8080, web :3000. REAL Route A + real model, ZERO
+#                      image rebuild on edits. Ctrl-C tears down the native
+#                      services; the sandbox/infra containers survive -- stop
+#                      them with `make dev-down` (infra) + `make opensandbox-down`.
+#   make up-container  Mode 2. FULLY containerized Route A stack via
+#                      scripts/start.sh (docker-compose.full.yml: 9 services,
+#                      real model). When .env sets
+#                      COCOLA_SANDBOX_PROVIDER=opensandbox, start.sh also brings
+#                      up the standalone OpenSandbox server (:8090) and tears it
+#                      down together. Manage with `bash scripts/start.sh --down`.
+# `up` runs in the foreground (Ctrl-C tears the NATIVE children down);
+# `up-container` runs detached containers (stop via start.sh --stop/--down).
+.PHONY: up up-container
+up: ## Mode 1 (default debug): all cocola services NATIVE, only sandbox+infra containerized (real Route A, no rebuild)
 	bash scripts/run-stack.sh
 
-up-web: ## ... + the Next.js browser test tool on :3000
-	bash scripts/run-stack.sh --with-web
-
-up-hybrid: ## THE debug mode: only sandbox+infra containerized, all cocola services NATIVE (real Route A, no rebuild)
-	bash scripts/run-stack.sh --hybrid
-
-up-all: ## Full containerized Route A stack (start.sh + full.yml; OpenSandbox when .env selects it)
+up-container: ## Mode 2: fully containerized Route A stack (start.sh + full.yml; OpenSandbox when .env selects it)
 	bash scripts/start.sh
 
 # -------------------------------------------------------------------- aggregate

@@ -1,61 +1,56 @@
 #!/usr/bin/env bash
-# run-stack.sh - one-click local dev stack for cocola.
+# run-stack.sh - deploy mode 1 for cocola: everything NATIVE except the sandbox.
 #
-# Boots the full request path on your machine and keeps it running until you
-# press Ctrl-C, then tears everything down cleanly:
+# This is the DEFAULT local debug stack (Makefile: `make up`). Only the
+# sandbox's OWN container dependencies stay containerized -- the OpenSandbox
+# server (:8090) plus redis/postgres/minio (docker-compose.dev.yml). EVERY
+# cocola-authored service runs NATIVE in the foreground and is torn down on
+# Ctrl-C:
 #
 #   web (Next.js) --(SSE proxy)--> gateway (Go BFF) --(gRPC)--> agent-runtime (Py)
 #                                                                   |
 #                              (Route A: brain runs inside sandbox) v
 #                                                          llm-gateway (Py, FastAPI)
 #
-# Always started:  agent-runtime + gateway   (zero-config, EchoProvider)
-# Opt-in:          llm-gateway  (--with-llm)  the model upstream the sandbox brain hits
-#                  web          (--with-web)  the browser test tool from Step 4
-#                  --all        enables both
+#   native  : sandbox-manager :50051  llm-gateway :8081  admin-api :8092
+#             agent-runtime :50061    gateway :8080      web :3000
+#   contain.: OpenSandbox server :8090 + redis/postgres/minio (dev.yml)
+#
+# Result: REAL Route A (brain in sandbox) + real model, and editing ANY cocola
+# service means just Ctrl-C + re-run -- ZERO image rebuilds. The sibling deploy
+# mode is `make up-container` (fully containerized stack via scripts/start.sh).
 #
 # Design notes
 #   * Port 8080 collision: the gateway BFF and the llm-gateway BOTH default to
 #     8080. We pin llm-gateway to COCOLA_LLM_PORT (default 8081) so they never
 #     fight; the sandbox brain reaches it via COCOLA_SANDBOX_LLM_BASE_URL.
-#   * Route A (brain-in-sandbox, ADR-0009) is the only real path. A
-#     sandbox-manager is NOT started here (its build is containerized), so for a
-#     REAL Route-A run you must export COCOLA_SANDBOX_ADDR pointing at one; we
-#     pass it through and the agent runs the whole Claude brain inside that
-#     sandbox. With no executor reachable, agent-runtime uses EchoProvider (no
-#     real model calls). The legacy Route B was decommissioned (see ADR-0009).
+#   * Route A (brain-in-sandbox, ADR-0009) is the only real path; the legacy
+#     Route B was decommissioned (see ADR-0009).
 #   * Every child logs to .run-logs/<name>.log; this script prints a token you
 #     can paste into the web UI or a curl call.
 #
 # Usage:
-#   bash scripts/run-stack.sh            # echo stack: agent-runtime + gateway
-#   bash scripts/run-stack.sh --with-web # + browser test tool on :3000
-#   bash scripts/run-stack.sh --all      # + llm-gateway (real SDK path) + web
-#   bash scripts/run-stack.sh --hybrid   # THE debug mode: only the sandbox's own
-#                                        # container deps (OpenSandbox server +
-#                                        # redis/pg/minio) run in containers;
-#                                        # EVERY cocola service (sandbox-manager,
-#                                        # llm-gateway, admin-api, agent-runtime,
-#                                        # gateway, web) runs NATIVE. REAL Route A
-#                                        # + real model, zero image rebuild.
+#   bash scripts/run-stack.sh            # the one and only mode (= make up)
+#   bash scripts/run-stack.sh --help     # show this header
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$ROOT"
 
-WITH_LLM=0
-WITH_WEB=0
-HYBRID=0
+# Deploy mode 1 has exactly ONE shape now: the former --hybrid. These three
+# switches are therefore always on -- every cocola service runs NATIVE
+# (sandbox-manager/admin-api included), the real llm-gateway is up, and the web
+# tool is served. They are kept as constants (rather than inlined) so the many
+# `[[ "$X" == "1" ]]` guards below read unchanged. There are no mode flags.
+WITH_LLM=1
+WITH_WEB=1
+HYBRID=1
 for arg in "$@"; do
   case "$arg" in
-    --with-llm) WITH_LLM=1 ;;
-    --with-web) WITH_WEB=1 ;;
-    --hybrid)   HYBRID=1; WITH_WEB=1; WITH_LLM=1 ;;
-    --all)      WITH_LLM=1; WITH_WEB=1 ;;
     -h|--help)
       grep '^#' "$0" | sed 's/^# \{0,1\}//'
       exit 0 ;;
-    *) echo "unknown flag: $arg (try --help)" >&2; exit 2 ;;
+    *) echo "unknown flag: $arg (this script has one mode; try --help)" >&2; exit 2 ;;
   esac
 done
 
