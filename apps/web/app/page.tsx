@@ -19,6 +19,7 @@
 
 import { CocolaRuntimeProvider, useCocola } from "@/app/runtime-provider";
 import { AppSidebar } from "@/components/assistant-ui/app-sidebar";
+import { CodeBlock, MarkdownContent } from "@/components/assistant-ui/markdown-text";
 import { Thread } from "@/components/assistant-ui/thread";
 import { Download, FileQuestion, X } from "lucide-react";
 import { useEffect, useState } from "react";
@@ -114,6 +115,8 @@ function ArtifactPreviewPanel() {
   const canText = isTextPreview(selectedArtifact.mimeType, selectedArtifact.filename);
   const canImage = selectedArtifact.mimeType.startsWith("image/");
   const canPdf = selectedArtifact.mimeType === "application/pdf";
+  const previewKind = getTextPreviewKind(selectedArtifact.mimeType, selectedArtifact.filename);
+  const language = getCodeLanguage(selectedArtifact.mimeType, selectedArtifact.filename);
 
   return (
     <div className="flex h-full flex-col">
@@ -160,9 +163,7 @@ function ArtifactPreviewPanel() {
             className="h-full w-full"
           />
         ) : canText ? (
-          <pre className="min-h-full whitespace-pre-wrap break-words p-4 font-mono text-xs leading-5 text-foreground">
-            {error || text || "Loading preview..."}
-          </pre>
+          <TextArtifactPreview error={error} text={text} kind={previewKind} language={language} />
         ) : (
           <div className="flex h-full flex-col items-center justify-center gap-3 p-8 text-center text-muted-foreground">
             <FileQuestion className="size-8" />
@@ -175,12 +176,124 @@ function ArtifactPreviewPanel() {
   );
 }
 
+function TextArtifactPreview({
+  error,
+  text,
+  kind,
+  language,
+}: {
+  error: string;
+  text: string;
+  kind: "markdown" | "code" | "plain";
+  language: string;
+}) {
+  if (error) {
+    return (
+      <pre className="min-h-full whitespace-pre-wrap break-words p-4 font-mono text-xs leading-5 text-destructive">
+        {error}
+      </pre>
+    );
+  }
+  if (!text) {
+    return <div className="p-4 text-sm text-muted-foreground">Loading preview...</div>;
+  }
+  if (kind === "markdown") {
+    return <MarkdownContent value={text} className="p-4" />;
+  }
+  if (kind === "code") {
+    return <CodeBlock language={language} code={text} className="m-4" />;
+  }
+  return (
+    <pre className="min-h-full whitespace-pre-wrap break-words p-4 font-mono text-xs leading-5 text-foreground">
+      {text}
+    </pre>
+  );
+}
+
 function isTextPreview(mime: string, filename: string): boolean {
   if (mime.startsWith("text/")) return true;
   if (["application/json", "application/xml", "application/javascript"].includes(mime)) return true;
-  return /\.(md|markdown|json|csv|ts|tsx|js|jsx|py|go|rs|java|kt|css|html|xml|yaml|yml|toml|txt)$/i.test(
-    filename,
-  );
+  return getKnownTextExtension(filename) !== "";
+}
+
+function getTextPreviewKind(mime: string, filename: string): "markdown" | "code" | "plain" {
+  const ext = getKnownTextExtension(filename);
+  if (mime === "text/markdown" || ext === "md" || ext === "markdown") return "markdown";
+  if (getCodeLanguage(mime, filename) !== "text") return "code";
+  return "plain";
+}
+
+function getCodeLanguage(mime: string, filename: string): string {
+  if (mime === "application/json") return "json";
+  if (mime === "application/xml") return "xml";
+  if (mime === "application/javascript") return "javascript";
+
+  const ext = getKnownTextExtension(filename);
+  const languages: Record<string, string> = {
+    bash: "shell",
+    c: "c",
+    cpp: "cpp",
+    css: "css",
+    csv: "text",
+    diff: "diff",
+    go: "go",
+    h: "c",
+    html: "html",
+    java: "java",
+    js: "javascript",
+    jsx: "javascript",
+    json: "json",
+    kt: "kotlin",
+    md: "markdown",
+    patch: "diff",
+    py: "python",
+    rs: "rust",
+    sh: "shell",
+    toml: "toml",
+    ts: "typescript",
+    tsx: "typescript",
+    xml: "xml",
+    yaml: "yaml",
+    yml: "yaml",
+    zsh: "shell",
+  };
+  return languages[ext] ?? "text";
+}
+
+function getKnownTextExtension(filename: string): string {
+  const match = /\.([a-z0-9]+)$/i.exec(filename);
+  const ext = match?.[1]?.toLowerCase() ?? "";
+  const known = new Set([
+    "bash",
+    "c",
+    "cpp",
+    "css",
+    "csv",
+    "diff",
+    "go",
+    "h",
+    "html",
+    "java",
+    "js",
+    "jsx",
+    "json",
+    "kt",
+    "markdown",
+    "md",
+    "patch",
+    "py",
+    "rs",
+    "sh",
+    "toml",
+    "ts",
+    "tsx",
+    "txt",
+    "xml",
+    "yaml",
+    "yml",
+    "zsh",
+  ]);
+  return known.has(ext) ? ext : "";
 }
 
 function formatBytes(bytes: number): string {

@@ -104,6 +104,8 @@ const SUGGESTIONS: { title: string; subtitle: string; prompt: string }[] = [
   },
 ];
 
+const MODEL_LABEL = "gpt-4.1-nano";
+
 const ThreadWelcome: FC = () => (
   <ThreadPrimitive.Empty>
     <div className="flex w-full max-w-[var(--thread-max-width)] flex-grow flex-col items-center justify-center">
@@ -111,7 +113,7 @@ const ThreadWelcome: FC = () => (
         <div className="flex size-9 items-center justify-center rounded-full bg-foreground text-background">
           <MessagesSquare className="size-5" />
         </div>
-        <p className="text-3xl font-semibold text-foreground">gpt-4.1-nano</p>
+        <p className="text-3xl font-semibold text-foreground">{MODEL_LABEL}</p>
       </div>
 
       <div className="mt-8 w-full">
@@ -177,7 +179,7 @@ const ModelPicker: FC = () => (
     <span className="flex size-5 shrink-0 items-center justify-center rounded-full border border-border bg-background">
       <BrainCircuit className="size-3.5 text-muted-foreground" />
     </span>
-    <span className="truncate">gpt-4.1-nano</span>
+    <span className="truncate">{MODEL_LABEL}</span>
     <ChevronDown className="size-4 shrink-0 text-muted-foreground" />
   </button>
 );
@@ -267,6 +269,7 @@ const UserMessage: FC = () => (
 const AssistantMessage: FC = () => (
   <MessagePrimitive.Root className="relative grid w-full max-w-[var(--thread-max-width)] grid-cols-[auto_1fr] grid-rows-[auto_1fr] py-3">
     <div className="col-span-2 col-start-1 row-start-1 my-1.5 max-w-full break-words leading-7 text-foreground">
+      <AssistantMessageHeader />
       <MessagePrimitive.Parts
         components={{
           Text: MarkdownText,
@@ -288,6 +291,27 @@ const AssistantMessage: FC = () => (
     </div>
     <AssistantActionBar />
   </MessagePrimitive.Root>
+);
+
+const AssistantMessageHeader: FC = () => (
+  <div className="mb-2 flex items-center gap-2 text-xs text-muted-foreground">
+    <span className="inline-flex min-w-0 items-center gap-1.5 rounded-full border border-border bg-muted/35 px-2 py-1">
+      <BrainCircuit className="size-3.5 shrink-0" />
+      <span className="truncate font-medium text-foreground">{MODEL_LABEL}</span>
+    </span>
+    <MessagePrimitive.If last>
+      <ThreadPrimitive.If running>
+        <span
+          role="status"
+          aria-label="Assistant response in progress"
+          className="inline-flex items-center gap-1.5 rounded-full border border-primary/25 bg-primary/10 px-2 py-1 text-primary"
+        >
+          <span className="size-1.5 animate-pulse rounded-full bg-current" />
+          Answering
+        </span>
+      </ThreadPrimitive.If>
+    </MessagePrimitive.If>
+  </div>
 );
 
 // Three-dot "typing" pulse rendered while an assistant turn is in flight but no
