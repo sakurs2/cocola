@@ -74,6 +74,20 @@ opensandbox_down() {
   "${OSB_DC[@]}" down || true
 }
 
+# sandbox-manager 运行时会经 OpenSandbox server 动态创建 per-session 沙箱容器
+# (名字 sandbox-<uuid>、镜像 cocola/sandbox-runtime:dev、带 opensandbox.io/id label)。
+# 它们不属于任一 compose 文件,所以 `compose down` 清不掉,会继续占用宿主端口
+# (如 :50051),导致随后 `make up`(--hybrid 原生模式)因端口被占而失败。
+# 这里按镜像 ancestor 精确匹配并强删,确保 --down/--stop 后端口彻底释放。
+cleanup_sandboxes() {
+  local ids
+  ids="$(docker ps -aq --filter 'ancestor=cocola/sandbox-runtime:dev' 2>/dev/null || true)"
+  if [[ -n "$ids" ]]; then
+    log "清理动态沙箱容器 (cocola/sandbox-runtime:dev) ..."
+    docker rm -f $ids >/dev/null 2>&1 || true
+  fi
+}
+
 log()  { printf '\033[1;36m[start]\033[0m %s\n' "$*"; }
 err()  { printf '\033[1;31m[start:err]\033[0m %s\n' "$*" >&2; }
 
@@ -146,12 +160,14 @@ main() {
       log "停止并删除容器 ..."
       "${DC[@]}" down
       opensandbox_down
+      cleanup_sandboxes
       ;;
     --stop)
       require_docker
       log "停止容器（保留数据）..."
       "${DC[@]}" stop
       needs_opensandbox && "${OSB_DC[@]}" stop || true
+      cleanup_sandboxes
       ;;
     --logs)
       "${DC[@]}" logs -f

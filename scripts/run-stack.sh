@@ -297,6 +297,20 @@ hybrid_up() {
   # would fail, and because a published port is fronted by the engine proxy we
   # must NOT (and now will not) try to reap it. Rather than crash mid-boot,
   # detect the conflicting stack here and tell the user to stop it first.
+  # First self-heal: sandbox-manager may have left per-session sandbox
+  # containers (image cocola/sandbox-runtime:dev, name sandbox-<uuid>) behind
+  # from a prior run. Those are EPHEMERAL session sandboxes -- never part of the
+  # app stack -- so they are always safe to reap, and one of them publishing
+  # :50051 is the usual reason this preflight tripped. Remove them up front so a
+  # stale sandbox alone never blocks a fresh `make up`.
+  local _stale_sbx
+  _stale_sbx="$(docker ps -aq --filter 'ancestor=cocola/sandbox-runtime:dev' 2>/dev/null || true)"
+  if [[ -n "$_stale_sbx" ]]; then
+    echo "==> [hybrid] removing stale session sandbox container(s) holding host ports" >&2
+    # shellcheck disable=SC2086
+    docker rm -f $_stale_sbx >/dev/null 2>&1 || true
+  fi
+
   local _conflict="" _p _cid
   for _p in 50051 8080 8092 3000 8081; do
     _cid="$(docker ps --filter "publish=$_p" --format '{{.Names}}' 2>/dev/null | head -1 || true)"
