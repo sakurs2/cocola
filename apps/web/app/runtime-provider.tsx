@@ -212,7 +212,13 @@ const attachmentAdapter = new Base64AttachmentAdapter();
 export function CocolaRuntimeProvider({ children }: { children: ReactNode }) {
   const [messages, setMessages] = useState<UiMessage[]>([]);
   const [isRunning, setIsRunning] = useState(false);
-  const [token, setToken] = useState("");
+  // Persist the Bearer token to localStorage so identity survives a page
+  // refresh. Without this the token reset to "" on reload and the request fell
+  // back to the anonymous dev-user, hiding the real user's stored conversations.
+  const [token, setToken] = useState<string>(() => {
+    if (typeof window === "undefined") return "";
+    return window.localStorage.getItem("cocola_token") ?? "";
+  });
   // Lazy init: one random session_id per browser tab. NEVER a shared constant
   // ("s1" made every client resume the SAME claude conversation — cross-user
   // context bleed once the session_map is durable, and no way to start over).
@@ -223,6 +229,13 @@ export function CocolaRuntimeProvider({ children }: { children: ReactNode }) {
   // token in a ref so fetch helpers can read the latest without being deps.
   const tokenRef = useRef(token);
   tokenRef.current = token;
+
+  // Mirror token changes into localStorage (see the lazy init above).
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    if (token) window.localStorage.setItem("cocola_token", token);
+    else window.localStorage.removeItem("cocola_token");
+  }, [token]);
 
   const applyEvent = useCallback((assistantId: string, ev: AgentEvent) => {
     if (ev.kind === "sandbox") {
