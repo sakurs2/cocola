@@ -74,11 +74,9 @@ type WireMessage = {
   created_at: string;
 };
 
-// ---- Session shell context (token / session_id / sandbox banner) -----------
+// ---- Session shell context (session_id / sandbox banner) -------------------
 
 type CocolaContextValue = {
-  token: string;
-  setToken: (v: string) => void;
   sessionId: string;
   setSessionId: (v: string) => void;
   sandbox: SandboxInfo | null;
@@ -212,13 +210,6 @@ const attachmentAdapter = new Base64AttachmentAdapter();
 export function CocolaRuntimeProvider({ children }: { children: ReactNode }) {
   const [messages, setMessages] = useState<UiMessage[]>([]);
   const [isRunning, setIsRunning] = useState(false);
-  // Persist the Bearer token to localStorage so identity survives a page
-  // refresh. Without this the token reset to "" on reload and the request fell
-  // back to the anonymous dev-user, hiding the real user's stored conversations.
-  const [token, setToken] = useState<string>(() => {
-    if (typeof window === "undefined") return "";
-    return window.localStorage.getItem("cocola_token") ?? "";
-  });
   // Lazy init: one random session_id per browser tab. NEVER a shared constant
   // ("s1" made every client resume the SAME claude conversation — cross-user
   // context bleed once the session_map is durable, and no way to start over).
@@ -226,16 +217,6 @@ export function CocolaRuntimeProvider({ children }: { children: ReactNode }) {
   const [sandbox, setSandbox] = useState<SandboxInfo | null>(null);
   const [conversations, setConversations] = useState<ConversationSummary[]>([]);
   const abortRef = useRef<AbortController | null>(null);
-  // token in a ref so fetch helpers can read the latest without being deps.
-  const tokenRef = useRef(token);
-  tokenRef.current = token;
-
-  // Mirror token changes into localStorage (see the lazy init above).
-  useEffect(() => {
-    if (typeof window === "undefined") return;
-    if (token) window.localStorage.setItem("cocola_token", token);
-    else window.localStorage.removeItem("cocola_token");
-  }, [token]);
 
   const applyEvent = useCallback((assistantId: string, ev: AgentEvent) => {
     if (ev.kind === "sandbox") {
@@ -255,12 +236,9 @@ export function CocolaRuntimeProvider({ children }: { children: ReactNode }) {
   // Pull the sidebar conversation list from the gateway (scoped server-side to
   // the verified identity). Best-effort: a failure just leaves the list as-is.
   const refreshConversations = useCallback(() => {
-    const t = tokenRef.current;
     void (async () => {
       try {
-        const res = await fetch("/api/conversations", {
-          headers: { ...(t ? { authorization: `Bearer ${t}` } : {}) },
-        });
+        const res = await fetch("/api/conversations");
         if (!res.ok) return;
         const rows = (await res.json()) as ConversationSummary[];
         if (Array.isArray(rows)) setConversations(rows);
@@ -316,7 +294,6 @@ export function CocolaRuntimeProvider({ children }: { children: ReactNode }) {
           method: "POST",
           headers: {
             "content-type": "application/json",
-            ...(token ? { authorization: `Bearer ${token}` } : {}),
           },
           body: JSON.stringify({
             prompt: text,
@@ -351,7 +328,7 @@ export function CocolaRuntimeProvider({ children }: { children: ReactNode }) {
         refreshConversations();
       }
     },
-    [token, sessionId, applyEvent, refreshConversations],
+    [sessionId, applyEvent, refreshConversations],
   );
 
   const onCancel = useCallback(async () => {
@@ -366,11 +343,8 @@ export function CocolaRuntimeProvider({ children }: { children: ReactNode }) {
     abortRef.current?.abort();
     abortRef.current = null;
     setIsRunning(false);
-    const t = tokenRef.current;
     try {
-      const res = await fetch(`/api/conversations/${encodeURIComponent(id)}/messages`, {
-        headers: { ...(t ? { authorization: `Bearer ${t}` } : {}) },
-      });
+      const res = await fetch(`/api/conversations/${encodeURIComponent(id)}/messages`);
       if (!res.ok) return;
       const rows = (await res.json()) as WireMessage[];
       const loaded: UiMessage[] = (Array.isArray(rows) ? rows : []).map((m) => ({
@@ -399,10 +373,10 @@ export function CocolaRuntimeProvider({ children }: { children: ReactNode }) {
     setSessionId(genId());
   }, []);
 
-  // Initial + token-change load of the sidebar list.
+  // Initial load of the sidebar list.
   useEffect(() => {
     refreshConversations();
-  }, [refreshConversations, token]);
+  }, [refreshConversations]);
 
   const runtime = useExternalStoreRuntime<UiMessage>({
     messages,
@@ -417,8 +391,6 @@ export function CocolaRuntimeProvider({ children }: { children: ReactNode }) {
 
   const ctx = useMemo<CocolaContextValue>(
     () => ({
-      token,
-      setToken,
       sessionId,
       setSessionId,
       sandbox,
@@ -428,7 +400,7 @@ export function CocolaRuntimeProvider({ children }: { children: ReactNode }) {
       loadConversation,
       activeConversationId: sessionId,
     }),
-    [token, sessionId, sandbox, newConversation, conversations, refreshConversations, loadConversation],
+    [sessionId, sandbox, newConversation, conversations, refreshConversations, loadConversation],
   );
 
   return (
