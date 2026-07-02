@@ -5,6 +5,7 @@ import {
   AttachmentPrimitive,
   ComposerPrimitive,
   MessagePrimitive,
+  type FileMessagePartProps,
   type ReasoningMessagePartProps,
   ThreadPrimitive,
   type ToolCallMessagePartProps,
@@ -15,6 +16,9 @@ import {
   ChevronDown,
   ChevronRight,
   CopyIcon,
+  Download,
+  Eye,
+  FileText,
   MessagesSquare,
   PaperclipIcon,
   SendHorizontalIcon,
@@ -24,6 +28,7 @@ import {
   Zap,
 } from "lucide-react";
 import type { FC } from "react";
+import { useCocola } from "@/app/runtime-provider";
 import { TooltipIconButton } from "@/components/assistant-ui/tooltip-icon-button";
 import { MarkdownText } from "@/components/assistant-ui/markdown-text";
 import { cn } from "@/lib/utils";
@@ -266,6 +271,7 @@ const AssistantMessage: FC = () => (
         components={{
           Text: MarkdownText,
           Reasoning: ReasoningPart,
+          File: ArtifactFilePart,
           tools: { Fallback: ToolFallback },
         }}
       />
@@ -294,6 +300,81 @@ const TypingIndicator: FC = () => (
     <span className="size-2 animate-bounce rounded-full bg-muted-foreground/60" />
   </div>
 );
+
+const ArtifactFilePart: FC<FileMessagePartProps> = ({ filename, mimeType, data }) => {
+  const { activeConversationId, openArtifact } = useCocola();
+  const meta = parseArtifactData(data);
+  const name = filename || "file";
+  const type = mimeType || "application/octet-stream";
+  const downloadUrl = meta.url || data;
+
+  return (
+    <div className="my-3 flex max-w-xl items-center gap-3 rounded-lg border border-border bg-muted/30 p-3 text-sm">
+      <span className="flex size-9 shrink-0 items-center justify-center rounded-md border border-border bg-background text-muted-foreground">
+        <FileText className="size-4" />
+      </span>
+      <div className="min-w-0 flex-1">
+        <div className="truncate font-medium text-foreground">{name}</div>
+        <div className="mt-0.5 truncate text-xs text-muted-foreground">
+          {formatBytes(meta.size)} · {type}
+        </div>
+      </div>
+      <div className="flex shrink-0 items-center gap-1">
+        <TooltipIconButton
+          tooltip="Preview"
+          variant="ghost"
+          className="size-8 rounded-full p-2"
+          onClick={() =>
+            openArtifact({
+              id: meta.id || name,
+              conversationId: activeConversationId,
+              filename: name,
+              mimeType: type,
+              size: meta.size,
+              downloadUrl,
+            })
+          }
+        >
+          <Eye className="size-4" />
+        </TooltipIconButton>
+        <a
+          href={downloadUrl}
+          download={name}
+          title="Download"
+          aria-label={`Download ${name}`}
+          className="inline-flex size-8 items-center justify-center rounded-full text-muted-foreground transition-colors hover:bg-accent hover:text-accent-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+        >
+          <Download className="size-4" />
+        </a>
+      </div>
+    </div>
+  );
+};
+
+const parseArtifactData = (data: string): { id?: string; url: string; size: number } => {
+  try {
+    const parsed = JSON.parse(data) as { id?: unknown; url?: unknown; size?: unknown };
+    return {
+      id: typeof parsed.id === "string" ? parsed.id : undefined,
+      url: typeof parsed.url === "string" ? parsed.url : "",
+      size: typeof parsed.size === "number" ? parsed.size : 0,
+    };
+  } catch {
+    return { url: data, size: 0 };
+  }
+};
+
+const formatBytes = (bytes: number): string => {
+  if (!bytes) return "Unknown size";
+  const units = ["B", "KB", "MB", "GB"];
+  let value = bytes;
+  let unit = 0;
+  while (value >= 1024 && unit < units.length - 1) {
+    value /= 1024;
+    unit += 1;
+  }
+  return `${value >= 10 || unit === 0 ? value.toFixed(0) : value.toFixed(1)} ${units[unit]}`;
+};
 
 const ReasoningPart: FC<ReasoningMessagePartProps> = ({ text, status }) => (
   <details className="aui-details group my-3 overflow-hidden rounded-lg border border-border bg-muted/30 text-sm">

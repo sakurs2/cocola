@@ -26,11 +26,14 @@ Design choices, all to avoid reinventing what we already have:
 from __future__ import annotations
 
 import asyncio
+import dataclasses
 import json
+import mimetypes
 import os
 import pathlib
 import posixpath
 import tempfile
+import uuid
 from typing import Any, NamedTuple
 
 from cocola.agent.v1 import agent_pb2 as pb
@@ -43,6 +46,30 @@ from cocola_agent_runtime.sandbox_binder import SandboxBinder, SandboxExecutor
 from cocola_agent_runtime.skill_loader import SkillCatalog, apply_skills_to_options
 
 log = get_logger("cocola.agent-runtime.server")
+
+ARTIFACT_SYSTEM_PROMPT = (
+    "When you create files that the user should download or preview, save them "
+    "under ./outputs/. Only files in ./outputs/ are published to the user."
+)
+
+_OUTPUTS_SNAPSHOT_SCRIPT = r"""
+import json
+import os
+
+root = "outputs"
+os.makedirs(root, exist_ok=True)
+out = {}
+for dirpath, _, files in os.walk(root):
+    for name in files:
+        path = os.path.join(dirpath, name)
+        try:
+            st = os.stat(path)
+        except OSError:
+            continue
+        rel = os.path.relpath(path, ".").replace(os.sep, "/")
+        out[rel] = {"size": st.st_size, "mtime_ns": st.st_mtime_ns}
+print(json.dumps(out, sort_keys=True))
+"""
 
 
 class _ResolvedAttachment(NamedTuple):
@@ -83,6 +110,12 @@ def _uploads_preamble(landed: list[str]) -> str:
     )
 
 
+def _merge_system_prompt(base: str | None, extra: str) -> str:
+    if not base:
+        return extra
+    return extra + "\n\n" + base
+
+
 def _stringify(value: Any) -> str:
     """Flatten an arbitrary event-data value to a string for the proto map.
 
@@ -104,6 +137,18 @@ def event_to_proto(event: AgentEvent) -> pb.AgentEvent:
     """Map the runtime\'s generic AgentEvent onto the proto AgentEvent."""
     data = {k: _stringify(v) for k, v in (event.data or {}).items()}
     return pb.AgentEvent(kind=event.kind, data=data)
+
+
+def _artifact_max_bytes() -> int:
+    raw = os.getenv("COCOLA_ARTIFACT_MAX_BYTES", "").strip()
+    if raw:
+        try:
+            n = int(raw)
+            if n > 0:
+                return n
+        except ValueError:
+            pass
+    return 32 * 1024 * 1024
 
 
 class AgentRuntimeServicer(pb_grpc.AgentRuntimeServiceServicer):
@@ -217,6 +262,12 @@ class AgentRuntimeServicer(pb_grpc.AgentRuntimeServiceServicer):
             workspace=workspace,
             max_turns=request.max_turns or 30,
         )
+        artifacts_enabled = bool(self._objstore is not None and hasattr(self._objstore, "put"))
+        if artifacts_enabled:
+            opts = dataclasses.replace(
+                opts,
+                system_prompt=_merge_system_prompt(opts.system_prompt, ARTIFACT_SYSTEM_PROMPT),
+            )
         if self._skills is not None:
             opts = apply_skills_to_options(opts, self._skills)
 
@@ -227,12 +278,128 @@ class AgentRuntimeServicer(pb_grpc.AgentRuntimeServiceServicer):
             has_sandbox=bool(sandbox_id),
             attachments=len(request.attachments),
         )
+        outputs_before = await self._snapshot_outputs(sandbox_id) if artifacts_enabled else {}
         try:
+            terminal_done: AgentEvent | None = None
             async for event in self._provider.query(prompt, opts):
+                if event.kind == "done":
+                    terminal_done = event
+                    continue
                 await context.write(event_to_proto(event))
+            if artifacts_enabled:
+                async for event in self._publish_output_artifacts(
+                    sandbox_id=sandbox_id,
+                    user_id=request.user_id,
+                    session_id=request.session_id,
+                    before=outputs_before,
+                ):
+                    await context.write(event_to_proto(event))
+            if terminal_done is not None:
+                await context.write(event_to_proto(terminal_done))
         except Exception as exc:  # noqa: BLE001 - turn any provider fault into a clean terminal event
             log.warning("agent query failed", session_id=request.session_id, error=str(exc))
             await context.write(pb.AgentEvent(kind="error", data={"error": str(exc)}))
+
+    async def _snapshot_outputs(self, sandbox_id: str | None) -> dict[str, dict[str, int]]:
+        """Return metadata for files under ./outputs/ in the bound sandbox."""
+        if self._executor is None or not sandbox_id:
+            return {}
+        try:
+            res = await self._executor.exec(
+                sandbox_id=sandbox_id,
+                cmd=["python3", "-c", _OUTPUTS_SNAPSHOT_SCRIPT],
+            )
+        except Exception as exc:  # noqa: BLE001 - artifact scan is best-effort
+            log.warning("outputs snapshot failed", sandbox_id=sandbox_id, error=str(exc))
+            return {}
+        if not res.ok:
+            log.warning(
+                "outputs snapshot command failed",
+                sandbox_id=sandbox_id,
+                error=(res.error or res.stderr or str(res.exit_code)),
+            )
+            return {}
+        try:
+            raw = json.loads(res.stdout or "{}")
+        except json.JSONDecodeError:
+            log.warning("outputs snapshot emitted invalid JSON", sandbox_id=sandbox_id)
+            return {}
+        if not isinstance(raw, dict):
+            return {}
+        out: dict[str, dict[str, int]] = {}
+        for path, meta in raw.items():
+            if not isinstance(path, str) or not path.startswith("outputs/"):
+                continue
+            if not isinstance(meta, dict):
+                continue
+            try:
+                out[path] = {"size": int(meta["size"]), "mtime_ns": int(meta["mtime_ns"])}
+            except (KeyError, TypeError, ValueError):
+                continue
+        return out
+
+    async def _publish_output_artifacts(
+        self,
+        *,
+        sandbox_id: str | None,
+        user_id: str,
+        session_id: str,
+        before: dict[str, dict[str, int]],
+    ):
+        """Upload changed ./outputs files and emit one file event per artifact."""
+        if self._executor is None or self._objstore is None or not sandbox_id:
+            return
+        after = await self._snapshot_outputs(sandbox_id)
+        max_bytes = _artifact_max_bytes()
+        changed = sorted(path for path, meta in after.items() if before.get(path) != meta)
+        for path in changed:
+            size = int(after[path].get("size", 0))
+            filename = _sanitize_filename(posixpath.basename(path))
+            if size > max_bytes:
+                yield AgentEvent(
+                    kind="error",
+                    data={
+                        "error": (
+                            f"artifact {filename!r} is {size} bytes, "
+                            f"larger than COCOLA_ARTIFACT_MAX_BYTES={max_bytes}"
+                        )
+                    },
+                )
+                continue
+            try:
+                data = await self._executor.read_bytes(sandbox_id=sandbox_id, path=path)
+            except Exception as exc:  # noqa: BLE001 - per-file failure should not fail the turn
+                yield AgentEvent(
+                    kind="error",
+                    data={"error": f"artifact {filename!r} could not be read: {exc}"},
+                )
+                continue
+            artifact_id = str(uuid.uuid4())
+            mime = mimetypes.guess_type(filename)[0] or "application/octet-stream"
+            key = "artifacts/{}/{}/{}-{}".format(
+                _sanitize_filename(user_id or "user"),
+                _sanitize_filename(session_id or "session"),
+                artifact_id,
+                filename,
+            )
+            try:
+                await asyncio.to_thread(self._objstore.put, key, data, mime)
+            except Exception as exc:  # noqa: BLE001 - per-file failure should not fail the turn
+                yield AgentEvent(
+                    kind="error",
+                    data={"error": f"artifact {filename!r} upload failed: {exc}"},
+                )
+                continue
+            yield AgentEvent(
+                kind="file",
+                data={
+                    "id": artifact_id,
+                    "filename": filename,
+                    "mime": mime,
+                    "size": str(len(data)),
+                    "object_key": key,
+                },
+            )
 
     async def _provision_attachments(
         self, sandbox_id, session_id, attachments

@@ -18,6 +18,7 @@ surfaces as a clean provisioning error rather than a silent drop.
 
 from __future__ import annotations
 
+import io
 import os
 from typing import Protocol
 
@@ -27,9 +28,10 @@ log = get_logger("cocola.agent-runtime.objstore")
 
 
 class Fetcher(Protocol):
-    """Fetches an object's raw bytes by key."""
+    """Fetches and stores object bytes by key."""
 
     def get(self, key: str) -> bytes: ...
+    def put(self, key: str, data: bytes, mime: str) -> None: ...
 
 
 class MinioFetcher:
@@ -49,6 +51,15 @@ class MinioFetcher:
             if resp is not None:
                 resp.close()
                 resp.release_conn()
+
+    def put(self, key: str, data: bytes, mime: str) -> None:
+        self._client.put_object(
+            self._bucket,
+            key,
+            io.BytesIO(data),
+            length=len(data),
+            content_type=mime or "application/octet-stream",
+        )
 
 
 def fetcher_from_env() -> Fetcher | None:

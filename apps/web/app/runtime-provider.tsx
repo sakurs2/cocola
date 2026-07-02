@@ -42,7 +42,29 @@ type UiToolCall = {
   isError?: boolean;
 };
 
-type UiPart = { type: "text"; text: string } | { type: "reasoning"; text: string } | UiToolCall;
+export type ArtifactPreview = {
+  id: string;
+  conversationId: string;
+  filename: string;
+  mimeType: string;
+  size: number;
+  downloadUrl: string;
+};
+
+type UiFilePart = {
+  type: "file";
+  id: string;
+  filename: string;
+  mimeType: string;
+  size: number;
+  downloadUrl: string;
+};
+
+type UiPart =
+  | { type: "text"; text: string }
+  | { type: "reasoning"; text: string }
+  | UiToolCall
+  | UiFilePart;
 
 type UiMessage = {
   id: string;
@@ -92,6 +114,9 @@ type CocolaContextValue = {
   refreshConversations: () => void;
   loadConversation: (id: string) => Promise<void>;
   activeConversationId: string;
+  selectedArtifact: ArtifactPreview | null;
+  openArtifact: (artifact: ArtifactPreview) => void;
+  closeArtifact: () => void;
 };
 
 const CocolaContext = createContext<CocolaContextValue | null>(null);
@@ -111,6 +136,11 @@ function genId(): string {
 
 function isTruthy(v: string | undefined): boolean {
   return v === "true" || v === "True" || v === "1";
+}
+
+function parseSize(v: string | undefined): number {
+  const n = Number.parseInt(v ?? "", 10);
+  return Number.isFinite(n) && n > 0 ? n : 0;
 }
 
 // Append text to the trailing text part, or start a new one. Immutable.
@@ -167,6 +197,18 @@ function reducePart(parts: UiPart[], ev: AgentEvent): UiPart[] {
       ];
     case "tool_result":
       return fillToolResult(parts, d.tool_use_id ?? "", d.content ?? "", isTruthy(d.is_error));
+    case "file":
+      return [
+        ...parts,
+        {
+          type: "file",
+          id: d.id || genId(),
+          filename: d.filename || "file",
+          mimeType: d.mime || d.mimeType || "application/octet-stream",
+          size: parseSize(d.size),
+          downloadUrl: d.download_url || d.downloadUrl || "",
+        },
+      ];
     case "error":
       return appendTo(parts, "text", `\n\n⚠️ ${d.error ?? "unknown error"}`);
     // result / system / sandbox / done carry no message-body content.
@@ -180,6 +222,18 @@ function convertMessage(message: UiMessage): ThreadMessageLike {
   const content = message.parts.map((p) => {
     if (p.type === "text") return { type: "text" as const, text: p.text };
     if (p.type === "reasoning") return { type: "reasoning" as const, text: p.text };
+    if (p.type === "file") {
+      return {
+        type: "file" as const,
+        filename: p.filename,
+        mimeType: p.mimeType,
+        data: JSON.stringify({
+          id: p.id,
+          url: p.downloadUrl,
+          size: p.size,
+        }),
+      };
+    }
     // tool-call. We pass only argsText (the raw JSON string from the wire) —
     // the renderer displays it verbatim, so there is no need to parse into the
     // typed `args` (and parsing back would fight ReadonlyJSONObject typing).
@@ -218,11 +272,20 @@ export function CocolaRuntimeProvider({ children }: { children: ReactNode }) {
   const [sessionId, setSessionId] = useState(genId);
   const [sandboxes, setSandboxes] = useState<Record<string, SandboxInfo | null>>({});
   const [conversations, setConversations] = useState<ConversationSummary[]>([]);
+  const [selectedArtifact, setSelectedArtifact] = useState<ArtifactPreview | null>(null);
   const abortMap = useRef<Map<string, AbortController>>(new Map());
 
   const messages = useMemo(() => convMessages[sessionId] ?? [], [convMessages, sessionId]);
   const isRunning = runningIds.has(sessionId);
   const sandbox = sandboxes[sessionId] ?? null;
+
+  const openArtifact = useCallback((artifact: ArtifactPreview) => {
+    setSelectedArtifact(artifact);
+  }, []);
+
+  const closeArtifact = useCallback(() => {
+    setSelectedArtifact(null);
+  }, []);
 
   const setRunning = useCallback((convId: string, on: boolean) => {
     setRunningIds((prev) => {
@@ -382,6 +445,7 @@ export function CocolaRuntimeProvider({ children }: { children: ReactNode }) {
     async (id: string) => {
       setSandboxes((prev) => ({ ...prev, [id]: prev[id] ?? null }));
       setSessionId(id);
+      setSelectedArtifact(null);
       if ((convMessages[id]?.length ?? 0) > 0) return;
       try {
         const res = await fetch(`/api/conversations/${encodeURIComponent(id)}/messages`);
@@ -406,6 +470,7 @@ export function CocolaRuntimeProvider({ children }: { children: ReactNode }) {
   const newConversation = useCallback(() => {
     const fresh = genId();
     setSessionId(fresh);
+    setSelectedArtifact(null);
     setConvMessages((prev) => ({ ...prev, [fresh]: [] }));
     setSandboxes((prev) => ({ ...prev, [fresh]: null }));
   }, []);
@@ -436,8 +501,21 @@ export function CocolaRuntimeProvider({ children }: { children: ReactNode }) {
       refreshConversations,
       loadConversation,
       activeConversationId: sessionId,
+      selectedArtifact,
+      openArtifact,
+      closeArtifact,
     }),
-    [sessionId, sandbox, newConversation, conversations, refreshConversations, loadConversation],
+    [
+      sessionId,
+      sandbox,
+      newConversation,
+      conversations,
+      refreshConversations,
+      loadConversation,
+      selectedArtifact,
+      openArtifact,
+      closeArtifact,
+    ],
   );
 
   return (

@@ -246,6 +246,10 @@ class SandboxExecutor(Protocol):
         """Read a UTF-8 text file from the sandbox."""
         ...
 
+    async def read_bytes(self, *, sandbox_id: str, path: str) -> bytes:
+        """Read raw bytes from the sandbox."""
+        ...
+
     async def write_file(self, *, sandbox_id: str, path: str, content: str) -> None:
         """Write a UTF-8 text file into the sandbox."""
         ...
@@ -300,6 +304,13 @@ class SandboxManagerExecutor:
         def _call() -> str:
             with SandboxClient(addr=self._addr) as sb:
                 return sb.read_file(sandbox_id, path).decode("utf-8", "replace")
+
+        return await anyio.to_thread.run_sync(_call)
+
+    async def read_bytes(self, *, sandbox_id: str, path: str) -> bytes:
+        def _call() -> bytes:
+            with SandboxClient(addr=self._addr) as sb:
+                return sb.read_file(sandbox_id, path)
 
         return await anyio.to_thread.run_sync(_call)
 
@@ -391,6 +402,7 @@ class StaticSandboxExecutor:
         self.writes: list[tuple[str, str, str]] = []
         self.byte_writes: list[tuple[str, str, bytes]] = []
         self.files: dict[tuple[str, str], str] = {}
+        self.byte_files: dict[tuple[str, str], bytes] = {}
 
     async def exec(
         self,
@@ -413,21 +425,36 @@ class StaticSandboxExecutor:
         if self._fail is not None:
             raise self._fail
         self.reads.append((sandbox_id, path))
-        try:
-            return self.files[(sandbox_id, path)]
-        except KeyError:
-            raise FileNotFoundError(path) from None
+        key = (sandbox_id, path)
+        if key in self.files:
+            return self.files[key]
+        if key in self.byte_files:
+            return self.byte_files[key].decode("utf-8", "replace")
+        raise FileNotFoundError(path)
+
+    async def read_bytes(self, *, sandbox_id: str, path: str) -> bytes:
+        if self._fail is not None:
+            raise self._fail
+        self.reads.append((sandbox_id, path))
+        key = (sandbox_id, path)
+        if key in self.byte_files:
+            return self.byte_files[key]
+        if key in self.files:
+            return self.files[key].encode("utf-8")
+        raise FileNotFoundError(path)
 
     async def write_file(self, *, sandbox_id: str, path: str, content: str) -> None:
         if self._fail is not None:
             raise self._fail
         self.writes.append((sandbox_id, path, content))
         self.files[(sandbox_id, path)] = content
+        self.byte_files[(sandbox_id, path)] = content.encode("utf-8")
 
     async def write_bytes(self, *, sandbox_id: str, path: str, data: bytes) -> None:
         if self._fail is not None:
             raise self._fail
         self.byte_writes.append((sandbox_id, path, data))
+        self.byte_files[(sandbox_id, path)] = data
         self.files[(sandbox_id, path)] = data.decode("utf-8", "replace")
 
     async def exec_stream(

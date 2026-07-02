@@ -80,6 +80,67 @@ func TestChatPersistsTurn(t *testing.T) {
 	}
 }
 
+func TestChatPersistsArtifactAndDownloads(t *testing.T) {
+	fs := &fakeStreamer{script: []agent.Event{
+		{Kind: "file", Data: map[string]string{
+			"id":         "art-1",
+			"filename":   "report.txt",
+			"mime":       "text/plain",
+			"size":       "11",
+			"object_key": "artifacts/dev-user/conv-1/art-1-report.txt",
+		}},
+		{Kind: "done", Data: map[string]string{"reason": "stop"}},
+	}}
+	cs := convo.NewMemory()
+	store := newFakeObjStore()
+	store.puts["artifacts/dev-user/conv-1/art-1-report.txt"] = []byte("hello world")
+	h := New(fs, auth.NewVerifier(auth.Config{}), logger.Must()).
+		WithConvoStore(cs).
+		WithObjStore(store, 1024).
+		Handler()
+
+	rec := httptest.NewRecorder()
+	h.ServeHTTP(rec, httptest.NewRequest("POST", "/v1/chat",
+		strings.NewReader(`{"prompt":"make a file","session_id":"conv-1"}`)))
+	if rec.Code != http.StatusOK {
+		t.Fatalf("chat status = %d", rec.Code)
+	}
+	body := rec.Body.String()
+	if strings.Contains(body, "object_key") {
+		t.Fatalf("object_key must not be exposed to browser: %q", body)
+	}
+	if !strings.Contains(body, `"download_url":"/api/conversations/conv-1/artifacts/art-1"`) {
+		t.Fatalf("file event missing download_url: %q", body)
+	}
+
+	rec = httptest.NewRecorder()
+	h.ServeHTTP(rec, httptest.NewRequest("GET", "/v1/conversations/conv-1/messages", nil))
+	if rec.Code != http.StatusOK {
+		t.Fatalf("messages status = %d", rec.Code)
+	}
+	var msgs []convo.Message
+	mustJSON(t, rec.Body.Bytes(), &msgs)
+	ap := msgs[1].Parts
+	if len(ap) != 1 || ap[0].Type != convo.PartFile || ap[0].ID != "art-1" {
+		t.Fatalf("assistant file part not persisted: %+v", ap)
+	}
+	if ap[0].DownloadURL != "/api/conversations/conv-1/artifacts/art-1" {
+		t.Fatalf("bad download url: %+v", ap[0])
+	}
+
+	rec = httptest.NewRecorder()
+	h.ServeHTTP(rec, httptest.NewRequest("GET", "/v1/conversations/conv-1/artifacts/art-1", nil))
+	if rec.Code != http.StatusOK {
+		t.Fatalf("download status = %d body=%s", rec.Code, rec.Body.String())
+	}
+	if rec.Header().Get("content-type") != "text/plain" {
+		t.Fatalf("content-type = %q", rec.Header().Get("content-type"))
+	}
+	if rec.Body.String() != "hello world" {
+		t.Fatalf("download body = %q", rec.Body.String())
+	}
+}
+
 // TestChatWithoutSessionIDSkipsPersistence: no session_id => nothing stored, but
 // the stream still succeeds.
 func TestChatWithoutSessionIDSkipsPersistence(t *testing.T) {

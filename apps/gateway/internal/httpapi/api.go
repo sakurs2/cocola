@@ -16,6 +16,8 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"net/url"
+	"strconv"
 	"strings"
 	"time"
 
@@ -109,6 +111,8 @@ func (a *API) Handler() http.Handler {
 		a.verifier.Middleware(writeErr)(http.HandlerFunc(a.listConversations))))
 	mux.Handle("GET /v1/conversations/{id}/messages", a.instrument("GET /v1/conversations/{id}/messages",
 		a.verifier.Middleware(writeErr)(http.HandlerFunc(a.conversationMessages))))
+	mux.Handle("GET /v1/conversations/{id}/artifacts/{artifact_id}", a.instrument("GET /v1/conversations/{id}/artifacts/{artifact_id}",
+		a.verifier.Middleware(writeErr)(http.HandlerFunc(a.downloadArtifact))))
 	// Tracing: wrap the whole mux so an inbound W3C traceparent is extracted and
 	// a server span is started before auth/handlers run; the span context then
 	// flows into the agent gRPC call (client stats handler) for an end-to-end
@@ -237,6 +241,9 @@ func (a *API) chat(w http.ResponseWriter, r *http.Request) {
 	}
 
 	err := a.streamer.Stream(r.Context(), q, func(ev agent.Event) error {
+		if ev.Kind == "file" {
+			ev = a.registerArtifact(context.Background(), id, req.SessionID, ev)
+		}
 		if reducer != nil {
 			reducer.Apply(ev.Kind, ev.Data)
 		}
@@ -307,6 +314,46 @@ func (a *API) persistAssistantTurn(ctx context.Context, sessionID string, parts 
 	}
 }
 
+// registerArtifact records a file event's private object-store key, then
+// returns the browser-safe event shape (download URL, no object_key).
+func (a *API) registerArtifact(ctx context.Context, id auth.Identity, sessionID string, ev agent.Event) agent.Event {
+	data := make(map[string]string, len(ev.Data)+1)
+	for k, v := range ev.Data {
+		if k != "object_key" {
+			data[k] = v
+		}
+	}
+	artifactID := ev.Data["id"]
+	if artifactID == "" {
+		artifactID = uuid.NewString()
+		data["id"] = artifactID
+	}
+	data["download_url"] = artifactDownloadURL(sessionID, artifactID)
+
+	if a.convo == nil || sessionID == "" || ev.Data["object_key"] == "" {
+		return agent.Event{Kind: ev.Kind, Data: data}
+	}
+	size, _ := strconv.ParseInt(ev.Data["size"], 10, 64)
+	mime := ev.Data["mime"]
+	if mime == "" {
+		mime = "application/octet-stream"
+	}
+	if err := a.convo.UpsertArtifact(ctx, convo.Artifact{
+		ID:             artifactID,
+		ConversationID: sessionID,
+		UserID:         id.UserID,
+		TenantID:       id.TenantID,
+		Filename:       ev.Data["filename"],
+		Mime:           mime,
+		Size:           size,
+		ObjectKey:      ev.Data["object_key"],
+		CreatedAt:      time.Now().UTC(),
+	}); err != nil {
+		a.log.Warn("persist artifact failed: " + err.Error())
+	}
+	return agent.Event{Kind: ev.Kind, Data: data}
+}
+
 // titleFromPrompt derives the MVP conversation title: the first line of the
 // prompt, trimmed and truncated to a display-friendly length (rune-safe).
 func titleFromPrompt(prompt string) string {
@@ -320,6 +367,10 @@ func titleFromPrompt(prompt string) string {
 		title = strings.TrimSpace(string(r[:maxRunes])) + "\u2026"
 	}
 	return title
+}
+
+func artifactDownloadURL(sessionID, artifactID string) string {
+	return "/api/conversations/" + url.PathEscape(sessionID) + "/artifacts/" + url.PathEscape(artifactID)
 }
 
 // listConversations serves the sidebar: the caller's conversations, newest
@@ -372,6 +423,54 @@ func (a *API) conversationMessages(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, msgs)
+}
+
+func (a *API) downloadArtifact(w http.ResponseWriter, r *http.Request) {
+	id, ok := auth.IdentityOf(r)
+	if !ok {
+		writeErr(w, http.StatusUnauthorized, "UNAUTHENTICATED", "missing identity")
+		return
+	}
+	convID := r.PathValue("id")
+	artifactID := r.PathValue("artifact_id")
+	if convID == "" || artifactID == "" {
+		writeErr(w, http.StatusBadRequest, "INVALID_ARGUMENT", "conversation id and artifact id are required")
+		return
+	}
+	if a.convo == nil {
+		writeErr(w, http.StatusNotFound, "NOT_FOUND", "artifact not found")
+		return
+	}
+	artifact, err := a.convo.GetArtifact(r.Context(), convID, artifactID, id.UserID)
+	if err != nil {
+		if errors.Is(err, convo.ErrNotFound) {
+			writeErr(w, http.StatusNotFound, "NOT_FOUND", "artifact not found")
+			return
+		}
+		a.log.Warn("get artifact failed: " + err.Error())
+		writeErr(w, http.StatusInternalServerError, "INTERNAL", "could not load artifact")
+		return
+	}
+	if a.store == nil {
+		writeErr(w, http.StatusServiceUnavailable, "UNAVAILABLE", "artifact object store is not configured")
+		return
+	}
+	data, err := a.store.Get(r.Context(), artifact.ObjectKey)
+	if err != nil {
+		a.log.Warn("artifact object read failed: " + err.Error())
+		writeErr(w, http.StatusNotFound, "NOT_FOUND", "artifact bytes not found")
+		return
+	}
+	mime := artifact.Mime
+	if mime == "" {
+		mime = "application/octet-stream"
+	}
+	filename := sanitizeKeySegment(artifact.Filename)
+	w.Header().Set("content-type", mime)
+	w.Header().Set("content-length", strconv.Itoa(len(data)))
+	w.Header().Set("content-disposition", fmt.Sprintf("inline; filename=%q", filename))
+	w.WriteHeader(http.StatusOK)
+	_, _ = w.Write(data)
 }
 
 // writeSSE serializes one event as an SSE frame: "event: <kind>\ndata: <json>\n\n".

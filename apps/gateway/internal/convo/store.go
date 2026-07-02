@@ -4,8 +4,8 @@
 //
 // This is a "route A" UI-message MIRROR (see docs/plan/
 // conversation-persistence-history-rendering.md): we store the exact parts the
-// web client renders (text / reasoning / tool-call), NOT the agent's on-disk
-// claude JSONL (which stays the source of truth for --resume). The Store
+// web client renders (text / reasoning / tool-call / file), NOT the agent's
+// on-disk claude JSONL (which stays the source of truth for --resume). The Store
 // contract has two backends behind one interface, matching the project rule
 // (go-common/redis.KV, admin-api/store): Memory for tests/zero-dep dev, Postgres
 // when COCOLA_PG_DSN is set. Schema is owned by db/migrations (goose); this
@@ -30,10 +30,12 @@ const (
 	PartText      = "text"
 	PartReasoning = "reasoning"
 	PartToolCall  = "tool-call"
+	PartFile      = "file"
 )
 
 // Part mirrors the frontend UiPart union. A text/reasoning part uses Text; a
-// tool-call part uses the ToolCall* fields. Persisted as JSONB verbatim so a
+// tool-call part uses the ToolCall* fields; a file part uses the artifact
+// metadata fields. Persisted as JSONB verbatim so a
 // read replays straight into convertMessage with zero schema drift.
 //
 // Only the fields relevant to a given Type are populated; the rest stay at
@@ -52,6 +54,13 @@ type Part struct {
 	ArgsText   string  `json:"argsText,omitempty"`
 	Result     *string `json:"result,omitempty"`
 	IsError    bool    `json:"isError,omitempty"`
+
+	// file
+	ID          string `json:"id,omitempty"`
+	Filename    string `json:"filename,omitempty"`
+	MimeType    string `json:"mimeType,omitempty"`
+	Size        int64  `json:"size,omitempty"`
+	DownloadURL string `json:"downloadUrl,omitempty"`
 }
 
 // Conversation is one row in the sidebar. ID reuses the frontend session_id.
@@ -73,6 +82,20 @@ type Message struct {
 	CreatedAt      time.Time `json:"created_at"`
 }
 
+// Artifact is one downloadable agent-produced file. Bytes are stored in the
+// object store; this row is the auth-scoped metadata index.
+type Artifact struct {
+	ID             string    `json:"id"`
+	ConversationID string    `json:"conversation_id"`
+	UserID         string    `json:"user_id"`
+	TenantID       string    `json:"tenant_id"`
+	Filename       string    `json:"filename"`
+	Mime           string    `json:"mime"`
+	Size           int64     `json:"size"`
+	ObjectKey      string    `json:"object_key"`
+	CreatedAt      time.Time `json:"created_at"`
+}
+
 // Store is the persistence contract the gateway depends on. All reads are
 // scoped by userID so a caller can only ever see their own conversations
 // (ownership is enforced in the store, never trusted from the request body).
@@ -88,4 +111,8 @@ type Store interface {
 	// GetMessages returns a conversation's messages in chronological order, but
 	// ONLY if userID owns it; otherwise ErrNotFound (no cross-user leak).
 	GetMessages(ctx context.Context, convID, userID string) ([]Message, error)
+	// UpsertArtifact records a downloadable artifact's metadata.
+	UpsertArtifact(ctx context.Context, a Artifact) error
+	// GetArtifact returns an artifact only when userID owns its conversation.
+	GetArtifact(ctx context.Context, convID, artifactID, userID string) (Artifact, error)
 }

@@ -12,6 +12,11 @@ import json
 from dataclasses import dataclass, field
 
 from cocola_agent_runtime.agent_provider import AgentEvent, AgentOptions
+from cocola_agent_runtime.sandbox_binder import (
+    ExecOutcome,
+    StaticSandboxBinder,
+    StaticSandboxExecutor,
+)
 from cocola_agent_runtime.server import AgentRuntimeServicer, event_to_proto
 from cocola_agent_runtime.skill_loader import Skill, StaticSkillCatalog
 
@@ -57,6 +62,54 @@ class BoomProvider:
         self.seen_options = options
         yield AgentEvent(kind="text", data={"text": "partial"})
         raise RuntimeError("provider exploded")
+
+
+class FakeObjectStore:
+    def __init__(self):
+        self.puts = {}
+
+    def get(self, key: str) -> bytes:
+        return self.puts[key]
+
+    def put(self, key: str, data: bytes, mime: str) -> None:
+        self.puts[key] = (data, mime)
+
+
+class OutputWritingProvider:
+    def __init__(self, executor: StaticSandboxExecutor):
+        self._executor = executor
+        self.seen_options: AgentOptions | None = None
+
+    async def query(self, prompt, options):
+        self.seen_options = options
+        await self._executor.write_bytes(
+            sandbox_id=options.sandbox_id,
+            path="outputs/report.txt",
+            data=b"hello world",
+        )
+        await self._executor.write_bytes(
+            sandbox_id=options.sandbox_id,
+            path="scratch.txt",
+            data=b"not public",
+        )
+        yield AgentEvent(kind="text", data={"text": "done"})
+        yield AgentEvent(kind="done", data={})
+
+
+def outputs_snapshot_executor() -> StaticSandboxExecutor:
+    ex: StaticSandboxExecutor
+
+    def exec_handler(sandbox_id, cmd):
+        if cmd[:2] == ["python3", "-c"]:
+            out = {}
+            for (sid, path), data in ex.byte_files.items():
+                if sid == sandbox_id and path.startswith("outputs/"):
+                    out[path] = {"size": len(data), "mtime_ns": len(data)}
+            return ExecOutcome(exit_code=0, stdout=json.dumps(out))
+        return ExecOutcome(exit_code=0)
+
+    ex = StaticSandboxExecutor(exec_handler=exec_handler)
+    return ex
 
 
 def test_event_to_proto_flattens_non_strings():
@@ -115,3 +168,27 @@ async def test_query_maps_request_fields_to_options():
     o = prov.seen_options
     assert o.user_id == "emp-9" and o.session_id == "sess-7"
     assert o.sandbox_id == "box-1" and o.max_turns == 5
+
+
+async def test_query_publishes_outputs_artifacts():
+    ex = outputs_snapshot_executor()
+    store = FakeObjectStore()
+    prov = OutputWritingProvider(ex)
+    ctx = FakeContext()
+
+    await AgentRuntimeServicer(
+        prov,
+        binder=StaticSandboxBinder(),
+        executor=ex,
+        objstore=store,
+    ).Query(FakeRequest(), ctx)
+
+    kinds = [e.kind for e in ctx.written]
+    assert kinds == ["sandbox", "text", "file", "done"]
+    file_event = ctx.written[2]
+    assert file_event.data["filename"] == "report.txt"
+    assert file_event.data["mime"] == "text/plain"
+    key = file_event.data["object_key"]
+    assert key.startswith("artifacts/U1/S1/")
+    assert store.puts[key] == (b"hello world", "text/plain")
+    assert "Only files in ./outputs/" in prov.seen_options.system_prompt

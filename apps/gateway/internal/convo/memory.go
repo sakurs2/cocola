@@ -13,6 +13,7 @@ type Memory struct {
 	mu    sync.RWMutex
 	convs map[string]Conversation
 	msgs  map[string][]Message // conversation_id -> messages (append order)
+	arts  map[string]Artifact  // artifact_id -> metadata
 }
 
 var _ Store = (*Memory)(nil)
@@ -22,6 +23,7 @@ func NewMemory() *Memory {
 	return &Memory{
 		convs: make(map[string]Conversation),
 		msgs:  make(map[string][]Message),
+		arts:  make(map[string]Artifact),
 	}
 }
 
@@ -75,4 +77,25 @@ func (m *Memory) GetMessages(_ context.Context, convID, userID string) ([]Messag
 	out := make([]Message, len(src))
 	copy(out, src)
 	return out, nil
+}
+
+func (m *Memory) UpsertArtifact(_ context.Context, a Artifact) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.arts[a.ID] = a
+	return nil
+}
+
+func (m *Memory) GetArtifact(_ context.Context, convID, artifactID, userID string) (Artifact, error) {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	c, ok := m.convs[convID]
+	if !ok || c.UserID != userID {
+		return Artifact{}, ErrNotFound
+	}
+	a, ok := m.arts[artifactID]
+	if !ok || a.ConversationID != convID || a.UserID != userID {
+		return Artifact{}, ErrNotFound
+	}
+	return a, nil
 }

@@ -111,3 +111,36 @@ func (p *Postgres) GetMessages(ctx context.Context, convID, userID string) ([]Me
 	}
 	return out, rows.Err()
 }
+
+func (p *Postgres) UpsertArtifact(ctx context.Context, a Artifact) error {
+	const q = `INSERT INTO artifacts
+		(id, conversation_id, user_id, tenant_id, filename, mime, size_bytes, object_key, created_at)
+		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)
+		ON CONFLICT (id) DO UPDATE SET
+			filename = EXCLUDED.filename,
+			mime = EXCLUDED.mime,
+			size_bytes = EXCLUDED.size_bytes,
+			object_key = EXCLUDED.object_key`
+	_, err := p.pool.Exec(ctx, q,
+		a.ID, a.ConversationID, a.UserID, a.TenantID, a.Filename, a.Mime, a.Size, a.ObjectKey, a.CreatedAt)
+	return err
+}
+
+func (p *Postgres) GetArtifact(ctx context.Context, convID, artifactID, userID string) (Artifact, error) {
+	const q = `SELECT a.id, a.conversation_id, a.user_id, a.tenant_id,
+			a.filename, a.mime, a.size_bytes, a.object_key, a.created_at
+		FROM artifacts a
+		JOIN conversations c ON c.id = a.conversation_id
+		WHERE a.id = $1 AND a.conversation_id = $2 AND c.user_id = $3`
+	var a Artifact
+	if err := p.pool.QueryRow(ctx, q, artifactID, convID, userID).Scan(
+		&a.ID, &a.ConversationID, &a.UserID, &a.TenantID,
+		&a.Filename, &a.Mime, &a.Size, &a.ObjectKey, &a.CreatedAt,
+	); err != nil {
+		if err == pgx.ErrNoRows {
+			return Artifact{}, ErrNotFound
+		}
+		return Artifact{}, err
+	}
+	return a, nil
+}

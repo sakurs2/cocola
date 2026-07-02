@@ -1,14 +1,16 @@
 package convo
 
+import "strconv"
+
 // Reducer aggregates the agent's SSE event stream into an assistant message's
 // Part slice, mirroring the frontend reducer in apps/web/app/runtime-provider.tsx
 // (reducePart/appendTo/fillToolResult). Persisting the SAME shape the browser
 // renders is what makes route A a zero-drift mirror: a stored message replays
 // straight through convertMessage.
 //
-// Event vocabulary (kind): text | thinking | tool_use | tool_result | error;
-// result / system / sandbox / done carry no message-body content and are
-// dropped (identical to the frontend). Unknown kinds are ignored.
+// Event vocabulary (kind): text | thinking | tool_use | tool_result | file |
+// error; result / system / sandbox / done carry no message-body content and
+// are dropped (identical to the frontend). Unknown kinds are ignored.
 type Reducer struct {
 	parts []Part
 }
@@ -37,11 +39,32 @@ func (r *Reducer) Apply(kind string, data map[string]string) {
 		})
 	case "tool_result":
 		r.fillToolResult(data["tool_use_id"], data["content"], truthy(data["is_error"]))
+	case "file":
+		r.appendFile(data)
 	case "error":
 		r.appendText(PartText, "\n\n⚠️ "+errText(data))
 	default:
 		// result / system / sandbox / done / unknown: no body content.
 	}
+}
+
+func (r *Reducer) appendFile(data map[string]string) {
+	size, _ := strconv.ParseInt(data["size"], 10, 64)
+	mime := data["mime"]
+	if mime == "" {
+		mime = data["mimeType"]
+	}
+	if mime == "" {
+		mime = "application/octet-stream"
+	}
+	r.parts = append(r.parts, Part{
+		Type:        PartFile,
+		ID:          data["id"],
+		Filename:    data["filename"],
+		MimeType:    mime,
+		Size:        size,
+		DownloadURL: data["download_url"],
+	})
 }
 
 // Parts returns the aggregated parts (nil if nothing was applied).
