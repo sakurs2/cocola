@@ -208,29 +208,51 @@ function convertMessage(message: UiMessage): ThreadMessageLike {
 const attachmentAdapter = new Base64AttachmentAdapter();
 
 export function CocolaRuntimeProvider({ children }: { children: ReactNode }) {
-  const [messages, setMessages] = useState<UiMessage[]>([]);
-  const [isRunning, setIsRunning] = useState(false);
+  // Message and running state are keyed by conversation id (session_id). A
+  // background stream keeps writing into its own buffer even after navigation.
+  const [convMessages, setConvMessages] = useState<Record<string, UiMessage[]>>({});
+  const [runningIds, setRunningIds] = useState<Set<string>>(() => new Set());
   // Lazy init: one random session_id per browser tab. NEVER a shared constant
   // ("s1" made every client resume the SAME claude conversation — cross-user
   // context bleed once the session_map is durable, and no way to start over).
   const [sessionId, setSessionId] = useState(genId);
-  const [sandbox, setSandbox] = useState<SandboxInfo | null>(null);
+  const [sandboxes, setSandboxes] = useState<Record<string, SandboxInfo | null>>({});
   const [conversations, setConversations] = useState<ConversationSummary[]>([]);
-  const abortRef = useRef<AbortController | null>(null);
+  const abortMap = useRef<Map<string, AbortController>>(new Map());
 
-  const applyEvent = useCallback((assistantId: string, ev: AgentEvent) => {
+  const messages = useMemo(() => convMessages[sessionId] ?? [], [convMessages, sessionId]);
+  const isRunning = runningIds.has(sessionId);
+  const sandbox = sandboxes[sessionId] ?? null;
+
+  const setRunning = useCallback((convId: string, on: boolean) => {
+    setRunningIds((prev) => {
+      const next = new Set(prev);
+      if (on) next.add(convId);
+      else next.delete(convId);
+      return next;
+    });
+  }, []);
+
+  const applyEvent = useCallback((convId: string, assistantId: string, ev: AgentEvent) => {
     if (ev.kind === "sandbox") {
       const d = ev.data ?? {};
-      setSandbox({
-        sandboxId: d.sandbox_id ?? "",
-        endpoint: d.endpoint ?? "",
-        reused: isTruthy(d.reused),
-      });
+      setSandboxes((prev) => ({
+        ...prev,
+        [convId]: {
+          sandboxId: d.sandbox_id ?? "",
+          endpoint: d.endpoint ?? "",
+          reused: isTruthy(d.reused),
+        },
+      }));
       return;
     }
-    setMessages((prev) =>
-      prev.map((m) => (m.id === assistantId ? { ...m, parts: reducePart(m.parts, ev) } : m)),
-    );
+    setConvMessages((prev) => {
+      const cur = prev[convId] ?? [];
+      const next = cur.map((m) =>
+        m.id === assistantId ? { ...m, parts: reducePart(m.parts, ev) } : m,
+      );
+      return { ...prev, [convId]: next };
+    });
   }, []);
 
   // Pull the sidebar conversation list from the gateway (scoped server-side to
@@ -279,16 +301,33 @@ export function CocolaRuntimeProvider({ children }: { children: ReactNode }) {
           })),
       );
 
+      const convId = sessionId;
       const assistantId = genId();
-      setMessages((prev) => [
-        ...prev,
-        { id: genId(), role: "user", parts: [{ type: "text", text }], createdAt: Date.now() },
-        { id: assistantId, role: "assistant", parts: [], createdAt: Date.now() },
-      ]);
-      setIsRunning(true);
+      setConvMessages((prev) => {
+        const cur = prev[convId] ?? [];
+        return {
+          ...prev,
+          [convId]: [
+            ...cur,
+            { id: genId(), role: "user", parts: [{ type: "text", text }], createdAt: Date.now() },
+            { id: assistantId, role: "assistant", parts: [], createdAt: Date.now() },
+          ],
+        };
+      });
+      setRunning(convId, true);
+
+      // Surface the conversation immediately in the sidebar, then reconcile
+      // with the server's persisted title/updated_at when the stream finishes.
+      setConversations((prev) => {
+        const now = new Date().toISOString();
+        const existing = prev.find((c) => c.id === convId);
+        const rest = prev.filter((c) => c.id !== convId);
+        const title = existing?.title || text.slice(0, 40) || "New Chat";
+        return [{ id: convId, title, updated_at: now }, ...rest];
+      });
 
       const ctrl = new AbortController();
-      abortRef.current = ctrl;
+      abortMap.current.set(convId, ctrl);
       try {
         const res = await fetch("/api/chat", {
           method: "POST",
@@ -297,7 +336,7 @@ export function CocolaRuntimeProvider({ children }: { children: ReactNode }) {
           },
           body: JSON.stringify({
             prompt: text,
-            session_id: sessionId,
+            session_id: convId,
             ...(attachments.length > 0 ? { attachments } : {}),
           }),
           signal: ctrl.signal,
@@ -313,64 +352,62 @@ export function CocolaRuntimeProvider({ children }: { children: ReactNode }) {
           buffer += decoder.decode(value, { stream: true });
           const { events, rest } = parseFrames(buffer);
           buffer = rest;
-          for (const ev of events) applyEvent(assistantId, ev);
+          for (const ev of events) applyEvent(convId, assistantId, ev);
         }
       } catch (err) {
         if (!(err instanceof DOMException && err.name === "AbortError")) {
           const msg = err instanceof Error ? err.message : String(err);
-          applyEvent(assistantId, { kind: "error", data: { error: msg } });
+          applyEvent(convId, assistantId, { kind: "error", data: { error: msg } });
         }
       } finally {
-        setIsRunning(false);
-        abortRef.current = null;
-        // The turn just persisted server-side (new conversation and/or a new
-        // title / updated_at). Refresh the sidebar so it surfaces.
+        setRunning(convId, false);
+        abortMap.current.delete(convId);
         refreshConversations();
       }
     },
-    [sessionId, applyEvent, refreshConversations],
+    [sessionId, applyEvent, refreshConversations, setRunning],
   );
 
   const onCancel = useCallback(async () => {
-    abortRef.current?.abort();
-    setIsRunning(false);
-  }, []);
+    const ctrl = abortMap.current.get(sessionId);
+    ctrl?.abort();
+    abortMap.current.delete(sessionId);
+    setRunning(sessionId, false);
+  }, [sessionId, setRunning]);
 
   // Replay a stored conversation into the thread: fetch its messages, map them
   // back into local state, and point session_id at it so a follow-up turn
   // continues the SAME conversation (and lets the backend --resume it).
-  const loadConversation = useCallback(async (id: string) => {
-    abortRef.current?.abort();
-    abortRef.current = null;
-    setIsRunning(false);
-    try {
-      const res = await fetch(`/api/conversations/${encodeURIComponent(id)}/messages`);
-      if (!res.ok) return;
-      const rows = (await res.json()) as WireMessage[];
-      const loaded: UiMessage[] = (Array.isArray(rows) ? rows : []).map((m) => ({
-        id: m.id,
-        role: m.role,
-        parts: m.parts ?? [],
-        createdAt: m.created_at ? new Date(m.created_at).getTime() : Date.now(),
-      }));
-      setMessages(loaded);
-      setSandbox(null);
+  const loadConversation = useCallback(
+    async (id: string) => {
+      setSandboxes((prev) => ({ ...prev, [id]: prev[id] ?? null }));
       setSessionId(id);
-    } catch {
-      // ignore — leave the current thread untouched on failure
-    }
-  }, []);
+      if ((convMessages[id]?.length ?? 0) > 0) return;
+      try {
+        const res = await fetch(`/api/conversations/${encodeURIComponent(id)}/messages`);
+        if (!res.ok) return;
+        const rows = (await res.json()) as WireMessage[];
+        const loaded: UiMessage[] = (Array.isArray(rows) ? rows : []).map((m) => ({
+          id: m.id,
+          role: m.role,
+          parts: m.parts ?? [],
+          createdAt: m.created_at ? new Date(m.created_at).getTime() : Date.now(),
+        }));
+        setConvMessages((prev) => ({ ...prev, [id]: loaded }));
+      } catch {
+        // ignore — leave the current thread untouched on failure
+      }
+    },
+    [convMessages],
+  );
 
-  // Start a fresh conversation. Aborts any in-flight stream, clears the local
-  // message state and sandbox banner, and rotates session_id to a new random
-  // id so the backend cannot --resume the previous claude session.
+  // Start a fresh conversation. Other conversations' in-flight streams continue
+  // in the background; the fresh session_id prevents backend --resume.
   const newConversation = useCallback(() => {
-    abortRef.current?.abort();
-    abortRef.current = null;
-    setIsRunning(false);
-    setMessages([]);
-    setSandbox(null);
-    setSessionId(genId());
+    const fresh = genId();
+    setSessionId(fresh);
+    setConvMessages((prev) => ({ ...prev, [fresh]: [] }));
+    setSandboxes((prev) => ({ ...prev, [fresh]: null }));
   }, []);
 
   // Initial load of the sidebar list.
