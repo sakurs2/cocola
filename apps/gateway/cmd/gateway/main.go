@@ -10,7 +10,8 @@
 //	COCOLA_AGENT_ADDR       agent-runtime gRPC addr  (default 127.0.0.1:50061)
 //	COCOLA_AUTH_SECRET      HS256 secret; empty => auth disabled (dev only)
 //	COCOLA_AUTH_ISSUER      expected token issuer    (default cocola)
-//	COCOLA_AUTH_ALLOW_ANON  "1" to accept blank tokens as dev-user (dev only)
+//	COCOLA_AUTH_ALLOW_ANON  blank tokens => dev-user; default ON, set "0" to
+//	                        reject anonymous callers (dev only)
 //	COCOLA_METRICS_ADDR     observability listen address; empty => disabled
 //	                        (default :9091, serving /metrics and /healthz)
 //	COCOLA_PG_DSN           Postgres DSN; enables conversation persistence
@@ -76,7 +77,14 @@ func main() {
 	verifier := auth.NewVerifier(auth.Config{
 		Secret:         config.SecretFromEnv("COCOLA_AUTH_SECRET"),
 		Issuer:         env("COCOLA_AUTH_ISSUER", "cocola"),
-		AllowAnonymous: os.Getenv("COCOLA_AUTH_ALLOW_ANON") == "1",
+		// Auth identity is a LATER concern: today the product UI sends no token
+		// and every caller should resolve to the shared dev-user. So anonymous
+		// access defaults ON and is only disabled by an explicit
+		// COCOLA_AUTH_ALLOW_ANON=0. (It still requires a secret to matter at all;
+		// with no secret auth is off entirely.) This keeps a blank-token read
+		// working no matter how the gateway is launched (make up, GoLand, bare
+		// go run) rather than only when run-stack.sh exports the flag.
+		AllowAnonymous: os.Getenv("COCOLA_AUTH_ALLOW_ANON") != "0",
 	})
 	// Observability: a shared metrics registry instruments the public routes and
 	// is also exposed on a dedicated port so a scrape never competes with user
