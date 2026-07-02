@@ -171,15 +171,59 @@ trap cleanup EXIT INT TERM
 # (this actually bit us: a stale llm-gateway on 8081 swallowed traffic so the
 # real one logged nothing). Kill any listener on the port up front. macOS-safe:
 # resolve PIDs via lsof, then SIGTERM, escalate to SIGKILL if still alive.
+# CRITICAL: a container that PUBLISHES a host port is fronted by the container
+# engine's OWN proxy process (on OrbStack/Docker Desktop that is a single
+# "OrbStack Helper" / "com.docker.backend" / "vpnkit" process). lsof on such a
+# port returns THAT engine pid -- so a naive kill would SIGTERM the whole engine,
+# tearing down the VM and every container with it. This actually bit us: running
+# `make up-hybrid` while the full containerized stack still held 50051/8080/8092
+# made free_port kill "OrbStack", the VM bounced, and every container died
+# ("Received signal, requesting stop" in the OrbStack vmgr log). So free_port
+# NEVER kills a container-engine/proxy process; ports it owns belong to
+# containers and must be freed via docker (make dev-down / opensandbox-down).
+# We only reap our OWN native children (go run / uv run / pnpm dev, etc.).
+#
+# We resolve the command name via `lsof -F c` (NOT ps): on locked-down corporate
+# macOS `ps` can be denied, and a blank name there would fall through to a kill.
+# Anything we cannot positively identify as ours is treated as an engine/unknown
+# and SPARED -- fail-safe: when unsure, never kill.
+_engine_name_re='OrbStack|orbstack|com\.docker|[Dd]ocker|vpnkit|qemu|colima|lima|containerd|dockerd'
+
+# Print, one per line, ONLY the pids on a port that are safe for us to reap
+# (i.e. positively NOT a container engine / port forwarder). Unknown => skipped.
+_reapable_pids_on_port() {
+  local port="$1" pid cmd
+  # -F pc emits: p<pid> then c<command> lines, grouped per process.
+  while IFS= read -r line; do
+    case "$line" in
+      p*) pid="${line#p}" ;;
+      c*)
+        cmd="${line#c}"
+        if [[ -n "$pid" && ! "$cmd" =~ $_engine_name_re ]]; then
+          printf '%s\n' "$pid"
+        fi
+        pid=""
+        ;;
+    esac
+  done < <(lsof -nP -iTCP:"$port" -sTCP:LISTEN -Fpc 2>/dev/null || true)
+}
+
 free_port() {
-  local port="$1" name="$2" pids
-  pids="$(lsof -ti "TCP:$port" -s "TCP:LISTEN" 2>/dev/null || true)"
-  [[ -z "$pids" ]] && return 0
-  echo "==> port $port ($name) busy; freeing stale listener(s): $pids"
+  local port="$1" name="$2" pids all
+  all="$(lsof -ti "TCP:$port" -s "TCP:LISTEN" 2>/dev/null || true)"
+  [[ -z "$all" ]] && return 0
+  pids="$(_reapable_pids_on_port "$port" | tr '\n' ' ')"
+  pids="${pids// /  }"; pids="$(echo $pids)"   # normalize whitespace
+  if [[ -z "$pids" ]]; then
+    echo "==> port $port ($name) is held by the container engine (published container port); NOT killing it" >&2
+    echo "    stop the owning container via docker / make dev-down / make opensandbox-down" >&2
+    return 0
+  fi
+  echo "==> port $port ($name) busy; freeing stale NATIVE listener(s): $pids"
   # shellcheck disable=SC2086
   kill $pids 2>/dev/null || true
   for ((i=0; i<10; i++)); do
-    pids="$(lsof -ti "TCP:$port" -s "TCP:LISTEN" 2>/dev/null || true)"
+    pids="$(_reapable_pids_on_port "$port" | tr '\n' ' ')"; pids="$(echo $pids)"
     [[ -z "$pids" ]] && return 0
     sleep 0.3
   done
@@ -243,6 +287,24 @@ fi
 hybrid_up() {
   command -v docker >/dev/null 2>&1 || { echo "!! --hybrid needs docker; is Docker Desktop running?" >&2; exit 1; }
   docker info >/dev/null 2>&1 || { echo "!! docker daemon unreachable; start Docker Desktop first." >&2; exit 1; }
+
+  # Preflight: --hybrid runs sandbox-manager/gateway/admin-api/agent-runtime/web
+  # NATIVELY, so their host ports must be FREE. If the full containerized stack
+  # is still up, its containers PUBLISH those same ports -- the native binds
+  # would fail, and because a published port is fronted by the engine proxy we
+  # must NOT (and now will not) try to reap it. Rather than crash mid-boot,
+  # detect the conflicting stack here and tell the user to stop it first.
+  local _conflict="" _p _cid
+  for _p in 50051 8080 8092 3000 8081; do
+    _cid="$(docker ps --filter "publish=$_p" --format '{{.Names}}' 2>/dev/null | head -1 || true)"
+    [[ -n "$_cid" ]] && _conflict+=$'\n'"    :$_p is published by container '$_cid'"
+  done
+  if [[ -n "$_conflict" ]]; then
+    echo "!! --hybrid runs cocola services NATIVELY, but a containerized stack still holds their ports:$_conflict" >&2
+    echo "   stop the full stack first, then re-run --hybrid:  make dev-down" >&2
+    echo "   (leave only the sandbox deps -- OpenSandbox server + redis/pg/minio -- to this mode)" >&2
+    exit 1
+  fi
 
   # (1) OpenSandbox server (host :8090) when the backend is opensandbox. The
   # default docker/DooD provider needs no standalone server.
