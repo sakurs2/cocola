@@ -31,10 +31,13 @@
 #   bash scripts/run-stack.sh            # echo stack: agent-runtime + gateway
 #   bash scripts/run-stack.sh --with-web # + browser test tool on :3000
 #   bash scripts/run-stack.sh --all      # + llm-gateway (real SDK path) + web
-#   bash scripts/run-stack.sh --hybrid   # REAL Route A: containerized backends
-#                                        # (sandbox-manager/llm-gateway/...) +
-#                                        # NATIVE app incl. web (:3000) -- no
-#                                        # image rebuild on edits
+#   bash scripts/run-stack.sh --hybrid   # THE debug mode: only the sandbox's own
+#                                        # container deps (OpenSandbox server +
+#                                        # redis/pg/minio) run in containers;
+#                                        # EVERY cocola service (sandbox-manager,
+#                                        # llm-gateway, admin-api, agent-runtime,
+#                                        # gateway, web) runs NATIVE. REAL Route A
+#                                        # + real model, zero image rebuild.
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
@@ -47,7 +50,7 @@ for arg in "$@"; do
   case "$arg" in
     --with-llm) WITH_LLM=1 ;;
     --with-web) WITH_WEB=1 ;;
-    --hybrid)   HYBRID=1; WITH_WEB=1 ;;
+    --hybrid)   HYBRID=1; WITH_WEB=1; WITH_LLM=1 ;;
     --all)      WITH_LLM=1; WITH_WEB=1 ;;
     -h|--help)
       grep '^#' "$0" | sed 's/^# \{0,1\}//'
@@ -103,6 +106,8 @@ PIDS=()
 OWNED_PORTS=("$AGENT_PORT" "$GATEWAY_PORT")
 [[ "$WITH_LLM" == "1" ]] && OWNED_PORTS+=("$LLM_PORT")
 [[ "$WITH_WEB" == "1" ]] && OWNED_PORTS+=("$WEB_PORT")
+# hybrid runs sandbox-manager (50051) and admin-api (8092) NATIVELY too.
+[[ "$HYBRID" == "1" ]] && OWNED_PORTS+=(50051 8092)
 
 log_redirect() { printf '%s/%s.log' "$LOG_DIR" "$1"; }
 
@@ -209,37 +214,38 @@ else
 fi
 
 # ----------------------------------------------------------------- hybrid mode
-# --hybrid bridges the two dev tiers: the DATA/CONTROL backends run CONTAINERIZED
-# (a docker-compose.full.yml subset) while the APP processes you iterate on --
-# agent-runtime + gateway (+ web) -- run NATIVELY below. You get a REAL Route A
-# (real sandbox-manager + real llm-gateway/model) with ZERO image rebuilds on
-# each code change: edit, Ctrl-C, `make up-hybrid` again -- the idempotent
-# `up -d` leaves the warm backends untouched and only your native app relaunches.
+# THE single debug mode. Only the sandbox's OWN container dependencies stay
+# containerized; every cocola-authored service runs NATIVELY in the foreground:
 #
-# Wiring (native app -> containerized backend, over host-published ports):
-#   agent-runtime -> sandbox-manager  127.0.0.1:50051  (COCOLA_SANDBOX_ADDR)
-#                 -> admin-api        127.0.0.1:8092   (COCOLA_ADMIN_BASE_URL)
-#                 -> postgres         127.0.0.1:5432   (COCOLA_PG_DSN)
-#                 -> minio            127.0.0.1:9000   (COCOLA_MINIO_*)
-#   sandbox brain -> llm-gateway  host.docker.internal:18091  (injected into the
-#                    sandbox at creation; sandboxes are DooD siblings on the host
-#                    daemon, so they reach the gateway over the host bridge)
-# Backends are NOT torn down on Ctrl-C (that is the point -- fast inner loop);
-# stop them with `bash scripts/start.sh --stop` / `--down` (same `cocola` project).
+#   containers (sandbox deps only):
+#     OpenSandbox server  host :8090   (drives execd/egress sibling containers)
+#     redis :6379 / postgres :5432 / minio :9000,:9001   (docker-compose.dev.yml)
+#   native (this script, Ctrl-C tears all down):
+#     sandbox-manager :50051  llm-gateway :8081  admin-api :8092
+#     agent-runtime :50061    gateway :8080      web :3000
+#
+# Result: REAL Route A (brain in sandbox) + real model, and editing ANY cocola
+# service means just Ctrl-C + re-run -- ZERO image rebuilds. The idempotent
+# `up -d` leaves the warm sandbox/infra containers untouched between runs.
+#
+# Wiring pitfalls handled here:
+#   * sandbox-manager is native, so it CANNOT use host.docker.internal:8090 from
+#     .env; we force COCOLA_OPENSANDBOX_URL -> http://127.0.0.1:8090/v1.
+#   * We keep server-proxy exec (do NOT set COCOLA_OPENSANDBOX_DIRECT_EXEC): the
+#     server would otherwise hand back a host.docker.internal exec URL a native
+#     manager cannot resolve.
+#   * native admin-api would collide with the OpenSandbox server on :8090, so it
+#     listens on :8092 (COCOLA_ADMIN_ADDR).
+#   * the sandbox BRAIN still runs inside a container, so it reaches the native
+#     llm-gateway via host.docker.internal:$LLM_PORT (injected at creation).
+# Sandbox/infra containers survive Ctrl-C; stop them with
+# `make dev-down` (infra) and `make opensandbox-down` (sandbox server).
 hybrid_up() {
   command -v docker >/dev/null 2>&1 || { echo "!! --hybrid needs docker; is Docker Desktop running?" >&2; exit 1; }
   docker info >/dev/null 2>&1 || { echo "!! docker daemon unreachable; start Docker Desktop first." >&2; exit 1; }
 
-  local full="deploy/docker-compose/docker-compose.full.yml"
-  local env_args=()
-  if [[ -f "$ROOT/.env" ]]; then
-    env_args=(--env-file "$ROOT/.env")
-  else
-    echo "==> [hybrid] no .env; llm-gateway will use the fake provider (echo). Add .env for a real model."
-  fi
-
-  # Optional standalone OpenSandbox server (host :8090) when the backend is
-  # opensandbox (env wins over .env; default docker/DooD needs no server).
+  # (1) OpenSandbox server (host :8090) when the backend is opensandbox. The
+  # default docker/DooD provider needs no standalone server.
   local provider="${COCOLA_SANDBOX_PROVIDER:-}"
   if [[ -z "$provider" && -f "$ROOT/.env" ]]; then
     provider="$(grep -E '^COCOLA_SANDBOX_PROVIDER=' "$ROOT/.env" | tail -1 | cut -d= -f2-)"
@@ -257,41 +263,57 @@ hybrid_up() {
     done
   fi
 
-  echo "==> [hybrid] starting containerized backends (redis/postgres/minio/sandbox-manager/llm-gateway/admin-api)"
-  echo "    (first run builds the backend images if missing; app code stays native -- no rebuild on edits)"
-  docker compose -f "$full" "${env_args[@]}" up -d \
-      redis postgres minio minio-init sandbox-manager llm-gateway admin-api \
-      >"$(log_redirect hybrid-backends)" 2>&1 \
-    || { echo "!! [hybrid] backend bring-up failed; see .run-logs/hybrid-backends.log" >&2; exit 1; }
+  # (2) Infra only: redis / postgres / minio (the third-party stateful deps).
+  echo "==> [hybrid] starting containerized infra (redis/postgres/minio) via docker-compose.dev.yml"
+  docker compose -f deploy/docker-compose/docker-compose.dev.yml up -d \
+      redis postgres minio minio-init \
+      >"$(log_redirect hybrid-infra)" 2>&1 \
+    || { echo "!! [hybrid] infra bring-up failed; see .run-logs/hybrid-infra.log" >&2; exit 1; }
+  wait_port 127.0.0.1 6379 "redis"    120
+  wait_port 127.0.0.1 5432 "postgres" 120
+  wait_port 127.0.0.1 9000 "minio"    120
 
-  local llm_host_port="${COCOLA_LLM_HOST_PORT:-18091}"
-  local admin_host_port="${COCOLA_ADMIN_HOST_PORT:-8092}"
-  wait_port 127.0.0.1 6379               "redis"           120
-  wait_port 127.0.0.1 5432               "postgres"        120
-  wait_port 127.0.0.1 9000               "minio"           120
-  wait_port 127.0.0.1 50051              "sandbox-manager" 120
-  wait_port 127.0.0.1 "$llm_host_port"   "llm-gateway"     120
-  wait_port 127.0.0.1 "$admin_host_port" "admin-api"       120
-
-  # Point the NATIVE app processes (launched below) at the containerized backends.
-  # host-published ports; existing env always wins so a one-off override sticks.
-  export COCOLA_SANDBOX_ADDR="${COCOLA_SANDBOX_ADDR:-127.0.0.1:50051}"
-  export COCOLA_SANDBOX_IMAGE="${COCOLA_SANDBOX_IMAGE:-cocola/sandbox-runtime:dev}"
-  export COCOLA_SANDBOX_LLM_BASE_URL="${COCOLA_SANDBOX_LLM_BASE_URL:-http://host.docker.internal:$llm_host_port}"
-  export COCOLA_SANDBOX_LLM_TOKEN="${COCOLA_SANDBOX_LLM_TOKEN:-cocola-local}"
-  export COCOLA_SANDBOX_MODEL_ALIAS="${COCOLA_SANDBOX_MODEL_ALIAS:-cocola-default}"
-  export COCOLA_ADMIN_BASE_URL="${COCOLA_ADMIN_BASE_URL:-http://127.0.0.1:$admin_host_port}"
+  # Shared infra wiring for every native process launched below.
+  export COCOLA_REDIS_ADDR="${COCOLA_REDIS_ADDR:-127.0.0.1:6379}"
   export COCOLA_PG_DSN="${COCOLA_PG_DSN:-postgres://cocola:cocola_dev_pw@127.0.0.1:5432/cocola?sslmode=disable}"
   export COCOLA_MINIO_ENDPOINT="${COCOLA_MINIO_ENDPOINT:-127.0.0.1:9000}"
   export COCOLA_MINIO_ACCESS_KEY="${COCOLA_MINIO_ACCESS_KEY:-cocola}"
   export COCOLA_MINIO_SECRET_KEY="${COCOLA_MINIO_SECRET_KEY:-cocola_dev_pw}"
   export COCOLA_MINIO_BUCKET="${COCOLA_MINIO_BUCKET:-cocola}"
   export COCOLA_ATTACHMENT_INLINE_MAX_BYTES="${COCOLA_ATTACHMENT_INLINE_MAX_BYTES:-16777216}"
+  # MinIO is already up here; skip run-stack's own dev.yml MinIO block later.
+  export COCOLA_SKIP_MINIO=1
   # Web-UI dev ergonomics: blank token -> dev-user (matches the full stack).
   export COCOLA_AUTH_ALLOW_ANON="${COCOLA_AUTH_ALLOW_ANON:-1}"
-  # MinIO is already containerized above; skip run-stack's own dev.yml MinIO.
-  export COCOLA_SKIP_MINIO=1
-  echo "==> [hybrid] backends ready; launching native app against real Route A"
+
+  # (3) NATIVE sandbox-manager. It is a standalone Go module kept OUT of go.work,
+  # so it MUST build/run with GOWORK=off from its own module dir. Talk to the
+  # OpenSandbox server over the HOST loopback (host.docker.internal is
+  # container-only and would not resolve here).
+  local osb_url="http://127.0.0.1:${COCOLA_OPENSANDBOX_HOST_PORT:-8090}/v1"
+  free_port 50051 sandbox-manager
+  (
+    cd apps/sandbox-manager
+    GOWORK=off \
+    COCOLA_SANDBOX_ADDR=":50051" \
+    COCOLA_SANDBOX_PROVIDER="$provider" \
+    COCOLA_OPENSANDBOX_URL="$osb_url" \
+    COCOLA_REDIS_ADDR="$COCOLA_REDIS_ADDR" \
+      $SETSID go run ./cmd/sandbox-manager
+  ) >"$(log_redirect sandbox-manager)" 2>&1 &
+  PIDS+=("$!")
+  echo "==> [hybrid] starting NATIVE sandbox-manager on :50051 (provider=$provider -> $osb_url; log: .run-logs/sandbox-manager.log)"
+  wait_port 127.0.0.1 50051 "sandbox-manager" 180
+
+  # (4) Point the app processes (launched by the main flow) at the native stack.
+  export COCOLA_SANDBOX_ADDR="${COCOLA_SANDBOX_ADDR:-127.0.0.1:50051}"
+  export COCOLA_SANDBOX_IMAGE="${COCOLA_SANDBOX_IMAGE:-cocola/sandbox-runtime:dev}"
+  # The sandbox brain runs INSIDE a container -> reach the native llm-gateway
+  # (:$LLM_PORT below) over the host bridge.
+  export COCOLA_SANDBOX_LLM_BASE_URL="${COCOLA_SANDBOX_LLM_BASE_URL:-http://host.docker.internal:$LLM_PORT}"
+  export COCOLA_SANDBOX_LLM_TOKEN="${COCOLA_SANDBOX_LLM_TOKEN:-cocola-local}"
+  export COCOLA_SANDBOX_MODEL_ALIAS="${COCOLA_SANDBOX_MODEL_ALIAS:-cocola-default}"
+  echo "==> [hybrid] sandbox + infra ready; launching native cocola services (real Route A)"
 }
 
 if [[ "$HYBRID" == "1" ]]; then
@@ -301,8 +323,16 @@ fi
 # ----------------------------------------------------------------- llm-gateway
 if [[ "$WITH_LLM" == "1" ]]; then
   free_port "$LLM_PORT" llm-gateway
+  # In --hybrid the sandbox brain presents the dev token COCOLA_SANDBOX_LLM_TOKEN
+  # (default cocola-local). The containerized full stack runs llm-gateway with
+  # auth OFF so that token is accepted; match that here by blanking the secret
+  # for THIS process only (the global export stays put for gateway/agent-rt).
+  LLM_AUTH_SECRET="${COCOLA_AUTH_SECRET:-}"
+  [[ "$HYBRID" == "1" ]] && LLM_AUTH_SECRET=""
   ( cd apps/llm-gateway && \
     COCOLA_LLM_HOST="$LLM_HOST" COCOLA_LLM_PORT="$LLM_PORT" \
+    COCOLA_AUTH_SECRET="$LLM_AUTH_SECRET" \
+    COCOLA_LLM_REDIS_URL="${COCOLA_LLM_REDIS_URL:-redis://127.0.0.1:6379/0}" \
     $SETSID uv run python -m cocola_llm_gateway ) >"$(log_redirect llm-gateway)" 2>&1 &
   PIDS+=("$!")
   echo "==> starting llm-gateway on $LLM_HOST:$LLM_PORT (provider: ${COCOLA_LLM_PROVIDER:-fake})"
@@ -313,6 +343,25 @@ if [[ "$WITH_LLM" == "1" ]]; then
   # the sandbox at it.
   export COCOLA_SANDBOX_LLM_BASE_URL="${COCOLA_SANDBOX_LLM_BASE_URL:-http://$LLM_HOST:$LLM_PORT}"
   echo "    llm-gateway up; sandbox brain should target $COCOLA_SANDBOX_LLM_BASE_URL"
+fi
+
+# ----------------------------------------------------------------- admin-api (hybrid)
+# --hybrid runs admin-api NATIVELY too (agent-runtime's market-skills source).
+# It listens on :8092 -- NOT :8090 -- because the OpenSandbox server owns host
+# :8090. admin-api is a SOFT dependency: if it is down agent-runtime just warns
+# "no market skills" and still serves chat. Persist to the same Postgres/Redis.
+if [[ "$HYBRID" == "1" ]]; then
+  free_port 8092 admin-api
+  (
+    COCOLA_ADMIN_ADDR=":8092" \
+    COCOLA_REDIS_ADDR="${COCOLA_REDIS_ADDR:-127.0.0.1:6379}" \
+    COCOLA_PG_DSN="${COCOLA_PG_DSN:-}" \
+      $SETSID go run ./apps/admin-api/cmd/admin-api
+  ) >"$(log_redirect admin-api)" 2>&1 &
+  PIDS+=("$!")
+  echo "==> [hybrid] starting NATIVE admin-api on :8092 (log: .run-logs/admin-api.log)"
+  wait_port 127.0.0.1 8092 "admin-api" 120
+  export COCOLA_ADMIN_BASE_URL="${COCOLA_ADMIN_BASE_URL:-http://127.0.0.1:8092}"
 fi
 
 # ----------------------------------------------------------------- MinIO (attachments)
@@ -407,8 +456,9 @@ echo " agent-rt  : $AGENT_ADDR (gRPC)"
 [[ "$WITH_LLM" == "1" && -z "${COCOLA_LLM_CONFIG:-}" ]] && echo " llm-up    : ${COCOLA_ANTHROPIC_BASE_URL:-${COCOLA_OPENAI_BASE_URL:-<provider default>}}"
 [[ "$WITH_WEB" == "1" ]] && echo " web       : http://127.0.0.1:$WEB_PORT  (paste the token below)"
 [[ -n "${MINIO_CONSOLE:-}" ]] && echo " minio     : ${MINIO_CONSOLE}  (console; cocola / cocola_dev_pw)"
-[[ "$HYBRID" == "1" ]] && echo " backends  : containerized (redis/pg/minio/sandbox-manager/llm-gw:${COCOLA_LLM_HOST_PORT:-18091}/admin-api); REAL Route A"
-[[ "$HYBRID" == "1" ]] && echo " stop bk   : bash scripts/start.sh --stop   (backends survive Ctrl-C; app relaunches with no rebuild)"
+[[ "$HYBRID" == "1" ]] && echo " sandbox   : NATIVE sandbox-manager :50051 (provider=${COCOLA_SANDBOX_PROVIDER:-docker}) + admin-api :8092; REAL Route A"
+[[ "$HYBRID" == "1" ]] && echo " containers: only sandbox deps -- OpenSandbox server :${COCOLA_OPENSANDBOX_HOST_PORT:-8090} + redis/pg/minio (dev.yml)"
+[[ "$HYBRID" == "1" ]] && echo " stop cont : make dev-down  (infra) + make opensandbox-down  (sandbox); they survive Ctrl-C, app relaunches with no rebuild"
 echo "----------------------------------------------------------------------"
 echo " dev token : $TOKEN"
 echo "----------------------------------------------------------------------"

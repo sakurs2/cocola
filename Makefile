@@ -160,13 +160,15 @@ demo-minimal: ## M-minimal: fully containerised control plane + sandbox + persis
 #   make up        native, foreground: agent-runtime + gateway, EchoProvider
 #                  (zero-config, no sandbox) -- fastest inner loop, NO model.
 #   make up-web    ... + the Next.js browser test tool (:3000).
-#   make up-hybrid REAL Route A with NO image rebuild on edits: the backends
-#                  (sandbox-manager/llm-gateway/redis/pg/minio/admin-api) run
-#                  CONTAINERIZED (a full.yml subset), while the app you iterate
-#                  on (agent-runtime + gateway + web :3000) runs NATIVE in the
-#                  foreground.
-#                  Ctrl-C relaunches only the native app; warm backends survive.
-#                  Stop the backends with `bash scripts/start.sh --stop/--down`.
+#   make up-hybrid THE debug mode. Only the sandbox's OWN container deps run in
+#                  containers -- the OpenSandbox server (:8090) + redis/pg/minio
+#                  (dev.yml). EVERY cocola service runs NATIVE in the foreground:
+#                  sandbox-manager :50051, llm-gateway :8081, admin-api :8092,
+#                  agent-runtime :50061, gateway :8080, web :3000. REAL Route A +
+#                  real model, ZERO image rebuild on edits.
+#                  Ctrl-C tears down the native services; the sandbox/infra
+#                  containers survive. Stop them with `make dev-down` (infra) and
+#                  `make opensandbox-down` (sandbox server).
 #   make up-all    FULL containerized Route A stack via scripts/start.sh
 #                  (docker-compose.full.yml: 9 services, real model). When
 #                  .env sets COCOLA_SANDBOX_PROVIDER=opensandbox, start.sh also
@@ -181,7 +183,7 @@ up: ## Boot local app stack: agent-runtime + gateway (Echo)
 up-web: ## ... + the Next.js browser test tool on :3000
 	bash scripts/run-stack.sh --with-web
 
-up-hybrid: ## REAL Route A: containerized backends + native app incl. web :3000 (no image rebuild)
+up-hybrid: ## THE debug mode: only sandbox+infra containerized, all cocola services NATIVE (real Route A, no rebuild)
 	bash scripts/run-stack.sh --hybrid
 
 up-all: ## Full containerized Route A stack (start.sh + full.yml; OpenSandbox when .env selects it)
