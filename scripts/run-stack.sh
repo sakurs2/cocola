@@ -114,6 +114,26 @@ OWNED_PORTS=("$AGENT_PORT" "$GATEWAY_PORT")
 
 log_redirect() { printf '%s/%s.log' "$LOG_DIR" "$1"; }
 
+docker_compose() {
+  if docker compose version >/dev/null 2>&1; then
+    docker compose "$@"
+    return
+  fi
+  if command -v docker-compose >/dev/null 2>&1; then
+    docker-compose "$@"
+    return
+  fi
+  echo "!! docker compose is unavailable; install Docker Compose v2 plugin or docker-compose v1." >&2
+  return 127
+}
+
+env_bool_false() {
+  case "${1:-}" in
+    0|false|FALSE|False|no|NO|No|off|OFF|Off) return 0 ;;
+    *) return 1 ;;
+  esac
+}
+
 # Graceful, deterministic teardown. The contract: when this returns, NONE of our
 # ports stay occupied. Three phases, escalating only as needed:
 #   1. SIGTERM each service process group  -> lets go/uv/node flush & exit.
@@ -331,11 +351,17 @@ hybrid_up() {
     provider="$(grep -E '^COCOLA_SANDBOX_PROVIDER=' "$ROOT/.env" | tail -1 | cut -d= -f2-)"
   fi
   provider="${provider:-docker}"
-  if [[ "$provider" == "opensandbox" ]]; then
+  if [[ "$provider" == "opensandbox" ]] && env_bool_false "${COCOLA_OPENSANDBOX_MANAGED:-1}"; then
+    echo "==> [hybrid] external OpenSandbox server selected (COCOLA_OPENSANDBOX_MANAGED=0); skipping docker-compose OpenSandbox"
+    if [[ -z "${COCOLA_OPENSANDBOX_URL:-}" ]]; then
+      echo "!! COCOLA_OPENSANDBOX_MANAGED=0 requires COCOLA_OPENSANDBOX_URL (for example http://127.0.0.1:8090/v1)" >&2
+      exit 1
+    fi
+  elif [[ "$provider" == "opensandbox" ]]; then
     local osb_port="${COCOLA_OPENSANDBOX_HOST_PORT:-8090}"
     echo "==> [hybrid] bringing up OpenSandbox server (host :$osb_port)"
     COCOLA_OPENSANDBOX_HOST_PORT="$osb_port" \
-      docker compose -f deploy/docker-compose/docker-compose.opensandbox.yml up -d \
+      docker_compose -f deploy/docker-compose/docker-compose.opensandbox.yml up -d \
         >"$(log_redirect hybrid-opensandbox)" 2>&1 || true
     for ((i=0; i<60; i++)); do
       curl -fsS -m 3 "http://127.0.0.1:$osb_port/health" >/dev/null 2>&1 && break
@@ -345,7 +371,7 @@ hybrid_up() {
 
   # (2) Infra only: redis / postgres / minio (the third-party stateful deps).
   echo "==> [hybrid] starting containerized infra (redis/postgres/minio) via docker-compose.dev.yml"
-  docker compose -f deploy/docker-compose/docker-compose.dev.yml up -d \
+  docker_compose -f deploy/docker-compose/docker-compose.dev.yml up -d \
       redis postgres minio minio-init \
       >"$(log_redirect hybrid-infra)" 2>&1 \
     || { echo "!! [hybrid] infra bring-up failed; see .run-logs/hybrid-infra.log" >&2; exit 1; }
@@ -370,7 +396,7 @@ hybrid_up() {
   # so it MUST build/run with GOWORK=off from its own module dir. Talk to the
   # OpenSandbox server over the HOST loopback (host.docker.internal is
   # container-only and would not resolve here).
-  local osb_url="http://127.0.0.1:${COCOLA_OPENSANDBOX_HOST_PORT:-8090}/v1"
+  local osb_url="${COCOLA_OPENSANDBOX_URL:-http://127.0.0.1:${COCOLA_OPENSANDBOX_HOST_PORT:-8090}/v1}"
   free_port 50051 sandbox-manager
   (
     cd apps/sandbox-manager
@@ -457,7 +483,7 @@ fi
 # Skips cleanly when docker is unavailable or COCOLA_SKIP_MINIO=1.
 if [[ "${COCOLA_SKIP_MINIO:-0}" != "1" ]] && command -v docker >/dev/null 2>&1; then
   echo "==> starting MinIO (attachments) via docker-compose.dev.yml"
-  if docker compose -f deploy/docker-compose/docker-compose.dev.yml up -d minio minio-init \
+  if docker_compose -f deploy/docker-compose/docker-compose.dev.yml up -d minio minio-init \
        >"$(log_redirect minio)" 2>&1 && wait_port 127.0.0.1 9000 "minio" 60; then
     export COCOLA_MINIO_ENDPOINT="${COCOLA_MINIO_ENDPOINT:-127.0.0.1:9000}"
     export COCOLA_MINIO_ACCESS_KEY="${COCOLA_MINIO_ACCESS_KEY:-cocola}"
@@ -519,6 +545,8 @@ if [[ "$WITH_WEB" == "1" ]]; then
   (
     cd apps/web
     COCOLA_GATEWAY_URL="http://$GATEWAY_ADDR" \
+    COCOLA_ADMIN_URL="${COCOLA_ADMIN_BASE_URL:-http://127.0.0.1:8092}" \
+    COCOLA_ADMIN_KEY="${COCOLA_ADMIN_KEY:-}" \
       $SETSID pnpm dev --port "$WEB_PORT"
   ) >"$(log_redirect web)" 2>&1 &
   PIDS+=("$!")
@@ -539,7 +567,11 @@ echo " agent-rt  : $AGENT_ADDR (gRPC)"
 [[ "$WITH_WEB" == "1" ]] && echo " web       : http://127.0.0.1:$WEB_PORT  (paste the token below)"
 [[ -n "${MINIO_CONSOLE:-}" ]] && echo " minio     : ${MINIO_CONSOLE}  (console; cocola / cocola_dev_pw)"
 [[ "$HYBRID" == "1" ]] && echo " sandbox   : NATIVE sandbox-manager :50051 (provider=${COCOLA_SANDBOX_PROVIDER:-docker}) + admin-api :8092; REAL Route A"
-[[ "$HYBRID" == "1" ]] && echo " containers: only sandbox deps -- OpenSandbox server :${COCOLA_OPENSANDBOX_HOST_PORT:-8090} + redis/pg/minio (dev.yml)"
+if [[ "$HYBRID" == "1" ]] && [[ "${COCOLA_SANDBOX_PROVIDER:-docker}" == "opensandbox" ]] && env_bool_false "${COCOLA_OPENSANDBOX_MANAGED:-1}"; then
+  echo " containers: only infra -- external OpenSandbox server ${COCOLA_OPENSANDBOX_URL:-<unset>} + redis/pg/minio (dev.yml)"
+elif [[ "$HYBRID" == "1" ]]; then
+  echo " containers: only sandbox deps -- OpenSandbox server :${COCOLA_OPENSANDBOX_HOST_PORT:-8090} + redis/pg/minio (dev.yml)"
+fi
 [[ "$HYBRID" == "1" ]] && echo " stop cont : make dev-down  (infra) + make opensandbox-down  (sandbox); they survive Ctrl-C, app relaunches with no rebuild"
 echo "----------------------------------------------------------------------"
 echo " dev token : $TOKEN"

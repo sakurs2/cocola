@@ -5,25 +5,26 @@
 ROOT := $(shell pwd)
 GO_APPS := gateway sandbox-manager admin-api
 PY_APPS := agent-runtime llm-gateway
+DOCKER_COMPOSE := scripts/docker-compose.sh
 
 # -------------------------------------------------------------------- meta
 .PHONY: help
 help: ## Show this help
-	@awk 'BEGIN {FS = ":.*?## "} /^[a-zA-Z_-]+:.*?## / {printf "  \033[36m%-20s\033[0m %s\n", $$1, $$2}' $(MAKEFILE_LIST)
+	@awk 'BEGIN {FS = ":.*?## "} /^[a-zA-Z0-9_-]+:.*?## / {printf "  \033[36m%-20s\033[0m %s\n", $$1, $$2}' $(MAKEFILE_LIST)
 
 # -------------------------------------------------------------------- dev infra
 .PHONY: dev-up dev-down dev-logs dev-ps
 dev-up: ## Start local infra (PostgreSQL + Redis + MinIO)
-	docker compose -f deploy/docker-compose/docker-compose.dev.yml up -d
+	$(DOCKER_COMPOSE) -f deploy/docker-compose/docker-compose.dev.yml up -d
 
 dev-down: ## Stop local infra
-	docker compose -f deploy/docker-compose/docker-compose.dev.yml down
+	$(DOCKER_COMPOSE) -f deploy/docker-compose/docker-compose.dev.yml down
 
 dev-logs: ## Tail local infra logs
-	docker compose -f deploy/docker-compose/docker-compose.dev.yml logs -f
+	$(DOCKER_COMPOSE) -f deploy/docker-compose/docker-compose.dev.yml logs -f
 
 dev-ps: ## Show local infra status
-	docker compose -f deploy/docker-compose/docker-compose.dev.yml ps
+	$(DOCKER_COMPOSE) -f deploy/docker-compose/docker-compose.dev.yml ps
 
 # -------------------------------------------------------------------- proto
 .PHONY: proto-lint proto-gen proto-breaking proto-gen-py
@@ -102,7 +103,7 @@ web-format-check: ## Check prettier formatting (no write)
 # corporate-managed macOS host blocks both the native TLS verifier and writing
 # ".gitmodules" files, so a host-native `go build` cannot resolve modules.
 # scripts/sandbox-build.sh encapsulates the working recipe.
-.PHONY: sandbox-build sandbox-run sandbox-e2e sandbox-m2-e2e verify-opensandbox verify-opensandbox-full opensandbox-up opensandbox-down
+.PHONY: sandbox-build sandbox-run sandbox-e2e sandbox-m2-e2e verify-opensandbox verify-opensandbox-full opensandbox-up opensandbox-down verify-opensandbox-k8s
 sandbox-build: ## Build sandbox-manager + sandbox-cli (containerized)
 	scripts/sandbox-build.sh
 
@@ -128,7 +129,7 @@ verify-opensandbox-full: opensandbox-up ## Deploy a local OpenSandbox server, th
 		$(MAKE) verify-opensandbox
 
 opensandbox-up: ## Start a local OpenSandbox server on :8090 and wait for /health
-	docker compose -f $(OPENSANDBOX_COMPOSE) up -d
+	$(DOCKER_COMPOSE) -f $(OPENSANDBOX_COMPOSE) up -d
 	@echo "waiting for OpenSandbox server /health on :8090 ..."
 	@for i in $$(seq 1 60); do \
 		if curl -fsS http://localhost:8090/health >/dev/null 2>&1; then \
@@ -136,11 +137,15 @@ opensandbox-up: ## Start a local OpenSandbox server on :8090 and wait for /healt
 		sleep 2; \
 	done; \
 	echo "ERROR: OpenSandbox server did not become healthy in time"; \
-	docker compose -f $(OPENSANDBOX_COMPOSE) logs --tail=50 opensandbox-server; \
+	$(DOCKER_COMPOSE) -f $(OPENSANDBOX_COMPOSE) logs --tail=50 opensandbox-server; \
 	exit 1
 
 opensandbox-down: ## Stop and remove the local OpenSandbox server
-	docker compose -f $(OPENSANDBOX_COMPOSE) down
+	$(DOCKER_COMPOSE) -f $(OPENSANDBOX_COMPOSE) down
+
+verify-opensandbox-k8s: ## Verify OpenSandbox Kubernetes runtime with cocola/sandbox-runtime:dev
+	COCOLA_OPENSANDBOX_URL=$${COCOLA_OPENSANDBOX_URL:-http://127.0.0.1:8090/v1} \
+		$(MAKE) verify-opensandbox ARGS="-image $${COCOLA_K8S_SANDBOX_IMAGE_REMOTE:-localhost:5001/cocola/sandbox-runtime:dev} -skip-pause $(ARGS)"
 
 sandbox-run: sandbox-build ## Run sandbox-manager locally (Docker provider)
 	COCOLA_SANDBOX_PROVIDER=docker ./bin/sandbox-manager
@@ -174,12 +179,24 @@ demo-minimal: ## M-minimal: fully containerised control plane + sandbox + persis
 #                      down together. Manage with `bash scripts/start.sh --down`.
 # `up` runs in the foreground (Ctrl-C tears the NATIVE children down);
 # `up-container` runs detached containers (stop via start.sh --stop/--down).
-.PHONY: up up-container
+.PHONY: up up-container up-k8s down-k8s reset-k8s status-k8s
 up: ## Mode 1 (default debug): all cocola services NATIVE, only sandbox+infra containerized (real Route A, no rebuild)
 	bash scripts/run-stack.sh
 
 up-container: ## Mode 2: fully containerized Route A stack (start.sh + full.yml; OpenSandbox when .env selects it)
 	bash scripts/start.sh
+
+up-k8s: ## Mode 1 + local k3d OpenSandbox Kubernetes runtime POC (one command)
+	bash scripts/run-stack-k8s.sh up
+
+down-k8s: ## Stop the local OpenSandbox Kubernetes runtime POC, keeping the k3d cluster
+	bash scripts/run-stack-k8s.sh down
+
+reset-k8s: ## Delete the local k3d OpenSandbox Kubernetes runtime POC cluster
+	bash scripts/run-stack-k8s.sh reset
+
+status-k8s: ## Show the local OpenSandbox Kubernetes runtime POC status
+	bash scripts/run-stack-k8s.sh status
 
 # -------------------------------------------------------------------- aggregate
 .PHONY: install test lint format format-check precommit-install clean

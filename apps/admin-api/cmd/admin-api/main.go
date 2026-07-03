@@ -135,6 +135,15 @@ func main() {
 	}
 
 	svc := service.New(st, iss, time.Now)
+	nodeMgr, err := service.NewSandboxNodeManagerFromEnv()
+	if err != nil {
+		log.Sugar().Warnw("sandbox node manager disabled", "err", err)
+	} else if nodeMgr != nil {
+		svc.WithSandboxNodeManager(nodeMgr)
+		log.Info("sandbox node manager enabled (Kubernetes REST)")
+	} else {
+		log.Warn("sandbox node manager DISABLED (no Kubernetes config)")
+	}
 
 	// Observability: a shared registry instruments every route and is exposed on
 	// a dedicated port so scrapes never compete with operator traffic.

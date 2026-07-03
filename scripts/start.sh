@@ -24,7 +24,8 @@ cd "$ROOT"
 
 COMPOSE_FILE="deploy/docker-compose/docker-compose.full.yml"
 ENV_FILE=".env"
-DC=(docker compose -f "$COMPOSE_FILE" --env-file "$ENV_FILE")
+COMPOSE_BIN="$ROOT/scripts/docker-compose.sh"
+DC=("$COMPOSE_BIN" -f "$COMPOSE_FILE" --env-file "$ENV_FILE")
 # 必须用 BuildKit=0 以绕开公司网络对 docker.io 的 TLS 拦截
 export DOCKER_BUILDKIT=0
 
@@ -32,7 +33,7 @@ export DOCKER_BUILDKIT=0
 # full.yml 里的 sandbox-manager 经 host.docker.internal:8090/v1 跨 host 桥接连它。
 # 仅当沙箱后端为 opensandbox 时才需要它;provider=docker(DooD)不需要 server。
 OSB_COMPOSE="deploy/docker-compose/docker-compose.opensandbox.yml"
-OSB_DC=(docker compose -f "$OSB_COMPOSE")
+OSB_DC=("$COMPOSE_BIN" -f "$OSB_COMPOSE")
 OSB_PORT="${COCOLA_OPENSANDBOX_HOST_PORT:-8090}"
 
 # 从 .env / 环境读出沙箱后端。.env 里已存在 COCOLA_SANDBOX_PROVIDER 时以其为准;
@@ -49,10 +50,44 @@ sandbox_provider() {
   printf 'docker'
 }
 
+env_file_value() {
+  local key="$1"
+  if [[ -f "$ENV_FILE" ]]; then
+    grep -E "^${key}=" "$ENV_FILE" | tail -1 | cut -d= -f2-
+  fi
+}
+
 needs_opensandbox() { [[ "$(sandbox_provider)" == "opensandbox" ]]; }
+
+opensandbox_managed() {
+  local managed="${COCOLA_OPENSANDBOX_MANAGED:-}"
+  [[ -z "$managed" ]] && managed="$(env_file_value COCOLA_OPENSANDBOX_MANAGED)"
+  managed="${managed:-1}"
+  case "$managed" in
+    0|false|FALSE|False|no|NO|No|off|OFF|Off) return 1 ;;
+    *) return 0 ;;
+  esac
+}
+
+opensandbox_url() {
+  if [[ -n "${COCOLA_OPENSANDBOX_URL:-}" ]]; then
+    printf '%s' "$COCOLA_OPENSANDBOX_URL"; return
+  fi
+  env_file_value COCOLA_OPENSANDBOX_URL
+}
 
 opensandbox_up() {
   needs_opensandbox || { log "沙箱后端非 opensandbox,跳过 OpenSandbox server。"; return 0; }
+  if ! opensandbox_managed; then
+    local url
+    url="$(opensandbox_url)"
+    if [[ -z "$url" ]]; then
+      err "COCOLA_OPENSANDBOX_MANAGED=0 时必须设置 COCOLA_OPENSANDBOX_URL，例如 http://127.0.0.1:8090/v1"
+      return 1
+    fi
+    log "使用外部 OpenSandbox server ($url)，跳过 docker-compose OpenSandbox server。"
+    return 0
+  fi
   log "拉起 OpenSandbox server(host :$OSB_PORT)..."
   COCOLA_OPENSANDBOX_HOST_PORT="$OSB_PORT" "${OSB_DC[@]}" up -d
   log "等待 OpenSandbox server /health ..."
@@ -70,6 +105,7 @@ opensandbox_up() {
 
 opensandbox_down() {
   needs_opensandbox || return 0
+  opensandbox_managed || { log "外部 OpenSandbox server 由调用方管理，跳过 down。"; return 0; }
   log "停止并删除 OpenSandbox server ..."
   "${OSB_DC[@]}" down || true
 }
@@ -166,7 +202,9 @@ main() {
       require_docker
       log "停止容器（保留数据）..."
       "${DC[@]}" stop
-      needs_opensandbox && "${OSB_DC[@]}" stop || true
+      if needs_opensandbox && opensandbox_managed; then
+        "${OSB_DC[@]}" stop || true
+      fi
       cleanup_sandboxes
       ;;
     --logs)

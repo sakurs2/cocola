@@ -89,6 +89,14 @@ func (a *API) Router() http.Handler {
 			r.Delete("/{id}", a.deleteSkill)
 		})
 
+		r.Route("/sandbox-nodes", func(r chi.Router) {
+			r.Get("/", a.listSandboxNodes)
+			r.Get("/join-command", a.sandboxNodeJoinCommand)
+			r.Post("/{name}/disable", a.disableSandboxNode)
+			r.Post("/{name}/restore", a.restoreSandboxNode)
+			r.Post("/{name}/offline", a.offlineSandboxNode)
+		})
+
 		r.Get("/audit", a.listAudit)
 	})
 
@@ -174,6 +182,8 @@ func mapErr(w http.ResponseWriter, err error) {
 		writeErr(w, http.StatusNotFound, "NOT_FOUND", "resource not found")
 	case errors.Is(err, store.ErrConflict):
 		writeErr(w, http.StatusConflict, "CONFLICT", "resource already exists")
+	case errors.Is(err, service.ErrNotConfigured):
+		writeErr(w, http.StatusNotImplemented, "NOT_CONFIGURED", err.Error())
 	default:
 		writeErr(w, http.StatusInternalServerError, "INTERNAL", "internal error")
 	}

@@ -32,9 +32,10 @@ type Clock func() time.Time
 
 // Admin is the admin-api service.
 type Admin struct {
-	store  store.Store
-	issuer *token.Issuer
-	now    Clock
+	store        store.Store
+	issuer       *token.Issuer
+	now          Clock
+	sandboxNodes SandboxNodeManager
 }
 
 // New builds the service. issuer may be nil if token minting is disabled (no
@@ -44,6 +45,14 @@ func New(s store.Store, iss *token.Issuer, now Clock) *Admin {
 		now = time.Now
 	}
 	return &Admin{store: s, issuer: iss, now: now}
+}
+
+// WithSandboxNodeManager attaches the optional lightweight Kubernetes node
+// operations backend. When nil, the HTTP layer returns a clear "not configured"
+// error for sandbox-node routes while the rest of admin-api stays usable.
+func (a *Admin) WithSandboxNodeManager(m SandboxNodeManager) *Admin {
+	a.sandboxNodes = m
+	return a
 }
 
 // ---- Tokens ----

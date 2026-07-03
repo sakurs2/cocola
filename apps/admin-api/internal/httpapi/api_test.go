@@ -7,6 +7,7 @@ package httpapi
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
@@ -25,6 +26,48 @@ func newTestAPI(adminKey string) *API {
 	mem := store.NewMemory()
 	iss := token.NewIssuer("test-secret", "cocola", 24*time.Hour)
 	svc := service.New(mem, iss, fixedClock)
+	return New(svc, adminKey)
+}
+
+type fakeNodeManager struct {
+	offlineForce bool
+}
+
+func (f *fakeNodeManager) ListNodes(context.Context) (service.SandboxNodeList, error) {
+	return service.SandboxNodeList{Nodes: []service.SandboxNode{{
+		Name:              "node-a",
+		Status:            "active",
+		Ready:             true,
+		Schedulable:       true,
+		CPUCapacity:       "4",
+		MemoryCapacity:    "8Gi",
+		CPUAllocatable:    "3900m",
+		MemoryAllocatable: "7Gi",
+		SandboxPods:       2,
+	}}}, nil
+}
+
+func (f *fakeNodeManager) DisableNode(context.Context, string) (service.SandboxNode, error) {
+	return service.SandboxNode{Name: "node-a", Status: "disabled"}, nil
+}
+
+func (f *fakeNodeManager) RestoreNode(context.Context, string) (service.SandboxNode, error) {
+	return service.SandboxNode{Name: "node-a", Status: "active"}, nil
+}
+
+func (f *fakeNodeManager) OfflineNode(_ context.Context, _ string, force bool) (service.OfflineNodeResult, error) {
+	f.offlineForce = force
+	return service.OfflineNodeResult{Node: service.SandboxNode{Name: "node-a", Status: "offline_pending"}, Message: "ok"}, nil
+}
+
+func (f *fakeNodeManager) JoinCommand(context.Context) (service.JoinCommand, error) {
+	return service.JoinCommand{Command: "k3s agent join", Note: "demo"}, nil
+}
+
+func newTestNodeAPI(adminKey string, mgr service.SandboxNodeManager) *API {
+	mem := store.NewMemory()
+	iss := token.NewIssuer("test-secret", "cocola", 24*time.Hour)
+	svc := service.New(mem, iss, fixedClock).WithSandboxNodeManager(mgr)
 	return New(svc, adminKey)
 }
 
@@ -271,6 +314,50 @@ func TestSkillCRUD(t *testing.T) {
 	rec = do(t, r, http.MethodGet, "/admin/skills/web-search", "k", nil)
 	if rec.Code != http.StatusNotFound {
 		t.Fatalf("get deleted: want 404, got %d", rec.Code)
+	}
+}
+
+func TestSandboxNodeRoutes(t *testing.T) {
+	mgr := &fakeNodeManager{}
+	api := newTestNodeAPI("k", mgr)
+	r := api.Router()
+
+	rec := do(t, r, http.MethodGet, "/admin/sandbox-nodes", "k", nil)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("list nodes: want 200, got %d (%s)", rec.Code, rec.Body.String())
+	}
+	var listed service.SandboxNodeList
+	if err := json.Unmarshal(rec.Body.Bytes(), &listed); err != nil {
+		t.Fatalf("decode nodes: %v", err)
+	}
+	if len(listed.Nodes) != 1 || listed.Nodes[0].Name != "node-a" || listed.Nodes[0].SandboxPods != 2 {
+		t.Fatalf("unexpected nodes: %+v", listed.Nodes)
+	}
+
+	rec = do(t, r, http.MethodGet, "/admin/sandbox-nodes/join-command", "k", nil)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("join command: want 200, got %d", rec.Code)
+	}
+	var join service.JoinCommand
+	_ = json.Unmarshal(rec.Body.Bytes(), &join)
+	if join.Command == "" {
+		t.Fatalf("empty join command")
+	}
+
+	rec = do(t, r, http.MethodPost, "/admin/sandbox-nodes/node-a/offline", "k", map[string]any{"force": true})
+	if rec.Code != http.StatusOK {
+		t.Fatalf("offline: want 200, got %d (%s)", rec.Code, rec.Body.String())
+	}
+	if !mgr.offlineForce {
+		t.Fatalf("offline did not pass force=true")
+	}
+}
+
+func TestSandboxNodeRoutesNotConfigured(t *testing.T) {
+	api := newTestAPI("k")
+	rec := do(t, api.Router(), http.MethodGet, "/admin/sandbox-nodes", "k", nil)
+	if rec.Code != http.StatusNotImplemented {
+		t.Fatalf("not configured: want 501, got %d", rec.Code)
 	}
 }
 

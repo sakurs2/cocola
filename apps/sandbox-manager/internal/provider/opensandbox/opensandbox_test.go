@@ -72,6 +72,19 @@ func TestNew_EnvDefaults(t *testing.T) {
 	}
 }
 
+func TestNew_HTTPTimeoutEnv(t *testing.T) {
+	t.Setenv("COCOLA_OPENSANDBOX_URL", "http://from-env:8090/v1/")
+	t.Setenv("COCOLA_OPENSANDBOX_HTTP_TIMEOUT", "2m")
+
+	p, err := New()
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	if p.http.Timeout.String() != "2m0s" {
+		t.Fatalf("http timeout = %s, want 2m0s", p.http.Timeout)
+	}
+}
+
 func TestCreate_HappyPath(t *testing.T) {
 	var gotMethod, gotPath, gotAPIKey, gotCT string
 	gotBody := ""

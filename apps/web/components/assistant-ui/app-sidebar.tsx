@@ -13,6 +13,7 @@ import {
   Pencil,
   Plus,
   Search,
+  Server,
   LayoutGrid,
   Trash2,
 } from "lucide-react";
@@ -25,7 +26,7 @@ import { useCocola } from "@/app/runtime-provider";
 // Notes / Workspace / Channels / Folders remain decorative shells. Hand-rolled
 // (plain divs + a useState collapse) to avoid pulling in Radix.
 
-type NavItem = { icon: typeof Plus; label: string };
+type NavItem = { icon: typeof Plus; label: string; href?: string };
 
 // "New Chat" is wired to the runtime (rotates session_id + clears messages);
 // the rest stay decorative until multi-thread persistence lands.
@@ -33,6 +34,7 @@ const PRIMARY_NAV: NavItem[] = [
   { icon: Search, label: "Search" },
   { icon: NotebookPen, label: "Notes" },
   { icon: LayoutGrid, label: "Workspace" },
+  { icon: Server, label: "Sandbox Nodes", href: "/admin/sandbox-nodes" },
 ];
 
 const CHANNELS = [{ icon: Hash, label: "general" }];
@@ -136,8 +138,19 @@ export function AppSidebar() {
               <Plus className="size-4 shrink-0" />
               {!collapsed && <span className="truncate">New Chat</span>}
             </SidebarButton>
-            {PRIMARY_NAV.map(({ icon: Icon, label }) => (
-              <SidebarButton key={label} collapsed={collapsed} title={label}>
+            {PRIMARY_NAV.map(({ icon: Icon, label, href }) => (
+              <SidebarButton
+                key={label}
+                collapsed={collapsed}
+                title={label}
+                onClick={
+                  href
+                    ? () => {
+                        window.location.href = href;
+                      }
+                    : undefined
+                }
+              >
                 <Icon className="size-4 shrink-0" />
                 {!collapsed && <span className="truncate">{label}</span>}
               </SidebarButton>

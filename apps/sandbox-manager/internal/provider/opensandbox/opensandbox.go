@@ -58,9 +58,12 @@ const ProviderName = "opensandbox"
 // apiKeyHeader is the OpenSandbox authentication header.
 const apiKeyHeader = "OPEN-SANDBOX-API-KEY"
 
-// defaultHTTPTimeout bounds a single lifecycle REST call. Streaming exec uses a
+// defaultHTTPTimeout bounds a single lifecycle REST call. Kubernetes-backed
+// OpenSandbox create waits up to 60s for the sandbox pod to become Running, so
+// the client timeout must be longer than the server-side wait to surface the
+// real K8s reason instead of a local context deadline. Streaming exec uses a
 // separate client whose timeout is governed by the per-Exec context/deadline.
-const defaultHTTPTimeout = 30 * time.Second
+const defaultHTTPTimeout = 90 * time.Second
 
 // execdPort is the standard in-sandbox port the execd service listens on. The
 // lifecycle endpoints API resolves it to a reachable URL per sandbox. Mirrors
@@ -205,7 +208,7 @@ func New(opts ...Option) (*Provider, error) {
 	p := &Provider{
 		baseURL: strings.TrimRight(os.Getenv("COCOLA_OPENSANDBOX_URL"), "/"),
 		apiKey:  os.Getenv("COCOLA_OPENSANDBOX_API_KEY"),
-		http:    &http.Client{Timeout: defaultHTTPTimeout},
+		http:    &http.Client{Timeout: httpTimeoutFromEnv()},
 		// No timeout: the Exec context governs stream lifetime. Keep-alives are
 		// DISABLED on purpose: the OpenSandbox server proxy ({server}/sandboxes/
 		// {id}/proxy/{port}) mishandles connection reuse for streaming exec -- a
@@ -901,6 +904,18 @@ func execUserFromEnv() string {
 		return ""
 	}
 	return v
+}
+
+func httpTimeoutFromEnv() time.Duration {
+	raw := strings.TrimSpace(os.Getenv("COCOLA_OPENSANDBOX_HTTP_TIMEOUT"))
+	if raw == "" {
+		return defaultHTTPTimeout
+	}
+	d, err := time.ParseDuration(raw)
+	if err != nil || d <= 0 {
+		return defaultHTTPTimeout
+	}
+	return d
 }
 
 // mapVolumes translates cocola's two-volume filesystem model (ADR-0008) into the

@@ -211,6 +211,67 @@ func (a *API) deleteSkill(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusNoContent)
 }
 
+// ---- sandbox nodes ----
+
+func (a *API) listSandboxNodes(w http.ResponseWriter, r *http.Request) {
+	nodes, err := a.svc.ListSandboxNodes(r.Context())
+	if err != nil {
+		mapErr(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, nodes)
+}
+
+func (a *API) sandboxNodeJoinCommand(w http.ResponseWriter, r *http.Request) {
+	cmd, err := a.svc.SandboxNodeJoinCommand(r.Context())
+	if err != nil {
+		mapErr(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, cmd)
+}
+
+func (a *API) disableSandboxNode(w http.ResponseWriter, r *http.Request) {
+	name := chi.URLParam(r, "name")
+	node, err := a.svc.DisableSandboxNode(r.Context(), name, actorOf(r))
+	if err != nil {
+		mapErr(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, node)
+}
+
+func (a *API) restoreSandboxNode(w http.ResponseWriter, r *http.Request) {
+	name := chi.URLParam(r, "name")
+	node, err := a.svc.RestoreSandboxNode(r.Context(), name, actorOf(r))
+	if err != nil {
+		mapErr(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, node)
+}
+
+type offlineSandboxNodeReq struct {
+	Force bool `json:"force,omitempty"`
+}
+
+func (a *API) offlineSandboxNode(w http.ResponseWriter, r *http.Request) {
+	name := chi.URLParam(r, "name")
+	var req offlineSandboxNodeReq
+	if r.Body != nil && r.ContentLength != 0 {
+		if err := decode(r, &req); err != nil {
+			mapErr(w, err)
+			return
+		}
+	}
+	out, err := a.svc.OfflineSandboxNode(r.Context(), name, req.Force, actorOf(r))
+	if err != nil {
+		mapErr(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, out)
+}
+
 // ---- audit ----
 
 func (a *API) listAudit(w http.ResponseWriter, r *http.Request) {
