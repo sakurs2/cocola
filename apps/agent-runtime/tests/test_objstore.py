@@ -71,9 +71,13 @@ class _FakeClient:
         self.calls.append((bucket, key))
         return self._resp
 
+    def presigned_get_object(self, bucket, key, *, expires):
+        self.presign_calls.append(("GET", bucket, key, expires.total_seconds()))
+        return f"http://minio.local/{bucket}/{key}?sig=get"
+
     def presigned_put_object(self, bucket, key, *, expires):
-        self.presign_calls.append((bucket, key, expires.total_seconds()))
-        return f"http://minio.local/{bucket}/{key}?sig=test"
+        self.presign_calls.append(("PUT", bucket, key, expires.total_seconds()))
+        return f"http://minio.local/{bucket}/{key}?sig=put"
 
 
 def test_minio_fetcher_reads_and_closes():
@@ -91,5 +95,15 @@ def test_minio_fetcher_presigns_put_url():
 
     url = f.presigned_put_url("checkpoints/u/s/archive.tar.zst", expires_seconds=60)
 
-    assert url == "http://minio.local/cocola/checkpoints/u/s/archive.tar.zst?sig=test"
-    assert client.presign_calls == [("cocola", "checkpoints/u/s/archive.tar.zst", 60.0)]
+    assert url == "http://minio.local/cocola/checkpoints/u/s/archive.tar.zst?sig=put"
+    assert client.presign_calls == [("PUT", "cocola", "checkpoints/u/s/archive.tar.zst", 60.0)]
+
+
+def test_minio_fetcher_presigns_get_url():
+    client = _FakeClient(b"")
+    f = objstore.MinioFetcher(client, "cocola")
+
+    url = f.presigned_get_url("checkpoints/u/s/archive.tar.zst", expires_seconds=90)
+
+    assert url == "http://minio.local/cocola/checkpoints/u/s/archive.tar.zst?sig=get"
+    assert client.presign_calls == [("GET", "cocola", "checkpoints/u/s/archive.tar.zst", 90.0)]

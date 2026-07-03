@@ -87,9 +87,26 @@ if ! command -v curl >/dev/null 2>&1; then
   exit 127
 fi
 mkdir -p /workspace /home/cocola/.claude
-tar -C / -cf - workspace -C /home/cocola .claude \
+tar -C / -cf - workspace home/cocola/.claude \
   | zstd -T0 -3 -q \
   | curl -fsS -X PUT --upload-file - "${COCOLA_CHECKPOINT_PUT_URL}"
+"""
+
+_CHECKPOINT_RESTORE_SCRIPT = r"""
+set -eu
+: "${COCOLA_CHECKPOINT_GET_URL:?missing checkpoint download URL}"
+if ! command -v zstd >/dev/null 2>&1; then
+  echo "zstd is required for checkpoint restore" >&2
+  exit 127
+fi
+if ! command -v curl >/dev/null 2>&1; then
+  echo "curl is required for checkpoint restore" >&2
+  exit 127
+fi
+mkdir -p /workspace /home/cocola/.claude
+curl -fsS "${COCOLA_CHECKPOINT_GET_URL}" \
+  | zstd -d -q \
+  | tar -C / -xf -
 """
 
 
@@ -377,6 +394,11 @@ class AgentRuntimeServicer(pb_grpc.AgentRuntimeServiceServicer):
                     )
                 )
             )
+            if not box.reused:
+                await self._restore_session_checkpoint(
+                    sandbox_id=sandbox_id,
+                    session_id=request.session_id,
+                )
 
         # Pre-provision user-uploaded attachments into the bound sandbox before
         # the agent runs (push model, ADR-0017). We land them under ./uploads/
@@ -515,7 +537,71 @@ class AgentRuntimeServicer(pb_grpc.AgentRuntimeServiceServicer):
             )
             return None
         log.info("session checkpoint uploaded", session_id=session_id, key=key)
+        if self._session_map is not None:
+            try:
+                await self._session_map.put_checkpoint(
+                    session_id,
+                    key,
+                    user_id=user_id,
+                )
+            except Exception as exc:  # noqa: BLE001 - checkpoint index is best-effort
+                log.warning(
+                    "session checkpoint index update failed",
+                    session_id=session_id,
+                    error=str(exc),
+                )
         return key
+
+    async def _restore_session_checkpoint(
+        self,
+        *,
+        sandbox_id: str | None,
+        session_id: str,
+    ) -> bool:
+        """Best-effort restore of the latest checkpoint into a fresh sandbox."""
+        if self._executor is None or self._objstore is None or self._session_map is None:
+            return False
+        if not sandbox_id:
+            return False
+        try:
+            key = await self._session_map.get_checkpoint(session_id)
+        except Exception as exc:  # noqa: BLE001 - restore is best-effort
+            log.warning("session checkpoint lookup failed", session_id=session_id, error=str(exc))
+            return False
+        if not key:
+            return False
+        signer = getattr(self._objstore, "presigned_get_url", None)
+        if signer is None:
+            log.warning(
+                "session checkpoint restore skipped: object store cannot sign get urls",
+                session_id=session_id,
+            )
+            return False
+        try:
+            get_url = await asyncio.to_thread(
+                signer,
+                key,
+                expires_seconds=_checkpoint_url_ttl_seconds(),
+            )
+            res = await self._executor.exec(
+                sandbox_id=sandbox_id,
+                cmd=["sh", "-c", _CHECKPOINT_RESTORE_SCRIPT],
+                env={"COCOLA_CHECKPOINT_GET_URL": get_url},
+                timeout_secs=0,
+            )
+        except Exception as exc:  # noqa: BLE001 - restore is best-effort
+            log.warning("session checkpoint restore failed", session_id=session_id, error=str(exc))
+            return False
+        if not res.ok:
+            log.warning(
+                "session checkpoint restore command failed",
+                session_id=session_id,
+                exit_code=res.exit_code,
+                error=(res.error or res.stderr or ""),
+            )
+            return False
+        log.info("session checkpoint restored", session_id=session_id, key=key)
+        return True
 
     async def _snapshot_outputs(self, sandbox_id: str | None) -> dict[str, dict[str, int]]:
         """Return metadata for files under ./outputs/ in the bound sandbox."""

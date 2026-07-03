@@ -33,6 +33,7 @@ class Fetcher(Protocol):
 
     def get(self, key: str) -> bytes: ...
     def put(self, key: str, data: bytes, mime: str) -> None: ...
+    def presigned_get_url(self, key: str, *, expires_seconds: int = 3600) -> str: ...
     def presigned_put_url(self, key: str, *, expires_seconds: int = 3600) -> str: ...
 
 
@@ -61,6 +62,14 @@ class MinioFetcher:
             io.BytesIO(data),
             length=len(data),
             content_type=mime or "application/octet-stream",
+        )
+
+    def presigned_get_url(self, key: str, *, expires_seconds: int = 3600) -> str:
+        """Return a short-lived URL that lets a sandbox download one object."""
+        return self._client.presigned_get_object(
+            self._bucket,
+            key,
+            expires=timedelta(seconds=max(1, expires_seconds)),
         )
 
     def presigned_put_url(self, key: str, *, expires_seconds: int = 3600) -> str:

@@ -71,6 +71,7 @@ class FakeObjectStore:
     def __init__(self):
         self.puts = {}
         self.presigned = []
+        self.get_presigned = []
 
     def get(self, key: str) -> bytes:
         return self.puts[key]
@@ -82,14 +83,28 @@ class FakeObjectStore:
         self.presigned.append((key, expires_seconds))
         return f"http://minio.local/{key}?sig=test"
 
+    def presigned_get_url(self, key: str, *, expires_seconds: int = 3600) -> str:
+        self.get_presigned.append((key, expires_seconds))
+        return f"http://minio.local/{key}?sig=get"
+
 
 class FakeSessionMap:
     def __init__(self, *, fail_delete: bool = False):
         self.deleted = []
         self.fail_delete = fail_delete
+        self.checkpoints = {}
 
     async def get(self, session_id: str):
         return None
+
+    async def get_binding(self, session_id: str):
+        return None
+
+    async def get_checkpoint(self, session_id: str):
+        return self.checkpoints.get(session_id)
+
+    async def put_checkpoint(self, session_id: str, object_key: str, *, user_id: str = ""):
+        self.checkpoints[session_id] = object_key
 
     async def put(
         self, session_id: str, claude_session_id: str, *, user_id: str = "", sandbox_id: str = ""
@@ -254,6 +269,7 @@ async def test_query_checkpoints_session_storage_when_enabled(monkeypatch):
     monkeypatch.setenv("COCOLA_SESSION_CHECKPOINT_ENABLED", "1")
     ex = outputs_snapshot_executor()
     store = FakeObjectStore()
+    session_map = FakeSessionMap()
     prov = ListProvider([AgentEvent(kind="done", data={})])
 
     await AgentRuntimeServicer(
@@ -261,6 +277,7 @@ async def test_query_checkpoints_session_storage_when_enabled(monkeypatch):
         binder=StaticSandboxBinder(),
         executor=ex,
         objstore=store,
+        session_map=session_map,
     ).Query(FakeRequest(), FakeContext())
 
     assert len(store.presigned) == 1
@@ -275,6 +292,33 @@ async def test_query_checkpoints_session_storage_when_enabled(monkeypatch):
     call = checkpoint_calls[0]
     assert call["env"]["COCOLA_CHECKPOINT_PUT_URL"].endswith("?sig=test")
     command = " ".join(call["cmd"])
-    assert "tar -C / -cf - workspace -C /home/cocola .claude" in command
+    assert "tar -C / -cf - workspace home/cocola/.claude" in command
     assert "zstd -T0 -3 -q" in command
     assert "curl -fsS -X PUT --upload-file -" in command
+    assert session_map.checkpoints["S1"] == key
+
+
+async def test_query_restores_latest_checkpoint_into_fresh_sandbox():
+    ex = outputs_snapshot_executor()
+    store = FakeObjectStore()
+    session_map = FakeSessionMap()
+    session_map.checkpoints["S1"] = "checkpoints/U1/S1/latest.tar.zst"
+    prov = ListProvider([AgentEvent(kind="done", data={})])
+
+    await AgentRuntimeServicer(
+        prov,
+        binder=StaticSandboxBinder(),
+        executor=ex,
+        objstore=store,
+        session_map=session_map,
+    ).Query(FakeRequest(), FakeContext())
+
+    assert store.get_presigned == [("checkpoints/U1/S1/latest.tar.zst", 3600)]
+    restore_calls = [call for call in ex.exec_calls if call["env"].get("COCOLA_CHECKPOINT_GET_URL")]
+    assert len(restore_calls) == 1
+    call = restore_calls[0]
+    assert call["env"]["COCOLA_CHECKPOINT_GET_URL"].endswith("?sig=get")
+    command = " ".join(call["cmd"])
+    assert 'curl -fsS "${COCOLA_CHECKPOINT_GET_URL}"' in command
+    assert "zstd -d -q" in command
+    assert "tar -C / -xf -" in command

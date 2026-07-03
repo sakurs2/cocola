@@ -27,6 +27,7 @@ pg_only = pytest.mark.skipif(not PG_DSN, reason="COCOLA_TEST_PG_DSN not set")
 async def _contract(store):
     # Unknown session -> None.
     assert await store.get("S-unknown") is None
+    assert await store.get_checkpoint("S-unknown") is None
     # Put then get round-trips.
     await store.put("S1", "claude-aaa", user_id="U1", sandbox_id="box-1")
     assert await store.get("S1") == "claude-aaa"
@@ -34,6 +35,14 @@ async def _contract(store):
     assert binding is not None
     assert binding.claude_session_id == "claude-aaa"
     assert binding.sandbox_id == "box-1"
+    assert binding.checkpoint_object_key == ""
+    # Checkpoint metadata is independent from the Claude resume id.
+    await store.put_checkpoint("S1", "checkpoints/U1/S1/a.tar.zst", user_id="U1")
+    assert await store.get_checkpoint("S1") == "checkpoints/U1/S1/a.tar.zst"
+    binding = await store.get_binding("S1")
+    assert binding is not None
+    assert binding.claude_session_id == "claude-aaa"
+    assert binding.checkpoint_object_key == "checkpoints/U1/S1/a.tar.zst"
     # Idempotent overwrite: the latest claude_session_id wins.
     await store.put("S1", "claude-bbb", user_id="U1", sandbox_id="box-2")
     assert await store.get("S1") == "claude-bbb"
@@ -41,12 +50,23 @@ async def _contract(store):
     assert binding is not None
     assert binding.claude_session_id == "claude-bbb"
     assert binding.sandbox_id == "box-2"
+    assert binding.checkpoint_object_key == "checkpoints/U1/S1/a.tar.zst"
+    # Checkpoint overwrite does not clobber the Claude resume id.
+    await store.put_checkpoint("S1", "checkpoints/U1/S1/b.tar.zst", user_id="U1")
+    assert await store.get_checkpoint("S1") == "checkpoints/U1/S1/b.tar.zst"
+    assert await store.get("S1") == "claude-bbb"
+    # Checkpoint-only sessions are valid: restore may happen before a Claude
+    # resume id exists in a freshly recreated sandbox.
+    await store.put_checkpoint("S-only-checkpoint", "checkpoints/U1/S-only/c.tar.zst")
+    assert await store.get_checkpoint("S-only-checkpoint") == "checkpoints/U1/S-only/c.tar.zst"
+    assert await store.get("S-only-checkpoint") is None
     # Empty claude_session_id is a no-op (never clobbers a good binding).
     await store.put("S1", "", user_id="U1")
     assert await store.get("S1") == "claude-bbb"
     # delete forgets a binding (used to drop a dangling/stale resume id).
     await store.delete("S1")
     assert await store.get("S1") is None
+    assert await store.get_checkpoint("S1") is None
     assert await store.get_binding("S1") is None
     # delete is idempotent: forgetting an unknown session is a no-op.
     await store.delete("S-unknown")
