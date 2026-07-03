@@ -178,6 +178,49 @@ def test_anthropic_payload_moves_late_tool_result_next_to_tool_use():
     assert payload["messages"][3]["content"] == [{"type": "text", "text": "continue"}]
 
 
+def test_anthropic_payload_moves_tool_use_blocks_after_trailing_thinking_and_text():
+    body = {
+        "model": "claude-sonnet",
+        "max_tokens": 100,
+        "messages": [
+            {"role": "user", "content": "compile this"},
+            {
+                "role": "assistant",
+                "content": [
+                    {"type": "thinking", "thinking": "I need to compile first."},
+                    {
+                        "type": "tool_use",
+                        "id": "call_compile",
+                        "name": "Bash",
+                        "input": {"command": "cc main.c"},
+                    },
+                    {"type": "thinking", "thinking": "The compiler result will decide."},
+                    {"type": "text", "text": "Running the compiler now."},
+                ],
+            },
+            {
+                "role": "user",
+                "content": [
+                    {"type": "tool_result", "tool_use_id": "call_compile", "content": "ok"}
+                ],
+            },
+        ],
+    }
+    req = to_chat_request(body, resolved_model="real-model")
+
+    payload = _build_payload(req, stream=True)
+
+    _assert_tool_results_immediately_after(payload)
+    assistant_blocks = payload["messages"][1]["content"]
+    assert [block["type"] for block in assistant_blocks] == [
+        "thinking",
+        "thinking",
+        "text",
+        "tool_use",
+    ]
+    assert assistant_blocks[-1]["id"] == "call_compile"
+
+
 def test_anthropic_payload_inserts_missing_tool_result_error():
     body = {
         "model": "claude-sonnet",

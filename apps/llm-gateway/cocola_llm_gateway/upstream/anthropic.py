@@ -97,6 +97,12 @@ def _normalize_tool_result_order(msgs: list[dict]) -> list[dict]:
     tool_result blocks to the required location. If a result is missing entirely,
     insert a short error result so the model can continue instead of the relay
     rejecting the whole request with a 400.
+
+    DeepSeek's Anthropic-compatible endpoint is stricter than Anthropic's docs
+    imply: if an assistant message contains a `tool_use`, no later block in the
+    same assistant message may be text/thinking. Keep non-tool blocks, but move
+    all tool_use blocks to the end so the next user message can immediately
+    start with the matching tool_result blocks.
     """
     out = [dict(m) for m in msgs]
     idx = 0
@@ -105,6 +111,7 @@ def _normalize_tool_result_order(msgs: list[dict]) -> list[dict]:
         if msg.get("role") != "assistant":
             idx += 1
             continue
+        msg["content"] = _tool_use_blocks_last(msg.get("content"))
         pending = _tool_use_ids(msg.get("content"))
         if not pending:
             idx += 1
@@ -120,6 +127,21 @@ def _normalize_tool_result_order(msgs: list[dict]) -> list[dict]:
             out.insert(idx + 1, {"role": "user", "content": results})
         idx += 2
     return out
+
+
+def _tool_use_blocks_last(content: object) -> object:
+    if not isinstance(content, list):
+        return content
+    tool_blocks: list[object] = []
+    other_blocks: list[object] = []
+    for block in content:
+        if isinstance(block, dict) and block.get("type") == "tool_use":
+            tool_blocks.append(block)
+        else:
+            other_blocks.append(block)
+    if not tool_blocks or not other_blocks:
+        return content
+    return other_blocks + tool_blocks
 
 
 def _tool_use_ids(content: object) -> list[str]:
@@ -207,6 +229,27 @@ def _tool_turn_violations(messages: object) -> list[dict]:
         tool_use_ids = _tool_use_ids(msg.get("content"))
         if not tool_use_ids:
             continue
+        content = msg.get("content")
+        if isinstance(content, list):
+            last_non_tool_use = max(
+                (
+                    block_idx
+                    for block_idx, block in enumerate(content)
+                    if not (isinstance(block, dict) and block.get("type") == "tool_use")
+                ),
+                default=-1,
+            )
+            first_tool_use = next(
+                (
+                    block_idx
+                    for block_idx, block in enumerate(content)
+                    if isinstance(block, dict) and block.get("type") == "tool_use"
+                ),
+                None,
+            )
+            if first_tool_use is not None and last_non_tool_use > first_tool_use:
+                violations.append({"message_index": idx, "tool_use_not_terminal_ids": tool_use_ids})
+                continue
         if idx + 1 >= len(messages):
             violations.append({"message_index": idx, "missing_tool_result_ids": tool_use_ids})
             continue
