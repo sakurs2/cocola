@@ -39,6 +39,15 @@ The simplified profile deliberately uses a k3d local registry instead of
 `k3d image import`. Importing the full sandbox runtime image into every node can
 consume a large amount of disk and is brittle on small local Docker VMs.
 
+The image has two addresses in local k3d mode:
+
+- Host push address: `localhost:5001/cocola/sandbox-runtime:dev`
+- Kubernetes pull address: `cocola-registry.localhost:5000/cocola/sandbox-runtime:dev`
+
+Do not pass the host `localhost:5001` address to OpenSandbox sandbox pods. From
+inside a k3d node, `localhost` is the node container itself, so pod image pulls
+will fail with `ImagePullBackOff`.
+
 The local values intentionally run without an OpenSandbox API key and set
 `OPENSANDBOX_INSECURE_SERVER=YES`; do not use this values file as-is for a
 shared environment. `make up-k8s` injects the Kubernetes-specific OpenSandbox
@@ -52,7 +61,7 @@ make verify-opensandbox-k8s
 
 This verifies create, health, streaming exec, file upload/download and destroy.
 By default it uses the same local registry image as `make up-k8s`:
-`localhost:5001/cocola/sandbox-runtime:dev`. It intentionally skips
+`cocola-registry.localhost:5000/cocola/sandbox-runtime:dev`. It intentionally skips
 pause/resume because OpenSandbox Kubernetes snapshots require registry
 configuration.
 

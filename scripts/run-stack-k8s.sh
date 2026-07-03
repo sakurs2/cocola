@@ -18,7 +18,8 @@ CLUSTER="${COCOLA_K8S_CLUSTER:-cocola-sandbox}"
 REGISTRY_HOST="${COCOLA_K8S_REGISTRY_HOST:-cocola-registry.localhost}"
 REGISTRY_PORT="${COCOLA_K8S_REGISTRY_PORT:-5001}"
 SANDBOX_IMAGE_LOCAL="${COCOLA_K8S_SANDBOX_IMAGE_LOCAL:-cocola/sandbox-runtime:dev}"
-SANDBOX_IMAGE_REMOTE="${COCOLA_K8S_SANDBOX_IMAGE_REMOTE:-localhost:${REGISTRY_PORT}/cocola/sandbox-runtime:dev}"
+SANDBOX_IMAGE_PUSH="${COCOLA_K8S_SANDBOX_IMAGE_PUSH:-localhost:${REGISTRY_PORT}/cocola/sandbox-runtime:dev}"
+SANDBOX_IMAGE_REMOTE="${COCOLA_K8S_SANDBOX_IMAGE_REMOTE:-${REGISTRY_HOST}:5000/cocola/sandbox-runtime:dev}"
 SERVER_PORT="${COCOLA_OPENSANDBOX_HOST_PORT:-8090}"
 RELEASE="${COCOLA_OPENSANDBOX_K8S_RELEASE:-opensandbox}"
 SYSTEM_NAMESPACE="${COCOLA_OPENSANDBOX_K8S_SYSTEM_NAMESPACE:-opensandbox-system}"
@@ -79,13 +80,14 @@ push_sandbox_image() {
     err "build the sandbox runtime image first, then rerun: make up-k8s"
     return 1
   fi
-  log "pushing sandbox image to local k3d registry: $SANDBOX_IMAGE_REMOTE"
-  docker tag "$SANDBOX_IMAGE_LOCAL" "$SANDBOX_IMAGE_REMOTE"
-  if ! docker push "$SANDBOX_IMAGE_REMOTE"; then
-    err "failed to push $SANDBOX_IMAGE_REMOTE"
+  log "pushing sandbox image to local k3d registry: $SANDBOX_IMAGE_PUSH"
+  docker tag "$SANDBOX_IMAGE_LOCAL" "$SANDBOX_IMAGE_PUSH"
+  if ! docker push "$SANDBOX_IMAGE_PUSH"; then
+    err "failed to push $SANDBOX_IMAGE_PUSH"
     err "if the cluster was created before the local registry existed, run: make reset-k8s"
     return 1
   fi
+  log "Kubernetes sandbox pods will pull image as: $SANDBOX_IMAGE_REMOTE"
 }
 
 install_opensandbox() {
@@ -129,6 +131,19 @@ print_opensandbox_status() {
   kubectl -n "$SANDBOX_NAMESPACE" get pods -o wide || true
   log "sandbox PVCs"
   kubectl -n "$SANDBOX_NAMESPACE" get pvc || true
+}
+
+delete_sandbox_workloads() {
+  log "deleting sandbox workloads before OpenSandbox teardown"
+  kubectl -n "$SANDBOX_NAMESPACE" delete batchsandbox --all \
+    --ignore-not-found=true \
+    --timeout=120s \
+    || true
+  kubectl -n "$SANDBOX_NAMESPACE" delete pod \
+    -l opensandbox.io/id \
+    --ignore-not-found=true \
+    --timeout=120s \
+    || true
 }
 
 stop_forward() {
@@ -208,6 +223,7 @@ down() {
   stop_stack
   stop_forward
   log "uninstalling OpenSandbox Kubernetes runtime; keeping k3d cluster $CLUSTER"
+  delete_sandbox_workloads
   uninstall_opensandbox
   log "stopping cocola infra containers"
   make dev-down || true
@@ -268,7 +284,8 @@ Environment:
   COCOLA_K8S_REGISTRY_HOST        default: cocola-registry.localhost
   COCOLA_K8S_REGISTRY_PORT        default: 5001
   COCOLA_K8S_SANDBOX_IMAGE_LOCAL  default: cocola/sandbox-runtime:dev
-  COCOLA_K8S_SANDBOX_IMAGE_REMOTE default: localhost:5001/cocola/sandbox-runtime:dev
+  COCOLA_K8S_SANDBOX_IMAGE_PUSH   default: localhost:5001/cocola/sandbox-runtime:dev
+  COCOLA_K8S_SANDBOX_IMAGE_REMOTE default: cocola-registry.localhost:5000/cocola/sandbox-runtime:dev
   OPENSANDBOX_REPO                default: \$HOME/Desktop/github/opensandbox
 TXT
     ;;
