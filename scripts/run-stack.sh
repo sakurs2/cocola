@@ -37,6 +37,8 @@ set -euo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$ROOT"
 
+export PATH="/Applications/OrbStack.app/Contents/MacOS/xbin:/opt/homebrew/bin:/usr/local/bin:$PATH"
+
 # Deploy mode 1 has exactly ONE shape now: the former --hybrid. These three
 # switches are therefore always on -- every cocola service runs NATIVE
 # (sandbox-manager/admin-api included), the real llm-gateway is up, and the web
@@ -132,6 +134,13 @@ env_bool_false() {
     0|false|FALSE|False|no|NO|No|off|OFF|Off) return 0 ;;
     *) return 1 ;;
   esac
+}
+
+opensandbox_health_url() {
+  local url="${1:-}"
+  url="${url%/}"
+  url="${url%/v1}"
+  printf '%s/health' "$url"
 }
 
 # Graceful, deterministic teardown. The contract: when this returns, NONE of our
@@ -357,16 +366,37 @@ hybrid_up() {
       echo "!! COCOLA_OPENSANDBOX_MANAGED=0 requires COCOLA_OPENSANDBOX_URL (for example http://127.0.0.1:8090/v1)" >&2
       exit 1
     fi
+    local external_health
+    external_health="$(opensandbox_health_url "$COCOLA_OPENSANDBOX_URL")"
+    if ! curl -fsS -m 3 "$external_health" >/dev/null 2>&1; then
+      echo "!! external OpenSandbox server is not reachable: $external_health" >&2
+      echo "   unset COCOLA_OPENSANDBOX_MANAGED/COCOLA_OPENSANDBOX_URL for the default make up path," >&2
+      echo "   or start the external OpenSandbox server before running make up." >&2
+      exit 1
+    fi
   elif [[ "$provider" == "opensandbox" ]]; then
     local osb_port="${COCOLA_OPENSANDBOX_HOST_PORT:-8090}"
     echo "==> [hybrid] bringing up OpenSandbox server (host :$osb_port)"
-    COCOLA_OPENSANDBOX_HOST_PORT="$osb_port" \
+    if ! COCOLA_OPENSANDBOX_HOST_PORT="$osb_port" \
       docker_compose -f deploy/docker-compose/docker-compose.opensandbox.yml up -d \
-        >"$(log_redirect hybrid-opensandbox)" 2>&1 || true
+        >"$(log_redirect hybrid-opensandbox)" 2>&1; then
+      echo "!! [hybrid] OpenSandbox server bring-up failed; see .run-logs/hybrid-opensandbox.log" >&2
+      tail -80 "$(log_redirect hybrid-opensandbox)" >&2 || true
+      exit 1
+    fi
+    local osb_ready=0
     for ((i=0; i<60; i++)); do
-      curl -fsS -m 3 "http://127.0.0.1:$osb_port/health" >/dev/null 2>&1 && break
+      if curl -fsS -m 3 "http://127.0.0.1:$osb_port/health" >/dev/null 2>&1; then
+        osb_ready=1
+        break
+      fi
       sleep 2
     done
+    if [[ "$osb_ready" != "1" ]]; then
+      echo "!! [hybrid] OpenSandbox server did not become healthy on http://127.0.0.1:$osb_port/health" >&2
+      docker_compose -f deploy/docker-compose/docker-compose.opensandbox.yml logs --tail=80 opensandbox-server >&2 || true
+      exit 1
+    fi
   fi
 
   # (2) Infra only: redis / postgres / minio (the third-party stateful deps).

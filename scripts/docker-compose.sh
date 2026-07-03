@@ -6,6 +6,8 @@
 # targets portable by routing through this tiny shim.
 set -euo pipefail
 
+export PATH="/Applications/OrbStack.app/Contents/MacOS/xbin:/opt/homebrew/bin:/usr/local/bin:$PATH"
+
 if docker compose version >/dev/null 2>&1; then
   exec docker compose "$@"
 fi
