@@ -70,12 +70,17 @@ class BoomProvider:
 class FakeObjectStore:
     def __init__(self):
         self.puts = {}
+        self.presigned = []
 
     def get(self, key: str) -> bytes:
         return self.puts[key]
 
     def put(self, key: str, data: bytes, mime: str) -> None:
         self.puts[key] = (data, mime)
+
+    def presigned_put_url(self, key: str, *, expires_seconds: int = 3600) -> str:
+        self.presigned.append((key, expires_seconds))
+        return f"http://minio.local/{key}?sig=test"
 
 
 class FakeSessionMap:
@@ -243,3 +248,33 @@ async def test_query_publishes_outputs_artifacts():
     assert key.startswith("artifacts/U1/S1/")
     assert store.puts[key] == (b"hello world", "text/plain")
     assert "Only files in ./outputs/" in prov.seen_options.system_prompt
+
+
+async def test_query_checkpoints_session_storage_when_enabled(monkeypatch):
+    monkeypatch.setenv("COCOLA_SESSION_CHECKPOINT_ENABLED", "1")
+    ex = outputs_snapshot_executor()
+    store = FakeObjectStore()
+    prov = ListProvider([AgentEvent(kind="done", data={})])
+
+    await AgentRuntimeServicer(
+        prov,
+        binder=StaticSandboxBinder(),
+        executor=ex,
+        objstore=store,
+    ).Query(FakeRequest(), FakeContext())
+
+    assert len(store.presigned) == 1
+    key, ttl = store.presigned[0]
+    assert key.startswith("checkpoints/U1/S1/")
+    assert key.endswith(".tar.zst")
+    assert ttl == 3600
+    checkpoint_calls = [
+        call for call in ex.exec_calls if call["env"].get("COCOLA_CHECKPOINT_PUT_URL")
+    ]
+    assert len(checkpoint_calls) == 1
+    call = checkpoint_calls[0]
+    assert call["env"]["COCOLA_CHECKPOINT_PUT_URL"].endswith("?sig=test")
+    command = " ".join(call["cmd"])
+    assert "tar -C / -cf - workspace -C /home/cocola .claude" in command
+    assert "zstd -T0 -3 -q" in command
+    assert "curl -fsS -X PUT --upload-file -" in command

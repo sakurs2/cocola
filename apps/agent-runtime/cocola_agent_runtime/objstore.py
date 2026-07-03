@@ -20,6 +20,7 @@ from __future__ import annotations
 
 import io
 import os
+from datetime import timedelta
 from typing import Protocol
 
 from cocola_common import get_logger
@@ -32,6 +33,7 @@ class Fetcher(Protocol):
 
     def get(self, key: str) -> bytes: ...
     def put(self, key: str, data: bytes, mime: str) -> None: ...
+    def presigned_put_url(self, key: str, *, expires_seconds: int = 3600) -> str: ...
 
 
 class MinioFetcher:
@@ -59,6 +61,18 @@ class MinioFetcher:
             io.BytesIO(data),
             length=len(data),
             content_type=mime or "application/octet-stream",
+        )
+
+    def presigned_put_url(self, key: str, *, expires_seconds: int = 3600) -> str:
+        """Return a short-lived URL that lets a sandbox upload one object.
+
+        The sandbox receives only this URL, not MinIO credentials. It can then
+        stream a checkpoint archive directly with curl PUT.
+        """
+        return self._client.presigned_put_object(
+            self._bucket,
+            key,
+            expires=timedelta(seconds=max(1, expires_seconds)),
         )
 
 
