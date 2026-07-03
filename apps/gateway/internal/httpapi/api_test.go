@@ -11,6 +11,7 @@ import (
 
 	"github.com/cocola-project/cocola/apps/gateway/internal/agent"
 	"github.com/cocola-project/cocola/apps/gateway/internal/auth"
+	"github.com/cocola-project/cocola/apps/gateway/internal/convo"
 	"github.com/cocola-project/cocola/packages/go-common/logger"
 	"github.com/cocola-project/cocola/packages/go-common/metrics"
 	"github.com/cocola-project/cocola/packages/go-common/token"
@@ -85,6 +86,63 @@ func TestChatStreamsSSE(t *testing.T) {
 	// The prompt must be forwarded; session honored.
 	if fs.gotQuery.Prompt != "hi" || fs.gotQuery.SessionID != "s1" {
 		t.Fatalf("query not forwarded: %+v", fs.gotQuery)
+	}
+}
+
+func TestChatForwardsModelAlias(t *testing.T) {
+	fs := &fakeStreamer{script: []agent.Event{{Kind: "done"}}}
+	h := newAPI(t, fs)
+
+	req := httptest.NewRequest(
+		"POST",
+		"/v1/chat",
+		strings.NewReader(`{"prompt":"hi","session_id":"s1","model_alias":"claude-sonnet"}`),
+	)
+	rec := httptest.NewRecorder()
+	h.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("want 200, got %d", rec.Code)
+	}
+	if fs.gotQuery.ModelAlias != "claude-sonnet" {
+		t.Fatalf("model alias not forwarded, got %q", fs.gotQuery.ModelAlias)
+	}
+}
+
+func TestChatPersistsAssistantModelMetadata(t *testing.T) {
+	fs := &fakeStreamer{script: []agent.Event{
+		{Kind: "text", Data: map[string]string{"text": "hello"}},
+		{Kind: "done"},
+	}}
+	store := convo.NewMemory()
+	v := auth.NewVerifier(auth.Config{})
+	h := New(fs, v, logger.Must()).WithConvoStore(store).Handler()
+
+	req := httptest.NewRequest(
+		"POST",
+		"/v1/chat",
+		strings.NewReader(`{"prompt":"hi","session_id":"s1","model_alias":"claude-sonnet","model_label":"Claude Sonnet","model_icon":{"type":"simple-icons","slug":"anthropic"}}`),
+	)
+	rec := httptest.NewRecorder()
+	h.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("want 200, got %d", rec.Code)
+	}
+	msgs, err := store.GetMessages(context.Background(), "s1", auth.DevIdentity.UserID)
+	if err != nil {
+		t.Fatalf("messages: %v", err)
+	}
+	if len(msgs) != 2 {
+		t.Fatalf("want user+assistant messages, got %d", len(msgs))
+	}
+	assistant := msgs[1]
+	if assistant.Metadata["model_alias"] != "claude-sonnet" {
+		t.Fatalf("model alias metadata = %#v", assistant.Metadata["model_alias"])
+	}
+	icon, ok := assistant.Metadata["model_icon"].(map[string]string)
+	if !ok || icon["slug"] != "anthropic" {
+		t.Fatalf("model icon metadata = %#v", assistant.Metadata["model_icon"])
 	}
 }
 
@@ -244,7 +302,6 @@ func TestChatDropsAttachmentWithInvalidBase64(t *testing.T) {
 		t.Fatalf("invalid-base64 attachment should be dropped, got %d", len(fs.gotQuery.Attachments))
 	}
 }
-
 
 // ---- P1a: object-store upload + threshold split ----
 

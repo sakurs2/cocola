@@ -24,6 +24,7 @@ from __future__ import annotations
 
 import json
 import os
+import pathlib
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
@@ -88,7 +89,8 @@ def _build_from_dict(spec: dict) -> Registry:
         },
         "routes": {
           "claude-sonnet": {"provider": "anthropic", "real_model": "claude-3-5-sonnet-20241022",
-                            "input_per_1k": 0.003, "output_per_1k": 0.015}
+                            "runtime": "claude-code", "label": "Claude Sonnet",
+                            "icon": {"type": "simple-icons", "slug": "anthropic"}}
         }
       }
     """
@@ -106,6 +108,13 @@ def _build_from_dict(spec: dict) -> Registry:
                 input_per_1k=float(rcfg.get("input_per_1k", 0.0)),
                 output_per_1k=float(rcfg.get("output_per_1k", 0.0)),
             ),
+            runtime=str(rcfg.get("runtime", "claude-code")),
+            label=str(rcfg.get("label", alias)),
+            icon={str(k): str(v) for k, v in (rcfg.get("icon") or {}).items()}
+            if isinstance(rcfg.get("icon"), dict)
+            else {},
+            enabled=_cfg_bool(rcfg.get("enabled", True)),
+            visible=_cfg_bool(rcfg.get("visible", True)),
         )
 
     default_alias = spec.get("default_alias", "")
@@ -153,7 +162,7 @@ def _build_provider(name: str, cfg: dict) -> UpstreamProvider:
 
 def load_registry() -> Registry:
     """Load a Registry from COCOLA_LLM_CONFIG file, else from env, else Fake."""
-    path = os.getenv("COCOLA_LLM_CONFIG", "")
+    path = _llm_config_path()
     if path:
         with open(path, encoding="utf-8") as fh:
             spec = json.load(fh) if path.endswith(".json") else _load_yaml(fh.read())
@@ -161,6 +170,27 @@ def load_registry() -> Registry:
         return _build_from_dict(spec)
 
     return _build_from_env()
+
+
+def _llm_config_path() -> str:
+    explicit = os.getenv("COCOLA_LLM_CONFIG", "").strip()
+    if explicit:
+        explicit_path = pathlib.Path(explicit)
+        if explicit_path.is_absolute():
+            return explicit
+        repo_root = pathlib.Path(__file__).resolve().parents[3]
+        for candidate in (pathlib.Path.cwd() / explicit_path, repo_root / explicit_path):
+            if candidate.exists():
+                return str(candidate)
+        return explicit
+    repo_root = pathlib.Path(__file__).resolve().parents[3]
+    for candidate in (
+        pathlib.Path.cwd() / "deploy" / "llm-config.json",
+        repo_root / "deploy" / "llm-config.json",
+    ):
+        if candidate.exists():
+            return str(candidate)
+    return ""
 
 
 def _build_from_env() -> Registry:
@@ -292,3 +322,14 @@ def _envflag(name: str, *, default: bool = False) -> bool:
     if not raw:
         return default
     return raw in ("1", "true", "yes", "on")
+
+
+def _cfg_bool(value: object) -> bool:
+    if value is None:
+        return True
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, str):
+        raw = value.strip().lower()
+        return raw not in ("0", "false", "no", "off")
+    return bool(value)

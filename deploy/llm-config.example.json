@@ -1,28 +1,32 @@
 {
   "_comment": [
-    "cocola llm-gateway 上游配置示例 (Anthropic 兼容)。",
+    "cocola 临时多模型配置示例。",
     "用法: 复制为 deploy/llm-config.json, 填入你购买服务的 base_url, 然后",
     "  export COCOLA_LLM_CONFIG=deploy/llm-config.json",
-    "  export COCOLA_ANTHROPIC_API_KEY=sk-ant-xxxx   # 密钥只走环境变量, 绝不写进本文件",
+    "  export COCOLA_ANTHROPIC_API_KEY=sk-ant-xxxx   # 密钥只走环境变量, 绝不写进 JSON",
     "  make up-all",
-    "ADR-0004 硬约束: endpoint 可入文件, 但 api_key 永远经 api_key_env 间接引用, 不落盘。",
-    "default_alias 是 agent-runtime 经 COCOLA_ANTHROPIC_MODEL 发来的别名;",
-    "real_model 是网关转发给你上游的真实模型名 —— 二者解耦, 这正是用文件而非纯 env 的原因。"
+    "deploy/llm-config.json 已被 .gitignore 忽略; 只提交本 example。",
+    "providers 描述上游连接; routes 描述用户可选模型和 runtime 兼容性。",
+    "当前 agent runtime 固定为 claude-code; 后续 codex-cli 应新增 runtime adapter, 不复用 Claude Code 协议。",
+    "icon 使用 Simple Icons slug 语义; Web 内置少量品牌图标, 未知 slug 回退到通用图标。"
   ],
-  "default_alias": "cocola-default",
+  "default_alias": "claude-sonnet",
   "providers": {
-    "myvendor": {
+    "anthropic": {
       "type": "anthropic",
-      "base_url": "https://你购买服务的域名",
+      "base_url": "https://api.anthropic.com",
       "api_key_env": "COCOLA_ANTHROPIC_API_KEY"
     }
   },
   "routes": {
-    "cocola-default": {
-      "provider": "myvendor",
+    "claude-sonnet": {
+      "provider": "anthropic",
       "real_model": "claude-3-5-sonnet-20241022",
-      "input_per_1k": 0.003,
-      "output_per_1k": 0.015
+      "runtime": "claude-code",
+      "label": "Claude Sonnet",
+      "icon": { "type": "simple-icons", "slug": "anthropic" },
+      "enabled": true,
+      "visible": true
     }
   }
 }

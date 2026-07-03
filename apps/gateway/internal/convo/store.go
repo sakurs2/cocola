@@ -75,11 +75,12 @@ type Conversation struct {
 
 // Message is one rendered message within a conversation.
 type Message struct {
-	ID             string    `json:"id"`
-	ConversationID string    `json:"conversation_id"`
-	Role           string    `json:"role"` // "user" | "assistant"
-	Parts          []Part    `json:"parts"`
-	CreatedAt      time.Time `json:"created_at"`
+	ID             string         `json:"id"`
+	ConversationID string         `json:"conversation_id"`
+	Role           string         `json:"role"` // "user" | "assistant"
+	Parts          []Part         `json:"parts"`
+	Metadata       map[string]any `json:"metadata,omitempty"`
+	CreatedAt      time.Time      `json:"created_at"`
 }
 
 // Artifact is one downloadable agent-produced file. Bytes are stored in the

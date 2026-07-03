@@ -71,6 +71,7 @@ type UiMessage = {
   role: "user" | "assistant";
   parts: UiPart[];
   createdAt: number;
+  metadata?: UiMessageMetadata;
 };
 
 export type SandboxInfo = {
@@ -86,6 +87,24 @@ export type ConversationSummary = {
   updated_at: string;
 };
 
+export type ModelIconConfig = {
+  type: "simple-icons" | "image";
+  slug: string;
+  src?: string;
+};
+
+export type ModelOption = {
+  alias: string;
+  label: string;
+  icon: ModelIconConfig;
+};
+
+export type UiMessageMetadata = {
+  model_alias?: string;
+  model_label?: string;
+  model_icon?: ModelIconConfig;
+};
+
 // Wire shape of a persisted message (gateway GET /v1/conversations/{id}/messages).
 // Parts mirror UiPart exactly (that is the whole point of route A), so mapping
 // back into local state is a near-identity.
@@ -93,6 +112,7 @@ type WireMessage = {
   id: string;
   role: "user" | "assistant";
   parts: UiPart[];
+  metadata?: UiMessageMetadata;
   created_at: string;
 };
 
@@ -117,6 +137,10 @@ type CocolaContextValue = {
   selectedArtifact: ArtifactPreview | null;
   openArtifact: (artifact: ArtifactPreview) => void;
   closeArtifact: () => void;
+  models: ModelOption[];
+  selectedModelAlias: string;
+  selectedModel: ModelOption;
+  setSelectedModelAlias: (alias: string) => void;
 };
 
 const CocolaContext = createContext<CocolaContextValue | null>(null);
@@ -141,6 +165,24 @@ function isTruthy(v: string | undefined): boolean {
 function parseSize(v: string | undefined): number {
   const n = Number.parseInt(v ?? "", 10);
   return Number.isFinite(n) && n > 0 ? n : 0;
+}
+
+function normalizeMetadata(raw: UiMessageMetadata | undefined): UiMessageMetadata | undefined {
+  if (!raw) return undefined;
+  return {
+    ...(typeof raw.model_alias === "string" ? { model_alias: raw.model_alias } : {}),
+    ...(typeof raw.model_label === "string" ? { model_label: raw.model_label } : {}),
+    ...((raw.model_icon?.type === "simple-icons" || raw.model_icon?.type === "image") &&
+    typeof raw.model_icon.slug === "string"
+      ? {
+          model_icon: {
+            type: raw.model_icon.type,
+            slug: raw.model_icon.slug,
+            ...(typeof raw.model_icon.src === "string" ? { src: raw.model_icon.src } : {}),
+          },
+        }
+      : {}),
+  };
 }
 
 // Append text to the trailing text part, or start a new one. Immutable.
@@ -252,6 +294,9 @@ function convertMessage(message: UiMessage): ThreadMessageLike {
     content: content.length > 0 ? content : [{ type: "text" as const, text: "" }],
     id: message.id,
     createdAt: new Date(message.createdAt),
+    metadata: {
+      custom: message.metadata ?? {},
+    },
   };
 }
 
@@ -260,6 +305,12 @@ function convertMessage(message: UiMessage): ThreadMessageLike {
 // The base64 adapter is stateless, so a single module-level instance is safe to
 // share across renders (avoids re-creating it and thrashing the runtime).
 const attachmentAdapter = new Base64AttachmentAdapter();
+
+const DEFAULT_MODEL: ModelOption = {
+  alias: "cocola-default",
+  label: "Cocola Default",
+  icon: { type: "simple-icons", slug: "anthropic" },
+};
 
 export function CocolaRuntimeProvider({ children }: { children: ReactNode }) {
   // Message and running state are keyed by conversation id (session_id). A
@@ -273,11 +324,17 @@ export function CocolaRuntimeProvider({ children }: { children: ReactNode }) {
   const [sandboxes, setSandboxes] = useState<Record<string, SandboxInfo | null>>({});
   const [conversations, setConversations] = useState<ConversationSummary[]>([]);
   const [selectedArtifact, setSelectedArtifact] = useState<ArtifactPreview | null>(null);
+  const [models, setModels] = useState<ModelOption[]>([DEFAULT_MODEL]);
+  const [selectedModelAlias, setSelectedModelAlias] = useState(DEFAULT_MODEL.alias);
   const abortMap = useRef<Map<string, AbortController>>(new Map());
 
   const messages = useMemo(() => convMessages[sessionId] ?? [], [convMessages, sessionId]);
   const isRunning = runningIds.has(sessionId);
   const sandbox = sandboxes[sessionId] ?? null;
+  const selectedModel = useMemo(
+    () => models.find((m) => m.alias === selectedModelAlias) ?? models[0] ?? DEFAULT_MODEL,
+    [models, selectedModelAlias],
+  );
 
   const openArtifact = useCallback((artifact: ArtifactPreview) => {
     setSelectedArtifact(artifact);
@@ -365,6 +422,12 @@ export function CocolaRuntimeProvider({ children }: { children: ReactNode }) {
       );
 
       const convId = sessionId;
+      const model = selectedModel;
+      const assistantMetadata: UiMessageMetadata = {
+        model_alias: model.alias,
+        model_label: model.label,
+        model_icon: model.icon,
+      };
       const assistantId = genId();
       setConvMessages((prev) => {
         const cur = prev[convId] ?? [];
@@ -373,7 +436,13 @@ export function CocolaRuntimeProvider({ children }: { children: ReactNode }) {
           [convId]: [
             ...cur,
             { id: genId(), role: "user", parts: [{ type: "text", text }], createdAt: Date.now() },
-            { id: assistantId, role: "assistant", parts: [], createdAt: Date.now() },
+            {
+              id: assistantId,
+              role: "assistant",
+              parts: [],
+              createdAt: Date.now(),
+              metadata: assistantMetadata,
+            },
           ],
         };
       });
@@ -400,6 +469,9 @@ export function CocolaRuntimeProvider({ children }: { children: ReactNode }) {
           body: JSON.stringify({
             prompt: text,
             session_id: convId,
+            model_alias: model.alias,
+            model_label: model.label,
+            model_icon: model.icon,
             ...(attachments.length > 0 ? { attachments } : {}),
           }),
           signal: ctrl.signal,
@@ -428,7 +500,7 @@ export function CocolaRuntimeProvider({ children }: { children: ReactNode }) {
         refreshConversations();
       }
     },
-    [sessionId, applyEvent, refreshConversations, setRunning],
+    [sessionId, selectedModel, applyEvent, refreshConversations, setRunning],
   );
 
   const onCancel = useCallback(async () => {
@@ -455,6 +527,7 @@ export function CocolaRuntimeProvider({ children }: { children: ReactNode }) {
           id: m.id,
           role: m.role,
           parts: m.parts ?? [],
+          metadata: normalizeMetadata(m.metadata),
           createdAt: m.created_at ? new Date(m.created_at).getTime() : Date.now(),
         }));
         setConvMessages((prev) => ({ ...prev, [id]: loaded }));
@@ -480,6 +553,24 @@ export function CocolaRuntimeProvider({ children }: { children: ReactNode }) {
     refreshConversations();
   }, [refreshConversations]);
 
+  useEffect(() => {
+    void (async () => {
+      try {
+        const res = await fetch("/api/models");
+        if (!res.ok) return;
+        const rows = (await res.json()) as ModelOption[];
+        const next = Array.isArray(rows) && rows.length > 0 ? rows : [DEFAULT_MODEL];
+        const fallbackAlias = next[0]?.alias ?? DEFAULT_MODEL.alias;
+        setModels(next);
+        setSelectedModelAlias((prev) =>
+          next.some((m) => m.alias === prev) ? prev : fallbackAlias,
+        );
+      } catch {
+        // Keep the built-in fallback model; model discovery is non-critical.
+      }
+    })();
+  }, []);
+
   const runtime = useExternalStoreRuntime<UiMessage>({
     messages,
     isRunning,
@@ -504,6 +595,10 @@ export function CocolaRuntimeProvider({ children }: { children: ReactNode }) {
       selectedArtifact,
       openArtifact,
       closeArtifact,
+      models,
+      selectedModelAlias,
+      selectedModel,
+      setSelectedModelAlias,
     }),
     [
       sessionId,
@@ -515,6 +610,9 @@ export function CocolaRuntimeProvider({ children }: { children: ReactNode }) {
       selectedArtifact,
       openArtifact,
       closeArtifact,
+      models,
+      selectedModelAlias,
+      selectedModel,
     ],
   );
 

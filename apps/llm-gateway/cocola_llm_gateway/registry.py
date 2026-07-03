@@ -51,6 +51,11 @@ class ModelRoute:
     provider_name: str
     real_model: str
     pricing: Pricing = field(default_factory=Pricing)
+    runtime: str = "claude-code"
+    label: str = ""
+    icon: dict[str, str] = field(default_factory=dict)
+    enabled: bool = True
+    visible: bool = True
 
 
 class Registry:
@@ -81,13 +86,13 @@ class Registry:
         return self._default_alias
 
     def aliases(self) -> list[str]:
-        return sorted(self._routes.keys())
+        return sorted(alias for alias, route in self._routes.items() if route.enabled)
 
     def resolve(self, requested_alias: str | None) -> tuple[ModelRoute, UpstreamProvider]:
         """Resolve an alias (or the default) to a route + provider instance."""
         alias = (requested_alias or "").strip() or self._default_alias
         route = self._routes.get(alias)
-        if route is None:
+        if route is None or not route.enabled:
             raise CocolaError(
                 ErrorCode.NOT_FOUND,
                 f"unknown model alias '{alias}'; known: {', '.join(self.aliases()) or '(none)'}",

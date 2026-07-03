@@ -11,9 +11,11 @@ import (
 	"io"
 	"os"
 	"strconv"
+	"strings"
 
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials/insecure"
+	"google.golang.org/grpc/metadata"
 
 	"github.com/cocola-project/cocola/packages/go-common/tracing"
 	agentv1 "github.com/cocola-project/cocola/packages/proto/gen/go/cocola/agent/v1"
@@ -36,6 +38,7 @@ type Query struct {
 	Prompt      string
 	SandboxID   string
 	MaxTurns    int32
+	ModelAlias  string
 	Attachments []Attachment
 }
 
@@ -128,6 +131,9 @@ func (c *Client) Close() error {
 // Stream forwards q to agent-runtime and relays each AgentEvent to onEvent. A
 // context cancel (client disconnect, deadline) aborts the RPC promptly.
 func (c *Client) Stream(ctx context.Context, q Query, onEvent func(Event) error) error {
+	if strings.TrimSpace(q.ModelAlias) != "" {
+		ctx = metadata.AppendToOutgoingContext(ctx, "x-cocola-model-alias", strings.TrimSpace(q.ModelAlias))
+	}
 	atts := make([]*agentv1.Attachment, 0, len(q.Attachments))
 	for i := range q.Attachments {
 		atts = append(atts, &agentv1.Attachment{

@@ -180,6 +180,15 @@ class InSandboxShimProvider:
             req["resume"] = resume
         return json.dumps(req, ensure_ascii=False, separators=(",", ":"))
 
+    def _model_env(self, options: AgentOptions) -> dict[str, str]:
+        alias = (options.model_alias or "").strip()
+        if not alias:
+            return {}
+        return {
+            "ANTHROPIC_MODEL": alias,
+            "ANTHROPIC_SMALL_FAST_MODEL": alias,
+        }
+
     async def query(
         self,
         prompt: str,
@@ -303,6 +312,7 @@ class InSandboxShimProvider:
             async for chunk in self._executor.exec_stream(
                 sandbox_id=options.sandbox_id,
                 cmd=[SHIM_ENTRYPOINT],
+                env=self._model_env(options),
                 stdin=request_json,
             ):
                 if chunk.kind == "stderr":

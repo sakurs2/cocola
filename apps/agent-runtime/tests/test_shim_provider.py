@@ -96,6 +96,30 @@ async def test_session_id_is_reused_as_resume_next_turn():
     assert second_req["resume"] == "sess-1"
 
 
+async def test_model_alias_is_injected_into_exec_env():
+    def stream_handler(sandbox_id, cmd, stdin):
+        yield ExecChunk(
+            kind="stdout",
+            data=_ndjson({"type": "done", "session_id": "sess-1"}),
+        )
+        yield ExecChunk(kind="exit", exit_code=0)
+
+    execu = StaticSandboxExecutor(stream_handler=stream_handler)
+    provider = InSandboxShimProvider(execu)
+    opts = AgentOptions(
+        user_id="U1",
+        session_id="S1",
+        sandbox_id="box-1",
+        model_alias="claude-sonnet",
+    )
+
+    await _drain(provider, "hello", opts)
+
+    env = execu.stream_calls[0]["env"]
+    assert env["ANTHROPIC_MODEL"] == "claude-sonnet"
+    assert env["ANTHROPIC_SMALL_FAST_MODEL"] == "claude-sonnet"
+
+
 async def test_nonzero_exit_becomes_terminal_error():
     def stream_handler(sandbox_id, cmd, stdin):
         yield ExecChunk(kind="stderr", data="boom: cli not found\n")

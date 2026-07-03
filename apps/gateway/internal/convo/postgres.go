@@ -52,10 +52,18 @@ func (p *Postgres) InsertMessage(ctx context.Context, m Message) error {
 	if err != nil {
 		return err
 	}
-	const q = `INSERT INTO messages (id, conversation_id, role, parts_json, created_at)
-		VALUES ($1,$2,$3,$4,$5)`
+	metadata := m.Metadata
+	if metadata == nil {
+		metadata = map[string]any{}
+	}
+	metadataJSON, err := json.Marshal(metadata)
+	if err != nil {
+		return err
+	}
+	const q = `INSERT INTO messages (id, conversation_id, role, parts_json, metadata_json, created_at)
+		VALUES ($1,$2,$3,$4,$5,$6)`
 	_, err = p.pool.Exec(ctx, q,
-		m.ID, m.ConversationID, m.Role, partsJSON, m.CreatedAt)
+		m.ID, m.ConversationID, m.Role, partsJSON, metadataJSON, m.CreatedAt)
 	return err
 }
 
@@ -90,7 +98,7 @@ func (p *Postgres) GetMessages(ctx context.Context, convID, userID string) ([]Me
 		}
 		return nil, err
 	}
-	const q = `SELECT id, conversation_id, role, parts_json, created_at
+	const q = `SELECT id, conversation_id, role, parts_json, metadata_json, created_at
 		FROM messages WHERE conversation_id = $1 ORDER BY created_at ASC, id ASC`
 	rows, err := p.pool.Query(ctx, q, convID)
 	if err != nil {
@@ -101,11 +109,17 @@ func (p *Postgres) GetMessages(ctx context.Context, convID, userID string) ([]Me
 	for rows.Next() {
 		var m Message
 		var partsJSON []byte
-		if err := rows.Scan(&m.ID, &m.ConversationID, &m.Role, &partsJSON, &m.CreatedAt); err != nil {
+		var metadataJSON []byte
+		if err := rows.Scan(&m.ID, &m.ConversationID, &m.Role, &partsJSON, &metadataJSON, &m.CreatedAt); err != nil {
 			return nil, err
 		}
 		if err := json.Unmarshal(partsJSON, &m.Parts); err != nil {
 			return nil, err
+		}
+		if len(metadataJSON) > 0 {
+			if err := json.Unmarshal(metadataJSON, &m.Metadata); err != nil {
+				return nil, err
+			}
 		}
 		out = append(out, m)
 	}

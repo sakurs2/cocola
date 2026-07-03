@@ -128,11 +128,14 @@ func (a *API) health(w http.ResponseWriter, _ *http.Request) {
 // the verified identity, NOT from the body, so a caller cannot impersonate
 // another user. session_id and sandbox_id are caller-chosen routing hints.
 type chatRequest struct {
-	Prompt      string          `json:"prompt"`
-	SessionID   string          `json:"session_id"`
-	SandboxID   string          `json:"sandbox_id"`
-	MaxTurns    int32           `json:"max_turns"`
-	Attachments []attachmentDTO `json:"attachments"`
+	Prompt      string            `json:"prompt"`
+	SessionID   string            `json:"session_id"`
+	SandboxID   string            `json:"sandbox_id"`
+	MaxTurns    int32             `json:"max_turns"`
+	ModelAlias  string            `json:"model_alias"`
+	ModelLabel  string            `json:"model_label"`
+	ModelIcon   map[string]string `json:"model_icon"`
+	Attachments []attachmentDTO   `json:"attachments"`
 }
 
 // attachmentDTO is one user-uploaded file carried inline in the chat body.
@@ -221,6 +224,7 @@ func (a *API) chat(w http.ResponseWriter, r *http.Request) {
 		Prompt:      req.Prompt,
 		SandboxID:   req.SandboxID,
 		MaxTurns:    req.MaxTurns,
+		ModelAlias:  strings.TrimSpace(req.ModelAlias),
 		Attachments: atts,
 	}
 
@@ -260,7 +264,7 @@ func (a *API) chat(w http.ResponseWriter, r *http.Request) {
 	// background context so a client disconnect (r.Context() cancelled) does not
 	// abort the write.
 	if persist {
-		a.persistAssistantTurn(context.Background(), req.SessionID, reducer.Parts())
+		a.persistAssistantTurn(context.Background(), req.SessionID, reducer.Parts(), assistantMetadata(req))
 	}
 }
 
@@ -293,7 +297,7 @@ func (a *API) persistUserTurn(ctx context.Context, id auth.Identity, req chatReq
 // persistAssistantTurn appends the aggregated assistant message and refreshes
 // the conversation's updated_at so it floats to the top of the sidebar. Skips a
 // truly empty turn (no parts) to avoid storing blank rows. Best-effort.
-func (a *API) persistAssistantTurn(ctx context.Context, sessionID string, parts []convo.Part) {
+func (a *API) persistAssistantTurn(ctx context.Context, sessionID string, parts []convo.Part, metadata map[string]any) {
 	if len(parts) == 0 {
 		return
 	}
@@ -303,6 +307,7 @@ func (a *API) persistAssistantTurn(ctx context.Context, sessionID string, parts 
 		ConversationID: sessionID,
 		Role:           "assistant",
 		Parts:          parts,
+		Metadata:       metadata,
 		CreatedAt:      now,
 	}); err != nil {
 		a.log.Warn("persist assistant message failed: " + err.Error())
@@ -312,6 +317,24 @@ func (a *API) persistAssistantTurn(ctx context.Context, sessionID string, parts 
 	if err := a.convo.UpsertConversation(ctx, convo.Conversation{ID: sessionID, UpdatedAt: now}); err != nil {
 		a.log.Warn("refresh conversation updated_at failed: " + err.Error())
 	}
+}
+
+func assistantMetadata(req chatRequest) map[string]any {
+	out := make(map[string]any)
+	if alias := strings.TrimSpace(req.ModelAlias); alias != "" {
+		out["model_alias"] = alias
+	}
+	if label := strings.TrimSpace(req.ModelLabel); label != "" {
+		out["model_label"] = label
+	}
+	if req.ModelIcon != nil {
+		iconType := strings.TrimSpace(req.ModelIcon["type"])
+		slug := strings.TrimSpace(req.ModelIcon["slug"])
+		if iconType != "" && slug != "" {
+			out["model_icon"] = map[string]string{"type": iconType, "slug": slug}
+		}
+	}
+	return out
 }
 
 // registerArtifact records a file event's private object-store key, then

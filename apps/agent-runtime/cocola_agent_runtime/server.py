@@ -51,6 +51,8 @@ ARTIFACT_SYSTEM_PROMPT = (
     "When you create files that the user should download or preview, save them "
     "under ./outputs/. Only files in ./outputs/ are published to the user."
 )
+CURRENT_RUNTIME = os.getenv("COCOLA_AGENT_RUNTIME", "claude-code")
+MODEL_ALIAS_METADATA_KEY = "x-cocola-model-alias"
 
 _OUTPUTS_SNAPSHOT_SCRIPT = r"""
 import json
@@ -151,6 +153,85 @@ def _artifact_max_bytes() -> int:
     return 32 * 1024 * 1024
 
 
+def _metadata_value(context, key: str) -> str:
+    for item in context.invocation_metadata() or ():
+        if item.key.lower() == key.lower():
+            return str(item.value).strip()
+    return ""
+
+
+def _enabled(value: Any) -> bool:
+    if value is None:
+        return True
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, str):
+        return value.strip().lower() not in {"0", "false", "no", "off"}
+    return bool(value)
+
+
+def _validated_model_alias(requested_alias: str) -> str | None:
+    """Resolve and validate a user-facing model alias for this runtime.
+
+    If COCOLA_LLM_CONFIG is mounted here, agent-runtime validates that the alias
+    exists, is enabled, and targets this runtime. Without that file, we keep the
+    dev path permissive and simply pass through the alias to Claude Code.
+    """
+    alias = requested_alias.strip()
+    path = _llm_config_path()
+    if not path:
+        return alias or None
+    with open(path, encoding="utf-8") as fh:
+        spec = json.load(fh)
+    routes = spec.get("routes") or {}
+    if not alias:
+        alias = str(spec.get("default_alias") or "").strip()
+    if not alias:
+        return None
+    route = routes.get(alias)
+    if not isinstance(route, dict):
+        raise ValueError(f"unknown model alias {alias!r}")
+    if not _enabled(route.get("enabled", True)):
+        raise ValueError(f"model alias {alias!r} is disabled")
+    runtime = str(route.get("runtime") or "claude-code")
+    if runtime != CURRENT_RUNTIME:
+        raise ValueError(
+            f"model alias {alias!r} targets runtime {runtime!r}, "
+            f"current runtime is {CURRENT_RUNTIME!r}"
+        )
+    return alias
+
+
+def _llm_config_path() -> str:
+    explicit = os.getenv("COCOLA_LLM_CONFIG", "").strip()
+    if explicit:
+        explicit_path = pathlib.Path(explicit)
+        if explicit_path.is_absolute():
+            return explicit
+        repo_root = pathlib.Path(__file__).resolve().parents[3]
+        for candidate in (pathlib.Path.cwd() / explicit_path, repo_root / explicit_path):
+            if candidate.exists():
+                return str(candidate)
+        return explicit
+    repo_root = pathlib.Path(__file__).resolve().parents[3]
+    for candidate in (
+        pathlib.Path.cwd() / "deploy" / "llm-config.json",
+        repo_root / "deploy" / "llm-config.json",
+    ):
+        if candidate.exists():
+            return str(candidate)
+    return ""
+
+
+def _model_env(model_alias: str | None) -> dict[str, str]:
+    if not model_alias:
+        return {}
+    return {
+        "ANTHROPIC_MODEL": model_alias,
+        "ANTHROPIC_SMALL_FAST_MODEL": model_alias,
+    }
+
+
 class AgentRuntimeServicer(pb_grpc.AgentRuntimeServiceServicer):
     """Serves AgentRuntimeService.Query by driving an injected AgentProvider."""
 
@@ -187,6 +268,22 @@ class AgentRuntimeServicer(pb_grpc.AgentRuntimeServiceServicer):
         (the shim provider yields `done`); on error we substitute one.
         """
         sandbox_id = request.sandbox_id or None
+        try:
+            model_alias = _validated_model_alias(_metadata_value(context, MODEL_ALIAS_METADATA_KEY))
+        except Exception as exc:  # noqa: BLE001 - config/alias error -> clean terminal event
+            log.warning(
+                "model alias validation failed",
+                session_id=request.session_id,
+                error=str(exc),
+            )
+            await context.write(
+                pb.AgentEvent(
+                    kind="error",
+                    data={"error": f"model selection failed: {exc}"},
+                )
+            )
+            return
+        model_env = _model_env(model_alias)
 
         # Bind the session to a real sandbox when a binder is wired and the
         # caller did not pin one. Acquire is create-or-reuse (M2): the same
@@ -196,7 +293,7 @@ class AgentRuntimeServicer(pb_grpc.AgentRuntimeServiceServicer):
         if self._binder is not None and sandbox_id is None:
             try:
                 box = await self._binder.acquire(
-                    session_id=request.session_id, user_id=request.user_id
+                    session_id=request.session_id, user_id=request.user_id, env=model_env
                 )
             except Exception as exc:  # noqa: BLE001 - bind failure -> clean terminal event
                 log.warning(
@@ -261,6 +358,7 @@ class AgentRuntimeServicer(pb_grpc.AgentRuntimeServiceServicer):
             sandbox_id=sandbox_id,
             workspace=workspace,
             max_turns=request.max_turns or 30,
+            model_alias=model_alias,
         )
         artifacts_enabled = bool(self._objstore is not None and hasattr(self._objstore, "put"))
         if artifacts_enabled:
@@ -277,6 +375,7 @@ class AgentRuntimeServicer(pb_grpc.AgentRuntimeServiceServicer):
             session_id=request.session_id,
             has_sandbox=bool(sandbox_id),
             attachments=len(request.attachments),
+            model_alias=model_alias or "",
         )
         outputs_before = await self._snapshot_outputs(sandbox_id) if artifacts_enabled else {}
         try:

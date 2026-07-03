@@ -24,6 +24,7 @@ class AgentOptions:
     workspace: str | None = None
     system_prompt: str | None = None
     max_turns: int = 30
+    model_alias: str | None = None
 
 
 @dataclass

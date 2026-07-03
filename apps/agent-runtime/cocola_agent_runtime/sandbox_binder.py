@@ -469,7 +469,9 @@ class StaticSandboxExecutor:
     ) -> AsyncIterator[ExecChunk]:
         if self._fail is not None:
             raise self._fail
-        self.stream_calls.append({"sandbox_id": sandbox_id, "cmd": cmd, "cwd": cwd, "stdin": stdin})
+        self.stream_calls.append(
+            {"sandbox_id": sandbox_id, "cmd": cmd, "cwd": cwd, "env": env or {}, "stdin": stdin}
+        )
         if self._stream_handler is not None:
             for chunk in self._stream_handler(sandbox_id, cmd, stdin):
                 yield chunk

@@ -39,6 +39,20 @@ def test_resolve_unknown_raises_not_found():
     assert ei.value.code is ErrorCode.NOT_FOUND
 
 
+def test_disabled_alias_is_hidden_and_not_resolvable():
+    fake = FakeUpstream()
+    routes = {
+        "fast": ModelRoute("fast", "fake", "fake-fast"),
+        "off": ModelRoute("off", "fake", "fake-off", enabled=False),
+    }
+    reg = Registry({"fake": fake}, routes, default_alias="fast")
+
+    assert reg.aliases() == ["fast"]
+    with pytest.raises(CocolaError) as ei:
+        reg.resolve("off")
+    assert ei.value.code is ErrorCode.NOT_FOUND
+
+
 def test_bad_default_alias_rejected():
     with pytest.raises(CocolaError):
         Registry({"fake": FakeUpstream()}, {}, default_alias="missing")

@@ -9,6 +9,7 @@ import {
   type ReasoningMessagePartProps,
   ThreadPrimitive,
   type ToolCallMessagePartProps,
+  useMessage,
 } from "@assistant-ui/react";
 import {
   ArrowDownIcon,
@@ -27,8 +28,9 @@ import {
   XIcon,
   Zap,
 } from "lucide-react";
-import type { FC } from "react";
-import { useCocola } from "@/app/runtime-provider";
+import Image from "next/image";
+import { useState, type FC } from "react";
+import { useCocola, type ModelIconConfig, type UiMessageMetadata } from "@/app/runtime-provider";
 import { TooltipIconButton } from "@/components/assistant-ui/tooltip-icon-button";
 import { MarkdownText } from "@/components/assistant-ui/markdown-text";
 import { cn } from "@/lib/utils";
@@ -104,44 +106,46 @@ const SUGGESTIONS: { title: string; subtitle: string; prompt: string }[] = [
   },
 ];
 
-const MODEL_LABEL = "gpt-4.1-nano";
+const ThreadWelcome: FC = () => {
+  const { selectedModel } = useCocola();
 
-const ThreadWelcome: FC = () => (
-  <ThreadPrimitive.Empty>
-    <div className="flex w-full max-w-[var(--thread-max-width)] flex-grow flex-col items-center justify-center">
-      <div className="flex items-center gap-3">
-        <div className="flex size-9 items-center justify-center rounded-full bg-foreground text-background">
-          <MessagesSquare className="size-5" />
+  return (
+    <ThreadPrimitive.Empty>
+      <div className="flex w-full max-w-[var(--thread-max-width)] flex-grow flex-col items-center justify-center">
+        <div className="flex items-center gap-3">
+          <div className="flex size-9 items-center justify-center rounded-full bg-foreground text-background">
+            <MessagesSquare className="size-5" />
+          </div>
+          <p className="text-3xl font-semibold text-foreground">{selectedModel.label}</p>
         </div>
-        <p className="text-3xl font-semibold text-foreground">{MODEL_LABEL}</p>
-      </div>
 
-      <div className="mt-8 w-full">
-        <Composer />
-      </div>
+        <div className="mt-8 w-full">
+          <Composer />
+        </div>
 
-      <div className="mt-6 w-full">
-        <div className="mb-2 flex items-center gap-1.5 px-1 text-sm text-muted-foreground">
-          <Zap className="size-3.5" />
-          Suggested
-        </div>
-        <div className="flex flex-col">
-          {SUGGESTIONS.map(({ title, subtitle, prompt }) => (
-            <ThreadPrimitive.Suggestion
-              key={title}
-              prompt={prompt}
-              send
-              className="flex flex-col items-start gap-0.5 rounded-lg px-2 py-2.5 text-left transition-colors hover:bg-muted"
-            >
-              <span className="text-sm font-medium text-foreground">{title}</span>
-              <span className="text-xs text-muted-foreground">{subtitle}</span>
-            </ThreadPrimitive.Suggestion>
-          ))}
+        <div className="mt-6 w-full">
+          <div className="mb-2 flex items-center gap-1.5 px-1 text-sm text-muted-foreground">
+            <Zap className="size-3.5" />
+            Suggested
+          </div>
+          <div className="flex flex-col">
+            {SUGGESTIONS.map(({ title, subtitle, prompt }) => (
+              <ThreadPrimitive.Suggestion
+                key={title}
+                prompt={prompt}
+                send
+                className="flex flex-col items-start gap-0.5 rounded-lg px-2 py-2.5 text-left transition-colors hover:bg-muted"
+              >
+                <span className="text-sm font-medium text-foreground">{title}</span>
+                <span className="text-xs text-muted-foreground">{subtitle}</span>
+              </ThreadPrimitive.Suggestion>
+            ))}
+          </div>
         </div>
       </div>
-    </div>
-  </ThreadPrimitive.Empty>
-);
+    </ThreadPrimitive.Empty>
+  );
+};
 
 const Composer: FC = () => (
   <ComposerPrimitive.Root className="flex w-full flex-col rounded-[1.5rem] border border-input bg-card px-3 py-2 shadow-sm transition-colors focus-within:border-ring">
@@ -170,19 +174,105 @@ const Composer: FC = () => (
   </ComposerPrimitive.Root>
 );
 
-const ModelPicker: FC = () => (
-  <button
-    type="button"
-    className="flex min-w-0 items-center gap-2 rounded-full px-2 py-1.5 text-sm font-medium text-foreground transition-colors hover:bg-muted focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
-    aria-label="Select model"
-  >
-    <span className="flex size-5 shrink-0 items-center justify-center rounded-full border border-border bg-background">
-      <BrainCircuit className="size-3.5 text-muted-foreground" />
+const ModelPicker: FC = () => {
+  const { models, selectedModel, selectedModelAlias, setSelectedModelAlias } = useCocola();
+  const [open, setOpen] = useState(false);
+
+  return (
+    <div className="relative min-w-0">
+      <button
+        type="button"
+        className="flex max-w-[14rem] min-w-0 items-center gap-2 rounded-full px-2 py-1.5 text-sm font-medium text-foreground transition-colors hover:bg-muted focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+        aria-label="Select model"
+        aria-expanded={open}
+        onClick={() => setOpen((v) => !v)}
+      >
+        <ModelIcon icon={selectedModel.icon} className="size-5" />
+        <span className="truncate">{selectedModel.label}</span>
+        <ChevronDown className="size-4 shrink-0 text-muted-foreground" />
+      </button>
+      {open ? (
+        <div className="absolute bottom-full left-0 z-20 mb-2 w-64 overflow-hidden rounded-lg border border-border bg-popover p-1 text-sm shadow-lg">
+          {models.map((model) => (
+            <button
+              key={model.alias}
+              type="button"
+              className={cn(
+                "flex w-full items-center gap-2 rounded-md px-2 py-2 text-left transition-colors hover:bg-muted",
+                model.alias === selectedModelAlias
+                  ? "bg-muted text-foreground"
+                  : "text-muted-foreground",
+              )}
+              onClick={() => {
+                setSelectedModelAlias(model.alias);
+                setOpen(false);
+              }}
+            >
+              <ModelIcon icon={model.icon} className="size-5" />
+              <span className="min-w-0 flex-1 truncate font-medium">{model.label}</span>
+            </button>
+          ))}
+        </div>
+      ) : null}
+    </div>
+  );
+};
+
+const BRAND_MARKS: Record<string, { label: string; fg: string; bg: string }> = {
+  anthropic: { label: "A", fg: "#0f172a", bg: "#f5f1e8" },
+  openai: { label: "◎", fg: "#0f172a", bg: "#f8fafc" },
+  google: { label: "G", fg: "#4285f4", bg: "#ffffff" },
+  xai: { label: "xAI", fg: "#ffffff", bg: "#111827" },
+  deepseek: { label: "DS", fg: "#ffffff", bg: "#2563eb" },
+};
+
+const ModelIcon: FC<{ icon?: ModelIconConfig; className?: string }> = ({ icon, className }) => {
+  if (icon?.type === "image" && icon.src) {
+    return (
+      <span
+        className={cn(
+          "relative flex shrink-0 items-center justify-center overflow-hidden rounded-full border border-border bg-card",
+          className,
+        )}
+      >
+        <Image
+          src={icon.src}
+          alt=""
+          width={256}
+          height={256}
+          unoptimized
+          className="size-full object-contain"
+          aria-hidden="true"
+        />
+      </span>
+    );
+  }
+  const mark = icon?.type === "simple-icons" ? BRAND_MARKS[icon.slug.toLowerCase()] : undefined;
+  if (!mark) {
+    return (
+      <span
+        className={cn(
+          "flex shrink-0 items-center justify-center rounded-full border border-border bg-background text-muted-foreground",
+          className,
+        )}
+      >
+        <BrainCircuit className="size-[70%]" />
+      </span>
+    );
+  }
+  return (
+    <span
+      className={cn(
+        "flex shrink-0 items-center justify-center rounded-full border border-border text-[9px] font-bold leading-none",
+        className,
+      )}
+      style={{ color: mark.fg, backgroundColor: mark.bg }}
+      aria-hidden="true"
+    >
+      {mark.label}
     </span>
-    <span className="truncate">{MODEL_LABEL}</span>
-    <ChevronDown className="size-4 shrink-0 text-muted-foreground" />
-  </button>
-);
+  );
+};
 
 // Pending attachment chips shown inside the composer before send. Each chip
 // carries the file name plus a remove control; the runtime holds the File until
@@ -288,29 +378,35 @@ const AssistantMessage: FC = () => (
           <TypingIndicator />
         </MessagePrimitive.If>
       </MessagePrimitive.If>
+      <MessagePrimitive.If last>
+        <ThreadPrimitive.If running>
+          <AnsweringIndicator />
+        </ThreadPrimitive.If>
+      </MessagePrimitive.If>
     </div>
     <AssistantActionBar />
   </MessagePrimitive.Root>
 );
 
-const AssistantMessageHeader: FC = () => (
-  <div className="mb-2 flex items-center gap-2 text-xs text-muted-foreground">
-    <span className="inline-flex min-w-0 items-center gap-1.5 rounded-full border border-border bg-muted/35 px-2 py-1">
-      <BrainCircuit className="size-3.5 shrink-0" />
-      <span className="truncate font-medium text-foreground">{MODEL_LABEL}</span>
-    </span>
-    <MessagePrimitive.If last>
-      <ThreadPrimitive.If running>
-        <span
-          role="status"
-          aria-label="Assistant response in progress"
-          className="inline-flex items-center gap-1.5 rounded-full border border-primary/25 bg-primary/10 px-2 py-1 text-primary"
-        >
-          <span className="size-1.5 animate-pulse rounded-full bg-current" />
-          Answering
-        </span>
-      </ThreadPrimitive.If>
-    </MessagePrimitive.If>
+const AssistantMessageHeader: FC = () => {
+  const { selectedModel } = useCocola();
+  const metadata = useMessage((m) => m.metadata.custom) as UiMessageMetadata | undefined;
+  const label = metadata?.model_label || selectedModel.label;
+  const icon = metadata?.model_icon || selectedModel.icon;
+
+  return (
+    <div className="mb-2 flex items-center gap-2 text-xs text-muted-foreground">
+      <span className="inline-flex min-w-0 items-center gap-1.5 rounded-full border border-border bg-muted/35 px-2 py-1">
+        <ModelIcon icon={icon} className="size-4" />
+        <span className="truncate font-medium text-foreground">{label}</span>
+      </span>
+    </div>
+  );
+};
+
+const AnsweringIndicator: FC = () => (
+  <div className="mt-3 flex items-center" role="status" aria-label="Assistant response in progress">
+    <span className="aui-answering-shimmer text-xs font-semibold tracking-wide">Answering</span>
   </div>
 );
 

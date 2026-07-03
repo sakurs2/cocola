@@ -97,6 +97,23 @@
   .aui-code-action:focus-visible {
     opacity: 1;
   }
+
+  .aui-answering-shimmer {
+    color: hsl(var(--muted-foreground));
+    background: linear-gradient(
+      100deg,
+      hsl(var(--muted-foreground)) 0%,
+      hsl(var(--muted-foreground)) 40%,
+      hsl(var(--foreground)) 50%,
+      hsl(var(--muted-foreground)) 60%,
+      hsl(var(--muted-foreground)) 100%
+    );
+    background-size: 250% 100%;
+    background-clip: text;
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+    animation: aui-answering-shimmer 2.6s linear infinite;
+  }
 }
 
 @keyframes aui-soft-in {
@@ -110,9 +127,19 @@
   }
 }
 
+@keyframes aui-answering-shimmer {
+  0% {
+    background-position: 150% 0;
+  }
+  100% {
+    background-position: -50% 0;
+  }
+}
+
 @media (prefers-reduced-motion: reduce) {
   .aui-stream-in[data-status="running"],
-  .aui-details-body {
+  .aui-details-body,
+  .aui-answering-shimmer {
     animation: none;
   }
 

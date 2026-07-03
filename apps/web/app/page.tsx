@@ -22,7 +22,7 @@ import { AppSidebar } from "@/components/assistant-ui/app-sidebar";
 import { CodeBlock, MarkdownContent } from "@/components/assistant-ui/markdown-text";
 import { Thread } from "@/components/assistant-ui/thread";
 import { Download, FileQuestion, X } from "lucide-react";
-import { useEffect, useState } from "react";
+import { type PointerEvent, useCallback, useEffect, useState } from "react";
 
 export default function Home() {
   return (
@@ -34,6 +34,39 @@ export default function Home() {
 
 function Workspace() {
   const { selectedArtifact } = useCocola();
+  const [previewWidth, setPreviewWidth] = useState(448);
+
+  const startPreviewResize = useCallback(
+    (event: PointerEvent<HTMLDivElement>) => {
+      event.preventDefault();
+      const startX = event.clientX;
+      const startWidth = previewWidth;
+      const previousCursor = document.body.style.cursor;
+      const previousUserSelect = document.body.style.userSelect;
+      document.body.style.cursor = "col-resize";
+      document.body.style.userSelect = "none";
+
+      const clampPreviewWidth = (value: number) => {
+        const max = Math.max(352, Math.min(window.innerWidth * 0.55, 760));
+        return Math.min(Math.max(value, 352), max);
+      };
+      const onPointerMove = (moveEvent: globalThis.PointerEvent) => {
+        setPreviewWidth(clampPreviewWidth(startWidth - (moveEvent.clientX - startX)));
+      };
+      const onPointerUp = () => {
+        document.body.style.cursor = previousCursor;
+        document.body.style.userSelect = previousUserSelect;
+        window.removeEventListener("pointermove", onPointerMove);
+        window.removeEventListener("pointerup", onPointerUp);
+        window.removeEventListener("pointercancel", onPointerUp);
+      };
+
+      window.addEventListener("pointermove", onPointerMove);
+      window.addEventListener("pointerup", onPointerUp);
+      window.addEventListener("pointercancel", onPointerUp);
+    },
+    [previewWidth],
+  );
 
   return (
     <div className="flex h-screen bg-background text-foreground">
@@ -45,9 +78,22 @@ function Workspace() {
             <Thread />
           </div>
           {selectedArtifact ? (
-            <aside className="w-[28rem] min-w-[22rem] max-w-[45vw] border-l border-border bg-background">
-              <ArtifactPreviewPanel />
-            </aside>
+            <>
+              <div
+                role="separator"
+                aria-label="Resize file preview"
+                aria-orientation="vertical"
+                title="Resize preview"
+                onPointerDown={startPreviewResize}
+                className="group relative z-10 w-2 shrink-0 cursor-col-resize touch-none"
+              >
+                <div className="absolute inset-y-0 left-1/2 w-px -translate-x-1/2 bg-border transition-colors group-hover:bg-primary/70" />
+                <div className="absolute inset-y-0 left-1/2 w-1 -translate-x-1/2 rounded-full bg-transparent transition-colors group-hover:bg-primary/20" />
+              </div>
+              <aside className="shrink-0 bg-background" style={{ width: `${previewWidth}px` }}>
+                <ArtifactPreviewPanel />
+              </aside>
+            </>
           ) : null}
         </div>
       </div>
