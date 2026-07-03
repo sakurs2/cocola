@@ -380,7 +380,7 @@ func verifyPersistence(ctx context.Context, p *opensandbox.Provider, run *runner
 		sessMarker   = "cocola-persist-sess-1"
 		userFile     = "/data/userdata/persist-user/marker.txt"
 		claudeFile   = "/home/cocola/.claude/marker.txt"
-		sessFile     = "/workspace/persist-session/marker.txt"
+		sessFile     = "/workspace/marker.txt"
 	)
 
 	// --- Round A: create + write ---

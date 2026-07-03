@@ -283,7 +283,7 @@ kubectl -n cocola-sandboxes get configmap cocola-bind-$SID # 期望仍在(resolv
 
 # 4c. Resume(经控制面 Resume 接口) -> 新 Pod 重建并重挂同一对 PVC
 kubectl -n cocola-sandboxes get pod cocola-$SID -o wide    # 期望重新 Running / Ready
-kubectl -n cocola-sandboxes exec cocola-$SID -c sandbox -- cat /workspace/$SID/keep.txt
+kubectl -n cocola-sandboxes exec cocola-$SID -c sandbox -- cat /workspace/keep.txt
 # 期望:persisted-marker —— workspace PVC 续上了
 
 # 4d. 大脑续接:再发一轮 query,确认走 claude --resume 接上了之前会话

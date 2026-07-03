@@ -9,7 +9,7 @@
 // Three-tier directory model (mirrors Mira's convention):
 //
 //	/data/userdata/<user_id>/   -> host: <root>/userdata/<user_id>   (cross-session, RW)
-//	/workspace/<session_id>/    -> host: <root>/workspace/<session>  (session-scoped, RW)
+//	/workspace/                 -> host: <root>/workspace/<session>  (session-scoped, RW)
 //	/data/plugins/              -> host: <root>/plugins              (platform skills, RO)
 package docker
 
@@ -201,7 +201,7 @@ func (p *Provider) Create(ctx context.Context, spec provider.SandboxSpec) (*prov
 	hostCfg := &container.HostConfig{
 		Mounts: []mount.Mount{
 			{Type: mount.TypeBind, Source: userDir, Target: guestUserData + "/" + safe(spec.UserID)},
-			{Type: mount.TypeBind, Source: sessDir, Target: guestWorkspace + "/" + safe(spec.SessionID)},
+			{Type: mount.TypeBind, Source: sessDir, Target: guestWorkspace},
 			{Type: mount.TypeBind, Source: pluginDir, Target: guestPlugins, ReadOnly: true},
 			{Type: mount.TypeBind, Source: claudeDir, Target: guestClaudeConfig},
 		},
@@ -220,7 +220,7 @@ func (p *Provider) Create(ctx context.Context, spec provider.SandboxSpec) (*prov
 		Image:      img,
 		Env:        env,
 		Cmd:        cmd,
-		WorkingDir: guestWorkspace + "/" + safe(spec.SessionID),
+		WorkingDir: guestWorkspace,
 		Labels: map[string]string{
 			labelManaged:   "true",
 			labelSandboxID: sid,

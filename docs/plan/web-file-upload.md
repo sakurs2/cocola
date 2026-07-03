@@ -40,8 +40,8 @@ composer 选文件
   → /api/chat 透传
   → gateway /v1/chat: chatRequest 增 attachments 字段, 透传给 gRPC
   → agent-runtime Query: acquire 沙箱之后、provider.query 之前,
-      先 exec `mkdir -p /workspace/<session_id>/uploads`(CopyToContainer 不建中间目录),
-      再对每个附件 binder.write_file(sandbox_id, /workspace/<session_id>/uploads/<name>, content)
+      先 exec `mkdir -p /workspace/uploads`(CopyToContainer 不建中间目录),
+      再对每个附件 binder.write_file(sandbox_id, /workspace/uploads/<name>, content)
   → 在 prompt 前言里告诉模型:「用户上传了以下文件:./uploads/...(相对 cwd)」
   → provider.query 正常跑
 ```
@@ -57,8 +57,8 @@ composer 选文件
   `agent.Query`(`internal/agent/client.go`)增 `Attachments` 字段并映射到 gRPC。
 - **agent-runtime**(`server.py` Query)
   在沙箱 acquire 成功后、`provider.query` 前,遍历 `request.attachments`,
-  经 `self._binder.write_file(...)` 落到 `/workspace/<session_id>/uploads/<sanitized-name>`;
-  (workspace 是会话隔离卷 ADR-0008 T1b,`/workspace` 根未挂载;写前需 `mkdir -p`)
+  经 `self._binder.write_file(...)` 落到 `/workspace/uploads/<sanitized-name>`;
+  (workspace 是会话隔离卷 ADR-0008 T1b,挂载在 `/workspace`;写前需 `mkdir -p`)
   把落地路径清单拼进 `opts.system_prompt`(或 prompt 前言)。
   失败按现有约定发一个 `error` 终止事件,不裸崩流。
 
@@ -76,12 +76,12 @@ composer 选文件
 
 ### 3.3 大小与安全约束(P0)
 - 单文件上限(建议 1MB,内联 base64)+ 总大小上限;超限前端拦截并提示。
-- 文件名 sanitize(去 `..`/绝对路径/控制字符),固定落 `/workspace/<session_id>/uploads/` 下。
+- 文件名 sanitize(去 `..`/绝对路径/控制字符),固定落 `/workspace/uploads/` 下。
 - accept 白名单:文本/代码/常见图片;二进制大文件 P0 不支持(P1 走 OSS)。
 
 ## 4. 验收标准(P0)
 - `make up-web`(Echo)与 `make up-all`(真实模型)下:
-  选一个 .txt/.md/.py 文件 + 输入问题 → 发送 → 沙箱 `/workspace/<session_id>/uploads/` 出现该文件
+  选一个 .txt/.md/.py 文件 + 输入问题 → 发送 → 沙箱 `/workspace/uploads/` 出现该文件
   → 模型能读到内容并在回答中引用。
 - 前端 prettier / lint / build 全绿;Go `go vet`/`go test`、Python `pytest` 全绿。
 - 附件写入失败时,前端渲染出 error 事件而非静默丢失/崩溃。

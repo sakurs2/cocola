@@ -46,6 +46,9 @@ class FakeContext:
     def __init__(self):
         self.written = []
 
+    def invocation_metadata(self):
+        return ()
+
     async def write(self, event):
         self.written.append(event)
 
@@ -68,9 +71,7 @@ class RecordingProvider:
 def _pwd_executor():
     """Executor whose `pwd` returns the session workspace cwd."""
     return StaticSandboxExecutor(
-        exec_handler=lambda sid, cmd: ExecOutcome(
-            exit_code=0, stdout="/workspace/S9\n"
-        )
+        exec_handler=lambda sid, cmd: ExecOutcome(exit_code=0, stdout="/workspace\n")
     )
 
 
@@ -98,8 +99,8 @@ async def test_attachments_are_written_and_preamble_prepended():
     # Both files landed under the resolved absolute uploads dir, binary-safe.
     written_paths = {p for (_sid, p, _data) in ex.byte_writes}
     assert written_paths == {
-        "/workspace/S9/uploads/notes.txt",
-        "/workspace/S9/uploads/pic.png",
+        "/workspace/uploads/notes.txt",
+        "/workspace/uploads/pic.png",
     }
     png = next(d for (_s, p, d) in ex.byte_writes if p.endswith("pic.png"))
     assert png == b"\x89PNG\x00\x01"  # bytes preserved, not utf-8 mangled
@@ -124,7 +125,7 @@ async def test_filename_is_sanitized_against_traversal():
 
     paths = [p for (_s, p, _d) in ex.byte_writes]
     # Cannot escape the uploads dir; basename only.
-    assert paths == ["/workspace/S9/uploads/passwd"]
+    assert paths == ["/workspace/uploads/passwd"]
 
 
 async def test_provisioning_failure_is_terminal_and_skips_provider():

@@ -87,7 +87,7 @@ func TestLive_OnDemandAllocation_OpenSandbox(t *testing.T) {
 	// --- the dialogue's actual work: run a command inside the bound box and
 	//     prove the per-user volume mount is present (mapVolumes wired). ---
 	ev, err := p.Exec(ctx, sid, provider.ExecRequest{
-		Cmd: []string{"sh", "-c", "echo dialogue-ok && ls -d /data/userdata/live-user-1 /workspace/live-sess-1 /home/cocola/.claude"},
+		Cmd: []string{"sh", "-c", "echo dialogue-ok && ls -d /data/userdata/live-user-1 /workspace /home/cocola/.claude"},
 	})
 	if err != nil {
 		t.Fatalf("exec in bound box: %v", err)
@@ -111,7 +111,7 @@ func TestLive_OnDemandAllocation_OpenSandbox(t *testing.T) {
 	if exit != 0 {
 		t.Fatalf("exec exit=%d (want 0); output=%q", exit, gotOut)
 	}
-	for _, want := range []string{"dialogue-ok", "/data/userdata/live-user-1", "/workspace/live-sess-1", "/home/cocola/.claude"} {
+	for _, want := range []string{"dialogue-ok", "/data/userdata/live-user-1", "/workspace", "/home/cocola/.claude"} {
 		if !strings.Contains(gotOut, want) {
 			t.Fatalf("exec output missing %q; got %q", want, gotOut)
 		}

@@ -19,7 +19,7 @@ docker provider 在 Create 时挂 4 个点(`docker.go`):
 | 宿主目录(root 下) | 容器内路径 | 语义 | 读写 |
 |---|---|---|---|
 | `userdata/<userID>` | `/data/userdata/<userID>` | 用户长期文件(T2) | RW |
-| `workspace/<sessionID>` | `/workspace/<sessionID>` | 会话工作区(T1b) | RW |
+| `workspace/<sessionID>` | `/workspace` | 会话工作区(T1b) | RW |
 | `plugins/` | `/data/plugins` | 平台 skill | **RO** |
 | `claude/<userID>` | `/home/cocola/.claude` | Claude Code 会话/记忆(T2,--resume 依赖) | RW |
 
@@ -49,7 +49,7 @@ docker provider 在 Create 时挂 4 个点(`docker.go`):
 |---|---|---|---|
 | 用户长期文件(T2) | pvc `claimName=cocola-user-<userID>`,createIfNotExists | `/data/userdata/<userID>` | false |
 | Claude 配置/会话(T2) | **同一用户卷 `cocola-user-<userID>`,`subPath=.claude`**(已定:合到用户卷,不另开卷) | `/home/cocola/.claude` | false |
-| 会话工作区(T1b) | pvc `claimName=cocola-session-<sessionID>`,createIfNotExists,deleteOnSandboxTermination=false | `/workspace/<sessionID>` | false |
+| 会话工作区(T1b) | pvc `claimName=cocola-session-<sessionID>`,createIfNotExists,deleteOnSandboxTermination=false | `/workspace` | false |
 | 平台 skill | pvc `cocola-plugins`(共享,预置) | `/data/plugins` | **true** |
 
 - **.claude 合卷实现注记(已定)**:不另开 PVC,而是把用户卷 `cocola-user-<userID>`

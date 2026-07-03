@@ -694,7 +694,7 @@ func TestMapVolumes(t *testing.T) {
 	// 2: session workspace, RW, must NOT delete on termination (cocola GC).
 	if v := vols[2]; v.PVC == nil || v.PVC.ClaimName != "cocola-session-s1" ||
 		!v.PVC.CreateIfNotExists || v.PVC.DeleteOnSandboxTermination ||
-		v.MountPath != "/workspace/s1" || v.ReadOnly {
+		v.MountPath != "/workspace" || v.ReadOnly {
 		t.Errorf("session volume = %+v (pvc %+v)", v, v.PVC)
 	}
 	// 3: shared platform-skill volume, read-only, no createIfNotExists.
@@ -727,7 +727,7 @@ func TestMapVolumes_SanitisesIDs(t *testing.T) {
 	if vols[2].PVC.ClaimName != "cocola-session-sess-1" {
 		t.Errorf("session claim = %q, want cocola-session-sess-1", vols[2].PVC.ClaimName)
 	}
-	if vols[2].MountPath != "/workspace/sess-1" {
+	if vols[2].MountPath != "/workspace" {
 		t.Errorf("session mountPath = %q", vols[2].MountPath)
 	}
 }
@@ -750,7 +750,7 @@ func TestCreate_SendsVolumes(t *testing.T) {
 	want := map[string]bool{
 		"/data/userdata/u1":    false,
 		"/home/cocola/.claude": false,
-		"/workspace/s1":        false,
+		"/workspace":           false,
 		"/data/plugins":        true, // readOnly
 	}
 	for _, v := range body.Volumes {
@@ -1070,12 +1070,12 @@ func TestReadFile_NotFound(t *testing.T) {
 
 func TestChownEntrypoint(t *testing.T) {
 	// Empty exec user runs Exec as root -> no chown needed, bare blocker.
-	if got := chownEntrypoint("", "u1", "s1"); len(got) != 2 || got[0] != "sleep" || got[1] != "infinity" {
+	if got := chownEntrypoint("", "u1"); len(got) != 2 || got[0] != "sleep" || got[1] != "infinity" {
 		t.Fatalf("empty execUser entrypoint = %v, want [sleep infinity]", got)
 	}
 
 	// Non-empty exec user -> one-time chown of the three mounts, then exec blocker.
-	got := chownEntrypoint("cocola", "u1", "s1")
+	got := chownEntrypoint("cocola", "u1")
 	if len(got) != 3 || got[0] != "/bin/sh" || got[1] != "-c" {
 		t.Fatalf("entrypoint prefix = %v, want [/bin/sh -c ...]", got)
 	}
@@ -1084,7 +1084,7 @@ func TestChownEntrypoint(t *testing.T) {
 		"chown -R 'cocola':'cocola'",
 		"'/home/cocola/.claude'",
 		"'/data/userdata/u1'",
-		"'/workspace/s1'",
+		"'/workspace'",
 		"|| true",
 		"exec sleep infinity",
 	} {

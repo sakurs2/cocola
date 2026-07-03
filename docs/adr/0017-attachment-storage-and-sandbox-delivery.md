@@ -28,7 +28,7 @@
 依据沙箱 ephemeral,只有对象存储能支撑跨会话回看与重放。
 
 **送达方式**:选 **A. 后端预置(push)** —— agent 运行前,后端主动把文件写进沙箱工作区
-`/workspace/<session_id>/uploads/`,并在 prompt 前言告诉模型文件清单与相对路径。
+`/workspace/uploads/`,并在 prompt 前言告诉模型文件清单与相对路径。
 对齐 OpenAI Code Interpreter 挂载、E2B `files.write()` 的成熟做法。
 
 **分阶段**:

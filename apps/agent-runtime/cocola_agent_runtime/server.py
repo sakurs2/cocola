@@ -537,7 +537,7 @@ class AgentRuntimeServicer(pb_grpc.AgentRuntimeServiceServicer):
 
         - Route A (executor + sandbox bound): the brain runs INSIDE the sandbox,
           so we write into its workspace over the executor. Files land under
-          ./uploads/ in the session cwd (/workspace/<session_id>/, ADR-0008 T1b),
+          ./uploads/ in the session cwd (/workspace, ADR-0008 T1b),
           resolved via `pwd` (provider-agnostic) with `mkdir -p uploads` in the
           same shell -- WriteFile (docker CopyToContainer) makes no parent dirs.
         - Local dev (no executor/sandbox): there is no bound sandbox to write

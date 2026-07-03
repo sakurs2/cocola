@@ -11,7 +11,7 @@
 
 ## 根因
 
-opensandbox provider 的 `mapVolumes`（`opensandbox.go:895`）把新建的 per-user PVC 挂到 `/home/cocola/.claude`（subPath `.claude`）、`/data/userdata/<uid>`，把 per-session PVC 挂到 `/workspace/<sid>`。这些 PVC 首次创建时属主是 **root**。而每次 `Exec` 都通过 `runuser -u cocola` 把权限降到非 root 的 `cocola`（uid 10001），于是 `cocola` 无法写入这些 root 属主的挂载点。
+opensandbox provider 的 `mapVolumes`（`opensandbox.go:895`）把新建的 per-user PVC 挂到 `/home/cocola/.claude`（subPath `.claude`）、`/data/userdata/<uid>`，把 per-session PVC 挂到 `/workspace`。这些 PVC 首次创建时属主是 **root**。而每次 `Exec` 都通过 `runuser -u cocola` 把权限降到非 root 的 `cocola`（uid 10001），于是 `cocola` 无法写入这些 root 属主的挂载点。
 
 - docker provider 通过在**宿主机** bind-mount 目录上 `os.Chown` 修正属主（sandbox-manager 能直接摸宿主 FS）。
 - opensandbox provider **无法复用**：其卷位于 OpenSandbox server 运行时内部，sandbox-manager 触达不到宿主路径。
@@ -34,7 +34,7 @@ opensandbox provider 的 `mapVolumes`（`opensandbox.go:895`）把新建的 per-
 `execUser != ""`（默认）：
 
 ```
-["/bin/sh","-c","chown -R <execUser>:<execUser> '/home/cocola/.claude' '/data/userdata/<uid>' '/workspace/<sid>' || true; exec sleep infinity"]
+["/bin/sh","-c","chown -R <execUser>:<execUser> '/home/cocola/.claude' '/data/userdata/<uid>' '/workspace' || true; exec sleep infinity"]
 ```
 
 `execUser == ""`（以 root 跑 Exec，无需修属主）：

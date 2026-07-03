@@ -54,7 +54,7 @@ service 层 / `cmd/sandbox-manager/main.go` / orchestrator 零改动。新增一
    保证任意 sandbox-manager 副本能 Pause/Resume/Destroy/Health 任意 Pod
    (对齐 Docker `resolve` 的 cache+label 回退模式)。
 3. **卷模型(PVC)**:`UserID` → 用户 PVC(挂 `/data/userdata/<uid>` 及
-   `~/.claude`),`SessionID` → 会话 PVC(挂 `/workspace/<sid>`),plugins 只读。
+   `~/.claude`),`SessionID` → 会话 PVC(挂 `/workspace`),plugins 只读。
    映射关系与 Docker bind-mount 完全一致,只换后端。
 4. **生命周期**:`Pause` = 删 Pod 留两个 PVC;`Resume` = 用同 spec 重建 Pod 重挂
    PVC;`Destroy` = 删 Pod + **保留用户 PVC**(会话 PVC 可随 Release 删)。

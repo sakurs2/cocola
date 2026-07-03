@@ -8,7 +8,7 @@
 
 A logical chat _session_ must map to exactly one live _sandbox_ across its
 lifetime: every turn of a conversation has to land in the same container so the
-workspace (`/workspace/<session_id>`), installed packages, and process state
+workspace (`/workspace`), installed packages, and process state
 persist between turns. M1 gave us a stateless `Create/Exec/Destroy` surface with
 no notion of "which sandbox belongs to this session". M2 adds that binding plus
 its lifecycle.

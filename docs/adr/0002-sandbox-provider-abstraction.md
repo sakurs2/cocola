@@ -53,7 +53,7 @@ Key rules, enforced by package layout:
 
 For M1 the only implementation is **DockerProvider** (per the agreed scope):
 it uses the Docker Engine API to run an `alpine` container per sandbox, mounts
-the three-tier directory model (`/data/userdata/<user>` RW, `/workspace/<session>`
+the three-tier directory model (`/data/userdata/<user>` RW, `/workspace`
 RW, `/data/plugins` RO), streams exec output via `stdcopy` demux, and does file
 IO through tar streams.
 

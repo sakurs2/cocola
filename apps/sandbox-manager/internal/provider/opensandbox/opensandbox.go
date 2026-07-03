@@ -358,7 +358,7 @@ func (p *Provider) Create(ctx context.Context, spec provider.SandboxSpec) (*prov
 		// provider fixes this by chowning the host bind-mount; opensandbox volumes
 		// live inside the server runtime and are unreachable from here, and the server
 		// API exposes no fsGroup/securityContext, so the entrypoint is the only seam.
-		req.Entrypoint = chownEntrypoint(p.execUser, safe(spec.UserID), safe(spec.SessionID))
+		req.Entrypoint = chownEntrypoint(p.execUser, safe(spec.UserID))
 	}
 	if rl := mapResources(spec.Resources); len(rl) > 0 {
 		req.ResourceLimits = rl
@@ -854,10 +854,11 @@ func shellJoin(argv []string) string {
 // chownEntrypoint builds the sandbox entry process. It is a no-op idle-blocker
 // (sleep infinity), optionally prefixed by a one-time chown of the mounted,
 // root-owned PVCs to execUser so the non-root Exec user can write them (see the
-// Create call site for the full rationale). uid/sid must already be safe()'d --
-// they compose the same guest mount paths as mapVolumes. When execUser is empty
-// Exec runs as root, so no chown is needed and we return a bare blocker.
-func chownEntrypoint(execUser, uid, sid string) []string {
+// Create call site for the full rationale). uid must already be safe()'d; it
+// composes the same user-data mount path as mapVolumes. The session id is not
+// exposed in the guest workspace path. When execUser is empty, Exec runs as
+// root, so no chown is needed and we return a bare blocker.
+func chownEntrypoint(execUser, uid string) []string {
 	if execUser == "" {
 		return []string{"sleep", "infinity"}
 	}
@@ -865,7 +866,7 @@ func chownEntrypoint(execUser, uid, sid string) []string {
 	paths := shellJoin([]string{
 		guestClaudeConfig,
 		guestUserData + "/" + uid,
-		guestWorkspace + "/" + sid,
+		guestWorkspace,
 	})
 	script := "chown -R " + owner + " " + paths + " || true; exec sleep infinity"
 	return []string{"/bin/sh", "-c", script}
@@ -925,7 +926,7 @@ func httpTimeoutFromEnv() time.Duration {
 //
 //   - user files (T2):   pvc cocola-user-<uid>            -> /data/userdata/<uid>
 //   - Claude state (T2):  same user volume, subPath .claude -> /home/cocola/.claude
-//   - workspace (T1b):    pvc cocola-session-<sid>        -> /workspace/<sid>
+//   - workspace (T1b):    pvc cocola-session-<sid>        -> /workspace
 //   - platform skills:    pvc cocola-plugins (shared)     -> /data/plugins (RO)
 //
 // The user volume is mounted twice (root + .claude subPath) so user files and
@@ -956,7 +957,7 @@ func mapVolumes(userID, sessionID string) []volumeSpec {
 		{
 			Name:      "session",
 			PVC:       &pvcBackend{ClaimName: "cocola-session-" + sid, CreateIfNotExists: true},
-			MountPath: guestWorkspace + "/" + sid,
+			MountPath: guestWorkspace,
 		},
 		{
 			Name:      "plugins",
