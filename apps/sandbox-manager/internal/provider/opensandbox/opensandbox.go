@@ -31,7 +31,9 @@ import (
 	"bufio"
 	"bytes"
 	"context"
+	"crypto/sha256"
 	"encoding/base64"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -118,7 +120,9 @@ const (
 	claudeSubPath    = "claude"
 	// pluginsClaimName is the shared, pre-provisioned platform-skill volume.
 	// It is mounted read-only into every sandbox.
-	pluginsClaimName = "cocola-plugins"
+	pluginsClaimName  = "cocola-plugins"
+	volumeBackendPVC  = "pvc"
+	volumeBackendHost = "host"
 	// defaultCPU / defaultMemory are applied when a SandboxSpec carries no
 	// Resources. OpenSandbox rejects a non-pooled create without resourceLimits
 	// ("resourceLimits is required when poolRef is not provided"), and the
@@ -167,6 +171,13 @@ type Provider struct {
 	// execUser is the OS user every Exec drops to (default "cocola", uid 10001).
 	// Empty runs commands as execd's default (root). See sandboxExecUser.
 	execUser string
+
+	// volumeBackend selects how cocola exposes persistent session storage to
+	// OpenSandbox. "pvc" preserves the historical Docker-volume/K8s-PVC request
+	// shape; "host" points OpenSandbox at directories under root, which may be an
+	// NFS/NAS mount already present on every node.
+	volumeBackend string
+	root          string
 }
 
 // Option configures the Provider.
@@ -187,6 +198,14 @@ func WithServerProxy(v bool) Option { return func(p *Provider) { p.useServerProx
 // string disables the privilege drop, running commands as execd's default user.
 func WithExecUser(u string) Option { return func(p *Provider) { p.execUser = u } }
 
+// WithVolumeBackend overrides COCOLA_SANDBOX_VOLUME_BACKEND (pvc|host).
+func WithVolumeBackend(v string) Option {
+	return func(p *Provider) { p.volumeBackend = strings.TrimSpace(strings.ToLower(v)) }
+}
+
+// WithRoot overrides COCOLA_SANDBOX_ROOT for host-backed volumes.
+func WithRoot(root string) Option { return func(p *Provider) { p.root = root } }
+
 // WithHTTPClient injects a custom http.Client used for BOTH the lifecycle REST
 // calls and the execd SSE stream. This is the seam unit tests use to supply a
 // stub RoundTripper, so no real socket is ever opened.
@@ -201,6 +220,11 @@ func WithHTTPClient(c *http.Client) Option {
 // default (COCOLA_OPENSANDBOX_URL, COCOLA_OPENSANDBOX_API_KEY) and can be
 // overridden by options.
 func New(opts ...Option) (*Provider, error) {
+	home, _ := os.UserHomeDir()
+	root := filepath.Join(home, ".cocola", "sandboxes")
+	if r := os.Getenv("COCOLA_SANDBOX_ROOT"); r != "" {
+		root = r
+	}
 	p := &Provider{
 		baseURL: strings.TrimRight(os.Getenv("COCOLA_OPENSANDBOX_URL"), "/"),
 		apiKey:  os.Getenv("COCOLA_OPENSANDBOX_API_KEY"),
@@ -222,13 +246,25 @@ func New(opts ...Option) (*Provider, error) {
 		// Drop privileges to the brain image's non-root user by default so the
 		// in-sandbox claude CLI accepts --dangerously-skip-permissions. Override
 		// (incl. "" to disable) via COCOLA_OPENSANDBOX_EXEC_USER.
-		execUser: execUserFromEnv(),
+		execUser:      execUserFromEnv(),
+		volumeBackend: volumeBackendFromEnv(),
+		root:          root,
 	}
 	for _, o := range opts {
 		o(p)
 	}
 	if p.baseURL == "" {
 		return nil, fmt.Errorf("opensandbox: base URL not set (COCOLA_OPENSANDBOX_URL or WithBaseURL)")
+	}
+	switch p.volumeBackend {
+	case "", volumeBackendPVC:
+		p.volumeBackend = volumeBackendPVC
+	case volumeBackendHost:
+		if p.root == "" {
+			return nil, fmt.Errorf("opensandbox: host volume backend requires COCOLA_SANDBOX_ROOT or WithRoot")
+		}
+	default:
+		return nil, fmt.Errorf("opensandbox: unsupported volume backend %q (want pvc or host)", p.volumeBackend)
 	}
 	return p, nil
 }
@@ -265,11 +301,12 @@ type createSandboxRequest struct {
 // locally, K8s PVC in prod) — see docs/plan/opensandbox-volume-mapping.md.
 type volumeSpec struct {
 	// Name is a per-request unique volume identifier (server-required).
-	Name      string      `json:"name"`
-	PVC       *pvcBackend `json:"pvc,omitempty"`
-	MountPath string      `json:"mountPath"`
-	ReadOnly  bool        `json:"readOnly,omitempty"`
-	SubPath   string      `json:"subPath,omitempty"`
+	Name      string       `json:"name"`
+	PVC       *pvcBackend  `json:"pvc,omitempty"`
+	Host      *hostBackend `json:"host,omitempty"`
+	MountPath string       `json:"mountPath"`
+	ReadOnly  bool         `json:"readOnly,omitempty"`
+	SubPath   string       `json:"subPath,omitempty"`
 }
 
 // pvcBackend is the OpenSandbox PVC volume backend. ClaimName names the volume
@@ -284,6 +321,13 @@ type pvcBackend struct {
 	StorageClass               string   `json:"storageClass,omitempty"`
 	AccessModes                []string `json:"accessModes,omitempty"`
 	DeleteOnSandboxTermination bool     `json:"deleteOnSandboxTermination,omitempty"`
+}
+
+// hostBackend is the OpenSandbox host volume backend. Path must be allowed by
+// the server's [storage].allowed_host_paths and visible at the same absolute
+// path from the OpenSandbox server container and the host Docker daemon.
+type hostBackend struct {
+	Path string `json:"path"`
 }
 
 type sandboxStatus struct {
@@ -360,7 +404,11 @@ func (p *Provider) Create(ctx context.Context, spec provider.SandboxSpec) (*prov
 	// Volume mapping: per-session workspace, per-session Claude config, plus
 	// read-only platform skills. See mapVolumes. Claude config is mounted outside
 	// /workspace so user file listings do not expose it.
-	req.Volumes = mapVolumes(spec.SessionID)
+	vols, err := p.mapVolumes(spec.UserID, spec.SessionID)
+	if err != nil {
+		return nil, err
+	}
+	req.Volumes = vols
 	// Egress mapping: cocola's allowlist -> OpenSandbox networkPolicy
 	// (default-deny + per-domain allow). Whether cocola's own egress
 	// NetworkPolicy or OpenSandbox's takes ownership is a P2 decision; the
@@ -427,6 +475,29 @@ func (p *Provider) Destroy(ctx context.Context, sid string) error {
 	p.mu.Lock()
 	delete(p.ids, sid)
 	p.mu.Unlock()
+	return nil
+}
+
+// CleanupSessionStorage removes the durable storage owned by one conversation
+// when host-backed volumes are enabled. PVC storage is intentionally left to
+// cluster/volume lifecycle tooling because this client only sends OpenSandbox
+// lifecycle requests and has no Kubernetes/Docker volume API access here.
+func (p *Provider) CleanupSessionStorage(ctx context.Context, userID, sessionID string) error {
+	if p.volumeBackend != volumeBackendHost {
+		return nil
+	}
+	select {
+	case <-ctx.Done():
+		return ctx.Err()
+	default:
+	}
+	dir := p.sessionRoot(userID, sessionID)
+	if !isSubpath(p.root, dir) {
+		return fmt.Errorf("opensandbox: refusing to remove session dir outside root: %s", dir)
+	}
+	if err := os.RemoveAll(dir); err != nil {
+		return fmt.Errorf("opensandbox: remove session storage: %w", err)
+	}
 	return nil
 }
 
@@ -912,9 +983,18 @@ func httpTimeoutFromEnv() time.Duration {
 	return d
 }
 
+func volumeBackendFromEnv() string {
+	raw := strings.TrimSpace(strings.ToLower(os.Getenv("COCOLA_SANDBOX_VOLUME_BACKEND")))
+	if raw == "" {
+		return volumeBackendPVC
+	}
+	return raw
+}
+
 // mapVolumes translates cocola's filesystem model into the OpenSandbox volumes
 // list. It mirrors the docker provider's mount points so both backends present
-// an identical filesystem to the same brain image:
+// an identical filesystem to the same brain image. PVC mode keeps the historical
+// request shape:
 //
 //   - workspace:       pvc cocola-session-<sid>, subPath workspace -> /workspace
 //   - Claude state:    pvc cocola-session-<sid>, subPath claude    -> /home/cocola/.claude
@@ -925,10 +1005,22 @@ func httpTimeoutFromEnv() time.Duration {
 // writable volume is declared, so sessions cannot accidentally share Claude
 // config or files.
 //
-// CreateIfNotExists lets the server provision per-session volumes lazily. The
-// session volume is NOT DeleteOnSandboxTermination: cocola's orchestrator GCs it,
-// so the workspace survives a hibernate (destroy container, keep volume).
-func mapVolumes(sessionID string) []volumeSpec {
+// Host mode maps the same guest paths to directories under:
+//
+//	<root>/users/<user>/sessions/<session>/{workspace,claude}
+//
+// where <root> may be an NFS/NAS mount. CreateIfNotExists lets the server
+// provision PVC volumes lazily; host mode creates directories locally before
+// sending the create request. Neither backend deletes storage on sandbox
+// termination; explicit conversation deletion calls CleanupSessionStorage.
+func (p *Provider) mapVolumes(userID, sessionID string) ([]volumeSpec, error) {
+	if p.volumeBackend == volumeBackendHost {
+		return p.mapHostVolumes(userID, sessionID)
+	}
+	return mapPVCVolumes(sessionID), nil
+}
+
+func mapPVCVolumes(sessionID string) []volumeSpec {
 	sid := safe(sessionID)
 	sessionClaim := "cocola-session-" + sid
 	return []volumeSpec{
@@ -951,6 +1043,56 @@ func mapVolumes(sessionID string) []volumeSpec {
 			ReadOnly:  true,
 		},
 	}
+}
+
+func (p *Provider) mapHostVolumes(userID, sessionID string) ([]volumeSpec, error) {
+	sessionRoot := p.sessionRoot(userID, sessionID)
+	workspaceDir := filepath.Join(sessionRoot, workspaceSubPath)
+	claudeDir := filepath.Join(sessionRoot, claudeSubPath)
+	pluginDir := filepath.Join(p.root, "plugins")
+	for _, d := range []string{workspaceDir, claudeDir, pluginDir} {
+		if !isSubpath(p.root, d) {
+			return nil, fmt.Errorf("opensandbox: volume path outside root: %s", d)
+		}
+		if err := os.MkdirAll(d, 0o755); err != nil {
+			return nil, fmt.Errorf("opensandbox: mkdir %s: %w", d, err)
+		}
+	}
+	for _, d := range []string{workspaceDir, claudeDir} {
+		if err := os.Chown(d, 10001, 10001); err != nil {
+			// Best effort: a pre-created NFS directory may already have the right
+			// ownership or may reject chown due to export options.
+			continue
+		}
+	}
+	return []volumeSpec{
+		{
+			Name:      "workspace",
+			Host:      &hostBackend{Path: workspaceDir},
+			MountPath: guestWorkspace,
+		},
+		{
+			Name:      "claude",
+			Host:      &hostBackend{Path: claudeDir},
+			MountPath: guestClaudeConfig,
+		},
+		{
+			Name:      "plugins",
+			Host:      &hostBackend{Path: pluginDir},
+			MountPath: guestPlugins,
+			ReadOnly:  true,
+		},
+	}, nil
+}
+
+func (p *Provider) sessionRoot(userID, sessionID string) string {
+	return filepath.Join(
+		p.root,
+		"users",
+		safePathSegment(userID),
+		"sessions",
+		safePathSegment(sessionID),
+	)
 }
 
 // safe sanitises a cocola identifier into an OpenSandbox-legal volume/path
@@ -980,6 +1122,37 @@ func safe(s string) string {
 		return "x"
 	}
 	return out
+}
+
+// safePathSegment sanitises an identifier for host filesystem paths and appends
+// a short hash so different raw ids cannot collide after sanitisation.
+func safePathSegment(s string) string {
+	h := sha256.Sum256([]byte(s))
+	hash := hex.EncodeToString(h[:])[:12]
+	base := safe(s)
+	if len(base) > 80 {
+		base = strings.Trim(base[:80], "-")
+		if base == "" {
+			base = "x"
+		}
+	}
+	return base + "-" + hash
+}
+
+func isSubpath(root, path string) bool {
+	absRoot, err := filepath.Abs(root)
+	if err != nil {
+		return false
+	}
+	absPath, err := filepath.Abs(path)
+	if err != nil {
+		return false
+	}
+	rel, err := filepath.Rel(absRoot, absPath)
+	if err != nil {
+		return false
+	}
+	return rel != "." && rel != ".." && !strings.HasPrefix(rel, ".."+string(os.PathSeparator))
 }
 
 func mapResources(r provider.Resources) map[string]string {

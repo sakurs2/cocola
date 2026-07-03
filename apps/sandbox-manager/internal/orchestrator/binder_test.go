@@ -21,6 +21,7 @@ type fakeProvider struct {
 	mu        sync.Mutex
 	state     map[string]string // sandbox id -> "active"|"paused"|"destroyed"
 	resumeErr map[string]error
+	cleanups  []string
 }
 
 func newFakeProvider() *fakeProvider {
@@ -58,6 +59,12 @@ func (f *fakeProvider) Destroy(ctx context.Context, sid string) error {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.state[sid] = "destroyed"
+	return nil
+}
+func (f *fakeProvider) CleanupSessionStorage(ctx context.Context, userID, sessionID string) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.cleanups = append(f.cleanups, userID+"/"+sessionID)
 	return nil
 }
 func (f *fakeProvider) Exec(ctx context.Context, sid string, req provider.ExecRequest) (<-chan provider.ExecEvent, error) {
@@ -226,6 +233,12 @@ func TestReaperPauseThenDestroy(t *testing.T) {
 	if _, ok, _ := b.lookup(ctx, "idle"); ok {
 		t.Fatal("expected mapping removed after destroy")
 	}
+	fp.mu.Lock()
+	cleanups := append([]string(nil), fp.cleanups...)
+	fp.mu.Unlock()
+	if len(cleanups) != 0 {
+		t.Fatalf("idle reaper must not clean session storage, got %v", cleanups)
+	}
 }
 
 // TestHeartbeatKeepsAlive: a heartbeated sandbox survives reaper passes.
@@ -249,6 +262,32 @@ func TestHeartbeatKeepsAlive(t *testing.T) {
 	fp.mu.Unlock()
 	if st != "active" {
 		t.Fatalf("expected sandbox to stay active under heartbeat, got %s", st)
+	}
+}
+
+func TestReleaseDestroysUnbindsAndCleansSessionStorage(t *testing.T) {
+	b, fp := newTestBinder(t)
+	ctx := context.Background()
+	sb, err := b.Acquire(ctx, AcquireSpec{SessionID: "s1", UserID: "u1"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := b.Release(ctx, "s1"); err != nil {
+		t.Fatalf("Release: %v", err)
+	}
+	if got := fp.destroys.Load(); got != 1 {
+		t.Fatalf("destroys = %d, want 1", got)
+	}
+	if _, ok, _ := b.lookup(ctx, "s1"); ok {
+		t.Fatal("expected mapping removed after release")
+	}
+	fp.mu.Lock()
+	defer fp.mu.Unlock()
+	if fp.state[sb.ID] != "destroyed" {
+		t.Fatalf("sandbox state = %q, want destroyed", fp.state[sb.ID])
+	}
+	if len(fp.cleanups) != 1 || fp.cleanups[0] != "u1/s1" {
+		t.Fatalf("cleanups = %v, want [u1/s1]", fp.cleanups)
 	}
 }
 

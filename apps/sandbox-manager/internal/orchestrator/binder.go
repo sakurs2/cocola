@@ -326,12 +326,25 @@ func (b *Binder) Release(ctx context.Context, sessionID string) error {
 	if err != nil {
 		return err
 	}
+	var m meta
+	raw, metaErr := b.kv.Get(ctx, metaKey(sid))
+	if metaErr == nil {
+		_ = json.Unmarshal([]byte(raw), &m)
+	}
 	// Destroy the sandbox first; even if mapping cleanup fails afterwards the
 	// reaper will mop up the now-dangling record.
 	if err := b.p.Destroy(ctx, sid); err != nil {
 		return fmt.Errorf("provider destroy: %w", err)
 	}
-	return b.unbind(ctx, sessionID, sid)
+	if err := b.unbind(ctx, sessionID, sid); err != nil {
+		return err
+	}
+	if cleaner, ok := b.p.(provider.SessionStorageCleaner); ok && m.UserID != "" {
+		if err := cleaner.CleanupSessionStorage(ctx, m.UserID, sessionID); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 // unbind removes all four keys for a (session, sandbox) pair atomically.

@@ -65,19 +65,10 @@ class _FakeClient:
     def __init__(self, data):
         self._resp = _FakeResp(data)
         self.calls = []
-        self.presign_calls = []
 
     def get_object(self, bucket, key):
         self.calls.append((bucket, key))
         return self._resp
-
-    def presigned_get_object(self, bucket, key, *, expires):
-        self.presign_calls.append(("GET", bucket, key, expires.total_seconds()))
-        return f"http://minio.local/{bucket}/{key}?sig=get"
-
-    def presigned_put_object(self, bucket, key, *, expires):
-        self.presign_calls.append(("PUT", bucket, key, expires.total_seconds()))
-        return f"http://minio.local/{bucket}/{key}?sig=put"
 
 
 def test_minio_fetcher_reads_and_closes():
@@ -87,23 +78,3 @@ def test_minio_fetcher_reads_and_closes():
     assert client.calls == [("cocola", "attachments/s/uuid-a.bin")]
     # Connection is always closed + released after read (no leak).
     assert client._resp.closed and client._resp.released
-
-
-def test_minio_fetcher_presigns_put_url():
-    client = _FakeClient(b"")
-    f = objstore.MinioFetcher(client, "cocola")
-
-    url = f.presigned_put_url("checkpoints/u/s/archive.tar.zst", expires_seconds=60)
-
-    assert url == "http://minio.local/cocola/checkpoints/u/s/archive.tar.zst?sig=put"
-    assert client.presign_calls == [("PUT", "cocola", "checkpoints/u/s/archive.tar.zst", 60.0)]
-
-
-def test_minio_fetcher_presigns_get_url():
-    client = _FakeClient(b"")
-    f = objstore.MinioFetcher(client, "cocola")
-
-    url = f.presigned_get_url("checkpoints/u/s/archive.tar.zst", expires_seconds=90)
-
-    assert url == "http://minio.local/cocola/checkpoints/u/s/archive.tar.zst?sig=get"
-    assert client.presign_calls == [("GET", "cocola", "checkpoints/u/s/archive.tar.zst", 90.0)]

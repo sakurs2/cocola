@@ -8,15 +8,17 @@
 //
 // Sandbox directory model:
 //
-//	/workspace/            -> host: <root>/workspace/<session>/workspace  (session files, RW)
-//	/home/cocola/.claude   -> host: <root>/workspace/<session>/claude     (session Claude state, RW)
-//	/data/plugins/         -> host: <root>/plugins                         (platform skills, RO)
+//	/workspace/            -> host: <root>/users/<user>/sessions/<session>/workspace  (session files, RW)
+//	/home/cocola/.claude   -> host: <root>/users/<user>/sessions/<session>/claude     (session Claude state, RW)
+//	/data/plugins/         -> host: <root>/plugins                                      (platform skills, RO)
 package docker
 
 import (
 	"archive/tar"
 	"bytes"
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"fmt"
 	"io"
 	"log/slog"
@@ -170,7 +172,7 @@ func (p *Provider) Create(ctx context.Context, spec provider.SandboxSpec) (*prov
 	}
 
 	sid := "sbx-" + uuid.NewString()
-	sessionRoot := filepath.Join(p.root, "workspace", safe(spec.SessionID))
+	sessionRoot := p.sessionRoot(spec.UserID, spec.SessionID)
 	workspaceDir := filepath.Join(sessionRoot, "workspace")
 	claudeDir := filepath.Join(sessionRoot, "claude")
 	pluginDir := filepath.Join(p.root, "plugins")
@@ -441,7 +443,7 @@ func (p *Provider) Resume(ctx context.Context, sid string) error {
 }
 
 // Destroy force-removes the sandbox container. Host volumes are intentionally
-// retained (cross-session userdata persistence is the whole point).
+// retained; explicit conversation deletion calls CleanupSessionStorage.
 func (p *Provider) Destroy(ctx context.Context, sid string) error {
 	rec, err := p.resolve(ctx, sid)
 	if err != nil {
@@ -453,6 +455,25 @@ func (p *Provider) Destroy(ctx context.Context, sid string) error {
 	p.mu.Lock()
 	delete(p.sandboxes, sid)
 	p.mu.Unlock()
+	return nil
+}
+
+// CleanupSessionStorage removes the durable storage owned by one conversation.
+// It is intentionally separate from Destroy so idle reclaim can tear down a
+// sandbox container while preserving the workspace for a later turn.
+func (p *Provider) CleanupSessionStorage(ctx context.Context, userID, sessionID string) error {
+	select {
+	case <-ctx.Done():
+		return ctx.Err()
+	default:
+	}
+	dir := p.sessionRoot(userID, sessionID)
+	if !isSubpath(p.root, dir) {
+		return fmt.Errorf("docker: refusing to remove session dir outside root: %s", dir)
+	}
+	if err := os.RemoveAll(dir); err != nil {
+		return fmt.Errorf("docker: remove session storage: %w", err)
+	}
 	return nil
 }
 
@@ -533,13 +554,62 @@ func (p *Provider) ensureImage(ctx context.Context, ref string) error {
 	return nil
 }
 
-// safe sanitises an identifier for use as a filesystem path segment.
-func safe(s string) string {
-	if s == "" {
-		return "_"
+func (p *Provider) sessionRoot(userID, sessionID string) string {
+	return filepath.Join(
+		p.root,
+		"users",
+		safePathSegment(userID),
+		"sessions",
+		safePathSegment(sessionID),
+	)
+}
+
+// safePathSegment sanitises an identifier for use as a filesystem path segment
+// and appends a short hash so different raw ids cannot collide after cleanup.
+func safePathSegment(s string) string {
+	h := sha256.Sum256([]byte(s))
+	hash := hex.EncodeToString(h[:])[:12]
+	var b strings.Builder
+	prevDash := false
+	for _, r := range strings.ToLower(s) {
+		ok := (r >= 'a' && r <= 'z') || (r >= '0' && r <= '9')
+		if ok {
+			b.WriteRune(r)
+			prevDash = false
+			continue
+		}
+		if !prevDash {
+			b.WriteByte('-')
+			prevDash = true
+		}
 	}
-	r := strings.NewReplacer("/", "_", "..", "_", " ", "_")
-	return r.Replace(s)
+	out := strings.Trim(b.String(), "-")
+	if out == "" {
+		out = "x"
+	}
+	if len(out) > 80 {
+		out = strings.Trim(out[:80], "-")
+		if out == "" {
+			out = "x"
+		}
+	}
+	return out + "-" + hash
+}
+
+func isSubpath(root, path string) bool {
+	absRoot, err := filepath.Abs(root)
+	if err != nil {
+		return false
+	}
+	absPath, err := filepath.Abs(path)
+	if err != nil {
+		return false
+	}
+	rel, err := filepath.Rel(absRoot, absPath)
+	if err != nil {
+		return false
+	}
+	return rel != "." && rel != ".." && !strings.HasPrefix(rel, ".."+string(os.PathSeparator))
 }
 
 // chanWriter adapts an io.Writer onto the ExecEvent channel.

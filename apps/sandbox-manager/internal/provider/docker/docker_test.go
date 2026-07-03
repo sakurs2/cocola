@@ -3,6 +3,8 @@ package docker
 import (
 	"context"
 	"errors"
+	"os"
+	"path/filepath"
 	"slices"
 	"strings"
 	"testing"
@@ -172,5 +174,45 @@ func TestApplyEgressPolicy_NonEmptyAllowlistEnforced(t *testing.T) {
 	v, ok := hasEnv(env, "COCOLA_EGRESS_ALLOWLIST")
 	if !ok || v != "api.example.com,10.0.0.0/8,host.docker.internal" {
 		t.Fatalf("allowlist env mismatch: %q ok=%v", v, ok)
+	}
+}
+
+func TestSessionRootUsesUserAndSession(t *testing.T) {
+	root := t.TempDir()
+	p := &Provider{root: root}
+
+	got := p.sessionRoot("User/1", "Sess..1")
+	want := filepath.Join(root, "users", safePathSegment("User/1"), "sessions", safePathSegment("Sess..1"))
+	if got != want {
+		t.Fatalf("sessionRoot = %q, want %q", got, want)
+	}
+	if strings.Contains(got, "/User/1/") || strings.Contains(got, "/Sess..1/") {
+		t.Fatalf("sessionRoot used raw unsafe ids: %q", got)
+	}
+}
+
+func TestCleanupSessionStorageRemovesOnlySessionDir(t *testing.T) {
+	root := t.TempDir()
+	p := &Provider{root: root}
+	sessionDir := p.sessionRoot("u1", "s1")
+	otherDir := p.sessionRoot("u1", "s2")
+	if err := os.MkdirAll(filepath.Join(sessionDir, "workspace"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(filepath.Join(sessionDir, "claude"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(filepath.Join(otherDir, "workspace"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := p.CleanupSessionStorage(context.Background(), "u1", "s1"); err != nil {
+		t.Fatalf("CleanupSessionStorage: %v", err)
+	}
+	if _, err := os.Stat(sessionDir); !os.IsNotExist(err) {
+		t.Fatalf("session dir should be removed, stat err=%v", err)
+	}
+	if _, err := os.Stat(otherDir); err != nil {
+		t.Fatalf("other session dir should remain: %v", err)
 	}
 }

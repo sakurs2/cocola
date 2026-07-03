@@ -105,6 +105,7 @@ services:
       COCOLA_OPENSANDBOX_DIRECT_EXEC: "${COCOLA_OPENSANDBOX_DIRECT_EXEC:-}"
       COCOLA_REDIS_ADDR: "redis:6379"
       COCOLA_SANDBOX_ROOT: "${COCOLA_DATA_ROOT:-/var/lib/cocola/sandboxes}"
+      COCOLA_SANDBOX_VOLUME_BACKEND: "${COCOLA_SANDBOX_VOLUME_BACKEND:-}"
       # Egress hardening (ADR-0009). sandbox-manager reads these to build each
       # sandbox's firewall allowlist: the llm-gateway host is auto-folded in from
       # COCOLA_SANDBOX_LLM_BASE_URL so Route A can always reach the gateway; any
@@ -118,12 +119,10 @@ services:
       - "${COCOLA_SANDBOX_HOST_PORT:-50051}:50051"
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock
-      # COCOLA_DATA_ROOT holds every per-session/per-user sandbox volume,
-      # including <root>/claude/<user_id> which is bind-mounted into each Route A
-      # sandbox at /home/cocola/.claude (CLAUDE_CONFIG_DIR). That on-disk Claude
-      # session store is the SUFFICIENT condition for --resume to survive a
-      # sandbox recreation (M7, ADR-0008 T2); the session_map table in Postgres
-      # is only the index that says which claude_session_id to resume.
+      # COCOLA_DATA_ROOT holds session storage:
+      # <root>/users/<user>/sessions/<session>/{workspace,claude}. Bind the same
+      # absolute path into sandbox-manager so Docker/OpenSandbox host volumes are
+      # path-isomorphic with the host daemon. Point it at NFS/NAS in production.
       - "${COCOLA_DATA_ROOT:-/var/lib/cocola/sandboxes}:${COCOLA_DATA_ROOT:-/var/lib/cocola/sandboxes}"
 
   llm-gateway:

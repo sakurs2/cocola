@@ -29,6 +29,10 @@ services:
     volumes:
       # Docker runtime drives sandboxes as sibling containers on the host daemon.
       - /var/run/docker.sock:/var/run/docker.sock
+      # Host-backed cocola volumes must be path-isomorphic: the same absolute
+      # path is visible to this server container and to the host Docker daemon.
+      # Point COCOLA_SANDBOX_ROOT at an NFS/NAS mount in production.
+      - "${COCOLA_SANDBOX_ROOT:-${HOME}/.cocola/sandboxes}:${COCOLA_SANDBOX_ROOT:-${HOME}/.cocola/sandboxes}"
     environment:
       - SANDBOX_CONFIG_PATH=/etc/opensandbox/config.toml
       # api_key is empty -> server refuses to start insecure unless we ack it.
@@ -61,6 +65,9 @@ configs:
 
       [egress]
       image = "opensandbox/egress:v1.1.2"
+
+      [storage]
+      allowed_host_paths = ["${COCOLA_SANDBOX_ROOT:-${HOME}/.cocola/sandboxes}"]
 
       [docker]
       network_mode = "bridge"

@@ -84,6 +84,11 @@ Two volumes are mounted by the provider:
 | `/home/cocola/.claude` | per-session, RW   | hibernate, cleaned at session end |
 | `/data/plugins`        | shared, read-only | platform-managed                  |
 
+For host-backed storage, the provider maps them under
+`<COCOLA_SANDBOX_ROOT>/users/<user>/sessions/<session>/{workspace,claude}`.
+Point `COCOLA_SANDBOX_ROOT` at an NFS/NAS mount to share session storage across
+nodes without changing the in-container contract.
+
 `CLAUDE_CONFIG_DIR=/home/cocola/.claude` so Claude Code memory/sessions/projects
 are isolated per cocola session without appearing in `/workspace` file listings.
 `--resume <session_id>` rebuilds the brain from that on-disk session (no RAM

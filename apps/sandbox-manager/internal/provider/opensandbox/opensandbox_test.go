@@ -11,6 +11,8 @@ import (
 	"mime"
 	"mime/multipart"
 	"net/http"
+	"os"
+	"path/filepath"
 	"regexp"
 	"strings"
 	"testing"
@@ -34,16 +36,18 @@ func jsonResp(status int, body string) *http.Response {
 }
 
 // newStub builds a Provider whose HTTP client is backed by handler.
-func newStub(t *testing.T, handler roundTripFunc) *Provider {
+func newStub(t *testing.T, handler roundTripFunc, opts ...Option) *Provider {
 	t.Helper()
-	p, err := New(
+	base := []Option{
 		WithBaseURL("http://opensandbox.test/v1"),
 		WithAPIKey("test-key"),
 		WithHTTPClient(&http.Client{Transport: handler}),
 		// Disable the non-root drop by default so tests can assert the inner
 		// command body directly; TestExec_RunsAsExecUser* cover the wrap.
 		WithExecUser(""),
-	)
+	}
+	base = append(base, opts...)
+	p, err := New(base...)
 	if err != nil {
 		t.Fatalf("New: %v", err)
 	}
@@ -60,6 +64,8 @@ func TestNew_RequiresBaseURL(t *testing.T) {
 func TestNew_EnvDefaults(t *testing.T) {
 	t.Setenv("COCOLA_OPENSANDBOX_URL", "http://from-env:8090/v1/")
 	t.Setenv("COCOLA_OPENSANDBOX_API_KEY", "env-key")
+	t.Setenv("COCOLA_SANDBOX_VOLUME_BACKEND", "host")
+	t.Setenv("COCOLA_SANDBOX_ROOT", "/mnt/cocola")
 	p, err := New()
 	if err != nil {
 		t.Fatalf("New: %v", err)
@@ -69,6 +75,12 @@ func TestNew_EnvDefaults(t *testing.T) {
 	}
 	if p.apiKey != "env-key" {
 		t.Errorf("apiKey = %q, want env-key", p.apiKey)
+	}
+	if p.volumeBackend != volumeBackendHost {
+		t.Errorf("volume backend = %q, want host", p.volumeBackend)
+	}
+	if p.root != "/mnt/cocola" {
+		t.Errorf("root = %q, want /mnt/cocola", p.root)
 	}
 }
 
@@ -671,7 +683,7 @@ func TestSafe(t *testing.T) {
 }
 
 func TestMapVolumes(t *testing.T) {
-	vols := mapVolumes("s1")
+	vols := mapPVCVolumes("s1")
 	if len(vols) != 3 {
 		t.Fatalf("mapVolumes returned %d volumes, want 3", len(vols))
 	}
@@ -712,13 +724,40 @@ func TestMapVolumes(t *testing.T) {
 }
 
 func TestMapVolumes_SanitisesIDs(t *testing.T) {
-	vols := mapVolumes("Sess..1")
+	vols := mapPVCVolumes("Sess..1")
 	if vols[0].PVC.ClaimName != "cocola-session-sess-1" {
 		t.Errorf("session claim = %q, want cocola-session-sess-1", vols[0].PVC.ClaimName)
 	}
 	if vols[0].MountPath != "/workspace" {
 		t.Errorf("session mountPath = %q", vols[0].MountPath)
 	}
+}
+
+func TestMapHostVolumes(t *testing.T) {
+	root := t.TempDir()
+	p := &Provider{volumeBackend: volumeBackendHost, root: root}
+	vols, err := p.mapVolumes("User/1", "Sess..1")
+	if err != nil {
+		t.Fatalf("mapVolumes host: %v", err)
+	}
+	if len(vols) != 3 {
+		t.Fatalf("host volumes = %d, want 3", len(vols))
+	}
+	sessionRoot := filepath.Join(root, "users", safePathSegment("User/1"), "sessions", safePathSegment("Sess..1"))
+	assertHost := func(i int, name, path, mount string, ro bool) {
+		t.Helper()
+		v := vols[i]
+		if v.Name != name || v.Host == nil || v.Host.Path != path || v.PVC != nil ||
+			v.MountPath != mount || v.ReadOnly != ro || v.SubPath != "" {
+			t.Fatalf("volume %d = %+v host=%+v pvc=%+v", i, v, v.Host, v.PVC)
+		}
+		if _, err := os.Stat(path); err != nil {
+			t.Fatalf("host path %s not created: %v", path, err)
+		}
+	}
+	assertHost(0, "workspace", filepath.Join(sessionRoot, "workspace"), guestWorkspace, false)
+	assertHost(1, "claude", filepath.Join(sessionRoot, "claude"), guestClaudeConfig, false)
+	assertHost(2, "plugins", filepath.Join(root, "plugins"), guestPlugins, true)
 }
 
 // TestCreate_SendsVolumes asserts the mapped volumes reach the wire on Create.
@@ -757,6 +796,31 @@ func TestCreate_SendsVolumes(t *testing.T) {
 	}
 	if len(want) != 0 {
 		t.Errorf("missing volumes on wire: %v", want)
+	}
+}
+
+func TestCreate_SendsHostVolumes(t *testing.T) {
+	root := t.TempDir()
+	var body createSandboxRequest
+	p := newStub(t, func(r *http.Request) (*http.Response, error) {
+		_ = json.NewDecoder(r.Body).Decode(&body)
+		return jsonResp(http.StatusOK, `{"id":"sbx-9","status":{"state":"Pending"}}`), nil
+	}, WithVolumeBackend(volumeBackendHost), WithRoot(root))
+	if _, err := p.Create(context.Background(), provider.SandboxSpec{
+		UserID: "u1", SessionID: "s1", Image: "img",
+	}); err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+	if len(body.Volumes) != 3 {
+		t.Fatalf("wire volumes = %d, want 3", len(body.Volumes))
+	}
+	for _, v := range body.Volumes {
+		if v.PVC != nil || v.Host == nil {
+			t.Fatalf("host backend volume should set host only: %+v", v)
+		}
+		if !strings.HasPrefix(v.Host.Path, root+string(os.PathSeparator)) {
+			t.Fatalf("host path %q not under root %q", v.Host.Path, root)
+		}
 	}
 }
 

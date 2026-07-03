@@ -86,6 +86,13 @@ type SandboxProvider interface {
 	Health(ctx context.Context, sid string) (*HealthStatus, error)
 }
 
+// SessionStorageCleaner is an optional extension implemented by providers that
+// own host-visible session storage. The orchestrator calls it only for explicit
+// conversation deletion; idle reaping still preserves session directories.
+type SessionStorageCleaner interface {
+	CleanupSessionStorage(ctx context.Context, userID, sessionID string) error
+}
+
 // Registry is the global provider registry. Providers self-register in their
 // package init() so the orchestrator can pick one by name from config.
 var (

@@ -43,7 +43,6 @@ log = get_logger("cocola.agent-runtime.session-map")
 class SessionBinding:
     claude_session_id: str
     sandbox_id: str = ""
-    checkpoint_object_key: str = ""
 
 
 @runtime_checkable
@@ -55,12 +54,6 @@ class SessionMap(Protocol):
 
     async def get_binding(self, session_id: str) -> SessionBinding | None:
         """Return the stored resume binding, including the sandbox it belongs to."""
-
-    async def get_checkpoint(self, session_id: str) -> str | None:
-        """Return the latest checkpoint object key, or None if unknown."""
-
-    async def put_checkpoint(self, session_id: str, object_key: str, *, user_id: str = "") -> None:
-        """Record the latest checkpoint object key for a cocola session."""
 
     async def put(
         self, session_id: str, claude_session_id: str, *, user_id: str = "", sandbox_id: str = ""
@@ -92,31 +85,13 @@ class MemorySessionMap:
             return None
         return binding
 
-    async def get_checkpoint(self, session_id: str) -> str | None:
-        binding = self._d.get(session_id)
-        if not binding or not binding.checkpoint_object_key:
-            return None
-        return binding.checkpoint_object_key
-
-    async def put_checkpoint(self, session_id: str, object_key: str, *, user_id: str = "") -> None:
-        if not object_key:
-            return
-        prev = self._d.get(session_id)
-        self._d[session_id] = SessionBinding(
-            claude_session_id=prev.claude_session_id if prev else "",
-            sandbox_id=prev.sandbox_id if prev else "",
-            checkpoint_object_key=object_key,
-        )
-
     async def put(
         self, session_id: str, claude_session_id: str, *, user_id: str = "", sandbox_id: str = ""
     ) -> None:
         if claude_session_id:
-            prev = self._d.get(session_id)
             self._d[session_id] = SessionBinding(
                 claude_session_id=claude_session_id,
                 sandbox_id=sandbox_id,
-                checkpoint_object_key=prev.checkpoint_object_key if prev else "",
             )
 
     async def delete(self, session_id: str) -> None:
@@ -127,7 +102,7 @@ class MemorySessionMap:
 
 
 _GET = """
-SELECT claude_session_id, sandbox_id, checkpoint_object_key
+SELECT claude_session_id, sandbox_id
 FROM session_map
 WHERE session_id = %s
 """
@@ -140,20 +115,6 @@ DO UPDATE SET claude_session_id = EXCLUDED.claude_session_id,
              user_id = EXCLUDED.user_id,
              sandbox_id = EXCLUDED.sandbox_id,
              updated_at = now()
-"""
-
-_GET_CHECKPOINT = "SELECT checkpoint_object_key FROM session_map WHERE session_id = %s"
-
-_PUT_CHECKPOINT = """
-INSERT INTO session_map (session_id, user_id, checkpoint_object_key, updated_at)
-VALUES (%s, %s, %s, now())
-ON CONFLICT (session_id)
-DO UPDATE SET user_id = CASE
-                            WHEN EXCLUDED.user_id <> '' THEN EXCLUDED.user_id
-                            ELSE session_map.user_id
-                        END,
-              checkpoint_object_key = EXCLUDED.checkpoint_object_key,
-              updated_at = now()
 """
 
 _DELETE = "DELETE FROM session_map WHERE session_id = %s"
@@ -196,24 +157,7 @@ class PostgresSessionMap:
         return SessionBinding(
             claude_session_id=cid,
             sandbox_id=row[1] or "",
-            checkpoint_object_key=row[2] or "",
         )
-
-    async def get_checkpoint(self, session_id: str) -> str | None:
-        await self._ready()
-        async with self._pool.connection() as conn:
-            cur = await conn.execute(_GET_CHECKPOINT, (session_id,))
-            row = await cur.fetchone()
-        if not row or not row[0]:
-            return None
-        return row[0]
-
-    async def put_checkpoint(self, session_id: str, object_key: str, *, user_id: str = "") -> None:
-        if not object_key:
-            return
-        await self._ready()
-        async with self._pool.connection() as conn:
-            await conn.execute(_PUT_CHECKPOINT, (session_id, user_id, object_key))
 
     async def put(
         self, session_id: str, claude_session_id: str, *, user_id: str = "", sandbox_id: str = ""
