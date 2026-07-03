@@ -95,10 +95,10 @@ docker provider 用 **bind mount**,`mount.Source` 是宿主机绝对路径
 2. `sandbox-cli -addr :50051 demo` 输出 `DEMO OK`(create→exec→destroy 全通)。
 3. **持久化证明**:
    a. `sandbox-cli create -user u1 -session s1` 得 sbx-A;
-   b. `exec sbx-A -- sh -c 'echo persisted > /data/userdata/u1/proof.txt'`;
+   b. `exec sbx-A -- sh -c 'echo persisted > /workspace/proof.txt'`;
    c. `destroy sbx-A`;
-   d. 再 `create -user u1 -session s2` 得 sbx-B;
-   e. `exec sbx-B -- cat /data/userdata/u1/proof.txt` 输出 `persisted`。
+   d. 再 `create -user u1 -session s1` 得 sbx-B;
+   e. `exec sbx-B -- cat /workspace/proof.txt` 输出 `persisted`。
 4. **重启证明**:`docker compose down && up` 后重复 3e,数据仍在。
 5. **部署者零 go 依赖**:全程只用到 docker / docker compose,未在宿主机装 go。
 

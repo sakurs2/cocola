@@ -4,7 +4,7 @@ package orchestrator
 // path (ADR-0015/0016). Skipped unless COCOLA_OPENSANDBOX_URL is set, so the
 // normal hermetic suite is unaffected. This exercises the exact slow path a
 // /v1/chat turn drives: AcquireWithOutcome -> per-session lock -> provider.Create
-// (with mapVolumes double-volume mount) -> bind; then the fast path (reuse) and a
+// (with mapVolumes session workspace mount) -> bind; then the fast path (reuse) and a
 // real Exec inside the bound box. On-demand cold-start is the only allocation
 // path (warm pool removed in ADR-0016); no listeners started.
 
@@ -85,9 +85,9 @@ func TestLive_OnDemandAllocation_OpenSandbox(t *testing.T) {
 	}
 
 	// --- the dialogue's actual work: run a command inside the bound box and
-	//     prove the per-user volume mount is present (mapVolumes wired). ---
+	//     prove the session workspace mounts are present (mapVolumes wired). ---
 	ev, err := p.Exec(ctx, sid, provider.ExecRequest{
-		Cmd: []string{"sh", "-c", "echo dialogue-ok && ls -d /data/userdata/live-user-1 /workspace /home/cocola/.claude"},
+		Cmd: []string{"sh", "-c", "echo dialogue-ok && ls -d /workspace /home/cocola/.claude /data/plugins"},
 	})
 	if err != nil {
 		t.Fatalf("exec in bound box: %v", err)
@@ -111,10 +111,10 @@ func TestLive_OnDemandAllocation_OpenSandbox(t *testing.T) {
 	if exit != 0 {
 		t.Fatalf("exec exit=%d (want 0); output=%q", exit, gotOut)
 	}
-	for _, want := range []string{"dialogue-ok", "/data/userdata/live-user-1", "/workspace", "/home/cocola/.claude"} {
+	for _, want := range []string{"dialogue-ok", "/workspace", "/home/cocola/.claude", "/data/plugins"} {
 		if !strings.Contains(gotOut, want) {
 			t.Fatalf("exec output missing %q; got %q", want, gotOut)
 		}
 	}
-	t.Log("on-demand allocation path OK: slow-create+mount -> fast-reuse -> exec sees double-volume mounts")
+	t.Log("on-demand allocation path OK: slow-create+mount -> fast-reuse -> exec sees session workspace mounts")
 }

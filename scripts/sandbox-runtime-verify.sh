@@ -14,8 +14,9 @@
 #                (ADR-0010): the model can only write proof.txt by emitting a
 #                tool_use that the gateway forwarded -- if tools were dropped the
 #                file never appears. Requires ANTHROPIC_BASE_URL + ANTHROPIC_AUTH_TOKEN.
-#   4. persist : the per-user volume keeps ~/.claude across a container destroy
-#                + recreate, and `--resume <session_id>` restores the session.
+#   4. persist : the session storage keeps /home/cocola/.claude across a
+#                container destroy + recreate, and `--resume <session_id>`
+#                restores the session.
 #
 # The shim is driven over `docker exec -i` STDIO -- never a listening port.
 #
@@ -38,11 +39,10 @@ IMAGE="${IMAGE:-cocola/sandbox-runtime:dev}"
 DOCKER_RUNTIME="${DOCKER_RUNTIME:-runc}"
 MODEL="${MODEL:-cocola-default}"
 
-# Per-test scratch dirs that stand in for the two ADR-0008 mounted volumes.
+# Per-test scratch dir that stands in for the session workspace volume.
 WORK="$(mktemp -d)"
-USER_VOL="$WORK/user"      # T2 per-user volume  -> /home/cocola/.claude
-SESS_VOL="$WORK/session"   # T1b session volume  -> /workspace
-mkdir -p "$USER_VOL" "$SESS_VOL"
+SESS_VOL="$WORK/session"   # session root; subdirs emulate session volume subPaths
+mkdir -p "$SESS_VOL/workspace" "$SESS_VOL/claude"
 
 CTR="cocola-verify-$$"
 PASS=0; FAIL=0
@@ -56,13 +56,13 @@ cleanup() {
 }
 trap cleanup EXIT
 
-# Mounts shared by every container we spin up: the two persistent volumes, plus
-# the env that redirects Claude Code at the cocola gateway (ADR-0009 sec.2).
+# Mounts shared by every container we spin up: the session workspace volume,
+# plus the env that redirects Claude Code at the cocola gateway (ADR-0009 sec.2).
 run_args=(
   --rm -d --name "$CTR"
   --runtime "$DOCKER_RUNTIME"
-  -v "$USER_VOL:/home/cocola/.claude"
-  -v "$SESS_VOL:/workspace"
+  -v "$SESS_VOL/workspace:/workspace"
+  -v "$SESS_VOL/claude:/home/cocola/.claude"
   -e "CLAUDE_CONFIG_DIR=/home/cocola/.claude"
   -e "ANTHROPIC_CONFIG_DIR=/home/cocola/.claude"
   -e "COCOLA_WORKSPACE=/workspace"
@@ -121,15 +121,15 @@ else
 fi
 
 # ---- 4. persistence across container destroy + recreate ------------------
-note "persistence: dual-volume survives container teardown"
-# A marker that should outlive the container, written to the per-user volume.
+note "persistence: session storage survives container teardown"
+# A marker that should outlive the container, written to the hidden session-local Claude config.
 docker exec -i "$CTR" bash -lc 'echo cocola-persist-marker > /home/cocola/.claude/persist_probe.txt'
 docker rm -f "$CTR" >/dev/null
-ls "$USER_VOL/persist_probe.txt" >/dev/null 2>&1 && ok "per-user volume retained file on host after destroy" || bad "per-user volume lost data"
+ls "$SESS_VOL/claude/persist_probe.txt" >/dev/null 2>&1 && ok "session storage retained .claude file on host after destroy" || bad "session storage lost .claude data"
 
 start_ctr
 docker exec -i "$CTR" cat /home/cocola/.claude/persist_probe.txt 2>/dev/null | grep -q cocola-persist-marker \
-  && ok "re-created container re-mounts the same ~/.claude" || bad "remount did not restore ~/.claude"
+  && ok "re-created container re-mounts the same /home/cocola/.claude" || bad "remount did not restore /home/cocola/.claude"
 
 # resume only if we got a session id from step 3
 if [ -n "$SESSION_ID" ]; then

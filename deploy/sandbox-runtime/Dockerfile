@@ -23,9 +23,10 @@
 #     This matches cocola's hard rule: a sandbox never binds a network port.
 #     (The base image's default entrypoint would start a Jupyter server; cocola
 #     OVERRIDES both ENTRYPOINT and CMD below, so that never runs.)
-#   - Persistence is via mounted volumes (ADR-0008): CLAUDE_CONFIG_DIR lives on
-#     the per-user volume so `~/.claude` (memory/sessions/projects) survives
-#     hibernate; the session workspace is a separate mounted volume.
+#   - Persistence is via mounted volumes: /workspace holds user-visible files,
+#     while CLAUDE_CONFIG_DIR lives at /home/cocola/.claude on the same session
+#     storage unit, so Claude Code state is isolated per cocola session without
+#     appearing in workspace file listings.
 #
 # Build:
 #   # optional: vendor the CLI for offline builds
@@ -61,10 +62,11 @@ ENV DEBIAN_FRONTEND=noninteractive \
 # ---- extra tools the base image lacks ------------------------------------
 # The base already provides Node 22 + npm, uv, Python 3.12 (+ venv), git, curl.
 # cocola only needs to add the pieces the base omits: tini (PID-1 reaper), the
-# egress-firewall toolchain (iptables/ipset) and the agent's search helpers
-# (ripgrep/jq). Node/uv/python install steps are GONE -- inherited from base.
+# egress-firewall toolchain (iptables/ipset), the agent's search helpers
+# (ripgrep/jq), and zstd for future workspace checkpoint packaging.
+# Node/uv/python install steps are GONE -- inherited from base.
 RUN apt-get update && apt-get install -y --no-install-recommends \
-        ca-certificates tini iptables ipset ripgrep jq \
+        ca-certificates tini iptables ipset ripgrep jq zstd \
     && rm -rf /var/lib/apt/lists/* \
     && npm config set registry "${NPM_REGISTRY}"
 
@@ -106,11 +108,12 @@ RUN chmod +x /opt/cocola/init-firewall.sh /opt/cocola/firewall-entrypoint.sh
 COPY shim/ /opt/cocola/shim/
 RUN chmod +x /opt/cocola/shim/entrypoint.sh
 
-# ---- non-root user + mount points (ADR-0008 dual volume) -----------------
-# /home/cocola/.claude  -> bound onto the PER-USER volume (T2, cross-session)
-# /workspace            -> bound onto the SESSION volume (T1b, hibernate-safe)
+# ---- non-root user + mount points ----------------------------------------
+# /workspace           -> bound onto the SESSION volume (RW)
+# /home/cocola/.claude -> session-local Claude Code config/state
+# /data/plugins        -> bound read-only platform skills
 RUN useradd -m -u 10001 -s /bin/bash cocola \
-    && mkdir -p /home/cocola/.claude /workspace \
+    && mkdir -p /workspace /home/cocola/.claude /data/plugins \
     && chown -R cocola:cocola /home/cocola /workspace /opt/cocola
 
 # NOTE: the container's main process runs as ROOT so firewall-entrypoint.sh can
@@ -121,7 +124,8 @@ RUN useradd -m -u 10001 -s /bin/bash cocola \
 # nothing exploitable.
 WORKDIR /workspace
 
-# CLAUDE_CONFIG_DIR points at the per-user volume so memory/sessions persist.
+# CLAUDE_CONFIG_DIR points to a hidden session-local mount outside /workspace so
+# memory/sessions are isolated without appearing in user file listings.
 ENV CLAUDE_CONFIG_DIR=/home/cocola/.claude \
     ANTHROPIC_CONFIG_DIR=/home/cocola/.claude \
     CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC=1 \

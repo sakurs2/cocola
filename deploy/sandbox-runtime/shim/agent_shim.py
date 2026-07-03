@@ -30,7 +30,7 @@ Request schema:
 
 Auth/routing come from the ENV the container was started with (injected by the
 provider, ADR-0009 sec.2): ANTHROPIC_BASE_URL, ANTHROPIC_AUTH_TOKEN,
-CLAUDE_CONFIG_DIR (-> the per-user persistent volume). The shim does NOT read
+CLAUDE_CONFIG_DIR (-> hidden session-local Claude config). The shim does NOT read
 credentials from the request, so they never transit the prompt channel.
 
 The agent runs with the FULL native Claude Code toolset (no MCP forwarding, no
@@ -106,9 +106,9 @@ def _build_options(req: dict[str, Any]):
         }
     else:
         kwargs["system_prompt"] = {"type": "preset", "preset": "claude_code"}
-    # Resume rebuilds the brain from the on-disk session (persisted on the
-    # per-user volume), which is how a hibernated sandbox restores state without
-    # a RAM snapshot (ADR-0008 lifecycle).
+    # Resume rebuilds the brain from the on-disk session (persisted under the
+    # session workspace), which is how a hibernated sandbox restores state
+    # without a RAM snapshot.
     if req.get("resume"):
         kwargs["resume"] = req["resume"]
 

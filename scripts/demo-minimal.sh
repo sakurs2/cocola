@@ -58,24 +58,33 @@ say "demo loop: create -> exec -> destroy"
 "${CLI[@]}" demo | tee "$OUT" || fail "demo loop errored"
 grep -q "DEMO OK" "$OUT" || fail "demo did not print DEMO OK"
 
-say "persistence: write in sbx-A, read from sbx-B after destroying A"
+say "persistence: write in sbx-A, read from sbx-B with the same session"
 SBX_A="$("${CLI[@]}" create -user u1 -session s1)"
 [ -n "$SBX_A" ] || fail "create A returned empty id"
-"${CLI[@]}" exec -id "$SBX_A" -- sh -c 'mkdir -p /data/userdata/u1 && echo persisted > /data/userdata/u1/proof.txt'
+"${CLI[@]}" exec -id "$SBX_A" -- sh -c 'echo persisted > /workspace/proof.txt'
 "${CLI[@]}" destroy -id "$SBX_A"
-SBX_B="$("${CLI[@]}" create -user u1 -session s2)"
+SBX_B="$("${CLI[@]}" create -user u1 -session s1)"
 [ -n "$SBX_B" ] || fail "create B returned empty id"
-GOT="$("${CLI[@]}" exec -id "$SBX_B" -- cat /data/userdata/u1/proof.txt)"
+GOT="$("${CLI[@]}" exec -id "$SBX_B" -- cat /workspace/proof.txt)"
 [ "$GOT" = "persisted" ] || fail "persistence broken: got '$GOT'"
 "${CLI[@]}" destroy -id "$SBX_B"
-say "persistence OK (read back: $GOT)"
+say "same-session persistence OK (read back: $GOT)"
+
+say "isolation: another session should not see the workspace file"
+SBX_ISO="$("${CLI[@]}" create -user u1 -session s2)"
+[ -n "$SBX_ISO" ] || fail "create isolation sandbox returned empty id"
+if "${CLI[@]}" exec -id "$SBX_ISO" -- test -f /workspace/proof.txt; then
+  fail "session isolation broken: s2 can see s1 proof.txt"
+fi
+"${CLI[@]}" destroy -id "$SBX_ISO"
+say "session isolation OK"
 
 say "restart: down && up, data must survive"
 compose down
 compose up -d --build
 wait_port
-SBX_C="$("${CLI[@]}" create -user u1 -session s3)"
-GOT2="$("${CLI[@]}" exec -id "$SBX_C" -- cat /data/userdata/u1/proof.txt)"
+SBX_C="$("${CLI[@]}" create -user u1 -session s1)"
+GOT2="$("${CLI[@]}" exec -id "$SBX_C" -- cat /workspace/proof.txt)"
 [ "$GOT2" = "persisted" ] || fail "restart persistence broken: got '$GOT2'"
 "${CLI[@]}" destroy -id "$SBX_C"
 say "restart persistence OK (read back: $GOT2)"

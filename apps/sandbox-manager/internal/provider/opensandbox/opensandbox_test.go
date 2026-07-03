@@ -663,7 +663,7 @@ func TestSafe(t *testing.T) {
 	// Result must satisfy OpenSandbox claim-name rules when prefixed.
 	re := regexp.MustCompile(`^[a-z0-9]([-a-z0-9]*[a-z0-9])?$`)
 	for _, in := range []string{"u1", "User_123", "a..b/c", "已删除", ""} {
-		claim := "cocola-user-" + safe(in)
+		claim := "cocola-session-" + safe(in)
 		if !re.MatchString(claim) {
 			t.Errorf("claim %q (from %q) is not a legal volume name", claim, in)
 		}
@@ -671,35 +671,30 @@ func TestSafe(t *testing.T) {
 }
 
 func TestMapVolumes(t *testing.T) {
-	vols := mapVolumes("u1", "s1")
-	if len(vols) != 4 {
-		t.Fatalf("mapVolumes returned %d volumes, want 4", len(vols))
+	vols := mapVolumes("s1")
+	if len(vols) != 3 {
+		t.Fatalf("mapVolumes returned %d volumes, want 3", len(vols))
 	}
 
-	// 0: user files volume at /data/userdata/<uid>, RW, no subPath.
-	if v := vols[0]; v.PVC == nil || v.PVC.ClaimName != "cocola-user-u1" ||
-		!v.PVC.CreateIfNotExists || v.MountPath != "/data/userdata/u1" ||
-		v.ReadOnly || v.SubPath != "" {
-		t.Errorf("user volume = %+v (pvc %+v)", v, v.PVC)
-	}
-	// 1: .claude as subPath of the SAME user volume.
-	if v := vols[1]; v.PVC == nil || v.PVC.ClaimName != "cocola-user-u1" ||
-		v.MountPath != "/home/cocola/.claude" || v.SubPath != ".claude" || v.ReadOnly {
-		t.Errorf("claude volume = %+v (pvc %+v)", v, v.PVC)
-	}
-	// .claude must reuse the user claim, never a separate volume.
-	if vols[0].PVC.ClaimName != vols[1].PVC.ClaimName {
-		t.Errorf("claude volume claim %q != user volume claim %q", vols[1].PVC.ClaimName, vols[0].PVC.ClaimName)
-	}
-	// 2: session workspace, RW, must NOT delete on termination (cocola GC).
-	if v := vols[2]; v.PVC == nil || v.PVC.ClaimName != "cocola-session-s1" ||
+	// 0: session workspace, RW, must NOT delete on termination (cocola GC).
+	if v := vols[0]; v.PVC == nil || v.PVC.ClaimName != "cocola-session-s1" ||
 		!v.PVC.CreateIfNotExists || v.PVC.DeleteOnSandboxTermination ||
-		v.MountPath != "/workspace" || v.ReadOnly {
+		v.MountPath != "/workspace" || v.ReadOnly || v.SubPath != "workspace" {
 		t.Errorf("session volume = %+v (pvc %+v)", v, v.PVC)
 	}
-	// 3: shared platform-skill volume, read-only, no createIfNotExists.
-	if v := vols[3]; v.PVC == nil || v.PVC.ClaimName != "cocola-plugins" ||
-		v.PVC.CreateIfNotExists || v.MountPath != "/data/plugins" || !v.ReadOnly {
+	// 1: session-local Claude config, RW, hidden outside /workspace.
+	if v := vols[1]; v.PVC == nil || v.PVC.ClaimName != "cocola-session-s1" ||
+		!v.PVC.CreateIfNotExists || v.PVC.DeleteOnSandboxTermination ||
+		v.MountPath != "/home/cocola/.claude" || v.ReadOnly || v.SubPath != "claude" {
+		t.Errorf("claude volume = %+v (pvc %+v)", v, v.PVC)
+	}
+	// Workspace and Claude state must share the same session claim.
+	if vols[0].PVC.ClaimName != vols[1].PVC.ClaimName {
+		t.Errorf("claude claim %q != workspace claim %q", vols[1].PVC.ClaimName, vols[0].PVC.ClaimName)
+	}
+	// 2: shared platform-skill volume, read-only, no createIfNotExists.
+	if v := vols[2]; v.PVC == nil || v.PVC.ClaimName != "cocola-plugins" ||
+		v.PVC.CreateIfNotExists || v.MountPath != "/data/plugins" || !v.ReadOnly || v.SubPath != "" {
 		t.Errorf("plugins volume = %+v (pvc %+v)", v, v.PVC)
 	}
 	// Every volume needs a non-empty, request-unique Name (server-required:
@@ -717,18 +712,12 @@ func TestMapVolumes(t *testing.T) {
 }
 
 func TestMapVolumes_SanitisesIDs(t *testing.T) {
-	vols := mapVolumes("User_A/B", "Sess..1")
-	if vols[0].PVC.ClaimName != "cocola-user-user-a-b" {
-		t.Errorf("user claim = %q, want cocola-user-user-a-b", vols[0].PVC.ClaimName)
+	vols := mapVolumes("Sess..1")
+	if vols[0].PVC.ClaimName != "cocola-session-sess-1" {
+		t.Errorf("session claim = %q, want cocola-session-sess-1", vols[0].PVC.ClaimName)
 	}
-	if vols[0].MountPath != "/data/userdata/user-a-b" {
-		t.Errorf("user mountPath = %q", vols[0].MountPath)
-	}
-	if vols[2].PVC.ClaimName != "cocola-session-sess-1" {
-		t.Errorf("session claim = %q, want cocola-session-sess-1", vols[2].PVC.ClaimName)
-	}
-	if vols[2].MountPath != "/workspace" {
-		t.Errorf("session mountPath = %q", vols[2].MountPath)
+	if vols[0].MountPath != "/workspace" {
+		t.Errorf("session mountPath = %q", vols[0].MountPath)
 	}
 }
 
@@ -744,13 +733,12 @@ func TestCreate_SendsVolumes(t *testing.T) {
 	}); err != nil {
 		t.Fatalf("Create: %v", err)
 	}
-	if len(body.Volumes) != 4 {
-		t.Fatalf("wire volumes = %d, want 4\nbody=%+v", len(body.Volumes), body)
+	if len(body.Volumes) != 3 {
+		t.Fatalf("wire volumes = %d, want 3\nbody=%+v", len(body.Volumes), body)
 	}
 	want := map[string]bool{
-		"/data/userdata/u1":    false,
-		"/home/cocola/.claude": false,
 		"/workspace":           false,
+		"/home/cocola/.claude": false,
 		"/data/plugins":        true, // readOnly
 	}
 	for _, v := range body.Volumes {
@@ -1070,21 +1058,21 @@ func TestReadFile_NotFound(t *testing.T) {
 
 func TestChownEntrypoint(t *testing.T) {
 	// Empty exec user runs Exec as root -> no chown needed, bare blocker.
-	if got := chownEntrypoint("", "u1"); len(got) != 2 || got[0] != "sleep" || got[1] != "infinity" {
+	if got := chownEntrypoint(""); len(got) != 2 || got[0] != "sleep" || got[1] != "infinity" {
 		t.Fatalf("empty execUser entrypoint = %v, want [sleep infinity]", got)
 	}
 
-	// Non-empty exec user -> one-time chown of the three mounts, then exec blocker.
-	got := chownEntrypoint("cocola", "u1")
+	// Non-empty exec user -> one-time chown of the session mounts, then exec blocker.
+	got := chownEntrypoint("cocola")
 	if len(got) != 3 || got[0] != "/bin/sh" || got[1] != "-c" {
 		t.Fatalf("entrypoint prefix = %v, want [/bin/sh -c ...]", got)
 	}
 	script := got[2]
 	for _, want := range []string{
+		"mkdir -p '/workspace' '/home/cocola/.claude'",
 		"chown -R 'cocola':'cocola'",
-		"'/home/cocola/.claude'",
-		"'/data/userdata/u1'",
 		"'/workspace'",
+		"'/home/cocola/.claude'",
 		"|| true",
 		"exec sleep infinity",
 	} {

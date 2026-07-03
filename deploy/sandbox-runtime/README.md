@@ -1,6 +1,6 @@
 # cocola Route-A sandbox runtime image
 
-This is the per-user **sandbox runtime image** for cocola's Route A
+This is the session-scoped **sandbox runtime image** for cocola's Route A
 architecture (see `docs/adr/0009-agent-runtime-in-sandbox.md`). The whole
 Claude Code agent runtime -- Node.js + the `claude` CLI + `claude-agent-sdk` +
 a thin stdio shim -- is **baked into this image** and runs *inside the user's
@@ -74,18 +74,20 @@ kubectl exec -i  <pod> -- /opt/cocola/shim/entrypoint.sh   < request.json
 `--selfcheck` runs an offline probe (no SDK call) and prints one JSON line of
 runtime facts; used by the verification script.
 
-## Persistence (ADR-0008 dual volume)
+## Persistence
 
 Two volumes are mounted by the provider:
 
-| Mount in container     | Volume          | Tier | Survives                |
-|------------------------|-----------------|------|-------------------------|
-| `/home/cocola/.claude` | per-user (T2)   | T2   | cross-session, hibernate|
-| `/workspace`           | per-session(T1b)| T1b  | hibernate, cleaned at session end |
+| Mount in container     | Volume            | Survives                          |
+|------------------------|-------------------|-----------------------------------|
+| `/workspace`           | per-session, RW   | hibernate, cleaned at session end |
+| `/home/cocola/.claude` | per-session, RW   | hibernate, cleaned at session end |
+| `/data/plugins`        | shared, read-only | platform-managed                  |
 
-`CLAUDE_CONFIG_DIR=/home/cocola/.claude` so memory/sessions/projects persist on
-the per-user volume; `--resume <session_id>` rebuilds the brain from that
-on-disk session (no RAM snapshot needed).
+`CLAUDE_CONFIG_DIR=/home/cocola/.claude` so Claude Code memory/sessions/projects
+are isolated per cocola session without appearing in `/workspace` file listings.
+`--resume <session_id>` rebuilds the brain from that on-disk session (no RAM
+snapshot needed).
 
 ## Build
 
@@ -100,7 +102,7 @@ docker build -t cocola/sandbox-runtime:dev deploy/sandbox-runtime
 ## Verify (local Docker / runc; same body is the future gVisor spike)
 
 ```bash
-# build + offline selfcheck + dual-volume persistence (no gateway needed)
+# build + offline selfcheck + session-workspace persistence (no gateway needed)
 SKIP_QUERY=1 scripts/sandbox-runtime-verify.sh
 
 # full run incl. a live model turn through the gateway

@@ -5,6 +5,27 @@
 - Deciders: @wangjiahui
 - Depends on: ADR-0009 (runtime runs inside each user's sandbox)
 
+## 2026-07-04 amendment: session workspace owns mutable sandbox state
+
+The original version of this ADR used a per-user writable volume plus a
+per-session workspace volume. That model has been superseded for the current
+OpenSandbox runtime:
+
+- `/data/userdata/<userID>` is no longer mounted.
+- `/home/cocola/.claude` is no longer a per-user mount; it is now session-local.
+- `CLAUDE_CONFIG_DIR` and `ANTHROPIC_CONFIG_DIR` point to
+  `/home/cocola/.claude`, backed by the same session storage unit as
+  `/workspace`.
+- Mutable sandbox/session state is split into user-visible `/workspace` and
+  hidden session-local `/home/cocola/.claude`, both backed by
+  `cocola-session-<sessionID>`.
+- `/data/plugins` remains the shared read-only platform mount.
+
+Reason: each cocola session needs independent Claude Code config/state, while
+user-facing workspace listings should not expose `.claude`. Historical sections
+below describe the earlier dual-volume model and should be read as background,
+not as the active container path contract.
+
 ## Context
 
 ADR-0009 moves the Claude Code runtime *inside* each user's sandbox (Route A).
