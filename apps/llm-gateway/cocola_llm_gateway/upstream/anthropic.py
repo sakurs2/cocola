@@ -18,10 +18,12 @@ from collections.abc import AsyncIterator
 from dataclasses import dataclass
 
 import httpx
-from cocola_common import ErrorCode
+from cocola_common import ErrorCode, get_logger
 
 from cocola_llm_gateway.types import ChatRequest, StreamEvent, StreamEventType, Usage
 from cocola_llm_gateway.upstream.errors import UpstreamError
+
+log = get_logger("cocola.llm-gateway.upstream.anthropic")
 
 
 @dataclass
@@ -60,6 +62,7 @@ def _build_payload(req: ChatRequest, *, stream: bool) -> dict:
             # verbatim; otherwise fall back to the plain text content.
             content: object = m.content_blocks if m.content_blocks is not None else m.content
             msgs.append({"role": m.role, "content": content})
+    msgs = _normalize_tool_result_order(msgs)
 
     payload: dict = {
         "model": req.model,
@@ -82,6 +85,198 @@ def _build_payload(req: ChatRequest, *, stream: bool) -> dict:
     if req.params.tool_choice is not None:
         payload["tool_choice"] = req.params.tool_choice
     return payload
+
+
+def _normalize_tool_result_order(msgs: list[dict]) -> list[dict]:
+    """Make Anthropic-compatible relays happy with Claude Code tool turns.
+
+    Some relays enforce that the user message immediately after an assistant
+    `tool_use` starts with the matching `tool_result` block(s). Claude Code may
+    include text reminders in that same user message; official clients tolerate
+    this poorly across providers. We repair the transcript by moving matching
+    tool_result blocks to the required location. If a result is missing entirely,
+    insert a short error result so the model can continue instead of the relay
+    rejecting the whole request with a 400.
+    """
+    out = [dict(m) for m in msgs]
+    idx = 0
+    while idx < len(out):
+        msg = out[idx]
+        if msg.get("role") != "assistant":
+            idx += 1
+            continue
+        pending = _tool_use_ids(msg.get("content"))
+        if not pending:
+            idx += 1
+            continue
+        results = _complete_tool_results(_take_tool_results_after(out, idx + 1, pending), pending)
+
+        if idx + 1 < len(out) and out[idx + 1].get("role") == "user":
+            remaining = _content_as_blocks(out[idx + 1].get("content"))
+            out[idx + 1]["content"] = results
+            if remaining:
+                out.insert(idx + 2, {"role": "user", "content": remaining})
+        else:
+            out.insert(idx + 1, {"role": "user", "content": results})
+        idx += 2
+    return out
+
+
+def _tool_use_ids(content: object) -> list[str]:
+    if not isinstance(content, list):
+        return []
+    ids: list[str] = []
+    for block in content:
+        if isinstance(block, dict) and block.get("type") == "tool_use":
+            bid = str(block.get("id", "")).strip()
+            if bid:
+                ids.append(bid)
+    return ids
+
+
+def _take_tool_results_after(out: list[dict], start: int, pending_ids: list[str]) -> list[dict]:
+    pending = set(pending_ids)
+    found: dict[str, dict] = {}
+    j = start
+    while j < len(out):
+        msg = out[j]
+        content = msg.get("content")
+        if msg.get("role") != "user" or not isinstance(content, list):
+            j += 1
+            continue
+
+        changed = False
+        rest: list[object] = []
+        for block in content:
+            tool_use_id = _tool_result_id(block)
+            if tool_use_id in pending and tool_use_id not in found:
+                found[tool_use_id] = block
+                changed = True
+            else:
+                rest.append(block)
+
+        if not changed:
+            j += 1
+            continue
+        if rest or j == start:
+            msg["content"] = rest
+            j += 1
+        else:
+            del out[j]
+
+    return [found[tool_use_id] for tool_use_id in pending_ids if tool_use_id in found]
+
+
+def _complete_tool_results(results: list[dict], pending_ids: list[str]) -> list[dict]:
+    found = {_tool_result_id(block): block for block in results}
+    return [
+        found.get(tool_use_id) or _missing_tool_result(tool_use_id) for tool_use_id in pending_ids
+    ]
+
+
+def _tool_result_id(block: object) -> str:
+    if not isinstance(block, dict) or block.get("type") != "tool_result":
+        return ""
+    return str(block.get("tool_use_id", "")).strip()
+
+
+def _content_as_blocks(content: object) -> list[object]:
+    if isinstance(content, list):
+        return content
+    if isinstance(content, str) and content:
+        return [{"type": "text", "text": content}]
+    return []
+
+
+def _missing_tool_result(tool_use_id: str) -> dict:
+    return {
+        "type": "tool_result",
+        "tool_use_id": tool_use_id,
+        "content": "Tool result was unavailable in the local transcript.",
+        "is_error": True,
+    }
+
+
+def _tool_turn_violations(messages: object) -> list[dict]:
+    if not isinstance(messages, list):
+        return [{"message_index": -1, "missing_tool_result_ids": ["messages_not_list"]}]
+    violations: list[dict] = []
+    for idx, msg in enumerate(messages):
+        if not isinstance(msg, dict) or msg.get("role") != "assistant":
+            continue
+        tool_use_ids = _tool_use_ids(msg.get("content"))
+        if not tool_use_ids:
+            continue
+        if idx + 1 >= len(messages):
+            violations.append({"message_index": idx, "missing_tool_result_ids": tool_use_ids})
+            continue
+        nxt = messages[idx + 1]
+        content = nxt.get("content") if isinstance(nxt, dict) else None
+        if not isinstance(nxt, dict) or nxt.get("role") != "user" or not isinstance(content, list):
+            violations.append({"message_index": idx, "missing_tool_result_ids": tool_use_ids})
+            continue
+        got = [_tool_result_id(block) for block in content[: len(tool_use_ids)]]
+        missing = [
+            tool_use_id
+            for tool_use_id, result_id in zip(tool_use_ids, got, strict=False)
+            if result_id != tool_use_id
+        ]
+        if len(got) < len(tool_use_ids):
+            missing.extend(tool_use_ids[len(got) :])
+        if missing:
+            violations.append({"message_index": idx, "missing_tool_result_ids": missing})
+    return violations
+
+
+def _tool_payload_summary(messages: object) -> list[dict]:
+    if not isinstance(messages, list):
+        return []
+    summary: list[dict] = []
+    for idx, msg in enumerate(messages):
+        if not isinstance(msg, dict):
+            summary.append({"index": idx, "role": "unknown", "content": "not_object"})
+            continue
+        content = msg.get("content")
+        blocks = content if isinstance(content, list) else []
+        summary.append(
+            {
+                "index": idx,
+                "role": msg.get("role", ""),
+                "content_shape": "blocks" if isinstance(content, list) else type(content).__name__,
+                "block_types": [
+                    block.get("type", "") for block in blocks if isinstance(block, dict)
+                ],
+                "tool_use_ids": _tool_use_ids(content),
+                "tool_result_ids": [
+                    result_id
+                    for result_id in (_tool_result_id(block) for block in blocks)
+                    if result_id
+                ],
+            }
+        )
+    return summary
+
+
+def _log_tool_payload_if_invalid(payload: dict) -> None:
+    violations = _tool_turn_violations(payload.get("messages"))
+    if not violations:
+        return
+    log.warning(
+        "anthropic payload has tool transcript violations before upstream request",
+        violations=violations,
+        tool_summary=_tool_payload_summary(payload.get("messages")),
+    )
+
+
+def _log_tool_payload_rejected(status_code: int, body: str, payload: dict) -> None:
+    if "tool_use" not in body and "tool_result" not in body:
+        return
+    log.warning(
+        "anthropic upstream rejected tool transcript",
+        status_code=status_code,
+        violations=_tool_turn_violations(payload.get("messages")),
+        tool_summary=_tool_payload_summary(payload.get("messages")),
+    )
 
 
 def _iter_sse_events(lines: list[str]):
@@ -133,10 +328,12 @@ class AnthropicUpstream:
                 yield ev
             return
         payload = _build_payload(req, stream=True)
+        _log_tool_payload_if_invalid(payload)
         try:
             async with self._client.stream("POST", "/v1/messages", json=payload) as resp:
                 if resp.status_code >= 400:
                     body = (await resp.aread()).decode(errors="replace")
+                    _log_tool_payload_rejected(resp.status_code, body, payload)
                     yield StreamEvent(
                         StreamEventType.ERROR,
                         error=f"upstream {resp.status_code}: {body[:500]}",
@@ -163,6 +360,7 @@ class AnthropicUpstream:
         through the identical reconstruction logic -- no codec change needed.
         """
         payload = _build_payload(req, stream=False)
+        _log_tool_payload_if_invalid(payload)
         try:
             resp = await self._client.post("/v1/messages", json=payload)
         except httpx.TimeoutException as e:
@@ -176,6 +374,7 @@ class AnthropicUpstream:
 
         if resp.status_code >= 400:
             body = resp.text
+            _log_tool_payload_rejected(resp.status_code, body, payload)
             yield StreamEvent(
                 StreamEventType.ERROR,
                 error=f"upstream {resp.status_code}: {body[:500]}",

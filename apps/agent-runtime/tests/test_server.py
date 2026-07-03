@@ -37,6 +37,9 @@ class FakeContext:
     def __init__(self):
         self.written = []
 
+    def invocation_metadata(self):
+        return ()
+
     async def write(self, event):
         self.written.append(event)
 
@@ -73,6 +76,28 @@ class FakeObjectStore:
 
     def put(self, key: str, data: bytes, mime: str) -> None:
         self.puts[key] = (data, mime)
+
+
+class FakeSessionMap:
+    def __init__(self, *, fail_delete: bool = False):
+        self.deleted = []
+        self.fail_delete = fail_delete
+
+    async def get(self, session_id: str):
+        return None
+
+    async def put(
+        self, session_id: str, claude_session_id: str, *, user_id: str = "", sandbox_id: str = ""
+    ):
+        return None
+
+    async def delete(self, session_id: str):
+        self.deleted.append(session_id)
+        if self.fail_delete:
+            raise RuntimeError("delete failed")
+
+    async def aclose(self):
+        return None
 
 
 class OutputWritingProvider:
@@ -168,6 +193,32 @@ async def test_query_maps_request_fields_to_options():
     o = prov.seen_options
     assert o.user_id == "emp-9" and o.session_id == "sess-7"
     assert o.sandbox_id == "box-1" and o.max_turns == 5
+
+
+async def test_release_session_calls_binder_and_session_map():
+    binder = StaticSandboxBinder()
+    session_map = FakeSessionMap()
+
+    await AgentRuntimeServicer(
+        ListProvider([]),
+        binder=binder,
+        session_map=session_map,
+    ).ReleaseSession(FakeRequest(session_id="sess-7"), FakeContext())
+
+    assert binder.released == ["sess-7"]
+    assert session_map.deleted == ["sess-7"]
+
+
+async def test_release_session_without_binder_succeeds_and_delete_failure_is_best_effort():
+    session_map = FakeSessionMap(fail_delete=True)
+
+    resp = await AgentRuntimeServicer(
+        ListProvider([]),
+        session_map=session_map,
+    ).ReleaseSession(FakeRequest(session_id="sess-8"), FakeContext())
+
+    assert resp is not None
+    assert session_map.deleted == ["sess-8"]
 
 
 async def test_query_publishes_outputs_artifacts():

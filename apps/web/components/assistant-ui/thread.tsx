@@ -66,7 +66,7 @@ export const Thread: FC = () => {
         {/* Docked composer, only while a conversation is in progress. On the
             empty state the composer lives centered inside ThreadWelcome. */}
         <ThreadPrimitive.If empty={false}>
-          <div className="sticky bottom-0 mt-3 flex w-full max-w-[var(--thread-max-width)] flex-col items-center justify-end rounded-t-lg bg-background pb-4">
+          <div className="sticky bottom-0 z-30 mt-3 flex w-full max-w-[var(--thread-max-width)] flex-col items-center justify-end rounded-t-lg bg-background pt-3 pb-4 shadow-[0_-18px_28px_hsl(var(--background))]">
             <ScrollToBottom />
             <Composer />
           </div>
@@ -148,7 +148,7 @@ const ThreadWelcome: FC = () => {
 };
 
 const Composer: FC = () => (
-  <ComposerPrimitive.Root className="flex w-full flex-col rounded-[1.5rem] border border-input bg-card px-3 py-2 shadow-sm transition-colors focus-within:border-ring">
+  <ComposerPrimitive.Root className="relative z-10 flex w-full flex-col rounded-[1.5rem] border border-input bg-card px-3 py-2 shadow-lg transition-colors focus-within:border-ring">
     <ComposerAttachments />
     <ComposerPrimitive.Input
       rows={1}
@@ -359,30 +359,39 @@ const UserMessage: FC = () => (
 const AssistantMessage: FC = () => (
   <MessagePrimitive.Root className="relative grid w-full max-w-[var(--thread-max-width)] grid-cols-[auto_1fr] grid-rows-[auto_1fr] py-3">
     <div className="col-span-2 col-start-1 row-start-1 my-1.5 max-w-full break-words leading-7 text-foreground">
-      <AssistantMessageHeader />
-      <MessagePrimitive.Parts
-        components={{
-          Text: MarkdownText,
-          Reasoning: ReasoningPart,
-          File: ArtifactFilePart,
-          tools: { Fallback: ToolFallback },
-        }}
-      />
-      {/* Loading affordance: the runtime pushes an EMPTY assistant message the
-          moment a turn starts and only then streams text into it. Until the
-          first token lands the message has no content, so a "hasContent=false"
-          message that is still the last one is exactly the in-flight state.
-          Show typing dots there so the user sees the model is working. */}
-      <MessagePrimitive.If hasContent={false}>
+      <div className="relative">
         <MessagePrimitive.If last>
-          <TypingIndicator />
+          <ThreadPrimitive.If running>
+            <span className="aui-answer-border-beam" aria-hidden="true" />
+          </ThreadPrimitive.If>
         </MessagePrimitive.If>
-      </MessagePrimitive.If>
-      <MessagePrimitive.If last>
-        <ThreadPrimitive.If running>
-          <AnsweringIndicator />
-        </ThreadPrimitive.If>
-      </MessagePrimitive.If>
+        <div className="relative z-[1]">
+          <AssistantMessageHeader />
+          <MessagePrimitive.Parts
+            components={{
+              Text: MarkdownText,
+              Reasoning: ReasoningPart,
+              File: ArtifactFilePart,
+              tools: { Fallback: ToolFallback },
+            }}
+          />
+          {/* Loading affordance: the runtime pushes an EMPTY assistant message the
+              moment a turn starts and only then streams text into it. Until the
+              first token lands the message has no content, so a "hasContent=false"
+              message that is still the last one is exactly the in-flight state.
+              Show typing dots there so the user sees the model is working. */}
+          <MessagePrimitive.If hasContent={false}>
+            <MessagePrimitive.If last>
+              <TypingIndicator />
+            </MessagePrimitive.If>
+          </MessagePrimitive.If>
+          <MessagePrimitive.If last>
+            <ThreadPrimitive.If running>
+              <AnsweringIndicator />
+            </ThreadPrimitive.If>
+          </MessagePrimitive.If>
+        </div>
+      </div>
     </div>
     <AssistantActionBar />
   </MessagePrimitive.Root>

@@ -73,6 +73,39 @@ func TestMemoryOwnershipGate(t *testing.T) {
 	}
 }
 
+func TestMemoryRenameAndDeleteConversation(t *testing.T) {
+	ctx := context.Background()
+	m := NewMemory()
+	now := time.Now()
+	must(t, m.UpsertConversation(ctx, Conversation{ID: "a", UserID: "u1", Title: "old", CreatedAt: now, UpdatedAt: now}))
+	must(t, m.InsertMessage(ctx, Message{ID: "m1", ConversationID: "a", Role: "user", CreatedAt: now}))
+	must(t, m.UpsertArtifact(ctx, Artifact{ID: "art-1", ConversationID: "a", UserID: "u1"}))
+
+	renamed, err := m.RenameConversation(ctx, "a", "u1", "new")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if renamed.Title != "new" {
+		t.Fatalf("title = %q", renamed.Title)
+	}
+	if _, err := m.RenameConversation(ctx, "a", "u2", "bad"); err != ErrNotFound {
+		t.Fatalf("non-owner rename should get ErrNotFound, got %v", err)
+	}
+
+	if err := m.DeleteConversation(ctx, "a", "u1"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := m.GetConversation(ctx, "a", "u1"); err != ErrNotFound {
+		t.Fatalf("deleted conversation should be gone, got %v", err)
+	}
+	if _, err := m.GetMessages(ctx, "a", "u1"); err != ErrNotFound {
+		t.Fatalf("deleted messages should be inaccessible, got %v", err)
+	}
+	if _, err := m.GetArtifact(ctx, "a", "art-1", "u1"); err != ErrNotFound {
+		t.Fatalf("deleted artifact metadata should be inaccessible, got %v", err)
+	}
+}
+
 func must(t *testing.T, err error) {
 	t.Helper()
 	if err != nil {

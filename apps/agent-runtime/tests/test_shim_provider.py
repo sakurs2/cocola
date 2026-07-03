@@ -96,6 +96,35 @@ async def test_session_id_is_reused_as_resume_next_turn():
     assert second_req["resume"] == "sess-1"
 
 
+async def test_stored_resume_is_dropped_when_sandbox_changes():
+    def stream_handler(sandbox_id, cmd, stdin):
+        req = json.loads(stdin)
+        assert "resume" not in req
+        yield ExecChunk(
+            kind="stdout",
+            data=_ndjson(
+                {"type": "text", "text": "fresh sandbox"},
+                {"type": "done", "session_id": "sess-new"},
+            ),
+        )
+        yield ExecChunk(kind="exit", exit_code=0)
+
+    smap = MemorySessionMap()
+    await smap.put("S1", "sess-old", user_id="U1", sandbox_id="box-old")
+    execu = StaticSandboxExecutor(stream_handler=stream_handler)
+    provider = InSandboxShimProvider(execu, session_map=smap)
+    opts = AgentOptions(user_id="U1", session_id="S1", sandbox_id="box-new")
+
+    events = await _drain(provider, "continue", opts)
+
+    assert [e.kind for e in events] == ["text", "done"]
+    assert events[0].data["text"] == "fresh sandbox"
+    binding = await smap.get_binding("S1")
+    assert binding is not None
+    assert binding.claude_session_id == "sess-new"
+    assert binding.sandbox_id == "box-new"
+
+
 async def test_model_alias_is_injected_into_exec_env():
     def stream_handler(sandbox_id, cmd, stdin):
         yield ExecChunk(

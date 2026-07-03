@@ -15,11 +15,35 @@ from cocola_llm_gateway.anthropic_codec import (
     to_chat_request,
 )
 from cocola_llm_gateway.types import StreamEvent, StreamEventType, Usage
+from cocola_llm_gateway.upstream.anthropic import _build_payload, _tool_turn_violations
 
 
 async def _events(seq):
     for ev in seq:
         yield ev
+
+
+def _assert_tool_results_immediately_after(payload):
+    assert _tool_turn_violations(payload["messages"]) == []
+    messages = payload["messages"]
+    for idx, message in enumerate(messages):
+        if message["role"] != "assistant" or not isinstance(message["content"], list):
+            continue
+        tool_use_ids = [
+            block["id"]
+            for block in message["content"]
+            if isinstance(block, dict) and block.get("type") == "tool_use"
+        ]
+        if not tool_use_ids:
+            continue
+        next_message = messages[idx + 1]
+        assert next_message["role"] == "user"
+        assert isinstance(next_message["content"], list)
+        assert [
+            block.get("tool_use_id")
+            for block in next_message["content"][: len(tool_use_ids)]
+            if isinstance(block, dict) and block.get("type") == "tool_result"
+        ] == tool_use_ids
 
 
 def test_inbound_preserves_tools_and_tool_result_blocks():
@@ -70,6 +94,174 @@ def test_inbound_preserves_tools_and_tool_result_blocks():
     # plain text message still flattened, no spurious blocks
     assert req.messages[0].content == "weather in NYC?"
     assert req.messages[0].content_blocks is None
+
+
+def test_anthropic_payload_promotes_tool_result_blocks_before_text():
+    body = {
+        "model": "claude-sonnet",
+        "max_tokens": 100,
+        "messages": [
+            {"role": "user", "content": "compile this"},
+            {
+                "role": "assistant",
+                "content": [
+                    {"type": "text", "text": "I'll run the compiler."},
+                    {
+                        "type": "tool_use",
+                        "id": "call_1",
+                        "name": "Bash",
+                        "input": {"command": "cc main.c"},
+                    },
+                ],
+            },
+            {
+                "role": "user",
+                "content": [
+                    {"type": "text", "text": "<system-reminder>continue</system-reminder>"},
+                    {"type": "tool_result", "tool_use_id": "call_1", "content": "ok"},
+                ],
+            },
+        ],
+    }
+    req = to_chat_request(body, resolved_model="real-model")
+
+    payload = _build_payload(req, stream=True)
+
+    _assert_tool_results_immediately_after(payload)
+    assert len(payload["messages"]) == 4
+    user_after_tool = payload["messages"][2]
+    assert user_after_tool["content"][0]["type"] == "tool_result"
+    assert user_after_tool["content"][0]["tool_use_id"] == "call_1"
+    assert len(user_after_tool["content"]) == 1
+    assert payload["messages"][3]["content"] == [
+        {"type": "text", "text": "<system-reminder>continue</system-reminder>"}
+    ]
+
+
+def test_anthropic_payload_moves_late_tool_result_next_to_tool_use():
+    body = {
+        "model": "claude-sonnet",
+        "max_tokens": 100,
+        "messages": [
+            {"role": "user", "content": "compile this"},
+            {
+                "role": "assistant",
+                "content": [
+                    {"type": "text", "text": "I'll run the compiler."},
+                    {
+                        "type": "tool_use",
+                        "id": "call_late",
+                        "name": "Bash",
+                        "input": {"command": "cc main.c"},
+                    },
+                ],
+            },
+            {"role": "user", "content": "continue"},
+            {
+                "role": "user",
+                "content": [
+                    {"type": "tool_result", "tool_use_id": "call_late", "content": "compiled"}
+                ],
+            },
+        ],
+    }
+    req = to_chat_request(body, resolved_model="real-model")
+
+    payload = _build_payload(req, stream=True)
+
+    _assert_tool_results_immediately_after(payload)
+    assert len(payload["messages"]) == 4
+    user_after_tool = payload["messages"][2]
+    assert user_after_tool["content"][0]["type"] == "tool_result"
+    assert user_after_tool["content"][0]["tool_use_id"] == "call_late"
+    assert len(user_after_tool["content"]) == 1
+    assert payload["messages"][3]["content"] == [{"type": "text", "text": "continue"}]
+
+
+def test_anthropic_payload_inserts_missing_tool_result_error():
+    body = {
+        "model": "claude-sonnet",
+        "max_tokens": 100,
+        "messages": [
+            {"role": "user", "content": "compile this"},
+            {
+                "role": "assistant",
+                "content": [
+                    {
+                        "type": "tool_use",
+                        "id": "call_missing",
+                        "name": "Bash",
+                        "input": {"command": "cc main.c"},
+                    }
+                ],
+            },
+            {"role": "user", "content": "what happened?"},
+        ],
+    }
+    req = to_chat_request(body, resolved_model="real-model")
+
+    payload = _build_payload(req, stream=True)
+
+    _assert_tool_results_immediately_after(payload)
+    user_after_tool = payload["messages"][2]
+    assert user_after_tool["content"][0]["type"] == "tool_result"
+    assert user_after_tool["content"][0]["tool_use_id"] == "call_missing"
+    assert user_after_tool["content"][0]["is_error"] is True
+    assert len(user_after_tool["content"]) == 1
+    assert payload["messages"][3]["content"] == [{"type": "text", "text": "what happened?"}]
+
+
+def test_anthropic_payload_completes_partial_multi_tool_results():
+    body = {
+        "model": "claude-sonnet",
+        "max_tokens": 100,
+        "messages": [
+            {"role": "user", "content": "write and compile code"},
+            {
+                "role": "assistant",
+                "content": [
+                    {
+                        "type": "tool_use",
+                        "id": "call_write",
+                        "name": "Write",
+                        "input": {"file_path": "main.c"},
+                    },
+                    {
+                        "type": "tool_use",
+                        "id": "call_compile",
+                        "name": "Bash",
+                        "input": {"command": "cc main.c"},
+                    },
+                    {
+                        "type": "tool_use",
+                        "id": "call_run",
+                        "name": "Bash",
+                        "input": {"command": "./a.out"},
+                    },
+                ],
+            },
+            {
+                "role": "user",
+                "content": [
+                    {"type": "tool_result", "tool_use_id": "call_write", "content": "wrote file"}
+                ],
+            },
+        ],
+    }
+    req = to_chat_request(body, resolved_model="real-model")
+
+    payload = _build_payload(req, stream=True)
+
+    _assert_tool_results_immediately_after(payload)
+    tool_results = payload["messages"][2]["content"]
+    assert [block["tool_use_id"] for block in tool_results] == [
+        "call_write",
+        "call_compile",
+        "call_run",
+    ]
+    assert tool_results[0]["content"] == "wrote file"
+    assert tool_results[1]["is_error"] is True
+    assert tool_results[2]["is_error"] is True
 
 
 def _tool_use_stream():

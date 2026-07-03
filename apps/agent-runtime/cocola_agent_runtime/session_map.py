@@ -30,6 +30,7 @@ lives. Two implementations:
 from __future__ import annotations
 
 import asyncio
+from dataclasses import dataclass
 from typing import Protocol, runtime_checkable
 
 from cocola_common import get_logger
@@ -38,12 +39,21 @@ from psycopg_pool import AsyncConnectionPool
 log = get_logger("cocola.agent-runtime.session-map")
 
 
+@dataclass(frozen=True)
+class SessionBinding:
+    claude_session_id: str
+    sandbox_id: str = ""
+
+
 @runtime_checkable
 class SessionMap(Protocol):
     """session_id -> claude_session_id index for --resume continuation."""
 
     async def get(self, session_id: str) -> str | None:
         """Return the claude_session_id to resume, or None if unknown."""
+
+    async def get_binding(self, session_id: str) -> SessionBinding | None:
+        """Return the stored resume binding, including the sandbox it belongs to."""
 
     async def put(
         self, session_id: str, claude_session_id: str, *, user_id: str = "", sandbox_id: str = ""
@@ -61,16 +71,23 @@ class MemorySessionMap:
     """In-process index; resume works within one process lifetime only."""
 
     def __init__(self) -> None:
-        self._d: dict[str, str] = {}
+        self._d: dict[str, SessionBinding] = {}
 
     async def get(self, session_id: str) -> str | None:
+        binding = await self.get_binding(session_id)
+        return binding.claude_session_id if binding else None
+
+    async def get_binding(self, session_id: str) -> SessionBinding | None:
         return self._d.get(session_id)
 
     async def put(
         self, session_id: str, claude_session_id: str, *, user_id: str = "", sandbox_id: str = ""
     ) -> None:
         if claude_session_id:
-            self._d[session_id] = claude_session_id
+            self._d[session_id] = SessionBinding(
+                claude_session_id=claude_session_id,
+                sandbox_id=sandbox_id,
+            )
 
     async def delete(self, session_id: str) -> None:
         self._d.pop(session_id, None)
@@ -79,7 +96,7 @@ class MemorySessionMap:
         return None
 
 
-_GET = "SELECT claude_session_id FROM session_map WHERE session_id = %s"
+_GET = "SELECT claude_session_id, sandbox_id FROM session_map WHERE session_id = %s"
 
 _PUT = """
 INSERT INTO session_map (session_id, claude_session_id, user_id, sandbox_id, updated_at)
@@ -115,6 +132,10 @@ class PostgresSessionMap:
                 self._opened = True
 
     async def get(self, session_id: str) -> str | None:
+        binding = await self.get_binding(session_id)
+        return binding.claude_session_id if binding else None
+
+    async def get_binding(self, session_id: str) -> SessionBinding | None:
         await self._ready()
         async with self._pool.connection() as conn:
             cur = await conn.execute(_GET, (session_id,))
@@ -122,7 +143,9 @@ class PostgresSessionMap:
         if not row:
             return None
         cid = row[0]
-        return cid or None
+        if not cid:
+            return None
+        return SessionBinding(claude_session_id=cid, sandbox_id=row[1] or "")
 
     async def put(
         self, session_id: str, claude_session_id: str, *, user_id: str = "", sandbox_id: str = ""

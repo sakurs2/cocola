@@ -70,6 +70,11 @@ func (f *fakeProvider) ReadFile(ctx context.Context, sid, path string) ([]byte, 
 	return nil, nil
 }
 func (f *fakeProvider) Health(ctx context.Context, sid string) (*provider.HealthStatus, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if f.state[sid] == "" || f.state[sid] == "destroyed" {
+		return nil, fs.ErrNotExist
+	}
 	return &provider.HealthStatus{Healthy: true}, nil
 }
 
@@ -279,6 +284,38 @@ func TestAcquireRecreatesWhenPausedSandboxDisappeared(t *testing.T) {
 	}
 	if out.Reused {
 		t.Fatal("expected fresh sandbox after stale paused binding, got reused")
+	}
+	if out.Sandbox.ID == sb1.ID {
+		t.Fatalf("expected new sandbox id, got stale %s", out.Sandbox.ID)
+	}
+	if got := fp.creates.Load(); got != 2 {
+		t.Fatalf("expected 2 creates, got %d", got)
+	}
+	if sid, err := b.kv.Get(ctx, convKey(spec.SessionID)); err != nil || sid != out.Sandbox.ID {
+		t.Fatalf("forward binding = %q, %v; want %q", sid, err, out.Sandbox.ID)
+	}
+}
+
+func TestAcquireRecreatesWhenActiveSandboxDisappeared(t *testing.T) {
+	b, fp := newTestBinder(t)
+	ctx := context.Background()
+	spec := AcquireSpec{SessionID: "active-gone", UserID: "u"}
+
+	sb1, err := b.Acquire(ctx, spec)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	fp.mu.Lock()
+	fp.state[sb1.ID] = "destroyed"
+	fp.mu.Unlock()
+
+	out, err := b.AcquireWithOutcome(ctx, spec)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if out.Reused {
+		t.Fatal("expected fresh sandbox after stale active binding, got reused")
 	}
 	if out.Sandbox.ID == sb1.ID {
 		t.Fatalf("expected new sandbox id, got stale %s", out.Sandbox.ID)

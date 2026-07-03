@@ -43,6 +43,7 @@ from cocola_common import get_logger
 from cocola_agent_runtime.agent_provider import AgentEvent, AgentOptions, AgentProvider
 from cocola_agent_runtime.objstore import Fetcher
 from cocola_agent_runtime.sandbox_binder import SandboxBinder, SandboxExecutor
+from cocola_agent_runtime.session_map import SessionMap
 from cocola_agent_runtime.skill_loader import SkillCatalog, apply_skills_to_options
 
 log = get_logger("cocola.agent-runtime.server")
@@ -243,10 +244,12 @@ class AgentRuntimeServicer(pb_grpc.AgentRuntimeServiceServicer):
         binder: SandboxBinder | None = None,
         executor: SandboxExecutor | None = None,
         objstore: Fetcher | None = None,
+        session_map: SessionMap | None = None,
     ) -> None:
         self._provider = provider
         self._skills = skills
         self._binder = binder
+        self._session_map = session_map
         # The executor writes user-uploaded attachments into the bound sandbox
         # before the agent runs (push model, ADR-0017). Optional: when it is not
         # wired, attachments are dropped with a warning rather than failing the
@@ -258,6 +261,23 @@ class AgentRuntimeServicer(pb_grpc.AgentRuntimeServiceServicer):
         # before provisioning. Optional: unset => a key-only attachment surfaces
         # as a clean provisioning error rather than a silent empty file.
         self._objstore = objstore
+
+    async def ReleaseSession(self, request, context):  # noqa: N802 - gRPC-generated name
+        """Best-effort release of runtime state bound to a conversation."""
+        session_id = request.session_id
+        if not session_id:
+            return pb.ReleaseSessionResponse()
+        if self._binder is not None:
+            try:
+                await self._binder.release(session_id=session_id)
+            except Exception as exc:  # noqa: BLE001 - delete should not fail on cleanup
+                log.warning("sandbox release failed", session_id=session_id, error=str(exc))
+        if self._session_map is not None:
+            try:
+                await self._session_map.delete(session_id)
+            except Exception as exc:  # noqa: BLE001 - stale resume cleanup is best-effort
+                log.warning("session map delete failed", session_id=session_id, error=str(exc))
+        return pb.ReleaseSessionResponse()
 
     async def Query(self, request, context):  # noqa: N802 - gRPC-generated name
         """Server-streaming RPC: run one agent turn, stream events back.

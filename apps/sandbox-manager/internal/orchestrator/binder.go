@@ -254,6 +254,18 @@ func (b *Binder) lookup(ctx context.Context, sessionID string) (*provider.Sandbo
 			return nil, false, err
 		}
 	}
+	if _, err := b.p.Health(ctx, sid); err != nil {
+		if errors.Is(err, fs.ErrNotExist) {
+			// The binding is durable but the provider has already lost the
+			// sandbox. Drop the stale mapping and let Acquire create a fresh
+			// sandbox for this session.
+			if unbindErr := b.unbind(ctx, m.SessionID, m.SandboxID); unbindErr != nil {
+				return nil, false, unbindErr
+			}
+			return nil, false, nil
+		}
+		return nil, false, fmt.Errorf("health sandbox: %w", err)
+	}
 	return &provider.Sandbox{
 		ID:        m.SandboxID,
 		UserID:    m.UserID,

@@ -184,7 +184,7 @@ class HealthResponse(_message.Message):
     DETAIL_FIELD_NUMBER: _ClassVar[int]
     healthy: bool
     detail: str
-    def __init__(self, healthy: _Optional[bool] = ..., detail: _Optional[str] = ...) -> None: ...
+    def __init__(self, healthy: bool = ..., detail: _Optional[str] = ...) -> None: ...
 
 class AcquireRequest(_message.Message):
     __slots__ = ("session_id", "user_id", "image", "env")
@@ -211,7 +211,7 @@ class AcquireResponse(_message.Message):
     REUSED_FIELD_NUMBER: _ClassVar[int]
     sandbox: Sandbox
     reused: bool
-    def __init__(self, sandbox: _Optional[_Union[Sandbox, _Mapping]] = ..., reused: _Optional[bool] = ...) -> None: ...
+    def __init__(self, sandbox: _Optional[_Union[Sandbox, _Mapping]] = ..., reused: bool = ...) -> None: ...
 
 class HeartbeatRequest(_message.Message):
     __slots__ = ("sandbox_id",)

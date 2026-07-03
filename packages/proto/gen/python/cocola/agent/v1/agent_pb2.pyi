@@ -50,3 +50,15 @@ class AgentEvent(_message.Message):
     kind: str
     data: _containers.ScalarMap[str, str]
     def __init__(self, kind: _Optional[str] = ..., data: _Optional[_Mapping[str, str]] = ...) -> None: ...
+
+class ReleaseSessionRequest(_message.Message):
+    __slots__ = ("user_id", "session_id")
+    USER_ID_FIELD_NUMBER: _ClassVar[int]
+    SESSION_ID_FIELD_NUMBER: _ClassVar[int]
+    user_id: str
+    session_id: str
+    def __init__(self, user_id: _Optional[str] = ..., session_id: _Optional[str] = ...) -> None: ...
+
+class ReleaseSessionResponse(_message.Message):
+    __slots__ = ()
+    def __init__(self) -> None: ...

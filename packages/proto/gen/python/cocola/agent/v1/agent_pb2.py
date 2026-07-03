@@ -24,7 +24,7 @@ _sym_db = _symbol_database.Default()
 
 
 
-DESCRIPTOR = _descriptor_pool.Default().AddSerializedFile(b'\n\x1b\x63ocola/agent/v1/agent.proto\x12\x0f\x63ocola.agent.v1\"\x9c\x01\n\x0cQueryRequest\x12\x0f\n\x07user_id\x18\x01 \x01(\t\x12\x12\n\nsession_id\x18\x02 \x01(\t\x12\x0e\n\x06prompt\x18\x03 \x01(\t\x12\x12\n\nsandbox_id\x18\x04 \x01(\t\x12\x11\n\tmax_turns\x18\x05 \x01(\x05\x12\x30\n\x0b\x61ttachments\x18\x06 \x03(\x0b\x32\x1b.cocola.agent.v1.Attachment\"\\\n\nAttachment\x12\x10\n\x08\x66ilename\x18\x01 \x01(\t\x12\x0f\n\x07\x63ontent\x18\x02 \x01(\x0c\x12\x0c\n\x04mime\x18\x03 \x01(\t\x12\x0f\n\x07oss_key\x18\x04 \x01(\t\x12\x0c\n\x04size\x18\x05 \x01(\x03\"|\n\nAgentEvent\x12\x0c\n\x04kind\x18\x01 \x01(\t\x12\x33\n\x04\x64\x61ta\x18\x02 \x03(\x0b\x32%.cocola.agent.v1.AgentEvent.DataEntry\x1a+\n\tDataEntry\x12\x0b\n\x03key\x18\x01 \x01(\t\x12\r\n\x05value\x18\x02 \x01(\t:\x02\x38\x01\x32\\\n\x13\x41gentRuntimeService\x12\x45\n\x05Query\x12\x1d.cocola.agent.v1.QueryRequest\x1a\x1b.cocola.agent.v1.AgentEvent0\x01\x42PZNgithub.com/cocola-project/cocola/packages/proto/gen/go/cocola/agent/v1;agentv1b\x06proto3')
+DESCRIPTOR = _descriptor_pool.Default().AddSerializedFile(b'\n\x1b\x63ocola/agent/v1/agent.proto\x12\x0f\x63ocola.agent.v1\"\x9c\x01\n\x0cQueryRequest\x12\x0f\n\x07user_id\x18\x01 \x01(\t\x12\x12\n\nsession_id\x18\x02 \x01(\t\x12\x0e\n\x06prompt\x18\x03 \x01(\t\x12\x12\n\nsandbox_id\x18\x04 \x01(\t\x12\x11\n\tmax_turns\x18\x05 \x01(\x05\x12\x30\n\x0b\x61ttachments\x18\x06 \x03(\x0b\x32\x1b.cocola.agent.v1.Attachment\"\\\n\nAttachment\x12\x10\n\x08\x66ilename\x18\x01 \x01(\t\x12\x0f\n\x07\x63ontent\x18\x02 \x01(\x0c\x12\x0c\n\x04mime\x18\x03 \x01(\t\x12\x0f\n\x07oss_key\x18\x04 \x01(\t\x12\x0c\n\x04size\x18\x05 \x01(\x03\"|\n\nAgentEvent\x12\x0c\n\x04kind\x18\x01 \x01(\t\x12\x33\n\x04\x64\x61ta\x18\x02 \x03(\x0b\x32%.cocola.agent.v1.AgentEvent.DataEntry\x1a+\n\tDataEntry\x12\x0b\n\x03key\x18\x01 \x01(\t\x12\r\n\x05value\x18\x02 \x01(\t:\x02\x38\x01\"<\n\x15ReleaseSessionRequest\x12\x0f\n\x07user_id\x18\x01 \x01(\t\x12\x12\n\nsession_id\x18\x02 \x01(\t\"\x18\n\x16ReleaseSessionResponse2\xbf\x01\n\x13\x41gentRuntimeService\x12\x45\n\x05Query\x12\x1d.cocola.agent.v1.QueryRequest\x1a\x1b.cocola.agent.v1.AgentEvent0\x01\x12\x61\n\x0eReleaseSession\x12&.cocola.agent.v1.ReleaseSessionRequest\x1a\'.cocola.agent.v1.ReleaseSessionResponseBPZNgithub.com/cocola-project/cocola/packages/proto/gen/go/cocola/agent/v1;agentv1b\x06proto3')
 
 _globals = globals()
 _builder.BuildMessageAndEnumDescriptors(DESCRIPTOR, _globals)
@@ -42,6 +42,10 @@ if not _descriptor._USE_C_DESCRIPTORS:
   _globals['_AGENTEVENT']._serialized_end=425
   _globals['_AGENTEVENT_DATAENTRY']._serialized_start=382
   _globals['_AGENTEVENT_DATAENTRY']._serialized_end=425
-  _globals['_AGENTRUNTIMESERVICE']._serialized_start=427
-  _globals['_AGENTRUNTIMESERVICE']._serialized_end=519
+  _globals['_RELEASESESSIONREQUEST']._serialized_start=427
+  _globals['_RELEASESESSIONREQUEST']._serialized_end=487
+  _globals['_RELEASESESSIONRESPONSE']._serialized_start=489
+  _globals['_RELEASESESSIONRESPONSE']._serialized_end=513
+  _globals['_AGENTRUNTIMESERVICE']._serialized_start=516
+  _globals['_AGENTRUNTIMESERVICE']._serialized_end=707
 # @@protoc_insertion_point(module_scope)

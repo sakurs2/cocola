@@ -5,7 +5,7 @@ import warnings
 
 from cocola.sandbox.v1 import sandbox_pb2 as cocola_dot_sandbox_dot_v1_dot_sandbox__pb2
 
-GRPC_GENERATED_VERSION = '1.81.0'
+GRPC_GENERATED_VERSION = '1.80.0'
 GRPC_VERSION = grpc.__version__
 _version_not_supported = False
 
@@ -25,7 +25,7 @@ if _version_not_supported:
     )
 
 
-class SandboxServiceStub:
+class SandboxServiceStub(object):
     """SandboxService is implemented by sandbox-manager and called by agent-runtime.
 
     M1 fills in the full lifecycle (Exec streaming, file IO, pause/resume) on top
@@ -97,7 +97,7 @@ class SandboxServiceStub:
                 _registered_method=True)
 
 
-class SandboxServiceServicer:
+class SandboxServiceServicer(object):
     """SandboxService is implemented by sandbox-manager and called by agent-runtime.
 
     M1 fills in the full lifecycle (Exec streaming, file IO, pause/resume) on top
@@ -247,7 +247,7 @@ def add_SandboxServiceServicer_to_server(servicer, server):
 
 
  # This class is part of an EXPERIMENTAL API.
-class SandboxService:
+class SandboxService(object):
     """SandboxService is implemented by sandbox-manager and called by agent-runtime.
 
     M1 fills in the full lifecycle (Exec streaming, file IO, pause/resume) on top

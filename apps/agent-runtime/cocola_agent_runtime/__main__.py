@@ -48,6 +48,7 @@ from cocola_agent_runtime.sandbox_binder import (
     SandboxManagerBinder,
     SandboxManagerExecutor,
 )
+from cocola_agent_runtime.session_map import SessionMap
 from cocola_agent_runtime.server import AgentRuntimeServicer
 from cocola_agent_runtime.skill_loader import AdminSkillCatalog, SkillCatalog
 
@@ -74,7 +75,9 @@ def _build_session_map():
     return MemorySessionMap()
 
 
-def _build_provider(executor: SandboxExecutor | None) -> AgentProvider:
+def _build_provider(
+    executor: SandboxExecutor | None, session_map: SessionMap | None
+) -> AgentProvider:
     # Route A (ADR-0009) is the only real path: run the WHOLE Claude Code brain
     # inside the user's own sandbox via the in-sandbox stdio shim, so agent-runtime
     # is a pure control-plane router. Route A needs a reachable sandbox to run the
@@ -94,7 +97,8 @@ def _build_provider(executor: SandboxExecutor | None) -> AgentProvider:
 
     from cocola_agent_runtime.shim_provider import InSandboxShimProvider
 
-    session_map = _build_session_map()
+    if session_map is None:
+        session_map = _build_session_map()
     log.info("using InSandboxShimProvider (Route A: brain in sandbox)")
     return InSandboxShimProvider(executor, session_map=session_map)
 
@@ -173,12 +177,14 @@ async def serve() -> None:
     addr = f"{host}:{port}"
 
     executor = _build_executor()
+    session_map = _build_session_map() if executor is not None else None
     servicer = AgentRuntimeServicer(
-        _build_provider(executor),
+        _build_provider(executor, session_map),
         skills=_build_skill_catalog(),
         binder=_build_binder(),
         executor=executor,
         objstore=fetcher_from_env(),
+        session_map=session_map,
     )
     # Observability: RED metrics for every RPC. agent-runtime has no HTTP server
     # of its own, so unlike the llm-gateway it exposes /metrics on a dedicated

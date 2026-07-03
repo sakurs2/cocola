@@ -86,6 +86,21 @@ func (p *Postgres) ListConversations(ctx context.Context, userID string) ([]Conv
 	return out, rows.Err()
 }
 
+func (p *Postgres) GetConversation(ctx context.Context, convID, userID string) (Conversation, error) {
+	const q = `SELECT id, user_id, tenant_id, title, created_at, updated_at
+		FROM conversations WHERE id = $1 AND user_id = $2`
+	var c Conversation
+	if err := p.pool.QueryRow(ctx, q, convID, userID).Scan(
+		&c.ID, &c.UserID, &c.TenantID, &c.Title, &c.CreatedAt, &c.UpdatedAt,
+	); err != nil {
+		if err == pgx.ErrNoRows {
+			return Conversation{}, ErrNotFound
+		}
+		return Conversation{}, err
+	}
+	return c, nil
+}
+
 func (p *Postgres) GetMessages(ctx context.Context, convID, userID string) ([]Message, error) {
 	// Ownership gate: one round-trip that both checks the owner and pulls rows.
 	// If the conversation is missing or owned by someone else, no rows come back
@@ -124,6 +139,34 @@ func (p *Postgres) GetMessages(ctx context.Context, convID, userID string) ([]Me
 		out = append(out, m)
 	}
 	return out, rows.Err()
+}
+
+func (p *Postgres) RenameConversation(ctx context.Context, convID, userID, title string) (Conversation, error) {
+	const q = `UPDATE conversations SET title = $3
+		WHERE id = $1 AND user_id = $2
+		RETURNING id, user_id, tenant_id, title, created_at, updated_at`
+	var c Conversation
+	if err := p.pool.QueryRow(ctx, q, convID, userID, title).Scan(
+		&c.ID, &c.UserID, &c.TenantID, &c.Title, &c.CreatedAt, &c.UpdatedAt,
+	); err != nil {
+		if err == pgx.ErrNoRows {
+			return Conversation{}, ErrNotFound
+		}
+		return Conversation{}, err
+	}
+	return c, nil
+}
+
+func (p *Postgres) DeleteConversation(ctx context.Context, convID, userID string) error {
+	const q = `DELETE FROM conversations WHERE id = $1 AND user_id = $2`
+	tag, err := p.pool.Exec(ctx, q, convID, userID)
+	if err != nil {
+		return err
+	}
+	if tag.RowsAffected() == 0 {
+		return ErrNotFound
+	}
+	return nil
 }
 
 func (p *Postgres) UpsertArtifact(ctx context.Context, a Artifact) error {

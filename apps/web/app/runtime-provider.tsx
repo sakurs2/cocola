@@ -133,7 +133,11 @@ type CocolaContextValue = {
   conversations: ConversationSummary[];
   refreshConversations: () => void;
   loadConversation: (id: string) => Promise<void>;
+  renameConversation: (id: string, title: string) => Promise<void>;
+  deleteConversation: (id: string) => Promise<void>;
   activeConversationId: string;
+  runningConversationIds: Set<string>;
+  unreadCompletedConversationIds: Set<string>;
   selectedArtifact: ArtifactPreview | null;
   openArtifact: (artifact: ArtifactPreview) => void;
   closeArtifact: () => void;
@@ -323,10 +327,12 @@ export function CocolaRuntimeProvider({ children }: { children: ReactNode }) {
   const [sessionId, setSessionId] = useState(genId);
   const [sandboxes, setSandboxes] = useState<Record<string, SandboxInfo | null>>({});
   const [conversations, setConversations] = useState<ConversationSummary[]>([]);
+  const [unreadCompletedIds, setUnreadCompletedIds] = useState<Set<string>>(() => new Set());
   const [selectedArtifact, setSelectedArtifact] = useState<ArtifactPreview | null>(null);
   const [models, setModels] = useState<ModelOption[]>([DEFAULT_MODEL]);
   const [selectedModelAlias, setSelectedModelAlias] = useState(DEFAULT_MODEL.alias);
   const abortMap = useRef<Map<string, AbortController>>(new Map());
+  const sessionIdRef = useRef(sessionId);
 
   const messages = useMemo(() => convMessages[sessionId] ?? [], [convMessages, sessionId]);
   const isRunning = runningIds.has(sessionId);
@@ -335,6 +341,10 @@ export function CocolaRuntimeProvider({ children }: { children: ReactNode }) {
     () => models.find((m) => m.alias === selectedModelAlias) ?? models[0] ?? DEFAULT_MODEL,
     [models, selectedModelAlias],
   );
+
+  useEffect(() => {
+    sessionIdRef.current = sessionId;
+  }, [sessionId]);
 
   const openArtifact = useCallback((artifact: ArtifactPreview) => {
     setSelectedArtifact(artifact);
@@ -447,6 +457,11 @@ export function CocolaRuntimeProvider({ children }: { children: ReactNode }) {
         };
       });
       setRunning(convId, true);
+      setUnreadCompletedIds((prev) => {
+        const next = new Set(prev);
+        next.delete(convId);
+        return next;
+      });
 
       // Surface the conversation immediately in the sidebar, then reconcile
       // with the server's persisted title/updated_at when the stream finishes.
@@ -460,6 +475,7 @@ export function CocolaRuntimeProvider({ children }: { children: ReactNode }) {
 
       const ctrl = new AbortController();
       abortMap.current.set(convId, ctrl);
+      let aborted = false;
       try {
         const res = await fetch("/api/chat", {
           method: "POST",
@@ -493,10 +509,19 @@ export function CocolaRuntimeProvider({ children }: { children: ReactNode }) {
         if (!(err instanceof DOMException && err.name === "AbortError")) {
           const msg = err instanceof Error ? err.message : String(err);
           applyEvent(convId, assistantId, { kind: "error", data: { error: msg } });
+        } else {
+          aborted = true;
         }
       } finally {
         setRunning(convId, false);
         abortMap.current.delete(convId);
+        if (!aborted) {
+          setUnreadCompletedIds((prev) => {
+            const next = new Set(prev);
+            next.add(convId);
+            return next;
+          });
+        }
         refreshConversations();
       }
     },
@@ -518,6 +543,11 @@ export function CocolaRuntimeProvider({ children }: { children: ReactNode }) {
       setSandboxes((prev) => ({ ...prev, [id]: prev[id] ?? null }));
       setSessionId(id);
       setSelectedArtifact(null);
+      setUnreadCompletedIds((prev) => {
+        const next = new Set(prev);
+        next.delete(id);
+        return next;
+      });
       if ((convMessages[id]?.length ?? 0) > 0) return;
       try {
         const res = await fetch(`/api/conversations/${encodeURIComponent(id)}/messages`);
@@ -536,6 +566,81 @@ export function CocolaRuntimeProvider({ children }: { children: ReactNode }) {
       }
     },
     [convMessages],
+  );
+
+  const renameConversation = useCallback(
+    async (id: string, title: string) => {
+      const nextTitle = title.trim();
+      if (!nextTitle) return;
+      setConversations((prev) => prev.map((c) => (c.id === id ? { ...c, title: nextTitle } : c)));
+      try {
+        const res = await fetch(`/api/conversations/${encodeURIComponent(id)}`, {
+          method: "PATCH",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({ title: nextTitle }),
+        });
+        if (!res.ok) throw new Error(`rename failed (${res.status})`);
+        const updated = (await res.json()) as ConversationSummary;
+        setConversations((prev) =>
+          prev.map((c) =>
+            c.id === id
+              ? {
+                  ...c,
+                  title: updated.title || nextTitle,
+                  updated_at: updated.updated_at || c.updated_at,
+                }
+              : c,
+          ),
+        );
+      } catch (err) {
+        refreshConversations();
+        throw err;
+      }
+    },
+    [refreshConversations],
+  );
+
+  const deleteConversation = useCallback(
+    async (id: string) => {
+      const ctrl = abortMap.current.get(id);
+      ctrl?.abort();
+      abortMap.current.delete(id);
+      setRunning(id, false);
+
+      const res = await fetch(`/api/conversations/${encodeURIComponent(id)}`, {
+        method: "DELETE",
+      });
+      if (!res.ok) {
+        refreshConversations();
+        throw new Error(`delete failed (${res.status})`);
+      }
+
+      setConversations((prev) => prev.filter((c) => c.id !== id));
+      setUnreadCompletedIds((prev) => {
+        const next = new Set(prev);
+        next.delete(id);
+        return next;
+      });
+      setConvMessages((prev) => {
+        const next = { ...prev };
+        delete next[id];
+        return next;
+      });
+      setSandboxes((prev) => {
+        const next = { ...prev };
+        delete next[id];
+        return next;
+      });
+      setSelectedArtifact((prev) => (prev?.conversationId === id ? null : prev));
+      if (sessionIdRef.current === id) {
+        const fresh = genId();
+        sessionIdRef.current = fresh;
+        setSessionId(fresh);
+        setConvMessages((prev) => ({ ...prev, [fresh]: [] }));
+        setSandboxes((prev) => ({ ...prev, [fresh]: null }));
+      }
+    },
+    [refreshConversations, setRunning],
   );
 
   // Start a fresh conversation. Other conversations' in-flight streams continue
@@ -591,7 +696,11 @@ export function CocolaRuntimeProvider({ children }: { children: ReactNode }) {
       conversations,
       refreshConversations,
       loadConversation,
+      renameConversation,
+      deleteConversation,
       activeConversationId: sessionId,
+      runningConversationIds: runningIds,
+      unreadCompletedConversationIds: unreadCompletedIds,
       selectedArtifact,
       openArtifact,
       closeArtifact,
@@ -607,6 +716,10 @@ export function CocolaRuntimeProvider({ children }: { children: ReactNode }) {
       conversations,
       refreshConversations,
       loadConversation,
+      renameConversation,
+      deleteConversation,
+      runningIds,
+      unreadCompletedIds,
       selectedArtifact,
       openArtifact,
       closeArtifact,

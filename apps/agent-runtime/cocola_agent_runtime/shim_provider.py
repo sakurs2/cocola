@@ -217,7 +217,25 @@ class InSandboxShimProvider:
             yield AgentEvent(kind="done", data={})
             return
 
-        resume = await self._session_map.get(options.session_id)
+        binding = await self._session_map.get_binding(options.session_id)
+        resume = binding.claude_session_id if binding else None
+        if binding and binding.sandbox_id and binding.sandbox_id != options.sandbox_id:
+            log.info(
+                "session sandbox changed; forgetting stale resume id",
+                session_id=options.session_id,
+                resume=resume,
+                previous_sandbox_id=binding.sandbox_id,
+                sandbox_id=options.sandbox_id,
+            )
+            try:
+                await self._session_map.delete(options.session_id)
+            except Exception as exc:  # noqa: BLE001 - index delete is best-effort
+                log.warning(
+                    "session-map delete failed",
+                    session_id=options.session_id,
+                    error=repr(exc),
+                )
+            resume = None
 
         state = _AttemptState()
         async for ev in self._stream_attempt(

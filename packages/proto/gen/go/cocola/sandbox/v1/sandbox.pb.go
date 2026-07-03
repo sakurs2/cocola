@@ -143,12 +143,25 @@ type SandboxSpec struct {
 	sizeCache     protoimpl.SizeCache
 	unknownFields protoimpl.UnknownFields
 
-	UserId          string            `protobuf:"bytes,1,opt,name=user_id,json=userId,proto3" json:"user_id,omitempty"`
-	SessionId       string            `protobuf:"bytes,2,opt,name=session_id,json=sessionId,proto3" json:"session_id,omitempty"`
-	Image           string            `protobuf:"bytes,3,opt,name=image,proto3" json:"image,omitempty"`
-	Env             map[string]string `protobuf:"bytes,4,rep,name=env,proto3" json:"env,omitempty" protobuf_key:"bytes,1,opt,name=key,proto3" protobuf_val:"bytes,2,opt,name=value,proto3"`
-	Resources       *Resources        `protobuf:"bytes,5,opt,name=resources,proto3" json:"resources,omitempty"`
-	EgressAllowlist []string          `protobuf:"bytes,6,rep,name=egress_allowlist,json=egressAllowlist,proto3" json:"egress_allowlist,omitempty"`
+	UserId    string            `protobuf:"bytes,1,opt,name=user_id,json=userId,proto3" json:"user_id,omitempty"`
+	SessionId string            `protobuf:"bytes,2,opt,name=session_id,json=sessionId,proto3" json:"session_id,omitempty"`
+	Image     string            `protobuf:"bytes,3,opt,name=image,proto3" json:"image,omitempty"`
+	Env       map[string]string `protobuf:"bytes,4,rep,name=env,proto3" json:"env,omitempty" protobuf_key:"bytes,1,opt,name=key,proto3" protobuf_val:"bytes,2,opt,name=value,proto3"`
+	Resources *Resources        `protobuf:"bytes,5,opt,name=resources,proto3" json:"resources,omitempty"`
+	// egress_allowlist controls the sandbox's outbound network policy (ADR-0009).
+	// The provider distinguishes "unset" from "set but empty":
+	//   - unset  -> no egress policy configured; legacy wide-open behaviour.
+	//   - set    -> egress firewall is enforced. A DNS + in-cluster llm-gateway
+	//     baseline is ALWAYS allowed (so the gateway is never cut off);
+	//     every additional CIDR/IP entry widens that baseline. Domain
+	//     entries need a DNS-aware CNI (e.g. Cilium toFQDNs) to be
+	//     pinned precisely; a vanilla CNI / iptables layer skips them.
+	//
+	// NOTE: proto3 cannot tell an empty repeated field from an absent one on the
+	// wire, so callers that want the enforced-with-baseline posture must route an
+	// explicitly-configured allowlist (the orchestrator always folds in the
+	// gateway host, guaranteeing a non-empty list in practice).
+	EgressAllowlist []string `protobuf:"bytes,6,rep,name=egress_allowlist,json=egressAllowlist,proto3" json:"egress_allowlist,omitempty"`
 }
 
 func (x *SandboxSpec) Reset() {

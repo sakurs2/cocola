@@ -5,7 +5,7 @@ import warnings
 
 from cocola.agent.v1 import agent_pb2 as cocola_dot_agent_dot_v1_dot_agent__pb2
 
-GRPC_GENERATED_VERSION = '1.81.0'
+GRPC_GENERATED_VERSION = '1.80.0'
 GRPC_VERSION = grpc.__version__
 _version_not_supported = False
 
@@ -25,7 +25,7 @@ if _version_not_supported:
     )
 
 
-class AgentRuntimeServiceStub:
+class AgentRuntimeServiceStub(object):
     """AgentRuntimeService is called by gateway. Stream returns agent events.
 
     Event envelope is intentionally generic so we can add new event kinds (e.g.
@@ -44,9 +44,14 @@ class AgentRuntimeServiceStub:
                 request_serializer=cocola_dot_agent_dot_v1_dot_agent__pb2.QueryRequest.SerializeToString,
                 response_deserializer=cocola_dot_agent_dot_v1_dot_agent__pb2.AgentEvent.FromString,
                 _registered_method=True)
+        self.ReleaseSession = channel.unary_unary(
+                '/cocola.agent.v1.AgentRuntimeService/ReleaseSession',
+                request_serializer=cocola_dot_agent_dot_v1_dot_agent__pb2.ReleaseSessionRequest.SerializeToString,
+                response_deserializer=cocola_dot_agent_dot_v1_dot_agent__pb2.ReleaseSessionResponse.FromString,
+                _registered_method=True)
 
 
-class AgentRuntimeServiceServicer:
+class AgentRuntimeServiceServicer(object):
     """AgentRuntimeService is called by gateway. Stream returns agent events.
 
     Event envelope is intentionally generic so we can add new event kinds (e.g.
@@ -60,6 +65,12 @@ class AgentRuntimeServiceServicer:
         context.set_details('Method not implemented!')
         raise NotImplementedError('Method not implemented!')
 
+    def ReleaseSession(self, request, context):
+        """Missing associated documentation comment in .proto file."""
+        context.set_code(grpc.StatusCode.UNIMPLEMENTED)
+        context.set_details('Method not implemented!')
+        raise NotImplementedError('Method not implemented!')
+
 
 def add_AgentRuntimeServiceServicer_to_server(servicer, server):
     rpc_method_handlers = {
@@ -67,6 +78,11 @@ def add_AgentRuntimeServiceServicer_to_server(servicer, server):
                     servicer.Query,
                     request_deserializer=cocola_dot_agent_dot_v1_dot_agent__pb2.QueryRequest.FromString,
                     response_serializer=cocola_dot_agent_dot_v1_dot_agent__pb2.AgentEvent.SerializeToString,
+            ),
+            'ReleaseSession': grpc.unary_unary_rpc_method_handler(
+                    servicer.ReleaseSession,
+                    request_deserializer=cocola_dot_agent_dot_v1_dot_agent__pb2.ReleaseSessionRequest.FromString,
+                    response_serializer=cocola_dot_agent_dot_v1_dot_agent__pb2.ReleaseSessionResponse.SerializeToString,
             ),
     }
     generic_handler = grpc.method_handlers_generic_handler(
@@ -76,7 +92,7 @@ def add_AgentRuntimeServiceServicer_to_server(servicer, server):
 
 
  # This class is part of an EXPERIMENTAL API.
-class AgentRuntimeService:
+class AgentRuntimeService(object):
     """AgentRuntimeService is called by gateway. Stream returns agent events.
 
     Event envelope is intentionally generic so we can add new event kinds (e.g.
@@ -101,6 +117,33 @@ class AgentRuntimeService:
             '/cocola.agent.v1.AgentRuntimeService/Query',
             cocola_dot_agent_dot_v1_dot_agent__pb2.QueryRequest.SerializeToString,
             cocola_dot_agent_dot_v1_dot_agent__pb2.AgentEvent.FromString,
+            options,
+            channel_credentials,
+            insecure,
+            call_credentials,
+            compression,
+            wait_for_ready,
+            timeout,
+            metadata,
+            _registered_method=True)
+
+    @staticmethod
+    def ReleaseSession(request,
+            target,
+            options=(),
+            channel_credentials=None,
+            call_credentials=None,
+            insecure=False,
+            compression=None,
+            wait_for_ready=None,
+            timeout=None,
+            metadata=None):
+        return grpc.experimental.unary_unary(
+            request,
+            target,
+            '/cocola.agent.v1.AgentRuntimeService/ReleaseSession',
+            cocola_dot_agent_dot_v1_dot_agent__pb2.ReleaseSessionRequest.SerializeToString,
+            cocola_dot_agent_dot_v1_dot_agent__pb2.ReleaseSessionResponse.FromString,
             options,
             channel_credentials,
             insecure,

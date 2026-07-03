@@ -66,6 +66,16 @@ func (m *Memory) ListConversations(_ context.Context, userID string) ([]Conversa
 	return out, nil
 }
 
+func (m *Memory) GetConversation(_ context.Context, convID, userID string) (Conversation, error) {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	c, ok := m.convs[convID]
+	if !ok || c.UserID != userID {
+		return Conversation{}, ErrNotFound
+	}
+	return c, nil
+}
+
 func (m *Memory) GetMessages(_ context.Context, convID, userID string) ([]Message, error) {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
@@ -77,6 +87,35 @@ func (m *Memory) GetMessages(_ context.Context, convID, userID string) ([]Messag
 	out := make([]Message, len(src))
 	copy(out, src)
 	return out, nil
+}
+
+func (m *Memory) RenameConversation(_ context.Context, convID, userID, title string) (Conversation, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	c, ok := m.convs[convID]
+	if !ok || c.UserID != userID {
+		return Conversation{}, ErrNotFound
+	}
+	c.Title = title
+	m.convs[convID] = c
+	return c, nil
+}
+
+func (m *Memory) DeleteConversation(_ context.Context, convID, userID string) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	c, ok := m.convs[convID]
+	if !ok || c.UserID != userID {
+		return ErrNotFound
+	}
+	delete(m.convs, convID)
+	delete(m.msgs, convID)
+	for id, a := range m.arts {
+		if a.ConversationID == convID {
+			delete(m.arts, id)
+		}
+	}
+	return nil
 }
 
 func (m *Memory) UpsertArtifact(_ context.Context, a Artifact) error {

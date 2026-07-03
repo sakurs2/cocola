@@ -30,15 +30,24 @@ async def _contract(store):
     # Put then get round-trips.
     await store.put("S1", "claude-aaa", user_id="U1", sandbox_id="box-1")
     assert await store.get("S1") == "claude-aaa"
+    binding = await store.get_binding("S1")
+    assert binding is not None
+    assert binding.claude_session_id == "claude-aaa"
+    assert binding.sandbox_id == "box-1"
     # Idempotent overwrite: the latest claude_session_id wins.
     await store.put("S1", "claude-bbb", user_id="U1", sandbox_id="box-2")
     assert await store.get("S1") == "claude-bbb"
+    binding = await store.get_binding("S1")
+    assert binding is not None
+    assert binding.claude_session_id == "claude-bbb"
+    assert binding.sandbox_id == "box-2"
     # Empty claude_session_id is a no-op (never clobbers a good binding).
     await store.put("S1", "", user_id="U1")
     assert await store.get("S1") == "claude-bbb"
     # delete forgets a binding (used to drop a dangling/stale resume id).
     await store.delete("S1")
     assert await store.get("S1") is None
+    assert await store.get_binding("S1") is None
     # delete is idempotent: forgetting an unknown session is a no-op.
     await store.delete("S-unknown")
 
@@ -84,5 +93,8 @@ async def test_postgres_session_map_survives_restart():
     reader = PostgresSessionMap(PG_DSN)
     try:
         assert await reader.get("S-restart") == "claude-persist"
+        binding = await reader.get_binding("S-restart")
+        assert binding is not None
+        assert binding.sandbox_id == "box-9"
     finally:
         await reader.aclose()

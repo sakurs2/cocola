@@ -3,6 +3,7 @@ package httpapi
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -21,6 +22,16 @@ func newAPIWithConvo(t *testing.T, fs *fakeStreamer, cs convo.Store) http.Handle
 	t.Helper()
 	v := auth.NewVerifier(auth.Config{})
 	return New(fs, v, logger.Must()).WithConvoStore(cs).Handler()
+}
+
+type fakeReleaser struct {
+	calls []string
+	err   error
+}
+
+func (f *fakeReleaser) ReleaseSession(_ context.Context, userID, sessionID string) error {
+	f.calls = append(f.calls, userID+":"+sessionID)
+	return f.err
 }
 
 // TestChatPersistsTurn: a chat with a session_id mirrors the user prompt and the
@@ -188,6 +199,73 @@ func TestConversationMessagesOwnershipMiss(t *testing.T) {
 	h.ServeHTTP(rec, httptest.NewRequest("GET", "/v1/conversations/other/messages", nil))
 	if rec.Code != http.StatusNotFound {
 		t.Fatalf("ownership miss should be 404, got %d", rec.Code)
+	}
+}
+
+func TestRenameConversationEndpoint(t *testing.T) {
+	cs := convo.NewMemory()
+	_ = cs.UpsertConversation(context.Background(), convo.Conversation{ID: "conv-1", UserID: auth.DevIdentity.UserID, Title: "old"})
+	h := newAPIWithConvo(t, &fakeStreamer{}, cs)
+
+	rec := httptest.NewRecorder()
+	h.ServeHTTP(rec, httptest.NewRequest("PATCH", "/v1/conversations/conv-1",
+		strings.NewReader(`{"title":"new title"}`)))
+	if rec.Code != http.StatusOK {
+		t.Fatalf("rename status = %d body=%s", rec.Code, rec.Body.String())
+	}
+	var got convo.Conversation
+	mustJSON(t, rec.Body.Bytes(), &got)
+	if got.Title != "new title" {
+		t.Fatalf("title = %q", got.Title)
+	}
+
+	rec = httptest.NewRecorder()
+	h.ServeHTTP(rec, httptest.NewRequest("PATCH", "/v1/conversations/conv-1",
+		strings.NewReader(`{"title":"   "}`)))
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("empty title should be 400, got %d", rec.Code)
+	}
+}
+
+func TestDeleteConversationEndpointReleasesAndDeletes(t *testing.T) {
+	cs := convo.NewMemory()
+	_ = cs.UpsertConversation(context.Background(), convo.Conversation{ID: "conv-1", UserID: auth.DevIdentity.UserID})
+	_ = cs.InsertMessage(context.Background(), convo.Message{ID: "m1", ConversationID: "conv-1", Role: "user"})
+	releaser := &fakeReleaser{}
+	h := New(&fakeStreamer{}, auth.NewVerifier(auth.Config{}), logger.Must()).
+		WithConvoStore(cs).
+		WithAgentReleaser(releaser).
+		Handler()
+
+	rec := httptest.NewRecorder()
+	h.ServeHTTP(rec, httptest.NewRequest("DELETE", "/v1/conversations/conv-1", nil))
+	if rec.Code != http.StatusNoContent {
+		t.Fatalf("delete status = %d body=%s", rec.Code, rec.Body.String())
+	}
+	if len(releaser.calls) != 1 || releaser.calls[0] != auth.DevIdentity.UserID+":conv-1" {
+		t.Fatalf("release calls = %+v", releaser.calls)
+	}
+	if _, err := cs.GetConversation(context.Background(), "conv-1", auth.DevIdentity.UserID); err != convo.ErrNotFound {
+		t.Fatalf("conversation should be deleted, got %v", err)
+	}
+}
+
+func TestDeleteConversationReleaseFailureStillDeletes(t *testing.T) {
+	cs := convo.NewMemory()
+	_ = cs.UpsertConversation(context.Background(), convo.Conversation{ID: "conv-1", UserID: auth.DevIdentity.UserID})
+	releaser := &fakeReleaser{err: errors.New("release failed")}
+	h := New(&fakeStreamer{}, auth.NewVerifier(auth.Config{}), logger.Must()).
+		WithConvoStore(cs).
+		WithAgentReleaser(releaser).
+		Handler()
+
+	rec := httptest.NewRecorder()
+	h.ServeHTTP(rec, httptest.NewRequest("DELETE", "/v1/conversations/conv-1", nil))
+	if rec.Code != http.StatusNoContent {
+		t.Fatalf("delete status = %d body=%s", rec.Code, rec.Body.String())
+	}
+	if _, err := cs.GetConversation(context.Background(), "conv-1", auth.DevIdentity.UserID); err != convo.ErrNotFound {
+		t.Fatalf("conversation should be deleted despite release failure, got %v", err)
 	}
 }
 

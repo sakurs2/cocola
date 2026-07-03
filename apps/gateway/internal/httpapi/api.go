@@ -41,6 +41,7 @@ const DefaultInlineMaxBytes int64 = 16 * 1024 * 1024
 // can inject a fake without a real agent-runtime.
 type API struct {
 	streamer agent.Streamer
+	releaser agent.Releaser
 	verifier *auth.Verifier
 	log      logger.Logger
 	metrics  *metrics.Registry // optional; nil => no instrumentation (tests)
@@ -57,7 +58,11 @@ type API struct {
 
 // New builds the BFF API.
 func New(streamer agent.Streamer, verifier *auth.Verifier, log logger.Logger) *API {
-	return &API{streamer: streamer, verifier: verifier, log: log}
+	a := &API{streamer: streamer, verifier: verifier, log: log}
+	if releaser, ok := streamer.(agent.Releaser); ok {
+		a.releaser = releaser
+	}
+	return a
 }
 
 // WithMetrics enables RED instrumentation on the public routes. The registry is
@@ -86,6 +91,10 @@ func (a *API) WithObjStore(store objstore.Store, inlineMaxBytes int64) *API {
 // persistence dark. See docs/plan/conversation-persistence-history-rendering.md.
 func (a *API) WithConvoStore(store convo.Store) *API { a.convo = store; return a }
 
+// WithAgentReleaser injects the best-effort session releaser used by
+// conversation deletion tests or alternate runtimes.
+func (a *API) WithAgentReleaser(releaser agent.Releaser) *API { a.releaser = releaser; return a }
+
 // instrument wraps a handler with the RED middleware under a fixed route label,
 // or returns it unchanged when metrics are disabled.
 func (a *API) instrument(route string, h http.Handler) http.Handler {
@@ -109,6 +118,10 @@ func (a *API) Handler() http.Handler {
 	// sees their own conversations (ownership from the verified identity).
 	mux.Handle("GET /v1/conversations", a.instrument("GET /v1/conversations",
 		a.verifier.Middleware(writeErr)(http.HandlerFunc(a.listConversations))))
+	mux.Handle("PATCH /v1/conversations/{id}", a.instrument("PATCH /v1/conversations/{id}",
+		a.verifier.Middleware(writeErr)(http.HandlerFunc(a.renameConversation))))
+	mux.Handle("DELETE /v1/conversations/{id}", a.instrument("DELETE /v1/conversations/{id}",
+		a.verifier.Middleware(writeErr)(http.HandlerFunc(a.deleteConversation))))
 	mux.Handle("GET /v1/conversations/{id}/messages", a.instrument("GET /v1/conversations/{id}/messages",
 		a.verifier.Middleware(writeErr)(http.HandlerFunc(a.conversationMessages))))
 	mux.Handle("GET /v1/conversations/{id}/artifacts/{artifact_id}", a.instrument("GET /v1/conversations/{id}/artifacts/{artifact_id}",
@@ -415,6 +428,93 @@ func (a *API) listConversations(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, convs)
+}
+
+type renameConversationRequest struct {
+	Title string `json:"title"`
+}
+
+func (a *API) renameConversation(w http.ResponseWriter, r *http.Request) {
+	id, ok := auth.IdentityOf(r)
+	if !ok {
+		writeErr(w, http.StatusUnauthorized, "UNAUTHENTICATED", "missing identity")
+		return
+	}
+	convID := r.PathValue("id")
+	if convID == "" {
+		writeErr(w, http.StatusBadRequest, "INVALID_ARGUMENT", "conversation id is required")
+		return
+	}
+	var req renameConversationRequest
+	dec := json.NewDecoder(r.Body)
+	dec.DisallowUnknownFields()
+	if err := dec.Decode(&req); err != nil {
+		writeErr(w, http.StatusBadRequest, "INVALID_ARGUMENT", "malformed JSON body")
+		return
+	}
+	title := strings.TrimSpace(req.Title)
+	if title == "" {
+		writeErr(w, http.StatusBadRequest, "INVALID_ARGUMENT", "title is required")
+		return
+	}
+	if a.convo == nil {
+		writeErr(w, http.StatusNotFound, "NOT_FOUND", "conversation not found")
+		return
+	}
+	conv, err := a.convo.RenameConversation(r.Context(), convID, id.UserID, title)
+	if err != nil {
+		if errors.Is(err, convo.ErrNotFound) {
+			writeErr(w, http.StatusNotFound, "NOT_FOUND", "conversation not found")
+			return
+		}
+		a.log.Warn("rename conversation failed: " + err.Error())
+		writeErr(w, http.StatusInternalServerError, "INTERNAL", "could not rename conversation")
+		return
+	}
+	writeJSON(w, http.StatusOK, conv)
+}
+
+func (a *API) deleteConversation(w http.ResponseWriter, r *http.Request) {
+	id, ok := auth.IdentityOf(r)
+	if !ok {
+		writeErr(w, http.StatusUnauthorized, "UNAUTHENTICATED", "missing identity")
+		return
+	}
+	convID := r.PathValue("id")
+	if convID == "" {
+		writeErr(w, http.StatusBadRequest, "INVALID_ARGUMENT", "conversation id is required")
+		return
+	}
+	if a.convo == nil {
+		writeErr(w, http.StatusNotFound, "NOT_FOUND", "conversation not found")
+		return
+	}
+	if _, err := a.convo.GetConversation(r.Context(), convID, id.UserID); err != nil {
+		if errors.Is(err, convo.ErrNotFound) {
+			writeErr(w, http.StatusNotFound, "NOT_FOUND", "conversation not found")
+			return
+		}
+		a.log.Warn("get conversation before delete failed: " + err.Error())
+		writeErr(w, http.StatusInternalServerError, "INTERNAL", "could not delete conversation")
+		return
+	}
+	if a.releaser != nil {
+		releaseCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		defer cancel()
+		if err := a.releaser.ReleaseSession(releaseCtx, id.UserID, convID); err != nil {
+			a.log.Warn("release conversation session failed: " + err.Error())
+		}
+	}
+	if err := a.convo.DeleteConversation(r.Context(), convID, id.UserID); err != nil {
+		if errors.Is(err, convo.ErrNotFound) {
+			writeErr(w, http.StatusNotFound, "NOT_FOUND", "conversation not found")
+			return
+		}
+		a.log.Warn("delete conversation failed: " + err.Error())
+		writeErr(w, http.StatusInternalServerError, "INTERNAL", "could not delete conversation")
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
 }
 
 // conversationMessages serves one conversation's history, but only if the

@@ -109,9 +109,15 @@ type Store interface {
 	InsertMessage(ctx context.Context, m Message) error
 	// ListConversations returns userID's conversations, most-recently-updated first.
 	ListConversations(ctx context.Context, userID string) ([]Conversation, error)
+	// GetConversation returns one conversation only when userID owns it.
+	GetConversation(ctx context.Context, convID, userID string) (Conversation, error)
 	// GetMessages returns a conversation's messages in chronological order, but
 	// ONLY if userID owns it; otherwise ErrNotFound (no cross-user leak).
 	GetMessages(ctx context.Context, convID, userID string) ([]Message, error)
+	// RenameConversation updates a conversation title only when userID owns it.
+	RenameConversation(ctx context.Context, convID, userID, title string) (Conversation, error)
+	// DeleteConversation deletes a conversation only when userID owns it.
+	DeleteConversation(ctx context.Context, convID, userID string) error
 	// UpsertArtifact records a downloadable artifact's metadata.
 	UpsertArtifact(ctx context.Context, a Artifact) error
 	// GetArtifact returns an artifact only when userID owns its conversation.

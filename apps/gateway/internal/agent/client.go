@@ -64,6 +64,13 @@ type Streamer interface {
 	Stream(ctx context.Context, q Query, onEvent func(Event) error) error
 }
 
+// Releaser frees runtime resources bound to a cocola session. Callers treat
+// errors as best-effort because deleting durable conversation history must not
+// be blocked by a transient runtime release failure.
+type Releaser interface {
+	ReleaseSession(ctx context.Context, userID, sessionID string) error
+}
+
 // Client is the gRPC-backed Streamer. Build it with Dial.
 type Client struct {
 	conn *grpc.ClientConn
@@ -169,4 +176,17 @@ func (c *Client) Stream(ctx context.Context, q Query, onEvent func(Event) error)
 			return err
 		}
 	}
+}
+
+// ReleaseSession asks agent-runtime to free any sandbox/resume state for a
+// conversation. Ownership is still enforced by the gateway before this call.
+func (c *Client) ReleaseSession(ctx context.Context, userID, sessionID string) error {
+	_, err := c.rpc.ReleaseSession(ctx, &agentv1.ReleaseSessionRequest{
+		UserId:    userID,
+		SessionId: sessionID,
+	})
+	if err != nil {
+		return fmt.Errorf("agent: release session: %w", err)
+	}
+	return nil
 }
