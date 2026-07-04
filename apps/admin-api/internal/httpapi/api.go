@@ -194,6 +194,8 @@ func mapErr(w http.ResponseWriter, err error) {
 		writeErr(w, http.StatusForbidden, "ACCOUNT_DISABLED", "account disabled")
 	case errors.Is(err, service.ErrProtectedAdmin):
 		writeErr(w, http.StatusForbidden, "PROTECTED_ADMIN", "bootstrap admin cannot be changed")
+	case errors.Is(err, service.ErrSelfPermission):
+		writeErr(w, http.StatusForbidden, "SELF_PERMISSION_CHANGE", "admin cannot change own permissions")
 	case errors.Is(err, service.ErrPermissionDenied):
 		writeErr(w, http.StatusForbidden, "PERMISSION_DENIED", "permission denied")
 	case errors.Is(err, service.ErrInvalidArg):

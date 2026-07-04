@@ -30,6 +30,7 @@ var (
 	ErrUnauthenticated  = errors.New("service: unauthenticated")
 	ErrAccountDisabled  = errors.New("service: account disabled")
 	ErrProtectedAdmin   = errors.New("service: protected admin")
+	ErrSelfPermission   = errors.New("service: self permission change")
 	ErrPermissionDenied = errors.New("service: permission denied")
 	ErrNotFound         = store.ErrNotFound
 	ErrConflict         = store.ErrConflict
@@ -98,6 +99,10 @@ func isAuthUserUnavailable(u store.AuthUser) bool {
 
 func isBootstrapAdmin(u store.AuthUser) bool {
 	return strings.EqualFold(strings.TrimSpace(u.CreatedBy), bootstrapActor)
+}
+
+func isSelfActor(u store.AuthUser, actor string) bool {
+	return normalizeEmail(actor) != "" && normalizeEmail(actor) == u.Email
 }
 
 // BootstrapAdminInput seeds the first admin from environment variables.
@@ -255,6 +260,9 @@ func (a *Admin) SetAuthUser(ctx context.Context, id string, in AuthUserInput) (s
 	}
 	u.Name = u.Username
 	if in.Role != "" {
+		if isSelfActor(u, in.Actor) {
+			return store.AuthUser{}, ErrSelfPermission
+		}
 		if !validRole(in.Role) {
 			return store.AuthUser{}, ErrInvalidArg
 		}
@@ -264,6 +272,9 @@ func (a *Admin) SetAuthUser(ctx context.Context, id string, in AuthUserInput) (s
 		u.Role = in.Role
 	}
 	if in.Enabled != nil {
+		if isSelfActor(u, in.Actor) {
+			return store.AuthUser{}, ErrSelfPermission
+		}
 		if isBootstrapAdmin(u) && !*in.Enabled {
 			return store.AuthUser{}, ErrProtectedAdmin
 		}
@@ -315,6 +326,9 @@ func (a *Admin) DeleteAuthUser(ctx context.Context, id, actor string) error {
 	}
 	if !u.DeletedAt.IsZero() {
 		return ErrNotFound
+	}
+	if isSelfActor(u, actor) {
+		return ErrSelfPermission
 	}
 	if isBootstrapAdmin(u) {
 		return ErrProtectedAdmin

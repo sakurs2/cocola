@@ -93,6 +93,30 @@ func do(t *testing.T, h http.Handler, method, path, key string, body any) *httpt
 	return rec
 }
 
+func doAs(t *testing.T, h http.Handler, method, path, key, actor string, body any) *httptest.ResponseRecorder {
+	t.Helper()
+	var rdr *bytes.Reader
+	if body != nil {
+		b, err := json.Marshal(body)
+		if err != nil {
+			t.Fatalf("marshal body: %v", err)
+		}
+		rdr = bytes.NewReader(b)
+	} else {
+		rdr = bytes.NewReader(nil)
+	}
+	req := httptest.NewRequest(method, path, rdr)
+	if key != "" {
+		req.Header.Set("authorization", "Bearer "+key)
+	}
+	if actor != "" {
+		req.Header.Set("x-cocola-admin", actor)
+	}
+	rec := httptest.NewRecorder()
+	h.ServeHTTP(rec, req)
+	return rec
+}
+
 func TestHealthNoAuth(t *testing.T) {
 	api := newTestAPI("s3cr3t")
 	rec := do(t, api.Router(), http.MethodGet, "/healthz", "", nil)
@@ -316,6 +340,43 @@ func TestProtectedBootstrapAdminCannotBeDemotedDisabledOrDeleted(t *testing.T) {
 			t.Fatalf("%s: decode error body: %v", name, err)
 		}
 		if body.Error.Code != "PROTECTED_ADMIN" {
+			t.Fatalf("%s: wrong error body: %+v", name, body)
+		}
+	}
+}
+
+func TestAdminCannotChangeOwnPermissionsHTTP(t *testing.T) {
+	api := newTestAPI("k")
+	r := api.Router()
+
+	rec := doAs(t, r, http.MethodPost, "/admin/users", "k", "owner@example.com", map[string]any{
+		"username": "self-admin", "email": "self@example.com", "password": "pw", "role": "admin",
+	})
+	if rec.Code != http.StatusCreated {
+		t.Fatalf("create admin user: want 201, got %d (%s)", rec.Code, rec.Body.String())
+	}
+	var admin store.AuthUser
+	if err := json.Unmarshal(rec.Body.Bytes(), &admin); err != nil {
+		t.Fatalf("decode admin user: %v", err)
+	}
+
+	for name, req := range map[string]struct {
+		method string
+		body   any
+	}{
+		"downgrade": {method: http.MethodPatch, body: map[string]any{"role": "user"}},
+		"disable":   {method: http.MethodPatch, body: map[string]any{"enabled": false}},
+		"delete":    {method: http.MethodDelete},
+	} {
+		rec = doAs(t, r, req.method, "/admin/users/"+admin.ID, "k", "SELF@example.com", req.body)
+		if rec.Code != http.StatusForbidden {
+			t.Fatalf("%s: want 403, got %d (%s)", name, rec.Code, rec.Body.String())
+		}
+		var body errBody
+		if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
+			t.Fatalf("%s: decode error body: %v", name, err)
+		}
+		if body.Error.Code != "SELF_PERMISSION_CHANGE" {
 			t.Fatalf("%s: wrong error body: %+v", name, body)
 		}
 	}

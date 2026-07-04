@@ -12,7 +12,7 @@ import {
   UserPlus,
   Users,
 } from "lucide-react";
-import { signOut } from "next-auth/react";
+import { signOut, useSession } from "next-auth/react";
 import { useCallback, useEffect, useMemo, useState } from "react";
 
 type Role = "user" | "admin";
@@ -45,6 +45,7 @@ const EMPTY_FORM: UserForm = {
 };
 
 export default function AdminUsersPage() {
+  const { data: session } = useSession();
   const [users, setUsers] = useState<AuthUser[]>([]);
   const [form, setForm] = useState<UserForm>(EMPTY_FORM);
   const [loading, setLoading] = useState(true);
@@ -85,6 +86,8 @@ export default function AdminUsersPage() {
     [users],
   );
 
+  const currentUserEmail = session?.user?.email ?? "";
+
   const createUser = async () => {
     setError("");
     setNotice("");
@@ -121,11 +124,7 @@ export default function AdminUsersPage() {
       const res = await fetch(`/api/admin/users/${encodeURIComponent(user.id)}`, {
         method: "PATCH",
         headers: { "content-type": "application/json" },
-        body: JSON.stringify({
-          role: patch.role ?? user.role,
-          enabled: patch.enabled ?? user.enabled,
-          username: user.username,
-        }),
+        body: JSON.stringify(patch),
       });
       if (isAccountDisabledResponse(res)) return redirectAccountDisabled();
       if (!res.ok) throw new Error(await responseError(res));
@@ -314,8 +313,10 @@ export default function AdminUsersPage() {
                   users.map((user) => {
                     const busy = actingId === user.id;
                     const protectedAdmin = isProtectedAdmin(user);
-                    const roleLocked = protectedAdmin && user.role === "admin";
-                    const disableLocked = protectedAdmin && user.enabled;
+                    const selfUser = isCurrentUser(user, currentUserEmail);
+                    const roleLocked = selfUser || (protectedAdmin && user.role === "admin");
+                    const disableLocked = selfUser || (protectedAdmin && user.enabled);
+                    const deleteLocked = selfUser || protectedAdmin;
                     return (
                       <tr key={user.id} className="border-b border-border/70 last:border-0">
                         <td className="px-4 py-3">
@@ -339,7 +340,11 @@ export default function AdminUsersPage() {
                               variant="outline"
                               size="sm"
                               disabled={Boolean(actingId) || roleLocked}
-                              title={roleLocked ? "Bootstrap admin cannot be demoted" : undefined}
+                              title={permissionLockTitle({
+                                selfUser,
+                                locked: roleLocked,
+                                fallback: "Bootstrap admin cannot be demoted",
+                              })}
                               onClick={() =>
                                 void updateUser(user, {
                                   role: user.role === "admin" ? "user" : "admin",
@@ -353,7 +358,11 @@ export default function AdminUsersPage() {
                               variant={user.enabled ? "destructive" : "outline"}
                               size="sm"
                               disabled={Boolean(actingId) || disableLocked}
-                              title={disableLocked ? "Bootstrap admin cannot be disabled" : undefined}
+                              title={permissionLockTitle({
+                                selfUser,
+                                locked: disableLocked,
+                                fallback: "Bootstrap admin cannot be disabled",
+                              })}
                               onClick={() => void updateUser(user, { enabled: !user.enabled })}
                             >
                               {user.enabled ? "Disable" : "Enable"}
@@ -381,10 +390,14 @@ export default function AdminUsersPage() {
                             <Button
                               variant="destructive"
                               size="sm"
-                              disabled={Boolean(actingId) || protectedAdmin}
+                              disabled={Boolean(actingId) || deleteLocked}
                               onClick={() => setDeleteTarget(user)}
                               title={
-                                protectedAdmin ? "Bootstrap admin cannot be deleted" : "Delete user"
+                                selfUser
+                                  ? "You cannot delete your own account"
+                                  : protectedAdmin
+                                    ? "Bootstrap admin cannot be deleted"
+                                    : "Delete user"
                               }
                             >
                               <Trash2 className="mr-2 size-4" />
@@ -410,11 +423,7 @@ export default function AdminUsersPage() {
               and the username and email will remain reserved.
             </p>
             <div className="mt-5 flex justify-end gap-2">
-              <Button
-                variant="outline"
-                disabled={deleting}
-                onClick={() => setDeleteTarget(null)}
-              >
+              <Button variant="outline" disabled={deleting} onClick={() => setDeleteTarget(null)}>
                 Cancel
               </Button>
               <Button variant="destructive" disabled={deleting} onClick={() => void deleteUser()}>
@@ -511,6 +520,9 @@ async function responseError(res: Response) {
     const body = (await res.json()) as { error?: string | { code?: string; message?: string } };
     if (typeof body.error === "string" && body.error) return body.error;
     if (body.error?.code === "PROTECTED_ADMIN") return "Bootstrap admin cannot be changed.";
+    if (body.error?.code === "SELF_PERMISSION_CHANGE") {
+      return "You cannot change your own permissions.";
+    }
     if (body.error && typeof body.error.message === "string" && body.error.message) {
       return body.error.message;
     }
@@ -530,4 +542,22 @@ function redirectAccountDisabled() {
 
 function isProtectedAdmin(user: AuthUser) {
   return user.created_by === "bootstrap";
+}
+
+function isCurrentUser(user: AuthUser, currentUserEmail: string) {
+  return currentUserEmail.trim().toLowerCase() === user.email.trim().toLowerCase();
+}
+
+function permissionLockTitle({
+  selfUser,
+  locked,
+  fallback,
+}: {
+  selfUser: boolean;
+  locked: boolean;
+  fallback: string;
+}) {
+  if (!locked) return undefined;
+  if (selfUser) return "You cannot change your own permissions";
+  return fallback;
 }

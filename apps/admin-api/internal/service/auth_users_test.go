@@ -199,3 +199,42 @@ func TestAuthUserLifecycleAndRuntimeToken(t *testing.T) {
 		t.Fatalf("deleted user cannot be restored/redeleted, got %v", err)
 	}
 }
+
+func TestAdminCannotChangeOwnPermissions(t *testing.T) {
+	ctx := context.Background()
+	st := store.NewMemory()
+	svc := New(st, token.NewIssuer("secret", "cocola", time.Hour), authTestClock)
+
+	admin, err := svc.CreateAuthUser(ctx, AuthUserInput{
+		Username: "self-admin",
+		Email:    "self@example.com",
+		Role:     RoleAdmin,
+		Enabled:  boolPtr(true),
+		Password: "admin-password",
+		Actor:    "owner@example.com",
+	})
+	if err != nil {
+		t.Fatalf("create admin: %v", err)
+	}
+	if _, err := svc.SetAuthUser(ctx, admin.ID, AuthUserInput{
+		Role:  RoleUser,
+		Actor: "self@example.com",
+	}); !errors.Is(err, ErrSelfPermission) {
+		t.Fatalf("self role change want ErrSelfPermission, got %v", err)
+	}
+	if _, err := svc.SetAuthUser(ctx, admin.ID, AuthUserInput{
+		Enabled: boolPtr(false),
+		Actor:   "SELF@example.com",
+	}); !errors.Is(err, ErrSelfPermission) {
+		t.Fatalf("self disable want ErrSelfPermission, got %v", err)
+	}
+	if err := svc.DeleteAuthUser(ctx, admin.ID, "self@example.com"); !errors.Is(err, ErrSelfPermission) {
+		t.Fatalf("self delete want ErrSelfPermission, got %v", err)
+	}
+	if _, err := svc.SetAuthUser(ctx, admin.ID, AuthUserInput{
+		Role:  RoleUser,
+		Actor: "other-admin@example.com",
+	}); err != nil {
+		t.Fatalf("different admin should be able to change role: %v", err)
+	}
+}
