@@ -63,9 +63,21 @@ func (a *API) Router() http.Handler {
 	}
 
 	r.Get("/healthz", a.health)
+	r.Post("/auth/login", a.login)
 
 	r.Route("/admin", func(r chi.Router) {
 		r.Use(a.requireAdmin)
+
+		r.Route("/users", func(r chi.Router) {
+			r.Post("/", a.createAuthUser)
+			r.Get("/", a.listAuthUsers)
+			r.Get("/lookup", a.lookupAuthUser)
+			r.Patch("/{id}", a.updateAuthUser)
+			r.Post("/{id}/password", a.resetAuthUserPassword)
+			r.Delete("/{id}", a.deleteAuthUser)
+		})
+
+		r.Post("/runtime-token", a.issueRuntimeToken)
 
 		r.Route("/tokens", func(r chi.Router) {
 			r.Post("/", a.issueToken)
@@ -176,6 +188,14 @@ func writeErr(w http.ResponseWriter, status int, code, msg string) {
 // mapErr translates a service/store sentinel into an HTTP response.
 func mapErr(w http.ResponseWriter, err error) {
 	switch {
+	case errors.Is(err, service.ErrUnauthenticated):
+		writeErr(w, http.StatusUnauthorized, "UNAUTHENTICATED", "invalid credentials")
+	case errors.Is(err, service.ErrAccountDisabled):
+		writeErr(w, http.StatusForbidden, "ACCOUNT_DISABLED", "account disabled")
+	case errors.Is(err, service.ErrProtectedAdmin):
+		writeErr(w, http.StatusForbidden, "PROTECTED_ADMIN", "bootstrap admin cannot be changed")
+	case errors.Is(err, service.ErrPermissionDenied):
+		writeErr(w, http.StatusForbidden, "PERMISSION_DENIED", "permission denied")
 	case errors.Is(err, service.ErrInvalidArg):
 		writeErr(w, http.StatusBadRequest, "INVALID_ARGUMENT", err.Error())
 	case errors.Is(err, store.ErrNotFound):

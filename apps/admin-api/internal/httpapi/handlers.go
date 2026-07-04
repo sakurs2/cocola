@@ -7,6 +7,7 @@ package httpapi
 
 import (
 	"context"
+	"errors"
 	"net/http"
 	"time"
 
@@ -26,6 +27,168 @@ func withActor(r *http.Request, actor string) context.Context {
 
 func (a *API) health(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})
+}
+
+// ---- auth users ----
+
+type loginReq struct {
+	Identifier string `json:"identifier"`
+	Email      string `json:"email"`
+	Password   string `json:"password"`
+}
+
+func (a *API) login(w http.ResponseWriter, r *http.Request) {
+	var req loginReq
+	if err := decode(r, &req); err != nil {
+		mapErr(w, err)
+		return
+	}
+	identifier := req.Identifier
+	if identifier == "" {
+		identifier = req.Email
+	}
+	user, err := a.svc.Authenticate(r.Context(), identifier, req.Password)
+	if err != nil {
+		mapErr(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"user": user})
+}
+
+type createAuthUserReq struct {
+	Username string `json:"username"`
+	Email    string `json:"email"`
+	Role     string `json:"role,omitempty"`
+	Enabled  *bool  `json:"enabled,omitempty"`
+	Password string `json:"password"`
+}
+
+type updateAuthUserReq struct {
+	Username string `json:"username,omitempty"`
+	Email    string `json:"email,omitempty"`
+	Role     string `json:"role,omitempty"`
+	Enabled  *bool  `json:"enabled,omitempty"`
+}
+
+type resetAuthUserPasswordReq struct {
+	Password string `json:"password"`
+}
+
+func (a *API) createAuthUser(w http.ResponseWriter, r *http.Request) {
+	var req createAuthUserReq
+	if err := decode(r, &req); err != nil {
+		mapErr(w, err)
+		return
+	}
+	u, err := a.svc.CreateAuthUser(r.Context(), service.AuthUserInput{
+		Username: req.Username,
+		Email:    req.Email,
+		Role:     req.Role,
+		Enabled:  req.Enabled,
+		Password: req.Password,
+		Actor:    actorOf(r),
+	})
+	if err != nil {
+		if errors.Is(err, store.ErrConflict) {
+			writeErr(w, http.StatusConflict, "CONFLICT", "username or email already exists")
+			return
+		}
+		mapErr(w, err)
+		return
+	}
+	writeJSON(w, http.StatusCreated, u)
+}
+
+func (a *API) listAuthUsers(w http.ResponseWriter, r *http.Request) {
+	users, err := a.svc.ListAuthUsers(r.Context())
+	if err != nil {
+		mapErr(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"users": users})
+}
+
+func (a *API) lookupAuthUser(w http.ResponseWriter, r *http.Request) {
+	u, err := a.svc.GetAuthUserByEmail(r.Context(), r.URL.Query().Get("email"))
+	if err != nil {
+		mapErr(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, u)
+}
+
+func (a *API) updateAuthUser(w http.ResponseWriter, r *http.Request) {
+	var req updateAuthUserReq
+	if err := decode(r, &req); err != nil {
+		mapErr(w, err)
+		return
+	}
+	u, err := a.svc.SetAuthUser(r.Context(), chi.URLParam(r, "id"), service.AuthUserInput{
+		Username: req.Username,
+		Email:    req.Email,
+		Role:     req.Role,
+		Enabled:  req.Enabled,
+		Actor:    actorOf(r),
+	})
+	if err != nil {
+		if errors.Is(err, store.ErrConflict) {
+			writeErr(w, http.StatusConflict, "CONFLICT", "username or email already exists")
+			return
+		}
+		mapErr(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, u)
+}
+
+func (a *API) resetAuthUserPassword(w http.ResponseWriter, r *http.Request) {
+	var req resetAuthUserPasswordReq
+	if err := decode(r, &req); err != nil {
+		mapErr(w, err)
+		return
+	}
+	u, err := a.svc.ResetAuthUserPassword(r.Context(), chi.URLParam(r, "id"), req.Password, actorOf(r))
+	if err != nil {
+		mapErr(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, u)
+}
+
+func (a *API) deleteAuthUser(w http.ResponseWriter, r *http.Request) {
+	if err := a.svc.DeleteAuthUser(r.Context(), chi.URLParam(r, "id"), actorOf(r)); err != nil {
+		mapErr(w, err)
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
+}
+
+type runtimeTokenReq struct {
+	UserID     string `json:"user_id"`
+	TenantID   string `json:"tenant_id,omitempty"`
+	TTLSeconds int64  `json:"ttl_seconds,omitempty"`
+}
+
+func (a *API) issueRuntimeToken(w http.ResponseWriter, r *http.Request) {
+	var req runtimeTokenReq
+	if err := decode(r, &req); err != nil {
+		mapErr(w, err)
+		return
+	}
+	var ttl time.Duration
+	if req.TTLSeconds > 0 {
+		ttl = time.Duration(req.TTLSeconds) * time.Second
+	}
+	effectiveTTL := ttl
+	if effectiveTTL <= 0 {
+		effectiveTTL = 10 * time.Minute
+	}
+	tok, err := a.svc.IssueRuntimeToken(r.Context(), req.UserID, req.TenantID, ttl)
+	if err != nil {
+		mapErr(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"token": tok, "ttl_seconds": int64(effectiveTTL.Seconds())})
 }
 
 // ---- tokens ----

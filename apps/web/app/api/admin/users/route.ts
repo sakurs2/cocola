@@ -7,26 +7,20 @@ export const dynamic = "force-dynamic";
 const ADMIN_URL =
   process.env.COCOLA_ADMIN_URL ?? process.env.COCOLA_ADMIN_BASE_URL ?? "http://127.0.0.1:8092";
 
-export async function GET(req: NextRequest, { params }: { params: Promise<{ path: string[] }> }) {
+export async function GET(req: NextRequest) {
   const authResult = await requireAdmin();
   if (isAuthFail(authResult)) return authResult.response;
-  return proxyAdmin(req, await adminPath(params), authResult.user);
+  return proxyAdmin(req, "/admin/users", authResult.user);
 }
 
-export async function POST(req: NextRequest, { params }: { params: Promise<{ path: string[] }> }) {
+export async function POST(req: NextRequest) {
   const authResult = await requireAdmin();
   if (isAuthFail(authResult)) return authResult.response;
-  const body = await req.text();
-  return proxyAdmin(req, await adminPath(params), authResult.user, {
+  return proxyAdmin(req, "/admin/users", authResult.user, {
     method: "POST",
-    body,
+    body: await req.text(),
     contentType: req.headers.get("content-type") ?? "application/json",
   });
-}
-
-async function adminPath(params: Promise<{ path: string[] }>) {
-  const { path } = await params;
-  return `/admin/sandbox-nodes/${path.map(encodeURIComponent).join("/")}`;
 }
 
 async function proxyAdmin(

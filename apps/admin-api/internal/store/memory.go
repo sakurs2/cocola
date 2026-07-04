@@ -11,26 +11,150 @@ import (
 // default backend for tests and dev. All slices returned are fresh copies so
 // callers cannot mutate internal state.
 type Memory struct {
-	mu       sync.RWMutex
-	tokens   map[string]TokenRecord
-	quotas   map[string]QuotaOverride // key = scope + "/" + subject
-	skills   map[string]Skill
-	audit    []AuditEntry
-	auditSeq int64
+	mu          sync.RWMutex
+	users       map[string]AuthUser
+	identifiers map[string]string // normalized identifier -> user id
+	tokens      map[string]TokenRecord
+	quotas      map[string]QuotaOverride // key = scope + "/" + subject
+	skills      map[string]Skill
+	audit       []AuditEntry
+	auditSeq    int64
 }
 
 // NewMemory returns an empty in-memory store.
 func NewMemory() *Memory {
 	return &Memory{
-		tokens: map[string]TokenRecord{},
-		quotas: map[string]QuotaOverride{},
-		skills: map[string]Skill{},
+		users:       map[string]AuthUser{},
+		identifiers: map[string]string{},
+		tokens:      map[string]TokenRecord{},
+		quotas:      map[string]QuotaOverride{},
+		skills:      map[string]Skill{},
 	}
 }
 
 var _ Store = (*Memory)(nil)
 
 func quotaKey(scope, subject string) string { return scope + "/" + subject }
+
+// ---- Auth users ----
+
+func (m *Memory) CreateAuthUser(ctx context.Context, u AuthUser) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if _, ok := m.users[u.ID]; ok {
+		return ErrConflict
+	}
+	for _, ident := range authUserIdentifiersFor(u) {
+		if owner, ok := m.identifiers[ident.Value]; ok && owner != u.ID {
+			return ErrConflict
+		}
+	}
+	m.users[u.ID] = u
+	for _, ident := range authUserIdentifiersFor(u) {
+		m.identifiers[ident.Value] = u.ID
+	}
+	return nil
+}
+
+func (m *Memory) GetAuthUser(ctx context.Context, id string) (AuthUser, error) {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	u, ok := m.users[id]
+	if !ok {
+		return AuthUser{}, ErrNotFound
+	}
+	return u, nil
+}
+
+func (m *Memory) GetAuthUserByEmail(ctx context.Context, email string) (AuthUser, error) {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	for _, u := range m.users {
+		if u.Email == email {
+			return u, nil
+		}
+	}
+	return AuthUser{}, ErrNotFound
+}
+
+func (m *Memory) GetAuthUserByIdentifier(ctx context.Context, identifier string) (AuthUser, error) {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	id, ok := m.identifiers[identifier]
+	if !ok {
+		return AuthUser{}, ErrNotFound
+	}
+	u, ok := m.users[id]
+	if !ok {
+		return AuthUser{}, ErrNotFound
+	}
+	return u, nil
+}
+
+func (m *Memory) ListAuthUsers(ctx context.Context) ([]AuthUser, error) {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	out := make([]AuthUser, 0, len(m.users))
+	for _, u := range m.users {
+		if !u.DeletedAt.IsZero() {
+			continue
+		}
+		out = append(out, u)
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i].Email < out[j].Email })
+	return out, nil
+}
+
+func (m *Memory) UpdateAuthUser(ctx context.Context, u AuthUser) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if _, ok := m.users[u.ID]; !ok {
+		return ErrNotFound
+	}
+	for _, ident := range authUserIdentifiersFor(u) {
+		if owner, ok := m.identifiers[ident.Value]; ok && owner != u.ID {
+			return ErrConflict
+		}
+	}
+	for value, owner := range m.identifiers {
+		if owner == u.ID {
+			delete(m.identifiers, value)
+		}
+	}
+	m.users[u.ID] = u
+	for _, ident := range authUserIdentifiersFor(u) {
+		m.identifiers[ident.Value] = u.ID
+	}
+	return nil
+}
+
+func (m *Memory) DeleteAuthUser(ctx context.Context, id, actor string, at time.Time) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	u, ok := m.users[id]
+	if !ok || !u.DeletedAt.IsZero() {
+		return ErrNotFound
+	}
+	u.Enabled = false
+	u.DeletedAt = at
+	u.DeletedBy = actor
+	u.UpdatedAt = at
+	u.UpdatedBy = actor
+	m.users[id] = u
+	return nil
+}
+
+func (m *Memory) TouchAuthUserLogin(ctx context.Context, id string, at time.Time) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	u, ok := m.users[id]
+	if !ok {
+		return ErrNotFound
+	}
+	u.LastLoginAt = at
+	m.users[id] = u
+	return nil
+}
 
 // ---- Tokens ----
 

@@ -147,6 +147,39 @@ func TestCreate_HappyPath(t *testing.T) {
 	}
 }
 
+func TestCreate_SanitisesMetadataLabelValues(t *testing.T) {
+	var body createSandboxRequest
+	p := newStub(t, func(r *http.Request) (*http.Response, error) {
+		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+			t.Fatalf("decode create body: %v", err)
+		}
+		return jsonResp(http.StatusOK, `{"id":"sbx-123","status":{"state":"Pending"}}`), nil
+	})
+
+	sb, err := p.Create(context.Background(), provider.SandboxSpec{
+		UserID:    "admin@cocola.local",
+		SessionID: "Session/With Spaces",
+		Image:     "cocola/sandbox-runtime:dev",
+	})
+	if err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+	if sb.UserID != "admin@cocola.local" {
+		t.Fatalf("sandbox user id should remain raw identity, got %q", sb.UserID)
+	}
+	userMeta := body.Metadata["cocola.user_id"]
+	if strings.Contains(userMeta, "@") || len(userMeta) > 63 {
+		t.Fatalf("unsafe metadata user id %q", userMeta)
+	}
+	if !strings.HasPrefix(userMeta, "admin-cocola.local-") {
+		t.Fatalf("metadata user id = %q, want sanitized email prefix", userMeta)
+	}
+	sessionMeta := body.Metadata["cocola.session_id"]
+	if strings.Contains(sessionMeta, "/") || strings.Contains(sessionMeta, " ") || len(sessionMeta) > 63 {
+		t.Fatalf("unsafe metadata session id %q", sessionMeta)
+	}
+}
+
 func TestCreate_EmptyIDFails(t *testing.T) {
 	p := newStub(t, func(r *http.Request) (*http.Response, error) {
 		return jsonResp(http.StatusOK, `{"id":"","status":{"state":"Pending"}}`), nil

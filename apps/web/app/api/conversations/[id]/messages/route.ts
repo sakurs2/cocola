@@ -1,4 +1,5 @@
 import { NextRequest } from "next/server";
+import { isAuthFail, requireUser, runtimeAuthHeaders } from "@/lib/server-auth";
 
 // Same-origin proxy for one conversation's MESSAGES (history). The gateway
 // enforces ownership against the verified token, so a caller can only load
@@ -18,11 +19,14 @@ export async function GET(
   { params }: { params: Promise<{ id: string }> },
 ) {
   const { id } = await params;
-  const auth = req.headers.get("authorization") ?? "";
+  const authResult = await requireUser();
+  if (isAuthFail(authResult)) return authResult.response;
+  const authHeaders = await runtimeAuthHeaders(authResult.user);
+  if (authHeaders instanceof Response) return authHeaders;
   try {
     const upstream = await fetch(
       `${GATEWAY_URL}/v1/conversations/${encodeURIComponent(id)}/messages`,
-      { method: "GET", cache: "no-store", headers: { ...(auth ? { authorization: auth } : {}) } },
+      { method: "GET", cache: "no-store", headers: authHeaders },
     );
     const body = await upstream.text();
     return new Response(body, {

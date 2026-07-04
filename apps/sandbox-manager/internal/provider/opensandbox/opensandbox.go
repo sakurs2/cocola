@@ -378,8 +378,11 @@ type ssePayload struct {
 // cocola->opensandbox id mapping.
 func (p *Provider) Create(ctx context.Context, spec provider.SandboxSpec) (*provider.Sandbox, error) {
 	req := createSandboxRequest{
-		Env:      spec.Env,
-		Metadata: map[string]string{"cocola.user_id": spec.UserID, "cocola.session_id": spec.SessionID},
+		Env: spec.Env,
+		Metadata: map[string]string{
+			"cocola.user_id":    safeMetadataLabelValue(spec.UserID),
+			"cocola.session_id": safeMetadataLabelValue(spec.SessionID),
+		},
 	}
 	if spec.Image != "" {
 		req.Image = &imageSpec{URI: spec.Image}
@@ -1137,6 +1140,44 @@ func safePathSegment(s string) string {
 		}
 	}
 	return base + "-" + hash
+}
+
+// safeMetadataLabelValue sanitises metadata values that OpenSandbox validates
+// with Kubernetes label-value rules. Preserve the original provider.Sandbox
+// UserID/SessionID; only the OpenSandbox metadata projection is normalised.
+func safeMetadataLabelValue(s string) string {
+	const maxLabelValueLen = 63
+
+	h := sha256.Sum256([]byte(s))
+	hash := hex.EncodeToString(h[:])[:12]
+	var b strings.Builder
+	prevDash := false
+	for _, r := range strings.ToLower(s) {
+		ok := (r >= 'a' && r <= 'z') || (r >= '0' && r <= '9') || r == '-' || r == '_' || r == '.'
+		if ok {
+			b.WriteRune(r)
+			prevDash = false
+			continue
+		}
+		if !prevDash {
+			b.WriteByte('-')
+			prevDash = true
+		}
+	}
+
+	base := strings.Trim(b.String(), "-_.")
+	if base == "" {
+		base = "x"
+	}
+	suffix := "-" + hash
+	limit := maxLabelValueLen - len(suffix)
+	if len(base) > limit {
+		base = strings.Trim(base[:limit], "-_.")
+		if base == "" {
+			base = "x"
+		}
+	}
+	return base + suffix
 }
 
 func isSubpath(root, path string) bool {

@@ -12,19 +12,27 @@ package service
 
 import (
 	"context"
+	"crypto/rand"
+	"encoding/hex"
 	"errors"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/cocola-project/cocola/apps/admin-api/internal/store"
 	"github.com/cocola-project/cocola/packages/go-common/token"
+	"golang.org/x/crypto/bcrypt"
 )
 
 // Sentinel errors mapped to HTTP codes by the handler layer.
 var (
-	ErrInvalidArg = errors.New("service: invalid argument")
-	ErrNotFound   = store.ErrNotFound
-	ErrConflict   = store.ErrConflict
+	ErrInvalidArg       = errors.New("service: invalid argument")
+	ErrUnauthenticated  = errors.New("service: unauthenticated")
+	ErrAccountDisabled  = errors.New("service: account disabled")
+	ErrProtectedAdmin   = errors.New("service: protected admin")
+	ErrPermissionDenied = errors.New("service: permission denied")
+	ErrNotFound         = store.ErrNotFound
+	ErrConflict         = store.ErrConflict
 )
 
 // Clock is injectable so tests get deterministic timestamps.
@@ -53,6 +61,388 @@ func New(s store.Store, iss *token.Issuer, now Clock) *Admin {
 func (a *Admin) WithSandboxNodeManager(m SandboxNodeManager) *Admin {
 	a.sandboxNodes = m
 	return a
+}
+
+// ---- Auth users / whitelist ----
+
+const (
+	RoleUser       = "user"
+	RoleAdmin      = "admin"
+	bootstrapActor = "bootstrap"
+)
+
+// AuthUserInput describes user creation/update over the admin surface.
+type AuthUserInput struct {
+	Username string
+	Email    string
+	Role     string
+	Enabled  *bool
+	Password string
+	Actor    string
+}
+
+// LoginResult is the safe identity payload returned to Auth.js. It deliberately
+// excludes PasswordHash and any cocola runtime token.
+type LoginResult struct {
+	ID       string `json:"id"`
+	Username string `json:"username"`
+	Email    string `json:"email"`
+	Name     string `json:"name"`
+	Role     string `json:"role"`
+	Enabled  bool   `json:"enabled"`
+}
+
+func isAuthUserUnavailable(u store.AuthUser) bool {
+	return !u.Enabled || !u.DeletedAt.IsZero()
+}
+
+func isBootstrapAdmin(u store.AuthUser) bool {
+	return strings.EqualFold(strings.TrimSpace(u.CreatedBy), bootstrapActor)
+}
+
+// BootstrapAdminInput seeds the first admin from environment variables.
+type BootstrapAdminInput struct {
+	Username     string
+	Email        string
+	Password     string
+	PasswordHash string
+	Reset        bool
+	Actor        string
+}
+
+func normalizeEmail(email string) string {
+	return strings.ToLower(strings.TrimSpace(email))
+}
+
+func normalizeUsername(username string) string {
+	return strings.ToLower(strings.TrimSpace(username))
+}
+
+func normalizeIdentifier(identifier string) string {
+	return strings.ToLower(strings.TrimSpace(identifier))
+}
+
+func defaultUsername(email string) string {
+	local, _, ok := strings.Cut(email, "@")
+	if !ok {
+		local = email
+	}
+	local = normalizeUsername(local)
+	if local == "" {
+		return "user"
+	}
+	return local
+}
+
+func validRole(role string) bool {
+	return role == RoleUser || role == RoleAdmin
+}
+
+func publicUser(u store.AuthUser) LoginResult {
+	name := u.Name
+	if name == "" {
+		name = u.Username
+	}
+	if name == "" {
+		name = u.Email
+	}
+	return LoginResult{
+		ID:       u.ID,
+		Username: u.Username,
+		Email:    u.Email,
+		Name:     name,
+		Role:     u.Role,
+		Enabled:  u.Enabled,
+	}
+}
+
+func newID() string {
+	var b [12]byte
+	_, _ = rand.Read(b[:])
+	return hex.EncodeToString(b[:])
+}
+
+func hashPassword(password string) (string, error) {
+	if strings.TrimSpace(password) == "" {
+		return "", ErrInvalidArg
+	}
+	b, err := bcrypt.GenerateFromPassword([]byte(password), bcrypt.DefaultCost)
+	if err != nil {
+		return "", err
+	}
+	return string(b), nil
+}
+
+func (a *Admin) CreateAuthUser(ctx context.Context, in AuthUserInput) (store.AuthUser, error) {
+	email := normalizeEmail(in.Email)
+	username := normalizeUsername(in.Username)
+	if username == "" {
+		username = defaultUsername(email)
+	}
+	role := in.Role
+	if role == "" {
+		role = RoleUser
+	}
+	if email == "" || username == "" || !validRole(role) || strings.TrimSpace(in.Password) == "" {
+		return store.AuthUser{}, ErrInvalidArg
+	}
+	pw, err := hashPassword(in.Password)
+	if err != nil {
+		return store.AuthUser{}, err
+	}
+	now := a.now().UTC()
+	enabled := true
+	if in.Enabled != nil {
+		enabled = *in.Enabled
+	}
+	u := store.AuthUser{
+		ID:              newID(),
+		Username:        username,
+		Email:           email,
+		Name:            username,
+		Role:            role,
+		Enabled:         enabled,
+		PasswordHash:    pw,
+		CreatedAt:       now,
+		UpdatedAt:       now,
+		CreatedBy:       in.Actor,
+		UpdatedBy:       in.Actor,
+		PasswordUpdated: now,
+	}
+	if err := a.store.CreateAuthUser(ctx, u); err != nil {
+		return store.AuthUser{}, err
+	}
+	a.audit(ctx, in.Actor, "auth_user.create", u.ID, "email="+u.Email+" role="+u.Role)
+	return u, nil
+}
+
+func (a *Admin) ListAuthUsers(ctx context.Context) ([]store.AuthUser, error) {
+	return a.store.ListAuthUsers(ctx)
+}
+
+func (a *Admin) GetAuthUserByEmail(ctx context.Context, email string) (store.AuthUser, error) {
+	normalized := normalizeEmail(email)
+	if normalized == "" {
+		return store.AuthUser{}, ErrInvalidArg
+	}
+	return a.store.GetAuthUserByEmail(ctx, normalized)
+}
+
+func (a *Admin) GetAuthUserByIdentifier(ctx context.Context, identifier string) (store.AuthUser, error) {
+	normalized := normalizeIdentifier(identifier)
+	if normalized == "" {
+		return store.AuthUser{}, ErrInvalidArg
+	}
+	return a.store.GetAuthUserByIdentifier(ctx, normalized)
+}
+
+func (a *Admin) SetAuthUser(ctx context.Context, id string, in AuthUserInput) (store.AuthUser, error) {
+	if id == "" {
+		return store.AuthUser{}, ErrInvalidArg
+	}
+	u, err := a.store.GetAuthUser(ctx, id)
+	if err != nil {
+		return store.AuthUser{}, err
+	}
+	if !u.DeletedAt.IsZero() {
+		return store.AuthUser{}, ErrNotFound
+	}
+	if email := normalizeEmail(in.Email); email != "" {
+		u.Email = email
+	}
+	if username := normalizeUsername(in.Username); username != "" {
+		u.Username = username
+	}
+	u.Name = u.Username
+	if in.Role != "" {
+		if !validRole(in.Role) {
+			return store.AuthUser{}, ErrInvalidArg
+		}
+		if isBootstrapAdmin(u) && in.Role != RoleAdmin {
+			return store.AuthUser{}, ErrProtectedAdmin
+		}
+		u.Role = in.Role
+	}
+	if in.Enabled != nil {
+		if isBootstrapAdmin(u) && !*in.Enabled {
+			return store.AuthUser{}, ErrProtectedAdmin
+		}
+		u.Enabled = *in.Enabled
+	}
+	u.UpdatedAt = a.now().UTC()
+	u.UpdatedBy = in.Actor
+	if err := a.store.UpdateAuthUser(ctx, u); err != nil {
+		return store.AuthUser{}, err
+	}
+	a.audit(ctx, in.Actor, "auth_user.update", u.ID, "email="+u.Email+" role="+u.Role+" enabled="+strconv.FormatBool(u.Enabled))
+	return u, nil
+}
+
+func (a *Admin) ResetAuthUserPassword(ctx context.Context, id, password, actor string) (store.AuthUser, error) {
+	if id == "" {
+		return store.AuthUser{}, ErrInvalidArg
+	}
+	u, err := a.store.GetAuthUser(ctx, id)
+	if err != nil {
+		return store.AuthUser{}, err
+	}
+	if !u.DeletedAt.IsZero() {
+		return store.AuthUser{}, ErrNotFound
+	}
+	pw, err := hashPassword(password)
+	if err != nil {
+		return store.AuthUser{}, err
+	}
+	now := a.now().UTC()
+	u.PasswordHash = pw
+	u.PasswordUpdated = now
+	u.UpdatedAt = now
+	u.UpdatedBy = actor
+	if err := a.store.UpdateAuthUser(ctx, u); err != nil {
+		return store.AuthUser{}, err
+	}
+	a.audit(ctx, actor, "auth_user.password_reset", u.ID, "email="+u.Email)
+	return u, nil
+}
+
+func (a *Admin) DeleteAuthUser(ctx context.Context, id, actor string) error {
+	if id == "" {
+		return ErrInvalidArg
+	}
+	u, err := a.store.GetAuthUser(ctx, id)
+	if err != nil {
+		return err
+	}
+	if !u.DeletedAt.IsZero() {
+		return ErrNotFound
+	}
+	if isBootstrapAdmin(u) {
+		return ErrProtectedAdmin
+	}
+	now := a.now().UTC()
+	if err := a.store.DeleteAuthUser(ctx, id, actor, now); err != nil {
+		return err
+	}
+	a.audit(ctx, actor, "auth_user.delete", id, "email="+u.Email)
+	return nil
+}
+
+func (a *Admin) Authenticate(ctx context.Context, identifier, password string) (LoginResult, error) {
+	u, err := a.GetAuthUserByIdentifier(ctx, identifier)
+	if err != nil {
+		if errors.Is(err, store.ErrNotFound) {
+			return LoginResult{}, ErrUnauthenticated
+		}
+		return LoginResult{}, err
+	}
+	if isAuthUserUnavailable(u) {
+		return LoginResult{}, ErrAccountDisabled
+	}
+	if bcrypt.CompareHashAndPassword([]byte(u.PasswordHash), []byte(password)) != nil {
+		return LoginResult{}, ErrUnauthenticated
+	}
+	_ = a.store.TouchAuthUserLogin(ctx, u.ID, a.now().UTC())
+	return publicUser(u), nil
+}
+
+func (a *Admin) BootstrapAdmin(ctx context.Context, in BootstrapAdminInput) error {
+	email := normalizeEmail(in.Email)
+	if email == "" {
+		return nil
+	}
+	username := normalizeUsername(in.Username)
+	if username == "" {
+		username = defaultUsername(email)
+	}
+	if in.Actor == "" {
+		in.Actor = bootstrapActor
+	}
+	existing, err := a.store.GetAuthUserByEmail(ctx, email)
+	if err != nil && !errors.Is(err, store.ErrNotFound) {
+		return err
+	}
+	if err == nil && !existing.DeletedAt.IsZero() {
+		return nil
+	}
+
+	hash := strings.TrimSpace(in.PasswordHash)
+	if hash == "" && strings.TrimSpace(in.Password) != "" {
+		var hErr error
+		hash, hErr = hashPassword(in.Password)
+		if hErr != nil {
+			return hErr
+		}
+	}
+	if errors.Is(err, store.ErrNotFound) {
+		if hash == "" {
+			return ErrInvalidArg
+		}
+		now := a.now().UTC()
+		u := store.AuthUser{
+			ID:              newID(),
+			Username:        username,
+			Email:           email,
+			Name:            username,
+			Role:            RoleAdmin,
+			Enabled:         true,
+			PasswordHash:    hash,
+			CreatedAt:       now,
+			UpdatedAt:       now,
+			CreatedBy:       bootstrapActor,
+			UpdatedBy:       in.Actor,
+			PasswordUpdated: now,
+		}
+		if err := a.store.CreateAuthUser(ctx, u); err != nil {
+			return err
+		}
+		a.audit(ctx, in.Actor, "auth_user.bootstrap", u.ID, "email="+u.Email)
+		return nil
+	}
+	if !in.Reset {
+		return nil
+	}
+	if hash == "" {
+		return ErrInvalidArg
+	}
+	now := a.now().UTC()
+	existing.Role = RoleAdmin
+	existing.Username = username
+	existing.Name = username
+	existing.Enabled = true
+	existing.CreatedBy = bootstrapActor
+	existing.PasswordHash = hash
+	existing.PasswordUpdated = now
+	existing.UpdatedAt = now
+	existing.UpdatedBy = in.Actor
+	if err := a.store.UpdateAuthUser(ctx, existing); err != nil {
+		return err
+	}
+	a.audit(ctx, in.Actor, "auth_user.bootstrap_reset", existing.ID, "email="+existing.Email)
+	return nil
+}
+
+func (a *Admin) IssueRuntimeToken(ctx context.Context, userID, tenant string, ttl time.Duration) (string, error) {
+	if a.issuer == nil {
+		return "", ErrInvalidArg
+	}
+	if strings.TrimSpace(userID) == "" {
+		return "", ErrInvalidArg
+	}
+	if strings.Contains(userID, "@") {
+		u, err := a.store.GetAuthUserByEmail(ctx, normalizeEmail(userID))
+		if err != nil {
+			return "", err
+		}
+		if isAuthUserUnavailable(u) {
+			return "", ErrAccountDisabled
+		}
+		userID = u.Email
+	}
+	if ttl <= 0 {
+		ttl = 10 * time.Minute
+	}
+	tok, _, err := a.issuer.Issue(strings.TrimSpace(userID), strings.TrimSpace(tenant), ttl, a.now().Unix())
+	return tok, err
 }
 
 // ---- Tokens ----

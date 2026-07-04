@@ -127,6 +127,200 @@ func TestAuthDisabledWhenNoKey(t *testing.T) {
 	}
 }
 
+func TestAuthUsersLoginAndRuntimeToken(t *testing.T) {
+	api := newTestAPI("k")
+	r := api.Router()
+
+	// Public login misses until an admin creates the user.
+	rec := do(t, r, http.MethodPost, "/auth/login", "", map[string]any{
+		"email": "alice@example.com", "password": "pw",
+	})
+	if rec.Code != http.StatusUnauthorized {
+		t.Fatalf("unknown login: want 401, got %d", rec.Code)
+	}
+
+	// User management is admin-key protected.
+	rec = do(t, r, http.MethodPost, "/admin/users", "", map[string]any{
+		"username": "alice", "email": "alice@example.com", "password": "pw", "role": "user",
+	})
+	if rec.Code != http.StatusUnauthorized {
+		t.Fatalf("create user without key: want 401, got %d", rec.Code)
+	}
+
+	rec = do(t, r, http.MethodPost, "/admin/users", "k", map[string]any{
+		"username": "Alice", "email": "Alice@Example.COM", "password": "pw", "role": "user",
+	})
+	if rec.Code != http.StatusCreated {
+		t.Fatalf("create auth user: want 201, got %d (%s)", rec.Code, rec.Body.String())
+	}
+	var created store.AuthUser
+	if err := json.Unmarshal(rec.Body.Bytes(), &created); err != nil {
+		t.Fatalf("decode created user: %v", err)
+	}
+	if created.Username != "alice" || created.Email != "alice@example.com" || created.PasswordHash != "" {
+		t.Fatalf("public user JSON should be normalized and hide password hash: %+v", created)
+	}
+	for name, payload := range map[string]map[string]any{
+		"duplicate username":          {"username": "ALICE", "email": "alice2@example.com", "password": "pw", "role": "user"},
+		"duplicate email":             {"username": "alice2", "email": "ALICE@example.com", "password": "pw", "role": "user"},
+		"cross-kind duplicate handle": {"username": "ALICE@example.com", "email": "alice3@example.com", "password": "pw", "role": "user"},
+	} {
+		rec = do(t, r, http.MethodPost, "/admin/users", "k", payload)
+		if rec.Code != http.StatusConflict {
+			t.Fatalf("%s: want 409, got %d (%s)", name, rec.Code, rec.Body.String())
+		}
+		var body errBody
+		if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
+			t.Fatalf("%s: decode error response: %v", name, err)
+		}
+		if body.Error.Message != "username or email already exists" {
+			t.Fatalf("%s: wrong message %q", name, body.Error.Message)
+		}
+	}
+	rec = do(t, r, http.MethodGet, "/admin/users/lookup?email=Alice%40Example.COM", "k", nil)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("lookup auth user: want 200, got %d (%s)", rec.Code, rec.Body.String())
+	}
+
+	rec = do(t, r, http.MethodPost, "/auth/login", "", map[string]any{
+		"identifier": "ALICE@example.com", "password": "pw",
+	})
+	if rec.Code != http.StatusOK {
+		t.Fatalf("login: want 200, got %d (%s)", rec.Code, rec.Body.String())
+	}
+	var login struct {
+		User service.LoginResult `json:"user"`
+	}
+	_ = json.Unmarshal(rec.Body.Bytes(), &login)
+	if login.User.ID != created.ID || login.User.Username != "alice" || login.User.Role != "user" {
+		t.Fatalf("login user payload wrong: %+v", login.User)
+	}
+	rec = do(t, r, http.MethodPost, "/auth/login", "", map[string]any{
+		"identifier": "alice", "password": "pw",
+	})
+	if rec.Code != http.StatusOK {
+		t.Fatalf("username login: want 200, got %d (%s)", rec.Code, rec.Body.String())
+	}
+
+	rec = do(t, r, http.MethodPost, "/admin/runtime-token", "k", map[string]any{
+		"user_id": login.User.Email,
+	})
+	if rec.Code != http.StatusOK {
+		t.Fatalf("runtime token: want 200, got %d (%s)", rec.Code, rec.Body.String())
+	}
+	var rt struct {
+		Token string `json:"token"`
+	}
+	_ = json.Unmarshal(rec.Body.Bytes(), &rt)
+	if rt.Token == "" {
+		t.Fatalf("runtime token empty")
+	}
+	if _, err := token.Decode(rt.Token, "test-secret", fixedClock().Unix()); err != nil {
+		t.Fatalf("runtime token not decodable: %v", err)
+	}
+
+	rec = do(t, r, http.MethodPatch, "/admin/users/"+created.ID, "k", map[string]any{"enabled": false})
+	if rec.Code != http.StatusOK {
+		t.Fatalf("disable auth user: want 200, got %d (%s)", rec.Code, rec.Body.String())
+	}
+	rec = do(t, r, http.MethodPost, "/auth/login", "", map[string]any{
+		"email": "alice@example.com", "password": "pw",
+	})
+	if rec.Code != http.StatusForbidden {
+		t.Fatalf("disabled login: want 403, got %d", rec.Code)
+	}
+	var disabledBody errBody
+	if err := json.Unmarshal(rec.Body.Bytes(), &disabledBody); err != nil {
+		t.Fatalf("disabled login error body: %v", err)
+	}
+	if disabledBody.Error.Code != "ACCOUNT_DISABLED" {
+		t.Fatalf("disabled login code: %+v", disabledBody)
+	}
+	rec = do(t, r, http.MethodPost, "/admin/runtime-token", "k", map[string]any{
+		"user_id": login.User.Email,
+	})
+	if rec.Code != http.StatusForbidden {
+		t.Fatalf("disabled runtime token: want 403, got %d (%s)", rec.Code, rec.Body.String())
+	}
+
+	rec = do(t, r, http.MethodPatch, "/admin/users/"+created.ID, "k", map[string]any{"enabled": true})
+	if rec.Code != http.StatusOK {
+		t.Fatalf("reenable auth user: want 200, got %d (%s)", rec.Code, rec.Body.String())
+	}
+	rec = do(t, r, http.MethodDelete, "/admin/users/"+created.ID, "k", nil)
+	if rec.Code != http.StatusNoContent {
+		t.Fatalf("delete auth user: want 204, got %d (%s)", rec.Code, rec.Body.String())
+	}
+	rec = do(t, r, http.MethodGet, "/admin/users", "k", nil)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("list after delete: want 200, got %d (%s)", rec.Code, rec.Body.String())
+	}
+	var listed struct {
+		Users []store.AuthUser `json:"users"`
+	}
+	_ = json.Unmarshal(rec.Body.Bytes(), &listed)
+	if len(listed.Users) != 0 {
+		t.Fatalf("deleted user should be hidden from list: %+v", listed.Users)
+	}
+	rec = do(t, r, http.MethodPost, "/auth/login", "", map[string]any{
+		"identifier": "alice", "password": "pw",
+	})
+	if rec.Code != http.StatusForbidden {
+		t.Fatalf("deleted login: want 403, got %d (%s)", rec.Code, rec.Body.String())
+	}
+	rec = do(t, r, http.MethodPost, "/admin/users", "k", map[string]any{
+		"username": "alice-new", "email": "alice@example.com", "password": "pw", "role": "user",
+	})
+	if rec.Code != http.StatusConflict {
+		t.Fatalf("deleted user email should still conflict: got %d (%s)", rec.Code, rec.Body.String())
+	}
+	rec = do(t, r, http.MethodDelete, "/admin/users/"+created.ID, "k", nil)
+	if rec.Code != http.StatusNotFound {
+		t.Fatalf("delete already deleted user: want 404, got %d (%s)", rec.Code, rec.Body.String())
+	}
+}
+
+func TestProtectedBootstrapAdminCannotBeDemotedDisabledOrDeleted(t *testing.T) {
+	api := newTestAPI("k")
+	if err := api.svc.BootstrapAdmin(context.Background(), service.BootstrapAdminInput{
+		Username: "admin",
+		Email:    "admin@example.com",
+		Password: "pw",
+		Actor:    "bootstrap",
+	}); err != nil {
+		t.Fatalf("bootstrap admin: %v", err)
+	}
+	rec := do(t, api.Router(), http.MethodGet, "/admin/users/lookup?email=admin%40example.com", "k", nil)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("lookup bootstrap admin: want 200, got %d (%s)", rec.Code, rec.Body.String())
+	}
+	var admin store.AuthUser
+	if err := json.Unmarshal(rec.Body.Bytes(), &admin); err != nil {
+		t.Fatalf("decode bootstrap admin: %v", err)
+	}
+
+	for name, req := range map[string]struct {
+		method string
+		body   any
+	}{
+		"downgrade": {method: http.MethodPatch, body: map[string]any{"role": "user"}},
+		"disable":   {method: http.MethodPatch, body: map[string]any{"enabled": false}},
+		"delete":    {method: http.MethodDelete},
+	} {
+		rec = do(t, api.Router(), req.method, "/admin/users/"+admin.ID, "k", req.body)
+		if rec.Code != http.StatusForbidden {
+			t.Fatalf("%s: want 403, got %d (%s)", name, rec.Code, rec.Body.String())
+		}
+		var body errBody
+		if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
+			t.Fatalf("%s: decode error body: %v", name, err)
+		}
+		if body.Error.Code != "PROTECTED_ADMIN" {
+			t.Fatalf("%s: wrong error body: %+v", name, body)
+		}
+	}
+}
+
 func TestTokenLifecycle(t *testing.T) {
 	api := newTestAPI("k")
 	r := api.Router()

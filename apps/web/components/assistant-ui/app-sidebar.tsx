@@ -6,6 +6,7 @@ import {
   FolderClosed,
   Hash,
   LoaderCircle,
+  LogOut,
   MoreHorizontal,
   MessagesSquare,
   NotebookPen,
@@ -16,7 +17,9 @@ import {
   Server,
   LayoutGrid,
   Trash2,
+  Users,
 } from "lucide-react";
+import { signOut, useSession } from "next-auth/react";
 import { cn } from "@/lib/utils";
 import { useCocola } from "@/app/runtime-provider";
 
@@ -34,6 +37,7 @@ const PRIMARY_NAV: NavItem[] = [
   { icon: Search, label: "Search" },
   { icon: NotebookPen, label: "Notes" },
   { icon: LayoutGrid, label: "Workspace" },
+  { icon: Users, label: "Users", href: "/admin/users" },
   { icon: Server, label: "Sandbox Nodes", href: "/admin/sandbox-nodes" },
 ];
 
@@ -45,6 +49,7 @@ const FOLDERS = [
 ];
 
 export function AppSidebar() {
+  const { data: session } = useSession();
   const [collapsed, setCollapsed] = useState(false);
   const [menuOpenId, setMenuOpenId] = useState<string | null>(null);
   const [editingId, setEditingId] = useState<string | null>(null);
@@ -62,6 +67,10 @@ export function AppSidebar() {
     runningConversationIds,
     unreadCompletedConversationIds,
   } = useCocola();
+  const isAdmin = session?.user?.role === "admin";
+  const userLabel = session?.user?.name || session?.user?.email || "User";
+  const userSubtitle = session?.user?.role;
+  const userInitial = userLabel.trim().slice(0, 1).toUpperCase() || "U";
 
   const startRename = (id: string, title: string) => {
     setMenuOpenId(null);
@@ -138,23 +147,25 @@ export function AppSidebar() {
               <Plus className="size-4 shrink-0" />
               {!collapsed && <span className="truncate">New Chat</span>}
             </SidebarButton>
-            {PRIMARY_NAV.map(({ icon: Icon, label, href }) => (
-              <SidebarButton
-                key={label}
-                collapsed={collapsed}
-                title={label}
-                onClick={
-                  href
-                    ? () => {
-                        window.location.href = href;
-                      }
-                    : undefined
-                }
-              >
-                <Icon className="size-4 shrink-0" />
-                {!collapsed && <span className="truncate">{label}</span>}
-              </SidebarButton>
-            ))}
+            {PRIMARY_NAV.filter((item) => !item.href?.startsWith("/admin") || isAdmin).map(
+              ({ icon: Icon, label, href }) => (
+                <SidebarButton
+                  key={label}
+                  collapsed={collapsed}
+                  title={label}
+                  onClick={
+                    href
+                      ? () => {
+                          window.location.href = href;
+                        }
+                      : undefined
+                  }
+                >
+                  <Icon className="size-4 shrink-0" />
+                  {!collapsed && <span className="truncate">{label}</span>}
+                </SidebarButton>
+              ),
+            )}
           </div>
 
           {!collapsed && (
@@ -214,13 +225,32 @@ export function AppSidebar() {
           )}
         </nav>
 
-        {/* Footer: user area (static placeholder) */}
         <div className="border-t border-sidebar-border p-2">
           <div className="flex items-center gap-2 rounded-md px-2 py-1.5">
             <div className="grid size-6 shrink-0 place-items-center rounded-full bg-amber-500/90 text-[11px] font-medium text-white">
-              U
+              {userInitial}
             </div>
-            {!collapsed && <span className="truncate text-sm">User</span>}
+            {!collapsed && (
+              <>
+                <div className="min-w-0 flex-1">
+                  <div className="truncate text-sm">{userLabel}</div>
+                  {userSubtitle && (
+                    <div className="truncate text-[11px] text-sidebar-foreground/55">
+                      {userSubtitle}
+                    </div>
+                  )}
+                </div>
+                <button
+                  type="button"
+                  title="Sign out"
+                  aria-label="Sign out"
+                  onClick={() => void signOut({ callbackUrl: "/login" })}
+                  className="grid size-7 shrink-0 place-items-center rounded-md text-sidebar-foreground/60 hover:bg-sidebar-accent hover:text-sidebar-accent-foreground"
+                >
+                  <LogOut className="size-4" />
+                </button>
+              </>
+            )}
           </div>
         </div>
       </aside>

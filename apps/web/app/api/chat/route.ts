@@ -1,4 +1,5 @@
 import { NextRequest } from "next/server";
+import { isAuthFail, requireUser, runtimeAuthHeaders } from "@/lib/server-auth";
 
 // Same-origin SSE proxy: browser -> this route -> cocola gateway.
 //
@@ -6,11 +7,11 @@ import { NextRequest } from "next/server";
 // SSE at POST /v1/chat. A browser cannot call it cross-origin, and EventSource
 // cannot POST. So the page POSTs here (same origin), and we forward the request
 // to the gateway and stream its response body straight back, unbuffered. This
-// keeps the page a pure test client with zero coupling to the gateway's address.
+// keeps the browser decoupled from the gateway's address and credentials.
 //
 // The gateway URL is server-side config (COCOLA_GATEWAY_URL), never exposed to
-// the browser. The caller's bearer token is passed through verbatim — the
-// gateway is the only thing that verifies it.
+// the browser. The browser holds only an Auth.js session; this route gets a
+// short-lived cocola runtime token from admin-api and forwards it to gateway.
 
 export const runtime = "nodejs";
 // Never cache or statically optimize a streaming proxy.
@@ -19,7 +20,10 @@ export const dynamic = "force-dynamic";
 const GATEWAY_URL = process.env.COCOLA_GATEWAY_URL ?? "http://127.0.0.1:8080";
 
 export async function POST(req: NextRequest) {
-  const auth = req.headers.get("authorization") ?? "";
+  const authResult = await requireUser();
+  if (isAuthFail(authResult)) return authResult.response;
+  const authHeaders = await runtimeAuthHeaders(authResult.user);
+  if (authHeaders instanceof Response) return authHeaders;
   const body = await req.text();
 
   let upstream: Response;
@@ -28,7 +32,7 @@ export async function POST(req: NextRequest) {
       method: "POST",
       headers: {
         "content-type": "application/json",
-        ...(auth ? { authorization: auth } : {}),
+        ...authHeaders,
       },
       body,
       // Stream the response instead of buffering it.

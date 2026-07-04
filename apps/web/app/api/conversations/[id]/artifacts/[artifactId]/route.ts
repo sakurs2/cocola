@@ -1,4 +1,5 @@
 import { NextRequest } from "next/server";
+import { isAuthFail, requireUser, runtimeAuthHeaders } from "@/lib/server-auth";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -9,14 +10,17 @@ export async function GET(
   req: NextRequest,
   { params }: { params: { id: string; artifactId: string } },
 ) {
-  const auth = req.headers.get("authorization") ?? "";
+  const authResult = await requireUser();
+  if (isAuthFail(authResult)) return authResult.response;
+  const authHeaders = await runtimeAuthHeaders(authResult.user);
+  if (authHeaders instanceof Response) return authHeaders;
   const id = encodeURIComponent(params.id);
   const artifactId = encodeURIComponent(params.artifactId);
   try {
     const upstream = await fetch(`${GATEWAY_URL}/v1/conversations/${id}/artifacts/${artifactId}`, {
       method: "GET",
       cache: "no-store",
-      headers: { ...(auth ? { authorization: auth } : {}) },
+      headers: authHeaders,
     });
     const headers = new Headers();
     for (const key of ["content-type", "content-length", "content-disposition"]) {

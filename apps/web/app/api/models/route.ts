@@ -1,5 +1,6 @@
 import { promises as fs } from "fs";
 import path from "path";
+import { isAuthFail, requireUser } from "@/lib/server-auth";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -38,6 +39,8 @@ const DEFAULT_MODEL: ModelOption = {
 };
 
 export async function GET() {
+  const authResult = await requireUser();
+  if (isAuthFail(authResult)) return authResult.response;
   const config = await loadConfig();
   const models = selectModels(config);
   return Response.json(models.length > 0 ? models : [DEFAULT_MODEL]);

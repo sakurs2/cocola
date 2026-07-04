@@ -62,6 +62,177 @@ func nullableTime(t time.Time) any {
 	return t
 }
 
+// ---- Auth users ----
+
+const authUserCols = `id, username_normalized, email_normalized, name, role, enabled, password_hash, created_at, updated_at, last_login_at, created_by, updated_by, password_updated_at, deleted_at, deleted_by`
+const authUserColsU = `u.id, u.username_normalized, u.email_normalized, u.name, u.role, u.enabled, u.password_hash, u.created_at, u.updated_at, u.last_login_at, u.created_by, u.updated_by, u.password_updated_at, u.deleted_at, u.deleted_by`
+
+func scanAuthUser(row pgx.Row) (AuthUser, error) {
+	var u AuthUser
+	var lastLogin, passwordUpdated, deletedAt *time.Time
+	err := row.Scan(&u.ID, &u.Username, &u.Email, &u.Name, &u.Role, &u.Enabled,
+		&u.PasswordHash, &u.CreatedAt, &u.UpdatedAt, &lastLogin, &u.CreatedBy, &u.UpdatedBy, &passwordUpdated, &deletedAt, &u.DeletedBy)
+	if err != nil {
+		return AuthUser{}, err
+	}
+	if lastLogin != nil {
+		u.LastLoginAt = *lastLogin
+	}
+	if passwordUpdated != nil {
+		u.PasswordUpdated = *passwordUpdated
+	}
+	if deletedAt != nil {
+		u.DeletedAt = *deletedAt
+	}
+	return u, nil
+}
+
+func (p *Postgres) CreateAuthUser(ctx context.Context, u AuthUser) error {
+	tx, err := p.pool.Begin(ctx)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback(ctx)
+
+	const q = `INSERT INTO auth_users (` + authUserCols + `)
+		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15)`
+	_, err = tx.Exec(ctx, q,
+		u.ID, u.Username, u.Email, u.Name, u.Role, u.Enabled, u.PasswordHash,
+		u.CreatedAt, u.UpdatedAt, nullableTime(u.LastLoginAt), u.CreatedBy, u.UpdatedBy, nullableTime(u.PasswordUpdated), nullableTime(u.DeletedAt), u.DeletedBy)
+	if isUniqueViolation(err) {
+		return ErrConflict
+	}
+	if err != nil {
+		return err
+	}
+	if err := insertAuthUserIdentifiers(ctx, tx, u); err != nil {
+		return err
+	}
+	return tx.Commit(ctx)
+}
+
+func (p *Postgres) GetAuthUser(ctx context.Context, id string) (AuthUser, error) {
+	row := p.pool.QueryRow(ctx, `SELECT `+authUserCols+` FROM auth_users WHERE id=$1`, id)
+	u, err := scanAuthUser(row)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return AuthUser{}, ErrNotFound
+	}
+	return u, err
+}
+
+func (p *Postgres) GetAuthUserByEmail(ctx context.Context, email string) (AuthUser, error) {
+	row := p.pool.QueryRow(ctx, `SELECT `+authUserCols+` FROM auth_users WHERE email_normalized=$1`, email)
+	u, err := scanAuthUser(row)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return AuthUser{}, ErrNotFound
+	}
+	return u, err
+}
+
+func (p *Postgres) GetAuthUserByIdentifier(ctx context.Context, identifier string) (AuthUser, error) {
+	row := p.pool.QueryRow(ctx, `SELECT `+authUserColsU+`
+		FROM auth_users u
+		JOIN auth_user_identifiers i ON i.user_id = u.id
+		WHERE i.value_normalized=$1`, identifier)
+	u, err := scanAuthUser(row)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return AuthUser{}, ErrNotFound
+	}
+	return u, err
+}
+
+func (p *Postgres) ListAuthUsers(ctx context.Context) ([]AuthUser, error) {
+	rows, err := p.pool.Query(ctx, `SELECT `+authUserCols+` FROM auth_users WHERE deleted_at IS NULL ORDER BY email_normalized`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := make([]AuthUser, 0)
+	for rows.Next() {
+		u, err := scanAuthUser(rows)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, u)
+	}
+	return out, rows.Err()
+}
+
+func (p *Postgres) UpdateAuthUser(ctx context.Context, u AuthUser) error {
+	tx, err := p.pool.Begin(ctx)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback(ctx)
+
+	const q = `UPDATE auth_users
+		SET username_normalized=$2, email_normalized=$3, name=$4, role=$5, enabled=$6,
+		    password_hash=$7, created_at=$8, updated_at=$9, last_login_at=$10,
+		    created_by=$11, updated_by=$12, password_updated_at=$13, deleted_at=$14, deleted_by=$15
+		WHERE id=$1`
+	ct, err := tx.Exec(ctx, q,
+		u.ID, u.Username, u.Email, u.Name, u.Role, u.Enabled, u.PasswordHash,
+		u.CreatedAt, u.UpdatedAt, nullableTime(u.LastLoginAt), u.CreatedBy, u.UpdatedBy, nullableTime(u.PasswordUpdated), nullableTime(u.DeletedAt), u.DeletedBy)
+	if isUniqueViolation(err) {
+		return ErrConflict
+	}
+	if err != nil {
+		return err
+	}
+	if ct.RowsAffected() == 0 {
+		return ErrNotFound
+	}
+	if _, err := tx.Exec(ctx, `DELETE FROM auth_user_identifiers WHERE user_id=$1 AND kind IN ('username','email')`, u.ID); err != nil {
+		return err
+	}
+	if err := insertAuthUserIdentifiers(ctx, tx, u); err != nil {
+		return err
+	}
+	return tx.Commit(ctx)
+}
+
+func (p *Postgres) DeleteAuthUser(ctx context.Context, id, actor string, at time.Time) error {
+	ct, err := p.pool.Exec(ctx, `UPDATE auth_users
+		SET enabled=FALSE, deleted_at=$2, deleted_by=$3, updated_at=$2, updated_by=$3
+		WHERE id=$1 AND deleted_at IS NULL`, id, at, actor)
+	if err != nil {
+		return err
+	}
+	if ct.RowsAffected() == 0 {
+		return ErrNotFound
+	}
+	return nil
+}
+
+func insertAuthUserIdentifiers(ctx context.Context, tx pgx.Tx, u AuthUser) error {
+	const q = `INSERT INTO auth_user_identifiers
+		(id, user_id, kind, value_normalized, display_value, verified, is_primary, created_at, updated_at)
+		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)`
+	for _, ident := range authUserIdentifiersFor(u) {
+		_, err := tx.Exec(ctx, q,
+			ident.ID, ident.UserID, ident.Kind, ident.Value, ident.DisplayValue,
+			ident.Verified, ident.Primary, ident.CreatedAt, ident.UpdatedAt)
+		if isUniqueViolation(err) {
+			return ErrConflict
+		}
+		if err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func (p *Postgres) TouchAuthUserLogin(ctx context.Context, id string, at time.Time) error {
+	ct, err := p.pool.Exec(ctx, `UPDATE auth_users SET last_login_at=$2 WHERE id=$1`, id, at)
+	if err != nil {
+		return err
+	}
+	if ct.RowsAffected() == 0 {
+		return ErrNotFound
+	}
+	return nil
+}
+
 // ---- Tokens ----
 
 func (p *Postgres) CreateToken(ctx context.Context, r TokenRecord) error {

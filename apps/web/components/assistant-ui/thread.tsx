@@ -179,7 +179,7 @@ const ModelPicker: FC = () => {
   const [open, setOpen] = useState(false);
 
   return (
-    <div className="relative min-w-0">
+    <div className="relative inline-flex max-w-[14rem] min-w-0">
       <button
         type="button"
         className="flex max-w-[14rem] min-w-0 items-center gap-2 rounded-full px-2 py-1.5 text-sm font-medium text-foreground transition-colors hover:bg-muted focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
@@ -192,7 +192,7 @@ const ModelPicker: FC = () => {
         <ChevronDown className="size-4 shrink-0 text-muted-foreground" />
       </button>
       {open ? (
-        <div className="absolute bottom-full left-0 z-20 mb-2 w-64 overflow-hidden rounded-lg border border-border bg-popover p-1 text-sm shadow-lg">
+        <div className="absolute bottom-full left-0 z-20 mb-2 w-full overflow-hidden rounded-lg border border-border bg-popover p-1 text-sm shadow-lg">
           {models.map((model) => (
             <button
               key={model.alias}

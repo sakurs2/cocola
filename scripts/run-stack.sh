@@ -77,6 +77,13 @@ if [[ -f "$ROOT/.env" ]]; then
 fi
 
 export COCOLA_AUTH_SECRET="${COCOLA_AUTH_SECRET:-local-dev-secret}"
+export AUTH_SECRET="${AUTH_SECRET:-local-dev-auth-secret}"
+export COCOLA_ADMIN_KEY="${COCOLA_ADMIN_KEY:-local-dev-admin-key}"
+export COCOLA_BOOTSTRAP_ADMIN_USERNAME="${COCOLA_BOOTSTRAP_ADMIN_USERNAME:-admin}"
+export COCOLA_BOOTSTRAP_ADMIN_EMAIL="${COCOLA_BOOTSTRAP_ADMIN_EMAIL:-admin@cocola.local}"
+export COCOLA_BOOTSTRAP_ADMIN_PASSWORD="${COCOLA_BOOTSTRAP_ADMIN_PASSWORD:-cocola-admin}"
+export COCOLA_BOOTSTRAP_ADMIN_RESET="${COCOLA_BOOTSTRAP_ADMIN_RESET:-true}"
+export COCOLA_BOOTSTRAP_ADMIN_PRINT="${COCOLA_BOOTSTRAP_ADMIN_PRINT:-true}"
 
 AGENT_HOST="${COCOLA_AGENT_HOST:-127.0.0.1}"
 AGENT_PORT="${COCOLA_AGENT_PORT:-50061}"
@@ -494,6 +501,12 @@ if [[ "$HYBRID" == "1" ]]; then
     COCOLA_ADMIN_ADDR=":8092" \
     COCOLA_REDIS_ADDR="${COCOLA_REDIS_ADDR:-127.0.0.1:6379}" \
     COCOLA_PG_DSN="${COCOLA_PG_DSN:-}" \
+    COCOLA_BOOTSTRAP_ADMIN_USERNAME="$COCOLA_BOOTSTRAP_ADMIN_USERNAME" \
+    COCOLA_BOOTSTRAP_ADMIN_EMAIL="$COCOLA_BOOTSTRAP_ADMIN_EMAIL" \
+    COCOLA_BOOTSTRAP_ADMIN_PASSWORD="$COCOLA_BOOTSTRAP_ADMIN_PASSWORD" \
+    COCOLA_BOOTSTRAP_ADMIN_PASSWORD_HASH="${COCOLA_BOOTSTRAP_ADMIN_PASSWORD_HASH:-}" \
+    COCOLA_BOOTSTRAP_ADMIN_RESET="${COCOLA_BOOTSTRAP_ADMIN_RESET:-}" \
+    COCOLA_BOOTSTRAP_ADMIN_PRINT="$COCOLA_BOOTSTRAP_ADMIN_PRINT" \
       $SETSID go run ./apps/admin-api/cmd/admin-api
   ) >"$(log_redirect admin-api)" 2>&1 &
   PIDS+=("$!")
@@ -576,7 +589,8 @@ if [[ "$WITH_WEB" == "1" ]]; then
     cd apps/web
     COCOLA_GATEWAY_URL="http://$GATEWAY_ADDR" \
     COCOLA_ADMIN_URL="${COCOLA_ADMIN_BASE_URL:-http://127.0.0.1:8092}" \
-    COCOLA_ADMIN_KEY="${COCOLA_ADMIN_KEY:-}" \
+    COCOLA_ADMIN_KEY="$COCOLA_ADMIN_KEY" \
+    AUTH_SECRET="$AUTH_SECRET" \
       $SETSID pnpm dev --port "$WEB_PORT"
   ) >"$(log_redirect web)" 2>&1 &
   PIDS+=("$!")
@@ -594,7 +608,8 @@ echo " agent-rt  : $AGENT_ADDR (gRPC)"
 [[ "$WITH_LLM" == "1" ]] && echo " llm-gw    : http://$LLM_HOST:$LLM_PORT  (provider: ${COCOLA_LLM_PROVIDER:-fake})"
 [[ "$WITH_LLM" == "1" && -n "${COCOLA_LLM_CONFIG:-}" ]] && echo " llm-cfg   : ${COCOLA_LLM_CONFIG}"
 [[ "$WITH_LLM" == "1" && -z "${COCOLA_LLM_CONFIG:-}" ]] && echo " llm-up    : ${COCOLA_ANTHROPIC_BASE_URL:-${COCOLA_OPENAI_BASE_URL:-<provider default>}}"
-[[ "$WITH_WEB" == "1" ]] && echo " web       : http://127.0.0.1:$WEB_PORT  (paste the token below)"
+[[ "$WITH_WEB" == "1" ]] && echo " web       : http://127.0.0.1:$WEB_PORT"
+[[ "$WITH_WEB" == "1" ]] && echo " web login : ${COCOLA_BOOTSTRAP_ADMIN_USERNAME} or ${COCOLA_BOOTSTRAP_ADMIN_EMAIL} / ${COCOLA_BOOTSTRAP_ADMIN_PASSWORD}"
 [[ -n "${MINIO_CONSOLE:-}" ]] && echo " minio     : ${MINIO_CONSOLE}  (console; cocola / cocola_dev_pw)"
 [[ "$HYBRID" == "1" ]] && echo " sandbox   : NATIVE sandbox-manager :50051 (provider=${COCOLA_SANDBOX_PROVIDER:-docker}) + admin-api :8092; REAL Route A"
 if [[ "$HYBRID" == "1" ]] && [[ "${COCOLA_SANDBOX_PROVIDER:-docker}" == "opensandbox" ]] && env_bool_false "${COCOLA_OPENSANDBOX_MANAGED:-1}"; then

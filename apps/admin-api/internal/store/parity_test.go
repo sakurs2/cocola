@@ -39,7 +39,7 @@ func newParityPostgres(t *testing.T) *Postgres {
 	}
 	// Clean slate: truncate every table this suite touches.
 	_, err = pg.pool.Exec(ctx,
-		`TRUNCATE token_records, quota_overrides, skill_entries, audit_log RESTART IDENTITY`)
+		`TRUNCATE auth_user_identifiers, auth_users, token_records, quota_overrides, skill_entries, audit_log RESTART IDENTITY`)
 	if err != nil {
 		t.Fatalf("truncate: %v", err)
 	}
@@ -53,6 +53,81 @@ func runStoreContract(t *testing.T, st Store) {
 	t.Helper()
 	ctx := context.Background()
 	now := time.Unix(1_700_000_000, 0).UTC()
+
+	// ----- auth users -----
+	user := AuthUser{
+		ID:              "user-1",
+		Username:        "alice",
+		Email:           "alice@example.com",
+		Name:            "Alice",
+		Role:            "user",
+		Enabled:         true,
+		PasswordHash:    "$2a$10$012345678901234567890u012345678901234567890123456789012",
+		CreatedAt:       now,
+		UpdatedAt:       now,
+		CreatedBy:       "admin",
+		UpdatedBy:       "admin",
+		PasswordUpdated: now,
+	}
+	if err := st.CreateAuthUser(ctx, user); err != nil {
+		t.Fatalf("CreateAuthUser: %v", err)
+	}
+	if err := st.CreateAuthUser(ctx, AuthUser{ID: "user-2", Email: user.Email}); !errors.Is(err, ErrConflict) {
+		t.Fatalf("duplicate auth email want ErrConflict, got %v", err)
+	}
+	if err := st.CreateAuthUser(ctx, AuthUser{ID: "user-3", Username: user.Username, Email: "other@example.com"}); !errors.Is(err, ErrConflict) {
+		t.Fatalf("duplicate auth username want ErrConflict, got %v", err)
+	}
+	gotUser, err := st.GetAuthUserByEmail(ctx, "alice@example.com")
+	if err != nil || gotUser.ID != "user-1" || gotUser.PasswordHash == "" {
+		t.Fatalf("GetAuthUserByEmail roundtrip: %+v %v", gotUser, err)
+	}
+	gotUser, err = st.GetAuthUserByIdentifier(ctx, "alice")
+	if err != nil || gotUser.ID != "user-1" || gotUser.PasswordHash == "" {
+		t.Fatalf("GetAuthUserByIdentifier username roundtrip: %+v %v", gotUser, err)
+	}
+	gotUser, err = st.GetAuthUserByIdentifier(ctx, "alice@example.com")
+	if err != nil || gotUser.ID != "user-1" || gotUser.PasswordHash == "" {
+		t.Fatalf("GetAuthUserByIdentifier email roundtrip: %+v %v", gotUser, err)
+	}
+	gotUser.Role = "admin"
+	gotUser.Enabled = false
+	gotUser.UpdatedAt = now.Add(time.Hour)
+	if err := st.UpdateAuthUser(ctx, gotUser); err != nil {
+		t.Fatalf("UpdateAuthUser: %v", err)
+	}
+	updated, _ := st.GetAuthUser(ctx, "user-1")
+	if updated.Role != "admin" || updated.Enabled {
+		t.Fatalf("auth user update not persisted: %+v", updated)
+	}
+	if err := st.TouchAuthUserLogin(ctx, "user-1", now.Add(2*time.Hour)); err != nil {
+		t.Fatalf("TouchAuthUserLogin: %v", err)
+	}
+	touched, _ := st.GetAuthUser(ctx, "user-1")
+	if touched.LastLoginAt.IsZero() {
+		t.Fatalf("last login not updated: %+v", touched)
+	}
+	users, _ := st.ListAuthUsers(ctx)
+	if len(users) != 1 || users[0].Email != "alice@example.com" {
+		t.Fatalf("ListAuthUsers: %+v", users)
+	}
+	if err := st.DeleteAuthUser(ctx, "user-1", "admin", now.Add(3*time.Hour)); err != nil {
+		t.Fatalf("DeleteAuthUser: %v", err)
+	}
+	users, _ = st.ListAuthUsers(ctx)
+	if len(users) != 0 {
+		t.Fatalf("deleted auth user should be hidden from list: %+v", users)
+	}
+	deletedUser, err := st.GetAuthUserByIdentifier(ctx, "alice")
+	if err != nil || deletedUser.ID != "user-1" || deletedUser.Enabled {
+		t.Fatalf("deleted auth user lookup should remain reserved and disabled: %+v %v", deletedUser, err)
+	}
+	if deletedUser.DeletedAt.IsZero() || deletedUser.DeletedBy != "admin" {
+		t.Fatalf("deleted auth user metadata missing: %+v", deletedUser)
+	}
+	if err := st.DeleteAuthUser(ctx, "user-1", "admin", now.Add(4*time.Hour)); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("DeleteAuthUser already deleted want ErrNotFound, got %v", err)
+	}
 
 	// ----- tokens -----
 	tok := TokenRecord{ID: "tok-1", UserID: "u1", TenantID: "t1", Issuer: "cocola", IssuedAt: now, CreatedBy: "admin"}

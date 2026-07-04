@@ -21,6 +21,15 @@
 //	COCOLA_REDIS_PASSWORD / COCOLA_REDIS_DB / COCOLA_REDIS_POOL_SIZE tune it.
 //	COCOLA_METRICS_ADDR        observability listen address; empty => disabled
 //	                           (default ":9093", serving /metrics and /healthz).
+//	COCOLA_BOOTSTRAP_ADMIN_EMAIL
+//	COCOLA_BOOTSTRAP_ADMIN_USERNAME
+//	COCOLA_BOOTSTRAP_ADMIN_PASSWORD or COCOLA_BOOTSTRAP_ADMIN_PASSWORD_HASH
+//	                           seed the first Auth.js web admin user. Existing
+//	                           users are left unchanged unless
+//	                           COCOLA_BOOTSTRAP_ADMIN_RESET=true.
+//	COCOLA_BOOTSTRAP_ADMIN_PRINT
+//	                           true => print dev bootstrap credentials. Use
+//	                           only for local dev; never in production.
 //
 // Persistence is in-memory for M5 (process-local); the PostgreSQL backend
 // lands in M7 behind the same store.Store interface — no handler change. The
@@ -34,6 +43,7 @@ import (
 	"net/http"
 	"os"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/cocola-project/cocola/apps/admin-api/internal/httpapi"
@@ -135,6 +145,31 @@ func main() {
 	}
 
 	svc := service.New(st, iss, time.Now)
+	if email := os.Getenv("COCOLA_BOOTSTRAP_ADMIN_EMAIL"); email != "" {
+		username := os.Getenv("COCOLA_BOOTSTRAP_ADMIN_USERNAME")
+		password := config.SecretFromEnv("COCOLA_BOOTSTRAP_ADMIN_PASSWORD")
+		passwordHash := config.SecretFromEnv("COCOLA_BOOTSTRAP_ADMIN_PASSWORD_HASH")
+		if err := svc.BootstrapAdmin(context.Background(), service.BootstrapAdminInput{
+			Username:     username,
+			Email:        email,
+			Password:     password,
+			PasswordHash: passwordHash,
+			Reset:        getenvBool("COCOLA_BOOTSTRAP_ADMIN_RESET", false),
+			Actor:        "bootstrap",
+		}); err != nil {
+			log.Sugar().Fatalf("bootstrap admin user: %v", err)
+		}
+		log.Sugar().Infow("bootstrap admin user ensured", "email", email)
+		if getenvBool("COCOLA_BOOTSTRAP_ADMIN_PRINT", false) && password != "" {
+			if username == "" {
+				username = email
+				if at := strings.IndexByte(username, '@'); at > 0 {
+					username = username[:at]
+				}
+			}
+			log.Sugar().Warnw("dev bootstrap admin credentials", "username", username, "email", email, "password", password)
+		}
+	}
 	nodeMgr, err := service.NewSandboxNodeManagerFromEnv()
 	if err != nil {
 		log.Sugar().Warnw("sandbox node manager disabled", "err", err)
@@ -182,6 +217,18 @@ func getenvInt(k string, def int) int {
 	if v := os.Getenv(k); v != "" {
 		if n, err := strconv.Atoi(v); err == nil {
 			return n
+		}
+	}
+	return def
+}
+
+func getenvBool(k string, def bool) bool {
+	if v := os.Getenv(k); v != "" {
+		switch v {
+		case "1", "true", "TRUE", "True", "yes", "YES", "on", "ON":
+			return true
+		case "0", "false", "FALSE", "False", "no", "NO", "off", "OFF":
+			return false
 		}
 	}
 	return def

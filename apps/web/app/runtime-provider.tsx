@@ -28,6 +28,7 @@ import {
   useState,
   type ReactNode,
 } from "react";
+import { signOut } from "next-auth/react";
 import { parseFrames, type AgentEvent } from "@/lib/sse";
 import { Base64AttachmentAdapter } from "@/lib/base64-attachment-adapter";
 
@@ -187,6 +188,14 @@ function normalizeMetadata(raw: UiMessageMetadata | undefined): UiMessageMetadat
         }
       : {}),
   };
+}
+
+function isAccountDisabledResponse(res: Response): boolean {
+  return res.headers.get("x-cocola-auth") === "account-disabled";
+}
+
+function redirectAccountDisabled() {
+  void signOut({ callbackUrl: "/login?reason=account_disabled" });
 }
 
 // Append text to the trailing text part, or start a new one. Immutable.
@@ -391,6 +400,10 @@ export function CocolaRuntimeProvider({ children }: { children: ReactNode }) {
     void (async () => {
       try {
         const res = await fetch("/api/conversations");
+        if (isAccountDisabledResponse(res)) {
+          redirectAccountDisabled();
+          return;
+        }
         if (!res.ok) return;
         const rows = (await res.json()) as ConversationSummary[];
         if (Array.isArray(rows)) setConversations(rows);
@@ -492,6 +505,10 @@ export function CocolaRuntimeProvider({ children }: { children: ReactNode }) {
           }),
           signal: ctrl.signal,
         });
+        if (isAccountDisabledResponse(res)) {
+          redirectAccountDisabled();
+          return;
+        }
         if (!res.body) throw new Error("no response body");
 
         const reader = res.body.getReader();
@@ -551,6 +568,10 @@ export function CocolaRuntimeProvider({ children }: { children: ReactNode }) {
       if ((convMessages[id]?.length ?? 0) > 0) return;
       try {
         const res = await fetch(`/api/conversations/${encodeURIComponent(id)}/messages`);
+        if (isAccountDisabledResponse(res)) {
+          redirectAccountDisabled();
+          return;
+        }
         if (!res.ok) return;
         const rows = (await res.json()) as WireMessage[];
         const loaded: UiMessage[] = (Array.isArray(rows) ? rows : []).map((m) => ({
@@ -579,6 +600,10 @@ export function CocolaRuntimeProvider({ children }: { children: ReactNode }) {
           headers: { "content-type": "application/json" },
           body: JSON.stringify({ title: nextTitle }),
         });
+        if (isAccountDisabledResponse(res)) {
+          redirectAccountDisabled();
+          return;
+        }
         if (!res.ok) throw new Error(`rename failed (${res.status})`);
         const updated = (await res.json()) as ConversationSummary;
         setConversations((prev) =>
@@ -610,6 +635,10 @@ export function CocolaRuntimeProvider({ children }: { children: ReactNode }) {
       const res = await fetch(`/api/conversations/${encodeURIComponent(id)}`, {
         method: "DELETE",
       });
+      if (isAccountDisabledResponse(res)) {
+        redirectAccountDisabled();
+        return;
+      }
       if (!res.ok) {
         refreshConversations();
         throw new Error(`delete failed (${res.status})`);
@@ -662,6 +691,10 @@ export function CocolaRuntimeProvider({ children }: { children: ReactNode }) {
     void (async () => {
       try {
         const res = await fetch("/api/models");
+        if (isAccountDisabledResponse(res)) {
+          redirectAccountDisabled();
+          return;
+        }
         if (!res.ok) return;
         const rows = (await res.json()) as ModelOption[];
         const next = Array.isArray(rows) && rows.length > 0 ? rows : [DEFAULT_MODEL];

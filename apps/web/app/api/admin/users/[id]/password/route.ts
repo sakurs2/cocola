@@ -1,5 +1,5 @@
 import { NextRequest } from "next/server";
-import { adminHeaders, isAuthFail, requireAdmin, type SessionUser } from "@/lib/server-auth";
+import { adminHeaders, isAuthFail, requireAdmin } from "@/lib/server-auth";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -7,19 +7,16 @@ export const dynamic = "force-dynamic";
 const ADMIN_URL =
   process.env.COCOLA_ADMIN_URL ?? process.env.COCOLA_ADMIN_BASE_URL ?? "http://127.0.0.1:8092";
 
-export async function GET(req: NextRequest) {
+export async function POST(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   const authResult = await requireAdmin();
   if (isAuthFail(authResult)) return authResult.response;
-  return proxyAdmin(req, "/admin/sandbox-nodes", authResult.user);
-}
-
-async function proxyAdmin(req: NextRequest, path: string, user: SessionUser, init?: RequestInit) {
+  const { id } = await params;
   try {
-    const upstream = await fetch(`${ADMIN_URL}${path}`, {
-      method: init?.method ?? req.method,
+    const upstream = await fetch(`${ADMIN_URL}/admin/users/${encodeURIComponent(id)}/password`, {
+      method: "POST",
       cache: "no-store",
-      headers: adminHeaders(user),
-      body: init?.body,
+      headers: adminHeaders(authResult.user, req.headers.get("content-type") ?? "application/json"),
+      body: await req.text(),
     });
     const text = await upstream.text();
     return new Response(text || null, {

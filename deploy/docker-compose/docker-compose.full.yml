@@ -8,10 +8,12 @@
 #   admin-api / llm-gateway <-> redis (revokes, quota, billing)
 #   sandbox-manager -> host docker daemon (DooD) to create user sandboxes
 #
-# Dev defaults: auth is OFF (no COCOLA_AUTH_SECRET / COCOLA_ADMIN_KEY). The agent
-# runs Route A (ADR-0009): the Claude Code brain lives inside the user's sandbox
-# (COCOLA_SANDBOX_ADDR is set below); with no sandbox it degrades to EchoProvider.
-# Flip to production by injecting the auth env vars -- no code change.
+# Auth.js protects the web app; admin-api owns the whitelist and runtime token
+# signing. For production inject AUTH_SECRET, COCOLA_ADMIN_KEY,
+# COCOLA_AUTH_SECRET, and bootstrap admin env vars from your secret manager.
+# The agent runs Route A (ADR-0009): the Claude Code brain lives inside the
+# user's sandbox (COCOLA_SANDBOX_ADDR is set below); with no sandbox it degrades
+# to EchoProvider.
 #
 # DooD path isomorphism (see m-minimal plan): COCOLA_SANDBOX_ROOT must be the
 # SAME absolute path inside sandbox-manager and on the host, so the host daemon
@@ -182,7 +184,13 @@ services:
     environment:
       COCOLA_ADMIN_ADDR: ":8090"
       COCOLA_REDIS_ADDR: "redis:6379"
-      # COCOLA_ADMIN_KEY / COCOLA_AUTH_SECRET unset -> dev mode (auth off).
+      COCOLA_ADMIN_KEY: "${COCOLA_ADMIN_KEY:-}"
+      COCOLA_AUTH_SECRET: "${COCOLA_AUTH_SECRET:-}"
+      COCOLA_BOOTSTRAP_ADMIN_USERNAME: "${COCOLA_BOOTSTRAP_ADMIN_USERNAME:-}"
+      COCOLA_BOOTSTRAP_ADMIN_EMAIL: "${COCOLA_BOOTSTRAP_ADMIN_EMAIL:-}"
+      COCOLA_BOOTSTRAP_ADMIN_PASSWORD: "${COCOLA_BOOTSTRAP_ADMIN_PASSWORD:-}"
+      COCOLA_BOOTSTRAP_ADMIN_PASSWORD_HASH: "${COCOLA_BOOTSTRAP_ADMIN_PASSWORD_HASH:-}"
+      COCOLA_BOOTSTRAP_ADMIN_RESET: "${COCOLA_BOOTSTRAP_ADMIN_RESET:-}"
       # M7 persistence: DSN set -> Postgres repository; unset -> in-memory.
       COCOLA_PG_DSN: "${COCOLA_PG_DSN:-postgres://cocola:cocola_dev_pw@postgres:5432/cocola?sslmode=disable}"
     ports:
@@ -269,7 +277,8 @@ services:
     environment:
       COCOLA_GATEWAY_ADDR: ":8080"
       COCOLA_AGENT_ADDR: "agent-runtime:50061"
-      COCOLA_AUTH_ALLOW_ANON: "1" # dev: accept blank tokens as dev-user
+      COCOLA_AUTH_SECRET: "${COCOLA_AUTH_SECRET:-}"
+      COCOLA_AUTH_ALLOW_ANON: "${COCOLA_AUTH_ALLOW_ANON:-0}"
       # Conversation persistence (route A): the gateway mirrors each turn's
       # rendered parts into Postgres so the sidebar can list past conversations
       # and clicking one replays its history. Set -> persist; unset -> feature
@@ -323,6 +332,7 @@ services:
       COCOLA_GATEWAY_URL: "http://gateway:8080"
       COCOLA_ADMIN_URL: "http://admin-api:8090"
       COCOLA_ADMIN_KEY: "${COCOLA_ADMIN_KEY:-}"
+      AUTH_SECRET: "${AUTH_SECRET:-}"
     ports:
       - "${COCOLA_WEB_HOST_PORT:-3000}:3000"
 
