@@ -96,14 +96,14 @@ async def test_session_id_is_reused_as_resume_next_turn():
     assert second_req["resume"] == "sess-1"
 
 
-async def test_stored_resume_is_dropped_when_sandbox_changes():
+async def test_stored_resume_is_reused_when_sandbox_changes():
     def stream_handler(sandbox_id, cmd, stdin):
         req = json.loads(stdin)
-        assert "resume" not in req
+        assert req["resume"] == "sess-old"
         yield ExecChunk(
             kind="stdout",
             data=_ndjson(
-                {"type": "text", "text": "fresh sandbox"},
+                {"type": "text", "text": "resumed sandbox"},
                 {"type": "done", "session_id": "sess-new"},
             ),
         )
@@ -118,7 +118,7 @@ async def test_stored_resume_is_dropped_when_sandbox_changes():
     events = await _drain(provider, "continue", opts)
 
     assert [e.kind for e in events] == ["text", "done"]
-    assert events[0].data["text"] == "fresh sandbox"
+    assert events[0].data["text"] == "resumed sandbox"
     binding = await smap.get_binding("S1")
     assert binding is not None
     assert binding.claude_session_id == "sess-new"
