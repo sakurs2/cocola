@@ -180,6 +180,32 @@ func TestCreate_SanitisesMetadataLabelValues(t *testing.T) {
 	}
 }
 
+func TestCreate_SendsTargetNodeSelector(t *testing.T) {
+	var body createSandboxRequest
+	p := newStub(t, func(r *http.Request) (*http.Response, error) {
+		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+			t.Fatalf("decode create body: %v", err)
+		}
+		return jsonResp(http.StatusOK, `{"id":"sbx-123","status":{"state":"Pending"}}`), nil
+	})
+
+	if _, err := p.Create(context.Background(), provider.SandboxSpec{
+		UserID:         "u1",
+		SessionID:      "s1",
+		Image:          "cocola/sandbox-runtime:dev",
+		TargetNodeName: "node-b",
+	}); err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+
+	if got := body.NodeSelector["kubernetes.io/hostname"]; got != "node-b" {
+		t.Fatalf("nodeSelector hostname = %q, want node-b", got)
+	}
+	if got := body.Metadata["cocola.target_node"]; !strings.HasPrefix(got, "node-b-") {
+		t.Fatalf("target node metadata = %q, want sanitized node-b prefix", got)
+	}
+}
+
 func TestCreate_EmptyIDFails(t *testing.T) {
 	p := newStub(t, func(r *http.Request) (*http.Response, error) {
 		return jsonResp(http.StatusOK, `{"id":"","status":{"state":"Pending"}}`), nil

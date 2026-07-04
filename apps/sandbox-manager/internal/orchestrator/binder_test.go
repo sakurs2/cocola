@@ -22,6 +22,7 @@ type fakeProvider struct {
 	state     map[string]string // sandbox id -> "active"|"paused"|"destroyed"
 	resumeErr map[string]error
 	cleanups  []string
+	lastSpec  provider.SandboxSpec
 }
 
 func newFakeProvider() *fakeProvider {
@@ -36,6 +37,7 @@ func (f *fakeProvider) Create(ctx context.Context, spec provider.SandboxSpec) (*
 	id := fmt.Sprintf("sbx-%d", n)
 	f.mu.Lock()
 	f.state[id] = "active"
+	f.lastSpec = spec
 	f.mu.Unlock()
 	return &provider.Sandbox{ID: id, UserID: spec.UserID, SessionID: spec.SessionID}, nil
 }

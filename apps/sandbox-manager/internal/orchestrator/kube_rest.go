@@ -1,4 +1,4 @@
-package service
+package orchestrator
 
 import (
 	"bytes"
@@ -79,8 +79,7 @@ func kubeConfigFromEnv() (kubeConfig, bool, error) {
 	if ic, ok, err := inClusterKubeConfig(cfg); ok || err != nil {
 		return ic, ok, err
 	}
-	kc, ok, err := kubeconfigFileConfig(cfg)
-	return kc, ok, err
+	return kubeconfigFileConfig(cfg)
 }
 
 func inClusterKubeConfig(base kubeConfig) (kubeConfig, bool, error) {
@@ -130,18 +129,6 @@ func kubeconfigFileConfig(base kubeConfig) (kubeConfig, bool, error) {
 	return cfg, cfg.Server != "", nil
 }
 
-func (c *kubeClient) snapshot(ctx context.Context) ([]kubeNode, []kubePod, error) {
-	nodes, err := c.listNodes(ctx)
-	if err != nil {
-		return nil, nil, err
-	}
-	pods, err := c.listSandboxPods(ctx)
-	if err != nil {
-		return nil, nil, err
-	}
-	return nodes, pods, nil
-}
-
 func (c *kubeClient) listNodes(ctx context.Context) ([]kubeNode, error) {
 	var out struct {
 		Items []kubeNode `json:"items"`
@@ -150,41 +137,6 @@ func (c *kubeClient) listNodes(ctx context.Context) ([]kubeNode, error) {
 		return nil, err
 	}
 	return out.Items, nil
-}
-
-func (c *kubeClient) getNode(ctx context.Context, name string) (kubeNode, error) {
-	var out kubeNode
-	if err := c.do(ctx, http.MethodGet, "/api/v1/nodes/"+url.PathEscape(name), nil, &out, "application/json"); err != nil {
-		return kubeNode{}, err
-	}
-	return out, nil
-}
-
-func (c *kubeClient) patchNodeState(ctx context.Context, name string, unschedulable bool, mode string) error {
-	var modeValue any = mode
-	if mode == "" {
-		modeValue = nil
-	}
-	body := map[string]any{
-		"metadata": map[string]any{
-			"annotations": map[string]any{
-				sandboxNodeModeAnnotation: modeValue,
-			},
-		},
-		"spec": map[string]any{"unschedulable": unschedulable},
-	}
-	return c.do(ctx, http.MethodPatch, "/api/v1/nodes/"+url.PathEscape(name), body, nil, "application/merge-patch+json")
-}
-
-func (c *kubeClient) patchNodeAnnotation(ctx context.Context, name, key string, value any) error {
-	body := map[string]any{
-		"metadata": map[string]any{
-			"annotations": map[string]any{
-				key: value,
-			},
-		},
-	}
-	return c.do(ctx, http.MethodPatch, "/api/v1/nodes/"+url.PathEscape(name), body, nil, "application/merge-patch+json")
 }
 
 func (c *kubeClient) listSandboxPods(ctx context.Context) ([]kubePod, error) {
@@ -205,31 +157,18 @@ func (c *kubeClient) listSandboxPods(ctx context.Context) ([]kubePod, error) {
 	return out.Items, nil
 }
 
-func (c *kubeClient) evictPod(ctx context.Context, namespace, name string) error {
-	body := map[string]any{
-		"apiVersion": "policy/v1",
-		"kind":       "Eviction",
-		"metadata": map[string]string{
-			"name":      name,
-			"namespace": namespace,
-		},
-	}
-	path := "/api/v1/namespaces/" + url.PathEscape(namespace) + "/pods/" + url.PathEscape(name) + "/eviction"
-	return c.do(ctx, http.MethodPost, path, body, nil, "application/json")
-}
-
 func (c *kubeClient) do(ctx context.Context, method, path string, body any, out any, contentType string) error {
 	var rdr io.Reader
 	if body != nil {
 		b, err := json.Marshal(body)
 		if err != nil {
-			return ErrInvalidArg
+			return err
 		}
 		rdr = bytes.NewReader(b)
 	}
 	req, err := http.NewRequestWithContext(ctx, method, c.cfg.Server+path, rdr)
 	if err != nil {
-		return ErrInvalidArg
+		return err
 	}
 	req.Header.Set("accept", "application/json")
 	if body != nil {
@@ -243,13 +182,6 @@ func (c *kubeClient) do(ctx context.Context, method, path string, body any, out 
 		return fmt.Errorf("kubernetes api: %w", err)
 	}
 	defer resp.Body.Close()
-	if resp.StatusCode == http.StatusNotFound {
-		return ErrNotFound
-	}
-	if resp.StatusCode == http.StatusConflict {
-		b, _ := io.ReadAll(io.LimitReader(resp.Body, 4096))
-		return fmt.Errorf("%w: kubernetes conflict: %s", ErrConflict, strings.TrimSpace(string(b)))
-	}
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
 		b, _ := io.ReadAll(io.LimitReader(resp.Body, 4096))
 		return fmt.Errorf("kubernetes api status %d: %s", resp.StatusCode, strings.TrimSpace(string(b)))
@@ -269,9 +201,7 @@ type kubeNode struct {
 		Unschedulable bool `json:"unschedulable"`
 	} `json:"spec"`
 	Status struct {
-		Capacity    map[string]string `json:"capacity"`
-		Allocatable map[string]string `json:"allocatable"`
-		Conditions  []struct {
+		Conditions []struct {
 			Type    string `json:"type"`
 			Status  string `json:"status"`
 			Reason  string `json:"reason"`
@@ -299,154 +229,177 @@ type kubeMeta struct {
 
 type kubeconfigDoc struct {
 	CurrentContext string
-	Clusters       map[string]map[string]string
-	Users          map[string]map[string]string
-	Contexts       map[string]map[string]string
+	Clusters       []map[string]map[string]string
+	Contexts       []map[string]map[string]string
+	Users          []map[string]map[string]string
 }
 
 func parseKubeconfig(raw []byte) (kubeConfig, error) {
 	doc := kubeconfigDoc{
-		Clusters: map[string]map[string]string{},
-		Users:    map[string]map[string]string{},
-		Contexts: map[string]map[string]string{},
+		Clusters: []map[string]map[string]string{},
+		Contexts: []map[string]map[string]string{},
+		Users:    []map[string]map[string]string{},
 	}
-	section := ""
-	var itemName string
-	var item map[string]string
-	var nested string
-	flush := func() {
-		if itemName == "" || item == nil {
-			return
-		}
-		switch section {
-		case "clusters":
-			doc.Clusters[itemName] = item
-		case "users":
-			doc.Users[itemName] = item
-		case "contexts":
-			doc.Contexts[itemName] = item
-		}
-	}
-	for _, rawLine := range strings.Split(string(raw), "\n") {
-		line := stripYAMLComment(rawLine)
-		if strings.TrimSpace(line) == "" {
+	var section string
+	var item map[string]map[string]string
+	for _, line := range strings.Split(string(raw), "\n") {
+		trimmed := strings.TrimSpace(line)
+		if trimmed == "" || strings.HasPrefix(trimmed, "#") {
 			continue
 		}
-		trim := strings.TrimSpace(line)
-		if !strings.HasPrefix(rawLine, " ") && !strings.HasPrefix(trim, "- ") && strings.HasSuffix(trim, ":") {
-			flush()
-			section = strings.TrimSuffix(trim, ":")
-			itemName, item, nested = "", nil, ""
+		if !strings.HasPrefix(line, " ") && strings.HasSuffix(trimmed, ":") {
+			section = strings.TrimSuffix(trimmed, ":")
+			item = nil
 			continue
 		}
-		if strings.HasPrefix(trim, "current-context:") {
-			doc.CurrentContext = yamlValue(trim)
-			continue
-		}
-		if section != "clusters" && section != "users" && section != "contexts" {
-			continue
-		}
-		if strings.HasPrefix(trim, "- ") {
-			flush()
-			itemName = ""
-			item = map[string]string{}
-			nested = ""
-			rest := strings.TrimSpace(strings.TrimPrefix(trim, "- "))
-			if strings.HasPrefix(rest, "name:") {
-				itemName = yamlValue(rest)
-			} else if strings.HasSuffix(rest, ":") {
-				nested = strings.TrimSuffix(rest, ":")
-			} else if idx := strings.Index(rest, ":"); idx >= 0 {
-				key := strings.TrimSpace(rest[:idx])
-				item[key] = strings.Trim(strings.TrimSpace(rest[idx+1:]), `"'`)
+		if !strings.HasPrefix(line, " ") && strings.Contains(trimmed, ":") {
+			key, value, _ := strings.Cut(trimmed, ":")
+			if key == "current-context" {
+				doc.CurrentContext = strings.Trim(strings.TrimSpace(value), `"`)
 			}
 			continue
 		}
-		if item == nil {
-			continue
-		}
-		if strings.HasPrefix(trim, "name:") {
-			itemName = yamlValue(trim)
-			continue
-		}
-		if strings.HasSuffix(trim, ":") {
-			nested = strings.TrimSuffix(trim, ":")
-			continue
-		}
-		if idx := strings.Index(trim, ":"); idx >= 0 {
-			key := strings.TrimSpace(trim[:idx])
-			val := strings.Trim(strings.TrimSpace(trim[idx+1:]), `"'`)
-			if nested != "" {
-				key = nested + "." + key
+		if strings.HasPrefix(strings.TrimLeft(line, " "), "- ") {
+			item = map[string]map[string]string{}
+			switch section {
+			case "clusters":
+				doc.Clusters = append(doc.Clusters, item)
+			case "contexts":
+				doc.Contexts = append(doc.Contexts, item)
+			case "users":
+				doc.Users = append(doc.Users, item)
 			}
-			item[key] = val
+			rest := strings.TrimSpace(strings.TrimPrefix(strings.TrimLeft(line, " "), "- "))
+			if rest != "" {
+				assignKubeconfigLine(item, rest)
+			}
+			continue
+		}
+		if item != nil {
+			assignKubeconfigLine(item, trimmed)
 		}
 	}
-	flush()
 	ctxName := doc.CurrentContext
-	if ctxName == "" && len(doc.Contexts) == 1 {
-		for k := range doc.Contexts {
-			ctxName = k
-		}
+	if ctxName == "" {
+		return kubeConfig{}, fmt.Errorf("kubeconfig: current-context missing")
 	}
-	ctx := doc.Contexts[ctxName]
+	ctx := findNamed(doc.Contexts, ctxName)
 	if ctx == nil {
 		return kubeConfig{}, fmt.Errorf("kubeconfig: current context %q not found", ctxName)
 	}
-	cluster := doc.Clusters[ctx["context.cluster"]]
-	user := doc.Users[ctx["context.user"]]
+	cluster := findNamed(doc.Clusters, ctx["context.cluster"])
 	if cluster == nil {
 		return kubeConfig{}, fmt.Errorf("kubeconfig: cluster %q not found", ctx["context.cluster"])
 	}
 	cfg := kubeConfig{Server: normalizeKubeServer(strings.TrimRight(cluster["cluster.server"], "/"))}
-	cfg.CAData = decodeDataOrFile(cluster["cluster.certificate-authority-data"], cluster["cluster.certificate-authority"])
-	cfg.BearerToken = user["user.token"]
-	cfg.ClientCertData = decodeDataOrFile(user["user.client-certificate-data"], user["user.client-certificate"])
-	cfg.ClientKeyData = decodeDataOrFile(user["user.client-key-data"], user["user.client-key"])
-	cfg.InsecureSkipTLS = cluster["cluster.insecure-skip-tls-verify"] == "true"
+	if ca := cluster["cluster.certificate-authority-data"]; ca != "" {
+		if b, err := base64.StdEncoding.DecodeString(ca); err == nil {
+			cfg.CAData = b
+		}
+	}
+	if userName := ctx["context.user"]; userName != "" {
+		if user := findNamed(doc.Users, userName); user != nil {
+			cfg.BearerToken = user["user.token"]
+			if cert := user["user.client-certificate-data"]; cert != "" {
+				if b, err := base64.StdEncoding.DecodeString(cert); err == nil {
+					cfg.ClientCertData = b
+				}
+			}
+			if key := user["user.client-key-data"]; key != "" {
+				if b, err := base64.StdEncoding.DecodeString(key); err == nil {
+					cfg.ClientKeyData = b
+				}
+			}
+		}
+	}
 	return cfg, nil
 }
 
-func stripYAMLComment(line string) string {
-	if idx := strings.Index(line, " #"); idx >= 0 {
-		return line[:idx]
+func assignKubeconfigLine(item map[string]map[string]string, line string) {
+	key, value, ok := strings.Cut(line, ":")
+	if !ok {
+		return
 	}
-	return line
-}
-
-func yamlValue(line string) string {
-	idx := strings.Index(line, ":")
-	if idx < 0 {
-		return ""
+	key = strings.TrimSpace(key)
+	value = strings.Trim(strings.TrimSpace(value), `"`)
+	if key == "name" {
+		item["name"] = map[string]string{"": value}
+		return
 	}
-	return strings.Trim(strings.TrimSpace(line[idx+1:]), `"'`)
-}
-
-func decodeDataOrFile(data, file string) []byte {
-	if data != "" {
-		if b, err := base64.StdEncoding.DecodeString(data); err == nil {
-			return b
+	for group := range item {
+		if group != "name" && strings.HasPrefix(key, group+".") {
+			item[key] = map[string]string{"": value}
+			return
 		}
 	}
-	if file != "" {
-		if b, err := os.ReadFile(expandHome(file)); err == nil {
-			return b
+	switch key {
+	case "cluster", "context", "user":
+		item[key] = map[string]string{}
+	default:
+		for _, group := range []string{"cluster", "context", "user"} {
+			if _, ok := item[group]; ok {
+				item[group+"."+key] = map[string]string{"": value}
+				return
+			}
+		}
+	}
+}
+
+func findNamed(items []map[string]map[string]string, name string) map[string]string {
+	for _, item := range items {
+		if item["name"][""] == name {
+			out := map[string]string{}
+			for key, value := range item {
+				if key == "name" {
+					continue
+				}
+				if v, ok := value[""]; ok {
+					out[key] = v
+				}
+			}
+			return out
 		}
 	}
 	return nil
 }
 
 func normalizeKubeServer(server string) string {
-	u, err := url.Parse(server)
-	if err != nil || u.Hostname() != "0.0.0.0" {
+	server = strings.TrimSpace(server)
+	if server == "" || strings.HasPrefix(server, "http://") || strings.HasPrefix(server, "https://") {
 		return server
 	}
-	host := "127.0.0.1"
-	if port := u.Port(); port != "" {
-		host += ":" + port
+	return "https://" + server
+}
+
+func nodeReady(n kubeNode) bool {
+	for _, c := range n.Status.Conditions {
+		if c.Type == "Ready" {
+			return c.Status == "True"
+		}
 	}
-	u.Host = host
-	return u.String()
+	return false
+}
+
+func isFinishedPod(phase string) bool {
+	return phase == "Succeeded" || phase == "Failed"
+}
+
+func envFirst(keys ...string) string {
+	for _, key := range keys {
+		if v := strings.TrimSpace(os.Getenv(key)); v != "" {
+			return v
+		}
+	}
+	return ""
+}
+
+func envBool(key string) bool {
+	switch strings.ToLower(strings.TrimSpace(os.Getenv(key))) {
+	case "1", "true", "yes", "on":
+		return true
+	default:
+		return false
+	}
 }
 
 func expandHome(path string) string {
@@ -457,22 +410,8 @@ func expandHome(path string) string {
 	}
 	if strings.HasPrefix(path, "~/") {
 		if home, err := os.UserHomeDir(); err == nil {
-			return filepath.Join(home, path[2:])
+			return filepath.Join(home, strings.TrimPrefix(path, "~/"))
 		}
 	}
 	return path
-}
-
-func envFirst(keys ...string) string {
-	for _, k := range keys {
-		if v := strings.TrimSpace(os.Getenv(k)); v != "" {
-			return v
-		}
-	}
-	return ""
-}
-
-func envBool(key string) bool {
-	v := strings.ToLower(strings.TrimSpace(os.Getenv(key)))
-	return v == "1" || v == "true" || v == "yes" || v == "on"
 }

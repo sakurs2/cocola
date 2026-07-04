@@ -31,6 +31,7 @@ func newTestAPI(adminKey string) *API {
 
 type fakeNodeManager struct {
 	offlineForce bool
+	maxPods      *int
 }
 
 func (f *fakeNodeManager) ListNodes(context.Context) (service.SandboxNodeList, error) {
@@ -44,6 +45,7 @@ func (f *fakeNodeManager) ListNodes(context.Context) (service.SandboxNodeList, e
 		CPUAllocatable:    "3900m",
 		MemoryAllocatable: "7Gi",
 		SandboxPods:       2,
+		MaxSandboxPods:    f.maxPods,
 	}}}, nil
 }
 
@@ -55,8 +57,20 @@ func (f *fakeNodeManager) RestoreNode(context.Context, string) (service.SandboxN
 	return service.SandboxNode{Name: "node-a", Status: "active"}, nil
 }
 
+func (f *fakeNodeManager) SetMaxSandboxPods(_ context.Context, _ string, max *int) (service.SandboxNode, error) {
+	f.maxPods = max
+	return service.SandboxNode{Name: "node-a", Status: "active", SandboxPods: 2, MaxSandboxPods: max}, nil
+}
+
 func (f *fakeNodeManager) OfflineNode(_ context.Context, _ string, force bool) (service.OfflineNodeResult, error) {
 	f.offlineForce = force
+	if !force {
+		return service.OfflineNodeResult{
+			Node:        service.SandboxNode{Name: "node-a", Status: "offline_pending", SandboxPods: 1},
+			PendingPods: []string{"sandbox-pod-a"},
+			Message:     "confirm force",
+		}, nil
+	}
 	return service.OfflineNodeResult{Node: service.SandboxNode{Name: "node-a", Status: "offline_pending"}, Message: "ok"}, nil
 }
 
@@ -599,12 +613,36 @@ func TestSandboxNodeRoutes(t *testing.T) {
 		t.Fatalf("empty join command")
 	}
 
+	rec = do(t, r, http.MethodPatch, "/admin/sandbox-nodes/node-a/capacity", "k", map[string]any{"max_sandbox_pods": 3})
+	if rec.Code != http.StatusOK {
+		t.Fatalf("set capacity: want 200, got %d (%s)", rec.Code, rec.Body.String())
+	}
+	var capacity service.SandboxNode
+	if err := json.Unmarshal(rec.Body.Bytes(), &capacity); err != nil {
+		t.Fatalf("decode capacity: %v", err)
+	}
+	if capacity.MaxSandboxPods == nil || *capacity.MaxSandboxPods != 3 {
+		t.Fatalf("capacity max = %+v, want 3", capacity.MaxSandboxPods)
+	}
+
 	rec = do(t, r, http.MethodPost, "/admin/sandbox-nodes/node-a/offline", "k", map[string]any{"force": true})
 	if rec.Code != http.StatusOK {
 		t.Fatalf("offline: want 200, got %d (%s)", rec.Code, rec.Body.String())
 	}
 	if !mgr.offlineForce {
 		t.Fatalf("offline did not pass force=true")
+	}
+
+	rec = do(t, r, http.MethodPost, "/admin/sandbox-nodes/node-a/offline", "k", map[string]any{"force": false})
+	if rec.Code != http.StatusOK {
+		t.Fatalf("offline pending: want 200, got %d (%s)", rec.Code, rec.Body.String())
+	}
+	var pending service.OfflineNodeResult
+	if err := json.Unmarshal(rec.Body.Bytes(), &pending); err != nil {
+		t.Fatalf("decode offline pending: %v", err)
+	}
+	if len(pending.PendingPods) != 1 || pending.PendingPods[0] != "sandbox-pod-a" {
+		t.Fatalf("offline pending pods wrong: %+v", pending)
 	}
 }
 

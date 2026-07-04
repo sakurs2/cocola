@@ -83,6 +83,9 @@ type Binder struct {
 
 	// metrics is optional; nil means "don't record".
 	metrics *Metrics
+
+	// cap is optional; nil means fresh sandbox creation is not capacity-gated.
+	cap CapacityGuard
 }
 
 // NewBinder constructs a Binder. The provider is the same abstraction the gRPC
@@ -105,6 +108,13 @@ func (b *Binder) WithMetrics(m *Metrics) *Binder {
 // creates. Returns the binder for chaining.
 func (b *Binder) WithNetworking(n provider.Networking) *Binder {
 	b.net = n
+	return b
+}
+
+// WithCapacityGuard gates fresh sandbox creation. Existing session bindings are
+// still reused so a full cluster does not strand already-running conversations.
+func (b *Binder) WithCapacityGuard(g CapacityGuard) *Binder {
+	b.cap = g
 	return b
 }
 
@@ -178,13 +188,23 @@ func (b *Binder) AcquireWithOutcome(ctx context.Context, spec AcquireSpec) (Outc
 		return Outcome{Sandbox: sb, Reused: true}, nil
 	}
 
+	targetNode := ""
+	if b.cap != nil {
+		node, err := b.cap.SelectNode(ctx)
+		if err != nil {
+			return Outcome{}, err
+		}
+		targetNode = node
+	}
+
 	start := time.Now()
 	sb, err := b.p.Create(ctx, provider.SandboxSpec{
-		UserID:     spec.UserID,
-		SessionID:  spec.SessionID,
-		Image:      spec.Image,
-		Env:        spec.Env,
-		Networking: b.net,
+		UserID:         spec.UserID,
+		SessionID:      spec.SessionID,
+		Image:          spec.Image,
+		Env:            spec.Env,
+		Networking:     b.net,
+		TargetNodeName: targetNode,
 	})
 	if err != nil {
 		return Outcome{}, fmt.Errorf("provider create: %w", err)

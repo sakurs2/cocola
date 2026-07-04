@@ -106,6 +106,7 @@ func (a *API) Router() http.Handler {
 			r.Get("/join-command", a.sandboxNodeJoinCommand)
 			r.Post("/{name}/disable", a.disableSandboxNode)
 			r.Post("/{name}/restore", a.restoreSandboxNode)
+			r.Patch("/{name}/capacity", a.setSandboxNodeCapacity)
 			r.Post("/{name}/offline", a.offlineSandboxNode)
 		})
 

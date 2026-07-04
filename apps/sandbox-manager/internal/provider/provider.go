@@ -12,12 +12,13 @@ import (
 
 // SandboxSpec describes the desired sandbox.
 type SandboxSpec struct {
-	UserID     string            // owner — used to mount per-user persistent volume
-	SessionID  string            // session — used to scope ephemeral workspace
-	Image      string            // OCI image reference
-	Env        map[string]string // extra env to inject
-	Resources  Resources         // CPU/mem/disk caps
-	Networking Networking        // egress policy
+	UserID         string            // owner — used to mount per-user persistent volume
+	SessionID      string            // session — used to scope ephemeral workspace
+	Image          string            // OCI image reference
+	Env            map[string]string // extra env to inject
+	Resources      Resources         // CPU/mem/disk caps
+	Networking     Networking        // egress policy
+	TargetNodeName string            // optional node placement for schedulable backends
 }
 
 // Resources defines the resource quota.

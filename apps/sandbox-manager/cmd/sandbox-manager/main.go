@@ -80,6 +80,13 @@ func main() {
 		binder = orchestrator.NewBinder(kv, p, cfg).
 			WithMetrics(bm).
 			WithNetworking(net)
+		capGuard, capErr := orchestrator.NewCapacityGuardFromEnv()
+		if capErr != nil {
+			log.Sugar().Warnw("sandbox capacity guard disabled", "err", capErr)
+		} else if capGuard != nil {
+			binder.WithCapacityGuard(capGuard)
+			log.Info("sandbox capacity guard enabled (Kubernetes REST)")
+		}
 
 		// Allocation is on-demand cold-start only (ADR-0015/0016): every miss
 		// cold-creates a sandbox and mounts the per-user + per-session volumes at

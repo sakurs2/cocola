@@ -15,6 +15,7 @@ directly with a StaticSandboxBinder and assert the binding lifecycle:
 
 from dataclasses import dataclass, field
 
+import grpc
 from cocola_agent_runtime.agent_provider import AgentEvent, AgentOptions
 from cocola_agent_runtime.sandbox_binder import (
     BoundSandbox,
@@ -40,6 +41,9 @@ class FakeContext:
 
     async def write(self, event):
         self.written.append(event)
+
+    def invocation_metadata(self):
+        return []
 
 
 class RecordingProvider:
@@ -227,3 +231,34 @@ async def test_manager_binder_applies_provisioning_defaults(monkeypatch):
     assert captured["image"] == "other:img"
     assert captured["env"]["ANTHROPIC_BASE_URL"] == "http://gw:8081"  # default kept
     assert captured["env"]["ANTHROPIC_MODEL"] == "fast"  # per-call wins
+
+
+async def test_manager_binder_maps_capacity_exhausted(monkeypatch):
+    import cocola_agent_runtime.sandbox_binder as mod
+
+    class CapacityRpcError(grpc.RpcError):
+        def code(self):
+            return grpc.StatusCode.RESOURCE_EXHAUSTED
+
+    class FakeClient:
+        def __init__(self, addr=""):
+            pass
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *a):
+            return False
+
+        def acquire(self, session_id, user_id="", image="", env=None):
+            raise CapacityRpcError()
+
+    monkeypatch.setattr(mod, "SandboxClient", FakeClient)
+
+    binder = SandboxManagerBinder("addr")
+    try:
+        await binder.acquire(session_id="S5", user_id="u")
+    except RuntimeError as exc:
+        assert str(exc) == "current resources are busy; no sandbox capacity available"
+    else:
+        raise AssertionError("expected RuntimeError")

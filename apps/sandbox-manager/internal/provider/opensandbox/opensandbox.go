@@ -292,6 +292,7 @@ type createSandboxRequest struct {
 	ResourceLimits map[string]string `json:"resourceLimits,omitempty"`
 	Env            map[string]string `json:"env,omitempty"`
 	Metadata       map[string]string `json:"metadata,omitempty"`
+	NodeSelector   map[string]string `json:"nodeSelector,omitempty"`
 	NetworkPolicy  *networkPolicy    `json:"networkPolicy,omitempty"`
 	Volumes        []volumeSpec      `json:"volumes,omitempty"`
 }
@@ -384,6 +385,10 @@ func (p *Provider) Create(ctx context.Context, spec provider.SandboxSpec) (*prov
 			"cocola.user_id":    safeMetadataLabelValue(spec.UserID),
 			"cocola.session_id": safeMetadataLabelValue(spec.SessionID),
 		},
+	}
+	if spec.TargetNodeName != "" {
+		req.Metadata["cocola.target_node"] = safeMetadataLabelValue(spec.TargetNodeName)
+		req.NodeSelector = map[string]string{"kubernetes.io/hostname": spec.TargetNodeName}
 	}
 	if spec.Image != "" {
 		req.Image = &imageSpec{URI: spec.Image}

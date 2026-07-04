@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"sort"
+	"strconv"
 	"strings"
 )
 
@@ -17,6 +18,7 @@ type SandboxNodeManager interface {
 	ListNodes(ctx context.Context) (SandboxNodeList, error)
 	DisableNode(ctx context.Context, name string) (SandboxNode, error)
 	RestoreNode(ctx context.Context, name string) (SandboxNode, error)
+	SetMaxSandboxPods(ctx context.Context, name string, max *int) (SandboxNode, error)
 	OfflineNode(ctx context.Context, name string, force bool) (OfflineNodeResult, error)
 	JoinCommand(ctx context.Context) (JoinCommand, error)
 }
@@ -35,6 +37,7 @@ type SandboxNode struct {
 	CPUAllocatable    string            `json:"cpu_allocatable"`
 	MemoryAllocatable string            `json:"memory_allocatable"`
 	SandboxPods       int               `json:"sandbox_pods"`
+	MaxSandboxPods    *int              `json:"max_sandbox_pods,omitempty"`
 	Reason            string            `json:"reason,omitempty"`
 	Labels            map[string]string `json:"labels,omitempty"`
 }
@@ -88,6 +91,28 @@ func (a *Admin) RestoreSandboxNode(ctx context.Context, name, actor string) (San
 	return out, nil
 }
 
+func (a *Admin) SetSandboxNodeMaxPods(ctx context.Context, name string, max *int, actor string) (SandboxNode, error) {
+	if a.sandboxNodes == nil {
+		return SandboxNode{}, ErrNotConfigured
+	}
+	if strings.TrimSpace(name) == "" {
+		return SandboxNode{}, ErrInvalidArg
+	}
+	if max != nil && *max < 0 {
+		return SandboxNode{}, ErrInvalidArg
+	}
+	out, err := a.sandboxNodes.SetMaxSandboxPods(ctx, name, max)
+	if err != nil {
+		return SandboxNode{}, err
+	}
+	detail := "cleared"
+	if max != nil {
+		detail = fmt.Sprintf("max=%d", *max)
+	}
+	a.audit(ctx, actor, "sandbox_node.capacity", name, detail)
+	return out, nil
+}
+
 func (a *Admin) OfflineSandboxNode(ctx context.Context, name string, force bool, actor string) (OfflineNodeResult, error) {
 	if a.sandboxNodes == nil {
 		return OfflineNodeResult{}, ErrNotConfigured
@@ -116,6 +141,9 @@ func (a *Admin) SandboxNodeJoinCommand(ctx context.Context) (JoinCommand, error)
 // NewSandboxNodeManagerFromEnv returns nil when Kubernetes configuration is not
 // present. This keeps admin-api's existing zero-dependency dev mode intact.
 func NewSandboxNodeManagerFromEnv() (SandboxNodeManager, error) {
+	if strings.ToLower(strings.TrimSpace(os.Getenv("COCOLA_CLUSTER_MANAGER_MODE"))) != "k3s" {
+		return nil, nil
+	}
 	cfg, ok, err := kubeConfigFromEnv()
 	if err != nil || !ok {
 		return nil, err
@@ -128,6 +156,7 @@ type KubeSandboxNodeManager struct {
 }
 
 const sandboxNodeModeAnnotation = "cocola.dev/sandbox-node-mode"
+const sandboxNodeMaxAnnotation = "cocola.dev/max-sandbox-pods"
 
 func NewKubeSandboxNodeManager(cfg kubeConfig) *KubeSandboxNodeManager {
 	return &KubeSandboxNodeManager{client: newKubeClient(cfg)}
@@ -162,6 +191,17 @@ func (m *KubeSandboxNodeManager) DisableNode(ctx context.Context, name string) (
 
 func (m *KubeSandboxNodeManager) RestoreNode(ctx context.Context, name string) (SandboxNode, error) {
 	if err := m.client.patchNodeState(ctx, name, false, ""); err != nil {
+		return SandboxNode{}, err
+	}
+	return m.getNode(ctx, name)
+}
+
+func (m *KubeSandboxNodeManager) SetMaxSandboxPods(ctx context.Context, name string, max *int) (SandboxNode, error) {
+	var value any
+	if max != nil {
+		value = fmt.Sprintf("%d", *max)
+	}
+	if err := m.client.patchNodeAnnotation(ctx, name, sandboxNodeMaxAnnotation, value); err != nil {
 		return SandboxNode{}, err
 	}
 	return m.getNode(ctx, name)
@@ -278,9 +318,22 @@ func nodeSummary(n kubeNode, sandboxPods int) SandboxNode {
 		CPUAllocatable:    n.Status.Allocatable["cpu"],
 		MemoryAllocatable: n.Status.Allocatable["memory"],
 		SandboxPods:       sandboxPods,
+		MaxSandboxPods:    parseMaxSandboxPods(n.Metadata.Annotations[sandboxNodeMaxAnnotation]),
 		Reason:            reason,
 		Labels:            n.Metadata.Labels,
 	}
+}
+
+func parseMaxSandboxPods(raw string) *int {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return nil
+	}
+	n, err := strconv.Atoi(raw)
+	if err != nil || n < 0 {
+		return nil
+	}
+	return &n
 }
 
 func nodeReady(n kubeNode) (bool, string) {

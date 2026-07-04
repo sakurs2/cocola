@@ -414,6 +414,25 @@ func (a *API) restoreSandboxNode(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, node)
 }
 
+type setSandboxNodeCapacityReq struct {
+	MaxSandboxPods *int `json:"max_sandbox_pods"`
+}
+
+func (a *API) setSandboxNodeCapacity(w http.ResponseWriter, r *http.Request) {
+	name := chi.URLParam(r, "name")
+	var req setSandboxNodeCapacityReq
+	if err := decode(r, &req); err != nil {
+		mapErr(w, err)
+		return
+	}
+	node, err := a.svc.SetSandboxNodeMaxPods(r.Context(), name, req.MaxSandboxPods, actorOf(r))
+	if err != nil {
+		mapErr(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, node)
+}
+
 type offlineSandboxNodeReq struct {
 	Force bool `json:"force,omitempty"`
 }

@@ -161,6 +161,9 @@ func (s *Server) Acquire(ctx context.Context, req *sandboxv1.AcquireRequest) (*s
 		Env:       req.GetEnv(),
 	})
 	if err != nil {
+		if errors.Is(err, orchestrator.ErrCapacityBusy) {
+			return nil, status.Error(codes.ResourceExhausted, "current resources are busy; no sandbox capacity available")
+		}
 		return nil, status.Errorf(codes.Internal, "acquire: %v", err)
 	}
 	return &sandboxv1.AcquireResponse{

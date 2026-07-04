@@ -24,6 +24,17 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ pat
   });
 }
 
+export async function PATCH(req: NextRequest, { params }: { params: Promise<{ path: string[] }> }) {
+  const authResult = await requireAdmin();
+  if (isAuthFail(authResult)) return authResult.response;
+  const body = await req.text();
+  return proxyAdmin(req, await adminPath(params), authResult.user, {
+    method: "PATCH",
+    body,
+    contentType: req.headers.get("content-type") ?? "application/json",
+  });
+}
+
 async function adminPath(params: Promise<{ path: string[] }>) {
   const { path } = await params;
   return `/admin/sandbox-nodes/${path.map(encodeURIComponent).join("/")}`;

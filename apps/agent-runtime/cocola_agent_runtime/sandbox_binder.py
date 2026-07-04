@@ -40,6 +40,7 @@ from dataclasses import dataclass
 from typing import Protocol
 
 import anyio
+import grpc
 from cocola.sandbox.v1 import sandbox_pb2 as pb
 from cocola_common import get_logger
 
@@ -108,9 +109,16 @@ class SandboxManagerBinder:
 
         def _call() -> BoundSandbox:
             with SandboxClient(addr=self._addr) as sb:
-                res = sb.acquire(
-                    session_id=session_id, user_id=user_id, image=eff_image, env=eff_env
-                )
+                try:
+                    res = sb.acquire(
+                        session_id=session_id, user_id=user_id, image=eff_image, env=eff_env
+                    )
+                except grpc.RpcError as exc:
+                    if exc.code() == grpc.StatusCode.RESOURCE_EXHAUSTED:
+                        raise RuntimeError(
+                            "current resources are busy; no sandbox capacity available"
+                        ) from exc
+                    raise
             box = res.sandbox
             return BoundSandbox(id=box.id, endpoint=box.endpoint, reused=res.reused)
 
