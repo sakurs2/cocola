@@ -53,6 +53,7 @@ import (
 	"github.com/cocola-project/cocola/packages/go-common/config"
 	"github.com/cocola-project/cocola/packages/go-common/logger"
 	"github.com/cocola-project/cocola/packages/go-common/metrics"
+	rds "github.com/cocola-project/cocola/packages/go-common/redis"
 	"github.com/cocola-project/cocola/packages/go-common/token"
 	"github.com/cocola-project/cocola/packages/go-common/tracing"
 )
@@ -118,6 +119,7 @@ func main() {
 	// fleet-wide. Best-effort — a publish failure is logged, never fatal, since
 	// the authoritative write already landed in the store.
 	redisAddr := os.Getenv("COCOLA_REDIS_ADDR")
+	var runtimeKV *rds.Client
 	if redisAddr != "" {
 		cfg := redispub.Config{
 			Addr:     redisAddr,
@@ -140,11 +142,37 @@ func main() {
 		}
 		st = mirror
 		log.Sugar().Infow("shared-redis publishing enabled", "addr", redisAddr)
+
+		kvctx, kvcancel := context.WithTimeout(context.Background(), 5*time.Second)
+		runtimeKV, err = rds.New(kvctx, rds.Config{
+			Addr:     redisAddr,
+			Password: os.Getenv("COCOLA_REDIS_PASSWORD"),
+			DB:       getenvInt("COCOLA_REDIS_DB", 0),
+			PoolSize: getenvInt("COCOLA_REDIS_POOL_SIZE", 10),
+		})
+		kvcancel()
+		if err != nil {
+			log.Sugar().Warnw("sandbox runtime monitor disabled: shared Redis unavailable", "err", err)
+		} else {
+			defer func() { _ = runtimeKV.Close() }()
+		}
 	} else {
 		log.Warn("shared-redis publishing DISABLED (no COCOLA_REDIS_ADDR) — revokes/overrides are process-local")
 	}
 
 	svc := service.New(st, iss, time.Now)
+	if runtimeKV != nil {
+		runtimeMgr, err := service.NewSandboxRuntimeManagerFromEnv(runtimeKV)
+		if err != nil {
+			log.Sugar().Warnw("sandbox runtime monitor disabled", "err", err)
+		} else if runtimeMgr != nil {
+			if rm, ok := runtimeMgr.(*service.RedisSandboxRuntimeManager); ok {
+				runtimeMgr = svc.AttachSandboxRuntimeUsernames(rm)
+			}
+			svc.WithSandboxRuntimeManager(runtimeMgr)
+			log.Info("sandbox runtime monitor enabled (Redis metadata)")
+		}
+	}
 	if email := os.Getenv("COCOLA_BOOTSTRAP_ADMIN_EMAIL"); email != "" {
 		username := os.Getenv("COCOLA_BOOTSTRAP_ADMIN_USERNAME")
 		password := config.SecretFromEnv("COCOLA_BOOTSTRAP_ADMIN_PASSWORD")

@@ -2,7 +2,7 @@
 
 import { buttonVariants } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
-import { ArrowRight, Server, ShieldCheck, Users } from "lucide-react";
+import { ArrowRight, Box, Server, ShieldCheck, Users } from "lucide-react";
 import Link from "next/link";
 
 const MODULES = [
@@ -13,6 +13,15 @@ const MODULES = [
     group: "Infrastructure",
     summary: "k3s node health, sandbox pod counts, capacity limits, and node operations.",
     stats: ["Nodes", "Sandbox Pods", "Max Sandbox Pods"],
+  },
+  {
+    title: "Sandbox Runtime",
+    href: "/admin/sandboxes",
+    icon: Box,
+    group: "Infrastructure",
+    summary:
+      "Current sandboxes, conversation bindings, owners, lifecycle state, and pod placement.",
+    stats: ["Running", "Starting", "To Reclaim"],
   },
   {
     title: "Users",
@@ -45,7 +54,7 @@ export default function AdminPage() {
         <section className="grid gap-3 md:grid-cols-3">
           <Metric label="Modules" value={String(MODULES.length)} />
           <Metric label="Access" value="1" />
-          <Metric label="Infrastructure" value="1" />
+          <Metric label="Infrastructure" value="2" />
         </section>
 
         <section className="grid gap-4 lg:grid-cols-2">

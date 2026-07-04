@@ -41,10 +41,11 @@ type Clock func() time.Time
 
 // Admin is the admin-api service.
 type Admin struct {
-	store        store.Store
-	issuer       *token.Issuer
-	now          Clock
-	sandboxNodes SandboxNodeManager
+	store           store.Store
+	issuer          *token.Issuer
+	now             Clock
+	sandboxNodes    SandboxNodeManager
+	sandboxRuntimes SandboxRuntimeManager
 }
 
 // New builds the service. issuer may be nil if token minting is disabled (no
@@ -61,6 +62,14 @@ func New(s store.Store, iss *token.Issuer, now Clock) *Admin {
 // error for sandbox-node routes while the rest of admin-api stays usable.
 func (a *Admin) WithSandboxNodeManager(m SandboxNodeManager) *Admin {
 	a.sandboxNodes = m
+	return a
+}
+
+// WithSandboxRuntimeManager attaches the optional read-only sandbox runtime
+// monitor backend. When nil, the HTTP layer returns "not configured" while the
+// rest of admin-api remains usable.
+func (a *Admin) WithSandboxRuntimeManager(m SandboxRuntimeManager) *Admin {
+	a.sandboxRuntimes = m
 	return a
 }
 

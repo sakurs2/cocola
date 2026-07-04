@@ -19,8 +19,8 @@ const keyPrefix = "cocola:sb:"
 //   - leaseTTL:       a sandbox whose lease is not renewed within this window is
 //     considered idle and becomes eligible for stage-1 reclaim.
 //   - heartbeatEvery: how often the heartbeat worker renews live leases. Must be
-//     comfortably less than leaseTTL (here 1/3) so a single
-//     missed tick never expires a healthy lease.
+//     comfortably less than leaseTTL so missed ticks do not expire a healthy
+//     lease.
 //   - destroyGrace:   after a sandbox is Paused (stage 1), how long it lingers
 //     before it is Destroyed (stage 2). A re-acquire during this
 //     window resurrects it (Resume) instead of paying a cold
@@ -28,7 +28,7 @@ const keyPrefix = "cocola:sb:"
 //   - lockTTL:        safety cap on the per-session create lock so a crashed
 //     holder cannot wedge a session forever.
 const (
-	DefaultLeaseTTL       = 60 * time.Second
+	DefaultLeaseTTL       = 10 * time.Minute
 	DefaultHeartbeatEvery = 20 * time.Second
 	DefaultDestroyGrace   = 120 * time.Second
 	DefaultLockTTL        = 30 * time.Second

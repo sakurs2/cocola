@@ -21,6 +21,7 @@ import (
 	"encoding/hex"
 	"fmt"
 	"io"
+	"io/fs"
 	"log/slog"
 	"os"
 	"path/filepath"
@@ -522,7 +523,7 @@ func (p *Provider) resolve(ctx context.Context, sid string) (*record, error) {
 		return nil, fmt.Errorf("docker: container list: %w", err)
 	}
 	if len(cs) == 0 {
-		return nil, fmt.Errorf("docker: sandbox not found: %s", sid)
+		return nil, fmt.Errorf("docker: sandbox not found: %s: %w", sid, fs.ErrNotExist)
 	}
 	c := cs[0]
 	rec = &record{

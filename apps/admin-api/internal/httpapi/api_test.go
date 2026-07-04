@@ -78,10 +78,33 @@ func (f *fakeNodeManager) JoinCommand(context.Context) (service.JoinCommand, err
 	return service.JoinCommand{Command: "k3s agent join", Note: "demo"}, nil
 }
 
+type fakeRuntimeManager struct{}
+
+func (f fakeRuntimeManager) ListSandboxes(context.Context) (service.SandboxRuntimeList, error) {
+	return service.SandboxRuntimeList{Sandboxes: []service.SandboxRuntime{{
+		SandboxID:      "sb-1",
+		SessionID:      "conv-1",
+		UserID:         "alice@example.com",
+		Username:       "alice",
+		Status:         "running",
+		LifecycleState: "active",
+		PodName:        "pod-1",
+		PodPhase:       "Running",
+		NodeName:       "node-a",
+	}}}, nil
+}
+
 func newTestNodeAPI(adminKey string, mgr service.SandboxNodeManager) *API {
 	mem := store.NewMemory()
 	iss := token.NewIssuer("test-secret", "cocola", 24*time.Hour)
 	svc := service.New(mem, iss, fixedClock).WithSandboxNodeManager(mgr)
+	return New(svc, adminKey)
+}
+
+func newTestRuntimeAPI(adminKey string, mgr service.SandboxRuntimeManager) *API {
+	mem := store.NewMemory()
+	iss := token.NewIssuer("test-secret", "cocola", 24*time.Hour)
+	svc := service.New(mem, iss, fixedClock).WithSandboxRuntimeManager(mgr)
 	return New(svc, adminKey)
 }
 
@@ -649,6 +672,29 @@ func TestSandboxNodeRoutes(t *testing.T) {
 func TestSandboxNodeRoutesNotConfigured(t *testing.T) {
 	api := newTestAPI("k")
 	rec := do(t, api.Router(), http.MethodGet, "/admin/sandbox-nodes", "k", nil)
+	if rec.Code != http.StatusNotImplemented {
+		t.Fatalf("not configured: want 501, got %d", rec.Code)
+	}
+}
+
+func TestSandboxRuntimeRoutes(t *testing.T) {
+	api := newTestRuntimeAPI("k", fakeRuntimeManager{})
+	rec := do(t, api.Router(), http.MethodGet, "/admin/sandboxes", "k", nil)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("list sandboxes: want 200, got %d (%s)", rec.Code, rec.Body.String())
+	}
+	var listed service.SandboxRuntimeList
+	if err := json.Unmarshal(rec.Body.Bytes(), &listed); err != nil {
+		t.Fatalf("decode sandboxes: %v", err)
+	}
+	if len(listed.Sandboxes) != 1 || listed.Sandboxes[0].SandboxID != "sb-1" || listed.Sandboxes[0].Username != "alice" {
+		t.Fatalf("unexpected sandboxes: %+v", listed.Sandboxes)
+	}
+}
+
+func TestSandboxRuntimeRoutesNotConfigured(t *testing.T) {
+	api := newTestAPI("k")
+	rec := do(t, api.Router(), http.MethodGet, "/admin/sandboxes", "k", nil)
 	if rec.Code != http.StatusNotImplemented {
 		t.Fatalf("not configured: want 501, got %d", rec.Code)
 	}

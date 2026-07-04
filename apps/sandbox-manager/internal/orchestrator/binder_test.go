@@ -16,19 +16,23 @@ import (
 // fakeProvider is a minimal in-memory SandboxProvider for binder tests. It only
 // implements the lifecycle methods the binder touches; the rest are stubs.
 type fakeProvider struct {
-	creates   atomic.Int64
-	destroys  atomic.Int64
-	mu        sync.Mutex
-	state     map[string]string // sandbox id -> "active"|"paused"|"destroyed"
-	resumeErr map[string]error
-	cleanups  []string
-	lastSpec  provider.SandboxSpec
+	creates    atomic.Int64
+	destroys   atomic.Int64
+	mu         sync.Mutex
+	state      map[string]string // sandbox id -> "active"|"paused"|"destroyed"
+	pauseErr   map[string]error
+	resumeErr  map[string]error
+	destroyErr map[string]error
+	cleanups   []string
+	lastSpec   provider.SandboxSpec
 }
 
 func newFakeProvider() *fakeProvider {
 	return &fakeProvider{
-		state:     map[string]string{},
-		resumeErr: map[string]error{},
+		state:      map[string]string{},
+		pauseErr:   map[string]error{},
+		resumeErr:  map[string]error{},
+		destroyErr: map[string]error{},
 	}
 }
 
@@ -44,6 +48,9 @@ func (f *fakeProvider) Create(ctx context.Context, spec provider.SandboxSpec) (*
 func (f *fakeProvider) Pause(ctx context.Context, sid string) error {
 	f.mu.Lock()
 	defer f.mu.Unlock()
+	if err := f.pauseErr[sid]; err != nil {
+		return err
+	}
 	f.state[sid] = "paused"
 	return nil
 }
@@ -60,6 +67,9 @@ func (f *fakeProvider) Destroy(ctx context.Context, sid string) error {
 	f.destroys.Add(1)
 	f.mu.Lock()
 	defer f.mu.Unlock()
+	if err := f.destroyErr[sid]; err != nil {
+		return err
+	}
 	f.state[sid] = "destroyed"
 	return nil
 }
@@ -240,6 +250,58 @@ func TestReaperPauseThenDestroy(t *testing.T) {
 	fp.mu.Unlock()
 	if len(cleanups) != 0 {
 		t.Fatalf("idle reaper must not clean session storage, got %v", cleanups)
+	}
+}
+
+func TestReaperUnbindsMissingActiveSandbox(t *testing.T) {
+	b, fp := newTestBinder(t)
+	ctx := context.Background()
+	sb, err := b.Acquire(ctx, AcquireSpec{SessionID: "missing-active", UserID: "u"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	fp.mu.Lock()
+	fp.pauseErr[sb.ID] = fs.ErrNotExist
+	fp.mu.Unlock()
+
+	if _, err := b.kv.Del(ctx, leaseKey(sb.ID)); err != nil {
+		t.Fatalf("delete lease: %v", err)
+	}
+	if err := b.reapOnce(ctx, time.Now()); err != nil {
+		t.Fatalf("reapOnce: %v", err)
+	}
+	if _, ok, err := b.lookup(ctx, "missing-active"); err != nil || ok {
+		t.Fatalf("lookup after reap ok=%v err=%v, want unbound", ok, err)
+	}
+}
+
+func TestReaperUnbindsMissingPausedSandbox(t *testing.T) {
+	b, fp := newTestBinder(t)
+	ctx := context.Background()
+	sb, err := b.Acquire(ctx, AcquireSpec{SessionID: "missing-paused", UserID: "u"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	m := meta{
+		SandboxID:   sb.ID,
+		SessionID:   "missing-paused",
+		UserID:      "u",
+		State:       StatePaused,
+		CreatedUnix: time.Now().Unix(),
+		PausedUnix:  time.Now().Add(-time.Hour).Unix(),
+	}
+	if err := b.putMeta(ctx, m); err != nil {
+		t.Fatalf("put meta: %v", err)
+	}
+	fp.mu.Lock()
+	fp.destroyErr[sb.ID] = fs.ErrNotExist
+	fp.mu.Unlock()
+
+	if err := b.reapOnce(ctx, time.Now()); err != nil {
+		t.Fatalf("reapOnce: %v", err)
+	}
+	if _, ok, err := b.lookup(ctx, "missing-paused"); err != nil || ok {
+		t.Fatalf("lookup after reap ok=%v err=%v, want unbound", ok, err)
 	}
 }
 

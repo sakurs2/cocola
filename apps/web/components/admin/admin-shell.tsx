@@ -1,7 +1,7 @@
 "use client";
 
 import { cn } from "@/lib/utils";
-import { Activity, ArrowLeft, LayoutDashboard, Server, Users } from "lucide-react";
+import { Activity, ArrowLeft, Box, LayoutDashboard, Server, Users } from "lucide-react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import type { ReactNode } from "react";
@@ -23,7 +23,10 @@ const NAV_GROUPS: { label: string; items: AdminNavItem[] }[] = [
   },
   {
     label: "Infrastructure",
-    items: [{ href: "/admin/sandbox-nodes", label: "Sandbox Nodes", icon: Server }],
+    items: [
+      { href: "/admin/sandboxes", label: "Sandbox Runtime", icon: Box },
+      { href: "/admin/sandbox-nodes", label: "Sandbox Nodes", icon: Server },
+    ],
   },
 ];
 

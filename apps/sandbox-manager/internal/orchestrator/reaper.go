@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"io/fs"
 	"time"
 
 	rds "github.com/cocola-project/cocola/packages/go-common/redis"
@@ -98,6 +99,9 @@ func (b *Binder) pause(ctx context.Context, m meta, now time.Time) error {
 		return err
 	}
 	if err := b.p.Pause(ctx, m.SandboxID); err != nil {
+		if errors.Is(err, fs.ErrNotExist) {
+			return b.unbind(ctx, m.SessionID, m.SandboxID)
+		}
 		return err
 	}
 	m.State = StatePaused
@@ -124,6 +128,9 @@ func (b *Binder) destroyPaused(ctx context.Context, m meta) error {
 		return nil // someone resumed it; leave alone
 	}
 	if err := b.p.Destroy(ctx, m.SandboxID); err != nil {
+		if errors.Is(err, fs.ErrNotExist) {
+			return b.unbind(ctx, m.SessionID, m.SandboxID)
+		}
 		return err
 	}
 	return b.unbind(ctx, m.SessionID, m.SandboxID)

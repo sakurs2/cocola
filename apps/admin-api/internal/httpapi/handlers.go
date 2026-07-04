@@ -454,6 +454,17 @@ func (a *API) offlineSandboxNode(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, out)
 }
 
+// ---- sandbox runtimes ----
+
+func (a *API) listSandboxes(w http.ResponseWriter, r *http.Request) {
+	out, err := a.svc.ListSandboxes(r.Context())
+	if err != nil {
+		mapErr(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, out)
+}
+
 // ---- audit ----
 
 func (a *API) listAudit(w http.ResponseWriter, r *http.Request) {

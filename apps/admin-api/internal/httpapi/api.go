@@ -110,6 +110,8 @@ func (a *API) Router() http.Handler {
 			r.Post("/{name}/offline", a.offlineSandboxNode)
 		})
 
+		r.Get("/sandboxes", a.listSandboxes)
+
 		r.Get("/audit", a.listAudit)
 	})
 
@@ -206,6 +208,8 @@ func mapErr(w http.ResponseWriter, err error) {
 	case errors.Is(err, store.ErrConflict):
 		writeErr(w, http.StatusConflict, "CONFLICT", "resource already exists")
 	case errors.Is(err, service.ErrNotConfigured):
+		writeErr(w, http.StatusNotImplemented, "NOT_CONFIGURED", err.Error())
+	case errors.Is(err, service.ErrSandboxRuntimeNotConfigured):
 		writeErr(w, http.StatusNotImplemented, "NOT_CONFIGURED", err.Error())
 	default:
 		writeErr(w, http.StatusInternalServerError, "INTERNAL", "internal error")

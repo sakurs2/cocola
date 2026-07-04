@@ -44,7 +44,7 @@ Key model (prefix `cocola:sb:`):
 | `rev:{sandbox}`      | session id  | none           | reverse lookup for cleanup                 |
 | `meta:{sandbox}`     | JSON record | none           | durable registry; reaper's source of truth |
 | `lock:{session}`     | owner token | `LockTTL` 30s  | guards create-and-bind critical section    |
-| `lease:{sandbox}`    | `"1"`       | `LeaseTTL` 60s | heartbeat-renewed liveness signal          |
+| `lease:{sandbox}`    | `"1"`       | `LeaseTTL` 10m | heartbeat-renewed liveness signal          |
 | `reaplock:{sandbox}` | owner token | 5s             | one-replica-per-sandbox reap guard         |
 
 `conv/rev/meta` are durable; only `lease` (and the locks) expire. Idleness is
@@ -65,8 +65,8 @@ Lua script so a crash can never leave a half-written binding.
 
 - **Lease + heartbeat.** A sandbox stays alive while its lease is renewed.
   `Acquire` renews on every hit; long-running tasks that hold a sandbox between
-  acquires call `Heartbeat`. `HeartbeatEvery` (20s) is one third of `LeaseTTL`
-  (60s), so a single missed pulse never expires a healthy lease.
+  acquires call `Heartbeat`. `HeartbeatEvery` (20s) is comfortably less than
+  `LeaseTTL` (10m), so missed pulses do not expire a healthy lease.
 - **Stage 1 — Pause (idle).** When an _active_ sandbox's lease lapses, the reaper
   `Pause`s it (container freeze) and marks it `paused`. The workspace is
   preserved.
@@ -84,7 +84,7 @@ transition is re-checked under that lock to close races against a concurrent
 
 ### Chosen defaults
 
-`LeaseTTL=60s`, `HeartbeatEvery=20s`, `DestroyGrace=120s`, `LockTTL=30s`,
+`LeaseTTL=10m`, `HeartbeatEvery=20s`, `DestroyGrace=120s`, `LockTTL=30s`,
 `ReaperEvery=10s`. All overridable via `orchestrator.Config`.
 
 ## Alternatives considered
