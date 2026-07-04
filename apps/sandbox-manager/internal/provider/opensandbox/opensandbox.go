@@ -60,11 +60,12 @@ const ProviderName = "opensandbox"
 const apiKeyHeader = "OPEN-SANDBOX-API-KEY"
 
 // defaultHTTPTimeout bounds a single lifecycle REST call. Kubernetes-backed
-// OpenSandbox create waits up to 60s for the sandbox pod to become Running, so
-// the client timeout must be longer than the server-side wait to surface the
-// real K8s reason instead of a local context deadline. Streaming exec uses a
-// separate client whose timeout is governed by the per-Exec context/deadline.
-const defaultHTTPTimeout = 90 * time.Second
+// OpenSandbox can spend more than a minute on cold local image pulls before the
+// sandbox pod becomes Running, so the client timeout must be longer than the
+// server-side wait to surface the real K8s reason instead of a local context
+// deadline. Streaming exec uses a separate client whose timeout is governed by
+// the per-Exec context/deadline.
+const defaultHTTPTimeout = 240 * time.Second
 
 // execdPort is the standard in-sandbox port the execd service listens on. The
 // lifecycle endpoints API resolves it to a reachable URL per sandbox. Mirrors
