@@ -14,10 +14,9 @@ import {
   Pencil,
   Plus,
   Search,
-  Server,
+  ShieldCheck,
   LayoutGrid,
   Trash2,
-  Users,
 } from "lucide-react";
 import { signOut, useSession } from "next-auth/react";
 import { cn } from "@/lib/utils";
@@ -37,8 +36,7 @@ const PRIMARY_NAV: NavItem[] = [
   { icon: Search, label: "Search" },
   { icon: NotebookPen, label: "Notes" },
   { icon: LayoutGrid, label: "Workspace" },
-  { icon: Users, label: "Users", href: "/admin/users" },
-  { icon: Server, label: "Sandbox Nodes", href: "/admin/sandbox-nodes" },
+  { icon: ShieldCheck, label: "Admin", href: "/admin" },
 ];
 
 const CHANNELS = [{ icon: Hash, label: "general" }];

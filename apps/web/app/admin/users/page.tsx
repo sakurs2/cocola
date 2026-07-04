@@ -519,12 +519,13 @@ async function responseError(res: Response) {
   try {
     const body = (await res.json()) as { error?: string | { code?: string; message?: string } };
     if (typeof body.error === "string" && body.error) return body.error;
-    if (body.error?.code === "PROTECTED_ADMIN") return "Bootstrap admin cannot be changed.";
-    if (body.error?.code === "SELF_PERMISSION_CHANGE") {
+    const errorBody = typeof body.error === "object" ? body.error : undefined;
+    if (errorBody?.code === "PROTECTED_ADMIN") return "Bootstrap admin cannot be changed.";
+    if (errorBody?.code === "SELF_PERMISSION_CHANGE") {
       return "You cannot change your own permissions.";
     }
-    if (body.error && typeof body.error.message === "string" && body.error.message) {
-      return body.error.message;
+    if (errorBody?.message) {
+      return errorBody.message;
     }
     return `${res.status} ${res.statusText}`;
   } catch {
