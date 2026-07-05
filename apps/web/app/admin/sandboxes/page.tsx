@@ -97,7 +97,7 @@ export default function SandboxesPage() {
           <div className="min-w-0 flex-1">
             <h1 className="truncate text-base font-semibold">Sandbox Runtime</h1>
             <p className="truncate text-xs text-muted-foreground">
-              Runtime state for conversation-bound sandboxes
+              Runtime state for session-bound sandboxes
             </p>
           </div>
           <Button variant="outline" size="sm" onClick={() => void refresh()} disabled={loading}>
@@ -143,7 +143,7 @@ export default function SandboxesPage() {
                     <tr>
                       <th className="px-4 py-3 text-left font-medium">Sandbox ID</th>
                       <th className="px-4 py-3 text-left font-medium">Status</th>
-                      <th className="px-4 py-3 text-left font-medium">Conversation ID</th>
+                      <th className="px-4 py-3 text-left font-medium">Session ID</th>
                       <th className="px-4 py-3 text-left font-medium">User</th>
                       <th className="px-4 py-3 text-left font-medium">Runtime</th>
                       <th className="px-4 py-3 text-left font-medium">Created</th>

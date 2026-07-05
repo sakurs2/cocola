@@ -39,6 +39,7 @@ from cocola_common.metrics_grpc import PrometheusServerInterceptor
 from cocola_common.tracing import grpc_aio_server_interceptor
 
 from cocola_agent_runtime.agent_provider import AgentProvider
+from cocola_agent_runtime.checkpoint import CheckpointManager
 from cocola_agent_runtime.echo_provider import EchoProvider
 from cocola_agent_runtime.grpc_limits import channel_options
 from cocola_agent_runtime.objstore import fetcher_from_env
@@ -48,8 +49,8 @@ from cocola_agent_runtime.sandbox_binder import (
     SandboxManagerBinder,
     SandboxManagerExecutor,
 )
-from cocola_agent_runtime.session_map import SessionMap
 from cocola_agent_runtime.server import AgentRuntimeServicer
+from cocola_agent_runtime.session_map import SessionMap
 from cocola_agent_runtime.skill_loader import AdminSkillCatalog, SkillCatalog
 
 log = get_logger("cocola.agent-runtime")
@@ -178,13 +179,16 @@ async def serve() -> None:
 
     executor = _build_executor()
     session_map = _build_session_map() if executor is not None else None
+    objstore = fetcher_from_env()
+    checkpoint = CheckpointManager(objstore=objstore, executor=executor, session_map=session_map)
     servicer = AgentRuntimeServicer(
         _build_provider(executor, session_map),
         skills=_build_skill_catalog(),
         binder=_build_binder(),
         executor=executor,
-        objstore=fetcher_from_env(),
+        objstore=objstore,
         session_map=session_map,
+        checkpoint=checkpoint,
     )
     # Observability: RED metrics for every RPC. agent-runtime has no HTTP server
     # of its own, so unlike the llm-gateway it exposes /metrics on a dedicated

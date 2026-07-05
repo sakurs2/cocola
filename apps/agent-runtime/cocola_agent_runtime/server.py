@@ -41,6 +41,7 @@ from cocola.agent.v1 import agent_pb2_grpc as pb_grpc
 from cocola_common import get_logger
 
 from cocola_agent_runtime.agent_provider import AgentEvent, AgentOptions, AgentProvider
+from cocola_agent_runtime.checkpoint import CheckpointManager
 from cocola_agent_runtime.objstore import Fetcher
 from cocola_agent_runtime.sandbox_binder import SandboxBinder, SandboxExecutor
 from cocola_agent_runtime.session_map import SessionMap
@@ -73,6 +74,7 @@ for dirpath, _, files in os.walk(root):
         out[rel] = {"size": st.st_size, "mtime_ns": st.st_mtime_ns}
 print(json.dumps(out, sort_keys=True))
 """
+
 
 class _ResolvedAttachment(NamedTuple):
     """An attachment with its bytes in hand, whatever the delivery path.
@@ -244,6 +246,7 @@ class AgentRuntimeServicer(pb_grpc.AgentRuntimeServiceServicer):
         executor: SandboxExecutor | None = None,
         objstore: Fetcher | None = None,
         session_map: SessionMap | None = None,
+        checkpoint: CheckpointManager | None = None,
     ) -> None:
         self._provider = provider
         self._skills = skills
@@ -260,12 +263,28 @@ class AgentRuntimeServicer(pb_grpc.AgentRuntimeServiceServicer):
         # before provisioning. Optional: unset => a key-only attachment surfaces
         # as a clean provisioning error rather than a silent empty file.
         self._objstore = objstore
+        self._checkpoint = checkpoint
 
     async def ReleaseSession(self, request, context):  # noqa: N802 - gRPC-generated name
         """Best-effort release of runtime state bound to a conversation."""
         session_id = request.session_id
         if not session_id:
             return pb.ReleaseSessionResponse()
+        if self._checkpoint is not None and self._session_map is not None:
+            try:
+                binding = await self._session_map.get_binding(session_id)
+                if binding and binding.sandbox_id:
+                    await self._checkpoint.checkpoint_on_reclaim(
+                        sandbox_id=binding.sandbox_id,
+                        user_id=request.user_id,
+                        session_id=session_id,
+                    )
+            except Exception as exc:  # noqa: BLE001 - release must continue
+                log.warning(
+                    "checkpoint before release failed",
+                    session_id=session_id,
+                    error=str(exc),
+                )
         if self._binder is not None:
             try:
                 await self._binder.release(session_id=session_id)
@@ -328,6 +347,12 @@ class AgentRuntimeServicer(pb_grpc.AgentRuntimeServiceServicer):
                 )
                 return
             sandbox_id = box.id
+            if self._checkpoint is not None:
+                await self._checkpoint.restore_if_fresh(
+                    sandbox_id=box.id,
+                    session_id=request.session_id,
+                    reused=box.reused,
+                )
             # Make the binding observable to the BFF/client.
             await context.write(
                 event_to_proto(

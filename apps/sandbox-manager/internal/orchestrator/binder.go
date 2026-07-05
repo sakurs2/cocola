@@ -351,6 +351,13 @@ func (b *Binder) Release(ctx context.Context, sessionID string) error {
 	if metaErr == nil {
 		_ = json.Unmarshal([]byte(raw), &m)
 	}
+	if m.SessionID == "" {
+		m.SessionID = sessionID
+	}
+	if m.SandboxID == "" {
+		m.SandboxID = sid
+	}
+	b.checkpointBeforeReclaim(ctx, m)
 	// Destroy the sandbox first; even if mapping cleanup fails afterwards the
 	// reaper will mop up the now-dangling record.
 	if err := b.p.Destroy(ctx, sid); err != nil {
@@ -367,11 +374,34 @@ func (b *Binder) Release(ctx context.Context, sessionID string) error {
 	return nil
 }
 
+// CheckpointSandbox snapshots a sandbox when metadata is still available.
+// It is used by raw Destroy callers that only know sandbox_id, not session_id.
+func (b *Binder) CheckpointSandbox(ctx context.Context, sandboxID string) {
+	if sandboxID == "" {
+		return
+	}
+	raw, err := b.kv.Get(ctx, metaKey(sandboxID))
+	if err != nil {
+		return
+	}
+	var m meta
+	if err := json.Unmarshal([]byte(raw), &m); err != nil {
+		return
+	}
+	b.checkpointBeforeReclaim(ctx, m)
+}
+
 // unbind removes all four keys for a (session, sandbox) pair atomically.
 func (b *Binder) unbind(ctx context.Context, sessionID, sandboxID string) error {
 	_, err := b.kv.Del(ctx,
 		convKey(sessionID), revKey(sandboxID), metaKey(sandboxID), leaseKey(sandboxID))
 	return err
+}
+
+func (b *Binder) checkpointBeforeReclaim(ctx context.Context, m meta) {
+	if checkpointer, ok := b.p.(provider.SessionCheckpointer); ok {
+		_ = checkpointer.CheckpointSession(ctx, m.UserID, m.SessionID, m.SandboxID)
+	}
 }
 
 func (b *Binder) recordHit() {

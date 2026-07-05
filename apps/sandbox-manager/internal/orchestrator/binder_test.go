@@ -2,6 +2,7 @@ package orchestrator
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io/fs"
 	"sync"
@@ -16,23 +17,26 @@ import (
 // fakeProvider is a minimal in-memory SandboxProvider for binder tests. It only
 // implements the lifecycle methods the binder touches; the rest are stubs.
 type fakeProvider struct {
-	creates    atomic.Int64
-	destroys   atomic.Int64
-	mu         sync.Mutex
-	state      map[string]string // sandbox id -> "active"|"paused"|"destroyed"
-	pauseErr   map[string]error
-	resumeErr  map[string]error
-	destroyErr map[string]error
-	cleanups   []string
-	lastSpec   provider.SandboxSpec
+	creates       atomic.Int64
+	destroys      atomic.Int64
+	mu            sync.Mutex
+	state         map[string]string // sandbox id -> "active"|"paused"|"destroyed"
+	pauseErr      map[string]error
+	resumeErr     map[string]error
+	destroyErr    map[string]error
+	checkpointErr map[string]error
+	cleanups      []string
+	checkpoints   []string
+	lastSpec      provider.SandboxSpec
 }
 
 func newFakeProvider() *fakeProvider {
 	return &fakeProvider{
-		state:      map[string]string{},
-		pauseErr:   map[string]error{},
-		resumeErr:  map[string]error{},
-		destroyErr: map[string]error{},
+		state:         map[string]string{},
+		pauseErr:      map[string]error{},
+		resumeErr:     map[string]error{},
+		destroyErr:    map[string]error{},
+		checkpointErr: map[string]error{},
 	}
 }
 
@@ -78,6 +82,12 @@ func (f *fakeProvider) CleanupSessionStorage(ctx context.Context, userID, sessio
 	defer f.mu.Unlock()
 	f.cleanups = append(f.cleanups, userID+"/"+sessionID)
 	return nil
+}
+func (f *fakeProvider) CheckpointSession(ctx context.Context, userID, sessionID, sandboxID string) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.checkpoints = append(f.checkpoints, userID+"/"+sessionID+"/"+sandboxID)
+	return f.checkpointErr[sandboxID]
 }
 func (f *fakeProvider) Exec(ctx context.Context, sid string, req provider.ExecRequest) (<-chan provider.ExecEvent, error) {
 	return nil, nil
@@ -247,9 +257,14 @@ func TestReaperPauseThenDestroy(t *testing.T) {
 	}
 	fp.mu.Lock()
 	cleanups := append([]string(nil), fp.cleanups...)
+	checkpoints := append([]string(nil), fp.checkpoints...)
 	fp.mu.Unlock()
 	if len(cleanups) != 0 {
 		t.Fatalf("idle reaper must not clean session storage, got %v", cleanups)
+	}
+	wantCheckpoint := "u/idle/" + id
+	if len(checkpoints) != 1 || checkpoints[0] != wantCheckpoint {
+		t.Fatalf("checkpoints = %v, want [%s]", checkpoints, wantCheckpoint)
 	}
 }
 
@@ -352,6 +367,32 @@ func TestReleaseDestroysUnbindsAndCleansSessionStorage(t *testing.T) {
 	}
 	if len(fp.cleanups) != 1 || fp.cleanups[0] != "u1/s1" {
 		t.Fatalf("cleanups = %v, want [u1/s1]", fp.cleanups)
+	}
+	wantCheckpoint := "u1/s1/" + sb.ID
+	if len(fp.checkpoints) != 1 || fp.checkpoints[0] != wantCheckpoint {
+		t.Fatalf("checkpoints = %v, want [%s]", fp.checkpoints, wantCheckpoint)
+	}
+}
+
+func TestReleaseIgnoresCheckpointFailure(t *testing.T) {
+	b, fp := newTestBinder(t)
+	ctx := context.Background()
+	sb, err := b.Acquire(ctx, AcquireSpec{SessionID: "s-checkpoint-fail", UserID: "u1"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	fp.mu.Lock()
+	fp.checkpointErr[sb.ID] = errors.New("checkpoint failed")
+	fp.mu.Unlock()
+
+	if err := b.Release(ctx, "s-checkpoint-fail"); err != nil {
+		t.Fatalf("Release: %v", err)
+	}
+	if got := fp.destroys.Load(); got != 1 {
+		t.Fatalf("destroys = %d, want 1", got)
+	}
+	if _, ok, _ := b.lookup(ctx, "s-checkpoint-fail"); ok {
+		t.Fatal("expected mapping removed after release")
 	}
 }
 

@@ -8,16 +8,19 @@ becomes a terminal proto `error` event instead of propagating, and (c) enabled
 skills are folded into the AgentOptions the provider receives.
 """
 
+import base64
 import json
 from dataclasses import dataclass, field
 
 from cocola_agent_runtime.agent_provider import AgentEvent, AgentOptions
+from cocola_agent_runtime.checkpoint import CheckpointConfig, CheckpointManager
 from cocola_agent_runtime.sandbox_binder import (
     ExecOutcome,
     StaticSandboxBinder,
     StaticSandboxExecutor,
 )
 from cocola_agent_runtime.server import AgentRuntimeServicer, event_to_proto
+from cocola_agent_runtime.session_map import SessionBinding
 from cocola_agent_runtime.skill_loader import Skill, StaticSkillCatalog
 
 
@@ -72,7 +75,10 @@ class FakeObjectStore:
         self.puts = {}
 
     def get(self, key: str) -> bytes:
-        return self.puts[key]
+        value = self.puts[key]
+        if isinstance(value, tuple):
+            return value[0]
+        return value
 
     def put(self, key: str, data: bytes, mime: str) -> None:
         self.puts[key] = (data, mime)
@@ -82,22 +88,42 @@ class FakeSessionMap:
     def __init__(self, *, fail_delete: bool = False):
         self.deleted = []
         self.fail_delete = fail_delete
+        self.bindings = {}
+        self.checkpoints = {}
+        self.put_checkpoint_calls = []
 
     async def get(self, session_id: str):
-        return None
+        binding = await self.get_binding(session_id)
+        return binding.claude_session_id if binding else None
 
     async def get_binding(self, session_id: str):
-        return None
+        return self.bindings.get(session_id)
 
     async def put(
         self, session_id: str, claude_session_id: str, *, user_id: str = "", sandbox_id: str = ""
     ):
+        self.bindings[session_id] = SessionBinding(
+            claude_session_id=claude_session_id,
+            sandbox_id=sandbox_id,
+            checkpoint_object_key=self.checkpoints.get(session_id, ""),
+        )
+
+    async def get_checkpoint(self, session_id: str):
+        return self.checkpoints.get(session_id)
+
+    async def put_checkpoint(self, session_id: str, object_key: str, *, size_bytes: int = 0):
+        self.put_checkpoint_calls.append((session_id, object_key))
+        self.checkpoints[session_id] = object_key
+
+    async def put_checkpoint_failure(self, session_id: str, error: str):
         return None
 
     async def delete(self, session_id: str):
         self.deleted.append(session_id)
         if self.fail_delete:
             raise RuntimeError("delete failed")
+        self.bindings.pop(session_id, None)
+        self.checkpoints.pop(session_id, None)
 
     async def aclose(self):
         return None
@@ -222,6 +248,137 @@ async def test_release_session_without_binder_succeeds_and_delete_failure_is_bes
 
     assert resp is not None
     assert session_map.deleted == ["sess-8"]
+
+
+async def test_release_session_checkpoints_before_releasing_sandbox():
+    archive = b"checkpoint-bytes"
+
+    def exec_handler(sandbox_id, cmd):
+        assert sandbox_id == "box-sess-7"
+        return ExecOutcome(exit_code=0, stdout=base64.b64encode(archive).decode("ascii"))
+
+    binder = StaticSandboxBinder()
+    executor = StaticSandboxExecutor(exec_handler=exec_handler)
+    store = FakeObjectStore()
+    session_map = FakeSessionMap()
+    session_map.bindings["sess-7"] = SessionBinding(
+        claude_session_id="claude-1",
+        sandbox_id="box-sess-7",
+    )
+    checkpoint = CheckpointManager(
+        objstore=store,
+        executor=executor,
+        session_map=session_map,
+        config=CheckpointConfig(),
+    )
+
+    await AgentRuntimeServicer(
+        ListProvider([]),
+        binder=binder,
+        executor=executor,
+        objstore=store,
+        session_map=session_map,
+        checkpoint=checkpoint,
+    ).ReleaseSession(FakeRequest(session_id="sess-7"), FakeContext())
+
+    assert binder.released == ["sess-7"]
+    assert session_map.deleted == ["sess-7"]
+    assert len(store.puts) == 1
+    key = next(iter(store.puts))
+    assert key.startswith("checkpoints/U1/sess-7/")
+    assert store.puts[key] == (archive, "application/zstd")
+    assert session_map.put_checkpoint_calls == [("sess-7", key)]
+
+
+async def test_checkpoint_failure_does_not_block_release():
+    def exec_handler(sandbox_id, cmd):
+        return ExecOutcome(exit_code=1, stderr="tar failed")
+
+    binder = StaticSandboxBinder()
+    executor = StaticSandboxExecutor(exec_handler=exec_handler)
+    store = FakeObjectStore()
+    session_map = FakeSessionMap()
+    session_map.bindings["sess-9"] = SessionBinding(
+        claude_session_id="claude-1",
+        sandbox_id="box-sess-9",
+    )
+    checkpoint = CheckpointManager(
+        objstore=store,
+        executor=executor,
+        session_map=session_map,
+        config=CheckpointConfig(),
+    )
+
+    await AgentRuntimeServicer(
+        ListProvider([]),
+        binder=binder,
+        executor=executor,
+        objstore=store,
+        session_map=session_map,
+        checkpoint=checkpoint,
+    ).ReleaseSession(FakeRequest(session_id="sess-9"), FakeContext())
+
+    assert binder.released == ["sess-9"]
+    assert session_map.deleted == ["sess-9"]
+    assert store.puts == {}
+
+
+async def test_query_restores_checkpoint_for_fresh_sandbox_before_agent_runs():
+    prov = ListProvider([AgentEvent(kind="done", data={})])
+    executor = StaticSandboxExecutor()
+    store = FakeObjectStore()
+    store.puts["ck-latest"] = b"checkpoint-bytes"
+    session_map = FakeSessionMap()
+    session_map.checkpoints["S1"] = "ck-latest"
+    checkpoint = CheckpointManager(
+        objstore=store,
+        executor=executor,
+        session_map=session_map,
+        config=CheckpointConfig(),
+    )
+
+    await AgentRuntimeServicer(
+        prov,
+        binder=StaticSandboxBinder(),
+        executor=executor,
+        objstore=store,
+        session_map=session_map,
+        checkpoint=checkpoint,
+    ).Query(FakeRequest(), FakeContext())
+
+    assert executor.exec_calls
+    first = executor.exec_calls[0]
+    assert first["sandbox_id"] == "box-S1"
+    assert "zstd -d -c" in first["cmd"][2]
+    assert base64.b64decode(first["stdin"]) == b"checkpoint-bytes"
+
+
+async def test_query_does_not_restore_checkpoint_for_reused_sandbox():
+    prov = ListProvider([AgentEvent(kind="done", data={})])
+    binder = StaticSandboxBinder()
+    await binder.acquire(session_id="S1", user_id="U1")
+    executor = StaticSandboxExecutor()
+    store = FakeObjectStore()
+    store.puts["ck-latest"] = b"checkpoint-bytes"
+    session_map = FakeSessionMap()
+    session_map.checkpoints["S1"] = "ck-latest"
+    checkpoint = CheckpointManager(
+        objstore=store,
+        executor=executor,
+        session_map=session_map,
+        config=CheckpointConfig(),
+    )
+
+    await AgentRuntimeServicer(
+        prov,
+        binder=binder,
+        executor=executor,
+        objstore=store,
+        session_map=session_map,
+        checkpoint=checkpoint,
+    ).Query(FakeRequest(), FakeContext())
+
+    assert not any("zstd -d -c" in call["cmd"][2] for call in executor.exec_calls)
 
 
 async def test_query_publishes_outputs_artifacts():

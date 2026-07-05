@@ -131,6 +131,9 @@ func (s *Server) Resume(ctx context.Context, req *sandboxv1.ResumeRequest) (*san
 
 // Destroy tears down the sandbox.
 func (s *Server) Destroy(ctx context.Context, req *sandboxv1.DestroyRequest) (*sandboxv1.DestroyResponse, error) {
+	if s.b != nil {
+		s.b.CheckpointSandbox(ctx, req.GetSandboxId())
+	}
 	if err := s.p.Destroy(ctx, req.GetSandboxId()); err != nil {
 		return nil, status.Errorf(codes.Internal, "destroy: %v", err)
 	}

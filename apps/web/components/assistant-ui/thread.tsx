@@ -431,7 +431,7 @@ const TypingIndicator: FC = () => (
 );
 
 const ArtifactFilePart: FC<FileMessagePartProps> = ({ filename, mimeType, data }) => {
-  const { activeConversationId, openArtifact } = useCocola();
+  const { activeSessionId, openArtifact } = useCocola();
   const meta = parseArtifactData(data);
   const name = filename || "file";
   const type = mimeType || "application/octet-stream";
@@ -456,7 +456,7 @@ const ArtifactFilePart: FC<FileMessagePartProps> = ({ filename, mimeType, data }
           onClick={() =>
             openArtifact({
               id: meta.id || name,
-              conversationId: activeConversationId,
+              sessionId: activeSessionId,
               filename: name,
               mimeType: type,
               size: meta.size,

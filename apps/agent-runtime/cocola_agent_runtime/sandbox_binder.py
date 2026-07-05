@@ -35,6 +35,7 @@ keeps the binder a thin, honest wrapper.
 
 from __future__ import annotations
 
+import inspect
 from collections.abc import AsyncIterator
 from dataclasses import dataclass
 from typing import Protocol
@@ -424,8 +425,19 @@ class StaticSandboxExecutor:
     ) -> ExecOutcome:
         if self._fail is not None:
             raise self._fail
-        self.exec_calls.append({"sandbox_id": sandbox_id, "cmd": cmd, "cwd": cwd, "env": env or {}})
+        self.exec_calls.append(
+            {
+                "sandbox_id": sandbox_id,
+                "cmd": cmd,
+                "cwd": cwd,
+                "env": env or {},
+                "stdin": stdin,
+                "timeout_secs": timeout_secs,
+            }
+        )
         if self._exec_handler is not None:
+            if len(inspect.signature(self._exec_handler).parameters) >= 3:
+                return self._exec_handler(sandbox_id, cmd, stdin)
             return self._exec_handler(sandbox_id, cmd)
         return ExecOutcome(exit_code=0, stdout="ran: " + " ".join(cmd))
 

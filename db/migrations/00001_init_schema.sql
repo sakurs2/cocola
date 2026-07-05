@@ -110,6 +110,10 @@ CREATE TABLE IF NOT EXISTS session_map (
     user_id           TEXT NOT NULL DEFAULT '',
     sandbox_id        TEXT NOT NULL DEFAULT '',
     checkpoint_object_key TEXT NOT NULL DEFAULT '',
+    checkpoint_status TEXT NOT NULL DEFAULT '',
+    checkpoint_size_bytes BIGINT NOT NULL DEFAULT 0,
+    checkpoint_error TEXT NOT NULL DEFAULT '',
+    checkpoint_updated_at TIMESTAMPTZ,
     updated_at        TIMESTAMPTZ NOT NULL
 );
 CREATE INDEX IF NOT EXISTS idx_session_map_user_id ON session_map (user_id);

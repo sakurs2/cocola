@@ -98,6 +98,7 @@ func (b *Binder) pause(ctx context.Context, m meta, now time.Time) error {
 	} else if !errors.Is(err, rds.ErrNil) {
 		return err
 	}
+	b.checkpointBeforeReclaim(ctx, m)
 	if err := b.p.Pause(ctx, m.SandboxID); err != nil {
 		if errors.Is(err, fs.ErrNotExist) {
 			return b.unbind(ctx, m.SessionID, m.SandboxID)

@@ -22,6 +22,7 @@ import (
 	"github.com/cocola-project/cocola/apps/sandbox-manager/internal/obs"
 	"github.com/cocola-project/cocola/apps/sandbox-manager/internal/orchestrator"
 	"github.com/cocola-project/cocola/apps/sandbox-manager/internal/provider"
+	checkpointprovider "github.com/cocola-project/cocola/apps/sandbox-manager/internal/provider/checkpoint"
 	"github.com/cocola-project/cocola/apps/sandbox-manager/internal/provider/docker"
 	"github.com/cocola-project/cocola/apps/sandbox-manager/internal/provider/opensandbox"
 	"github.com/cocola-project/cocola/apps/sandbox-manager/internal/server"
@@ -53,6 +54,12 @@ func main() {
 	p, err := newProvider(backend)
 	if err != nil {
 		log.Sugar().Fatalf("init provider %q: %v", backend, err)
+	}
+	if wrapped, werr := checkpointprovider.Wrap(p, checkpointprovider.ConfigFromEnv()); werr != nil {
+		log.Sugar().Warnw("sandbox checkpointing disabled", "err", werr)
+	} else if wrapped != p {
+		p = wrapped
+		log.Info("sandbox checkpointing enabled")
 	}
 
 	// Wire the session<->sandbox binder over Redis. If Redis is unreachable we

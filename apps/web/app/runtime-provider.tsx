@@ -45,7 +45,7 @@ type UiToolCall = {
 
 export type ArtifactPreview = {
   id: string;
-  conversationId: string;
+  sessionId: string;
   filename: string;
   mimeType: string;
   size: number;
@@ -136,9 +136,9 @@ type CocolaContextValue = {
   loadConversation: (id: string) => Promise<void>;
   renameConversation: (id: string, title: string) => Promise<void>;
   deleteConversation: (id: string) => Promise<void>;
-  activeConversationId: string;
-  runningConversationIds: Set<string>;
-  unreadCompletedConversationIds: Set<string>;
+  activeSessionId: string;
+  runningSessionIds: Set<string>;
+  unreadCompletedSessionIds: Set<string>;
   selectedArtifact: ArtifactPreview | null;
   openArtifact: (artifact: ArtifactPreview) => void;
   closeArtifact: () => void;
@@ -326,7 +326,7 @@ const DEFAULT_MODEL: ModelOption = {
 };
 
 export function CocolaRuntimeProvider({ children }: { children: ReactNode }) {
-  // Message and running state are keyed by conversation id (session_id). A
+  // Message and running state are keyed by session_id. A
   // background stream keeps writing into its own buffer even after navigation.
   const [convMessages, setConvMessages] = useState<Record<string, UiMessage[]>>({});
   const [runningIds, setRunningIds] = useState<Set<string>>(() => new Set());
@@ -363,21 +363,21 @@ export function CocolaRuntimeProvider({ children }: { children: ReactNode }) {
     setSelectedArtifact(null);
   }, []);
 
-  const setRunning = useCallback((convId: string, on: boolean) => {
+  const setRunning = useCallback((targetSessionId: string, on: boolean) => {
     setRunningIds((prev) => {
       const next = new Set(prev);
-      if (on) next.add(convId);
-      else next.delete(convId);
+      if (on) next.add(targetSessionId);
+      else next.delete(targetSessionId);
       return next;
     });
   }, []);
 
-  const applyEvent = useCallback((convId: string, assistantId: string, ev: AgentEvent) => {
+  const applyEvent = useCallback((targetSessionId: string, assistantId: string, ev: AgentEvent) => {
     if (ev.kind === "sandbox") {
       const d = ev.data ?? {};
       setSandboxes((prev) => ({
         ...prev,
-        [convId]: {
+        [targetSessionId]: {
           sandboxId: d.sandbox_id ?? "",
           endpoint: d.endpoint ?? "",
           reused: isTruthy(d.reused),
@@ -386,11 +386,11 @@ export function CocolaRuntimeProvider({ children }: { children: ReactNode }) {
       return;
     }
     setConvMessages((prev) => {
-      const cur = prev[convId] ?? [];
+      const cur = prev[targetSessionId] ?? [];
       const next = cur.map((m) =>
         m.id === assistantId ? { ...m, parts: reducePart(m.parts, ev) } : m,
       );
-      return { ...prev, [convId]: next };
+      return { ...prev, [targetSessionId]: next };
     });
   }, []);
 
@@ -444,7 +444,7 @@ export function CocolaRuntimeProvider({ children }: { children: ReactNode }) {
           })),
       );
 
-      const convId = sessionId;
+      const turnSessionId = sessionId;
       const model = selectedModel;
       const assistantMetadata: UiMessageMetadata = {
         model_alias: model.alias,
@@ -453,10 +453,10 @@ export function CocolaRuntimeProvider({ children }: { children: ReactNode }) {
       };
       const assistantId = genId();
       setConvMessages((prev) => {
-        const cur = prev[convId] ?? [];
+        const cur = prev[turnSessionId] ?? [];
         return {
           ...prev,
-          [convId]: [
+          [turnSessionId]: [
             ...cur,
             { id: genId(), role: "user", parts: [{ type: "text", text }], createdAt: Date.now() },
             {
@@ -469,10 +469,10 @@ export function CocolaRuntimeProvider({ children }: { children: ReactNode }) {
           ],
         };
       });
-      setRunning(convId, true);
+      setRunning(turnSessionId, true);
       setUnreadCompletedIds((prev) => {
         const next = new Set(prev);
-        next.delete(convId);
+        next.delete(turnSessionId);
         return next;
       });
 
@@ -480,14 +480,14 @@ export function CocolaRuntimeProvider({ children }: { children: ReactNode }) {
       // with the server's persisted title/updated_at when the stream finishes.
       setConversations((prev) => {
         const now = new Date().toISOString();
-        const existing = prev.find((c) => c.id === convId);
-        const rest = prev.filter((c) => c.id !== convId);
+        const existing = prev.find((c) => c.id === turnSessionId);
+        const rest = prev.filter((c) => c.id !== turnSessionId);
         const title = existing?.title || text.slice(0, 40) || "New Chat";
-        return [{ id: convId, title, updated_at: now }, ...rest];
+        return [{ id: turnSessionId, title, updated_at: now }, ...rest];
       });
 
       const ctrl = new AbortController();
-      abortMap.current.set(convId, ctrl);
+      abortMap.current.set(turnSessionId, ctrl);
       let aborted = false;
       try {
         const res = await fetch("/api/chat", {
@@ -497,7 +497,7 @@ export function CocolaRuntimeProvider({ children }: { children: ReactNode }) {
           },
           body: JSON.stringify({
             prompt: text,
-            session_id: convId,
+            session_id: turnSessionId,
             model_alias: model.alias,
             model_label: model.label,
             model_icon: model.icon,
@@ -520,22 +520,22 @@ export function CocolaRuntimeProvider({ children }: { children: ReactNode }) {
           buffer += decoder.decode(value, { stream: true });
           const { events, rest } = parseFrames(buffer);
           buffer = rest;
-          for (const ev of events) applyEvent(convId, assistantId, ev);
+          for (const ev of events) applyEvent(turnSessionId, assistantId, ev);
         }
       } catch (err) {
         if (!(err instanceof DOMException && err.name === "AbortError")) {
           const msg = err instanceof Error ? err.message : String(err);
-          applyEvent(convId, assistantId, { kind: "error", data: { error: msg } });
+          applyEvent(turnSessionId, assistantId, { kind: "error", data: { error: msg } });
         } else {
           aborted = true;
         }
       } finally {
-        setRunning(convId, false);
-        abortMap.current.delete(convId);
+        setRunning(turnSessionId, false);
+        abortMap.current.delete(turnSessionId);
         if (!aborted) {
           setUnreadCompletedIds((prev) => {
             const next = new Set(prev);
-            next.add(convId);
+            next.add(turnSessionId);
             return next;
           });
         }
@@ -660,7 +660,7 @@ export function CocolaRuntimeProvider({ children }: { children: ReactNode }) {
         delete next[id];
         return next;
       });
-      setSelectedArtifact((prev) => (prev?.conversationId === id ? null : prev));
+      setSelectedArtifact((prev) => (prev?.sessionId === id ? null : prev));
       if (sessionIdRef.current === id) {
         const fresh = genId();
         sessionIdRef.current = fresh;
@@ -731,9 +731,9 @@ export function CocolaRuntimeProvider({ children }: { children: ReactNode }) {
       loadConversation,
       renameConversation,
       deleteConversation,
-      activeConversationId: sessionId,
-      runningConversationIds: runningIds,
-      unreadCompletedConversationIds: unreadCompletedIds,
+      activeSessionId: sessionId,
+      runningSessionIds: runningIds,
+      unreadCompletedSessionIds: unreadCompletedIds,
       selectedArtifact,
       openArtifact,
       closeArtifact,

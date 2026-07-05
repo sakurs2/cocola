@@ -442,7 +442,7 @@ func (a *API) renameConversation(w http.ResponseWriter, r *http.Request) {
 	}
 	convID := r.PathValue("id")
 	if convID == "" {
-		writeErr(w, http.StatusBadRequest, "INVALID_ARGUMENT", "conversation id is required")
+		writeErr(w, http.StatusBadRequest, "INVALID_ARGUMENT", "session id is required")
 		return
 	}
 	var req renameConversationRequest
@@ -482,7 +482,7 @@ func (a *API) deleteConversation(w http.ResponseWriter, r *http.Request) {
 	}
 	convID := r.PathValue("id")
 	if convID == "" {
-		writeErr(w, http.StatusBadRequest, "INVALID_ARGUMENT", "conversation id is required")
+		writeErr(w, http.StatusBadRequest, "INVALID_ARGUMENT", "session id is required")
 		return
 	}
 	if a.convo == nil {
@@ -528,7 +528,7 @@ func (a *API) conversationMessages(w http.ResponseWriter, r *http.Request) {
 	}
 	convID := r.PathValue("id")
 	if convID == "" {
-		writeErr(w, http.StatusBadRequest, "INVALID_ARGUMENT", "conversation id is required")
+		writeErr(w, http.StatusBadRequest, "INVALID_ARGUMENT", "session id is required")
 		return
 	}
 	if a.convo == nil {
@@ -557,7 +557,7 @@ func (a *API) downloadArtifact(w http.ResponseWriter, r *http.Request) {
 	convID := r.PathValue("id")
 	artifactID := r.PathValue("artifact_id")
 	if convID == "" || artifactID == "" {
-		writeErr(w, http.StatusBadRequest, "INVALID_ARGUMENT", "conversation id and artifact id are required")
+		writeErr(w, http.StatusBadRequest, "INVALID_ARGUMENT", "session id and artifact id are required")
 		return
 	}
 	if a.convo == nil {

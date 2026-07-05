@@ -43,6 +43,7 @@ log = get_logger("cocola.agent-runtime.session-map")
 class SessionBinding:
     claude_session_id: str
     sandbox_id: str = ""
+    checkpoint_object_key: str = ""
 
 
 @runtime_checkable
@@ -60,6 +61,17 @@ class SessionMap(Protocol):
     ) -> None:
         """Record the latest claude_session_id for a cocola session."""
 
+    async def get_checkpoint(self, session_id: str) -> str | None:
+        """Return the latest checkpoint object key for a cocola session."""
+
+    async def put_checkpoint(
+        self, session_id: str, object_key: str, *, size_bytes: int = 0
+    ) -> None:
+        """Record the latest checkpoint object key for a cocola session."""
+
+    async def put_checkpoint_failure(self, session_id: str, error: str) -> None:
+        """Record a failed checkpoint attempt for a cocola session."""
+
     async def delete(self, session_id: str) -> None:
         """Forget a session's binding (e.g. a dangling/stale resume id)."""
 
@@ -72,6 +84,7 @@ class MemorySessionMap:
 
     def __init__(self) -> None:
         self._d: dict[str, SessionBinding] = {}
+        self._checkpoints: dict[str, str] = {}
 
     async def get(self, session_id: str) -> str | None:
         binding = await self.get_binding(session_id)
@@ -83,7 +96,12 @@ class MemorySessionMap:
         binding = self._d.get(session_id)
         if not binding or not binding.claude_session_id:
             return None
-        return binding
+        checkpoint = self._checkpoints.get(session_id, binding.checkpoint_object_key)
+        return SessionBinding(
+            claude_session_id=binding.claude_session_id,
+            sandbox_id=binding.sandbox_id,
+            checkpoint_object_key=checkpoint,
+        )
 
     async def put(
         self, session_id: str, claude_session_id: str, *, user_id: str = "", sandbox_id: str = ""
@@ -92,17 +110,43 @@ class MemorySessionMap:
             self._d[session_id] = SessionBinding(
                 claude_session_id=claude_session_id,
                 sandbox_id=sandbox_id,
+                checkpoint_object_key=self._checkpoints.get(session_id, ""),
             )
+
+    async def get_checkpoint(self, session_id: str) -> str | None:
+        binding = self._d.get(session_id)
+        key = self._checkpoints.get(session_id) or (
+            binding.checkpoint_object_key if binding else ""
+        )
+        return key or None
+
+    async def put_checkpoint(
+        self, session_id: str, object_key: str, *, size_bytes: int = 0
+    ) -> None:
+        if not object_key:
+            return
+        self._checkpoints[session_id] = object_key
+        binding = self._d.get(session_id)
+        if binding:
+            self._d[session_id] = SessionBinding(
+                claude_session_id=binding.claude_session_id,
+                sandbox_id=binding.sandbox_id,
+                checkpoint_object_key=object_key,
+            )
+
+    async def put_checkpoint_failure(self, session_id: str, error: str) -> None:
+        return None
 
     async def delete(self, session_id: str) -> None:
         self._d.pop(session_id, None)
+        self._checkpoints.pop(session_id, None)
 
     async def aclose(self) -> None:
         return None
 
 
 _GET = """
-SELECT claude_session_id, sandbox_id
+SELECT claude_session_id, sandbox_id, checkpoint_object_key
 FROM session_map
 WHERE session_id = %s
 """
@@ -114,6 +158,48 @@ ON CONFLICT (session_id)
 DO UPDATE SET claude_session_id = EXCLUDED.claude_session_id,
              user_id = EXCLUDED.user_id,
              sandbox_id = EXCLUDED.sandbox_id,
+             updated_at = now()
+"""
+
+_GET_CHECKPOINT = """
+SELECT checkpoint_object_key
+FROM session_map
+WHERE session_id = %s
+"""
+
+_PUT_CHECKPOINT = """
+INSERT INTO session_map (
+    session_id,
+    checkpoint_object_key,
+    checkpoint_status,
+    checkpoint_size_bytes,
+    checkpoint_error,
+    checkpoint_updated_at,
+    updated_at
+)
+VALUES (%s, %s, 'uploaded', %s, '', now(), now())
+ON CONFLICT (session_id)
+DO UPDATE SET checkpoint_object_key = EXCLUDED.checkpoint_object_key,
+             checkpoint_status = EXCLUDED.checkpoint_status,
+             checkpoint_size_bytes = EXCLUDED.checkpoint_size_bytes,
+             checkpoint_error = EXCLUDED.checkpoint_error,
+             checkpoint_updated_at = EXCLUDED.checkpoint_updated_at,
+             updated_at = now()
+"""
+
+_PUT_CHECKPOINT_FAILURE = """
+INSERT INTO session_map (
+    session_id,
+    checkpoint_status,
+    checkpoint_error,
+    checkpoint_updated_at,
+    updated_at
+)
+VALUES (%s, 'failed', %s, now(), now())
+ON CONFLICT (session_id)
+DO UPDATE SET checkpoint_status = EXCLUDED.checkpoint_status,
+             checkpoint_error = EXCLUDED.checkpoint_error,
+             checkpoint_updated_at = EXCLUDED.checkpoint_updated_at,
              updated_at = now()
 """
 
@@ -157,6 +243,7 @@ class PostgresSessionMap:
         return SessionBinding(
             claude_session_id=cid,
             sandbox_id=row[1] or "",
+            checkpoint_object_key=row[2] or "",
         )
 
     async def put(
@@ -167,6 +254,29 @@ class PostgresSessionMap:
         await self._ready()
         async with self._pool.connection() as conn:
             await conn.execute(_PUT, (session_id, claude_session_id, user_id, sandbox_id))
+
+    async def get_checkpoint(self, session_id: str) -> str | None:
+        await self._ready()
+        async with self._pool.connection() as conn:
+            cur = await conn.execute(_GET_CHECKPOINT, (session_id,))
+            row = await cur.fetchone()
+        if not row:
+            return None
+        return row[0] or None
+
+    async def put_checkpoint(
+        self, session_id: str, object_key: str, *, size_bytes: int = 0
+    ) -> None:
+        if not object_key:
+            return
+        await self._ready()
+        async with self._pool.connection() as conn:
+            await conn.execute(_PUT_CHECKPOINT, (session_id, object_key, size_bytes))
+
+    async def put_checkpoint_failure(self, session_id: str, error: str) -> None:
+        await self._ready()
+        async with self._pool.connection() as conn:
+            await conn.execute(_PUT_CHECKPOINT_FAILURE, (session_id, error[:1000]))
 
     async def delete(self, session_id: str) -> None:
         await self._ready()

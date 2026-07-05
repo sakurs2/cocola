@@ -61,9 +61,9 @@ export function AppSidebar() {
     loadConversation,
     renameConversation,
     deleteConversation,
-    activeConversationId,
-    runningConversationIds,
-    unreadCompletedConversationIds,
+    activeSessionId,
+    runningSessionIds,
+    unreadCompletedSessionIds,
   } = useCocola();
   const isAdmin = session?.user?.role === "admin";
   const userLabel = session?.user?.name || session?.user?.email || "User";
@@ -199,9 +199,9 @@ export function AppSidebar() {
                     <ChatHistoryItem
                       key={c.id}
                       title={c.title || "Untitled"}
-                      active={c.id === activeConversationId}
-                      running={runningConversationIds.has(c.id)}
-                      unread={unreadCompletedConversationIds.has(c.id)}
+                      active={c.id === activeSessionId}
+                      running={runningSessionIds.has(c.id)}
+                      unread={unreadCompletedSessionIds.has(c.id)}
                       menuOpen={menuOpenId === c.id}
                       editing={editingId === c.id}
                       draftTitle={draftTitle}

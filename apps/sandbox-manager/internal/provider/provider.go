@@ -94,6 +94,14 @@ type SessionStorageCleaner interface {
 	CleanupSessionStorage(ctx context.Context, userID, sessionID string) error
 }
 
+// SessionCheckpointer is an optional extension implemented by providers that
+// can snapshot a live sandbox before the orchestrator reclaims it. Errors are
+// intentionally best-effort at the call site so reclamation cannot be blocked
+// forever by persistence failures.
+type SessionCheckpointer interface {
+	CheckpointSession(ctx context.Context, userID, sessionID, sandboxID string) error
+}
+
 // Registry is the global provider registry. Providers self-register in their
 // package init() so the orchestrator can pick one by name from config.
 var (

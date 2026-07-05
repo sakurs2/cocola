@@ -1,0 +1,236 @@
+"""Best-effort session checkpointing around sandbox reclamation.
+
+The runtime workspace stays on the sandbox backend's local storage. To make the
+important conversational state portable across a later fresh sandbox, we archive
+only a small allowlist of directories immediately before a controlled reclaim,
+then restore the latest archive when a session cold-starts again.
+"""
+
+from __future__ import annotations
+
+import asyncio
+import base64
+import os
+import re
+import uuid
+from dataclasses import dataclass, field
+from datetime import UTC, datetime
+
+from cocola_common import get_logger
+
+from cocola_agent_runtime.objstore import Fetcher
+from cocola_agent_runtime.sandbox_binder import SandboxExecutor
+from cocola_agent_runtime.session_map import SessionMap
+
+log = get_logger("cocola.agent-runtime.checkpoint")
+
+DEFAULT_CHECKPOINT_DIRS = (
+    "/home/cocola/.claude",
+    "/workspace/uploads",
+    "/workspace/outputs",
+    "/workspace/persist",
+)
+DEFAULT_TIMEOUT_SECS = 60
+DEFAULT_MAX_BYTES = 256 * 1024 * 1024
+
+
+@dataclass(frozen=True)
+class CheckpointConfig:
+    dirs: tuple[str, ...] = field(default_factory=lambda: DEFAULT_CHECKPOINT_DIRS)
+    timeout_secs: int = DEFAULT_TIMEOUT_SECS
+    max_bytes: int = DEFAULT_MAX_BYTES
+
+    @classmethod
+    def from_env(cls) -> CheckpointConfig:
+        return cls(
+            dirs=_dirs_from_env(),
+            timeout_secs=_env_int("COCOLA_SESSION_CHECKPOINT_TIMEOUT_SECS", DEFAULT_TIMEOUT_SECS),
+            max_bytes=_env_int("COCOLA_SESSION_CHECKPOINT_MAX_BYTES", DEFAULT_MAX_BYTES),
+        )
+
+
+def _env_int(name: str, default: int) -> int:
+    raw = os.getenv(name, "").strip()
+    if not raw:
+        return default
+    try:
+        value = int(raw)
+    except ValueError:
+        return default
+    return value if value > 0 else default
+
+
+def _dirs_from_env() -> tuple[str, ...]:
+    raw = os.getenv("COCOLA_SESSION_CHECKPOINT_DIRS", "").strip()
+    if not raw:
+        return DEFAULT_CHECKPOINT_DIRS
+    dirs = tuple(p.strip() for p in raw.split(",") if p.strip())
+    return dirs or DEFAULT_CHECKPOINT_DIRS
+
+
+def _safe_key_part(value: str, fallback: str) -> str:
+    cleaned = re.sub(r"[^A-Za-z0-9_.-]+", "-", (value or "").strip()).strip("-")
+    return cleaned or fallback
+
+
+def _archive_command(dirs: tuple[str, ...]) -> list[str]:
+    rel_paths = [p.strip().lstrip("/") for p in dirs if p.strip()]
+    quoted = " ".join("'" + p.replace("'", "'\\''") + "'" for p in rel_paths)
+    script = (
+        "set -eu; "
+        "paths=''; "
+        f"for p in {quoted}; do "
+        '[ -e "/$p" ] && paths="$paths $p"; '
+        "done; "
+        '[ -n "$paths" ] || exit 0; '
+        "tar -C / -cf - $paths | zstd -q -c | base64 | tr -d '\\n'"
+    )
+    return ["sh", "-lc", script]
+
+
+RESTORE_COMMAND = [
+    "sh",
+    "-lc",
+    (
+        "set -eu; "
+        "tmp=$(mktemp); "
+        'cat > "$tmp.b64"; '
+        'base64 -d "$tmp.b64" > "$tmp"; '
+        'zstd -d -c "$tmp" | tar -C / -xf -; '
+        'rm -f "$tmp" "$tmp.b64"'
+    ),
+]
+
+
+class CheckpointManager:
+    def __init__(
+        self,
+        *,
+        objstore: Fetcher | None,
+        executor: SandboxExecutor | None,
+        session_map: SessionMap | None,
+        config: CheckpointConfig | None = None,
+    ) -> None:
+        self._objstore = objstore
+        self._executor = executor
+        self._session_map = session_map
+        self._config = config or CheckpointConfig.from_env()
+
+    @property
+    def enabled(self) -> bool:
+        return (
+            self._objstore is not None
+            and self._executor is not None
+            and self._session_map is not None
+        )
+
+    async def checkpoint_on_reclaim(
+        self, *, sandbox_id: str, user_id: str, session_id: str
+    ) -> str | None:
+        """Archive configured dirs and record the resulting latest object key.
+
+        Failures are logged and swallowed so resource reclamation never gets
+        stuck behind persistence trouble.
+        """
+        if not self.enabled or not sandbox_id:
+            return None
+        assert self._executor is not None
+        assert self._objstore is not None
+        assert self._session_map is not None
+        try:
+            res = await self._executor.exec(
+                sandbox_id=sandbox_id,
+                cmd=_archive_command(self._config.dirs),
+                timeout_secs=self._config.timeout_secs,
+            )
+            if not res.ok:
+                await self._record_failure(
+                    session_id, res.error or res.stderr or str(res.exit_code)
+                )
+                log.warning(
+                    "checkpoint archive failed",
+                    sandbox_id=sandbox_id,
+                    session_id=session_id,
+                    error=res.error or res.stderr or str(res.exit_code),
+                )
+                return None
+            if not res.stdout.strip():
+                log.info("checkpoint skipped: no configured dirs exist", session_id=session_id)
+                return None
+            data = base64.b64decode(res.stdout.strip(), validate=False)
+            if self._config.max_bytes and len(data) > self._config.max_bytes:
+                await self._record_failure(
+                    session_id,
+                    f"archive size {len(data)} exceeds max {self._config.max_bytes}",
+                )
+                log.warning(
+                    "checkpoint archive exceeds max bytes",
+                    session_id=session_id,
+                    size=len(data),
+                    max_bytes=self._config.max_bytes,
+                )
+                return None
+            key = self._object_key(user_id=user_id, session_id=session_id)
+            await asyncio.to_thread(self._objstore.put, key, data, "application/zstd")
+            await self._session_map.put_checkpoint(session_id, key, size_bytes=len(data))
+            log.info("checkpoint uploaded", session_id=session_id, object_key=key, size=len(data))
+            return key
+        except Exception as exc:  # noqa: BLE001 - reclaim must continue
+            await self._record_failure(session_id, str(exc))
+            log.warning("checkpoint failed", session_id=session_id, error=str(exc))
+            return None
+
+    async def restore_if_fresh(self, *, sandbox_id: str, session_id: str, reused: bool) -> bool:
+        """Restore the latest checkpoint before running the agent in a fresh sandbox."""
+        if reused or not self.enabled or not sandbox_id:
+            return False
+        assert self._executor is not None
+        assert self._objstore is not None
+        assert self._session_map is not None
+        try:
+            key = await self._session_map.get_checkpoint(session_id)
+            if not key:
+                return False
+            data = await asyncio.to_thread(self._objstore.get, key)
+            encoded = base64.b64encode(data).decode("ascii")
+            res = await self._executor.exec(
+                sandbox_id=sandbox_id,
+                cmd=RESTORE_COMMAND,
+                stdin=encoded,
+                timeout_secs=self._config.timeout_secs,
+            )
+            if not res.ok:
+                log.warning(
+                    "checkpoint restore failed",
+                    sandbox_id=sandbox_id,
+                    session_id=session_id,
+                    object_key=key,
+                    error=res.error or res.stderr or str(res.exit_code),
+                )
+                return False
+            log.info("checkpoint restored", session_id=session_id, object_key=key)
+            return True
+        except Exception as exc:  # noqa: BLE001 - restore is best-effort
+            log.warning("checkpoint restore failed", session_id=session_id, error=str(exc))
+            return False
+
+    def _object_key(self, *, user_id: str, session_id: str) -> str:
+        ts = datetime.now(UTC).strftime("%Y%m%dT%H%M%SZ")
+        return "checkpoints/{}/{}/{}-{}.tar.zst".format(
+            _safe_key_part(user_id, "user"),
+            _safe_key_part(session_id, "session"),
+            ts,
+            uuid.uuid4(),
+        )
+
+    async def _record_failure(self, session_id: str, error: str) -> None:
+        if self._session_map is None:
+            return
+        try:
+            await self._session_map.put_checkpoint_failure(session_id, error)
+        except Exception as exc:  # noqa: BLE001 - avoid masking the original failure
+            log.warning(
+                "checkpoint failure metadata update failed",
+                session_id=session_id,
+                error=str(exc),
+            )
