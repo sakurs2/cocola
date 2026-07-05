@@ -1,0 +1,21 @@
+# Local BatchSandbox template merged by OpenSandbox for every sandbox pod.
+# The /dev/shm mount gives Chromium/Playwright enough shared memory for
+# headless rendering without relying on the Kubernetes default 64Mi tmpfs.
+metadata:
+spec:
+  replicas: 1
+  template:
+    spec:
+      restartPolicy: Never
+      tolerations:
+        - operator: "Exists"
+      volumes:
+        - name: cocola-dev-shm
+          emptyDir:
+            medium: Memory
+            sizeLimit: 256Mi
+      containers:
+        - name: sandbox
+          volumeMounts:
+            - name: cocola-dev-shm
+              mountPath: /dev/shm

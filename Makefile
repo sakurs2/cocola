@@ -143,9 +143,9 @@ opensandbox-up: ## Start a local OpenSandbox server on :8090 and wait for /healt
 opensandbox-down: ## Stop and remove the local OpenSandbox server
 	$(DOCKER_COMPOSE) -f $(OPENSANDBOX_COMPOSE) down
 
-verify-opensandbox-k8s: ## Verify OpenSandbox Kubernetes runtime with cocola/sandbox-runtime:dev
+verify-opensandbox-k8s: ## Verify OpenSandbox Kubernetes runtime with the configured sandbox image
 	COCOLA_OPENSANDBOX_URL=$${COCOLA_OPENSANDBOX_URL:-http://127.0.0.1:8090/v1} \
-		$(MAKE) verify-opensandbox ARGS="-image $${COCOLA_K8S_SANDBOX_IMAGE_REMOTE:-cocola-registry.localhost:5000/cocola/sandbox-runtime:dev} -skip-pause $(ARGS)"
+		$(MAKE) verify-opensandbox ARGS="-image $${COCOLA_K8S_SANDBOX_IMAGE_REMOTE:-ghcr.io/sakurs2/cocola-sandbox-runtime:latest} -skip-pause $(ARGS)"
 
 sandbox-run: sandbox-build ## Run sandbox-manager locally (Docker provider)
 	COCOLA_SANDBOX_PROVIDER=docker ./bin/sandbox-manager

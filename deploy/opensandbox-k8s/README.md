@@ -12,9 +12,10 @@ make up-k8s
 ```
 
 It creates or reuses a single-node k3d cluster, creates a local registry,
-pushes `cocola/sandbox-runtime:dev` into that registry, installs OpenSandbox's
-Kubernetes runtime, starts a local port-forward, and then starts cocola through
-the normal native dev stack.
+installs OpenSandbox's Kubernetes runtime, starts a local port-forward, and
+then starts cocola through the normal native dev stack. Sandbox pods pull
+`ghcr.io/sakurs2/cocola-sandbox-runtime:latest` by default, and `make up-k8s`
+pre-pulls that image into the k3d node before accepting chat traffic.
 
 Useful follow-ups:
 
@@ -33,13 +34,19 @@ want to validate Kubernetes sandbox placement or the sandbox node admin UI.
 - `docker`, `k3d`, `kubectl` and `helm`.
 - OpenSandbox cloned locally. The default path is:
   `/Users/bytedance/Desktop/github/opensandbox`
-- `cocola/sandbox-runtime:dev` built locally.
 
-The simplified profile deliberately uses a k3d local registry instead of
-`k3d image import`. Importing the full sandbox runtime image into every node can
-consume a large amount of disk and is brittle on small local Docker VMs.
+The simplified profile pulls the official cocola sandbox runtime image from
+GHCR by default. This avoids rebuilding or pushing the large sandbox image on
+every local Kubernetes run. The image is pre-pulled during startup so the first
+chat does not pay the full cold-pull cost inside `POST /sandboxes`.
 
-The image has two addresses in local k3d mode:
+For image development, you can still opt into the old local-registry flow:
+
+```bash
+COCOLA_K8S_PUSH_SANDBOX_IMAGE=1 make up-k8s
+```
+
+That mode uses two addresses:
 
 - Host push address: `localhost:5001/cocola/sandbox-runtime:dev`
 - Kubernetes pull address: `cocola-registry.localhost:5000/cocola/sandbox-runtime:dev`
@@ -53,6 +60,15 @@ The local values intentionally run without an OpenSandbox API key and set
 shared environment. `make up-k8s` injects the Kubernetes-specific OpenSandbox
 URL, node selector, timeout, and sandbox image variables automatically.
 
+## Sandbox pod template
+
+`make up-k8s` creates a `cocola-batchsandbox-template` ConfigMap from
+`deploy/opensandbox-k8s/batchsandbox-template.yaml` and mounts it into the
+OpenSandbox server. The template is merged into every new sandbox pod. Cocola
+uses it to mount `/dev/shm` as a 256Mi memory-backed `emptyDir`, which gives
+Chromium and Playwright enough shared memory for headless screenshots. The
+memory is not preallocated, but actual writes count toward node memory pressure.
+
 ## Verify provider lifecycle
 
 ```bash
@@ -60,8 +76,8 @@ make verify-opensandbox-k8s
 ```
 
 This verifies create, health, streaming exec, file upload/download and destroy.
-By default it uses the same local registry image as `make up-k8s`:
-`cocola-registry.localhost:5000/cocola/sandbox-runtime:dev`. It intentionally skips
+By default it uses the same GHCR image as `make up-k8s`:
+`ghcr.io/sakurs2/cocola-sandbox-runtime:latest`. It intentionally skips
 pause/resume because OpenSandbox Kubernetes snapshots require registry
 configuration.
 

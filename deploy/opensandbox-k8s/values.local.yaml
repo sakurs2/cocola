@@ -21,6 +21,15 @@ opensandbox-server:
     env:
       - name: OPENSANDBOX_INSECURE_SERVER
         value: "YES"
+    volumeMounts:
+      - name: cocola-batchsandbox-template
+        mountPath: /etc/opensandbox/cocola.batchsandbox-template.yaml
+        subPath: batchsandbox-template.yaml
+        readOnly: true
+    volumes:
+      - name: cocola-batchsandbox-template
+        configMap:
+          name: cocola-batchsandbox-template
     resources:
       limits:
         cpu: "1"
@@ -50,7 +59,7 @@ opensandbox-server:
     sandbox_create_timeout_seconds = 180
     snapshot_create_timeout_seconds = 900
     workload_provider = "batchsandbox"
-    batchsandbox_template_file = "/etc/opensandbox/example.batchsandbox-template.yaml"
+    batchsandbox_template_file = "/etc/opensandbox/cocola.batchsandbox-template.yaml"
 
     [egress]
     image = "sandbox-registry.cn-zhangjiakou.cr.aliyuncs.com/opensandbox/egress:v1.1.2"

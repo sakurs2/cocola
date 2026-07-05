@@ -19,7 +19,14 @@ REGISTRY_HOST="${COCOLA_K8S_REGISTRY_HOST:-cocola-registry.localhost}"
 REGISTRY_PORT="${COCOLA_K8S_REGISTRY_PORT:-5001}"
 SANDBOX_IMAGE_LOCAL="${COCOLA_K8S_SANDBOX_IMAGE_LOCAL:-cocola/sandbox-runtime:dev}"
 SANDBOX_IMAGE_PUSH="${COCOLA_K8S_SANDBOX_IMAGE_PUSH:-localhost:${REGISTRY_PORT}/cocola/sandbox-runtime:dev}"
-SANDBOX_IMAGE_REMOTE="${COCOLA_K8S_SANDBOX_IMAGE_REMOTE:-${REGISTRY_HOST}:5000/cocola/sandbox-runtime:dev}"
+PUSH_SANDBOX_IMAGE="${COCOLA_K8S_PUSH_SANDBOX_IMAGE:-0}"
+PREPULL_SANDBOX_IMAGE="${COCOLA_K8S_PREPULL_SANDBOX_IMAGE:-1}"
+if [[ "$PUSH_SANDBOX_IMAGE" == "1" ]]; then
+  SANDBOX_IMAGE_REMOTE_DEFAULT="${REGISTRY_HOST}:5000/cocola/sandbox-runtime:dev"
+else
+  SANDBOX_IMAGE_REMOTE_DEFAULT="ghcr.io/sakurs2/cocola-sandbox-runtime:latest"
+fi
+SANDBOX_IMAGE_REMOTE="${COCOLA_K8S_SANDBOX_IMAGE_REMOTE:-$SANDBOX_IMAGE_REMOTE_DEFAULT}"
 SERVER_PORT="${COCOLA_OPENSANDBOX_HOST_PORT:-8090}"
 RELEASE="${COCOLA_OPENSANDBOX_K8S_RELEASE:-opensandbox}"
 SYSTEM_NAMESPACE="${COCOLA_OPENSANDBOX_K8S_SYSTEM_NAMESPACE:-opensandbox-system}"
@@ -28,6 +35,8 @@ OPENSANDBOX_REPO="${OPENSANDBOX_REPO:-$HOME/Desktop/github/opensandbox}"
 CHART_DIR="${COCOLA_OPENSANDBOX_K8S_CHART:-$OPENSANDBOX_REPO/kubernetes/charts/opensandbox}"
 VALUES_FILE="${COCOLA_OPENSANDBOX_K8S_VALUES:-$ROOT/deploy/opensandbox-k8s/values.local.yaml}"
 PVC_FILE="${COCOLA_OPENSANDBOX_K8S_PVC:-$ROOT/deploy/opensandbox-k8s/cocola-plugins-pvc.yaml}"
+BATCHSANDBOX_TEMPLATE_FILE="${COCOLA_OPENSANDBOX_K8S_BATCHSANDBOX_TEMPLATE:-$ROOT/deploy/opensandbox-k8s/batchsandbox-template.yaml}"
+BATCHSANDBOX_TEMPLATE_CM="cocola-batchsandbox-template"
 SERVER_SERVICE="${COCOLA_OPENSANDBOX_K8S_SERVER_SERVICE:-opensandbox-server}"
 LOG_DIR="$ROOT/.run-logs"
 FORWARD_PID_FILE="$LOG_DIR/opensandbox-k8s-forward.pid"
@@ -90,6 +99,21 @@ push_sandbox_image() {
   log "Kubernetes sandbox pods will pull image as: $SANDBOX_IMAGE_REMOTE"
 }
 
+prepull_sandbox_image() {
+  if [[ "$PREPULL_SANDBOX_IMAGE" != "1" ]]; then
+    log "skipping sandbox image pre-pull: COCOLA_K8S_PREPULL_SANDBOX_IMAGE=$PREPULL_SANDBOX_IMAGE"
+    return 0
+  fi
+
+  local node="k3d-${CLUSTER}-server-0"
+  log "pre-pulling sandbox image on k3d node $node: $SANDBOX_IMAGE_REMOTE"
+  if ! docker exec "$node" crictl pull "$SANDBOX_IMAGE_REMOTE"; then
+    err "failed to pre-pull $SANDBOX_IMAGE_REMOTE inside k3d node $node"
+    err "check GHCR package visibility/network access, or set COCOLA_K8S_PREPULL_SANDBOX_IMAGE=0 to skip"
+    return 1
+  fi
+}
+
 install_opensandbox() {
   ensure_chart
 
@@ -102,8 +126,21 @@ install_opensandbox() {
     -o yaml \
     | kubectl apply -f -
 
+  log "creating OpenSandbox system namespace $SYSTEM_NAMESPACE"
+  kubectl create namespace "$SYSTEM_NAMESPACE" \
+    --dry-run=client \
+    -o yaml \
+    | kubectl apply -f -
+
   log "creating cocola-plugins PVC"
   kubectl -n "$SANDBOX_NAMESPACE" apply -f "$PVC_FILE"
+
+  log "creating BatchSandbox template ConfigMap $BATCHSANDBOX_TEMPLATE_CM"
+  kubectl -n "$SYSTEM_NAMESPACE" create configmap "$BATCHSANDBOX_TEMPLATE_CM" \
+    --from-file=batchsandbox-template.yaml="$BATCHSANDBOX_TEMPLATE_FILE" \
+    --dry-run=client \
+    -o yaml \
+    | kubectl apply -f -
 
   log "installing OpenSandbox release=$RELEASE namespace=$SYSTEM_NAMESPACE"
   helm upgrade --install "$RELEASE" "$CHART_DIR" \
@@ -120,6 +157,8 @@ install_opensandbox() {
 uninstall_opensandbox() {
   log "uninstalling OpenSandbox release=$RELEASE from namespace=$SYSTEM_NAMESPACE"
   helm uninstall "$RELEASE" --namespace "$SYSTEM_NAMESPACE" || true
+  log "deleting local BatchSandbox template ConfigMap"
+  kubectl -n "$SYSTEM_NAMESPACE" delete configmap "$BATCHSANDBOX_TEMPLATE_CM" --ignore-not-found=true
   log "deleting local cocola-plugins PVC"
   kubectl -n "$SANDBOX_NAMESPACE" delete -f "$PVC_FILE" --ignore-not-found=true
 }
@@ -195,7 +234,12 @@ start_forward() {
 
 up() {
   ensure_cluster
-  push_sandbox_image
+  if [[ "$PUSH_SANDBOX_IMAGE" == "1" ]]; then
+    push_sandbox_image
+  else
+    log "Kubernetes sandbox pods will pull image from registry: $SANDBOX_IMAGE_REMOTE"
+    prepull_sandbox_image
+  fi
   install_opensandbox
   start_forward
 
@@ -286,7 +330,12 @@ Environment:
   COCOLA_K8S_REGISTRY_PORT        default: 5001
   COCOLA_K8S_SANDBOX_IMAGE_LOCAL  default: cocola/sandbox-runtime:dev
   COCOLA_K8S_SANDBOX_IMAGE_PUSH   default: localhost:5001/cocola/sandbox-runtime:dev
-  COCOLA_K8S_SANDBOX_IMAGE_REMOTE default: cocola-registry.localhost:5000/cocola/sandbox-runtime:dev
+  COCOLA_K8S_SANDBOX_IMAGE_REMOTE default: ghcr.io/sakurs2/cocola-sandbox-runtime:latest
+                                    when COCOLA_K8S_PUSH_SANDBOX_IMAGE=1:
+                                    cocola-registry.localhost:5000/cocola/sandbox-runtime:dev
+  COCOLA_K8S_PUSH_SANDBOX_IMAGE   default: 0; set 1 to push a local dev image to k3d registry
+  COCOLA_K8S_PREPULL_SANDBOX_IMAGE default: 1; pre-pull the remote image during make up-k8s
+  COCOLA_OPENSANDBOX_K8S_BATCHSANDBOX_TEMPLATE default: deploy/opensandbox-k8s/batchsandbox-template.yaml
   OPENSANDBOX_REPO                default: \$HOME/Desktop/github/opensandbox
 TXT
     ;;
