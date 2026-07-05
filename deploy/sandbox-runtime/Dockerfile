@@ -61,14 +61,28 @@ ENV DEBIAN_FRONTEND=noninteractive \
 
 # ---- extra tools the base image lacks ------------------------------------
 # The base already provides Node 22 + npm, uv, Python 3.12 (+ venv), git, curl.
-# cocola only needs to add the pieces the base omits: tini (PID-1 reaper), the
-# egress-firewall toolchain (iptables/ipset), the agent's search helpers
-# (ripgrep/jq), and zstd for future workspace checkpoint packaging.
+# cocola adds the pieces agents use frequently: PID-1 reaping, egress firewall
+# tooling, search/JSON/YAML helpers, archive/build utilities, Playwright's
+# Chromium for HTML preview/screenshot automation, fonts, and common
+# document/media CLIs.
 # Node/uv/python install steps are GONE -- inherited from base.
 RUN apt-get update && apt-get install -y --no-install-recommends \
-        ca-certificates tini iptables ipset ripgrep jq zstd \
+        ca-certificates tini \
+        iptables ipset \
+        ripgrep fd-find jq yq tree file less procps psmisc \
+        wget unzip zip tar gzip zstd make build-essential pkg-config sqlite3 \
+        poppler-utils imagemagick librsvg2-bin \
+        fonts-noto fonts-noto-cjk fonts-noto-color-emoji \
     && rm -rf /var/lib/apt/lists/* \
-    && npm config set registry "${NPM_REGISTRY}"
+    && ln -sf /usr/bin/fdfind /usr/local/bin/fd \
+    && npm config set registry "${NPM_REGISTRY}" \
+    && npm install -g pnpm@10 yarn playwright \
+    && PLAYWRIGHT_BROWSERS_PATH=/ms-playwright playwright install --with-deps chromium \
+    && chromium_path="$(find /ms-playwright -type f \( -path '*/chrome-linux/chrome' -o -path '*/chrome-linux64/chrome' \) | head -n1)" \
+    && test -n "$chromium_path" \
+    && printf '#!/usr/bin/env sh\nexec "%s" "$@"\n' "$chromium_path" > /usr/local/bin/chromium \
+    && chmod +x /usr/local/bin/chromium \
+    && chmod -R a+rX /ms-playwright
 
 # ---- Claude Code CLI: offline tgz first, registry fallback --------------
 # Anything matching offline/*claude-code*.tgz is installed without the network;
@@ -130,7 +144,12 @@ ENV CLAUDE_CONFIG_DIR=/home/cocola/.claude \
     ANTHROPIC_CONFIG_DIR=/home/cocola/.claude \
     CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC=1 \
     CLAUDE_CODE_MAX_RETRIES=3 \
-    COCOLA_WORKSPACE=/workspace
+    COCOLA_WORKSPACE=/workspace \
+    NODE_PATH=/usr/local/lib/node_modules \
+    PLAYWRIGHT_BROWSERS_PATH=/ms-playwright \
+    CHROME_BIN=/usr/local/bin/chromium \
+    PUPPETEER_EXECUTABLE_PATH=/usr/local/bin/chromium \
+    PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH=/usr/local/bin/chromium
 
 # tini reaps the `claude` CLI subprocesses the SDK spawns. Default command keeps
 # the container alive (session-lived per ADR-0009); the shim is invoked on

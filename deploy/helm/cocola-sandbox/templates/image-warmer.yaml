@@ -1,4 +1,6 @@
 {{- if .Values.imageWarmer.enabled }}
+{{- $warmerImage := .Values.imageWarmer.image | default .Values.sandbox.image }}
+{{- $warmerDigest := .Values.imageWarmer.imageDigest | default .Values.sandbox.imageDigest }}
 {{- /*
 Image warmer DaemonSet (ADR-0012): pre-pull the large (~1.9 GB) sandbox runtime
 image onto every candidate node so a new sandbox Pod skips the pull on cold
@@ -41,7 +43,7 @@ spec:
       {{- end }}
       initContainers:
         - name: pull-sandbox-runtime
-          image: {{ .Values.imageWarmer.image | default .Values.sandbox.image }}
+          image: {{ include "cocola-sandbox.imageRef" (dict "image" $warmerImage "digest" $warmerDigest) }}
           imagePullPolicy: {{ .Values.imageWarmer.imagePullPolicy }}
           command: ["true"]
           resources:

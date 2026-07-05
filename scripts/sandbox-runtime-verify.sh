@@ -7,7 +7,8 @@
 # What it proves (ADR-0009 / ADR-0008):
 #   1. build   : the image builds; CLI is pre-baked (offline tgz if vendored).
 #   2. selfcheck: Node + claude CLI + claude-agent-sdk present; config_dir /
-#                 workspace / auth env wired. (no network)
+#                 workspace / auth env wired, plus common browser/document
+#                 tooling baked in. (no network)
 #   3. query   : a real turn through the in-sandbox stdio shim -> reaches the
 #                llm-gateway (egress) AND exercises native bash/file IO inside
 #                the container. This is also the live TOOL-USE round-trip
@@ -91,6 +92,13 @@ echo "$SELF"
 echo "$SELF" | grep -q '"node":"v2' && ok "Node 22+ present" || bad "Node missing / wrong major"
 echo "$SELF" | grep -q '"claude_cli":"[0-9]' && ok "claude CLI pre-baked" || bad "claude CLI missing"
 echo "$SELF" | grep -qv '"claude_agent_sdk":"missing' && ok "claude-agent-sdk importable" || bad "claude-agent-sdk missing"
+for tool in pnpm yarn playwright chromium fd jq yq tree file make imagemagick pdftotext rsvg_convert; do
+  if echo "$SELF" | grep -Eq "\"$tool\":\"(missing|error:)"; then
+    bad "$tool missing from sandbox runtime"
+  else
+    ok "$tool present"
+  fi
+done
 
 # ---- 3. real query: egress + native bash/file IO -------------------------
 if [ "${SKIP_QUERY:-0}" != "1" ] && [ -n "${ANTHROPIC_BASE_URL:-}" ] && [ -n "${ANTHROPIC_AUTH_TOKEN:-}" ]; then

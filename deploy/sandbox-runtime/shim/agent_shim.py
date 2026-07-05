@@ -187,12 +187,37 @@ def _selfcheck() -> int:
     import shutil
     import subprocess
 
+    def cmd_version(*cmd: str) -> str:
+        exe = cmd[0]
+        if not shutil.which(exe):
+            return "missing"
+        try:
+            out = subprocess.check_output(
+                list(cmd), text=True, stderr=subprocess.STDOUT
+            ).strip()
+        except Exception as e:  # noqa: BLE001
+            return f"error: {e}"
+        return out.splitlines()[0] if out else "installed"
+
     info: dict[str, Any] = {
         "type": "selfcheck",
         "python": sys.version.split()[0],
         "node": None,
         "claude_cli": None,
         "claude_agent_sdk": None,
+        "pnpm": cmd_version("pnpm", "--version"),
+        "yarn": cmd_version("yarn", "--version"),
+        "playwright": cmd_version("playwright", "--version"),
+        "chromium": cmd_version("chromium", "--version"),
+        "fd": cmd_version("fd", "--version"),
+        "jq": cmd_version("jq", "--version"),
+        "yq": cmd_version("yq", "--version"),
+        "tree": cmd_version("tree", "--version"),
+        "file": cmd_version("file", "--version"),
+        "make": cmd_version("make", "--version"),
+        "imagemagick": cmd_version("convert", "-version"),
+        "pdftotext": cmd_version("pdftotext", "-v"),
+        "rsvg_convert": cmd_version("rsvg-convert", "--version"),
         "config_dir": os.environ.get("CLAUDE_CONFIG_DIR"),
         "workspace": os.environ.get("COCOLA_WORKSPACE"),
         "base_url_set": bool(os.environ.get("ANTHROPIC_BASE_URL")),
@@ -220,12 +245,31 @@ def _selfcheck() -> int:
         info["claude_agent_sdk"] = f"missing: {e}"
 
     _emit(info)
+    required_tools = [
+        "pnpm",
+        "yarn",
+        "playwright",
+        "chromium",
+        "fd",
+        "jq",
+        "yq",
+        "tree",
+        "file",
+        "make",
+        "imagemagick",
+        "pdftotext",
+        "rsvg_convert",
+    ]
     ok = (
         info["node"]
         and not str(info["node"]).startswith("error")
         and info["claude_cli"]
         and not str(info["claude_cli"]).startswith("error")
         and not str(info["claude_agent_sdk"]).startswith("missing")
+        and all(
+            not str(info[name]).startswith(("missing", "error"))
+            for name in required_tools
+        )
     )
     return 0 if ok else 1
 

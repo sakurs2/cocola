@@ -3,19 +3,20 @@
 This is the session-scoped **sandbox runtime image** for cocola's Route A
 architecture (see `docs/adr/0009-agent-runtime-in-sandbox.md`). The whole
 Claude Code agent runtime -- Node.js + the `claude` CLI + `claude-agent-sdk` +
-a thin stdio shim -- is **baked into this image** and runs *inside the user's
-own container*. The agent's brain and hands both live here, so native
+a thin stdio shim -- is **baked into this image** and runs _inside the user's
+own container_. The agent's brain and hands both live here, so native
 Bash/Read/Write/Edit are isolated to this filesystem by construction; there is
 no MCP forwarding seam.
 
 The image is built **`FROM opensandbox/code-interpreter`** -- OpenSandbox's
 official multi-language runtime (Node 22 + uv + Python already inside), which
 is also cocola's sandbox backend (see `docs/adr/0014-...`). cocola reuses it
-and layers only the pieces it lacks (Claude Code CLI + `claude-agent-sdk` venv
-+ the stdio shim + the egress-firewall toolchain). This honours cocola's
-"prefer upstream over reinventing" rule while keeping the CLI **build-time
-baked** (ADR-0009 sec.3): nothing is installed on container start. Override the
-base with `--build-arg OPENSANDBOX_BASE=...` for a pinned/offline mirror.
+and layers only the pieces it lacks: Claude Code CLI, `claude-agent-sdk` venv,
+the stdio shim, the egress-firewall toolchain, and common browser/document
+tools. This honours cocola's "prefer upstream over reinventing" rule while
+keeping the CLI **build-time baked** (ADR-0009 sec.3): nothing is installed on
+container start. Override the base with `--build-arg OPENSANDBOX_BASE=...` for a
+pinned/offline mirror.
 
 ## Layout
 
@@ -37,7 +38,7 @@ locked down to a **default-deny + allowlist** posture (the same iptables+ipset
 shape as Anthropic's Claude Code devcontainer `init-firewall.sh`):
 
 - The container's **main process runs as root** so `firewall-entrypoint.sh` can
-  install the rules (needs `NET_ADMIN`) *before* any `exec` lands. User/agent
+  install the rules (needs `NET_ADMIN`) _before_ any `exec` lands. User/agent
   code never runs as that main process -- it arrives via `docker exec` /
   `kubectl exec`, which sandbox-manager pins to the non-root `cocola` user
   (uid 10001) without `NET_ADMIN`, so it cannot alter the rules.
@@ -74,12 +75,41 @@ kubectl exec -i  <pod> -- /opt/cocola/shim/entrypoint.sh   < request.json
 `--selfcheck` runs an offline probe (no SDK call) and prints one JSON line of
 runtime facts; used by the verification script.
 
+## Preinstalled tools
+
+The runtime includes a small, high-frequency toolbelt so agents can inspect
+files, build simple projects, render HTML, take screenshots, and process common
+document/media outputs without installing dependencies at sandbox start:
+
+- Basics: `wget`, `ripgrep`, `fd`, `jq`, `yq`, `tree`, `file`, `less`,
+  `procps`, `psmisc`, `unzip`, `zip`, `tar`, `gzip`, `zstd`.
+- Build helpers: `make`, `build-essential`, `pkg-config`, `sqlite3`.
+- Node/web: `pnpm`, `yarn`, global `playwright`, Playwright-managed
+  `chromium`.
+- Documents/media: `poppler-utils`, `imagemagick`, `librsvg2-bin`.
+- Fonts: Noto core, CJK, and color emoji fonts.
+
+Playwright uses a build-time downloaded Chromium under `/ms-playwright`, exposed
+through `/usr/local/bin/chromium`. The image sets
+`NODE_PATH=/usr/local/lib/node_modules`, `PLAYWRIGHT_BROWSERS_PATH`,
+`CHROME_BIN`, `PUPPETEER_EXECUTABLE_PATH`, and
+`PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH` so simple Node scripts can locate the
+global package and browser. A typical screenshot probe can launch with:
+
+```js
+const { chromium } = require("playwright");
+const browser = await chromium.launch({
+  executablePath: process.env.PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH,
+  args: ["--no-sandbox"],
+});
+```
+
 ## Persistence
 
 Two volumes are mounted by the provider:
 
 | Mount in container     | Volume            | Survives                          |
-|------------------------|-------------------|-----------------------------------|
+| ---------------------- | ----------------- | --------------------------------- |
 | `/workspace`           | per-session, RW   | hibernate, cleaned at session end |
 | `/home/cocola/.claude` | per-session, RW   | hibernate, cleaned at session end |
 | `/data/plugins`        | shared, read-only | platform-managed                  |
@@ -102,6 +132,36 @@ npm pack @anthropic-ai/claude-code --registry=https://registry.npmmirror.com
 mv anthropic-ai-claude-code-*.tgz deploy/sandbox-runtime/offline/
 
 docker build -t cocola/sandbox-runtime:dev deploy/sandbox-runtime
+```
+
+## Publish
+
+Production images are published as OCI images to GHCR. The GitHub Actions
+workflow `.github/workflows/sandbox-runtime-image.yml` builds `linux/amd64`,
+pushes immutable `sha-<commit>` tags, keeps `dev` moving on the default branch,
+adds semver tags for `v*` releases, and prints the digest-pinned reference in
+the workflow summary.
+
+For local publishing after changing the image:
+
+```bash
+# gh auth must include write:packages, then log in to GHCR:
+gh auth refresh -h github.com -s write:packages
+gh auth token | docker login ghcr.io -u <github-user> --password-stdin
+
+# build, selfcheck, push dev + sha-<commit>
+scripts/sandbox-runtime-publish.sh
+
+# release-style tags, e.g. v0.1.0 and 0.1
+VERSION_TAG=v0.1.0 scripts/sandbox-runtime-publish.sh
+```
+
+Use digest-pinned references for production rollout:
+
+```bash
+helm upgrade --install cocola-sandbox deploy/helm/cocola-sandbox \
+  --set sandbox.image=ghcr.io/sakurs2/cocola-sandbox-runtime:sha-<commit> \
+  --set sandbox.imageDigest=sha256:<digest-from-ci>
 ```
 
 ## Verify (local Docker / runc; same body is the future gVisor spike)

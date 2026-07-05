@@ -55,7 +55,12 @@ sandbox:
   # mapping container root to a non-privileged host uid. "true" disables it;
   # "default" defers to the cluster.
   hostUsers: "false"
+  # Development default keeps local workflows simple. In production prefer the
+  # GHCR image pinned by digest, for example:
+  #   image: ghcr.io/sakurs2/cocola-sandbox-runtime:sha-<commit>
+  #   imageDigest: sha256:<digest-from-ci>
   image: cocola/sandbox-runtime:dev
+  imageDigest: ""
   storageClass: "" # empty => cluster default StorageClass
   llmBaseURL: http://llm-gateway.cocola.svc.cluster.local:8080
   redisAddr: redis.cocola.svc.cluster.local:6379
@@ -99,6 +104,7 @@ imageWarmer:
   enabled: false
   # Image to warm. Empty => falls back to sandbox.image (keeps them from drifting).
   image: ""
+  imageDigest: ""
   imagePullPolicy: IfNotPresent
   # Tiny long-lived container that keeps the pulled image pinned in the node cache.
   pauseImage: registry.k8s.io/pause:3.9

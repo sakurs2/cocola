@@ -21,7 +21,7 @@ import { CocolaRuntimeProvider, useCocola } from "@/app/runtime-provider";
 import { AppSidebar } from "@/components/assistant-ui/app-sidebar";
 import { CodeBlock, MarkdownContent } from "@/components/assistant-ui/markdown-text";
 import { Thread } from "@/components/assistant-ui/thread";
-import { Download, FileQuestion, X } from "lucide-react";
+import { Code2, Download, Eye, FileQuestion, X } from "lucide-react";
 import { type PointerEvent, useCallback, useEffect, useState } from "react";
 
 export default function Home() {
@@ -133,11 +133,13 @@ function ArtifactPreviewPanel() {
   const { selectedArtifact, closeArtifact } = useCocola();
   const [text, setText] = useState<string>("");
   const [error, setError] = useState<string>("");
+  const [htmlSourceMode, setHtmlSourceMode] = useState(false);
 
   useEffect(() => {
     let cancelled = false;
     setText("");
     setError("");
+    setHtmlSourceMode(false);
     if (!selectedArtifact || !isTextPreview(selectedArtifact.mimeType, selectedArtifact.filename)) {
       return;
     }
@@ -159,6 +161,7 @@ function ArtifactPreviewPanel() {
   if (!selectedArtifact) return null;
 
   const canText = isTextPreview(selectedArtifact.mimeType, selectedArtifact.filename);
+  const canHtml = isHtmlPreview(selectedArtifact.mimeType, selectedArtifact.filename);
   const canImage = selectedArtifact.mimeType.startsWith("image/");
   const canPdf = selectedArtifact.mimeType === "application/pdf";
   const previewKind = getTextPreviewKind(selectedArtifact.mimeType, selectedArtifact.filename);
@@ -173,6 +176,17 @@ function ArtifactPreviewPanel() {
             {formatBytes(selectedArtifact.size)} · {selectedArtifact.mimeType}
           </div>
         </div>
+        {canHtml ? (
+          <button
+            type="button"
+            aria-label={htmlSourceMode ? "Preview HTML" : "View HTML source"}
+            title={htmlSourceMode ? "Preview HTML" : "View source"}
+            onClick={() => setHtmlSourceMode((value) => !value)}
+            className="inline-flex size-8 shrink-0 items-center justify-center rounded-full text-muted-foreground transition-colors hover:bg-muted hover:text-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+          >
+            {htmlSourceMode ? <Eye className="size-4" /> : <Code2 className="size-4" />}
+          </button>
+        ) : null}
         <a
           href={selectedArtifact.downloadUrl}
           download={selectedArtifact.filename}
@@ -207,6 +221,13 @@ function ArtifactPreviewPanel() {
             title={selectedArtifact.filename}
             src={selectedArtifact.downloadUrl}
             className="h-full w-full"
+          />
+        ) : canHtml && !htmlSourceMode && !error && text ? (
+          <iframe
+            title={selectedArtifact.filename}
+            srcDoc={text}
+            sandbox="allow-forms allow-modals allow-popups allow-scripts"
+            className="h-full w-full bg-white"
           />
         ) : canText ? (
           <TextArtifactPreview error={error} text={text} kind={previewKind} language={language} />
@@ -256,6 +277,11 @@ function TextArtifactPreview({
   );
 }
 
+function isHtmlPreview(mime: string, filename: string): boolean {
+  const ext = getKnownTextExtension(filename);
+  return mime === "text/html" || ext === "html" || ext === "htm";
+}
+
 function isTextPreview(mime: string, filename: string): boolean {
   if (mime.startsWith("text/")) return true;
   if (["application/json", "application/xml", "application/javascript"].includes(mime)) return true;
@@ -284,6 +310,7 @@ function getCodeLanguage(mime: string, filename: string): string {
     diff: "diff",
     go: "go",
     h: "c",
+    htm: "html",
     html: "html",
     java: "java",
     js: "javascript",
@@ -318,6 +345,7 @@ function getKnownTextExtension(filename: string): string {
     "diff",
     "go",
     "h",
+    "htm",
     "html",
     "java",
     "js",
