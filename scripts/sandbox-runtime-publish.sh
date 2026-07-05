@@ -1,13 +1,14 @@
 #!/usr/bin/env bash
 # Build, selfcheck, and publish the cocola sandbox runtime image to an OCI
-# registry. Defaults target GHCR and publish immutable sha-* tags; set
-# VERSION_TAG=vX.Y.Z for a release tag.
+# registry. Defaults target GHCR and publish latest/dev plus immutable sha-*
+# tags; set VERSION_TAG=vX.Y.Z for a release tag.
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 CTX="$ROOT/deploy/sandbox-runtime"
 PLATFORM="${PLATFORM:-linux/amd64}"
 PUBLISH_DEV_TAG="${PUBLISH_DEV_TAG:-1}"
+PUBLISH_LATEST_TAG="${PUBLISH_LATEST_TAG:-1}"
 VERIFY="${VERIFY:-1}"
 
 detect_owner() {
@@ -34,6 +35,9 @@ fi
 GIT_SHA="${GIT_SHA:-$(git -C "$ROOT" rev-parse --short=12 HEAD)}"
 
 tags=("$IMAGE_REPO:sha-$GIT_SHA")
+if [ "$PUBLISH_LATEST_TAG" = "1" ]; then
+  tags+=("$IMAGE_REPO:latest")
+fi
 if [ "$PUBLISH_DEV_TAG" = "1" ]; then
   tags+=("$IMAGE_REPO:dev")
 fi

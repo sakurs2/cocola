@@ -138,9 +138,9 @@ docker build -t cocola/sandbox-runtime:dev deploy/sandbox-runtime
 
 Production images are published as OCI images to GHCR. The GitHub Actions
 workflow `.github/workflows/sandbox-runtime-image.yml` builds `linux/amd64`,
-pushes immutable `sha-<commit>` tags, keeps `dev` moving on the default branch,
-adds semver tags for `v*` releases, and prints the digest-pinned reference in
-the workflow summary.
+pushes immutable `sha-<commit>` tags, keeps `latest` and `dev` moving on the
+default branch, adds semver tags for `v*` releases, and prints the
+digest-pinned reference in the workflow summary.
 
 For local publishing after changing the image:
 
@@ -149,7 +149,7 @@ For local publishing after changing the image:
 gh auth refresh -h github.com -s write:packages
 gh auth token | docker login ghcr.io -u <github-user> --password-stdin
 
-# build, selfcheck, push dev + sha-<commit>
+# build, selfcheck, push latest + dev + sha-<commit>
 scripts/sandbox-runtime-publish.sh
 
 # release-style tags, e.g. v0.1.0 and 0.1
@@ -163,6 +163,16 @@ helm upgrade --install cocola-sandbox deploy/helm/cocola-sandbox \
   --set sandbox.image=ghcr.io/sakurs2/cocola-sandbox-runtime:sha-<commit> \
   --set sandbox.imageDigest=sha256:<digest-from-ci>
 ```
+
+For quick single-server deployments that intentionally track the newest
+successful master build, `latest` is available as a convenience tag:
+
+```bash
+docker pull ghcr.io/sakurs2/cocola-sandbox-runtime:latest
+```
+
+`latest` is mutable by design. Keep `sha-<commit>` or `vX.Y.Z@sha256:<digest>`
+for reproducible production rollouts and rollback targets.
 
 ## Verify (local Docker / runc; same body is the future gVisor spike)
 
