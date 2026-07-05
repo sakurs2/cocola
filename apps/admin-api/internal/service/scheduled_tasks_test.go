@@ -69,6 +69,19 @@ func TestComputeNextScheduledRunAllowsHourlyCron(t *testing.T) {
 	}
 }
 
+func TestComputeNextScheduledRunRejectsPastOnce(t *testing.T) {
+	_, err := computeNextScheduledRun(
+		ScheduleOnce,
+		json.RawMessage(`{"run_at":"2026-07-05T07:59:00Z"}`),
+		"Asia/Shanghai",
+		time.Date(2026, 7, 5, 8, 0, 0, 0, time.UTC),
+		time.Hour,
+	)
+	if !errors.Is(err, ErrScheduleInPast) {
+		t.Fatalf("expected ErrScheduleInPast, got %v", err)
+	}
+}
+
 func TestCreateUserScheduledTaskSetsOwnerAndConversation(t *testing.T) {
 	ctx := context.Background()
 	svc := New(store.NewMemory(), nil, func() time.Time {

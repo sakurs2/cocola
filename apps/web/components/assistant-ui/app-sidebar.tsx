@@ -567,6 +567,22 @@ type ScheduledAttachment = {
   content_b64: string;
 };
 
+type SchedulePromptState =
+  | {
+      kind: "notice";
+      title: string;
+      message: string;
+      tone?: "default" | "danger";
+    }
+  | {
+      kind: "confirm";
+      title: string;
+      message: string;
+      confirmLabel: string;
+      tone?: "default" | "danger";
+      onConfirm: () => void;
+    };
+
 function ScheduleTaskDialog({
   models,
   defaultModelAlias,
@@ -586,6 +602,7 @@ function ScheduleTaskDialog({
   const [loadingTasks, setLoadingTasks] = useState(false);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
+  const [prompt, setPrompt] = useState<SchedulePromptState | null>(null);
 
   const loadTasks = useCallback(async () => {
     setLoadingTasks(true);
@@ -625,10 +642,26 @@ function ScheduleTaskDialog({
     });
   }
 
-  async function submit() {
+  async function submit(options?: { skipDistantOnceWarning?: boolean }) {
     const frequencyError = validateScheduleFrequency(form);
     if (frequencyError) {
-      window.alert(frequencyError);
+      setPrompt({
+        kind: "notice",
+        title: "Invalid schedule",
+        message: frequencyError,
+        tone: "danger",
+      });
+      return;
+    }
+    const distantOnceWarning = distantOnceScheduleWarning(form);
+    if (distantOnceWarning && !options?.skipDistantOnceWarning) {
+      setPrompt({
+        kind: "confirm",
+        title: "Confirm schedule time",
+        message: distantOnceWarning,
+        confirmLabel: editingId ? "Save" : "Create",
+        onConfirm: () => void submit({ skipDistantOnceWarning: true }),
+      });
       return;
     }
     setSaving(true);
@@ -651,7 +684,19 @@ function ScheduleTaskDialog({
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
       if (msg.includes("INVALID_SCHEDULE_FREQUENCY")) {
-        window.alert("Scheduled tasks can run at most once per hour.");
+        setPrompt({
+          kind: "notice",
+          title: "Invalid schedule",
+          message: "Scheduled tasks can run at most once per hour.",
+          tone: "danger",
+        });
+      } else if (msg.includes("INVALID_SCHEDULE_TIME")) {
+        setPrompt({
+          kind: "notice",
+          title: "Invalid schedule",
+          message: "Scheduled time must be in the future.",
+          tone: "danger",
+        });
       }
       setError(msg);
     } finally {
@@ -748,12 +793,17 @@ function ScheduleTaskDialog({
                   <select
                     className={scheduleInputClass}
                     value={form.scheduleKind}
-                    onChange={(e) =>
+                    onChange={(e) => {
+                      const scheduleKind = e.target.value as ScheduleFormState["scheduleKind"];
                       setForm({
                         ...form,
-                        scheduleKind: e.target.value as ScheduleFormState["scheduleKind"],
-                      })
-                    }
+                        scheduleKind,
+                        runAt:
+                          scheduleKind === "once" && !form.runAt
+                            ? nextLocalDateTimeInput()
+                            : form.runAt,
+                      });
+                    }}
                   >
                     <option value="interval">Interval</option>
                     <option value="cron">Cron</option>
@@ -908,11 +958,16 @@ function ScheduleTaskDialog({
                       <button
                         type="button"
                         title="Delete"
-                        onClick={() => {
-                          if (window.confirm(`Delete scheduled task "${task.name}"?`)) {
-                            void mutateTask(task, "delete");
-                          }
-                        }}
+                        onClick={() =>
+                          setPrompt({
+                            kind: "confirm",
+                            title: "Delete scheduled task",
+                            message: `Delete "${task.name}"? This will stop future runs for this task.`,
+                            confirmLabel: "Delete",
+                            tone: "danger",
+                            onConfirm: () => void mutateTask(task, "delete"),
+                          })
+                        }
                         className="grid size-8 place-items-center rounded-md text-red-500 hover:bg-red-500/10"
                       >
                         <Trash2 className="size-4" />
@@ -927,6 +982,72 @@ function ScheduleTaskDialog({
               </div>
             )}
           </div>
+        </div>
+      </div>
+      {prompt ? (
+        <ScheduleTaskPrompt prompt={prompt} saving={saving} onClose={() => setPrompt(null)} />
+      ) : null}
+    </div>
+  );
+}
+
+function ScheduleTaskPrompt({
+  prompt,
+  saving,
+  onClose,
+}: {
+  prompt: SchedulePromptState;
+  saving: boolean;
+  onClose: () => void;
+}) {
+  const isDanger = prompt.tone === "danger";
+  return (
+    <div className="fixed inset-0 z-[60] grid place-items-center bg-black/40 px-4">
+      <div
+        role="dialog"
+        aria-modal="true"
+        className="w-full max-w-sm rounded-lg border border-border bg-background p-4 text-foreground shadow-xl"
+      >
+        <div className="flex items-start gap-3">
+          <div
+            className={`grid size-9 shrink-0 place-items-center rounded-md ${
+              isDanger ? "bg-red-500/10 text-red-500" : "bg-primary/10 text-primary"
+            }`}
+          >
+            {isDanger ? <Trash2 className="size-4" /> : <CalendarClock className="size-4" />}
+          </div>
+          <div className="min-w-0 flex-1">
+            <div className="text-sm font-semibold">{prompt.title}</div>
+            <div className="mt-1 text-sm leading-5 text-muted-foreground">{prompt.message}</div>
+          </div>
+        </div>
+        <div className="mt-4 flex justify-end gap-2">
+          <button
+            type="button"
+            disabled={saving}
+            onClick={onClose}
+            className="h-8 rounded-md px-3 text-sm text-muted-foreground transition-colors hover:bg-muted hover:text-foreground disabled:opacity-50"
+          >
+            {prompt.kind === "confirm" ? "Cancel" : "Close"}
+          </button>
+          {prompt.kind === "confirm" ? (
+            <button
+              type="button"
+              disabled={saving}
+              onClick={() => {
+                const onConfirm = prompt.onConfirm;
+                onClose();
+                onConfirm();
+              }}
+              className={`h-8 rounded-md px-3 text-sm font-medium transition-colors disabled:opacity-50 ${
+                isDanger
+                  ? "bg-red-500 text-white hover:bg-red-600"
+                  : "bg-primary text-primary-foreground hover:bg-primary/90"
+              }`}
+            >
+              {saving ? "Working..." : prompt.confirmLabel}
+            </button>
+          ) : null}
         </div>
       </div>
     </div>
@@ -997,7 +1118,22 @@ function validateScheduleFrequency(form: ScheduleFormState): string {
       return "Scheduled tasks can run at most once per hour.";
     }
   }
+  if (form.scheduleKind === "once" && form.runAt) {
+    const runAtMs = new Date(form.runAt).getTime();
+    if (!Number.isFinite(runAtMs) || runAtMs <= Date.now()) {
+      return "Scheduled time must be in the future.";
+    }
+  }
   return "";
+}
+
+function distantOnceScheduleWarning(form: ScheduleFormState): string {
+  if (form.scheduleKind !== "once" || !form.runAt) return "";
+  const runAtMs = new Date(form.runAt).getTime();
+  if (!Number.isFinite(runAtMs)) return "";
+  const thirtyDaysMs = 30 * 24 * 60 * 60 * 1000;
+  if (runAtMs - Date.now() <= thirtyDaysMs) return "";
+  return `This task is scheduled for ${formatFullDateTime(runAtMs)}. Continue?`;
 }
 
 function formatTaskSchedule(task: ScheduledTaskSummary): string {
@@ -1024,6 +1160,23 @@ function toLocalInput(value: string): string {
   if (Number.isNaN(date.getTime())) return "";
   const offsetMs = date.getTimezoneOffset() * 60 * 1000;
   return new Date(date.getTime() - offsetMs).toISOString().slice(0, 16);
+}
+
+function nextLocalDateTimeInput(): string {
+  const date = new Date(Date.now() + 5 * 60 * 1000);
+  const offsetMs = date.getTimezoneOffset() * 60 * 1000;
+  return new Date(date.getTime() - offsetMs).toISOString().slice(0, 16);
+}
+
+function formatFullDateTime(value: number): string {
+  return new Intl.DateTimeFormat(undefined, {
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+    hour12: false,
+  }).format(new Date(value));
 }
 
 async function fileToBase64(file: File): Promise<string> {

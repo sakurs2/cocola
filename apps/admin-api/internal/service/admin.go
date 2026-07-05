@@ -38,6 +38,7 @@ var (
 	ErrSelfPermission      = errors.New("service: self permission change")
 	ErrPermissionDenied    = errors.New("service: permission denied")
 	ErrScheduleTooFrequent = errors.New("service: schedule frequency below minimum")
+	ErrScheduleInPast      = errors.New("service: schedule time is in the past")
 	ErrNotFound            = store.ErrNotFound
 	ErrConflict            = store.ErrConflict
 )
@@ -52,6 +53,7 @@ type Admin struct {
 	now                 Clock
 	sandboxNodes        SandboxNodeManager
 	sandboxRuntimes     SandboxRuntimeManager
+	userEvents          UserEventBroker
 	modelSecretKey      string
 	minScheduleInterval time.Duration
 }

@@ -19,8 +19,10 @@ package redispub
 
 import (
 	"context"
+	"encoding/json"
 	"strconv"
 
+	"github.com/cocola-project/cocola/apps/admin-api/internal/service"
 	goredis "github.com/redis/go-redis/v9"
 )
 
@@ -28,6 +30,7 @@ import (
 const (
 	RevokedKey   = "cocola:revoked"
 	OverrideKey  = "cocola:quota:override"
+	UserEventsCh = "cocola:user-events"
 	fieldSepRune = "/"
 )
 
@@ -47,6 +50,7 @@ type Publisher struct {
 	rdb         *goredis.Client
 	revokedKey  string
 	overrideKey string
+	eventsCh    string
 }
 
 // New dials Redis, verifies the connection with a Ping, and returns a Publisher.
@@ -61,7 +65,7 @@ func New(ctx context.Context, cfg Config) (*Publisher, error) {
 		_ = rdb.Close()
 		return nil, err
 	}
-	return &Publisher{rdb: rdb, revokedKey: RevokedKey, overrideKey: OverrideKey}, nil
+	return &Publisher{rdb: rdb, revokedKey: RevokedKey, overrideKey: OverrideKey, eventsCh: UserEventsCh}, nil
 }
 
 // Revoke adds a token id to the shared denylist set (SADD). Idempotent.
@@ -87,6 +91,60 @@ func (p *Publisher) DeleteQuota(ctx context.Context, scope, subject string) erro
 		return nil
 	}
 	return p.rdb.HDel(ctx, p.overrideKey, overrideField(scope, subject)).Err()
+}
+
+func (p *Publisher) PublishUserEvent(ctx context.Context, event service.UserEvent) error {
+	raw, err := json.Marshal(event)
+	if err != nil {
+		return err
+	}
+	return p.rdb.Publish(ctx, p.eventsCh, raw).Err()
+}
+
+func (p *Publisher) SubscribeUserEvents(ctx context.Context) (<-chan service.UserEvent, func(), error) {
+	sub := p.rdb.Subscribe(ctx, p.eventsCh)
+	if _, err := sub.Receive(ctx); err != nil {
+		_ = sub.Close()
+		return nil, func() {}, err
+	}
+	out := make(chan service.UserEvent, 32)
+	done := make(chan struct{})
+	go func() {
+		defer close(out)
+		ch := sub.Channel()
+		for {
+			select {
+			case msg, ok := <-ch:
+				if !ok {
+					return
+				}
+				var event service.UserEvent
+				if err := json.Unmarshal([]byte(msg.Payload), &event); err != nil {
+					continue
+				}
+				select {
+				case out <- event:
+				case <-done:
+					return
+				case <-ctx.Done():
+					return
+				}
+			case <-done:
+				return
+			case <-ctx.Done():
+				return
+			}
+		}
+	}()
+	cancel := func() {
+		select {
+		case <-done:
+		default:
+			close(done)
+			_ = sub.Close()
+		}
+	}
+	return out, cancel, nil
 }
 
 // Close releases the connection pool.

@@ -508,7 +508,7 @@ func computeNextScheduledRun(kind string, spec json.RawMessage, tzName string, a
 			return time.Time{}, ErrInvalidArg
 		}
 		if !runAt.After(after) {
-			return time.Time{}, nil
+			return time.Time{}, ErrScheduleInPast
 		}
 		return runAt.UTC(), nil
 	case ScheduleInterval:

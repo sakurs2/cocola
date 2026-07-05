@@ -89,6 +89,22 @@ export type ConversationSummary = {
   updated_at: string;
 };
 
+type UserEvent = {
+  id: string;
+  type: string;
+  user_id: string;
+  occurred_at: string;
+  resource?: {
+    kind?: string;
+    id?: string;
+  };
+  data?: Record<string, unknown>;
+};
+
+type UserEventSnapshot = {
+  events?: UserEvent[];
+};
+
 export type ModelIconConfig = {
   type: "simple-icons" | "image";
   slug?: string;
@@ -201,6 +217,21 @@ function isAccountDisabledResponse(res: Response): boolean {
 
 function redirectAccountDisabled() {
   void signOut({ callbackUrl: "/login?reason=account_disabled" });
+}
+
+function stringValue(v: unknown): string {
+  return typeof v === "string" ? v : "";
+}
+
+function eventTimeMs(primary: unknown, fallback?: unknown): number {
+  const raw = stringValue(primary) || stringValue(fallback);
+  if (!raw) return Date.now();
+  const ms = Date.parse(raw);
+  return Number.isFinite(ms) ? ms : Date.now();
+}
+
+function hasAssistantResponse(messages: UiMessage[]): boolean {
+  return messages.some((m) => m.role === "assistant" && m.parts.length > 0);
 }
 
 // Append text to the trailing text part, or start a new one. Immutable.
@@ -341,6 +372,9 @@ export function CocolaRuntimeProvider({ children }: { children: ReactNode }) {
   const [selectedModelAlias, setSelectedModelAlias] = useState("");
   const abortMap = useRef<Map<string, AbortController>>(new Map());
   const sessionIdRef = useRef(sessionId);
+  const conversationsRef = useRef(conversations);
+  const realtimeScheduledRunsRef = useRef<Set<string>>(new Set());
+  const deletedScheduledConversationsRef = useRef<Map<string, number>>(new Map());
 
   const messages = useMemo(() => convMessages[sessionId] ?? [], [convMessages, sessionId]);
   const isRunning = runningIds.has(sessionId);
@@ -353,6 +387,10 @@ export function CocolaRuntimeProvider({ children }: { children: ReactNode }) {
   useEffect(() => {
     sessionIdRef.current = sessionId;
   }, [sessionId]);
+
+  useEffect(() => {
+    conversationsRef.current = conversations;
+  }, [conversations]);
 
   const openArtifact = useCallback((artifact: ArtifactPreview) => {
     setSelectedArtifact(artifact);
@@ -411,6 +449,122 @@ export function CocolaRuntimeProvider({ children }: { children: ReactNode }) {
       }
     })();
   }, []);
+
+  const applyUserEvent = useCallback(
+    (event: UserEvent, source: "realtime" | "snapshot" = "realtime") => {
+      const conversationID =
+        event.resource?.kind === "conversation"
+          ? stringValue(event.resource.id)
+          : stringValue(event.data?.conversation_id);
+      if (!conversationID) return;
+      if (event.type === "scheduled_task.run.started") {
+        const startedAtMs = eventTimeMs(event.data?.run_started_at, event.occurred_at);
+        const deletedAtMs = deletedScheduledConversationsRef.current.get(conversationID);
+        if (source === "snapshot" && deletedAtMs && startedAtMs <= deletedAtMs) return;
+        deletedScheduledConversationsRef.current.delete(conversationID);
+        realtimeScheduledRunsRef.current.add(conversationID);
+        const title = stringValue(event.data?.title) || "Scheduled task";
+        const updatedAt = event.occurred_at || new Date().toISOString();
+        setConversations((prev) => {
+          const existing = prev.find((c) => c.id === conversationID);
+          const rest = prev.filter((c) => c.id !== conversationID);
+          return [
+            {
+              id: conversationID,
+              title: existing?.title || title,
+              chat_type: existing?.chat_type || "scheduled_task",
+              updated_at: updatedAt,
+            },
+            ...rest,
+          ];
+        });
+        setRunning(conversationID, true);
+        setUnreadCompletedIds((prev) => {
+          const next = new Set(prev);
+          next.delete(conversationID);
+          return next;
+        });
+        return;
+      }
+      if (event.type === "scheduled_task.run.finished") {
+        realtimeScheduledRunsRef.current.delete(conversationID);
+        setRunning(conversationID, false);
+        if (conversationID !== sessionIdRef.current) {
+          setUnreadCompletedIds((prev) => {
+            const next = new Set(prev);
+            next.add(conversationID);
+            return next;
+          });
+        }
+        refreshConversations();
+        return;
+      }
+      if (event.type === "scheduled_task.run.failed") {
+        realtimeScheduledRunsRef.current.delete(conversationID);
+        setRunning(conversationID, false);
+        refreshConversations();
+      }
+    },
+    [refreshConversations, setRunning],
+  );
+
+  const applyUserEventSnapshot = useCallback(
+    (snapshot: UserEventSnapshot) => {
+      const events = snapshot.events ?? [];
+      for (const event of events) applyUserEvent(event, "snapshot");
+      const runningScheduledConversationIds = new Set(
+        events
+          .filter((event) => event.type === "scheduled_task.run.started")
+          .map((event) =>
+            event.resource?.kind === "conversation"
+              ? stringValue(event.resource.id)
+              : stringValue(event.data?.conversation_id),
+          )
+          .filter(Boolean),
+      );
+      setRunningIds((prev) => {
+        const scheduledConversationIds = new Set(
+          conversationsRef.current
+            .filter((conversation) => conversation.chat_type === "scheduled_task")
+            .map((conversation) => conversation.id),
+        );
+        let changed = false;
+        const next = new Set(prev);
+        for (const id of prev) {
+          if (
+            (scheduledConversationIds.has(id) || id.startsWith("sched-")) &&
+            !runningScheduledConversationIds.has(id)
+          ) {
+            next.delete(id);
+            realtimeScheduledRunsRef.current.delete(id);
+            changed = true;
+          }
+        }
+        return changed ? next : prev;
+      });
+    },
+    [applyUserEvent],
+  );
+
+  useEffect(() => {
+    const events = new EventSource("/api/events");
+    events.addEventListener("snapshot", (raw) => {
+      try {
+        const snapshot = JSON.parse((raw as MessageEvent).data) as UserEventSnapshot;
+        applyUserEventSnapshot(snapshot);
+      } catch {
+        // ignore malformed snapshot frames
+      }
+    });
+    events.addEventListener("user_event", (raw) => {
+      try {
+        applyUserEvent(JSON.parse((raw as MessageEvent).data) as UserEvent);
+      } catch {
+        // ignore malformed event frames
+      }
+    });
+    return () => events.close();
+  }, [applyUserEvent, applyUserEventSnapshot]);
 
   const onNew = useCallback(
     async (message: {
@@ -565,7 +719,11 @@ export function CocolaRuntimeProvider({ children }: { children: ReactNode }) {
         next.delete(id);
         return next;
       });
-      if ((convMessages[id]?.length ?? 0) > 0) return;
+      const cached = convMessages[id] ?? [];
+      if (cached.length > 0) {
+        if (hasAssistantResponse(cached)) setRunning(id, false);
+        return;
+      }
       try {
         const res = await fetch(`/api/conversations/${encodeURIComponent(id)}/messages`);
         if (isAccountDisabledResponse(res)) {
@@ -582,11 +740,12 @@ export function CocolaRuntimeProvider({ children }: { children: ReactNode }) {
           createdAt: m.created_at ? new Date(m.created_at).getTime() : Date.now(),
         }));
         setConvMessages((prev) => ({ ...prev, [id]: loaded }));
+        if (hasAssistantResponse(loaded)) setRunning(id, false);
       } catch {
         // ignore — leave the current thread untouched on failure
       }
     },
-    [convMessages],
+    [convMessages, setRunning],
   );
 
   const renameConversation = useCallback(
@@ -645,6 +804,8 @@ export function CocolaRuntimeProvider({ children }: { children: ReactNode }) {
       }
 
       setConversations((prev) => prev.filter((c) => c.id !== id));
+      realtimeScheduledRunsRef.current.delete(id);
+      deletedScheduledConversationsRef.current.set(id, Date.now());
       setUnreadCompletedIds((prev) => {
         const next = new Set(prev);
         next.delete(id);

@@ -258,9 +258,15 @@ func (a *Admin) executeDueTask(ctx context.Context, cfg SchedulerConfig, runner 
 	if err != nil || !ok {
 		return
 	}
+	if claimedTask.OwnerType == "user" {
+		a.publishScheduledTaskUserEvent(ctx, UserEventScheduledTaskRunStarted, claimedTask, run, "running", "")
+	}
 	attachments, err := a.store.ListScheduledTaskAttachments(ctx, claimedTask.ID)
 	if err != nil {
 		a.finishRun(ctx, run, next, "error", "", err.Error())
+		if claimedTask.OwnerType == "user" {
+			a.publishScheduledTaskUserEvent(ctx, UserEventScheduledTaskRunFailed, claimedTask, run, "error", err.Error())
+		}
 		return
 	}
 	runCtx, cancel := context.WithTimeout(ctx, cfg.RunTimeout)
@@ -284,9 +290,15 @@ func (a *Admin) executeDueTask(ctx context.Context, cfg SchedulerConfig, runner 
 	run.SessionID = sessionID
 	if err != nil {
 		a.finishRun(ctx, run, next, "error", strings.Join(output, ""), err.Error())
+		if claimedTask.OwnerType == "user" {
+			a.publishScheduledTaskUserEvent(ctx, UserEventScheduledTaskRunFailed, claimedTask, run, "error", err.Error())
+		}
 		return
 	}
 	a.finishRun(ctx, run, next, "success", strings.Join(output, ""), "")
+	if claimedTask.OwnerType == "user" {
+		a.publishScheduledTaskUserEvent(ctx, UserEventScheduledTaskRunFinished, claimedTask, run, "success", "")
+	}
 }
 
 func (a *Admin) finishRun(ctx context.Context, run store.ScheduledTaskRun, next time.Time, status, output, errText string) {
@@ -297,4 +309,15 @@ func (a *Admin) finishRun(ctx context.Context, run store.ScheduledTaskRun, next 
 	run.FinishedAt = now
 	run.UpdatedAt = now
 	_ = a.store.UpdateScheduledTaskRun(ctx, run, next, true)
+}
+
+func (a *Admin) publishScheduledTaskUserEvent(ctx context.Context, eventType string, task store.ScheduledTask, run store.ScheduledTaskRun, status, errText string) {
+	if task.OwnerType != "user" || strings.TrimSpace(task.OwnerUserID) == "" {
+		return
+	}
+	if err := a.PublishUserEvent(ctx, scheduledTaskUserEvent(eventType, task, run, status, errText, a.now().UTC())); err != nil {
+		// Event delivery is best-effort; the scheduled run and conversation are
+		// already persisted on the authoritative path.
+		return
+	}
 }

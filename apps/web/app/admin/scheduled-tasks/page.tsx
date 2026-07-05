@@ -157,6 +157,10 @@ export default function ScheduledTasksPage() {
       alert(frequencyError);
       return;
     }
+    const distantOnceWarning = distantOnceScheduleWarning(form);
+    if (distantOnceWarning && !confirm(distantOnceWarning)) {
+      return;
+    }
     setSaving(true);
     setError("");
     try {
@@ -179,6 +183,8 @@ export default function ScheduledTasksPage() {
       const msg = err instanceof Error ? err.message : String(err);
       if (msg.includes("INVALID_SCHEDULE_FREQUENCY")) {
         alert("System tasks can run at most once per hour.");
+      } else if (msg.includes("INVALID_SCHEDULE_TIME")) {
+        alert("Scheduled time must be in the future.");
       }
       setError(msg);
     } finally {
@@ -329,9 +335,17 @@ export default function ScheduledTasksPage() {
                 <select
                   className={input}
                   value={form.scheduleKind}
-                  onChange={(e) =>
-                    setForm({ ...form, scheduleKind: e.target.value as FormState["scheduleKind"] })
-                  }
+                  onChange={(e) => {
+                    const scheduleKind = e.target.value as FormState["scheduleKind"];
+                    setForm({
+                      ...form,
+                      scheduleKind,
+                      runAt:
+                        scheduleKind === "once" && !form.runAt
+                          ? nextLocalDateTimeInput()
+                          : form.runAt,
+                    });
+                  }}
                 >
                   <option value="interval">Interval</option>
                   <option value="cron">Cron</option>
@@ -680,7 +694,22 @@ function validateFrequency(form: FormState): string {
       return "System tasks can run at most once per hour.";
     }
   }
+  if (form.scheduleKind === "once" && form.runAt) {
+    const runAtMs = new Date(form.runAt).getTime();
+    if (!Number.isFinite(runAtMs) || runAtMs <= Date.now()) {
+      return "Scheduled time must be in the future.";
+    }
+  }
   return "";
+}
+
+function distantOnceScheduleWarning(form: FormState): string {
+  if (form.scheduleKind !== "once" || !form.runAt) return "";
+  const runAtMs = new Date(form.runAt).getTime();
+  if (!Number.isFinite(runAtMs)) return "";
+  const thirtyDaysMs = 30 * 24 * 60 * 60 * 1000;
+  if (runAtMs - Date.now() <= thirtyDaysMs) return "";
+  return `This task is scheduled for ${formatFullDateTime(runAtMs)}. Continue?`;
 }
 
 async function fileToBase64(file: File): Promise<string> {
@@ -703,6 +732,22 @@ function toLocalInput(value: string): string {
   const d = new Date(value);
   if (Number.isNaN(d.getTime())) return "";
   return new Date(d.getTime() - d.getTimezoneOffset() * 60000).toISOString().slice(0, 16);
+}
+
+function nextLocalDateTimeInput(): string {
+  const d = new Date(Date.now() + 5 * 60 * 1000);
+  return new Date(d.getTime() - d.getTimezoneOffset() * 60000).toISOString().slice(0, 16);
+}
+
+function formatFullDateTime(value: number): string {
+  return new Intl.DateTimeFormat(undefined, {
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+    hour12: false,
+  }).format(new Date(value));
 }
 
 function formatDate(value?: string) {

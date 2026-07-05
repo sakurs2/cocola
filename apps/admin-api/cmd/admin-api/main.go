@@ -128,6 +128,7 @@ func main() {
 	// the authoritative write already landed in the store.
 	redisAddr := os.Getenv("COCOLA_REDIS_ADDR")
 	var runtimeKV *rds.Client
+	var userEventBroker service.UserEventBroker = service.NewMemoryUserEventBroker()
 	if redisAddr != "" {
 		cfg := redispub.Config{
 			Addr:     redisAddr,
@@ -142,6 +143,7 @@ func main() {
 			log.Sugar().Fatalf("connect shared Redis at %s: %v", redisAddr, err)
 		}
 		defer func() { _ = pub.Close() }()
+		userEventBroker = pub
 		mirror := store.NewMirror(st, pub)
 		if m, ok := mirror.(*store.Mirror); ok {
 			m.OnPublishError = func(op string, e error) {
@@ -166,9 +168,11 @@ func main() {
 		}
 	} else {
 		log.Warn("shared-redis publishing DISABLED (no COCOLA_REDIS_ADDR) — revokes/overrides are process-local")
+		log.Warn("user event bus using in-memory broker (no COCOLA_REDIS_ADDR) — realtime events are single-process")
 	}
 
 	svc := service.New(st, iss, time.Now).
+		WithUserEventBroker(userEventBroker).
 		WithModelSecretKey(config.SecretFromEnv("COCOLA_MODEL_SECRET_KEY")).
 		WithMinScheduleInterval(time.Duration(getenvInt("COCOLA_SCHEDULER_MIN_INTERVAL_SECS", 3600)) * time.Second)
 	if runtimeKV != nil {

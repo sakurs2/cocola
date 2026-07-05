@@ -30,6 +30,55 @@ func (a *API) health(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})
 }
 
+func (a *API) streamMyEvents(w http.ResponseWriter, r *http.Request) {
+	flusher, ok := w.(http.Flusher)
+	if !ok {
+		writeErr(w, http.StatusInternalServerError, "INTERNAL", "streaming unsupported")
+		return
+	}
+	userID := actorOf(r)
+	ch, cancel, err := a.svc.SubscribeUserEvents(r.Context())
+	if err != nil {
+		mapErr(w, err)
+		return
+	}
+	defer cancel()
+	snapshot, err := a.svc.UserEventSnapshot(r.Context(), userID)
+	if err != nil {
+		mapErr(w, err)
+		return
+	}
+	w.Header().Set("content-type", "text/event-stream")
+	w.Header().Set("cache-control", "no-cache, no-transform")
+	w.Header().Set("connection", "keep-alive")
+	w.Header().Set("x-accel-buffering", "no")
+	w.WriteHeader(http.StatusOK)
+	writeSSE(w, flusher, "snapshot", map[string]any{"events": snapshot})
+	heartbeat := time.NewTicker(25 * time.Second)
+	defer heartbeat.Stop()
+	for {
+		select {
+		case event, ok := <-ch:
+			if !ok {
+				return
+			}
+			if event.UserID != userID {
+				continue
+			}
+			writeSSE(w, flusher, "user_event", event)
+		case <-heartbeat.C:
+			snapshot, err := a.svc.UserEventSnapshot(r.Context(), userID)
+			if err != nil {
+				writeSSE(w, flusher, "ping", map[string]any{"at": time.Now().UTC()})
+				continue
+			}
+			writeSSE(w, flusher, "snapshot", map[string]any{"events": snapshot})
+		case <-r.Context().Done():
+			return
+		}
+	}
+}
+
 // ---- auth users ----
 
 type loginReq struct {

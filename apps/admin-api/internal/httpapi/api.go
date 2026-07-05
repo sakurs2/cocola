@@ -15,6 +15,7 @@ import (
 	"crypto/subtle"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net/http"
 	"strconv"
 	"strings"
@@ -76,6 +77,7 @@ func (a *API) Router() http.Handler {
 
 	r.Route("/me", func(r chi.Router) {
 		r.Use(a.requireRuntimeUser)
+		r.Get("/events", a.streamMyEvents)
 		r.Route("/scheduled-tasks", func(r chi.Router) {
 			r.Post("/", a.createMyScheduledTask)
 			r.Get("/", a.listMyScheduledTasks)
@@ -247,6 +249,15 @@ func writeJSON(w http.ResponseWriter, code int, v any) {
 	_ = json.NewEncoder(w).Encode(v)
 }
 
+func writeSSE(w http.ResponseWriter, flusher http.Flusher, event string, v any) {
+	raw, err := json.Marshal(v)
+	if err != nil {
+		return
+	}
+	_, _ = fmt.Fprintf(w, "event: %s\ndata: %s\n\n", event, raw)
+	flusher.Flush()
+}
+
 type errBody struct {
 	Error struct {
 		Code    string `json:"code"`
@@ -276,6 +287,8 @@ func mapErr(w http.ResponseWriter, err error) {
 		writeErr(w, http.StatusForbidden, "PERMISSION_DENIED", "permission denied")
 	case errors.Is(err, service.ErrScheduleTooFrequent):
 		writeErr(w, http.StatusBadRequest, "INVALID_SCHEDULE_FREQUENCY", "scheduled tasks can run at most once per hour")
+	case errors.Is(err, service.ErrScheduleInPast):
+		writeErr(w, http.StatusBadRequest, "INVALID_SCHEDULE_TIME", "scheduled time must be in the future")
 	case errors.Is(err, service.ErrInvalidArg):
 		writeErr(w, http.StatusBadRequest, "INVALID_ARGUMENT", err.Error())
 	case errors.Is(err, store.ErrNotFound):
