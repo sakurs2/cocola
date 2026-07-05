@@ -73,12 +73,39 @@ jobs:
           image="${IMAGE_NAME}@${DIGEST}"
           self="$(docker run --rm --platform linux/amd64 "$image" /opt/cocola/shim/entrypoint.sh --selfcheck)"
           echo "$self"
-          for tool in node claude_cli claude_agent_sdk pnpm yarn playwright chromium fd jq yq tree file make imagemagick pdftotext rsvg_convert; do
-            echo "$self" | grep -Eq "\"$tool\":\"(missing|error:)" && {
-              echo "$tool failed selfcheck" >&2
-              exit 1
-            }
-          done
+          SELF="$self" python3 - <<'PY'
+          import json
+          import os
+          import sys
+
+          data = json.loads(os.environ["SELF"])
+          tools = [
+              "node",
+              "claude_cli",
+              "claude_agent_sdk",
+              "pnpm",
+              "yarn",
+              "playwright",
+              "chromium",
+              "fd",
+              "jq",
+              "yq",
+              "tree",
+              "file",
+              "make",
+              "imagemagick",
+              "pdftotext",
+              "rsvg_convert",
+          ]
+          failed = [
+              tool
+              for tool in tools
+              if str(data.get(tool, "")).startswith(("missing", "error:"))
+          ]
+          if failed:
+              print("failed selfcheck tools:", ", ".join(failed), file=sys.stderr)
+              sys.exit(1)
+          PY
         env:
           DIGEST: ${{ steps.build.outputs.digest }}
 
