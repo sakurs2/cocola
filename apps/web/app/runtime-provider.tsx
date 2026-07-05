@@ -90,7 +90,7 @@ export type ConversationSummary = {
 
 export type ModelIconConfig = {
   type: "simple-icons" | "image";
-  slug: string;
+  slug?: string;
   src?: string;
 };
 
@@ -144,7 +144,7 @@ type CocolaContextValue = {
   closeArtifact: () => void;
   models: ModelOption[];
   selectedModelAlias: string;
-  selectedModel: ModelOption;
+  selectedModel: ModelOption | null;
   setSelectedModelAlias: (alias: string) => void;
 };
 
@@ -174,19 +174,23 @@ function parseSize(v: string | undefined): number {
 
 function normalizeMetadata(raw: UiMessageMetadata | undefined): UiMessageMetadata | undefined {
   if (!raw) return undefined;
+  const icon =
+    raw.model_icon?.type === "simple-icons" && typeof raw.model_icon.slug === "string"
+      ? {
+          type: raw.model_icon.type,
+          slug: raw.model_icon.slug,
+          ...(typeof raw.model_icon.src === "string" ? { src: raw.model_icon.src } : {}),
+        }
+      : raw.model_icon?.type === "image" && typeof raw.model_icon.src === "string"
+        ? {
+            type: raw.model_icon.type,
+            src: raw.model_icon.src,
+          }
+        : undefined;
   return {
     ...(typeof raw.model_alias === "string" ? { model_alias: raw.model_alias } : {}),
     ...(typeof raw.model_label === "string" ? { model_label: raw.model_label } : {}),
-    ...((raw.model_icon?.type === "simple-icons" || raw.model_icon?.type === "image") &&
-    typeof raw.model_icon.slug === "string"
-      ? {
-          model_icon: {
-            type: raw.model_icon.type,
-            slug: raw.model_icon.slug,
-            ...(typeof raw.model_icon.src === "string" ? { src: raw.model_icon.src } : {}),
-          },
-        }
-      : {}),
+    ...(icon ? { model_icon: icon } : {}),
   };
 }
 
@@ -319,12 +323,6 @@ function convertMessage(message: UiMessage): ThreadMessageLike {
 // share across renders (avoids re-creating it and thrashing the runtime).
 const attachmentAdapter = new Base64AttachmentAdapter();
 
-const DEFAULT_MODEL: ModelOption = {
-  alias: "cocola-default",
-  label: "Cocola Default",
-  icon: { type: "simple-icons", slug: "anthropic" },
-};
-
 export function CocolaRuntimeProvider({ children }: { children: ReactNode }) {
   // Message and running state are keyed by session_id. A
   // background stream keeps writing into its own buffer even after navigation.
@@ -338,8 +336,8 @@ export function CocolaRuntimeProvider({ children }: { children: ReactNode }) {
   const [conversations, setConversations] = useState<ConversationSummary[]>([]);
   const [unreadCompletedIds, setUnreadCompletedIds] = useState<Set<string>>(() => new Set());
   const [selectedArtifact, setSelectedArtifact] = useState<ArtifactPreview | null>(null);
-  const [models, setModels] = useState<ModelOption[]>([DEFAULT_MODEL]);
-  const [selectedModelAlias, setSelectedModelAlias] = useState(DEFAULT_MODEL.alias);
+  const [models, setModels] = useState<ModelOption[]>([]);
+  const [selectedModelAlias, setSelectedModelAlias] = useState("");
   const abortMap = useRef<Map<string, AbortController>>(new Map());
   const sessionIdRef = useRef(sessionId);
 
@@ -347,7 +345,7 @@ export function CocolaRuntimeProvider({ children }: { children: ReactNode }) {
   const isRunning = runningIds.has(sessionId);
   const sandbox = sandboxes[sessionId] ?? null;
   const selectedModel = useMemo(
-    () => models.find((m) => m.alias === selectedModelAlias) ?? models[0] ?? DEFAULT_MODEL,
+    () => models.find((m) => m.alias === selectedModelAlias) ?? models[0] ?? null,
     [models, selectedModelAlias],
   );
 
@@ -446,6 +444,7 @@ export function CocolaRuntimeProvider({ children }: { children: ReactNode }) {
 
       const turnSessionId = sessionId;
       const model = selectedModel;
+      if (!model) return;
       const assistantMetadata: UiMessageMetadata = {
         model_alias: model.alias,
         model_label: model.label,
@@ -697,14 +696,15 @@ export function CocolaRuntimeProvider({ children }: { children: ReactNode }) {
         }
         if (!res.ok) return;
         const rows = (await res.json()) as ModelOption[];
-        const next = Array.isArray(rows) && rows.length > 0 ? rows : [DEFAULT_MODEL];
-        const fallbackAlias = next[0]?.alias ?? DEFAULT_MODEL.alias;
+        const next = Array.isArray(rows) ? rows : [];
+        const fallbackAlias = next[0]?.alias ?? "";
         setModels(next);
         setSelectedModelAlias((prev) =>
           next.some((m) => m.alias === prev) ? prev : fallbackAlias,
         );
       } catch {
-        // Keep the built-in fallback model; model discovery is non-critical.
+        setModels([]);
+        setSelectedModelAlias("");
       }
     })();
   }, []);

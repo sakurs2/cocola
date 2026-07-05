@@ -160,7 +160,7 @@ func main() {
 		log.Warn("shared-redis publishing DISABLED (no COCOLA_REDIS_ADDR) — revokes/overrides are process-local")
 	}
 
-	svc := service.New(st, iss, time.Now)
+	svc := service.New(st, iss, time.Now).WithModelSecretKey(config.SecretFromEnv("COCOLA_MODEL_SECRET_KEY"))
 	if runtimeKV != nil {
 		runtimeMgr, err := service.NewSandboxRuntimeManagerFromEnv(runtimeKV)
 		if err != nil {

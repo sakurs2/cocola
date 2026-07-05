@@ -60,6 +60,52 @@ type Skill struct {
 	UpdatedAt   time.Time `json:"updated_at"`
 }
 
+// LLMProvider is one upstream model vendor/endpoint. APIKeyCiphertext is never
+// serialized to clients; APIKeyHint is the masked display value shown in admin.
+type LLMProvider struct {
+	ID               string    `json:"id"`
+	Name             string    `json:"name"`
+	Type             string    `json:"type"` // "anthropic" | "openai_compat" | "fake"
+	BaseURL          string    `json:"base_url"`
+	APIKeyCiphertext string    `json:"-"`
+	APIKeyHint       string    `json:"api_key_hint"`
+	Enabled          bool      `json:"enabled"`
+	CreatedAt        time.Time `json:"created_at"`
+	UpdatedAt        time.Time `json:"updated_at"`
+}
+
+// LLMModelRoute maps a user-facing alias to a provider's real model id. The
+// public chat UI sees only alias/label/icon, while the gateway consumes the full
+// route for provider/model resolution and billing.
+type LLMModelRoute struct {
+	Alias      string    `json:"alias"`
+	ProviderID string    `json:"provider_id"`
+	RealModel  string    `json:"real_model"`
+	Runtime    string    `json:"runtime"`
+	Label      string    `json:"label"`
+	IconType   string    `json:"icon_type"`
+	IconSlug   string    `json:"icon_slug"`
+	IconURL    string    `json:"icon_url"`
+	Enabled    bool      `json:"enabled"`
+	Visible    bool      `json:"visible"`
+	IsDefault  bool      `json:"is_default"`
+	SortOrder  int       `json:"sort_order"`
+	CreatedAt  time.Time `json:"created_at"`
+	UpdatedAt  time.Time `json:"updated_at"`
+}
+
+type LLMModelIcon struct {
+	Type string `json:"type"`
+	Slug string `json:"slug,omitempty"`
+	Src  string `json:"src,omitempty"`
+}
+
+type PublicLLMModel struct {
+	Alias string       `json:"alias"`
+	Label string       `json:"label"`
+	Icon  LLMModelIcon `json:"icon"`
+}
+
 // AuthUser is one whitelisted login principal for the web app. Username and
 // email are normalized to lower-case before persistence; login lookup is backed
 // by AuthUserIdentifier so future identifiers such as phone numbers can share
@@ -164,6 +210,18 @@ type Store interface {
 	ListSkills(ctx context.Context, onlyEnabled bool) ([]Skill, error)
 	UpdateSkill(ctx context.Context, s Skill) error
 	DeleteSkill(ctx context.Context, id string) error
+
+	// LLM model configuration
+	CreateLLMProvider(ctx context.Context, p LLMProvider) error
+	GetLLMProvider(ctx context.Context, id string) (LLMProvider, error)
+	ListLLMProviders(ctx context.Context) ([]LLMProvider, error)
+	UpdateLLMProvider(ctx context.Context, p LLMProvider) error
+	DeleteLLMProvider(ctx context.Context, id string) error
+	CreateLLMModelRoute(ctx context.Context, m LLMModelRoute) error
+	GetLLMModelRoute(ctx context.Context, alias string) (LLMModelRoute, error)
+	ListLLMModelRoutes(ctx context.Context) ([]LLMModelRoute, error)
+	UpdateLLMModelRoute(ctx context.Context, m LLMModelRoute) error
+	DeleteLLMModelRoute(ctx context.Context, alias string) error
 
 	// Audit
 	AppendAudit(ctx context.Context, e AuditEntry) error

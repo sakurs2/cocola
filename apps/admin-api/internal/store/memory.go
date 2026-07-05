@@ -11,24 +11,28 @@ import (
 // default backend for tests and dev. All slices returned are fresh copies so
 // callers cannot mutate internal state.
 type Memory struct {
-	mu          sync.RWMutex
-	users       map[string]AuthUser
-	identifiers map[string]string // normalized identifier -> user id
-	tokens      map[string]TokenRecord
-	quotas      map[string]QuotaOverride // key = scope + "/" + subject
-	skills      map[string]Skill
-	audit       []AuditEntry
-	auditSeq    int64
+	mu           sync.RWMutex
+	users        map[string]AuthUser
+	identifiers  map[string]string // normalized identifier -> user id
+	tokens       map[string]TokenRecord
+	quotas       map[string]QuotaOverride // key = scope + "/" + subject
+	skills       map[string]Skill
+	llmProviders map[string]LLMProvider
+	llmModels    map[string]LLMModelRoute
+	audit        []AuditEntry
+	auditSeq     int64
 }
 
 // NewMemory returns an empty in-memory store.
 func NewMemory() *Memory {
 	return &Memory{
-		users:       map[string]AuthUser{},
-		identifiers: map[string]string{},
-		tokens:      map[string]TokenRecord{},
-		quotas:      map[string]QuotaOverride{},
-		skills:      map[string]Skill{},
+		users:        map[string]AuthUser{},
+		identifiers:  map[string]string{},
+		tokens:       map[string]TokenRecord{},
+		quotas:       map[string]QuotaOverride{},
+		skills:       map[string]Skill{},
+		llmProviders: map[string]LLMProvider{},
+		llmModels:    map[string]LLMModelRoute{},
 	}
 }
 
@@ -314,6 +318,144 @@ func (m *Memory) DeleteSkill(ctx context.Context, id string) error {
 		return ErrNotFound
 	}
 	delete(m.skills, id)
+	return nil
+}
+
+// ---- LLM model configuration ----
+
+func (m *Memory) CreateLLMProvider(ctx context.Context, p LLMProvider) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if _, ok := m.llmProviders[p.ID]; ok {
+		return ErrConflict
+	}
+	m.llmProviders[p.ID] = p
+	return nil
+}
+
+func (m *Memory) GetLLMProvider(ctx context.Context, id string) (LLMProvider, error) {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	p, ok := m.llmProviders[id]
+	if !ok {
+		return LLMProvider{}, ErrNotFound
+	}
+	return p, nil
+}
+
+func (m *Memory) ListLLMProviders(ctx context.Context) ([]LLMProvider, error) {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	out := make([]LLMProvider, 0, len(m.llmProviders))
+	for _, p := range m.llmProviders {
+		out = append(out, p)
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i].ID < out[j].ID })
+	return out, nil
+}
+
+func (m *Memory) UpdateLLMProvider(ctx context.Context, p LLMProvider) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if _, ok := m.llmProviders[p.ID]; !ok {
+		return ErrNotFound
+	}
+	m.llmProviders[p.ID] = p
+	return nil
+}
+
+func (m *Memory) DeleteLLMProvider(ctx context.Context, id string) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if _, ok := m.llmProviders[id]; !ok {
+		return ErrNotFound
+	}
+	for _, route := range m.llmModels {
+		if route.ProviderID == id {
+			return ErrConflict
+		}
+	}
+	delete(m.llmProviders, id)
+	return nil
+}
+
+func (m *Memory) CreateLLMModelRoute(ctx context.Context, route LLMModelRoute) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if _, ok := m.llmModels[route.Alias]; ok {
+		return ErrConflict
+	}
+	if _, ok := m.llmProviders[route.ProviderID]; !ok {
+		return ErrNotFound
+	}
+	if route.IsDefault {
+		for alias, existing := range m.llmModels {
+			existing.IsDefault = false
+			m.llmModels[alias] = existing
+		}
+	}
+	m.llmModels[route.Alias] = route
+	return nil
+}
+
+func (m *Memory) GetLLMModelRoute(ctx context.Context, alias string) (LLMModelRoute, error) {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	route, ok := m.llmModels[alias]
+	if !ok {
+		return LLMModelRoute{}, ErrNotFound
+	}
+	return route, nil
+}
+
+func (m *Memory) ListLLMModelRoutes(ctx context.Context) ([]LLMModelRoute, error) {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	out := make([]LLMModelRoute, 0, len(m.llmModels))
+	for _, route := range m.llmModels {
+		out = append(out, route)
+	}
+	sort.Slice(out, func(i, j int) bool {
+		if out[i].IsDefault != out[j].IsDefault {
+			return out[i].IsDefault
+		}
+		if out[i].SortOrder != out[j].SortOrder {
+			return out[i].SortOrder < out[j].SortOrder
+		}
+		return out[i].Alias < out[j].Alias
+	})
+	return out, nil
+}
+
+func (m *Memory) UpdateLLMModelRoute(ctx context.Context, route LLMModelRoute) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if _, ok := m.llmModels[route.Alias]; !ok {
+		return ErrNotFound
+	}
+	if _, ok := m.llmProviders[route.ProviderID]; !ok {
+		return ErrNotFound
+	}
+	if route.IsDefault {
+		for alias, existing := range m.llmModels {
+			if alias == route.Alias {
+				continue
+			}
+			existing.IsDefault = false
+			m.llmModels[alias] = existing
+		}
+	}
+	m.llmModels[route.Alias] = route
+	return nil
+}
+
+func (m *Memory) DeleteLLMModelRoute(ctx context.Context, alias string) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if _, ok := m.llmModels[alias]; !ok {
+		return ErrNotFound
+	}
+	delete(m.llmModels, alias)
 	return nil
 }
 

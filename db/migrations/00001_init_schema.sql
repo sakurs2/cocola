@@ -57,6 +57,42 @@ CREATE TABLE IF NOT EXISTS skill_entries (
 );
 CREATE INDEX IF NOT EXISTS idx_skill_entries_enabled ON skill_entries (enabled);
 
+-- Admin-managed LLM providers and user-facing model routes.
+CREATE TABLE IF NOT EXISTS llm_providers (
+    id                 TEXT PRIMARY KEY,
+    name               TEXT NOT NULL DEFAULT '',
+    type               TEXT NOT NULL DEFAULT '',
+    base_url           TEXT NOT NULL DEFAULT '',
+    api_key_ciphertext TEXT NOT NULL DEFAULT '',
+    api_key_hint       TEXT NOT NULL DEFAULT '',
+    enabled            BOOLEAN NOT NULL DEFAULT TRUE,
+    created_at         TIMESTAMPTZ NOT NULL,
+    updated_at         TIMESTAMPTZ NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_llm_providers_enabled ON llm_providers (enabled);
+
+CREATE TABLE IF NOT EXISTS llm_model_routes (
+    alias       TEXT PRIMARY KEY,
+    provider_id TEXT NOT NULL REFERENCES llm_providers(id) ON DELETE RESTRICT,
+    real_model  TEXT NOT NULL DEFAULT '',
+    runtime     TEXT NOT NULL DEFAULT 'claude-code',
+    label       TEXT NOT NULL DEFAULT '',
+    icon_type   TEXT NOT NULL DEFAULT 'simple-icons',
+    icon_slug   TEXT NOT NULL DEFAULT '',
+    icon_url    TEXT NOT NULL DEFAULT '',
+    enabled     BOOLEAN NOT NULL DEFAULT TRUE,
+    visible     BOOLEAN NOT NULL DEFAULT TRUE,
+    is_default  BOOLEAN NOT NULL DEFAULT FALSE,
+    sort_order  INTEGER NOT NULL DEFAULT 0,
+    created_at  TIMESTAMPTZ NOT NULL,
+    updated_at  TIMESTAMPTZ NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_llm_model_routes_provider_id ON llm_model_routes (provider_id);
+CREATE INDEX IF NOT EXISTS idx_llm_model_routes_visible ON llm_model_routes (enabled, visible);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_llm_model_routes_one_default
+    ON llm_model_routes ((is_default))
+    WHERE is_default;
+
 -- Append-only admin write audit. Reads are not audited.
 CREATE TABLE IF NOT EXISTS audit_log (
     id       BIGSERIAL PRIMARY KEY,
@@ -125,6 +161,8 @@ DROP TABLE IF EXISTS session_map;
 DROP TABLE IF EXISTS quota_counters;
 DROP TABLE IF EXISTS usage_ledger;
 DROP TABLE IF EXISTS audit_log;
+DROP TABLE IF EXISTS llm_model_routes;
+DROP TABLE IF EXISTS llm_providers;
 DROP TABLE IF EXISTS skill_entries;
 DROP TABLE IF EXISTS quota_overrides;
 DROP TABLE IF EXISTS token_records;

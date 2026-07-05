@@ -166,6 +166,7 @@ services:
       COCOLA_ANTHROPIC_BASE_URL: "${COCOLA_ANTHROPIC_BASE_URL:-}"
       COCOLA_ANTHROPIC_API_KEY: "${COCOLA_ANTHROPIC_API_KEY:-}"
       COCOLA_ANTHROPIC_MODEL: "${COCOLA_ANTHROPIC_MODEL:-}"
+      COCOLA_MODEL_SECRET_KEY: "${COCOLA_MODEL_SECRET_KEY:-cocola-local-model-secret}"
       # M7 persistence: when COCOLA_PG_DSN is set the service persists to
       # Postgres; unset -> in-memory (zero-dep dev boot). Full stack ships
       # a postgres node, so we default the DSN to it.
@@ -205,6 +206,7 @@ services:
       COCOLA_BOOTSTRAP_ADMIN_PASSWORD: "${COCOLA_BOOTSTRAP_ADMIN_PASSWORD:-}"
       COCOLA_BOOTSTRAP_ADMIN_PASSWORD_HASH: "${COCOLA_BOOTSTRAP_ADMIN_PASSWORD_HASH:-}"
       COCOLA_BOOTSTRAP_ADMIN_RESET: "${COCOLA_BOOTSTRAP_ADMIN_RESET:-}"
+      COCOLA_MODEL_SECRET_KEY: "${COCOLA_MODEL_SECRET_KEY:-cocola-local-model-secret}"
       # M7 persistence: DSN set -> Postgres repository; unset -> in-memory.
       COCOLA_PG_DSN: "${COCOLA_PG_DSN:-postgres://cocola:cocola_dev_pw@postgres:5432/cocola?sslmode=disable}"
     ports:

@@ -24,6 +24,7 @@ from __future__ import annotations
 
 import uuid
 from collections.abc import AsyncIterator
+from typing import Protocol
 
 from cocola_common import get_logger
 
@@ -37,6 +38,23 @@ from cocola_llm_gateway.types import ChatRequest, StreamEvent, StreamEventType, 
 log = get_logger("cocola.llm-gateway.service")
 
 
+class RegistrySource(Protocol):
+    async def get_registry(self) -> Registry: ...
+
+    async def aclose(self) -> None: ...
+
+
+class StaticRegistrySource:
+    def __init__(self, registry: Registry):
+        self._registry = registry
+
+    async def get_registry(self) -> Registry:
+        return self._registry
+
+    async def aclose(self) -> None:
+        await self._registry.aclose()
+
+
 class GatewayService:
     def __init__(
         self,
@@ -44,8 +62,10 @@ class GatewayService:
         ledger: Ledger,
         policy: ResiliencePolicy | None = None,
         enforcer: Enforcer | None = None,
+        registry_source: RegistrySource | None = None,
     ):
         self._registry = registry
+        self._registry_source = registry_source or StaticRegistrySource(registry)
         self._ledger = ledger
         self._policy = policy or ResiliencePolicy()
         self._enforcer = enforcer
@@ -56,6 +76,11 @@ class GatewayService:
     def registry(self) -> Registry:
         return self._registry
 
+    async def current_registry(self) -> Registry:
+        reg = await self._registry_source.get_registry()
+        self._registry = reg
+        return reg
+
     @property
     def ledger(self) -> Ledger:
         return self._ledger
@@ -64,10 +89,10 @@ class GatewayService:
     def enforcer(self) -> Enforcer | None:
         return self._enforcer
 
-    def resolve_model(self, requested_alias: str | None) -> str:
+    async def resolve_model(self, requested_alias: str | None) -> str:
         """Expose the resolved real model id (used by the front-end to stamp the
         outgoing message's `model` field). Raises CocolaError(NOT_FOUND)."""
-        route, _ = self._registry.resolve(requested_alias)
+        route, _ = (await self.current_registry()).resolve(requested_alias)
         return route.real_model
 
     async def check_quota(self, identity: Identity | None) -> None:
@@ -98,7 +123,7 @@ class GatewayService:
         billing attribution. `identity` drives the post-call quota commit.
         """
         alias = requested_alias or req.metadata.get("requested_model") or None
-        route, provider = self._registry.resolve(alias)
+        route, provider = (await self.current_registry()).resolve(alias)
 
         request_id = req.metadata.get("request_id") or f"req_{uuid.uuid4().hex[:16]}"
         streamer = ResilientStreamer(provider, self._policy, self._limiter)
@@ -155,7 +180,7 @@ class GatewayService:
         await self._enforcer.commit(identity, usage.total_tokens)
 
     async def aclose(self) -> None:
-        await self._registry.aclose()
+        await self._registry_source.aclose()
         await self._ledger.aclose()
         if self._enforcer is not None:
             await self._enforcer.store.aclose()

@@ -374,6 +374,173 @@ func (a *API) deleteSkill(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusNoContent)
 }
 
+// ---- LLM model configuration ----
+
+type llmProviderReq struct {
+	ID      string  `json:"id,omitempty"`
+	Name    string  `json:"name,omitempty"`
+	Type    string  `json:"type,omitempty"`
+	BaseURL string  `json:"base_url,omitempty"`
+	APIKey  *string `json:"api_key,omitempty"`
+	Enabled *bool   `json:"enabled,omitempty"`
+}
+
+func (a *API) createLLMProvider(w http.ResponseWriter, r *http.Request) {
+	var req llmProviderReq
+	if err := decode(r, &req); err != nil {
+		mapErr(w, err)
+		return
+	}
+	provider, err := a.svc.CreateLLMProvider(r.Context(), service.LLMProviderInput{
+		ID:      req.ID,
+		Name:    req.Name,
+		Type:    req.Type,
+		BaseURL: req.BaseURL,
+		APIKey:  req.APIKey,
+		Enabled: req.Enabled,
+		Actor:   actorOf(r),
+	})
+	if err != nil {
+		mapErr(w, err)
+		return
+	}
+	writeJSON(w, http.StatusCreated, provider)
+}
+
+func (a *API) listLLMProviders(w http.ResponseWriter, r *http.Request) {
+	providers, err := a.svc.ListLLMProviders(r.Context())
+	if err != nil {
+		mapErr(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"providers": providers})
+}
+
+func (a *API) updateLLMProvider(w http.ResponseWriter, r *http.Request) {
+	var req llmProviderReq
+	if err := decode(r, &req); err != nil {
+		mapErr(w, err)
+		return
+	}
+	provider, err := a.svc.UpdateLLMProvider(r.Context(), chi.URLParam(r, "id"), service.LLMProviderInput{
+		Name:    req.Name,
+		Type:    req.Type,
+		BaseURL: req.BaseURL,
+		APIKey:  req.APIKey,
+		Enabled: req.Enabled,
+		Actor:   actorOf(r),
+	})
+	if err != nil {
+		mapErr(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, provider)
+}
+
+func (a *API) deleteLLMProvider(w http.ResponseWriter, r *http.Request) {
+	if err := a.svc.DeleteLLMProvider(r.Context(), chi.URLParam(r, "id"), actorOf(r)); err != nil {
+		mapErr(w, err)
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
+}
+
+type llmModelReq struct {
+	Alias      string `json:"alias,omitempty"`
+	ProviderID string `json:"provider_id,omitempty"`
+	RealModel  string `json:"real_model,omitempty"`
+	Runtime    string `json:"runtime,omitempty"`
+	Label      string `json:"label,omitempty"`
+	IconType   string `json:"icon_type,omitempty"`
+	IconSlug   string `json:"icon_slug,omitempty"`
+	IconURL    string `json:"icon_url,omitempty"`
+	Enabled    *bool  `json:"enabled,omitempty"`
+	Visible    *bool  `json:"visible,omitempty"`
+	IsDefault  bool   `json:"is_default,omitempty"`
+	SortOrder  int    `json:"sort_order,omitempty"`
+}
+
+func (a *API) createLLMModel(w http.ResponseWriter, r *http.Request) {
+	var req llmModelReq
+	if err := decode(r, &req); err != nil {
+		mapErr(w, err)
+		return
+	}
+	model, err := a.svc.CreateLLMModel(r.Context(), llmModelInput(req, actorOf(r)))
+	if err != nil {
+		mapErr(w, err)
+		return
+	}
+	writeJSON(w, http.StatusCreated, model)
+}
+
+func (a *API) listLLMModels(w http.ResponseWriter, r *http.Request) {
+	models, err := a.svc.ListLLMModels(r.Context())
+	if err != nil {
+		mapErr(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"models": models})
+}
+
+func (a *API) updateLLMModel(w http.ResponseWriter, r *http.Request) {
+	var req llmModelReq
+	if err := decode(r, &req); err != nil {
+		mapErr(w, err)
+		return
+	}
+	model, err := a.svc.UpdateLLMModel(r.Context(), chi.URLParam(r, "alias"), llmModelInput(req, actorOf(r)))
+	if err != nil {
+		mapErr(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, model)
+}
+
+func (a *API) deleteLLMModel(w http.ResponseWriter, r *http.Request) {
+	if err := a.svc.DeleteLLMModel(r.Context(), chi.URLParam(r, "alias"), actorOf(r)); err != nil {
+		mapErr(w, err)
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
+}
+
+func (a *API) setDefaultLLMModel(w http.ResponseWriter, r *http.Request) {
+	model, err := a.svc.SetDefaultLLMModel(r.Context(), chi.URLParam(r, "alias"), actorOf(r))
+	if err != nil {
+		mapErr(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, model)
+}
+
+func (a *API) listPublicLLMModels(w http.ResponseWriter, r *http.Request) {
+	models, err := a.svc.ListPublicLLMModels(r.Context())
+	if err != nil {
+		mapErr(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, models)
+}
+
+func llmModelInput(req llmModelReq, actor string) service.LLMModelInput {
+	return service.LLMModelInput{
+		Alias:      req.Alias,
+		ProviderID: req.ProviderID,
+		RealModel:  req.RealModel,
+		Runtime:    req.Runtime,
+		Label:      req.Label,
+		IconType:   req.IconType,
+		IconSlug:   req.IconSlug,
+		IconURL:    req.IconURL,
+		Enabled:    req.Enabled,
+		Visible:    req.Visible,
+		IsDefault:  req.IsDefault,
+		SortOrder:  req.SortOrder,
+		Actor:      actor,
+	}
+}
+
 // ---- sandbox nodes ----
 
 func (a *API) listSandboxNodes(w http.ResponseWriter, r *http.Request) {

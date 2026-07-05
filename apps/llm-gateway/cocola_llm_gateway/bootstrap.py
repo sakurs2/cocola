@@ -43,6 +43,7 @@ from cocola_llm_gateway.config import (
     load_registry,
     quota_policy_from_env,
 )
+from cocola_llm_gateway.db_registry import registry_source_from_env
 from cocola_llm_gateway.middleware import ResiliencePolicy
 from cocola_llm_gateway.quota import (
     Enforcer,
@@ -134,6 +135,7 @@ def build_enforcer(policy: QuotaPolicy | None = None) -> Enforcer | None:
 
 def build_service() -> GatewayService:
     registry = load_registry()
+    registry_source = registry_source_from_env(registry)
     gcfg = gateway_config_from_env()
     policy = ResiliencePolicy(
         timeout_s=gcfg.request_timeout_s,
@@ -142,7 +144,7 @@ def build_service() -> GatewayService:
     )
     ledger = build_ledger()
     enforcer = build_enforcer()
-    return GatewayService(registry, ledger, policy, enforcer)
+    return GatewayService(registry, ledger, policy, enforcer, registry_source=registry_source)
 
 
 def build_verifier() -> Verifier:

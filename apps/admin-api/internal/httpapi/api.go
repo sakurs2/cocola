@@ -101,6 +101,22 @@ func (a *API) Router() http.Handler {
 			r.Delete("/{id}", a.deleteSkill)
 		})
 
+		r.Route("/model-providers", func(r chi.Router) {
+			r.Post("/", a.createLLMProvider)
+			r.Get("/", a.listLLMProviders)
+			r.Patch("/{id}", a.updateLLMProvider)
+			r.Delete("/{id}", a.deleteLLMProvider)
+		})
+
+		r.Route("/models", func(r chi.Router) {
+			r.Get("/", a.listLLMModels)
+			r.Post("/", a.createLLMModel)
+			r.Get("/public", a.listPublicLLMModels)
+			r.Patch("/{alias}", a.updateLLMModel)
+			r.Delete("/{alias}", a.deleteLLMModel)
+			r.Post("/{alias}/default", a.setDefaultLLMModel)
+		})
+
 		r.Route("/sandbox-nodes", func(r chi.Router) {
 			r.Get("/", a.listSandboxNodes)
 			r.Get("/join-command", a.sandboxNodeJoinCommand)

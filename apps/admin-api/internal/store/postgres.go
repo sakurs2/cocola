@@ -53,6 +53,14 @@ func isUniqueViolation(err error) bool {
 	return false
 }
 
+func isForeignKeyViolation(err error) bool {
+	var pgErr *pgconn.PgError
+	if errors.As(err, &pgErr) {
+		return pgErr.Code == "23503"
+	}
+	return false
+}
+
 // nullableTime converts a zero time.Time to NULL on write. expires_at and
 // revoked_at use NULL for "unset"; everything else stores the value as-is.
 func nullableTime(t time.Time) any {
@@ -443,6 +451,199 @@ func (p *Postgres) UpdateSkill(ctx context.Context, s Skill) error {
 
 func (p *Postgres) DeleteSkill(ctx context.Context, id string) error {
 	ct, err := p.pool.Exec(ctx, `DELETE FROM skill_entries WHERE id=$1`, id)
+	if err != nil {
+		return err
+	}
+	if ct.RowsAffected() == 0 {
+		return ErrNotFound
+	}
+	return nil
+}
+
+// ---- LLM model configuration ----
+
+const llmProviderCols = `id, name, type, base_url, api_key_ciphertext, api_key_hint, enabled, created_at, updated_at`
+
+func scanLLMProvider(row pgx.Row) (LLMProvider, error) {
+	var p LLMProvider
+	err := row.Scan(&p.ID, &p.Name, &p.Type, &p.BaseURL, &p.APIKeyCiphertext,
+		&p.APIKeyHint, &p.Enabled, &p.CreatedAt, &p.UpdatedAt)
+	return p, err
+}
+
+func (p *Postgres) CreateLLMProvider(ctx context.Context, provider LLMProvider) error {
+	const q = `INSERT INTO llm_providers (` + llmProviderCols + `)
+		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)`
+	_, err := p.pool.Exec(ctx, q,
+		provider.ID, provider.Name, provider.Type, provider.BaseURL,
+		provider.APIKeyCiphertext, provider.APIKeyHint, provider.Enabled,
+		provider.CreatedAt, provider.UpdatedAt)
+	if isUniqueViolation(err) {
+		return ErrConflict
+	}
+	return err
+}
+
+func (p *Postgres) GetLLMProvider(ctx context.Context, id string) (LLMProvider, error) {
+	row := p.pool.QueryRow(ctx, `SELECT `+llmProviderCols+` FROM llm_providers WHERE id=$1`, id)
+	provider, err := scanLLMProvider(row)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return LLMProvider{}, ErrNotFound
+	}
+	return provider, err
+}
+
+func (p *Postgres) ListLLMProviders(ctx context.Context) ([]LLMProvider, error) {
+	rows, err := p.pool.Query(ctx, `SELECT `+llmProviderCols+` FROM llm_providers ORDER BY id`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := make([]LLMProvider, 0)
+	for rows.Next() {
+		provider, err := scanLLMProvider(rows)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, provider)
+	}
+	return out, rows.Err()
+}
+
+func (p *Postgres) UpdateLLMProvider(ctx context.Context, provider LLMProvider) error {
+	const q = `UPDATE llm_providers
+		SET name=$2, type=$3, base_url=$4, api_key_ciphertext=$5, api_key_hint=$6,
+		    enabled=$7, created_at=$8, updated_at=$9
+		WHERE id=$1`
+	ct, err := p.pool.Exec(ctx, q,
+		provider.ID, provider.Name, provider.Type, provider.BaseURL,
+		provider.APIKeyCiphertext, provider.APIKeyHint, provider.Enabled,
+		provider.CreatedAt, provider.UpdatedAt)
+	if err != nil {
+		return err
+	}
+	if ct.RowsAffected() == 0 {
+		return ErrNotFound
+	}
+	return nil
+}
+
+func (p *Postgres) DeleteLLMProvider(ctx context.Context, id string) error {
+	ct, err := p.pool.Exec(ctx, `DELETE FROM llm_providers WHERE id=$1`, id)
+	if isForeignKeyViolation(err) {
+		return ErrConflict
+	}
+	if err != nil {
+		return err
+	}
+	if ct.RowsAffected() == 0 {
+		return ErrNotFound
+	}
+	return nil
+}
+
+const llmModelCols = `alias, provider_id, real_model, runtime, label, icon_type, icon_slug, icon_url, enabled, visible, is_default, sort_order, created_at, updated_at`
+
+func scanLLMModelRoute(row pgx.Row) (LLMModelRoute, error) {
+	var route LLMModelRoute
+	err := row.Scan(&route.Alias, &route.ProviderID, &route.RealModel, &route.Runtime,
+		&route.Label, &route.IconType, &route.IconSlug, &route.IconURL, &route.Enabled,
+		&route.Visible, &route.IsDefault, &route.SortOrder, &route.CreatedAt, &route.UpdatedAt)
+	return route, err
+}
+
+func (p *Postgres) CreateLLMModelRoute(ctx context.Context, route LLMModelRoute) error {
+	tx, err := p.pool.Begin(ctx)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback(ctx)
+	if route.IsDefault {
+		if _, err := tx.Exec(ctx, `UPDATE llm_model_routes SET is_default=FALSE WHERE is_default=TRUE`); err != nil {
+			return err
+		}
+	}
+	const q = `INSERT INTO llm_model_routes (` + llmModelCols + `)
+		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14)`
+	_, err = tx.Exec(ctx, q,
+		route.Alias, route.ProviderID, route.RealModel, route.Runtime, route.Label,
+		route.IconType, route.IconSlug, route.IconURL, route.Enabled, route.Visible,
+		route.IsDefault, route.SortOrder, route.CreatedAt, route.UpdatedAt)
+	if isUniqueViolation(err) {
+		return ErrConflict
+	}
+	if isForeignKeyViolation(err) {
+		return ErrNotFound
+	}
+	if err != nil {
+		return err
+	}
+	return tx.Commit(ctx)
+}
+
+func (p *Postgres) GetLLMModelRoute(ctx context.Context, alias string) (LLMModelRoute, error) {
+	row := p.pool.QueryRow(ctx, `SELECT `+llmModelCols+` FROM llm_model_routes WHERE alias=$1`, alias)
+	route, err := scanLLMModelRoute(row)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return LLMModelRoute{}, ErrNotFound
+	}
+	return route, err
+}
+
+func (p *Postgres) ListLLMModelRoutes(ctx context.Context) ([]LLMModelRoute, error) {
+	rows, err := p.pool.Query(ctx, `SELECT `+llmModelCols+` FROM llm_model_routes ORDER BY is_default DESC, sort_order, alias`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := make([]LLMModelRoute, 0)
+	for rows.Next() {
+		route, err := scanLLMModelRoute(rows)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, route)
+	}
+	return out, rows.Err()
+}
+
+func (p *Postgres) UpdateLLMModelRoute(ctx context.Context, route LLMModelRoute) error {
+	tx, err := p.pool.Begin(ctx)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback(ctx)
+	if route.IsDefault {
+		if _, err := tx.Exec(ctx, `UPDATE llm_model_routes SET is_default=FALSE WHERE alias<>$1 AND is_default=TRUE`, route.Alias); err != nil {
+			return err
+		}
+	}
+	const q = `UPDATE llm_model_routes
+		SET provider_id=$2, real_model=$3, runtime=$4, label=$5, icon_type=$6,
+		    icon_slug=$7, icon_url=$8, enabled=$9, visible=$10, is_default=$11,
+		    sort_order=$12, created_at=$13, updated_at=$14
+		WHERE alias=$1`
+	ct, err := tx.Exec(ctx, q,
+		route.Alias, route.ProviderID, route.RealModel, route.Runtime, route.Label,
+		route.IconType, route.IconSlug, route.IconURL, route.Enabled, route.Visible,
+		route.IsDefault, route.SortOrder, route.CreatedAt, route.UpdatedAt)
+	if isUniqueViolation(err) {
+		return ErrConflict
+	}
+	if isForeignKeyViolation(err) {
+		return ErrNotFound
+	}
+	if err != nil {
+		return err
+	}
+	if ct.RowsAffected() == 0 {
+		return ErrNotFound
+	}
+	return tx.Commit(ctx)
+}
+
+func (p *Postgres) DeleteLLMModelRoute(ctx context.Context, alias string) error {
+	ct, err := p.pool.Exec(ctx, `DELETE FROM llm_model_routes WHERE alias=$1`, alias)
 	if err != nil {
 		return err
 	}

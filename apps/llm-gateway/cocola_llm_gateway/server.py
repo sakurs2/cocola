@@ -123,10 +123,11 @@ def create_app(
 
     @app.get("/healthz")
     async def healthz() -> dict:
+        reg = await service.current_registry()
         return {
             "status": "ok",
-            "default_alias": service.registry.default_alias,
-            "aliases": service.registry.aliases(),
+            "default_alias": reg.default_alias,
+            "aliases": reg.aliases(),
             "auth_enabled": vrf.config.enabled,
         }
 
@@ -147,7 +148,7 @@ def create_app(
 
         # 2) Resolve alias up-front so an unknown model fails fast with 404.
         try:
-            resolved_model = service.resolve_model(requested_alias)
+            resolved_model = await service.resolve_model(requested_alias)
         except CocolaError as e:
             return _err(e.code, e.message)
 

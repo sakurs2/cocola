@@ -12,9 +12,14 @@ package service
 
 import (
 	"context"
+	"crypto/aes"
+	"crypto/cipher"
 	"crypto/rand"
+	"crypto/sha256"
+	"encoding/base64"
 	"encoding/hex"
 	"errors"
+	"io"
 	"strconv"
 	"strings"
 	"time"
@@ -46,6 +51,7 @@ type Admin struct {
 	now             Clock
 	sandboxNodes    SandboxNodeManager
 	sandboxRuntimes SandboxRuntimeManager
+	modelSecretKey  string
 }
 
 // New builds the service. issuer may be nil if token minting is disabled (no
@@ -70,6 +76,13 @@ func (a *Admin) WithSandboxNodeManager(m SandboxNodeManager) *Admin {
 // rest of admin-api remains usable.
 func (a *Admin) WithSandboxRuntimeManager(m SandboxRuntimeManager) *Admin {
 	a.sandboxRuntimes = m
+	return a
+}
+
+// WithModelSecretKey configures API-key encryption for admin-managed LLM
+// providers. Without it, provider saves that include a plaintext API key fail.
+func (a *Admin) WithModelSecretKey(secret string) *Admin {
+	a.modelSecretKey = strings.TrimSpace(secret)
 	return a
 }
 
@@ -633,6 +646,369 @@ func (a *Admin) DeleteSkill(ctx context.Context, id, actor string) error {
 	}
 	a.audit(ctx, actor, "skill.delete", id, "")
 	return nil
+}
+
+// ---- LLM model configuration ----
+
+const (
+	ProviderAnthropic    = "anthropic"
+	ProviderOpenAICompat = "openai_compat"
+	ProviderFake         = "fake"
+	RuntimeClaudeCode    = "claude-code"
+	IconSimpleIcons      = "simple-icons"
+	IconImage            = "image"
+)
+
+type LLMProviderInput struct {
+	ID      string
+	Name    string
+	Type    string
+	BaseURL string
+	APIKey  *string
+	Enabled *bool
+	Actor   string
+}
+
+type LLMModelInput struct {
+	Alias      string
+	ProviderID string
+	RealModel  string
+	Runtime    string
+	Label      string
+	IconType   string
+	IconSlug   string
+	IconURL    string
+	Enabled    *bool
+	Visible    *bool
+	IsDefault  bool
+	SortOrder  int
+	Actor      string
+}
+
+func (a *Admin) CreateLLMProvider(ctx context.Context, in LLMProviderInput) (store.LLMProvider, error) {
+	id := normalizeID(in.ID)
+	ptype := normalizeProviderType(in.Type)
+	if id == "" || strings.TrimSpace(in.Name) == "" || !validProviderType(ptype) {
+		return store.LLMProvider{}, ErrInvalidArg
+	}
+	enabled := true
+	if in.Enabled != nil {
+		enabled = *in.Enabled
+	}
+	now := a.now().UTC()
+	provider := store.LLMProvider{
+		ID:        id,
+		Name:      strings.TrimSpace(in.Name),
+		Type:      ptype,
+		BaseURL:   strings.TrimSpace(in.BaseURL),
+		Enabled:   enabled,
+		CreatedAt: now,
+		UpdatedAt: now,
+	}
+	if err := a.applyProviderAPIKey(&provider, in.APIKey); err != nil {
+		return store.LLMProvider{}, err
+	}
+	if err := validateProviderReady(provider); err != nil {
+		return store.LLMProvider{}, err
+	}
+	if err := a.store.CreateLLMProvider(ctx, provider); err != nil {
+		return store.LLMProvider{}, err
+	}
+	a.audit(ctx, in.Actor, "llm_provider.create", provider.ID, "type="+provider.Type)
+	return provider, nil
+}
+
+func (a *Admin) ListLLMProviders(ctx context.Context) ([]store.LLMProvider, error) {
+	return a.store.ListLLMProviders(ctx)
+}
+
+func (a *Admin) UpdateLLMProvider(ctx context.Context, id string, in LLMProviderInput) (store.LLMProvider, error) {
+	provider, err := a.store.GetLLMProvider(ctx, normalizeID(id))
+	if err != nil {
+		return store.LLMProvider{}, err
+	}
+	if strings.TrimSpace(in.Name) != "" {
+		provider.Name = strings.TrimSpace(in.Name)
+	}
+	if in.Type != "" {
+		ptype := normalizeProviderType(in.Type)
+		if !validProviderType(ptype) {
+			return store.LLMProvider{}, ErrInvalidArg
+		}
+		provider.Type = ptype
+	}
+	if in.BaseURL != "" || provider.Type == ProviderFake {
+		provider.BaseURL = strings.TrimSpace(in.BaseURL)
+	}
+	if in.Enabled != nil {
+		provider.Enabled = *in.Enabled
+	}
+	if err := a.applyProviderAPIKey(&provider, in.APIKey); err != nil {
+		return store.LLMProvider{}, err
+	}
+	if err := validateProviderReady(provider); err != nil {
+		return store.LLMProvider{}, err
+	}
+	provider.UpdatedAt = a.now().UTC()
+	if err := a.store.UpdateLLMProvider(ctx, provider); err != nil {
+		return store.LLMProvider{}, err
+	}
+	a.audit(ctx, in.Actor, "llm_provider.update", provider.ID, "enabled="+strconv.FormatBool(provider.Enabled))
+	return provider, nil
+}
+
+func (a *Admin) DeleteLLMProvider(ctx context.Context, id, actor string) error {
+	id = normalizeID(id)
+	if err := a.store.DeleteLLMProvider(ctx, id); err != nil {
+		return err
+	}
+	a.audit(ctx, actor, "llm_provider.delete", id, "")
+	return nil
+}
+
+func (a *Admin) CreateLLMModel(ctx context.Context, in LLMModelInput) (store.LLMModelRoute, error) {
+	route, err := a.llmRouteFromInput(store.LLMModelRoute{}, in, true)
+	if err != nil {
+		return store.LLMModelRoute{}, err
+	}
+	if _, err := a.store.GetLLMProvider(ctx, route.ProviderID); err != nil {
+		return store.LLMModelRoute{}, err
+	}
+	if err := a.store.CreateLLMModelRoute(ctx, route); err != nil {
+		return store.LLMModelRoute{}, err
+	}
+	a.audit(ctx, in.Actor, "llm_model.create", route.Alias, "provider="+route.ProviderID)
+	return route, nil
+}
+
+func (a *Admin) ListLLMModels(ctx context.Context) ([]store.LLMModelRoute, error) {
+	return a.store.ListLLMModelRoutes(ctx)
+}
+
+func (a *Admin) UpdateLLMModel(ctx context.Context, alias string, in LLMModelInput) (store.LLMModelRoute, error) {
+	existing, err := a.store.GetLLMModelRoute(ctx, normalizeID(alias))
+	if err != nil {
+		return store.LLMModelRoute{}, err
+	}
+	route, err := a.llmRouteFromInput(existing, in, false)
+	if err != nil {
+		return store.LLMModelRoute{}, err
+	}
+	if _, err := a.store.GetLLMProvider(ctx, route.ProviderID); err != nil {
+		return store.LLMModelRoute{}, err
+	}
+	if err := a.store.UpdateLLMModelRoute(ctx, route); err != nil {
+		return store.LLMModelRoute{}, err
+	}
+	a.audit(ctx, in.Actor, "llm_model.update", route.Alias, "enabled="+strconv.FormatBool(route.Enabled))
+	return route, nil
+}
+
+func (a *Admin) DeleteLLMModel(ctx context.Context, alias, actor string) error {
+	alias = normalizeID(alias)
+	if err := a.store.DeleteLLMModelRoute(ctx, alias); err != nil {
+		return err
+	}
+	a.audit(ctx, actor, "llm_model.delete", alias, "")
+	return nil
+}
+
+func (a *Admin) SetDefaultLLMModel(ctx context.Context, alias, actor string) (store.LLMModelRoute, error) {
+	route, err := a.store.GetLLMModelRoute(ctx, normalizeID(alias))
+	if err != nil {
+		return store.LLMModelRoute{}, err
+	}
+	if !route.Enabled || !route.Visible {
+		return store.LLMModelRoute{}, ErrInvalidArg
+	}
+	route.IsDefault = true
+	route.UpdatedAt = a.now().UTC()
+	if err := a.store.UpdateLLMModelRoute(ctx, route); err != nil {
+		return store.LLMModelRoute{}, err
+	}
+	a.audit(ctx, actor, "llm_model.default", route.Alias, "")
+	return route, nil
+}
+
+func (a *Admin) ListPublicLLMModels(ctx context.Context) ([]store.PublicLLMModel, error) {
+	providers, err := a.store.ListLLMProviders(ctx)
+	if err != nil {
+		return nil, err
+	}
+	enabledProviders := map[string]bool{}
+	for _, p := range providers {
+		enabledProviders[p.ID] = p.Enabled
+	}
+	routes, err := a.store.ListLLMModelRoutes(ctx)
+	if err != nil {
+		return nil, err
+	}
+	out := make([]store.PublicLLMModel, 0, len(routes))
+	for _, route := range routes {
+		if !route.Enabled || !route.Visible || !enabledProviders[route.ProviderID] {
+			continue
+		}
+		out = append(out, publicLLMModel(route))
+	}
+	return out, nil
+}
+
+func (a *Admin) llmRouteFromInput(existing store.LLMModelRoute, in LLMModelInput, create bool) (store.LLMModelRoute, error) {
+	route := existing
+	if create {
+		route.Alias = normalizeID(in.Alias)
+		route.Enabled = true
+		route.Visible = true
+		route.Runtime = RuntimeClaudeCode
+		route.IconType = IconSimpleIcons
+		now := a.now().UTC()
+		route.CreatedAt = now
+		route.UpdatedAt = now
+	}
+	if route.Alias == "" {
+		return store.LLMModelRoute{}, ErrInvalidArg
+	}
+	if in.ProviderID != "" || create {
+		route.ProviderID = normalizeID(in.ProviderID)
+	}
+	if in.RealModel != "" || create {
+		route.RealModel = strings.TrimSpace(in.RealModel)
+	}
+	if in.Runtime != "" {
+		route.Runtime = strings.TrimSpace(in.Runtime)
+	}
+	if route.Runtime == "" {
+		route.Runtime = RuntimeClaudeCode
+	}
+	if in.Label != "" || create {
+		route.Label = strings.TrimSpace(in.Label)
+	}
+	if route.Label == "" {
+		route.Label = route.Alias
+	}
+	if in.IconType != "" || create {
+		route.IconType = strings.TrimSpace(in.IconType)
+	}
+	if in.IconSlug != "" || create {
+		route.IconSlug = strings.TrimSpace(in.IconSlug)
+	}
+	if in.IconURL != "" || create {
+		route.IconURL = strings.TrimSpace(in.IconURL)
+	}
+	if in.Enabled != nil {
+		route.Enabled = *in.Enabled
+	}
+	if in.Visible != nil {
+		route.Visible = *in.Visible
+	}
+	route.IsDefault = in.IsDefault
+	route.SortOrder = in.SortOrder
+	route.UpdatedAt = a.now().UTC()
+	if route.ProviderID == "" || route.RealModel == "" || !validIcon(route) {
+		return store.LLMModelRoute{}, ErrInvalidArg
+	}
+	if route.IsDefault && (!route.Enabled || !route.Visible) {
+		return store.LLMModelRoute{}, ErrInvalidArg
+	}
+	return route, nil
+}
+
+func (a *Admin) applyProviderAPIKey(provider *store.LLMProvider, apiKey *string) error {
+	if apiKey == nil {
+		return nil
+	}
+	key := strings.TrimSpace(*apiKey)
+	if key == "" {
+		provider.APIKeyCiphertext = ""
+		provider.APIKeyHint = ""
+		return nil
+	}
+	ciphertext, err := encryptModelSecret(a.modelSecretKey, key)
+	if err != nil {
+		return err
+	}
+	provider.APIKeyCiphertext = ciphertext
+	provider.APIKeyHint = maskAPIKey(key)
+	return nil
+}
+
+func encryptModelSecret(secret, plaintext string) (string, error) {
+	if strings.TrimSpace(secret) == "" {
+		return "", ErrInvalidArg
+	}
+	sum := sha256.Sum256([]byte(secret))
+	block, err := aes.NewCipher(sum[:])
+	if err != nil {
+		return "", err
+	}
+	gcm, err := cipher.NewGCM(block)
+	if err != nil {
+		return "", err
+	}
+	nonce := make([]byte, gcm.NonceSize())
+	if _, err := io.ReadFull(rand.Reader, nonce); err != nil {
+		return "", err
+	}
+	sealed := gcm.Seal(nonce, nonce, []byte(plaintext), nil)
+	return "v1:" + base64.StdEncoding.EncodeToString(sealed), nil
+}
+
+func maskAPIKey(key string) string {
+	key = strings.TrimSpace(key)
+	if len(key) <= 4 {
+		return "****"
+	}
+	return "****" + key[len(key)-4:]
+}
+
+func validateProviderReady(provider store.LLMProvider) error {
+	if provider.Type != ProviderFake && provider.Enabled {
+		if provider.BaseURL == "" || provider.APIKeyCiphertext == "" {
+			return ErrInvalidArg
+		}
+	}
+	return nil
+}
+
+func normalizeID(v string) string {
+	return strings.ToLower(strings.TrimSpace(v))
+}
+
+func normalizeProviderType(v string) string {
+	v = strings.ToLower(strings.TrimSpace(v))
+	if v == "openai-compatible" || v == "openai" {
+		return ProviderOpenAICompat
+	}
+	return v
+}
+
+func validProviderType(v string) bool {
+	return v == ProviderAnthropic || v == ProviderOpenAICompat || v == ProviderFake
+}
+
+func validIcon(route store.LLMModelRoute) bool {
+	switch route.IconType {
+	case IconSimpleIcons:
+		return route.IconSlug != ""
+	case IconImage:
+		return strings.HasPrefix(route.IconURL, "https://")
+	default:
+		return false
+	}
+}
+
+func publicLLMModel(route store.LLMModelRoute) store.PublicLLMModel {
+	icon := store.LLMModelIcon{Type: route.IconType}
+	if route.IconType == IconImage {
+		icon.Src = route.IconURL
+	} else {
+		icon.Slug = route.IconSlug
+	}
+	return store.PublicLLMModel{
+		Alias: route.Alias,
+		Label: route.Label,
+		Icon:  icon,
+	}
 }
 
 // ---- Audit ----

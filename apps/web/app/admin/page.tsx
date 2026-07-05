@@ -2,7 +2,7 @@
 
 import { buttonVariants } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
-import { ArrowRight, Box, Server, ShieldCheck, Users } from "lucide-react";
+import { ArrowRight, Box, Cpu, Server, ShieldCheck, Users } from "lucide-react";
 import Link from "next/link";
 
 const MODULES = [
@@ -30,6 +30,14 @@ const MODULES = [
     group: "Access",
     summary: "Whitelist accounts, admin roles, enabled status, and password resets.",
     stats: ["Users", "Enabled", "Admins"],
+  },
+  {
+    title: "Models",
+    href: "/admin/models",
+    icon: Cpu,
+    group: "AI",
+    summary: "Providers, model aliases, API keys, default model, visibility, and logos.",
+    stats: ["Providers", "Routes", "Default"],
   },
 ];
 

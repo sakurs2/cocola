@@ -20,7 +20,7 @@ Design rules:
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from enum import Enum
+from enum import StrEnum
 from typing import Any, Literal
 
 from pydantic import BaseModel, Field
@@ -89,7 +89,7 @@ class ChatRequest(BaseModel):
 # --------------------------------------------------------------------------- #
 
 
-class StreamEventType(str, Enum):
+class StreamEventType(StrEnum):
     MESSAGE_START = "message_start"
     CONTENT_DELTA = "content_block_delta"
     MESSAGE_DELTA = "message_delta"

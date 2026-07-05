@@ -31,13 +31,13 @@ async def test_chat_stream_passes_events_and_meters():
 
 async def test_resolve_model_returns_real_id():
     svc, _ = build_service()
-    assert svc.resolve_model("default") == "fake-1"
+    assert await svc.resolve_model("default") == "fake-1"
 
 
 async def test_resolve_unknown_alias_raises():
     svc, _ = build_service()
     with pytest.raises(CocolaError) as ei:
-        svc.resolve_model("ghost")
+        await svc.resolve_model("ghost")
     assert ei.value.code is ErrorCode.NOT_FOUND
 
 

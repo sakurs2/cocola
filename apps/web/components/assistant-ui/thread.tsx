@@ -33,6 +33,7 @@ import { useState, type FC } from "react";
 import { useCocola, type ModelIconConfig, type UiMessageMetadata } from "@/app/runtime-provider";
 import { TooltipIconButton } from "@/components/assistant-ui/tooltip-icon-button";
 import { MarkdownText } from "@/components/assistant-ui/markdown-text";
+import { LOCAL_SIMPLE_ICON_PATHS, SIMPLE_ICON_FALLBACK_BADGES } from "@/lib/model-icons";
 import { cn } from "@/lib/utils";
 
 // Open WebUI style product Thread for cocola, authored against the design
@@ -108,6 +109,7 @@ const SUGGESTIONS: { title: string; subtitle: string; prompt: string }[] = [
 
 const ThreadWelcome: FC = () => {
   const { selectedModel } = useCocola();
+  const noModel = !selectedModel;
 
   return (
     <ThreadPrimitive.Empty>
@@ -116,8 +118,15 @@ const ThreadWelcome: FC = () => {
           <div className="flex size-9 items-center justify-center rounded-full bg-foreground text-background">
             <MessagesSquare className="size-5" />
           </div>
-          <p className="text-3xl font-semibold text-foreground">{selectedModel.label}</p>
+          <p className="text-3xl font-semibold text-foreground">
+            {selectedModel?.label ?? "No model configured"}
+          </p>
         </div>
+        {noModel ? (
+          <p className="mt-3 text-center text-sm text-muted-foreground">
+            Ask an admin to enable a model before starting a conversation.
+          </p>
+        ) : null}
 
         <div className="mt-8 w-full">
           <Composer />
@@ -147,51 +156,62 @@ const ThreadWelcome: FC = () => {
   );
 };
 
-const Composer: FC = () => (
-  <ComposerPrimitive.Root className="relative z-10 flex w-full flex-col rounded-[1.5rem] border border-input bg-card px-3 py-2 shadow-lg transition-colors focus-within:border-ring">
-    <ComposerAttachments />
-    <ComposerPrimitive.Input
-      rows={1}
-      autoFocus
-      placeholder="Send a message... (@ to mention, / for commands)"
-      className="max-h-40 min-h-12 flex-grow resize-none border-none bg-transparent px-2 py-3 text-sm outline-none placeholder:text-muted-foreground focus:ring-0 disabled:cursor-not-allowed"
-    />
-    <div className="flex w-full items-center justify-between gap-2">
-      <div className="flex min-w-0 items-center gap-1.5">
-        <ComposerPrimitive.AddAttachment asChild>
-          <TooltipIconButton
-            tooltip="Attach file"
-            variant="ghost"
-            className="size-8 shrink-0 rounded-full p-2 text-muted-foreground"
-          >
-            <PaperclipIcon className="size-4" />
-          </TooltipIconButton>
-        </ComposerPrimitive.AddAttachment>
-        <ModelPicker />
+const Composer: FC = () => {
+  const { selectedModel } = useCocola();
+  const noModel = !selectedModel;
+
+  return (
+    <ComposerPrimitive.Root className="relative z-10 flex w-full flex-col rounded-[1.5rem] border border-input bg-card px-3 py-2 shadow-lg transition-colors focus-within:border-ring">
+      <ComposerAttachments />
+      <ComposerPrimitive.Input
+        rows={1}
+        autoFocus={!noModel}
+        disabled={noModel}
+        placeholder={
+          noModel ? "No model configured" : "Send a message... (@ to mention, / for commands)"
+        }
+        className="max-h-40 min-h-12 flex-grow resize-none border-none bg-transparent px-2 py-3 text-sm outline-none placeholder:text-muted-foreground focus:ring-0 disabled:cursor-not-allowed"
+      />
+      <div className="flex w-full items-center justify-between gap-2">
+        <div className="flex min-w-0 items-center gap-1.5">
+          <ComposerPrimitive.AddAttachment asChild>
+            <TooltipIconButton
+              tooltip={noModel ? "No model configured" : "Attach file"}
+              variant="ghost"
+              disabled={noModel}
+              className="size-8 shrink-0 rounded-full p-2 text-muted-foreground"
+            >
+              <PaperclipIcon className="size-4" />
+            </TooltipIconButton>
+          </ComposerPrimitive.AddAttachment>
+          <ModelPicker />
+        </div>
+        <ComposerAction />
       </div>
-      <ComposerAction />
-    </div>
-  </ComposerPrimitive.Root>
-);
+    </ComposerPrimitive.Root>
+  );
+};
 
 const ModelPicker: FC = () => {
   const { models, selectedModel, selectedModelAlias, setSelectedModelAlias } = useCocola();
   const [open, setOpen] = useState(false);
+  const noModel = !selectedModel;
 
   return (
     <div className="relative inline-flex max-w-[14rem] min-w-0">
       <button
         type="button"
         className="flex max-w-[14rem] min-w-0 items-center gap-2 rounded-full px-2 py-1.5 text-sm font-medium text-foreground transition-colors hover:bg-muted focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
-        aria-label="Select model"
-        aria-expanded={open}
+        aria-label={noModel ? "No model configured" : "Select model"}
+        aria-expanded={open && !noModel}
+        disabled={noModel}
         onClick={() => setOpen((v) => !v)}
       >
-        <ModelIcon icon={selectedModel.icon} className="size-5" />
-        <span className="truncate">{selectedModel.label}</span>
-        <ChevronDown className="size-4 shrink-0 text-muted-foreground" />
+        <ModelIcon icon={selectedModel?.icon} className="size-5" />
+        <span className="truncate">{selectedModel?.label ?? "No model"}</span>
+        {noModel ? null : <ChevronDown className="size-4 shrink-0 text-muted-foreground" />}
       </button>
-      {open ? (
+      {open && !noModel ? (
         <div className="absolute bottom-full left-0 z-20 mb-2 w-full overflow-hidden rounded-lg border border-border bg-popover p-1 text-sm shadow-lg">
           {models.map((model) => (
             <button
@@ -218,15 +238,12 @@ const ModelPicker: FC = () => {
   );
 };
 
-const BRAND_MARKS: Record<string, { label: string; fg: string; bg: string }> = {
-  anthropic: { label: "A", fg: "#0f172a", bg: "#f5f1e8" },
-  openai: { label: "◎", fg: "#0f172a", bg: "#f8fafc" },
-  google: { label: "G", fg: "#4285f4", bg: "#ffffff" },
-  xai: { label: "xAI", fg: "#ffffff", bg: "#111827" },
-  deepseek: { label: "DS", fg: "#ffffff", bg: "#2563eb" },
-};
-
 const ModelIcon: FC<{ icon?: ModelIconConfig; className?: string }> = ({ icon, className }) => {
+  const simpleIconPath =
+    icon?.type === "simple-icons" && icon.slug
+      ? LOCAL_SIMPLE_ICON_PATHS[icon.slug.toLowerCase()]
+      : "";
+
   if (icon?.type === "image" && icon.src) {
     return (
       <span
@@ -247,8 +264,31 @@ const ModelIcon: FC<{ icon?: ModelIconConfig; className?: string }> = ({ icon, c
       </span>
     );
   }
-  const mark = icon?.type === "simple-icons" ? BRAND_MARKS[icon.slug.toLowerCase()] : undefined;
-  if (!mark) {
+  if (simpleIconPath) {
+    return (
+      <span
+        className={cn(
+          "flex shrink-0 items-center justify-center overflow-hidden rounded-full border border-border bg-white",
+          className,
+        )}
+        aria-hidden="true"
+      >
+        <Image
+          src={simpleIconPath}
+          alt=""
+          width={96}
+          height={96}
+          unoptimized
+          className="size-[72%] object-contain"
+        />
+      </span>
+    );
+  }
+  const fallbackBadge =
+    icon?.type === "simple-icons" && icon.slug
+      ? SIMPLE_ICON_FALLBACK_BADGES[icon.slug.toLowerCase()]
+      : "";
+  if (!fallbackBadge) {
     return (
       <span
         className={cn(
@@ -263,13 +303,12 @@ const ModelIcon: FC<{ icon?: ModelIconConfig; className?: string }> = ({ icon, c
   return (
     <span
       className={cn(
-        "flex shrink-0 items-center justify-center rounded-full border border-border text-[9px] font-bold leading-none",
+        "flex shrink-0 items-center justify-center rounded-full border border-border bg-muted text-[9px] font-bold leading-none text-foreground",
         className,
       )}
-      style={{ color: mark.fg, backgroundColor: mark.bg }}
       aria-hidden="true"
     >
-      {mark.label}
+      {fallbackBadge}
     </span>
   );
 };
@@ -303,32 +342,38 @@ const ComposerAttachments: FC = () => (
   </div>
 );
 
-const ComposerAction: FC = () => (
-  <>
-    <ThreadPrimitive.If running={false}>
-      <ComposerPrimitive.Send asChild>
-        <TooltipIconButton
-          tooltip="Send"
-          variant="default"
-          className="my-1 size-8 rounded-full p-2"
-        >
-          <SendHorizontalIcon className="h-4 w-4" />
-        </TooltipIconButton>
-      </ComposerPrimitive.Send>
-    </ThreadPrimitive.If>
-    <ThreadPrimitive.If running>
-      <ComposerPrimitive.Cancel asChild>
-        <TooltipIconButton
-          tooltip="Stop"
-          variant="outline"
-          className="my-1 size-8 rounded-full p-2"
-        >
-          <Square className="h-3.5 w-3.5 fill-current" />
-        </TooltipIconButton>
-      </ComposerPrimitive.Cancel>
-    </ThreadPrimitive.If>
-  </>
-);
+const ComposerAction: FC = () => {
+  const { selectedModel } = useCocola();
+  const noModel = !selectedModel;
+
+  return (
+    <>
+      <ThreadPrimitive.If running={false}>
+        <ComposerPrimitive.Send asChild>
+          <TooltipIconButton
+            tooltip={noModel ? "No model configured" : "Send"}
+            variant="default"
+            disabled={noModel}
+            className="my-1 size-8 rounded-full p-2"
+          >
+            <SendHorizontalIcon className="h-4 w-4" />
+          </TooltipIconButton>
+        </ComposerPrimitive.Send>
+      </ThreadPrimitive.If>
+      <ThreadPrimitive.If running>
+        <ComposerPrimitive.Cancel asChild>
+          <TooltipIconButton
+            tooltip="Stop"
+            variant="outline"
+            className="my-1 size-8 rounded-full p-2"
+          >
+            <Square className="h-3.5 w-3.5 fill-current" />
+          </TooltipIconButton>
+        </ComposerPrimitive.Cancel>
+      </ThreadPrimitive.If>
+    </>
+  );
+};
 
 const UserMessage: FC = () => (
   <MessagePrimitive.Root className="grid w-full max-w-[var(--thread-max-width)] auto-rows-auto grid-cols-[minmax(72px,1fr)_auto] gap-y-1 py-3">
@@ -400,8 +445,8 @@ const AssistantMessage: FC = () => (
 const AssistantMessageHeader: FC = () => {
   const { selectedModel } = useCocola();
   const metadata = useMessage((m) => m.metadata.custom) as UiMessageMetadata | undefined;
-  const label = metadata?.model_label || selectedModel.label;
-  const icon = metadata?.model_icon || selectedModel.icon;
+  const label = metadata?.model_label || selectedModel?.label || "Model";
+  const icon = metadata?.model_icon || selectedModel?.icon;
 
   return (
     <div className="mb-2 flex items-center gap-2 text-xs text-muted-foreground">
