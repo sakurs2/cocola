@@ -188,6 +188,57 @@ func TestAuthDisabledWhenNoKey(t *testing.T) {
 	}
 }
 
+func TestAdminSettingsAPI(t *testing.T) {
+	api := newTestAPI("k")
+	r := api.Router()
+
+	rec := do(t, r, http.MethodGet, "/admin/settings", "k", nil)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("list settings: want 200, got %d (%s)", rec.Code, rec.Body.String())
+	}
+	var listed struct {
+		Settings []service.SystemSettingView `json:"settings"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &listed); err != nil {
+		t.Fatalf("decode settings: %v", err)
+	}
+	if len(listed.Settings) == 0 {
+		t.Fatal("expected settings")
+	}
+
+	rec = do(t, r, http.MethodPatch, "/admin/settings/scheduler.poll_secs", "k", map[string]any{
+		"value": 5, "expected_version": 0,
+	})
+	if rec.Code != http.StatusOK {
+		t.Fatalf("patch poll setting: want 200, got %d (%s)", rec.Code, rec.Body.String())
+	}
+	var updated service.SystemSettingView
+	if err := json.Unmarshal(rec.Body.Bytes(), &updated); err != nil {
+		t.Fatalf("decode updated setting: %v", err)
+	}
+	if updated.Source != "db" || updated.Value.(float64) != 5 || updated.Version != 1 {
+		t.Fatalf("bad updated setting: %+v", updated)
+	}
+
+	rec = do(t, r, http.MethodPatch, "/admin/settings/scheduler.min_interval_secs", "k", map[string]any{
+		"value": 1800, "expected_version": 0,
+	})
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("too-small min interval: want 400, got %d (%s)", rec.Code, rec.Body.String())
+	}
+	rec = do(t, r, http.MethodPatch, "/admin/settings/auth.secret", "k", map[string]any{
+		"value": "new-secret", "expected_version": 0,
+	})
+	if rec.Code != http.StatusForbidden {
+		t.Fatalf("secret update: want 403, got %d (%s)", rec.Code, rec.Body.String())
+	}
+
+	rec = do(t, r, http.MethodDelete, "/admin/settings/scheduler.poll_secs?expected_version=1", "k", nil)
+	if rec.Code != http.StatusNoContent {
+		t.Fatalf("reset poll setting: want 204, got %d (%s)", rec.Code, rec.Body.String())
+	}
+}
+
 func TestAuthUsersLoginAndRuntimeToken(t *testing.T) {
 	api := newTestAPI("k")
 	r := api.Router()

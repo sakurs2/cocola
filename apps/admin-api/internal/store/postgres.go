@@ -383,6 +383,102 @@ func (p *Postgres) DeleteQuota(ctx context.Context, scope, subject string) error
 	return nil
 }
 
+// ---- System settings ----
+
+func scanSystemSetting(row pgx.Row) (SystemSetting, error) {
+	var setting SystemSetting
+	err := row.Scan(&setting.Key, &setting.ValueJSON, &setting.Version, &setting.UpdatedAt, &setting.UpdatedBy)
+	return setting, err
+}
+
+func (p *Postgres) GetSystemSetting(ctx context.Context, key string) (SystemSetting, error) {
+	row := p.pool.QueryRow(ctx, `SELECT key, value_json, version, updated_at, updated_by FROM system_settings WHERE key=$1`, key)
+	setting, err := scanSystemSetting(row)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return SystemSetting{}, ErrNotFound
+	}
+	return setting, err
+}
+
+func (p *Postgres) ListSystemSettings(ctx context.Context) ([]SystemSetting, error) {
+	rows, err := p.pool.Query(ctx, `SELECT key, value_json, version, updated_at, updated_by FROM system_settings ORDER BY key`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := make([]SystemSetting, 0)
+	for rows.Next() {
+		setting, err := scanSystemSetting(rows)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, setting)
+	}
+	return out, rows.Err()
+}
+
+func (p *Postgres) SetSystemSetting(ctx context.Context, setting SystemSetting, expectedVersion int64) (SystemSetting, error) {
+	tx, err := p.pool.Begin(ctx)
+	if err != nil {
+		return SystemSetting{}, err
+	}
+	defer tx.Rollback(ctx)
+	row := tx.QueryRow(ctx, `SELECT key, value_json, version, updated_at, updated_by FROM system_settings WHERE key=$1 FOR UPDATE`, setting.Key)
+	current, err := scanSystemSetting(row)
+	if errors.Is(err, pgx.ErrNoRows) {
+		if expectedVersion > 0 {
+			return SystemSetting{}, ErrConflict
+		}
+		setting.Version = 1
+		if _, err := tx.Exec(ctx, `INSERT INTO system_settings (key, value_json, version, updated_at, updated_by)
+			VALUES ($1,$2,$3,$4,$5)`, setting.Key, setting.ValueJSON, setting.Version, setting.UpdatedAt, setting.UpdatedBy); err != nil {
+			return SystemSetting{}, err
+		}
+		return setting, tx.Commit(ctx)
+	}
+	if err != nil {
+		return SystemSetting{}, err
+	}
+	if expectedVersion >= 0 && expectedVersion != current.Version {
+		return SystemSetting{}, ErrConflict
+	}
+	setting.Version = current.Version + 1
+	if _, err := tx.Exec(ctx, `UPDATE system_settings SET value_json=$2, version=$3, updated_at=$4, updated_by=$5 WHERE key=$1`,
+		setting.Key, setting.ValueJSON, setting.Version, setting.UpdatedAt, setting.UpdatedBy); err != nil {
+		return SystemSetting{}, err
+	}
+	return setting, tx.Commit(ctx)
+}
+
+func (p *Postgres) DeleteSystemSetting(ctx context.Context, key string, expectedVersion int64) error {
+	tx, err := p.pool.Begin(ctx)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback(ctx)
+	row := tx.QueryRow(ctx, `SELECT version FROM system_settings WHERE key=$1 FOR UPDATE`, key)
+	var version int64
+	if err := row.Scan(&version); errors.Is(err, pgx.ErrNoRows) {
+		if expectedVersion > 0 {
+			return ErrConflict
+		}
+		return ErrNotFound
+	} else if err != nil {
+		return err
+	}
+	if expectedVersion >= 0 && expectedVersion != version {
+		return ErrConflict
+	}
+	ct, err := tx.Exec(ctx, `DELETE FROM system_settings WHERE key=$1`, key)
+	if err != nil {
+		return err
+	}
+	if ct.RowsAffected() == 0 {
+		return ErrNotFound
+	}
+	return tx.Commit(ctx)
+}
+
 // ---- Skills ----
 
 const skillCols = `id, name, description, version, entrypoint, enabled, created_at, updated_at`

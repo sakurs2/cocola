@@ -103,6 +103,12 @@ func (a *API) Router() http.Handler {
 
 		r.Post("/runtime-token", a.issueRuntimeToken)
 
+		r.Route("/settings", func(r chi.Router) {
+			r.Get("/", a.listSystemSettings)
+			r.Patch("/{key}", a.updateSystemSetting)
+			r.Delete("/{key}", a.resetSystemSetting)
+		})
+
 		r.Route("/tokens", func(r chi.Router) {
 			r.Post("/", a.issueToken)
 			r.Get("/", a.listTokens)

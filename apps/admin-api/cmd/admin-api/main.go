@@ -34,6 +34,9 @@
 //	                           (default true).
 //	COCOLA_AGENT_ADDR          agent-runtime gRPC address for scheduled tasks
 //	                           (default 127.0.0.1:50061).
+//	COCOLA_GATEWAY_URL         llm-gateway URL for user scheduled tasks
+//	                           (default http://127.0.0.1:8080).
+//	COCOLA_SCHEDULER_POLL_SECS due-task scan cadence (default 60).
 //	COCOLA_SCHEDULER_RUN_TIMEOUT_SECS
 //	                           max runtime per scheduled task run (default 3600).
 //	COCOLA_SCHEDULER_HEARTBEAT_SECS

@@ -16,6 +16,7 @@ type Memory struct {
 	identifiers  map[string]string // normalized identifier -> user id
 	tokens       map[string]TokenRecord
 	quotas       map[string]QuotaOverride // key = scope + "/" + subject
+	settings     map[string]SystemSetting
 	skills       map[string]Skill
 	llmProviders map[string]LLMProvider
 	llmModels    map[string]LLMModelRoute
@@ -35,6 +36,7 @@ func NewMemory() *Memory {
 		identifiers:  map[string]string{},
 		tokens:       map[string]TokenRecord{},
 		quotas:       map[string]QuotaOverride{},
+		settings:     map[string]SystemSetting{},
 		skills:       map[string]Skill{},
 		llmProviders: map[string]LLMProvider{},
 		llmModels:    map[string]LLMModelRoute{},
@@ -271,6 +273,65 @@ func (m *Memory) DeleteQuota(ctx context.Context, scope, subject string) error {
 		return ErrNotFound
 	}
 	delete(m.quotas, k)
+	return nil
+}
+
+// ---- System settings ----
+
+func (m *Memory) GetSystemSetting(ctx context.Context, key string) (SystemSetting, error) {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	setting, ok := m.settings[key]
+	if !ok {
+		return SystemSetting{}, ErrNotFound
+	}
+	setting.ValueJSON = append([]byte(nil), setting.ValueJSON...)
+	return setting, nil
+}
+
+func (m *Memory) ListSystemSettings(ctx context.Context) ([]SystemSetting, error) {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	out := make([]SystemSetting, 0, len(m.settings))
+	for _, setting := range m.settings {
+		setting.ValueJSON = append([]byte(nil), setting.ValueJSON...)
+		out = append(out, setting)
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i].Key < out[j].Key })
+	return out, nil
+}
+
+func (m *Memory) SetSystemSetting(ctx context.Context, setting SystemSetting, expectedVersion int64) (SystemSetting, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	current, exists := m.settings[setting.Key]
+	currentVersion := int64(0)
+	if exists {
+		currentVersion = current.Version
+	}
+	if expectedVersion >= 0 && expectedVersion != currentVersion {
+		return SystemSetting{}, ErrConflict
+	}
+	setting.Version = currentVersion + 1
+	setting.ValueJSON = append([]byte(nil), setting.ValueJSON...)
+	m.settings[setting.Key] = setting
+	return setting, nil
+}
+
+func (m *Memory) DeleteSystemSetting(ctx context.Context, key string, expectedVersion int64) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	current, exists := m.settings[key]
+	if !exists {
+		if expectedVersion > 0 {
+			return ErrConflict
+		}
+		return ErrNotFound
+	}
+	if expectedVersion >= 0 && expectedVersion != current.Version {
+		return ErrConflict
+	}
+	delete(m.settings, key)
 	return nil
 }
 

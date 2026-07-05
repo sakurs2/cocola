@@ -48,6 +48,14 @@ type QuotaOverride struct {
 	UpdatedBy string    `json:"updated_by"`
 }
 
+type SystemSetting struct {
+	Key       string          `json:"key"`
+	ValueJSON json.RawMessage `json:"value_json"`
+	Version   int64           `json:"version"`
+	UpdatedAt time.Time       `json:"updated_at"`
+	UpdatedBy string          `json:"updated_by"`
+}
+
 // Skill is a Skill-Market entry: a named, versioned capability employees can
 // enable. The admin-api owns the catalog; the runtime consumes Enabled entries.
 type Skill struct {
@@ -270,6 +278,12 @@ type Store interface {
 	GetQuota(ctx context.Context, scope, subject string) (QuotaOverride, error)
 	ListQuotas(ctx context.Context) ([]QuotaOverride, error)
 	DeleteQuota(ctx context.Context, scope, subject string) error
+
+	// System settings
+	GetSystemSetting(ctx context.Context, key string) (SystemSetting, error)
+	ListSystemSettings(ctx context.Context) ([]SystemSetting, error)
+	SetSystemSetting(ctx context.Context, setting SystemSetting, expectedVersion int64) (SystemSetting, error)
+	DeleteSystemSetting(ctx context.Context, key string, expectedVersion int64) error
 
 	// Skills
 	CreateSkill(ctx context.Context, s Skill) error

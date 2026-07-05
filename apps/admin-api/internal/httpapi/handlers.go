@@ -344,6 +344,49 @@ func (a *API) deleteQuota(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusNoContent)
 }
 
+// ---- system settings ----
+
+type updateSystemSettingReq struct {
+	Value           any   `json:"value"`
+	ExpectedVersion int64 `json:"expected_version"`
+}
+
+func (a *API) listSystemSettings(w http.ResponseWriter, r *http.Request) {
+	settings, err := a.svc.ListSystemSettings(r.Context())
+	if err != nil {
+		mapErr(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"settings": settings})
+}
+
+func (a *API) updateSystemSetting(w http.ResponseWriter, r *http.Request) {
+	var req updateSystemSettingReq
+	if err := decode(r, &req); err != nil {
+		mapErr(w, err)
+		return
+	}
+	out, err := a.svc.UpdateSystemSetting(r.Context(), chi.URLParam(r, "key"), service.SystemSettingUpdateInput{
+		Value:           req.Value,
+		ExpectedVersion: req.ExpectedVersion,
+		Actor:           actorOf(r),
+	})
+	if err != nil {
+		mapErr(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, out)
+}
+
+func (a *API) resetSystemSetting(w http.ResponseWriter, r *http.Request) {
+	expected := qInt(r, "expected_version", -1)
+	if err := a.svc.ResetSystemSetting(r.Context(), chi.URLParam(r, "key"), int64(expected), actorOf(r)); err != nil {
+		mapErr(w, err)
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
+}
+
 // ---- skills ----
 
 type createSkillReq struct {

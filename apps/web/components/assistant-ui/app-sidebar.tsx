@@ -22,6 +22,7 @@ import {
   Trash2,
 } from "lucide-react";
 import { signOut, useSession } from "next-auth/react";
+import Link from "next/link";
 import { cn } from "@/lib/utils";
 import { useCocola } from "@/app/runtime-provider";
 
@@ -240,12 +241,19 @@ export function AppSidebar() {
         </nav>
 
         <div className="border-t border-sidebar-border p-2">
-          <div className="flex items-center gap-2 rounded-md px-2 py-1.5">
-            <div className="grid size-6 shrink-0 place-items-center rounded-full bg-amber-500/90 text-[11px] font-medium text-white">
-              {userInitial}
-            </div>
-            {!collapsed && (
-              <>
+          <div className="flex items-center gap-2">
+            <Link
+              href="/profile"
+              title="Profile"
+              className={cn(
+                "flex min-w-0 flex-1 items-center gap-2 rounded-md px-2 py-1.5 text-sidebar-foreground/90 transition-colors hover:bg-sidebar-accent hover:text-sidebar-accent-foreground",
+                collapsed && "justify-center px-0",
+              )}
+            >
+              <div className="grid size-6 shrink-0 place-items-center rounded-full bg-amber-500/90 text-[11px] font-medium text-white">
+                {userInitial}
+              </div>
+              {!collapsed && (
                 <div className="min-w-0 flex-1">
                   <div className="truncate text-sm">{userLabel}</div>
                   {userSubtitle && (
@@ -254,16 +262,18 @@ export function AppSidebar() {
                     </div>
                   )}
                 </div>
-                <button
-                  type="button"
-                  title="Sign out"
-                  aria-label="Sign out"
-                  onClick={() => void signOut({ callbackUrl: "/login" })}
-                  className="grid size-7 shrink-0 place-items-center rounded-md text-sidebar-foreground/60 hover:bg-sidebar-accent hover:text-sidebar-accent-foreground"
-                >
-                  <LogOut className="size-4" />
-                </button>
-              </>
+              )}
+            </Link>
+            {!collapsed && (
+              <button
+                type="button"
+                title="Sign out"
+                aria-label="Sign out"
+                onClick={() => void signOut({ callbackUrl: "/login" })}
+                className="grid size-7 shrink-0 place-items-center rounded-md text-sidebar-foreground/60 hover:bg-sidebar-accent hover:text-sidebar-accent-foreground"
+              >
+                <LogOut className="size-4" />
+              </button>
             )}
           </div>
         </div>

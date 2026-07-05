@@ -2,7 +2,16 @@
 
 import { buttonVariants } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
-import { ArrowRight, Box, CalendarClock, Cpu, Server, ShieldCheck, Users } from "lucide-react";
+import {
+  ArrowRight,
+  Box,
+  CalendarClock,
+  Cpu,
+  Server,
+  Settings,
+  ShieldCheck,
+  Users,
+} from "lucide-react";
 import Link from "next/link";
 
 const MODULES = [
@@ -46,6 +55,15 @@ const MODULES = [
     group: "AI",
     summary: "System task schedules, prompt inputs, model selection, attachments, and run history.",
     stats: ["Tasks", "Runs", "Errors"],
+  },
+  {
+    title: "Settings",
+    href: "/admin/settings",
+    icon: Settings,
+    group: "Settings",
+    summary:
+      "Runtime configuration defaults, database overrides, hot reload status, and secrets state.",
+    stats: ["Defaults", "Overrides", "Restart Required"],
   },
 ];
 

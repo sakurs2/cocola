@@ -67,10 +67,11 @@ func validTaskStatus(status string) bool {
 }
 
 func (a *Admin) MinScheduleInterval() time.Duration {
+	fallback := int(defaultMinInterval.Seconds())
 	if a.minScheduleInterval > 0 {
-		return a.minScheduleInterval
+		fallback = int(a.minScheduleInterval.Seconds())
 	}
-	return defaultMinInterval
+	return secondsDuration(a.settingInt(context.Background(), SettingSchedulerMinIntervalSecs, fallback))
 }
 
 func (a *Admin) CreateScheduledTask(ctx context.Context, in ScheduledTaskInput) (ScheduledTaskDetail, error) {

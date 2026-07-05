@@ -22,6 +22,7 @@ import (
 	"io"
 	"strconv"
 	"strings"
+	"sync/atomic"
 	"time"
 
 	"github.com/cocola-project/cocola/apps/admin-api/internal/store"
@@ -56,6 +57,7 @@ type Admin struct {
 	userEvents          UserEventBroker
 	modelSecretKey      string
 	minScheduleInterval time.Duration
+	schedulerStarted    atomic.Bool
 }
 
 // New builds the service. issuer may be nil if token minting is disabled (no

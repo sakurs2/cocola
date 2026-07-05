@@ -68,6 +68,7 @@ func (a *Admin) StartScheduler(ctx context.Context, cfg SchedulerConfig) error {
 		defer conn.Close()
 		a.schedulerLoop(ctx, cfg, runner)
 	}()
+	a.schedulerStarted.Store(true)
 	return nil
 }
 
@@ -219,21 +220,29 @@ func (r *grpcTaskRunner) runUserTask(ctx context.Context, task store.ScheduledTa
 }
 
 func (a *Admin) schedulerLoop(ctx context.Context, cfg SchedulerConfig, runner taskRunner) {
-	ticker := time.NewTicker(cfg.PollEvery)
-	defer ticker.Stop()
 	for {
 		a.runSchedulerOnce(ctx, cfg, runner)
+		next := a.effectiveSchedulerConfig(ctx, cfg).PollEvery
+		if next <= 0 {
+			next = time.Minute
+		}
+		timer := time.NewTimer(next)
 		select {
 		case <-ctx.Done():
+			timer.Stop()
 			return
-		case <-ticker.C:
+		case <-timer.C:
 		}
 	}
 }
 
 func (a *Admin) runSchedulerOnce(ctx context.Context, cfg SchedulerConfig, runner taskRunner) {
 	now := a.now().UTC()
+	cfg = a.effectiveSchedulerConfig(ctx, cfg)
 	a.expireStaleScheduledTaskRuns(ctx, cfg, now)
+	if !cfg.Enabled {
+		return
+	}
 	due, err := a.store.ListDueScheduledTasks(ctx, now, 5)
 	if err != nil {
 		return
@@ -382,4 +391,14 @@ func maxDuration(a, b time.Duration) time.Duration {
 		return a
 	}
 	return b
+}
+
+func (a *Admin) effectiveSchedulerConfig(ctx context.Context, base SchedulerConfig) SchedulerConfig {
+	cfg := base
+	cfg.Enabled = a.settingBool(ctx, SettingSchedulerEnabled, base.Enabled)
+	cfg.PollEvery = secondsDuration(a.settingInt(ctx, SettingSchedulerPollSecs, int(base.PollEvery.Seconds())))
+	cfg.RunTimeout = secondsDuration(a.settingInt(ctx, SettingSchedulerRunTimeoutSecs, int(base.RunTimeout.Seconds())))
+	cfg.HeartbeatEvery = secondsDuration(a.settingInt(ctx, SettingSchedulerHeartbeatSecs, int(base.HeartbeatEvery.Seconds())))
+	cfg.LeaseTimeout = secondsDuration(a.settingInt(ctx, SettingSchedulerLeaseTimeoutSecs, int(base.LeaseTimeout.Seconds())))
+	return cfg
 }

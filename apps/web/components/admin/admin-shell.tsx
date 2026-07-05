@@ -9,6 +9,7 @@ import {
   Cpu,
   LayoutDashboard,
   Server,
+  Settings,
   Users,
 } from "lucide-react";
 import Link from "next/link";
@@ -43,6 +44,10 @@ const NAV_GROUPS: { label: string; items: AdminNavItem[] }[] = [
       { href: "/admin/sandboxes", label: "Sandbox Runtime", icon: Box },
       { href: "/admin/sandbox-nodes", label: "Sandbox Nodes", icon: Server },
     ],
+  },
+  {
+    label: "Settings",
+    items: [{ href: "/admin/settings", label: "System Settings", icon: Settings }],
   },
 ];
 
