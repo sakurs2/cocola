@@ -137,10 +137,11 @@ docker build -t cocola/sandbox-runtime:dev deploy/sandbox-runtime
 ## Publish
 
 Production images are published as OCI images to GHCR. The GitHub Actions
-workflow `.github/workflows/sandbox-runtime-image.yml` builds `linux/amd64`,
-pushes immutable `sha-<commit>` tags, keeps `latest` and `dev` moving on the
-default branch, adds semver tags for `v*` releases, and prints the
-digest-pinned reference in the workflow summary.
+workflow `.github/workflows/sandbox-runtime-image.yml` builds a multi-arch
+manifest for `linux/amd64` and `linux/arm64`, pushes immutable `sha-<commit>`
+tags, keeps `latest` and `dev` moving on the default branch, adds semver tags
+for `v*` releases, and prints the digest-pinned reference in the workflow
+summary.
 
 For local publishing after changing the image:
 
@@ -149,8 +150,11 @@ For local publishing after changing the image:
 gh auth refresh -h github.com -s write:packages
 gh auth token | docker login ghcr.io -u <github-user> --password-stdin
 
-# build, selfcheck, push latest + dev + sha-<commit>
+# build, selfcheck, push latest + dev + sha-<commit> for linux/amd64
 scripts/sandbox-runtime-publish.sh
+
+# build and push a multi-arch manifest for linux/amd64 + linux/arm64
+PLATFORMS=linux/amd64,linux/arm64 scripts/sandbox-runtime-publish.sh
 
 # release-style tags, e.g. v0.1.0 and 0.1
 VERSION_TAG=v0.1.0 scripts/sandbox-runtime-publish.sh
@@ -171,8 +175,10 @@ successful master build, `latest` is available as a convenience tag:
 docker pull ghcr.io/sakurs2/cocola-sandbox-runtime:latest
 ```
 
-`latest` is mutable by design. Keep `sha-<commit>` or `vX.Y.Z@sha256:<digest>`
-for reproducible production rollouts and rollback targets.
+`latest` is mutable by design. It is multi-arch, so Docker pulls the matching
+`linux/amd64` or `linux/arm64` image automatically on ordinary Linux servers
+and Apple Silicon Macs. Keep `sha-<commit>` or `vX.Y.Z@sha256:<digest>` for
+reproducible production rollouts and rollback targets.
 
 ## Verify (local Docker / runc; same body is the future gVisor spike)
 

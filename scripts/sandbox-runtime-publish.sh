@@ -7,6 +7,8 @@ set -euo pipefail
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 CTX="$ROOT/deploy/sandbox-runtime"
 PLATFORM="${PLATFORM:-linux/amd64}"
+PLATFORMS="${PLATFORMS:-$PLATFORM}"
+VERIFY_PLATFORM="${VERIFY_PLATFORM:-$PLATFORM}"
 PUBLISH_DEV_TAG="${PUBLISH_DEV_TAG:-1}"
 PUBLISH_LATEST_TAG="${PUBLISH_LATEST_TAG:-1}"
 VERIFY="${VERIFY:-1}"
@@ -51,22 +53,38 @@ if [ -n "${VERSION_TAG:-}" ]; then
   fi
 fi
 
-echo "building ${tags[0]} for $PLATFORM"
-docker build --platform "$PLATFORM" -t "${tags[0]}" "$CTX"
+if [[ "$PLATFORMS" == *,* ]]; then
+  if [ "$VERIFY" = "1" ]; then
+    echo "building ${tags[0]} for selfcheck on $VERIFY_PLATFORM"
+    docker build --platform "$VERIFY_PLATFORM" -t "${tags[0]}" "$CTX"
+    echo "running sandbox runtime selfcheck with ${tags[0]}"
+    IMAGE="${tags[0]}" SKIP_BUILD=1 SKIP_QUERY=1 "$ROOT/scripts/sandbox-runtime-verify.sh"
+  fi
 
-for tag in "${tags[@]:1}"; do
-  docker tag "${tags[0]}" "$tag"
-done
+  tag_args=()
+  for tag in "${tags[@]}"; do
+    tag_args+=(--tag "$tag")
+  done
+  echo "building and pushing ${tags[0]} for $PLATFORMS"
+  docker buildx build --platform "$PLATFORMS" --push "${tag_args[@]}" "$CTX"
+else
+  echo "building ${tags[0]} for $PLATFORMS"
+  docker build --platform "$PLATFORMS" -t "${tags[0]}" "$CTX"
 
-if [ "$VERIFY" = "1" ]; then
-  echo "running sandbox runtime selfcheck with ${tags[0]}"
-  IMAGE="${tags[0]}" SKIP_BUILD=1 SKIP_QUERY=1 "$ROOT/scripts/sandbox-runtime-verify.sh"
+  for tag in "${tags[@]:1}"; do
+    docker tag "${tags[0]}" "$tag"
+  done
+
+  if [ "$VERIFY" = "1" ]; then
+    echo "running sandbox runtime selfcheck with ${tags[0]}"
+    IMAGE="${tags[0]}" SKIP_BUILD=1 SKIP_QUERY=1 "$ROOT/scripts/sandbox-runtime-verify.sh"
+  fi
+
+  for tag in "${tags[@]}"; do
+    echo "pushing $tag"
+    docker push "$tag"
+  done
 fi
-
-for tag in "${tags[@]}"; do
-  echo "pushing $tag"
-  docker push "$tag"
-done
 
 echo
 echo "published tags:"
