@@ -11,6 +11,7 @@ package store
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"time"
 )
@@ -104,6 +105,72 @@ type PublicLLMModel struct {
 	Alias string       `json:"alias"`
 	Label string       `json:"label"`
 	Icon  LLMModelIcon `json:"icon"`
+}
+
+// ScheduledTask is an admin-created system task. ScheduleSpec and ConfigJSON
+// intentionally hold extensible JSON so new task options can land without
+// widening the core table for every experiment.
+type ScheduledTask struct {
+	ID             string          `json:"id"`
+	OwnerType      string          `json:"owner_type"`
+	OwnerUserID    string          `json:"owner_user_id,omitempty"`
+	ConversationID string          `json:"conversation_id,omitempty"`
+	Name           string          `json:"name"`
+	Description    string          `json:"description"`
+	Status         string          `json:"status"`
+	ScheduleKind   string          `json:"schedule_kind"`
+	ScheduleSpec   json.RawMessage `json:"schedule_spec"`
+	Timezone       string          `json:"timezone"`
+	Prompt         string          `json:"prompt"`
+	ModelAlias     string          `json:"model_alias"`
+	MaxTurns       int             `json:"max_turns"`
+	ConfigJSON     json.RawMessage `json:"config_json"`
+	NextRunAt      time.Time       `json:"next_run_at,omitempty"`
+	LastRunAt      time.Time       `json:"last_run_at,omitempty"`
+	RunCount       int64           `json:"run_count"`
+	LastStatus     string          `json:"last_status"`
+	LastError      string          `json:"last_error"`
+	CreatedAt      time.Time       `json:"created_at"`
+	UpdatedAt      time.Time       `json:"updated_at"`
+	CreatedBy      string          `json:"created_by"`
+	UpdatedBy      string          `json:"updated_by"`
+}
+
+type ScheduledTaskAttachment struct {
+	ID         string    `json:"id"`
+	TaskID     string    `json:"task_id"`
+	Filename   string    `json:"filename"`
+	Mime       string    `json:"mime"`
+	SizeBytes  int64     `json:"size_bytes"`
+	ObjectKey  string    `json:"object_key"`
+	ContentB64 string    `json:"-"`
+	CreatedAt  time.Time `json:"created_at"`
+	CreatedBy  string    `json:"created_by"`
+}
+
+type ScheduledTaskRun struct {
+	ID           string    `json:"id"`
+	TaskID       string    `json:"task_id"`
+	ScheduledFor time.Time `json:"scheduled_for,omitempty"`
+	Status       string    `json:"status"`
+	WorkerID     string    `json:"worker_id"`
+	SessionID    string    `json:"session_id"`
+	ModelAlias   string    `json:"model_alias"`
+	OutputText   string    `json:"output_text"`
+	Error        string    `json:"error"`
+	StartedAt    time.Time `json:"started_at,omitempty"`
+	FinishedAt   time.Time `json:"finished_at,omitempty"`
+	CreatedAt    time.Time `json:"created_at"`
+	UpdatedAt    time.Time `json:"updated_at"`
+}
+
+type ScheduledTaskRunEvent struct {
+	ID        int64           `json:"id"`
+	RunID     string          `json:"run_id"`
+	Seq       int             `json:"seq"`
+	Kind      string          `json:"kind"`
+	DataJSON  json.RawMessage `json:"data_json"`
+	CreatedAt time.Time       `json:"created_at"`
 }
 
 // AuthUser is one whitelisted login principal for the web app. Username and
@@ -222,6 +289,24 @@ type Store interface {
 	ListLLMModelRoutes(ctx context.Context) ([]LLMModelRoute, error)
 	UpdateLLMModelRoute(ctx context.Context, m LLMModelRoute) error
 	DeleteLLMModelRoute(ctx context.Context, alias string) error
+
+	// Scheduled system tasks
+	CreateScheduledTask(ctx context.Context, task ScheduledTask, attachments []ScheduledTaskAttachment) error
+	GetScheduledTask(ctx context.Context, id string) (ScheduledTask, error)
+	GetScheduledTaskForOwner(ctx context.Context, id, ownerUserID string) (ScheduledTask, error)
+	ListScheduledTasks(ctx context.Context) ([]ScheduledTask, error)
+	ListScheduledTasksForOwner(ctx context.Context, ownerUserID string) ([]ScheduledTask, error)
+	UpdateScheduledTask(ctx context.Context, task ScheduledTask, replaceAttachments bool, attachments []ScheduledTaskAttachment) error
+	DeleteScheduledTask(ctx context.Context, id string) error
+	DeleteScheduledTaskForOwner(ctx context.Context, id, ownerUserID string) error
+	ListScheduledTaskAttachments(ctx context.Context, taskID string) ([]ScheduledTaskAttachment, error)
+	ListDueScheduledTasks(ctx context.Context, now time.Time, limit int) ([]ScheduledTask, error)
+	TryStartScheduledTaskRun(ctx context.Context, taskID string, run ScheduledTaskRun, nextRunAt time.Time) (ScheduledTask, bool, error)
+	GetScheduledTaskRun(ctx context.Context, id string) (ScheduledTaskRun, error)
+	ListScheduledTaskRuns(ctx context.Context, taskID, status string, limit int) ([]ScheduledTaskRun, error)
+	UpdateScheduledTaskRun(ctx context.Context, run ScheduledTaskRun, taskNextRunAt time.Time, terminal bool) error
+	AppendScheduledTaskRunEvent(ctx context.Context, event ScheduledTaskRunEvent) error
+	ListScheduledTaskRunEvents(ctx context.Context, runID string) ([]ScheduledTaskRunEvent, error)
 
 	// Audit
 	AppendAudit(ctx context.Context, e AuditEntry) error

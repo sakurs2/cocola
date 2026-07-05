@@ -31,14 +31,15 @@ import (
 
 // Sentinel errors mapped to HTTP codes by the handler layer.
 var (
-	ErrInvalidArg       = errors.New("service: invalid argument")
-	ErrUnauthenticated  = errors.New("service: unauthenticated")
-	ErrAccountDisabled  = errors.New("service: account disabled")
-	ErrProtectedAdmin   = errors.New("service: protected admin")
-	ErrSelfPermission   = errors.New("service: self permission change")
-	ErrPermissionDenied = errors.New("service: permission denied")
-	ErrNotFound         = store.ErrNotFound
-	ErrConflict         = store.ErrConflict
+	ErrInvalidArg          = errors.New("service: invalid argument")
+	ErrUnauthenticated     = errors.New("service: unauthenticated")
+	ErrAccountDisabled     = errors.New("service: account disabled")
+	ErrProtectedAdmin      = errors.New("service: protected admin")
+	ErrSelfPermission      = errors.New("service: self permission change")
+	ErrPermissionDenied    = errors.New("service: permission denied")
+	ErrScheduleTooFrequent = errors.New("service: schedule frequency below minimum")
+	ErrNotFound            = store.ErrNotFound
+	ErrConflict            = store.ErrConflict
 )
 
 // Clock is injectable so tests get deterministic timestamps.
@@ -46,12 +47,13 @@ type Clock func() time.Time
 
 // Admin is the admin-api service.
 type Admin struct {
-	store           store.Store
-	issuer          *token.Issuer
-	now             Clock
-	sandboxNodes    SandboxNodeManager
-	sandboxRuntimes SandboxRuntimeManager
-	modelSecretKey  string
+	store               store.Store
+	issuer              *token.Issuer
+	now                 Clock
+	sandboxNodes        SandboxNodeManager
+	sandboxRuntimes     SandboxRuntimeManager
+	modelSecretKey      string
+	minScheduleInterval time.Duration
 }
 
 // New builds the service. issuer may be nil if token minting is disabled (no
@@ -83,6 +85,13 @@ func (a *Admin) WithSandboxRuntimeManager(m SandboxRuntimeManager) *Admin {
 // providers. Without it, provider saves that include a plaintext API key fail.
 func (a *Admin) WithModelSecretKey(secret string) *Admin {
 	a.modelSecretKey = strings.TrimSpace(secret)
+	return a
+}
+
+func (a *Admin) WithMinScheduleInterval(d time.Duration) *Admin {
+	if d > 0 {
+		a.minScheduleInterval = d
+	}
 	return a
 }
 

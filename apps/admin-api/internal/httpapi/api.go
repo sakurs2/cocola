@@ -24,19 +24,28 @@ import (
 	"github.com/cocola-project/cocola/apps/admin-api/internal/service"
 	"github.com/cocola-project/cocola/apps/admin-api/internal/store"
 	"github.com/cocola-project/cocola/packages/go-common/metrics"
+	"github.com/cocola-project/cocola/packages/go-common/token"
 	"github.com/cocola-project/cocola/packages/go-common/tracing"
 )
 
 // API holds the dependencies the handlers need.
 type API struct {
-	svc      *service.Admin
-	adminKey string            // when "", admin auth is disabled
-	metrics  *metrics.Registry // optional; nil => no instrumentation (tests)
+	svc           *service.Admin
+	adminKey      string // when "", admin auth is disabled
+	runtimeSecret string
+	runtimeIssuer string
+	metrics       *metrics.Registry // optional; nil => no instrumentation (tests)
 }
 
 // New builds the API. adminKey "" disables auth (dev/test).
 func New(svc *service.Admin, adminKey string) *API {
 	return &API{svc: svc, adminKey: adminKey}
+}
+
+func (a *API) WithRuntimeAuth(secret, issuer string) *API {
+	a.runtimeSecret = secret
+	a.runtimeIssuer = issuer
+	return a
 }
 
 // WithMetrics enables RED instrumentation on every route. The label is chi's
@@ -64,6 +73,19 @@ func (a *API) Router() http.Handler {
 
 	r.Get("/healthz", a.health)
 	r.Post("/auth/login", a.login)
+
+	r.Route("/me", func(r chi.Router) {
+		r.Use(a.requireRuntimeUser)
+		r.Route("/scheduled-tasks", func(r chi.Router) {
+			r.Post("/", a.createMyScheduledTask)
+			r.Get("/", a.listMyScheduledTasks)
+			r.Get("/{id}", a.getMyScheduledTask)
+			r.Patch("/{id}", a.updateMyScheduledTask)
+			r.Delete("/{id}", a.deleteMyScheduledTask)
+			r.Post("/{id}/pause", a.pauseMyScheduledTask)
+			r.Post("/{id}/resume", a.resumeMyScheduledTask)
+		})
+	})
 
 	r.Route("/admin", func(r chi.Router) {
 		r.Use(a.requireAdmin)
@@ -115,6 +137,22 @@ func (a *API) Router() http.Handler {
 			r.Patch("/{alias}", a.updateLLMModel)
 			r.Delete("/{alias}", a.deleteLLMModel)
 			r.Post("/{alias}/default", a.setDefaultLLMModel)
+		})
+
+		r.Route("/scheduled-tasks", func(r chi.Router) {
+			r.Post("/", a.createScheduledTask)
+			r.Get("/", a.listScheduledTasks)
+			r.Get("/{id}", a.getScheduledTask)
+			r.Patch("/{id}", a.updateScheduledTask)
+			r.Delete("/{id}", a.deleteScheduledTask)
+			r.Post("/{id}/pause", a.pauseScheduledTask)
+			r.Post("/{id}/resume", a.resumeScheduledTask)
+			r.Post("/{id}/run", a.runScheduledTaskNow)
+		})
+
+		r.Route("/scheduled-task-runs", func(r chi.Router) {
+			r.Get("/", a.listScheduledTaskRuns)
+			r.Get("/{id}", a.getScheduledTaskRun)
 		})
 
 		r.Route("/sandbox-nodes", func(r chi.Router) {
@@ -175,6 +213,25 @@ func bearer(r *http.Request) string {
 	return strings.TrimSpace(r.Header.Get("x-admin-key"))
 }
 
+func (a *API) requireRuntimeUser(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if a.runtimeSecret == "" {
+			writeErr(w, http.StatusUnauthorized, "UNAUTHENTICATED", "runtime authentication required")
+			return
+		}
+		claims, err := token.Decode(bearer(r), a.runtimeSecret, 0)
+		if err != nil || strings.TrimSpace(claims.Subject) == "" {
+			writeErr(w, http.StatusUnauthorized, "UNAUTHENTICATED", "valid runtime token required")
+			return
+		}
+		if a.runtimeIssuer != "" && claims.Issuer != a.runtimeIssuer {
+			writeErr(w, http.StatusUnauthorized, "UNAUTHENTICATED", "valid runtime token required")
+			return
+		}
+		next.ServeHTTP(w, r.WithContext(withActor(r, strings.TrimSpace(claims.Subject))))
+	})
+}
+
 // ---- helpers ----
 
 func actorOf(r *http.Request) string {
@@ -217,6 +274,8 @@ func mapErr(w http.ResponseWriter, err error) {
 		writeErr(w, http.StatusForbidden, "SELF_PERMISSION_CHANGE", "admin cannot change own permissions")
 	case errors.Is(err, service.ErrPermissionDenied):
 		writeErr(w, http.StatusForbidden, "PERMISSION_DENIED", "permission denied")
+	case errors.Is(err, service.ErrScheduleTooFrequent):
+		writeErr(w, http.StatusBadRequest, "INVALID_SCHEDULE_FREQUENCY", "scheduled tasks can run at most once per hour")
 	case errors.Is(err, service.ErrInvalidArg):
 		writeErr(w, http.StatusBadRequest, "INVALID_ARGUMENT", err.Error())
 	case errors.Is(err, store.ErrNotFound):

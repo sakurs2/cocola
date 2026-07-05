@@ -19,8 +19,13 @@ type Memory struct {
 	skills       map[string]Skill
 	llmProviders map[string]LLMProvider
 	llmModels    map[string]LLMModelRoute
+	tasks        map[string]ScheduledTask
+	attachments  map[string]ScheduledTaskAttachment
+	runs         map[string]ScheduledTaskRun
+	runEvents    map[string][]ScheduledTaskRunEvent
 	audit        []AuditEntry
 	auditSeq     int64
+	runEventSeq  int64
 }
 
 // NewMemory returns an empty in-memory store.
@@ -33,6 +38,10 @@ func NewMemory() *Memory {
 		skills:       map[string]Skill{},
 		llmProviders: map[string]LLMProvider{},
 		llmModels:    map[string]LLMModelRoute{},
+		tasks:        map[string]ScheduledTask{},
+		attachments:  map[string]ScheduledTaskAttachment{},
+		runs:         map[string]ScheduledTaskRun{},
+		runEvents:    map[string][]ScheduledTaskRunEvent{},
 	}
 }
 
@@ -457,6 +466,280 @@ func (m *Memory) DeleteLLMModelRoute(ctx context.Context, alias string) error {
 	}
 	delete(m.llmModels, alias)
 	return nil
+}
+
+// ---- Scheduled system tasks ----
+
+func cloneTask(t ScheduledTask) ScheduledTask {
+	t.ScheduleSpec = append([]byte(nil), t.ScheduleSpec...)
+	t.ConfigJSON = append([]byte(nil), t.ConfigJSON...)
+	return t
+}
+
+func cloneRunEvent(e ScheduledTaskRunEvent) ScheduledTaskRunEvent {
+	e.DataJSON = append([]byte(nil), e.DataJSON...)
+	return e
+}
+
+func (m *Memory) CreateScheduledTask(ctx context.Context, task ScheduledTask, attachments []ScheduledTaskAttachment) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if _, ok := m.tasks[task.ID]; ok {
+		return ErrConflict
+	}
+	m.tasks[task.ID] = cloneTask(task)
+	for _, att := range attachments {
+		if _, ok := m.attachments[att.ID]; ok {
+			return ErrConflict
+		}
+		m.attachments[att.ID] = att
+	}
+	return nil
+}
+
+func (m *Memory) GetScheduledTask(ctx context.Context, id string) (ScheduledTask, error) {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	task, ok := m.tasks[id]
+	if !ok {
+		return ScheduledTask{}, ErrNotFound
+	}
+	return cloneTask(task), nil
+}
+
+func (m *Memory) GetScheduledTaskForOwner(ctx context.Context, id, ownerUserID string) (ScheduledTask, error) {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	task, ok := m.tasks[id]
+	if !ok || task.OwnerType != "user" || task.OwnerUserID != ownerUserID {
+		return ScheduledTask{}, ErrNotFound
+	}
+	return cloneTask(task), nil
+}
+
+func (m *Memory) ListScheduledTasks(ctx context.Context) ([]ScheduledTask, error) {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	out := make([]ScheduledTask, 0, len(m.tasks))
+	for _, task := range m.tasks {
+		out = append(out, cloneTask(task))
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i].UpdatedAt.After(out[j].UpdatedAt) })
+	return out, nil
+}
+
+func (m *Memory) ListScheduledTasksForOwner(ctx context.Context, ownerUserID string) ([]ScheduledTask, error) {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	out := make([]ScheduledTask, 0)
+	for _, task := range m.tasks {
+		if task.OwnerType == "user" && task.OwnerUserID == ownerUserID {
+			out = append(out, cloneTask(task))
+		}
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i].UpdatedAt.After(out[j].UpdatedAt) })
+	return out, nil
+}
+
+func (m *Memory) UpdateScheduledTask(ctx context.Context, task ScheduledTask, replaceAttachments bool, attachments []ScheduledTaskAttachment) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if _, ok := m.tasks[task.ID]; !ok {
+		return ErrNotFound
+	}
+	m.tasks[task.ID] = cloneTask(task)
+	if replaceAttachments {
+		for id, att := range m.attachments {
+			if att.TaskID == task.ID {
+				delete(m.attachments, id)
+			}
+		}
+		for _, att := range attachments {
+			m.attachments[att.ID] = att
+		}
+	}
+	return nil
+}
+
+func (m *Memory) DeleteScheduledTask(ctx context.Context, id string) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if _, ok := m.tasks[id]; !ok {
+		return ErrNotFound
+	}
+	delete(m.tasks, id)
+	for attID, att := range m.attachments {
+		if att.TaskID == id {
+			delete(m.attachments, attID)
+		}
+	}
+	for runID, run := range m.runs {
+		if run.TaskID == id {
+			delete(m.runs, runID)
+			delete(m.runEvents, runID)
+		}
+	}
+	return nil
+}
+
+func (m *Memory) DeleteScheduledTaskForOwner(ctx context.Context, id, ownerUserID string) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	task, ok := m.tasks[id]
+	if !ok || task.OwnerType != "user" || task.OwnerUserID != ownerUserID {
+		return ErrNotFound
+	}
+	delete(m.tasks, id)
+	for attID, att := range m.attachments {
+		if att.TaskID == id {
+			delete(m.attachments, attID)
+		}
+	}
+	for runID, run := range m.runs {
+		if run.TaskID == id {
+			delete(m.runs, runID)
+			delete(m.runEvents, runID)
+		}
+	}
+	return nil
+}
+
+func (m *Memory) ListScheduledTaskAttachments(ctx context.Context, taskID string) ([]ScheduledTaskAttachment, error) {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	out := make([]ScheduledTaskAttachment, 0)
+	for _, att := range m.attachments {
+		if att.TaskID == taskID {
+			out = append(out, att)
+		}
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i].CreatedAt.Before(out[j].CreatedAt) })
+	return out, nil
+}
+
+func (m *Memory) ListDueScheduledTasks(ctx context.Context, now time.Time, limit int) ([]ScheduledTask, error) {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	out := make([]ScheduledTask, 0)
+	for _, task := range m.tasks {
+		if task.Status != "active" || task.NextRunAt.IsZero() || task.NextRunAt.After(now) {
+			continue
+		}
+		out = append(out, cloneTask(task))
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i].NextRunAt.Before(out[j].NextRunAt) })
+	if limit > 0 && len(out) > limit {
+		out = out[:limit]
+	}
+	return out, nil
+}
+
+func (m *Memory) TryStartScheduledTaskRun(ctx context.Context, taskID string, run ScheduledTaskRun, nextRunAt time.Time) (ScheduledTask, bool, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	task, ok := m.tasks[taskID]
+	if !ok {
+		return ScheduledTask{}, false, ErrNotFound
+	}
+	if task.Status != "active" || task.NextRunAt.IsZero() || task.NextRunAt.After(run.ScheduledFor) {
+		return ScheduledTask{}, false, nil
+	}
+	for _, existing := range m.runs {
+		if existing.TaskID == taskID && (existing.Status == "queued" || existing.Status == "running") {
+			return ScheduledTask{}, false, nil
+		}
+	}
+	if _, ok := m.runs[run.ID]; ok {
+		return ScheduledTask{}, false, ErrConflict
+	}
+	task.NextRunAt = nextRunAt
+	task.UpdatedAt = run.UpdatedAt
+	if task.OwnerType == "user" && task.ConversationID == "" {
+		task.ConversationID = "sched-" + task.ID
+	}
+	m.tasks[taskID] = cloneTask(task)
+	m.runs[run.ID] = run
+	return cloneTask(task), true, nil
+}
+
+func (m *Memory) GetScheduledTaskRun(ctx context.Context, id string) (ScheduledTaskRun, error) {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	run, ok := m.runs[id]
+	if !ok {
+		return ScheduledTaskRun{}, ErrNotFound
+	}
+	return run, nil
+}
+
+func (m *Memory) ListScheduledTaskRuns(ctx context.Context, taskID, status string, limit int) ([]ScheduledTaskRun, error) {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	out := make([]ScheduledTaskRun, 0)
+	for _, run := range m.runs {
+		if taskID != "" && run.TaskID != taskID {
+			continue
+		}
+		if status != "" && run.Status != status {
+			continue
+		}
+		out = append(out, run)
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i].CreatedAt.After(out[j].CreatedAt) })
+	if limit > 0 && len(out) > limit {
+		out = out[:limit]
+	}
+	return out, nil
+}
+
+func (m *Memory) UpdateScheduledTaskRun(ctx context.Context, run ScheduledTaskRun, taskNextRunAt time.Time, terminal bool) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if _, ok := m.runs[run.ID]; !ok {
+		return ErrNotFound
+	}
+	m.runs[run.ID] = run
+	if terminal {
+		task, ok := m.tasks[run.TaskID]
+		if !ok {
+			return ErrNotFound
+		}
+		task.LastRunAt = run.FinishedAt
+		task.LastStatus = run.Status
+		task.LastError = run.Error
+		task.UpdatedAt = run.UpdatedAt
+		task.NextRunAt = taskNextRunAt
+		if task.ScheduleKind == "once" && taskNextRunAt.IsZero() {
+			task.Status = "completed"
+		}
+		task.RunCount++
+		m.tasks[task.ID] = cloneTask(task)
+	}
+	return nil
+}
+
+func (m *Memory) AppendScheduledTaskRunEvent(ctx context.Context, event ScheduledTaskRunEvent) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if _, ok := m.runs[event.RunID]; !ok {
+		return ErrNotFound
+	}
+	m.runEventSeq++
+	event.ID = m.runEventSeq
+	m.runEvents[event.RunID] = append(m.runEvents[event.RunID], cloneRunEvent(event))
+	return nil
+}
+
+func (m *Memory) ListScheduledTaskRunEvents(ctx context.Context, runID string) ([]ScheduledTaskRunEvent, error) {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	events := m.runEvents[runID]
+	out := make([]ScheduledTaskRunEvent, 0, len(events))
+	for _, event := range events {
+		out = append(out, cloneRunEvent(event))
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i].Seq < out[j].Seq })
+	return out, nil
 }
 
 // ---- Audit ----

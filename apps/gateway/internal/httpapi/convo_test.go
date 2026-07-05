@@ -91,6 +91,42 @@ func TestChatPersistsTurn(t *testing.T) {
 	}
 }
 
+func TestChatCanRevealDeferredConversationWithExplicitTitle(t *testing.T) {
+	fs := &fakeStreamer{script: []agent.Event{
+		{Kind: "text", Data: map[string]string{"text": "done"}},
+		{Kind: "done", Data: map[string]string{"reason": "stop"}},
+	}}
+	cs := convo.NewMemory()
+	h := newAPIWithConvo(t, fs, cs)
+
+	rec := httptest.NewRecorder()
+	h.ServeHTTP(rec, httptest.NewRequest("POST", "/v1/chat", strings.NewReader(`{
+		"prompt":"run scheduled task",
+		"session_id":"sched-1",
+		"conversation_title":"Daily digest",
+		"conversation_type":"scheduled_task",
+		"defer_conversation_visibility_until_done":true
+	}`)))
+	if rec.Code != http.StatusOK {
+		t.Fatalf("chat status = %d", rec.Code)
+	}
+
+	rec = httptest.NewRecorder()
+	h.ServeHTTP(rec, httptest.NewRequest("GET", "/v1/conversations", nil))
+	if rec.Code != http.StatusOK {
+		t.Fatalf("list status = %d", rec.Code)
+	}
+	var convs []convo.Conversation
+	mustJSON(t, rec.Body.Bytes(), &convs)
+	if len(convs) != 1 ||
+		convs[0].ID != "sched-1" ||
+		convs[0].Title != "Daily digest" ||
+		convs[0].ChatType != "scheduled_task" ||
+		convs[0].Hidden {
+		t.Fatalf("conversation not revealed with task title: %+v", convs)
+	}
+}
+
 func TestChatPersistsArtifactAndDownloads(t *testing.T) {
 	fs := &fakeStreamer{script: []agent.Event{
 		{Kind: "file", Data: map[string]string{

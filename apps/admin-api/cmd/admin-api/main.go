@@ -30,6 +30,14 @@
 //	COCOLA_BOOTSTRAP_ADMIN_PRINT
 //	                           true => print dev bootstrap credentials. Use
 //	                           only for local dev; never in production.
+//	COCOLA_SCHEDULER_ENABLED   run admin-created system scheduled tasks
+//	                           (default true).
+//	COCOLA_AGENT_ADDR          agent-runtime gRPC address for scheduled tasks
+//	                           (default 127.0.0.1:50061).
+//	COCOLA_SCHEDULER_RUN_TIMEOUT_SECS
+//	                           max runtime per scheduled task run (default 3600).
+//	COCOLA_SCHEDULER_MIN_INTERVAL_SECS
+//	                           minimum schedule interval accepted (default 3600).
 //
 // Persistence is in-memory for M5 (process-local); the PostgreSQL backend
 // lands in M7 behind the same store.Store interface — no handler change. The
@@ -160,7 +168,9 @@ func main() {
 		log.Warn("shared-redis publishing DISABLED (no COCOLA_REDIS_ADDR) — revokes/overrides are process-local")
 	}
 
-	svc := service.New(st, iss, time.Now).WithModelSecretKey(config.SecretFromEnv("COCOLA_MODEL_SECRET_KEY"))
+	svc := service.New(st, iss, time.Now).
+		WithModelSecretKey(config.SecretFromEnv("COCOLA_MODEL_SECRET_KEY")).
+		WithMinScheduleInterval(time.Duration(getenvInt("COCOLA_SCHEDULER_MIN_INTERVAL_SECS", 3600)) * time.Second)
 	if runtimeKV != nil {
 		runtimeMgr, err := service.NewSandboxRuntimeManagerFromEnv(runtimeKV)
 		if err != nil {
@@ -207,11 +217,27 @@ func main() {
 	} else {
 		log.Warn("sandbox node manager DISABLED (no Kubernetes config)")
 	}
+	if !envBoolFalse(os.Getenv("COCOLA_SCHEDULER_ENABLED")) {
+		if err := svc.StartScheduler(context.Background(), service.SchedulerConfig{
+			Enabled:    true,
+			AgentAddr:  getenv("COCOLA_AGENT_ADDR", "127.0.0.1:50061"),
+			GatewayURL: getenv("COCOLA_GATEWAY_URL", "http://127.0.0.1:8080"),
+			WorkerID:   getenv("COCOLA_SCHEDULER_WORKER_ID", "admin-api"),
+			PollEvery:  time.Duration(getenvInt("COCOLA_SCHEDULER_POLL_SECS", 60)) * time.Second,
+			RunTimeout: time.Duration(getenvInt("COCOLA_SCHEDULER_RUN_TIMEOUT_SECS", 3600)) * time.Second,
+		}); err != nil {
+			log.Sugar().Warnw("scheduled task worker disabled", "err", err)
+		} else {
+			log.Info("scheduled task worker enabled")
+		}
+	} else {
+		log.Warn("scheduled task worker DISABLED")
+	}
 
 	// Observability: a shared registry instruments every route and is exposed on
 	// a dedicated port so scrapes never compete with operator traffic.
 	reg := metrics.New("admin-api")
-	api := httpapi.New(svc, adminKey).WithMetrics(reg)
+	api := httpapi.New(svc, adminKey).WithRuntimeAuth(secret, issuerName).WithMetrics(reg)
 	if metricsAddr := getenv("COCOLA_METRICS_ADDR", ":9093"); metricsAddr != "" {
 		go func() {
 			log.Sugar().Infow("admin-api metrics", "addr", metricsAddr)
@@ -260,4 +286,13 @@ func getenvBool(k string, def bool) bool {
 		}
 	}
 	return def
+}
+
+func envBoolFalse(v string) bool {
+	switch v {
+	case "0", "false", "FALSE", "False", "no", "NO", "off", "OFF":
+		return true
+	default:
+		return false
+	}
 }

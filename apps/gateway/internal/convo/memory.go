@@ -4,6 +4,7 @@ import (
 	"context"
 	"sort"
 	"sync"
+	"time"
 )
 
 // Memory is the in-process Store used for tests and zero-dependency dev boots
@@ -30,6 +31,9 @@ func NewMemory() *Memory {
 func (m *Memory) UpsertConversation(_ context.Context, c Conversation) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
+	if c.ChatType == "" {
+		c.ChatType = "chat"
+	}
 	if existing, ok := m.convs[c.ID]; ok {
 		// Refresh updated_at only; keep the original title (MVP: never overwrite).
 		existing.UpdatedAt = c.UpdatedAt
@@ -37,6 +41,22 @@ func (m *Memory) UpsertConversation(_ context.Context, c Conversation) error {
 		return nil
 	}
 	m.convs[c.ID] = c
+	return nil
+}
+
+func (m *Memory) RevealConversation(_ context.Context, convID, userID, title string, updatedAt time.Time) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	c, ok := m.convs[convID]
+	if !ok || c.UserID != userID {
+		return ErrNotFound
+	}
+	if title != "" {
+		c.Title = title
+	}
+	c.Hidden = false
+	c.UpdatedAt = updatedAt
+	m.convs[convID] = c
 	return nil
 }
 
@@ -52,7 +72,7 @@ func (m *Memory) ListConversations(_ context.Context, userID string) ([]Conversa
 	defer m.mu.RUnlock()
 	out := make([]Conversation, 0)
 	for _, c := range m.convs {
-		if c.UserID == userID {
+		if c.UserID == userID && !c.Hidden {
 			out = append(out, c)
 		}
 	}

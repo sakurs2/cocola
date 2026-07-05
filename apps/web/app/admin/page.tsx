@@ -2,7 +2,7 @@
 
 import { buttonVariants } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
-import { ArrowRight, Box, Cpu, Server, ShieldCheck, Users } from "lucide-react";
+import { ArrowRight, Box, CalendarClock, Cpu, Server, ShieldCheck, Users } from "lucide-react";
 import Link from "next/link";
 
 const MODULES = [
@@ -38,6 +38,14 @@ const MODULES = [
     group: "AI",
     summary: "Providers, model aliases, API keys, default model, visibility, and logos.",
     stats: ["Providers", "Routes", "Default"],
+  },
+  {
+    title: "Scheduled Tasks",
+    href: "/admin/scheduled-tasks",
+    icon: CalendarClock,
+    group: "AI",
+    summary: "System task schedules, prompt inputs, model selection, attachments, and run history.",
+    stats: ["Tasks", "Runs", "Errors"],
   },
 ];
 

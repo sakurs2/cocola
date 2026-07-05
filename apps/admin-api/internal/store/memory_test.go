@@ -106,3 +106,51 @@ func TestAuditAppendAndListNewestFirst(t *testing.T) {
 		t.Fatalf("not newest-first: %+v", got)
 	}
 }
+
+func TestTryStartScheduledTaskRunBackfillsLegacyUserConversationID(t *testing.T) {
+	m := NewMemory()
+	ctx := context.Background()
+	now := time.Unix(1_800_000_000, 0).UTC()
+	task := ScheduledTask{
+		ID:           "task-1",
+		OwnerType:    "user",
+		OwnerUserID:  "alice@example.com",
+		Name:         "Time query",
+		Status:       "active",
+		ScheduleKind: "once",
+		ScheduleSpec: []byte(`{"run_at":"2027-01-15T08:00:00Z"}`),
+		Timezone:     "Asia/Shanghai",
+		Prompt:       "what time is it",
+		ModelAlias:   "claude-sonnet",
+		MaxTurns:     30,
+		ConfigJSON:   []byte(`{}`),
+		NextRunAt:    now,
+		CreatedAt:    now.Add(-time.Hour),
+		UpdatedAt:    now.Add(-time.Hour),
+	}
+	if err := m.CreateScheduledTask(ctx, task, nil); err != nil {
+		t.Fatalf("create legacy task: %v", err)
+	}
+
+	claimed, ok, err := m.TryStartScheduledTaskRun(ctx, task.ID, ScheduledTaskRun{
+		ID:           "run-1",
+		TaskID:       task.ID,
+		ScheduledFor: now,
+		Status:       "running",
+		CreatedAt:    now,
+		UpdatedAt:    now,
+	}, time.Time{})
+	if err != nil || !ok {
+		t.Fatalf("try start: ok=%v err=%v", ok, err)
+	}
+	if claimed.ConversationID != "sched-task-1" {
+		t.Fatalf("claimed conversation id = %q", claimed.ConversationID)
+	}
+	stored, err := m.GetScheduledTask(ctx, task.ID)
+	if err != nil {
+		t.Fatalf("get task: %v", err)
+	}
+	if stored.ConversationID != "sched-task-1" {
+		t.Fatalf("stored conversation id = %q", stored.ConversationID)
+	}
+}

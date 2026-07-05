@@ -7,6 +7,7 @@ package httpapi
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"net/http"
 	"time"
@@ -539,6 +540,231 @@ func llmModelInput(req llmModelReq, actor string) service.LLMModelInput {
 		SortOrder:  req.SortOrder,
 		Actor:      actor,
 	}
+}
+
+// ---- scheduled system tasks ----
+
+type scheduledTaskAttachmentReq struct {
+	Filename   string `json:"filename"`
+	Mime       string `json:"mime"`
+	SizeBytes  int64  `json:"size_bytes"`
+	ContentB64 string `json:"content_b64"`
+}
+
+type scheduledTaskReq struct {
+	Name         string                       `json:"name"`
+	Description  string                       `json:"description,omitempty"`
+	Status       string                       `json:"status,omitempty"`
+	ScheduleKind string                       `json:"schedule_kind"`
+	ScheduleSpec json.RawMessage              `json:"schedule_spec"`
+	Timezone     string                       `json:"timezone,omitempty"`
+	Prompt       string                       `json:"prompt"`
+	ModelAlias   string                       `json:"model_alias"`
+	ConfigJSON   json.RawMessage              `json:"config_json,omitempty"`
+	Attachments  []scheduledTaskAttachmentReq `json:"attachments,omitempty"`
+}
+
+func (a *API) createScheduledTask(w http.ResponseWriter, r *http.Request) {
+	var req scheduledTaskReq
+	if err := decode(r, &req); err != nil {
+		mapErr(w, err)
+		return
+	}
+	out, err := a.svc.CreateScheduledTask(r.Context(), scheduledTaskInput(req, actorOf(r), false))
+	if err != nil {
+		mapErr(w, err)
+		return
+	}
+	writeJSON(w, http.StatusCreated, out)
+}
+
+func (a *API) createMyScheduledTask(w http.ResponseWriter, r *http.Request) {
+	var req scheduledTaskReq
+	if err := decode(r, &req); err != nil {
+		mapErr(w, err)
+		return
+	}
+	owner := actorOf(r)
+	out, err := a.svc.CreateUserScheduledTask(r.Context(), owner, scheduledTaskInput(req, owner, false))
+	if err != nil {
+		mapErr(w, err)
+		return
+	}
+	writeJSON(w, http.StatusCreated, out)
+}
+
+func (a *API) listScheduledTasks(w http.ResponseWriter, r *http.Request) {
+	tasks, err := a.svc.ListScheduledTasks(r.Context())
+	if err != nil {
+		mapErr(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"tasks": tasks})
+}
+
+func (a *API) listMyScheduledTasks(w http.ResponseWriter, r *http.Request) {
+	tasks, err := a.svc.ListUserScheduledTasks(r.Context(), actorOf(r))
+	if err != nil {
+		mapErr(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"tasks": tasks})
+}
+
+func (a *API) getScheduledTask(w http.ResponseWriter, r *http.Request) {
+	task, err := a.svc.GetScheduledTask(r.Context(), chi.URLParam(r, "id"))
+	if err != nil {
+		mapErr(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, task)
+}
+
+func (a *API) getMyScheduledTask(w http.ResponseWriter, r *http.Request) {
+	task, err := a.svc.GetUserScheduledTask(r.Context(), chi.URLParam(r, "id"), actorOf(r))
+	if err != nil {
+		mapErr(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, task)
+}
+
+func (a *API) updateScheduledTask(w http.ResponseWriter, r *http.Request) {
+	var req scheduledTaskReq
+	if err := decode(r, &req); err != nil {
+		mapErr(w, err)
+		return
+	}
+	out, err := a.svc.UpdateScheduledTask(r.Context(), chi.URLParam(r, "id"), scheduledTaskInput(req, actorOf(r), req.Attachments != nil))
+	if err != nil {
+		mapErr(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, out)
+}
+
+func (a *API) updateMyScheduledTask(w http.ResponseWriter, r *http.Request) {
+	var req scheduledTaskReq
+	if err := decode(r, &req); err != nil {
+		mapErr(w, err)
+		return
+	}
+	owner := actorOf(r)
+	out, err := a.svc.UpdateUserScheduledTask(r.Context(), chi.URLParam(r, "id"), owner, scheduledTaskInput(req, owner, req.Attachments != nil))
+	if err != nil {
+		mapErr(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, out)
+}
+
+func scheduledTaskInput(req scheduledTaskReq, actor string, replaceAttachments bool) service.ScheduledTaskInput {
+	return service.ScheduledTaskInput{
+		Name:               req.Name,
+		Description:        req.Description,
+		Status:             req.Status,
+		ScheduleKind:       req.ScheduleKind,
+		ScheduleSpec:       req.ScheduleSpec,
+		Timezone:           req.Timezone,
+		Prompt:             req.Prompt,
+		ModelAlias:         req.ModelAlias,
+		ConfigJSON:         req.ConfigJSON,
+		Attachments:        scheduledTaskAttachments(req.Attachments),
+		ReplaceAttachments: replaceAttachments,
+		Actor:              actor,
+	}
+}
+
+func (a *API) deleteMyScheduledTask(w http.ResponseWriter, r *http.Request) {
+	if err := a.svc.DeleteUserScheduledTask(r.Context(), chi.URLParam(r, "id"), actorOf(r)); err != nil {
+		mapErr(w, err)
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
+}
+
+func scheduledTaskAttachments(reqs []scheduledTaskAttachmentReq) []store.ScheduledTaskAttachment {
+	out := make([]store.ScheduledTaskAttachment, 0, len(reqs))
+	for _, req := range reqs {
+		out = append(out, store.ScheduledTaskAttachment{
+			Filename:   req.Filename,
+			Mime:       req.Mime,
+			SizeBytes:  req.SizeBytes,
+			ContentB64: req.ContentB64,
+		})
+	}
+	return out
+}
+
+func (a *API) deleteScheduledTask(w http.ResponseWriter, r *http.Request) {
+	if err := a.svc.DeleteScheduledTask(r.Context(), chi.URLParam(r, "id"), actorOf(r)); err != nil {
+		mapErr(w, err)
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
+}
+
+func (a *API) pauseScheduledTask(w http.ResponseWriter, r *http.Request) {
+	out, err := a.svc.SetScheduledTaskStatus(r.Context(), chi.URLParam(r, "id"), service.TaskStatusPaused, actorOf(r))
+	if err != nil {
+		mapErr(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, out)
+}
+
+func (a *API) pauseMyScheduledTask(w http.ResponseWriter, r *http.Request) {
+	out, err := a.svc.SetUserScheduledTaskStatus(r.Context(), chi.URLParam(r, "id"), actorOf(r), service.TaskStatusPaused)
+	if err != nil {
+		mapErr(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, out)
+}
+
+func (a *API) resumeScheduledTask(w http.ResponseWriter, r *http.Request) {
+	out, err := a.svc.SetScheduledTaskStatus(r.Context(), chi.URLParam(r, "id"), service.TaskStatusActive, actorOf(r))
+	if err != nil {
+		mapErr(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, out)
+}
+
+func (a *API) resumeMyScheduledTask(w http.ResponseWriter, r *http.Request) {
+	out, err := a.svc.SetUserScheduledTaskStatus(r.Context(), chi.URLParam(r, "id"), actorOf(r), service.TaskStatusActive)
+	if err != nil {
+		mapErr(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, out)
+}
+
+func (a *API) runScheduledTaskNow(w http.ResponseWriter, r *http.Request) {
+	out, err := a.svc.EnqueueScheduledTaskNow(r.Context(), chi.URLParam(r, "id"), actorOf(r))
+	if err != nil {
+		mapErr(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, out)
+}
+
+func (a *API) listScheduledTaskRuns(w http.ResponseWriter, r *http.Request) {
+	runs, err := a.svc.ListScheduledTaskRuns(r.Context(), r.URL.Query().Get("task_id"), r.URL.Query().Get("status"), qInt(r, "limit", 50))
+	if err != nil {
+		mapErr(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"runs": runs})
+}
+
+func (a *API) getScheduledTaskRun(w http.ResponseWriter, r *http.Request) {
+	run, err := a.svc.GetScheduledTaskRun(r.Context(), chi.URLParam(r, "id"))
+	if err != nil {
+		mapErr(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, run)
 }
 
 // ---- sandbox nodes ----

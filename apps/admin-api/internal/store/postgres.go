@@ -3,6 +3,7 @@ package store
 import (
 	"context"
 	"errors"
+	"strconv"
 	"time"
 
 	"github.com/jackc/pgx/v5"
@@ -651,6 +652,414 @@ func (p *Postgres) DeleteLLMModelRoute(ctx context.Context, alias string) error 
 		return ErrNotFound
 	}
 	return nil
+}
+
+// ---- Scheduled system tasks ----
+
+const scheduledTaskCols = `id, owner_type, owner_user_id, conversation_id, name, description, status, schedule_kind, schedule_spec, timezone, prompt, model_alias, max_turns, config_json, next_run_at, last_run_at, run_count, last_status, last_error, created_at, updated_at, created_by, updated_by`
+
+func scanScheduledTask(row pgx.Row) (ScheduledTask, error) {
+	var task ScheduledTask
+	var nextRun, lastRun *time.Time
+	err := row.Scan(&task.ID, &task.OwnerType, &task.OwnerUserID, &task.ConversationID, &task.Name, &task.Description, &task.Status,
+		&task.ScheduleKind, &task.ScheduleSpec, &task.Timezone, &task.Prompt, &task.ModelAlias,
+		&task.MaxTurns, &task.ConfigJSON, &nextRun, &lastRun, &task.RunCount, &task.LastStatus,
+		&task.LastError, &task.CreatedAt, &task.UpdatedAt, &task.CreatedBy, &task.UpdatedBy)
+	if err != nil {
+		return ScheduledTask{}, err
+	}
+	if nextRun != nil {
+		task.NextRunAt = *nextRun
+	}
+	if lastRun != nil {
+		task.LastRunAt = *lastRun
+	}
+	return task, nil
+}
+
+func scanScheduledTaskAttachment(row pgx.Row) (ScheduledTaskAttachment, error) {
+	var att ScheduledTaskAttachment
+	err := row.Scan(&att.ID, &att.TaskID, &att.Filename, &att.Mime, &att.SizeBytes, &att.ObjectKey, &att.ContentB64, &att.CreatedAt, &att.CreatedBy)
+	return att, err
+}
+
+func (p *Postgres) CreateScheduledTask(ctx context.Context, task ScheduledTask, attachments []ScheduledTaskAttachment) error {
+	tx, err := p.pool.Begin(ctx)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback(ctx)
+	const q = `INSERT INTO scheduled_tasks (` + scheduledTaskCols + `)
+		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23)`
+	_, err = tx.Exec(ctx, q,
+		task.ID, task.OwnerType, task.OwnerUserID, task.ConversationID, task.Name, task.Description, task.Status, task.ScheduleKind,
+		task.ScheduleSpec, task.Timezone, task.Prompt, task.ModelAlias, task.MaxTurns,
+		task.ConfigJSON, nullableTime(task.NextRunAt), nullableTime(task.LastRunAt), task.RunCount,
+		task.LastStatus, task.LastError, task.CreatedAt, task.UpdatedAt, task.CreatedBy, task.UpdatedBy)
+	if isUniqueViolation(err) {
+		return ErrConflict
+	}
+	if err != nil {
+		return err
+	}
+	if err := insertScheduledTaskAttachments(ctx, tx, attachments); err != nil {
+		return err
+	}
+	return tx.Commit(ctx)
+}
+
+func insertScheduledTaskAttachments(ctx context.Context, tx pgx.Tx, attachments []ScheduledTaskAttachment) error {
+	const q = `INSERT INTO scheduled_task_attachments
+		(id, task_id, filename, mime, size_bytes, object_key, content_b64, created_at, created_by)
+		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)`
+	for _, att := range attachments {
+		_, err := tx.Exec(ctx, q, att.ID, att.TaskID, att.Filename, att.Mime, att.SizeBytes, att.ObjectKey, att.ContentB64, att.CreatedAt, att.CreatedBy)
+		if isUniqueViolation(err) {
+			return ErrConflict
+		}
+		if isForeignKeyViolation(err) {
+			return ErrNotFound
+		}
+		if err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func (p *Postgres) GetScheduledTask(ctx context.Context, id string) (ScheduledTask, error) {
+	row := p.pool.QueryRow(ctx, `SELECT `+scheduledTaskCols+` FROM scheduled_tasks WHERE id=$1`, id)
+	task, err := scanScheduledTask(row)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return ScheduledTask{}, ErrNotFound
+	}
+	return task, err
+}
+
+func (p *Postgres) GetScheduledTaskForOwner(ctx context.Context, id, ownerUserID string) (ScheduledTask, error) {
+	row := p.pool.QueryRow(ctx, `SELECT `+scheduledTaskCols+` FROM scheduled_tasks
+		WHERE id=$1 AND owner_type='user' AND owner_user_id=$2`, id, ownerUserID)
+	task, err := scanScheduledTask(row)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return ScheduledTask{}, ErrNotFound
+	}
+	return task, err
+}
+
+func (p *Postgres) ListScheduledTasks(ctx context.Context) ([]ScheduledTask, error) {
+	rows, err := p.pool.Query(ctx, `SELECT `+scheduledTaskCols+` FROM scheduled_tasks ORDER BY updated_at DESC`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := make([]ScheduledTask, 0)
+	for rows.Next() {
+		task, err := scanScheduledTask(rows)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, task)
+	}
+	return out, rows.Err()
+}
+
+func (p *Postgres) ListScheduledTasksForOwner(ctx context.Context, ownerUserID string) ([]ScheduledTask, error) {
+	rows, err := p.pool.Query(ctx, `SELECT `+scheduledTaskCols+` FROM scheduled_tasks
+		WHERE owner_type='user' AND owner_user_id=$1 ORDER BY updated_at DESC`, ownerUserID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := make([]ScheduledTask, 0)
+	for rows.Next() {
+		task, err := scanScheduledTask(rows)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, task)
+	}
+	return out, rows.Err()
+}
+
+func (p *Postgres) UpdateScheduledTask(ctx context.Context, task ScheduledTask, replaceAttachments bool, attachments []ScheduledTaskAttachment) error {
+	tx, err := p.pool.Begin(ctx)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback(ctx)
+	const q = `UPDATE scheduled_tasks
+		SET owner_type=$2, owner_user_id=$3, conversation_id=$4, name=$5, description=$6,
+		    status=$7, schedule_kind=$8, schedule_spec=$9, timezone=$10, prompt=$11,
+		    model_alias=$12, max_turns=$13, config_json=$14, next_run_at=$15,
+		    last_run_at=$16, run_count=$17, last_status=$18, last_error=$19,
+		    created_at=$20, updated_at=$21, created_by=$22, updated_by=$23
+		WHERE id=$1`
+	ct, err := tx.Exec(ctx, q,
+		task.ID, task.OwnerType, task.OwnerUserID, task.ConversationID, task.Name, task.Description, task.Status, task.ScheduleKind,
+		task.ScheduleSpec, task.Timezone, task.Prompt, task.ModelAlias, task.MaxTurns,
+		task.ConfigJSON, nullableTime(task.NextRunAt), nullableTime(task.LastRunAt), task.RunCount,
+		task.LastStatus, task.LastError, task.CreatedAt, task.UpdatedAt, task.CreatedBy, task.UpdatedBy)
+	if err != nil {
+		return err
+	}
+	if ct.RowsAffected() == 0 {
+		return ErrNotFound
+	}
+	if replaceAttachments {
+		if _, err := tx.Exec(ctx, `DELETE FROM scheduled_task_attachments WHERE task_id=$1`, task.ID); err != nil {
+			return err
+		}
+		if err := insertScheduledTaskAttachments(ctx, tx, attachments); err != nil {
+			return err
+		}
+	}
+	return tx.Commit(ctx)
+}
+
+func (p *Postgres) DeleteScheduledTask(ctx context.Context, id string) error {
+	ct, err := p.pool.Exec(ctx, `DELETE FROM scheduled_tasks WHERE id=$1`, id)
+	if err != nil {
+		return err
+	}
+	if ct.RowsAffected() == 0 {
+		return ErrNotFound
+	}
+	return nil
+}
+
+func (p *Postgres) DeleteScheduledTaskForOwner(ctx context.Context, id, ownerUserID string) error {
+	ct, err := p.pool.Exec(ctx, `DELETE FROM scheduled_tasks WHERE id=$1 AND owner_type='user' AND owner_user_id=$2`, id, ownerUserID)
+	if err != nil {
+		return err
+	}
+	if ct.RowsAffected() == 0 {
+		return ErrNotFound
+	}
+	return nil
+}
+
+func (p *Postgres) ListScheduledTaskAttachments(ctx context.Context, taskID string) ([]ScheduledTaskAttachment, error) {
+	rows, err := p.pool.Query(ctx, `SELECT id, task_id, filename, mime, size_bytes, object_key, content_b64, created_at, created_by
+		FROM scheduled_task_attachments WHERE task_id=$1 ORDER BY created_at`, taskID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := make([]ScheduledTaskAttachment, 0)
+	for rows.Next() {
+		att, err := scanScheduledTaskAttachment(rows)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, att)
+	}
+	return out, rows.Err()
+}
+
+func (p *Postgres) ListDueScheduledTasks(ctx context.Context, now time.Time, limit int) ([]ScheduledTask, error) {
+	q := `SELECT ` + scheduledTaskCols + ` FROM scheduled_tasks
+		WHERE status='active' AND next_run_at IS NOT NULL AND next_run_at <= $1
+		ORDER BY next_run_at ASC`
+	args := []any{now}
+	if limit > 0 {
+		q += ` LIMIT $2`
+		args = append(args, limit)
+	}
+	rows, err := p.pool.Query(ctx, q, args...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := make([]ScheduledTask, 0)
+	for rows.Next() {
+		task, err := scanScheduledTask(rows)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, task)
+	}
+	return out, rows.Err()
+}
+
+func (p *Postgres) TryStartScheduledTaskRun(ctx context.Context, taskID string, run ScheduledTaskRun, nextRunAt time.Time) (ScheduledTask, bool, error) {
+	tx, err := p.pool.Begin(ctx)
+	if err != nil {
+		return ScheduledTask{}, false, err
+	}
+	defer tx.Rollback(ctx)
+	row := tx.QueryRow(ctx, `SELECT `+scheduledTaskCols+` FROM scheduled_tasks
+		WHERE id=$1 AND status='active' AND next_run_at IS NOT NULL AND next_run_at <= $2
+		AND NOT EXISTS (
+			SELECT 1 FROM scheduled_task_runs
+			WHERE task_id=$1 AND status IN ('queued','running')
+		)
+		FOR UPDATE`, taskID, run.ScheduledFor)
+	task, err := scanScheduledTask(row)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return ScheduledTask{}, false, nil
+	}
+	if err != nil {
+		return ScheduledTask{}, false, err
+	}
+	const rq = `INSERT INTO scheduled_task_runs
+		(id, task_id, scheduled_for, status, worker_id, session_id, model_alias, output_text, error, started_at, finished_at, created_at, updated_at)
+		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13)`
+	_, err = tx.Exec(ctx, rq,
+		run.ID, run.TaskID, nullableTime(run.ScheduledFor), run.Status, run.WorkerID,
+		run.SessionID, run.ModelAlias, run.OutputText, run.Error, nullableTime(run.StartedAt),
+		nullableTime(run.FinishedAt), run.CreatedAt, run.UpdatedAt)
+	if isUniqueViolation(err) {
+		return ScheduledTask{}, false, ErrConflict
+	}
+	if err != nil {
+		return ScheduledTask{}, false, err
+	}
+	_, err = tx.Exec(ctx, `UPDATE scheduled_tasks
+		SET next_run_at=$2,
+		    updated_at=$3,
+		    conversation_id=CASE
+		        WHEN owner_type='user' AND conversation_id='' THEN 'sched-' || id
+		        ELSE conversation_id
+		    END
+		WHERE id=$1`,
+		taskID, nullableTime(nextRunAt), run.UpdatedAt)
+	if err != nil {
+		return ScheduledTask{}, false, err
+	}
+	if task.OwnerType == "user" && task.ConversationID == "" {
+		task.ConversationID = "sched-" + task.ID
+	}
+	return task, true, tx.Commit(ctx)
+}
+
+func scanScheduledTaskRun(row pgx.Row) (ScheduledTaskRun, error) {
+	var run ScheduledTaskRun
+	var scheduledFor, startedAt, finishedAt *time.Time
+	err := row.Scan(&run.ID, &run.TaskID, &scheduledFor, &run.Status, &run.WorkerID,
+		&run.SessionID, &run.ModelAlias, &run.OutputText, &run.Error, &startedAt,
+		&finishedAt, &run.CreatedAt, &run.UpdatedAt)
+	if err != nil {
+		return ScheduledTaskRun{}, err
+	}
+	if scheduledFor != nil {
+		run.ScheduledFor = *scheduledFor
+	}
+	if startedAt != nil {
+		run.StartedAt = *startedAt
+	}
+	if finishedAt != nil {
+		run.FinishedAt = *finishedAt
+	}
+	return run, nil
+}
+
+func (p *Postgres) GetScheduledTaskRun(ctx context.Context, id string) (ScheduledTaskRun, error) {
+	row := p.pool.QueryRow(ctx, `SELECT id, task_id, scheduled_for, status, worker_id, session_id, model_alias, output_text, error, started_at, finished_at, created_at, updated_at
+		FROM scheduled_task_runs WHERE id=$1`, id)
+	run, err := scanScheduledTaskRun(row)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return ScheduledTaskRun{}, ErrNotFound
+	}
+	return run, err
+}
+
+func (p *Postgres) ListScheduledTaskRuns(ctx context.Context, taskID, status string, limit int) ([]ScheduledTaskRun, error) {
+	q := `SELECT id, task_id, scheduled_for, status, worker_id, session_id, model_alias, output_text, error, started_at, finished_at, created_at, updated_at
+		FROM scheduled_task_runs WHERE TRUE`
+	args := []any{}
+	if taskID != "" {
+		args = append(args, taskID)
+		q += ` AND task_id=$` + strconv.Itoa(len(args))
+	}
+	if status != "" {
+		args = append(args, status)
+		q += ` AND status=$` + strconv.Itoa(len(args))
+	}
+	q += ` ORDER BY created_at DESC`
+	if limit > 0 {
+		args = append(args, limit)
+		q += ` LIMIT $` + strconv.Itoa(len(args))
+	}
+	rows, err := p.pool.Query(ctx, q, args...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := make([]ScheduledTaskRun, 0)
+	for rows.Next() {
+		run, err := scanScheduledTaskRun(rows)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, run)
+	}
+	return out, rows.Err()
+}
+
+func (p *Postgres) UpdateScheduledTaskRun(ctx context.Context, run ScheduledTaskRun, taskNextRunAt time.Time, terminal bool) error {
+	tx, err := p.pool.Begin(ctx)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback(ctx)
+	const q = `UPDATE scheduled_task_runs
+		SET status=$2, worker_id=$3, session_id=$4, model_alias=$5, output_text=$6,
+		    error=$7, started_at=$8, finished_at=$9, created_at=$10, updated_at=$11
+		WHERE id=$1`
+	ct, err := tx.Exec(ctx, q,
+		run.ID, run.Status, run.WorkerID, run.SessionID, run.ModelAlias, run.OutputText,
+		run.Error, nullableTime(run.StartedAt), nullableTime(run.FinishedAt), run.CreatedAt, run.UpdatedAt)
+	if err != nil {
+		return err
+	}
+	if ct.RowsAffected() == 0 {
+		return ErrNotFound
+	}
+	if terminal {
+		ct, err = tx.Exec(ctx, `UPDATE scheduled_tasks
+			SET status=CASE WHEN schedule_kind='once' AND $5 IS NULL THEN 'completed' ELSE status END,
+			    last_run_at=$2, run_count=run_count+1, last_status=$3, last_error=$4,
+			    next_run_at=$5, updated_at=$6
+			WHERE id=$1`, run.TaskID, nullableTime(run.FinishedAt), run.Status, run.Error, nullableTime(taskNextRunAt), run.UpdatedAt)
+		if err != nil {
+			return err
+		}
+		if ct.RowsAffected() == 0 {
+			return ErrNotFound
+		}
+	}
+	return tx.Commit(ctx)
+}
+
+func (p *Postgres) AppendScheduledTaskRunEvent(ctx context.Context, event ScheduledTaskRunEvent) error {
+	const q = `INSERT INTO scheduled_task_run_events (run_id, seq, kind, data_json, created_at)
+		VALUES ($1,$2,$3,$4,$5)`
+	_, err := p.pool.Exec(ctx, q, event.RunID, event.Seq, event.Kind, event.DataJSON, event.CreatedAt)
+	if isForeignKeyViolation(err) {
+		return ErrNotFound
+	}
+	if isUniqueViolation(err) {
+		return ErrConflict
+	}
+	return err
+}
+
+func (p *Postgres) ListScheduledTaskRunEvents(ctx context.Context, runID string) ([]ScheduledTaskRunEvent, error) {
+	rows, err := p.pool.Query(ctx, `SELECT id, run_id, seq, kind, data_json, created_at
+		FROM scheduled_task_run_events WHERE run_id=$1 ORDER BY seq`, runID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := make([]ScheduledTaskRunEvent, 0)
+	for rows.Next() {
+		var event ScheduledTaskRunEvent
+		if err := rows.Scan(&event.ID, &event.RunID, &event.Seq, &event.Kind, &event.DataJSON, &event.CreatedAt); err != nil {
+			return nil, err
+		}
+		out = append(out, event)
+	}
+	return out, rows.Err()
 }
 
 // ---- Audit ----

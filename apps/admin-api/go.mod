@@ -5,11 +5,13 @@ go 1.23.0
 require (
 	github.com/cocola-project/cocola/db v0.0.0
 	github.com/cocola-project/cocola/packages/go-common v0.0.0
+	github.com/cocola-project/cocola/packages/proto/gen/go v0.0.0
 	github.com/go-chi/chi/v5 v5.2.0
 	github.com/jackc/pgx/v5 v5.7.2
 	github.com/pressly/goose/v3 v3.24.1
 	github.com/redis/go-redis/v9 v9.7.0
 	golang.org/x/crypto v0.31.0
+	google.golang.org/grpc v1.65.0
 )
 
 require (
@@ -50,10 +52,11 @@ require (
 	golang.org/x/text v0.21.0 // indirect
 	google.golang.org/genproto/googleapis/api v0.0.0-20240701130421-f6361c86f094 // indirect
 	google.golang.org/genproto/googleapis/rpc v0.0.0-20240701130421-f6361c86f094 // indirect
-	google.golang.org/grpc v1.65.0 // indirect
 	google.golang.org/protobuf v1.36.6 // indirect
 )
 
 replace github.com/cocola-project/cocola/packages/go-common => ../../packages/go-common
 
 replace github.com/cocola-project/cocola/db => ../../db
+
+replace github.com/cocola-project/cocola/packages/proto/gen/go => ../../packages/proto/gen/go

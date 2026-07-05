@@ -30,7 +30,7 @@ export async function GET(req: NextRequest) {
     const body = await upstream.text();
     return new Response(body, {
       status: upstream.status,
-      headers: { "content-type": "application/json" },
+      headers: { "content-type": "application/json", "cache-control": "no-store" },
     });
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);

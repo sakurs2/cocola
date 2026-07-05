@@ -85,6 +85,7 @@ export type SandboxInfo = {
 export type ConversationSummary = {
   id: string;
   title: string;
+  chat_type?: "chat" | "scheduled_task" | string;
   updated_at: string;
 };
 
@@ -397,7 +398,7 @@ export function CocolaRuntimeProvider({ children }: { children: ReactNode }) {
   const refreshConversations = useCallback(() => {
     void (async () => {
       try {
-        const res = await fetch("/api/conversations");
+        const res = await fetch("/api/conversations", { cache: "no-store" });
         if (isAccountDisabledResponse(res)) {
           redirectAccountDisabled();
           return;

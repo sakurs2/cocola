@@ -141,14 +141,17 @@ func (a *API) health(w http.ResponseWriter, _ *http.Request) {
 // the verified identity, NOT from the body, so a caller cannot impersonate
 // another user. session_id and sandbox_id are caller-chosen routing hints.
 type chatRequest struct {
-	Prompt      string            `json:"prompt"`
-	SessionID   string            `json:"session_id"`
-	SandboxID   string            `json:"sandbox_id"`
-	MaxTurns    int32             `json:"max_turns"`
-	ModelAlias  string            `json:"model_alias"`
-	ModelLabel  string            `json:"model_label"`
-	ModelIcon   map[string]string `json:"model_icon"`
-	Attachments []attachmentDTO   `json:"attachments"`
+	Prompt                               string            `json:"prompt"`
+	SessionID                            string            `json:"session_id"`
+	SandboxID                            string            `json:"sandbox_id"`
+	MaxTurns                             int32             `json:"max_turns"`
+	ModelAlias                           string            `json:"model_alias"`
+	ModelLabel                           string            `json:"model_label"`
+	ModelIcon                            map[string]string `json:"model_icon"`
+	ConversationTitle                    string            `json:"conversation_title"`
+	ConversationType                     string            `json:"conversation_type"`
+	DeferConversationVisibilityUntilDone bool              `json:"defer_conversation_visibility_until_done"`
+	Attachments                          []attachmentDTO   `json:"attachments"`
 }
 
 // attachmentDTO is one user-uploaded file carried inline in the chat body.
@@ -268,7 +271,11 @@ func (a *API) chat(w http.ResponseWriter, r *http.Request) {
 	})
 	if err != nil {
 		// Best-effort terminal error event; the connection may already be gone.
-		_ = writeSSE(w, flusher, agent.Event{Kind: "error", Data: map[string]string{"error": err.Error()}})
+		errEv := agent.Event{Kind: "error", Data: map[string]string{"error": err.Error()}}
+		if reducer != nil {
+			reducer.Apply(errEv.Kind, errEv.Data)
+		}
+		_ = writeSSE(w, flusher, errEv)
 		a.log.Warn("agent stream ended with error: " + err.Error())
 	}
 
@@ -278,6 +285,9 @@ func (a *API) chat(w http.ResponseWriter, r *http.Request) {
 	// abort the write.
 	if persist {
 		a.persistAssistantTurn(context.Background(), req.SessionID, reducer.Parts(), assistantMetadata(req))
+		if req.DeferConversationVisibilityUntilDone {
+			a.revealConversation(context.Background(), id, req)
+		}
 	}
 }
 
@@ -289,7 +299,9 @@ func (a *API) persistUserTurn(ctx context.Context, id auth.Identity, req chatReq
 		ID:        req.SessionID,
 		UserID:    id.UserID,
 		TenantID:  id.TenantID,
-		Title:     titleFromPrompt(req.Prompt),
+		Title:     titleForConversation(req),
+		ChatType:  chatTypeForConversation(req),
+		Hidden:    req.DeferConversationVisibilityUntilDone,
 		CreatedAt: now,
 		UpdatedAt: now,
 	}); err != nil {
@@ -304,6 +316,15 @@ func (a *API) persistUserTurn(ctx context.Context, id auth.Identity, req chatReq
 		CreatedAt:      now,
 	}); err != nil {
 		a.log.Warn("persist user message failed: " + err.Error())
+	}
+}
+
+func (a *API) revealConversation(ctx context.Context, id auth.Identity, req chatRequest) {
+	if a.convo == nil || req.SessionID == "" {
+		return
+	}
+	if err := a.convo.RevealConversation(ctx, req.SessionID, id.UserID, titleForConversation(req), time.Now().UTC()); err != nil {
+		a.log.Warn("reveal conversation failed: " + err.Error())
 	}
 }
 
@@ -403,6 +424,22 @@ func titleFromPrompt(prompt string) string {
 		title = strings.TrimSpace(string(r[:maxRunes])) + "\u2026"
 	}
 	return title
+}
+
+func titleForConversation(req chatRequest) string {
+	if title := strings.TrimSpace(req.ConversationTitle); title != "" {
+		return title
+	}
+	return titleFromPrompt(req.Prompt)
+}
+
+func chatTypeForConversation(req chatRequest) string {
+	switch strings.TrimSpace(req.ConversationType) {
+	case "scheduled_task":
+		return "scheduled_task"
+	default:
+		return "chat"
+	}
 }
 
 func artifactDownloadURL(sessionID, artifactID string) string {

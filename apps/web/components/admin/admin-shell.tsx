@@ -1,7 +1,16 @@
 "use client";
 
 import { cn } from "@/lib/utils";
-import { Activity, ArrowLeft, Box, Cpu, LayoutDashboard, Server, Users } from "lucide-react";
+import {
+  Activity,
+  ArrowLeft,
+  Box,
+  Clock3,
+  Cpu,
+  LayoutDashboard,
+  Server,
+  Users,
+} from "lucide-react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import type { ReactNode } from "react";
@@ -23,7 +32,10 @@ const NAV_GROUPS: { label: string; items: AdminNavItem[] }[] = [
   },
   {
     label: "AI",
-    items: [{ href: "/admin/models", label: "Models", icon: Cpu }],
+    items: [
+      { href: "/admin/models", label: "Models", icon: Cpu },
+      { href: "/admin/scheduled-tasks", label: "Scheduled Tasks", icon: Clock3 },
+    ],
   },
   {
     label: "Infrastructure",

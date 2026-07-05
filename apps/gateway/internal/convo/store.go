@@ -69,6 +69,8 @@ type Conversation struct {
 	UserID    string    `json:"user_id"`
 	TenantID  string    `json:"tenant_id"`
 	Title     string    `json:"title"`
+	ChatType  string    `json:"chat_type"`
+	Hidden    bool      `json:"hidden"`
 	CreatedAt time.Time `json:"created_at"`
 	UpdatedAt time.Time `json:"updated_at"`
 }
@@ -105,6 +107,9 @@ type Store interface {
 	// updated_at. Title is set only on first insert (never overwritten), so the
 	// MVP "first user message" title is stable across follow-up turns.
 	UpsertConversation(ctx context.Context, c Conversation) error
+	// RevealConversation makes a hidden conversation visible after a background
+	// run finishes, optionally setting a stable title if it was created hidden.
+	RevealConversation(ctx context.Context, convID, userID, title string, updatedAt time.Time) error
 	// InsertMessage appends a message to a conversation.
 	InsertMessage(ctx context.Context, m Message) error
 	// ListConversations returns userID's conversations, most-recently-updated first.
