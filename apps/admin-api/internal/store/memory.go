@@ -692,6 +692,63 @@ func (m *Memory) ListScheduledTaskRuns(ctx context.Context, taskID, status strin
 	return out, nil
 }
 
+func (m *Memory) HeartbeatScheduledTaskRun(ctx context.Context, id, workerID string, now time.Time) (bool, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	run, ok := m.runs[id]
+	if !ok {
+		return false, ErrNotFound
+	}
+	if run.Status != "running" || (workerID != "" && run.WorkerID != workerID) {
+		return false, nil
+	}
+	run.UpdatedAt = now
+	m.runs[id] = run
+	return true, nil
+}
+
+func (m *Memory) ExpireStaleScheduledTaskRuns(ctx context.Context, before, now time.Time, errText string, limit int) ([]ScheduledTaskRun, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	candidates := make([]ScheduledTaskRun, 0)
+	for _, run := range m.runs {
+		updatedAt := run.UpdatedAt
+		if updatedAt.IsZero() {
+			updatedAt = run.CreatedAt
+		}
+		if run.Status == "running" && !updatedAt.IsZero() && updatedAt.Before(before) {
+			candidates = append(candidates, run)
+		}
+	}
+	sort.Slice(candidates, func(i, j int) bool { return candidates[i].UpdatedAt.Before(candidates[j].UpdatedAt) })
+	if limit > 0 && len(candidates) > limit {
+		candidates = candidates[:limit]
+	}
+	expired := make([]ScheduledTaskRun, 0, len(candidates))
+	for _, run := range candidates {
+		run.Status = "error"
+		run.Error = errText
+		run.FinishedAt = now
+		run.UpdatedAt = now
+		m.runs[run.ID] = run
+		task, ok := m.tasks[run.TaskID]
+		if !ok {
+			return nil, ErrNotFound
+		}
+		task.LastRunAt = now
+		task.LastStatus = run.Status
+		task.LastError = run.Error
+		task.UpdatedAt = now
+		if task.ScheduleKind == "once" && task.NextRunAt.IsZero() {
+			task.Status = "completed"
+		}
+		task.RunCount++
+		m.tasks[task.ID] = cloneTask(task)
+		expired = append(expired, run)
+	}
+	return expired, nil
+}
+
 func (m *Memory) UpdateScheduledTaskRun(ctx context.Context, run ScheduledTaskRun, taskNextRunAt time.Time, terminal bool) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()

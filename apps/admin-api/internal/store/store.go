@@ -304,6 +304,8 @@ type Store interface {
 	TryStartScheduledTaskRun(ctx context.Context, taskID string, run ScheduledTaskRun, nextRunAt time.Time) (ScheduledTask, bool, error)
 	GetScheduledTaskRun(ctx context.Context, id string) (ScheduledTaskRun, error)
 	ListScheduledTaskRuns(ctx context.Context, taskID, status string, limit int) ([]ScheduledTaskRun, error)
+	HeartbeatScheduledTaskRun(ctx context.Context, id, workerID string, now time.Time) (bool, error)
+	ExpireStaleScheduledTaskRuns(ctx context.Context, before, now time.Time, errText string, limit int) ([]ScheduledTaskRun, error)
 	UpdateScheduledTaskRun(ctx context.Context, run ScheduledTaskRun, taskNextRunAt time.Time, terminal bool) error
 	AppendScheduledTaskRunEvent(ctx context.Context, event ScheduledTaskRunEvent) error
 	ListScheduledTaskRunEvents(ctx context.Context, runID string) ([]ScheduledTaskRunEvent, error)

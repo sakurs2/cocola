@@ -36,6 +36,10 @@
 //	                           (default 127.0.0.1:50061).
 //	COCOLA_SCHEDULER_RUN_TIMEOUT_SECS
 //	                           max runtime per scheduled task run (default 3600).
+//	COCOLA_SCHEDULER_HEARTBEAT_SECS
+//	                           running task lease heartbeat cadence (default 30).
+//	COCOLA_SCHEDULER_LEASE_TIMEOUT_SECS
+//	                           stale running task timeout (default 300).
 //	COCOLA_SCHEDULER_MIN_INTERVAL_SECS
 //	                           minimum schedule interval accepted (default 3600).
 //
@@ -229,6 +233,12 @@ func main() {
 			WorkerID:   getenv("COCOLA_SCHEDULER_WORKER_ID", "admin-api"),
 			PollEvery:  time.Duration(getenvInt("COCOLA_SCHEDULER_POLL_SECS", 60)) * time.Second,
 			RunTimeout: time.Duration(getenvInt("COCOLA_SCHEDULER_RUN_TIMEOUT_SECS", 3600)) * time.Second,
+			HeartbeatEvery: time.Duration(
+				getenvInt("COCOLA_SCHEDULER_HEARTBEAT_SECS", 30),
+			) * time.Second,
+			LeaseTimeout: time.Duration(
+				getenvInt("COCOLA_SCHEDULER_LEASE_TIMEOUT_SECS", 300),
+			) * time.Second,
 		}); err != nil {
 			log.Sugar().Warnw("scheduled task worker disabled", "err", err)
 		} else {

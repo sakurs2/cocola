@@ -22,12 +22,14 @@ import (
 )
 
 type SchedulerConfig struct {
-	Enabled    bool
-	AgentAddr  string
-	GatewayURL string
-	WorkerID   string
-	PollEvery  time.Duration
-	RunTimeout time.Duration
+	Enabled        bool
+	AgentAddr      string
+	GatewayURL     string
+	WorkerID       string
+	PollEvery      time.Duration
+	RunTimeout     time.Duration
+	HeartbeatEvery time.Duration
+	LeaseTimeout   time.Duration
 }
 
 func (a *Admin) StartScheduler(ctx context.Context, cfg SchedulerConfig) error {
@@ -45,6 +47,12 @@ func (a *Admin) StartScheduler(ctx context.Context, cfg SchedulerConfig) error {
 	}
 	if cfg.RunTimeout <= 0 {
 		cfg.RunTimeout = time.Hour
+	}
+	if cfg.HeartbeatEvery <= 0 {
+		cfg.HeartbeatEvery = 30 * time.Second
+	}
+	if cfg.LeaseTimeout <= 0 {
+		cfg.LeaseTimeout = maxDuration(5*time.Minute, cfg.HeartbeatEvery*4)
 	}
 	conn, err := grpc.Dial(cfg.AgentAddr, grpc.WithTransportCredentials(insecure.NewCredentials()))
 	if err != nil {
@@ -225,6 +233,7 @@ func (a *Admin) schedulerLoop(ctx context.Context, cfg SchedulerConfig, runner t
 
 func (a *Admin) runSchedulerOnce(ctx context.Context, cfg SchedulerConfig, runner taskRunner) {
 	now := a.now().UTC()
+	a.expireStaleScheduledTaskRuns(ctx, cfg, now)
 	due, err := a.store.ListDueScheduledTasks(ctx, now, 5)
 	if err != nil {
 		return
@@ -271,6 +280,8 @@ func (a *Admin) executeDueTask(ctx context.Context, cfg SchedulerConfig, runner 
 	}
 	runCtx, cancel := context.WithTimeout(ctx, cfg.RunTimeout)
 	defer cancel()
+	stopHeartbeat := a.startScheduledTaskRunHeartbeat(runCtx, cfg, run.ID)
+	defer stopHeartbeat()
 	seq := 0
 	var output []string
 	sessionID, err = runner.Run(runCtx, claimedTask, attachments, func(kind string, data map[string]string) {
@@ -301,6 +312,50 @@ func (a *Admin) executeDueTask(ctx context.Context, cfg SchedulerConfig, runner 
 	}
 }
 
+func (a *Admin) startScheduledTaskRunHeartbeat(ctx context.Context, cfg SchedulerConfig, runID string) func() {
+	every := cfg.HeartbeatEvery
+	if every <= 0 {
+		every = 30 * time.Second
+	}
+	heartbeatCtx, cancel := context.WithCancel(ctx)
+	go func() {
+		ticker := time.NewTicker(every)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-heartbeatCtx.Done():
+				return
+			case <-ticker.C:
+				_, _ = a.store.HeartbeatScheduledTaskRun(heartbeatCtx, runID, cfg.WorkerID, a.now().UTC())
+			}
+		}
+	}()
+	return cancel
+}
+
+func (a *Admin) expireStaleScheduledTaskRuns(ctx context.Context, cfg SchedulerConfig, now time.Time) {
+	leaseTimeout := cfg.LeaseTimeout
+	if leaseTimeout <= 0 {
+		heartbeatEvery := cfg.HeartbeatEvery
+		if heartbeatEvery <= 0 {
+			heartbeatEvery = 30 * time.Second
+		}
+		leaseTimeout = maxDuration(5*time.Minute, heartbeatEvery*4)
+	}
+	const errText = "scheduled task run expired after worker heartbeat timeout"
+	expired, err := a.store.ExpireStaleScheduledTaskRuns(ctx, now.Add(-leaseTimeout), now, errText, 20)
+	if err != nil {
+		return
+	}
+	for _, run := range expired {
+		task, err := a.store.GetScheduledTask(ctx, run.TaskID)
+		if err != nil || task.OwnerType != "user" {
+			continue
+		}
+		a.publishScheduledTaskUserEvent(ctx, UserEventScheduledTaskRunFailed, task, run, "error", errText)
+	}
+}
+
 func (a *Admin) finishRun(ctx context.Context, run store.ScheduledTaskRun, next time.Time, status, output, errText string) {
 	now := a.now().UTC()
 	run.Status = status
@@ -320,4 +375,11 @@ func (a *Admin) publishScheduledTaskUserEvent(ctx context.Context, eventType str
 		// already persisted on the authoritative path.
 		return
 	}
+}
+
+func maxDuration(a, b time.Duration) time.Duration {
+	if a > b {
+		return a
+	}
+	return b
 }

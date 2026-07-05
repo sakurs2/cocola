@@ -996,6 +996,83 @@ func (p *Postgres) ListScheduledTaskRuns(ctx context.Context, taskID, status str
 	return out, rows.Err()
 }
 
+func (p *Postgres) HeartbeatScheduledTaskRun(ctx context.Context, id, workerID string, now time.Time) (bool, error) {
+	ct, err := p.pool.Exec(ctx, `UPDATE scheduled_task_runs
+		SET updated_at=$3
+		WHERE id=$1 AND worker_id=$2 AND status='running'`, id, workerID, now)
+	if err != nil {
+		return false, err
+	}
+	return ct.RowsAffected() > 0, nil
+}
+
+func (p *Postgres) ExpireStaleScheduledTaskRuns(ctx context.Context, before, now time.Time, errText string, limit int) ([]ScheduledTaskRun, error) {
+	if limit <= 0 {
+		limit = 50
+	}
+	tx, err := p.pool.Begin(ctx)
+	if err != nil {
+		return nil, err
+	}
+	defer tx.Rollback(ctx)
+	rows, err := tx.Query(ctx, `SELECT id, task_id, scheduled_for, status, worker_id, session_id, model_alias, output_text, error, started_at, finished_at, created_at, updated_at
+		FROM scheduled_task_runs
+		WHERE status='running' AND updated_at < $1
+		ORDER BY updated_at ASC
+		LIMIT $2
+		FOR UPDATE SKIP LOCKED`, before, limit)
+	if err != nil {
+		return nil, err
+	}
+	expired := make([]ScheduledTaskRun, 0)
+	for rows.Next() {
+		run, err := scanScheduledTaskRun(rows)
+		if err != nil {
+			rows.Close()
+			return nil, err
+		}
+		expired = append(expired, run)
+	}
+	if err := rows.Err(); err != nil {
+		rows.Close()
+		return nil, err
+	}
+	rows.Close()
+	for i := range expired {
+		run := expired[i]
+		run.Status = "error"
+		run.Error = errText
+		run.FinishedAt = now
+		run.UpdatedAt = now
+		ct, err := tx.Exec(ctx, `UPDATE scheduled_task_runs
+			SET status=$2, error=$3, finished_at=$4, updated_at=$4
+			WHERE id=$1 AND status='running'`,
+			run.ID, run.Status, run.Error, nullableTime(run.FinishedAt))
+		if err != nil {
+			return nil, err
+		}
+		if ct.RowsAffected() == 0 {
+			continue
+		}
+		ct, err = tx.Exec(ctx, `UPDATE scheduled_tasks
+			SET status=CASE WHEN schedule_kind='once' AND next_run_at IS NULL THEN 'completed' ELSE status END,
+			    last_run_at=$2, run_count=run_count+1, last_status=$3, last_error=$4, updated_at=$2
+			WHERE id=$1`,
+			run.TaskID, run.FinishedAt, run.Status, run.Error)
+		if err != nil {
+			return nil, err
+		}
+		if ct.RowsAffected() == 0 {
+			return nil, ErrNotFound
+		}
+		expired[i] = run
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return nil, err
+	}
+	return expired, nil
+}
+
 func (p *Postgres) UpdateScheduledTaskRun(ctx context.Context, run ScheduledTaskRun, taskNextRunAt time.Time, terminal bool) error {
 	tx, err := p.pool.Begin(ctx)
 	if err != nil {

@@ -154,3 +154,133 @@ func TestTryStartScheduledTaskRunBackfillsLegacyUserConversationID(t *testing.T)
 		t.Fatalf("stored conversation id = %q", stored.ConversationID)
 	}
 }
+
+func TestScheduledTaskRunHeartbeatAndExpire(t *testing.T) {
+	m := NewMemory()
+	ctx := context.Background()
+	now := time.Unix(1_800_000_000, 0).UTC()
+	task := ScheduledTask{
+		ID:           "task-1",
+		OwnerType:    "user",
+		OwnerUserID:  "alice@example.com",
+		Name:         "Hourly report",
+		Status:       "active",
+		ScheduleKind: "interval",
+		ScheduleSpec: []byte(`{"every_seconds":3600}`),
+		Timezone:     "Asia/Shanghai",
+		Prompt:       "summarize",
+		ModelAlias:   "claude-sonnet",
+		MaxTurns:     30,
+		ConfigJSON:   []byte(`{}`),
+		NextRunAt:    now.Add(-time.Hour),
+		CreatedAt:    now.Add(-2 * time.Hour),
+		UpdatedAt:    now.Add(-2 * time.Hour),
+	}
+	if err := m.CreateScheduledTask(ctx, task, nil); err != nil {
+		t.Fatalf("create task: %v", err)
+	}
+	run := ScheduledTaskRun{
+		ID:           "run-1",
+		TaskID:       task.ID,
+		ScheduledFor: now.Add(-time.Hour),
+		Status:       "running",
+		WorkerID:     "worker-a",
+		StartedAt:    now.Add(-time.Hour),
+		CreatedAt:    now.Add(-time.Hour),
+		UpdatedAt:    now.Add(-time.Hour),
+	}
+	if _, ok, err := m.TryStartScheduledTaskRun(ctx, task.ID, run, now); err != nil || !ok {
+		t.Fatalf("try start: ok=%v err=%v", ok, err)
+	}
+	if ok, err := m.HeartbeatScheduledTaskRun(ctx, run.ID, "worker-a", now.Add(-time.Minute)); err != nil || !ok {
+		t.Fatalf("heartbeat: ok=%v err=%v", ok, err)
+	}
+	expired, err := m.ExpireStaleScheduledTaskRuns(ctx, now.Add(-2*time.Minute), now, "expired", 10)
+	if err != nil {
+		t.Fatalf("expire fresh heartbeat: %v", err)
+	}
+	if len(expired) != 0 {
+		t.Fatalf("fresh heartbeat should not expire: %+v", expired)
+	}
+	expired, err = m.ExpireStaleScheduledTaskRuns(ctx, now.Add(30*time.Second), now, "expired", 10)
+	if err != nil {
+		t.Fatalf("expire stale: %v", err)
+	}
+	if len(expired) != 1 || expired[0].Status != "error" || expired[0].Error != "expired" {
+		t.Fatalf("bad expired run: %+v", expired)
+	}
+	storedRun, err := m.GetScheduledTaskRun(ctx, run.ID)
+	if err != nil {
+		t.Fatalf("get run: %v", err)
+	}
+	if storedRun.Status != "error" {
+		t.Fatalf("run status = %q", storedRun.Status)
+	}
+	storedTask, err := m.GetScheduledTask(ctx, task.ID)
+	if err != nil {
+		t.Fatalf("get task: %v", err)
+	}
+	if storedTask.RunCount != 1 || storedTask.LastStatus != "error" || !storedTask.NextRunAt.Equal(now) {
+		t.Fatalf("bad task after expire: %+v", storedTask)
+	}
+	nextRun := ScheduledTaskRun{
+		ID:           "run-2",
+		TaskID:       task.ID,
+		ScheduledFor: now,
+		Status:       "running",
+		WorkerID:     "worker-b",
+		CreatedAt:    now,
+		UpdatedAt:    now,
+	}
+	if _, ok, err := m.TryStartScheduledTaskRun(ctx, task.ID, nextRun, now.Add(time.Hour)); err != nil || !ok {
+		t.Fatalf("next claim after expire: ok=%v err=%v", ok, err)
+	}
+}
+
+func TestExpireOnceScheduledTaskRunCompletesTask(t *testing.T) {
+	m := NewMemory()
+	ctx := context.Background()
+	now := time.Unix(1_800_000_000, 0).UTC()
+	task := ScheduledTask{
+		ID:           "task-1",
+		OwnerType:    "user",
+		OwnerUserID:  "alice@example.com",
+		Name:         "One-shot",
+		Status:       "active",
+		ScheduleKind: "once",
+		ScheduleSpec: []byte(`{"run_at":"2027-01-15T08:00:00Z"}`),
+		Timezone:     "Asia/Shanghai",
+		Prompt:       "run once",
+		ModelAlias:   "claude-sonnet",
+		MaxTurns:     30,
+		ConfigJSON:   []byte(`{}`),
+		NextRunAt:    now.Add(-time.Hour),
+		CreatedAt:    now.Add(-2 * time.Hour),
+		UpdatedAt:    now.Add(-2 * time.Hour),
+	}
+	if err := m.CreateScheduledTask(ctx, task, nil); err != nil {
+		t.Fatalf("create task: %v", err)
+	}
+	run := ScheduledTaskRun{
+		ID:           "run-1",
+		TaskID:       task.ID,
+		ScheduledFor: now.Add(-time.Hour),
+		Status:       "running",
+		WorkerID:     "worker-a",
+		CreatedAt:    now.Add(-time.Hour),
+		UpdatedAt:    now.Add(-time.Hour),
+	}
+	if _, ok, err := m.TryStartScheduledTaskRun(ctx, task.ID, run, time.Time{}); err != nil || !ok {
+		t.Fatalf("try start: ok=%v err=%v", ok, err)
+	}
+	if _, err := m.ExpireStaleScheduledTaskRuns(ctx, now.Add(-time.Minute), now, "expired", 10); err != nil {
+		t.Fatalf("expire stale: %v", err)
+	}
+	storedTask, err := m.GetScheduledTask(ctx, task.ID)
+	if err != nil {
+		t.Fatalf("get task: %v", err)
+	}
+	if storedTask.Status != "completed" || !storedTask.NextRunAt.IsZero() {
+		t.Fatalf("once task should be completed without retry: %+v", storedTask)
+	}
+}
