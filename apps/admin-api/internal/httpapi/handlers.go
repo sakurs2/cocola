@@ -876,6 +876,73 @@ func (a *API) setMyMCPEnabled(w http.ResponseWriter, r *http.Request, enabled bo
 	w.WriteHeader(http.StatusNoContent)
 }
 
+// ---- Agent prompts ----
+
+type agentPromptReq struct {
+	Name    string `json:"name,omitempty"`
+	Content string `json:"content,omitempty"`
+	Enabled *bool  `json:"enabled,omitempty"`
+}
+
+func (a *API) getGlobalAgentPrompt(w http.ResponseWriter, r *http.Request) {
+	prompt, err := a.svc.DefaultAgentPrompt(r.Context())
+	if err != nil {
+		mapErr(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, prompt)
+}
+
+func (a *API) updateGlobalAgentPrompt(w http.ResponseWriter, r *http.Request) {
+	var req agentPromptReq
+	if err := decode(r, &req); err != nil {
+		mapErr(w, err)
+		return
+	}
+	prompt, err := a.svc.UpdateGlobalAgentPrompt(r.Context(), service.AgentPromptInput{
+		Name:    req.Name,
+		Content: req.Content,
+		Enabled: req.Enabled,
+		Actor:   actorOf(r),
+	})
+	if err != nil {
+		mapErr(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, prompt)
+}
+
+func (a *API) enableGlobalAgentPrompt(w http.ResponseWriter, r *http.Request) {
+	a.setGlobalAgentPromptEnabled(w, r, true)
+}
+
+func (a *API) disableGlobalAgentPrompt(w http.ResponseWriter, r *http.Request) {
+	a.setGlobalAgentPromptEnabled(w, r, false)
+}
+
+func (a *API) setGlobalAgentPromptEnabled(w http.ResponseWriter, r *http.Request, enabled bool) {
+	prompt, err := a.svc.SetGlobalAgentPromptEnabled(r.Context(), enabled, actorOf(r))
+	if err != nil {
+		mapErr(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, prompt)
+}
+
+func (a *API) effectiveAgentPrompt(w http.ResponseWriter, r *http.Request) {
+	userID := strings.TrimSpace(r.URL.Query().Get("user_id"))
+	if userID == "" {
+		mapErr(w, service.ErrInvalidArg)
+		return
+	}
+	cfg, err := a.svc.EffectiveAgentPromptRuntimeConfig(r.Context(), userID)
+	if err != nil {
+		mapErr(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, cfg)
+}
+
 // ---- LLM model configuration ----
 
 type llmProviderReq struct {

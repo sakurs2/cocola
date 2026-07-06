@@ -167,6 +167,14 @@ func (a *API) Router() http.Handler {
 			r.Delete("/{id}", a.deleteMCP)
 		})
 
+		r.Route("/agent-prompts", func(r chi.Router) {
+			r.Get("/global", a.getGlobalAgentPrompt)
+			r.Patch("/global", a.updateGlobalAgentPrompt)
+			r.Post("/global/enable", a.enableGlobalAgentPrompt)
+			r.Post("/global/disable", a.disableGlobalAgentPrompt)
+			r.Get("/effective", a.effectiveAgentPrompt)
+		})
+
 		r.Route("/model-providers", func(r chi.Router) {
 			r.Post("/", a.createLLMProvider)
 			r.Get("/", a.listLLMProviders)

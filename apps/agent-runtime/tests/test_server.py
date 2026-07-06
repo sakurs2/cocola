@@ -14,6 +14,7 @@ from dataclasses import dataclass, field
 
 from cocola_agent_runtime.agent_provider import AgentEvent, AgentOptions
 from cocola_agent_runtime.checkpoint import CheckpointConfig, CheckpointManager
+from cocola_agent_runtime.prompt_loader import PromptMarker, StaticPromptCatalog
 from cocola_agent_runtime.sandbox_binder import (
     ExecOutcome,
     StaticSandboxBinder,
@@ -240,6 +241,29 @@ async def test_query_loads_mcp_servers_into_options_and_trace():
     mcp_trace = next(event for event in traces if event.data["name"] == "sandbox.mcp_config_load")
     assert mcp_trace.data["mcp_count"] == "1"
     assert json.loads(mcp_trace.data["mcp_names"]) == ["amap"]
+
+
+async def test_query_loads_admin_prompt_into_options_and_trace():
+    prov = ListProvider([AgentEvent(kind="done", data={})])
+    prompts = StaticPromptCatalog(
+        "Prefer concise answers.",
+        [PromptMarker(id="global", version=4, content_length=23)],
+    )
+    ctx = FakeContext()
+
+    await AgentRuntimeServicer(prov, prompts=prompts).Query(FakeRequest(user_id="alice"), ctx)
+
+    assert prov.seen_options.system_prompt is not None
+    assert "Administrator-configured system instructions:" in prov.seen_options.system_prompt
+    assert "Prefer concise answers." in prov.seen_options.system_prompt
+    traces = [event for event in ctx.written if event.kind == "trace"]
+    prompt_trace = next(
+        event for event in traces if event.data["name"] == "agent.prompt_config_load"
+    )
+    assert prompt_trace.data["prompt_count"] == "1"
+    assert json.loads(prompt_trace.data["prompt_ids"]) == ["global"]
+    assert json.loads(prompt_trace.data["prompt_versions"]) == [4]
+    assert "Prefer concise answers." not in json.dumps(dict(prompt_trace.data))
 
 
 async def test_query_maps_request_fields_to_options():

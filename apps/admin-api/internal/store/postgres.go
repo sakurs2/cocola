@@ -767,6 +767,81 @@ func (p *Postgres) DeleteUserMCPPreference(ctx context.Context, userID, mcpID st
 	return err
 }
 
+// ---- Agent prompts ----
+
+const agentPromptCols = `id, name, content, enabled, scope, priority, version, created_at, updated_at, created_by, updated_by`
+
+func scanAgentPrompt(row pgx.Row) (AgentPrompt, error) {
+	var p AgentPrompt
+	err := row.Scan(&p.ID, &p.Name, &p.Content, &p.Enabled, &p.Scope, &p.Priority,
+		&p.Version, &p.CreatedAt, &p.UpdatedAt, &p.CreatedBy, &p.UpdatedBy)
+	return p, err
+}
+
+func (p *Postgres) CreateAgentPrompt(ctx context.Context, prompt AgentPrompt) error {
+	prompt = normalizeAgentPrompt(prompt)
+	const q = `INSERT INTO agent_prompts (` + agentPromptCols + `)
+		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)`
+	_, err := p.pool.Exec(ctx, q,
+		prompt.ID, prompt.Name, prompt.Content, prompt.Enabled, prompt.Scope,
+		prompt.Priority, prompt.Version, prompt.CreatedAt, prompt.UpdatedAt,
+		prompt.CreatedBy, prompt.UpdatedBy)
+	if isUniqueViolation(err) {
+		return ErrConflict
+	}
+	return err
+}
+
+func (p *Postgres) GetAgentPrompt(ctx context.Context, id string) (AgentPrompt, error) {
+	row := p.pool.QueryRow(ctx, `SELECT `+agentPromptCols+` FROM agent_prompts WHERE id=$1`, id)
+	prompt, err := scanAgentPrompt(row)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return AgentPrompt{}, ErrNotFound
+	}
+	return prompt, err
+}
+
+func (p *Postgres) ListAgentPrompts(ctx context.Context, onlyEnabled bool) ([]AgentPrompt, error) {
+	q := `SELECT ` + agentPromptCols + ` FROM agent_prompts`
+	if onlyEnabled {
+		q += ` WHERE enabled=TRUE`
+	}
+	q += ` ORDER BY priority, id`
+	rows, err := p.pool.Query(ctx, q)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := make([]AgentPrompt, 0)
+	for rows.Next() {
+		prompt, err := scanAgentPrompt(rows)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, prompt)
+	}
+	return out, rows.Err()
+}
+
+func (p *Postgres) UpdateAgentPrompt(ctx context.Context, prompt AgentPrompt) error {
+	prompt = normalizeAgentPrompt(prompt)
+	const q = `UPDATE agent_prompts
+		SET name=$2, content=$3, enabled=$4, scope=$5, priority=$6, version=$7,
+		    created_at=$8, updated_at=$9, created_by=$10, updated_by=$11
+		WHERE id=$1`
+	ct, err := p.pool.Exec(ctx, q,
+		prompt.ID, prompt.Name, prompt.Content, prompt.Enabled, prompt.Scope,
+		prompt.Priority, prompt.Version, prompt.CreatedAt, prompt.UpdatedAt,
+		prompt.CreatedBy, prompt.UpdatedBy)
+	if err != nil {
+		return err
+	}
+	if ct.RowsAffected() == 0 {
+		return ErrNotFound
+	}
+	return nil
+}
+
 // ---- LLM model configuration ----
 
 const llmProviderCols = `id, name, type, base_url, api_key_ciphertext, api_key_hint, enabled, created_at, updated_at`

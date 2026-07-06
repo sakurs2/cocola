@@ -748,6 +748,69 @@ func TestMCPCRUDAndEffectiveConfig(t *testing.T) {
 	}
 }
 
+func TestAgentPromptGlobalAndEffective(t *testing.T) {
+	api := newTestAPI("k")
+	r := api.Router()
+
+	rec := do(t, r, http.MethodGet, "/admin/agent-prompts/global", "k", nil)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("get default prompt: want 200, got %d (%s)", rec.Code, rec.Body.String())
+	}
+	var prompt store.AgentPrompt
+	if err := json.Unmarshal(rec.Body.Bytes(), &prompt); err != nil {
+		t.Fatalf("decode default prompt: %v", err)
+	}
+	if prompt.ID != service.GlobalAgentPromptID || prompt.Enabled || prompt.Content != "" {
+		t.Fatalf("bad default prompt: %+v", prompt)
+	}
+
+	rec = doAs(t, r, http.MethodPatch, "/admin/agent-prompts/global", "k", "admin@example.com", map[string]any{
+		"content": "Prefer concise answers.",
+		"enabled": true,
+	})
+	if rec.Code != http.StatusOK {
+		t.Fatalf("update prompt: want 200, got %d (%s)", rec.Code, rec.Body.String())
+	}
+	prompt = store.AgentPrompt{}
+	if err := json.Unmarshal(rec.Body.Bytes(), &prompt); err != nil {
+		t.Fatalf("decode updated prompt: %v", err)
+	}
+	if !prompt.Enabled || prompt.Version != 1 || prompt.Content != "Prefer concise answers." {
+		t.Fatalf("bad updated prompt: %+v", prompt)
+	}
+
+	rec = do(t, r, http.MethodGet, "/admin/agent-prompts/effective?user_id=alice", "k", nil)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("effective prompt: want 200, got %d (%s)", rec.Code, rec.Body.String())
+	}
+	var effective service.AgentPromptRuntimeConfig
+	if err := json.Unmarshal(rec.Body.Bytes(), &effective); err != nil {
+		t.Fatalf("decode effective prompt: %v", err)
+	}
+	if effective.SystemPrompt != "Prefer concise answers." {
+		t.Fatalf("bad effective prompt: %+v", effective)
+	}
+	if len(effective.Prompts) != 1 || effective.Prompts[0].ID != service.GlobalAgentPromptID {
+		t.Fatalf("bad effective markers: %+v", effective.Prompts)
+	}
+
+	rec = do(t, r, http.MethodPost, "/admin/agent-prompts/global/disable", "k", nil)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("disable prompt: want 200, got %d (%s)", rec.Code, rec.Body.String())
+	}
+	rec = do(t, r, http.MethodGet, "/admin/agent-prompts/effective?user_id=alice", "k", nil)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("effective disabled prompt: want 200, got %d (%s)", rec.Code, rec.Body.String())
+	}
+	effective = service.AgentPromptRuntimeConfig{}
+	if err := json.Unmarshal(rec.Body.Bytes(), &effective); err != nil {
+		t.Fatalf("decode disabled effective prompt: %v", err)
+	}
+	if effective.SystemPrompt != "" || len(effective.Prompts) != 0 {
+		t.Fatalf("disabled prompt should not be effective: %+v", effective)
+	}
+}
+
 func TestSandboxNodeRoutes(t *testing.T) {
 	mgr := &fakeNodeManager{}
 	api := newTestNodeAPI("k", mgr)

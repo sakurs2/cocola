@@ -6,7 +6,7 @@ and runs the async gRPC server. It deliberately holds no business logic.
 
 Env (all optional; sensible local defaults):
     COCOLA_AGENT_HOST / COCOLA_AGENT_PORT   where to listen (default 0.0.0.0:50061)
-    COCOLA_ADMIN_BASE_URL                    admin-api root for the Skill-Market catalog
+    COCOLA_ADMIN_BASE_URL                    admin-api root for skills, MCP, and prompts
     COCOLA_ADMIN_KEY                         admin bearer key (if admin-api auth is on)
     COCOLA_SANDBOX_ADDR                      sandbox-manager gRPC addr (binds session->sandbox,
                                              routes the agent's bash/file tools into it, AND
@@ -44,6 +44,7 @@ from cocola_agent_runtime.echo_provider import EchoProvider
 from cocola_agent_runtime.grpc_limits import channel_options
 from cocola_agent_runtime.mcp_loader import AdminMCPCatalog, MCPCatalog
 from cocola_agent_runtime.objstore import fetcher_from_env
+from cocola_agent_runtime.prompt_loader import AdminPromptCatalog, PromptCatalog
 from cocola_agent_runtime.sandbox_binder import (
     SandboxBinder,
     SandboxExecutor,
@@ -123,6 +124,15 @@ def _build_mcp_catalog() -> MCPCatalog | None:
     return AdminMCPCatalog(admin_base, admin_key=os.getenv("COCOLA_ADMIN_KEY", ""))
 
 
+def _build_prompt_catalog() -> PromptCatalog | None:
+    admin_base = os.getenv("COCOLA_ADMIN_BASE_URL", "").strip()
+    if not admin_base:
+        log.warning("COCOLA_ADMIN_BASE_URL unset; sessions run with no admin prompt")
+        return None
+    log.info("Agent prompt policy enabled", admin_base=admin_base)
+    return AdminPromptCatalog(admin_base, admin_key=os.getenv("COCOLA_ADMIN_KEY", ""))
+
+
 def _sandbox_provisioning() -> tuple[str, dict[str, str]]:
     """Route A (ADR-0009) sandbox image + the ENV injected at creation time.
 
@@ -195,6 +205,7 @@ async def serve() -> None:
         _build_provider(executor, session_map),
         skills=_build_skill_catalog(),
         mcps=_build_mcp_catalog(),
+        prompts=_build_prompt_catalog(),
         binder=_build_binder(),
         executor=executor,
         objstore=objstore,

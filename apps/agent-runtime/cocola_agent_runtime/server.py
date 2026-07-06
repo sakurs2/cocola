@@ -48,6 +48,7 @@ from cocola_agent_runtime.agent_provider import AgentEvent, AgentOptions, AgentP
 from cocola_agent_runtime.checkpoint import CheckpointManager
 from cocola_agent_runtime.mcp_loader import MCPCatalog
 from cocola_agent_runtime.objstore import Fetcher
+from cocola_agent_runtime.prompt_loader import PromptCatalog, PromptConfig
 from cocola_agent_runtime.sandbox_binder import SandboxBinder, SandboxExecutor
 from cocola_agent_runtime.session_map import SessionMap
 from cocola_agent_runtime.skill_loader import Skill, SkillCatalog, skills_system_preamble
@@ -58,6 +59,7 @@ ARTIFACT_SYSTEM_PROMPT = (
     "When you create files that the user should download or preview, save them "
     "under ./outputs/. Only files in ./outputs/ are published to the user."
 )
+ADMIN_SYSTEM_PROMPT_HEADER = "Administrator-configured system instructions:"
 CURRENT_RUNTIME = os.getenv("COCOLA_AGENT_RUNTIME", "claude-code")
 MODEL_ALIAS_METADATA_KEY = "x-cocola-model-alias"
 
@@ -306,6 +308,7 @@ class AgentRuntimeServicer(pb_grpc.AgentRuntimeServiceServicer):
         *,
         skills: SkillCatalog | None = None,
         mcps: MCPCatalog | None = None,
+        prompts: PromptCatalog | None = None,
         binder: SandboxBinder | None = None,
         executor: SandboxExecutor | None = None,
         objstore: Fetcher | None = None,
@@ -315,6 +318,7 @@ class AgentRuntimeServicer(pb_grpc.AgentRuntimeServiceServicer):
         self._provider = provider
         self._skills = skills
         self._mcps = mcps
+        self._prompts = prompts
         self._binder = binder
         self._session_map = session_map
         # The executor writes user-uploaded attachments into the bound sandbox
@@ -610,6 +614,41 @@ class AgentRuntimeServicer(pb_grpc.AgentRuntimeServiceServicer):
                     )
                 )
 
+        active_prompt = PromptConfig()
+        if self._prompts is not None:
+            prompt_start_ns = time.time_ns()
+            try:
+                active_prompt = self._prompts.effective_prompt(request.user_id)
+                await context.write(
+                    event_to_proto(
+                        trace_event(
+                            "agent.prompt_config_load",
+                            "agent-runtime",
+                            prompt_start_ns,
+                            prompt_count=len(active_prompt.prompts),
+                            prompt_ids=[p.id for p in active_prompt.prompts],
+                            prompt_versions=[p.version for p in active_prompt.prompts],
+                            content_length=len(active_prompt.system_prompt),
+                        )
+                    )
+                )
+            except Exception as exc:  # noqa: BLE001 - prompt policy degrades to default
+                active_prompt = PromptConfig()
+                log.warning(
+                    "agent prompt load failed; running without admin prompt", error=str(exc)
+                )
+                await context.write(
+                    event_to_proto(
+                        trace_event(
+                            "agent.prompt_config_load",
+                            "agent-runtime",
+                            prompt_start_ns,
+                            status="error",
+                            error_type=type(exc).__name__,
+                        )
+                    )
+                )
+
         opts = AgentOptions(
             user_id=request.user_id,
             session_id=request.session_id,
@@ -619,17 +658,26 @@ class AgentRuntimeServicer(pb_grpc.AgentRuntimeServiceServicer):
             model_alias=model_alias,
             mcp_servers=active_mcp_servers,
         )
-        artifacts_enabled = bool(self._objstore is not None and hasattr(self._objstore, "put"))
-        if artifacts_enabled:
-            opts = dataclasses.replace(
-                opts,
-                system_prompt=_merge_system_prompt(opts.system_prompt, ARTIFACT_SYSTEM_PROMPT),
-            )
         skills_preamble = skills_system_preamble(active_skills)
         if skills_preamble:
             opts = dataclasses.replace(
                 opts,
                 system_prompt=_merge_system_prompt(opts.system_prompt, skills_preamble),
+            )
+        admin_prompt = active_prompt.system_prompt.strip()
+        if admin_prompt:
+            opts = dataclasses.replace(
+                opts,
+                system_prompt=_merge_system_prompt(
+                    opts.system_prompt,
+                    f"{ADMIN_SYSTEM_PROMPT_HEADER}\n{admin_prompt}",
+                ),
+            )
+        artifacts_enabled = bool(self._objstore is not None and hasattr(self._objstore, "put"))
+        if artifacts_enabled:
+            opts = dataclasses.replace(
+                opts,
+                system_prompt=_merge_system_prompt(opts.system_prompt, ARTIFACT_SYSTEM_PROMPT),
             )
 
         log.info(

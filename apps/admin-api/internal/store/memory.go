@@ -21,6 +21,7 @@ type Memory struct {
 	skillPrefs   map[string]UserSkillPreference
 	mcps         map[string]MCPServer
 	mcpPrefs     map[string]UserMCPPreference
+	agentPrompts map[string]AgentPrompt
 	llmProviders map[string]LLMProvider
 	llmModels    map[string]LLMModelRoute
 	tasks        map[string]ScheduledTask
@@ -45,6 +46,7 @@ func NewMemory() *Memory {
 		skillPrefs:   map[string]UserSkillPreference{},
 		mcps:         map[string]MCPServer{},
 		mcpPrefs:     map[string]UserMCPPreference{},
+		agentPrompts: map[string]AgentPrompt{},
 		llmProviders: map[string]LLMProvider{},
 		llmModels:    map[string]LLMModelRoute{},
 		tasks:        map[string]ScheduledTask{},
@@ -605,6 +607,70 @@ func (m *Memory) DeleteUserMCPPreference(ctx context.Context, userID, mcpID stri
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	delete(m.mcpPrefs, mcpPrefKey(userID, mcpID))
+	return nil
+}
+
+// ---- Agent prompts ----
+
+func normalizeAgentPrompt(p AgentPrompt) AgentPrompt {
+	if p.Scope == "" {
+		p.Scope = "global"
+	}
+	if p.Name == "" {
+		p.Name = p.ID
+	}
+	return p
+}
+
+func (m *Memory) CreateAgentPrompt(ctx context.Context, p AgentPrompt) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	p = normalizeAgentPrompt(p)
+	if _, ok := m.agentPrompts[p.ID]; ok {
+		return ErrConflict
+	}
+	m.agentPrompts[p.ID] = p
+	return nil
+}
+
+func (m *Memory) GetAgentPrompt(ctx context.Context, id string) (AgentPrompt, error) {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	p, ok := m.agentPrompts[id]
+	if !ok {
+		return AgentPrompt{}, ErrNotFound
+	}
+	return normalizeAgentPrompt(p), nil
+}
+
+func (m *Memory) ListAgentPrompts(ctx context.Context, onlyEnabled bool) ([]AgentPrompt, error) {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	out := make([]AgentPrompt, 0, len(m.agentPrompts))
+	for _, p := range m.agentPrompts {
+		p = normalizeAgentPrompt(p)
+		if onlyEnabled && !p.Enabled {
+			continue
+		}
+		out = append(out, p)
+	}
+	sort.Slice(out, func(i, j int) bool {
+		if out[i].Priority == out[j].Priority {
+			return out[i].ID < out[j].ID
+		}
+		return out[i].Priority < out[j].Priority
+	})
+	return out, nil
+}
+
+func (m *Memory) UpdateAgentPrompt(ctx context.Context, p AgentPrompt) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	p = normalizeAgentPrompt(p)
+	if _, ok := m.agentPrompts[p.ID]; !ok {
+		return ErrNotFound
+	}
+	m.agentPrompts[p.ID] = p
 	return nil
 }
 

@@ -125,6 +125,23 @@ type UserMCPPreference struct {
 	UpdatedAt time.Time `json:"updated_at"`
 }
 
+// AgentPrompt is an administrator-managed system-prompt policy injected into
+// new agent sessions. v1 exposes only the global prompt, while scope/priority
+// leave room for future team/model/session-specific policy layers.
+type AgentPrompt struct {
+	ID        string    `json:"id"`
+	Name      string    `json:"name"`
+	Content   string    `json:"content"`
+	Enabled   bool      `json:"enabled"`
+	Scope     string    `json:"scope"`
+	Priority  int       `json:"priority"`
+	Version   int64     `json:"version"`
+	CreatedAt time.Time `json:"created_at"`
+	UpdatedAt time.Time `json:"updated_at"`
+	CreatedBy string    `json:"created_by,omitempty"`
+	UpdatedBy string    `json:"updated_by,omitempty"`
+}
+
 // LLMProvider is one upstream model vendor/endpoint. APIKeyCiphertext is never
 // serialized to clients; APIKeyHint is the masked display value shown in admin.
 type LLMProvider struct {
@@ -421,6 +438,12 @@ type Store interface {
 	SetUserMCPPreference(ctx context.Context, pref UserMCPPreference) error
 	ListUserMCPPreferences(ctx context.Context, userID string) ([]UserMCPPreference, error)
 	DeleteUserMCPPreference(ctx context.Context, userID, mcpID string) error
+
+	// Agent prompts
+	CreateAgentPrompt(ctx context.Context, p AgentPrompt) error
+	GetAgentPrompt(ctx context.Context, id string) (AgentPrompt, error)
+	ListAgentPrompts(ctx context.Context, onlyEnabled bool) ([]AgentPrompt, error)
+	UpdateAgentPrompt(ctx context.Context, p AgentPrompt) error
 
 	// LLM model configuration
 	CreateLLMProvider(ctx context.Context, p LLMProvider) error

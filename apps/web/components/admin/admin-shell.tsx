@@ -9,6 +9,7 @@ import {
   Cpu,
   FileClock,
   LayoutDashboard,
+  MessageSquareText,
   PlugZap,
   Sparkles,
   Server,
@@ -39,6 +40,7 @@ const NAV_GROUPS: { label: string; items: AdminNavItem[] }[] = [
     label: "AI",
     items: [
       { href: "/admin/models", label: "Models", icon: Cpu },
+      { href: "/admin/prompts", label: "Prompt", icon: MessageSquareText },
       { href: "/admin/skills", label: "Skills", icon: Sparkles },
       { href: "/admin/mcps", label: "MCP", icon: PlugZap },
       { href: "/admin/scheduled-tasks", label: "Scheduled Tasks", icon: Clock3 },
