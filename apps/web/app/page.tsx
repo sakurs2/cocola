@@ -21,7 +21,7 @@ import { CocolaRuntimeProvider, useCocola } from "@/app/runtime-provider";
 import { AppSidebar } from "@/components/assistant-ui/app-sidebar";
 import { CodeBlock, MarkdownContent } from "@/components/assistant-ui/markdown-text";
 import { Thread } from "@/components/assistant-ui/thread";
-import { Code2, Download, Eye, FileQuestion, X } from "lucide-react";
+import { Check, Code2, Download, Eye, FileQuestion, Share2, X } from "lucide-react";
 import { type PointerEvent, useCallback, useEffect, useState } from "react";
 
 export default function Home() {
@@ -105,12 +105,42 @@ function Workspace() {
 // input-first chat layout. Keep sandbox state visible without competing with the
 // conversation controls.
 function TopBar() {
-  const { sandbox } = useCocola();
+  const { activeSessionId, conversations, sandbox } = useCocola();
+  const [copied, setCopied] = useState(false);
+  const canShare = conversations.some((conversation) => conversation.id === activeSessionId);
+
+  const copyShareLink = useCallback(async () => {
+    if (!activeSessionId || typeof window === "undefined") return;
+    const url = `${window.location.origin}/conversations/${encodeURIComponent(activeSessionId)}`;
+    try {
+      await navigator.clipboard.writeText(url);
+      setCopied(true);
+      window.setTimeout(() => setCopied(false), 1600);
+    } catch {
+      setCopied(false);
+    }
+  }, [activeSessionId]);
 
   return (
     <header className="flex flex-col border-b border-border">
       <div className="flex h-14 items-center gap-3 px-4">
         <div className="ml-auto flex items-center gap-2">
+          <button
+            type="button"
+            title={
+              canShare
+                ? copied
+                  ? "Link copied"
+                  : "Copy share link"
+                : "Start a conversation to share"
+            }
+            aria-label={canShare ? "Copy share link" : "Start a conversation to share"}
+            disabled={!canShare}
+            onClick={() => void copyShareLink()}
+            className="inline-flex size-8 items-center justify-center rounded-full text-muted-foreground transition-colors hover:bg-muted hover:text-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring disabled:pointer-events-none disabled:opacity-40"
+          >
+            {copied ? <Check className="size-4 text-emerald-400" /> : <Share2 className="size-4" />}
+          </button>
           {sandbox ? (
             <span
               className="rounded-full bg-emerald-500/15 px-2 py-0.5 font-mono text-[11px] text-emerald-400"

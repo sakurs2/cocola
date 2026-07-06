@@ -238,7 +238,10 @@ const ModelPicker: FC = () => {
   );
 };
 
-const ModelIcon: FC<{ icon?: ModelIconConfig; className?: string }> = ({ icon, className }) => {
+export const ModelIcon: FC<{ icon?: ModelIconConfig; className?: string }> = ({
+  icon,
+  className,
+}) => {
   const simpleIconPath =
     icon?.type === "simple-icons" && icon.slug
       ? LOCAL_SIMPLE_ICON_PATHS[icon.slug.toLowerCase()]

@@ -10,6 +10,7 @@ import {
   RefreshCw,
   Search,
 } from "lucide-react";
+import Link from "next/link";
 import { useCallback, useEffect, useMemo, useState } from "react";
 
 type AuditEvent = {
@@ -251,54 +252,67 @@ export default function AdminAuditPage() {
                 </tr>
               </thead>
               <tbody className="divide-y divide-border">
-                {events.map((event) => (
-                  <tr key={event.id} className="align-top">
-                    <td className="whitespace-nowrap px-4 py-3 text-xs text-muted-foreground">
-                      {formatDate(event.at)}
-                    </td>
-                    <td className="px-4 py-3">
-                      <div className="font-medium">
-                        {event.actor_email || event.actor_user_id || "-"}
-                      </div>
-                      <div className="text-xs text-muted-foreground">{event.actor_type || "-"}</div>
-                    </td>
-                    <td className="px-4 py-3 font-mono text-xs">{event.action}</td>
-                    <td className="px-4 py-3">
-                      <div>{event.resource_type || "-"}</div>
-                      <div className="max-w-[160px] truncate font-mono text-xs text-muted-foreground">
-                        {event.resource_id || "-"}
-                      </div>
-                    </td>
-                    <td className="px-4 py-3">
-                      <Badge tone={resultTone(event.result)}>{event.result || "-"}</Badge>
-                      {event.error_code ? (
-                        <div className="mt-1 font-mono text-xs text-muted-foreground">
-                          {event.error_code}
+                {events.map((event) => {
+                  const conversationID = conversationIDForEvent(event);
+                  return (
+                    <tr key={event.id} className="align-top">
+                      <td className="whitespace-nowrap px-4 py-3 text-xs text-muted-foreground">
+                        {formatDate(event.at)}
+                      </td>
+                      <td className="px-4 py-3">
+                        <div className="font-medium">
+                          {event.actor_email || event.actor_user_id || "-"}
                         </div>
-                      ) : null}
-                    </td>
-                    <td className="px-4 py-3">
-                      <div className="font-mono text-xs">
-                        {[event.http_method, event.route].filter(Boolean).join(" ") || "-"}
-                      </div>
-                      {event.status_code ? (
-                        <div className="mt-1 text-xs text-muted-foreground">
-                          {event.status_code}
+                        <div className="text-xs text-muted-foreground">
+                          {event.actor_type || "-"}
                         </div>
-                      ) : null}
-                    </td>
-                    <td className="px-4 py-3">
-                      <div className="max-w-[180px] truncate font-mono text-xs">
-                        {event.trace_id || event.request_id || "-"}
-                      </div>
-                    </td>
-                    <td className="px-4 py-3">
-                      <div className="max-w-[240px] truncate font-mono text-xs text-muted-foreground">
-                        {formatMetadata(event.metadata_json)}
-                      </div>
-                    </td>
-                  </tr>
-                ))}
+                      </td>
+                      <td className="px-4 py-3 font-mono text-xs">{event.action}</td>
+                      <td className="px-4 py-3">
+                        <div>{event.resource_type || "-"}</div>
+                        {conversationID ? (
+                          <Link
+                            href={`/conversations/${encodeURIComponent(conversationID)}`}
+                            className="block max-w-[160px] truncate font-mono text-xs text-primary underline-offset-2 hover:underline"
+                            title={`Open conversation ${conversationID}`}
+                          >
+                            {conversationID}
+                          </Link>
+                        ) : (
+                          <div className="max-w-[160px] truncate font-mono text-xs text-muted-foreground">
+                            {event.resource_id || "-"}
+                          </div>
+                        )}
+                      </td>
+                      <td className="px-4 py-3">
+                        <Badge tone={resultTone(event.result)}>{event.result || "-"}</Badge>
+                        {event.error_code ? (
+                          <div className="mt-1 font-mono text-xs text-muted-foreground">
+                            {event.error_code}
+                          </div>
+                        ) : null}
+                      </td>
+                      <td className="px-4 py-3">
+                        <div className="font-mono text-xs">
+                          {[event.http_method, event.route].filter(Boolean).join(" ") || "-"}
+                        </div>
+                        {event.status_code ? (
+                          <div className="mt-1 text-xs text-muted-foreground">
+                            {event.status_code}
+                          </div>
+                        ) : null}
+                      </td>
+                      <td className="px-4 py-3">
+                        <div className="max-w-[180px] truncate font-mono text-xs">
+                          {event.trace_id || event.request_id || "-"}
+                        </div>
+                      </td>
+                      <td className="px-4 py-3">
+                        <MetadataCell event={event} conversationID={conversationID} />
+                      </td>
+                    </tr>
+                  );
+                })}
                 {!loading && events.length === 0 ? (
                   <tr>
                     <td
@@ -323,6 +337,29 @@ function Metric({ label, value }: { label: string; value: string }) {
     <div className="rounded-lg border border-border bg-card px-4 py-3">
       <div className="text-xs text-muted-foreground">{label}</div>
       <div className="mt-1 text-2xl font-semibold">{value}</div>
+    </div>
+  );
+}
+
+function MetadataCell({ event, conversationID }: { event: AuditEvent; conversationID: string }) {
+  const metadata = formatMetadata(event.metadata_json);
+  if (!conversationID) {
+    return (
+      <div className="max-w-[240px] truncate font-mono text-xs text-muted-foreground">
+        {metadata}
+      </div>
+    );
+  }
+  return (
+    <div className="max-w-[260px] space-y-1">
+      <Link
+        href={`/conversations/${encodeURIComponent(conversationID)}`}
+        className="block truncate font-mono text-xs text-primary underline-offset-2 hover:underline"
+        title={`Open conversation ${conversationID}`}
+      >
+        conversation_id={conversationID}
+      </Link>
+      <div className="truncate font-mono text-xs text-muted-foreground">{metadata}</div>
     </div>
   );
 }
@@ -357,6 +394,17 @@ function formatDate(value: string) {
 function formatMetadata(value: Record<string, unknown> | undefined) {
   if (!value || Object.keys(value).length === 0) return "-";
   return JSON.stringify(value);
+}
+
+function conversationIDForEvent(event: AuditEvent): string {
+  const fromMetadata = event.metadata_json?.conversation_id;
+  if (typeof fromMetadata === "string" && fromMetadata.trim()) {
+    return fromMetadata.trim();
+  }
+  if (event.resource_type === "conversation" && event.resource_id?.trim()) {
+    return event.resource_id.trim();
+  }
+  return "";
 }
 
 async function errorText(res: Response) {
