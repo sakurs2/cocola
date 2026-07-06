@@ -58,6 +58,7 @@ type Admin struct {
 	sandboxRuntimes     SandboxRuntimeManager
 	userEvents          UserEventBroker
 	modelSecretKey      string
+	configSecretKey     string
 	minScheduleInterval time.Duration
 	schedulerStarted    atomic.Bool
 }
@@ -102,6 +103,21 @@ func (a *Admin) WithSandboxRuntimeManager(m SandboxRuntimeManager) *Admin {
 func (a *Admin) WithModelSecretKey(secret string) *Admin {
 	a.modelSecretKey = strings.TrimSpace(secret)
 	return a
+}
+
+// WithConfigSecretKey configures encryption for administrator-managed runtime
+// configuration secrets such as MCP env/header values. Empty falls back to the
+// legacy model secret for compatibility.
+func (a *Admin) WithConfigSecretKey(secret string) *Admin {
+	a.configSecretKey = strings.TrimSpace(secret)
+	return a
+}
+
+func (a *Admin) configSecret() string {
+	if strings.TrimSpace(a.configSecretKey) != "" {
+		return strings.TrimSpace(a.configSecretKey)
+	}
+	return strings.TrimSpace(a.modelSecretKey)
 }
 
 func (a *Admin) WithMinScheduleInterval(d time.Duration) *Admin {
@@ -1248,6 +1264,39 @@ func encryptModelSecret(secret, plaintext string) (string, error) {
 	}
 	sealed := gcm.Seal(nonce, nonce, []byte(plaintext), nil)
 	return "v1:" + base64.StdEncoding.EncodeToString(sealed), nil
+}
+
+func decryptModelSecret(secret, ciphertext string) (string, error) {
+	if strings.TrimSpace(secret) == "" {
+		return "", ErrInvalidArg
+	}
+	raw := strings.TrimSpace(ciphertext)
+	if raw == "" {
+		return "", nil
+	}
+	raw = strings.TrimPrefix(raw, "v1:")
+	data, err := base64.StdEncoding.DecodeString(raw)
+	if err != nil {
+		return "", err
+	}
+	sum := sha256.Sum256([]byte(secret))
+	block, err := aes.NewCipher(sum[:])
+	if err != nil {
+		return "", err
+	}
+	gcm, err := cipher.NewGCM(block)
+	if err != nil {
+		return "", err
+	}
+	if len(data) < gcm.NonceSize() {
+		return "", ErrInvalidArg
+	}
+	nonce, sealed := data[:gcm.NonceSize()], data[gcm.NonceSize():]
+	plain, err := gcm.Open(nil, nonce, sealed, nil)
+	if err != nil {
+		return "", err
+	}
+	return string(plain), nil
 }
 
 func maskAPIKey(key string) string {

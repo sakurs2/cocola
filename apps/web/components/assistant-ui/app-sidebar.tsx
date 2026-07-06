@@ -14,6 +14,7 @@ import {
   PanelLeft,
   Pause,
   Pencil,
+  PlugZap,
   Play,
   Plus,
   Search,
@@ -43,6 +44,7 @@ const PRIMARY_NAV: NavItem[] = [
   { icon: NotebookPen, label: "Notes" },
   { icon: LayoutGrid, label: "Workspace" },
   { icon: Sparkles, label: "Skills", href: "/skills" },
+  { icon: PlugZap, label: "MCP", href: "/mcps" },
   { icon: ShieldCheck, label: "Admin", href: "/admin" },
 ];
 
@@ -195,16 +197,16 @@ export function AppSidebar() {
               ({ icon: Icon, label, href }) => {
                 const active = href ? pathname === href || pathname?.startsWith(`${href}/`) : false;
                 return (
-                <SidebarButton
-                  key={label}
-                  collapsed={collapsed}
-                  title={label}
-                  active={active}
-                  onClick={href ? () => navigateTo(href) : undefined}
-                >
-                  <Icon className="size-4 shrink-0" />
-                  {!collapsed && <span className="truncate">{label}</span>}
-                </SidebarButton>
+                  <SidebarButton
+                    key={label}
+                    collapsed={collapsed}
+                    title={label}
+                    active={active}
+                    onClick={href ? () => navigateTo(href) : undefined}
+                  >
+                    <Icon className="size-4 shrink-0" />
+                    {!collapsed && <span className="truncate">{label}</span>}
+                  </SidebarButton>
                 );
               },
             )}

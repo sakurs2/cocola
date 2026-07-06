@@ -150,6 +150,16 @@ class OutputWritingProvider:
         yield AgentEvent(kind="done", data={})
 
 
+class StaticMCPCatalog:
+    def __init__(self, servers):
+        self.servers = servers
+        self.seen_user_id = ""
+
+    def effective_mcp_servers(self, user_id: str = ""):
+        self.seen_user_id = user_id
+        return dict(self.servers)
+
+
 def outputs_snapshot_executor() -> StaticSandboxExecutor:
     ex: StaticSandboxExecutor
 
@@ -213,6 +223,23 @@ async def test_query_folds_enabled_skills_into_options():
     await AgentRuntimeServicer(prov, skills=cat).Query(FakeRequest(), FakeContext())
     assert prov.seen_options.system_prompt is not None
     assert "Web Search" in prov.seen_options.system_prompt
+
+
+async def test_query_loads_mcp_servers_into_options_and_trace():
+    prov = ListProvider([AgentEvent(kind="done", data={})])
+    mcps = StaticMCPCatalog({"amap": {"type": "http", "url": "https://mcp.example.com/mcp"}})
+    ctx = FakeContext()
+
+    await AgentRuntimeServicer(prov, mcps=mcps).Query(FakeRequest(user_id="alice"), ctx)
+
+    assert mcps.seen_user_id == "alice"
+    assert prov.seen_options.mcp_servers == {
+        "amap": {"type": "http", "url": "https://mcp.example.com/mcp"}
+    }
+    traces = [event for event in ctx.written if event.kind == "trace"]
+    mcp_trace = next(event for event in traces if event.data["name"] == "sandbox.mcp_config_load")
+    assert mcp_trace.data["mcp_count"] == "1"
+    assert json.loads(mcp_trace.data["mcp_names"]) == ["amap"]
 
 
 async def test_query_maps_request_fields_to_options():

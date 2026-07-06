@@ -91,6 +91,40 @@ type UserSkillPreference struct {
 	UpdatedAt time.Time `json:"updated_at"`
 }
 
+// MCPServer is an administrator-managed Model Context Protocol server
+// definition. Sensitive env/header values are stored encrypted and never
+// serialized; clients only see masked hint JSON.
+type MCPServer struct {
+	ID                   string          `json:"id"`
+	Name                 string          `json:"name"`
+	Description          string          `json:"description"`
+	Transport            string          `json:"transport"` // "stdio" | "http" | "sse"
+	Command              string          `json:"command,omitempty"`
+	ArgsJSON             json.RawMessage `json:"args,omitempty"`
+	URL                  string          `json:"url,omitempty"`
+	URLVarCiphertextJSON json.RawMessage `json:"-"`
+	URLVarHintJSON       json.RawMessage `json:"url_var_hints,omitempty"`
+	EnvCiphertextJSON    json.RawMessage `json:"-"`
+	EnvHintJSON          json.RawMessage `json:"env_hints,omitempty"`
+	HeaderCiphertextJSON json.RawMessage `json:"-"`
+	HeaderHintJSON       json.RawMessage `json:"header_hints,omitempty"`
+	Enabled              bool            `json:"enabled"`
+	DefaultEnabled       bool            `json:"default_enabled"`
+	Source               string          `json:"source"`
+	Status               string          `json:"status"`
+	CreatedAt            time.Time       `json:"created_at"`
+	UpdatedAt            time.Time       `json:"updated_at"`
+	CreatedBy            string          `json:"created_by,omitempty"`
+	UpdatedBy            string          `json:"updated_by,omitempty"`
+}
+
+type UserMCPPreference struct {
+	UserID    string    `json:"user_id"`
+	MCPID     string    `json:"mcp_id"`
+	Enabled   bool      `json:"enabled"`
+	UpdatedAt time.Time `json:"updated_at"`
+}
+
 // LLMProvider is one upstream model vendor/endpoint. APIKeyCiphertext is never
 // serialized to clients; APIKeyHint is the masked display value shown in admin.
 type LLMProvider struct {
@@ -377,6 +411,16 @@ type Store interface {
 	SetUserSkillPreference(ctx context.Context, pref UserSkillPreference) error
 	ListUserSkillPreferences(ctx context.Context, userID string) ([]UserSkillPreference, error)
 	DeleteUserSkillPreference(ctx context.Context, userID, skillID string) error
+
+	// MCP servers
+	CreateMCPServer(ctx context.Context, s MCPServer) error
+	GetMCPServer(ctx context.Context, id string) (MCPServer, error)
+	ListMCPServers(ctx context.Context, onlyEnabled bool) ([]MCPServer, error)
+	UpdateMCPServer(ctx context.Context, s MCPServer) error
+	DeleteMCPServer(ctx context.Context, id string) error
+	SetUserMCPPreference(ctx context.Context, pref UserMCPPreference) error
+	ListUserMCPPreferences(ctx context.Context, userID string) ([]UserMCPPreference, error)
+	DeleteUserMCPPreference(ctx context.Context, userID, mcpID string) error
 
 	// LLM model configuration
 	CreateLLMProvider(ctx context.Context, p LLMProvider) error

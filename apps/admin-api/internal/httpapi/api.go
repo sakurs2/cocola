@@ -91,6 +91,11 @@ func (a *API) Router() http.Handler {
 			r.Post("/{id}/disable", a.disableMySkill)
 			r.Delete("/{id}", a.deleteMySkill)
 		})
+		r.Route("/mcps", func(r chi.Router) {
+			r.Get("/", a.listMyMCPs)
+			r.Post("/{id}/enable", a.enableMyMCP)
+			r.Post("/{id}/disable", a.disableMyMCP)
+		})
 		r.Route("/scheduled-tasks", func(r chi.Router) {
 			r.Post("/", a.createMyScheduledTask)
 			r.Get("/", a.listMyScheduledTasks)
@@ -149,6 +154,17 @@ func (a *API) Router() http.Handler {
 			r.Post("/{id}/enable", a.enableSkill)
 			r.Post("/{id}/disable", a.disableSkill)
 			r.Delete("/{id}", a.deleteSkill)
+		})
+
+		r.Route("/mcps", func(r chi.Router) {
+			r.Post("/", a.createMCP)
+			r.Get("/", a.listMCPs)
+			r.Get("/effective", a.listEffectiveMCPs)
+			r.Get("/{id}", a.getMCP)
+			r.Patch("/{id}", a.updateMCP)
+			r.Post("/{id}/enable", a.enableMCP)
+			r.Post("/{id}/disable", a.disableMCP)
+			r.Delete("/{id}", a.deleteMCP)
 		})
 
 		r.Route("/model-providers", func(r chi.Router) {

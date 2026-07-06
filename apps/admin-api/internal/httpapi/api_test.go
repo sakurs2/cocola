@@ -25,7 +25,7 @@ func fixedClock() time.Time { return time.Unix(1_700_000_000, 0).UTC() }
 func newTestAPI(adminKey string) *API {
 	mem := store.NewMemory()
 	iss := token.NewIssuer("test-secret", "cocola", 24*time.Hour)
-	svc := service.New(mem, iss, fixedClock)
+	svc := service.New(mem, iss, fixedClock).WithConfigSecretKey("config-secret")
 	return New(svc, adminKey)
 }
 
@@ -657,6 +657,94 @@ func TestSkillCRUD(t *testing.T) {
 	rec = do(t, r, http.MethodGet, "/admin/skills/web-search", "k", nil)
 	if rec.Code != http.StatusNotFound {
 		t.Fatalf("get deleted: want 404, got %d", rec.Code)
+	}
+}
+
+func TestMCPCRUDAndEffectiveConfig(t *testing.T) {
+	api := newTestAPI("k")
+	r := api.Router()
+
+	rec := do(t, r, http.MethodPost, "/admin/mcps", "k", map[string]any{
+		"id":              "github",
+		"name":            "GitHub",
+		"transport":       "stdio",
+		"command":         "npx",
+		"args":            []string{"-y", "@modelcontextprotocol/server-github"},
+		"env":             map[string]string{"GITHUB_TOKEN": "ghp_secret123"},
+		"default_enabled": true,
+	})
+	if rec.Code != http.StatusCreated {
+		t.Fatalf("create mcp: want 201, got %d (%s)", rec.Code, rec.Body.String())
+	}
+	if bytes.Contains(rec.Body.Bytes(), []byte("ghp_secret123")) {
+		t.Fatal("create response leaked plaintext secret")
+	}
+
+	rec = do(t, r, http.MethodPost, "/admin/mcps", "k", map[string]any{
+		"id":              "amap",
+		"name":            "Amap",
+		"transport":       "http",
+		"url":             "https://mcp.amap.com/mcp?key=${AMAP_KEY}",
+		"url_vars":        map[string]string{"AMAP_KEY": "amap_secret456"},
+		"default_enabled": true,
+	})
+	if rec.Code != http.StatusCreated {
+		t.Fatalf("create amap mcp: want 201, got %d (%s)", rec.Code, rec.Body.String())
+	}
+	if bytes.Contains(rec.Body.Bytes(), []byte("amap_secret456")) {
+		t.Fatal("create response leaked URL var secret")
+	}
+
+	rec = do(t, r, http.MethodGet, "/admin/mcps", "k", nil)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("list mcps: want 200, got %d", rec.Code)
+	}
+	if bytes.Contains(rec.Body.Bytes(), []byte("ghp_secret123")) ||
+		bytes.Contains(rec.Body.Bytes(), []byte("amap_secret456")) {
+		t.Fatal("list response leaked plaintext secret")
+	}
+	var listed struct {
+		MCPs []store.MCPServer `json:"mcps"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &listed); err != nil {
+		t.Fatalf("decode list: %v", err)
+	}
+	if len(listed.MCPs) != 2 {
+		t.Fatalf("expected 2 MCPs, got %+v", listed.MCPs)
+	}
+	if !bytes.Contains(listed.MCPs[1].EnvHintJSON, []byte("GITHUB_TOKEN")) {
+		t.Fatalf("expected masked env hint, got %+v", listed.MCPs)
+	}
+	if !bytes.Contains(listed.MCPs[0].URLVarHintJSON, []byte("AMAP_KEY")) {
+		t.Fatalf("expected masked URL var hint, got %+v", listed.MCPs)
+	}
+
+	rec = do(t, r, http.MethodGet, "/admin/mcps/effective?user_id=alice", "k", nil)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("effective mcps: want 200, got %d (%s)", rec.Code, rec.Body.String())
+	}
+	var effective struct {
+		MCPServers map[string]map[string]any `json:"mcp_servers"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &effective); err != nil {
+		t.Fatalf("decode effective: %v", err)
+	}
+	github := effective.MCPServers["github"]
+	if github["command"] != "npx" {
+		t.Fatalf("runtime command = %#v", github["command"])
+	}
+	env, ok := github["env"].(map[string]any)
+	if !ok || env["GITHUB_TOKEN"] != "ghp_secret123" {
+		t.Fatalf("runtime env not decrypted: %#v", github["env"])
+	}
+	amap := effective.MCPServers["amap"]
+	if amap["url"] != "https://mcp.amap.com/mcp?key=amap_secret456" {
+		t.Fatalf("runtime URL not rendered: %#v", amap["url"])
+	}
+
+	rec = do(t, r, http.MethodDelete, "/admin/mcps/github", "k", nil)
+	if rec.Code != http.StatusNoContent {
+		t.Fatalf("delete mcp: want 204, got %d", rec.Code)
 	}
 }
 

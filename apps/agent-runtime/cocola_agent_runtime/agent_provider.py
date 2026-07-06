@@ -25,6 +25,7 @@ class AgentOptions:
     system_prompt: str | None = None
     max_turns: int = 30
     model_alias: str | None = None
+    mcp_servers: dict[str, dict] | None = None
 
 
 @dataclass

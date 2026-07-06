@@ -42,6 +42,7 @@ from cocola_agent_runtime.agent_provider import AgentProvider
 from cocola_agent_runtime.checkpoint import CheckpointManager
 from cocola_agent_runtime.echo_provider import EchoProvider
 from cocola_agent_runtime.grpc_limits import channel_options
+from cocola_agent_runtime.mcp_loader import AdminMCPCatalog, MCPCatalog
 from cocola_agent_runtime.objstore import fetcher_from_env
 from cocola_agent_runtime.sandbox_binder import (
     SandboxBinder,
@@ -111,6 +112,15 @@ def _build_skill_catalog() -> SkillCatalog | None:
         return None
     log.info("Skill-Market enabled", admin_base=admin_base)
     return AdminSkillCatalog(admin_base, admin_key=os.getenv("COCOLA_ADMIN_KEY", ""))
+
+
+def _build_mcp_catalog() -> MCPCatalog | None:
+    admin_base = os.getenv("COCOLA_ADMIN_BASE_URL", "").strip()
+    if not admin_base:
+        log.warning("COCOLA_ADMIN_BASE_URL unset; sessions run with no MCP servers")
+        return None
+    log.info("MCP catalog enabled", admin_base=admin_base)
+    return AdminMCPCatalog(admin_base, admin_key=os.getenv("COCOLA_ADMIN_KEY", ""))
 
 
 def _sandbox_provisioning() -> tuple[str, dict[str, str]]:
@@ -184,6 +194,7 @@ async def serve() -> None:
     servicer = AgentRuntimeServicer(
         _build_provider(executor, session_map),
         skills=_build_skill_catalog(),
+        mcps=_build_mcp_catalog(),
         binder=_build_binder(),
         executor=executor,
         objstore=objstore,

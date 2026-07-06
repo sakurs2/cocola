@@ -166,6 +166,7 @@ services:
       COCOLA_ANTHROPIC_API_KEY: "${COCOLA_ANTHROPIC_API_KEY:-}"
       COCOLA_ANTHROPIC_MODEL: "${COCOLA_ANTHROPIC_MODEL:-}"
       COCOLA_MODEL_SECRET_KEY: "${COCOLA_MODEL_SECRET_KEY:-cocola-local-model-secret}"
+      COCOLA_CONFIG_SECRET_KEY: "${COCOLA_CONFIG_SECRET_KEY:-cocola-local-model-secret}"
       # M7 persistence: when COCOLA_PG_DSN is set the service persists to
       # Postgres; unset -> in-memory (zero-dep dev boot). Full stack ships
       # a postgres node, so we default the DSN to it.
@@ -208,6 +209,7 @@ services:
       COCOLA_BOOTSTRAP_ADMIN_PASSWORD_HASH: "${COCOLA_BOOTSTRAP_ADMIN_PASSWORD_HASH:-}"
       COCOLA_BOOTSTRAP_ADMIN_RESET: "${COCOLA_BOOTSTRAP_ADMIN_RESET:-}"
       COCOLA_MODEL_SECRET_KEY: "${COCOLA_MODEL_SECRET_KEY:-cocola-local-model-secret}"
+      COCOLA_CONFIG_SECRET_KEY: "${COCOLA_CONFIG_SECRET_KEY:-cocola-local-model-secret}"
       # M7 persistence: DSN set -> Postgres repository; unset -> in-memory.
       COCOLA_PG_DSN: "${COCOLA_PG_DSN:-postgres://cocola:cocola_dev_pw@postgres:5432/cocola?sslmode=disable}"
       # Skill bundles use the same object store as attachments/checkpoints.
@@ -250,6 +252,7 @@ services:
       COCOLA_AGENT_PORT: "50061"
       COCOLA_SANDBOX_ADDR: "sandbox-manager:50051"
       COCOLA_ADMIN_BASE_URL: "http://admin-api:8090"
+      COCOLA_ADMIN_KEY: "${COCOLA_ADMIN_KEY:-}"
       # Route A (ADR-0009): the agent-runtime slim image has no node/claude CLI,
       # so the Claude Code brain runs INSIDE the user's sandbox (the
       # cocola/sandbox-runtime image, which bakes node + claude + the shim).

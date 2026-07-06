@@ -195,6 +195,8 @@ class InSandboxShimProvider:
         }
         if options.system_prompt:
             req["system_prompt"] = options.system_prompt
+        if options.mcp_servers:
+            req["mcp_servers"] = options.mcp_servers
         if resume:
             req["resume"] = resume
         return json.dumps(req, ensure_ascii=False, separators=(",", ":"))

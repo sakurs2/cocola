@@ -69,6 +69,34 @@ async def test_maps_tool_use_turn_and_reassembles_split_line():
     assert "resume" not in sent  # first turn has nothing to resume
 
 
+async def test_request_includes_mcp_servers_when_configured():
+    def stream_handler(sandbox_id, cmd, stdin):
+        yield ExecChunk(kind="stdout", data=_ndjson({"type": "done", "session_id": "sess-1"}))
+        yield ExecChunk(kind="exit", exit_code=0)
+
+    execu = StaticSandboxExecutor(stream_handler=stream_handler)
+    provider = InSandboxShimProvider(execu)
+    opts = AgentOptions(
+        user_id="U1",
+        session_id="S1",
+        sandbox_id="box-1",
+        mcp_servers={
+            "github": {
+                "type": "stdio",
+                "command": "npx",
+                "args": ["-y", "server"],
+                "env": {"GITHUB_TOKEN": "secret"},
+            }
+        },
+    )
+
+    await _drain(provider, "hello", opts)
+
+    sent = json.loads(execu.stream_calls[0]["stdin"])
+    assert sent["mcp_servers"]["github"]["command"] == "npx"
+    assert sent["mcp_servers"]["github"]["env"]["GITHUB_TOKEN"] == "secret"
+
+
 async def test_session_id_is_reused_as_resume_next_turn():
     def make_handler(session_id):
         def stream_handler(sandbox_id, cmd, stdin):

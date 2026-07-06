@@ -5,13 +5,13 @@ opens a server-streaming `Query` RPC and forwards each `AgentEvent` to the web
 client. Everything below the wire is the layering the package docstring fixes:
 
     grpc server (here)  ->  AgentProvider (Protocol)  ->  concrete provider
-                                                   ->  SkillCatalog (enabled skills)
+                                                   ->  SkillCatalog / MCPCatalog
 
 Design choices, all to avoid reinventing what we already have:
 
 - The servicer depends ONLY on the `AgentProvider` Protocol and the
   `SkillCatalog` Protocol, never on a concrete provider. Production injects
-  `InSandboxShimProvider` (Route A) + `AdminSkillCatalog`; tests inject fakes.
+  `InSandboxShimProvider` (Route A) + admin-api catalogs; tests inject fakes.
   This is the same composition-root pattern the rest of the runtime uses.
 - The generic `AgentEvent` dataclass the provider yields maps 1:1 onto the proto
   `AgentEvent` (a `kind` string + a flat `map<string,string>` of data). Non-string
@@ -21,6 +21,8 @@ Design choices, all to avoid reinventing what we already have:
 - Enabled Skill-Market skills are folded into the session via
   `apply_skills_to_options` before the provider runs, so toggling a skill in the
   control plane changes the agent with no redeploy.
+- Enabled MCP servers are passed through to the in-sandbox Claude SDK via
+  `mcp_servers`; the old host-side MCP forwarding seam remains deleted.
 """
 
 from __future__ import annotations
@@ -44,6 +46,7 @@ from cocola_common import get_logger
 
 from cocola_agent_runtime.agent_provider import AgentEvent, AgentOptions, AgentProvider
 from cocola_agent_runtime.checkpoint import CheckpointManager
+from cocola_agent_runtime.mcp_loader import MCPCatalog
 from cocola_agent_runtime.objstore import Fetcher
 from cocola_agent_runtime.sandbox_binder import SandboxBinder, SandboxExecutor
 from cocola_agent_runtime.session_map import SessionMap
@@ -302,6 +305,7 @@ class AgentRuntimeServicer(pb_grpc.AgentRuntimeServiceServicer):
         provider: AgentProvider,
         *,
         skills: SkillCatalog | None = None,
+        mcps: MCPCatalog | None = None,
         binder: SandboxBinder | None = None,
         executor: SandboxExecutor | None = None,
         objstore: Fetcher | None = None,
@@ -310,6 +314,7 @@ class AgentRuntimeServicer(pb_grpc.AgentRuntimeServiceServicer):
     ) -> None:
         self._provider = provider
         self._skills = skills
+        self._mcps = mcps
         self._binder = binder
         self._session_map = session_map
         # The executor writes user-uploaded attachments into the bound sandbox
@@ -571,6 +576,40 @@ class AgentRuntimeServicer(pb_grpc.AgentRuntimeServiceServicer):
                     )
                 )
 
+        active_mcp_servers: dict[str, dict] = {}
+        if self._mcps is not None:
+            mcp_start_ns = time.time_ns()
+            try:
+                active_mcp_servers = self._mcps.effective_mcp_servers(request.user_id)
+                active_mcp_names = sorted(active_mcp_servers)
+                await context.write(
+                    event_to_proto(
+                        trace_event(
+                            "sandbox.mcp_config_load",
+                            "sandbox",
+                            mcp_start_ns,
+                            sandbox_id=sandbox_id or "",
+                            mcp_count=len(active_mcp_servers),
+                            mcp_names=active_mcp_names,
+                        )
+                    )
+                )
+            except Exception as exc:  # noqa: BLE001 - MCP config degrades to none
+                active_mcp_servers = {}
+                log.warning("mcp config load failed; running without MCP servers", error=str(exc))
+                await context.write(
+                    event_to_proto(
+                        trace_event(
+                            "sandbox.mcp_config_load",
+                            "sandbox",
+                            mcp_start_ns,
+                            status="error",
+                            sandbox_id=sandbox_id or "",
+                            error_type=type(exc).__name__,
+                        )
+                    )
+                )
+
         opts = AgentOptions(
             user_id=request.user_id,
             session_id=request.session_id,
@@ -578,6 +617,7 @@ class AgentRuntimeServicer(pb_grpc.AgentRuntimeServiceServicer):
             workspace=workspace,
             max_turns=request.max_turns or 30,
             model_alias=model_alias,
+            mcp_servers=active_mcp_servers,
         )
         artifacts_enabled = bool(self._objstore is not None and hasattr(self._objstore, "put"))
         if artifacts_enabled:

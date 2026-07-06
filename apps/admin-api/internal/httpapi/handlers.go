@@ -720,6 +720,162 @@ func (a *API) deleteMySkill(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusNoContent)
 }
 
+// ---- MCP servers ----
+
+type mcpReq struct {
+	ID             string            `json:"id,omitempty"`
+	Name           string            `json:"name,omitempty"`
+	Description    string            `json:"description,omitempty"`
+	Transport      string            `json:"transport,omitempty"`
+	Command        string            `json:"command,omitempty"`
+	Args           *[]string         `json:"args,omitempty"`
+	URL            string            `json:"url,omitempty"`
+	URLVars        map[string]string `json:"url_vars,omitempty"`
+	Env            map[string]string `json:"env,omitempty"`
+	Headers        map[string]string `json:"headers,omitempty"`
+	ClearURLVars   bool              `json:"clear_url_vars,omitempty"`
+	ClearEnv       bool              `json:"clear_env,omitempty"`
+	ClearHeaders   bool              `json:"clear_headers,omitempty"`
+	Enabled        *bool             `json:"enabled,omitempty"`
+	DefaultEnabled *bool             `json:"default_enabled,omitempty"`
+	Source         string            `json:"source,omitempty"`
+	Status         string            `json:"status,omitempty"`
+}
+
+func (req mcpReq) input(actor string) service.MCPServerInput {
+	return service.MCPServerInput{
+		ID:             req.ID,
+		Name:           req.Name,
+		Description:    req.Description,
+		Transport:      req.Transport,
+		Command:        req.Command,
+		Args:           req.Args,
+		URL:            req.URL,
+		URLVars:        req.URLVars,
+		Env:            req.Env,
+		Headers:        req.Headers,
+		ClearURLVars:   req.ClearURLVars,
+		ClearEnv:       req.ClearEnv,
+		ClearHeaders:   req.ClearHeaders,
+		Enabled:        req.Enabled,
+		DefaultEnabled: req.DefaultEnabled,
+		Source:         req.Source,
+		Status:         req.Status,
+		Actor:          actor,
+	}
+}
+
+func (a *API) createMCP(w http.ResponseWriter, r *http.Request) {
+	var req mcpReq
+	if err := decode(r, &req); err != nil {
+		mapErr(w, err)
+		return
+	}
+	out, err := a.svc.CreateMCPServer(r.Context(), req.input(actorOf(r)))
+	if err != nil {
+		mapErr(w, err)
+		return
+	}
+	writeJSON(w, http.StatusCreated, out)
+}
+
+func (a *API) listMCPs(w http.ResponseWriter, r *http.Request) {
+	onlyEnabled := r.URL.Query().Get("enabled") == "true"
+	mcps, err := a.svc.ListMCPServers(r.Context(), onlyEnabled)
+	if err != nil {
+		mapErr(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"mcps": mcps})
+}
+
+func (a *API) getMCP(w http.ResponseWriter, r *http.Request) {
+	mcp, err := a.svc.GetMCPServer(r.Context(), chi.URLParam(r, "id"))
+	if err != nil {
+		mapErr(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, mcp)
+}
+
+func (a *API) updateMCP(w http.ResponseWriter, r *http.Request) {
+	var req mcpReq
+	if err := decode(r, &req); err != nil {
+		mapErr(w, err)
+		return
+	}
+	out, err := a.svc.UpdateMCPServer(r.Context(), chi.URLParam(r, "id"), req.input(actorOf(r)))
+	if err != nil {
+		mapErr(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, out)
+}
+
+func (a *API) enableMCP(w http.ResponseWriter, r *http.Request) {
+	a.setMCPEnabled(w, r, true)
+}
+
+func (a *API) disableMCP(w http.ResponseWriter, r *http.Request) {
+	a.setMCPEnabled(w, r, false)
+}
+
+func (a *API) setMCPEnabled(w http.ResponseWriter, r *http.Request, enabled bool) {
+	mcp, err := a.svc.SetMCPServerEnabled(r.Context(), chi.URLParam(r, "id"), enabled, actorOf(r))
+	if err != nil {
+		mapErr(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, mcp)
+}
+
+func (a *API) deleteMCP(w http.ResponseWriter, r *http.Request) {
+	if err := a.svc.DeleteMCPServer(r.Context(), chi.URLParam(r, "id"), actorOf(r)); err != nil {
+		mapErr(w, err)
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
+}
+
+func (a *API) listEffectiveMCPs(w http.ResponseWriter, r *http.Request) {
+	userID := strings.TrimSpace(r.URL.Query().Get("user_id"))
+	if userID == "" {
+		mapErr(w, service.ErrInvalidArg)
+		return
+	}
+	cfg, err := a.svc.ListEffectiveMCPRuntimeConfig(r.Context(), userID)
+	if err != nil {
+		mapErr(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, cfg)
+}
+
+func (a *API) listMyMCPs(w http.ResponseWriter, r *http.Request) {
+	mcps, err := a.svc.ListUserMCPCatalog(r.Context(), actorOf(r))
+	if err != nil {
+		mapErr(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"mcps": mcps})
+}
+
+func (a *API) enableMyMCP(w http.ResponseWriter, r *http.Request) {
+	a.setMyMCPEnabled(w, r, true)
+}
+
+func (a *API) disableMyMCP(w http.ResponseWriter, r *http.Request) {
+	a.setMyMCPEnabled(w, r, false)
+}
+
+func (a *API) setMyMCPEnabled(w http.ResponseWriter, r *http.Request, enabled bool) {
+	if err := a.svc.SetUserMCPEnabled(r.Context(), actorOf(r), chi.URLParam(r, "id"), enabled); err != nil {
+		mapErr(w, err)
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
+}
+
 // ---- LLM model configuration ----
 
 type llmProviderReq struct {

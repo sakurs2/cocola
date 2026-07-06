@@ -25,7 +25,8 @@ Request schema:
     "max_turns":     int | null,      # optional, default 20
     "resume":        str | null,      # optional session_id to --resume
     "cwd":           str | null,      # optional, default $COCOLA_WORKSPACE
-    "permission_mode": str | null     # optional, default "bypassPermissions"
+    "permission_mode": str | null,    # optional, default "bypassPermissions"
+    "mcp_servers":   object | null    # optional Claude SDK mcp_servers config
   }
 
 Auth/routing come from the ENV the container was started with (injected by the
@@ -111,6 +112,9 @@ def _build_options(req: dict[str, Any]):
     # without a RAM snapshot.
     if req.get("resume"):
         kwargs["resume"] = req["resume"]
+    if isinstance(req.get("mcp_servers"), dict) and req["mcp_servers"]:
+        kwargs["mcp_servers"] = req["mcp_servers"]
+        kwargs["strict_mcp_config"] = True
 
     return claude_agent_sdk.ClaudeAgentOptions(**kwargs)
 

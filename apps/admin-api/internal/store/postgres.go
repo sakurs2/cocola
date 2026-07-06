@@ -633,6 +633,140 @@ func (p *Postgres) DeleteUserSkillPreference(ctx context.Context, userID, skillI
 	return err
 }
 
+// ---- MCP servers ----
+
+const mcpServerCols = `id, name, description, transport, command, args_json, url, url_var_ciphertext_json, url_var_hint_json, env_ciphertext_json, env_hint_json, header_ciphertext_json, header_hint_json, enabled, default_enabled, source, status, created_at, updated_at, created_by, updated_by`
+
+func scanMCPServer(row pgx.Row) (MCPServer, error) {
+	var s MCPServer
+	err := row.Scan(&s.ID, &s.Name, &s.Description, &s.Transport, &s.Command,
+		&s.ArgsJSON, &s.URL, &s.URLVarCiphertextJSON, &s.URLVarHintJSON,
+		&s.EnvCiphertextJSON, &s.EnvHintJSON,
+		&s.HeaderCiphertextJSON, &s.HeaderHintJSON, &s.Enabled,
+		&s.DefaultEnabled, &s.Source, &s.Status, &s.CreatedAt, &s.UpdatedAt,
+		&s.CreatedBy, &s.UpdatedBy)
+	return s, err
+}
+
+func (p *Postgres) CreateMCPServer(ctx context.Context, s MCPServer) error {
+	s = normalizeMCPServer(s)
+	const q = `INSERT INTO mcp_servers (` + mcpServerCols + `)
+		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21)`
+	_, err := p.pool.Exec(ctx, q,
+		s.ID, s.Name, s.Description, s.Transport, s.Command, s.ArgsJSON, s.URL,
+		s.URLVarCiphertextJSON, s.URLVarHintJSON, s.EnvCiphertextJSON, s.EnvHintJSON,
+		s.HeaderCiphertextJSON, s.HeaderHintJSON,
+		s.Enabled, s.DefaultEnabled, s.Source, s.Status, s.CreatedAt, s.UpdatedAt,
+		s.CreatedBy, s.UpdatedBy)
+	if isUniqueViolation(err) {
+		return ErrConflict
+	}
+	return err
+}
+
+func (p *Postgres) GetMCPServer(ctx context.Context, id string) (MCPServer, error) {
+	row := p.pool.QueryRow(ctx, `SELECT `+mcpServerCols+` FROM mcp_servers WHERE id=$1`, id)
+	s, err := scanMCPServer(row)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return MCPServer{}, ErrNotFound
+	}
+	return s, err
+}
+
+func (p *Postgres) ListMCPServers(ctx context.Context, onlyEnabled bool) ([]MCPServer, error) {
+	q := `SELECT ` + mcpServerCols + ` FROM mcp_servers`
+	if onlyEnabled {
+		q += ` WHERE enabled=TRUE`
+	}
+	q += ` ORDER BY id`
+	rows, err := p.pool.Query(ctx, q)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := make([]MCPServer, 0)
+	for rows.Next() {
+		s, err := scanMCPServer(rows)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, s)
+	}
+	return out, rows.Err()
+}
+
+func (p *Postgres) UpdateMCPServer(ctx context.Context, s MCPServer) error {
+	s = normalizeMCPServer(s)
+	const q = `UPDATE mcp_servers
+		SET name=$2, description=$3, transport=$4, command=$5, args_json=$6, url=$7,
+		    url_var_ciphertext_json=$8, url_var_hint_json=$9, env_ciphertext_json=$10,
+		    env_hint_json=$11, header_ciphertext_json=$12, header_hint_json=$13,
+		    enabled=$14, default_enabled=$15, source=$16, status=$17, created_at=$18,
+		    updated_at=$19, created_by=$20, updated_by=$21
+		WHERE id=$1`
+	ct, err := p.pool.Exec(ctx, q,
+		s.ID, s.Name, s.Description, s.Transport, s.Command, s.ArgsJSON, s.URL,
+		s.URLVarCiphertextJSON, s.URLVarHintJSON, s.EnvCiphertextJSON, s.EnvHintJSON,
+		s.HeaderCiphertextJSON, s.HeaderHintJSON,
+		s.Enabled, s.DefaultEnabled, s.Source, s.Status, s.CreatedAt, s.UpdatedAt,
+		s.CreatedBy, s.UpdatedBy)
+	if err != nil {
+		return err
+	}
+	if ct.RowsAffected() == 0 {
+		return ErrNotFound
+	}
+	return nil
+}
+
+func (p *Postgres) DeleteMCPServer(ctx context.Context, id string) error {
+	ct, err := p.pool.Exec(ctx, `DELETE FROM mcp_servers WHERE id=$1`, id)
+	if err != nil {
+		return err
+	}
+	if ct.RowsAffected() == 0 {
+		return ErrNotFound
+	}
+	return nil
+}
+
+func (p *Postgres) SetUserMCPPreference(ctx context.Context, pref UserMCPPreference) error {
+	const q = `INSERT INTO user_mcp_preferences (user_id, mcp_id, enabled, updated_at)
+		VALUES ($1,$2,$3,$4)
+		ON CONFLICT (user_id, mcp_id)
+		DO UPDATE SET enabled=EXCLUDED.enabled, updated_at=EXCLUDED.updated_at`
+	_, err := p.pool.Exec(ctx, q, pref.UserID, pref.MCPID, pref.Enabled, pref.UpdatedAt)
+	if isForeignKeyViolation(err) {
+		return ErrNotFound
+	}
+	return err
+}
+
+func (p *Postgres) ListUserMCPPreferences(ctx context.Context, userID string) ([]UserMCPPreference, error) {
+	rows, err := p.pool.Query(ctx, `SELECT user_id, mcp_id, enabled, updated_at
+		FROM user_mcp_preferences
+		WHERE user_id=$1
+		ORDER BY mcp_id`, userID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := make([]UserMCPPreference, 0)
+	for rows.Next() {
+		var pref UserMCPPreference
+		if err := rows.Scan(&pref.UserID, &pref.MCPID, &pref.Enabled, &pref.UpdatedAt); err != nil {
+			return nil, err
+		}
+		out = append(out, pref)
+	}
+	return out, rows.Err()
+}
+
+func (p *Postgres) DeleteUserMCPPreference(ctx context.Context, userID, mcpID string) error {
+	_, err := p.pool.Exec(ctx, `DELETE FROM user_mcp_preferences WHERE user_id=$1 AND mcp_id=$2`, userID, mcpID)
+	return err
+}
+
 // ---- LLM model configuration ----
 
 const llmProviderCols = `id, name, type, base_url, api_key_ciphertext, api_key_hint, enabled, created_at, updated_at`

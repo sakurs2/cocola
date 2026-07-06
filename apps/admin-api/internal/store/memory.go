@@ -19,6 +19,8 @@ type Memory struct {
 	settings     map[string]SystemSetting
 	skills       map[string]Skill
 	skillPrefs   map[string]UserSkillPreference
+	mcps         map[string]MCPServer
+	mcpPrefs     map[string]UserMCPPreference
 	llmProviders map[string]LLMProvider
 	llmModels    map[string]LLMModelRoute
 	tasks        map[string]ScheduledTask
@@ -41,6 +43,8 @@ func NewMemory() *Memory {
 		settings:     map[string]SystemSetting{},
 		skills:       map[string]Skill{},
 		skillPrefs:   map[string]UserSkillPreference{},
+		mcps:         map[string]MCPServer{},
+		mcpPrefs:     map[string]UserMCPPreference{},
 		llmProviders: map[string]LLMProvider{},
 		llmModels:    map[string]LLMModelRoute{},
 		tasks:        map[string]ScheduledTask{},
@@ -465,6 +469,142 @@ func (m *Memory) DeleteUserSkillPreference(ctx context.Context, userID, skillID 
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	delete(m.skillPrefs, skillPrefKey(userID, skillID))
+	return nil
+}
+
+// ---- MCP servers ----
+
+func normalizeMCPServer(s MCPServer) MCPServer {
+	if s.ArgsJSON == nil {
+		s.ArgsJSON = []byte("[]")
+	}
+	if s.EnvCiphertextJSON == nil {
+		s.EnvCiphertextJSON = []byte("{}")
+	}
+	if s.EnvHintJSON == nil {
+		s.EnvHintJSON = []byte("{}")
+	}
+	if s.URLVarCiphertextJSON == nil {
+		s.URLVarCiphertextJSON = []byte("{}")
+	}
+	if s.URLVarHintJSON == nil {
+		s.URLVarHintJSON = []byte("{}")
+	}
+	if s.HeaderCiphertextJSON == nil {
+		s.HeaderCiphertextJSON = []byte("{}")
+	}
+	if s.HeaderHintJSON == nil {
+		s.HeaderHintJSON = []byte("{}")
+	}
+	if s.Source == "" {
+		s.Source = "admin"
+	}
+	if s.Status == "" {
+		s.Status = "active"
+	}
+	return s
+}
+
+func cloneMCPServer(s MCPServer) MCPServer {
+	s = normalizeMCPServer(s)
+	s.ArgsJSON = append([]byte(nil), s.ArgsJSON...)
+	s.URLVarCiphertextJSON = append([]byte(nil), s.URLVarCiphertextJSON...)
+	s.URLVarHintJSON = append([]byte(nil), s.URLVarHintJSON...)
+	s.EnvCiphertextJSON = append([]byte(nil), s.EnvCiphertextJSON...)
+	s.EnvHintJSON = append([]byte(nil), s.EnvHintJSON...)
+	s.HeaderCiphertextJSON = append([]byte(nil), s.HeaderCiphertextJSON...)
+	s.HeaderHintJSON = append([]byte(nil), s.HeaderHintJSON...)
+	return s
+}
+
+func mcpPrefKey(userID, mcpID string) string { return userID + "/" + mcpID }
+
+func (m *Memory) CreateMCPServer(ctx context.Context, s MCPServer) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if _, ok := m.mcps[s.ID]; ok {
+		return ErrConflict
+	}
+	m.mcps[s.ID] = cloneMCPServer(s)
+	return nil
+}
+
+func (m *Memory) GetMCPServer(ctx context.Context, id string) (MCPServer, error) {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	s, ok := m.mcps[id]
+	if !ok {
+		return MCPServer{}, ErrNotFound
+	}
+	return cloneMCPServer(s), nil
+}
+
+func (m *Memory) ListMCPServers(ctx context.Context, onlyEnabled bool) ([]MCPServer, error) {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	out := make([]MCPServer, 0, len(m.mcps))
+	for _, s := range m.mcps {
+		if onlyEnabled && !s.Enabled {
+			continue
+		}
+		out = append(out, cloneMCPServer(s))
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i].ID < out[j].ID })
+	return out, nil
+}
+
+func (m *Memory) UpdateMCPServer(ctx context.Context, s MCPServer) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if _, ok := m.mcps[s.ID]; !ok {
+		return ErrNotFound
+	}
+	m.mcps[s.ID] = cloneMCPServer(s)
+	return nil
+}
+
+func (m *Memory) DeleteMCPServer(ctx context.Context, id string) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if _, ok := m.mcps[id]; !ok {
+		return ErrNotFound
+	}
+	delete(m.mcps, id)
+	for key, pref := range m.mcpPrefs {
+		if pref.MCPID == id {
+			delete(m.mcpPrefs, key)
+		}
+	}
+	return nil
+}
+
+func (m *Memory) SetUserMCPPreference(ctx context.Context, pref UserMCPPreference) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if _, ok := m.mcps[pref.MCPID]; !ok {
+		return ErrNotFound
+	}
+	m.mcpPrefs[mcpPrefKey(pref.UserID, pref.MCPID)] = pref
+	return nil
+}
+
+func (m *Memory) ListUserMCPPreferences(ctx context.Context, userID string) ([]UserMCPPreference, error) {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	out := make([]UserMCPPreference, 0)
+	for _, pref := range m.mcpPrefs {
+		if pref.UserID == userID {
+			out = append(out, pref)
+		}
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i].MCPID < out[j].MCPID })
+	return out, nil
+}
+
+func (m *Memory) DeleteUserMCPPreference(ctx context.Context, userID, mcpID string) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	delete(m.mcpPrefs, mcpPrefKey(userID, mcpID))
 	return nil
 }
 
