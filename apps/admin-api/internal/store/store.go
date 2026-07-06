@@ -244,7 +244,8 @@ func authUserIdentifiersFor(u AuthUser) []AuthUserIdentifier {
 	return out
 }
 
-// AuditEntry is one record of an admin write. Reads are not audited.
+// AuditEntry is the legacy admin audit shape kept for /admin/audit
+// compatibility. New code should prefer AuditEvent.
 type AuditEntry struct {
 	ID       int64     `json:"id"`
 	At       time.Time `json:"at"`
@@ -252,6 +253,45 @@ type AuditEntry struct {
 	Action   string    `json:"action"`   // e.g. "token.issue", "skill.delete"
 	Resource string    `json:"resource"` // affected id
 	Detail   string    `json:"detail"`   // human-readable summary
+}
+
+// AuditEvent is one structured, append-only user or system audit event.
+type AuditEvent struct {
+	ID           int64          `json:"id"`
+	At           time.Time      `json:"at"`
+	ActorType    string         `json:"actor_type"`
+	ActorUserID  string         `json:"actor_user_id,omitempty"`
+	ActorEmail   string         `json:"actor_email,omitempty"`
+	Action       string         `json:"action"`
+	ResourceType string         `json:"resource_type,omitempty"`
+	ResourceID   string         `json:"resource_id,omitempty"`
+	Result       string         `json:"result"`
+	HTTPMethod   string         `json:"http_method,omitempty"`
+	Route        string         `json:"route,omitempty"`
+	StatusCode   int            `json:"status_code,omitempty"`
+	RequestID    string         `json:"request_id,omitempty"`
+	TraceID      string         `json:"trace_id,omitempty"`
+	ClientIP     string         `json:"client_ip,omitempty"`
+	UserAgent    string         `json:"user_agent,omitempty"`
+	Metadata     map[string]any `json:"metadata_json,omitempty"`
+	ErrorCode    string         `json:"error_code,omitempty"`
+}
+
+// AuditEventQuery filters audit-event list calls. Empty fields are ignored.
+type AuditEventQuery struct {
+	Limit        int
+	Offset       int
+	LegacyOnly   bool
+	ActorUserID  string
+	ActorEmail   string
+	Action       string
+	ResourceType string
+	ResourceID   string
+	Result       string
+	RequestID    string
+	TraceID      string
+	Since        time.Time
+	Until        time.Time
 }
 
 // Store is the full persistence contract the service depends on.
@@ -327,4 +367,6 @@ type Store interface {
 	// Audit
 	AppendAudit(ctx context.Context, e AuditEntry) error
 	ListAudit(ctx context.Context, limit int) ([]AuditEntry, error)
+	AppendAuditEvent(ctx context.Context, e AuditEvent) error
+	ListAuditEvents(ctx context.Context, q AuditEventQuery) ([]AuditEvent, error)
 }

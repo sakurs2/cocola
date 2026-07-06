@@ -39,7 +39,7 @@ func newParityPostgres(t *testing.T) *Postgres {
 	}
 	// Clean slate: truncate every table this suite touches.
 	_, err = pg.pool.Exec(ctx,
-		`TRUNCATE auth_user_identifiers, auth_users, token_records, quota_overrides, skill_entries, audit_log RESTART IDENTITY`)
+		`TRUNCATE auth_user_identifiers, auth_users, token_records, quota_overrides, skill_entries, audit_log, audit_events RESTART IDENTITY`)
 	if err != nil {
 		t.Fatalf("truncate: %v", err)
 	}

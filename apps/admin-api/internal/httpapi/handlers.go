@@ -88,8 +88,10 @@ type loginReq struct {
 }
 
 func (a *API) login(w http.ResponseWriter, r *http.Request) {
+	start := time.Now()
 	var req loginReq
 	if err := decode(r, &req); err != nil {
+		a.appendHTTPAudit(r, "user", "auth.login", "auth", "", http.StatusBadRequest, "INVALID_ARGUMENT", start)
 		mapErr(w, err)
 		return
 	}
@@ -99,9 +101,11 @@ func (a *API) login(w http.ResponseWriter, r *http.Request) {
 	}
 	user, err := a.svc.Authenticate(r.Context(), identifier, req.Password)
 	if err != nil {
+		a.appendHTTPAudit(r, "user", "auth.login", "auth", "", http.StatusUnauthorized, "UNAUTHENTICATED", start)
 		mapErr(w, err)
 		return
 	}
+	a.appendHTTPAudit(r, "user", "auth.login", "auth_user", user.ID, http.StatusOK, "", start)
 	writeJSON(w, http.StatusOK, map[string]any{"user": user})
 }
 
@@ -960,4 +964,42 @@ func (a *API) listAudit(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"audit": entries})
+}
+
+func (a *API) listAuditEvents(w http.ResponseWriter, r *http.Request) {
+	q := r.URL.Query()
+	query := store.AuditEventQuery{
+		Limit:        qInt(r, "limit", 100),
+		Offset:       qInt(r, "offset", 0),
+		ActorUserID:  q.Get("actor_user_id"),
+		ActorEmail:   q.Get("actor_email"),
+		Action:       q.Get("action"),
+		ResourceType: q.Get("resource_type"),
+		ResourceID:   q.Get("resource_id"),
+		Result:       q.Get("result"),
+		RequestID:    q.Get("request_id"),
+		TraceID:      q.Get("trace_id"),
+	}
+	if v := q.Get("since"); v != "" {
+		t, err := time.Parse(time.RFC3339, v)
+		if err != nil {
+			writeErr(w, http.StatusBadRequest, "INVALID_ARGUMENT", "since must be RFC3339")
+			return
+		}
+		query.Since = t
+	}
+	if v := q.Get("until"); v != "" {
+		t, err := time.Parse(time.RFC3339, v)
+		if err != nil {
+			writeErr(w, http.StatusBadRequest, "INVALID_ARGUMENT", "until must be RFC3339")
+			return
+		}
+		query.Until = t
+	}
+	events, err := a.svc.ListAuditEvents(r.Context(), query)
+	if err != nil {
+		mapErr(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"events": events})
 }

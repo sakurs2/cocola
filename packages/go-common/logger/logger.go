@@ -24,3 +24,11 @@ func Must() Logger {
 	}
 	return l
 }
+
+// WithService binds the standard low-cardinality infra log fields to a logger.
+func WithService(l Logger, service, component string) Logger {
+	if component == "" {
+		component = service
+	}
+	return l.With(zap.String("service", service), zap.String("component", component))
+}

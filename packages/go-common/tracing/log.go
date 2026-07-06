@@ -18,12 +18,22 @@ import (
 // gateway/agent-runtime/sandbox-manager/llm-gateway logs by trace_id, even when
 // span export to a backend is turned off.
 func LogFields(ctx context.Context) []zap.Field {
-	sc := trace.SpanContextFromContext(ctx)
-	if !sc.IsValid() {
+	traceID, spanID := IDs(ctx)
+	if traceID == "" {
 		return nil
 	}
 	return []zap.Field{
-		zap.String("trace_id", sc.TraceID().String()),
-		zap.String("span_id", sc.SpanID().String()),
+		zap.String("trace_id", traceID),
+		zap.String("span_id", spanID),
 	}
+}
+
+// IDs returns the active trace/span ids in ctx. Empty strings mean no valid span
+// context is present.
+func IDs(ctx context.Context) (traceID, spanID string) {
+	sc := trace.SpanContextFromContext(ctx)
+	if !sc.IsValid() {
+		return "", ""
+	}
+	return sc.TraceID().String(), sc.SpanID().String()
 }

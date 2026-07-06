@@ -7,9 +7,11 @@ import {
   Box,
   Clock3,
   Cpu,
+  FileClock,
   LayoutDashboard,
   Server,
   Settings,
+  Terminal,
   Users,
 } from "lucide-react";
 import Link from "next/link";
@@ -43,6 +45,13 @@ const NAV_GROUPS: { label: string; items: AdminNavItem[] }[] = [
     items: [
       { href: "/admin/sandboxes", label: "Sandbox Runtime", icon: Box },
       { href: "/admin/sandbox-nodes", label: "Sandbox Nodes", icon: Server },
+    ],
+  },
+  {
+    label: "Logs",
+    items: [
+      { href: "/admin/audit", label: "Audit Logs", icon: FileClock },
+      { href: "/admin/component-logs", label: "Component Logs", icon: Terminal },
     ],
   },
   {

@@ -34,6 +34,7 @@ import (
 	"strconv"
 
 	"github.com/cocola-project/cocola/apps/gateway/internal/agent"
+	auditstore "github.com/cocola-project/cocola/apps/gateway/internal/audit"
 	"github.com/cocola-project/cocola/apps/gateway/internal/auth"
 	"github.com/cocola-project/cocola/apps/gateway/internal/convo"
 	"github.com/cocola-project/cocola/apps/gateway/internal/httpapi"
@@ -52,7 +53,7 @@ func env(key, def string) string {
 }
 
 func main() {
-	log := logger.Must()
+	log := logger.WithService(logger.Must(), "gateway", "gateway")
 	defer func() { _ = log.Sync() }()
 
 	// Tracing: OFF unless COCOLA_OTEL_ENABLED. When off, only the W3C propagator
@@ -75,8 +76,8 @@ func main() {
 	defer func() { _ = client.Close() }()
 
 	verifier := auth.NewVerifier(auth.Config{
-		Secret:         config.SecretFromEnv("COCOLA_AUTH_SECRET"),
-		Issuer:         env("COCOLA_AUTH_ISSUER", "cocola"),
+		Secret: config.SecretFromEnv("COCOLA_AUTH_SECRET"),
+		Issuer: env("COCOLA_AUTH_ISSUER", "cocola"),
 		// Auth identity is a LATER concern: today the product UI sends no token
 		// and every caller should resolve to the shared dev-user. So anonymous
 		// access defaults ON and is only disabled by an explicit
@@ -127,6 +128,13 @@ func main() {
 			api = api.WithConvoStore(cs)
 			defer cs.Close()
 			log.Info("conversation persistence enabled (postgres)")
+			if auditStore, aerr := auditstore.NewPostgres(context.Background(), dsn); aerr != nil {
+				log.Warn("audit events disabled (connect failed): " + aerr.Error())
+			} else {
+				api = api.WithAuditStore(auditStore)
+				defer auditStore.Close()
+				log.Info("audit events enabled (postgres)")
+			}
 		}
 	}
 

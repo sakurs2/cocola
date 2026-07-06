@@ -10,6 +10,7 @@ import (
 	"testing"
 
 	"github.com/cocola-project/cocola/apps/gateway/internal/agent"
+	auditstore "github.com/cocola-project/cocola/apps/gateway/internal/audit"
 	"github.com/cocola-project/cocola/apps/gateway/internal/auth"
 	"github.com/cocola-project/cocola/apps/gateway/internal/convo"
 	"github.com/cocola-project/cocola/packages/go-common/logger"
@@ -22,6 +23,15 @@ type fakeStreamer struct {
 	gotQuery agent.Query
 	script   []agent.Event
 	err      error
+}
+
+type fakeAuditStore struct {
+	events []auditstore.Event
+}
+
+func (f *fakeAuditStore) AppendAuditEvent(_ context.Context, e auditstore.Event) error {
+	f.events = append(f.events, e)
+	return nil
 }
 
 func (f *fakeStreamer) Stream(_ context.Context, q agent.Query, onEvent func(agent.Event) error) error {
@@ -86,6 +96,43 @@ func TestChatStreamsSSE(t *testing.T) {
 	// The prompt must be forwarded; session honored.
 	if fs.gotQuery.Prompt != "hi" || fs.gotQuery.SessionID != "s1" {
 		t.Fatalf("query not forwarded: %+v", fs.gotQuery)
+	}
+}
+
+func TestChatAuditMetadataExcludesPrompt(t *testing.T) {
+	fs := &fakeStreamer{script: []agent.Event{
+		{Kind: "file", Data: map[string]string{"id": "a1", "filename": "out.html", "mime": "text/html", "size": "12"}},
+		{Kind: "done"},
+	}}
+	audit := &fakeAuditStore{}
+	v := auth.NewVerifier(auth.Config{})
+	h := New(fs, v, logger.Must()).WithAuditStore(audit).Handler()
+
+	req := httptest.NewRequest(
+		http.MethodPost,
+		"/v1/chat",
+		strings.NewReader(`{"prompt":"secret prompt","session_id":"s1","model_alias":"claude","attachments":[{"filename":"a.txt","content_b64":"aGk=","mime":"text/plain"}]}`),
+	)
+	rec := httptest.NewRecorder()
+	h.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("want 200, got %d", rec.Code)
+	}
+	if len(audit.events) != 1 {
+		t.Fatalf("want one audit event, got %d", len(audit.events))
+	}
+	event := audit.events[0]
+	if event.Action != "chat.send" || event.ResourceID != "s1" || event.Result != "success" {
+		t.Fatalf("bad audit event: %+v", event)
+	}
+	raw := event.Metadata
+	if raw["conversation_id"] != "s1" || raw["model_alias"] != "claude" ||
+		raw["attachment_count"] != 1 || raw["artifact_count"] != 1 {
+		t.Fatalf("bad audit metadata: %+v", raw)
+	}
+	if _, ok := raw["prompt"]; ok {
+		t.Fatalf("prompt leaked into audit metadata: %+v", raw)
 	}
 }
 

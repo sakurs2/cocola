@@ -2,8 +2,11 @@ package store
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
+	"fmt"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/jackc/pgx/v5"
@@ -1238,29 +1241,149 @@ func (p *Postgres) ListScheduledTaskRunEvents(ctx context.Context, runID string)
 // ---- Audit ----
 
 func (p *Postgres) AppendAudit(ctx context.Context, e AuditEntry) error {
-	// id is BIGSERIAL; the DB assigns it. ListAudit reflects the assigned ids.
-	const q = `INSERT INTO audit_log (ts, actor, action, resource, detail) VALUES ($1,$2,$3,$4,$5)`
-	_, err := p.pool.Exec(ctx, q, e.At, e.Actor, e.Action, e.Resource, e.Detail)
-	return err
+	detail := map[string]any{}
+	detail["legacy_entry"] = true
+	if e.Detail != "" {
+		detail["detail"] = e.Detail
+	}
+	return p.AppendAuditEvent(ctx, AuditEvent{
+		At:           e.At,
+		ActorType:    "admin",
+		ActorUserID:  e.Actor,
+		ActorEmail:   e.Actor,
+		Action:       e.Action,
+		ResourceType: auditResourceType(e.Action),
+		ResourceID:   e.Resource,
+		Result:       "success",
+		Metadata:     detail,
+	})
 }
 
 func (p *Postgres) ListAudit(ctx context.Context, limit int) ([]AuditEntry, error) {
-	q := `SELECT id, ts, actor, action, resource, detail FROM audit_log ORDER BY id DESC`
-	args := []any{}
-	if limit > 0 {
-		q += ` LIMIT $1`
-		args = append(args, limit)
+	events, err := p.ListAuditEvents(ctx, AuditEventQuery{Limit: limit, LegacyOnly: true})
+	if err != nil {
+		return nil, err
+	}
+	out := make([]AuditEntry, 0)
+	for _, e := range events {
+		if isLegacyAuditEvent(e) {
+			out = append(out, legacyAuditEntry(e))
+			if limit > 0 && len(out) >= limit {
+				break
+			}
+		}
+	}
+	return out, nil
+}
+
+func (p *Postgres) AppendAuditEvent(ctx context.Context, e AuditEvent) error {
+	if e.At.IsZero() {
+		e.At = time.Now().UTC()
+	}
+	if e.Result == "" {
+		e.Result = "success"
+	}
+	if e.Metadata == nil {
+		e.Metadata = map[string]any{}
+	}
+	meta, err := json.Marshal(e.Metadata)
+	if err != nil {
+		return err
+	}
+	const q = `INSERT INTO audit_events (
+		ts, actor_type, actor_user_id, actor_email, action, resource_type,
+		resource_id, result, http_method, route, status_code, request_id, trace_id,
+		client_ip, user_agent, metadata_json, error_code
+	) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17)`
+	_, err = p.pool.Exec(ctx, q,
+		e.At, e.ActorType, e.ActorUserID, e.ActorEmail, e.Action, e.ResourceType,
+		e.ResourceID, e.Result, e.HTTPMethod, e.Route, e.StatusCode, e.RequestID, e.TraceID,
+		e.ClientIP, e.UserAgent, meta, e.ErrorCode)
+	return err
+}
+
+func (p *Postgres) ListAuditEvents(ctx context.Context, query AuditEventQuery) ([]AuditEvent, error) {
+	q := `SELECT id, ts, actor_type, actor_user_id, actor_email, action, resource_type,
+		resource_id, result, http_method, route, status_code, request_id, trace_id,
+		client_ip, user_agent, metadata_json, error_code FROM audit_events`
+	conds := make([]string, 0)
+	args := make([]any, 0)
+	add := func(field string, value any) {
+		args = append(args, value)
+		conds = append(conds, fmt.Sprintf("%s = $%d", field, len(args)))
+	}
+	addTime := func(expr string, value time.Time) {
+		args = append(args, value)
+		conds = append(conds, fmt.Sprintf("%s $%d", expr, len(args)))
+	}
+	if strings.TrimSpace(query.ActorUserID) != "" {
+		add("actor_user_id", strings.TrimSpace(query.ActorUserID))
+	}
+	if strings.TrimSpace(query.ActorEmail) != "" {
+		add("actor_email", strings.TrimSpace(query.ActorEmail))
+	}
+	if strings.TrimSpace(query.Action) != "" {
+		add("action", strings.TrimSpace(query.Action))
+	}
+	if strings.TrimSpace(query.ResourceType) != "" {
+		add("resource_type", strings.TrimSpace(query.ResourceType))
+	}
+	if strings.TrimSpace(query.ResourceID) != "" {
+		add("resource_id", strings.TrimSpace(query.ResourceID))
+	}
+	if strings.TrimSpace(query.Result) != "" {
+		add("result", strings.TrimSpace(query.Result))
+	}
+	if strings.TrimSpace(query.RequestID) != "" {
+		add("request_id", strings.TrimSpace(query.RequestID))
+	}
+	if strings.TrimSpace(query.TraceID) != "" {
+		add("trace_id", strings.TrimSpace(query.TraceID))
+	}
+	if !query.Since.IsZero() {
+		addTime("ts >=", query.Since)
+	}
+	if !query.Until.IsZero() {
+		addTime("ts <=", query.Until)
+	}
+	if query.LegacyOnly {
+		conds = append(conds, "(metadata_json ? 'legacy_entry' OR metadata_json->>'legacy_table' = 'audit_log')")
+	}
+	if len(conds) > 0 {
+		q += " WHERE " + strings.Join(conds, " AND ")
+	}
+	q += ` ORDER BY ts DESC, id DESC`
+	if query.Limit > 0 {
+		args = append(args, query.Limit)
+		q += fmt.Sprintf(" LIMIT $%d", len(args))
+	}
+	if query.Offset > 0 {
+		args = append(args, query.Offset)
+		q += fmt.Sprintf(" OFFSET $%d", len(args))
 	}
 	rows, err := p.pool.Query(ctx, q, args...)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
-	out := make([]AuditEntry, 0)
+	out := make([]AuditEvent, 0)
 	for rows.Next() {
-		var e AuditEntry
-		if err := rows.Scan(&e.ID, &e.At, &e.Actor, &e.Action, &e.Resource, &e.Detail); err != nil {
+		var e AuditEvent
+		var meta []byte
+		if err := rows.Scan(
+			&e.ID, &e.At, &e.ActorType, &e.ActorUserID, &e.ActorEmail, &e.Action,
+			&e.ResourceType, &e.ResourceID, &e.Result, &e.HTTPMethod, &e.Route,
+			&e.StatusCode, &e.RequestID, &e.TraceID, &e.ClientIP, &e.UserAgent, &meta, &e.ErrorCode,
+		); err != nil {
 			return nil, err
+		}
+		if len(meta) > 0 {
+			if err := json.Unmarshal(meta, &e.Metadata); err != nil {
+				return nil, err
+			}
+		}
+		if e.Metadata == nil {
+			e.Metadata = map[string]any{}
 		}
 		out = append(out, e)
 	}

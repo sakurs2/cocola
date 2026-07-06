@@ -120,7 +120,12 @@ func (v *Verifier) Middleware(onErr func(w http.ResponseWriter, status int, code
 // IdentityOf returns the verified Identity stashed by Middleware, or the zero
 // Identity and false when none is present.
 func IdentityOf(r *http.Request) (Identity, bool) {
-	id, ok := r.Context().Value(identityKey).(Identity)
+	return IdentityOfContext(r.Context())
+}
+
+// IdentityOfContext returns the verified Identity stashed on a context.
+func IdentityOfContext(ctx context.Context) (Identity, bool) {
+	id, ok := ctx.Value(identityKey).(Identity)
 	return id, ok
 }
 

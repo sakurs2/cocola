@@ -15,6 +15,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"net"
 	"net/http"
 	"net/url"
 	"strconv"
@@ -24,6 +25,7 @@ import (
 	"github.com/google/uuid"
 
 	"github.com/cocola-project/cocola/apps/gateway/internal/agent"
+	auditstore "github.com/cocola-project/cocola/apps/gateway/internal/audit"
 	"github.com/cocola-project/cocola/apps/gateway/internal/auth"
 	"github.com/cocola-project/cocola/apps/gateway/internal/convo"
 	"github.com/cocola-project/cocola/apps/gateway/internal/objstore"
@@ -54,6 +56,7 @@ type API struct {
 	// nil => persistence is dark: chat still streams, but nothing is stored and
 	// the list/messages endpoints return empty. Enabled by COCOLA_PG_DSN in main.
 	convo convo.Store
+	audit auditstore.Store
 }
 
 // New builds the BFF API.
@@ -91,6 +94,10 @@ func (a *API) WithObjStore(store objstore.Store, inlineMaxBytes int64) *API {
 // persistence dark. See docs/plan/conversation-persistence-history-rendering.md.
 func (a *API) WithConvoStore(store convo.Store) *API { a.convo = store; return a }
 
+// WithAuditStore enables best-effort structured audit events. Passing nil keeps
+// auditing dark, which is the zero-Postgres dev mode.
+func (a *API) WithAuditStore(store auditstore.Store) *API { a.audit = store; return a }
+
 // WithAgentReleaser injects the best-effort session releaser used by
 // conversation deletion tests or alternate runtimes.
 func (a *API) WithAgentReleaser(releaser agent.Releaser) *API { a.releaser = releaser; return a }
@@ -117,15 +124,15 @@ func (a *API) Handler() http.Handler {
 	// Conversation history (route A). Both are auth-guarded so a caller only ever
 	// sees their own conversations (ownership from the verified identity).
 	mux.Handle("GET /v1/conversations", a.instrument("GET /v1/conversations",
-		a.verifier.Middleware(writeErr)(http.HandlerFunc(a.listConversations))))
+		a.verifier.Middleware(writeErr)(a.auditHTTP("conversation.list", "conversation", "", http.HandlerFunc(a.listConversations)))))
 	mux.Handle("PATCH /v1/conversations/{id}", a.instrument("PATCH /v1/conversations/{id}",
-		a.verifier.Middleware(writeErr)(http.HandlerFunc(a.renameConversation))))
+		a.verifier.Middleware(writeErr)(a.auditHTTP("conversation.rename", "conversation", "id", http.HandlerFunc(a.renameConversation)))))
 	mux.Handle("DELETE /v1/conversations/{id}", a.instrument("DELETE /v1/conversations/{id}",
-		a.verifier.Middleware(writeErr)(http.HandlerFunc(a.deleteConversation))))
+		a.verifier.Middleware(writeErr)(a.auditHTTP("conversation.delete", "conversation", "id", http.HandlerFunc(a.deleteConversation)))))
 	mux.Handle("GET /v1/conversations/{id}/messages", a.instrument("GET /v1/conversations/{id}/messages",
-		a.verifier.Middleware(writeErr)(http.HandlerFunc(a.conversationMessages))))
+		a.verifier.Middleware(writeErr)(a.auditHTTP("conversation.messages", "conversation", "id", http.HandlerFunc(a.conversationMessages)))))
 	mux.Handle("GET /v1/conversations/{id}/artifacts/{artifact_id}", a.instrument("GET /v1/conversations/{id}/artifacts/{artifact_id}",
-		a.verifier.Middleware(writeErr)(http.HandlerFunc(a.downloadArtifact))))
+		a.verifier.Middleware(writeErr)(a.auditHTTP("artifact.download", "artifact", "artifact_id", http.HandlerFunc(a.downloadArtifact)))))
 	// Tracing: wrap the whole mux so an inbound W3C traceparent is extracted and
 	// a server span is started before auth/handlers run; the span context then
 	// flows into the agent gRPC call (client stats handler) for an end-to-end
@@ -135,6 +142,115 @@ func (a *API) Handler() http.Handler {
 
 func (a *API) health(w http.ResponseWriter, _ *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})
+}
+
+type auditStatusWriter struct {
+	http.ResponseWriter
+	status int
+}
+
+func (w *auditStatusWriter) WriteHeader(code int) {
+	w.status = code
+	w.ResponseWriter.WriteHeader(code)
+}
+
+func (w *auditStatusWriter) Write(b []byte) (int, error) {
+	if w.status == 0 {
+		w.status = http.StatusOK
+	}
+	return w.ResponseWriter.Write(b)
+}
+
+func (w *auditStatusWriter) Flush() {
+	if f, ok := w.ResponseWriter.(http.Flusher); ok {
+		f.Flush()
+	}
+}
+
+func (a *API) auditHTTP(action, resourceType, resourcePathValue string, next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		start := time.Now()
+		sw := &auditStatusWriter{ResponseWriter: w}
+		next.ServeHTTP(sw, r)
+		status := sw.status
+		if status == 0 {
+			status = http.StatusOK
+		}
+		resourceID := ""
+		if resourcePathValue != "" {
+			resourceID = r.PathValue(resourcePathValue)
+		}
+		a.appendAudit(r.Context(), auditstore.Event{
+			At:           time.Now().UTC(),
+			ActorType:    "user",
+			Action:       action,
+			ResourceType: resourceType,
+			ResourceID:   resourceID,
+			Result:       auditResult(status),
+			HTTPMethod:   r.Method,
+			Route:        r.Pattern,
+			StatusCode:   status,
+			RequestID:    requestID(r),
+			ClientIP:     clientIP(r),
+			UserAgent:    r.UserAgent(),
+			Metadata:     map[string]any{"duration_ms": time.Since(start).Milliseconds()},
+		})
+	})
+}
+
+func (a *API) appendAudit(ctx context.Context, e auditstore.Event) {
+	if a.audit == nil {
+		return
+	}
+	if id, ok := auth.IdentityOfContext(ctx); ok {
+		e.ActorUserID = id.UserID
+		e.ActorEmail = id.UserID
+		if e.Metadata == nil {
+			e.Metadata = map[string]any{}
+		}
+		if id.TenantID != "" {
+			e.Metadata["tenant_id"] = id.TenantID
+		}
+	}
+	traceID, _ := tracing.IDs(ctx)
+	e.TraceID = traceID
+	if err := a.audit.AppendAuditEvent(context.Background(), e); err != nil {
+		if a.metrics != nil {
+			a.metrics.IncAuditWriteError()
+		}
+		a.log.Warn("audit write failed: " + err.Error())
+	}
+}
+
+func auditResult(status int) string {
+	if status == http.StatusUnauthorized || status == http.StatusForbidden {
+		return "denied"
+	}
+	if status >= 400 {
+		return "failure"
+	}
+	return "success"
+}
+
+func requestID(r *http.Request) string {
+	if v := strings.TrimSpace(r.Header.Get("x-request-id")); v != "" {
+		return v
+	}
+	return strings.TrimSpace(r.Header.Get("x-cocola-request-id"))
+}
+
+func clientIP(r *http.Request) string {
+	if v := strings.TrimSpace(r.Header.Get("x-forwarded-for")); v != "" {
+		if i := strings.IndexByte(v, ','); i >= 0 {
+			return strings.TrimSpace(v[:i])
+		}
+		return v
+	}
+	host, _, err := net.SplitHostPort(r.RemoteAddr)
+	if err != nil {
+		return r.RemoteAddr
+	}
+	return host
 }
 
 // chatRequest is the client-supplied body. user_id/session scoping comes from
@@ -167,6 +283,7 @@ type attachmentDTO struct {
 
 // chat is the SSE entrypoint: verify -> open agent stream -> flush events.
 func (a *API) chat(w http.ResponseWriter, r *http.Request) {
+	start := time.Now()
 	id, ok := auth.IdentityOf(r)
 	if !ok {
 		writeErr(w, http.StatusUnauthorized, "UNAUTHENTICATED", "missing identity")
@@ -177,16 +294,19 @@ func (a *API) chat(w http.ResponseWriter, r *http.Request) {
 	dec := json.NewDecoder(r.Body)
 	dec.DisallowUnknownFields()
 	if err := dec.Decode(&req); err != nil {
+		a.auditChat(r, req, http.StatusBadRequest, "failure", "INVALID_ARGUMENT", 0, start)
 		writeErr(w, http.StatusBadRequest, "INVALID_ARGUMENT", "malformed JSON body")
 		return
 	}
 	if strings.TrimSpace(req.Prompt) == "" {
+		a.auditChat(r, req, http.StatusBadRequest, "failure", "INVALID_ARGUMENT", 0, start)
 		writeErr(w, http.StatusBadRequest, "INVALID_ARGUMENT", "prompt is required")
 		return
 	}
 
 	flusher, ok := w.(http.Flusher)
 	if !ok {
+		a.auditChat(r, req, http.StatusInternalServerError, "failure", "INTERNAL", 0, start)
 		writeErr(w, http.StatusInternalServerError, "INTERNAL", "streaming unsupported")
 		return
 	}
@@ -260,8 +380,10 @@ func (a *API) chat(w http.ResponseWriter, r *http.Request) {
 		reducer = convo.NewReducer()
 	}
 
+	artifactCount := 0
 	err := a.streamer.Stream(r.Context(), q, func(ev agent.Event) error {
 		if ev.Kind == "file" {
+			artifactCount++
 			ev = a.registerArtifact(context.Background(), id, req.SessionID, ev)
 		}
 		if reducer != nil {
@@ -289,6 +411,41 @@ func (a *API) chat(w http.ResponseWriter, r *http.Request) {
 			a.revealConversation(context.Background(), id, req)
 		}
 	}
+	if err != nil {
+		a.auditChat(r, req, http.StatusOK, "failure", "AGENT_STREAM_ERROR", artifactCount, start)
+	} else {
+		a.auditChat(r, req, http.StatusOK, "success", "", artifactCount, start)
+	}
+}
+
+func (a *API) auditChat(r *http.Request, req chatRequest, status int, result, errorCode string, artifactCount int, start time.Time) {
+	meta := map[string]any{
+		"conversation_id":  strings.TrimSpace(req.SessionID),
+		"chat_type":        chatTypeForConversation(req),
+		"model_alias":      strings.TrimSpace(req.ModelAlias),
+		"attachment_count": len(req.Attachments),
+		"artifact_count":   artifactCount,
+		"duration_ms":      time.Since(start).Milliseconds(),
+	}
+	if req.DeferConversationVisibilityUntilDone {
+		meta["defer_conversation_visibility_until_done"] = true
+	}
+	a.appendAudit(r.Context(), auditstore.Event{
+		At:           time.Now().UTC(),
+		ActorType:    "user",
+		Action:       "chat.send",
+		ResourceType: "conversation",
+		ResourceID:   strings.TrimSpace(req.SessionID),
+		Result:       result,
+		HTTPMethod:   r.Method,
+		Route:        "POST /v1/chat",
+		StatusCode:   status,
+		RequestID:    requestID(r),
+		ClientIP:     clientIP(r),
+		UserAgent:    r.UserAgent(),
+		Metadata:     meta,
+		ErrorCode:    errorCode,
+	})
 }
 
 // persistUserTurn upserts the conversation (title = truncated first prompt, set

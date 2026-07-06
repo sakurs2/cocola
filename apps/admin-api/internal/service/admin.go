@@ -1031,6 +1031,19 @@ func (a *Admin) ListAudit(ctx context.Context, limit int) ([]store.AuditEntry, e
 	return a.store.ListAudit(ctx, limit)
 }
 
+// AppendAuditEvent appends one structured audit event.
+func (a *Admin) AppendAuditEvent(ctx context.Context, e store.AuditEvent) error {
+	if e.At.IsZero() {
+		e.At = a.now().UTC()
+	}
+	return a.store.AppendAuditEvent(ctx, e)
+}
+
+// ListAuditEvents returns filtered structured audit events.
+func (a *Admin) ListAuditEvents(ctx context.Context, q store.AuditEventQuery) ([]store.AuditEvent, error) {
+	return a.store.ListAuditEvents(ctx, q)
+}
+
 // audit appends one entry best-effort; an audit-write failure must not fail the
 // underlying operation (it already succeeded), so it is intentionally ignored.
 func (a *Admin) audit(ctx context.Context, actor, action, resource, detail string) {

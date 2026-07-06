@@ -776,6 +776,34 @@ func TestAuditTrail(t *testing.T) {
 	}
 }
 
+func TestAuditEventsIncludeHTTPReads(t *testing.T) {
+	api := newTestAPI("k")
+	r := api.Router()
+
+	rec := do(t, r, http.MethodGet, "/admin/tokens", "k", nil)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("list tokens: want 200, got %d", rec.Code)
+	}
+
+	rec = do(t, r, http.MethodGet, "/admin/audit-events?action=admin.tokens.list", "k", nil)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("audit events: want 200, got %d (%s)", rec.Code, rec.Body.String())
+	}
+	var body struct {
+		Events []store.AuditEvent `json:"events"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
+		t.Fatalf("decode audit events: %v", err)
+	}
+	if len(body.Events) == 0 {
+		t.Fatal("expected at least one audit event")
+	}
+	got := body.Events[0]
+	if got.Action != "admin.tokens.list" || got.Result != "success" || got.HTTPMethod != http.MethodGet {
+		t.Fatalf("unexpected audit event: %+v", got)
+	}
+}
+
 func TestTokenMintDisabledWithoutSecret(t *testing.T) {
 	mem := store.NewMemory()
 	svc := service.New(mem, nil, fixedClock) // no issuer

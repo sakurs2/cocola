@@ -24,7 +24,7 @@ type Memory struct {
 	attachments  map[string]ScheduledTaskAttachment
 	runs         map[string]ScheduledTaskRun
 	runEvents    map[string][]ScheduledTaskRunEvent
-	audit        []AuditEntry
+	audit        []AuditEvent
 	auditSeq     int64
 	runEventSeq  int64
 }
@@ -863,25 +863,126 @@ func (m *Memory) ListScheduledTaskRunEvents(ctx context.Context, runID string) (
 // ---- Audit ----
 
 func (m *Memory) AppendAudit(ctx context.Context, e AuditEntry) error {
+	detail := map[string]any{}
+	detail["legacy_entry"] = true
+	if e.Detail != "" {
+		detail["detail"] = e.Detail
+	}
+	return m.AppendAuditEvent(ctx, AuditEvent{
+		At:           e.At,
+		ActorType:    "admin",
+		ActorUserID:  e.Actor,
+		ActorEmail:   e.Actor,
+		Action:       e.Action,
+		ResourceType: auditResourceType(e.Action),
+		ResourceID:   e.Resource,
+		Result:       "success",
+		Metadata:     detail,
+	})
+}
+
+func (m *Memory) AppendAuditEvent(ctx context.Context, e AuditEvent) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	m.auditSeq++
 	e.ID = m.auditSeq
+	if e.At.IsZero() {
+		e.At = time.Now().UTC()
+	}
+	if e.Result == "" {
+		e.Result = "success"
+	}
+	if e.Metadata == nil {
+		e.Metadata = map[string]any{}
+	}
 	m.audit = append(m.audit, e)
 	return nil
 }
 
 func (m *Memory) ListAudit(ctx context.Context, limit int) ([]AuditEntry, error) {
+	events, err := m.ListAuditEvents(ctx, AuditEventQuery{Limit: limit, LegacyOnly: true})
+	if err != nil {
+		return nil, err
+	}
+	out := make([]AuditEntry, 0)
+	for _, e := range events {
+		if isLegacyAuditEvent(e) {
+			out = append(out, legacyAuditEntry(e))
+			if limit > 0 && len(out) >= limit {
+				break
+			}
+		}
+	}
+	return out, nil
+}
+
+func (m *Memory) ListAuditEvents(ctx context.Context, q AuditEventQuery) ([]AuditEvent, error) {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
 	n := len(m.audit)
+	limit := q.Limit
 	if limit <= 0 || limit > n {
 		limit = n
 	}
-	out := make([]AuditEntry, 0, limit)
+	out := make([]AuditEvent, 0, limit)
+	skipped := 0
 	// newest first
 	for i := n - 1; i >= 0 && len(out) < limit; i-- {
-		out = append(out, m.audit[i])
+		if auditMatches(m.audit[i], q) {
+			if skipped < q.Offset {
+				skipped++
+				continue
+			}
+			out = append(out, cloneAuditEvent(m.audit[i]))
+		}
 	}
 	return out, nil
+}
+
+func auditMatches(e AuditEvent, q AuditEventQuery) bool {
+	if q.LegacyOnly && !isLegacyAuditEvent(e) {
+		return false
+	}
+	if q.ActorUserID != "" && e.ActorUserID != q.ActorUserID {
+		return false
+	}
+	if q.ActorEmail != "" && e.ActorEmail != q.ActorEmail {
+		return false
+	}
+	if q.Action != "" && e.Action != q.Action {
+		return false
+	}
+	if q.ResourceType != "" && e.ResourceType != q.ResourceType {
+		return false
+	}
+	if q.ResourceID != "" && e.ResourceID != q.ResourceID {
+		return false
+	}
+	if q.Result != "" && e.Result != q.Result {
+		return false
+	}
+	if q.RequestID != "" && e.RequestID != q.RequestID {
+		return false
+	}
+	if q.TraceID != "" && e.TraceID != q.TraceID {
+		return false
+	}
+	if !q.Since.IsZero() && e.At.Before(q.Since) {
+		return false
+	}
+	if !q.Until.IsZero() && e.At.After(q.Until) {
+		return false
+	}
+	return true
+}
+
+func cloneAuditEvent(e AuditEvent) AuditEvent {
+	if e.Metadata != nil {
+		m := make(map[string]any, len(e.Metadata))
+		for k, v := range e.Metadata {
+			m[k] = v
+		}
+		e.Metadata = m
+	}
+	return e
 }

@@ -7,9 +7,11 @@ import {
   Box,
   CalendarClock,
   Cpu,
+  FileClock,
   Server,
   Settings,
   ShieldCheck,
+  Terminal,
   Users,
 } from "lucide-react";
 import Link from "next/link";
@@ -65,6 +67,22 @@ const MODULES = [
       "Runtime configuration defaults, database overrides, hot reload status, and secrets state.",
     stats: ["Defaults", "Overrides", "Restart Required"],
   },
+  {
+    title: "Audit Logs",
+    href: "/admin/audit",
+    icon: FileClock,
+    group: "Logs",
+    summary: "Server-side user behavior events, outcomes, request ids, and trace correlation.",
+    stats: ["Users", "Actions", "Denied"],
+  },
+  {
+    title: "Component Logs",
+    href: "/admin/component-logs",
+    icon: Terminal,
+    group: "Logs",
+    summary: "Runtime component stdout logs from the configured local log directory.",
+    stats: ["Gateway", "Runtime", "Sandbox"],
+  },
 ];
 
 export default function AdminPage() {
@@ -87,8 +105,8 @@ export default function AdminPage() {
       <div className="mx-auto max-w-7xl space-y-6 px-6 py-6">
         <section className="grid gap-3 md:grid-cols-3">
           <Metric label="Modules" value={String(MODULES.length)} />
-          <Metric label="Access" value="1" />
           <Metric label="Infrastructure" value="2" />
+          <Metric label="Logs" value="2" />
         </section>
 
         <section className="grid gap-4 lg:grid-cols-2">

@@ -74,7 +74,7 @@ import (
 )
 
 func main() {
-	log := logger.Must()
+	log := logger.WithService(logger.Must(), "admin-api", "admin-api")
 	defer func() { _ = log.Sync() }()
 
 	// Tracing: OFF unless COCOLA_OTEL_ENABLED; otherwise only the W3C propagator

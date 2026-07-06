@@ -23,6 +23,15 @@ def _add_trace_context(_logger, _method_name, event_dict):
     return event_dict
 
 
+def _service_fields(name: str) -> dict[str, str]:
+    parts = [p for p in name.split(".") if p]
+    if len(parts) >= 2 and parts[0] == "cocola":
+        service = parts[1]
+        component = ".".join(parts[2:]) or service
+        return {"service": service, "component": component}
+    return {"service": name, "component": name}
+
+
 def get_logger(name: str, level: str = "INFO") -> structlog.stdlib.BoundLogger:
     """Return a JSON-emitting structured logger bound to `name`.
 
@@ -46,4 +55,4 @@ def get_logger(name: str, level: str = "INFO") -> structlog.stdlib.BoundLogger:
         logger_factory=structlog.stdlib.LoggerFactory(),
         cache_logger_on_first_use=True,
     )
-    return structlog.get_logger(name)
+    return structlog.get_logger(name).bind(**_service_fields(name))

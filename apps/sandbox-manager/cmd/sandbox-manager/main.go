@@ -34,7 +34,7 @@ import (
 )
 
 func main() {
-	log := logger.Must()
+	log := logger.WithService(logger.Must(), "sandbox-manager", "sandbox-manager")
 	defer func() { _ = log.Sync() }()
 
 	stopTracing, terr := tracing.Init(context.Background(), tracing.ConfigFromEnv("sandbox-manager"))

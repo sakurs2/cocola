@@ -34,6 +34,7 @@ type Registry struct {
 	reqTotal    *prometheus.CounterVec
 	reqDuration *prometheus.HistogramVec
 	inflight    *prometheus.GaugeVec
+	auditErrors prometheus.Counter
 }
 
 // Option configures a Registry at construction time.
@@ -95,8 +96,13 @@ func New(service string, opts ...Option) *Registry {
 			Help:        "In-flight requests, by transport.",
 			ConstLabels: o.constLabels,
 		}, []string{"transport"}),
+		auditErrors: prometheus.NewCounter(prometheus.CounterOpts{
+			Name:        "cocola_audit_write_errors_total",
+			Help:        "Total audit-event write failures.",
+			ConstLabels: o.constLabels,
+		}),
 	}
-	reg.MustRegister(r.reqTotal, r.reqDuration, r.inflight)
+	reg.MustRegister(r.reqTotal, r.reqDuration, r.inflight, r.auditErrors)
 	return r
 }
 
@@ -119,4 +125,11 @@ func (r *Registry) Handler() http.Handler {
 func (r *Registry) observeRequest(transport, method, code string, seconds float64) {
 	r.reqTotal.WithLabelValues(transport, method, code).Inc()
 	r.reqDuration.WithLabelValues(transport, method).Observe(seconds)
+}
+
+// IncAuditWriteError records one best-effort audit write failure.
+func (r *Registry) IncAuditWriteError() {
+	if r != nil {
+		r.auditErrors.Inc()
+	}
 }
