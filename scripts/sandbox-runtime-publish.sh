@@ -58,7 +58,7 @@ if [[ "$PLATFORMS" == *,* ]]; then
     echo "building ${tags[0]} for selfcheck on $VERIFY_PLATFORM"
     docker build --platform "$VERIFY_PLATFORM" -t "${tags[0]}" "$CTX"
     echo "running sandbox runtime selfcheck with ${tags[0]}"
-    IMAGE="${tags[0]}" SKIP_BUILD=1 SKIP_QUERY=1 "$ROOT/scripts/sandbox-runtime-verify.sh"
+    IMAGE="${tags[0]}" SKIP_BUILD=1 "$ROOT/scripts/sandbox-runtime-verify.sh"
   fi
 
   tag_args=()
@@ -77,7 +77,7 @@ else
 
   if [ "$VERIFY" = "1" ]; then
     echo "running sandbox runtime selfcheck with ${tags[0]}"
-    IMAGE="${tags[0]}" SKIP_BUILD=1 SKIP_QUERY=1 "$ROOT/scripts/sandbox-runtime-verify.sh"
+    IMAGE="${tags[0]}" SKIP_BUILD=1 "$ROOT/scripts/sandbox-runtime-verify.sh"
   fi
 
   for tag in "${tags[@]}"; do

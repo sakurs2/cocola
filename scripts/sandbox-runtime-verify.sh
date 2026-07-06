@@ -22,8 +22,7 @@
 # The shim is driven over `docker exec -i` STDIO -- never a listening port.
 #
 # Usage:
-#   scripts/sandbox-runtime-verify.sh                  # full run (needs gateway env)
-#   SKIP_QUERY=1 scripts/sandbox-runtime-verify.sh     # build + selfcheck + persist only
+#   scripts/sandbox-runtime-verify.sh                  # build + selfcheck + persist
 #   ANTHROPIC_BASE_URL=... ANTHROPIC_AUTH_TOKEN=... scripts/sandbox-runtime-verify.sh
 #
 # Env knobs:
@@ -31,7 +30,6 @@
 #   DOCKER_RUNTIME  container runtime           (default runc; set runsc for gVisor)
 #   MODEL           model alias for the query turn (default cocola-default)
 #   SKIP_BUILD=1    reuse an existing image
-#   SKIP_QUERY=1    skip the live model turn (no gateway needed)
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
@@ -101,7 +99,7 @@ for tool in pnpm yarn playwright chromium fd jq yq tree file make imagemagick pd
 done
 
 # ---- 3. real query: egress + native bash/file IO -------------------------
-if [ "${SKIP_QUERY:-0}" != "1" ] && [ -n "${ANTHROPIC_BASE_URL:-}" ] && [ -n "${ANTHROPIC_AUTH_TOKEN:-}" ]; then
+if [ -n "${ANTHROPIC_BASE_URL:-}" ] && [ -n "${ANTHROPIC_AUTH_TOKEN:-}" ]; then
   note "live turn: reach the gateway AND run native bash/file IO in-sandbox"
   note "  (this is the end-to-end TOOL-USE round-trip -- ADR-0010)"
   REQ='{"prompt":"Use the Bash tool to write the text COCOLA_OK into /workspace/proof.txt, then read it back and tell me its contents.","max_turns":8}'
@@ -124,7 +122,7 @@ if [ "${SKIP_QUERY:-0}" != "1" ] && [ -n "${ANTHROPIC_BASE_URL:-}" ] && [ -n "${
   fi
   [ -n "$SESSION_ID" ] && ok "captured session_id=$SESSION_ID" || note "no session_id captured (skipping resume test)"
 else
-  note "SKIP_QUERY (or no gateway env): skipping live model turn + resume"
+  note "no gateway env: skipping live model turn + resume"
   SESSION_ID=""
 fi
 

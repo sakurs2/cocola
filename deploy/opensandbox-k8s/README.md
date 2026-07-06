@@ -33,21 +33,6 @@ GHCR by default. This avoids rebuilding or pushing the large sandbox image on
 every local Kubernetes run. The image is pre-pulled during startup so the first
 chat does not pay the full cold-pull cost inside `POST /sandboxes`.
 
-For image development, you can still opt into the old local-registry flow:
-
-```bash
-COCOLA_K8S_PUSH_SANDBOX_IMAGE=1 make dev
-```
-
-That mode uses two addresses:
-
-- Host push address: `localhost:5001/cocola/sandbox-runtime:dev`
-- Kubernetes pull address: `cocola-registry.localhost:5000/cocola/sandbox-runtime:dev`
-
-Do not pass the host `localhost:5001` address to OpenSandbox sandbox pods. From
-inside a k3d node, `localhost` is the node container itself, so pod image pulls
-will fail with `ImagePullBackOff`.
-
 The local values intentionally run without an OpenSandbox API key and set
 `OPENSANDBOX_INSECURE_SERVER=YES`; do not use this values file as-is for a
 shared environment. `make dev` injects the Kubernetes-specific OpenSandbox URL,

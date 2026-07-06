@@ -15,17 +15,8 @@ export PATH="/Applications/OrbStack.app/Contents/MacOS/xbin:/opt/homebrew/bin:/u
 ACTION="${1:-up}"
 
 CLUSTER="${COCOLA_K8S_CLUSTER:-cocola-sandbox}"
-REGISTRY_HOST="${COCOLA_K8S_REGISTRY_HOST:-cocola-registry.localhost}"
-REGISTRY_PORT="${COCOLA_K8S_REGISTRY_PORT:-5001}"
-SANDBOX_IMAGE_LOCAL="${COCOLA_K8S_SANDBOX_IMAGE_LOCAL:-cocola/sandbox-runtime:dev}"
-SANDBOX_IMAGE_PUSH="${COCOLA_K8S_SANDBOX_IMAGE_PUSH:-localhost:${REGISTRY_PORT}/cocola/sandbox-runtime:dev}"
-PUSH_SANDBOX_IMAGE="${COCOLA_K8S_PUSH_SANDBOX_IMAGE:-0}"
 PREPULL_SANDBOX_IMAGE="${COCOLA_K8S_PREPULL_SANDBOX_IMAGE:-1}"
-if [[ "$PUSH_SANDBOX_IMAGE" == "1" ]]; then
-  SANDBOX_IMAGE_REMOTE_DEFAULT="${REGISTRY_HOST}:5000/cocola/sandbox-runtime:dev"
-else
-  SANDBOX_IMAGE_REMOTE_DEFAULT="ghcr.io/sakurs2/cocola-sandbox-runtime:latest"
-fi
+SANDBOX_IMAGE_REMOTE_DEFAULT="ghcr.io/sakurs2/cocola-sandbox-runtime:latest"
 SANDBOX_IMAGE_REMOTE="${COCOLA_K8S_SANDBOX_IMAGE_REMOTE:-$SANDBOX_IMAGE_REMOTE_DEFAULT}"
 SERVER_PORT="${COCOLA_OPENSANDBOX_HOST_PORT:-8090}"
 RELEASE="${COCOLA_OPENSANDBOX_K8S_RELEASE:-opensandbox}"
@@ -77,26 +68,9 @@ ensure_cluster() {
     log "creating single-node k3d cluster: $CLUSTER"
     k3d cluster create "$CLUSTER" \
       --servers 1 \
-      --agents 0 \
-      --registry-create "${REGISTRY_HOST}:0.0.0.0:${REGISTRY_PORT}"
+      --agents 0
   fi
   k3d kubeconfig merge "$CLUSTER" --kubeconfig-switch-context >/dev/null
-}
-
-push_sandbox_image() {
-  if ! docker image inspect "$SANDBOX_IMAGE_LOCAL" >/dev/null 2>&1; then
-    err "missing local image: $SANDBOX_IMAGE_LOCAL"
-    err "build the sandbox runtime image first, then rerun: make dev"
-    return 1
-  fi
-  log "pushing sandbox image to local k3d registry: $SANDBOX_IMAGE_PUSH"
-  docker tag "$SANDBOX_IMAGE_LOCAL" "$SANDBOX_IMAGE_PUSH"
-  if ! docker push "$SANDBOX_IMAGE_PUSH"; then
-    err "failed to push $SANDBOX_IMAGE_PUSH"
-    err "if the cluster was created before the local registry existed, run: scripts/run-stack-dev.sh reset"
-    return 1
-  fi
-  log "Kubernetes sandbox pods will pull image as: $SANDBOX_IMAGE_REMOTE"
 }
 
 prepull_sandbox_image() {
@@ -244,12 +218,8 @@ start_forward() {
 up() {
   log "mode: dev (local debug; native cocola services + OpenSandbox Kubernetes runtime + containerized infra)"
   ensure_cluster
-  if [[ "$PUSH_SANDBOX_IMAGE" == "1" ]]; then
-    push_sandbox_image
-  else
-    log "Kubernetes sandbox pods will pull image from registry: $SANDBOX_IMAGE_REMOTE"
-    prepull_sandbox_image
-  fi
+  log "Kubernetes sandbox pods will pull image from registry: $SANDBOX_IMAGE_REMOTE"
+  prepull_sandbox_image
   install_opensandbox
   start_forward
 
@@ -348,14 +318,7 @@ Common targets:
 
 Environment:
   COCOLA_K8S_CLUSTER              default: cocola-sandbox
-  COCOLA_K8S_REGISTRY_HOST        default: cocola-registry.localhost
-  COCOLA_K8S_REGISTRY_PORT        default: 5001
-  COCOLA_K8S_SANDBOX_IMAGE_LOCAL  default: cocola/sandbox-runtime:dev
-  COCOLA_K8S_SANDBOX_IMAGE_PUSH   default: localhost:5001/cocola/sandbox-runtime:dev
   COCOLA_K8S_SANDBOX_IMAGE_REMOTE default: ghcr.io/sakurs2/cocola-sandbox-runtime:latest
-                                    when COCOLA_K8S_PUSH_SANDBOX_IMAGE=1:
-                                    cocola-registry.localhost:5000/cocola/sandbox-runtime:dev
-  COCOLA_K8S_PUSH_SANDBOX_IMAGE   default: 0; set 1 to push a local dev image to k3d registry
   COCOLA_K8S_PREPULL_SANDBOX_IMAGE default: 1; pre-pull the remote image during make dev
   COCOLA_OPENSANDBOX_K8S_BATCHSANDBOX_TEMPLATE default: deploy/opensandbox-k8s/batchsandbox-template.yaml
   OPENSANDBOX_REPO                default: \$HOME/Desktop/github/opensandbox

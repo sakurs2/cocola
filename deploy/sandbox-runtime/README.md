@@ -183,7 +183,7 @@ reproducible production rollouts and rollback targets.
 
 ```bash
 # build + offline selfcheck + session-workspace persistence (no gateway needed)
-SKIP_QUERY=1 scripts/sandbox-runtime-verify.sh
+scripts/sandbox-runtime-verify.sh
 
 # full run incl. a live model turn through the gateway
 ANTHROPIC_BASE_URL=http://host.docker.internal:8081 \
