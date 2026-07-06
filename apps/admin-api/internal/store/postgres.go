@@ -1389,3 +1389,46 @@ func (p *Postgres) ListAuditEvents(ctx context.Context, query AuditEventQuery) (
 	}
 	return out, rows.Err()
 }
+
+func (p *Postgres) ListTraceEvents(ctx context.Context, query TraceEventQuery) ([]TraceEvent, error) {
+	traceID := strings.TrimSpace(query.TraceID)
+	if traceID == "" {
+		return []TraceEvent{}, nil
+	}
+	limit := query.Limit
+	if limit <= 0 || limit > 500 {
+		limit = 500
+	}
+	const q = `SELECT id, trace_id, service, name, category, started_at, duration_ms,
+		status, metadata_json
+		FROM trace_events
+		WHERE trace_id = $1
+		ORDER BY started_at ASC, id ASC
+		LIMIT $2`
+	rows, err := p.pool.Query(ctx, q, traceID, limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := make([]TraceEvent, 0)
+	for rows.Next() {
+		var e TraceEvent
+		var meta []byte
+		if err := rows.Scan(
+			&e.ID, &e.TraceID, &e.Service, &e.Name, &e.Category, &e.StartedAt,
+			&e.DurationMS, &e.Status, &meta,
+		); err != nil {
+			return nil, err
+		}
+		if len(meta) > 0 {
+			if err := json.Unmarshal(meta, &e.Metadata); err != nil {
+				return nil, err
+			}
+		}
+		if e.Metadata == nil {
+			e.Metadata = map[string]any{}
+		}
+		out = append(out, e)
+	}
+	return out, rows.Err()
+}

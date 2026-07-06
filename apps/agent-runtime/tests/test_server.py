@@ -395,8 +395,9 @@ async def test_query_publishes_outputs_artifacts():
     ).Query(FakeRequest(), ctx)
 
     kinds = [e.kind for e in ctx.written]
-    assert kinds == ["sandbox", "text", "file", "done"]
-    file_event = ctx.written[2]
+    assert kinds == ["trace", "sandbox", "text", "file", "done"]
+    assert ctx.written[0].data["name"] == "sandbox.create"
+    file_event = ctx.written[3]
     assert file_event.data["filename"] == "report.txt"
     assert file_event.data["mime"] == "text/plain"
     key = file_event.data["object_key"]

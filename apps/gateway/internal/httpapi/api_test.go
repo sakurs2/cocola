@@ -13,6 +13,7 @@ import (
 	auditstore "github.com/cocola-project/cocola/apps/gateway/internal/audit"
 	"github.com/cocola-project/cocola/apps/gateway/internal/auth"
 	"github.com/cocola-project/cocola/apps/gateway/internal/convo"
+	traceevents "github.com/cocola-project/cocola/apps/gateway/internal/traceevent"
 	"github.com/cocola-project/cocola/packages/go-common/logger"
 	"github.com/cocola-project/cocola/packages/go-common/metrics"
 	"github.com/cocola-project/cocola/packages/go-common/token"
@@ -29,7 +30,16 @@ type fakeAuditStore struct {
 	events []auditstore.Event
 }
 
+type fakeTraceStore struct {
+	events []traceevents.Event
+}
+
 func (f *fakeAuditStore) AppendAuditEvent(_ context.Context, e auditstore.Event) error {
+	f.events = append(f.events, e)
+	return nil
+}
+
+func (f *fakeTraceStore) AppendTraceEvent(_ context.Context, e traceevents.Event) error {
 	f.events = append(f.events, e)
 	return nil
 }
@@ -96,6 +106,56 @@ func TestChatStreamsSSE(t *testing.T) {
 	// The prompt must be forwarded; session honored.
 	if fs.gotQuery.Prompt != "hi" || fs.gotQuery.SessionID != "s1" {
 		t.Fatalf("query not forwarded: %+v", fs.gotQuery)
+	}
+}
+
+func TestChatConsumesInternalTraceEvents(t *testing.T) {
+	fs := &fakeStreamer{script: []agent.Event{
+		{Kind: "trace", Data: map[string]string{
+			"name":               "sandbox.create",
+			"category":           "sandbox",
+			"service":            "agent-runtime",
+			"started_at_unix_ms": "1760000000000",
+			"duration_ms":        "1234",
+			"status":             "ok",
+			"sandbox_id":         "box-1",
+			"reused":             "false",
+		}},
+		{Kind: "text", Data: map[string]string{"text": "hello"}},
+		{Kind: "done", Data: map[string]string{"reason": "stop"}},
+	}}
+	trace := &fakeTraceStore{}
+	h := New(fs, auth.NewVerifier(auth.Config{}), logger.Must()).WithTraceStore(trace).Handler()
+
+	req := httptest.NewRequest("POST", "/v1/chat", strings.NewReader(`{"prompt":"hi","session_id":"s1"}`))
+	rec := httptest.NewRecorder()
+	h.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("want 200, got %d", rec.Code)
+	}
+	body := rec.Body.String()
+	if strings.Contains(body, "event: trace") {
+		t.Fatalf("internal trace event leaked to SSE: %s", body)
+	}
+	if !strings.Contains(body, "event: text\n") {
+		t.Fatalf("missing text SSE: %s", body)
+	}
+	found := false
+	for _, event := range trace.events {
+		if event.Name != "sandbox.create" {
+			continue
+		}
+		found = true
+		if event.Service != "agent-runtime" || event.Category != "sandbox" || event.DurationMS != 1234 {
+			t.Fatalf("bad trace event: %+v", event)
+		}
+		if event.Metadata["sandbox_id"] != "box-1" || event.Metadata["reused"] != "false" {
+			t.Fatalf("bad trace metadata: %+v", event.Metadata)
+		}
+	}
+	if !found {
+		t.Fatalf("sandbox.create trace event not recorded: %+v", trace.events)
 	}
 }
 

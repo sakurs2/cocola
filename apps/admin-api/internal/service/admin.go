@@ -1044,6 +1044,11 @@ func (a *Admin) ListAuditEvents(ctx context.Context, q store.AuditEventQuery) ([
 	return a.store.ListAuditEvents(ctx, q)
 }
 
+// ListTraceEvents returns timing events for one trace.
+func (a *Admin) ListTraceEvents(ctx context.Context, q store.TraceEventQuery) ([]store.TraceEvent, error) {
+	return a.store.ListTraceEvents(ctx, q)
+}
+
 // audit appends one entry best-effort; an audit-write failure must not fail the
 // underlying operation (it already succeeded), so it is intentionally ignored.
 func (a *Admin) audit(ctx context.Context, actor, action, resource, detail string) {

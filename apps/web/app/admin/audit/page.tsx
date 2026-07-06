@@ -54,7 +54,7 @@ export default function AdminAuditPage() {
   const [filters, setFilters] = useState<Filters>({
     actor: "",
     action: "",
-    resourceType: "",
+    resourceType: "conversation",
     result: "",
     requestID: "",
     traceID: "",
@@ -153,15 +153,30 @@ export default function AdminAuditPage() {
                 setFilters((prev) => ({ ...prev, action: event.target.value }));
               }}
             />
-            <input
+            <select
               className={input}
-              placeholder="resource"
               value={filters.resourceType}
               onChange={(event) => {
                 setPage(0);
                 setFilters((prev) => ({ ...prev, resourceType: event.target.value }));
               }}
-            />
+            >
+              <option value="">any resource</option>
+              <option value="conversation">conversation</option>
+              <option value="artifact">artifact</option>
+              <option value="users">users</option>
+              <option value="tokens">tokens</option>
+              <option value="settings">settings</option>
+              <option value="quotas">quotas</option>
+              <option value="skills">skills</option>
+              <option value="models">models</option>
+              <option value="model_providers">model_providers</option>
+              <option value="scheduled_tasks">scheduled_tasks</option>
+              <option value="scheduled_task_runs">scheduled_task_runs</option>
+              <option value="sandbox_nodes">sandbox_nodes</option>
+              <option value="sandboxes">sandboxes</option>
+              <option value="runtime_token">runtime_token</option>
+            </select>
             <select
               className={input}
               value={filters.result}
@@ -303,9 +318,7 @@ export default function AdminAuditPage() {
                         ) : null}
                       </td>
                       <td className="px-4 py-3">
-                        <div className="max-w-[180px] truncate font-mono text-xs">
-                          {event.trace_id || event.request_id || "-"}
-                        </div>
+                        <TraceLink traceID={event.trace_id} requestID={event.request_id} />
                       </td>
                       <td className="px-4 py-3">
                         <MetadataCell event={event} conversationID={conversationID} />
@@ -360,6 +373,25 @@ function MetadataCell({ event, conversationID }: { event: AuditEvent; conversati
         conversation_id={conversationID}
       </Link>
       <div className="truncate font-mono text-xs text-muted-foreground">{metadata}</div>
+    </div>
+  );
+}
+
+function TraceLink({ traceID, requestID }: { traceID?: string; requestID?: string }) {
+  if (traceID) {
+    return (
+      <Link
+        href={`/admin/traces/${encodeURIComponent(traceID)}`}
+        className="block max-w-[180px] truncate font-mono text-xs text-primary underline-offset-2 hover:underline"
+        title={`Open trace ${traceID}`}
+      >
+        {traceID}
+      </Link>
+    );
+  }
+  return (
+    <div className="max-w-[180px] truncate font-mono text-xs text-muted-foreground">
+      {requestID || "-"}
     </div>
   );
 }

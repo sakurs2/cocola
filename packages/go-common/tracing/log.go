@@ -2,6 +2,9 @@ package tracing
 
 import (
 	"context"
+	"crypto/rand"
+	"encoding/hex"
+	"time"
 
 	"go.opentelemetry.io/otel/trace"
 	"go.uber.org/zap"
@@ -36,4 +39,25 @@ func IDs(ctx context.Context) (traceID, spanID string) {
 		return "", ""
 	}
 	return sc.TraceID().String(), sc.SpanID().String()
+}
+
+// TraceID returns the active OTel trace id when one exists, otherwise a fresh
+// internal 16-byte hex id. Use it for in-product correlation records that should
+// exist even when external OpenTelemetry export is disabled.
+func TraceID(ctx context.Context) string {
+	traceID, _ := IDs(ctx)
+	if traceID != "" {
+		return traceID
+	}
+	return NewTraceID()
+}
+
+// NewTraceID returns a lowercase 32-character hex trace id.
+func NewTraceID() string {
+	var b [16]byte
+	if _, err := rand.Read(b[:]); err == nil {
+		return hex.EncodeToString(b[:])
+	}
+	// crypto/rand failures are vanishingly rare; keep correlation alive anyway.
+	return hex.EncodeToString([]byte(time.Now().UTC().Format("20060102150405.000000000")))[:32]
 }

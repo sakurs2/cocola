@@ -25,6 +25,7 @@ type Memory struct {
 	runs         map[string]ScheduledTaskRun
 	runEvents    map[string][]ScheduledTaskRunEvent
 	audit        []AuditEvent
+	traceEvents  []TraceEvent
 	auditSeq     int64
 	runEventSeq  int64
 }
@@ -977,6 +978,40 @@ func auditMatches(e AuditEvent, q AuditEventQuery) bool {
 }
 
 func cloneAuditEvent(e AuditEvent) AuditEvent {
+	if e.Metadata != nil {
+		m := make(map[string]any, len(e.Metadata))
+		for k, v := range e.Metadata {
+			m[k] = v
+		}
+		e.Metadata = m
+	}
+	return e
+}
+
+func (m *Memory) ListTraceEvents(ctx context.Context, q TraceEventQuery) ([]TraceEvent, error) {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	if q.TraceID == "" {
+		return []TraceEvent{}, nil
+	}
+	limit := q.Limit
+	if limit <= 0 || limit > len(m.traceEvents) {
+		limit = len(m.traceEvents)
+	}
+	out := make([]TraceEvent, 0, limit)
+	for _, event := range m.traceEvents {
+		if event.TraceID != q.TraceID {
+			continue
+		}
+		out = append(out, cloneTraceEvent(event))
+		if len(out) >= limit {
+			break
+		}
+	}
+	return out, nil
+}
+
+func cloneTraceEvent(e TraceEvent) TraceEvent {
 	if e.Metadata != nil {
 		m := make(map[string]any, len(e.Metadata))
 		for k, v := range e.Metadata {

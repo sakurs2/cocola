@@ -52,7 +52,7 @@ func (a *API) auditHTTP(actorType string) func(http.Handler) http.Handler {
 }
 
 func (a *API) appendHTTPAudit(r *http.Request, actorType, action, resourceType, resourceID string, status int, errorCode string, start time.Time) {
-	traceID, _ := tracing.IDs(r.Context())
+	traceID := tracing.TraceID(r.Context())
 	actor := actorOf(r)
 	if actor == "unknown" {
 		actor = actorFromHeaders(r)

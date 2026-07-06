@@ -29,6 +29,7 @@ import (
 	"github.com/cocola-project/cocola/apps/gateway/internal/auth"
 	"github.com/cocola-project/cocola/apps/gateway/internal/convo"
 	"github.com/cocola-project/cocola/apps/gateway/internal/objstore"
+	traceevents "github.com/cocola-project/cocola/apps/gateway/internal/traceevent"
 	"github.com/cocola-project/cocola/packages/go-common/logger"
 	"github.com/cocola-project/cocola/packages/go-common/metrics"
 	"github.com/cocola-project/cocola/packages/go-common/tracing"
@@ -57,6 +58,7 @@ type API struct {
 	// the list/messages endpoints return empty. Enabled by COCOLA_PG_DSN in main.
 	convo convo.Store
 	audit auditstore.Store
+	trace traceevents.Store
 }
 
 // New builds the BFF API.
@@ -97,6 +99,9 @@ func (a *API) WithConvoStore(store convo.Store) *API { a.convo = store; return a
 // WithAuditStore enables best-effort structured audit events. Passing nil keeps
 // auditing dark, which is the zero-Postgres dev mode.
 func (a *API) WithAuditStore(store auditstore.Store) *API { a.audit = store; return a }
+
+// WithTraceStore enables best-effort in-product trace timing events.
+func (a *API) WithTraceStore(store traceevents.Store) *API { a.trace = store; return a }
 
 // WithAgentReleaser injects the best-effort session releaser used by
 // conversation deletion tests or alternate runtimes.
@@ -170,6 +175,7 @@ func (w *auditStatusWriter) Flush() {
 func (a *API) auditHTTP(action, resourceType, resourcePathValue string, next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		start := time.Now()
+		traceID := tracing.TraceID(r.Context())
 		sw := &auditStatusWriter{ResponseWriter: w}
 		next.ServeHTTP(sw, r)
 		status := sw.status
@@ -191,9 +197,18 @@ func (a *API) auditHTTP(action, resourceType, resourcePathValue string, next htt
 			Route:        r.Pattern,
 			StatusCode:   status,
 			RequestID:    requestID(r),
+			TraceID:      traceID,
 			ClientIP:     clientIP(r),
 			UserAgent:    r.UserAgent(),
 			Metadata:     map[string]any{"duration_ms": time.Since(start).Milliseconds()},
+		})
+		a.recordTrace(r.Context(), traceID, "http.request", "gateway", start, auditResult(status), map[string]any{
+			"action":        action,
+			"resource_type": resourceType,
+			"resource_id":   resourceID,
+			"method":        r.Method,
+			"route":         r.Pattern,
+			"status_code":   status,
 		})
 	})
 }
@@ -212,14 +227,97 @@ func (a *API) appendAudit(ctx context.Context, e auditstore.Event) {
 			e.Metadata["tenant_id"] = id.TenantID
 		}
 	}
-	traceID, _ := tracing.IDs(ctx)
-	e.TraceID = traceID
+	if e.TraceID == "" {
+		e.TraceID = tracing.TraceID(ctx)
+	}
 	if err := a.audit.AppendAuditEvent(context.Background(), e); err != nil {
 		if a.metrics != nil {
 			a.metrics.IncAuditWriteError()
 		}
 		a.log.Warn("audit write failed: " + err.Error())
 	}
+}
+
+func (a *API) recordTrace(ctx context.Context, traceID, name, category string, startedAt time.Time, status string, metadata map[string]any) {
+	if a.trace == nil || traceID == "" {
+		return
+	}
+	if status == "" {
+		status = "ok"
+	}
+	event := traceevents.Event{
+		TraceID:    traceID,
+		Service:    "gateway",
+		Name:       name,
+		Category:   category,
+		StartedAt:  startedAt.UTC(),
+		DurationMS: time.Since(startedAt).Milliseconds(),
+		Status:     status,
+		Metadata:   metadata,
+	}
+	a.appendTraceEvent(ctx, event)
+}
+
+func (a *API) appendTraceEvent(ctx context.Context, event traceevents.Event) {
+	if a.trace == nil || event.TraceID == "" || event.Name == "" {
+		return
+	}
+	if err := a.trace.AppendTraceEvent(context.Background(), event); err != nil {
+		a.log.Warn("trace event write failed: " + err.Error())
+	}
+}
+
+func (a *API) recordAgentTrace(ctx context.Context, traceID string, data map[string]string) {
+	if a.trace == nil || traceID == "" {
+		return
+	}
+	name := strings.TrimSpace(data["name"])
+	if name == "" {
+		return
+	}
+	durationMS := int64(0)
+	if raw := strings.TrimSpace(data["duration_ms"]); raw != "" {
+		if parsed, err := strconv.ParseInt(raw, 10, 64); err == nil && parsed > 0 {
+			durationMS = parsed
+		}
+	}
+	startedAt := time.Now().Add(-time.Duration(durationMS) * time.Millisecond)
+	if raw := strings.TrimSpace(data["started_at_unix_ms"]); raw != "" {
+		if parsed, err := strconv.ParseInt(raw, 10, 64); err == nil && parsed > 0 {
+			startedAt = time.UnixMilli(parsed)
+		}
+	}
+	service := strings.TrimSpace(data["service"])
+	if service == "" {
+		service = "agent-runtime"
+	}
+	category := strings.TrimSpace(data["category"])
+	if category == "" {
+		category = service
+	}
+	status := strings.TrimSpace(data["status"])
+	if status == "" {
+		status = "ok"
+	}
+	metadata := make(map[string]any, len(data))
+	for k, v := range data {
+		switch k {
+		case "name", "category", "service", "started_at_unix_ms", "duration_ms", "status":
+			continue
+		default:
+			metadata[k] = v
+		}
+	}
+	a.appendTraceEvent(ctx, traceevents.Event{
+		TraceID:    traceID,
+		Service:    service,
+		Name:       name,
+		Category:   category,
+		StartedAt:  startedAt.UTC(),
+		DurationMS: durationMS,
+		Status:     status,
+		Metadata:   metadata,
+	})
 }
 
 func auditResult(status int) string {
@@ -289,24 +387,39 @@ func (a *API) chat(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusUnauthorized, "UNAUTHENTICATED", "missing identity")
 		return
 	}
+	traceID := tracing.TraceID(r.Context())
 
 	var req chatRequest
+	decodeStart := time.Now()
 	dec := json.NewDecoder(r.Body)
 	dec.DisallowUnknownFields()
 	if err := dec.Decode(&req); err != nil {
-		a.auditChat(r, req, http.StatusBadRequest, "failure", "INVALID_ARGUMENT", 0, start)
+		a.recordTrace(r.Context(), traceID, "request.decode", "gateway", decodeStart, "error",
+			map[string]any{"error_code": "INVALID_ARGUMENT"})
+		a.auditChat(r, traceID, req, http.StatusBadRequest, "failure", "INVALID_ARGUMENT", 0, start)
 		writeErr(w, http.StatusBadRequest, "INVALID_ARGUMENT", "malformed JSON body")
 		return
 	}
+	a.recordTrace(r.Context(), traceID, "request.decode", "gateway", decodeStart, "ok", nil)
 	if strings.TrimSpace(req.Prompt) == "" {
-		a.auditChat(r, req, http.StatusBadRequest, "failure", "INVALID_ARGUMENT", 0, start)
+		a.recordTrace(r.Context(), traceID, "request.validate", "gateway", time.Now(), "error",
+			map[string]any{"error_code": "INVALID_ARGUMENT"})
+		a.auditChat(r, traceID, req, http.StatusBadRequest, "failure", "INVALID_ARGUMENT", 0, start)
 		writeErr(w, http.StatusBadRequest, "INVALID_ARGUMENT", "prompt is required")
 		return
 	}
+	a.recordTrace(r.Context(), traceID, "request.validate", "gateway", time.Now(), "ok", map[string]any{
+		"conversation_id":  strings.TrimSpace(req.SessionID),
+		"chat_type":        chatTypeForConversation(req),
+		"model_alias":      strings.TrimSpace(req.ModelAlias),
+		"attachment_count": len(req.Attachments),
+	})
 
 	flusher, ok := w.(http.Flusher)
 	if !ok {
-		a.auditChat(r, req, http.StatusInternalServerError, "failure", "INTERNAL", 0, start)
+		a.recordTrace(r.Context(), traceID, "sse.prepare", "gateway", time.Now(), "error",
+			map[string]any{"error_code": "INTERNAL"})
+		a.auditChat(r, traceID, req, http.StatusInternalServerError, "failure", "INTERNAL", 0, start)
 		writeErr(w, http.StatusInternalServerError, "INTERNAL", "streaming unsupported")
 		return
 	}
@@ -320,8 +433,12 @@ func (a *API) chat(w http.ResponseWriter, r *http.Request) {
 	h.Set("x-accel-buffering", "no") // disable proxy buffering (nginx)
 	w.WriteHeader(http.StatusOK)
 	flusher.Flush()
+	a.recordTrace(r.Context(), traceID, "sse.prepare", "gateway", time.Now(), "ok", nil)
 
+	attachmentsStart := time.Now()
 	atts := make([]agent.Attachment, 0, len(req.Attachments))
+	inlineCount := 0
+	objectCount := 0
 	for i := range req.Attachments {
 		content, derr := base64.StdEncoding.DecodeString(req.Attachments[i].ContentB64)
 		if derr != nil {
@@ -344,15 +461,26 @@ func (a *API) chat(w http.ResponseWriter, r *http.Request) {
 				a.log.Warn("attachment object-store upload failed, delivering inline: " + err.Error())
 			} else {
 				att.OssKey = key
+				objectCount++
 				if att.Size > a.inlineMaxBytes {
 					// Large file: hand agent-runtime the key only; it pulls the
 					// bytes from the store before the run (backend-pull).
 					att.Content = nil
+				} else {
+					inlineCount++
 				}
 			}
+		} else {
+			inlineCount++
 		}
 		atts = append(atts, att)
 	}
+	a.recordTrace(r.Context(), traceID, "attachments.prepare", "gateway", attachmentsStart, "ok", map[string]any{
+		"attachment_count": len(req.Attachments),
+		"accepted_count":   len(atts),
+		"inline_count":     inlineCount,
+		"object_count":     objectCount,
+	})
 
 	q := agent.Query{
 		UserID:      id.UserID,
@@ -370,7 +498,11 @@ func (a *API) chat(w http.ResponseWriter, r *http.Request) {
 	// key the conversation; if empty (dev/no-frontend), we skip persistence.
 	persist := a.convo != nil && req.SessionID != ""
 	if persist {
+		persistUserStart := time.Now()
 		a.persistUserTurn(r.Context(), id, req)
+		a.recordTrace(r.Context(), traceID, "conversation.persist_user", "persistence", persistUserStart, "ok", map[string]any{
+			"conversation_id": strings.TrimSpace(req.SessionID),
+		})
 	}
 
 	// reducer mirrors the frontend's reducePart so the stored assistant message
@@ -381,10 +513,66 @@ func (a *API) chat(w http.ResponseWriter, r *http.Request) {
 	}
 
 	artifactCount := 0
+	streamStart := time.Now()
+	streamEventCount := 0
+	textChunkCount := 0
+	thinkingChunkCount := 0
+	toolUseCount := 0
+	toolResultCount := 0
+	firstEventRecorded := false
+	firstTextRecorded := false
+	firstToolUseRecorded := false
+	sandboxReadyRecorded := false
 	err := a.streamer.Stream(r.Context(), q, func(ev agent.Event) error {
+		if ev.Kind == "trace" {
+			a.recordAgentTrace(r.Context(), traceID, ev.Data)
+			return nil
+		}
+		streamEventCount++
+		if !firstEventRecorded {
+			firstEventRecorded = true
+			a.recordTrace(r.Context(), traceID, "agent.first_event_wait", "agent", streamStart, "ok", map[string]any{
+				"event_kind": ev.Kind,
+			})
+		}
+		switch ev.Kind {
+		case "text":
+			textChunkCount++
+			if !firstTextRecorded {
+				firstTextRecorded = true
+				a.recordTrace(r.Context(), traceID, "agent.first_text_wait", "agent", streamStart, "ok", nil)
+			}
+		case "thinking":
+			thinkingChunkCount++
+		case "tool_use":
+			toolUseCount++
+			if !firstToolUseRecorded {
+				firstToolUseRecorded = true
+				a.recordTrace(r.Context(), traceID, "agent.first_tool_wait", "agent", streamStart, "ok", map[string]any{
+					"tool_name": ev.Data["name"],
+				})
+			}
+		case "tool_result":
+			toolResultCount++
+		}
+		if ev.Kind == "sandbox" && !sandboxReadyRecorded {
+			sandboxReadyRecorded = true
+			a.recordTrace(r.Context(), traceID, "sandbox.ready_wait", "sandbox", streamStart, "ok", map[string]any{
+				"sandbox_id": ev.Data["sandbox_id"],
+				"endpoint":   ev.Data["endpoint"],
+				"reused":     ev.Data["reused"],
+			})
+		}
 		if ev.Kind == "file" {
 			artifactCount++
+			artifactStart := time.Now()
 			ev = a.registerArtifact(context.Background(), id, req.SessionID, ev)
+			a.recordTrace(r.Context(), traceID, "artifact.register", "artifact", artifactStart, "ok", map[string]any{
+				"artifact_count": artifactCount,
+				"filename":       ev.Data["filename"],
+				"mime":           ev.Data["mime"],
+				"size":           ev.Data["size"],
+			})
 		}
 		if reducer != nil {
 			reducer.Apply(ev.Kind, ev.Data)
@@ -392,6 +580,15 @@ func (a *API) chat(w http.ResponseWriter, r *http.Request) {
 		return writeSSE(w, flusher, ev)
 	})
 	if err != nil {
+		a.recordTrace(r.Context(), traceID, "agent.stream", "agent", streamStart, "error", map[string]any{
+			"error":                err.Error(),
+			"event_count":          streamEventCount,
+			"text_chunk_count":     textChunkCount,
+			"thinking_chunk_count": thinkingChunkCount,
+			"tool_use_count":       toolUseCount,
+			"tool_result_count":    toolResultCount,
+			"artifact_count":       artifactCount,
+		})
 		// Best-effort terminal error event; the connection may already be gone.
 		errEv := agent.Event{Kind: "error", Data: map[string]string{"error": err.Error()}}
 		if reducer != nil {
@@ -399,6 +596,15 @@ func (a *API) chat(w http.ResponseWriter, r *http.Request) {
 		}
 		_ = writeSSE(w, flusher, errEv)
 		a.log.Warn("agent stream ended with error: " + err.Error())
+	} else {
+		a.recordTrace(r.Context(), traceID, "agent.stream", "agent", streamStart, "ok", map[string]any{
+			"event_count":          streamEventCount,
+			"text_chunk_count":     textChunkCount,
+			"thinking_chunk_count": thinkingChunkCount,
+			"tool_use_count":       toolUseCount,
+			"tool_result_count":    toolResultCount,
+			"artifact_count":       artifactCount,
+		})
 	}
 
 	// Persist the assistant turn with whatever was aggregated (even a partial
@@ -406,19 +612,32 @@ func (a *API) chat(w http.ResponseWriter, r *http.Request) {
 	// background context so a client disconnect (r.Context() cancelled) does not
 	// abort the write.
 	if persist {
+		persistAssistantStart := time.Now()
 		a.persistAssistantTurn(context.Background(), req.SessionID, reducer.Parts(), assistantMetadata(req))
 		if req.DeferConversationVisibilityUntilDone {
 			a.revealConversation(context.Background(), id, req)
 		}
+		a.recordTrace(
+			r.Context(),
+			traceID,
+			"conversation.persist_assistant",
+			"persistence",
+			persistAssistantStart,
+			"ok",
+			map[string]any{
+				"conversation_id": strings.TrimSpace(req.SessionID),
+				"part_count":      len(reducer.Parts()),
+			},
+		)
 	}
 	if err != nil {
-		a.auditChat(r, req, http.StatusOK, "failure", "AGENT_STREAM_ERROR", artifactCount, start)
+		a.auditChat(r, traceID, req, http.StatusOK, "failure", "AGENT_STREAM_ERROR", artifactCount, start)
 	} else {
-		a.auditChat(r, req, http.StatusOK, "success", "", artifactCount, start)
+		a.auditChat(r, traceID, req, http.StatusOK, "success", "", artifactCount, start)
 	}
 }
 
-func (a *API) auditChat(r *http.Request, req chatRequest, status int, result, errorCode string, artifactCount int, start time.Time) {
+func (a *API) auditChat(r *http.Request, traceID string, req chatRequest, status int, result, errorCode string, artifactCount int, start time.Time) {
 	meta := map[string]any{
 		"conversation_id":  strings.TrimSpace(req.SessionID),
 		"chat_type":        chatTypeForConversation(req),
@@ -430,6 +649,7 @@ func (a *API) auditChat(r *http.Request, req chatRequest, status int, result, er
 	if req.DeferConversationVisibilityUntilDone {
 		meta["defer_conversation_visibility_until_done"] = true
 	}
+	auditStart := time.Now()
 	a.appendAudit(r.Context(), auditstore.Event{
 		At:           time.Now().UTC(),
 		ActorType:    "user",
@@ -441,10 +661,17 @@ func (a *API) auditChat(r *http.Request, req chatRequest, status int, result, er
 		Route:        "POST /v1/chat",
 		StatusCode:   status,
 		RequestID:    requestID(r),
+		TraceID:      traceID,
 		ClientIP:     clientIP(r),
 		UserAgent:    r.UserAgent(),
 		Metadata:     meta,
 		ErrorCode:    errorCode,
+	})
+	a.recordTrace(r.Context(), traceID, "audit.write", "audit", auditStart, result, map[string]any{
+		"action":          "chat.send",
+		"status_code":     status,
+		"error_code":      errorCode,
+		"conversation_id": strings.TrimSpace(req.SessionID),
 	})
 }
 

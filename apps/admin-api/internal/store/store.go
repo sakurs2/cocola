@@ -294,6 +294,26 @@ type AuditEventQuery struct {
 	Until        time.Time
 }
 
+// TraceEvent is one in-product timing span used by the admin trace UI. It is
+// intentionally storage-backed so diagnostics work even when external OTel
+// collection is disabled.
+type TraceEvent struct {
+	ID         int64          `json:"id"`
+	TraceID    string         `json:"trace_id"`
+	Service    string         `json:"service"`
+	Name       string         `json:"name"`
+	Category   string         `json:"category,omitempty"`
+	StartedAt  time.Time      `json:"started_at"`
+	DurationMS int64          `json:"duration_ms"`
+	Status     string         `json:"status"`
+	Metadata   map[string]any `json:"metadata_json,omitempty"`
+}
+
+type TraceEventQuery struct {
+	TraceID string
+	Limit   int
+}
+
 // Store is the full persistence contract the service depends on.
 type Store interface {
 	// Auth users / whitelist
@@ -369,4 +389,5 @@ type Store interface {
 	ListAudit(ctx context.Context, limit int) ([]AuditEntry, error)
 	AppendAuditEvent(ctx context.Context, e AuditEvent) error
 	ListAuditEvents(ctx context.Context, q AuditEventQuery) ([]AuditEvent, error)
+	ListTraceEvents(ctx context.Context, q TraceEventQuery) ([]TraceEvent, error)
 }

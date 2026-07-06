@@ -1003,3 +1003,32 @@ func (a *API) listAuditEvents(w http.ResponseWriter, r *http.Request) {
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"events": events})
 }
+
+func (a *API) getTrace(w http.ResponseWriter, r *http.Request) {
+	traceID := chi.URLParam(r, "trace_id")
+	if traceID == "" {
+		writeErr(w, http.StatusBadRequest, "INVALID_ARGUMENT", "trace_id is required")
+		return
+	}
+	events, err := a.svc.ListTraceEvents(r.Context(), store.TraceEventQuery{
+		TraceID: traceID,
+		Limit:   qInt(r, "limit", 500),
+	})
+	if err != nil {
+		mapErr(w, err)
+		return
+	}
+	auditEvents, err := a.svc.ListAuditEvents(r.Context(), store.AuditEventQuery{
+		TraceID: traceID,
+		Limit:   qInt(r, "audit_limit", 100),
+	})
+	if err != nil {
+		mapErr(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{
+		"trace_id":     traceID,
+		"events":       events,
+		"audit_events": auditEvents,
+	})
+}

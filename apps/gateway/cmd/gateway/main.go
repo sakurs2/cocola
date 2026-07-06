@@ -39,6 +39,7 @@ import (
 	"github.com/cocola-project/cocola/apps/gateway/internal/convo"
 	"github.com/cocola-project/cocola/apps/gateway/internal/httpapi"
 	"github.com/cocola-project/cocola/apps/gateway/internal/objstore"
+	traceevents "github.com/cocola-project/cocola/apps/gateway/internal/traceevent"
 	"github.com/cocola-project/cocola/packages/go-common/config"
 	"github.com/cocola-project/cocola/packages/go-common/logger"
 	"github.com/cocola-project/cocola/packages/go-common/metrics"
@@ -134,6 +135,13 @@ func main() {
 				api = api.WithAuditStore(auditStore)
 				defer auditStore.Close()
 				log.Info("audit events enabled (postgres)")
+			}
+			if traceStore, terr := traceevents.NewPostgres(context.Background(), dsn); terr != nil {
+				log.Warn("trace events disabled (connect failed): " + terr.Error())
+			} else {
+				api = api.WithTraceStore(traceStore)
+				defer traceStore.Close()
+				log.Info("trace events enabled (postgres)")
 			}
 		}
 	}

@@ -71,13 +71,19 @@ async def test_query_acquires_sandbox_when_unpinned():
     assert binder.acquired == ["S9"]
     # The provider received the bound sandbox id.
     assert prov.seen_options.sandbox_id == "box-S9"
-    # The first streamed event is the observable sandbox binding.
+    # The sandbox acquire trace is emitted internally before the observable binding.
     kinds = [e.kind for e in ctx.written]
-    assert kinds[0] == "sandbox"
+    assert kinds[0] == "trace"
+    assert ctx.written[0].data["name"] == "sandbox.create"
+    assert ctx.written[0].data["category"] == "sandbox"
     assert ctx.written[0].data["sandbox_id"] == "box-S9"
     assert ctx.written[0].data["endpoint"] == "inmem://local"
+    assert ctx.written[0].data["reused"] == "false"
+    assert kinds[1] == "sandbox"
+    assert ctx.written[1].data["sandbox_id"] == "box-S9"
+    assert ctx.written[1].data["endpoint"] == "inmem://local"
     # Then the agent output, ending clean.
-    assert kinds == ["sandbox", "text", "done"]
+    assert kinds == ["trace", "sandbox", "text", "done"]
 
 
 async def test_caller_pinned_sandbox_is_respected():
@@ -106,10 +112,12 @@ async def test_acquire_failure_is_terminal_and_skips_provider():
     ctx = FakeContext()
     await AgentRuntimeServicer(prov, binder=binder).Query(FakeRequest(), ctx)
 
-    # One terminal error event, provider never ran.
+    # One internal acquire trace plus a terminal error event, provider never ran.
     kinds = [e.kind for e in ctx.written]
-    assert kinds == ["error"]
-    assert "manager down" in ctx.written[0].data["error"]
+    assert kinds == ["trace", "error"]
+    assert ctx.written[0].data["name"] == "sandbox.acquire"
+    assert ctx.written[0].data["status"] == "error"
+    assert "manager down" in ctx.written[1].data["error"]
     assert prov.ran is False
 
 

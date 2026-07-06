@@ -179,6 +179,7 @@ func (a *API) Router() http.Handler {
 
 		r.Get("/audit", a.listAudit)
 		r.Get("/audit-events", a.listAuditEvents)
+		r.Get("/traces/{trace_id}", a.getTrace)
 	})
 
 	// Tracing: wrap the whole router so an inbound W3C traceparent is extracted

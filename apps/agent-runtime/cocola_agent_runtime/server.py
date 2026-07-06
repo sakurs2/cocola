@@ -33,6 +33,7 @@ import os
 import pathlib
 import posixpath
 import tempfile
+import time
 import uuid
 from typing import Any, NamedTuple
 
@@ -141,6 +142,32 @@ def event_to_proto(event: AgentEvent) -> pb.AgentEvent:
     """Map the runtime\'s generic AgentEvent onto the proto AgentEvent."""
     data = {k: _stringify(v) for k, v in (event.data or {}).items()}
     return pb.AgentEvent(kind=event.kind, data=data)
+
+
+def trace_event(
+    name: str,
+    category: str,
+    started_at_ns: int,
+    *,
+    status: str = "ok",
+    **metadata: Any,
+) -> AgentEvent:
+    """Build an internal timing event for the gateway trace sink.
+
+    The gateway records these events and intentionally does not forward them to
+    the browser chat stream. Keep metadata operational and non-secret.
+    """
+    duration_ms = max((time.time_ns() - started_at_ns) // 1_000_000, 0)
+    data: dict[str, Any] = {
+        "name": name,
+        "category": category,
+        "service": "agent-runtime",
+        "started_at_unix_ms": started_at_ns // 1_000_000,
+        "duration_ms": duration_ms,
+        "status": status or "ok",
+    }
+    data.update(metadata)
+    return AgentEvent(kind="trace", data=data)
 
 
 def _artifact_max_bytes() -> int:
@@ -329,6 +356,7 @@ class AgentRuntimeServicer(pb_grpc.AgentRuntimeServiceServicer):
         # failure is surfaced as a terminal `error` event rather than crashing
         # the stream, and the agent does not run without its execution sandbox.
         if self._binder is not None and sandbox_id is None:
+            acquire_start_ns = time.time_ns()
             try:
                 box = await self._binder.acquire(
                     session_id=request.session_id, user_id=request.user_id, env=model_env
@@ -340,6 +368,18 @@ class AgentRuntimeServicer(pb_grpc.AgentRuntimeServiceServicer):
                     error=str(exc),
                 )
                 await context.write(
+                    event_to_proto(
+                        trace_event(
+                            "sandbox.acquire",
+                            "sandbox",
+                            acquire_start_ns,
+                            status="error",
+                            session_id=request.session_id,
+                            error_type=type(exc).__name__,
+                        )
+                    )
+                )
+                await context.write(
                     pb.AgentEvent(
                         kind="error",
                         data={"error": f"sandbox acquire failed: {exc}"},
@@ -347,11 +387,54 @@ class AgentRuntimeServicer(pb_grpc.AgentRuntimeServiceServicer):
                 )
                 return
             sandbox_id = box.id
+            acquire_trace_name = "sandbox.reuse" if box.reused else "sandbox.create"
+            await context.write(
+                event_to_proto(
+                    trace_event(
+                        acquire_trace_name,
+                        "sandbox",
+                        acquire_start_ns,
+                        sandbox_id=box.id,
+                        endpoint=box.endpoint,
+                        reused=box.reused,
+                        session_id=request.session_id,
+                    )
+                )
+            )
             if self._checkpoint is not None:
-                await self._checkpoint.restore_if_fresh(
-                    sandbox_id=box.id,
-                    session_id=request.session_id,
-                    reused=box.reused,
+                restore_start_ns = time.time_ns()
+                try:
+                    restored = await self._checkpoint.restore_if_fresh(
+                        sandbox_id=box.id,
+                        session_id=request.session_id,
+                        reused=box.reused,
+                    )
+                except Exception as exc:  # noqa: BLE001 - preserve existing failure semantics
+                    await context.write(
+                        event_to_proto(
+                            trace_event(
+                                "sandbox.checkpoint_restore",
+                                "sandbox",
+                                restore_start_ns,
+                                status="error",
+                                sandbox_id=box.id,
+                                reused=box.reused,
+                                error_type=type(exc).__name__,
+                            )
+                        )
+                    )
+                    raise
+                await context.write(
+                    event_to_proto(
+                        trace_event(
+                            "sandbox.checkpoint_restore",
+                            "sandbox",
+                            restore_start_ns,
+                            sandbox_id=box.id,
+                            reused=box.reused,
+                            restored=restored,
+                        )
+                    )
                 )
             # Make the binding observable to the BFF/client.
             await context.write(
@@ -375,6 +458,7 @@ class AgentRuntimeServicer(pb_grpc.AgentRuntimeServiceServicer):
         prompt = request.prompt
         workspace: str | None = None
         if request.attachments:
+            provision_start_ns = time.time_ns()
             try:
                 preamble, workspace = await self._provision_attachments(
                     sandbox_id, request.session_id, list(request.attachments)
@@ -386,12 +470,37 @@ class AgentRuntimeServicer(pb_grpc.AgentRuntimeServiceServicer):
                     error=str(exc),
                 )
                 await context.write(
+                    event_to_proto(
+                        trace_event(
+                            "sandbox.attachments_provision",
+                            "sandbox",
+                            provision_start_ns,
+                            status="error",
+                            sandbox_id=sandbox_id or "",
+                            attachment_count=len(request.attachments),
+                            error_type=type(exc).__name__,
+                        )
+                    )
+                )
+                await context.write(
                     pb.AgentEvent(
                         kind="error",
                         data={"error": f"attachment provisioning failed: {exc}"},
                     )
                 )
                 return
+            await context.write(
+                event_to_proto(
+                    trace_event(
+                        "sandbox.attachments_provision",
+                        "sandbox",
+                        provision_start_ns,
+                        sandbox_id=sandbox_id or "",
+                        attachment_count=len(request.attachments),
+                        target="host" if workspace else "sandbox",
+                    )
+                )
+            )
             if preamble:
                 prompt = f"{preamble}\n\n{request.prompt}"
 
