@@ -59,14 +59,36 @@ type SystemSetting struct {
 // Skill is a Skill-Market entry: a named, versioned capability employees can
 // enable. The admin-api owns the catalog; the runtime consumes Enabled entries.
 type Skill struct {
-	ID          string    `json:"id"`   // stable kebab id, unique
-	Name        string    `json:"name"` // display name
-	Description string    `json:"description"`
-	Version     string    `json:"version"`
-	Entrypoint  string    `json:"entrypoint"` // module/path the runtime loads
-	Enabled     bool      `json:"enabled"`
-	CreatedAt   time.Time `json:"created_at"`
-	UpdatedAt   time.Time `json:"updated_at"`
+	ID              string          `json:"id"`   // stable kebab id, unique per scope/owner in v1
+	Name            string          `json:"name"` // display name
+	Description     string          `json:"description"`
+	Version         string          `json:"version"`
+	Entrypoint      string          `json:"entrypoint"` // module/path the runtime loads
+	Enabled         bool            `json:"enabled"`
+	Scope           string          `json:"scope"` // "admin" | "user"
+	OwnerUserID     string          `json:"owner_user_id,omitempty"`
+	SourceType      string          `json:"source_type,omitempty"` // "manual" | "archive" | "git"
+	SourceURL       string          `json:"source_url,omitempty"`
+	SourceRef       string          `json:"source_ref,omitempty"`
+	SourcePath      string          `json:"source_path,omitempty"`
+	BundleObjectKey string          `json:"bundle_object_key,omitempty"`
+	ContentSHA256   string          `json:"content_sha256,omitempty"`
+	ManifestJSON    json.RawMessage `json:"manifest_json,omitempty"`
+	FrontmatterJSON json.RawMessage `json:"frontmatter_json,omitempty"`
+	SkillMD         string          `json:"skill_md,omitempty"`
+	FileCount       int             `json:"file_count"`
+	SizeBytes       int64           `json:"size_bytes"`
+	CreatedAt       time.Time       `json:"created_at"`
+	UpdatedAt       time.Time       `json:"updated_at"`
+	CreatedBy       string          `json:"created_by,omitempty"`
+	UpdatedBy       string          `json:"updated_by,omitempty"`
+}
+
+type UserSkillPreference struct {
+	UserID    string    `json:"user_id"`
+	SkillID   string    `json:"skill_id"`
+	Enabled   bool      `json:"enabled"`
+	UpdatedAt time.Time `json:"updated_at"`
 }
 
 // LLMProvider is one upstream model vendor/endpoint. APIKeyCiphertext is never
@@ -349,8 +371,12 @@ type Store interface {
 	CreateSkill(ctx context.Context, s Skill) error
 	GetSkill(ctx context.Context, id string) (Skill, error)
 	ListSkills(ctx context.Context, onlyEnabled bool) ([]Skill, error)
+	ListSkillsForUser(ctx context.Context, userID string) ([]Skill, error)
 	UpdateSkill(ctx context.Context, s Skill) error
 	DeleteSkill(ctx context.Context, id string) error
+	SetUserSkillPreference(ctx context.Context, pref UserSkillPreference) error
+	ListUserSkillPreferences(ctx context.Context, userID string) ([]UserSkillPreference, error)
+	DeleteUserSkillPreference(ctx context.Context, userID, skillID string) error
 
 	// LLM model configuration
 	CreateLLMProvider(ctx context.Context, p LLMProvider) error

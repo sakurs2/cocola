@@ -25,7 +25,7 @@ RUN GOWORK=off CGO_ENABLED=0 GOOS=linux go build \
 
 # ---- runtime stage -------------------------------------------------------
 FROM alpine:3.20
-RUN apk add --no-cache ca-certificates
+RUN apk add --no-cache ca-certificates git
 COPY --from=build /out/admin-api  /usr/local/bin/admin-api
 COPY --from=build /out/admin-mint /usr/local/bin/admin-mint
 EXPOSE 8090

@@ -32,6 +32,7 @@ import mimetypes
 import os
 import pathlib
 import posixpath
+import re
 import tempfile
 import time
 import uuid
@@ -46,7 +47,7 @@ from cocola_agent_runtime.checkpoint import CheckpointManager
 from cocola_agent_runtime.objstore import Fetcher
 from cocola_agent_runtime.sandbox_binder import SandboxBinder, SandboxExecutor
 from cocola_agent_runtime.session_map import SessionMap
-from cocola_agent_runtime.skill_loader import SkillCatalog, apply_skills_to_options
+from cocola_agent_runtime.skill_loader import Skill, SkillCatalog, skills_system_preamble
 
 log = get_logger("cocola.agent-runtime.server")
 
@@ -75,6 +76,38 @@ for dirpath, _, files in os.walk(root):
         out[rel] = {"size": st.st_size, "mtime_ns": st.st_mtime_ns}
 print(json.dumps(out, sort_keys=True))
 """
+_SKILL_EXTRACT_SCRIPT = r"""
+import os
+import shutil
+import sys
+import zipfile
+
+archive, target = sys.argv[1], sys.argv[2]
+tmp = target + ".tmp"
+if os.path.exists(tmp):
+    shutil.rmtree(tmp)
+os.makedirs(tmp, exist_ok=True)
+with zipfile.ZipFile(archive) as zf:
+    for info in zf.infolist():
+        name = info.filename.replace("\\", "/")
+        if not name or name.startswith("/") or ".." in name.split("/"):
+            raise SystemExit(f"unsafe skill archive path: {name}")
+        if info.is_dir():
+            continue
+        dest = os.path.join(tmp, name)
+        os.makedirs(os.path.dirname(dest), exist_ok=True)
+        with zf.open(info) as src, open(dest, "wb") as out:
+            shutil.copyfileobj(src, out)
+if not os.path.exists(os.path.join(tmp, "SKILL.md")):
+    raise SystemExit("skill archive missing SKILL.md")
+if os.path.lexists(target):
+    if os.path.islink(target) or os.path.isfile(target):
+        os.unlink(target)
+    else:
+        shutil.rmtree(target)
+os.replace(tmp, target)
+"""
+_SAFE_SKILL_ID_RE = re.compile(r"[^a-zA-Z0-9_.-]+")
 
 
 class _ResolvedAttachment(NamedTuple):
@@ -504,6 +537,40 @@ class AgentRuntimeServicer(pb_grpc.AgentRuntimeServiceServicer):
             if preamble:
                 prompt = f"{preamble}\n\n{request.prompt}"
 
+        active_skills: list[Skill] = []
+        if self._skills is not None:
+            skills_start_ns = time.time_ns()
+            try:
+                active_skills = self._skills.enabled_skills(request.user_id)
+                if sandbox_id and active_skills:
+                    await self._sync_skills_into_sandbox(sandbox_id, active_skills)
+                await context.write(
+                    event_to_proto(
+                        trace_event(
+                            "sandbox.skills_sync",
+                            "sandbox",
+                            skills_start_ns,
+                            sandbox_id=sandbox_id or "",
+                            skill_count=len(active_skills),
+                        )
+                    )
+                )
+            except Exception as exc:  # noqa: BLE001 - skills degrade to prompt-less session
+                active_skills = []
+                log.warning("skill sync failed; running without skills", error=str(exc))
+                await context.write(
+                    event_to_proto(
+                        trace_event(
+                            "sandbox.skills_sync",
+                            "sandbox",
+                            skills_start_ns,
+                            status="error",
+                            sandbox_id=sandbox_id or "",
+                            error_type=type(exc).__name__,
+                        )
+                    )
+                )
+
         opts = AgentOptions(
             user_id=request.user_id,
             session_id=request.session_id,
@@ -518,8 +585,12 @@ class AgentRuntimeServicer(pb_grpc.AgentRuntimeServiceServicer):
                 opts,
                 system_prompt=_merge_system_prompt(opts.system_prompt, ARTIFACT_SYSTEM_PROMPT),
             )
-        if self._skills is not None:
-            opts = apply_skills_to_options(opts, self._skills)
+        skills_preamble = skills_system_preamble(active_skills)
+        if skills_preamble:
+            opts = dataclasses.replace(
+                opts,
+                system_prompt=_merge_system_prompt(opts.system_prompt, skills_preamble),
+            )
 
         log.info(
             "agent query",
@@ -588,6 +659,56 @@ class AgentRuntimeServicer(pb_grpc.AgentRuntimeServiceServicer):
             except (KeyError, TypeError, ValueError):
                 continue
         return out
+
+    async def _sync_skills_into_sandbox(self, sandbox_id: str, skills: list[Skill]) -> None:
+        if self._executor is None:
+            return
+        for skill in skills:
+            skill_id = _SAFE_SKILL_ID_RE.sub("-", skill.id).strip(".-") or "skill"
+            stdin = skill.skill_md or ""
+            script = f"""
+set -eu
+base="${{CLAUDE_CONFIG_DIR:-/home/cocola/.claude}}"
+target="$base/skills/{skill_id}"
+shared="/data/plugins/skills/{skill_id}"
+mkdir -p "$base/skills" "$base/.cocola"
+if [ -f "$shared/SKILL.md" ]; then
+  rm -rf "$target"
+  ln -s "$shared" "$target"
+  printf shared
+else
+  rm -rf "$target"
+  mkdir -p "$target"
+  printf local
+fi
+"""
+            res = await self._executor.exec(
+                sandbox_id=sandbox_id,
+                cmd=["/bin/sh", "-lc", script],
+                timeout_secs=20,
+            )
+            if res.exit_code != 0 or res.error:
+                raise RuntimeError(res.error or res.stderr or f"skill sync failed for {skill_id}")
+            if (res.stdout or "").strip() == "shared":
+                continue
+            target = f"/home/cocola/.claude/skills/{skill_id}"
+            if skill.bundle_object_key and self._objstore is not None:
+                data = await asyncio.to_thread(self._objstore.get, skill.bundle_object_key)
+                archive = f"/tmp/cocola-skill-{skill_id}.zip"
+                await self._executor.write_bytes(sandbox_id=sandbox_id, path=archive, data=data)
+                extract = await self._executor.exec(
+                    sandbox_id=sandbox_id,
+                    cmd=["python3", "-c", _SKILL_EXTRACT_SCRIPT, archive, target],
+                    timeout_secs=30,
+                )
+                if extract.exit_code != 0 or extract.error:
+                    raise RuntimeError(
+                        extract.error or extract.stderr or f"skill extract failed for {skill_id}"
+                    )
+            elif stdin:
+                await self._executor.write_file(
+                    sandbox_id=sandbox_id, path=f"{target}/SKILL.md", content=stdin
+                )
 
     async def _publish_output_artifacts(
         self,

@@ -17,24 +17,28 @@
 // The main column is a flex row so a future Artifacts canvas can sit beside the
 // Thread without restructuring.
 
-import { CocolaRuntimeProvider, useCocola } from "@/app/runtime-provider";
-import { AppSidebar } from "@/components/assistant-ui/app-sidebar";
+import { useCocola } from "@/app/runtime-provider";
 import { CodeBlock, MarkdownContent } from "@/components/assistant-ui/markdown-text";
 import { Thread } from "@/components/assistant-ui/thread";
 import { Check, Code2, Download, Eye, FileQuestion, Share2, X } from "lucide-react";
+import { useRouter } from "next/navigation";
 import { type PointerEvent, useCallback, useEffect, useState } from "react";
 
 export default function Home() {
-  return (
-    <CocolaRuntimeProvider>
-      <Workspace />
-    </CocolaRuntimeProvider>
-  );
+  return <Workspace />;
 }
 
 function Workspace() {
-  const { selectedArtifact } = useCocola();
+  const { loadConversation, selectedArtifact } = useCocola();
+  const router = useRouter();
   const [previewWidth, setPreviewWidth] = useState(448);
+
+  useEffect(() => {
+    const id = new URLSearchParams(window.location.search).get("conversation")?.trim();
+    if (!id) return;
+    void loadConversation(id);
+    router.replace("/");
+  }, [loadConversation, router]);
 
   const startPreviewResize = useCallback(
     (event: PointerEvent<HTMLDivElement>) => {
@@ -69,33 +73,30 @@ function Workspace() {
   );
 
   return (
-    <div className="flex h-screen bg-background text-foreground">
-      <AppSidebar />
-      <div className="flex min-w-0 flex-1 flex-col">
-        <TopBar />
-        <div className="flex min-h-0 flex-1">
-          <div className="min-w-0 flex-1">
-            <Thread />
-          </div>
-          {selectedArtifact ? (
-            <>
-              <div
-                role="separator"
-                aria-label="Resize file preview"
-                aria-orientation="vertical"
-                title="Resize preview"
-                onPointerDown={startPreviewResize}
-                className="group relative z-10 w-2 shrink-0 cursor-col-resize touch-none"
-              >
-                <div className="absolute inset-y-0 left-1/2 w-px -translate-x-1/2 bg-border transition-colors group-hover:bg-primary/70" />
-                <div className="absolute inset-y-0 left-1/2 w-1 -translate-x-1/2 rounded-full bg-transparent transition-colors group-hover:bg-primary/20" />
-              </div>
-              <aside className="shrink-0 bg-background" style={{ width: `${previewWidth}px` }}>
-                <ArtifactPreviewPanel />
-              </aside>
-            </>
-          ) : null}
+    <div className="flex h-full min-w-0 flex-1 flex-col">
+      <TopBar />
+      <div className="flex min-h-0 flex-1">
+        <div className="min-w-0 flex-1">
+          <Thread />
         </div>
+        {selectedArtifact ? (
+          <>
+            <div
+              role="separator"
+              aria-label="Resize file preview"
+              aria-orientation="vertical"
+              title="Resize preview"
+              onPointerDown={startPreviewResize}
+              className="group relative z-10 w-2 shrink-0 cursor-col-resize touch-none"
+            >
+              <div className="absolute inset-y-0 left-1/2 w-px -translate-x-1/2 bg-border transition-colors group-hover:bg-primary/70" />
+              <div className="absolute inset-y-0 left-1/2 w-1 -translate-x-1/2 rounded-full bg-transparent transition-colors group-hover:bg-primary/20" />
+            </div>
+            <aside className="shrink-0 bg-background" style={{ width: `${previewWidth}px` }}>
+              <ArtifactPreviewPanel />
+            </aside>
+          </>
+        ) : null}
       </div>
     </div>
   );

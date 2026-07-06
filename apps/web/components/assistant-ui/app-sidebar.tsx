@@ -18,11 +18,13 @@ import {
   Plus,
   Search,
   ShieldCheck,
+  Sparkles,
   LayoutGrid,
   Trash2,
 } from "lucide-react";
 import { signOut, useSession } from "next-auth/react";
 import Link from "next/link";
+import { usePathname, useRouter } from "next/navigation";
 import { cn } from "@/lib/utils";
 import { useCocola } from "@/app/runtime-provider";
 
@@ -40,6 +42,7 @@ const PRIMARY_NAV: NavItem[] = [
   { icon: Search, label: "Search" },
   { icon: NotebookPen, label: "Notes" },
   { icon: LayoutGrid, label: "Workspace" },
+  { icon: Sparkles, label: "Skills", href: "/skills" },
   { icon: ShieldCheck, label: "Admin", href: "/admin" },
 ];
 
@@ -52,6 +55,8 @@ const FOLDERS = [
 
 export function AppSidebar() {
   const { data: session } = useSession();
+  const pathname = usePathname();
+  const router = useRouter();
   const [collapsed, setCollapsed] = useState(false);
   const [menuOpenId, setMenuOpenId] = useState<string | null>(null);
   const [editingId, setEditingId] = useState<string | null>(null);
@@ -77,6 +82,31 @@ export function AppSidebar() {
   const userLabel = session?.user?.name || session?.user?.email || "User";
   const userSubtitle = session?.user?.role;
   const userInitial = userLabel.trim().slice(0, 1).toUpperCase() || "U";
+
+  const navigateTo = useCallback(
+    (href: string) => {
+      if (pathname === href || pathname?.startsWith(`${href}/`)) return;
+      router.push(href);
+    },
+    [pathname, router],
+  );
+
+  const openNewChat = () => {
+    if (pathname !== "/") {
+      router.push("/");
+      return;
+    }
+    newConversation();
+  };
+
+  const openConversation = (id: string) => {
+    setMenuOpenId(null);
+    if (pathname !== "/") {
+      router.push(`/?conversation=${encodeURIComponent(id)}`);
+      return;
+    }
+    void loadConversation(id);
+  };
 
   const startRename = (id: string, title: string) => {
     setMenuOpenId(null);
@@ -149,7 +179,7 @@ export function AppSidebar() {
         <nav className="flex-1 overflow-y-auto px-2 pb-2">
           {/* Primary actions */}
           <div className="flex flex-col gap-0.5">
-            <SidebarButton collapsed={collapsed} title="New Chat" onClick={newConversation}>
+            <SidebarButton collapsed={collapsed} title="New Chat" onClick={openNewChat}>
               <Plus className="size-4 shrink-0" />
               {!collapsed && <span className="truncate">New Chat</span>}
             </SidebarButton>
@@ -162,23 +192,21 @@ export function AppSidebar() {
               {!collapsed && <span className="truncate">Schedule</span>}
             </SidebarButton>
             {PRIMARY_NAV.filter((item) => !item.href?.startsWith("/admin") || isAdmin).map(
-              ({ icon: Icon, label, href }) => (
+              ({ icon: Icon, label, href }) => {
+                const active = href ? pathname === href || pathname?.startsWith(`${href}/`) : false;
+                return (
                 <SidebarButton
                   key={label}
                   collapsed={collapsed}
                   title={label}
-                  onClick={
-                    href
-                      ? () => {
-                          window.location.href = href;
-                        }
-                      : undefined
-                  }
+                  active={active}
+                  onClick={href ? () => navigateTo(href) : undefined}
                 >
                   <Icon className="size-4 shrink-0" />
                   {!collapsed && <span className="truncate">{label}</span>}
                 </SidebarButton>
-              ),
+                );
+              },
             )}
           </div>
 
@@ -223,8 +251,7 @@ export function AppSidebar() {
                       editing={editingId === c.id}
                       draftTitle={draftTitle}
                       onOpen={() => {
-                        setMenuOpenId(null);
-                        void loadConversation(c.id);
+                        openConversation(c.id);
                       }}
                       onToggleMenu={() => setMenuOpenId((prev) => (prev === c.id ? null : c.id))}
                       onRename={() => startRename(c.id, c.title || "Untitled")}

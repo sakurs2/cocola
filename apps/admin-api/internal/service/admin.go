@@ -19,6 +19,7 @@ import (
 	"encoding/base64"
 	"encoding/hex"
 	"errors"
+	"fmt"
 	"io"
 	"strconv"
 	"strings"
@@ -52,6 +53,7 @@ type Admin struct {
 	store               store.Store
 	issuer              *token.Issuer
 	now                 Clock
+	skillBundles        SkillBundleStore
 	sandboxNodes        SandboxNodeManager
 	sandboxRuntimes     SandboxRuntimeManager
 	userEvents          UserEventBroker
@@ -67,6 +69,16 @@ func New(s store.Store, iss *token.Issuer, now Clock) *Admin {
 		now = time.Now
 	}
 	return &Admin{store: s, issuer: iss, now: now}
+}
+
+type SkillBundleStore interface {
+	PutBytes(ctx context.Context, key string, data []byte, contentType string) error
+	GetBytes(ctx context.Context, key string) ([]byte, string, error)
+}
+
+func (a *Admin) WithSkillBundleStore(store SkillBundleStore) *Admin {
+	a.skillBundles = store
+	return a
 }
 
 // WithSandboxNodeManager attaches the optional lightweight Kubernetes node
@@ -616,6 +628,14 @@ func (a *Admin) CreateSkill(ctx context.Context, s store.Skill, actor string) (s
 	now := a.now().UTC()
 	s.CreatedAt = now
 	s.UpdatedAt = now
+	s.CreatedBy = actor
+	s.UpdatedBy = actor
+	if s.Scope == "" {
+		s.Scope = "admin"
+	}
+	if s.SourceType == "" {
+		s.SourceType = "manual"
+	}
 	if err := a.store.CreateSkill(ctx, s); err != nil {
 		return store.Skill{}, err
 	}
@@ -626,6 +646,72 @@ func (a *Admin) CreateSkill(ctx context.Context, s store.Skill, actor string) (s
 // ListSkills returns the catalog; onlyEnabled filters to enabled entries.
 func (a *Admin) ListSkills(ctx context.Context, onlyEnabled bool) ([]store.Skill, error) {
 	return a.store.ListSkills(ctx, onlyEnabled)
+}
+
+func (a *Admin) ListEffectiveSkills(ctx context.Context, userID string) ([]store.Skill, error) {
+	adminSkills, err := a.store.ListSkills(ctx, true)
+	if err != nil {
+		return nil, err
+	}
+	prefs, err := a.store.ListUserSkillPreferences(ctx, userID)
+	if err != nil {
+		return nil, err
+	}
+	prefMap := map[string]bool{}
+	for _, pref := range prefs {
+		prefMap[pref.SkillID] = pref.Enabled
+	}
+	out := make([]store.Skill, 0)
+	for _, s := range adminSkills {
+		if s.Scope != "" && s.Scope != "admin" {
+			continue
+		}
+		if enabled, ok := prefMap[s.ID]; ok && !enabled {
+			continue
+		}
+		out = append(out, s)
+	}
+	userSkills, err := a.store.ListSkillsForUser(ctx, userID)
+	if err != nil {
+		return nil, err
+	}
+	for _, s := range userSkills {
+		if s.Enabled {
+			out = append(out, s)
+		}
+	}
+	return out, nil
+}
+
+func (a *Admin) ListUserSkillCatalog(ctx context.Context, userID string) ([]store.Skill, error) {
+	adminSkills, err := a.store.ListSkills(ctx, false)
+	if err != nil {
+		return nil, err
+	}
+	prefs, err := a.store.ListUserSkillPreferences(ctx, userID)
+	if err != nil {
+		return nil, err
+	}
+	prefMap := map[string]bool{}
+	for _, pref := range prefs {
+		prefMap[pref.SkillID] = pref.Enabled
+	}
+	out := make([]store.Skill, 0)
+	for _, s := range adminSkills {
+		if s.Scope != "" && s.Scope != "admin" {
+			continue
+		}
+		if enabled, ok := prefMap[s.ID]; ok {
+			s.Enabled = enabled
+		}
+		out = append(out, s)
+	}
+	userSkills, err := a.store.ListSkillsForUser(ctx, userID)
+	if err != nil {
+		return nil, err
+	}
+	out = append(out, userSkills...)
+	return out, nil
 }
 
 // GetSkill fetches one entry.
@@ -641,6 +727,7 @@ func (a *Admin) SetSkillEnabled(ctx context.Context, id string, enabled bool, ac
 	}
 	s.Enabled = enabled
 	s.UpdatedAt = a.now().UTC()
+	s.UpdatedBy = actor
 	if err := a.store.UpdateSkill(ctx, s); err != nil {
 		return store.Skill{}, err
 	}
@@ -659,6 +746,203 @@ func (a *Admin) DeleteSkill(ctx context.Context, id, actor string) error {
 	}
 	a.audit(ctx, actor, "skill.delete", id, "")
 	return nil
+}
+
+func (a *Admin) ScanSkillArchive(ctx context.Context, archive []byte) ([]SkillImportCandidate, error) {
+	_ = ctx
+	return parseSkillArchive(archive)
+}
+
+func (a *Admin) ImportSkillArchive(ctx context.Context, scope, ownerUserID, actor string, archive []byte, selectedIDs []string) ([]store.Skill, []SkillImportCandidate, error) {
+	scope = strings.TrimSpace(scope)
+	if scope == "" {
+		scope = "admin"
+	}
+	if scope != "admin" && scope != "user" {
+		return nil, nil, ErrInvalidArg
+	}
+	ownerUserID = strings.TrimSpace(ownerUserID)
+	if scope == "user" && ownerUserID == "" {
+		return nil, nil, ErrInvalidArg
+	}
+	candidates, err := parseSkillArchive(archive)
+	if err != nil {
+		return nil, nil, err
+	}
+	selected := map[string]bool{}
+	for _, id := range selectedIDs {
+		id = sanitizeSkillID(id)
+		if id != "" {
+			selected[id] = true
+		}
+	}
+	allSelected := len(selected) == 0
+	imported := make([]store.Skill, 0)
+	for i := range candidates {
+		c := &candidates[i]
+		if !c.Valid || (!allSelected && !selected[c.ID]) {
+			continue
+		}
+		skillID := c.ID
+		if scope == "user" {
+			skillID = userSkillID(ownerUserID, c.ID)
+		}
+		objectKey := fmt.Sprintf("skills/%s/%s/%s.zip", scope, skillID, c.ContentSHA256)
+		if a.skillBundles != nil {
+			if err := a.skillBundles.PutBytes(ctx, objectKey, c.Bundle, "application/zip"); err != nil {
+				return nil, candidates, err
+			}
+			c.BundleObjectKey = objectKey
+		}
+		now := a.now().UTC()
+		s := store.Skill{
+			ID:              skillID,
+			Name:            c.Name,
+			Description:     c.Description,
+			Version:         c.Version,
+			Entrypoint:      "$CLAUDE_CONFIG_DIR/skills/" + skillID,
+			Enabled:         true,
+			Scope:           scope,
+			OwnerUserID:     ownerUserID,
+			SourceType:      "archive",
+			SourcePath:      c.Path,
+			BundleObjectKey: c.BundleObjectKey,
+			ContentSHA256:   c.ContentSHA256,
+			ManifestJSON:    skillManifestJSON(*c),
+			FrontmatterJSON: skillFrontmatterJSON(*c),
+			SkillMD:         c.SkillMD,
+			FileCount:       c.FileCount,
+			SizeBytes:       c.SizeBytes,
+			CreatedAt:       now,
+			UpdatedAt:       now,
+			CreatedBy:       actor,
+			UpdatedBy:       actor,
+		}
+		existing, err := a.store.GetSkill(ctx, skillID)
+		switch {
+		case err == nil:
+			if existing.Scope != "" && existing.Scope != scope {
+				return nil, candidates, ErrConflict
+			}
+			if scope == "user" && existing.OwnerUserID != ownerUserID {
+				return nil, candidates, ErrConflict
+			}
+			s.CreatedAt = existing.CreatedAt
+			s.CreatedBy = existing.CreatedBy
+			if err := a.store.UpdateSkill(ctx, s); err != nil {
+				return nil, candidates, err
+			}
+		case errors.Is(err, store.ErrNotFound):
+			if err := a.store.CreateSkill(ctx, s); err != nil {
+				return nil, candidates, err
+			}
+		default:
+			return nil, candidates, err
+		}
+		imported = append(imported, s)
+	}
+	if len(imported) == 0 {
+		return nil, candidates, ErrInvalidArg
+	}
+	a.audit(ctx, actor, "skill.import", scope, "count="+strconv.Itoa(len(imported)))
+	return imported, candidates, nil
+}
+
+type SkillGitInput struct {
+	RepoURL     string
+	Ref         string
+	Path        string
+	SelectedIDs []string
+}
+
+func (a *Admin) ScanSkillGit(ctx context.Context, in SkillGitInput) ([]SkillImportCandidate, error) {
+	archive, err := skillArchiveFromGit(ctx, in.RepoURL, in.Ref, in.Path)
+	if err != nil {
+		return nil, err
+	}
+	return parseSkillArchive(archive)
+}
+
+func (a *Admin) ImportSkillGit(ctx context.Context, scope, ownerUserID, actor string, in SkillGitInput) ([]store.Skill, []SkillImportCandidate, error) {
+	archive, err := skillArchiveFromGit(ctx, in.RepoURL, in.Ref, in.Path)
+	if err != nil {
+		return nil, nil, err
+	}
+	imported, candidates, err := a.ImportSkillArchive(ctx, scope, ownerUserID, actor, archive, in.SelectedIDs)
+	if err != nil {
+		return nil, candidates, err
+	}
+	for i := range imported {
+		s := imported[i]
+		s.SourceType = "git"
+		s.SourceURL = strings.TrimSpace(in.RepoURL)
+		s.SourceRef = strings.TrimSpace(in.Ref)
+		s.SourcePath = strings.Trim(strings.TrimSpace(in.Path), "/")
+		if s.SourcePath == "" {
+			s.SourcePath = "skills"
+		}
+		s.UpdatedAt = a.now().UTC()
+		s.UpdatedBy = actor
+		if err := a.store.UpdateSkill(ctx, s); err != nil {
+			return nil, candidates, err
+		}
+		imported[i] = s
+	}
+	a.audit(ctx, actor, "skill.import_git", scope, "count="+strconv.Itoa(len(imported)))
+	return imported, candidates, nil
+}
+
+func (a *Admin) SetUserSkillEnabled(ctx context.Context, userID, skillID string, enabled bool) error {
+	s, err := a.store.GetSkill(ctx, skillID)
+	if err != nil {
+		return err
+	}
+	now := a.now().UTC()
+	if s.Scope == "user" {
+		if s.OwnerUserID != userID {
+			return ErrNotFound
+		}
+		s.Enabled = enabled
+		s.UpdatedAt = now
+		s.UpdatedBy = userID
+		return a.store.UpdateSkill(ctx, s)
+	}
+	return a.store.SetUserSkillPreference(ctx, store.UserSkillPreference{
+		UserID:    userID,
+		SkillID:   skillID,
+		Enabled:   enabled,
+		UpdatedAt: now,
+	})
+}
+
+func (a *Admin) DeleteUserSkill(ctx context.Context, userID, skillID string) error {
+	s, err := a.store.GetSkill(ctx, skillID)
+	if err != nil {
+		return err
+	}
+	if s.Scope != "user" || s.OwnerUserID != userID {
+		return ErrPermissionDenied
+	}
+	return a.store.DeleteSkill(ctx, skillID)
+}
+
+func (a *Admin) GetSkillBundle(ctx context.Context, id string) ([]byte, string, error) {
+	if a.skillBundles == nil {
+		return nil, "", ErrInvalidArg
+	}
+	s, err := a.store.GetSkill(ctx, id)
+	if err != nil {
+		return nil, "", err
+	}
+	if s.BundleObjectKey == "" {
+		return nil, "", ErrNotFound
+	}
+	return a.skillBundles.GetBytes(ctx, s.BundleObjectKey)
+}
+
+func userSkillID(userID, skillID string) string {
+	sum := sha256.Sum256([]byte(userID))
+	return "user-" + hex.EncodeToString(sum[:4]) + "-" + sanitizeSkillID(skillID)
 }
 
 // ---- LLM model configuration ----

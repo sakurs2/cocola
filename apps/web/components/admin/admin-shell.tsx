@@ -9,6 +9,7 @@ import {
   Cpu,
   FileClock,
   LayoutDashboard,
+  Sparkles,
   Server,
   Settings,
   Terminal,
@@ -37,6 +38,7 @@ const NAV_GROUPS: { label: string; items: AdminNavItem[] }[] = [
     label: "AI",
     items: [
       { href: "/admin/models", label: "Models", icon: Cpu },
+      { href: "/admin/skills", label: "Skills", icon: Sparkles },
       { href: "/admin/scheduled-tasks", label: "Scheduled Tasks", icon: Clock3 },
     ],
   },

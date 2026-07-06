@@ -18,6 +18,7 @@ type Memory struct {
 	quotas       map[string]QuotaOverride // key = scope + "/" + subject
 	settings     map[string]SystemSetting
 	skills       map[string]Skill
+	skillPrefs   map[string]UserSkillPreference
 	llmProviders map[string]LLMProvider
 	llmModels    map[string]LLMModelRoute
 	tasks        map[string]ScheduledTask
@@ -39,6 +40,7 @@ func NewMemory() *Memory {
 		quotas:       map[string]QuotaOverride{},
 		settings:     map[string]SystemSetting{},
 		skills:       map[string]Skill{},
+		skillPrefs:   map[string]UserSkillPreference{},
 		llmProviders: map[string]LLMProvider{},
 		llmModels:    map[string]LLMModelRoute{},
 		tasks:        map[string]ScheduledTask{},
@@ -338,13 +340,38 @@ func (m *Memory) DeleteSystemSetting(ctx context.Context, key string, expectedVe
 
 // ---- Skills ----
 
+func normalizeSkill(s Skill) Skill {
+	if s.Scope == "" {
+		s.Scope = "admin"
+	}
+	if s.SourceType == "" {
+		s.SourceType = "manual"
+	}
+	if s.ManifestJSON == nil {
+		s.ManifestJSON = []byte("[]")
+	}
+	if s.FrontmatterJSON == nil {
+		s.FrontmatterJSON = []byte("{}")
+	}
+	return s
+}
+
+func cloneSkill(s Skill) Skill {
+	s = normalizeSkill(s)
+	s.ManifestJSON = append([]byte(nil), s.ManifestJSON...)
+	s.FrontmatterJSON = append([]byte(nil), s.FrontmatterJSON...)
+	return s
+}
+
+func skillPrefKey(userID, skillID string) string { return userID + "/" + skillID }
+
 func (m *Memory) CreateSkill(ctx context.Context, s Skill) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	if _, ok := m.skills[s.ID]; ok {
 		return ErrConflict
 	}
-	m.skills[s.ID] = s
+	m.skills[s.ID] = cloneSkill(s)
 	return nil
 }
 
@@ -355,7 +382,7 @@ func (m *Memory) GetSkill(ctx context.Context, id string) (Skill, error) {
 	if !ok {
 		return Skill{}, ErrNotFound
 	}
-	return s, nil
+	return cloneSkill(s), nil
 }
 
 func (m *Memory) ListSkills(ctx context.Context, onlyEnabled bool) ([]Skill, error) {
@@ -366,7 +393,21 @@ func (m *Memory) ListSkills(ctx context.Context, onlyEnabled bool) ([]Skill, err
 		if onlyEnabled && !s.Enabled {
 			continue
 		}
-		out = append(out, s)
+		out = append(out, cloneSkill(s))
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i].ID < out[j].ID })
+	return out, nil
+}
+
+func (m *Memory) ListSkillsForUser(ctx context.Context, userID string) ([]Skill, error) {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	out := make([]Skill, 0)
+	for _, s := range m.skills {
+		s = normalizeSkill(s)
+		if s.Scope == "user" && s.OwnerUserID == userID {
+			out = append(out, cloneSkill(s))
+		}
 	}
 	sort.Slice(out, func(i, j int) bool { return out[i].ID < out[j].ID })
 	return out, nil
@@ -378,7 +419,7 @@ func (m *Memory) UpdateSkill(ctx context.Context, s Skill) error {
 	if _, ok := m.skills[s.ID]; !ok {
 		return ErrNotFound
 	}
-	m.skills[s.ID] = s
+	m.skills[s.ID] = cloneSkill(s)
 	return nil
 }
 
@@ -389,6 +430,41 @@ func (m *Memory) DeleteSkill(ctx context.Context, id string) error {
 		return ErrNotFound
 	}
 	delete(m.skills, id)
+	for key, pref := range m.skillPrefs {
+		if pref.SkillID == id {
+			delete(m.skillPrefs, key)
+		}
+	}
+	return nil
+}
+
+func (m *Memory) SetUserSkillPreference(ctx context.Context, pref UserSkillPreference) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if _, ok := m.skills[pref.SkillID]; !ok {
+		return ErrNotFound
+	}
+	m.skillPrefs[skillPrefKey(pref.UserID, pref.SkillID)] = pref
+	return nil
+}
+
+func (m *Memory) ListUserSkillPreferences(ctx context.Context, userID string) ([]UserSkillPreference, error) {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	out := make([]UserSkillPreference, 0)
+	for _, pref := range m.skillPrefs {
+		if pref.UserID == userID {
+			out = append(out, pref)
+		}
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i].SkillID < out[j].SkillID })
+	return out, nil
+}
+
+func (m *Memory) DeleteUserSkillPreference(ctx context.Context, userID, skillID string) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	delete(m.skillPrefs, skillPrefKey(userID, skillID))
 	return nil
 }
 

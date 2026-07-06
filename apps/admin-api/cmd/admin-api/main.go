@@ -62,6 +62,7 @@ import (
 	"time"
 
 	"github.com/cocola-project/cocola/apps/admin-api/internal/httpapi"
+	"github.com/cocola-project/cocola/apps/admin-api/internal/objstore"
 	"github.com/cocola-project/cocola/apps/admin-api/internal/redispub"
 	"github.com/cocola-project/cocola/apps/admin-api/internal/service"
 	"github.com/cocola-project/cocola/apps/admin-api/internal/store"
@@ -182,6 +183,24 @@ func main() {
 		WithUserEventBroker(userEventBroker).
 		WithModelSecretKey(config.SecretFromEnv("COCOLA_MODEL_SECRET_KEY")).
 		WithMinScheduleInterval(time.Duration(getenvInt("COCOLA_SCHEDULER_MIN_INTERVAL_SECS", 3600)) * time.Second)
+	if oc := objstore.ConfigFromEnv(); oc.Enabled() {
+		skillStore, err := objstore.New(oc)
+		if err != nil {
+			log.Sugar().Warnw("skill bundle store disabled", "err", err)
+		} else {
+			hctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+			herr := skillStore.Health(hctx)
+			cancel()
+			if herr != nil {
+				log.Sugar().Warnw("skill bundle store health failed; disabling bundle uploads", "err", herr)
+			} else {
+				svc.WithSkillBundleStore(skillStore)
+				log.Sugar().Infow("skill bundle store enabled", "endpoint", oc.Endpoint, "bucket", oc.Bucket)
+			}
+		}
+	} else {
+		log.Warn("skill bundle store disabled (no COCOLA_MINIO_ENDPOINT/BUCKET) — imported skills keep metadata only")
+	}
 	if runtimeKV != nil {
 		runtimeMgr, err := service.NewSandboxRuntimeManagerFromEnv(runtimeKV)
 		if err != nil {

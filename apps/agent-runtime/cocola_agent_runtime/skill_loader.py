@@ -22,6 +22,7 @@ from __future__ import annotations
 
 import dataclasses
 import json
+import urllib.parse
 import urllib.request
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass
@@ -48,6 +49,10 @@ class Skill:
     description: str = ""
     version: str = ""
     entrypoint: str = ""
+    scope: str = ""
+    content_sha256: str = ""
+    bundle_object_key: str = ""
+    skill_md: str = ""
 
     @classmethod
     def from_json(cls, d: dict) -> Skill:
@@ -57,13 +62,17 @@ class Skill:
             description=str(d.get("description", "")),
             version=str(d.get("version", "")),
             entrypoint=str(d.get("entrypoint", "")),
+            scope=str(d.get("scope", "")),
+            content_sha256=str(d.get("content_sha256", "")),
+            bundle_object_key=str(d.get("bundle_object_key", "")),
+            skill_md=str(d.get("skill_md", "")),
         )
 
 
 class SkillCatalog(Protocol):
     """The runtime depends on this Protocol only, never a concrete client."""
 
-    def enabled_skills(self) -> list[Skill]:
+    def enabled_skills(self, user_id: str = "") -> list[Skill]:
         """Return the currently-enabled skills (may be empty; never None)."""
         ...
 
@@ -101,8 +110,11 @@ class AdminSkillCatalog:
         self._timeout = timeout_s
         self._fetch = fetcher or _urllib_fetch
 
-    def enabled_skills(self) -> list[Skill]:
-        url = self._base + "/admin/skills?enabled=true"
+    def enabled_skills(self, user_id: str = "") -> list[Skill]:
+        if user_id:
+            url = self._base + "/admin/skills/effective?user_id=" + urllib.parse.quote(user_id)
+        else:
+            url = self._base + "/admin/skills?enabled=true"
         headers = {"Accept": "application/json"}
         if self._admin_key:
             headers["Authorization"] = "Bearer " + self._admin_key
@@ -124,7 +136,7 @@ class StaticSkillCatalog:
     def __init__(self, skills: Sequence[Skill] | None = None) -> None:
         self._skills = list(skills or ())
 
-    def enabled_skills(self) -> list[Skill]:
+    def enabled_skills(self, user_id: str = "") -> list[Skill]:
         return list(self._skills)
 
 
@@ -164,7 +176,7 @@ def apply_skills_to_options(options: AgentOptions, catalog: SkillCatalog) -> Age
     an empty list), so this never raises on a control-plane blip — `options` is
     returned effectively unchanged.
     """
-    preamble = skills_system_preamble(catalog.enabled_skills())
+    preamble = skills_system_preamble(catalog.enabled_skills(options.user_id or ""))
     if not preamble:
         return options
     base = options.system_prompt or ""

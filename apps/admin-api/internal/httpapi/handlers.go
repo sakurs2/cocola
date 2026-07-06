@@ -9,7 +9,9 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"io"
 	"net/http"
+	"strings"
 	"time"
 
 	"github.com/go-chi/chi/v5"
@@ -402,6 +404,13 @@ type createSkillReq struct {
 	Enabled     bool   `json:"enabled,omitempty"`
 }
 
+type skillGitReq struct {
+	RepoURL     string   `json:"repo_url"`
+	Ref         string   `json:"ref,omitempty"`
+	Path        string   `json:"path,omitempty"`
+	SelectedIDs []string `json:"selected_ids,omitempty"`
+}
+
 func (a *API) createSkill(w http.ResponseWriter, r *http.Request) {
 	var req createSkillReq
 	if err := decode(r, &req); err != nil {
@@ -465,6 +474,246 @@ func (a *API) setSkillEnabled(w http.ResponseWriter, r *http.Request, enabled bo
 func (a *API) deleteSkill(w http.ResponseWriter, r *http.Request) {
 	id := chi.URLParam(r, "id")
 	if err := a.svc.DeleteSkill(r.Context(), id, actorOf(r)); err != nil {
+		mapErr(w, err)
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
+}
+
+func readSkillArchiveUpload(r *http.Request) ([]byte, []string, error) {
+	if err := r.ParseMultipartForm(80 << 20); err != nil {
+		return nil, nil, service.ErrInvalidArg
+	}
+	file, _, err := r.FormFile("file")
+	if err != nil {
+		return nil, nil, service.ErrInvalidArg
+	}
+	defer file.Close()
+	data, err := io.ReadAll(io.LimitReader(file, 80<<20))
+	if err != nil {
+		return nil, nil, err
+	}
+	selected := make([]string, 0)
+	for _, raw := range r.MultipartForm.Value["selected"] {
+		for _, part := range strings.Split(raw, ",") {
+			part = strings.TrimSpace(part)
+			if part != "" {
+				selected = append(selected, part)
+			}
+		}
+	}
+	for _, raw := range r.MultipartForm.Value["selected_ids"] {
+		for _, part := range strings.Split(raw, ",") {
+			part = strings.TrimSpace(part)
+			if part != "" {
+				selected = append(selected, part)
+			}
+		}
+	}
+	return data, selected, nil
+}
+
+func (a *API) scanSkillArchive(w http.ResponseWriter, r *http.Request) {
+	data, _, err := readSkillArchiveUpload(r)
+	if err != nil {
+		mapErr(w, err)
+		return
+	}
+	candidates, err := a.svc.ScanSkillArchive(r.Context(), data)
+	if err != nil {
+		mapErr(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"skills": candidates})
+}
+
+func (a *API) importSkillArchive(w http.ResponseWriter, r *http.Request) {
+	data, selected, err := readSkillArchiveUpload(r)
+	if err != nil {
+		mapErr(w, err)
+		return
+	}
+	imported, candidates, err := a.svc.ImportSkillArchive(r.Context(), "admin", "", actorOf(r), data, selected)
+	if err != nil {
+		mapErr(w, err)
+		return
+	}
+	writeJSON(w, http.StatusCreated, map[string]any{"skills": imported, "candidates": candidates})
+}
+
+func (a *API) scanSkillGit(w http.ResponseWriter, r *http.Request) {
+	var req skillGitReq
+	if err := decode(r, &req); err != nil {
+		mapErr(w, err)
+		return
+	}
+	candidates, err := a.svc.ScanSkillGit(r.Context(), service.SkillGitInput{
+		RepoURL: req.RepoURL,
+		Ref:     req.Ref,
+		Path:    req.Path,
+	})
+	if err != nil {
+		mapErr(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"skills": candidates})
+}
+
+func (a *API) importSkillGit(w http.ResponseWriter, r *http.Request) {
+	var req skillGitReq
+	if err := decode(r, &req); err != nil {
+		mapErr(w, err)
+		return
+	}
+	imported, candidates, err := a.svc.ImportSkillGit(r.Context(), "admin", "", actorOf(r), service.SkillGitInput{
+		RepoURL:     req.RepoURL,
+		Ref:         req.Ref,
+		Path:        req.Path,
+		SelectedIDs: req.SelectedIDs,
+	})
+	if err != nil {
+		mapErr(w, err)
+		return
+	}
+	writeJSON(w, http.StatusCreated, map[string]any{"skills": imported, "candidates": candidates})
+}
+
+func (a *API) listEffectiveSkills(w http.ResponseWriter, r *http.Request) {
+	userID := strings.TrimSpace(r.URL.Query().Get("user_id"))
+	if userID == "" {
+		mapErr(w, service.ErrInvalidArg)
+		return
+	}
+	skills, err := a.svc.ListEffectiveSkills(r.Context(), userID)
+	if err != nil {
+		mapErr(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"skills": skills})
+}
+
+func (a *API) getSkillBundle(w http.ResponseWriter, r *http.Request) {
+	data, contentType, err := a.svc.GetSkillBundle(r.Context(), chi.URLParam(r, "id"))
+	if err != nil {
+		mapErr(w, err)
+		return
+	}
+	if contentType == "" {
+		contentType = "application/zip"
+	}
+	w.Header().Set("content-type", contentType)
+	w.WriteHeader(http.StatusOK)
+	_, _ = w.Write(data)
+}
+
+func (a *API) listMySkills(w http.ResponseWriter, r *http.Request) {
+	skills, err := a.svc.ListUserSkillCatalog(r.Context(), actorOf(r))
+	if err != nil {
+		mapErr(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"skills": skills})
+}
+
+func (a *API) scanMySkillArchive(w http.ResponseWriter, r *http.Request) {
+	data, _, err := readSkillArchiveUpload(r)
+	if err != nil {
+		mapErr(w, err)
+		return
+	}
+	candidates, err := a.svc.ScanSkillArchive(r.Context(), data)
+	if err != nil {
+		mapErr(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"skills": candidates})
+}
+
+func (a *API) importMySkillArchive(w http.ResponseWriter, r *http.Request) {
+	data, selected, err := readSkillArchiveUpload(r)
+	if err != nil {
+		mapErr(w, err)
+		return
+	}
+	userID := actorOf(r)
+	imported, candidates, err := a.svc.ImportSkillArchive(r.Context(), "user", userID, userID, data, selected)
+	if err != nil {
+		mapErr(w, err)
+		return
+	}
+	writeJSON(w, http.StatusCreated, map[string]any{"skills": imported, "candidates": candidates})
+}
+
+func (a *API) scanMySkillGit(w http.ResponseWriter, r *http.Request) {
+	var req skillGitReq
+	if err := decode(r, &req); err != nil {
+		mapErr(w, err)
+		return
+	}
+	candidates, err := a.svc.ScanSkillGit(r.Context(), service.SkillGitInput{
+		RepoURL: req.RepoURL,
+		Ref:     req.Ref,
+		Path:    req.Path,
+	})
+	if err != nil {
+		mapErr(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"skills": candidates})
+}
+
+func (a *API) importMySkillGit(w http.ResponseWriter, r *http.Request) {
+	var req skillGitReq
+	if err := decode(r, &req); err != nil {
+		mapErr(w, err)
+		return
+	}
+	userID := actorOf(r)
+	imported, candidates, err := a.svc.ImportSkillGit(r.Context(), "user", userID, userID, service.SkillGitInput{
+		RepoURL:     req.RepoURL,
+		Ref:         req.Ref,
+		Path:        req.Path,
+		SelectedIDs: req.SelectedIDs,
+	})
+	if err != nil {
+		mapErr(w, err)
+		return
+	}
+	writeJSON(w, http.StatusCreated, map[string]any{"skills": imported, "candidates": candidates})
+}
+
+func (a *API) getMySkill(w http.ResponseWriter, r *http.Request) {
+	id := chi.URLParam(r, "id")
+	s, err := a.svc.GetSkill(r.Context(), id)
+	if err != nil {
+		mapErr(w, err)
+		return
+	}
+	if s.Scope == "user" && s.OwnerUserID != actorOf(r) {
+		mapErr(w, service.ErrPermissionDenied)
+		return
+	}
+	writeJSON(w, http.StatusOK, s)
+}
+
+func (a *API) enableMySkill(w http.ResponseWriter, r *http.Request) {
+	a.setMySkillEnabled(w, r, true)
+}
+
+func (a *API) disableMySkill(w http.ResponseWriter, r *http.Request) {
+	a.setMySkillEnabled(w, r, false)
+}
+
+func (a *API) setMySkillEnabled(w http.ResponseWriter, r *http.Request, enabled bool) {
+	if err := a.svc.SetUserSkillEnabled(r.Context(), actorOf(r), chi.URLParam(r, "id"), enabled); err != nil {
+		mapErr(w, err)
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
+}
+
+func (a *API) deleteMySkill(w http.ResponseWriter, r *http.Request) {
+	if err := a.svc.DeleteUserSkill(r.Context(), actorOf(r), chi.URLParam(r, "id")); err != nil {
 		mapErr(w, err)
 		return
 	}

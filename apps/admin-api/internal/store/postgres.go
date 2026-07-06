@@ -484,19 +484,27 @@ func (p *Postgres) DeleteSystemSetting(ctx context.Context, key string, expected
 
 // ---- Skills ----
 
-const skillCols = `id, name, description, version, entrypoint, enabled, created_at, updated_at`
+const skillCols = `id, name, description, version, entrypoint, enabled, scope, owner_user_id, source_type, source_url, source_ref, source_path, bundle_object_key, content_sha256, manifest_json, frontmatter_json, skill_md, file_count, size_bytes, created_at, updated_at, created_by, updated_by`
 
 func scanSkill(row pgx.Row) (Skill, error) {
 	var s Skill
 	err := row.Scan(&s.ID, &s.Name, &s.Description, &s.Version, &s.Entrypoint,
-		&s.Enabled, &s.CreatedAt, &s.UpdatedAt)
+		&s.Enabled, &s.Scope, &s.OwnerUserID, &s.SourceType, &s.SourceURL,
+		&s.SourceRef, &s.SourcePath, &s.BundleObjectKey, &s.ContentSHA256,
+		&s.ManifestJSON, &s.FrontmatterJSON, &s.SkillMD, &s.FileCount,
+		&s.SizeBytes, &s.CreatedAt, &s.UpdatedAt, &s.CreatedBy, &s.UpdatedBy)
 	return s, err
 }
 
 func (p *Postgres) CreateSkill(ctx context.Context, s Skill) error {
-	const q = `INSERT INTO skill_entries (` + skillCols + `) VALUES ($1,$2,$3,$4,$5,$6,$7,$8)`
+	s = normalizeSkill(s)
+	const q = `INSERT INTO skill_entries (` + skillCols + `)
+		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23)`
 	_, err := p.pool.Exec(ctx, q,
-		s.ID, s.Name, s.Description, s.Version, s.Entrypoint, s.Enabled, s.CreatedAt, s.UpdatedAt)
+		s.ID, s.Name, s.Description, s.Version, s.Entrypoint, s.Enabled,
+		s.Scope, s.OwnerUserID, s.SourceType, s.SourceURL, s.SourceRef, s.SourcePath,
+		s.BundleObjectKey, s.ContentSHA256, s.ManifestJSON, s.FrontmatterJSON, s.SkillMD,
+		s.FileCount, s.SizeBytes, s.CreatedAt, s.UpdatedAt, s.CreatedBy, s.UpdatedBy)
 	if isUniqueViolation(err) {
 		return ErrConflict
 	}
@@ -534,12 +542,40 @@ func (p *Postgres) ListSkills(ctx context.Context, onlyEnabled bool) ([]Skill, e
 	return out, rows.Err()
 }
 
+func (p *Postgres) ListSkillsForUser(ctx context.Context, userID string) ([]Skill, error) {
+	rows, err := p.pool.Query(ctx, `SELECT `+skillCols+`
+		FROM skill_entries
+		WHERE scope='user' AND owner_user_id=$1
+		ORDER BY id`, userID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := make([]Skill, 0)
+	for rows.Next() {
+		s, err := scanSkill(rows)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, s)
+	}
+	return out, rows.Err()
+}
+
 func (p *Postgres) UpdateSkill(ctx context.Context, s Skill) error {
+	s = normalizeSkill(s)
 	const q = `UPDATE skill_entries
-		SET name=$2, description=$3, version=$4, entrypoint=$5, enabled=$6, created_at=$7, updated_at=$8
+		SET name=$2, description=$3, version=$4, entrypoint=$5, enabled=$6,
+		    scope=$7, owner_user_id=$8, source_type=$9, source_url=$10, source_ref=$11,
+		    source_path=$12, bundle_object_key=$13, content_sha256=$14, manifest_json=$15,
+		    frontmatter_json=$16, skill_md=$17, file_count=$18, size_bytes=$19,
+		    created_at=$20, updated_at=$21, created_by=$22, updated_by=$23
 		WHERE id=$1`
 	ct, err := p.pool.Exec(ctx, q,
-		s.ID, s.Name, s.Description, s.Version, s.Entrypoint, s.Enabled, s.CreatedAt, s.UpdatedAt)
+		s.ID, s.Name, s.Description, s.Version, s.Entrypoint, s.Enabled,
+		s.Scope, s.OwnerUserID, s.SourceType, s.SourceURL, s.SourceRef, s.SourcePath,
+		s.BundleObjectKey, s.ContentSHA256, s.ManifestJSON, s.FrontmatterJSON, s.SkillMD,
+		s.FileCount, s.SizeBytes, s.CreatedAt, s.UpdatedAt, s.CreatedBy, s.UpdatedBy)
 	if err != nil {
 		return err
 	}
@@ -558,6 +594,43 @@ func (p *Postgres) DeleteSkill(ctx context.Context, id string) error {
 		return ErrNotFound
 	}
 	return nil
+}
+
+func (p *Postgres) SetUserSkillPreference(ctx context.Context, pref UserSkillPreference) error {
+	const q = `INSERT INTO user_skill_preferences (user_id, skill_id, enabled, updated_at)
+		VALUES ($1,$2,$3,$4)
+		ON CONFLICT (user_id, skill_id)
+		DO UPDATE SET enabled=EXCLUDED.enabled, updated_at=EXCLUDED.updated_at`
+	_, err := p.pool.Exec(ctx, q, pref.UserID, pref.SkillID, pref.Enabled, pref.UpdatedAt)
+	if isForeignKeyViolation(err) {
+		return ErrNotFound
+	}
+	return err
+}
+
+func (p *Postgres) ListUserSkillPreferences(ctx context.Context, userID string) ([]UserSkillPreference, error) {
+	rows, err := p.pool.Query(ctx, `SELECT user_id, skill_id, enabled, updated_at
+		FROM user_skill_preferences
+		WHERE user_id=$1
+		ORDER BY skill_id`, userID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := make([]UserSkillPreference, 0)
+	for rows.Next() {
+		var pref UserSkillPreference
+		if err := rows.Scan(&pref.UserID, &pref.SkillID, &pref.Enabled, &pref.UpdatedAt); err != nil {
+			return nil, err
+		}
+		out = append(out, pref)
+	}
+	return out, rows.Err()
+}
+
+func (p *Postgres) DeleteUserSkillPreference(ctx context.Context, userID, skillID string) error {
+	_, err := p.pool.Exec(ctx, `DELETE FROM user_skill_preferences WHERE user_id=$1 AND skill_id=$2`, userID, skillID)
+	return err
 }
 
 // ---- LLM model configuration ----
