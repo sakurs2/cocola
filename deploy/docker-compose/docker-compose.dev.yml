@@ -1,5 +1,5 @@
 # Local development infrastructure for cocola.
-# Intentionally minimal — only what M0–M3 needs. K8s manifests live in deploy/k8s.
+# Intentionally minimal: only local stateful dependencies for dev mode.
 #
 # Usage:
 #   make dev-up      # start everything

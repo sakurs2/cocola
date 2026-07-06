@@ -11,7 +11,7 @@
 #     COCOLA_LLM_PROVIDER=anthropic \
 #     COCOLA_ANTHROPIC_BASE_URL=<your proxy> \
 #     COCOLA_ANTHROPIC_API_KEY=<key> \
-#     bash scripts/run-stack.sh --with-llm
+#     make dev
 #   (the banner prints a dev TOKEN -- export it as TOKEN below)
 #
 # Usage:

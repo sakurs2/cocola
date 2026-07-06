@@ -4,7 +4,7 @@
 // This is the #18 PoC skeleton (ADR-0013). It wraps the OpenSandbox REST
 // lifecycle API (POST/GET/DELETE /v1/sandboxes, OPEN-SANDBOX-API-KEY header)
 // as a cocola backend, proving the seam works WITHOUT touching the core
-// SandboxProvider interface or the docker/k8s backends (ADR-0002).
+// SandboxProvider interface (ADR-0002).
 //
 // Scope: Create / Health / Destroy / Exec / Pause / Resume are implemented
 // against the REST + execd APIs. Create maps cocola's filesystem model onto
@@ -56,6 +56,12 @@ import (
 // (COCOLA_SANDBOX_PROVIDER=opensandbox).
 const ProviderName = "opensandbox"
 
+func init() {
+	provider.Register(ProviderName, func() (provider.SandboxProvider, error) {
+		return New()
+	})
+}
+
 // apiKeyHeader is the OpenSandbox authentication header.
 const apiKeyHeader = "OPEN-SANDBOX-API-KEY"
 
@@ -78,6 +84,7 @@ const execdPort = 44772
 const execdAuthHeader = "X-EXECD-ACCESS-TOKEN"
 
 // defaultExecTimeout caps a single Exec when the caller leaves req.Timeout at 0.
+// Operators can override it with COCOLA_OPENSANDBOX_EXEC_TIMEOUT, e.g. "10m".
 const defaultExecTimeout = 5 * time.Minute
 
 // resumeWaitTimeout / resumePollInterval bound the wait for a thawed sandbox to
@@ -100,13 +107,12 @@ const (
 )
 
 // execEventBuffer sizes the Exec result channel so a fast-producing SSE stream
-// does not block on a momentarily slow consumer. Matches the docker backend.
+// does not block on a momentarily slow consumer.
 const execEventBuffer = 32
 
-// Guest path contract: these MUST match the docker provider (docker.go) and the
-// brain image (deploy/sandbox-runtime/Dockerfile). Both backends mount the same
-// brain image, so the in-container paths are a shared contract, not a per-
-// provider choice.
+// Guest path contract: these MUST match the brain image
+// (deploy/sandbox-runtime/Dockerfile). The in-container paths are a shared
+// platform contract, not a per-provider choice.
 const (
 	// guestWorkspace is the user-visible per-session workspace root.
 	guestWorkspace = "/workspace"
@@ -137,8 +143,7 @@ const (
 	// brain image's Dockerfile (useradd -u 10001 cocola). execd runs the
 	// /command body as root by default; the claude CLI refuses
 	// --dangerously-skip-permissions under root for safety, so the control
-	// plane MUST drop to this user -- mirroring the docker provider, which pins
-	// `docker exec --user cocola`. Overridable via COCOLA_OPENSANDBOX_EXEC_USER
+	// plane MUST drop to this user. Overridable via COCOLA_OPENSANDBOX_EXEC_USER
 	// (empty disables the drop, i.e. run as the image default / root).
 	sandboxExecUser = "cocola"
 )
@@ -171,7 +176,8 @@ type Provider struct {
 
 	// execUser is the OS user every Exec drops to (default "cocola", uid 10001).
 	// Empty runs commands as execd's default (root). See sandboxExecUser.
-	execUser string
+	execUser    string
+	execTimeout time.Duration
 
 	// volumeBackend selects how cocola exposes persistent session storage to
 	// OpenSandbox. "pvc" preserves the historical Docker-volume/K8s-PVC request
@@ -198,6 +204,15 @@ func WithServerProxy(v bool) Option { return func(p *Provider) { p.useServerProx
 // WithExecUser overrides the OS user Exec drops to (default "cocola"). An empty
 // string disables the privilege drop, running commands as execd's default user.
 func WithExecUser(u string) Option { return func(p *Provider) { p.execUser = u } }
+
+// WithExecTimeout overrides COCOLA_OPENSANDBOX_EXEC_TIMEOUT.
+func WithExecTimeout(d time.Duration) Option {
+	return func(p *Provider) {
+		if d > 0 {
+			p.execTimeout = d
+		}
+	}
+}
 
 // WithVolumeBackend overrides COCOLA_SANDBOX_VOLUME_BACKEND (pvc|host).
 func WithVolumeBackend(v string) Option {
@@ -248,6 +263,7 @@ func New(opts ...Option) (*Provider, error) {
 		// in-sandbox claude CLI accepts --dangerously-skip-permissions. Override
 		// (incl. "" to disable) via COCOLA_OPENSANDBOX_EXEC_USER.
 		execUser:      execUserFromEnv(),
+		execTimeout:   execTimeoutFromEnv(),
 		volumeBackend: volumeBackendFromEnv(),
 		root:          root,
 	}
@@ -524,7 +540,7 @@ func (p *Provider) CleanupSessionStorage(ctx context.Context, userID, sessionID 
 // The channel is closed exactly once, when the stream ends or the context is
 // cancelled. A non-zero req.Timeout bounds the run; 0 falls back to
 // defaultExecTimeout. cocola joins req.Cmd with spaces into a single shell
-// command, matching the docker/k8s backends' shell-exec contract.
+// command, matching cocola's shell-exec contract.
 func (p *Provider) Exec(ctx context.Context, sid string, req provider.ExecRequest) (<-chan provider.ExecEvent, error) {
 	osbID, err := p.resolve(sid)
 	if err != nil {
@@ -537,7 +553,7 @@ func (p *Provider) Exec(ctx context.Context, sid string, req provider.ExecReques
 	// On-demand allocation (ADR-0015) pauses an idle sandbox between turns to
 	// free memory; execd in a paused container accepts the POST but the frozen
 	// process never runs, so the stream returns empty (no stdout, no error).
-	// Thaw before exec -- mirrors the docker provider's thawIfPaused.
+	// Thaw before exec so paused sandboxes resume transparently.
 	if err := p.thawIfPaused(ctx, osbID); err != nil {
 		return nil, err
 	}
@@ -568,8 +584,7 @@ func (p *Provider) Exec(ctx context.Context, sid string, req provider.ExecReques
 	// under root, so we re-exec the command as p.execUser via runuser. runuser
 	// runs the argv DIRECTLY (no nested shell), preserves the environment --
 	// including the injected ANTHROPIC_* creds -- and sets HOME to the user's
-	// home so ~/.claude resolves. This mirrors the docker provider's
-	// `docker exec --user cocola`. Empty execUser keeps the execd default user.
+	// home so ~/.claude resolves. Empty execUser keeps the execd default user.
 	if p.execUser != "" {
 		command = fmt.Sprintf("runuser -u %s -- %s", shellQuote(p.execUser), command)
 	}
@@ -602,7 +617,10 @@ func (p *Provider) Exec(ctx context.Context, sid string, req provider.ExecReques
 		return nil, fmt.Errorf("opensandbox: marshal command: %w", err)
 	}
 
-	timeout := defaultExecTimeout
+	timeout := p.execTimeout
+	if timeout <= 0 {
+		timeout = defaultExecTimeout
+	}
 	if req.Timeout > 0 {
 		timeout = time.Duration(req.Timeout) * time.Second
 	}
@@ -785,9 +803,9 @@ type fileMetadata struct {
 // (octet-stream). Ownership is set to the Exec user (default "cocola") so files
 // written by the control plane are readable by the in-sandbox claude process,
 // which runs as that same non-root user; an empty execUser leaves ownership at
-// execd's default. Mirrors the docker provider's CopyToContainer semantics
-// (whole-file write by absolute path). The endpoint, auth headers, and a thaw
-// of a paused sandbox are resolved through the same chain Exec uses.
+// execd's default. This is a whole-file write by absolute path. The endpoint,
+// auth headers, and a thaw of a paused sandbox are resolved through the same
+// chain Exec uses.
 func (p *Provider) WriteFile(ctx context.Context, sid, path string, data []byte) error {
 	osbID, err := p.resolve(sid)
 	if err != nil {
@@ -864,10 +882,9 @@ func (p *Provider) WriteFile(ctx context.Context, sid, path string, data []byte)
 
 // ReadFile downloads the whole file at path from inside the sandbox via execd's
 // GET /files/download?path=. It reads the full object (no Range / offset-limit
-// line reads), mirroring the docker provider's CopyFromContainer semantics. A
-// 404 is wrapped as fs.ErrNotExist so callers can distinguish "missing" from a
-// transport error. The endpoint, auth headers, and a thaw of a paused sandbox
-// are resolved through the same chain Exec uses.
+// line reads). A 404 is wrapped as fs.ErrNotExist so callers can distinguish
+// "missing" from a transport error. The endpoint, auth headers, and a thaw of a
+// paused sandbox are resolved through the same chain Exec uses.
 func (p *Provider) ReadFile(ctx context.Context, sid, path string) ([]byte, error) {
 	osbID, err := p.resolve(sid)
 	if err != nil {
@@ -992,6 +1009,18 @@ func httpTimeoutFromEnv() time.Duration {
 	return d
 }
 
+func execTimeoutFromEnv() time.Duration {
+	raw := strings.TrimSpace(os.Getenv("COCOLA_OPENSANDBOX_EXEC_TIMEOUT"))
+	if raw == "" {
+		return defaultExecTimeout
+	}
+	d, err := time.ParseDuration(raw)
+	if err != nil || d <= 0 {
+		return defaultExecTimeout
+	}
+	return d
+}
+
 func volumeBackendFromEnv() string {
 	raw := strings.TrimSpace(strings.ToLower(os.Getenv("COCOLA_SANDBOX_VOLUME_BACKEND")))
 	if raw == "" {
@@ -1001,9 +1030,8 @@ func volumeBackendFromEnv() string {
 }
 
 // mapVolumes translates cocola's filesystem model into the OpenSandbox volumes
-// list. It mirrors the docker provider's mount points so both backends present
-// an identical filesystem to the same brain image. PVC mode keeps the historical
-// request shape:
+// list. It presents the filesystem expected by the brain image. PVC mode keeps
+// the historical request shape:
 //
 //   - workspace:       pvc cocola-session-<sid>, subPath workspace -> /workspace
 //   - Claude state:    pvc cocola-session-<sid>, subPath claude    -> /home/cocola/.claude
@@ -1108,9 +1136,7 @@ func (p *Provider) sessionRoot(userID, sessionID string) string {
 // segment. OpenSandbox claim names must match ^[a-z0-9]([-a-z0-9]*[a-z0-9])?$
 // (<=253). We lower-case, replace every illegal char with '-', collapse runs,
 // trim leading/trailing '-', and fall back to "x" for an empty result so a
-// claim name like "cocola-session-<sanitised>" is always valid. Mirrors the
-// intent of the docker provider's safe() but targets DNS-label rules, not
-// filesystem.
+// claim name like "cocola-session-<sanitised>" is always valid.
 func safe(s string) string {
 	var b strings.Builder
 	prevDash := false
@@ -1354,9 +1380,8 @@ func processSSEPayload(payload string, out chan<- provider.ExecEvent) bool {
 		// execd line-buffers the child's stdout and emits one event per line
 		// with the trailing newline stripped. The downstream consumer
 		// (agent-runtime shim_provider) reassembles NDJSON by splitting on
-		// "\n", exactly as it does for the docker provider whose raw
-		// `docker exec` stream preserves newlines. Restore the newline so both
-		// backends present an identical newline-delimited byte stream;
+		// "\n". Restore the newline so execd presents the same newline-delimited
+		// byte stream the shim expects;
 		// otherwise the shim's JSON objects concatenate with no delimiter and
 		// none are ever parsed. We normalise to exactly one trailing newline
 		// in case a future execd build stops stripping it.

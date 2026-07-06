@@ -163,9 +163,8 @@ VERSION_TAG=v0.1.0 scripts/sandbox-runtime-publish.sh
 Use digest-pinned references for production rollout:
 
 ```bash
-helm upgrade --install cocola-sandbox deploy/helm/cocola-sandbox \
-  --set sandbox.image=ghcr.io/sakurs2/cocola-sandbox-runtime:sha-<commit> \
-  --set sandbox.imageDigest=sha256:<digest-from-ci>
+COCOLA_SANDBOX_IMAGE=ghcr.io/sakurs2/cocola-sandbox-runtime:sha-<commit>@sha256:<digest-from-ci> \
+  make prod
 ```
 
 For quick single-server deployments that intentionally track the newest

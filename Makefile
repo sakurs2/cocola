@@ -3,7 +3,8 @@
 .DEFAULT_GOAL := help
 
 ROOT := $(shell pwd)
-GO_APPS := gateway sandbox-manager admin-api
+GO_APPS := gateway admin-api
+SANDBOX_APP := sandbox-manager
 PY_APPS := agent-runtime llm-gateway
 DOCKER_COMPOSE := scripts/docker-compose.sh
 
@@ -44,13 +45,16 @@ proto-gen-py: ## Generate Python stubs (containerized; corporate-TLS safe)
 .PHONY: go-tidy go-build go-test go-lint
 go-tidy: ## go mod tidy for all Go modules
 	@for a in $(GO_APPS); do (cd apps/$$a && go mod tidy); done
+	@cd apps/$(SANDBOX_APP) && GOWORK=off go mod tidy
 	@cd packages/go-common && go mod tidy
 
 go-build: ## Build all Go services
 	@for a in $(GO_APPS); do (cd apps/$$a && go build -o ../../bin/$$a ./cmd/$$a); done
+	@cd apps/$(SANDBOX_APP) && GOWORK=off go build -o ../../bin/$(SANDBOX_APP) ./cmd/$(SANDBOX_APP)
 
 go-test: ## Run all Go tests
 	@for a in $(GO_APPS); do (cd apps/$$a && go test ./...); done
+	@cd apps/$(SANDBOX_APP) && GOWORK=off go test ./...
 	@cd packages/go-common && go test ./...
 
 go-lint: ## Run golangci-lint
@@ -98,23 +102,15 @@ web-format: ## Format web/ts/json/md/yaml with prettier
 web-format-check: ## Check prettier formatting (no write)
 	node_modules/.bin/prettier --check --ignore-unknown "apps/web/**/*.{ts,tsx,js,jsx,css,json,md}" "packages/ts-common/**/*.ts"
 
-# -------------------------------------------------------------------- sandbox (M1)
-# The sandbox-manager Go build is run inside a Linux golang container. The
-# corporate-managed macOS host blocks both the native TLS verifier and writing
-# ".gitmodules" files, so a host-native `go build` cannot resolve modules.
-# scripts/sandbox-build.sh encapsulates the working recipe.
-.PHONY: sandbox-build sandbox-run sandbox-e2e sandbox-m2-e2e verify-opensandbox verify-opensandbox-full opensandbox-up opensandbox-down verify-opensandbox-k8s
-sandbox-build: ## Build sandbox-manager + sandbox-cli (containerized)
-	scripts/sandbox-build.sh
+# -------------------------------------------------------------------- sandbox / runtime
+.PHONY: verify-opensandbox verify-opensandbox-full opensandbox-up opensandbox-down verify-opensandbox-k8s sandbox-runtime-verify sandbox-runtime-publish
 
-# sandbox-manager is a standalone Go module deliberately kept OUT of go.work
-# (its grpc/go 1.25 dependency graph would force-upgrade the other modules via
-# workspace MVS and break their offline builds). So every sandbox-manager go
-# command must run from inside the module with GOWORK=off. This target wraps the
-# manual OpenSandbox provider verification harness (cmd/opensandbox-verify) so a
-# developer can just `make verify-opensandbox` instead of remembering the dance.
-# Requires COCOLA_OPENSANDBOX_URL (and COCOLA_OPENSANDBOX_API_KEY if the server
-# enables auth) in the environment. Extra flags pass through via ARGS=.
+# sandbox-manager is a standalone Go module deliberately kept OUT of go.work.
+# So every sandbox-manager go command must run from inside the module with
+# GOWORK=off. This target wraps the manual OpenSandbox provider verification
+# harness (cmd/opensandbox-verify). Requires COCOLA_OPENSANDBOX_URL (and
+# COCOLA_OPENSANDBOX_API_KEY if the server enables auth) in the environment.
+# Extra flags pass through via ARGS=.
 verify-opensandbox: ## Run the OpenSandbox provider e2e harness (needs COCOLA_OPENSANDBOX_URL)
 	cd apps/sandbox-manager && GOWORK=off go run ./cmd/opensandbox-verify $(ARGS)
 
@@ -147,56 +143,30 @@ verify-opensandbox-k8s: ## Verify OpenSandbox Kubernetes runtime with the config
 	COCOLA_OPENSANDBOX_URL=$${COCOLA_OPENSANDBOX_URL:-http://127.0.0.1:8090/v1} \
 		$(MAKE) verify-opensandbox ARGS="-image $${COCOLA_K8S_SANDBOX_IMAGE_REMOTE:-ghcr.io/sakurs2/cocola-sandbox-runtime:latest} -skip-pause $(ARGS)"
 
-sandbox-run: sandbox-build ## Run sandbox-manager locally (Docker provider)
-	COCOLA_SANDBOX_PROVIDER=docker ./bin/sandbox-manager
+sandbox-runtime-verify: ## Build/self-check the sandbox runtime image
+	scripts/sandbox-runtime-verify.sh
 
-sandbox-e2e: ## Full M1 smoke test: Go CLI + Python runtime demos
-	scripts/sandbox-e2e.sh
-
-sandbox-m2-e2e: ## M2 acceptance: 50-session concurrency bench (needs Redis)
-	scripts/sandbox-m2-e2e.sh
-
-.PHONY: demo-minimal
-demo-minimal: ## M-minimal: fully containerised control plane + sandbox + persistence demo
-	bash scripts/demo-minimal.sh
+sandbox-runtime-publish: ## Publish the sandbox runtime image to GHCR
+	scripts/sandbox-runtime-publish.sh
 
 # -------------------------------------------------------------------- dev stack
-# Local app stack. ONE route (Route A), exactly TWO deploy modes:
-#   make up            Mode 1 (DEFAULT debug). Everything NATIVE except the
-#                      sandbox: only the OpenSandbox server (:8090) + redis/pg/
-#                      minio (dev.yml) run in containers; EVERY cocola service
-#                      runs NATIVE in the foreground -- sandbox-manager :50051,
-#                      llm-gateway :8081, admin-api :8092, agent-runtime :50061,
-#                      gateway :8080, web :3000. REAL Route A + real model, ZERO
-#                      image rebuild on edits. Ctrl-C tears down the native
-#                      services; the sandbox/infra containers survive -- stop
-#                      them with `make dev-down` (infra) + `make opensandbox-down`.
-#   make up-container  Mode 2. FULLY containerized Route A stack via
-#                      scripts/start.sh (docker-compose.full.yml: 9 services,
-#                      real model). When .env sets
-#                      COCOLA_SANDBOX_PROVIDER=opensandbox, start.sh also brings
-#                      up the standalone OpenSandbox server (:8090) and tears it
-#                      down together. Manage with `bash scripts/start.sh --down`.
-# `up` runs in the foreground (Ctrl-C tears the NATIVE children down);
-# `up-container` runs detached containers (stop via start.sh --stop/--down).
-.PHONY: up up-container up-k8s down-k8s reset-k8s status-k8s
-up: ## Mode 1 (default debug): all cocola services NATIVE, only sandbox+infra containerized (real Route A, no rebuild)
-	bash scripts/run-stack.sh
+# Local app stack. `make dev` is the DEFAULT debug mode: OpenSandbox Kubernetes
+# runtime plus redis/postgres/minio run in containers; cocola-authored services
+# run natively in the foreground for fast edit/restart loops. Formal/full
+# Docker startup remains available as `make prod`.
+.PHONY: dev prod
+dev: ## Dev debug mode: cocola services NATIVE, sandbox runtime + infra containerized
+	@echo "==> cocola mode: dev (local debug; native cocola services + containerized sandbox/infra)"
+	@bash scripts/run-stack-dev.sh; status=$$?; \
+		if [ "$$status" -eq 130 ] || [ "$$status" -eq 143 ]; then \
+			echo "==> cocola dev stopped"; \
+			exit 0; \
+		fi; \
+		exit "$$status"
 
-up-container: ## Mode 2: fully containerized Route A stack (start.sh + full.yml; OpenSandbox when .env selects it)
+prod: ## Prod mode: formal/full Docker startup (start.sh + docker-compose.full.yml)
+	@echo "==> cocola mode: prod (full Docker stack)"
 	bash scripts/start.sh
-
-up-k8s: ## Mode 1 + local k3d OpenSandbox Kubernetes runtime POC (one command)
-	bash scripts/run-stack-k8s.sh up
-
-down-k8s: ## Stop the local OpenSandbox Kubernetes runtime POC, keeping the k3d cluster
-	bash scripts/run-stack-k8s.sh down
-
-reset-k8s: ## Delete the local k3d OpenSandbox Kubernetes runtime POC cluster
-	bash scripts/run-stack-k8s.sh reset
-
-status-k8s: ## Show the local OpenSandbox Kubernetes runtime POC status
-	bash scripts/run-stack-k8s.sh status
 
 # -------------------------------------------------------------------- aggregate
 .PHONY: install test lint format format-check precommit-install clean

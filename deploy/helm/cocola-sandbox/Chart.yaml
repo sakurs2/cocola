@@ -1,6 +1,0 @@
-apiVersion: v2
-name: cocola-sandbox
-description: cocola sandbox-manager with the Kubernetes + gVisor sandbox provider (SUPERSEDED by ADR-0014: k8s provider retired; OpenSandbox is the primary backend)
-type: application
-version: 0.1.0
-appVersion: "0.1.0"

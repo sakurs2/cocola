@@ -234,6 +234,10 @@ function hasAssistantResponse(messages: UiMessage[]): boolean {
   return messages.some((m) => m.role === "assistant" && m.parts.length > 0);
 }
 
+function isTerminalAgentEvent(event: AgentEvent): boolean {
+  return event.kind === "done";
+}
+
 // Append text to the trailing text part, or start a new one. Immutable.
 function appendTo(parts: UiPart[], kind: "text" | "reasoning", chunk: string): UiPart[] {
   const last = parts[parts.length - 1];
@@ -643,6 +647,21 @@ export function CocolaRuntimeProvider({ children }: { children: ReactNode }) {
       const ctrl = new AbortController();
       abortMap.current.set(turnSessionId, ctrl);
       let aborted = false;
+      let finalized = false;
+      const finalizeTurn = (markUnread: boolean) => {
+        if (finalized) return;
+        finalized = true;
+        setRunning(turnSessionId, false);
+        abortMap.current.delete(turnSessionId);
+        if (markUnread) {
+          setUnreadCompletedIds((prev) => {
+            const next = new Set(prev);
+            next.add(turnSessionId);
+            return next;
+          });
+        }
+        refreshConversations();
+      };
       try {
         const res = await fetch("/api/chat", {
           method: "POST",
@@ -668,13 +687,20 @@ export function CocolaRuntimeProvider({ children }: { children: ReactNode }) {
         const reader = res.body.getReader();
         const decoder = new TextDecoder();
         let buffer = "";
-        for (;;) {
+        stream: for (;;) {
           const { value, done } = await reader.read();
           if (done) break;
           buffer += decoder.decode(value, { stream: true });
           const { events, rest } = parseFrames(buffer);
           buffer = rest;
-          for (const ev of events) applyEvent(turnSessionId, assistantId, ev);
+          for (const ev of events) {
+            applyEvent(turnSessionId, assistantId, ev);
+            if (isTerminalAgentEvent(ev)) {
+              finalizeTurn(true);
+              await reader.cancel().catch(() => {});
+              break stream;
+            }
+          }
         }
       } catch (err) {
         if (!(err instanceof DOMException && err.name === "AbortError")) {
@@ -684,16 +710,7 @@ export function CocolaRuntimeProvider({ children }: { children: ReactNode }) {
           aborted = true;
         }
       } finally {
-        setRunning(turnSessionId, false);
-        abortMap.current.delete(turnSessionId);
-        if (!aborted) {
-          setUnreadCompletedIds((prev) => {
-            const next = new Set(prev);
-            next.add(turnSessionId);
-            return next;
-          });
-        }
-        refreshConversations();
+        finalizeTurn(!aborted);
       }
     },
     [sessionId, selectedModel, applyEvent, refreshConversations, setRunning],

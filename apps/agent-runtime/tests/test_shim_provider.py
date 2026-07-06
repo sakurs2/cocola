@@ -167,6 +167,25 @@ async def test_nonzero_exit_becomes_terminal_error():
     assert kinds[-1] == "done"  # still terminated cleanly
 
 
+async def test_sandbox_exec_timeout_gets_user_facing_error():
+    def stream_handler(sandbox_id, cmd, stdin):
+        yield ExecChunk(
+            kind="error",
+            error="opensandbox: sse read: context deadline exceeded",
+        )
+
+    execu = StaticSandboxExecutor(stream_handler=stream_handler)
+    provider = InSandboxShimProvider(execu)
+    opts = AgentOptions(user_id="U1", session_id="S1", sandbox_id="box-1")
+
+    events = await _drain(provider, "screenshot", opts)
+    kinds = [e.kind for e in events]
+
+    assert kinds == ["error", "done"], kinds
+    assert "工具执行超时" in events[0].data["error"]
+    assert "opensandbox: sse read" not in events[0].data["error"]
+
+
 async def test_shim_error_event_is_relayed():
     def stream_handler(sandbox_id, cmd, stdin):
         yield ExecChunk(

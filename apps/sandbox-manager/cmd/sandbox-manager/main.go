@@ -1,14 +1,15 @@
 // sandbox-manager owns the SandboxProvider abstraction. It receives Create/Exec/
 // Destroy gRPC calls from agent-runtime and dispatches to a concrete provider:
-//   - DockerProvider (zero-config local / fallback backend)
-//   - OpenSandboxProvider (primary backend; see ADR-0014)
+//   - OpenSandboxProvider (default backend; see ADR-0014)
+//   - future providers registered behind the same SandboxProvider interface
 //
-// The provider is chosen at startup from COCOLA_SANDBOX_PROVIDER (default: docker).
+// The provider is chosen at startup from COCOLA_SANDBOX_PROVIDER (default: opensandbox).
 // Nothing below the provider factory knows which backend is in use.
 package main
 
 import (
 	"context"
+	"fmt"
 	"net"
 	"net/http"
 	"os"
@@ -23,8 +24,7 @@ import (
 	"github.com/cocola-project/cocola/apps/sandbox-manager/internal/orchestrator"
 	"github.com/cocola-project/cocola/apps/sandbox-manager/internal/provider"
 	checkpointprovider "github.com/cocola-project/cocola/apps/sandbox-manager/internal/provider/checkpoint"
-	"github.com/cocola-project/cocola/apps/sandbox-manager/internal/provider/docker"
-	"github.com/cocola-project/cocola/apps/sandbox-manager/internal/provider/opensandbox"
+	_ "github.com/cocola-project/cocola/apps/sandbox-manager/internal/provider/opensandbox"
 	"github.com/cocola-project/cocola/apps/sandbox-manager/internal/server"
 	"github.com/cocola-project/cocola/packages/go-common/logger"
 	"github.com/cocola-project/cocola/packages/go-common/metrics"
@@ -45,7 +45,7 @@ func main() {
 	}
 
 	addr := getenv("COCOLA_SANDBOX_ADDR", ":50051")
-	backend := getenv("COCOLA_SANDBOX_PROVIDER", docker.ProviderName)
+	backend := getenv("COCOLA_SANDBOX_PROVIDER", "opensandbox")
 
 	// Observability registry: shared by the gRPC interceptors below and the
 	// binder collector bridge. Exposed on a dedicated port at the end of main.
@@ -145,22 +145,18 @@ func main() {
 	}
 }
 
-// newProvider is the single place that maps a backend name to a concrete
-// implementation. Adding a new backend = one case here + a package under
-// internal/provider/. No other file changes.
+// newProvider is the single place that resolves a backend name to a registered
+// concrete implementation. Adding a new backend = add a package under
+// internal/provider/ that calls provider.Register from init().
 func newProvider(name string) (provider.SandboxProvider, error) {
-	switch name {
-	case docker.ProviderName:
-		return docker.New()
-	case opensandbox.ProviderName:
-		return opensandbox.New()
-	default:
-		// Allow providers that self-registered via Register() in their init().
-		if p := provider.Get(name); p != nil {
-			return p, nil
-		}
-		return docker.New()
+	p, err := provider.New(name)
+	if err != nil {
+		return nil, err
 	}
+	if p == nil {
+		return nil, fmt.Errorf("unknown sandbox provider %q", name)
+	}
+	return p, nil
 }
 
 // defaultMaxMessageBytes is 64 MiB -- above the 32 MiB frontend upload cap,

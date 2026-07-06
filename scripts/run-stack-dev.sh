@@ -39,11 +39,11 @@ BATCHSANDBOX_TEMPLATE_FILE="${COCOLA_OPENSANDBOX_K8S_BATCHSANDBOX_TEMPLATE:-$ROO
 BATCHSANDBOX_TEMPLATE_CM="cocola-batchsandbox-template"
 SERVER_SERVICE="${COCOLA_OPENSANDBOX_K8S_SERVER_SERVICE:-opensandbox-server}"
 LOG_DIR="$ROOT/.run-logs"
-FORWARD_PID_FILE="$LOG_DIR/opensandbox-k8s-forward.pid"
-STACK_PID_FILE="$LOG_DIR/up-k8s-stack.pid"
+FORWARD_PID_FILE="$LOG_DIR/opensandbox-dev-forward.pid"
+STACK_PID_FILE="$LOG_DIR/dev-stack.pid"
 
-log() { printf '\033[1;36m[up-k8s]\033[0m %s\n' "$*"; }
-err() { printf '\033[1;31m[up-k8s:err]\033[0m %s\n' "$*" >&2; }
+log() { printf '\033[1;36m[dev]\033[0m %s\n' "$*"; }
+err() { printf '\033[1;31m[dev:err]\033[0m %s\n' "$*" >&2; }
 
 require_cmd() {
   command -v "$1" >/dev/null 2>&1 || { err "missing command: $1"; return 127; }
@@ -86,14 +86,14 @@ ensure_cluster() {
 push_sandbox_image() {
   if ! docker image inspect "$SANDBOX_IMAGE_LOCAL" >/dev/null 2>&1; then
     err "missing local image: $SANDBOX_IMAGE_LOCAL"
-    err "build the sandbox runtime image first, then rerun: make up-k8s"
+    err "build the sandbox runtime image first, then rerun: make dev"
     return 1
   fi
   log "pushing sandbox image to local k3d registry: $SANDBOX_IMAGE_PUSH"
   docker tag "$SANDBOX_IMAGE_LOCAL" "$SANDBOX_IMAGE_PUSH"
   if ! docker push "$SANDBOX_IMAGE_PUSH"; then
     err "failed to push $SANDBOX_IMAGE_PUSH"
-    err "if the cluster was created before the local registry existed, run: make reset-k8s"
+    err "if the cluster was created before the local registry existed, run: scripts/run-stack-dev.sh reset"
     return 1
   fi
   log "Kubernetes sandbox pods will pull image as: $SANDBOX_IMAGE_REMOTE"
@@ -211,13 +211,22 @@ stop_stack() {
   fi
 }
 
+graceful_stop() {
+  trap '' INT TERM
+  log "stopping cocola dev mode gracefully"
+  stop_stack
+  stop_forward
+  rm -f "$STACK_PID_FILE"
+  exit 0
+}
+
 start_forward() {
   mkdir -p "$LOG_DIR"
   stop_forward
   log "starting OpenSandbox port-forward on 127.0.0.1:$SERVER_PORT"
   (
     kubectl -n "$SYSTEM_NAMESPACE" port-forward "svc/$SERVER_SERVICE" "$SERVER_PORT:80"
-  ) >"$LOG_DIR/opensandbox-k8s-forward.log" 2>&1 &
+  ) >"$LOG_DIR/opensandbox-dev-forward.log" 2>&1 &
   echo "$!" >"$FORWARD_PID_FILE"
 
   local i
@@ -228,11 +237,12 @@ start_forward() {
     fi
     sleep 1
   done
-  err "OpenSandbox port-forward did not become healthy; see .run-logs/opensandbox-k8s-forward.log"
+  err "OpenSandbox port-forward did not become healthy; see .run-logs/opensandbox-dev-forward.log"
   return 1
 }
 
 up() {
+  log "mode: dev (local debug; native cocola services + OpenSandbox Kubernetes runtime + containerized infra)"
   ensure_cluster
   if [[ "$PUSH_SANDBOX_IMAGE" == "1" ]]; then
     push_sandbox_image
@@ -244,7 +254,7 @@ up() {
   start_forward
 
   log "starting cocola dev stack with Kubernetes OpenSandbox runtime"
-  trap 'stop_stack; stop_forward; exit 130' INT TERM
+  trap graceful_stop INT TERM
   trap 'rm -f "$STACK_PID_FILE"; stop_forward' EXIT
   (
     COCOLA_SANDBOX_PROVIDER=opensandbox \
@@ -260,7 +270,22 @@ up() {
   ) &
   local stack_pid="$!"
   echo "$stack_pid" >"$STACK_PID_FILE"
+  set +e
   wait "$stack_pid"
+  local status="$?"
+  set -e
+  case "$status" in
+    0)
+      return 0
+      ;;
+    130|143)
+      log "cocola dev stack stopped"
+      return 0
+      ;;
+    *)
+      return "$status"
+      ;;
+  esac
 }
 
 down() {
@@ -316,13 +341,10 @@ case "$ACTION" in
   status) status ;;
   -h|--help)
     cat <<TXT
-Usage: scripts/run-stack-k8s.sh <up|down|reset|status>
+Usage: scripts/run-stack-dev.sh <up|down|reset|status>
 
 Common targets:
-  make up-k8s       # create/reuse k3d, install OpenSandbox K8s runtime, start cocola
-  make down-k8s     # stop port-forward + OpenSandbox K8s runtime, keep k3d cluster
-  make reset-k8s    # delete the local k3d cluster and reclaim test disk
-  make status-k8s   # show k3d/OpenSandbox/Docker status
+  make dev          # create/reuse k3d, install OpenSandbox K8s runtime, start cocola dev stack
 
 Environment:
   COCOLA_K8S_CLUSTER              default: cocola-sandbox
@@ -334,7 +356,7 @@ Environment:
                                     when COCOLA_K8S_PUSH_SANDBOX_IMAGE=1:
                                     cocola-registry.localhost:5000/cocola/sandbox-runtime:dev
   COCOLA_K8S_PUSH_SANDBOX_IMAGE   default: 0; set 1 to push a local dev image to k3d registry
-  COCOLA_K8S_PREPULL_SANDBOX_IMAGE default: 1; pre-pull the remote image during make up-k8s
+  COCOLA_K8S_PREPULL_SANDBOX_IMAGE default: 1; pre-pull the remote image during make dev
   COCOLA_OPENSANDBOX_K8S_BATCHSANDBOX_TEMPLATE default: deploy/opensandbox-k8s/batchsandbox-template.yaml
   OPENSANDBOX_REPO                default: \$HOME/Desktop/github/opensandbox
 TXT

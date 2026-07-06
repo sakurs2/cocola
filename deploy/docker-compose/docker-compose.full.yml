@@ -6,7 +6,7 @@
 # Topology:
 #   web -> gateway -> agent-runtime -> {sandbox-manager, llm-gateway, admin-api}
 #   admin-api / llm-gateway <-> redis (revokes, quota, billing)
-#   sandbox-manager -> host docker daemon (DooD) to create user sandboxes
+#   sandbox-manager -> OpenSandbox server -> user sandboxes
 #
 # Auth.js protects the web app; admin-api owns the whitelist and runtime token
 # signing. For production inject AUTH_SECRET, COCOLA_ADMIN_KEY,
@@ -15,9 +15,8 @@
 # user's sandbox (COCOLA_SANDBOX_ADDR is set below); with no sandbox it degrades
 # to EchoProvider.
 #
-# DooD path isomorphism (see m-minimal plan): COCOLA_SANDBOX_ROOT must be the
-# SAME absolute path inside sandbox-manager and on the host, so the host daemon
-# resolves the user-sandbox bind mounts. Mounted source==target below.
+# OpenSandbox server is managed by scripts/start.sh via
+# docker-compose.opensandbox.yml and is reached through host.docker.internal.
 
 name: cocola
 
@@ -98,17 +97,18 @@ services:
         condition: service_completed_successfully
     environment:
       COCOLA_SANDBOX_ADDR: ":50051"
-      # Sandbox backend (ADR-0013/0014): "docker" (default, DooD on the host
-      # daemon) or "opensandbox" (talks to an OpenSandbox server). Override via
-      # repo-root .env. When opensandbox, the server is NOT on this compose
-      # network -- it is published on the host -- so point the URL at
+      # Sandbox backend (ADR-0013/0014): OpenSandbox is the default and only
+      # bundled provider. The server is NOT on this compose network -- it is
+      # published on the host by scripts/start.sh -- so point the URL at
       # host.docker.internal:<host_port>/v1 (note the /v1 suffix).
-      COCOLA_SANDBOX_PROVIDER: "${COCOLA_SANDBOX_PROVIDER:-docker}"
-      COCOLA_OPENSANDBOX_URL: "${COCOLA_OPENSANDBOX_URL:-}"
+      COCOLA_SANDBOX_PROVIDER: "${COCOLA_SANDBOX_PROVIDER:-opensandbox}"
+      COCOLA_OPENSANDBOX_URL: "${COCOLA_OPENSANDBOX_URL:-http://host.docker.internal:8090/v1}"
       COCOLA_OPENSANDBOX_API_KEY: "${COCOLA_OPENSANDBOX_API_KEY:-}"
       COCOLA_OPENSANDBOX_DEFAULT_CPU: "${COCOLA_OPENSANDBOX_DEFAULT_CPU:-}"
       COCOLA_OPENSANDBOX_DEFAULT_MEMORY: "${COCOLA_OPENSANDBOX_DEFAULT_MEMORY:-}"
       COCOLA_OPENSANDBOX_DIRECT_EXEC: "${COCOLA_OPENSANDBOX_DIRECT_EXEC:-}"
+      COCOLA_OPENSANDBOX_HTTP_TIMEOUT: "${COCOLA_OPENSANDBOX_HTTP_TIMEOUT:-}"
+      COCOLA_OPENSANDBOX_EXEC_TIMEOUT: "${COCOLA_OPENSANDBOX_EXEC_TIMEOUT:-}"
       COCOLA_REDIS_ADDR: "redis:6379"
       COCOLA_SANDBOX_ROOT: "${COCOLA_DATA_ROOT:-/var/lib/cocola/sandboxes}"
       COCOLA_SANDBOX_VOLUME_BACKEND: "${COCOLA_SANDBOX_VOLUME_BACKEND:-}"
@@ -134,11 +134,8 @@ services:
     ports:
       - "${COCOLA_SANDBOX_HOST_PORT:-50051}:50051"
     volumes:
-      - /var/run/docker.sock:/var/run/docker.sock
-      # COCOLA_DATA_ROOT holds session storage:
-      # <root>/users/<user>/sessions/<session>/{workspace,claude}. Bind the same
-      # absolute path into sandbox-manager so Docker/OpenSandbox host volumes are
-      # path-isomorphic with the host daemon. Point it at NFS/NAS in production.
+      # COCOLA_DATA_ROOT holds session storage when OpenSandbox is configured
+      # for host-backed volumes. Point it at NFS/NAS in production if needed.
       - "${COCOLA_DATA_ROOT:-/var/lib/cocola/sandboxes}:${COCOLA_DATA_ROOT:-/var/lib/cocola/sandboxes}"
 
   llm-gateway:
@@ -253,9 +250,8 @@ services:
       # separate route switch (the legacy Route B was decommissioned).
       # The session sandbox is created from the brain image and gets the model
       # credentials injected at creation (never via the prompt). The in-sandbox
-      # claude CLI reaches the gateway over the HOST-published port: sandboxes
-      # are created by sandbox-manager via DooD on the host daemon, so they land
-      # on the host bridge, not this compose network. host.docker.internal:18091
+      # claude CLI reaches the gateway over the HOST-published port: OpenSandbox
+      # creates sandboxes outside this compose network, so host.docker.internal:18091
       # -> llm-gateway:8080. ANTHROPIC_AUTH_TOKEN is a dev token (gateway auth
       # is off); ANTHROPIC_MODEL resolves to the gateway's default alias.
       COCOLA_SANDBOX_IMAGE: "${COCOLA_SANDBOX_IMAGE:-cocola/sandbox-runtime:dev}"

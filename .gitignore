@@ -78,3 +78,6 @@ deploy/llm-config.json
 
 # Local Claude Code agent state (never committed)
 .claude/
+
+# Local CodeGraph index (never committed)
+.codegraph/

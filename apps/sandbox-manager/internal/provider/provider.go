@@ -1,8 +1,8 @@
 // Package provider declares the SandboxProvider abstraction.
 //
-// Every concrete implementation (Docker, K8s+gVisor, E2B, CubeSandbox) must
-// satisfy this interface. The orchestrator code MUST NOT import any concrete
-// provider directly; instead, providers register themselves via Register().
+// Every concrete implementation must satisfy this interface. The orchestrator
+// code MUST NOT import any concrete provider directly; instead, providers
+// register a factory via Register().
 package provider
 
 import (
@@ -102,26 +102,33 @@ type SessionCheckpointer interface {
 	CheckpointSession(ctx context.Context, userID, sessionID, sandboxID string) error
 }
 
-// Registry is the global provider registry. Providers self-register in their
-// package init() so the orchestrator can pick one by name from config.
+// Factory constructs a concrete SandboxProvider from process configuration.
+type Factory func() (SandboxProvider, error)
+
+// Registry is the global provider factory registry. Providers self-register in
+// their package init() so the orchestrator can pick one by name from config.
 var (
 	registryMu sync.RWMutex
-	registry   = map[string]SandboxProvider{}
+	registry   = map[string]Factory{}
 )
 
-// Register a provider under the given name. Panics on duplicate keys.
-func Register(name string, p SandboxProvider) {
+// Register a provider factory under the given name. Panics on duplicate keys.
+func Register(name string, f Factory) {
 	registryMu.Lock()
 	defer registryMu.Unlock()
 	if _, exists := registry[name]; exists {
 		panic("sandbox provider already registered: " + name)
 	}
-	registry[name] = p
+	registry[name] = f
 }
 
-// Get looks up a registered provider. Returns nil if absent.
-func Get(name string) SandboxProvider {
+// New looks up and constructs a registered provider. Returns nil, nil if absent.
+func New(name string) (SandboxProvider, error) {
 	registryMu.RLock()
-	defer registryMu.RUnlock()
-	return registry[name]
+	f := registry[name]
+	registryMu.RUnlock()
+	if f == nil {
+		return nil, nil
+	}
+	return f()
 }

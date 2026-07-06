@@ -29,6 +29,7 @@ through the prompt channel -- so this provider never puts secrets in the Request
 from __future__ import annotations
 
 import json
+import re
 from collections.abc import AsyncIterator
 from dataclasses import dataclass, field
 
@@ -69,6 +70,24 @@ def _looks_like_resume_not_found(text: str) -> bool:
         return False
     low = text.lower()
     return any(marker in low for marker in _RESUME_NOT_FOUND_MARKERS)
+
+
+_SANDBOX_TIMEOUT_RE = re.compile(
+    r"(context deadline exceeded|deadlineexceeded|timed out|timeout)",
+    re.IGNORECASE,
+)
+
+
+def _user_facing_exec_error(raw: str) -> str:
+    """Map low-level sandbox transport errors to text safe to show users."""
+    text = (raw or "").strip()
+    if _SANDBOX_TIMEOUT_RE.search(text):
+        return (
+            "工具执行超时：这次沙箱里的命令运行太久了，可能是网页加载、浏览器截图或脚本没有在"
+            "限定时间内结束。请缩小任务范围，或让浏览器脚本设置较短 timeout、使用 "
+            "waitUntil='domcontentloaded'，并确保最后关闭浏览器。"
+        )
+    return f"sandbox exec failed: {text or 'unknown error'}"
 
 
 def _shim_event_to_agent_events(ev: dict) -> list[AgentEvent]:
@@ -329,10 +348,18 @@ class InSandboxShimProvider:
                     stderr_tail = (stderr_tail + chunk.data)[-2000:]
                     continue
                 if chunk.kind == "error":
+                    message = _user_facing_exec_error(chunk.error)
+                    log.warning(
+                        "sandbox exec failed",
+                        session_id=options.session_id,
+                        sandbox_id=options.sandbox_id,
+                        error=chunk.error,
+                        user_message=message,
+                    )
                     _record_error(
                         AgentEvent(
                             kind="error",
-                            data={"error": f"sandbox exec failed: {chunk.error}"},
+                            data={"error": message},
                         ),
                         chunk.error,
                     )

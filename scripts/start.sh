@@ -6,9 +6,8 @@
 #   1) 必带 --env-file .env，否则 llm-gateway 回落 fake provider（echo 回显）。
 #   2) 网关发布端口用 18091（绕开宿主上遗留的 IPv4 :8081 监听导致的 401）。
 #
-# 当 .env 里 COCOLA_SANDBOX_PROVIDER=opensandbox 时，还会自动拉起/拆除独立的
-# OpenSandbox server（docker-compose.opensandbox.yml，宿主 :8090），full.yml 里的
-# sandbox-manager 经 host.docker.internal:8090/v1 连它。provider=docker 时跳过。
+# 默认会自动拉起/拆除独立的 OpenSandbox server（docker-compose.opensandbox.yml，
+# 宿主 :8090），full.yml 里的 sandbox-manager 经 host.docker.internal:8090/v1 连它。
 #
 # 用法：
 #   bash scripts/start.sh            # 启动整栈（镜像缺失时自动构建）
@@ -31,13 +30,12 @@ export DOCKER_BUILDKIT=0
 
 # OpenSandbox server 是独立 compose(宿主发布 :8090),不在 full.yml 网络内;
 # full.yml 里的 sandbox-manager 经 host.docker.internal:8090/v1 跨 host 桥接连它。
-# 仅当沙箱后端为 opensandbox 时才需要它;provider=docker(DooD)不需要 server。
 OSB_COMPOSE="deploy/docker-compose/docker-compose.opensandbox.yml"
 OSB_DC=("$COMPOSE_BIN" -f "$OSB_COMPOSE")
 OSB_PORT="${COCOLA_OPENSANDBOX_HOST_PORT:-8090}"
 
 # 从 .env / 环境读出沙箱后端。.env 里已存在 COCOLA_SANDBOX_PROVIDER 时以其为准;
-# 环境变量优先。默认 docker(与 full.yml 默认一致)。
+# 环境变量优先。默认 opensandbox(与 full.yml 默认一致)。
 sandbox_provider() {
   if [[ -n "${COCOLA_SANDBOX_PROVIDER:-}" ]]; then
     printf '%s' "$COCOLA_SANDBOX_PROVIDER"; return
@@ -47,7 +45,7 @@ sandbox_provider() {
     v="$(grep -E '^COCOLA_SANDBOX_PROVIDER=' "$ENV_FILE" | tail -1 | cut -d= -f2-)"
     [[ -n "$v" ]] && { printf '%s' "$v"; return; }
   fi
-  printf 'docker'
+  printf 'opensandbox'
 }
 
 env_file_value() {
@@ -94,6 +92,7 @@ opensandbox_up() {
   local i
   for ((i=1; i<=60; i++)); do
     if curl -fsS -m 3 "http://localhost:$OSB_PORT/health" >/dev/null 2>&1; then
+      export COCOLA_OPENSANDBOX_URL="${COCOLA_OPENSANDBOX_URL:-http://host.docker.internal:${OSB_PORT}/v1}"
       log "OpenSandbox server 已就绪。"; return 0
     fi
     sleep 2
@@ -113,7 +112,7 @@ opensandbox_down() {
 # sandbox-manager 运行时会经 OpenSandbox server 动态创建 per-session 沙箱容器
 # (名字 sandbox-<uuid>、镜像 cocola/sandbox-runtime:dev、带 opensandbox.io/id label)。
 # 它们不属于任一 compose 文件,所以 `compose down` 清不掉,会继续占用宿主端口
-# (如 :50051),导致随后 `make up`(--hybrid 原生模式)因端口被占而失败。
+# (如 :50051),导致随后 `make dev`(dev 原生模式)因端口被占而失败。
 # 这里按镜像 ancestor 精确匹配并强删,确保 --down/--stop 后端口彻底释放。
 cleanup_sandboxes() {
   local ids
@@ -175,8 +174,9 @@ print_endpoints() {
   Web 界面 :  http://localhost:3000   <- 浏览器打开即用
   对话 API :  http://localhost:8080/v1/chat
   模型网关 :  http://localhost:18091  (接 .env 上游)
+  沙箱后端 :  OpenSandbox provider
 
-  Web 端 Bearer token：当前 dev 模式无需 token，留空即可
+  Web 端 Bearer token：当前 prod Docker 模式无需 token，留空即可
   （gateway 已设 COCOLA_AUTH_ALLOW_ANON=1，空 token 视为 dev-user）。
 
   常用：
@@ -215,6 +215,7 @@ main() {
       ;;
     --build)
       require_docker; require_env
+      log "mode: prod (full Docker stack)"
       log "强制构建镜像 ..."
       "${DC[@]}" build
       opensandbox_up
@@ -224,6 +225,7 @@ main() {
       ;;
     up|"")
       require_docker; require_env
+      log "mode: prod (full Docker stack)"
       if needs_build; then
         log "检测到镜像缺失，先构建（仅首次较慢）..."
         "${DC[@]}" build

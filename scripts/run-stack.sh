@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # run-stack.sh - deploy mode 1 for cocola: everything NATIVE except the sandbox.
 #
-# This is the DEFAULT local debug stack (Makefile: `make up`). Only the
+# This is the DEFAULT local debug stack (Makefile: `make dev`). Only the
 # sandbox's OWN container dependencies stay containerized -- the OpenSandbox
 # server (:8090) plus redis/postgres/minio (docker-compose.dev.yml). EVERY
 # cocola-authored service runs NATIVE in the foreground and is torn down on
@@ -17,8 +17,8 @@
 #   contain.: OpenSandbox server :8090 + redis/postgres/minio (dev.yml)
 #
 # Result: REAL Route A (brain in sandbox) + real model, and editing ANY cocola
-# service means just Ctrl-C + re-run -- ZERO image rebuilds. The sibling deploy
-# mode is `make up-container` (fully containerized stack via scripts/start.sh).
+# service means just Ctrl-C + re-run -- ZERO image rebuilds. The formal/full
+# Docker mode is `make prod` (scripts/start.sh + docker-compose.full.yml).
 #
 # Design notes
 #   * Port 8080 collision: the gateway BFF and the llm-gateway BOTH default to
@@ -30,7 +30,7 @@
 #     can paste into the web UI or a curl call.
 #
 # Usage:
-#   bash scripts/run-stack.sh            # the one and only mode (= make up)
+#   bash scripts/run-stack.sh            # dev mode (= make dev)
 #   bash scripts/run-stack.sh --help     # show this header
 set -euo pipefail
 
@@ -39,14 +39,13 @@ cd "$ROOT"
 
 export PATH="/Applications/OrbStack.app/Contents/MacOS/xbin:/opt/homebrew/bin:/usr/local/bin:$PATH"
 
-# Deploy mode 1 has exactly ONE shape now: the former --hybrid. These three
-# switches are therefore always on -- every cocola service runs NATIVE
-# (sandbox-manager/admin-api included), the real llm-gateway is up, and the web
-# tool is served. They are kept as constants (rather than inlined) so the many
-# `[[ "$X" == "1" ]]` guards below read unchanged. There are no mode flags.
+# Deploy mode 1 has exactly ONE shape now. These three switches are always on:
+# every cocola service runs NATIVE (sandbox-manager/admin-api included), the
+# real llm-gateway is up, and the web tool is served. They are kept as constants
+# so the guarded blocks read clearly. There are no mode flags.
 WITH_LLM=1
 WITH_WEB=1
-HYBRID=1
+DEV_STACK=1
 for arg in "$@"; do
   case "$arg" in
     -h|--help)
@@ -57,9 +56,9 @@ for arg in "$@"; do
 done
 
 # ----------------------------------------------------------------- config
-# Auto-load repo-root .env if present, so `make up-all` can pick up your real
-# model endpoint/key without manual exports. Existing env wins over the file
-# (so a one-off `COCOLA_LLM_PROVIDER=fake make up` still overrides .env).
+# Auto-load repo-root .env if present, so `make dev` can pick up your real model
+# endpoint/key without manual exports. Existing env wins over the file
+# (so a one-off `COCOLA_LLM_PROVIDER=fake make dev` still overrides .env).
 if [[ -f "$ROOT/.env" ]]; then
   echo "==> loading $ROOT/.env"
   set -a
@@ -94,14 +93,14 @@ GATEWAY_HOST="${COCOLA_GATEWAY_HOST:-127.0.0.1}"
 GATEWAY_PORT="${COCOLA_GATEWAY_PORT:-8080}"
 GATEWAY_ADDR="$GATEWAY_HOST:$GATEWAY_PORT"
 
-# In --hybrid the sandbox brain runs INSIDE a container and reaches this gateway
+# In dev mode the sandbox brain runs INSIDE a container and reaches this gateway
 # over host.docker.internal (the Docker host bridge), NOT loopback. A gateway
 # bound to 127.0.0.1 is unreachable from the container -> the in-sandbox claude
 # CLI stalls on its first model call until the client gives up ("chat hangs with
-# no response"). So default the hybrid bind to 0.0.0.0; native-only modes keep
+# no response"). So default the dev bind to 0.0.0.0; native-only modes keep
 # loopback. Either is still overridable via COCOLA_LLM_HOST.
 _llm_host_default="127.0.0.1"
-[[ "$HYBRID" == "1" ]] && _llm_host_default="0.0.0.0"
+[[ "$DEV_STACK" == "1" ]] && _llm_host_default="0.0.0.0"
 LLM_HOST="${COCOLA_LLM_HOST:-$_llm_host_default}"
 LLM_PORT="${COCOLA_LLM_PORT:-8081}"   # NOT 8080: that is the gateway port.
 
@@ -119,8 +118,8 @@ PIDS=()
 OWNED_PORTS=("$AGENT_PORT" "$GATEWAY_PORT")
 [[ "$WITH_LLM" == "1" ]] && OWNED_PORTS+=("$LLM_PORT")
 [[ "$WITH_WEB" == "1" ]] && OWNED_PORTS+=("$WEB_PORT")
-# hybrid runs sandbox-manager (50051) and admin-api (8092) NATIVELY too.
-[[ "$HYBRID" == "1" ]] && OWNED_PORTS+=(50051 8092)
+# dev runs sandbox-manager (50051) and admin-api (8092) NATIVELY too.
+[[ "$DEV_STACK" == "1" ]] && OWNED_PORTS+=(50051 8092)
 
 log_redirect() { printf '%s/%s.log' "$LOG_DIR" "$1"; }
 
@@ -216,7 +215,7 @@ trap cleanup EXIT INT TERM
 # "OrbStack Helper" / "com.docker.backend" / "vpnkit" process). lsof on such a
 # port returns THAT engine pid -- so a naive kill would SIGTERM the whole engine,
 # tearing down the VM and every container with it. This actually bit us: running
-# `make up-hybrid` while the full containerized stack still held 50051/8080/8092
+# `make dev` while the full containerized stack still held 50051/8080/8092
 # made free_port kill "OrbStack", the VM bounced, and every container died
 # ("Received signal, requesting stop" in the OrbStack vmgr log). So free_port
 # NEVER kills a container-engine/proxy process; ports it owns belong to
@@ -297,7 +296,7 @@ else
   set -m
 fi
 
-# ----------------------------------------------------------------- hybrid mode
+# ----------------------------------------------------------------- dev mode
 # THE single debug mode. Only the sandbox's OWN container dependencies stay
 # containerized; every cocola-authored service runs NATIVELY in the foreground:
 #
@@ -324,11 +323,11 @@ fi
 #     llm-gateway via host.docker.internal:$LLM_PORT (injected at creation).
 # Sandbox/infra containers survive Ctrl-C; stop them with
 # `make dev-down` (infra) and `make opensandbox-down` (sandbox server).
-hybrid_up() {
-  command -v docker >/dev/null 2>&1 || { echo "!! --hybrid needs docker; is Docker Desktop running?" >&2; exit 1; }
+dev_up() {
+  command -v docker >/dev/null 2>&1 || { echo "!! dev mode needs docker; is Docker Desktop running?" >&2; exit 1; }
   docker info >/dev/null 2>&1 || { echo "!! docker daemon unreachable; start Docker Desktop first." >&2; exit 1; }
 
-  # Preflight: --hybrid runs sandbox-manager/gateway/admin-api/agent-runtime/web
+  # Preflight: dev mode runs sandbox-manager/gateway/admin-api/agent-runtime/web
   # NATIVELY, so their host ports must be FREE. If the full containerized stack
   # is still up, its containers PUBLISH those same ports -- the native binds
   # would fail, and because a published port is fronted by the engine proxy we
@@ -339,11 +338,11 @@ hybrid_up() {
   # from a prior run. Those are EPHEMERAL session sandboxes -- never part of the
   # app stack -- so they are always safe to reap, and one of them publishing
   # :50051 is the usual reason this preflight tripped. Remove them up front so a
-  # stale sandbox alone never blocks a fresh `make up`.
+  # stale sandbox alone never blocks a fresh `make dev`.
   local _stale_sbx
   _stale_sbx="$(docker ps -aq --filter 'ancestor=cocola/sandbox-runtime:dev' 2>/dev/null || true)"
   if [[ -n "$_stale_sbx" ]]; then
-    echo "==> [hybrid] removing stale session sandbox container(s) holding host ports" >&2
+    echo "==> [dev] removing stale session sandbox container(s) holding host ports" >&2
     # shellcheck disable=SC2086
     docker rm -f $_stale_sbx >/dev/null 2>&1 || true
   fi
@@ -354,22 +353,23 @@ hybrid_up() {
     [[ -n "$_cid" ]] && _conflict+=$'\n'"    :$_p is published by container '$_cid'"
   done
   if [[ -n "$_conflict" ]]; then
-    echo "!! --hybrid runs cocola services NATIVELY, but a containerized stack still holds their ports:$_conflict" >&2
-    echo "   those app containers are the FULL stack (make up-all / start.sh). Stop it first, then re-run --hybrid:" >&2
+    echo "!! dev mode runs cocola services NATIVELY, but a containerized stack still holds their ports:$_conflict" >&2
+    echo "   those app containers are the FULL stack (full Docker stack / start.sh). Stop it first, then re-run dev mode:" >&2
     echo "     bash scripts/start.sh --down     # tear down the full containerized stack" >&2
     echo "   (this mode then brings up ONLY the sandbox deps -- OpenSandbox server + redis/pg/minio -- itself)" >&2
     exit 1
   fi
 
-  # (1) OpenSandbox server (host :8090) when the backend is opensandbox. The
-  # default docker/DooD provider needs no standalone server.
+  # (1) OpenSandbox server (host :8090) when this script is run directly. The
+  # outer dev wrapper sets COCOLA_OPENSANDBOX_MANAGED=0 and points us at the
+  # Kubernetes OpenSandbox port-forward it already prepared.
   local provider="${COCOLA_SANDBOX_PROVIDER:-}"
   if [[ -z "$provider" && -f "$ROOT/.env" ]]; then
     provider="$(grep -E '^COCOLA_SANDBOX_PROVIDER=' "$ROOT/.env" | tail -1 | cut -d= -f2-)"
   fi
-  provider="${provider:-docker}"
+  provider="${provider:-opensandbox}"
   if [[ "$provider" == "opensandbox" ]] && env_bool_false "${COCOLA_OPENSANDBOX_MANAGED:-1}"; then
-    echo "==> [hybrid] external OpenSandbox server selected (COCOLA_OPENSANDBOX_MANAGED=0); skipping docker-compose OpenSandbox"
+    echo "==> [dev] external OpenSandbox server selected (COCOLA_OPENSANDBOX_MANAGED=0); skipping docker-compose OpenSandbox"
     if [[ -z "${COCOLA_OPENSANDBOX_URL:-}" ]]; then
       echo "!! COCOLA_OPENSANDBOX_MANAGED=0 requires COCOLA_OPENSANDBOX_URL (for example http://127.0.0.1:8090/v1)" >&2
       exit 1
@@ -378,18 +378,18 @@ hybrid_up() {
     external_health="$(opensandbox_health_url "$COCOLA_OPENSANDBOX_URL")"
     if ! curl -fsS -m 3 "$external_health" >/dev/null 2>&1; then
       echo "!! external OpenSandbox server is not reachable: $external_health" >&2
-      echo "   unset COCOLA_OPENSANDBOX_MANAGED/COCOLA_OPENSANDBOX_URL for the default make up path," >&2
-      echo "   or start the external OpenSandbox server before running make up." >&2
+      echo "   unset COCOLA_OPENSANDBOX_MANAGED/COCOLA_OPENSANDBOX_URL for the default make dev path," >&2
+      echo "   or start the external OpenSandbox server before running make dev." >&2
       exit 1
     fi
   elif [[ "$provider" == "opensandbox" ]]; then
     local osb_port="${COCOLA_OPENSANDBOX_HOST_PORT:-8090}"
-    echo "==> [hybrid] bringing up OpenSandbox server (host :$osb_port)"
+    echo "==> [dev] bringing up OpenSandbox server (host :$osb_port)"
     if ! COCOLA_OPENSANDBOX_HOST_PORT="$osb_port" \
       docker_compose -f deploy/docker-compose/docker-compose.opensandbox.yml up -d \
-        >"$(log_redirect hybrid-opensandbox)" 2>&1; then
-      echo "!! [hybrid] OpenSandbox server bring-up failed; see .run-logs/hybrid-opensandbox.log" >&2
-      tail -80 "$(log_redirect hybrid-opensandbox)" >&2 || true
+        >"$(log_redirect dev-opensandbox)" 2>&1; then
+      echo "!! [dev] OpenSandbox server bring-up failed; see .run-logs/dev-opensandbox.log" >&2
+      tail -80 "$(log_redirect dev-opensandbox)" >&2 || true
       exit 1
     fi
     local osb_ready=0
@@ -401,18 +401,18 @@ hybrid_up() {
       sleep 2
     done
     if [[ "$osb_ready" != "1" ]]; then
-      echo "!! [hybrid] OpenSandbox server did not become healthy on http://127.0.0.1:$osb_port/health" >&2
+      echo "!! [dev] OpenSandbox server did not become healthy on http://127.0.0.1:$osb_port/health" >&2
       docker_compose -f deploy/docker-compose/docker-compose.opensandbox.yml logs --tail=80 opensandbox-server >&2 || true
       exit 1
     fi
   fi
 
   # (2) Infra only: redis / postgres / minio (the third-party stateful deps).
-  echo "==> [hybrid] starting containerized infra (redis/postgres/minio) via docker-compose.dev.yml"
+  echo "==> [dev] starting containerized infra (redis/postgres/minio) via docker-compose.dev.yml"
   docker_compose -f deploy/docker-compose/docker-compose.dev.yml up -d \
       redis postgres minio minio-init \
-      >"$(log_redirect hybrid-infra)" 2>&1 \
-    || { echo "!! [hybrid] infra bring-up failed; see .run-logs/hybrid-infra.log" >&2; exit 1; }
+      >"$(log_redirect dev-infra)" 2>&1 \
+    || { echo "!! [dev] infra bring-up failed; see .run-logs/dev-infra.log" >&2; exit 1; }
   wait_port 127.0.0.1 6379 "redis"    120
   wait_port 127.0.0.1 5432 "postgres" 120
   wait_port 127.0.0.1 9000 "minio"    120
@@ -446,7 +446,7 @@ hybrid_up() {
       $SETSID go run ./cmd/sandbox-manager
   ) >"$(log_redirect sandbox-manager)" 2>&1 &
   PIDS+=("$!")
-  echo "==> [hybrid] starting NATIVE sandbox-manager on :50051 (provider=$provider -> $osb_url; log: .run-logs/sandbox-manager.log)"
+  echo "==> [dev] starting NATIVE sandbox-manager on :50051 (provider=$provider -> $osb_url; log: .run-logs/sandbox-manager.log)"
   wait_port 127.0.0.1 50051 "sandbox-manager" 180
 
   # (4) Point the app processes (launched by the main flow) at the native stack.
@@ -457,22 +457,22 @@ hybrid_up() {
   export COCOLA_SANDBOX_LLM_BASE_URL="${COCOLA_SANDBOX_LLM_BASE_URL:-http://host.docker.internal:$LLM_PORT}"
   export COCOLA_SANDBOX_LLM_TOKEN="${COCOLA_SANDBOX_LLM_TOKEN:-cocola-local}"
   export COCOLA_SANDBOX_MODEL_ALIAS="${COCOLA_SANDBOX_MODEL_ALIAS:-cocola-default}"
-  echo "==> [hybrid] sandbox + infra ready; launching native cocola services (real Route A)"
+  echo "==> [dev] sandbox + infra ready; launching native cocola services (real Route A)"
 }
 
-if [[ "$HYBRID" == "1" ]]; then
-  hybrid_up
+if [[ "$DEV_STACK" == "1" ]]; then
+  dev_up
 fi
 
 # ----------------------------------------------------------------- llm-gateway
 if [[ "$WITH_LLM" == "1" ]]; then
   free_port "$LLM_PORT" llm-gateway
-  # In --hybrid the sandbox brain presents the dev token COCOLA_SANDBOX_LLM_TOKEN
+  # In dev mode the sandbox brain presents the dev token COCOLA_SANDBOX_LLM_TOKEN
   # (default cocola-local). The containerized full stack runs llm-gateway with
   # auth OFF so that token is accepted; match that here by blanking the secret
   # for THIS process only (the global export stays put for gateway/agent-rt).
   LLM_AUTH_SECRET="${COCOLA_AUTH_SECRET:-}"
-  [[ "$HYBRID" == "1" ]] && LLM_AUTH_SECRET=""
+  [[ "$DEV_STACK" == "1" ]] && LLM_AUTH_SECRET=""
   ( cd apps/llm-gateway && \
     COCOLA_LLM_HOST="$LLM_HOST" COCOLA_LLM_PORT="$LLM_PORT" \
     COCOLA_AUTH_SECRET="$LLM_AUTH_SECRET" \
@@ -492,12 +492,12 @@ if [[ "$WITH_LLM" == "1" ]]; then
   echo "    llm-gateway up; sandbox brain should target $COCOLA_SANDBOX_LLM_BASE_URL"
 fi
 
-# ----------------------------------------------------------------- admin-api (hybrid)
-# --hybrid runs admin-api NATIVELY too (agent-runtime's market-skills source).
+# ----------------------------------------------------------------- admin-api (dev)
+# dev mode runs admin-api NATIVELY too (agent-runtime's market-skills source).
 # It listens on :8092 -- NOT :8090 -- because the OpenSandbox server owns host
 # :8090. admin-api is a SOFT dependency: if it is down agent-runtime just warns
 # "no market skills" and still serves chat. Persist to the same Postgres/Redis.
-if [[ "$HYBRID" == "1" ]]; then
+if [[ "$DEV_STACK" == "1" ]]; then
   free_port 8092 admin-api
   (
     COCOLA_ADMIN_ADDR=":8092" \
@@ -513,7 +513,7 @@ if [[ "$HYBRID" == "1" ]]; then
       $SETSID go run ./apps/admin-api/cmd/admin-api
   ) >"$(log_redirect admin-api)" 2>&1 &
   PIDS+=("$!")
-  echo "==> [hybrid] starting NATIVE admin-api on :8092 (log: .run-logs/admin-api.log)"
+  echo "==> [dev] starting NATIVE admin-api on :8092 (log: .run-logs/admin-api.log)"
   wait_port 127.0.0.1 8092 "admin-api" 120
   export COCOLA_ADMIN_BASE_URL="${COCOLA_ADMIN_BASE_URL:-http://127.0.0.1:8092}"
 fi
@@ -614,13 +614,13 @@ echo " agent-rt  : $AGENT_ADDR (gRPC)"
 [[ "$WITH_WEB" == "1" ]] && echo " web       : http://127.0.0.1:$WEB_PORT"
 [[ "$WITH_WEB" == "1" ]] && echo " web login : ${COCOLA_BOOTSTRAP_ADMIN_USERNAME} or ${COCOLA_BOOTSTRAP_ADMIN_EMAIL} / ${COCOLA_BOOTSTRAP_ADMIN_PASSWORD}"
 [[ -n "${MINIO_CONSOLE:-}" ]] && echo " minio     : ${MINIO_CONSOLE}  (console; cocola / cocola_dev_pw)"
-[[ "$HYBRID" == "1" ]] && echo " sandbox   : NATIVE sandbox-manager :50051 (provider=${COCOLA_SANDBOX_PROVIDER:-docker}) + admin-api :8092; REAL Route A"
-if [[ "$HYBRID" == "1" ]] && [[ "${COCOLA_SANDBOX_PROVIDER:-docker}" == "opensandbox" ]] && env_bool_false "${COCOLA_OPENSANDBOX_MANAGED:-1}"; then
+[[ "$DEV_STACK" == "1" ]] && echo " sandbox   : NATIVE sandbox-manager :50051 (provider=${COCOLA_SANDBOX_PROVIDER:-opensandbox}) + admin-api :8092; REAL Route A"
+if [[ "$DEV_STACK" == "1" ]] && [[ "${COCOLA_SANDBOX_PROVIDER:-opensandbox}" == "opensandbox" ]] && env_bool_false "${COCOLA_OPENSANDBOX_MANAGED:-1}"; then
   echo " containers: only infra -- external OpenSandbox server ${COCOLA_OPENSANDBOX_URL:-<unset>} + redis/pg/minio (dev.yml)"
-elif [[ "$HYBRID" == "1" ]]; then
+elif [[ "$DEV_STACK" == "1" ]]; then
   echo " containers: only sandbox deps -- OpenSandbox server :${COCOLA_OPENSANDBOX_HOST_PORT:-8090} + redis/pg/minio (dev.yml)"
 fi
-[[ "$HYBRID" == "1" ]] && echo " stop cont : make dev-down  (infra) + make opensandbox-down  (sandbox); they survive Ctrl-C, app relaunches with no rebuild"
+[[ "$DEV_STACK" == "1" ]] && echo " stop cont : make dev-down  (infra) + make opensandbox-down  (sandbox); they survive Ctrl-C, app relaunches with no rebuild"
 echo "----------------------------------------------------------------------"
 echo " dev token : $TOKEN"
 echo "----------------------------------------------------------------------"
