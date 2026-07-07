@@ -56,6 +56,7 @@ type Admin struct {
 	skillBundles        SkillBundleStore
 	sandboxNodes        SandboxNodeManager
 	sandboxRuntimes     SandboxRuntimeManager
+	architectureChecker ArchitectureHealthChecker
 	userEvents          UserEventBroker
 	modelSecretKey      string
 	configSecretKey     string
@@ -95,6 +96,11 @@ func (a *Admin) WithSandboxNodeManager(m SandboxNodeManager) *Admin {
 // rest of admin-api remains usable.
 func (a *Admin) WithSandboxRuntimeManager(m SandboxRuntimeManager) *Admin {
 	a.sandboxRuntimes = m
+	return a
+}
+
+func (a *Admin) WithArchitectureHealthChecker(c ArchitectureHealthChecker) *Admin {
+	a.architectureChecker = c
 	return a
 }
 

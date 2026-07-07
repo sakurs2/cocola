@@ -8,6 +8,7 @@ import {
   CalendarClock,
   Cpu,
   FileClock,
+  Network,
   Server,
   Settings,
   ShieldCheck,
@@ -17,6 +18,14 @@ import {
 import Link from "next/link";
 
 const MODULES = [
+  {
+    title: "Architecture",
+    href: "/admin/architecture",
+    icon: Network,
+    group: "Overview",
+    summary: "System DAG, component health states, and links into operational surfaces.",
+    stats: ["DAG", "Health", "Dependencies"],
+  },
   {
     title: "Sandbox Nodes",
     href: "/admin/sandbox-nodes",

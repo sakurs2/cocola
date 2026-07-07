@@ -94,6 +94,19 @@ func (f fakeRuntimeManager) ListSandboxes(context.Context) (service.SandboxRunti
 	}}}, nil
 }
 
+type fakeArchitectureChecker struct {
+	http map[string]bool
+	tcp  map[string]bool
+}
+
+func (f fakeArchitectureChecker) CheckHTTP(_ context.Context, url string) bool {
+	return f.http[url]
+}
+
+func (f fakeArchitectureChecker) CheckTCP(_ context.Context, addr string) bool {
+	return f.tcp[addr]
+}
+
 func newTestNodeAPI(adminKey string, mgr service.SandboxNodeManager) *API {
 	mem := store.NewMemory()
 	iss := token.NewIssuer("test-secret", "cocola", 24*time.Hour)
@@ -105,6 +118,16 @@ func newTestRuntimeAPI(adminKey string, mgr service.SandboxRuntimeManager) *API 
 	mem := store.NewMemory()
 	iss := token.NewIssuer("test-secret", "cocola", 24*time.Hour)
 	svc := service.New(mem, iss, fixedClock).WithSandboxRuntimeManager(mgr)
+	return New(svc, adminKey)
+}
+
+func newTestArchitectureAPI(adminKey string, checker service.ArchitectureHealthChecker) *API {
+	mem := store.NewMemory()
+	iss := token.NewIssuer("test-secret", "cocola", 24*time.Hour)
+	svc := service.New(mem, iss, fixedClock).
+		WithSandboxNodeManager(&fakeNodeManager{}).
+		WithSandboxRuntimeManager(fakeRuntimeManager{}).
+		WithArchitectureHealthChecker(checker)
 	return New(svc, adminKey)
 }
 
@@ -808,6 +831,93 @@ func TestAgentPromptGlobalAndEffective(t *testing.T) {
 	}
 	if effective.SystemPrompt != "" || len(effective.Prompts) != 0 {
 		t.Fatalf("disabled prompt should not be effective: %+v", effective)
+	}
+}
+
+func TestArchitectureGraph(t *testing.T) {
+	t.Setenv("COCOLA_GATEWAY_URL", "http://gateway.local:8080")
+	t.Setenv("COCOLA_LLM_GATEWAY_URL", "http://llm-gateway.local:8080")
+	t.Setenv("COCOLA_OPENSANDBOX_URL", "http://opensandbox.local:8090/v1")
+	t.Setenv("COCOLA_MINIO_ENDPOINT", "minio.local:9000")
+	t.Setenv("COCOLA_REDIS_ADDR", "redis.local:6379")
+	t.Setenv("COCOLA_PG_DSN", "postgres://cocola:secret@postgres.local:5432/cocola?sslmode=disable")
+	t.Setenv("COCOLA_AGENT_ADDR", "agent-runtime.local:50061")
+	t.Setenv("COCOLA_SANDBOX_ADDR", "sandbox-manager.local:50051")
+
+	api := newTestArchitectureAPI("k", fakeArchitectureChecker{
+		http: map[string]bool{
+			"http://gateway.local:8080/healthz":         true,
+			"http://llm-gateway.local:8080/healthz":     true,
+			"http://opensandbox.local:8090/health":      true,
+			"http://minio.local:9000/minio/health/live": false,
+		},
+		tcp: map[string]bool{
+			"agent-runtime.local:50061":   true,
+			"sandbox-manager.local:50051": false,
+			"postgres.local:5432":         true,
+			"redis.local:6379":            true,
+		},
+	})
+	rec := do(t, api.Router(), http.MethodGet, "/admin/architecture", "k", nil)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("architecture: want 200, got %d (%s)", rec.Code, rec.Body.String())
+	}
+	var graph service.ArchitectureGraph
+	if err := json.Unmarshal(rec.Body.Bytes(), &graph); err != nil {
+		t.Fatalf("decode architecture: %v", err)
+	}
+	if len(graph.Nodes) != 11 {
+		t.Fatalf("expected 11 nodes, got %d", len(graph.Nodes))
+	}
+	if len(graph.Edges) == 0 {
+		t.Fatal("expected edges")
+	}
+	nodes := map[string]service.ArchitectureNode{}
+	for _, node := range graph.Nodes {
+		nodes[node.ID] = node
+	}
+	if nodes["postgres"].Status != service.ArchitectureHealthy {
+		t.Fatalf("postgres status = %q", nodes["postgres"].Status)
+	}
+	if nodes["minio"].Status != service.ArchitectureUnhealthy {
+		t.Fatalf("minio status = %q", nodes["minio"].Status)
+	}
+	if nodes["sandbox-manager"].Status != service.ArchitectureUnhealthy {
+		t.Fatalf("sandbox-manager status = %q", nodes["sandbox-manager"].Status)
+	}
+	if nodes["user-sandboxes"].Metadata["running_sandboxes"].(float64) != 1 {
+		t.Fatalf("bad sandbox metadata: %+v", nodes["user-sandboxes"].Metadata)
+	}
+	if bytes.Contains(rec.Body.Bytes(), []byte("secret")) {
+		t.Fatal("architecture response leaked postgres secret")
+	}
+	if bytes.Contains(rec.Body.Bytes(), []byte("latency")) || bytes.Contains(rec.Body.Bytes(), []byte("recent_error")) {
+		t.Fatal("architecture response should not include latency or recent errors")
+	}
+}
+
+func TestArchitectureUnconfiguredInfraIsUnknown(t *testing.T) {
+	t.Setenv("COCOLA_MINIO_ENDPOINT", "")
+	t.Setenv("COCOLA_REDIS_ADDR", "")
+	t.Setenv("COCOLA_PG_DSN", "")
+
+	api := newTestArchitectureAPI("k", fakeArchitectureChecker{})
+	rec := do(t, api.Router(), http.MethodGet, "/admin/architecture", "k", nil)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("architecture: want 200, got %d (%s)", rec.Code, rec.Body.String())
+	}
+	var graph service.ArchitectureGraph
+	if err := json.Unmarshal(rec.Body.Bytes(), &graph); err != nil {
+		t.Fatalf("decode architecture: %v", err)
+	}
+	nodes := map[string]service.ArchitectureNode{}
+	for _, node := range graph.Nodes {
+		nodes[node.ID] = node
+	}
+	for _, id := range []string{"postgres", "redis", "minio"} {
+		if nodes[id].Status != service.ArchitectureUnknown {
+			t.Fatalf("%s status = %q", id, nodes[id].Status)
+		}
 	}
 }
 

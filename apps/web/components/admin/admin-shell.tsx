@@ -10,6 +10,7 @@ import {
   FileClock,
   LayoutDashboard,
   MessageSquareText,
+  Network,
   PlugZap,
   Sparkles,
   Server,
@@ -30,7 +31,10 @@ type AdminNavItem = {
 const NAV_GROUPS: { label: string; items: AdminNavItem[] }[] = [
   {
     label: "Overview",
-    items: [{ href: "/admin", label: "Summary", icon: LayoutDashboard }],
+    items: [
+      { href: "/admin", label: "Summary", icon: LayoutDashboard },
+      { href: "/admin/architecture", label: "Architecture", icon: Network },
+    ],
   },
   {
     label: "Access",
