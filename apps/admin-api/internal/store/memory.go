@@ -1303,3 +1303,15 @@ func cloneTraceEvent(e TraceEvent) TraceEvent {
 	}
 	return e
 }
+
+func (m *Memory) TokenUsageSummary(ctx context.Context, q TokenUsageQuery) (TokenUsageSummary, error) {
+	return TokenUsageSummary{}, nil
+}
+
+func (m *Memory) TokenUsageTrend(ctx context.Context, q TokenUsageQuery) ([]TokenUsagePoint, error) {
+	return []TokenUsagePoint{}, nil
+}
+
+func (m *Memory) TokenUsageUsers(ctx context.Context, q TokenUsageQuery) ([]TokenUsageUser, error) {
+	return []TokenUsageUser{}, nil
+}

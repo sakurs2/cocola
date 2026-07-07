@@ -20,6 +20,7 @@ tags:
   - name: Models
   - name: Scheduled Tasks
   - name: Sandbox
+  - name: Token Usage
   - name: Audit
   - name: Traces
 paths:
@@ -1300,6 +1301,81 @@ paths:
                     type: array
                     items:
                       $ref: "#/components/schemas/Object"
+  /admin/token-usage:
+    get:
+      tags: [Token Usage]
+      operationId: getTokenUsage
+      summary: Read token usage summary, trend, and ranked users.
+      security:
+        - AdminKey: []
+      parameters:
+        - $ref: "#/components/parameters/UsageFrom"
+        - $ref: "#/components/parameters/UsageTo"
+        - $ref: "#/components/parameters/UsageBucket"
+        - in: query
+          name: limit
+          schema:
+            type: integer
+            default: 100
+            maximum: 500
+        - in: query
+          name: offset
+          schema:
+            type: integer
+            default: 0
+      responses:
+        "200":
+          description: Token usage dashboard data.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/TokenUsageReport"
+  /admin/token-usage/users/{user_id}:
+    get:
+      tags: [Token Usage]
+      operationId: getUserTokenUsage
+      summary: Read token usage summary and trend for one user.
+      security:
+        - AdminKey: []
+      parameters:
+        - in: path
+          name: user_id
+          required: true
+          schema:
+            type: string
+        - $ref: "#/components/parameters/UsageFrom"
+        - $ref: "#/components/parameters/UsageTo"
+        - $ref: "#/components/parameters/UsageBucket"
+      responses:
+        "200":
+          description: User token usage data.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/TokenUsageReport"
+  /admin/token-usage/export:
+    get:
+      tags: [Token Usage]
+      operationId: exportTokenUsage
+      summary: Export token usage dashboard data as Excel.
+      security:
+        - AdminKey: []
+      parameters:
+        - $ref: "#/components/parameters/UsageFrom"
+        - $ref: "#/components/parameters/UsageTo"
+        - $ref: "#/components/parameters/UsageBucket"
+      responses:
+        "200":
+          description: Excel workbook.
+          headers:
+            Content-Disposition:
+              schema:
+                type: string
+          content:
+            application/vnd.openxmlformats-officedocument.spreadsheetml.sheet:
+              schema:
+                type: string
+                format: binary
   /admin/audit:
     get:
       tags: [Audit]
@@ -1392,6 +1468,25 @@ components:
       required: true
       schema:
         type: string
+    UsageFrom:
+      in: query
+      name: from
+      schema:
+        type: string
+        description: RFC3339 timestamp or YYYY-MM-DD.
+    UsageTo:
+      in: query
+      name: to
+      schema:
+        type: string
+        description: RFC3339 timestamp or YYYY-MM-DD.
+    UsageBucket:
+      in: query
+      name: bucket
+      schema:
+        type: string
+        enum: [auto, hour, day]
+        default: auto
   requestBodies:
     AuthUserCreate:
       required: true
@@ -1770,3 +1865,86 @@ components:
         config_json:
           type: object
           additionalProperties: true
+    TokenUsageReport:
+      type: object
+      properties:
+        from:
+          type: string
+          format: date-time
+        to:
+          type: string
+          format: date-time
+        bucket:
+          type: string
+          enum: [hour, day]
+        summary:
+          $ref: "#/components/schemas/TokenUsageSummary"
+        trend:
+          type: array
+          items:
+            $ref: "#/components/schemas/TokenUsagePoint"
+        users:
+          type: array
+          items:
+            $ref: "#/components/schemas/TokenUsageUser"
+    TokenUsageSummary:
+      type: object
+      properties:
+        calls:
+          type: integer
+        user_count:
+          type: integer
+        prompt_tokens:
+          type: integer
+        completion_tokens:
+          type: integer
+        total_tokens:
+          type: integer
+        cost_usd:
+          type: number
+    TokenUsagePoint:
+      type: object
+      properties:
+        bucket_start:
+          type: string
+          format: date-time
+        calls:
+          type: integer
+        prompt_tokens:
+          type: integer
+        completion_tokens:
+          type: integer
+        total_tokens:
+          type: integer
+        cost_usd:
+          type: number
+    TokenUsageUser:
+      type: object
+      properties:
+        user_id:
+          type: string
+        username:
+          type: string
+        email:
+          type: string
+        name:
+          type: string
+        role:
+          type: string
+        enabled:
+          type: boolean
+        known_user:
+          type: boolean
+        calls:
+          type: integer
+        prompt_tokens:
+          type: integer
+        completion_tokens:
+          type: integer
+        total_tokens:
+          type: integer
+        cost_usd:
+          type: number
+        last_used_at:
+          type: string
+          format: date-time

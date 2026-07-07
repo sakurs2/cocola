@@ -4,6 +4,7 @@ import { buttonVariants } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import {
   ArrowRight,
+  BarChart3,
   Box,
   CalendarClock,
   Cpu,
@@ -57,6 +58,14 @@ const MODULES = [
     group: "AI",
     summary: "System task schedules, prompt inputs, model selection, attachments, and run history.",
     stats: ["Tasks", "Runs", "Errors"],
+  },
+  {
+    title: "Token Usage",
+    href: "/admin/token-usage",
+    icon: BarChart3,
+    group: "AI",
+    summary: "Token totals, usage trends, ranked users, and Excel export.",
+    stats: ["Tokens", "Users", "Export"],
   },
   {
     title: "Settings",

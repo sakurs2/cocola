@@ -1714,3 +1714,146 @@ func (p *Postgres) ListTraceEvents(ctx context.Context, query TraceEventQuery) (
 	}
 	return out, rows.Err()
 }
+
+func tokenUsageWhere(q TokenUsageQuery) (string, []any) {
+	parts := []string{}
+	args := []any{}
+	if !q.From.IsZero() {
+		args = append(args, q.From)
+		parts = append(parts, fmt.Sprintf("ts >= $%d", len(args)))
+	}
+	if !q.To.IsZero() {
+		args = append(args, q.To)
+		parts = append(parts, fmt.Sprintf("ts < $%d", len(args)))
+	}
+	if strings.TrimSpace(q.UserID) != "" {
+		args = append(args, strings.TrimSpace(q.UserID))
+		parts = append(parts, fmt.Sprintf("user_id = $%d", len(args)))
+	}
+	if len(parts) == 0 {
+		return "", args
+	}
+	return " WHERE " + strings.Join(parts, " AND "), args
+}
+
+func tokenUsageBucketExpr(bucket string) string {
+	if bucket == "hour" {
+		return "date_trunc('hour', ts)"
+	}
+	return "date_trunc('day', ts)"
+}
+
+func (p *Postgres) TokenUsageSummary(ctx context.Context, q TokenUsageQuery) (TokenUsageSummary, error) {
+	where, args := tokenUsageWhere(q)
+	sql := `SELECT count(*) AS calls,
+		count(DISTINCT NULLIF(user_id, '')) AS user_count,
+		COALESCE(SUM(prompt_tokens), 0) AS prompt_tokens,
+		COALESCE(SUM(completion_tokens), 0) AS completion_tokens,
+		COALESCE(SUM(cost_usd), 0) AS cost_usd
+		FROM usage_ledger` + where
+	var s TokenUsageSummary
+	if err := p.pool.QueryRow(ctx, sql, args...).Scan(
+		&s.Calls, &s.UserCount, &s.PromptTokens, &s.CompletionTokens, &s.CostUSD,
+	); err != nil {
+		return TokenUsageSummary{}, err
+	}
+	s.TotalTokens = s.PromptTokens + s.CompletionTokens
+	return s, nil
+}
+
+func (p *Postgres) TokenUsageTrend(ctx context.Context, q TokenUsageQuery) ([]TokenUsagePoint, error) {
+	where, args := tokenUsageWhere(q)
+	sql := `SELECT ` + tokenUsageBucketExpr(q.Bucket) + ` AS bucket_start,
+		count(*) AS calls,
+		COALESCE(SUM(prompt_tokens), 0) AS prompt_tokens,
+		COALESCE(SUM(completion_tokens), 0) AS completion_tokens,
+		COALESCE(SUM(cost_usd), 0) AS cost_usd
+		FROM usage_ledger` + where + `
+		GROUP BY bucket_start
+		ORDER BY bucket_start ASC`
+	rows, err := p.pool.Query(ctx, sql, args...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := make([]TokenUsagePoint, 0)
+	for rows.Next() {
+		var point TokenUsagePoint
+		if err := rows.Scan(
+			&point.BucketStart, &point.Calls, &point.PromptTokens,
+			&point.CompletionTokens, &point.CostUSD,
+		); err != nil {
+			return nil, err
+		}
+		point.BucketStart = point.BucketStart.UTC()
+		point.TotalTokens = point.PromptTokens + point.CompletionTokens
+		out = append(out, point)
+	}
+	return out, rows.Err()
+}
+
+func (p *Postgres) TokenUsageUsers(ctx context.Context, q TokenUsageQuery) ([]TokenUsageUser, error) {
+	where, args := tokenUsageWhere(q)
+	sql := `WITH grouped AS (
+			SELECT user_id,
+				count(*) AS calls,
+				COALESCE(SUM(prompt_tokens), 0) AS prompt_tokens,
+				COALESCE(SUM(completion_tokens), 0) AS completion_tokens,
+				COALESCE(SUM(cost_usd), 0) AS cost_usd,
+				MAX(ts) AS last_used_at
+			FROM usage_ledger` + where + `
+			GROUP BY user_id
+		)
+		SELECT g.user_id,
+			COALESCE(u.username_normalized, '') AS username,
+			COALESCE(u.email_normalized, '') AS email,
+			COALESCE(u.name, '') AS name,
+			COALESCE(u.role, '') AS role,
+			COALESCE(u.enabled, FALSE) AS enabled,
+			(u.id IS NOT NULL) AS known_user,
+			g.calls, g.prompt_tokens, g.completion_tokens, g.cost_usd, g.last_used_at
+		FROM grouped g
+		LEFT JOIN LATERAL (
+			SELECT id, username_normalized, email_normalized, name, role, enabled
+			FROM auth_users
+			WHERE deleted_at IS NULL
+				AND (id = g.user_id
+					OR email_normalized = lower(g.user_id)
+					OR username_normalized = lower(g.user_id))
+			ORDER BY CASE
+				WHEN id = g.user_id THEN 0
+				WHEN email_normalized = lower(g.user_id) THEN 1
+				ELSE 2
+			END
+			LIMIT 1
+		) u ON TRUE
+		ORDER BY (g.prompt_tokens + g.completion_tokens) DESC, g.user_id ASC`
+	if q.Limit > 0 {
+		args = append(args, q.Limit)
+		sql += fmt.Sprintf(" LIMIT $%d", len(args))
+	}
+	if q.Offset > 0 {
+		args = append(args, q.Offset)
+		sql += fmt.Sprintf(" OFFSET $%d", len(args))
+	}
+	rows, err := p.pool.Query(ctx, sql, args...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := make([]TokenUsageUser, 0)
+	for rows.Next() {
+		var user TokenUsageUser
+		if err := rows.Scan(
+			&user.UserID, &user.Username, &user.Email, &user.Name, &user.Role,
+			&user.Enabled, &user.KnownUser, &user.Calls, &user.PromptTokens,
+			&user.CompletionTokens, &user.CostUSD, &user.LastUsedAt,
+		); err != nil {
+			return nil, err
+		}
+		user.LastUsedAt = user.LastUsedAt.UTC()
+		user.TotalTokens = user.PromptTokens + user.CompletionTokens
+		out = append(out, user)
+	}
+	return out, rows.Err()
+}

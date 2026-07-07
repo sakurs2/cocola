@@ -218,6 +218,12 @@ func (a *API) Router() http.Handler {
 
 		r.Get("/sandboxes", a.listSandboxes)
 
+		r.Route("/token-usage", func(r chi.Router) {
+			r.Get("/", a.tokenUsage)
+			r.Get("/export", a.exportTokenUsage)
+			r.Get("/users/{user_id}", a.tokenUsageUser)
+		})
+
 		r.Get("/audit", a.listAudit)
 		r.Get("/audit-events", a.listAuditEvents)
 		r.Get("/traces/{trace_id}", a.getTrace)

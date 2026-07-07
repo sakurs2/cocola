@@ -387,6 +387,66 @@ type TraceEventQuery struct {
 	Limit   int
 }
 
+// TokenUsageQuery filters usage_ledger aggregate reads. Bucket is "hour" or
+// "day"; empty lets the service choose based on the range.
+type TokenUsageQuery struct {
+	From   time.Time
+	To     time.Time
+	Bucket string
+	Limit  int
+	Offset int
+	UserID string
+}
+
+// TokenUsageSummary is a rolled-up view over usage_ledger rows.
+type TokenUsageSummary struct {
+	Calls            int64   `json:"calls"`
+	UserCount        int64   `json:"user_count"`
+	PromptTokens     int64   `json:"prompt_tokens"`
+	CompletionTokens int64   `json:"completion_tokens"`
+	TotalTokens      int64   `json:"total_tokens"`
+	CostUSD          float64 `json:"cost_usd"`
+}
+
+// TokenUsagePoint is one time bucket in a token usage trend.
+type TokenUsagePoint struct {
+	BucketStart      time.Time `json:"bucket_start"`
+	Calls            int64     `json:"calls"`
+	PromptTokens     int64     `json:"prompt_tokens"`
+	CompletionTokens int64     `json:"completion_tokens"`
+	TotalTokens      int64     `json:"total_tokens"`
+	CostUSD          float64   `json:"cost_usd"`
+}
+
+// TokenUsageUser is one ranked row in the admin token usage dashboard.
+type TokenUsageUser struct {
+	UserID           string    `json:"user_id"`
+	Username         string    `json:"username,omitempty"`
+	Email            string    `json:"email,omitempty"`
+	Name             string    `json:"name,omitempty"`
+	Role             string    `json:"role,omitempty"`
+	Enabled          bool      `json:"enabled"`
+	KnownUser        bool      `json:"known_user"`
+	Calls            int64     `json:"calls"`
+	PromptTokens     int64     `json:"prompt_tokens"`
+	CompletionTokens int64     `json:"completion_tokens"`
+	TotalTokens      int64     `json:"total_tokens"`
+	CostUSD          float64   `json:"cost_usd"`
+	LastUsedAt       time.Time `json:"last_used_at,omitempty"`
+}
+
+// TokenUsageReport is the full aggregate read used by the dashboard and export.
+type TokenUsageReport struct {
+	From    time.Time         `json:"from"`
+	To      time.Time         `json:"to"`
+	Bucket  string            `json:"bucket"`
+	Summary TokenUsageSummary `json:"summary"`
+	Trend   []TokenUsagePoint `json:"trend"`
+	Users   []TokenUsageUser  `json:"users,omitempty"`
+	Limit   int               `json:"limit,omitempty"`
+	Offset  int               `json:"offset,omitempty"`
+}
+
 // Store is the full persistence contract the service depends on.
 type Store interface {
 	// Auth users / whitelist
@@ -483,4 +543,9 @@ type Store interface {
 	AppendAuditEvent(ctx context.Context, e AuditEvent) error
 	ListAuditEvents(ctx context.Context, q AuditEventQuery) ([]AuditEvent, error)
 	ListTraceEvents(ctx context.Context, q TraceEventQuery) ([]TraceEvent, error)
+
+	// Token usage dashboard
+	TokenUsageSummary(ctx context.Context, q TokenUsageQuery) (TokenUsageSummary, error)
+	TokenUsageTrend(ctx context.Context, q TokenUsageQuery) ([]TokenUsagePoint, error)
+	TokenUsageUsers(ctx context.Context, q TokenUsageQuery) ([]TokenUsageUser, error)
 }

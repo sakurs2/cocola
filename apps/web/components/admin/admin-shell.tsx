@@ -4,6 +4,7 @@ import { cn } from "@/lib/utils";
 import {
   Activity,
   ArrowLeft,
+  BarChart3,
   BookOpenText,
   Box,
   Clock3,
@@ -34,6 +35,7 @@ const NAV_GROUPS: { label: string; items: AdminNavItem[] }[] = [
     items: [
       { href: "/admin", label: "Summary", icon: LayoutDashboard },
       { href: "/admin/api-docs", label: "API Docs", icon: BookOpenText },
+      { href: "/admin/token-usage", label: "Token Usage", icon: BarChart3 },
     ],
   },
   {

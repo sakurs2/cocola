@@ -11,6 +11,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 	"time"
 
@@ -236,6 +237,53 @@ func TestAdminSettingsAPI(t *testing.T) {
 	rec = do(t, r, http.MethodDelete, "/admin/settings/scheduler.poll_secs?expected_version=1", "k", nil)
 	if rec.Code != http.StatusNoContent {
 		t.Fatalf("reset poll setting: want 204, got %d (%s)", rec.Code, rec.Body.String())
+	}
+}
+
+func TestTokenUsageAPI(t *testing.T) {
+	api := newTestAPI("k")
+	r := api.Router()
+
+	rec := do(t, r, http.MethodGet, "/admin/token-usage?bucket=day&limit=10", "k", nil)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("token usage: want 200, got %d (%s)", rec.Code, rec.Body.String())
+	}
+	var report store.TokenUsageReport
+	if err := json.Unmarshal(rec.Body.Bytes(), &report); err != nil {
+		t.Fatalf("decode token usage: %v", err)
+	}
+	if report.Bucket != "day" || report.Limit != 10 {
+		t.Fatalf("unexpected report metadata: %+v", report)
+	}
+	if report.Summary.TotalTokens != 0 || len(report.Users) != 0 {
+		t.Fatalf("memory backend should be empty: %+v", report)
+	}
+
+	rec = do(t, r, http.MethodGet, "/admin/token-usage/users/alice@example.com?bucket=hour", "k", nil)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("user token usage: want 200, got %d (%s)", rec.Code, rec.Body.String())
+	}
+
+	rec = do(t, r, http.MethodGet, "/admin/token-usage?from=not-a-time", "k", nil)
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("invalid from: want 400, got %d", rec.Code)
+	}
+}
+
+func TestTokenUsageExportAPI(t *testing.T) {
+	api := newTestAPI("k")
+	rec := do(t, api.Router(), http.MethodGet, "/admin/token-usage/export?bucket=day", "k", nil)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("export: want 200, got %d (%s)", rec.Code, rec.Body.String())
+	}
+	if got := rec.Header().Get("content-type"); got != "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" {
+		t.Fatalf("content-type = %q", got)
+	}
+	if got := rec.Header().Get("content-disposition"); !strings.Contains(got, ".xlsx") {
+		t.Fatalf("content-disposition = %q", got)
+	}
+	if !bytes.HasPrefix(rec.Body.Bytes(), []byte("PK")) {
+		t.Fatalf("xlsx should be a zip container")
 	}
 }
 

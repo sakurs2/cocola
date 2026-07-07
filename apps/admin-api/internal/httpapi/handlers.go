@@ -9,6 +9,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"net/http"
 	"strings"
@@ -1424,6 +1425,89 @@ func (a *API) listSandboxes(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, out)
+}
+
+// ---- token usage ----
+
+func (a *API) tokenUsage(w http.ResponseWriter, r *http.Request) {
+	query, ok := tokenUsageQueryFromRequest(w, r)
+	if !ok {
+		return
+	}
+	report, err := a.svc.TokenUsageReport(r.Context(), query)
+	if err != nil {
+		mapErr(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, report)
+}
+
+func (a *API) tokenUsageUser(w http.ResponseWriter, r *http.Request) {
+	query, ok := tokenUsageQueryFromRequest(w, r)
+	if !ok {
+		return
+	}
+	report, err := a.svc.TokenUsageUserReport(r.Context(), chi.URLParam(r, "user_id"), query)
+	if err != nil {
+		mapErr(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, report)
+}
+
+func (a *API) exportTokenUsage(w http.ResponseWriter, r *http.Request) {
+	query, ok := tokenUsageQueryFromRequest(w, r)
+	if !ok {
+		return
+	}
+	data, filename, err := a.svc.ExportTokenUsageXLSX(r.Context(), query)
+	if err != nil {
+		mapErr(w, err)
+		return
+	}
+	w.Header().Set("content-type", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
+	w.Header().Set("content-disposition", fmt.Sprintf(`attachment; filename="%s"`, filename))
+	w.WriteHeader(http.StatusOK)
+	_, _ = w.Write(data)
+}
+
+func tokenUsageQueryFromRequest(w http.ResponseWriter, r *http.Request) (store.TokenUsageQuery, bool) {
+	q := r.URL.Query()
+	var out store.TokenUsageQuery
+	var err error
+	if raw := strings.TrimSpace(q.Get("from")); raw != "" {
+		out.From, err = parseTokenUsageTime(raw, false)
+		if err != nil {
+			writeErr(w, http.StatusBadRequest, "INVALID_ARGUMENT", "from must be RFC3339 or YYYY-MM-DD")
+			return store.TokenUsageQuery{}, false
+		}
+	}
+	if raw := strings.TrimSpace(q.Get("to")); raw != "" {
+		out.To, err = parseTokenUsageTime(raw, true)
+		if err != nil {
+			writeErr(w, http.StatusBadRequest, "INVALID_ARGUMENT", "to must be RFC3339 or YYYY-MM-DD")
+			return store.TokenUsageQuery{}, false
+		}
+	}
+	out.Bucket = q.Get("bucket")
+	out.Limit = qInt(r, "limit", 100)
+	out.Offset = qInt(r, "offset", 0)
+	return out, true
+}
+
+func parseTokenUsageTime(raw string, endOfDay bool) (time.Time, error) {
+	if t, err := time.Parse(time.RFC3339, raw); err == nil {
+		return t.UTC(), nil
+	}
+	t, err := time.Parse("2006-01-02", raw)
+	if err != nil {
+		return time.Time{}, err
+	}
+	t = t.UTC()
+	if endOfDay {
+		return t.AddDate(0, 0, 1), nil
+	}
+	return t, nil
 }
 
 // ---- audit ----
