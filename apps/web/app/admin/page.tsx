@@ -96,10 +96,10 @@ const MODULES = [
 
 export default function AdminPage() {
   return (
-    <main className="min-h-screen bg-background text-foreground">
-      <header className="border-b border-border">
+    <main className="min-h-screen bg-transparent text-foreground">
+      <header className="border-b border-white/45 bg-white/18 backdrop-blur-md">
         <div className="mx-auto flex h-16 max-w-7xl items-center gap-3 px-6">
-          <div className="grid size-9 place-items-center rounded-md bg-primary text-primary-foreground">
+          <div className="grid size-9 place-items-center rounded-2xl bg-primary text-primary-foreground shadow-lg shadow-primary/20">
             <ShieldCheck className="size-4" />
           </div>
           <div className="min-w-0 flex-1">
@@ -122,10 +122,10 @@ export default function AdminPage() {
           {MODULES.map((module) => {
             const Icon = module.icon;
             return (
-              <div key={module.href} className="rounded-lg border border-border bg-card p-4">
+              <div key={module.href} className="admin-glass-panel rounded-2xl border p-4">
                 <div className="flex items-start gap-3">
-                  <div className="grid size-9 shrink-0 place-items-center rounded-md bg-muted">
-                    <Icon className="size-4 text-muted-foreground" />
+                  <div className="grid size-9 shrink-0 place-items-center rounded-2xl border border-white/45 bg-white/42 shadow-[inset_0_1px_0_hsl(0_0%_100%/0.68)]">
+                    <Icon className="size-4 text-accent-foreground" />
                   </div>
                   <div className="min-w-0 flex-1">
                     <div className="text-xs font-medium text-muted-foreground">{module.group}</div>
@@ -137,7 +137,7 @@ export default function AdminPage() {
                   {module.stats.map((stat) => (
                     <span
                       key={stat}
-                      className="rounded-md border border-border bg-background px-2 py-1 text-xs text-muted-foreground"
+                      className="admin-control rounded-full border px-2.5 py-1 text-xs text-muted-foreground"
                     >
                       {stat}
                     </span>
@@ -163,7 +163,7 @@ export default function AdminPage() {
 
 function Metric({ label, value }: { label: string; value: string }) {
   return (
-    <div className="rounded-lg border border-border bg-card px-4 py-3">
+    <div className="admin-glass-panel rounded-2xl border px-4 py-3">
       <div className="text-xs text-muted-foreground">{label}</div>
       <div className="mt-1 text-2xl font-semibold">{value}</div>
     </div>
