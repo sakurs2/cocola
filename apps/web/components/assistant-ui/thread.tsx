@@ -52,10 +52,13 @@ import { cn } from "@/lib/utils";
 export const Thread: FC = () => {
   return (
     <ThreadPrimitive.Root
-      className="flex h-full flex-col bg-background"
+      className="relative flex h-full flex-col overflow-hidden bg-background"
       style={{ ["--thread-max-width" as string]: "46rem" }}
     >
-      <ThreadPrimitive.Viewport className="flex flex-1 flex-col items-center overflow-y-auto scroll-smooth px-5 pt-8">
+      <ThreadPrimitive.If empty>
+        <div className="cocola-cloud-field" aria-hidden="true" />
+      </ThreadPrimitive.If>
+      <ThreadPrimitive.Viewport className="relative z-10 flex flex-1 flex-col items-center overflow-y-auto scroll-smooth px-5 pt-8">
         <ThreadWelcome />
 
         <ThreadPrimitive.Messages
