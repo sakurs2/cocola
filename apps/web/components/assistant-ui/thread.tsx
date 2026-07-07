@@ -11,9 +11,13 @@ import {
   type ToolCallMessagePartProps,
   useMessage,
 } from "@assistant-ui/react";
+import * as Popover from "@radix-ui/react-popover";
+import { Command } from "cmdk";
+import { motion } from "framer-motion";
 import {
   ArrowDownIcon,
   BrainCircuit,
+  Check,
   ChevronDown,
   ChevronRight,
   CopyIcon,
@@ -22,6 +26,7 @@ import {
   FileText,
   MessagesSquare,
   PaperclipIcon,
+  Search,
   SendHorizontalIcon,
   Square,
   Wrench,
@@ -29,28 +34,28 @@ import {
   Zap,
 } from "lucide-react";
 import Image from "next/image";
-import { useState, type FC } from "react";
+import { useEffect, useState, type FC } from "react";
 import { useCocola, type ModelIconConfig, type UiMessageMetadata } from "@/app/runtime-provider";
 import { TooltipIconButton } from "@/components/assistant-ui/tooltip-icon-button";
 import { MarkdownText } from "@/components/assistant-ui/markdown-text";
-import { LOCAL_SIMPLE_ICON_PATHS, SIMPLE_ICON_FALLBACK_BADGES } from "@/lib/model-icons";
+import {
+  LOCAL_SIMPLE_ICON_PATHS,
+  SIMPLE_ICON_FALLBACK_BADGES,
+  lobeIconPath,
+  normalizeLobeIconSlug,
+} from "@/lib/model-icons";
 import { cn } from "@/lib/utils";
 
-// Open WebUI style product Thread for cocola, authored against the design
-// tokens in app/globals.css (dark palette). Empty state centers a logo + model
-// name over a pill composer with a "Suggested" list; once a conversation
-// starts, the composer docks to the bottom. Surfaces the ExternalStore
-// capabilities the adapter implements: send / cancel plus inline file
-// attachments (paperclip → chip → sent, backed by Base64AttachmentAdapter).
-// Voice and branch controls remain unsupported.
+// Product Thread for cocola, authored against the white workspace design tokens.
+// assistant-ui owns chat semantics; this file owns the composed product chrome.
 
 export const Thread: FC = () => {
   return (
     <ThreadPrimitive.Root
       className="flex h-full flex-col bg-background"
-      style={{ ["--thread-max-width" as string]: "44rem" }}
+      style={{ ["--thread-max-width" as string]: "46rem" }}
     >
-      <ThreadPrimitive.Viewport className="flex flex-1 flex-col items-center overflow-y-auto scroll-smooth px-4 pt-8">
+      <ThreadPrimitive.Viewport className="flex flex-1 flex-col items-center overflow-y-auto scroll-smooth px-5 pt-8">
         <ThreadWelcome />
 
         <ThreadPrimitive.Messages
@@ -67,7 +72,7 @@ export const Thread: FC = () => {
         {/* Docked composer, only while a conversation is in progress. On the
             empty state the composer lives centered inside ThreadWelcome. */}
         <ThreadPrimitive.If empty={false}>
-          <div className="sticky bottom-0 z-30 mt-3 flex w-full max-w-[var(--thread-max-width)] flex-col items-center justify-end rounded-t-lg bg-background pt-3 pb-4 shadow-[0_-18px_28px_hsl(var(--background))]">
+          <div className="sticky bottom-0 z-30 mt-3 flex w-full max-w-[var(--thread-max-width)] flex-col items-center justify-end bg-gradient-to-t from-background via-background to-background/0 pt-4 pb-5">
             <ScrollToBottom />
             <Composer />
           </div>
@@ -113,13 +118,21 @@ const ThreadWelcome: FC = () => {
 
   return (
     <ThreadPrimitive.Empty>
-      <div className="flex w-full max-w-[var(--thread-max-width)] flex-grow flex-col items-center justify-center">
-        <div className="flex items-center gap-3">
-          <div className="flex size-9 items-center justify-center rounded-full bg-foreground text-background">
+      <motion.div
+        initial={{ opacity: 0, y: 8 }}
+        animate={{ opacity: 1, y: 0 }}
+        transition={{ duration: 0.22, ease: "easeOut" }}
+        className="flex w-full max-w-[var(--thread-max-width)] flex-grow flex-col items-center justify-center"
+      >
+        <div className="flex flex-col items-center gap-3 text-center">
+          <div className="flex size-12 items-center justify-center rounded-2xl bg-primary text-primary-foreground shadow-lg shadow-primary/20">
             <MessagesSquare className="size-5" />
           </div>
-          <p className="text-3xl font-semibold text-foreground">
+          <p className="text-3xl font-semibold tracking-normal text-foreground">
             {selectedModel?.label ?? "No model configured"}
+          </p>
+          <p className="max-w-md text-sm leading-6 text-muted-foreground">
+            Ask, inspect files, run tools, and keep every session grounded in its workspace.
           </p>
         </div>
         {noModel ? (
@@ -128,12 +141,12 @@ const ThreadWelcome: FC = () => {
           </p>
         ) : null}
 
-        <div className="mt-8 w-full">
+        <div className="mt-7 w-full">
           <Composer />
         </div>
 
-        <div className="mt-6 w-full">
-          <div className="mb-2 flex items-center gap-1.5 px-1 text-sm text-muted-foreground">
+        <div className="mt-6 w-full rounded-2xl border border-border bg-card/70 p-2 shadow-sm">
+          <div className="mb-1 flex items-center gap-1.5 px-2 text-xs font-medium uppercase text-muted-foreground">
             <Zap className="size-3.5" />
             Suggested
           </div>
@@ -143,7 +156,7 @@ const ThreadWelcome: FC = () => {
                 key={title}
                 prompt={prompt}
                 send
-                className="flex flex-col items-start gap-0.5 rounded-lg px-2 py-2.5 text-left transition-colors hover:bg-muted"
+                className="flex flex-col items-start gap-0.5 rounded-xl px-3 py-2.5 text-left transition-colors hover:bg-accent hover:text-accent-foreground"
               >
                 <span className="text-sm font-medium text-foreground">{title}</span>
                 <span className="text-xs text-muted-foreground">{subtitle}</span>
@@ -151,7 +164,7 @@ const ThreadWelcome: FC = () => {
             ))}
           </div>
         </div>
-      </div>
+      </motion.div>
     </ThreadPrimitive.Empty>
   );
 };
@@ -161,34 +174,40 @@ const Composer: FC = () => {
   const noModel = !selectedModel;
 
   return (
-    <ComposerPrimitive.Root className="relative z-10 flex w-full flex-col rounded-[1.5rem] border border-input bg-card px-3 py-2 shadow-lg transition-colors focus-within:border-ring">
-      <ComposerAttachments />
-      <ComposerPrimitive.Input
-        rows={1}
-        autoFocus={!noModel}
-        disabled={noModel}
-        placeholder={
-          noModel ? "No model configured" : "Send a message... (@ to mention, / for commands)"
-        }
-        className="max-h-40 min-h-12 flex-grow resize-none border-none bg-transparent px-2 py-3 text-sm outline-none placeholder:text-muted-foreground focus:ring-0 disabled:cursor-not-allowed"
-      />
-      <div className="flex w-full items-center justify-between gap-2">
-        <div className="flex min-w-0 items-center gap-1.5">
-          <ComposerPrimitive.AddAttachment asChild>
-            <TooltipIconButton
-              tooltip={noModel ? "No model configured" : "Attach file"}
-              variant="ghost"
-              disabled={noModel}
-              className="size-8 shrink-0 rounded-full p-2 text-muted-foreground"
-            >
-              <PaperclipIcon className="size-4" />
-            </TooltipIconButton>
-          </ComposerPrimitive.AddAttachment>
-          <ModelPicker />
+    <motion.div
+      className="w-full"
+      whileFocus={{ y: -1 }}
+      transition={{ type: "spring", stiffness: 420, damping: 32 }}
+    >
+      <ComposerPrimitive.Root className="composer-lift relative z-10 flex w-full flex-col rounded-2xl border border-input bg-card/95 px-3 py-2 transition-colors focus-within:border-ring">
+        <ComposerAttachments />
+        <ComposerPrimitive.Input
+          rows={1}
+          autoFocus={!noModel}
+          disabled={noModel}
+          placeholder={
+            noModel ? "No model configured" : "Send a message... (@ to mention, / for commands)"
+          }
+          className="max-h-40 min-h-12 flex-grow resize-none border-none bg-transparent px-2 py-3 text-sm outline-none placeholder:text-muted-foreground focus:ring-0 disabled:cursor-not-allowed"
+        />
+        <div className="flex w-full items-center justify-between gap-2">
+          <div className="flex min-w-0 items-center gap-1.5">
+            <ComposerPrimitive.AddAttachment asChild>
+              <TooltipIconButton
+                tooltip={noModel ? "No model configured" : "Attach file"}
+                variant="ghost"
+                disabled={noModel}
+                className="size-8 shrink-0 rounded-full p-2 text-muted-foreground"
+              >
+                <PaperclipIcon className="size-4" />
+              </TooltipIconButton>
+            </ComposerPrimitive.AddAttachment>
+            <ModelPicker />
+          </div>
+          <ComposerAction />
         </div>
-        <ComposerAction />
-      </div>
-    </ComposerPrimitive.Root>
+      </ComposerPrimitive.Root>
+    </motion.div>
   );
 };
 
@@ -198,43 +217,58 @@ const ModelPicker: FC = () => {
   const noModel = !selectedModel;
 
   return (
-    <div className="relative inline-flex max-w-[14rem] min-w-0">
-      <button
-        type="button"
-        className="flex max-w-[14rem] min-w-0 items-center gap-2 rounded-full px-2 py-1.5 text-sm font-medium text-foreground transition-colors hover:bg-muted focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
-        aria-label={noModel ? "No model configured" : "Select model"}
-        aria-expanded={open && !noModel}
-        disabled={noModel}
-        onClick={() => setOpen((v) => !v)}
-      >
-        <ModelIcon icon={selectedModel?.icon} className="size-5" />
-        <span className="truncate">{selectedModel?.label ?? "No model"}</span>
-        {noModel ? null : <ChevronDown className="size-4 shrink-0 text-muted-foreground" />}
-      </button>
-      {open && !noModel ? (
-        <div className="absolute bottom-full left-0 z-20 mb-2 w-full overflow-hidden rounded-lg border border-border bg-popover p-1 text-sm shadow-lg">
-          {models.map((model) => (
-            <button
-              key={model.alias}
-              type="button"
-              className={cn(
-                "flex w-full items-center gap-2 rounded-md px-2 py-2 text-left transition-colors hover:bg-muted",
-                model.alias === selectedModelAlias
-                  ? "bg-muted text-foreground"
-                  : "text-muted-foreground",
-              )}
-              onClick={() => {
-                setSelectedModelAlias(model.alias);
-                setOpen(false);
-              }}
-            >
-              <ModelIcon icon={model.icon} className="size-5" />
-              <span className="min-w-0 flex-1 truncate font-medium">{model.label}</span>
-            </button>
-          ))}
-        </div>
-      ) : null}
-    </div>
+    <Popover.Root open={open} onOpenChange={setOpen}>
+      <Popover.Trigger asChild>
+        <button
+          type="button"
+          className="flex max-w-[14rem] min-w-0 items-center gap-2 rounded-full border border-transparent px-2 py-1.5 text-sm font-medium text-foreground transition-colors hover:border-border hover:bg-muted focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+          aria-label={noModel ? "No model configured" : "Select model"}
+          disabled={noModel}
+        >
+          <ModelIcon icon={selectedModel?.icon} className="size-5" />
+          <span className="truncate">{selectedModel?.label ?? "No model"}</span>
+          {noModel ? null : <ChevronDown className="size-4 shrink-0 text-muted-foreground" />}
+        </button>
+      </Popover.Trigger>
+      <Popover.Portal>
+        <Popover.Content
+          side="top"
+          align="start"
+          sideOffset={10}
+          className="z-50 w-72 overflow-hidden rounded-2xl border border-border bg-popover text-popover-foreground shadow-xl"
+        >
+          <Command>
+            <div className="flex items-center gap-2 border-b border-border px-3">
+              <Search className="size-4 text-muted-foreground" />
+              <Command.Input
+                placeholder="Find a model..."
+                className="h-10 min-w-0 flex-1 bg-transparent text-sm outline-none placeholder:text-muted-foreground"
+              />
+            </div>
+            <Command.List className="max-h-72 overflow-auto p-1.5">
+              <Command.Empty className="px-3 py-8 text-center text-sm text-muted-foreground">
+                No model found.
+              </Command.Empty>
+              {models.map((model) => (
+                <Command.Item
+                  key={model.alias}
+                  value={`${model.label} ${model.alias}`}
+                  className="flex cursor-pointer items-center gap-2 rounded-xl px-2 py-2 text-sm outline-none data-[selected=true]:bg-accent data-[selected=true]:text-accent-foreground"
+                  onSelect={() => {
+                    setSelectedModelAlias(model.alias);
+                    setOpen(false);
+                  }}
+                >
+                  <ModelIcon icon={model.icon} className="size-6" />
+                  <span className="min-w-0 flex-1 truncate font-medium">{model.label}</span>
+                  {model.alias === selectedModelAlias ? <Check className="size-4" /> : null}
+                </Command.Item>
+              ))}
+            </Command.List>
+          </Command>
+        </Popover.Content>
+      </Popover.Portal>
+    </Popover.Root>
   );
 };
 
@@ -242,10 +276,19 @@ export const ModelIcon: FC<{ icon?: ModelIconConfig; className?: string }> = ({
   icon,
   className,
 }) => {
+  const [lobeFailed, setLobeFailed] = useState(false);
+  const normalizedSlug = normalizeLobeIconSlug(icon?.slug);
+  const canUseLobeIcon =
+    (icon?.type === "lobe-icons" || icon?.type === "simple-icons") && normalizedSlug !== "";
+  const lobePath = canUseLobeIcon && !lobeFailed ? lobeIconPath(normalizedSlug) : "";
   const simpleIconPath =
-    icon?.type === "simple-icons" && icon.slug
+    !lobePath && icon?.type === "simple-icons" && icon.slug
       ? LOCAL_SIMPLE_ICON_PATHS[icon.slug.toLowerCase()]
       : "";
+
+  useEffect(() => {
+    setLobeFailed(false);
+  }, [icon?.slug, icon?.src, icon?.type]);
 
   if (icon?.type === "image" && icon.src) {
     return (
@@ -263,6 +306,27 @@ export const ModelIcon: FC<{ icon?: ModelIconConfig; className?: string }> = ({
           unoptimized
           className="size-full object-contain"
           aria-hidden="true"
+        />
+      </span>
+    );
+  }
+  if (lobePath) {
+    return (
+      <span
+        className={cn(
+          "flex shrink-0 items-center justify-center overflow-hidden rounded-full border border-border bg-white",
+          className,
+        )}
+        aria-hidden="true"
+      >
+        <Image
+          src={lobePath}
+          alt=""
+          width={96}
+          height={96}
+          unoptimized
+          className="size-[72%] object-contain"
+          onError={() => setLobeFailed(true)}
         />
       </span>
     );
@@ -288,8 +352,9 @@ export const ModelIcon: FC<{ icon?: ModelIconConfig; className?: string }> = ({
     );
   }
   const fallbackBadge =
-    icon?.type === "simple-icons" && icon.slug
-      ? SIMPLE_ICON_FALLBACK_BADGES[icon.slug.toLowerCase()]
+    (icon?.type === "simple-icons" || icon?.type === "lobe-icons") && icon.slug
+      ? SIMPLE_ICON_FALLBACK_BADGES[icon.slug.toLowerCase()] ||
+        SIMPLE_ICON_FALLBACK_BADGES[normalizedSlug]
       : "";
   if (!fallbackBadge) {
     return (
@@ -379,7 +444,7 @@ const ComposerAction: FC = () => {
 };
 
 const UserMessage: FC = () => (
-  <MessagePrimitive.Root className="grid w-full max-w-[var(--thread-max-width)] auto-rows-auto grid-cols-[minmax(72px,1fr)_auto] gap-y-1 py-3">
+  <MessagePrimitive.Root className="message-enter grid w-full max-w-[var(--thread-max-width)] auto-rows-auto grid-cols-[minmax(72px,1fr)_auto] gap-y-1 py-3">
     <div className="col-start-2 row-start-1 flex flex-col items-end gap-1.5">
       <div className="flex flex-wrap justify-end gap-1.5 empty:hidden">
         <MessagePrimitive.Attachments
@@ -396,7 +461,7 @@ const UserMessage: FC = () => (
         />
       </div>
       <MessagePrimitive.If hasContent>
-        <div className="max-w-[calc(var(--thread-max-width)*0.8)] whitespace-pre-wrap break-words rounded-2xl bg-muted px-4 py-2 text-sm text-foreground">
+        <div className="max-w-[calc(var(--thread-max-width)*0.8)] whitespace-pre-wrap break-words rounded-2xl bg-primary px-4 py-2.5 text-sm leading-6 text-primary-foreground shadow-sm">
           <MessagePrimitive.Parts />
         </div>
       </MessagePrimitive.If>
@@ -405,8 +470,8 @@ const UserMessage: FC = () => (
 );
 
 const AssistantMessage: FC = () => (
-  <MessagePrimitive.Root className="relative grid w-full max-w-[var(--thread-max-width)] grid-cols-[auto_1fr] grid-rows-[auto_1fr] py-3">
-    <div className="col-span-2 col-start-1 row-start-1 my-1.5 max-w-full break-words leading-7 text-foreground">
+  <MessagePrimitive.Root className="message-enter relative grid w-full max-w-[var(--thread-max-width)] grid-cols-[auto_1fr] grid-rows-[auto_1fr] py-3">
+    <div className="col-span-2 col-start-1 row-start-1 my-1.5 max-w-full break-words rounded-2xl border border-border bg-card/90 px-4 py-3 leading-7 text-foreground shadow-sm">
       <div className="relative">
         <MessagePrimitive.If last>
           <ThreadPrimitive.If running>
@@ -453,7 +518,7 @@ const AssistantMessageHeader: FC = () => {
 
   return (
     <div className="mb-2 flex items-center gap-2 text-xs text-muted-foreground">
-      <span className="inline-flex min-w-0 items-center gap-1.5 rounded-full border border-border bg-muted/35 px-2 py-1">
+      <span className="inline-flex min-w-0 items-center gap-1.5 rounded-full border border-border bg-background px-2 py-1 shadow-sm">
         <ModelIcon icon={icon} className="size-4" />
         <span className="truncate font-medium text-foreground">{label}</span>
       </span>
@@ -486,8 +551,8 @@ const ArtifactFilePart: FC<FileMessagePartProps> = ({ filename, mimeType, data }
   const downloadUrl = meta.url || data;
 
   return (
-    <div className="my-3 flex max-w-xl items-center gap-3 rounded-lg border border-border bg-muted/30 p-3 text-sm">
-      <span className="flex size-9 shrink-0 items-center justify-center rounded-md border border-border bg-background text-muted-foreground">
+    <div className="my-3 flex max-w-xl items-center gap-3 rounded-xl border border-border bg-background p-3 text-sm shadow-sm">
+      <span className="flex size-9 shrink-0 items-center justify-center rounded-lg border border-border bg-muted text-muted-foreground">
         <FileText className="size-4" />
       </span>
       <div className="min-w-0 flex-1">
@@ -554,12 +619,12 @@ const formatBytes = (bytes: number): string => {
 };
 
 const ReasoningPart: FC<ReasoningMessagePartProps> = ({ text, status }) => (
-  <details className="aui-details group my-3 overflow-hidden rounded-lg border border-border bg-muted/30 text-sm">
+  <details className="aui-details group my-3 overflow-hidden rounded-xl border border-border bg-background text-sm shadow-sm">
     <summary className="flex cursor-pointer select-none items-center gap-2 px-3 py-2 text-muted-foreground [&::-webkit-details-marker]:hidden">
       <ChevronRight className="size-3.5 shrink-0 transition-transform group-open:rotate-90" />
       <BrainCircuit className="size-3.5 shrink-0" />
       <span className="font-medium text-foreground">Reasoning</span>
-      <span className="ml-auto rounded-full border border-border bg-background px-2 py-0.5 text-[11px] leading-4">
+      <span className="ml-auto rounded-full border border-border bg-muted px-2 py-0.5 text-[11px] leading-4">
         {status.type === "running" ? "Thinking" : "Done"}
       </span>
     </summary>
@@ -598,13 +663,13 @@ const ToolCard: FC<{
     <details
       open={status.type === "running" || status.type === "requires-action" || isError}
       className={cn(
-        "aui-details group my-3 overflow-hidden rounded-lg border bg-muted/30 text-sm",
+        "aui-details group my-3 overflow-hidden rounded-xl border bg-background text-sm shadow-sm",
         isError ? "border-destructive/50" : "border-border",
       )}
     >
       <summary className="flex cursor-pointer select-none items-center gap-2 px-3 py-2 text-muted-foreground [&::-webkit-details-marker]:hidden">
         <ChevronRight className="size-3.5 shrink-0 transition-transform group-open:rotate-90" />
-        <span className="flex size-6 shrink-0 items-center justify-center rounded-md border border-border bg-background">
+        <span className="flex size-6 shrink-0 items-center justify-center rounded-lg border border-border bg-muted">
           <Wrench className="size-3.5" />
         </span>
         <span className="min-w-0 truncate font-mono text-xs text-foreground">{title}</span>
@@ -639,7 +704,7 @@ const ToolPayload: FC<{
   value: string;
   tone: "muted" | "error";
 }> = ({ label, value, tone }) => (
-  <section className="overflow-hidden rounded-md border border-border bg-background/70">
+  <section className="overflow-hidden rounded-lg border border-border bg-muted/35">
     <div className="border-b border-border px-2.5 py-1.5 font-mono text-[11px] uppercase text-muted-foreground">
       {label}
     </div>

@@ -9,11 +9,9 @@
 }
 
 /*
- * shadcn-style design tokens. The assistant-ui Thread / Button / Markdown /
- * sidebar components are authored against these semantic colors (bg-background,
- * text-muted-foreground, border-border, bg-sidebar, …); tailwind.config.ts maps
- * the Tailwind color names onto these CSS variables. The .dark palette targets
- * an Open WebUI style near-black look; light values kept for completeness.
+ * shadcn-style design tokens. Admin keeps the existing .dark palette for now.
+ * The user-facing workspace mounts .cocola-user-ui to opt into the white
+ * product surface without redesigning admin pages in the same pass.
  */
 @layer base {
   :root {
@@ -72,6 +70,34 @@
     --sidebar-border: 0 0% 14%;
     --sidebar-accent: 0 0% 16%;
     --sidebar-accent-foreground: 0 0% 98%;
+  }
+
+  .cocola-user-ui {
+    --background: 210 24% 98%;
+    --foreground: 222 47% 11%;
+    --card: 0 0% 100%;
+    --card-foreground: 222 47% 11%;
+    --popover: 0 0% 100%;
+    --popover-foreground: 222 47% 11%;
+    --primary: 221 83% 45%;
+    --primary-foreground: 0 0% 100%;
+    --secondary: 214 32% 91%;
+    --secondary-foreground: 222 47% 11%;
+    --muted: 214 32% 94%;
+    --muted-foreground: 215 16% 44%;
+    --accent: 213 94% 95%;
+    --accent-foreground: 221 83% 33%;
+    --destructive: 0 72% 51%;
+    --destructive-foreground: 0 0% 100%;
+    --border: 214 32% 88%;
+    --input: 214 32% 86%;
+    --ring: 221 83% 53%;
+
+    --sidebar: 216 33% 97%;
+    --sidebar-foreground: 222 47% 16%;
+    --sidebar-border: 214 32% 88%;
+    --sidebar-accent: 0 0% 100%;
+    --sidebar-accent-foreground: 221 83% 35%;
   }
 }
 
@@ -161,6 +187,44 @@
       inset 0 0 0 1px hsl(var(--border) / 0.55),
       0 0 22px hsl(204 98% 65% / 0.08);
   }
+
+  .cocola-user-ui.workspace-grain {
+    background:
+      linear-gradient(180deg, hsl(213 94% 95% / 0.66), transparent 14rem),
+      radial-gradient(circle at 28% -6rem, hsl(221 83% 68% / 0.14), transparent 24rem),
+      hsl(var(--background));
+  }
+
+  .cocola-user-ui .glass-panel {
+    background: hsl(var(--card) / 0.88);
+    box-shadow:
+      0 1px 1px hsl(222 47% 11% / 0.04),
+      0 18px 42px hsl(222 47% 11% / 0.08);
+    backdrop-filter: blur(18px);
+  }
+
+  .cocola-user-ui .message-enter {
+    animation: cocola-message-enter 180ms ease-out;
+  }
+
+  .cocola-user-ui .composer-lift {
+    box-shadow:
+      0 1px 1px hsl(222 47% 11% / 0.04),
+      0 18px 45px hsl(221 83% 45% / 0.11);
+  }
+
+  .cocola-user-ui .aui-answer-border-beam::before {
+    background: conic-gradient(
+      from var(--aui-border-angle),
+      transparent 0%,
+      transparent 58%,
+      hsl(221 83% 53% / 0.06) 66%,
+      hsl(221 83% 53% / 0.52) 72%,
+      hsl(172 66% 43% / 0.42) 78%,
+      transparent 88%,
+      transparent 100%
+    );
+  }
 }
 
 @keyframes aui-soft-in {
@@ -189,6 +253,17 @@
   }
 }
 
+@keyframes cocola-message-enter {
+  from {
+    opacity: 0;
+    transform: translateY(6px) scale(0.99);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+
 @media (prefers-reduced-motion: reduce) {
   .aui-stream-in[data-status="running"],
   .aui-details-body,
@@ -200,5 +275,9 @@
   .aui-details summary svg,
   .aui-code-action {
     transition: none;
+  }
+
+  .cocola-user-ui .message-enter {
+    animation: none;
   }
 }

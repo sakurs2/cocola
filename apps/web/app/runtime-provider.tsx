@@ -106,7 +106,7 @@ type UserEventSnapshot = {
 };
 
 export type ModelIconConfig = {
-  type: "simple-icons" | "image";
+  type: "lobe-icons" | "simple-icons" | "image";
   slug?: string;
   src?: string;
 };
@@ -114,12 +114,18 @@ export type ModelIconConfig = {
 export type ModelOption = {
   alias: string;
   label: string;
+  provider?: string;
+  family?: string;
+  iconSlug?: string;
   icon: ModelIconConfig;
 };
 
 export type UiMessageMetadata = {
   model_alias?: string;
   model_label?: string;
+  model_provider?: string;
+  model_family?: string;
+  model_icon_slug?: string;
   model_icon?: ModelIconConfig;
 };
 
@@ -189,25 +195,63 @@ function parseSize(v: string | undefined): number {
   return Number.isFinite(n) && n > 0 ? n : 0;
 }
 
-function normalizeMetadata(raw: UiMessageMetadata | undefined): UiMessageMetadata | undefined {
+function normalizeIcon(raw: ModelIconConfig | undefined): ModelIconConfig | undefined {
   if (!raw) return undefined;
-  const icon =
-    raw.model_icon?.type === "simple-icons" && typeof raw.model_icon.slug === "string"
+  return raw.type === "lobe-icons" && typeof raw.slug === "string"
+    ? {
+        type: raw.type,
+        slug: raw.slug,
+      }
+    : raw.type === "simple-icons" && typeof raw.slug === "string"
       ? {
-          type: raw.model_icon.type,
-          slug: raw.model_icon.slug,
-          ...(typeof raw.model_icon.src === "string" ? { src: raw.model_icon.src } : {}),
+          type: raw.type,
+          slug: raw.slug,
+          ...(typeof raw.src === "string" ? { src: raw.src } : {}),
         }
-      : raw.model_icon?.type === "image" && typeof raw.model_icon.src === "string"
+      : raw.type === "image" && typeof raw.src === "string"
         ? {
-            type: raw.model_icon.type,
-            src: raw.model_icon.src,
+            type: raw.type,
+            src: raw.src,
           }
         : undefined;
+}
+
+function normalizeMetadata(raw: UiMessageMetadata | undefined): UiMessageMetadata | undefined {
+  if (!raw) return undefined;
+  const icon = normalizeIcon(raw.model_icon);
   return {
     ...(typeof raw.model_alias === "string" ? { model_alias: raw.model_alias } : {}),
     ...(typeof raw.model_label === "string" ? { model_label: raw.model_label } : {}),
+    ...(typeof raw.model_provider === "string" ? { model_provider: raw.model_provider } : {}),
+    ...(typeof raw.model_family === "string" ? { model_family: raw.model_family } : {}),
+    ...(typeof raw.model_icon_slug === "string" ? { model_icon_slug: raw.model_icon_slug } : {}),
     ...(icon ? { model_icon: icon } : {}),
+  };
+}
+
+function normalizeModelOption(raw: unknown): ModelOption | null {
+  if (!raw || typeof raw !== "object") return null;
+  const row = raw as Record<string, unknown>;
+  const alias = typeof row.alias === "string" ? row.alias : "";
+  const label = typeof row.label === "string" ? row.label : "";
+  if (!alias || !label) return null;
+  const provider = typeof row.provider === "string" ? row.provider : "";
+  const family = typeof row.family === "string" ? row.family : "";
+  const iconSlug = typeof row.icon_slug === "string" ? row.icon_slug : "";
+  const icon = normalizeIcon(row.icon as ModelIconConfig | undefined);
+  const normalizedIcon =
+    icon?.type === "image" && icon.src
+      ? icon
+      : iconSlug
+        ? { type: "lobe-icons" as const, slug: iconSlug }
+        : (icon ?? { type: "lobe-icons" as const, slug: family || provider || alias });
+  return {
+    alias,
+    label,
+    ...(provider ? { provider } : {}),
+    ...(family ? { family } : {}),
+    ...(iconSlug ? { iconSlug } : {}),
+    icon: normalizedIcon,
   };
 }
 
@@ -607,6 +651,9 @@ export function CocolaRuntimeProvider({ children }: { children: ReactNode }) {
       const assistantMetadata: UiMessageMetadata = {
         model_alias: model.alias,
         model_label: model.label,
+        ...(model.provider ? { model_provider: model.provider } : {}),
+        ...(model.family ? { model_family: model.family } : {}),
+        ...(model.iconSlug ? { model_icon_slug: model.iconSlug } : {}),
         model_icon: model.icon,
       };
       const assistantId = genId();
@@ -673,6 +720,9 @@ export function CocolaRuntimeProvider({ children }: { children: ReactNode }) {
             session_id: turnSessionId,
             model_alias: model.alias,
             model_label: model.label,
+            ...(model.provider ? { model_provider: model.provider } : {}),
+            ...(model.family ? { model_family: model.family } : {}),
+            ...(model.iconSlug ? { model_icon_slug: model.iconSlug } : {}),
             model_icon: model.icon,
             ...(attachments.length > 0 ? { attachments } : {}),
           }),
@@ -875,7 +925,12 @@ export function CocolaRuntimeProvider({ children }: { children: ReactNode }) {
         }
         if (!res.ok) return;
         const rows = (await res.json()) as ModelOption[];
-        const next = Array.isArray(rows) ? rows : [];
+        const next = Array.isArray(rows)
+          ? rows.flatMap((row) => {
+              const model = normalizeModelOption(row);
+              return model ? [model] : [];
+            })
+          : [];
         const fallbackAlias = next[0]?.alias ?? "";
         setModels(next);
         setSelectedModelAlias((prev) =>

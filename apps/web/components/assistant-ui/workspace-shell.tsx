@@ -4,6 +4,7 @@ import { type ReactNode } from "react";
 import { usePathname } from "next/navigation";
 import { CocolaRuntimeProvider } from "@/app/runtime-provider";
 import { AppSidebar } from "@/components/assistant-ui/app-sidebar";
+import { CommandPalette } from "@/components/assistant-ui/command-palette";
 
 function isWorkspacePath(pathname: string | null) {
   return (
@@ -24,9 +25,12 @@ export function WorkspaceShell({ children }: { children: ReactNode }) {
 
   return (
     <CocolaRuntimeProvider>
-      <div className="flex h-screen bg-background text-foreground">
+      <div className="cocola-user-ui workspace-grain flex h-screen bg-background text-foreground">
         <AppSidebar />
-        <div className="min-w-0 flex-1">{children}</div>
+        <main className="m-2 min-w-0 flex-1 overflow-hidden rounded-2xl border border-border/80 bg-background shadow-sm">
+          {children}
+        </main>
+        <CommandPalette />
       </div>
     </CocolaRuntimeProvider>
   );

@@ -183,9 +183,12 @@ type LLMModelIcon struct {
 }
 
 type PublicLLMModel struct {
-	Alias string       `json:"alias"`
-	Label string       `json:"label"`
-	Icon  LLMModelIcon `json:"icon"`
+	Alias    string       `json:"alias"`
+	Label    string       `json:"label"`
+	Provider string       `json:"provider"`
+	Family   string       `json:"family"`
+	IconSlug string       `json:"icon_slug"`
+	Icon     LLMModelIcon `json:"icon"`
 }
 
 // ScheduledTask is an admin-created system task. ScheduleSpec and ConfigJSON

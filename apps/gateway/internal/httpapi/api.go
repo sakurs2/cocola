@@ -361,6 +361,9 @@ type chatRequest struct {
 	MaxTurns                             int32             `json:"max_turns"`
 	ModelAlias                           string            `json:"model_alias"`
 	ModelLabel                           string            `json:"model_label"`
+	ModelProvider                        string            `json:"model_provider"`
+	ModelFamily                          string            `json:"model_family"`
+	ModelIconSlug                        string            `json:"model_icon_slug"`
 	ModelIcon                            map[string]string `json:"model_icon"`
 	ConversationTitle                    string            `json:"conversation_title"`
 	ConversationType                     string            `json:"conversation_type"`
@@ -745,10 +748,26 @@ func assistantMetadata(req chatRequest) map[string]any {
 	if label := strings.TrimSpace(req.ModelLabel); label != "" {
 		out["model_label"] = label
 	}
+	if provider := strings.TrimSpace(req.ModelProvider); provider != "" {
+		out["model_provider"] = provider
+	}
+	if family := strings.TrimSpace(req.ModelFamily); family != "" {
+		out["model_family"] = family
+	}
+	if iconSlug := strings.TrimSpace(req.ModelIconSlug); iconSlug != "" {
+		out["model_icon_slug"] = iconSlug
+	}
 	if req.ModelIcon != nil {
 		iconType := strings.TrimSpace(req.ModelIcon["type"])
 		slug := strings.TrimSpace(req.ModelIcon["slug"])
-		if iconType != "" && slug != "" {
+		src := strings.TrimSpace(req.ModelIcon["src"])
+		if iconType == "image" && src != "" {
+			icon := map[string]string{"type": iconType, "src": src}
+			if slug != "" {
+				icon["slug"] = slug
+			}
+			out["model_icon"] = icon
+		} else if iconType != "" && slug != "" {
 			out["model_icon"] = map[string]string{"type": iconType, "slug": slug}
 		}
 	}

@@ -228,7 +228,7 @@ func TestChatPersistsAssistantModelMetadata(t *testing.T) {
 	req := httptest.NewRequest(
 		"POST",
 		"/v1/chat",
-		strings.NewReader(`{"prompt":"hi","session_id":"s1","model_alias":"claude-sonnet","model_label":"Claude Sonnet","model_icon":{"type":"simple-icons","slug":"anthropic"}}`),
+		strings.NewReader(`{"prompt":"hi","session_id":"s1","model_alias":"claude-sonnet","model_label":"Claude Sonnet","model_provider":"anthropic","model_family":"claude","model_icon_slug":"anthropic","model_icon":{"type":"lobe-icons","slug":"anthropic"}}`),
 	)
 	rec := httptest.NewRecorder()
 	h.ServeHTTP(rec, req)
@@ -246,6 +246,11 @@ func TestChatPersistsAssistantModelMetadata(t *testing.T) {
 	assistant := msgs[1]
 	if assistant.Metadata["model_alias"] != "claude-sonnet" {
 		t.Fatalf("model alias metadata = %#v", assistant.Metadata["model_alias"])
+	}
+	if assistant.Metadata["model_provider"] != "anthropic" ||
+		assistant.Metadata["model_family"] != "claude" ||
+		assistant.Metadata["model_icon_slug"] != "anthropic" {
+		t.Fatalf("model identity metadata = %#v", assistant.Metadata)
 	}
 	icon, ok := assistant.Metadata["model_icon"].(map[string]string)
 	if !ok || icon["slug"] != "anthropic" {

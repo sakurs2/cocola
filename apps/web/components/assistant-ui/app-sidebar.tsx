@@ -24,16 +24,15 @@ import {
   Trash2,
 } from "lucide-react";
 import { signOut, useSession } from "next-auth/react";
+import { motion } from "framer-motion";
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { cn } from "@/lib/utils";
 import { useCocola } from "@/app/runtime-provider";
 
-// Sidebar mirroring the Open WebUI chrome. New Chat + the Chats list are wired
-// to the backend (conversation persistence, route A): Chats lists the user's
-// stored conversations and clicking one replays it into the thread. Search /
-// Notes / Workspace / Channels / Folders remain decorative shells. Hand-rolled
-// (plain divs + a useState collapse) to avoid pulling in Radix.
+// User workspace sidebar. New Chat + the Chats list are wired to the backend
+// (conversation persistence, route A); secondary areas remain lightweight
+// product shells until their backing features land.
 
 type NavItem = { icon: typeof Plus; label: string; href?: string };
 
@@ -149,22 +148,30 @@ export function AppSidebar() {
 
   return (
     <>
-      <aside
+      <motion.aside
+        initial={false}
+        animate={{ width: collapsed ? 52 : 264 }}
+        transition={{ type: "spring", stiffness: 380, damping: 36 }}
         className={cn(
-          "flex h-full shrink-0 flex-col border-r border-sidebar-border bg-sidebar text-sidebar-foreground transition-[width] duration-200",
-          collapsed ? "w-[3.25rem]" : "w-64",
+          "glass-panel m-2 flex h-[calc(100%-1rem)] shrink-0 flex-col overflow-hidden rounded-2xl border border-sidebar-border/80 bg-sidebar text-sidebar-foreground",
+          collapsed ? "w-[3.25rem]" : "w-[16.5rem]",
         )}
       >
         {/* Header: brand + collapse toggle */}
         <div
-          className={cn("flex h-14 items-center gap-2 px-3", collapsed && "justify-center px-0")}
+          className={cn("flex h-16 items-center gap-2 px-3", collapsed && "justify-center px-0")}
         >
           {!collapsed && (
             <>
-              <div className="flex size-7 shrink-0 items-center justify-center rounded-lg bg-foreground text-background">
+              <div className="flex size-8 shrink-0 items-center justify-center rounded-xl bg-primary text-primary-foreground shadow-sm">
                 <MessagesSquare className="size-4" />
               </div>
-              <span className="flex-1 truncate text-sm font-semibold">cocola</span>
+              <div className="min-w-0 flex-1">
+                <span className="block truncate text-sm font-semibold">cocola</span>
+                <span className="block truncate text-[11px] text-sidebar-foreground/55">
+                  agent workspace
+                </span>
+              </div>
             </>
           )}
           <button
@@ -172,7 +179,7 @@ export function AppSidebar() {
             onClick={() => setCollapsed((v) => !v)}
             aria-label="Toggle sidebar"
             title="Toggle sidebar"
-            className="flex size-7 shrink-0 items-center justify-center rounded-md text-sidebar-foreground/70 hover:bg-sidebar-accent hover:text-sidebar-accent-foreground"
+            className="flex size-8 shrink-0 items-center justify-center rounded-xl text-sidebar-foreground/70 transition-colors hover:bg-sidebar-accent hover:text-sidebar-accent-foreground"
           >
             <PanelLeft className="size-4" />
           </button>
@@ -269,17 +276,17 @@ export function AppSidebar() {
           )}
         </nav>
 
-        <div className="border-t border-sidebar-border p-2">
+        <div className="border-t border-sidebar-border bg-sidebar/80 p-2">
           <div className="flex items-center gap-2">
             <Link
               href="/profile"
               title="Profile"
               className={cn(
-                "flex min-w-0 flex-1 items-center gap-2 rounded-md px-2 py-1.5 text-sidebar-foreground/90 transition-colors hover:bg-sidebar-accent hover:text-sidebar-accent-foreground",
+                "flex min-w-0 flex-1 items-center gap-2 rounded-xl px-2 py-1.5 text-sidebar-foreground/90 transition-colors hover:bg-sidebar-accent hover:text-sidebar-accent-foreground",
                 collapsed && "justify-center px-0",
               )}
             >
-              <div className="grid size-6 shrink-0 place-items-center rounded-full bg-amber-500/90 text-[11px] font-medium text-white">
+              <div className="grid size-7 shrink-0 place-items-center rounded-full bg-primary text-[11px] font-medium text-primary-foreground">
                 {userInitial}
               </div>
               {!collapsed && (
@@ -299,14 +306,14 @@ export function AppSidebar() {
                 title="Sign out"
                 aria-label="Sign out"
                 onClick={() => void signOut({ callbackUrl: "/login" })}
-                className="grid size-7 shrink-0 place-items-center rounded-md text-sidebar-foreground/60 hover:bg-sidebar-accent hover:text-sidebar-accent-foreground"
+                className="grid size-8 shrink-0 place-items-center rounded-xl text-sidebar-foreground/60 hover:bg-sidebar-accent hover:text-sidebar-accent-foreground"
               >
                 <LogOut className="size-4" />
               </button>
             )}
           </div>
         </div>
-      </aside>
+      </motion.aside>
 
       {deleteTarget && (
         <DeleteConversationDialog
@@ -354,8 +361,8 @@ function SidebarButton({
       title={title}
       onClick={onClick}
       className={cn(
-        "flex h-8 items-center gap-2 rounded-md px-2.5 text-sm text-sidebar-foreground/90 transition-colors hover:bg-sidebar-accent hover:text-sidebar-accent-foreground",
-        active && "bg-sidebar-accent text-sidebar-accent-foreground",
+        "flex h-8 items-center gap-2 rounded-xl px-2.5 text-sm text-sidebar-foreground/80 transition-colors hover:bg-sidebar-accent hover:text-sidebar-accent-foreground",
+        active && "bg-sidebar-accent text-sidebar-accent-foreground shadow-sm",
         collapsed && "justify-center px-0",
       )}
     >
@@ -400,8 +407,8 @@ function ChatHistoryItem({
   return (
     <div
       className={cn(
-        "group relative flex h-8 items-center gap-2 rounded-md px-2.5 text-sm text-sidebar-foreground/90 transition-colors hover:bg-sidebar-accent hover:text-sidebar-accent-foreground",
-        active && "bg-sidebar-accent text-sidebar-accent-foreground",
+        "group relative flex h-8 items-center gap-2 rounded-xl px-2.5 text-sm text-sidebar-foreground/85 transition-colors hover:bg-sidebar-accent hover:text-sidebar-accent-foreground",
+        active && "bg-sidebar-accent text-sidebar-accent-foreground shadow-sm",
       )}
       title={title}
     >
