@@ -52,7 +52,7 @@ import { cn } from "@/lib/utils";
 export const Thread: FC = () => {
   return (
     <ThreadPrimitive.Root
-      className="relative flex h-full flex-col overflow-hidden bg-background"
+      className="relative flex h-full flex-col overflow-hidden bg-transparent"
       style={{ ["--thread-max-width" as string]: "46rem" }}
     >
       <ThreadPrimitive.If empty>
@@ -128,7 +128,7 @@ const ThreadWelcome: FC = () => {
         className="flex w-full max-w-[var(--thread-max-width)] flex-grow flex-col items-center justify-center"
       >
         <div className="flex flex-col items-center gap-3 text-center">
-          <div className="flex size-12 items-center justify-center rounded-2xl bg-primary text-primary-foreground shadow-lg shadow-primary/20">
+          <div className="cocola-hero-badge flex size-12 items-center justify-center rounded-2xl text-white">
             <MessagesSquare className="size-5" />
           </div>
           <p className="text-3xl font-semibold tracking-normal text-foreground">
@@ -148,7 +148,7 @@ const ThreadWelcome: FC = () => {
           <Composer />
         </div>
 
-        <div className="mt-6 w-full rounded-2xl border border-border bg-card/70 p-2 shadow-sm">
+        <div className="cocola-suggest-card mt-6 w-full rounded-2xl border p-2">
           <div className="mb-1 flex items-center gap-1.5 px-2 text-xs font-medium uppercase text-muted-foreground">
             <Zap className="size-3.5" />
             Suggested
@@ -159,7 +159,7 @@ const ThreadWelcome: FC = () => {
                 key={title}
                 prompt={prompt}
                 send
-                className="flex flex-col items-start gap-0.5 rounded-xl px-3 py-2.5 text-left transition-colors hover:bg-accent hover:text-accent-foreground"
+                className="cocola-suggest-item flex flex-col items-start gap-0.5 rounded-xl px-3 py-2.5 text-left hover:bg-white/70 hover:text-accent-foreground"
               >
                 <span className="text-sm font-medium text-foreground">{title}</span>
                 <span className="text-xs text-muted-foreground">{subtitle}</span>
@@ -182,7 +182,7 @@ const Composer: FC = () => {
       whileFocus={{ y: -1 }}
       transition={{ type: "spring", stiffness: 420, damping: 32 }}
     >
-      <ComposerPrimitive.Root className="composer-lift relative z-10 flex w-full flex-col rounded-2xl border border-input bg-card/95 px-3 py-2 transition-colors focus-within:border-ring">
+      <ComposerPrimitive.Root className="composer-lift relative z-10 flex w-full flex-col rounded-2xl border px-3 py-2">
         <ComposerAttachments />
         <ComposerPrimitive.Input
           rows={1}

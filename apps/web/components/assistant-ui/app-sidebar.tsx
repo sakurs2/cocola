@@ -182,7 +182,7 @@ export function AppSidebar() {
         animate={{ width: collapsed ? 64 : 272 }}
         transition={{ type: "spring", stiffness: 380, damping: 36 }}
         className={cn(
-          "sky-glass-sidebar m-2 flex h-[calc(100%-1rem)] shrink-0 flex-col overflow-hidden rounded-3xl border text-sidebar-foreground max-sm:absolute max-sm:left-0 max-sm:top-0 max-sm:z-40",
+          "sky-glass-sidebar my-1.5 ml-1.5 flex h-[calc(100%-0.75rem)] shrink-0 flex-col overflow-hidden rounded-[1.4rem] border text-sidebar-foreground max-sm:absolute max-sm:left-0 max-sm:top-0 max-sm:z-40",
           collapsed ? "w-16" : "w-[17rem]",
         )}
       >

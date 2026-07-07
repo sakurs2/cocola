@@ -190,10 +190,11 @@
 
   .cocola-user-ui.workspace-grain {
     background:
-      radial-gradient(ellipse at 86% 18%, hsl(0 0% 100% / 0.76) 0 8rem, transparent 14rem),
-      radial-gradient(ellipse at 12% 42%, hsl(0 0% 100% / 0.7) 0 6rem, transparent 13rem),
-      linear-gradient(180deg, hsl(204 100% 86% / 0.88), hsl(212 42% 98%) 24rem),
-      radial-gradient(circle at 28% -6rem, hsl(221 83% 68% / 0.16), transparent 24rem),
+      radial-gradient(108% 78% at 90% -4%, hsl(214 100% 78% / 0.55) 0%, transparent 42%),
+      radial-gradient(96% 72% at 2% 14%, hsl(232 92% 80% / 0.42) 0%, transparent 48%),
+      radial-gradient(84% 66% at 82% 96%, hsl(268 88% 82% / 0.42) 0%, transparent 52%),
+      radial-gradient(72% 58% at 12% 104%, hsl(190 96% 76% / 0.4) 0%, transparent 52%),
+      linear-gradient(180deg, hsl(210 100% 84% / 0.6), hsl(216 60% 97%) 34rem),
       hsl(var(--background));
   }
 
@@ -258,9 +259,88 @@
   }
 
   .cocola-user-ui .composer-lift {
+    border-color: hsl(0 0% 100% / 0.72);
+    background: linear-gradient(180deg, hsl(0 0% 100% / 0.72), hsl(210 56% 99% / 0.52));
     box-shadow:
-      0 1px 1px hsl(222 47% 11% / 0.04),
-      0 18px 45px hsl(221 83% 45% / 0.11);
+      inset 0 1.5px 0 hsl(0 0% 100% / 1),
+      inset 0 0 0 1px hsl(0 0% 100% / 0.5),
+      0 1px 2px hsl(222 47% 11% / 0.05),
+      0 20px 48px hsl(221 83% 45% / 0.18);
+    backdrop-filter: blur(26px) saturate(1.5);
+    transition:
+      box-shadow 240ms cubic-bezier(0.22, 1, 0.36, 1),
+      border-color 240ms ease,
+      transform 240ms cubic-bezier(0.22, 1, 0.36, 1);
+  }
+
+  .cocola-user-ui .composer-lift:focus-within {
+    border-color: hsl(221 83% 60% / 0.55);
+    box-shadow:
+      inset 0 1px 0 hsl(0 0% 100% / 0.96),
+      inset 0 0 0 1px hsl(221 83% 62% / 0.3),
+      0 1px 2px hsl(222 47% 11% / 0.06),
+      0 22px 54px hsl(221 83% 48% / 0.22);
+  }
+
+  /* Main workspace surface: real glass so the ambient aurora reads through. */
+  .cocola-user-ui .cocola-main-glass {
+    position: relative;
+    border-color: hsl(0 0% 100% / 0.85);
+    background:
+      linear-gradient(180deg, hsl(0 0% 100% / 0.44), hsl(210 70% 99% / 0.2)),
+      radial-gradient(140% 60% at 50% -10%, hsl(0 0% 100% / 0.5), transparent 60%);
+    box-shadow:
+      inset 0 1.5px 0 hsl(0 0% 100% / 1),
+      inset 0 0 0 1px hsl(0 0% 100% / 0.5),
+      inset 0 -30px 60px hsl(214 60% 88% / 0.18),
+      0 1px 2px hsl(215 40% 20% / 0.05),
+      0 34px 80px hsl(215 50% 32% / 0.16);
+    backdrop-filter: blur(30px) saturate(1.5);
+  }
+
+  .cocola-user-ui .cocola-main-glass::before {
+    content: "";
+    position: absolute;
+    inset: 0;
+    z-index: 0;
+    pointer-events: none;
+    border-radius: inherit;
+    background: linear-gradient(120deg, hsl(0 0% 100% / 0.34) 0%, transparent 26%);
+  }
+
+  .cocola-user-ui .cocola-main-glass > * {
+    position: relative;
+    z-index: 1;
+  }
+
+  /* Gradient, softly glowing hero badge for the empty-state model title. */
+  .cocola-user-ui .cocola-hero-badge {
+    background: linear-gradient(150deg, hsl(221 83% 58%), hsl(244 80% 60%) 52%, hsl(264 78% 61%));
+    box-shadow:
+      inset 0 1px 0 hsl(0 0% 100% / 0.45),
+      0 8px 22px hsl(233 83% 45% / 0.36),
+      0 2px 6px hsl(233 83% 30% / 0.3);
+  }
+
+  /* Lightweight glass card for the Suggested list. */
+  .cocola-user-ui .cocola-suggest-card {
+    border-color: hsl(0 0% 100% / 0.6);
+    background: linear-gradient(180deg, hsl(0 0% 100% / 0.64), hsl(210 52% 99% / 0.42));
+    box-shadow:
+      inset 0 1px 0 hsl(0 0% 100% / 0.85),
+      0 1px 2px hsl(222 47% 11% / 0.04),
+      0 12px 32px hsl(221 83% 45% / 0.09);
+    backdrop-filter: blur(16px) saturate(1.2);
+  }
+
+  .cocola-user-ui .cocola-suggest-item {
+    transition:
+      background-color 180ms ease,
+      transform 180ms cubic-bezier(0.22, 1, 0.36, 1);
+  }
+
+  .cocola-user-ui .cocola-suggest-item:hover {
+    transform: translateX(3px);
   }
 
   .cocola-user-ui .aui-answer-border-beam::before {
@@ -329,6 +409,15 @@
 
   .cocola-user-ui .message-enter {
     animation: none;
+  }
+
+  .cocola-user-ui .cocola-suggest-item,
+  .cocola-user-ui .composer-lift {
+    transition: none;
+  }
+
+  .cocola-user-ui .cocola-suggest-item:hover {
+    transform: none;
   }
 
   .cocola-user-ui .cocola-cloud-field {
