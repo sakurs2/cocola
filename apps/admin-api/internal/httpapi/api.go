@@ -128,6 +128,8 @@ func (a *API) Router() http.Handler {
 			r.Delete("/{key}", a.resetSystemSetting)
 		})
 
+		r.Get("/architecture", a.getArchitecture)
+
 		r.Route("/tokens", func(r chi.Router) {
 			r.Post("/", a.issueToken)
 			r.Get("/", a.listTokens)

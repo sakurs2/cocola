@@ -33,3 +33,34 @@ export const SIMPLE_ICON_FALLBACK_BADGES: Record<string, string> = {
   xai: "xAI",
   moonshot: "K",
 };
+
+export const LOBE_ICON_SLUG_ALIASES: Record<string, string> = {
+  anthropic: "anthropic",
+  claude: "claude",
+  claudecode: "claudecode",
+  codex: "codex",
+  deepseek: "deepseek",
+  doubao: "doubao",
+  gemini: "gemini",
+  google: "google",
+  googlegemini: "gemini",
+  grok: "grok",
+  kimi: "moonshot",
+  mistral: "mistral",
+  moonshot: "moonshot",
+  openai: "openai",
+  qwen: "qwen",
+  volcengine: "volcengine",
+  xai: "xai",
+};
+
+export function normalizeLobeIconSlug(slug: string | undefined): string {
+  const normalized = (slug ?? "").trim().toLowerCase().replace(/_/g, "-");
+  if (!/^[a-z0-9-]+$/.test(normalized)) return "";
+  return LOBE_ICON_SLUG_ALIASES[normalized] ?? normalized;
+}
+
+export function lobeIconPath(slug: string | undefined): string {
+  const normalized = normalizeLobeIconSlug(slug);
+  return normalized ? `/api/model-icons/${normalized}` : "";
+}

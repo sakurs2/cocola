@@ -4,7 +4,7 @@ export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
 type ModelIcon = {
-  type: "simple-icons" | "image";
+  type: "lobe-icons" | "simple-icons" | "image";
   slug?: string;
   src?: string;
 };

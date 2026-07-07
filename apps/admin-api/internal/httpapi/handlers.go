@@ -33,6 +33,15 @@ func (a *API) health(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})
 }
 
+func (a *API) getArchitecture(w http.ResponseWriter, r *http.Request) {
+	graph, err := a.svc.Architecture(r.Context())
+	if err != nil {
+		mapErr(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, graph)
+}
+
 func (a *API) streamMyEvents(w http.ResponseWriter, r *http.Request) {
 	flusher, ok := w.(http.Flusher)
 	if !ok {

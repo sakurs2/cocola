@@ -56,6 +56,7 @@ type Admin struct {
 	skillBundles        SkillBundleStore
 	sandboxNodes        SandboxNodeManager
 	sandboxRuntimes     SandboxRuntimeManager
+	architectureChecker ArchitectureHealthChecker
 	userEvents          UserEventBroker
 	modelSecretKey      string
 	configSecretKey     string
@@ -95,6 +96,11 @@ func (a *Admin) WithSandboxNodeManager(m SandboxNodeManager) *Admin {
 // rest of admin-api remains usable.
 func (a *Admin) WithSandboxRuntimeManager(m SandboxRuntimeManager) *Admin {
 	a.sandboxRuntimes = m
+	return a
+}
+
+func (a *Admin) WithArchitectureHealthChecker(c ArchitectureHealthChecker) *Admin {
+	a.architectureChecker = c
 	return a
 }
 
@@ -1343,17 +1349,78 @@ func validIcon(route store.LLMModelRoute) bool {
 	}
 }
 
+func publicModelSlug(v string) string {
+	v = strings.ToLower(strings.TrimSpace(v))
+	v = strings.NewReplacer("_", "-", " ", "-").Replace(v)
+	return v
+}
+
+func inferPublicModelFamily(route store.LLMModelRoute) string {
+	haystack := publicModelSlug(strings.Join([]string{
+		route.Alias,
+		route.RealModel,
+		route.Label,
+		route.IconSlug,
+		route.ProviderID,
+	}, " "))
+	switch {
+	case strings.Contains(haystack, "deepseek"):
+		return "deepseek"
+	case strings.Contains(haystack, "claude"):
+		return "claude"
+	case strings.Contains(haystack, "anthropic"):
+		return "anthropic"
+	case strings.Contains(haystack, "gemini"):
+		return "gemini"
+	case strings.Contains(haystack, "google"):
+		return "google"
+	case strings.Contains(haystack, "qwen") || strings.Contains(haystack, "tongyi") ||
+		strings.Contains(haystack, "dashscope") || strings.Contains(haystack, "bailian"):
+		return "qwen"
+	case strings.Contains(haystack, "doubao"):
+		return "doubao"
+	case strings.Contains(haystack, "volc") || strings.Contains(haystack, "bytedance"):
+		return "bytedance"
+	case strings.Contains(haystack, "mistral"):
+		return "mistral"
+	case strings.Contains(haystack, "grok"):
+		return "grok"
+	case strings.Contains(haystack, "xai"):
+		return "xai"
+	case strings.Contains(haystack, "moonshot") || strings.Contains(haystack, "kimi"):
+		return "moonshot"
+	case strings.Contains(haystack, "codex"):
+		return "codex"
+	case strings.Contains(haystack, "gpt") || strings.Contains(haystack, "openai"):
+		return "openai"
+	default:
+		return publicModelSlug(route.ProviderID)
+	}
+}
+
 func publicLLMModel(route store.LLMModelRoute) store.PublicLLMModel {
+	provider := publicModelSlug(route.ProviderID)
+	family := inferPublicModelFamily(route)
+	iconSlug := publicModelSlug(route.IconSlug)
+	if iconSlug == "" {
+		iconSlug = family
+	}
+	if iconSlug == "" {
+		iconSlug = provider
+	}
 	icon := store.LLMModelIcon{Type: route.IconType}
 	if route.IconType == IconImage {
 		icon.Src = route.IconURL
 	} else {
-		icon.Slug = route.IconSlug
+		icon.Slug = iconSlug
 	}
 	return store.PublicLLMModel{
-		Alias: route.Alias,
-		Label: route.Label,
-		Icon:  icon,
+		Alias:    route.Alias,
+		Label:    route.Label,
+		Provider: provider,
+		Family:   family,
+		IconSlug: iconSlug,
+		Icon:     icon,
 	}
 }
 

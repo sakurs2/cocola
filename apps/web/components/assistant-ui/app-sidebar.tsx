@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import {
   CalendarClock,
   CheckCircle2,
@@ -24,28 +24,32 @@ import {
   Trash2,
 } from "lucide-react";
 import { signOut, useSession } from "next-auth/react";
+import { motion } from "framer-motion";
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { cn } from "@/lib/utils";
 import { useCocola } from "@/app/runtime-provider";
 
-// Sidebar mirroring the Open WebUI chrome. New Chat + the Chats list are wired
-// to the backend (conversation persistence, route A): Chats lists the user's
-// stored conversations and clicking one replays it into the thread. Search /
-// Notes / Workspace / Channels / Folders remain decorative shells. Hand-rolled
-// (plain divs + a useState collapse) to avoid pulling in Radix.
+// User workspace sidebar. New Chat + the Chats list are wired to the backend
+// (conversation persistence, route A); secondary areas remain lightweight
+// product shells until their backing features land.
 
 type NavItem = { icon: typeof Plus; label: string; href?: string };
+type SidebarSection = "actions" | "navigation" | "channels" | "folders" | "chats" | "account";
+
+type PrimaryNavItem = NavItem & {
+  section: SidebarSection;
+};
 
 // "New Chat" is wired to the runtime (rotates session_id + clears messages);
 // the rest stay decorative until multi-thread persistence lands.
-const PRIMARY_NAV: NavItem[] = [
-  { icon: Search, label: "Search" },
-  { icon: NotebookPen, label: "Notes" },
-  { icon: LayoutGrid, label: "Workspace" },
-  { icon: Sparkles, label: "Skills", href: "/skills" },
-  { icon: PlugZap, label: "MCP", href: "/mcps" },
-  { icon: ShieldCheck, label: "Admin", href: "/admin" },
+const PRIMARY_NAV: PrimaryNavItem[] = [
+  { icon: Search, label: "Search", section: "navigation" },
+  { icon: NotebookPen, label: "Notes", section: "navigation" },
+  { icon: LayoutGrid, label: "Workspace", href: "/", section: "navigation" },
+  { icon: Sparkles, label: "Skills", href: "/skills", section: "navigation" },
+  { icon: PlugZap, label: "MCP", href: "/mcps", section: "navigation" },
+  { icon: ShieldCheck, label: "Admin", href: "/admin", section: "navigation" },
 ];
 
 const CHANNELS = [{ icon: Hash, label: "general" }];
@@ -59,7 +63,16 @@ export function AppSidebar() {
   const { data: session } = useSession();
   const pathname = usePathname();
   const router = useRouter();
-  const [collapsed, setCollapsed] = useState(false);
+  const [collapsed, setCollapsed] = useState(true);
+  const [expandedSection, setExpandedSection] = useState<SidebarSection>("navigation");
+  const sectionRefs = useRef<Record<SidebarSection, HTMLDivElement | null>>({
+    actions: null,
+    navigation: null,
+    channels: null,
+    folders: null,
+    chats: null,
+    account: null,
+  });
   const [menuOpenId, setMenuOpenId] = useState<string | null>(null);
   const [editingId, setEditingId] = useState<string | null>(null);
   const [draftTitle, setDraftTitle] = useState("");
@@ -84,6 +97,21 @@ export function AppSidebar() {
   const userLabel = session?.user?.name || session?.user?.email || "User";
   const userSubtitle = session?.user?.role;
   const userInitial = userLabel.trim().slice(0, 1).toUpperCase() || "U";
+  const visiblePrimaryNav = PRIMARY_NAV.filter(
+    (item) => !item.href?.startsWith("/admin") || isAdmin,
+  );
+
+  const setSectionRef = (section: SidebarSection) => (node: HTMLDivElement | null) => {
+    sectionRefs.current[section] = node;
+  };
+
+  const revealSection = (section: SidebarSection) => {
+    setExpandedSection(section);
+    setCollapsed(false);
+    window.setTimeout(() => {
+      sectionRefs.current[section]?.scrollIntoView({ block: "nearest", behavior: "smooth" });
+    }, 180);
+  };
 
   const navigateTo = useCallback(
     (href: string) => {
@@ -149,164 +177,258 @@ export function AppSidebar() {
 
   return (
     <>
-      <aside
+      <motion.aside
+        initial={false}
+        animate={{ width: collapsed ? 64 : 272 }}
+        transition={{ type: "spring", stiffness: 380, damping: 36 }}
         className={cn(
-          "flex h-full shrink-0 flex-col border-r border-sidebar-border bg-sidebar text-sidebar-foreground transition-[width] duration-200",
-          collapsed ? "w-[3.25rem]" : "w-64",
+          "sky-glass-sidebar my-1.5 ml-1.5 flex h-[calc(100%-0.75rem)] shrink-0 flex-col overflow-hidden rounded-[1.4rem] border text-sidebar-foreground max-sm:absolute max-sm:left-0 max-sm:top-0 max-sm:z-40",
+          collapsed ? "w-16" : "w-[17rem]",
         )}
       >
-        {/* Header: brand + collapse toggle */}
         <div
-          className={cn("flex h-14 items-center gap-2 px-3", collapsed && "justify-center px-0")}
+          className={cn(
+            "flex h-16 items-center gap-2 px-3",
+            collapsed ? "justify-center px-2" : "justify-between",
+          )}
         >
-          {!collapsed && (
-            <>
-              <div className="flex size-7 shrink-0 items-center justify-center rounded-lg bg-foreground text-background">
-                <MessagesSquare className="size-4" />
-              </div>
-              <span className="flex-1 truncate text-sm font-semibold">cocola</span>
-            </>
-          )}
-          <button
-            type="button"
-            onClick={() => setCollapsed((v) => !v)}
-            aria-label="Toggle sidebar"
-            title="Toggle sidebar"
-            className="flex size-7 shrink-0 items-center justify-center rounded-md text-sidebar-foreground/70 hover:bg-sidebar-accent hover:text-sidebar-accent-foreground"
-          >
-            <PanelLeft className="size-4" />
-          </button>
-        </div>
-
-        <nav className="flex-1 overflow-y-auto px-2 pb-2">
-          {/* Primary actions */}
-          <div className="flex flex-col gap-0.5">
-            <SidebarButton collapsed={collapsed} title="New Chat" onClick={openNewChat}>
-              <Plus className="size-4 shrink-0" />
-              {!collapsed && <span className="truncate">New Chat</span>}
-            </SidebarButton>
-            <SidebarButton
-              collapsed={collapsed}
-              title="Schedule"
-              onClick={() => setScheduleOpen(true)}
+          {collapsed ? (
+            <SidebarRailButton
+              title="Expand sidebar"
+              active={false}
+              onClick={() => revealSection("navigation")}
             >
-              <CalendarClock className="size-4 shrink-0" />
-              {!collapsed && <span className="truncate">Schedule</span>}
-            </SidebarButton>
-            {PRIMARY_NAV.filter((item) => !item.href?.startsWith("/admin") || isAdmin).map(
-              ({ icon: Icon, label, href }) => {
-                const active = href ? pathname === href || pathname?.startsWith(`${href}/`) : false;
-                return (
-                  <SidebarButton
-                    key={label}
-                    collapsed={collapsed}
-                    title={label}
-                    active={active}
-                    onClick={href ? () => navigateTo(href) : undefined}
-                  >
-                    <Icon className="size-4 shrink-0" />
-                    {!collapsed && <span className="truncate">{label}</span>}
-                  </SidebarButton>
-                );
-              },
-            )}
-          </div>
-
-          {!collapsed && (
+              <MessagesSquare className="size-4" />
+            </SidebarRailButton>
+          ) : (
             <>
-              <SectionLabel>Channels</SectionLabel>
-              <div className="flex flex-col gap-0.5">
-                {CHANNELS.map(({ icon: Icon, label }) => (
-                  <SidebarButton key={label} collapsed={collapsed} title={label}>
-                    <Icon className="size-4 shrink-0" />
-                    <span className="truncate">{label}</span>
-                  </SidebarButton>
-                ))}
-              </div>
-
-              <SectionLabel>Folders</SectionLabel>
-              <div className="flex flex-col gap-0.5">
-                {FOLDERS.map(({ emoji, label }) => (
-                  <SidebarButton key={label} collapsed={collapsed} title={label}>
-                    <span className="grid size-4 shrink-0 place-items-center text-xs">{emoji}</span>
-                    <span className="truncate">{label}</span>
-                  </SidebarButton>
-                ))}
-              </div>
-
-              <SectionLabel>Chats</SectionLabel>
-              {conversations.length === 0 ? (
-                <div className="px-2.5 py-1 text-xs text-sidebar-foreground/50">
-                  No conversations yet
+              <div className="flex min-w-0 items-center gap-2">
+                <div className="flex size-9 shrink-0 items-center justify-center rounded-2xl bg-primary text-primary-foreground shadow-lg shadow-primary/20">
+                  <MessagesSquare className="size-4" />
                 </div>
-              ) : (
-                <div className="flex flex-col gap-0.5">
-                  {conversations.map((c) => (
-                    <ChatHistoryItem
-                      key={c.id}
-                      title={c.title || "Untitled"}
-                      chatType={c.chat_type || "chat"}
-                      active={c.id === activeSessionId}
-                      running={runningSessionIds.has(c.id)}
-                      unread={unreadCompletedSessionIds.has(c.id)}
-                      menuOpen={menuOpenId === c.id}
-                      editing={editingId === c.id}
-                      draftTitle={draftTitle}
-                      onOpen={() => {
-                        openConversation(c.id);
-                      }}
-                      onToggleMenu={() => setMenuOpenId((prev) => (prev === c.id ? null : c.id))}
-                      onRename={() => startRename(c.id, c.title || "Untitled")}
-                      onDelete={() => openDeleteDialog(c.id, c.title || "Untitled")}
-                      onDraftChange={setDraftTitle}
-                      onCommitRename={() => void commitRename(c.id)}
-                      onCancelRename={() => setEditingId(null)}
-                    />
-                  ))}
-                </div>
-              )}
-            </>
-          )}
-        </nav>
-
-        <div className="border-t border-sidebar-border p-2">
-          <div className="flex items-center gap-2">
-            <Link
-              href="/profile"
-              title="Profile"
-              className={cn(
-                "flex min-w-0 flex-1 items-center gap-2 rounded-md px-2 py-1.5 text-sidebar-foreground/90 transition-colors hover:bg-sidebar-accent hover:text-sidebar-accent-foreground",
-                collapsed && "justify-center px-0",
-              )}
-            >
-              <div className="grid size-6 shrink-0 place-items-center rounded-full bg-amber-500/90 text-[11px] font-medium text-white">
-                {userInitial}
-              </div>
-              {!collapsed && (
                 <div className="min-w-0 flex-1">
-                  <div className="truncate text-sm">{userLabel}</div>
-                  {userSubtitle && (
-                    <div className="truncate text-[11px] text-sidebar-foreground/55">
-                      {userSubtitle}
-                    </div>
-                  )}
+                  <span className="block truncate text-sm font-semibold">cocola</span>
+                  <span className="block truncate text-[11px] text-sidebar-foreground/55">
+                    agent workspace
+                  </span>
                 </div>
-              )}
-            </Link>
-            {!collapsed && (
+              </div>
               <button
                 type="button"
-                title="Sign out"
-                aria-label="Sign out"
-                onClick={() => void signOut({ callbackUrl: "/login" })}
-                className="grid size-7 shrink-0 place-items-center rounded-md text-sidebar-foreground/60 hover:bg-sidebar-accent hover:text-sidebar-accent-foreground"
+                onClick={() => setCollapsed(true)}
+                aria-label="Collapse sidebar"
+                title="Collapse sidebar"
+                className="flex size-8 shrink-0 items-center justify-center rounded-xl text-sidebar-foreground/70 transition-colors hover:bg-white/38 hover:text-sidebar-accent-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/45"
               >
-                <LogOut className="size-4" />
+                <PanelLeft className="size-4" />
               </button>
-            )}
-          </div>
+            </>
+          )}
         </div>
-      </aside>
+
+        {collapsed ? (
+          <>
+            <nav className="flex flex-1 flex-col items-center gap-2 px-2 pb-2">
+              <SidebarRailButton title="New Chat" onClick={() => revealSection("actions")}>
+                <Plus className="size-4" />
+              </SidebarRailButton>
+              <SidebarRailButton title="Schedule" onClick={() => revealSection("actions")}>
+                <CalendarClock className="size-4" />
+              </SidebarRailButton>
+              <div className="my-1 h-px w-8 bg-white/36" />
+              {visiblePrimaryNav.map(({ icon: Icon, label, href, section }) => {
+                const active = href
+                  ? href === "/"
+                    ? pathname === "/"
+                    : pathname === href || pathname?.startsWith(`${href}/`)
+                  : false;
+                return (
+                  <SidebarRailButton
+                    key={label}
+                    title={label}
+                    active={active}
+                    onClick={() => revealSection(section)}
+                  >
+                    <Icon className="size-4" />
+                  </SidebarRailButton>
+                );
+              })}
+              <div className="my-1 h-px w-8 bg-white/36" />
+              <SidebarRailButton title="Channels" onClick={() => revealSection("channels")}>
+                <Hash className="size-4" />
+              </SidebarRailButton>
+              <SidebarRailButton title="Folders" onClick={() => revealSection("folders")}>
+                <FolderClosed className="size-4" />
+              </SidebarRailButton>
+              <SidebarRailButton
+                title="Chats"
+                active={conversations.some((c) => c.id === activeSessionId)}
+                onClick={() => revealSection("chats")}
+              >
+                <MessagesSquare className="size-4" />
+              </SidebarRailButton>
+            </nav>
+            <div className="flex flex-col items-center gap-2 px-2 pb-3">
+              <SidebarRailButton title="Profile" onClick={() => revealSection("account")}>
+                <span className="grid size-6 place-items-center rounded-full bg-primary text-[10px] font-semibold text-primary-foreground">
+                  {userInitial}
+                </span>
+              </SidebarRailButton>
+              <SidebarRailButton title="Sign out" onClick={() => revealSection("account")}>
+                <LogOut className="size-4" />
+              </SidebarRailButton>
+            </div>
+          </>
+        ) : (
+          <>
+            <nav className="flex-1 overflow-y-auto px-2 pb-2">
+              <SidebarSectionPanel
+                refSetter={setSectionRef("actions")}
+                active={expandedSection === "actions"}
+              >
+                <SidebarExpandedRow title="New Chat" onClick={openNewChat}>
+                  <Plus className="size-4 shrink-0" />
+                  <span className="truncate">New Chat</span>
+                </SidebarExpandedRow>
+                <SidebarExpandedRow title="Schedule" onClick={() => setScheduleOpen(true)}>
+                  <CalendarClock className="size-4 shrink-0" />
+                  <span className="truncate">Schedule</span>
+                </SidebarExpandedRow>
+              </SidebarSectionPanel>
+
+              <SidebarSectionPanel
+                refSetter={setSectionRef("navigation")}
+                active={expandedSection === "navigation"}
+              >
+                {visiblePrimaryNav.map(({ icon: Icon, label, href }) => {
+                  const active = href
+                    ? href === "/"
+                      ? pathname === "/"
+                      : pathname === href || pathname?.startsWith(`${href}/`)
+                    : false;
+                  return (
+                    <SidebarExpandedRow
+                      key={label}
+                      title={label}
+                      active={active}
+                      onClick={href ? () => navigateTo(href) : undefined}
+                    >
+                      <Icon className="size-4 shrink-0" />
+                      <span className="truncate">{label}</span>
+                    </SidebarExpandedRow>
+                  );
+                })}
+              </SidebarSectionPanel>
+
+              <SidebarSectionPanel
+                refSetter={setSectionRef("channels")}
+                active={expandedSection === "channels"}
+              >
+                <SectionLabel>Channels</SectionLabel>
+                <div className="flex flex-col gap-0.5">
+                  {CHANNELS.map(({ icon: Icon, label }) => (
+                    <SidebarExpandedRow key={label} title={label}>
+                      <Icon className="size-4 shrink-0" />
+                      <span className="truncate">{label}</span>
+                    </SidebarExpandedRow>
+                  ))}
+                </div>
+              </SidebarSectionPanel>
+
+              <SidebarSectionPanel
+                refSetter={setSectionRef("folders")}
+                active={expandedSection === "folders"}
+              >
+                <SectionLabel>Folders</SectionLabel>
+                <div className="flex flex-col gap-0.5">
+                  {FOLDERS.map(({ emoji, label }) => (
+                    <SidebarExpandedRow key={label} title={label}>
+                      <span className="grid size-4 shrink-0 place-items-center text-xs">
+                        {emoji}
+                      </span>
+                      <span className="truncate">{label}</span>
+                    </SidebarExpandedRow>
+                  ))}
+                </div>
+              </SidebarSectionPanel>
+
+              <SidebarSectionPanel
+                refSetter={setSectionRef("chats")}
+                active={expandedSection === "chats"}
+              >
+                <SectionLabel>Chats</SectionLabel>
+                {conversations.length === 0 ? (
+                  <div className="px-2.5 py-1 text-xs text-sidebar-foreground/50">
+                    No conversations yet
+                  </div>
+                ) : (
+                  <div className="flex flex-col gap-0.5">
+                    {conversations.map((c) => (
+                      <ChatHistoryItem
+                        key={c.id}
+                        title={c.title || "Untitled"}
+                        chatType={c.chat_type || "chat"}
+                        active={c.id === activeSessionId}
+                        running={runningSessionIds.has(c.id)}
+                        unread={unreadCompletedSessionIds.has(c.id)}
+                        menuOpen={menuOpenId === c.id}
+                        editing={editingId === c.id}
+                        draftTitle={draftTitle}
+                        onOpen={() => {
+                          openConversation(c.id);
+                        }}
+                        onToggleMenu={() => setMenuOpenId((prev) => (prev === c.id ? null : c.id))}
+                        onRename={() => startRename(c.id, c.title || "Untitled")}
+                        onDelete={() => openDeleteDialog(c.id, c.title || "Untitled")}
+                        onDraftChange={setDraftTitle}
+                        onCommitRename={() => void commitRename(c.id)}
+                        onCancelRename={() => setEditingId(null)}
+                      />
+                    ))}
+                  </div>
+                )}
+              </SidebarSectionPanel>
+            </nav>
+
+            <div
+              ref={setSectionRef("account")}
+              className={cn(
+                "border-t border-white/35 bg-white/10 p-2 transition-colors",
+                expandedSection === "account" && "bg-white/22",
+              )}
+            >
+              <div className="flex items-center gap-2">
+                <Link
+                  href="/profile"
+                  title="Profile"
+                  className="flex min-w-0 flex-1 items-center gap-2 rounded-2xl px-2 py-1.5 text-sidebar-foreground/90 transition-colors hover:bg-white/38 hover:text-sidebar-accent-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/45"
+                >
+                  <div className="grid size-8 shrink-0 place-items-center rounded-full bg-primary text-[11px] font-medium text-primary-foreground">
+                    {userInitial}
+                  </div>
+                  <div className="min-w-0 flex-1">
+                    <div className="truncate text-sm">{userLabel}</div>
+                    {userSubtitle && (
+                      <div className="truncate text-[11px] text-sidebar-foreground/55">
+                        {userSubtitle}
+                      </div>
+                    )}
+                  </div>
+                </Link>
+                <button
+                  type="button"
+                  title="Sign out"
+                  aria-label="Sign out"
+                  onClick={() => void signOut({ callbackUrl: "/login" })}
+                  className="grid size-8 shrink-0 place-items-center rounded-xl text-sidebar-foreground/60 transition-colors hover:bg-white/38 hover:text-sidebar-accent-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/45"
+                >
+                  <LogOut className="size-4" />
+                </button>
+              </div>
+            </div>
+          </>
+        )}
+      </motion.aside>
 
       {deleteTarget && (
         <DeleteConversationDialog
@@ -335,15 +457,43 @@ export function AppSidebar() {
   );
 }
 
-function SidebarButton({
+function SidebarRailButton({
   children,
-  collapsed,
   title,
   onClick,
   active,
 }: {
   children: React.ReactNode;
-  collapsed: boolean;
+  title: string;
+  onClick?: () => void;
+  active?: boolean;
+}) {
+  return (
+    <motion.button
+      type="button"
+      title={title}
+      aria-label={title}
+      onClick={onClick}
+      whileHover={{ scale: 1.04, y: -1 }}
+      whileTap={{ scale: 0.97 }}
+      className={cn(
+        "grid size-10 place-items-center rounded-2xl text-sidebar-foreground/70 transition-colors hover:bg-white/38 hover:text-sidebar-accent-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/45",
+        active &&
+          "bg-white/44 text-sidebar-accent-foreground shadow-[inset_0_1px_0_hsl(0_0%_100%/0.7),0_10px_26px_hsl(207_78%_38%/0.14)] backdrop-blur-md",
+      )}
+    >
+      {children}
+    </motion.button>
+  );
+}
+
+function SidebarExpandedRow({
+  children,
+  title,
+  onClick,
+  active,
+}: {
+  children: React.ReactNode;
   title: string;
   onClick?: () => void;
   active?: boolean;
@@ -354,13 +504,35 @@ function SidebarButton({
       title={title}
       onClick={onClick}
       className={cn(
-        "flex h-8 items-center gap-2 rounded-md px-2.5 text-sm text-sidebar-foreground/90 transition-colors hover:bg-sidebar-accent hover:text-sidebar-accent-foreground",
-        active && "bg-sidebar-accent text-sidebar-accent-foreground",
-        collapsed && "justify-center px-0",
+        "flex h-9 w-full items-center gap-2 rounded-2xl px-2.5 text-sm text-sidebar-foreground/80 transition-all hover:bg-white/38 hover:text-sidebar-accent-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/45",
+        active &&
+          "bg-white/42 text-sidebar-accent-foreground shadow-[inset_0_1px_0_hsl(0_0%_100%/0.68),0_10px_24px_hsl(207_78%_38%/0.12)] backdrop-blur-md",
       )}
     >
       {children}
     </button>
+  );
+}
+
+function SidebarSectionPanel({
+  children,
+  active,
+  refSetter,
+}: {
+  children: React.ReactNode;
+  active: boolean;
+  refSetter: (node: HTMLDivElement | null) => void;
+}) {
+  return (
+    <div
+      ref={refSetter}
+      className={cn(
+        "mb-2 rounded-3xl p-1 transition-colors",
+        active && "bg-white/18 shadow-[inset_0_1px_0_hsl(0_0%_100%/0.5)] backdrop-blur-sm",
+      )}
+    >
+      {children}
+    </div>
   );
 }
 
@@ -400,8 +572,8 @@ function ChatHistoryItem({
   return (
     <div
       className={cn(
-        "group relative flex h-8 items-center gap-2 rounded-md px-2.5 text-sm text-sidebar-foreground/90 transition-colors hover:bg-sidebar-accent hover:text-sidebar-accent-foreground",
-        active && "bg-sidebar-accent text-sidebar-accent-foreground",
+        "group relative flex h-8 items-center gap-2 rounded-xl px-2.5 text-sm text-sidebar-foreground/85 transition-colors hover:bg-sidebar-accent hover:text-sidebar-accent-foreground",
+        active && "bg-sidebar-accent text-sidebar-accent-foreground shadow-sm",
       )}
       title={title}
     >

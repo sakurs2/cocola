@@ -90,6 +90,9 @@ func TestLLMModelsDefaultAndPublicList(t *testing.T) {
 	if len(public) != 1 || public[0].Alias != "sonnet" {
 		t.Fatalf("public models = %+v", public)
 	}
+	if public[0].Provider != "anthropic" || public[0].Family != "claude" || public[0].IconSlug != "anthropic" {
+		t.Fatalf("public model identity = %+v", public[0])
+	}
 
 	if _, err := svc.SetDefaultLLMModel(ctx, "hidden", "admin"); !errors.Is(err, ErrInvalidArg) {
 		t.Fatalf("hidden default want ErrInvalidArg, got %v", err)

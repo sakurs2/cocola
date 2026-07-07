@@ -18,11 +18,15 @@
 // Thread without restructuring.
 
 import { useCocola } from "@/app/runtime-provider";
-import { CodeBlock, MarkdownContent } from "@/components/assistant-ui/markdown-text";
+import { MarkdownContent } from "@/components/assistant-ui/markdown-text";
 import { Thread } from "@/components/assistant-ui/thread";
+import { AnimatePresence, motion } from "framer-motion";
 import { Check, Code2, Download, Eye, FileQuestion, Share2, X } from "lucide-react";
+import dynamic from "next/dynamic";
 import { useRouter } from "next/navigation";
 import { type PointerEvent, useCallback, useEffect, useState } from "react";
+
+const MonacoEditor = dynamic(() => import("@monaco-editor/react"), { ssr: false });
 
 export default function Home() {
   return <Workspace />;
@@ -79,24 +83,34 @@ function Workspace() {
         <div className="min-w-0 flex-1">
           <Thread />
         </div>
-        {selectedArtifact ? (
-          <>
-            <div
-              role="separator"
-              aria-label="Resize file preview"
-              aria-orientation="vertical"
-              title="Resize preview"
-              onPointerDown={startPreviewResize}
-              className="group relative z-10 w-2 shrink-0 cursor-col-resize touch-none"
-            >
-              <div className="absolute inset-y-0 left-1/2 w-px -translate-x-1/2 bg-border transition-colors group-hover:bg-primary/70" />
-              <div className="absolute inset-y-0 left-1/2 w-1 -translate-x-1/2 rounded-full bg-transparent transition-colors group-hover:bg-primary/20" />
-            </div>
-            <aside className="shrink-0 bg-background" style={{ width: `${previewWidth}px` }}>
-              <ArtifactPreviewPanel />
-            </aside>
-          </>
-        ) : null}
+        <AnimatePresence initial={false}>
+          {selectedArtifact ? (
+            <>
+              <div
+                role="separator"
+                aria-label="Resize file preview"
+                aria-orientation="vertical"
+                title="Resize preview"
+                onPointerDown={startPreviewResize}
+                className="group relative z-10 w-3 shrink-0 cursor-col-resize touch-none"
+              >
+                <div className="absolute inset-y-4 left-1/2 w-px -translate-x-1/2 rounded-full bg-border transition-colors group-hover:bg-primary/70" />
+                <div className="absolute inset-y-4 left-1/2 w-1 -translate-x-1/2 rounded-full bg-transparent transition-colors group-hover:bg-primary/20" />
+              </div>
+              <motion.aside
+                key="artifact-preview"
+                initial={{ opacity: 0, x: 28 }}
+                animate={{ opacity: 1, x: 0 }}
+                exit={{ opacity: 0, x: 28 }}
+                transition={{ duration: 0.18, ease: "easeOut" }}
+                className="m-2 ml-0 shrink-0 overflow-hidden rounded-2xl border border-border bg-card shadow-xl"
+                style={{ width: `${previewWidth}px` }}
+              >
+                <ArtifactPreviewPanel />
+              </motion.aside>
+            </>
+          ) : null}
+        </AnimatePresence>
       </div>
     </div>
   );
@@ -123,8 +137,12 @@ function TopBar() {
   }, [activeSessionId]);
 
   return (
-    <header className="flex flex-col border-b border-border">
+    <header className="flex flex-col border-b border-border/80 bg-background/80 backdrop-blur">
       <div className="flex h-14 items-center gap-3 px-4">
+        <div className="min-w-0">
+          <div className="text-sm font-semibold">Workspace</div>
+          <div className="text-xs text-muted-foreground">Press ⌘K to jump around</div>
+        </div>
         <div className="ml-auto flex items-center gap-2">
           <button
             type="button"
@@ -140,11 +158,11 @@ function TopBar() {
             onClick={() => void copyShareLink()}
             className="inline-flex size-8 items-center justify-center rounded-full text-muted-foreground transition-colors hover:bg-muted hover:text-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring disabled:pointer-events-none disabled:opacity-40"
           >
-            {copied ? <Check className="size-4 text-emerald-400" /> : <Share2 className="size-4" />}
+            {copied ? <Check className="size-4 text-emerald-600" /> : <Share2 className="size-4" />}
           </button>
           {sandbox ? (
             <span
-              className="rounded-full bg-emerald-500/15 px-2 py-0.5 font-mono text-[11px] text-emerald-400"
+              className="rounded-full border border-emerald-500/20 bg-emerald-500/10 px-2 py-0.5 font-mono text-[11px] text-emerald-700"
               title={sandbox.endpoint}
             >
               sandbox {sandbox.sandboxId.slice(0, 8) || "—"} {sandbox.reused ? "(reused)" : "(new)"}
@@ -200,7 +218,7 @@ function ArtifactPreviewPanel() {
 
   return (
     <div className="flex h-full flex-col">
-      <header className="flex min-h-14 items-center gap-3 border-b border-border px-4">
+      <header className="flex min-h-14 items-center gap-3 border-b border-border bg-card px-4">
         <div className="min-w-0 flex-1">
           <div className="truncate text-sm font-medium">{selectedArtifact.filename}</div>
           <div className="truncate text-xs text-muted-foreground">
@@ -237,14 +255,14 @@ function ArtifactPreviewPanel() {
           <X className="size-4" />
         </button>
       </header>
-      <div className="min-h-0 flex-1 overflow-auto">
+      <div className="min-h-0 flex-1 overflow-auto bg-background">
         {canImage ? (
           <div className="flex min-h-full items-start justify-center p-4">
             {/* eslint-disable-next-line @next/next/no-img-element */}
             <img
               src={selectedArtifact.downloadUrl}
               alt={selectedArtifact.filename}
-              className="max-h-full max-w-full rounded-lg border border-border object-contain"
+              className="max-h-full max-w-full rounded-xl border border-border bg-card object-contain shadow-sm"
             />
           </div>
         ) : canPdf ? (
@@ -299,13 +317,51 @@ function TextArtifactPreview({
     return <MarkdownContent value={text} className="p-4" />;
   }
   if (kind === "code") {
-    return <CodeBlock language={language} code={text} className="m-4" />;
+    return (
+      <div className="h-full min-h-[420px]">
+        <MonacoEditor
+          language={toMonacoLanguage(language)}
+          value={text}
+          theme="vs"
+          options={{
+            readOnly: true,
+            minimap: { enabled: false },
+            fontSize: 12,
+            lineHeight: 20,
+            scrollBeyondLastLine: false,
+            wordWrap: "on",
+            renderLineHighlight: "none",
+            overviewRulerBorder: false,
+          }}
+        />
+      </div>
+    );
   }
   return (
-    <pre className="min-h-full whitespace-pre-wrap break-words p-4 font-mono text-xs leading-5 text-foreground">
-      {text}
-    </pre>
+    <div className="h-full min-h-[420px]">
+      <MonacoEditor
+        language="plaintext"
+        value={text}
+        theme="vs"
+        options={{
+          readOnly: true,
+          minimap: { enabled: false },
+          fontSize: 12,
+          lineHeight: 20,
+          scrollBeyondLastLine: false,
+          wordWrap: "on",
+          renderLineHighlight: "none",
+          overviewRulerBorder: false,
+        }}
+      />
+    </div>
   );
+}
+
+function toMonacoLanguage(language: string): string {
+  if (language === "shell") return "shell";
+  if (language === "text") return "plaintext";
+  return language;
 }
 
 function isHtmlPreview(mime: string, filename: string): boolean {
