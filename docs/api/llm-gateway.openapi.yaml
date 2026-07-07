@@ -1,0 +1,225 @@
+openapi: 3.0.3
+info:
+  title: cocola LLM Gateway API
+  version: 0.0.1
+  description: Anthropic-compatible model gateway with cocola auth, quota, and usage reads.
+servers:
+  - url: http://127.0.0.1:8081
+    description: Local dev LLM gateway
+tags:
+  - name: Health
+  - name: Messages
+  - name: Usage
+  - name: Quota
+paths:
+  /healthz:
+    get:
+      tags: [Health]
+      operationId: llmGatewayHealthz
+      summary: Check liveness and configured model aliases.
+      responses:
+        "200":
+          description: Health and registry summary.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/HealthResponse"
+  /v1/messages:
+    post:
+      tags: [Messages]
+      operationId: createMessage
+      summary: Anthropic Messages-compatible endpoint.
+      description: Accepts standard Anthropic Messages payloads. When `stream=true`, returns SSE.
+      security:
+        - RuntimeBearer: []
+        - AnthropicAPIKey: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/AnthropicMessagesRequest"
+      responses:
+        "200":
+          description: Anthropic message response or SSE stream.
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: true
+            text/event-stream:
+              schema:
+                type: string
+        "400":
+          $ref: "#/components/responses/Error"
+        "401":
+          $ref: "#/components/responses/Error"
+        "404":
+          $ref: "#/components/responses/Error"
+        "429":
+          $ref: "#/components/responses/Error"
+        "503":
+          $ref: "#/components/responses/Error"
+  /v1/usage:
+    get:
+      tags: [Usage]
+      operationId: getUsage
+      summary: Read recent token usage for the caller.
+      security:
+        - RuntimeBearer: []
+        - AnthropicAPIKey: []
+      parameters:
+        - in: query
+          name: user_id
+          description: Honored only when auth is disabled in dev mode.
+          schema:
+            type: string
+        - in: query
+          name: session_id
+          schema:
+            type: string
+        - in: query
+          name: limit
+          schema:
+            type: integer
+            default: 20
+            minimum: 1
+            maximum: 200
+      responses:
+        "200":
+          description: Usage records and aggregates.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/UsageResponse"
+        "401":
+          $ref: "#/components/responses/Error"
+  /v1/quota:
+    get:
+      tags: [Quota]
+      operationId: getQuota
+      summary: Read quota status for the caller.
+      security:
+        - RuntimeBearer: []
+        - AnthropicAPIKey: []
+      responses:
+        "200":
+          description: Quota status.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/QuotaResponse"
+        "401":
+          $ref: "#/components/responses/Error"
+components:
+  securitySchemes:
+    RuntimeBearer:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+    AnthropicAPIKey:
+      type: apiKey
+      in: header
+      name: x-api-key
+      description: The Claude SDK sends ANTHROPIC_API_KEY in this header.
+  responses:
+    Error:
+      description: Standard cocola error envelope.
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorEnvelope"
+  schemas:
+    HealthResponse:
+      type: object
+      properties:
+        status:
+          type: string
+          example: ok
+        default_alias:
+          type: string
+        aliases:
+          type: array
+          items:
+            type: string
+        auth_enabled:
+          type: boolean
+      required: [status, aliases, auth_enabled]
+    AnthropicMessagesRequest:
+      type: object
+      additionalProperties: true
+      properties:
+        model:
+          type: string
+        max_tokens:
+          type: integer
+        stream:
+          type: boolean
+        messages:
+          type: array
+          items:
+            type: object
+            additionalProperties: true
+      required: [model, messages]
+    ErrorEnvelope:
+      type: object
+      properties:
+        error:
+          type: object
+          properties:
+            code:
+              type: string
+              example: PERMISSION_DENIED
+            message:
+              type: string
+              example: invalid token
+          required: [code, message]
+      required: [error]
+    UsageResponse:
+      type: object
+      properties:
+        recent:
+          type: array
+          items:
+            type: object
+            additionalProperties: true
+        user_aggregate:
+          $ref: "#/components/schemas/UsageAggregate"
+        session_aggregate:
+          $ref: "#/components/schemas/UsageAggregate"
+    UsageAggregate:
+      type: object
+      additionalProperties: true
+      properties:
+        input_tokens:
+          type: integer
+        output_tokens:
+          type: integer
+        total_tokens:
+          type: integer
+    QuotaResponse:
+      type: object
+      properties:
+        user_id:
+          type: string
+        tenant_id:
+          type: string
+        scopes:
+          type: array
+          items:
+            type: object
+            properties:
+              scope:
+                type: string
+              subject:
+                type: string
+              period:
+                type: string
+              used:
+                type: integer
+              limit:
+                type: integer
+              remaining:
+                type: integer
+              exceeded:
+                type: boolean

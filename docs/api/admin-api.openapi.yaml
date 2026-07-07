@@ -1,0 +1,1772 @@
+openapi: 3.0.3
+info:
+  title: cocola Admin API
+  version: 0.0.1
+  description: Operator and runtime-control API for cocola administration.
+servers:
+  - url: http://127.0.0.1:8092
+    description: Local dev admin-api
+tags:
+  - name: Health
+  - name: Auth
+  - name: Runtime
+  - name: Users
+  - name: Settings
+  - name: Tokens
+  - name: Quotas
+  - name: Skills
+  - name: MCP
+  - name: Agent Prompts
+  - name: Models
+  - name: Scheduled Tasks
+  - name: Sandbox
+  - name: Audit
+  - name: Traces
+paths:
+  /healthz:
+    get:
+      tags: [Health]
+      operationId: adminHealthz
+      summary: Check admin-api liveness.
+      responses:
+        "200":
+          description: Admin API is healthy.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/HealthResponse"
+  /auth/login:
+    post:
+      tags: [Auth]
+      operationId: login
+      summary: Login with a cocola local account.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/LoginRequest"
+      responses:
+        "200":
+          description: Authenticated user.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  user:
+                    $ref: "#/components/schemas/AuthUser"
+        "401":
+          $ref: "#/components/responses/Error"
+  /me/events:
+    get:
+      tags: [Runtime]
+      operationId: streamMyEvents
+      summary: Stream current user's server-side events.
+      security:
+        - RuntimeBearer: []
+      responses:
+        "200":
+          description: Event stream.
+          content:
+            text/event-stream:
+              schema:
+                type: string
+        "401":
+          $ref: "#/components/responses/Error"
+  /me/skills:
+    get:
+      tags: [Skills]
+      operationId: listMySkills
+      summary: List admin and user skills visible to the current user.
+      security:
+        - RuntimeBearer: []
+      responses:
+        "200":
+          $ref: "#/components/responses/Skills"
+    post:
+      tags: [Skills]
+      operationId: createMySkill
+      summary: Create a user-owned skill record.
+      security:
+        - RuntimeBearer: []
+      requestBody:
+        $ref: "#/components/requestBodies/Skill"
+      responses:
+        "200":
+          $ref: "#/components/responses/Skill"
+  /me/skills/scan/archive:
+    post:
+      tags: [Skills]
+      operationId: scanMySkillArchive
+      summary: Scan an uploaded skill archive for valid skills.
+      security:
+        - RuntimeBearer: []
+      requestBody:
+        $ref: "#/components/requestBodies/ArchiveScan"
+      responses:
+        "200":
+          $ref: "#/components/responses/SkillScan"
+  /me/skills/scan/git:
+    post:
+      tags: [Skills]
+      operationId: scanMySkillGit
+      summary: Clone and scan a git repository for valid skills.
+      security:
+        - RuntimeBearer: []
+      requestBody:
+        $ref: "#/components/requestBodies/GitScan"
+      responses:
+        "200":
+          $ref: "#/components/responses/SkillScan"
+  /me/skills/import/archive:
+    post:
+      tags: [Skills]
+      operationId: importMySkillArchive
+      summary: Import selected user-owned skills from an archive.
+      security:
+        - RuntimeBearer: []
+      requestBody:
+        $ref: "#/components/requestBodies/ArchiveScan"
+      responses:
+        "200":
+          $ref: "#/components/responses/Skills"
+  /me/skills/import/git:
+    post:
+      tags: [Skills]
+      operationId: importMySkillGit
+      summary: Import selected user-owned skills from git.
+      security:
+        - RuntimeBearer: []
+      requestBody:
+        $ref: "#/components/requestBodies/GitScan"
+      responses:
+        "200":
+          $ref: "#/components/responses/Skills"
+  /me/skills/{id}:
+    get:
+      tags: [Skills]
+      operationId: getMySkill
+      summary: Get a user-visible skill.
+      security:
+        - RuntimeBearer: []
+      parameters:
+        - $ref: "#/components/parameters/ID"
+      responses:
+        "200":
+          $ref: "#/components/responses/Skill"
+    delete:
+      tags: [Skills]
+      operationId: deleteMySkill
+      summary: Delete a user-owned skill.
+      security:
+        - RuntimeBearer: []
+      parameters:
+        - $ref: "#/components/parameters/ID"
+      responses:
+        "204":
+          description: Deleted.
+  /me/skills/{id}/enable:
+    post:
+      tags: [Skills]
+      operationId: enableMySkill
+      summary: Enable a skill for the current user.
+      security:
+        - RuntimeBearer: []
+      parameters:
+        - $ref: "#/components/parameters/ID"
+      responses:
+        "200":
+          $ref: "#/components/responses/Skill"
+  /me/skills/{id}/disable:
+    post:
+      tags: [Skills]
+      operationId: disableMySkill
+      summary: Disable a skill for the current user.
+      security:
+        - RuntimeBearer: []
+      parameters:
+        - $ref: "#/components/parameters/ID"
+      responses:
+        "200":
+          $ref: "#/components/responses/Skill"
+  /me/mcps:
+    get:
+      tags: [MCP]
+      operationId: listMyMCPs
+      summary: List MCP servers visible to the current user.
+      security:
+        - RuntimeBearer: []
+      responses:
+        "200":
+          $ref: "#/components/responses/MCPs"
+  /me/mcps/{id}/enable:
+    post:
+      tags: [MCP]
+      operationId: enableMyMCP
+      summary: Enable an MCP server for the current user.
+      security:
+        - RuntimeBearer: []
+      parameters:
+        - $ref: "#/components/parameters/ID"
+      responses:
+        "200":
+          $ref: "#/components/responses/MCP"
+  /me/mcps/{id}/disable:
+    post:
+      tags: [MCP]
+      operationId: disableMyMCP
+      summary: Disable an MCP server for the current user.
+      security:
+        - RuntimeBearer: []
+      parameters:
+        - $ref: "#/components/parameters/ID"
+      responses:
+        "200":
+          $ref: "#/components/responses/MCP"
+  /me/scheduled-tasks:
+    get:
+      tags: [Scheduled Tasks]
+      operationId: listMyScheduledTasks
+      summary: List current user's scheduled tasks.
+      security:
+        - RuntimeBearer: []
+      responses:
+        "200":
+          $ref: "#/components/responses/ScheduledTasks"
+    post:
+      tags: [Scheduled Tasks]
+      operationId: createMyScheduledTask
+      summary: Create a scheduled task for the current user.
+      security:
+        - RuntimeBearer: []
+      requestBody:
+        $ref: "#/components/requestBodies/ScheduledTask"
+      responses:
+        "200":
+          $ref: "#/components/responses/ScheduledTask"
+  /me/scheduled-tasks/{id}:
+    get:
+      tags: [Scheduled Tasks]
+      operationId: getMyScheduledTask
+      security:
+        - RuntimeBearer: []
+      parameters:
+        - $ref: "#/components/parameters/ID"
+      responses:
+        "200":
+          $ref: "#/components/responses/ScheduledTask"
+    patch:
+      tags: [Scheduled Tasks]
+      operationId: updateMyScheduledTask
+      security:
+        - RuntimeBearer: []
+      parameters:
+        - $ref: "#/components/parameters/ID"
+      requestBody:
+        $ref: "#/components/requestBodies/ScheduledTask"
+      responses:
+        "200":
+          $ref: "#/components/responses/ScheduledTask"
+    delete:
+      tags: [Scheduled Tasks]
+      operationId: deleteMyScheduledTask
+      security:
+        - RuntimeBearer: []
+      parameters:
+        - $ref: "#/components/parameters/ID"
+      responses:
+        "204":
+          description: Deleted.
+  /me/scheduled-tasks/{id}/pause:
+    post:
+      tags: [Scheduled Tasks]
+      operationId: pauseMyScheduledTask
+      security:
+        - RuntimeBearer: []
+      parameters:
+        - $ref: "#/components/parameters/ID"
+      responses:
+        "200":
+          $ref: "#/components/responses/ScheduledTask"
+  /me/scheduled-tasks/{id}/resume:
+    post:
+      tags: [Scheduled Tasks]
+      operationId: resumeMyScheduledTask
+      security:
+        - RuntimeBearer: []
+      parameters:
+        - $ref: "#/components/parameters/ID"
+      responses:
+        "200":
+          $ref: "#/components/responses/ScheduledTask"
+  /admin/users:
+    get:
+      tags: [Users]
+      operationId: listAuthUsers
+      summary: List auth users.
+      security:
+        - AdminKey: []
+      responses:
+        "200":
+          description: Users.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  users:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/AuthUser"
+    post:
+      tags: [Users]
+      operationId: createAuthUser
+      summary: Create an auth user.
+      security:
+        - AdminKey: []
+      requestBody:
+        $ref: "#/components/requestBodies/AuthUserCreate"
+      responses:
+        "200":
+          description: Created user.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AuthUser"
+  /admin/users/lookup:
+    get:
+      tags: [Users]
+      operationId: lookupAuthUser
+      summary: Lookup an auth user by email or username.
+      security:
+        - AdminKey: []
+      parameters:
+        - in: query
+          name: email
+          schema:
+            type: string
+        - in: query
+          name: username
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Matching user.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AuthUser"
+  /admin/users/{id}:
+    patch:
+      tags: [Users]
+      operationId: updateAuthUser
+      security:
+        - AdminKey: []
+      parameters:
+        - $ref: "#/components/parameters/ID"
+      requestBody:
+        $ref: "#/components/requestBodies/AuthUserUpdate"
+      responses:
+        "200":
+          description: Updated user.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AuthUser"
+    delete:
+      tags: [Users]
+      operationId: deleteAuthUser
+      security:
+        - AdminKey: []
+      parameters:
+        - $ref: "#/components/parameters/ID"
+      responses:
+        "204":
+          description: Deleted.
+  /admin/users/{id}/password:
+    post:
+      tags: [Users]
+      operationId: resetAuthUserPassword
+      security:
+        - AdminKey: []
+      parameters:
+        - $ref: "#/components/parameters/ID"
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                password:
+                  type: string
+                  format: password
+      responses:
+        "204":
+          description: Password reset.
+  /admin/runtime-token:
+    post:
+      tags: [Runtime]
+      operationId: issueRuntimeToken
+      summary: Issue a short-lived runtime JWT.
+      security:
+        - AdminKey: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                user_id:
+                  type: string
+                tenant_id:
+                  type: string
+                ttl_seconds:
+                  type: integer
+      responses:
+        "200":
+          description: Runtime token.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  token:
+                    type: string
+                    example: eyJ.example.redacted
+                  ttl_seconds:
+                    type: integer
+  /admin/settings:
+    get:
+      tags: [Settings]
+      operationId: listSystemSettings
+      security:
+        - AdminKey: []
+      responses:
+        "200":
+          description: Settings.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  settings:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/SystemSetting"
+  /admin/settings/{key}:
+    patch:
+      tags: [Settings]
+      operationId: updateSystemSetting
+      security:
+        - AdminKey: []
+      parameters:
+        - in: path
+          name: key
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                value: {}
+                expected_version:
+                  type: integer
+      responses:
+        "200":
+          description: Updated setting.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SystemSetting"
+    delete:
+      tags: [Settings]
+      operationId: resetSystemSetting
+      security:
+        - AdminKey: []
+      parameters:
+        - in: path
+          name: key
+          required: true
+          schema:
+            type: string
+      responses:
+        "204":
+          description: Reset.
+  /admin/tokens:
+    get:
+      tags: [Tokens]
+      operationId: listTokens
+      security:
+        - AdminKey: []
+      responses:
+        "200":
+          description: Issued tokens.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  tokens:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/Object"
+    post:
+      tags: [Tokens]
+      operationId: issueToken
+      security:
+        - AdminKey: []
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                user_id:
+                  type: string
+                tenant:
+                  type: string
+                ttl_seconds:
+                  type: integer
+      responses:
+        "200":
+          description: Issued token.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Object"
+  /admin/tokens/revoked:
+    get:
+      tags: [Tokens]
+      operationId: listRevokedTokens
+      security:
+        - AdminKey: []
+      responses:
+        "200":
+          description: Revoked token ids.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  revoked:
+                    type: array
+                    items:
+                      type: string
+  /admin/tokens/{id}:
+    delete:
+      tags: [Tokens]
+      operationId: revokeToken
+      security:
+        - AdminKey: []
+      parameters:
+        - $ref: "#/components/parameters/ID"
+      responses:
+        "204":
+          description: Revoked.
+  /admin/quotas:
+    get:
+      tags: [Quotas]
+      operationId: listQuotas
+      security:
+        - AdminKey: []
+      responses:
+        "200":
+          description: Quotas.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  quotas:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/Object"
+    put:
+      tags: [Quotas]
+      operationId: setQuota
+      security:
+        - AdminKey: []
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                scope:
+                  type: string
+                  enum: [user, tenant]
+                subject:
+                  type: string
+                limit:
+                  type: integer
+      responses:
+        "200":
+          description: Saved quota.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Object"
+  /admin/quotas/{scope}/{subject}:
+    delete:
+      tags: [Quotas]
+      operationId: deleteQuota
+      security:
+        - AdminKey: []
+      parameters:
+        - in: path
+          name: scope
+          required: true
+          schema:
+            type: string
+        - in: path
+          name: subject
+          required: true
+          schema:
+            type: string
+      responses:
+        "204":
+          description: Deleted.
+  /admin/skills:
+    get:
+      tags: [Skills]
+      operationId: listSkills
+      security:
+        - AdminKey: []
+      responses:
+        "200":
+          $ref: "#/components/responses/Skills"
+    post:
+      tags: [Skills]
+      operationId: createSkill
+      security:
+        - AdminKey: []
+      requestBody:
+        $ref: "#/components/requestBodies/Skill"
+      responses:
+        "200":
+          $ref: "#/components/responses/Skill"
+  /admin/skills/effective:
+    get:
+      tags: [Skills]
+      operationId: listEffectiveSkills
+      security:
+        - AdminKey: []
+      parameters:
+        - in: query
+          name: user_id
+          schema:
+            type: string
+      responses:
+        "200":
+          $ref: "#/components/responses/Skills"
+  /admin/skills/scan/archive:
+    post:
+      tags: [Skills]
+      operationId: scanSkillArchive
+      security:
+        - AdminKey: []
+      requestBody:
+        $ref: "#/components/requestBodies/ArchiveScan"
+      responses:
+        "200":
+          $ref: "#/components/responses/SkillScan"
+  /admin/skills/scan/git:
+    post:
+      tags: [Skills]
+      operationId: scanSkillGit
+      security:
+        - AdminKey: []
+      requestBody:
+        $ref: "#/components/requestBodies/GitScan"
+      responses:
+        "200":
+          $ref: "#/components/responses/SkillScan"
+  /admin/skills/import/archive:
+    post:
+      tags: [Skills]
+      operationId: importSkillArchive
+      security:
+        - AdminKey: []
+      requestBody:
+        $ref: "#/components/requestBodies/ArchiveScan"
+      responses:
+        "200":
+          $ref: "#/components/responses/Skills"
+  /admin/skills/import/git:
+    post:
+      tags: [Skills]
+      operationId: importSkillGit
+      security:
+        - AdminKey: []
+      requestBody:
+        $ref: "#/components/requestBodies/GitScan"
+      responses:
+        "200":
+          $ref: "#/components/responses/Skills"
+  /admin/skills/{id}:
+    get:
+      tags: [Skills]
+      operationId: getSkill
+      security:
+        - AdminKey: []
+      parameters:
+        - $ref: "#/components/parameters/ID"
+      responses:
+        "200":
+          $ref: "#/components/responses/Skill"
+    delete:
+      tags: [Skills]
+      operationId: deleteSkill
+      security:
+        - AdminKey: []
+      parameters:
+        - $ref: "#/components/parameters/ID"
+      responses:
+        "204":
+          description: Deleted.
+  /admin/skills/{id}/bundle:
+    get:
+      tags: [Skills]
+      operationId: getSkillBundle
+      security:
+        - AdminKey: []
+      parameters:
+        - $ref: "#/components/parameters/ID"
+      responses:
+        "200":
+          description: Skill bundle archive.
+          content:
+            application/octet-stream:
+              schema:
+                type: string
+                format: binary
+  /admin/skills/{id}/enable:
+    post:
+      tags: [Skills]
+      operationId: enableSkill
+      security:
+        - AdminKey: []
+      parameters:
+        - $ref: "#/components/parameters/ID"
+      responses:
+        "200":
+          $ref: "#/components/responses/Skill"
+  /admin/skills/{id}/disable:
+    post:
+      tags: [Skills]
+      operationId: disableSkill
+      security:
+        - AdminKey: []
+      parameters:
+        - $ref: "#/components/parameters/ID"
+      responses:
+        "200":
+          $ref: "#/components/responses/Skill"
+  /admin/mcps:
+    get:
+      tags: [MCP]
+      operationId: listMCPs
+      security:
+        - AdminKey: []
+      responses:
+        "200":
+          $ref: "#/components/responses/MCPs"
+    post:
+      tags: [MCP]
+      operationId: createMCP
+      security:
+        - AdminKey: []
+      requestBody:
+        $ref: "#/components/requestBodies/MCP"
+      responses:
+        "200":
+          $ref: "#/components/responses/MCP"
+  /admin/mcps/effective:
+    get:
+      tags: [MCP]
+      operationId: listEffectiveMCPs
+      security:
+        - AdminKey: []
+      parameters:
+        - in: query
+          name: user_id
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Effective MCP configuration. Runtime callers may receive decrypted config.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Object"
+  /admin/mcps/{id}:
+    get:
+      tags: [MCP]
+      operationId: getMCP
+      security:
+        - AdminKey: []
+      parameters:
+        - $ref: "#/components/parameters/ID"
+      responses:
+        "200":
+          $ref: "#/components/responses/MCP"
+    patch:
+      tags: [MCP]
+      operationId: updateMCP
+      security:
+        - AdminKey: []
+      parameters:
+        - $ref: "#/components/parameters/ID"
+      requestBody:
+        $ref: "#/components/requestBodies/MCP"
+      responses:
+        "200":
+          $ref: "#/components/responses/MCP"
+    delete:
+      tags: [MCP]
+      operationId: deleteMCP
+      security:
+        - AdminKey: []
+      parameters:
+        - $ref: "#/components/parameters/ID"
+      responses:
+        "204":
+          description: Deleted.
+  /admin/mcps/{id}/enable:
+    post:
+      tags: [MCP]
+      operationId: enableMCP
+      security:
+        - AdminKey: []
+      parameters:
+        - $ref: "#/components/parameters/ID"
+      responses:
+        "200":
+          $ref: "#/components/responses/MCP"
+  /admin/mcps/{id}/disable:
+    post:
+      tags: [MCP]
+      operationId: disableMCP
+      security:
+        - AdminKey: []
+      parameters:
+        - $ref: "#/components/parameters/ID"
+      responses:
+        "200":
+          $ref: "#/components/responses/MCP"
+  /admin/agent-prompts/global:
+    get:
+      tags: [Agent Prompts]
+      operationId: getGlobalAgentPrompt
+      security:
+        - AdminKey: []
+      responses:
+        "200":
+          $ref: "#/components/responses/AgentPrompt"
+    patch:
+      tags: [Agent Prompts]
+      operationId: updateGlobalAgentPrompt
+      security:
+        - AdminKey: []
+      requestBody:
+        $ref: "#/components/requestBodies/AgentPrompt"
+      responses:
+        "200":
+          $ref: "#/components/responses/AgentPrompt"
+  /admin/agent-prompts/global/enable:
+    post:
+      tags: [Agent Prompts]
+      operationId: enableGlobalAgentPrompt
+      security:
+        - AdminKey: []
+      responses:
+        "200":
+          $ref: "#/components/responses/AgentPrompt"
+  /admin/agent-prompts/global/disable:
+    post:
+      tags: [Agent Prompts]
+      operationId: disableGlobalAgentPrompt
+      security:
+        - AdminKey: []
+      responses:
+        "200":
+          $ref: "#/components/responses/AgentPrompt"
+  /admin/agent-prompts/effective:
+    get:
+      tags: [Agent Prompts]
+      operationId: effectiveAgentPrompt
+      security:
+        - AdminKey: []
+      responses:
+        "200":
+          $ref: "#/components/responses/AgentPrompt"
+  /admin/model-providers:
+    get:
+      tags: [Models]
+      operationId: listLLMProviders
+      security:
+        - AdminKey: []
+      responses:
+        "200":
+          description: Providers.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  providers:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/Object"
+    post:
+      tags: [Models]
+      operationId: createLLMProvider
+      security:
+        - AdminKey: []
+      requestBody:
+        $ref: "#/components/requestBodies/LLMProvider"
+      responses:
+        "200":
+          description: Created provider.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Object"
+  /admin/model-providers/{id}:
+    patch:
+      tags: [Models]
+      operationId: updateLLMProvider
+      security:
+        - AdminKey: []
+      parameters:
+        - $ref: "#/components/parameters/ID"
+      requestBody:
+        $ref: "#/components/requestBodies/LLMProvider"
+      responses:
+        "200":
+          description: Updated provider.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Object"
+    delete:
+      tags: [Models]
+      operationId: deleteLLMProvider
+      security:
+        - AdminKey: []
+      parameters:
+        - $ref: "#/components/parameters/ID"
+      responses:
+        "204":
+          description: Deleted.
+  /admin/models:
+    get:
+      tags: [Models]
+      operationId: listLLMModels
+      security:
+        - AdminKey: []
+      responses:
+        "200":
+          description: Models.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  models:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/Object"
+    post:
+      tags: [Models]
+      operationId: createLLMModel
+      security:
+        - AdminKey: []
+      requestBody:
+        $ref: "#/components/requestBodies/LLMModel"
+      responses:
+        "200":
+          description: Created model.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Object"
+  /admin/models/public:
+    get:
+      tags: [Models]
+      operationId: listPublicLLMModels
+      security:
+        - AdminKey: []
+      responses:
+        "200":
+          description: Public visible models.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  models:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/Object"
+  /admin/models/{alias}:
+    patch:
+      tags: [Models]
+      operationId: updateLLMModel
+      security:
+        - AdminKey: []
+      parameters:
+        - in: path
+          name: alias
+          required: true
+          schema:
+            type: string
+      requestBody:
+        $ref: "#/components/requestBodies/LLMModel"
+      responses:
+        "200":
+          description: Updated model.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Object"
+    delete:
+      tags: [Models]
+      operationId: deleteLLMModel
+      security:
+        - AdminKey: []
+      parameters:
+        - in: path
+          name: alias
+          required: true
+          schema:
+            type: string
+      responses:
+        "204":
+          description: Deleted.
+  /admin/models/{alias}/default:
+    post:
+      tags: [Models]
+      operationId: setDefaultLLMModel
+      security:
+        - AdminKey: []
+      parameters:
+        - in: path
+          name: alias
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Default model updated.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Object"
+  /admin/scheduled-tasks:
+    get:
+      tags: [Scheduled Tasks]
+      operationId: listScheduledTasks
+      security:
+        - AdminKey: []
+      responses:
+        "200":
+          $ref: "#/components/responses/ScheduledTasks"
+    post:
+      tags: [Scheduled Tasks]
+      operationId: createScheduledTask
+      security:
+        - AdminKey: []
+      requestBody:
+        $ref: "#/components/requestBodies/ScheduledTask"
+      responses:
+        "200":
+          $ref: "#/components/responses/ScheduledTask"
+  /admin/scheduled-tasks/{id}:
+    get:
+      tags: [Scheduled Tasks]
+      operationId: getScheduledTask
+      security:
+        - AdminKey: []
+      parameters:
+        - $ref: "#/components/parameters/ID"
+      responses:
+        "200":
+          $ref: "#/components/responses/ScheduledTask"
+    patch:
+      tags: [Scheduled Tasks]
+      operationId: updateScheduledTask
+      security:
+        - AdminKey: []
+      parameters:
+        - $ref: "#/components/parameters/ID"
+      requestBody:
+        $ref: "#/components/requestBodies/ScheduledTask"
+      responses:
+        "200":
+          $ref: "#/components/responses/ScheduledTask"
+    delete:
+      tags: [Scheduled Tasks]
+      operationId: deleteScheduledTask
+      security:
+        - AdminKey: []
+      parameters:
+        - $ref: "#/components/parameters/ID"
+      responses:
+        "204":
+          description: Deleted.
+  /admin/scheduled-tasks/{id}/pause:
+    post:
+      tags: [Scheduled Tasks]
+      operationId: pauseScheduledTask
+      security:
+        - AdminKey: []
+      parameters:
+        - $ref: "#/components/parameters/ID"
+      responses:
+        "200":
+          $ref: "#/components/responses/ScheduledTask"
+  /admin/scheduled-tasks/{id}/resume:
+    post:
+      tags: [Scheduled Tasks]
+      operationId: resumeScheduledTask
+      security:
+        - AdminKey: []
+      parameters:
+        - $ref: "#/components/parameters/ID"
+      responses:
+        "200":
+          $ref: "#/components/responses/ScheduledTask"
+  /admin/scheduled-tasks/{id}/run:
+    post:
+      tags: [Scheduled Tasks]
+      operationId: runScheduledTaskNow
+      security:
+        - AdminKey: []
+      parameters:
+        - $ref: "#/components/parameters/ID"
+      responses:
+        "200":
+          description: Run created.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Object"
+  /admin/scheduled-task-runs:
+    get:
+      tags: [Scheduled Tasks]
+      operationId: listScheduledTaskRuns
+      security:
+        - AdminKey: []
+      responses:
+        "200":
+          description: Scheduled task runs.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  runs:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/Object"
+  /admin/scheduled-task-runs/{id}:
+    get:
+      tags: [Scheduled Tasks]
+      operationId: getScheduledTaskRun
+      security:
+        - AdminKey: []
+      parameters:
+        - $ref: "#/components/parameters/ID"
+      responses:
+        "200":
+          description: Scheduled task run.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Object"
+  /admin/sandbox-nodes:
+    get:
+      tags: [Sandbox]
+      operationId: listSandboxNodes
+      security:
+        - AdminKey: []
+      responses:
+        "200":
+          description: Sandbox nodes.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  nodes:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/Object"
+  /admin/sandbox-nodes/join-command:
+    get:
+      tags: [Sandbox]
+      operationId: sandboxNodeJoinCommand
+      security:
+        - AdminKey: []
+      responses:
+        "200":
+          description: Node join command.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Object"
+  /admin/sandbox-nodes/{name}/disable:
+    post:
+      tags: [Sandbox]
+      operationId: disableSandboxNode
+      security:
+        - AdminKey: []
+      parameters:
+        - $ref: "#/components/parameters/Name"
+      responses:
+        "200":
+          $ref: "#/components/responses/Object"
+  /admin/sandbox-nodes/{name}/restore:
+    post:
+      tags: [Sandbox]
+      operationId: restoreSandboxNode
+      security:
+        - AdminKey: []
+      parameters:
+        - $ref: "#/components/parameters/Name"
+      responses:
+        "200":
+          $ref: "#/components/responses/Object"
+  /admin/sandbox-nodes/{name}/capacity:
+    patch:
+      tags: [Sandbox]
+      operationId: setSandboxNodeCapacity
+      security:
+        - AdminKey: []
+      parameters:
+        - $ref: "#/components/parameters/Name"
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                max_sandbox_pods:
+                  type: integer
+      responses:
+        "200":
+          $ref: "#/components/responses/Object"
+  /admin/sandbox-nodes/{name}/offline:
+    post:
+      tags: [Sandbox]
+      operationId: offlineSandboxNode
+      security:
+        - AdminKey: []
+      parameters:
+        - $ref: "#/components/parameters/Name"
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                force:
+                  type: boolean
+      responses:
+        "200":
+          $ref: "#/components/responses/Object"
+  /admin/sandboxes:
+    get:
+      tags: [Sandbox]
+      operationId: listSandboxes
+      security:
+        - AdminKey: []
+      responses:
+        "200":
+          description: Sandboxes.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  sandboxes:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/Object"
+  /admin/audit:
+    get:
+      tags: [Audit]
+      operationId: listAudit
+      security:
+        - AdminKey: []
+      parameters:
+        - in: query
+          name: resource
+          schema:
+            type: string
+        - in: query
+          name: actor
+          schema:
+            type: string
+        - in: query
+          name: limit
+          schema:
+            type: integer
+      responses:
+        "200":
+          description: Audit entries.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  audit:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/Object"
+  /admin/audit-events:
+    get:
+      tags: [Audit]
+      operationId: listAuditEvents
+      security:
+        - AdminKey: []
+      responses:
+        "200":
+          description: Structured audit events.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  events:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/Object"
+  /admin/traces/{trace_id}:
+    get:
+      tags: [Traces]
+      operationId: getTrace
+      security:
+        - AdminKey: []
+      parameters:
+        - in: path
+          name: trace_id
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Trace event timeline.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Object"
+components:
+  securitySchemes:
+    AdminKey:
+      type: http
+      scheme: bearer
+      description: Static admin key from COCOLA_ADMIN_KEY.
+    RuntimeBearer:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+      description: cocola runtime token.
+  parameters:
+    ID:
+      in: path
+      name: id
+      required: true
+      schema:
+        type: string
+    Name:
+      in: path
+      name: name
+      required: true
+      schema:
+        type: string
+  requestBodies:
+    AuthUserCreate:
+      required: true
+      content:
+        application/json:
+          schema:
+            type: object
+            properties:
+              username:
+                type: string
+              email:
+                type: string
+                format: email
+              role:
+                type: string
+                enum: [user, admin]
+              enabled:
+                type: boolean
+              password:
+                type: string
+                format: password
+    AuthUserUpdate:
+      content:
+        application/json:
+          schema:
+            type: object
+            properties:
+              username:
+                type: string
+              email:
+                type: string
+                format: email
+              role:
+                type: string
+                enum: [user, admin]
+              enabled:
+                type: boolean
+    Skill:
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/Skill"
+    ArchiveScan:
+      required: true
+      content:
+        application/json:
+          schema:
+            type: object
+            properties:
+              filename:
+                type: string
+              mime:
+                type: string
+              size_bytes:
+                type: integer
+              content_b64:
+                type: string
+                format: byte
+              selected_ids:
+                type: array
+                items:
+                  type: string
+    GitScan:
+      required: true
+      content:
+        application/json:
+          schema:
+            type: object
+            properties:
+              repo_url:
+                type: string
+              ref:
+                type: string
+              path:
+                type: string
+              selected_ids:
+                type: array
+                items:
+                  type: string
+    MCP:
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/MCPServer"
+    AgentPrompt:
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/AgentPrompt"
+    LLMProvider:
+      content:
+        application/json:
+          schema:
+            type: object
+            properties:
+              id:
+                type: string
+              name:
+                type: string
+              type:
+                type: string
+              base_url:
+                type: string
+              api_key:
+                type: string
+                format: password
+                description: Secret value; use redacted examples only.
+              enabled:
+                type: boolean
+    LLMModel:
+      content:
+        application/json:
+          schema:
+            type: object
+            properties:
+              alias:
+                type: string
+              provider_id:
+                type: string
+              real_model:
+                type: string
+              runtime:
+                type: string
+              label:
+                type: string
+              icon_type:
+                type: string
+              icon_slug:
+                type: string
+              icon_url:
+                type: string
+              enabled:
+                type: boolean
+              visible:
+                type: boolean
+              is_default:
+                type: boolean
+              sort_order:
+                type: integer
+    ScheduledTask:
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ScheduledTask"
+  responses:
+    Error:
+      description: Standard cocola error envelope.
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorEnvelope"
+    Object:
+      description: JSON object.
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/Object"
+    Skill:
+      description: Skill.
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/Skill"
+    Skills:
+      description: Skills.
+      content:
+        application/json:
+          schema:
+            type: object
+            properties:
+              skills:
+                type: array
+                items:
+                  $ref: "#/components/schemas/Skill"
+    SkillScan:
+      description: Scan result with valid skills and validation errors.
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/Object"
+    MCP:
+      description: MCP server.
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/MCPServer"
+    MCPs:
+      description: MCP servers.
+      content:
+        application/json:
+          schema:
+            type: object
+            properties:
+              mcps:
+                type: array
+                items:
+                  $ref: "#/components/schemas/MCPServer"
+    AgentPrompt:
+      description: Agent prompt.
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/AgentPrompt"
+    ScheduledTask:
+      description: Scheduled task.
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ScheduledTask"
+    ScheduledTasks:
+      description: Scheduled tasks.
+      content:
+        application/json:
+          schema:
+            type: object
+            properties:
+              tasks:
+                type: array
+                items:
+                  $ref: "#/components/schemas/ScheduledTask"
+  schemas:
+    Object:
+      type: object
+      additionalProperties: true
+    HealthResponse:
+      type: object
+      properties:
+        status:
+          type: string
+          example: ok
+      required: [status]
+    ErrorEnvelope:
+      type: object
+      properties:
+        error:
+          type: object
+          properties:
+            code:
+              type: string
+              example: PERMISSION_DENIED
+            message:
+              type: string
+              example: admin authentication required
+          required: [code, message]
+      required: [error]
+    LoginRequest:
+      type: object
+      properties:
+        identifier:
+          type: string
+        email:
+          type: string
+          format: email
+        password:
+          type: string
+          format: password
+      required: [password]
+    AuthUser:
+      type: object
+      additionalProperties: true
+      properties:
+        id:
+          type: string
+        username:
+          type: string
+        email:
+          type: string
+        role:
+          type: string
+          enum: [user, admin]
+        enabled:
+          type: boolean
+    SystemSetting:
+      type: object
+      additionalProperties: true
+      properties:
+        key:
+          type: string
+        value: {}
+        source:
+          type: string
+        version:
+          type: integer
+    Skill:
+      type: object
+      additionalProperties: true
+      properties:
+        id:
+          type: string
+        name:
+          type: string
+        description:
+          type: string
+        version:
+          type: string
+        entrypoint:
+          type: string
+        enabled:
+          type: boolean
+        owner_type:
+          type: string
+          enum: [admin, user]
+    MCPServer:
+      type: object
+      additionalProperties: true
+      properties:
+        id:
+          type: string
+        name:
+          type: string
+        description:
+          type: string
+        transport:
+          type: string
+          enum: [stdio, http, sse]
+        command:
+          type: string
+        args:
+          type: array
+          items:
+            type: string
+        url:
+          type: string
+          description: May contain placeholders for encrypted URL variables.
+        url_vars:
+          type: object
+          additionalProperties:
+            type: string
+          description: Secret values are returned only as masked hints in UI responses.
+        env:
+          type: object
+          additionalProperties:
+            type: string
+        headers:
+          type: object
+          additionalProperties:
+            type: string
+        enabled:
+          type: boolean
+        default_enabled:
+          type: boolean
+        status:
+          type: string
+    AgentPrompt:
+      type: object
+      properties:
+        name:
+          type: string
+        content:
+          type: string
+        enabled:
+          type: boolean
+    ScheduledTask:
+      type: object
+      additionalProperties: true
+      properties:
+        id:
+          type: string
+        name:
+          type: string
+        description:
+          type: string
+        status:
+          type: string
+        schedule_kind:
+          type: string
+        schedule_spec:
+          type: object
+          additionalProperties: true
+        timezone:
+          type: string
+        prompt:
+          type: string
+        model_alias:
+          type: string
+        config_json:
+          type: object
+          additionalProperties: true

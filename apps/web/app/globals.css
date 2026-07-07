@@ -90,6 +90,25 @@
 }
 
 @layer components {
+  .api-docs-swagger .swagger-ui {
+    color: #0f172a;
+    font-family: inherit;
+  }
+
+  .api-docs-swagger .swagger-ui .topbar {
+    display: none;
+  }
+
+  .api-docs-swagger .swagger-ui .wrapper {
+    max-width: none;
+    padding: 1.25rem;
+  }
+
+  .api-docs-swagger .swagger-ui .scheme-container {
+    border-radius: 0.5rem;
+    box-shadow: none;
+  }
+
   .aui-stream-in[data-status="running"],
   .aui-details-body {
     animation: aui-soft-in 180ms ease-out;

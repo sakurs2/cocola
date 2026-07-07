@@ -4,6 +4,7 @@ import { cn } from "@/lib/utils";
 import {
   Activity,
   ArrowLeft,
+  BookOpenText,
   Box,
   Clock3,
   Cpu,
@@ -30,7 +31,10 @@ type AdminNavItem = {
 const NAV_GROUPS: { label: string; items: AdminNavItem[] }[] = [
   {
     label: "Overview",
-    items: [{ href: "/admin", label: "Summary", icon: LayoutDashboard }],
+    items: [
+      { href: "/admin", label: "Summary", icon: LayoutDashboard },
+      { href: "/admin/api-docs", label: "API Docs", icon: BookOpenText },
+    ],
   },
   {
     label: "Access",
