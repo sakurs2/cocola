@@ -66,7 +66,7 @@ export const Thread: FC = () => {
       <ThreadPrimitive.If empty>
         <div className="cocola-cloud-field" aria-hidden="true" />
       </ThreadPrimitive.If>
-      <ThreadPrimitive.Viewport className="relative z-10 flex flex-1 flex-col items-center overflow-y-auto scroll-smooth px-5 pt-8">
+      <ThreadPrimitive.Viewport className="relative z-10 flex flex-1 flex-col items-center overflow-y-auto scroll-smooth px-5 pt-8 [scrollbar-gutter:stable_both-edges]">
         <ThreadWelcome />
 
         <ThreadPrimitive.Messages
@@ -145,8 +145,8 @@ const SUGGESTIONS: SuggestionTile[] = [
 ];
 
 const ThreadWelcome: FC = () => {
-  const { selectedModel } = useCocola();
-  const noModel = !selectedModel;
+  const { selectedModel, modelsLoaded } = useCocola();
+  const noModel = modelsLoaded && !selectedModel;
   // Time-aware greeting resolved after mount so SSR/client markup agree.
   const [greeting, setGreeting] = useState("Welcome back");
   useEffect(() => {
@@ -165,8 +165,8 @@ const ThreadWelcome: FC = () => {
         <div className="flex flex-col items-center gap-3 text-center">
           <h1 className="sr-only">{greeting}</h1>
           <CocolaWordmark className="cocola-wordmark h-48 w-auto max-w-[min(96vw,680px)]" />
-          <p className="max-w-md text-base leading-6 text-muted-foreground">
-            What can I help you build, create, or explore today?
+          <p className="max-w-md text-center text-base leading-6 text-muted-foreground">
+            Your trusty & powerful agent platform
           </p>
         </div>
         {noModel ? (
@@ -212,8 +212,8 @@ const ThreadWelcome: FC = () => {
 };
 
 const Composer: FC = () => {
-  const { selectedModel } = useCocola();
-  const noModel = !selectedModel;
+  const { selectedModel, modelsLoaded } = useCocola();
+  const noModel = modelsLoaded && !selectedModel;
 
   return (
     <motion.div
@@ -254,9 +254,10 @@ const Composer: FC = () => {
 };
 
 const ModelPicker: FC = () => {
-  const { models, selectedModel, selectedModelAlias, setSelectedModelAlias } = useCocola();
+  const { models, selectedModel, selectedModelAlias, setSelectedModelAlias, modelsLoaded } =
+    useCocola();
   const [open, setOpen] = useState(false);
-  const noModel = !selectedModel;
+  const noModel = modelsLoaded && !selectedModel;
 
   return (
     <Popover.Root open={open} onOpenChange={setOpen}>
@@ -453,8 +454,8 @@ const ComposerAttachments: FC = () => (
 );
 
 const ComposerAction: FC = () => {
-  const { selectedModel } = useCocola();
-  const noModel = !selectedModel;
+  const { selectedModel, modelsLoaded } = useCocola();
+  const noModel = modelsLoaded && !selectedModel;
 
   return (
     <>

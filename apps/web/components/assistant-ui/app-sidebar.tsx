@@ -28,6 +28,7 @@ import { motion } from "framer-motion";
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { cn } from "@/lib/utils";
+import { CocolaLogo } from "@/components/cocola-logo";
 import { useCocola } from "@/app/runtime-provider";
 
 // User workspace sidebar. New Chat + the Chats list are wired to the backend
@@ -198,13 +199,13 @@ export function AppSidebar() {
               active={false}
               onClick={() => revealSection("navigation")}
             >
-              <MessagesSquare className="size-4" />
+              <CocolaLogo className="size-7" />
             </SidebarRailButton>
           ) : (
             <>
               <div className="flex min-w-0 items-center gap-2">
                 <div className="flex size-9 shrink-0 items-center justify-center rounded-2xl bg-primary text-primary-foreground shadow-lg shadow-primary/20">
-                  <MessagesSquare className="size-4" />
+                  <CocolaLogo mono className="size-5" />
                 </div>
                 <div className="min-w-0 flex-1">
                   <span className="block truncate text-sm font-semibold">cocola</span>

@@ -168,6 +168,7 @@ type CocolaContextValue = {
   models: ModelOption[];
   selectedModelAlias: string;
   selectedModel: ModelOption | null;
+  modelsLoaded: boolean;
   setSelectedModelAlias: (alias: string) => void;
 };
 
@@ -418,6 +419,7 @@ export function CocolaRuntimeProvider({ children }: { children: ReactNode }) {
   const [selectedArtifact, setSelectedArtifact] = useState<ArtifactPreview | null>(null);
   const [models, setModels] = useState<ModelOption[]>([]);
   const [selectedModelAlias, setSelectedModelAlias] = useState("");
+  const [modelsLoaded, setModelsLoaded] = useState(false);
   const abortMap = useRef<Map<string, AbortController>>(new Map());
   const sessionIdRef = useRef(sessionId);
   const conversationsRef = useRef(conversations);
@@ -939,6 +941,8 @@ export function CocolaRuntimeProvider({ children }: { children: ReactNode }) {
       } catch {
         setModels([]);
         setSelectedModelAlias("");
+      } finally {
+        setModelsLoaded(true);
       }
     })();
   }, []);
@@ -974,6 +978,7 @@ export function CocolaRuntimeProvider({ children }: { children: ReactNode }) {
       models,
       selectedModelAlias,
       selectedModel,
+      modelsLoaded,
       setSelectedModelAlias,
     }),
     [
@@ -993,6 +998,7 @@ export function CocolaRuntimeProvider({ children }: { children: ReactNode }) {
       models,
       selectedModelAlias,
       selectedModel,
+      modelsLoaded,
     ],
   );
 
