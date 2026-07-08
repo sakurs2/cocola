@@ -24,18 +24,11 @@ import {
   Download,
   Eye,
   FileText,
-  MessageSquare,
   PaperclipIcon,
   Search,
   SendHorizontalIcon,
   Square,
-  Wrench,
   XIcon,
-  Globe,
-  Terminal,
-  FolderSearch,
-  ListTodo,
-  Loader2,
   ArrowRight,
   ArrowUp as ArrowUpIcon,
   BarChart3,
@@ -45,6 +38,22 @@ import {
   Sparkles,
   ExternalLink,
 } from "lucide-react";
+import {
+  Brain,
+  ChatCircle,
+  FilePlus,
+  FileText as PhFileText,
+  FolderOpen,
+  Globe as PhGlobe,
+  ListChecks,
+  MagnifyingGlass,
+  PencilSimple,
+  Sparkle,
+  SpinnerGap,
+  TerminalWindow,
+  Wrench as PhWrench,
+  type Icon as PhosphorIcon,
+} from "@phosphor-icons/react";
 import Image from "next/image";
 import { useEffect, useState, type FC, type ReactNode } from "react";
 import { useCocola, type ModelIconConfig, type UiMessageMetadata } from "@/app/runtime-provider";
@@ -603,7 +612,7 @@ const ArtifactFilePart: FC<FileMessagePartProps> = ({ filename, mimeType, data }
   const downloadUrl = meta.url || data;
 
   return (
-    <RailRow icon={FileText} label="生成文件">
+    <RailRow icon={FilePlus} label="生成文件" color="text-teal-500">
       <div className="flex max-w-xl items-center gap-3 rounded-xl border border-border/60 bg-muted/40 p-3 text-sm">
         <span className="flex size-9 shrink-0 items-center justify-center rounded-lg bg-background text-muted-foreground">
           <FileText className="size-4" />
@@ -672,25 +681,34 @@ const formatBytes = (bytes: number): string => {
   return `${value >= 10 || unit === 0 ? value.toFixed(0) : value.toFixed(1)} ${units[unit]}`;
 };
 
+// All rail action icons come from Phosphor; reuse its component type so the
+// `weight` prop (duotone/bold/…) type-checks.
+type ActionIcon = PhosphorIcon;
+
 // Shared vertical-rail row. Every assistant response node hangs off one
 // continuous line (drawn by the parent .aui-rail container): an icon badge sits
 // on the line, an action label + type-specific content sit to its right.
 const RailRow: FC<{
-  icon: FC<{ className?: string }>;
+  icon: ActionIcon;
   label: string;
   running?: boolean;
   tone?: "default" | "error";
+  color?: string;
   children?: ReactNode;
-}> = ({ icon: Icon, label, running, tone = "default", children }) => (
+}> = ({ icon: Icon, label, running, tone = "default", color, children }) => (
   <div className="grid grid-cols-[1.75rem_1fr] gap-x-2.5">
     <div className="relative flex justify-center after:absolute after:left-1/2 after:top-8 after:bottom-0 after:w-0.5 after:-translate-x-1/2 after:rounded-full after:bg-border/50">
       <span
         className={cn(
           "relative z-[1] flex size-7 items-center justify-center",
-          tone === "error" ? "text-destructive" : "text-muted-foreground",
+          tone === "error" ? "text-destructive" : (color ?? "text-muted-foreground"),
         )}
       >
-        {running ? <Loader2 className="size-4 animate-spin" /> : <Icon className="size-4" />}
+        {running ? (
+          <SpinnerGap className="size-[18px] animate-spin" weight="bold" />
+        ) : (
+          <Icon className="size-[18px]" weight="duotone" />
+        )}
       </span>
     </div>
     <div className="min-w-0 pb-4 pt-1.5">
@@ -711,7 +729,7 @@ const RailRow: FC<{
 
 // Plain assistant text answer, rendered as a rail node.
 const TextPart: FC = () => (
-  <RailRow icon={MessageSquare} label="回答">
+  <RailRow icon={ChatCircle} label="回答" color="text-indigo-500">
     <MarkdownText />
   </RailRow>
 );
@@ -719,7 +737,7 @@ const TextPart: FC = () => (
 const ReasoningPart: FC<ReasoningMessagePartProps> = ({ text, status }) => {
   const running = status.type === "running";
   return (
-    <RailRow icon={BrainCircuit} label={running ? "正在思考" : "推理过程"} running={running}>
+    <RailRow icon={Brain} label={running ? "正在思考" : "推理过程"} running={running} color="text-purple-500">
       <details className="aui-details group text-sm">
         <summary className="flex w-fit cursor-pointer select-none items-center gap-1 py-0.5 text-xs text-muted-foreground transition-colors hover:text-foreground [&::-webkit-details-marker]:hidden">
           <ChevronRight className="size-3 shrink-0 transition-transform group-open:rotate-90" />
@@ -741,7 +759,7 @@ const ReasoningPart: FC<ReasoningMessagePartProps> = ({ text, status }) => {
 // from the input (search query / url host / filename / command). Details can be
 // expanded to inspect the raw arguments.
 
-type ToolMeta = { icon: FC<{ className?: string }>; running: string; done: string };
+type ToolMeta = { icon: ActionIcon; running: string; done: string; color: string };
 
 // Map SDK tool names (Claude Agent SDK: Bash/Read/Write/Edit/Glob/Grep/
 // WebSearch/WebFetch/Task/TodoWrite/Skill; MCP tools carry an mcp__ prefix)
@@ -749,24 +767,24 @@ type ToolMeta = { icon: FC<{ className?: string }>; running: string; done: strin
 const getToolMeta = (rawName: string): ToolMeta => {
   const name = rawName.replace(/^mcp__/, "").toLowerCase();
   if (name.includes("websearch") || name.includes("search"))
-    return { icon: Search, running: "正在搜索资料", done: "已搜索资料" };
+    return { icon: MagnifyingGlass, running: "正在搜索资料", done: "已搜索资料", color: "text-violet-500" };
   if (name.includes("webfetch") || name.includes("fetch") || name.includes("browser"))
-    return { icon: Globe, running: "正在读取网页", done: "已读取网页" };
+    return { icon: PhGlobe, running: "正在读取网页", done: "已读取网页", color: "text-sky-500" };
   if (name.startsWith("read") || name.includes("read_file"))
-    return { icon: FileText, running: "正在阅读文件", done: "已阅读文件" };
+    return { icon: PhFileText, running: "正在阅读文件", done: "已阅读文件", color: "text-blue-500" };
   if (name.startsWith("write") || name.includes("write_file"))
-    return { icon: Pencil, running: "正在写入文件", done: "已写入文件" };
+    return { icon: PencilSimple, running: "正在写入文件", done: "已写入文件", color: "text-emerald-500" };
   if (name.startsWith("edit") || name.includes("str_replace") || name.includes("edit_file"))
-    return { icon: Pencil, running: "正在编辑文件", done: "已编辑文件" };
+    return { icon: PencilSimple, running: "正在编辑文件", done: "已编辑文件", color: "text-amber-500" };
   if (name.startsWith("glob") || name.startsWith("grep") || name.includes("find"))
-    return { icon: FolderSearch, running: "正在检索代码", done: "已检索代码" };
+    return { icon: FolderOpen, running: "正在检索代码", done: "已检索代码", color: "text-cyan-600" };
   if (name.startsWith("bash") || name.includes("shell") || name.includes("terminal"))
-    return { icon: Terminal, running: "正在执行命令", done: "已执行命令" };
+    return { icon: TerminalWindow, running: "正在执行命令", done: "已执行命令", color: "text-orange-500" };
   if (name.startsWith("todo") || name.includes("task"))
-    return { icon: ListTodo, running: "正在规划任务", done: "已更新任务" };
+    return { icon: ListChecks, running: "正在规划任务", done: "已更新任务", color: "text-fuchsia-500" };
   if (name.startsWith("skill") || name.includes("load"))
-    return { icon: Sparkles, running: "正在加载技能", done: "已加载技能" };
-  return { icon: Wrench, running: "正在调用工具", done: "已调用工具" };
+    return { icon: Sparkle, running: "正在加载技能", done: "已加载技能", color: "text-yellow-500" };
+  return { icon: PhWrench, running: "正在调用工具", done: "已调用工具", color: "text-slate-400" };
 };
 
 // Best-effort chips from the tool input JSON. Never throws; returns [] on any
@@ -911,6 +929,7 @@ const ToolFallback: FC<ToolCallMessagePartProps> = ({
       label={label}
       running={running}
       tone={isError ? "error" : "default"}
+      color={meta.color}
     >
       {chips.length ? (
         <div className="flex flex-wrap gap-1.5">
