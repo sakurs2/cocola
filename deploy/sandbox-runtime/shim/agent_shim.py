@@ -148,6 +148,39 @@ def _tool_result_content(content: Any) -> str:
     return text
 
 
+def _block_to_event(block: Any) -> dict[str, Any] | None:
+    """Map one SDK content block to a transport event, or None to skip.
+
+    Handles both client-side tools (ToolUseBlock/ToolResultBlock) and the
+    server-side variants (ServerToolUseBlock/ServerToolResultBlock, used by
+    web_search/web_fetch). Crucially, ToolResultBlock arrives inside a
+    UserMessage: the SDK synthesizes a user turn to carry the result back
+    to the model, so this mapper is applied to UserMessage content too.
+    Without that, tool_result events never reach the UI and a tool node
+    spinner never stops even after the model has moved on.
+    """
+    bcls = type(block).__name__
+    if bcls == "TextBlock":
+        return {"type": "text", "text": getattr(block, "text", "")}
+    if bcls == "ThinkingBlock":
+        return {"type": "thinking", "text": getattr(block, "thinking", "")}
+    if bcls in ("ToolUseBlock", "ServerToolUseBlock"):
+        return {
+            "type": "tool_use",
+            "name": getattr(block, "name", None),
+            "id": getattr(block, "id", None),
+            "input": getattr(block, "input", None),
+        }
+    if bcls in ("ToolResultBlock", "ServerToolResultBlock"):
+        return {
+            "type": "tool_result",
+            "tool_use_id": getattr(block, "tool_use_id", None),
+            "is_error": bool(getattr(block, "is_error", False)),
+            "content": _tool_result_content(getattr(block, "content", None)),
+        }
+    return None
+
+
 def _message_to_events(message: Any) -> list[dict[str, Any]]:
     """Map an SDK message to transport-neutral NDJSON events.
 
@@ -157,27 +190,15 @@ def _message_to_events(message: Any) -> list[dict[str, Any]]:
     events: list[dict[str, Any]] = []
     cls = type(message).__name__
 
-    if cls == "AssistantMessage":
-        for block in getattr(message, "content", []) or []:
-            bcls = type(block).__name__
-            if bcls == "TextBlock":
-                events.append({"type": "text", "text": getattr(block, "text", "")})
-            elif bcls == "ThinkingBlock":
-                events.append({"type": "thinking", "text": getattr(block, "thinking", "")})
-            elif bcls == "ToolUseBlock":
-                events.append({
-                    "type": "tool_use",
-                    "name": getattr(block, "name", None),
-                    "id": getattr(block, "id", None),
-                    "input": getattr(block, "input", None),
-                })
-            elif bcls == "ToolResultBlock":
-                events.append({
-                    "type": "tool_result",
-                    "tool_use_id": getattr(block, "tool_use_id", None),
-                    "is_error": bool(getattr(block, "is_error", False)),
-                    "content": _tool_result_content(getattr(block, "content", None)),
-                })
+    if cls in ("AssistantMessage", "UserMessage"):
+        # UserMessage.content may be a bare string (the human prompt): skip
+        # that; only its block list carries tool results worth relaying.
+        content = getattr(message, "content", None)
+        if isinstance(content, list):
+            for block in content:
+                ev = _block_to_event(block)
+                if ev is not None:
+                    events.append(ev)
     elif cls == "ResultMessage":
         events.append({
             "type": "result",
