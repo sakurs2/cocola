@@ -24,14 +24,13 @@ import {
   Download,
   Eye,
   FileText,
-  MessagesSquare,
+  MessageSquare,
   PaperclipIcon,
   Search,
   SendHorizontalIcon,
   Square,
   Wrench,
   XIcon,
-  Zap,
   Globe,
   Terminal,
   FolderSearch,
@@ -46,7 +45,7 @@ import {
   Sparkles,
 } from "lucide-react";
 import Image from "next/image";
-import { useEffect, useState, type FC } from "react";
+import { useEffect, useState, type FC, type ReactNode } from "react";
 import { useCocola, type ModelIconConfig, type UiMessageMetadata } from "@/app/runtime-provider";
 import { CocolaWordmark } from "@/components/assistant-ui/cocola-wordmark";
 import { TooltipIconButton } from "@/components/assistant-ui/tooltip-icon-button";
@@ -528,14 +527,20 @@ const AssistantMessage: FC = () => (
         </MessagePrimitive.If>
         <div className="relative z-[1]">
           <AssistantMessageHeader />
-          <MessagePrimitive.Parts
-            components={{
-              Text: MarkdownText,
-              Reasoning: ReasoningPart,
-              File: ArtifactFilePart,
-              tools: { Fallback: ToolFallback },
-            }}
-          />
+          {/* Vertical timeline rail: one continuous line (the ::before pseudo)
+              runs at x=0.875rem — exactly the center of each RailRow icon column
+              (1.75rem wide) — so every node's badge sits centered on the line.
+              Badges carry bg-background + z-[1] to punch through it. */}
+          <div>
+            <MessagePrimitive.Parts
+              components={{
+                Text: TextPart,
+                Reasoning: ReasoningPart,
+                File: ArtifactFilePart,
+                tools: { Fallback: ToolFallback },
+              }}
+            />
+          </div>
           {/* Loading affordance: the runtime pushes an EMPTY assistant message the
               moment a turn starts and only then streams text into it. Until the
               first token lands the message has no content, so a "hasContent=false"
@@ -597,45 +602,47 @@ const ArtifactFilePart: FC<FileMessagePartProps> = ({ filename, mimeType, data }
   const downloadUrl = meta.url || data;
 
   return (
-    <div className="my-3 flex max-w-xl items-center gap-3 rounded-xl border border-border/60 bg-muted/40 p-3 text-sm">
-      <span className="flex size-9 shrink-0 items-center justify-center rounded-lg bg-background text-muted-foreground">
-        <FileText className="size-4" />
-      </span>
-      <div className="min-w-0 flex-1">
-        <div className="truncate font-medium text-foreground">{name}</div>
-        <div className="mt-0.5 truncate text-xs text-muted-foreground">
-          {formatBytes(meta.size)} · {type}
+    <RailRow icon={FileText} label="生成文件">
+      <div className="flex max-w-xl items-center gap-3 rounded-xl border border-border/60 bg-muted/40 p-3 text-sm">
+        <span className="flex size-9 shrink-0 items-center justify-center rounded-lg bg-background text-muted-foreground">
+          <FileText className="size-4" />
+        </span>
+        <div className="min-w-0 flex-1">
+          <div className="truncate font-medium text-foreground">{name}</div>
+          <div className="mt-0.5 truncate text-xs text-muted-foreground">
+            {formatBytes(meta.size)} · {type}
+          </div>
+        </div>
+        <div className="flex shrink-0 items-center gap-1">
+          <TooltipIconButton
+            tooltip="Preview"
+            variant="ghost"
+            className="size-8 rounded-full p-2"
+            onClick={() =>
+              openArtifact({
+                id: meta.id || name,
+                sessionId: activeSessionId,
+                filename: name,
+                mimeType: type,
+                size: meta.size,
+                downloadUrl,
+              })
+            }
+          >
+            <Eye className="size-4" />
+          </TooltipIconButton>
+          <a
+            href={downloadUrl}
+            download={name}
+            title="Download"
+            aria-label={`Download ${name}`}
+            className="inline-flex size-8 items-center justify-center rounded-full text-muted-foreground transition-colors hover:bg-accent hover:text-accent-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+          >
+            <Download className="size-4" />
+          </a>
         </div>
       </div>
-      <div className="flex shrink-0 items-center gap-1">
-        <TooltipIconButton
-          tooltip="Preview"
-          variant="ghost"
-          className="size-8 rounded-full p-2"
-          onClick={() =>
-            openArtifact({
-              id: meta.id || name,
-              sessionId: activeSessionId,
-              filename: name,
-              mimeType: type,
-              size: meta.size,
-              downloadUrl,
-            })
-          }
-        >
-          <Eye className="size-4" />
-        </TooltipIconButton>
-        <a
-          href={downloadUrl}
-          download={name}
-          title="Download"
-          aria-label={`Download ${name}`}
-          className="inline-flex size-8 items-center justify-center rounded-full text-muted-foreground transition-colors hover:bg-accent hover:text-accent-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
-        >
-          <Download className="size-4" />
-        </a>
-      </div>
-    </div>
+    </RailRow>
   );
 };
 
@@ -664,18 +671,66 @@ const formatBytes = (bytes: number): string => {
   return `${value >= 10 || unit === 0 ? value.toFixed(0) : value.toFixed(1)} ${units[unit]}`;
 };
 
-const ReasoningPart: FC<ReasoningMessagePartProps> = ({ text, status }) => (
-  <details className="aui-details group my-2 text-sm">
-    <summary className="flex w-fit cursor-pointer select-none items-center gap-1.5 py-1 text-xs text-muted-foreground transition-colors hover:text-foreground [&::-webkit-details-marker]:hidden">
-      <ChevronRight className="size-3 shrink-0 transition-transform group-open:rotate-90" />
-      <BrainCircuit className={cn("size-3.5 shrink-0", status.type === "running" && "animate-pulse")} />
-      <span className="font-medium">{status.type === "running" ? "正在思考" : "推理过程"}</span>
-    </summary>
-    <div className="aui-details-body mt-1 border-l-2 border-border/70 pl-3 text-[13px] leading-6 text-muted-foreground">
-      {text}
+// Shared vertical-rail row. Every assistant response node hangs off one
+// continuous line (drawn by the parent .aui-rail container): an icon badge sits
+// on the line, an action label + type-specific content sit to its right.
+const RailRow: FC<{
+  icon: FC<{ className?: string }>;
+  label: string;
+  running?: boolean;
+  tone?: "default" | "error";
+  children?: ReactNode;
+}> = ({ icon: Icon, label, running, tone = "default", children }) => (
+  <div className="grid grid-cols-[1.75rem_1fr] gap-x-2.5">
+    <div className="relative flex justify-center after:absolute after:left-1/2 after:top-[2.5rem] after:bottom-0 after:w-0.5 after:-translate-x-1/2 after:rounded-full after:bg-border/50">
+      <span
+        className={cn(
+          "relative z-[1] mt-1.5 flex size-7 items-center justify-center",
+          tone === "error" ? "text-destructive" : "text-muted-foreground",
+        )}
+      >
+        {running ? <Loader2 className="size-4 animate-spin" /> : <Icon className="size-4" />}
+      </span>
     </div>
-  </details>
+    <div className="min-w-0 pb-4 pt-1.5">
+      {label ? (
+        <div
+          className={cn(
+            "mb-1 text-xs font-medium",
+            tone === "error" ? "text-destructive" : "text-muted-foreground",
+          )}
+        >
+          {label}
+        </div>
+      ) : null}
+      {children}
+    </div>
+  </div>
 );
+
+// Plain assistant text answer, rendered as a rail node.
+const TextPart: FC = () => (
+  <RailRow icon={MessageSquare} label="回答">
+    <MarkdownText />
+  </RailRow>
+);
+
+const ReasoningPart: FC<ReasoningMessagePartProps> = ({ text, status }) => {
+  const running = status.type === "running";
+  return (
+    <RailRow icon={BrainCircuit} label={running ? "正在思考" : "推理过程"} running={running}>
+      <details className="aui-details group text-sm">
+        <summary className="flex w-fit cursor-pointer select-none items-center gap-1 py-0.5 text-xs text-muted-foreground transition-colors hover:text-foreground [&::-webkit-details-marker]:hidden">
+          <ChevronRight className="size-3 shrink-0 transition-transform group-open:rotate-90" />
+          <span>展开思考过程</span>
+        </summary>
+        <div className="aui-details-body mt-1 border-l-2 border-border/70 pl-3 text-[13px] leading-6 text-muted-foreground">
+          {text}
+        </div>
+      </details>
+    </RailRow>
+  );
+};
 
 // Tool call rendering — content-flow style (no card chrome).
 //
@@ -765,38 +820,38 @@ const ToolFallback: FC<ToolCallMessagePartProps> = ({
   const hasArgs = Boolean((argsText ?? "").trim());
 
   return (
-    <details className="aui-details group my-2 text-sm">
-      <summary className="flex w-fit cursor-pointer select-none flex-wrap items-center gap-1.5 py-1 text-xs [&::-webkit-details-marker]:hidden">
-        {running ? (
-          <Loader2 className="size-3.5 shrink-0 animate-spin text-muted-foreground" />
-        ) : (
-          <Icon
-            className={cn("size-3.5 shrink-0", isError ? "text-destructive" : "text-muted-foreground")}
-          />
-        )}
-        <span className={cn("font-medium", isError ? "text-destructive" : "text-muted-foreground")}>
-          {label}
-        </span>
-        {chips.map((chip, i) => (
-          <span
-            key={i}
-            className="inline-flex max-w-[16rem] items-center truncate rounded-md bg-muted px-1.5 py-0.5 font-mono text-[11px] text-muted-foreground"
-          >
-            {chip}
-          </span>
-        ))}
-        {hasArgs ? (
-          <ChevronRight className="size-3 shrink-0 text-muted-foreground/60 transition-transform group-open:rotate-90" />
-        ) : null}
-      </summary>
-      {hasArgs ? (
-        <div className="aui-details-body mt-1 border-l-2 border-border/70 pl-3">
-          <pre className="max-h-72 overflow-auto whitespace-pre-wrap break-words py-1 font-mono text-[11px] leading-5 text-muted-foreground">
-            {formatPayload(argsText)}
-          </pre>
+    <RailRow
+      icon={Icon}
+      label={label}
+      running={running}
+      tone={isError ? "error" : "default"}
+    >
+      {chips.length ? (
+        <div className="flex flex-wrap gap-1.5">
+          {chips.map((chip, i) => (
+            <span
+              key={i}
+              className="inline-flex max-w-[18rem] items-center truncate rounded-md bg-muted px-1.5 py-0.5 font-mono text-[11px] text-muted-foreground"
+            >
+              {chip}
+            </span>
+          ))}
         </div>
       ) : null}
-    </details>
+      {hasArgs ? (
+        <details className="aui-details group mt-1.5 text-sm">
+          <summary className="flex w-fit cursor-pointer select-none items-center gap-1 py-0.5 text-xs text-muted-foreground/70 transition-colors hover:text-foreground [&::-webkit-details-marker]:hidden">
+            <ChevronRight className="size-3 shrink-0 transition-transform group-open:rotate-90" />
+            <span>查看调用参数</span>
+          </summary>
+          <div className="aui-details-body mt-1 border-l-2 border-border/70 pl-3">
+            <pre className="max-h-72 overflow-auto whitespace-pre-wrap break-words py-1 font-mono text-[11px] leading-5 text-muted-foreground">
+              {formatPayload(argsText)}
+            </pre>
+          </div>
+        </details>
+      ) : null}
+    </RailRow>
   );
 };
 
