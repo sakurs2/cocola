@@ -43,6 +43,7 @@ import {
   Lightbulb,
   Pencil,
   Sparkles,
+  ExternalLink,
 } from "lucide-react";
 import Image from "next/image";
 import { useEffect, useState, type FC, type ReactNode } from "react";
@@ -682,10 +683,10 @@ const RailRow: FC<{
   children?: ReactNode;
 }> = ({ icon: Icon, label, running, tone = "default", children }) => (
   <div className="grid grid-cols-[1.75rem_1fr] gap-x-2.5">
-    <div className="relative flex justify-center after:absolute after:left-1/2 after:top-[2.5rem] after:bottom-0 after:w-0.5 after:-translate-x-1/2 after:rounded-full after:bg-border/50">
+    <div className="relative flex justify-center after:absolute after:left-1/2 after:top-8 after:bottom-0 after:w-0.5 after:-translate-x-1/2 after:rounded-full after:bg-border/50">
       <span
         className={cn(
-          "relative z-[1] mt-1.5 flex size-7 items-center justify-center",
+          "relative z-[1] flex size-7 items-center justify-center",
           tone === "error" ? "text-destructive" : "text-muted-foreground",
         )}
       >
@@ -806,9 +807,92 @@ const extractToolChips = (argsText: string): string[] => {
   return Array.from(new Set(chips)).slice(0, 4);
 };
 
+type SearchResult = { title: string; url: string; host: string };
+
+// Detect the tools whose result content IS the thing to show (a list of web
+// resources). Only these get the rich favicon-card treatment; everything else
+// keeps the lightweight chip/label row.
+const isSearchTool = (rawName: string): boolean => {
+  const name = rawName.replace(/^mcp__/, "").toLowerCase();
+  return name.includes("search") || name.includes("webfetch") || name.includes("fetch");
+};
+
+// Walk an arbitrary parsed tool_result payload and collect every {title,url}.
+// WebSearch returns nested content blocks whose exact shape varies by provider,
+// so we recurse and pick up any object exposing a usable url. Never throws.
+const collectResults = (node: unknown, out: SearchResult[], seen: Set<string>): void => {
+  if (out.length >= 12 || node === null || typeof node !== "object") return;
+  if (Array.isArray(node)) {
+    for (const item of node) collectResults(item, out, seen);
+    return;
+  }
+  const obj = node as Record<string, unknown>;
+  const rawUrl = typeof obj.url === "string" ? obj.url : "";
+  if (rawUrl.startsWith("http")) {
+    let host = "";
+    try {
+      host = new URL(rawUrl).host.replace(/^www\./, "");
+    } catch {
+      host = "";
+    }
+    if (host && !seen.has(rawUrl)) {
+      seen.add(rawUrl);
+      const title =
+        (typeof obj.title === "string" && obj.title.trim()) ||
+        (typeof obj.page_title === "string" && obj.page_title.trim()) ||
+        host;
+      out.push({ title, url: rawUrl, host });
+    }
+  }
+  for (const v of Object.values(obj)) {
+    if (v && typeof v === "object") collectResults(v, out, seen);
+  }
+};
+
+const parseSearchResults = (result: unknown): SearchResult[] => {
+  if (result === undefined || result === null) return [];
+  let payload: unknown = result;
+  if (typeof result === "string") {
+    const trimmed = result.trim();
+    if (!trimmed) return [];
+    try {
+      payload = JSON.parse(trimmed);
+    } catch {
+      return [];
+    }
+  }
+  const out: SearchResult[] = [];
+  collectResults(payload, out, new Set<string>());
+  return out;
+};
+
+// A single web resource pill: favicon + title, links out in a new tab.
+const SearchResultCard: FC<{ item: SearchResult }> = ({ item }) => (
+  <a
+    href={item.url}
+    target="_blank"
+    rel="noopener noreferrer"
+    title={item.url}
+    className="inline-flex max-w-[20rem] items-center gap-1.5 rounded-full border border-border/70 bg-background px-2 py-1 text-xs text-foreground transition-colors hover:border-border hover:bg-muted"
+  >
+    <Image
+      src={`https://www.google.com/s2/favicons?domain=${item.host}&sz=64`}
+      alt=""
+      width={16}
+      height={16}
+      unoptimized
+      className="size-4 shrink-0 rounded-sm"
+      aria-hidden="true"
+    />
+    <span className="truncate">{item.title}</span>
+    <ExternalLink className="size-3 shrink-0 text-muted-foreground/60" />
+  </a>
+);
+
 const ToolFallback: FC<ToolCallMessagePartProps> = ({
   toolName,
   argsText,
+  result,
   isError,
   status,
 }) => {
@@ -818,6 +902,8 @@ const ToolFallback: FC<ToolCallMessagePartProps> = ({
   const chips = extractToolChips(argsText ?? "");
   const label = isError ? "工具调用失败" : running ? meta.running : meta.done;
   const hasArgs = Boolean((argsText ?? "").trim());
+  // Rich result cards only for web-search/fetch tools once their result lands.
+  const searchResults = !isError && isSearchTool(toolName) ? parseSearchResults(result) : [];
 
   return (
     <RailRow
@@ -831,10 +917,17 @@ const ToolFallback: FC<ToolCallMessagePartProps> = ({
           {chips.map((chip, i) => (
             <span
               key={i}
-              className="inline-flex max-w-[18rem] items-center truncate rounded-md bg-muted px-1.5 py-0.5 font-mono text-[11px] text-muted-foreground"
+              className="inline-block max-w-full break-words rounded-md bg-muted px-2 py-1 align-top font-mono text-[11px] leading-5 text-muted-foreground"
             >
               {chip}
             </span>
+          ))}
+        </div>
+      ) : null}
+      {searchResults.length ? (
+        <div className="mt-1.5 flex flex-wrap gap-1.5">
+          {searchResults.map((item) => (
+            <SearchResultCard key={item.url} item={item} />
           ))}
         </div>
       ) : null}

@@ -119,6 +119,35 @@ def _build_options(req: dict[str, Any]):
     return claude_agent_sdk.ClaudeAgentOptions(**kwargs)
 
 
+# Cap on tool_result content forwarded to the UI. Tool outputs (Read of a big
+# file, Bash flooding stdout) can be huge; the browser only needs enough to
+# render a status node or a search-result list, so we truncate hard here to keep
+# the SSE stream and client memory bounded.
+_TOOL_RESULT_MAX_CHARS = 4000
+
+
+def _tool_result_content(content: Any) -> str:
+    """Flatten an SDK ToolResultBlock.content to a bounded string.
+
+    content is ``str | list[dict] | None``. Web search / fetch return a list of
+    content blocks; everything else is usually a plain string. We JSON-encode
+    lists so the browser can parse structured results, pass strings through, and
+    truncate either form to _TOOL_RESULT_MAX_CHARS.
+    """
+    if content is None:
+        return ""
+    if isinstance(content, str):
+        text = content
+    else:
+        try:
+            text = json.dumps(content, ensure_ascii=False, default=str)
+        except (TypeError, ValueError):
+            text = str(content)
+    if len(text) > _TOOL_RESULT_MAX_CHARS:
+        return text[:_TOOL_RESULT_MAX_CHARS] + "…[truncated]"
+    return text
+
+
 def _message_to_events(message: Any) -> list[dict[str, Any]]:
     """Map an SDK message to transport-neutral NDJSON events.
 
@@ -147,6 +176,7 @@ def _message_to_events(message: Any) -> list[dict[str, Any]]:
                     "type": "tool_result",
                     "tool_use_id": getattr(block, "tool_use_id", None),
                     "is_error": bool(getattr(block, "is_error", False)),
+                    "content": _tool_result_content(getattr(block, "content", None)),
                 })
     elif cls == "ResultMessage":
         events.append({

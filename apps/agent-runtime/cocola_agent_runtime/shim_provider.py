@@ -120,6 +120,7 @@ def _shim_event_to_agent_events(ev: dict) -> list[AgentEvent]:
                 data={
                     "tool_use_id": ev.get("tool_use_id", ""),
                     "is_error": bool(ev.get("is_error", False)),
+                    "content": ev.get("content", ""),
                 },
             )
         ]
