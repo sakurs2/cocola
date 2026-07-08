@@ -43,6 +43,7 @@ import {
 import Image from "next/image";
 import { useEffect, useState, type FC } from "react";
 import { useCocola, type ModelIconConfig, type UiMessageMetadata } from "@/app/runtime-provider";
+import { CocolaWordmark } from "@/components/assistant-ui/cocola-wordmark";
 import { TooltipIconButton } from "@/components/assistant-ui/tooltip-icon-button";
 import { MarkdownText } from "@/components/assistant-ui/markdown-text";
 import {
@@ -162,10 +163,8 @@ const ThreadWelcome: FC = () => {
         className="flex w-full max-w-[var(--thread-max-width)] flex-grow flex-col items-center justify-center"
       >
         <div className="flex flex-col items-center gap-3 text-center">
-          <div className="cocola-hero-badge flex size-12 items-center justify-center rounded-2xl text-white">
-            <Sparkles className="size-5" />
-          </div>
-          <h1 className="cocola-hero-title text-4xl font-bold tracking-tight">{greeting}</h1>
+          <h1 className="sr-only">{greeting}</h1>
+          <CocolaWordmark className="cocola-wordmark h-48 w-auto max-w-[min(96vw,680px)]" />
           <p className="max-w-md text-base leading-6 text-muted-foreground">
             What can I help you build, create, or explore today?
           </p>
