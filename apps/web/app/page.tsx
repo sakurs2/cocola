@@ -78,7 +78,7 @@ function Workspace() {
   );
 
   return (
-    <div className="flex h-full min-w-0 flex-1 flex-col">
+    <div className="relative flex h-full min-w-0 flex-1 flex-col">
       <TopBar />
       <div className="flex min-h-0 flex-1">
         <div className="min-w-0 flex-1">
@@ -121,7 +121,7 @@ function Workspace() {
 // input-first chat layout. Keep sandbox state visible without competing with the
 // conversation controls.
 function TopBar() {
-  const { activeSessionId, conversations, sandbox } = useCocola();
+  const { activeSessionId, conversations } = useCocola();
   const [copied, setCopied] = useState(false);
   // The empty/welcome state is chrome-free (matches the reference): the status
   // bar and its Share control only appear once a conversation is under way.
@@ -143,13 +143,9 @@ function TopBar() {
   if (!hasMessages) return null;
 
   return (
-    <header className="flex flex-col border-b border-border/80 bg-background/80 backdrop-blur">
-      <div className="flex h-14 items-center gap-3 px-4">
-        <div className="min-w-0">
-          <div className="text-sm font-semibold">Workspace</div>
-          <div className="text-xs text-muted-foreground">Press ⌘K to jump around</div>
-        </div>
-        <div className="ml-auto flex items-center gap-2">
+    <div className="pointer-events-none absolute right-0 top-0 z-20">
+      <div className="flex items-center gap-3 px-4 py-2">
+        <div className="pointer-events-auto ml-auto flex items-center gap-2">
           <button
             type="button"
             title={
@@ -166,21 +162,9 @@ function TopBar() {
           >
             {copied ? <Check className="size-4 text-emerald-600" /> : <Share2 className="size-4" />}
           </button>
-          {sandbox ? (
-            <span
-              className="rounded-full border border-emerald-500/20 bg-emerald-500/10 px-2 py-0.5 font-mono text-[11px] text-emerald-700"
-              title={sandbox.endpoint}
-            >
-              sandbox {sandbox.sandboxId.slice(0, 8) || "—"} {sandbox.reused ? "(reused)" : "(new)"}
-            </span>
-          ) : (
-            <span className="rounded-full bg-muted px-2 py-0.5 font-mono text-[11px] text-muted-foreground">
-              no sandbox yet
-            </span>
-          )}
         </div>
       </div>
-    </header>
+    </div>
   );
 }
 

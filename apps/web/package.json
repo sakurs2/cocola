@@ -31,8 +31,6 @@
     "react-chartjs-2": "^5.3.1",
     "react-dom": "^18.3.1",
     "remark-gfm": "^4.0.1",
-    "swagger-ui-dist": "^5.32.8",
-    "swagger-ui-react": "^5.32.8",
     "tailwind-merge": "^3.6.0"
   },
   "devDependencies": {

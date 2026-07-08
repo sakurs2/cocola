@@ -140,28 +140,51 @@
     background-color: hsl(var(--background));
     color: hsl(var(--foreground));
   }
+
+  /*
+   * Global slim scrollbar. Applies to every scroll area (chat thread, admin
+   * pages, dialogs) via theme tokens so it adapts to light / admin / dark
+   * palettes automatically. More specific rules (e.g. the sidebar
+   * .sky-glass-scroll in @layer components) still win where they exist.
+   */
+  * {
+    scrollbar-width: thin;
+    scrollbar-color: hsl(var(--muted-foreground) / 0.28) transparent;
+  }
+
+  *::-webkit-scrollbar {
+    width: 8px;
+    height: 8px;
+  }
+
+  *::-webkit-scrollbar-track {
+    background: transparent;
+  }
+
+  *::-webkit-scrollbar-thumb {
+    border-radius: 9999px;
+    background: hsl(var(--muted-foreground) / 0.28);
+    border: 2px solid transparent;
+    background-clip: padding-box;
+    transition: background 160ms ease;
+  }
+
+  *:hover::-webkit-scrollbar-thumb {
+    background: hsl(var(--muted-foreground) / 0.42);
+    background-clip: padding-box;
+  }
+
+  *::-webkit-scrollbar-thumb:hover {
+    background: hsl(var(--muted-foreground) / 0.6);
+    background-clip: padding-box;
+  }
+
+  *::-webkit-scrollbar-corner {
+    background: transparent;
+  }
 }
 
 @layer components {
-  .api-docs-swagger .swagger-ui {
-    color: #0f172a;
-    font-family: inherit;
-  }
-
-  .api-docs-swagger .swagger-ui .topbar {
-    display: none;
-  }
-
-  .api-docs-swagger .swagger-ui .wrapper {
-    max-width: none;
-    padding: 1.25rem;
-  }
-
-  .api-docs-swagger .swagger-ui .scheme-container {
-    border-radius: 0.5rem;
-    box-shadow: none;
-  }
-
   .aui-stream-in[data-status="running"],
   .aui-details-body {
     animation: aui-soft-in 180ms ease-out;

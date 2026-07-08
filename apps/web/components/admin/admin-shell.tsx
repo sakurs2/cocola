@@ -5,7 +5,6 @@ import {
   Activity,
   ArrowLeft,
   BarChart3,
-  BookOpenText,
   Box,
   Clock3,
   Cpu,
@@ -35,7 +34,6 @@ const NAV_GROUPS: { label: string; items: AdminNavItem[] }[] = [
     label: "Overview",
     items: [
       { href: "/admin", label: "Summary", icon: LayoutDashboard },
-      { href: "/admin/api-docs", label: "API Docs", icon: BookOpenText },
       { href: "/admin/token-usage", label: "Token Usage", icon: BarChart3 },
       { href: "/admin/architecture", label: "Architecture", icon: Network },
     ],
