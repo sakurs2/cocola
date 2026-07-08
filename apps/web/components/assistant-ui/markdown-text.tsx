@@ -292,7 +292,7 @@ const CodeHeader: FC<CodeHeaderProps> = ({ language, code }) => {
   };
 
   return (
-    <div className="mt-3 flex items-center justify-between gap-3 rounded-t-xl border-x border-t border-border bg-muted/40 px-3 py-2 shadow-sm">
+    <div className="mt-3 flex items-center justify-between gap-3 rounded-t-xl border-x border-t border-border/60 bg-muted/50 px-3 py-2">
       <span className="min-w-0 truncate font-mono text-[11px] uppercase text-muted-foreground">
         {label}
       </span>
@@ -317,7 +317,7 @@ const SyntaxHighlighter: FC<SyntaxHighlighterProps> = ({
   const lines = code.replace(/\n$/, "").split("\n");
 
   return (
-    <Pre className="mb-3 overflow-x-auto rounded-b-xl border-x border-b border-border bg-[#0f1011] p-4 text-[13px] leading-6 text-[#eceff4] shadow-sm">
+    <Pre className="mb-3 overflow-x-auto rounded-b-xl border-x border-b border-border/60 bg-[#0f1011] p-4 text-[13px] leading-6 text-[#eceff4]">
       <Code className="block whitespace-pre font-mono">
         {lines.map((line, index) => (
           <span key={index} className={cn("block min-h-6", diffLineClass(normalized, line))}>

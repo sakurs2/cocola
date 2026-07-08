@@ -32,6 +32,11 @@ import {
   Wrench,
   XIcon,
   Zap,
+  Globe,
+  Terminal,
+  FolderSearch,
+  ListTodo,
+  Loader2,
   ArrowRight,
   ArrowUp as ArrowUpIcon,
   BarChart3,
@@ -504,7 +509,7 @@ const UserMessage: FC = () => (
         />
       </div>
       <MessagePrimitive.If hasContent>
-        <div className="max-w-[calc(var(--thread-max-width)*0.8)] whitespace-pre-wrap break-words rounded-2xl bg-primary px-4 py-2.5 text-sm leading-6 text-primary-foreground shadow-sm">
+        <div className="max-w-[calc(var(--thread-max-width)*0.8)] whitespace-pre-wrap break-words rounded-2xl bg-muted px-4 py-2.5 text-sm leading-6 text-foreground">
           <MessagePrimitive.Parts />
         </div>
       </MessagePrimitive.If>
@@ -514,7 +519,7 @@ const UserMessage: FC = () => (
 
 const AssistantMessage: FC = () => (
   <MessagePrimitive.Root className="message-enter relative grid w-full max-w-[var(--thread-max-width)] grid-cols-[auto_1fr] grid-rows-[auto_1fr] py-3">
-    <div className="col-span-2 col-start-1 row-start-1 my-1.5 max-w-full break-words rounded-2xl border border-border bg-card/90 px-4 py-3 leading-7 text-foreground shadow-sm">
+    <div className="col-span-2 col-start-1 row-start-1 max-w-full break-words px-0.5 py-1 leading-7 text-foreground">
       <div className="relative">
         <MessagePrimitive.If last>
           <ThreadPrimitive.If running>
@@ -560,11 +565,9 @@ const AssistantMessageHeader: FC = () => {
   const icon = metadata?.model_icon || selectedModel?.icon;
 
   return (
-    <div className="mb-2 flex items-center gap-2 text-xs text-muted-foreground">
-      <span className="inline-flex min-w-0 items-center gap-1.5 rounded-full border border-border bg-background px-2 py-1 shadow-sm">
-        <ModelIcon icon={icon} className="size-4" />
-        <span className="truncate font-medium text-foreground">{label}</span>
-      </span>
+    <div className="mb-2 flex items-center gap-2 text-sm text-muted-foreground">
+      <ModelIcon icon={icon} className="size-5 opacity-90" />
+      <span className="truncate font-medium">{label}</span>
     </div>
   );
 };
@@ -594,8 +597,8 @@ const ArtifactFilePart: FC<FileMessagePartProps> = ({ filename, mimeType, data }
   const downloadUrl = meta.url || data;
 
   return (
-    <div className="my-3 flex max-w-xl items-center gap-3 rounded-xl border border-border bg-background p-3 text-sm shadow-sm">
-      <span className="flex size-9 shrink-0 items-center justify-center rounded-lg border border-border bg-muted text-muted-foreground">
+    <div className="my-3 flex max-w-xl items-center gap-3 rounded-xl border border-border/60 bg-muted/40 p-3 text-sm">
+      <span className="flex size-9 shrink-0 items-center justify-center rounded-lg bg-background text-muted-foreground">
         <FileText className="size-4" />
       </span>
       <div className="min-w-0 flex-1">
@@ -662,139 +665,139 @@ const formatBytes = (bytes: number): string => {
 };
 
 const ReasoningPart: FC<ReasoningMessagePartProps> = ({ text, status }) => (
-  <details className="aui-details group my-3 overflow-hidden rounded-xl border border-border bg-background text-sm shadow-sm">
-    <summary className="flex cursor-pointer select-none items-center gap-2 px-3 py-2 text-muted-foreground [&::-webkit-details-marker]:hidden">
-      <ChevronRight className="size-3.5 shrink-0 transition-transform group-open:rotate-90" />
-      <BrainCircuit className="size-3.5 shrink-0" />
-      <span className="font-medium text-foreground">Reasoning</span>
-      <span className="ml-auto rounded-full border border-border bg-muted px-2 py-0.5 text-[11px] leading-4">
-        {status.type === "running" ? "Thinking" : "Done"}
-      </span>
+  <details className="aui-details group my-2 text-sm">
+    <summary className="flex w-fit cursor-pointer select-none items-center gap-1.5 py-1 text-xs text-muted-foreground transition-colors hover:text-foreground [&::-webkit-details-marker]:hidden">
+      <ChevronRight className="size-3 shrink-0 transition-transform group-open:rotate-90" />
+      <BrainCircuit className={cn("size-3.5 shrink-0", status.type === "running" && "animate-pulse")} />
+      <span className="font-medium">{status.type === "running" ? "正在思考" : "推理过程"}</span>
     </summary>
-    <div className="aui-details-body border-t border-border px-3 py-2.5 text-sm leading-6 text-muted-foreground">
+    <div className="aui-details-body mt-1 border-l-2 border-border/70 pl-3 text-[13px] leading-6 text-muted-foreground">
       {text}
     </div>
   </details>
 );
 
+// Tool call rendering — content-flow style (no card chrome).
+//
+// The gateway only streams tool_use (name + input) and a bare tool_result
+// (id + is_error, NO content payload). So we render each tool call as a light
+// status row: an icon + a Chinese progress phrase, plus small chips extracted
+// from the input (search query / url host / filename / command). Details can be
+// expanded to inspect the raw arguments.
+
+type ToolMeta = { icon: FC<{ className?: string }>; running: string; done: string };
+
+// Map SDK tool names (Claude Agent SDK: Bash/Read/Write/Edit/Glob/Grep/
+// WebSearch/WebFetch/Task/TodoWrite/Skill; MCP tools carry an mcp__ prefix)
+// to an icon + progress phrases. Unknown names fall back to a generic wrench.
+const getToolMeta = (rawName: string): ToolMeta => {
+  const name = rawName.replace(/^mcp__/, "").toLowerCase();
+  if (name.includes("websearch") || name.includes("search"))
+    return { icon: Search, running: "正在搜索资料", done: "已搜索资料" };
+  if (name.includes("webfetch") || name.includes("fetch") || name.includes("browser"))
+    return { icon: Globe, running: "正在读取网页", done: "已读取网页" };
+  if (name.startsWith("read") || name.includes("read_file"))
+    return { icon: FileText, running: "正在阅读文件", done: "已阅读文件" };
+  if (name.startsWith("write") || name.includes("write_file"))
+    return { icon: Pencil, running: "正在写入文件", done: "已写入文件" };
+  if (name.startsWith("edit") || name.includes("str_replace") || name.includes("edit_file"))
+    return { icon: Pencil, running: "正在编辑文件", done: "已编辑文件" };
+  if (name.startsWith("glob") || name.startsWith("grep") || name.includes("find"))
+    return { icon: FolderSearch, running: "正在检索代码", done: "已检索代码" };
+  if (name.startsWith("bash") || name.includes("shell") || name.includes("terminal"))
+    return { icon: Terminal, running: "正在执行命令", done: "已执行命令" };
+  if (name.startsWith("todo") || name.includes("task"))
+    return { icon: ListTodo, running: "正在规划任务", done: "已更新任务" };
+  if (name.startsWith("skill") || name.includes("load"))
+    return { icon: Sparkles, running: "正在加载技能", done: "已加载技能" };
+  return { icon: Wrench, running: "正在调用工具", done: "已调用工具" };
+};
+
+// Best-effort chips from the tool input JSON. Never throws; returns [] on any
+// parse miss so the status row still renders cleanly.
+const extractToolChips = (argsText: string): string[] => {
+  if (!argsText) return [];
+  let obj: Record<string, unknown>;
+  try {
+    obj = JSON.parse(argsText) as Record<string, unknown>;
+  } catch {
+    return [];
+  }
+  const chips: string[] = [];
+  const push = (v: unknown) => {
+    if (typeof v === "string" && v.trim()) chips.push(v.trim());
+  };
+  push(obj.query);
+  push(obj.pattern);
+  if (typeof obj.url === "string") {
+    try {
+      chips.push(new URL(obj.url).host);
+    } catch {
+      push(obj.url);
+    }
+  }
+  const file = obj.file_path ?? obj.path ?? obj.filename;
+  if (typeof file === "string" && file.trim()) {
+    const parts = file.trim().split("/");
+    chips.push(parts[parts.length - 1] || file.trim());
+  }
+  if (typeof obj.command === "string" && obj.command.trim()) {
+    const firstLine = obj.command.trim().split("\n")[0] ?? "";
+    chips.push(firstLine.slice(0, 48));
+  }
+  if (typeof obj.description === "string" && obj.description.trim() && chips.length === 0) {
+    chips.push(obj.description.trim().slice(0, 48));
+  }
+  return Array.from(new Set(chips)).slice(0, 4);
+};
+
 const ToolFallback: FC<ToolCallMessagePartProps> = ({
   toolName,
   argsText,
-  result,
   isError,
   status,
-}) => (
-  <ToolCard
-    title={toolName}
-    args={formatPayload(argsText)}
-    result={formatPayload(result)}
-    isError={isError}
-    status={status}
-  />
-);
-
-const ToolCard: FC<{
-  title: string;
-  args?: string;
-  result?: string;
-  isError?: boolean;
-  status: ToolCallMessagePartProps["status"];
-}> = ({ title, args, result, isError, status }) => {
-  const meta = getToolStatusMeta(status, isError, result !== undefined);
+}) => {
+  const meta = getToolMeta(toolName);
+  const running = status.type === "running" || status.type === "requires-action";
+  const Icon = meta.icon;
+  const chips = extractToolChips(argsText ?? "");
+  const label = isError ? "工具调用失败" : running ? meta.running : meta.done;
+  const hasArgs = Boolean((argsText ?? "").trim());
 
   return (
-    <details
-      open={status.type === "running" || status.type === "requires-action" || isError}
-      className={cn(
-        "aui-details group my-3 overflow-hidden rounded-xl border bg-background text-sm shadow-sm",
-        isError ? "border-destructive/50" : "border-border",
-      )}
-    >
-      <summary className="flex cursor-pointer select-none items-center gap-2 px-3 py-2 text-muted-foreground [&::-webkit-details-marker]:hidden">
-        <ChevronRight className="size-3.5 shrink-0 transition-transform group-open:rotate-90" />
-        <span className="flex size-6 shrink-0 items-center justify-center rounded-lg border border-border bg-muted">
-          <Wrench className="size-3.5" />
-        </span>
-        <span className="min-w-0 truncate font-mono text-xs text-foreground">{title}</span>
-        <span
-          className={cn(
-            "ml-auto rounded-full border px-2 py-0.5 text-[11px] leading-4",
-            meta.className,
-          )}
-        >
-          {meta.label}
-        </span>
-      </summary>
-      <div className="aui-details-body grid gap-2 border-t border-border p-3">
-        {args ? <ToolPayload label="Arguments" tone="muted" value={args} /> : null}
-        {result !== undefined ? (
-          <ToolPayload
-            label={isError ? "Error" : "Result"}
-            tone={isError ? "error" : "muted"}
-            value={result}
+    <details className="aui-details group my-2 text-sm">
+      <summary className="flex w-fit cursor-pointer select-none flex-wrap items-center gap-1.5 py-1 text-xs [&::-webkit-details-marker]:hidden">
+        {running ? (
+          <Loader2 className="size-3.5 shrink-0 animate-spin text-muted-foreground" />
+        ) : (
+          <Icon
+            className={cn("size-3.5 shrink-0", isError ? "text-destructive" : "text-muted-foreground")}
           />
+        )}
+        <span className={cn("font-medium", isError ? "text-destructive" : "text-muted-foreground")}>
+          {label}
+        </span>
+        {chips.map((chip, i) => (
+          <span
+            key={i}
+            className="inline-flex max-w-[16rem] items-center truncate rounded-md bg-muted px-1.5 py-0.5 font-mono text-[11px] text-muted-foreground"
+          >
+            {chip}
+          </span>
+        ))}
+        {hasArgs ? (
+          <ChevronRight className="size-3 shrink-0 text-muted-foreground/60 transition-transform group-open:rotate-90" />
         ) : null}
-        {!args && result === undefined ? (
-          <p className="text-xs text-muted-foreground">Waiting for output...</p>
-        ) : null}
-      </div>
+      </summary>
+      {hasArgs ? (
+        <div className="aui-details-body mt-1 border-l-2 border-border/70 pl-3">
+          <pre className="max-h-72 overflow-auto whitespace-pre-wrap break-words py-1 font-mono text-[11px] leading-5 text-muted-foreground">
+            {formatPayload(argsText)}
+          </pre>
+        </div>
+      ) : null}
     </details>
   );
-};
-
-const ToolPayload: FC<{
-  label: string;
-  value: string;
-  tone: "muted" | "error";
-}> = ({ label, value, tone }) => (
-  <section className="overflow-hidden rounded-lg border border-border bg-muted/35">
-    <div className="border-b border-border px-2.5 py-1.5 font-mono text-[11px] uppercase text-muted-foreground">
-      {label}
-    </div>
-    <pre
-      className={cn(
-        "max-h-72 overflow-auto whitespace-pre-wrap break-words p-2.5 font-mono text-xs leading-5",
-        tone === "error" ? "text-destructive" : "text-muted-foreground",
-      )}
-    >
-      {value}
-    </pre>
-  </section>
-);
-
-const getToolStatusMeta = (
-  status: ToolCallMessagePartProps["status"],
-  isError: boolean | undefined,
-  hasResult: boolean,
-) => {
-  if (isError) {
-    return {
-      label: "Error",
-      className: "border-destructive/40 bg-destructive/10 text-destructive",
-    };
-  }
-  if (status.type === "running") {
-    return {
-      label: "Running",
-      className: "border-border bg-background text-muted-foreground",
-    };
-  }
-  if (status.type === "requires-action") {
-    return {
-      label: "Action needed",
-      className: "border-primary/30 bg-primary/10 text-foreground",
-    };
-  }
-  if (status.type === "incomplete") {
-    return {
-      label: "Incomplete",
-      className: "border-destructive/40 bg-destructive/10 text-destructive",
-    };
-  }
-  return {
-    label: hasResult ? "Done" : "No output",
-    className: "border-border bg-background text-muted-foreground",
-  };
 };
 
 const formatPayload = (value: unknown): string | undefined => {
