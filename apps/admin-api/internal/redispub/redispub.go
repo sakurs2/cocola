@@ -32,6 +32,10 @@ const (
 	OverrideKey  = "cocola:quota:override"
 	UserEventsCh = "cocola:user-events"
 	fieldSepRune = "/"
+	// WarmPoolConfigKey mirrors sandbox-manager's orchestrator.warmConfigKey.
+	// It carries the admin-tunable warm-pool sizing (enabled + size) so a config
+	// change on the admin page hot-reloads every sandbox-manager replica.
+	WarmPoolConfigKey = "cocola:sb:warmpool:config"
 )
 
 func overrideField(scope, subject string) string { return scope + fieldSepRune + subject }
@@ -145,6 +149,20 @@ func (p *Publisher) SubscribeUserEvents(ctx context.Context) (<-chan service.Use
 		}
 	}
 	return out, cancel, nil
+}
+
+// SetWarmPoolConfig writes the effective warm-pool sizing to the shared key
+// sandbox-manager reads on every refill tick. The JSON shape MUST match
+// orchestrator.warmSizing ({"enabled":bool,"size":int}).
+func (p *Publisher) SetWarmPoolConfig(ctx context.Context, enabled bool, size int) error {
+	raw, err := json.Marshal(struct {
+		Enabled bool `json:"enabled"`
+		Size    int  `json:"size"`
+	}{Enabled: enabled, Size: size})
+	if err != nil {
+		return err
+	}
+	return p.rdb.Set(ctx, WarmPoolConfigKey, raw, 0).Err()
 }
 
 // Close releases the connection pool.

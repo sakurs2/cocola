@@ -1436,6 +1436,15 @@ func (a *API) listSandboxes(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, out)
 }
 
+func (a *API) deleteSandbox(w http.ResponseWriter, r *http.Request) {
+	id := chi.URLParam(r, "id")
+	if err := a.svc.DeleteSandbox(r.Context(), id); err != nil {
+		mapErr(w, err)
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
+}
+
 // ---- token usage ----
 
 func (a *API) tokenUsage(w http.ResponseWriter, r *http.Request) {

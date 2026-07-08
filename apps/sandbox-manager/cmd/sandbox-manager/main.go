@@ -95,12 +95,34 @@ func main() {
 			log.Info("sandbox capacity guard enabled (Kubernetes REST)")
 		}
 
-		// Allocation is on-demand cold-start only (ADR-0015/0016): every miss
-		// cold-creates a sandbox and mounts the per-user + per-session volumes at
-		// create time. The warm pool capability was removed in ADR-0016 — see
-		// that ADR for the rationale (OpenSandbox exposes no hot-mount-volume API,
-		// so adopt-by-remount was permanently infeasible on the only backend).
+		// Warm pool (re-introduced): pre-create session-agnostic sandboxes ahead
+		// of demand so a cold-start becomes a claim (Redis DEL + bind) instead of a
+		// multi-second backend create. This is compatible with OpenSandbox's
+		// no-hot-mount constraint (ADR-0016): warm sandboxes carry NO per-session
+		// volume, and a claim restores session state via checkpoint/restore exactly
+		// as a cold create would. Sizing is admin-tunable (default 10) and
+		// hot-reloads from a shared Redis config key written by admin-api. Multi-node
+		// spread reuses the capacity guard (each warm create targets the node with
+		// the most remaining capacity).
+		warmCfg := orchestrator.WarmConfigFromEnv()
+		binder.WithWarmPool(warmCfg)
+
 		go binder.RunReaper(ctx) // background two-stage Pause-then-Destroy GC
+		if binder.WarmEnabled() {
+			// The refill loop self-heals on every tick: each tick probes warm
+			// sandbox health and prunes stale records before resizing, so a
+			// restart with leftover warm keys is reconciled by the first tick
+			// (which runs immediately). No separate synchronous startup pass is
+			// needed — this keeps startup non-blocking and the reconcile logic
+			// in exactly one place.
+			go binder.RunWarmPool(ctx) // background pre-warm refill + self-heal loop
+			log.Sugar().Infow("sandbox warm pool enabled",
+				"size", warmCfg.Size,
+				"enabled", warmCfg.Enabled,
+				"refill_every", warmCfg.RefillEvery)
+		} else {
+			log.Info("sandbox warm pool disabled (no COCOLA_SANDBOX_IMAGE)")
+		}
 		eff := binder.EffectiveConfig()
 		log.Sugar().Infow("session<->sandbox binder enabled",
 			"lease_ttl", eff.LeaseTTL,
@@ -223,3 +245,4 @@ func getenv(k, def string) string {
 	}
 	return def
 }
+

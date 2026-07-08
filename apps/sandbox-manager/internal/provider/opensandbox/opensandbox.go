@@ -400,6 +400,7 @@ func (p *Provider) Create(ctx context.Context, spec provider.SandboxSpec) (*prov
 		Metadata: map[string]string{
 			"cocola.user_id":    safeMetadataLabelValue(spec.UserID),
 			"cocola.session_id": safeMetadataLabelValue(spec.SessionID),
+			"cocola.warm":       safeMetadataLabelValue(boolLabel(spec.Warm)),
 		},
 	}
 	if spec.TargetNodeName != "" {
@@ -429,7 +430,7 @@ func (p *Provider) Create(ctx context.Context, spec provider.SandboxSpec) (*prov
 	// Volume mapping: per-session workspace, per-session Claude config, plus
 	// read-only platform skills. See mapVolumes. Claude config is mounted outside
 	// /workspace so user file listings do not expose it.
-	vols, err := p.mapVolumes(spec.UserID, spec.SessionID)
+	vols, err := p.mapVolumes(spec.UserID, spec.SessionID, spec.Warm)
 	if err != nil {
 		return nil, err
 	}
@@ -962,6 +963,14 @@ func chownEntrypoint(execUser string) []string {
 	return []string{"/bin/sh", "-c", script}
 }
 
+// boolLabel renders a bool as a metadata-friendly "true"/"false" string.
+func boolLabel(b bool) string {
+	if b {
+		return "true"
+	}
+	return "false"
+}
+
 // shellQuote wraps s in single quotes, escaping any embedded single quotes
 // via the standard '\” idiom. The result is safe to paste into a POSIX shell
 // as one word. An empty string becomes ” so it is not dropped.
@@ -1050,11 +1059,47 @@ func volumeBackendFromEnv() string {
 // provision PVC volumes lazily; host mode creates directories locally before
 // sending the create request. Neither backend deletes storage on sandbox
 // termination; explicit conversation deletion calls CleanupSessionStorage.
-func (p *Provider) mapVolumes(userID, sessionID string) ([]volumeSpec, error) {
+func (p *Provider) mapVolumes(userID, sessionID string, warm bool) ([]volumeSpec, error) {
+	// Warm sandboxes are session-agnostic: they are created ahead of demand with
+	// no bound session yet, and OpenSandbox has no hot-mount-volume API (ADR-0016)
+	// so a per-session PVC can never be attached after the fact. We therefore mount
+	// ONLY the shared read-only platform-skills volume. When a session later claims
+	// the warm sandbox its workspace/.claude state is delivered via checkpoint
+	// restore (agent-runtime restore_if_fresh on reused=false), not a PVC.
+	if warm {
+		return p.mapWarmVolumes(), nil
+	}
 	if p.volumeBackend == volumeBackendHost {
 		return p.mapHostVolumes(userID, sessionID)
 	}
 	return mapPVCVolumes(sessionID), nil
+}
+
+// mapWarmVolumes returns the volume set for a session-agnostic warm sandbox:
+// the shared read-only plugins volume only. In host-backend mode the plugins
+// directory lives under <root>/plugins; in PVC mode it is the shared
+// cocola-plugins claim. No writable session volume is declared, so the warm
+// sandbox's /workspace and /home/cocola/.claude are the image's own ephemeral
+// dirs until a claim restores real state into them.
+func (p *Provider) mapWarmVolumes() []volumeSpec {
+	if p.volumeBackend == volumeBackendHost {
+		return []volumeSpec{
+			{
+				Name:      "plugins",
+				Host:      &hostBackend{Path: filepath.Join(p.root, "plugins")},
+				MountPath: guestPlugins,
+				ReadOnly:  true,
+			},
+		}
+	}
+	return []volumeSpec{
+		{
+			Name:      "plugins",
+			PVC:       &pvcBackend{ClaimName: pluginsClaimName},
+			MountPath: guestPlugins,
+			ReadOnly:  true,
+		},
+	}
 }
 
 func mapPVCVolumes(sessionID string) []volumeSpec {

@@ -2,7 +2,7 @@
 
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
-import { Box, CheckCircle2, Clock3, LoaderCircle, RefreshCw, Server } from "lucide-react";
+import { Box, CheckCircle2, Clock3, LoaderCircle, RefreshCw, Server, Trash2 } from "lucide-react";
 import { signOut } from "next-auth/react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
@@ -13,11 +13,13 @@ type SandboxRuntime = {
   username?: string;
   status:
     | "running"
+    | "ready"
     | "starting"
     | "pending_reclaim"
     | "reclaiming"
     | "stale_metadata"
     | "stopped"
+    | "orphan"
     | "unknown"
     | string;
   lifecycle_state: string;
@@ -33,11 +35,13 @@ type SandboxListResponse = { sandboxes: SandboxRuntime[] };
 
 const STATUS_LABELS: Record<string, string> = {
   running: "Running",
+  ready: "Ready",
   starting: "Starting",
   pending_reclaim: "Pending reclaim",
   reclaiming: "Reclaiming",
   stale_metadata: "Stale metadata",
   stopped: "Stopped",
+  orphan: "Orphan",
   unknown: "Unknown",
 };
 
@@ -47,6 +51,7 @@ export default function SandboxesPage() {
   const [unsupported, setUnsupported] = useState(false);
   const [error, setError] = useState("");
   const [notice, setNotice] = useState("");
+  const [deletingId, setDeletingId] = useState("");
 
   const refresh = useCallback(async () => {
     setError("");
@@ -71,6 +76,32 @@ export default function SandboxesPage() {
     }
   }, []);
 
+  const handleDelete = useCallback(
+    async (sandboxID: string) => {
+      if (!sandboxID) return;
+      if (!window.confirm(`Delete sandbox ${sandboxID}? This removes the pod and its metadata.`)) {
+        return;
+      }
+      setError("");
+      setDeletingId(sandboxID);
+      try {
+        const res = await fetch(`/api/admin/sandboxes/${encodeURIComponent(sandboxID)}`, {
+          method: "DELETE",
+          cache: "no-store",
+        });
+        if (isAccountDisabledResponse(res)) return redirectAccountDisabled();
+        if (!res.ok && res.status !== 204) throw new Error(await responseError(res));
+        setSandboxes((prev) => prev.filter((s) => s.sandbox_id !== sandboxID));
+        setNotice(`Sandbox ${sandboxID} deleted`);
+      } catch (err) {
+        setError(err instanceof Error ? err.message : String(err));
+      } finally {
+        setDeletingId("");
+      }
+    },
+    [],
+  );
+
   useEffect(() => {
     void refresh();
   }, [refresh]);
@@ -79,10 +110,10 @@ export default function SandboxesPage() {
     () => ({
       total: sandboxes.length,
       running: sandboxes.filter((s) => s.status === "running").length,
-      starting: sandboxes.filter((s) => s.status === "starting").length,
+      ready: sandboxes.filter((s) => s.status === "ready").length,
+      orphan: sandboxes.filter((s) => s.status === "orphan").length,
       reclaiming: sandboxes.filter((s) => ["pending_reclaim", "reclaiming"].includes(s.status))
         .length,
-      stopped: sandboxes.filter((s) => s.status === "stopped").length,
     }),
     [sandboxes],
   );
@@ -131,14 +162,14 @@ export default function SandboxesPage() {
             <section className="grid gap-3 md:grid-cols-5">
               <Metric label="Sandboxes" value={String(totals.total)} />
               <Metric label="Running" value={String(totals.running)} />
-              <Metric label="Starting" value={String(totals.starting)} />
+              <Metric label="Ready (warm)" value={String(totals.ready)} />
+              <Metric label="Orphan" value={String(totals.orphan)} />
               <Metric label="To Reclaim" value={String(totals.reclaiming)} />
-              <Metric label="Stopped" value={String(totals.stopped)} />
             </section>
 
             <section className="overflow-hidden rounded-lg border border-border bg-card">
               <div className="overflow-x-auto">
-                <table className="w-full min-w-[1180px] text-sm">
+                <table className="w-full min-w-[1280px] text-sm">
                   <thead className="border-b border-border bg-muted/50 text-xs text-muted-foreground">
                     <tr>
                       <th className="px-4 py-3 text-left font-medium">Sandbox ID</th>
@@ -148,18 +179,19 @@ export default function SandboxesPage() {
                       <th className="px-4 py-3 text-left font-medium">Runtime</th>
                       <th className="px-4 py-3 text-left font-medium">Created</th>
                       <th className="px-4 py-3 text-left font-medium">Node / Pod ID</th>
+                      <th className="px-4 py-3 text-right font-medium">Actions</th>
                     </tr>
                   </thead>
                   <tbody>
                     {loading && sandboxes.length === 0 ? (
                       <tr>
-                        <td colSpan={7} className="px-4 py-10 text-center text-muted-foreground">
+                        <td colSpan={8} className="px-4 py-10 text-center text-muted-foreground">
                           Loading sandboxes...
                         </td>
                       </tr>
                     ) : sandboxes.length === 0 ? (
                       <tr>
-                        <td colSpan={7} className="px-4 py-10 text-center text-muted-foreground">
+                        <td colSpan={8} className="px-4 py-10 text-center text-muted-foreground">
                           No sandboxes found
                         </td>
                       </tr>
@@ -225,6 +257,26 @@ export default function SandboxesPage() {
                               tooltip={podTitle(sandbox)}
                               className="mt-1 max-w-[210px] font-mono text-xs text-muted-foreground"
                             />
+                          </td>
+                          <td className="px-4 py-3 text-right">
+                            {sandbox.status === "ready" || sandbox.status === "orphan" ? (
+                              <Button
+                                variant="outline"
+                                size="sm"
+                                className="text-destructive hover:text-destructive"
+                                disabled={deletingId === sandbox.sandbox_id}
+                                onClick={() => void handleDelete(sandbox.sandbox_id)}
+                              >
+                                {deletingId === sandbox.sandbox_id ? (
+                                  <LoaderCircle className="mr-1 size-3.5 animate-spin" />
+                                ) : (
+                                  <Trash2 className="mr-1 size-3.5" />
+                                )}
+                                Delete
+                              </Button>
+                            ) : (
+                              <span className="text-xs text-muted-foreground">-</span>
+                            )}
                           </td>
                         </tr>
                       ))
@@ -342,11 +394,13 @@ function StatusPill({ status }: { status: string }) {
       className={cn(
         "inline-flex items-center rounded-full px-2 py-0.5 text-xs font-medium",
         status === "running" && "bg-emerald-500/15 text-emerald-400",
+        status === "ready" && "bg-teal-500/15 text-teal-400",
         status === "starting" && "bg-sky-500/15 text-sky-400",
         status === "pending_reclaim" && "bg-amber-500/15 text-amber-400",
         status === "reclaiming" && "bg-amber-500/15 text-amber-400",
         status === "stale_metadata" && "bg-muted text-muted-foreground",
         status === "stopped" && "bg-muted text-muted-foreground",
+        status === "orphan" && "bg-rose-500/15 text-rose-400",
         status === "unknown" && "bg-muted text-muted-foreground",
       )}
     >

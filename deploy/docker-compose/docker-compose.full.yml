@@ -133,6 +133,17 @@ services:
       # the DNS+gateway baseline (secure by default).
       COCOLA_SANDBOX_LLM_BASE_URL: "${COCOLA_SANDBOX_LLM_BASE_URL:-http://host.docker.internal:18091}"
       COCOLA_SANDBOX_EGRESS_ALLOWLIST: "${COCOLA_SANDBOX_EGRESS_ALLOWLIST:-}"
+      # Warm pool (pre-warming). sandbox-manager creates session-agnostic
+      # sandboxes ahead of demand, so it needs the same brain image + LLM
+      # credentials agent-runtime injects on the Acquire path (a claimed warm
+      # sandbox must be credential-identical to a cold-created one). Sizing is
+      # admin-tunable from the config page and hot-reloads via the shared Redis
+      # key; the env values below are the boot defaults.
+      COCOLA_SANDBOX_IMAGE: "${COCOLA_SANDBOX_IMAGE:-cocola/sandbox-runtime:dev}"
+      COCOLA_SANDBOX_LLM_TOKEN: "${COCOLA_SANDBOX_LLM_TOKEN:-cocola-local}"
+      COCOLA_SANDBOX_MODEL_ALIAS: "${COCOLA_SANDBOX_MODEL_ALIAS:-cocola-default}"
+      COCOLA_SANDBOX_WARM_POOL_ENABLED: "${COCOLA_SANDBOX_WARM_POOL_ENABLED:-true}"
+      COCOLA_SANDBOX_WARM_POOL_SIZE: "${COCOLA_SANDBOX_WARM_POOL_SIZE:-10}"
     ports:
       - "${COCOLA_SANDBOX_HOST_PORT:-50051}:50051"
     volumes:

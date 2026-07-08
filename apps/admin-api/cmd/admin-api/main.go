@@ -139,6 +139,7 @@ func main() {
 	// the authoritative write already landed in the store.
 	redisAddr := os.Getenv("COCOLA_REDIS_ADDR")
 	var runtimeKV *rds.Client
+	var warmPoolWriter service.WarmPoolConfigWriter
 	var userEventBroker service.UserEventBroker = service.NewMemoryUserEventBroker()
 	if redisAddr != "" {
 		cfg := redispub.Config{
@@ -155,6 +156,7 @@ func main() {
 		}
 		defer func() { _ = pub.Close() }()
 		userEventBroker = pub
+		warmPoolWriter = pub
 		mirror := store.NewMirror(st, pub)
 		if m, ok := mirror.(*store.Mirror); ok {
 			m.OnPublishError = func(op string, e error) {
@@ -184,6 +186,7 @@ func main() {
 
 	svc := service.New(st, iss, time.Now).
 		WithUserEventBroker(userEventBroker).
+		WithWarmPoolConfigWriter(warmPoolWriter).
 		WithModelSecretKey(config.SecretFromEnv("COCOLA_MODEL_SECRET_KEY")).
 		WithConfigSecretKey(config.SecretFromEnv("COCOLA_CONFIG_SECRET_KEY")).
 		WithMinScheduleInterval(time.Duration(getenvInt("COCOLA_SCHEDULER_MIN_INTERVAL_SECS", 3600)) * time.Second)
@@ -216,6 +219,14 @@ func main() {
 			svc.WithSandboxRuntimeManager(runtimeMgr)
 			log.Info("sandbox runtime monitor enabled (Redis metadata)")
 		}
+	}
+	if warmPoolWriter != nil {
+		// Reconcile the shared warm-pool config key with the current DB/env state
+		// at boot so sandbox-manager sees the admin-configured sizing even if no
+		// update has happened since the last restart.
+		bctx, bcancel := context.WithTimeout(context.Background(), 5*time.Second)
+		svc.PublishWarmPoolConfig(bctx)
+		bcancel()
 	}
 	if email := os.Getenv("COCOLA_BOOTSTRAP_ADMIN_EMAIL"); email != "" {
 		username := os.Getenv("COCOLA_BOOTSTRAP_ADMIN_USERNAME")

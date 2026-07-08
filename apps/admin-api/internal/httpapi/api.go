@@ -219,6 +219,7 @@ func (a *API) Router() http.Handler {
 		})
 
 		r.Get("/sandboxes", a.listSandboxes)
+		r.Delete("/sandboxes/{id}", a.deleteSandbox)
 
 		r.Route("/token-usage", func(r chi.Router) {
 			r.Get("/", a.tokenUsage)

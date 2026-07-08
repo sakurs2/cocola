@@ -56,6 +56,7 @@ type Admin struct {
 	skillBundles        SkillBundleStore
 	sandboxNodes        SandboxNodeManager
 	sandboxRuntimes     SandboxRuntimeManager
+	warmPool            WarmPoolConfigWriter
 	architectureChecker ArchitectureHealthChecker
 	userEvents          UserEventBroker
 	modelSecretKey      string

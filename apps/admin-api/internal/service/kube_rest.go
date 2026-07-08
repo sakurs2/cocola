@@ -205,6 +205,25 @@ func (c *kubeClient) listSandboxPods(ctx context.Context) ([]kubePod, error) {
 	return out.Items, nil
 }
 
+// BatchSandbox is the OpenSandbox CRD that owns a sandbox pod. Deleting the pod
+// directly is futile (its controller recreates it via ownerReference); the pod
+// is only torn down for good by deleting this CRD object, whose name equals the
+// sandbox id.
+const (
+	batchSandboxGroup   = "sandbox.opensandbox.io"
+	batchSandboxVersion = "v1alpha1"
+	batchSandboxPlural  = "batchsandboxes"
+)
+
+// deleteBatchSandbox removes the BatchSandbox CRD object named after the sandbox
+// id; Kubernetes garbage-collects the owned pod. A missing object surfaces as
+// ErrNotFound (mapped by c.do), which callers treat as already-gone.
+func (c *kubeClient) deleteBatchSandbox(ctx context.Context, namespace, name string) error {
+	path := "/apis/" + batchSandboxGroup + "/" + batchSandboxVersion +
+		"/namespaces/" + url.PathEscape(namespace) + "/" + batchSandboxPlural + "/" + url.PathEscape(name)
+	return c.do(ctx, http.MethodDelete, path, nil, nil, "application/json")
+}
+
 func (c *kubeClient) evictPod(ctx context.Context, namespace, name string) error {
 	body := map[string]any{
 		"apiVersion": "policy/v1",

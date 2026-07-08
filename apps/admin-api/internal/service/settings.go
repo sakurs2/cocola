@@ -19,6 +19,9 @@ const (
 	SettingSchedulerHeartbeatSecs    = "scheduler.heartbeat_secs"
 	SettingSchedulerLeaseTimeoutSecs = "scheduler.lease_timeout_secs"
 	SettingSchedulerMinIntervalSecs  = "scheduler.min_interval_secs"
+
+	SettingWarmPoolEnabled = "sandbox.warm_pool_enabled"
+	SettingWarmPoolSize    = "sandbox.warm_pool_size"
 )
 
 type SystemSettingDefinition struct {
@@ -84,6 +87,16 @@ func settingDefinitions() []SystemSettingDefinition {
 			Key: SettingSchedulerMinIntervalSecs, Group: "Scheduler", Label: "Minimum Schedule Interval",
 			Description: "Minimum allowed task interval in seconds. Values below one hour are rejected.",
 			Kind:        "int", Env: "COCOLA_SCHEDULER_MIN_INTERVAL_SECS", Default: 3600, Editable: true, HotReload: true, Min: 3600, Max: 86400,
+		},
+		{
+			Key: SettingWarmPoolEnabled, Group: "Sandbox", Label: "Warm Pool Enabled",
+			Description: "Pre-create session-agnostic sandboxes ahead of demand so a new session claims a ready sandbox instead of waiting on a cold start.",
+			Kind:        "bool", Env: "COCOLA_SANDBOX_WARM_POOL_ENABLED", Default: true, Editable: true, HotReload: true,
+		},
+		{
+			Key: SettingWarmPoolSize, Group: "Sandbox", Label: "Warm Pool Size",
+			Description: "Target number of pre-warmed sandboxes to keep ready. Applied fleet-wide and hot-reloaded by sandbox-manager.",
+			Kind:        "int", Env: "COCOLA_SANDBOX_WARM_POOL_SIZE", Default: 10, Editable: true, HotReload: true, Min: 0, Max: 500,
 		},
 		{
 			Key: "auth.token_ttl_secs", Group: "Auth", Label: "Token Default TTL",
@@ -179,6 +192,9 @@ func (a *Admin) UpdateSystemSetting(ctx context.Context, key string, in SystemSe
 		return SystemSettingView{}, err
 	}
 	a.audit(ctx, in.Actor, "setting.update", key, "value="+settingAuditValue(def, value))
+	if key == SettingWarmPoolEnabled || key == SettingWarmPoolSize {
+		a.publishWarmPoolConfig(ctx)
+	}
 	return a.settingView(def, setting), nil
 }
 
@@ -200,6 +216,9 @@ func (a *Admin) ResetSystemSetting(ctx context.Context, key string, expectedVers
 		return err
 	}
 	a.audit(ctx, actor, "setting.reset", key, "")
+	if key == SettingWarmPoolEnabled || key == SettingWarmPoolSize {
+		a.publishWarmPoolConfig(ctx)
+	}
 	return nil
 }
 
@@ -398,6 +417,36 @@ func (a *Admin) settingBool(ctx context.Context, key string, fallback bool) bool
 		return b
 	}
 	return fallback
+}
+
+// WarmPoolConfigWriter propagates the effective warm-pool sizing to the shared
+// Redis key that sandbox-manager reads on every refill tick, so an admin config
+// change hot-reloads fleet-wide without a sandbox-manager restart.
+type WarmPoolConfigWriter interface {
+	SetWarmPoolConfig(ctx context.Context, enabled bool, size int) error
+}
+
+// WithWarmPoolConfigWriter attaches the shared-Redis warm-pool config publisher.
+// Nil (no shared Redis) simply means the admin page still persists the setting,
+// but sandbox-manager falls back to its own env/default until restarted.
+func (a *Admin) WithWarmPoolConfigWriter(w WarmPoolConfigWriter) *Admin {
+	a.warmPool = w
+	return a
+}
+
+// PublishWarmPoolConfig pushes the current effective warm-pool sizing to shared
+// Redis. Safe to call at boot to reconcile the shared key with the DB/env state.
+func (a *Admin) PublishWarmPoolConfig(ctx context.Context) {
+	a.publishWarmPoolConfig(ctx)
+}
+
+func (a *Admin) publishWarmPoolConfig(ctx context.Context) {
+	if a.warmPool == nil {
+		return
+	}
+	enabled := a.settingBool(ctx, SettingWarmPoolEnabled, true)
+	size := a.settingInt(ctx, SettingWarmPoolSize, 10)
+	_ = a.warmPool.SetWarmPoolConfig(ctx, enabled, size)
 }
 
 func secondsDuration(n int) time.Duration {

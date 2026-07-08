@@ -19,6 +19,11 @@ type SandboxSpec struct {
 	Resources      Resources         // CPU/mem/disk caps
 	Networking     Networking        // egress policy
 	TargetNodeName string            // optional node placement for schedulable backends
+	// Warm marks a session-agnostic pre-warmed sandbox created ahead of demand
+	// (see orchestrator.WarmPool). A warm sandbox mounts NO per-session volume
+	// (OpenSandbox has no hot-mount API, ADR-0016), so its workspace is ephemeral
+	// until a session claims it and its state is restored via checkpoint/restore.
+	Warm bool
 }
 
 // Resources defines the resource quota.

@@ -68,6 +68,31 @@ func metaKey(sandboxID string) string { return metaPrefix + sandboxID }
 
 func metaScanPattern() string { return metaPrefix + "*" }
 
+// warmPrefix is the scan root for the pre-warmed sandbox inventory. A warm key
+// records one session-agnostic sandbox that was created ahead of demand and is
+// waiting to be claimed by the next cold-start. Warm keys carry NO TTL: the
+// refill loop is the source of truth for how many warm sandboxes exist, and a
+// claim is an atomic DEL of the key (exactly one replica wins).
+//
+//	cocola:sb:warm:{sandbox} -> JSON(warmMeta)
+const warmPrefix = keyPrefix + "warm:"
+
+func warmKey(sandboxID string) string { return warmPrefix + sandboxID }
+
+func warmScanPattern() string { return warmPrefix + "*" }
+
+// warmConfigKey holds the admin-tunable warm-pool config (enabled + size),
+// written by admin-api and read by sandbox-manager on every refill tick so the
+// admin config page hot-reloads without a sandbox-manager restart.
+//
+//	cocola:sb:warmpool:config -> JSON({"enabled":bool,"size":int})
+const warmConfigKey = keyPrefix + "warmpool:config"
+
+// warmRefillLockKey serialises the refill loop across replicas so only one
+// replica creates warm sandboxes per tick (avoids N replicas each creating a
+// full pool). Short TTL so a crashed holder frees it quickly.
+const warmRefillLockKey = keyPrefix + "warmrefill:lock"
+
 // State is the lifecycle phase of a bound sandbox, persisted in meta.
 type State string
 
@@ -88,4 +113,12 @@ type meta struct {
 	State       State  `json:"state"`
 	CreatedUnix int64  `json:"created_unix"`
 	PausedUnix  int64  `json:"paused_unix"` // 0 unless StatePaused
+}
+
+// warmMeta is the durable registry record for one pre-warmed sandbox.
+type warmMeta struct {
+	SandboxID   string `json:"sandbox_id"`
+	Image       string `json:"image"`
+	NodeName    string `json:"node_name,omitempty"`
+	CreatedUnix int64  `json:"created_unix"`
 }

@@ -444,6 +444,10 @@ dev_up() {
     COCOLA_SANDBOX_PROVIDER="$provider" \
     COCOLA_OPENSANDBOX_URL="$osb_url" \
     COCOLA_REDIS_ADDR="$COCOLA_REDIS_ADDR" \
+    COCOLA_SANDBOX_IMAGE="${COCOLA_SANDBOX_IMAGE:-cocola/sandbox-runtime:dev}" \
+    COCOLA_SANDBOX_LLM_BASE_URL="${COCOLA_SANDBOX_LLM_BASE_URL:-http://host.docker.internal:$LLM_PORT}" \
+    COCOLA_SANDBOX_LLM_TOKEN="${COCOLA_SANDBOX_LLM_TOKEN:-cocola-local}" \
+    COCOLA_SANDBOX_MODEL_ALIAS="${COCOLA_SANDBOX_MODEL_ALIAS:-cocola-default}" \
       $SETSID go run ./cmd/sandbox-manager
   ) >"$(log_redirect sandbox-manager)" 2>&1 &
   PIDS+=("$!")

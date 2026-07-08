@@ -86,6 +86,11 @@ type Binder struct {
 
 	// cap is optional; nil means fresh sandbox creation is not capacity-gated.
 	cap CapacityGuard
+
+	// warm is optional; nil means no pre-warm pool (every miss cold-creates).
+	// When set and usable (WarmEnabled), the slow path prefers claiming a
+	// pre-warmed sandbox over cold-creating one.
+	warm *WarmConfig
 }
 
 // NewBinder constructs a Binder. The provider is the same abstraction the gRPC
@@ -188,6 +193,34 @@ func (b *Binder) AcquireWithOutcome(ctx context.Context, spec AcquireSpec) (Outc
 		return Outcome{Sandbox: sb, Reused: true}, nil
 	}
 
+	start := time.Now()
+
+	// Warm-pool fast-create: prefer claiming a pre-warmed, session-agnostic
+	// sandbox over a cold create. A claimed sandbox has no per-session volume
+	// (OpenSandbox has no hot-mount API), so the session's workspace/.claude
+	// state is restored from its checkpoint by agent-runtime on reused=false —
+	// exactly the path a cold create would take. Claiming turns a multi-second
+	// cold start into a Redis DEL + bind. A claim failure/empty pool silently
+	// falls through to the normal create path below.
+	if sb, ok := b.claimWarm(ctx, spec); ok {
+		m := meta{
+			SandboxID:   sb.ID,
+			SessionID:   spec.SessionID,
+			UserID:      spec.UserID,
+			Image:       spec.Image,
+			State:       StateActive,
+			CreatedUnix: time.Now().Unix(),
+		}
+		if err := b.bind(ctx, m); err != nil {
+			// Bind failed after we already own the sandbox: tear it down so the
+			// claim never leaks a container, then fall through to a cold create.
+			_ = b.p.Destroy(ctx, sb.ID)
+		} else {
+			b.recordMiss(time.Since(start))
+			return Outcome{Sandbox: sb, Reused: false}, nil
+		}
+	}
+
 	targetNode := ""
 	if b.cap != nil {
 		node, err := b.cap.SelectNode(ctx)
@@ -197,7 +230,6 @@ func (b *Binder) AcquireWithOutcome(ctx context.Context, spec AcquireSpec) (Outc
 		targetNode = node
 	}
 
-	start := time.Now()
 	sb, err := b.p.Create(ctx, provider.SandboxSpec{
 		UserID:         spec.UserID,
 		SessionID:      spec.SessionID,

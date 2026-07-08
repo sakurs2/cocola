@@ -808,7 +808,7 @@ func TestMapVolumes_SanitisesIDs(t *testing.T) {
 func TestMapHostVolumes(t *testing.T) {
 	root := t.TempDir()
 	p := &Provider{volumeBackend: volumeBackendHost, root: root}
-	vols, err := p.mapVolumes("User/1", "Sess..1")
+	vols, err := p.mapVolumes("User/1", "Sess..1", false)
 	if err != nil {
 		t.Fatalf("mapVolumes host: %v", err)
 	}
@@ -830,6 +830,44 @@ func TestMapHostVolumes(t *testing.T) {
 	assertHost(0, "workspace", filepath.Join(sessionRoot, "workspace"), guestWorkspace, false)
 	assertHost(1, "claude", filepath.Join(sessionRoot, "claude"), guestClaudeConfig, false)
 	assertHost(2, "plugins", filepath.Join(root, "plugins"), guestPlugins, true)
+}
+
+// TestMapVolumes_WarmPVC asserts a warm sandbox mounts only the shared,
+// read-only plugins volume in PVC mode — no per-session claim (OpenSandbox has
+// no hot-mount API, so warm sandboxes are session-agnostic).
+func TestMapVolumes_WarmPVC(t *testing.T) {
+	p := &Provider{volumeBackend: volumeBackendPVC}
+	vols, err := p.mapVolumes("u1", "", true)
+	if err != nil {
+		t.Fatalf("mapVolumes warm pvc: %v", err)
+	}
+	if len(vols) != 1 {
+		t.Fatalf("warm volumes = %d, want 1", len(vols))
+	}
+	v := vols[0]
+	if v.Name != "plugins" || v.PVC == nil || v.PVC.ClaimName != pluginsClaimName ||
+		v.MountPath != guestPlugins || !v.ReadOnly {
+		t.Fatalf("warm volume = %+v pvc=%+v", v, v.PVC)
+	}
+}
+
+// TestMapVolumes_WarmHost asserts a warm sandbox in host mode mounts only the
+// shared read-only plugins directory.
+func TestMapVolumes_WarmHost(t *testing.T) {
+	root := t.TempDir()
+	p := &Provider{volumeBackend: volumeBackendHost, root: root}
+	vols, err := p.mapVolumes("u1", "", true)
+	if err != nil {
+		t.Fatalf("mapVolumes warm host: %v", err)
+	}
+	if len(vols) != 1 {
+		t.Fatalf("warm host volumes = %d, want 1", len(vols))
+	}
+	v := vols[0]
+	if v.Name != "plugins" || v.Host == nil || v.Host.Path != filepath.Join(root, "plugins") ||
+		v.MountPath != guestPlugins || !v.ReadOnly {
+		t.Fatalf("warm host volume = %+v host=%+v", v, v.Host)
+	}
 }
 
 // TestCreate_SendsVolumes asserts the mapped volumes reach the wire on Create.
