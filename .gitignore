@@ -81,3 +81,6 @@ deploy/llm-config.json
 
 # Local CodeGraph index (never committed)
 .codegraph/
+
+# local scratch / temp files
+temp/
