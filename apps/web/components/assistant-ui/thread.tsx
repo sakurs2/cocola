@@ -32,6 +32,13 @@ import {
   Wrench,
   XIcon,
   Zap,
+  ArrowRight,
+  ArrowUp as ArrowUpIcon,
+  BarChart3,
+  Code2,
+  Lightbulb,
+  Pencil,
+  Sparkles,
 } from "lucide-react";
 import Image from "next/image";
 import { useEffect, useState, type FC } from "react";
@@ -97,27 +104,54 @@ const ScrollToBottom: FC = () => (
   </ThreadPrimitive.ScrollToBottom>
 );
 
-const SUGGESTIONS: { title: string; subtitle: string; prompt: string }[] = [
+type SuggestionTile = {
+  icon: typeof BarChart3;
+  tile: string;
+  title: string;
+  subtitle: string;
+  prompt: string;
+};
+
+const SUGGESTIONS: SuggestionTile[] = [
   {
-    title: "Show me a code snippet",
-    subtitle: "of a website's sticky header",
-    prompt: "Show me a code snippet of a website's sticky header",
+    icon: BarChart3,
+    tile: "bg-emerald-100 text-emerald-600",
+    title: "Analyze this data",
+    subtitle: "and create insights",
+    prompt: "Analyze this data and create insights",
   },
   {
-    title: "Summarize the latest changes",
-    subtitle: "in this repo",
-    prompt: "Summarize the latest changes in this repo",
+    icon: Pencil,
+    tile: "bg-sky-100 text-sky-600",
+    title: "Draft a project plan",
+    subtitle: "for a new product",
+    prompt: "Draft a project plan for a new product",
   },
   {
-    title: "Explain how the SSE proxy works",
-    subtitle: "in the cocola gateway",
-    prompt: "Explain how the SSE proxy works in the cocola gateway",
+    icon: Code2,
+    tile: "bg-violet-100 text-violet-600",
+    title: "Write a Python script",
+    subtitle: "to automate this task",
+    prompt: "Write a Python script to automate this task",
+  },
+  {
+    icon: Lightbulb,
+    tile: "bg-pink-100 text-pink-600",
+    title: "Brainstorm creative ideas",
+    subtitle: "for a campaign",
+    prompt: "Brainstorm creative ideas for a campaign",
   },
 ];
 
 const ThreadWelcome: FC = () => {
   const { selectedModel } = useCocola();
   const noModel = !selectedModel;
+  // Time-aware greeting resolved after mount so SSR/client markup agree.
+  const [greeting, setGreeting] = useState("Welcome back");
+  useEffect(() => {
+    const h = new Date().getHours();
+    setGreeting(h < 12 ? "Good morning" : h < 18 ? "Good afternoon" : "Good evening");
+  }, []);
 
   return (
     <ThreadPrimitive.Empty>
@@ -129,13 +163,11 @@ const ThreadWelcome: FC = () => {
       >
         <div className="flex flex-col items-center gap-3 text-center">
           <div className="cocola-hero-badge flex size-12 items-center justify-center rounded-2xl text-white">
-            <MessagesSquare className="size-5" />
+            <Sparkles className="size-5" />
           </div>
-          <p className="text-3xl font-semibold tracking-normal text-foreground">
-            {selectedModel?.label ?? "No model configured"}
-          </p>
-          <p className="max-w-md text-sm leading-6 text-muted-foreground">
-            Ask, inspect files, run tools, and keep every session grounded in its workspace.
+          <h1 className="cocola-hero-title text-4xl font-bold tracking-tight">{greeting}</h1>
+          <p className="max-w-md text-base leading-6 text-muted-foreground">
+            What can I help you build, create, or explore today?
           </p>
         </div>
         {noModel ? (
@@ -148,21 +180,29 @@ const ThreadWelcome: FC = () => {
           <Composer />
         </div>
 
-        <div className="cocola-suggest-card mt-6 w-full rounded-2xl border p-2">
-          <div className="mb-1 flex items-center gap-1.5 px-2 text-xs font-medium uppercase text-muted-foreground">
-            <Zap className="size-3.5" />
-            Suggested
+        <div className="mt-8 w-full">
+          <div className="mb-3 flex items-center gap-1.5 px-1 text-sm font-semibold text-foreground">
+            <Sparkles className="size-4 text-primary" />
+            Suggested prompts
           </div>
-          <div className="flex flex-col">
-            {SUGGESTIONS.map(({ title, subtitle, prompt }) => (
+          <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+            {SUGGESTIONS.map(({ icon: Icon, tile, title, subtitle, prompt }) => (
               <ThreadPrimitive.Suggestion
                 key={title}
                 prompt={prompt}
                 send
-                className="cocola-suggest-item flex flex-col items-start gap-0.5 rounded-xl px-3 py-2.5 text-left hover:bg-white/70 hover:text-accent-foreground"
+                className="cocola-prompt-card group relative flex flex-col gap-3 rounded-2xl border p-4 text-left"
               >
-                <span className="text-sm font-medium text-foreground">{title}</span>
-                <span className="text-xs text-muted-foreground">{subtitle}</span>
+                <span className={cn("flex size-11 items-center justify-center rounded-xl", tile)}>
+                  <Icon className="size-5" />
+                </span>
+                <div className="min-w-0 pr-6">
+                  <div className="text-sm font-semibold leading-snug text-foreground">{title}</div>
+                  <div className="text-xs text-muted-foreground">{subtitle}</div>
+                </div>
+                <span className="cocola-prompt-arrow absolute bottom-4 right-4 grid size-7 place-items-center rounded-full border border-border bg-white/80 text-muted-foreground">
+                  <ArrowRight className="size-3.5" />
+                </span>
               </ThreadPrimitive.Suggestion>
             ))}
           </div>
@@ -425,9 +465,9 @@ const ComposerAction: FC = () => {
             tooltip={noModel ? "No model configured" : "Send"}
             variant="default"
             disabled={noModel}
-            className="my-1 size-8 rounded-full p-2"
+            className="cocola-send-btn my-1 size-9 rounded-full p-2 text-white"
           >
-            <SendHorizontalIcon className="h-4 w-4" />
+            <ArrowUpIcon className="h-4 w-4" />
           </TooltipIconButton>
         </ComposerPrimitive.Send>
       </ThreadPrimitive.If>

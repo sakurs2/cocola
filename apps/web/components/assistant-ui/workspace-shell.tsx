@@ -27,7 +27,7 @@ export function WorkspaceShell({ children }: { children: ReactNode }) {
     <CocolaRuntimeProvider>
       <div className="cocola-user-ui workspace-grain flex h-screen bg-background text-foreground">
         <AppSidebar />
-        <main className="cocola-main-glass my-1.5 ml-1.5 mr-1.5 min-w-0 flex-1 overflow-hidden rounded-[1.4rem] border">
+        <main className="min-w-0 flex-1 overflow-hidden bg-transparent">
           {children}
         </main>
         <CommandPalette />

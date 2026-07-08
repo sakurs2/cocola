@@ -17,6 +17,7 @@
 // The main column is a flex row so a future Artifacts canvas can sit beside the
 // Thread without restructuring.
 
+import { useThread } from "@assistant-ui/react";
 import { useCocola } from "@/app/runtime-provider";
 import { MarkdownContent } from "@/components/assistant-ui/markdown-text";
 import { Thread } from "@/components/assistant-ui/thread";
@@ -122,6 +123,9 @@ function Workspace() {
 function TopBar() {
   const { activeSessionId, conversations, sandbox } = useCocola();
   const [copied, setCopied] = useState(false);
+  // The empty/welcome state is chrome-free (matches the reference): the status
+  // bar and its Share control only appear once a conversation is under way.
+  const hasMessages = useThread((t) => t.messages.length > 0);
   const canShare = conversations.some((conversation) => conversation.id === activeSessionId);
 
   const copyShareLink = useCallback(async () => {
@@ -135,6 +139,8 @@ function TopBar() {
       setCopied(false);
     }
   }, [activeSessionId]);
+
+  if (!hasMessages) return null;
 
   return (
     <header className="flex flex-col border-b border-border/80 bg-background/80 backdrop-blur">

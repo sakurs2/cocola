@@ -235,13 +235,43 @@
   }
 
   .cocola-user-ui.workspace-grain {
+    position: relative;
+    isolation: isolate;
+    overflow: hidden;
+    max-width: 100vw;
     background:
-      radial-gradient(108% 78% at 90% -4%, hsl(214 100% 78% / 0.55) 0%, transparent 42%),
-      radial-gradient(96% 72% at 2% 14%, hsl(232 92% 80% / 0.42) 0%, transparent 48%),
-      radial-gradient(84% 66% at 82% 96%, hsl(268 88% 82% / 0.42) 0%, transparent 52%),
-      radial-gradient(72% 58% at 12% 104%, hsl(190 96% 76% / 0.4) 0%, transparent 52%),
-      linear-gradient(180deg, hsl(210 100% 84% / 0.6), hsl(216 60% 97%) 34rem),
+      radial-gradient(58% 52% at 2% -4%, hsl(162 78% 82% / 0.9) 0%, transparent 52%),
+      radial-gradient(52% 54% at 100% -2%, hsl(256 90% 89% / 0.85) 0%, transparent 55%),
+      radial-gradient(64% 60% at 104% 104%, hsl(276 84% 87% / 0.55) 0%, transparent 58%),
+      radial-gradient(60% 58% at -4% 104%, hsl(186 88% 85% / 0.5) 0%, transparent 58%),
+      radial-gradient(40% 38% at 46% 60%, hsl(210 90% 93% / 0.45) 0%, transparent 60%),
+      linear-gradient(140deg, hsl(166 66% 96%) 0%, hsl(200 78% 97%) 34%, hsl(220 82% 97%) 62%, hsl(264 74% 97%) 100%),
       hsl(var(--background));
+  }
+
+  /* Soft translucent "planet" sphere on the right, like the Aera reference */
+  .cocola-user-ui.workspace-grain::after {
+    content: "";
+    position: absolute;
+    z-index: -1;
+    top: 8%;
+    right: -9vw;
+    width: 44vw;
+    height: 44vw;
+    max-width: 620px;
+    max-height: 620px;
+    border-radius: 50%;
+    pointer-events: none;
+    background:
+      radial-gradient(circle at 34% 30%, hsl(0 0% 100% / 0.55) 0%, hsl(0 0% 100% / 0.12) 26%, transparent 42%),
+      radial-gradient(circle at 68% 74%, hsl(276 82% 80% / 0.5) 0%, transparent 55%),
+      radial-gradient(circle at 30% 70%, hsl(190 86% 78% / 0.42) 0%, transparent 58%),
+      radial-gradient(circle at 50% 50%, hsl(224 84% 88% / 0.4) 0%, hsl(258 76% 86% / 0.28) 55%, transparent 72%);
+    box-shadow:
+      inset 0 0 60px hsl(0 0% 100% / 0.35),
+      inset -22px -30px 90px hsl(266 70% 74% / 0.3);
+    filter: blur(2px);
+    opacity: 0.9;
   }
 
   .cocola-user-ui .glass-panel {
@@ -282,6 +312,50 @@
   .cocola-user-ui .sky-glass-sidebar > * {
     position: relative;
     z-index: 1;
+  }
+
+  /* Slim translucent scrollbar for the sidebar nav */
+  .cocola-user-ui .sky-glass-sidebar *,
+  .cocola-user-ui .sky-glass-scroll {
+    scrollbar-width: thin;
+    scrollbar-color: hsl(224 40% 60% / 0.28) transparent;
+  }
+
+  .cocola-user-ui .sky-glass-sidebar *::-webkit-scrollbar,
+  .cocola-user-ui .sky-glass-scroll::-webkit-scrollbar {
+    width: 6px;
+    height: 6px;
+  }
+
+  .cocola-user-ui .sky-glass-sidebar *::-webkit-scrollbar-track,
+  .cocola-user-ui .sky-glass-scroll::-webkit-scrollbar-track {
+    background: transparent;
+  }
+
+  .cocola-user-ui .sky-glass-sidebar *::-webkit-scrollbar-thumb,
+  .cocola-user-ui .sky-glass-scroll::-webkit-scrollbar-thumb {
+    border-radius: 9999px;
+    background: hsl(224 42% 58% / 0.24);
+    border: 1px solid transparent;
+    background-clip: padding-box;
+    transition: background 160ms ease;
+  }
+
+  .cocola-user-ui .sky-glass-sidebar *:hover::-webkit-scrollbar-thumb,
+  .cocola-user-ui .sky-glass-scroll:hover::-webkit-scrollbar-thumb {
+    background: hsl(224 46% 52% / 0.4);
+    background-clip: padding-box;
+  }
+
+  .cocola-user-ui .sky-glass-sidebar *::-webkit-scrollbar-thumb:hover,
+  .cocola-user-ui .sky-glass-scroll::-webkit-scrollbar-thumb:hover {
+    background: hsl(226 52% 48% / 0.55);
+    background-clip: padding-box;
+  }
+
+  .cocola-user-ui .sky-glass-sidebar *::-webkit-scrollbar-corner,
+  .cocola-user-ui .sky-glass-scroll::-webkit-scrollbar-corner {
+    background: transparent;
   }
 
   .cocola-user-ui .cocola-cloud-field {
@@ -387,6 +461,126 @@
 
   .cocola-user-ui .cocola-suggest-item:hover {
     transform: translateX(3px);
+  }
+
+  .cocola-user-ui .cocola-hero-title {
+    background: linear-gradient(100deg, hsl(190 92% 44%) 0%, hsl(221 83% 58%) 46%, hsl(268 78% 60%) 100%);
+    background-clip: text;
+    -webkit-background-clip: text;
+    color: transparent;
+    -webkit-text-fill-color: transparent;
+  }
+
+  /* Send button: blue -> violet diagonal gradient with soft halo (ref image) */
+  .cocola-user-ui .cocola-send-btn {
+    position: relative;
+    isolation: isolate;
+    background: linear-gradient(45deg, hsl(214 92% 54%) 0%, hsl(232 84% 60%) 46%, hsl(270 82% 62%) 100%);
+    box-shadow:
+      inset 0 1px 0 hsl(0 0% 100% / 0.45),
+      inset 0 -3px 8px hsl(266 70% 40% / 0.28),
+      0 6px 16px hsl(240 78% 52% / 0.34),
+      0 0 0 0 hsl(255 85% 62% / 0.5);
+    transition:
+      transform 240ms cubic-bezier(0.34, 1.56, 0.64, 1),
+      box-shadow 260ms ease,
+      filter 240ms ease;
+  }
+
+  /* Soft outer glow halo, like the reference image */
+  .cocola-user-ui .cocola-send-btn::before {
+    content: "";
+    position: absolute;
+    inset: -6px;
+    z-index: -1;
+    border-radius: inherit;
+    pointer-events: none;
+    background: radial-gradient(circle at 50% 55%, hsl(252 88% 66% / 0.55) 0%, transparent 70%);
+    opacity: 0.65;
+    filter: blur(6px);
+    transition: opacity 260ms ease, transform 320ms ease;
+  }
+
+  .cocola-user-ui .cocola-send-btn svg {
+    filter: drop-shadow(0 1px 1.5px hsl(240 70% 30% / 0.4));
+    transition: transform 240ms cubic-bezier(0.34, 1.56, 0.64, 1);
+  }
+
+  .cocola-user-ui .cocola-send-btn:hover {
+    transform: translateY(-1px) scale(1.08);
+    filter: brightness(1.05) saturate(1.08);
+    box-shadow:
+      inset 0 1px 0 hsl(0 0% 100% / 0.55),
+      inset 0 -3px 10px hsl(266 70% 40% / 0.32),
+      0 10px 26px hsl(240 80% 52% / 0.42),
+      0 0 0 5px hsl(255 85% 64% / 0.16);
+  }
+
+  .cocola-user-ui .cocola-send-btn:hover::before {
+    opacity: 1;
+    transform: scale(1.18);
+  }
+
+  .cocola-user-ui .cocola-send-btn:hover svg {
+    transform: translateY(-2px);
+  }
+
+  .cocola-user-ui .cocola-send-btn:active {
+    transform: translateY(0) scale(0.94);
+    transition-duration: 90ms;
+  }
+
+  .cocola-user-ui .cocola-send-btn:disabled {
+    background: linear-gradient(45deg, hsl(220 14% 78%), hsl(230 12% 72%));
+    box-shadow:
+      inset 0 1px 0 hsl(0 0% 100% / 0.4),
+      0 2px 6px hsl(222 20% 40% / 0.14);
+    transform: none;
+    filter: none;
+    opacity: 0.75;
+  }
+
+  .cocola-user-ui .cocola-send-btn:disabled::before {
+    opacity: 0;
+  }
+
+  .cocola-user-ui .cocola-send-btn:disabled svg {
+    filter: none;
+  }
+
+  .cocola-user-ui .cocola-prompt-card {
+    border-color: hsl(0 0% 100% / 0.72);
+    background: linear-gradient(180deg, hsl(0 0% 100% / 0.74), hsl(210 60% 99% / 0.5));
+    box-shadow:
+      inset 0 1px 0 hsl(0 0% 100% / 0.9),
+      0 1px 2px hsl(222 47% 11% / 0.04),
+      0 14px 34px hsl(221 62% 45% / 0.1);
+    backdrop-filter: blur(16px) saturate(1.2);
+    transition:
+      transform 220ms cubic-bezier(0.22, 1, 0.36, 1),
+      box-shadow 220ms ease;
+  }
+
+  .cocola-user-ui .cocola-prompt-card:hover {
+    transform: translateY(-3px);
+    box-shadow:
+      inset 0 1px 0 hsl(0 0% 100% / 0.95),
+      0 1px 2px hsl(222 47% 11% / 0.05),
+      0 22px 46px hsl(221 62% 45% / 0.16);
+  }
+
+  .cocola-user-ui .cocola-prompt-card .cocola-prompt-arrow {
+    opacity: 0;
+    transform: translateX(-4px);
+    transition:
+      opacity 200ms ease,
+      transform 200ms cubic-bezier(0.22, 1, 0.36, 1);
+  }
+
+  .cocola-user-ui .cocola-prompt-card:hover .cocola-prompt-arrow {
+    opacity: 1;
+    transform: translateX(0);
+    color: hsl(var(--primary));
   }
 
   .cocola-user-ui .aui-answer-border-beam::before {
@@ -562,11 +756,23 @@
   }
 
   .cocola-user-ui .cocola-suggest-item,
-  .cocola-user-ui .composer-lift {
+  .cocola-user-ui .composer-lift,
+  .cocola-user-ui .cocola-prompt-card,
+  .cocola-user-ui .cocola-prompt-card .cocola-prompt-arrow,
+  .cocola-user-ui .cocola-send-btn,
+  .cocola-user-ui .cocola-send-btn::before,
+  .cocola-user-ui .cocola-send-btn svg {
     transition: none;
   }
 
-  .cocola-user-ui .cocola-suggest-item:hover {
+  .cocola-user-ui .cocola-suggest-item:hover,
+  .cocola-user-ui .cocola-prompt-card:hover,
+  .cocola-user-ui .cocola-send-btn:hover {
+    transform: none;
+  }
+
+  .cocola-user-ui .cocola-send-btn:hover svg,
+  .cocola-user-ui .cocola-send-btn:hover::before {
     transform: none;
   }
 
