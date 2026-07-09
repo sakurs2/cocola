@@ -60,6 +60,7 @@ func runStoreContract(t *testing.T, st Store) {
 		Username:        "alice",
 		Email:           "alice@example.com",
 		Name:            "Alice",
+		TenantID:        "team-a",
 		Role:            "user",
 		Enabled:         true,
 		PasswordHash:    "$2a$10$012345678901234567890u012345678901234567890123456789012",
@@ -82,6 +83,9 @@ func runStoreContract(t *testing.T, st Store) {
 	if err != nil || gotUser.ID != "user-1" || gotUser.PasswordHash == "" {
 		t.Fatalf("GetAuthUserByEmail roundtrip: %+v %v", gotUser, err)
 	}
+	if gotUser.TenantID != "team-a" {
+		t.Fatalf("tenant not persisted: %+v", gotUser)
+	}
 	gotUser, err = st.GetAuthUserByIdentifier(ctx, "alice")
 	if err != nil || gotUser.ID != "user-1" || gotUser.PasswordHash == "" {
 		t.Fatalf("GetAuthUserByIdentifier username roundtrip: %+v %v", gotUser, err)
@@ -92,12 +96,13 @@ func runStoreContract(t *testing.T, st Store) {
 	}
 	gotUser.Role = "admin"
 	gotUser.Enabled = false
+	gotUser.TenantID = "team-b"
 	gotUser.UpdatedAt = now.Add(time.Hour)
 	if err := st.UpdateAuthUser(ctx, gotUser); err != nil {
 		t.Fatalf("UpdateAuthUser: %v", err)
 	}
 	updated, _ := st.GetAuthUser(ctx, "user-1")
-	if updated.Role != "admin" || updated.Enabled {
+	if updated.Role != "admin" || updated.Enabled || updated.TenantID != "team-b" {
 		t.Fatalf("auth user update not persisted: %+v", updated)
 	}
 	if err := st.TouchAuthUserLogin(ctx, "user-1", now.Add(2*time.Hour)); err != nil {

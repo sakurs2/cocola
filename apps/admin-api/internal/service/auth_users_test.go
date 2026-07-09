@@ -16,6 +16,8 @@ func authTestClock() time.Time { return time.Unix(1_700_000_000, 0).UTC() }
 
 func boolPtr(v bool) *bool { return &v }
 
+func stringPtr(v string) *string { return &v }
+
 func TestBootstrapAdminAuthenticateAndReset(t *testing.T) {
 	ctx := context.Background()
 	st := store.NewMemory()
@@ -236,5 +238,72 @@ func TestAdminCannotChangeOwnPermissions(t *testing.T) {
 		Actor: "other-admin@example.com",
 	}); err != nil {
 		t.Fatalf("different admin should be able to change role: %v", err)
+	}
+}
+
+func TestRuntimeTokenTenantFromUserRecord(t *testing.T) {
+	ctx := context.Background()
+	st := store.NewMemory()
+	svc := New(st, token.NewIssuer("secret", "cocola", time.Hour), authTestClock)
+
+	created, err := svc.CreateAuthUser(ctx, AuthUserInput{
+		Username: "member",
+		Email:    "member@example.com",
+		Tenant:   stringPtr("team-alpha"),
+		Role:     RoleUser,
+		Enabled:  boolPtr(true),
+		Password: "member-password",
+		Actor:    "admin",
+	})
+	if err != nil {
+		t.Fatalf("create auth user: %v", err)
+	}
+	if created.TenantID != "team-alpha" {
+		t.Fatalf("tenant not stored on create: %+v", created)
+	}
+
+	// The persisted tenant is authoritative even when the caller passes nothing.
+	tok, err := svc.IssueRuntimeToken(ctx, created.Email, "", 10*time.Minute)
+	if err != nil {
+		t.Fatalf("runtime token: %v", err)
+	}
+	claims, err := token.Decode(tok, "secret", authTestClock().Unix())
+	if err != nil {
+		t.Fatalf("decode runtime token: %v", err)
+	}
+	if claims.Tenant != "team-alpha" {
+		t.Fatalf("runtime token tenant want team-alpha, got %q", claims.Tenant)
+	}
+
+	// A stored tenant overrides a stale caller-supplied tenant.
+	tok2, err := svc.IssueRuntimeToken(ctx, created.Email, "team-stale", 10*time.Minute)
+	if err != nil {
+		t.Fatalf("runtime token (with caller tenant): %v", err)
+	}
+	claims2, err := token.Decode(tok2, "secret", authTestClock().Unix())
+	if err != nil {
+		t.Fatalf("decode runtime token 2: %v", err)
+	}
+	if claims2.Tenant != "team-alpha" {
+		t.Fatalf("stored tenant should win, got %q", claims2.Tenant)
+	}
+
+	// Reassigning the team updates subsequent tokens.
+	if _, err := svc.SetAuthUser(ctx, created.ID, AuthUserInput{
+		Tenant: stringPtr("team-beta"),
+		Actor:  "admin",
+	}); err != nil {
+		t.Fatalf("update tenant: %v", err)
+	}
+	tok3, err := svc.IssueRuntimeToken(ctx, created.Email, "", 10*time.Minute)
+	if err != nil {
+		t.Fatalf("runtime token 3: %v", err)
+	}
+	claims3, err := token.Decode(tok3, "secret", authTestClock().Unix())
+	if err != nil {
+		t.Fatalf("decode runtime token 3: %v", err)
+	}
+	if claims3.Tenant != "team-beta" {
+		t.Fatalf("runtime token tenant want team-beta, got %q", claims3.Tenant)
 	}
 }

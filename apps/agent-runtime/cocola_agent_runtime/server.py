@@ -62,6 +62,10 @@ ARTIFACT_SYSTEM_PROMPT = (
 ADMIN_SYSTEM_PROMPT_HEADER = "Administrator-configured system instructions:"
 CURRENT_RUNTIME = os.getenv("COCOLA_AGENT_RUNTIME", "claude-code")
 MODEL_ALIAS_METADATA_KEY = "x-cocola-model-alias"
+# Per-user sandbox token forwarded by the gateway (gRPC metadata seam, no
+# proto change). Injected into the sandbox as ANTHROPIC_AUTH_TOKEN per turn so
+# the in-sandbox brain calls the llm-gateway as the real user. Never logged.
+SANDBOX_TOKEN_METADATA_KEY = "x-cocola-sandbox-token"
 
 _OUTPUTS_SNAPSHOT_SCRIPT = r"""
 import json
@@ -299,6 +303,21 @@ def _model_env(model_alias: str | None) -> dict[str, str]:
     }
 
 
+def _acquire_env(model_env: dict[str, str], sandbox_token: str) -> dict[str, str]:
+    """Env passed to sandbox acquire: model alias plus, when present, the
+    per-user token as ANTHROPIC_AUTH_TOKEN.
+
+    On a COLD create this seeds the sandbox with the caller's token; on a WARM
+    reuse the sandbox already has the baked static token, but the provider's
+    per-turn exec env (shim_provider._model_env) re-injects this same token and
+    is the authoritative override, so identity is correct either way.
+    """
+    env = dict(model_env)
+    if sandbox_token:
+        env["ANTHROPIC_AUTH_TOKEN"] = sandbox_token
+    return env
+
+
 class AgentRuntimeServicer(pb_grpc.AgentRuntimeServiceServicer):
     """Serves AgentRuntimeService.Query by driving an injected AgentProvider."""
 
@@ -391,6 +410,12 @@ class AgentRuntimeServicer(pb_grpc.AgentRuntimeServiceServicer):
             )
             return
         model_env = _model_env(model_alias)
+        # Per-user sandbox token (P0 identity fix): forwarded by the gateway as
+        # gRPC metadata. When present it is injected into the sandbox as
+        # ANTHROPIC_AUTH_TOKEN per turn (creation-time exec env override), so the
+        # in-sandbox brain authenticates to the llm-gateway AS THE USER instead
+        # of via the static cluster-wide token baked at sandbox creation.
+        sandbox_token = _metadata_value(context, SANDBOX_TOKEN_METADATA_KEY)
 
         # Bind the session to a real sandbox when a binder is wired and the
         # caller did not pin one. Acquire is create-or-reuse (M2): the same
@@ -401,7 +426,9 @@ class AgentRuntimeServicer(pb_grpc.AgentRuntimeServiceServicer):
             acquire_start_ns = time.time_ns()
             try:
                 box = await self._binder.acquire(
-                    session_id=request.session_id, user_id=request.user_id, env=model_env
+                    session_id=request.session_id,
+                    user_id=request.user_id,
+                    env=_acquire_env(model_env, sandbox_token),
                 )
             except Exception as exc:  # noqa: BLE001 - bind failure -> clean terminal event
                 log.warning(
@@ -657,6 +684,7 @@ class AgentRuntimeServicer(pb_grpc.AgentRuntimeServiceServicer):
             max_turns=request.max_turns or 30,
             model_alias=model_alias,
             mcp_servers=active_mcp_servers,
+            auth_token=sandbox_token or None,
         )
         skills_preamble = skills_system_preamble(active_skills)
         if skills_preamble:

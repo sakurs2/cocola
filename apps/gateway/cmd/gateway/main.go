@@ -32,6 +32,7 @@ import (
 	"net/http"
 	"os"
 	"strconv"
+	"time"
 
 	"github.com/cocola-project/cocola/apps/gateway/internal/agent"
 	auditstore "github.com/cocola-project/cocola/apps/gateway/internal/audit"
@@ -43,6 +44,7 @@ import (
 	"github.com/cocola-project/cocola/packages/go-common/config"
 	"github.com/cocola-project/cocola/packages/go-common/logger"
 	"github.com/cocola-project/cocola/packages/go-common/metrics"
+	"github.com/cocola-project/cocola/packages/go-common/token"
 	"github.com/cocola-project/cocola/packages/go-common/tracing"
 )
 
@@ -93,6 +95,29 @@ func main() {
 	// traffic. COCOLA_METRICS_ADDR="" disables both the port and instrumentation.
 	reg := metrics.New("gateway")
 	api := httpapi.New(client, verifier, log).WithMetrics(reg)
+
+	// Per-user sandbox token issuer (P0 identity fix). The gateway mints a fresh
+	// cocola token per chat turn from the VERIFIED identity (sub=user, ten=tenant)
+	// and forwards it to agent-runtime, which injects it into the sandbox as
+	// ANTHROPIC_AUTH_TOKEN -- so the in-sandbox brain calls the llm-gateway AS THE
+	// USER and per-user quota / usage / revocation actually bind, instead of the
+	// static cluster-wide COCOLA_SANDBOX_LLM_TOKEN. Same secret+issuer the
+	// llm-gateway verifies with (COCOLA_AUTH_SECRET / COCOLA_AUTH_ISSUER), so the
+	// minted token verifies offline downstream. When the secret is empty (dev,
+	// auth off) the issuer stays nil and the runtime keeps its baked token.
+	if secret := config.SecretFromEnv("COCOLA_AUTH_SECRET"); secret != "" {
+		ttl := 60 * time.Minute
+		if v := os.Getenv("COCOLA_SANDBOX_TOKEN_TTL_SECONDS"); v != "" {
+			if n, perr := strconv.Atoi(v); perr == nil && n > 0 {
+				ttl = time.Duration(n) * time.Second
+			} else {
+				log.Warn("ignoring invalid COCOLA_SANDBOX_TOKEN_TTL_SECONDS=" + v)
+			}
+		}
+		issuer := token.NewIssuer(secret, env("COCOLA_AUTH_ISSUER", "cocola"), ttl)
+		api = api.WithSandboxTokenIssuer(issuer, ttl)
+		log.Info("per-user sandbox token issuer enabled (ttl " + ttl.String() + ")")
+	}
 
 	// Attachment source-of-truth object store (ADR-0017 P1a). Wired only when
 	// COCOLA_MINIO_ENDPOINT+BUCKET are set; otherwise the gateway stays on the

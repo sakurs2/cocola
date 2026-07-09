@@ -76,13 +76,13 @@ func nullableTime(t time.Time) any {
 
 // ---- Auth users ----
 
-const authUserCols = `id, username_normalized, email_normalized, name, role, enabled, password_hash, created_at, updated_at, last_login_at, created_by, updated_by, password_updated_at, deleted_at, deleted_by`
-const authUserColsU = `u.id, u.username_normalized, u.email_normalized, u.name, u.role, u.enabled, u.password_hash, u.created_at, u.updated_at, u.last_login_at, u.created_by, u.updated_by, u.password_updated_at, u.deleted_at, u.deleted_by`
+const authUserCols = `id, username_normalized, email_normalized, name, tenant_id, role, enabled, password_hash, created_at, updated_at, last_login_at, created_by, updated_by, password_updated_at, deleted_at, deleted_by`
+const authUserColsU = `u.id, u.username_normalized, u.email_normalized, u.name, u.tenant_id, u.role, u.enabled, u.password_hash, u.created_at, u.updated_at, u.last_login_at, u.created_by, u.updated_by, u.password_updated_at, u.deleted_at, u.deleted_by`
 
 func scanAuthUser(row pgx.Row) (AuthUser, error) {
 	var u AuthUser
 	var lastLogin, passwordUpdated, deletedAt *time.Time
-	err := row.Scan(&u.ID, &u.Username, &u.Email, &u.Name, &u.Role, &u.Enabled,
+	err := row.Scan(&u.ID, &u.Username, &u.Email, &u.Name, &u.TenantID, &u.Role, &u.Enabled,
 		&u.PasswordHash, &u.CreatedAt, &u.UpdatedAt, &lastLogin, &u.CreatedBy, &u.UpdatedBy, &passwordUpdated, &deletedAt, &u.DeletedBy)
 	if err != nil {
 		return AuthUser{}, err
@@ -107,9 +107,9 @@ func (p *Postgres) CreateAuthUser(ctx context.Context, u AuthUser) error {
 	defer tx.Rollback(ctx)
 
 	const q = `INSERT INTO auth_users (` + authUserCols + `)
-		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15)`
+		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16)`
 	_, err = tx.Exec(ctx, q,
-		u.ID, u.Username, u.Email, u.Name, u.Role, u.Enabled, u.PasswordHash,
+		u.ID, u.Username, u.Email, u.Name, u.TenantID, u.Role, u.Enabled, u.PasswordHash,
 		u.CreatedAt, u.UpdatedAt, nullableTime(u.LastLoginAt), u.CreatedBy, u.UpdatedBy, nullableTime(u.PasswordUpdated), nullableTime(u.DeletedAt), u.DeletedBy)
 	if isUniqueViolation(err) {
 		return ErrConflict
@@ -178,12 +178,12 @@ func (p *Postgres) UpdateAuthUser(ctx context.Context, u AuthUser) error {
 	defer tx.Rollback(ctx)
 
 	const q = `UPDATE auth_users
-		SET username_normalized=$2, email_normalized=$3, name=$4, role=$5, enabled=$6,
-		    password_hash=$7, created_at=$8, updated_at=$9, last_login_at=$10,
-		    created_by=$11, updated_by=$12, password_updated_at=$13, deleted_at=$14, deleted_by=$15
+		SET username_normalized=$2, email_normalized=$3, name=$4, tenant_id=$5, role=$6, enabled=$7,
+		    password_hash=$8, created_at=$9, updated_at=$10, last_login_at=$11,
+		    created_by=$12, updated_by=$13, password_updated_at=$14, deleted_at=$15, deleted_by=$16
 		WHERE id=$1`
 	ct, err := tx.Exec(ctx, q,
-		u.ID, u.Username, u.Email, u.Name, u.Role, u.Enabled, u.PasswordHash,
+		u.ID, u.Username, u.Email, u.Name, u.TenantID, u.Role, u.Enabled, u.PasswordHash,
 		u.CreatedAt, u.UpdatedAt, nullableTime(u.LastLoginAt), u.CreatedBy, u.UpdatedBy, nullableTime(u.PasswordUpdated), nullableTime(u.DeletedAt), u.DeletedBy)
 	if isUniqueViolation(err) {
 		return ErrConflict

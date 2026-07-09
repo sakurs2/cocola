@@ -32,6 +32,7 @@ import (
 	traceevents "github.com/cocola-project/cocola/apps/gateway/internal/traceevent"
 	"github.com/cocola-project/cocola/packages/go-common/logger"
 	"github.com/cocola-project/cocola/packages/go-common/metrics"
+	"github.com/cocola-project/cocola/packages/go-common/token"
 	"github.com/cocola-project/cocola/packages/go-common/tracing"
 )
 
@@ -59,6 +60,13 @@ type API struct {
 	convo convo.Store
 	audit auditstore.Store
 	trace traceevents.Store
+	// sandboxTokenIssuer mints a fresh per-user cocola token per chat turn from
+	// the verified identity; agent-runtime injects it into the sandbox as
+	// ANTHROPIC_AUTH_TOKEN so downstream quota/usage/revocation bind to the real
+	// user. nil => the per-user token feature is dark and agent-runtime falls
+	// back to its baked static token. sandboxTokenTTL is the mint TTL.
+	sandboxTokenIssuer *token.Issuer
+	sandboxTokenTTL    time.Duration
 }
 
 // New builds the BFF API.
@@ -106,6 +114,33 @@ func (a *API) WithTraceStore(store traceevents.Store) *API { a.trace = store; re
 // WithAgentReleaser injects the best-effort session releaser used by
 // conversation deletion tests or alternate runtimes.
 func (a *API) WithAgentReleaser(releaser agent.Releaser) *API { a.releaser = releaser; return a }
+
+// WithSandboxTokenIssuer enables per-user sandbox tokens: the chat handler mints
+// a fresh cocola token per turn (sub=identity.UserID, ten=identity.TenantID) and
+// forwards it to agent-runtime, which injects it as the sandbox
+// ANTHROPIC_AUTH_TOKEN. Passing nil (the default) leaves the feature dark and
+// agent-runtime keeps its baked static token.
+func (a *API) WithSandboxTokenIssuer(issuer *token.Issuer, ttl time.Duration) *API {
+	a.sandboxTokenIssuer = issuer
+	a.sandboxTokenTTL = ttl
+	return a
+}
+
+// mintSandboxToken issues a per-user, short-lived cocola token for one turn. A
+// mint failure is non-fatal: it is logged and the caller proceeds without a
+// per-user token (agent-runtime falls back to its baked static token) so a
+// signing hiccup never breaks chat.
+func (a *API) mintSandboxToken(id auth.Identity) string {
+	if a.sandboxTokenIssuer == nil {
+		return ""
+	}
+	tok, _, err := a.sandboxTokenIssuer.Issue(id.UserID, id.TenantID, a.sandboxTokenTTL, 0)
+	if err != nil {
+		a.log.Warn("sandbox token mint failed; using runtime default token: " + err.Error())
+		return ""
+	}
+	return tok
+}
 
 // instrument wraps a handler with the RED middleware under a fixed route label,
 // or returns it unchanged when metrics are disabled.
@@ -486,13 +521,14 @@ func (a *API) chat(w http.ResponseWriter, r *http.Request) {
 	})
 
 	q := agent.Query{
-		UserID:      id.UserID,
-		SessionID:   req.SessionID,
-		Prompt:      req.Prompt,
-		SandboxID:   req.SandboxID,
-		MaxTurns:    req.MaxTurns,
-		ModelAlias:  strings.TrimSpace(req.ModelAlias),
-		Attachments: atts,
+		UserID:           id.UserID,
+		SessionID:        req.SessionID,
+		Prompt:           req.Prompt,
+		SandboxID:        req.SandboxID,
+		MaxTurns:         req.MaxTurns,
+		ModelAlias:       strings.TrimSpace(req.ModelAlias),
+		SandboxAuthToken: a.mintSandboxToken(id),
+		Attachments:      atts,
 	}
 
 	// Persist the user turn (route A UI-message mirror). All persistence is a

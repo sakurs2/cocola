@@ -122,18 +122,20 @@ func (a *API) login(w http.ResponseWriter, r *http.Request) {
 }
 
 type createAuthUserReq struct {
-	Username string `json:"username"`
-	Email    string `json:"email"`
-	Role     string `json:"role,omitempty"`
-	Enabled  *bool  `json:"enabled,omitempty"`
-	Password string `json:"password"`
+	Username string  `json:"username"`
+	Email    string  `json:"email"`
+	Tenant   *string `json:"tenant_id,omitempty"`
+	Role     string  `json:"role,omitempty"`
+	Enabled  *bool   `json:"enabled,omitempty"`
+	Password string  `json:"password"`
 }
 
 type updateAuthUserReq struct {
-	Username string `json:"username,omitempty"`
-	Email    string `json:"email,omitempty"`
-	Role     string `json:"role,omitempty"`
-	Enabled  *bool  `json:"enabled,omitempty"`
+	Username string  `json:"username,omitempty"`
+	Email    string  `json:"email,omitempty"`
+	Tenant   *string `json:"tenant_id,omitempty"`
+	Role     string  `json:"role,omitempty"`
+	Enabled  *bool   `json:"enabled,omitempty"`
 }
 
 type resetAuthUserPasswordReq struct {
@@ -149,6 +151,7 @@ func (a *API) createAuthUser(w http.ResponseWriter, r *http.Request) {
 	u, err := a.svc.CreateAuthUser(r.Context(), service.AuthUserInput{
 		Username: req.Username,
 		Email:    req.Email,
+		Tenant:   req.Tenant,
 		Role:     req.Role,
 		Enabled:  req.Enabled,
 		Password: req.Password,
@@ -192,6 +195,7 @@ func (a *API) updateAuthUser(w http.ResponseWriter, r *http.Request) {
 	u, err := a.svc.SetAuthUser(r.Context(), chi.URLParam(r, "id"), service.AuthUserInput{
 		Username: req.Username,
 		Email:    req.Email,
+		Tenant:   req.Tenant,
 		Role:     req.Role,
 		Enabled:  req.Enabled,
 		Actor:    actorOf(r),

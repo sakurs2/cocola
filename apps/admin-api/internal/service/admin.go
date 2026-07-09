@@ -146,6 +146,9 @@ const (
 type AuthUserInput struct {
 	Username string
 	Email    string
+	// Tenant is the team/tenant assignment. On update, a nil pointer leaves the
+	// existing value untouched; a non-nil pointer (including empty string) sets it.
+	Tenant   *string
 	Role     string
 	Enabled  *bool
 	Password string
@@ -270,11 +273,16 @@ func (a *Admin) CreateAuthUser(ctx context.Context, in AuthUserInput) (store.Aut
 	if in.Enabled != nil {
 		enabled = *in.Enabled
 	}
+	tenant := ""
+	if in.Tenant != nil {
+		tenant = strings.TrimSpace(*in.Tenant)
+	}
 	u := store.AuthUser{
 		ID:              newID(),
 		Username:        username,
 		Email:           email,
 		Name:            username,
+		TenantID:        tenant,
 		Role:            role,
 		Enabled:         enabled,
 		PasswordHash:    pw,
@@ -349,6 +357,9 @@ func (a *Admin) SetAuthUser(ctx context.Context, id string, in AuthUserInput) (s
 			return store.AuthUser{}, ErrProtectedAdmin
 		}
 		u.Enabled = *in.Enabled
+	}
+	if in.Tenant != nil {
+		u.TenantID = strings.TrimSpace(*in.Tenant)
 	}
 	u.UpdatedAt = a.now().UTC()
 	u.UpdatedBy = in.Actor
@@ -512,6 +523,10 @@ func (a *Admin) IssueRuntimeToken(ctx context.Context, userID, tenant string, tt
 	if strings.TrimSpace(userID) == "" {
 		return "", ErrInvalidArg
 	}
+	// Resolve the tenant from the persisted user record so the "ten" claim is
+	// authoritative (team quota + usage attribution). The record wins over any
+	// caller-supplied tenant; the caller value is only a fallback for principals
+	// that have no stored account (e.g. legacy id-only callers).
 	if strings.Contains(userID, "@") {
 		u, err := a.store.GetAuthUserByEmail(ctx, normalizeEmail(userID))
 		if err != nil {
@@ -521,6 +536,9 @@ func (a *Admin) IssueRuntimeToken(ctx context.Context, userID, tenant string, tt
 			return "", ErrAccountDisabled
 		}
 		userID = u.Email
+		if strings.TrimSpace(u.TenantID) != "" {
+			tenant = u.TenantID
+		}
 	}
 	if ttl <= 0 {
 		ttl = 10 * time.Minute

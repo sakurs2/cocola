@@ -26,6 +26,12 @@ class AgentOptions:
     max_turns: int = 30
     model_alias: str | None = None
     mcp_servers: dict[str, dict] | None = None
+    # Per-user cocola token minted by the gateway for THIS turn (sub=user,
+    # ten=tenant). A Route A provider injects it into the sandbox as
+    # ANTHROPIC_AUTH_TOKEN so the in-sandbox brain calls the llm-gateway as the
+    # real user (per-user quota / usage / revocation), overriding the static
+    # token baked at sandbox creation. None => keep the baked default token.
+    auth_token: str | None = None
 
 
 @dataclass

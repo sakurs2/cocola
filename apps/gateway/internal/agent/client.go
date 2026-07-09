@@ -33,13 +33,21 @@ type Event struct {
 // caller (HTTP layer) fills UserID/SessionId from the verified identity, never
 // from client-supplied fields.
 type Query struct {
-	UserID      string
-	SessionID   string
-	Prompt      string
-	SandboxID   string
-	MaxTurns    int32
-	ModelAlias  string
-	Attachments []Attachment
+	UserID     string
+	SessionID  string
+	Prompt     string
+	SandboxID  string
+	MaxTurns   int32
+	ModelAlias string
+	// SandboxAuthToken is a fresh per-user cocola token the gateway mints from
+	// the verified identity (sub=UserID, ten=TenantID) for THIS turn. It is
+	// forwarded to agent-runtime over gRPC metadata and injected into the
+	// sandbox as ANTHROPIC_AUTH_TOKEN so the in-sandbox brain calls the
+	// llm-gateway as the real user (per-user quota / usage / revocation),
+	// replacing the static cluster-wide sandbox token. Empty => agent-runtime
+	// falls back to its baked COCOLA_SANDBOX_LLM_TOKEN.
+	SandboxAuthToken string
+	Attachments      []Attachment
 }
 
 // Attachment is one user-uploaded file forwarded to agent-runtime. Content is
@@ -140,6 +148,12 @@ func (c *Client) Close() error {
 func (c *Client) Stream(ctx context.Context, q Query, onEvent func(Event) error) error {
 	if strings.TrimSpace(q.ModelAlias) != "" {
 		ctx = metadata.AppendToOutgoingContext(ctx, "x-cocola-model-alias", strings.TrimSpace(q.ModelAlias))
+	}
+	// Per-user sandbox token: carry it as gRPC metadata (same seam as the model
+	// alias) so agent-runtime can inject it as ANTHROPIC_AUTH_TOKEN per turn
+	// without a proto change. Never logged; treated as a credential.
+	if strings.TrimSpace(q.SandboxAuthToken) != "" {
+		ctx = metadata.AppendToOutgoingContext(ctx, "x-cocola-sandbox-token", strings.TrimSpace(q.SandboxAuthToken))
 	}
 	atts := make([]*agentv1.Attachment, 0, len(q.Attachments))
 	for i := range q.Attachments {

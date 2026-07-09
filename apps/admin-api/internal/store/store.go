@@ -267,7 +267,8 @@ type AuthUser struct {
 	Username        string    `json:"username"`
 	Email           string    `json:"email"`
 	Name            string    `json:"name"`
-	Role            string    `json:"role"` // "user" | "admin"
+	TenantID        string    `json:"tenant_id"` // ten: authoritative team/tenant for minted tokens
+	Role            string    `json:"role"`      // "user" | "admin"
 	Enabled         bool      `json:"enabled"`
 	PasswordHash    string    `json:"-"`
 	CreatedAt       time.Time `json:"created_at"`

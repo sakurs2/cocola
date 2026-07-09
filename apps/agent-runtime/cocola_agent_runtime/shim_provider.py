@@ -203,13 +203,25 @@ class InSandboxShimProvider:
         return json.dumps(req, ensure_ascii=False, separators=(",", ":"))
 
     def _model_env(self, options: AgentOptions) -> dict[str, str]:
+        """Per-turn exec env for the shim.
+
+        Carries the model alias and, when the gateway minted a per-user token
+        for this turn, ANTHROPIC_AUTH_TOKEN. This exec env is applied on EVERY
+        turn's `exec_stream` and overrides whatever was baked into the sandbox
+        at creation time (the static COCOLA_SANDBOX_LLM_TOKEN), so a warm/reused
+        sandbox still authenticates to the llm-gateway AS THE USER -- the
+        warm-pool-safe injection point (ADR-0009 keeps creds in env, never the
+        prompt channel).
+        """
+        env: dict[str, str] = {}
         alias = (options.model_alias or "").strip()
-        if not alias:
-            return {}
-        return {
-            "ANTHROPIC_MODEL": alias,
-            "ANTHROPIC_SMALL_FAST_MODEL": alias,
-        }
+        if alias:
+            env["ANTHROPIC_MODEL"] = alias
+            env["ANTHROPIC_SMALL_FAST_MODEL"] = alias
+        token = (options.auth_token or "").strip()
+        if token:
+            env["ANTHROPIC_AUTH_TOKEN"] = token
+        return env
 
     async def query(
         self,
