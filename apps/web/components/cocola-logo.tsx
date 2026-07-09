@@ -1,21 +1,25 @@
 import type { SVGProps } from "react";
 
 /**
- * cocola brand mark. Vector artwork supplied by the design team: a single
- * path filled with the blue -> violet brand gradient.
+ * cocola brand mark — the Phosphor "Sparkle" (灵光) glyph rendered duotone:
+ * a 20%-opacity fill for body plus a rounded stroke for the outline. The
+ * classic four-point sparkle reads instantly as "AI / agent".
  *
- * Pass `mono` to paint the mark with `currentColor` instead of the gradient,
- * so it can inherit text color in monochrome contexts (e.g. inside the
- * primary-colored sidebar badge, dark mode, or print).
+ * By default both layers use the blue -> violet brand gradient. Pass `mono` to
+ * paint the mark with `currentColor` instead, so it can inherit text color in
+ * monochrome contexts (e.g. inside the primary-colored sidebar badge, dark
+ * mode, or print) — the fill layer keeps its 20% opacity in either mode.
  */
 export function CocolaLogo({
   mono = false,
   ...props
 }: SVGProps<SVGSVGElement> & { mono?: boolean }) {
-  const fill = mono ? "currentColor" : "url(#cocola-brand)";
+  const paint = mono ? "currentColor" : "url(#cocola-brand)";
+  const sparkle =
+    "M128 24 L150 106 L232 128 L150 150 L128 232 L106 150 L24 128 L106 106 Z";
   return (
     <svg
-      viewBox="0 0 1254 1254"
+      viewBox="0 0 256 256"
       xmlns="http://www.w3.org/2000/svg"
       role="img"
       aria-label="cocola"
@@ -29,7 +33,15 @@ export function CocolaLogo({
           </linearGradient>
         </defs>
       ) : null}
-      <path fill={fill} fillRule="evenodd" d="M361.81,952.08C370.99,948.27 402.35,934.94 431.50,922.46C465.06,908.09 486.16,899.59 489.03,899.28C494.55,898.68 496.83,899.34 514.00,906.50C538.24,916.62 567.66,924.51 596.25,928.57C611.43,930.73 657.04,931.62 672.66,930.07C740.09,923.38 804.70,896.53 854.50,854.51C867.52,843.52 889.76,820.94 899.34,809.00C907.05,799.37 915.75,782.60 919.05,771.00C922.12,760.19 922.83,740.86 920.53,730.38C916.53,712.10 907.65,696.55 893.70,683.38C883.97,674.20 874.27,668.40 861.00,663.82C851.77,660.64 851.03,660.55 835.00,660.53C815.90,660.52 810.75,661.58 796.50,668.47C784.76,674.14 776.12,680.81 766.39,691.67C737.72,723.70 711.51,740.04 675.00,748.65C661.98,751.71 634.63,752.94 620.50,751.08C585.71,746.52 554.89,731.41 528.64,706.06C482.02,661.02 467.55,594.49 491.46,535.12C501.74,509.60 517.47,488.42 538.99,471.11C588.92,430.95 656.09,423.01 711.50,450.73C730.03,460.00 748.44,473.92 762.06,488.93C780.38,509.14 802.90,520.77 827.16,522.55C853.76,524.50 878.22,514.99 897.06,495.34C912.66,479.08 920.62,460.97 921.71,439.26C922.95,414.72 915.64,393.42 898.72,372.27C889.82,361.13 867.36,338.89 854.32,328.30C742.20,237.24 588.57,226.80 464.52,301.81C430.47,322.39 394.48,355.19 369.22,388.65C326.05,445.83 302.20,513.45 300.30,584.09C299.43,616.18 302.17,640.81 310.00,671.50C319.29,707.92 332.41,738.57 353.81,773.84C359.16,782.66 362.12,788.64 362.55,791.47C363.07,794.97 360.88,805.16 350.70,846.63C343.82,874.61 335.61,908.57 332.44,922.10L326.67,946.70 L328.81,951.10C333.71,961.23 339.34,961.40 361.81,952.08Z" />
+      <path d={sparkle} fill={paint} opacity={0.2} />
+      <path
+        d={sparkle}
+        fill="none"
+        stroke={paint}
+        strokeWidth={16}
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
     </svg>
   );
 }
