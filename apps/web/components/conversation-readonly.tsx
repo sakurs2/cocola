@@ -155,7 +155,7 @@ export function ConversationReadOnly({ conversationId }: { conversationId: strin
 
         <div
           className="flex flex-col items-center"
-          style={{ ["--thread-max-width" as string]: "44rem" }}
+          style={{ ["--thread-max-width" as string]: "52rem" }}
         >
           {state.messages.map((message) => (
             <MessageBubble key={message.id} message={message} />

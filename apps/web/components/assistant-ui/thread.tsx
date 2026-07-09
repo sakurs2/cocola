@@ -62,7 +62,7 @@ export const Thread: FC = () => {
   return (
     <ThreadPrimitive.Root
       className="relative flex h-full flex-col overflow-hidden bg-transparent"
-      style={{ ["--thread-max-width" as string]: "46rem" }}
+      style={{ ["--thread-max-width" as string]: "52rem" }}
     >
       <ThreadPrimitive.If empty>
         <div className="cocola-cloud-field" aria-hidden="true" />
@@ -279,7 +279,11 @@ const ModelPicker: FC = () => {
           side="top"
           align="start"
           sideOffset={10}
-          className="z-50 w-72 overflow-hidden rounded-2xl border border-border bg-popover text-popover-foreground shadow-xl"
+          // Popover.Portal mounts to <body>, which sits under <html class="dark">
+          // and outside the .cocola-user-ui wrapper — so it would inherit the dark
+          // --popover token (near-black). Re-declare the user theme on the content
+          // itself so its tokens (bg-popover, border, accent, ...) resolve light.
+          className="cocola-user-ui z-50 w-72 overflow-hidden rounded-2xl border border-border bg-popover text-popover-foreground shadow-xl"
         >
           <Command>
             <div className="flex items-center gap-2 border-b border-border px-3">

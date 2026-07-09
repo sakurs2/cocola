@@ -578,6 +578,9 @@ function ChatHistoryItem({
         active && "bg-sidebar-accent text-sidebar-accent-foreground shadow-sm",
       )}
       title={title}
+      onMouseLeave={() => {
+        if (menuOpen) onToggleMenu();
+      }}
     >
       {editing ? (
         <>
@@ -613,8 +616,8 @@ function ChatHistoryItem({
 
       {running ? (
         <SpinnerGap
-          className="size-3.5 shrink-0 animate-spin text-sidebar-foreground/55"
-          weight="duotone"
+          className="size-3.5 shrink-0 animate-spin text-sidebar-accent-foreground/70"
+          weight="bold"
           aria-label="Agent is answering"
         />
       ) : !editing ? (
@@ -629,7 +632,7 @@ function ChatHistoryItem({
           <button
             type="button"
             className={cn(
-              "absolute inset-0 grid place-items-center rounded-md text-sidebar-foreground/60 opacity-0 transition hover:bg-sidebar-accent-foreground/10 hover:text-sidebar-foreground group-hover:opacity-100",
+              "absolute inset-0 grid place-items-center rounded-md text-sidebar-foreground/60 opacity-0 transition hover:text-sidebar-foreground group-hover:opacity-100",
               menuOpen && "opacity-100",
             )}
             aria-label={`Conversation actions for ${title}`}
@@ -640,7 +643,7 @@ function ChatHistoryItem({
               onToggleMenu();
             }}
           >
-            <DotsThree className="size-4" weight="duotone" />
+            <DotsThree className="size-4" weight="bold" />
           </button>
         </div>
       ) : null}

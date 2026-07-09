@@ -173,8 +173,10 @@ const extractToolChips = (argsText: string): string[] => {
     chips.push(parts[parts.length - 1] || file.trim());
   }
   if (typeof obj.command === "string" && obj.command.trim()) {
+    // Show the command's first line in full — the chip wraps (break-words), so
+    // a long command reads completely instead of being cut off mid-path.
     const firstLine = obj.command.trim().split("\n")[0] ?? "";
-    chips.push(firstLine.slice(0, 48));
+    chips.push(firstLine);
   }
   if (typeof obj.description === "string" && obj.description.trim() && chips.length === 0) {
     chips.push(obj.description.trim().slice(0, 48));
