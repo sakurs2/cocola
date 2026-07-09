@@ -440,6 +440,54 @@ func TestAcquireRecreatesWhenPausedSandboxDisappeared(t *testing.T) {
 	}
 }
 
+// TestAcquireRecreatesWhenPausedSandboxNotResumable covers the state-divergence
+// bug: our durable binding says StatePaused but the provider has driven the
+// sandbox to a terminal phase and discarded the paused checkpoint, so Resume
+// returns provider.ErrSandboxNotResumable (the 409 INVALID_STATE case). Acquire
+// must self-heal — drop the stale binding and cold-create — rather than fail.
+func TestAcquireRecreatesWhenPausedSandboxNotResumable(t *testing.T) {
+	b, fp := newTestBinder(t)
+	ctx := context.Background()
+	spec := AcquireSpec{SessionID: "terminal", UserID: "u"}
+
+	sb1, err := b.Acquire(ctx, spec)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	fp.mu.Lock()
+	fp.resumeErr[sb1.ID] = provider.ErrSandboxNotResumable
+	fp.mu.Unlock()
+
+	if err := b.putMeta(ctx, meta{
+		SandboxID:   sb1.ID,
+		SessionID:   spec.SessionID,
+		UserID:      spec.UserID,
+		State:       StatePaused,
+		CreatedUnix: time.Now().Unix(),
+		PausedUnix:  time.Now().Unix(),
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	out, err := b.AcquireWithOutcome(ctx, spec)
+	if err != nil {
+		t.Fatalf("acquire must self-heal a non-resumable paused sandbox, got err: %v", err)
+	}
+	if out.Reused {
+		t.Fatal("expected fresh sandbox after non-resumable paused binding, got reused")
+	}
+	if out.Sandbox.ID == sb1.ID {
+		t.Fatalf("expected new sandbox id, got stale %s", out.Sandbox.ID)
+	}
+	if got := fp.creates.Load(); got != 2 {
+		t.Fatalf("expected 2 creates, got %d", got)
+	}
+	if sid, err := b.kv.Get(ctx, convKey(spec.SessionID)); err != nil || sid != out.Sandbox.ID {
+		t.Fatalf("forward binding = %q, %v; want %q", sid, err, out.Sandbox.ID)
+	}
+}
+
 func TestAcquireRecreatesWhenActiveSandboxDisappeared(t *testing.T) {
 	b, fp := newTestBinder(t)
 	ctx := context.Background()

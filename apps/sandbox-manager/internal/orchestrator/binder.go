@@ -288,11 +288,15 @@ func (b *Binder) lookup(ctx context.Context, sessionID string) (*provider.Sandbo
 	// resumes on its existing workspace rather than cold-creating.
 	if m.State == StatePaused {
 		if err := b.p.Resume(ctx, sid); err != nil {
-			if errors.Is(err, fs.ErrNotExist) {
-				// The provider has already forgotten the paused sandbox (for
-				// example after an OpenSandbox/Docker restart) while our durable
-				// binding still points at it. Drop the stale binding and let
-				// Acquire create a fresh sandbox for the same session.
+			if errors.Is(err, fs.ErrNotExist) || errors.Is(err, provider.ErrSandboxNotResumable) {
+				// Either the provider has already forgotten the paused sandbox
+				// (e.g. after an OpenSandbox/Docker restart) or it has driven the
+				// pod to a terminal phase and discarded the paused checkpoint
+				// (409 INVALID_STATE), while our durable binding still points at
+				// it. In both cases the sandbox is unrecoverable: drop the stale
+				// binding and let Acquire cold-create a fresh sandbox for the
+				// session (its workspace is restored from checkpoint by
+				// agent-runtime on the reused=false path).
 				if unbindErr := b.unbind(ctx, m.SessionID, m.SandboxID); unbindErr != nil {
 					return nil, false, unbindErr
 				}

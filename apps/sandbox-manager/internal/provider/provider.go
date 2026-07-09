@@ -7,6 +7,7 @@ package provider
 
 import (
 	"context"
+	"errors"
 	"sync"
 )
 
@@ -79,6 +80,14 @@ type HealthStatus struct {
 	Healthy bool
 	Detail  string
 }
+
+// ErrSandboxNotResumable indicates a Resume was rejected because the sandbox is
+// no longer in a resumable (Paused) state: it has reached a terminal phase
+// (completed / failed / terminated) and its paused checkpoint is gone. The
+// orchestrator treats this exactly like a missing sandbox — it drops the stale
+// binding and cold-creates a fresh one (session state is restored from the
+// durable checkpoint by agent-runtime).
+var ErrSandboxNotResumable = errors.New("provider: sandbox not resumable")
 
 // SandboxProvider is the contract every backend must implement.
 type SandboxProvider interface {

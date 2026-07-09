@@ -4,8 +4,10 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"io/fs"
 	"time"
 
+	"github.com/cocola-project/cocola/apps/sandbox-manager/internal/provider"
 	rds "github.com/cocola-project/cocola/packages/go-common/redis"
 )
 
@@ -40,6 +42,16 @@ func (b *Binder) Heartbeat(ctx context.Context, sandboxID string) error {
 	// flip state to active before renewing.
 	if m.State == StatePaused {
 		if err := b.p.Resume(ctx, sandboxID); err != nil {
+			if errors.Is(err, fs.ErrNotExist) || errors.Is(err, provider.ErrSandboxNotResumable) {
+				// The sandbox is gone or terminal (checkpoint discarded): the
+				// pulse can't revive it. Drop the stale binding and tell the
+				// caller so its heartbeat loop stops; the next Acquire will
+				// cold-create a fresh sandbox for the session.
+				if unbindErr := b.unbind(ctx, m.SessionID, sandboxID); unbindErr != nil {
+					return unbindErr
+				}
+				return ErrUnknownSandbox
+			}
 			return err
 		}
 		m.State = StateActive

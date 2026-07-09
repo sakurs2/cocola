@@ -35,6 +35,7 @@ import (
 	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"io/fs"
@@ -673,12 +674,51 @@ func (p *Provider) Pause(ctx context.Context, sid string) error {
 }
 
 // Resume maps to the lifecycle POST /sandboxes/{id}/resume endpoint.
+//
+// A resume can race the sandbox's real lifecycle: our durable binding may still
+// say Paused while OpenSandbox has already driven the pod to a terminal phase
+// (Succeed/Failed/Terminated) and discarded the paused checkpoint. That returns
+// 409 KUBERNETES::INVALID_STATE ("Cannot resume sandbox in phase Succeed,
+// expected Paused"), which is NOT a transient error — the sandbox can never be
+// resumed. We re-read the authoritative phase to disambiguate: an already-Running
+// sandbox (another racer resumed it) is success; any terminal phase is reported
+// as provider.ErrSandboxNotResumable so the orchestrator drops the stale binding
+// and cold-creates instead of failing the Acquire.
 func (p *Provider) Resume(ctx context.Context, sid string) error {
 	osbID, err := p.resolve(sid)
 	if err != nil {
 		return err
 	}
-	return p.do(ctx, http.MethodPost, "/sandboxes/"+osbID+"/resume", nil, nil)
+	if err := p.do(ctx, http.MethodPost, "/sandboxes/"+osbID+"/resume", nil, nil); err != nil {
+		return p.classifyResumeErr(ctx, osbID, err)
+	}
+	return nil
+}
+
+// classifyResumeErr inspects the sandbox's real phase after a failed resume and
+// maps unrecoverable states onto provider.ErrSandboxNotResumable. A missing
+// sandbox (fs.ErrNotExist from a 404) and a genuine transient failure are passed
+// through unchanged so their existing handling still applies.
+func (p *Provider) classifyResumeErr(ctx context.Context, osbID string, resumeErr error) error {
+	if errors.Is(resumeErr, fs.ErrNotExist) {
+		return resumeErr
+	}
+	var info sandboxInfo
+	if err := p.do(ctx, http.MethodGet, "/sandboxes/"+osbID, nil, &info); err != nil {
+		// Can't read the phase — surface the original resume error unchanged.
+		return resumeErr
+	}
+	switch info.Status.State {
+	case "Running":
+		// Someone resumed it in the meantime (or it never actually paused).
+		return nil
+	case "Paused", "Pausing", "Pending":
+		// Still (or not yet) resumable — treat as transient, let the caller retry.
+		return resumeErr
+	default:
+		// Succeed / Failed / Terminated / Stopping: terminal, checkpoint gone.
+		return fmt.Errorf("opensandbox: resume %s in phase %s: %w", osbID, info.Status.State, provider.ErrSandboxNotResumable)
+	}
 }
 
 // thawIfPaused resumes a paused sandbox (by opensandbox id) and waits for it to
