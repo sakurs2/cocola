@@ -91,7 +91,7 @@ export const RailText: FC<{ running?: boolean; children: ReactNode }> = ({
   running,
   children,
 }) => (
-  <RailRow icon={ChatCircle} label="回答" running={running} color="text-indigo-500">
+  <RailRow icon={ChatCircle} label="Answer" running={running} color="text-indigo-500">
     {children}
   </RailRow>
 );
@@ -100,14 +100,14 @@ export const RailText: FC<{ running?: boolean; children: ReactNode }> = ({
 export const RailReasoning: FC<{ text: string; running?: boolean }> = ({ text, running }) => (
   <RailRow
     icon={Brain}
-    label={running ? "正在思考" : "推理过程"}
+    label={running ? "Thinking" : "Reasoning"}
     running={running}
     color="text-purple-500"
   >
     <details className="aui-details group text-sm">
       <summary className="flex w-fit cursor-pointer select-none items-center gap-1 py-0.5 text-xs text-muted-foreground transition-colors hover:text-foreground [&::-webkit-details-marker]:hidden">
         <ChevronRight className="size-3 shrink-0 transition-transform group-open:rotate-90" />
-        <span>展开思考过程</span>
+        <span>Show reasoning</span>
       </summary>
       <div className="aui-details-body mt-1 border-l-2 border-border/70 pl-3 text-[13px] leading-6 text-muted-foreground">
         {text}
@@ -124,24 +124,24 @@ type ToolMeta = { icon: RailIcon; running: string; done: string; color: string }
 const getToolMeta = (rawName: string): ToolMeta => {
   const name = rawName.replace(/^mcp__/, "").toLowerCase();
   if (name.includes("websearch") || name.includes("search"))
-    return { icon: MagnifyingGlass, running: "正在搜索资料", done: "已搜索资料", color: "text-violet-500" };
+    return { icon: MagnifyingGlass, running: "Searching", done: "Searched", color: "text-violet-500" };
   if (name.includes("webfetch") || name.includes("fetch") || name.includes("browser"))
-    return { icon: PhGlobe, running: "正在读取网页", done: "已读取网页", color: "text-sky-500" };
+    return { icon: PhGlobe, running: "Reading page", done: "Read page", color: "text-sky-500" };
   if (name.startsWith("read") || name.includes("read_file"))
-    return { icon: PhFileText, running: "正在阅读文件", done: "已阅读文件", color: "text-blue-500" };
+    return { icon: PhFileText, running: "Reading file", done: "Read file", color: "text-blue-500" };
   if (name.startsWith("write") || name.includes("write_file"))
-    return { icon: PencilSimple, running: "正在写入文件", done: "已写入文件", color: "text-emerald-500" };
+    return { icon: PencilSimple, running: "Writing file", done: "Wrote file", color: "text-emerald-500" };
   if (name.startsWith("edit") || name.includes("str_replace") || name.includes("edit_file"))
-    return { icon: PencilSimple, running: "正在编辑文件", done: "已编辑文件", color: "text-amber-500" };
+    return { icon: PencilSimple, running: "Editing file", done: "Edited file", color: "text-amber-500" };
   if (name.startsWith("glob") || name.startsWith("grep") || name.includes("find"))
-    return { icon: FolderOpen, running: "正在检索代码", done: "已检索代码", color: "text-cyan-600" };
+    return { icon: FolderOpen, running: "Searching code", done: "Searched code", color: "text-cyan-600" };
   if (name.startsWith("bash") || name.includes("shell") || name.includes("terminal"))
-    return { icon: TerminalWindow, running: "正在执行命令", done: "已执行命令", color: "text-orange-500" };
+    return { icon: TerminalWindow, running: "Running command", done: "Ran command", color: "text-orange-500" };
   if (name.startsWith("todo") || name.includes("task"))
-    return { icon: ListChecks, running: "正在规划任务", done: "已更新任务", color: "text-fuchsia-500" };
+    return { icon: ListChecks, running: "Planning tasks", done: "Updated tasks", color: "text-fuchsia-500" };
   if (name.startsWith("skill") || name.includes("load"))
-    return { icon: Sparkle, running: "正在加载技能", done: "已加载技能", color: "text-yellow-500" };
-  return { icon: PhWrench, running: "正在调用工具", done: "已调用工具", color: "text-slate-400" };
+    return { icon: Sparkle, running: "Loading skill", done: "Loaded skill", color: "text-yellow-500" };
+  return { icon: PhWrench, running: "Calling tool", done: "Called tool", color: "text-slate-400" };
 };
 
 // Best-effort chips from the tool input JSON. Never throws; returns [] on any
@@ -172,17 +172,50 @@ const extractToolChips = (argsText: string): string[] => {
     const parts = file.trim().split("/");
     chips.push(parts[parts.length - 1] || file.trim());
   }
-  if (typeof obj.command === "string" && obj.command.trim()) {
-    // Show the command's first line in full — the chip wraps (break-words), so
-    // a long command reads completely instead of being cut off mid-path.
-    const firstLine = obj.command.trim().split("\n")[0] ?? "";
-    chips.push(firstLine);
-  }
   if (typeof obj.description === "string" && obj.description.trim() && chips.length === 0) {
     chips.push(obj.description.trim().slice(0, 48));
   }
   return Array.from(new Set(chips)).slice(0, 4);
 };
+
+// Pull the shell command out of the tool input, if any. Bash-like tools carry
+// their command under `command`; it gets its own terminal-style preview rather
+// than a plain chip. Returns the trimmed command (multi-line preserved) or null.
+const extractCommand = (argsText: string): string | null => {
+  if (!argsText) return null;
+  try {
+    const obj = JSON.parse(argsText) as Record<string, unknown>;
+    if (typeof obj.command === "string" && obj.command.trim()) {
+      return obj.command.trim();
+    }
+  } catch {
+    return null;
+  }
+  return null;
+};
+
+// Terminal-style command preview. A slim dark "window" with a leading prompt
+// glyph makes a shell command read as a command — monospace, syntax-neutral,
+// wraps instead of truncating, and stays legible on both light and dark pages.
+const CommandPreview: FC<{ command: string }> = ({ command }) => (
+  <div className="overflow-hidden rounded-lg border border-border/60 bg-zinc-950 text-zinc-100 shadow-sm dark:bg-zinc-900">
+    <div className="flex items-center gap-1.5 border-b border-white/10 px-3 py-1.5">
+      <span className="size-2 rounded-full bg-red-400/80" />
+      <span className="size-2 rounded-full bg-yellow-400/80" />
+      <span className="size-2 rounded-full bg-green-400/80" />
+      <span className="ml-1.5 flex items-center gap-1 text-[10px] font-medium uppercase tracking-wide text-zinc-400">
+        <TerminalWindow className="size-3" weight="bold" />
+        Terminal
+      </span>
+    </div>
+    <pre className="max-h-48 overflow-auto px-3 py-2 font-mono text-[11.5px] leading-5">
+      <code>
+        <span className="mr-2 select-none text-emerald-400">$</span>
+        <span className="whitespace-pre-wrap break-words text-zinc-100">{command}</span>
+      </code>
+    </pre>
+  </div>
+);
 
 type SearchResult = { title: string; url: string; host: string };
 
@@ -266,8 +299,8 @@ const SearchResultCard: FC<{ item: SearchResult }> = ({ item }) => (
   </a>
 );
 
-// Tool call node -- content-flow style (no card chrome): an icon + a Chinese
-// progress phrase, small chips from the input, favicon cards for web results,
+// Tool call node -- content-flow style (no card chrome): an icon + an English
+// progress phrase, a terminal-style command preview, small chips from the
 // and a collapsible raw-arguments block.
 export const RailTool: FC<{
   toolName: string;
@@ -279,7 +312,8 @@ export const RailTool: FC<{
   const meta = getToolMeta(toolName);
   const Icon = meta.icon;
   const chips = extractToolChips(argsText ?? "");
-  const label = isError ? "工具调用失败" : running ? meta.running : meta.done;
+  const command = extractCommand(argsText ?? "");
+  const label = isError ? "Tool call failed" : running ? meta.running : meta.done;
   const hasArgs = Boolean((argsText ?? "").trim());
   // Rich result cards only for web-search/fetch tools once their result lands.
   const searchResults = !isError && isSearchTool(toolName) ? parseSearchResults(result) : [];
@@ -292,6 +326,11 @@ export const RailTool: FC<{
       tone={isError ? "error" : "default"}
       color={meta.color}
     >
+      {command ? (
+        <div className="mb-1.5">
+          <CommandPreview command={command} />
+        </div>
+      ) : null}
       {chips.length ? (
         <div className="flex flex-wrap gap-1.5">
           {chips.map((chip, i) => (
@@ -315,7 +354,7 @@ export const RailTool: FC<{
         <details className="aui-details group mt-1.5 text-sm">
           <summary className="flex w-fit cursor-pointer select-none items-center gap-1 py-0.5 text-xs text-muted-foreground/70 transition-colors hover:text-foreground [&::-webkit-details-marker]:hidden">
             <ChevronRight className="size-3 shrink-0 transition-transform group-open:rotate-90" />
-            <span>查看调用参数</span>
+            <span>View arguments</span>
           </summary>
           <div className="aui-details-body mt-1 border-l-2 border-border/70 pl-3">
             <pre className="max-h-72 overflow-auto whitespace-pre-wrap break-words py-1 font-mono text-[11px] leading-5 text-muted-foreground">
@@ -338,7 +377,7 @@ export const RailFile: FC<{
   downloadUrl: string;
   onPreview?: () => void;
 }> = ({ filename, mimeType, size, downloadUrl, onPreview }) => (
-  <RailRow icon={FilePlus} label="生成文件" color="text-teal-500">
+  <RailRow icon={FilePlus} label="Generated file" color="text-teal-500">
     <div className="flex max-w-xl items-center gap-3 rounded-xl border border-border/60 bg-muted/40 p-3 text-sm">
       <span className="flex size-9 shrink-0 items-center justify-center rounded-lg bg-background text-muted-foreground">
         <FileText className="size-4" />
