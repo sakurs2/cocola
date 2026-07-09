@@ -199,23 +199,6 @@
     opacity: 1;
   }
 
-  .aui-answering-shimmer {
-    color: hsl(var(--muted-foreground));
-    background: linear-gradient(
-      100deg,
-      hsl(var(--muted-foreground)) 0%,
-      hsl(var(--muted-foreground)) 40%,
-      hsl(var(--foreground)) 50%,
-      hsl(var(--muted-foreground)) 60%,
-      hsl(var(--muted-foreground)) 100%
-    );
-    background-size: 250% 100%;
-    background-clip: text;
-    -webkit-background-clip: text;
-    -webkit-text-fill-color: transparent;
-    animation: aui-answering-shimmer 2.6s linear infinite;
-  }
-
   .aui-answer-border-beam {
     position: absolute;
     inset: -0.55rem -0.75rem;
@@ -735,15 +718,6 @@
   }
 }
 
-@keyframes aui-answering-shimmer {
-  0% {
-    background-position: 150% 0;
-  }
-  100% {
-    background-position: -50% 0;
-  }
-}
-
 @keyframes aui-border-beam-spin {
   to {
     --aui-border-angle: 360deg;
@@ -764,7 +738,6 @@
 @media (prefers-reduced-motion: reduce) {
   .aui-stream-in[data-status="running"],
   .aui-details-body,
-  .aui-answering-shimmer,
   .aui-answer-border-beam::before {
     animation: none;
   }

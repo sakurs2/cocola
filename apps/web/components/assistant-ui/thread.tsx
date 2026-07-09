@@ -7,9 +7,11 @@ import {
   MessagePrimitive,
   type FileMessagePartProps,
   type ReasoningMessagePartProps,
+  type TextMessagePartProps,
   ThreadPrimitive,
   type ToolCallMessagePartProps,
   useMessage,
+  useThread,
 } from "@assistant-ui/react";
 import * as Popover from "@radix-ui/react-popover";
 import { Command } from "cmdk";
@@ -541,37 +543,35 @@ const AssistantMessage: FC = () => (
               runs at x=0.875rem — exactly the center of each RailRow icon column
               (1.75rem wide) — so every node's badge sits centered on the line.
               Badges carry bg-background + z-[1] to punch through it. */}
-          <div>
-            <MessagePrimitive.Parts
-              components={{
-                Text: TextPart,
-                Reasoning: ReasoningPart,
-                File: ArtifactFilePart,
-                tools: { Fallback: ToolFallback },
-              }}
-            />
-          </div>
-          {/* Loading affordance: the runtime pushes an EMPTY assistant message the
-              moment a turn starts and only then streams text into it. Until the
-              first token lands the message has no content, so a "hasContent=false"
-              message that is still the last one is exactly the in-flight state.
-              Show typing dots there so the user sees the model is working. */}
-          <MessagePrimitive.If hasContent={false}>
-            <MessagePrimitive.If last>
-              <TypingIndicator />
-            </MessagePrimitive.If>
-          </MessagePrimitive.If>
-          <MessagePrimitive.If last>
-            <ThreadPrimitive.If running>
-              <AnsweringIndicator />
-            </ThreadPrimitive.If>
-          </MessagePrimitive.If>
+          <AssistantMessageParts />
         </div>
       </div>
     </div>
     <AssistantActionBar />
   </MessagePrimitive.Root>
 );
+
+// Renders the message's parts. The vertical rail connector under the FINAL node
+// is hidden only while this (last) message is still streaming — so the trailing
+// line does not dangle mid-generation. Once the turn completes the connector is
+// restored, keeping the rail continuous with whatever renders below.
+const AssistantMessageParts: FC = () => {
+  const isLast = useMessage((m) => m.isLast);
+  const isRunning = useThread((t) => t.isRunning);
+  const streaming = isLast && isRunning;
+  return (
+    <div className={streaming ? "aui-rail-streaming" : undefined}>
+      <MessagePrimitive.Parts
+        components={{
+          Text: TextPart,
+          Reasoning: ReasoningPart,
+          File: ArtifactFilePart,
+          tools: { Fallback: ToolFallback },
+        }}
+      />
+    </div>
+  );
+};
 
 const AssistantMessageHeader: FC = () => {
   const { selectedModel } = useCocola();
@@ -586,23 +586,6 @@ const AssistantMessageHeader: FC = () => {
     </div>
   );
 };
-
-const AnsweringIndicator: FC = () => (
-  <div className="mt-3 flex items-center" role="status" aria-label="Assistant response in progress">
-    <span className="aui-answering-shimmer text-xs font-semibold tracking-wide">Answering</span>
-  </div>
-);
-
-// Three-dot "typing" pulse rendered while an assistant turn is in flight but no
-// text has streamed yet. Pure CSS (Tailwind animate-bounce + staggered delays);
-// aria-label keeps it announced to screen readers.
-const TypingIndicator: FC = () => (
-  <div className="flex items-center gap-1 py-1" role="status" aria-label="Assistant is typing">
-    <span className="size-2 animate-bounce rounded-full bg-muted-foreground/60 [animation-delay:-0.3s]" />
-    <span className="size-2 animate-bounce rounded-full bg-muted-foreground/60 [animation-delay:-0.15s]" />
-    <span className="size-2 animate-bounce rounded-full bg-muted-foreground/60" />
-  </div>
-);
 
 const ArtifactFilePart: FC<FileMessagePartProps> = ({ filename, mimeType, data }) => {
   const { activeSessionId, openArtifact } = useCocola();
@@ -696,8 +679,11 @@ const RailRow: FC<{
   color?: string;
   children?: ReactNode;
 }> = ({ icon: Icon, label, running, tone = "default", color, children }) => (
-  <div className="grid grid-cols-[1.75rem_1fr] gap-x-2.5">
-    <div className="relative flex justify-center after:absolute after:left-1/2 after:top-8 after:bottom-0 after:w-0.5 after:-translate-x-1/2 after:rounded-full after:bg-border/50">
+  // The `after:` pseudo on the icon column paints the continuous vertical rail.
+  // The last node in a message must NOT trail a line below it, so when this
+  // RailRow is the final sibling we hide its connector via :last-child.
+  <div className="grid grid-cols-[1.75rem_1fr] gap-x-2.5 [.aui-rail-streaming_&:last-child_.rail-connector]:after:hidden">
+    <div className="rail-connector relative flex justify-center after:absolute after:left-1/2 after:top-8 after:bottom-0 after:w-0.5 after:-translate-x-1/2 after:rounded-full after:bg-border/50">
       <span
         className={cn(
           "relative z-[1] flex size-7 items-center justify-center",
@@ -727,12 +713,17 @@ const RailRow: FC<{
   </div>
 );
 
-// Plain assistant text answer, rendered as a rail node.
-const TextPart: FC = () => (
-  <RailRow icon={ChatCircle} label="回答" color="text-indigo-500">
-    <MarkdownText />
-  </RailRow>
-);
+// Plain assistant text answer, rendered as a rail node. While the text part is
+// still streaming (status "running") the node icon spins in place — this is the
+// single, localized "answering" affordance (there is no separate bottom banner).
+const TextPart: FC<TextMessagePartProps> = ({ status }) => {
+  const running = status.type === "running";
+  return (
+    <RailRow icon={ChatCircle} label="回答" running={running} color="text-indigo-500">
+      <MarkdownText />
+    </RailRow>
+  );
+};
 
 const ReasoningPart: FC<ReasoningMessagePartProps> = ({ text, status }) => {
   const running = status.type === "running";
@@ -992,7 +983,7 @@ const AssistantActionBar: FC = () => (
   <ActionBarPrimitive.Root
     hideWhenRunning
     autohide="never"
-    className="col-start-1 row-start-2 -ml-1 flex gap-1 text-muted-foreground"
+    className="col-start-1 row-start-2 ml-1 flex gap-1 text-muted-foreground"
   >
     <ActionBarPrimitive.Copy asChild>
       <TooltipIconButton tooltip="Copy">
