@@ -36,9 +36,10 @@ import {
   Sparkles,
 } from "lucide-react";
 import Image from "next/image";
-import { useEffect, useState, type FC } from "react";
+import { useEffect, useState, type CSSProperties, type FC } from "react";
 import { useCocola, type ModelIconConfig, type UiMessageMetadata } from "@/app/runtime-provider";
 import { CocolaWordmark } from "@/components/assistant-ui/cocola-wordmark";
+import { CocolaLogo } from "@/components/cocola-logo";
 import { TooltipIconButton } from "@/components/assistant-ui/tooltip-icon-button";
 import { MarkdownText } from "@/components/assistant-ui/markdown-text";
 import {
@@ -145,6 +146,44 @@ const SUGGESTIONS: SuggestionTile[] = [
   },
 ];
 
+// Homepage tagline. Each glyph is its own span so it can blur->clear in a
+// staggered entrance (synced to CocolaWordmark 0.45s). A second identical
+// layer (.cocola-tagline-shine) carries a transparent gradient with one bright
+// band, swept left->right periodically for a subtle 流光 highlight. The base
+// layer stays solid gray so the text is always visible (never disappears).
+const TAGLINE_TEXT = "Your trusty & powerful agent platform";
+
+const renderTaglineChars = () => {
+  let letterIndex = 0;
+  return Array.from(TAGLINE_TEXT).map((chr, i) => {
+    if (chr === " ") {
+      return (
+        <span key={i} className="cocola-tag-sp">
+          {"\u00A0"}
+        </span>
+      );
+    }
+    const style = { ["--i" as string]: String(letterIndex) } as CSSProperties;
+    letterIndex += 1;
+    return (
+      <span key={i} className="cocola-tag-ch" style={style}>
+        {chr}
+      </span>
+    );
+  });
+};
+
+const CocolaTagline: FC = () => (
+  <p className="cocola-tagline" aria-label={TAGLINE_TEXT}>
+    <span className="cocola-tagline-base" aria-hidden="true">
+      {renderTaglineChars()}
+    </span>
+    <span className="cocola-tagline-shine" aria-hidden="true">
+      {renderTaglineChars()}
+    </span>
+  </p>
+);
+
 const ThreadWelcome: FC = () => {
   const { selectedModel, modelsLoaded } = useCocola();
   const noModel = modelsLoaded && !selectedModel;
@@ -163,12 +202,13 @@ const ThreadWelcome: FC = () => {
         transition={{ duration: 0.22, ease: "easeOut" }}
         className="flex w-full max-w-[var(--thread-max-width)] flex-grow flex-col items-center justify-center"
       >
-        <div className="flex flex-col items-center gap-3 text-center">
+        <div className="flex flex-col items-center gap-2 sm:flex-row sm:items-center sm:justify-center sm:gap-3">
           <h1 className="sr-only">{greeting}</h1>
-          <CocolaWordmark className="cocola-wordmark h-48 w-auto max-w-[min(96vw,680px)]" />
-          <p className="max-w-md text-center text-base leading-6 text-muted-foreground">
-            Your trusty & powerful agent platform
-          </p>
+          <CocolaLogo className="h-28 w-28 shrink-0 sm:h-32 sm:w-32" />
+          <div className="flex flex-col items-center text-center sm:-ml-6">
+            <CocolaWordmark className="cocola-wordmark -my-4 h-32 w-auto max-w-[min(90vw,460px)] sm:h-36" />
+            <CocolaTagline />
+          </div>
         </div>
         {noModel ? (
           <p className="mt-3 text-center text-sm text-muted-foreground">
