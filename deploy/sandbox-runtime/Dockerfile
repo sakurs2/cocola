@@ -75,6 +75,15 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
         fonts-noto fonts-noto-cjk fonts-noto-color-emoji \
     && rm -rf /var/lib/apt/lists/* \
     && ln -sf /usr/bin/fdfind /usr/local/bin/fd \
+    # The base image ships Python only as `python3` (no bare `python`), so agents
+    # that invoke `python ...` hit command-not-found and have to retry `python3`.
+    # Symlink `python` -> the real python3 on PATH (same idiom as `fd`/`chromium`
+    # above) so both spellings just work. We resolve python3 rather than hardcode
+    # a path, and assert it exists, so the build fails loudly if the base ever
+    # stops providing it instead of baking a dangling link.
+    && py3="$(command -v python3)" \
+    && test -n "$py3" \
+    && ln -sf "$py3" /usr/local/bin/python \
     && npm config set registry "${NPM_REGISTRY}" \
     && npm install -g pnpm@10 yarn playwright \
     && PLAYWRIGHT_BROWSERS_PATH=/ms-playwright playwright install --with-deps chromium \
