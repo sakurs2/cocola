@@ -13,7 +13,9 @@ import (
 	"net"
 	"net/http"
 	"os"
+	"os/signal"
 	"strconv"
+	"syscall"
 	"time"
 
 	"github.com/prometheus/client_golang/prometheus"
@@ -66,7 +68,8 @@ func main() {
 	// degrade gracefully: the raw provider RPCs still work, only the binding
 	// RPCs (Acquire/Heartbeat/Release) return Unimplemented. This keeps local
 	// single-process debugging possible without standing up Redis.
-	ctx := context.Background()
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
 	var binder *orchestrator.Binder
 	// Retry the initial dial instead of a single shot: full.yml orders us after
 	// redis is healthy, but transient DNS/network races (or a slow-to-DNS bridge)
@@ -162,9 +165,51 @@ func main() {
 
 	log.Sugar().Infow("cocola sandbox-manager listening",
 		"milestone", "M2", "addr", addr, "provider", backend)
-	if err := gs.Serve(lis); err != nil {
-		log.Sugar().Fatalf("serve: %v", err)
+
+	// Serve on a goroutine so main can block on the signal channel and drive an
+	// orderly teardown (plan A): on SIGINT/SIGTERM we stop accepting new work,
+	// let in-flight RPCs drain, then checkpoint every ACTIVE session so a
+	// non-reclaim exit (Ctrl+C, rollout/drain/scale-in, pod eviction) does not
+	// drop the turns accumulated since each session's last clean reclaim.
+	serveErr := make(chan error, 1)
+	go func() { serveErr <- gs.Serve(lis) }()
+
+	sig := make(chan os.Signal, 1)
+	signal.Notify(sig, syscall.SIGINT, syscall.SIGTERM)
+
+	select {
+	case err := <-serveErr:
+		if err != nil {
+			log.Sugar().Fatalf("serve: %v", err)
+		}
+	case s := <-sig:
+		log.Sugar().Infow("signal received; draining before exit", "signal", s.String())
+		// GracefulStop first: stop accepting new RPCs and wait for in-flight
+		// Exec calls to finish, so the sandbox's .claude reflects the latest
+		// completed turn before we archive it.
+		gs.GracefulStop()
+		if binder != nil {
+			budget := checkpointDrainBudget()
+			dctx, dcancel := context.WithTimeout(context.Background(), budget)
+			log.Sugar().Infow("checkpointing active sessions before exit", "budget", budget.String())
+			binder.CheckpointAllActive(dctx)
+			dcancel()
+		}
+		cancel() // stop reaper/warm-pool background loops
 	}
+}
+
+// checkpointDrainBudget bounds the pre-exit checkpoint sweep so a slow backend
+// cannot wedge teardown past the orchestrator's terminationGracePeriod. A
+// non-positive/invalid COCOLA_SANDBOX_CHECKPOINT_DRAIN_SECS falls back to 25s
+// (comfortably under a typical 30s grace period).
+func checkpointDrainBudget() time.Duration {
+	if v := os.Getenv("COCOLA_SANDBOX_CHECKPOINT_DRAIN_SECS"); v != "" {
+		if n, err := strconv.Atoi(v); err == nil && n > 0 {
+			return time.Duration(n) * time.Second
+		}
+	}
+	return 25 * time.Second
 }
 
 // newProvider is the single place that resolves a backend name to a registered

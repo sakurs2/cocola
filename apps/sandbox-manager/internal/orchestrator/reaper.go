@@ -7,6 +7,7 @@ import (
 	"io/fs"
 	"time"
 
+	"github.com/cocola-project/cocola/apps/sandbox-manager/internal/provider"
 	rds "github.com/cocola-project/cocola/packages/go-common/redis"
 )
 
@@ -148,6 +149,71 @@ func (b *Binder) underReapLock(ctx context.Context, sandboxID string, fn func() 
 	}
 	defer func() { _, _ = b.kv.Eval(ctx, luaUnlock, []string{key}, token) }()
 	return fn()
+}
+
+// CheckpointAllActive snapshots every ACTIVE bound sandbox once, best-effort.
+//
+// This is the graceful-teardown safety net (plan A): reclaim-time checkpointing
+// only fires when the reaper Pauses an idle sandbox or a conversation is
+// deleted, so a sandbox that dies abruptly (Ctrl+C, SIGTERM on rollout/drain/
+// scale-in, pod eviction) between reclaims would lose every turn since its last
+// clean reclaim. Draining a checkpoint for each live session on the way out
+// closes that gap without touching the per-turn hot path.
+//
+// It is deliberately parallel to reapOnce: same meta scan, same per-sandbox
+// reaper lock (so across replicas each sandbox is checkpointed exactly once),
+// but instead of Pausing it just archives. PAUSED sandboxes are skipped -- they
+// were already checkpointed at Pause time and archiving one would need a thaw.
+// The whole sweep is bounded by ctx; a caller passes a deadline so a slow
+// backend cannot wedge the exit path.
+func (b *Binder) CheckpointAllActive(ctx context.Context) {
+	checkpointer, ok := b.p.(provider.SessionCheckpointer)
+	if !ok {
+		return // provider has no checkpointing configured; nothing to do
+	}
+	_ = b.kv.ScanKeys(ctx, metaScanPattern(), 100, func(keys []string) error {
+		for _, mk := range keys {
+			if ctx.Err() != nil {
+				return ctx.Err() // teardown budget exhausted; stop scanning
+			}
+			b.checkpointActiveMeta(ctx, checkpointer, mk)
+		}
+		return nil
+	})
+}
+
+// checkpointActiveMeta archives a single meta key if it is ACTIVE, under the
+// shared per-sandbox reaper lock so concurrent replicas do not double-archive.
+func (b *Binder) checkpointActiveMeta(
+	ctx context.Context, checkpointer provider.SessionCheckpointer, metaK string,
+) {
+	raw, err := b.kv.Get(ctx, metaK)
+	if err != nil {
+		return // vanished mid-scan or transient error; best-effort
+	}
+	var m meta
+	if err := json.Unmarshal([]byte(raw), &m); err != nil {
+		return
+	}
+	if m.State != StateActive {
+		return // paused sandboxes were already checkpointed at Pause time
+	}
+	_ = b.underReapLock(ctx, m.SandboxID, func() error {
+		// Re-read under lock: a racer may have paused/destroyed it meanwhile.
+		cur, cerr := b.kv.Get(ctx, metaK)
+		if cerr != nil {
+			return nil
+		}
+		var cm meta
+		if jerr := json.Unmarshal([]byte(cur), &cm); jerr != nil {
+			return nil
+		}
+		if cm.State != StateActive {
+			return nil
+		}
+		_ = checkpointer.CheckpointSession(ctx, cm.UserID, cm.SessionID, cm.SandboxID)
+		return nil
+	})
 }
 
 // RunReaper drives reapOnce on ReaperEvery until ctx is cancelled. Spawn one per

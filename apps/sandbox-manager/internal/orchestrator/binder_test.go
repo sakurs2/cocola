@@ -471,3 +471,77 @@ func TestAcquireRecreatesWhenActiveSandboxDisappeared(t *testing.T) {
 		t.Fatalf("forward binding = %q, %v; want %q", sid, err, out.Sandbox.ID)
 	}
 }
+
+// TestCheckpointAllActiveArchivesOnlyActive: the graceful-teardown drain sweep
+// checkpoints every ACTIVE bound sandbox exactly once and skips PAUSED ones
+// (those were already archived at Pause time; archiving one would need a thaw).
+func TestCheckpointAllActiveArchivesOnlyActive(t *testing.T) {
+	b, fp := newTestBinder(t)
+	ctx := context.Background()
+
+	sb1, err := b.Acquire(ctx, AcquireSpec{SessionID: "live-1", UserID: "u1"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	sb2, err := b.Acquire(ctx, AcquireSpec{SessionID: "live-2", UserID: "u2"})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	pausedID := "sbx-paused"
+	if err := b.putMeta(ctx, meta{
+		SandboxID:   pausedID,
+		SessionID:   "dozing",
+		UserID:      "u3",
+		State:       StatePaused,
+		CreatedUnix: time.Now().Unix(),
+		PausedUnix:  time.Now().Unix(),
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	b.CheckpointAllActive(ctx)
+
+	fp.mu.Lock()
+	got := map[string]bool{}
+	for _, c := range fp.checkpoints {
+		got[c] = true
+	}
+	fp.mu.Unlock()
+
+	if len(got) != 2 {
+		t.Fatalf("expected exactly 2 checkpoints, got %v", got)
+	}
+	if !got["u1/live-1/"+sb1.ID] {
+		t.Fatalf("missing checkpoint for live-1; got %v", got)
+	}
+	if !got["u2/live-2/"+sb2.ID] {
+		t.Fatalf("missing checkpoint for live-2; got %v", got)
+	}
+	if got["u3/dozing/"+pausedID] {
+		t.Fatalf("paused sandbox must not be checkpointed; got %v", got)
+	}
+}
+
+// TestCheckpointAllActiveStopsWhenBudgetExhausted: a cancelled context (the
+// teardown budget elapsed) halts the sweep without archiving anything.
+func TestCheckpointAllActiveStopsWhenBudgetExhausted(t *testing.T) {
+	b, fp := newTestBinder(t)
+	ctx := context.Background()
+
+	if _, err := b.Acquire(ctx, AcquireSpec{SessionID: "live-1", UserID: "u1"}); err != nil {
+		t.Fatal(err)
+	}
+
+	cctx, cancel := context.WithCancel(ctx)
+	cancel() // budget already exhausted before the sweep starts
+
+	b.CheckpointAllActive(cctx)
+
+	fp.mu.Lock()
+	n := len(fp.checkpoints)
+	fp.mu.Unlock()
+	if n != 0 {
+		t.Fatalf("expected no checkpoints under an exhausted budget, got %d", n)
+	}
+}
