@@ -8,8 +8,8 @@ becomes a terminal proto `error` event instead of propagating, and (c) enabled
 skills are folded into the AgentOptions the provider receives.
 """
 
-import base64
 import json
+import re
 from dataclasses import dataclass, field
 
 from cocola_agent_runtime.agent_provider import AgentEvent, AgentOptions
@@ -303,10 +303,17 @@ async def test_release_session_without_binder_succeeds_and_delete_failure_is_bes
 
 async def test_release_session_checkpoints_before_releasing_sandbox():
     archive = b"checkpoint-bytes"
+    executor = StaticSandboxExecutor()
 
     def exec_handler(sandbox_id, cmd):
         assert sandbox_id == "box-sess-7"
-        return ExecOutcome(exit_code=0, stdout=base64.b64encode(archive).decode("ascii"))
+        # The archive command writes a zstd tar to an on-disk temp path inside
+        # the sandbox and prints an "archived" marker; the payload is then read
+        # back over the binary file channel, never via stdout.
+        match = re.search(r"(/tmp/cocola-checkpoint-[0-9a-f]+\.tar\.zst)", cmd[2])
+        assert match, cmd[2]
+        executor.byte_files[(sandbox_id, match.group(1))] = archive
+        return ExecOutcome(exit_code=0, stdout="archived")
 
     binder = StaticSandboxBinder()
     executor = StaticSandboxExecutor(exec_handler=exec_handler)
@@ -401,7 +408,13 @@ async def test_query_restores_checkpoint_for_fresh_sandbox_before_agent_runs():
     first = executor.exec_calls[0]
     assert first["sandbox_id"] == "box-S1"
     assert "zstd -d -c" in first["cmd"][2]
-    assert base64.b64decode(first["stdin"]) == b"checkpoint-bytes"
+    # The archive bytes are delivered over the binary file channel, then the
+    # unpack command reads them from that on-disk path -- no stdin base64 blob.
+    assert first["stdin"] == ""
+    match = re.search(r"(/tmp/cocola-checkpoint-[0-9a-f]+\.tar\.zst)", first["cmd"][2])
+    assert match, first["cmd"][2]
+    assert executor.byte_files[("box-S1", match.group(1))] == b"checkpoint-bytes"
+    assert executor.byte_writes == [("box-S1", match.group(1), b"checkpoint-bytes")]
 
 
 async def test_query_does_not_restore_checkpoint_for_reused_sandbox():

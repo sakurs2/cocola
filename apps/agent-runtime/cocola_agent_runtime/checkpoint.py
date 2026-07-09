@@ -4,12 +4,20 @@ The runtime workspace stays on the sandbox backend's local storage. To make the
 important conversational state portable across a later fresh sandbox, we archive
 only a small allowlist of directories immediately before a controlled reclaim,
 then restore the latest archive when a session cold-starts again.
+
+Transport note: the archive bytes move between the sandbox and this process over
+execd's binary-safe file channel (``write_bytes`` / ``read_bytes``), never the
+command line. Piping a base64 blob through argv/stdin was fragile (length limits,
+runuser stdin forwarding, 1.33x bloat) and was the root cause of restore failing
+with an abnormal-termination exit code. Writing the archive to a temp file inside
+the sandbox and unpacking it from disk mirrors how skills are synced in and how
+output artifacts are read back -- one proven, binary-clean pattern everywhere.
 """
 
 from __future__ import annotations
 
 import asyncio
-import base64
+import contextlib
 import os
 import re
 import uuid
@@ -32,6 +40,11 @@ DEFAULT_CHECKPOINT_DIRS = (
 )
 DEFAULT_TIMEOUT_SECS = 60
 DEFAULT_MAX_BYTES = 256 * 1024 * 1024
+
+# Marker the archive script prints so we can tell "nothing to archive" apart from
+# "archived a file", without inspecting the (now file-resident) payload on stdout.
+_ARCHIVED_MARKER = "archived"
+_EMPTY_MARKER = "empty"
 
 
 @dataclass(frozen=True)
@@ -73,33 +86,51 @@ def _safe_key_part(value: str, fallback: str) -> str:
     return cleaned or fallback
 
 
-def _archive_command(dirs: tuple[str, ...]) -> list[str]:
+def _sh_quote(value: str) -> str:
+    return "'" + value.replace("'", "'\\''") + "'"
+
+
+def _archive_command(dirs: tuple[str, ...], out_path: str) -> list[str]:
+    """Archive the allowlisted dirs into ``out_path`` *inside the sandbox*.
+
+    Writes a zstd-compressed tar to a temp file on the sandbox filesystem and
+    prints a short marker on stdout so the caller can distinguish "no dirs
+    existed" from "archive written" -- the payload itself never touches stdout,
+    so there is no base64 encode/bloat and no argv/stdin size ceiling.
+    """
     rel_paths = [p.strip().lstrip("/") for p in dirs if p.strip()]
-    quoted = " ".join("'" + p.replace("'", "'\\''") + "'" for p in rel_paths)
+    quoted = " ".join(_sh_quote(p) for p in rel_paths)
+    out_q = _sh_quote(out_path)
     script = (
         "set -eu; "
         "paths=''; "
         f"for p in {quoted}; do "
         '[ -e "/$p" ] && paths="$paths $p"; '
         "done; "
-        '[ -n "$paths" ] || exit 0; '
-        "tar -C / -cf - $paths | zstd -q -c | base64 | tr -d '\\n'"
+        f'if [ -z "$paths" ]; then printf %s {_sh_quote(_EMPTY_MARKER)}; exit 0; fi; '
+        f"tar -C / -cf - $paths | zstd -q -c > {out_q}; "
+        f"printf %s {_sh_quote(_ARCHIVED_MARKER)}"
     )
     return ["sh", "-lc", script]
 
 
-RESTORE_COMMAND = [
-    "sh",
-    "-lc",
-    (
+def _restore_command(archive_path: str) -> list[str]:
+    """Unpack a checkpoint archive already written to ``archive_path`` on disk."""
+    path_q = _sh_quote(archive_path)
+    script = (
         "set -eu; "
-        "tmp=$(mktemp); "
-        'cat > "$tmp.b64"; '
-        'base64 -d "$tmp.b64" > "$tmp"; '
-        'zstd -d -c "$tmp" | tar -C / -xf -; '
-        'rm -f "$tmp" "$tmp.b64"'
-    ),
-]
+        f'zstd -d -c {path_q} | tar -C / -xf -; '
+        f"rm -f {path_q}"
+    )
+    return ["sh", "-lc", script]
+
+
+def _cleanup_command(archive_path: str) -> list[str]:
+    return ["sh", "-lc", f"rm -f {_sh_quote(archive_path)}"]
+
+
+def _sandbox_tmp_path() -> str:
+    return f"/tmp/cocola-checkpoint-{uuid.uuid4().hex}.tar.zst"
 
 
 class CheckpointManager:
@@ -137,10 +168,11 @@ class CheckpointManager:
         assert self._executor is not None
         assert self._objstore is not None
         assert self._session_map is not None
+        archive_path = _sandbox_tmp_path()
         try:
             res = await self._executor.exec(
                 sandbox_id=sandbox_id,
-                cmd=_archive_command(self._config.dirs),
+                cmd=_archive_command(self._config.dirs, archive_path),
                 timeout_secs=self._config.timeout_secs,
             )
             if not res.ok:
@@ -154,10 +186,10 @@ class CheckpointManager:
                     error=res.error or res.stderr or str(res.exit_code),
                 )
                 return None
-            if not res.stdout.strip():
+            if res.stdout.strip() != _ARCHIVED_MARKER:
                 log.info("checkpoint skipped: no configured dirs exist", session_id=session_id)
                 return None
-            data = base64.b64decode(res.stdout.strip(), validate=False)
+            data = await self._executor.read_bytes(sandbox_id=sandbox_id, path=archive_path)
             if self._config.max_bytes and len(data) > self._config.max_bytes:
                 await self._record_failure(
                     session_id,
@@ -179,6 +211,8 @@ class CheckpointManager:
             await self._record_failure(session_id, str(exc))
             log.warning("checkpoint failed", session_id=session_id, error=str(exc))
             return None
+        finally:
+            await self._best_effort_cleanup(sandbox_id, archive_path)
 
     async def restore_if_fresh(self, *, sandbox_id: str, session_id: str, reused: bool) -> bool:
         """Restore the latest checkpoint before running the agent in a fresh sandbox."""
@@ -187,16 +221,16 @@ class CheckpointManager:
         assert self._executor is not None
         assert self._objstore is not None
         assert self._session_map is not None
+        archive_path = _sandbox_tmp_path()
         try:
             key = await self._session_map.get_checkpoint(session_id)
             if not key:
                 return False
             data = await asyncio.to_thread(self._objstore.get, key)
-            encoded = base64.b64encode(data).decode("ascii")
+            await self._executor.write_bytes(sandbox_id=sandbox_id, path=archive_path, data=data)
             res = await self._executor.exec(
                 sandbox_id=sandbox_id,
-                cmd=RESTORE_COMMAND,
-                stdin=encoded,
+                cmd=_restore_command(archive_path),
                 timeout_secs=self._config.timeout_secs,
             )
             if not res.ok:
@@ -207,12 +241,25 @@ class CheckpointManager:
                     object_key=key,
                     error=res.error or res.stderr or str(res.exit_code),
                 )
+                await self._best_effort_cleanup(sandbox_id, archive_path)
                 return False
             log.info("checkpoint restored", session_id=session_id, object_key=key)
             return True
         except Exception as exc:  # noqa: BLE001 - restore is best-effort
             log.warning("checkpoint restore failed", session_id=session_id, error=str(exc))
+            await self._best_effort_cleanup(sandbox_id, archive_path)
             return False
+
+    async def _best_effort_cleanup(self, sandbox_id: str, archive_path: str) -> None:
+        if self._executor is None:
+            return
+        # cleanup is advisory; the sandbox is transient, so any failure is moot
+        with contextlib.suppress(Exception):
+            await self._executor.exec(
+                sandbox_id=sandbox_id,
+                cmd=_cleanup_command(archive_path),
+                timeout_secs=10,
+            )
 
     def _object_key(self, *, user_id: str, session_id: str) -> str:
         ts = datetime.now(UTC).strftime("%Y%m%dT%H%M%SZ")
