@@ -1,14 +1,27 @@
 "use client";
 
 import { Button } from "@/components/ui/button";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
 import { cn } from "@/lib/utils";
 import {
   CheckCircle2,
+  Copy,
+  KeyRound,
   LoaderCircle,
+  MoreHorizontal,
+  Power,
   RefreshCw,
+  Search,
   Shield,
   ShieldCheck,
   Trash2,
+  UserCog,
   UserPlus,
   Users,
 } from "lucide-react";
@@ -22,6 +35,7 @@ type AuthUser = {
   username: string;
   email: string;
   name?: string;
+  tenant_id?: string;
   role: Role;
   enabled: boolean;
   created_by?: string;
@@ -30,32 +44,62 @@ type AuthUser = {
   last_login_at?: string;
 };
 
+type RoleFilter = "all" | Role;
+type StatusFilter = "all" | "enabled" | "disabled";
+
+type DrawerMode = "create" | "edit";
+
 type UserForm = {
   username: string;
   email: string;
+  tenant: string;
   role: Role;
+  autoPassword: boolean;
   password: string;
 };
 
 const EMPTY_FORM: UserForm = {
   username: "",
   email: "",
+  tenant: "",
   role: "user",
+  autoPassword: true,
   password: "",
 };
+
+const NEW_TEAM = "__new__";
 
 export default function AdminUsersPage() {
   const { data: session } = useSession();
   const [users, setUsers] = useState<AuthUser[]>([]);
-  const [form, setForm] = useState<UserForm>(EMPTY_FORM);
   const [loading, setLoading] = useState(true);
-  const [saving, setSaving] = useState(false);
   const [actingId, setActingId] = useState<string | null>(null);
-  const [resetDrafts, setResetDrafts] = useState<Record<string, string>>({});
   const [deleteTarget, setDeleteTarget] = useState<AuthUser | null>(null);
   const [deleting, setDeleting] = useState(false);
   const [error, setError] = useState("");
   const [notice, setNotice] = useState("");
+
+  // Filters
+  const [query, setQuery] = useState("");
+  const [roleFilter, setRoleFilter] = useState<RoleFilter>("all");
+  const [statusFilter, setStatusFilter] = useState<StatusFilter>("all");
+
+  // Create / edit drawer
+  const [drawerOpen, setDrawerOpen] = useState(false);
+  const [drawerMode, setDrawerMode] = useState<DrawerMode>("create");
+  const [editTarget, setEditTarget] = useState<AuthUser | null>(null);
+  const [form, setForm] = useState<UserForm>(EMPTY_FORM);
+  const [teamChoice, setTeamChoice] = useState<string>("");
+  const [saving, setSaving] = useState(false);
+
+  // Reset-password drawer
+  const [resetTarget, setResetTarget] = useState<AuthUser | null>(null);
+  const [resetAuto, setResetAuto] = useState(true);
+  const [resetPasswordValue, setResetPasswordValue] = useState("");
+  const [resetting, setResetting] = useState(false);
+
+  // One-time credential reveal (after create / reset)
+  const [credential, setCredential] = useState<{ email: string; password: string } | null>(null);
 
   const refresh = useCallback(async () => {
     setError("");
@@ -86,29 +130,110 @@ export default function AdminUsersPage() {
     [users],
   );
 
+  const teams = useMemo(() => {
+    const set = new Set<string>();
+    for (const u of users) {
+      const t = (u.tenant_id ?? "").trim();
+      if (t) set.add(t);
+    }
+    return Array.from(set).sort((a, b) => a.localeCompare(b));
+  }, [users]);
+
+  const filtered = useMemo(() => {
+    const q = query.trim().toLowerCase();
+    return users.filter((u) => {
+      if (roleFilter !== "all" && u.role !== roleFilter) return false;
+      if (statusFilter === "enabled" && !u.enabled) return false;
+      if (statusFilter === "disabled" && u.enabled) return false;
+      if (!q) return true;
+      return (
+        u.username.toLowerCase().includes(q) ||
+        u.email.toLowerCase().includes(q) ||
+        (u.tenant_id ?? "").toLowerCase().includes(q)
+      );
+    });
+  }, [users, query, roleFilter, statusFilter]);
+
   const currentUserEmail = session?.user?.email ?? "";
 
-  const createUser = async () => {
+  const openCreate = () => {
+    setDrawerMode("create");
+    setEditTarget(null);
+    setForm(EMPTY_FORM);
+    setTeamChoice("");
+    setError("");
+    setDrawerOpen(true);
+  };
+
+  const openEdit = (user: AuthUser) => {
+    setDrawerMode("edit");
+    setEditTarget(user);
+    setForm({
+      username: user.username,
+      email: user.email,
+      tenant: user.tenant_id ?? "",
+      role: user.role,
+      autoPassword: true,
+      password: "",
+    });
+    setTeamChoice(user.tenant_id ? user.tenant_id : "");
+    setError("");
+    setDrawerOpen(true);
+  };
+
+  const closeDrawer = () => {
+    setDrawerOpen(false);
+    setEditTarget(null);
+  };
+
+  const submitDrawer = async () => {
     setError("");
     setNotice("");
     setSaving(true);
     try {
-      const res = await fetch("/api/admin/users", {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({
-          username: form.username.trim(),
-          email: form.email.trim(),
-          role: form.role,
-          password: form.password,
-          enabled: true,
-        }),
-      });
-      if (isAccountDisabledResponse(res)) return redirectAccountDisabled();
-      if (!res.ok) throw new Error(await responseError(res));
-      setForm(EMPTY_FORM);
-      setNotice("User created");
-      await refresh();
+      const tenant = form.tenant.trim();
+      if (drawerMode === "create") {
+        const password = form.autoPassword ? generatePassword() : form.password;
+        if (!password) {
+          setError("Password is required");
+          setSaving(false);
+          return;
+        }
+        const res = await fetch("/api/admin/users", {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({
+            username: form.username.trim(),
+            email: form.email.trim(),
+            tenant_id: tenant,
+            role: form.role,
+            password,
+            enabled: true,
+          }),
+        });
+        if (isAccountDisabledResponse(res)) return redirectAccountDisabled();
+        if (!res.ok) throw new Error(await responseError(res));
+        closeDrawer();
+        setNotice("User created");
+        setCredential({ email: form.email.trim(), password });
+        await refresh();
+      } else if (editTarget) {
+        const res = await fetch(`/api/admin/users/${encodeURIComponent(editTarget.id)}`, {
+          method: "PATCH",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({
+            username: form.username.trim(),
+            email: form.email.trim(),
+            tenant_id: tenant,
+            role: form.role,
+          }),
+        });
+        if (isAccountDisabledResponse(res)) return redirectAccountDisabled();
+        if (!res.ok) throw new Error(await responseError(res));
+        closeDrawer();
+        setNotice("User updated");
+        await refresh();
+      }
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
     } finally {
@@ -116,7 +241,11 @@ export default function AdminUsersPage() {
     }
   };
 
-  const updateUser = async (user: AuthUser, patch: Partial<Pick<AuthUser, "role" | "enabled">>) => {
+  const patchUser = async (
+    user: AuthUser,
+    patch: Partial<Pick<AuthUser, "role" | "enabled">>,
+    successMsg: string,
+  ) => {
     setError("");
     setNotice("");
     setActingId(user.id);
@@ -128,7 +257,7 @@ export default function AdminUsersPage() {
       });
       if (isAccountDisabledResponse(res)) return redirectAccountDisabled();
       if (!res.ok) throw new Error(await responseError(res));
-      setNotice("User updated");
+      setNotice(successMsg);
       await refresh();
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
@@ -137,29 +266,44 @@ export default function AdminUsersPage() {
     }
   };
 
-  const resetPassword = async (user: AuthUser) => {
-    const password = (resetDrafts[user.id] ?? "").trim();
+  const openReset = (user: AuthUser) => {
+    setResetTarget(user);
+    setResetAuto(true);
+    setResetPasswordValue("");
+    setError("");
+  };
+
+  const submitReset = async () => {
+    if (!resetTarget) return;
+    const password = resetAuto ? generatePassword() : resetPasswordValue.trim();
     if (!password) {
       setError("Password is required");
       return;
     }
     setError("");
     setNotice("");
-    setActingId(user.id);
+    setResetting(true);
+    setActingId(resetTarget.id);
     try {
-      const res = await fetch(`/api/admin/users/${encodeURIComponent(user.id)}/password`, {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({ password }),
-      });
+      const res = await fetch(
+        `/api/admin/users/${encodeURIComponent(resetTarget.id)}/password`,
+        {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({ password }),
+        },
+      );
       if (isAccountDisabledResponse(res)) return redirectAccountDisabled();
       if (!res.ok) throw new Error(await responseError(res));
-      setResetDrafts((drafts) => ({ ...drafts, [user.id]: "" }));
+      const email = resetTarget.email;
+      setResetTarget(null);
       setNotice("Password reset");
+      setCredential({ email, password });
       await refresh();
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
     } finally {
+      setResetting(false);
       setActingId(null);
     }
   };
@@ -186,6 +330,11 @@ export default function AdminUsersPage() {
       setActingId(null);
     }
   };
+
+  const canSubmitDrawer =
+    Boolean(form.username.trim()) &&
+    Boolean(form.email.trim()) &&
+    (drawerMode === "edit" || form.autoPassword || Boolean(form.password));
 
   return (
     <main className="min-h-screen bg-background text-foreground">
@@ -230,67 +379,49 @@ export default function AdminUsersPage() {
           <Metric label="Admins" value={String(stats.admins)} />
         </section>
 
-        <section className="rounded-lg border border-border bg-card">
-          <div className="flex items-center gap-3 border-b border-border px-4 py-3">
-            <div className="grid size-8 place-items-center rounded-md bg-muted">
-              <UserPlus className="size-4 text-muted-foreground" />
-            </div>
-            <div className="min-w-0 flex-1">
-              <div className="text-sm font-medium">Create user</div>
-              <div className="text-xs text-muted-foreground">
-                Passwords are sent to the admin-api and stored as bcrypt hashes.
-              </div>
-            </div>
+        {/* Toolbar: search + filters + create */}
+        <section className="flex flex-wrap items-center gap-3">
+          <div className="relative min-w-[240px] flex-1">
+            <Search className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
+            <input
+              value={query}
+              onChange={(e) => setQuery(e.target.value)}
+              placeholder="Search username, email, or team"
+              className="h-10 w-full rounded-md border border-input bg-background pl-9 pr-3 text-sm outline-none focus:border-ring"
+            />
           </div>
-          <div className="grid gap-3 p-4 lg:grid-cols-[minmax(0,0.9fr)_minmax(0,1.2fr)_8rem_minmax(0,0.9fr)_auto]">
-            <TextInput
-              label="Username"
-              value={form.username}
-              onChange={(username) => setForm((prev) => ({ ...prev, username }))}
-            />
-            <TextInput
-              label="Email"
-              type="email"
-              value={form.email}
-              onChange={(email) => setForm((prev) => ({ ...prev, email }))}
-            />
-            <label className="grid gap-1 text-xs text-muted-foreground">
-              Role
-              <select
-                value={form.role}
-                onChange={(e) => setForm((prev) => ({ ...prev, role: e.target.value as Role }))}
-                className="h-10 rounded-md border border-input bg-background px-3 text-sm text-foreground outline-none focus:border-ring"
-              >
-                <option value="user">user</option>
-                <option value="admin">admin</option>
-              </select>
-            </label>
-            <TextInput
-              label="Password"
-              type="password"
-              value={form.password}
-              onChange={(password) => setForm((prev) => ({ ...prev, password }))}
-            />
-            <div className="flex items-end">
-              <Button
-                className="w-full"
-                disabled={saving || !form.username.trim() || !form.email.trim() || !form.password}
-                onClick={() => void createUser()}
-              >
-                {saving ? <LoaderCircle className="mr-2 size-4 animate-spin" /> : null}
-                Create
-              </Button>
-            </div>
-          </div>
+          <select
+            value={roleFilter}
+            onChange={(e) => setRoleFilter(e.target.value as RoleFilter)}
+            className="h-10 rounded-md border border-input bg-background px-3 text-sm outline-none focus:border-ring"
+          >
+            <option value="all">All roles</option>
+            <option value="user">user</option>
+            <option value="admin">admin</option>
+          </select>
+          <select
+            value={statusFilter}
+            onChange={(e) => setStatusFilter(e.target.value as StatusFilter)}
+            className="h-10 rounded-md border border-input bg-background px-3 text-sm outline-none focus:border-ring"
+          >
+            <option value="all">All statuses</option>
+            <option value="enabled">Enabled</option>
+            <option value="disabled">Disabled</option>
+          </select>
+          <Button onClick={openCreate}>
+            <UserPlus className="mr-2 size-4" />
+            New user
+          </Button>
         </section>
 
         <section className="overflow-hidden rounded-lg border border-border bg-card">
           <div className="overflow-x-auto">
-            <table className="w-full min-w-[1024px] text-sm">
+            <table className="w-full min-w-[720px] text-sm">
               <thead className="border-b border-border bg-muted/50 text-xs text-muted-foreground">
                 <tr>
                   <th className="px-4 py-3 text-left font-medium">User</th>
                   <th className="px-4 py-3 text-left font-medium">Role</th>
+                  <th className="px-4 py-3 text-left font-medium">Team</th>
                   <th className="px-4 py-3 text-left font-medium">Status</th>
                   <th className="px-4 py-3 text-left font-medium">Last login</th>
                   <th className="px-4 py-3 text-right font-medium">Actions</th>
@@ -299,18 +430,18 @@ export default function AdminUsersPage() {
               <tbody>
                 {loading && users.length === 0 ? (
                   <tr>
-                    <td colSpan={5} className="px-4 py-10 text-center text-muted-foreground">
+                    <td colSpan={6} className="px-4 py-10 text-center text-muted-foreground">
                       Loading users...
                     </td>
                   </tr>
-                ) : users.length === 0 ? (
+                ) : filtered.length === 0 ? (
                   <tr>
-                    <td colSpan={5} className="px-4 py-10 text-center text-muted-foreground">
-                      No users found
+                    <td colSpan={6} className="px-4 py-10 text-center text-muted-foreground">
+                      {users.length === 0 ? "No users found" : "No users match your filters"}
                     </td>
                   </tr>
                 ) : (
-                  users.map((user) => {
+                  filtered.map((user) => {
                     const busy = actingId === user.id;
                     const protectedAdmin = isProtectedAdmin(user);
                     const selfUser = isCurrentUser(user, currentUserEmail);
@@ -329,80 +460,82 @@ export default function AdminUsersPage() {
                           <RolePill role={user.role} />
                         </td>
                         <td className="px-4 py-3">
+                          {user.tenant_id ? (
+                            <span className="text-sm">{user.tenant_id}</span>
+                          ) : (
+                            <span className="text-muted-foreground">—</span>
+                          )}
+                        </td>
+                        <td className="px-4 py-3">
                           <StatusPill enabled={user.enabled} />
                         </td>
                         <td className="px-4 py-3 text-muted-foreground">
                           {formatTime(user.last_login_at)}
                         </td>
                         <td className="px-4 py-3">
-                          <div className="flex flex-wrap justify-end gap-2">
-                            <Button
-                              variant="outline"
-                              size="sm"
-                              disabled={Boolean(actingId) || roleLocked}
-                              title={permissionLockTitle({
-                                selfUser,
-                                locked: roleLocked,
-                                fallback: "Bootstrap admin cannot be demoted",
-                              })}
-                              onClick={() =>
-                                void updateUser(user, {
-                                  role: user.role === "admin" ? "user" : "admin",
-                                })
-                              }
-                            >
-                              {busy ? <LoaderCircle className="mr-2 size-4 animate-spin" /> : null}
-                              {user.role === "admin" ? "Make user" : "Make admin"}
-                            </Button>
-                            <Button
-                              variant={user.enabled ? "destructive" : "outline"}
-                              size="sm"
-                              disabled={Boolean(actingId) || disableLocked}
-                              title={permissionLockTitle({
-                                selfUser,
-                                locked: disableLocked,
-                                fallback: "Bootstrap admin cannot be disabled",
-                              })}
-                              onClick={() => void updateUser(user, { enabled: !user.enabled })}
-                            >
-                              {user.enabled ? "Disable" : "Enable"}
-                            </Button>
-                            <input
-                              type="password"
-                              placeholder="New password"
-                              value={resetDrafts[user.id] ?? ""}
-                              onChange={(e) =>
-                                setResetDrafts((drafts) => ({
-                                  ...drafts,
-                                  [user.id]: e.target.value,
-                                }))
-                              }
-                              className="h-9 w-40 rounded-md border border-input bg-background px-3 text-sm outline-none focus:border-ring"
-                            />
-                            <Button
-                              variant="secondary"
-                              size="sm"
-                              disabled={Boolean(actingId) || !(resetDrafts[user.id] ?? "").trim()}
-                              onClick={() => void resetPassword(user)}
-                            >
-                              Reset
-                            </Button>
-                            <Button
-                              variant="destructive"
-                              size="sm"
-                              disabled={Boolean(actingId) || deleteLocked}
-                              onClick={() => setDeleteTarget(user)}
-                              title={
-                                selfUser
-                                  ? "You cannot delete your own account"
-                                  : protectedAdmin
-                                    ? "Bootstrap admin cannot be deleted"
-                                    : "Delete user"
-                              }
-                            >
-                              <Trash2 className="mr-2 size-4" />
-                              Delete
-                            </Button>
+                          <div className="flex justify-end">
+                            <DropdownMenu>
+                              <DropdownMenuTrigger asChild>
+                                <Button
+                                  variant="ghost"
+                                  size="icon"
+                                  className="size-9"
+                                  disabled={busy}
+                                  aria-label="Actions"
+                                >
+                                  {busy ? (
+                                    <LoaderCircle className="size-4 animate-spin" />
+                                  ) : (
+                                    <MoreHorizontal className="size-4" />
+                                  )}
+                                </Button>
+                              </DropdownMenuTrigger>
+                              <DropdownMenuContent align="end">
+                                <DropdownMenuItem onSelect={() => openEdit(user)}>
+                                  <UserCog className="size-4" />
+                                  Edit
+                                </DropdownMenuItem>
+                                <DropdownMenuItem onSelect={() => openReset(user)}>
+                                  <KeyRound className="size-4" />
+                                  Reset password
+                                </DropdownMenuItem>
+                                <DropdownMenuItem
+                                  disabled={roleLocked}
+                                  onSelect={() =>
+                                    void patchUser(
+                                      user,
+                                      { role: user.role === "admin" ? "user" : "admin" },
+                                      "User updated",
+                                    )
+                                  }
+                                >
+                                  <ShieldCheck className="size-4" />
+                                  {user.role === "admin" ? "Make user" : "Make admin"}
+                                </DropdownMenuItem>
+                                <DropdownMenuItem
+                                  disabled={disableLocked}
+                                  onSelect={() =>
+                                    void patchUser(
+                                      user,
+                                      { enabled: !user.enabled },
+                                      user.enabled ? "User disabled" : "User enabled",
+                                    )
+                                  }
+                                >
+                                  <Power className="size-4" />
+                                  {user.enabled ? "Disable" : "Enable"}
+                                </DropdownMenuItem>
+                                <DropdownMenuSeparator />
+                                <DropdownMenuItem
+                                  variant="destructive"
+                                  disabled={deleteLocked}
+                                  onSelect={() => setDeleteTarget(user)}
+                                >
+                                  <Trash2 className="size-4" />
+                                  Delete
+                                </DropdownMenuItem>
+                              </DropdownMenuContent>
+                            </DropdownMenu>
                           </div>
                         </td>
                       </tr>
@@ -414,6 +547,204 @@ export default function AdminUsersPage() {
           </div>
         </section>
       </div>
+
+      {/* Create / edit drawer */}
+      {drawerOpen ? (
+        <div className="fixed inset-0 z-50 flex justify-end bg-background/80 backdrop-blur-sm">
+          <div className="flex h-full w-full max-w-md flex-col border-l border-border bg-card shadow-xl">
+            <div className="flex items-center gap-3 border-b border-border px-5 py-4">
+              <div className="grid size-8 place-items-center rounded-md bg-muted">
+                {drawerMode === "create" ? (
+                  <UserPlus className="size-4 text-muted-foreground" />
+                ) : (
+                  <UserCog className="size-4 text-muted-foreground" />
+                )}
+              </div>
+              <div className="min-w-0 flex-1">
+                <div className="text-sm font-medium">
+                  {drawerMode === "create" ? "Create user" : "Edit user"}
+                </div>
+                <div className="truncate text-xs text-muted-foreground">
+                  {drawerMode === "create"
+                    ? "Passwords are stored as bcrypt hashes."
+                    : editTarget?.email}
+                </div>
+              </div>
+            </div>
+
+            <div className="flex-1 space-y-4 overflow-y-auto px-5 py-5">
+              <FieldInput
+                label="Username"
+                value={form.username}
+                onChange={(username) => setForm((p) => ({ ...p, username }))}
+              />
+              <FieldInput
+                label="Email"
+                type="email"
+                value={form.email}
+                onChange={(email) => setForm((p) => ({ ...p, email }))}
+              />
+
+              <label className="grid gap-1 text-xs text-muted-foreground">
+                Team
+                <select
+                  value={teamChoice === "" && form.tenant ? form.tenant : teamChoice}
+                  onChange={(e) => {
+                    const v = e.target.value;
+                    setTeamChoice(v);
+                    if (v === NEW_TEAM) {
+                      setForm((p) => ({ ...p, tenant: "" }));
+                    } else {
+                      setForm((p) => ({ ...p, tenant: v }));
+                    }
+                  }}
+                  className="h-10 rounded-md border border-input bg-background px-3 text-sm text-foreground outline-none focus:border-ring"
+                >
+                  <option value="">No team</option>
+                  {teams.map((t) => (
+                    <option key={t} value={t}>
+                      {t}
+                    </option>
+                  ))}
+                  <option value={NEW_TEAM}>+ New team…</option>
+                </select>
+              </label>
+              {teamChoice === NEW_TEAM ? (
+                <FieldInput
+                  label="New team name"
+                  value={form.tenant}
+                  onChange={(tenant) => setForm((p) => ({ ...p, tenant }))}
+                />
+              ) : null}
+
+              <label className="grid gap-1 text-xs text-muted-foreground">
+                Role
+                <select
+                  value={form.role}
+                  onChange={(e) => setForm((p) => ({ ...p, role: e.target.value as Role }))}
+                  className="h-10 rounded-md border border-input bg-background px-3 text-sm text-foreground outline-none focus:border-ring"
+                >
+                  <option value="user">user</option>
+                  <option value="admin">admin</option>
+                </select>
+              </label>
+
+              {drawerMode === "create" ? (
+                <div className="space-y-2 rounded-md border border-border bg-muted/30 p-3">
+                  <label className="flex items-center gap-2 text-sm">
+                    <input
+                      type="checkbox"
+                      checked={form.autoPassword}
+                      onChange={(e) => setForm((p) => ({ ...p, autoPassword: e.target.checked }))}
+                      className="size-4 rounded border-input"
+                    />
+                    Auto-generate initial password
+                  </label>
+                  {form.autoPassword ? (
+                    <p className="text-xs text-muted-foreground">
+                      A strong password is generated on create and shown once so you can copy it.
+                    </p>
+                  ) : (
+                    <FieldInput
+                      label="Password"
+                      type="password"
+                      value={form.password}
+                      onChange={(password) => setForm((p) => ({ ...p, password }))}
+                    />
+                  )}
+                </div>
+              ) : null}
+            </div>
+
+            <div className="flex justify-end gap-2 border-t border-border px-5 py-4">
+              <Button variant="outline" disabled={saving} onClick={closeDrawer}>
+                Cancel
+              </Button>
+              <Button disabled={saving || !canSubmitDrawer} onClick={() => void submitDrawer()}>
+                {saving ? <LoaderCircle className="mr-2 size-4 animate-spin" /> : null}
+                {drawerMode === "create" ? "Create" : "Save"}
+              </Button>
+            </div>
+          </div>
+        </div>
+      ) : null}
+
+      {/* Reset-password drawer */}
+      {resetTarget ? (
+        <div className="fixed inset-0 z-50 grid place-items-center bg-background/80 px-4 backdrop-blur-sm">
+          <div className="w-full max-w-md rounded-lg border border-border bg-card p-5 shadow-xl">
+            <div className="text-base font-semibold">Reset password</div>
+            <p className="mt-1 text-sm text-muted-foreground">
+              {resetTarget.username || resetTarget.email}
+            </p>
+            <div className="mt-4 space-y-3">
+              <label className="flex items-center gap-2 text-sm">
+                <input
+                  type="checkbox"
+                  checked={resetAuto}
+                  onChange={(e) => setResetAuto(e.target.checked)}
+                  className="size-4 rounded border-input"
+                />
+                Auto-generate new password
+              </label>
+              {resetAuto ? (
+                <p className="text-xs text-muted-foreground">
+                  A strong password is generated and shown once so you can copy it.
+                </p>
+              ) : (
+                <FieldInput
+                  label="New password"
+                  type="password"
+                  value={resetPasswordValue}
+                  onChange={setResetPasswordValue}
+                />
+              )}
+            </div>
+            <div className="mt-5 flex justify-end gap-2">
+              <Button variant="outline" disabled={resetting} onClick={() => setResetTarget(null)}>
+                Cancel
+              </Button>
+              <Button disabled={resetting} onClick={() => void submitReset()}>
+                {resetting ? <LoaderCircle className="mr-2 size-4 animate-spin" /> : null}
+                Reset
+              </Button>
+            </div>
+          </div>
+        </div>
+      ) : null}
+
+      {/* One-time credential reveal */}
+      {credential ? (
+        <div className="fixed inset-0 z-[60] grid place-items-center bg-background/80 px-4 backdrop-blur-sm">
+          <div className="w-full max-w-md rounded-lg border border-border bg-card p-5 shadow-xl">
+            <div className="flex items-center gap-2 text-base font-semibold">
+              <CheckCircle2 className="size-5 text-emerald-500" />
+              Password ready
+            </div>
+            <p className="mt-2 text-sm text-muted-foreground">
+              Copy this password now — it will not be shown again.
+            </p>
+            <div className="mt-4 space-y-2">
+              <CredentialRow label="Email" value={credential.email} />
+              <CredentialRow label="Password" value={credential.password} mono />
+            </div>
+            <div className="mt-5 flex justify-end gap-2">
+              <Button
+                variant="outline"
+                onClick={() =>
+                  void copyText(`${credential.email} / ${credential.password}`)
+                }
+              >
+                <Copy className="mr-2 size-4" />
+                Copy both
+              </Button>
+              <Button onClick={() => setCredential(null)}>Done</Button>
+            </div>
+          </div>
+        </div>
+      ) : null}
+
+      {/* Delete confirm */}
       {deleteTarget ? (
         <div className="fixed inset-0 z-50 grid place-items-center bg-background/80 px-4 backdrop-blur-sm">
           <div className="w-full max-w-md rounded-lg border border-border bg-card p-5 shadow-xl">
@@ -447,7 +778,7 @@ function Metric({ label, value }: { label: string; value: string }) {
   );
 }
 
-function TextInput({
+function FieldInput({
   label,
   value,
   onChange,
@@ -468,6 +799,41 @@ function TextInput({
         className="h-10 rounded-md border border-input bg-background px-3 text-sm text-foreground outline-none focus:border-ring"
       />
     </label>
+  );
+}
+
+function CredentialRow({
+  label,
+  value,
+  mono = false,
+}: {
+  label: string;
+  value: string;
+  mono?: boolean;
+}) {
+  const [copied, setCopied] = useState(false);
+  return (
+    <div className="flex items-center gap-2 rounded-md border border-border bg-muted/30 px-3 py-2">
+      <div className="w-16 shrink-0 text-xs text-muted-foreground">{label}</div>
+      <div className={cn("min-w-0 flex-1 truncate text-sm", mono && "font-mono")}>{value}</div>
+      <Button
+        variant="ghost"
+        size="icon"
+        className="size-8"
+        aria-label={`Copy ${label}`}
+        onClick={async () => {
+          await copyText(value);
+          setCopied(true);
+          window.setTimeout(() => setCopied(false), 1500);
+        }}
+      >
+        {copied ? (
+          <CheckCircle2 className="size-4 text-emerald-500" />
+        ) : (
+          <Copy className="size-4" />
+        )}
+      </Button>
+    </div>
   );
 }
 
@@ -515,6 +881,33 @@ function formatTime(value?: string) {
   }).format(new Date(ts));
 }
 
+// Generate a strong, human-copyable password. Uses the Web Crypto API so the
+// value is unpredictable; avoids ambiguous characters (0/O, 1/l/I).
+function generatePassword(length = 16): string {
+  const charset = "ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz23456789!@#$%^&*";
+  const n = charset.length;
+  const out: string[] = [];
+  const cryptoObj = globalThis.crypto;
+  if (cryptoObj?.getRandomValues) {
+    const buf = new Uint32Array(length);
+    cryptoObj.getRandomValues(buf);
+    for (let i = 0; i < length; i++) out.push(charset.charAt((buf[i] ?? 0) % n));
+  } else {
+    for (let i = 0; i < length; i++) {
+      out.push(charset.charAt(Math.floor(Math.random() * n)));
+    }
+  }
+  return out.join("");
+}
+
+async function copyText(text: string) {
+  try {
+    await navigator.clipboard.writeText(text);
+  } catch {
+    // Clipboard may be unavailable (insecure context); silently ignore.
+  }
+}
+
 async function responseError(res: Response) {
   try {
     const body = (await res.json()) as { error?: string | { code?: string; message?: string } };
@@ -547,18 +940,4 @@ function isProtectedAdmin(user: AuthUser) {
 
 function isCurrentUser(user: AuthUser, currentUserEmail: string) {
   return currentUserEmail.trim().toLowerCase() === user.email.trim().toLowerCase();
-}
-
-function permissionLockTitle({
-  selfUser,
-  locked,
-  fallback,
-}: {
-  selfUser: boolean;
-  locked: boolean;
-  fallback: string;
-}) {
-  if (!locked) return undefined;
-  if (selfUser) return "You cannot change your own permissions";
-  return fallback;
 }
