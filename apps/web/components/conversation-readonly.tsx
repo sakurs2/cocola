@@ -3,18 +3,19 @@
 import {
   AlertTriangle,
   Bot,
-  BrainCircuit,
   Check,
-  ChevronRight,
   CopyIcon,
-  Download,
-  FileText,
   Loader2,
   RefreshCw,
-  Wrench,
 } from "lucide-react";
 import { useCallback, useEffect, useRef, useState } from "react";
-import { CodeBlock, MarkdownContent } from "@/components/assistant-ui/markdown-text";
+import { MarkdownContent } from "@/components/assistant-ui/markdown-text";
+import {
+  RailFile,
+  RailReasoning,
+  RailText,
+  RailTool,
+} from "@/components/assistant-ui/rail";
 import { ModelIcon } from "@/components/assistant-ui/thread";
 import { cn } from "@/lib/utils";
 import { type ModelIconConfig } from "@/app/runtime-provider";
@@ -191,7 +192,7 @@ function MessageBubble({ message }: { message: WireMessage }) {
     <article className="relative grid w-full max-w-[var(--thread-max-width)] grid-cols-[auto_1fr] grid-rows-[auto_1fr] py-3">
       <div className="col-span-2 col-start-1 row-start-1 my-1.5 max-w-full break-words leading-7 text-foreground">
         <AssistantHeader message={message} />
-        <div className="space-y-3">
+        <div>
           {parts.length > 0 ? (
             parts.map((part, index) => (
               <MessagePartView key={`${message.id}-${index}`} part={part} role={message.role} />
@@ -223,154 +224,42 @@ function AssistantHeader({ message }: { message: WireMessage }) {
 
 function MessagePartView({ part, role }: { part: MessagePart; role: "user" | "assistant" }) {
   if (part.type === "text") {
+    // User text stays inside the bubble as plain text; assistant text renders as
+    // a rail "回答" node with markdown, identical to the live thread.
     if (role === "user") {
       return <span>{part.text ?? ""}</span>;
     }
-    return <MarkdownContent value={part.text ?? ""} />;
-  }
-  if (part.type === "reasoning") {
     return (
-      <details className="aui-details group my-3 overflow-hidden rounded-lg border border-border bg-muted/30 text-sm">
-        <summary className="flex cursor-pointer select-none items-center gap-2 px-3 py-2 text-muted-foreground [&::-webkit-details-marker]:hidden">
-          <ChevronRight className="size-3.5 shrink-0 transition-transform group-open:rotate-90" />
-          <BrainCircuit className="size-3.5" />
-          <span className="font-medium text-foreground">Reasoning</span>
-          <span className="ml-auto rounded-full border border-border bg-background px-2 py-0.5 text-[11px] leading-4">
-            Done
-          </span>
-        </summary>
-        <div className="aui-details-body border-t border-border px-3 py-2.5 text-sm leading-6 text-muted-foreground">
-          {part.text ?? ""}
-        </div>
-      </details>
+      <RailText>
+        <MarkdownContent value={part.text ?? ""} />
+      </RailText>
     );
   }
+  if (part.type === "reasoning") {
+    return <RailReasoning text={part.text ?? ""} />;
+  }
   if (part.type === "tool-call") {
-    return <ToolCallPart part={part} />;
+    return (
+      <RailTool
+        toolName={part.toolName || "tool"}
+        argsText={part.argsText}
+        result={part.result}
+        isError={part.isError}
+      />
+    );
   }
   if (part.type === "file") {
-    return <FilePartView part={part} />;
+    // Read-only page has no Artifact side panel, so omit onPreview → download only.
+    return (
+      <RailFile
+        filename={part.filename || "file"}
+        mimeType={part.mimeType || part.mime || "application/octet-stream"}
+        size={part.size ?? 0}
+        downloadUrl={part.downloadUrl || part.download_url || ""}
+      />
+    );
   }
   return null;
-}
-
-function ToolCallPart({ part }: { part: ToolPart }) {
-  const hasResult = part.result !== undefined;
-
-  return (
-    <details
-      open={part.isError}
-      className={cn(
-        "aui-details group my-3 overflow-hidden rounded-lg border bg-muted/30 text-sm",
-        part.isError ? "border-destructive/50" : "border-border",
-      )}
-    >
-      <summary className="flex cursor-pointer select-none items-center gap-2 px-3 py-2 text-muted-foreground [&::-webkit-details-marker]:hidden">
-        <ChevronRight className="size-3.5 shrink-0 transition-transform group-open:rotate-90" />
-        <span className="flex size-6 shrink-0 items-center justify-center rounded-md border border-border bg-background">
-          <Wrench className="size-3.5" />
-        </span>
-        <span className="min-w-0 truncate font-mono text-xs text-foreground">
-          {part.toolName || "tool"}
-        </span>
-        <span
-          className={cn(
-            "ml-auto rounded-full border px-2 py-0.5 text-[11px] leading-4",
-            part.isError
-              ? "border-destructive/40 bg-destructive/10 text-destructive"
-              : "border-border bg-background text-muted-foreground",
-          )}
-        >
-          {part.isError ? "Error" : hasResult ? "Done" : "No output"}
-        </span>
-      </summary>
-      <div className="aui-details-body grid gap-2 border-t border-border p-3">
-        {part.argsText ? (
-          <ToolPayload label="Arguments" tone="muted" value={formatPayload(part.argsText)} />
-        ) : null}
-        {part.result !== undefined ? (
-          <ToolPayload
-            label={part.isError ? "Error" : "Result"}
-            tone={part.isError ? "error" : "muted"}
-            value={formatPayload(part.result)}
-          />
-        ) : null}
-        {!part.argsText && part.result === undefined ? (
-          <p className="text-xs text-muted-foreground">Waiting for output...</p>
-        ) : null}
-      </div>
-    </details>
-  );
-}
-
-function ToolPayload({
-  label,
-  value,
-  tone,
-}: {
-  label: string;
-  value: string;
-  tone: "muted" | "error";
-}) {
-  return (
-    <section className="overflow-hidden rounded-md border border-border bg-background/70">
-      <div className="border-b border-border px-2.5 py-1.5 font-mono text-[11px] uppercase text-muted-foreground">
-        {label}
-      </div>
-      <pre
-        className={cn(
-          "max-h-72 overflow-auto whitespace-pre-wrap break-words p-2.5 font-mono text-xs leading-5",
-          tone === "error" ? "text-destructive" : "text-muted-foreground",
-        )}
-      >
-        {value}
-      </pre>
-    </section>
-  );
-}
-
-function FilePartView({ part }: { part: FilePart }) {
-  const filename = part.filename || "file";
-  const mimeType = part.mimeType || part.mime || "application/octet-stream";
-  const downloadUrl = part.downloadUrl || part.download_url || "";
-  const canPreviewImage = mimeType.startsWith("image/") && downloadUrl;
-
-  return (
-    <div className="my-3 overflow-hidden rounded-lg border border-border bg-muted/30 text-sm">
-      {canPreviewImage ? (
-        <div className="border-b border-border bg-background/40 p-2">
-          {/* eslint-disable-next-line @next/next/no-img-element */}
-          <img
-            src={downloadUrl}
-            alt={filename}
-            className="max-h-80 w-full rounded object-contain"
-          />
-        </div>
-      ) : null}
-      <div className="flex items-center gap-3 p-3">
-        <span className="flex size-9 shrink-0 items-center justify-center rounded-md border border-border bg-background text-muted-foreground">
-          <FileText className="size-4" />
-        </span>
-        <div className="min-w-0 flex-1">
-          <div className="truncate font-medium text-foreground">{filename}</div>
-          <div className="mt-0.5 truncate text-xs text-muted-foreground">
-            {formatBytes(part.size ?? 0)} · {mimeType}
-          </div>
-        </div>
-        {downloadUrl ? (
-          <a
-            href={downloadUrl}
-            download={filename}
-            title="Download"
-            aria-label="Download"
-            className="inline-flex size-8 shrink-0 items-center justify-center rounded-full text-muted-foreground transition-colors hover:bg-accent hover:text-accent-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
-          >
-            <Download className="size-4" />
-          </a>
-        ) : null}
-      </div>
-    </div>
-  );
 }
 
 function CopyMessageButton({ message }: { message: WireMessage }) {
@@ -447,18 +336,6 @@ function formatPayload(value: unknown): string {
   } catch {
     return String(value);
   }
-}
-
-function formatBytes(bytes: number): string {
-  if (!bytes) return "Unknown size";
-  const units = ["B", "KB", "MB", "GB"];
-  let value = bytes;
-  let unit = 0;
-  while (value >= 1024 && unit < units.length - 1) {
-    value /= 1024;
-    unit += 1;
-  }
-  return `${value >= 10 || unit === 0 ? value.toFixed(0) : value.toFixed(1)} ${units[unit]}`;
 }
 
 function formatDate(value: string) {
