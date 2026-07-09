@@ -7,6 +7,7 @@ import {
   CheckCircle,
   DotsThree,
   Folder,
+  Gear,
   Hash,
   MagnifyingGlass,
   Notebook,
@@ -17,14 +18,13 @@ import {
   PlusCircle,
   ShieldCheck,
   SidebarSimple,
-  SignOut,
   Sparkle,
   SpinnerGap,
   SquaresFour,
   Trash,
   type Icon as PhosphorIcon,
 } from "@phosphor-icons/react";
-import { signOut, useSession } from "next-auth/react";
+import { useSession } from "next-auth/react";
 import { motion } from "framer-motion";
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
@@ -276,9 +276,6 @@ export function AppSidebar() {
                   {userInitial}
                 </span>
               </SidebarRailButton>
-              <SidebarRailButton title="Sign out" onClick={() => revealSection("account")}>
-                <SignOut className="size-4 text-sidebar-accent-foreground" weight="duotone" />
-              </SidebarRailButton>
             </div>
           </>
         ) : (
@@ -399,34 +396,27 @@ export function AppSidebar() {
                 expandedSection === "account" && "bg-white/22",
               )}
             >
-              <div className="flex items-center gap-2">
-                <Link
-                  href="/profile"
-                  title="Profile"
-                  className="flex min-w-0 flex-1 items-center gap-2 rounded-2xl px-2 py-1.5 text-sidebar-foreground/90 transition-colors hover:bg-white/38 hover:text-sidebar-accent-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/45"
-                >
-                  <div className="grid size-8 shrink-0 place-items-center rounded-full bg-primary text-[11px] font-medium text-primary-foreground">
-                    {userInitial}
-                  </div>
-                  <div className="min-w-0 flex-1">
-                    <div className="truncate text-sm">{userLabel}</div>
-                    {userSubtitle && (
-                      <div className="truncate text-[11px] text-sidebar-foreground/55">
-                        {userSubtitle}
-                      </div>
-                    )}
-                  </div>
-                </Link>
-                <button
-                  type="button"
-                  title="Sign out"
-                  aria-label="Sign out"
-                  onClick={() => void signOut({ callbackUrl: "/login" })}
-                  className="grid size-8 shrink-0 place-items-center rounded-xl text-sidebar-foreground/60 transition-colors hover:bg-white/38 hover:text-sidebar-accent-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/45"
-                >
-                  <SignOut className="size-4 text-sidebar-accent-foreground" weight="duotone" />
-                </button>
-              </div>
+              <Link
+                href="/profile"
+                title="Profile"
+                className="group flex min-w-0 items-center gap-2 rounded-2xl px-2 py-1.5 text-sidebar-foreground/90 transition-colors hover:bg-white/38 hover:text-sidebar-accent-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/45"
+              >
+                <div className="grid size-8 shrink-0 place-items-center rounded-full bg-primary text-[11px] font-medium text-primary-foreground">
+                  {userInitial}
+                </div>
+                <div className="min-w-0 flex-1">
+                  <div className="truncate text-sm">{userLabel}</div>
+                  {userSubtitle && (
+                    <div className="truncate text-[11px] text-sidebar-foreground/55">
+                      {userSubtitle}
+                    </div>
+                  )}
+                </div>
+                <Gear
+                  className="size-4 shrink-0 text-sidebar-foreground/45 transition-colors group-hover:text-sidebar-accent-foreground"
+                  weight="duotone"
+                />
+              </Link>
             </div>
           </>
         )}
