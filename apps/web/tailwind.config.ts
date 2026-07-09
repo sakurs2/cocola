@@ -1,5 +1,6 @@
 import type { Config } from "tailwindcss";
 import animate from "tailwindcss-animate";
+import defaultTheme from "tailwindcss/defaultTheme";
 
 // Tailwind v3 config wired to the shadcn CSS variables defined in
 // app/globals.css. The assistant-ui components reference these semantic color
@@ -10,6 +11,24 @@ const config: Config = {
   content: ["./app/**/*.{ts,tsx}", "./components/**/*.{ts,tsx}", "./lib/**/*.{ts,tsx}"],
   theme: {
     extend: {
+      fontFamily: {
+        // Geist is the primary UI + code family, injected as the
+        // --font-geist-* CSS variables by next/font/local in app/layout.tsx
+        // (self-hosted, no external CDN). We keep Tailwind's default system
+        // stack as fallback and add CJK faces so Chinese content renders with
+        // a native, high-quality face instead of a serif fallback.
+        sans: [
+          "var(--font-geist-sans)",
+          "PingFang SC",
+          "Microsoft YaHei",
+          "Noto Sans SC",
+          ...defaultTheme.fontFamily.sans,
+        ],
+        mono: [
+          "var(--font-geist-mono)",
+          ...defaultTheme.fontFamily.mono,
+        ],
+      },
       colors: {
         border: "hsl(var(--border))",
         input: "hsl(var(--input))",
