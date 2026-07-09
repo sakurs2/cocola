@@ -644,19 +644,27 @@ const ToolFallback: FC<ToolCallMessagePartProps> = ({
   />
 );
 
-const AssistantActionBar: FC = () => (
-  // Copy control stays resident: autohide="never" so the action bar is always
-  // visible under every assistant turn, not just on hover. hideWhenRunning is
-  // kept so it does not flash mid-stream, appearing once the turn settles.
-  <ActionBarPrimitive.Root
-    hideWhenRunning
-    autohide="never"
-    className="col-start-1 row-start-2 ml-1 flex gap-1 text-muted-foreground"
-  >
-    <ActionBarPrimitive.Copy asChild>
-      <TooltipIconButton tooltip="Copy">
-        <CopyIcon className="h-4 w-4" />
-      </TooltipIconButton>
-    </ActionBarPrimitive.Copy>
-  </ActionBarPrimitive.Root>
-);
+const AssistantActionBar: FC = () => {
+  // Copy control stays resident: autohide="never" so every completed assistant
+  // turn keeps its copy button, not just on hover.
+  //
+  // We deliberately do NOT use the library's `hideWhenRunning`: it keys off the
+  // THREAD-level isRunning, so a new turn streaming would hide the copy button
+  // on EVERY prior assistant message. Instead we hide the bar only for the one
+  // message that is actively streaming (the last one while the thread runs).
+  const isLast = useMessage((m) => m.isLast);
+  const isRunning = useThread((t) => t.isRunning);
+  if (isLast && isRunning) return null;
+  return (
+    <ActionBarPrimitive.Root
+      autohide="never"
+      className="col-start-1 row-start-2 ml-1 flex gap-1 text-muted-foreground"
+    >
+      <ActionBarPrimitive.Copy asChild>
+        <TooltipIconButton tooltip="Copy">
+          <CopyIcon className="h-4 w-4" />
+        </TooltipIconButton>
+      </ActionBarPrimitive.Copy>
+    </ActionBarPrimitive.Root>
+  );
+};

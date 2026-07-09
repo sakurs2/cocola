@@ -2,27 +2,28 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import {
-  CalendarClock,
-  CheckCircle2,
-  FolderClosed,
+  CalendarDots,
+  ChatsCircle,
+  CheckCircle,
+  DotsThree,
+  Folder,
   Hash,
-  LoaderCircle,
-  LogOut,
-  MoreHorizontal,
-  MessagesSquare,
-  NotebookPen,
-  PanelLeft,
+  MagnifyingGlass,
+  Notebook,
   Pause,
-  Pencil,
-  PlugZap,
+  PencilSimple,
   Play,
-  Plus,
-  Search,
+  PlugsConnected,
+  PlusCircle,
   ShieldCheck,
-  Sparkles,
-  LayoutGrid,
-  Trash2,
-} from "lucide-react";
+  SidebarSimple,
+  SignOut,
+  Sparkle,
+  SpinnerGap,
+  SquaresFour,
+  Trash,
+  type Icon as PhosphorIcon,
+} from "@phosphor-icons/react";
 import { signOut, useSession } from "next-auth/react";
 import { motion } from "framer-motion";
 import Link from "next/link";
@@ -35,7 +36,7 @@ import { useCocola } from "@/app/runtime-provider";
 // (conversation persistence, route A); secondary areas remain lightweight
 // product shells until their backing features land.
 
-type NavItem = { icon: typeof Plus; label: string; href?: string };
+type NavItem = { icon: PhosphorIcon; label: string; href?: string };
 type SidebarSection = "actions" | "navigation" | "channels" | "folders" | "chats" | "account";
 
 type PrimaryNavItem = NavItem & {
@@ -45,11 +46,11 @@ type PrimaryNavItem = NavItem & {
 // "New Chat" is wired to the runtime (rotates session_id + clears messages);
 // the rest stay decorative until multi-thread persistence lands.
 const PRIMARY_NAV: PrimaryNavItem[] = [
-  { icon: Search, label: "Search", section: "navigation" },
-  { icon: NotebookPen, label: "Notes", section: "navigation" },
-  { icon: LayoutGrid, label: "Workspace", href: "/", section: "navigation" },
-  { icon: Sparkles, label: "Skills", href: "/skills", section: "navigation" },
-  { icon: PlugZap, label: "MCP", href: "/mcps", section: "navigation" },
+  { icon: MagnifyingGlass, label: "Search", section: "navigation" },
+  { icon: Notebook, label: "Notes", section: "navigation" },
+  { icon: SquaresFour, label: "Workspace", href: "/", section: "navigation" },
+  { icon: Sparkle, label: "Skills", href: "/skills", section: "navigation" },
+  { icon: PlugsConnected, label: "MCP", href: "/mcps", section: "navigation" },
   { icon: ShieldCheck, label: "Admin", href: "/admin", section: "navigation" },
 ];
 
@@ -221,7 +222,7 @@ export function AppSidebar() {
                 title="Collapse sidebar"
                 className="flex size-8 shrink-0 items-center justify-center rounded-xl text-sidebar-foreground/70 transition-colors hover:bg-white/38 hover:text-sidebar-accent-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/45"
               >
-                <PanelLeft className="size-4" />
+                <SidebarSimple className="size-4 text-sidebar-accent-foreground" weight="duotone" />
               </button>
             </>
           )}
@@ -231,10 +232,10 @@ export function AppSidebar() {
           <>
             <nav className="flex flex-1 flex-col items-center gap-2 px-2 pb-2">
               <SidebarRailButton title="New Chat" onClick={() => revealSection("actions")}>
-                <Plus className="size-4" />
+                <PlusCircle className="size-4 text-sidebar-accent-foreground" weight="duotone" />
               </SidebarRailButton>
               <SidebarRailButton title="Schedule" onClick={() => revealSection("actions")}>
-                <CalendarClock className="size-4" />
+                <CalendarDots className="size-4 text-sidebar-accent-foreground" weight="duotone" />
               </SidebarRailButton>
               <div className="my-1 h-px w-8 bg-white/36" />
               {visiblePrimaryNav.map(({ icon: Icon, label, href, section }) => {
@@ -250,23 +251,23 @@ export function AppSidebar() {
                     active={active}
                     onClick={() => revealSection(section)}
                   >
-                    <Icon className="size-4" />
+                    <Icon className="size-4 text-sidebar-accent-foreground" weight="duotone" />
                   </SidebarRailButton>
                 );
               })}
               <div className="my-1 h-px w-8 bg-white/36" />
               <SidebarRailButton title="Channels" onClick={() => revealSection("channels")}>
-                <Hash className="size-4" />
+                <Hash className="size-4 text-sidebar-accent-foreground" weight="duotone" />
               </SidebarRailButton>
               <SidebarRailButton title="Folders" onClick={() => revealSection("folders")}>
-                <FolderClosed className="size-4" />
+                <Folder className="size-4 text-sidebar-accent-foreground" weight="duotone" />
               </SidebarRailButton>
               <SidebarRailButton
                 title="Chats"
                 active={conversations.some((c) => c.id === activeSessionId)}
                 onClick={() => revealSection("chats")}
               >
-                <MessagesSquare className="size-4" />
+                <ChatsCircle className="size-4 text-sidebar-accent-foreground" weight="duotone" />
               </SidebarRailButton>
             </nav>
             <div className="flex flex-col items-center gap-2 px-2 pb-3">
@@ -276,7 +277,7 @@ export function AppSidebar() {
                 </span>
               </SidebarRailButton>
               <SidebarRailButton title="Sign out" onClick={() => revealSection("account")}>
-                <LogOut className="size-4" />
+                <SignOut className="size-4 text-sidebar-accent-foreground" weight="duotone" />
               </SidebarRailButton>
             </div>
           </>
@@ -288,11 +289,11 @@ export function AppSidebar() {
                 active={expandedSection === "actions"}
               >
                 <SidebarExpandedRow title="New Chat" onClick={openNewChat}>
-                  <Plus className="size-4 shrink-0" />
+                  <PlusCircle className="size-4 shrink-0 text-sidebar-accent-foreground" weight="duotone" />
                   <span className="truncate">New Chat</span>
                 </SidebarExpandedRow>
                 <SidebarExpandedRow title="Schedule" onClick={() => setScheduleOpen(true)}>
-                  <CalendarClock className="size-4 shrink-0" />
+                  <CalendarDots className="size-4 shrink-0 text-sidebar-accent-foreground" weight="duotone" />
                   <span className="truncate">Schedule</span>
                 </SidebarExpandedRow>
               </SidebarSectionPanel>
@@ -314,7 +315,7 @@ export function AppSidebar() {
                       active={active}
                       onClick={href ? () => navigateTo(href) : undefined}
                     >
-                      <Icon className="size-4 shrink-0" />
+                      <Icon className="size-4 shrink-0 text-sidebar-accent-foreground" weight="duotone" />
                       <span className="truncate">{label}</span>
                     </SidebarExpandedRow>
                   );
@@ -329,7 +330,7 @@ export function AppSidebar() {
                 <div className="flex flex-col gap-0.5">
                   {CHANNELS.map(({ icon: Icon, label }) => (
                     <SidebarExpandedRow key={label} title={label}>
-                      <Icon className="size-4 shrink-0" />
+                      <Icon className="size-4 shrink-0 text-sidebar-accent-foreground" weight="duotone" />
                       <span className="truncate">{label}</span>
                     </SidebarExpandedRow>
                   ))}
@@ -423,7 +424,7 @@ export function AppSidebar() {
                   onClick={() => void signOut({ callbackUrl: "/login" })}
                   className="grid size-8 shrink-0 place-items-center rounded-xl text-sidebar-foreground/60 transition-colors hover:bg-white/38 hover:text-sidebar-accent-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/45"
                 >
-                  <LogOut className="size-4" />
+                  <SignOut className="size-4 text-sidebar-accent-foreground" weight="duotone" />
                 </button>
               </div>
             </div>
@@ -580,7 +581,7 @@ function ChatHistoryItem({
     >
       {editing ? (
         <>
-          <FolderClosed className="size-4 shrink-0 opacity-0" />
+          <Folder className="size-4 shrink-0 opacity-0" weight="duotone" />
           <input
             autoFocus
             value={draftTitle}
@@ -611,15 +612,17 @@ function ChatHistoryItem({
       )}
 
       {running ? (
-        <LoaderCircle
+        <SpinnerGap
           className="size-3.5 shrink-0 animate-spin text-sidebar-foreground/55"
+          weight="duotone"
           aria-label="Agent is answering"
         />
       ) : !editing ? (
         <div className="relative size-6 shrink-0">
           {unread && !menuOpen && (
-            <CheckCircle2
+            <CheckCircle
               className="absolute inset-0 m-auto size-3.5 text-emerald-500 transition-opacity group-hover:opacity-0"
+              weight="duotone"
               aria-label="Answer completed"
             />
           )}
@@ -637,7 +640,7 @@ function ChatHistoryItem({
               onToggleMenu();
             }}
           >
-            <MoreHorizontal className="size-4" />
+            <DotsThree className="size-4" weight="duotone" />
           </button>
         </div>
       ) : null}
@@ -654,7 +657,7 @@ function ChatHistoryItem({
             className="flex w-full items-center gap-2 rounded px-2 py-1.5 text-left text-sm hover:bg-sidebar-accent"
             onClick={onRename}
           >
-            <Pencil className="size-3.5" />
+            <PencilSimple className="size-3.5" weight="duotone" />
             Rename
           </button>
           <button
@@ -663,7 +666,7 @@ function ChatHistoryItem({
             className="flex w-full items-center gap-2 rounded px-2 py-1.5 text-left text-sm text-red-500 hover:bg-red-500/10"
             onClick={onDelete}
           >
-            <Trash2 className="size-3.5" />
+            <Trash className="size-3.5" weight="duotone" />
             Delete
           </button>
         </div>
@@ -674,9 +677,9 @@ function ChatHistoryItem({
 
 function ChatTypeIcon({ type }: { type: string }) {
   if (type === "scheduled_task") {
-    return <CalendarClock className="size-4 shrink-0 text-sidebar-foreground/55" />;
+    return <CalendarDots className="size-4 shrink-0 text-sidebar-accent-foreground" weight="duotone" />;
   }
-  return <MessagesSquare className="size-4 shrink-0 text-sidebar-foreground/45" />;
+  return <ChatsCircle className="size-4 shrink-0 text-sidebar-accent-foreground" weight="duotone" />;
 }
 
 function DeleteConversationDialog({
@@ -702,7 +705,7 @@ function DeleteConversationDialog({
       >
         <div className="flex items-start gap-3">
           <div className="grid size-9 shrink-0 place-items-center rounded-md bg-red-500/10 text-red-500">
-            <Trash2 className="size-4" />
+            <Trash className="size-4" weight="duotone" />
           </div>
           <div className="min-w-0 flex-1">
             <h2 id="delete-conversation-title" className="text-sm font-semibold">
@@ -961,7 +964,7 @@ function ScheduleTaskDialog({
       >
         <header className="flex items-center gap-3 border-b border-border p-4">
           <div className="grid size-9 shrink-0 place-items-center rounded-md bg-primary/10 text-primary">
-            <CalendarClock className="size-4" />
+            <CalendarDots className="size-4" weight="duotone" />
           </div>
           <h2 id="schedule-task-title" className="min-w-0 flex-1 truncate text-sm font-semibold">
             Scheduled Tasks
@@ -1128,7 +1131,7 @@ function ScheduleTaskDialog({
                 {tasks.map((task) => (
                   <div key={task.id} className="rounded-md border border-border bg-muted/20 p-3">
                     <div className="flex items-start gap-2">
-                      <CalendarClock className="mt-0.5 size-4 shrink-0 text-muted-foreground" />
+                      <CalendarDots className="mt-0.5 size-4 shrink-0 text-muted-foreground" weight="duotone" />
                       <div className="min-w-0 flex-1">
                         <div className="truncate text-sm font-medium">{task.name}</div>
                         <div className="mt-0.5 text-xs text-muted-foreground">
@@ -1151,7 +1154,7 @@ function ScheduleTaskDialog({
                         onClick={() => editTask(task)}
                         className="grid size-8 place-items-center rounded-md text-muted-foreground hover:bg-muted hover:text-foreground"
                       >
-                        <Pencil className="size-4" />
+                        <PencilSimple className="size-4" weight="duotone" />
                       </button>
                       <button
                         type="button"
@@ -1162,9 +1165,9 @@ function ScheduleTaskDialog({
                         className="grid size-8 place-items-center rounded-md text-muted-foreground hover:bg-muted hover:text-foreground"
                       >
                         {task.status === "active" ? (
-                          <Pause className="size-4" />
+                          <Pause className="size-4" weight="duotone" />
                         ) : (
-                          <Play className="size-4" />
+                          <Play className="size-4" weight="duotone" />
                         )}
                       </button>
                       <button
@@ -1182,7 +1185,7 @@ function ScheduleTaskDialog({
                         }
                         className="grid size-8 place-items-center rounded-md text-red-500 hover:bg-red-500/10"
                       >
-                        <Trash2 className="size-4" />
+                        <Trash className="size-4" weight="duotone" />
                       </button>
                     </div>
                   </div>
@@ -1226,7 +1229,7 @@ function ScheduleTaskPrompt({
               isDanger ? "bg-red-500/10 text-red-500" : "bg-primary/10 text-primary"
             }`}
           >
-            {isDanger ? <Trash2 className="size-4" /> : <CalendarClock className="size-4" />}
+            {isDanger ? <Trash className="size-4" weight="duotone" /> : <CalendarDots className="size-4" weight="duotone" />}
           </div>
           <div className="min-w-0 flex-1">
             <div className="text-sm font-semibold">{prompt.title}</div>
