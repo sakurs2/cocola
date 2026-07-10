@@ -125,7 +125,7 @@ export function AdminShell({ children }: { children: ReactNode }) {
                 </Dialog.Trigger>
                 <Dialog.Portal>
                   <Dialog.Overlay className="fixed inset-0 z-50 bg-slate-950/20 backdrop-blur-sm data-[state=closed]:animate-out data-[state=open]:animate-in data-[state=closed]:fade-out data-[state=open]:fade-in" />
-                  <Dialog.Content className="admin-mobile-nav fixed inset-y-2 left-2 z-50 flex w-[min(19rem,calc(100vw-1rem))] flex-col overflow-hidden rounded-3xl border outline-none data-[state=closed]:animate-out data-[state=open]:animate-in data-[state=closed]:slide-out-to-left data-[state=open]:slide-in-from-left">
+                  <Dialog.Content className="cocola-admin-ui admin-mobile-nav fixed inset-y-2 left-2 z-50 flex w-[min(19rem,calc(100vw-1rem))] flex-col overflow-hidden rounded-3xl border text-foreground outline-none data-[state=closed]:animate-out data-[state=open]:animate-in data-[state=closed]:slide-out-to-left data-[state=open]:slide-in-from-left">
                     <Dialog.Title className="sr-only">Admin navigation</Dialog.Title>
                     <Dialog.Description className="sr-only">
                       Navigate between control plane pages.

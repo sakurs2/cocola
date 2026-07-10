@@ -710,7 +710,9 @@
   }
 
   .cocola-admin-ui .admin-mobile-nav,
-  .cocola-admin-ui .admin-drawer {
+  .cocola-admin-ui.admin-mobile-nav,
+  .cocola-admin-ui .admin-drawer,
+  .cocola-admin-ui.admin-drawer {
     border-color: hsl(0 0% 100% / 0.78);
     background:
       linear-gradient(180deg, hsl(0 0% 100% / 0.92), hsl(207 70% 98% / 0.84)),

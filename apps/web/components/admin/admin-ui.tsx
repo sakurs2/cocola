@@ -271,7 +271,7 @@ export function AdminDrawer({
         <Dialog.Overlay className="fixed inset-0 z-50 bg-slate-950/20 backdrop-blur-sm data-[state=closed]:animate-out data-[state=open]:animate-in data-[state=closed]:fade-out data-[state=open]:fade-in" />
         <Dialog.Content
           className={cn(
-            "admin-drawer fixed inset-y-2 right-2 z-50 flex flex-col overflow-hidden rounded-3xl border outline-none data-[state=closed]:animate-out data-[state=open]:animate-in data-[state=closed]:slide-out-to-right data-[state=open]:slide-in-from-right",
+            "cocola-admin-ui admin-drawer fixed inset-y-2 right-2 z-50 flex flex-col overflow-hidden rounded-3xl border text-foreground outline-none data-[state=closed]:animate-out data-[state=open]:animate-in data-[state=closed]:slide-out-to-right data-[state=open]:slide-in-from-right",
             size === "lg" ? "w-[min(42rem,calc(100vw-1rem))]" : "w-[min(30rem,calc(100vw-1rem))]",
           )}
         >
