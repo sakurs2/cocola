@@ -611,10 +611,10 @@ function ChatHistoryItem({
           aria-label="Agent is answering"
         />
       ) : !editing ? (
-        <div className="relative size-6 shrink-0">
+        <div className="relative size-3.5 shrink-0">
           {unread && !menuOpen && (
             <CheckCircle
-              className="absolute inset-0 m-auto size-3.5 text-emerald-500 transition-opacity group-hover:opacity-0"
+              className="absolute inset-0 size-3.5 text-emerald-500 transition-opacity group-hover:opacity-0"
               weight="duotone"
               aria-label="Answer completed"
             />
@@ -622,7 +622,7 @@ function ChatHistoryItem({
           <button
             type="button"
             className={cn(
-              "absolute inset-0 grid place-items-center rounded-md text-sidebar-foreground/60 opacity-0 transition hover:text-sidebar-foreground group-hover:opacity-100",
+              "absolute left-1/2 top-1/2 grid size-6 -translate-x-1/2 -translate-y-1/2 place-items-center rounded-md text-sidebar-foreground/60 opacity-0 transition hover:text-sidebar-foreground group-hover:opacity-100",
               menuOpen && "opacity-100",
             )}
             aria-label={`Conversation actions for ${title}`}
