@@ -33,16 +33,17 @@ deploy/sandbox-runtime/
 
 ## Egress firewall (ADR-0009 hardening)
 
-The sandbox runs untrusted user/agent code, so its outbound network is
-locked down to a **default-deny + allowlist** posture (the same iptables+ipset
-shape as Anthropic's Claude Code devcontainer `init-firewall.sh`):
+The sandbox can optionally lock outbound network access down to a
+**default-deny + allowlist** posture (the same iptables+ipset shape as
+Anthropic's Claude Code devcontainer `init-firewall.sh`). Public access is open
+by default; setting `COCOLA_SANDBOX_EGRESS_ALLOWLIST` opts into this policy:
 
 - The container's **main process runs as root** so `firewall-entrypoint.sh` can
   install the rules (needs `NET_ADMIN`) _before_ any `exec` lands. User/agent
   code never runs as that main process -- it arrives via `docker exec` /
   `kubectl exec`, which sandbox-manager pins to the non-root `cocola` user
   (uid 10001) without `NET_ADMIN`, so it cannot alter the rules.
-- **Baseline (always allowed):** loopback, established/related, DNS, plus the
+- **Restricted-mode baseline:** loopback, established/related, DNS, plus the
   llm-gateway host (Route A's lifeline; folded in by the orchestrator from
   `COCOLA_SANDBOX_LLM_BASE_URL`).
 - **Allowlist:** `COCOLA_EGRESS_ALLOWLIST` (comma/space-separated domains/CIDRs)

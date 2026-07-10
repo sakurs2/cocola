@@ -10,17 +10,15 @@ import (
 
 // NetworkingFromEnv builds the sandbox egress policy from environment config.
 //
-// COCOLA_SANDBOX_EGRESS_ALLOWLIST is a comma-separated list of domains/CIDRs the
-// sandbox may reach *in addition* to the always-on baseline (DNS + llm-gateway),
-// which each provider enforces unconditionally. The llm-gateway host is parsed
-// from COCOLA_SANDBOX_LLM_BASE_URL and folded into the allowlist so operators
-// need not repeat it.
+// COCOLA_SANDBOX_EGRESS_ALLOWLIST is a comma-separated list of domains/CIDRs.
+// Leaving it empty does not configure an egress policy, so the provider keeps
+// its default public-network access. When operators opt into an allowlist, the
+// llm-gateway host is parsed from COCOLA_SANDBOX_LLM_BASE_URL and folded into
+// the list so the restricted sandbox can still reach the model gateway.
 //
 // Returned value semantics (see provider.Networking and ADR-0009):
-//   - non-empty allowlist -> baseline + the listed targets; everything else denied.
-//   - nil/empty allowlist  -> nothing configured; providers fall back to their
-//     own default (Docker: legacy wide-open; K8s: deny-all). The secure default
-//     posture is tightened in the provider layer (S2/S3), not here.
+//   - non-empty allowlist -> gateway + the listed targets; everything else denied.
+//   - nil allowlist       -> no egress policy; public network access stays open.
 func NetworkingFromEnv() provider.Networking {
 	var allow []string
 	seen := map[string]bool{}
@@ -34,6 +32,9 @@ func NetworkingFromEnv() provider.Networking {
 	}
 	for _, item := range strings.Split(os.Getenv("COCOLA_SANDBOX_EGRESS_ALLOWLIST"), ",") {
 		add(item)
+	}
+	if len(allow) == 0 {
+		return provider.Networking{}
 	}
 	if h := gatewayHost(os.Getenv("COCOLA_SANDBOX_LLM_BASE_URL")); h != "" {
 		add(h)

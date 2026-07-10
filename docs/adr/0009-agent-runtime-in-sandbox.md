@@ -213,6 +213,16 @@ ADR 第 2 节「安全边界从 tool allowlist 迁移到 network egress」的强
 端到端实跑验证（沙箱内 curl gateway 通 / curl 任意公网被拒）需 Linux+Docker 或
 K8s 集群环境，随本批次合并后在目标机执行（开发机为 macOS）。
 
+## 默认策略调整（2026-07-11）
+
+为保证远程 MCP、网页访问和包管理开箱即用，默认值调整为“不配置 egress
+policy”，即允许 sandbox 访问公网。只有显式设置
+`COCOLA_SANDBOX_EGRESS_ALLOWLIST` 时才启用原有 default-deny 策略；此时编排层仍
+自动加入模型网关域名。生产部署若需要严格的数据防泄漏边界，应明确配置 allowlist。
+
+该调整只改变默认配置，不删除 OpenSandbox DNS+nft enforcement，也不改变
+`Networking.EgressAllowlist` 的 provider 契约。
+
 ## 实现进展（2026-07-02）下线 Route B
 
 Route A 已在 opensandbox 后端全栈端到端验证成功（Web 对话、原生工具、真实

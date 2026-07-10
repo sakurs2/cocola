@@ -236,26 +236,25 @@ make dev         # dev 调试栈，llm-gateway 接到你的上游 + 真实 Route
 ## 安全：沙箱出网模型（egress）
 
 沙箱里跑的是不可信的用户/Agent 代码,因此安全边界不是「工具白名单」,而是
-**网络出网管控**(ADR-0009)。默认采用 **default-deny + 基线放行**:
+**网络出网管控**(ADR-0009)。为让远程 MCP、网页访问和包管理开箱即用，当前默认
+不下发 egress policy，允许访问公网：
 
-- **始终放行**:DNS(域名解析)与集群内/宿主的 **llm-gateway**——Agent 大脑必须
-  能回连网关计费出网,所以 gateway 永不被切断。
-- **默认拒绝**:其余一切出网流量。
-- **可配置 allowlist**:经 `COCOLA_SANDBOX_EGRESS_ALLOWLIST`(逗号分隔的
-  CIDR/IP)在基线之上按需放宽。编排层会自动并入 `COCOLA_SANDBOX_LLM_BASE_URL`
-  的 gateway host,故实际部署下沙箱默认即被锁定到「仅 DNS + gateway」。
+- **默认开放**:未配置 `COCOLA_SANDBOX_EGRESS_ALLOWLIST` 时不创建网络策略。
+- **生产收紧**:配置 `COCOLA_SANDBOX_EGRESS_ALLOWLIST` 后切换为 default-deny，
+  仅允许逗号分隔的域名/CIDR/IP；编排层自动并入
+  `COCOLA_SANDBOX_LLM_BASE_URL` 的 gateway host。
+- **按需控制**:例如 `mcp.amap.com,api.github.com`，无需使用 `*` 全量放行。
 
 当前内置 sandbox provider 只保留 OpenSandbox。cocola 把 egress allowlist 转成
 OpenSandbox 的 `networkPolicy`，由 OpenSandbox 所在 runtime 负责执行；本地 dev 默认
 使用 OpenSandbox Kubernetes runtime，正式 Docker 模式由 `scripts/start.sh` 管理
 OpenSandbox server。
 
-**域名级精确放行**:普通 Kubernetes `NetworkPolicy` 只能匹配 IP/CIDR。若需要精确
-域名策略，需在 OpenSandbox runtime 所在集群启用 DNS-aware CNI（如 Cilium
-`toFQDNs`）；本项目不强制引入。
+**域名级精确放行**:OpenSandbox 的 DNS-aware egress sidecar 负责解析域名并维护
+nftables 动态 allow set，不需要在 Cocola 中固定供应商 IP。
 
-> 配置语义:`Networking.EgressAllowlist` 为 nil = 未配置策略(遗留全开,仅
-> 向后兼容);非 nil(含空)= 防火墙生效、基线放行、其余 DROP。
+> 配置语义：`Networking.EgressAllowlist` 为 nil = 未配置策略、允许公网；非 nil
+> 且非空 = 防火墙生效、仅放行列表和模型网关、其余 DROP。
 
 ## License
 

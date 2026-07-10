@@ -124,13 +124,10 @@ services:
         ${COCOLA_SESSION_CHECKPOINT_DIRS:-/home/cocola/.claude,/workspace/uploads,/workspace/outputs,/workspace/persist}
       COCOLA_SESSION_CHECKPOINT_TIMEOUT_SECS: "${COCOLA_SESSION_CHECKPOINT_TIMEOUT_SECS:-60}"
       COCOLA_SESSION_CHECKPOINT_MAX_BYTES: "${COCOLA_SESSION_CHECKPOINT_MAX_BYTES:-268435456}"
-      # Egress hardening (ADR-0009). sandbox-manager reads these to build each
-      # sandbox's firewall allowlist: the llm-gateway host is auto-folded in from
-      # COCOLA_SANDBOX_LLM_BASE_URL so Route A can always reach the gateway; any
-      # extra domains/CIDRs the agent needs go in COCOLA_SANDBOX_EGRESS_ALLOWLIST
-      # (comma-separated). Setting these switches every sandbox to default-deny +
-      # allowlist; leaving COCOLA_SANDBOX_EGRESS_ALLOWLIST unset still installs
-      # the DNS+gateway baseline (secure by default).
+      # Optional egress hardening (ADR-0009). Leaving the allowlist empty keeps
+      # public access open. Setting one or more comma-separated domains/CIDRs
+      # switches sandboxes to default-deny; sandbox-manager then auto-folds the
+      # llm-gateway host in so Route A can still reach the model gateway.
       COCOLA_SANDBOX_LLM_BASE_URL: "${COCOLA_SANDBOX_LLM_BASE_URL:-http://host.docker.internal:18091}"
       COCOLA_SANDBOX_EGRESS_ALLOWLIST: "${COCOLA_SANDBOX_EGRESS_ALLOWLIST:-}"
       # Warm pool (pre-warming). sandbox-manager creates session-agnostic

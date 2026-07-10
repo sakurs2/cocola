@@ -31,9 +31,9 @@ func TestNetworkingFromEnv(t *testing.T) {
 			want:      []string{"api.example.com", "host.docker.internal"},
 		},
 		{
-			name:    "gateway host alone when allowlist empty",
+			name:    "empty allowlist keeps public access despite gateway url",
 			baseURL: "https://llm-gateway.cocola.svc.cluster.local:8080",
-			want:    []string{"llm-gateway.cocola.svc.cluster.local"},
+			want:    nil,
 		},
 		{
 			name:      "gateway host not duplicated if already listed",
