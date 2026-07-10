@@ -1,9 +1,9 @@
 "use client";
 
 import { Graph as ArchitecturePageIcon } from "@phosphor-icons/react";
-import { LoaderCircle, RefreshCw } from "lucide-react";
+import { LoaderCircle } from "lucide-react";
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { AdminPageHeader } from "@/components/admin/admin-ui";
+import { AdminPageHeader, AdminRefreshButton } from "@/components/admin/admin-ui";
 
 type Status = "healthy" | "degraded" | "unhealthy" | "unknown" | string;
 
@@ -82,19 +82,17 @@ export default function AdminArchitecturePage() {
               <Stat label="Attention" value={stats.attention} />
               <Stat label="Unknown" value={stats.unknown} />
             </div>
-            <button
+            <AdminRefreshButton
               className="inline-flex h-9 items-center justify-center gap-2 rounded-md border border-border bg-background px-3 text-sm font-medium transition-colors hover:bg-accent hover:text-accent-foreground disabled:pointer-events-none disabled:opacity-50"
               onClick={() => void load()}
               disabled={loading}
+              refreshing={loading}
+              variant="outline"
+              size="sm"
               type="button"
             >
-              {loading ? (
-                <LoaderCircle className="size-4 animate-spin" />
-              ) : (
-                <RefreshCw className="size-4" />
-              )}
               Refresh
-            </button>
+            </AdminRefreshButton>
           </div>
         }
       />

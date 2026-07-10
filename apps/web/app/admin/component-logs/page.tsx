@@ -1,8 +1,9 @@
 "use client";
 
 import { TerminalWindow as ComponentLogsPageIcon } from "@phosphor-icons/react";
-import { AlertTriangle, CheckCircle2, Loader2, RefreshCw, ScrollText } from "lucide-react";
+import { AlertTriangle, CheckCircle2, Loader2, ScrollText } from "lucide-react";
 import { useCallback, useEffect, useMemo, useState } from "react";
+import { AdminRefreshButton } from "@/components/admin/admin-ui";
 
 type LogFile = {
   name: string;
@@ -80,9 +81,16 @@ export default function ComponentLogsPage() {
               Structured stdout logs captured by the local runtime log directory
             </p>
           </div>
-          <button className={iconBtn} title="Refresh component logs" onClick={() => void load()}>
-            <RefreshCw className="size-4" />
-          </button>
+          <AdminRefreshButton
+            className={iconBtn}
+            title="Refresh component logs"
+            aria-label="Refresh component logs"
+            onClick={() => void load()}
+            disabled={loading}
+            refreshing={loading}
+            variant="ghost"
+            size="icon"
+          />
         </div>
       </header>
 
@@ -123,18 +131,15 @@ export default function ComponentLogsPage() {
               value={lineCount}
               onChange={(event) => setLineCount(Number(event.target.value))}
             />
-            <button
+            <AdminRefreshButton
               className="inline-flex h-9 items-center justify-center gap-2 rounded-md bg-primary px-3 text-sm font-medium text-primary-foreground transition-colors hover:bg-primary/90 disabled:opacity-50"
               disabled={loading}
               onClick={() => void load()}
+              refreshing={loading}
+              size="sm"
             >
-              {loading ? (
-                <Loader2 className="size-4 animate-spin" />
-              ) : (
-                <RefreshCw className="size-4" />
-              )}
               Load
-            </button>
+            </AdminRefreshButton>
           </div>
           <div className="border-t border-border px-4 py-2 font-mono text-xs text-muted-foreground">
             {logDir || "-"}

@@ -2,6 +2,7 @@
 
 import { Cpu as SandboxNodesPageIcon } from "@phosphor-icons/react";
 import { Button } from "@/components/ui/button";
+import { AdminRefreshButton } from "@/components/admin/admin-ui";
 import { cn } from "@/lib/utils";
 import {
   AlertTriangle,
@@ -11,7 +12,6 @@ import {
   LoaderCircle,
   Plus,
   Power,
-  RefreshCw,
   Server,
   SlidersHorizontal,
 } from "lucide-react";
@@ -222,14 +222,15 @@ export default function SandboxNodesPage() {
               k3s node operations for OpenSandbox Kubernetes runtime
             </p>
           </div>
-          <Button variant="outline" size="sm" onClick={() => void refresh()} disabled={loading}>
-            {loading ? (
-              <LoaderCircle className="mr-2 size-4 animate-spin" />
-            ) : (
-              <RefreshCw className="mr-2 size-4" />
-            )}
+          <AdminRefreshButton
+            variant="outline"
+            size="sm"
+            onClick={() => void refresh()}
+            disabled={loading}
+            refreshing={loading}
+          >
             Refresh
-          </Button>
+          </AdminRefreshButton>
         </div>
       </header>
 

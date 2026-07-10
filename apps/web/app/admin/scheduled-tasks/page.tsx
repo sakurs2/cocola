@@ -1,9 +1,9 @@
 "use client";
 
 import { ClockCountdown as ScheduledTasksPageIcon } from "@phosphor-icons/react";
-import { Eye, Pause, Play, Plus, RefreshCw, Rocket, Trash2 } from "lucide-react";
+import { Eye, Pause, Play, Plus, Rocket, Trash2 } from "lucide-react";
 import { useCallback, useEffect, useMemo, useState, type ReactNode } from "react";
-import { AdminDrawer } from "@/components/admin/admin-ui";
+import { AdminDrawer, AdminRefreshButton } from "@/components/admin/admin-ui";
 
 type ModelOption = {
   alias: string;
@@ -275,10 +275,17 @@ export default function ScheduledTasksPage() {
               System task creation, execution, and monitoring
             </p>
           </div>
-          <button className={btn} type="button" onClick={() => void load()}>
-            <RefreshCw className="size-4" />
+          <AdminRefreshButton
+            className={btn}
+            type="button"
+            onClick={() => void load()}
+            disabled={loading}
+            refreshing={loading}
+            variant="outline"
+            size="sm"
+          >
             Refresh
-          </button>
+          </AdminRefreshButton>
         </div>
       </header>
 

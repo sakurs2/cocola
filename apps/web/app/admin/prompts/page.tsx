@@ -2,8 +2,8 @@
 
 import { FileText as PromptPageIcon } from "@phosphor-icons/react";
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { LoaderCircle, RotateCw, Save, ToggleLeft, ToggleRight } from "lucide-react";
-import { AdminPageHeader } from "@/components/admin/admin-ui";
+import { LoaderCircle, Save, ToggleLeft, ToggleRight } from "lucide-react";
+import { AdminPageHeader, AdminRefreshButton } from "@/components/admin/admin-ui";
 
 type AgentPrompt = {
   id: string;
@@ -128,15 +128,17 @@ export default function AdminAgentPromptPage() {
               {enabled ? <ToggleRight className="size-4" /> : <ToggleLeft className="size-4" />}
               {enabled ? "Enabled" : "Disabled"}
             </button>
-            <button
+            <AdminRefreshButton
               className={btn}
               type="button"
               onClick={() => void load()}
               disabled={loading || saving}
+              refreshing={loading}
+              variant="outline"
+              size="sm"
             >
-              <RotateCw className={`size-4 ${loading ? "animate-spin" : ""}`} />
               Refresh
-            </button>
+            </AdminRefreshButton>
             <button
               className={primaryBtn}
               type="button"

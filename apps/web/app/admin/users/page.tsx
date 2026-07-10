@@ -6,6 +6,7 @@ import {
   AdminAlert,
   AdminDrawer,
   AdminMetric,
+  AdminRefreshButton,
   AdminTable,
   AdminToolbar,
 } from "@/components/admin/admin-ui";
@@ -24,7 +25,6 @@ import {
   LoaderCircle,
   MoreHorizontal,
   Power,
-  RefreshCw,
   Search,
   Shield,
   ShieldCheck,
@@ -353,14 +353,15 @@ export default function AdminUsersPage() {
               Whitelist accounts and admin access
             </p>
           </div>
-          <Button variant="outline" size="sm" onClick={() => void refresh()} disabled={loading}>
-            {loading ? (
-              <LoaderCircle className="mr-2 size-4 animate-spin" />
-            ) : (
-              <RefreshCw className="mr-2 size-4" />
-            )}
+          <AdminRefreshButton
+            variant="outline"
+            size="sm"
+            onClick={() => void refresh()}
+            disabled={loading}
+            refreshing={loading}
+          >
             Refresh
-          </Button>
+          </AdminRefreshButton>
         </div>
       </header>
 

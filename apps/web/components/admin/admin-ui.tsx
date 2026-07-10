@@ -2,8 +2,9 @@
 
 import * as Dialog from "@radix-ui/react-dialog";
 import { motion } from "framer-motion";
-import { X } from "lucide-react";
-import { type ComponentPropsWithoutRef, type ReactNode } from "react";
+import { RefreshCw, X } from "lucide-react";
+import { type ComponentPropsWithoutRef, type ReactNode, useState } from "react";
+import { Button, type ButtonProps } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 
 export function AdminPage({
@@ -307,5 +308,41 @@ export function AdminIconButton({ className, ...props }: ComponentPropsWithoutRe
       )}
       {...props}
     />
+  );
+}
+
+export function AdminRefreshButton({
+  refreshing = false,
+  iconClassName,
+  className,
+  children,
+  onClick,
+  ...props
+}: ButtonProps & {
+  refreshing?: boolean;
+  iconClassName?: string;
+}) {
+  const [refreshCycle, setRefreshCycle] = useState(0);
+
+  return (
+    <Button
+      className={cn("gap-2", className)}
+      onClick={(event) => {
+        setRefreshCycle((cycle) => cycle + 1);
+        onClick?.(event);
+      }}
+      {...props}
+    >
+      <RefreshCw
+        key={refreshCycle}
+        aria-hidden="true"
+        className={cn(
+          "size-4 shrink-0",
+          refreshing ? "animate-spin" : refreshCycle > 0 && "admin-refresh-spin-once",
+          iconClassName,
+        )}
+      />
+      {children}
+    </Button>
   );
 }

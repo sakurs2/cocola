@@ -1,9 +1,10 @@
 "use client";
 
 import { Cpu as ModelsPageIcon } from "@phosphor-icons/react";
-import { Check, Eye, EyeOff, KeyRound, Plus, RefreshCw, Save, Star, Trash2 } from "lucide-react";
+import { Check, Eye, EyeOff, KeyRound, Plus, Save, Star, Trash2 } from "lucide-react";
 import Image from "next/image";
 import { useCallback, useEffect, useMemo, useState, type ReactNode } from "react";
+import { AdminRefreshButton } from "@/components/admin/admin-ui";
 import {
   LOCAL_SIMPLE_ICON_PATHS,
   SIMPLE_ICON_FALLBACK_BADGES,
@@ -293,10 +294,17 @@ export default function AdminModelsPage() {
               Providers, API keys, model aliases, visibility, defaults, and logos
             </p>
           </div>
-          <button className={btn} type="button" onClick={() => void load()}>
-            <RefreshCw className="size-4" />
+          <AdminRefreshButton
+            className={btn}
+            type="button"
+            onClick={() => void load()}
+            disabled={loading}
+            refreshing={loading}
+            variant="outline"
+            size="sm"
+          >
             Refresh
-          </button>
+          </AdminRefreshButton>
         </div>
       </header>
 
@@ -473,7 +481,7 @@ export default function AdminModelsPage() {
                       })
                     }
                   >
-                    <option value="simple-icons">Local icon</option>
+                    <option value="simple-icons">Brand icon</option>
                     <option value="image">Image URL</option>
                   </select>
                   {modelForm.icon_type === "image" ? (

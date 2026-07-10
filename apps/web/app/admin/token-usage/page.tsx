@@ -13,9 +13,10 @@ import {
   Tooltip,
   type ChartOptions,
 } from "chart.js";
-import { Download, Loader2, RefreshCw, Search, UserRound } from "lucide-react";
+import { Download, Loader2, Search, UserRound } from "lucide-react";
 import { Line } from "react-chartjs-2";
 import { useCallback, useEffect, useMemo, useState } from "react";
+import { AdminRefreshButton } from "@/components/admin/admin-ui";
 
 ChartJS.register(
   CategoryScale,
@@ -255,15 +256,17 @@ export default function AdminTokenUsagePage() {
               User token consumption from the LLM usage ledger
             </p>
           </div>
-          <button
+          <AdminRefreshButton
             className={iconBtn}
             title="Refresh"
             onClick={() => void load()}
             disabled={loading}
+            refreshing={loading}
+            variant="outline"
+            size="sm"
           >
-            <RefreshCw className={loading ? "size-4 animate-spin" : "size-4"} />
             Refresh
-          </button>
+          </AdminRefreshButton>
           <button
             className={iconBtn}
             title="Export Excel"

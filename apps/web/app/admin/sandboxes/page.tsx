@@ -2,8 +2,9 @@
 
 import { Stack as SandboxesPageIcon } from "@phosphor-icons/react";
 import { Button } from "@/components/ui/button";
+import { AdminRefreshButton } from "@/components/admin/admin-ui";
 import { cn } from "@/lib/utils";
-import { CheckCircle2, Clock3, LoaderCircle, RefreshCw, Server, Trash2 } from "lucide-react";
+import { CheckCircle2, Clock3, LoaderCircle, Server, Trash2 } from "lucide-react";
 import { signOut } from "next-auth/react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
@@ -129,14 +130,15 @@ export default function SandboxesPage() {
               Runtime state for session-bound sandboxes
             </p>
           </div>
-          <Button variant="outline" size="sm" onClick={() => void refresh()} disabled={loading}>
-            {loading ? (
-              <LoaderCircle className="mr-2 size-4 animate-spin" />
-            ) : (
-              <RefreshCw className="mr-2 size-4" />
-            )}
+          <AdminRefreshButton
+            variant="outline"
+            size="sm"
+            onClick={() => void refresh()}
+            disabled={loading}
+            refreshing={loading}
+          >
             Refresh
-          </Button>
+          </AdminRefreshButton>
         </div>
       </header>
 

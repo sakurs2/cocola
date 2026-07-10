@@ -7,11 +7,11 @@ import {
   ChevronLeft,
   ChevronRight,
   Loader2,
-  RefreshCw,
   Search,
 } from "lucide-react";
 import Link from "next/link";
 import { useCallback, useEffect, useMemo, useState } from "react";
+import { AdminRefreshButton } from "@/components/admin/admin-ui";
 
 type AuditEvent = {
   id: number;
@@ -116,9 +116,16 @@ export default function AdminAuditPage() {
               Server-side user behavior events without chat content
             </p>
           </div>
-          <button className={iconBtn} title="Refresh audit logs" onClick={() => void load()}>
-            <RefreshCw className="size-4" />
-          </button>
+          <AdminRefreshButton
+            className={iconBtn}
+            title="Refresh audit logs"
+            aria-label="Refresh audit logs"
+            onClick={() => void load()}
+            disabled={loading}
+            refreshing={loading}
+            variant="ghost"
+            size="icon"
+          />
         </div>
       </header>
 

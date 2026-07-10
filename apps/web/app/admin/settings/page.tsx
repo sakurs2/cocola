@@ -1,16 +1,9 @@
 "use client";
 
 import { Gear as SettingsPageIcon } from "@phosphor-icons/react";
-import {
-  AlertTriangle,
-  Check,
-  Loader2,
-  RefreshCw,
-  RotateCcw,
-  Save,
-  SlidersHorizontal,
-} from "lucide-react";
+import { AlertTriangle, Check, Loader2, RotateCcw, Save, SlidersHorizontal } from "lucide-react";
 import { useCallback, useEffect, useMemo, useState } from "react";
+import { AdminRefreshButton } from "@/components/admin/admin-ui";
 
 type SettingValue = boolean | number | string | null;
 
@@ -146,9 +139,16 @@ export default function AdminSettingsPage() {
               Startup defaults, database overrides, and runtime mutability
             </p>
           </div>
-          <button className={iconBtn} title="Refresh settings" onClick={() => void load()}>
-            <RefreshCw className="size-4" />
-          </button>
+          <AdminRefreshButton
+            className={iconBtn}
+            title="Refresh settings"
+            aria-label="Refresh settings"
+            onClick={() => void load()}
+            disabled={loading}
+            refreshing={loading}
+            variant="ghost"
+            size="icon"
+          />
         </div>
       </header>
 

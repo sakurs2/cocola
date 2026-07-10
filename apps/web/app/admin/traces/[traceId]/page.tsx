@@ -9,11 +9,11 @@ import {
   Clock3,
   FileClock,
   Loader2,
-  RefreshCw,
   TimerReset,
 } from "lucide-react";
 import Link from "next/link";
 import { useCallback, useEffect, useMemo, useState, type ReactNode } from "react";
+import { AdminRefreshButton } from "@/components/admin/admin-ui";
 import { cn } from "@/lib/utils";
 
 type TraceEvent = {
@@ -121,9 +121,16 @@ export default function AdminTracePage({ params }: { params: { traceId: string }
             <h1 className="truncate text-base font-semibold">Trace Detail</h1>
             <p className="truncate font-mono text-xs text-muted-foreground">{traceId}</p>
           </div>
-          <button className={iconBtn} title="Refresh trace" onClick={() => void load()}>
-            <RefreshCw className={cn("size-4", state.status === "loading" && "animate-spin")} />
-          </button>
+          <AdminRefreshButton
+            className={iconBtn}
+            title="Refresh trace"
+            aria-label="Refresh trace"
+            onClick={() => void load()}
+            disabled={state.status === "loading"}
+            refreshing={state.status === "loading"}
+            variant="ghost"
+            size="icon"
+          />
         </div>
       </header>
 
