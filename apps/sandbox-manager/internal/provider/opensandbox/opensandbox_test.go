@@ -374,9 +374,10 @@ func TestExec_BridgesSSEStream(t *testing.T) {
 	})
 
 	ch, err := p.Exec(context.Background(), "sbx-1", provider.ExecRequest{
-		Cmd: []string{"echo", "hi"},
-		Cwd: "/work",
-		Env: map[string]string{"FOO": "bar"},
+		Cmd:     []string{"echo", "hi"},
+		Cwd:     "/work",
+		Env:     map[string]string{"FOO": "bar"},
+		Timeout: 45,
 	})
 	if err != nil {
 		t.Fatalf("Exec: %v", err)
@@ -392,7 +393,7 @@ func TestExec_BridgesSSEStream(t *testing.T) {
 	if gotExecdToken != "etok" {
 		t.Errorf("execd token header = %q, want etok (from endpoint headers)", gotExecdToken)
 	}
-	for _, want := range []string{`"command":"'echo' 'hi'"`, `"cwd":"/work"`, `"FOO":"bar"`} {
+	for _, want := range []string{`"command":"'echo' 'hi'"`, `"cwd":"/work"`, `"FOO":"bar"`, `"timeout":45000`} {
 		if !strings.Contains(gotCmdBody, want) {
 			t.Errorf("command body missing %s\nbody: %s", want, gotCmdBody)
 		}

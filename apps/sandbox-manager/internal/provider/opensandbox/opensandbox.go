@@ -612,7 +612,10 @@ func (p *Provider) Exec(ctx context.Context, sid string, req provider.ExecReques
 		Envs:    req.Env,
 	}
 	if req.Timeout > 0 {
-		body.Timeout = int64(req.Timeout)
+		// SandboxService exposes timeout_secs, while OpenSandbox execd expects
+		// milliseconds. Passing seconds through unchanged turns a 45-second MCP
+		// check into a 45ms command that exits before emitting any output.
+		body.Timeout = int64(req.Timeout) * int64(time.Second/time.Millisecond)
 	}
 	b, err := json.Marshal(body)
 	if err != nil {
