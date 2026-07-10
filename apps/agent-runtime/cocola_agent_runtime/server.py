@@ -29,6 +29,7 @@ from __future__ import annotations
 
 import asyncio
 import dataclasses
+import io
 import json
 import mimetypes
 import os
@@ -38,6 +39,7 @@ import re
 import tempfile
 import time
 import uuid
+import zipfile
 from typing import Any, NamedTuple
 
 from cocola.agent.v1 import agent_pb2 as pb
@@ -85,38 +87,149 @@ for dirpath, _, files in os.walk(root):
         out[rel] = {"size": st.st_size, "mtime_ns": st.st_mtime_ns}
 print(json.dumps(out, sort_keys=True))
 """
-_SKILL_EXTRACT_SCRIPT = r"""
+_SKILLS_BATCH_INSTALL_SCRIPT = r"""
+import io
+import json
 import os
 import shutil
 import sys
+import tempfile
 import zipfile
 
-archive, target = sys.argv[1], sys.argv[2]
-tmp = target + ".tmp"
-if os.path.exists(tmp):
-    shutil.rmtree(tmp)
-os.makedirs(tmp, exist_ok=True)
-with zipfile.ZipFile(archive) as zf:
-    for info in zf.infolist():
-        name = info.filename.replace("\\", "/")
-        if not name or name.startswith("/") or ".." in name.split("/"):
-            raise SystemExit(f"unsafe skill archive path: {name}")
-        if info.is_dir():
-            continue
-        dest = os.path.join(tmp, name)
-        os.makedirs(os.path.dirname(dest), exist_ok=True)
-        with zf.open(info) as src, open(dest, "wb") as out:
-            shutil.copyfileobj(src, out)
-if not os.path.exists(os.path.join(tmp, "SKILL.md")):
-    raise SystemExit("skill archive missing SKILL.md")
-if os.path.lexists(target):
-    if os.path.islink(target) or os.path.isfile(target):
-        os.unlink(target)
+archive_path, base, shared_root = sys.argv[1:4]
+skills_root = os.path.join(base, "skills")
+state_root = os.path.join(base, ".cocola")
+os.makedirs(skills_root, exist_ok=True)
+os.makedirs(state_root, exist_ok=True)
+stage_root = tempfile.mkdtemp(prefix="skill-sync-", dir=state_root)
+
+
+def remove_path(path):
+    if not os.path.lexists(path):
+        return
+    if os.path.islink(path) or os.path.isfile(path):
+        os.unlink(path)
     else:
-        shutil.rmtree(target)
-os.replace(tmp, target)
+        shutil.rmtree(path)
+
+
+def extract_bundle(data, target):
+    os.makedirs(target, exist_ok=True)
+    with zipfile.ZipFile(io.BytesIO(data)) as bundle:
+        for info in bundle.infolist():
+            name = info.filename.replace("\\", "/")
+            if not name or name.startswith("/") or ".." in name.split("/"):
+                raise SystemExit(f"unsafe skill archive path: {name}")
+            if info.is_dir():
+                continue
+            dest = os.path.join(target, name)
+            os.makedirs(os.path.dirname(dest), exist_ok=True)
+            with bundle.open(info) as src, open(dest, "wb") as out:
+                shutil.copyfileobj(src, out)
+
+
+try:
+    with zipfile.ZipFile(archive_path) as batch:
+        manifest = json.loads(batch.read("manifest.json"))
+        if not isinstance(manifest, list):
+            raise SystemExit("invalid skill batch manifest")
+
+        # Validate and stage every local package before changing live targets.
+        # A malformed bundle therefore cannot leave a partially-updated set.
+        for item in manifest:
+            if not isinstance(item, dict):
+                raise SystemExit("invalid skill batch entry")
+            skill_id = item.get("id", "")
+            allowed = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789_.-"
+            if not skill_id or any(ch not in allowed for ch in skill_id):
+                raise SystemExit(f"invalid skill id: {skill_id}")
+            shared = os.path.join(shared_root, skill_id)
+            if os.path.isfile(os.path.join(shared, "SKILL.md")):
+                continue
+
+            staged = os.path.join(stage_root, skill_id)
+            kind = item.get("kind")
+            if kind == "bundle":
+                extract_bundle(batch.read(item["member"]), staged)
+            elif kind == "markdown":
+                os.makedirs(staged, exist_ok=True)
+                with open(os.path.join(staged, "SKILL.md"), "wb") as out:
+                    out.write(batch.read(item["member"]))
+            elif kind == "empty":
+                os.makedirs(staged, exist_ok=True)
+            else:
+                raise SystemExit(f"invalid skill payload kind: {kind}")
+            if kind != "empty" and not os.path.isfile(os.path.join(staged, "SKILL.md")):
+                raise SystemExit(f"skill archive missing SKILL.md: {skill_id}")
+
+        for item in manifest:
+            skill_id = item["id"]
+            target = os.path.join(skills_root, skill_id)
+            shared = os.path.join(shared_root, skill_id)
+            remove_path(target)
+            if os.path.isfile(os.path.join(shared, "SKILL.md")):
+                os.symlink(shared, target)
+            else:
+                os.replace(os.path.join(stage_root, skill_id), target)
+finally:
+    shutil.rmtree(stage_root, ignore_errors=True)
+    try:
+        os.unlink(archive_path)
+    except OSError:
+        pass
 """
 _SAFE_SKILL_ID_RE = re.compile(r"[^a-zA-Z0-9_.-]+")
+
+
+async def _build_skill_batch_archive(skills: list[Skill], objstore: Fetcher | None) -> bytes:
+    """Build one transport archive for every enabled non-shared skill payload.
+
+    Shared-image skills are still represented in the manifest; the in-sandbox
+    installer chooses the shared copy before reading their payload. Object-store
+    reads run concurrently, while sandbox I/O remains one write plus one exec.
+    """
+
+    async def load_payload(skill: Skill) -> tuple[str, bytes]:
+        if skill.bundle_object_key and objstore is not None:
+            data = await asyncio.to_thread(objstore.get, skill.bundle_object_key)
+            return "bundle", data
+        if skill.skill_md:
+            return "markdown", skill.skill_md.encode("utf-8")
+        return "empty", b""
+
+    skill_ids: list[str] = []
+    seen_ids: set[str] = set()
+    for skill in skills:
+        skill_id = _SAFE_SKILL_ID_RE.sub("-", skill.id).strip(".-") or "skill"
+        if skill_id in seen_ids:
+            raise RuntimeError(f"duplicate normalized skill id: {skill_id}")
+        seen_ids.add(skill_id)
+        skill_ids.append(skill_id)
+
+    payloads = await asyncio.gather(*(load_payload(skill) for skill in skills))
+    manifest: list[dict[str, str]] = []
+    out = io.BytesIO()
+    with zipfile.ZipFile(out, "w", compression=zipfile.ZIP_DEFLATED) as batch:
+        for index, (skill_id, payload) in enumerate(zip(skill_ids, payloads, strict=True)):
+            kind, data = payload
+            entry: dict[str, str] = {"id": skill_id, "kind": kind}
+            if kind != "empty":
+                suffix = "zip" if kind == "bundle" else "md"
+                member = f"payloads/{index:04d}.{suffix}"
+                batch.writestr(
+                    member,
+                    data,
+                    compress_type=(
+                        zipfile.ZIP_STORED if kind == "bundle" else zipfile.ZIP_DEFLATED
+                    ),
+                )
+                entry["member"] = member
+            manifest.append(entry)
+        batch.writestr(
+            "manifest.json",
+            json.dumps(manifest, ensure_ascii=False, separators=(",", ":")),
+        )
+    return out.getvalue()
 
 
 class _ResolvedAttachment(NamedTuple):
@@ -777,54 +890,25 @@ class AgentRuntimeServicer(pb_grpc.AgentRuntimeServiceServicer):
         return out
 
     async def _sync_skills_into_sandbox(self, sandbox_id: str, skills: list[Skill]) -> None:
-        if self._executor is None:
+        if self._executor is None or not skills:
             return
-        for skill in skills:
-            skill_id = _SAFE_SKILL_ID_RE.sub("-", skill.id).strip(".-") or "skill"
-            stdin = skill.skill_md or ""
-            script = f"""
-set -eu
-base="${{CLAUDE_CONFIG_DIR:-/home/cocola/.claude}}"
-target="$base/skills/{skill_id}"
-shared="/data/plugins/skills/{skill_id}"
-mkdir -p "$base/skills" "$base/.cocola"
-if [ -f "$shared/SKILL.md" ]; then
-  rm -rf "$target"
-  ln -s "$shared" "$target"
-  printf shared
-else
-  rm -rf "$target"
-  mkdir -p "$target"
-  printf local
-fi
-"""
-            res = await self._executor.exec(
-                sandbox_id=sandbox_id,
-                cmd=["/bin/sh", "-lc", script],
-                timeout_secs=20,
-            )
-            if res.exit_code != 0 or res.error:
-                raise RuntimeError(res.error or res.stderr or f"skill sync failed for {skill_id}")
-            if (res.stdout or "").strip() == "shared":
-                continue
-            target = f"/home/cocola/.claude/skills/{skill_id}"
-            if skill.bundle_object_key and self._objstore is not None:
-                data = await asyncio.to_thread(self._objstore.get, skill.bundle_object_key)
-                archive = f"/tmp/cocola-skill-{skill_id}.zip"
-                await self._executor.write_bytes(sandbox_id=sandbox_id, path=archive, data=data)
-                extract = await self._executor.exec(
-                    sandbox_id=sandbox_id,
-                    cmd=["python3", "-c", _SKILL_EXTRACT_SCRIPT, archive, target],
-                    timeout_secs=30,
-                )
-                if extract.exit_code != 0 or extract.error:
-                    raise RuntimeError(
-                        extract.error or extract.stderr or f"skill extract failed for {skill_id}"
-                    )
-            elif stdin:
-                await self._executor.write_file(
-                    sandbox_id=sandbox_id, path=f"{target}/SKILL.md", content=stdin
-                )
+        data = await _build_skill_batch_archive(skills, self._objstore)
+        archive = f"/tmp/cocola-skills-{uuid.uuid4().hex}.zip"
+        await self._executor.write_bytes(sandbox_id=sandbox_id, path=archive, data=data)
+        res = await self._executor.exec(
+            sandbox_id=sandbox_id,
+            cmd=[
+                "python3",
+                "-c",
+                _SKILLS_BATCH_INSTALL_SCRIPT,
+                archive,
+                "/home/cocola/.claude",
+                "/data/plugins/skills",
+            ],
+            timeout_secs=max(30, min(300, len(skills) * 10)),
+        )
+        if not res.ok:
+            raise RuntimeError(res.error or res.stderr or "batch skill sync failed")
 
     async def _publish_output_artifacts(
         self,

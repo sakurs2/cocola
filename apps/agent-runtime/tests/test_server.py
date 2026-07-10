@@ -8,8 +8,12 @@ becomes a terminal proto `error` event instead of propagating, and (c) enabled
 skills are folded into the AgentOptions the provider receives.
 """
 
+import io
 import json
 import re
+import subprocess
+import sys
+import zipfile
 from dataclasses import dataclass, field
 
 from cocola_agent_runtime.agent_provider import AgentEvent, AgentOptions
@@ -20,7 +24,11 @@ from cocola_agent_runtime.sandbox_binder import (
     StaticSandboxBinder,
     StaticSandboxExecutor,
 )
-from cocola_agent_runtime.server import AgentRuntimeServicer, event_to_proto
+from cocola_agent_runtime.server import (
+    _SKILLS_BATCH_INSTALL_SCRIPT,
+    AgentRuntimeServicer,
+    event_to_proto,
+)
 from cocola_agent_runtime.session_map import SessionBinding
 from cocola_agent_runtime.skill_loader import Skill, StaticSkillCatalog
 
@@ -161,6 +169,14 @@ class StaticMCPCatalog:
         return dict(self.servers)
 
 
+def skill_bundle(**files: str) -> bytes:
+    out = io.BytesIO()
+    with zipfile.ZipFile(out, "w") as archive:
+        for path, content in files.items():
+            archive.writestr(path, content)
+    return out.getvalue()
+
+
 def outputs_snapshot_executor() -> StaticSandboxExecutor:
     ex: StaticSandboxExecutor
 
@@ -224,6 +240,125 @@ async def test_query_folds_enabled_skills_into_options():
     await AgentRuntimeServicer(prov, skills=cat).Query(FakeRequest(), FakeContext())
     assert prov.seen_options.system_prompt is not None
     assert "Web Search" in prov.seen_options.system_prompt
+
+
+async def test_skill_sync_uses_one_archive_write_and_one_exec():
+    executor = StaticSandboxExecutor()
+    store = FakeObjectStore()
+    store.puts["bundle-a"] = skill_bundle(**{"SKILL.md": "# A", "scripts/run.py": "pass"})
+    skills = [
+        Skill(id="bundle-a", name="A", bundle_object_key="bundle-a"),
+        Skill(id="markdown-b", name="B", skill_md="# B"),
+    ]
+    servicer = AgentRuntimeServicer(
+        ListProvider([]),
+        executor=executor,
+        objstore=store,
+    )
+
+    await servicer._sync_skills_into_sandbox("box-1", skills)
+
+    assert len(executor.byte_writes) == 1
+    assert len(executor.exec_calls) == 1
+    sandbox_id, archive_path, batch_data = executor.byte_writes[0]
+    assert sandbox_id == "box-1"
+    assert archive_path.startswith("/tmp/cocola-skills-")
+    with zipfile.ZipFile(io.BytesIO(batch_data)) as batch:
+        manifest = json.loads(batch.read("manifest.json"))
+        assert manifest == [
+            {"id": "bundle-a", "kind": "bundle", "member": "payloads/0000.zip"},
+            {"id": "markdown-b", "kind": "markdown", "member": "payloads/0001.md"},
+        ]
+        with zipfile.ZipFile(io.BytesIO(batch.read("payloads/0000.zip"))) as bundle:
+            assert bundle.read("SKILL.md") == b"# A"
+        assert batch.read("payloads/0001.md") == b"# B"
+    call = executor.exec_calls[0]
+    assert call["cmd"][:3] == ["python3", "-c", _SKILLS_BATCH_INSTALL_SCRIPT]
+    assert call["cmd"][3] == archive_path
+
+
+async def test_skill_batch_installer_links_shared_and_installs_local_payloads(tmp_path):
+    executor = StaticSandboxExecutor()
+    store = FakeObjectStore()
+    store.puts["local-bundle"] = skill_bundle(**{"SKILL.md": "# Local"})
+    store.puts["shared-bundle"] = skill_bundle(**{"SKILL.md": "# Stale copy"})
+    skills = [
+        Skill(id="local", name="Local", bundle_object_key="local-bundle"),
+        Skill(id="markdown", name="Markdown", skill_md="# Markdown"),
+        Skill(id="shared", name="Shared", bundle_object_key="shared-bundle"),
+    ]
+    servicer = AgentRuntimeServicer(ListProvider([]), executor=executor, objstore=store)
+    await servicer._sync_skills_into_sandbox("box-1", skills)
+    batch_data = executor.byte_writes[0][2]
+
+    archive = tmp_path / "skills.zip"
+    archive.write_bytes(batch_data)
+    base = tmp_path / "claude"
+    shared_root = tmp_path / "shared"
+    (shared_root / "shared").mkdir(parents=True)
+    (shared_root / "shared" / "SKILL.md").write_text("# Shared", encoding="utf-8")
+
+    result = subprocess.run(
+        [
+            sys.executable,
+            "-c",
+            _SKILLS_BATCH_INSTALL_SCRIPT,
+            str(archive),
+            str(base),
+            str(shared_root),
+        ],
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+
+    assert result.returncode == 0, result.stderr
+    assert (base / "skills" / "local" / "SKILL.md").read_text() == "# Local"
+    assert (base / "skills" / "markdown" / "SKILL.md").read_text() == "# Markdown"
+    assert (base / "skills" / "shared").is_symlink()
+    assert (base / "skills" / "shared" / "SKILL.md").read_text() == "# Shared"
+    assert not archive.exists()
+
+
+async def test_skill_batch_installer_rejects_unsafe_bundle_before_replacing_targets(tmp_path):
+    executor = StaticSandboxExecutor()
+    store = FakeObjectStore()
+    store.puts["bad-bundle"] = skill_bundle(
+        **{"SKILL.md": "# Bad", "../escaped.txt": "not allowed"}
+    )
+    servicer = AgentRuntimeServicer(ListProvider([]), executor=executor, objstore=store)
+    await servicer._sync_skills_into_sandbox(
+        "box-1",
+        [Skill(id="bad", name="Bad", bundle_object_key="bad-bundle")],
+    )
+
+    archive = tmp_path / "skills.zip"
+    archive.write_bytes(executor.byte_writes[0][2])
+    base = tmp_path / "claude"
+    existing = base / "skills" / "bad"
+    existing.mkdir(parents=True)
+    (existing / "SKILL.md").write_text("# Existing", encoding="utf-8")
+    shared_root = tmp_path / "shared"
+    shared_root.mkdir()
+
+    result = subprocess.run(
+        [
+            sys.executable,
+            "-c",
+            _SKILLS_BATCH_INSTALL_SCRIPT,
+            str(archive),
+            str(base),
+            str(shared_root),
+        ],
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+
+    assert result.returncode != 0
+    assert "unsafe skill archive path" in result.stderr
+    assert (existing / "SKILL.md").read_text() == "# Existing"
+    assert not (base / ".cocola" / "escaped.txt").exists()
 
 
 async def test_query_loads_mcp_servers_into_options_and_trace():
