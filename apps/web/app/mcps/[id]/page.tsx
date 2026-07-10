@@ -10,7 +10,7 @@ type MCPServer = {
   description: string;
   transport: string;
   command?: string;
-  url?: string;
+  url_hint?: string;
   default_enabled: boolean;
   effective_enabled: boolean;
 };
@@ -85,7 +85,7 @@ export default function MCPDetailPage({ params }: { params: { id: string } }) {
                   {mcp.description || "No description"}
                 </p>
                 <div className="mt-4 rounded-md border border-border bg-background p-3 text-sm">
-                  {mcp.transport === "stdio" ? mcp.command || "-" : mcp.url || "-"}
+                  {mcp.transport === "stdio" ? mcp.command || "-" : mcp.url_hint || "-"}
                 </div>
               </div>
             </div>

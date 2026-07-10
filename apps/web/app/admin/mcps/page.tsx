@@ -1,18 +1,34 @@
 "use client";
 
 import { PlugsConnected as McpPageIcon } from "@phosphor-icons/react";
-import { useCallback, useEffect, useMemo, useState, type ReactNode } from "react";
+import { useCallback, useEffect, useState, type ReactNode } from "react";
 import {
   ChevronDown,
+  CircleAlert,
+  Eye,
+  EyeOff,
+  FileTerminal,
+  Globe2,
   LoaderCircle,
-  PlugZap,
-  Save,
-  ToggleLeft,
-  ToggleRight,
+  Pencil,
+  Plus,
+  Power,
+  PowerOff,
+  ShieldCheck,
   Trash2,
 } from "lucide-react";
-import Link from "next/link";
-import { AdminPageHeader } from "@/components/admin/admin-ui";
+import {
+  AdminAlert,
+  AdminDrawer,
+  AdminEmptyState,
+  AdminIconButton,
+  AdminPage,
+  AdminPageHeader,
+  AdminPanel,
+  AdminRefreshButton,
+  AdminStatusBadge,
+} from "@/components/admin/admin-ui";
+import { Button } from "@/components/ui/button";
 
 type MCPServer = {
   id: string;
@@ -21,14 +37,19 @@ type MCPServer = {
   transport: "stdio" | "http" | "sse" | string;
   command?: string;
   args?: string[];
-  url?: string;
-  url_var_hints?: Record<string, string>;
+  url_hint?: string;
   env_hints?: Record<string, string>;
   header_hints?: Record<string, string>;
   enabled: boolean;
   default_enabled: boolean;
-  source: string;
   status: string;
+};
+
+type VerificationResult = {
+  status: string;
+  server_name?: string;
+  server_version?: string;
+  tool_count: number;
 };
 
 type FormState = {
@@ -39,11 +60,11 @@ type FormState = {
   command: string;
   args: string;
   url: string;
-  url_vars: string;
   env: string;
   headers: string;
-  enabled: boolean;
-  default_enabled: boolean;
+  defaultEnabled: boolean;
+  clearEnv: boolean;
+  clearHeaders: boolean;
 };
 
 const EMPTY_FORM: FormState = {
@@ -54,41 +75,30 @@ const EMPTY_FORM: FormState = {
   command: "",
   args: "",
   url: "",
-  url_vars: "",
   env: "",
   headers: "",
-  enabled: true,
-  default_enabled: false,
+  defaultEnabled: false,
+  clearEnv: false,
+  clearHeaders: false,
 };
 
-const input =
-  "h-9 min-w-0 rounded-md border border-input bg-background px-3 text-sm text-foreground outline-none transition-colors placeholder:text-muted-foreground focus:border-ring focus:ring-1 focus:ring-ring";
-const textArea =
-  "min-h-20 min-w-0 rounded-md border border-input bg-background px-3 py-2 text-sm text-foreground outline-none transition-colors placeholder:text-muted-foreground focus:border-ring focus:ring-1 focus:ring-ring";
-const btn =
-  "inline-flex h-9 items-center justify-center gap-2 rounded-md border border-border bg-background px-3 text-sm font-medium transition-colors hover:bg-accent hover:text-accent-foreground disabled:pointer-events-none disabled:opacity-50";
-const primaryBtn =
-  "inline-flex h-9 items-center justify-center gap-2 rounded-md bg-primary px-3 text-sm font-medium text-primary-foreground transition-colors hover:bg-primary/90 disabled:pointer-events-none disabled:opacity-50";
-const iconBtn =
-  "inline-flex size-8 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-accent hover:text-accent-foreground disabled:pointer-events-none disabled:opacity-40";
+const controlClass =
+  "h-10 min-w-0 rounded-xl border border-input bg-background/85 px-3 text-sm text-foreground outline-none transition-[border-color,box-shadow] placeholder:text-muted-foreground focus:border-ring focus:ring-2 focus:ring-ring/20";
+const textAreaClass =
+  "min-h-24 min-w-0 resize-y rounded-xl border border-input bg-background/85 px-3 py-2.5 font-mono text-sm text-foreground outline-none transition-[border-color,box-shadow] placeholder:text-muted-foreground focus:border-ring focus:ring-2 focus:ring-ring/20";
 
 export default function AdminMCPPage() {
   const [mcps, setMcps] = useState<MCPServer[]>([]);
   const [form, setForm] = useState<FormState>(EMPTY_FORM);
-  const [editing, setEditing] = useState<string | null>(null);
+  const [editing, setEditing] = useState<MCPServer | null>(null);
+  const [drawerOpen, setDrawerOpen] = useState(false);
+  const [advancedOpen, setAdvancedOpen] = useState(false);
+  const [showURL, setShowURL] = useState(false);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
+  const [busyID, setBusyID] = useState<string | null>(null);
   const [error, setError] = useState("");
-  const [advancedOpen, setAdvancedOpen] = useState(false);
-
-  const stats = useMemo(
-    () => ({
-      total: mcps.length,
-      enabled: mcps.filter((mcp) => mcp.enabled).length,
-      defaults: mcps.filter((mcp) => mcp.enabled && mcp.default_enabled).length,
-    }),
-    [mcps],
-  );
+  const [notice, setNotice] = useState("");
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -109,38 +119,100 @@ export default function AdminMCPPage() {
     void load();
   }, [load]);
 
-  const save = async () => {
-    setSaving(true);
+  const openCreate = () => {
+    setEditing(null);
+    setForm(EMPTY_FORM);
+    setAdvancedOpen(false);
+    setShowURL(false);
     setError("");
+    setDrawerOpen(true);
+  };
+
+  const openEdit = (mcp: MCPServer) => {
+    const transport = normalizeTransport(mcp.transport);
+    setEditing(mcp);
+    setForm({
+      ...EMPTY_FORM,
+      id: mcp.id,
+      name: mcp.name,
+      description: mcp.description,
+      transport,
+      command: mcp.command ?? "",
+      args: (mcp.args ?? []).join("\n"),
+      defaultEnabled: mcp.default_enabled,
+    });
+    setAdvancedOpen(false);
+    setShowURL(false);
+    setError("");
+    setDrawerOpen(true);
+  };
+
+  const save = async () => {
+    setError("");
+    setNotice("");
+    const name = form.name.trim();
+    const id = editing?.id || slugify(form.id || name);
+    if (!name || !id) {
+      setError("Name is required.");
+      return;
+    }
+    if (form.transport === "stdio" && !form.command.trim()) {
+      setError("Command is required for a stdio server.");
+      return;
+    }
+    const keepsRemoteURL =
+      editing && normalizeTransport(editing.transport) !== "stdio" && !form.url.trim();
+    if (form.transport !== "stdio" && !form.url.trim() && !keepsRemoteURL) {
+      setError("URL is required for an HTTP or SSE server.");
+      return;
+    }
+
+    let env: Record<string, string> | undefined;
+    let headers: Record<string, string> | undefined;
     try {
-      const id = editing || slugify(form.id || form.name);
+      env = parsePairs(form.env, "Env");
+      headers = parsePairs(form.headers, "Headers");
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err));
+      return;
+    }
+
+    setSaving(true);
+    try {
       const body: Record<string, unknown> = {
         id,
-        name: form.name,
-        description: form.description,
+        name,
+        description: form.description.trim(),
         transport: form.transport,
-        command: form.transport === "stdio" ? form.command : "",
-        args: form.transport === "stdio" ? splitArgs(form.args) : [],
-        url: form.transport === "stdio" ? "" : form.url,
-        enabled: form.enabled,
-        default_enabled: form.default_enabled,
+        default_enabled: form.defaultEnabled,
       };
-      const env = parsePairs(form.env);
-      const urlVars = parsePairs(form.url_vars);
-      const headers = parsePairs(form.headers);
-      if (Object.keys(env).length) body.env = env;
-      if (Object.keys(urlVars).length) body.url_vars = urlVars;
-      if (Object.keys(headers).length) body.headers = headers;
-      const url = editing ? `/api/admin/mcps/${encodeURIComponent(editing)}` : "/api/admin/mcps";
-      const res = await fetch(url, {
+      if (form.transport === "stdio") {
+        body.command = form.command.trim();
+        body.args = splitArgs(form.args);
+        if (env) body.env = env;
+        if (form.clearEnv) body.clear_env = true;
+      } else {
+        if (form.url.trim()) body.url = form.url.trim();
+        if (headers) body.headers = headers;
+        if (form.clearHeaders) body.clear_headers = true;
+      }
+      const endpoint = editing
+        ? `/api/admin/mcps/${encodeURIComponent(editing.id)}`
+        : "/api/admin/mcps";
+      const res = await fetch(endpoint, {
         method: editing ? "PATCH" : "POST",
         headers: { "content-type": "application/json" },
         body: JSON.stringify(body),
       });
       if (!res.ok) throw new Error(await readError(res));
-      setForm(EMPTY_FORM);
-      setEditing(null);
-      setAdvancedOpen(false);
+      const result = (await res.json()) as MCPServer & { verification?: VerificationResult };
+      const verification = result.verification;
+      setNotice(
+        verification
+          ? `${result.name} verified on save · ${verification.tool_count} tool${verification.tool_count === 1 ? "" : "s"} discovered.`
+          : `${result.name} saved and verified.`,
+      );
+      setDrawerOpen(false);
       await load();
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
@@ -149,358 +221,462 @@ export default function AdminMCPPage() {
     }
   };
 
-  const edit = (mcp: MCPServer) => {
-    setEditing(mcp.id);
-    setForm({
-      id: mcp.id,
-      name: mcp.name,
-      description: mcp.description,
-      transport: mcp.transport === "http" || mcp.transport === "sse" ? mcp.transport : "stdio",
-      command: mcp.command || "",
-      args: (mcp.args || []).join("\n"),
-      url: mcp.url || "",
-      url_vars: "",
-      env: "",
-      headers: "",
-      enabled: mcp.enabled,
-      default_enabled: mcp.default_enabled,
-    });
-    setAdvancedOpen(false);
-  };
-
-  const toggle = async (mcp: MCPServer) => {
-    await mutate(
-      `/api/admin/mcps/${encodeURIComponent(mcp.id)}/${mcp.enabled ? "disable" : "enable"}`,
-      "POST",
-    );
-  };
-
-  const remove = async (id: string) => {
-    if (!confirm(`Delete MCP ${id}?`)) return;
-    await mutate(`/api/admin/mcps/${encodeURIComponent(id)}`, "DELETE");
-  };
-
-  const mutate = async (url: string, method: string) => {
-    setSaving(true);
+  const mutate = async (mcp: MCPServer, action: "enable" | "disable" | "delete") => {
+    if (action === "delete" && !window.confirm(`Delete ${mcp.name || mcp.id}?`)) return;
+    setBusyID(mcp.id);
     setError("");
+    setNotice("");
     try {
-      const res = await fetch(url, { method });
+      const endpoint =
+        action === "delete"
+          ? `/api/admin/mcps/${encodeURIComponent(mcp.id)}`
+          : `/api/admin/mcps/${encodeURIComponent(mcp.id)}/${action}`;
+      const res = await fetch(endpoint, { method: action === "delete" ? "DELETE" : "POST" });
       if (!res.ok) throw new Error(await readError(res));
       await load();
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
     } finally {
-      setSaving(false);
+      setBusyID(null);
     }
   };
 
   return (
-    <main className="mx-auto max-w-6xl space-y-6 px-6 py-6">
+    <AdminPage width="standard">
       <AdminPageHeader
         icon={<McpPageIcon className="size-[18px]" weight="duotone" />}
-        title="MCP"
-        description="Publish Model Context Protocol servers that users can enable for their agent sessions."
+        title="MCP Servers"
         actions={
-          <div className="grid grid-cols-3 overflow-hidden rounded-md border border-border text-center text-xs">
-            <Stat label="Total" value={stats.total} />
-            <Stat label="Enabled" value={stats.enabled} />
-            <Stat label="Default" value={stats.defaults} />
-          </div>
+          <>
+            <AdminRefreshButton refreshing={loading} onClick={() => void load()} variant="outline">
+              Refresh
+            </AdminRefreshButton>
+            <Button className="gap-2" onClick={openCreate}>
+              <Plus className="size-4" />
+              Add server
+            </Button>
+          </>
         }
       />
 
-      {error ? (
-        <div className="rounded-md border border-red-500/30 bg-red-500/10 px-3 py-2 text-sm text-red-600">
-          {error}
-        </div>
+      {error && !drawerOpen ? (
+        <AdminAlert tone="error" icon={<CircleAlert className="size-4" />}>
+          <span aria-live="polite">{error}</span>
+        </AdminAlert>
+      ) : null}
+      {notice ? (
+        <AdminAlert tone="success" icon={<ShieldCheck className="size-4" />}>
+          <span aria-live="polite">{notice}</span>
+        </AdminAlert>
       ) : null}
 
-      <section className="rounded-lg border border-border bg-card p-4">
-        <div className="mb-4 flex items-center justify-between gap-3">
-          <h2 className="text-sm font-semibold">
-            {editing ? `Edit ${editing}` : "New MCP server"}
-          </h2>
-          {editing ? (
-            <button
-              type="button"
-              className={btn}
-              onClick={() => {
-                setEditing(null);
-                setForm(EMPTY_FORM);
-                setAdvancedOpen(false);
-              }}
-            >
+      <AdminPanel contentClassName="p-4 sm:p-5">
+        {loading && !mcps.length ? (
+          <div className="flex min-h-48 items-center justify-center text-sm text-muted-foreground">
+            <LoaderCircle className="mr-2 size-4 animate-spin" />
+            Loading MCP servers
+          </div>
+        ) : mcps.length ? (
+          <div className="grid gap-4 md:grid-cols-2">
+            {mcps.map((mcp) => (
+              <MCPCard
+                key={mcp.id}
+                mcp={mcp}
+                busy={busyID === mcp.id}
+                onEdit={() => openEdit(mcp)}
+                onToggle={() => void mutate(mcp, mcp.enabled ? "disable" : "enable")}
+                onDelete={() => void mutate(mcp, "delete")}
+              />
+            ))}
+          </div>
+        ) : (
+          <AdminEmptyState
+            icon={<McpPageIcon className="size-6" weight="duotone" />}
+            title="No MCP servers configured"
+            description="Add a server and Cocola will verify its handshake and tools before saving it."
+            action={
+              <Button className="gap-2" onClick={openCreate}>
+                <Plus className="size-4" />
+                Add server
+              </Button>
+            }
+          />
+        )}
+      </AdminPanel>
+
+      <AdminDrawer
+        open={drawerOpen}
+        onOpenChange={(open) => {
+          if (!saving) setDrawerOpen(open);
+        }}
+        title={editing ? `Edit ${editing.name}` : "Add MCP server"}
+        description="The connection is verified inside a sandbox before the configuration is saved."
+        size="lg"
+        footer={
+          <div className="flex items-center justify-end gap-2">
+            <Button variant="outline" disabled={saving} onClick={() => setDrawerOpen(false)}>
               Cancel
-            </button>
+            </Button>
+            <Button disabled={saving} className="min-w-32 gap-2" onClick={() => void save()}>
+              {saving ? (
+                <LoaderCircle className="size-4 animate-spin" />
+              ) : (
+                <ShieldCheck className="size-4" />
+              )}
+              {saving ? "Verifying…" : editing ? "Save changes" : "Add server"}
+            </Button>
+          </div>
+        }
+      >
+        <div className="space-y-5">
+          {error ? (
+            <AdminAlert tone="error" icon={<CircleAlert className="size-4" />}>
+              <span aria-live="polite">{error}</span>
+            </AdminAlert>
           ) : null}
-        </div>
-        <div className="grid gap-3 md:grid-cols-2">
-          <Field label="Name">
-            <input
-              className={input}
-              value={form.name}
-              placeholder="Amap Maps"
-              onChange={(e) => setForm({ ...form, name: e.target.value })}
-            />
-          </Field>
-          <Field label="Transport">
-            <select
-              className={input}
-              value={form.transport}
-              onChange={(e) =>
-                setForm({ ...form, transport: e.target.value as FormState["transport"] })
-              }
-            >
-              <option value="stdio">stdio</option>
-              <option value="http">http</option>
-              <option value="sse">sse</option>
-            </select>
-          </Field>
+          <div className="grid gap-4 sm:grid-cols-2">
+            <Field label="Name">
+              <input
+                className={controlClass}
+                value={form.name}
+                placeholder="GitHub"
+                autoFocus
+                onChange={(event) => setForm({ ...form, name: event.target.value })}
+              />
+            </Field>
+            <Field label="Transport">
+              <select
+                className={controlClass}
+                value={form.transport}
+                onChange={(event) =>
+                  setForm({ ...form, transport: event.target.value as FormState["transport"] })
+                }
+              >
+                <option value="stdio">stdio · Command</option>
+                <option value="http">HTTP · URL</option>
+                <option value="sse">SSE · URL</option>
+              </select>
+            </Field>
+          </div>
+
+          <p className="-mt-3 text-xs leading-5 text-muted-foreground">
+            {form.transport === "stdio"
+              ? "stdio starts a local process, so it uses Command instead of URL."
+              : `${form.transport === "http" ? "HTTP" : "SSE"} connects to a remote URL.`}
+          </p>
+
           <Field label="Description" optional>
             <input
-              className={input}
+              className={controlClass}
               value={form.description}
-              placeholder="Maps, geocoding, and route planning"
-              onChange={(e) => setForm({ ...form, description: e.target.value })}
+              placeholder="Repository tools for agent sessions"
+              onChange={(event) => setForm({ ...form, description: event.target.value })}
             />
           </Field>
+
           {form.transport === "stdio" ? (
             <>
               <Field label="Command">
                 <input
-                  className={input}
+                  className={`${controlClass} font-mono`}
                   value={form.command}
                   placeholder="npx"
-                  onChange={(e) => setForm({ ...form, command: e.target.value })}
+                  onChange={(event) => setForm({ ...form, command: event.target.value })}
                 />
               </Field>
-              <Field label="Args" optional>
+              <Field label="Arguments" optional hint="One argument per line.">
                 <textarea
-                  className={textArea}
+                  className={textAreaClass}
                   value={form.args}
-                  placeholder="-y&#10;@modelcontextprotocol/server-github"
-                  onChange={(e) => setForm({ ...form, args: e.target.value })}
+                  placeholder={"-y\n@modelcontextprotocol/server-github"}
+                  onChange={(event) => setForm({ ...form, args: event.target.value })}
                 />
               </Field>
+              <SecretPairsField
+                label="Env"
+                value={form.env}
+                placeholder="GITHUB_TOKEN=..."
+                savedHints={editing?.env_hints}
+                clearSaved={form.clearEnv}
+                onClearSaved={(clearEnv) =>
+                  setForm({ ...form, clearEnv, env: clearEnv ? "" : form.env })
+                }
+                onChange={(env) => setForm({ ...form, env, clearEnv: false })}
+              />
             </>
           ) : (
-            <Field label="URL">
-              <input
-                className={input}
-                value={form.url}
-                placeholder="https://mcp.amap.com/mcp?key=${AMAP_KEY}"
-                onChange={(e) => setForm({ ...form, url: e.target.value })}
-              />
-            </Field>
-          )}
-        </div>
-        <div className="mt-4">
-          <button
-            type="button"
-            className="inline-flex h-8 items-center gap-2 rounded-md px-2 text-sm text-muted-foreground hover:bg-accent hover:text-accent-foreground"
-            onClick={() => setAdvancedOpen((open) => !open)}
-          >
-            <ChevronDown
-              className={`size-4 transition-transform ${advancedOpen ? "rotate-180" : ""}`}
-            />
-            Advanced
-          </button>
-          {advancedOpen ? (
-            <div className="mt-3 grid gap-3 md:grid-cols-2">
-              {!editing ? (
-                <Field label="ID" optional>
+            <>
+              <Field
+                label="URL"
+                hint={
+                  editing
+                    ? "Leave blank to keep the saved URL."
+                    : "Paste the complete provider URL."
+                }
+              >
+                <div className="relative">
                   <input
-                    className={input}
-                    value={form.id}
-                    placeholder={slugify(form.name) || "amap-maps"}
-                    onChange={(e) => setForm({ ...form, id: e.target.value })}
+                    type={showURL ? "text" : "password"}
+                    className={`${controlClass} w-full pr-11 font-mono`}
+                    value={form.url}
+                    placeholder={
+                      editing
+                        ? editing.url_hint || "Saved URL"
+                        : "https://mcp.example.com/api?token=..."
+                    }
+                    autoComplete="off"
+                    onChange={(event) => setForm({ ...form, url: event.target.value })}
                   />
-                </Field>
-              ) : null}
-              {form.transport === "stdio" ? (
-                <Field label="Env" optional>
-                  <textarea
-                    className={textArea}
-                    value={form.env}
-                    placeholder="GITHUB_TOKEN=..."
-                    onChange={(e) => setForm({ ...form, env: e.target.value })}
-                  />
-                </Field>
-              ) : (
-                <>
-                  <Field label="URL Variables" optional>
-                    <textarea
-                      className={textArea}
-                      value={form.url_vars}
-                      placeholder="AMAP_KEY=..."
-                      onChange={(e) => setForm({ ...form, url_vars: e.target.value })}
+                  <button
+                    type="button"
+                    aria-label={showURL ? "Hide URL" : "Show URL"}
+                    className="absolute inset-y-0 right-1 grid w-9 place-items-center rounded-lg text-muted-foreground hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/30"
+                    onClick={() => setShowURL((show) => !show)}
+                  >
+                    {showURL ? <EyeOff className="size-4" /> : <Eye className="size-4" />}
+                  </button>
+                </div>
+              </Field>
+              <p className="-mt-3 text-xs leading-5 text-muted-foreground">
+                The complete URL is encrypted. Lists only show its scheme, host, and path.
+              </p>
+              <SecretPairsField
+                label="Headers"
+                value={form.headers}
+                placeholder="Authorization=Bearer ..."
+                savedHints={editing?.header_hints}
+                clearSaved={form.clearHeaders}
+                onClearSaved={(clearHeaders) =>
+                  setForm({ ...form, clearHeaders, headers: clearHeaders ? "" : form.headers })
+                }
+                onChange={(headers) => setForm({ ...form, headers, clearHeaders: false })}
+              />
+            </>
+          )}
+
+          <label className="flex cursor-pointer items-start gap-3 rounded-xl border border-border/70 bg-muted/30 p-3.5">
+            <input
+              type="checkbox"
+              className="mt-0.5 size-4 rounded border-input accent-primary"
+              checked={form.defaultEnabled}
+              onChange={(event) => setForm({ ...form, defaultEnabled: event.target.checked })}
+            />
+            <span>
+              <span className="block text-sm font-medium">Enabled for users by default</span>
+              <span className="mt-0.5 block text-xs leading-5 text-muted-foreground">
+                Users can still turn this server off for their own agent sessions.
+              </span>
+            </span>
+          </label>
+
+          {!editing ? (
+            <div>
+              <button
+                type="button"
+                className="inline-flex h-9 items-center gap-2 rounded-xl px-2 text-sm font-medium text-muted-foreground hover:bg-muted hover:text-foreground"
+                onClick={() => setAdvancedOpen((open) => !open)}
+              >
+                <ChevronDown
+                  className={`size-4 transition-transform ${advancedOpen ? "rotate-180" : ""}`}
+                />
+                Advanced
+              </button>
+              {advancedOpen ? (
+                <div className="mt-3">
+                  <Field label="ID" optional hint="Generated from the name when left blank.">
+                    <input
+                      className={`${controlClass} w-full font-mono`}
+                      value={form.id}
+                      placeholder={slugify(form.name) || "github"}
+                      onChange={(event) => setForm({ ...form, id: event.target.value })}
                     />
                   </Field>
-                  <Field label="Headers" optional>
-                    <textarea
-                      className={textArea}
-                      value={form.headers}
-                      placeholder="Authorization=Bearer ..."
-                      onChange={(e) => setForm({ ...form, headers: e.target.value })}
-                    />
-                  </Field>
-                </>
-              )}
-              {editing ? (
-                <div className="self-end text-xs text-muted-foreground">
-                  Leave secret fields empty to keep the saved values unchanged.
                 </div>
               ) : null}
             </div>
           ) : null}
         </div>
-        <div className="mt-4 flex flex-wrap items-center gap-4 text-sm">
-          <label className="inline-flex items-center gap-2">
-            <input
-              type="checkbox"
-              checked={form.enabled}
-              onChange={(e) => setForm({ ...form, enabled: e.target.checked })}
-            />
-            Enabled
-          </label>
-          <label className="inline-flex items-center gap-2">
-            <input
-              type="checkbox"
-              checked={form.default_enabled}
-              onChange={(e) => setForm({ ...form, default_enabled: e.target.checked })}
-            />
-            Default enabled for users
-          </label>
-          <button
-            type="button"
-            className={primaryBtn}
-            disabled={saving}
-            onClick={() => void save()}
-          >
-            {saving ? (
-              <LoaderCircle className="size-4 animate-spin" />
-            ) : (
-              <Save className="size-4" />
-            )}
-            Save
-          </button>
-        </div>
-        <p className="mt-3 text-xs text-muted-foreground">
-          For URL keys, use placeholders such as ${"${AMAP_KEY}"} in the URL and save the real value
-          in Advanced URL Variables. Env, headers, and URL variables are encrypted.
-        </p>
-      </section>
-
-      <section className="grid gap-3 md:grid-cols-2">
-        {loading ? (
-          <div className="col-span-full flex h-32 items-center justify-center text-muted-foreground">
-            <LoaderCircle className="mr-2 size-4 animate-spin" />
-            Loading MCP servers
-          </div>
-        ) : mcps.length ? (
-          mcps.map((mcp) => (
-            <article key={mcp.id} className="rounded-lg border border-border bg-card p-4">
-              <div className="flex items-start gap-3">
-                <div className="grid size-10 shrink-0 place-items-center rounded-md bg-muted">
-                  <PlugZap className="size-5 text-muted-foreground" />
-                </div>
-                <div className="min-w-0 flex-1">
-                  <div className="flex items-center gap-2">
-                    <Link
-                      href={`/admin/mcps/${encodeURIComponent(mcp.id)}`}
-                      className="truncate text-sm font-semibold hover:underline"
-                    >
-                      {mcp.name || mcp.id}
-                    </Link>
-                    <span className="rounded-md border border-border px-2 py-0.5 text-xs text-muted-foreground">
-                      {mcp.transport}
-                    </span>
-                  </div>
-                  <p className="mt-1 line-clamp-2 text-sm text-muted-foreground">
-                    {mcp.description || "No description"}
-                  </p>
-                  <div className="mt-3 space-y-1 text-xs text-muted-foreground">
-                    <div className="truncate">
-                      {mcp.transport === "stdio" ? mcp.command : mcp.url}
-                    </div>
-                    <SecretHints title="URL vars" hints={mcp.url_var_hints} />
-                    <SecretHints title="Env" hints={mcp.env_hints} />
-                    <SecretHints title="Headers" hints={mcp.header_hints} />
-                  </div>
-                </div>
-                <div className="flex shrink-0 items-center gap-1">
-                  <button className={iconBtn} title="Toggle" onClick={() => void toggle(mcp)}>
-                    {mcp.enabled ? (
-                      <ToggleRight className="size-4" />
-                    ) : (
-                      <ToggleLeft className="size-4" />
-                    )}
-                  </button>
-                  <button className={iconBtn} title="Edit" onClick={() => edit(mcp)}>
-                    <Save className="size-4" />
-                  </button>
-                  <button className={iconBtn} title="Delete" onClick={() => void remove(mcp.id)}>
-                    <Trash2 className="size-4" />
-                  </button>
-                </div>
-              </div>
-              <div className="mt-3 flex flex-wrap gap-2 text-xs text-muted-foreground">
-                <span className="rounded-md border border-border px-2 py-0.5">
-                  {mcp.enabled ? "enabled" : "disabled"}
-                </span>
-                <span className="rounded-md border border-border px-2 py-0.5">
-                  {mcp.default_enabled ? "default on" : "default off"}
-                </span>
-              </div>
-            </article>
-          ))
-        ) : (
-          <div className="col-span-full rounded-lg border border-dashed border-border p-8 text-center text-sm text-muted-foreground">
-            No MCP servers configured.
-          </div>
-        )}
-      </section>
-    </main>
+      </AdminDrawer>
+    </AdminPage>
   );
 }
 
-function Stat({ label, value }: { label: string; value: number }) {
+function MCPCard({
+  mcp,
+  busy,
+  onEdit,
+  onToggle,
+  onDelete,
+}: {
+  mcp: MCPServer;
+  busy: boolean;
+  onEdit: () => void;
+  onToggle: () => void;
+  onDelete: () => void;
+}) {
+  const transport = normalizeTransport(mcp.transport);
+  const remote = transport !== "stdio";
+  const endpoint = !remote
+    ? [mcp.command, ...(mcp.args ?? [])].filter(Boolean).join(" ")
+    : mcp.url_hint;
+  const TransportIcon = remote ? Globe2 : FileTerminal;
   return (
-    <div className="min-w-20 border-r border-border px-3 py-2 last:border-r-0">
-      <div className="text-base font-semibold">{value}</div>
-      <div className="text-muted-foreground">{label}</div>
-    </div>
+    <article className="group flex min-h-56 flex-col rounded-2xl border border-border/75 bg-white/45 p-4 shadow-[0_12px_35px_-28px_rgba(30,64,175,0.65)] transition-[border-color,background-color,transform,box-shadow] hover:-translate-y-0.5 hover:border-blue-400/35 hover:bg-white/60 hover:shadow-[0_18px_42px_-28px_rgba(30,64,175,0.7)] motion-reduce:transform-none">
+      <div className="flex items-start gap-3">
+        <div className="grid size-10 shrink-0 place-items-center rounded-xl border border-border/70 bg-white/70 text-muted-foreground shadow-sm">
+          <TransportIcon className="size-[18px]" />
+        </div>
+        <div className="min-w-0 flex-1">
+          <div className="flex flex-wrap items-center gap-2">
+            <h2 className="truncate text-sm font-semibold text-foreground">{mcp.name || mcp.id}</h2>
+            <AdminStatusBadge>{transport === "http" ? "HTTP" : transport}</AdminStatusBadge>
+          </div>
+          <p className="mt-1 line-clamp-2 text-sm leading-5 text-muted-foreground">
+            {mcp.description || "No description"}
+          </p>
+        </div>
+        <AdminStatusBadge tone={mcp.enabled ? "green" : "neutral"} dot>
+          {mcp.enabled ? "Enabled" : "Disabled"}
+        </AdminStatusBadge>
+      </div>
+
+      <div className="mt-4 rounded-xl border border-border/60 bg-slate-50/65 px-3 py-2.5">
+        <div className="text-[10px] font-semibold uppercase tracking-[0.12em] text-muted-foreground">
+          {remote ? "URL" : "Command"}
+        </div>
+        <code className="mt-1 block truncate font-mono text-xs tabular-nums text-foreground/80">
+          {endpoint || (remote ? "Remote URL saved" : "Command saved")}
+        </code>
+      </div>
+
+      <div className="mt-auto flex flex-wrap items-center gap-2 pt-4">
+        {mcp.status === "verified" ? (
+          <span className="inline-flex items-center gap-1.5 text-xs text-blue-700">
+            <ShieldCheck className="size-3.5" />
+            Verified on save
+          </span>
+        ) : (
+          <span className="text-xs text-muted-foreground">Not verified on save</span>
+        )}
+        {mcp.default_enabled ? (
+          <span className="text-xs text-muted-foreground">· Default on</span>
+        ) : null}
+        <div className="ml-auto flex items-center gap-1">
+          <Button
+            variant="outline"
+            size="sm"
+            className="h-8 gap-1.5"
+            disabled={busy}
+            onClick={onEdit}
+          >
+            <Pencil className="size-4" />
+            Edit
+          </Button>
+          <AdminIconButton
+            disabled={busy}
+            aria-label={mcp.enabled ? `Disable ${mcp.name}` : `Enable ${mcp.name}`}
+            title={mcp.enabled ? "Disable" : "Enable"}
+            onClick={onToggle}
+          >
+            {busy ? (
+              <LoaderCircle className="size-4 animate-spin" />
+            ) : mcp.enabled ? (
+              <PowerOff className="size-4" />
+            ) : (
+              <Power className="size-4" />
+            )}
+          </AdminIconButton>
+          <AdminIconButton
+            disabled={busy}
+            aria-label={`Delete ${mcp.name}`}
+            title="Delete"
+            className="hover:bg-destructive/10 hover:text-destructive"
+            onClick={onDelete}
+          >
+            <Trash2 className="size-4" />
+          </AdminIconButton>
+        </div>
+      </div>
+    </article>
   );
 }
 
 function Field({
   label,
   optional = false,
+  hint,
   children,
 }: {
   label: string;
   optional?: boolean;
+  hint?: string;
   children: ReactNode;
 }) {
   return (
     <label className="grid gap-1.5 text-sm">
-      <span className="text-xs font-medium text-muted-foreground">
-        {label}
-        {optional ? <span className="font-normal"> optional</span> : null}
+      <span className="flex items-baseline justify-between gap-3 text-xs font-medium text-muted-foreground">
+        <span>
+          {label}
+          {optional ? <span className="font-normal"> · optional</span> : null}
+        </span>
+        {hint ? <span className="text-right font-normal">{hint}</span> : null}
       </span>
       {children}
     </label>
   );
 }
 
-function SecretHints({ title, hints }: { title: string; hints?: Record<string, string> }) {
-  const entries = Object.entries(hints || {});
-  if (!entries.length) return null;
+function SecretPairsField({
+  label,
+  value,
+  placeholder,
+  savedHints,
+  clearSaved,
+  onChange,
+  onClearSaved,
+}: {
+  label: string;
+  value: string;
+  placeholder: string;
+  savedHints?: Record<string, string>;
+  clearSaved: boolean;
+  onChange: (value: string) => void;
+  onClearSaved: (clear: boolean) => void;
+}) {
+  const savedKeys = Object.keys(savedHints ?? {});
   return (
-    <div className="truncate">
-      {title}: {entries.map(([k, v]) => `${k}=${v}`).join(", ")}
-    </div>
+    <Field label={label} optional hint="One KEY=value pair per line.">
+      <textarea
+        className={textAreaClass}
+        value={value}
+        placeholder={placeholder}
+        onChange={(event) => onChange(event.target.value)}
+      />
+      {savedKeys.length ? (
+        <div className="flex flex-wrap items-center justify-between gap-2 text-xs text-muted-foreground">
+          <span>
+            {clearSaved
+              ? "Saved values will be cleared."
+              : `Saved: ${savedKeys.join(", ")}. Blank keeps them.`}
+          </span>
+          <button
+            type="button"
+            className="font-medium text-foreground underline-offset-4 hover:underline"
+            onClick={() => onClearSaved(!clearSaved)}
+          >
+            {clearSaved ? "Keep saved values" : "Clear saved values"}
+          </button>
+        </div>
+      ) : null}
+    </Field>
   );
+}
+
+function normalizeTransport(value: string): FormState["transport"] {
+  const normalized = value.trim().toLowerCase().replace(/[_-]/g, "");
+  if (normalized === "http" || normalized === "streamablehttp") return "http";
+  if (normalized === "sse") return "sse";
+  return "stdio";
 }
 
 function slugify(raw: string) {
@@ -518,16 +694,24 @@ function splitArgs(raw: string) {
     .filter(Boolean);
 }
 
-function parsePairs(raw: string) {
-  const out: Record<string, string> = {};
-  for (const line of raw.split(/\n+/)) {
-    const trimmed = line.trim();
-    if (!trimmed) continue;
-    const idx = trimmed.indexOf("=");
-    if (idx <= 0) continue;
-    out[trimmed.slice(0, idx).trim()] = trimmed.slice(idx + 1).trim();
+function parsePairs(raw: string, field: string): Record<string, string> | undefined {
+  const result: Record<string, string> = {};
+  const lines = raw.split("\n");
+  for (const [index, rawLine] of lines.entries()) {
+    const line = rawLine.trim();
+    if (!line) continue;
+    const separator = line.indexOf("=");
+    if (separator <= 0) throw new Error(`${field} line ${index + 1} must use KEY=value.`);
+    const key = line.slice(0, separator).trim();
+    const value = line.slice(separator + 1).trim();
+    if (!/^[A-Za-z_][A-Za-z0-9_.-]*$/.test(key)) {
+      throw new Error(`${field} line ${index + 1} has an invalid key.`);
+    }
+    if (!value) throw new Error(`${field} line ${index + 1} has an empty value.`);
+    if (Object.hasOwn(result, key)) throw new Error(`${field} contains duplicate key ${key}.`);
+    result[key] = value;
   }
-  return out;
+  return Object.keys(result).length ? result : undefined;
 }
 
 async function readError(res: Response) {

@@ -46,8 +46,10 @@
 //	COCOLA_SCHEDULER_MIN_INTERVAL_SECS
 //	                           minimum schedule interval accepted (default 3600).
 //	COCOLA_CONFIG_SECRET_KEY    encrypts admin-managed runtime config secrets
-//	                           (MCP env/header). Empty falls back to
+//	                           (MCP URL/env/header). Empty falls back to
 //	                           COCOLA_MODEL_SECRET_KEY for compatibility.
+//	COCOLA_SANDBOX_ADDR         sandbox-manager gRPC address used for MCP checks.
+//	COCOLA_SANDBOX_IMAGE        runtime image used by temporary MCP checks.
 //
 // Persistence is in-memory for M5 (process-local); the PostgreSQL backend
 // lands in M7 behind the same store.Store interface — no handler change. The
@@ -190,6 +192,21 @@ func main() {
 		WithModelSecretKey(config.SecretFromEnv("COCOLA_MODEL_SECRET_KEY")).
 		WithConfigSecretKey(config.SecretFromEnv("COCOLA_CONFIG_SECRET_KEY")).
 		WithMinScheduleInterval(time.Duration(getenvInt("COCOLA_SCHEDULER_MIN_INTERVAL_SECS", 3600)) * time.Second)
+	if verifier, err := service.NewSandboxMCPVerifier(
+		os.Getenv("COCOLA_SANDBOX_ADDR"),
+		os.Getenv("COCOLA_SANDBOX_IMAGE"),
+	); err != nil {
+		log.Sugar().Warnw("MCP verification disabled", "err", err)
+	} else {
+		svc.WithMCPVerifier(verifier)
+		log.Info("MCP verification enabled (sandbox runtime)")
+	}
+	migrationCtx, migrationCancel := context.WithTimeout(context.Background(), 30*time.Second)
+	if err := svc.MigrateMCPRemoteURLs(migrationCtx); err != nil {
+		migrationCancel()
+		log.Sugar().Fatalf("secure legacy MCP URLs: %v", err)
+	}
+	migrationCancel()
 	if oc := objstore.ConfigFromEnv(); oc.Enabled() {
 		skillStore, err := objstore.New(oc)
 		if err != nil {

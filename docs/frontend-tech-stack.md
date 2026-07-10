@@ -122,6 +122,7 @@ shadcn/ui 在本项目中表示组件组织方式和 token 约定，不代表必
 - Chart.js 是当前 Admin 图表标准；不要在同一后台同时引入 Recharts 或 ECharts，除非现有方案无法满足明确需求。
 - React Flow 只在需要节点、边、缩放、拖拽和自动布局的真实图场景中引入；普通步骤列表或状态时间线继续使用常规 React 组件。
 - cmdk 用于命令搜索和大型可搜索选项集；小型固定选项使用 Dropdown Menu、Tabs 或原生控件。
+- Admin MCP 配置遵循“列表即状态、Drawer 即编辑”的单层结构。保存操作同时在真实 sandbox 中执行 MCP initialize 和工具发现；不再增加独立测试、健康页或发布状态。远程 URL 作为完整 secret 输入，界面只展示移除 userinfo、query 和 fragment 后的 `url_hint`。
 
 ## 8. 关键源码入口
 

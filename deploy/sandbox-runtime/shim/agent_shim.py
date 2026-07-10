@@ -46,9 +46,11 @@ from __future__ import annotations
 import asyncio
 import json
 import os
+import re
 import sys
 import time
 from typing import Any
+from urllib.parse import urlsplit, urlunsplit
 
 
 def _emit(obj: dict[str, Any]) -> None:
@@ -57,13 +59,18 @@ def _emit(obj: dict[str, Any]) -> None:
     sys.stdout.flush()
 
 
-def _read_request() -> dict[str, Any]:
+def _read_json_object() -> dict[str, Any]:
     raw = sys.stdin.read()
     if not raw.strip():
         raise ValueError("empty request on stdin")
     req = json.loads(raw)
     if not isinstance(req, dict):
         raise ValueError("request must be a JSON object")
+    return req
+
+
+def _read_request() -> dict[str, Any]:
+    req = _read_json_object()
     if not req.get("prompt"):
         raise ValueError("request.prompt is required")
     return req
@@ -200,14 +207,16 @@ def _message_to_events(message: Any) -> list[dict[str, Any]]:
                 if ev is not None:
                     events.append(ev)
     elif cls == "ResultMessage":
-        events.append({
-            "type": "result",
-            "is_error": bool(getattr(message, "is_error", False)),
-            "num_turns": getattr(message, "num_turns", None),
-            "total_cost_usd": getattr(message, "total_cost_usd", None),
-            "session_id": getattr(message, "session_id", None),
-            "result": getattr(message, "result", None),
-        })
+        events.append(
+            {
+                "type": "result",
+                "is_error": bool(getattr(message, "is_error", False)),
+                "num_turns": getattr(message, "num_turns", None),
+                "total_cost_usd": getattr(message, "total_cost_usd", None),
+                "session_id": getattr(message, "session_id", None),
+                "result": getattr(message, "result", None),
+            }
+        )
     elif cls == "SystemMessage":
         events.append({"type": "system", "subtype": getattr(message, "subtype", None)})
 
@@ -233,6 +242,138 @@ async def _run(req: dict[str, Any]) -> int:
     return 0
 
 
+def _safe_remote_url(raw_url: str) -> str:
+    try:
+        parsed = urlsplit(raw_url)
+    except ValueError:
+        return "remote MCP server"
+    if not parsed.scheme or not parsed.hostname:
+        return "remote MCP server"
+    host = parsed.hostname
+    if ":" in host and not host.startswith("["):
+        host = f"[{host}]"
+    try:
+        port = parsed.port
+    except ValueError:
+        return "remote MCP server"
+    if port:
+        host = f"{host}:{port}"
+    return urlunsplit((parsed.scheme, host, parsed.path, "", ""))
+
+
+def _redact_mcp_message(message: str, config: dict[str, Any]) -> str:
+    raw_url = str(config.get("url") or "")
+    replacements: list[tuple[str, str]] = []
+    if raw_url:
+        replacements.append((raw_url, _safe_remote_url(raw_url)))
+    for field in ("headers", "env"):
+        values = config.get(field)
+        if isinstance(values, dict):
+            for value in values.values():
+                secret = str(value or "")
+                if secret:
+                    replacements.append((secret, "[redacted]"))
+    for secret, replacement in sorted(replacements, key=lambda item: len(item[0]), reverse=True):
+        message = message.replace(secret, replacement)
+
+    # Libraries may normalize or shorten a URL before including it in an
+    # exception. Strip credentials, query and fragment from any remaining URL.
+    message = re.sub(
+        r"https?://[^\s\"'<>]+",
+        lambda match: _safe_remote_url(match.group(0)),
+        message,
+    )
+    return message
+
+
+def _sanitize_mcp_error(error: Exception, config: dict[str, Any]) -> str:
+    """Return an actionable error without reflecting URL/header/env secrets."""
+    return _redact_mcp_message(f"{type(error).__name__}: {error}", config)[:500]
+
+
+def _sanitize_agent_error(error: Exception, req: dict[str, Any]) -> str:
+    message = f"{type(error).__name__}: {error}"
+    servers = req.get("mcp_servers")
+    if isinstance(servers, dict):
+        for config in servers.values():
+            if isinstance(config, dict):
+                message = _redact_mcp_message(message, config)
+    return message[:500]
+
+
+async def _initialize_mcp(config: dict[str, Any]) -> dict[str, Any]:
+    from mcp import ClientSession, StdioServerParameters
+    from mcp.client.sse import sse_client
+    from mcp.client.stdio import stdio_client
+    from mcp.client.streamable_http import streamablehttp_client
+
+    transport = str(config.get("type") or "").lower()
+    if transport == "stdio":
+        command = str(config.get("command") or "").strip()
+        if not command:
+            raise ValueError("stdio command is required")
+        args = config.get("args") if isinstance(config.get("args"), list) else []
+        env = config.get("env") if isinstance(config.get("env"), dict) else None
+        params = StdioServerParameters(command=command, args=args, env=env)
+        client = stdio_client(params)
+    elif transport == "http":
+        raw_url = str(config.get("url") or "").strip()
+        if not raw_url:
+            raise ValueError("HTTP URL is required")
+        headers = config.get("headers") if isinstance(config.get("headers"), dict) else None
+        client = streamablehttp_client(
+            raw_url,
+            headers=headers,
+            timeout=10,
+            sse_read_timeout=45,
+        )
+    elif transport == "sse":
+        raw_url = str(config.get("url") or "").strip()
+        if not raw_url:
+            raise ValueError("SSE URL is required")
+        headers = config.get("headers") if isinstance(config.get("headers"), dict) else None
+        client = sse_client(
+            raw_url,
+            headers=headers,
+            timeout=10,
+            sse_read_timeout=45,
+        )
+    else:
+        raise ValueError("transport must be stdio, http, or sse")
+
+    async with client as streams:
+        read_stream, write_stream = streams[0], streams[1]
+        async with ClientSession(read_stream, write_stream) as session:
+            initialized = await session.initialize()
+            tools = await session.list_tools()
+
+    server_info = getattr(initialized, "serverInfo", None) or getattr(
+        initialized, "server_info", None
+    )
+    return {
+        "status": "connected",
+        "server_name": str(getattr(server_info, "name", "") or ""),
+        "server_version": str(getattr(server_info, "version", "") or ""),
+        "tool_count": len(getattr(tools, "tools", []) or []),
+    }
+
+
+async def _mcp_check(req: dict[str, Any]) -> int:
+    config = req.get("config")
+    if not isinstance(config, dict):
+        _emit({"status": "error", "error": "config must be a JSON object"})
+        return 2
+    try:
+        result = await _initialize_mcp(config)
+    except asyncio.CancelledError:
+        raise
+    except Exception as error:  # noqa: BLE001
+        _emit({"status": "error", "error": _sanitize_mcp_error(error, config)})
+        return 1
+    _emit(result)
+    return 0
+
+
 def _selfcheck() -> int:
     """Environment sanity probe used by the verification script.
 
@@ -247,9 +388,7 @@ def _selfcheck() -> int:
         if not shutil.which(exe):
             return "missing"
         try:
-            out = subprocess.check_output(
-                list(cmd), text=True, stderr=subprocess.STDOUT
-            ).strip()
+            out = subprocess.check_output(list(cmd), text=True, stderr=subprocess.STDOUT).strip()
         except Exception as e:  # noqa: BLE001
             return f"error: {e}"
         return out.splitlines()[0] if out else "installed"
@@ -285,17 +424,13 @@ def _selfcheck() -> int:
             info["node"] = f"error: {e}"
     if shutil.which("claude"):
         try:
-            info["claude_cli"] = subprocess.check_output(
-                ["claude", "--version"], text=True
-            ).strip()
+            info["claude_cli"] = subprocess.check_output(["claude", "--version"], text=True).strip()
         except Exception as e:  # noqa: BLE001
             info["claude_cli"] = f"error: {e}"
     try:
         import claude_agent_sdk  # noqa: F401
 
-        info["claude_agent_sdk"] = getattr(
-            claude_agent_sdk, "__version__", "installed"
-        )
+        info["claude_agent_sdk"] = getattr(claude_agent_sdk, "__version__", "installed")
     except Exception as e:  # noqa: BLE001
         info["claude_agent_sdk"] = f"missing: {e}"
 
@@ -321,10 +456,7 @@ def _selfcheck() -> int:
         and info["claude_cli"]
         and not str(info["claude_cli"]).startswith("error")
         and not str(info["claude_agent_sdk"]).startswith("missing")
-        and all(
-            not str(info[name]).startswith(("missing", "error"))
-            for name in required_tools
-        )
+        and all(not str(info[name]).startswith(("missing", "error")) for name in required_tools)
     )
     return 0 if ok else 1
 
@@ -332,6 +464,13 @@ def _selfcheck() -> int:
 def main() -> int:
     if "--selfcheck" in sys.argv[1:]:
         return _selfcheck()
+    if "--mcp-check" in sys.argv[1:]:
+        try:
+            req = _read_json_object()
+        except Exception as e:  # noqa: BLE001
+            _emit({"status": "error", "error": f"invalid request: {e}"})
+            return 2
+        return asyncio.run(_mcp_check(req))
     try:
         req = _read_request()
     except Exception as e:  # noqa: BLE001
@@ -340,7 +479,7 @@ def main() -> int:
     try:
         return asyncio.run(_run(req))
     except Exception as e:  # noqa: BLE001
-        _emit({"type": "error", "stage": "run", "error": str(e)})
+        _emit({"type": "error", "stage": "run", "error": _sanitize_agent_error(e, req)})
         return 1
 
 

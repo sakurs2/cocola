@@ -744,16 +744,11 @@ type mcpReq struct {
 	Command        string            `json:"command,omitempty"`
 	Args           *[]string         `json:"args,omitempty"`
 	URL            string            `json:"url,omitempty"`
-	URLVars        map[string]string `json:"url_vars,omitempty"`
 	Env            map[string]string `json:"env,omitempty"`
 	Headers        map[string]string `json:"headers,omitempty"`
-	ClearURLVars   bool              `json:"clear_url_vars,omitempty"`
 	ClearEnv       bool              `json:"clear_env,omitempty"`
 	ClearHeaders   bool              `json:"clear_headers,omitempty"`
-	Enabled        *bool             `json:"enabled,omitempty"`
 	DefaultEnabled *bool             `json:"default_enabled,omitempty"`
-	Source         string            `json:"source,omitempty"`
-	Status         string            `json:"status,omitempty"`
 }
 
 func (req mcpReq) input(actor string) service.MCPServerInput {
@@ -765,16 +760,11 @@ func (req mcpReq) input(actor string) service.MCPServerInput {
 		Command:        req.Command,
 		Args:           req.Args,
 		URL:            req.URL,
-		URLVars:        req.URLVars,
 		Env:            req.Env,
 		Headers:        req.Headers,
-		ClearURLVars:   req.ClearURLVars,
 		ClearEnv:       req.ClearEnv,
 		ClearHeaders:   req.ClearHeaders,
-		Enabled:        req.Enabled,
 		DefaultEnabled: req.DefaultEnabled,
-		Source:         req.Source,
-		Status:         req.Status,
 		Actor:          actor,
 	}
 }

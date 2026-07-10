@@ -101,9 +101,9 @@ type MCPServer struct {
 	Transport            string          `json:"transport"` // "stdio" | "http" | "sse"
 	Command              string          `json:"command,omitempty"`
 	ArgsJSON             json.RawMessage `json:"args,omitempty"`
-	URL                  string          `json:"url,omitempty"`
+	URL                  string          `json:"-"`
 	URLVarCiphertextJSON json.RawMessage `json:"-"`
-	URLVarHintJSON       json.RawMessage `json:"url_var_hints,omitempty"`
+	URLVarHintJSON       json.RawMessage `json:"-"`
 	EnvCiphertextJSON    json.RawMessage `json:"-"`
 	EnvHintJSON          json.RawMessage `json:"env_hints,omitempty"`
 	HeaderCiphertextJSON json.RawMessage `json:"-"`
