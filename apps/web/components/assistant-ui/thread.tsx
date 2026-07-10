@@ -44,11 +44,14 @@ import { CocolaTagline } from "@/components/assistant-ui/cocola-tagline";
 import { TooltipIconButton } from "@/components/assistant-ui/tooltip-icon-button";
 import { MarkdownText } from "@/components/assistant-ui/markdown-text";
 import {
+  RailEnvironment,
   RailFile,
   RailReasoning,
+  RailResponsePending,
   RailText,
   RailTool,
 } from "@/components/assistant-ui/rail";
+import { type EnvironmentPreparationSnapshot } from "@/lib/environment";
 import {
   LOCAL_SIMPLE_ICON_PATHS,
   SIMPLE_ICON_FALLBACK_BADGES,
@@ -550,17 +553,32 @@ const AssistantMessage: FC = () => (
 const AssistantMessageParts: FC = () => {
   const isLast = useMessage((m) => m.isLast);
   const isRunning = useThread((t) => t.isRunning);
+  const custom = useMessage((m) => m.metadata.custom) as UiMessageMetadata & {
+    environmentPreparation?: EnvironmentPreparationSnapshot;
+    environmentOnly?: boolean;
+  };
   const streaming = isLast && isRunning;
+  const awaitingFirstResponsePart =
+    streaming &&
+    custom.environmentOnly === true &&
+    custom.environmentPreparation != null &&
+    custom.environmentPreparation.state !== "preparing";
   return (
     <div className={streaming ? "aui-rail-streaming" : undefined}>
-      <MessagePrimitive.Parts
-        components={{
-          Text: TextPart,
-          Reasoning: ReasoningPart,
-          File: ArtifactFilePart,
-          tools: { Fallback: ToolFallback },
-        }}
-      />
+      {custom.environmentPreparation ? (
+        <RailEnvironment environment={custom.environmentPreparation} />
+      ) : null}
+      {awaitingFirstResponsePart ? <RailResponsePending /> : null}
+      {!custom.environmentOnly ? (
+        <MessagePrimitive.Parts
+          components={{
+            Text: TextPart,
+            Reasoning: ReasoningPart,
+            File: ArtifactFilePart,
+            tools: { Fallback: ToolFallback },
+          }}
+        />
+      ) : null}
     </div>
   );
 };

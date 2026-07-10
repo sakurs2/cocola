@@ -95,6 +95,7 @@ async def test_request_includes_mcp_servers_when_configured():
     sent = json.loads(execu.stream_calls[0]["stdin"])
     assert sent["mcp_servers"]["github"]["command"] == "npx"
     assert sent["mcp_servers"]["github"]["env"]["GITHUB_TOKEN"] == "secret"
+    assert "environment_skills" not in sent
 
 
 async def test_environment_status_is_forwarded_as_a_snapshot():
@@ -125,16 +126,75 @@ async def test_environment_status_is_forwarded_as_a_snapshot():
         yield ExecChunk(kind="exit", exit_code=0)
 
     provider = InSandboxShimProvider(StaticSandboxExecutor(stream_handler=stream_handler))
-    opts = AgentOptions(user_id="U1", session_id="S1", sandbox_id="box-1")
+    opts = AgentOptions(
+        user_id="U1",
+        session_id="S1",
+        sandbox_id="box-1",
+        environment_skills=[{"id": "web", "name": "Web Search", "version": "1.2"}],
+    )
 
     events = await _drain(provider, "hello", opts)
 
     assert [event.kind for event in events] == ["environment_status", "done"]
+    expected_components = [
+        {
+            "kind": "skill",
+            "id": "web",
+            "label": "Web Search",
+            "status": "loaded",
+            "tool_count": 0,
+            "version": "1.2",
+        },
+        *components,
+    ]
     assert events[0].data == {
         "version": "1",
         "phase": "degraded",
-        "components": json.dumps(components, ensure_ascii=False, separators=(",", ":")),
+        "components": json.dumps(
+            expected_components,
+            ensure_ascii=False,
+            separators=(",", ":"),
+        ),
     }
+
+
+async def test_loaded_skills_enrich_an_empty_ready_environment_snapshot():
+    def stream_handler(sandbox_id, cmd, stdin):
+        yield ExecChunk(
+            kind="stdout",
+            data=_ndjson(
+                {
+                    "type": "environment_status",
+                    "version": 1,
+                    "phase": "ready",
+                    "components": [],
+                },
+                {"type": "done", "session_id": "sess-1"},
+            ),
+        )
+        yield ExecChunk(kind="exit", exit_code=0)
+
+    provider = InSandboxShimProvider(StaticSandboxExecutor(stream_handler=stream_handler))
+    opts = AgentOptions(
+        user_id="U1",
+        session_id="S1",
+        sandbox_id="box-1",
+        environment_skills=[{"id": "pdf", "name": "PDF", "version": "1.0"}],
+    )
+
+    events = await _drain(provider, "hello", opts)
+
+    components = json.loads(events[0].data["components"])
+    assert components == [
+        {
+            "kind": "skill",
+            "id": "pdf",
+            "label": "PDF",
+            "status": "loaded",
+            "tool_count": 0,
+            "version": "1.0",
+        }
+    ]
 
 
 async def test_session_id_is_reused_as_resume_next_turn():

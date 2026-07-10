@@ -1,8 +1,15 @@
 "use client";
 
 import { type EnvironmentComponent, type EnvironmentStatus } from "@/app/runtime-provider";
-import { CheckCircle, PlugsConnected, SpinnerGap, WarningCircle } from "@phosphor-icons/react";
-import { FileText, X } from "lucide-react";
+import {
+  CheckCircle,
+  PlugsConnected,
+  Sparkle,
+  SpinnerGap,
+  WarningCircle,
+} from "@phosphor-icons/react";
+import { ChevronRight, FileText, X } from "lucide-react";
+import { useState, type ReactNode } from "react";
 
 export function SessionStatusButton({
   status,
@@ -40,11 +47,13 @@ export function SessionStatusPanel({
   onOpenArtifact: () => void;
   onClose: () => void;
 }) {
-  const connected = status.components.filter(
-    (component) => component.status === "connected",
-  ).length;
-  const connecting = status.components.filter((component) => component.status === "pending").length;
-  const unavailable = status.components.filter((component) =>
+  const [skillsOpen, setSkillsOpen] = useState(false);
+  const [mcpsOpen, setMcpsOpen] = useState(true);
+  const skills = status.components.filter((component) => component.kind === "skill");
+  const mcps = status.components.filter((component) => component.kind === "mcp");
+  const connected = mcps.filter((component) => component.status === "connected").length;
+  const connecting = mcps.filter((component) => component.status === "pending").length;
+  const unavailable = mcps.filter((component) =>
     ["failed", "needs-auth", "timeout", "unavailable"].includes(component.status),
   ).length;
   const statusCounts = [
@@ -86,7 +95,7 @@ export function SessionStatusPanel({
       </header>
 
       <div className="min-h-0 flex-1 overflow-auto px-4 py-5">
-        {status.components.length === 0 ? (
+        {status.components.length === 0 && status.phase !== "ready" ? (
           <div className="flex items-start gap-3 text-sm text-muted-foreground">
             <EnvironmentPhaseIcon status={status} className="mt-0.5 size-4 shrink-0" />
             <div>
@@ -102,29 +111,55 @@ export function SessionStatusPanel({
                   ? "Checking the connections available to this turn."
                   : status.phase === "degraded"
                     ? "The environment check did not complete for this turn."
-                    : "No MCP servers are enabled for this session."}
+                    : "No environment capabilities were reported for this session."}
               </p>
             </div>
           </div>
         ) : (
-          <div>
-            <div className="mb-4 flex items-center justify-between gap-3">
-              <div>
-                <p className="text-xs font-medium uppercase tracking-[0.14em] text-muted-foreground">
-                  MCP connections
-                </p>
-                <p className="mt-1 text-xs text-muted-foreground">{statusCounts.join(" · ")}</p>
-              </div>
-            </div>
-            <div className="space-y-0">
-              {status.components.map((component, index) => (
-                <EnvironmentComponentRow
-                  key={`${component.kind}:${component.id}`}
-                  component={component}
-                  last={index === status.components.length - 1}
-                />
-              ))}
-            </div>
+          <div className="space-y-3">
+            <EnvironmentGroup
+              title="Skills"
+              summary={skills.length > 0 ? `${skills.length} loaded` : "None loaded"}
+              icon={<Sparkle className="size-4" weight="duotone" />}
+              open={skillsOpen}
+              onToggle={() => setSkillsOpen((open) => !open)}
+            >
+              {skills.length > 0 ? (
+                skills.map((component, index) => (
+                  <EnvironmentComponentRow
+                    key={`${component.kind}:${component.id}`}
+                    component={component}
+                    last={index === skills.length - 1}
+                  />
+                ))
+              ) : (
+                <EnvironmentEmptyState>
+                  No skills are loaded for this session.
+                </EnvironmentEmptyState>
+              )}
+            </EnvironmentGroup>
+
+            <EnvironmentGroup
+              title="MCP servers"
+              summary={statusCounts.length > 0 ? statusCounts.join(" · ") : "None enabled"}
+              icon={<PlugsConnected className="size-4" weight="duotone" />}
+              open={mcpsOpen}
+              onToggle={() => setMcpsOpen((open) => !open)}
+            >
+              {mcps.length > 0 ? (
+                mcps.map((component, index) => (
+                  <EnvironmentComponentRow
+                    key={`${component.kind}:${component.id}`}
+                    component={component}
+                    last={index === mcps.length - 1}
+                  />
+                ))
+              ) : (
+                <EnvironmentEmptyState>
+                  No MCP servers are enabled for this session.
+                </EnvironmentEmptyState>
+              )}
+            </EnvironmentGroup>
           </div>
         )}
       </div>
@@ -141,6 +176,49 @@ export function SessionStatusPanel({
       ) : null}
     </div>
   );
+}
+
+function EnvironmentGroup({
+  title,
+  summary,
+  icon,
+  open,
+  onToggle,
+  children,
+}: {
+  title: string;
+  summary: string;
+  icon: ReactNode;
+  open: boolean;
+  onToggle: () => void;
+  children: ReactNode;
+}) {
+  return (
+    <section className="overflow-hidden rounded-xl border border-border/80 bg-card/60">
+      <button
+        type="button"
+        aria-expanded={open}
+        onClick={onToggle}
+        className="flex w-full items-center gap-3 px-3 py-3 text-left transition-colors hover:bg-muted/50 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-inset focus-visible:ring-ring"
+      >
+        <span className="grid size-7 shrink-0 place-items-center rounded-lg bg-primary/10 text-primary">
+          {icon}
+        </span>
+        <span className="min-w-0 flex-1">
+          <span className="block text-sm font-medium text-foreground">{title}</span>
+          <span className="block truncate text-xs text-muted-foreground">{summary}</span>
+        </span>
+        <ChevronRight
+          className={`size-4 shrink-0 text-muted-foreground transition-transform ${open ? "rotate-90" : ""}`}
+        />
+      </button>
+      {open ? <div className="border-t border-border/70 px-3 py-3">{children}</div> : null}
+    </section>
+  );
+}
+
+function EnvironmentEmptyState({ children }: { children: ReactNode }) {
+  return <p className="px-1 text-xs leading-5 text-muted-foreground">{children}</p>;
 }
 
 function EnvironmentComponentRow({
@@ -165,7 +243,9 @@ function EnvironmentComponentRow({
         </div>
         {component.error ? (
           <p className="mt-1 break-words text-xs leading-5 text-amber-700">{component.error}</p>
-        ) : component.status === "connected" ? (
+        ) : component.kind === "skill" && component.version ? (
+          <p className="mt-1 text-xs text-muted-foreground">Version {component.version}</p>
+        ) : component.kind === "mcp" && component.status === "connected" ? (
           <p className="mt-1 text-xs text-muted-foreground">
             {component.toolCount} tool{component.toolCount === 1 ? "" : "s"} available
           </p>
@@ -195,26 +275,34 @@ function ComponentStatusIcon({ component }: { component: EnvironmentComponent })
   if (component.status === "pending") {
     return <SpinnerGap className="size-4 animate-spin text-sky-600" weight="bold" />;
   }
-  if (component.status === "connected") {
+  if (component.status === "connected" || component.status === "loaded") {
     return <CheckCircle className="size-4 text-emerald-600" weight="duotone" />;
   }
   return <WarningCircle className="size-4 text-amber-600" weight="duotone" />;
 }
 
 function environmentSummary(status: EnvironmentStatus): string {
-  const unavailable = status.components.filter((component) =>
+  const skills = status.components.filter((component) => component.kind === "skill");
+  const mcps = status.components.filter((component) => component.kind === "mcp");
+  const unavailable = mcps.filter((component) =>
     ["failed", "needs-auth", "timeout", "unavailable"].includes(component.status),
   ).length;
   if (status.phase === "preparing") return "Preparing environment…";
+  const parts =
+    skills.length > 0 ? [`${skills.length} skill${skills.length === 1 ? "" : "s"}`] : [];
   if (unavailable > 0) {
-    return `${unavailable} MCP connection${unavailable === 1 ? "" : "s"} unavailable`;
+    parts.push(`${unavailable} MCP unavailable`);
+    return parts.join(" · ");
   }
-  if (status.components.length === 0) return "Environment ready";
-  return `${status.components.length} MCP connection${status.components.length === 1 ? "" : "s"} ready`;
+  const connected = mcps.filter((component) => component.status === "connected").length;
+  if (connected > 0) parts.push(`${connected} MCP ready`);
+  return parts.length > 0 ? parts.join(" · ") : "Environment ready";
 }
 
 function componentStatusLabel(component: EnvironmentComponent): string {
   switch (component.status) {
+    case "loaded":
+      return "Loaded";
     case "connected":
       return "Connected";
     case "needs-auth":

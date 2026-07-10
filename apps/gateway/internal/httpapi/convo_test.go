@@ -39,6 +39,12 @@ func (f *fakeReleaser) ReleaseSession(_ context.Context, userID, sessionID strin
 // messages read back with the right shape.
 func TestChatPersistsTurn(t *testing.T) {
 	fs := &fakeStreamer{script: []agent.Event{
+		{Kind: "environment_prepare", Data: map[string]string{
+			"snapshot": `{"schema_version":1,"part_id":"environment","state":"preparing","components":[]}`,
+		}},
+		{Kind: "environment_prepare", Data: map[string]string{
+			"snapshot": `{"schema_version":1,"part_id":"environment","state":"ready","components":[{"kind":"skills","status":"ready","label":"Skills","summary":"2 loaded"}]}`,
+		}},
 		{Kind: "text", Data: map[string]string{"text": "hel"}},
 		{Kind: "text", Data: map[string]string{"text": "lo"}},
 		{Kind: "tool_use", Data: map[string]string{"id": "t1", "name": "bash", "input": "{}"}},
@@ -83,10 +89,17 @@ func TestChatPersistsTurn(t *testing.T) {
 		t.Fatalf("bad messages: %+v", msgs)
 	}
 	ap := msgs[1].Parts
-	if len(ap) != 2 || ap[0].Type != convo.PartText || ap[0].Text != "hello" {
+	if len(ap) != 3 || ap[0].Type != convo.PartEnvironment {
+		t.Fatalf("assistant environment not persisted first: %+v", ap)
+	}
+	var environment map[string]any
+	if err := json.Unmarshal(ap[0].Environment, &environment); err != nil || environment["state"] != "ready" {
+		t.Fatalf("assistant environment snapshot not updated: %v %#v", err, environment)
+	}
+	if ap[1].Type != convo.PartText || ap[1].Text != "hello" {
 		t.Fatalf("assistant text not coalesced: %+v", ap)
 	}
-	if ap[1].Type != convo.PartToolCall || ap[1].Result == nil || *ap[1].Result != "done" {
+	if ap[2].Type != convo.PartToolCall || ap[2].Result == nil || *ap[2].Result != "done" {
 		t.Fatalf("assistant tool-call not paired: %+v", ap)
 	}
 }

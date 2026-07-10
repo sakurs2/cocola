@@ -14,6 +14,7 @@ package convo
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"time"
 )
@@ -27,10 +28,11 @@ var ErrNotFound = errors.New("convo: not found")
 // values are the WIRE CONTRACT with apps/web/app/runtime-provider.tsx (UiPart):
 // changing them requires a matching frontend change.
 const (
-	PartText      = "text"
-	PartReasoning = "reasoning"
-	PartToolCall  = "tool-call"
-	PartFile      = "file"
+	PartText        = "text"
+	PartReasoning   = "reasoning"
+	PartToolCall    = "tool-call"
+	PartFile        = "file"
+	PartEnvironment = "environment"
 )
 
 // Part mirrors the frontend UiPart union. A text/reasoning part uses Text; a
@@ -61,6 +63,10 @@ type Part struct {
 	MimeType    string `json:"mimeType,omitempty"`
 	Size        int64  `json:"size,omitempty"`
 	DownloadURL string `json:"downloadUrl,omitempty"`
+
+	// environment: an opaque, versioned snapshot. Keeping the raw JSON intact
+	// lets newer component kinds/fields survive an older gateway unchanged.
+	Environment json.RawMessage `json:"environment,omitempty"`
 }
 
 // Conversation is one row in the sidebar. ID reuses the frontend session_id.

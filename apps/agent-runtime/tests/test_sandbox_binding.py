@@ -13,6 +13,7 @@ directly with a StaticSandboxBinder and assert the binding lifecycle:
     thread, returning a transport-neutral BoundSandbox.
 """
 
+import json
 from dataclasses import dataclass, field
 
 import grpc
@@ -79,11 +80,26 @@ async def test_query_acquires_sandbox_when_unpinned():
     assert ctx.written[0].data["sandbox_id"] == "box-S9"
     assert ctx.written[0].data["endpoint"] == "inmem://local"
     assert ctx.written[0].data["reused"] == "false"
-    assert kinds[1] == "sandbox"
-    assert ctx.written[1].data["sandbox_id"] == "box-S9"
-    assert ctx.written[1].data["endpoint"] == "inmem://local"
+    assert kinds[1] == "environment_prepare"
+    preparing = json.loads(ctx.written[1].data["snapshot"])
+    assert preparing["schema_version"] == 1
+    assert preparing["state"] == "preparing"
+    assert preparing["components"][0]["kind"] == "sandbox"
+    assert kinds[2] == "sandbox"
+    assert ctx.written[2].data["sandbox_id"] == "box-S9"
+    assert ctx.written[2].data["endpoint"] == "inmem://local"
+    ready = json.loads(ctx.written[3].data["snapshot"])
+    assert ready["state"] == "ready"
+    assert all(component["kind"] != "mcp" for component in ready["components"])
     # Then the agent output, ending clean.
-    assert kinds == ["trace", "sandbox", "text", "done"]
+    assert kinds == [
+        "trace",
+        "environment_prepare",
+        "sandbox",
+        "environment_prepare",
+        "text",
+        "done",
+    ]
 
 
 async def test_caller_pinned_sandbox_is_respected():
@@ -127,6 +143,16 @@ async def test_repeated_acquire_reports_reuse():
     second = await binder.acquire(session_id="S1", user_id="u")
     assert second.reused is True
     assert second.id == "box-S1"
+
+
+async def test_reused_sandbox_does_not_emit_environment_preparation():
+    binder = StaticSandboxBinder()
+    await binder.acquire(session_id="S1", user_id="U1")
+    ctx = FakeContext()
+
+    await AgentRuntimeServicer(RecordingProvider(), binder=binder).Query(FakeRequest(), ctx)
+
+    assert all(event.kind != "environment_prepare" for event in ctx.written)
 
 
 # --- SandboxManagerBinder: the production thread-bridge over SandboxClient ----

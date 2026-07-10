@@ -33,7 +33,9 @@ Gateway SSE
 
 - 不绕过 runtime 另建一套聊天消息状态。
 - 新的消息 part 或 SSE event 先在 runtime adapter 中完成类型化和容错，再交给渲染层。
-- `environment_status` 是当前 Agent 会话首次初始化的环境快照，不写入消息历史，也不在正常 follow-up 中重复检查；它与 artifact 共用右侧 Context Dock，移动端使用覆盖面板。
+- `environment_status` 是当前 Agent 会话首次初始化的环境快照，包含已加载的 Skills 和 MCP 连接状态；不写入消息历史，也不在正常 follow-up 中重复检查。它与 artifact 共用右侧 Context Dock，移动端使用覆盖面板。
+- `environment_prepare` 是某一轮消息的阻塞性环境准备快照，仅在绑定新 sandbox 时产生，并作为消息的第一个 Rail 节点持久化；复用现有 sandbox 时不产生。它使用开放的 `schema_version + part_id + state + components[]` 结构，当前只展示 workspace、checkpoint、attachments 和 Skills，不包含 MCP。
+- Environment 已完成但首个模型输出尚未到达时，消息 Rail 根据本地 running 状态显示临时的 `Starting response` 节点；首个 reasoning、text、tool 或 file part 到达后自动替换。该节点不进入 SSE 协议和消息历史。
 - composer、附件、消息流和 tool call 优先复用 assistant-ui primitive。
 - cocola 的视觉组合集中在 `components/assistant-ui/`，不要修改 assistant-ui 内部实现。
 
@@ -124,6 +126,8 @@ shadcn/ui 在本项目中表示组件组织方式和 token 约定，不代表必
 - React Flow 只在需要节点、边、缩放、拖拽和自动布局的真实图场景中引入；普通步骤列表或状态时间线继续使用常规 React 组件。
 - cmdk 用于命令搜索和大型可搜索选项集；小型固定选项使用 Dropdown Menu、Tabs 或原生控件。
 - Admin MCP 配置遵循“列表即状态、Drawer 即编辑”的单层结构。保存时只校验并安全持久化配置，不额外申请 sandbox；连接能力由首次真实 Agent 会话自然验证，不增加独立测试、健康页或发布状态。远程 URL 作为完整 secret 输入，界面只展示移除 userinfo、query 和 fragment 后的 `url_hint`。
+- Session Status 使用一份完整环境快照：agent-runtime 在 Skill 同步成功后补入 `kind=skill` 的 Loaded 组件，sandbox shim 继续提供真实的 `kind=mcp` 连接状态；前端按 Skills 与 MCP servers 分组并允许独立折叠，不在浏览器合并多个局部快照。
+- Environment 消息节点与 Session Status 职责分离：前者解释本轮为何尚未开始，只呈现阻塞性的环境准备；后者呈现会话能力和异步 MCP 连接。Gateway 以原始 JSON 保存 Environment 快照并按稳定 `part_id` 原位更新，未知 component 与字段不得被中间层丢弃。
 - MCP 连接终态必须来自实际执行首次对话的同一个 `ClaudeSDKClient`，不得通过 system prompt 注入，也不得申请额外 sandbox。模型请求在 client 初始化后立即开始；仅当 SDK 报告 `pending` 时进行最多 8 秒的有界查询，终态到达后停止，并通过 `environment_status` SSE 快照更新 Session Status。有 `resume` 的 follow-up 使用 one-shot SDK 路径且不重复查询状态。该状态表示会话初始化时的加载结果，不是持续健康监控。
 
 ## 8. 关键源码入口

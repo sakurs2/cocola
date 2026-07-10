@@ -1,6 +1,9 @@
 package convo
 
-import "strconv"
+import (
+	"encoding/json"
+	"strconv"
+)
 
 // Reducer aggregates the agent's SSE event stream into an assistant message's
 // Part slice, mirroring the frontend reducer in apps/web/app/runtime-provider.tsx
@@ -8,9 +11,9 @@ import "strconv"
 // renders is what makes route A a zero-drift mirror: a stored message replays
 // straight through convertMessage.
 //
-// Event vocabulary (kind): text | thinking | tool_use | tool_result | file |
-// error; result / system / sandbox / done carry no message-body content and
-// are dropped (identical to the frontend). Unknown kinds are ignored.
+// Event vocabulary (kind): environment_prepare | text | thinking | tool_use |
+// tool_result | file | error; result / system / sandbox / done carry no
+// message-body content and are dropped (identical to the frontend).
 type Reducer struct {
 	parts []Part
 }
@@ -21,6 +24,8 @@ func NewReducer() *Reducer { return &Reducer{} }
 // Apply folds one event (kind + its data map) into the accumulating parts.
 func (r *Reducer) Apply(kind string, data map[string]string) {
 	switch kind {
+	case "environment_prepare":
+		r.upsertEnvironment(data["snapshot"])
 	case "text":
 		r.appendText(PartText, data["text"])
 	case "thinking":
@@ -46,6 +51,34 @@ func (r *Reducer) Apply(kind string, data map[string]string) {
 	default:
 		// result / system / sandbox / done / unknown: no body content.
 	}
+}
+
+const maxEnvironmentSnapshotBytes = 64 << 10
+
+type environmentEnvelope struct {
+	PartID string `json:"part_id"`
+}
+
+func (r *Reducer) upsertEnvironment(snapshot string) {
+	if snapshot == "" || len(snapshot) > maxEnvironmentSnapshotBytes || !json.Valid([]byte(snapshot)) {
+		return
+	}
+	var next environmentEnvelope
+	if err := json.Unmarshal([]byte(snapshot), &next); err != nil || next.PartID == "" {
+		return
+	}
+	raw := append(json.RawMessage(nil), snapshot...)
+	for i := range r.parts {
+		if r.parts[i].Type != PartEnvironment {
+			continue
+		}
+		var current environmentEnvelope
+		if json.Unmarshal(r.parts[i].Environment, &current) == nil && current.PartID == next.PartID {
+			r.parts[i].Environment = raw
+			return
+		}
+	}
+	r.parts = append([]Part{{Type: PartEnvironment, Environment: raw}}, r.parts...)
 }
 
 func (r *Reducer) appendFile(data map[string]string) {

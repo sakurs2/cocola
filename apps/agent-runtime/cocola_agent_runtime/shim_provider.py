@@ -166,6 +166,50 @@ def _shim_event_to_agent_events(ev: dict) -> list[AgentEvent]:
     return []
 
 
+def _with_loaded_skills(
+    event: AgentEvent,
+    skills: list[dict[str, str]] | None,
+) -> AgentEvent:
+    """Fold runtime-owned Skill state into a shim-owned MCP snapshot."""
+    if event.kind != "environment_status" or not skills:
+        return event
+    try:
+        raw_components = json.loads(event.data.get("components", "[]"))
+    except (TypeError, json.JSONDecodeError):
+        raw_components = []
+    components = [item for item in raw_components if isinstance(item, dict)]
+    existing = {(str(item.get("kind") or ""), str(item.get("id") or "")) for item in components}
+    loaded: list[dict[str, object]] = []
+    for skill in sorted(skills, key=lambda item: str(item.get("id") or "")):
+        skill_id = str(skill.get("id") or "").strip()
+        if not skill_id or ("skill", skill_id) in existing:
+            continue
+        component: dict[str, object] = {
+            "kind": "skill",
+            "id": skill_id,
+            "label": str(skill.get("name") or skill_id).strip() or skill_id,
+            "status": "loaded",
+            "tool_count": 0,
+        }
+        version = str(skill.get("version") or "").strip()
+        if version:
+            component["version"] = version
+        loaded.append(component)
+    if not loaded:
+        return event
+    return AgentEvent(
+        kind=event.kind,
+        data={
+            **event.data,
+            "components": json.dumps(
+                [*loaded, *components],
+                ensure_ascii=False,
+                separators=(",", ":"),
+            ),
+        },
+    )
+
+
 @dataclass
 class _AttemptState:
     """Mutable bookkeeping for ONE shim exec attempt.
@@ -430,6 +474,7 @@ class InSandboxShimProvider:
                     if ev.get("type") == "result" and ev.get("session_id"):
                         state.last_session_id = ev["session_id"]
                     for out in _shim_event_to_agent_events(ev):
+                        out = _with_loaded_skills(out, options.environment_skills)
                         if out.kind == "error":
                             _record_error(out, out.data.get("error", ""))
                         else:
@@ -447,6 +492,7 @@ class InSandboxShimProvider:
                             state.last_session_id = ev["session_id"]
                         elif ev.get("type") != "done":
                             for out in _shim_event_to_agent_events(ev):
+                                out = _with_loaded_skills(out, options.environment_skills)
                                 if out.kind == "error":
                                     _record_error(out, out.data.get("error", ""))
                                 else:

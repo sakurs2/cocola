@@ -31,6 +31,10 @@ import {
 import { signOut } from "next-auth/react";
 import { parseFrames, type AgentEvent } from "@/lib/sse";
 import { Base64AttachmentAdapter } from "@/lib/base64-attachment-adapter";
+import {
+  parseEnvironmentPreparationSnapshot,
+  type EnvironmentPreparationSnapshot,
+} from "@/lib/environment";
 
 // ---- Local message model (carries cocola semantics) ------------------------
 
@@ -61,11 +65,17 @@ type UiFilePart = {
   downloadUrl: string;
 };
 
+type UiEnvironmentPart = {
+  type: "environment";
+  environment: EnvironmentPreparationSnapshot;
+};
+
 type UiPart =
   | { type: "text"; text: string }
   | { type: "reasoning"; text: string }
   | UiToolCall
-  | UiFilePart;
+  | UiFilePart
+  | UiEnvironmentPart;
 
 type UiMessage = {
   id: string;
@@ -83,6 +93,7 @@ export type SandboxInfo = {
 
 export type EnvironmentComponentStatus =
   | "pending"
+  | "loaded"
   | "connected"
   | "failed"
   | "needs-auth"
@@ -96,6 +107,7 @@ export type EnvironmentComponent = {
   label: string;
   status: EnvironmentComponentStatus;
   toolCount: number;
+  version?: string;
   error?: string;
 };
 
@@ -225,6 +237,7 @@ function parseSize(v: string | undefined): number {
 const ENVIRONMENT_PHASES = new Set<EnvironmentStatus["phase"]>(["preparing", "ready", "degraded"]);
 const ENVIRONMENT_COMPONENT_STATUSES = new Set<EnvironmentComponentStatus>([
   "pending",
+  "loaded",
   "connected",
   "failed",
   "needs-auth",
@@ -251,6 +264,7 @@ function parseEnvironmentStatus(event: AgentEvent): EnvironmentStatus | null {
     if (!id || !ENVIRONMENT_COMPONENT_STATUSES.has(status)) return [];
     const count = Number(item.tool_count);
     const error = stringValue(item.error).trim().slice(0, 500);
+    const componentVersion = stringValue(item.version).trim().slice(0, 80);
     return [
       {
         kind: stringValue(item.kind) || "mcp",
@@ -258,6 +272,7 @@ function parseEnvironmentStatus(event: AgentEvent): EnvironmentStatus | null {
         label: stringValue(item.label).trim() || id,
         status,
         toolCount: Number.isFinite(count) && count > 0 ? count : 0,
+        ...(componentVersion ? { version: componentVersion } : {}),
         ...(error ? { error } : {}),
       },
     ];
@@ -303,6 +318,19 @@ function normalizeMetadata(raw: UiMessageMetadata | undefined): UiMessageMetadat
     ...(typeof raw.model_icon_slug === "string" ? { model_icon_slug: raw.model_icon_slug } : {}),
     ...(icon ? { model_icon: icon } : {}),
   };
+}
+
+function normalizePersistedParts(parts: UiPart[] | undefined): UiPart[] {
+  const normalized: UiPart[] = [];
+  for (const part of parts ?? []) {
+    if (part.type !== "environment") {
+      normalized.push(part);
+      continue;
+    }
+    const environment = parseEnvironmentPreparationSnapshot(part.environment);
+    if (environment) normalized.push({ type: "environment", environment });
+  }
+  return normalized;
 }
 
 function normalizeModelOption(raw: unknown): ModelOption | null {
@@ -392,10 +420,26 @@ function fillToolResult(
   );
 }
 
+function upsertEnvironmentPreparation(
+  parts: UiPart[],
+  environment: EnvironmentPreparationSnapshot,
+): UiPart[] {
+  const index = parts.findIndex(
+    (part) => part.type === "environment" && part.environment.part_id === environment.part_id,
+  );
+  const next: UiEnvironmentPart = { type: "environment", environment };
+  if (index < 0) return [next, ...parts];
+  return parts.map((part, partIndex) => (partIndex === index ? next : part));
+}
+
 // Reduce a single agent event into the assistant message's parts. Pure.
 function reducePart(parts: UiPart[], ev: AgentEvent): UiPart[] {
   const d = ev.data ?? {};
   switch (ev.kind) {
+    case "environment_prepare": {
+      const environment = parseEnvironmentPreparationSnapshot(d.snapshot);
+      return environment ? upsertEnvironmentPreparation(parts, environment) : parts;
+    }
     case "text":
       return appendTo(parts, "text", d.text ?? "");
     case "thinking":
@@ -434,7 +478,11 @@ function reducePart(parts: UiPart[], ev: AgentEvent): UiPart[] {
 
 // Map our local message to assistant-ui's ThreadMessageLike.
 function convertMessage(message: UiMessage): ThreadMessageLike {
-  const content = message.parts.map((p) => {
+  const environment = message.parts.find(
+    (part): part is UiEnvironmentPart => part.type === "environment",
+  )?.environment;
+  const content = message.parts.flatMap((p) => {
+    if (p.type === "environment") return [];
     if (p.type === "text") return { type: "text" as const, text: p.text };
     if (p.type === "reasoning") return { type: "reasoning" as const, text: p.text };
     if (p.type === "file") {
@@ -468,7 +516,11 @@ function convertMessage(message: UiMessage): ThreadMessageLike {
     id: message.id,
     createdAt: new Date(message.createdAt),
     metadata: {
-      custom: message.metadata ?? {},
+      custom: {
+        ...(message.metadata ?? {}),
+        ...(environment ? { environmentPreparation: environment } : {}),
+        ...(environment && content.length === 0 ? { environmentOnly: true } : {}),
+      },
     },
   };
 }
@@ -933,7 +985,7 @@ export function CocolaRuntimeProvider({ children }: { children: ReactNode }) {
         const loaded: UiMessage[] = (Array.isArray(rows) ? rows : []).map((m) => ({
           id: m.id,
           role: m.role,
-          parts: m.parts ?? [],
+          parts: normalizePersistedParts(m.parts),
           metadata: normalizeMetadata(m.metadata),
           createdAt: m.created_at ? new Date(m.created_at).getTime() : Date.now(),
         }));

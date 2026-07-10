@@ -26,6 +26,10 @@ class AgentOptions:
     max_turns: int = 30
     model_alias: str | None = None
     mcp_servers: dict[str, dict] | None = None
+    # Secret-free metadata for skills that were successfully materialized in
+    # this sandbox. The Route-A provider folds these into the same environment
+    # snapshot as MCP status; they never enter the model prompt.
+    environment_skills: list[dict[str, str]] | None = None
     # Per-user cocola token minted by the gateway for THIS turn (sub=user,
     # ten=tenant). A Route A provider injects it into the sandbox as
     # ANTHROPIC_AUTH_TOKEN so the in-sandbox brain calls the llm-gateway as the

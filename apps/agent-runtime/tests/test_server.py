@@ -236,10 +236,46 @@ async def test_query_error_becomes_terminal_event():
 
 async def test_query_folds_enabled_skills_into_options():
     prov = ListProvider([AgentEvent(kind="done", data={})])
-    cat = StaticSkillCatalog([Skill(id="web", name="Web Search")])
-    await AgentRuntimeServicer(prov, skills=cat).Query(FakeRequest(), FakeContext())
+    cat = StaticSkillCatalog(
+        [Skill(id="web", name="Web Search", version="1.2", skill_md="# Web Search")]
+    )
+    await AgentRuntimeServicer(
+        prov,
+        skills=cat,
+        executor=StaticSandboxExecutor(),
+    ).Query(FakeRequest(sandbox_id="box-1"), FakeContext())
     assert prov.seen_options.system_prompt is not None
     assert "Web Search" in prov.seen_options.system_prompt
+    assert prov.seen_options.environment_skills == [
+        {"id": "web", "name": "Web Search", "version": "1.2"}
+    ]
+
+
+async def test_fresh_environment_snapshot_reports_loaded_skills_without_mcp():
+    prov = ListProvider([AgentEvent(kind="done", data={})])
+    cat = StaticSkillCatalog(
+        [Skill(id="web", name="Web Search", version="1.2", skill_md="# Web Search")]
+    )
+    ctx = FakeContext()
+
+    await AgentRuntimeServicer(
+        prov,
+        skills=cat,
+        binder=StaticSandboxBinder(),
+        executor=StaticSandboxExecutor(),
+    ).Query(FakeRequest(), ctx)
+
+    snapshots = [
+        json.loads(event.data["snapshot"])
+        for event in ctx.written
+        if event.kind == "environment_prepare"
+    ]
+    assert [snapshot["state"] for snapshot in snapshots] == ["preparing", "ready"]
+    ready = snapshots[-1]
+    assert all(component["kind"] != "mcp" for component in ready["components"])
+    skills = next(component for component in ready["components"] if component["kind"] == "skills")
+    assert skills["count"] == 1
+    assert skills["metadata"]["items"] == [{"id": "web", "label": "Web Search", "version": "1.2"}]
 
 
 async def test_skill_sync_uses_one_archive_write_and_one_exec():
@@ -594,9 +630,17 @@ async def test_query_publishes_outputs_artifacts():
     ).Query(FakeRequest(), ctx)
 
     kinds = [e.kind for e in ctx.written]
-    assert kinds == ["trace", "sandbox", "text", "file", "done"]
+    assert kinds == [
+        "trace",
+        "environment_prepare",
+        "sandbox",
+        "environment_prepare",
+        "text",
+        "file",
+        "done",
+    ]
     assert ctx.written[0].data["name"] == "sandbox.create"
-    file_event = ctx.written[3]
+    file_event = ctx.written[5]
     assert file_event.data["filename"] == "report.txt"
     assert file_event.data["mime"] == "text/plain"
     key = file_event.data["object_key"]

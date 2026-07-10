@@ -14,6 +14,7 @@
 import {
   Brain,
   ChatCircle,
+  Cube,
   FilePlus,
   FileText as PhFileText,
   FolderOpen,
@@ -32,6 +33,7 @@ import Image from "next/image";
 import { type FC, type ReactNode } from "react";
 import { TooltipIconButton } from "@/components/assistant-ui/tooltip-icon-button";
 import { cn } from "@/lib/utils";
+import { type EnvironmentPreparationSnapshot } from "@/lib/environment";
 
 // All rail action icons come from Phosphor; reuse its component type so the
 // `weight` prop (duotone/bold/...) type-checks.
@@ -87,13 +89,46 @@ export const RailRow: FC<{
 // each surface can supply its own source: the live thread renders the streaming
 // <MarkdownText/> (reads the part from context), while the read-only page passes
 // <MarkdownContent value={...}/>. While streaming, the icon spins in place.
-export const RailText: FC<{ running?: boolean; children: ReactNode }> = ({
-  running,
-  children,
-}) => (
+export const RailText: FC<{ running?: boolean; children: ReactNode }> = ({ running, children }) => (
   <RailRow icon={ChatCircle} label="Answer" running={running} color="text-indigo-500">
     {children}
   </RailRow>
+);
+
+export const RailEnvironment: FC<{
+  environment: EnvironmentPreparationSnapshot;
+}> = ({ environment }) => {
+  const running = environment.state === "preparing";
+  const degraded = environment.state === "degraded";
+  const label = running
+    ? "Preparing environment"
+    : degraded
+      ? "Environment ready with limits"
+      : environment.state === "ready"
+        ? "Environment ready"
+        : "Environment updated";
+  const summaries = environment.components.map((component) =>
+    component.summary ? `${component.label}: ${component.summary}` : component.label,
+  );
+
+  return (
+    <RailRow
+      icon={Cube}
+      label={label}
+      running={running}
+      color={degraded ? "text-amber-500" : "text-sky-500"}
+    >
+      {summaries.length > 0 ? (
+        <p className="text-xs leading-5 text-muted-foreground">{summaries.join(" · ")}</p>
+      ) : null}
+    </RailRow>
+  );
+};
+
+// Ephemeral hand-off between environment preparation and the first real
+// response part. It is derived from the live thread state and is never stored.
+export const RailResponsePending: FC = () => (
+  <RailRow icon={ChatCircle} label="Starting response" running color="text-indigo-500" />
 );
 
 // Reasoning / chain-of-thought node with a collapsible body.
@@ -124,23 +159,58 @@ type ToolMeta = { icon: RailIcon; running: string; done: string; color: string }
 const getToolMeta = (rawName: string): ToolMeta => {
   const name = rawName.replace(/^mcp__/, "").toLowerCase();
   if (name.includes("websearch") || name.includes("search"))
-    return { icon: MagnifyingGlass, running: "Searching", done: "Searched", color: "text-violet-500" };
+    return {
+      icon: MagnifyingGlass,
+      running: "Searching",
+      done: "Searched",
+      color: "text-violet-500",
+    };
   if (name.includes("webfetch") || name.includes("fetch") || name.includes("browser"))
     return { icon: PhGlobe, running: "Reading page", done: "Read page", color: "text-sky-500" };
   if (name.startsWith("read") || name.includes("read_file"))
     return { icon: PhFileText, running: "Reading file", done: "Read file", color: "text-blue-500" };
   if (name.startsWith("write") || name.includes("write_file"))
-    return { icon: PencilSimple, running: "Writing file", done: "Wrote file", color: "text-emerald-500" };
+    return {
+      icon: PencilSimple,
+      running: "Writing file",
+      done: "Wrote file",
+      color: "text-emerald-500",
+    };
   if (name.startsWith("edit") || name.includes("str_replace") || name.includes("edit_file"))
-    return { icon: PencilSimple, running: "Editing file", done: "Edited file", color: "text-amber-500" };
+    return {
+      icon: PencilSimple,
+      running: "Editing file",
+      done: "Edited file",
+      color: "text-amber-500",
+    };
   if (name.startsWith("glob") || name.startsWith("grep") || name.includes("find"))
-    return { icon: FolderOpen, running: "Searching code", done: "Searched code", color: "text-cyan-600" };
+    return {
+      icon: FolderOpen,
+      running: "Searching code",
+      done: "Searched code",
+      color: "text-cyan-600",
+    };
   if (name.startsWith("bash") || name.includes("shell") || name.includes("terminal"))
-    return { icon: TerminalWindow, running: "Running command", done: "Ran command", color: "text-orange-500" };
+    return {
+      icon: TerminalWindow,
+      running: "Running command",
+      done: "Ran command",
+      color: "text-orange-500",
+    };
   if (name.startsWith("todo") || name.includes("task"))
-    return { icon: ListChecks, running: "Planning tasks", done: "Updated tasks", color: "text-fuchsia-500" };
+    return {
+      icon: ListChecks,
+      running: "Planning tasks",
+      done: "Updated tasks",
+      color: "text-fuchsia-500",
+    };
   if (name.startsWith("skill") || name.includes("load"))
-    return { icon: Sparkle, running: "Loading skill", done: "Loaded skill", color: "text-yellow-500" };
+    return {
+      icon: Sparkle,
+      running: "Loading skill",
+      done: "Loaded skill",
+      color: "text-yellow-500",
+    };
   return { icon: PhWrench, running: "Calling tool", done: "Called tool", color: "text-slate-400" };
 };
 

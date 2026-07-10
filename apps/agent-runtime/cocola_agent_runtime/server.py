@@ -68,6 +68,8 @@ MODEL_ALIAS_METADATA_KEY = "x-cocola-model-alias"
 # proto change). Injected into the sandbox as ANTHROPIC_AUTH_TOKEN per turn so
 # the in-sandbox brain calls the llm-gateway as the real user. Never logged.
 SANDBOX_TOKEN_METADATA_KEY = "x-cocola-sandbox-token"
+ENVIRONMENT_PREPARATION_SCHEMA_VERSION = 1
+ENVIRONMENT_PREPARATION_PART_ID = "environment"
 
 _OUTPUTS_SNAPSHOT_SCRIPT = r"""
 import json
@@ -325,6 +327,23 @@ def trace_event(
     return AgentEvent(kind="trace", data=data)
 
 
+def environment_preparation_event(
+    state: str,
+    components: list[dict[str, Any]],
+) -> AgentEvent:
+    """Build one versioned, secret-free, full preparation snapshot."""
+    snapshot = {
+        "schema_version": ENVIRONMENT_PREPARATION_SCHEMA_VERSION,
+        "part_id": ENVIRONMENT_PREPARATION_PART_ID,
+        "state": state,
+        "components": components,
+    }
+    return AgentEvent(
+        kind="environment_prepare",
+        data={"snapshot": json.dumps(snapshot, ensure_ascii=False, separators=(",", ":"))},
+    )
+
+
 def _artifact_max_bytes() -> int:
     raw = os.getenv("COCOLA_ARTIFACT_MAX_BYTES", "").strip()
     if raw:
@@ -529,6 +548,9 @@ class AgentRuntimeServicer(pb_grpc.AgentRuntimeServiceServicer):
         # in-sandbox brain authenticates to the llm-gateway AS THE USER instead
         # of via the static cluster-wide token baked at sandbox creation.
         sandbox_token = _metadata_value(context, SANDBOX_TOKEN_METADATA_KEY)
+        preparing_environment = False
+        environment_components: list[dict[str, Any]] = []
+        environment_degraded = False
 
         # Bind the session to a real sandbox when a binder is wired and the
         # caller did not pin one. Acquire is create-or-reuse (M2): the same
@@ -583,6 +605,21 @@ class AgentRuntimeServicer(pb_grpc.AgentRuntimeServiceServicer):
                     )
                 )
             )
+            if not box.reused:
+                preparing_environment = True
+                environment_components = [
+                    {
+                        "kind": "sandbox",
+                        "status": "ready",
+                        "label": "Workspace",
+                        "summary": "Ready",
+                    }
+                ]
+                await context.write(
+                    event_to_proto(
+                        environment_preparation_event("preparing", environment_components)
+                    )
+                )
             if self._checkpoint is not None:
                 restore_start_ns = time.time_ns()
                 try:
@@ -592,6 +629,24 @@ class AgentRuntimeServicer(pb_grpc.AgentRuntimeServiceServicer):
                         reused=box.reused,
                     )
                 except Exception as exc:  # noqa: BLE001 - preserve existing failure semantics
+                    if preparing_environment:
+                        environment_degraded = True
+                        await context.write(
+                            event_to_proto(
+                                environment_preparation_event(
+                                    "degraded",
+                                    [
+                                        *environment_components,
+                                        {
+                                            "kind": "checkpoint",
+                                            "status": "failed",
+                                            "label": "Session restore",
+                                            "summary": "Could not restore saved state",
+                                        },
+                                    ],
+                                )
+                            )
+                        )
                     await context.write(
                         event_to_proto(
                             trace_event(
@@ -618,6 +673,15 @@ class AgentRuntimeServicer(pb_grpc.AgentRuntimeServiceServicer):
                         )
                     )
                 )
+                if preparing_environment and restored:
+                    environment_components.append(
+                        {
+                            "kind": "checkpoint",
+                            "status": "ready",
+                            "label": "Session restore",
+                            "summary": "Saved state restored",
+                        }
+                    )
             # Make the binding observable to the BFF/client.
             await context.write(
                 event_to_proto(
@@ -651,6 +715,23 @@ class AgentRuntimeServicer(pb_grpc.AgentRuntimeServiceServicer):
                     session_id=request.session_id,
                     error=str(exc),
                 )
+                if preparing_environment:
+                    await context.write(
+                        event_to_proto(
+                            environment_preparation_event(
+                                "degraded",
+                                [
+                                    *environment_components,
+                                    {
+                                        "kind": "attachments",
+                                        "status": "failed",
+                                        "label": "Attachments",
+                                        "summary": "Could not prepare uploaded files",
+                                    },
+                                ],
+                            )
+                        )
+                    )
                 await context.write(
                     event_to_proto(
                         trace_event(
@@ -685,14 +766,26 @@ class AgentRuntimeServicer(pb_grpc.AgentRuntimeServiceServicer):
             )
             if preamble:
                 prompt = f"{preamble}\n\n{request.prompt}"
+            if preparing_environment:
+                environment_components.append(
+                    {
+                        "kind": "attachments",
+                        "status": "ready",
+                        "label": "Attachments",
+                        "summary": f"{len(request.attachments)} prepared",
+                        "count": len(request.attachments),
+                    }
+                )
 
         active_skills: list[Skill] = []
+        loaded_skills: list[Skill] = []
         if self._skills is not None:
             skills_start_ns = time.time_ns()
             try:
                 active_skills = self._skills.enabled_skills(request.user_id)
-                if sandbox_id and active_skills:
+                if sandbox_id and active_skills and self._executor is not None:
                     await self._sync_skills_into_sandbox(sandbox_id, active_skills)
+                    loaded_skills = list(active_skills)
                 await context.write(
                     event_to_proto(
                         trace_event(
@@ -706,6 +799,16 @@ class AgentRuntimeServicer(pb_grpc.AgentRuntimeServiceServicer):
                 )
             except Exception as exc:  # noqa: BLE001 - skills degrade to prompt-less session
                 active_skills = []
+                if preparing_environment:
+                    environment_degraded = True
+                    environment_components.append(
+                        {
+                            "kind": "skills",
+                            "status": "failed",
+                            "label": "Skills",
+                            "summary": "Could not load configured skills",
+                        }
+                    )
                 log.warning("skill sync failed; running without skills", error=str(exc))
                 await context.write(
                     event_to_proto(
@@ -719,6 +822,36 @@ class AgentRuntimeServicer(pb_grpc.AgentRuntimeServiceServicer):
                         )
                     )
                 )
+
+        if preparing_environment:
+            if loaded_skills:
+                environment_components.append(
+                    {
+                        "kind": "skills",
+                        "status": "ready",
+                        "label": "Skills",
+                        "summary": f"{len(loaded_skills)} loaded",
+                        "count": len(loaded_skills),
+                        "metadata": {
+                            "items": [
+                                {
+                                    "id": skill.id,
+                                    "label": skill.name or skill.id,
+                                    "version": skill.version,
+                                }
+                                for skill in loaded_skills
+                            ]
+                        },
+                    }
+                )
+            await context.write(
+                event_to_proto(
+                    environment_preparation_event(
+                        "degraded" if environment_degraded else "ready",
+                        environment_components,
+                    )
+                )
+            )
 
         active_mcp_servers: dict[str, dict] = {}
         if self._mcps is not None:
@@ -797,6 +930,14 @@ class AgentRuntimeServicer(pb_grpc.AgentRuntimeServiceServicer):
             max_turns=request.max_turns or 30,
             model_alias=model_alias,
             mcp_servers=active_mcp_servers,
+            environment_skills=[
+                {
+                    "id": skill.id,
+                    "name": skill.name or skill.id,
+                    "version": skill.version,
+                }
+                for skill in loaded_skills
+            ],
             auth_token=sandbox_token or None,
         )
         skills_preamble = skills_system_preamble(active_skills)

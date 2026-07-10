@@ -1,21 +1,16 @@
 "use client";
 
-import {
-  AlertTriangle,
-  Bot,
-  Check,
-  CopyIcon,
-  Loader2,
-  RefreshCw,
-} from "lucide-react";
+import { AlertTriangle, Bot, Check, CopyIcon, Loader2, RefreshCw } from "lucide-react";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { MarkdownContent } from "@/components/assistant-ui/markdown-text";
 import {
+  RailEnvironment,
   RailFile,
   RailReasoning,
   RailText,
   RailTool,
 } from "@/components/assistant-ui/rail";
+import { parseEnvironmentPreparationSnapshot } from "@/lib/environment";
 import { ModelIcon } from "@/components/assistant-ui/thread";
 import { cn } from "@/lib/utils";
 import { type ModelIconConfig } from "@/app/runtime-provider";
@@ -40,11 +35,17 @@ type FilePart = {
   download_url?: string;
 };
 
+type EnvironmentPart = {
+  type: "environment";
+  environment?: unknown;
+};
+
 type MessagePart =
   | { type: "text"; text?: string }
   | { type: "reasoning"; text?: string }
   | ToolPart
-  | FilePart;
+  | FilePart
+  | EnvironmentPart;
 
 type WireMessage = {
   id: string;
@@ -237,6 +238,10 @@ function MessagePartView({ part, role }: { part: MessagePart; role: "user" | "as
   }
   if (part.type === "reasoning") {
     return <RailReasoning text={part.text ?? ""} />;
+  }
+  if (part.type === "environment") {
+    const environment = parseEnvironmentPreparationSnapshot(part.environment);
+    return environment ? <RailEnvironment environment={environment} /> : null;
   }
   if (part.type === "tool-call") {
     return (

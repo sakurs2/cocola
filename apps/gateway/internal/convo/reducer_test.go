@@ -1,6 +1,9 @@
 package convo
 
-import "testing"
+import (
+	"encoding/json"
+	"testing"
+)
 
 // TestReducerMirrorsFrontend verifies the aggregation matches the frontend
 // reducePart semantics: text/thinking coalesce, tool_use adds a tool-call,
@@ -47,5 +50,36 @@ func TestReducerUnmatchedToolResult(t *testing.T) {
 	p := r.Parts()
 	if len(p) != 1 || p[0].Type != PartText {
 		t.Fatalf("unmatched result should surface as text: %+v", p)
+	}
+}
+
+func TestReducerUpsertsVersionedEnvironmentSnapshotAsFirstPart(t *testing.T) {
+	r := NewReducer()
+	r.Apply("text", map[string]string{"text": "hello"})
+	r.Apply("environment_prepare", map[string]string{
+		"snapshot": `{"schema_version":1,"part_id":"environment","state":"preparing","components":[]}`,
+	})
+	r.Apply("environment_prepare", map[string]string{
+		"snapshot": `{"schema_version":2,"part_id":"environment","state":"ready","components":[{"kind":"future-capability","status":"ready","label":"Future","future_field":{"kept":true}}]}`,
+	})
+
+	parts := r.Parts()
+	if len(parts) != 2 || parts[0].Type != PartEnvironment || parts[1].Type != PartText {
+		t.Fatalf("environment snapshot should upsert at the front: %+v", parts)
+	}
+	var snapshot map[string]any
+	if err := json.Unmarshal(parts[0].Environment, &snapshot); err != nil {
+		t.Fatal(err)
+	}
+	if snapshot["schema_version"] != float64(2) || snapshot["state"] != "ready" {
+		t.Fatalf("environment snapshot was not replaced: %#v", snapshot)
+	}
+	components, ok := snapshot["components"].([]any)
+	if !ok || len(components) != 1 {
+		t.Fatalf("environment components missing: %#v", snapshot)
+	}
+	component := components[0].(map[string]any)
+	if _, ok := component["future_field"]; !ok {
+		t.Fatalf("unknown future field was dropped: %#v", component)
 	}
 }
