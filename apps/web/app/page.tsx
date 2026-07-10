@@ -57,10 +57,7 @@ function Workspace() {
 
   useEffect(() => {
     if (!environmentStatus || selectedArtifact) return;
-    if (
-      (environmentStatus.phase === "preparing" && environmentStatus.components.length === 0) ||
-      environmentStatus.phase === "degraded"
-    ) {
+    if (environmentStatus.phase === "preparing" || environmentStatus.phase === "degraded") {
       setDockView("status");
       setStatusOpen(true);
     }

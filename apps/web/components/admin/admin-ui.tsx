@@ -299,6 +299,54 @@ export function AdminDrawer({
   );
 }
 
+export function AdminConfirmDialog({
+  open,
+  onOpenChange,
+  title,
+  description,
+  confirmLabel = "Confirm",
+  busy = false,
+  destructive = false,
+  onConfirm,
+}: {
+  open: boolean;
+  onOpenChange: (open: boolean) => void;
+  title: string;
+  description: string;
+  confirmLabel?: string;
+  busy?: boolean;
+  destructive?: boolean;
+  onConfirm: () => void;
+}) {
+  return (
+    <Dialog.Root open={open} onOpenChange={(nextOpen) => !busy && onOpenChange(nextOpen)}>
+      <Dialog.Portal>
+        <Dialog.Overlay className="fixed inset-0 z-50 bg-slate-950/20 backdrop-blur-sm data-[state=closed]:animate-out data-[state=open]:animate-in data-[state=closed]:fade-out data-[state=open]:fade-in" />
+        <Dialog.Content className="cocola-admin-ui admin-drawer fixed left-1/2 top-1/2 z-50 w-[min(28rem,calc(100vw-2rem))] -translate-x-1/2 -translate-y-1/2 rounded-3xl border p-5 text-foreground outline-none data-[state=closed]:animate-out data-[state=open]:animate-in data-[state=closed]:fade-out data-[state=open]:fade-in data-[state=closed]:zoom-out-95 data-[state=open]:zoom-in-95">
+          <Dialog.Title className="text-base font-semibold tracking-[-0.01em]">
+            {title}
+          </Dialog.Title>
+          <Dialog.Description className="mt-2 text-sm leading-6 text-muted-foreground">
+            {description}
+          </Dialog.Description>
+          <div className="mt-6 flex items-center justify-end gap-2">
+            <Button variant="outline" disabled={busy} onClick={() => onOpenChange(false)}>
+              Cancel
+            </Button>
+            <Button
+              variant={destructive ? "destructive" : "default"}
+              disabled={busy}
+              onClick={onConfirm}
+            >
+              {busy ? "Deleting…" : confirmLabel}
+            </Button>
+          </div>
+        </Dialog.Content>
+      </Dialog.Portal>
+    </Dialog.Root>
+  );
+}
+
 export function AdminIconButton({ className, ...props }: ComponentPropsWithoutRef<"button">) {
   return (
     <button

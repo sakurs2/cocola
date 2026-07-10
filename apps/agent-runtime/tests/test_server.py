@@ -241,18 +241,6 @@ async def test_query_loads_mcp_servers_into_options_and_trace():
     mcp_trace = next(event for event in traces if event.data["name"] == "sandbox.mcp_config_load")
     assert mcp_trace.data["mcp_count"] == "1"
     assert json.loads(mcp_trace.data["mcp_names"]) == ["amap"]
-    environment = next(event for event in ctx.written if event.kind == "environment_status")
-    assert environment.data["phase"] == "preparing"
-    assert json.loads(environment.data["components"]) == [
-        {
-            "kind": "mcp",
-            "id": "amap",
-            "label": "amap",
-            "status": "pending",
-            "tool_count": 0,
-        }
-    ]
-    assert "mcp.example.com" not in str(dict(environment.data))
 
 
 async def test_query_loads_admin_prompt_into_options_and_trace():

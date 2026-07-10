@@ -20,6 +20,7 @@ import {
 } from "lucide-react";
 import {
   AdminAlert,
+  AdminConfirmDialog,
   AdminDrawer,
   AdminEmptyState,
   AdminIconButton,
@@ -91,6 +92,7 @@ export default function AdminMCPPage() {
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [busyID, setBusyID] = useState<string | null>(null);
+  const [deleteTarget, setDeleteTarget] = useState<MCPServer | null>(null);
   const [error, setError] = useState("");
   const [notice, setNotice] = useState("");
 
@@ -211,7 +213,6 @@ export default function AdminMCPPage() {
   };
 
   const mutate = async (mcp: MCPServer, action: "enable" | "disable" | "delete") => {
-    if (action === "delete" && !window.confirm(`Delete ${mcp.name || mcp.id}?`)) return;
     setBusyID(mcp.id);
     setError("");
     setNotice("");
@@ -222,8 +223,10 @@ export default function AdminMCPPage() {
           : `/api/admin/mcps/${encodeURIComponent(mcp.id)}/${action}`;
       const res = await fetch(endpoint, { method: action === "delete" ? "DELETE" : "POST" });
       if (!res.ok) throw new Error(await readError(res));
+      if (action === "delete") setDeleteTarget(null);
       await load();
     } catch (err) {
+      if (action === "delete") setDeleteTarget(null);
       setError(err instanceof Error ? err.message : String(err));
     } finally {
       setBusyID(null);
@@ -274,7 +277,7 @@ export default function AdminMCPPage() {
                 busy={busyID === mcp.id}
                 onEdit={() => openEdit(mcp)}
                 onToggle={() => void mutate(mcp, mcp.enabled ? "disable" : "enable")}
-                onDelete={() => void mutate(mcp, "delete")}
+                onDelete={() => setDeleteTarget(mcp)}
               />
             ))}
           </div>
@@ -486,6 +489,21 @@ export default function AdminMCPPage() {
           ) : null}
         </div>
       </AdminDrawer>
+
+      <AdminConfirmDialog
+        open={deleteTarget !== null}
+        onOpenChange={(open) => {
+          if (!open) setDeleteTarget(null);
+        }}
+        title="Delete MCP server?"
+        description={`This permanently removes ${deleteTarget?.name || deleteTarget?.id || "this server"} from future agent sessions.`}
+        confirmLabel="Delete server"
+        destructive
+        busy={deleteTarget !== null && busyID === deleteTarget.id}
+        onConfirm={() => {
+          if (deleteTarget) void mutate(deleteTarget, "delete");
+        }}
+      />
     </AdminPage>
   );
 }

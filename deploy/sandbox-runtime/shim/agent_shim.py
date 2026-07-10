@@ -334,25 +334,33 @@ async def _run(req: dict[str, Any]) -> int:
 
     options = _build_options(req)
     _emit({"type": "start", "ts": time.time()})
-    _emit(_environment_status_event(req))
 
     last_session_id: str | None = None
-    status_task: asyncio.Task[None] | None = None
-    async with claude_agent_sdk.ClaudeSDKClient(options=options) as client:
-        if _mcp_configs(req):
-            status_task = asyncio.create_task(_watch_mcp_status(client, req))
-        try:
-            await client.query(req["prompt"])
-            async for message in client.receive_response():
-                for ev in _message_to_events(message):
-                    if ev.get("type") == "result" and ev.get("session_id"):
-                        last_session_id = ev["session_id"]
-                    _emit(ev)
-        finally:
-            if status_task is not None:
-                if not status_task.done():
-                    status_task.cancel()
-                await asyncio.gather(status_task, return_exceptions=True)
+
+    async def relay(messages: Any) -> None:
+        nonlocal last_session_id
+        async for message in messages:
+            for ev in _message_to_events(message):
+                if ev.get("type") == "result" and ev.get("session_id"):
+                    last_session_id = ev["session_id"]
+                _emit(ev)
+
+    if req.get("resume"):
+        await relay(claude_agent_sdk.query(prompt=req["prompt"], options=options))
+    else:
+        _emit(_environment_status_event(req))
+        status_task: asyncio.Task[None] | None = None
+        async with claude_agent_sdk.ClaudeSDKClient(options=options) as client:
+            if _mcp_configs(req):
+                status_task = asyncio.create_task(_watch_mcp_status(client, req))
+            try:
+                await client.query(req["prompt"])
+                await relay(client.receive_response())
+            finally:
+                if status_task is not None:
+                    if not status_task.done():
+                        status_task.cancel()
+                    await asyncio.gather(status_task, return_exceptions=True)
 
     # The final done event carries the session_id so the caller can persist the
     # session<->sandbox binding and later --resume it.

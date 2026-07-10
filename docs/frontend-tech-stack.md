@@ -33,7 +33,7 @@ Gateway SSE
 
 - 不绕过 runtime 另建一套聊天消息状态。
 - 新的消息 part 或 SSE event 先在 runtime adapter 中完成类型化和容错，再交给渲染层。
-- `environment_status` 是当前 Agent turn 的环境快照，不写入消息历史；它与 artifact 共用右侧 Context Dock，移动端使用覆盖面板。
+- `environment_status` 是当前 Agent 会话首次初始化的环境快照，不写入消息历史，也不在正常 follow-up 中重复检查；它与 artifact 共用右侧 Context Dock，移动端使用覆盖面板。
 - composer、附件、消息流和 tool call 优先复用 assistant-ui primitive。
 - cocola 的视觉组合集中在 `components/assistant-ui/`，不要修改 assistant-ui 内部实现。
 
@@ -124,7 +124,7 @@ shadcn/ui 在本项目中表示组件组织方式和 token 约定，不代表必
 - React Flow 只在需要节点、边、缩放、拖拽和自动布局的真实图场景中引入；普通步骤列表或状态时间线继续使用常规 React 组件。
 - cmdk 用于命令搜索和大型可搜索选项集；小型固定选项使用 Dropdown Menu、Tabs 或原生控件。
 - Admin MCP 配置遵循“列表即状态、Drawer 即编辑”的单层结构。保存时只校验并安全持久化配置，不额外申请 sandbox；连接能力由首次真实 Agent 会话自然验证，不增加独立测试、健康页或发布状态。远程 URL 作为完整 secret 输入，界面只展示移除 userinfo、query 和 fragment 后的 `url_hint`。
-- agent-runtime 可以先用有效配置发送不含 secret 的 MCP `pending` 名单，避免新旧 runtime 镜像滚动期间把“尚未报告”误判为“未启用”；连接终态必须来自实际执行对话的同一个 `ClaudeSDKClient`，不得通过 system prompt 注入，也不得申请额外 sandbox。模型请求立即开始；仅当 SDK 报告 `pending` 时进行最多 8 秒的有界查询，终态到达后停止，并通过 `environment_status` SSE 快照更新 Session Status。该状态表示本轮加载结果，不是持续健康监控。
+- MCP 连接终态必须来自实际执行首次对话的同一个 `ClaudeSDKClient`，不得通过 system prompt 注入，也不得申请额外 sandbox。模型请求在 client 初始化后立即开始；仅当 SDK 报告 `pending` 时进行最多 8 秒的有界查询，终态到达后停止，并通过 `environment_status` SSE 快照更新 Session Status。有 `resume` 的 follow-up 使用 one-shot SDK 路径且不重复查询状态。该状态表示会话初始化时的加载结果，不是持续健康监控。
 
 ## 8. 关键源码入口
 

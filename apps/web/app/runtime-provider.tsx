@@ -761,6 +761,7 @@ export function CocolaRuntimeProvider({ children }: { children: ReactNode }) {
       const turnSessionId = sessionId;
       const model = selectedModel;
       if (!model) return;
+      const isInitialTurn = messages.length === 0;
       const assistantMetadata: UiMessageMetadata = {
         model_alias: model.alias,
         model_label: model.label,
@@ -788,15 +789,17 @@ export function CocolaRuntimeProvider({ children }: { children: ReactNode }) {
         };
       });
       setRunning(turnSessionId, true);
-      setEnvironmentStatuses((prev) => ({
-        ...prev,
-        [turnSessionId]: {
-          version: 1,
-          phase: "preparing",
-          components: [],
-          updatedAt: Date.now(),
-        },
-      }));
+      if (isInitialTurn) {
+        setEnvironmentStatuses((prev) => ({
+          ...prev,
+          [turnSessionId]: {
+            version: 1,
+            phase: "preparing",
+            components: [],
+            updatedAt: Date.now(),
+          },
+        }));
+      }
       setUnreadCompletedIds((prev) => {
         const next = new Set(prev);
         next.delete(turnSessionId);
@@ -885,7 +888,7 @@ export function CocolaRuntimeProvider({ children }: { children: ReactNode }) {
         finalizeTurn(!aborted);
       }
     },
-    [sessionId, selectedModel, applyEvent, refreshConversations, setRunning],
+    [sessionId, selectedModel, messages.length, applyEvent, refreshConversations, setRunning],
   );
 
   const onCancel = useCallback(async () => {
@@ -894,6 +897,7 @@ export function CocolaRuntimeProvider({ children }: { children: ReactNode }) {
     abortMap.current.delete(sessionId);
     setRunning(sessionId, false);
     setEnvironmentStatuses((prev) => {
+      if (prev[sessionId]?.phase !== "preparing") return prev;
       const next = { ...prev };
       delete next[sessionId];
       return next;

@@ -186,24 +186,6 @@ def event_to_proto(event: AgentEvent) -> pb.AgentEvent:
     return pb.AgentEvent(kind=event.kind, data=data)
 
 
-def mcp_environment_pending_event(servers: dict[str, dict]) -> AgentEvent:
-    """Describe configured MCPs before the sandbox reports live SDK status."""
-    components = [
-        {
-            "kind": "mcp",
-            "id": name,
-            "label": name,
-            "status": "pending",
-            "tool_count": 0,
-        }
-        for name in sorted(servers)
-    ]
-    return AgentEvent(
-        kind="environment_status",
-        data={"version": 1, "phase": "preparing", "components": components},
-    )
-
-
 def trace_event(
     name: str,
     category: str,
@@ -643,10 +625,6 @@ class AgentRuntimeServicer(pb_grpc.AgentRuntimeServiceServicer):
                         )
                     )
                 )
-                if active_mcp_servers:
-                    await context.write(
-                        event_to_proto(mcp_environment_pending_event(active_mcp_servers))
-                    )
             except Exception as exc:  # noqa: BLE001 - MCP config degrades to none
                 active_mcp_servers = {}
                 log.warning("mcp config load failed; running without MCP servers", error=str(exc))

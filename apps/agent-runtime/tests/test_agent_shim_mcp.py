@@ -127,3 +127,57 @@ async def test_agent_shim_streams_mcp_status_without_blocking_query(monkeypatch)
     ]
     assert emitted[-1]["type"] == "done"
     assert emitted[-1]["session_id"] == "claude-session"
+
+
+async def test_agent_shim_skips_mcp_status_on_resumed_turn(monkeypatch):
+    captured: dict[str, object] = {}
+
+    class FakeClaudeAgentOptions:
+        def __init__(self, **kwargs):
+            captured["options"] = kwargs
+
+    class UnexpectedClaudeSDKClient:
+        def __init__(self, **_kwargs):
+            raise AssertionError("resumed turns must use the one-shot SDK path")
+
+    async def fake_query(*, prompt, options):
+        captured["prompt"] = prompt
+        captured["client_options"] = options
+        result_type = type("ResultMessage", (), {})
+        result = result_type()
+        result.is_error = False
+        result.num_turns = 1
+        result.total_cost_usd = 0
+        result.session_id = "claude-session"
+        result.result = "done"
+        yield result
+
+    fake_sdk = types.SimpleNamespace(
+        ClaudeAgentOptions=FakeClaudeAgentOptions,
+        ClaudeSDKClient=UnexpectedClaudeSDKClient,
+        query=fake_query,
+    )
+    monkeypatch.setitem(sys.modules, "claude_agent_sdk", fake_sdk)
+
+    root = pathlib.Path(__file__).resolve().parents[3]
+    shim_path = root / "deploy" / "sandbox-runtime" / "shim" / "agent_shim.py"
+    spec = importlib.util.spec_from_file_location("cocola_agent_shim_resume_status_test", shim_path)
+    assert spec and spec.loader
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    emitted: list[dict] = []
+    monkeypatch.setattr(module, "_emit", emitted.append)
+
+    await module._run(
+        {
+            "prompt": "and tomorrow?",
+            "resume": "claude-session",
+            "mcp_servers": {"maps": {"type": "http", "url": "https://mcp.example.test/mcp"}},
+        }
+    )
+
+    assert captured["prompt"] == "and tomorrow?"
+    assert captured["options"]["resume"] == "claude-session"
+    assert not [event for event in emitted if event.get("type") == "environment_status"]
+    assert emitted[-1]["type"] == "done"
+    assert emitted[-1]["session_id"] == "claude-session"
