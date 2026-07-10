@@ -36,10 +36,11 @@ import {
   Sparkles,
 } from "lucide-react";
 import Image from "next/image";
-import { useEffect, useState, type CSSProperties, type FC } from "react";
+import { useEffect, useState, type FC } from "react";
 import { useCocola, type ModelIconConfig, type UiMessageMetadata } from "@/app/runtime-provider";
 import { CocolaWordmark } from "@/components/assistant-ui/cocola-wordmark";
 import { CocolaLogo } from "@/components/cocola-logo";
+import { CocolaTagline } from "@/components/assistant-ui/cocola-tagline";
 import { TooltipIconButton } from "@/components/assistant-ui/tooltip-icon-button";
 import { MarkdownText } from "@/components/assistant-ui/markdown-text";
 import {
@@ -145,44 +146,6 @@ const SUGGESTIONS: SuggestionTile[] = [
     prompt: "Brainstorm creative ideas for a campaign",
   },
 ];
-
-// Homepage tagline. Each glyph is its own span so it can blur->clear in a
-// staggered entrance (synced to CocolaWordmark 0.45s). A second identical
-// layer (.cocola-tagline-shine) carries a transparent gradient with one bright
-// band, swept left->right periodically for a subtle 流光 highlight. The base
-// layer stays solid gray so the text is always visible (never disappears).
-const TAGLINE_TEXT = "Your trusty & powerful agent platform";
-
-const renderTaglineChars = () => {
-  let letterIndex = 0;
-  return Array.from(TAGLINE_TEXT).map((chr, i) => {
-    if (chr === " ") {
-      return (
-        <span key={i} className="cocola-tag-sp">
-          {"\u00A0"}
-        </span>
-      );
-    }
-    const style = { ["--i" as string]: String(letterIndex) } as CSSProperties;
-    letterIndex += 1;
-    return (
-      <span key={i} className="cocola-tag-ch" style={style}>
-        {chr}
-      </span>
-    );
-  });
-};
-
-const CocolaTagline: FC = () => (
-  <p className="cocola-tagline" aria-label={TAGLINE_TEXT}>
-    <span className="cocola-tagline-base" aria-hidden="true">
-      {renderTaglineChars()}
-    </span>
-    <span className="cocola-tagline-shine" aria-hidden="true">
-      {renderTaglineChars()}
-    </span>
-  </p>
-);
 
 const ThreadWelcome: FC = () => {
   const { selectedModel, modelsLoaded } = useCocola();

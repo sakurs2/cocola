@@ -774,6 +774,74 @@
   .cocola-user-ui .cocola-tag-sp {
     display: inline-block;
   }
+
+  /* ---- Login page: brand hero (left/center) + glass card (right) ---- */
+  .cocola-user-ui.cocola-login {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: clamp(24px, 6vw, 110px);
+    min-height: 100vh;
+    flex-wrap: wrap;
+    /* nudge the whole cluster toward the right */
+    padding: 48px clamp(20px, 4vw, 56px) 48px clamp(140px, 22vw, 360px);
+  }
+
+  .cocola-user-ui .cocola-login-brand {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 6px;
+    flex: 0 1 auto;
+  }
+
+  .cocola-user-ui .cocola-login-card {
+    width: 100%;
+    max-width: 380px;
+    flex: 0 0 auto;
+    display: flex;
+    flex-direction: column;
+    gap: 16px;
+    padding: 30px 28px;
+    border-radius: 20px;
+    border: 1px solid hsl(0 0% 100% / 0.7);
+    background: hsl(0 0% 100% / 0.72);
+    backdrop-filter: blur(16px);
+    box-shadow:
+      0 18px 50px hsl(221 60% 40% / 0.14),
+      inset 0 1px 0 hsl(0 0% 100% / 0.9);
+    animation: cocola-login-card-in 0.5s ease-out 0.3s both;
+  }
+
+  .cocola-user-ui .cocola-login-signin {
+    background-image: linear-gradient(
+      120deg,
+      hsl(200 92% 48%) 0%,
+      hsl(221 83% 55%) 46%,
+      hsl(268 78% 60%) 100%
+    );
+    box-shadow: 0 8px 22px hsl(221 70% 45% / 0.32);
+    transition: transform 0.12s, box-shadow 0.12s, filter 0.12s;
+  }
+
+  .cocola-user-ui .cocola-login-signin:hover:not(:disabled) {
+    transform: translateY(-1px);
+    filter: brightness(1.05);
+    box-shadow: 0 12px 28px hsl(221 70% 45% / 0.4);
+  }
+
+  .cocola-user-ui .cocola-login-signin:active:not(:disabled) {
+    transform: translateY(0);
+  }
+
+  @media (max-width: 860px) {
+    .cocola-user-ui.cocola-login {
+      flex-direction: column;
+      justify-content: flex-start;
+      gap: 36px;
+      padding: 64px clamp(20px, 6vw, 48px) 48px;
+    }
+  }
 }
 
 @keyframes aui-soft-in {
@@ -821,6 +889,17 @@
   }
   100% {
     background-position: 0% 0;
+  }
+}
+
+@keyframes cocola-login-card-in {
+  from {
+    opacity: 0;
+    transform: translateY(10px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
   }
 }
 
@@ -874,5 +953,13 @@
 
   .cocola-user-ui .cocola-tagline-shine {
     animation: none;
+  }
+
+  .cocola-user-ui .cocola-login-card {
+    animation: none;
+  }
+
+  .cocola-user-ui .cocola-login-signin {
+    transition: none;
   }
 }

@@ -5,6 +5,10 @@ import { signIn } from "next-auth/react";
 import { useSearchParams } from "next/navigation";
 import { FormEvent, Suspense, useState } from "react";
 
+import { CocolaTagline } from "@/components/assistant-ui/cocola-tagline";
+import { CocolaWordmark } from "@/components/assistant-ui/cocola-wordmark";
+import { CocolaLogo } from "@/components/cocola-logo";
+
 export default function LoginPage() {
   return (
     <Suspense>
@@ -62,11 +66,20 @@ function LoginForm() {
   };
 
   return (
-    <main className="flex min-h-screen items-center justify-center bg-background px-4 text-foreground">
-      <form
-        onSubmit={submit}
-        className="flex w-full max-w-sm flex-col gap-4 rounded-lg border border-border bg-card p-6 shadow-lg"
-      >
+    <main className="cocola-user-ui workspace-grain cocola-login min-h-screen bg-background text-foreground">
+      {/* Brand hero: logo + handwriting wordmark + shimmer tagline (same as home) */}
+      <div className="cocola-login-brand">
+        <div className="flex items-center">
+          <CocolaLogo className="h-28 w-28 shrink-0 sm:h-32 sm:w-32" />
+          <div className="-ml-6 flex flex-col items-center text-center">
+            <CocolaWordmark className="cocola-wordmark -my-4 h-32 w-auto max-w-[min(90vw,460px)] sm:h-36" />
+            <CocolaTagline />
+          </div>
+        </div>
+      </div>
+
+      {/* Login card */}
+      <form onSubmit={submit} className="cocola-login-card">
         <div className="space-y-1">
           <h1 className="text-lg font-semibold">Sign in to cocola</h1>
           <p className="text-sm text-muted-foreground">Use an account enabled by an admin.</p>
@@ -116,7 +129,7 @@ function LoginForm() {
         <button
           type="submit"
           disabled={pending}
-          className="h-10 rounded-md bg-primary px-4 text-sm font-medium text-primary-foreground transition-opacity disabled:opacity-60"
+          className="cocola-login-signin h-10 rounded-md px-4 text-sm font-medium text-primary-foreground transition-opacity disabled:opacity-60"
         >
           {pending ? "Signing in..." : "Sign in"}
         </button>
