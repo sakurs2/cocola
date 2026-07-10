@@ -131,6 +131,9 @@ def _build_options(req: dict[str, Any]):
 # render a status node or a search-result list, so we truncate hard here to keep
 # the SSE stream and client memory bounded.
 _TOOL_RESULT_MAX_CHARS = 4000
+_MCP_STATUS_TIMEOUT_SECONDS = 8.0
+_MCP_STATUS_POLL_SECONDS = (0.5, 1.0, 2.0)
+_MCP_TERMINAL_STATUSES = {"connected", "failed", "needs-auth", "disabled"}
 
 
 def _tool_result_content(content: Any) -> str:
@@ -223,18 +226,133 @@ def _message_to_events(message: Any) -> list[dict[str, Any]]:
     return events
 
 
+def _mcp_configs(req: dict[str, Any]) -> dict[str, dict[str, Any]]:
+    servers = req.get("mcp_servers")
+    if not isinstance(servers, dict):
+        return {}
+    return {
+        str(name): config
+        for name, config in servers.items()
+        if isinstance(name, str) and isinstance(config, dict)
+    }
+
+
+def _environment_status_event(
+    req: dict[str, Any],
+    result: dict[str, Any] | None = None,
+    *,
+    timed_out: bool = False,
+) -> dict[str, Any]:
+    """Build one secret-safe, idempotent session environment snapshot."""
+    configs = _mcp_configs(req)
+    statuses = {
+        str(server.get("name") or ""): server
+        for server in (result or {}).get("mcpServers", [])
+        if isinstance(server, dict)
+    }
+    components: list[dict[str, Any]] = []
+    for name, config in sorted(configs.items()):
+        server = statuses.get(name, {})
+        status = str(server.get("status") or "pending")
+        if timed_out and status == "pending":
+            status = "timeout"
+        info = server.get("serverInfo") if isinstance(server.get("serverInfo"), dict) else {}
+        tools = server.get("tools") if isinstance(server.get("tools"), list) else []
+        component: dict[str, Any] = {
+            "kind": "mcp",
+            "id": name,
+            "label": str(info.get("name") or name),
+            "status": status,
+            "tool_count": len(tools),
+        }
+        error = str(server.get("error") or "").strip()
+        if error:
+            component["error"] = _redact_mcp_message(error, config)[:500]
+        components.append(component)
+
+    statuses_seen = {str(component["status"]) for component in components}
+    if statuses_seen & {"failed", "needs-auth", "timeout"}:
+        phase = "degraded"
+    elif "pending" in statuses_seen:
+        phase = "preparing"
+    else:
+        phase = "ready"
+    return {
+        "type": "environment_status",
+        "version": 1,
+        "phase": phase,
+        "components": components,
+        "ts": time.time(),
+    }
+
+
+async def _watch_mcp_status(client: Any, req: dict[str, Any]) -> None:
+    """Observe MCP startup until it reaches a terminal state or a short deadline."""
+    if not _mcp_configs(req):
+        return
+    deadline = time.monotonic() + _MCP_STATUS_TIMEOUT_SECONDS
+    last_snapshot = ""
+    last_result: dict[str, Any] = {}
+    poll_index = 0
+    try:
+        while True:
+            try:
+                result = await client.get_mcp_status()
+            except Exception as error:  # noqa: BLE001 - status is best-effort per turn
+                result = {
+                    "mcpServers": [
+                        {"name": name, "status": "failed", "error": str(error)}
+                        for name in _mcp_configs(req)
+                    ]
+                }
+            last_result = result
+            snapshot = _environment_status_event(req, result)
+            serialized = json.dumps(
+                {"phase": snapshot["phase"], "components": snapshot["components"]},
+                sort_keys=True,
+                default=str,
+            )
+            if serialized != last_snapshot:
+                _emit(snapshot)
+                last_snapshot = serialized
+            statuses = {str(component.get("status") or "") for component in snapshot["components"]}
+            if statuses and statuses <= _MCP_TERMINAL_STATUSES:
+                return
+            if time.monotonic() >= deadline:
+                _emit(_environment_status_event(req, result, timed_out=True))
+                return
+            delay = _MCP_STATUS_POLL_SECONDS[min(poll_index, len(_MCP_STATUS_POLL_SECONDS) - 1)]
+            poll_index += 1
+            await asyncio.sleep(min(delay, max(deadline - time.monotonic(), 0)))
+    except asyncio.CancelledError:
+        _emit(_environment_status_event(req, last_result, timed_out=True))
+        raise
+
+
 async def _run(req: dict[str, Any]) -> int:
     import claude_agent_sdk
 
     options = _build_options(req)
     _emit({"type": "start", "ts": time.time()})
+    _emit(_environment_status_event(req))
 
     last_session_id: str | None = None
-    async for message in claude_agent_sdk.query(prompt=req["prompt"], options=options):
-        for ev in _message_to_events(message):
-            if ev.get("type") == "result" and ev.get("session_id"):
-                last_session_id = ev["session_id"]
-            _emit(ev)
+    status_task: asyncio.Task[None] | None = None
+    async with claude_agent_sdk.ClaudeSDKClient(options=options) as client:
+        if _mcp_configs(req):
+            status_task = asyncio.create_task(_watch_mcp_status(client, req))
+        try:
+            await client.query(req["prompt"])
+            async for message in client.receive_response():
+                for ev in _message_to_events(message):
+                    if ev.get("type") == "result" and ev.get("session_id"):
+                        last_session_id = ev["session_id"]
+                    _emit(ev)
+        finally:
+            if status_task is not None:
+                if not status_task.done():
+                    status_task.cancel()
+                await asyncio.gather(status_task, return_exceptions=True)
 
     # The final done event carries the session_id so the caller can persist the
     # session<->sandbox binding and later --resume it.

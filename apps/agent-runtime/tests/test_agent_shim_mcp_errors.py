@@ -73,3 +73,43 @@ def test_agent_error_unwraps_nested_exception_group_and_redacts_secrets():
     assert "ExceptionGroup" not in message
     assert "url-secret" not in message
     assert "header-secret" not in message
+
+
+def test_environment_status_redacts_failed_mcp_and_marks_timeout():
+    shim = _load_shim()
+    request = {
+        "mcp_servers": {
+            "remote": {
+                "type": "http",
+                "url": "https://user:pass@mcp.example.test/api?token=url-secret",
+                "headers": {"Authorization": "Bearer header-secret"},
+            }
+        }
+    }
+    failed = shim._environment_status_event(
+        request,
+        {
+            "mcpServers": [
+                {
+                    "name": "remote",
+                    "status": "failed",
+                    "error": (
+                        "HTTP 401 from https://user:pass@mcp.example.test/api?token=url-secret "
+                        "using Bearer header-secret"
+                    ),
+                }
+            ]
+        },
+    )
+
+    assert failed["phase"] == "degraded"
+    assert failed["components"][0]["error"] == (
+        "HTTP 401 from https://mcp.example.test/api using [redacted]"
+    )
+    assert "url-secret" not in str(failed)
+    assert "header-secret" not in str(failed)
+    assert "user:pass" not in str(failed)
+
+    timed_out = shim._environment_status_event(request, timed_out=True)
+    assert timed_out["phase"] == "degraded"
+    assert timed_out["components"][0]["status"] == "timeout"

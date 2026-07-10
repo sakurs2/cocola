@@ -97,6 +97,46 @@ async def test_request_includes_mcp_servers_when_configured():
     assert sent["mcp_servers"]["github"]["env"]["GITHUB_TOKEN"] == "secret"
 
 
+async def test_environment_status_is_forwarded_as_a_snapshot():
+    components = [
+        {
+            "kind": "mcp",
+            "id": "maps",
+            "label": "Amap",
+            "status": "failed",
+            "tool_count": 0,
+            "error": "Unable to connect",
+        }
+    ]
+
+    def stream_handler(sandbox_id, cmd, stdin):
+        yield ExecChunk(
+            kind="stdout",
+            data=_ndjson(
+                {
+                    "type": "environment_status",
+                    "version": 1,
+                    "phase": "degraded",
+                    "components": components,
+                },
+                {"type": "done", "session_id": "sess-1"},
+            ),
+        )
+        yield ExecChunk(kind="exit", exit_code=0)
+
+    provider = InSandboxShimProvider(StaticSandboxExecutor(stream_handler=stream_handler))
+    opts = AgentOptions(user_id="U1", session_id="S1", sandbox_id="box-1")
+
+    events = await _drain(provider, "hello", opts)
+
+    assert [event.kind for event in events] == ["environment_status", "done"]
+    assert events[0].data == {
+        "version": "1",
+        "phase": "degraded",
+        "components": json.dumps(components, ensure_ascii=False, separators=(",", ":")),
+    }
+
+
 async def test_session_id_is_reused_as_resume_next_turn():
     def make_handler(session_id):
         def stream_handler(sandbox_id, cmd, stdin):

@@ -139,6 +139,22 @@ def _shim_event_to_agent_events(ev: dict) -> list[AgentEvent]:
         ]
     if t == "system":
         return [AgentEvent(kind="system", data={"subtype": ev.get("subtype", "")})]
+    if t == "environment_status":
+        components = ev.get("components") if isinstance(ev.get("components"), list) else []
+        return [
+            AgentEvent(
+                kind="environment_status",
+                data={
+                    "version": str(ev.get("version") or 1),
+                    "phase": str(ev.get("phase") or "preparing"),
+                    "components": json.dumps(
+                        components,
+                        ensure_ascii=False,
+                        separators=(",", ":"),
+                    ),
+                },
+            )
+        ]
     if t == "error":
         return [
             AgentEvent(
@@ -417,7 +433,8 @@ class InSandboxShimProvider:
                         if out.kind == "error":
                             _record_error(out, out.data.get("error", ""))
                         else:
-                            state.saw_content = True
+                            if out.kind != "environment_status":
+                                state.saw_content = True
                             yield out
 
             # Flush a final unterminated line, if any (defensive).
@@ -433,7 +450,8 @@ class InSandboxShimProvider:
                                 if out.kind == "error":
                                     _record_error(out, out.data.get("error", ""))
                                 else:
-                                    state.saw_content = True
+                                    if out.kind != "environment_status":
+                                        state.saw_content = True
                                     yield out
                 except json.JSONDecodeError:
                     pass

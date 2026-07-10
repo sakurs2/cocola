@@ -18,8 +18,12 @@
 // Thread without restructuring.
 
 import { useThread } from "@assistant-ui/react";
-import { useCocola } from "@/app/runtime-provider";
+import { useCocola, type EnvironmentStatus } from "@/app/runtime-provider";
 import { MarkdownContent } from "@/components/assistant-ui/markdown-text";
+import {
+  SessionStatusButton,
+  SessionStatusPanel,
+} from "@/components/assistant-ui/session-status-panel";
 import { Thread } from "@/components/assistant-ui/thread";
 import { AnimatePresence, motion } from "framer-motion";
 import { Check, Code2, Download, Eye, FileQuestion, Share2, X } from "lucide-react";
@@ -34,9 +38,11 @@ export default function Home() {
 }
 
 function Workspace() {
-  const { loadConversation, selectedArtifact } = useCocola();
+  const { loadConversation, selectedArtifact, environmentStatus } = useCocola();
   const router = useRouter();
   const [previewWidth, setPreviewWidth] = useState(448);
+  const [dockView, setDockView] = useState<"status" | "artifact">("status");
+  const [statusOpen, setStatusOpen] = useState(false);
 
   useEffect(() => {
     const id = new URLSearchParams(window.location.search).get("conversation")?.trim();
@@ -44,6 +50,21 @@ function Workspace() {
     void loadConversation(id);
     router.replace("/");
   }, [loadConversation, router]);
+
+  useEffect(() => {
+    if (selectedArtifact) setDockView("artifact");
+  }, [selectedArtifact]);
+
+  useEffect(() => {
+    if (!environmentStatus || selectedArtifact) return;
+    if (
+      (environmentStatus.phase === "preparing" && environmentStatus.components.length === 0) ||
+      environmentStatus.phase === "degraded"
+    ) {
+      setDockView("status");
+      setStatusOpen(true);
+    }
+  }, [environmentStatus, selectedArtifact]);
 
   const startPreviewResize = useCallback(
     (event: PointerEvent<HTMLDivElement>) => {
@@ -79,13 +100,19 @@ function Workspace() {
 
   return (
     <div className="relative flex h-full min-w-0 flex-1 flex-col">
-      <TopBar />
       <div className="flex min-h-0 flex-1">
-        <div className="min-w-0 flex-1">
+        <div className="relative min-w-0 flex-1">
+          <TopBar
+            environmentStatus={environmentStatus}
+            onOpenStatus={() => {
+              setDockView("status");
+              setStatusOpen(true);
+            }}
+          />
           <Thread />
         </div>
         <AnimatePresence initial={false}>
-          {selectedArtifact ? (
+          {selectedArtifact && dockView === "artifact" ? (
             <>
               <div
                 role="separator"
@@ -110,6 +137,25 @@ function Workspace() {
                 <ArtifactPreviewPanel />
               </motion.aside>
             </>
+          ) : environmentStatus && statusOpen && dockView === "status" ? (
+            <motion.aside
+              key="session-status"
+              initial={{ opacity: 0, x: 24 }}
+              animate={{ opacity: 1, x: 0 }}
+              exit={{ opacity: 0, x: 24 }}
+              transition={{ duration: 0.18, ease: "easeOut" }}
+              className="fixed inset-x-2 bottom-2 top-14 z-30 overflow-hidden rounded-2xl border border-border bg-card/95 shadow-xl backdrop-blur-xl md:static md:inset-auto md:z-auto md:m-2 md:ml-0 md:w-80 md:shrink-0"
+            >
+              <SessionStatusPanel
+                status={environmentStatus}
+                artifactName={selectedArtifact?.filename}
+                onOpenArtifact={() => setDockView("artifact")}
+                onClose={() => {
+                  setStatusOpen(false);
+                  if (selectedArtifact) setDockView("artifact");
+                }}
+              />
+            </motion.aside>
           ) : null}
         </AnimatePresence>
       </div>
@@ -120,7 +166,13 @@ function Workspace() {
 // Slim status bar: model selection now lives inside the composer, matching the
 // input-first chat layout. Keep sandbox state visible without competing with the
 // conversation controls.
-function TopBar() {
+function TopBar({
+  environmentStatus,
+  onOpenStatus,
+}: {
+  environmentStatus: EnvironmentStatus | null;
+  onOpenStatus: () => void;
+}) {
   const { activeSessionId, conversations } = useCocola();
   const [copied, setCopied] = useState(false);
   // The empty/welcome state is chrome-free (matches the reference): the status
@@ -146,6 +198,9 @@ function TopBar() {
     <div className="pointer-events-none absolute right-0 top-0 z-20">
       <div className="flex items-center gap-3 px-4 py-2">
         <div className="pointer-events-auto ml-auto flex items-center gap-2">
+          {environmentStatus ? (
+            <SessionStatusButton status={environmentStatus} onClick={onOpenStatus} />
+          ) : null}
           <button
             type="button"
             title={

@@ -81,6 +81,31 @@ export type SandboxInfo = {
   reused: boolean;
 };
 
+export type EnvironmentComponentStatus =
+  | "pending"
+  | "connected"
+  | "failed"
+  | "needs-auth"
+  | "disabled"
+  | "unavailable"
+  | "timeout";
+
+export type EnvironmentComponent = {
+  kind: "mcp" | string;
+  id: string;
+  label: string;
+  status: EnvironmentComponentStatus;
+  toolCount: number;
+  error?: string;
+};
+
+export type EnvironmentStatus = {
+  version: number;
+  phase: "preparing" | "ready" | "degraded";
+  components: EnvironmentComponent[];
+  updatedAt: number;
+};
+
 // One row in the sidebar conversation list (gateway GET /v1/conversations).
 export type ConversationSummary = {
   id: string;
@@ -162,6 +187,7 @@ type CocolaContextValue = {
   activeSessionId: string;
   runningSessionIds: Set<string>;
   unreadCompletedSessionIds: Set<string>;
+  environmentStatus: EnvironmentStatus | null;
   selectedArtifact: ArtifactPreview | null;
   openArtifact: (artifact: ArtifactPreview) => void;
   closeArtifact: () => void;
@@ -194,6 +220,55 @@ function isTruthy(v: string | undefined): boolean {
 function parseSize(v: string | undefined): number {
   const n = Number.parseInt(v ?? "", 10);
   return Number.isFinite(n) && n > 0 ? n : 0;
+}
+
+const ENVIRONMENT_PHASES = new Set<EnvironmentStatus["phase"]>(["preparing", "ready", "degraded"]);
+const ENVIRONMENT_COMPONENT_STATUSES = new Set<EnvironmentComponentStatus>([
+  "pending",
+  "connected",
+  "failed",
+  "needs-auth",
+  "disabled",
+  "unavailable",
+  "timeout",
+]);
+
+function parseEnvironmentStatus(event: AgentEvent): EnvironmentStatus | null {
+  const data = event.data ?? {};
+  if (!ENVIRONMENT_PHASES.has(data.phase as EnvironmentStatus["phase"])) return null;
+  let rawComponents: unknown;
+  try {
+    rawComponents = JSON.parse(data.components ?? "[]");
+  } catch {
+    return null;
+  }
+  if (!Array.isArray(rawComponents)) return null;
+  const components = rawComponents.flatMap((raw): EnvironmentComponent[] => {
+    if (!raw || typeof raw !== "object") return [];
+    const item = raw as Record<string, unknown>;
+    const id = stringValue(item.id).trim();
+    const status = stringValue(item.status) as EnvironmentComponentStatus;
+    if (!id || !ENVIRONMENT_COMPONENT_STATUSES.has(status)) return [];
+    const count = Number(item.tool_count);
+    const error = stringValue(item.error).trim().slice(0, 500);
+    return [
+      {
+        kind: stringValue(item.kind) || "mcp",
+        id,
+        label: stringValue(item.label).trim() || id,
+        status,
+        toolCount: Number.isFinite(count) && count > 0 ? count : 0,
+        ...(error ? { error } : {}),
+      },
+    ];
+  });
+  const version = Number.parseInt(data.version ?? "1", 10);
+  return {
+    version: Number.isFinite(version) && version > 0 ? version : 1,
+    phase: data.phase as EnvironmentStatus["phase"],
+    components,
+    updatedAt: Date.now(),
+  };
 }
 
 function normalizeIcon(raw: ModelIconConfig | undefined): ModelIconConfig | undefined {
@@ -414,6 +489,9 @@ export function CocolaRuntimeProvider({ children }: { children: ReactNode }) {
   // context bleed once the session_map is durable, and no way to start over).
   const [sessionId, setSessionId] = useState(genId);
   const [sandboxes, setSandboxes] = useState<Record<string, SandboxInfo | null>>({});
+  const [environmentStatuses, setEnvironmentStatuses] = useState<Record<string, EnvironmentStatus>>(
+    {},
+  );
   const [conversations, setConversations] = useState<ConversationSummary[]>([]);
   const [unreadCompletedIds, setUnreadCompletedIds] = useState<Set<string>>(() => new Set());
   const [selectedArtifact, setSelectedArtifact] = useState<ArtifactPreview | null>(null);
@@ -429,6 +507,7 @@ export function CocolaRuntimeProvider({ children }: { children: ReactNode }) {
   const messages = useMemo(() => convMessages[sessionId] ?? [], [convMessages, sessionId]);
   const isRunning = runningIds.has(sessionId);
   const sandbox = sandboxes[sessionId] ?? null;
+  const environmentStatus = environmentStatuses[sessionId] ?? null;
   const selectedModel = useMemo(
     () => models.find((m) => m.alias === selectedModelAlias) ?? models[0] ?? null,
     [models, selectedModelAlias],
@@ -460,6 +539,38 @@ export function CocolaRuntimeProvider({ children }: { children: ReactNode }) {
   }, []);
 
   const applyEvent = useCallback((targetSessionId: string, assistantId: string, ev: AgentEvent) => {
+    if (ev.kind === "environment_status") {
+      const status = parseEnvironmentStatus(ev);
+      if (status) {
+        setEnvironmentStatuses((prev) => ({ ...prev, [targetSessionId]: status }));
+      }
+      return;
+    }
+    if (ev.kind === "done" || ev.kind === "error") {
+      setEnvironmentStatuses((prev) => {
+        const current = prev[targetSessionId];
+        if (!current || current.phase !== "preparing") return prev;
+        const components = current.components.map((component) =>
+          component.status === "pending"
+            ? { ...component, status: "unavailable" as const }
+            : component,
+        );
+        const degraded =
+          ev.kind === "error" ||
+          components.some((component) =>
+            ["failed", "needs-auth", "timeout", "unavailable"].includes(component.status),
+          );
+        return {
+          ...prev,
+          [targetSessionId]: {
+            ...current,
+            phase: degraded ? "degraded" : "ready",
+            components,
+            updatedAt: Date.now(),
+          },
+        };
+      });
+    }
     if (ev.kind === "sandbox") {
       const d = ev.data ?? {};
       setSandboxes((prev) => ({
@@ -677,6 +788,15 @@ export function CocolaRuntimeProvider({ children }: { children: ReactNode }) {
         };
       });
       setRunning(turnSessionId, true);
+      setEnvironmentStatuses((prev) => ({
+        ...prev,
+        [turnSessionId]: {
+          version: 1,
+          phase: "preparing",
+          components: [],
+          updatedAt: Date.now(),
+        },
+      }));
       setUnreadCompletedIds((prev) => {
         const next = new Set(prev);
         next.delete(turnSessionId);
@@ -773,6 +893,11 @@ export function CocolaRuntimeProvider({ children }: { children: ReactNode }) {
     ctrl?.abort();
     abortMap.current.delete(sessionId);
     setRunning(sessionId, false);
+    setEnvironmentStatuses((prev) => {
+      const next = { ...prev };
+      delete next[sessionId];
+      return next;
+    });
   }, [sessionId, setRunning]);
 
   // Replay a stored conversation into the thread: fetch its messages, map them
@@ -890,6 +1015,11 @@ export function CocolaRuntimeProvider({ children }: { children: ReactNode }) {
         delete next[id];
         return next;
       });
+      setEnvironmentStatuses((prev) => {
+        const next = { ...prev };
+        delete next[id];
+        return next;
+      });
       setSelectedArtifact((prev) => (prev?.sessionId === id ? null : prev));
       if (sessionIdRef.current === id) {
         const fresh = genId();
@@ -972,6 +1102,7 @@ export function CocolaRuntimeProvider({ children }: { children: ReactNode }) {
       activeSessionId: sessionId,
       runningSessionIds: runningIds,
       unreadCompletedSessionIds: unreadCompletedIds,
+      environmentStatus,
       selectedArtifact,
       openArtifact,
       closeArtifact,
@@ -992,6 +1123,7 @@ export function CocolaRuntimeProvider({ children }: { children: ReactNode }) {
       deleteConversation,
       runningIds,
       unreadCompletedIds,
+      environmentStatus,
       selectedArtifact,
       openArtifact,
       closeArtifact,
