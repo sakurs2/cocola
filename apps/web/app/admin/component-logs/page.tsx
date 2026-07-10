@@ -1,13 +1,7 @@
 "use client";
 
-import {
-  AlertTriangle,
-  CheckCircle2,
-  Loader2,
-  RefreshCw,
-  ScrollText,
-  Terminal,
-} from "lucide-react";
+import { TerminalWindow as ComponentLogsPageIcon } from "@phosphor-icons/react";
+import { AlertTriangle, CheckCircle2, Loader2, RefreshCw, ScrollText } from "lucide-react";
 import { useCallback, useEffect, useMemo, useState } from "react";
 
 type LogFile = {
@@ -77,8 +71,8 @@ export default function ComponentLogsPage() {
     <main className="min-h-screen bg-background text-foreground">
       <header className="border-b border-border">
         <div className="mx-auto flex h-16 max-w-7xl items-center gap-3 px-6">
-          <div className="grid size-9 place-items-center rounded-md bg-primary text-primary-foreground">
-            <Terminal className="size-4" />
+          <div className="admin-page-icon">
+            <ComponentLogsPageIcon className="size-[18px]" weight="duotone" />
           </div>
           <div className="min-w-0 flex-1">
             <h1 className="truncate text-base font-semibold">Component Logs</h1>

@@ -1,5 +1,6 @@
 "use client";
 
+import { Gear as SettingsPageIcon } from "@phosphor-icons/react";
 import {
   AlertTriangle,
   Check,
@@ -7,7 +8,6 @@ import {
   RefreshCw,
   RotateCcw,
   Save,
-  Settings,
   SlidersHorizontal,
 } from "lucide-react";
 import { useCallback, useEffect, useMemo, useState } from "react";
@@ -137,8 +137,8 @@ export default function AdminSettingsPage() {
     <main className="min-h-screen bg-background text-foreground">
       <header className="border-b border-border">
         <div className="mx-auto flex h-16 max-w-7xl items-center gap-3 px-6">
-          <div className="grid size-9 place-items-center rounded-md bg-primary text-primary-foreground">
-            <Settings className="size-4" />
+          <div className="admin-page-icon">
+            <SettingsPageIcon className="size-[18px]" weight="duotone" />
           </div>
           <div className="min-w-0 flex-1">
             <h1 className="truncate text-base font-semibold">System Settings</h1>

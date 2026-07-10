@@ -1,6 +1,14 @@
 "use client";
 
+import { UsersThree as UsersPageIcon } from "@phosphor-icons/react";
 import { Button } from "@/components/ui/button";
+import {
+  AdminAlert,
+  AdminDrawer,
+  AdminMetric,
+  AdminTable,
+  AdminToolbar,
+} from "@/components/admin/admin-ui";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -23,7 +31,6 @@ import {
   Trash2,
   UserCog,
   UserPlus,
-  Users,
 } from "lucide-react";
 import { signOut, useSession } from "next-auth/react";
 import { useCallback, useEffect, useMemo, useState } from "react";
@@ -285,14 +292,11 @@ export default function AdminUsersPage() {
     setResetting(true);
     setActingId(resetTarget.id);
     try {
-      const res = await fetch(
-        `/api/admin/users/${encodeURIComponent(resetTarget.id)}/password`,
-        {
-          method: "POST",
-          headers: { "content-type": "application/json" },
-          body: JSON.stringify({ password }),
-        },
-      );
+      const res = await fetch(`/api/admin/users/${encodeURIComponent(resetTarget.id)}/password`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ password }),
+      });
       if (isAccountDisabledResponse(res)) return redirectAccountDisabled();
       if (!res.ok) throw new Error(await responseError(res));
       const email = resetTarget.email;
@@ -340,8 +344,8 @@ export default function AdminUsersPage() {
     <main className="min-h-screen bg-background text-foreground">
       <header className="border-b border-border">
         <div className="mx-auto flex h-16 max-w-7xl items-center gap-3 px-6">
-          <div className="grid size-9 place-items-center rounded-md bg-primary text-primary-foreground">
-            <Users className="size-4" />
+          <div className="admin-page-icon">
+            <UsersPageIcon className="size-[18px]" weight="duotone" />
           </div>
           <div className="min-w-0 flex-1">
             <h1 className="truncate text-base font-semibold">Users</h1>
@@ -361,26 +365,21 @@ export default function AdminUsersPage() {
       </header>
 
       <div className="mx-auto max-w-7xl space-y-6 px-6 py-6">
-        {error && (
-          <div className="rounded-md border border-destructive/30 bg-destructive/10 px-4 py-3 text-sm text-destructive">
-            {error}
-          </div>
-        )}
+        {error && <AdminAlert tone="error">{error}</AdminAlert>}
         {notice && (
-          <div className="flex items-center gap-2 rounded-md border border-emerald-500/30 bg-emerald-500/10 px-4 py-3 text-sm text-emerald-700 dark:text-emerald-300">
-            <CheckCircle2 className="size-4 shrink-0" />
-            <span>{notice}</span>
-          </div>
+          <AdminAlert tone="success" icon={<CheckCircle2 className="size-4" />}>
+            {notice}
+          </AdminAlert>
         )}
 
         <section className="grid gap-3 md:grid-cols-3">
-          <Metric label="Users" value={String(stats.total)} />
-          <Metric label="Enabled" value={String(stats.enabled)} />
-          <Metric label="Admins" value={String(stats.admins)} />
+          <AdminMetric label="Users" value={String(stats.total)} tone="sky" />
+          <AdminMetric label="Enabled" value={String(stats.enabled)} tone="green" />
+          <AdminMetric label="Admins" value={String(stats.admins)} tone="violet" />
         </section>
 
         {/* Toolbar: search + filters + create */}
-        <section className="flex flex-wrap items-center gap-3">
+        <AdminToolbar>
           <div className="relative min-w-[240px] flex-1">
             <Search className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
             <input
@@ -412,262 +411,246 @@ export default function AdminUsersPage() {
             <UserPlus className="mr-2 size-4" />
             New user
           </Button>
-        </section>
+        </AdminToolbar>
 
-        <section className="overflow-hidden rounded-lg border border-border bg-card">
-          <div className="overflow-x-auto">
-            <table className="w-full min-w-[720px] text-sm">
-              <thead className="border-b border-border bg-muted/50 text-xs text-muted-foreground">
+        <AdminTable>
+          <table className="w-full min-w-[720px] text-sm">
+            <thead className="border-b border-border bg-muted/50 text-xs text-muted-foreground">
+              <tr>
+                <th className="px-4 py-3 text-left font-medium">User</th>
+                <th className="px-4 py-3 text-left font-medium">Role</th>
+                <th className="px-4 py-3 text-left font-medium">Team</th>
+                <th className="px-4 py-3 text-left font-medium">Status</th>
+                <th className="px-4 py-3 text-left font-medium">Last login</th>
+                <th className="px-4 py-3 text-right font-medium">Actions</th>
+              </tr>
+            </thead>
+            <tbody>
+              {loading && users.length === 0 ? (
                 <tr>
-                  <th className="px-4 py-3 text-left font-medium">User</th>
-                  <th className="px-4 py-3 text-left font-medium">Role</th>
-                  <th className="px-4 py-3 text-left font-medium">Team</th>
-                  <th className="px-4 py-3 text-left font-medium">Status</th>
-                  <th className="px-4 py-3 text-left font-medium">Last login</th>
-                  <th className="px-4 py-3 text-right font-medium">Actions</th>
+                  <td colSpan={6} className="px-4 py-10 text-center text-muted-foreground">
+                    Loading users...
+                  </td>
                 </tr>
-              </thead>
-              <tbody>
-                {loading && users.length === 0 ? (
-                  <tr>
-                    <td colSpan={6} className="px-4 py-10 text-center text-muted-foreground">
-                      Loading users...
-                    </td>
-                  </tr>
-                ) : filtered.length === 0 ? (
-                  <tr>
-                    <td colSpan={6} className="px-4 py-10 text-center text-muted-foreground">
-                      {users.length === 0 ? "No users found" : "No users match your filters"}
-                    </td>
-                  </tr>
-                ) : (
-                  filtered.map((user) => {
-                    const busy = actingId === user.id;
-                    const protectedAdmin = isProtectedAdmin(user);
-                    const selfUser = isCurrentUser(user, currentUserEmail);
-                    const roleLocked = selfUser || (protectedAdmin && user.role === "admin");
-                    const disableLocked = selfUser || (protectedAdmin && user.enabled);
-                    const deleteLocked = selfUser || protectedAdmin;
-                    return (
-                      <tr key={user.id} className="border-b border-border/70 last:border-0">
-                        <td className="px-4 py-3">
-                          <div className="font-medium">{user.username || user.email}</div>
-                          <div className="max-w-[260px] truncate text-xs text-muted-foreground">
-                            {user.username} / {user.email}
-                          </div>
-                        </td>
-                        <td className="px-4 py-3">
-                          <RolePill role={user.role} />
-                        </td>
-                        <td className="px-4 py-3">
-                          {user.tenant_id ? (
-                            <span className="text-sm">{user.tenant_id}</span>
-                          ) : (
-                            <span className="text-muted-foreground">—</span>
-                          )}
-                        </td>
-                        <td className="px-4 py-3">
-                          <StatusPill enabled={user.enabled} />
-                        </td>
-                        <td className="px-4 py-3 text-muted-foreground">
-                          {formatTime(user.last_login_at)}
-                        </td>
-                        <td className="px-4 py-3">
-                          <div className="flex justify-end">
-                            <DropdownMenu>
-                              <DropdownMenuTrigger asChild>
-                                <Button
-                                  variant="ghost"
-                                  size="icon"
-                                  className="size-9"
-                                  disabled={busy}
-                                  aria-label="Actions"
-                                >
-                                  {busy ? (
-                                    <LoaderCircle className="size-4 animate-spin" />
-                                  ) : (
-                                    <MoreHorizontal className="size-4" />
-                                  )}
-                                </Button>
-                              </DropdownMenuTrigger>
-                              <DropdownMenuContent align="end">
-                                <DropdownMenuItem onSelect={() => openEdit(user)}>
-                                  <UserCog className="size-4" />
-                                  Edit
-                                </DropdownMenuItem>
-                                <DropdownMenuItem onSelect={() => openReset(user)}>
-                                  <KeyRound className="size-4" />
-                                  Reset password
-                                </DropdownMenuItem>
-                                <DropdownMenuItem
-                                  disabled={roleLocked}
-                                  onSelect={() =>
-                                    void patchUser(
-                                      user,
-                                      { role: user.role === "admin" ? "user" : "admin" },
-                                      "User updated",
-                                    )
-                                  }
-                                >
-                                  <ShieldCheck className="size-4" />
-                                  {user.role === "admin" ? "Make user" : "Make admin"}
-                                </DropdownMenuItem>
-                                <DropdownMenuItem
-                                  disabled={disableLocked}
-                                  onSelect={() =>
-                                    void patchUser(
-                                      user,
-                                      { enabled: !user.enabled },
-                                      user.enabled ? "User disabled" : "User enabled",
-                                    )
-                                  }
-                                >
-                                  <Power className="size-4" />
-                                  {user.enabled ? "Disable" : "Enable"}
-                                </DropdownMenuItem>
-                                <DropdownMenuSeparator />
-                                <DropdownMenuItem
-                                  variant="destructive"
-                                  disabled={deleteLocked}
-                                  onSelect={() => setDeleteTarget(user)}
-                                >
-                                  <Trash2 className="size-4" />
-                                  Delete
-                                </DropdownMenuItem>
-                              </DropdownMenuContent>
-                            </DropdownMenu>
-                          </div>
-                        </td>
-                      </tr>
-                    );
-                  })
-                )}
-              </tbody>
-            </table>
-          </div>
-        </section>
+              ) : filtered.length === 0 ? (
+                <tr>
+                  <td colSpan={6} className="px-4 py-10 text-center text-muted-foreground">
+                    {users.length === 0 ? "No users found" : "No users match your filters"}
+                  </td>
+                </tr>
+              ) : (
+                filtered.map((user) => {
+                  const busy = actingId === user.id;
+                  const protectedAdmin = isProtectedAdmin(user);
+                  const selfUser = isCurrentUser(user, currentUserEmail);
+                  const roleLocked = selfUser || (protectedAdmin && user.role === "admin");
+                  const disableLocked = selfUser || (protectedAdmin && user.enabled);
+                  const deleteLocked = selfUser || protectedAdmin;
+                  return (
+                    <tr key={user.id} className="border-b border-border/70 last:border-0">
+                      <td className="px-4 py-3">
+                        <div className="font-medium">{user.username || user.email}</div>
+                        <div className="max-w-[260px] truncate text-xs text-muted-foreground">
+                          {user.username} / {user.email}
+                        </div>
+                      </td>
+                      <td className="px-4 py-3">
+                        <RolePill role={user.role} />
+                      </td>
+                      <td className="px-4 py-3">
+                        {user.tenant_id ? (
+                          <span className="text-sm">{user.tenant_id}</span>
+                        ) : (
+                          <span className="text-muted-foreground">—</span>
+                        )}
+                      </td>
+                      <td className="px-4 py-3">
+                        <StatusPill enabled={user.enabled} />
+                      </td>
+                      <td className="px-4 py-3 text-muted-foreground">
+                        {formatTime(user.last_login_at)}
+                      </td>
+                      <td className="px-4 py-3">
+                        <div className="flex justify-end">
+                          <DropdownMenu>
+                            <DropdownMenuTrigger asChild>
+                              <Button
+                                variant="ghost"
+                                size="icon"
+                                className="size-9"
+                                disabled={busy}
+                                aria-label="Actions"
+                              >
+                                {busy ? (
+                                  <LoaderCircle className="size-4 animate-spin" />
+                                ) : (
+                                  <MoreHorizontal className="size-4" />
+                                )}
+                              </Button>
+                            </DropdownMenuTrigger>
+                            <DropdownMenuContent align="end">
+                              <DropdownMenuItem onSelect={() => openEdit(user)}>
+                                <UserCog className="size-4" />
+                                Edit
+                              </DropdownMenuItem>
+                              <DropdownMenuItem onSelect={() => openReset(user)}>
+                                <KeyRound className="size-4" />
+                                Reset password
+                              </DropdownMenuItem>
+                              <DropdownMenuItem
+                                disabled={roleLocked}
+                                onSelect={() =>
+                                  void patchUser(
+                                    user,
+                                    { role: user.role === "admin" ? "user" : "admin" },
+                                    "User updated",
+                                  )
+                                }
+                              >
+                                <ShieldCheck className="size-4" />
+                                {user.role === "admin" ? "Make user" : "Make admin"}
+                              </DropdownMenuItem>
+                              <DropdownMenuItem
+                                disabled={disableLocked}
+                                onSelect={() =>
+                                  void patchUser(
+                                    user,
+                                    { enabled: !user.enabled },
+                                    user.enabled ? "User disabled" : "User enabled",
+                                  )
+                                }
+                              >
+                                <Power className="size-4" />
+                                {user.enabled ? "Disable" : "Enable"}
+                              </DropdownMenuItem>
+                              <DropdownMenuSeparator />
+                              <DropdownMenuItem
+                                variant="destructive"
+                                disabled={deleteLocked}
+                                onSelect={() => setDeleteTarget(user)}
+                              >
+                                <Trash2 className="size-4" />
+                                Delete
+                              </DropdownMenuItem>
+                            </DropdownMenuContent>
+                          </DropdownMenu>
+                        </div>
+                      </td>
+                    </tr>
+                  );
+                })
+              )}
+            </tbody>
+          </table>
+        </AdminTable>
       </div>
 
       {/* Create / edit drawer */}
-      {drawerOpen ? (
-        <div className="fixed inset-0 z-50 flex justify-end bg-background/80 backdrop-blur-sm">
-          <div className="flex h-full w-full max-w-md flex-col border-l border-border bg-card shadow-xl">
-            <div className="flex items-center gap-3 border-b border-border px-5 py-4">
-              <div className="grid size-8 place-items-center rounded-md bg-muted">
-                {drawerMode === "create" ? (
-                  <UserPlus className="size-4 text-muted-foreground" />
-                ) : (
-                  <UserCog className="size-4 text-muted-foreground" />
-                )}
-              </div>
-              <div className="min-w-0 flex-1">
-                <div className="text-sm font-medium">
-                  {drawerMode === "create" ? "Create user" : "Edit user"}
-                </div>
-                <div className="truncate text-xs text-muted-foreground">
-                  {drawerMode === "create"
-                    ? "Passwords are stored as bcrypt hashes."
-                    : editTarget?.email}
-                </div>
-              </div>
-            </div>
-
-            <div className="flex-1 space-y-4 overflow-y-auto px-5 py-5">
-              <FieldInput
-                label="Username"
-                value={form.username}
-                onChange={(username) => setForm((p) => ({ ...p, username }))}
-              />
-              <FieldInput
-                label="Email"
-                type="email"
-                value={form.email}
-                onChange={(email) => setForm((p) => ({ ...p, email }))}
-              />
-
-              <label className="grid gap-1 text-xs text-muted-foreground">
-                Team
-                <select
-                  value={teamChoice === "" && form.tenant ? form.tenant : teamChoice}
-                  onChange={(e) => {
-                    const v = e.target.value;
-                    setTeamChoice(v);
-                    if (v === NEW_TEAM) {
-                      setForm((p) => ({ ...p, tenant: "" }));
-                    } else {
-                      setForm((p) => ({ ...p, tenant: v }));
-                    }
-                  }}
-                  className="h-10 rounded-md border border-input bg-background px-3 text-sm text-foreground outline-none focus:border-ring"
-                >
-                  <option value="">No team</option>
-                  {teams.map((t) => (
-                    <option key={t} value={t}>
-                      {t}
-                    </option>
-                  ))}
-                  <option value={NEW_TEAM}>+ New team…</option>
-                </select>
-              </label>
-              {teamChoice === NEW_TEAM ? (
-                <FieldInput
-                  label="New team name"
-                  value={form.tenant}
-                  onChange={(tenant) => setForm((p) => ({ ...p, tenant }))}
-                />
-              ) : null}
-
-              <label className="grid gap-1 text-xs text-muted-foreground">
-                Role
-                <select
-                  value={form.role}
-                  onChange={(e) => setForm((p) => ({ ...p, role: e.target.value as Role }))}
-                  className="h-10 rounded-md border border-input bg-background px-3 text-sm text-foreground outline-none focus:border-ring"
-                >
-                  <option value="user">user</option>
-                  <option value="admin">admin</option>
-                </select>
-              </label>
-
-              {drawerMode === "create" ? (
-                <div className="space-y-2 rounded-md border border-border bg-muted/30 p-3">
-                  <label className="flex items-center gap-2 text-sm">
-                    <input
-                      type="checkbox"
-                      checked={form.autoPassword}
-                      onChange={(e) => setForm((p) => ({ ...p, autoPassword: e.target.checked }))}
-                      className="size-4 rounded border-input"
-                    />
-                    Auto-generate initial password
-                  </label>
-                  {form.autoPassword ? (
-                    <p className="text-xs text-muted-foreground">
-                      A strong password is generated on create and shown once so you can copy it.
-                    </p>
-                  ) : (
-                    <FieldInput
-                      label="Password"
-                      type="password"
-                      value={form.password}
-                      onChange={(password) => setForm((p) => ({ ...p, password }))}
-                    />
-                  )}
-                </div>
-              ) : null}
-            </div>
-
-            <div className="flex justify-end gap-2 border-t border-border px-5 py-4">
-              <Button variant="outline" disabled={saving} onClick={closeDrawer}>
-                Cancel
-              </Button>
-              <Button disabled={saving || !canSubmitDrawer} onClick={() => void submitDrawer()}>
-                {saving ? <LoaderCircle className="mr-2 size-4 animate-spin" /> : null}
-                {drawerMode === "create" ? "Create" : "Save"}
-              </Button>
-            </div>
+      <AdminDrawer
+        open={drawerOpen}
+        onOpenChange={(open) => {
+          if (!open) closeDrawer();
+        }}
+        title={drawerMode === "create" ? "Create user" : "Edit user"}
+        description={
+          drawerMode === "create" ? "Passwords are stored as bcrypt hashes." : editTarget?.email
+        }
+        footer={
+          <div className="flex justify-end gap-2">
+            <Button variant="outline" disabled={saving} onClick={closeDrawer}>
+              Cancel
+            </Button>
+            <Button disabled={saving || !canSubmitDrawer} onClick={() => void submitDrawer()}>
+              {saving ? <LoaderCircle className="mr-2 size-4 animate-spin" /> : null}
+              {drawerMode === "create" ? "Create" : "Save"}
+            </Button>
           </div>
+        }
+      >
+        <div className="space-y-4">
+          <FieldInput
+            label="Username"
+            value={form.username}
+            onChange={(username) => setForm((p) => ({ ...p, username }))}
+          />
+          <FieldInput
+            label="Email"
+            type="email"
+            value={form.email}
+            onChange={(email) => setForm((p) => ({ ...p, email }))}
+          />
+
+          <label className="grid gap-1 text-xs text-muted-foreground">
+            Team
+            <select
+              value={teamChoice === "" && form.tenant ? form.tenant : teamChoice}
+              onChange={(e) => {
+                const v = e.target.value;
+                setTeamChoice(v);
+                if (v === NEW_TEAM) {
+                  setForm((p) => ({ ...p, tenant: "" }));
+                } else {
+                  setForm((p) => ({ ...p, tenant: v }));
+                }
+              }}
+              className="h-10 rounded-md border border-input bg-background px-3 text-sm text-foreground outline-none focus:border-ring"
+            >
+              <option value="">No team</option>
+              {teams.map((t) => (
+                <option key={t} value={t}>
+                  {t}
+                </option>
+              ))}
+              <option value={NEW_TEAM}>+ New team…</option>
+            </select>
+          </label>
+          {teamChoice === NEW_TEAM ? (
+            <FieldInput
+              label="New team name"
+              value={form.tenant}
+              onChange={(tenant) => setForm((p) => ({ ...p, tenant }))}
+            />
+          ) : null}
+
+          <label className="grid gap-1 text-xs text-muted-foreground">
+            Role
+            <select
+              value={form.role}
+              onChange={(e) => setForm((p) => ({ ...p, role: e.target.value as Role }))}
+              className="h-10 rounded-md border border-input bg-background px-3 text-sm text-foreground outline-none focus:border-ring"
+            >
+              <option value="user">user</option>
+              <option value="admin">admin</option>
+            </select>
+          </label>
+
+          {drawerMode === "create" ? (
+            <div className="space-y-2 rounded-md border border-border bg-muted/30 p-3">
+              <label className="flex items-center gap-2 text-sm">
+                <input
+                  type="checkbox"
+                  checked={form.autoPassword}
+                  onChange={(e) => setForm((p) => ({ ...p, autoPassword: e.target.checked }))}
+                  className="size-4 rounded border-input"
+                />
+                Auto-generate initial password
+              </label>
+              {form.autoPassword ? (
+                <p className="text-xs text-muted-foreground">
+                  A strong password is generated on create and shown once so you can copy it.
+                </p>
+              ) : (
+                <FieldInput
+                  label="Password"
+                  type="password"
+                  value={form.password}
+                  onChange={(password) => setForm((p) => ({ ...p, password }))}
+                />
+              )}
+            </div>
+          ) : null}
         </div>
-      ) : null}
+      </AdminDrawer>
 
       {/* Reset-password drawer */}
       {resetTarget ? (
@@ -731,9 +714,7 @@ export default function AdminUsersPage() {
             <div className="mt-5 flex justify-end gap-2">
               <Button
                 variant="outline"
-                onClick={() =>
-                  void copyText(`${credential.email} / ${credential.password}`)
-                }
+                onClick={() => void copyText(`${credential.email} / ${credential.password}`)}
               >
                 <Copy className="mr-2 size-4" />
                 Copy both
@@ -766,15 +747,6 @@ export default function AdminUsersPage() {
         </div>
       ) : null}
     </main>
-  );
-}
-
-function Metric({ label, value }: { label: string; value: string }) {
-  return (
-    <div className="rounded-lg border border-border bg-card px-4 py-3">
-      <div className="text-xs text-muted-foreground">{label}</div>
-      <div className="mt-1 text-2xl font-semibold">{value}</div>
-    </div>
   );
 }
 

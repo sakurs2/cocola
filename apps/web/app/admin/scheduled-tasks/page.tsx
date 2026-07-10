@@ -1,7 +1,9 @@
 "use client";
 
-import { CalendarClock, Eye, Pause, Play, Plus, RefreshCw, Rocket, Trash2, X } from "lucide-react";
+import { ClockCountdown as ScheduledTasksPageIcon } from "@phosphor-icons/react";
+import { Eye, Pause, Play, Plus, RefreshCw, Rocket, Trash2 } from "lucide-react";
 import { useCallback, useEffect, useMemo, useState, type ReactNode } from "react";
+import { AdminDrawer } from "@/components/admin/admin-ui";
 
 type ModelOption = {
   alias: string;
@@ -264,8 +266,8 @@ export default function ScheduledTasksPage() {
     <main className="min-h-screen bg-background text-foreground">
       <header className="border-b border-border">
         <div className="mx-auto flex h-16 max-w-7xl items-center gap-3 px-6">
-          <div className="grid size-9 place-items-center rounded-md bg-primary text-primary-foreground">
-            <CalendarClock className="size-4" />
+          <div className="admin-page-icon">
+            <ScheduledTasksPageIcon className="size-[18px]" weight="duotone" />
           </div>
           <div className="min-w-0 flex-1">
             <h1 className="truncate text-base font-semibold">Scheduled Tasks</h1>
@@ -566,95 +568,91 @@ function RunDetailDrawer({
 }) {
   if (!open) return null;
   return (
-    <div className="fixed inset-0 z-50 flex justify-end bg-background/70 backdrop-blur-sm">
-      <button className="absolute inset-0 cursor-default" type="button" onClick={onClose} />
-      <aside className="relative flex h-full w-full max-w-2xl flex-col border-l border-border bg-card shadow-xl">
-        <header className="flex h-16 items-center gap-3 border-b border-border px-5">
-          <div className="min-w-0 flex-1">
-            <h2 className="truncate text-sm font-semibold">Run Details</h2>
-            <p className="truncate text-xs text-muted-foreground">{taskName}</p>
-          </div>
-          <button type="button" className={iconBtn} onClick={onClose}>
-            <X className="size-4" />
-          </button>
-        </header>
-        {loading ? (
-          <div className="grid flex-1 place-items-center text-sm text-muted-foreground">
-            Loading run details...
-          </div>
-        ) : run ? (
-          <div className="flex-1 space-y-4 overflow-y-auto px-5 py-5">
-            <section className="grid gap-3 sm:grid-cols-2">
-              <DetailMetric label="Status" value={run.status} />
-              <DetailMetric label="Model" value={run.model_alias || "-"} />
-              <DetailMetric label="Started" value={formatDate(run.started_at || run.created_at)} />
-              <DetailMetric label="Finished" value={formatDate(run.finished_at)} />
-            </section>
+    <AdminDrawer
+      open={open}
+      onOpenChange={(nextOpen) => {
+        if (!nextOpen) onClose();
+      }}
+      title="Run details"
+      description={taskName}
+      size="lg"
+    >
+      {loading ? (
+        <div className="grid min-h-64 place-items-center text-sm text-muted-foreground">
+          Loading run details...
+        </div>
+      ) : run ? (
+        <div className="space-y-4">
+          <section className="grid gap-3 sm:grid-cols-2">
+            <DetailMetric label="Status" value={run.status} />
+            <DetailMetric label="Model" value={run.model_alias || "-"} />
+            <DetailMetric label="Started" value={formatDate(run.started_at || run.created_at)} />
+            <DetailMetric label="Finished" value={formatDate(run.finished_at)} />
+          </section>
 
-            <section className="rounded-lg border border-border bg-background">
-              <div className="border-b border-border px-3 py-2 text-xs font-medium text-muted-foreground">
-                Session
-              </div>
-              <div className="break-all px-3 py-2 font-mono text-xs text-foreground">
-                {run.session_id || "-"}
-              </div>
-            </section>
+          <section className="rounded-lg border border-border bg-background">
+            <div className="border-b border-border px-3 py-2 text-xs font-medium text-muted-foreground">
+              Session
+            </div>
+            <div className="break-all px-3 py-2 font-mono text-xs text-foreground">
+              {run.session_id || "-"}
+            </div>
+          </section>
 
-            {run.error ? (
-              <section className="rounded-lg border border-destructive/30 bg-destructive/10">
-                <div className="border-b border-destructive/20 px-3 py-2 text-xs font-medium text-destructive">
-                  Error
-                </div>
-                <pre className="whitespace-pre-wrap break-words px-3 py-2 text-xs text-destructive">
-                  {run.error}
-                </pre>
-              </section>
-            ) : null}
-
-            <section className="rounded-lg border border-border bg-background">
-              <div className="border-b border-border px-3 py-2 text-xs font-medium text-muted-foreground">
-                Output
+          {run.error ? (
+            <section className="rounded-lg border border-destructive/30 bg-destructive/10">
+              <div className="border-b border-destructive/20 px-3 py-2 text-xs font-medium text-destructive">
+                Error
               </div>
-              <pre className="min-h-24 whitespace-pre-wrap break-words px-3 py-2 text-xs text-foreground">
-                {run.output_text || "(no output captured)"}
+              <pre className="whitespace-pre-wrap break-words px-3 py-2 text-xs text-destructive">
+                {run.error}
               </pre>
             </section>
+          ) : null}
 
-            <section className="rounded-lg border border-border bg-background">
-              <div className="border-b border-border px-3 py-2 text-xs font-medium text-muted-foreground">
-                Events
-              </div>
-              <div className="divide-y divide-border">
-                {(run.events ?? []).map((event) => (
-                  <div key={event.id || `${event.run_id}-${event.seq}`} className="px-3 py-3">
-                    <div className="flex items-center justify-between gap-3">
-                      <span className="rounded-md border border-border bg-card px-2 py-1 text-xs font-medium">
-                        #{event.seq} {event.kind}
-                      </span>
-                      <span className="text-xs text-muted-foreground">
-                        {formatDate(event.created_at)}
-                      </span>
-                    </div>
-                    <pre className="mt-2 max-h-56 overflow-auto whitespace-pre-wrap break-words rounded-md bg-card px-3 py-2 text-xs text-muted-foreground">
-                      {JSON.stringify(event.data_json ?? {}, null, 2)}
-                    </pre>
+          <section className="rounded-lg border border-border bg-background">
+            <div className="border-b border-border px-3 py-2 text-xs font-medium text-muted-foreground">
+              Output
+            </div>
+            <pre className="min-h-24 whitespace-pre-wrap break-words px-3 py-2 text-xs text-foreground">
+              {run.output_text || "(no output captured)"}
+            </pre>
+          </section>
+
+          <section className="rounded-lg border border-border bg-background">
+            <div className="border-b border-border px-3 py-2 text-xs font-medium text-muted-foreground">
+              Events
+            </div>
+            <div className="divide-y divide-border">
+              {(run.events ?? []).map((event) => (
+                <div key={event.id || `${event.run_id}-${event.seq}`} className="px-3 py-3">
+                  <div className="flex items-center justify-between gap-3">
+                    <span className="rounded-md border border-border bg-card px-2 py-1 text-xs font-medium">
+                      #{event.seq} {event.kind}
+                    </span>
+                    <span className="text-xs text-muted-foreground">
+                      {formatDate(event.created_at)}
+                    </span>
                   </div>
-                ))}
-                {!(run.events ?? []).length ? (
-                  <div className="px-3 py-8 text-center text-sm text-muted-foreground">
-                    No events captured
-                  </div>
-                ) : null}
-              </div>
-            </section>
-          </div>
-        ) : (
-          <div className="grid flex-1 place-items-center text-sm text-muted-foreground">
-            Run detail unavailable
-          </div>
-        )}
-      </aside>
-    </div>
+                  <pre className="mt-2 max-h-56 overflow-auto whitespace-pre-wrap break-words rounded-md bg-card px-3 py-2 text-xs text-muted-foreground">
+                    {JSON.stringify(event.data_json ?? {}, null, 2)}
+                  </pre>
+                </div>
+              ))}
+              {!(run.events ?? []).length ? (
+                <div className="px-3 py-8 text-center text-sm text-muted-foreground">
+                  No events captured
+                </div>
+              ) : null}
+            </div>
+          </section>
+        </div>
+      ) : (
+        <div className="grid min-h-64 place-items-center text-sm text-muted-foreground">
+          Run detail unavailable
+        </div>
+      )}
+    </AdminDrawer>
   );
 }
 

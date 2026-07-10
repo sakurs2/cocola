@@ -1,5 +1,6 @@
 "use client";
 
+import { PlugsConnected as McpPageIcon } from "@phosphor-icons/react";
 import { useCallback, useEffect, useMemo, useState, type ReactNode } from "react";
 import {
   ChevronDown,
@@ -11,6 +12,7 @@ import {
   Trash2,
 } from "lucide-react";
 import Link from "next/link";
+import { AdminPageHeader } from "@/components/admin/admin-ui";
 
 type MCPServer = {
   id: string;
@@ -194,19 +196,18 @@ export default function AdminMCPPage() {
 
   return (
     <main className="mx-auto max-w-6xl space-y-6 px-6 py-6">
-      <header className="flex flex-wrap items-start justify-between gap-4">
-        <div>
-          <h1 className="text-xl font-semibold">MCP</h1>
-          <p className="mt-1 text-sm text-muted-foreground">
-            Publish Model Context Protocol servers that users can enable for their agent sessions.
-          </p>
-        </div>
-        <div className="grid grid-cols-3 overflow-hidden rounded-md border border-border text-center text-xs">
-          <Stat label="Total" value={stats.total} />
-          <Stat label="Enabled" value={stats.enabled} />
-          <Stat label="Default" value={stats.defaults} />
-        </div>
-      </header>
+      <AdminPageHeader
+        icon={<McpPageIcon className="size-[18px]" weight="duotone" />}
+        title="MCP"
+        description="Publish Model Context Protocol servers that users can enable for their agent sessions."
+        actions={
+          <div className="grid grid-cols-3 overflow-hidden rounded-md border border-border text-center text-xs">
+            <Stat label="Total" value={stats.total} />
+            <Stat label="Enabled" value={stats.enabled} />
+            <Stat label="Default" value={stats.defaults} />
+          </div>
+        }
+      />
 
       {error ? (
         <div className="rounded-md border border-red-500/30 bg-red-500/10 px-3 py-2 text-sm text-red-600">
@@ -385,8 +386,8 @@ export default function AdminMCPPage() {
           </button>
         </div>
         <p className="mt-3 text-xs text-muted-foreground">
-          For URL keys, use placeholders such as ${"${AMAP_KEY}"} in the URL and save the real
-          value in Advanced URL Variables. Env, headers, and URL variables are encrypted.
+          For URL keys, use placeholders such as ${"${AMAP_KEY}"} in the URL and save the real value
+          in Advanced URL Variables. Env, headers, and URL variables are encrypted.
         </p>
       </section>
 

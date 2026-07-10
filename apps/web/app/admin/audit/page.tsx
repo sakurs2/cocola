@@ -1,11 +1,11 @@
 "use client";
 
+import { ShieldCheck as AuditPageIcon } from "@phosphor-icons/react";
 import {
   AlertTriangle,
   CheckCircle2,
   ChevronLeft,
   ChevronRight,
-  FileClock,
   Loader2,
   RefreshCw,
   Search,
@@ -107,8 +107,8 @@ export default function AdminAuditPage() {
     <main className="min-h-screen bg-background text-foreground">
       <header className="border-b border-border">
         <div className="mx-auto flex h-16 max-w-7xl items-center gap-3 px-6">
-          <div className="grid size-9 place-items-center rounded-md bg-primary text-primary-foreground">
-            <FileClock className="size-4" />
+          <div className="admin-page-icon">
+            <AuditPageIcon className="size-[18px]" weight="duotone" />
           </div>
           <div className="min-w-0 flex-1">
             <h1 className="truncate text-base font-semibold">Audit Logs</h1>

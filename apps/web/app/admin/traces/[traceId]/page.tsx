@@ -1,7 +1,7 @@
 "use client";
 
+import { Graph as TracePageIcon } from "@phosphor-icons/react";
 import {
-  Activity,
   AlertTriangle,
   ArrowLeft,
   CheckCircle2,
@@ -114,8 +114,8 @@ export default function AdminTracePage({ params }: { params: { traceId: string }
           <Link href="/admin/audit" className={iconBtn} title="Back to audit logs">
             <ArrowLeft className="size-4" />
           </Link>
-          <div className="grid size-9 place-items-center rounded-md bg-primary text-primary-foreground">
-            <Activity className="size-4" />
+          <div className="admin-page-icon">
+            <TracePageIcon className="size-[18px]" weight="duotone" />
           </div>
           <div className="min-w-0 flex-1">
             <h1 className="truncate text-base font-semibold">Trace Detail</h1>

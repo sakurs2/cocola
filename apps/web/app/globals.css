@@ -100,31 +100,38 @@
   }
 
   .cocola-admin-ui {
-    --background: 210 40% 97%;
-    --foreground: 222 47% 11%;
+    --background: 207 69% 97%;
+    --foreground: 217 44% 14%;
     --card: 0 0% 100%;
-    --card-foreground: 222 47% 11%;
+    --card-foreground: 217 44% 14%;
     --popover: 0 0% 100%;
-    --popover-foreground: 222 47% 11%;
-    --primary: 221 83% 45%;
+    --popover-foreground: 217 44% 14%;
+    --primary: 221 83% 53%;
     --primary-foreground: 0 0% 100%;
-    --secondary: 214 32% 91%;
-    --secondary-foreground: 222 47% 11%;
-    --muted: 214 32% 94%;
-    --muted-foreground: 215 16% 42%;
-    --accent: 213 94% 94%;
-    --accent-foreground: 221 83% 33%;
+    --secondary: 214 40% 93%;
+    --secondary-foreground: 217 44% 14%;
+    --muted: 211 44% 94%;
+    --muted-foreground: 215 20% 42%;
+    --accent: 213 92% 94%;
+    --accent-foreground: 221 83% 40%;
     --destructive: 0 72% 51%;
     --destructive-foreground: 0 0% 100%;
-    --border: 214 32% 85%;
-    --input: 214 32% 84%;
+    --border: 211 48% 86%;
+    --input: 211 48% 83%;
     --ring: 221 83% 53%;
 
-    --sidebar: 205 100% 96%;
-    --sidebar-foreground: 222 47% 16%;
-    --sidebar-border: 205 84% 88%;
+    --sidebar: 207 69% 97%;
+    --sidebar-foreground: 217 44% 18%;
+    --sidebar-border: 205 76% 87%;
     --sidebar-accent: 0 0% 100%;
-    --sidebar-accent-foreground: 221 83% 35%;
+    --sidebar-accent-foreground: 221 83% 45%;
+
+    --admin-cloud: #f4f9fd;
+    --admin-frost: rgb(255 255 255 / 0.8);
+    --admin-ink: #142033;
+    --admin-sky: #2563eb;
+    --admin-violet: #7c3aed;
+    --admin-signal: #10b981;
   }
 }
 
@@ -251,7 +258,13 @@
       radial-gradient(64% 60% at 104% 104%, hsl(276 84% 87% / 0.55) 0%, transparent 58%),
       radial-gradient(60% 58% at -4% 104%, hsl(186 88% 85% / 0.5) 0%, transparent 58%),
       radial-gradient(40% 38% at 46% 60%, hsl(210 90% 93% / 0.45) 0%, transparent 60%),
-      linear-gradient(140deg, hsl(166 66% 96%) 0%, hsl(200 78% 97%) 34%, hsl(220 82% 97%) 62%, hsl(264 74% 97%) 100%),
+      linear-gradient(
+        140deg,
+        hsl(166 66% 96%) 0%,
+        hsl(200 78% 97%) 34%,
+        hsl(220 82% 97%) 62%,
+        hsl(264 74% 97%) 100%
+      ),
       hsl(var(--background));
   }
 
@@ -269,10 +282,20 @@
     border-radius: 50%;
     pointer-events: none;
     background:
-      radial-gradient(circle at 34% 30%, hsl(0 0% 100% / 0.55) 0%, hsl(0 0% 100% / 0.12) 26%, transparent 42%),
+      radial-gradient(
+        circle at 34% 30%,
+        hsl(0 0% 100% / 0.55) 0%,
+        hsl(0 0% 100% / 0.12) 26%,
+        transparent 42%
+      ),
       radial-gradient(circle at 68% 74%, hsl(276 82% 80% / 0.5) 0%, transparent 55%),
       radial-gradient(circle at 30% 70%, hsl(190 86% 78% / 0.42) 0%, transparent 58%),
-      radial-gradient(circle at 50% 50%, hsl(224 84% 88% / 0.4) 0%, hsl(258 76% 86% / 0.28) 55%, transparent 72%);
+      radial-gradient(
+        circle at 50% 50%,
+        hsl(224 84% 88% / 0.4) 0%,
+        hsl(258 76% 86% / 0.28) 55%,
+        transparent 72%
+      );
     box-shadow:
       inset 0 0 60px hsl(0 0% 100% / 0.35),
       inset -22px -30px 90px hsl(266 70% 74% / 0.3);
@@ -470,7 +493,12 @@
   }
 
   .cocola-user-ui .cocola-hero-title {
-    background: linear-gradient(100deg, hsl(190 92% 44%) 0%, hsl(221 83% 58%) 46%, hsl(268 78% 60%) 100%);
+    background: linear-gradient(
+      100deg,
+      hsl(190 92% 44%) 0%,
+      hsl(221 83% 58%) 46%,
+      hsl(268 78% 60%) 100%
+    );
     background-clip: text;
     -webkit-background-clip: text;
     color: transparent;
@@ -481,7 +509,12 @@
   .cocola-user-ui .cocola-send-btn {
     position: relative;
     isolation: isolate;
-    background: linear-gradient(45deg, hsl(214 92% 54%) 0%, hsl(232 84% 60%) 46%, hsl(270 82% 62%) 100%);
+    background: linear-gradient(
+      45deg,
+      hsl(214 92% 54%) 0%,
+      hsl(232 84% 60%) 46%,
+      hsl(270 82% 62%) 100%
+    );
     box-shadow:
       inset 0 1px 0 hsl(0 0% 100% / 0.45),
       inset 0 -3px 8px hsl(266 70% 40% / 0.28),
@@ -504,7 +537,9 @@
     background: radial-gradient(circle at 50% 55%, hsl(252 88% 66% / 0.55) 0%, transparent 70%);
     opacity: 0.65;
     filter: blur(6px);
-    transition: opacity 260ms ease, transform 320ms ease;
+    transition:
+      opacity 260ms ease,
+      transform 320ms ease;
   }
 
   .cocola-user-ui .cocola-send-btn svg {
@@ -603,11 +638,33 @@
   }
 
   .cocola-admin-ui.admin-ops-bg {
+    position: relative;
+    isolation: isolate;
     background:
-      radial-gradient(88% 62% at 4% 0%, hsl(206 100% 83% / 0.5) 0%, transparent 48%),
-      radial-gradient(78% 54% at 96% 6%, hsl(222 100% 86% / 0.34) 0%, transparent 46%),
-      linear-gradient(180deg, hsl(208 100% 93% / 0.62), hsl(214 56% 97%) 38rem),
+      radial-gradient(88% 62% at 4% 0%, hsl(201 96% 82% / 0.5) 0%, transparent 48%),
+      radial-gradient(78% 54% at 96% 6%, hsl(258 92% 88% / 0.3) 0%, transparent 46%),
+      linear-gradient(180deg, hsl(205 100% 94% / 0.72), hsl(207 69% 98%) 38rem),
       hsl(var(--background));
+  }
+
+  /* The control plane's one ambient signature: a low-contrast topology grid.
+     It stays outside content surfaces so dense tables and logs remain quiet. */
+  .cocola-admin-ui.admin-ops-bg::before {
+    content: "";
+    position: fixed;
+    inset: 0;
+    z-index: -1;
+    pointer-events: none;
+    opacity: 0.24;
+    background-image:
+      linear-gradient(hsl(221 83% 53% / 0.11) 1px, transparent 1px),
+      linear-gradient(90deg, hsl(221 83% 53% / 0.11) 1px, transparent 1px),
+      radial-gradient(circle at center, hsl(258 90% 66% / 0.2) 1px, transparent 1.5px);
+    background-size:
+      44px 44px,
+      44px 44px,
+      88px 88px;
+    mask-image: linear-gradient(to bottom, black, transparent 72%);
   }
 
   .cocola-admin-ui .admin-glass-sidebar {
@@ -652,10 +709,73 @@
     backdrop-filter: blur(22px) saturate(1.18);
   }
 
+  .cocola-admin-ui .admin-mobile-nav,
+  .cocola-admin-ui .admin-drawer {
+    border-color: hsl(0 0% 100% / 0.78);
+    background:
+      linear-gradient(180deg, hsl(0 0% 100% / 0.92), hsl(207 70% 98% / 0.84)),
+      hsl(var(--background));
+    box-shadow:
+      inset 0 1px 0 hsl(0 0% 100% / 0.96),
+      0 28px 80px hsl(215 50% 20% / 0.2);
+    backdrop-filter: blur(24px) saturate(1.2);
+  }
+
   .cocola-admin-ui .admin-topbar {
     border-color: hsl(205 84% 86% / 0.62);
     background: linear-gradient(180deg, hsl(0 0% 100% / 0.64), hsl(210 100% 99% / 0.36));
     backdrop-filter: blur(18px) saturate(1.15);
+  }
+
+  .cocola-admin-ui .admin-context-pill {
+    display: inline-flex;
+    min-height: 1.75rem;
+    align-items: center;
+    gap: 0.4rem;
+    border: 1px solid hsl(0 0% 100% / 0.62);
+    border-radius: 9999px;
+    background: hsl(0 0% 100% / 0.38);
+    padding: 0.25rem 0.65rem;
+    color: hsl(var(--muted-foreground));
+    box-shadow: inset 0 1px 0 hsl(0 0% 100% / 0.74);
+    font-size: 0.6875rem;
+    line-height: 1rem;
+    backdrop-filter: blur(10px);
+  }
+
+  .cocola-admin-ui .admin-rail-button {
+    display: inline-flex;
+    width: 2.25rem;
+    height: 2.25rem;
+    flex: 0 0 auto;
+    align-items: center;
+    justify-content: center;
+    border-radius: 0.75rem;
+    color: hsl(var(--muted-foreground));
+    transition:
+      color 160ms ease,
+      background-color 160ms ease;
+  }
+
+  .cocola-admin-ui .admin-rail-button:hover {
+    color: hsl(var(--primary));
+    background: hsl(0 0% 100% / 0.5);
+  }
+
+  .cocola-admin-ui .admin-rail-button:focus-visible,
+  .cocola-admin-ui .admin-nav-item:focus-visible {
+    outline: 2px solid hsl(var(--ring) / 0.42);
+    outline-offset: 2px;
+  }
+
+  .cocola-admin-ui .admin-nav-item {
+    transition:
+      color 160ms ease,
+      background-color 160ms ease;
+  }
+
+  .cocola-admin-ui .admin-nav-item:hover {
+    background: hsl(0 0% 100% / 0.28);
   }
 
   .cocola-admin-ui .admin-glass-panel,
@@ -669,6 +789,119 @@
       0 1px 2px hsl(215 40% 20% / 0.04),
       0 12px 32px hsl(215 50% 32% / 0.07);
     backdrop-filter: blur(14px) saturate(1.08);
+  }
+
+  .cocola-admin-ui .admin-overview-hero {
+    position: relative;
+    isolation: isolate;
+    border-color: hsl(0 0% 100% / 0.8);
+    background:
+      radial-gradient(circle at 86% 18%, hsl(258 90% 66% / 0.16), transparent 28%),
+      radial-gradient(circle at 70% 105%, hsl(160 84% 45% / 0.12), transparent 34%),
+      linear-gradient(132deg, hsl(0 0% 100% / 0.84), hsl(207 100% 98% / 0.56));
+    box-shadow:
+      inset 0 1px 0 hsl(0 0% 100% / 0.95),
+      0 22px 56px hsl(215 50% 32% / 0.1);
+    backdrop-filter: blur(18px) saturate(1.15);
+  }
+
+  .cocola-admin-ui .admin-overview-hero::after {
+    content: "";
+    position: absolute;
+    inset: 0;
+    z-index: -1;
+    pointer-events: none;
+    opacity: 0.32;
+    background-image:
+      linear-gradient(hsl(221 83% 53% / 0.13) 1px, transparent 1px),
+      linear-gradient(90deg, hsl(221 83% 53% / 0.13) 1px, transparent 1px);
+    background-size: 36px 36px;
+    mask-image: linear-gradient(90deg, transparent 36%, black);
+  }
+
+  .cocola-admin-ui .admin-page-icon {
+    display: grid;
+    width: 2.5rem;
+    height: 2.5rem;
+    flex: 0 0 auto;
+    place-items: center;
+    border: 1px solid hsl(0 0% 100% / 0.74);
+    border-radius: 0.875rem;
+    color: hsl(var(--primary));
+    background: linear-gradient(145deg, hsl(0 0% 100% / 0.82), hsl(213 94% 95% / 0.66));
+    box-shadow:
+      inset 0 1px 0 hsl(0 0% 100% / 0.96),
+      0 10px 24px hsl(221 83% 53% / 0.12);
+  }
+
+  .cocola-admin-ui .admin-domain-panel {
+    border-color: hsl(205 84% 84% / 0.7);
+    background: hsl(0 0% 100% / 0.48);
+    box-shadow: inset 0 1px 0 hsl(0 0% 100% / 0.76);
+    backdrop-filter: blur(14px);
+  }
+
+  .cocola-admin-ui .admin-module-card {
+    display: flex;
+    min-height: 7.25rem;
+    align-items: flex-start;
+    gap: 0.75rem;
+    border: 1px solid hsl(205 84% 84% / 0.66);
+    border-radius: 1rem;
+    background: hsl(0 0% 100% / 0.62);
+    padding: 0.875rem;
+    box-shadow: inset 0 1px 0 hsl(0 0% 100% / 0.88);
+    transition:
+      transform 200ms cubic-bezier(0.22, 1, 0.36, 1),
+      border-color 200ms ease,
+      background-color 200ms ease,
+      box-shadow 200ms ease;
+  }
+
+  .cocola-admin-ui .admin-module-card:hover {
+    transform: translateY(-2px);
+    border-color: hsl(221 83% 70% / 0.55);
+    background: hsl(0 0% 100% / 0.78);
+    box-shadow:
+      inset 0 1px 0 hsl(0 0% 100% / 0.96),
+      0 16px 34px hsl(221 62% 45% / 0.11);
+  }
+
+  .cocola-admin-ui .admin-module-icon,
+  .cocola-admin-ui .admin-empty-icon {
+    display: grid;
+    width: 2.5rem;
+    height: 2.5rem;
+    flex: 0 0 auto;
+    place-items: center;
+    border-radius: 0.875rem;
+  }
+
+  .cocola-admin-ui .admin-empty-icon {
+    color: hsl(var(--primary));
+    background: hsl(var(--accent));
+  }
+
+  .cocola-admin-ui .admin-metric,
+  .cocola-admin-ui .admin-toolbar {
+    border-color: hsl(205 84% 84% / 0.72);
+    background:
+      linear-gradient(180deg, hsl(0 0% 100% / 0.78), hsl(210 100% 99% / 0.6)),
+      hsl(var(--card) / 0.8);
+    box-shadow:
+      inset 0 1px 0 hsl(0 0% 100% / 0.88),
+      0 10px 28px hsl(215 50% 32% / 0.06);
+    backdrop-filter: blur(12px);
+  }
+
+  .cocola-admin-ui .admin-metric-icon {
+    display: grid;
+    width: 1.75rem;
+    height: 1.75rem;
+    place-items: center;
+    border-radius: 0.625rem;
+    color: hsl(var(--primary));
+    background: hsl(var(--accent));
   }
 
   .cocola-admin-ui .admin-table-surface {
@@ -688,8 +921,59 @@
     backdrop-filter: blur(10px);
   }
 
+  .cocola-admin-ui input,
+  .cocola-admin-ui textarea,
+  .cocola-admin-ui select {
+    border-radius: 0.75rem;
+  }
+
+  .cocola-admin-ui button,
+  .cocola-admin-ui a {
+    -webkit-tap-highlight-color: transparent;
+  }
+
+  .cocola-admin-ui button:focus-visible,
+  .cocola-admin-ui a:focus-visible,
+  .cocola-admin-ui input:focus-visible,
+  .cocola-admin-ui textarea:focus-visible,
+  .cocola-admin-ui select:focus-visible {
+    outline: 2px solid hsl(var(--ring) / 0.4);
+    outline-offset: 2px;
+  }
+
   .cocola-admin-ui main.bg-background {
     background: transparent;
+  }
+
+  .cocola-admin-ui main.min-h-screen {
+    min-height: 100%;
+  }
+
+  .cocola-admin-ui main > header.border-b {
+    border-color: hsl(205 84% 86% / 0.56);
+    background: linear-gradient(180deg, hsl(0 0% 100% / 0.4), hsl(210 100% 99% / 0.18));
+    backdrop-filter: blur(12px);
+  }
+
+  .cocola-admin-ui main > header.border-b > div {
+    min-height: 4rem;
+    height: auto;
+    padding-top: 0.75rem;
+    padding-bottom: 0.75rem;
+  }
+
+  .cocola-admin-ui .rounded-lg {
+    border-radius: 1rem;
+  }
+
+  .cocola-admin-ui table {
+    font-variant-numeric: tabular-nums;
+  }
+
+  .cocola-admin-ui thead {
+    position: sticky;
+    top: 0;
+    z-index: 2;
   }
 
   .cocola-admin-ui .bg-muted,
@@ -704,6 +988,39 @@
 
   .cocola-admin-ui tbody tr:hover {
     background-color: hsl(210 100% 98% / 0.62);
+  }
+
+  .cocola-admin-ui tbody tr {
+    transition: background-color 140ms ease;
+  }
+
+  .cocola-admin-ui pre,
+  .cocola-admin-ui code,
+  .cocola-admin-ui .font-mono {
+    font-variant-numeric: tabular-nums;
+  }
+
+  @media (max-width: 640px) {
+    .cocola-admin-ui main > header.border-b > div {
+      padding-right: 1rem;
+      padding-left: 1rem;
+    }
+
+    .cocola-admin-ui main > div {
+      padding-right: 1rem;
+      padding-left: 1rem;
+    }
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    .cocola-admin-ui *,
+    .cocola-admin-ui *::before,
+    .cocola-admin-ui *::after {
+      scroll-behavior: auto !important;
+      animation-duration: 0.01ms !important;
+      animation-iteration-count: 1 !important;
+      transition-duration: 0.01ms !important;
+    }
   }
 
   /* Homepage tagline: two aligned layers.
@@ -821,7 +1138,10 @@
       hsl(268 78% 60%) 100%
     );
     box-shadow: 0 8px 22px hsl(221 70% 45% / 0.32);
-    transition: transform 0.12s, box-shadow 0.12s, filter 0.12s;
+    transition:
+      transform 0.12s,
+      box-shadow 0.12s,
+      filter 0.12s;
   }
 
   .cocola-user-ui .cocola-login-signin:hover:not(:disabled) {

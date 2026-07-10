@@ -1,7 +1,9 @@
 "use client";
 
+import { FileText as PromptPageIcon } from "@phosphor-icons/react";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { LoaderCircle, RotateCw, Save, ToggleLeft, ToggleRight } from "lucide-react";
+import { AdminPageHeader } from "@/components/admin/admin-ui";
 
 type AgentPrompt = {
   id: string;
@@ -94,19 +96,18 @@ export default function AdminAgentPromptPage() {
 
   return (
     <main className="mx-auto max-w-5xl space-y-6 px-6 py-6">
-      <header className="flex flex-wrap items-start justify-between gap-4">
-        <div>
-          <h1 className="text-xl font-semibold">Agent Prompt</h1>
-          <p className="mt-1 text-sm text-muted-foreground">
-            Configure the global system prompt applied to new agent turns.
-          </p>
-        </div>
-        <div className="grid grid-cols-3 overflow-hidden rounded-md border border-border text-center text-xs">
-          <Stat label="Status" value={enabled ? "On" : "Off"} />
-          <Stat label="Version" value={prompt.version || 0} />
-          <Stat label="Chars" value={charCount} />
-        </div>
-      </header>
+      <AdminPageHeader
+        icon={<PromptPageIcon className="size-[18px]" weight="duotone" />}
+        title="Agent Prompt"
+        description="Configure the global system prompt applied to new agent turns."
+        actions={
+          <div className="grid grid-cols-3 overflow-hidden rounded-md border border-border text-center text-xs">
+            <Stat label="Status" value={enabled ? "On" : "Off"} />
+            <Stat label="Version" value={prompt.version || 0} />
+            <Stat label="Chars" value={charCount} />
+          </div>
+        }
+      />
 
       {error ? (
         <div className="rounded-md border border-red-500/30 bg-red-500/10 px-3 py-2 text-sm text-red-600">

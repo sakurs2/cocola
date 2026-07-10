@@ -1,7 +1,9 @@
 "use client";
 
+import { Graph as ArchitecturePageIcon } from "@phosphor-icons/react";
 import { LoaderCircle, RefreshCw } from "lucide-react";
 import { useCallback, useEffect, useMemo, useState } from "react";
+import { AdminPageHeader } from "@/components/admin/admin-ui";
 
 type Status = "healthy" | "degraded" | "unhealthy" | "unknown" | string;
 
@@ -68,35 +70,34 @@ export default function AdminArchitecturePage() {
 
   return (
     <main className="flex min-h-screen flex-col gap-5 px-6 py-5">
-      <header className="flex shrink-0 flex-wrap items-start justify-between gap-4">
-        <div>
-          <h1 className="text-xl font-semibold">Architecture</h1>
-          <p className="mt-1 text-sm text-muted-foreground">
-            System topology and health states for the current cocola deployment.
-          </p>
-        </div>
-        <div className="flex flex-wrap items-center gap-2">
-          <div className="grid grid-cols-4 overflow-hidden rounded-md border border-border text-center text-xs">
-            <Stat label="Nodes" value={stats.total} />
-            <Stat label="Healthy" value={stats.healthy} />
-            <Stat label="Attention" value={stats.attention} />
-            <Stat label="Unknown" value={stats.unknown} />
+      <AdminPageHeader
+        icon={<ArchitecturePageIcon className="size-[18px]" weight="duotone" />}
+        title="Architecture"
+        description="System topology and health states for the current cocola deployment."
+        actions={
+          <div className="flex flex-wrap items-center gap-2">
+            <div className="grid grid-cols-4 overflow-hidden rounded-md border border-border text-center text-xs">
+              <Stat label="Nodes" value={stats.total} />
+              <Stat label="Healthy" value={stats.healthy} />
+              <Stat label="Attention" value={stats.attention} />
+              <Stat label="Unknown" value={stats.unknown} />
+            </div>
+            <button
+              className="inline-flex h-9 items-center justify-center gap-2 rounded-md border border-border bg-background px-3 text-sm font-medium transition-colors hover:bg-accent hover:text-accent-foreground disabled:pointer-events-none disabled:opacity-50"
+              onClick={() => void load()}
+              disabled={loading}
+              type="button"
+            >
+              {loading ? (
+                <LoaderCircle className="size-4 animate-spin" />
+              ) : (
+                <RefreshCw className="size-4" />
+              )}
+              Refresh
+            </button>
           </div>
-          <button
-            className="inline-flex h-9 items-center justify-center gap-2 rounded-md border border-border bg-background px-3 text-sm font-medium transition-colors hover:bg-accent hover:text-accent-foreground disabled:pointer-events-none disabled:opacity-50"
-            onClick={() => void load()}
-            disabled={loading}
-            type="button"
-          >
-            {loading ? (
-              <LoaderCircle className="size-4 animate-spin" />
-            ) : (
-              <RefreshCw className="size-4" />
-            )}
-            Refresh
-          </button>
-        </div>
-      </header>
+        }
+      />
 
       {error ? (
         <div className="rounded-md border border-red-500/30 bg-red-500/10 px-3 py-2 text-sm text-red-600">
@@ -108,7 +109,9 @@ export default function AdminArchitecturePage() {
         <div className="architecture-flow relative h-[620px] overflow-hidden rounded-lg border border-border bg-card xl:h-full">
           <div className="absolute inset-0 bg-[radial-gradient(circle_at_1px_1px,hsl(var(--border))_1px,transparent_0)] [background-size:32px_32px]" />
           <div className="absolute left-3 top-3 rounded-md border border-border bg-background/95 px-3 py-2 text-xs text-muted-foreground shadow-sm backdrop-blur">
-            {graph?.generated_at ? `Generated ${formatDateTime(graph.generated_at)}` : "Loading graph"}
+            {graph?.generated_at
+              ? `Generated ${formatDateTime(graph.generated_at)}`
+              : "Loading graph"}
           </div>
           {loading && !graph ? (
             <div className="absolute inset-0 grid place-items-center bg-background/60">

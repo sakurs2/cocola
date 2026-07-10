@@ -1,5 +1,6 @@
 "use client";
 
+import { Sparkle as SkillsPageIcon } from "@phosphor-icons/react";
 import { ChangeEvent, useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import {
@@ -13,6 +14,7 @@ import {
   Upload,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { AdminPageHeader } from "@/components/admin/admin-ui";
 
 type Skill = {
   id: string;
@@ -203,19 +205,23 @@ export default function AdminSkillsPage() {
 
   return (
     <main className="mx-auto max-w-6xl space-y-6 px-6 py-6">
-      <header className="flex flex-wrap items-start justify-between gap-4">
-        <div>
-          <h1 className="text-xl font-semibold">Skills</h1>
-          <p className="mt-1 text-sm text-muted-foreground">
-            Publish shared skills for every user sandbox.
-          </p>
-        </div>
-        <label className="inline-flex h-9 cursor-pointer items-center gap-2 rounded-md bg-primary px-3 text-sm font-medium text-primary-foreground hover:bg-primary/90">
-          <Upload className="size-4" />
-          Upload zip
-          <input type="file" accept=".zip,application/zip" className="hidden" onChange={chooseFile} />
-        </label>
-      </header>
+      <AdminPageHeader
+        icon={<SkillsPageIcon className="size-[18px]" weight="duotone" />}
+        title="Skills"
+        description="Publish shared skills for every user sandbox."
+        actions={
+          <label className="inline-flex h-9 cursor-pointer items-center gap-2 rounded-xl bg-primary px-3 text-sm font-medium text-primary-foreground transition-colors hover:bg-primary/90 focus-within:ring-2 focus-within:ring-ring/40">
+            <Upload className="size-4" />
+            Upload zip
+            <input
+              type="file"
+              accept=".zip,application/zip"
+              className="hidden"
+              onChange={chooseFile}
+            />
+          </label>
+        }
+      />
 
       {error ? (
         <div className="rounded-md border border-red-500/30 bg-red-500/10 px-3 py-2 text-sm text-red-600">

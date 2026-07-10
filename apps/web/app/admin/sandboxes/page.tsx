@@ -1,8 +1,9 @@
 "use client";
 
+import { Stack as SandboxesPageIcon } from "@phosphor-icons/react";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
-import { Box, CheckCircle2, Clock3, LoaderCircle, RefreshCw, Server, Trash2 } from "lucide-react";
+import { CheckCircle2, Clock3, LoaderCircle, RefreshCw, Server, Trash2 } from "lucide-react";
 import { signOut } from "next-auth/react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
@@ -76,31 +77,28 @@ export default function SandboxesPage() {
     }
   }, []);
 
-  const handleDelete = useCallback(
-    async (sandboxID: string) => {
-      if (!sandboxID) return;
-      if (!window.confirm(`Delete sandbox ${sandboxID}? This removes the pod and its metadata.`)) {
-        return;
-      }
-      setError("");
-      setDeletingId(sandboxID);
-      try {
-        const res = await fetch(`/api/admin/sandboxes/${encodeURIComponent(sandboxID)}`, {
-          method: "DELETE",
-          cache: "no-store",
-        });
-        if (isAccountDisabledResponse(res)) return redirectAccountDisabled();
-        if (!res.ok && res.status !== 204) throw new Error(await responseError(res));
-        setSandboxes((prev) => prev.filter((s) => s.sandbox_id !== sandboxID));
-        setNotice(`Sandbox ${sandboxID} deleted`);
-      } catch (err) {
-        setError(err instanceof Error ? err.message : String(err));
-      } finally {
-        setDeletingId("");
-      }
-    },
-    [],
-  );
+  const handleDelete = useCallback(async (sandboxID: string) => {
+    if (!sandboxID) return;
+    if (!window.confirm(`Delete sandbox ${sandboxID}? This removes the pod and its metadata.`)) {
+      return;
+    }
+    setError("");
+    setDeletingId(sandboxID);
+    try {
+      const res = await fetch(`/api/admin/sandboxes/${encodeURIComponent(sandboxID)}`, {
+        method: "DELETE",
+        cache: "no-store",
+      });
+      if (isAccountDisabledResponse(res)) return redirectAccountDisabled();
+      if (!res.ok && res.status !== 204) throw new Error(await responseError(res));
+      setSandboxes((prev) => prev.filter((s) => s.sandbox_id !== sandboxID));
+      setNotice(`Sandbox ${sandboxID} deleted`);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setDeletingId("");
+    }
+  }, []);
 
   useEffect(() => {
     void refresh();
@@ -122,8 +120,8 @@ export default function SandboxesPage() {
     <main className="min-h-screen bg-background text-foreground">
       <header className="border-b border-border">
         <div className="mx-auto flex h-16 max-w-7xl items-center gap-3 px-6">
-          <div className="grid size-9 place-items-center rounded-md bg-primary text-primary-foreground">
-            <Box className="size-4" />
+          <div className="admin-page-icon">
+            <SandboxesPageIcon className="size-[18px]" weight="duotone" />
           </div>
           <div className="min-w-0 flex-1">
             <h1 className="truncate text-base font-semibold">Sandbox Runtime</h1>

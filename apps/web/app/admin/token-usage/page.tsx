@@ -1,5 +1,6 @@
 "use client";
 
+import { ChartLineUp as TokenUsagePageIcon } from "@phosphor-icons/react";
 import {
   BarElement,
   CategoryScale,
@@ -12,7 +13,7 @@ import {
   Tooltip,
   type ChartOptions,
 } from "chart.js";
-import { BarChart3, Download, Loader2, RefreshCw, Search, UserRound } from "lucide-react";
+import { Download, Loader2, RefreshCw, Search, UserRound } from "lucide-react";
 import { Line } from "react-chartjs-2";
 import { useCallback, useEffect, useMemo, useState } from "react";
 
@@ -83,11 +84,12 @@ const PAGE_LIMIT = 100;
 const chartOptions = {
   responsive: true,
   maintainAspectRatio: false,
+  animation: false,
   interaction: { mode: "index", intersect: false },
   plugins: {
     legend: {
       labels: {
-        color: "rgb(212 212 212)",
+        color: "#516174",
         boxWidth: 10,
         usePointStyle: true,
       },
@@ -103,14 +105,14 @@ const chartOptions = {
   },
   scales: {
     x: {
-      grid: { color: "rgba(255,255,255,0.06)" },
-      ticks: { color: "rgb(163 163 163)", maxRotation: 0 },
+      grid: { color: "rgba(37, 99, 235, 0.08)" },
+      ticks: { color: "#64748b", maxRotation: 0 },
     },
     y: {
       beginAtZero: true,
-      grid: { color: "rgba(255,255,255,0.08)" },
+      grid: { color: "rgba(37, 99, 235, 0.09)" },
       ticks: {
-        color: "rgb(163 163 163)",
+        color: "#64748b",
         callback(value) {
           return compactNumber(Number(value));
         },
@@ -244,8 +246,8 @@ export default function AdminTokenUsagePage() {
     <main className="min-h-screen bg-background text-foreground">
       <header className="border-b border-border">
         <div className="mx-auto flex h-16 max-w-7xl items-center gap-3 px-6">
-          <div className="grid size-9 place-items-center rounded-md bg-primary text-primary-foreground">
-            <BarChart3 className="size-4" />
+          <div className="admin-page-icon">
+            <TokenUsagePageIcon className="size-[18px]" weight="duotone" />
           </div>
           <div className="min-w-0 flex-1">
             <h1 className="truncate text-base font-semibold">Token Usage</h1>
@@ -498,8 +500,8 @@ function chartData(points: TokenUsagePoint[], bucket: "hour" | "day") {
       {
         label: "Total",
         data: points.map((point) => point.total_tokens),
-        borderColor: "rgb(96 165 250)",
-        backgroundColor: "rgba(96, 165, 250, 0.14)",
+        borderColor: "#2563eb",
+        backgroundColor: "rgba(37, 99, 235, 0.12)",
         fill: true,
         tension: 0.35,
         pointRadius: 2,
@@ -507,16 +509,16 @@ function chartData(points: TokenUsagePoint[], bucket: "hour" | "day") {
       {
         label: "Input",
         data: points.map((point) => point.prompt_tokens),
-        borderColor: "rgb(52 211 153)",
-        backgroundColor: "rgba(52, 211, 153, 0.08)",
+        borderColor: "#10b981",
+        backgroundColor: "rgba(16, 185, 129, 0.08)",
         tension: 0.35,
         pointRadius: 2,
       },
       {
         label: "Output",
         data: points.map((point) => point.completion_tokens),
-        borderColor: "rgb(251 191 36)",
-        backgroundColor: "rgba(251, 191, 36, 0.08)",
+        borderColor: "#7c3aed",
+        backgroundColor: "rgba(124, 58, 237, 0.08)",
         tension: 0.35,
         pointRadius: 2,
       },

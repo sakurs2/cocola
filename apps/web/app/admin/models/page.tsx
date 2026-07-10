@@ -1,17 +1,7 @@
 "use client";
 
-import {
-  Check,
-  Cpu,
-  Eye,
-  EyeOff,
-  KeyRound,
-  Plus,
-  RefreshCw,
-  Save,
-  Star,
-  Trash2,
-} from "lucide-react";
+import { Cpu as ModelsPageIcon } from "@phosphor-icons/react";
+import { Check, Eye, EyeOff, KeyRound, Plus, RefreshCw, Save, Star, Trash2 } from "lucide-react";
 import Image from "next/image";
 import { useCallback, useEffect, useMemo, useState, type ReactNode } from "react";
 import {
@@ -294,8 +284,8 @@ export default function AdminModelsPage() {
     <main className="min-h-screen bg-background text-foreground">
       <header className="border-b border-border">
         <div className="mx-auto flex h-16 max-w-7xl items-center gap-3 px-6">
-          <div className="grid size-9 place-items-center rounded-md bg-primary text-primary-foreground">
-            <Cpu className="size-4" />
+          <div className="admin-page-icon">
+            <ModelsPageIcon className="size-[18px]" weight="duotone" />
           </div>
           <div className="min-w-0 flex-1">
             <h1 className="truncate text-base font-semibold">Model Configuration</h1>
