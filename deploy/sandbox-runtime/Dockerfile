@@ -48,14 +48,12 @@ ARG COCOLA_VENV_PYTHON=3.12
 ARG NPM_REGISTRY=https://registry.npmjs.org
 # Pin a known-good agent SDK range. >=0.2.x is not on PyPI yet; 0.1.x is.
 ARG CLAUDE_AGENT_SDK_SPEC=claude-agent-sdk>=0.2.0
-ARG MCP_SDK_SPEC=mcp==1.28.1
 
 FROM ${OPENSANDBOX_BASE}
 
 ARG COCOLA_VENV_PYTHON
 ARG NPM_REGISTRY
 ARG CLAUDE_AGENT_SDK_SPEC
-ARG MCP_SDK_SPEC
 
 ENV DEBIAN_FRONTEND=noninteractive \
     LANG=C.UTF-8 \
@@ -118,7 +116,7 @@ RUN set -eux; \
 # venv's python directly, so its version is independent of the base image's.
 RUN uv venv --python "${COCOLA_VENV_PYTHON}" /opt/cocola/venv \
     && uv pip install --python /opt/cocola/venv/bin/python --no-cache \
-        "${CLAUDE_AGENT_SDK_SPEC}" "${MCP_SDK_SPEC}"
+        "${CLAUDE_AGENT_SDK_SPEC}"
 
 # ---- egress firewall (ADR-0009 hardening) --------------------------------
 # init-firewall.sh installs an iptables+ipset default-DROP egress allowlist; the

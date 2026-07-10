@@ -286,92 +286,30 @@ def _redact_mcp_message(message: str, config: dict[str, Any]) -> str:
     return message
 
 
-def _sanitize_mcp_error(error: Exception, config: dict[str, Any]) -> str:
-    """Return an actionable error without reflecting URL/header/env secrets."""
-    return _redact_mcp_message(f"{type(error).__name__}: {error}", config)[:500]
+def _exception_detail(error: BaseException) -> str:
+    """Return the first useful leaf instead of a TaskGroup wrapper."""
+    pending: list[BaseException] = [error]
+    fallback = f"{type(error).__name__}: {error}"
+    while pending:
+        current = pending.pop(0)
+        if isinstance(current, BaseExceptionGroup):
+            pending[0:0] = list(current.exceptions)
+            continue
+        detail = str(current).strip()
+        if detail:
+            return f"{type(current).__name__}: {detail}"
+        fallback = type(current).__name__
+    return fallback
 
 
 def _sanitize_agent_error(error: Exception, req: dict[str, Any]) -> str:
-    message = f"{type(error).__name__}: {error}"
+    message = _exception_detail(error)
     servers = req.get("mcp_servers")
     if isinstance(servers, dict):
         for config in servers.values():
             if isinstance(config, dict):
                 message = _redact_mcp_message(message, config)
     return message[:500]
-
-
-async def _initialize_mcp(config: dict[str, Any]) -> dict[str, Any]:
-    from mcp import ClientSession, StdioServerParameters
-    from mcp.client.sse import sse_client
-    from mcp.client.stdio import stdio_client
-    from mcp.client.streamable_http import streamablehttp_client
-
-    transport = str(config.get("type") or "").lower()
-    if transport == "stdio":
-        command = str(config.get("command") or "").strip()
-        if not command:
-            raise ValueError("stdio command is required")
-        args = config.get("args") if isinstance(config.get("args"), list) else []
-        env = config.get("env") if isinstance(config.get("env"), dict) else None
-        params = StdioServerParameters(command=command, args=args, env=env)
-        client = stdio_client(params)
-    elif transport == "http":
-        raw_url = str(config.get("url") or "").strip()
-        if not raw_url:
-            raise ValueError("HTTP URL is required")
-        headers = config.get("headers") if isinstance(config.get("headers"), dict) else None
-        client = streamablehttp_client(
-            raw_url,
-            headers=headers,
-            timeout=10,
-            sse_read_timeout=45,
-        )
-    elif transport == "sse":
-        raw_url = str(config.get("url") or "").strip()
-        if not raw_url:
-            raise ValueError("SSE URL is required")
-        headers = config.get("headers") if isinstance(config.get("headers"), dict) else None
-        client = sse_client(
-            raw_url,
-            headers=headers,
-            timeout=10,
-            sse_read_timeout=45,
-        )
-    else:
-        raise ValueError("transport must be stdio, http, or sse")
-
-    async with client as streams:
-        read_stream, write_stream = streams[0], streams[1]
-        async with ClientSession(read_stream, write_stream) as session:
-            initialized = await session.initialize()
-            tools = await session.list_tools()
-
-    server_info = getattr(initialized, "serverInfo", None) or getattr(
-        initialized, "server_info", None
-    )
-    return {
-        "status": "connected",
-        "server_name": str(getattr(server_info, "name", "") or ""),
-        "server_version": str(getattr(server_info, "version", "") or ""),
-        "tool_count": len(getattr(tools, "tools", []) or []),
-    }
-
-
-async def _mcp_check(req: dict[str, Any]) -> int:
-    config = req.get("config")
-    if not isinstance(config, dict):
-        _emit({"status": "error", "error": "config must be a JSON object"})
-        return 2
-    try:
-        result = await _initialize_mcp(config)
-    except asyncio.CancelledError:
-        raise
-    except Exception as error:  # noqa: BLE001
-        _emit({"status": "error", "error": _sanitize_mcp_error(error, config)})
-        return 1
-    _emit(result)
-    return 0
 
 
 def _selfcheck() -> int:
@@ -464,13 +402,6 @@ def _selfcheck() -> int:
 def main() -> int:
     if "--selfcheck" in sys.argv[1:]:
         return _selfcheck()
-    if "--mcp-check" in sys.argv[1:]:
-        try:
-            req = _read_json_object()
-        except Exception as e:  # noqa: BLE001
-            _emit({"status": "error", "error": f"invalid request: {e}"})
-            return 2
-        return asyncio.run(_mcp_check(req))
     try:
         req = _read_request()
     except Exception as e:  # noqa: BLE001

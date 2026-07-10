@@ -5,6 +5,7 @@ import { useCallback, useEffect, useState, type ReactNode } from "react";
 import {
   ChevronDown,
   CircleAlert,
+  CircleCheck,
   Eye,
   EyeOff,
   FileTerminal,
@@ -14,7 +15,7 @@ import {
   Plus,
   Power,
   PowerOff,
-  ShieldCheck,
+  Save,
   Trash2,
 } from "lucide-react";
 import {
@@ -43,13 +44,6 @@ type MCPServer = {
   enabled: boolean;
   default_enabled: boolean;
   status: string;
-};
-
-type VerificationResult = {
-  status: string;
-  server_name?: string;
-  server_version?: string;
-  tool_count: number;
 };
 
 type FormState = {
@@ -205,13 +199,8 @@ export default function AdminMCPPage() {
         body: JSON.stringify(body),
       });
       if (!res.ok) throw new Error(await readError(res));
-      const result = (await res.json()) as MCPServer & { verification?: VerificationResult };
-      const verification = result.verification;
-      setNotice(
-        verification
-          ? `${result.name} verified on save · ${verification.tool_count} tool${verification.tool_count === 1 ? "" : "s"} discovered.`
-          : `${result.name} saved and verified.`,
-      );
+      const result = (await res.json()) as MCPServer;
+      setNotice(`${result.name} saved. The connection will be checked when an agent uses it.`);
       setDrawerOpen(false);
       await load();
     } catch (err) {
@@ -265,7 +254,7 @@ export default function AdminMCPPage() {
         </AdminAlert>
       ) : null}
       {notice ? (
-        <AdminAlert tone="success" icon={<ShieldCheck className="size-4" />}>
+        <AdminAlert tone="success" icon={<CircleCheck className="size-4" />}>
           <span aria-live="polite">{notice}</span>
         </AdminAlert>
       ) : null}
@@ -293,7 +282,7 @@ export default function AdminMCPPage() {
           <AdminEmptyState
             icon={<McpPageIcon className="size-6" weight="duotone" />}
             title="No MCP servers configured"
-            description="Add a server and Cocola will verify its handshake and tools before saving it."
+            description="Add a server now; Cocola checks the connection when an agent first uses it."
             action={
               <Button className="gap-2" onClick={openCreate}>
                 <Plus className="size-4" />
@@ -310,7 +299,7 @@ export default function AdminMCPPage() {
           if (!saving) setDrawerOpen(open);
         }}
         title={editing ? `Edit ${editing.name}` : "Add MCP server"}
-        description="The connection is verified inside a sandbox before the configuration is saved."
+        description="Save the configuration now. Its connection is checked in the first agent session that uses it."
         size="lg"
         footer={
           <div className="flex items-center justify-end gap-2">
@@ -321,9 +310,9 @@ export default function AdminMCPPage() {
               {saving ? (
                 <LoaderCircle className="size-4 animate-spin" />
               ) : (
-                <ShieldCheck className="size-4" />
+                <Save className="size-4" />
               )}
-              {saving ? "Verifying…" : editing ? "Save changes" : "Add server"}
+              {saving ? "Saving…" : editing ? "Save changes" : "Add server"}
             </Button>
           </div>
         }
@@ -550,14 +539,10 @@ function MCPCard({
       </div>
 
       <div className="mt-auto flex flex-wrap items-center gap-2 pt-4">
-        {mcp.status === "verified" ? (
-          <span className="inline-flex items-center gap-1.5 text-xs text-blue-700">
-            <ShieldCheck className="size-3.5" />
-            Verified on save
-          </span>
-        ) : (
-          <span className="text-xs text-muted-foreground">Not verified on save</span>
-        )}
+        <span className="inline-flex items-center gap-1.5 text-xs text-blue-700">
+          <CircleCheck className="size-3.5" />
+          Configured
+        </span>
         {mcp.default_enabled ? (
           <span className="text-xs text-muted-foreground">· Default on</span>
         ) : null}

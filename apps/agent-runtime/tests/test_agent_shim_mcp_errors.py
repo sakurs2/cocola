@@ -1,0 +1,75 @@
+from __future__ import annotations
+
+import importlib.util
+from pathlib import Path
+
+
+def _load_shim():
+    root = Path(__file__).resolve().parents[3]
+    shim_path = root / "deploy" / "sandbox-runtime" / "shim" / "agent_shim.py"
+    spec = importlib.util.spec_from_file_location("cocola_agent_shim_mcp_errors", shim_path)
+    assert spec and spec.loader
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+def test_agent_error_redacts_mcp_url_headers_and_env():
+    shim = _load_shim()
+    config = {
+        "type": "http",
+        "url": "https://user:pass@mcp.example.test/api?token=url-secret#private",
+        "headers": {"Authorization": "Bearer header-secret"},
+        "env": {"TOKEN": "env-secret"},
+    }
+    error = RuntimeError(
+        "request to https://user:pass@mcp.example.test/api?token=url-secret#private "
+        "with Bearer header-secret and env-secret failed"
+    )
+
+    message = shim._sanitize_agent_error(
+        error,
+        {"mcp_servers": {"remote": config}},
+    )
+
+    assert message == (
+        "RuntimeError: request to https://mcp.example.test/api with [redacted] "
+        "and [redacted] failed"
+    )
+    assert "url-secret" not in message
+    assert "header-secret" not in message
+    assert "env-secret" not in message
+    assert "user:pass" not in message
+
+
+def test_agent_error_unwraps_nested_exception_group_and_redacts_secrets():
+    shim = _load_shim()
+    config = {
+        "type": "http",
+        "url": "https://mcp.example.test/api?token=url-secret",
+        "headers": {"Authorization": "Bearer header-secret"},
+    }
+    error = ExceptionGroup(
+        "unhandled errors in a TaskGroup",
+        [
+            ExceptionGroup(
+                "request failed",
+                [
+                    RuntimeError(
+                        "HTTP 401 from https://mcp.example.test/api?token=url-secret "
+                        "using Bearer header-secret"
+                    )
+                ],
+            )
+        ],
+    )
+
+    message = shim._sanitize_agent_error(
+        error,
+        {"mcp_servers": {"remote": config}},
+    )
+
+    assert message == ("RuntimeError: HTTP 401 from https://mcp.example.test/api using [redacted]")
+    assert "ExceptionGroup" not in message
+    assert "url-secret" not in message
+    assert "header-secret" not in message

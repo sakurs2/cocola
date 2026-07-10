@@ -38,17 +38,6 @@ type MCPServerInput struct {
 	Actor          string
 }
 
-type MCPVerificationResult struct {
-	Status        string `json:"status"`
-	ServerName    string `json:"server_name,omitempty"`
-	ServerVersion string `json:"server_version,omitempty"`
-	ToolCount     int    `json:"tool_count"`
-}
-
-type MCPVerifier interface {
-	Verify(ctx context.Context, serverID string, config map[string]any) (MCPVerificationResult, error)
-}
-
 type MCPServerPublic struct {
 	store.MCPServer
 	URLHint string `json:"url_hint,omitempty"`
@@ -60,20 +49,15 @@ type MCPServerView struct {
 	PreferenceSet    bool `json:"preference_set"`
 }
 
-type MCPServerMutationResult struct {
-	MCPServerPublic
-	Verification MCPVerificationResult `json:"verification"`
-}
-
 type MCPRuntimeConfig struct {
 	MCPServers map[string]map[string]any `json:"mcp_servers"`
 }
 
-func (a *Admin) CreateMCPServer(ctx context.Context, in MCPServerInput) (MCPServerMutationResult, error) {
+func (a *Admin) CreateMCPServer(ctx context.Context, in MCPServerInput) (MCPServerPublic, error) {
 	id := normalizeID(in.ID)
 	transport := normalizeMCPTransport(in.Transport)
 	if id == "" || strings.TrimSpace(in.Name) == "" || !validMCPTransport(transport) {
-		return MCPServerMutationResult{}, ErrInvalidArg
+		return MCPServerPublic{}, ErrInvalidArg
 	}
 	now := a.now().UTC()
 	args := []string{}
@@ -90,7 +74,7 @@ func (a *Admin) CreateMCPServer(ctx context.Context, in MCPServerInput) (MCPServ
 		Enabled:        true,
 		DefaultEnabled: boolValue(in.DefaultEnabled, false),
 		Source:         "admin",
-		Status:         "verified",
+		Status:         "configured",
 		CreatedAt:      now,
 		UpdatedAt:      now,
 		CreatedBy:      in.Actor,
@@ -99,15 +83,15 @@ func (a *Admin) CreateMCPServer(ctx context.Context, in MCPServerInput) (MCPServ
 	var err error
 	server.ArgsJSON, err = jsonRawOne(args)
 	if err != nil {
-		return MCPServerMutationResult{}, err
+		return MCPServerPublic{}, err
 	}
 	server.EnvCiphertextJSON, server.EnvHintJSON, err = encryptSecretMap(a.configSecret(), nil, nil, in.Env, false)
 	if err != nil {
-		return MCPServerMutationResult{}, err
+		return MCPServerPublic{}, err
 	}
 	server.HeaderCiphertextJSON, server.HeaderHintJSON, err = encryptSecretMap(a.configSecret(), nil, nil, in.Headers, false)
 	if err != nil {
-		return MCPServerMutationResult{}, err
+		return MCPServerPublic{}, err
 	}
 	if server.Transport == MCPTransportStdio {
 		server.URL = ""
@@ -116,7 +100,7 @@ func (a *Admin) CreateMCPServer(ctx context.Context, in MCPServerInput) (MCPServ
 		server.HeaderCiphertextJSON = []byte("{}")
 		server.HeaderHintJSON = []byte("{}")
 	} else if err := a.secureMCPRemoteURL(&server, in.URL); err != nil {
-		return MCPServerMutationResult{}, err
+		return MCPServerPublic{}, err
 	} else {
 		server.Command = ""
 		server.ArgsJSON = []byte("[]")
@@ -124,22 +108,17 @@ func (a *Admin) CreateMCPServer(ctx context.Context, in MCPServerInput) (MCPServ
 		server.EnvHintJSON = []byte("{}")
 	}
 	if err := validateMCPServerReady(server); err != nil {
-		return MCPServerMutationResult{}, err
+		return MCPServerPublic{}, err
 	}
-	verification, err := a.verifyMCPServer(ctx, server)
-	if err != nil {
-		return MCPServerMutationResult{}, err
-	}
-	server.Status = "verified"
 	if err := a.store.CreateMCPServer(ctx, server); err != nil {
-		return MCPServerMutationResult{}, err
+		return MCPServerPublic{}, err
 	}
 	a.audit(ctx, in.Actor, "mcp.create", server.ID, "transport="+server.Transport)
 	public, err := a.publicMCPServer(server)
 	if err != nil {
-		return MCPServerMutationResult{}, err
+		return MCPServerPublic{}, err
 	}
-	return MCPServerMutationResult{MCPServerPublic: public, Verification: verification}, nil
+	return public, nil
 }
 
 func (a *Admin) ListMCPServers(ctx context.Context, onlyEnabled bool) ([]MCPServerPublic, error) {
@@ -166,10 +145,10 @@ func (a *Admin) GetMCPServer(ctx context.Context, id string) (MCPServerPublic, e
 	return a.publicMCPServer(server)
 }
 
-func (a *Admin) UpdateMCPServer(ctx context.Context, id string, in MCPServerInput) (MCPServerMutationResult, error) {
+func (a *Admin) UpdateMCPServer(ctx context.Context, id string, in MCPServerInput) (MCPServerPublic, error) {
 	server, err := a.store.GetMCPServer(ctx, normalizeID(id))
 	if err != nil {
-		return MCPServerMutationResult{}, err
+		return MCPServerPublic{}, err
 	}
 	if strings.TrimSpace(in.Name) != "" {
 		server.Name = strings.TrimSpace(in.Name)
@@ -178,7 +157,7 @@ func (a *Admin) UpdateMCPServer(ctx context.Context, id string, in MCPServerInpu
 	if in.Transport != "" {
 		transport := normalizeMCPTransport(in.Transport)
 		if !validMCPTransport(transport) {
-			return MCPServerMutationResult{}, ErrInvalidArg
+			return MCPServerPublic{}, ErrInvalidArg
 		}
 		server.Transport = transport
 	}
@@ -188,7 +167,7 @@ func (a *Admin) UpdateMCPServer(ctx context.Context, id string, in MCPServerInpu
 	if in.Args != nil {
 		server.ArgsJSON, err = jsonRawOne(cleanStringList(*in.Args))
 		if err != nil {
-			return MCPServerMutationResult{}, err
+			return MCPServerPublic{}, err
 		}
 	}
 	if in.DefaultEnabled != nil {
@@ -198,13 +177,13 @@ func (a *Admin) UpdateMCPServer(ctx context.Context, id string, in MCPServerInpu
 		a.configSecret(), server.EnvCiphertextJSON, server.EnvHintJSON, in.Env, in.ClearEnv,
 	)
 	if err != nil {
-		return MCPServerMutationResult{}, err
+		return MCPServerPublic{}, err
 	}
 	server.HeaderCiphertextJSON, server.HeaderHintJSON, err = encryptSecretMap(
 		a.configSecret(), server.HeaderCiphertextJSON, server.HeaderHintJSON, in.Headers, in.ClearHeaders,
 	)
 	if err != nil {
-		return MCPServerMutationResult{}, err
+		return MCPServerPublic{}, err
 	}
 	if server.Transport == MCPTransportStdio {
 		server.URL = ""
@@ -215,11 +194,11 @@ func (a *Admin) UpdateMCPServer(ctx context.Context, id string, in MCPServerInpu
 	} else {
 		if strings.TrimSpace(in.URL) != "" {
 			if err := a.secureMCPRemoteURL(&server, in.URL); err != nil {
-				return MCPServerMutationResult{}, err
+				return MCPServerPublic{}, err
 			}
 		} else if server.URL != mcpRemoteURLTemplate {
 			if err := a.secureExistingMCPRemoteURL(&server); err != nil {
-				return MCPServerMutationResult{}, err
+				return MCPServerPublic{}, err
 			}
 		}
 		server.Command = ""
@@ -230,22 +209,18 @@ func (a *Admin) UpdateMCPServer(ctx context.Context, id string, in MCPServerInpu
 	server.UpdatedAt = a.now().UTC()
 	server.UpdatedBy = in.Actor
 	if err := validateMCPServerReady(server); err != nil {
-		return MCPServerMutationResult{}, err
+		return MCPServerPublic{}, err
 	}
-	verification, err := a.verifyMCPServer(ctx, server)
-	if err != nil {
-		return MCPServerMutationResult{}, err
-	}
-	server.Status = "verified"
+	server.Status = "configured"
 	if err := a.store.UpdateMCPServer(ctx, server); err != nil {
-		return MCPServerMutationResult{}, err
+		return MCPServerPublic{}, err
 	}
 	a.audit(ctx, in.Actor, "mcp.update", server.ID, "enabled="+boolText(server.Enabled))
 	public, err := a.publicMCPServer(server)
 	if err != nil {
-		return MCPServerMutationResult{}, err
+		return MCPServerPublic{}, err
 	}
-	return MCPServerMutationResult{MCPServerPublic: public, Verification: verification}, nil
+	return public, nil
 }
 
 func (a *Admin) SetMCPServerEnabled(ctx context.Context, id string, enabled bool, actor string) (MCPServerPublic, error) {
@@ -381,22 +356,6 @@ func (a *Admin) mcpServerRuntimeConfig(server store.MCPServer) (map[string]any, 
 	default:
 		return nil, ErrInvalidArg
 	}
-}
-
-func (a *Admin) verifyMCPServer(ctx context.Context, server store.MCPServer) (MCPVerificationResult, error) {
-	if a.mcpVerifier == nil {
-		return MCPVerificationResult{}, ErrNotConfigured
-	}
-	config, err := a.mcpServerRuntimeConfig(server)
-	if err != nil {
-		return MCPVerificationResult{}, err
-	}
-	result, err := a.mcpVerifier.Verify(ctx, server.ID, config)
-	if err != nil {
-		return MCPVerificationResult{}, fmt.Errorf("%w: %v", ErrMCPVerification, err)
-	}
-	result.Status = "connected"
-	return result, nil
 }
 
 func (a *Admin) publicMCPServer(server store.MCPServer) (MCPServerPublic, error) {

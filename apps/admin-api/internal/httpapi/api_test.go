@@ -23,23 +23,10 @@ import (
 // fixedClock returns a deterministic time so audit/issued timestamps are stable.
 func fixedClock() time.Time { return time.Unix(1_700_000_000, 0).UTC() }
 
-type fakeMCPVerifier struct{}
-
-func (fakeMCPVerifier) Verify(_ context.Context, _ string, _ map[string]any) (service.MCPVerificationResult, error) {
-	return service.MCPVerificationResult{
-		Status:        "connected",
-		ServerName:    "test-server",
-		ServerVersion: "1.0.0",
-		ToolCount:     2,
-	}, nil
-}
-
 func newTestAPI(adminKey string) *API {
 	mem := store.NewMemory()
 	iss := token.NewIssuer("test-secret", "cocola", 24*time.Hour)
-	svc := service.New(mem, iss, fixedClock).
-		WithConfigSecretKey("config-secret").
-		WithMCPVerifier(fakeMCPVerifier{})
+	svc := service.New(mem, iss, fixedClock).WithConfigSecretKey("config-secret")
 	return New(svc, adminKey)
 }
 

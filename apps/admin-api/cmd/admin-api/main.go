@@ -192,15 +192,6 @@ func main() {
 		WithModelSecretKey(config.SecretFromEnv("COCOLA_MODEL_SECRET_KEY")).
 		WithConfigSecretKey(config.SecretFromEnv("COCOLA_CONFIG_SECRET_KEY")).
 		WithMinScheduleInterval(time.Duration(getenvInt("COCOLA_SCHEDULER_MIN_INTERVAL_SECS", 3600)) * time.Second)
-	if verifier, err := service.NewSandboxMCPVerifier(
-		os.Getenv("COCOLA_SANDBOX_ADDR"),
-		os.Getenv("COCOLA_SANDBOX_IMAGE"),
-	); err != nil {
-		log.Sugar().Warnw("MCP verification disabled", "err", err)
-	} else {
-		svc.WithMCPVerifier(verifier)
-		log.Info("MCP verification enabled (sandbox runtime)")
-	}
 	migrationCtx, migrationCancel := context.WithTimeout(context.Background(), 30*time.Second)
 	if err := svc.MigrateMCPRemoteURLs(migrationCtx); err != nil {
 		migrationCancel()

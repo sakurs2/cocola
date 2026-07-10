@@ -353,9 +353,6 @@ func mapErr(w http.ResponseWriter, err error) {
 		writeErr(w, http.StatusBadRequest, "INVALID_SCHEDULE_FREQUENCY", "scheduled tasks can run at most once per hour")
 	case errors.Is(err, service.ErrScheduleInPast):
 		writeErr(w, http.StatusBadRequest, "INVALID_SCHEDULE_TIME", "scheduled time must be in the future")
-	case errors.Is(err, service.ErrMCPVerification):
-		message := strings.TrimPrefix(err.Error(), service.ErrMCPVerification.Error()+": ")
-		writeErr(w, http.StatusUnprocessableEntity, "MCP_VERIFICATION_FAILED", message)
 	case errors.Is(err, service.ErrInvalidArg):
 		writeErr(w, http.StatusBadRequest, "INVALID_ARGUMENT", err.Error())
 	case errors.Is(err, store.ErrNotFound):

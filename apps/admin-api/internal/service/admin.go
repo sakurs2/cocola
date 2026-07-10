@@ -41,7 +41,6 @@ var (
 	ErrPermissionDenied    = errors.New("service: permission denied")
 	ErrScheduleTooFrequent = errors.New("service: schedule frequency below minimum")
 	ErrScheduleInPast      = errors.New("service: schedule time is in the past")
-	ErrMCPVerification     = errors.New("service: MCP verification failed")
 	ErrNotFound            = store.ErrNotFound
 	ErrConflict            = store.ErrConflict
 )
@@ -59,7 +58,6 @@ type Admin struct {
 	sandboxRuntimes     SandboxRuntimeManager
 	warmPool            WarmPoolConfigWriter
 	architectureChecker ArchitectureHealthChecker
-	mcpVerifier         MCPVerifier
 	userEvents          UserEventBroker
 	modelSecretKey      string
 	configSecretKey     string
@@ -104,14 +102,6 @@ func (a *Admin) WithSandboxRuntimeManager(m SandboxRuntimeManager) *Admin {
 
 func (a *Admin) WithArchitectureHealthChecker(c ArchitectureHealthChecker) *Admin {
 	a.architectureChecker = c
-	return a
-}
-
-// WithMCPVerifier attaches the sandbox-backed verifier used before MCP
-// definitions are persisted. Keeping it behind an interface makes the service
-// transaction boundary independently testable.
-func (a *Admin) WithMCPVerifier(v MCPVerifier) *Admin {
-	a.mcpVerifier = v
 	return a
 }
 
