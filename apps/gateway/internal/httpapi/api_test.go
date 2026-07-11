@@ -8,9 +8,9 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/cocola-project/cocola/apps/gateway/internal/agent"
-	auditstore "github.com/cocola-project/cocola/apps/gateway/internal/audit"
 	"github.com/cocola-project/cocola/apps/gateway/internal/auth"
 	"github.com/cocola-project/cocola/apps/gateway/internal/convo"
 	traceevents "github.com/cocola-project/cocola/apps/gateway/internal/traceevent"
@@ -24,29 +24,39 @@ type fakeStreamer struct {
 	gotQuery agent.Query
 	script   []agent.Event
 	err      error
-}
-
-type fakeAuditStore struct {
-	events []auditstore.Event
+	delay    time.Duration
 }
 
 type fakeTraceStore struct {
-	events []traceevents.Event
+	runs  []traceevents.Run
+	spans []traceevents.Span
 }
 
-func (f *fakeAuditStore) AppendAuditEvent(_ context.Context, e auditstore.Event) error {
-	f.events = append(f.events, e)
+func (f *fakeTraceStore) UpsertConversationRun(_ context.Context, run traceevents.Run) error {
+	f.runs = append(f.runs, run)
 	return nil
 }
 
-func (f *fakeTraceStore) AppendTraceEvent(_ context.Context, e traceevents.Event) error {
-	f.events = append(f.events, e)
+func (f *fakeTraceStore) UpsertConversationTraceSpan(_ context.Context, span traceevents.Span) error {
+	f.spans = append(f.spans, span)
+	return nil
+}
+
+func (f *fakeTraceStore) MarkConversationRunPartial(_ context.Context, traceID string) error {
+	for index := range f.runs {
+		if f.runs[index].TraceID == traceID {
+			f.runs[index].DetailStatus = "partial"
+		}
+	}
 	return nil
 }
 
 func (f *fakeStreamer) Stream(_ context.Context, q agent.Query, onEvent func(agent.Event) error) error {
 	f.gotQuery = q
 	for _, ev := range f.script {
+		if f.delay > 0 {
+			time.Sleep(f.delay)
+		}
 		if err := onEvent(ev); err != nil {
 			return err
 		}
@@ -110,17 +120,24 @@ func TestChatStreamsSSE(t *testing.T) {
 }
 
 func TestChatConsumesInternalTraceEvents(t *testing.T) {
-	fs := &fakeStreamer{script: []agent.Event{
+	fs := &fakeStreamer{delay: 5 * time.Millisecond, script: []agent.Event{
 		{Kind: "trace", Data: map[string]string{
-			"name":               "sandbox.create",
-			"category":           "sandbox",
-			"service":            "agent-runtime",
-			"started_at_unix_ms": "1760000000000",
-			"duration_ms":        "1234",
-			"status":             "ok",
-			"sandbox_id":         "box-1",
-			"reused":             "false",
+			"name":        "sandbox.create",
+			"category":    "sandbox",
+			"service":     "agent-runtime",
+			"duration_ms": "1",
+			"status":      "ok",
+			"sandbox_id":  "box-1",
+			"reused":      "false",
 		}},
+		{Kind: "environment_prepare", Data: map[string]string{
+			"snapshot": `{"schema_version":1,"state":"ready","components":[]}`,
+		}},
+		{Kind: "trace", Data: map[string]string{
+			"name": "sandbox.mcp_config_load", "category": "agent_init", "service": "agent-runtime",
+			"duration_ms": "1", "status": "success",
+		}},
+		{Kind: "environment_status", Data: map[string]string{"phase": "ready"}},
 		{Kind: "text", Data: map[string]string{"text": "hello"}},
 		{Kind: "done", Data: map[string]string{"reason": "stop"}},
 	}}
@@ -142,31 +159,113 @@ func TestChatConsumesInternalTraceEvents(t *testing.T) {
 		t.Fatalf("missing text SSE: %s", body)
 	}
 	found := false
-	for _, event := range trace.events {
+	for _, event := range trace.spans {
 		if event.Name != "sandbox.create" {
 			continue
 		}
 		found = true
-		if event.Service != "agent-runtime" || event.Category != "sandbox" || event.DurationMS != 1234 {
+		if event.Service != "agent-runtime" || event.Category != "sandbox" || event.DurationUS != 1000 {
 			t.Fatalf("bad trace event: %+v", event)
 		}
-		if event.Metadata["sandbox_id"] != "box-1" || event.Metadata["reused"] != "false" {
-			t.Fatalf("bad trace metadata: %+v", event.Metadata)
+		if event.Attributes["sandbox_id"] != "box-1" || event.Attributes["reused"] != "false" {
+			t.Fatalf("bad trace metadata: %+v", event.Attributes)
 		}
 	}
 	if !found {
-		t.Fatalf("sandbox.create trace event not recorded: %+v", trace.events)
+		t.Fatalf("sandbox.create trace event not recorded: %+v", trace.spans)
+	}
+	latest := make(map[string]traceevents.Span)
+	for _, span := range trace.spans {
+		latest[span.SpanID] = span
+	}
+	var rootID, environmentID, agentID, agentInitID string
+	phaseNames := map[string]bool{}
+	for _, span := range latest {
+		phaseNames[span.Name] = true
+		switch span.Name {
+		case "conversation.run":
+			rootID = span.SpanID
+		case "environment.prepare":
+			environmentID = span.SpanID
+		case "agent.execute":
+			agentID = span.SpanID
+		case "agent.initialize":
+			agentInitID = span.SpanID
+		}
+		if strings.Contains(span.Name, "first_") || span.Name == "agent.stream" {
+			t.Fatalf("milestone recorded as a span: %+v", span)
+		}
+	}
+	for _, name := range []string{"conversation.run", "request.prepare", "environment.prepare", "environment.runtime_dispatch", "agent.execute", "agent.initialize", "agent.sdk_initialize", "run.finalize"} {
+		if !phaseNames[name] {
+			t.Fatalf("missing hierarchy span %q: %+v", name, latest)
+		}
+	}
+	if rootID == "" || environmentID == "" || agentID == "" || agentInitID == "" {
+		t.Fatalf("incomplete hierarchy root=%q environment=%q agent=%q init=%q", rootID, environmentID, agentID, agentInitID)
+	}
+	for _, span := range latest {
+		if span.Name == "request.prepare" || span.Name == "environment.prepare" || span.Name == "agent.execute" || span.Name == "run.finalize" {
+			if span.ParentSpanID != rootID {
+				t.Fatalf("phase %q parent=%q want root %q", span.Name, span.ParentSpanID, rootID)
+			}
+		}
+		if span.Name == "sandbox.create" && span.ParentSpanID != environmentID {
+			t.Fatalf("sandbox parent=%q want environment %q", span.ParentSpanID, environmentID)
+		}
+		if span.Name == "environment.runtime_dispatch" {
+			if span.ParentSpanID != environmentID || span.DurationUS <= 0 {
+				t.Fatalf("runtime dispatch span not attached to environment: %+v", span)
+			}
+		}
+		if span.Name == "agent.initialize" && span.ParentSpanID != agentID {
+			t.Fatalf("agent initialize parent=%q want agent %q", span.ParentSpanID, agentID)
+		}
+		if span.Name == "sandbox.mcp_config_load" || span.Name == "agent.sdk_initialize" {
+			if span.ParentSpanID != agentInitID {
+				t.Fatalf("agent initialization child has wrong parent: %+v", span)
+			}
+		}
+	}
+	if fs.gotQuery.ParentSpanID != agentID {
+		t.Fatalf("agent query parent=%q want agent phase %q", fs.gotQuery.ParentSpanID, agentID)
+	}
+	phases := make(map[string]traceevents.Span)
+	for _, span := range latest {
+		phases[span.Name] = span
+	}
+	spanEnd := func(span traceevents.Span) time.Time {
+		return span.StartedAt.Add(time.Duration(span.DurationUS) * time.Microsecond)
+	}
+	ordered := []traceevents.Span{
+		phases["request.prepare"],
+		phases["environment.prepare"],
+		phases["agent.execute"],
+		phases["run.finalize"],
+	}
+	for index := 0; index < len(ordered)-1; index++ {
+		if spanEnd(ordered[index]).After(ordered[index+1].StartedAt) {
+			t.Fatalf("phase overlap: %q ends %s after %q starts %s", ordered[index].Name, spanEnd(ordered[index]), ordered[index+1].Name, ordered[index+1].StartedAt)
+		}
+	}
+	var phaseDurationUS int64
+	for _, phase := range ordered {
+		phaseDurationUS += phase.DurationUS
+	}
+	root := phases["conversation.run"]
+	if phaseDurationUS > root.DurationUS {
+		t.Fatalf("phase duration %dus exceeds root %dus", phaseDurationUS, root.DurationUS)
 	}
 }
 
-func TestChatAuditMetadataExcludesPrompt(t *testing.T) {
+func TestChatConversationRunExcludesPrompt(t *testing.T) {
 	fs := &fakeStreamer{script: []agent.Event{
 		{Kind: "file", Data: map[string]string{"id": "a1", "filename": "out.html", "mime": "text/html", "size": "12"}},
 		{Kind: "done"},
 	}}
-	audit := &fakeAuditStore{}
+	trace := &fakeTraceStore{}
 	v := auth.NewVerifier(auth.Config{})
-	h := New(fs, v, logger.Must()).WithAuditStore(audit).Handler()
+	h := New(fs, v, logger.Must()).WithTraceStore(trace).Handler()
 
 	req := httptest.NewRequest(
 		http.MethodPost,
@@ -179,20 +278,17 @@ func TestChatAuditMetadataExcludesPrompt(t *testing.T) {
 	if rec.Code != http.StatusOK {
 		t.Fatalf("want 200, got %d", rec.Code)
 	}
-	if len(audit.events) != 1 {
-		t.Fatalf("want one audit event, got %d", len(audit.events))
+	if len(trace.runs) < 2 {
+		t.Fatalf("want start and finish run writes, got %d", len(trace.runs))
 	}
-	event := audit.events[0]
-	if event.Action != "chat.send" || event.ResourceID != "s1" || event.Result != "success" {
-		t.Fatalf("bad audit event: %+v", event)
+	run := trace.runs[len(trace.runs)-1]
+	if run.ConversationID != "s1" || run.Status != "success" || run.ModelAlias != "claude" {
+		t.Fatalf("bad conversation run: %+v", run)
 	}
-	raw := event.Metadata
-	if raw["conversation_id"] != "s1" || raw["model_alias"] != "claude" ||
-		raw["attachment_count"] != 1 || raw["artifact_count"] != 1 {
-		t.Fatalf("bad audit metadata: %+v", raw)
-	}
-	if _, ok := raw["prompt"]; ok {
-		t.Fatalf("prompt leaked into audit metadata: %+v", raw)
+	for _, span := range trace.spans {
+		if _, ok := span.Attributes["prompt"]; ok {
+			t.Fatalf("prompt leaked into trace metadata: %+v", span.Attributes)
+		}
 	}
 }
 

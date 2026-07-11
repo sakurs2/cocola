@@ -30,6 +30,8 @@ from __future__ import annotations
 
 import json
 import re
+import secrets
+import time
 from collections.abc import AsyncIterator
 from dataclasses import dataclass, field
 
@@ -226,6 +228,28 @@ class _AttemptState:
     errors: list[AgentEvent] = field(default_factory=list)
 
 
+def _provider_trace_event(
+    name: str,
+    span_id: str,
+    started_at_ns: int,
+    *,
+    status: str,
+    **attributes: object,
+) -> AgentEvent:
+    data: dict[str, object] = {
+        "schema_version": 1,
+        "span_id": span_id,
+        "service": "sandbox-shim",
+        "name": name,
+        "category": "agent",
+        "started_at_unix_ms": started_at_ns // 1_000_000,
+        "duration_us": max((time.time_ns() - started_at_ns) // 1_000, 0),
+        "status": status,
+    }
+    data.update(attributes)
+    return AgentEvent(kind="trace", data=data)
+
+
 class InSandboxShimProvider:
     """AgentProvider that runs the agent inside the bound sandbox via the shim.
 
@@ -281,6 +305,11 @@ class InSandboxShimProvider:
         token = (options.auth_token or "").strip()
         if token:
             env["ANTHROPIC_AUTH_TOKEN"] = token
+        traceparent = (options.traceparent or "").strip()
+        if traceparent:
+            # Claude/Anthropic parses this variable as newline-separated
+            # ``Header-Name: value`` entries, not as JSON.
+            env["ANTHROPIC_CUSTOM_HEADERS"] = f"traceparent: {traceparent}"
         return env
 
     async def query(
@@ -352,10 +381,18 @@ class InSandboxShimProvider:
                     error=repr(exc),
                 )
             state = _AttemptState()
+            retry_span_id = secrets.token_hex(8)
+            retry_started_ns = time.time_ns()
             async for ev in self._stream_attempt(
                 self._build_request(prompt, options, None), options, state
             ):
                 yield ev
+            yield _provider_trace_event(
+                "agent.resume_retry",
+                retry_span_id,
+                retry_started_ns,
+                status="error" if state.saw_error else "success",
+            )
 
         # Surface any deferred error(s) from the FINAL attempt (deferred so the
         # retry decision above can inspect them before the user sees them).

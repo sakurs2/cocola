@@ -92,21 +92,6 @@ func TestSkillCRUD(t *testing.T) {
 	}
 }
 
-func TestAuditAppendAndListNewestFirst(t *testing.T) {
-	m := NewMemory()
-	ctx := context.Background()
-	for i := 0; i < 5; i++ {
-		_ = m.AppendAudit(ctx, AuditEntry{Actor: "admin", Action: "x"})
-	}
-	got, _ := m.ListAudit(ctx, 3)
-	if len(got) != 3 {
-		t.Fatalf("limit not honored: %d", len(got))
-	}
-	if got[0].ID != 5 || got[1].ID != 4 || got[2].ID != 3 {
-		t.Fatalf("not newest-first: %+v", got)
-	}
-}
-
 func TestTryStartScheduledTaskRunBackfillsLegacyUserConversationID(t *testing.T) {
 	m := NewMemory()
 	ctx := context.Background()

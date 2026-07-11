@@ -1,8 +1,7 @@
-// Package service is the admin-api business layer: it composes the token Issuer
-// and the store into the operations the HTTP handlers expose, and it is the one
-// place that writes the audit log. Handlers stay thin (decode -> call service ->
-// encode); the store stays dumb (CRUD). Errors are returned as typed sentinels
-// the handler maps to HTTP status codes.
+// Package service is the admin-api business layer. Handlers stay thin
+// (decode -> call service -> encode), while the store stays focused on
+// persistence. Errors are returned as typed sentinels that handlers map to
+// HTTP status codes.
 //
 // Identity note: the tokens minted here are the SAME cocola-signed HS256 JWTs
 // the Python llm-gateway verifies (see internal/token, byte-compatible with the
@@ -21,7 +20,6 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"strconv"
 	"strings"
 	"sync/atomic"
 	"time"
@@ -296,7 +294,6 @@ func (a *Admin) CreateAuthUser(ctx context.Context, in AuthUserInput) (store.Aut
 	if err := a.store.CreateAuthUser(ctx, u); err != nil {
 		return store.AuthUser{}, err
 	}
-	a.audit(ctx, in.Actor, "auth_user.create", u.ID, "email="+u.Email+" role="+u.Role)
 	return u, nil
 }
 
@@ -372,7 +369,6 @@ func (a *Admin) SetAuthUser(ctx context.Context, id string, in AuthUserInput) (s
 			return store.AuthUser{}, err
 		}
 	}
-	a.audit(ctx, in.Actor, "auth_user.update", u.ID, "email="+u.Email+" role="+u.Role+" enabled="+strconv.FormatBool(u.Enabled))
 	return u, nil
 }
 
@@ -399,7 +395,6 @@ func (a *Admin) ResetAuthUserPassword(ctx context.Context, id, password, actor s
 	if err := a.store.UpdateAuthUser(ctx, u); err != nil {
 		return store.AuthUser{}, err
 	}
-	a.audit(ctx, actor, "auth_user.password_reset", u.ID, "email="+u.Email)
 	return u, nil
 }
 
@@ -427,7 +422,6 @@ func (a *Admin) DeleteAuthUser(ctx context.Context, id, actor string) error {
 	if err := a.pauseScheduledTasksForUnavailableOwner(ctx, id, "Owner deleted", actor); err != nil {
 		return err
 	}
-	a.audit(ctx, actor, "auth_user.delete", id, "email="+u.Email)
 	return nil
 }
 
@@ -449,7 +443,6 @@ func (a *Admin) pauseScheduledTasksForUnavailableOwner(ctx context.Context, owne
 		if err := a.store.UpdateScheduledTask(ctx, task, false, nil); err != nil {
 			return err
 		}
-		a.audit(ctx, actor, "scheduled_task.pause", task.ID, "reason="+reason)
 	}
 	return nil
 }
@@ -522,7 +515,6 @@ func (a *Admin) BootstrapAdmin(ctx context.Context, in BootstrapAdminInput) erro
 		if err := a.store.CreateAuthUser(ctx, u); err != nil {
 			return err
 		}
-		a.audit(ctx, in.Actor, "auth_user.bootstrap", u.ID, "email="+u.Email)
 		return nil
 	}
 	if !in.Reset {
@@ -544,7 +536,6 @@ func (a *Admin) BootstrapAdmin(ctx context.Context, in BootstrapAdminInput) erro
 	if err := a.store.UpdateAuthUser(ctx, existing); err != nil {
 		return err
 	}
-	a.audit(ctx, in.Actor, "auth_user.bootstrap_reset", existing.ID, "email="+existing.Email)
 	return nil
 }
 
@@ -625,7 +616,6 @@ func (a *Admin) IssueToken(ctx context.Context, in IssueTokenInput) (IssueTokenR
 	if err := a.store.CreateToken(ctx, rec); err != nil {
 		return IssueTokenResult{}, err
 	}
-	a.audit(ctx, in.Actor, "token.issue", rec.ID, "user="+in.UserID+" tenant="+in.Tenant)
 	return IssueTokenResult{Token: tok, Record: rec}, nil
 }
 
@@ -642,7 +632,6 @@ func (a *Admin) RevokeToken(ctx context.Context, id, actor string) error {
 	if err := a.store.RevokeToken(ctx, id, a.now().UTC()); err != nil {
 		return err
 	}
-	a.audit(ctx, actor, "token.revoke", id, "")
 	return nil
 }
 
@@ -673,7 +662,6 @@ func (a *Admin) SetQuota(ctx context.Context, scope, subject string, limit int64
 	if err := a.store.SetQuota(ctx, q); err != nil {
 		return store.QuotaOverride{}, err
 	}
-	a.audit(ctx, actor, "quota.set", scope+"/"+subject, "limit="+strconv.FormatInt(limit, 10))
 	return q, nil
 }
 
@@ -687,7 +675,6 @@ func (a *Admin) DeleteQuota(ctx context.Context, scope, subject, actor string) e
 	if err := a.store.DeleteQuota(ctx, scope, subject); err != nil {
 		return err
 	}
-	a.audit(ctx, actor, "quota.delete", scope+"/"+subject, "")
 	return nil
 }
 
@@ -712,7 +699,6 @@ func (a *Admin) CreateSkill(ctx context.Context, s store.Skill, actor string) (s
 	if err := a.store.CreateSkill(ctx, s); err != nil {
 		return store.Skill{}, err
 	}
-	a.audit(ctx, actor, "skill.create", s.ID, "name="+s.Name)
 	return s, nil
 }
 
@@ -804,11 +790,6 @@ func (a *Admin) SetSkillEnabled(ctx context.Context, id string, enabled bool, ac
 	if err := a.store.UpdateSkill(ctx, s); err != nil {
 		return store.Skill{}, err
 	}
-	action := "skill.disable"
-	if enabled {
-		action = "skill.enable"
-	}
-	a.audit(ctx, actor, action, id, "")
 	return s, nil
 }
 
@@ -817,7 +798,6 @@ func (a *Admin) DeleteSkill(ctx context.Context, id, actor string) error {
 	if err := a.store.DeleteSkill(ctx, id); err != nil {
 		return err
 	}
-	a.audit(ctx, actor, "skill.delete", id, "")
 	return nil
 }
 
@@ -917,7 +897,6 @@ func (a *Admin) ImportSkillArchive(ctx context.Context, scope, ownerUserID, acto
 	if len(imported) == 0 {
 		return nil, candidates, ErrInvalidArg
 	}
-	a.audit(ctx, actor, "skill.import", scope, "count="+strconv.Itoa(len(imported)))
 	return imported, candidates, nil
 }
 
@@ -961,7 +940,6 @@ func (a *Admin) ImportSkillGit(ctx context.Context, scope, ownerUserID, actor st
 		}
 		imported[i] = s
 	}
-	a.audit(ctx, actor, "skill.import_git", scope, "count="+strconv.Itoa(len(imported)))
 	return imported, candidates, nil
 }
 
@@ -1084,7 +1062,6 @@ func (a *Admin) CreateLLMProvider(ctx context.Context, in LLMProviderInput) (sto
 	if err := a.store.CreateLLMProvider(ctx, provider); err != nil {
 		return store.LLMProvider{}, err
 	}
-	a.audit(ctx, in.Actor, "llm_provider.create", provider.ID, "type="+provider.Type)
 	return provider, nil
 }
 
@@ -1123,7 +1100,6 @@ func (a *Admin) UpdateLLMProvider(ctx context.Context, id string, in LLMProvider
 	if err := a.store.UpdateLLMProvider(ctx, provider); err != nil {
 		return store.LLMProvider{}, err
 	}
-	a.audit(ctx, in.Actor, "llm_provider.update", provider.ID, "enabled="+strconv.FormatBool(provider.Enabled))
 	return provider, nil
 }
 
@@ -1132,7 +1108,6 @@ func (a *Admin) DeleteLLMProvider(ctx context.Context, id, actor string) error {
 	if err := a.store.DeleteLLMProvider(ctx, id); err != nil {
 		return err
 	}
-	a.audit(ctx, actor, "llm_provider.delete", id, "")
 	return nil
 }
 
@@ -1147,7 +1122,6 @@ func (a *Admin) CreateLLMModel(ctx context.Context, in LLMModelInput) (store.LLM
 	if err := a.store.CreateLLMModelRoute(ctx, route); err != nil {
 		return store.LLMModelRoute{}, err
 	}
-	a.audit(ctx, in.Actor, "llm_model.create", route.Alias, "provider="+route.ProviderID)
 	return route, nil
 }
 
@@ -1170,7 +1144,6 @@ func (a *Admin) UpdateLLMModel(ctx context.Context, alias string, in LLMModelInp
 	if err := a.store.UpdateLLMModelRoute(ctx, route); err != nil {
 		return store.LLMModelRoute{}, err
 	}
-	a.audit(ctx, in.Actor, "llm_model.update", route.Alias, "enabled="+strconv.FormatBool(route.Enabled))
 	return route, nil
 }
 
@@ -1179,7 +1152,6 @@ func (a *Admin) DeleteLLMModel(ctx context.Context, alias, actor string) error {
 	if err := a.store.DeleteLLMModelRoute(ctx, alias); err != nil {
 		return err
 	}
-	a.audit(ctx, actor, "llm_model.delete", alias, "")
 	return nil
 }
 
@@ -1196,7 +1168,6 @@ func (a *Admin) SetDefaultLLMModel(ctx context.Context, alias, actor string) (st
 	if err := a.store.UpdateLLMModelRoute(ctx, route); err != nil {
 		return store.LLMModelRoute{}, err
 	}
-	a.audit(ctx, actor, "llm_model.default", route.Alias, "")
 	return route, nil
 }
 
@@ -1475,39 +1446,14 @@ func publicLLMModel(route store.LLMModelRoute) store.PublicLLMModel {
 	}
 }
 
-// ---- Audit ----
-
-// ListAudit returns the most recent audit entries.
-func (a *Admin) ListAudit(ctx context.Context, limit int) ([]store.AuditEntry, error) {
-	return a.store.ListAudit(ctx, limit)
+func (a *Admin) GetConversationRun(ctx context.Context, traceID string) (store.ConversationRun, error) {
+	return a.store.GetConversationRun(ctx, traceID)
 }
 
-// AppendAuditEvent appends one structured audit event.
-func (a *Admin) AppendAuditEvent(ctx context.Context, e store.AuditEvent) error {
-	if e.At.IsZero() {
-		e.At = a.now().UTC()
-	}
-	return a.store.AppendAuditEvent(ctx, e)
+func (a *Admin) ListConversationRuns(ctx context.Context, q store.ConversationRunQuery) ([]store.ConversationRun, error) {
+	return a.store.ListConversationRuns(ctx, q)
 }
 
-// ListAuditEvents returns filtered structured audit events.
-func (a *Admin) ListAuditEvents(ctx context.Context, q store.AuditEventQuery) ([]store.AuditEvent, error) {
-	return a.store.ListAuditEvents(ctx, q)
-}
-
-// ListTraceEvents returns timing events for one trace.
-func (a *Admin) ListTraceEvents(ctx context.Context, q store.TraceEventQuery) ([]store.TraceEvent, error) {
-	return a.store.ListTraceEvents(ctx, q)
-}
-
-// audit appends one entry best-effort; an audit-write failure must not fail the
-// underlying operation (it already succeeded), so it is intentionally ignored.
-func (a *Admin) audit(ctx context.Context, actor, action, resource, detail string) {
-	_ = a.store.AppendAudit(ctx, store.AuditEntry{
-		At:       a.now().UTC(),
-		Actor:    actor,
-		Action:   action,
-		Resource: resource,
-		Detail:   detail,
-	})
+func (a *Admin) ListConversationTraceSpans(ctx context.Context, q store.ConversationTraceSpanQuery) ([]store.ConversationTraceSpan, error) {
+	return a.store.ListConversationTraceSpans(ctx, q)
 }

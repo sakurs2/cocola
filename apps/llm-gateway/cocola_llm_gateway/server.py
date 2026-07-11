@@ -42,6 +42,7 @@ from cocola_llm_gateway.anthropic_codec import (
 from cocola_llm_gateway.auth import Identity, JWTError, Verifier
 from cocola_llm_gateway.auth.identity import AuthConfig
 from cocola_llm_gateway.auth.revocation import RevocationStore
+from cocola_llm_gateway.conversation_trace import TraceContext
 from cocola_llm_gateway.quota import QuotaExceeded
 from cocola_llm_gateway.service import GatewayService
 
@@ -168,7 +169,10 @@ def create_app(
 
         if wants_stream:
             event_stream = service.chat_stream(
-                chat_req, requested_alias=requested_alias, identity=identity
+                chat_req,
+                requested_alias=requested_alias,
+                identity=identity,
+                trace_context=TraceContext.parse(request.headers.get("traceparent")),
             )
             sse = stream_to_anthropic_sse(event_stream, fallback_model=resolved_model)
             return StreamingResponse(
@@ -179,7 +183,10 @@ def create_app(
 
         # Non-streaming: drain to a single JSON response.
         event_stream = service.chat_stream(
-            chat_req, requested_alias=requested_alias, identity=identity
+            chat_req,
+            requested_alias=requested_alias,
+            identity=identity,
+            trace_context=TraceContext.parse(request.headers.get("traceparent")),
         )
         try:
             payload = await collect_to_anthropic_response(

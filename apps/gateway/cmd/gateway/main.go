@@ -35,7 +35,6 @@ import (
 	"time"
 
 	"github.com/cocola-project/cocola/apps/gateway/internal/agent"
-	auditstore "github.com/cocola-project/cocola/apps/gateway/internal/audit"
 	"github.com/cocola-project/cocola/apps/gateway/internal/auth"
 	"github.com/cocola-project/cocola/apps/gateway/internal/convo"
 	"github.com/cocola-project/cocola/apps/gateway/internal/httpapi"
@@ -154,19 +153,16 @@ func main() {
 			api = api.WithConvoStore(cs)
 			defer cs.Close()
 			log.Info("conversation persistence enabled (postgres)")
-			if auditStore, aerr := auditstore.NewPostgres(context.Background(), dsn); aerr != nil {
-				log.Warn("audit events disabled (connect failed): " + aerr.Error())
-			} else {
-				api = api.WithAuditStore(auditStore)
-				defer auditStore.Close()
-				log.Info("audit events enabled (postgres)")
-			}
 			if traceStore, terr := traceevents.NewPostgres(context.Background(), dsn); terr != nil {
-				log.Warn("trace events disabled (connect failed): " + terr.Error())
+				log.Warn("conversation traces disabled (connect failed): " + terr.Error())
 			} else {
-				api = api.WithTraceStore(traceStore)
 				defer traceStore.Close()
-				log.Info("trace events enabled (postgres)")
+				asyncTraceStore := traceevents.NewAsyncStore(traceStore, 2048, func(err error) {
+					log.Warn("conversation trace flush failed: " + err.Error())
+				})
+				defer asyncTraceStore.Close()
+				api = api.WithTraceStore(asyncTraceStore)
+				log.Info("conversation audit and traces enabled (postgres)")
 			}
 		}
 	}

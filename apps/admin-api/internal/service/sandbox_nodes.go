@@ -72,7 +72,6 @@ func (a *Admin) DisableSandboxNode(ctx context.Context, name, actor string) (San
 	if err != nil {
 		return SandboxNode{}, err
 	}
-	a.audit(ctx, actor, "sandbox_node.disable", name, "")
 	return out, nil
 }
 
@@ -87,7 +86,6 @@ func (a *Admin) RestoreSandboxNode(ctx context.Context, name, actor string) (San
 	if err != nil {
 		return SandboxNode{}, err
 	}
-	a.audit(ctx, actor, "sandbox_node.restore", name, "")
 	return out, nil
 }
 
@@ -105,11 +103,6 @@ func (a *Admin) SetSandboxNodeMaxPods(ctx context.Context, name string, max *int
 	if err != nil {
 		return SandboxNode{}, err
 	}
-	detail := "cleared"
-	if max != nil {
-		detail = fmt.Sprintf("max=%d", *max)
-	}
-	a.audit(ctx, actor, "sandbox_node.capacity", name, detail)
 	return out, nil
 }
 
@@ -124,7 +117,6 @@ func (a *Admin) OfflineSandboxNode(ctx context.Context, name string, force bool,
 	if err != nil {
 		return OfflineNodeResult{}, err
 	}
-	a.audit(ctx, actor, "sandbox_node.offline", name, fmt.Sprintf("force=%v evicted=%d", force, len(out.EvictedPods)))
 	return out, nil
 }
 

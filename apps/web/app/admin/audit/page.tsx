@@ -1,64 +1,52 @@
 "use client";
 
-import { ShieldCheck as AuditPageIcon } from "@phosphor-icons/react";
+import { ChatCircleDots } from "@phosphor-icons/react";
+import * as Popover from "@radix-ui/react-popover";
 import {
   AlertTriangle,
-  CheckCircle2,
+  CalendarDays,
   ChevronLeft,
   ChevronRight,
-  Loader2,
+  Clock3,
   Search,
 } from "lucide-react";
 import Link from "next/link";
-import { useCallback, useEffect, useMemo, useState } from "react";
-import { AdminRefreshButton } from "@/components/admin/admin-ui";
+import { useCallback, useEffect, useState } from "react";
+import {
+  AdminAlert,
+  AdminEmptyState,
+  AdminPage,
+  AdminPageHeader,
+  AdminRefreshButton,
+  AdminStatusBadge,
+  AdminTable,
+  AdminToolbar,
+} from "@/components/admin/admin-ui";
+import { cn } from "@/lib/utils";
 
 type AuditEvent = {
   id: number;
   at: string;
-  actor_type: string;
   actor_user_id?: string;
   actor_email?: string;
-  action: string;
-  resource_type?: string;
   resource_id?: string;
-  result: "success" | "failure" | "denied" | string;
-  http_method?: string;
-  route?: string;
-  status_code?: number;
-  request_id?: string;
-  trace_id?: string;
-  client_ip?: string;
-  user_agent?: string;
-  metadata_json?: Record<string, unknown>;
-  error_code?: string;
-};
-
-type Filters = {
-  actor: string;
-  action: string;
-  resourceType: string;
   result: string;
-  requestID: string;
-  traceID: string;
+  trace_id?: string;
+  error_code?: string;
+  metadata_json?: Record<string, unknown>;
 };
 
-const input =
-  "h-9 min-w-0 rounded-md border border-input bg-background px-3 text-sm text-foreground outline-none transition-colors placeholder:text-muted-foreground focus:border-ring focus:ring-1 focus:ring-ring";
-const iconBtn =
-  "inline-flex size-8 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-accent hover:text-accent-foreground disabled:pointer-events-none disabled:opacity-40";
 const PAGE_SIZE = 50;
+const control =
+  "h-10 min-w-0 rounded-xl border border-border/80 bg-background/80 px-3 text-sm text-foreground outline-none transition focus:border-primary/40 focus:ring-2 focus:ring-primary/10 placeholder:text-muted-foreground";
 
 export default function AdminAuditPage() {
   const [events, setEvents] = useState<AuditEvent[]>([]);
-  const [filters, setFilters] = useState<Filters>({
-    actor: "",
-    action: "",
-    resourceType: "conversation",
-    result: "",
-    requestID: "",
-    traceID: "",
-  });
+  const [search, setSearch] = useState("");
+  const [status, setStatus] = useState("");
+  const [source, setSource] = useState("");
+  const [from, setFrom] = useState("");
+  const [until, setUntil] = useState("");
   const [page, setPage] = useState(0);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
@@ -70,359 +58,458 @@ export default function AdminAuditPage() {
       limit: String(PAGE_SIZE),
       offset: String(page * PAGE_SIZE),
     });
-    if (filters.actor.trim()) params.set("actor_user_id", filters.actor.trim());
-    if (filters.action.trim()) params.set("action", filters.action.trim());
-    if (filters.resourceType.trim()) params.set("resource_type", filters.resourceType.trim());
-    if (filters.result.trim()) params.set("result", filters.result.trim());
-    if (filters.requestID.trim()) params.set("request_id", filters.requestID.trim());
-    if (filters.traceID.trim()) params.set("trace_id", filters.traceID.trim());
+    if (search.trim()) params.set("search", search.trim());
+    if (status) params.set("status", status);
+    if (source) params.set("source", source);
+    if (from) params.set("since", new Date(`${from}T00:00:00`).toISOString());
+    if (until) params.set("until", new Date(`${until}T23:59:59.999`).toISOString());
     try {
-      const res = await fetch(`/api/admin/audit-events?${params.toString()}`, {
-        cache: "no-store",
-      });
-      if (!res.ok) throw new Error(await errorText(res));
-      const body = (await res.json()) as { events?: AuditEvent[] };
+      const response = await fetch(`/api/admin/audit-events?${params}`, { cache: "no-store" });
+      if (!response.ok) throw new Error(await errorText(response));
+      const body = (await response.json()) as { events?: AuditEvent[] };
       setEvents(body.events ?? []);
-    } catch (err) {
-      setError(err instanceof Error ? err.message : String(err));
+    } catch (loadError) {
+      setError(loadError instanceof Error ? loadError.message : String(loadError));
     } finally {
       setLoading(false);
     }
-  }, [filters, page]);
+  }, [from, page, search, source, status, until]);
 
   useEffect(() => {
     void load();
   }, [load]);
 
-  const stats = useMemo(
-    () => ({
-      total: events.length,
-      failures: events.filter((event) => event.result === "failure").length,
-      denied: events.filter((event) => event.result === "denied").length,
-    }),
-    [events],
+  return (
+    <AdminPage>
+      <AdminPageHeader
+        icon={<ChatCircleDots className="size-5" weight="duotone" />}
+        eyebrow="Observability"
+        title="Conversation Audit"
+        description="One safe metadata record for every user–agent run. Chat content stays in its conversation."
+        actions={
+          <AdminRefreshButton onClick={() => void load()} refreshing={loading} disabled={loading}>
+            Refresh
+          </AdminRefreshButton>
+        }
+      />
+
+      <AdminToolbar>
+        <label className="min-w-[16rem] flex-1">
+          <span className="sr-only">Search conversation runs</span>
+          <span className="relative block">
+            <Search className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
+            <input
+              className={`${control} w-full pl-9`}
+              placeholder="Search user, conversation, or trace ID"
+              value={search}
+              onChange={(event) => {
+                setPage(0);
+                setSearch(event.target.value);
+              }}
+            />
+          </span>
+        </label>
+        <select
+          aria-label="Result"
+          className={`${control} sm:w-40`}
+          value={status}
+          onChange={(event) => {
+            setPage(0);
+            setStatus(event.target.value);
+          }}
+        >
+          <option value="">All results</option>
+          <option value="running">Running</option>
+          <option value="success">Success</option>
+          <option value="error">Error</option>
+          <option value="cancelled">Cancelled</option>
+          <option value="interrupted">Interrupted</option>
+        </select>
+        <select
+          aria-label="Source"
+          className={`${control} sm:w-44`}
+          value={source}
+          onChange={(event) => {
+            setPage(0);
+            setSource(event.target.value);
+          }}
+        >
+          <option value="">All sources</option>
+          <option value="interactive">Interactive</option>
+          <option value="scheduled_task">Scheduled task</option>
+        </select>
+        <DateRangeFilter
+          from={from}
+          until={until}
+          onChange={(nextFrom, nextUntil) => {
+            setPage(0);
+            setFrom(nextFrom);
+            setUntil(nextUntil);
+          }}
+        />
+      </AdminToolbar>
+
+      {error ? (
+        <AdminAlert tone="error" icon={<AlertTriangle className="size-4" />}>
+          {error}
+        </AdminAlert>
+      ) : null}
+
+      <AdminTable>
+        <div className="flex min-h-12 items-center justify-between border-b border-border/70 px-4">
+          <div className="text-sm font-semibold">Agent runs</div>
+          <div className="flex items-center gap-1">
+            <button
+              className="inline-flex size-9 items-center justify-center rounded-xl text-muted-foreground hover:bg-muted disabled:opacity-35"
+              aria-label="Previous page"
+              disabled={page === 0 || loading}
+              onClick={() => setPage((value) => Math.max(0, value - 1))}
+            >
+              <ChevronLeft className="size-4" />
+            </button>
+            <span className="min-w-10 text-center font-mono text-xs text-muted-foreground">
+              {page + 1}
+            </span>
+            <button
+              className="inline-flex size-9 items-center justify-center rounded-xl text-muted-foreground hover:bg-muted disabled:opacity-35"
+              aria-label="Next page"
+              disabled={events.length < PAGE_SIZE || loading}
+              onClick={() => setPage((value) => value + 1)}
+            >
+              <ChevronRight className="size-4" />
+            </button>
+          </div>
+        </div>
+        <table className="w-full min-w-[1120px] text-left text-sm">
+          <thead className="sticky top-0 border-b border-border/70 bg-muted/45 text-xs text-muted-foreground">
+            <tr>
+              <th className="px-4 py-3 font-medium">Started</th>
+              <th className="px-4 py-3 font-medium">User</th>
+              <th className="px-4 py-3 font-medium">Conversation</th>
+              <th className="px-4 py-3 font-medium">Source</th>
+              <th className="px-4 py-3 font-medium">Model</th>
+              <th className="px-4 py-3 text-right font-medium">Total</th>
+              <th className="px-4 py-3 text-right font-medium">TTFT</th>
+              <th className="px-4 py-3 font-medium">Result</th>
+              <th className="px-4 py-3 font-medium">Trace ID</th>
+            </tr>
+          </thead>
+          <tbody className="divide-y divide-border/60">
+            {events.map((event) => {
+              const metadata = event.metadata_json ?? {};
+              const traceID = event.trace_id ?? "";
+              const conversationID =
+                stringValue(metadata.conversation_id) || event.resource_id || "";
+              const runStatus = stringValue(metadata.status) || event.result;
+              return (
+                <tr
+                  key={traceID || event.id}
+                  className="cursor-pointer transition-colors hover:bg-primary/[0.035] focus-within:bg-primary/[0.035]"
+                  onClick={() =>
+                    traceID &&
+                    (window.location.href = `/admin/traces/${encodeURIComponent(traceID)}`)
+                  }
+                >
+                  <td className="whitespace-nowrap px-4 py-3 text-xs text-muted-foreground">
+                    {formatDate(event.at)}
+                  </td>
+                  <td className="px-4 py-3 font-medium">
+                    {event.actor_email || event.actor_user_id || "—"}
+                  </td>
+                  <td className="max-w-[220px] px-4 py-3">
+                    <div className="truncate font-medium">
+                      {stringValue(metadata.conversation_title) || "Untitled conversation"}
+                    </div>
+                    {conversationID ? (
+                      <Link
+                        href={`/conversations/${encodeURIComponent(conversationID)}`}
+                        onClick={(clickEvent) => clickEvent.stopPropagation()}
+                        className="mt-0.5 block truncate font-mono text-xs text-primary hover:underline"
+                      >
+                        {conversationID}
+                      </Link>
+                    ) : null}
+                  </td>
+                  <td className="px-4 py-3 text-muted-foreground">
+                    {stringValue(metadata.chat_type) === "scheduled_task"
+                      ? "Scheduled task"
+                      : "Interactive"}
+                  </td>
+                  <td className="px-4 py-3">{stringValue(metadata.model_alias) || "Default"}</td>
+                  <td className="px-4 py-3 text-right font-mono tabular-nums">
+                    {formatDuration(numberValue(metadata.duration_ms))}
+                  </td>
+                  <td className="px-4 py-3 text-right font-mono tabular-nums">
+                    {formatDuration(numberValue(metadata.ttft_ms))}
+                  </td>
+                  <td className="px-4 py-3">
+                    <RunStatus status={runStatus} />
+                    {event.error_code ? (
+                      <div className="mt-1 font-mono text-[11px] text-muted-foreground">
+                        {event.error_code}
+                      </div>
+                    ) : null}
+                  </td>
+                  <td className="max-w-[190px] px-4 py-3">
+                    <Link
+                      href={`/admin/traces/${encodeURIComponent(traceID)}`}
+                      onClick={(clickEvent) => clickEvent.stopPropagation()}
+                      className="block truncate font-mono text-xs text-primary hover:underline"
+                    >
+                      {traceID || "—"}
+                    </Link>
+                  </td>
+                </tr>
+              );
+            })}
+          </tbody>
+        </table>
+        {!loading && events.length === 0 ? (
+          <AdminEmptyState
+            icon={<Clock3 className="size-5" />}
+            title="No agent runs found"
+            description="Conversation runs will appear here after a user sends a message or a scheduled task executes."
+          />
+        ) : null}
+      </AdminTable>
+    </AdminPage>
   );
+}
+
+function DateRangeFilter({
+  from,
+  until,
+  onChange,
+}: {
+  from: string;
+  until: string;
+  onChange: (from: string, until: string) => void;
+}) {
+  const [open, setOpen] = useState(false);
+  const [month, setMonth] = useState(() =>
+    startOfMonth(from ? new Date(`${from}T12:00:00`) : new Date()),
+  );
+  const days = calendarDays(month);
+
+  const selectDay = (day: Date) => {
+    const value = localDateValue(day);
+    if (!from || until) {
+      onChange(value, "");
+      return;
+    }
+    if (value < from) onChange(value, from);
+    else onChange(from, value);
+    setOpen(false);
+  };
+
+  const applyRecentDays = (count: number) => {
+    const end = startOfDay(new Date());
+    const start = new Date(end);
+    start.setDate(start.getDate() - (count - 1));
+    onChange(localDateValue(start), localDateValue(end));
+    setMonth(startOfMonth(start));
+    setOpen(false);
+  };
 
   return (
-    <main className="min-h-screen bg-background text-foreground">
-      <header className="border-b border-border">
-        <div className="mx-auto flex h-16 max-w-7xl items-center gap-3 px-6">
-          <div className="admin-page-icon">
-            <AuditPageIcon className="size-[18px]" weight="duotone" />
-          </div>
-          <div className="min-w-0 flex-1">
-            <h1 className="truncate text-base font-semibold">Audit Logs</h1>
-            <p className="truncate text-xs text-muted-foreground">
-              Server-side user behavior events without chat content
-            </p>
-          </div>
-          <AdminRefreshButton
-            className={iconBtn}
-            title="Refresh audit logs"
-            aria-label="Refresh audit logs"
-            onClick={() => void load()}
-            disabled={loading}
-            refreshing={loading}
-            variant="ghost"
-            size="icon"
-          />
-        </div>
-      </header>
-
-      <div className="mx-auto max-w-7xl space-y-5 px-6 py-6">
-        <section className="grid gap-3 md:grid-cols-3">
-          <Metric label="Loaded Events" value={String(stats.total)} />
-          <Metric label="Failures" value={String(stats.failures)} />
-          <Metric label="Denied" value={String(stats.denied)} />
-        </section>
-
-        <section className="rounded-lg border border-border bg-card">
-          <div className="flex items-center gap-2 border-b border-border px-4 py-3">
-            <Search className="size-4 text-muted-foreground" />
-            <h2 className="text-sm font-semibold">Filters</h2>
-          </div>
-          <div className="grid gap-3 p-4 md:grid-cols-3 xl:grid-cols-6">
-            <input
-              className={input}
-              placeholder="actor"
-              value={filters.actor}
-              onChange={(event) => {
-                setPage(0);
-                setFilters((prev) => ({ ...prev, actor: event.target.value }));
-              }}
-            />
-            <input
-              className={input}
-              placeholder="action"
-              value={filters.action}
-              onChange={(event) => {
-                setPage(0);
-                setFilters((prev) => ({ ...prev, action: event.target.value }));
-              }}
-            />
-            <select
-              className={input}
-              value={filters.resourceType}
-              onChange={(event) => {
-                setPage(0);
-                setFilters((prev) => ({ ...prev, resourceType: event.target.value }));
-              }}
+    <Popover.Root
+      open={open}
+      onOpenChange={(nextOpen) => {
+        setOpen(nextOpen);
+        if (nextOpen) setMonth(startOfMonth(from ? new Date(`${from}T12:00:00`) : new Date()));
+      }}
+    >
+      <Popover.Trigger asChild>
+        <button
+          type="button"
+          className={`${control} inline-flex min-w-[12rem] items-center justify-between gap-3 text-left`}
+          aria-label="Filter by date range"
+        >
+          <span className="inline-flex min-w-0 items-center gap-2">
+            <CalendarDays className="size-4 shrink-0 text-primary" />
+            <span className="truncate">{dateRangeLabel(from, until)}</span>
+          </span>
+          <ChevronRight className="size-3.5 rotate-90 text-muted-foreground" />
+        </button>
+      </Popover.Trigger>
+      <Popover.Portal>
+        <Popover.Content
+          align="end"
+          sideOffset={8}
+          className="cocola-admin-ui z-50 w-[20rem] rounded-2xl border border-border/80 bg-popover p-3 text-popover-foreground shadow-[0_24px_70px_-28px_rgba(20,32,51,0.45)] outline-none"
+        >
+          <div className="flex items-center justify-between px-1 pb-3">
+            <button
+              type="button"
+              className="flex size-8 items-center justify-center rounded-lg text-muted-foreground hover:bg-muted hover:text-foreground"
+              onClick={() => setMonth(addMonths(month, -1))}
+              aria-label="Previous month"
             >
-              <option value="">any resource</option>
-              <option value="conversation">conversation</option>
-              <option value="artifact">artifact</option>
-              <option value="users">users</option>
-              <option value="tokens">tokens</option>
-              <option value="settings">settings</option>
-              <option value="quotas">quotas</option>
-              <option value="skills">skills</option>
-              <option value="models">models</option>
-              <option value="model_providers">model_providers</option>
-              <option value="scheduled_tasks">scheduled_tasks</option>
-              <option value="scheduled_task_runs">scheduled_task_runs</option>
-              <option value="sandbox_nodes">sandbox_nodes</option>
-              <option value="sandboxes">sandboxes</option>
-              <option value="runtime_token">runtime_token</option>
-            </select>
-            <select
-              className={input}
-              value={filters.result}
-              onChange={(event) => {
-                setPage(0);
-                setFilters((prev) => ({ ...prev, result: event.target.value }));
-              }}
+              <ChevronLeft className="size-4" />
+            </button>
+            <div className="text-sm font-semibold">{formatMonth(month)}</div>
+            <button
+              type="button"
+              className="flex size-8 items-center justify-center rounded-lg text-muted-foreground hover:bg-muted hover:text-foreground"
+              onClick={() => setMonth(addMonths(month, 1))}
+              aria-label="Next month"
             >
-              <option value="">any result</option>
-              <option value="success">success</option>
-              <option value="failure">failure</option>
-              <option value="denied">denied</option>
-            </select>
-            <input
-              className={input}
-              placeholder="request_id"
-              value={filters.requestID}
-              onChange={(event) => {
-                setPage(0);
-                setFilters((prev) => ({ ...prev, requestID: event.target.value }));
-              }}
-            />
-            <input
-              className={input}
-              placeholder="trace_id"
-              value={filters.traceID}
-              onChange={(event) => {
-                setPage(0);
-                setFilters((prev) => ({ ...prev, traceID: event.target.value }));
-              }}
-            />
+              <ChevronRight className="size-4" />
+            </button>
           </div>
-        </section>
-
-        {error ? (
-          <div className="flex items-center gap-2 rounded-md border border-destructive/30 bg-destructive/10 px-3 py-2 text-sm text-destructive">
-            <AlertTriangle className="size-4 shrink-0" />
-            <span className="min-w-0">{error}</span>
+          <div className="grid grid-cols-7 px-1 text-center text-[11px] font-medium text-muted-foreground">
+            {["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"].map((label) => (
+              <div key={label} className="py-1.5">
+                {label}
+              </div>
+            ))}
           </div>
-        ) : null}
-
-        <section className="overflow-hidden rounded-lg border border-border bg-card">
-          <div className="flex items-center justify-between border-b border-border px-4 py-3">
-            <h2 className="text-sm font-semibold">Recent Events</h2>
-            <div className="flex items-center gap-2">
-              {loading ? (
-                <span className="inline-flex items-center text-xs text-muted-foreground">
-                  <Loader2 className="mr-2 size-3 animate-spin" />
-                  Loading
-                </span>
-              ) : (
-                <span className="inline-flex items-center text-xs text-muted-foreground">
-                  <CheckCircle2 className="mr-2 size-3" />
-                  Updated
-                </span>
-              )}
-              <button
-                className={iconBtn}
-                title="Previous page"
-                disabled={page === 0 || loading}
-                onClick={() => setPage((prev) => Math.max(0, prev - 1))}
-              >
-                <ChevronLeft className="size-4" />
-              </button>
-              <span className="min-w-12 text-center text-xs text-muted-foreground">{page + 1}</span>
-              <button
-                className={iconBtn}
-                title="Next page"
-                disabled={events.length < PAGE_SIZE || loading}
-                onClick={() => setPage((prev) => prev + 1)}
-              >
-                <ChevronRight className="size-4" />
-              </button>
+          <div className="grid grid-cols-7 gap-y-1 px-1">
+            {days.map((day) => {
+              const value = localDateValue(day);
+              const endpoint = value === from || value === until;
+              const inRange = Boolean(from && until && value > from && value < until);
+              const outside = day.getMonth() !== month.getMonth();
+              const today = value === localDateValue(new Date());
+              return (
+                <button
+                  type="button"
+                  key={value}
+                  onClick={() => selectDay(day)}
+                  className={cn(
+                    "relative flex h-9 items-center justify-center rounded-lg text-sm tabular-nums transition-colors hover:bg-primary/10 hover:text-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/30",
+                    outside && "text-muted-foreground/45",
+                    inRange && "rounded-none bg-primary/[0.08] text-primary",
+                    endpoint &&
+                      "bg-primary font-semibold text-primary-foreground hover:bg-primary hover:text-primary-foreground",
+                    today &&
+                      !endpoint &&
+                      "font-semibold text-primary ring-1 ring-inset ring-primary/30",
+                  )}
+                >
+                  {day.getDate()}
+                </button>
+              );
+            })}
+          </div>
+          <div className="mt-3 border-t border-border/70 pt-3">
+            <div className="mb-2 flex items-center justify-between px-1 text-xs text-muted-foreground">
+              <span>{from && !until ? "Select an end date" : "Quick ranges"}</span>
+              {from ? (
+                <button
+                  type="button"
+                  className="font-medium text-primary hover:underline"
+                  onClick={() => onChange("", "")}
+                >
+                  Clear
+                </button>
+              ) : null}
+            </div>
+            <div className="grid grid-cols-3 gap-2">
+              <RangePreset onClick={() => applyRecentDays(1)}>Today</RangePreset>
+              <RangePreset onClick={() => applyRecentDays(7)}>Last 7 days</RangePreset>
+              <RangePreset onClick={() => applyRecentDays(30)}>Last 30 days</RangePreset>
             </div>
           </div>
-          <div className="overflow-x-auto">
-            <table className="w-full min-w-[980px] text-left text-sm">
-              <thead className="border-b border-border bg-muted/50 text-xs text-muted-foreground">
-                <tr>
-                  <th className="px-4 py-2 font-medium">Time</th>
-                  <th className="px-4 py-2 font-medium">Actor</th>
-                  <th className="px-4 py-2 font-medium">Action</th>
-                  <th className="px-4 py-2 font-medium">Resource</th>
-                  <th className="px-4 py-2 font-medium">Result</th>
-                  <th className="px-4 py-2 font-medium">Route</th>
-                  <th className="px-4 py-2 font-medium">Trace</th>
-                  <th className="px-4 py-2 font-medium">Metadata</th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-border">
-                {events.map((event) => {
-                  const conversationID = conversationIDForEvent(event);
-                  return (
-                    <tr key={event.id} className="align-top">
-                      <td className="whitespace-nowrap px-4 py-3 text-xs text-muted-foreground">
-                        {formatDate(event.at)}
-                      </td>
-                      <td className="px-4 py-3">
-                        <div className="font-medium">
-                          {event.actor_email || event.actor_user_id || "-"}
-                        </div>
-                        <div className="text-xs text-muted-foreground">
-                          {event.actor_type || "-"}
-                        </div>
-                      </td>
-                      <td className="px-4 py-3 font-mono text-xs">{event.action}</td>
-                      <td className="px-4 py-3">
-                        <div>{event.resource_type || "-"}</div>
-                        {conversationID ? (
-                          <Link
-                            href={`/conversations/${encodeURIComponent(conversationID)}`}
-                            className="block max-w-[160px] truncate font-mono text-xs text-primary underline-offset-2 hover:underline"
-                            title={`Open conversation ${conversationID}`}
-                          >
-                            {conversationID}
-                          </Link>
-                        ) : (
-                          <div className="max-w-[160px] truncate font-mono text-xs text-muted-foreground">
-                            {event.resource_id || "-"}
-                          </div>
-                        )}
-                      </td>
-                      <td className="px-4 py-3">
-                        <Badge tone={resultTone(event.result)}>{event.result || "-"}</Badge>
-                        {event.error_code ? (
-                          <div className="mt-1 font-mono text-xs text-muted-foreground">
-                            {event.error_code}
-                          </div>
-                        ) : null}
-                      </td>
-                      <td className="px-4 py-3">
-                        <div className="font-mono text-xs">
-                          {[event.http_method, event.route].filter(Boolean).join(" ") || "-"}
-                        </div>
-                        {event.status_code ? (
-                          <div className="mt-1 text-xs text-muted-foreground">
-                            {event.status_code}
-                          </div>
-                        ) : null}
-                      </td>
-                      <td className="px-4 py-3">
-                        <TraceLink traceID={event.trace_id} requestID={event.request_id} />
-                      </td>
-                      <td className="px-4 py-3">
-                        <MetadataCell event={event} conversationID={conversationID} />
-                      </td>
-                    </tr>
-                  );
-                })}
-                {!loading && events.length === 0 ? (
-                  <tr>
-                    <td
-                      className="px-4 py-10 text-center text-sm text-muted-foreground"
-                      colSpan={8}
-                    >
-                      No audit events
-                    </td>
-                  </tr>
-                ) : null}
-              </tbody>
-            </table>
-          </div>
-        </section>
-      </div>
-    </main>
+          <Popover.Arrow className="fill-border" />
+        </Popover.Content>
+      </Popover.Portal>
+    </Popover.Root>
   );
 }
 
-function Metric({ label, value }: { label: string; value: string }) {
+function RangePreset({ children, onClick }: { children: string; onClick: () => void }) {
   return (
-    <div className="rounded-lg border border-border bg-card px-4 py-3">
-      <div className="text-xs text-muted-foreground">{label}</div>
-      <div className="mt-1 text-2xl font-semibold">{value}</div>
-    </div>
+    <button
+      type="button"
+      onClick={onClick}
+      className="rounded-lg border border-border/70 bg-background/70 px-2 py-2 text-xs font-medium text-muted-foreground hover:border-primary/30 hover:bg-primary/[0.05] hover:text-primary"
+    >
+      {children}
+    </button>
   );
 }
 
-function MetadataCell({ event, conversationID }: { event: AuditEvent; conversationID: string }) {
-  const metadata = formatMetadata(event.metadata_json);
-  if (!conversationID) {
-    return (
-      <div className="max-w-[240px] truncate font-mono text-xs text-muted-foreground">
-        {metadata}
-      </div>
+function startOfDay(date: Date) {
+  return new Date(date.getFullYear(), date.getMonth(), date.getDate());
+}
+
+function startOfMonth(date: Date) {
+  return new Date(date.getFullYear(), date.getMonth(), 1);
+}
+
+function addMonths(date: Date, amount: number) {
+  return new Date(date.getFullYear(), date.getMonth() + amount, 1);
+}
+
+function calendarDays(month: Date) {
+  const first = startOfMonth(month);
+  const mondayOffset = (first.getDay() + 6) % 7;
+  const cursor = new Date(first);
+  cursor.setDate(cursor.getDate() - mondayOffset);
+  return Array.from({ length: 42 }, (_, index) => {
+    const day = new Date(cursor);
+    day.setDate(cursor.getDate() + index);
+    return day;
+  });
+}
+
+function localDateValue(date: Date) {
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, "0");
+  const day = String(date.getDate()).padStart(2, "0");
+  return `${year}-${month}-${day}`;
+}
+
+function formatMonth(date: Date) {
+  return new Intl.DateTimeFormat(undefined, { month: "long", year: "numeric" }).format(date);
+}
+
+function dateRangeLabel(from: string, until: string) {
+  if (!from) return "Any date";
+  const format = (value: string) =>
+    new Intl.DateTimeFormat(undefined, { month: "short", day: "numeric", year: "numeric" }).format(
+      new Date(`${value}T12:00:00`),
     );
-  }
+  return until ? `${format(from)} – ${format(until)}` : `${format(from)} – Select end`;
+}
+
+function RunStatus({ status }: { status: string }) {
+  const tone =
+    status === "success"
+      ? "green"
+      : status === "running"
+        ? "sky"
+        : status === "cancelled" || status === "interrupted"
+          ? "amber"
+          : "red";
   return (
-    <div className="max-w-[260px] space-y-1">
-      <Link
-        href={`/conversations/${encodeURIComponent(conversationID)}`}
-        className="block truncate font-mono text-xs text-primary underline-offset-2 hover:underline"
-        title={`Open conversation ${conversationID}`}
-      >
-        conversation_id={conversationID}
-      </Link>
-      <div className="truncate font-mono text-xs text-muted-foreground">{metadata}</div>
-    </div>
+    <AdminStatusBadge tone={tone} dot>
+      {status || "unknown"}
+    </AdminStatusBadge>
   );
 }
 
-function TraceLink({ traceID, requestID }: { traceID?: string; requestID?: string }) {
-  if (traceID) {
-    return (
-      <Link
-        href={`/admin/traces/${encodeURIComponent(traceID)}`}
-        className="block max-w-[180px] truncate font-mono text-xs text-primary underline-offset-2 hover:underline"
-        title={`Open trace ${traceID}`}
-      >
-        {traceID}
-      </Link>
-    );
-  }
-  return (
-    <div className="max-w-[180px] truncate font-mono text-xs text-muted-foreground">
-      {requestID || "-"}
-    </div>
-  );
+function stringValue(value: unknown) {
+  return typeof value === "string" ? value : "";
 }
 
-function Badge({ children, tone }: { children: string; tone: "green" | "amber" | "red" }) {
-  const cls =
-    tone === "green"
-      ? "border-emerald-500/30 bg-emerald-500/10 text-emerald-700 dark:text-emerald-300"
-      : tone === "amber"
-        ? "border-amber-500/30 bg-amber-500/10 text-amber-700 dark:text-amber-300"
-        : "border-destructive/30 bg-destructive/10 text-destructive";
-  return <span className={`rounded-md border px-2 py-0.5 text-xs ${cls}`}>{children}</span>;
+function numberValue(value: unknown) {
+  if (typeof value === "number") return value;
+  if (typeof value === "string") return Number.parseInt(value, 10) || 0;
+  return 0;
 }
 
-function resultTone(result: string) {
-  if (result === "success") return "green";
-  if (result === "denied") return "amber";
-  return "red";
+function formatDuration(ms: number) {
+  if (!ms) return "—";
+  if (ms < 1000) return `${ms} ms`;
+  if (ms < 60_000) return `${(ms / 1000).toFixed(ms < 10_000 ? 2 : 1)} s`;
+  return `${(ms / 60_000).toFixed(1)} min`;
 }
 
 function formatDate(value: string) {
-  if (!value) return "-";
   return new Intl.DateTimeFormat(undefined, {
-    month: "2-digit",
+    month: "short",
     day: "2-digit",
     hour: "2-digit",
     minute: "2-digit",
@@ -430,29 +517,13 @@ function formatDate(value: string) {
   }).format(new Date(value));
 }
 
-function formatMetadata(value: Record<string, unknown> | undefined) {
-  if (!value || Object.keys(value).length === 0) return "-";
-  return JSON.stringify(value);
-}
-
-function conversationIDForEvent(event: AuditEvent): string {
-  const fromMetadata = event.metadata_json?.conversation_id;
-  if (typeof fromMetadata === "string" && fromMetadata.trim()) {
-    return fromMetadata.trim();
-  }
-  if (event.resource_type === "conversation" && event.resource_id?.trim()) {
-    return event.resource_id.trim();
-  }
-  return "";
-}
-
-async function errorText(res: Response) {
+async function errorText(response: Response) {
   try {
-    const body = (await res.json()) as { error?: string | { message?: string } };
+    const body = (await response.json()) as { error?: string | { message?: string } };
     if (typeof body.error === "string") return body.error;
     if (body.error?.message) return body.error.message;
   } catch {
-    // fall through
+    // Fall through to the status line.
   }
-  return `${res.status} ${res.statusText}`;
+  return `${response.status} ${response.statusText}`;
 }

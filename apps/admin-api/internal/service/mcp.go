@@ -113,7 +113,6 @@ func (a *Admin) CreateMCPServer(ctx context.Context, in MCPServerInput) (MCPServ
 	if err := a.store.CreateMCPServer(ctx, server); err != nil {
 		return MCPServerPublic{}, err
 	}
-	a.audit(ctx, in.Actor, "mcp.create", server.ID, "transport="+server.Transport)
 	public, err := a.publicMCPServer(server)
 	if err != nil {
 		return MCPServerPublic{}, err
@@ -215,7 +214,6 @@ func (a *Admin) UpdateMCPServer(ctx context.Context, id string, in MCPServerInpu
 	if err := a.store.UpdateMCPServer(ctx, server); err != nil {
 		return MCPServerPublic{}, err
 	}
-	a.audit(ctx, in.Actor, "mcp.update", server.ID, "enabled="+boolText(server.Enabled))
 	public, err := a.publicMCPServer(server)
 	if err != nil {
 		return MCPServerPublic{}, err
@@ -234,7 +232,6 @@ func (a *Admin) SetMCPServerEnabled(ctx context.Context, id string, enabled bool
 	if err := a.store.UpdateMCPServer(ctx, server); err != nil {
 		return MCPServerPublic{}, err
 	}
-	a.audit(ctx, actor, "mcp.toggle", server.ID, "enabled="+boolText(enabled))
 	return a.publicMCPServer(server)
 }
 
@@ -243,7 +240,6 @@ func (a *Admin) DeleteMCPServer(ctx context.Context, id, actor string) error {
 	if err := a.store.DeleteMCPServer(ctx, id); err != nil {
 		return err
 	}
-	a.audit(ctx, actor, "mcp.delete", id, "")
 	return nil
 }
 
@@ -596,11 +592,4 @@ func defaultString(v, fallback string) string {
 		return fallback
 	}
 	return v
-}
-
-func boolText(v bool) string {
-	if v {
-		return "true"
-	}
-	return "false"
 }

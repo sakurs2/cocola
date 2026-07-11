@@ -1,4 +1,5 @@
 import { NextRequest } from "next/server";
+import { randomBytes } from "node:crypto";
 import { isAuthFail, requireUser, runtimeAuthHeaders } from "@/lib/server-auth";
 
 // Same-origin SSE proxy: browser -> this route -> cocola gateway.
@@ -20,11 +21,17 @@ export const dynamic = "force-dynamic";
 const GATEWAY_URL = process.env.COCOLA_GATEWAY_URL ?? "http://127.0.0.1:8080";
 
 export async function POST(req: NextRequest) {
+  const requestStartedAt = Date.now();
+  const authStartedAt = Date.now();
   const authResult = await requireUser();
   if (isAuthFail(authResult)) return authResult.response;
+  const authDuration = Date.now() - authStartedAt;
+  const tokenStartedAt = Date.now();
   const authHeaders = await runtimeAuthHeaders(authResult.user);
   if (authHeaders instanceof Response) return authHeaders;
+  const tokenDuration = Date.now() - tokenStartedAt;
   const body = await req.text();
+  const traceparent = `00-${randomBytes(16).toString("hex")}-${randomBytes(8).toString("hex")}-01`;
 
   let upstream: Response;
   try {
@@ -32,6 +39,10 @@ export async function POST(req: NextRequest) {
       method: "POST",
       headers: {
         "content-type": "application/json",
+        traceparent,
+        "x-cocola-chat-started-at-ms": String(requestStartedAt),
+        "x-cocola-session-auth-ms": String(authDuration),
+        "x-cocola-runtime-token-ms": String(tokenDuration),
         ...authHeaders,
       },
       body,

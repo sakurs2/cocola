@@ -1558,125 +1558,125 @@ func (p *Postgres) ListScheduledTaskRunEvents(ctx context.Context, runID string)
 	return out, rows.Err()
 }
 
-// ---- Audit ----
-
-func (p *Postgres) AppendAudit(ctx context.Context, e AuditEntry) error {
-	detail := map[string]any{}
-	detail["legacy_entry"] = true
-	if e.Detail != "" {
-		detail["detail"] = e.Detail
+func (p *Postgres) UpsertConversationRun(ctx context.Context, run ConversationRun) error {
+	if run.TraceID == "" {
+		return ErrNotFound
 	}
-	return p.AppendAuditEvent(ctx, AuditEvent{
-		At:           e.At,
-		ActorType:    "admin",
-		ActorUserID:  e.Actor,
-		ActorEmail:   e.Actor,
-		Action:       e.Action,
-		ResourceType: auditResourceType(e.Action),
-		ResourceID:   e.Resource,
-		Result:       "success",
-		Metadata:     detail,
-	})
-}
-
-func (p *Postgres) ListAudit(ctx context.Context, limit int) ([]AuditEntry, error) {
-	events, err := p.ListAuditEvents(ctx, AuditEventQuery{Limit: limit, LegacyOnly: true})
-	if err != nil {
-		return nil, err
+	now := time.Now().UTC()
+	if run.CreatedAt.IsZero() {
+		run.CreatedAt = now
 	}
-	out := make([]AuditEntry, 0)
-	for _, e := range events {
-		if isLegacyAuditEvent(e) {
-			out = append(out, legacyAuditEntry(e))
-			if limit > 0 && len(out) >= limit {
-				break
-			}
-		}
+	if run.UpdatedAt.IsZero() {
+		run.UpdatedAt = now
 	}
-	return out, nil
-}
-
-func (p *Postgres) AppendAuditEvent(ctx context.Context, e AuditEvent) error {
-	if e.At.IsZero() {
-		e.At = time.Now().UTC()
+	if run.LastActivityAt.IsZero() {
+		run.LastActivityAt = now
 	}
-	if e.Result == "" {
-		e.Result = "success"
+	const q = `INSERT INTO conversation_runs (
+		trace_id, root_span_id, conversation_id, conversation_title, user_id, user_email,
+		source, model_alias, status, started_at, completed_at, last_activity_at,
+		duration_ms, ttft_ms, llm_call_count, tool_call_count, input_tokens,
+		output_tokens, cache_tokens, error_code, safe_error_summary, detail_status,
+		created_at, updated_at
+	) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23,$24)
+	ON CONFLICT (trace_id) DO UPDATE SET
+		root_span_id=EXCLUDED.root_span_id, conversation_id=EXCLUDED.conversation_id,
+		conversation_title=EXCLUDED.conversation_title, user_id=EXCLUDED.user_id,
+		user_email=EXCLUDED.user_email, source=EXCLUDED.source, model_alias=EXCLUDED.model_alias,
+		status=EXCLUDED.status, completed_at=EXCLUDED.completed_at,
+		last_activity_at=EXCLUDED.last_activity_at, duration_ms=EXCLUDED.duration_ms,
+		ttft_ms=EXCLUDED.ttft_ms, llm_call_count=EXCLUDED.llm_call_count,
+		tool_call_count=EXCLUDED.tool_call_count, input_tokens=EXCLUDED.input_tokens,
+		output_tokens=EXCLUDED.output_tokens, cache_tokens=EXCLUDED.cache_tokens,
+		error_code=EXCLUDED.error_code, safe_error_summary=EXCLUDED.safe_error_summary,
+		detail_status=EXCLUDED.detail_status, updated_at=EXCLUDED.updated_at`
+	var completedAt any
+	if !run.CompletedAt.IsZero() {
+		completedAt = run.CompletedAt
 	}
-	if e.Metadata == nil {
-		e.Metadata = map[string]any{}
-	}
-	meta, err := json.Marshal(e.Metadata)
-	if err != nil {
-		return err
-	}
-	const q = `INSERT INTO audit_events (
-		ts, actor_type, actor_user_id, actor_email, action, resource_type,
-		resource_id, result, http_method, route, status_code, request_id, trace_id,
-		client_ip, user_agent, metadata_json, error_code
-	) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17)`
-	_, err = p.pool.Exec(ctx, q,
-		e.At, e.ActorType, e.ActorUserID, e.ActorEmail, e.Action, e.ResourceType,
-		e.ResourceID, e.Result, e.HTTPMethod, e.Route, e.StatusCode, e.RequestID, e.TraceID,
-		e.ClientIP, e.UserAgent, meta, e.ErrorCode)
+	_, err := p.pool.Exec(ctx, q,
+		run.TraceID, run.RootSpanID, run.ConversationID, run.ConversationTitle,
+		run.UserID, run.UserEmail, run.Source, run.ModelAlias, run.Status, run.StartedAt,
+		completedAt, run.LastActivityAt, run.DurationMS,
+		run.TTFTMS, run.LLMCallCount, run.ToolCallCount, run.InputTokens, run.OutputTokens,
+		run.CacheTokens, run.ErrorCode, run.SafeErrorSummary, run.DetailStatus, run.CreatedAt, run.UpdatedAt)
 	return err
 }
 
-func (p *Postgres) ListAuditEvents(ctx context.Context, query AuditEventQuery) ([]AuditEvent, error) {
-	q := `SELECT id, ts, actor_type, actor_user_id, actor_email, action, resource_type,
-		resource_id, result, http_method, route, status_code, request_id, trace_id,
-		client_ip, user_agent, metadata_json, error_code FROM audit_events`
+type rowScanner interface {
+	Scan(dest ...any) error
+}
+
+func scanConversationRun(row rowScanner) (ConversationRun, error) {
+	var run ConversationRun
+	var completedAt *time.Time
+	err := row.Scan(
+		&run.TraceID, &run.RootSpanID, &run.ConversationID, &run.ConversationTitle,
+		&run.UserID, &run.UserEmail, &run.Source, &run.ModelAlias, &run.Status,
+		&run.StartedAt, &completedAt, &run.LastActivityAt, &run.DurationMS, &run.TTFTMS,
+		&run.LLMCallCount, &run.ToolCallCount, &run.InputTokens, &run.OutputTokens,
+		&run.CacheTokens, &run.ErrorCode, &run.SafeErrorSummary, &run.DetailStatus,
+		&run.CreatedAt, &run.UpdatedAt,
+	)
+	if completedAt != nil {
+		run.CompletedAt = *completedAt
+	}
+	return run, err
+}
+
+const conversationRunColumns = `trace_id, root_span_id, conversation_id, conversation_title,
+	user_id, user_email, source, model_alias, status, started_at, completed_at,
+	last_activity_at, duration_ms, ttft_ms, llm_call_count, tool_call_count,
+	input_tokens, output_tokens, cache_tokens, error_code, safe_error_summary,
+	detail_status, created_at, updated_at`
+
+func (p *Postgres) GetConversationRun(ctx context.Context, traceID string) (ConversationRun, error) {
+	run, err := scanConversationRun(p.pool.QueryRow(ctx,
+		"SELECT "+conversationRunColumns+" FROM conversation_runs WHERE trace_id=$1", strings.TrimSpace(traceID)))
+	if errors.Is(err, pgx.ErrNoRows) {
+		return ConversationRun{}, ErrNotFound
+	}
+	return run, err
+}
+
+func (p *Postgres) ListConversationRuns(ctx context.Context, query ConversationRunQuery) ([]ConversationRun, error) {
+	q := "SELECT " + conversationRunColumns + " FROM conversation_runs"
 	conds := make([]string, 0)
 	args := make([]any, 0)
-	add := func(field string, value any) {
+	add := func(expr string, value any) {
 		args = append(args, value)
-		conds = append(conds, fmt.Sprintf("%s = $%d", field, len(args)))
+		conds = append(conds, fmt.Sprintf(expr, len(args)))
 	}
-	addTime := func(expr string, value time.Time) {
-		args = append(args, value)
-		conds = append(conds, fmt.Sprintf("%s $%d", expr, len(args)))
+	if search := strings.TrimSpace(query.Search); search != "" {
+		args = append(args, "%"+search+"%")
+		n := len(args)
+		conds = append(conds, fmt.Sprintf(
+			`(user_id ILIKE $%d OR user_email ILIKE $%d OR conversation_id ILIKE $%d OR conversation_title ILIKE $%d OR trace_id ILIKE $%d)`,
+			n, n, n, n, n,
+		))
 	}
-	if strings.TrimSpace(query.ActorUserID) != "" {
-		add("actor_user_id", strings.TrimSpace(query.ActorUserID))
+	if status := strings.TrimSpace(query.Status); status != "" {
+		add("status = $%d", status)
 	}
-	if strings.TrimSpace(query.ActorEmail) != "" {
-		add("actor_email", strings.TrimSpace(query.ActorEmail))
+	if source := strings.TrimSpace(query.Source); source != "" {
+		add("source = $%d", source)
 	}
-	if strings.TrimSpace(query.Action) != "" {
-		add("action", strings.TrimSpace(query.Action))
-	}
-	if strings.TrimSpace(query.ResourceType) != "" {
-		add("resource_type", strings.TrimSpace(query.ResourceType))
-	}
-	if strings.TrimSpace(query.ResourceID) != "" {
-		add("resource_id", strings.TrimSpace(query.ResourceID))
-	}
-	if strings.TrimSpace(query.Result) != "" {
-		add("result", strings.TrimSpace(query.Result))
-	}
-	if strings.TrimSpace(query.RequestID) != "" {
-		add("request_id", strings.TrimSpace(query.RequestID))
-	}
-	if strings.TrimSpace(query.TraceID) != "" {
-		add("trace_id", strings.TrimSpace(query.TraceID))
-	}
-	if !query.Since.IsZero() {
-		addTime("ts >=", query.Since)
+	if !query.From.IsZero() {
+		add("started_at >= $%d", query.From)
 	}
 	if !query.Until.IsZero() {
-		addTime("ts <=", query.Until)
-	}
-	if query.LegacyOnly {
-		conds = append(conds, "(metadata_json ? 'legacy_entry' OR metadata_json->>'legacy_table' = 'audit_log')")
+		add("started_at <= $%d", query.Until)
 	}
 	if len(conds) > 0 {
 		q += " WHERE " + strings.Join(conds, " AND ")
 	}
-	q += ` ORDER BY ts DESC, id DESC`
-	if query.Limit > 0 {
-		args = append(args, query.Limit)
-		q += fmt.Sprintf(" LIMIT $%d", len(args))
+	q += " ORDER BY started_at DESC, trace_id DESC"
+	limit := query.Limit
+	if limit <= 0 || limit > 200 {
+		limit = 50
 	}
+	args = append(args, limit)
+	q += fmt.Sprintf(" LIMIT $%d", len(args))
 	if query.Offset > 0 {
 		args = append(args, query.Offset)
 		q += fmt.Sprintf(" OFFSET $%d", len(args))
@@ -1686,71 +1686,99 @@ func (p *Postgres) ListAuditEvents(ctx context.Context, query AuditEventQuery) (
 		return nil, err
 	}
 	defer rows.Close()
-	out := make([]AuditEvent, 0)
+	out := make([]ConversationRun, 0)
 	for rows.Next() {
-		var e AuditEvent
-		var meta []byte
-		if err := rows.Scan(
-			&e.ID, &e.At, &e.ActorType, &e.ActorUserID, &e.ActorEmail, &e.Action,
-			&e.ResourceType, &e.ResourceID, &e.Result, &e.HTTPMethod, &e.Route,
-			&e.StatusCode, &e.RequestID, &e.TraceID, &e.ClientIP, &e.UserAgent, &meta, &e.ErrorCode,
-		); err != nil {
+		run, err := scanConversationRun(rows)
+		if err != nil {
 			return nil, err
 		}
-		if len(meta) > 0 {
-			if err := json.Unmarshal(meta, &e.Metadata); err != nil {
-				return nil, err
-			}
-		}
-		if e.Metadata == nil {
-			e.Metadata = map[string]any{}
-		}
-		out = append(out, e)
+		out = append(out, run)
 	}
 	return out, rows.Err()
 }
 
-func (p *Postgres) ListTraceEvents(ctx context.Context, query TraceEventQuery) ([]TraceEvent, error) {
-	traceID := strings.TrimSpace(query.TraceID)
-	if traceID == "" {
-		return []TraceEvent{}, nil
+func (p *Postgres) UpsertConversationTraceSpan(ctx context.Context, span ConversationTraceSpan) error {
+	if span.Attributes == nil {
+		span.Attributes = map[string]any{}
 	}
+	attributes, err := json.Marshal(span.Attributes)
+	if err != nil {
+		return err
+	}
+	now := time.Now().UTC()
+	if span.SchemaVersion <= 0 {
+		span.SchemaVersion = 1
+	}
+	const q = `INSERT INTO conversation_trace_spans (
+		trace_id, span_id, parent_span_id, schema_version, service, name, category,
+		started_at, duration_us, status, attributes_json, created_at, updated_at
+	) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$12)
+	ON CONFLICT (trace_id, span_id) DO UPDATE SET
+		parent_span_id=EXCLUDED.parent_span_id, schema_version=EXCLUDED.schema_version,
+		service=EXCLUDED.service, name=EXCLUDED.name, category=EXCLUDED.category,
+		started_at=EXCLUDED.started_at, duration_us=EXCLUDED.duration_us,
+		status=EXCLUDED.status, attributes_json=EXCLUDED.attributes_json,
+		updated_at=EXCLUDED.updated_at`
+	_, err = p.pool.Exec(ctx, q, span.TraceID, span.SpanID, span.ParentSpanID,
+		span.SchemaVersion, span.Service, span.Name, span.Category, span.StartedAt,
+		span.DurationUS, span.Status, attributes, now)
+	return err
+}
+
+func (p *Postgres) ListConversationTraceSpans(ctx context.Context, query ConversationTraceSpanQuery) ([]ConversationTraceSpan, error) {
 	limit := query.Limit
-	if limit <= 0 || limit > 500 {
-		limit = 500
+	if limit <= 0 || limit > 2000 {
+		limit = 1000
 	}
-	const q = `SELECT id, trace_id, service, name, category, started_at, duration_ms,
-		status, metadata_json
-		FROM trace_events
-		WHERE trace_id = $1
-		ORDER BY started_at ASC, id ASC
-		LIMIT $2`
-	rows, err := p.pool.Query(ctx, q, traceID, limit)
+	const q = `SELECT id, trace_id, span_id, parent_span_id, schema_version,
+		service, name, category, started_at, duration_us, status, attributes_json,
+		created_at, updated_at
+		FROM conversation_trace_spans
+		WHERE trace_id=$1 AND id>$2 ORDER BY id ASC LIMIT $3`
+	rows, err := p.pool.Query(ctx, q, strings.TrimSpace(query.TraceID), query.AfterID, limit)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
-	out := make([]TraceEvent, 0)
+	out := make([]ConversationTraceSpan, 0)
 	for rows.Next() {
-		var e TraceEvent
-		var meta []byte
-		if err := rows.Scan(
-			&e.ID, &e.TraceID, &e.Service, &e.Name, &e.Category, &e.StartedAt,
-			&e.DurationMS, &e.Status, &meta,
-		); err != nil {
+		var span ConversationTraceSpan
+		var attributes []byte
+		if err := rows.Scan(&span.ID, &span.TraceID, &span.SpanID, &span.ParentSpanID,
+			&span.SchemaVersion, &span.Service, &span.Name, &span.Category, &span.StartedAt,
+			&span.DurationUS, &span.Status, &attributes, &span.CreatedAt, &span.UpdatedAt); err != nil {
 			return nil, err
 		}
-		if len(meta) > 0 {
-			if err := json.Unmarshal(meta, &e.Metadata); err != nil {
+		if len(attributes) > 0 {
+			if err := json.Unmarshal(attributes, &span.Attributes); err != nil {
 				return nil, err
 			}
 		}
-		if e.Metadata == nil {
-			e.Metadata = map[string]any{}
-		}
-		out = append(out, e)
+		out = append(out, span)
 	}
 	return out, rows.Err()
+}
+
+func (p *Postgres) ExpireConversationTraceSpans(ctx context.Context, before time.Time) (int64, error) {
+	result, err := p.pool.Exec(ctx, "DELETE FROM conversation_trace_spans WHERE created_at < $1", before)
+	if err != nil {
+		return 0, err
+	}
+	_, err = p.pool.Exec(ctx, `UPDATE conversation_runs SET detail_status='expired', updated_at=now()
+		WHERE started_at < $1 AND detail_status <> 'expired'
+		AND NOT EXISTS (SELECT 1 FROM conversation_trace_spans s WHERE s.trace_id=conversation_runs.trace_id)`, before)
+	return result.RowsAffected(), err
+}
+
+func (p *Postgres) InterruptStaleConversationRuns(ctx context.Context, before, now time.Time) (int64, error) {
+	result, err := p.pool.Exec(ctx, `UPDATE conversation_runs SET status='interrupted',
+		completed_at=$2, duration_ms=GREATEST((extract(epoch FROM ($2-started_at))*1000)::bigint,0),
+		error_code='TRACE_STALE', updated_at=$2
+		WHERE status='running' AND last_activity_at < $1`, before, now)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
 }
 
 func tokenUsageWhere(q TokenUsageQuery) (string, []any) {

@@ -19,7 +19,6 @@ import (
 	"net/http"
 	"strconv"
 	"strings"
-	"time"
 
 	"github.com/go-chi/chi/v5"
 
@@ -78,7 +77,6 @@ func (a *API) Router() http.Handler {
 
 	r.Route("/me", func(r chi.Router) {
 		r.Use(a.requireRuntimeUser)
-		r.Use(a.auditHTTP("user"))
 		r.Get("/events", a.streamMyEvents)
 		r.Route("/skills", func(r chi.Router) {
 			r.Get("/", a.listMySkills)
@@ -109,7 +107,6 @@ func (a *API) Router() http.Handler {
 
 	r.Route("/admin", func(r chi.Router) {
 		r.Use(a.requireAdmin)
-		r.Use(a.auditHTTP("admin"))
 
 		r.Route("/users", func(r chi.Router) {
 			r.Post("/", a.createAuthUser)
@@ -222,9 +219,11 @@ func (a *API) Router() http.Handler {
 			r.Get("/users/{user_id}", a.tokenUsageUser)
 		})
 
-		r.Get("/audit", a.listAudit)
 		r.Get("/audit-events", a.listAuditEvents)
 		r.Get("/traces/{trace_id}", a.getTrace)
+		r.Get("/conversation-runs", a.listConversationRuns)
+		r.Get("/conversation-runs/{trace_id}", a.getConversationRun)
+		r.Get("/conversation-runs/{trace_id}/spans", a.listConversationTraceSpans)
 	})
 
 	// Tracing: wrap the whole router so an inbound W3C traceparent is extracted
@@ -248,7 +247,6 @@ func (a *API) requireAdmin(next http.Handler) http.Handler {
 		}
 		presented := bearer(r)
 		if presented == "" || subtle.ConstantTimeCompare([]byte(presented), []byte(a.adminKey)) != 1 {
-			a.appendHTTPAudit(r, "admin", "admin.auth.denied", "auth", "", http.StatusUnauthorized, "PERMISSION_DENIED", time.Now())
 			writeErr(w, http.StatusUnauthorized, "PERMISSION_DENIED", "admin authentication required")
 			return
 		}
@@ -280,12 +278,10 @@ func (a *API) requireRuntimeUser(next http.Handler) http.Handler {
 		}
 		claims, err := token.Decode(bearer(r), a.runtimeSecret, 0)
 		if err != nil || strings.TrimSpace(claims.Subject) == "" {
-			a.appendHTTPAudit(r, "user", "me.auth.denied", "auth", "", http.StatusUnauthorized, "UNAUTHENTICATED", time.Now())
 			writeErr(w, http.StatusUnauthorized, "UNAUTHENTICATED", "valid runtime token required")
 			return
 		}
 		if a.runtimeIssuer != "" && claims.Issuer != a.runtimeIssuer {
-			a.appendHTTPAudit(r, "user", "me.auth.denied", "auth", "", http.StatusUnauthorized, "UNAUTHENTICATED", time.Now())
 			writeErr(w, http.StatusUnauthorized, "UNAUTHENTICATED", "valid runtime token required")
 			return
 		}

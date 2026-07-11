@@ -33,12 +33,14 @@ type Event struct {
 // caller (HTTP layer) fills UserID/SessionId from the verified identity, never
 // from client-supplied fields.
 type Query struct {
-	UserID     string
-	SessionID  string
-	Prompt     string
-	SandboxID  string
-	MaxTurns   int32
-	ModelAlias string
+	UserID       string
+	SessionID    string
+	Prompt       string
+	SandboxID    string
+	MaxTurns     int32
+	ModelAlias   string
+	TraceID      string
+	ParentSpanID string
 	// SandboxAuthToken is a fresh per-user cocola token the gateway mints from
 	// the verified identity (sub=UserID, ten=TenantID) for THIS turn. It is
 	// forwarded to agent-runtime over gRPC metadata and injected into the
@@ -154,6 +156,12 @@ func (c *Client) Stream(ctx context.Context, q Query, onEvent func(Event) error)
 	// without a proto change. Never logged; treated as a credential.
 	if strings.TrimSpace(q.SandboxAuthToken) != "" {
 		ctx = metadata.AppendToOutgoingContext(ctx, "x-cocola-sandbox-token", strings.TrimSpace(q.SandboxAuthToken))
+	}
+	if len(q.TraceID) == 32 && len(q.ParentSpanID) == 16 {
+		// otelgrpc owns the standard traceparent key and may replace it with its
+		// transport span. Keep the product parent explicit so model.generate is
+		// attached to agent.execute rather than to an unpersisted OTel span.
+		ctx = metadata.AppendToOutgoingContext(ctx, "x-cocola-product-traceparent", "00-"+q.TraceID+"-"+q.ParentSpanID+"-01")
 	}
 	atts := make([]*agentv1.Attachment, 0, len(q.Attachments))
 	for i := range q.Attachments {

@@ -321,18 +321,7 @@ func authUserIdentifiersFor(u AuthUser) []AuthUserIdentifier {
 	return out
 }
 
-// AuditEntry is the legacy admin audit shape kept for /admin/audit
-// compatibility. New code should prefer AuditEvent.
-type AuditEntry struct {
-	ID       int64     `json:"id"`
-	At       time.Time `json:"at"`
-	Actor    string    `json:"actor"`    // admin principal
-	Action   string    `json:"action"`   // e.g. "token.issue", "skill.delete"
-	Resource string    `json:"resource"` // affected id
-	Detail   string    `json:"detail"`   // human-readable summary
-}
-
-// AuditEvent is one structured, append-only user or system audit event.
+// AuditEvent is the compatibility response shape for conversation runs.
 type AuditEvent struct {
 	ID           int64          `json:"id"`
 	At           time.Time      `json:"at"`
@@ -354,26 +343,7 @@ type AuditEvent struct {
 	ErrorCode    string         `json:"error_code,omitempty"`
 }
 
-// AuditEventQuery filters audit-event list calls. Empty fields are ignored.
-type AuditEventQuery struct {
-	Limit        int
-	Offset       int
-	LegacyOnly   bool
-	ActorUserID  string
-	ActorEmail   string
-	Action       string
-	ResourceType string
-	ResourceID   string
-	Result       string
-	RequestID    string
-	TraceID      string
-	Since        time.Time
-	Until        time.Time
-}
-
-// TraceEvent is one in-product timing span used by the admin trace UI. It is
-// intentionally storage-backed so diagnostics work even when external OTel
-// collection is disabled.
+// TraceEvent is the compatibility response shape for conversation trace spans.
 type TraceEvent struct {
 	ID         int64          `json:"id"`
 	TraceID    string         `json:"trace_id"`
@@ -386,8 +356,66 @@ type TraceEvent struct {
 	Metadata   map[string]any `json:"metadata_json,omitempty"`
 }
 
-type TraceEventQuery struct {
+// ConversationRun is both the immutable conversation-audit identity and the
+// mutable summary of one agent turn. Detailed execution data lives in child
+// ConversationTraceSpan rows and may expire independently of this summary.
+type ConversationRun struct {
+	TraceID           string    `json:"trace_id"`
+	RootSpanID        string    `json:"root_span_id"`
+	ConversationID    string    `json:"conversation_id"`
+	ConversationTitle string    `json:"conversation_title,omitempty"`
+	UserID            string    `json:"user_id"`
+	UserEmail         string    `json:"user_email"`
+	Source            string    `json:"source"`
+	ModelAlias        string    `json:"model_alias"`
+	Status            string    `json:"status"`
+	StartedAt         time.Time `json:"started_at"`
+	CompletedAt       time.Time `json:"completed_at,omitempty"`
+	LastActivityAt    time.Time `json:"last_activity_at"`
+	DurationMS        int64     `json:"duration_ms"`
+	TTFTMS            int64     `json:"ttft_ms"`
+	LLMCallCount      int64     `json:"llm_call_count"`
+	ToolCallCount     int64     `json:"tool_call_count"`
+	InputTokens       int64     `json:"input_tokens"`
+	OutputTokens      int64     `json:"output_tokens"`
+	CacheTokens       int64     `json:"cache_tokens"`
+	ErrorCode         string    `json:"error_code,omitempty"`
+	SafeErrorSummary  string    `json:"safe_error_summary,omitempty"`
+	DetailStatus      string    `json:"detail_status"`
+	CreatedAt         time.Time `json:"created_at"`
+	UpdatedAt         time.Time `json:"updated_at"`
+}
+
+type ConversationRunQuery struct {
+	Search string
+	Status string
+	Source string
+	From   time.Time
+	Until  time.Time
+	Limit  int
+	Offset int
+}
+
+type ConversationTraceSpan struct {
+	ID            int64          `json:"id"`
+	TraceID       string         `json:"trace_id"`
+	SpanID        string         `json:"span_id"`
+	ParentSpanID  string         `json:"parent_span_id,omitempty"`
+	SchemaVersion int            `json:"schema_version"`
+	Service       string         `json:"service"`
+	Name          string         `json:"name"`
+	Category      string         `json:"category"`
+	StartedAt     time.Time      `json:"started_at"`
+	DurationUS    int64          `json:"duration_us"`
+	Status        string         `json:"status"`
+	Attributes    map[string]any `json:"attributes_json,omitempty"`
+	CreatedAt     time.Time      `json:"created_at"`
+	UpdatedAt     time.Time      `json:"updated_at"`
+}
+
+type ConversationTraceSpanQuery struct {
 	TraceID string
+	AfterID int64
 	Limit   int
 }
 
@@ -542,12 +570,14 @@ type Store interface {
 	AppendScheduledTaskRunEvent(ctx context.Context, event ScheduledTaskRunEvent) error
 	ListScheduledTaskRunEvents(ctx context.Context, runID string) ([]ScheduledTaskRunEvent, error)
 
-	// Audit
-	AppendAudit(ctx context.Context, e AuditEntry) error
-	ListAudit(ctx context.Context, limit int) ([]AuditEntry, error)
-	AppendAuditEvent(ctx context.Context, e AuditEvent) error
-	ListAuditEvents(ctx context.Context, q AuditEventQuery) ([]AuditEvent, error)
-	ListTraceEvents(ctx context.Context, q TraceEventQuery) ([]TraceEvent, error)
+	// Conversation audit and product traces
+	UpsertConversationRun(ctx context.Context, run ConversationRun) error
+	GetConversationRun(ctx context.Context, traceID string) (ConversationRun, error)
+	ListConversationRuns(ctx context.Context, q ConversationRunQuery) ([]ConversationRun, error)
+	UpsertConversationTraceSpan(ctx context.Context, span ConversationTraceSpan) error
+	ListConversationTraceSpans(ctx context.Context, q ConversationTraceSpanQuery) ([]ConversationTraceSpan, error)
+	ExpireConversationTraceSpans(ctx context.Context, before time.Time) (int64, error)
+	InterruptStaleConversationRuns(ctx context.Context, before, now time.Time) (int64, error)
 
 	// Token usage dashboard
 	TokenUsageSummary(ctx context.Context, q TokenUsageQuery) (TokenUsageSummary, error)

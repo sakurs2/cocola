@@ -4,93 +4,106 @@ import { Graph as TracePageIcon } from "@phosphor-icons/react";
 import {
   AlertTriangle,
   ArrowLeft,
+  Bot,
+  Box,
+  BrainCircuit,
   CheckCircle2,
   ChevronRight,
   Clock3,
-  FileClock,
+  Database,
+  Hammer,
   Loader2,
   TimerReset,
 } from "lucide-react";
 import Link from "next/link";
 import { useCallback, useEffect, useMemo, useState, type ReactNode } from "react";
-import { AdminRefreshButton } from "@/components/admin/admin-ui";
+import {
+  AdminAlert,
+  AdminDrawer,
+  AdminMetric,
+  AdminPage,
+  AdminPageHeader,
+  AdminRefreshButton,
+  AdminStatusBadge,
+} from "@/components/admin/admin-ui";
 import { cn } from "@/lib/utils";
 
-type TraceEvent = {
-  id: number;
+type ConversationRun = {
   trace_id: string;
-  service: string;
-  name: string;
-  category?: string;
-  started_at: string;
-  duration_ms: number;
+  root_span_id: string;
+  conversation_id: string;
+  conversation_title?: string;
+  user_id: string;
+  user_email: string;
+  source: string;
+  model_alias: string;
   status: string;
-  metadata_json?: Record<string, unknown>;
+  started_at: string;
+  completed_at?: string;
+  duration_ms: number;
+  ttft_ms: number;
+  llm_call_count: number;
+  tool_call_count: number;
+  input_tokens: number;
+  output_tokens: number;
+  cache_tokens: number;
+  error_code?: string;
+  safe_error_summary?: string;
+  detail_status: string;
 };
 
-type AuditEvent = {
+type TraceSpan = {
   id: number;
-  at: string;
-  actor_type: string;
-  actor_email?: string;
-  actor_user_id?: string;
-  action: string;
-  resource_type?: string;
-  resource_id?: string;
-  result: string;
-  route?: string;
-  status_code?: number;
-  trace_id?: string;
-  metadata_json?: Record<string, unknown>;
-  error_code?: string;
+  trace_id: string;
+  span_id: string;
+  parent_span_id?: string;
+  schema_version: number;
+  service: string;
+  name: string;
+  category: string;
+  started_at: string;
+  duration_us: number;
+  status: string;
+  attributes_json?: Record<string, unknown>;
 };
 
 type TraceResponse = {
-  trace_id: string;
-  events?: TraceEvent[];
-  audit_events?: AuditEvent[];
+  run?: ConversationRun;
+  spans?: TraceSpan[];
 };
-
-type TraceModule = {
-  key: string;
-  label: string;
-  category?: string;
-  service: string;
-  events: TraceEvent[];
-  startMs: number;
-  endMs: number;
-  durationMs: number;
-  spanMs: number;
-  errorCount: number;
-};
-
-type LoadState =
-  | { status: "loading"; data: TraceResponse | null; error: "" }
-  | { status: "ready"; data: TraceResponse; error: "" }
-  | { status: "error"; data: TraceResponse | null; error: string };
-
-const iconBtn =
-  "inline-flex size-8 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-accent hover:text-accent-foreground disabled:pointer-events-none disabled:opacity-40";
 
 export default function AdminTracePage({ params }: { params: { traceId: string } }) {
   const traceId = params.traceId;
-  const [state, setState] = useState<LoadState>({ status: "loading", data: null, error: "" });
+  const [run, setRun] = useState<ConversationRun | null>(null);
+  const [spans, setSpans] = useState<TraceSpan[]>([]);
+  const [selected, setSelected] = useState<TraceSpan | null>(null);
+  const [inspectorOpen, setInspectorOpen] = useState(false);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState("");
 
   const load = useCallback(async () => {
-    setState((prev) => ({ status: "loading", data: prev.data, error: "" }));
+    setError("");
     try {
-      const res = await fetch(`/api/admin/traces/${encodeURIComponent(traceId)}`, {
+      const response = await fetch(`/api/admin/traces/${encodeURIComponent(traceId)}`, {
         cache: "no-store",
       });
-      if (!res.ok) throw new Error(await errorText(res));
-      const data = (await res.json()) as TraceResponse;
-      setState({ status: "ready", data, error: "" });
-    } catch (err) {
-      setState((prev) => ({
-        status: "error",
-        data: prev.data,
-        error: err instanceof Error ? err.message : String(err),
-      }));
+      if (!response.ok) throw new Error(await errorText(response));
+      const body = (await response.json()) as TraceResponse;
+      setRun(body.run ?? null);
+      setSpans(body.spans ?? []);
+      setSelected((current) => {
+        if (current)
+          return (body.spans ?? []).find((span) => span.span_id === current.span_id) ?? current;
+        return (
+          (body.spans ?? []).find((span) => span.name === "conversation.run") ??
+          body.spans?.[0] ??
+          null
+        );
+      });
+    } catch (loadError) {
+      setError(loadError instanceof Error ? loadError.message : String(loadError));
+    } finally {
+      setLoading(false);
     }
   }, [traceId]);
 
@@ -98,554 +111,577 @@ export default function AdminTracePage({ params }: { params: { traceId: string }
     void load();
   }, [load]);
 
-  const events = useMemo(() => state.data?.events ?? [], [state.data]);
-  const auditEvents = useMemo(() => state.data?.audit_events ?? [], [state.data]);
-  const timelineEvents = useMemo(
-    () => (events.length ? events : auditEvents.map(auditEventToTraceEvent)),
-    [auditEvents, events],
-  );
-  const stats = useMemo(() => traceStats(timelineEvents), [timelineEvents]);
-  const modules = useMemo(() => traceModules(timelineEvents), [timelineEvents]);
+  useEffect(() => {
+    if (run?.status !== "running") return;
+    const timer = window.setInterval(() => void load(), 2000);
+    return () => window.clearInterval(timer);
+  }, [load, run?.status]);
+
+  const timeline = useMemo(() => timelineStats(run, spans), [run, spans]);
+  const traceTree = useMemo(() => buildSpanTree(spans), [spans]);
 
   return (
-    <main className="min-h-screen bg-background text-foreground">
-      <header className="border-b border-border">
-        <div className="mx-auto flex h-16 max-w-7xl items-center gap-3 px-6">
-          <Link href="/admin/audit" className={iconBtn} title="Back to audit logs">
-            <ArrowLeft className="size-4" />
+    <AdminPage>
+      <AdminPageHeader
+        icon={<TracePageIcon className="size-5" weight="duotone" />}
+        eyebrow="Conversation trace"
+        title={run?.conversation_title || "Agent run"}
+        description={traceId}
+        actions={
+          <div className="flex items-center gap-2">
+            {run ? <RunBadge status={run.status} /> : null}
+            <AdminRefreshButton onClick={() => void load()} refreshing={loading} disabled={loading}>
+              Refresh
+            </AdminRefreshButton>
+          </div>
+        }
+      />
+
+      <div className="flex flex-wrap items-center gap-x-5 gap-y-2 text-sm text-muted-foreground">
+        <Link
+          href="/admin/audit"
+          className="inline-flex items-center gap-1.5 hover:text-foreground"
+        >
+          <ArrowLeft className="size-4" /> Conversation Audit
+        </Link>
+        <span>{run?.user_email || run?.user_id || "—"}</span>
+        <span>{run?.source === "scheduled_task" ? "Scheduled task" : "Interactive"}</span>
+        <span>{run?.model_alias || "Default model"}</span>
+        {run?.conversation_id ? (
+          <Link
+            href={`/conversations/${encodeURIComponent(run.conversation_id)}`}
+            className="font-mono text-xs text-primary hover:underline"
+          >
+            Open conversation
           </Link>
-          <div className="admin-page-icon">
-            <TracePageIcon className="size-[18px]" weight="duotone" />
-          </div>
-          <div className="min-w-0 flex-1">
-            <h1 className="truncate text-base font-semibold">Trace Detail</h1>
-            <p className="truncate font-mono text-xs text-muted-foreground">{traceId}</p>
-          </div>
-          <AdminRefreshButton
-            className={iconBtn}
-            title="Refresh trace"
-            aria-label="Refresh trace"
-            onClick={() => void load()}
-            disabled={state.status === "loading"}
-            refreshing={state.status === "loading"}
-            variant="ghost"
-            size="icon"
-          />
-        </div>
-      </header>
-
-      <div className="mx-auto max-w-7xl space-y-5 px-6 py-6">
-        {state.status === "error" ? (
-          <div className="flex items-center gap-2 rounded-md border border-destructive/30 bg-destructive/10 px-3 py-2 text-sm text-destructive">
-            <AlertTriangle className="size-4 shrink-0" />
-            <span className="min-w-0">{state.error}</span>
-          </div>
         ) : null}
+      </div>
 
-        <section className="grid gap-3 md:grid-cols-4">
-          <Metric
-            icon={<TimerReset className="size-4" />}
-            label="Trace Duration"
-            value={timelineEvents.length ? formatDuration(stats.totalMs) : "-"}
-          />
-          <Metric
-            icon={<Clock3 className="size-4" />}
-            label="Slowest Stage"
-            value={stats.slowest ? formatDuration(stats.slowest.duration_ms) : "-"}
-            sub={stats.slowest?.name}
-          />
-          <Metric
-            icon={<AlertTriangle className="size-4" />}
-            label="Errors"
-            value={String(stats.errorCount)}
-          />
-          <Metric
-            icon={<FileClock className="size-4" />}
-            label="Audit Events"
-            value={String(auditEvents.length)}
-          />
-        </section>
+      {error ? (
+        <AdminAlert tone="error" icon={<AlertTriangle className="size-4" />}>
+          {error}
+        </AdminAlert>
+      ) : null}
+      {run?.detail_status === "expired" ? (
+        <AdminAlert tone="warning" icon={<Clock3 className="size-4" />}>
+          Trace details expired. The conversation audit summary remains available.
+        </AdminAlert>
+      ) : null}
+      {run?.detail_status === "partial" ? (
+        <AdminAlert tone="warning" icon={<AlertTriangle className="size-4" />}>
+          Some trace spans could not be recorded. The agent run summary is complete.
+        </AdminAlert>
+      ) : null}
 
-        <section className="overflow-hidden rounded-lg border border-border bg-card">
-          <div className="flex items-center justify-between border-b border-border px-4 py-3">
+      <section className="grid gap-3 sm:grid-cols-2 xl:grid-cols-5">
+        <AdminMetric
+          icon={<TimerReset className="size-4" />}
+          label="Total"
+          value={formatDurationMS(run?.duration_ms ?? timeline.totalMs)}
+          tone="sky"
+        />
+        <AdminMetric
+          icon={<Clock3 className="size-4" />}
+          label="Time to first token"
+          value={formatDurationMS(run?.ttft_ms ?? 0)}
+        />
+        <AdminMetric
+          icon={<BrainCircuit className="size-4" />}
+          label="Model calls"
+          value={run?.llm_call_count ?? countCategory(spans, "model")}
+          tone="violet"
+        />
+        <AdminMetric
+          icon={<Hammer className="size-4" />}
+          label="Tool calls"
+          value={run?.tool_call_count ?? countCategory(spans, "tool")}
+          tone="amber"
+        />
+        <AdminMetric
+          icon={<Database className="size-4" />}
+          label="Tokens"
+          value={formatNumber((run?.input_tokens ?? 0) + (run?.output_tokens ?? 0))}
+          detail={`${formatNumber(run?.input_tokens ?? 0)} in · ${formatNumber(run?.output_tokens ?? 0)} out`}
+          tone="green"
+        />
+      </section>
+
+      <section className="grid min-h-[38rem] overflow-hidden rounded-2xl border border-border/80 bg-card/80 shadow-[0_18px_55px_-42px_rgba(37,99,235,0.45)] lg:grid-cols-[21rem_minmax(0,1fr)]">
+        <div className="min-w-0 border-border/70 lg:border-r">
+          <div className="flex min-h-14 items-center justify-between border-b border-border/70 px-4 sm:px-5">
             <div>
-              <h2 className="text-sm font-semibold">Modules</h2>
-              <p className="text-xs text-muted-foreground">
-                Expand a module to inspect its internal stages
-              </p>
+              <h2 className="text-xs font-semibold uppercase tracking-[0.16em]">Trace</h2>
+              <p className="text-xs text-muted-foreground">{uniqueSpanCount(spans)} spans</p>
             </div>
-            {state.status === "loading" ? (
-              <span className="inline-flex items-center text-xs text-muted-foreground">
-                <Loader2 className="mr-2 size-3 animate-spin" />
-                Loading
+            {run?.status === "running" ? (
+              <span className="inline-flex items-center gap-2 text-xs text-primary">
+                <Loader2 className="size-3.5 animate-spin" /> Live
               </span>
             ) : (
-              <span className="inline-flex items-center text-xs text-muted-foreground">
-                <CheckCircle2 className="mr-2 size-3" />
-                {modules.length} modules · {timelineEvents.length} stages
+              <span className="inline-flex items-center gap-2 text-xs text-muted-foreground">
+                <CheckCircle2 className="size-3.5" /> Complete
               </span>
             )}
           </div>
-          {!events.length && timelineEvents.length ? (
-            <div className="border-b border-border bg-amber-500/10 px-4 py-2 text-xs text-amber-700 dark:text-amber-300">
-              Detailed stage events were not recorded for this trace; showing audit duration as a
-              fallback.
-            </div>
-          ) : null}
-          {timelineEvents.length ? (
-            <div className="divide-y divide-border">
-              {modules.map((module) => (
-                <TraceModuleRow key={module.key} module={module} stats={stats} />
+
+          {traceTree.length ? (
+            <div className="max-h-[42rem] divide-y divide-border/60 overflow-y-auto">
+              {traceTree.map((node) => (
+                <TraceTreeNode
+                  key={node.span.span_id}
+                  node={node}
+                  selectedID={selected?.span_id}
+                  onSelect={(span) => {
+                    setSelected(span);
+                    if (!window.matchMedia("(min-width: 1024px)").matches) setInspectorOpen(true);
+                  }}
+                />
               ))}
             </div>
           ) : (
-            <div className="px-4 py-12 text-center text-sm text-muted-foreground">
-              No trace timing events found for this trace id.
+            <div className="flex min-h-72 items-center justify-center px-6 text-sm text-muted-foreground">
+              {loading ? "Loading trace…" : "No detailed spans were recorded."}
             </div>
           )}
-        </section>
+        </div>
 
-        <section className="overflow-hidden rounded-lg border border-border bg-card">
-          <div className="border-b border-border px-4 py-3">
-            <h2 className="text-sm font-semibold">Related Audit Events</h2>
-          </div>
-          <div className="overflow-x-auto">
-            <table className="w-full min-w-[880px] text-left text-sm">
-              <thead className="border-b border-border bg-muted/50 text-xs text-muted-foreground">
-                <tr>
-                  <th className="px-4 py-2 font-medium">Time</th>
-                  <th className="px-4 py-2 font-medium">Actor</th>
-                  <th className="px-4 py-2 font-medium">Action</th>
-                  <th className="px-4 py-2 font-medium">Resource</th>
-                  <th className="px-4 py-2 font-medium">Result</th>
-                  <th className="px-4 py-2 font-medium">Route</th>
-                  <th className="px-4 py-2 font-medium">Metadata</th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-border">
-                {auditEvents.map((event) => (
-                  <tr key={event.id} className="align-top">
-                    <td className="whitespace-nowrap px-4 py-3 text-xs text-muted-foreground">
-                      {formatDate(event.at)}
-                    </td>
-                    <td className="px-4 py-3">
-                      <div className="font-medium">
-                        {event.actor_email || event.actor_user_id || "-"}
-                      </div>
-                      <div className="text-xs text-muted-foreground">{event.actor_type || "-"}</div>
-                    </td>
-                    <td className="px-4 py-3 font-mono text-xs">{event.action}</td>
-                    <td className="px-4 py-3">
-                      <div>{event.resource_type || "-"}</div>
-                      <div className="max-w-[180px] truncate font-mono text-xs text-muted-foreground">
-                        {event.resource_id || "-"}
-                      </div>
-                    </td>
-                    <td className="px-4 py-3">
-                      <Badge tone={event.result === "success" ? "green" : "red"}>
-                        {event.result || "-"}
-                      </Badge>
-                      {event.error_code ? (
-                        <div className="mt-1 font-mono text-xs text-muted-foreground">
-                          {event.error_code}
-                        </div>
-                      ) : null}
-                    </td>
-                    <td className="px-4 py-3 font-mono text-xs">
-                      {event.route || "-"}
-                      {event.status_code ? (
-                        <div className="mt-1 text-xs text-muted-foreground">
-                          {event.status_code}
-                        </div>
-                      ) : null}
-                    </td>
-                    <td className="px-4 py-3">
-                      <div className="max-w-[260px] truncate font-mono text-xs text-muted-foreground">
-                        {formatMetadata(event.metadata_json)}
-                      </div>
-                    </td>
-                  </tr>
-                ))}
-                {!auditEvents.length ? (
-                  <tr>
-                    <td
-                      className="px-4 py-10 text-center text-sm text-muted-foreground"
-                      colSpan={7}
-                    >
-                      No related audit events
-                    </td>
-                  </tr>
-                ) : null}
-              </tbody>
-            </table>
-          </div>
-        </section>
-      </div>
-    </main>
+        <aside className="hidden min-w-0 bg-background/35 lg:block">
+          <SpanInspector span={selected} run={run} timeline={timeline} />
+        </aside>
+      </section>
+
+      <AdminDrawer
+        open={inspectorOpen}
+        onOpenChange={setInspectorOpen}
+        title={selected?.name || "Span details"}
+        description="Safe execution metadata"
+      >
+        <SpanInspector span={selected} run={run} timeline={timeline} embedded />
+      </AdminDrawer>
+    </AdminPage>
   );
 }
 
-function TraceModuleRow({
-  module,
-  stats,
+type TraceNode = { span: TraceSpan; children: TraceNode[] };
+
+function TraceTreeNode({
+  node,
+  selectedID,
+  onSelect,
+  depth = 0,
 }: {
-  module: TraceModule;
-  stats: ReturnType<typeof traceStats>;
+  node: TraceNode;
+  selectedID?: string;
+  onSelect: (span: TraceSpan) => void;
+  depth?: number;
 }) {
-  const total = Math.max(stats.totalMs, 1);
-  const offset = Math.max(module.startMs - stats.startMs, 0);
-  const spanLeftPct = Math.min((offset / total) * 100, 98);
-  const spanWidthPct = Math.max((module.spanMs / total) * 100, 1.5);
-  const tone = module.errorCount > 0 ? "red" : categoryTone(module.category);
-  const showSpan = module.spanMs > module.durationMs + 25;
-
+  const key = moduleKey(node.span.category);
+  const Icon = moduleIcon(key);
+  const hasChildren = node.children.length > 0;
+  const [expanded, setExpanded] = useState(true);
   return (
-    <details className="group">
-      <summary className="grid cursor-pointer list-none gap-3 px-4 py-4 hover:bg-muted/30 lg:grid-cols-[260px_1fr_120px] [&::-webkit-details-marker]:hidden">
-        <div className="min-w-0">
-          <div className="flex items-center gap-2">
-            <ChevronRight className="size-4 shrink-0 text-muted-foreground transition-transform group-open:rotate-90" />
-            <span className={cn("size-2 rounded-full", toneDot(tone))} />
-            <span className="truncate text-sm font-semibold">{module.label}</span>
-          </div>
-          <div className="mt-1 flex min-w-0 items-center gap-2 pl-6 text-xs text-muted-foreground">
-            <span className="truncate font-mono">{module.service}</span>
-            <span>{module.events.length} stages</span>
-          </div>
-        </div>
-        <div className="min-w-0">
-          <div className="relative h-8 overflow-hidden rounded-md border border-border bg-background">
-            <div
-              className="absolute top-1/2 h-5 -translate-y-1/2 rounded-sm bg-muted"
-              style={{
-                left: `${spanLeftPct}%`,
-                width: `${Math.min(spanWidthPct, 100 - spanLeftPct)}%`,
-              }}
-            />
-            {module.events.map((event) => (
-              <div
-                key={event.id}
-                className={cn("absolute top-1/2 h-3 -translate-y-1/2 rounded-full", toneBar(tone))}
-                style={eventBarStyle(event, stats)}
-                title={`${event.name}: ${formatDuration(event.duration_ms)}`}
-              />
-            ))}
-          </div>
-          <div className="mt-1 flex justify-between text-[11px] text-muted-foreground">
-            <span>+{formatDuration(offset)}</span>
-            <span>
-              {showSpan
-                ? `span ${formatDuration(module.spanMs)}`
-                : formatDate(new Date(module.startMs).toISOString())}
+    <div
+      className={cn(
+        depth > 0 &&
+          "relative before:absolute before:bottom-0 before:left-0 before:top-0 before:w-px before:bg-border/70",
+      )}
+      style={depth > 0 ? { paddingLeft: 18, marginLeft: 18 } : undefined}
+    >
+      <div
+        className={cn(
+          "flex items-center py-2 pr-3 transition-colors hover:bg-muted/35",
+          selectedID === node.span.span_id && "bg-primary/[0.07]",
+        )}
+        style={{ paddingLeft: depth === 0 ? 12 : 2 }}
+      >
+        <button
+          type="button"
+          className="flex size-7 shrink-0 items-center justify-center rounded-md text-muted-foreground hover:bg-background disabled:opacity-25"
+          onClick={() => setExpanded((current) => !current)}
+          aria-label={
+            expanded ? `Collapse ${humanize(node.span.name)}` : `Expand ${humanize(node.span.name)}`
+          }
+          aria-expanded={expanded}
+          disabled={!hasChildren}
+        >
+          <ChevronRight className={cn("size-3.5 transition-transform", expanded && "rotate-90")} />
+        </button>
+        <button
+          type="button"
+          className="flex min-w-0 flex-1 items-center gap-2.5 text-left"
+          onClick={() => onSelect(node.span)}
+        >
+          <span
+            className={cn(
+              "flex size-8 shrink-0 items-center justify-center rounded-lg",
+              moduleTone(key),
+            )}
+          >
+            <Icon className="size-3.5" />
+          </span>
+          <span className="min-w-0 flex-1">
+            <span className="flex items-center gap-2">
+              <span className={cn("size-1.5 shrink-0 rounded-full", statusDot(node.span.status))} />
+              <span className="truncate text-sm font-medium">{humanize(node.span.name)}</span>
             </span>
-          </div>
-        </div>
-        <div className="text-right">
-          <div className="font-mono text-sm font-semibold">{formatDuration(module.durationMs)}</div>
-          <div className="mt-0.5 text-[11px] text-muted-foreground">active</div>
-          <div className="mt-1">
-            <Badge tone={module.errorCount > 0 ? "red" : "green"}>
-              {module.errorCount > 0 ? `${module.errorCount} errors` : "ok"}
-            </Badge>
-          </div>
-        </div>
-      </summary>
-      <div className="border-t border-border bg-background/40">
-        {module.events.map((event) => (
-          <TraceRow key={event.id} event={event} stats={stats} />
-        ))}
+            <span className="mt-0.5 block truncate font-mono text-[10px] text-muted-foreground">
+              {node.span.service}
+            </span>
+          </span>
+          <span className="ml-2 shrink-0 font-mono text-[11px] tabular-nums text-muted-foreground">
+            {formatDurationUS(node.span.duration_us)}
+          </span>
+        </button>
       </div>
-    </details>
-  );
-}
-
-function TraceRow({ event, stats }: { event: TraceEvent; stats: ReturnType<typeof traceStats> }) {
-  const started = Date.parse(event.started_at);
-  const offset = Number.isFinite(started) ? Math.max(started - stats.startMs, 0) : 0;
-  const tone =
-    event.status === "error" || event.status === "failure" ? "red" : categoryTone(event.category);
-
-  return (
-    <div className="grid gap-3 px-4 py-3 lg:grid-cols-[260px_1fr_120px]">
-      <div className="min-w-0">
-        <div className="flex items-center gap-2">
-          <span className={cn("size-2 rounded-full", toneDot(tone))} />
-          <span className="truncate text-sm font-medium">{event.name}</span>
+      {expanded && hasChildren ? (
+        <div>
+          {node.children.map((child) => (
+            <TraceTreeNode
+              key={child.span.span_id}
+              node={child}
+              selectedID={selectedID}
+              onSelect={onSelect}
+              depth={depth + 1}
+            />
+          ))}
         </div>
-        <div className="mt-1 flex min-w-0 items-center gap-2 text-xs text-muted-foreground">
-          <span className="truncate font-mono">{event.service}</span>
-          {event.category ? <span className="truncate">{event.category}</span> : null}
-        </div>
-      </div>
-      <div className="min-w-0">
-        <div className="relative h-8 overflow-hidden rounded-md border border-border bg-background">
-          <div
-            className={cn("absolute top-1/2 h-3 -translate-y-1/2 rounded-full", toneBar(tone))}
-            style={eventBarStyle(event, stats)}
-          />
-        </div>
-        <div className="mt-1 flex justify-between text-[11px] text-muted-foreground">
-          <span>+{formatDuration(offset)}</span>
-          <span>{formatDate(event.started_at)}</span>
-        </div>
-      </div>
-      <div className="text-right">
-        <div className="font-mono text-sm font-semibold">{formatDuration(event.duration_ms)}</div>
-        <div className="mt-1">
-          <Badge tone={tone === "red" ? "red" : "green"}>{event.status || "ok"}</Badge>
-        </div>
-      </div>
-      {event.metadata_json && Object.keys(event.metadata_json).length > 0 ? (
-        <details className="lg:col-start-2 lg:col-span-2">
-          <summary className="cursor-pointer text-xs text-muted-foreground">metadata</summary>
-          <pre className="mt-2 max-h-48 overflow-auto rounded-md border border-border bg-background p-3 font-mono text-xs text-muted-foreground">
-            {JSON.stringify(event.metadata_json, null, 2)}
-          </pre>
-        </details>
       ) : null}
     </div>
   );
 }
 
-function Metric({
-  icon,
-  label,
-  value,
-  sub,
+function SpanInspector({
+  span,
+  run,
+  timeline,
+  embedded = false,
 }: {
-  icon: ReactNode;
-  label: string;
-  value: string;
-  sub?: string;
+  span: TraceSpan | null;
+  run: ConversationRun | null;
+  timeline: ReturnType<typeof timelineStats>;
+  embedded?: boolean;
 }) {
-  return (
-    <div className="rounded-lg border border-border bg-card px-4 py-3">
-      <div className="flex items-center gap-2 text-xs text-muted-foreground">
-        {icon}
-        <span>{label}</span>
+  const [tab, setTab] = useState<"run" | "metadata">("run");
+  if (!span) {
+    return (
+      <div
+        className={cn(
+          "flex min-h-72 items-center justify-center p-6 text-center text-sm text-muted-foreground",
+          !embedded && "sticky top-0",
+        )}
+      >
+        Select a span to inspect its timing and safe metadata.
       </div>
-      <div className="mt-2 truncate text-2xl font-semibold">{value}</div>
-      {sub ? <div className="mt-1 truncate text-xs text-muted-foreground">{sub}</div> : null}
+    );
+  }
+  return (
+    <div className={cn(!embedded && "sticky top-0")}>
+      {!embedded ? (
+        <div className="border-b border-border/70 px-5 pt-5">
+          <div className="flex items-start justify-between gap-4">
+            <div className="min-w-0">
+              <div className="flex items-center gap-2">
+                <span className={cn("size-2 rounded-full", statusDot(span.status))} />
+                <h2 className="truncate text-lg font-semibold tracking-tight">
+                  {humanize(span.name)}
+                </h2>
+              </div>
+              <p className="mt-1 truncate font-mono text-[11px] text-muted-foreground">
+                {span.span_id}
+              </p>
+            </div>
+            <RunBadge status={span.status} />
+          </div>
+          <div className="mt-5 flex gap-6">
+            <InspectorTab active={tab === "run"} onClick={() => setTab("run")}>
+              Run
+            </InspectorTab>
+            <InspectorTab active={tab === "metadata"} onClick={() => setTab("metadata")}>
+              Metadata
+            </InspectorTab>
+          </div>
+        </div>
+      ) : null}
+      <div className="space-y-6 p-5 sm:p-6">
+        {embedded || tab === "run" ? (
+          <>
+            <div className="grid gap-3 sm:grid-cols-3">
+              <InspectorMetric label="Duration" value={formatDurationUS(span.duration_us)} />
+              <InspectorMetric label="Started" value={formatTime(span.started_at)} />
+              <InspectorMetric label="Run position" value={formatRunPosition(span, timeline)} />
+            </div>
+            <dl className="grid grid-cols-[7rem_1fr] gap-x-4 gap-y-3 border-t border-border/70 pt-5 text-sm">
+              <InspectorRow label="Service" value={span.service} mono />
+              <InspectorRow label="Module" value={moduleKey(span.category)} />
+              <InspectorRow label="Started" value={formatDate(span.started_at)} />
+              <InspectorRow label="Parent span" value={span.parent_span_id || "Root"} mono />
+              <InspectorRow label="Trace ID" value={span.trace_id} mono />
+            </dl>
+            <div className="flex flex-wrap gap-4 border-t border-border/70 pt-5">
+              {run?.conversation_id ? (
+                <Link
+                  href={`/conversations/${encodeURIComponent(run.conversation_id)}`}
+                  className="text-sm font-medium text-primary hover:underline"
+                >
+                  Open conversation
+                </Link>
+              ) : null}
+              <Link
+                href={`/admin/logs?trace_id=${encodeURIComponent(span.trace_id)}`}
+                className="text-sm font-medium text-primary hover:underline"
+              >
+                View related component logs
+              </Link>
+            </div>
+            {embedded ? <SafeAttributes attributes={span.attributes_json} /> : null}
+          </>
+        ) : (
+          <SafeAttributes attributes={span.attributes_json} />
+        )}
+      </div>
     </div>
   );
 }
 
-function Badge({ children, tone }: { children: string; tone: "green" | "red" }) {
-  const cls =
-    tone === "green"
-      ? "border-emerald-500/30 bg-emerald-500/10 text-emerald-700 dark:text-emerald-300"
-      : "border-destructive/30 bg-destructive/10 text-destructive";
-  return <span className={`rounded-md border px-2 py-0.5 text-xs ${cls}`}>{children}</span>;
+function InspectorTab({
+  active,
+  onClick,
+  children,
+}: {
+  active: boolean;
+  onClick: () => void;
+  children: ReactNode;
+}) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      className={cn(
+        "relative pb-3 text-sm font-medium text-muted-foreground transition-colors hover:text-foreground",
+        active &&
+          "text-primary after:absolute after:inset-x-0 after:-bottom-px after:h-0.5 after:bg-primary",
+      )}
+    >
+      {children}
+    </button>
+  );
 }
 
-function traceStats(events: TraceEvent[]) {
-  const starts = events
-    .map((event) => Date.parse(event.started_at))
-    .filter((value) => Number.isFinite(value));
-  const startMs = starts.length ? Math.min(...starts) : Date.now();
-  const endMs = events.reduce((max, event) => {
-    const started = Date.parse(event.started_at);
-    if (!Number.isFinite(started)) return max;
-    return Math.max(max, started + Math.max(event.duration_ms, 0));
-  }, startMs);
+function InspectorMetric({ label, value }: { label: string; value: string }) {
+  return (
+    <div className="rounded-xl border border-border/70 bg-card/75 px-4 py-3">
+      <div className="text-xs text-muted-foreground">{label}</div>
+      <div className="mt-1 font-mono text-sm font-medium tabular-nums">{value}</div>
+    </div>
+  );
+}
+
+function SafeAttributes({ attributes }: { attributes?: Record<string, unknown> }) {
+  const entries = Object.entries(attributes ?? {});
+  if (!entries.length) {
+    return (
+      <div className="rounded-xl border border-dashed border-border px-5 py-10 text-center text-sm text-muted-foreground">
+        This span has no additional safe metadata.
+      </div>
+    );
+  }
+  return (
+    <div>
+      <h3 className="text-xs font-semibold uppercase tracking-[0.12em] text-muted-foreground">
+        Safe metadata
+      </h3>
+      <dl className="mt-3 grid gap-3 xl:grid-cols-2">
+        {entries.map(([key, value]) => (
+          <div key={key} className="rounded-xl border border-border/70 bg-card/75 px-4 py-3">
+            <dt className="font-mono text-[11px] text-muted-foreground">{key}</dt>
+            <dd className="mt-1 break-words text-sm">{formatAttribute(value)}</dd>
+          </div>
+        ))}
+      </dl>
+    </div>
+  );
+}
+
+function InspectorRow({
+  label,
+  value,
+  mono = false,
+}: {
+  label: string;
+  value: string;
+  mono?: boolean;
+}) {
+  return (
+    <>
+      <dt className="text-muted-foreground">{label}</dt>
+      <dd className={cn("min-w-0 break-all", mono && "font-mono text-xs")}>{value || "—"}</dd>
+    </>
+  );
+}
+
+function RunBadge({ status }: { status: string }) {
+  const tone =
+    status === "success"
+      ? "green"
+      : status === "running"
+        ? "sky"
+        : status === "cancelled" || status === "interrupted"
+          ? "amber"
+          : "red";
+  return (
+    <AdminStatusBadge tone={tone} dot>
+      {status}
+    </AdminStatusBadge>
+  );
+}
+
+function buildSpanTree(spans: TraceSpan[]) {
+  const latest = new Map<string, TraceSpan>();
+  for (const span of spans) latest.set(span.span_id, span);
+  const nodes = new Map<string, TraceNode>();
+  for (const span of latest.values()) nodes.set(span.span_id, { span, children: [] });
+
+  const roots: TraceNode[] = [];
+  for (const node of nodes.values()) {
+    const parent = node.span.parent_span_id ? nodes.get(node.span.parent_span_id) : undefined;
+    if (parent && parent !== node) parent.children.push(node);
+    else roots.push(node);
+  }
+  const sortNodes = (rows: TraceNode[]) => {
+    rows.sort(
+      (left, right) => Date.parse(left.span.started_at) - Date.parse(right.span.started_at),
+    );
+    for (const row of rows) sortNodes(row.children);
+  };
+  sortNodes(roots);
+  roots.sort((left, right) => {
+    if (left.span.name === "conversation.run") return -1;
+    if (right.span.name === "conversation.run") return 1;
+    return Date.parse(left.span.started_at) - Date.parse(right.span.started_at);
+  });
+  return roots;
+}
+
+function uniqueSpanCount(spans: TraceSpan[]) {
+  return new Set(spans.map((span) => span.span_id)).size;
+}
+
+function moduleKey(category: string) {
+  if (category === "sandbox") return "environment";
+  if (category === "persistence" || category === "artifact") return "finalization";
+  if (["request", "environment", "agent", "model", "tool", "finalization"].includes(category))
+    return category;
+  return "agent";
+}
+
+function moduleIcon(key: string) {
+  return (
+    (
+      {
+        request: Clock3,
+        environment: Box,
+        agent: Bot,
+        model: BrainCircuit,
+        tool: Hammer,
+        finalization: Database,
+      } as Record<string, typeof Clock3>
+    )[key] ?? Bot
+  );
+}
+
+function moduleTone(key: string) {
   return {
+    request: "bg-sky-500/10 text-sky-700",
+    environment: "bg-amber-500/10 text-amber-700",
+    agent: "bg-blue-500/10 text-blue-700",
+    model: "bg-violet-500/10 text-violet-700",
+    tool: "bg-orange-500/10 text-orange-700",
+    finalization: "bg-emerald-500/10 text-emerald-700",
+  }[key];
+}
+
+function timelineStats(run: ConversationRun | null, spans: TraceSpan[]) {
+  const starts = spans.map((span) => Date.parse(span.started_at)).filter(Number.isFinite);
+  const startMs = starts.length
+    ? Math.min(...starts)
+    : Date.parse(run?.started_at ?? "") || Date.now();
+  const endMs = spans.reduce(
+    (latest, span) => Math.max(latest, Date.parse(span.started_at) + span.duration_us / 1000),
     startMs,
-    totalMs: Math.max(endMs - startMs, 0),
-    slowest: [...events].sort((a, b) => b.duration_ms - a.duration_ms)[0],
-    errorCount: events.filter((event) => event.status === "error" || event.status === "failure")
-      .length,
-  };
+  );
+  return { startMs, totalMs: Math.max(run?.duration_ms ?? 0, endMs - startMs, 1) };
 }
 
-function traceModules(events: TraceEvent[]): TraceModule[] {
-  const groups = new Map<string, TraceEvent[]>();
-  for (const event of events) {
-    const key = moduleKey(event);
-    groups.set(key, [...(groups.get(key) ?? []), event]);
-  }
-  return [...groups.entries()]
-    .map(([key, rows]) => {
-      const sorted = [...rows].sort((a, b) => Date.parse(a.started_at) - Date.parse(b.started_at));
-      const starts = sorted
-        .map((event) => Date.parse(event.started_at))
-        .filter((value) => Number.isFinite(value));
-      const startMs = starts.length ? Math.min(...starts) : Date.now();
-      const endMs = sorted.reduce((max, event) => {
-        const started = Date.parse(event.started_at);
-        if (!Number.isFinite(started)) return max;
-        return Math.max(max, started + Math.max(event.duration_ms, 0));
-      }, startMs);
-      const durationMs = activeDuration(sorted);
-      return {
-        key,
-        label: moduleLabel(key),
-        category: key,
-        service: moduleService(sorted),
-        events: sorted,
-        startMs,
-        endMs,
-        durationMs,
-        spanMs: Math.max(endMs - startMs, 0),
-        errorCount: sorted.filter((event) => event.status === "error" || event.status === "failure")
-          .length,
-      };
-    })
-    .sort((a, b) => a.startMs - b.startMs);
+function countCategory(spans: TraceSpan[], category: string) {
+  return spans.filter((span) => moduleKey(span.category) === category).length;
 }
 
-function moduleKey(event: TraceEvent): string {
-  if (event.category === "sandbox") return "agent";
-  return event.category || event.service || "unknown";
+function statusDot(status: string) {
+  if (status === "error" || status === "interrupted") return "bg-destructive";
+  if (status === "cancelled") return "bg-amber-500";
+  if (status === "running") return "animate-pulse bg-primary";
+  return "bg-emerald-500";
 }
 
-function moduleLabel(key: string): string {
-  const labels: Record<string, string> = {
-    gateway: "Gateway",
-    agent: "Agent Runtime",
-    artifact: "Artifacts",
-    persistence: "Persistence",
-    audit: "Audit",
-  };
-  return labels[key] ?? key.replaceAll("_", " ");
+function humanize(value: string) {
+  return value.replaceAll(".", " · ").replaceAll("_", " ");
 }
 
-function moduleService(events: TraceEvent[]): string {
-  const services = [...new Set(events.map((event) => event.service).filter(Boolean))];
-  if (!services.length) return "-";
-  if (services.length <= 2) return services.join(" / ");
-  return `${services.slice(0, 2).join(" / ")} +${services.length - 2}`;
+function formatDurationUS(us: number) {
+  return formatDurationMS(us / 1000);
 }
 
-function activeDuration(events: TraceEvent[]): number {
-  const intervals = events
-    .map((event) => {
-      const started = Date.parse(event.started_at);
-      if (!Number.isFinite(started)) return null;
-      return {
-        start: started,
-        end: started + Math.max(event.duration_ms, 0),
-      };
-    })
-    .filter((value): value is { start: number; end: number } => value !== null)
-    .sort((a, b) => a.start - b.start);
-
-  let total = 0;
-  let currentStart: number | null = null;
-  let currentEnd: number | null = null;
-  for (const interval of intervals) {
-    if (currentStart === null || currentEnd === null) {
-      currentStart = interval.start;
-      currentEnd = interval.end;
-      continue;
-    }
-    if (interval.start <= currentEnd) {
-      currentEnd = Math.max(currentEnd, interval.end);
-      continue;
-    }
-    total += Math.max(currentEnd - currentStart, 0);
-    currentStart = interval.start;
-    currentEnd = interval.end;
-  }
-  if (currentStart !== null && currentEnd !== null) {
-    total += Math.max(currentEnd - currentStart, 0);
-  }
-  return total;
-}
-
-function eventBarStyle(event: TraceEvent, stats: ReturnType<typeof traceStats>) {
-  const started = Date.parse(event.started_at);
-  const total = Math.max(stats.totalMs, 1);
-  const offset = Number.isFinite(started) ? Math.max(started - stats.startMs, 0) : 0;
-  const leftPct = Math.min((offset / total) * 100, 98);
-  const widthPct = Math.max((event.duration_ms / total) * 100, 1.5);
-  return {
-    left: `${leftPct}%`,
-    width: `${Math.min(widthPct, 100 - leftPct)}%`,
-  };
-}
-
-function auditEventToTraceEvent(event: AuditEvent, index: number): TraceEvent {
-  return {
-    id: -event.id || -(index + 1),
-    trace_id: event.trace_id || "",
-    service: event.actor_type || "audit",
-    name: event.action || "audit.event",
-    category: "audit",
-    started_at: event.at,
-    duration_ms: metadataDuration(event.metadata_json),
-    status: event.result || "success",
-    metadata_json: {
-      ...(event.metadata_json ?? {}),
-      route: event.route,
-      resource_type: event.resource_type,
-      resource_id: event.resource_id,
-      status_code: event.status_code,
-      error_code: event.error_code,
-    },
-  };
-}
-
-function metadataDuration(metadata: Record<string, unknown> | undefined): number {
-  const raw = metadata?.duration_ms;
-  if (typeof raw === "number" && Number.isFinite(raw)) return Math.max(raw, 0);
-  if (typeof raw === "string") {
-    const parsed = Number.parseInt(raw, 10);
-    if (Number.isFinite(parsed)) return Math.max(parsed, 0);
-  }
-  return 0;
-}
-
-function categoryTone(category?: string): "blue" | "green" | "amber" {
-  if (category === "agent") return "blue";
-  if (category === "persistence") return "green";
-  if (category === "sandbox") return "amber";
-  return "amber";
-}
-
-function toneDot(tone: "blue" | "green" | "amber" | "red") {
-  if (tone === "blue") return "bg-sky-500";
-  if (tone === "green") return "bg-emerald-500";
-  if (tone === "red") return "bg-destructive";
-  return "bg-amber-500";
-}
-
-function toneBar(tone: "blue" | "green" | "amber" | "red") {
-  if (tone === "blue") return "bg-sky-500/80";
-  if (tone === "green") return "bg-emerald-500/80";
-  if (tone === "red") return "bg-destructive/80";
-  return "bg-amber-500/80";
-}
-
-function formatDuration(ms: number) {
-  if (!Number.isFinite(ms)) return "-";
-  if (ms < 1000) return `${Math.max(ms, 0).toFixed(0)} ms`;
+function formatDurationMS(ms: number) {
+  if (!Number.isFinite(ms) || ms <= 0) return "—";
+  if (ms < 1000) return `${Math.round(ms)} ms`;
   if (ms < 60_000) return `${(ms / 1000).toFixed(ms < 10_000 ? 2 : 1)} s`;
   return `${(ms / 60_000).toFixed(1)} min`;
 }
 
 function formatDate(value: string) {
-  if (!value) return "-";
   return new Intl.DateTimeFormat(undefined, {
-    month: "2-digit",
+    month: "short",
     day: "2-digit",
     hour: "2-digit",
     minute: "2-digit",
     second: "2-digit",
+    fractionalSecondDigits: 3,
   }).format(new Date(value));
 }
 
-function formatMetadata(value: Record<string, unknown> | undefined) {
-  if (!value || Object.keys(value).length === 0) return "-";
+function formatTime(value: string) {
+  return new Intl.DateTimeFormat(undefined, {
+    hour: "2-digit",
+    minute: "2-digit",
+    second: "2-digit",
+    fractionalSecondDigits: 3,
+  }).format(new Date(value));
+}
+
+function formatRunPosition(span: TraceSpan, timeline: ReturnType<typeof timelineStats>) {
+  const offset = Math.max(Date.parse(span.started_at) - timeline.startMs, 0);
+  return offset > 0 ? `+${formatDurationMS(offset)}` : "+0 ms";
+}
+
+function formatNumber(value: number) {
+  return new Intl.NumberFormat(undefined, {
+    notation: value >= 10_000 ? "compact" : "standard",
+  }).format(value);
+}
+
+function formatAttribute(value: unknown) {
+  if (typeof value === "string" || typeof value === "number" || typeof value === "boolean")
+    return String(value);
   return JSON.stringify(value);
 }
 
-async function errorText(res: Response) {
+async function errorText(response: Response) {
   try {
-    const body = (await res.json()) as { error?: string | { message?: string } };
+    const body = (await response.json()) as { error?: string | { message?: string } };
     if (typeof body.error === "string") return body.error;
     if (body.error?.message) return body.error.message;
   } catch {
-    // fall through
+    // Fall through to the status line.
   }
-  return `${res.status} ${res.statusText}`;
+  return `${response.status} ${response.statusText}`;
 }

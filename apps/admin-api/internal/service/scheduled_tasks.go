@@ -166,7 +166,6 @@ func (a *Admin) UpdateScheduledTask(ctx context.Context, id string, in Scheduled
 	if err != nil {
 		return ScheduledTaskDetail{}, err
 	}
-	a.audit(ctx, in.Actor, "scheduled_task.update", task.ID, "status="+task.Status)
 	return a.scheduledTaskDetail(ctx, task, outAtts), nil
 }
 
@@ -385,7 +384,6 @@ func (a *Admin) DeleteScheduledTask(ctx context.Context, id, actor string) error
 	if err := a.store.DeleteScheduledTask(ctx, id); err != nil {
 		return err
 	}
-	a.audit(ctx, actor, "scheduled_task.delete", id, "")
 	return nil
 }
 
@@ -427,7 +425,6 @@ func (a *Admin) SetScheduledTaskStatus(ctx context.Context, id, status, actor st
 	if err != nil {
 		return ScheduledTaskDetail{}, err
 	}
-	a.audit(ctx, actor, "scheduled_task."+status, id, "")
 	return a.scheduledTaskDetail(ctx, task, atts), nil
 }
 
@@ -503,7 +500,6 @@ func (a *Admin) EnqueueScheduledTaskNow(ctx context.Context, id, actor string) (
 	if err != nil {
 		return ScheduledTaskDetail{}, err
 	}
-	a.audit(ctx, actor, "scheduled_task.run_now", id, "")
 	return a.scheduledTaskDetail(ctx, task, atts), nil
 }
 

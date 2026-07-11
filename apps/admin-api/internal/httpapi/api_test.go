@@ -1072,7 +1072,7 @@ func TestSandboxRuntimeRoutesNotConfigured(t *testing.T) {
 	}
 }
 
-func TestAuditTrail(t *testing.T) {
+func TestAdministrativeWritesDoNotCreateConversationAudit(t *testing.T) {
 	api := newTestAPI("k")
 	r := api.Router()
 
@@ -1080,24 +1080,20 @@ func TestAuditTrail(t *testing.T) {
 	_ = do(t, r, http.MethodPost, "/admin/tokens", "k", map[string]any{"user_id": "bob"})
 	_ = do(t, r, http.MethodPut, "/admin/quotas", "k", map[string]any{"scope": "tenant", "subject": "acme", "limit": 5})
 
-	rec := do(t, r, http.MethodGet, "/admin/audit", "k", nil)
+	rec := do(t, r, http.MethodGet, "/admin/audit-events", "k", nil)
 	if rec.Code != http.StatusOK {
 		t.Fatalf("audit: want 200, got %d", rec.Code)
 	}
 	var al struct {
-		Audit []store.AuditEntry `json:"audit"`
+		Events []store.AuditEvent `json:"events"`
 	}
 	_ = json.Unmarshal(rec.Body.Bytes(), &al)
-	if len(al.Audit) < 2 {
-		t.Fatalf("audit: want >=2 entries, got %d", len(al.Audit))
-	}
-	// newest first: most recent action should be the quota.set
-	if al.Audit[0].Action != "quota.set" {
-		t.Fatalf("audit order: want newest quota.set first, got %q", al.Audit[0].Action)
+	if len(al.Events) != 0 {
+		t.Fatalf("admin operations must not create conversation audit entries: %+v", al.Events)
 	}
 }
 
-func TestAuditEventsIncludeHTTPReads(t *testing.T) {
+func TestAuditEventsExcludeHTTPReads(t *testing.T) {
 	api := newTestAPI("k")
 	r := api.Router()
 
@@ -1116,12 +1112,28 @@ func TestAuditEventsIncludeHTTPReads(t *testing.T) {
 	if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
 		t.Fatalf("decode audit events: %v", err)
 	}
-	if len(body.Events) == 0 {
-		t.Fatal("expected at least one audit event")
+	if len(body.Events) != 0 {
+		t.Fatalf("HTTP reads must not create conversation audit entries: %+v", body.Events)
 	}
-	got := body.Events[0]
-	if got.Action != "admin.tokens.list" || got.Result != "success" || got.HTTPMethod != http.MethodGet {
-		t.Fatalf("unexpected audit event: %+v", got)
+}
+
+func TestConversationRunRoutes(t *testing.T) {
+	mem := store.NewMemory()
+	now := fixedClock()
+	err := mem.UpsertConversationRun(context.Background(), store.ConversationRun{
+		TraceID: "0123456789abcdef0123456789abcdef", RootSpanID: "0123456789abcdef",
+		ConversationID: "c1", UserID: "u1", UserEmail: "u1@example.com",
+		Source: "interactive", Status: "success", StartedAt: now,
+		LastActivityAt: now, DetailStatus: "available",
+	})
+	if err != nil {
+		t.Fatalf("seed conversation run: %v", err)
+	}
+	svc := service.New(mem, nil, fixedClock)
+	r := New(svc, "k").Router()
+	rec := do(t, r, http.MethodGet, "/admin/conversation-runs", "k", nil)
+	if rec.Code != http.StatusOK || !strings.Contains(rec.Body.String(), "0123456789abcdef0123456789abcdef") {
+		t.Fatalf("conversation runs: got %d %s", rec.Code, rec.Body.String())
 	}
 }
 

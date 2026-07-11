@@ -15,7 +15,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"net"
 	"net/http"
 	"net/url"
 	"strconv"
@@ -25,7 +24,6 @@ import (
 	"github.com/google/uuid"
 
 	"github.com/cocola-project/cocola/apps/gateway/internal/agent"
-	auditstore "github.com/cocola-project/cocola/apps/gateway/internal/audit"
 	"github.com/cocola-project/cocola/apps/gateway/internal/auth"
 	"github.com/cocola-project/cocola/apps/gateway/internal/convo"
 	"github.com/cocola-project/cocola/apps/gateway/internal/objstore"
@@ -40,6 +38,66 @@ import (
 // configured: files at or below it are pushed inline into the sandbox, larger
 // ones are delivered key-only and pulled by agent-runtime (ADR-0017 P1a).
 const DefaultInlineMaxBytes int64 = 16 * 1024 * 1024
+
+type conversationRootSpanKey struct{}
+type conversationStageSpansKey struct{}
+
+type conversationStageSpans struct {
+	request      string
+	environment  string
+	agent        string
+	agentInit    string
+	finalization string
+}
+
+var traceAttributeAllowlist = map[string]bool{
+	"accepted_count": true, "action": true, "artifact_count": true,
+	"attachment_count": true, "chat_type": true, "content_length": true,
+	"conversation_id": true, "error_code": true, "error_type": true,
+	"event_count": true, "event_kind": true, "inline_count": true,
+	"mcp_count": true, "mcp_names": true, "model_alias": true,
+	"object_count": true, "part_count": true, "prompt_count": true,
+	"prompt_ids": true, "prompt_versions": true, "restored": true,
+	"resumed": true, "reused": true, "sandbox_id": true, "session_id": true,
+	"skill_count": true, "target": true, "text_chunk_count": true,
+	"thinking_chunk_count": true, "tool_name": true, "tool_result_count": true,
+	"tool_type": true, "tool_use_count": true,
+	"session_auth_ms": true, "runtime_token_ms": true, "decode_ms": true,
+	"persist_user_ms": true, "first_event_ms": true, "first_reasoning_ms": true,
+	"first_token_ms": true, "first_tool_ms": true,
+}
+
+func traceParentForCategory(ctx context.Context, category string) string {
+	rootSpanID, _ := ctx.Value(conversationRootSpanKey{}).(string)
+	stages, _ := ctx.Value(conversationStageSpansKey{}).(conversationStageSpans)
+	switch strings.TrimSpace(category) {
+	case "request", "gateway":
+		return stages.request
+	case "sandbox", "environment":
+		return stages.environment
+	case "agent_init":
+		return stages.agentInit
+	case "agent", "model", "tool":
+		return stages.agent
+	case "persistence", "artifact", "finalization":
+		return stages.finalization
+	default:
+		return rootSpanID
+	}
+}
+
+func safeTraceAttributes(attributes map[string]any) map[string]any {
+	if len(attributes) == 0 {
+		return map[string]any{}
+	}
+	out := make(map[string]any)
+	for key, value := range attributes {
+		if traceAttributeAllowlist[key] {
+			out[key] = value
+		}
+	}
+	return out
+}
 
 // API wires the BFF dependencies. The agent.Streamer is an interface so tests
 // can inject a fake without a real agent-runtime.
@@ -58,7 +116,6 @@ type API struct {
 	// nil => persistence is dark: chat still streams, but nothing is stored and
 	// the list/messages endpoints return empty. Enabled by COCOLA_PG_DSN in main.
 	convo convo.Store
-	audit auditstore.Store
 	trace traceevents.Store
 	// sandboxTokenIssuer mints a fresh per-user cocola token per chat turn from
 	// the verified identity; agent-runtime injects it into the sandbox as
@@ -104,11 +161,7 @@ func (a *API) WithObjStore(store objstore.Store, inlineMaxBytes int64) *API {
 // persistence dark. See docs/plan/conversation-persistence-history-rendering.md.
 func (a *API) WithConvoStore(store convo.Store) *API { a.convo = store; return a }
 
-// WithAuditStore enables best-effort structured audit events. Passing nil keeps
-// auditing dark, which is the zero-Postgres dev mode.
-func (a *API) WithAuditStore(store auditstore.Store) *API { a.audit = store; return a }
-
-// WithTraceStore enables best-effort in-product trace timing events.
+// WithTraceStore enables conversation audit summaries and detailed traces.
 func (a *API) WithTraceStore(store traceevents.Store) *API { a.trace = store; return a }
 
 // WithAgentReleaser injects the best-effort session releaser used by
@@ -164,15 +217,15 @@ func (a *API) Handler() http.Handler {
 	// Conversation history (route A). Both are auth-guarded so a caller only ever
 	// sees their own conversations (ownership from the verified identity).
 	mux.Handle("GET /v1/conversations", a.instrument("GET /v1/conversations",
-		a.verifier.Middleware(writeErr)(a.auditHTTP("conversation.list", "conversation", "", http.HandlerFunc(a.listConversations)))))
+		a.verifier.Middleware(writeErr)(http.HandlerFunc(a.listConversations))))
 	mux.Handle("PATCH /v1/conversations/{id}", a.instrument("PATCH /v1/conversations/{id}",
-		a.verifier.Middleware(writeErr)(a.auditHTTP("conversation.rename", "conversation", "id", http.HandlerFunc(a.renameConversation)))))
+		a.verifier.Middleware(writeErr)(http.HandlerFunc(a.renameConversation))))
 	mux.Handle("DELETE /v1/conversations/{id}", a.instrument("DELETE /v1/conversations/{id}",
-		a.verifier.Middleware(writeErr)(a.auditHTTP("conversation.delete", "conversation", "id", http.HandlerFunc(a.deleteConversation)))))
+		a.verifier.Middleware(writeErr)(http.HandlerFunc(a.deleteConversation))))
 	mux.Handle("GET /v1/conversations/{id}/messages", a.instrument("GET /v1/conversations/{id}/messages",
-		a.verifier.Middleware(writeErr)(a.auditHTTP("conversation.messages", "conversation", "id", http.HandlerFunc(a.conversationMessages)))))
+		a.verifier.Middleware(writeErr)(http.HandlerFunc(a.conversationMessages))))
 	mux.Handle("GET /v1/conversations/{id}/artifacts/{artifact_id}", a.instrument("GET /v1/conversations/{id}/artifacts/{artifact_id}",
-		a.verifier.Middleware(writeErr)(a.auditHTTP("artifact.download", "artifact", "artifact_id", http.HandlerFunc(a.downloadArtifact)))))
+		a.verifier.Middleware(writeErr)(http.HandlerFunc(a.downloadArtifact))))
 	// Tracing: wrap the whole mux so an inbound W3C traceparent is extracted and
 	// a server span is started before auth/handlers run; the span context then
 	// flows into the agent gRPC call (client stats handler) for an end-to-end
@@ -184,122 +237,69 @@ func (a *API) health(w http.ResponseWriter, _ *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})
 }
 
-type auditStatusWriter struct {
-	http.ResponseWriter
-	status int
-}
-
-func (w *auditStatusWriter) WriteHeader(code int) {
-	w.status = code
-	w.ResponseWriter.WriteHeader(code)
-}
-
-func (w *auditStatusWriter) Write(b []byte) (int, error) {
-	if w.status == 0 {
-		w.status = http.StatusOK
-	}
-	return w.ResponseWriter.Write(b)
-}
-
-func (w *auditStatusWriter) Flush() {
-	if f, ok := w.ResponseWriter.(http.Flusher); ok {
-		f.Flush()
-	}
-}
-
-func (a *API) auditHTTP(action, resourceType, resourcePathValue string, next http.Handler) http.Handler {
-	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		start := time.Now()
-		traceID := tracing.TraceID(r.Context())
-		sw := &auditStatusWriter{ResponseWriter: w}
-		next.ServeHTTP(sw, r)
-		status := sw.status
-		if status == 0 {
-			status = http.StatusOK
-		}
-		resourceID := ""
-		if resourcePathValue != "" {
-			resourceID = r.PathValue(resourcePathValue)
-		}
-		a.appendAudit(r.Context(), auditstore.Event{
-			At:           time.Now().UTC(),
-			ActorType:    "user",
-			Action:       action,
-			ResourceType: resourceType,
-			ResourceID:   resourceID,
-			Result:       auditResult(status),
-			HTTPMethod:   r.Method,
-			Route:        r.Pattern,
-			StatusCode:   status,
-			RequestID:    requestID(r),
-			TraceID:      traceID,
-			ClientIP:     clientIP(r),
-			UserAgent:    r.UserAgent(),
-			Metadata:     map[string]any{"duration_ms": time.Since(start).Milliseconds()},
-		})
-		a.recordTrace(r.Context(), traceID, "http.request", "gateway", start, auditResult(status), map[string]any{
-			"action":        action,
-			"resource_type": resourceType,
-			"resource_id":   resourceID,
-			"method":        r.Method,
-			"route":         r.Pattern,
-			"status_code":   status,
-		})
-	})
-}
-
-func (a *API) appendAudit(ctx context.Context, e auditstore.Event) {
-	if a.audit == nil {
-		return
-	}
-	if id, ok := auth.IdentityOfContext(ctx); ok {
-		e.ActorUserID = id.UserID
-		e.ActorEmail = id.UserID
-		if e.Metadata == nil {
-			e.Metadata = map[string]any{}
-		}
-		if id.TenantID != "" {
-			e.Metadata["tenant_id"] = id.TenantID
-		}
-	}
-	if e.TraceID == "" {
-		e.TraceID = tracing.TraceID(ctx)
-	}
-	if err := a.audit.AppendAuditEvent(context.Background(), e); err != nil {
-		if a.metrics != nil {
-			a.metrics.IncAuditWriteError()
-		}
-		a.log.Warn("audit write failed: " + err.Error())
-	}
-}
-
 func (a *API) recordTrace(ctx context.Context, traceID, name, category string, startedAt time.Time, status string, metadata map[string]any) {
-	if a.trace == nil || traceID == "" {
+	parentSpanID := traceParentForCategory(ctx, category)
+	if a.trace == nil || traceID == "" || parentSpanID == "" {
 		return
 	}
-	if status == "" {
-		status = "ok"
+	if status == "" || status == "ok" {
+		status = "success"
 	}
-	event := traceevents.Event{
-		TraceID:    traceID,
-		Service:    "gateway",
-		Name:       name,
-		Category:   category,
-		StartedAt:  startedAt.UTC(),
-		DurationMS: time.Since(startedAt).Milliseconds(),
-		Status:     status,
-		Metadata:   metadata,
+	span := traceevents.Span{
+		TraceID:       traceID,
+		SpanID:        traceevents.NewSpanID(),
+		ParentSpanID:  parentSpanID,
+		SchemaVersion: 1,
+		Service:       "gateway",
+		Name:          name,
+		Category:      category,
+		StartedAt:     startedAt.UTC(),
+		DurationUS:    time.Since(startedAt).Microseconds(),
+		Status:        status,
+		Attributes:    safeTraceAttributes(metadata),
 	}
-	a.appendTraceEvent(ctx, event)
+	a.upsertTraceSpan(ctx, span)
 }
 
-func (a *API) appendTraceEvent(ctx context.Context, event traceevents.Event) {
-	if a.trace == nil || event.TraceID == "" || event.Name == "" {
+func (a *API) upsertTraceSpan(ctx context.Context, span traceevents.Span) {
+	if a.trace == nil || span.TraceID == "" || span.Name == "" {
 		return
 	}
-	if err := a.trace.AppendTraceEvent(context.Background(), event); err != nil {
+	if err := a.trace.UpsertConversationTraceSpan(context.Background(), span); err != nil {
 		a.log.Warn("trace event write failed: " + err.Error())
 	}
+}
+
+func traceEventStartedAt(data map[string]string, fallback time.Time) time.Time {
+	raw := strings.TrimSpace(data["started_at_unix_ms"])
+	if parsed, err := strconv.ParseInt(raw, 10, 64); err == nil && parsed > 0 {
+		return time.UnixMilli(parsed)
+	}
+	return fallback
+}
+
+func traceEventDurationUS(data map[string]string) int64 {
+	if raw := strings.TrimSpace(data["duration_us"]); raw != "" {
+		if parsed, err := strconv.ParseInt(raw, 10, 64); err == nil && parsed > 0 {
+			return parsed
+		}
+	}
+	if raw := strings.TrimSpace(data["duration_ms"]); raw != "" {
+		if parsed, err := strconv.ParseInt(raw, 10, 64); err == nil && parsed > 0 {
+			return parsed * 1000
+		}
+	}
+	return 0
+}
+
+func environmentPreparationComplete(data map[string]string) bool {
+	var snapshot struct {
+		State string `json:"state"`
+	}
+	if err := json.Unmarshal([]byte(data["snapshot"]), &snapshot); err != nil {
+		return false
+	}
+	return snapshot.State == "ready" || snapshot.State == "degraded"
 }
 
 func (a *API) recordAgentTrace(ctx context.Context, traceID string, data map[string]string) {
@@ -310,18 +310,8 @@ func (a *API) recordAgentTrace(ctx context.Context, traceID string, data map[str
 	if name == "" {
 		return
 	}
-	durationMS := int64(0)
-	if raw := strings.TrimSpace(data["duration_ms"]); raw != "" {
-		if parsed, err := strconv.ParseInt(raw, 10, 64); err == nil && parsed > 0 {
-			durationMS = parsed
-		}
-	}
-	startedAt := time.Now().Add(-time.Duration(durationMS) * time.Millisecond)
-	if raw := strings.TrimSpace(data["started_at_unix_ms"]); raw != "" {
-		if parsed, err := strconv.ParseInt(raw, 10, 64); err == nil && parsed > 0 {
-			startedAt = time.UnixMilli(parsed)
-		}
-	}
+	durationUS := traceEventDurationUS(data)
+	startedAt := traceEventStartedAt(data, time.Now().Add(-time.Duration(durationUS)*time.Microsecond))
 	service := strings.TrimSpace(data["service"])
 	if service == "" {
 		service = "agent-runtime"
@@ -331,59 +321,39 @@ func (a *API) recordAgentTrace(ctx context.Context, traceID string, data map[str
 		category = service
 	}
 	status := strings.TrimSpace(data["status"])
-	if status == "" {
-		status = "ok"
+	if status == "" || status == "ok" {
+		status = "success"
 	}
 	metadata := make(map[string]any, len(data))
 	for k, v := range data {
 		switch k {
-		case "name", "category", "service", "started_at_unix_ms", "duration_ms", "status":
+		case "name", "category", "service", "started_at_unix_ms", "duration_ms", "duration_us", "status", "span_id", "parent_span_id", "schema_version":
 			continue
 		default:
 			metadata[k] = v
 		}
 	}
-	a.appendTraceEvent(ctx, traceevents.Event{
-		TraceID:    traceID,
-		Service:    service,
-		Name:       name,
-		Category:   category,
-		StartedAt:  startedAt.UTC(),
-		DurationMS: durationMS,
-		Status:     status,
-		Metadata:   metadata,
+	spanID := strings.TrimSpace(data["span_id"])
+	if spanID == "" {
+		spanID = traceevents.NewSpanID()
+	}
+	parentSpanID := strings.TrimSpace(data["parent_span_id"])
+	if parentSpanID == "" {
+		parentSpanID = traceParentForCategory(ctx, category)
+	}
+	a.upsertTraceSpan(ctx, traceevents.Span{
+		TraceID:       traceID,
+		SpanID:        spanID,
+		ParentSpanID:  parentSpanID,
+		SchemaVersion: 1,
+		Service:       service,
+		Name:          name,
+		Category:      category,
+		StartedAt:     startedAt.UTC(),
+		DurationUS:    durationUS,
+		Status:        status,
+		Attributes:    safeTraceAttributes(metadata),
 	})
-}
-
-func auditResult(status int) string {
-	if status == http.StatusUnauthorized || status == http.StatusForbidden {
-		return "denied"
-	}
-	if status >= 400 {
-		return "failure"
-	}
-	return "success"
-}
-
-func requestID(r *http.Request) string {
-	if v := strings.TrimSpace(r.Header.Get("x-request-id")); v != "" {
-		return v
-	}
-	return strings.TrimSpace(r.Header.Get("x-cocola-request-id"))
-}
-
-func clientIP(r *http.Request) string {
-	if v := strings.TrimSpace(r.Header.Get("x-forwarded-for")); v != "" {
-		if i := strings.IndexByte(v, ','); i >= 0 {
-			return strings.TrimSpace(v[:i])
-		}
-		return v
-	}
-	host, _, err := net.SplitHostPort(r.RemoteAddr)
-	if err != nil {
-		return r.RemoteAddr
-	}
-	return host
 }
 
 // chatRequest is the client-supplied body. user_id/session scoping comes from
@@ -417,9 +387,98 @@ type attachmentDTO struct {
 	Mime       string `json:"mime"`
 }
 
+func (a *API) startConversationRun(ctx context.Context, id auth.Identity, req chatRequest, traceID, rootSpanID string, startedAt time.Time) traceevents.Run {
+	source := "interactive"
+	if chatTypeForConversation(req) == "scheduled_task" {
+		source = "scheduled_task"
+	}
+	run := traceevents.Run{
+		TraceID:           traceID,
+		RootSpanID:        rootSpanID,
+		ConversationID:    strings.TrimSpace(req.SessionID),
+		ConversationTitle: titleForConversation(req),
+		UserID:            id.UserID,
+		UserEmail:         id.UserID,
+		Source:            source,
+		ModelAlias:        strings.TrimSpace(req.ModelAlias),
+		Status:            "running",
+		StartedAt:         startedAt.UTC(),
+		LastActivityAt:    time.Now().UTC(),
+		DetailStatus:      "available",
+	}
+	if a.trace == nil {
+		return run
+	}
+	if err := a.trace.UpsertConversationRun(context.Background(), run); err != nil {
+		a.log.Warn("conversation run start failed: " + err.Error())
+		return run
+	}
+	a.upsertTraceSpan(ctx, traceevents.Span{
+		TraceID: traceID, SpanID: rootSpanID, SchemaVersion: 1,
+		Service: "gateway", Name: "conversation.run", Category: "request",
+		StartedAt: startedAt.UTC(), Status: "running",
+		Attributes: map[string]any{
+			"conversation_id": run.ConversationID,
+			"chat_type":       source,
+			"model_alias":     run.ModelAlias,
+		},
+	})
+	return run
+}
+
+func (a *API) finishConversationRun(ctx context.Context, run traceevents.Run, status, errorCode string, ttftMS int64, toolCalls int64) {
+	if a.trace == nil || run.TraceID == "" {
+		return
+	}
+	now := time.Now().UTC()
+	run.Status = status
+	run.CompletedAt = now
+	run.LastActivityAt = now
+	run.DurationMS = now.Sub(run.StartedAt).Milliseconds()
+	run.TTFTMS = ttftMS
+	run.ToolCallCount = toolCalls
+	run.ErrorCode = errorCode
+	if err := a.trace.UpsertConversationRun(context.Background(), run); err != nil {
+		a.log.Warn("conversation run finish failed: " + err.Error())
+	}
+	a.upsertTraceSpan(ctx, traceevents.Span{
+		TraceID: run.TraceID, SpanID: run.RootSpanID, SchemaVersion: 1,
+		Service: "gateway", Name: "conversation.run", Category: "request",
+		StartedAt: run.StartedAt, DurationUS: now.Sub(run.StartedAt).Microseconds(), Status: status,
+		Attributes: safeTraceAttributes(map[string]any{
+			"conversation_id": run.ConversationID,
+			"chat_type":       run.Source,
+			"model_alias":     run.ModelAlias,
+			"tool_use_count":  toolCalls,
+			"error_code":      errorCode,
+		}),
+	})
+}
+
+func chatStartedAt(r *http.Request) time.Time {
+	raw, err := strconv.ParseInt(strings.TrimSpace(r.Header.Get("x-cocola-chat-started-at-ms")), 10, 64)
+	if err != nil || raw <= 0 {
+		return time.Now()
+	}
+	started := time.UnixMilli(raw)
+	age := time.Since(started)
+	if age < 0 || age > time.Minute {
+		return time.Now()
+	}
+	return started
+}
+
+func boundedTimingHeader(r *http.Request, name string) time.Duration {
+	raw, err := strconv.ParseInt(strings.TrimSpace(r.Header.Get(name)), 10, 64)
+	if err != nil || raw < 0 || raw > 60_000 {
+		return 0
+	}
+	return time.Duration(raw) * time.Millisecond
+}
+
 // chat is the SSE entrypoint: verify -> open agent stream -> flush events.
 func (a *API) chat(w http.ResponseWriter, r *http.Request) {
-	start := time.Now()
+	start := chatStartedAt(r)
 	id, ok := auth.IdentityOf(r)
 	if !ok {
 		writeErr(w, http.StatusUnauthorized, "UNAUTHENTICATED", "missing identity")
@@ -432,32 +491,38 @@ func (a *API) chat(w http.ResponseWriter, r *http.Request) {
 	dec := json.NewDecoder(r.Body)
 	dec.DisallowUnknownFields()
 	if err := dec.Decode(&req); err != nil {
-		a.recordTrace(r.Context(), traceID, "request.decode", "gateway", decodeStart, "error",
-			map[string]any{"error_code": "INVALID_ARGUMENT"})
-		a.auditChat(r, traceID, req, http.StatusBadRequest, "failure", "INVALID_ARGUMENT", 0, start)
 		writeErr(w, http.StatusBadRequest, "INVALID_ARGUMENT", "malformed JSON body")
 		return
 	}
-	a.recordTrace(r.Context(), traceID, "request.decode", "gateway", decodeStart, "ok", nil)
 	if strings.TrimSpace(req.Prompt) == "" {
-		a.recordTrace(r.Context(), traceID, "request.validate", "gateway", time.Now(), "error",
-			map[string]any{"error_code": "INVALID_ARGUMENT"})
-		a.auditChat(r, traceID, req, http.StatusBadRequest, "failure", "INVALID_ARGUMENT", 0, start)
 		writeErr(w, http.StatusBadRequest, "INVALID_ARGUMENT", "prompt is required")
 		return
 	}
-	a.recordTrace(r.Context(), traceID, "request.validate", "gateway", time.Now(), "ok", map[string]any{
-		"conversation_id":  strings.TrimSpace(req.SessionID),
-		"chat_type":        chatTypeForConversation(req),
-		"model_alias":      strings.TrimSpace(req.ModelAlias),
-		"attachment_count": len(req.Attachments),
-	})
+	decodeDuration := time.Since(decodeStart)
+	rootSpanID := traceevents.NewSpanID()
+	stages := conversationStageSpans{
+		request:      traceevents.NewSpanID(),
+		environment:  traceevents.NewSpanID(),
+		agent:        traceevents.NewSpanID(),
+		agentInit:    traceevents.NewSpanID(),
+		finalization: traceevents.NewSpanID(),
+	}
+	r = r.WithContext(context.WithValue(r.Context(), conversationRootSpanKey{}, rootSpanID))
+	r = r.WithContext(context.WithValue(r.Context(), conversationStageSpansKey{}, stages))
+	run := a.startConversationRun(r.Context(), id, req, traceID, rootSpanID, start)
+	authDuration := boundedTimingHeader(r, "x-cocola-session-auth-ms")
+	tokenDuration := boundedTimingHeader(r, "x-cocola-runtime-token-ms")
 
 	flusher, ok := w.(http.Flusher)
 	if !ok {
-		a.recordTrace(r.Context(), traceID, "sse.prepare", "gateway", time.Now(), "error",
-			map[string]any{"error_code": "INTERNAL"})
-		a.auditChat(r, traceID, req, http.StatusInternalServerError, "failure", "INTERNAL", 0, start)
+		now := time.Now()
+		a.upsertTraceSpan(r.Context(), traceevents.Span{
+			TraceID: traceID, SpanID: stages.request, ParentSpanID: rootSpanID, SchemaVersion: 1,
+			Service: "gateway", Name: "request.prepare", Category: "request",
+			StartedAt: start, DurationUS: now.Sub(start).Microseconds(), Status: "error",
+			Attributes: safeTraceAttributes(map[string]any{"error_code": "INTERNAL"}),
+		})
+		a.finishConversationRun(r.Context(), run, "error", "INTERNAL", 0, 0)
 		writeErr(w, http.StatusInternalServerError, "INTERNAL", "streaming unsupported")
 		return
 	}
@@ -471,9 +536,7 @@ func (a *API) chat(w http.ResponseWriter, r *http.Request) {
 	h.Set("x-accel-buffering", "no") // disable proxy buffering (nginx)
 	w.WriteHeader(http.StatusOK)
 	flusher.Flush()
-	a.recordTrace(r.Context(), traceID, "sse.prepare", "gateway", time.Now(), "ok", nil)
 
-	attachmentsStart := time.Now()
 	atts := make([]agent.Attachment, 0, len(req.Attachments))
 	inlineCount := 0
 	objectCount := 0
@@ -513,13 +576,6 @@ func (a *API) chat(w http.ResponseWriter, r *http.Request) {
 		}
 		atts = append(atts, att)
 	}
-	a.recordTrace(r.Context(), traceID, "attachments.prepare", "gateway", attachmentsStart, "ok", map[string]any{
-		"attachment_count": len(req.Attachments),
-		"accepted_count":   len(atts),
-		"inline_count":     inlineCount,
-		"object_count":     objectCount,
-	})
-
 	q := agent.Query{
 		UserID:           id.UserID,
 		SessionID:        req.SessionID,
@@ -527,6 +583,8 @@ func (a *API) chat(w http.ResponseWriter, r *http.Request) {
 		SandboxID:        req.SandboxID,
 		MaxTurns:         req.MaxTurns,
 		ModelAlias:       strings.TrimSpace(req.ModelAlias),
+		TraceID:          traceID,
+		ParentSpanID:     stages.agent,
 		SandboxAuthToken: a.mintSandboxToken(id),
 		Attachments:      atts,
 	}
@@ -536,13 +594,26 @@ func (a *API) chat(w http.ResponseWriter, r *http.Request) {
 	// never break the SSE stream the user is watching. Requires a session_id to
 	// key the conversation; if empty (dev/no-frontend), we skip persistence.
 	persist := a.convo != nil && req.SessionID != ""
+	var persistUserDuration time.Duration
 	if persist {
 		persistUserStart := time.Now()
 		a.persistUserTurn(r.Context(), id, req)
-		a.recordTrace(r.Context(), traceID, "conversation.persist_user", "persistence", persistUserStart, "ok", map[string]any{
-			"conversation_id": strings.TrimSpace(req.SessionID),
-		})
+		persistUserDuration = time.Since(persistUserStart)
 	}
+	requestEnd := time.Now()
+	a.upsertTraceSpan(r.Context(), traceevents.Span{
+		TraceID: traceID, SpanID: stages.request, ParentSpanID: rootSpanID, SchemaVersion: 1,
+		Service: "gateway", Name: "request.prepare", Category: "request",
+		StartedAt: start, DurationUS: requestEnd.Sub(start).Microseconds(), Status: "success",
+		Attributes: safeTraceAttributes(map[string]any{
+			"conversation_id": strings.TrimSpace(req.SessionID),
+			"chat_type":       chatTypeForConversation(req), "model_alias": strings.TrimSpace(req.ModelAlias),
+			"attachment_count": len(req.Attachments), "accepted_count": len(atts),
+			"inline_count": inlineCount, "object_count": objectCount,
+			"session_auth_ms": authDuration.Milliseconds(), "runtime_token_ms": tokenDuration.Milliseconds(),
+			"decode_ms": decodeDuration.Milliseconds(), "persist_user_ms": persistUserDuration.Milliseconds(),
+		}),
+	})
 
 	// reducer mirrors the frontend's reducePart so the stored assistant message
 	// has the exact parts the browser renders. Only populated when persisting.
@@ -560,53 +631,147 @@ func (a *API) chat(w http.ResponseWriter, r *http.Request) {
 	toolResultCount := 0
 	firstEventRecorded := false
 	firstTextRecorded := false
+	firstReasoningRecorded := false
 	firstToolUseRecorded := false
-	sandboxReadyRecorded := false
+	var ttftMS int64
+	var firstEventMS int64
+	var firstReasoningMS int64
+	var firstToolMS int64
+	environmentEnd := streamStart
+	var environmentReadyAt time.Time
+	var firstEnvironmentOperationStart time.Time
+	var lastEnvironmentOperationEnd time.Time
+	var firstAgentInitOperationStart time.Time
+	var lastAgentInitOperationEnd time.Time
+	var agentInitializationStatusAt time.Time
+	var firstAgentEventAt time.Time
+	type openToolSpan struct {
+		spanID string
+		name   string
+		start  time.Time
+	}
+	openTools := make(map[string]openToolSpan)
+	// Persist phase parents before cross-service children can arrive. These are
+	// updated with their final timing/status after the stream completes.
+	a.upsertTraceSpan(r.Context(), traceevents.Span{
+		TraceID: traceID, SpanID: stages.environment, ParentSpanID: rootSpanID, SchemaVersion: 1,
+		Service: "agent-runtime", Name: "environment.prepare", Category: "environment",
+		StartedAt: streamStart, Status: "running",
+	})
+	a.upsertTraceSpan(r.Context(), traceevents.Span{
+		TraceID: traceID, SpanID: stages.agent, ParentSpanID: rootSpanID, SchemaVersion: 1,
+		Service: "agent-runtime", Name: "agent.execute", Category: "agent",
+		StartedAt: streamStart, Status: "running",
+	})
+	a.upsertTraceSpan(r.Context(), traceevents.Span{
+		TraceID: traceID, SpanID: stages.agentInit, ParentSpanID: stages.agent, SchemaVersion: 1,
+		Service: "agent-runtime", Name: "agent.initialize", Category: "agent",
+		StartedAt: streamStart, Status: "running",
+	})
 	err := a.streamer.Stream(r.Context(), q, func(ev agent.Event) error {
 		if ev.Kind == "trace" {
+			category := strings.TrimSpace(ev.Data["category"])
+			durationUS := traceEventDurationUS(ev.Data)
+			observedAt := time.Now()
+			operationStart := traceEventStartedAt(
+				ev.Data,
+				observedAt.Add(-time.Duration(durationUS)*time.Microsecond),
+			)
+			operationEnd := operationStart.Add(time.Duration(durationUS) * time.Microsecond)
+			if category == "sandbox" || category == "environment" {
+				environmentEnd = observedAt
+				if firstEnvironmentOperationStart.IsZero() || operationStart.Before(firstEnvironmentOperationStart) {
+					firstEnvironmentOperationStart = operationStart
+				}
+				if operationEnd.After(lastEnvironmentOperationEnd) {
+					lastEnvironmentOperationEnd = operationEnd
+				}
+			}
+			if category == "agent_init" {
+				if firstAgentInitOperationStart.IsZero() || operationStart.Before(firstAgentInitOperationStart) {
+					firstAgentInitOperationStart = operationStart
+				}
+				if operationEnd.After(lastAgentInitOperationEnd) {
+					lastAgentInitOperationEnd = operationEnd
+				}
+			}
 			a.recordAgentTrace(r.Context(), traceID, ev.Data)
 			return nil
 		}
 		streamEventCount++
-		if !firstEventRecorded {
+		isEnvironmentEvent := ev.Kind == "sandbox" || ev.Kind == "environment_prepare" || ev.Kind == "environment_status"
+		if isEnvironmentEvent {
+			observedAt := time.Now()
+			switch ev.Kind {
+			case "sandbox":
+				environmentEnd = observedAt
+			case "environment_prepare":
+				if environmentPreparationComplete(ev.Data) {
+					environmentReadyAt = observedAt
+					environmentEnd = observedAt
+				}
+			case "environment_status":
+				agentInitializationStatusAt = observedAt
+			}
+		} else if firstAgentEventAt.IsZero() {
+			firstAgentEventAt = time.Now()
+		}
+		if !isEnvironmentEvent && !firstEventRecorded {
 			firstEventRecorded = true
-			a.recordTrace(r.Context(), traceID, "agent.first_event_wait", "agent", streamStart, "ok", map[string]any{
-				"event_kind": ev.Kind,
-			})
+			firstEventMS = time.Since(streamStart).Milliseconds()
 		}
 		switch ev.Kind {
 		case "text":
 			textChunkCount++
 			if !firstTextRecorded {
 				firstTextRecorded = true
-				a.recordTrace(r.Context(), traceID, "agent.first_text_wait", "agent", streamStart, "ok", nil)
+				ttftMS = time.Since(streamStart).Milliseconds()
 			}
 		case "thinking":
 			thinkingChunkCount++
+			if !firstReasoningRecorded {
+				firstReasoningRecorded = true
+				firstReasoningMS = time.Since(streamStart).Milliseconds()
+			}
 		case "tool_use":
 			toolUseCount++
+			toolID := strings.TrimSpace(ev.Data["id"])
+			if toolID != "" {
+				openTools[toolID] = openToolSpan{
+					spanID: traceevents.NewSpanID(),
+					name:   strings.TrimSpace(ev.Data["name"]),
+					start:  time.Now(),
+				}
+			}
 			if !firstToolUseRecorded {
 				firstToolUseRecorded = true
-				a.recordTrace(r.Context(), traceID, "agent.first_tool_wait", "agent", streamStart, "ok", map[string]any{
-					"tool_name": ev.Data["name"],
-				})
+				firstToolMS = time.Since(streamStart).Milliseconds()
 			}
 		case "tool_result":
 			toolResultCount++
-		}
-		if ev.Kind == "sandbox" && !sandboxReadyRecorded {
-			sandboxReadyRecorded = true
-			a.recordTrace(r.Context(), traceID, "sandbox.ready_wait", "sandbox", streamStart, "ok", map[string]any{
-				"sandbox_id": ev.Data["sandbox_id"],
-				"endpoint":   ev.Data["endpoint"],
-				"reused":     ev.Data["reused"],
-			})
+			toolID := strings.TrimSpace(ev.Data["tool_use_id"])
+			if tool, ok := openTools[toolID]; ok {
+				status := "success"
+				if strings.EqualFold(ev.Data["is_error"], "true") {
+					status = "error"
+				}
+				a.upsertTraceSpan(r.Context(), traceevents.Span{
+					TraceID: traceID, SpanID: tool.spanID, ParentSpanID: stages.agent, SchemaVersion: 1,
+					Service: "sandbox-shim", Name: "tool.execute", Category: "tool",
+					StartedAt: tool.start, DurationUS: time.Since(tool.start).Microseconds(), Status: status,
+					Attributes: safeTraceAttributes(map[string]any{
+						"tool_name": tool.name,
+						"tool_type": toolType(tool.name),
+					}),
+				})
+				delete(openTools, toolID)
+			}
 		}
 		if ev.Kind == "file" {
 			artifactCount++
 			artifactStart := time.Now()
 			ev = a.registerArtifact(context.Background(), id, req.SessionID, ev)
-			a.recordTrace(r.Context(), traceID, "artifact.register", "artifact", artifactStart, "ok", map[string]any{
+			a.recordTrace(r.Context(), traceID, "artifact.register", "agent", artifactStart, "ok", map[string]any{
 				"artifact_count": artifactCount,
 				"filename":       ev.Data["filename"],
 				"mime":           ev.Data["mime"],
@@ -618,16 +783,93 @@ func (a *API) chat(w http.ResponseWriter, r *http.Request) {
 		}
 		return writeSSE(w, flusher, ev)
 	})
-	if err != nil {
-		a.recordTrace(r.Context(), traceID, "agent.stream", "agent", streamStart, "error", map[string]any{
-			"error":                err.Error(),
-			"event_count":          streamEventCount,
-			"text_chunk_count":     textChunkCount,
-			"thinking_chunk_count": thinkingChunkCount,
-			"tool_use_count":       toolUseCount,
-			"tool_result_count":    toolResultCount,
-			"artifact_count":       artifactCount,
+	streamEnd := time.Now()
+	for _, tool := range openTools {
+		a.upsertTraceSpan(r.Context(), traceevents.Span{
+			TraceID: traceID, SpanID: tool.spanID, ParentSpanID: stages.agent, SchemaVersion: 1,
+			Service: "sandbox-shim", Name: "tool.execute", Category: "tool",
+			StartedAt: tool.start, DurationUS: time.Since(tool.start).Microseconds(), Status: "interrupted",
+			Attributes: safeTraceAttributes(map[string]any{
+				"tool_name": tool.name,
+				"tool_type": toolType(tool.name),
+			}),
 		})
+	}
+	if !environmentReadyAt.IsZero() {
+		environmentEnd = environmentReadyAt
+	} else if !firstAgentInitOperationStart.IsZero() {
+		environmentEnd = firstAgentInitOperationStart
+	} else if !lastEnvironmentOperationEnd.IsZero() {
+		environmentEnd = lastEnvironmentOperationEnd
+	}
+	if environmentEnd.Before(streamStart) || environmentEnd.After(streamEnd) {
+		environmentEnd = streamStart
+	}
+	if !firstAgentEventAt.IsZero() && environmentEnd.After(firstAgentEventAt) {
+		environmentEnd = firstAgentEventAt
+	}
+	if !firstEnvironmentOperationStart.IsZero() {
+		dispatchEnd := firstEnvironmentOperationStart
+		if dispatchEnd.After(environmentEnd) {
+			dispatchEnd = environmentEnd
+		}
+		if dispatchEnd.Sub(streamStart) >= time.Millisecond {
+			a.upsertTraceSpan(r.Context(), traceevents.Span{
+				TraceID: traceID, SpanID: traceevents.NewSpanID(), ParentSpanID: stages.environment, SchemaVersion: 1,
+				Service: "gateway", Name: "environment.runtime_dispatch", Category: "environment",
+				StartedAt: streamStart, DurationUS: dispatchEnd.Sub(streamStart).Microseconds(), Status: "success",
+			})
+		}
+	}
+	agentStart := environmentEnd
+	agentInitializationEnd := agentInitializationStatusAt
+	if agentInitializationEnd.IsZero() || agentInitializationEnd.Before(agentStart) {
+		agentInitializationEnd = lastAgentInitOperationEnd
+	}
+	if agentInitializationEnd.IsZero() || agentInitializationEnd.Before(agentStart) {
+		agentInitializationEnd = firstAgentEventAt
+	}
+	if agentInitializationEnd.IsZero() || agentInitializationEnd.Before(agentStart) {
+		agentInitializationEnd = agentStart
+	}
+	if !firstAgentEventAt.IsZero() && agentInitializationEnd.After(firstAgentEventAt) {
+		agentInitializationEnd = firstAgentEventAt
+	}
+	if agentInitializationEnd.After(streamEnd) {
+		agentInitializationEnd = streamEnd
+	}
+	if !lastAgentInitOperationEnd.IsZero() {
+		initializeStart := lastAgentInitOperationEnd
+		if initializeStart.Before(agentStart) {
+			initializeStart = agentStart
+		}
+		if agentInitializationEnd.Sub(initializeStart) >= time.Millisecond {
+			a.upsertTraceSpan(r.Context(), traceevents.Span{
+				TraceID: traceID, SpanID: traceevents.NewSpanID(), ParentSpanID: stages.agentInit, SchemaVersion: 1,
+				Service: "sandbox-shim", Name: "agent.sdk_initialize", Category: "agent_init",
+				StartedAt: initializeStart, DurationUS: agentInitializationEnd.Sub(initializeStart).Microseconds(), Status: "success",
+			})
+		}
+	}
+	a.upsertTraceSpan(r.Context(), traceevents.Span{
+		TraceID: traceID, SpanID: stages.environment, ParentSpanID: rootSpanID, SchemaVersion: 1,
+		Service: "agent-runtime", Name: "environment.prepare", Category: "environment",
+		StartedAt: streamStart, DurationUS: environmentEnd.Sub(streamStart).Microseconds(), Status: "success",
+	})
+	a.upsertTraceSpan(r.Context(), traceevents.Span{
+		TraceID: traceID, SpanID: stages.agentInit, ParentSpanID: stages.agent, SchemaVersion: 1,
+		Service: "agent-runtime", Name: "agent.initialize", Category: "agent",
+		StartedAt: agentStart, DurationUS: agentInitializationEnd.Sub(agentStart).Microseconds(), Status: "success",
+	})
+	agentStatus := "success"
+	agentErrorCode := ""
+	if err != nil {
+		agentStatus = "error"
+		agentErrorCode = "AGENT_STREAM_ERROR"
+		if errors.Is(err, context.Canceled) {
+			agentStatus = "cancelled"
+			agentErrorCode = "CLIENT_CANCELLED"
+		}
 		// Best-effort terminal error event; the connection may already be gone.
 		errEv := agent.Event{Kind: "error", Data: map[string]string{"error": err.Error()}}
 		if reducer != nil {
@@ -635,21 +877,31 @@ func (a *API) chat(w http.ResponseWriter, r *http.Request) {
 		}
 		_ = writeSSE(w, flusher, errEv)
 		a.log.Warn("agent stream ended with error: " + err.Error())
-	} else {
-		a.recordTrace(r.Context(), traceID, "agent.stream", "agent", streamStart, "ok", map[string]any{
-			"event_count":          streamEventCount,
-			"text_chunk_count":     textChunkCount,
-			"thinking_chunk_count": thinkingChunkCount,
-			"tool_use_count":       toolUseCount,
-			"tool_result_count":    toolResultCount,
-			"artifact_count":       artifactCount,
-		})
 	}
+	a.upsertTraceSpan(r.Context(), traceevents.Span{
+		TraceID: traceID, SpanID: stages.agent, ParentSpanID: rootSpanID, SchemaVersion: 1,
+		Service: "agent-runtime", Name: "agent.execute", Category: "agent",
+		StartedAt: agentStart, DurationUS: streamEnd.Sub(agentStart).Microseconds(), Status: agentStatus,
+		Attributes: safeTraceAttributes(map[string]any{
+			"event_count": streamEventCount, "text_chunk_count": textChunkCount,
+			"thinking_chunk_count": thinkingChunkCount, "tool_use_count": toolUseCount,
+			"tool_result_count": toolResultCount, "artifact_count": artifactCount,
+			"first_event_ms": firstEventMS, "first_reasoning_ms": firstReasoningMS,
+			"first_token_ms": ttftMS, "first_tool_ms": firstToolMS,
+			"error_code": agentErrorCode,
+		}),
+	})
 
 	// Persist the assistant turn with whatever was aggregated (even a partial
 	// stream on error/abort is worth keeping so the history renders). Use a
 	// background context so a client disconnect (r.Context() cancelled) does not
 	// abort the write.
+	finalizationStart := streamEnd
+	a.upsertTraceSpan(r.Context(), traceevents.Span{
+		TraceID: traceID, SpanID: stages.finalization, ParentSpanID: rootSpanID, SchemaVersion: 1,
+		Service: "gateway", Name: "run.finalize", Category: "finalization",
+		StartedAt: finalizationStart, Status: "running",
+	})
 	if persist {
 		persistAssistantStart := time.Now()
 		a.persistAssistantTurn(context.Background(), req.SessionID, reducer.Parts(), assistantMetadata(req))
@@ -669,49 +921,34 @@ func (a *API) chat(w http.ResponseWriter, r *http.Request) {
 			},
 		)
 	}
+	finalizationEnd := time.Now()
+	partCount := 0
+	if reducer != nil {
+		partCount = len(reducer.Parts())
+	}
+	a.upsertTraceSpan(r.Context(), traceevents.Span{
+		TraceID: traceID, SpanID: stages.finalization, ParentSpanID: rootSpanID, SchemaVersion: 1,
+		Service: "gateway", Name: "run.finalize", Category: "finalization",
+		StartedAt: finalizationStart, DurationUS: finalizationEnd.Sub(finalizationStart).Microseconds(), Status: "success",
+		Attributes: safeTraceAttributes(map[string]any{
+			"artifact_count": artifactCount, "part_count": partCount,
+		}),
+	})
 	if err != nil {
-		a.auditChat(r, traceID, req, http.StatusOK, "failure", "AGENT_STREAM_ERROR", artifactCount, start)
+		a.finishConversationRun(r.Context(), run, agentStatus, agentErrorCode, ttftMS, int64(toolUseCount))
 	} else {
-		a.auditChat(r, traceID, req, http.StatusOK, "success", "", artifactCount, start)
+		a.finishConversationRun(r.Context(), run, "success", "", ttftMS, int64(toolUseCount))
 	}
 }
 
-func (a *API) auditChat(r *http.Request, traceID string, req chatRequest, status int, result, errorCode string, artifactCount int, start time.Time) {
-	meta := map[string]any{
-		"conversation_id":  strings.TrimSpace(req.SessionID),
-		"chat_type":        chatTypeForConversation(req),
-		"model_alias":      strings.TrimSpace(req.ModelAlias),
-		"attachment_count": len(req.Attachments),
-		"artifact_count":   artifactCount,
-		"duration_ms":      time.Since(start).Milliseconds(),
+func toolType(name string) string {
+	if strings.HasPrefix(name, "mcp__") {
+		return "mcp"
 	}
-	if req.DeferConversationVisibilityUntilDone {
-		meta["defer_conversation_visibility_until_done"] = true
+	if name == "WebSearch" || name == "WebFetch" {
+		return "server"
 	}
-	auditStart := time.Now()
-	a.appendAudit(r.Context(), auditstore.Event{
-		At:           time.Now().UTC(),
-		ActorType:    "user",
-		Action:       "chat.send",
-		ResourceType: "conversation",
-		ResourceID:   strings.TrimSpace(req.SessionID),
-		Result:       result,
-		HTTPMethod:   r.Method,
-		Route:        "POST /v1/chat",
-		StatusCode:   status,
-		RequestID:    requestID(r),
-		TraceID:      traceID,
-		ClientIP:     clientIP(r),
-		UserAgent:    r.UserAgent(),
-		Metadata:     meta,
-		ErrorCode:    errorCode,
-	})
-	a.recordTrace(r.Context(), traceID, "audit.write", "audit", auditStart, result, map[string]any{
-		"action":          "chat.send",
-		"status_code":     status,
-		"error_code":      errorCode,
-		"conversation_id": strings.TrimSpace(req.SessionID),
-	})
+	return "builtin"
 }
 
 // persistUserTurn upserts the conversation (title = truncated first prompt, set

@@ -3,7 +3,6 @@ package service
 import (
 	"context"
 	"errors"
-	"strconv"
 	"strings"
 
 	"github.com/cocola-project/cocola/apps/admin-api/internal/store"
@@ -82,7 +81,6 @@ func (a *Admin) UpdateGlobalAgentPrompt(ctx context.Context, in AgentPromptInput
 		if err := a.store.CreateAgentPrompt(ctx, prompt); err != nil {
 			return store.AgentPrompt{}, err
 		}
-		a.audit(ctx, in.Actor, "agent_prompt.update", prompt.ID, agentPromptAuditDetail(prompt))
 		return prompt, nil
 	}
 	if in.Enabled != nil {
@@ -101,7 +99,6 @@ func (a *Admin) UpdateGlobalAgentPrompt(ctx context.Context, in AgentPromptInput
 	if err := a.store.UpdateAgentPrompt(ctx, current); err != nil {
 		return store.AgentPrompt{}, err
 	}
-	a.audit(ctx, in.Actor, "agent_prompt.update", current.ID, agentPromptAuditDetail(current))
 	return current, nil
 }
 
@@ -142,12 +139,3 @@ func (a *Admin) EffectiveAgentPromptRuntimeConfig(ctx context.Context, userID st
 		Prompts:      markers,
 	}, nil
 }
-
-func agentPromptAuditDetail(prompt store.AgentPrompt) string {
-	return "enabled=" + boolText(prompt.Enabled) + " version=" + int64Text(prompt.Version) +
-		" content_length=" + intText(len(strings.TrimSpace(prompt.Content)))
-}
-
-func intText(v int) string { return strconv.Itoa(v) }
-
-func int64Text(v int64) string { return strconv.FormatInt(v, 10) }

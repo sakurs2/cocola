@@ -20,8 +20,9 @@ const (
 	SettingSchedulerLeaseTimeoutSecs = "scheduler.lease_timeout_secs"
 	SettingSchedulerMinIntervalSecs  = "scheduler.min_interval_secs"
 
-	SettingWarmPoolEnabled = "sandbox.warm_pool_enabled"
-	SettingWarmPoolSize    = "sandbox.warm_pool_size"
+	SettingWarmPoolEnabled    = "sandbox.warm_pool_enabled"
+	SettingWarmPoolSize       = "sandbox.warm_pool_size"
+	SettingTraceRetentionDays = "observability.trace_retention_days"
 )
 
 type SystemSettingDefinition struct {
@@ -134,6 +135,11 @@ func settingDefinitions() []SystemSettingDefinition {
 			Kind:        "string", Env: "COCOLA_AGENT_ADDR", Default: "127.0.0.1:50061", RestartRequired: true,
 		},
 		{
+			Key: SettingTraceRetentionDays, Group: "Observability", Label: "Trace Retention",
+			Description: "Days to retain detailed conversation spans. Conversation audit summaries are kept.",
+			Kind:        "int", Env: "COCOLA_TRACE_RETENTION_DAYS", Default: 30, Editable: true, HotReload: true, Min: 1, Max: 365,
+		},
+		{
 			Key: "observability.metrics_addr", Group: "Observability", Label: "Metrics Address",
 			Description: "admin-api metrics listen address. Empty disables the metrics server.",
 			Kind:        "string", Env: "COCOLA_METRICS_ADDR", Default: ":9093", RestartRequired: true,
@@ -177,7 +183,7 @@ func (a *Admin) UpdateSystemSetting(ctx context.Context, key string, in SystemSe
 	if def.Key == SettingSchedulerEnabled && !a.schedulerStarted.Load() {
 		return SystemSettingView{}, ErrPermissionDenied
 	}
-	value, raw, err := normalizeSettingValue(def, in.Value)
+	_, raw, err := normalizeSettingValue(def, in.Value)
 	if err != nil {
 		return SystemSettingView{}, err
 	}
@@ -191,7 +197,6 @@ func (a *Admin) UpdateSystemSetting(ctx context.Context, key string, in SystemSe
 	if err != nil {
 		return SystemSettingView{}, err
 	}
-	a.audit(ctx, in.Actor, "setting.update", key, "value="+settingAuditValue(def, value))
 	if key == SettingWarmPoolEnabled || key == SettingWarmPoolSize {
 		a.publishWarmPoolConfig(ctx)
 	}
@@ -215,7 +220,6 @@ func (a *Admin) ResetSystemSetting(ctx context.Context, key string, expectedVers
 		}
 		return err
 	}
-	a.audit(ctx, actor, "setting.reset", key, "")
 	if key == SettingWarmPoolEnabled || key == SettingWarmPoolSize {
 		a.publishWarmPoolConfig(ctx)
 	}
@@ -364,17 +368,6 @@ func envBoolFalseValue(v string) bool {
 	default:
 		return false
 	}
-}
-
-func settingAuditValue(def SystemSettingDefinition, value any) string {
-	if def.Sensitive {
-		return "<redacted>"
-	}
-	b, err := json.Marshal(value)
-	if err != nil {
-		return "<invalid>"
-	}
-	return string(b)
 }
 
 func (a *Admin) settingInt(ctx context.Context, key string, fallback int) int {

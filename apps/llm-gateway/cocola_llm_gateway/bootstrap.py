@@ -43,6 +43,7 @@ from cocola_llm_gateway.config import (
     load_registry,
     quota_policy_from_env,
 )
+from cocola_llm_gateway.conversation_trace import ConversationTraceStore
 from cocola_llm_gateway.db_registry import registry_source_from_env
 from cocola_llm_gateway.middleware import ResiliencePolicy
 from cocola_llm_gateway.quota import (
@@ -144,7 +145,16 @@ def build_service() -> GatewayService:
     )
     ledger = build_ledger()
     enforcer = build_enforcer()
-    return GatewayService(registry, ledger, policy, enforcer, registry_source=registry_source)
+    dsn = os.getenv("COCOLA_PG_DSN", "").strip()
+    trace_store = ConversationTraceStore(dsn) if dsn else None
+    return GatewayService(
+        registry,
+        ledger,
+        policy,
+        enforcer,
+        registry_source=registry_source,
+        trace_store=trace_store,
+    )
 
 
 def build_verifier() -> Verifier:

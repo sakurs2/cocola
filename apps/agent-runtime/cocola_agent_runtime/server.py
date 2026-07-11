@@ -68,6 +68,8 @@ MODEL_ALIAS_METADATA_KEY = "x-cocola-model-alias"
 # proto change). Injected into the sandbox as ANTHROPIC_AUTH_TOKEN per turn so
 # the in-sandbox brain calls the llm-gateway as the real user. Never logged.
 SANDBOX_TOKEN_METADATA_KEY = "x-cocola-sandbox-token"
+TRACEPARENT_METADATA_KEY = "traceparent"
+PRODUCT_TRACEPARENT_METADATA_KEY = "x-cocola-product-traceparent"
 ENVIRONMENT_PREPARATION_SCHEMA_VERSION = 1
 ENVIRONMENT_PREPARATION_PART_ID = "environment"
 
@@ -363,6 +365,15 @@ def _metadata_value(context, key: str) -> str:
     return ""
 
 
+def _product_traceparent(context) -> str:
+    """Prefer Cocola's persisted parent over otelgrpc's transport span."""
+    for key in (PRODUCT_TRACEPARENT_METADATA_KEY, TRACEPARENT_METADATA_KEY):
+        value = _metadata_value(context, key).lower()
+        if re.fullmatch(r"00-[0-9a-f]{32}-[0-9a-f]{16}-[0-9a-f]{2}", value):
+            return value
+    return ""
+
+
 def _enabled(value: Any) -> bool:
     if value is None:
         return True
@@ -548,6 +559,7 @@ class AgentRuntimeServicer(pb_grpc.AgentRuntimeServiceServicer):
         # in-sandbox brain authenticates to the llm-gateway AS THE USER instead
         # of via the static cluster-wide token baked at sandbox creation.
         sandbox_token = _metadata_value(context, SANDBOX_TOKEN_METADATA_KEY)
+        traceparent = _product_traceparent(context)
         preparing_environment = False
         environment_components: list[dict[str, Any]] = []
         environment_degraded = False
@@ -863,7 +875,7 @@ class AgentRuntimeServicer(pb_grpc.AgentRuntimeServiceServicer):
                     event_to_proto(
                         trace_event(
                             "sandbox.mcp_config_load",
-                            "sandbox",
+                            "agent_init",
                             mcp_start_ns,
                             sandbox_id=sandbox_id or "",
                             mcp_count=len(active_mcp_servers),
@@ -878,7 +890,7 @@ class AgentRuntimeServicer(pb_grpc.AgentRuntimeServiceServicer):
                     event_to_proto(
                         trace_event(
                             "sandbox.mcp_config_load",
-                            "sandbox",
+                            "agent_init",
                             mcp_start_ns,
                             status="error",
                             sandbox_id=sandbox_id or "",
@@ -896,7 +908,7 @@ class AgentRuntimeServicer(pb_grpc.AgentRuntimeServiceServicer):
                     event_to_proto(
                         trace_event(
                             "agent.prompt_config_load",
-                            "agent-runtime",
+                            "agent_init",
                             prompt_start_ns,
                             prompt_count=len(active_prompt.prompts),
                             prompt_ids=[p.id for p in active_prompt.prompts],
@@ -914,7 +926,7 @@ class AgentRuntimeServicer(pb_grpc.AgentRuntimeServiceServicer):
                     event_to_proto(
                         trace_event(
                             "agent.prompt_config_load",
-                            "agent-runtime",
+                            "agent_init",
                             prompt_start_ns,
                             status="error",
                             error_type=type(exc).__name__,
@@ -939,6 +951,7 @@ class AgentRuntimeServicer(pb_grpc.AgentRuntimeServiceServicer):
                 for skill in loaded_skills
             ],
             auth_token=sandbox_token or None,
+            traceparent=traceparent or None,
         )
         skills_preamble = skills_system_preamble(active_skills)
         if skills_preamble:

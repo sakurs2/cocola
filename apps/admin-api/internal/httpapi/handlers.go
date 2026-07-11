@@ -100,10 +100,8 @@ type loginReq struct {
 }
 
 func (a *API) login(w http.ResponseWriter, r *http.Request) {
-	start := time.Now()
 	var req loginReq
 	if err := decode(r, &req); err != nil {
-		a.appendHTTPAudit(r, "user", "auth.login", "auth", "", http.StatusBadRequest, "INVALID_ARGUMENT", start)
 		mapErr(w, err)
 		return
 	}
@@ -113,11 +111,9 @@ func (a *API) login(w http.ResponseWriter, r *http.Request) {
 	}
 	user, err := a.svc.Authenticate(r.Context(), identifier, req.Password)
 	if err != nil {
-		a.appendHTTPAudit(r, "user", "auth.login", "auth", "", http.StatusUnauthorized, "UNAUTHENTICATED", start)
 		mapErr(w, err)
 		return
 	}
-	a.appendHTTPAudit(r, "user", "auth.login", "auth_user", user.ID, http.StatusOK, "", start)
 	writeJSON(w, http.StatusOK, map[string]any{"user": user})
 }
 
@@ -1542,31 +1538,14 @@ func parseTokenUsageTime(raw string, endOfDay bool) (time.Time, error) {
 	return t, nil
 }
 
-// ---- audit ----
-
-func (a *API) listAudit(w http.ResponseWriter, r *http.Request) {
-	limit := qInt(r, "limit", 100)
-	entries, err := a.svc.ListAudit(r.Context(), limit)
-	if err != nil {
-		mapErr(w, err)
-		return
-	}
-	writeJSON(w, http.StatusOK, map[string]any{"audit": entries})
-}
-
 func (a *API) listAuditEvents(w http.ResponseWriter, r *http.Request) {
 	q := r.URL.Query()
-	query := store.AuditEventQuery{
-		Limit:        qInt(r, "limit", 100),
-		Offset:       qInt(r, "offset", 0),
-		ActorUserID:  q.Get("actor_user_id"),
-		ActorEmail:   q.Get("actor_email"),
-		Action:       q.Get("action"),
-		ResourceType: q.Get("resource_type"),
-		ResourceID:   q.Get("resource_id"),
-		Result:       q.Get("result"),
-		RequestID:    q.Get("request_id"),
-		TraceID:      q.Get("trace_id"),
+	query := store.ConversationRunQuery{
+		Limit:  qInt(r, "limit", 100),
+		Offset: qInt(r, "offset", 0),
+		Search: firstNonEmpty(q.Get("search"), q.Get("actor_user_id"), q.Get("actor_email"), q.Get("trace_id")),
+		Status: q.Get("status"),
+		Source: q.Get("source"),
 	}
 	if v := q.Get("since"); v != "" {
 		t, err := time.Parse(time.RFC3339, v)
@@ -1574,7 +1553,7 @@ func (a *API) listAuditEvents(w http.ResponseWriter, r *http.Request) {
 			writeErr(w, http.StatusBadRequest, "INVALID_ARGUMENT", "since must be RFC3339")
 			return
 		}
-		query.Since = t
+		query.From = t
 	}
 	if v := q.Get("until"); v != "" {
 		t, err := time.Parse(time.RFC3339, v)
@@ -1584,10 +1563,14 @@ func (a *API) listAuditEvents(w http.ResponseWriter, r *http.Request) {
 		}
 		query.Until = t
 	}
-	events, err := a.svc.ListAuditEvents(r.Context(), query)
+	runs, err := a.svc.ListConversationRuns(r.Context(), query)
 	if err != nil {
 		mapErr(w, err)
 		return
+	}
+	events := make([]store.AuditEvent, 0, len(runs))
+	for index, run := range runs {
+		events = append(events, conversationRunAuditEvent(run, int64(index+1)))
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"events": events})
 }
@@ -1598,25 +1581,112 @@ func (a *API) getTrace(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusBadRequest, "INVALID_ARGUMENT", "trace_id is required")
 		return
 	}
-	events, err := a.svc.ListTraceEvents(r.Context(), store.TraceEventQuery{
-		TraceID: traceID,
-		Limit:   qInt(r, "limit", 500),
+	run, err := a.svc.GetConversationRun(r.Context(), traceID)
+	if err != nil {
+		mapErr(w, err)
+		return
+	}
+	spans, err := a.svc.ListConversationTraceSpans(r.Context(), store.ConversationTraceSpanQuery{
+		TraceID: traceID, Limit: qInt(r, "limit", 1000),
 	})
 	if err != nil {
 		mapErr(w, err)
 		return
 	}
-	auditEvents, err := a.svc.ListAuditEvents(r.Context(), store.AuditEventQuery{
-		TraceID: traceID,
-		Limit:   qInt(r, "audit_limit", 100),
-	})
-	if err != nil {
-		mapErr(w, err)
-		return
+	events := make([]store.TraceEvent, 0, len(spans))
+	for _, span := range spans {
+		events = append(events, store.TraceEvent{
+			ID: span.ID, TraceID: span.TraceID, Service: span.Service, Name: span.Name,
+			Category: span.Category, StartedAt: span.StartedAt,
+			DurationMS: span.DurationUS / 1000, Status: span.Status, Metadata: span.Attributes,
+		})
 	}
 	writeJSON(w, http.StatusOK, map[string]any{
 		"trace_id":     traceID,
 		"events":       events,
-		"audit_events": auditEvents,
+		"audit_events": []store.AuditEvent{conversationRunAuditEvent(run, 1)},
+		"run":          run,
+		"spans":        spans,
 	})
+}
+
+func (a *API) listConversationRuns(w http.ResponseWriter, r *http.Request) {
+	q := r.URL.Query()
+	query := store.ConversationRunQuery{
+		Search: q.Get("search"), Status: q.Get("status"), Source: q.Get("source"),
+		Limit: qInt(r, "limit", 50), Offset: qInt(r, "offset", 0),
+	}
+	var err error
+	if raw := q.Get("from"); raw != "" {
+		query.From, err = time.Parse(time.RFC3339, raw)
+		if err != nil {
+			writeErr(w, http.StatusBadRequest, "INVALID_ARGUMENT", "from must be RFC3339")
+			return
+		}
+	}
+	if raw := q.Get("until"); raw != "" {
+		query.Until, err = time.Parse(time.RFC3339, raw)
+		if err != nil {
+			writeErr(w, http.StatusBadRequest, "INVALID_ARGUMENT", "until must be RFC3339")
+			return
+		}
+	}
+	runs, err := a.svc.ListConversationRuns(r.Context(), query)
+	if err != nil {
+		mapErr(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"runs": runs})
+}
+
+func (a *API) getConversationRun(w http.ResponseWriter, r *http.Request) {
+	run, err := a.svc.GetConversationRun(r.Context(), chi.URLParam(r, "trace_id"))
+	if err != nil {
+		mapErr(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"run": run})
+}
+
+func (a *API) listConversationTraceSpans(w http.ResponseWriter, r *http.Request) {
+	spans, err := a.svc.ListConversationTraceSpans(r.Context(), store.ConversationTraceSpanQuery{
+		TraceID: chi.URLParam(r, "trace_id"),
+		AfterID: int64(qInt(r, "after_id", 0)),
+		Limit:   qInt(r, "limit", 1000),
+	})
+	if err != nil {
+		mapErr(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"spans": spans})
+}
+
+func conversationRunAuditEvent(run store.ConversationRun, id int64) store.AuditEvent {
+	result := run.Status
+	if result == "error" || result == "cancelled" || result == "interrupted" {
+		result = "failure"
+	}
+	return store.AuditEvent{
+		ID: id, At: run.StartedAt, ActorType: "user", ActorUserID: run.UserID,
+		ActorEmail: run.UserEmail, Action: "chat.send", ResourceType: "conversation",
+		ResourceID: run.ConversationID, Result: result, TraceID: run.TraceID,
+		ErrorCode: run.ErrorCode,
+		Metadata: map[string]any{
+			"conversation_id": run.ConversationID, "chat_type": run.Source,
+			"conversation_title": run.ConversationTitle, "model_alias": run.ModelAlias,
+			"duration_ms": run.DurationMS, "ttft_ms": run.TTFTMS,
+			"status": run.Status, "detail_status": run.DetailStatus,
+			"llm_call_count": run.LLMCallCount, "tool_call_count": run.ToolCallCount,
+			"input_tokens": run.InputTokens, "output_tokens": run.OutputTokens,
+		},
+	}
+}
+
+func firstNonEmpty(values ...string) string {
+	for _, value := range values {
+		if value = strings.TrimSpace(value); value != "" {
+			return value
+		}
+	}
+	return ""
 }

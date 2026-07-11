@@ -36,6 +36,9 @@ class AgentOptions:
     # real user (per-user quota / usage / revocation), overriding the static
     # token baked at sandbox creation. None => keep the baked default token.
     auth_token: str | None = None
+    # W3C context for Cocola-owned downstream services. It is injected only
+    # into requests to the configured Cocola LLM gateway, never into MCP calls.
+    traceparent: str | None = None
 
 
 @dataclass

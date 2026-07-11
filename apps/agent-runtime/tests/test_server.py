@@ -15,6 +15,7 @@ import subprocess
 import sys
 import zipfile
 from dataclasses import dataclass, field
+from types import SimpleNamespace
 
 from cocola_agent_runtime.agent_provider import AgentEvent, AgentOptions
 from cocola_agent_runtime.checkpoint import CheckpointConfig, CheckpointManager
@@ -27,6 +28,7 @@ from cocola_agent_runtime.sandbox_binder import (
 from cocola_agent_runtime.server import (
     _SKILLS_BATCH_INSTALL_SCRIPT,
     AgentRuntimeServicer,
+    _product_traceparent,
     event_to_proto,
 )
 from cocola_agent_runtime.session_map import SessionBinding
@@ -46,11 +48,12 @@ class FakeRequest:
 class FakeContext:
     """Records proto events the servicer streams via context.write()."""
 
-    def __init__(self):
+    def __init__(self, metadata=()):
         self.written = []
+        self.metadata = metadata
 
     def invocation_metadata(self):
-        return ()
+        return self.metadata
 
     async def write(self, event):
         self.written.append(event)
@@ -91,6 +94,26 @@ class FakeObjectStore:
 
     def put(self, key: str, data: bytes, mime: str) -> None:
         self.puts[key] = (data, mime)
+
+
+def test_product_traceparent_wins_over_otel_transport_parent():
+    otel_parent = "00-" + "a" * 32 + "-" + "1" * 16 + "-01"
+    product_parent = "00-" + "a" * 32 + "-" + "2" * 16 + "-01"
+    context = FakeContext(
+        (
+            SimpleNamespace(key="traceparent", value=otel_parent),
+            SimpleNamespace(key="x-cocola-product-traceparent", value=product_parent),
+        )
+    )
+
+    assert _product_traceparent(context) == product_parent
+
+
+def test_product_traceparent_falls_back_to_standard_header():
+    traceparent = "00-" + "a" * 32 + "-" + "1" * 16 + "-01"
+    context = FakeContext((SimpleNamespace(key="traceparent", value=traceparent),))
+
+    assert _product_traceparent(context) == traceparent
 
 
 class FakeSessionMap:
@@ -412,6 +435,7 @@ async def test_query_loads_mcp_servers_into_options_and_trace():
     mcp_trace = next(event for event in traces if event.data["name"] == "sandbox.mcp_config_load")
     assert mcp_trace.data["mcp_count"] == "1"
     assert json.loads(mcp_trace.data["mcp_names"]) == ["amap"]
+    assert mcp_trace.data["category"] == "agent_init"
 
 
 async def test_query_loads_admin_prompt_into_options_and_trace():
@@ -434,6 +458,7 @@ async def test_query_loads_admin_prompt_into_options_and_trace():
     assert prompt_trace.data["prompt_count"] == "1"
     assert json.loads(prompt_trace.data["prompt_ids"]) == ["global"]
     assert json.loads(prompt_trace.data["prompt_versions"]) == [4]
+    assert prompt_trace.data["category"] == "agent_init"
     assert "Prefer concise answers." not in json.dumps(dict(prompt_trace.data))
 
 

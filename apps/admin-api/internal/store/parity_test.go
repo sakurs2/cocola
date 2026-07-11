@@ -39,7 +39,7 @@ func newParityPostgres(t *testing.T) *Postgres {
 	}
 	// Clean slate: truncate every table this suite touches.
 	_, err = pg.pool.Exec(ctx,
-		`TRUNCATE auth_user_identifiers, auth_users, token_records, quota_overrides, skill_entries, audit_log, audit_events RESTART IDENTITY`)
+		`TRUNCATE conversation_trace_spans, conversation_runs, auth_user_identifiers, auth_users, token_records, quota_overrides, skill_entries, audit_log, audit_events RESTART IDENTITY`)
 	if err != nil {
 		t.Fatalf("truncate: %v", err)
 	}
@@ -222,20 +222,6 @@ func runStoreContract(t *testing.T, st Store) {
 		t.Fatalf("deleted skill want ErrNotFound, got %v", err)
 	}
 
-	// ----- audit -----
-	for i := 0; i < 5; i++ {
-		if err := st.AppendAudit(ctx, AuditEntry{At: now, Actor: "admin", Action: "x", Resource: "r"}); err != nil {
-			t.Fatalf("AppendAudit: %v", err)
-		}
-	}
-	a, _ := st.ListAudit(ctx, 3)
-	if len(a) != 3 {
-		t.Fatalf("ListAudit limit: %d", len(a))
-	}
-	// newest-first: ids strictly descending
-	if !(a[0].ID > a[1].ID && a[1].ID > a[2].ID) {
-		t.Fatalf("ListAudit not newest-first: %+v", a)
-	}
 }
 
 func TestStoreContract_Memory(t *testing.T) {

@@ -3,6 +3,7 @@ package store
 import (
 	"context"
 	"sort"
+	"strings"
 	"sync"
 	"time"
 )
@@ -11,48 +12,50 @@ import (
 // default backend for tests and dev. All slices returned are fresh copies so
 // callers cannot mutate internal state.
 type Memory struct {
-	mu           sync.RWMutex
-	users        map[string]AuthUser
-	identifiers  map[string]string // normalized identifier -> user id
-	tokens       map[string]TokenRecord
-	quotas       map[string]QuotaOverride // key = scope + "/" + subject
-	settings     map[string]SystemSetting
-	skills       map[string]Skill
-	skillPrefs   map[string]UserSkillPreference
-	mcps         map[string]MCPServer
-	mcpPrefs     map[string]UserMCPPreference
-	agentPrompts map[string]AgentPrompt
-	llmProviders map[string]LLMProvider
-	llmModels    map[string]LLMModelRoute
-	tasks        map[string]ScheduledTask
-	attachments  map[string]ScheduledTaskAttachment
-	runs         map[string]ScheduledTaskRun
-	runEvents    map[string][]ScheduledTaskRunEvent
-	audit        []AuditEvent
-	traceEvents  []TraceEvent
-	auditSeq     int64
-	runEventSeq  int64
+	mu                  sync.RWMutex
+	users               map[string]AuthUser
+	identifiers         map[string]string // normalized identifier -> user id
+	tokens              map[string]TokenRecord
+	quotas              map[string]QuotaOverride // key = scope + "/" + subject
+	settings            map[string]SystemSetting
+	skills              map[string]Skill
+	skillPrefs          map[string]UserSkillPreference
+	mcps                map[string]MCPServer
+	mcpPrefs            map[string]UserMCPPreference
+	agentPrompts        map[string]AgentPrompt
+	llmProviders        map[string]LLMProvider
+	llmModels           map[string]LLMModelRoute
+	tasks               map[string]ScheduledTask
+	attachments         map[string]ScheduledTaskAttachment
+	runs                map[string]ScheduledTaskRun
+	runEvents           map[string][]ScheduledTaskRunEvent
+	conversationRuns    map[string]ConversationRun
+	conversationSpans   map[string]map[string]ConversationTraceSpan
+	runEventSeq         int64
+	conversationSpanSeq int64
 }
 
 // NewMemory returns an empty in-memory store.
 func NewMemory() *Memory {
 	return &Memory{
-		users:        map[string]AuthUser{},
-		identifiers:  map[string]string{},
-		tokens:       map[string]TokenRecord{},
-		quotas:       map[string]QuotaOverride{},
-		settings:     map[string]SystemSetting{},
-		skills:       map[string]Skill{},
-		skillPrefs:   map[string]UserSkillPreference{},
-		mcps:         map[string]MCPServer{},
-		mcpPrefs:     map[string]UserMCPPreference{},
-		agentPrompts: map[string]AgentPrompt{},
-		llmProviders: map[string]LLMProvider{},
-		llmModels:    map[string]LLMModelRoute{},
-		tasks:        map[string]ScheduledTask{},
-		attachments:  map[string]ScheduledTaskAttachment{},
-		runs:         map[string]ScheduledTaskRun{},
-		runEvents:    map[string][]ScheduledTaskRunEvent{},
+		users:             map[string]AuthUser{},
+		identifiers:       map[string]string{},
+		tokens:            map[string]TokenRecord{},
+		quotas:            map[string]QuotaOverride{},
+		settings:          map[string]SystemSetting{},
+		skills:            map[string]Skill{},
+		skillPrefs:        map[string]UserSkillPreference{},
+		mcps:              map[string]MCPServer{},
+		mcpPrefs:          map[string]UserMCPPreference{},
+		agentPrompts:      map[string]AgentPrompt{},
+		llmProviders:      map[string]LLMProvider{},
+		llmModels:         map[string]LLMModelRoute{},
+		tasks:             map[string]ScheduledTask{},
+		attachments:       map[string]ScheduledTaskAttachment{},
+		runs:              map[string]ScheduledTaskRun{},
+		runEvents:         map[string][]ScheduledTaskRunEvent{},
+		conversationRuns:  map[string]ConversationRun{},
+		conversationSpans: map[string]map[string]ConversationTraceSpan{},
 	}
 }
 
@@ -1171,165 +1174,149 @@ func (m *Memory) ListScheduledTaskRunEvents(ctx context.Context, runID string) (
 	return out, nil
 }
 
-// ---- Audit ----
-
-func (m *Memory) AppendAudit(ctx context.Context, e AuditEntry) error {
-	detail := map[string]any{}
-	detail["legacy_entry"] = true
-	if e.Detail != "" {
-		detail["detail"] = e.Detail
-	}
-	return m.AppendAuditEvent(ctx, AuditEvent{
-		At:           e.At,
-		ActorType:    "admin",
-		ActorUserID:  e.Actor,
-		ActorEmail:   e.Actor,
-		Action:       e.Action,
-		ResourceType: auditResourceType(e.Action),
-		ResourceID:   e.Resource,
-		Result:       "success",
-		Metadata:     detail,
-	})
-}
-
-func (m *Memory) AppendAuditEvent(ctx context.Context, e AuditEvent) error {
+func (m *Memory) UpsertConversationRun(ctx context.Context, run ConversationRun) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	m.auditSeq++
-	e.ID = m.auditSeq
-	if e.At.IsZero() {
-		e.At = time.Now().UTC()
+	if run.TraceID == "" {
+		return ErrNotFound
 	}
-	if e.Result == "" {
-		e.Result = "success"
+	now := time.Now().UTC()
+	if existing, ok := m.conversationRuns[run.TraceID]; ok {
+		if run.CreatedAt.IsZero() {
+			run.CreatedAt = existing.CreatedAt
+		}
 	}
-	if e.Metadata == nil {
-		e.Metadata = map[string]any{}
+	if run.CreatedAt.IsZero() {
+		run.CreatedAt = now
 	}
-	m.audit = append(m.audit, e)
+	if run.UpdatedAt.IsZero() {
+		run.UpdatedAt = now
+	}
+	m.conversationRuns[run.TraceID] = run
 	return nil
 }
 
-func (m *Memory) ListAudit(ctx context.Context, limit int) ([]AuditEntry, error) {
-	events, err := m.ListAuditEvents(ctx, AuditEventQuery{Limit: limit, LegacyOnly: true})
-	if err != nil {
-		return nil, err
-	}
-	out := make([]AuditEntry, 0)
-	for _, e := range events {
-		if isLegacyAuditEvent(e) {
-			out = append(out, legacyAuditEntry(e))
-			if limit > 0 && len(out) >= limit {
-				break
-			}
-		}
-	}
-	return out, nil
-}
-
-func (m *Memory) ListAuditEvents(ctx context.Context, q AuditEventQuery) ([]AuditEvent, error) {
+func (m *Memory) GetConversationRun(ctx context.Context, traceID string) (ConversationRun, error) {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
-	n := len(m.audit)
-	limit := q.Limit
-	if limit <= 0 || limit > n {
-		limit = n
+	run, ok := m.conversationRuns[traceID]
+	if !ok {
+		return ConversationRun{}, ErrNotFound
 	}
-	out := make([]AuditEvent, 0, limit)
-	skipped := 0
-	// newest first
-	for i := n - 1; i >= 0 && len(out) < limit; i-- {
-		if auditMatches(m.audit[i], q) {
-			if skipped < q.Offset {
-				skipped++
-				continue
-			}
-			out = append(out, cloneAuditEvent(m.audit[i]))
-		}
-	}
-	return out, nil
+	return run, nil
 }
 
-func auditMatches(e AuditEvent, q AuditEventQuery) bool {
-	if q.LegacyOnly && !isLegacyAuditEvent(e) {
-		return false
-	}
-	if q.ActorUserID != "" && e.ActorUserID != q.ActorUserID {
-		return false
-	}
-	if q.ActorEmail != "" && e.ActorEmail != q.ActorEmail {
-		return false
-	}
-	if q.Action != "" && e.Action != q.Action {
-		return false
-	}
-	if q.ResourceType != "" && e.ResourceType != q.ResourceType {
-		return false
-	}
-	if q.ResourceID != "" && e.ResourceID != q.ResourceID {
-		return false
-	}
-	if q.Result != "" && e.Result != q.Result {
-		return false
-	}
-	if q.RequestID != "" && e.RequestID != q.RequestID {
-		return false
-	}
-	if q.TraceID != "" && e.TraceID != q.TraceID {
-		return false
-	}
-	if !q.Since.IsZero() && e.At.Before(q.Since) {
-		return false
-	}
-	if !q.Until.IsZero() && e.At.After(q.Until) {
-		return false
-	}
-	return true
-}
-
-func cloneAuditEvent(e AuditEvent) AuditEvent {
-	if e.Metadata != nil {
-		m := make(map[string]any, len(e.Metadata))
-		for k, v := range e.Metadata {
-			m[k] = v
-		}
-		e.Metadata = m
-	}
-	return e
-}
-
-func (m *Memory) ListTraceEvents(ctx context.Context, q TraceEventQuery) ([]TraceEvent, error) {
+func (m *Memory) ListConversationRuns(ctx context.Context, q ConversationRunQuery) ([]ConversationRun, error) {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
-	if q.TraceID == "" {
-		return []TraceEvent{}, nil
-	}
-	limit := q.Limit
-	if limit <= 0 || limit > len(m.traceEvents) {
-		limit = len(m.traceEvents)
-	}
-	out := make([]TraceEvent, 0, limit)
-	for _, event := range m.traceEvents {
-		if event.TraceID != q.TraceID {
+	out := make([]ConversationRun, 0, len(m.conversationRuns))
+	search := strings.ToLower(strings.TrimSpace(q.Search))
+	for _, run := range m.conversationRuns {
+		if q.Status != "" && run.Status != q.Status || q.Source != "" && run.Source != q.Source {
 			continue
 		}
-		out = append(out, cloneTraceEvent(event))
-		if len(out) >= limit {
-			break
+		if !q.From.IsZero() && run.StartedAt.Before(q.From) || !q.Until.IsZero() && run.StartedAt.After(q.Until) {
+			continue
 		}
+		if search != "" && !strings.Contains(strings.ToLower(strings.Join([]string{run.UserID, run.UserEmail, run.ConversationID, run.ConversationTitle, run.TraceID}, " ")), search) {
+			continue
+		}
+		out = append(out, run)
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i].StartedAt.After(out[j].StartedAt) })
+	start := min(q.Offset, len(out))
+	end := len(out)
+	if q.Limit > 0 && start+q.Limit < end {
+		end = start + q.Limit
+	}
+	return append([]ConversationRun(nil), out[start:end]...), nil
+}
+
+func (m *Memory) UpsertConversationTraceSpan(ctx context.Context, span ConversationTraceSpan) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if _, ok := m.conversationRuns[span.TraceID]; !ok {
+		return ErrNotFound
+	}
+	if m.conversationSpans[span.TraceID] == nil {
+		m.conversationSpans[span.TraceID] = map[string]ConversationTraceSpan{}
+	}
+	if existing, ok := m.conversationSpans[span.TraceID][span.SpanID]; ok {
+		span.ID = existing.ID
+		span.CreatedAt = existing.CreatedAt
+	} else {
+		m.conversationSpanSeq++
+		span.ID = m.conversationSpanSeq
+		span.CreatedAt = time.Now().UTC()
+	}
+	span.UpdatedAt = time.Now().UTC()
+	m.conversationSpans[span.TraceID][span.SpanID] = cloneConversationSpan(span)
+	return nil
+}
+
+func (m *Memory) ListConversationTraceSpans(ctx context.Context, q ConversationTraceSpanQuery) ([]ConversationTraceSpan, error) {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	out := make([]ConversationTraceSpan, 0)
+	for _, span := range m.conversationSpans[q.TraceID] {
+		if span.ID > q.AfterID {
+			out = append(out, cloneConversationSpan(span))
+		}
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i].ID < out[j].ID })
+	if q.Limit > 0 && len(out) > q.Limit {
+		out = out[:q.Limit]
 	}
 	return out, nil
 }
 
-func cloneTraceEvent(e TraceEvent) TraceEvent {
-	if e.Metadata != nil {
-		m := make(map[string]any, len(e.Metadata))
-		for k, v := range e.Metadata {
-			m[k] = v
+func cloneConversationSpan(span ConversationTraceSpan) ConversationTraceSpan {
+	if span.Attributes != nil {
+		attributes := make(map[string]any, len(span.Attributes))
+		for key, value := range span.Attributes {
+			attributes[key] = value
 		}
-		e.Metadata = m
+		span.Attributes = attributes
 	}
-	return e
+	return span
+}
+
+func (m *Memory) ExpireConversationTraceSpans(ctx context.Context, before time.Time) (int64, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	var removed int64
+	for traceID, spans := range m.conversationSpans {
+		for spanID, span := range spans {
+			if span.CreatedAt.Before(before) {
+				delete(spans, spanID)
+				removed++
+			}
+		}
+		if len(spans) == 0 {
+			if run, ok := m.conversationRuns[traceID]; ok && run.StartedAt.Before(before) {
+				run.DetailStatus = "expired"
+				m.conversationRuns[traceID] = run
+			}
+		}
+	}
+	return removed, nil
+}
+
+func (m *Memory) InterruptStaleConversationRuns(ctx context.Context, before, now time.Time) (int64, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	var updated int64
+	for traceID, run := range m.conversationRuns {
+		if run.Status == "running" && run.LastActivityAt.Before(before) {
+			run.Status = "interrupted"
+			run.CompletedAt = now
+			run.DurationMS = now.Sub(run.StartedAt).Milliseconds()
+			run.UpdatedAt = now
+			m.conversationRuns[traceID] = run
+			updated++
+		}
+	}
+	return updated, nil
 }
 
 func (m *Memory) TokenUsageSummary(ctx context.Context, q TokenUsageQuery) (TokenUsageSummary, error) {

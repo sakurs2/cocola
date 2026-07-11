@@ -26,7 +26,17 @@ def _ndjson(*objs: dict) -> str:
 
 
 async def _drain(provider, prompt, options):
-    return [ev async for ev in provider.query(prompt, options)]
+    return [ev async for ev in provider.query(prompt, options) if ev.kind != "trace"]
+
+
+def test_model_env_formats_traceparent_as_an_http_header():
+    provider = InSandboxShimProvider(StaticSandboxExecutor())
+    traceparent = "00-" + "a" * 32 + "-" + "b" * 16 + "-01"
+
+    env = provider._model_env(AgentOptions(user_id="U1", session_id="S1", traceparent=traceparent))
+
+    assert env["ANTHROPIC_CUSTOM_HEADERS"] == f"traceparent: {traceparent}"
+    assert not env["ANTHROPIC_CUSTOM_HEADERS"].startswith("{")
 
 
 async def test_maps_tool_use_turn_and_reassembles_split_line():

@@ -334,7 +334,6 @@ func (a *Admin) finishRun(ctx context.Context, run store.ScheduledTaskRun, next 
 }
 
 func (a *Admin) handleScheduledTaskFinishError(ctx context.Context, task store.ScheduledTask, run store.ScheduledTaskRun, err error) {
-	a.audit(ctx, "scheduler", "scheduled_task.finish_failed", task.ID, "error="+err.Error())
 	a.publishScheduledTaskUserEvent(ctx, UserEventScheduledTaskRunFailed, task, run, "error", "Task result could not be saved")
 }
 

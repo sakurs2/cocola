@@ -22,6 +22,7 @@ streams so usage is captured for whatever the upstream already produced.
 
 from __future__ import annotations
 
+import time
 import uuid
 from collections.abc import AsyncIterator
 from typing import Protocol
@@ -30,6 +31,7 @@ from cocola_common import get_logger
 
 from cocola_llm_gateway.auth.jwt import Identity
 from cocola_llm_gateway.billing.ledger import Ledger, UsageRecord
+from cocola_llm_gateway.conversation_trace import ConversationTraceStore, TraceContext, utc_now
 from cocola_llm_gateway.middleware import RateLimiter, ResiliencePolicy, ResilientStreamer
 from cocola_llm_gateway.quota import Enforcer, QuotaStatus
 from cocola_llm_gateway.registry import Registry
@@ -63,12 +65,14 @@ class GatewayService:
         policy: ResiliencePolicy | None = None,
         enforcer: Enforcer | None = None,
         registry_source: RegistrySource | None = None,
+        trace_store: ConversationTraceStore | None = None,
     ):
         self._registry = registry
         self._registry_source = registry_source or StaticRegistrySource(registry)
         self._ledger = ledger
         self._policy = policy or ResiliencePolicy()
         self._enforcer = enforcer
+        self._trace_store = trace_store
         # One shared limiter so per-tenant buckets persist across requests.
         self._limiter = RateLimiter(self._policy.rate_limit_rps, self._policy.rate_burst)
 
@@ -115,6 +119,7 @@ class GatewayService:
         *,
         requested_alias: str | None = None,
         identity: Identity | None = None,
+        trace_context: TraceContext | None = None,
     ) -> AsyncIterator[StreamEvent]:
         """Resolve, stream with resilience, meter, and commit quota.
 
@@ -131,9 +136,19 @@ class GatewayService:
         usage = Usage()
         status = "ok"
         error = ""
+        started_at = utc_now()
+        started_mono = time.monotonic()
+        ttft_ms = 0
+        saw_first_output = False
 
         try:
             async for ev in streamer.chat_stream(req):
+                if not saw_first_output and ev.type in (
+                    StreamEventType.MESSAGE_START,
+                    StreamEventType.CONTENT_DELTA,
+                ):
+                    saw_first_output = True
+                    ttft_ms = int((time.monotonic() - started_mono) * 1000)
                 if ev.usage is not None and ev.type in (
                     StreamEventType.MESSAGE_START,
                     StreamEventType.MESSAGE_DELTA,
@@ -152,6 +167,23 @@ class GatewayService:
             # Always record + commit, even on partial/error streams.
             await self._write_record(req, route, request_id, usage, status, error)
             await self._commit_quota(identity, usage)
+            if self._trace_store is not None and trace_context is not None:
+                try:
+                    await self._trace_store.record_model_call(
+                        trace_context,
+                        started_at=started_at,
+                        duration_us=int((time.monotonic() - started_mono) * 1_000_000),
+                        ttft_ms=ttft_ms,
+                        status="error" if status == "error" else "success",
+                        model_alias=route.alias,
+                        real_model=route.real_model,
+                        provider=route.provider_name,
+                        input_tokens=usage.prompt_tokens,
+                        output_tokens=usage.completion_tokens,
+                        error_code="upstream_error" if error else "",
+                    )
+                except Exception as exc:  # noqa: BLE001 - tracing never breaks inference
+                    log.warning("conversation trace write failed", error=repr(exc))
 
     async def _write_record(self, req, route, request_id, usage, status, error) -> None:
         cost = route.pricing.cost(usage.prompt_tokens, usage.completion_tokens)
@@ -184,3 +216,5 @@ class GatewayService:
         await self._ledger.aclose()
         if self._enforcer is not None:
             await self._enforcer.store.aclose()
+        if self._trace_store is not None:
+            await self._trace_store.aclose()

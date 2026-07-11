@@ -189,6 +189,7 @@ func main() {
 		WithModelSecretKey(config.SecretFromEnv("COCOLA_MODEL_SECRET_KEY")).
 		WithConfigSecretKey(config.SecretFromEnv("COCOLA_CONFIG_SECRET_KEY")).
 		WithMinScheduleInterval(time.Duration(getenvInt("COCOLA_SCHEDULER_MIN_INTERVAL_SECS", 3600)) * time.Second)
+	svc.StartConversationTraceMaintenance(context.Background())
 	migrationCtx, migrationCancel := context.WithTimeout(context.Background(), 30*time.Second)
 	if err := svc.MigrateMCPRemoteURLs(migrationCtx); err != nil {
 		migrationCancel()
