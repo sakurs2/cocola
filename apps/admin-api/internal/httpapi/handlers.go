@@ -1114,7 +1114,7 @@ func llmModelInput(req llmModelReq, actor string) service.LLMModelInput {
 	}
 }
 
-// ---- scheduled system tasks ----
+// ---- scheduled tasks ----
 
 type scheduledTaskAttachmentReq struct {
 	Filename   string `json:"filename"`
@@ -1124,6 +1124,7 @@ type scheduledTaskAttachmentReq struct {
 }
 
 type scheduledTaskReq struct {
+	OwnerUserID  string                       `json:"owner_user_id,omitempty"`
 	Name         string                       `json:"name"`
 	Description  string                       `json:"description,omitempty"`
 	Status       string                       `json:"status,omitempty"`
@@ -1133,21 +1134,8 @@ type scheduledTaskReq struct {
 	Prompt       string                       `json:"prompt"`
 	ModelAlias   string                       `json:"model_alias"`
 	ConfigJSON   json.RawMessage              `json:"config_json,omitempty"`
+	ExpiresAt    json.RawMessage              `json:"expires_at"`
 	Attachments  []scheduledTaskAttachmentReq `json:"attachments,omitempty"`
-}
-
-func (a *API) createScheduledTask(w http.ResponseWriter, r *http.Request) {
-	var req scheduledTaskReq
-	if err := decode(r, &req); err != nil {
-		mapErr(w, err)
-		return
-	}
-	out, err := a.svc.CreateScheduledTask(r.Context(), scheduledTaskInput(req, actorOf(r), false))
-	if err != nil {
-		mapErr(w, err)
-		return
-	}
-	writeJSON(w, http.StatusCreated, out)
 }
 
 func (a *API) createMyScheduledTask(w http.ResponseWriter, r *http.Request) {
@@ -1157,7 +1145,12 @@ func (a *API) createMyScheduledTask(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	owner := actorOf(r)
-	out, err := a.svc.CreateUserScheduledTask(r.Context(), owner, scheduledTaskInput(req, owner, false))
+	in, err := scheduledTaskInput(req, owner, false)
+	if err != nil {
+		mapErr(w, err)
+		return
+	}
+	out, err := a.svc.CreateUserScheduledTask(r.Context(), owner, in)
 	if err != nil {
 		mapErr(w, err)
 		return
@@ -1207,7 +1200,12 @@ func (a *API) updateScheduledTask(w http.ResponseWriter, r *http.Request) {
 		mapErr(w, err)
 		return
 	}
-	out, err := a.svc.UpdateScheduledTask(r.Context(), chi.URLParam(r, "id"), scheduledTaskInput(req, actorOf(r), req.Attachments != nil))
+	in, err := scheduledTaskInput(req, actorOf(r), req.Attachments != nil)
+	if err != nil {
+		mapErr(w, err)
+		return
+	}
+	out, err := a.svc.UpdateScheduledTask(r.Context(), chi.URLParam(r, "id"), in)
 	if err != nil {
 		mapErr(w, err)
 		return
@@ -1222,7 +1220,12 @@ func (a *API) updateMyScheduledTask(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	owner := actorOf(r)
-	out, err := a.svc.UpdateUserScheduledTask(r.Context(), chi.URLParam(r, "id"), owner, scheduledTaskInput(req, owner, req.Attachments != nil))
+	in, err := scheduledTaskInput(req, owner, req.Attachments != nil)
+	if err != nil {
+		mapErr(w, err)
+		return
+	}
+	out, err := a.svc.UpdateUserScheduledTask(r.Context(), chi.URLParam(r, "id"), owner, in)
 	if err != nil {
 		mapErr(w, err)
 		return
@@ -1230,8 +1233,9 @@ func (a *API) updateMyScheduledTask(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, out)
 }
 
-func scheduledTaskInput(req scheduledTaskReq, actor string, replaceAttachments bool) service.ScheduledTaskInput {
-	return service.ScheduledTaskInput{
+func scheduledTaskInput(req scheduledTaskReq, actor string, replaceAttachments bool) (service.ScheduledTaskInput, error) {
+	in := service.ScheduledTaskInput{
+		OwnerUserID:        req.OwnerUserID,
 		Name:               req.Name,
 		Description:        req.Description,
 		Status:             req.Status,
@@ -1245,6 +1249,22 @@ func scheduledTaskInput(req scheduledTaskReq, actor string, replaceAttachments b
 		ReplaceAttachments: replaceAttachments,
 		Actor:              actor,
 	}
+	if req.ExpiresAt != nil {
+		in.ReplaceExpiresAt = true
+		raw := strings.TrimSpace(string(req.ExpiresAt))
+		if raw != "" && raw != "null" {
+			var value string
+			if err := json.Unmarshal(req.ExpiresAt, &value); err != nil {
+				return service.ScheduledTaskInput{}, service.ErrInvalidArg
+			}
+			expiresAt, err := time.Parse(time.RFC3339, strings.TrimSpace(value))
+			if err != nil {
+				return service.ScheduledTaskInput{}, service.ErrInvalidArg
+			}
+			in.ExpiresAt = expiresAt.UTC()
+		}
+	}
+	return in, nil
 }
 
 func (a *API) deleteMyScheduledTask(w http.ResponseWriter, r *http.Request) {

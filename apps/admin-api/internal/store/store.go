@@ -191,12 +191,11 @@ type PublicLLMModel struct {
 	Icon     LLMModelIcon `json:"icon"`
 }
 
-// ScheduledTask is an admin-created system task. ScheduleSpec and ConfigJSON
-// intentionally hold extensible JSON so new task options can land without
-// widening the core table for every experiment.
+// ScheduledTask is always owned by one user. OwnerType remains internal during
+// the expand/contract migration and is no longer part of the API contract.
 type ScheduledTask struct {
 	ID             string          `json:"id"`
-	OwnerType      string          `json:"owner_type"`
+	OwnerType      string          `json:"-"`
 	OwnerUserID    string          `json:"owner_user_id,omitempty"`
 	ConversationID string          `json:"conversation_id,omitempty"`
 	Name           string          `json:"name"`
@@ -209,6 +208,7 @@ type ScheduledTask struct {
 	ModelAlias     string          `json:"model_alias"`
 	MaxTurns       int             `json:"max_turns"`
 	ConfigJSON     json.RawMessage `json:"config_json"`
+	ExpiresAt      time.Time       `json:"expires_at,omitempty"`
 	NextRunAt      time.Time       `json:"next_run_at,omitempty"`
 	LastRunAt      time.Time       `json:"last_run_at,omitempty"`
 	RunCount       int64           `json:"run_count"`
@@ -521,7 +521,7 @@ type Store interface {
 	UpdateLLMModelRoute(ctx context.Context, m LLMModelRoute) error
 	DeleteLLMModelRoute(ctx context.Context, alias string) error
 
-	// Scheduled system tasks
+	// Scheduled tasks
 	CreateScheduledTask(ctx context.Context, task ScheduledTask, attachments []ScheduledTaskAttachment) error
 	GetScheduledTask(ctx context.Context, id string) (ScheduledTask, error)
 	GetScheduledTaskForOwner(ctx context.Context, id, ownerUserID string) (ScheduledTask, error)
@@ -532,6 +532,7 @@ type Store interface {
 	DeleteScheduledTaskForOwner(ctx context.Context, id, ownerUserID string) error
 	ListScheduledTaskAttachments(ctx context.Context, taskID string) ([]ScheduledTaskAttachment, error)
 	ListDueScheduledTasks(ctx context.Context, now time.Time, limit int) ([]ScheduledTask, error)
+	ExpireScheduledTasks(ctx context.Context, now time.Time, limit int) ([]ScheduledTask, error)
 	TryStartScheduledTaskRun(ctx context.Context, taskID string, run ScheduledTaskRun, nextRunAt time.Time) (ScheduledTask, bool, error)
 	GetScheduledTaskRun(ctx context.Context, id string) (ScheduledTaskRun, error)
 	ListScheduledTaskRuns(ctx context.Context, taskID, status string, limit int) ([]ScheduledTaskRun, error)

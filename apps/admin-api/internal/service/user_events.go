@@ -107,7 +107,11 @@ func (a *Admin) SubscribeUserEvents(ctx context.Context) (<-chan UserEvent, func
 }
 
 func (a *Admin) UserEventSnapshot(ctx context.Context, ownerUserID string) ([]UserEvent, error) {
-	tasks, err := a.store.ListScheduledTasksForOwner(ctx, ownerUserID)
+	owner, err := a.resolveScheduledTaskOwner(ctx, ownerUserID)
+	if err != nil {
+		return nil, err
+	}
+	tasks, err := a.store.ListScheduledTasksForOwner(ctx, owner.ID)
 	if err != nil {
 		return nil, err
 	}
@@ -128,14 +132,16 @@ func (a *Admin) UserEventSnapshot(ctx context.Context, ownerUserID string) ([]Us
 			if occurredAt.IsZero() {
 				occurredAt = now
 			}
-			events = append(events, scheduledTaskUserEvent(
+			event := scheduledTaskUserEvent(
 				UserEventScheduledTaskRunStarted,
 				task,
 				running[0],
 				"running",
 				"",
 				occurredAt,
-			))
+			)
+			event.UserID = owner.Email
+			events = append(events, event)
 			continue
 		}
 		if !task.LastRunAt.IsZero() && task.LastRunAt.After(recentCutoff) {
@@ -143,14 +149,16 @@ func (a *Admin) UserEventSnapshot(ctx context.Context, ownerUserID string) ([]Us
 			if task.LastStatus == "error" {
 				eventType = UserEventScheduledTaskRunFailed
 			}
-			events = append(events, scheduledTaskUserEvent(
+			event := scheduledTaskUserEvent(
 				eventType,
 				task,
 				store.ScheduledTaskRun{TaskID: task.ID, Status: task.LastStatus},
 				task.LastStatus,
 				task.LastError,
 				task.LastRunAt,
-			))
+			)
+			event.UserID = owner.Email
+			events = append(events, event)
 		}
 	}
 	return events, nil

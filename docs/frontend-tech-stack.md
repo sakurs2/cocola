@@ -75,7 +75,7 @@ Gateway SSE
 
 用户侧和 Admin 控制面的领域 icon 使用 **Phosphor Icons**，优先采用 `duotone`，用于：
 
-- Skills、MCP、Schedule、Chats 等一级导航。
+- Skills、MCP、Tasks、Chats 等一级导航。
 - 展开/收起侧边栏和用户工作台功能入口。
 - reasoning、answer、tool call、terminal、search、file 等 Agent 执行 rail 节点。
 - Admin 一级导航、页面身份和控制域模块入口。
@@ -125,6 +125,8 @@ shadcn/ui 在本项目中表示组件组织方式和 token 约定，不代表必
 - Chart.js 是当前 Admin 图表标准；不要在同一后台同时引入 Recharts 或 ECharts，除非现有方案无法满足明确需求。
 - React Flow 只在需要节点、边、缩放、拖拽和自动布局的真实图场景中引入；普通步骤列表或状态时间线继续使用常规 React 组件。
 - cmdk 用于命令搜索和大型可搜索选项集；小型固定选项使用 Dropdown Menu、Tabs 或原生控件。
+- Tasks 使用独立 `/tasks` 页面和 `TaskDrawer`：用户侧以真实任务卡片呈现并负责创建、编辑和启停；Admin 侧只提供紧凑管理表格、只读详情和删除能力。用户表单统一 Once / Hourly / Daily / Weekly / Monthly、时区与过期校验；不向用户暴露 Cron 或 Interval，新旧任务兼容逻辑留在 API 与调度层。
+- 定时任务始终归属于用户并通过 Gateway 以 Owner 身份执行，结果复用固定 Conversation 进入 Chat History。Admin 只有跨用户管理权限，不是一种任务类型，也不提供无归属任务创建入口。
 - Admin MCP 配置遵循“列表即状态、Drawer 即编辑”的单层结构。保存时只校验并安全持久化配置，不额外申请 sandbox；连接能力由首次真实 Agent 会话自然验证，不增加独立测试、健康页或发布状态。远程 URL 作为完整 secret 输入，界面只展示移除 userinfo、query 和 fragment 后的 `url_hint`。
 - Session Status 使用一份完整环境快照：agent-runtime 在 Skill 同步成功后补入 `kind=skill` 的 Loaded 组件，sandbox shim 继续提供真实的 `kind=mcp` 连接状态；前端按 Skills 与 MCP servers 分组并允许独立折叠，不在浏览器合并多个局部快照。
 - Environment 消息节点与 Session Status 职责分离：前者解释本轮为何尚未开始，只呈现阻塞性的环境准备；后者呈现会话能力和异步 MCP 连接。Gateway 以原始 JSON 保存 Environment 快照并按稳定 `part_id` 原位更新，未知 component 与字段不得被中间层丢弃。
@@ -139,6 +141,7 @@ shadcn/ui 在本项目中表示组件组织方式和 token 约定，不代表必
 - `apps/web/components/assistant-ui/thread.tsx`：聊天界面组合。
 - `apps/web/components/assistant-ui/session-status-panel.tsx`：当前会话环境与 MCP 加载状态的 Context Dock。
 - `apps/web/components/assistant-ui/app-sidebar.tsx`：用户侧 Phosphor 导航体系。
+- `apps/web/app/tasks/page.tsx`、`apps/web/components/scheduled-tasks/task-drawer.tsx`：用户任务卡片页与用户/Admin 共享编辑表单。
 - `apps/web/components/assistant-ui/rail.tsx`：Agent 过程 Phosphor 图标体系。
 - `apps/web/components/admin/admin-shell.tsx`：Admin 响应式侧栏、移动导航和控制面上下文。
 - `apps/web/components/admin/admin-ui.tsx`：Admin Page、Panel、Metric、Table、状态与 Drawer primitives。

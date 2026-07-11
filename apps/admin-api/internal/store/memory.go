@@ -812,7 +812,7 @@ func (m *Memory) DeleteLLMModelRoute(ctx context.Context, alias string) error {
 	return nil
 }
 
-// ---- Scheduled system tasks ----
+// ---- Scheduled tasks ----
 
 func cloneTask(t ScheduledTask) ScheduledTask {
 	t.ScheduleSpec = append([]byte(nil), t.ScheduleSpec...)
@@ -855,7 +855,7 @@ func (m *Memory) GetScheduledTaskForOwner(ctx context.Context, id, ownerUserID s
 	m.mu.RLock()
 	defer m.mu.RUnlock()
 	task, ok := m.tasks[id]
-	if !ok || task.OwnerType != "user" || task.OwnerUserID != ownerUserID {
+	if !ok || task.OwnerUserID != ownerUserID {
 		return ScheduledTask{}, ErrNotFound
 	}
 	return cloneTask(task), nil
@@ -877,7 +877,7 @@ func (m *Memory) ListScheduledTasksForOwner(ctx context.Context, ownerUserID str
 	defer m.mu.RUnlock()
 	out := make([]ScheduledTask, 0)
 	for _, task := range m.tasks {
-		if task.OwnerType == "user" && task.OwnerUserID == ownerUserID {
+		if task.OwnerUserID == ownerUserID {
 			out = append(out, cloneTask(task))
 		}
 	}
@@ -930,7 +930,7 @@ func (m *Memory) DeleteScheduledTaskForOwner(ctx context.Context, id, ownerUserI
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	task, ok := m.tasks[id]
-	if !ok || task.OwnerType != "user" || task.OwnerUserID != ownerUserID {
+	if !ok || task.OwnerUserID != ownerUserID {
 		return ErrNotFound
 	}
 	delete(m.tasks, id)
@@ -966,7 +966,7 @@ func (m *Memory) ListDueScheduledTasks(ctx context.Context, now time.Time, limit
 	defer m.mu.RUnlock()
 	out := make([]ScheduledTask, 0)
 	for _, task := range m.tasks {
-		if task.Status != "active" || task.NextRunAt.IsZero() || task.NextRunAt.After(now) {
+		if task.Status != "active" || task.OwnerUserID == "" || task.NextRunAt.IsZero() || task.NextRunAt.After(now) || (!task.ExpiresAt.IsZero() && task.ExpiresAt.Before(now)) {
 			continue
 		}
 		out = append(out, cloneTask(task))
@@ -978,6 +978,30 @@ func (m *Memory) ListDueScheduledTasks(ctx context.Context, now time.Time, limit
 	return out, nil
 }
 
+func (m *Memory) ExpireScheduledTasks(ctx context.Context, now time.Time, limit int) ([]ScheduledTask, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	candidates := make([]ScheduledTask, 0)
+	for _, task := range m.tasks {
+		if (task.Status == "active" || task.Status == "paused") && !task.ExpiresAt.IsZero() && task.ExpiresAt.Before(now) {
+			candidates = append(candidates, task)
+		}
+	}
+	sort.Slice(candidates, func(i, j int) bool { return candidates[i].ExpiresAt.Before(candidates[j].ExpiresAt) })
+	if limit > 0 && len(candidates) > limit {
+		candidates = candidates[:limit]
+	}
+	for i := range candidates {
+		task := candidates[i]
+		task.Status = "expired"
+		task.NextRunAt = time.Time{}
+		task.UpdatedAt = now
+		m.tasks[task.ID] = cloneTask(task)
+		candidates[i] = cloneTask(task)
+	}
+	return candidates, nil
+}
+
 func (m *Memory) TryStartScheduledTaskRun(ctx context.Context, taskID string, run ScheduledTaskRun, nextRunAt time.Time) (ScheduledTask, bool, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
@@ -985,7 +1009,7 @@ func (m *Memory) TryStartScheduledTaskRun(ctx context.Context, taskID string, ru
 	if !ok {
 		return ScheduledTask{}, false, ErrNotFound
 	}
-	if task.Status != "active" || task.NextRunAt.IsZero() || task.NextRunAt.After(run.ScheduledFor) {
+	if task.Status != "active" || task.OwnerUserID == "" || task.NextRunAt.IsZero() || task.NextRunAt.After(run.ScheduledFor) || (!task.ExpiresAt.IsZero() && task.ExpiresAt.Before(run.ScheduledFor)) {
 		return ScheduledTask{}, false, nil
 	}
 	for _, existing := range m.runs {
@@ -998,7 +1022,7 @@ func (m *Memory) TryStartScheduledTaskRun(ctx context.Context, taskID string, ru
 	}
 	task.NextRunAt = nextRunAt
 	task.UpdatedAt = run.UpdatedAt
-	if task.OwnerType == "user" && task.ConversationID == "" {
+	if task.ConversationID == "" {
 		task.ConversationID = "sched-" + task.ID
 	}
 	m.tasks[taskID] = cloneTask(task)
@@ -1085,6 +1109,8 @@ func (m *Memory) ExpireStaleScheduledTaskRuns(ctx context.Context, before, now t
 		task.UpdatedAt = now
 		if task.ScheduleKind == "once" && task.NextRunAt.IsZero() {
 			task.Status = "completed"
+		} else if !task.ExpiresAt.IsZero() && task.NextRunAt.IsZero() {
+			task.Status = "expired"
 		}
 		task.RunCount++
 		m.tasks[task.ID] = cloneTask(task)
@@ -1112,6 +1138,8 @@ func (m *Memory) UpdateScheduledTaskRun(ctx context.Context, run ScheduledTaskRu
 		task.NextRunAt = taskNextRunAt
 		if task.ScheduleKind == "once" && taskNextRunAt.IsZero() {
 			task.Status = "completed"
+		} else if !task.ExpiresAt.IsZero() && taskNextRunAt.IsZero() {
+			task.Status = "expired"
 		}
 		task.RunCount++
 		m.tasks[task.ID] = cloneTask(task)

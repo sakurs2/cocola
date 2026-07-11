@@ -4,26 +4,18 @@ import (
 	"bufio"
 	"bytes"
 	"context"
-	"encoding/base64"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"io"
 	"net/http"
 	"strings"
 	"time"
 
-	"google.golang.org/grpc"
-	"google.golang.org/grpc/credentials/insecure"
-	"google.golang.org/grpc/metadata"
-
 	"github.com/cocola-project/cocola/apps/admin-api/internal/store"
-	agentv1 "github.com/cocola-project/cocola/packages/proto/gen/go/cocola/agent/v1"
 )
 
 type SchedulerConfig struct {
 	Enabled        bool
-	AgentAddr      string
 	GatewayURL     string
 	WorkerID       string
 	PollEvery      time.Duration
@@ -36,7 +28,7 @@ func (a *Admin) StartScheduler(ctx context.Context, cfg SchedulerConfig) error {
 	if !cfg.Enabled {
 		return nil
 	}
-	if strings.TrimSpace(cfg.AgentAddr) == "" {
+	if strings.TrimSpace(cfg.GatewayURL) == "" {
 		return ErrInvalidArg
 	}
 	if cfg.WorkerID == "" {
@@ -54,18 +46,12 @@ func (a *Admin) StartScheduler(ctx context.Context, cfg SchedulerConfig) error {
 	if cfg.LeaseTimeout <= 0 {
 		cfg.LeaseTimeout = maxDuration(5*time.Minute, cfg.HeartbeatEvery*4)
 	}
-	conn, err := grpc.Dial(cfg.AgentAddr, grpc.WithTransportCredentials(insecure.NewCredentials()))
-	if err != nil {
-		return err
-	}
-	runner := &grpcTaskRunner{
-		rpc:        agentv1.NewAgentRuntimeServiceClient(conn),
+	runner := &gatewayTaskRunner{
 		admin:      a,
 		gatewayURL: strings.TrimRight(strings.TrimSpace(cfg.GatewayURL), "/"),
 		httpClient: &http.Client{},
 	}
 	go func() {
-		defer conn.Close()
 		a.schedulerLoop(ctx, cfg, runner)
 	}()
 	a.schedulerStarted.Store(true)
@@ -76,63 +62,13 @@ type taskRunner interface {
 	Run(ctx context.Context, task store.ScheduledTask, attachments []store.ScheduledTaskAttachment, onEvent func(kind string, data map[string]string)) (string, error)
 }
 
-type grpcTaskRunner struct {
-	rpc        agentv1.AgentRuntimeServiceClient
+type gatewayTaskRunner struct {
 	admin      *Admin
 	gatewayURL string
 	httpClient *http.Client
 }
 
-func (r *grpcTaskRunner) Run(ctx context.Context, task store.ScheduledTask, attachments []store.ScheduledTaskAttachment, onEvent func(kind string, data map[string]string)) (string, error) {
-	if task.OwnerType == "user" {
-		return r.runUserTask(ctx, task, attachments, onEvent)
-	}
-	if strings.TrimSpace(task.ModelAlias) != "" {
-		ctx = metadata.AppendToOutgoingContext(ctx, "x-cocola-model-alias", strings.TrimSpace(task.ModelAlias))
-	}
-	atts := make([]*agentv1.Attachment, 0, len(attachments))
-	for _, att := range attachments {
-		var content []byte
-		if att.ContentB64 != "" {
-			decoded, err := base64.StdEncoding.DecodeString(att.ContentB64)
-			if err != nil {
-				return "", fmt.Errorf("attachment %s: %w", att.Filename, err)
-			}
-			content = decoded
-		}
-		atts = append(atts, &agentv1.Attachment{
-			Filename: att.Filename,
-			Content:  content,
-			Mime:     att.Mime,
-			OssKey:   att.ObjectKey,
-			Size:     att.SizeBytes,
-		})
-	}
-	sessionID := "sched-" + task.ID + "-" + newID()
-	stream, err := r.rpc.Query(ctx, &agentv1.QueryRequest{
-		UserId:      "system:scheduler",
-		SessionId:   sessionID,
-		Prompt:      task.Prompt,
-		MaxTurns:    int32(task.MaxTurns),
-		Attachments: atts,
-	})
-	if err != nil {
-		return sessionID, err
-	}
-	for {
-		msg, err := stream.Recv()
-		if errors.Is(err, io.EOF) {
-			return sessionID, nil
-		}
-		if err != nil {
-			return sessionID, err
-		}
-		data := msg.GetData()
-		onEvent(msg.GetKind(), data)
-	}
-}
-
-func (r *grpcTaskRunner) runUserTask(ctx context.Context, task store.ScheduledTask, attachments []store.ScheduledTaskAttachment, onEvent func(kind string, data map[string]string)) (string, error) {
+func (r *gatewayTaskRunner) Run(ctx context.Context, task store.ScheduledTask, attachments []store.ScheduledTaskAttachment, onEvent func(kind string, data map[string]string)) (string, error) {
 	if r.admin == nil || strings.TrimSpace(r.gatewayURL) == "" {
 		return task.ConversationID, ErrNotConfigured
 	}
@@ -144,7 +80,11 @@ func (r *grpcTaskRunner) runUserTask(ctx context.Context, task store.ScheduledTa
 	if deadline, ok := ctx.Deadline(); ok {
 		tokenTTL = time.Until(deadline) + 5*time.Minute
 	}
-	tok, err := r.admin.IssueRuntimeToken(ctx, task.OwnerUserID, "", tokenTTL)
+	owner, err := r.admin.store.GetAuthUser(ctx, task.OwnerUserID)
+	if err != nil || isAuthUserUnavailable(owner) {
+		return sessionID, ErrAccountDisabled
+	}
+	tok, err := r.admin.IssueRuntimeToken(ctx, owner.Email, "", tokenTTL)
 	if err != nil {
 		return sessionID, err
 	}
@@ -240,6 +180,7 @@ func (a *Admin) runSchedulerOnce(ctx context.Context, cfg SchedulerConfig, runne
 	now := a.now().UTC()
 	cfg = a.effectiveSchedulerConfig(ctx, cfg)
 	a.expireStaleScheduledTaskRuns(ctx, cfg, now)
+	_, _ = a.store.ExpireScheduledTasks(ctx, now, 100)
 	if !cfg.Enabled {
 		return
 	}
@@ -254,6 +195,22 @@ func (a *Admin) runSchedulerOnce(ctx context.Context, cfg SchedulerConfig, runne
 
 func (a *Admin) executeDueTask(ctx context.Context, cfg SchedulerConfig, runner taskRunner, task store.ScheduledTask) {
 	now := a.now().UTC()
+	if !task.ExpiresAt.IsZero() && task.ExpiresAt.Before(now) {
+		task.Status = TaskStatusExpired
+		task.NextRunAt = time.Time{}
+		task.UpdatedAt = now
+		_ = a.store.UpdateScheduledTask(ctx, task, false, nil)
+		return
+	}
+	owner, ownerErr := a.store.GetAuthUser(ctx, task.OwnerUserID)
+	if ownerErr != nil || !owner.Enabled {
+		task.Status = TaskStatusPaused
+		task.NextRunAt = time.Time{}
+		task.LastError = "Task owner is disabled or unavailable"
+		task.UpdatedAt = now
+		_ = a.store.UpdateScheduledTask(ctx, task, false, nil)
+		return
+	}
 	next, err := nextRunAfterTask(task, now, a.MinScheduleInterval())
 	if err != nil {
 		next = now.Add(5 * time.Minute)
@@ -276,15 +233,14 @@ func (a *Admin) executeDueTask(ctx context.Context, cfg SchedulerConfig, runner 
 	if err != nil || !ok {
 		return
 	}
-	if claimedTask.OwnerType == "user" {
-		a.publishScheduledTaskUserEvent(ctx, UserEventScheduledTaskRunStarted, claimedTask, run, "running", "")
-	}
+	a.publishScheduledTaskUserEvent(ctx, UserEventScheduledTaskRunStarted, claimedTask, run, "running", "")
 	attachments, err := a.store.ListScheduledTaskAttachments(ctx, claimedTask.ID)
 	if err != nil {
-		a.finishRun(ctx, run, next, "error", "", err.Error())
-		if claimedTask.OwnerType == "user" {
-			a.publishScheduledTaskUserEvent(ctx, UserEventScheduledTaskRunFailed, claimedTask, run, "error", err.Error())
+		if finishErr := a.finishRun(ctx, run, next, "error", "", err.Error()); finishErr != nil {
+			a.handleScheduledTaskFinishError(ctx, claimedTask, run, finishErr)
+			return
 		}
+		a.publishScheduledTaskUserEvent(ctx, UserEventScheduledTaskRunFailed, claimedTask, run, "error", err.Error())
 		return
 	}
 	runCtx, cancel := context.WithTimeout(ctx, cfg.RunTimeout)
@@ -309,16 +265,18 @@ func (a *Admin) executeDueTask(ctx context.Context, cfg SchedulerConfig, runner 
 	})
 	run.SessionID = sessionID
 	if err != nil {
-		a.finishRun(ctx, run, next, "error", strings.Join(output, ""), err.Error())
-		if claimedTask.OwnerType == "user" {
-			a.publishScheduledTaskUserEvent(ctx, UserEventScheduledTaskRunFailed, claimedTask, run, "error", err.Error())
+		if finishErr := a.finishRun(ctx, run, next, "error", strings.Join(output, ""), err.Error()); finishErr != nil {
+			a.handleScheduledTaskFinishError(ctx, claimedTask, run, finishErr)
+			return
 		}
+		a.publishScheduledTaskUserEvent(ctx, UserEventScheduledTaskRunFailed, claimedTask, run, "error", err.Error())
 		return
 	}
-	a.finishRun(ctx, run, next, "success", strings.Join(output, ""), "")
-	if claimedTask.OwnerType == "user" {
-		a.publishScheduledTaskUserEvent(ctx, UserEventScheduledTaskRunFinished, claimedTask, run, "success", "")
+	if finishErr := a.finishRun(ctx, run, next, "success", strings.Join(output, ""), ""); finishErr != nil {
+		a.handleScheduledTaskFinishError(ctx, claimedTask, run, finishErr)
+		return
 	}
+	a.publishScheduledTaskUserEvent(ctx, UserEventScheduledTaskRunFinished, claimedTask, run, "success", "")
 }
 
 func (a *Admin) startScheduledTaskRunHeartbeat(ctx context.Context, cfg SchedulerConfig, runID string) func() {
@@ -358,28 +316,39 @@ func (a *Admin) expireStaleScheduledTaskRuns(ctx context.Context, cfg SchedulerC
 	}
 	for _, run := range expired {
 		task, err := a.store.GetScheduledTask(ctx, run.TaskID)
-		if err != nil || task.OwnerType != "user" {
+		if err != nil || strings.TrimSpace(task.OwnerUserID) == "" {
 			continue
 		}
 		a.publishScheduledTaskUserEvent(ctx, UserEventScheduledTaskRunFailed, task, run, "error", errText)
 	}
 }
 
-func (a *Admin) finishRun(ctx context.Context, run store.ScheduledTaskRun, next time.Time, status, output, errText string) {
+func (a *Admin) finishRun(ctx context.Context, run store.ScheduledTaskRun, next time.Time, status, output, errText string) error {
 	now := a.now().UTC()
 	run.Status = status
 	run.OutputText = summarizeOutput(output)
 	run.Error = errText
 	run.FinishedAt = now
 	run.UpdatedAt = now
-	_ = a.store.UpdateScheduledTaskRun(ctx, run, next, true)
+	return a.store.UpdateScheduledTaskRun(ctx, run, next, true)
+}
+
+func (a *Admin) handleScheduledTaskFinishError(ctx context.Context, task store.ScheduledTask, run store.ScheduledTaskRun, err error) {
+	a.audit(ctx, "scheduler", "scheduled_task.finish_failed", task.ID, "error="+err.Error())
+	a.publishScheduledTaskUserEvent(ctx, UserEventScheduledTaskRunFailed, task, run, "error", "Task result could not be saved")
 }
 
 func (a *Admin) publishScheduledTaskUserEvent(ctx context.Context, eventType string, task store.ScheduledTask, run store.ScheduledTaskRun, status, errText string) {
-	if task.OwnerType != "user" || strings.TrimSpace(task.OwnerUserID) == "" {
+	if strings.TrimSpace(task.OwnerUserID) == "" {
 		return
 	}
-	if err := a.PublishUserEvent(ctx, scheduledTaskUserEvent(eventType, task, run, status, errText, a.now().UTC())); err != nil {
+	owner, err := a.store.GetAuthUser(ctx, task.OwnerUserID)
+	if err != nil {
+		return
+	}
+	event := scheduledTaskUserEvent(eventType, task, run, status, errText, a.now().UTC())
+	event.UserID = owner.Email
+	if err := a.PublishUserEvent(ctx, event); err != nil {
 		// Event delivery is best-effort; the scheduled run and conversation are
 		// already persisted on the authoritative path.
 		return

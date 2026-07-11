@@ -13,27 +13,6 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ path
   return proxyAdmin(req, await adminPath(params), authResult.user);
 }
 
-export async function PATCH(req: NextRequest, { params }: { params: Promise<{ path: string[] }> }) {
-  const authResult = await requireAdmin();
-  if (isAuthFail(authResult)) return authResult.response;
-  return proxyAdmin(req, await adminPath(params), authResult.user, {
-    method: "PATCH",
-    body: await req.text(),
-    contentType: req.headers.get("content-type") ?? "application/json",
-  });
-}
-
-export async function POST(req: NextRequest, { params }: { params: Promise<{ path: string[] }> }) {
-  const authResult = await requireAdmin();
-  if (isAuthFail(authResult)) return authResult.response;
-  const body = await req.text();
-  return proxyAdmin(req, await adminPath(params), authResult.user, {
-    method: "POST",
-    body,
-    contentType: req.headers.get("content-type") ?? "application/json",
-  });
-}
-
 export async function DELETE(
   req: NextRequest,
   { params }: { params: Promise<{ path: string[] }> },

@@ -41,6 +41,7 @@ var (
 	ErrPermissionDenied    = errors.New("service: permission denied")
 	ErrScheduleTooFrequent = errors.New("service: schedule frequency below minimum")
 	ErrScheduleInPast      = errors.New("service: schedule time is in the past")
+	ErrScheduleExpiration  = errors.New("service: task expiration does not allow a future run")
 	ErrNotFound            = store.ErrNotFound
 	ErrConflict            = store.ErrConflict
 )
@@ -366,6 +367,11 @@ func (a *Admin) SetAuthUser(ctx context.Context, id string, in AuthUserInput) (s
 	if err := a.store.UpdateAuthUser(ctx, u); err != nil {
 		return store.AuthUser{}, err
 	}
+	if !u.Enabled {
+		if err := a.pauseScheduledTasksForUnavailableOwner(ctx, u.ID, "Owner disabled", in.Actor); err != nil {
+			return store.AuthUser{}, err
+		}
+	}
 	a.audit(ctx, in.Actor, "auth_user.update", u.ID, "email="+u.Email+" role="+u.Role+" enabled="+strconv.FormatBool(u.Enabled))
 	return u, nil
 }
@@ -418,7 +424,33 @@ func (a *Admin) DeleteAuthUser(ctx context.Context, id, actor string) error {
 	if err := a.store.DeleteAuthUser(ctx, id, actor, now); err != nil {
 		return err
 	}
+	if err := a.pauseScheduledTasksForUnavailableOwner(ctx, id, "Owner deleted", actor); err != nil {
+		return err
+	}
 	a.audit(ctx, actor, "auth_user.delete", id, "email="+u.Email)
+	return nil
+}
+
+func (a *Admin) pauseScheduledTasksForUnavailableOwner(ctx context.Context, ownerID, reason, actor string) error {
+	tasks, err := a.store.ListScheduledTasksForOwner(ctx, ownerID)
+	if err != nil {
+		return err
+	}
+	now := a.now().UTC()
+	for _, task := range tasks {
+		if task.Status != TaskStatusActive {
+			continue
+		}
+		task.Status = TaskStatusPaused
+		task.NextRunAt = time.Time{}
+		task.LastError = reason
+		task.UpdatedAt = now
+		task.UpdatedBy = actor
+		if err := a.store.UpdateScheduledTask(ctx, task, false, nil); err != nil {
+			return err
+		}
+		a.audit(ctx, actor, "scheduled_task.pause", task.ID, "reason="+reason)
+	}
 	return nil
 }
 

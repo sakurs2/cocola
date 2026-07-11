@@ -45,10 +45,13 @@ func TestUserEventSnapshotIncludesRunningUserTask(t *testing.T) {
 	now := time.Date(2026, 7, 5, 10, 0, 0, 0, time.UTC)
 	mem := store.NewMemory()
 	svc := New(mem, nil, func() time.Time { return now })
+	if err := mem.CreateAuthUser(ctx, store.AuthUser{ID: "user-alice", Username: "alice", Email: "alice@example.com", Enabled: true}); err != nil {
+		t.Fatal(err)
+	}
 	task := store.ScheduledTask{
 		ID:             "task-1",
 		OwnerType:      "user",
-		OwnerUserID:    "alice@example.com",
+		OwnerUserID:    "user-alice",
 		ConversationID: "sched-task-1",
 		Name:           "Time query",
 		Status:         TaskStatusActive,
@@ -94,10 +97,13 @@ func TestUserEventSnapshotIgnoresStaleRunningRunAfterTaskCompleted(t *testing.T)
 	now := time.Date(2026, 7, 5, 10, 0, 0, 0, time.UTC)
 	mem := store.NewMemory()
 	svc := New(mem, nil, func() time.Time { return now })
+	if err := mem.CreateAuthUser(ctx, store.AuthUser{ID: "user-alice", Username: "alice", Email: "alice@example.com", Enabled: true}); err != nil {
+		t.Fatal(err)
+	}
 	task := store.ScheduledTask{
 		ID:             "task-1",
 		OwnerType:      "user",
-		OwnerUserID:    "alice@example.com",
+		OwnerUserID:    "user-alice",
 		ConversationID: "sched-task-1",
 		Name:           "Time query",
 		Status:         TaskStatusActive,

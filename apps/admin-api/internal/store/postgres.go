@@ -1035,19 +1035,22 @@ func (p *Postgres) DeleteLLMModelRoute(ctx context.Context, alias string) error 
 	return nil
 }
 
-// ---- Scheduled system tasks ----
+// ---- Scheduled tasks ----
 
-const scheduledTaskCols = `id, owner_type, owner_user_id, conversation_id, name, description, status, schedule_kind, schedule_spec, timezone, prompt, model_alias, max_turns, config_json, next_run_at, last_run_at, run_count, last_status, last_error, created_at, updated_at, created_by, updated_by`
+const scheduledTaskCols = `id, owner_type, owner_user_id, conversation_id, name, description, status, schedule_kind, schedule_spec, timezone, prompt, model_alias, max_turns, config_json, expires_at, next_run_at, last_run_at, run_count, last_status, last_error, created_at, updated_at, created_by, updated_by`
 
 func scanScheduledTask(row pgx.Row) (ScheduledTask, error) {
 	var task ScheduledTask
-	var nextRun, lastRun *time.Time
+	var expiresAt, nextRun, lastRun *time.Time
 	err := row.Scan(&task.ID, &task.OwnerType, &task.OwnerUserID, &task.ConversationID, &task.Name, &task.Description, &task.Status,
 		&task.ScheduleKind, &task.ScheduleSpec, &task.Timezone, &task.Prompt, &task.ModelAlias,
-		&task.MaxTurns, &task.ConfigJSON, &nextRun, &lastRun, &task.RunCount, &task.LastStatus,
+		&task.MaxTurns, &task.ConfigJSON, &expiresAt, &nextRun, &lastRun, &task.RunCount, &task.LastStatus,
 		&task.LastError, &task.CreatedAt, &task.UpdatedAt, &task.CreatedBy, &task.UpdatedBy)
 	if err != nil {
 		return ScheduledTask{}, err
+	}
+	if expiresAt != nil {
+		task.ExpiresAt = *expiresAt
 	}
 	if nextRun != nil {
 		task.NextRunAt = *nextRun
@@ -1071,11 +1074,11 @@ func (p *Postgres) CreateScheduledTask(ctx context.Context, task ScheduledTask, 
 	}
 	defer tx.Rollback(ctx)
 	const q = `INSERT INTO scheduled_tasks (` + scheduledTaskCols + `)
-		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23)`
+		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23,$24)`
 	_, err = tx.Exec(ctx, q,
 		task.ID, task.OwnerType, task.OwnerUserID, task.ConversationID, task.Name, task.Description, task.Status, task.ScheduleKind,
 		task.ScheduleSpec, task.Timezone, task.Prompt, task.ModelAlias, task.MaxTurns,
-		task.ConfigJSON, nullableTime(task.NextRunAt), nullableTime(task.LastRunAt), task.RunCount,
+		task.ConfigJSON, nullableTime(task.ExpiresAt), nullableTime(task.NextRunAt), nullableTime(task.LastRunAt), task.RunCount,
 		task.LastStatus, task.LastError, task.CreatedAt, task.UpdatedAt, task.CreatedBy, task.UpdatedBy)
 	if isUniqueViolation(err) {
 		return ErrConflict
@@ -1119,7 +1122,7 @@ func (p *Postgres) GetScheduledTask(ctx context.Context, id string) (ScheduledTa
 
 func (p *Postgres) GetScheduledTaskForOwner(ctx context.Context, id, ownerUserID string) (ScheduledTask, error) {
 	row := p.pool.QueryRow(ctx, `SELECT `+scheduledTaskCols+` FROM scheduled_tasks
-		WHERE id=$1 AND owner_type='user' AND owner_user_id=$2`, id, ownerUserID)
+		WHERE id=$1 AND owner_user_id=$2`, id, ownerUserID)
 	task, err := scanScheduledTask(row)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return ScheduledTask{}, ErrNotFound
@@ -1146,7 +1149,7 @@ func (p *Postgres) ListScheduledTasks(ctx context.Context) ([]ScheduledTask, err
 
 func (p *Postgres) ListScheduledTasksForOwner(ctx context.Context, ownerUserID string) ([]ScheduledTask, error) {
 	rows, err := p.pool.Query(ctx, `SELECT `+scheduledTaskCols+` FROM scheduled_tasks
-		WHERE owner_type='user' AND owner_user_id=$1 ORDER BY updated_at DESC`, ownerUserID)
+		WHERE owner_user_id=$1 ORDER BY updated_at DESC`, ownerUserID)
 	if err != nil {
 		return nil, err
 	}
@@ -1171,14 +1174,14 @@ func (p *Postgres) UpdateScheduledTask(ctx context.Context, task ScheduledTask, 
 	const q = `UPDATE scheduled_tasks
 		SET owner_type=$2, owner_user_id=$3, conversation_id=$4, name=$5, description=$6,
 		    status=$7, schedule_kind=$8, schedule_spec=$9, timezone=$10, prompt=$11,
-		    model_alias=$12, max_turns=$13, config_json=$14, next_run_at=$15,
-		    last_run_at=$16, run_count=$17, last_status=$18, last_error=$19,
-		    created_at=$20, updated_at=$21, created_by=$22, updated_by=$23
+		    model_alias=$12, max_turns=$13, config_json=$14, expires_at=$15, next_run_at=$16,
+		    last_run_at=$17, run_count=$18, last_status=$19, last_error=$20,
+		    created_at=$21, updated_at=$22, created_by=$23, updated_by=$24
 		WHERE id=$1`
 	ct, err := tx.Exec(ctx, q,
 		task.ID, task.OwnerType, task.OwnerUserID, task.ConversationID, task.Name, task.Description, task.Status, task.ScheduleKind,
 		task.ScheduleSpec, task.Timezone, task.Prompt, task.ModelAlias, task.MaxTurns,
-		task.ConfigJSON, nullableTime(task.NextRunAt), nullableTime(task.LastRunAt), task.RunCount,
+		task.ConfigJSON, nullableTime(task.ExpiresAt), nullableTime(task.NextRunAt), nullableTime(task.LastRunAt), task.RunCount,
 		task.LastStatus, task.LastError, task.CreatedAt, task.UpdatedAt, task.CreatedBy, task.UpdatedBy)
 	if err != nil {
 		return err
@@ -1209,7 +1212,7 @@ func (p *Postgres) DeleteScheduledTask(ctx context.Context, id string) error {
 }
 
 func (p *Postgres) DeleteScheduledTaskForOwner(ctx context.Context, id, ownerUserID string) error {
-	ct, err := p.pool.Exec(ctx, `DELETE FROM scheduled_tasks WHERE id=$1 AND owner_type='user' AND owner_user_id=$2`, id, ownerUserID)
+	ct, err := p.pool.Exec(ctx, `DELETE FROM scheduled_tasks WHERE id=$1 AND owner_user_id=$2`, id, ownerUserID)
 	if err != nil {
 		return err
 	}
@@ -1239,7 +1242,8 @@ func (p *Postgres) ListScheduledTaskAttachments(ctx context.Context, taskID stri
 
 func (p *Postgres) ListDueScheduledTasks(ctx context.Context, now time.Time, limit int) ([]ScheduledTask, error) {
 	q := `SELECT ` + scheduledTaskCols + ` FROM scheduled_tasks
-		WHERE status='active' AND next_run_at IS NOT NULL AND next_run_at <= $1
+		WHERE status='active' AND owner_user_id <> '' AND next_run_at IS NOT NULL AND next_run_at <= $1
+		  AND (expires_at IS NULL OR expires_at >= $1)
 		ORDER BY next_run_at ASC`
 	args := []any{now}
 	if limit > 0 {
@@ -1247,6 +1251,34 @@ func (p *Postgres) ListDueScheduledTasks(ctx context.Context, now time.Time, lim
 		args = append(args, limit)
 	}
 	rows, err := p.pool.Query(ctx, q, args...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := make([]ScheduledTask, 0)
+	for rows.Next() {
+		task, err := scanScheduledTask(rows)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, task)
+	}
+	return out, rows.Err()
+}
+
+func (p *Postgres) ExpireScheduledTasks(ctx context.Context, now time.Time, limit int) ([]ScheduledTask, error) {
+	if limit <= 0 {
+		limit = 50
+	}
+	rows, err := p.pool.Query(ctx, `WITH expired AS (
+		SELECT id FROM scheduled_tasks
+		WHERE status IN ('active','paused') AND expires_at IS NOT NULL AND expires_at < $1
+		ORDER BY expires_at ASC LIMIT $2 FOR UPDATE SKIP LOCKED
+	)
+	UPDATE scheduled_tasks AS task
+	SET status='expired', next_run_at=NULL, updated_at=$1
+	WHERE task.id IN (SELECT id FROM expired)
+	RETURNING `+scheduledTaskCols, now, limit)
 	if err != nil {
 		return nil, err
 	}
@@ -1270,6 +1302,7 @@ func (p *Postgres) TryStartScheduledTaskRun(ctx context.Context, taskID string, 
 	defer tx.Rollback(ctx)
 	row := tx.QueryRow(ctx, `SELECT `+scheduledTaskCols+` FROM scheduled_tasks
 		WHERE id=$1 AND status='active' AND next_run_at IS NOT NULL AND next_run_at <= $2
+		AND owner_user_id <> '' AND (expires_at IS NULL OR expires_at >= $2)
 		AND NOT EXISTS (
 			SELECT 1 FROM scheduled_task_runs
 			WHERE task_id=$1 AND status IN ('queued','running')
@@ -1298,16 +1331,13 @@ func (p *Postgres) TryStartScheduledTaskRun(ctx context.Context, taskID string, 
 	_, err = tx.Exec(ctx, `UPDATE scheduled_tasks
 		SET next_run_at=$2,
 		    updated_at=$3,
-		    conversation_id=CASE
-		        WHEN owner_type='user' AND conversation_id='' THEN 'sched-' || id
-		        ELSE conversation_id
-		    END
+		    conversation_id=CASE WHEN conversation_id='' THEN 'sched-' || id ELSE conversation_id END
 		WHERE id=$1`,
 		taskID, nullableTime(nextRunAt), run.UpdatedAt)
 	if err != nil {
 		return ScheduledTask{}, false, err
 	}
-	if task.OwnerType == "user" && task.ConversationID == "" {
+	if task.ConversationID == "" {
 		task.ConversationID = "sched-" + task.ID
 	}
 	return task, true, tx.Commit(ctx)
@@ -1436,7 +1466,11 @@ func (p *Postgres) ExpireStaleScheduledTaskRuns(ctx context.Context, before, now
 			continue
 		}
 		ct, err = tx.Exec(ctx, `UPDATE scheduled_tasks
-			SET status=CASE WHEN schedule_kind='once' AND next_run_at IS NULL THEN 'completed' ELSE status END,
+			SET status=CASE
+			        WHEN schedule_kind='once' AND next_run_at IS NULL THEN 'completed'
+			        WHEN expires_at IS NOT NULL AND next_run_at IS NULL THEN 'expired'
+			        ELSE status
+			    END,
 			    last_run_at=$2, run_count=run_count+1, last_status=$3, last_error=$4, updated_at=$2
 			WHERE id=$1`,
 			run.TaskID, run.FinishedAt, run.Status, run.Error)
@@ -1475,9 +1509,13 @@ func (p *Postgres) UpdateScheduledTaskRun(ctx context.Context, run ScheduledTask
 	}
 	if terminal {
 		ct, err = tx.Exec(ctx, `UPDATE scheduled_tasks
-			SET status=CASE WHEN schedule_kind='once' AND $5 IS NULL THEN 'completed' ELSE status END,
+			SET status=CASE
+			        WHEN schedule_kind='once' AND $5::timestamptz IS NULL THEN 'completed'
+			        WHEN expires_at IS NOT NULL AND $5::timestamptz IS NULL THEN 'expired'
+			        ELSE status
+			    END,
 			    last_run_at=$2, run_count=run_count+1, last_status=$3, last_error=$4,
-			    next_run_at=$5, updated_at=$6
+			    next_run_at=$5::timestamptz, updated_at=$6
 			WHERE id=$1`, run.TaskID, nullableTime(run.FinishedAt), run.Status, run.Error, nullableTime(taskNextRunAt), run.UpdatedAt)
 		if err != nil {
 			return err

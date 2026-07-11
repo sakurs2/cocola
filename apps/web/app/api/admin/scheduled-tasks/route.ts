@@ -13,16 +13,6 @@ export async function GET(req: NextRequest) {
   return proxyAdmin(req, "/admin/scheduled-tasks", authResult.user);
 }
 
-export async function POST(req: NextRequest) {
-  const authResult = await requireAdmin();
-  if (isAuthFail(authResult)) return authResult.response;
-  return proxyAdmin(req, "/admin/scheduled-tasks", authResult.user, {
-    method: "POST",
-    body: await req.text(),
-    contentType: req.headers.get("content-type") ?? "application/json",
-  });
-}
-
 async function proxyAdmin(
   req: NextRequest,
   path: string,

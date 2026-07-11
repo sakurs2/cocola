@@ -30,11 +30,8 @@
 //	COCOLA_BOOTSTRAP_ADMIN_PRINT
 //	                           true => print dev bootstrap credentials. Use
 //	                           only for local dev; never in production.
-//	COCOLA_SCHEDULER_ENABLED   run admin-created system scheduled tasks
-//	                           (default true).
-//	COCOLA_AGENT_ADDR          agent-runtime gRPC address for scheduled tasks
-//	                           (default 127.0.0.1:50061).
-//	COCOLA_GATEWAY_URL         llm-gateway URL for user scheduled tasks
+//	COCOLA_SCHEDULER_ENABLED   run user-owned scheduled tasks (default true).
+//	COCOLA_GATEWAY_URL         llm-gateway URL for scheduled task execution
 //	                           (default http://127.0.0.1:8080).
 //	COCOLA_SCHEDULER_POLL_SECS due-task scan cadence (default 60).
 //	COCOLA_SCHEDULER_RUN_TIMEOUT_SECS
@@ -44,7 +41,7 @@
 //	COCOLA_SCHEDULER_LEASE_TIMEOUT_SECS
 //	                           stale running task timeout (default 300).
 //	COCOLA_SCHEDULER_MIN_INTERVAL_SECS
-//	                           minimum schedule interval accepted (default 3600).
+//	                           minimum legacy custom interval (default 3600).
 //	COCOLA_CONFIG_SECRET_KEY    encrypts admin-managed runtime config secrets
 //	                           (MCP URL/env/header). Empty falls back to
 //	                           COCOLA_MODEL_SECRET_KEY for compatibility.
@@ -273,7 +270,6 @@ func main() {
 	if !envBoolFalse(os.Getenv("COCOLA_SCHEDULER_ENABLED")) {
 		if err := svc.StartScheduler(context.Background(), service.SchedulerConfig{
 			Enabled:    true,
-			AgentAddr:  getenv("COCOLA_AGENT_ADDR", "127.0.0.1:50061"),
 			GatewayURL: getenv("COCOLA_GATEWAY_URL", "http://127.0.0.1:8080"),
 			WorkerID:   getenv("COCOLA_SCHEDULER_WORKER_ID", "admin-api"),
 			PollEvery:  time.Duration(getenvInt("COCOLA_SCHEDULER_POLL_SECS", 60)) * time.Second,

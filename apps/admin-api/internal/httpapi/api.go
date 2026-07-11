@@ -194,14 +194,9 @@ func (a *API) Router() http.Handler {
 		})
 
 		r.Route("/scheduled-tasks", func(r chi.Router) {
-			r.Post("/", a.createScheduledTask)
 			r.Get("/", a.listScheduledTasks)
 			r.Get("/{id}", a.getScheduledTask)
-			r.Patch("/{id}", a.updateScheduledTask)
 			r.Delete("/{id}", a.deleteScheduledTask)
-			r.Post("/{id}/pause", a.pauseScheduledTask)
-			r.Post("/{id}/resume", a.resumeScheduledTask)
-			r.Post("/{id}/run", a.runScheduledTaskNow)
 		})
 
 		r.Route("/scheduled-task-runs", func(r chi.Router) {
@@ -353,6 +348,8 @@ func mapErr(w http.ResponseWriter, err error) {
 		writeErr(w, http.StatusBadRequest, "INVALID_SCHEDULE_FREQUENCY", "scheduled tasks can run at most once per hour")
 	case errors.Is(err, service.ErrScheduleInPast):
 		writeErr(w, http.StatusBadRequest, "INVALID_SCHEDULE_TIME", "scheduled time must be in the future")
+	case errors.Is(err, service.ErrScheduleExpiration):
+		writeErr(w, http.StatusBadRequest, "INVALID_EXPIRATION", "expiration must allow at least one future run")
 	case errors.Is(err, service.ErrInvalidArg):
 		writeErr(w, http.StatusBadRequest, "INVALID_ARGUMENT", err.Error())
 	case errors.Is(err, store.ErrNotFound):

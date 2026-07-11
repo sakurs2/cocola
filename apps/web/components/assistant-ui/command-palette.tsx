@@ -2,7 +2,17 @@
 
 import * as Dialog from "@radix-ui/react-dialog";
 import { Command } from "cmdk";
-import { Bot, History, Search, Sparkles, PlugZap, UserRound, ShieldCheck, Plus } from "lucide-react";
+import {
+  Bot,
+  CalendarClock,
+  History,
+  Search,
+  Sparkles,
+  PlugZap,
+  UserRound,
+  ShieldCheck,
+  Plus,
+} from "lucide-react";
 import { useSession } from "next-auth/react";
 import { usePathname, useRouter } from "next/navigation";
 import { useEffect, useMemo, useState } from "react";
@@ -39,6 +49,13 @@ export function CommandPalette() {
           if (pathname !== "/") router.push("/");
           newConversation();
         },
+      },
+      {
+        id: "tasks",
+        label: "Tasks",
+        hint: "Manage scheduled work",
+        icon: CalendarClock,
+        run: () => router.push("/tasks"),
       },
       {
         id: "skills",

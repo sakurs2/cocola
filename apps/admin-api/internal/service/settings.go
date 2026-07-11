@@ -85,7 +85,7 @@ func settingDefinitions() []SystemSettingDefinition {
 		},
 		{
 			Key: SettingSchedulerMinIntervalSecs, Group: "Scheduler", Label: "Minimum Schedule Interval",
-			Description: "Minimum allowed task interval in seconds. Values below one hour are rejected.",
+			Description: "Minimum interval retained for legacy custom schedules; new tasks use simple calendar frequencies.",
 			Kind:        "int", Env: "COCOLA_SCHEDULER_MIN_INTERVAL_SECS", Default: 3600, Editable: true, HotReload: true, Min: 3600, Max: 86400,
 		},
 		{
@@ -125,12 +125,12 @@ func settingDefinitions() []SystemSettingDefinition {
 		},
 		{
 			Key: "gateway.url", Group: "AI Runtime", Label: "Gateway URL",
-			Description: "Gateway URL used by admin-api for user scheduled task runs.",
+			Description: "Gateway URL used by admin-api for all scheduled task runs.",
 			Kind:        "string", Env: "COCOLA_GATEWAY_URL", Default: "http://127.0.0.1:8080", RestartRequired: true,
 		},
 		{
 			Key: "agent.addr", Group: "AI Runtime", Label: "Agent Runtime Address",
-			Description: "agent-runtime gRPC address used by system scheduled tasks.",
+			Description: "agent-runtime gRPC address used by the Gateway for interactive agent sessions.",
 			Kind:        "string", Env: "COCOLA_AGENT_ADDR", Default: "127.0.0.1:50061", RestartRequired: true,
 		},
 		{
