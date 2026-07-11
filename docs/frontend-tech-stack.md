@@ -75,7 +75,7 @@ Gateway SSE
 
 用户侧和 Admin 控制面的领域 icon 使用 **Phosphor Icons**，优先采用 `duotone`，用于：
 
-- Workspace、Skills、MCP、Schedule、Chats 等一级导航。
+- Skills、MCP、Schedule、Chats 等一级导航。
 - 展开/收起侧边栏和用户工作台功能入口。
 - reasoning、answer、tool call、terminal、search、file 等 Agent 执行 rail 节点。
 - Admin 一级导航、页面身份和控制域模块入口。

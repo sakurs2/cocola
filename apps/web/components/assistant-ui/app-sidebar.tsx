@@ -20,7 +20,6 @@ import {
   SidebarSimple,
   Sparkle,
   SpinnerGap,
-  SquaresFour,
   Trash,
   type Icon as PhosphorIcon,
 } from "@phosphor-icons/react";
@@ -43,12 +42,9 @@ type PrimaryNavItem = NavItem & {
   section: SidebarSection;
 };
 
-// "New Chat" is wired to the runtime (rotates session_id + clears messages);
-// the rest stay decorative until multi-thread persistence lands.
 const PRIMARY_NAV: PrimaryNavItem[] = [
   { icon: MagnifyingGlass, label: "Search", section: "navigation" },
   { icon: Notebook, label: "Notes", section: "navigation" },
-  { icon: SquaresFour, label: "Workspace", href: "/", section: "navigation" },
   { icon: Sparkle, label: "Skills", href: "/skills", section: "navigation" },
   { icon: PlugsConnected, label: "MCP", href: "/mcps", section: "navigation" },
   { icon: ShieldCheck, label: "Admin", href: "/admin", section: "navigation" },
@@ -66,7 +62,6 @@ export function AppSidebar() {
   const pathname = usePathname();
   const router = useRouter();
   const [collapsed, setCollapsed] = useState(true);
-  const [expandedSection, setExpandedSection] = useState<SidebarSection>("navigation");
   const sectionRefs = useRef<Record<SidebarSection, HTMLDivElement | null>>({
     actions: null,
     navigation: null,
@@ -108,7 +103,6 @@ export function AppSidebar() {
   };
 
   const revealSection = (section: SidebarSection) => {
-    setExpandedSection(section);
     setCollapsed(false);
     window.setTimeout(() => {
       sectionRefs.current[section]?.scrollIntoView({ block: "nearest", behavior: "smooth" });
@@ -124,11 +118,8 @@ export function AppSidebar() {
   );
 
   const openNewChat = () => {
-    if (pathname !== "/") {
-      router.push("/");
-      return;
-    }
     newConversation();
+    if (pathname !== "/") router.push("/");
   };
 
   const openConversation = (id: string) => {
@@ -231,7 +222,7 @@ export function AppSidebar() {
         {collapsed ? (
           <>
             <nav className="flex flex-1 flex-col items-center gap-2 px-2 pb-2">
-              <SidebarRailButton title="New Chat" onClick={() => revealSection("actions")}>
+              <SidebarRailButton title="New Chat" onClick={openNewChat}>
                 <PlusCircle className="size-4 text-sidebar-accent-foreground" weight="duotone" />
               </SidebarRailButton>
               <SidebarRailButton title="Schedule" onClick={() => revealSection("actions")}>
@@ -281,24 +272,24 @@ export function AppSidebar() {
         ) : (
           <>
             <nav className="flex-1 overflow-y-auto px-2 pb-2">
-              <SidebarSectionPanel
-                refSetter={setSectionRef("actions")}
-                active={expandedSection === "actions"}
-              >
+              <SidebarSectionPanel refSetter={setSectionRef("actions")}>
                 <SidebarExpandedRow title="New Chat" onClick={openNewChat}>
-                  <PlusCircle className="size-4 shrink-0 text-sidebar-accent-foreground" weight="duotone" />
+                  <PlusCircle
+                    className="size-4 shrink-0 text-sidebar-accent-foreground"
+                    weight="duotone"
+                  />
                   <span className="truncate">New Chat</span>
                 </SidebarExpandedRow>
                 <SidebarExpandedRow title="Schedule" onClick={() => setScheduleOpen(true)}>
-                  <CalendarDots className="size-4 shrink-0 text-sidebar-accent-foreground" weight="duotone" />
+                  <CalendarDots
+                    className="size-4 shrink-0 text-sidebar-accent-foreground"
+                    weight="duotone"
+                  />
                   <span className="truncate">Schedule</span>
                 </SidebarExpandedRow>
               </SidebarSectionPanel>
 
-              <SidebarSectionPanel
-                refSetter={setSectionRef("navigation")}
-                active={expandedSection === "navigation"}
-              >
+              <SidebarSectionPanel refSetter={setSectionRef("navigation")}>
                 {visiblePrimaryNav.map(({ icon: Icon, label, href }) => {
                   const active = href
                     ? href === "/"
@@ -312,32 +303,32 @@ export function AppSidebar() {
                       active={active}
                       onClick={href ? () => navigateTo(href) : undefined}
                     >
-                      <Icon className="size-4 shrink-0 text-sidebar-accent-foreground" weight="duotone" />
+                      <Icon
+                        className="size-4 shrink-0 text-sidebar-accent-foreground"
+                        weight="duotone"
+                      />
                       <span className="truncate">{label}</span>
                     </SidebarExpandedRow>
                   );
                 })}
               </SidebarSectionPanel>
 
-              <SidebarSectionPanel
-                refSetter={setSectionRef("channels")}
-                active={expandedSection === "channels"}
-              >
+              <SidebarSectionPanel refSetter={setSectionRef("channels")}>
                 <SectionLabel>Channels</SectionLabel>
                 <div className="flex flex-col gap-0.5">
                   {CHANNELS.map(({ icon: Icon, label }) => (
                     <SidebarExpandedRow key={label} title={label}>
-                      <Icon className="size-4 shrink-0 text-sidebar-accent-foreground" weight="duotone" />
+                      <Icon
+                        className="size-4 shrink-0 text-sidebar-accent-foreground"
+                        weight="duotone"
+                      />
                       <span className="truncate">{label}</span>
                     </SidebarExpandedRow>
                   ))}
                 </div>
               </SidebarSectionPanel>
 
-              <SidebarSectionPanel
-                refSetter={setSectionRef("folders")}
-                active={expandedSection === "folders"}
-              >
+              <SidebarSectionPanel refSetter={setSectionRef("folders")}>
                 <SectionLabel>Folders</SectionLabel>
                 <div className="flex flex-col gap-0.5">
                   {FOLDERS.map(({ emoji, label }) => (
@@ -351,10 +342,7 @@ export function AppSidebar() {
                 </div>
               </SidebarSectionPanel>
 
-              <SidebarSectionPanel
-                refSetter={setSectionRef("chats")}
-                active={expandedSection === "chats"}
-              >
+              <SidebarSectionPanel refSetter={setSectionRef("chats")}>
                 <SectionLabel>Chats</SectionLabel>
                 {conversations.length === 0 ? (
                   <div className="px-2.5 py-1 text-xs text-sidebar-foreground/50">
@@ -391,10 +379,7 @@ export function AppSidebar() {
 
             <div
               ref={setSectionRef("account")}
-              className={cn(
-                "border-t border-white/35 bg-white/10 p-2 transition-colors",
-                expandedSection === "account" && "bg-white/22",
-              )}
+              className="border-t border-white/35 bg-white/10 p-2"
             >
               <Link
                 href="/profile"
@@ -508,21 +493,13 @@ function SidebarExpandedRow({
 
 function SidebarSectionPanel({
   children,
-  active,
   refSetter,
 }: {
   children: React.ReactNode;
-  active: boolean;
   refSetter: (node: HTMLDivElement | null) => void;
 }) {
   return (
-    <div
-      ref={refSetter}
-      className={cn(
-        "mb-2 rounded-3xl p-1 transition-colors",
-        active && "bg-white/18 shadow-[inset_0_1px_0_hsl(0_0%_100%/0.5)] backdrop-blur-sm",
-      )}
-    >
+    <div ref={refSetter} className="mb-2 p-1">
       {children}
     </div>
   );
@@ -670,9 +647,13 @@ function ChatHistoryItem({
 
 function ChatTypeIcon({ type }: { type: string }) {
   if (type === "scheduled_task") {
-    return <CalendarDots className="size-4 shrink-0 text-sidebar-accent-foreground" weight="duotone" />;
+    return (
+      <CalendarDots className="size-4 shrink-0 text-sidebar-accent-foreground" weight="duotone" />
+    );
   }
-  return <ChatsCircle className="size-4 shrink-0 text-sidebar-accent-foreground" weight="duotone" />;
+  return (
+    <ChatsCircle className="size-4 shrink-0 text-sidebar-accent-foreground" weight="duotone" />
+  );
 }
 
 function DeleteConversationDialog({
@@ -1124,7 +1105,10 @@ function ScheduleTaskDialog({
                 {tasks.map((task) => (
                   <div key={task.id} className="rounded-md border border-border bg-muted/20 p-3">
                     <div className="flex items-start gap-2">
-                      <CalendarDots className="mt-0.5 size-4 shrink-0 text-muted-foreground" weight="duotone" />
+                      <CalendarDots
+                        className="mt-0.5 size-4 shrink-0 text-muted-foreground"
+                        weight="duotone"
+                      />
                       <div className="min-w-0 flex-1">
                         <div className="truncate text-sm font-medium">{task.name}</div>
                         <div className="mt-0.5 text-xs text-muted-foreground">
@@ -1222,7 +1206,11 @@ function ScheduleTaskPrompt({
               isDanger ? "bg-red-500/10 text-red-500" : "bg-primary/10 text-primary"
             }`}
           >
-            {isDanger ? <Trash className="size-4" weight="duotone" /> : <CalendarDots className="size-4" weight="duotone" />}
+            {isDanger ? (
+              <Trash className="size-4" weight="duotone" />
+            ) : (
+              <CalendarDots className="size-4" weight="duotone" />
+            )}
           </div>
           <div className="min-w-0 flex-1">
             <div className="text-sm font-semibold">{prompt.title}</div>
