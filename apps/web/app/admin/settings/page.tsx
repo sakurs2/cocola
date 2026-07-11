@@ -134,7 +134,7 @@ export default function AdminSettingsPage() {
             <SettingsPageIcon className="size-[18px]" weight="duotone" />
           </div>
           <div className="min-w-0 flex-1">
-            <h1 className="truncate text-base font-semibold">System Settings</h1>
+            <h1 className="truncate text-base font-semibold">Settings</h1>
             <p className="truncate text-xs text-muted-foreground">
               Startup defaults, database overrides, and runtime mutability
             </p>

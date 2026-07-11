@@ -17,6 +17,7 @@ import {
   SquaresFour,
   Stack,
   TerminalWindow,
+  ToolboxIcon,
   UsersThree,
   X,
   type Icon as PhosphorIcon,
@@ -33,59 +34,52 @@ type AdminNavItem = {
   href: string;
   label: string;
   icon: PhosphorIcon;
+  match?: string[];
 };
 
 const NAV_GROUPS: { label: string; items: AdminNavItem[] }[] = [
   {
-    label: "Overview",
+    label: "Configuration",
     items: [
-      { href: "/admin", label: "Summary", icon: SquaresFour },
-      { href: "/admin/token-usage", label: "Token Usage", icon: ChartLineUp },
-      { href: "/admin/architecture", label: "Architecture", icon: Graph },
+      { href: "/admin/users", label: "Users", icon: UsersThree },
+      { href: "/admin/models", label: "Models", icon: Cpu },
+      { href: "/admin/skills", label: "Skills", icon: Sparkle },
+      { href: "/admin/mcps", label: "MCP Servers", icon: PlugsConnected },
+      { href: "/admin/toolbox", label: "Toolbox", icon: ToolboxIcon },
     ],
   },
   {
-    label: "Access",
-    items: [{ href: "/admin/users", label: "Users", icon: UsersThree }],
-  },
-  {
-    label: "AI",
+    label: "Operations",
     items: [
-      { href: "/admin/models", label: "Models", icon: Cpu },
-      { href: "/admin/prompts", label: "Prompt", icon: FileText },
-      { href: "/admin/skills", label: "Skills", icon: Sparkle },
-      { href: "/admin/mcps", label: "MCP", icon: PlugsConnected },
-      { href: "/admin/scheduled-tasks", label: "Scheduled Tasks", icon: ClockCountdown },
+      { href: "/admin/scheduled-tasks", label: "Tasks", icon: ClockCountdown },
+      { href: "/admin/audit", label: "Agent Runs", icon: FileText, match: ["/admin/traces"] },
+      { href: "/admin/token-usage", label: "Token Usage", icon: ChartLineUp },
     ],
   },
   {
     label: "Infrastructure",
     items: [
-      { href: "/admin/sandboxes", label: "Sandbox Runtime", icon: Stack },
-      { href: "/admin/sandbox-nodes", label: "Sandbox Nodes", icon: Cpu },
+      { href: "/admin/sandboxes", label: "Sandboxes", icon: Stack },
+      { href: "/admin/sandbox-nodes", label: "Nodes", icon: Cpu },
+      { href: "/admin/architecture", label: "Architecture", icon: Graph },
+      { href: "/admin/component-logs", label: "Service Logs", icon: TerminalWindow },
     ],
-  },
-  {
-    label: "Logs",
-    items: [
-      { href: "/admin/audit", label: "Audit Logs", icon: FileText },
-      { href: "/admin/component-logs", label: "Component Logs", icon: TerminalWindow },
-    ],
-  },
-  {
-    label: "Settings",
-    items: [{ href: "/admin/settings", label: "System Settings", icon: Gear }],
   },
 ];
 
-const navItems = NAV_GROUPS.flatMap((group) =>
-  group.items.map((item) => ({ ...item, group: group.label })),
-);
+const OVERVIEW_ITEM: AdminNavItem = { href: "/admin", label: "Overview", icon: SquaresFour };
+const SETTINGS_ITEM: AdminNavItem = { href: "/admin/settings", label: "Settings", icon: Gear };
 
-function isActive(pathname: string, href: string) {
-  return href === "/admin"
-    ? pathname === href
-    : pathname === href || pathname.startsWith(`${href}/`);
+const navItems = [
+  { ...OVERVIEW_ITEM, group: "Overview" },
+  ...NAV_GROUPS.flatMap((group) => group.items.map((item) => ({ ...item, group: group.label }))),
+  { ...SETTINGS_ITEM, group: "Settings" },
+];
+
+function isActive(pathname: string, item: AdminNavItem) {
+  return [item.href, ...(item.match ?? [])].some((href) =>
+    href === "/admin" ? pathname === href : pathname === href || pathname.startsWith(`${href}/`),
+  );
 }
 
 export function AdminShell({ children }: { children: ReactNode }) {
@@ -93,7 +87,7 @@ export function AdminShell({ children }: { children: ReactNode }) {
   const { data: session } = useSession();
   const [collapsed, setCollapsed] = useState(false);
   const [mobileOpen, setMobileOpen] = useState(false);
-  const currentItem = navItems.find((item) => isActive(pathname, item.href)) ?? navItems[0];
+  const currentItem = navItems.find((item) => isActive(pathname, item)) ?? navItems[0];
   const userLabel = session?.user?.name || session?.user?.email || "Administrator";
 
   return (
@@ -107,7 +101,7 @@ export function AdminShell({ children }: { children: ReactNode }) {
         >
           <AdminBrand collapsed={collapsed} onCollapse={() => setCollapsed((value) => !value)} />
           <AdminNavigation pathname={pathname} collapsed={collapsed} />
-          <AdminSidebarFooter collapsed={collapsed} />
+          <AdminSidebarFooter pathname={pathname} collapsed={collapsed} />
         </motion.aside>
 
         <section className="min-w-0 flex-1 py-1.5 pr-1.5 max-md:pl-1.5">
@@ -149,7 +143,12 @@ export function AdminShell({ children }: { children: ReactNode }) {
                         <AdminNavigation pathname={pathname} collapsed={false} mobile />
                       </div>
                     </Dialog.Close>
-                    <AdminSidebarFooter collapsed={false} />
+                    <AdminSidebarFooter
+                      pathname={pathname}
+                      collapsed={false}
+                      mobile
+                      onNavigate={() => setMobileOpen(false)}
+                    />
                   </Dialog.Content>
                 </Dialog.Portal>
               </Dialog.Root>
@@ -235,6 +234,14 @@ function AdminNavigation({
 }) {
   return (
     <nav className={cn("min-h-0 flex-1 overflow-y-auto px-2 pb-3", mobile && "px-3 pt-3")}>
+      <div className={cn("mb-4", collapsed && "mb-3")}>
+        <AdminNavLink
+          item={OVERVIEW_ITEM}
+          pathname={pathname}
+          collapsed={collapsed}
+          mobile={mobile}
+        />
+      </div>
       {NAV_GROUPS.map((group) => (
         <div key={group.label} className={cn("mb-3", collapsed && "mb-2")}>
           {!collapsed ? (
@@ -245,35 +252,15 @@ function AdminNavigation({
           <div
             className={cn("space-y-1", collapsed && "flex flex-col items-center gap-1 space-y-0")}
           >
-            {group.items.map((item) => {
-              const active = isActive(pathname, item.href);
-              const Icon = item.icon;
-              return (
-                <Link
-                  key={item.href}
-                  href={item.href}
-                  title={collapsed ? item.label : undefined}
-                  aria-label={collapsed ? item.label : undefined}
-                  className={cn(
-                    "admin-nav-item group relative flex h-9 items-center gap-2.5 overflow-hidden rounded-xl px-2.5 text-sm",
-                    collapsed && "size-10 justify-center px-0",
-                    active ? "text-primary" : "text-muted-foreground hover:text-foreground",
-                  )}
-                >
-                  {active ? (
-                    <motion.span
-                      layoutId={mobile ? "admin-mobile-active-nav" : "admin-active-nav"}
-                      className="absolute inset-0 rounded-xl border border-white/65 bg-white/58 shadow-[inset_0_1px_0_hsl(0_0%_100%/0.85),0_8px_20px_hsl(221_83%_53%/0.1)]"
-                      transition={{ type: "spring", stiffness: 420, damping: 38 }}
-                    />
-                  ) : null}
-                  <Icon className="relative z-[1] size-[17px] shrink-0" weight="duotone" />
-                  {!collapsed ? (
-                    <span className="relative z-[1] truncate">{item.label}</span>
-                  ) : null}
-                </Link>
-              );
-            })}
+            {group.items.map((item) => (
+              <AdminNavLink
+                key={item.href}
+                item={item}
+                pathname={pathname}
+                collapsed={collapsed}
+                mobile={mobile}
+              />
+            ))}
           </div>
         </div>
       ))}
@@ -281,12 +268,70 @@ function AdminNavigation({
   );
 }
 
-function AdminSidebarFooter({ collapsed }: { collapsed: boolean }) {
+function AdminNavLink({
+  item,
+  pathname,
+  collapsed,
+  mobile = false,
+  onNavigate,
+}: {
+  item: AdminNavItem;
+  pathname: string;
+  collapsed: boolean;
+  mobile?: boolean;
+  onNavigate?: () => void;
+}) {
+  const active = isActive(pathname, item);
+  const Icon = item.icon;
   return (
-    <div className="border-t border-white/35 p-2.5">
+    <Link
+      href={item.href}
+      title={collapsed ? item.label : undefined}
+      aria-label={collapsed ? item.label : undefined}
+      onClick={onNavigate}
+      className={cn(
+        "admin-nav-item group relative flex h-9 items-center gap-2.5 overflow-hidden rounded-xl px-2.5 text-sm",
+        collapsed && "size-10 justify-center px-0",
+        active ? "text-primary" : "text-muted-foreground hover:text-foreground",
+      )}
+    >
+      {active ? (
+        <motion.span
+          layoutId={mobile ? "admin-mobile-active-nav" : "admin-active-nav"}
+          className="absolute inset-0 rounded-xl border border-white/65 bg-white/58 shadow-[inset_0_1px_0_hsl(0_0%_100%/0.85),0_8px_20px_hsl(221_83%_53%/0.1)]"
+          transition={{ type: "spring", stiffness: 420, damping: 38 }}
+        />
+      ) : null}
+      <Icon className="relative z-[1] size-[17px] shrink-0" weight="duotone" />
+      {!collapsed ? <span className="relative z-[1] truncate">{item.label}</span> : null}
+    </Link>
+  );
+}
+
+function AdminSidebarFooter({
+  pathname,
+  collapsed,
+  mobile = false,
+  onNavigate,
+}: {
+  pathname: string;
+  collapsed: boolean;
+  mobile?: boolean;
+  onNavigate?: () => void;
+}) {
+  return (
+    <div className="space-y-1.5 border-t border-white/35 p-2.5">
+      <AdminNavLink
+        item={SETTINGS_ITEM}
+        pathname={pathname}
+        collapsed={collapsed}
+        mobile={mobile}
+        onNavigate={onNavigate}
+      />
       <Link
         href="/"
         title={collapsed ? "Back to workspace" : undefined}
+        onClick={onNavigate}
         className={cn(
           "flex h-10 items-center gap-2 rounded-xl border border-white/50 bg-white/28 px-3 text-sm font-medium text-foreground shadow-[inset_0_1px_0_hsl(0_0%_100%/0.7)] transition-colors hover:bg-white/52 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/40",
           collapsed && "justify-center px-0",

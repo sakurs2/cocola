@@ -119,8 +119,8 @@ export default function ScheduledTasksPage() {
   return (
     <AdminPage>
       <AdminPageHeader
-        eyebrow="Automation"
-        title="Scheduled Tasks"
+        eyebrow="Operations"
+        title="Tasks"
         description="Review scheduled work across all users. Tasks can only be changed by their owners."
         icon={<ClockCountdown className="size-5" weight="duotone" />}
         actions={

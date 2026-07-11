@@ -83,8 +83,8 @@ export default function AdminAuditPage() {
     <AdminPage>
       <AdminPageHeader
         icon={<ChatCircleDots className="size-5" weight="duotone" />}
-        eyebrow="Observability"
-        title="Conversation Audit"
+        eyebrow="Operations"
+        title="Agent Runs"
         description="One safe metadata record for every user–agent run. Chat content stays in its conversation."
         actions={
           <AdminRefreshButton onClick={() => void load()} refreshing={loading} disabled={loading}>

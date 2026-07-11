@@ -5,13 +5,13 @@ import {
   ClockCountdown,
   Cpu,
   FileText,
-  Gear,
   Graph,
   PlugsConnected,
   ShieldCheck,
   Sparkle,
   Stack,
   TerminalWindow,
+  ToolboxIcon,
   UsersThree,
   type Icon as PhosphorIcon,
 } from "@phosphor-icons/react";
@@ -34,28 +34,8 @@ type AdminModule = {
 
 const MODULE_GROUPS: { label: string; description: string; modules: AdminModule[] }[] = [
   {
-    label: "Overview",
-    description: "Observe usage and understand how the control plane fits together.",
-    modules: [
-      {
-        title: "Token Usage",
-        href: "/admin/token-usage",
-        icon: ChartLineUp,
-        summary: "Review token totals, usage trends, ranked users, and exports.",
-        accent: "text-blue-600 bg-blue-500/10",
-      },
-      {
-        title: "Architecture",
-        href: "/admin/architecture",
-        icon: Graph,
-        summary: "Inspect the system DAG, dependencies, and component health.",
-        accent: "text-violet-600 bg-violet-500/10",
-      },
-    ],
-  },
-  {
-    label: "Access",
-    description: "Control who can use cocola and which privileges they hold.",
+    label: "Configuration",
+    description: "Manage access and the capabilities available to every agent.",
     modules: [
       {
         title: "Users",
@@ -64,25 +44,12 @@ const MODULE_GROUPS: { label: string; description: string; modules: AdminModule[
         summary: "Manage whitelist accounts, roles, teams, and account status.",
         accent: "text-cyan-700 bg-cyan-500/10",
       },
-    ],
-  },
-  {
-    label: "AI",
-    description: "Configure the models, prompts, capabilities, and recurring work agents can use.",
-    modules: [
       {
         title: "Models",
         href: "/admin/models",
         icon: Cpu,
         summary: "Configure providers, aliases, credentials, and the default route.",
         accent: "text-indigo-600 bg-indigo-500/10",
-      },
-      {
-        title: "Prompt",
-        href: "/admin/prompts",
-        icon: FileText,
-        summary: "Edit the shared system prompt and rollout state.",
-        accent: "text-sky-700 bg-sky-500/10",
       },
       {
         title: "Skills",
@@ -92,18 +59,45 @@ const MODULE_GROUPS: { label: string; description: string; modules: AdminModule[
         accent: "text-fuchsia-600 bg-fuchsia-500/10",
       },
       {
-        title: "MCP",
+        title: "MCP Servers",
         href: "/admin/mcps",
         icon: PlugsConnected,
         summary: "Manage MCP servers, transport settings, and availability.",
         accent: "text-emerald-700 bg-emerald-500/10",
       },
       {
-        title: "Scheduled Tasks",
+        title: "Toolbox",
+        href: "/admin/toolbox",
+        icon: ToolboxIcon,
+        summary: "Open lightweight admin controls such as the global system prompt.",
+        accent: "text-sky-700 bg-sky-500/10",
+      },
+    ],
+  },
+  {
+    label: "Operations",
+    description: "Review scheduled work, agent execution, and model consumption.",
+    modules: [
+      {
+        title: "Tasks",
         href: "/admin/scheduled-tasks",
         icon: ClockCountdown,
-        summary: "Manage system schedules, model inputs, and run history.",
+        summary: "Review user-owned schedules, task status, and recent results.",
         accent: "text-amber-700 bg-amber-500/10",
+      },
+      {
+        title: "Agent Runs",
+        href: "/admin/audit",
+        icon: FileText,
+        summary: "Inspect conversation runs, traces, timing, and failures.",
+        accent: "text-rose-700 bg-rose-500/10",
+      },
+      {
+        title: "Token Usage",
+        href: "/admin/token-usage",
+        icon: ChartLineUp,
+        summary: "Review token totals, usage trends, ranked users, and exports.",
+        accent: "text-blue-600 bg-blue-500/10",
       },
     ],
   },
@@ -112,51 +106,32 @@ const MODULE_GROUPS: { label: string; description: string; modules: AdminModule[
     description: "Operate the isolated compute capacity behind every conversation.",
     modules: [
       {
-        title: "Sandbox Runtime",
+        title: "Sandboxes",
         href: "/admin/sandboxes",
         icon: Stack,
         summary: "Inspect active sandboxes, owners, bindings, and lifecycle state.",
         accent: "text-orange-700 bg-orange-500/10",
       },
       {
-        title: "Sandbox Nodes",
+        title: "Nodes",
         href: "/admin/sandbox-nodes",
         icon: Cpu,
         summary: "Track node health, pod capacity, placement, and node operations.",
         accent: "text-teal-700 bg-teal-500/10",
       },
-    ],
-  },
-  {
-    label: "Logs",
-    description: "Trace changes and inspect runtime output when the system needs attention.",
-    modules: [
       {
-        title: "Audit Logs",
-        href: "/admin/audit",
-        icon: ShieldCheck,
-        summary: "Correlate actor activity, outcomes, requests, and traces.",
-        accent: "text-rose-700 bg-rose-500/10",
+        title: "Architecture",
+        href: "/admin/architecture",
+        icon: Graph,
+        summary: "Inspect the system DAG, dependencies, and component health.",
+        accent: "text-violet-600 bg-violet-500/10",
       },
       {
-        title: "Component Logs",
+        title: "Service Logs",
         href: "/admin/component-logs",
         icon: TerminalWindow,
-        summary: "Read structured stdout captured from runtime components.",
+        summary: "Read recent output from Cocola's core runtime services.",
         accent: "text-slate-700 bg-slate-500/10",
-      },
-    ],
-  },
-  {
-    label: "Settings",
-    description: "Tune control-plane defaults and understand which changes require a restart.",
-    modules: [
-      {
-        title: "System Settings",
-        href: "/admin/settings",
-        icon: Gear,
-        summary: "Manage database overrides, runtime defaults, and secret state.",
-        accent: "text-purple-700 bg-purple-500/10",
       },
     ],
   },

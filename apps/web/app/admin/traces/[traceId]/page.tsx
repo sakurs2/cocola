@@ -142,7 +142,7 @@ export default function AdminTracePage({ params }: { params: { traceId: string }
           href="/admin/audit"
           className="inline-flex items-center gap-1.5 hover:text-foreground"
         >
-          <ArrowLeft className="size-4" /> Conversation Audit
+          <ArrowLeft className="size-4" /> Agent Runs
         </Link>
         <span>{run?.user_email || run?.user_id || "—"}</span>
         <span>{run?.source === "scheduled_task" ? "Scheduled task" : "Interactive"}</span>

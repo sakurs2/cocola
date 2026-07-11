@@ -217,7 +217,7 @@ export default function SandboxNodesPage() {
             <SandboxNodesPageIcon className="size-[18px]" weight="duotone" />
           </div>
           <div className="min-w-0 flex-1">
-            <h1 className="truncate text-base font-semibold">Sandbox Nodes</h1>
+            <h1 className="truncate text-base font-semibold">Nodes</h1>
             <p className="truncate text-xs text-muted-foreground">
               k3s node operations for OpenSandbox Kubernetes runtime
             </p>

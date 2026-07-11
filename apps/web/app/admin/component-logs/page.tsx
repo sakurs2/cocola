@@ -73,7 +73,7 @@ export default function ComponentLogsPage() {
             <ComponentLogsPageIcon className="size-[18px]" weight="duotone" />
           </div>
           <div className="min-w-0 flex-1">
-            <h1 className="truncate text-base font-semibold">Component Logs</h1>
+            <h1 className="truncate text-base font-semibold">Service Logs</h1>
             <p className="truncate text-xs text-muted-foreground">
               Recent output from Cocola&apos;s core runtime services
             </p>
