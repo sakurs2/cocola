@@ -590,9 +590,11 @@ const AssistantMessageHeader: FC = () => {
   const icon = metadata?.model_icon || selectedModel?.icon;
 
   return (
-    <div className="mb-2 flex items-center gap-2 text-sm text-muted-foreground">
-      <ModelIcon icon={icon} className="size-5 opacity-90" />
-      <span className="truncate font-medium">{label}</span>
+    <div className="mb-2 grid grid-cols-[1.75rem_1fr] gap-x-2.5 text-sm text-muted-foreground">
+      <div className="flex items-center justify-center">
+        <ModelIcon icon={icon} className="size-5 opacity-90" />
+      </div>
+      <span className="min-w-0 self-center truncate font-medium">{label}</span>
     </div>
   );
 };
