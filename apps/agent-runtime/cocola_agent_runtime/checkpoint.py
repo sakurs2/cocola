@@ -23,6 +23,7 @@ import re
 import uuid
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
+from typing import Literal
 
 from cocola_common import get_logger
 
@@ -60,6 +61,20 @@ class CheckpointConfig:
             timeout_secs=_env_int("COCOLA_SESSION_CHECKPOINT_TIMEOUT_SECS", DEFAULT_TIMEOUT_SECS),
             max_bytes=_env_int("COCOLA_SESSION_CHECKPOINT_MAX_BYTES", DEFAULT_MAX_BYTES),
         )
+
+
+@dataclass(frozen=True)
+class RestoreOutcome:
+    status: Literal["skipped", "restored", "missing", "failed"]
+    error: str = ""
+
+    @property
+    def restored(self) -> bool:
+        return self.status == "restored"
+
+    @property
+    def degraded(self) -> bool:
+        return self.status in {"missing", "failed"}
 
 
 def _env_int(name: str, default: int) -> int:
@@ -117,11 +132,7 @@ def _archive_command(dirs: tuple[str, ...], out_path: str) -> list[str]:
 def _restore_command(archive_path: str) -> list[str]:
     """Unpack a checkpoint archive already written to ``archive_path`` on disk."""
     path_q = _sh_quote(archive_path)
-    script = (
-        "set -eu; "
-        f'zstd -d -c {path_q} | tar -C / -xf -; '
-        f"rm -f {path_q}"
-    )
+    script = f"set -eu; zstd -d -c {path_q} | tar -C / -xf -; rm -f {path_q}"
     return ["sh", "-lc", script]
 
 
@@ -214,18 +225,28 @@ class CheckpointManager:
         finally:
             await self._best_effort_cleanup(sandbox_id, archive_path)
 
-    async def restore_if_fresh(self, *, sandbox_id: str, session_id: str, reused: bool) -> bool:
+    async def restore_if_fresh(
+        self, *, sandbox_id: str, session_id: str, reused: bool
+    ) -> RestoreOutcome:
         """Restore the latest checkpoint before running the agent in a fresh sandbox."""
         if reused or not self.enabled or not sandbox_id:
-            return False
+            return RestoreOutcome("skipped")
         assert self._executor is not None
         assert self._objstore is not None
         assert self._session_map is not None
         archive_path = _sandbox_tmp_path()
         try:
+            binding = await self._session_map.get_binding(session_id)
             key = await self._session_map.get_checkpoint(session_id)
             if not key:
-                return False
+                if binding is None:
+                    return RestoreOutcome("skipped")
+                log.warning(
+                    "checkpoint unavailable for existing session",
+                    session_id=session_id,
+                    sandbox_id=sandbox_id,
+                )
+                return RestoreOutcome("missing", "checkpoint object key is missing")
             data = await asyncio.to_thread(self._objstore.get, key)
             await self._executor.write_bytes(sandbox_id=sandbox_id, path=archive_path, data=data)
             res = await self._executor.exec(
@@ -242,13 +263,15 @@ class CheckpointManager:
                     error=res.error or res.stderr or str(res.exit_code),
                 )
                 await self._best_effort_cleanup(sandbox_id, archive_path)
-                return False
+                return RestoreOutcome(
+                    "failed", res.error or res.stderr or f"restore exited {res.exit_code}"
+                )
             log.info("checkpoint restored", session_id=session_id, object_key=key)
-            return True
+            return RestoreOutcome("restored")
         except Exception as exc:  # noqa: BLE001 - restore is best-effort
             log.warning("checkpoint restore failed", session_id=session_id, error=str(exc))
             await self._best_effort_cleanup(sandbox_id, archive_path)
-            return False
+            return RestoreOutcome("failed", str(exc))
 
     async def _best_effort_cleanup(self, sandbox_id: str, archive_path: str) -> None:
         if self._executor is None:

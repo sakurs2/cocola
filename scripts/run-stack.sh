@@ -162,6 +162,12 @@ opensandbox_health_url() {
 # Phase 3 port sweep is the backstop that catches reparented grandchildren the
 # process-group signal cannot reach (the real cause of "exited but port busy").
 _SHUTTING_DOWN=0
+
+process_group_alive() {
+  local pid="$1"
+  kill -0 -- "-$pid" 2>/dev/null || kill -0 "$pid" 2>/dev/null
+}
+
 cleanup() {
   # The trap fires for INT/TERM and again for the subsequent EXIT; run once.
   [[ "$_SHUTTING_DOWN" == "1" ]] && return
@@ -178,12 +184,14 @@ cleanup() {
       || kill -TERM "$pid" 2>>"$LOG_DIR/cleanup.log" || true
   done
 
-  # Phase 2: give them up to ~3s to exit cleanly.
-  for ((i=0; i<15; i++)); do
+  # Phase 2: give process groups up to 30s to exit cleanly. Checking the group
+  # matters for wrappers such as `go run`: the wrapper may exit immediately on
+  # TERM while its child is still flushing a checkpoint in the same group.
+  for ((i=0; i<150; i++)); do
     alive=0
     for pid in "${PIDS[@]:-}"; do
       [[ -n "$pid" ]] || continue
-      kill -0 "$pid" 2>>"$LOG_DIR/cleanup.log" && alive=1
+      process_group_alive "$pid" && alive=1
     done
     [[ "$alive" == "0" ]] && break
     sleep 0.2
@@ -192,8 +200,10 @@ cleanup() {
   # Phase 3a: SIGKILL any process groups still standing.
   for pid in "${PIDS[@]:-}"; do
     [[ -n "$pid" ]] || continue
-    kill -KILL -- "-$pid" 2>>"$LOG_DIR/cleanup.log" \
-      || kill -KILL "$pid" 2>>"$LOG_DIR/cleanup.log" || true
+    if process_group_alive "$pid"; then
+      kill -KILL -- "-$pid" 2>>"$LOG_DIR/cleanup.log" \
+        || kill -KILL "$pid" 2>>"$LOG_DIR/cleanup.log" || true
+    fi
   done
 
   # Phase 3b: backstop -- guarantee every port we own is released, whatever still

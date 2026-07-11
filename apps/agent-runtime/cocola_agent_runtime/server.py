@@ -634,66 +634,49 @@ class AgentRuntimeServicer(pb_grpc.AgentRuntimeServiceServicer):
                 )
             if self._checkpoint is not None:
                 restore_start_ns = time.time_ns()
-                try:
-                    restored = await self._checkpoint.restore_if_fresh(
-                        sandbox_id=box.id,
-                        session_id=request.session_id,
-                        reused=box.reused,
-                    )
-                except Exception as exc:  # noqa: BLE001 - preserve existing failure semantics
-                    if preparing_environment:
-                        environment_degraded = True
-                        await context.write(
-                            event_to_proto(
-                                environment_preparation_event(
-                                    "degraded",
-                                    [
-                                        *environment_components,
-                                        {
-                                            "kind": "checkpoint",
-                                            "status": "failed",
-                                            "label": "Session restore",
-                                            "summary": "Could not restore saved state",
-                                        },
-                                    ],
-                                )
-                            )
-                        )
-                    await context.write(
-                        event_to_proto(
-                            trace_event(
-                                "sandbox.checkpoint_restore",
-                                "sandbox",
-                                restore_start_ns,
-                                status="error",
-                                sandbox_id=box.id,
-                                reused=box.reused,
-                                error_type=type(exc).__name__,
-                            )
-                        )
-                    )
-                    raise
+                restore = await self._checkpoint.restore_if_fresh(
+                    sandbox_id=box.id,
+                    session_id=request.session_id,
+                    reused=box.reused,
+                )
                 await context.write(
                     event_to_proto(
                         trace_event(
                             "sandbox.checkpoint_restore",
                             "sandbox",
                             restore_start_ns,
+                            status="error" if restore.degraded else "success",
                             sandbox_id=box.id,
                             reused=box.reused,
-                            restored=restored,
+                            restored=restore.restored,
+                            restore_status=restore.status,
                         )
                     )
                 )
-                if preparing_environment and restored:
-                    environment_components.append(
-                        {
-                            "kind": "checkpoint",
-                            "status": "ready",
-                            "label": "Session restore",
-                            "summary": "Saved state restored",
-                        }
-                    )
+                if preparing_environment:
+                    if restore.restored:
+                        environment_components.append(
+                            {
+                                "kind": "checkpoint",
+                                "status": "ready",
+                                "label": "Session restore",
+                                "summary": "Saved state restored",
+                            }
+                        )
+                    elif restore.degraded:
+                        environment_degraded = True
+                        environment_components.append(
+                            {
+                                "kind": "checkpoint",
+                                "status": "failed",
+                                "label": "Session restore",
+                                "summary": (
+                                    "Saved session data is unavailable"
+                                    if restore.status == "missing"
+                                    else "Could not restore saved session data"
+                                ),
+                            }
+                        )
             # Make the binding observable to the BFF/client.
             await context.write(
                 event_to_proto(

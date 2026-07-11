@@ -12,6 +12,15 @@ cd "$ROOT"
 
 export PATH="/Applications/OrbStack.app/Contents/MacOS/xbin:/opt/homebrew/bin:/usr/local/bin:$PATH"
 
+# Keep background helpers out of the terminal's foreground process group so
+# Ctrl+C reaches this supervisor first and dependencies can stop in order.
+if command -v setsid >/dev/null 2>&1; then
+  SETSID="setsid"
+else
+  SETSID=""
+  set -m
+fi
+
 ACTION="${1:-up}"
 
 CLUSTER="${COCOLA_K8S_CLUSTER:-cocola-sandbox}"
@@ -165,7 +174,18 @@ stop_forward() {
     pid="$(cat "$FORWARD_PID_FILE" 2>/dev/null || true)"
     if [[ -n "$pid" ]] && kill -0 "$pid" 2>/dev/null; then
       log "stopping OpenSandbox port-forward (pid=$pid)"
-      kill "$pid" 2>/dev/null || true
+      kill -TERM -- "-$pid" 2>/dev/null || kill -TERM "$pid" 2>/dev/null || true
+      local i
+      for ((i = 0; i < 25; i++)); do
+        if ! kill -0 "$pid" 2>/dev/null; then
+          break
+        fi
+        sleep 0.2
+      done
+      if kill -0 "$pid" 2>/dev/null; then
+        log "OpenSandbox port-forward did not stop in time; killing it"
+        kill -KILL -- "-$pid" 2>/dev/null || kill -KILL "$pid" 2>/dev/null || true
+      fi
       wait "$pid" 2>/dev/null || true
     fi
     rm -f "$FORWARD_PID_FILE"
@@ -199,7 +219,7 @@ start_forward() {
   stop_forward
   log "starting OpenSandbox port-forward on 127.0.0.1:$SERVER_PORT"
   (
-    kubectl -n "$SYSTEM_NAMESPACE" port-forward "svc/$SERVER_SERVICE" "$SERVER_PORT:80"
+    $SETSID kubectl -n "$SYSTEM_NAMESPACE" port-forward "svc/$SERVER_SERVICE" "$SERVER_PORT:80"
   ) >"$LOG_DIR/opensandbox-dev-forward.log" 2>&1 &
   echo "$!" >"$FORWARD_PID_FILE"
 

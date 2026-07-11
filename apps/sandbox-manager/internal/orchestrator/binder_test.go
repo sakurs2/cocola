@@ -548,7 +548,7 @@ func TestCheckpointAllActiveArchivesOnlyActive(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	b.CheckpointAllActive(ctx)
+	summary := b.CheckpointAllActive(ctx)
 
 	fp.mu.Lock()
 	got := map[string]bool{}
@@ -569,6 +569,34 @@ func TestCheckpointAllActiveArchivesOnlyActive(t *testing.T) {
 	if got["u3/dozing/"+pausedID] {
 		t.Fatalf("paused sandbox must not be checkpointed; got %v", got)
 	}
+	if summary.Scanned != 3 || summary.Succeeded != 2 || summary.Skipped != 1 || len(summary.Failures) != 0 {
+		t.Fatalf("unexpected checkpoint summary: %+v", summary)
+	}
+}
+
+func TestCheckpointAllActiveReportsProviderFailure(t *testing.T) {
+	b, fp := newTestBinder(t)
+	ctx := context.Background()
+
+	sb, err := b.Acquire(ctx, AcquireSpec{SessionID: "live-fail", UserID: "u1"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	fp.mu.Lock()
+	fp.checkpointErr[sb.ID] = errors.New("minio upload unavailable")
+	fp.mu.Unlock()
+
+	summary := b.CheckpointAllActive(ctx)
+	if summary.Scanned != 1 || summary.Succeeded != 0 || len(summary.Failures) != 1 {
+		t.Fatalf("unexpected checkpoint summary: %+v", summary)
+	}
+	failure := summary.Failures[0]
+	if failure.SessionID != "live-fail" || failure.SandboxID != sb.ID {
+		t.Fatalf("unexpected failure identity: %+v", failure)
+	}
+	if failure.Err == nil || failure.Err.Error() != "minio upload unavailable" {
+		t.Fatalf("unexpected failure error: %v", failure.Err)
+	}
 }
 
 // TestCheckpointAllActiveStopsWhenBudgetExhausted: a cancelled context (the
@@ -584,12 +612,15 @@ func TestCheckpointAllActiveStopsWhenBudgetExhausted(t *testing.T) {
 	cctx, cancel := context.WithCancel(ctx)
 	cancel() // budget already exhausted before the sweep starts
 
-	b.CheckpointAllActive(cctx)
+	summary := b.CheckpointAllActive(cctx)
 
 	fp.mu.Lock()
 	n := len(fp.checkpoints)
 	fp.mu.Unlock()
 	if n != 0 {
 		t.Fatalf("expected no checkpoints under an exhausted budget, got %d", n)
+	}
+	if !errors.Is(summary.ScanError, context.Canceled) {
+		t.Fatalf("scan error = %v, want context.Canceled", summary.ScanError)
 	}
 }

@@ -641,6 +641,121 @@ async def test_query_does_not_restore_checkpoint_for_reused_sandbox():
     assert not any("zstd -d -c" in call["cmd"][2] for call in executor.exec_calls)
 
 
+async def test_query_reports_missing_checkpoint_for_existing_session():
+    prov = ListProvider([AgentEvent(kind="done", data={})])
+    executor = StaticSandboxExecutor()
+    store = FakeObjectStore()
+    session_map = FakeSessionMap()
+    session_map.bindings["S1"] = SessionBinding(
+        claude_session_id="claude-old",
+        sandbox_id="box-old",
+    )
+    checkpoint = CheckpointManager(
+        objstore=store,
+        executor=executor,
+        session_map=session_map,
+        config=CheckpointConfig(),
+    )
+    ctx = FakeContext()
+
+    await AgentRuntimeServicer(
+        prov,
+        binder=StaticSandboxBinder(),
+        executor=executor,
+        objstore=store,
+        session_map=session_map,
+        checkpoint=checkpoint,
+    ).Query(FakeRequest(), ctx)
+
+    snapshots = [
+        json.loads(event.data["snapshot"])
+        for event in ctx.written
+        if event.kind == "environment_prepare"
+    ]
+    assert [snapshot["state"] for snapshot in snapshots] == ["preparing", "degraded"]
+    restore = next(
+        component for component in snapshots[-1]["components"] if component["kind"] == "checkpoint"
+    )
+    assert restore == {
+        "kind": "checkpoint",
+        "status": "failed",
+        "label": "Session restore",
+        "summary": "Saved session data is unavailable",
+    }
+
+
+async def test_query_does_not_report_missing_checkpoint_for_new_session():
+    prov = ListProvider([AgentEvent(kind="done", data={})])
+    executor = StaticSandboxExecutor()
+    store = FakeObjectStore()
+    session_map = FakeSessionMap()
+    checkpoint = CheckpointManager(
+        objstore=store,
+        executor=executor,
+        session_map=session_map,
+        config=CheckpointConfig(),
+    )
+    ctx = FakeContext()
+
+    await AgentRuntimeServicer(
+        prov,
+        binder=StaticSandboxBinder(),
+        executor=executor,
+        objstore=store,
+        session_map=session_map,
+        checkpoint=checkpoint,
+    ).Query(FakeRequest(), ctx)
+
+    snapshots = [
+        json.loads(event.data["snapshot"])
+        for event in ctx.written
+        if event.kind == "environment_prepare"
+    ]
+    assert [snapshot["state"] for snapshot in snapshots] == ["preparing", "ready"]
+    assert all(component["kind"] != "checkpoint" for component in snapshots[-1]["components"])
+
+
+async def test_query_reports_checkpoint_restore_failure():
+    prov = ListProvider([AgentEvent(kind="done", data={})])
+    executor = StaticSandboxExecutor()
+    store = FakeObjectStore()
+    session_map = FakeSessionMap()
+    session_map.bindings["S1"] = SessionBinding(
+        claude_session_id="claude-old",
+        sandbox_id="box-old",
+        checkpoint_object_key="missing-object",
+    )
+    session_map.checkpoints["S1"] = "missing-object"
+    checkpoint = CheckpointManager(
+        objstore=store,
+        executor=executor,
+        session_map=session_map,
+        config=CheckpointConfig(),
+    )
+    ctx = FakeContext()
+
+    await AgentRuntimeServicer(
+        prov,
+        binder=StaticSandboxBinder(),
+        executor=executor,
+        objstore=store,
+        session_map=session_map,
+        checkpoint=checkpoint,
+    ).Query(FakeRequest(), ctx)
+
+    snapshots = [
+        json.loads(event.data["snapshot"])
+        for event in ctx.written
+        if event.kind == "environment_prepare"
+    ]
+    assert snapshots[-1]["state"] == "degraded"
+    restore = next(
+        component for component in snapshots[-1]["components"] if component["kind"] == "checkpoint"
+    )
+    assert restore["status"] == "failed"
+    assert restore["summary"] == "Could not restore saved session data"
+
+
 async def test_query_publishes_outputs_artifacts():
     ex = outputs_snapshot_executor()
     store = FakeObjectStore()

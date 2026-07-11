@@ -5,6 +5,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/base64"
+	"errors"
 	"fmt"
 	"os"
 	"regexp"
@@ -102,16 +103,14 @@ func (p *Provider) CheckpointSession(ctx context.Context, userID, sessionID, san
 	}
 	data, err := p.archive(ctx, sandboxID)
 	if err != nil {
-		_ = p.recordFailure(ctx, sessionID, err.Error())
-		return err
+		return p.withRecordedFailure(ctx, sessionID, err)
 	}
 	if len(data) == 0 {
 		return nil
 	}
 	if p.cfg.MaxBytes > 0 && len(data) > p.cfg.MaxBytes {
 		err := fmt.Errorf("archive size %d exceeds max %d", len(data), p.cfg.MaxBytes)
-		_ = p.recordFailure(ctx, sessionID, err.Error())
-		return err
+		return p.withRecordedFailure(ctx, sessionID, err)
 	}
 	key := objectKey(userID, sessionID)
 	if _, err := p.minio.PutObject(
@@ -123,10 +122,19 @@ func (p *Provider) CheckpointSession(ctx context.Context, userID, sessionID, san
 		minio.PutObjectOptions{ContentType: "application/zstd"},
 	); err != nil {
 		err = fmt.Errorf("checkpoint upload: %w", err)
-		_ = p.recordFailure(ctx, sessionID, err.Error())
-		return err
+		return p.withRecordedFailure(ctx, sessionID, err)
 	}
-	return p.recordSuccess(ctx, sessionID, key, len(data))
+	if err := p.recordSuccess(ctx, sessionID, key, len(data)); err != nil {
+		return fmt.Errorf("record checkpoint success: %w", err)
+	}
+	return nil
+}
+
+func (p *Provider) withRecordedFailure(ctx context.Context, sessionID string, cause error) error {
+	if err := p.recordFailure(ctx, sessionID, cause.Error()); err != nil {
+		return errors.Join(cause, fmt.Errorf("record checkpoint failure: %w", err))
+	}
+	return cause
 }
 
 func (p *Provider) archive(ctx context.Context, sandboxID string) ([]byte, error) {

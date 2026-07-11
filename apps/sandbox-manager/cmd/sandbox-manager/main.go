@@ -192,8 +192,22 @@ func main() {
 			budget := checkpointDrainBudget()
 			dctx, dcancel := context.WithTimeout(context.Background(), budget)
 			log.Sugar().Infow("checkpointing active sessions before exit", "budget", budget.String())
-			binder.CheckpointAllActive(dctx)
+			summary := binder.CheckpointAllActive(dctx)
 			dcancel()
+			for _, failure := range summary.Failures {
+				log.Sugar().Errorw("session checkpoint failed",
+					"session_id", failure.SessionID,
+					"sandbox_id", failure.SandboxID,
+					"err", failure.Err)
+			}
+			if summary.ScanError != nil {
+				log.Sugar().Errorw("active session checkpoint scan failed", "err", summary.ScanError)
+			}
+			log.Sugar().Infow("active session checkpoint sweep completed",
+				"scanned", summary.Scanned,
+				"succeeded", summary.Succeeded,
+				"skipped", summary.Skipped,
+				"failed", len(summary.Failures))
 		}
 		cancel() // stop reaper/warm-pool background loops
 	}
@@ -290,4 +304,3 @@ func getenv(k, def string) string {
 	}
 	return def
 }
-

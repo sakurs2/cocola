@@ -151,6 +151,22 @@ func (b *Binder) underReapLock(ctx context.Context, sandboxID string, fn func() 
 	return fn()
 }
 
+// CheckpointFailure identifies one active session whose checkpoint did not complete.
+type CheckpointFailure struct {
+	SessionID string
+	SandboxID string
+	Err       error
+}
+
+// CheckpointSummary makes a best-effort checkpoint sweep observable to shutdown callers.
+type CheckpointSummary struct {
+	Scanned   int
+	Succeeded int
+	Skipped   int
+	Failures  []CheckpointFailure
+	ScanError error
+}
+
 // CheckpointAllActive snapshots every ACTIVE bound sandbox once, best-effort.
 //
 // This is the graceful-teardown safety net (plan A): reclaim-time checkpointing
@@ -166,54 +182,77 @@ func (b *Binder) underReapLock(ctx context.Context, sandboxID string, fn func() 
 // were already checkpointed at Pause time and archiving one would need a thaw.
 // The whole sweep is bounded by ctx; a caller passes a deadline so a slow
 // backend cannot wedge the exit path.
-func (b *Binder) CheckpointAllActive(ctx context.Context) {
+func (b *Binder) CheckpointAllActive(ctx context.Context) CheckpointSummary {
+	var summary CheckpointSummary
 	checkpointer, ok := b.p.(provider.SessionCheckpointer)
 	if !ok {
-		return // provider has no checkpointing configured; nothing to do
+		return summary // provider has no checkpointing configured; nothing to do
 	}
-	_ = b.kv.ScanKeys(ctx, metaScanPattern(), 100, func(keys []string) error {
+	summary.ScanError = b.kv.ScanKeys(ctx, metaScanPattern(), 100, func(keys []string) error {
 		for _, mk := range keys {
 			if ctx.Err() != nil {
 				return ctx.Err() // teardown budget exhausted; stop scanning
 			}
-			b.checkpointActiveMeta(ctx, checkpointer, mk)
+			summary.Scanned++
+			attempted, failure := b.checkpointActiveMeta(ctx, checkpointer, mk)
+			if failure != nil {
+				summary.Failures = append(summary.Failures, *failure)
+				continue
+			}
+			if attempted {
+				summary.Succeeded++
+			} else {
+				summary.Skipped++
+			}
 		}
 		return nil
 	})
+	return summary
 }
 
 // checkpointActiveMeta archives a single meta key if it is ACTIVE, under the
 // shared per-sandbox reaper lock so concurrent replicas do not double-archive.
 func (b *Binder) checkpointActiveMeta(
 	ctx context.Context, checkpointer provider.SessionCheckpointer, metaK string,
-) {
+) (bool, *CheckpointFailure) {
+	failure := CheckpointFailure{SandboxID: metaK[len(metaPrefix):]}
 	raw, err := b.kv.Get(ctx, metaK)
 	if err != nil {
-		return // vanished mid-scan or transient error; best-effort
+		failure.Err = err
+		return false, &failure
 	}
 	var m meta
 	if err := json.Unmarshal([]byte(raw), &m); err != nil {
-		return
+		failure.Err = err
+		return false, &failure
 	}
+	failure.SessionID = m.SessionID
+	failure.SandboxID = m.SandboxID
 	if m.State != StateActive {
-		return // paused sandboxes were already checkpointed at Pause time
+		return false, nil // paused sandboxes were already checkpointed at Pause time
 	}
-	_ = b.underReapLock(ctx, m.SandboxID, func() error {
+	attempted := false
+	err = b.underReapLock(ctx, m.SandboxID, func() error {
 		// Re-read under lock: a racer may have paused/destroyed it meanwhile.
 		cur, cerr := b.kv.Get(ctx, metaK)
 		if cerr != nil {
-			return nil
+			return cerr
 		}
 		var cm meta
 		if jerr := json.Unmarshal([]byte(cur), &cm); jerr != nil {
-			return nil
+			return jerr
 		}
 		if cm.State != StateActive {
 			return nil
 		}
-		_ = checkpointer.CheckpointSession(ctx, cm.UserID, cm.SessionID, cm.SandboxID)
-		return nil
+		attempted = true
+		return checkpointer.CheckpointSession(ctx, cm.UserID, cm.SessionID, cm.SandboxID)
 	})
+	if err != nil {
+		failure.Err = err
+		return attempted, &failure
+	}
+	return attempted, nil
 }
 
 // RunReaper drives reapOnce on ReaperEvery until ctx is cancelled. Spawn one per
