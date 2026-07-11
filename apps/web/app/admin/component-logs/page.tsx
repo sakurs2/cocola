@@ -7,15 +7,14 @@ import { AdminRefreshButton } from "@/components/admin/admin-ui";
 
 type LogFile = {
   name: string;
+  label: string;
   size: number;
-  updated_at: string;
 };
 
 type LogResponse = {
   files?: LogFile[];
   selected?: string;
   lines?: string[];
-  log_dir?: string;
 };
 
 const input =
@@ -28,7 +27,6 @@ export default function ComponentLogsPage() {
   const [selected, setSelected] = useState("");
   const [lines, setLines] = useState<string[]>([]);
   const [lineCount, setLineCount] = useState(500);
-  const [logDir, setLogDir] = useState("");
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
 
@@ -49,7 +47,6 @@ export default function ComponentLogsPage() {
         setFiles(nextFiles);
         setSelected(nextSelectedFile);
         setLines(body.lines ?? []);
-        setLogDir(body.log_dir ?? "");
       } catch (err) {
         setError(err instanceof Error ? err.message : String(err));
       } finally {
@@ -78,7 +75,7 @@ export default function ComponentLogsPage() {
           <div className="min-w-0 flex-1">
             <h1 className="truncate text-base font-semibold">Component Logs</h1>
             <p className="truncate text-xs text-muted-foreground">
-              Structured stdout logs captured by the local runtime log directory
+              Recent output from Cocola&apos;s core runtime services
             </p>
           </div>
           <AdminRefreshButton
@@ -96,7 +93,7 @@ export default function ComponentLogsPage() {
 
       <div className="mx-auto max-w-7xl space-y-5 px-6 py-6">
         <section className="grid gap-3 md:grid-cols-3">
-          <Metric label="Log Files" value={String(files.length)} />
+          <Metric label="Components" value={String(files.length)} />
           <Metric label="Loaded Lines" value={String(lines.length)} />
           <Metric label="Selected Size" value={formatBytes(selectedFile?.size ?? 0)} />
         </section>
@@ -118,10 +115,10 @@ export default function ComponentLogsPage() {
             >
               {files.map((file) => (
                 <option key={file.name} value={file.name}>
-                  {file.name}
+                  {file.label}
                 </option>
               ))}
-              {files.length === 0 ? <option value="">No log files</option> : null}
+              {files.length === 0 ? <option value="">No component logs</option> : null}
             </select>
             <input
               className={input}
@@ -141,9 +138,6 @@ export default function ComponentLogsPage() {
               Load
             </AdminRefreshButton>
           </div>
-          <div className="border-t border-border px-4 py-2 font-mono text-xs text-muted-foreground">
-            {logDir || "-"}
-          </div>
         </section>
 
         {error ? (
@@ -155,7 +149,7 @@ export default function ComponentLogsPage() {
 
         <section className="overflow-hidden rounded-lg border border-border bg-card">
           <div className="flex items-center justify-between border-b border-border px-4 py-3">
-            <h2 className="text-sm font-semibold">{selected || "Logs"}</h2>
+            <h2 className="text-sm font-semibold">{selectedFile?.label ?? "Logs"}</h2>
             {loading ? (
               <span className="inline-flex items-center text-xs text-muted-foreground">
                 <Loader2 className="mr-2 size-3 animate-spin" />

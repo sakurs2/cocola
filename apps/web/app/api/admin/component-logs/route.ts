@@ -1,6 +1,6 @@
 import { NextRequest } from "next/server";
 import { isAuthFail, requireAdmin } from "@/lib/server-auth";
-import { readdir, readFile, stat } from "node:fs/promises";
+import { open, stat } from "node:fs/promises";
 import path from "node:path";
 
 export const runtime = "nodejs";
@@ -8,31 +8,39 @@ export const dynamic = "force-dynamic";
 
 type LogFile = {
   name: string;
+  label: string;
   size: number;
-  updated_at: string;
 };
 
 const MAX_LINES = 2000;
+const MAX_TAIL_BYTES = 2 * 1024 * 1024;
+const COMPONENT_LOG_FILES = [
+  { name: "web.log", label: "Web" },
+  { name: "gateway.log", label: "Gateway" },
+  { name: "admin-api.log", label: "Admin API" },
+  { name: "agent-runtime.log", label: "Agent Runtime" },
+  { name: "llm-gateway.log", label: "LLM Gateway" },
+  { name: "sandbox-manager.log", label: "Sandbox Manager" },
+] as const;
 
 export async function GET(req: NextRequest) {
   const authResult = await requireAdmin();
   if (isAuthFail(authResult)) return authResult.response;
 
   const logDir = componentLogDir();
-  let files: LogFile[] = [];
-  try {
-    const entries = await readdir(logDir);
-    files = (
-      await Promise.all(
-        entries.filter(isAllowedLogName).map(async (name) => {
+  const files = (
+    await Promise.all(
+      COMPONENT_LOG_FILES.map(async ({ name, label }): Promise<LogFile | null> => {
+        try {
           const info = await stat(path.join(logDir, name));
-          return { name, size: info.size, updated_at: info.mtime.toISOString() };
-        }),
-      )
-    ).sort((a, b) => b.updated_at.localeCompare(a.updated_at));
-  } catch {
-    return Response.json({ files: [], selected: "", lines: [], log_dir: logDir });
-  }
+          if (!info.isFile()) return null;
+          return { name, label, size: info.size };
+        } catch {
+          return null;
+        }
+      }),
+    )
+  ).filter((file): file is LogFile => file !== null);
 
   const url = new URL(req.url);
   const requested = url.searchParams.get("file") ?? "";
@@ -40,9 +48,16 @@ export async function GET(req: NextRequest) {
     ? requested
     : (files[0]?.name ?? "");
   const limit = clamp(Number(url.searchParams.get("lines") ?? 500), 1, MAX_LINES);
-  const lines = selected ? await tailLines(path.join(logDir, selected), limit) : [];
+  let lines: string[] = [];
+  if (selected) {
+    try {
+      lines = await tailLines(path.join(logDir, selected), limit);
+    } catch {
+      lines = [];
+    }
+  }
 
-  return Response.json({ files, selected, lines, log_dir: logDir });
+  return Response.json({ files, selected, lines });
 }
 
 function componentLogDir() {
@@ -52,17 +67,28 @@ function componentLogDir() {
   return path.resolve(process.cwd(), "../..", ".run-logs");
 }
 
-function isAllowedLogName(name: string) {
-  return /^[a-zA-Z0-9._-]+\.log$/.test(name);
-}
-
 function clamp(n: number, min: number, max: number) {
   if (!Number.isFinite(n)) return min;
   return Math.max(min, Math.min(max, Math.floor(n)));
 }
 
 async function tailLines(filePath: string, limit: number) {
-  const raw = await readFile(filePath, "utf8");
+  const file = await open(filePath, "r");
+  let raw = "";
+  try {
+    const info = await file.stat();
+    const readSize = Math.min(info.size, MAX_TAIL_BYTES);
+    const buffer = Buffer.alloc(readSize);
+    const { bytesRead } = await file.read(buffer, 0, readSize, info.size - readSize);
+    raw = buffer.subarray(0, bytesRead).toString("utf8");
+    if (info.size > readSize) {
+      const firstCompleteLine = raw.indexOf("\n");
+      raw = firstCompleteLine >= 0 ? raw.slice(firstCompleteLine + 1) : "";
+    }
+  } finally {
+    await file.close();
+  }
   const lines = raw.split(/\r?\n/);
+  if (lines.at(-1) === "") lines.pop();
   return lines.slice(Math.max(0, lines.length - limit));
 }

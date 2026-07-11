@@ -129,6 +129,7 @@ shadcn/ui 在本项目中表示组件组织方式和 token 约定，不代表必
 - 定时任务始终归属于用户并通过 Gateway 以 Owner 身份执行，结果复用固定 Conversation 进入 Chat History。Admin 只有跨用户管理权限，不是一种任务类型，也不提供无归属任务创建入口。
 - Admin MCP 配置遵循“列表即状态、Drawer 即编辑”的单层结构。保存时只校验并安全持久化配置，不额外申请 sandbox；连接能力由首次真实 Agent 会话自然验证，不增加独立测试、健康页或发布状态。远程 URL 作为完整 secret 输入，界面只展示移除 userinfo、query 和 fragment 后的 `url_hint`。
 - Admin Audit 只展示 Conversation Audit：一次用户消息或用户所属定时任务执行对应一条 Agent Run，不展示普通读取、配置修改或管理操作。Trace Detail 按真实 `parent_span_id` 展示 Root → Request / Environment / Agent / Finalization → Model / Tool 层级，并使用左侧 Trace 树与右侧 Run/Metadata inspector；运行中每 2 秒刷新，进入终态即停止。日期范围使用 Admin 主题隔离的 Radix Popover 日历。Trace ID、Span ID 和高精度耗时使用 Geist Mono，模块使用 Phosphor 领域图标，刷新、返回和状态操作继续使用 Lucide。
+- Component Logs 只展示 Web、Gateway、Admin API、Agent Runtime、LLM Gateway 和 Sandbox Manager 六个核心运行时日志；不得把构建、测试、启动脚本或任意目录下的 `*.log` 暴露为产品日志源。日志 Tail 必须有读取字节上限，避免大文件被整份载入 Web 进程。
 - Session Status 使用一份完整环境快照：agent-runtime 在 Skill 同步成功后补入 `kind=skill` 的 Loaded 组件，sandbox shim 继续提供真实的 `kind=mcp` 连接状态；前端按 Skills 与 MCP servers 分组并允许独立折叠，不在浏览器合并多个局部快照。
 - Environment 消息节点与 Session Status 职责分离：前者解释本轮为何尚未开始，只呈现阻塞性的环境准备；后者呈现会话能力和异步 MCP 连接。Gateway 以原始 JSON 保存 Environment 快照并按稳定 `part_id` 原位更新，未知 component 与字段不得被中间层丢弃。
 - MCP 连接终态必须来自实际执行首次对话的同一个 `ClaudeSDKClient`，不得通过 system prompt 注入，也不得申请额外 sandbox。模型请求在 client 初始化后立即开始；仅当 SDK 报告 `pending` 时进行最多 8 秒的有界查询，终态到达后停止，并通过 `environment_status` SSE 快照更新 Session Status。有 `resume` 的 follow-up 使用 one-shot SDK 路径且不重复查询状态。该状态表示会话初始化时的加载结果，不是持续健康监控。

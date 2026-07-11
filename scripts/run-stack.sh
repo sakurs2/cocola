@@ -109,6 +109,9 @@ WEB_PORT="${COCOLA_WEB_PORT:-3000}"
 
 LOG_DIR="$ROOT/.run-logs"
 mkdir -p "$LOG_DIR"
+# cleanup.log is append-only during teardown. Reset it for each stack run so
+# repeated local starts do not accumulate thousands of stale process checks.
+: > "$LOG_DIR/cleanup.log"
 
 PIDS=()
 
