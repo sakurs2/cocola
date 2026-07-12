@@ -65,9 +65,14 @@ Redis、MinIO 等依赖由 Docker/k3d/Helm 准备，cocola 自己的服务
 原生前台运行，方便改代码后 Ctrl-C 重启。各服务日志落在 `.run-logs/<服务名>.log`。
 
 ```bash
+cp .env.example .env
 make dev   # dev 调试栈：OpenSandbox runtime + 本机原生 cocola 服务
 make prod  # 正式/完整 Docker 启动：scripts/start.sh + docker-compose.full.yml
 ```
+
+`.env.example` 可直接作为本地配置使用，默认管理员为 `admin` / `cocola-admin`。
+其中的 Secret 和密码均为公开的本地开发值；真实部署前必须替换。已有 `.env` 不应
+直接覆盖，应保留原 `COCOLA_MODEL_SECRET_KEY`，否则历史加密模型 API key 无法解密。
 
 > 端口约定：gateway BFF 与 llm-gateway 默认都监听 `8080`，编排脚本把
 > llm-gateway 改钉到 `8081`（`COCOLA_LLM_PORT`）规避端口冲突；沙箱内大脑经

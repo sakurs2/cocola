@@ -3,6 +3,10 @@
 Cocola 只保留两类配置源。一个配置项只能有一个 owner，不允许文件、环境变量、
 数据库和 Redis 同时表达同一含义。
 
+仓库根目录的 `.env.example` 是可直接复制的本地 dev/prod 配置：
+`cp .env.example .env`。其中凭据仅供本机开发；真实部署必须替换。已有环境升级时
+应合并变量而不是覆盖，尤其必须保持 `COCOLA_MODEL_SECRET_KEY` 稳定。
+
 ## 1. 配置所有权
 
 | 类型           | 唯一来源                    | 生效方式       | 适用内容                                                            |
@@ -32,20 +36,21 @@ Scheduler、Warm Pool sizing 和 Trace 的同名环境变量只是无 DB overrid
 
 启动配置按 owner 分组。除明确注明外，修改后需要重启对应进程。
 
-| 分组                   | 主要变量                                                                                                                                        |
-| ---------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------- |
-| 服务地址               | `COCOLA_*_ADDR`、`COCOLA_*_HOST`、`COCOLA_*_PORT`、`COCOLA_ADMIN_URL`、`COCOLA_GATEWAY_URL`、`COCOLA_LLM_GATEWAY_URL`                           |
-| Auth/Secret            | `COCOLA_AUTH_SECRET`、`COCOLA_AUTH_ISSUER`、`COCOLA_AUTH_ALLOW_ANON`、`COCOLA_ADMIN_KEY`、`COCOLA_MODEL_SECRET_KEY`、`COCOLA_CONFIG_SECRET_KEY` |
-| Postgres/Redis         | `COCOLA_PG_DSN`、`COCOLA_REDIS_ADDR`、`COCOLA_REDIS_PASSWORD`、`COCOLA_REDIS_DB`、`COCOLA_REDIS_POOL_SIZE`                                      |
-| MinIO                  | `COCOLA_MINIO_ENDPOINT`、access/secret key、bucket、TLS、附件阈值                                                                               |
-| Agent/Run              | `COCOLA_AGENT_MODE`、`COCOLA_AGENT_RUN_TIMEOUT_SECS`、gRPC/message/artifact limits                                                              |
-| Sandbox                | `COCOLA_SANDBOX_ADDR`、image、lease/reaper/heartbeat、LLM URL/token/model、egress、volume backend                                               |
-| Warm Pool provisioning | `COCOLA_SANDBOX_WARM_POOL_REFILL_SECS`（enabled/size 是 Admin 可热加载配置，环境变量仅作为默认值）                                              |
-| OpenSandbox            | `COCOLA_OPENSANDBOX_*`（URL、API key、HTTP/Exec timeout、resources、K8s 部署参数）                                                              |
-| Checkpoint             | `COCOLA_SESSION_CHECKPOINT_*`、`COCOLA_SANDBOX_CHECKPOINT_DRAIN_SECS`                                                                           |
-| LLM 可靠性             | `COCOLA_LLM_TIMEOUT_SECS`、`COCOLA_LLM_MAX_RETRIES`、`COCOLA_LLM_RATE_LIMIT_RPS`、registry cache TTL                                            |
-| Quota/Auth cache       | quota 默认限额、override/revocation cache TTL、token TTL                                                                                        |
-| Observability          | `COCOLA_METRICS_*`、`COCOLA_OTEL_*`                                                                                                             |
+| 分组                   | 主要变量                                                                                                                                                       |
+| ---------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 服务地址               | `COCOLA_*_ADDR`、`COCOLA_*_HOST`、`COCOLA_*_PORT`、`COCOLA_ADMIN_URL`、`COCOLA_GATEWAY_URL`、`COCOLA_LLM_GATEWAY_URL`                                          |
+| Auth/Secret            | `AUTH_SECRET`、`COCOLA_AUTH_SECRET`、`COCOLA_AUTH_ISSUER`、`COCOLA_AUTH_ALLOW_ANON`、`COCOLA_ADMIN_KEY`、`COCOLA_MODEL_SECRET_KEY`、`COCOLA_CONFIG_SECRET_KEY` |
+| 初始管理员             | `COCOLA_BOOTSTRAP_ADMIN_USERNAME`、email、password/password hash、reset                                                                                        |
+| Postgres/Redis         | `COCOLA_PG_DSN`、`COCOLA_REDIS_ADDR`、`COCOLA_REDIS_PASSWORD`、`COCOLA_REDIS_DB`、`COCOLA_REDIS_POOL_SIZE`                                                     |
+| MinIO                  | `COCOLA_MINIO_ENDPOINT`、access/secret key、bucket、TLS、附件阈值                                                                                              |
+| Agent/Run              | `COCOLA_AGENT_MODE`、`COCOLA_AGENT_RUN_TIMEOUT_SECS`、gRPC/message/artifact limits                                                                             |
+| Sandbox                | `COCOLA_SANDBOX_ADDR`、image、lease/reaper/heartbeat、LLM URL/token/model、egress、volume backend                                                              |
+| Warm Pool provisioning | `COCOLA_SANDBOX_WARM_POOL_REFILL_SECS`（enabled/size 是 Admin 可热加载配置，环境变量仅作为默认值）                                                             |
+| OpenSandbox            | `COCOLA_OPENSANDBOX_*`（URL、API key、HTTP/Exec timeout、resources、K8s 部署参数）                                                                             |
+| Checkpoint             | `COCOLA_SESSION_CHECKPOINT_*`、`COCOLA_SANDBOX_CHECKPOINT_DRAIN_SECS`                                                                                          |
+| LLM 可靠性             | `COCOLA_LLM_TIMEOUT_SECS`、`COCOLA_LLM_MAX_RETRIES`、`COCOLA_LLM_RATE_LIMIT_RPS`、registry cache TTL                                                           |
+| Quota/Auth cache       | quota 默认限额、override/revocation cache TTL、token TTL                                                                                                       |
+| Observability          | `COCOLA_METRICS_*`、`COCOLA_OTEL_*`                                                                                                                            |
 
 Secret 支持统一的 `<NAME>_FILE` 约定：文件内容优先于同名环境变量。生产环境应
 通过 Secret/Vault 文件注入，不把明文写入仓库。
