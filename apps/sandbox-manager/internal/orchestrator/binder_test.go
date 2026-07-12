@@ -122,6 +122,67 @@ func newTestBinder(t *testing.T) (*Binder, *fakeProvider) {
 	return b, fp
 }
 
+func TestDrainWarmPoolLeavesClaimedSandboxRunning(t *testing.T) {
+	b, fp := newTestBinder(t)
+	ctx := context.Background()
+	b.WithWarmPool(WarmConfig{Image: "sandbox-image"})
+	for i := 0; i < 3; i++ {
+		if err := b.createOneWarm(ctx); err != nil {
+			t.Fatalf("create warm sandbox: %v", err)
+		}
+	}
+	claimed, ok := b.claimWarm(ctx, AcquireSpec{SessionID: "session-1", UserID: "user-1"})
+	if !ok {
+		t.Fatal("expected one warm sandbox to be claimed")
+	}
+
+	drained, err := b.DrainWarmPool(ctx)
+	if err != nil {
+		t.Fatalf("drain warm pool: %v", err)
+	}
+	if drained != 2 {
+		t.Fatalf("drained = %d, want 2 unclaimed sandboxes", drained)
+	}
+	if got := fp.destroys.Load(); got != 2 {
+		t.Fatalf("provider destroys = %d, want 2", got)
+	}
+	fp.mu.Lock()
+	claimedState := fp.state[claimed.ID]
+	fp.mu.Unlock()
+	if claimedState != "active" {
+		t.Fatalf("claimed sandbox state = %q, want active", claimedState)
+	}
+	ids, err := b.listWarm(ctx)
+	if err != nil || len(ids) != 0 {
+		t.Fatalf("remaining warm inventory = %v, %v", ids, err)
+	}
+}
+
+func TestDrainWarmPoolRetainsInventoryWhenDestroyFails(t *testing.T) {
+	b, fp := newTestBinder(t)
+	ctx := context.Background()
+	b.WithWarmPool(WarmConfig{Image: "sandbox-image"})
+	if err := b.createOneWarm(ctx); err != nil {
+		t.Fatalf("create warm sandbox: %v", err)
+	}
+	ids, err := b.listWarm(ctx)
+	if err != nil || len(ids) != 1 {
+		t.Fatalf("warm inventory = %v, %v", ids, err)
+	}
+	fp.mu.Lock()
+	fp.destroyErr[ids[0]] = errors.New("provider unavailable")
+	fp.mu.Unlock()
+
+	drained, err := b.DrainWarmPool(ctx)
+	if drained != 0 || err == nil {
+		t.Fatalf("drain result = %d, %v; want failure", drained, err)
+	}
+	remaining, listErr := b.listWarm(ctx)
+	if listErr != nil || len(remaining) != 1 || remaining[0] != ids[0] {
+		t.Fatalf("failed sandbox inventory = %v, %v; want %s retained", remaining, listErr, ids[0])
+	}
+}
+
 // TestAcquireReusesSameSandbox: two sequential acquires for one session return
 // the same sandbox and trigger exactly one create.
 func TestAcquireReusesSameSandbox(t *testing.T) {
@@ -140,6 +201,24 @@ func TestAcquireReusesSameSandbox(t *testing.T) {
 	}
 	if got := fp.creates.Load(); got != 1 {
 		t.Fatalf("expected 1 create, got %d", got)
+	}
+}
+
+func TestAcquireRejectsSessionOwnedByAnotherUser(t *testing.T) {
+	b, fp := newTestBinder(t)
+	ctx := context.Background()
+	first, err := b.Acquire(ctx, AcquireSpec{SessionID: "shared", UserID: "u1"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := b.Acquire(ctx, AcquireSpec{SessionID: "shared", UserID: "u2"}); !errors.Is(err, ErrSessionOwnerMismatch) {
+		t.Fatalf("cross-owner acquire error = %v, want owner mismatch", err)
+	}
+	if got := fp.creates.Load(); got != 1 {
+		t.Fatalf("creates = %d, want 1", got)
+	}
+	if state := fp.state[first.ID]; state != "active" {
+		t.Fatalf("original sandbox state = %q, want active", state)
 	}
 }
 
@@ -252,7 +331,7 @@ func TestReaperPauseThenDestroy(t *testing.T) {
 	}
 
 	// Mapping must be gone.
-	if _, ok, _ := b.lookup(ctx, "idle"); ok {
+	if _, ok, _ := b.lookup(ctx, "idle", "u"); ok {
 		t.Fatal("expected mapping removed after destroy")
 	}
 	fp.mu.Lock()
@@ -285,7 +364,7 @@ func TestReaperUnbindsMissingActiveSandbox(t *testing.T) {
 	if err := b.reapOnce(ctx, time.Now()); err != nil {
 		t.Fatalf("reapOnce: %v", err)
 	}
-	if _, ok, err := b.lookup(ctx, "missing-active"); err != nil || ok {
+	if _, ok, err := b.lookup(ctx, "missing-active", "u"); err != nil || ok {
 		t.Fatalf("lookup after reap ok=%v err=%v, want unbound", ok, err)
 	}
 }
@@ -315,7 +394,7 @@ func TestReaperUnbindsMissingPausedSandbox(t *testing.T) {
 	if err := b.reapOnce(ctx, time.Now()); err != nil {
 		t.Fatalf("reapOnce: %v", err)
 	}
-	if _, ok, err := b.lookup(ctx, "missing-paused"); err != nil || ok {
+	if _, ok, err := b.lookup(ctx, "missing-paused", "u"); err != nil || ok {
 		t.Fatalf("lookup after reap ok=%v err=%v, want unbound", ok, err)
 	}
 }
@@ -357,7 +436,7 @@ func TestReleaseDestroysUnbindsAndCleansSessionStorage(t *testing.T) {
 	if got := fp.destroys.Load(); got != 1 {
 		t.Fatalf("destroys = %d, want 1", got)
 	}
-	if _, ok, _ := b.lookup(ctx, "s1"); ok {
+	if _, ok, _ := b.lookup(ctx, "s1", "u1"); ok {
 		t.Fatal("expected mapping removed after release")
 	}
 	fp.mu.Lock()
@@ -391,7 +470,7 @@ func TestReleaseIgnoresCheckpointFailure(t *testing.T) {
 	if got := fp.destroys.Load(); got != 1 {
 		t.Fatalf("destroys = %d, want 1", got)
 	}
-	if _, ok, _ := b.lookup(ctx, "s-checkpoint-fail"); ok {
+	if _, ok, _ := b.lookup(ctx, "s-checkpoint-fail", "u1"); ok {
 		t.Fatal("expected mapping removed after release")
 	}
 }

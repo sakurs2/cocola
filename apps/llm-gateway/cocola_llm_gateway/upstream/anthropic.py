@@ -31,7 +31,7 @@ class AnthropicConfig:
     base_url: str = "https://api.anthropic.com"
     api_key: str = ""
     anthropic_version: str = "2023-06-01"
-    timeout_s: float = 60.0
+    timeout_s: float = 300.0
     connect_timeout_s: float = 10.0
     # When False, talk to the upstream in NON-streaming mode (POST once, read the
     # whole JSON body) and re-synthesize the downstream StreamEvent sequence

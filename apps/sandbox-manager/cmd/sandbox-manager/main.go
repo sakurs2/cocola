@@ -71,6 +71,7 @@ func main() {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	var binder *orchestrator.Binder
+	var warmDone chan struct{}
 	// Retry the initial dial instead of a single shot: full.yml orders us after
 	// redis is healthy, but transient DNS/network races (or a slow-to-DNS bridge)
 	// would otherwise permanently disable binding RPCs until a manual restart.
@@ -118,7 +119,11 @@ func main() {
 			// (which runs immediately). No separate synchronous startup pass is
 			// needed — this keeps startup non-blocking and the reconcile logic
 			// in exactly one place.
-			go binder.RunWarmPool(ctx) // background pre-warm refill + self-heal loop
+			warmDone = make(chan struct{})
+			go func() {
+				defer close(warmDone)
+				binder.RunWarmPool(ctx) // background pre-warm refill + self-heal loop
+			}()
 			log.Sugar().Infow("sandbox warm pool enabled",
 				"size", warmCfg.Size,
 				"enabled", warmCfg.Enabled,
@@ -209,7 +214,22 @@ func main() {
 				"skipped", summary.Skipped,
 				"failed", len(summary.Failures))
 		}
-		cancel() // stop reaper/warm-pool background loops
+		// Stop the refill loop before draining its inventory; otherwise it could
+		// recreate a warm sandbox while shutdown is deleting the previous ones.
+		cancel()
+		if warmDone != nil {
+			<-warmDone
+		}
+		if binder != nil {
+			dctx, dcancel := context.WithTimeout(context.Background(), 5*time.Second)
+			drained, drainErr := binder.DrainWarmPool(dctx)
+			dcancel()
+			if drainErr != nil {
+				log.Sugar().Errorw("warm pool drain incomplete", "drained", drained, "err", drainErr)
+			} else {
+				log.Sugar().Infow("warm pool drain completed", "drained", drained)
+			}
+		}
 	}
 }
 

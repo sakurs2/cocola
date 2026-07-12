@@ -163,4 +163,3 @@ async def test_stream_true_still_uses_sse_endpoint():
 async def _iter(seq):
     for ev in seq:
         yield ev
-

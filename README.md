@@ -139,9 +139,13 @@ make dev         # dev 调试栈，llm-gateway 接到你的上游 + 真实 Route
 > agent-runtime 暴露 `AgentRuntimeService.Query` 服务端流式 RPC；gateway 作为
 > BFF 校验 cocola 令牌（复用 `packages/go-common/token` 同一套 HS256 编解码，
 > 与 admin-api 共享，不重复造轮子），并把 Agent 事件以 SSE 推给浏览器。
+> Gateway 在本进程后台执行 Agent Run，浏览器断线只中断订阅；重连会先收到完整
+> assistant snapshot。Stop 才会显式取消任务。Gateway/Agent Runtime 重启不会重放
+> 工具调用，而是把 Run 标记为 `interrupted` 并保留最近一次 partial answer。详见
+> [`docs/core-chat-reliability.md`](./docs/core-chat-reliability.md) 与 ADR-0019。
 >
 > ```bash
-> # 启动 agent-runtime gRPC 服务（缺省 :50061；未配置 LLM 时回退 EchoProvider）
+> # 启动 agent-runtime gRPC 服务（缺省 :50061；real 模式要求配置 sandbox）
 > cd apps/agent-runtime && uv run python -m cocola_agent_runtime
 > # 启动 gateway BFF（缺省 :8080，转发至 127.0.0.1:50061）
 > export COCOLA_AUTH_SECRET=<与签发方共享的密钥>   # 缺省则鉴权关闭（仅本地）
@@ -217,21 +221,21 @@ make dev         # dev 调试栈，llm-gateway 接到你的上游 + 真实 Route
 
 ## 路线图
 
-| 里程碑  | 内容                                                                                                                                                                            | 状态 |
-| ------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---- |
-| M0      | Monorepo 地基、本地开发依赖                                                                                                                                                     | ✅   |
-| M1      | SandboxProvider 抽象 + Docker 实现                                                                                                                                              | ✅   |
-| M2      | 会话↔沙箱绑定 + 租约/两段式 GC（Agent Runtime 闭环）                                                                                                                            | ✅   |
-| M3      | LLM Gateway：Anthropic 兼容代理（承接 Claude Agent SDK）+ 计费账本                                                                                                              | ✅   |
-| M4      | Auth + Token 配额：cocola 签发令牌即 SDK API Key（HS256 离线校验）+ 周期化 token 配额（按用户日 / 租户月，超额 429）                                                            | ✅   |
-| M5      | Admin API + Skill Market：Go 控制面（令牌签发 / 吊销denylist + 动态 per-subject 配额覆盖 + Skill 目录 CRUD + 审计日志），令牌编解码与 Python 网关跨语言互通（HS256 字节级一致） | ✅   |
-| **MVP** | **后端端到端打通：agent-runtime gRPC 服务（`AgentRuntimeService.Query` 服务端流式）+ gateway BFF（HTTP/SSE + 令牌校验，复用 go-common/token 共享 HS256 编解码）**               | ✅   |
-| **R-A** | **Route A：Claude Code 大脑进沙箱（ADR-0009）+ 真实模型接入 + 全栈容器化（docker-compose.full）+ Web 对话 / 原生工具端到端**                                                       | ✅   |
+| 里程碑  | 内容                                                                                                                                                                                                                                                                                                | 状态 |
+| ------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---- |
+| M0      | Monorepo 地基、本地开发依赖                                                                                                                                                                                                                                                                         | ✅   |
+| M1      | SandboxProvider 抽象 + Docker 实现                                                                                                                                                                                                                                                                  | ✅   |
+| M2      | 会话↔沙箱绑定 + 租约/两段式 GC（Agent Runtime 闭环）                                                                                                                                                                                                                                                | ✅   |
+| M3      | LLM Gateway：Anthropic 兼容代理（承接 Claude Agent SDK）+ 计费账本                                                                                                                                                                                                                                  | ✅   |
+| M4      | Auth + Token 配额：cocola 签发令牌即 SDK API Key（HS256 离线校验）+ 周期化 token 配额（按用户日 / 租户月，超额 429）                                                                                                                                                                                | ✅   |
+| M5      | Admin API + Skill Market：Go 控制面（令牌签发 / 吊销denylist + 动态 per-subject 配额覆盖 + Skill 目录 CRUD + 审计日志），令牌编解码与 Python 网关跨语言互通（HS256 字节级一致）                                                                                                                     | ✅   |
+| **MVP** | **后端端到端打通：agent-runtime gRPC 服务（`AgentRuntimeService.Query` 服务端流式）+ gateway BFF（HTTP/SSE + 令牌校验，复用 go-common/token 共享 HS256 编解码）**                                                                                                                                   | ✅   |
+| **R-A** | **Route A：Claude Code 大脑进沙箱（ADR-0009）+ 真实模型接入 + 全栈容器化（docker-compose.full）+ Web 对话 / 原生工具端到端**                                                                                                                                                                        | ✅   |
 | M6      | K8s Provider:client-go 实现 8 方法 + 休眠(删 Pod 留 PVC)/恢复(凭 binding 重建)/Exec 自愈 + egress NetworkPolicy + 部署物(K8s 清单 / Helm Chart);默认 runc + 用户命名空间(零节点安装),gVisor 为可选增强;代码与单测就绪,真实集群端到端验收(Layer C)已在 k3d(本地)跑通,发行版无关(k3d/k3s/EKS/GKE/AKS) | ✅   |
-| M7      | 持久化数据分层：会话 `session_map`／计费账本／控制面元数据落 Postgres，重启不丢、可自托管、多副本可共享（Vault 密钥托管按 ADR-0008 留待后续）                                      | ✅   |
-| M8      | 可观测性与压测：五服务统一 RED 指标(Prometheus)+ OTel 链路(默认关，Tempo)+ 部署观测栈(Grafana 看板)+ 压测套件(k6 SSE / ghz gRPC)与容量基线 runbook                          | ✅   |
-| WP      | ~~Warm pool 预热池~~:**已由 ADR-0016 整体移除(代码 + 文档)**。OpenSandbox 运行中沙箱无热挂卷 API,adopt-by-remount 永久不可实现;自托管中小并发的冷启动可接受。沙箱分配只剩按需冷启动一条路(快路径续租复用 / 慢路径加锁 Create + 创建时挂双卷),见 ADR-0015/0016 | 已移除(ADR-0016) |
-| GV      | gVisor(runsc)兼容性 spike:Node + Claude Code 在 `RuntimeClass=runsc` 下跑通 Route A 的 pre-prod 验收门。Layer A/B 本机可做,Layer C(真集群 + gVisor 端到端)待目标集群 | ⏳   |
+| M7      | 持久化数据分层：会话 `session_map`／计费账本／控制面元数据落 Postgres，重启不丢、可自托管、多副本可共享（Vault 密钥托管按 ADR-0008 留待后续）                                                                                                                                                       | ✅   |
+| M8      | 可观测性与压测：五服务统一 RED 指标(Prometheus)+ OTel 链路(默认关，Tempo)+ 部署观测栈(Grafana 看板)+ 压测套件(k6 SSE / ghz gRPC)与容量基线 runbook                                                                                                                                                  | ✅   |
+| WP      | Warm Pool 默认开启；预热沙箱 claim 后按 `reused=false` 从 MinIO checkpoint 恢复 session 数据，不依赖运行中热挂载持久卷。活跃沙箱与冷启动沙箱使用相同 owner 校验和 heartbeat，见 ADR-0019。                                                                                                          | ✅   |
+| GV      | gVisor(runsc)兼容性 spike:Node + Claude Code 在 `RuntimeClass=runsc` 下跑通 Route A 的 pre-prod 验收门。Layer A/B 本机可做,Layer C(真集群 + gVisor 端到端)待目标集群                                                                                                                                | ⏳   |
 
 ## 安全：沙箱出网模型（egress）
 

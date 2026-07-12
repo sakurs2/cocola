@@ -32,7 +32,7 @@ from cocola_llm_gateway.upstream.errors import UpstreamError
 class OpenAICompatConfig:
     base_url: str = "https://api.openai.com/v1"
     api_key: str = ""
-    timeout_s: float = 60.0
+    timeout_s: float = 300.0
     connect_timeout_s: float = 10.0
     # Many OpenAI-compatible servers support usage in the final stream chunk via
     # this flag; off by default for broad compatibility.

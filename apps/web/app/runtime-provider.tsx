@@ -85,6 +85,44 @@ type UiMessage = {
   metadata?: UiMessageMetadata;
 };
 
+type RunCursor = {
+  conversationId: string;
+  runId: string;
+  assistantId: string;
+};
+
+const RUN_CURSOR_KEY = "cocola.chat-runs.v1";
+const CHAT_START_MAX_ATTEMPTS = 8;
+const RUN_RECONNECT_MAX_ATTEMPTS = 20;
+
+function readRunCursors(): RunCursor[] {
+  if (typeof window === "undefined") return [];
+  try {
+    const raw = JSON.parse(sessionStorage.getItem(RUN_CURSOR_KEY) ?? "[]") as unknown;
+    if (!Array.isArray(raw)) return [];
+    return raw.flatMap((item): RunCursor[] => {
+      if (!item || typeof item !== "object") return [];
+      const cursor = item as Record<string, unknown>;
+      return typeof cursor.conversationId === "string" &&
+        typeof cursor.runId === "string" &&
+        typeof cursor.assistantId === "string"
+        ? [cursor as RunCursor]
+        : [];
+    });
+  } catch {
+    return [];
+  }
+}
+
+function writeRunCursors(cursors: Map<string, RunCursor>) {
+  if (typeof window === "undefined") return;
+  try {
+    sessionStorage.setItem(RUN_CURSOR_KEY, JSON.stringify([...cursors.values()]));
+  } catch (error) {
+    console.warn("chat run cursor could not be persisted", error);
+  }
+}
+
 export type SandboxInfo = {
   sandboxId: string;
   endpoint: string;
@@ -551,6 +589,8 @@ export function CocolaRuntimeProvider({ children }: { children: ReactNode }) {
   const [selectedModelAlias, setSelectedModelAlias] = useState("");
   const [modelsLoaded, setModelsLoaded] = useState(false);
   const abortMap = useRef<Map<string, AbortController>>(new Map());
+  const runCursors = useRef<Map<string, RunCursor>>(new Map());
+  const restoredRuns = useRef(false);
   const sessionIdRef = useRef(sessionId);
   const conversationsRef = useRef(conversations);
   const realtimeScheduledRunsRef = useRef<Set<string>>(new Set());
@@ -591,6 +631,33 @@ export function CocolaRuntimeProvider({ children }: { children: ReactNode }) {
   }, []);
 
   const applyEvent = useCallback((targetSessionId: string, assistantId: string, ev: AgentEvent) => {
+    if (ev.kind === "snapshot") {
+      let parts: UiPart[] = [];
+      try {
+        const parsed = JSON.parse(ev.data?.parts ?? "[]") as UiPart[];
+        if (Array.isArray(parsed)) parts = normalizePersistedParts(parsed);
+      } catch {
+        return;
+      }
+      setConvMessages((prev) => {
+        const current = prev[targetSessionId] ?? [];
+        const index = current.findIndex((message) => message.id === assistantId);
+        const assistant: UiMessage = {
+          id: assistantId,
+          role: "assistant",
+          parts,
+          createdAt: Date.now(),
+        };
+        const next =
+          index >= 0
+            ? current.map((message, messageIndex) =>
+                messageIndex === index ? { ...message, parts } : message,
+              )
+            : [...current, assistant];
+        return { ...prev, [targetSessionId]: next };
+      });
+      return;
+    }
     if (ev.kind === "environment_status") {
       const status = parseEnvironmentStatus(ev);
       if (status) {
@@ -662,6 +729,137 @@ export function CocolaRuntimeProvider({ children }: { children: ReactNode }) {
       }
     })();
   }, []);
+
+  const finishRun = useCallback(
+    (cursor: RunCursor) => {
+      setRunning(cursor.conversationId, false);
+      abortMap.current.delete(cursor.conversationId);
+      runCursors.current.delete(cursor.conversationId);
+      writeRunCursors(runCursors.current);
+      if (cursor.conversationId !== sessionIdRef.current) {
+        setUnreadCompletedIds((prev) => new Set(prev).add(cursor.conversationId));
+      }
+      refreshConversations();
+    },
+    [refreshConversations, setRunning],
+  );
+
+  const followRun = useCallback(
+    async (cursor: RunCursor, controller: AbortController, initial?: Response) => {
+      let response = initial;
+      let retryDelay = 250;
+      let reconnectAttempts = 0;
+      while (!controller.signal.aborted) {
+        try {
+          response ??= await fetch(`/api/chat/runs/${encodeURIComponent(cursor.runId)}`, {
+            cache: "no-store",
+            signal: controller.signal,
+          });
+          if (isAccountDisabledResponse(response)) {
+            redirectAccountDisabled();
+            return;
+          }
+          if (!response.ok || !response.body) {
+            if (response.status === 404) {
+              applyEvent(cursor.conversationId, cursor.assistantId, {
+                kind: "error",
+                data: { error: "Saved run is unavailable" },
+              });
+              finishRun(cursor);
+              return;
+            }
+            throw new Error(`run stream unavailable (${response.status})`);
+          }
+
+          const reader = response.body.getReader();
+          const decoder = new TextDecoder();
+          let buffer = "";
+          let terminal = false;
+          for (;;) {
+            const { value, done } = await reader.read();
+            if (done) break;
+            buffer += decoder.decode(value, { stream: true });
+            const parsed = parseFrames(buffer);
+            buffer = parsed.rest;
+            for (const event of parsed.events) {
+              applyEvent(cursor.conversationId, cursor.assistantId, event);
+              if (isTerminalAgentEvent(event)) {
+                terminal = true;
+                break;
+              }
+            }
+            if (terminal) {
+              await reader.cancel().catch(() => {});
+              break;
+            }
+          }
+          if (terminal || !cursor.runId) {
+            finishRun(cursor);
+            return;
+          }
+          response = undefined;
+          retryDelay = 250;
+        } catch (error) {
+          if (controller.signal.aborted) return;
+          response = undefined;
+          console.warn("chat stream disconnected; reconnecting", error);
+        }
+        reconnectAttempts += 1;
+        if (reconnectAttempts >= RUN_RECONNECT_MAX_ATTEMPTS) {
+          applyEvent(cursor.conversationId, cursor.assistantId, {
+            kind: "error",
+            data: {
+              error: "Run connection is unavailable after repeated retries. Refresh to reconnect.",
+            },
+          });
+          abortMap.current.delete(cursor.conversationId);
+          runCursors.current.delete(cursor.conversationId);
+          writeRunCursors(runCursors.current);
+          setRunning(cursor.conversationId, false);
+          return;
+        }
+        await new Promise<void>((resolve) => window.setTimeout(resolve, retryDelay));
+        retryDelay = Math.min(retryDelay * 2, 5000);
+      }
+    },
+    [applyEvent, finishRun, setRunning],
+  );
+
+  useEffect(() => {
+    if (restoredRuns.current) return;
+    restoredRuns.current = true;
+    const cursors = readRunCursors();
+    for (const cursor of cursors) {
+      runCursors.current.set(cursor.conversationId, cursor);
+      setRunning(cursor.conversationId, true);
+      void (async () => {
+        try {
+          const history = await fetch(
+            `/api/conversations/${encodeURIComponent(cursor.conversationId)}/messages`,
+            { cache: "no-store" },
+          );
+          if (history.ok) {
+            const rows = (await history.json()) as WireMessage[];
+            const loaded = (Array.isArray(rows) ? rows : []).map(
+              (message): UiMessage => ({
+                id: message.id,
+                role: message.role,
+                parts: normalizePersistedParts(message.parts),
+                metadata: normalizeMetadata(message.metadata),
+                createdAt: message.created_at ? new Date(message.created_at).getTime() : Date.now(),
+              }),
+            );
+            setConvMessages((prev) => ({ ...prev, [cursor.conversationId]: loaded }));
+          }
+        } catch {
+          // The run snapshot below remains sufficient to continue rendering.
+        }
+        const controller = new AbortController();
+        abortMap.current.set(cursor.conversationId, controller);
+        await followRun(cursor, controller);
+      })();
+    }
+  }, [followRun, setRunning]);
 
   const applyUserEvent = useCallback(
     (event: UserEvent, source: "realtime" | "snapshot" = "realtime") => {
@@ -823,6 +1021,7 @@ export function CocolaRuntimeProvider({ children }: { children: ReactNode }) {
         model_icon: model.icon,
       };
       const assistantId = genId();
+      const clientRequestId = genId();
       setConvMessages((prev) => {
         const cur = prev[turnSessionId] ?? [];
         return {
@@ -870,81 +1069,114 @@ export function CocolaRuntimeProvider({ children }: { children: ReactNode }) {
 
       const ctrl = new AbortController();
       abortMap.current.set(turnSessionId, ctrl);
-      let aborted = false;
-      let finalized = false;
-      const finalizeTurn = (markUnread: boolean) => {
-        if (finalized) return;
-        finalized = true;
-        setRunning(turnSessionId, false);
-        abortMap.current.delete(turnSessionId);
-        if (markUnread) {
-          setUnreadCompletedIds((prev) => {
-            const next = new Set(prev);
-            next.add(turnSessionId);
-            return next;
-          });
-        }
-        refreshConversations();
-      };
       try {
-        const res = await fetch("/api/chat", {
-          method: "POST",
-          headers: {
-            "content-type": "application/json",
-          },
-          body: JSON.stringify({
-            prompt: text,
-            session_id: turnSessionId,
-            model_alias: model.alias,
-            model_label: model.label,
-            ...(model.provider ? { model_provider: model.provider } : {}),
-            ...(model.family ? { model_family: model.family } : {}),
-            ...(model.iconSlug ? { model_icon_slug: model.iconSlug } : {}),
-            model_icon: model.icon,
-            ...(attachments.length > 0 ? { attachments } : {}),
-          }),
-          signal: ctrl.signal,
+        const requestBody = JSON.stringify({
+          prompt: text,
+          session_id: turnSessionId,
+          client_request_id: clientRequestId,
+          model_alias: model.alias,
+          model_label: model.label,
+          ...(model.provider ? { model_provider: model.provider } : {}),
+          ...(model.family ? { model_family: model.family } : {}),
+          ...(model.iconSlug ? { model_icon_slug: model.iconSlug } : {}),
+          model_icon: model.icon,
+          ...(attachments.length > 0 ? { attachments } : {}),
         });
+        let res: Response | undefined;
+        let retryDelay = 250;
+        let startAttempts = 0;
+        while (!res && !ctrl.signal.aborted && startAttempts < CHAT_START_MAX_ATTEMPTS) {
+          startAttempts += 1;
+          try {
+            const candidate = await fetch("/api/chat", {
+              method: "POST",
+              headers: { "content-type": "application/json" },
+              body: requestBody,
+              signal: ctrl.signal,
+            });
+            const upstreamStatus = Number.parseInt(
+              candidate.headers.get("x-cocola-upstream-status") ?? "0",
+              10,
+            );
+            if (candidate.status >= 500 || upstreamStatus >= 500) {
+              await candidate.body?.cancel().catch(() => {});
+              if (startAttempts >= CHAT_START_MAX_ATTEMPTS) {
+                throw new Error(`chat start unavailable after ${startAttempts} attempts`);
+              }
+              await new Promise<void>((resolve) => window.setTimeout(resolve, retryDelay));
+              retryDelay = Math.min(retryDelay * 2, 5000);
+              continue;
+            }
+            res = candidate;
+          } catch (error) {
+            if (ctrl.signal.aborted) throw error;
+            if (startAttempts >= CHAT_START_MAX_ATTEMPTS) throw error;
+            await new Promise<void>((resolve) => window.setTimeout(resolve, retryDelay));
+            retryDelay = Math.min(retryDelay * 2, 5000);
+          }
+        }
+        if (!res) return;
         if (isAccountDisabledResponse(res)) {
           redirectAccountDisabled();
           return;
         }
         if (!res.body) throw new Error("no response body");
 
-        const reader = res.body.getReader();
-        const decoder = new TextDecoder();
-        let buffer = "";
-        stream: for (;;) {
-          const { value, done } = await reader.read();
-          if (done) break;
-          buffer += decoder.decode(value, { stream: true });
-          const { events, rest } = parseFrames(buffer);
-          buffer = rest;
-          for (const ev of events) {
-            applyEvent(turnSessionId, assistantId, ev);
-            if (isTerminalAgentEvent(ev)) {
-              finalizeTurn(true);
-              await reader.cancel().catch(() => {});
-              break stream;
-            }
-          }
+        const runId = res.headers.get("x-cocola-run-id") ?? "";
+        const durableAssistantId = runId ? `${runId}-assistant` : assistantId;
+        if (durableAssistantId !== assistantId) {
+          setConvMessages((prev) => ({
+            ...prev,
+            [turnSessionId]: (prev[turnSessionId] ?? []).map((item) =>
+              item.id === assistantId ? { ...item, id: durableAssistantId } : item,
+            ),
+          }));
         }
+        const cursor = {
+          conversationId: turnSessionId,
+          runId,
+          assistantId: durableAssistantId,
+        };
+        if (runId) {
+          runCursors.current.set(turnSessionId, cursor);
+          writeRunCursors(runCursors.current);
+        }
+        await followRun(cursor, ctrl, res);
       } catch (err) {
         if (!(err instanceof DOMException && err.name === "AbortError")) {
           const msg = err instanceof Error ? err.message : String(err);
           applyEvent(turnSessionId, assistantId, { kind: "error", data: { error: msg } });
-        } else {
-          aborted = true;
+          setRunning(turnSessionId, false);
+          abortMap.current.delete(turnSessionId);
         }
-      } finally {
-        finalizeTurn(!aborted);
       }
     },
-    [sessionId, selectedModel, messages.length, applyEvent, refreshConversations, setRunning],
+    [sessionId, selectedModel, messages.length, applyEvent, followRun, setRunning],
   );
 
   const onCancel = useCallback(async () => {
     const ctrl = abortMap.current.get(sessionId);
+    const cursor = runCursors.current.get(sessionId);
+    if (cursor?.runId) {
+      try {
+        const response = await fetch(`/api/chat/runs/${encodeURIComponent(cursor.runId)}`, {
+          method: "DELETE",
+        });
+        if (isAccountDisabledResponse(response)) {
+          redirectAccountDisabled();
+          return;
+        }
+        if (!response.ok) throw new Error(`cancel failed (${response.status})`);
+      } catch (error) {
+        applyEvent(sessionId, cursor.assistantId, {
+          kind: "error",
+          data: { error: error instanceof Error ? error.message : String(error) },
+        });
+        return;
+      }
+      runCursors.current.delete(sessionId);
+      writeRunCursors(runCursors.current);
+    }
     ctrl?.abort();
     abortMap.current.delete(sessionId);
     setRunning(sessionId, false);
@@ -954,7 +1186,53 @@ export function CocolaRuntimeProvider({ children }: { children: ReactNode }) {
       delete next[sessionId];
       return next;
     });
-  }, [sessionId, setRunning]);
+  }, [applyEvent, sessionId, setRunning]);
+
+  const connectActiveRun = useCallback(
+    async (conversationId: string) => {
+      if (abortMap.current.has(conversationId) || runCursors.current.has(conversationId)) return;
+      let response: Response;
+      try {
+        response = await fetch(
+          `/api/chat/runs/active?conversation_id=${encodeURIComponent(conversationId)}`,
+          { cache: "no-store" },
+        );
+      } catch {
+        return;
+      }
+      if (response.status === 404 || !response.ok) return;
+      const run = (await response.json()) as { run_id?: string };
+      if (!run.run_id) return;
+      const cursor: RunCursor = {
+        conversationId,
+        runId: run.run_id,
+        assistantId: `${run.run_id}-assistant`,
+      };
+      runCursors.current.set(conversationId, cursor);
+      writeRunCursors(runCursors.current);
+      setRunning(conversationId, true);
+      setConvMessages((prev) => {
+        const current = prev[conversationId] ?? [];
+        if (current.some((message) => message.id === cursor.assistantId)) return prev;
+        return {
+          ...prev,
+          [conversationId]: [
+            ...current,
+            {
+              id: cursor.assistantId,
+              role: "assistant",
+              parts: [],
+              createdAt: Date.now(),
+            },
+          ],
+        };
+      });
+      const controller = new AbortController();
+      abortMap.current.set(conversationId, controller);
+      await followRun(cursor, controller);
+    },
+    [followRun, setRunning],
+  );
 
   // Replay a stored conversation into the thread: fetch its messages, map them
   // back into local state, and point session_id at it so a follow-up turn
@@ -972,6 +1250,7 @@ export function CocolaRuntimeProvider({ children }: { children: ReactNode }) {
       const cached = convMessages[id] ?? [];
       if (cached.length > 0) {
         if (hasAssistantResponse(cached)) setRunning(id, false);
+        void connectActiveRun(id);
         return;
       }
       try {
@@ -980,7 +1259,10 @@ export function CocolaRuntimeProvider({ children }: { children: ReactNode }) {
           redirectAccountDisabled();
           return;
         }
-        if (!res.ok) return;
+        if (!res.ok) {
+          void connectActiveRun(id);
+          return;
+        }
         const rows = (await res.json()) as WireMessage[];
         const loaded: UiMessage[] = (Array.isArray(rows) ? rows : []).map((m) => ({
           id: m.id,
@@ -991,11 +1273,13 @@ export function CocolaRuntimeProvider({ children }: { children: ReactNode }) {
         }));
         setConvMessages((prev) => ({ ...prev, [id]: loaded }));
         if (hasAssistantResponse(loaded)) setRunning(id, false);
+        void connectActiveRun(id);
       } catch {
         // ignore — leave the current thread untouched on failure
+        void connectActiveRun(id);
       }
     },
-    [convMessages, setRunning],
+    [connectActiveRun, convMessages, setRunning],
   );
 
   const renameConversation = useCallback(
@@ -1036,11 +1320,6 @@ export function CocolaRuntimeProvider({ children }: { children: ReactNode }) {
 
   const deleteConversation = useCallback(
     async (id: string) => {
-      const ctrl = abortMap.current.get(id);
-      ctrl?.abort();
-      abortMap.current.delete(id);
-      setRunning(id, false);
-
       const res = await fetch(`/api/conversations/${encodeURIComponent(id)}`, {
         method: "DELETE",
       });
@@ -1050,8 +1329,18 @@ export function CocolaRuntimeProvider({ children }: { children: ReactNode }) {
       }
       if (!res.ok) {
         refreshConversations();
+        if (res.status === 409) {
+          throw new Error("Stop the running answer and wait for it to finish before deleting.");
+        }
         throw new Error(`delete failed (${res.status})`);
       }
+
+      const ctrl = abortMap.current.get(id);
+      ctrl?.abort();
+      abortMap.current.delete(id);
+      runCursors.current.delete(id);
+      writeRunCursors(runCursors.current);
+      setRunning(id, false);
 
       setConversations((prev) => prev.filter((c) => c.id !== id));
       realtimeScheduledRunsRef.current.delete(id);

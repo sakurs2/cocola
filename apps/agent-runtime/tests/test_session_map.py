@@ -29,42 +29,53 @@ async def _contract(store):
     assert await store.get("S-unknown") is None
     # Put then get round-trips.
     await store.put("S1", "claude-aaa", user_id="U1", sandbox_id="box-1")
-    assert await store.get("S1") == "claude-aaa"
-    binding = await store.get_binding("S1")
+    assert await store.get("S1", user_id="U1") == "claude-aaa"
+    binding = await store.get_binding("S1", user_id="U1")
     assert binding is not None
     assert binding.claude_session_id == "claude-aaa"
     assert binding.sandbox_id == "box-1"
-    assert await store.get_checkpoint("S1") is None
-    await store.put_checkpoint("S1", "checkpoints/U1/S1/ck1.tar.zst")
-    assert await store.get_checkpoint("S1") == "checkpoints/U1/S1/ck1.tar.zst"
-    binding = await store.get_binding("S1")
+    assert await store.get_checkpoint("S1", user_id="U1") is None
+    await store.put_checkpoint("S1", "checkpoints/U1/S1/ck1.tar.zst", user_id="U1")
+    assert await store.get_checkpoint("S1", user_id="U1") == "checkpoints/U1/S1/ck1.tar.zst"
+    binding = await store.get_binding("S1", user_id="U1")
     assert binding is not None
     assert binding.checkpoint_object_key == "checkpoints/U1/S1/ck1.tar.zst"
     # Idempotent overwrite: the latest claude_session_id wins.
     await store.put("S1", "claude-bbb", user_id="U1", sandbox_id="box-2")
-    assert await store.get("S1") == "claude-bbb"
-    assert await store.get_checkpoint("S1") == "checkpoints/U1/S1/ck1.tar.zst"
-    binding = await store.get_binding("S1")
+    assert await store.get("S1", user_id="U1") == "claude-bbb"
+    assert await store.get_checkpoint("S1", user_id="U1") == "checkpoints/U1/S1/ck1.tar.zst"
+    binding = await store.get_binding("S1", user_id="U1")
     assert binding is not None
     assert binding.claude_session_id == "claude-bbb"
     assert binding.sandbox_id == "box-2"
     assert binding.checkpoint_object_key == "checkpoints/U1/S1/ck1.tar.zst"
     # Empty claude_session_id is a no-op (never clobbers a good binding).
     await store.put("S1", "", user_id="U1")
-    assert await store.get("S1") == "claude-bbb"
+    assert await store.get("S1", user_id="U1") == "claude-bbb"
+    assert await store.get("S1", user_id="U2") is None
     # delete forgets a binding (used to drop a dangling/stale resume id).
-    await store.delete("S1")
-    assert await store.get("S1") is None
-    assert await store.get_binding("S1") is None
-    assert await store.get_checkpoint("S1") is None
+    await store.delete("S1", user_id="U1")
+    assert await store.get("S1", user_id="U1") is None
+    assert await store.get_binding("S1", user_id="U1") is None
+    assert await store.get_checkpoint("S1", user_id="U1") is None
     # delete is idempotent: forgetting an unknown session is a no-op.
-    await store.delete("S-unknown")
+    await store.delete("S-unknown", user_id="U1")
 
 
 async def test_memory_session_map_contract():
     store = MemorySessionMap()
     await _contract(store)
     await store.aclose()
+
+
+async def test_memory_session_map_rejects_cross_owner_overwrite_and_delete():
+    store = MemorySessionMap()
+    await store.put("shared", "claude-u1", user_id="U1", sandbox_id="box-u1")
+    with pytest.raises(PermissionError, match="owner mismatch"):
+        await store.put("shared", "claude-u2", user_id="U2", sandbox_id="box-u2")
+    await store.delete("shared", user_id="U2")
+    assert await store.get("shared", user_id="U1") == "claude-u1"
+    assert await store.get("shared", user_id="U2") is None
 
 
 async def _truncate(dsn: str) -> None:
@@ -101,8 +112,8 @@ async def test_postgres_session_map_survives_restart():
     # must come back from the durable table, not from any in-process state.
     reader = PostgresSessionMap(PG_DSN)
     try:
-        assert await reader.get("S-restart") == "claude-persist"
-        binding = await reader.get_binding("S-restart")
+        assert await reader.get("S-restart", user_id="U9") == "claude-persist"
+        binding = await reader.get_binding("S-restart", user_id="U9")
         assert binding is not None
         assert binding.sandbox_id == "box-9"
     finally:

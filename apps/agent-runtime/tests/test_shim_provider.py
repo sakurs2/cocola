@@ -74,6 +74,7 @@ async def test_maps_tool_use_turn_and_reassembles_split_line():
 
     # The shim was driven via the shim entrypoint with our Request JSON on stdin.
     assert execu.stream_calls[0]["cmd"] == ["/opt/cocola/shim/entrypoint.sh"]
+    assert execu.stream_calls[0]["timeout_secs"] == 3600
     sent = json.loads(execu.stream_calls[0]["stdin"])
     assert sent["prompt"] == "weather?"
     assert "resume" not in sent  # first turn has nothing to resume
@@ -257,7 +258,7 @@ async def test_stored_resume_is_reused_when_sandbox_changes():
 
     assert [e.kind for e in events] == ["text", "done"]
     assert events[0].data["text"] == "resumed sandbox"
-    binding = await smap.get_binding("S1")
+    binding = await smap.get_binding("S1", user_id="U1")
     assert binding is not None
     assert binding.claude_session_id == "sess-new"
     assert binding.sandbox_id == "box-new"
@@ -397,7 +398,7 @@ async def test_dangling_resume_retries_fresh_and_reindexes():
         yield ExecChunk(kind="exit", exit_code=0)
 
     smap = MemorySessionMap()
-    await smap.put("S1", "sess-stale")
+    await smap.put("S1", "sess-stale", user_id="U1")
     execu = StaticSandboxExecutor(stream_handler=stream_handler)
     provider = InSandboxShimProvider(execu, session_map=smap)
     opts = AgentOptions(user_id="U1", session_id="S1", sandbox_id="box-1")
@@ -411,7 +412,7 @@ async def test_dangling_resume_retries_fresh_and_reindexes():
     assert events[-1].data == {"session_id": "sess-new"}
     assert calls["n"] == 2  # exactly one retry
     # The stale id was forgotten and replaced by the fresh one.
-    assert await smap.get("S1") == "sess-new"
+    assert await smap.get("S1", user_id="U1") == "sess-new"
 
 
 async def test_unrelated_failure_is_not_retried():
@@ -426,7 +427,7 @@ async def test_unrelated_failure_is_not_retried():
         yield ExecChunk(kind="exit", exit_code=127)
 
     smap = MemorySessionMap()
-    await smap.put("S1", "sess-x")
+    await smap.put("S1", "sess-x", user_id="U1")
     execu = StaticSandboxExecutor(stream_handler=stream_handler)
     provider = InSandboxShimProvider(execu, session_map=smap)
     opts = AgentOptions(user_id="U1", session_id="S1", sandbox_id="box-1")
@@ -438,7 +439,7 @@ async def test_unrelated_failure_is_not_retried():
     assert kinds == ["error", "done"], kinds
     assert "shim exited 127" in events[0].data["error"]
     # A non-dangling failure must NOT clobber the stored resume id.
-    assert await smap.get("S1") == "sess-x"
+    assert await smap.get("S1", user_id="U1") == "sess-x"
 
 
 async def test_dangling_resume_not_retried_when_content_already_streamed():
@@ -454,7 +455,7 @@ async def test_dangling_resume_not_retried_when_content_already_streamed():
         yield ExecChunk(kind="exit", exit_code=1)
 
     smap = MemorySessionMap()
-    await smap.put("S1", "sess-stale")
+    await smap.put("S1", "sess-stale", user_id="U1")
     execu = StaticSandboxExecutor(stream_handler=stream_handler)
     provider = InSandboxShimProvider(execu, session_map=smap)
     opts = AgentOptions(user_id="U1", session_id="S1", sandbox_id="box-1")

@@ -36,7 +36,9 @@ keeps the binder a thin, honest wrapper.
 from __future__ import annotations
 
 import inspect
+import threading
 from collections.abc import AsyncIterator
+from contextlib import suppress
 from dataclasses import dataclass
 from typing import Protocol
 
@@ -75,6 +77,14 @@ class SandboxBinder(Protocol):
     async def release(self, *, session_id: str) -> None:
         """Best-effort unbind+destroy of the session's sandbox."""
         ...
+
+    async def heartbeat(self, *, sandbox_id: str) -> None:
+        """Renew the active sandbox lease."""
+        ...
+
+
+class SandboxGoneError(RuntimeError):
+    """The sandbox manager no longer knows an actively-used sandbox."""
 
 
 class SandboxManagerBinder:
@@ -132,6 +142,18 @@ class SandboxManagerBinder:
 
         await anyio.to_thread.run_sync(_call)
 
+    async def heartbeat(self, *, sandbox_id: str) -> None:
+        def _call() -> None:
+            with SandboxClient(addr=self._addr) as sb:
+                try:
+                    sb.heartbeat(sandbox_id=sandbox_id)
+                except grpc.RpcError as exc:
+                    if exc.code() == grpc.StatusCode.NOT_FOUND:
+                        raise SandboxGoneError(sandbox_id) from exc
+                    raise
+
+        await anyio.to_thread.run_sync(_call)
+
 
 class StaticSandboxBinder:
     """In-memory SandboxBinder for tests and dev (no sandbox-manager needed).
@@ -145,6 +167,7 @@ class StaticSandboxBinder:
         self._fail = fail_with
         self.acquired: list[str] = []
         self.released: list[str] = []
+        self.heartbeats: list[str] = []
         self._seen: set[str] = set()
 
     async def acquire(
@@ -159,6 +182,9 @@ class StaticSandboxBinder:
 
     async def release(self, *, session_id: str) -> None:
         self.released.append(session_id)
+
+    async def heartbeat(self, *, sandbox_id: str) -> None:
+        self.heartbeats.append(sandbox_id)
 
 
 @dataclass(frozen=True)
@@ -358,31 +384,55 @@ class SandboxManagerExecutor:
         """
         send, recv = anyio.create_memory_object_stream(0)
         stdin_bytes = stdin.encode("utf-8")
+        call_lock = threading.Lock()
+        cancel_requested = threading.Event()
+        active_call = None
 
         def _pump() -> None:
             # Runs on a worker thread. A fresh short-lived channel per call keeps
             # this stateless and concurrency-safe, like the buffered exec above.
+            nonlocal active_call
             try:
                 with SandboxClient(addr=self._addr) as sb:
-                    for ev in sb.exec_stream(
+                    call = sb.open_exec_stream(
                         sandbox_id,
                         cmd,
                         cwd=cwd,
                         env=env or {},
                         stdin=stdin_bytes,
                         timeout_secs=timeout_secs,
-                    ):
+                    )
+                    with call_lock:
+                        active_call = call
+                    if cancel_requested.is_set():
+                        call.cancel()
+                    for ev in call:
                         anyio.from_thread.run(send.send, _exec_event_to_chunk(ev))
             except Exception as exc:  # noqa: BLE001 - surface as a terminal error chunk
-                anyio.from_thread.run(send.send, ExecChunk(kind="error", error=str(exc)))
+                with suppress(Exception):
+                    anyio.from_thread.run(send.send, ExecChunk(kind="error", error=str(exc)))
             finally:
-                anyio.from_thread.run(send.aclose)
+                cancel_requested.set()
+                with call_lock:
+                    active_call = None
+                with suppress(Exception):
+                    anyio.from_thread.run(send.aclose)
+
+        async def _run_pump() -> None:
+            await anyio.to_thread.run_sync(_pump, abandon_on_cancel=True)
 
         async with anyio.create_task_group() as tg:
-            tg.start_soon(anyio.to_thread.run_sync, _pump)
-            async with recv:
-                async for chunk in recv:
-                    yield chunk
+            tg.start_soon(_run_pump)
+            try:
+                async with recv:
+                    async for chunk in recv:
+                        yield chunk
+            finally:
+                with call_lock:
+                    call = active_call
+                if call is not None:
+                    call.cancel()
+                tg.cancel_scope.cancel()
 
 
 class StaticSandboxExecutor:
@@ -490,7 +540,14 @@ class StaticSandboxExecutor:
         if self._fail is not None:
             raise self._fail
         self.stream_calls.append(
-            {"sandbox_id": sandbox_id, "cmd": cmd, "cwd": cwd, "env": env or {}, "stdin": stdin}
+            {
+                "sandbox_id": sandbox_id,
+                "cmd": cmd,
+                "cwd": cwd,
+                "env": env or {},
+                "stdin": stdin,
+                "timeout_secs": timeout_secs,
+            }
         )
         if self._stream_handler is not None:
             for chunk in self._stream_handler(sandbox_id, cmd, stdin):

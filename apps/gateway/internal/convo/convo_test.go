@@ -73,6 +73,32 @@ func TestMemoryOwnershipGate(t *testing.T) {
 	}
 }
 
+func TestMemoryMessagesPutUserBeforeAssistantWhenTimestampsTie(t *testing.T) {
+	ctx := context.Background()
+	m := NewMemory()
+	now := time.Now().UTC()
+	must(t, m.UpsertConversation(ctx, Conversation{
+		ID: "a", UserID: "u1", CreatedAt: now, UpdatedAt: now,
+	}))
+	// Durable chat drafts historically used the same timestamp as their user
+	// message. The semantic role order must win over the derived message id,
+	// where "-assistant" sorts before "-user".
+	must(t, m.InsertMessage(ctx, Message{
+		ID: "run-assistant", ConversationID: "a", Role: "assistant", CreatedAt: now,
+	}))
+	must(t, m.InsertMessage(ctx, Message{
+		ID: "run-user", ConversationID: "a", Role: "user", CreatedAt: now,
+	}))
+
+	messages, err := m.GetMessages(ctx, "a", "u1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(messages) != 2 || messages[0].Role != "user" || messages[1].Role != "assistant" {
+		t.Fatalf("messages ordered incorrectly: %+v", messages)
+	}
+}
+
 func TestMemoryRenameAndDeleteConversation(t *testing.T) {
 	ctx := context.Background()
 	m := NewMemory()

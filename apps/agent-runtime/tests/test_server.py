@@ -17,11 +17,14 @@ import zipfile
 from dataclasses import dataclass, field
 from types import SimpleNamespace
 
+import grpc
+import pytest
 from cocola_agent_runtime.agent_provider import AgentEvent, AgentOptions
 from cocola_agent_runtime.checkpoint import CheckpointConfig, CheckpointManager
 from cocola_agent_runtime.prompt_loader import PromptMarker, StaticPromptCatalog
 from cocola_agent_runtime.sandbox_binder import (
     ExecOutcome,
+    SandboxGoneError,
     StaticSandboxBinder,
     StaticSandboxExecutor,
 )
@@ -70,6 +73,33 @@ class ListProvider:
         self.seen_options = options
         for e in self._events:
             yield e
+
+
+def test_invalid_run_timeout_fails_servicer_startup(monkeypatch):
+    monkeypatch.setenv("COCOLA_AGENT_RUN_TIMEOUT_SECS", "0")
+    with pytest.raises(RuntimeError, match="positive integer"):
+        AgentRuntimeServicer(ListProvider([]))
+
+
+async def test_missing_active_sandbox_aborts_query_as_unavailable(monkeypatch):
+    class GoneBinder(StaticSandboxBinder):
+        async def heartbeat(self, *, sandbox_id: str) -> None:
+            raise SandboxGoneError(sandbox_id)
+
+    class AbortContext:
+        aborted = None
+
+        async def abort(self, code, detail):
+            self.aborted = (code, detail)
+
+    async def no_delay(_seconds):
+        return None
+
+    monkeypatch.setattr("cocola_agent_runtime.server.asyncio.sleep", no_delay)
+    context = AbortContext()
+    servicer = AgentRuntimeServicer(ListProvider([]), binder=GoneBinder())
+    await servicer._heartbeat_sandbox("box-gone", context, None)
+    assert context.aborted == (grpc.StatusCode.UNAVAILABLE, "active sandbox was reclaimed")
 
 
 class BoomProvider:
@@ -135,33 +165,42 @@ class FakeSessionMap:
         self.checkpoints = {}
         self.put_checkpoint_calls = []
 
-    async def get(self, session_id: str):
-        binding = await self.get_binding(session_id)
+    async def get(self, session_id: str, *, user_id: str = ""):
+        binding = await self.get_binding(session_id, user_id=user_id)
         return binding.claude_session_id if binding else None
 
-    async def get_binding(self, session_id: str):
-        return self.bindings.get(session_id)
+    async def get_binding(self, session_id: str, *, user_id: str = ""):
+        binding = self.bindings.get(session_id)
+        if binding and binding.user_id and binding.user_id != user_id:
+            return None
+        return binding
 
     async def put(
         self, session_id: str, claude_session_id: str, *, user_id: str = "", sandbox_id: str = ""
     ):
         self.bindings[session_id] = SessionBinding(
             claude_session_id=claude_session_id,
+            user_id=user_id,
             sandbox_id=sandbox_id,
             checkpoint_object_key=self.checkpoints.get(session_id, ""),
         )
 
-    async def get_checkpoint(self, session_id: str):
+    async def get_checkpoint(self, session_id: str, *, user_id: str = ""):
         return self.checkpoints.get(session_id)
 
-    async def put_checkpoint(self, session_id: str, object_key: str, *, size_bytes: int = 0):
+    async def put_checkpoint(
+        self, session_id: str, object_key: str, *, user_id: str = "", size_bytes: int = 0
+    ):
         self.put_checkpoint_calls.append((session_id, object_key))
         self.checkpoints[session_id] = object_key
 
-    async def put_checkpoint_failure(self, session_id: str, error: str):
+    async def put_checkpoint_failure(self, session_id: str, error: str, *, user_id: str = ""):
         return None
 
-    async def delete(self, session_id: str):
+    async def delete(self, session_id: str, *, user_id: str = ""):
+        binding = self.bindings.get(session_id)
+        if binding and binding.user_id and binding.user_id != user_id:
+            return
         self.deleted.append(session_id)
         if self.fail_delete:
             raise RuntimeError("delete failed")
@@ -485,6 +524,9 @@ async def test_query_maps_request_fields_to_options():
 async def test_release_session_calls_binder_and_session_map():
     binder = StaticSandboxBinder()
     session_map = FakeSessionMap()
+    session_map.bindings["sess-7"] = SessionBinding(
+        claude_session_id="claude-1", user_id="U1", sandbox_id="box-sess-7"
+    )
 
     await AgentRuntimeServicer(
         ListProvider([]),
@@ -494,6 +536,21 @@ async def test_release_session_calls_binder_and_session_map():
 
     assert binder.released == ["sess-7"]
     assert session_map.deleted == ["sess-7"]
+
+
+async def test_release_session_wrong_owner_does_not_release_sandbox():
+    binder = StaticSandboxBinder()
+    session_map = FakeSessionMap()
+    session_map.bindings["shared"] = SessionBinding(
+        claude_session_id="claude-u1", user_id="U1", sandbox_id="box-u1"
+    )
+
+    await AgentRuntimeServicer(
+        ListProvider([]), binder=binder, session_map=session_map
+    ).ReleaseSession(FakeRequest(user_id="U2", session_id="shared"), FakeContext())
+
+    assert binder.released == []
+    assert session_map.deleted == []
 
 
 async def test_release_session_without_binder_succeeds_and_delete_failure_is_best_effort():

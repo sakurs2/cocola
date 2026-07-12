@@ -93,6 +93,10 @@ type Binder struct {
 	warm *WarmConfig
 }
 
+// ErrSessionOwnerMismatch prevents a caller-controlled session id from
+// reusing a sandbox that belongs to another user.
+var ErrSessionOwnerMismatch = errors.New("orchestrator: session owner mismatch")
+
 // NewBinder constructs a Binder. The provider is the same abstraction the gRPC
 // server uses, so the binder works identically against Docker today and
 // K8s+gVisor later with no changes here.
@@ -163,9 +167,12 @@ func (b *Binder) AcquireWithOutcome(ctx context.Context, spec AcquireSpec) (Outc
 	if spec.SessionID == "" {
 		return Outcome{}, errors.New("orchestrator: session id required")
 	}
+	if spec.UserID == "" {
+		return Outcome{}, errors.New("orchestrator: user id required")
+	}
 
 	// --- Fast path: existing binding -------------------------------------
-	if sb, ok, err := b.lookup(ctx, spec.SessionID); err != nil {
+	if sb, ok, err := b.lookup(ctx, spec.SessionID, spec.UserID); err != nil {
 		return Outcome{}, err
 	} else if ok {
 		if err := b.renewLease(ctx, sb.ID); err != nil {
@@ -183,7 +190,7 @@ func (b *Binder) AcquireWithOutcome(ctx context.Context, spec AcquireSpec) (Outc
 	defer func() { _ = lock.release(ctx) }()
 
 	// Double-check under lock: a racer may have bound while we waited.
-	if sb, ok, err := b.lookup(ctx, spec.SessionID); err != nil {
+	if sb, ok, err := b.lookup(ctx, spec.SessionID, spec.UserID); err != nil {
 		return Outcome{}, err
 	} else if ok {
 		if err := b.renewLease(ctx, sb.ID); err != nil {
@@ -263,7 +270,7 @@ func (b *Binder) AcquireWithOutcome(ctx context.Context, spec AcquireSpec) (Outc
 // lookup resolves the forward mapping to a provider.Sandbox. The second return
 // is false when the session has no binding. A dangling forward key (sandbox
 // meta gone) is treated as "no binding" and cleaned opportunistically.
-func (b *Binder) lookup(ctx context.Context, sessionID string) (*provider.Sandbox, bool, error) {
+func (b *Binder) lookup(ctx context.Context, sessionID, userID string) (*provider.Sandbox, bool, error) {
 	sid, err := b.kv.Get(ctx, convKey(sessionID))
 	if errors.Is(err, rds.ErrNil) {
 		return nil, false, nil
@@ -283,6 +290,9 @@ func (b *Binder) lookup(ctx context.Context, sessionID string) (*provider.Sandbo
 	var m meta
 	if err := json.Unmarshal([]byte(raw), &m); err != nil {
 		return nil, false, err
+	}
+	if m.UserID == "" || m.UserID != userID {
+		return nil, false, ErrSessionOwnerMismatch
 	}
 	// If the sandbox was paused (stage-1 reclaim), resurrect it so the session
 	// resumes on its existing workspace rather than cold-creating.

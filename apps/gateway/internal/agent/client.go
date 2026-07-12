@@ -14,8 +14,10 @@ import (
 	"strings"
 
 	"google.golang.org/grpc"
+	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/credentials/insecure"
 	"google.golang.org/grpc/metadata"
+	"google.golang.org/grpc/status"
 
 	"github.com/cocola-project/cocola/packages/go-common/tracing"
 	agentv1 "github.com/cocola-project/cocola/packages/proto/gen/go/cocola/agent/v1"
@@ -27,6 +29,18 @@ import (
 type Event struct {
 	Kind string            `json:"kind"`
 	Data map[string]string `json:"data,omitempty"`
+}
+
+func IsRuntimeInterruption(err error) bool {
+	if err == nil {
+		return false
+	}
+	switch status.Code(err) {
+	case codes.Unavailable, codes.Canceled:
+		return true
+	default:
+		return false
+	}
 }
 
 // Query is the resolved request the gateway forwards to agent-runtime. The

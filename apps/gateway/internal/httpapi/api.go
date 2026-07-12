@@ -25,6 +25,7 @@ import (
 
 	"github.com/cocola-project/cocola/apps/gateway/internal/agent"
 	"github.com/cocola-project/cocola/apps/gateway/internal/auth"
+	"github.com/cocola-project/cocola/apps/gateway/internal/chatrun"
 	"github.com/cocola-project/cocola/apps/gateway/internal/convo"
 	"github.com/cocola-project/cocola/apps/gateway/internal/objstore"
 	traceevents "github.com/cocola-project/cocola/apps/gateway/internal/traceevent"
@@ -124,6 +125,7 @@ type API struct {
 	// back to its baked static token. sandboxTokenTTL is the mint TTL.
 	sandboxTokenIssuer *token.Issuer
 	sandboxTokenTTL    time.Duration
+	runs               *runController
 }
 
 // New builds the BFF API.
@@ -163,6 +165,14 @@ func (a *API) WithConvoStore(store convo.Store) *API { a.convo = store; return a
 
 // WithTraceStore enables conversation audit summaries and detailed traces.
 func (a *API) WithTraceStore(store traceevents.Store) *API { a.trace = store; return a }
+
+// WithChatRuns enables the single-Gateway background execution path. It is the
+// default whenever PostgreSQL is configured; there is deliberately no feature
+// flag or distributed worker mode.
+func (a *API) WithChatRuns(store chatrun.Store, cfg RunConfig) *API {
+	a.runs = newRunController(store, cfg)
+	return a
+}
 
 // WithAgentReleaser injects the best-effort session releaser used by
 // conversation deletion tests or alternate runtimes.
@@ -214,6 +224,12 @@ func (a *API) Handler() http.Handler {
 	// the whole chain so latency includes auth.
 	mux.Handle("POST /v1/chat", a.instrument("POST /v1/chat",
 		a.verifier.Middleware(writeErr)(http.HandlerFunc(a.chat))))
+	mux.Handle("GET /v1/chat/runs/{run_id}", a.instrument("GET /v1/chat/runs/{run_id}",
+		a.verifier.Middleware(writeErr)(http.HandlerFunc(a.streamRun))))
+	mux.Handle("DELETE /v1/chat/runs/{run_id}", a.instrument("DELETE /v1/chat/runs/{run_id}",
+		a.verifier.Middleware(writeErr)(http.HandlerFunc(a.cancelRun))))
+	mux.Handle("GET /v1/chat/runs/active", a.instrument("GET /v1/chat/runs/active",
+		a.verifier.Middleware(writeErr)(http.HandlerFunc(a.activeRun))))
 	// Conversation history (route A). Both are auth-guarded so a caller only ever
 	// sees their own conversations (ownership from the verified identity).
 	mux.Handle("GET /v1/conversations", a.instrument("GET /v1/conversations",
@@ -234,6 +250,10 @@ func (a *API) Handler() http.Handler {
 }
 
 func (a *API) health(w http.ResponseWriter, _ *http.Request) {
+	if a.runs != nil && (a.runs.shutting.Load() || a.runs.databaseUnavailable.Load()) {
+		writeJSON(w, http.StatusServiceUnavailable, map[string]string{"status": "unavailable"})
+		return
+	}
 	writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})
 }
 
@@ -374,6 +394,7 @@ type chatRequest struct {
 	ConversationType                     string            `json:"conversation_type"`
 	DeferConversationVisibilityUntilDone bool              `json:"defer_conversation_visibility_until_done"`
 	Attachments                          []attachmentDTO   `json:"attachments"`
+	ClientRequestID                      string            `json:"client_request_id"`
 }
 
 // attachmentDTO is one user-uploaded file carried inline in the chat body.
@@ -409,7 +430,9 @@ func (a *API) startConversationRun(ctx context.Context, id auth.Identity, req ch
 	if a.trace == nil {
 		return run
 	}
-	if err := a.trace.UpsertConversationRun(context.Background(), run); err != nil {
+	writeCtx, cancelWrite := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancelWrite()
+	if err := a.trace.UpsertConversationRun(writeCtx, run); err != nil {
 		a.log.Warn("conversation run start failed: " + err.Error())
 		return run
 	}
@@ -438,7 +461,9 @@ func (a *API) finishConversationRun(ctx context.Context, run traceevents.Run, st
 	run.TTFTMS = ttftMS
 	run.ToolCallCount = toolCalls
 	run.ErrorCode = errorCode
-	if err := a.trace.UpsertConversationRun(context.Background(), run); err != nil {
+	writeCtx, cancelWrite := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancelWrite()
+	if err := a.trace.UpsertConversationRun(writeCtx, run); err != nil {
 		a.log.Warn("conversation run finish failed: " + err.Error())
 	}
 	a.upsertTraceSpan(ctx, traceevents.Span{
@@ -477,7 +502,7 @@ func boundedTimingHeader(r *http.Request, name string) time.Duration {
 }
 
 // chat is the SSE entrypoint: verify -> open agent stream -> flush events.
-func (a *API) chat(w http.ResponseWriter, r *http.Request) {
+func (a *API) chatLegacy(w http.ResponseWriter, r *http.Request) {
 	start := chatStartedAt(r)
 	id, ok := auth.IdentityOf(r)
 	if !ok {
@@ -1210,6 +1235,30 @@ func (a *API) deleteConversation(w http.ResponseWriter, r *http.Request) {
 		a.log.Warn("get conversation before delete failed: " + err.Error())
 		writeErr(w, http.StatusInternalServerError, "INTERNAL", "could not delete conversation")
 		return
+	}
+	// Serialize with Run creation. A 202 from the cancel endpoint only means the
+	// cancellation was requested; deletion is safe only after Finalize committed
+	// the terminal Run and assistant message transaction.
+	if a.runs != nil {
+		a.runs.startMu.Lock()
+		defer a.runs.startMu.Unlock()
+		active, err := a.runs.store.Active(r.Context(), convID, id.UserID)
+		if err == nil {
+			writeJSON(w, http.StatusConflict, map[string]any{
+				"error": map[string]string{
+					"code": "RUN_IN_PROGRESS", "message": "stop the running answer and wait for it to finish before deleting",
+				},
+				"run_id": active.ID,
+			})
+			return
+		}
+		if !errors.Is(err, chatrun.ErrNotFound) {
+			a.runs.databaseUnavailable.Store(true)
+			a.log.Warn("active run check before delete failed: " + err.Error())
+			writeErr(w, http.StatusServiceUnavailable, "RUN_STORE_UNAVAILABLE", "could not verify conversation run state")
+			return
+		}
+		a.runs.databaseUnavailable.Store(false)
 	}
 	if a.releaser != nil {
 		releaseCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)

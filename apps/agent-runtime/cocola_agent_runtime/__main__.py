@@ -6,6 +6,7 @@ and runs the async gRPC server. It deliberately holds no business logic.
 
 Env (all optional; sensible local defaults):
     COCOLA_AGENT_HOST / COCOLA_AGENT_PORT   where to listen (default 0.0.0.0:50061)
+    COCOLA_AGENT_MODE                        real (default) or explicit echo for tests
     COCOLA_ADMIN_BASE_URL                    admin-api root for skills, MCP, and prompts
     COCOLA_ADMIN_KEY                         admin bearer key (if admin-api auth is on)
     COCOLA_SANDBOX_ADDR                      sandbox-manager gRPC addr (binds session->sandbox,
@@ -21,15 +22,17 @@ Env (all optional; sensible local defaults):
 
 Provider selection (ADR-0009, Route B decommissioned): Route A runs the whole
 Claude Code brain inside the user's own sandbox via the in-sandbox stdio shim,
-so it needs a reachable sandbox executor (COCOLA_SANDBOX_ADDR). With no executor
-we fall back to EchoProvider so a zero-config boot still serves the contract end
-to end (useful for wiring tests) -- no real model calls.
+so real mode requires a reachable sandbox executor (COCOLA_SANDBOX_ADDR).
+EchoProvider is available only through the explicit COCOLA_AGENT_MODE=echo
+development/test mode.
 """
 
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import os
+import signal
 
 import cocola_common
 import grpc
@@ -62,8 +65,8 @@ def _build_session_map():
     """session_id -> claude_session_id index for Route A --resume continuation.
 
     Postgres-backed when COCOLA_PG_DSN is set (survives an agent-runtime
-    restart, so paired with the persistent ~/.claude volume a follow-up turn
-    resumes the real conversation); otherwise an in-process map so a
+    restart, so paired with MinIO checkpoint restore a follow-up turn resumes
+    the real conversation); otherwise an in-process map so a
     zero-dependency dev boot still works within one process lifetime.
     """
     dsn = os.getenv("COCOLA_PG_DSN", "").strip()
@@ -91,12 +94,16 @@ def _build_provider(
     # The legacy central-SDK path (Route B, ClaudeAgentSDKProvider spawning the
     # claude CLI on the agent-runtime host) was decommissioned; see ADR-0009 and
     # docs/archive/refactor-decommission-route-b.md.
-    if executor is None:
-        log.warning(
-            "no sandbox executor (COCOLA_SANDBOX_ADDR unset); "
-            "using EchoProvider (no real model calls)"
-        )
+    mode = os.getenv("COCOLA_AGENT_MODE", "real").strip().lower()
+    if mode not in {"real", "echo"}:
+        raise RuntimeError("COCOLA_AGENT_MODE must be one of real, echo")
+    if mode == "echo":
+        log.warning("COCOLA_AGENT_MODE=echo; using EchoProvider (no real model calls)")
         return EchoProvider()
+    if executor is None:
+        raise RuntimeError(
+            "COCOLA_AGENT_MODE=real requires COCOLA_SANDBOX_ADDR and a sandbox executor"
+        )
 
     from cocola_agent_runtime.shim_provider import InSandboxShimProvider
 
@@ -245,9 +252,25 @@ async def serve() -> None:
 
     await server.start()
     log.info("cocola-agent-runtime serving", addr=addr)
+    stop_event = asyncio.Event()
+    loop = asyncio.get_running_loop()
+    for sig in (signal.SIGINT, signal.SIGTERM):
+        with contextlib.suppress(NotImplementedError):
+            loop.add_signal_handler(sig, stop_event.set)
+    stop_waiter = asyncio.create_task(stop_event.wait())
+    termination_waiter = asyncio.create_task(server.wait_for_termination())
     try:
-        await server.wait_for_termination()
+        _, pending = await asyncio.wait(
+            {stop_waiter, termination_waiter}, return_when=asyncio.FIRST_COMPLETED
+        )
+        for task in pending:
+            task.cancel()
+            with contextlib.suppress(asyncio.CancelledError):
+                await task
     finally:
+        await server.stop(grace=30)
+        if session_map is not None:
+            await session_map.aclose()
         await stop_tracing()
 
 

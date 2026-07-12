@@ -35,10 +35,16 @@ func (m *Memory) UpsertConversation(_ context.Context, c Conversation) error {
 		c.ChatType = "chat"
 	}
 	if existing, ok := m.convs[c.ID]; ok {
+		if c.UserID != "" && existing.UserID != c.UserID {
+			return ErrNotFound
+		}
 		// Refresh updated_at only; keep the original title (MVP: never overwrite).
 		existing.UpdatedAt = c.UpdatedAt
 		m.convs[c.ID] = existing
 		return nil
+	}
+	if c.UserID == "" {
+		return ErrNotFound
 	}
 	m.convs[c.ID] = c
 	return nil
@@ -63,7 +69,27 @@ func (m *Memory) RevealConversation(_ context.Context, convID, userID, title str
 func (m *Memory) InsertMessage(_ context.Context, msg Message) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
+	for _, existing := range m.msgs[msg.ConversationID] {
+		if existing.ID == msg.ID {
+			return nil
+		}
+	}
 	m.msgs[msg.ConversationID] = append(m.msgs[msg.ConversationID], msg)
+	return nil
+}
+
+func (m *Memory) UpsertMessage(_ context.Context, msg Message) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	messages := m.msgs[msg.ConversationID]
+	for i := range messages {
+		if messages[i].ID == msg.ID {
+			messages[i] = msg
+			m.msgs[msg.ConversationID] = messages
+			return nil
+		}
+	}
+	m.msgs[msg.ConversationID] = append(messages, msg)
 	return nil
 }
 
@@ -106,7 +132,28 @@ func (m *Memory) GetMessages(_ context.Context, convID, userID string) ([]Messag
 	src := m.msgs[convID]
 	out := make([]Message, len(src))
 	copy(out, src)
+	sort.SliceStable(out, func(i, j int) bool {
+		if !out[i].CreatedAt.Equal(out[j].CreatedAt) {
+			return out[i].CreatedAt.Before(out[j].CreatedAt)
+		}
+		leftRole, rightRole := messageRoleOrder(out[i].Role), messageRoleOrder(out[j].Role)
+		if leftRole != rightRole {
+			return leftRole < rightRole
+		}
+		return out[i].ID < out[j].ID
+	})
 	return out, nil
+}
+
+func messageRoleOrder(role string) int {
+	switch role {
+	case "user":
+		return 0
+	case "assistant":
+		return 1
+	default:
+		return 2
+	}
 }
 
 func (m *Memory) RenameConversation(_ context.Context, convID, userID, title string) (Conversation, error) {

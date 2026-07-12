@@ -94,6 +94,26 @@ class SandboxClient:
         stdin: bytes = b"",
         timeout_secs: int = 0,
     ) -> Iterator[pb.ExecEvent]:
+
+        yield from self.open_exec_stream(
+            sandbox_id,
+            cmd,
+            cwd=cwd,
+            env=env,
+            stdin=stdin,
+            timeout_secs=timeout_secs,
+        )
+
+    def open_exec_stream(
+        self,
+        sandbox_id: str,
+        cmd: list[str],
+        cwd: str = "",
+        env: dict[str, str] | None = None,
+        stdin: bytes = b"",
+        timeout_secs: int = 0,
+    ):
+        """Start Exec and return its cancellable gRPC stream call."""
         req = pb.ExecRequest(
             sandbox_id=sandbox_id,
             cmd=cmd,
@@ -102,7 +122,7 @@ class SandboxClient:
             stdin=stdin,
             timeout_secs=timeout_secs,
         )
-        yield from self.stub.Exec(req)
+        return self.stub.Exec(req)
 
     def exec(self, sandbox_id: str, cmd: list[str], **kw) -> ExecResult:
         """Drain the Exec stream into a single ExecResult."""

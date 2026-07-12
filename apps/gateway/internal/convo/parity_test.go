@@ -38,10 +38,10 @@ func TestPostgresParity(t *testing.T) {
 	must(t, pg.UpsertConversation(ctx, Conversation{ID: "a", UserID: "u1", Title: "first", CreatedAt: t0, UpdatedAt: t0}))
 	// Title preserved on conflict; updated_at refreshed.
 	must(t, pg.UpsertConversation(ctx, Conversation{ID: "a", UserID: "u1", Title: "CHANGED", CreatedAt: t0, UpdatedAt: t0.Add(time.Minute)}))
-	must(t, pg.InsertMessage(ctx, Message{ID: "m1", ConversationID: "a", Role: "user", Parts: []Part{{Type: PartText, Text: "hi"}}, CreatedAt: t0}))
-	must(t, pg.InsertMessage(ctx, Message{ID: "m2", ConversationID: "a", Role: "assistant", Parts: []Part{
+	must(t, pg.InsertMessage(ctx, Message{ID: "turn-user", ConversationID: "a", Role: "user", Parts: []Part{{Type: PartText, Text: "hi"}}, CreatedAt: t0}))
+	must(t, pg.InsertMessage(ctx, Message{ID: "turn-assistant", ConversationID: "a", Role: "assistant", Parts: []Part{
 		{Type: PartToolCall, ToolCallID: "t1", ToolName: "bash", ArgsText: "{}", Result: str("ok"), IsError: false},
-	}, CreatedAt: t0.Add(time.Second)}))
+	}, CreatedAt: t0}))
 
 	list, err := pg.ListConversations(ctx, "u1")
 	if err != nil {
@@ -58,7 +58,8 @@ func TestPostgresParity(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(msgs) != 2 || msgs[1].Parts[0].Result == nil || *msgs[1].Parts[0].Result != "ok" {
+	if len(msgs) != 2 || msgs[0].Role != "user" || msgs[1].Role != "assistant" ||
+		msgs[1].Parts[0].Result == nil || *msgs[1].Parts[0].Result != "ok" {
 		t.Fatalf("bad messages roundtrip: %+v", msgs)
 	}
 

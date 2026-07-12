@@ -255,8 +255,8 @@ class InSandboxShimProvider:
 
     The resume binding (cocola session_id -> claude_session_id) lives in a
     `SessionMap`. With a Postgres-backed map it survives an agent-runtime
-    restart, so a follow-up turn `--resume`s the on-disk Claude session
-    (persisted on the agent volume, ADR-0008). The map is a pure INDEX: the
+    restart, so a follow-up turn `--resume`s the on-disk Claude session (restored
+    from a MinIO checkpoint when the sandbox was replaced). The map is a pure INDEX: the
     SUFFICIENT condition for resume is the on-disk `~/.claude` session file; the
     map only records which id to reopen. Defaults to an in-process map so a
     zero-dependency dev boot still resumes within one process lifetime.
@@ -340,7 +340,7 @@ class InSandboxShimProvider:
             yield AgentEvent(kind="done", data={})
             return
 
-        binding = await self._session_map.get_binding(options.session_id)
+        binding = await self._session_map.get_binding(options.session_id, user_id=options.user_id)
         resume = binding.claude_session_id if binding else None
         if binding and binding.sandbox_id and binding.sandbox_id != options.sandbox_id:
             log.info(
@@ -373,7 +373,7 @@ class InSandboxShimProvider:
                 resume=resume,
             )
             try:
-                await self._session_map.delete(options.session_id)
+                await self._session_map.delete(options.session_id, user_id=options.user_id)
             except Exception as exc:  # noqa: BLE001 - index delete is best-effort
                 log.warning(
                     "session-map delete failed",
@@ -454,6 +454,7 @@ class InSandboxShimProvider:
                 cmd=[SHIM_ENTRYPOINT],
                 env=self._model_env(options),
                 stdin=request_json,
+                timeout_secs=options.run_timeout_secs,
             ):
                 if chunk.kind == "stderr":
                     # Shim diagnostics; keep a short tail for error context only.

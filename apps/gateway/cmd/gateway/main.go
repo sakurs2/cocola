@@ -16,6 +16,7 @@
 //	                        (default :9091, serving /metrics and /healthz)
 //	COCOLA_PG_DSN           Postgres DSN; enables conversation persistence
 //	                        (sidebar list + history). Unset => persistence dark.
+//	COCOLA_AGENT_RUN_TIMEOUT_SECS maximum wall time for one Agent run (default 3600)
 //
 // Attachment object storage (ADR-0017 P1a); unset endpoint/bucket => inline-only:
 //
@@ -31,11 +32,14 @@ import (
 	"context"
 	"net/http"
 	"os"
+	"os/signal"
 	"strconv"
+	"syscall"
 	"time"
 
 	"github.com/cocola-project/cocola/apps/gateway/internal/agent"
 	"github.com/cocola-project/cocola/apps/gateway/internal/auth"
+	"github.com/cocola-project/cocola/apps/gateway/internal/chatrun"
 	"github.com/cocola-project/cocola/apps/gateway/internal/convo"
 	"github.com/cocola-project/cocola/apps/gateway/internal/httpapi"
 	"github.com/cocola-project/cocola/apps/gateway/internal/objstore"
@@ -70,6 +74,14 @@ func main() {
 
 	addr := env("COCOLA_GATEWAY_ADDR", ":8080")
 	agentAddr := env("COCOLA_AGENT_ADDR", "127.0.0.1:50061")
+	runTimeout := 60 * time.Minute
+	if value := os.Getenv("COCOLA_AGENT_RUN_TIMEOUT_SECS"); value != "" {
+		seconds, parseErr := strconv.Atoi(value)
+		if parseErr != nil || seconds <= 0 {
+			log.Fatal("invalid COCOLA_AGENT_RUN_TIMEOUT_SECS=" + value)
+		}
+		runTimeout = time.Duration(seconds) * time.Second
+	}
 
 	client, err := agent.Dial(agentAddr)
 	if err != nil {
@@ -105,13 +117,17 @@ func main() {
 	// minted token verifies offline downstream. When the secret is empty (dev,
 	// auth off) the issuer stays nil and the runtime keeps its baked token.
 	if secret := config.SecretFromEnv("COCOLA_AUTH_SECRET"); secret != "" {
-		ttl := 60 * time.Minute
+		minimumTTL := runTimeout + 15*time.Minute
+		ttl := minimumTTL
 		if v := os.Getenv("COCOLA_SANDBOX_TOKEN_TTL_SECONDS"); v != "" {
 			if n, perr := strconv.Atoi(v); perr == nil && n > 0 {
 				ttl = time.Duration(n) * time.Second
 			} else {
-				log.Warn("ignoring invalid COCOLA_SANDBOX_TOKEN_TTL_SECONDS=" + v)
+				log.Fatal("invalid COCOLA_SANDBOX_TOKEN_TTL_SECONDS=" + v)
 			}
+		}
+		if ttl < minimumTTL {
+			log.Fatal("COCOLA_SANDBOX_TOKEN_TTL_SECONDS must be at least run timeout + 900 seconds")
 		}
 		issuer := token.NewIssuer(secret, env("COCOLA_AUTH_ISSUER", "cocola"), ttl)
 		api = api.WithSandboxTokenIssuer(issuer, ttl)
@@ -139,20 +155,27 @@ func main() {
 				", inline<=" + strconv.FormatInt(threshold, 10) + "B)")
 		}
 	}
-	// Conversation persistence (route A UI-message mirror). Wired only when
-	// COCOLA_PG_DSN is set; otherwise persistence stays dark (chat still streams,
-	// the list/history endpoints return empty). We run migrations here too so a
-	// gateway+PG boot is self-sufficient; goose is idempotent and coexists with
-	// admin-api applying the same embedded schema.
+	// PostgreSQL is mandatory when configured: silently falling back after a
+	// migration/connect error would reintroduce request-bound execution and lose
+	// the state guarantees the core chat path relies on.
 	if dsn := os.Getenv("COCOLA_PG_DSN"); dsn != "" {
 		if err := convo.Migrate(context.Background(), dsn); err != nil {
-			log.Warn("conversation persistence disabled (migrate failed): " + err.Error())
+			log.Fatal("conversation migration failed: " + err.Error())
 		} else if cs, cerr := convo.NewPostgres(context.Background(), dsn); cerr != nil {
-			log.Warn("conversation persistence disabled (connect failed): " + cerr.Error())
+			log.Fatal("conversation store connect failed: " + cerr.Error())
 		} else {
 			api = api.WithConvoStore(cs)
 			defer cs.Close()
-			log.Info("conversation persistence enabled (postgres)")
+			runStore, runErr := chatrun.NewPostgres(context.Background(), dsn)
+			if runErr != nil {
+				log.Fatal("chat run store connect failed: " + runErr.Error())
+			}
+			defer runStore.Close()
+			api = api.WithChatRuns(runStore, httpapi.RunConfig{RunTimeout: runTimeout})
+			if err := api.InterruptStaleRuns(context.Background()); err != nil {
+				log.Fatal("stale chat run recovery failed: " + err.Error())
+			}
+			log.Info("single-gateway durable chat enabled (postgres)")
 			if traceStore, terr := traceevents.NewPostgres(context.Background(), dsn); terr != nil {
 				log.Warn("conversation traces disabled (connect failed): " + terr.Error())
 			} else {
@@ -165,13 +188,20 @@ func main() {
 				log.Info("conversation audit and traces enabled (postgres)")
 			}
 		}
+	} else {
+		memoryConversations := convo.NewMemory()
+		memoryRuns := chatrun.NewMemory(memoryConversations)
+		api = api.WithConvoStore(memoryConversations).
+			WithChatRuns(memoryRuns, httpapi.RunConfig{RunTimeout: runTimeout})
+		log.Warn("COCOLA_PG_DSN unset; chat state is in-memory and will be lost on restart")
 	}
 
+	var metricsServer *http.Server
 	if metricsAddr := env("COCOLA_METRICS_ADDR", ":9091"); metricsAddr != "" {
+		metricsServer = &http.Server{Addr: metricsAddr, Handler: reg.Mux()}
 		go func() {
 			log.Info("cocola gateway metrics on " + metricsAddr + " (/metrics, /healthz)")
-			msrv := &http.Server{Addr: metricsAddr, Handler: reg.Mux()}
-			if err := msrv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
+			if err := metricsServer.ListenAndServe(); err != nil && err != http.ErrServerClosed {
 				log.Warn("gateway metrics server error: " + err.Error())
 			}
 		}()
@@ -179,7 +209,27 @@ func main() {
 
 	log.Info("cocola gateway listening on " + addr + " (agent-runtime: " + agentAddr + ")")
 	srv := &http.Server{Addr: addr, Handler: api.Handler()}
-	if err := srv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
-		log.Fatal("gateway server error: " + err.Error())
+	rootCtx, stopSignals := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
+	defer stopSignals()
+	serveErr := make(chan error, 1)
+	go func() { serveErr <- srv.ListenAndServe() }()
+	select {
+	case err := <-serveErr:
+		if err != nil && err != http.ErrServerClosed {
+			log.Fatal("gateway server error: " + err.Error())
+		}
+		return
+	case <-rootCtx.Done():
+	}
+	shutdownCtx, cancelShutdown := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancelShutdown()
+	if err := api.ShutdownRuns(shutdownCtx); err != nil {
+		log.Warn("chat run shutdown failed: " + err.Error())
+	}
+	if err := srv.Shutdown(shutdownCtx); err != nil {
+		log.Warn("gateway HTTP shutdown failed: " + err.Error())
+	}
+	if metricsServer != nil {
+		_ = metricsServer.Shutdown(shutdownCtx)
 	}
 }

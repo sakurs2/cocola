@@ -118,6 +118,9 @@ type Store interface {
 	RevealConversation(ctx context.Context, convID, userID, title string, updatedAt time.Time) error
 	// InsertMessage appends a message to a conversation.
 	InsertMessage(ctx context.Context, m Message) error
+	// UpsertMessage creates or replaces one deterministic message. Chat runs use
+	// this for their single assistant draft/final row.
+	UpsertMessage(ctx context.Context, m Message) error
 	// ListConversations returns userID's conversations, most-recently-updated first.
 	ListConversations(ctx context.Context, userID string) ([]Conversation, error)
 	// GetConversation returns one conversation only when userID owns it.

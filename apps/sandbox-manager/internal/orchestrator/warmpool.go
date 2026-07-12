@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io/fs"
 	"os"
 	"strconv"
@@ -264,6 +265,38 @@ func (b *Binder) listWarm(ctx context.Context) ([]string, error) {
 		return nil
 	})
 	return ids, err
+}
+
+// DrainWarmPool destroys only sandboxes that are still present in the warm
+// inventory. A claimed sandbox is removed from that inventory before it is
+// bound to a session, so it is deliberately outside this shutdown cleanup.
+// The caller must first stop the refill loop and wait for it to return.
+func (b *Binder) DrainWarmPool(ctx context.Context) (int, error) {
+	ids, err := b.listWarm(ctx)
+	if err != nil {
+		return 0, fmt.Errorf("list warm inventory: %w", err)
+	}
+	drained := 0
+	failures := make([]error, 0)
+	for _, id := range ids {
+		if err := ctx.Err(); err != nil {
+			failures = append(failures, err)
+			break
+		}
+		// No Acquire or refill can race here: gRPC has drained and the warm
+		// loop has stopped. Destroy first so a provider failure leaves the
+		// Redis key available for a later cleanup attempt.
+		if err := b.p.Destroy(ctx, id); err != nil && !errors.Is(err, fs.ErrNotExist) {
+			failures = append(failures, fmt.Errorf("destroy warm sandbox %s: %w", id, err))
+			continue
+		}
+		if _, err := b.kv.Del(ctx, warmKey(id)); err != nil {
+			failures = append(failures, fmt.Errorf("delete warm inventory %s: %w", id, err))
+			continue
+		}
+		drained++
+	}
+	return drained, errors.Join(failures...)
 }
 
 // createOneWarm provisions a single session-agnostic warm sandbox and records it

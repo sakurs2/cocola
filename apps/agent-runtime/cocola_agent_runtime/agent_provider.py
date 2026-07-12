@@ -24,6 +24,7 @@ class AgentOptions:
     workspace: str | None = None
     system_prompt: str | None = None
     max_turns: int = 30
+    run_timeout_secs: int = 3600
     model_alias: str | None = None
     mcp_servers: dict[str, dict] | None = None
     # Secret-free metadata for skills that were successfully materialized in

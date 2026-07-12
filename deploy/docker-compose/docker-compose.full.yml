@@ -95,8 +95,6 @@ services:
         condition: service_healthy
       minio-init:
         condition: service_completed_successfully
-      minio-init:
-        condition: service_completed_successfully
     environment:
       COCOLA_SANDBOX_ADDR: ":50051"
       # Sandbox backend (ADR-0013/0014): OpenSandbox is the default and only
@@ -162,6 +160,7 @@ services:
     environment:
       COCOLA_LLM_HOST: "0.0.0.0"
       COCOLA_LLM_PORT: "8080"
+      COCOLA_LLM_TIMEOUT_SECS: "${COCOLA_LLM_TIMEOUT_SECS:-300}"
       COCOLA_LLM_REDIS_URL: "redis://redis:6379/0"
       # Real model: provider + endpoint + key + model come from the repo-root
       # .env via compose substitution. Default to "fake" so a bare `up` (no
@@ -261,6 +260,9 @@ services:
     environment:
       COCOLA_AGENT_HOST: "0.0.0.0"
       COCOLA_AGENT_PORT: "50061"
+      COCOLA_AGENT_MODE: "real"
+      COCOLA_AGENT_RUN_TIMEOUT_SECS: "${COCOLA_AGENT_RUN_TIMEOUT_SECS:-3600}"
+      COCOLA_SANDBOX_HEARTBEAT_SECS: "${COCOLA_SANDBOX_HEARTBEAT_SECS:-20}"
       COCOLA_SANDBOX_ADDR: "sandbox-manager:50051"
       COCOLA_ADMIN_BASE_URL: "http://admin-api:8090"
       COCOLA_ADMIN_KEY: "${COCOLA_ADMIN_KEY:-}"
@@ -319,6 +321,8 @@ services:
     environment:
       COCOLA_GATEWAY_ADDR: ":8080"
       COCOLA_AGENT_ADDR: "agent-runtime:50061"
+      COCOLA_AGENT_RUN_TIMEOUT_SECS: "${COCOLA_AGENT_RUN_TIMEOUT_SECS:-3600}"
+      COCOLA_SANDBOX_TOKEN_TTL_SECONDS: "${COCOLA_SANDBOX_TOKEN_TTL_SECONDS:-}"
       COCOLA_AUTH_SECRET: "${COCOLA_AUTH_SECRET:-}"
       COCOLA_AUTH_ALLOW_ANON: "${COCOLA_AUTH_ALLOW_ANON:-0}"
       # Conversation persistence (route A): the gateway mirrors each turn's

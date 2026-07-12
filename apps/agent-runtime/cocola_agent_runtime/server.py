@@ -28,6 +28,7 @@ Design choices, all to avoid reinventing what we already have:
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import dataclasses
 import io
 import json
@@ -42,6 +43,7 @@ import uuid
 import zipfile
 from typing import Any, NamedTuple
 
+import grpc
 from cocola.agent.v1 import agent_pb2 as pb
 from cocola.agent.v1 import agent_pb2_grpc as pb_grpc
 from cocola_common import get_logger
@@ -51,7 +53,7 @@ from cocola_agent_runtime.checkpoint import CheckpointManager
 from cocola_agent_runtime.mcp_loader import MCPCatalog
 from cocola_agent_runtime.objstore import Fetcher
 from cocola_agent_runtime.prompt_loader import PromptCatalog, PromptConfig
-from cocola_agent_runtime.sandbox_binder import SandboxBinder, SandboxExecutor
+from cocola_agent_runtime.sandbox_binder import SandboxBinder, SandboxExecutor, SandboxGoneError
 from cocola_agent_runtime.session_map import SessionMap
 from cocola_agent_runtime.skill_loader import Skill, SkillCatalog, skills_system_preamble
 
@@ -72,6 +74,19 @@ TRACEPARENT_METADATA_KEY = "traceparent"
 PRODUCT_TRACEPARENT_METADATA_KEY = "x-cocola-product-traceparent"
 ENVIRONMENT_PREPARATION_SCHEMA_VERSION = 1
 ENVIRONMENT_PREPARATION_PART_ID = "environment"
+DEFAULT_AGENT_RUN_TIMEOUT_SECS = 3600
+DEFAULT_SANDBOX_HEARTBEAT_SECS = 20
+
+
+def _positive_env_int(name: str, default: int) -> int:
+    try:
+        value = int(os.getenv(name, str(default)))
+    except ValueError as exc:
+        raise RuntimeError(f"{name} must be a positive integer") from exc
+    if value <= 0:
+        raise RuntimeError(f"{name} must be a positive integer")
+    return value
+
 
 _OUTPUTS_SNAPSHOT_SCRIPT = r"""
 import json
@@ -495,18 +510,49 @@ class AgentRuntimeServicer(pb_grpc.AgentRuntimeServiceServicer):
         # as a clean provisioning error rather than a silent empty file.
         self._objstore = objstore
         self._checkpoint = checkpoint
+        self._run_timeout_secs = _positive_env_int(
+            "COCOLA_AGENT_RUN_TIMEOUT_SECS", DEFAULT_AGENT_RUN_TIMEOUT_SECS
+        )
+        self._heartbeat_secs = _positive_env_int(
+            "COCOLA_SANDBOX_HEARTBEAT_SECS", DEFAULT_SANDBOX_HEARTBEAT_SECS
+        )
+
+    async def _heartbeat_sandbox(
+        self, sandbox_id: str, context, query_task: asyncio.Task | None
+    ) -> None:
+        if self._binder is None:
+            return
+        while True:
+            await asyncio.sleep(self._heartbeat_secs)
+            try:
+                await self._binder.heartbeat(sandbox_id=sandbox_id)
+            except SandboxGoneError:
+                log.error("active sandbox disappeared", sandbox_id=sandbox_id)
+                try:
+                    await context.abort(grpc.StatusCode.UNAVAILABLE, "active sandbox was reclaimed")
+                finally:
+                    if query_task is not None:
+                        query_task.cancel()
+                return
+            except asyncio.CancelledError:
+                raise
+            except Exception as exc:  # noqa: BLE001 - transient pulse must not kill a run
+                log.warning("sandbox heartbeat failed", sandbox_id=sandbox_id, error=str(exc))
 
     async def ReleaseSession(self, request, context):  # noqa: N802 - gRPC-generated name
         """Best-effort release of runtime state bound to a conversation."""
         session_id = request.session_id
         if not session_id:
             return pb.ReleaseSessionResponse()
-        if self._checkpoint is not None and self._session_map is not None:
+        owned_binding = None
+        if self._session_map is not None:
             try:
-                binding = await self._session_map.get_binding(session_id)
-                if binding and binding.sandbox_id:
+                owned_binding = await self._session_map.get_binding(
+                    session_id, user_id=request.user_id
+                )
+                if self._checkpoint is not None and owned_binding and owned_binding.sandbox_id:
                     await self._checkpoint.checkpoint_on_reclaim(
-                        sandbox_id=binding.sandbox_id,
+                        sandbox_id=owned_binding.sandbox_id,
                         user_id=request.user_id,
                         session_id=session_id,
                     )
@@ -516,14 +562,16 @@ class AgentRuntimeServicer(pb_grpc.AgentRuntimeServiceServicer):
                     session_id=session_id,
                     error=str(exc),
                 )
-        if self._binder is not None:
+        # Release carries a caller-controlled session id. When the durable map
+        # is present, fail closed unless it confirms that caller's ownership.
+        if self._binder is not None and (self._session_map is None or owned_binding is not None):
             try:
                 await self._binder.release(session_id=session_id)
             except Exception as exc:  # noqa: BLE001 - delete should not fail on cleanup
                 log.warning("sandbox release failed", session_id=session_id, error=str(exc))
         if self._session_map is not None:
             try:
-                await self._session_map.delete(session_id)
+                await self._session_map.delete(session_id, user_id=request.user_id)
             except Exception as exc:  # noqa: BLE001 - stale resume cleanup is best-effort
                 log.warning("session map delete failed", session_id=session_id, error=str(exc))
         return pb.ReleaseSessionResponse()
@@ -537,6 +585,12 @@ class AgentRuntimeServicer(pb_grpc.AgentRuntimeServiceServicer):
         (the shim provider yields `done`); on error we substitute one.
         """
         sandbox_id = request.sandbox_id or None
+        if self._binder is not None and sandbox_id is not None:
+            log.warning(
+                "ignoring caller-pinned sandbox because owner-scoped binder is enabled",
+                session_id=request.session_id,
+            )
+            sandbox_id = None
         try:
             model_alias = _validated_model_alias(_metadata_value(context, MODEL_ALIAS_METADATA_KEY))
         except Exception as exc:  # noqa: BLE001 - config/alias error -> clean terminal event
@@ -563,13 +617,14 @@ class AgentRuntimeServicer(pb_grpc.AgentRuntimeServiceServicer):
         preparing_environment = False
         environment_components: list[dict[str, Any]] = []
         environment_degraded = False
+        heartbeat_task: asyncio.Task[None] | None = None
 
         # Bind the session to a real sandbox when a binder is wired and the
         # caller did not pin one. Acquire is create-or-reuse (M2): the same
         # session converges on one sandbox and the call renews its lease. A bind
         # failure is surfaced as a terminal `error` event rather than crashing
         # the stream, and the agent does not run without its execution sandbox.
-        if self._binder is not None and sandbox_id is None:
+        if self._binder is not None:
             acquire_start_ns = time.time_ns()
             try:
                 box = await self._binder.acquire(
@@ -603,6 +658,11 @@ class AgentRuntimeServicer(pb_grpc.AgentRuntimeServiceServicer):
                 )
                 return
             sandbox_id = box.id
+            heartbeat_task = asyncio.create_task(
+                self._heartbeat_sandbox(box.id, context, asyncio.current_task())
+            )
+            if hasattr(context, "add_done_callback"):
+                context.add_done_callback(lambda _ctx: heartbeat_task.cancel())
             acquire_trace_name = "sandbox.reuse" if box.reused else "sandbox.create"
             await context.write(
                 event_to_proto(
@@ -636,6 +696,7 @@ class AgentRuntimeServicer(pb_grpc.AgentRuntimeServiceServicer):
                 restore_start_ns = time.time_ns()
                 restore = await self._checkpoint.restore_if_fresh(
                     sandbox_id=box.id,
+                    user_id=request.user_id,
                     session_id=request.session_id,
                     reused=box.reused,
                 )
@@ -746,6 +807,10 @@ class AgentRuntimeServicer(pb_grpc.AgentRuntimeServiceServicer):
                         data={"error": f"attachment provisioning failed: {exc}"},
                     )
                 )
+                if heartbeat_task is not None:
+                    heartbeat_task.cancel()
+                    with contextlib.suppress(asyncio.CancelledError):
+                        await heartbeat_task
                 return
             await context.write(
                 event_to_proto(
@@ -923,6 +988,7 @@ class AgentRuntimeServicer(pb_grpc.AgentRuntimeServiceServicer):
             sandbox_id=sandbox_id,
             workspace=workspace,
             max_turns=request.max_turns or 30,
+            run_timeout_secs=self._run_timeout_secs,
             model_alias=model_alias,
             mcp_servers=active_mcp_servers,
             environment_skills=[
@@ -987,6 +1053,11 @@ class AgentRuntimeServicer(pb_grpc.AgentRuntimeServiceServicer):
         except Exception as exc:  # noqa: BLE001 - turn any provider fault into a clean terminal event
             log.warning("agent query failed", session_id=request.session_id, error=str(exc))
             await context.write(pb.AgentEvent(kind="error", data={"error": str(exc)}))
+        finally:
+            if heartbeat_task is not None:
+                heartbeat_task.cancel()
+                with contextlib.suppress(asyncio.CancelledError):
+                    await heartbeat_task
 
     async def _snapshot_outputs(self, sandbox_id: str | None) -> dict[str, dict[str, int]]:
         """Return metadata for files under ./outputs/ in the bound sandbox."""

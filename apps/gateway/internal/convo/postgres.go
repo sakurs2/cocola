@@ -38,16 +38,31 @@ func NewPostgres(ctx context.Context, dsn string) (*Postgres, error) {
 func (p *Postgres) Close() { p.pool.Close() }
 
 func (p *Postgres) UpsertConversation(ctx context.Context, c Conversation) error {
+	if c.UserID == "" {
+		tag, err := p.pool.Exec(ctx, `UPDATE conversations SET updated_at=$2 WHERE id=$1`, c.ID, c.UpdatedAt)
+		if err != nil {
+			return err
+		}
+		if tag.RowsAffected() == 0 {
+			return ErrNotFound
+		}
+		return nil
+	}
 	if c.ChatType == "" {
 		c.ChatType = "chat"
 	}
-	// ON CONFLICT: refresh updated_at only; title is set once (COALESCE keeps
-	// the existing non-empty title so a follow-up turn never rewrites it).
+	// A caller-controlled conversation id may only refresh its original owner.
 	const q = `INSERT INTO conversations (id, user_id, tenant_id, title, chat_type, hidden, created_at, updated_at)
 		VALUES ($1,$2,$3,$4,$5,$6,$7,$8)
-		ON CONFLICT (id) DO UPDATE SET updated_at = EXCLUDED.updated_at`
-	_, err := p.pool.Exec(ctx, q,
-		c.ID, c.UserID, c.TenantID, c.Title, c.ChatType, c.Hidden, c.CreatedAt, c.UpdatedAt)
+		ON CONFLICT (id) DO UPDATE SET updated_at = EXCLUDED.updated_at
+		WHERE conversations.user_id = EXCLUDED.user_id
+		RETURNING id`
+	var id string
+	err := p.pool.QueryRow(ctx, q,
+		c.ID, c.UserID, c.TenantID, c.Title, c.ChatType, c.Hidden, c.CreatedAt, c.UpdatedAt).Scan(&id)
+	if err == pgx.ErrNoRows {
+		return ErrNotFound
+	}
 	return err
 }
 
@@ -81,7 +96,31 @@ func (p *Postgres) InsertMessage(ctx context.Context, m Message) error {
 		return err
 	}
 	const q = `INSERT INTO messages (id, conversation_id, role, parts_json, metadata_json, created_at)
-		VALUES ($1,$2,$3,$4,$5,$6)`
+		VALUES ($1,$2,$3,$4,$5,$6) ON CONFLICT (id) DO NOTHING`
+	_, err = p.pool.Exec(ctx, q,
+		m.ID, m.ConversationID, m.Role, partsJSON, metadataJSON, m.CreatedAt)
+	return err
+}
+
+func (p *Postgres) UpsertMessage(ctx context.Context, m Message) error {
+	partsJSON, err := json.Marshal(m.Parts)
+	if err != nil {
+		return err
+	}
+	metadata := m.Metadata
+	if metadata == nil {
+		metadata = map[string]any{}
+	}
+	metadataJSON, err := json.Marshal(metadata)
+	if err != nil {
+		return err
+	}
+	const q = `INSERT INTO messages (id, conversation_id, role, parts_json, metadata_json, created_at)
+		VALUES ($1,$2,$3,$4,$5,$6)
+		ON CONFLICT (id) DO UPDATE SET
+			parts_json=EXCLUDED.parts_json,
+			metadata_json=EXCLUDED.metadata_json,
+			created_at=EXCLUDED.created_at`
 	_, err = p.pool.Exec(ctx, q,
 		m.ID, m.ConversationID, m.Role, partsJSON, metadataJSON, m.CreatedAt)
 	return err
@@ -134,7 +173,10 @@ func (p *Postgres) GetMessages(ctx context.Context, convID, userID string) ([]Me
 		return nil, err
 	}
 	const q = `SELECT id, conversation_id, role, parts_json, metadata_json, created_at
-		FROM messages WHERE conversation_id = $1 ORDER BY created_at ASC, id ASC`
+		FROM messages WHERE conversation_id = $1
+		ORDER BY created_at ASC,
+			CASE role WHEN 'user' THEN 0 WHEN 'assistant' THEN 1 ELSE 2 END ASC,
+			id ASC`
 	rows, err := p.pool.Query(ctx, q, convID)
 	if err != nil {
 		return nil, err

@@ -6,21 +6,25 @@ directly with a StaticSandboxBinder and assert the binding lifecycle:
   - with a binder and no caller-pinned sandbox, Query acquires a sandbox for the
     session, injects its id into the provider's AgentOptions, and emits an
     observable `sandbox` event before the agent output.
-  - a caller-pinned sandbox_id is respected verbatim (no acquire).
+  - a caller-pinned sandbox_id cannot bypass the owner-scoped binder.
   - an acquire failure becomes a terminal `error` event and the provider never
     runs (the agent does not execute without its sandbox).
   - the SandboxManagerBinder bridges the blocking SandboxClient to async via a
     thread, returning a transport-neutral BoundSandbox.
 """
 
+import asyncio
 import json
+import threading
 from dataclasses import dataclass, field
 
 import grpc
+import pytest
 from cocola_agent_runtime.agent_provider import AgentEvent, AgentOptions
 from cocola_agent_runtime.sandbox_binder import (
     BoundSandbox,
     SandboxManagerBinder,
+    SandboxManagerExecutor,
     StaticSandboxBinder,
 )
 from cocola_agent_runtime.server import AgentRuntimeServicer
@@ -102,15 +106,14 @@ async def test_query_acquires_sandbox_when_unpinned():
     ]
 
 
-async def test_caller_pinned_sandbox_is_respected():
+async def test_caller_pinned_sandbox_cannot_bypass_owner_scoped_binder():
     prov = RecordingProvider()
     binder = StaticSandboxBinder()
     ctx = FakeContext()
     await AgentRuntimeServicer(prov, binder=binder).Query(FakeRequest(sandbox_id="pinned-box"), ctx)
-    # No acquire happened; the pinned id flows through unchanged.
-    assert binder.acquired == []
-    assert prov.seen_options.sandbox_id == "pinned-box"
-    assert [e.kind for e in ctx.written] == ["done"]
+    assert binder.acquired == ["S1"]
+    assert prov.seen_options.sandbox_id == "box-S1"
+    assert [e.kind for e in ctx.written][-1] == "done"
 
 
 async def test_no_binder_keeps_passthrough_behavior():
@@ -296,3 +299,55 @@ async def test_manager_binder_maps_capacity_exhausted(monkeypatch):
         assert str(exc) == "current resources are busy; no sandbox capacity available"
     else:
         raise AssertionError("expected RuntimeError")
+
+
+async def test_streaming_exec_cancellation_cancels_underlying_grpc_call(monkeypatch):
+    import cocola_agent_runtime.sandbox_binder as mod
+
+    started = threading.Event()
+    released = threading.Event()
+    cancelled = threading.Event()
+
+    class BlockingCall:
+        def __iter__(self):
+            return self
+
+        def __next__(self):
+            started.set()
+            released.wait(timeout=5)
+            raise StopIteration
+
+        def cancel(self):
+            cancelled.set()
+            released.set()
+
+    call = BlockingCall()
+
+    class FakeClient:
+        def __init__(self, addr=""):
+            pass
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *args):
+            return False
+
+        def open_exec_stream(self, *args, **kwargs):
+            return call
+
+    monkeypatch.setattr(mod, "SandboxClient", FakeClient)
+    executor = SandboxManagerExecutor("sandbox-manager:50051")
+
+    async def consume():
+        async for _ in executor.exec_stream(
+            sandbox_id="box-1", cmd=["sleep", "3600"], timeout_secs=3600
+        ):
+            pass
+
+    task = asyncio.create_task(consume())
+    assert await asyncio.to_thread(started.wait, 1)
+    task.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await task
+    assert await asyncio.to_thread(cancelled.wait, 1)

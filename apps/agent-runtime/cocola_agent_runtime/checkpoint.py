@@ -188,7 +188,9 @@ class CheckpointManager:
             )
             if not res.ok:
                 await self._record_failure(
-                    session_id, res.error or res.stderr or str(res.exit_code)
+                    session_id,
+                    res.error or res.stderr or str(res.exit_code),
+                    user_id=user_id,
                 )
                 log.warning(
                     "checkpoint archive failed",
@@ -205,6 +207,7 @@ class CheckpointManager:
                 await self._record_failure(
                     session_id,
                     f"archive size {len(data)} exceeds max {self._config.max_bytes}",
+                    user_id=user_id,
                 )
                 log.warning(
                     "checkpoint archive exceeds max bytes",
@@ -215,7 +218,9 @@ class CheckpointManager:
                 return None
             key = self._object_key(user_id=user_id, session_id=session_id)
             await asyncio.to_thread(self._objstore.put, key, data, "application/zstd")
-            await self._session_map.put_checkpoint(session_id, key, size_bytes=len(data))
+            await self._session_map.put_checkpoint(
+                session_id, key, user_id=user_id, size_bytes=len(data)
+            )
             try:
                 await self._delete_superseded_snapshots(
                     user_id=user_id,
@@ -232,14 +237,14 @@ class CheckpointManager:
             log.info("checkpoint uploaded", session_id=session_id, object_key=key, size=len(data))
             return key
         except Exception as exc:  # noqa: BLE001 - reclaim must continue
-            await self._record_failure(session_id, str(exc))
+            await self._record_failure(session_id, str(exc), user_id=user_id)
             log.warning("checkpoint failed", session_id=session_id, error=str(exc))
             return None
         finally:
             await self._best_effort_cleanup(sandbox_id, archive_path)
 
     async def restore_if_fresh(
-        self, *, sandbox_id: str, session_id: str, reused: bool
+        self, *, sandbox_id: str, user_id: str, session_id: str, reused: bool
     ) -> RestoreOutcome:
         """Restore the latest checkpoint before running the agent in a fresh sandbox."""
         if reused or not self.enabled or not sandbox_id:
@@ -249,8 +254,8 @@ class CheckpointManager:
         assert self._session_map is not None
         archive_path = _sandbox_tmp_path()
         try:
-            binding = await self._session_map.get_binding(session_id)
-            key = await self._session_map.get_checkpoint(session_id)
+            binding = await self._session_map.get_binding(session_id, user_id=user_id)
+            key = await self._session_map.get_checkpoint(session_id, user_id=user_id)
             if not key:
                 if binding is None:
                     return RestoreOutcome("skipped")
@@ -333,11 +338,11 @@ class CheckpointManager:
                 deleted=deleted,
             )
 
-    async def _record_failure(self, session_id: str, error: str) -> None:
+    async def _record_failure(self, session_id: str, error: str, *, user_id: str) -> None:
         if self._session_map is None:
             return
         try:
-            await self._session_map.put_checkpoint_failure(session_id, error)
+            await self._session_map.put_checkpoint_failure(session_id, error, user_id=user_id)
         except Exception as exc:  # noqa: BLE001 - avoid masking the original failure
             log.warning(
                 "checkpoint failure metadata update failed",

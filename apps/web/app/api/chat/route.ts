@@ -46,6 +46,7 @@ export async function POST(req: NextRequest) {
         ...authHeaders,
       },
       body,
+      signal: req.signal,
       // Stream the response instead of buffering it.
       // @ts-expect-error - duplex is required by Node fetch for streaming bodies
       duplex: "half",
@@ -60,7 +61,10 @@ export async function POST(req: NextRequest) {
     })}\n\n`;
     return new Response(frame, {
       status: 200,
-      headers: { "content-type": "text/event-stream" },
+      headers: {
+        "content-type": "text/event-stream",
+        "x-cocola-upstream-status": "502",
+      },
     });
   }
 
@@ -70,13 +74,26 @@ export async function POST(req: NextRequest) {
   const ct = upstream.headers.get("content-type") ?? "";
   if (!upstream.ok || !ct.includes("text/event-stream")) {
     const text = await upstream.text();
+    let runId = upstream.headers.get("x-cocola-run-id") ?? "";
+    if (!runId && upstream.status === 409) {
+      try {
+        const conflict = JSON.parse(text) as { run_id?: string };
+        runId = conflict.run_id ?? "";
+      } catch {
+        // Keep the original upstream diagnostic below.
+      }
+    }
     const frame = `event: error\ndata: ${JSON.stringify({
       kind: "error",
       data: { error: `gateway ${upstream.status}: ${text}` },
     })}\n\n`;
     return new Response(frame, {
       status: 200,
-      headers: { "content-type": "text/event-stream" },
+      headers: {
+        "content-type": "text/event-stream",
+        "x-cocola-upstream-status": String(upstream.status),
+        ...(runId ? { "x-cocola-run-id": runId } : {}),
+      },
     });
   }
 
@@ -88,6 +105,9 @@ export async function POST(req: NextRequest) {
       "cache-control": "no-cache, no-transform",
       connection: "keep-alive",
       "x-accel-buffering": "no",
+      ...(upstream.headers.get("x-cocola-run-id")
+        ? { "x-cocola-run-id": upstream.headers.get("x-cocola-run-id")! }
+        : {}),
     },
   });
 }

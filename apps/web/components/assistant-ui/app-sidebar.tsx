@@ -156,8 +156,8 @@ export function AppSidebar() {
     try {
       await deleteConversation(deleteTarget.id);
       setDeleteTarget(null);
-    } catch {
-      setDeleteError("Delete failed. Please try again.");
+    } catch (error) {
+      setDeleteError(error instanceof Error ? error.message : "Delete failed. Please try again.");
     } finally {
       setDeleting(false);
     }
@@ -661,8 +661,9 @@ function DeleteConversationDialog({
               Delete conversation
             </h2>
             <p className="mt-1 text-sm text-muted-foreground">
-              This will delete <span className="font-medium text-foreground">{title}</span> and stop
-              any running answer for this conversation.
+              This will permanently delete{" "}
+              <span className="font-medium text-foreground">{title}</span>. Running answers must be
+              stopped and finished first.
             </p>
           </div>
         </div>
