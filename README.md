@@ -137,6 +137,8 @@ make prod  # 正式/完整 Docker 启动：scripts/start.sh + docker-compose.ful
 > [`docs/core-chat-reliability.md`](./docs/core-chat-reliability.md) 与 ADR-0019。
 >
 > ```bash
+> # Gateway 和 Agent Runtime 共用持久化会话索引；官方 make dev/prod 会自动注入
+> export COCOLA_PG_DSN=postgres://cocola:cocola_dev_pw@127.0.0.1:5432/cocola?sslmode=disable
 > # 启动 agent-runtime gRPC 服务（缺省 :50061；real 模式要求配置 sandbox）
 > cd apps/agent-runtime && uv run python -m cocola_agent_runtime
 > # 启动 gateway BFF（缺省 :8080，转发至 127.0.0.1:50061）
@@ -149,9 +151,9 @@ make prod  # 正式/完整 Docker 启动：scripts/start.sh + docker-compose.ful
 >   -d '{"prompt":"hello","session_id":"s1"}'
 > ```
 >
-> **接入真实 LLM 链路（Route A，ADR-0009）**：给 agent-runtime 设置
-> `COCOLA_SANDBOX_ADDR` 指向 sandbox-manager，它即从 EchoProvider 切换到
-> `InSandboxShimProvider`——整个 Claude Code 大脑跑在用户自己的沙箱里，
+> **真实 LLM 链路（Route A，ADR-0009）**：agent-runtime 必须通过
+> `COCOLA_SANDBOX_ADDR` 连接 sandbox-manager，并使用 `InSandboxShimProvider`。
+> 整个 Claude Code 大脑跑在用户自己的沙箱里，
 > agent-runtime 只做控制面路由。沙箱创建时经 ENV 注入模型凭证：
 > `ANTHROPIC_BASE_URL`←`COCOLA_SANDBOX_LLM_BASE_URL`（cocola llm-gateway 根）、
 > `ANTHROPIC_AUTH_TOKEN`←`COCOLA_SANDBOX_LLM_TOKEN`（cocola 令牌）。**校验令牌与

@@ -37,7 +37,7 @@ async def test_streaming_emits_anthropic_sse_and_bills_once():
                 "stream": True,
                 "messages": [{"role": "user", "content": "hi"}],
             },
-            headers={"x-cocola-user": "U1", "x-cocola-session": "S1"},
+            headers={"x-cocola-session": "S1"},
         ) as resp:
             assert resp.status_code == 200
             async for line in resp.aiter_lines():
@@ -45,7 +45,7 @@ async def test_streaming_emits_anthropic_sse_and_bills_once():
                     events.append(line.split(":", 1)[1].strip())
         assert events[0] == "message_start"
         assert events[-1] == "message_stop"
-    recent = await ledger.recent(user_id="U1")
+    recent = await ledger.recent(user_id="dev-user")
     assert len(recent) == 1
 
 
@@ -60,13 +60,13 @@ async def test_non_streaming_returns_json_and_bills_once():
                 "stream": False,
                 "messages": [{"role": "user", "content": "hi"}],
             },
-            headers={"x-cocola-user": "U1", "x-cocola-session": "S1"},
+            headers={"x-cocola-session": "S1"},
         )
         assert r.status_code == 200
         body = r.json()
         assert body["content"][0]["text"] == "hello world"
         assert body["usage"]["input_tokens"] >= 1
-    recent = await ledger.recent(user_id="U1")
+    recent = await ledger.recent(user_id="dev-user")
     assert len(recent) == 1
 
 
@@ -83,7 +83,7 @@ async def test_both_paths_accumulate_two_records():
                 "stream": True,
                 "messages": [{"role": "user", "content": "a"}],
             },
-            headers={"x-cocola-user": "U1", "x-cocola-session": "S1"},
+            headers={"x-cocola-session": "S1"},
         ) as resp:
             async for _ in resp.aiter_lines():
                 pass
@@ -95,9 +95,9 @@ async def test_both_paths_accumulate_two_records():
                 "stream": False,
                 "messages": [{"role": "user", "content": "b"}],
             },
-            headers={"x-cocola-user": "U1", "x-cocola-session": "S1"},
+            headers={"x-cocola-session": "S1"},
         )
-        r = await c.get("/v1/usage?user_id=U1&session_id=S1")
+        r = await c.get("/v1/usage?user_id=ignored&session_id=S1")
         u = r.json()
     assert len(u["recent"]) == 2
     assert u["user_aggregate"]["calls"] == 2

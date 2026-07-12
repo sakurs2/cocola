@@ -1,64 +1,27 @@
-import { NextRequest } from "next/server";
-import { adminHeaders, isAuthFail, requireAdmin, type SessionUser } from "@/lib/server-auth";
+import { type NextRequest } from "next/server";
+import { proxyAdmin } from "@/lib/admin-proxy";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
-const ADMIN_URL = process.env.COCOLA_ADMIN_URL ?? "http://127.0.0.1:8092";
+type Context = { params: Promise<{ path: string[] }> };
 
-export async function GET(req: NextRequest, { params }: { params: Promise<{ path: string[] }> }) {
-  const path = await adminPath(params);
-  if (path === "/admin/agent-prompts/effective") {
+async function path({ params }: Context) {
+  return `/admin/agent-prompts/${(await params).path.map(encodeURIComponent).join("/")}`;
+}
+
+export async function GET(req: NextRequest, context: Context) {
+  const target = await path(context);
+  if (target === "/admin/agent-prompts/effective") {
     return Response.json({ error: "runtime-only endpoint" }, { status: 404 });
   }
-  const authResult = await requireAdmin();
-  if (isAuthFail(authResult)) return authResult.response;
-  return proxyAdmin(req, `${path}${req.nextUrl.search}`, authResult.user);
+  return proxyAdmin(req, target);
 }
 
-export async function PATCH(req: NextRequest, { params }: { params: Promise<{ path: string[] }> }) {
-  const authResult = await requireAdmin();
-  if (isAuthFail(authResult)) return authResult.response;
-  return proxyAdmin(req, await adminPath(params), authResult.user, {
-    method: "PATCH",
-    body: await req.text(),
-    contentType: req.headers.get("content-type") ?? "application/json",
-  });
+export async function PATCH(req: NextRequest, context: Context) {
+  return proxyAdmin(req, await path(context));
 }
 
-export async function POST(req: NextRequest, { params }: { params: Promise<{ path: string[] }> }) {
-  const authResult = await requireAdmin();
-  if (isAuthFail(authResult)) return authResult.response;
-  return proxyAdmin(req, await adminPath(params), authResult.user);
-}
-
-async function adminPath(params: Promise<{ path: string[] }>) {
-  const { path } = await params;
-  return `/admin/agent-prompts/${path.map(encodeURIComponent).join("/")}`;
-}
-
-async function proxyAdmin(
-  req: NextRequest,
-  path: string,
-  user: SessionUser,
-  init?: RequestInit & { contentType?: string },
-) {
-  try {
-    const upstream = await fetch(`${ADMIN_URL}${path}`, {
-      method: init?.method ?? req.method,
-      cache: "no-store",
-      headers: adminHeaders(user, init?.contentType),
-      body: init?.body,
-    });
-    const text = await upstream.text();
-    return new Response(text || null, {
-      status: upstream.status,
-      headers: text
-        ? { "content-type": upstream.headers.get("content-type") ?? "application/json" }
-        : {},
-    });
-  } catch (err) {
-    const msg = err instanceof Error ? err.message : String(err);
-    return Response.json({ error: `admin-api unreachable: ${msg}` }, { status: 502 });
-  }
+export async function POST(req: NextRequest, context: Context) {
+  return proxyAdmin(req, await path(context));
 }

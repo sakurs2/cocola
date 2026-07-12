@@ -14,6 +14,7 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials/insecure"
@@ -21,6 +22,8 @@ import (
 
 	"github.com/cocola-project/cocola/apps/gateway/internal/agent"
 	"github.com/cocola-project/cocola/apps/gateway/internal/auth"
+	"github.com/cocola-project/cocola/apps/gateway/internal/chatrun"
+	"github.com/cocola-project/cocola/apps/gateway/internal/convo"
 	"github.com/cocola-project/cocola/apps/gateway/internal/httpapi"
 	"github.com/cocola-project/cocola/packages/go-common/logger"
 	"github.com/cocola-project/cocola/packages/go-common/token"
@@ -88,7 +91,14 @@ func buildHandler(t *testing.T, conn *grpc.ClientConn) http.Handler {
 	t.Helper()
 	client := agent.NewClient(conn)
 	verifier := auth.NewVerifier(auth.Config{Secret: "test-secret", Issuer: "cocola"})
-	return httpapi.New(client, verifier, logger.Must()).Handler()
+	conversations := convo.NewMemory()
+	runs := chatrun.NewMemory(conversations)
+	return httpapi.New(client, verifier, logger.Must()).
+		WithConvoStore(conversations).
+		WithChatRuns(runs, httpapi.RunConfig{
+			RunTimeout: time.Minute, PingEvery: time.Hour,
+			MergeWindow: time.Millisecond, DraftInterval: time.Millisecond,
+		}).Handler()
 }
 
 func TestEndToEndChatStreamsThroughRealGRPC(t *testing.T) {
@@ -116,15 +126,17 @@ func TestEndToEndChatStreamsThroughRealGRPC(t *testing.T) {
 	}
 
 	body := rec.Body.String()
-	// All three scripted frames must have crossed the real gRPC stream.
+	// The durable chat path emits an initial replay snapshot, merges adjacent text
+	// deltas, and owns the terminal status event.
 	for _, want := range []string{
-		"event: text\n", `"text":"hello ping"`, `"text":"world"`, "event: done\n", `"reason":"stop"`,
+		"event: snapshot\n", "event: text\n", `"text":"hello pingworld"`,
+		"event: done\n", `"status":"success"`,
 	} {
 		if !strings.Contains(body, want) {
 			t.Fatalf("SSE body missing %q\n---\n%s", want, body)
 		}
 	}
-	// Three events => three SSE records (blank-line terminated).
+	// snapshot + merged text + terminal status => three SSE records.
 	if got := strings.Count(body, "\n\n"); got != 3 {
 		t.Fatalf("want 3 SSE records, got %d\n---\n%s", got, body)
 	}
@@ -173,7 +185,7 @@ func TestEndToEndForwardsAttachmentsAsBytes(t *testing.T) {
 		t.Fatalf("encode token: %v", err)
 	}
 
-	body := `{"prompt":"read it","attachments":[{"filename":"note.txt","content_b64":"aGVsbG8gd29ybGQ=","mime":"text/plain"}]}`
+	body := `{"prompt":"read it","session_id":"sess-1","attachments":[{"filename":"note.txt","content_b64":"aGVsbG8gd29ybGQ=","mime":"text/plain"}]}`
 	req := httptest.NewRequest("POST", "/v1/chat", strings.NewReader(body))
 	req.Header.Set("authorization", "Bearer "+tok)
 	rec := httptest.NewRecorder()

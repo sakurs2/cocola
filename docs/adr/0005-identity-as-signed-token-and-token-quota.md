@@ -92,23 +92,20 @@ embedded in the counter key and the key is written with a TTL that expires
 shortly after the window ends. A new day/month therefore reads a fresh zero
 counter — **no cron, no reset job**.
 
-### Storage mirrors the M3 ledger seam
+### Storage mirrors the durable runtime topology
 
-A `QuotaStore` Protocol has a `MemoryQuotaStore` (hermetic default) and a
-`RedisQuotaStore` (`INCRBY` + `EXPIRE` in one `MULTI/EXEC`, key
-`cocola:quota:{scope}:{subject}:{period}`). The `Enforcer` (policy + store) is
-the single object the service depends on; it is attached only when a quota layer
-is enabled, so a no-cap deployment does zero quota work.
+A `QuotaStore` Protocol keeps unit tests hermetic with `MemoryQuotaStore`.
+Production uses Postgres as durable truth with a Redis fast-path mirror;
+per-subject overrides and token revocation also use Redis. Missing Postgres or
+Redis is a startup error instead of selecting an in-process production mode.
 
-### Composition + back-compat
+### Composition
 
 `bootstrap.py` builds a `Verifier` from `COCOLA_AUTH_*` and an `Enforcer` from
 `COCOLA_QUOTA_*`. **Auth is enforced only when `COCOLA_AUTH_SECRET` is set**;
-with no secret, auth is disabled and every caller resolves to a stable
-`dev-user` identity — preserving the zero-config dev/CI boot. In that disabled
-mode only, the legacy `x-cocola-user` / `x-cocola-tenant` headers are still
-honored so existing dev flows attribute usage to a real subject. With auth
-enabled the verified token is authoritative and those headers are ignored.
+with no secret, every caller resolves to a stable `dev-user` identity for
+isolated tests. Client-supplied identity headers and usage-query overrides are
+not accepted; the verified token (or fixed test identity) is authoritative.
 
 ### Hard testability constraint (unchanged from ADR-0004)
 

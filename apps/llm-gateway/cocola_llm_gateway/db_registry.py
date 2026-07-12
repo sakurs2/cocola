@@ -5,7 +5,6 @@ from __future__ import annotations
 import asyncio
 import base64
 import hashlib
-import os
 import time
 from typing import Any
 
@@ -13,9 +12,8 @@ from cocola_common import CocolaError, ErrorCode, get_logger
 from cryptography.hazmat.primitives.ciphers.aead import AESGCM
 from psycopg_pool import AsyncConnectionPool
 
-from cocola_llm_gateway.config import _build_from_dict, read_secret_env
+from cocola_llm_gateway.config import _build_from_dict
 from cocola_llm_gateway.registry import Registry
-from cocola_llm_gateway.service import RegistrySource
 
 log = get_logger("cocola.llm-gateway.db-registry")
 
@@ -194,33 +192,6 @@ def decrypt_secret(secret: str, ciphertext: str) -> str:
         raise CocolaError(ErrorCode.INVALID_ARGUMENT, "invalid model secret ciphertext")
     key = hashlib.sha256(secret.encode("utf-8")).digest()
     return AESGCM(key).decrypt(raw[:12], raw[12:], None).decode("utf-8")
-
-
-def registry_source_from_env(fallback: Registry) -> RegistrySource:
-    dsn = os.getenv("COCOLA_PG_DSN", "").strip()
-    if not dsn:
-        return _Static(fallback)
-    ttl_s = float(os.getenv("COCOLA_LLM_REGISTRY_CACHE_TTL_SECS", "2"))
-    return PostgresRegistrySource(
-        dsn,
-        fallback,
-        secret=read_secret_env("COCOLA_MODEL_SECRET_KEY"),
-        ttl_s=ttl_s,
-    )
-
-
-class _Static:
-    def __init__(self, registry: Registry):
-        self._registry = registry
-
-    async def acquire_registry(self) -> Registry:
-        return self._registry
-
-    async def release_registry(self, registry: Registry) -> None:
-        return None
-
-    async def aclose(self) -> None:
-        await self._registry.aclose()
 
 
 async def _close_registry(registry: Registry) -> None:

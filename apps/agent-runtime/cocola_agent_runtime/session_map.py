@@ -16,9 +16,7 @@ The store is a tiny protocol so the provider does not care where the index
 lives. Two implementations:
 
 ``MemorySessionMap``
-    In-process dict. Zero-dependency default so a dev boot needs no Postgres
-    (matches the COCOLA_PG_DSN gating used in llm-gateway / admin-api). Resume
-    works within a single process lifetime only.
+    In-process test implementation. Production always uses Postgres.
 
 ``PostgresSessionMap``
     Durable index in the ``session_map`` table (schema owned by
@@ -66,16 +64,6 @@ class SessionMap(Protocol):
     async def get_checkpoint(self, session_id: str, *, user_id: str = "") -> str | None:
         """Return the latest checkpoint object key for a cocola session."""
 
-    async def put_checkpoint(
-        self, session_id: str, object_key: str, *, user_id: str = "", size_bytes: int = 0
-    ) -> None:
-        """Record the latest checkpoint object key for a cocola session."""
-
-    async def put_checkpoint_failure(
-        self, session_id: str, error: str, *, user_id: str = ""
-    ) -> None:
-        """Record a failed checkpoint attempt for a cocola session."""
-
     async def delete(self, session_id: str, *, user_id: str = "") -> None:
         """Forget a session's binding (e.g. a dangling/stale resume id)."""
 
@@ -88,7 +76,6 @@ class MemorySessionMap:
 
     def __init__(self) -> None:
         self._d: dict[str, SessionBinding] = {}
-        self._checkpoints: dict[str, str] = {}
 
     async def get(self, session_id: str, *, user_id: str = "") -> str | None:
         binding = await self.get_binding(session_id, user_id=user_id)
@@ -102,12 +89,11 @@ class MemorySessionMap:
         binding = self._d.get(session_id)
         if not binding or not binding.claude_session_id or binding.user_id != user_id:
             return None
-        checkpoint = self._checkpoints.get(session_id, binding.checkpoint_object_key)
         return SessionBinding(
             claude_session_id=binding.claude_session_id,
             user_id=binding.user_id,
             sandbox_id=binding.sandbox_id,
-            checkpoint_object_key=checkpoint,
+            checkpoint_object_key=binding.checkpoint_object_key,
         )
 
     async def put(
@@ -123,7 +109,7 @@ class MemorySessionMap:
                 claude_session_id=claude_session_id,
                 user_id=user_id,
                 sandbox_id=sandbox_id,
-                checkpoint_object_key=self._checkpoints.get(session_id, ""),
+                checkpoint_object_key=current.checkpoint_object_key if current else "",
             )
 
     async def get_checkpoint(self, session_id: str, *, user_id: str = "") -> str | None:
@@ -132,43 +118,8 @@ class MemorySessionMap:
         binding = self._d.get(session_id)
         if binding and binding.user_id != user_id:
             return None
-        key = self._checkpoints.get(session_id) or (
-            binding.checkpoint_object_key if binding else ""
-        )
+        key = binding.checkpoint_object_key if binding else ""
         return key or None
-
-    async def put_checkpoint(
-        self, session_id: str, object_key: str, *, user_id: str = "", size_bytes: int = 0
-    ) -> None:
-        if not object_key:
-            return
-        if not user_id:
-            raise PermissionError("session owner required")
-        binding = self._d.get(session_id)
-        if binding and binding.user_id and binding.user_id != user_id:
-            raise PermissionError("session owner mismatch")
-        self._checkpoints[session_id] = object_key
-        if binding:
-            self._d[session_id] = SessionBinding(
-                claude_session_id=binding.claude_session_id,
-                user_id=binding.user_id,
-                sandbox_id=binding.sandbox_id,
-                checkpoint_object_key=object_key,
-            )
-        else:
-            self._d[session_id] = SessionBinding(
-                claude_session_id="", user_id=user_id, checkpoint_object_key=object_key
-            )
-
-    async def put_checkpoint_failure(
-        self, session_id: str, error: str, *, user_id: str = ""
-    ) -> None:
-        if not user_id:
-            raise PermissionError("session owner required")
-        binding = self._d.get(session_id)
-        if binding and binding.user_id and binding.user_id != user_id:
-            raise PermissionError("session owner mismatch")
-        return None
 
     async def delete(self, session_id: str, *, user_id: str = "") -> None:
         if not user_id:
@@ -177,7 +128,6 @@ class MemorySessionMap:
         if binding and binding.user_id != user_id:
             return
         self._d.pop(session_id, None)
-        self._checkpoints.pop(session_id, None)
 
     async def aclose(self) -> None:
         return None
@@ -205,48 +155,6 @@ _GET_CHECKPOINT = """
 SELECT checkpoint_object_key
 FROM session_map
 WHERE session_id = %s AND user_id = %s
-"""
-
-_PUT_CHECKPOINT = """
-INSERT INTO session_map (
-    session_id,
-    user_id,
-    checkpoint_object_key,
-    checkpoint_status,
-    checkpoint_size_bytes,
-    checkpoint_error,
-    checkpoint_updated_at,
-    updated_at
-)
-VALUES (%s, %s, %s, 'uploaded', %s, '', now(), now())
-ON CONFLICT (session_id)
-DO UPDATE SET checkpoint_object_key = EXCLUDED.checkpoint_object_key,
-             checkpoint_status = EXCLUDED.checkpoint_status,
-             checkpoint_size_bytes = EXCLUDED.checkpoint_size_bytes,
-             checkpoint_error = EXCLUDED.checkpoint_error,
-             checkpoint_updated_at = EXCLUDED.checkpoint_updated_at,
-             updated_at = now()
-WHERE session_map.user_id = EXCLUDED.user_id
-RETURNING session_id
-"""
-
-_PUT_CHECKPOINT_FAILURE = """
-INSERT INTO session_map (
-    session_id,
-    user_id,
-    checkpoint_status,
-    checkpoint_error,
-    checkpoint_updated_at,
-    updated_at
-)
-VALUES (%s, %s, 'failed', %s, now(), now())
-ON CONFLICT (session_id)
-DO UPDATE SET checkpoint_status = EXCLUDED.checkpoint_status,
-             checkpoint_error = EXCLUDED.checkpoint_error,
-             checkpoint_updated_at = EXCLUDED.checkpoint_updated_at,
-             updated_at = now()
-WHERE session_map.user_id = EXCLUDED.user_id
-RETURNING session_id
 """
 
 _DELETE = "DELETE FROM session_map WHERE session_id = %s AND user_id = %s"
@@ -318,30 +226,6 @@ class PostgresSessionMap:
         if not row:
             return None
         return row[0] or None
-
-    async def put_checkpoint(
-        self, session_id: str, object_key: str, *, user_id: str = "", size_bytes: int = 0
-    ) -> None:
-        if not object_key:
-            return
-        if not user_id:
-            raise PermissionError("session owner required")
-        await self._ready()
-        async with self._pool.connection() as conn:
-            cur = await conn.execute(_PUT_CHECKPOINT, (session_id, user_id, object_key, size_bytes))
-            if await cur.fetchone() is None:
-                raise PermissionError("session owner mismatch")
-
-    async def put_checkpoint_failure(
-        self, session_id: str, error: str, *, user_id: str = ""
-    ) -> None:
-        if not user_id:
-            raise PermissionError("session owner required")
-        await self._ready()
-        async with self._pool.connection() as conn:
-            cur = await conn.execute(_PUT_CHECKPOINT_FAILURE, (session_id, user_id, error[:1000]))
-            if await cur.fetchone() is None:
-                raise PermissionError("session owner mismatch")
 
     async def delete(self, session_id: str, *, user_id: str = "") -> None:
         if not user_id:

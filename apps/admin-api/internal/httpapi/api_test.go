@@ -253,8 +253,8 @@ func TestAdminSettingsAPI(t *testing.T) {
 	rec = do(t, r, http.MethodPatch, "/admin/settings/auth.secret", "k", map[string]any{
 		"value": "new-secret", "expected_version": 0,
 	})
-	if rec.Code != http.StatusForbidden {
-		t.Fatalf("secret update: want 403, got %d (%s)", rec.Code, rec.Body.String())
+	if rec.Code != http.StatusNotFound {
+		t.Fatalf("removed setting: want 404, got %d (%s)", rec.Code, rec.Body.String())
 	}
 
 	rec = do(t, r, http.MethodDelete, "/admin/settings/scheduler.poll_secs?expected_version=1", "k", nil)
@@ -1072,7 +1072,7 @@ func TestSandboxRuntimeRoutesNotConfigured(t *testing.T) {
 	}
 }
 
-func TestAdministrativeWritesDoNotCreateConversationAudit(t *testing.T) {
+func TestAdministrativeWritesDoNotCreateConversationRuns(t *testing.T) {
 	api := newTestAPI("k")
 	r := api.Router()
 
@@ -1080,48 +1080,25 @@ func TestAdministrativeWritesDoNotCreateConversationAudit(t *testing.T) {
 	_ = do(t, r, http.MethodPost, "/admin/tokens", "k", map[string]any{"user_id": "bob"})
 	_ = do(t, r, http.MethodPut, "/admin/quotas", "k", map[string]any{"scope": "tenant", "subject": "acme", "limit": 5})
 
-	rec := do(t, r, http.MethodGet, "/admin/audit-events", "k", nil)
+	rec := do(t, r, http.MethodGet, "/admin/conversation-runs", "k", nil)
 	if rec.Code != http.StatusOK {
 		t.Fatalf("audit: want 200, got %d", rec.Code)
 	}
 	var al struct {
-		Events []store.AuditEvent `json:"events"`
+		Runs []store.ConversationRun `json:"runs"`
 	}
 	_ = json.Unmarshal(rec.Body.Bytes(), &al)
-	if len(al.Events) != 0 {
-		t.Fatalf("admin operations must not create conversation audit entries: %+v", al.Events)
-	}
-}
-
-func TestAuditEventsExcludeHTTPReads(t *testing.T) {
-	api := newTestAPI("k")
-	r := api.Router()
-
-	rec := do(t, r, http.MethodGet, "/admin/tokens", "k", nil)
-	if rec.Code != http.StatusOK {
-		t.Fatalf("list tokens: want 200, got %d", rec.Code)
-	}
-
-	rec = do(t, r, http.MethodGet, "/admin/audit-events?action=admin.tokens.list", "k", nil)
-	if rec.Code != http.StatusOK {
-		t.Fatalf("audit events: want 200, got %d (%s)", rec.Code, rec.Body.String())
-	}
-	var body struct {
-		Events []store.AuditEvent `json:"events"`
-	}
-	if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
-		t.Fatalf("decode audit events: %v", err)
-	}
-	if len(body.Events) != 0 {
-		t.Fatalf("HTTP reads must not create conversation audit entries: %+v", body.Events)
+	if len(al.Runs) != 0 {
+		t.Fatalf("admin operations must not create conversation runs: %+v", al.Runs)
 	}
 }
 
 func TestConversationRunRoutes(t *testing.T) {
 	mem := store.NewMemory()
 	now := fixedClock()
+	const traceID = "0123456789abcdef0123456789abcdef"
 	err := mem.UpsertConversationRun(context.Background(), store.ConversationRun{
-		TraceID: "0123456789abcdef0123456789abcdef", RootSpanID: "0123456789abcdef",
+		TraceID: traceID, RootSpanID: "0123456789abcdef",
 		ConversationID: "c1", UserID: "u1", UserEmail: "u1@example.com",
 		Source: "interactive", Status: "success", StartedAt: now,
 		LastActivityAt: now, DetailStatus: "available",
@@ -1129,11 +1106,25 @@ func TestConversationRunRoutes(t *testing.T) {
 	if err != nil {
 		t.Fatalf("seed conversation run: %v", err)
 	}
+	if err := mem.UpsertConversationTraceSpan(context.Background(), store.ConversationTraceSpan{
+		TraceID: traceID, SpanID: "fedcba9876543210", Service: "gateway",
+		Name: "conversation.run", Category: "run", StartedAt: now, Status: "ok",
+	}); err != nil {
+		t.Fatalf("seed conversation span: %v", err)
+	}
 	svc := service.New(mem, nil, fixedClock)
 	r := New(svc, "k").Router()
 	rec := do(t, r, http.MethodGet, "/admin/conversation-runs", "k", nil)
-	if rec.Code != http.StatusOK || !strings.Contains(rec.Body.String(), "0123456789abcdef0123456789abcdef") {
+	if rec.Code != http.StatusOK || !strings.Contains(rec.Body.String(), traceID) {
 		t.Fatalf("conversation runs: got %d %s", rec.Code, rec.Body.String())
+	}
+	rec = do(t, r, http.MethodGet, "/admin/conversation-runs/"+traceID, "k", nil)
+	if rec.Code != http.StatusOK || !strings.Contains(rec.Body.String(), `"conversation_id":"c1"`) {
+		t.Fatalf("conversation run: got %d %s", rec.Code, rec.Body.String())
+	}
+	rec = do(t, r, http.MethodGet, "/admin/conversation-runs/"+traceID+"/spans", "k", nil)
+	if rec.Code != http.StatusOK || !strings.Contains(rec.Body.String(), `"name":"conversation.run"`) {
+		t.Fatalf("conversation spans: got %d %s", rec.Code, rec.Body.String())
 	}
 }
 

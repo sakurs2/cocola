@@ -2,10 +2,9 @@
 # llm-tooluse-probe.sh -- fire a single tool-enabled turn at a RUNNING cocola
 # llm-gateway and show whether the model came back with a tool_use block.
 #
-# This is the live counterpart to the hermetic scripts/llm-tooluse-e2e.py: that
-# one proves the gateway plumbing with a FakeUpstream; THIS one proves the real
-# upstream configured in Admin -> Models actually emits
-# tool_use through the gateway end to end (ADR-0010).
+# Unit tests prove the gateway plumbing with a FakeUpstream; this probe verifies
+# that the real upstream configured in Admin -> Models emits tool_use through
+# the gateway end to end (ADR-0010).
 #
 # Prereqs: a gateway already up and a model configured in Admin -> Models:
 #     make dev

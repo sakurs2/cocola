@@ -35,20 +35,14 @@ async def _contract(store):
     assert binding.claude_session_id == "claude-aaa"
     assert binding.sandbox_id == "box-1"
     assert await store.get_checkpoint("S1", user_id="U1") is None
-    await store.put_checkpoint("S1", "checkpoints/U1/S1/ck1.tar.zst", user_id="U1")
-    assert await store.get_checkpoint("S1", user_id="U1") == "checkpoints/U1/S1/ck1.tar.zst"
-    binding = await store.get_binding("S1", user_id="U1")
-    assert binding is not None
-    assert binding.checkpoint_object_key == "checkpoints/U1/S1/ck1.tar.zst"
     # Idempotent overwrite: the latest claude_session_id wins.
     await store.put("S1", "claude-bbb", user_id="U1", sandbox_id="box-2")
     assert await store.get("S1", user_id="U1") == "claude-bbb"
-    assert await store.get_checkpoint("S1", user_id="U1") == "checkpoints/U1/S1/ck1.tar.zst"
     binding = await store.get_binding("S1", user_id="U1")
     assert binding is not None
     assert binding.claude_session_id == "claude-bbb"
     assert binding.sandbox_id == "box-2"
-    assert binding.checkpoint_object_key == "checkpoints/U1/S1/ck1.tar.zst"
+    assert binding.checkpoint_object_key == ""
     # Empty claude_session_id is a no-op (never clobbers a good binding).
     await store.put("S1", "", user_id="U1")
     assert await store.get("S1", user_id="U1") == "claude-bbb"

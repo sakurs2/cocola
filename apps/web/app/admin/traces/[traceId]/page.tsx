@@ -67,11 +67,6 @@ type TraceSpan = {
   attributes_json?: Record<string, unknown>;
 };
 
-type TraceResponse = {
-  run?: ConversationRun;
-  spans?: TraceSpan[];
-};
-
 export default function AdminTracePage({ params }: { params: { traceId: string } }) {
   const traceId = params.traceId;
   const [run, setRun] = useState<ConversationRun | null>(null);
@@ -84,21 +79,21 @@ export default function AdminTracePage({ params }: { params: { traceId: string }
   const load = useCallback(async () => {
     setError("");
     try {
-      const response = await fetch(`/api/admin/traces/${encodeURIComponent(traceId)}`, {
-        cache: "no-store",
-      });
-      if (!response.ok) throw new Error(await errorText(response));
-      const body = (await response.json()) as TraceResponse;
-      setRun(body.run ?? null);
-      setSpans(body.spans ?? []);
+      const base = `/api/admin/conversation-runs/${encodeURIComponent(traceId)}`;
+      const [runResponse, spansResponse] = await Promise.all([
+        fetch(base, { cache: "no-store" }),
+        fetch(`${base}/spans`, { cache: "no-store" }),
+      ]);
+      if (!runResponse.ok) throw new Error(await errorText(runResponse));
+      if (!spansResponse.ok) throw new Error(await errorText(spansResponse));
+      const runBody = (await runResponse.json()) as { run?: ConversationRun };
+      const spansBody = (await spansResponse.json()) as { spans?: TraceSpan[] };
+      const nextSpans = spansBody.spans ?? [];
+      setRun(runBody.run ?? null);
+      setSpans(nextSpans);
       setSelected((current) => {
-        if (current)
-          return (body.spans ?? []).find((span) => span.span_id === current.span_id) ?? current;
-        return (
-          (body.spans ?? []).find((span) => span.name === "conversation.run") ??
-          body.spans?.[0] ??
-          null
-        );
+        if (current) return nextSpans.find((span) => span.span_id === current.span_id) ?? current;
+        return nextSpans.find((span) => span.name === "conversation.run") ?? nextSpans[0] ?? null;
       });
     } catch (loadError) {
       setError(loadError instanceof Error ? loadError.message : String(loadError));

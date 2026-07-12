@@ -115,8 +115,6 @@ class BoomProvider:
 class FakeObjectStore:
     def __init__(self):
         self.puts = {}
-        self.deleted = []
-        self.delete_errors = {}
 
     def get(self, key: str) -> bytes:
         value = self.puts[key]
@@ -126,15 +124,6 @@ class FakeObjectStore:
 
     def put(self, key: str, data: bytes, mime: str) -> None:
         self.puts[key] = (data, mime)
-
-    def list(self, prefix: str) -> list[str]:
-        return sorted(key for key in self.puts if key.startswith(prefix))
-
-    def delete(self, key: str) -> None:
-        if error := self.delete_errors.get(key):
-            raise error
-        self.deleted.append(key)
-        self.puts.pop(key, None)
 
 
 def test_product_traceparent_wins_over_otel_transport_parent():
@@ -163,7 +152,6 @@ class FakeSessionMap:
         self.fail_delete = fail_delete
         self.bindings = {}
         self.checkpoints = {}
-        self.put_checkpoint_calls = []
 
     async def get(self, session_id: str, *, user_id: str = ""):
         binding = await self.get_binding(session_id, user_id=user_id)
@@ -187,15 +175,6 @@ class FakeSessionMap:
 
     async def get_checkpoint(self, session_id: str, *, user_id: str = ""):
         return self.checkpoints.get(session_id)
-
-    async def put_checkpoint(
-        self, session_id: str, object_key: str, *, user_id: str = "", size_bytes: int = 0
-    ):
-        self.put_checkpoint_calls.append((session_id, object_key))
-        self.checkpoints[session_id] = object_key
-
-    async def put_checkpoint_failure(self, session_id: str, error: str, *, user_id: str = ""):
-        return None
 
     async def delete(self, session_id: str, *, user_id: str = ""):
         binding = self.bindings.get(session_id)
@@ -578,159 +557,6 @@ async def test_release_session_without_binder_succeeds_and_delete_failure_is_bes
 
     assert resp is not None
     assert session_map.deleted == ["sess-8"]
-
-
-async def test_release_session_checkpoints_before_releasing_sandbox():
-    archive = b"checkpoint-bytes"
-    executor = StaticSandboxExecutor()
-
-    def exec_handler(sandbox_id, cmd):
-        assert sandbox_id == "box-sess-7"
-        # The archive command writes a zstd tar to an on-disk temp path inside
-        # the sandbox and prints an "archived" marker; the payload is then read
-        # back over the binary file channel, never via stdout.
-        match = re.search(r"(/tmp/cocola-checkpoint-[0-9a-f]+\.tar\.zst)", cmd[2])
-        assert match, cmd[2]
-        executor.byte_files[(sandbox_id, match.group(1))] = archive
-        return ExecOutcome(exit_code=0, stdout="archived")
-
-    binder = StaticSandboxBinder()
-    executor = StaticSandboxExecutor(exec_handler=exec_handler)
-    store = FakeObjectStore()
-    session_map = FakeSessionMap()
-    session_map.bindings["sess-7"] = SessionBinding(
-        claude_session_id="claude-1",
-        sandbox_id="box-sess-7",
-    )
-    checkpoint = CheckpointManager(
-        objstore=store,
-        executor=executor,
-        session_map=session_map,
-        config=CheckpointConfig(),
-    )
-
-    await AgentRuntimeServicer(
-        ListProvider([]),
-        binder=binder,
-        executor=executor,
-        objstore=store,
-        session_map=session_map,
-        checkpoint=checkpoint,
-    ).ReleaseSession(FakeRequest(session_id="sess-7"), FakeContext())
-
-    assert binder.released == ["sess-7"]
-    assert session_map.deleted == ["sess-7"]
-    assert len(store.puts) == 1
-    key = next(iter(store.puts))
-    assert key.startswith("checkpoints/U1/sess-7/")
-    assert store.puts[key] == (archive, "application/zstd")
-    assert session_map.put_checkpoint_calls == [("sess-7", key)]
-
-
-async def test_checkpoint_failure_does_not_block_release():
-    def exec_handler(sandbox_id, cmd):
-        return ExecOutcome(exit_code=1, stderr="tar failed")
-
-    binder = StaticSandboxBinder()
-    executor = StaticSandboxExecutor(exec_handler=exec_handler)
-    store = FakeObjectStore()
-    session_map = FakeSessionMap()
-    session_map.bindings["sess-9"] = SessionBinding(
-        claude_session_id="claude-1",
-        sandbox_id="box-sess-9",
-    )
-    checkpoint = CheckpointManager(
-        objstore=store,
-        executor=executor,
-        session_map=session_map,
-        config=CheckpointConfig(),
-    )
-
-    await AgentRuntimeServicer(
-        ListProvider([]),
-        binder=binder,
-        executor=executor,
-        objstore=store,
-        session_map=session_map,
-        checkpoint=checkpoint,
-    ).ReleaseSession(FakeRequest(session_id="sess-9"), FakeContext())
-
-    assert binder.released == ["sess-9"]
-    assert session_map.deleted == ["sess-9"]
-    assert store.puts == {}
-
-
-async def test_checkpoint_upload_deletes_only_superseded_session_snapshots():
-    archive = b"checkpoint-bytes"
-    executor = StaticSandboxExecutor()
-
-    def exec_handler(sandbox_id, cmd):
-        match = re.search(r"(/tmp/cocola-checkpoint-[0-9a-f]+\.tar\.zst)", cmd[2])
-        assert match, cmd[2]
-        executor.byte_files[(sandbox_id, match.group(1))] = archive
-        return ExecOutcome(exit_code=0, stdout="archived")
-
-    executor = StaticSandboxExecutor(exec_handler=exec_handler)
-    store = FakeObjectStore()
-    old_key = "checkpoints/U1/S1/old.tar.zst"
-    unrelated_key = "checkpoints/U1/S2/keep.tar.zst"
-    store.puts[old_key] = b"old"
-    store.puts[unrelated_key] = b"unrelated"
-    session_map = FakeSessionMap()
-    checkpoint = CheckpointManager(
-        objstore=store,
-        executor=executor,
-        session_map=session_map,
-        config=CheckpointConfig(),
-    )
-
-    key = await checkpoint.checkpoint_on_reclaim(
-        sandbox_id="box-S1",
-        user_id="U1",
-        session_id="S1",
-    )
-
-    assert key is not None
-    assert old_key not in store.puts
-    assert store.deleted == [old_key]
-    assert key in store.puts
-    assert unrelated_key in store.puts
-    assert session_map.put_checkpoint_calls == [("S1", key)]
-
-
-async def test_checkpoint_cleanup_failure_keeps_new_snapshot_usable():
-    archive = b"checkpoint-bytes"
-    executor = StaticSandboxExecutor()
-
-    def exec_handler(sandbox_id, cmd):
-        match = re.search(r"(/tmp/cocola-checkpoint-[0-9a-f]+\.tar\.zst)", cmd[2])
-        assert match, cmd[2]
-        executor.byte_files[(sandbox_id, match.group(1))] = archive
-        return ExecOutcome(exit_code=0, stdout="archived")
-
-    executor = StaticSandboxExecutor(exec_handler=exec_handler)
-    store = FakeObjectStore()
-    old_key = "checkpoints/U1/S1/old.tar.zst"
-    store.puts[old_key] = b"old"
-    store.delete_errors[old_key] = RuntimeError("minio unavailable")
-    session_map = FakeSessionMap()
-    checkpoint = CheckpointManager(
-        objstore=store,
-        executor=executor,
-        session_map=session_map,
-        config=CheckpointConfig(),
-    )
-
-    key = await checkpoint.checkpoint_on_reclaim(
-        sandbox_id="box-S1",
-        user_id="U1",
-        session_id="S1",
-    )
-
-    assert key is not None
-    assert key in store.puts
-    assert old_key in store.puts
-    assert session_map.put_checkpoint_calls == [("S1", key)]
 
 
 async def test_query_restores_checkpoint_for_fresh_sandbox_before_agent_runs():

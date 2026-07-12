@@ -19,7 +19,7 @@ import cocola_common
 import uvicorn
 from cocola_common import Registry, get_logger
 
-from cocola_llm_gateway.bootstrap import build_service, build_verifier
+from cocola_llm_gateway.bootstrap import build_revocation, build_service, build_verifier
 from cocola_llm_gateway.config import gateway_config_from_env
 from cocola_llm_gateway.server import create_app
 
@@ -37,7 +37,13 @@ def main() -> None:
     # stopper; the FastAPI instrumentor is wired inside create_app.
     tracing_cfg = cocola_common.config_from_env("llm-gateway")
     cocola_common.init(tracing_cfg)
-    app = create_app(service, verifier=verifier, metrics=metrics, tracing=tracing_cfg)
+    app = create_app(
+        service,
+        verifier=verifier,
+        revocation=build_revocation(),
+        metrics=metrics,
+        tracing=tracing_cfg,
+    )
     log.info(
         "cocola-llm-gateway starting",
         milestone="M4",

@@ -1,7 +1,7 @@
 """Defines the AgentProvider Protocol.
 
-Concrete providers (`InSandboxShimProvider`, `EchoProvider`, …) MUST implement
-this Protocol. The runtime server depends on the Protocol only, never on a
+Concrete providers such as `InSandboxShimProvider` MUST implement this
+Protocol. The runtime server depends on the Protocol only, never on a
 concrete class — this is what makes the runtime LLM-agnostic and testable.
 """
 
@@ -20,7 +20,7 @@ class AgentOptions:
     # Host working directory for an in-process provider (one whose brain runs
     # IN THIS PROCESS). When set, such a provider points its cwd here so native
     # Read/Bash tools resolve relative paths like ./uploads/. Unused by Route A
-    # (the in-sandbox brain has its own cwd) and by EchoProvider.
+    # (the in-sandbox brain has its own cwd).
     workspace: str | None = None
     system_prompt: str | None = None
     max_turns: int = 30

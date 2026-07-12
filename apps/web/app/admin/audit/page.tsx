@@ -24,16 +24,19 @@ import {
 } from "@/components/admin/admin-ui";
 import { cn } from "@/lib/utils";
 
-type AuditEvent = {
-  id: number;
-  at: string;
-  actor_user_id?: string;
-  actor_email?: string;
-  resource_id?: string;
-  result: string;
-  trace_id?: string;
+type ConversationRun = {
+  trace_id: string;
+  conversation_id: string;
+  conversation_title?: string;
+  user_id: string;
+  user_email: string;
+  source: string;
+  model_alias: string;
+  status: string;
+  started_at: string;
+  duration_ms: number;
+  ttft_ms: number;
   error_code?: string;
-  metadata_json?: Record<string, unknown>;
 };
 
 const PAGE_SIZE = 50;
@@ -41,7 +44,7 @@ const control =
   "h-10 min-w-0 rounded-xl border border-border/80 bg-background/80 px-3 text-sm text-foreground outline-none transition focus:border-primary/40 focus:ring-2 focus:ring-primary/10 placeholder:text-muted-foreground";
 
 export default function AdminAuditPage() {
-  const [events, setEvents] = useState<AuditEvent[]>([]);
+  const [runs, setRuns] = useState<ConversationRun[]>([]);
   const [search, setSearch] = useState("");
   const [status, setStatus] = useState("");
   const [source, setSource] = useState("");
@@ -61,13 +64,15 @@ export default function AdminAuditPage() {
     if (search.trim()) params.set("search", search.trim());
     if (status) params.set("status", status);
     if (source) params.set("source", source);
-    if (from) params.set("since", new Date(`${from}T00:00:00`).toISOString());
+    if (from) params.set("from", new Date(`${from}T00:00:00`).toISOString());
     if (until) params.set("until", new Date(`${until}T23:59:59.999`).toISOString());
     try {
-      const response = await fetch(`/api/admin/audit-events?${params}`, { cache: "no-store" });
+      const response = await fetch(`/api/admin/conversation-runs?${params}`, {
+        cache: "no-store",
+      });
       if (!response.ok) throw new Error(await errorText(response));
-      const body = (await response.json()) as { events?: AuditEvent[] };
-      setEvents(body.events ?? []);
+      const body = (await response.json()) as { runs?: ConversationRun[] };
+      setRuns(body.runs ?? []);
     } catch (loadError) {
       setError(loadError instanceof Error ? loadError.message : String(loadError));
     } finally {
@@ -173,7 +178,7 @@ export default function AdminAuditPage() {
             <button
               className="inline-flex size-9 items-center justify-center rounded-xl text-muted-foreground hover:bg-muted disabled:opacity-35"
               aria-label="Next page"
-              disabled={events.length < PAGE_SIZE || loading}
+              disabled={runs.length < PAGE_SIZE || loading}
               onClick={() => setPage((value) => value + 1)}
             >
               <ChevronRight className="size-4" />
@@ -195,15 +200,11 @@ export default function AdminAuditPage() {
             </tr>
           </thead>
           <tbody className="divide-y divide-border/60">
-            {events.map((event) => {
-              const metadata = event.metadata_json ?? {};
-              const traceID = event.trace_id ?? "";
-              const conversationID =
-                stringValue(metadata.conversation_id) || event.resource_id || "";
-              const runStatus = stringValue(metadata.status) || event.result;
+            {runs.map((run) => {
+              const traceID = run.trace_id;
               return (
                 <tr
-                  key={traceID || event.id}
+                  key={traceID}
                   className="cursor-pointer transition-colors hover:bg-primary/[0.035] focus-within:bg-primary/[0.035]"
                   onClick={() =>
                     traceID &&
@@ -211,42 +212,38 @@ export default function AdminAuditPage() {
                   }
                 >
                   <td className="whitespace-nowrap px-4 py-3 text-xs text-muted-foreground">
-                    {formatDate(event.at)}
+                    {formatDate(run.started_at)}
                   </td>
-                  <td className="px-4 py-3 font-medium">
-                    {event.actor_email || event.actor_user_id || "—"}
-                  </td>
+                  <td className="px-4 py-3 font-medium">{run.user_email || run.user_id || "—"}</td>
                   <td className="max-w-[220px] px-4 py-3">
                     <div className="truncate font-medium">
-                      {stringValue(metadata.conversation_title) || "Untitled conversation"}
+                      {run.conversation_title || "Untitled conversation"}
                     </div>
-                    {conversationID ? (
+                    {run.conversation_id ? (
                       <Link
-                        href={`/conversations/${encodeURIComponent(conversationID)}`}
+                        href={`/conversations/${encodeURIComponent(run.conversation_id)}`}
                         onClick={(clickEvent) => clickEvent.stopPropagation()}
                         className="mt-0.5 block truncate font-mono text-xs text-primary hover:underline"
                       >
-                        {conversationID}
+                        {run.conversation_id}
                       </Link>
                     ) : null}
                   </td>
                   <td className="px-4 py-3 text-muted-foreground">
-                    {stringValue(metadata.chat_type) === "scheduled_task"
-                      ? "Scheduled task"
-                      : "Interactive"}
+                    {run.source === "scheduled_task" ? "Scheduled task" : "Interactive"}
                   </td>
-                  <td className="px-4 py-3">{stringValue(metadata.model_alias) || "Default"}</td>
+                  <td className="px-4 py-3">{run.model_alias || "Default"}</td>
                   <td className="px-4 py-3 text-right font-mono tabular-nums">
-                    {formatDuration(numberValue(metadata.duration_ms))}
+                    {formatDuration(run.duration_ms)}
                   </td>
                   <td className="px-4 py-3 text-right font-mono tabular-nums">
-                    {formatDuration(numberValue(metadata.ttft_ms))}
+                    {formatDuration(run.ttft_ms)}
                   </td>
                   <td className="px-4 py-3">
-                    <RunStatus status={runStatus} />
-                    {event.error_code ? (
+                    <RunStatus status={run.status} />
+                    {run.error_code ? (
                       <div className="mt-1 font-mono text-[11px] text-muted-foreground">
-                        {event.error_code}
+                        {run.error_code}
                       </div>
                     ) : null}
                   </td>
@@ -264,7 +261,7 @@ export default function AdminAuditPage() {
             })}
           </tbody>
         </table>
-        {!loading && events.length === 0 ? (
+        {!loading && runs.length === 0 ? (
           <AdminEmptyState
             icon={<Clock3 className="size-5" />}
             title="No agent runs found"
@@ -488,16 +485,6 @@ function RunStatus({ status }: { status: string }) {
       {status || "unknown"}
     </AdminStatusBadge>
   );
-}
-
-function stringValue(value: unknown) {
-  return typeof value === "string" ? value : "";
-}
-
-function numberValue(value: unknown) {
-  if (typeof value === "number") return value;
-  if (typeof value === "string") return Number.parseInt(value, 10) || 0;
-  return 0;
 }
 
 function formatDuration(ms: number) {

@@ -29,7 +29,6 @@ async def test_metrics_endpoint_records_red():
                 "stream": False,
                 "messages": [{"role": "user", "content": "hi"}],
             },
-            headers={"x-cocola-user": "U1"},
         )
         assert r.status_code == 200
 
@@ -61,7 +60,7 @@ async def test_metrics_does_not_break_sse_streaming():
                 "stream": True,
                 "messages": [{"role": "user", "content": "hi"}],
             },
-            headers={"x-cocola-user": "U1", "x-cocola-session": "S1"},
+            headers={"x-cocola-session": "S1"},
         ) as resp:
             assert resp.status_code == 200
             async for line in resp.aiter_lines():
@@ -70,4 +69,4 @@ async def test_metrics_does_not_break_sse_streaming():
         assert events[0] == "message_start"
         assert events[-1] == "message_stop"
     # Billing still records exactly once (instrumentation is transparent).
-    assert len(await ledger.recent(user_id="U1")) == 1
+    assert len(await ledger.recent(user_id="dev-user")) == 1

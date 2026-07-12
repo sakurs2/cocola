@@ -11,7 +11,6 @@ package httpapi
 
 import (
 	"context"
-	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -41,15 +40,6 @@ import (
 const DefaultInlineMaxBytes int64 = 16 * 1024 * 1024
 
 type conversationRootSpanKey struct{}
-type conversationStageSpansKey struct{}
-
-type conversationStageSpans struct {
-	request      string
-	environment  string
-	agent        string
-	agentInit    string
-	finalization string
-}
 
 var traceAttributeAllowlist = map[string]bool{
 	"accepted_count": true, "action": true, "artifact_count": true,
@@ -63,28 +53,11 @@ var traceAttributeAllowlist = map[string]bool{
 	"skill_count": true, "target": true, "text_chunk_count": true,
 	"thinking_chunk_count": true, "tool_name": true, "tool_result_count": true,
 	"tool_type": true, "tool_use_count": true,
-	"session_auth_ms": true, "runtime_token_ms": true, "decode_ms": true,
-	"persist_user_ms": true, "first_event_ms": true, "first_reasoning_ms": true,
-	"first_token_ms": true, "first_tool_ms": true,
 }
 
-func traceParentForCategory(ctx context.Context, category string) string {
+func conversationRootSpan(ctx context.Context) string {
 	rootSpanID, _ := ctx.Value(conversationRootSpanKey{}).(string)
-	stages, _ := ctx.Value(conversationStageSpansKey{}).(conversationStageSpans)
-	switch strings.TrimSpace(category) {
-	case "request", "gateway":
-		return stages.request
-	case "sandbox", "environment":
-		return stages.environment
-	case "agent_init":
-		return stages.agentInit
-	case "agent", "model", "tool":
-		return stages.agent
-	case "persistence", "artifact", "finalization":
-		return stages.finalization
-	default:
-		return rootSpanID
-	}
+	return rootSpanID
 }
 
 func safeTraceAttributes(attributes map[string]any) map[string]any {
@@ -114,8 +87,7 @@ type API struct {
 	store          objstore.Store
 	inlineMaxBytes int64
 	// convo is the conversation-persistence store (route A UI-message mirror).
-	// nil => persistence is dark: chat still streams, but nothing is stored and
-	// the list/messages endpoints return empty. Enabled by COCOLA_PG_DSN in main.
+	// Production always uses Postgres; nil is supported only by non-chat tests.
 	convo convo.Store
 	trace traceevents.Store
 	// sandboxTokenIssuer mints a fresh per-user cocola token per chat turn from
@@ -159,16 +131,16 @@ func (a *API) WithObjStore(store objstore.Store, inlineMaxBytes int64) *API {
 
 // WithConvoStore enables conversation persistence (route A): the chat handler
 // mirrors each turn's rendered messages into the store, and the read endpoints
-// serve a user's conversation list + history. Passing nil (the default) leaves
-// persistence dark. See docs/plan/conversation-persistence-history-rendering.md.
+// serve a user's conversation list + history. Production always configures the
+// Postgres store; tests may inject an in-memory implementation.
 func (a *API) WithConvoStore(store convo.Store) *API { a.convo = store; return a }
 
 // WithTraceStore enables conversation audit summaries and detailed traces.
 func (a *API) WithTraceStore(store traceevents.Store) *API { a.trace = store; return a }
 
-// WithChatRuns enables the single-Gateway background execution path. It is the
-// default whenever PostgreSQL is configured; there is deliberately no feature
-// flag or distributed worker mode.
+// WithChatRuns configures the single-Gateway background execution path. It is
+// required for chat; there is deliberately no feature flag or distributed
+// worker mode.
 func (a *API) WithChatRuns(store chatrun.Store, cfg RunConfig) *API {
 	a.runs = newRunController(store, cfg)
 	return a
@@ -258,7 +230,7 @@ func (a *API) health(w http.ResponseWriter, _ *http.Request) {
 }
 
 func (a *API) recordTrace(ctx context.Context, traceID, name, category string, startedAt time.Time, status string, metadata map[string]any) {
-	parentSpanID := traceParentForCategory(ctx, category)
+	parentSpanID := conversationRootSpan(ctx)
 	if a.trace == nil || traceID == "" || parentSpanID == "" {
 		return
 	}
@@ -359,7 +331,7 @@ func (a *API) recordAgentTrace(ctx context.Context, traceID string, data map[str
 	}
 	parentSpanID := strings.TrimSpace(data["parent_span_id"])
 	if parentSpanID == "" {
-		parentSpanID = traceParentForCategory(ctx, category)
+		parentSpanID = conversationRootSpan(ctx)
 	}
 	a.upsertTraceSpan(ctx, traceevents.Span{
 		TraceID:       traceID,
@@ -491,551 +463,6 @@ func chatStartedAt(r *http.Request) time.Time {
 		return time.Now()
 	}
 	return started
-}
-
-func boundedTimingHeader(r *http.Request, name string) time.Duration {
-	raw, err := strconv.ParseInt(strings.TrimSpace(r.Header.Get(name)), 10, 64)
-	if err != nil || raw < 0 || raw > 60_000 {
-		return 0
-	}
-	return time.Duration(raw) * time.Millisecond
-}
-
-// chat is the SSE entrypoint: verify -> open agent stream -> flush events.
-func (a *API) chatLegacy(w http.ResponseWriter, r *http.Request) {
-	start := chatStartedAt(r)
-	id, ok := auth.IdentityOf(r)
-	if !ok {
-		writeErr(w, http.StatusUnauthorized, "UNAUTHENTICATED", "missing identity")
-		return
-	}
-	traceID := tracing.TraceID(r.Context())
-
-	var req chatRequest
-	decodeStart := time.Now()
-	dec := json.NewDecoder(r.Body)
-	dec.DisallowUnknownFields()
-	if err := dec.Decode(&req); err != nil {
-		writeErr(w, http.StatusBadRequest, "INVALID_ARGUMENT", "malformed JSON body")
-		return
-	}
-	if strings.TrimSpace(req.Prompt) == "" {
-		writeErr(w, http.StatusBadRequest, "INVALID_ARGUMENT", "prompt is required")
-		return
-	}
-	decodeDuration := time.Since(decodeStart)
-	rootSpanID := traceevents.NewSpanID()
-	stages := conversationStageSpans{
-		request:      traceevents.NewSpanID(),
-		environment:  traceevents.NewSpanID(),
-		agent:        traceevents.NewSpanID(),
-		agentInit:    traceevents.NewSpanID(),
-		finalization: traceevents.NewSpanID(),
-	}
-	r = r.WithContext(context.WithValue(r.Context(), conversationRootSpanKey{}, rootSpanID))
-	r = r.WithContext(context.WithValue(r.Context(), conversationStageSpansKey{}, stages))
-	run := a.startConversationRun(r.Context(), id, req, traceID, rootSpanID, start)
-	authDuration := boundedTimingHeader(r, "x-cocola-session-auth-ms")
-	tokenDuration := boundedTimingHeader(r, "x-cocola-runtime-token-ms")
-
-	flusher, ok := w.(http.Flusher)
-	if !ok {
-		now := time.Now()
-		a.upsertTraceSpan(r.Context(), traceevents.Span{
-			TraceID: traceID, SpanID: stages.request, ParentSpanID: rootSpanID, SchemaVersion: 1,
-			Service: "gateway", Name: "request.prepare", Category: "request",
-			StartedAt: start, DurationUS: now.Sub(start).Microseconds(), Status: "error",
-			Attributes: safeTraceAttributes(map[string]any{"error_code": "INTERNAL"}),
-		})
-		a.finishConversationRun(r.Context(), run, "error", "INTERNAL", 0, 0)
-		writeErr(w, http.StatusInternalServerError, "INTERNAL", "streaming unsupported")
-		return
-	}
-
-	// SSE headers. Once written, the response is committed; errors after this
-	// point are surfaced as an in-band "error" event, not an HTTP status.
-	h := w.Header()
-	h.Set("content-type", "text/event-stream")
-	h.Set("cache-control", "no-cache")
-	h.Set("connection", "keep-alive")
-	h.Set("x-accel-buffering", "no") // disable proxy buffering (nginx)
-	w.WriteHeader(http.StatusOK)
-	flusher.Flush()
-
-	atts := make([]agent.Attachment, 0, len(req.Attachments))
-	inlineCount := 0
-	objectCount := 0
-	for i := range req.Attachments {
-		content, derr := base64.StdEncoding.DecodeString(req.Attachments[i].ContentB64)
-		if derr != nil {
-			a.log.Warn("dropping attachment with invalid base64 content")
-			continue
-		}
-		att := agent.Attachment{
-			Filename: req.Attachments[i].Filename,
-			Content:  content,
-			Mime:     req.Attachments[i].Mime,
-			Size:     int64(len(content)),
-		}
-		// Source-of-truth upload + threshold split (ADR-0017 P1a). When the
-		// store is unconfigured (nil) we stay on the P0 inline-only path. A
-		// PutObject failure degrades gracefully to inline delivery for that
-		// file rather than dropping it, since the bytes are still in hand.
-		if a.store != nil {
-			key := objectKey(req.SessionID, att.Filename)
-			if err := a.store.Put(r.Context(), key, content, att.Mime); err != nil {
-				a.log.Warn("attachment object-store upload failed, delivering inline: " + err.Error())
-			} else {
-				att.OssKey = key
-				objectCount++
-				if att.Size > a.inlineMaxBytes {
-					// Large file: hand agent-runtime the key only; it pulls the
-					// bytes from the store before the run (backend-pull).
-					att.Content = nil
-				} else {
-					inlineCount++
-				}
-			}
-		} else {
-			inlineCount++
-		}
-		atts = append(atts, att)
-	}
-	q := agent.Query{
-		UserID:           id.UserID,
-		SessionID:        req.SessionID,
-		Prompt:           req.Prompt,
-		SandboxID:        req.SandboxID,
-		MaxTurns:         req.MaxTurns,
-		ModelAlias:       strings.TrimSpace(req.ModelAlias),
-		TraceID:          traceID,
-		ParentSpanID:     stages.agent,
-		SandboxAuthToken: a.mintSandboxToken(id),
-		Attachments:      atts,
-	}
-
-	// Persist the user turn (route A UI-message mirror). All persistence is a
-	// best-effort SIDE CHANNEL: any store error is logged and swallowed so it can
-	// never break the SSE stream the user is watching. Requires a session_id to
-	// key the conversation; if empty (dev/no-frontend), we skip persistence.
-	persist := a.convo != nil && req.SessionID != ""
-	var persistUserDuration time.Duration
-	if persist {
-		persistUserStart := time.Now()
-		a.persistUserTurn(r.Context(), id, req)
-		persistUserDuration = time.Since(persistUserStart)
-	}
-	requestEnd := time.Now()
-	a.upsertTraceSpan(r.Context(), traceevents.Span{
-		TraceID: traceID, SpanID: stages.request, ParentSpanID: rootSpanID, SchemaVersion: 1,
-		Service: "gateway", Name: "request.prepare", Category: "request",
-		StartedAt: start, DurationUS: requestEnd.Sub(start).Microseconds(), Status: "success",
-		Attributes: safeTraceAttributes(map[string]any{
-			"conversation_id": strings.TrimSpace(req.SessionID),
-			"chat_type":       chatTypeForConversation(req), "model_alias": strings.TrimSpace(req.ModelAlias),
-			"attachment_count": len(req.Attachments), "accepted_count": len(atts),
-			"inline_count": inlineCount, "object_count": objectCount,
-			"session_auth_ms": authDuration.Milliseconds(), "runtime_token_ms": tokenDuration.Milliseconds(),
-			"decode_ms": decodeDuration.Milliseconds(), "persist_user_ms": persistUserDuration.Milliseconds(),
-		}),
-	})
-
-	// reducer mirrors the frontend's reducePart so the stored assistant message
-	// has the exact parts the browser renders. Only populated when persisting.
-	var reducer *convo.Reducer
-	if persist {
-		reducer = convo.NewReducer()
-	}
-
-	artifactCount := 0
-	streamStart := time.Now()
-	streamEventCount := 0
-	textChunkCount := 0
-	thinkingChunkCount := 0
-	toolUseCount := 0
-	toolResultCount := 0
-	firstEventRecorded := false
-	firstTextRecorded := false
-	firstReasoningRecorded := false
-	firstToolUseRecorded := false
-	var ttftMS int64
-	var firstEventMS int64
-	var firstReasoningMS int64
-	var firstToolMS int64
-	environmentEnd := streamStart
-	var environmentReadyAt time.Time
-	var firstEnvironmentOperationStart time.Time
-	var lastEnvironmentOperationEnd time.Time
-	var firstAgentInitOperationStart time.Time
-	var lastAgentInitOperationEnd time.Time
-	var agentInitializationStatusAt time.Time
-	var firstAgentEventAt time.Time
-	type openToolSpan struct {
-		spanID string
-		name   string
-		start  time.Time
-	}
-	openTools := make(map[string]openToolSpan)
-	// Persist phase parents before cross-service children can arrive. These are
-	// updated with their final timing/status after the stream completes.
-	a.upsertTraceSpan(r.Context(), traceevents.Span{
-		TraceID: traceID, SpanID: stages.environment, ParentSpanID: rootSpanID, SchemaVersion: 1,
-		Service: "agent-runtime", Name: "environment.prepare", Category: "environment",
-		StartedAt: streamStart, Status: "running",
-	})
-	a.upsertTraceSpan(r.Context(), traceevents.Span{
-		TraceID: traceID, SpanID: stages.agent, ParentSpanID: rootSpanID, SchemaVersion: 1,
-		Service: "agent-runtime", Name: "agent.execute", Category: "agent",
-		StartedAt: streamStart, Status: "running",
-	})
-	a.upsertTraceSpan(r.Context(), traceevents.Span{
-		TraceID: traceID, SpanID: stages.agentInit, ParentSpanID: stages.agent, SchemaVersion: 1,
-		Service: "agent-runtime", Name: "agent.initialize", Category: "agent",
-		StartedAt: streamStart, Status: "running",
-	})
-	err := a.streamer.Stream(r.Context(), q, func(ev agent.Event) error {
-		if ev.Kind == "trace" {
-			category := strings.TrimSpace(ev.Data["category"])
-			durationUS := traceEventDurationUS(ev.Data)
-			observedAt := time.Now()
-			operationStart := traceEventStartedAt(
-				ev.Data,
-				observedAt.Add(-time.Duration(durationUS)*time.Microsecond),
-			)
-			operationEnd := operationStart.Add(time.Duration(durationUS) * time.Microsecond)
-			if category == "sandbox" || category == "environment" {
-				environmentEnd = observedAt
-				if firstEnvironmentOperationStart.IsZero() || operationStart.Before(firstEnvironmentOperationStart) {
-					firstEnvironmentOperationStart = operationStart
-				}
-				if operationEnd.After(lastEnvironmentOperationEnd) {
-					lastEnvironmentOperationEnd = operationEnd
-				}
-			}
-			if category == "agent_init" {
-				if firstAgentInitOperationStart.IsZero() || operationStart.Before(firstAgentInitOperationStart) {
-					firstAgentInitOperationStart = operationStart
-				}
-				if operationEnd.After(lastAgentInitOperationEnd) {
-					lastAgentInitOperationEnd = operationEnd
-				}
-			}
-			a.recordAgentTrace(r.Context(), traceID, ev.Data)
-			return nil
-		}
-		streamEventCount++
-		isEnvironmentEvent := ev.Kind == "sandbox" || ev.Kind == "environment_prepare" || ev.Kind == "environment_status"
-		if isEnvironmentEvent {
-			observedAt := time.Now()
-			switch ev.Kind {
-			case "sandbox":
-				environmentEnd = observedAt
-			case "environment_prepare":
-				if environmentPreparationComplete(ev.Data) {
-					environmentReadyAt = observedAt
-					environmentEnd = observedAt
-				}
-			case "environment_status":
-				agentInitializationStatusAt = observedAt
-			}
-		} else if firstAgentEventAt.IsZero() {
-			firstAgentEventAt = time.Now()
-		}
-		if !isEnvironmentEvent && !firstEventRecorded {
-			firstEventRecorded = true
-			firstEventMS = time.Since(streamStart).Milliseconds()
-		}
-		switch ev.Kind {
-		case "text":
-			textChunkCount++
-			if !firstTextRecorded {
-				firstTextRecorded = true
-				ttftMS = time.Since(streamStart).Milliseconds()
-			}
-		case "thinking":
-			thinkingChunkCount++
-			if !firstReasoningRecorded {
-				firstReasoningRecorded = true
-				firstReasoningMS = time.Since(streamStart).Milliseconds()
-			}
-		case "tool_use":
-			toolUseCount++
-			toolID := strings.TrimSpace(ev.Data["id"])
-			if toolID != "" {
-				openTools[toolID] = openToolSpan{
-					spanID: traceevents.NewSpanID(),
-					name:   strings.TrimSpace(ev.Data["name"]),
-					start:  time.Now(),
-				}
-			}
-			if !firstToolUseRecorded {
-				firstToolUseRecorded = true
-				firstToolMS = time.Since(streamStart).Milliseconds()
-			}
-		case "tool_result":
-			toolResultCount++
-			toolID := strings.TrimSpace(ev.Data["tool_use_id"])
-			if tool, ok := openTools[toolID]; ok {
-				status := "success"
-				if strings.EqualFold(ev.Data["is_error"], "true") {
-					status = "error"
-				}
-				a.upsertTraceSpan(r.Context(), traceevents.Span{
-					TraceID: traceID, SpanID: tool.spanID, ParentSpanID: stages.agent, SchemaVersion: 1,
-					Service: "sandbox-shim", Name: "tool.execute", Category: "tool",
-					StartedAt: tool.start, DurationUS: time.Since(tool.start).Microseconds(), Status: status,
-					Attributes: safeTraceAttributes(map[string]any{
-						"tool_name": tool.name,
-						"tool_type": toolType(tool.name),
-					}),
-				})
-				delete(openTools, toolID)
-			}
-		}
-		if ev.Kind == "file" {
-			artifactCount++
-			artifactStart := time.Now()
-			ev = a.registerArtifact(context.Background(), id, req.SessionID, ev)
-			a.recordTrace(r.Context(), traceID, "artifact.register", "agent", artifactStart, "ok", map[string]any{
-				"artifact_count": artifactCount,
-				"filename":       ev.Data["filename"],
-				"mime":           ev.Data["mime"],
-				"size":           ev.Data["size"],
-			})
-		}
-		if reducer != nil {
-			reducer.Apply(ev.Kind, ev.Data)
-		}
-		return writeSSE(w, flusher, ev)
-	})
-	streamEnd := time.Now()
-	for _, tool := range openTools {
-		a.upsertTraceSpan(r.Context(), traceevents.Span{
-			TraceID: traceID, SpanID: tool.spanID, ParentSpanID: stages.agent, SchemaVersion: 1,
-			Service: "sandbox-shim", Name: "tool.execute", Category: "tool",
-			StartedAt: tool.start, DurationUS: time.Since(tool.start).Microseconds(), Status: "interrupted",
-			Attributes: safeTraceAttributes(map[string]any{
-				"tool_name": tool.name,
-				"tool_type": toolType(tool.name),
-			}),
-		})
-	}
-	if !environmentReadyAt.IsZero() {
-		environmentEnd = environmentReadyAt
-	} else if !firstAgentInitOperationStart.IsZero() {
-		environmentEnd = firstAgentInitOperationStart
-	} else if !lastEnvironmentOperationEnd.IsZero() {
-		environmentEnd = lastEnvironmentOperationEnd
-	}
-	if environmentEnd.Before(streamStart) || environmentEnd.After(streamEnd) {
-		environmentEnd = streamStart
-	}
-	if !firstAgentEventAt.IsZero() && environmentEnd.After(firstAgentEventAt) {
-		environmentEnd = firstAgentEventAt
-	}
-	if !firstEnvironmentOperationStart.IsZero() {
-		dispatchEnd := firstEnvironmentOperationStart
-		if dispatchEnd.After(environmentEnd) {
-			dispatchEnd = environmentEnd
-		}
-		if dispatchEnd.Sub(streamStart) >= time.Millisecond {
-			a.upsertTraceSpan(r.Context(), traceevents.Span{
-				TraceID: traceID, SpanID: traceevents.NewSpanID(), ParentSpanID: stages.environment, SchemaVersion: 1,
-				Service: "gateway", Name: "environment.runtime_dispatch", Category: "environment",
-				StartedAt: streamStart, DurationUS: dispatchEnd.Sub(streamStart).Microseconds(), Status: "success",
-			})
-		}
-	}
-	agentStart := environmentEnd
-	agentInitializationEnd := agentInitializationStatusAt
-	if agentInitializationEnd.IsZero() || agentInitializationEnd.Before(agentStart) {
-		agentInitializationEnd = lastAgentInitOperationEnd
-	}
-	if agentInitializationEnd.IsZero() || agentInitializationEnd.Before(agentStart) {
-		agentInitializationEnd = firstAgentEventAt
-	}
-	if agentInitializationEnd.IsZero() || agentInitializationEnd.Before(agentStart) {
-		agentInitializationEnd = agentStart
-	}
-	if !firstAgentEventAt.IsZero() && agentInitializationEnd.After(firstAgentEventAt) {
-		agentInitializationEnd = firstAgentEventAt
-	}
-	if agentInitializationEnd.After(streamEnd) {
-		agentInitializationEnd = streamEnd
-	}
-	if !lastAgentInitOperationEnd.IsZero() {
-		initializeStart := lastAgentInitOperationEnd
-		if initializeStart.Before(agentStart) {
-			initializeStart = agentStart
-		}
-		if agentInitializationEnd.Sub(initializeStart) >= time.Millisecond {
-			a.upsertTraceSpan(r.Context(), traceevents.Span{
-				TraceID: traceID, SpanID: traceevents.NewSpanID(), ParentSpanID: stages.agentInit, SchemaVersion: 1,
-				Service: "sandbox-shim", Name: "agent.sdk_initialize", Category: "agent_init",
-				StartedAt: initializeStart, DurationUS: agentInitializationEnd.Sub(initializeStart).Microseconds(), Status: "success",
-			})
-		}
-	}
-	a.upsertTraceSpan(r.Context(), traceevents.Span{
-		TraceID: traceID, SpanID: stages.environment, ParentSpanID: rootSpanID, SchemaVersion: 1,
-		Service: "agent-runtime", Name: "environment.prepare", Category: "environment",
-		StartedAt: streamStart, DurationUS: environmentEnd.Sub(streamStart).Microseconds(), Status: "success",
-	})
-	a.upsertTraceSpan(r.Context(), traceevents.Span{
-		TraceID: traceID, SpanID: stages.agentInit, ParentSpanID: stages.agent, SchemaVersion: 1,
-		Service: "agent-runtime", Name: "agent.initialize", Category: "agent",
-		StartedAt: agentStart, DurationUS: agentInitializationEnd.Sub(agentStart).Microseconds(), Status: "success",
-	})
-	agentStatus := "success"
-	agentErrorCode := ""
-	if err != nil {
-		agentStatus = "error"
-		agentErrorCode = "AGENT_STREAM_ERROR"
-		if errors.Is(err, context.Canceled) {
-			agentStatus = "cancelled"
-			agentErrorCode = "CLIENT_CANCELLED"
-		}
-		// Best-effort terminal error event; the connection may already be gone.
-		errEv := agent.Event{Kind: "error", Data: map[string]string{"error": err.Error()}}
-		if reducer != nil {
-			reducer.Apply(errEv.Kind, errEv.Data)
-		}
-		_ = writeSSE(w, flusher, errEv)
-		a.log.Warn("agent stream ended with error: " + err.Error())
-	}
-	a.upsertTraceSpan(r.Context(), traceevents.Span{
-		TraceID: traceID, SpanID: stages.agent, ParentSpanID: rootSpanID, SchemaVersion: 1,
-		Service: "agent-runtime", Name: "agent.execute", Category: "agent",
-		StartedAt: agentStart, DurationUS: streamEnd.Sub(agentStart).Microseconds(), Status: agentStatus,
-		Attributes: safeTraceAttributes(map[string]any{
-			"event_count": streamEventCount, "text_chunk_count": textChunkCount,
-			"thinking_chunk_count": thinkingChunkCount, "tool_use_count": toolUseCount,
-			"tool_result_count": toolResultCount, "artifact_count": artifactCount,
-			"first_event_ms": firstEventMS, "first_reasoning_ms": firstReasoningMS,
-			"first_token_ms": ttftMS, "first_tool_ms": firstToolMS,
-			"error_code": agentErrorCode,
-		}),
-	})
-
-	// Persist the assistant turn with whatever was aggregated (even a partial
-	// stream on error/abort is worth keeping so the history renders). Use a
-	// background context so a client disconnect (r.Context() cancelled) does not
-	// abort the write.
-	finalizationStart := streamEnd
-	a.upsertTraceSpan(r.Context(), traceevents.Span{
-		TraceID: traceID, SpanID: stages.finalization, ParentSpanID: rootSpanID, SchemaVersion: 1,
-		Service: "gateway", Name: "run.finalize", Category: "finalization",
-		StartedAt: finalizationStart, Status: "running",
-	})
-	if persist {
-		persistAssistantStart := time.Now()
-		a.persistAssistantTurn(context.Background(), req.SessionID, reducer.Parts(), assistantMetadata(req))
-		if req.DeferConversationVisibilityUntilDone {
-			a.revealConversation(context.Background(), id, req)
-		}
-		a.recordTrace(
-			r.Context(),
-			traceID,
-			"conversation.persist_assistant",
-			"persistence",
-			persistAssistantStart,
-			"ok",
-			map[string]any{
-				"conversation_id": strings.TrimSpace(req.SessionID),
-				"part_count":      len(reducer.Parts()),
-			},
-		)
-	}
-	finalizationEnd := time.Now()
-	partCount := 0
-	if reducer != nil {
-		partCount = len(reducer.Parts())
-	}
-	a.upsertTraceSpan(r.Context(), traceevents.Span{
-		TraceID: traceID, SpanID: stages.finalization, ParentSpanID: rootSpanID, SchemaVersion: 1,
-		Service: "gateway", Name: "run.finalize", Category: "finalization",
-		StartedAt: finalizationStart, DurationUS: finalizationEnd.Sub(finalizationStart).Microseconds(), Status: "success",
-		Attributes: safeTraceAttributes(map[string]any{
-			"artifact_count": artifactCount, "part_count": partCount,
-		}),
-	})
-	if err != nil {
-		a.finishConversationRun(r.Context(), run, agentStatus, agentErrorCode, ttftMS, int64(toolUseCount))
-	} else {
-		a.finishConversationRun(r.Context(), run, "success", "", ttftMS, int64(toolUseCount))
-	}
-}
-
-func toolType(name string) string {
-	if strings.HasPrefix(name, "mcp__") {
-		return "mcp"
-	}
-	if name == "WebSearch" || name == "WebFetch" {
-		return "server"
-	}
-	return "builtin"
-}
-
-// persistUserTurn upserts the conversation (title = truncated first prompt, set
-// once) and appends the user message. Best-effort: errors are logged only.
-func (a *API) persistUserTurn(ctx context.Context, id auth.Identity, req chatRequest) {
-	now := time.Now().UTC()
-	if err := a.convo.UpsertConversation(ctx, convo.Conversation{
-		ID:        req.SessionID,
-		UserID:    id.UserID,
-		TenantID:  id.TenantID,
-		Title:     titleForConversation(req),
-		ChatType:  chatTypeForConversation(req),
-		Hidden:    req.DeferConversationVisibilityUntilDone,
-		CreatedAt: now,
-		UpdatedAt: now,
-	}); err != nil {
-		a.log.Warn("persist conversation failed: " + err.Error())
-		return
-	}
-	if err := a.convo.InsertMessage(ctx, convo.Message{
-		ID:             uuid.NewString(),
-		ConversationID: req.SessionID,
-		Role:           "user",
-		Parts:          []convo.Part{{Type: convo.PartText, Text: req.Prompt}},
-		CreatedAt:      now,
-	}); err != nil {
-		a.log.Warn("persist user message failed: " + err.Error())
-	}
-}
-
-func (a *API) revealConversation(ctx context.Context, id auth.Identity, req chatRequest) {
-	if a.convo == nil || req.SessionID == "" {
-		return
-	}
-	if err := a.convo.RevealConversation(ctx, req.SessionID, id.UserID, titleForConversation(req), time.Now().UTC()); err != nil {
-		a.log.Warn("reveal conversation failed: " + err.Error())
-	}
-}
-
-// persistAssistantTurn appends the aggregated assistant message and refreshes
-// the conversation's updated_at so it floats to the top of the sidebar. Skips a
-// truly empty turn (no parts) to avoid storing blank rows. Best-effort.
-func (a *API) persistAssistantTurn(ctx context.Context, sessionID string, parts []convo.Part, metadata map[string]any) {
-	if len(parts) == 0 {
-		return
-	}
-	now := time.Now().UTC()
-	if err := a.convo.InsertMessage(ctx, convo.Message{
-		ID:             uuid.NewString(),
-		ConversationID: sessionID,
-		Role:           "assistant",
-		Parts:          parts,
-		Metadata:       metadata,
-		CreatedAt:      now,
-	}); err != nil {
-		a.log.Warn("persist assistant message failed: " + err.Error())
-		return
-	}
-	// Refresh updated_at (UpsertConversation on an existing id updates only that).
-	if err := a.convo.UpsertConversation(ctx, convo.Conversation{ID: sessionID, UpdatedAt: now}); err != nil {
-		a.log.Warn("refresh conversation updated_at failed: " + err.Error())
-	}
 }
 
 func assistantMetadata(req chatRequest) map[string]any {

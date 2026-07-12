@@ -41,7 +41,6 @@ export PATH="/Applications/OrbStack.app/Contents/MacOS/xbin:/opt/homebrew/bin:/u
 
 # Deploy mode 1 has exactly ONE shape: every cocola service runs natively and
 # both llm-gateway and web are always started. There are no feature switches.
-DEV_STACK=1
 for arg in "$@"; do
   case "$arg" in
     -h|--help)
@@ -79,7 +78,6 @@ export COCOLA_BOOTSTRAP_ADMIN_EMAIL="${COCOLA_BOOTSTRAP_ADMIN_EMAIL:-admin@cocol
 export COCOLA_BOOTSTRAP_ADMIN_PASSWORD="${COCOLA_BOOTSTRAP_ADMIN_PASSWORD:-cocola-admin}"
 export COCOLA_BOOTSTRAP_ADMIN_RESET="${COCOLA_BOOTSTRAP_ADMIN_RESET:-true}"
 export COCOLA_BOOTSTRAP_ADMIN_PRINT="${COCOLA_BOOTSTRAP_ADMIN_PRINT:-true}"
-export COCOLA_AGENT_MODE="${COCOLA_AGENT_MODE:-real}"
 export COCOLA_AGENT_RUN_TIMEOUT_SECS="${COCOLA_AGENT_RUN_TIMEOUT_SECS:-3600}"
 export COCOLA_SANDBOX_HEARTBEAT_SECS="${COCOLA_SANDBOX_HEARTBEAT_SECS:-20}"
 export COCOLA_LLM_TIMEOUT_SECS="${COCOLA_LLM_TIMEOUT_SECS:-300}"
@@ -104,8 +102,7 @@ GATEWAY_ADDR="$GATEWAY_HOST:$GATEWAY_PORT"
 # CLI stalls on its first model call until the client gives up ("chat hangs with
 # no response"). So default the dev bind to 0.0.0.0; native-only modes keep
 # loopback. Either is still overridable via COCOLA_LLM_HOST.
-_llm_host_default="127.0.0.1"
-[[ "$DEV_STACK" == "1" ]] && _llm_host_default="0.0.0.0"
+_llm_host_default="0.0.0.0"
 LLM_HOST="${COCOLA_LLM_HOST:-$_llm_host_default}"
 LLM_PORT="${COCOLA_LLM_PORT:-8081}"   # NOT 8080: that is the gateway port.
 
@@ -125,7 +122,7 @@ PIDS=()
 # group is NOT enough to guarantee the port is released. Freeing by port is.
 OWNED_PORTS=("$AGENT_PORT" "$GATEWAY_PORT" "$LLM_PORT" "$WEB_PORT")
 # dev runs sandbox-manager (50051) and admin-api (8092) NATIVELY too.
-[[ "$DEV_STACK" == "1" ]] && OWNED_PORTS+=(50051 8092)
+OWNED_PORTS+=(50051 8092)
 
 log_redirect() { printf '%s/%s.log' "$LOG_DIR" "$1"; }
 
@@ -436,8 +433,6 @@ dev_up() {
   export COCOLA_MINIO_SECRET_KEY="${COCOLA_MINIO_SECRET_KEY:-cocola_dev_pw}"
   export COCOLA_MINIO_BUCKET="${COCOLA_MINIO_BUCKET:-cocola}"
   export COCOLA_ATTACHMENT_INLINE_MAX_BYTES="${COCOLA_ATTACHMENT_INLINE_MAX_BYTES:-16777216}"
-  # MinIO is already up here; skip run-stack's own dev.yml MinIO block later.
-  export COCOLA_SKIP_MINIO=1
   # Web-UI dev ergonomics: blank token -> dev-user (matches the full stack).
   export COCOLA_AUTH_ALLOW_ANON="${COCOLA_AUTH_ALLOW_ANON:-1}"
 
@@ -474,9 +469,7 @@ dev_up() {
   echo "==> [dev] sandbox + infra ready; launching native cocola services (real Route A)"
 }
 
-if [[ "$DEV_STACK" == "1" ]]; then
-  dev_up
-fi
+dev_up
 
 # ----------------------------------------------------------------- llm-gateway
 free_port "$LLM_PORT" llm-gateway
@@ -486,6 +479,7 @@ free_port "$LLM_PORT" llm-gateway
   ( cd apps/llm-gateway && \
     COCOLA_LLM_HOST="$LLM_HOST" COCOLA_LLM_PORT="$LLM_PORT" \
     COCOLA_AUTH_SECRET="$LLM_AUTH_SECRET" \
+    COCOLA_PG_DSN="$COCOLA_PG_DSN" \
     COCOLA_MODEL_SECRET_KEY="$COCOLA_MODEL_SECRET_KEY" \
     COCOLA_CONFIG_SECRET_KEY="$COCOLA_CONFIG_SECRET_KEY" \
     COCOLA_LLM_REDIS_URL="${COCOLA_LLM_REDIS_URL:-redis://127.0.0.1:6379/0}" \
@@ -507,9 +501,8 @@ echo "    llm-gateway up; sandbox brain should target $COCOLA_SANDBOX_LLM_BASE_U
 # It listens on :8092 -- NOT :8090 -- because the OpenSandbox server owns host
 # :8090. admin-api is a SOFT dependency: if it is down agent-runtime just warns
 # "no market skills" and still serves chat. Persist to the same Postgres/Redis.
-if [[ "$DEV_STACK" == "1" ]]; then
-  free_port 8092 admin-api
-  (
+free_port 8092 admin-api
+(
     COCOLA_ADMIN_ADDR=":8092" \
     COCOLA_REDIS_ADDR="${COCOLA_REDIS_ADDR:-127.0.0.1:6379}" \
     COCOLA_PG_DSN="${COCOLA_PG_DSN:-}" \
@@ -526,39 +519,10 @@ if [[ "$DEV_STACK" == "1" ]]; then
     COCOLA_BOOTSTRAP_ADMIN_PRINT="$COCOLA_BOOTSTRAP_ADMIN_PRINT" \
       $SETSID go run ./apps/admin-api/cmd/admin-api
   ) >"$(log_redirect admin-api)" 2>&1 &
-  PIDS+=("$!")
-  echo "==> [dev] starting NATIVE admin-api on :8092 (log: .run-logs/admin-api.log)"
-  wait_port 127.0.0.1 8092 "admin-api" 120
-  export COCOLA_ADMIN_URL="${COCOLA_ADMIN_URL:-http://127.0.0.1:8092}"
-fi
-
-# ----------------------------------------------------------------- MinIO (attachments)
-# P1a attachment storage (ADR-0017): the gateway uploads every file to MinIO and
-# agent-runtime backend-pulls large ones. run-stack runs services NATIVELY, so
-# (unlike docker-compose.full.yml) MinIO is not wired implicitly -- we bring it
-# up via the dev compose file and export COCOLA_MINIO_* here. The gateway and
-# agent-runtime subshells inherit this exported env and activate the object
-# store; without it the gateway stays inline-only and large files fail. MinIO
-# shares the dev-infra lifecycle (stop with `make dev-down`), not this script's.
-# Skips cleanly when docker is unavailable or COCOLA_SKIP_MINIO=1.
-if [[ "${COCOLA_SKIP_MINIO:-0}" != "1" ]] && command -v docker >/dev/null 2>&1; then
-  echo "==> starting MinIO (attachments) via docker-compose.dev.yml"
-  if docker_compose -f deploy/docker-compose/docker-compose.dev.yml up -d minio minio-init \
-       >"$(log_redirect minio)" 2>&1 && wait_port 127.0.0.1 9000 "minio" 60; then
-    export COCOLA_MINIO_ENDPOINT="${COCOLA_MINIO_ENDPOINT:-127.0.0.1:9000}"
-    export COCOLA_MINIO_ACCESS_KEY="${COCOLA_MINIO_ACCESS_KEY:-cocola}"
-    export COCOLA_MINIO_SECRET_KEY="${COCOLA_MINIO_SECRET_KEY:-cocola_dev_pw}"
-    export COCOLA_MINIO_BUCKET="${COCOLA_MINIO_BUCKET:-cocola}"
-    export COCOLA_ATTACHMENT_INLINE_MAX_BYTES="${COCOLA_ATTACHMENT_INLINE_MAX_BYTES:-16777216}"
-    MINIO_CONSOLE="http://127.0.0.1:9001"
-    echo "    MinIO up: S3 ${COCOLA_MINIO_ENDPOINT}, console ${MINIO_CONSOLE} (cocola / cocola_dev_pw)"
-  else
-    echo "!! MinIO failed to start/ready; continuing inline-only (see .run-logs/minio.log)" >&2
-    echo "   large attachments will be capped; run \`make dev-up\` manually or set COCOLA_SKIP_MINIO=1 to silence." >&2
-  fi
-else
-  echo "==> MinIO skipped (COCOLA_SKIP_MINIO=1 or docker unavailable); attachments stay inline-only"
-fi
+PIDS+=("$!")
+echo "==> [dev] starting NATIVE admin-api on :8092 (log: .run-logs/admin-api.log)"
+wait_port 127.0.0.1 8092 "admin-api" 120
+export COCOLA_ADMIN_URL="${COCOLA_ADMIN_URL:-http://127.0.0.1:8092}"
 
 # ----------------------------------------------------------------- agent-runtime
 free_port "$AGENT_PORT" agent-runtime
@@ -607,13 +571,13 @@ echo " llm-gw    : http://$LLM_HOST:$LLM_PORT  (models: Admin/Postgres)"
 echo " web       : http://127.0.0.1:$WEB_PORT"
 echo " web login : ${COCOLA_BOOTSTRAP_ADMIN_USERNAME} or ${COCOLA_BOOTSTRAP_ADMIN_EMAIL} / ${COCOLA_BOOTSTRAP_ADMIN_PASSWORD}"
 [[ -n "${MINIO_CONSOLE:-}" ]] && echo " minio     : ${MINIO_CONSOLE}  (console; cocola / cocola_dev_pw)"
-[[ "$DEV_STACK" == "1" ]] && echo " sandbox   : NATIVE sandbox-manager :50051 (OpenSandbox) + admin-api :8092; REAL Route A"
-if [[ "$DEV_STACK" == "1" ]] && env_bool_false "${COCOLA_OPENSANDBOX_MANAGED:-1}"; then
+echo " sandbox   : NATIVE sandbox-manager :50051 (OpenSandbox) + admin-api :8092; REAL Route A"
+if env_bool_false "${COCOLA_OPENSANDBOX_MANAGED:-1}"; then
   echo " containers: only infra -- external OpenSandbox server ${COCOLA_OPENSANDBOX_URL:-<unset>} + redis/pg/minio (dev.yml)"
-elif [[ "$DEV_STACK" == "1" ]]; then
+else
   echo " containers: only sandbox deps -- OpenSandbox server :${COCOLA_OPENSANDBOX_HOST_PORT:-8090} + redis/pg/minio (dev.yml)"
 fi
-[[ "$DEV_STACK" == "1" ]] && echo " stop cont : make dev-down  (infra) + make opensandbox-down  (sandbox); they survive Ctrl-C, app relaunches with no rebuild"
+echo " stop cont : make dev-down  (infra) + make opensandbox-down  (sandbox); they survive Ctrl-C, app relaunches with no rebuild"
 echo "----------------------------------------------------------------------"
 echo " dev token : $TOKEN"
 echo "----------------------------------------------------------------------"

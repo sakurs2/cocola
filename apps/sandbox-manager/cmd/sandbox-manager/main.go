@@ -42,19 +42,16 @@ func main() {
 	}
 
 	addr := getenv("COCOLA_SANDBOX_ADDR", ":50051")
-	backend := opensandbox.ProviderName
 
 	// Observability registry: shared by the gRPC interceptors below and the
 	// binder collector bridge. Exposed on a dedicated port at the end of main.
 	reg := metrics.New("sandbox-manager")
 
-	p, err := provider.New(backend)
+	base, err := opensandbox.New()
 	if err != nil {
-		log.Sugar().Fatalf("init provider %q: %v", backend, err)
+		log.Sugar().Fatalf("init OpenSandbox provider: %v", err)
 	}
-	if p == nil {
-		log.Sugar().Fatalf("init provider %q: not registered", backend)
-	}
+	var p provider.SandboxProvider = base
 	if wrapped, werr := checkpointprovider.Wrap(p, checkpointprovider.ConfigFromEnv()); werr != nil {
 		log.Sugar().Warnw("sandbox checkpointing disabled", "err", werr)
 	} else if wrapped != p {
@@ -62,80 +59,75 @@ func main() {
 		log.Info("sandbox checkpointing enabled")
 	}
 
-	// Wire the session<->sandbox binder over Redis. If Redis is unreachable we
-	// degrade gracefully: the raw provider RPCs still work, only the binding
-	// RPCs (Acquire/Heartbeat/Release) return Unimplemented. This keeps local
-	// single-process debugging possible without standing up Redis.
+	// Redis is required by the session<->sandbox binder. Starting without it
+	// would expose a healthy server whose core binding RPCs are unusable.
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	var binder *orchestrator.Binder
 	var warmDone chan struct{}
 	// Retry the initial dial instead of a single shot: full.yml orders us after
 	// redis is healthy, but transient DNS/network races (or a slow-to-DNS bridge)
 	// would otherwise permanently disable binding RPCs until a manual restart.
-	// We wait up to COCOLA_REDIS_CONNECT_TIMEOUT (default 30s) before degrading.
+	// We wait up to COCOLA_REDIS_CONNECT_TIMEOUT (default 30s) before failing.
 	kv, rerr := dialRedisWithRetry(ctx, log, redisConnectTimeout())
 	if rerr != nil {
-		log.Sugar().Warnw("redis unavailable after retries; session-binding RPCs disabled",
-			"err", rerr)
-	} else {
-		defer func() { _ = kv.Close() }()
-		bm := orchestrator.NewMetrics()
-		// Bridge the in-memory binder sink into Prometheus (no rewrite; the
-		// collector reads Snapshot() lazily at scrape time).
-		reg.MustRegister(obs.NewBinderCollector(bm, prometheus.Labels{"service": "sandbox-manager"}))
-		cfg := orchestrator.ConfigFromEnv()
-		net := orchestrator.NetworkingFromEnv()
-		binder = orchestrator.NewBinder(kv, p, cfg).
-			WithMetrics(bm).
-			WithNetworking(net)
-		capGuard, capErr := orchestrator.NewCapacityGuardFromEnv()
-		if capErr != nil {
-			log.Sugar().Warnw("sandbox capacity guard disabled", "err", capErr)
-		} else if capGuard != nil {
-			binder.WithCapacityGuard(capGuard)
-			log.Info("sandbox capacity guard enabled (Kubernetes REST)")
-		}
-
-		// Warm pool (re-introduced): pre-create session-agnostic sandboxes ahead
-		// of demand so a cold-start becomes a claim (Redis DEL + bind) instead of a
-		// multi-second backend create. This is compatible with OpenSandbox's
-		// no-hot-mount constraint (ADR-0016): warm sandboxes carry NO per-session
-		// volume, and a claim restores session state via checkpoint/restore exactly
-		// as a cold create would. Sizing is admin-tunable (default 10) and
-		// hot-reloads from a shared Redis config key written by admin-api. Multi-node
-		// spread reuses the capacity guard (each warm create targets the node with
-		// the most remaining capacity).
-		warmCfg := orchestrator.WarmConfigFromEnv()
-		binder.WithWarmPool(warmCfg)
-
-		go binder.RunReaper(ctx) // background two-stage Pause-then-Destroy GC
-		if binder.WarmEnabled() {
-			// The refill loop self-heals on every tick: each tick probes warm
-			// sandbox health and prunes stale records before resizing, so a
-			// restart with leftover warm keys is reconciled by the first tick
-			// (which runs immediately). No separate synchronous startup pass is
-			// needed — this keeps startup non-blocking and the reconcile logic
-			// in exactly one place.
-			warmDone = make(chan struct{})
-			go func() {
-				defer close(warmDone)
-				binder.RunWarmPool(ctx) // background pre-warm refill + self-heal loop
-			}()
-			log.Sugar().Infow("sandbox warm pool enabled",
-				"size", warmCfg.Size,
-				"enabled", warmCfg.Enabled,
-				"refill_every", warmCfg.RefillEvery)
-		} else {
-			log.Info("sandbox warm pool disabled (no COCOLA_SANDBOX_IMAGE)")
-		}
-		eff := binder.EffectiveConfig()
-		log.Sugar().Infow("session<->sandbox binder enabled",
-			"lease_ttl", eff.LeaseTTL,
-			"heartbeat_every", eff.HeartbeatEvery,
-			"destroy_grace", eff.DestroyGrace,
-			"reaper_every", eff.ReaperEvery)
+		log.Sugar().Fatalf("redis unavailable after retries: %v", rerr)
 	}
+	defer func() { _ = kv.Close() }()
+	bm := orchestrator.NewMetrics()
+	// Bridge the in-memory binder sink into Prometheus (no rewrite; the
+	// collector reads Snapshot() lazily at scrape time).
+	reg.MustRegister(obs.NewBinderCollector(bm, prometheus.Labels{"service": "sandbox-manager"}))
+	cfg := orchestrator.ConfigFromEnv()
+	networking := orchestrator.NetworkingFromEnv()
+	binder := orchestrator.NewBinder(kv, p, cfg).
+		WithMetrics(bm).
+		WithNetworking(networking)
+	capGuard, capErr := orchestrator.NewCapacityGuardFromEnv()
+	if capErr != nil {
+		log.Sugar().Warnw("sandbox capacity guard disabled", "err", capErr)
+	} else if capGuard != nil {
+		binder.WithCapacityGuard(capGuard)
+		log.Info("sandbox capacity guard enabled (Kubernetes REST)")
+	}
+
+	// Warm pool (re-introduced): pre-create session-agnostic sandboxes ahead
+	// of demand so a cold-start becomes a claim (Redis DEL + bind) instead of a
+	// multi-second backend create. This is compatible with OpenSandbox's
+	// no-hot-mount constraint (ADR-0016): warm sandboxes carry NO per-session
+	// volume, and a claim restores session state via checkpoint/restore exactly
+	// as a cold create would. Sizing is admin-tunable (default 10) and
+	// hot-reloads from a shared Redis config key written by admin-api. Multi-node
+	// spread reuses the capacity guard (each warm create targets the node with
+	// the most remaining capacity).
+	warmCfg := orchestrator.WarmConfigFromEnv()
+	binder.WithWarmPool(warmCfg)
+
+	go binder.RunReaper(ctx) // background two-stage Pause-then-Destroy GC
+	if binder.WarmEnabled() {
+		// The refill loop self-heals on every tick: each tick probes warm
+		// sandbox health and prunes stale records before resizing, so a
+		// restart with leftover warm keys is reconciled by the first tick
+		// (which runs immediately). No separate synchronous startup pass is
+		// needed — this keeps startup non-blocking and the reconcile logic
+		// in exactly one place.
+		warmDone = make(chan struct{})
+		go func() {
+			defer close(warmDone)
+			binder.RunWarmPool(ctx) // background pre-warm refill + self-heal loop
+		}()
+		log.Sugar().Infow("sandbox warm pool enabled",
+			"size", warmCfg.Size,
+			"enabled", warmCfg.Enabled,
+			"refill_every", warmCfg.RefillEvery)
+	} else {
+		log.Info("sandbox warm pool disabled (no COCOLA_SANDBOX_IMAGE)")
+	}
+	eff := binder.EffectiveConfig()
+	log.Sugar().Infow("session<->sandbox binder enabled",
+		"lease_ttl", eff.LeaseTTL,
+		"heartbeat_every", eff.HeartbeatEvery,
+		"destroy_grace", eff.DestroyGrace,
+		"reaper_every", eff.ReaperEvery)
 
 	lis, err := net.Listen("tcp", addr)
 	if err != nil {
@@ -167,7 +159,7 @@ func main() {
 	}
 
 	log.Sugar().Infow("cocola sandbox-manager listening",
-		"milestone", "M2", "addr", addr, "provider", backend)
+		"milestone", "M2", "addr", addr, "provider", "opensandbox")
 
 	// Serve on a goroutine so main can block on the signal channel and drive an
 	// orderly teardown (plan A): on SIGINT/SIGTERM we stop accepting new work,
@@ -191,42 +183,38 @@ func main() {
 		// Exec calls to finish, so the sandbox's .claude reflects the latest
 		// completed turn before we archive it.
 		gs.GracefulStop()
-		if binder != nil {
-			budget := checkpointDrainBudget()
-			dctx, dcancel := context.WithTimeout(context.Background(), budget)
-			log.Sugar().Infow("checkpointing active sessions before exit", "budget", budget.String())
-			summary := binder.CheckpointAllActive(dctx)
-			dcancel()
-			for _, failure := range summary.Failures {
-				log.Sugar().Errorw("session checkpoint failed",
-					"session_id", failure.SessionID,
-					"sandbox_id", failure.SandboxID,
-					"err", failure.Err)
-			}
-			if summary.ScanError != nil {
-				log.Sugar().Errorw("active session checkpoint scan failed", "err", summary.ScanError)
-			}
-			log.Sugar().Infow("active session checkpoint sweep completed",
-				"scanned", summary.Scanned,
-				"succeeded", summary.Succeeded,
-				"skipped", summary.Skipped,
-				"failed", len(summary.Failures))
+		budget := checkpointDrainBudget()
+		dctx, dcancel := context.WithTimeout(context.Background(), budget)
+		log.Sugar().Infow("checkpointing active sessions before exit", "budget", budget.String())
+		summary := binder.CheckpointAllActive(dctx)
+		dcancel()
+		for _, failure := range summary.Failures {
+			log.Sugar().Errorw("session checkpoint failed",
+				"session_id", failure.SessionID,
+				"sandbox_id", failure.SandboxID,
+				"err", failure.Err)
 		}
+		if summary.ScanError != nil {
+			log.Sugar().Errorw("active session checkpoint scan failed", "err", summary.ScanError)
+		}
+		log.Sugar().Infow("active session checkpoint sweep completed",
+			"scanned", summary.Scanned,
+			"succeeded", summary.Succeeded,
+			"skipped", summary.Skipped,
+			"failed", len(summary.Failures))
 		// Stop the refill loop before draining its inventory; otherwise it could
 		// recreate a warm sandbox while shutdown is deleting the previous ones.
 		cancel()
 		if warmDone != nil {
 			<-warmDone
 		}
-		if binder != nil {
-			dctx, dcancel := context.WithTimeout(context.Background(), 5*time.Second)
-			drained, drainErr := binder.DrainWarmPool(dctx)
-			dcancel()
-			if drainErr != nil {
-				log.Sugar().Errorw("warm pool drain incomplete", "drained", drained, "err", drainErr)
-			} else {
-				log.Sugar().Infow("warm pool drain completed", "drained", drained)
-			}
+		dctx, dcancel = context.WithTimeout(context.Background(), 5*time.Second)
+		drained, drainErr := binder.DrainWarmPool(dctx)
+		dcancel()
+		if drainErr != nil {
+			log.Sugar().Errorw("warm pool drain incomplete", "drained", drained, "err", drainErr)
+		} else {
+			log.Sugar().Infow("warm pool drain completed", "drained", drained)
 		}
 	}
 }

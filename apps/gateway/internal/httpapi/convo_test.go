@@ -21,7 +21,7 @@ import (
 func newAPIWithConvo(t *testing.T, fs *fakeStreamer, cs convo.Store) http.Handler {
 	t.Helper()
 	v := auth.NewVerifier(auth.Config{})
-	return New(fs, v, logger.Must()).WithConvoStore(cs).Handler()
+	return newConfiguredTestAPIWithConvo(fs, v, logger.Must(), cs).Handler()
 }
 
 type fakeReleaser struct {
@@ -154,8 +154,7 @@ func TestChatPersistsArtifactAndDownloads(t *testing.T) {
 	cs := convo.NewMemory()
 	store := newFakeObjStore()
 	store.puts["artifacts/dev-user/conv-1/art-1-report.txt"] = []byte("hello world")
-	h := New(fs, auth.NewVerifier(auth.Config{}), logger.Must()).
-		WithConvoStore(cs).
+	h := newConfiguredTestAPIWithConvo(fs, auth.NewVerifier(auth.Config{}), logger.Must(), cs).
 		WithObjStore(store, 1024).
 		Handler()
 
@@ -201,15 +200,13 @@ func TestChatPersistsArtifactAndDownloads(t *testing.T) {
 	}
 }
 
-// TestChatWithoutSessionIDSkipsPersistence: no session_id => nothing stored, but
-// the stream still succeeds.
-func TestChatWithoutSessionIDSkipsPersistence(t *testing.T) {
+func TestChatWithoutSessionIDIsRejected(t *testing.T) {
 	cs := convo.NewMemory()
 	h := newAPIWithConvo(t, &fakeStreamer{script: []agent.Event{{Kind: "done"}}}, cs)
 	rec := httptest.NewRecorder()
 	h.ServeHTTP(rec, httptest.NewRequest("POST", "/v1/chat", strings.NewReader(`{"prompt":"hi"}`)))
-	if rec.Code != http.StatusOK {
-		t.Fatalf("chat status = %d", rec.Code)
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("chat status = %d, want 400", rec.Code)
 	}
 	got, _ := cs.ListConversations(context.Background(), "dev-user")
 	if len(got) != 0 {
@@ -281,8 +278,7 @@ func TestDeleteConversationEndpointReleasesAndDeletes(t *testing.T) {
 	_ = cs.UpsertConversation(context.Background(), convo.Conversation{ID: "conv-1", UserID: auth.DevIdentity.UserID})
 	_ = cs.InsertMessage(context.Background(), convo.Message{ID: "m1", ConversationID: "conv-1", Role: "user"})
 	releaser := &fakeReleaser{}
-	h := New(&fakeStreamer{}, auth.NewVerifier(auth.Config{}), logger.Must()).
-		WithConvoStore(cs).
+	h := newConfiguredTestAPIWithConvo(&fakeStreamer{}, auth.NewVerifier(auth.Config{}), logger.Must(), cs).
 		WithAgentReleaser(releaser).
 		Handler()
 
@@ -303,8 +299,7 @@ func TestDeleteConversationReleaseFailureStillDeletes(t *testing.T) {
 	cs := convo.NewMemory()
 	_ = cs.UpsertConversation(context.Background(), convo.Conversation{ID: "conv-1", UserID: auth.DevIdentity.UserID})
 	releaser := &fakeReleaser{err: errors.New("release failed")}
-	h := New(&fakeStreamer{}, auth.NewVerifier(auth.Config{}), logger.Must()).
-		WithConvoStore(cs).
+	h := newConfiguredTestAPIWithConvo(&fakeStreamer{}, auth.NewVerifier(auth.Config{}), logger.Must(), cs).
 		WithAgentReleaser(releaser).
 		Handler()
 

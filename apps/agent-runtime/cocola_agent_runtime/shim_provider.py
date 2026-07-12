@@ -258,8 +258,8 @@ class InSandboxShimProvider:
     restart, so a follow-up turn `--resume`s the on-disk Claude session (restored
     from a MinIO checkpoint when the sandbox was replaced). The map is a pure INDEX: the
     SUFFICIENT condition for resume is the on-disk `~/.claude` session file; the
-    map only records which id to reopen. Defaults to an in-process map so a
-    zero-dependency dev boot still resumes within one process lifetime.
+    map only records which id to reopen. Production injects Postgres; the
+    in-process default exists only for isolated provider tests.
     """
 
     def __init__(

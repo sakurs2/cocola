@@ -53,15 +53,6 @@ import (
 	"github.com/cocola-project/cocola/apps/sandbox-manager/internal/provider"
 )
 
-// ProviderName is the registry key for the production sandbox backend.
-const ProviderName = "opensandbox"
-
-func init() {
-	provider.Register(ProviderName, func() (provider.SandboxProvider, error) {
-		return New()
-	})
-}
-
 // apiKeyHeader is the OpenSandbox authentication header.
 const apiKeyHeader = "OPEN-SANDBOX-API-KEY"
 

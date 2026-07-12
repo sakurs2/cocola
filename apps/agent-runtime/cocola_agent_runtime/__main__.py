@@ -6,12 +6,11 @@ and runs the async gRPC server. It deliberately holds no business logic.
 
 Env (all optional; sensible local defaults):
     COCOLA_AGENT_HOST / COCOLA_AGENT_PORT   where to listen (default 0.0.0.0:50061)
-    COCOLA_AGENT_MODE                        real (default) or explicit echo for tests
     COCOLA_ADMIN_URL                         admin-api root for skills, MCP, and prompts
     COCOLA_ADMIN_KEY                         admin bearer key (if admin-api auth is on)
     COCOLA_SANDBOX_ADDR                      sandbox-manager gRPC addr (binds session->sandbox,
                                              routes the agent's bash/file tools into it, AND
-                                             hosts the Route A brain; unset => EchoProvider)
+                                             hosts the Route A brain; required)
     COCOLA_SANDBOX_IMAGE                      Route A brain image for the session sandbox
                                              (e.g. cocola/sandbox-runtime); empty => default
     COCOLA_SANDBOX_LLM_BASE_URL              gateway root injected as ANTHROPIC_BASE_URL
@@ -22,9 +21,7 @@ Env (all optional; sensible local defaults):
 
 Provider selection (ADR-0009, Route B decommissioned): Route A runs the whole
 Claude Code brain inside the user's own sandbox via the in-sandbox stdio shim,
-so real mode requires a reachable sandbox executor (COCOLA_SANDBOX_ADDR).
-EchoProvider is available only through the explicit COCOLA_AGENT_MODE=echo
-development/test mode.
+so a reachable sandbox executor (COCOLA_SANDBOX_ADDR) is required.
 """
 
 from __future__ import annotations
@@ -43,7 +40,6 @@ from cocola_common.tracing import grpc_aio_server_interceptor
 
 from cocola_agent_runtime.agent_provider import AgentProvider
 from cocola_agent_runtime.checkpoint import CheckpointManager
-from cocola_agent_runtime.echo_provider import EchoProvider
 from cocola_agent_runtime.grpc_limits import channel_options
 from cocola_agent_runtime.mcp_loader import AdminMCPCatalog, MCPCatalog
 from cocola_agent_runtime.objstore import fetcher_from_env
@@ -64,21 +60,16 @@ log = get_logger("cocola.agent-runtime")
 def _build_session_map():
     """session_id -> claude_session_id index for Route A --resume continuation.
 
-    Postgres-backed when COCOLA_PG_DSN is set (survives an agent-runtime
-    restart, so paired with MinIO checkpoint restore a follow-up turn resumes
-    the real conversation); otherwise an in-process map so a
-    zero-dependency dev boot still works within one process lifetime.
+    Postgres survives an agent-runtime restart, so paired with MinIO checkpoint
+    restore a follow-up turn resumes the real conversation.
     """
     dsn = os.getenv("COCOLA_PG_DSN", "").strip()
-    if dsn:
-        from cocola_agent_runtime.session_map import PostgresSessionMap
+    if not dsn:
+        raise RuntimeError("COCOLA_PG_DSN is required for the durable session map")
+    from cocola_agent_runtime.session_map import PostgresSessionMap
 
-        log.info("session-map: Postgres (durable resume index)")
-        return PostgresSessionMap(dsn)
-    from cocola_agent_runtime.session_map import MemorySessionMap
-
-    log.warning("COCOLA_PG_DSN unset; session-map is in-process (resume lost on restart)")
-    return MemorySessionMap()
+    log.info("session-map: Postgres (durable resume index)")
+    return PostgresSessionMap(dsn)
 
 
 def _build_provider(
@@ -88,22 +79,12 @@ def _build_provider(
     # inside the user's own sandbox via the in-sandbox stdio shim, so agent-runtime
     # is a pure control-plane router. Route A needs a reachable sandbox to run the
     # brain in; without an executor (COCOLA_SANDBOX_ADDR unset) there is nowhere to
-    # put it, so we degrade to EchoProvider -- a zero-config, no-model boot that
-    # still serves the gRPC contract end to end (useful for wiring tests).
-    #
+    # run a real query, so startup fails closed.
     # The legacy central-SDK path (Route B, ClaudeAgentSDKProvider spawning the
     # claude CLI on the agent-runtime host) was decommissioned; see ADR-0009 and
     # docs/archive/refactor-decommission-route-b.md.
-    mode = os.getenv("COCOLA_AGENT_MODE", "real").strip().lower()
-    if mode not in {"real", "echo"}:
-        raise RuntimeError("COCOLA_AGENT_MODE must be one of real, echo")
-    if mode == "echo":
-        log.warning("COCOLA_AGENT_MODE=echo; using EchoProvider (no real model calls)")
-        return EchoProvider()
     if executor is None:
-        raise RuntimeError(
-            "COCOLA_AGENT_MODE=real requires COCOLA_SANDBOX_ADDR and a sandbox executor"
-        )
+        raise RuntimeError("COCOLA_SANDBOX_ADDR and a sandbox executor are required")
 
     from cocola_agent_runtime.shim_provider import InSandboxShimProvider
 

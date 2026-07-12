@@ -7,8 +7,8 @@ import (
 	"time"
 )
 
-// Memory is the in-process Store used for tests and zero-dependency dev boots
-// (no COCOLA_PG_DSN). Value semantics: returned slices are freshly built so
+// Memory is the in-process Store used by hermetic tests. Value semantics:
+// returned slices are freshly built so
 // callers cannot mutate shared state. Not durable — data is lost on restart.
 type Memory struct {
 	mu    sync.RWMutex

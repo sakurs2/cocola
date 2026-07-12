@@ -131,14 +131,19 @@ async def test_usage_only_returns_own_records_when_auth_enabled():
         assert r2.json()["user_aggregate"]["calls"] == 1
 
 
-async def test_usage_honors_query_user_when_auth_disabled():
-    # Back-compat: with auth OFF, the query param still selects the subject.
-    svc, _ = build_service(reply="x")
+async def test_disabled_auth_ignores_legacy_identity_inputs():
+    svc, ledger = build_service(reply="x")
     async with _client(create_app(svc)) as c:  # no verifier => disabled
-        await c.post("/v1/messages", json=_MSG, headers={"x-cocola-user": "legacy-u"})
+        await c.post(
+            "/v1/messages",
+            json=_MSG,
+            headers={"x-cocola-user": "legacy-u", "x-cocola-tenant": "legacy-t"},
+        )
         r = await c.get("/v1/usage?user_id=legacy-u")
         assert r.status_code == 200
         assert r.json()["user_aggregate"]["calls"] == 1
+        assert len(await ledger.recent(user_id="dev-user")) == 1
+        assert await ledger.recent(user_id="legacy-u") == []
 
 
 async def test_healthz_reports_auth_state():

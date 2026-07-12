@@ -1,32 +1,9 @@
-import { NextRequest } from "next/server";
-import { adminHeaders, isAuthFail, requireAdmin, type SessionUser } from "@/lib/server-auth";
+import { type NextRequest } from "next/server";
+import { proxyAdmin } from "@/lib/admin-proxy";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
-const ADMIN_URL = process.env.COCOLA_ADMIN_URL ?? "http://127.0.0.1:8092";
-
-export async function GET(req: NextRequest) {
-  const authResult = await requireAdmin();
-  if (isAuthFail(authResult)) return authResult.response;
-  return proxy(req, "/admin/conversation-runs", authResult.user);
-}
-
-async function proxy(req: NextRequest, path: string, user: SessionUser) {
-  const url = new URL(req.url);
-  try {
-    const upstream = await fetch(`${ADMIN_URL}${path}${url.search}`, {
-      cache: "no-store",
-      headers: adminHeaders(user),
-    });
-    return new Response(await upstream.text(), {
-      status: upstream.status,
-      headers: { "content-type": upstream.headers.get("content-type") ?? "application/json" },
-    });
-  } catch (error) {
-    return Response.json(
-      { error: `admin-api unreachable: ${error instanceof Error ? error.message : String(error)}` },
-      { status: 502 },
-    );
-  }
+export function GET(req: NextRequest) {
+  return proxyAdmin(req, "/admin/conversation-runs");
 }

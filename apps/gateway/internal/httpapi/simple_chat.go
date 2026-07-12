@@ -103,7 +103,7 @@ func newRunController(store chatrun.Store, cfg RunConfig) *runController {
 
 func (a *API) chat(w http.ResponseWriter, r *http.Request) {
 	if a.runs == nil {
-		a.chatLegacy(w, r)
+		writeErr(w, http.StatusServiceUnavailable, "RUN_STORE_UNAVAILABLE", "chat run store is not configured")
 		return
 	}
 	if a.runs.shutting.Load() {
@@ -212,13 +212,7 @@ func (a *API) chat(w http.ResponseWriter, r *http.Request) {
 
 func (a *API) newLiveRun(r *http.Request, identity auth.Identity, req chatRequest, run chatrun.Run) *liveRun {
 	ctx, cancel := context.WithTimeout(context.Background(), a.runs.runTimeout)
-	stages := conversationStageSpans{
-		request: traceevents.NewSpanID(), environment: traceevents.NewSpanID(),
-		agent: traceevents.NewSpanID(), agentInit: traceevents.NewSpanID(),
-		finalization: traceevents.NewSpanID(),
-	}
 	traceCtx := context.WithValue(context.Background(), conversationRootSpanKey{}, run.RootSpanID)
-	traceCtx = context.WithValue(traceCtx, conversationStageSpansKey{}, stages)
 	traceRun := a.startConversationRun(traceCtx, identity, req, run.ID, run.RootSpanID, run.StartedAt)
 	return &liveRun{
 		run: run, identity: identity, request: req, traceCtx: traceCtx, traceRun: traceRun,
@@ -294,7 +288,7 @@ func (a *API) executeLiveRun(live *liveRun) {
 		UserID: live.identity.UserID, SessionID: live.request.SessionID,
 		Prompt: live.request.Prompt, SandboxID: live.request.SandboxID,
 		MaxTurns: live.request.MaxTurns, ModelAlias: strings.TrimSpace(live.request.ModelAlias),
-		TraceID: live.run.ID, ParentSpanID: traceParentForCategory(live.traceCtx, "agent"),
+		TraceID: live.run.ID, ParentSpanID: conversationRootSpan(live.traceCtx),
 		SandboxAuthToken: a.mintSandboxToken(live.identity), Attachments: attachments,
 	}
 	coalescer := memoryEventCoalescer{run: live, window: a.runs.mergeWindow}

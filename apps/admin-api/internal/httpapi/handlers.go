@@ -1538,78 +1538,6 @@ func parseTokenUsageTime(raw string, endOfDay bool) (time.Time, error) {
 	return t, nil
 }
 
-func (a *API) listAuditEvents(w http.ResponseWriter, r *http.Request) {
-	q := r.URL.Query()
-	query := store.ConversationRunQuery{
-		Limit:  qInt(r, "limit", 100),
-		Offset: qInt(r, "offset", 0),
-		Search: firstNonEmpty(q.Get("search"), q.Get("actor_user_id"), q.Get("actor_email"), q.Get("trace_id")),
-		Status: q.Get("status"),
-		Source: q.Get("source"),
-	}
-	if v := q.Get("since"); v != "" {
-		t, err := time.Parse(time.RFC3339, v)
-		if err != nil {
-			writeErr(w, http.StatusBadRequest, "INVALID_ARGUMENT", "since must be RFC3339")
-			return
-		}
-		query.From = t
-	}
-	if v := q.Get("until"); v != "" {
-		t, err := time.Parse(time.RFC3339, v)
-		if err != nil {
-			writeErr(w, http.StatusBadRequest, "INVALID_ARGUMENT", "until must be RFC3339")
-			return
-		}
-		query.Until = t
-	}
-	runs, err := a.svc.ListConversationRuns(r.Context(), query)
-	if err != nil {
-		mapErr(w, err)
-		return
-	}
-	events := make([]store.AuditEvent, 0, len(runs))
-	for index, run := range runs {
-		events = append(events, conversationRunAuditEvent(run, int64(index+1)))
-	}
-	writeJSON(w, http.StatusOK, map[string]any{"events": events})
-}
-
-func (a *API) getTrace(w http.ResponseWriter, r *http.Request) {
-	traceID := chi.URLParam(r, "trace_id")
-	if traceID == "" {
-		writeErr(w, http.StatusBadRequest, "INVALID_ARGUMENT", "trace_id is required")
-		return
-	}
-	run, err := a.svc.GetConversationRun(r.Context(), traceID)
-	if err != nil {
-		mapErr(w, err)
-		return
-	}
-	spans, err := a.svc.ListConversationTraceSpans(r.Context(), store.ConversationTraceSpanQuery{
-		TraceID: traceID, Limit: qInt(r, "limit", 1000),
-	})
-	if err != nil {
-		mapErr(w, err)
-		return
-	}
-	events := make([]store.TraceEvent, 0, len(spans))
-	for _, span := range spans {
-		events = append(events, store.TraceEvent{
-			ID: span.ID, TraceID: span.TraceID, Service: span.Service, Name: span.Name,
-			Category: span.Category, StartedAt: span.StartedAt,
-			DurationMS: span.DurationUS / 1000, Status: span.Status, Metadata: span.Attributes,
-		})
-	}
-	writeJSON(w, http.StatusOK, map[string]any{
-		"trace_id":     traceID,
-		"events":       events,
-		"audit_events": []store.AuditEvent{conversationRunAuditEvent(run, 1)},
-		"run":          run,
-		"spans":        spans,
-	})
-}
-
 func (a *API) listConversationRuns(w http.ResponseWriter, r *http.Request) {
 	q := r.URL.Query()
 	query := store.ConversationRunQuery{
@@ -1659,34 +1587,4 @@ func (a *API) listConversationTraceSpans(w http.ResponseWriter, r *http.Request)
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"spans": spans})
-}
-
-func conversationRunAuditEvent(run store.ConversationRun, id int64) store.AuditEvent {
-	result := run.Status
-	if result == "error" || result == "cancelled" || result == "interrupted" {
-		result = "failure"
-	}
-	return store.AuditEvent{
-		ID: id, At: run.StartedAt, ActorType: "user", ActorUserID: run.UserID,
-		ActorEmail: run.UserEmail, Action: "chat.send", ResourceType: "conversation",
-		ResourceID: run.ConversationID, Result: result, TraceID: run.TraceID,
-		ErrorCode: run.ErrorCode,
-		Metadata: map[string]any{
-			"conversation_id": run.ConversationID, "chat_type": run.Source,
-			"conversation_title": run.ConversationTitle, "model_alias": run.ModelAlias,
-			"duration_ms": run.DurationMS, "ttft_ms": run.TTFTMS,
-			"status": run.Status, "detail_status": run.DetailStatus,
-			"llm_call_count": run.LLMCallCount, "tool_call_count": run.ToolCallCount,
-			"input_tokens": run.InputTokens, "output_tokens": run.OutputTokens,
-		},
-	}
-}
-
-func firstNonEmpty(values ...string) string {
-	for _, value := range values {
-		if value = strings.TrimSpace(value); value != "" {
-			return value
-		}
-	}
-	return ""
 }

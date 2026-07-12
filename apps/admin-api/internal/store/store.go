@@ -1,12 +1,9 @@
-// Package store defines the admin-api persistence seam and an in-memory
-// implementation. Every admin resource (issued-token metadata + revocations,
-// per-subject quota overrides, skill-market entries, audit log) is reached
-// through a small Repository interface. The in-memory Store backs unit tests
-// and zero-dependency dev boots; a PostgreSQL implementation lands in M7
-// (persistence tiering) behind the same interfaces — no service/handler change.
+// Package store defines the admin-api persistence seam. Every admin resource
+// is reached through a small repository interface. PostgreSQL is the production
+// implementation; the in-memory Store backs unit tests.
 //
 // Mirrors the project rule established by go-common/redis.KV: funnel all access
-// through an interface so the backend is an additive swap.
+// through an interface so business logic remains storage-independent.
 package store
 
 import (
@@ -319,41 +316,6 @@ func authUserIdentifiersFor(u AuthUser) []AuthUserIdentifier {
 	add("username", u.Username, false)
 	add("email", u.Email, true)
 	return out
-}
-
-// AuditEvent is the compatibility response shape for conversation runs.
-type AuditEvent struct {
-	ID           int64          `json:"id"`
-	At           time.Time      `json:"at"`
-	ActorType    string         `json:"actor_type"`
-	ActorUserID  string         `json:"actor_user_id,omitempty"`
-	ActorEmail   string         `json:"actor_email,omitempty"`
-	Action       string         `json:"action"`
-	ResourceType string         `json:"resource_type,omitempty"`
-	ResourceID   string         `json:"resource_id,omitempty"`
-	Result       string         `json:"result"`
-	HTTPMethod   string         `json:"http_method,omitempty"`
-	Route        string         `json:"route,omitempty"`
-	StatusCode   int            `json:"status_code,omitempty"`
-	RequestID    string         `json:"request_id,omitempty"`
-	TraceID      string         `json:"trace_id,omitempty"`
-	ClientIP     string         `json:"client_ip,omitempty"`
-	UserAgent    string         `json:"user_agent,omitempty"`
-	Metadata     map[string]any `json:"metadata_json,omitempty"`
-	ErrorCode    string         `json:"error_code,omitempty"`
-}
-
-// TraceEvent is the compatibility response shape for conversation trace spans.
-type TraceEvent struct {
-	ID         int64          `json:"id"`
-	TraceID    string         `json:"trace_id"`
-	Service    string         `json:"service"`
-	Name       string         `json:"name"`
-	Category   string         `json:"category,omitempty"`
-	StartedAt  time.Time      `json:"started_at"`
-	DurationMS int64          `json:"duration_ms"`
-	Status     string         `json:"status"`
-	Metadata   map[string]any `json:"metadata_json,omitempty"`
 }
 
 // ConversationRun is both the immutable conversation-audit identity and the

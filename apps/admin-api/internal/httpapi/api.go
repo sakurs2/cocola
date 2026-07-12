@@ -219,8 +219,6 @@ func (a *API) Router() http.Handler {
 			r.Get("/users/{user_id}", a.tokenUsageUser)
 		})
 
-		r.Get("/audit-events", a.listAuditEvents)
-		r.Get("/traces/{trace_id}", a.getTrace)
 		r.Get("/conversation-runs", a.listConversationRuns)
 		r.Get("/conversation-runs/{trace_id}", a.getConversationRun)
 		r.Get("/conversation-runs/{trace_id}/spans", a.listConversationTraceSpans)

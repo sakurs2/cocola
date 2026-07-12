@@ -7,13 +7,12 @@ gateway consults a RevocationStore on the hot path: a verified-but-revoked token
 is rejected with 401 before any work happens.
 
 Storage-agnostic Protocol (mirrors QuotaStore): MemoryRevocationStore for
-hermetic tests + single-process dev, RedisRevocationStore for a shared denylist
-the admin-api and every gateway replica see. TTLCachedRevocation wraps either so
+hermetic tests and RedisRevocationStore for the shared production denylist.
+TTLCachedRevocation wraps either so
 the per-request check is an in-process set membership most of the time, with a
 short window before a fresh revocation takes effect (seconds, never past `exp`).
 
-Cross-process wiring (admin-api writes, gateways read the same Redis) lands with
-the shared backend in a later milestone; this module is the gateway-side seam.
+Admin API writes and LLM Gateway reads the same Redis keys.
 """
 
 from __future__ import annotations

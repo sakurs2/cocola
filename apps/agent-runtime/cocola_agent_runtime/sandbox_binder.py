@@ -18,7 +18,7 @@ hermetic tests.
     anyio.to_thread"). One short-lived channel per acquire keeps it simple; the
     sandbox-manager's Acquire is create-or-reuse, so reconnecting per call is
     cheap and stateless.
-  - `StaticSandboxBinder` — in-memory, for tests/dev (no sandbox-manager needed).
+  - `StaticSandboxBinder` — in-memory, for hermetic tests.
 
 Step "make the sandbox actually used" adds a second, orthogonal seam: an
 `SandboxExecutor` that turns the agent's tool calls (bash / file IO) into real

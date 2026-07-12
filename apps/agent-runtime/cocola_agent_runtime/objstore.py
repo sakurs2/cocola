@@ -28,12 +28,10 @@ log = get_logger("cocola.agent-runtime.objstore")
 
 
 class Fetcher(Protocol):
-    """Fetches and stores object bytes by key."""
+    """Fetches attachments/checkpoints and publishes output artifacts."""
 
     def get(self, key: str) -> bytes: ...
     def put(self, key: str, data: bytes, mime: str) -> None: ...
-    def list(self, prefix: str) -> list[str]: ...
-    def delete(self, key: str) -> None: ...
 
 
 class MinioFetcher:
@@ -62,15 +60,6 @@ class MinioFetcher:
             length=len(data),
             content_type=mime or "application/octet-stream",
         )
-
-    def list(self, prefix: str) -> list[str]:
-        return [
-            obj.object_name
-            for obj in self._client.list_objects(self._bucket, prefix=prefix, recursive=True)
-        ]
-
-    def delete(self, key: str) -> None:
-        self._client.remove_object(self._bucket, key)
 
 
 def fetcher_from_env() -> Fetcher | None:

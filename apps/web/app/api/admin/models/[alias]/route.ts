@@ -1,52 +1,19 @@
-import { NextRequest } from "next/server";
-import { adminHeaders, isAuthFail, requireAdmin } from "@/lib/server-auth";
+import { type NextRequest } from "next/server";
+import { proxyAdmin } from "@/lib/admin-proxy";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
-const ADMIN_URL = process.env.COCOLA_ADMIN_URL ?? "http://127.0.0.1:8092";
+type Context = { params: Promise<{ alias: string }> };
 
-export async function PATCH(req: NextRequest, { params }: { params: Promise<{ alias: string }> }) {
-  const authResult = await requireAdmin();
-  if (isAuthFail(authResult)) return authResult.response;
-  const { alias } = await params;
-  return proxyAdmin(req, `/admin/models/${encodeURIComponent(alias)}`, {
-    method: "PATCH",
-    body: await req.text(),
-    contentType: req.headers.get("content-type") ?? "application/json",
-  });
+async function path({ params }: Context) {
+  return `/admin/models/${encodeURIComponent((await params).alias)}`;
 }
 
-export async function DELETE(req: NextRequest, { params }: { params: Promise<{ alias: string }> }) {
-  const authResult = await requireAdmin();
-  if (isAuthFail(authResult)) return authResult.response;
-  const { alias } = await params;
-  return proxyAdmin(req, `/admin/models/${encodeURIComponent(alias)}`);
+export async function PATCH(req: NextRequest, context: Context) {
+  return proxyAdmin(req, await path(context));
 }
 
-async function proxyAdmin(
-  req: NextRequest,
-  path: string,
-  init?: RequestInit & { contentType?: string },
-) {
-  const authResult = await requireAdmin();
-  if (isAuthFail(authResult)) return authResult.response;
-  try {
-    const upstream = await fetch(`${ADMIN_URL}${path}`, {
-      method: init?.method ?? req.method,
-      cache: "no-store",
-      headers: adminHeaders(authResult.user, init?.contentType),
-      body: init?.body,
-    });
-    const text = await upstream.text();
-    return new Response(text || null, {
-      status: upstream.status,
-      headers: text
-        ? { "content-type": upstream.headers.get("content-type") ?? "application/json" }
-        : {},
-    });
-  } catch (err) {
-    const msg = err instanceof Error ? err.message : String(err);
-    return Response.json({ error: `admin-api unreachable: ${msg}` }, { status: 502 });
-  }
+export async function DELETE(req: NextRequest, context: Context) {
+  return proxyAdmin(req, await path(context));
 }

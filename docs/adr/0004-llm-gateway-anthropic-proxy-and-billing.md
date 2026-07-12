@@ -102,14 +102,13 @@ that constructs concrete providers and reads secrets.
   one `UsageRecord` in a `finally`. A billing failure is logged and swallowed —
   it must never break the user's stream.
 
-### Billing ledger: record-only in M3, atomic Redis aggregation
+### Billing ledger: record-only in M3
 
-The `Ledger` Protocol has a `MemoryLedger` (hermetic default) and a
-`RedisLedger` (durable). Cost is computed per call (`tokens × configured price`)
-and recorded, but **never charged** in M3 — real debiting/quota enforcement is
-M4+. The Redis ledger stores cost as integer **micro-USD** so per-call costs
-survive `HINCRBY` without float drift, and writes the detail row + recent lists +
-per-user/per-session aggregates in a single Lua script for atomicity.
+Cost is computed per call (`tokens × configured price`) and recorded, but
+**never charged** — quota enforcement is a separate concern. The current
+production composition uses `PostgresLedger`; `MemoryLedger` remains only as a
+hermetic test implementation. The earlier Redis-only ledger was removed after
+Postgres became the durable accounting source.
 
 ### Hard testability constraint
 

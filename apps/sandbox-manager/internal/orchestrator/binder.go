@@ -403,7 +403,9 @@ func (b *Binder) Release(ctx context.Context, sessionID string) error {
 	if m.SandboxID == "" {
 		m.SandboxID = sid
 	}
-	b.checkpointBeforeReclaim(ctx, m)
+	// Explicit release means the conversation was deleted. Do not checkpoint
+	// state that can no longer be resumed; graceful shutdown and idle reclaim
+	// own the persistence paths.
 	// Destroy the sandbox first; even if mapping cleanup fails afterwards the
 	// reaper will mop up the now-dangling record.
 	if err := b.p.Destroy(ctx, sid); err != nil {

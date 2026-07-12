@@ -2,20 +2,18 @@
 
 Public surface:
 - Ledger (Protocol), UsageRecord, Aggregate — what business logic depends on.
-- MemoryLedger — default, hermetic.
-- RedisLedger — durable aggregates + TTL'd detail rows.
+- MemoryLedger — hermetic test implementation.
+- PostgresLedger — production implementation.
 """
 
 from cocola_llm_gateway.billing.ledger import Aggregate, Ledger, UsageRecord
 from cocola_llm_gateway.billing.memory import MemoryLedger
 from cocola_llm_gateway.billing.postgres_ledger import PostgresLedger
-from cocola_llm_gateway.billing.redis_ledger import RedisLedger
 
 __all__ = [
     "Ledger",
     "UsageRecord",
     "Aggregate",
     "MemoryLedger",
-    "RedisLedger",
     "PostgresLedger",
 ]

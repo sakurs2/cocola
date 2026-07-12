@@ -13,8 +13,7 @@
 //	COCOLA_AUTH_ALLOW_ANON  blank tokens => dev-user; explicit dev-only opt-in
 //	COCOLA_METRICS_ADDR     observability listen address; empty => disabled
 //	                        (default :9091, serving /metrics and /healthz)
-//	COCOLA_PG_DSN           Postgres DSN; enables conversation persistence
-//	                        (sidebar list + history). Unset => persistence dark.
+//	COCOLA_PG_DSN           required Postgres DSN for conversations and chat runs
 //	COCOLA_AGENT_RUN_TIMEOUT_SECS maximum wall time for one Agent run (default 3600)
 //
 // Attachment object storage (ADR-0017 P1a); unset endpoint/bucket => inline-only:
@@ -151,45 +150,40 @@ func main() {
 				", inline<=" + strconv.FormatInt(threshold, 10) + "B)")
 		}
 	}
-	// PostgreSQL is mandatory when configured: silently falling back after a
-	// migration/connect error would reintroduce request-bound execution and lose
-	// the state guarantees the core chat path relies on.
-	if dsn := os.Getenv("COCOLA_PG_DSN"); dsn != "" {
-		if err := convo.Migrate(context.Background(), dsn); err != nil {
-			log.Fatal("conversation migration failed: " + err.Error())
-		} else if cs, cerr := convo.NewPostgres(context.Background(), dsn); cerr != nil {
-			log.Fatal("conversation store connect failed: " + cerr.Error())
-		} else {
-			api = api.WithConvoStore(cs)
-			defer cs.Close()
-			runStore, runErr := chatrun.NewPostgres(context.Background(), dsn)
-			if runErr != nil {
-				log.Fatal("chat run store connect failed: " + runErr.Error())
-			}
-			defer runStore.Close()
-			api = api.WithChatRuns(runStore, httpapi.RunConfig{RunTimeout: runTimeout})
-			if err := api.InterruptStaleRuns(context.Background()); err != nil {
-				log.Fatal("stale chat run recovery failed: " + err.Error())
-			}
-			log.Info("single-gateway durable chat enabled (postgres)")
-			if traceStore, terr := traceevents.NewPostgres(context.Background(), dsn); terr != nil {
-				log.Warn("conversation traces disabled (connect failed): " + terr.Error())
-			} else {
-				defer traceStore.Close()
-				asyncTraceStore := traceevents.NewAsyncStore(traceStore, 2048, func(err error) {
-					log.Warn("conversation trace flush failed: " + err.Error())
-				})
-				defer asyncTraceStore.Close()
-				api = api.WithTraceStore(asyncTraceStore)
-				log.Info("conversation audit and traces enabled (postgres)")
-			}
-		}
+	// Durable chat has one production storage path. Starting without PostgreSQL
+	// would make restart semantics depend on process memory.
+	dsn := strings.TrimSpace(os.Getenv("COCOLA_PG_DSN"))
+	if dsn == "" {
+		log.Fatal("COCOLA_PG_DSN is required")
+	}
+	if err := convo.Migrate(context.Background(), dsn); err != nil {
+		log.Fatal("conversation migration failed: " + err.Error())
+	} else if cs, cerr := convo.NewPostgres(context.Background(), dsn); cerr != nil {
+		log.Fatal("conversation store connect failed: " + cerr.Error())
 	} else {
-		memoryConversations := convo.NewMemory()
-		memoryRuns := chatrun.NewMemory(memoryConversations)
-		api = api.WithConvoStore(memoryConversations).
-			WithChatRuns(memoryRuns, httpapi.RunConfig{RunTimeout: runTimeout})
-		log.Warn("COCOLA_PG_DSN unset; chat state is in-memory and will be lost on restart")
+		api = api.WithConvoStore(cs)
+		defer cs.Close()
+		runStore, runErr := chatrun.NewPostgres(context.Background(), dsn)
+		if runErr != nil {
+			log.Fatal("chat run store connect failed: " + runErr.Error())
+		}
+		defer runStore.Close()
+		api = api.WithChatRuns(runStore, httpapi.RunConfig{RunTimeout: runTimeout})
+		if err := api.InterruptStaleRuns(context.Background()); err != nil {
+			log.Fatal("stale chat run recovery failed: " + err.Error())
+		}
+		log.Info("single-gateway durable chat enabled (postgres)")
+		if traceStore, terr := traceevents.NewPostgres(context.Background(), dsn); terr != nil {
+			log.Warn("conversation traces disabled (connect failed): " + terr.Error())
+		} else {
+			defer traceStore.Close()
+			asyncTraceStore := traceevents.NewAsyncStore(traceStore, 2048, func(err error) {
+				log.Warn("conversation trace flush failed: " + err.Error())
+			})
+			defer asyncTraceStore.Close()
+			api = api.WithTraceStore(asyncTraceStore)
+			log.Info("conversation audit and traces enabled (postgres)")
+		}
 	}
 
 	var metricsServer *http.Server

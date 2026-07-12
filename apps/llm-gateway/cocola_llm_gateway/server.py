@@ -95,29 +95,13 @@ def create_app(
     # left by stateless offline verification (see ADR-0006).
     deny = revocation
 
-    def _identity(request: Request) -> Identity:
-        ident = vrf.verify(_bearer(request))
-        # Back-compat / dev convenience: when auth is disabled (dev identity),
-        # honor the legacy x-cocola-user / x-cocola-session headers so existing
-        # zero-config callers still attribute usage to a real subject. With auth
-        # ENABLED, the verified token is authoritative and headers are ignored.
-        if not vrf.config.enabled:
-            user = request.headers.get("x-cocola-user", "").strip()
-            tenant = request.headers.get("x-cocola-tenant", "").strip()
-            if user or tenant:
-                ident = Identity(
-                    user_id=user or ident.user_id,
-                    tenant_id=tenant or ident.tenant_id,
-                )
-        return ident
-
     async def _authenticate(request: Request) -> Identity:
         """Resolve identity and enforce the revocation denylist.
 
         Raises JWTError if the token is missing/invalid (from the verifier) or
         if its `jti` is on the denylist. Callers map JWTError -> 401.
         """
-        ident = _identity(request)
+        ident = vrf.verify(_bearer(request))
         if deny is not None and ident.token_id and await deny.is_revoked(ident.token_id):
             raise JWTError("token revoked")
         return ident
@@ -200,18 +184,13 @@ def create_app(
     @app.get("/v1/usage")
     async def usage(request: Request):
         # Billing reads expose token usage, so they require identity. A caller
-        # may only read their OWN usage; with auth ENABLED the verified token is
-        # authoritative and any client-supplied user_id is ignored. Cross-user /
-        # admin reads are deferred to the admin-api (M5). With auth disabled
-        # (dev), honor the query param for back-compat with existing dev flows.
+        # may only read their OWN usage. Cross-user/admin reads belong to the
+        # admin API; query parameters never override the authenticated subject.
         try:
             identity = await _authenticate(request)
         except JWTError as e:
             return _auth_err(str(e))
-        if vrf.config.enabled:
-            user_id = identity.user_id
-        else:
-            user_id = request.query_params.get("user_id", "") or identity.user_id
+        user_id = identity.user_id
         session_id = request.query_params.get("session_id", "")
         limit = int(request.query_params.get("limit", "20"))
         recent = await service.ledger.recent(user_id=user_id, limit=limit)

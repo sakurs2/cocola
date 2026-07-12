@@ -473,31 +473,8 @@ func TestReleaseDestroysUnbindsAndCleansSessionStorage(t *testing.T) {
 	if len(fp.cleanups) != 1 || fp.cleanups[0] != "u1/s1" {
 		t.Fatalf("cleanups = %v, want [u1/s1]", fp.cleanups)
 	}
-	wantCheckpoint := "u1/s1/" + sb.ID
-	if len(fp.checkpoints) != 1 || fp.checkpoints[0] != wantCheckpoint {
-		t.Fatalf("checkpoints = %v, want [%s]", fp.checkpoints, wantCheckpoint)
-	}
-}
-
-func TestReleaseIgnoresCheckpointFailure(t *testing.T) {
-	b, fp := newTestBinder(t)
-	ctx := context.Background()
-	sb, err := b.Acquire(ctx, AcquireSpec{SessionID: "s-checkpoint-fail", UserID: "u1"})
-	if err != nil {
-		t.Fatal(err)
-	}
-	fp.mu.Lock()
-	fp.checkpointErr[sb.ID] = errors.New("checkpoint failed")
-	fp.mu.Unlock()
-
-	if err := b.Release(ctx, "s-checkpoint-fail"); err != nil {
-		t.Fatalf("Release: %v", err)
-	}
-	if got := fp.destroys.Load(); got != 1 {
-		t.Fatalf("destroys = %d, want 1", got)
-	}
-	if _, ok, _ := b.lookup(ctx, "s-checkpoint-fail", "u1"); ok {
-		t.Fatal("expected mapping removed after release")
+	if len(fp.checkpoints) != 0 {
+		t.Fatalf("explicit release must not checkpoint deleted conversation, got %v", fp.checkpoints)
 	}
 }
 

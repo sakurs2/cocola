@@ -14,10 +14,8 @@
 //	                           400); the rest of the admin surface still works.
 //	COCOLA_AUTH_ISSUER         `iss` stamped on minted tokens (default "cocola").
 //	COCOLA_AUTH_TOKEN_TTL_SECS default token lifetime in seconds (default 30d).
-//	COCOLA_REDIS_ADDR          host:port of the shared Redis. When set, revokes
-//	                           and quota overrides are published to the keys the
-//	                           gateway reads, so they take effect fleet-wide.
-//	                           Empty => single-process (publish disabled).
+//	COCOLA_REDIS_ADDR          required shared Redis host:port for revocations,
+//	                           quota overrides, runtime metadata and user events.
 //	COCOLA_REDIS_PASSWORD / COCOLA_REDIS_DB / COCOLA_REDIS_POOL_SIZE tune it.
 //	COCOLA_METRICS_ADDR        observability listen address; empty => disabled
 //	                           (default ":9093", serving /metrics and /healthz).
@@ -31,7 +29,7 @@
 //	                           true => print dev bootstrap credentials. Use
 //	                           only for local dev; never in production.
 //	COCOLA_SCHEDULER_ENABLED   run user-owned scheduled tasks (default true).
-//	COCOLA_GATEWAY_URL         llm-gateway URL for scheduled task execution
+//	COCOLA_GATEWAY_URL         gateway URL for scheduled task execution
 //	                           (default http://127.0.0.1:8080).
 //	COCOLA_SCHEDULER_POLL_SECS due-task scan cadence (default 60).
 //	COCOLA_SCHEDULER_RUN_TIMEOUT_SECS
@@ -48,10 +46,8 @@
 //	COCOLA_SANDBOX_ADDR         sandbox-manager gRPC address used for MCP checks.
 //	COCOLA_SANDBOX_IMAGE        runtime image used by temporary MCP checks.
 //
-// Persistence is in-memory for M5 (process-local); the PostgreSQL backend
-// lands in M7 behind the same store.Store interface — no handler change. The
-// shared-Redis publish above is the propagation seam that makes the two
-// gateway-read resources (revocations, quota overrides) fleet-wide today.
+// Production requires PostgreSQL. In-memory stores remain test doubles only;
+// Redis propagates revocations, quota overrides and user events.
 package main
 
 import (
@@ -108,84 +104,66 @@ func main() {
 		log.Warn("admin auth DISABLED (no COCOLA_ADMIN_KEY) — all callers are dev-admin")
 	}
 
-	// Persistence backend (M7): when COCOLA_PG_DSN is set we run the embedded
-	// goose migrations and use the Postgres store; otherwise we fall back to the
-	// in-memory store so a bare dev boot stays zero-dependency. The choice is
-	// invisible to the service/handlers -- both satisfy store.Store.
-	var st store.Store
-	if dsn := os.Getenv("COCOLA_PG_DSN"); dsn != "" {
-		mctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
-		if err := store.Migrate(mctx, dsn); err != nil {
-			cancel()
-			log.Sugar().Fatalf("apply migrations: %v", err)
-		}
-		pg, err := store.NewPostgres(mctx, dsn)
-		cancel()
-		if err != nil {
-			log.Sugar().Fatalf("connect postgres: %v", err)
-		}
-		defer pg.Close()
-		st = pg
-		log.Sugar().Infow("persistence backend: postgres")
-	} else {
-		st = store.NewMemory()
-		log.Warn("persistence backend: in-memory (no COCOLA_PG_DSN) — data is process-local and lost on restart")
+	// The control plane has one production persistence path. Starting with a
+	// process-local store would make configuration appear durable when it is not.
+	dsn := strings.TrimSpace(os.Getenv("COCOLA_PG_DSN"))
+	if dsn == "" {
+		log.Fatal("COCOLA_PG_DSN is required")
 	}
-
-	// Optional shared-Redis publishing: when COCOLA_REDIS_ADDR is set, mirror
-	// revokes + quota overrides to the keys the gateway reads so they apply
-	// fleet-wide. Best-effort — a publish failure is logged, never fatal, since
-	// the authoritative write already landed in the store.
-	redisAddr := os.Getenv("COCOLA_REDIS_ADDR")
-	var runtimeKV *rds.Client
-	var warmPoolWriter service.WarmPoolConfigWriter
-	var userEventBroker service.UserEventBroker = service.NewMemoryUserEventBroker()
-	if redisAddr != "" {
-		cfg := redispub.Config{
-			Addr:     redisAddr,
-			Password: os.Getenv("COCOLA_REDIS_PASSWORD"),
-			DB:       getenvInt("COCOLA_REDIS_DB", 0),
-			PoolSize: getenvInt("COCOLA_REDIS_POOL_SIZE", 10),
-		}
-		dctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-		pub, err := redispub.New(dctx, cfg)
+	mctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	if err := store.Migrate(mctx, dsn); err != nil {
 		cancel()
-		if err != nil {
-			log.Sugar().Fatalf("connect shared Redis at %s: %v", redisAddr, err)
-		}
-		defer func() { _ = pub.Close() }()
-		userEventBroker = pub
-		warmPoolWriter = pub
-		mirror := store.NewMirror(st, pub)
-		if m, ok := mirror.(*store.Mirror); ok {
-			m.OnPublishError = func(op string, e error) {
-				log.Sugar().Errorw("shared-redis publish failed", "op", op, "err", e)
-			}
-		}
-		st = mirror
-		log.Sugar().Infow("shared-redis publishing enabled", "addr", redisAddr)
-
-		kvctx, kvcancel := context.WithTimeout(context.Background(), 5*time.Second)
-		runtimeKV, err = rds.New(kvctx, rds.Config{
-			Addr:     redisAddr,
-			Password: os.Getenv("COCOLA_REDIS_PASSWORD"),
-			DB:       getenvInt("COCOLA_REDIS_DB", 0),
-			PoolSize: getenvInt("COCOLA_REDIS_POOL_SIZE", 10),
-		})
-		kvcancel()
-		if err != nil {
-			log.Sugar().Warnw("sandbox runtime monitor disabled: shared Redis unavailable", "err", err)
-		} else {
-			defer func() { _ = runtimeKV.Close() }()
-		}
-	} else {
-		log.Warn("shared-redis publishing DISABLED (no COCOLA_REDIS_ADDR) — revokes/overrides are process-local")
-		log.Warn("user event bus using in-memory broker (no COCOLA_REDIS_ADDR) — realtime events are single-process")
+		log.Sugar().Fatalf("apply migrations: %v", err)
 	}
+	pg, err := store.NewPostgres(mctx, dsn)
+	cancel()
+	if err != nil {
+		log.Sugar().Fatalf("connect postgres: %v", err)
+	}
+	defer pg.Close()
+	var st store.Store = pg
+	log.Info("persistence backend: postgres")
+
+	redisAddr := strings.TrimSpace(os.Getenv("COCOLA_REDIS_ADDR"))
+	if redisAddr == "" {
+		log.Fatal("COCOLA_REDIS_ADDR is required")
+	}
+	redisConfig := redispub.Config{
+		Addr:     redisAddr,
+		Password: os.Getenv("COCOLA_REDIS_PASSWORD"),
+		DB:       getenvInt("COCOLA_REDIS_DB", 0),
+		PoolSize: getenvInt("COCOLA_REDIS_POOL_SIZE", 10),
+	}
+	dctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	pub, err := redispub.New(dctx, redisConfig)
+	cancel()
+	if err != nil {
+		log.Sugar().Fatalf("connect shared Redis at %s: %v", redisAddr, err)
+	}
+	defer func() { _ = pub.Close() }()
+	mirror := store.NewMirror(st, pub)
+	if m, ok := mirror.(*store.Mirror); ok {
+		m.OnPublishError = func(op string, e error) {
+			log.Sugar().Errorw("shared-redis publish failed", "op", op, "err", e)
+		}
+	}
+	st = mirror
+	log.Sugar().Infow("shared-redis publishing enabled", "addr", redisAddr)
+
+	kvctx, kvcancel := context.WithTimeout(context.Background(), 5*time.Second)
+	runtimeKV, err := rds.New(kvctx, rds.Config{
+		Addr: redisAddr, Password: os.Getenv("COCOLA_REDIS_PASSWORD"),
+		DB: getenvInt("COCOLA_REDIS_DB", 0), PoolSize: getenvInt("COCOLA_REDIS_POOL_SIZE", 10),
+	})
+	kvcancel()
+	if err != nil {
+		log.Sugar().Fatalf("connect runtime Redis at %s: %v", redisAddr, err)
+	}
+	defer func() { _ = runtimeKV.Close() }()
 
 	svc := service.New(st, iss, time.Now).
-		WithUserEventBroker(userEventBroker).
-		WithWarmPoolConfigWriter(warmPoolWriter).
+		WithUserEventBroker(pub).
+		WithWarmPoolConfigWriter(pub).
 		WithModelSecretKey(config.SecretFromEnv("COCOLA_MODEL_SECRET_KEY")).
 		WithConfigSecretKey(config.SecretFromEnv("COCOLA_CONFIG_SECRET_KEY")).
 		WithMinScheduleInterval(time.Duration(getenvInt("COCOLA_SCHEDULER_MIN_INTERVAL_SECS", 3600)) * time.Second)
@@ -214,36 +192,32 @@ func main() {
 	} else {
 		log.Warn("skill bundle store disabled (no COCOLA_MINIO_ENDPOINT/BUCKET) — imported skills keep metadata only")
 	}
-	if runtimeKV != nil {
-		runtimeMgr, err := service.NewSandboxRuntimeManagerFromEnv(runtimeKV)
-		if err != nil {
-			log.Sugar().Warnw("sandbox runtime monitor disabled", "err", err)
-		} else if runtimeMgr != nil {
-			if rm, ok := runtimeMgr.(*service.RedisSandboxRuntimeManager); ok {
-				runtimeMgr = svc.AttachSandboxRuntimeUsernames(rm)
-			}
-			svc.WithSandboxRuntimeManager(runtimeMgr)
-			log.Info("sandbox runtime monitor enabled (Redis metadata)")
+	runtimeMgr, err := service.NewSandboxRuntimeManagerFromEnv(runtimeKV)
+	if err != nil {
+		log.Sugar().Warnw("sandbox runtime monitor disabled", "err", err)
+	} else if runtimeMgr != nil {
+		if rm, ok := runtimeMgr.(*service.RedisSandboxRuntimeManager); ok {
+			runtimeMgr = svc.AttachSandboxRuntimeUsernames(rm)
+		}
+		svc.WithSandboxRuntimeManager(runtimeMgr)
+		log.Info("sandbox runtime monitor enabled (Redis metadata)")
+	}
+	syncWarmPool := func() {
+		ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+		defer cancel()
+		if err := svc.PublishWarmPoolConfig(ctx); err != nil {
+			log.Sugar().Errorw("warm-pool config reconciliation failed", "err", err)
 		}
 	}
-	if warmPoolWriter != nil {
-		syncWarmPool := func() {
-			ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
-			defer cancel()
-			if err := svc.PublishWarmPoolConfig(ctx); err != nil {
-				log.Sugar().Errorw("warm-pool config reconciliation failed", "err", err)
-			}
+	syncWarmPool()
+	go func() {
+		ticker := time.NewTicker(5 * time.Second)
+		defer ticker.Stop()
+		for range ticker.C {
+			syncWarmPool()
 		}
-		syncWarmPool()
-		go func() {
-			ticker := time.NewTicker(5 * time.Second)
-			defer ticker.Stop()
-			for range ticker.C {
-				syncWarmPool()
-			}
-		}()
-		log.Info("warm-pool sizing hot reload enabled")
-	}
+	}()
+	log.Info("warm-pool sizing hot reload enabled")
 	if email := os.Getenv("COCOLA_BOOTSTRAP_ADMIN_EMAIL"); email != "" {
 		username := os.Getenv("COCOLA_BOOTSTRAP_ADMIN_USERNAME")
 		password := config.SecretFromEnv("COCOLA_BOOTSTRAP_ADMIN_PASSWORD")
@@ -278,26 +252,24 @@ func main() {
 	} else {
 		log.Warn("sandbox node manager DISABLED (no Kubernetes config)")
 	}
-	if !envBoolFalse(os.Getenv("COCOLA_SCHEDULER_ENABLED")) {
-		if err := svc.StartScheduler(context.Background(), service.SchedulerConfig{
-			Enabled:    true,
-			GatewayURL: getenv("COCOLA_GATEWAY_URL", "http://127.0.0.1:8080"),
-			WorkerID:   getenv("COCOLA_SCHEDULER_WORKER_ID", "admin-api"),
-			PollEvery:  time.Duration(getenvInt("COCOLA_SCHEDULER_POLL_SECS", 60)) * time.Second,
-			RunTimeout: time.Duration(getenvInt("COCOLA_SCHEDULER_RUN_TIMEOUT_SECS", 3600)) * time.Second,
-			HeartbeatEvery: time.Duration(
-				getenvInt("COCOLA_SCHEDULER_HEARTBEAT_SECS", 30),
-			) * time.Second,
-			LeaseTimeout: time.Duration(
-				getenvInt("COCOLA_SCHEDULER_LEASE_TIMEOUT_SECS", 300),
-			) * time.Second,
-		}); err != nil {
-			log.Sugar().Warnw("scheduled task worker disabled", "err", err)
-		} else {
-			log.Info("scheduled task worker enabled")
-		}
+	// The loop is always present; scheduler.enabled is the single hot-reloadable
+	// control for pausing and resuming due-task execution.
+	if err := svc.StartScheduler(context.Background(), service.SchedulerConfig{
+		Enabled:    true,
+		GatewayURL: getenv("COCOLA_GATEWAY_URL", "http://127.0.0.1:8080"),
+		WorkerID:   getenv("COCOLA_SCHEDULER_WORKER_ID", "admin-api"),
+		PollEvery:  time.Duration(getenvInt("COCOLA_SCHEDULER_POLL_SECS", 60)) * time.Second,
+		RunTimeout: time.Duration(getenvInt("COCOLA_SCHEDULER_RUN_TIMEOUT_SECS", 3600)) * time.Second,
+		HeartbeatEvery: time.Duration(
+			getenvInt("COCOLA_SCHEDULER_HEARTBEAT_SECS", 30),
+		) * time.Second,
+		LeaseTimeout: time.Duration(
+			getenvInt("COCOLA_SCHEDULER_LEASE_TIMEOUT_SECS", 300),
+		) * time.Second,
+	}); err != nil {
+		log.Sugar().Warnw("scheduled task worker disabled", "err", err)
 	} else {
-		log.Warn("scheduled task worker DISABLED")
+		log.Info("scheduled task worker enabled")
 	}
 
 	// Observability: a shared registry instruments every route and is exposed on
@@ -352,13 +324,4 @@ func getenvBool(k string, def bool) bool {
 		}
 	}
 	return def
-}
-
-func envBoolFalse(v string) bool {
-	switch v {
-	case "0", "false", "FALSE", "False", "no", "NO", "off", "OFF":
-		return true
-	default:
-		return false
-	}
 }

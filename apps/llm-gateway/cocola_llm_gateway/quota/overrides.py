@@ -16,13 +16,12 @@ So the return type is `int | None`: None and 0 are different answers. None means
 "I have nothing to say, use the default"; 0 means "this subject is uncapped".
 
 Storage-agnostic Protocol (mirrors QuotaStore / RevocationStore):
-MemoryOverrideStore for hermetic tests + single-process dev, RedisOverrideStore
+MemoryOverrideStore for hermetic tests, RedisOverrideStore
 for a shared table the admin-api writes and every gateway replica reads.
 TTLCachedOverrides wraps either so the hot path is an in-process dict lookup
 most of the time, with a few-seconds staleness bound on a fresh override.
 
-Cross-process wiring (admin-api writes, gateways read the same Redis) lands with
-the shared backend in a later milestone; this module is the gateway-side seam.
+Admin API writes and LLM Gateway reads the same Redis hash.
 """
 
 from __future__ import annotations

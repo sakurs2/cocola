@@ -43,7 +43,7 @@ Scheduler、Warm Pool sizing 和 Trace 的同名环境变量只是无 DB overrid
 | 初始管理员             | `COCOLA_BOOTSTRAP_ADMIN_USERNAME`、email、password/password hash、reset                                                                                        |
 | Postgres/Redis         | `COCOLA_PG_DSN`、`COCOLA_REDIS_ADDR`、`COCOLA_REDIS_PASSWORD`、`COCOLA_REDIS_DB`、`COCOLA_REDIS_POOL_SIZE`                                                     |
 | MinIO                  | `COCOLA_MINIO_ENDPOINT`、access/secret key、bucket、TLS、附件阈值                                                                                              |
-| Agent/Run              | `COCOLA_AGENT_MODE`、`COCOLA_AGENT_RUN_TIMEOUT_SECS`、gRPC/message/artifact limits                                                                             |
+| Agent/Run              | `COCOLA_AGENT_RUN_TIMEOUT_SECS`、gRPC/message/artifact limits                                                                                                  |
 | Sandbox                | `COCOLA_SANDBOX_ADDR`、image、lease/reaper/heartbeat、LLM URL/token/model、egress、volume backend                                                              |
 | Warm Pool provisioning | `COCOLA_SANDBOX_WARM_POOL_REFILL_SECS`（enabled/size 是 Admin 可热加载配置，环境变量仅作为默认值）                                                             |
 | OpenSandbox            | `COCOLA_OPENSANDBOX_*`（URL、API key、HTTP/Exec timeout、resources、K8s 部署参数）                                                                             |
@@ -54,6 +54,11 @@ Scheduler、Warm Pool sizing 和 Trace 的同名环境变量只是无 DB overrid
 
 Secret 支持统一的 `<NAME>_FILE` 约定：文件内容优先于同名环境变量。生产环境应
 通过 Secret/Vault 文件注入，不把明文写入仓库。
+
+Gateway、Agent Runtime、Admin API 和 LLM Gateway 要求 `COCOLA_PG_DSN`；
+Sandbox Manager 与 Admin API 要求 `COCOLA_REDIS_ADDR`，LLM Gateway 要求
+`COCOLA_LLM_REDIS_URL`。官方 `make dev` / `make prod` 会准备并注入这些依赖。
+内存实现只用于测试，不是运行模式。
 
 Warm Pool 默认开启、空闲目标默认 10。Enabled/Size 可在系统设置页热更新；Admin 每
 5 秒把 Postgres 期望值对账到 Redis，sandbox-manager 每次 refill 读取。Redis 短暂失败

@@ -1,24 +1,9 @@
-"""Production composition root: build a fully-wired app from env.
+"""Production composition root.
 
-Separated from server.py so tests can build their own service/verifier with
-fakes and call create_app() directly, while production goes through here.
-
-Ledger selection (M7 adds Postgres as the durable accounting truth):
-  - COCOLA_PG_DSN set         -> PostgresLedger (durable, survives restart)
-  - else COCOLA_LLM_REDIS_URL -> RedisLedger (durable aggregates, TTL'd detail)
-  - otherwise                 -> MemoryLedger (graceful default; warns)
-
-Quota store selection:
-  - COCOLA_PG_DSN + Redis     -> MirroredQuotaStore (PG durable, Redis fast-path)
-  - COCOLA_PG_DSN only        -> PostgresQuotaStore (durable)
-  - COCOLA_LLM_REDIS_URL only -> RedisQuotaStore (shared, period-windowed)
-  - otherwise                 -> MemoryQuotaStore
-The enforcer is only attached when a quota layer is enabled (limit > 0); with no
-caps configured the service skips quota work entirely.
-
-Auth (M4): a Verifier is built from COCOLA_AUTH_* env. With no secret, auth is
-disabled and every caller resolves to the dev identity (preserving zero-config
-dev boots); set COCOLA_AUTH_SECRET to enforce signed tokens.
+Tests inject explicit in-memory fakes into ``create_app``. The executable uses
+this module and requires the durable Postgres + Redis topology shipped by both
+``make dev`` and ``make prod``; missing connection configuration is a startup
+error rather than an implicit, restart-unsafe runtime mode.
 """
 
 from __future__ import annotations
@@ -29,26 +14,23 @@ from cocola_common import get_logger
 
 from cocola_llm_gateway.auth import Verifier
 from cocola_llm_gateway.auth.revocation import (
-    MemoryRevocationStore,
     RedisRevocationStore,
     RevocationStore,
     TTLCachedRevocation,
 )
-from cocola_llm_gateway.billing import MemoryLedger, RedisLedger
+from cocola_llm_gateway.billing import PostgresLedger
 from cocola_llm_gateway.billing.ledger import Ledger
-from cocola_llm_gateway.billing.postgres_ledger import PostgresLedger
 from cocola_llm_gateway.config import (
     auth_config_from_env,
     gateway_config_from_env,
     quota_policy_from_env,
+    read_secret_env,
 )
 from cocola_llm_gateway.conversation_trace import ConversationTraceStore
-from cocola_llm_gateway.db_registry import registry_source_from_env
+from cocola_llm_gateway.db_registry import PostgresRegistrySource
 from cocola_llm_gateway.middleware import ResiliencePolicy
 from cocola_llm_gateway.quota import (
     Enforcer,
-    MemoryOverrideStore,
-    MemoryQuotaStore,
     OverrideStore,
     QuotaStore,
     RedisOverrideStore,
@@ -63,68 +45,43 @@ from cocola_llm_gateway.service import GatewayService
 log = get_logger("cocola.llm-gateway.bootstrap")
 
 
+def _required_env(name: str) -> str:
+    value = os.getenv(name, "").strip()
+    if not value:
+        raise RuntimeError(f"{name} is required")
+    return value
+
+
 def build_ledger() -> Ledger:
-    # Postgres is the durable accounting truth (M7); it wins when configured.
-    dsn = os.getenv("COCOLA_PG_DSN", "").strip()
-    if dsn:
-        log.info("billing ledger: postgres (durable accounting truth)")
-        return PostgresLedger(dsn)
-    url = os.getenv("COCOLA_LLM_REDIS_URL", "").strip()
-    if url:
-        log.info("billing ledger: redis", url=url)
-        return RedisLedger.from_url(url)
-    log.info("billing ledger: in-memory (set COCOLA_PG_DSN for durable billing)")
-    return MemoryLedger()
+    log.info("billing ledger: postgres")
+    return PostgresLedger(_required_env("COCOLA_PG_DSN"))
 
 
 def build_quota_store() -> QuotaStore:
-    # Durable counters in Postgres (M7). When Redis is ALSO configured it becomes
-    # the fast-path mirror (read-through / write-through to PG); with PG only, the
-    # PG store is used directly; with neither, in-memory.
-    dsn = os.getenv("COCOLA_PG_DSN", "").strip()
-    url = os.getenv("COCOLA_LLM_REDIS_URL", "").strip()
-    if dsn:
-        durable = PostgresQuotaStore(dsn)
-        if url:
-            log.info("quota store: postgres (durable) + redis (fast-path mirror)", url=url)
-            return MirroredQuotaStore(RedisQuotaStore.from_url(url), durable)
-        log.info("quota store: postgres (durable)")
-        return durable
-    if url:
-        log.info("quota store: redis", url=url)
-        return RedisQuotaStore.from_url(url)
-    log.info("quota store: in-memory")
-    return MemoryQuotaStore()
+    dsn = _required_env("COCOLA_PG_DSN")
+    url = _required_env("COCOLA_LLM_REDIS_URL")
+    log.info("quota store: postgres + redis mirror", url=url)
+    return MirroredQuotaStore(RedisQuotaStore.from_url(url), PostgresQuotaStore(dsn))
 
 
-def build_override_store() -> OverrideStore | None:
+def build_override_store() -> OverrideStore:
     """Build the per-subject quota override store.
 
-    Mirrors the quota store selection: a shared Redis hash in production (the
-    admin-api writes it on PUT /admin/quotas, every gateway replica reads it), an
-    in-process table for single-process dev. A tiny TTL cache keeps the quota
-    path off the backend most of the time.
+    Admin API writes the shared Redis hash and the gateway reads it through a
+    small TTL cache.
     """
-    url = os.getenv("COCOLA_LLM_REDIS_URL", "").strip()
-    if url:
-        log.info("quota overrides: redis", url=url)
-        inner: OverrideStore = RedisOverrideStore.from_url(url)
-    else:
-        log.info("quota overrides: in-memory (set COCOLA_LLM_REDIS_URL to share fleet-wide)")
-        inner = MemoryOverrideStore()
+    url = _required_env("COCOLA_LLM_REDIS_URL")
+    log.info("quota overrides: redis", url=url)
+    inner: OverrideStore = RedisOverrideStore.from_url(url)
     ttl = float(os.getenv("COCOLA_QUOTA_OVERRIDE_CACHE_TTL_SECS", "5"))
     return TTLCachedOverrides(inner, ttl_s=ttl)
 
 
-def build_enforcer(policy: QuotaPolicy | None = None) -> Enforcer | None:
+def build_enforcer(policy: QuotaPolicy | None = None) -> Enforcer:
     policy = policy or quota_policy_from_env()
     overrides = build_override_store()
-    # With overrides wired the enforcer is useful even when no static cap is set:
-    # an operator can cap a single subject the env default leaves unlimited. Only
-    # skip entirely when there are neither static caps nor an override source.
-    if not policy.any_enabled and overrides is None:
-        log.info("quota: disabled (no token caps configured)")
-        return None
+    # Overrides can cap a subject even when the environment default is unlimited,
+    # so the production enforcer is always present.
     log.info(
         "quota: enabled",
         user_daily=policy.user_daily_tokens,
@@ -135,11 +92,15 @@ def build_enforcer(policy: QuotaPolicy | None = None) -> Enforcer | None:
 
 
 def build_service() -> GatewayService:
-    # Admin/Postgres is the sole production model source. An empty fallback
-    # keeps startup deterministic when Postgres is absent or has no configured
-    # model; requests then fail explicitly instead of silently using Fake.
+    dsn = _required_env("COCOLA_PG_DSN")
+    _required_env("COCOLA_LLM_REDIS_URL")
     registry = Registry({}, {}, "")
-    registry_source = registry_source_from_env(registry)
+    registry_source = PostgresRegistrySource(
+        dsn,
+        registry,
+        secret=read_secret_env("COCOLA_MODEL_SECRET_KEY"),
+        ttl_s=float(os.getenv("COCOLA_LLM_REGISTRY_CACHE_TTL_SECS", "2")),
+    )
     gcfg = gateway_config_from_env()
     policy = ResiliencePolicy(
         timeout_s=gcfg.request_timeout_s,
@@ -148,8 +109,7 @@ def build_service() -> GatewayService:
     )
     ledger = build_ledger()
     enforcer = build_enforcer()
-    dsn = os.getenv("COCOLA_PG_DSN", "").strip()
-    trace_store = ConversationTraceStore(dsn) if dsn else None
+    trace_store = ConversationTraceStore(dsn)
     return GatewayService(
         registry,
         ledger,
@@ -172,32 +132,14 @@ def build_verifier() -> Verifier:
 def build_revocation() -> RevocationStore | None:
     """Build the revocation denylist, or None to disable the gate.
 
-    Mirrors the ledger/quota selection: a shared Redis denylist in production
-    (the admin-api writes it, every gateway replica reads it), an in-process set
-    for single-process dev. The gate is only meaningful with auth enabled (tokens
-    carry a `jti`); with no secret it is skipped. A tiny TTL cache keeps the
-    per-request check off the backend most of the time.
+    The gate is only meaningful with auth enabled because anonymous identities
+    have no token id. Authenticated production uses the shared Redis denylist.
     """
     if not auth_config_from_env().enabled:
         log.info("revocation: disabled (auth off — no token ids to deny)")
         return None
-    url = os.getenv("COCOLA_LLM_REDIS_URL", "").strip()
-    if url:
-        log.info("revocation: redis denylist", url=url)
-        inner: RevocationStore = RedisRevocationStore.from_url(url)
-    else:
-        log.info("revocation: in-memory denylist (set COCOLA_LLM_REDIS_URL to share fleet-wide)")
-        inner = MemoryRevocationStore()
+    url = _required_env("COCOLA_LLM_REDIS_URL")
+    log.info("revocation: redis denylist", url=url)
+    inner: RevocationStore = RedisRevocationStore.from_url(url)
     ttl = float(os.getenv("COCOLA_REVOCATION_CACHE_TTL_SECS", "5"))
     return TTLCachedRevocation(inner, ttl_s=ttl)
-
-
-def build_app():
-    """Build the production ASGI app (service + verifier wired from env)."""
-    from cocola_llm_gateway.server import create_app
-
-    return create_app(
-        build_service(),
-        verifier=build_verifier(),
-        revocation=build_revocation(),
-    )

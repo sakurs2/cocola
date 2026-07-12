@@ -497,15 +497,9 @@ class AgentRuntimeServicer(pb_grpc.AgentRuntimeServiceServicer):
                 owned_binding = await self._session_map.get_binding(
                     session_id, user_id=request.user_id
                 )
-                if self._checkpoint is not None and owned_binding and owned_binding.sandbox_id:
-                    await self._checkpoint.checkpoint_on_reclaim(
-                        sandbox_id=owned_binding.sandbox_id,
-                        user_id=request.user_id,
-                        session_id=session_id,
-                    )
             except Exception as exc:  # noqa: BLE001 - release must continue
                 log.warning(
-                    "checkpoint before release failed",
+                    "session ownership lookup before release failed",
                     session_id=session_id,
                     error=str(exc),
                 )
@@ -1162,11 +1156,8 @@ class AgentRuntimeServicer(pb_grpc.AgentRuntimeServiceServicer):
           ./uploads/ in the session cwd (/workspace, ADR-0008 T1b),
           resolved via `pwd` (provider-agnostic) with `mkdir -p uploads` in the
           same shell -- WriteFile (docker CopyToContainer) makes no parent dirs.
-        - Local dev (no executor/sandbox): there is no bound sandbox to write
-          into, so we write into a per-session HOST dir and hand its path back as
-          the workspace cwd; an in-process provider's native Read/Bash would then
-          resolve ./uploads/ against it. (With Route B decommissioned the default
-          no-sandbox provider is EchoProvider, which makes no model calls.)
+        - Injected test providers without an executor use a per-session HOST dir.
+          Production always provisions into a bound sandbox.
 
         Content is written binary-safe so images survive intact.
         """

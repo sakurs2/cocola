@@ -12,6 +12,7 @@ import (
 
 	"github.com/cocola-project/cocola/apps/gateway/internal/agent"
 	"github.com/cocola-project/cocola/apps/gateway/internal/auth"
+	"github.com/cocola-project/cocola/apps/gateway/internal/chatrun"
 	"github.com/cocola-project/cocola/apps/gateway/internal/convo"
 	traceevents "github.com/cocola-project/cocola/apps/gateway/internal/traceevent"
 	"github.com/cocola-project/cocola/packages/go-common/logger"
@@ -70,7 +71,20 @@ func newAPI(t *testing.T, fs *fakeStreamer) http.Handler {
 	// DevIdentity. A dedicated auth-on test covers user_id derivation.
 	v := auth.NewVerifier(auth.Config{})
 	log := logger.Must()
-	return New(fs, v, log).Handler()
+	return newConfiguredTestAPI(fs, v, log).Handler()
+}
+
+func newConfiguredTestAPI(fs agent.Streamer, v *auth.Verifier, log logger.Logger) *API {
+	return newConfiguredTestAPIWithConvo(fs, v, log, convo.NewMemory())
+}
+
+func newConfiguredTestAPIWithConvo(fs agent.Streamer, v *auth.Verifier, log logger.Logger, conversations convo.Store) *API {
+	return New(fs, v, log).
+		WithConvoStore(conversations).
+		WithChatRuns(chatrun.NewMemory(conversations), RunConfig{
+			RunTimeout: time.Minute, PingEvery: time.Hour,
+			MergeWindow: time.Millisecond, DraftInterval: time.Millisecond,
+		})
 }
 
 func TestHealthz(t *testing.T) {
@@ -82,6 +96,17 @@ func TestHealthz(t *testing.T) {
 	}
 	if !strings.Contains(rec.Body.String(), "ok") {
 		t.Fatalf("health body = %q", rec.Body.String())
+	}
+}
+
+func TestChatRequiresRunStore(t *testing.T) {
+	h := New(&fakeStreamer{}, auth.NewVerifier(auth.Config{}), logger.Must()).Handler()
+	rec := httptest.NewRecorder()
+	h.ServeHTTP(rec, httptest.NewRequest("POST", "/v1/chat", strings.NewReader(
+		`{"prompt":"hi","session_id":"s1"}`,
+	)))
+	if rec.Code != http.StatusServiceUnavailable {
+		t.Fatalf("want 503 without run store, got %d", rec.Code)
 	}
 }
 
@@ -120,141 +145,51 @@ func TestChatStreamsSSE(t *testing.T) {
 }
 
 func TestChatConsumesInternalTraceEvents(t *testing.T) {
-	fs := &fakeStreamer{delay: 5 * time.Millisecond, script: []agent.Event{
+	fs := &fakeStreamer{script: []agent.Event{
 		{Kind: "trace", Data: map[string]string{
-			"name":        "sandbox.create",
-			"category":    "sandbox",
-			"service":     "agent-runtime",
-			"duration_ms": "1",
-			"status":      "ok",
-			"sandbox_id":  "box-1",
-			"reused":      "false",
-		}},
-		{Kind: "environment_prepare", Data: map[string]string{
-			"snapshot": `{"schema_version":1,"state":"ready","components":[]}`,
+			"name": "sandbox.create", "category": "sandbox", "service": "agent-runtime",
+			"duration_ms": "1", "status": "ok", "sandbox_id": "box-1", "reused": "false",
 		}},
 		{Kind: "trace", Data: map[string]string{
-			"name": "sandbox.mcp_config_load", "category": "agent_init", "service": "agent-runtime",
-			"duration_ms": "1", "status": "success",
+			"name": "sandbox.mcp_config_load", "category": "agent_init",
+			"service": "agent-runtime", "duration_ms": "1", "status": "success",
 		}},
-		{Kind: "environment_status", Data: map[string]string{"phase": "ready"}},
 		{Kind: "text", Data: map[string]string{"text": "hello"}},
 		{Kind: "done", Data: map[string]string{"reason": "stop"}},
 	}}
 	trace := &fakeTraceStore{}
-	h := New(fs, auth.NewVerifier(auth.Config{}), logger.Must()).WithTraceStore(trace).Handler()
+	h := newConfiguredTestAPI(fs, auth.NewVerifier(auth.Config{}), logger.Must()).WithTraceStore(trace).Handler()
 
-	req := httptest.NewRequest("POST", "/v1/chat", strings.NewReader(`{"prompt":"hi","session_id":"s1"}`))
 	rec := httptest.NewRecorder()
-	h.ServeHTTP(rec, req)
-
+	h.ServeHTTP(rec, httptest.NewRequest("POST", "/v1/chat", strings.NewReader(
+		`{"prompt":"hi","session_id":"s1"}`,
+	)))
 	if rec.Code != http.StatusOK {
 		t.Fatalf("want 200, got %d", rec.Code)
 	}
-	body := rec.Body.String()
-	if strings.Contains(body, "event: trace") {
-		t.Fatalf("internal trace event leaked to SSE: %s", body)
+	if strings.Contains(rec.Body.String(), "event: trace") {
+		t.Fatalf("internal trace event leaked to SSE: %s", rec.Body.String())
 	}
-	if !strings.Contains(body, "event: text\n") {
-		t.Fatalf("missing text SSE: %s", body)
-	}
-	found := false
-	for _, event := range trace.spans {
-		if event.Name != "sandbox.create" {
-			continue
-		}
-		found = true
-		if event.Service != "agent-runtime" || event.Category != "sandbox" || event.DurationUS != 1000 {
-			t.Fatalf("bad trace event: %+v", event)
-		}
-		if event.Attributes["sandbox_id"] != "box-1" || event.Attributes["reused"] != "false" {
-			t.Fatalf("bad trace metadata: %+v", event.Attributes)
-		}
-	}
-	if !found {
-		t.Fatalf("sandbox.create trace event not recorded: %+v", trace.spans)
-	}
+
 	latest := make(map[string]traceevents.Span)
 	for _, span := range trace.spans {
-		latest[span.SpanID] = span
+		latest[span.Name] = span
 	}
-	var rootID, environmentID, agentID, agentInitID string
-	phaseNames := map[string]bool{}
-	for _, span := range latest {
-		phaseNames[span.Name] = true
-		switch span.Name {
-		case "conversation.run":
-			rootID = span.SpanID
-		case "environment.prepare":
-			environmentID = span.SpanID
-		case "agent.execute":
-			agentID = span.SpanID
-		case "agent.initialize":
-			agentInitID = span.SpanID
-		}
-		if strings.Contains(span.Name, "first_") || span.Name == "agent.stream" {
-			t.Fatalf("milestone recorded as a span: %+v", span)
+	root := latest["conversation.run"]
+	if root.SpanID == "" {
+		t.Fatalf("missing conversation root: %+v", trace.spans)
+	}
+	for _, name := range []string{"sandbox.create", "sandbox.mcp_config_load"} {
+		span := latest[name]
+		if span.SpanID == "" || span.ParentSpanID != root.SpanID {
+			t.Fatalf("trace %q is not attached to root: %+v", name, span)
 		}
 	}
-	for _, name := range []string{"conversation.run", "request.prepare", "environment.prepare", "environment.runtime_dispatch", "agent.execute", "agent.initialize", "agent.sdk_initialize", "run.finalize"} {
-		if !phaseNames[name] {
-			t.Fatalf("missing hierarchy span %q: %+v", name, latest)
-		}
+	if latest["sandbox.create"].Attributes["sandbox_id"] != "box-1" {
+		t.Fatalf("sandbox trace metadata = %+v", latest["sandbox.create"].Attributes)
 	}
-	if rootID == "" || environmentID == "" || agentID == "" || agentInitID == "" {
-		t.Fatalf("incomplete hierarchy root=%q environment=%q agent=%q init=%q", rootID, environmentID, agentID, agentInitID)
-	}
-	for _, span := range latest {
-		if span.Name == "request.prepare" || span.Name == "environment.prepare" || span.Name == "agent.execute" || span.Name == "run.finalize" {
-			if span.ParentSpanID != rootID {
-				t.Fatalf("phase %q parent=%q want root %q", span.Name, span.ParentSpanID, rootID)
-			}
-		}
-		if span.Name == "sandbox.create" && span.ParentSpanID != environmentID {
-			t.Fatalf("sandbox parent=%q want environment %q", span.ParentSpanID, environmentID)
-		}
-		if span.Name == "environment.runtime_dispatch" {
-			if span.ParentSpanID != environmentID || span.DurationUS <= 0 {
-				t.Fatalf("runtime dispatch span not attached to environment: %+v", span)
-			}
-		}
-		if span.Name == "agent.initialize" && span.ParentSpanID != agentID {
-			t.Fatalf("agent initialize parent=%q want agent %q", span.ParentSpanID, agentID)
-		}
-		if span.Name == "sandbox.mcp_config_load" || span.Name == "agent.sdk_initialize" {
-			if span.ParentSpanID != agentInitID {
-				t.Fatalf("agent initialization child has wrong parent: %+v", span)
-			}
-		}
-	}
-	if fs.gotQuery.ParentSpanID != agentID {
-		t.Fatalf("agent query parent=%q want agent phase %q", fs.gotQuery.ParentSpanID, agentID)
-	}
-	phases := make(map[string]traceevents.Span)
-	for _, span := range latest {
-		phases[span.Name] = span
-	}
-	spanEnd := func(span traceevents.Span) time.Time {
-		return span.StartedAt.Add(time.Duration(span.DurationUS) * time.Microsecond)
-	}
-	ordered := []traceevents.Span{
-		phases["request.prepare"],
-		phases["environment.prepare"],
-		phases["agent.execute"],
-		phases["run.finalize"],
-	}
-	for index := 0; index < len(ordered)-1; index++ {
-		if spanEnd(ordered[index]).After(ordered[index+1].StartedAt) {
-			t.Fatalf("phase overlap: %q ends %s after %q starts %s", ordered[index].Name, spanEnd(ordered[index]), ordered[index+1].Name, ordered[index+1].StartedAt)
-		}
-	}
-	var phaseDurationUS int64
-	for _, phase := range ordered {
-		phaseDurationUS += phase.DurationUS
-	}
-	root := phases["conversation.run"]
-	if phaseDurationUS > root.DurationUS {
-		t.Fatalf("phase duration %dus exceeds root %dus", phaseDurationUS, root.DurationUS)
+	if fs.gotQuery.ParentSpanID != root.SpanID {
+		t.Fatalf("agent query parent=%q want root %q", fs.gotQuery.ParentSpanID, root.SpanID)
 	}
 }
 
@@ -265,7 +200,7 @@ func TestChatConversationRunExcludesPrompt(t *testing.T) {
 	}}
 	trace := &fakeTraceStore{}
 	v := auth.NewVerifier(auth.Config{})
-	h := New(fs, v, logger.Must()).WithTraceStore(trace).Handler()
+	h := newConfiguredTestAPI(fs, v, logger.Must()).WithTraceStore(trace).Handler()
 
 	req := httptest.NewRequest(
 		http.MethodPost,
@@ -319,7 +254,7 @@ func TestChatPersistsAssistantModelMetadata(t *testing.T) {
 	}}
 	store := convo.NewMemory()
 	v := auth.NewVerifier(auth.Config{})
-	h := New(fs, v, logger.Must()).WithConvoStore(store).Handler()
+	h := newConfiguredTestAPIWithConvo(fs, v, logger.Must(), store).Handler()
 
 	req := httptest.NewRequest(
 		"POST",
@@ -380,7 +315,7 @@ func TestChatStreamErrorBecomesTerminalEvent(t *testing.T) {
 		err:    context.DeadlineExceeded,
 	}
 	h := newAPI(t, fs)
-	req := httptest.NewRequest("POST", "/v1/chat", strings.NewReader(`{"prompt":"hi"}`))
+	req := httptest.NewRequest("POST", "/v1/chat", strings.NewReader(`{"prompt":"hi","session_id":"s1"}`))
 	rec := httptest.NewRecorder()
 	h.ServeHTTP(rec, req)
 
@@ -395,13 +330,13 @@ func TestChatUsesIdentityUserID(t *testing.T) {
 	// not from the request body (which has no user_id field anyway).
 	fs := &fakeStreamer{script: []agent.Event{{Kind: "done"}}}
 	v := auth.NewVerifier(auth.Config{Secret: "s", Issuer: "cocola"})
-	h := New(fs, v, logger.Must()).Handler()
+	h := newConfiguredTestAPI(fs, v, logger.Must()).Handler()
 
 	tok, err := token.Encode(token.Claims{Subject: "emp-42", Issuer: "cocola"}, "s")
 	if err != nil {
 		t.Fatalf("encode: %v", err)
 	}
-	req := httptest.NewRequest("POST", "/v1/chat", strings.NewReader(`{"prompt":"hi"}`))
+	req := httptest.NewRequest("POST", "/v1/chat", strings.NewReader(`{"prompt":"hi","session_id":"s1"}`))
 	req.Header.Set("authorization", "Bearer "+tok)
 	rec := httptest.NewRecorder()
 	h.ServeHTTP(rec, req)
@@ -417,9 +352,9 @@ func TestChatUsesIdentityUserID(t *testing.T) {
 func TestChatRequiresAuthWhenEnabled(t *testing.T) {
 	fs := &fakeStreamer{}
 	v := auth.NewVerifier(auth.Config{Secret: "s", Issuer: "cocola"})
-	h := New(fs, v, logger.Must()).Handler()
+	h := newConfiguredTestAPI(fs, v, logger.Must()).Handler()
 
-	req := httptest.NewRequest("POST", "/v1/chat", strings.NewReader(`{"prompt":"hi"}`))
+	req := httptest.NewRequest("POST", "/v1/chat", strings.NewReader(`{"prompt":"hi","session_id":"s1"}`))
 	rec := httptest.NewRecorder()
 	h.ServeHTTP(rec, req)
 	if rec.Code != http.StatusUnauthorized {
@@ -434,9 +369,9 @@ func TestMetricsInstrumentation(t *testing.T) {
 	fs := &fakeStreamer{script: []agent.Event{{Kind: "done"}}}
 	v := auth.NewVerifier(auth.Config{})
 	reg := metrics.New("gateway-test")
-	h := New(fs, v, logger.Must()).WithMetrics(reg).Handler()
+	h := newConfiguredTestAPI(fs, v, logger.Must()).WithMetrics(reg).Handler()
 
-	req := httptest.NewRequest("POST", "/v1/chat", strings.NewReader(`{"prompt":"hi"}`))
+	req := httptest.NewRequest("POST", "/v1/chat", strings.NewReader(`{"prompt":"hi","session_id":"s1"}`))
 	rec := httptest.NewRecorder()
 	h.ServeHTTP(rec, req)
 	if rec.Code != http.StatusOK {
@@ -472,7 +407,7 @@ func TestChatDecodesAndForwardsAttachments(t *testing.T) {
 	fs := &fakeStreamer{script: []agent.Event{{Kind: "done"}}}
 	h := newAPI(t, fs)
 
-	body := `{"prompt":"hi","attachments":[{"filename":"a.txt","content_b64":"aGVsbG8=","mime":"text/plain"}]}`
+	body := `{"prompt":"hi","session_id":"s1","attachments":[{"filename":"a.txt","content_b64":"aGVsbG8=","mime":"text/plain"}]}`
 	req := httptest.NewRequest("POST", "/v1/chat", strings.NewReader(body))
 	rec := httptest.NewRecorder()
 	h.ServeHTTP(rec, req)
@@ -498,7 +433,7 @@ func TestChatDropsAttachmentWithInvalidBase64(t *testing.T) {
 	fs := &fakeStreamer{script: []agent.Event{{Kind: "done"}}}
 	h := newAPI(t, fs)
 
-	body := `{"prompt":"hi","attachments":[{"filename":"bad.bin","content_b64":"!!!not-base64!!!","mime":"application/octet-stream"}]}`
+	body := `{"prompt":"hi","session_id":"s1","attachments":[{"filename":"bad.bin","content_b64":"!!!not-base64!!!","mime":"application/octet-stream"}]}`
 	req := httptest.NewRequest("POST", "/v1/chat", strings.NewReader(body))
 	rec := httptest.NewRecorder()
 	h.ServeHTTP(rec, req)
@@ -539,7 +474,7 @@ func newAPIWithStore(t *testing.T, fs *fakeStreamer, store *fakeObjStore, thresh
 	t.Helper()
 	v := auth.NewVerifier(auth.Config{})
 	log := logger.Must()
-	return New(fs, v, log).WithObjStore(store, threshold).Handler()
+	return newConfiguredTestAPI(fs, v, log).WithObjStore(store, threshold).Handler()
 }
 
 func TestChatUploadsAndSplitsBelowThreshold(t *testing.T) {
@@ -609,7 +544,7 @@ func TestChatWithoutStoreStaysInline(t *testing.T) {
 	fs := &fakeStreamer{script: []agent.Event{{Kind: "done"}}}
 	h := newAPI(t, fs) // no store wired
 
-	body := `{"prompt":"hi","attachments":[{"filename":"a.txt","content_b64":"` + b64("hello") + `"}]}`
+	body := `{"prompt":"hi","session_id":"s1","attachments":[{"filename":"a.txt","content_b64":"` + b64("hello") + `"}]}`
 	rec := httptest.NewRecorder()
 	h.ServeHTTP(rec, httptest.NewRequest("POST", "/v1/chat", strings.NewReader(body)))
 
