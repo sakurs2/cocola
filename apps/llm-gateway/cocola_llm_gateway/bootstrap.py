@@ -40,7 +40,6 @@ from cocola_llm_gateway.billing.postgres_ledger import PostgresLedger
 from cocola_llm_gateway.config import (
     auth_config_from_env,
     gateway_config_from_env,
-    load_registry,
     quota_policy_from_env,
 )
 from cocola_llm_gateway.conversation_trace import ConversationTraceStore
@@ -58,6 +57,7 @@ from cocola_llm_gateway.quota import (
 )
 from cocola_llm_gateway.quota.policy import QuotaPolicy
 from cocola_llm_gateway.quota.postgres_store import MirroredQuotaStore, PostgresQuotaStore
+from cocola_llm_gateway.registry import Registry
 from cocola_llm_gateway.service import GatewayService
 
 log = get_logger("cocola.llm-gateway.bootstrap")
@@ -135,7 +135,10 @@ def build_enforcer(policy: QuotaPolicy | None = None) -> Enforcer | None:
 
 
 def build_service() -> GatewayService:
-    registry = load_registry()
+    # Admin/Postgres is the sole production model source. An empty fallback
+    # keeps startup deterministic when Postgres is absent or has no configured
+    # model; requests then fail explicitly instead of silently using Fake.
+    registry = Registry({}, {}, "")
     registry_source = registry_source_from_env(registry)
     gcfg = gateway_config_from_env()
     policy = ResiliencePolicy(

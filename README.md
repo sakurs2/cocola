@@ -74,29 +74,16 @@ make prod  # 正式/完整 Docker 启动：scripts/start.sh + docker-compose.ful
 > `COCOLA_SANDBOX_LLM_BASE_URL` 回连它。`make dev` 会自动把 agent-runtime 指向本机
 > sandbox-manager，并把 sandbox-manager 指向准备好的 OpenSandbox server。
 
-#### 接入你购买的模型(全链路真实测试)
+#### 接入模型
 
-要跑真实模型,把上游配置写进仓库根的 `.env`(已被 `.gitignore` 忽略),
-`make dev` / `make prod` 启动时会自动加载它:
+启动后在 `Admin -> Models` 中配置 Provider、endpoint、API key、模型路由和默认
+模型。模型目录以 Postgres 为唯一事实源，LLM Gateway 自动加载变更；不再支持一份
+独立的模型 JSON 或 provider 环境变量，避免 Web、Agent Runtime 和 LLM Gateway
+读取到不同配置。API key 加密保存，不写入仓库文件。
 
-```bash
-cp .env.example .env
-# 编辑 .env:填入你购买的 Anthropic 兼容服务
-#   COCOLA_LLM_PROVIDER=anthropic
-#   COCOLA_ANTHROPIC_BASE_URL=https://你的服务域名
-#   COCOLA_ANTHROPIC_API_KEY=sk-ant-xxxx
-make dev         # dev 调试栈，llm-gateway 接到你的上游 + 真实 Route A 链路 + 前端
-```
-
-需要多模型 / 别名与真实模型解耦 / 自定义计费时,改用配置文件:复制
-`deploy/llm-config.example.json` 为 `deploy/llm-config.json`,在 `.env` 里设
-`COCOLA_LLM_CONFIG=deploy/llm-config.json`。密钥始终走 `api_key_env` 间接引用,
-绝不写进配置文件(ADR-0004 硬约束)。
-
-> 鉴权闭环:`run-stack.sh` 在真实 LLM 模式下,会把 `admin-mint` 签出的令牌同时
-> 注入 agent-runtime 作为 SDK 的 `ANTHROPIC_API_KEY`——网关用同一个
+> 鉴权闭环:`run-stack.sh` 会把 `admin-mint` 签出的令牌注入 sandbox——网关用同一个
 > `COCOLA_AUTH_SECRET` 离线校验它并按令牌主体计费,无需手动配 key。agent 发给
-> 网关的模型别名固定为 `cocola-default`(与 env / 文件两种配法注册的 route 对齐)。
+> 网关的模型别名由 Admin 模型目录选择并解析。
 
 > 当前里程碑：**Route A 真实模型全链路打通** — 已完成 M0–M5、后端 MVP，并落地
 > ADR-0009 的 Route A（Claude Code 大脑进沙箱），接入真实模型，Web 端对话与原生
@@ -174,7 +161,7 @@ make dev         # dev 调试栈，llm-gateway 接到你的上游 + 真实 Route
 > export COCOLA_SANDBOX_LLM_TOKEN=<cocola 签发令牌>
 > export COCOLA_SANDBOX_MODEL_ALIAS=cocola-default   # 网关 registry 解析为真实模型
 > cd apps/agent-runtime && uv run python -m cocola_agent_runtime
-> # llm-gateway 侧用真实上游：COCOLA_LLM_PROVIDER=anthropic + COCOLA_ANTHROPIC_API_KEY
+> # llm-gateway 侧的真实上游在 Admin -> Models 中配置
 > ```
 >
 > > 注：早期的中心化 SDK 路径（Route B，`ClaudeAgentSDKProvider` 在

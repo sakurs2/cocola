@@ -1,6 +1,6 @@
 # ADR-0002: SandboxProvider abstraction — no direct K8s/Docker coupling
 
-- Status: Accepted（抽象本身;但 K8s+gVisor 这一具体后端预期已由 ADR-0014 收敛——k8s provider 退役、OpenSandbox 为主力)
+- Status: Accepted（抽象保留为内部边界；生产 backend 选择配置已由 ADR-0020 收敛为 OpenSandbox）
 - Date: 2026-06-09
 - Deciders: @wangjiahui
 
@@ -46,8 +46,8 @@ Key rules, enforced by package layout:
 - Concrete backends live under `internal/provider/<name>/` and either are
   selected by an explicit `case` in the `newProvider` factory or self-register
   via `provider.Register(name, impl)` in their `init()`.
-- The backend is chosen at startup from `COCOLA_SANDBOX_PROVIDER`
-  (default `docker`). Nothing below the factory knows which backend is live.
+- OpenSandbox is the only production backend (ADR-0020). Nothing below the
+  provider boundary depends on its concrete transport.
 - Adding a backend = one new package + (at most) one `case` line. No edits to
   the service, the proto, or the Agent runtime.
 

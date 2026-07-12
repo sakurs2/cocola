@@ -101,7 +101,6 @@ services:
       # bundled provider. The server is NOT on this compose network -- it is
       # published on the host by scripts/start.sh -- so point the URL at
       # host.docker.internal:<host_port>/v1 (note the /v1 suffix).
-      COCOLA_SANDBOX_PROVIDER: "${COCOLA_SANDBOX_PROVIDER:-opensandbox}"
       COCOLA_OPENSANDBOX_URL: "${COCOLA_OPENSANDBOX_URL:-http://host.docker.internal:8090/v1}"
       COCOLA_OPENSANDBOX_API_KEY: "${COCOLA_OPENSANDBOX_API_KEY:-}"
       COCOLA_OPENSANDBOX_DEFAULT_CPU: "${COCOLA_OPENSANDBOX_DEFAULT_CPU:-}"
@@ -162,16 +161,12 @@ services:
       COCOLA_LLM_PORT: "8080"
       COCOLA_LLM_TIMEOUT_SECS: "${COCOLA_LLM_TIMEOUT_SECS:-300}"
       COCOLA_LLM_REDIS_URL: "redis://redis:6379/0"
-      # Real model: provider + endpoint + key + model come from the repo-root
-      # .env via compose substitution. Default to "fake" so a bare `up` (no
-      # --env-file) still boots zero-config. We deliberately do NOT forward
-      # COCOLA_AUTH_SECRET here: that would switch gateway auth ON and break the
-      # dev anonymous-token flow; auth enablement is a separate milestone.
-      COCOLA_LLM_PROVIDER: "${COCOLA_LLM_PROVIDER:-fake}"
-      COCOLA_LLM_DEFAULT_ALIAS: "cocola-default"
-      COCOLA_ANTHROPIC_BASE_URL: "${COCOLA_ANTHROPIC_BASE_URL:-}"
-      COCOLA_ANTHROPIC_API_KEY: "${COCOLA_ANTHROPIC_API_KEY:-}"
-      COCOLA_ANTHROPIC_MODEL: "${COCOLA_ANTHROPIC_MODEL:-}"
+      COCOLA_AUTH_SECRET: "${COCOLA_AUTH_SECRET:-}"
+      COCOLA_AUTH_ISSUER: "${COCOLA_AUTH_ISSUER:-cocola}"
+      COCOLA_AUTH_ALLOW_ANON: "${COCOLA_AUTH_ALLOW_ANON:-0}"
+      # Providers, routes, endpoints and encrypted API keys are managed by
+      # admin-api in Postgres. The same auth secret is shared with Gateway so
+      # per-user sandbox tokens retain their identity at this hop.
       COCOLA_MODEL_SECRET_KEY: "${COCOLA_MODEL_SECRET_KEY:-cocola-local-model-secret}"
       COCOLA_CONFIG_SECRET_KEY: "${COCOLA_CONFIG_SECRET_KEY:-cocola-local-model-secret}"
       # M7 persistence: when COCOLA_PG_DSN is set the service persists to
@@ -264,7 +259,7 @@ services:
       COCOLA_AGENT_RUN_TIMEOUT_SECS: "${COCOLA_AGENT_RUN_TIMEOUT_SECS:-3600}"
       COCOLA_SANDBOX_HEARTBEAT_SECS: "${COCOLA_SANDBOX_HEARTBEAT_SECS:-20}"
       COCOLA_SANDBOX_ADDR: "sandbox-manager:50051"
-      COCOLA_ADMIN_BASE_URL: "http://admin-api:8090"
+      COCOLA_ADMIN_URL: "http://admin-api:8090"
       COCOLA_ADMIN_KEY: "${COCOLA_ADMIN_KEY:-}"
       # Route A (ADR-0009): the agent-runtime slim image has no node/claude CLI,
       # so the Claude Code brain runs INSIDE the user's sandbox (the

@@ -1001,7 +1001,6 @@ func userSkillID(userID, skillID string) string {
 const (
 	ProviderAnthropic    = "anthropic"
 	ProviderOpenAICompat = "openai_compat"
-	ProviderFake         = "fake"
 	RuntimeClaudeCode    = "claude-code"
 	IconSimpleIcons      = "simple-icons"
 	IconImage            = "image"
@@ -1084,7 +1083,7 @@ func (a *Admin) UpdateLLMProvider(ctx context.Context, id string, in LLMProvider
 		}
 		provider.Type = ptype
 	}
-	if in.BaseURL != "" || provider.Type == ProviderFake {
+	if in.BaseURL != "" {
 		provider.BaseURL = strings.TrimSpace(in.BaseURL)
 	}
 	if in.Enabled != nil {
@@ -1336,7 +1335,7 @@ func maskAPIKey(key string) string {
 }
 
 func validateProviderReady(provider store.LLMProvider) error {
-	if provider.Type != ProviderFake && provider.Enabled {
+	if provider.Enabled {
 		if provider.BaseURL == "" || provider.APIKeyCiphertext == "" {
 			return ErrInvalidArg
 		}
@@ -1357,7 +1356,7 @@ func normalizeProviderType(v string) string {
 }
 
 func validProviderType(v string) bool {
-	return v == ProviderAnthropic || v == ProviderOpenAICompat || v == ProviderFake
+	return v == ProviderAnthropic || v == ProviderOpenAICompat
 }
 
 func validIcon(route store.LLMModelRoute) bool {

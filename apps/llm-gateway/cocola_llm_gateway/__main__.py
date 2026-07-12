@@ -2,10 +2,11 @@
 
 Run:
     python -m cocola_llm_gateway
-Env knobs (see config.py / bootstrap.py): COCOLA_LLM_PROVIDER,
-COCOLA_LLM_DEFAULT_ALIAS, COCOLA_LLM_CONFIG, COCOLA_LLM_REDIS_URL,
-COCOLA_LLM_HOST/PORT, COCOLA_*_API_KEY, COCOLA_AUTH_SECRET,
+Env knobs (see config.py / bootstrap.py): COCOLA_LLM_REDIS_URL,
+COCOLA_LLM_HOST/PORT, COCOLA_PG_DSN, COCOLA_AUTH_SECRET,
 COCOLA_QUOTA_USER_DAILY_TOKENS ...
+
+Providers and model routes are managed in Admin and loaded from Postgres.
 
 Point the Claude Agent SDK at it with:
     ANTHROPIC_BASE_URL=http://<host>:<port>

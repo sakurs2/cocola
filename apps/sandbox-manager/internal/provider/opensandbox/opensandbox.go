@@ -53,8 +53,7 @@ import (
 	"github.com/cocola-project/cocola/apps/sandbox-manager/internal/provider"
 )
 
-// ProviderName is the registry key used in config to select this backend
-// (COCOLA_SANDBOX_PROVIDER=opensandbox).
+// ProviderName is the registry key for the production sandbox backend.
 const ProviderName = "opensandbox"
 
 func init() {

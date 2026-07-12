@@ -4,7 +4,12 @@ from __future__ import annotations
 
 import json
 
-from cocola_agent_runtime.prompt_loader import AdminPromptCatalog, PromptMarker, StaticPromptCatalog
+import pytest
+from cocola_agent_runtime.prompt_loader import (
+    AdminPromptCatalog,
+    PromptMarker,
+    StaticPromptCatalog,
+)
 
 
 def _fetcher(payload, calls=None):
@@ -38,13 +43,27 @@ def test_admin_prompt_catalog_fetches_effective_prompt_for_user():
     assert calls[0][1]["Authorization"] == "Bearer k"
 
 
-def test_admin_prompt_catalog_degrades_to_empty_on_failure():
+def test_admin_prompt_catalog_fails_closed_without_last_good_policy():
     def boom(url, headers, timeout):
         raise RuntimeError("offline")
 
-    assert (
-        AdminPromptCatalog("http://admin", fetcher=boom).effective_prompt("u").system_prompt == ""
-    )
+    with pytest.raises(RuntimeError, match="prompt policy is unavailable"):
+        AdminPromptCatalog("http://admin", fetcher=boom).effective_prompt("u")
+
+
+def test_admin_prompt_catalog_uses_last_good_policy_on_refresh_failure():
+    calls = 0
+
+    def fetch(url, headers, timeout):
+        nonlocal calls
+        calls += 1
+        if calls > 1:
+            raise RuntimeError("offline")
+        return json.dumps({"system_prompt": "Keep data private."}).encode()
+
+    catalog = AdminPromptCatalog("http://admin", fetcher=fetch)
+    assert catalog.effective_prompt("u").system_prompt == "Keep data private."
+    assert catalog.effective_prompt("u").system_prompt == "Keep data private."
 
 
 def test_static_prompt_catalog_returns_copy():

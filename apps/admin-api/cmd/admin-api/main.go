@@ -227,12 +227,22 @@ func main() {
 		}
 	}
 	if warmPoolWriter != nil {
-		// Reconcile the shared warm-pool config key with the current DB/env state
-		// at boot so sandbox-manager sees the admin-configured sizing even if no
-		// update has happened since the last restart.
-		bctx, bcancel := context.WithTimeout(context.Background(), 5*time.Second)
-		svc.PublishWarmPoolConfig(bctx)
-		bcancel()
+		syncWarmPool := func() {
+			ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+			defer cancel()
+			if err := svc.PublishWarmPoolConfig(ctx); err != nil {
+				log.Sugar().Errorw("warm-pool config reconciliation failed", "err", err)
+			}
+		}
+		syncWarmPool()
+		go func() {
+			ticker := time.NewTicker(5 * time.Second)
+			defer ticker.Stop()
+			for range ticker.C {
+				syncWarmPool()
+			}
+		}()
+		log.Info("warm-pool sizing hot reload enabled")
 	}
 	if email := os.Getenv("COCOLA_BOOTSTRAP_ADMIN_EMAIL"); email != "" {
 		username := os.Getenv("COCOLA_BOOTSTRAP_ADMIN_USERNAME")

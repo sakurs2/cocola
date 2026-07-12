@@ -33,10 +33,10 @@ const (
 	warmClaimVerify = 3 * time.Second
 )
 
-// WarmConfig is the pre-warm pool's provisioning + sizing configuration. Sizing
-// (Enabled/Size) is the admin-tunable part and can be overridden at runtime via
-// a shared Redis key (see effectiveWarmSizing); Image/Env are process-level
-// provisioning inputs the background loop needs to create session-agnostic
+// WarmConfig combines sizing defaults with startup provisioning. Enabled/Size
+// can be overridden at runtime by the admin-managed Redis delivery value;
+// RefillEvery/Image/Env require a controlled sandbox-manager restart. Image/Env
+// are provisioning inputs the background loop needs to create session-agnostic
 // sandboxes on its own (agent-runtime is not in the loop for warm creates, so
 // sandbox-manager must carry the brain image + LLM credentials itself).
 type WarmConfig struct {
@@ -48,9 +48,8 @@ type WarmConfig struct {
 }
 
 // WarmConfigFromEnv reads the warm-pool provisioning + default sizing from the
-// environment. Sizing defaults to enabled with DefaultWarmPoolSize so a stock
-// deployment gets a warm pool out of the box; the admin config page (via the
-// shared Redis override) can flip it off or resize it without a restart.
+// environment. Sizing defaults to enabled with DefaultWarmPoolSize; Admin can
+// hot-adjust only the enabled flag and idle target.
 //
 // The LLM credentials + brain image mirror what agent-runtime injects on the
 // Acquire path (COCOLA_SANDBOX_IMAGE / COCOLA_SANDBOX_LLM_BASE_URL /
@@ -114,36 +113,35 @@ func (b *Binder) WithWarmPool(cfg WarmConfig) *Binder {
 	return b
 }
 
-// WarmEnabled reports whether a usable warm pool is configured (feature on and a
-// brain image to create from).
+// WarmEnabled reports whether the reconciliation loop is usable. It deliberately
+// ignores the current Enabled value: a hot transition to disabled still needs
+// the loop running so it can drain idle warm sandboxes.
 func (b *Binder) WarmEnabled() bool {
 	return b.warm != nil && b.warm.Image != ""
 }
 
-// warmSizing is the runtime-effective (enabled,size) after the admin override.
 type warmSizing struct {
 	Enabled bool `json:"enabled"`
 	Size    int  `json:"size"`
 }
 
-// effectiveWarmSizing resolves the live warm-pool sizing: a shared Redis config
-// key written by admin-api (hot-reload from the admin config page) wins over the
-// process env/default baked into b.warm. A malformed/absent key falls back to
-// the baseline so a bad write can never wedge the pool.
-func (b *Binder) effectiveWarmSizing(ctx context.Context) warmSizing {
-	base := warmSizing{Enabled: b.warm.Enabled, Size: b.warm.Size}
+// effectiveWarmSizing reads the hot sizing delivery value. Missing, malformed,
+// or temporarily unreadable data makes the current reconcile tick inert. This
+// avoids resizing to a startup fallback while admin-api is restoring the
+// authoritative Postgres value after a Redis restart.
+func (b *Binder) effectiveWarmSizing(ctx context.Context) (warmSizing, bool) {
 	raw, err := b.kv.Get(ctx, warmConfigKey)
 	if err != nil || raw == "" {
-		return base
+		return warmSizing{}, false
 	}
-	var override warmSizing
-	if err := json.Unmarshal([]byte(raw), &override); err != nil {
-		return base
+	var sizing warmSizing
+	if err := json.Unmarshal([]byte(raw), &sizing); err != nil {
+		return warmSizing{}, false
 	}
-	if override.Size < 0 {
-		override.Size = 0
+	if sizing.Size < 0 {
+		sizing.Size = 0
 	}
-	return override
+	return sizing, true
 }
 
 // pruneDeadWarm probes every recorded warm sandbox and drops the Redis record of
@@ -211,7 +209,10 @@ func (b *Binder) RunWarmPool(ctx context.Context) {
 // every tick (not just at startup) so a manually deleted / drained pod is
 // reconciled within one RefillEvery instead of lingering as a phantom.
 func (b *Binder) reconcileWarmOnce(ctx context.Context) {
-	sizing := b.effectiveWarmSizing(ctx)
+	sizing, ok := b.effectiveWarmSizing(ctx)
+	if !ok {
+		return
+	}
 	target := sizing.Size
 	if !sizing.Enabled {
 		target = 0

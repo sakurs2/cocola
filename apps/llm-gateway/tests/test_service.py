@@ -1,5 +1,6 @@
 import pytest
 from cocola_common import CocolaError, ErrorCode
+from cocola_llm_gateway.service import GatewayService
 from cocola_llm_gateway.types import ChatMessage, ChatParams, ChatRequest, StreamEventType
 from tests.conftest import build_service
 
@@ -52,3 +53,29 @@ async def test_metering_fires_even_when_consumer_stops_early():
     assert len(recent) == 1
     # Aborted before MESSAGE_DELTA -> completion_tokens may be 0 but a record exists.
     assert recent[0].prompt_tokens == 3
+
+
+async def test_registry_lease_is_released_after_stream():
+    base, ledger = build_service(reply="abcdef")
+
+    class LeaseSource:
+        def __init__(self):
+            self.acquired = 0
+            self.released = 0
+
+        async def acquire_registry(self):
+            self.acquired += 1
+            return base.registry
+
+        async def release_registry(self, registry):
+            assert registry is base.registry
+            self.released += 1
+
+        async def aclose(self):
+            return None
+
+    source = LeaseSource()
+    svc = GatewayService(base.registry, ledger, registry_source=source)
+    _ = [event async for event in svc.chat_stream(_req(), requested_alias="default")]
+    assert source.acquired == 1
+    assert source.released == 1

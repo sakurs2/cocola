@@ -52,9 +52,9 @@ def test_trims_trailing_newline_only(tmp_path, monkeypatch):
 def test_resolve_secret_routes_through_file(tmp_path, monkeypatch):
     p = tmp_path / "upstream_key"
     p.write_text("sk-from-file\n")
-    monkeypatch.setenv("COCOLA_ANTHROPIC_API_KEY_FILE", str(p))
-    monkeypatch.delenv("COCOLA_ANTHROPIC_API_KEY", raising=False)
-    cfg = {"api_key_env": "COCOLA_ANTHROPIC_API_KEY"}
+    monkeypatch.setenv("TEST_UPSTREAM_API_KEY_FILE", str(p))
+    monkeypatch.delenv("TEST_UPSTREAM_API_KEY", raising=False)
+    cfg = {"api_key_env": "TEST_UPSTREAM_API_KEY"}
     assert _resolve_secret(cfg, "api_key", "api_key_env") == "sk-from-file"
 
 

@@ -512,6 +512,21 @@ async def test_query_loads_admin_prompt_into_options_and_trace():
     assert "Prefer concise answers." not in json.dumps(dict(prompt_trace.data))
 
 
+async def test_query_stops_when_admin_prompt_policy_is_unavailable():
+    class BrokenPrompts:
+        def effective_prompt(self, user_id):
+            raise RuntimeError("admin unavailable")
+
+    prov = ListProvider([AgentEvent(kind="done", data={})])
+    ctx = FakeContext()
+    await AgentRuntimeServicer(prov, prompts=BrokenPrompts()).Query(FakeRequest(), ctx)
+
+    assert prov.seen_options is None
+    errors = [event for event in ctx.written if event.kind == "error"]
+    assert len(errors) == 1
+    assert errors[0].data["code"] == "PROMPT_POLICY_UNAVAILABLE"
+
+
 async def test_query_maps_request_fields_to_options():
     prov = ListProvider([AgentEvent(kind="done", data={})])
     req = FakeRequest(user_id="emp-9", session_id="sess-7", sandbox_id="box-1", max_turns=5)

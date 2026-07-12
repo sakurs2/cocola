@@ -64,7 +64,6 @@ ARTIFACT_SYSTEM_PROMPT = (
     "under ./outputs/. Only files in ./outputs/ are published to the user."
 )
 ADMIN_SYSTEM_PROMPT_HEADER = "Administrator-configured system instructions:"
-CURRENT_RUNTIME = os.getenv("COCOLA_AGENT_RUNTIME", "claude-code")
 MODEL_ALIAS_METADATA_KEY = "x-cocola-model-alias"
 # Per-user sandbox token forwarded by the gateway (gRPC metadata seam, no
 # proto change). Injected into the sandbox as ANTHROPIC_AUTH_TOKEN per turn so
@@ -389,67 +388,15 @@ def _product_traceparent(context) -> str:
     return ""
 
 
-def _enabled(value: Any) -> bool:
-    if value is None:
-        return True
-    if isinstance(value, bool):
-        return value
-    if isinstance(value, str):
-        return value.strip().lower() not in {"0", "false", "no", "off"}
-    return bool(value)
-
-
 def _validated_model_alias(requested_alias: str) -> str | None:
-    """Resolve and validate a user-facing model alias for this runtime.
+    """Pass through the alias selected from the admin-managed model catalog.
 
-    If COCOLA_LLM_CONFIG is mounted here, agent-runtime validates that the alias
-    exists, is enabled, and targets this runtime. Without that file, we keep the
-    dev path permissive and simply pass through the alias to Claude Code.
+    LLM Gateway is the authoritative routing and validation boundary. Reading a
+    second JSON catalog here previously allowed the runtime and gateway to see
+    different enabled/default models.
     """
     alias = requested_alias.strip()
-    path = _llm_config_path()
-    if not path:
-        return alias or None
-    with open(path, encoding="utf-8") as fh:
-        spec = json.load(fh)
-    routes = spec.get("routes") or {}
-    if not alias:
-        alias = str(spec.get("default_alias") or "").strip()
-    if not alias:
-        return None
-    route = routes.get(alias)
-    if not isinstance(route, dict):
-        raise ValueError(f"unknown model alias {alias!r}")
-    if not _enabled(route.get("enabled", True)):
-        raise ValueError(f"model alias {alias!r} is disabled")
-    runtime = str(route.get("runtime") or "claude-code")
-    if runtime != CURRENT_RUNTIME:
-        raise ValueError(
-            f"model alias {alias!r} targets runtime {runtime!r}, "
-            f"current runtime is {CURRENT_RUNTIME!r}"
-        )
-    return alias
-
-
-def _llm_config_path() -> str:
-    explicit = os.getenv("COCOLA_LLM_CONFIG", "").strip()
-    if explicit:
-        explicit_path = pathlib.Path(explicit)
-        if explicit_path.is_absolute():
-            return explicit
-        repo_root = pathlib.Path(__file__).resolve().parents[3]
-        for candidate in (pathlib.Path.cwd() / explicit_path, repo_root / explicit_path):
-            if candidate.exists():
-                return str(candidate)
-        return explicit
-    repo_root = pathlib.Path(__file__).resolve().parents[3]
-    for candidate in (
-        pathlib.Path.cwd() / "deploy" / "llm-config.json",
-        repo_root / "deploy" / "llm-config.json",
-    ):
-        if candidate.exists():
-            return str(candidate)
-    return ""
+    return alias or None
 
 
 def _model_env(model_alias: str | None) -> dict[str, str]:
@@ -965,11 +912,8 @@ class AgentRuntimeServicer(pb_grpc.AgentRuntimeServiceServicer):
                         )
                     )
                 )
-            except Exception as exc:  # noqa: BLE001 - prompt policy degrades to default
-                active_prompt = PromptConfig()
-                log.warning(
-                    "agent prompt load failed; running without admin prompt", error=str(exc)
-                )
+            except Exception as exc:  # noqa: BLE001 - policy absence must stop the turn
+                log.error("agent prompt load failed; refusing ungoverned turn", error=str(exc))
                 await context.write(
                     event_to_proto(
                         trace_event(
@@ -981,6 +925,23 @@ class AgentRuntimeServicer(pb_grpc.AgentRuntimeServiceServicer):
                         )
                     )
                 )
+                await context.write(
+                    pb.AgentEvent(
+                        kind="error",
+                        data={
+                            "error": (
+                                "Administrator prompt policy is temporarily unavailable. "
+                                "Please retry."
+                            ),
+                            "code": "PROMPT_POLICY_UNAVAILABLE",
+                        },
+                    )
+                )
+                if heartbeat_task is not None:
+                    heartbeat_task.cancel()
+                    with contextlib.suppress(asyncio.CancelledError):
+                        await heartbeat_task
+                return
 
         opts = AgentOptions(
             user_id=request.user_id,

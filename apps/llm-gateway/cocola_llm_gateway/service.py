@@ -41,7 +41,9 @@ log = get_logger("cocola.llm-gateway.service")
 
 
 class RegistrySource(Protocol):
-    async def get_registry(self) -> Registry: ...
+    async def acquire_registry(self) -> Registry: ...
+
+    async def release_registry(self, registry: Registry) -> None: ...
 
     async def aclose(self) -> None: ...
 
@@ -50,8 +52,11 @@ class StaticRegistrySource:
     def __init__(self, registry: Registry):
         self._registry = registry
 
-    async def get_registry(self) -> Registry:
+    async def acquire_registry(self) -> Registry:
         return self._registry
+
+    async def release_registry(self, registry: Registry) -> None:
+        return None
 
     async def aclose(self) -> None:
         await self._registry.aclose()
@@ -80,11 +85,6 @@ class GatewayService:
     def registry(self) -> Registry:
         return self._registry
 
-    async def current_registry(self) -> Registry:
-        reg = await self._registry_source.get_registry()
-        self._registry = reg
-        return reg
-
     @property
     def ledger(self) -> Ledger:
         return self._ledger
@@ -96,8 +96,21 @@ class GatewayService:
     async def resolve_model(self, requested_alias: str | None) -> str:
         """Expose the resolved real model id (used by the front-end to stamp the
         outgoing message's `model` field). Raises CocolaError(NOT_FOUND)."""
-        route, _ = (await self.current_registry()).resolve(requested_alias)
-        return route.real_model
+        registry = await self._registry_source.acquire_registry()
+        try:
+            self._registry = registry
+            route, _ = registry.resolve(requested_alias)
+            return route.real_model
+        finally:
+            await self._registry_source.release_registry(registry)
+
+    async def registry_status(self) -> tuple[str, list[str]]:
+        """Return a stable health snapshot without exposing a leased registry."""
+        registry = await self._registry_source.acquire_registry()
+        try:
+            return registry.default_alias, registry.aliases()
+        finally:
+            await self._registry_source.release_registry(registry)
 
     async def check_quota(self, identity: Identity | None) -> None:
         """Pre-call gate. Raises QuotaExceeded if the caller is over budget.
@@ -128,7 +141,13 @@ class GatewayService:
         billing attribution. `identity` drives the post-call quota commit.
         """
         alias = requested_alias or req.metadata.get("requested_model") or None
-        route, provider = (await self.current_registry()).resolve(alias)
+        registry = await self._registry_source.acquire_registry()
+        try:
+            self._registry = registry
+            route, provider = registry.resolve(alias)
+        except BaseException:
+            await self._registry_source.release_registry(registry)
+            raise
 
         request_id = req.metadata.get("request_id") or f"req_{uuid.uuid4().hex[:16]}"
         streamer = ResilientStreamer(provider, self._policy, self._limiter)
@@ -164,26 +183,29 @@ class GatewayService:
                     )
                 yield ev
         finally:
-            # Always record + commit, even on partial/error streams.
-            await self._write_record(req, route, request_id, usage, status, error)
-            await self._commit_quota(identity, usage)
-            if self._trace_store is not None and trace_context is not None:
-                try:
-                    await self._trace_store.record_model_call(
-                        trace_context,
-                        started_at=started_at,
-                        duration_us=int((time.monotonic() - started_mono) * 1_000_000),
-                        ttft_ms=ttft_ms,
-                        status="error" if status == "error" else "success",
-                        model_alias=route.alias,
-                        real_model=route.real_model,
-                        provider=route.provider_name,
-                        input_tokens=usage.prompt_tokens,
-                        output_tokens=usage.completion_tokens,
-                        error_code="upstream_error" if error else "",
-                    )
-                except Exception as exc:  # noqa: BLE001 - tracing never breaks inference
-                    log.warning("conversation trace write failed", error=repr(exc))
+            try:
+                # Always record + commit, even on partial/error streams.
+                await self._write_record(req, route, request_id, usage, status, error)
+                await self._commit_quota(identity, usage)
+                if self._trace_store is not None and trace_context is not None:
+                    try:
+                        await self._trace_store.record_model_call(
+                            trace_context,
+                            started_at=started_at,
+                            duration_us=int((time.monotonic() - started_mono) * 1_000_000),
+                            ttft_ms=ttft_ms,
+                            status="error" if status == "error" else "success",
+                            model_alias=route.alias,
+                            real_model=route.real_model,
+                            provider=route.provider_name,
+                            input_tokens=usage.prompt_tokens,
+                            output_tokens=usage.completion_tokens,
+                            error_code="upstream_error" if error else "",
+                        )
+                    except Exception as exc:  # noqa: BLE001 - tracing never breaks inference
+                        log.warning("conversation trace write failed", error=repr(exc))
+            finally:
+                await self._registry_source.release_registry(registry)
 
     async def _write_record(self, req, route, request_id, usage, status, error) -> None:
         cost = route.pricing.cost(usage.prompt_tokens, usage.completion_tokens)

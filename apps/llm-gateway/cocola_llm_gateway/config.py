@@ -1,30 +1,20 @@
-"""Composition root: build providers + registry from configuration.
+"""Build providers and immutable process configuration.
 
 This is the ONLY module that imports concrete UpstreamProvider classes. Business
 logic (server, router, billing) stays provider-agnostic; here we read config and
 wire concrete instances together.
 
-Two config sources, in order of precedence:
-  1. A YAML/JSON file pointed to by COCOLA_LLM_CONFIG (richest: multiple aliases,
-     per-alias pricing, multiple providers).
-  2. Environment variables (zero-file quick start), e.g.:
-       COCOLA_LLM_PROVIDER=fake|anthropic|openai_compat
-       COCOLA_LLM_DEFAULT_ALIAS=cocola-default
-       COCOLA_ANTHROPIC_API_KEY / COCOLA_ANTHROPIC_BASE_URL / ..._MODEL
-       COCOLA_OPENAI_API_KEY / COCOLA_OPENAI_BASE_URL / ..._MODEL
-
-If nothing is configured, we default to a single Fake provider so the gateway
-boots and is testable out of the box (and never accidentally points at a real
-endpoint).
+Production model providers and routes are loaded from the admin-managed
+Postgres tables by db_registry.py. ``_build_from_dict`` remains the composition
+seam used by that source and by hermetic tests; this module deliberately has no
+file or provider-env fallback, so all processes observe one model catalog.
 
 HARD CONSTRAINT (ADR-0004): no endpoint/key is hardcoded; all come from config.
 """
 
 from __future__ import annotations
 
-import json
 import os
-import pathlib
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
@@ -84,7 +74,7 @@ def _build_from_dict(spec: dict) -> Registry:
         "default_alias": "cocola-default",
         "providers": {
           "anthropic": {"type": "anthropic", "base_url": "...",
-                        "api_key_env": "COCOLA_ANTHROPIC_API_KEY"},
+                        "api_key_env": "TEST_UPSTREAM_API_KEY"},
           "fake": {"type": "fake"}
         },
         "routes": {
@@ -160,114 +150,6 @@ def _build_provider(name: str, cfg: dict) -> UpstreamProvider:
     raise CocolaError(ErrorCode.INVALID_ARGUMENT, f"unknown provider type '{ptype}'")
 
 
-def load_registry() -> Registry:
-    """Load a Registry from COCOLA_LLM_CONFIG file, else from env, else Fake."""
-    path = _llm_config_path()
-    if path:
-        with open(path, encoding="utf-8") as fh:
-            spec = json.load(fh) if path.endswith(".json") else _load_yaml(fh.read())
-        log.info("llm registry loaded from file", path=path)
-        return _build_from_dict(spec)
-
-    return _build_from_env()
-
-
-def _llm_config_path() -> str:
-    explicit = os.getenv("COCOLA_LLM_CONFIG", "").strip()
-    if explicit:
-        explicit_path = pathlib.Path(explicit)
-        if explicit_path.is_absolute():
-            return explicit
-        repo_root = pathlib.Path(__file__).resolve().parents[3]
-        for candidate in (pathlib.Path.cwd() / explicit_path, repo_root / explicit_path):
-            if candidate.exists():
-                return str(candidate)
-        return explicit
-    repo_root = pathlib.Path(__file__).resolve().parents[3]
-    for candidate in (
-        pathlib.Path.cwd() / "deploy" / "llm-config.json",
-        repo_root / "deploy" / "llm-config.json",
-    ):
-        if candidate.exists():
-            return str(candidate)
-    return ""
-
-
-def _build_from_env() -> Registry:
-    provider = os.getenv("COCOLA_LLM_PROVIDER", "fake").strip()
-    default_alias = os.getenv("COCOLA_LLM_DEFAULT_ALIAS", "cocola-default").strip()
-
-    if provider == "fake":
-        spec = {
-            "default_alias": default_alias,
-            "providers": {"fake": {"type": "fake"}},
-            "routes": {default_alias: {"provider": "fake", "real_model": "fake-1"}},
-        }
-        log.info("llm registry: fake provider (no real endpoint)", default_alias=default_alias)
-        return _build_from_dict(spec)
-
-    if provider == "anthropic":
-        spec = {
-            "default_alias": default_alias,
-            "providers": {
-                "anthropic": {
-                    "type": "anthropic",
-                    "base_url": os.getenv("COCOLA_ANTHROPIC_BASE_URL", AnthropicConfig.base_url),
-                    "api_key_env": "COCOLA_ANTHROPIC_API_KEY",
-                    # Default ON: upstream SSE streaming is the primary path
-                    # (verified healthy). Set COCOLA_ANTHROPIC_STREAM=0 to fall
-                    # back to non-stream + locally synthesized events if a relay's
-                    # SSE endpoint breaks again (see anthropic.py).
-                    "stream": _envflag("COCOLA_ANTHROPIC_STREAM", default=True),
-                }
-            },
-            "routes": {
-                default_alias: {
-                    "provider": "anthropic",
-                    "real_model": os.getenv("COCOLA_ANTHROPIC_MODEL", "claude-3-5-sonnet-20241022"),
-                    "input_per_1k": float(os.getenv("COCOLA_ANTHROPIC_IN_PER_1K", "0.003")),
-                    "output_per_1k": float(os.getenv("COCOLA_ANTHROPIC_OUT_PER_1K", "0.015")),
-                }
-            },
-        }
-        return _build_from_dict(spec)
-
-    if provider == "openai_compat":
-        spec = {
-            "default_alias": default_alias,
-            "providers": {
-                "openai_compat": {
-                    "type": "openai_compat",
-                    "base_url": os.getenv("COCOLA_OPENAI_BASE_URL", OpenAICompatConfig.base_url),
-                    "api_key_env": "COCOLA_OPENAI_API_KEY",
-                }
-            },
-            "routes": {
-                default_alias: {
-                    "provider": "openai_compat",
-                    "real_model": os.getenv("COCOLA_OPENAI_MODEL", "gpt-4o-mini"),
-                    "input_per_1k": float(os.getenv("COCOLA_OPENAI_IN_PER_1K", "0.0")),
-                    "output_per_1k": float(os.getenv("COCOLA_OPENAI_OUT_PER_1K", "0.0")),
-                }
-            },
-        }
-        return _build_from_dict(spec)
-
-    raise CocolaError(ErrorCode.INVALID_ARGUMENT, f"unknown COCOLA_LLM_PROVIDER '{provider}'")
-
-
-def _load_yaml(text: str) -> dict:
-    try:
-        import yaml  # type: ignore
-    except ModuleNotFoundError as e:  # pragma: no cover - optional dep
-        raise CocolaError(
-            ErrorCode.INVALID_ARGUMENT,
-            "YAML config requires pyyaml; use a .json config or install pyyaml",
-            cause=e,
-        ) from e
-    return yaml.safe_load(text)
-
-
 def gateway_config_from_env() -> GatewayConfig:
     return GatewayConfig(
         host=os.getenv("COCOLA_LLM_HOST", "127.0.0.1"),
@@ -290,7 +172,7 @@ def auth_config_from_env() -> AuthConfig:
                                  (everyone resolves to the dev identity).
     COCOLA_AUTH_ISSUER           expected `iss` claim (default "cocola").
     COCOLA_AUTH_TOKEN_TTL_SECS   default lifetime when issuing (default 30d).
-    COCOLA_AUTH_DEV_ANON         "1"/"true" => blank token -> dev identity even
+    COCOLA_AUTH_ALLOW_ANON       "1"/"true" => blank token -> dev identity even
                                  when a secret is set (local convenience only).
     """
     from cocola_llm_gateway.auth.identity import AuthConfig
@@ -299,7 +181,7 @@ def auth_config_from_env() -> AuthConfig:
         secret=read_secret_env("COCOLA_AUTH_SECRET").strip(),
         issuer=os.getenv("COCOLA_AUTH_ISSUER", "cocola").strip() or "cocola",
         default_ttl_s=int(os.getenv("COCOLA_AUTH_TOKEN_TTL_SECS", str(30 * 24 * 3600))),
-        dev_allow_anonymous=_envflag("COCOLA_AUTH_DEV_ANON"),
+        dev_allow_anonymous=_envflag("COCOLA_AUTH_ALLOW_ANON"),
     )
 
 

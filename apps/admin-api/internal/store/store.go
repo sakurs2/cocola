@@ -147,7 +147,7 @@ type AgentPrompt struct {
 type LLMProvider struct {
 	ID               string    `json:"id"`
 	Name             string    `json:"name"`
-	Type             string    `json:"type"` // "anthropic" | "openai_compat" | "fake"
+	Type             string    `json:"type"` // "anthropic" | "openai_compat"
 	BaseURL          string    `json:"base_url"`
 	APIKeyCiphertext string    `json:"-"`
 	APIKeyHint       string    `json:"api_key_hint"`

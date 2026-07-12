@@ -158,6 +158,32 @@ func TestDrainWarmPoolLeavesClaimedSandboxRunning(t *testing.T) {
 	}
 }
 
+func TestWarmPoolSizingUsesHotRuntimeOverride(t *testing.T) {
+	b, _ := newTestBinder(t)
+	ctx := context.Background()
+	b.WithWarmPool(WarmConfig{Enabled: true, Size: 10, Image: "sandbox-image"})
+
+	if err := b.kv.Set(ctx, warmConfigKey, `{"enabled":true,"size":3}`, 0); err != nil {
+		t.Fatal(err)
+	}
+	sizing, ok := b.effectiveWarmSizing(ctx)
+	if !ok {
+		t.Fatal("runtime warm sizing should be available")
+	}
+	if !sizing.Enabled || sizing.Size != 3 {
+		t.Fatalf("effective warm sizing = %+v, want enabled size 3", sizing)
+	}
+}
+
+func TestWarmPoolSizingWaitsForRuntimeDelivery(t *testing.T) {
+	b, _ := newTestBinder(t)
+	b.WithWarmPool(WarmConfig{Enabled: true, Size: 10, Image: "sandbox-image"})
+
+	if _, ok := b.effectiveWarmSizing(context.Background()); ok {
+		t.Fatal("missing runtime warm sizing must not fall back to startup defaults")
+	}
+}
+
 func TestDrainWarmPoolRetainsInventoryWhenDestroyFails(t *testing.T) {
 	b, fp := newTestBinder(t)
 	ctx := context.Background()

@@ -16,7 +16,7 @@ import { cn } from "@/lib/utils";
 type LLMProvider = {
   id: string;
   name: string;
-  type: "anthropic" | "openai_compat" | "fake";
+  type: "anthropic" | "openai_compat";
   base_url: string;
   api_key_hint: string;
   enabled: boolean;
@@ -92,7 +92,6 @@ const EMPTY_MODEL: ModelForm = {
 const PROVIDER_TYPES = [
   { value: "anthropic", label: "Anthropic" },
   { value: "openai_compat", label: "OpenAI Compatible" },
-  { value: "fake", label: "Fake" },
 ] as const;
 
 const btn =

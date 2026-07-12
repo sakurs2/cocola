@@ -1,10 +1,9 @@
 #!/usr/bin/env bash
 # start.sh -- cocola 全栈一键启动（容器化控制面 + 真实模型 Route A）。
 #
-# 封装 deploy/docker-compose/docker-compose.full.yml 的标准启动流程，规避两个
-# 已知坑：
-#   1) 必带 --env-file .env，否则 llm-gateway 回落 fake provider（echo 回显）。
-#   2) 网关发布端口用 18091（绕开宿主上遗留的 IPv4 :8081 监听导致的 401）。
+# 封装 deploy/docker-compose/docker-compose.full.yml 的标准启动流程。`.env` 可选，
+# 只提供进程启动参数；模型统一从 Admin/Postgres 加载。LLM Gateway 的宿主发布端口
+# 默认使用 18091，避免和 Gateway 或宿主遗留监听冲突。
 #
 # 默认会自动拉起/拆除独立的 OpenSandbox server（docker-compose.opensandbox.yml，
 # 宿主 :8090），full.yml 里的 sandbox-manager 经 host.docker.internal:8090/v1 连它。
@@ -24,7 +23,10 @@ cd "$ROOT"
 COMPOSE_FILE="deploy/docker-compose/docker-compose.full.yml"
 ENV_FILE=".env"
 COMPOSE_BIN="$ROOT/scripts/docker-compose.sh"
-DC=("$COMPOSE_BIN" -f "$COMPOSE_FILE" --env-file "$ENV_FILE")
+DC=("$COMPOSE_BIN" -f "$COMPOSE_FILE")
+if [[ -f "$ENV_FILE" ]]; then
+  DC+=(--env-file "$ENV_FILE")
+fi
 # 必须用 BuildKit=0 以绕开公司网络对 docker.io 的 TLS 拦截
 export DOCKER_BUILDKIT=0
 
@@ -34,28 +36,12 @@ OSB_COMPOSE="deploy/docker-compose/docker-compose.opensandbox.yml"
 OSB_DC=("$COMPOSE_BIN" -f "$OSB_COMPOSE")
 OSB_PORT="${COCOLA_OPENSANDBOX_HOST_PORT:-8090}"
 
-# 从 .env / 环境读出沙箱后端。.env 里已存在 COCOLA_SANDBOX_PROVIDER 时以其为准;
-# 环境变量优先。默认 opensandbox(与 full.yml 默认一致)。
-sandbox_provider() {
-  if [[ -n "${COCOLA_SANDBOX_PROVIDER:-}" ]]; then
-    printf '%s' "$COCOLA_SANDBOX_PROVIDER"; return
-  fi
-  if [[ -f "$ENV_FILE" ]]; then
-    local v
-    v="$(grep -E '^COCOLA_SANDBOX_PROVIDER=' "$ENV_FILE" | tail -1 | cut -d= -f2-)"
-    [[ -n "$v" ]] && { printf '%s' "$v"; return; }
-  fi
-  printf 'opensandbox'
-}
-
 env_file_value() {
   local key="$1"
   if [[ -f "$ENV_FILE" ]]; then
     grep -E "^${key}=" "$ENV_FILE" | tail -1 | cut -d= -f2-
   fi
 }
-
-needs_opensandbox() { [[ "$(sandbox_provider)" == "opensandbox" ]]; }
 
 opensandbox_managed() {
   local managed="${COCOLA_OPENSANDBOX_MANAGED:-}"
@@ -75,7 +61,6 @@ opensandbox_url() {
 }
 
 opensandbox_up() {
-  needs_opensandbox || { log "沙箱后端非 opensandbox,跳过 OpenSandbox server。"; return 0; }
   if ! opensandbox_managed; then
     local url
     url="$(opensandbox_url)"
@@ -103,7 +88,6 @@ opensandbox_up() {
 }
 
 opensandbox_down() {
-  needs_opensandbox || return 0
   opensandbox_managed || { log "外部 OpenSandbox server 由调用方管理，跳过 down。"; return 0; }
   log "停止并删除 OpenSandbox server ..."
   "${OSB_DC[@]}" down || true
@@ -125,14 +109,6 @@ cleanup_sandboxes() {
 
 log()  { printf '\033[1;36m[start]\033[0m %s\n' "$*"; }
 err()  { printf '\033[1;31m[start:err]\033[0m %s\n' "$*" >&2; }
-
-require_env() {
-  if [[ ! -f "$ENV_FILE" ]]; then
-    err "缺少 $ENV_FILE -- 真实模型链路需要它（COCOLA_LLM_PROVIDER / COCOLA_ANTHROPIC_*）。"
-    err "没有 .env 时 llm-gateway 会回落到 fake provider（echo 回显）。"
-    exit 1
-  fi
-}
 
 require_docker() {
   if ! docker info >/dev/null 2>&1; then
@@ -173,11 +149,10 @@ print_endpoints() {
 ----------------------------------------------
   Web 界面 :  http://localhost:3000   <- 浏览器打开即用
   对话 API :  http://localhost:8080/v1/chat
-  模型网关 :  http://localhost:18091  (接 .env 上游)
-  沙箱后端 :  OpenSandbox provider
+  模型网关 :  http://localhost:18091  (模型由 Admin/Postgres 管理)
+  沙箱后端 :  OpenSandbox
 
-  Web 端 Bearer token：当前 prod Docker 模式无需 token，留空即可
-  （gateway 已设 COCOLA_AUTH_ALLOW_ANON=1，空 token 视为 dev-user）。
+  Web 端请使用 Admin 账号登录；生产默认不允许匿名访问。
 
   常用：
     bash scripts/start.sh --status   # 看状态
@@ -202,7 +177,7 @@ main() {
       require_docker
       log "停止容器（保留数据）..."
       "${DC[@]}" stop
-      if needs_opensandbox && opensandbox_managed; then
+      if opensandbox_managed; then
         "${OSB_DC[@]}" stop || true
       fi
       cleanup_sandboxes
@@ -214,7 +189,7 @@ main() {
       "${DC[@]}" ps
       ;;
     --build)
-      require_docker; require_env
+      require_docker
       log "mode: prod (full Docker stack)"
       log "强制构建镜像 ..."
       "${DC[@]}" build
@@ -224,7 +199,7 @@ main() {
       wait_healthy && print_endpoints
       ;;
     up|"")
-      require_docker; require_env
+      require_docker
       log "mode: prod (full Docker stack)"
       if needs_build; then
         log "检测到镜像缺失，先构建（仅首次较慢）..."

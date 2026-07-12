@@ -124,11 +124,11 @@ def create_app(
 
     @app.get("/healthz")
     async def healthz() -> dict:
-        reg = await service.current_registry()
+        default_alias, aliases = await service.registry_status()
         return {
             "status": "ok",
-            "default_alias": reg.default_alias,
-            "aliases": reg.aliases(),
+            "default_alias": default_alias,
+            "aliases": aliases,
             "auth_enabled": vrf.config.enabled,
         }
 

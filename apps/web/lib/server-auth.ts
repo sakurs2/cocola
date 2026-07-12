@@ -1,7 +1,6 @@
 import { auth } from "@/auth";
 
-const ADMIN_URL =
-  process.env.COCOLA_ADMIN_URL ?? process.env.COCOLA_ADMIN_BASE_URL ?? "http://127.0.0.1:8092";
+const ADMIN_URL = process.env.COCOLA_ADMIN_URL ?? "http://127.0.0.1:8092";
 const RUNTIME_TOKEN_TTL_SECONDS = 600;
 
 export type SessionUser = {
@@ -158,7 +157,10 @@ export async function runtimeAuthHeaders(user: SessionUser): Promise<HeadersInit
 
   const body = (await upstream.json()) as { token?: string; ttl_seconds?: number };
   if (!body.token) {
-    return Response.json({ error: "runtime token missing from admin-api response" }, { status: 502 });
+    return Response.json(
+      { error: "runtime token missing from admin-api response" },
+      { status: 502 },
+    );
   }
   return { authorization: `Bearer ${body.token}` };
 }

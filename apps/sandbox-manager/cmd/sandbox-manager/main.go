@@ -1,15 +1,10 @@
 // sandbox-manager owns the SandboxProvider abstraction. It receives Create/Exec/
-// Destroy gRPC calls from agent-runtime and dispatches to a concrete provider:
-//   - OpenSandboxProvider (default backend; see ADR-0014)
-//   - future providers registered behind the same SandboxProvider interface
-//
-// The provider is chosen at startup from COCOLA_SANDBOX_PROVIDER (default: opensandbox).
-// Nothing below the provider factory knows which backend is in use.
+// Destroy gRPC calls from agent-runtime to OpenSandbox (ADR-0014). The provider
+// interface remains the internal test seam; there is only one production backend.
 package main
 
 import (
 	"context"
-	"fmt"
 	"net"
 	"net/http"
 	"os"
@@ -26,7 +21,7 @@ import (
 	"github.com/cocola-project/cocola/apps/sandbox-manager/internal/orchestrator"
 	"github.com/cocola-project/cocola/apps/sandbox-manager/internal/provider"
 	checkpointprovider "github.com/cocola-project/cocola/apps/sandbox-manager/internal/provider/checkpoint"
-	_ "github.com/cocola-project/cocola/apps/sandbox-manager/internal/provider/opensandbox"
+	"github.com/cocola-project/cocola/apps/sandbox-manager/internal/provider/opensandbox"
 	"github.com/cocola-project/cocola/apps/sandbox-manager/internal/server"
 	"github.com/cocola-project/cocola/packages/go-common/logger"
 	"github.com/cocola-project/cocola/packages/go-common/metrics"
@@ -47,15 +42,18 @@ func main() {
 	}
 
 	addr := getenv("COCOLA_SANDBOX_ADDR", ":50051")
-	backend := getenv("COCOLA_SANDBOX_PROVIDER", "opensandbox")
+	backend := opensandbox.ProviderName
 
 	// Observability registry: shared by the gRPC interceptors below and the
 	// binder collector bridge. Exposed on a dedicated port at the end of main.
 	reg := metrics.New("sandbox-manager")
 
-	p, err := newProvider(backend)
+	p, err := provider.New(backend)
 	if err != nil {
 		log.Sugar().Fatalf("init provider %q: %v", backend, err)
+	}
+	if p == nil {
+		log.Sugar().Fatalf("init provider %q: not registered", backend)
 	}
 	if wrapped, werr := checkpointprovider.Wrap(p, checkpointprovider.ConfigFromEnv()); werr != nil {
 		log.Sugar().Warnw("sandbox checkpointing disabled", "err", werr)
@@ -244,20 +242,6 @@ func checkpointDrainBudget() time.Duration {
 		}
 	}
 	return 25 * time.Second
-}
-
-// newProvider is the single place that resolves a backend name to a registered
-// concrete implementation. Adding a new backend = add a package under
-// internal/provider/ that calls provider.Register from init().
-func newProvider(name string) (provider.SandboxProvider, error) {
-	p, err := provider.New(name)
-	if err != nil {
-		return nil, err
-	}
-	if p == nil {
-		return nil, fmt.Errorf("unknown sandbox provider %q", name)
-	}
-	return p, nil
 }
 
 // defaultMaxMessageBytes is 64 MiB -- above the 32 MiB frontend upload cap,

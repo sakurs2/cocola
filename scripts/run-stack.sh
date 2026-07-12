@@ -39,12 +39,8 @@ cd "$ROOT"
 
 export PATH="/Applications/OrbStack.app/Contents/MacOS/xbin:/opt/homebrew/bin:/usr/local/bin:$PATH"
 
-# Deploy mode 1 has exactly ONE shape now. These three switches are always on:
-# every cocola service runs NATIVE (sandbox-manager/admin-api included), the
-# real llm-gateway is up, and the web tool is served. They are kept as constants
-# so the guarded blocks read clearly. There are no mode flags.
-WITH_LLM=1
-WITH_WEB=1
+# Deploy mode 1 has exactly ONE shape: every cocola service runs natively and
+# both llm-gateway and web are always started. There are no feature switches.
 DEV_STACK=1
 for arg in "$@"; do
   case "$arg" in
@@ -56,9 +52,7 @@ for arg in "$@"; do
 done
 
 # ----------------------------------------------------------------- config
-# Auto-load repo-root .env if present, so `make dev` can pick up your real model
-# endpoint/key without manual exports. Existing env wins over the file
-# (so a one-off `COCOLA_LLM_PROVIDER=fake make dev` still overrides .env).
+# Auto-load repo-root .env if present. Existing environment values win.
 if [[ -f "$ROOT/.env" ]]; then
   echo "==> loading $ROOT/.env"
   set -a
@@ -89,6 +83,12 @@ export COCOLA_AGENT_MODE="${COCOLA_AGENT_MODE:-real}"
 export COCOLA_AGENT_RUN_TIMEOUT_SECS="${COCOLA_AGENT_RUN_TIMEOUT_SECS:-3600}"
 export COCOLA_SANDBOX_HEARTBEAT_SECS="${COCOLA_SANDBOX_HEARTBEAT_SECS:-20}"
 export COCOLA_LLM_TIMEOUT_SECS="${COCOLA_LLM_TIMEOUT_SECS:-300}"
+
+# Mint before sandbox-manager starts so cold and warm sandboxes receive a
+# credential signed by the same secret enforced by llm-gateway.
+echo "==> minting a dev token (admin-mint)"
+TOKEN="$(go run ./apps/admin-api/cmd/admin-mint -user emp-42 -tenant team-platform -ttl 3600)"
+export COCOLA_SANDBOX_LLM_TOKEN="${COCOLA_SANDBOX_LLM_TOKEN:-$TOKEN}"
 
 AGENT_HOST="${COCOLA_AGENT_HOST:-127.0.0.1}"
 AGENT_PORT="${COCOLA_AGENT_PORT:-50061}"
@@ -123,9 +123,7 @@ PIDS=()
 # go run / uv run / pnpm dev fork the real listeners as grandchildren that get
 # reparented to launchd on macOS, escaping our process group -- so killing the
 # group is NOT enough to guarantee the port is released. Freeing by port is.
-OWNED_PORTS=("$AGENT_PORT" "$GATEWAY_PORT")
-[[ "$WITH_LLM" == "1" ]] && OWNED_PORTS+=("$LLM_PORT")
-[[ "$WITH_WEB" == "1" ]] && OWNED_PORTS+=("$WEB_PORT")
+OWNED_PORTS=("$AGENT_PORT" "$GATEWAY_PORT" "$LLM_PORT" "$WEB_PORT")
 # dev runs sandbox-manager (50051) and admin-api (8092) NATIVELY too.
 [[ "$DEV_STACK" == "1" ]] && OWNED_PORTS+=(50051 8092)
 
@@ -381,12 +379,7 @@ dev_up() {
   # (1) OpenSandbox server (host :8090) when this script is run directly. The
   # outer dev wrapper sets COCOLA_OPENSANDBOX_MANAGED=0 and points us at the
   # Kubernetes OpenSandbox port-forward it already prepared.
-  local provider="${COCOLA_SANDBOX_PROVIDER:-}"
-  if [[ -z "$provider" && -f "$ROOT/.env" ]]; then
-    provider="$(grep -E '^COCOLA_SANDBOX_PROVIDER=' "$ROOT/.env" | tail -1 | cut -d= -f2-)"
-  fi
-  provider="${provider:-opensandbox}"
-  if [[ "$provider" == "opensandbox" ]] && env_bool_false "${COCOLA_OPENSANDBOX_MANAGED:-1}"; then
+  if env_bool_false "${COCOLA_OPENSANDBOX_MANAGED:-1}"; then
     echo "==> [dev] external OpenSandbox server selected (COCOLA_OPENSANDBOX_MANAGED=0); skipping docker-compose OpenSandbox"
     if [[ -z "${COCOLA_OPENSANDBOX_URL:-}" ]]; then
       echo "!! COCOLA_OPENSANDBOX_MANAGED=0 requires COCOLA_OPENSANDBOX_URL (for example http://127.0.0.1:8090/v1)" >&2
@@ -400,7 +393,7 @@ dev_up() {
       echo "   or start the external OpenSandbox server before running make dev." >&2
       exit 1
     fi
-  elif [[ "$provider" == "opensandbox" ]]; then
+  else
     local osb_port="${COCOLA_OPENSANDBOX_HOST_PORT:-8090}"
     echo "==> [dev] bringing up OpenSandbox server (host :$osb_port)"
     if ! COCOLA_OPENSANDBOX_HOST_PORT="$osb_port" \
@@ -458,7 +451,6 @@ dev_up() {
     cd apps/sandbox-manager
     GOWORK=off \
     COCOLA_SANDBOX_ADDR=":50051" \
-    COCOLA_SANDBOX_PROVIDER="$provider" \
     COCOLA_OPENSANDBOX_URL="$osb_url" \
     COCOLA_REDIS_ADDR="$COCOLA_REDIS_ADDR" \
     COCOLA_SANDBOX_IMAGE="${COCOLA_SANDBOX_IMAGE:-cocola/sandbox-runtime:dev}" \
@@ -468,7 +460,7 @@ dev_up() {
       $SETSID go run ./cmd/sandbox-manager
   ) >"$(log_redirect sandbox-manager)" 2>&1 &
   PIDS+=("$!")
-  echo "==> [dev] starting NATIVE sandbox-manager on :50051 (provider=$provider -> $osb_url; log: .run-logs/sandbox-manager.log)"
+  echo "==> [dev] starting NATIVE sandbox-manager on :50051 (OpenSandbox -> $osb_url; log: .run-logs/sandbox-manager.log)"
   wait_port 127.0.0.1 50051 "sandbox-manager" 180
 
   # (4) Point the app processes (launched by the main flow) at the native stack.
@@ -487,14 +479,10 @@ if [[ "$DEV_STACK" == "1" ]]; then
 fi
 
 # ----------------------------------------------------------------- llm-gateway
-if [[ "$WITH_LLM" == "1" ]]; then
-  free_port "$LLM_PORT" llm-gateway
-  # In dev mode the sandbox brain presents the dev token COCOLA_SANDBOX_LLM_TOKEN
-  # (default cocola-local). The containerized full stack runs llm-gateway with
-  # auth OFF so that token is accepted; match that here by blanking the secret
-  # for THIS process only (the global export stays put for gateway/agent-rt).
+free_port "$LLM_PORT" llm-gateway
+  # llm-gateway verifies the token injected into each sandbox with the same
+  # shared secret used by gateway/admin-api.
   LLM_AUTH_SECRET="${COCOLA_AUTH_SECRET:-}"
-  [[ "$DEV_STACK" == "1" ]] && LLM_AUTH_SECRET=""
   ( cd apps/llm-gateway && \
     COCOLA_LLM_HOST="$LLM_HOST" COCOLA_LLM_PORT="$LLM_PORT" \
     COCOLA_AUTH_SECRET="$LLM_AUTH_SECRET" \
@@ -503,7 +491,7 @@ if [[ "$WITH_LLM" == "1" ]]; then
     COCOLA_LLM_REDIS_URL="${COCOLA_LLM_REDIS_URL:-redis://127.0.0.1:6379/0}" \
     $SETSID uv run python -m cocola_llm_gateway ) >"$(log_redirect llm-gateway)" 2>&1 &
   PIDS+=("$!")
-  echo "==> starting llm-gateway on $LLM_HOST:$LLM_PORT (provider: ${COCOLA_LLM_PROVIDER:-fake})"
+  echo "==> starting llm-gateway on $LLM_HOST:$LLM_PORT (models: Admin/Postgres)"
   # nc -z 0.0.0.0 is unreliable; a 0.0.0.0 bind also answers on loopback, so probe there.
   llm_probe_host="$LLM_HOST"; [[ "$LLM_HOST" == "0.0.0.0" ]] && llm_probe_host="127.0.0.1"
   wait_port "$llm_probe_host" "$LLM_PORT" "llm-gateway"
@@ -512,8 +500,7 @@ if [[ "$WITH_LLM" == "1" ]]; then
   # agent-runtime process env. Surface the URL so a real Route-A run can point
   # the sandbox at it.
   export COCOLA_SANDBOX_LLM_BASE_URL="${COCOLA_SANDBOX_LLM_BASE_URL:-http://$LLM_HOST:$LLM_PORT}"
-  echo "    llm-gateway up; sandbox brain should target $COCOLA_SANDBOX_LLM_BASE_URL"
-fi
+echo "    llm-gateway up; sandbox brain should target $COCOLA_SANDBOX_LLM_BASE_URL"
 
 # ----------------------------------------------------------------- admin-api (dev)
 # dev mode runs admin-api NATIVELY too (agent-runtime's market-skills source).
@@ -542,7 +529,7 @@ if [[ "$DEV_STACK" == "1" ]]; then
   PIDS+=("$!")
   echo "==> [dev] starting NATIVE admin-api on :8092 (log: .run-logs/admin-api.log)"
   wait_port 127.0.0.1 8092 "admin-api" 120
-  export COCOLA_ADMIN_BASE_URL="${COCOLA_ADMIN_BASE_URL:-http://127.0.0.1:8092}"
+  export COCOLA_ADMIN_URL="${COCOLA_ADMIN_URL:-http://127.0.0.1:8092}"
 fi
 
 # ----------------------------------------------------------------- MinIO (attachments)
@@ -573,28 +560,11 @@ else
   echo "==> MinIO skipped (COCOLA_SKIP_MINIO=1 or docker unavailable); attachments stay inline-only"
 fi
 
-# ----------------------------------------------------------------- dev token
-# Minted up front: in the real-LLM path the agent-runtime must present a VALID
-# cocola token to the gateway as ANTHROPIC_API_KEY (the gateway verifies it with
-# the shared COCOLA_AUTH_SECRET). The default "cocola-local" is not a token and
-# would be rejected, so we reuse this minted one. The same token is printed in
-# the banner for curl / the web UI.
-echo "==> minting a dev token (admin-mint)"
-TOKEN="$(go run ./apps/admin-api/cmd/admin-mint -user emp-42 -tenant team-platform -ttl 3600)"
-
-# With a real LLM upstream the sandbox brain must present a real cocola token as
-# ANTHROPIC_AUTH_TOKEN; with EchoProvider (no llm-gateway) it is never used, so
-# leave the harmless default.
-AGENT_API_KEY="cocola-local"
-[[ "$WITH_LLM" == "1" ]] && AGENT_API_KEY="$TOKEN"
-
 # ----------------------------------------------------------------- agent-runtime
 free_port "$AGENT_PORT" agent-runtime
 (
   cd apps/agent-runtime
   COCOLA_AGENT_HOST="$AGENT_HOST" COCOLA_AGENT_PORT="$AGENT_PORT" \
-  COCOLA_AGENT_API_KEY="$AGENT_API_KEY" \
-  COCOLA_ANTHROPIC_MODEL="${COCOLA_LLM_DEFAULT_ALIAS:-cocola-default}" \
   COCOLA_SANDBOX_ADDR="${COCOLA_SANDBOX_ADDR:-}" \
     $SETSID uv run python -m cocola_agent_runtime
 ) >"$(log_redirect agent-runtime)" 2>&1 &
@@ -612,21 +582,19 @@ PIDS+=("$!")
 echo "==> starting gateway on $GATEWAY_ADDR -> $AGENT_ADDR (log: .run-logs/gateway.log)"
 wait_port "$GATEWAY_HOST" "$GATEWAY_PORT" "gateway"
 
-# ----------------------------------------------------------------- web (opt-in)
-if [[ "$WITH_WEB" == "1" ]]; then
-  free_port "$WEB_PORT" web
+# ----------------------------------------------------------------- web
+free_port "$WEB_PORT" web
   (
     cd apps/web
     COCOLA_GATEWAY_URL="http://$GATEWAY_ADDR" \
-    COCOLA_ADMIN_URL="${COCOLA_ADMIN_BASE_URL:-http://127.0.0.1:8092}" \
+    COCOLA_ADMIN_URL="${COCOLA_ADMIN_URL:-http://127.0.0.1:8092}" \
     COCOLA_ADMIN_KEY="$COCOLA_ADMIN_KEY" \
     AUTH_SECRET="$AUTH_SECRET" \
       $SETSID pnpm dev --port "$WEB_PORT"
   ) >"$(log_redirect web)" 2>&1 &
   PIDS+=("$!")
   echo "==> starting web on http://127.0.0.1:$WEB_PORT (log: .run-logs/web.log)"
-  wait_port "127.0.0.1" "$WEB_PORT" "web" 240
-fi
+wait_port "127.0.0.1" "$WEB_PORT" "web" 240
 
 # ----------------------------------------------------------------- ready banner
 echo
@@ -635,14 +603,12 @@ echo " cocola dev stack is UP"
 echo "----------------------------------------------------------------------"
 echo " gateway   : http://$GATEWAY_ADDR   (POST /v1/chat, SSE)"
 echo " agent-rt  : $AGENT_ADDR (gRPC)"
-[[ "$WITH_LLM" == "1" ]] && echo " llm-gw    : http://$LLM_HOST:$LLM_PORT  (provider: ${COCOLA_LLM_PROVIDER:-fake})"
-[[ "$WITH_LLM" == "1" && -n "${COCOLA_LLM_CONFIG:-}" ]] && echo " llm-cfg   : ${COCOLA_LLM_CONFIG}"
-[[ "$WITH_LLM" == "1" && -z "${COCOLA_LLM_CONFIG:-}" ]] && echo " llm-up    : ${COCOLA_ANTHROPIC_BASE_URL:-${COCOLA_OPENAI_BASE_URL:-<provider default>}}"
-[[ "$WITH_WEB" == "1" ]] && echo " web       : http://127.0.0.1:$WEB_PORT"
-[[ "$WITH_WEB" == "1" ]] && echo " web login : ${COCOLA_BOOTSTRAP_ADMIN_USERNAME} or ${COCOLA_BOOTSTRAP_ADMIN_EMAIL} / ${COCOLA_BOOTSTRAP_ADMIN_PASSWORD}"
+echo " llm-gw    : http://$LLM_HOST:$LLM_PORT  (models: Admin/Postgres)"
+echo " web       : http://127.0.0.1:$WEB_PORT"
+echo " web login : ${COCOLA_BOOTSTRAP_ADMIN_USERNAME} or ${COCOLA_BOOTSTRAP_ADMIN_EMAIL} / ${COCOLA_BOOTSTRAP_ADMIN_PASSWORD}"
 [[ -n "${MINIO_CONSOLE:-}" ]] && echo " minio     : ${MINIO_CONSOLE}  (console; cocola / cocola_dev_pw)"
-[[ "$DEV_STACK" == "1" ]] && echo " sandbox   : NATIVE sandbox-manager :50051 (provider=${COCOLA_SANDBOX_PROVIDER:-opensandbox}) + admin-api :8092; REAL Route A"
-if [[ "$DEV_STACK" == "1" ]] && [[ "${COCOLA_SANDBOX_PROVIDER:-opensandbox}" == "opensandbox" ]] && env_bool_false "${COCOLA_OPENSANDBOX_MANAGED:-1}"; then
+[[ "$DEV_STACK" == "1" ]] && echo " sandbox   : NATIVE sandbox-manager :50051 (OpenSandbox) + admin-api :8092; REAL Route A"
+if [[ "$DEV_STACK" == "1" ]] && env_bool_false "${COCOLA_OPENSANDBOX_MANAGED:-1}"; then
   echo " containers: only infra -- external OpenSandbox server ${COCOLA_OPENSANDBOX_URL:-<unset>} + redis/pg/minio (dev.yml)"
 elif [[ "$DEV_STACK" == "1" ]]; then
   echo " containers: only sandbox deps -- OpenSandbox server :${COCOLA_OPENSANDBOX_HOST_PORT:-8090} + redis/pg/minio (dev.yml)"

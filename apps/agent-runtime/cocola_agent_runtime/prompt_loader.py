@@ -54,6 +54,7 @@ class AdminPromptCatalog:
         self._admin_key = admin_key
         self._timeout = timeout_s
         self._fetch = fetcher or _urllib_fetch
+        self._last_good: dict[str, PromptConfig] = {}
 
     def effective_prompt(self, user_id: str = "") -> PromptConfig:
         user_id = (user_id or "").strip()
@@ -67,8 +68,16 @@ class AdminPromptCatalog:
             raw = self._fetch(url, headers, self._timeout)
             payload = json.loads(raw)
         except Exception as exc:  # noqa: BLE001 - prompt policy should degrade safely
-            log.warning("agent prompt fetch failed; running with no admin prompt", error=str(exc))
-            return PromptConfig()
+            cached = self._last_good.get(user_id)
+            if cached is not None:
+                log.warning(
+                    "agent prompt fetch failed; using last-known-good policy", error=str(exc)
+                )
+                return PromptConfig(
+                    system_prompt=cached.system_prompt,
+                    prompts=list(cached.prompts),
+                )
+            raise RuntimeError("administrator prompt policy is unavailable") from exc
         system_prompt = str(payload.get("system_prompt") or "").strip()
         prompts = []
         for item in payload.get("prompts") or []:
@@ -81,7 +90,9 @@ class AdminPromptCatalog:
                     content_length=int(item.get("content_length") or 0),
                 )
             )
-        return PromptConfig(system_prompt=system_prompt, prompts=[p for p in prompts if p.id])
+        config = PromptConfig(system_prompt=system_prompt, prompts=[p for p in prompts if p.id])
+        self._last_good[user_id] = config
+        return PromptConfig(system_prompt=config.system_prompt, prompts=list(config.prompts))
 
 
 class StaticPromptCatalog:

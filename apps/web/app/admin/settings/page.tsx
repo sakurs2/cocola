@@ -12,7 +12,7 @@ type SystemSetting = {
   group: string;
   label: string;
   description: string;
-  kind: "bool" | "int" | "string" | "secret";
+  kind: "bool" | "int" | "string";
   env?: string;
   default?: SettingValue;
   value?: SettingValue;
@@ -22,9 +22,6 @@ type SystemSetting = {
   updated_at?: string;
   updated_by?: string;
   editable: boolean;
-  hot_reload: boolean;
-  restart_required: boolean;
-  sensitive: boolean;
   min?: number;
   max?: number;
 };
@@ -79,9 +76,9 @@ export default function AdminSettingsPage() {
     () => ({
       total: settings.length,
       overrides: settings.filter((setting) => setting.source === "db").length,
-      hot: settings.filter((setting) => setting.hot_reload).length,
+      groups: grouped.length,
     }),
-    [settings],
+    [grouped.length, settings],
   );
 
   async function save(setting: SystemSetting) {
@@ -136,7 +133,7 @@ export default function AdminSettingsPage() {
           <div className="min-w-0 flex-1">
             <h1 className="truncate text-base font-semibold">Settings</h1>
             <p className="truncate text-xs text-muted-foreground">
-              Startup defaults, database overrides, and runtime mutability
+              Runtime settings with environment defaults and database overrides
             </p>
           </div>
           <AdminRefreshButton
@@ -156,7 +153,7 @@ export default function AdminSettingsPage() {
         <section className="grid gap-3 md:grid-cols-3">
           <Metric label="Settings" value={String(stats.total)} />
           <Metric label="DB Overrides" value={String(stats.overrides)} />
-          <Metric label="Hot Reload" value={String(stats.hot)} />
+          <Metric label="Groups" value={String(stats.groups)} />
         </section>
 
         {error ? (
@@ -198,9 +195,6 @@ export default function AdminSettingsPage() {
                           <div className="flex flex-wrap items-center gap-2">
                             <h3 className="text-sm font-medium">{setting.label}</h3>
                             <Badge tone={sourceTone(setting.source)}>{setting.source}</Badge>
-                            {setting.hot_reload ? <Badge tone="green">hot reload</Badge> : null}
-                            {setting.restart_required ? <Badge tone="amber">restart</Badge> : null}
-                            {setting.sensitive ? <Badge tone="red">secret</Badge> : null}
                           </div>
                           <p className="mt-1 text-sm text-muted-foreground">
                             {setting.description}
@@ -226,11 +220,7 @@ export default function AdminSettingsPage() {
                             }
                           />
                           <div className="mt-2 text-xs text-muted-foreground">
-                            {setting.sensitive
-                              ? setting.configured
-                                ? "Configured"
-                                : "Not configured"
-                              : `Default: ${formatValue(setting.default)}`}
+                            {`Default: ${formatValue(setting.default)}`}
                           </div>
                         </div>
 
@@ -286,14 +276,6 @@ function SettingControl({
   value: SettingValue;
   onChange: (value: SettingValue) => void;
 }) {
-  if (setting.sensitive) {
-    return (
-      <div className="flex h-9 items-center rounded-md border border-input bg-muted px-3 text-sm text-muted-foreground">
-        {setting.configured ? "Configured" : "Not configured"}
-      </div>
-    );
-  }
-
   if (setting.kind === "bool") {
     return (
       <label className="flex h-9 items-center gap-3 text-sm">
@@ -344,26 +326,17 @@ function Metric({ label, value }: { label: string; value: string }) {
   );
 }
 
-function Badge({
-  children,
-  tone,
-}: {
-  children: string;
-  tone: "default" | "green" | "amber" | "red";
-}) {
+function Badge({ children, tone }: { children: string; tone: "default" | "green" | "amber" }) {
   const cls =
     tone === "green"
       ? "border-emerald-500/30 bg-emerald-500/10 text-emerald-700 dark:text-emerald-300"
       : tone === "amber"
         ? "border-amber-500/30 bg-amber-500/10 text-amber-700 dark:text-amber-300"
-        : tone === "red"
-          ? "border-destructive/30 bg-destructive/10 text-destructive"
-          : "border-border bg-muted text-muted-foreground";
+        : "border-border bg-muted text-muted-foreground";
   return <span className={`rounded-md border px-2 py-0.5 text-xs ${cls}`}>{children}</span>;
 }
 
 function valueForDraft(setting: SystemSetting): SettingValue {
-  if (setting.sensitive) return null;
   if (setting.value !== undefined) return setting.value;
   return setting.default ?? null;
 }

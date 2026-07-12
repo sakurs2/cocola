@@ -4,13 +4,10 @@
 #
 # This is the live counterpart to the hermetic scripts/llm-tooluse-e2e.py: that
 # one proves the gateway plumbing with a FakeUpstream; THIS one proves the real
-# upstream (the proxy you pointed COCOLA_ANTHROPIC_BASE_URL at) actually emits
+# upstream configured in Admin -> Models actually emits
 # tool_use through the gateway end to end (ADR-0010).
 #
-# Prereqs: a gateway already up, e.g.
-#     COCOLA_LLM_PROVIDER=anthropic \
-#     COCOLA_ANTHROPIC_BASE_URL=<your proxy> \
-#     COCOLA_ANTHROPIC_API_KEY=<key> \
+# Prereqs: a gateway already up and a model configured in Admin -> Models:
 #     make dev
 #   (the banner prints a dev TOKEN -- export it as TOKEN below)
 #

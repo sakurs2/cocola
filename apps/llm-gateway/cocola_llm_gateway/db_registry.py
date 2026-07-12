@@ -13,7 +13,7 @@ from cocola_common import CocolaError, ErrorCode, get_logger
 from cryptography.hazmat.primitives.ciphers.aead import AESGCM
 from psycopg_pool import AsyncConnectionPool
 
-from cocola_llm_gateway.config import _build_from_dict
+from cocola_llm_gateway.config import _build_from_dict, read_secret_env
 from cocola_llm_gateway.registry import Registry
 from cocola_llm_gateway.service import RegistrySource
 
@@ -32,6 +32,9 @@ class PostgresRegistrySource:
         self._opened = False
         self._cached: Registry | None = None
         self._cached_at = 0.0
+        self._fingerprint = ""
+        self._references: dict[Registry, int] = {}
+        self._retired: set[Registry] = set()
 
     async def _ready(self) -> None:
         if self._opened:
@@ -41,24 +44,58 @@ class PostgresRegistrySource:
                 await self._pool.open()
                 self._opened = True
 
-    async def get_registry(self) -> Registry:
+    async def acquire_registry(self) -> Registry:
+        close_after_swap: Registry | None = None
         now = time.monotonic()
-        if self._cached is not None and now - self._cached_at < self._ttl_s:
-            return self._cached
         async with self._refresh_lock:
             now = time.monotonic()
-            if self._cached is not None and now - self._cached_at < self._ttl_s:
-                return self._cached
-            try:
-                reg = await self._load()
-            except Exception as exc:  # noqa: BLE001 - fallback keeps gateway usable
-                log.warning("db model registry load failed", error=repr(exc))
-                reg = self._cached or self._fallback
-            self._cached = reg
-            self._cached_at = now
-            return reg
+            if self._cached is None or now - self._cached_at >= self._ttl_s:
+                close_after_swap = await self._refresh(now)
+            registry = self._cached or self._fallback
+            self._references[registry] = self._references.get(registry, 0) + 1
+        if close_after_swap is not None:
+            await _close_registry(close_after_swap)
+        return registry
 
-    async def _load(self) -> Registry:
+    async def release_registry(self, registry: Registry) -> None:
+        close = False
+        async with self._refresh_lock:
+            refs = self._references.get(registry, 0)
+            if refs <= 1:
+                self._references.pop(registry, None)
+                if registry in self._retired:
+                    self._retired.remove(registry)
+                    close = True
+            else:
+                self._references[registry] = refs - 1
+        if close:
+            await _close_registry(registry)
+
+    async def _refresh(self, now: float) -> Registry | None:
+        try:
+            fingerprint, spec = await self._load_snapshot()
+            if self._cached is not None and fingerprint == self._fingerprint:
+                self._cached_at = now
+                return None
+            registry = self._fallback if spec is None else _build_from_dict(spec)
+        except Exception as exc:  # noqa: BLE001 - last-known-good keeps gateway usable
+            log.warning("db model registry load failed", error=repr(exc))
+            self._cached = self._cached or self._fallback
+            self._cached_at = now
+            return None
+
+        previous = self._cached
+        self._cached = registry
+        self._cached_at = now
+        self._fingerprint = fingerprint
+        if previous is None or previous is registry or previous is self._fallback:
+            return None
+        if self._references.get(previous, 0) == 0:
+            return previous
+        self._retired.add(previous)
+        return None
+
+    async def _load_snapshot(self) -> tuple[str, dict[str, Any] | None]:
         await self._ready()
         query = """
             SELECT
@@ -73,8 +110,9 @@ class PostgresRegistrySource:
         async with self._pool.connection() as conn:
             cur = await conn.execute(query)
             rows = await cur.fetchall()
+        fingerprint = hashlib.sha256(repr(rows).encode("utf-8")).hexdigest()
         if not rows:
-            return self._fallback
+            return fingerprint, None
 
         providers: dict[str, dict[str, Any]] = {}
         routes: dict[str, dict[str, Any]] = {}
@@ -94,6 +132,11 @@ class PostgresRegistrySource:
                 icon_url,
                 is_default,
             ) = row
+            if provider_type == "fake":
+                raise CocolaError(
+                    ErrorCode.INVALID_ARGUMENT,
+                    "fake model providers are only supported by tests",
+                )
             if provider_id not in providers:
                 providers[provider_id] = {
                     "type": provider_type,
@@ -118,19 +161,22 @@ class PostgresRegistrySource:
             }
             if is_default and not default_alias:
                 default_alias = alias
-        return _build_from_dict(
-            {
-                "default_alias": default_alias,
-                "providers": providers,
-                "routes": routes,
-            }
-        )
+        return fingerprint, {
+            "default_alias": default_alias,
+            "providers": providers,
+            "routes": routes,
+        }
 
     async def aclose(self) -> None:
-        if self._cached is not None and self._cached is not self._fallback:
-            await self._cached.aclose()
-            self._cached = None
-        await self._fallback.aclose()
+        registries = set(self._retired)
+        if self._cached is not None:
+            registries.add(self._cached)
+        registries.add(self._fallback)
+        self._retired.clear()
+        self._references.clear()
+        self._cached = None
+        for registry in registries:
+            await _close_registry(registry)
         if self._opened:
             await self._pool.close()
             self._opened = False
@@ -158,7 +204,7 @@ def registry_source_from_env(fallback: Registry) -> RegistrySource:
     return PostgresRegistrySource(
         dsn,
         fallback,
-        secret=os.getenv("COCOLA_MODEL_SECRET_KEY", ""),
+        secret=read_secret_env("COCOLA_MODEL_SECRET_KEY"),
         ttl_s=ttl_s,
     )
 
@@ -167,8 +213,18 @@ class _Static:
     def __init__(self, registry: Registry):
         self._registry = registry
 
-    async def get_registry(self) -> Registry:
+    async def acquire_registry(self) -> Registry:
         return self._registry
+
+    async def release_registry(self, registry: Registry) -> None:
+        return None
 
     async def aclose(self) -> None:
         await self._registry.aclose()
+
+
+async def _close_registry(registry: Registry) -> None:
+    try:
+        await registry.aclose()
+    except Exception as exc:  # noqa: BLE001 - cleanup must not break active requests
+        log.warning("model registry close failed", error=repr(exc))

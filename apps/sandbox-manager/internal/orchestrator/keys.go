@@ -81,11 +81,8 @@ func warmKey(sandboxID string) string { return warmPrefix + sandboxID }
 
 func warmScanPattern() string { return warmPrefix + "*" }
 
-// warmConfigKey holds the admin-tunable warm-pool config (enabled + size),
-// written by admin-api and read by sandbox-manager on every refill tick so the
-// admin config page hot-reloads without a sandbox-manager restart.
-//
-//	cocola:sb:warmpool:config -> JSON({"enabled":bool,"size":int})
+// warmConfigKey is the runtime delivery cache written by admin-api from the
+// durable system setting. It only contains sizing; provisioning remains local.
 const warmConfigKey = keyPrefix + "warmpool:config"
 
 // warmRefillLockKey serialises the refill loop across replicas so only one

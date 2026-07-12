@@ -124,7 +124,7 @@ from the runtime.
   without its sandbox.
 - Composition root: `COCOLA_SANDBOX_ADDR` selects the binder; unset keeps the
   zero-config boot (sessions run with no bound sandbox), mirroring how
-  `COCOLA_LLM_BASE_URL` / `COCOLA_ADMIN_BASE_URL` gate their features.
+  `COCOLA_SANDBOX_ADDR` / `COCOLA_ADMIN_URL` gate their features.
 - **Then deferred, now done** (see next addendum): the runtime did not yet route
   the SDK's tool execution (bash/file IO) through the bound sandbox. Binding the
   session was the prerequisite that gives those calls a target. Release is still

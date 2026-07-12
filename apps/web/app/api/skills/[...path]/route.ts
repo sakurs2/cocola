@@ -4,8 +4,7 @@ import { isAuthFail, requireUser, runtimeAuthHeaders } from "@/lib/server-auth";
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
-const ADMIN_URL =
-  process.env.COCOLA_ADMIN_URL ?? process.env.COCOLA_ADMIN_BASE_URL ?? "http://127.0.0.1:8092";
+const ADMIN_URL = process.env.COCOLA_ADMIN_URL ?? "http://127.0.0.1:8092";
 
 export async function GET(req: NextRequest, { params }: { params: Promise<{ path: string[] }> }) {
   return proxyMe(req, `${await mePath(params)}${req.nextUrl.search}`);
@@ -31,7 +30,11 @@ async function mePath(params: Promise<{ path: string[] }>) {
   return `/me/skills/${path.map(encodeURIComponent).join("/")}`;
 }
 
-async function proxyMe(req: NextRequest, path: string, init?: RequestInit & { contentType?: string }) {
+async function proxyMe(
+  req: NextRequest,
+  path: string,
+  init?: RequestInit & { contentType?: string },
+) {
   const authResult = await requireUser();
   if (isAuthFail(authResult)) return authResult.response;
   const authHeaders = await runtimeAuthHeaders(authResult.user);

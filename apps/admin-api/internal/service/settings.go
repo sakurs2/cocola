@@ -26,19 +26,16 @@ const (
 )
 
 type SystemSettingDefinition struct {
-	Key             string `json:"key"`
-	Group           string `json:"group"`
-	Label           string `json:"label"`
-	Description     string `json:"description"`
-	Kind            string `json:"kind"`
-	Env             string `json:"env,omitempty"`
-	Default         any    `json:"default"`
-	Editable        bool   `json:"editable"`
-	HotReload       bool   `json:"hot_reload"`
-	RestartRequired bool   `json:"restart_required"`
-	Sensitive       bool   `json:"sensitive"`
-	Min             int    `json:"min,omitempty"`
-	Max             int    `json:"max,omitempty"`
+	Key         string `json:"key"`
+	Group       string `json:"group"`
+	Label       string `json:"label"`
+	Description string `json:"description"`
+	Kind        string `json:"kind"`
+	Env         string `json:"env,omitempty"`
+	Default     any    `json:"default"`
+	Editable    bool   `json:"editable"`
+	Min         int    `json:"min,omitempty"`
+	Max         int    `json:"max,omitempty"`
 }
 
 type SystemSettingView struct {
@@ -62,87 +59,47 @@ func settingDefinitions() []SystemSettingDefinition {
 		{
 			Key: SettingSchedulerEnabled, Group: "Scheduler", Label: "Scheduler Enabled",
 			Description: "Pause or resume due-task execution while the scheduler worker is running.",
-			Kind:        "bool", Env: "COCOLA_SCHEDULER_ENABLED", Default: true, Editable: true, HotReload: true,
+			Kind:        "bool", Env: "COCOLA_SCHEDULER_ENABLED", Default: true, Editable: true,
 		},
 		{
 			Key: SettingSchedulerPollSecs, Group: "Scheduler", Label: "Poll Interval",
 			Description: "Seconds between due-task scans.",
-			Kind:        "int", Env: "COCOLA_SCHEDULER_POLL_SECS", Default: 60, Editable: true, HotReload: true, Min: 1, Max: 3600,
+			Kind:        "int", Env: "COCOLA_SCHEDULER_POLL_SECS", Default: 60, Editable: true, Min: 1, Max: 3600,
 		},
 		{
 			Key: SettingSchedulerRunTimeoutSecs, Group: "Scheduler", Label: "Run Timeout",
 			Description: "Maximum seconds allowed for a scheduled task run.",
-			Kind:        "int", Env: "COCOLA_SCHEDULER_RUN_TIMEOUT_SECS", Default: 3600, Editable: true, HotReload: true, Min: 60, Max: 86400,
+			Kind:        "int", Env: "COCOLA_SCHEDULER_RUN_TIMEOUT_SECS", Default: 3600, Editable: true, Min: 60, Max: 86400,
 		},
 		{
 			Key: SettingSchedulerHeartbeatSecs, Group: "Scheduler", Label: "Heartbeat Interval",
 			Description: "Seconds between running-task lease heartbeats.",
-			Kind:        "int", Env: "COCOLA_SCHEDULER_HEARTBEAT_SECS", Default: 30, Editable: true, HotReload: true, Min: 1, Max: 3600,
+			Kind:        "int", Env: "COCOLA_SCHEDULER_HEARTBEAT_SECS", Default: 30, Editable: true, Min: 1, Max: 3600,
 		},
 		{
 			Key: SettingSchedulerLeaseTimeoutSecs, Group: "Scheduler", Label: "Lease Timeout",
 			Description: "Seconds after which a running task without heartbeat is marked expired.",
-			Kind:        "int", Env: "COCOLA_SCHEDULER_LEASE_TIMEOUT_SECS", Default: 300, Editable: true, HotReload: true, Min: 60, Max: 86400,
+			Kind:        "int", Env: "COCOLA_SCHEDULER_LEASE_TIMEOUT_SECS", Default: 300, Editable: true, Min: 60, Max: 86400,
 		},
 		{
 			Key: SettingSchedulerMinIntervalSecs, Group: "Scheduler", Label: "Minimum Schedule Interval",
 			Description: "Minimum interval retained for legacy custom schedules; new tasks use simple calendar frequencies.",
-			Kind:        "int", Env: "COCOLA_SCHEDULER_MIN_INTERVAL_SECS", Default: 3600, Editable: true, HotReload: true, Min: 3600, Max: 86400,
+			Kind:        "int", Env: "COCOLA_SCHEDULER_MIN_INTERVAL_SECS", Default: 3600, Editable: true, Min: 3600, Max: 86400,
 		},
 		{
 			Key: SettingWarmPoolEnabled, Group: "Sandbox", Label: "Warm Pool Enabled",
-			Description: "Pre-create session-agnostic sandboxes ahead of demand so a new session claims a ready sandbox instead of waiting on a cold start.",
-			Kind:        "bool", Env: "COCOLA_SANDBOX_WARM_POOL_ENABLED", Default: true, Editable: true, HotReload: true,
+			Description: "Create session-agnostic sandboxes ahead of demand. Applied without restarting sandbox-manager.",
+			Kind:        "bool", Env: "COCOLA_SANDBOX_WARM_POOL_ENABLED", Default: true, Editable: true,
 		},
 		{
-			Key: SettingWarmPoolSize, Group: "Sandbox", Label: "Warm Pool Size",
-			Description: "Target number of pre-warmed sandboxes to keep ready. Applied fleet-wide and hot-reloaded by sandbox-manager.",
-			Kind:        "int", Env: "COCOLA_SANDBOX_WARM_POOL_SIZE", Default: 10, Editable: true, HotReload: true, Min: 0, Max: 500,
-		},
-		{
-			Key: "auth.token_ttl_secs", Group: "Auth", Label: "Token Default TTL",
-			Description: "Default admin-minted token lifetime. Applies after restart in the current issuer implementation.",
-			Kind:        "int", Env: "COCOLA_AUTH_TOKEN_TTL_SECS", Default: 30 * 24 * 3600, RestartRequired: true, Min: 0, Max: 365 * 24 * 3600,
-		},
-		{
-			Key: "auth.secret", Group: "Auth", Label: "Runtime Auth Secret",
-			Description: "Whether the shared HS256 auth secret is configured.",
-			Kind:        "secret", Env: "COCOLA_AUTH_SECRET", Sensitive: true, RestartRequired: true,
-		},
-		{
-			Key: "admin.key", Group: "Auth", Label: "Admin API Key",
-			Description: "Whether static admin bearer authentication is configured.",
-			Kind:        "secret", Env: "COCOLA_ADMIN_KEY", Sensitive: true, RestartRequired: true,
-		},
-		{
-			Key: "infra.postgres_dsn", Group: "Storage / Infra", Label: "Postgres DSN",
-			Description: "Postgres persistence DSN configuration status.",
-			Kind:        "secret", Env: "COCOLA_PG_DSN", Sensitive: true, RestartRequired: true,
-		},
-		{
-			Key: "infra.redis_addr", Group: "Storage / Infra", Label: "Redis Address",
-			Description: "Shared Redis address for revocations, quota propagation, sandbox metadata, and user events.",
-			Kind:        "string", Env: "COCOLA_REDIS_ADDR", Default: "", RestartRequired: true,
-		},
-		{
-			Key: "gateway.url", Group: "AI Runtime", Label: "Gateway URL",
-			Description: "Gateway URL used by admin-api for all scheduled task runs.",
-			Kind:        "string", Env: "COCOLA_GATEWAY_URL", Default: "http://127.0.0.1:8080", RestartRequired: true,
-		},
-		{
-			Key: "agent.addr", Group: "AI Runtime", Label: "Agent Runtime Address",
-			Description: "agent-runtime gRPC address used by the Gateway for interactive agent sessions.",
-			Kind:        "string", Env: "COCOLA_AGENT_ADDR", Default: "127.0.0.1:50061", RestartRequired: true,
+			Key: SettingWarmPoolSize, Group: "Sandbox", Label: "Warm Idle Target",
+			Description: "Target number of idle pre-warmed sandboxes, excluding sandboxes already claimed by active sessions.",
+			Kind:        "int", Env: "COCOLA_SANDBOX_WARM_POOL_SIZE", Default: 10, Editable: true, Min: 0, Max: 500,
 		},
 		{
 			Key: SettingTraceRetentionDays, Group: "Observability", Label: "Trace Retention",
 			Description: "Days to retain detailed conversation spans. Conversation audit summaries are kept.",
-			Kind:        "int", Env: "COCOLA_TRACE_RETENTION_DAYS", Default: 30, Editable: true, HotReload: true, Min: 1, Max: 365,
-		},
-		{
-			Key: "observability.metrics_addr", Group: "Observability", Label: "Metrics Address",
-			Description: "admin-api metrics listen address. Empty disables the metrics server.",
-			Kind:        "string", Env: "COCOLA_METRICS_ADDR", Default: ":9093", RestartRequired: true,
+			Kind:        "int", Env: "COCOLA_TRACE_RETENTION_DAYS", Default: 30, Editable: true, Min: 1, Max: 365,
 		},
 	}
 }
@@ -177,11 +134,14 @@ func (a *Admin) UpdateSystemSetting(ctx context.Context, key string, in SystemSe
 	if !ok {
 		return SystemSettingView{}, store.ErrNotFound
 	}
-	if !def.Editable || def.Sensitive || def.RestartRequired {
+	if !def.Editable {
 		return SystemSettingView{}, ErrPermissionDenied
 	}
 	if def.Key == SettingSchedulerEnabled && !a.schedulerStarted.Load() {
 		return SystemSettingView{}, ErrPermissionDenied
+	}
+	if isWarmPoolSetting(key) && a.warmPool == nil {
+		return SystemSettingView{}, ErrNotConfigured
 	}
 	_, raw, err := normalizeSettingValue(def, in.Value)
 	if err != nil {
@@ -197,9 +157,6 @@ func (a *Admin) UpdateSystemSetting(ctx context.Context, key string, in SystemSe
 	if err != nil {
 		return SystemSettingView{}, err
 	}
-	if key == SettingWarmPoolEnabled || key == SettingWarmPoolSize {
-		a.publishWarmPoolConfig(ctx)
-	}
 	return a.settingView(def, setting), nil
 }
 
@@ -208,20 +165,20 @@ func (a *Admin) ResetSystemSetting(ctx context.Context, key string, expectedVers
 	if !ok {
 		return store.ErrNotFound
 	}
-	if !def.Editable || def.Sensitive || def.RestartRequired {
+	if !def.Editable {
 		return ErrPermissionDenied
 	}
 	if def.Key == SettingSchedulerEnabled && !a.schedulerStarted.Load() {
 		return ErrPermissionDenied
+	}
+	if isWarmPoolSetting(key) && a.warmPool == nil {
+		return ErrNotConfigured
 	}
 	if err := a.store.DeleteSystemSetting(ctx, key, expectedVersion); err != nil {
 		if errors.Is(err, store.ErrNotFound) {
 			return nil
 		}
 		return err
-	}
-	if key == SettingWarmPoolEnabled || key == SettingWarmPoolSize {
-		a.publishWarmPoolConfig(ctx)
 	}
 	return nil
 }
@@ -230,6 +187,9 @@ func (a *Admin) settingView(def SystemSettingDefinition, override store.SystemSe
 	value, source, configured := effectiveSettingValue(def, override)
 	editable := def.Editable
 	if def.Key == SettingSchedulerEnabled && !a.schedulerStarted.Load() {
+		editable = false
+	}
+	if isWarmPoolSetting(def.Key) && a.warmPool == nil {
 		editable = false
 	}
 	view := SystemSettingView{
@@ -242,9 +202,6 @@ func (a *Admin) settingView(def SystemSettingDefinition, override store.SystemSe
 		UpdatedBy:               override.UpdatedBy,
 	}
 	view.Editable = editable
-	if def.Sensitive {
-		view.Value = nil
-	}
 	return view
 }
 
@@ -262,9 +219,6 @@ func effectiveSettingValue(def SystemSettingDefinition, override store.SystemSet
 				return value, "env", raw != ""
 			}
 		}
-	}
-	if def.Sensitive {
-		return nil, "default", false
 	}
 	return def.Default, "default", def.Default != nil
 }
@@ -343,8 +297,6 @@ func parseSettingString(def SystemSettingDefinition, raw string) (any, error) {
 		return coerceSettingValue(def, n)
 	case "string":
 		return strings.TrimSpace(raw), nil
-	case "secret":
-		return nil, nil
 	default:
 		return def.Default, nil
 	}
@@ -412,34 +364,36 @@ func (a *Admin) settingBool(ctx context.Context, key string, fallback bool) bool
 	return fallback
 }
 
-// WarmPoolConfigWriter propagates the effective warm-pool sizing to the shared
-// Redis key that sandbox-manager reads on every refill tick, so an admin config
-// change hot-reloads fleet-wide without a sandbox-manager restart.
+// WarmPoolConfigWriter propagates the durable desired warm-pool size to the
+// Redis key sandbox-manager reads on every reconciliation tick.
 type WarmPoolConfigWriter interface {
 	SetWarmPoolConfig(ctx context.Context, enabled bool, size int) error
 }
 
-// WithWarmPoolConfigWriter attaches the shared-Redis warm-pool config publisher.
-// Nil (no shared Redis) simply means the admin page still persists the setting,
-// but sandbox-manager falls back to its own env/default until restarted.
+// WithWarmPoolConfigWriter enables hot warm-pool sizing. Without the writer the
+// settings remain visible but read-only, because changing them could not affect
+// sandbox-manager.
 func (a *Admin) WithWarmPoolConfigWriter(w WarmPoolConfigWriter) *Admin {
 	a.warmPool = w
 	return a
 }
 
-// PublishWarmPoolConfig pushes the current effective warm-pool sizing to shared
-// Redis. Safe to call at boot to reconcile the shared key with the DB/env state.
-func (a *Admin) PublishWarmPoolConfig(ctx context.Context) {
-	a.publishWarmPoolConfig(ctx)
+// PublishWarmPoolConfig reconciles the Redis delivery value from the durable
+// DB override (or its env/default fallback). Callers retry this operation so a
+// transient Redis failure cannot leave the runtime stale indefinitely.
+func (a *Admin) PublishWarmPoolConfig(ctx context.Context) error {
+	if a.warmPool == nil {
+		return ErrNotConfigured
+	}
+	return a.warmPool.SetWarmPoolConfig(
+		ctx,
+		a.settingBool(ctx, SettingWarmPoolEnabled, true),
+		a.settingInt(ctx, SettingWarmPoolSize, 10),
+	)
 }
 
-func (a *Admin) publishWarmPoolConfig(ctx context.Context) {
-	if a.warmPool == nil {
-		return
-	}
-	enabled := a.settingBool(ctx, SettingWarmPoolEnabled, true)
-	size := a.settingInt(ctx, SettingWarmPoolSize, 10)
-	_ = a.warmPool.SetWarmPoolConfig(ctx, enabled, size)
+func isWarmPoolSetting(key string) bool {
+	return key == SettingWarmPoolEnabled || key == SettingWarmPoolSize
 }
 
 func secondsDuration(n int) time.Duration {

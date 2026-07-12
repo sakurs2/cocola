@@ -7,7 +7,7 @@ and runs the async gRPC server. It deliberately holds no business logic.
 Env (all optional; sensible local defaults):
     COCOLA_AGENT_HOST / COCOLA_AGENT_PORT   where to listen (default 0.0.0.0:50061)
     COCOLA_AGENT_MODE                        real (default) or explicit echo for tests
-    COCOLA_ADMIN_BASE_URL                    admin-api root for skills, MCP, and prompts
+    COCOLA_ADMIN_URL                         admin-api root for skills, MCP, and prompts
     COCOLA_ADMIN_KEY                         admin bearer key (if admin-api auth is on)
     COCOLA_SANDBOX_ADDR                      sandbox-manager gRPC addr (binds session->sandbox,
                                              routes the agent's bash/file tools into it, AND
@@ -114,27 +114,27 @@ def _build_provider(
 
 
 def _build_skill_catalog() -> SkillCatalog | None:
-    admin_base = os.getenv("COCOLA_ADMIN_BASE_URL", "").strip()
+    admin_base = os.getenv("COCOLA_ADMIN_URL", "").strip()
     if not admin_base:
-        log.warning("COCOLA_ADMIN_BASE_URL unset; sessions run with no market skills")
+        log.warning("COCOLA_ADMIN_URL unset; sessions run with no market skills")
         return None
     log.info("Skill-Market enabled", admin_base=admin_base)
     return AdminSkillCatalog(admin_base, admin_key=os.getenv("COCOLA_ADMIN_KEY", ""))
 
 
 def _build_mcp_catalog() -> MCPCatalog | None:
-    admin_base = os.getenv("COCOLA_ADMIN_BASE_URL", "").strip()
+    admin_base = os.getenv("COCOLA_ADMIN_URL", "").strip()
     if not admin_base:
-        log.warning("COCOLA_ADMIN_BASE_URL unset; sessions run with no MCP servers")
+        log.warning("COCOLA_ADMIN_URL unset; sessions run with no MCP servers")
         return None
     log.info("MCP catalog enabled", admin_base=admin_base)
     return AdminMCPCatalog(admin_base, admin_key=os.getenv("COCOLA_ADMIN_KEY", ""))
 
 
 def _build_prompt_catalog() -> PromptCatalog | None:
-    admin_base = os.getenv("COCOLA_ADMIN_BASE_URL", "").strip()
+    admin_base = os.getenv("COCOLA_ADMIN_URL", "").strip()
     if not admin_base:
-        log.warning("COCOLA_ADMIN_BASE_URL unset; sessions run with no admin prompt")
+        log.warning("COCOLA_ADMIN_URL unset; sessions run with no admin prompt")
         return None
     log.info("Agent prompt policy enabled", admin_base=admin_base)
     return AdminPromptCatalog(admin_base, admin_key=os.getenv("COCOLA_ADMIN_KEY", ""))

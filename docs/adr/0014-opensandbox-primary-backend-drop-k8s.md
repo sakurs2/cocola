@@ -1,6 +1,6 @@
 # ADR-0014: OpenSandbox 定为主力沙箱后端,退役 k8s provider(docker 保留为兜底)
 
-- Status: Accepted
+- Status: Superseded in part by ADR-0020（OpenSandbox 已成为唯一生产后端，删除 backend 选择配置）
 - Date: 2026-06-28
 - Deciders: @cocola-maintainers
 - Supersedes: ADR-0013 中"仅作可插拔后端、不表态主次"的措辞;收敛 ADR-0008 / ADR-0002 对 K8s+gVisor 这一**具体后端**的预期

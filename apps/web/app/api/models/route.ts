@@ -9,8 +9,7 @@ type ModelIcon = {
   src?: string;
 };
 
-const ADMIN_URL =
-  process.env.COCOLA_ADMIN_URL ?? process.env.COCOLA_ADMIN_BASE_URL ?? "http://127.0.0.1:8092";
+const ADMIN_URL = process.env.COCOLA_ADMIN_URL ?? "http://127.0.0.1:8092";
 
 export async function GET() {
   const authResult = await requireUser();
