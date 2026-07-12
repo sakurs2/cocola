@@ -94,6 +94,11 @@ type Provider struct {
 	minio *minio.Client
 }
 
+type checkpointObjectCleaner interface {
+	ListObjects(ctx context.Context, bucketName string, opts minio.ListObjectsOptions) <-chan minio.ObjectInfo
+	RemoveObject(ctx context.Context, bucketName, objectName string, opts minio.RemoveObjectOptions) error
+}
+
 var _ provider.SessionCheckpointer = (*Provider)(nil)
 
 // CheckpointSession snapshots key dirs from a live sandbox and records metadata.
@@ -126,6 +131,11 @@ func (p *Provider) CheckpointSession(ctx context.Context, userID, sessionID, san
 	}
 	if err := p.recordSuccess(ctx, sessionID, key, len(data)); err != nil {
 		return fmt.Errorf("record checkpoint success: %w", err)
+	}
+	if err := removeSupersededCheckpointObjects(
+		ctx, p.minio, p.cfg.MinioBucket, checkpointPrefix(userID, sessionID), key,
+	); err != nil {
+		return fmt.Errorf("checkpoint uploaded but old snapshot cleanup failed: %w", err)
 	}
 	return nil
 }
@@ -256,14 +266,48 @@ func archiveCommand(dirs []string) []string {
 
 var keyPartRE = regexp.MustCompile(`[^A-Za-z0-9_.-]+`)
 
-func objectKey(userID, sessionID string) string {
+func checkpointPrefix(userID, sessionID string) string {
 	return fmt.Sprintf(
-		"checkpoints/%s/%s/%s-%s.tar.zst",
+		"checkpoints/%s/%s/",
 		safeKeyPart(userID, "user"),
 		safeKeyPart(sessionID, "session"),
+	)
+}
+
+func objectKey(userID, sessionID string) string {
+	return fmt.Sprintf(
+		"%s%s-%s.tar.zst",
+		checkpointPrefix(userID, sessionID),
 		time.Now().UTC().Format("20060102T150405Z"),
 		uuid.NewString(),
 	)
+}
+
+func removeSupersededCheckpointObjects(
+	ctx context.Context,
+	store checkpointObjectCleaner,
+	bucket, prefix, currentKey string,
+) error {
+	var cleanupErrors []error
+	for object := range store.ListObjects(ctx, bucket, minio.ListObjectsOptions{
+		Prefix:    prefix,
+		Recursive: true,
+	}) {
+		if object.Err != nil {
+			cleanupErrors = append(cleanupErrors, fmt.Errorf("list checkpoint objects: %w", object.Err))
+			continue
+		}
+		if object.Key == currentKey {
+			continue
+		}
+		if err := store.RemoveObject(ctx, bucket, object.Key, minio.RemoveObjectOptions{}); err != nil {
+			cleanupErrors = append(
+				cleanupErrors,
+				fmt.Errorf("remove checkpoint object %q: %w", object.Key, err),
+			)
+		}
+	}
+	return errors.Join(cleanupErrors...)
 }
 
 func safeKeyPart(value, fallback string) string {

@@ -216,6 +216,19 @@ class CheckpointManager:
             key = self._object_key(user_id=user_id, session_id=session_id)
             await asyncio.to_thread(self._objstore.put, key, data, "application/zstd")
             await self._session_map.put_checkpoint(session_id, key, size_bytes=len(data))
+            try:
+                await self._delete_superseded_snapshots(
+                    user_id=user_id,
+                    session_id=session_id,
+                    current_key=key,
+                )
+            except Exception as exc:  # noqa: BLE001 - latest checkpoint remains usable
+                log.warning(
+                    "old checkpoint cleanup failed",
+                    session_id=session_id,
+                    object_key=key,
+                    error=str(exc),
+                )
             log.info("checkpoint uploaded", session_id=session_id, object_key=key, size=len(data))
             return key
         except Exception as exc:  # noqa: BLE001 - reclaim must continue
@@ -284,14 +297,41 @@ class CheckpointManager:
                 timeout_secs=10,
             )
 
-    def _object_key(self, *, user_id: str, session_id: str) -> str:
-        ts = datetime.now(UTC).strftime("%Y%m%dT%H%M%SZ")
-        return "checkpoints/{}/{}/{}-{}.tar.zst".format(
+    def _object_prefix(self, *, user_id: str, session_id: str) -> str:
+        return "checkpoints/{}/{}/".format(
             _safe_key_part(user_id, "user"),
             _safe_key_part(session_id, "session"),
-            ts,
-            uuid.uuid4(),
         )
+
+    def _object_key(self, *, user_id: str, session_id: str) -> str:
+        ts = datetime.now(UTC).strftime("%Y%m%dT%H%M%SZ")
+        prefix = self._object_prefix(user_id=user_id, session_id=session_id)
+        return f"{prefix}{ts}-{uuid.uuid4()}.tar.zst"
+
+    async def _delete_superseded_snapshots(
+        self, *, user_id: str, session_id: str, current_key: str
+    ) -> None:
+        assert self._objstore is not None
+        prefix = self._object_prefix(user_id=user_id, session_id=session_id)
+        keys = await asyncio.to_thread(self._objstore.list, prefix)
+        failures: list[str] = []
+        deleted = 0
+        for key in keys:
+            if key == current_key:
+                continue
+            try:
+                await asyncio.to_thread(self._objstore.delete, key)
+                deleted += 1
+            except Exception as exc:  # noqa: BLE001 - attempt every stale object
+                failures.append(f"{key}: {exc}")
+        if failures:
+            raise RuntimeError("; ".join(failures))
+        if deleted:
+            log.info(
+                "old checkpoints deleted",
+                session_id=session_id,
+                deleted=deleted,
+            )
 
     async def _record_failure(self, session_id: str, error: str) -> None:
         if self._session_map is None:
