@@ -60,8 +60,8 @@ type Query struct {
 	// forwarded to agent-runtime over gRPC metadata and injected into the
 	// sandbox as ANTHROPIC_AUTH_TOKEN so the in-sandbox brain calls the
 	// llm-gateway as the real user (per-user quota / usage / revocation),
-	// replacing the static cluster-wide sandbox token. Empty => agent-runtime
-	// falls back to its baked COCOLA_SANDBOX_LLM_TOKEN.
+	// replacing static cluster-wide credentials. Empty is supported by tests
+	// with an unauthenticated fake runtime; production config always wires an issuer.
 	SandboxAuthToken string
 	Attachments      []Attachment
 }

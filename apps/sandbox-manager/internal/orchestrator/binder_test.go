@@ -175,6 +175,22 @@ func TestWarmPoolSizingUsesHotRuntimeOverride(t *testing.T) {
 	}
 }
 
+func TestWarmPoolProvisioningNeverBakesStaticAuthToken(t *testing.T) {
+	t.Setenv("COCOLA_SANDBOX_IMAGE", "registry/runtime:v1")
+	t.Setenv("COCOLA_SANDBOX_LLM_BASE_URL", "http://llm-gateway:8080")
+	t.Setenv("COCOLA_SANDBOX_MODEL_ALIAS", "cocola-default")
+	t.Setenv("COCOLA_SANDBOX_LLM_TOKEN", "legacy-shared-token")
+
+	cfg := WarmConfigFromEnv()
+	if cfg.Env["ANTHROPIC_AUTH_TOKEN"] != "" {
+		t.Fatalf("warm sandbox contains a static auth token: %q", cfg.Env["ANTHROPIC_AUTH_TOKEN"])
+	}
+	if cfg.Env["ANTHROPIC_BASE_URL"] != "http://llm-gateway:8080" ||
+		cfg.Env["ANTHROPIC_MODEL"] != "cocola-default" {
+		t.Fatalf("warm routing env = %#v", cfg.Env)
+	}
+}
+
 func TestWarmPoolSizingWaitsForRuntimeDelivery(t *testing.T) {
 	b, _ := newTestBinder(t)
 	b.WithWarmPool(WarmConfig{Enabled: true, Size: 10, Image: "sandbox-image"})

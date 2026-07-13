@@ -1,23 +1,28 @@
-"""Unit tests for the object-store fetcher builder (ADR-0017 P1a).
+"""Unit tests for the required object-store fetcher builder (ADR-0017 P1a).
 
 We do not stand up a real MinIO here; we assert the env-driven construction
-contract: unconfigured => None, _FILE secret indirection, and that MinioFetcher
+contract: incomplete config fails, _FILE secret indirection, and MinioFetcher
 reads/closes the SDK response correctly against a fake client.
 """
 
+import pytest
 from cocola_agent_runtime import objstore
 
 
-def test_fetcher_from_env_none_when_unconfigured(monkeypatch):
+def test_fetcher_from_env_fails_when_unconfigured(monkeypatch):
     monkeypatch.delenv("COCOLA_MINIO_ENDPOINT", raising=False)
     monkeypatch.delenv("COCOLA_MINIO_BUCKET", raising=False)
-    assert objstore.fetcher_from_env() is None
+    with pytest.raises(RuntimeError, match="COCOLA_MINIO_ENDPOINT"):
+        objstore.fetcher_from_env()
 
 
-def test_fetcher_from_env_none_when_bucket_missing(monkeypatch):
+def test_fetcher_from_env_fails_when_bucket_missing(monkeypatch):
     monkeypatch.setenv("COCOLA_MINIO_ENDPOINT", "127.0.0.1:9000")
+    monkeypatch.setenv("COCOLA_MINIO_ACCESS_KEY", "cocola")
+    monkeypatch.setenv("COCOLA_MINIO_SECRET_KEY", "cocola_dev_pw")
     monkeypatch.delenv("COCOLA_MINIO_BUCKET", raising=False)
-    assert objstore.fetcher_from_env() is None
+    with pytest.raises(RuntimeError, match="COCOLA_MINIO_BUCKET"):
+        objstore.fetcher_from_env()
 
 
 def test_fetcher_from_env_builds_when_configured(monkeypatch):
@@ -43,6 +48,13 @@ def test_secret_from_env_falls_back_to_plain(monkeypatch):
     monkeypatch.delenv("COCOLA_MINIO_SECRET_KEY_FILE", raising=False)
     monkeypatch.setenv("COCOLA_MINIO_SECRET_KEY", "plain")
     assert objstore._secret_from_env("COCOLA_MINIO_SECRET_KEY") == "plain"
+
+
+def test_secret_from_env_fails_when_configured_file_is_unreadable(monkeypatch):
+    monkeypatch.setenv("COCOLA_MINIO_SECRET_KEY", "stale-env")
+    monkeypatch.setenv("COCOLA_MINIO_SECRET_KEY_FILE", "/missing/cocola-secret")
+    with pytest.raises(RuntimeError, match="unreadable"):
+        objstore._secret_from_env("COCOLA_MINIO_SECRET_KEY")
 
 
 class _FakeResp:

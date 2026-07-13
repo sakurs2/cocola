@@ -1,0 +1,295 @@
+name: cocola
+
+services:
+  redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+    command: ["redis-server", "--appendonly", "yes"]
+    volumes:
+      - redisdata:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+
+  postgres:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: cocola
+      POSTGRES_PASSWORD: "${COCOLA_PG_PASSWORD}"
+      POSTGRES_DB: cocola
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U cocola -d cocola"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+
+  minio:
+    image: minio/minio:latest
+    restart: unless-stopped
+    command: server /data --console-address ":9001"
+    environment:
+      MINIO_ROOT_USER: cocola
+      MINIO_ROOT_PASSWORD: "${COCOLA_MINIO_ROOT_PASSWORD}"
+    volumes:
+      - miniodata:/data
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:9000/minio/health/live"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+
+  minio-init:
+    image: minio/mc:latest
+    depends_on:
+      minio:
+        condition: service_healthy
+    entrypoint: >-
+      sh -c "mc alias set local http://minio:9000 cocola '${COCOLA_MINIO_ROOT_PASSWORD}'
+      && mc mb --ignore-existing local/cocola"
+
+  opensandbox-server:
+    profiles: ["managed"]
+    image: "${COCOLA_OPENSANDBOX_IMAGE:-opensandbox/server:latest}"
+    restart: unless-stopped
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+      - "${COCOLA_SANDBOX_ROOT}:${COCOLA_SANDBOX_ROOT}"
+    environment:
+      SANDBOX_CONFIG_PATH: /etc/opensandbox/config.toml
+      OPENSANDBOX_INSECURE_SERVER: "YES"
+    configs:
+      - source: opensandbox-config
+        target: /etc/opensandbox/config.toml
+    extra_hosts:
+      - host.docker.internal:host-gateway
+    healthcheck:
+      test:
+        [
+          "CMD-SHELL",
+          'python -c "import urllib.request,sys; sys.exit(0 if urllib.request.urlopen(''http://localhost:8090/health'').status==200 else 1)"',
+        ]
+      interval: 5s
+      timeout: 3s
+      retries: 30
+
+  sandbox-manager:
+    image: "${COCOLA_IMAGE_REGISTRY}/cocola-sandbox-manager:${COCOLA_VERSION}"
+    restart: unless-stopped
+    depends_on:
+      redis:
+        condition: service_healthy
+      postgres:
+        condition: service_healthy
+      minio-init:
+        condition: service_completed_successfully
+    environment:
+      COCOLA_SANDBOX_ADDR: ":50051"
+      COCOLA_REDIS_ADDR: redis:6379
+      COCOLA_PG_DSN: "postgres://cocola:${COCOLA_PG_PASSWORD}@postgres:5432/cocola?sslmode=disable"
+      COCOLA_OPENSANDBOX_URL: "${COCOLA_OPENSANDBOX_URL}"
+      COCOLA_OPENSANDBOX_HTTP_TIMEOUT: "240s"
+      COCOLA_OPENSANDBOX_EXEC_TIMEOUT: "1h"
+      COCOLA_SANDBOX_ROOT: "${COCOLA_SANDBOX_ROOT}"
+      COCOLA_MINIO_ENDPOINT: minio:9000
+      COCOLA_MINIO_ACCESS_KEY: cocola
+      COCOLA_MINIO_SECRET_KEY: "${COCOLA_MINIO_ROOT_PASSWORD}"
+      COCOLA_MINIO_BUCKET: cocola
+      COCOLA_SESSION_CHECKPOINT_DIRS: "/home/cocola/.claude,/workspace/uploads,/workspace/outputs,/workspace/persist"
+      COCOLA_SESSION_CHECKPOINT_TIMEOUT_SECS: "60"
+      COCOLA_SESSION_CHECKPOINT_MAX_BYTES: "268435456"
+      COCOLA_SANDBOX_IMAGE: "${COCOLA_IMAGE_REGISTRY}/cocola-sandbox-runtime:${COCOLA_VERSION}"
+      COCOLA_SANDBOX_LLM_BASE_URL: "${COCOLA_SANDBOX_LLM_BASE_URL}"
+      COCOLA_SANDBOX_MODEL_ALIAS: cocola-default
+      COCOLA_SANDBOX_WARM_POOL_ENABLED: "true"
+      COCOLA_SANDBOX_WARM_POOL_SIZE: "10"
+    extra_hosts:
+      - host.docker.internal:host-gateway
+
+  llm-gateway:
+    image: "${COCOLA_IMAGE_REGISTRY}/cocola-llm-gateway:${COCOLA_VERSION}"
+    restart: unless-stopped
+    depends_on:
+      redis:
+        condition: service_healthy
+      postgres:
+        condition: service_healthy
+    environment:
+      COCOLA_LLM_HOST: 0.0.0.0
+      COCOLA_LLM_PORT: "8080"
+      COCOLA_LLM_TIMEOUT_SECS: "300"
+      COCOLA_LLM_REDIS_URL: redis://redis:6379/0
+      COCOLA_AUTH_SECRET: "${COCOLA_AUTH_SECRET}"
+      COCOLA_AUTH_ISSUER: cocola
+      COCOLA_MODEL_SECRET_KEY: "${COCOLA_MODEL_SECRET_KEY}"
+      COCOLA_CONFIG_SECRET_KEY: "${COCOLA_CONFIG_SECRET_KEY}"
+      COCOLA_PG_DSN: "postgres://cocola:${COCOLA_PG_PASSWORD}@postgres:5432/cocola?sslmode=disable"
+    ports:
+      - "${COCOLA_LLM_HOST_PORT}:8080"
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "python",
+          "-c",
+          "import urllib.request,sys; sys.exit(0) if urllib.request.urlopen('http://localhost:8080/healthz').status==200 else sys.exit(1)",
+        ]
+      interval: 5s
+      timeout: 3s
+      retries: 30
+
+  admin-api:
+    image: "${COCOLA_IMAGE_REGISTRY}/cocola-admin-api:${COCOLA_VERSION}"
+    restart: unless-stopped
+    depends_on:
+      redis:
+        condition: service_healthy
+      postgres:
+        condition: service_healthy
+      minio-init:
+        condition: service_completed_successfully
+    environment:
+      COCOLA_ADMIN_ADDR: ":8090"
+      COCOLA_REDIS_ADDR: redis:6379
+      COCOLA_PG_DSN: "postgres://cocola:${COCOLA_PG_PASSWORD}@postgres:5432/cocola?sslmode=disable"
+      COCOLA_ADMIN_KEY: "${COCOLA_ADMIN_KEY}"
+      COCOLA_AUTH_SECRET: "${COCOLA_AUTH_SECRET}"
+      COCOLA_AGENT_ADDR: agent-runtime:50061
+      COCOLA_SANDBOX_ADDR: sandbox-manager:50051
+      COCOLA_OPENSANDBOX_URL: "${COCOLA_OPENSANDBOX_URL}"
+      COCOLA_GATEWAY_URL: http://gateway:8080
+      COCOLA_LLM_GATEWAY_URL: http://llm-gateway:8080
+      COCOLA_MODEL_SECRET_KEY: "${COCOLA_MODEL_SECRET_KEY}"
+      COCOLA_CONFIG_SECRET_KEY: "${COCOLA_CONFIG_SECRET_KEY}"
+      COCOLA_MINIO_ENDPOINT: minio:9000
+      COCOLA_MINIO_ACCESS_KEY: cocola
+      COCOLA_MINIO_SECRET_KEY: "${COCOLA_MINIO_ROOT_PASSWORD}"
+      COCOLA_MINIO_BUCKET: cocola
+      COCOLA_BOOTSTRAP_ADMIN_USERNAME: "${COCOLA_BOOTSTRAP_ADMIN_USERNAME}"
+      COCOLA_BOOTSTRAP_ADMIN_EMAIL: "${COCOLA_BOOTSTRAP_ADMIN_EMAIL}"
+      COCOLA_BOOTSTRAP_ADMIN_PASSWORD: "${COCOLA_BOOTSTRAP_ADMIN_PASSWORD}"
+      COCOLA_BOOTSTRAP_ADMIN_RESET: "${COCOLA_BOOTSTRAP_ADMIN_RESET}"
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost:8090/healthz"]
+      interval: 5s
+      timeout: 3s
+      retries: 30
+
+  agent-runtime:
+    image: "${COCOLA_IMAGE_REGISTRY}/cocola-agent-runtime:${COCOLA_VERSION}"
+    restart: unless-stopped
+    depends_on:
+      sandbox-manager:
+        condition: service_started
+      llm-gateway:
+        condition: service_healthy
+      admin-api:
+        condition: service_healthy
+      postgres:
+        condition: service_healthy
+      minio-init:
+        condition: service_completed_successfully
+    environment:
+      COCOLA_AGENT_HOST: 0.0.0.0
+      COCOLA_AGENT_PORT: "50061"
+      COCOLA_AGENT_RUN_TIMEOUT_SECS: "3600"
+      COCOLA_SANDBOX_HEARTBEAT_SECS: "20"
+      COCOLA_SANDBOX_ADDR: sandbox-manager:50051
+      COCOLA_ADMIN_URL: http://admin-api:8090
+      COCOLA_ADMIN_KEY: "${COCOLA_ADMIN_KEY}"
+      COCOLA_SANDBOX_IMAGE: "${COCOLA_IMAGE_REGISTRY}/cocola-sandbox-runtime:${COCOLA_VERSION}"
+      COCOLA_SANDBOX_LLM_BASE_URL: "${COCOLA_SANDBOX_LLM_BASE_URL}"
+      COCOLA_SANDBOX_MODEL_ALIAS: cocola-default
+      COCOLA_PG_DSN: "postgres://cocola:${COCOLA_PG_PASSWORD}@postgres:5432/cocola?sslmode=disable"
+      COCOLA_MINIO_ENDPOINT: minio:9000
+      COCOLA_MINIO_ACCESS_KEY: cocola
+      COCOLA_MINIO_SECRET_KEY: "${COCOLA_MINIO_ROOT_PASSWORD}"
+      COCOLA_MINIO_BUCKET: cocola
+      COCOLA_SESSION_CHECKPOINT_TIMEOUT_SECS: "60"
+    extra_hosts:
+      - host.docker.internal:host-gateway
+
+  gateway:
+    image: "${COCOLA_IMAGE_REGISTRY}/cocola-gateway:${COCOLA_VERSION}"
+    restart: unless-stopped
+    depends_on:
+      agent-runtime:
+        condition: service_started
+      postgres:
+        condition: service_healthy
+      minio-init:
+        condition: service_completed_successfully
+    environment:
+      COCOLA_GATEWAY_ADDR: ":8080"
+      COCOLA_AGENT_ADDR: agent-runtime:50061
+      COCOLA_AGENT_RUN_TIMEOUT_SECS: "3600"
+      COCOLA_AUTH_SECRET: "${COCOLA_AUTH_SECRET}"
+      COCOLA_PG_DSN: "postgres://cocola:${COCOLA_PG_PASSWORD}@postgres:5432/cocola?sslmode=disable"
+      COCOLA_MINIO_ENDPOINT: minio:9000
+      COCOLA_MINIO_ACCESS_KEY: cocola
+      COCOLA_MINIO_SECRET_KEY: "${COCOLA_MINIO_ROOT_PASSWORD}"
+      COCOLA_MINIO_BUCKET: cocola
+    ports:
+      - "${COCOLA_GATEWAY_HOST_PORT}:8080"
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost:8080/healthz"]
+      interval: 5s
+      timeout: 3s
+      retries: 30
+
+  web:
+    image: "${COCOLA_IMAGE_REGISTRY}/cocola-web:${COCOLA_VERSION}"
+    restart: unless-stopped
+    depends_on:
+      gateway:
+        condition: service_healthy
+      admin-api:
+        condition: service_healthy
+    environment:
+      NODE_ENV: production
+      NEXT_PUBLIC_GATEWAY_URL: "http://localhost:${COCOLA_GATEWAY_HOST_PORT}"
+      COCOLA_GATEWAY_URL: http://gateway:8080
+      COCOLA_ADMIN_URL: http://admin-api:8090
+      COCOLA_ADMIN_KEY: "${COCOLA_ADMIN_KEY}"
+      AUTH_SECRET: "${AUTH_SECRET}"
+    ports:
+      - "${COCOLA_WEB_HOST_PORT}:3000"
+
+configs:
+  opensandbox-config:
+    content: |
+      [server]
+      host = "0.0.0.0"
+      port = 8090
+
+      [log]
+      level = "INFO"
+
+      [runtime]
+      type = "docker"
+      execd_image = "sandbox-registry.cn-zhangjiakou.cr.aliyuncs.com/opensandbox/execd:v1.0.19"
+
+      [egress]
+      image = "opensandbox/egress:v1.1.2"
+
+      [storage]
+      allowed_host_paths = ["${COCOLA_SANDBOX_ROOT}"]
+
+      [docker]
+      network_mode = "bridge"
+      host_ip = "host.docker.internal"
+      drop_capabilities = ["AUDIT_WRITE", "MKNOD", "NET_ADMIN", "NET_RAW", "SYS_ADMIN", "SYS_MODULE", "SYS_PTRACE", "SYS_TIME", "SYS_TTY_CONFIG"]
+      no_new_privileges = true
+      pids_limit = 4096
+
+      [ingress]
+      mode = "direct"
+
+volumes:
+  redisdata:
+  pgdata:
+  miniodata:

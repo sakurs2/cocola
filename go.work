@@ -2,6 +2,7 @@ go 1.23.0
 
 use (
 	./apps/admin-api
+	./apps/cli
 	./apps/gateway
 	./db
 	./packages/go-common

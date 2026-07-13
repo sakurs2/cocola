@@ -4,20 +4,17 @@ Composition root. Everything testable lives in `server.py` / providers / the
 skill loader; this module only reads env, wires the concrete pieces together,
 and runs the async gRPC server. It deliberately holds no business logic.
 
-Env (all optional; sensible local defaults):
+Env (listen/metrics have defaults; runtime dependencies are required):
     COCOLA_AGENT_HOST / COCOLA_AGENT_PORT   where to listen (default 0.0.0.0:50061)
     COCOLA_ADMIN_URL                         admin-api root for skills, MCP, and prompts
-    COCOLA_ADMIN_KEY                         admin bearer key (if admin-api auth is on)
+    COCOLA_ADMIN_KEY                         required admin bearer key
     COCOLA_SANDBOX_ADDR                      sandbox-manager gRPC addr (binds session->sandbox,
                                              routes the agent's bash/file tools into it, AND
                                              hosts the Route A brain; required)
-    COCOLA_SANDBOX_IMAGE                      Route A brain image for the session sandbox
-                                             (e.g. cocola/sandbox-runtime); empty => default
+    COCOLA_SANDBOX_IMAGE                      required Route A brain image
     COCOLA_SANDBOX_LLM_BASE_URL              gateway root injected as ANTHROPIC_BASE_URL
-    COCOLA_SANDBOX_LLM_TOKEN                 cocola token injected as ANTHROPIC_AUTH_TOKEN
     COCOLA_SANDBOX_MODEL_ALIAS               alias injected as ANTHROPIC_MODEL / _SMALL_FAST_MODEL
-    COCOLA_PG_DSN                            Postgres DSN; enables the durable session->claude
-                                             resume index (else in-process, lost on restart)
+    COCOLA_PG_DSN                            required Postgres DSN for durable resume
 
 Provider selection (ADR-0009, Route B decommissioned): Route A runs the whole
 Claude Code brain inside the user's own sandbox via the in-sandbox stdio shim,
@@ -57,15 +54,20 @@ from cocola_agent_runtime.skill_loader import AdminSkillCatalog, SkillCatalog
 log = get_logger("cocola.agent-runtime")
 
 
+def _required_env(name: str) -> str:
+    value = os.getenv(name, "").strip()
+    if not value:
+        raise RuntimeError(f"{name} is required")
+    return value
+
+
 def _build_session_map():
     """session_id -> claude_session_id index for Route A --resume continuation.
 
     Postgres survives an agent-runtime restart, so paired with MinIO checkpoint
     restore a follow-up turn resumes the real conversation.
     """
-    dsn = os.getenv("COCOLA_PG_DSN", "").strip()
-    if not dsn:
-        raise RuntimeError("COCOLA_PG_DSN is required for the durable session map")
+    dsn = _required_env("COCOLA_PG_DSN")
     from cocola_agent_runtime.session_map import PostgresSessionMap
 
     log.info("session-map: Postgres (durable resume index)")
@@ -94,31 +96,25 @@ def _build_provider(
     return InSandboxShimProvider(executor, session_map=session_map)
 
 
-def _build_skill_catalog() -> SkillCatalog | None:
-    admin_base = os.getenv("COCOLA_ADMIN_URL", "").strip()
-    if not admin_base:
-        log.warning("COCOLA_ADMIN_URL unset; sessions run with no market skills")
-        return None
+def _build_skill_catalog() -> SkillCatalog:
+    admin_base = _required_env("COCOLA_ADMIN_URL")
+    admin_key = _required_env("COCOLA_ADMIN_KEY")
     log.info("Skill-Market enabled", admin_base=admin_base)
-    return AdminSkillCatalog(admin_base, admin_key=os.getenv("COCOLA_ADMIN_KEY", ""))
+    return AdminSkillCatalog(admin_base, admin_key=admin_key)
 
 
-def _build_mcp_catalog() -> MCPCatalog | None:
-    admin_base = os.getenv("COCOLA_ADMIN_URL", "").strip()
-    if not admin_base:
-        log.warning("COCOLA_ADMIN_URL unset; sessions run with no MCP servers")
-        return None
+def _build_mcp_catalog() -> MCPCatalog:
+    admin_base = _required_env("COCOLA_ADMIN_URL")
+    admin_key = _required_env("COCOLA_ADMIN_KEY")
     log.info("MCP catalog enabled", admin_base=admin_base)
-    return AdminMCPCatalog(admin_base, admin_key=os.getenv("COCOLA_ADMIN_KEY", ""))
+    return AdminMCPCatalog(admin_base, admin_key=admin_key)
 
 
-def _build_prompt_catalog() -> PromptCatalog | None:
-    admin_base = os.getenv("COCOLA_ADMIN_URL", "").strip()
-    if not admin_base:
-        log.warning("COCOLA_ADMIN_URL unset; sessions run with no admin prompt")
-        return None
+def _build_prompt_catalog() -> PromptCatalog:
+    admin_base = _required_env("COCOLA_ADMIN_URL")
+    admin_key = _required_env("COCOLA_ADMIN_KEY")
     log.info("Agent prompt policy enabled", admin_base=admin_base)
-    return AdminPromptCatalog(admin_base, admin_key=os.getenv("COCOLA_ADMIN_KEY", ""))
+    return AdminPromptCatalog(admin_base, admin_key=admin_key)
 
 
 def _sandbox_provisioning() -> tuple[str, dict[str, str]]:
@@ -127,55 +123,46 @@ def _sandbox_provisioning() -> tuple[str, dict[str, str]]:
     The session sandbox runs the WHOLE Claude Code brain, so it must be created
     from the brain image (COCOLA_SANDBOX_IMAGE, e.g. cocola/sandbox-runtime)
     rather than the provider's default alpine, and it must carry the model
-    credentials so the in-sandbox `claude` CLI can reach the llm-gateway:
+    routing configuration so the in-sandbox `claude` CLI can reach the llm-gateway:
 
       ANTHROPIC_BASE_URL   <- COCOLA_SANDBOX_LLM_BASE_URL (the gateway root)
-      ANTHROPIC_AUTH_TOKEN <- COCOLA_SANDBOX_LLM_TOKEN (the cocola-issued token)
       ANTHROPIC_MODEL / ANTHROPIC_SMALL_FAST_MODEL <- COCOLA_SANDBOX_MODEL_ALIAS
           (both the main and the fast model resolve to a known gateway alias;
            the registry 404s unknown aliases, so an unset fast model would fail)
 
-    Credentials live in the sandbox ENV, never in the prompt channel. Empty
-    values are dropped so a partially-configured boot doesn't inject blanks.
+    Gateway supplies ANTHROPIC_AUTH_TOKEN separately for each verified Run;
+    session-agnostic provisioning never bakes a static credential into a warm
+    sandbox. Empty routing values are dropped rather than injecting blanks.
     """
-    image = os.getenv("COCOLA_SANDBOX_IMAGE", "").strip()
-    env: dict[str, str] = {}
-    base_url = os.getenv("COCOLA_SANDBOX_LLM_BASE_URL", "").strip()
-    if base_url:
-        env["ANTHROPIC_BASE_URL"] = base_url
-    token = os.getenv("COCOLA_SANDBOX_LLM_TOKEN", "").strip()
-    if token:
-        env["ANTHROPIC_AUTH_TOKEN"] = token
-    alias = os.getenv("COCOLA_SANDBOX_MODEL_ALIAS", "").strip()
-    if alias:
-        env["ANTHROPIC_MODEL"] = alias
-        env["ANTHROPIC_SMALL_FAST_MODEL"] = alias
+    image = _required_env("COCOLA_SANDBOX_IMAGE")
+    base_url = _required_env("COCOLA_SANDBOX_LLM_BASE_URL")
+    alias = _required_env("COCOLA_SANDBOX_MODEL_ALIAS")
+    env = {
+        "ANTHROPIC_BASE_URL": base_url,
+        "ANTHROPIC_MODEL": alias,
+        "ANTHROPIC_SMALL_FAST_MODEL": alias,
+    }
     return image, env
 
 
-def _build_binder() -> SandboxBinder | None:
-    addr = os.getenv("COCOLA_SANDBOX_ADDR", "").strip()
-    if not addr:
-        log.warning("COCOLA_SANDBOX_ADDR unset; sessions run without a bound sandbox")
-        return None
+def _build_binder() -> SandboxBinder:
+    addr = _required_env("COCOLA_SANDBOX_ADDR")
     image, env = _sandbox_provisioning()
     log.info(
         "sandbox binding enabled",
         sandbox_addr=addr,
-        sandbox_image=image or "(provider default)",
+        sandbox_image=image,
         creds_injected=bool(env.get("ANTHROPIC_BASE_URL")),
     )
     return SandboxManagerBinder(addr, default_image=image, default_env=env)
 
 
-def _build_executor() -> SandboxExecutor | None:
+def _build_executor() -> SandboxExecutor:
     # Same switch as the binder. Route A's InSandboxShimProvider drives the
     # in-sandbox brain over this executor's streaming exec; without a
     # sandbox-manager addr there is no sandbox to run the brain in, so Route A
     # falls back (and binding is off too).
-    addr = os.getenv("COCOLA_SANDBOX_ADDR", "").strip()
-    if not addr:
-        return None
+    addr = _required_env("COCOLA_SANDBOX_ADDR")
     log.info("sandbox tool execution enabled", sandbox_addr=addr)
     return SandboxManagerExecutor(addr)
 
@@ -186,7 +173,7 @@ async def serve() -> None:
     addr = f"{host}:{port}"
 
     executor = _build_executor()
-    session_map = _build_session_map() if executor is not None else None
+    session_map = _build_session_map()
     objstore = fetcher_from_env()
     checkpoint = CheckpointManager(objstore=objstore, executor=executor, session_map=session_map)
     servicer = AgentRuntimeServicer(

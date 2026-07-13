@@ -1,10 +1,10 @@
 # cocola observability stack: Prometheus + Grafana + Tempo (+ optional OTel Collector).
 #
 # This is a SIDE-CAR compose that attaches to the network created by the main
-# stack (docker-compose.full.yml, project name `cocola` => network `cocola_default`).
+# stack (`cocola up`, project name `cocola` => network `cocola_default`).
 # Bring the app up first, then layer observability on top:
 #
-#   docker compose -f deploy/docker-compose/docker-compose.full.yml up -d
+#   cocola up
 #   docker compose -f deploy/docker-compose/docker-compose.observability.yml up -d
 #
 # Prometheus scrapes each service over the shared network using its compose DNS
@@ -58,9 +58,9 @@ services:
       - ../observability/tempo/tempo.yaml:/etc/tempo/tempo.yaml:ro
       - tempodata:/var/tempo
     ports:
-      - "3200:3200"   # Tempo HTTP API / Grafana datasource
-      - "4318:4318"   # OTLP/HTTP receiver (services -> Tempo)
-      - "4317:4317"   # OTLP/gRPC receiver
+      - "3200:3200" # Tempo HTTP API / Grafana datasource
+      - "4318:4318" # OTLP/HTTP receiver (services -> Tempo)
+      - "4317:4317" # OTLP/gRPC receiver
     networks:
       - default
       - cocola
@@ -107,8 +107,8 @@ services:
     volumes:
       - ../observability/otel-collector/config.yaml:/etc/otelcol/config.yaml:ro
     ports:
-      - "14318:4318"  # OTLP/HTTP (host) -> collector
-      - "14317:4317"  # OTLP/gRPC (host) -> collector
+      - "14318:4318" # OTLP/HTTP (host) -> collector
+      - "14317:4317" # OTLP/gRPC (host) -> collector
     depends_on:
       tempo:
         condition: service_healthy
@@ -125,8 +125,8 @@ networks:
   # This compose's own network (Grafana <-> Prometheus <-> Tempo).
   default:
   # The main stack's network, joined as EXTERNAL so Prometheus can scrape the
-  # app services by their compose DNS names. Created by docker-compose.full.yml
-  # (project `cocola` => `cocola_default`). Start the app stack first.
+  # app services by their compose DNS names. Created by `cocola up` (project
+  # `cocola` => `cocola_default`). Start the app stack first.
   cocola:
     external: true
     name: cocola_default

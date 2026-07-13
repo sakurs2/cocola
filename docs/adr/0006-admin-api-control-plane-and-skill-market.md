@@ -104,11 +104,10 @@ and its lifecycle.
 ### Admin auth: a single static bearer key (for now)
 
 The admin surface is gated by a static shared admin key
-(`COCOLA_ADMIN_KEY`, constant-time compared). **When unset, auth is disabled**
-and all callers are a `dev-admin` — the exact convention ADR-0005 set for the
-gateway's `COCOLA_AUTH_SECRET`, so dev/CI boots stay zero-config. Operators are
-a small set; a shared key kept in the deployment secret is the simplest correct
-thing. **Per-operator admin identities + RBAC are deferred.** Every write is
+(`COCOLA_ADMIN_KEY`, constant-time compared). Current composition roots require
+this key and the shared auth secret at startup; anonymous control-plane mode was
+removed after MVP. Operators are a small set; a shared key kept in the deployment
+secret is the simplest correct thing. **Per-operator admin identities + RBAC are deferred.** Every write is
 attributed (an optional `x-cocola-admin` header names the operator) and recorded
 in the **audit log** (`GET /admin/audit`), so even with a shared key the trail
 is meaningful.
@@ -195,10 +194,9 @@ rejected with `401 authentication_error "token revoked"` before any work happens
 The gate is only active when auth is enabled (tokens carry a `jti`) and a store
 is wired; with neither, behavior is unchanged.
 
-`scripts/admin-revocation-e2e.py` is the acceptance proof: a token **minted in
-Go** is verified in Python, passes while absent from the denylist, then — after a
-revoke adds its `jti` — is rejected on all three surfaces while still within its
-`exp`.
+`apps/llm-gateway/tests/test_revocation.py` and the cross-language token tests
+cover the acceptance contract: a token passes while absent from the denylist,
+then is rejected on all three surfaces after revocation while still unexpired.
 
 What remains for M6/M7 is the **shared backend**: today the admin-api's denylist
 and the gateway's `RevocationStore` are separate in-memory stores, so they agree
@@ -244,11 +242,10 @@ unlimited**, so the enforcer can no longer short-circuit on the policy alone —
 still enforced only when its effective `limit > 0`, so an override of `0`
 correctly disables that layer for the subject.
 
-`scripts/admin-quota-override-e2e.py` is the acceptance proof: a token **minted
-in Go** is attributed to a subject; with no static cap and no override the
-subject is unlimited; an admin override of `5` then caps it (first call `200`,
-next `429`); raising it to `100000` lets calls pass and `/v1/quota` reports the
-override limit; an override of `0` marks the subject explicitly unlimited again.
+`apps/llm-gateway/tests/test_quota_overrides.py` and
+`tests/test_server_auth_quota.py` cover the acceptance contract: no override
+uses the default, positive overrides replace it, and `0` means explicitly
+unlimited.
 
 What remains for M6/M7 is the **shared backend** (the same gap as the denylist):
 today the admin-api's override store and the gateway's `OverrideStore` are

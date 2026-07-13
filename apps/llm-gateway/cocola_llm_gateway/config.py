@@ -38,21 +38,22 @@ def read_secret_env(name: str) -> str:
 
     If "<name>_FILE" is set, the secret is read from that file path (a trailing
     newline is trimmed, since templating tools commonly append one); otherwise
-    we fall back to the "<name>" env var. This is the only seam the gateway needs
+    the "<name>" env var is used. This is the only seam the gateway needs
     to be Vault-ready WITHOUT a Vault SDK dependency (ADR-0008 §5): a Vault Agent
     Sidecar renders the secret to e.g. /vault/secrets/auth_secret and the
     operator points "<name>_FILE" at it, so the app just reads a file. With no
     "_FILE" set, behavior is identical to os.getenv, so the dev .env flow is
-    unchanged. An unreadable file degrades to the env fallback rather than
-    crashing on a transient mount gap.
+    unchanged. An explicitly configured but unreadable file is a startup error;
+    silently switching to an environment value could change identity or
+    encryption keys.
     """
     path = os.getenv(name + "_FILE", "").strip()
     if path:
         try:
             with open(path, encoding="utf-8") as fh:
                 return fh.read().rstrip("\r\n")
-        except OSError:
-            log.warning("secret file unreadable; falling back to env", name=name, path=path)
+        except OSError as exc:
+            raise RuntimeError(f"{name}_FILE is unreadable: {path}") from exc
     return os.getenv(name, "")
 
 
@@ -168,12 +169,9 @@ def gateway_config_from_env() -> GatewayConfig:
 def auth_config_from_env() -> AuthConfig:
     """Build AuthConfig from env.
 
-    COCOLA_AUTH_SECRET           HS256 signing secret. Empty => auth disabled
-                                 (everyone resolves to the dev identity).
+    COCOLA_AUTH_SECRET           required HS256 signing secret.
     COCOLA_AUTH_ISSUER           expected `iss` claim (default "cocola").
     COCOLA_AUTH_TOKEN_TTL_SECS   default lifetime when issuing (default 30d).
-    COCOLA_AUTH_ALLOW_ANON       "1"/"true" => blank token -> dev identity even
-                                 when a secret is set (local convenience only).
     """
     from cocola_llm_gateway.auth.identity import AuthConfig
 
@@ -181,7 +179,7 @@ def auth_config_from_env() -> AuthConfig:
         secret=read_secret_env("COCOLA_AUTH_SECRET").strip(),
         issuer=os.getenv("COCOLA_AUTH_ISSUER", "cocola").strip() or "cocola",
         default_ttl_s=int(os.getenv("COCOLA_AUTH_TOKEN_TTL_SECS", str(30 * 24 * 3600))),
-        dev_allow_anonymous=_envflag("COCOLA_AUTH_ALLOW_ANON"),
+        dev_allow_anonymous=False,
     )
 
 
@@ -197,13 +195,6 @@ def quota_policy_from_env() -> QuotaPolicy:
         user_daily_tokens=int(os.getenv("COCOLA_QUOTA_USER_DAILY_TOKENS", "0")),
         tenant_monthly_tokens=int(os.getenv("COCOLA_QUOTA_TENANT_MONTHLY_TOKENS", "0")),
     )
-
-
-def _envflag(name: str, *, default: bool = False) -> bool:
-    raw = os.getenv(name, "").strip().lower()
-    if not raw:
-        return default
-    return raw in ("1", "true", "yes", "on")
 
 
 def _cfg_bool(value: object) -> bool:

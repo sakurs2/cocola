@@ -18,7 +18,6 @@ const (
 	SettingSchedulerRunTimeoutSecs   = "scheduler.run_timeout_secs"
 	SettingSchedulerHeartbeatSecs    = "scheduler.heartbeat_secs"
 	SettingSchedulerLeaseTimeoutSecs = "scheduler.lease_timeout_secs"
-	SettingSchedulerMinIntervalSecs  = "scheduler.min_interval_secs"
 
 	SettingWarmPoolEnabled    = "sandbox.warm_pool_enabled"
 	SettingWarmPoolSize       = "sandbox.warm_pool_size"
@@ -80,11 +79,6 @@ func settingDefinitions() []SystemSettingDefinition {
 			Key: SettingSchedulerLeaseTimeoutSecs, Group: "Scheduler", Label: "Lease Timeout",
 			Description: "Seconds after which a running task without heartbeat is marked expired.",
 			Kind:        "int", Env: "COCOLA_SCHEDULER_LEASE_TIMEOUT_SECS", Default: 300, Editable: true, Min: 60, Max: 86400,
-		},
-		{
-			Key: SettingSchedulerMinIntervalSecs, Group: "Scheduler", Label: "Minimum Schedule Interval",
-			Description: "Minimum interval retained for legacy custom schedules; new tasks use simple calendar frequencies.",
-			Kind:        "int", Env: "COCOLA_SCHEDULER_MIN_INTERVAL_SECS", Default: 3600, Editable: true, Min: 3600, Max: 86400,
 		},
 		{
 			Key: SettingWarmPoolEnabled, Group: "Sandbox", Label: "Warm Pool Enabled",

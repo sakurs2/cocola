@@ -29,12 +29,12 @@ func TestSecretFromEnv_EnvFallbackWhenNoFile(t *testing.T) {
 	}
 }
 
-func TestSecretFromEnv_EnvFallbackWhenFileUnreadable(t *testing.T) {
+func TestSecretFromEnv_EmptyWhenConfiguredFileUnreadable(t *testing.T) {
 	t.Setenv("COCOLA_AUTH_SECRET", "from-env")
 	t.Setenv("COCOLA_AUTH_SECRET_FILE", "/nonexistent/cocola/secret")
 
-	if got := SecretFromEnv("COCOLA_AUTH_SECRET"); got != "from-env" {
-		t.Fatalf("unreadable file should degrade to env, got %q", got)
+	if got := SecretFromEnv("COCOLA_AUTH_SECRET"); got != "" {
+		t.Fatalf("unreadable configured file must fail closed, got %q", got)
 	}
 }
 

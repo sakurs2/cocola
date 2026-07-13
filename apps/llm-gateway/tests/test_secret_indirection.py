@@ -1,13 +1,14 @@
 """read_secret_env: the Vault-ready "_FILE" indirection seam (ADR-0008 §5).
 
-Hermetic: no Vault, no network. We assert file-over-env precedence, env
-fallback (no file / unreadable file), trailing-newline trimming, and that the
+Hermetic: no Vault, no network. We assert file-over-env precedence, plain env
+use when no file exists, fail-closed unreadable files, newline trimming, and that the
 config readers (upstream api_key via _resolve_secret, COCOLA_AUTH_SECRET via
 auth_config_from_env) actually route through the seam.
 """
 
 from __future__ import annotations
 
+import pytest
 from cocola_llm_gateway.config import (
     _resolve_secret,
     auth_config_from_env,
@@ -30,10 +31,11 @@ def test_env_fallback_when_no_file(monkeypatch):
     assert read_secret_env("COCOLA_AUTH_SECRET") == "from-env"
 
 
-def test_env_fallback_when_file_unreadable(monkeypatch):
+def test_configured_file_unreadable_fails_closed(monkeypatch):
     monkeypatch.setenv("COCOLA_AUTH_SECRET", "from-env")
     monkeypatch.setenv("COCOLA_AUTH_SECRET_FILE", "/nonexistent/cocola/secret")
-    assert read_secret_env("COCOLA_AUTH_SECRET") == "from-env"
+    with pytest.raises(RuntimeError, match="unreadable"):
+        read_secret_env("COCOLA_AUTH_SECRET")
 
 
 def test_empty_when_neither_set(monkeypatch):

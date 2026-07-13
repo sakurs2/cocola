@@ -178,25 +178,27 @@ rather than inventing a tool transport:
   without raising. Provider tests assert the server mounts only when both executor
   and bound sandbox are present. No subprocess, no socket, no model.
 
-## Local orchestration (two deploy modes)
+## Orchestration
 
-The two-process topology above is wired together for local dev by exactly two
-deploy modes, one route (Route A):
+The topology has one development entry and one formal deployment entry, both on
+Route A:
 
-- **Mode 1 -- `make up`** (`scripts/run-stack.sh`, the default debug stack):
+- **Development -- `make dev`** (`scripts/run-stack-dev.sh` + `run-stack.sh`):
   everything NATIVE except the sandbox. Only the OpenSandbox server (:8090) and
   redis/postgres/minio (`docker-compose.dev.yml`) run in containers; every
   cocola service (sandbox-manager, llm-gateway, admin-api, agent-runtime,
   gateway, web) runs natively in the foreground. It is a foreground process
   supervisor, not a daemon: it starts each service in its own process group
-  (`setsid`), waits on the listen port with `nc -z` before moving on, mints a
-  dev token via `admin-mint`, and on `Ctrl-C` kills every child group via a
-  single `trap cleanup EXIT INT TERM`. Logs are split per service under
+  (`setsid`), waits on the listen port with `nc -z` before moving on, and on
+  `Ctrl-C` kills every child group via a single `trap cleanup EXIT INT TERM`.
+  User requests always obtain a signed per-Run token through Gateway; there is
+  no shared dev token. Logs are split per service under
   `.run-logs/`. Editing any cocola service just needs `Ctrl-C` + re-run -- zero
   image rebuilds; the sandbox/infra containers survive (stop them with
   `make dev-down` + `make opensandbox-down`).
-- **Mode 2 -- `make up-container`** (`scripts/start.sh` + `docker-compose.full.yml`):
-  the fully containerized Route A stack, closest to production.
+- **Formal deployment -- `cocola up`**: the standalone CLI renders its embedded
+  Compose definition and starts the complete versioned stack without requiring
+  a source checkout.
 
 One seam matters in both: the **port-8080 collision** -- the gateway BFF and the
 llm-gateway both default to 8080, so llm-gateway is pinned to 8081

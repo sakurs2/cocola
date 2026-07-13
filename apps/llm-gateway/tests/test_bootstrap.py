@@ -32,3 +32,13 @@ def test_authenticated_revocation_requires_redis(monkeypatch):
 
     with pytest.raises(RuntimeError, match="COCOLA_LLM_REDIS_URL is required"):
         bootstrap.build_revocation()
+
+
+def test_production_auth_is_required(monkeypatch):
+    monkeypatch.delenv("COCOLA_AUTH_SECRET", raising=False)
+    monkeypatch.delenv("COCOLA_AUTH_SECRET_FILE", raising=False)
+
+    with pytest.raises(RuntimeError, match="COCOLA_AUTH_SECRET is required"):
+        bootstrap.build_verifier()
+    with pytest.raises(RuntimeError, match="COCOLA_AUTH_SECRET is required"):
+        bootstrap.build_revocation()

@@ -15,6 +15,27 @@ type fakeCheckpointObjectCleaner struct {
 	removeErrors map[string]error
 }
 
+func TestConfigValidateRequiresDurableBackends(t *testing.T) {
+	complete := Config{
+		MinioEndpoint: "minio:9000", MinioAccessKey: "cocola",
+		MinioSecretKey: "secret", MinioBucket: "cocola", PGDSN: "postgres://cocola",
+	}
+	if err := complete.Validate(); err != nil {
+		t.Fatalf("complete config rejected: %v", err)
+	}
+
+	missingSecret := complete
+	missingSecret.MinioSecretKey = ""
+	if err := missingSecret.Validate(); err == nil {
+		t.Fatal("checkpoint config without MinIO secret was accepted")
+	}
+	missingPostgres := complete
+	missingPostgres.PGDSN = ""
+	if err := missingPostgres.Validate(); err == nil {
+		t.Fatal("checkpoint config without Postgres was accepted")
+	}
+}
+
 func (f *fakeCheckpointObjectCleaner) ListObjects(
 	_ context.Context, _ string, opts minio.ListObjectsOptions,
 ) <-chan minio.ObjectInfo {

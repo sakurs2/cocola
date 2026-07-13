@@ -1,9 +1,9 @@
 """Production composition root.
 
 Tests inject explicit in-memory fakes into ``create_app``. The executable uses
-this module and requires the durable Postgres + Redis topology shipped by both
-``make dev`` and ``make prod``; missing connection configuration is a startup
-error rather than an implicit, restart-unsafe runtime mode.
+this module and requires the durable Postgres + Redis topology prepared by
+``make dev`` or the standalone ``cocola`` CLI; missing connection configuration
+is a startup error rather than an implicit, restart-unsafe runtime mode.
 """
 
 from __future__ import annotations
@@ -47,6 +47,13 @@ log = get_logger("cocola.llm-gateway.bootstrap")
 
 def _required_env(name: str) -> str:
     value = os.getenv(name, "").strip()
+    if not value:
+        raise RuntimeError(f"{name} is required")
+    return value
+
+
+def _required_secret(name: str) -> str:
+    value = read_secret_env(name).strip()
     if not value:
         raise RuntimeError(f"{name} is required")
     return value
@@ -98,7 +105,7 @@ def build_service() -> GatewayService:
     registry_source = PostgresRegistrySource(
         dsn,
         registry,
-        secret=read_secret_env("COCOLA_MODEL_SECRET_KEY"),
+        secret=_required_secret("COCOLA_MODEL_SECRET_KEY"),
         ttl_s=float(os.getenv("COCOLA_LLM_REGISTRY_CACHE_TTL_SECS", "2")),
     )
     gcfg = gateway_config_from_env()
@@ -122,22 +129,15 @@ def build_service() -> GatewayService:
 
 def build_verifier() -> Verifier:
     cfg = auth_config_from_env()
-    if cfg.enabled:
-        log.info("auth: enabled", issuer=cfg.issuer, dev_anon=cfg.dev_allow_anonymous)
-    else:
-        log.warning("auth: DISABLED (no COCOLA_AUTH_SECRET) — all callers are the dev identity")
+    if not cfg.enabled:
+        raise RuntimeError("COCOLA_AUTH_SECRET is required")
+    log.info("auth: enabled", issuer=cfg.issuer)
     return Verifier(cfg)
 
 
-def build_revocation() -> RevocationStore | None:
-    """Build the revocation denylist, or None to disable the gate.
-
-    The gate is only meaningful with auth enabled because anonymous identities
-    have no token id. Authenticated production uses the shared Redis denylist.
-    """
-    if not auth_config_from_env().enabled:
-        log.info("revocation: disabled (auth off — no token ids to deny)")
-        return None
+def build_revocation() -> RevocationStore:
+    """Build the required shared revocation denylist."""
+    _required_secret("COCOLA_AUTH_SECRET")
     url = _required_env("COCOLA_LLM_REDIS_URL")
     log.info("revocation: redis denylist", url=url)
     inner: RevocationStore = RedisRevocationStore.from_url(url)

@@ -31,13 +31,6 @@ RUN GOWORK=off CGO_ENABLED=0 GOOS=linux go build \
     -trimpath -ldflags="-s -w" \
     -o /out/sandbox-manager ./cmd/sandbox-manager
 
-# Build the debug CLI into the same image so operators can drive the full
-# create/exec/destroy loop with `docker compose exec sandbox-manager sandbox-cli`
-# WITHOUT installing Go on the host (the whole point of containerising).
-RUN GOWORK=off CGO_ENABLED=0 GOOS=linux go build \
-    -trimpath -ldflags="-s -w" \
-    -o /out/sandbox-cli ./cmd/sandbox-cli
-
 # ---- runtime stage -------------------------------------------------------
 FROM alpine:3.20
 
@@ -45,7 +38,6 @@ FROM alpine:3.20
 RUN apk add --no-cache ca-certificates
 
 COPY --from=build /out/sandbox-manager /usr/local/bin/sandbox-manager
-COPY --from=build /out/sandbox-cli     /usr/local/bin/sandbox-cli
 
 # Default gRPC port (overridable via COCOLA_SANDBOX_ADDR).
 EXPOSE 50051

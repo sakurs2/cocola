@@ -9,7 +9,6 @@ on:
         type: string
   push:
     branches: [master]
-    tags: ["v*"]
     paths:
       - ".github/workflows/sandbox-runtime-image.yml"
       - "deploy/sandbox-runtime/**"

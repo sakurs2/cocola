@@ -3,8 +3,6 @@ package service
 import (
 	"context"
 	"encoding/json"
-	"fmt"
-	"strconv"
 	"strings"
 	"time"
 
@@ -22,12 +20,8 @@ const (
 	ScheduleDaily   = "daily"
 	ScheduleWeekly  = "weekly"
 	ScheduleMonthly = "monthly"
-	// Legacy kinds remain readable and executable during migration.
-	ScheduleInterval = "interval"
-	ScheduleCron     = "cron"
 
 	defaultTaskTimezone = "Asia/Shanghai"
-	defaultMinInterval  = time.Hour
 	defaultMaxTurns     = 30
 )
 
@@ -78,14 +72,6 @@ func normalizeTaskStatus(status string) string {
 
 func validTaskStatus(status string) bool {
 	return status == TaskStatusActive || status == TaskStatusPaused || status == TaskStatusCompleted || status == TaskStatusExpired
-}
-
-func (a *Admin) MinScheduleInterval() time.Duration {
-	fallback := int(defaultMinInterval.Seconds())
-	if a.minScheduleInterval > 0 {
-		fallback = int(a.minScheduleInterval.Seconds())
-	}
-	return secondsDuration(a.settingInt(context.Background(), SettingSchedulerMinIntervalSecs, fallback))
 }
 
 func (a *Admin) CreateUserScheduledTask(ctx context.Context, ownerUserID string, in ScheduledTaskInput) (ScheduledTaskDetail, error) {
@@ -224,9 +210,6 @@ func (a *Admin) scheduledTaskFromInput(existing store.ScheduledTask, in Schedule
 	if !create && kind == "" {
 		kind = existing.ScheduleKind
 	}
-	if isLegacySchedule(kind) && (create || kind != existing.ScheduleKind) {
-		return store.ScheduledTask{}, ErrInvalidArg
-	}
 	tz := strings.TrimSpace(in.Timezone)
 	if tz == "" {
 		if !create && existing.Timezone != "" {
@@ -265,7 +248,7 @@ func (a *Admin) scheduledTaskFromInput(existing store.ScheduledTask, in Schedule
 	if !expiresAt.IsZero() && !expiresAt.After(a.now().UTC()) {
 		return store.ScheduledTask{}, ErrScheduleExpiration
 	}
-	next, err := computeNextScheduledRun(kind, spec, tz, a.now().UTC(), a.MinScheduleInterval())
+	next, err := computeNextScheduledRun(kind, spec, tz, a.now().UTC())
 	if err != nil {
 		return store.ScheduledTask{}, err
 	}
@@ -310,10 +293,6 @@ func (a *Admin) scheduledTaskFromInput(existing store.ScheduledTask, in Schedule
 	task.UpdatedAt = now
 	task.UpdatedBy = in.Actor
 	return task, nil
-}
-
-func isLegacySchedule(kind string) bool {
-	return kind == ScheduleInterval || kind == ScheduleCron
 }
 
 func (a *Admin) ListScheduledTasks(ctx context.Context) ([]ScheduledTaskDetail, error) {
@@ -528,7 +507,7 @@ func (a *Admin) validateScheduledTaskOwner(ctx context.Context, task store.Sched
 }
 
 func (a *Admin) nextRunForActivation(task store.ScheduledTask) (time.Time, error) {
-	next, err := computeNextScheduledRun(task.ScheduleKind, task.ScheduleSpec, task.Timezone, a.now().UTC(), a.MinScheduleInterval())
+	next, err := computeNextScheduledRun(task.ScheduleKind, task.ScheduleSpec, task.Timezone, a.now().UTC())
 	if err != nil {
 		return time.Time{}, err
 	}
@@ -566,14 +545,6 @@ type onceSpec struct {
 	RunAt string `json:"run_at"`
 }
 
-type intervalSpec struct {
-	EverySeconds int64 `json:"every_seconds"`
-}
-
-type cronSpec struct {
-	Expression string `json:"expression"`
-}
-
 type hourlySpec struct {
 	Minute int `json:"minute"`
 }
@@ -595,10 +566,7 @@ type monthlySpec struct {
 	Minute int `json:"minute"`
 }
 
-func computeNextScheduledRun(kind string, spec json.RawMessage, tzName string, after time.Time, minInterval time.Duration) (time.Time, error) {
-	if minInterval <= 0 {
-		minInterval = defaultMinInterval
-	}
+func computeNextScheduledRun(kind string, spec json.RawMessage, tzName string, after time.Time) (time.Time, error) {
 	loc, err := time.LoadLocation(tzName)
 	if err != nil {
 		return time.Time{}, ErrInvalidArg
@@ -667,37 +635,6 @@ func computeNextScheduledRun(kind string, spec json.RawMessage, tzName string, a
 			candidate = monthlyCandidate(nextMonth.Year(), nextMonth.Month(), s, loc)
 		}
 		return candidate.UTC(), nil
-	case ScheduleInterval:
-		var s intervalSpec
-		if err := json.Unmarshal(spec, &s); err != nil || s.EverySeconds <= 0 {
-			return time.Time{}, ErrInvalidArg
-		}
-		d := time.Duration(s.EverySeconds) * time.Second
-		if d < minInterval {
-			return time.Time{}, ErrScheduleTooFrequent
-		}
-		return after.Add(d).UTC(), nil
-	case ScheduleCron:
-		var s cronSpec
-		if err := json.Unmarshal(spec, &s); err != nil || strings.TrimSpace(s.Expression) == "" {
-			return time.Time{}, ErrInvalidArg
-		}
-		c, err := parseCron5(s.Expression)
-		if err != nil {
-			return time.Time{}, ErrInvalidArg
-		}
-		first, ok := c.next(after.In(loc))
-		if !ok {
-			return time.Time{}, ErrInvalidArg
-		}
-		second, ok := c.next(first.Add(time.Second))
-		if !ok {
-			return time.Time{}, ErrInvalidArg
-		}
-		if second.Sub(first) < minInterval {
-			return time.Time{}, ErrScheduleTooFrequent
-		}
-		return first.UTC(), nil
 	default:
 		return time.Time{}, ErrInvalidArg
 	}
@@ -716,88 +653,11 @@ func monthlyCandidate(year int, month time.Month, spec monthlySpec, loc *time.Lo
 	return time.Date(year, month, day, spec.Hour, spec.Minute, 0, 0, loc)
 }
 
-type cron5 struct {
-	minutes map[int]bool
-	hours   map[int]bool
-	dom     map[int]bool
-	months  map[int]bool
-	dow     map[int]bool
-}
-
-func parseCron5(expr string) (cron5, error) {
-	parts := strings.Fields(expr)
-	if len(parts) != 5 {
-		return cron5{}, fmt.Errorf("cron: want 5 fields")
-	}
-	fields := []struct {
-		raw      string
-		min, max int
-	}{
-		{parts[0], 0, 59},
-		{parts[1], 0, 23},
-		{parts[2], 1, 31},
-		{parts[3], 1, 12},
-		{parts[4], 0, 6},
-	}
-	sets := make([]map[int]bool, 0, len(fields))
-	for _, f := range fields {
-		set, err := parseCronField(f.raw, f.min, f.max)
-		if err != nil {
-			return cron5{}, err
-		}
-		sets = append(sets, set)
-	}
-	return cron5{minutes: sets[0], hours: sets[1], dom: sets[2], months: sets[3], dow: sets[4]}, nil
-}
-
-func parseCronField(raw string, min, max int) (map[int]bool, error) {
-	out := map[int]bool{}
-	for _, part := range strings.Split(raw, ",") {
-		part = strings.TrimSpace(part)
-		if part == "*" {
-			for i := min; i <= max; i++ {
-				out[i] = true
-			}
-			continue
-		}
-		if strings.HasPrefix(part, "*/") {
-			step, err := strconv.Atoi(strings.TrimPrefix(part, "*/"))
-			if err != nil || step <= 0 {
-				return nil, fmt.Errorf("bad step")
-			}
-			for i := min; i <= max; i += step {
-				out[i] = true
-			}
-			continue
-		}
-		n, err := strconv.Atoi(part)
-		if err != nil || n < min || n > max {
-			return nil, fmt.Errorf("bad value")
-		}
-		out[n] = true
-	}
-	return out, nil
-}
-
-func (c cron5) next(after time.Time) (time.Time, bool) {
-	candidate := after.Truncate(time.Minute).Add(time.Minute)
-	end := candidate.AddDate(1, 0, 0)
-	for !candidate.After(end) {
-		weekday := int(candidate.Weekday())
-		if c.minutes[candidate.Minute()] && c.hours[candidate.Hour()] &&
-			c.dom[candidate.Day()] && c.months[int(candidate.Month())] && c.dow[weekday] {
-			return candidate, true
-		}
-		candidate = candidate.Add(time.Minute)
-	}
-	return time.Time{}, false
-}
-
-func nextRunAfterTask(task store.ScheduledTask, after time.Time, minInterval time.Duration) (time.Time, error) {
+func nextRunAfterTask(task store.ScheduledTask, after time.Time) (time.Time, error) {
 	if task.ScheduleKind == ScheduleOnce {
 		return time.Time{}, nil
 	}
-	next, err := computeNextScheduledRun(task.ScheduleKind, task.ScheduleSpec, task.Timezone, after, minInterval)
+	next, err := computeNextScheduledRun(task.ScheduleKind, task.ScheduleSpec, task.Timezone, after)
 	if err != nil {
 		return time.Time{}, err
 	}

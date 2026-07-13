@@ -8,9 +8,9 @@
 #
 # Prereqs:
 #   - ghz installed (https://ghz.sh): brew install ghz, or download a release.
-#   - agent-runtime reachable. Via docker-compose.full.yml it listens on :50061
-#     INSIDE the compose network; publish it or run ghz from a sidecar. For a
-#     local uv-run instance use COCOLA_AGENT_HOST/COCOLA_AGENT_PORT (default :50061).
+#   - agent-runtime reachable. A CLI-managed production stack keeps it private;
+#     layer deploy/docker-compose/docker-compose.bench.yml as documented in
+#     bench/README.md, or run ghz as a sidecar on cocola_default.
 #
 # Usage:
 #   bench/ghz/agent_query.sh [HOST:PORT]
@@ -22,6 +22,7 @@
 #   DURATION   run for a duration       (overrides TOTAL when set, e.g. 30s)
 #   PROMPT     prompt text              (default ping)
 #   INSECURE   plaintext (no TLS)       (default 1)
+#   TOKEN      required per-user cocola token forwarded to the sandbox
 #
 # CI smoke:
 #   CONC=2 TOTAL=20 bench/ghz/agent_query.sh
@@ -37,16 +38,22 @@ TOTAL="${TOTAL:-2000}"
 PROMPT="${PROMPT:-ping}"
 INSECURE="${INSECURE:-1}"
 DURATION="${DURATION:-}"
+TOKEN="${TOKEN:-}"
 
 if ! command -v ghz >/dev/null 2>&1; then
   echo "ghz not found. Install from https://ghz.sh (brew install ghz)." >&2
   exit 127
+fi
+if [[ -z "$TOKEN" ]]; then
+  echo "TOKEN is required; direct Agent Runtime calls do not use a shared dev credential." >&2
+  exit 2
 fi
 
 ARGS=(
   --proto "${PROTO}"
   --import-paths "${PROTO_DIR}"
   --call "cocola.agent.v1.AgentRuntimeService.Query"
+  --metadata "{\"x-cocola-sandbox-token\":\"${TOKEN}\"}"
   -d "{\"prompt\":\"${PROMPT}\",\"session_id\":\"ghz-{{.RequestNumber}}\",\"max_turns\":1}"
   -c "${CONC}"
 )

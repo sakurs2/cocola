@@ -24,8 +24,8 @@ func TestSystemSettingsListOnlyIncludesRuntimeSettingsAndReadsEnvDefaults(t *tes
 	if poll.Source != "env" || poll.Value != 45 {
 		t.Fatalf("poll setting = source %q value %#v, want env 45", poll.Source, poll.Value)
 	}
-	if len(settings) != 9 {
-		t.Fatalf("settings count = %d, want 9 runtime settings", len(settings))
+	if len(settings) != 8 {
+		t.Fatalf("settings count = %d, want 8 runtime settings", len(settings))
 	}
 	expected := map[string]bool{
 		SettingSchedulerEnabled:          true,
@@ -33,7 +33,6 @@ func TestSystemSettingsListOnlyIncludesRuntimeSettingsAndReadsEnvDefaults(t *tes
 		SettingSchedulerRunTimeoutSecs:   true,
 		SettingSchedulerHeartbeatSecs:    true,
 		SettingSchedulerLeaseTimeoutSecs: true,
-		SettingSchedulerMinIntervalSecs:  true,
 		SettingWarmPoolEnabled:           true,
 		SettingWarmPoolSize:              true,
 		SettingTraceRetentionDays:        true,
@@ -141,7 +140,7 @@ func TestSystemSettingUpdateResetAndVersionConflict(t *testing.T) {
 	}
 }
 
-func TestSystemSettingRejectsUnknownAndTooSmallMinInterval(t *testing.T) {
+func TestSystemSettingRejectsUnknownAndRequiresStartedScheduler(t *testing.T) {
 	ctx := context.Background()
 	svc := New(store.NewMemory(), nil, func() time.Time {
 		return time.Date(2026, 7, 5, 8, 0, 0, 0, time.UTC)
@@ -151,11 +150,6 @@ func TestSystemSettingRejectsUnknownAndTooSmallMinInterval(t *testing.T) {
 		Value: "new-secret", Actor: "admin@example.com",
 	}); !errors.Is(err, store.ErrNotFound) {
 		t.Fatalf("removed startup setting should be unknown, got %v", err)
-	}
-	if _, err := svc.UpdateSystemSetting(ctx, SettingSchedulerMinIntervalSecs, SystemSettingUpdateInput{
-		Value: 1800, Actor: "admin@example.com",
-	}); !errors.Is(err, ErrInvalidArg) {
-		t.Fatalf("too small min interval should be invalid, got %v", err)
 	}
 	if _, err := svc.UpdateSystemSetting(ctx, SettingSchedulerEnabled, SystemSettingUpdateInput{
 		Value: false, Actor: "admin@example.com",

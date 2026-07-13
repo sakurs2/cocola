@@ -42,3 +42,5 @@ Code shows _what_ and _how_. ADRs preserve _why_ — invaluable when:
 | 0017 | Chat attachment storage layering + sandbox delivery (push model; P0 inline, OSS/pull as TODO)         | Accepted           |
 | 0018 | Conversation audit summaries and product-level trace spans                                            | Accepted           |
 | 0019 | Single-Gateway reconnectable chat runs                                                                | Accepted           |
+| 0020 | Configuration ownership and reload boundaries                                                         | Accepted           |
+| 0021 | Standalone CLI and release-asset bootstrap installer                                                  | Accepted           |

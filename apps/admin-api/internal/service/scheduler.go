@@ -84,7 +84,7 @@ func (r *gatewayTaskRunner) Run(ctx context.Context, task store.ScheduledTask, a
 	if err != nil || isAuthUserUnavailable(owner) {
 		return sessionID, ErrAccountDisabled
 	}
-	tok, err := r.admin.IssueRuntimeToken(ctx, owner.Email, "", tokenTTL)
+	tok, err := r.admin.IssueRuntimeToken(ctx, owner.Email, tokenTTL)
 	if err != nil {
 		return sessionID, err
 	}
@@ -211,7 +211,7 @@ func (a *Admin) executeDueTask(ctx context.Context, cfg SchedulerConfig, runner 
 		_ = a.store.UpdateScheduledTask(ctx, task, false, nil)
 		return
 	}
-	next, err := nextRunAfterTask(task, now, a.MinScheduleInterval())
+	next, err := nextRunAfterTask(task, now)
 	if err != nil {
 		next = now.Add(5 * time.Minute)
 	}

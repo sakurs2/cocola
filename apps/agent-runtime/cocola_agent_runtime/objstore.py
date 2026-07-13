@@ -11,9 +11,9 @@ so the servicer depends on an abstraction (real MinIO in prod, a fake in tests)
 rather than the minio SDK directly -- the same composition-root pattern the rest
 of the runtime uses.
 
-Configuration is env-driven (COCOLA_MINIO_*), mirroring the gateway. When the
-endpoint/bucket are unset the fetcher is not built; a key-only attachment then
-surfaces as a clean provisioning error rather than a silent drop.
+Configuration is env-driven (COCOLA_MINIO_*), mirroring the gateway. Object
+storage is required by the production composition root so attachments,
+artifacts, and checkpoint restores cannot silently disappear.
 """
 
 from __future__ import annotations
@@ -62,8 +62,8 @@ class MinioFetcher:
         )
 
 
-def fetcher_from_env() -> Fetcher | None:
-    """Build a MinioFetcher from COCOLA_MINIO_* env, or None when unconfigured.
+def fetcher_from_env() -> Fetcher:
+    """Build the required MinioFetcher from COCOLA_MINIO_* env.
 
     Secret key honours the "_FILE" indirection (ADR-0008): if
     COCOLA_MINIO_SECRET_KEY_FILE points at a readable file, its contents (minus a
@@ -71,15 +71,22 @@ def fetcher_from_env() -> Fetcher | None:
     """
     endpoint = os.getenv("COCOLA_MINIO_ENDPOINT", "").strip()
     bucket = os.getenv("COCOLA_MINIO_BUCKET", "").strip()
-    if not endpoint or not bucket:
-        return None
+    access_key = os.getenv("COCOLA_MINIO_ACCESS_KEY", "").strip()
+    secret_key = _secret_from_env("COCOLA_MINIO_SECRET_KEY")
+    required = {
+        "COCOLA_MINIO_ENDPOINT": endpoint,
+        "COCOLA_MINIO_ACCESS_KEY": access_key,
+        "COCOLA_MINIO_SECRET_KEY": secret_key,
+        "COCOLA_MINIO_BUCKET": bucket,
+    }
+    missing = [name for name, value in required.items() if not value]
+    if missing:
+        raise RuntimeError(f"{', '.join(missing)} required for object storage")
 
     # Imported lazily so the dependency is only needed when object storage is
     # actually configured (keeps zero-config local boots import-light).
     from minio import Minio
 
-    access_key = os.getenv("COCOLA_MINIO_ACCESS_KEY", "").strip()
-    secret_key = _secret_from_env("COCOLA_MINIO_SECRET_KEY")
     secure = os.getenv("COCOLA_MINIO_USE_SSL", "") == "1"
 
     client = Minio(endpoint, access_key=access_key, secret_key=secret_key, secure=secure)
@@ -93,6 +100,6 @@ def _secret_from_env(name: str) -> str:
         try:
             with open(path, encoding="utf-8") as fh:
                 return fh.read().rstrip("\r\n")
-        except OSError:
-            pass
+        except OSError as exc:
+            raise RuntimeError(f"{name}_FILE is unreadable: {path}") from exc
     return os.getenv(name, "")

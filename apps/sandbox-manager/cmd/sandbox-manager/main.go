@@ -53,8 +53,8 @@ func main() {
 	}
 	var p provider.SandboxProvider = base
 	if wrapped, werr := checkpointprovider.Wrap(p, checkpointprovider.ConfigFromEnv()); werr != nil {
-		log.Sugar().Warnw("sandbox checkpointing disabled", "err", werr)
-	} else if wrapped != p {
+		log.Sugar().Fatalf("init required sandbox checkpointing: %v", werr)
+	} else {
 		p = wrapped
 		log.Info("sandbox checkpointing enabled")
 	}
@@ -64,7 +64,7 @@ func main() {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	var warmDone chan struct{}
-	// Retry the initial dial instead of a single shot: full.yml orders us after
+	// Retry the initial dial instead of a single shot: Compose orders us after
 	// redis is healthy, but transient DNS/network races (or a slow-to-DNS bridge)
 	// would otherwise permanently disable binding RPCs until a manual restart.
 	// We wait up to COCOLA_REDIS_CONNECT_TIMEOUT (default 30s) before failing.

@@ -17,16 +17,9 @@ WORKDIR /src/apps/admin-api
 RUN GOWORK=off CGO_ENABLED=0 GOOS=linux go build \
     -trimpath -ldflags="-s -w" \
     -o /out/admin-api ./cmd/admin-api
-# admin-mint is the offline token-minting helper; ship it too so operators can
-# mint identity tokens with `docker compose exec admin-api admin-mint ...`.
-RUN GOWORK=off CGO_ENABLED=0 GOOS=linux go build \
-    -trimpath -ldflags="-s -w" \
-    -o /out/admin-mint ./cmd/admin-mint
-
 # ---- runtime stage -------------------------------------------------------
 FROM alpine:3.20
 RUN apk add --no-cache ca-certificates git
 COPY --from=build /out/admin-api  /usr/local/bin/admin-api
-COPY --from=build /out/admin-mint /usr/local/bin/admin-mint
 EXPOSE 8090
 ENTRYPOINT ["/usr/local/bin/admin-api"]

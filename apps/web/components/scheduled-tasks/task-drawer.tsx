@@ -161,43 +161,25 @@ export function TaskDrawer({
                 />
               </Field>
 
-              {form.preserveLegacySchedule ? (
-                <div className="rounded-2xl border border-amber-400/30 bg-amber-400/10 p-3 text-sm">
-                  <div className="font-medium text-amber-700">Custom schedule (legacy)</div>
-                  <p className="mt-1 text-xs leading-5 text-muted-foreground">
-                    It will keep running unchanged until you choose one of the new repeat options.
-                  </p>
-                  <button
-                    type="button"
-                    className="mt-2 text-xs font-medium text-primary hover:underline"
-                    onClick={() => setForm({ ...form, preserveLegacySchedule: false })}
-                  >
-                    Choose a new schedule
-                  </button>
-                </div>
-              ) : (
-                <>
-                  <Field label="Repeat">
-                    <select
-                      className={inputClass}
-                      value={form.scheduleKind}
-                      onChange={(event) =>
-                        setForm({
-                          ...form,
-                          scheduleKind: event.target.value as TaskFormState["scheduleKind"],
-                        })
-                      }
-                    >
-                      <option value="once">Does not repeat</option>
-                      <option value="hourly">Every hour</option>
-                      <option value="daily">Every day</option>
-                      <option value="weekly">Every week</option>
-                      <option value="monthly">Every month</option>
-                    </select>
-                  </Field>
-                  <ScheduleFields form={form} setForm={setForm} />
-                </>
-              )}
+              <Field label="Repeat">
+                <select
+                  className={inputClass}
+                  value={form.scheduleKind}
+                  onChange={(event) =>
+                    setForm({
+                      ...form,
+                      scheduleKind: event.target.value as TaskFormState["scheduleKind"],
+                    })
+                  }
+                >
+                  <option value="once">Does not repeat</option>
+                  <option value="hourly">Every hour</option>
+                  <option value="daily">Every day</option>
+                  <option value="weekly">Every week</option>
+                  <option value="monthly">Every month</option>
+                </select>
+              </Field>
+              <ScheduleFields form={form} setForm={setForm} />
 
               <div className="rounded-2xl border border-border/70 bg-muted/25 px-3 py-2 text-xs text-muted-foreground">
                 Times use <span className="font-medium text-foreground">{form.timezone}</span>.

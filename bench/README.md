@@ -4,10 +4,10 @@
 使用:压测产生流量 → Prometheus 采集 RED 指标 → Grafana "Fleet RED" 看板观察,
 据此定容量基线。两条关键路径各一个工具:
 
-| 路径 | 协议 | 被测端点 | 工具 | 脚本 |
-| --- | --- | --- | --- | --- |
-| 用户会话流式 | HTTP/SSE | gateway `POST /v1/chat` | [k6](https://k6.io) | `k6/gateway_sse.js` |
-| 运行时调用 | gRPC(server-stream) | agent-runtime `AgentRuntimeService/Query` | [ghz](https://ghz.sh) | `ghz/agent_query.sh` |
+| 路径         | 协议                | 被测端点                                  | 工具                  | 脚本                 |
+| ------------ | ------------------- | ----------------------------------------- | --------------------- | -------------------- |
+| 用户会话流式 | HTTP/SSE            | gateway `POST /v1/chat`                   | [k6](https://k6.io)   | `k6/gateway_sse.js`  |
+| 运行时调用   | gRPC(server-stream) | agent-runtime `AgentRuntimeService/Query` | [ghz](https://ghz.sh) | `ghz/agent_query.sh` |
 
 > **复用开源,不造轮子**:k6 是 SSE/HTTP 负载事实标准,ghz 是 gRPC 的对应物,
 > 二者都开源且可脚本化进 CI。我们只写"被测什么 + 阈值",不自研压测框架。
@@ -15,10 +15,16 @@
 ## 0. 前置
 
 ```bash
-# 起全栈(auth OFF + EchoProvider,零配置即可压;见 compose 注释)
-docker compose -f deploy/docker-compose/docker-compose.full.yml up -d
+# CLI 安装并启动正式栈；压测使用真实模型配置和登录 token
+cocola up
 # 叠加观测栈(贴主栈网络)
 docker compose -f deploy/docker-compose/docker-compose.observability.yml up -d
+
+# 仅 ghz 直压需要：显式发布默认不暴露到宿主机的 agent-runtime 端口
+docker compose --project-name cocola \
+  --env-file "${COCOLA_HOME:-$HOME/.cocola}/config.env" \
+  -f "${COCOLA_HOME:-$HOME/.cocola}/compose.yaml" \
+  -f deploy/docker-compose/docker-compose.bench.yml up -d agent-runtime
 
 # 工具(macOS)
 brew install k6 ghz
@@ -47,14 +53,14 @@ k6 run -e TOKEN="$JWT" -e VUS=50 -e DURATION=60s bench/k6/gateway_sse.js
 ## 2. ghz — agent-runtime gRPC
 
 ```bash
-# 烟测
-CONC=2 TOTAL=20 bench/ghz/agent_query.sh
+# 烟测；直连 Agent Runtime 必须显式提供目标环境签发的用户 token
+TOKEN="$JWT" CONC=2 TOTAL=20 bench/ghz/agent_query.sh
 
 # 基线(并发 20,2000 次)
-CONC=20 TOTAL=2000 bench/ghz/agent_query.sh localhost:50061
+TOKEN="$JWT" CONC=20 TOTAL=2000 bench/ghz/agent_query.sh localhost:50061
 
 # 时长模式(并发 50 跑 30s)
-CONC=50 DURATION=30s bench/ghz/agent_query.sh
+TOKEN="$JWT" CONC=50 DURATION=30s bench/ghz/agent_query.sh
 ```
 
 ghz 直接吃 `packages/proto` 里的 `.proto`,无需服务端反射。输出含 RPS、
@@ -62,20 +68,20 @@ P50/P90/P99 及状态码分布。
 
 ## 3. 容量基线(首版,2026-06-16)
 
-> EchoProvider 路径测的是**框架 + 沙箱编排开销**(LLM 调用被 echo 替掉,但沙箱
-> 仍真实创建);接真实 provider 后另立一组"真实路径"基线行。
+> 以下是 2026-06-16 旧测试替身路径的历史数据，只用于观察框架和沙箱编排开销；
+> 当前正式路径不再提供 EchoProvider，新的容量结论必须使用真实模型重新测量。
 
-**环境**:Docker Desktop VM `linux/aarch64`,12 vCPU / 8 GiB;历史全栈
-`docker-compose.full.yml`(auth OFF + EchoProvider,旧沙箱后端);
+**环境**:Docker Desktop VM `linux/aarch64`,12 vCPU / 8 GiB；历史源码全容器栈
+(auth OFF + EchoProvider，旧沙箱后端)；
 k6/ghz 经官方容器(`grafana/k6`、`ghcr.io/bojand/ghz`)接入 `cocola_default`
 网络,以服务名压测。压测 commit:见本次提交。
 
 ### 3.1 稳态吞吐(20 并发)
 
-| 日期 | 硬件 | 路径 | 工具 | 并发 | 样本 | RPS | P50 | P95 | P99 | 错误率 | 备注 |
-| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| 2026-06-16 | aarch64 12c/8g | gateway SSE | k6 | 20 VU | 167 | 3.56 | 5.12s | 6.13s | — | 0% | EchoProvider,每迭代新 session |
-| 2026-06-16 | 同上 | agent-runtime Query | ghz | 20 | 200 | 5.57 | 3.47s | 4.68s | 5.08s | 0% | EchoProvider,每请求新 session |
+| 日期       | 硬件           | 路径                | 工具 | 并发  | 样本 | RPS  | P50   | P95   | P99   | 错误率 | 备注                          |
+| ---------- | -------------- | ------------------- | ---- | ----- | ---- | ---- | ----- | ----- | ----- | ------ | ----------------------------- |
+| 2026-06-16 | aarch64 12c/8g | gateway SSE         | k6   | 20 VU | 167  | 3.56 | 5.12s | 6.13s | —     | 0%     | EchoProvider,每迭代新 session |
+| 2026-06-16 | 同上           | agent-runtime Query | ghz  | 20    | 200  | 5.57 | 3.47s | 4.68s | 5.08s | 0%     | EchoProvider,每请求新 session |
 
 > 20 并发下两路径均 **0 错误**。延迟主要被「每请求新建沙箱(冷启)+ 并发排队」
 > 拉高:k6 经 gateway→agent-runtime 多一跳且 SSE 整流读完,故 P50 高于 ghz 直压。
@@ -86,10 +92,10 @@ k6/ghz 经官方容器(`grafana/k6`、`ghcr.io/bojand/ghz`)接入 `cocola_defaul
 
 同一 `session_id` 复用已有沙箱,新 `session_id` 触发创建。单并发逐请求计时:
 
-| 路径 | 首请求(冷启,建沙箱) | 稳态(复用沙箱) | 冷启净增量 |
-| --- | --- | --- | --- |
-| 复用同 session ×6 | 1.69s(#1) | ~0.62–0.67s(#2–6) | — |
-| 每次新 session ×6 | ~1.0–1.16s(均值 ~1.08s) | — | **≈ 0.44s / 请求** vs 复用 ~0.64s |
+| 路径              | 首请求(冷启,建沙箱)     | 稳态(复用沙箱)    | 冷启净增量                        |
+| ----------------- | ----------------------- | ----------------- | --------------------------------- |
+| 复用同 session ×6 | 1.69s(#1)               | ~0.62–0.67s(#2–6) | —                                 |
+| 每次新 session ×6 | ~1.0–1.16s(均值 ~1.08s) | —                 | **≈ 0.44s / 请求** vs 复用 ~0.64s |
 
 > **结论(喂给 #13 warm pool)**:Docker provider 下沙箱冷启给每个新会话**首请求**
 > 叠加约 **0.4–1.0s**(视是否已有暖容器)。warm pool 预热若能让新会话直接领到
@@ -100,17 +106,27 @@ k6/ghz 经官方容器(`grafana/k6`、`ghcr.io/bojand/ghz`)接入 `cocola_defaul
 
 ### 3.3 复现步骤
 
-1. 起栈:`docker compose -f deploy/docker-compose/docker-compose.full.yml up -d`
-   (可选叠 `docker-compose.observability.yml`)。
+1. 起栈：`cocola up`（可选叠 `docker-compose.observability.yml`）；ghz 直压时按
+   “前置”章节叠加 `docker-compose.bench.yml` 发布内部端口。
 2. 工具:本机无 k6/ghz 时用官方容器(见上),或 `brew install k6 ghz`。
-3. k6:`docker run --rm --network cocola_default -v "$PWD/bench/k6:/scripts:ro"
-   -e BASE_URL=http://gateway:8080 -e VUS=20 -e DURATION=30s grafana/k6 run
-   /scripts/gateway_sse.js`。
-4. ghz:`docker run --rm --network cocola_default -v "$PWD/packages/proto:/proto:ro"
-   ghcr.io/bojand/ghz --proto cocola/agent/v1/agent.proto --import-paths /proto
-   --call cocola.agent.v1.AgentRuntimeService.Query
-   -d '{"prompt":"ping","session_id":"ghz-{{.RequestNumber}}","max_turns":1}'
-   -c 20 -n 200 --insecure agent-runtime:50061`。
+3. k6：
+
+   ```bash
+   docker run --rm --network cocola_default -v "$PWD/bench/k6:/scripts:ro" \
+     -e BASE_URL=http://gateway:8080 -e VUS=20 -e DURATION=30s \
+     grafana/k6 run /scripts/gateway_sse.js
+   ```
+
+4. ghz：
+
+   ```bash
+   docker run --rm --network cocola_default -v "$PWD/packages/proto:/proto:ro" \
+     ghcr.io/bojand/ghz --proto cocola/agent/v1/agent.proto --import-paths /proto \
+     --call cocola.agent.v1.AgentRuntimeService.Query \
+     -d '{"prompt":"ping","session_id":"ghz-{{.RequestNumber}}","max_turns":1}' \
+     -c 20 -n 200 --insecure agent-runtime:50061
+   ```
+
 5. 定容量:取 P99 仍在 SLO 内(默认 `sse_ttfb_ms p95<2s`、错误率<1%)的最大 RPS
    为单实例额定容量,按 SLO 留 buffer。
 
@@ -120,8 +136,8 @@ k6/ghz 经官方容器(`grafana/k6`、`ghcr.io/bojand/ghz`)接入 `cocola_defaul
   Prometheus 里 `up=0`(scrape 目标端口/网络待校准);本次基线以 k6/ghz 自带
   统计为权威数据源,Grafana RED 看板的端到端联通留作 S5 收尾项单独修。
 - **真实路径基线**:接真实 LLM provider 后补一组(含真实 token 时延)。
-- **OpenSandbox runtime 基线**:后续用当前 `make dev` dev runtime 与正式 Docker
-  模式分别复测冷启 p99 和预拉收益。
+- **OpenSandbox runtime 基线**:后续用当前 `make dev` dev runtime 与 CLI 正式部署
+  分别复测冷启 p99 和预拉收益。
 
 ## 约束
 

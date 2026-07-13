@@ -51,18 +51,15 @@ type WarmConfig struct {
 // environment. Sizing defaults to enabled with DefaultWarmPoolSize; Admin can
 // hot-adjust only the enabled flag and idle target.
 //
-// The LLM credentials + brain image mirror what agent-runtime injects on the
-// Acquire path (COCOLA_SANDBOX_IMAGE / COCOLA_SANDBOX_LLM_BASE_URL /
-// COCOLA_SANDBOX_LLM_TOKEN / COCOLA_SANDBOX_MODEL_ALIAS). They are static and
-// cluster-wide, so a warm sandbox created here is credential-identical to one a
-// session would have cold-created — a later claim is transparent.
+// The brain image, LLM base URL and model alias mirror what agent-runtime
+// injects on the Acquire path. User authentication is deliberately absent at
+// prewarm time: Gateway mints a short-lived token for each Run and the shim
+// applies it to every exec, so a session-agnostic warm sandbox never carries a
+// cluster-wide credential.
 func WarmConfigFromEnv() WarmConfig {
 	env := map[string]string{}
 	if v := strings.TrimSpace(os.Getenv("COCOLA_SANDBOX_LLM_BASE_URL")); v != "" {
 		env["ANTHROPIC_BASE_URL"] = v
-	}
-	if v := strings.TrimSpace(os.Getenv("COCOLA_SANDBOX_LLM_TOKEN")); v != "" {
-		env["ANTHROPIC_AUTH_TOKEN"] = v
 	}
 	if v := strings.TrimSpace(os.Getenv("COCOLA_SANDBOX_MODEL_ALIAS")); v != "" {
 		env["ANTHROPIC_MODEL"] = v

@@ -230,8 +230,7 @@ func (a *API) deleteAuthUser(w http.ResponseWriter, r *http.Request) {
 }
 
 type runtimeTokenReq struct {
-	UserID     string `json:"user_id"`
-	TenantID   string `json:"tenant_id,omitempty"`
+	Email      string `json:"email"`
 	TTLSeconds int64  `json:"ttl_seconds,omitempty"`
 }
 
@@ -249,7 +248,7 @@ func (a *API) issueRuntimeToken(w http.ResponseWriter, r *http.Request) {
 	if effectiveTTL <= 0 {
 		effectiveTTL = 10 * time.Minute
 	}
-	tok, err := a.svc.IssueRuntimeToken(r.Context(), req.UserID, req.TenantID, ttl)
+	tok, err := a.svc.IssueRuntimeToken(r.Context(), req.Email, ttl)
 	if err != nil {
 		mapErr(w, err)
 		return

@@ -102,36 +102,3 @@ func TestMCPCreateAndUpdateOnlyPersistConfiguration(t *testing.T) {
 		t.Fatalf("updated MCP = %+v", updated)
 	}
 }
-
-func TestMigrateMCPRemoteURLsIsIdempotent(t *testing.T) {
-	mem := store.NewMemory()
-	admin := newMCPTestAdmin(mem)
-	legacy := store.MCPServer{
-		ID: "legacy", Name: "Legacy", Transport: MCPTransportSSE,
-		URL:     "https://mcp.example.test/events?token=legacy-secret",
-		Enabled: true, CreatedAt: time.Unix(1, 0), UpdatedAt: time.Unix(1, 0),
-	}
-	if err := mem.CreateMCPServer(context.Background(), legacy); err != nil {
-		t.Fatal(err)
-	}
-	if err := admin.MigrateMCPRemoteURLs(context.Background()); err != nil {
-		t.Fatalf("first migration: %v", err)
-	}
-	first, err := mem.GetMCPServer(context.Background(), "legacy")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if first.URL != mcpRemoteURLTemplate || bytes.Contains(first.URLVarCiphertextJSON, []byte("legacy-secret")) {
-		t.Fatalf("legacy URL was not secured: %+v", first)
-	}
-	if err := admin.MigrateMCPRemoteURLs(context.Background()); err != nil {
-		t.Fatalf("second migration: %v", err)
-	}
-	second, err := mem.GetMCPServer(context.Background(), "legacy")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if !bytes.Equal(first.URLVarCiphertextJSON, second.URLVarCiphertextJSON) || !first.UpdatedAt.Equal(second.UpdatedAt) {
-		t.Fatalf("idempotent migration changed the record")
-	}
-}

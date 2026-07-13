@@ -141,7 +141,7 @@ func TestAuthUserLifecycleAndRuntimeToken(t *testing.T) {
 		t.Fatalf("identifier reused across kinds should conflict, got %v", err)
 	}
 
-	tok, err := svc.IssueRuntimeToken(ctx, created.Email, "", 10*time.Minute)
+	tok, err := svc.IssueRuntimeToken(ctx, created.Email, 10*time.Minute)
 	if err != nil {
 		t.Fatalf("runtime token: %v", err)
 	}
@@ -166,7 +166,7 @@ func TestAuthUserLifecycleAndRuntimeToken(t *testing.T) {
 	if _, err := svc.Authenticate(ctx, "test@email", "user-password"); !errors.Is(err, ErrAccountDisabled) {
 		t.Fatalf("disabled login want ErrAccountDisabled, got %v", err)
 	}
-	if _, err := svc.IssueRuntimeToken(ctx, created.Email, "", 10*time.Minute); !errors.Is(err, ErrAccountDisabled) {
+	if _, err := svc.IssueRuntimeToken(ctx, created.Email, 10*time.Minute); !errors.Is(err, ErrAccountDisabled) {
 		t.Fatalf("disabled runtime token want ErrAccountDisabled, got %v", err)
 	}
 	reenabled, err := svc.SetAuthUser(ctx, created.ID, AuthUserInput{
@@ -263,7 +263,7 @@ func TestRuntimeTokenTenantFromUserRecord(t *testing.T) {
 	}
 
 	// The persisted tenant is authoritative even when the caller passes nothing.
-	tok, err := svc.IssueRuntimeToken(ctx, created.Email, "", 10*time.Minute)
+	tok, err := svc.IssueRuntimeToken(ctx, created.Email, 10*time.Minute)
 	if err != nil {
 		t.Fatalf("runtime token: %v", err)
 	}
@@ -275,19 +275,6 @@ func TestRuntimeTokenTenantFromUserRecord(t *testing.T) {
 		t.Fatalf("runtime token tenant want team-alpha, got %q", claims.Tenant)
 	}
 
-	// A stored tenant overrides a stale caller-supplied tenant.
-	tok2, err := svc.IssueRuntimeToken(ctx, created.Email, "team-stale", 10*time.Minute)
-	if err != nil {
-		t.Fatalf("runtime token (with caller tenant): %v", err)
-	}
-	claims2, err := token.Decode(tok2, "secret", authTestClock().Unix())
-	if err != nil {
-		t.Fatalf("decode runtime token 2: %v", err)
-	}
-	if claims2.Tenant != "team-alpha" {
-		t.Fatalf("stored tenant should win, got %q", claims2.Tenant)
-	}
-
 	// Reassigning the team updates subsequent tokens.
 	if _, err := svc.SetAuthUser(ctx, created.ID, AuthUserInput{
 		Tenant: stringPtr("team-beta"),
@@ -295,7 +282,7 @@ func TestRuntimeTokenTenantFromUserRecord(t *testing.T) {
 	}); err != nil {
 		t.Fatalf("update tenant: %v", err)
 	}
-	tok3, err := svc.IssueRuntimeToken(ctx, created.Email, "", 10*time.Minute)
+	tok3, err := svc.IssueRuntimeToken(ctx, created.Email, 10*time.Minute)
 	if err != nil {
 		t.Fatalf("runtime token 3: %v", err)
 	}

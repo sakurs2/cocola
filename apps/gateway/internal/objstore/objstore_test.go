@@ -47,27 +47,28 @@ func TestConfigFromEnv_SecretFileIndirection(t *testing.T) {
 	}
 }
 
-func TestConfigEnabled(t *testing.T) {
+func TestConfigValidate(t *testing.T) {
 	cases := []struct {
 		name string
 		cfg  Config
-		want bool
+		ok   bool
 	}{
-		{"both set", Config{Endpoint: "e", Bucket: "b"}, true},
-		{"no endpoint", Config{Bucket: "b"}, false},
-		{"no bucket", Config{Endpoint: "e"}, false},
-		{"empty", Config{}, false},
+		{"complete", Config{Endpoint: "e", AccessKey: "a", SecretKey: "s", Bucket: "b"}, true},
+		{"no endpoint", Config{AccessKey: "a", SecretKey: "s", Bucket: "b"}, false},
+		{"no access key", Config{Endpoint: "e", SecretKey: "s", Bucket: "b"}, false},
+		{"no secret key", Config{Endpoint: "e", AccessKey: "a", Bucket: "b"}, false},
+		{"no bucket", Config{Endpoint: "e", AccessKey: "a", SecretKey: "s"}, false},
 	}
 	for _, c := range cases {
-		if got := c.cfg.Enabled(); got != c.want {
-			t.Errorf("%s: Enabled()=%v want %v", c.name, got, c.want)
+		if err := c.cfg.Validate(); (err == nil) != c.ok {
+			t.Errorf("%s: Validate() error=%v, ok=%v", c.name, err, c.ok)
 		}
 	}
 }
 
 func TestNew_ErrorsWhenNotConfigured(t *testing.T) {
 	if _, err := New(Config{}); err == nil {
-		t.Fatal("New should error when config is disabled")
+		t.Fatal("New should error when config is incomplete")
 	}
 }
 

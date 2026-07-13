@@ -3,7 +3,6 @@ package service
 import (
 	"context"
 	"encoding/json"
-	"fmt"
 	"net/url"
 	"regexp"
 	"strings"
@@ -196,9 +195,7 @@ func (a *Admin) UpdateMCPServer(ctx context.Context, id string, in MCPServerInpu
 				return MCPServerPublic{}, err
 			}
 		} else if server.URL != mcpRemoteURLTemplate {
-			if err := a.secureExistingMCPRemoteURL(&server); err != nil {
-				return MCPServerPublic{}, err
-			}
+			return MCPServerPublic{}, ErrInvalidArg
 		}
 		server.Command = ""
 		server.ArgsJSON = []byte("[]")
@@ -385,18 +382,6 @@ func (a *Admin) secureMCPRemoteURL(server *store.MCPServer, rawURL string) error
 	return nil
 }
 
-func (a *Admin) secureExistingMCPRemoteURL(server *store.MCPServer) error {
-	vars, err := decryptSecretMap(a.configSecret(), server.URLVarCiphertextJSON)
-	if err != nil {
-		return err
-	}
-	rendered, err := renderMCPURLTemplate(server.URL, vars)
-	if err != nil {
-		return err
-	}
-	return a.secureMCPRemoteURL(server, rendered)
-}
-
 func validateMCPRemoteURL(rawURL string) error {
 	parsed, err := url.Parse(strings.TrimSpace(rawURL))
 	if err != nil || parsed.Host == "" || (parsed.Scheme != "http" && parsed.Scheme != "https") {
@@ -416,34 +401,6 @@ func safeMCPURLHint(rawURL string) string {
 	parsed.Fragment = ""
 	parsed.RawFragment = ""
 	return parsed.String()
-}
-
-// MigrateMCPRemoteURLs moves legacy plaintext/template URLs into the reserved
-// encrypted URL variable. It is safe to run on every process start.
-func (a *Admin) MigrateMCPRemoteURLs(ctx context.Context) error {
-	servers, err := a.store.ListMCPServers(ctx, false)
-	if err != nil {
-		return err
-	}
-	for _, server := range servers {
-		if server.Transport != MCPTransportHTTP && server.Transport != MCPTransportSSE {
-			continue
-		}
-		if server.URL == mcpRemoteURLTemplate {
-			ciphers := mapFromJSON(server.URLVarCiphertextJSON)
-			if strings.TrimSpace(ciphers[mcpRemoteURLVariable]) != "" {
-				continue
-			}
-		}
-		if err := a.secureExistingMCPRemoteURL(&server); err != nil {
-			return fmt.Errorf("migrate MCP server %s: %w", server.ID, err)
-		}
-		server.UpdatedAt = a.now().UTC()
-		if err := a.store.UpdateMCPServer(ctx, server); err != nil {
-			return err
-		}
-	}
-	return nil
 }
 
 func normalizeMCPTransport(v string) string {

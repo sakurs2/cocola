@@ -8,8 +8,7 @@
 // where the runtime exposes it (http_req_waiting is a good proxy for TTFB on a
 // streamed body that flushes headers immediately).
 //
-// Usage (services up via docker-compose.full.yml; auth OFF + EchoProvider by
-// default so it runs zero-config):
+// Usage (services up via `cocola up`; provide TOKEN when auth is enabled):
 //
 //   k6 run -e BASE_URL=http://localhost:8080 bench/k6/gateway_sse.js
 //
@@ -88,8 +87,7 @@ export default function () {
 
   const ok = check(res, {
     "status is 200": (r) => r.status === 200,
-    "is event-stream": (r) =>
-      (r.headers["Content-Type"] || "").includes("text/event-stream"),
+    "is event-stream": (r) => (r.headers["Content-Type"] || "").includes("text/event-stream"),
   });
 
   // Parse SSE frames to count events and detect in-band errors. The body holds

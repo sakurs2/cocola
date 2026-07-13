@@ -161,12 +161,15 @@ PLATFORMS=linux/amd64,linux/arm64 scripts/sandbox-runtime-publish.sh
 VERSION_TAG=v0.1.0 scripts/sandbox-runtime-publish.sh
 ```
 
-Use digest-pinned references for production rollout:
+Formal deployment uses the fixed Cocola release version selected at install:
 
 ```bash
-COCOLA_SANDBOX_IMAGE=ghcr.io/sakurs2/cocola-sandbox-runtime:sha-<commit>@sha256:<digest-from-ci> \
-  make prod
+cocola install --version v0.1.0
 ```
+
+The CLI applies the same registry and version to every Cocola service image,
+including `cocola-sandbox-runtime`, so a rollout cannot accidentally combine
+components from different releases.
 
 For quick single-server deployments that intentionally track the newest
 successful master build, `latest` is available as a convenience tag:

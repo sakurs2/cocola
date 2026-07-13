@@ -17,8 +17,8 @@
 #   contain.: OpenSandbox server :8090 + redis/postgres/minio (dev.yml)
 #
 # Result: REAL Route A (brain in sandbox) + real model, and editing ANY cocola
-# service means just Ctrl-C + re-run -- ZERO image rebuilds. The formal/full
-# Docker mode is `make prod` (scripts/start.sh + docker-compose.full.yml).
+# service means just Ctrl-C + re-run -- ZERO image rebuilds. Formal deployment
+# is owned exclusively by the standalone `cocola` CLI.
 #
 # Design notes
 #   * Port 8080 collision: the gateway BFF and the llm-gateway BOTH default to
@@ -26,8 +26,8 @@
 #     fight; the sandbox brain reaches it via COCOLA_SANDBOX_LLM_BASE_URL.
 #   * Route A (brain-in-sandbox, ADR-0009) is the only real path; the legacy
 #     Route B was decommissioned (see ADR-0009).
-#   * Every child logs to .run-logs/<name>.log; this script prints a token you
-#     can paste into the web UI or a curl call.
+#   * Every child logs to .run-logs/<name>.log; the terminal only shows startup
+#     phases, the Web entrypoint, and actionable errors.
 #
 # Usage:
 #   bash scripts/run-stack.sh            # dev mode (= make dev)
@@ -36,6 +36,8 @@ set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$ROOT"
+LOG_DIR="$ROOT/.run-logs"
+mkdir -p "$LOG_DIR"
 
 export PATH="/Applications/OrbStack.app/Contents/MacOS/xbin:/opt/homebrew/bin:/usr/local/bin:$PATH"
 
@@ -53,7 +55,6 @@ done
 # ----------------------------------------------------------------- config
 # Auto-load repo-root .env if present. Existing environment values win.
 if [[ -f "$ROOT/.env" ]]; then
-  echo "==> loading $ROOT/.env"
   set -a
   # shellcheck disable=SC1091
   while IFS= read -r line; do
@@ -72,21 +73,14 @@ export COCOLA_AUTH_SECRET="${COCOLA_AUTH_SECRET:-local-dev-secret}"
 export AUTH_SECRET="${AUTH_SECRET:-local-dev-auth-secret}"
 export COCOLA_ADMIN_KEY="${COCOLA_ADMIN_KEY:-local-dev-admin-key}"
 export COCOLA_MODEL_SECRET_KEY="${COCOLA_MODEL_SECRET_KEY:-cocola-local-model-secret}"
-export COCOLA_CONFIG_SECRET_KEY="${COCOLA_CONFIG_SECRET_KEY:-$COCOLA_MODEL_SECRET_KEY}"
+export COCOLA_CONFIG_SECRET_KEY="${COCOLA_CONFIG_SECRET_KEY:-cocola-local-config-secret}"
 export COCOLA_BOOTSTRAP_ADMIN_USERNAME="${COCOLA_BOOTSTRAP_ADMIN_USERNAME:-admin}"
 export COCOLA_BOOTSTRAP_ADMIN_EMAIL="${COCOLA_BOOTSTRAP_ADMIN_EMAIL:-admin@cocola.local}"
 export COCOLA_BOOTSTRAP_ADMIN_PASSWORD="${COCOLA_BOOTSTRAP_ADMIN_PASSWORD:-cocola-admin}"
-export COCOLA_BOOTSTRAP_ADMIN_RESET="${COCOLA_BOOTSTRAP_ADMIN_RESET:-true}"
-export COCOLA_BOOTSTRAP_ADMIN_PRINT="${COCOLA_BOOTSTRAP_ADMIN_PRINT:-true}"
+export COCOLA_BOOTSTRAP_ADMIN_RESET="${COCOLA_BOOTSTRAP_ADMIN_RESET:-false}"
 export COCOLA_AGENT_RUN_TIMEOUT_SECS="${COCOLA_AGENT_RUN_TIMEOUT_SECS:-3600}"
 export COCOLA_SANDBOX_HEARTBEAT_SECS="${COCOLA_SANDBOX_HEARTBEAT_SECS:-20}"
 export COCOLA_LLM_TIMEOUT_SECS="${COCOLA_LLM_TIMEOUT_SECS:-300}"
-
-# Mint before sandbox-manager starts so cold and warm sandboxes receive a
-# credential signed by the same secret enforced by llm-gateway.
-echo "==> minting a dev token (admin-mint)"
-TOKEN="$(go run ./apps/admin-api/cmd/admin-mint -user emp-42 -tenant team-platform -ttl 3600)"
-export COCOLA_SANDBOX_LLM_TOKEN="${COCOLA_SANDBOX_LLM_TOKEN:-$TOKEN}"
 
 AGENT_HOST="${COCOLA_AGENT_HOST:-127.0.0.1}"
 AGENT_PORT="${COCOLA_AGENT_PORT:-50061}"
@@ -108,8 +102,6 @@ LLM_PORT="${COCOLA_LLM_PORT:-8081}"   # NOT 8080: that is the gateway port.
 
 WEB_PORT="${COCOLA_WEB_PORT:-3000}"
 
-LOG_DIR="$ROOT/.run-logs"
-mkdir -p "$LOG_DIR"
 # cleanup.log is append-only during teardown. Reset it for each stack run so
 # repeated local starts do not accumulate thousands of stale process checks.
 : > "$LOG_DIR/cleanup.log"
@@ -127,16 +119,7 @@ OWNED_PORTS+=(50051 8092)
 log_redirect() { printf '%s/%s.log' "$LOG_DIR" "$1"; }
 
 docker_compose() {
-  if docker compose version >/dev/null 2>&1; then
-    docker compose "$@"
-    return
-  fi
-  if command -v docker-compose >/dev/null 2>&1; then
-    docker-compose "$@"
-    return
-  fi
-  echo "!! docker compose is unavailable; install Docker Compose v2 plugin or docker-compose v1." >&2
-  return 127
+  docker compose "$@"
 }
 
 env_bool_false() {
@@ -172,9 +155,6 @@ cleanup() {
   [[ "$_SHUTTING_DOWN" == "1" ]] && return
   _SHUTTING_DOWN=1
   trap '' INT TERM   # ignore repeat Ctrl-C while we tear down
-
-  echo
-  echo "==> shutting down dev stack"
 
   # Phase 1: polite SIGTERM to each process group (fall back to the bare pid).
   for pid in "${PIDS[@]:-}"; do
@@ -213,7 +193,6 @@ cleanup() {
   done
 
   wait 2>>"$LOG_DIR/cleanup.log" || true
-  echo "==> done. all owned ports released."
 }
 trap cleanup EXIT INT TERM
 
@@ -367,8 +346,8 @@ dev_up() {
   done
   if [[ -n "$_conflict" ]]; then
     echo "!! dev mode runs cocola services NATIVELY, but a containerized stack still holds their ports:$_conflict" >&2
-    echo "   those app containers are the FULL stack (full Docker stack / start.sh). Stop it first, then re-run dev mode:" >&2
-    echo "     bash scripts/start.sh --down     # tear down the full containerized stack" >&2
+    echo "   those app containers belong to a CLI-managed Cocola stack. Stop it first, then re-run dev mode:" >&2
+    echo "     cocola down" >&2
     echo "   (this mode then brings up ONLY the sandbox deps -- OpenSandbox server + redis/pg/minio -- itself)" >&2
     exit 1
   fi
@@ -377,7 +356,6 @@ dev_up() {
   # outer dev wrapper sets COCOLA_OPENSANDBOX_MANAGED=0 and points us at the
   # Kubernetes OpenSandbox port-forward it already prepared.
   if env_bool_false "${COCOLA_OPENSANDBOX_MANAGED:-1}"; then
-    echo "==> [dev] external OpenSandbox server selected (COCOLA_OPENSANDBOX_MANAGED=0); skipping docker-compose OpenSandbox"
     if [[ -z "${COCOLA_OPENSANDBOX_URL:-}" ]]; then
       echo "!! COCOLA_OPENSANDBOX_MANAGED=0 requires COCOLA_OPENSANDBOX_URL (for example http://127.0.0.1:8090/v1)" >&2
       exit 1
@@ -392,7 +370,6 @@ dev_up() {
     fi
   else
     local osb_port="${COCOLA_OPENSANDBOX_HOST_PORT:-8090}"
-    echo "==> [dev] bringing up OpenSandbox server (host :$osb_port)"
     if ! COCOLA_OPENSANDBOX_HOST_PORT="$osb_port" \
       docker_compose -f deploy/docker-compose/docker-compose.opensandbox.yml up -d \
         >"$(log_redirect dev-opensandbox)" 2>&1; then
@@ -416,7 +393,6 @@ dev_up() {
   fi
 
   # (2) Infra only: redis / postgres / minio (the third-party stateful deps).
-  echo "==> [dev] starting containerized infra (redis/postgres/minio) via docker-compose.dev.yml"
   docker_compose -f deploy/docker-compose/docker-compose.dev.yml up -d \
       redis postgres minio minio-init \
       >"$(log_redirect dev-infra)" 2>&1 \
@@ -433,9 +409,6 @@ dev_up() {
   export COCOLA_MINIO_SECRET_KEY="${COCOLA_MINIO_SECRET_KEY:-cocola_dev_pw}"
   export COCOLA_MINIO_BUCKET="${COCOLA_MINIO_BUCKET:-cocola}"
   export COCOLA_ATTACHMENT_INLINE_MAX_BYTES="${COCOLA_ATTACHMENT_INLINE_MAX_BYTES:-16777216}"
-  # Web-UI dev ergonomics: blank token -> dev-user (matches the full stack).
-  export COCOLA_AUTH_ALLOW_ANON="${COCOLA_AUTH_ALLOW_ANON:-1}"
-
   # (3) NATIVE sandbox-manager. It is a standalone Go module kept OUT of go.work,
   # so it MUST build/run with GOWORK=off from its own module dir. Talk to the
   # OpenSandbox server over the HOST loopback (host.docker.internal is
@@ -450,12 +423,10 @@ dev_up() {
     COCOLA_REDIS_ADDR="$COCOLA_REDIS_ADDR" \
     COCOLA_SANDBOX_IMAGE="${COCOLA_SANDBOX_IMAGE:-cocola/sandbox-runtime:dev}" \
     COCOLA_SANDBOX_LLM_BASE_URL="${COCOLA_SANDBOX_LLM_BASE_URL:-http://host.docker.internal:$LLM_PORT}" \
-    COCOLA_SANDBOX_LLM_TOKEN="${COCOLA_SANDBOX_LLM_TOKEN:-cocola-local}" \
     COCOLA_SANDBOX_MODEL_ALIAS="${COCOLA_SANDBOX_MODEL_ALIAS:-cocola-default}" \
       $SETSID go run ./cmd/sandbox-manager
   ) >"$(log_redirect sandbox-manager)" 2>&1 &
   PIDS+=("$!")
-  echo "==> [dev] starting NATIVE sandbox-manager on :50051 (OpenSandbox -> $osb_url; log: .run-logs/sandbox-manager.log)"
   wait_port 127.0.0.1 50051 "sandbox-manager" 180
 
   # (4) Point the app processes (launched by the main flow) at the native stack.
@@ -464,9 +435,7 @@ dev_up() {
   # The sandbox brain runs INSIDE a container -> reach the native llm-gateway
   # (:$LLM_PORT below) over the host bridge.
   export COCOLA_SANDBOX_LLM_BASE_URL="${COCOLA_SANDBOX_LLM_BASE_URL:-http://host.docker.internal:$LLM_PORT}"
-  export COCOLA_SANDBOX_LLM_TOKEN="${COCOLA_SANDBOX_LLM_TOKEN:-cocola-local}"
   export COCOLA_SANDBOX_MODEL_ALIAS="${COCOLA_SANDBOX_MODEL_ALIAS:-cocola-default}"
-  echo "==> [dev] sandbox + infra ready; launching native cocola services (real Route A)"
 }
 
 dev_up
@@ -485,7 +454,6 @@ free_port "$LLM_PORT" llm-gateway
     COCOLA_LLM_REDIS_URL="${COCOLA_LLM_REDIS_URL:-redis://127.0.0.1:6379/0}" \
     $SETSID uv run python -m cocola_llm_gateway ) >"$(log_redirect llm-gateway)" 2>&1 &
   PIDS+=("$!")
-  echo "==> starting llm-gateway on $LLM_HOST:$LLM_PORT (models: Admin/Postgres)"
   # nc -z 0.0.0.0 is unreliable; a 0.0.0.0 bind also answers on loopback, so probe there.
   llm_probe_host="$LLM_HOST"; [[ "$LLM_HOST" == "0.0.0.0" ]] && llm_probe_host="127.0.0.1"
   wait_port "$llm_probe_host" "$LLM_PORT" "llm-gateway"
@@ -494,7 +462,6 @@ free_port "$LLM_PORT" llm-gateway
   # agent-runtime process env. Surface the URL so a real Route-A run can point
   # the sandbox at it.
   export COCOLA_SANDBOX_LLM_BASE_URL="${COCOLA_SANDBOX_LLM_BASE_URL:-http://$LLM_HOST:$LLM_PORT}"
-echo "    llm-gateway up; sandbox brain should target $COCOLA_SANDBOX_LLM_BASE_URL"
 
 # ----------------------------------------------------------------- admin-api (dev)
 # dev mode runs admin-api NATIVELY too (agent-runtime's market-skills source).
@@ -516,11 +483,9 @@ free_port 8092 admin-api
     COCOLA_BOOTSTRAP_ADMIN_PASSWORD="$COCOLA_BOOTSTRAP_ADMIN_PASSWORD" \
     COCOLA_BOOTSTRAP_ADMIN_PASSWORD_HASH="${COCOLA_BOOTSTRAP_ADMIN_PASSWORD_HASH:-}" \
     COCOLA_BOOTSTRAP_ADMIN_RESET="${COCOLA_BOOTSTRAP_ADMIN_RESET:-}" \
-    COCOLA_BOOTSTRAP_ADMIN_PRINT="$COCOLA_BOOTSTRAP_ADMIN_PRINT" \
       $SETSID go run ./apps/admin-api/cmd/admin-api
   ) >"$(log_redirect admin-api)" 2>&1 &
 PIDS+=("$!")
-echo "==> [dev] starting NATIVE admin-api on :8092 (log: .run-logs/admin-api.log)"
 wait_port 127.0.0.1 8092 "admin-api" 120
 export COCOLA_ADMIN_URL="${COCOLA_ADMIN_URL:-http://127.0.0.1:8092}"
 
@@ -533,7 +498,6 @@ free_port "$AGENT_PORT" agent-runtime
     $SETSID uv run python -m cocola_agent_runtime
 ) >"$(log_redirect agent-runtime)" 2>&1 &
 PIDS+=("$!")
-echo "==> starting agent-runtime on $AGENT_ADDR (log: .run-logs/agent-runtime.log)"
 wait_port "$AGENT_HOST" "$AGENT_PORT" "agent-runtime"
 
 # ----------------------------------------------------------------- gateway
@@ -543,7 +507,6 @@ free_port "$GATEWAY_PORT" gateway
     $SETSID go run ./apps/gateway/cmd/gateway
 ) >"$(log_redirect gateway)" 2>&1 &
 PIDS+=("$!")
-echo "==> starting gateway on $GATEWAY_ADDR -> $AGENT_ADDR (log: .run-logs/gateway.log)"
 wait_port "$GATEWAY_HOST" "$GATEWAY_PORT" "gateway"
 
 # ----------------------------------------------------------------- web
@@ -557,39 +520,15 @@ free_port "$WEB_PORT" web
       $SETSID pnpm dev --port "$WEB_PORT"
   ) >"$(log_redirect web)" 2>&1 &
   PIDS+=("$!")
-  echo "==> starting web on http://127.0.0.1:$WEB_PORT (log: .run-logs/web.log)"
 wait_port "127.0.0.1" "$WEB_PORT" "web" 240
 
 # ----------------------------------------------------------------- ready banner
 echo
-echo "======================================================================"
-echo " cocola dev stack is UP"
-echo "----------------------------------------------------------------------"
-echo " gateway   : http://$GATEWAY_ADDR   (POST /v1/chat, SSE)"
-echo " agent-rt  : $AGENT_ADDR (gRPC)"
-echo " llm-gw    : http://$LLM_HOST:$LLM_PORT  (models: Admin/Postgres)"
-echo " web       : http://127.0.0.1:$WEB_PORT"
-echo " web login : ${COCOLA_BOOTSTRAP_ADMIN_USERNAME} or ${COCOLA_BOOTSTRAP_ADMIN_EMAIL} / ${COCOLA_BOOTSTRAP_ADMIN_PASSWORD}"
-[[ -n "${MINIO_CONSOLE:-}" ]] && echo " minio     : ${MINIO_CONSOLE}  (console; cocola / cocola_dev_pw)"
-echo " sandbox   : NATIVE sandbox-manager :50051 (OpenSandbox) + admin-api :8092; REAL Route A"
-if env_bool_false "${COCOLA_OPENSANDBOX_MANAGED:-1}"; then
-  echo " containers: only infra -- external OpenSandbox server ${COCOLA_OPENSANDBOX_URL:-<unset>} + redis/pg/minio (dev.yml)"
-else
-  echo " containers: only sandbox deps -- OpenSandbox server :${COCOLA_OPENSANDBOX_HOST_PORT:-8090} + redis/pg/minio (dev.yml)"
-fi
-echo " stop cont : make dev-down  (infra) + make opensandbox-down  (sandbox); they survive Ctrl-C, app relaunches with no rebuild"
-echo "----------------------------------------------------------------------"
-echo " dev token : $TOKEN"
-echo "----------------------------------------------------------------------"
-echo " try it    :"
-echo "   curl -sN -X POST http://$GATEWAY_ADDR/v1/chat \\"
-echo "     -H \"authorization: Bearer \$TOKEN\" \\"
-echo "     -H \"content-type: application/json\" \\"
-echo "     -d '{\"prompt\":\"hello cocola\",\"session_id\":\"sess-1\"}'"
-echo "----------------------------------------------------------------------"
-echo " logs      : tail -f .run-logs/  (one file per service)"
-echo " stop      : Ctrl-C (tears down every child process)"
-echo "======================================================================"
+printf '\033[1;32m[dev]\033[0m ready\n'
+echo "  Web    http://127.0.0.1:$WEB_PORT"
+echo "  Login  ${COCOLA_BOOTSTRAP_ADMIN_USERNAME} / ${COCOLA_BOOTSTRAP_ADMIN_PASSWORD}"
+echo "  Logs   .run-logs/"
+echo "  Stop   Ctrl-C"
 echo
 
 # Block until interrupted; cleanup() runs on the way out.

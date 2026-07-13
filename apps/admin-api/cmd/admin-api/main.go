@@ -7,11 +7,8 @@
 // powers both sides of the identity handshake:
 //
 //	COCOLA_ADMIN_ADDR          listen address (default ":8090")
-//	COCOLA_ADMIN_KEY           static admin bearer key. Empty => auth DISABLED
-//	                           (dev/test), exactly like the gateway's auth.
-//	COCOLA_AUTH_SECRET         HS256 signing secret SHARED with the gateway.
-//	                           Empty => token minting disabled (token endpoints
-//	                           400); the rest of the admin surface still works.
+//	COCOLA_ADMIN_KEY           required static admin bearer key.
+//	COCOLA_AUTH_SECRET         required HS256 signing secret shared with gateways.
 //	COCOLA_AUTH_ISSUER         `iss` stamped on minted tokens (default "cocola").
 //	COCOLA_AUTH_TOKEN_TTL_SECS default token lifetime in seconds (default 30d).
 //	COCOLA_REDIS_ADDR          required shared Redis host:port for revocations,
@@ -25,9 +22,6 @@
 //	                           seed the first Auth.js web admin user. Existing
 //	                           users are left unchanged unless
 //	                           COCOLA_BOOTSTRAP_ADMIN_RESET=true.
-//	COCOLA_BOOTSTRAP_ADMIN_PRINT
-//	                           true => print dev bootstrap credentials. Use
-//	                           only for local dev; never in production.
 //	COCOLA_SCHEDULER_ENABLED   run user-owned scheduled tasks (default true).
 //	COCOLA_GATEWAY_URL         gateway URL for scheduled task execution
 //	                           (default http://127.0.0.1:8080).
@@ -38,11 +32,7 @@
 //	                           running task lease heartbeat cadence (default 30).
 //	COCOLA_SCHEDULER_LEASE_TIMEOUT_SECS
 //	                           stale running task timeout (default 300).
-//	COCOLA_SCHEDULER_MIN_INTERVAL_SECS
-//	                           minimum legacy custom interval (default 3600).
-//	COCOLA_CONFIG_SECRET_KEY    encrypts admin-managed runtime config secrets
-//	                           (MCP URL/env/header). Empty falls back to
-//	                           COCOLA_MODEL_SECRET_KEY for compatibility.
+//	COCOLA_CONFIG_SECRET_KEY    required independent key for runtime config secrets.
 //	COCOLA_SANDBOX_ADDR         sandbox-manager gRPC address used for MCP checks.
 //	COCOLA_SANDBOX_IMAGE        runtime image used by temporary MCP checks.
 //
@@ -88,21 +78,24 @@ func main() {
 	addr := getenv("COCOLA_ADMIN_ADDR", ":8090")
 	adminKey := config.SecretFromEnv("COCOLA_ADMIN_KEY")
 	secret := config.SecretFromEnv("COCOLA_AUTH_SECRET")
+	modelSecret := config.SecretFromEnv("COCOLA_MODEL_SECRET_KEY")
+	configSecret := config.SecretFromEnv("COCOLA_CONFIG_SECRET_KEY")
+	requiredSecrets := [][2]string{
+		{"COCOLA_ADMIN_KEY", adminKey},
+		{"COCOLA_AUTH_SECRET", secret},
+		{"COCOLA_MODEL_SECRET_KEY", modelSecret},
+		{"COCOLA_CONFIG_SECRET_KEY", configSecret},
+	}
+	for _, item := range requiredSecrets {
+		if item[1] == "" {
+			log.Fatal(item[0] + " is required")
+		}
+	}
 	issuerName := getenv("COCOLA_AUTH_ISSUER", "cocola")
 	ttl := time.Duration(getenvInt("COCOLA_AUTH_TOKEN_TTL_SECS", 30*24*3600)) * time.Second
 
-	// Token minting is optional: without a shared secret the admin can still
-	// manage quotas/skills/audit, but token endpoints return 400.
-	var iss *token.Issuer
-	if secret != "" {
-		iss = token.NewIssuer(secret, issuerName, ttl)
-		log.Sugar().Infow("token issuance enabled", "issuer", issuerName, "default_ttl", ttl)
-	} else {
-		log.Warn("token issuance DISABLED (no COCOLA_AUTH_SECRET) — token endpoints will 400")
-	}
-	if adminKey == "" {
-		log.Warn("admin auth DISABLED (no COCOLA_ADMIN_KEY) — all callers are dev-admin")
-	}
+	iss := token.NewIssuer(secret, issuerName, ttl)
+	log.Sugar().Infow("token issuance enabled", "issuer", issuerName, "default_ttl", ttl)
 
 	// The control plane has one production persistence path. Starting with a
 	// process-local store would make configuration appear durable when it is not.
@@ -164,34 +157,22 @@ func main() {
 	svc := service.New(st, iss, time.Now).
 		WithUserEventBroker(pub).
 		WithWarmPoolConfigWriter(pub).
-		WithModelSecretKey(config.SecretFromEnv("COCOLA_MODEL_SECRET_KEY")).
-		WithConfigSecretKey(config.SecretFromEnv("COCOLA_CONFIG_SECRET_KEY")).
-		WithMinScheduleInterval(time.Duration(getenvInt("COCOLA_SCHEDULER_MIN_INTERVAL_SECS", 3600)) * time.Second)
+		WithModelSecretKey(modelSecret).
+		WithConfigSecretKey(configSecret)
 	svc.StartConversationTraceMaintenance(context.Background())
-	migrationCtx, migrationCancel := context.WithTimeout(context.Background(), 30*time.Second)
-	if err := svc.MigrateMCPRemoteURLs(migrationCtx); err != nil {
-		migrationCancel()
-		log.Sugar().Fatalf("secure legacy MCP URLs: %v", err)
+	oc := objstore.ConfigFromEnv()
+	skillStore, err := objstore.New(oc)
+	if err != nil {
+		log.Sugar().Fatalf("skill bundle store: %v", err)
 	}
-	migrationCancel()
-	if oc := objstore.ConfigFromEnv(); oc.Enabled() {
-		skillStore, err := objstore.New(oc)
-		if err != nil {
-			log.Sugar().Warnw("skill bundle store disabled", "err", err)
-		} else {
-			hctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-			herr := skillStore.Health(hctx)
-			cancel()
-			if herr != nil {
-				log.Sugar().Warnw("skill bundle store health failed; disabling bundle uploads", "err", herr)
-			} else {
-				svc.WithSkillBundleStore(skillStore)
-				log.Sugar().Infow("skill bundle store enabled", "endpoint", oc.Endpoint, "bucket", oc.Bucket)
-			}
-		}
-	} else {
-		log.Warn("skill bundle store disabled (no COCOLA_MINIO_ENDPOINT/BUCKET) — imported skills keep metadata only")
+	hctx, hcancel := context.WithTimeout(context.Background(), 5*time.Second)
+	herr := skillStore.Health(hctx)
+	hcancel()
+	if herr != nil {
+		log.Sugar().Fatalf("skill bundle store health check: %v", herr)
 	}
+	svc.WithSkillBundleStore(skillStore)
+	log.Sugar().Infow("skill bundle store enabled", "endpoint", oc.Endpoint, "bucket", oc.Bucket)
 	runtimeMgr, err := service.NewSandboxRuntimeManagerFromEnv(runtimeKV)
 	if err != nil {
 		log.Sugar().Warnw("sandbox runtime monitor disabled", "err", err)
@@ -233,15 +214,6 @@ func main() {
 			log.Sugar().Fatalf("bootstrap admin user: %v", err)
 		}
 		log.Sugar().Infow("bootstrap admin user ensured", "email", email)
-		if getenvBool("COCOLA_BOOTSTRAP_ADMIN_PRINT", false) && password != "" {
-			if username == "" {
-				username = email
-				if at := strings.IndexByte(username, '@'); at > 0 {
-					username = username[:at]
-				}
-			}
-			log.Sugar().Warnw("dev bootstrap admin credentials", "username", username, "email", email, "password", password)
-		}
 	}
 	nodeMgr, err := service.NewSandboxNodeManagerFromEnv()
 	if err != nil {
@@ -267,7 +239,7 @@ func main() {
 			getenvInt("COCOLA_SCHEDULER_LEASE_TIMEOUT_SECS", 300),
 		) * time.Second,
 	}); err != nil {
-		log.Sugar().Warnw("scheduled task worker disabled", "err", err)
+		log.Sugar().Fatalf("start scheduled task worker: %v", err)
 	} else {
 		log.Info("scheduled task worker enabled")
 	}

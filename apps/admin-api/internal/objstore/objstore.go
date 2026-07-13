@@ -38,8 +38,19 @@ func ConfigFromEnv() Config {
 	}
 }
 
-func (c Config) Enabled() bool {
-	return c.Endpoint != "" && c.Bucket != ""
+func (c Config) Validate() error {
+	switch {
+	case c.Endpoint == "":
+		return fmt.Errorf("objstore: COCOLA_MINIO_ENDPOINT is required")
+	case c.AccessKey == "":
+		return fmt.Errorf("objstore: COCOLA_MINIO_ACCESS_KEY is required")
+	case c.SecretKey == "":
+		return fmt.Errorf("objstore: COCOLA_MINIO_SECRET_KEY is required")
+	case c.Bucket == "":
+		return fmt.Errorf("objstore: COCOLA_MINIO_BUCKET is required")
+	default:
+		return nil
+	}
 }
 
 type Client struct {
@@ -50,8 +61,8 @@ type Client struct {
 var _ Store = (*Client)(nil)
 
 func New(cfg Config) (*Client, error) {
-	if !cfg.Enabled() {
-		return nil, fmt.Errorf("objstore: not configured (endpoint/bucket empty)")
+	if err := cfg.Validate(); err != nil {
+		return nil, err
 	}
 	mc, err := minio.New(cfg.Endpoint, &minio.Options{
 		Creds:  credentials.NewStaticV4(cfg.AccessKey, cfg.SecretKey, ""),

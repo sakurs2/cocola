@@ -5,8 +5,9 @@
 ROOT := $(shell pwd)
 GO_APPS := gateway admin-api
 SANDBOX_APP := sandbox-manager
+CLI_APP := cli
 PY_APPS := agent-runtime llm-gateway
-DOCKER_COMPOSE := scripts/docker-compose.sh
+DOCKER_COMPOSE := docker compose
 
 # -------------------------------------------------------------------- meta
 .PHONY: help
@@ -46,15 +47,18 @@ proto-gen-py: ## Generate Python stubs (containerized; corporate-TLS safe)
 go-tidy: ## go mod tidy for all Go modules
 	@for a in $(GO_APPS); do (cd apps/$$a && go mod tidy); done
 	@cd apps/$(SANDBOX_APP) && GOWORK=off go mod tidy
+	@cd apps/$(CLI_APP) && go mod tidy
 	@cd packages/go-common && go mod tidy
 
 go-build: ## Build all Go services
 	@for a in $(GO_APPS); do (cd apps/$$a && go build -o ../../bin/$$a ./cmd/$$a); done
 	@cd apps/$(SANDBOX_APP) && GOWORK=off go build -o ../../bin/$(SANDBOX_APP) ./cmd/$(SANDBOX_APP)
+	@cd apps/$(CLI_APP) && go build -o ../../bin/cocola ./cmd/cocola
 
 go-test: ## Run all Go tests
 	@for a in $(GO_APPS); do (cd apps/$$a && go test ./...); done
 	@cd apps/$(SANDBOX_APP) && GOWORK=off go test ./...
+	@cd apps/$(CLI_APP) && go test ./...
 	@cd packages/go-common && go test ./...
 
 go-lint: ## Run golangci-lint
@@ -152,22 +156,15 @@ sandbox-runtime-publish: ## Publish the sandbox runtime image to GHCR
 # -------------------------------------------------------------------- dev stack
 # Local app stack. `make dev` is the DEFAULT debug mode: OpenSandbox Kubernetes
 # runtime plus redis/postgres/minio run in containers; cocola-authored services
-# run natively in the foreground for fast edit/restart loops. Formal/full
-# Docker startup remains available as `make prod`.
-.PHONY: dev prod
+# run natively in the foreground for fast edit/restart loops. Formal deployment
+# is intentionally owned by the standalone `cocola` CLI.
+.PHONY: dev
 dev: ## Dev debug mode: cocola services NATIVE, sandbox runtime + infra containerized
-	@echo "==> cocola mode: dev (local debug; native cocola services + containerized sandbox/infra)"
 	@bash scripts/run-stack-dev.sh; status=$$?; \
 		if [ "$$status" -eq 130 ] || [ "$$status" -eq 143 ]; then \
-			echo "==> cocola dev stopped"; \
 			exit 0; \
 		fi; \
 		exit "$$status"
-
-prod: ## Prod mode: formal/full Docker startup (start.sh + docker-compose.full.yml)
-	@echo "==> cocola mode: prod (full Docker stack)"
-	bash scripts/start.sh
-
 # -------------------------------------------------------------------- aggregate
 .PHONY: install test lint format format-check precommit-install clean
 install: go-tidy py-install web-install ## Install all deps

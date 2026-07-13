@@ -128,7 +128,7 @@ export async function runtimeAuthHeaders(user: SessionUser): Promise<HeadersInit
       cache: "no-store",
       headers: adminHeaders(user, "application/json"),
       body: JSON.stringify({
-        user_id: user.email,
+        email: user.email,
         ttl_seconds: RUNTIME_TOKEN_TTL_SECONDS,
       }),
     });

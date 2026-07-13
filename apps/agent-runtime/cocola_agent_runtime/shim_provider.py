@@ -291,11 +291,10 @@ class InSandboxShimProvider:
 
         Carries the model alias and, when the gateway minted a per-user token
         for this turn, ANTHROPIC_AUTH_TOKEN. This exec env is applied on EVERY
-        turn's `exec_stream` and overrides whatever was baked into the sandbox
-        at creation time (the static COCOLA_SANDBOX_LLM_TOKEN), so a warm/reused
-        sandbox still authenticates to the llm-gateway AS THE USER -- the
-        warm-pool-safe injection point (ADR-0009 keeps creds in env, never the
-        prompt channel).
+        turn's `exec_stream`, so cold, warm and reused sandboxes authenticate to
+        the llm-gateway AS THE USER without a static provisioning credential --
+        the warm-pool-safe injection point (ADR-0009 keeps creds in env, never
+        the prompt channel).
         """
         env: dict[str, str] = {}
         alias = (options.model_alias or "").strip()

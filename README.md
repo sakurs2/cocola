@@ -28,7 +28,8 @@ cocola/
 │   ├── sandbox-manager/      # Go: 沙箱编排
 │   ├── agent-runtime/        # Python: Agent 运行时
 │   ├── llm-gateway/          # Python: LLM 网关与计费
-│   └── admin-api/            # Go: 管理后台后端
+│   ├── admin-api/            # Go: 管理后台后端
+│   └── cli/                  # Go: 安装、部署与运维 CLI
 ├── packages/                 # 共享库
 │   ├── proto/                # gRPC IDL
 │   ├── go-common/            # Go 公共库
@@ -47,7 +48,31 @@ cocola/
 └── README.md
 ```
 
-## 快速开始（M0 阶段）
+## 安装与启动
+
+### 无需下载源码
+
+主机安装好 Docker 与 Docker Compose v2 后，可以直接安装 CLI 并进入交互式部署：
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/sakurs2/cocola/master/scripts/install.sh | sh
+```
+
+安装器会校验 Release 归档的 SHA-256，默认把 `cocola` 安装到
+`~/.local/bin`，并把部署配置写到 `~/.cocola`。检查配置后执行 `cocola up` 拉取
+带版本号的正式镜像并启动服务。后续运维统一使用：
+
+```bash
+cocola up
+cocola status
+cocola logs -f
+cocola doctor
+cocola down
+```
+
+完整命令、非交互安装和目录说明见 [`docs/cli.md`](./docs/cli.md)。
+
+### 源码开发
 
 ```bash
 # 一键拉起本地依赖：PostgreSQL + Redis + MinIO
@@ -67,7 +92,6 @@ Redis、MinIO 等依赖由 Docker/k3d/Helm 准备，cocola 自己的服务
 ```bash
 cp .env.example .env
 make dev   # dev 调试栈：OpenSandbox runtime + 本机原生 cocola 服务
-make prod  # 正式/完整 Docker 启动：scripts/start.sh + docker-compose.full.yml
 ```
 
 `.env.example` 可直接作为本地配置使用，默认管理员为 `admin` / `cocola-admin`。
@@ -86,9 +110,9 @@ make prod  # 正式/完整 Docker 启动：scripts/start.sh + docker-compose.ful
 独立的模型 JSON 或 provider 环境变量，避免 Web、Agent Runtime 和 LLM Gateway
 读取到不同配置。API key 加密保存，不写入仓库文件。
 
-> 鉴权闭环:`run-stack.sh` 会把 `admin-mint` 签出的令牌注入 sandbox——网关用同一个
-> `COCOLA_AUTH_SECRET` 离线校验它并按令牌主体计费,无需手动配 key。agent 发给
-> 网关的模型别名由 Admin 模型目录选择并解析。
+> 鉴权闭环：Gateway 根据已验证的 Web/Scheduler 用户为每个 Run 签发短期 token，
+> Agent Runtime 在每次 shim exec 时把它作为 `ANTHROPIC_AUTH_TOKEN` 注入 sandbox。
+> Warm Pool 不保存静态共享凭据；LLM Gateway 按真实用户执行配额和计费。
 
 > 当前里程碑：**Route A 真实模型全链路打通** — 已完成 M0–M5、后端 MVP，并落地
 > ADR-0009 的 Route A（Claude Code 大脑进沙箱），接入真实模型，Web 端对话与原生
@@ -154,18 +178,15 @@ make prod  # 正式/完整 Docker 启动：scripts/start.sh + docker-compose.ful
 > **真实 LLM 链路（Route A，ADR-0009）**：agent-runtime 必须通过
 > `COCOLA_SANDBOX_ADDR` 连接 sandbox-manager，并使用 `InSandboxShimProvider`。
 > 整个 Claude Code 大脑跑在用户自己的沙箱里，
-> agent-runtime 只做控制面路由。沙箱创建时经 ENV 注入模型凭证：
-> `ANTHROPIC_BASE_URL`←`COCOLA_SANDBOX_LLM_BASE_URL`（cocola llm-gateway 根）、
-> `ANTHROPIC_AUTH_TOKEN`←`COCOLA_SANDBOX_LLM_TOKEN`（cocola 令牌）。**校验令牌与
-> 沙箱内 CLI 令牌是同一个**——网关收到 `x-api-key` 后离线校验、按令牌主体计费，
-> M4 的设计在此收口。凭证只走沙箱 ENV，绝不走 prompt 通道。
+> agent-runtime 只做控制面路由。沙箱 provisioning 注入模型地址和 alias；用户 token
+> 由 Gateway 随每个 Run 的 gRPC metadata 下发，并在每次 sandbox exec 时通过 ENV
+> 注入，绝不进入 prompt，也不在 Warm Pool 中持久保存。
 >
 > ```bash
 > # agent-runtime 绑定 sandbox-manager；沙箱内 claude CLI 经注入的 ENV 回连 llm-gateway
 > export COCOLA_SANDBOX_ADDR=127.0.0.1:50051
 > export COCOLA_SANDBOX_IMAGE=cocola/sandbox-runtime:dev
 > export COCOLA_SANDBOX_LLM_BASE_URL=http://127.0.0.1:8080
-> export COCOLA_SANDBOX_LLM_TOKEN=<cocola 签发令牌>
 > export COCOLA_SANDBOX_MODEL_ALIAS=cocola-default   # 网关 registry 解析为真实模型
 > cd apps/agent-runtime && uv run python -m cocola_agent_runtime
 > # llm-gateway 侧的真实上游在 Admin -> Models 中配置
@@ -224,7 +245,7 @@ make prod  # 正式/完整 Docker 启动：scripts/start.sh + docker-compose.ful
 | M4      | Auth + Token 配额：cocola 签发令牌即 SDK API Key（HS256 离线校验）+ 周期化 token 配额（按用户日 / 租户月，超额 429）                                                                                                                                                                                | ✅   |
 | M5      | Admin API + Skill Market：Go 控制面（令牌签发 / 吊销denylist + 动态 per-subject 配额覆盖 + Skill 目录 CRUD + 审计日志），令牌编解码与 Python 网关跨语言互通（HS256 字节级一致）                                                                                                                     | ✅   |
 | **MVP** | **后端端到端打通：agent-runtime gRPC 服务（`AgentRuntimeService.Query` 服务端流式）+ gateway BFF（HTTP/SSE + 令牌校验，复用 go-common/token 共享 HS256 编解码）**                                                                                                                                   | ✅   |
-| **R-A** | **Route A：Claude Code 大脑进沙箱（ADR-0009）+ 真实模型接入 + 全栈容器化（docker-compose.full）+ Web 对话 / 原生工具端到端**                                                                                                                                                                        | ✅   |
+| **R-A** | **Route A：Claude Code 大脑进沙箱（ADR-0009）+ 真实模型接入 + CLI 正式容器部署 + Web 对话 / 原生工具端到端**                                                                                                                                                                                        | ✅   |
 | M6      | K8s Provider:client-go 实现 8 方法 + 休眠(删 Pod 留 PVC)/恢复(凭 binding 重建)/Exec 自愈 + egress NetworkPolicy + 部署物(K8s 清单 / Helm Chart);默认 runc + 用户命名空间(零节点安装),gVisor 为可选增强;代码与单测就绪,真实集群端到端验收(Layer C)已在 k3d(本地)跑通,发行版无关(k3d/k3s/EKS/GKE/AKS) | ✅   |
 | M7      | 持久化数据分层：会话 `session_map`／计费账本／控制面元数据落 Postgres，重启不丢、可自托管、多副本可共享（Vault 密钥托管按 ADR-0008 留待后续）                                                                                                                                                       | ✅   |
 | M8      | 可观测性与压测：五服务统一 RED 指标(Prometheus)+ OTel 链路(默认关，Tempo)+ 部署观测栈(Grafana 看板)+ 压测套件(k6 SSE / ghz gRPC)与容量基线 runbook                                                                                                                                                  | ✅   |
@@ -245,7 +266,7 @@ make prod  # 正式/完整 Docker 启动：scripts/start.sh + docker-compose.ful
 
 当前内置 sandbox provider 只保留 OpenSandbox。cocola 把 egress allowlist 转成
 OpenSandbox 的 `networkPolicy`，由 OpenSandbox 所在 runtime 负责执行；本地 dev 默认
-使用 OpenSandbox Kubernetes runtime，正式 Docker 模式由 `scripts/start.sh` 管理
+使用 OpenSandbox Kubernetes runtime，正式 Docker 部署由 `cocola` CLI 管理专用的
 OpenSandbox server。
 
 **域名级精确放行**:OpenSandbox 的 DNS-aware egress sidecar 负责解析域名并维护

@@ -93,8 +93,8 @@ type API struct {
 	// sandboxTokenIssuer mints a fresh per-user cocola token per chat turn from
 	// the verified identity; agent-runtime injects it into the sandbox as
 	// ANTHROPIC_AUTH_TOKEN so downstream quota/usage/revocation bind to the real
-	// user. nil => the per-user token feature is dark and agent-runtime falls
-	// back to its baked static token. sandboxTokenTTL is the mint TTL.
+	// user. nil is supported by unauthenticated tests; production always wires
+	// the issuer. sandboxTokenTTL is the mint TTL.
 	sandboxTokenIssuer *token.Issuer
 	sandboxTokenTTL    time.Duration
 	runs               *runController
@@ -119,7 +119,7 @@ func (a *API) WithMetrics(reg *metrics.Registry) *API { a.metrics = reg; return 
 // it keep their inline bytes AND carry the object key; larger files are
 // delivered key-only and pulled by agent-runtime on the model's behalf
 // (ADR-0017 P1a). A non-positive threshold falls back to DefaultInlineMaxBytes.
-// Passing a nil store leaves the API on the P0 inline-only path.
+// Production always passes a store; nil is retained only for focused handler tests.
 func (a *API) WithObjStore(store objstore.Store, inlineMaxBytes int64) *API {
 	a.store = store
 	if inlineMaxBytes <= 0 {
@@ -153,8 +153,7 @@ func (a *API) WithAgentReleaser(releaser agent.Releaser) *API { a.releaser = rel
 // WithSandboxTokenIssuer enables per-user sandbox tokens: the chat handler mints
 // a fresh cocola token per turn (sub=identity.UserID, ten=identity.TenantID) and
 // forwards it to agent-runtime, which injects it as the sandbox
-// ANTHROPIC_AUTH_TOKEN. Passing nil (the default) leaves the feature dark and
-// agent-runtime keeps its baked static token.
+// ANTHROPIC_AUTH_TOKEN. Passing nil is reserved for unauthenticated tests.
 func (a *API) WithSandboxTokenIssuer(issuer *token.Issuer, ttl time.Duration) *API {
 	a.sandboxTokenIssuer = issuer
 	a.sandboxTokenTTL = ttl
@@ -162,16 +161,15 @@ func (a *API) WithSandboxTokenIssuer(issuer *token.Issuer, ttl time.Duration) *A
 }
 
 // mintSandboxToken issues a per-user, short-lived cocola token for one turn. A
-// mint failure is non-fatal: it is logged and the caller proceeds without a
-// per-user token (agent-runtime falls back to its baked static token) so a
-// signing hiccup never breaks chat.
+// mint failure is logged and the downstream Run fails closed without silently
+// switching to a shared identity.
 func (a *API) mintSandboxToken(id auth.Identity) string {
 	if a.sandboxTokenIssuer == nil {
 		return ""
 	}
 	tok, _, err := a.sandboxTokenIssuer.Issue(id.UserID, id.TenantID, a.sandboxTokenTTL, 0)
 	if err != nil {
-		a.log.Warn("sandbox token mint failed; using runtime default token: " + err.Error())
+		a.log.Warn("sandbox token mint failed; run will fail closed: " + err.Error())
 		return ""
 	}
 	return tok

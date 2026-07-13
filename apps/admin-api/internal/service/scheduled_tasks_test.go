@@ -14,72 +14,12 @@ import (
 	"github.com/cocola-project/cocola/packages/go-common/token"
 )
 
-func TestComputeNextScheduledRunRejectsTooFrequentInterval(t *testing.T) {
-	_, err := computeNextScheduledRun(
-		ScheduleInterval,
-		json.RawMessage(`{"every_seconds":1800}`),
-		"Asia/Shanghai",
-		time.Date(2026, 7, 5, 8, 0, 0, 0, time.UTC),
-		time.Hour,
-	)
-	if !errors.Is(err, ErrScheduleTooFrequent) {
-		t.Fatalf("expected ErrScheduleTooFrequent, got %v", err)
-	}
-}
-
-func TestComputeNextScheduledRunAllowsHourlyInterval(t *testing.T) {
-	after := time.Date(2026, 7, 5, 8, 0, 0, 0, time.UTC)
-	got, err := computeNextScheduledRun(
-		ScheduleInterval,
-		json.RawMessage(`{"every_seconds":3600}`),
-		"Asia/Shanghai",
-		after,
-		time.Hour,
-	)
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	if got.Sub(after) != time.Hour {
-		t.Fatalf("next run = %s, want exactly one hour after %s", got, after)
-	}
-}
-
-func TestComputeNextScheduledRunRejectsTooFrequentCron(t *testing.T) {
-	_, err := computeNextScheduledRun(
-		ScheduleCron,
-		json.RawMessage(`{"expression":"*/30 * * * *"}`),
-		"Asia/Shanghai",
-		time.Date(2026, 7, 5, 8, 0, 0, 0, time.UTC),
-		time.Hour,
-	)
-	if !errors.Is(err, ErrScheduleTooFrequent) {
-		t.Fatalf("expected ErrScheduleTooFrequent, got %v", err)
-	}
-}
-
-func TestComputeNextScheduledRunAllowsHourlyCron(t *testing.T) {
-	got, err := computeNextScheduledRun(
-		ScheduleCron,
-		json.RawMessage(`{"expression":"0 * * * *"}`),
-		"Asia/Shanghai",
-		time.Date(2026, 7, 5, 8, 13, 0, 0, time.UTC),
-		time.Hour,
-	)
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	if got.IsZero() {
-		t.Fatal("next run is zero")
-	}
-}
-
 func TestComputeNextScheduledRunRejectsPastOnce(t *testing.T) {
 	_, err := computeNextScheduledRun(
 		ScheduleOnce,
 		json.RawMessage(`{"run_at":"2026-07-05T07:59:00Z"}`),
 		"Asia/Shanghai",
 		time.Date(2026, 7, 5, 8, 0, 0, 0, time.UTC),
-		time.Hour,
 	)
 	if !errors.Is(err, ErrScheduleInPast) {
 		t.Fatalf("expected ErrScheduleInPast, got %v", err)
@@ -125,7 +65,7 @@ func TestComputeNextScheduledRunCalendarSchedules(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got, err := computeNextScheduledRun(tt.kind, json.RawMessage(tt.spec), "Asia/Shanghai", tt.after, time.Hour)
+			got, err := computeNextScheduledRun(tt.kind, json.RawMessage(tt.spec), "Asia/Shanghai", tt.after)
 			if err != nil {
 				t.Fatalf("compute next run: %v", err)
 			}
@@ -167,33 +107,6 @@ func TestCreateUserScheduledTaskSetsOwnerAndConversation(t *testing.T) {
 	}
 	if _, err := svc.GetUserScheduledTask(ctx, out.ID, "bob@example.com"); !errors.Is(err, store.ErrNotFound) {
 		t.Fatalf("cross-user lookup should miss, got %v", err)
-	}
-}
-
-func TestCreateUserScheduledTaskRejectsLegacySchedule(t *testing.T) {
-	ctx := context.Background()
-	memory := store.NewMemory()
-	if err := memory.CreateAuthUser(ctx, store.AuthUser{ID: "alice", Email: "alice@example.com", Enabled: true}); err != nil {
-		t.Fatal(err)
-	}
-	svc := New(memory, nil, func() time.Time { return time.Date(2026, 7, 5, 8, 0, 0, 0, time.UTC) })
-	_, err := svc.CreateUserScheduledTask(ctx, "alice", ScheduledTaskInput{
-		Name: "legacy", ScheduleKind: ScheduleCron, ScheduleSpec: json.RawMessage(`{"expression":"0 * * * *"}`), Prompt: "work", ModelAlias: "model",
-	})
-	if !errors.Is(err, ErrInvalidArg) {
-		t.Fatalf("expected ErrInvalidArg, got %v", err)
-	}
-	created, err := svc.CreateUserScheduledTask(ctx, "alice", ScheduledTaskInput{
-		Name: "hourly", ScheduleKind: ScheduleHourly, ScheduleSpec: json.RawMessage(`{"minute":0}`), Prompt: "work", ModelAlias: "model",
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
-	_, err = svc.UpdateUserScheduledTask(ctx, created.ID, "alice", ScheduledTaskInput{
-		ScheduleKind: ScheduleCron, ScheduleSpec: json.RawMessage(`{"expression":"0 * * * *"}`),
-	})
-	if !errors.Is(err, ErrInvalidArg) {
-		t.Fatalf("new task converted back to legacy schedule: %v", err)
 	}
 }
 

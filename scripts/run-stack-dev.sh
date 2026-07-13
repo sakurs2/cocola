@@ -41,6 +41,7 @@ SERVER_SERVICE="${COCOLA_OPENSANDBOX_K8S_SERVER_SERVICE:-opensandbox-server}"
 LOG_DIR="$ROOT/.run-logs"
 FORWARD_PID_FILE="$LOG_DIR/opensandbox-dev-forward.pid"
 STACK_PID_FILE="$LOG_DIR/dev-stack.pid"
+SETUP_LOG="$LOG_DIR/dev-setup.log"
 
 log() { printf '\033[1;36m[dev]\033[0m %s\n' "$*"; }
 err() { printf '\033[1;31m[dev:err]\033[0m %s\n' "$*" >&2; }
@@ -173,7 +174,6 @@ stop_forward() {
     local pid
     pid="$(cat "$FORWARD_PID_FILE" 2>/dev/null || true)"
     if [[ -n "$pid" ]] && kill -0 "$pid" 2>/dev/null; then
-      log "stopping OpenSandbox port-forward (pid=$pid)"
       kill -TERM -- "-$pid" 2>/dev/null || kill -TERM "$pid" 2>/dev/null || true
       local i
       for ((i = 0; i < 25; i++)); do
@@ -197,7 +197,6 @@ stop_stack() {
     local pid
     pid="$(cat "$STACK_PID_FILE" 2>/dev/null || true)"
     if [[ -n "$pid" ]] && kill -0 "$pid" 2>/dev/null; then
-      log "stopping cocola dev stack (pid=$pid)"
       kill "$pid" 2>/dev/null || true
       wait "$pid" 2>/dev/null || true
     fi
@@ -211,13 +210,13 @@ graceful_stop() {
   stop_stack
   stop_forward
   rm -f "$STACK_PID_FILE"
+  log "stopped"
   exit 0
 }
 
 start_forward() {
   mkdir -p "$LOG_DIR"
   stop_forward
-  log "starting OpenSandbox port-forward on 127.0.0.1:$SERVER_PORT"
   (
     $SETSID kubectl -n "$SYSTEM_NAMESPACE" port-forward "svc/$SERVER_SERVICE" "$SERVER_PORT:80"
   ) >"$LOG_DIR/opensandbox-dev-forward.log" 2>&1 &
@@ -226,7 +225,6 @@ start_forward() {
   local i
   for ((i=1; i<=90; i++)); do
     if curl -fsS -m 2 "http://127.0.0.1:$SERVER_PORT/health" >/dev/null 2>&1; then
-      log "OpenSandbox server is reachable at http://127.0.0.1:$SERVER_PORT/v1"
       return 0
     fi
     sleep 1
@@ -236,14 +234,22 @@ start_forward() {
 }
 
 up() {
-  log "mode: dev (local debug; native cocola services + OpenSandbox Kubernetes runtime + containerized infra)"
-  ensure_cluster
-  log "Kubernetes sandbox pods will pull image from registry: $SANDBOX_IMAGE_REMOTE"
-  prepull_sandbox_image
-  install_opensandbox
-  start_forward
+  mkdir -p "$LOG_DIR"
+  printf '\n=== make dev %s ===\n' "$(date '+%Y-%m-%d %H:%M:%S %z')" >>"$SETUP_LOG"
+  log "preparing sandbox runtime"
+  if ! {
+    ensure_cluster
+    prepull_sandbox_image
+    install_opensandbox
+    start_forward
+  } >>"$SETUP_LOG" 2>&1; then
+    err "sandbox runtime preparation failed; see .run-logs/dev-setup.log"
+    tail -40 "$SETUP_LOG" >&2 || true
+    return 1
+  fi
+  log "sandbox runtime ready"
 
-  log "starting cocola dev stack with Kubernetes OpenSandbox runtime"
+  log "starting application services"
   trap graceful_stop INT TERM
   trap 'rm -f "$STACK_PID_FILE"; stop_forward' EXIT
   (
@@ -268,7 +274,6 @@ up() {
       return 0
       ;;
     130|143)
-      log "cocola dev stack stopped"
       return 0
       ;;
     *)

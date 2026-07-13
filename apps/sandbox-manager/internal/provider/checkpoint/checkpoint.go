@@ -63,18 +63,30 @@ func ConfigFromEnv() Config {
 	}
 }
 
-// Enabled reports whether checkpointing has enough backing services configured.
-func (c Config) EnabledAndConfigured() bool {
-	return c.MinioEndpoint != "" &&
-		c.MinioBucket != "" &&
-		c.PGDSN != ""
+func (c Config) Validate() error {
+	switch {
+	case c.MinioEndpoint == "":
+		return fmt.Errorf("checkpoint: COCOLA_MINIO_ENDPOINT is required")
+	case c.MinioAccessKey == "":
+		return fmt.Errorf("checkpoint: COCOLA_MINIO_ACCESS_KEY is required")
+	case c.MinioSecretKey == "":
+		return fmt.Errorf("checkpoint: COCOLA_MINIO_SECRET_KEY is required")
+	case c.MinioBucket == "":
+		return fmt.Errorf("checkpoint: COCOLA_MINIO_BUCKET is required")
+	case c.PGDSN == "":
+		return fmt.Errorf("checkpoint: COCOLA_PG_DSN is required")
+	default:
+		return nil
+	}
 }
 
-// Wrap decorates base when checkpointing is fully configured; otherwise it
-// returns base unchanged.
+// Wrap decorates the production provider with required session checkpointing.
 func Wrap(base provider.SandboxProvider, cfg Config) (provider.SandboxProvider, error) {
-	if base == nil || !cfg.EnabledAndConfigured() {
-		return base, nil
+	if base == nil {
+		return nil, fmt.Errorf("checkpoint: sandbox provider is required")
+	}
+	if err := cfg.Validate(); err != nil {
+		return nil, err
 	}
 	mc, err := minio.New(cfg.MinioEndpoint, &minio.Options{
 		Creds:  credentials.NewStaticV4(cfg.MinioAccessKey, cfg.MinioSecretKey, ""),
@@ -82,6 +94,15 @@ func Wrap(base provider.SandboxProvider, cfg Config) (provider.SandboxProvider, 
 	})
 	if err != nil {
 		return nil, fmt.Errorf("checkpoint: new minio client: %w", err)
+	}
+	healthCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	exists, healthErr := mc.BucketExists(healthCtx, cfg.MinioBucket)
+	cancel()
+	if healthErr != nil {
+		return nil, fmt.Errorf("checkpoint: minio health: %w", healthErr)
+	}
+	if !exists {
+		return nil, fmt.Errorf("checkpoint: bucket %q does not exist", cfg.MinioBucket)
 	}
 	return &Provider{SandboxProvider: base, cfg: cfg, minio: mc}, nil
 }
@@ -103,7 +124,7 @@ var _ provider.SessionCheckpointer = (*Provider)(nil)
 
 // CheckpointSession snapshots key dirs from a live sandbox and records metadata.
 func (p *Provider) CheckpointSession(ctx context.Context, userID, sessionID, sandboxID string) error {
-	if !p.cfg.EnabledAndConfigured() || sandboxID == "" || sessionID == "" {
+	if sandboxID == "" || sessionID == "" {
 		return nil
 	}
 	data, err := p.archive(ctx, sandboxID)

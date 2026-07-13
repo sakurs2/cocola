@@ -1,0 +1,8 @@
+# Source-only benchmark override for a stack installed by the Cocola CLI.
+# Production keeps agent-runtime private; direct ghz benchmarks opt in to this
+# host port by layering this file over ~/.cocola/compose.yaml.
+
+services:
+  agent-runtime:
+    ports:
+      - "${COCOLA_AGENT_HOST_PORT:-50061}:50061"

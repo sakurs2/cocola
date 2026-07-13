@@ -1,12 +1,5 @@
 export type TaskStatus = "active" | "paused" | "completed" | "expired";
-export type TaskScheduleKind =
-  | "once"
-  | "hourly"
-  | "daily"
-  | "weekly"
-  | "monthly"
-  | "interval"
-  | "cron";
+export type TaskScheduleKind = "once" | "hourly" | "daily" | "weekly" | "monthly";
 
 export type TaskOwner = {
   id: string;
@@ -60,7 +53,7 @@ export type TaskRun = {
 export type TaskFormState = {
   name: string;
   prompt: string;
-  scheduleKind: Exclude<TaskScheduleKind, "interval" | "cron">;
+  scheduleKind: TaskScheduleKind;
   runAt: string;
   minute: string;
   hour: string;
@@ -71,7 +64,6 @@ export type TaskFormState = {
   timezone: string;
   modelAlias: string;
   files: TaskAttachment[];
-  preserveLegacySchedule: boolean;
 };
 
 export type ModelOption = { alias: string; label: string };
@@ -96,21 +88,16 @@ export function emptyTaskForm(modelAlias = ""): TaskFormState {
     timezone: detectedTimezone(),
     modelAlias,
     files: [],
-    preserveLegacySchedule: false,
   };
 }
 
 export function taskToForm(task: ScheduledTask): TaskFormState {
-  const legacy = task.schedule_kind === "interval" || task.schedule_kind === "cron";
   const hasExpiration = isUsableDate(task.expires_at);
   const timezone = task.timezone || detectedTimezone();
-  const scheduleKind: TaskFormState["scheduleKind"] = legacy
-    ? "daily"
-    : (task.schedule_kind as TaskFormState["scheduleKind"]);
   return {
     name: task.name,
     prompt: task.prompt,
-    scheduleKind,
+    scheduleKind: task.schedule_kind,
     runAt: toLocalInput(String(task.schedule_spec?.run_at ?? ""), timezone),
     minute: String(Number(task.schedule_spec?.minute ?? 0)),
     hour: String(Number(task.schedule_spec?.hour ?? 9)),
@@ -121,7 +108,6 @@ export function taskToForm(task: ScheduledTask): TaskFormState {
     timezone,
     modelAlias: task.model_alias,
     files: [],
-    preserveLegacySchedule: legacy,
   };
 }
 
@@ -141,10 +127,8 @@ export function taskPayload(
         : zonedLocalToISO(form.expiresAt, form.timezone),
     config_json: {},
   };
-  if (!form.preserveLegacySchedule) {
-    payload.schedule_kind = form.scheduleKind;
-    payload.schedule_spec = scheduleSpec(form);
-  }
+  payload.schedule_kind = form.scheduleKind;
+  payload.schedule_spec = scheduleSpec(form);
   if (options?.includeAttachments) payload.attachments = form.files;
   return payload;
 }
@@ -216,9 +200,6 @@ export function scheduleLabel(task: ScheduledTask): string {
       return `Every ${weekdayLabel(Number(spec.weekday ?? 1))} · ${hour}:${minute}`;
     case "monthly":
       return `Monthly on day ${Number(spec.day ?? 1)} · ${hour}:${minute}`;
-    case "interval":
-    case "cron":
-      return "Custom schedule (legacy)";
   }
 }
 

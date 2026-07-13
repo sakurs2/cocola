@@ -10,9 +10,9 @@
 // Store is a narrow interface so the HTTP layer depends on an abstraction (real
 // MinIO in prod, a fake in tests) rather than the minio-go stubs directly.
 //
-// Configuration is env-driven (COCOLA_MINIO_*). When the endpoint/bucket are
-// unset the store is "disabled": callers fall back to the P0 pure-inline path,
-// which keeps the feature dark until MinIO is provisioned (graceful rollout).
+// Configuration is env-driven (COCOLA_MINIO_*). Object storage is a required
+// part of the production chat path: attachments and durable session state must
+// not depend on whether a payload happens to fit in an inline gRPC frame.
 package objstore
 
 import (
@@ -61,10 +61,19 @@ func ConfigFromEnv() Config {
 	}
 }
 
-// Enabled reports whether enough is configured to talk to a store. When false
-// the gateway stays on the P0 inline-only path.
-func (c Config) Enabled() bool {
-	return c.Endpoint != "" && c.Bucket != ""
+func (c Config) Validate() error {
+	switch {
+	case c.Endpoint == "":
+		return fmt.Errorf("objstore: COCOLA_MINIO_ENDPOINT is required")
+	case c.AccessKey == "":
+		return fmt.Errorf("objstore: COCOLA_MINIO_ACCESS_KEY is required")
+	case c.SecretKey == "":
+		return fmt.Errorf("objstore: COCOLA_MINIO_SECRET_KEY is required")
+	case c.Bucket == "":
+		return fmt.Errorf("objstore: COCOLA_MINIO_BUCKET is required")
+	default:
+		return nil
+	}
 }
 
 // Client is the minio-go-backed Store.
@@ -80,8 +89,8 @@ var _ Store = (*Client)(nil)
 // (minio-go connects lazily); call Health to verify reachability. Returns an
 // error only on malformed configuration.
 func New(cfg Config) (*Client, error) {
-	if !cfg.Enabled() {
-		return nil, fmt.Errorf("objstore: not configured (endpoint/bucket empty)")
+	if err := cfg.Validate(); err != nil {
+		return nil, err
 	}
 	mc, err := minio.New(cfg.Endpoint, &minio.Options{
 		Creds:  credentials.NewStaticV4(cfg.AccessKey, cfg.SecretKey, ""),

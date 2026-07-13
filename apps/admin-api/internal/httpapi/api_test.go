@@ -244,12 +244,6 @@ func TestAdminSettingsAPI(t *testing.T) {
 		t.Fatalf("bad updated setting: %+v", updated)
 	}
 
-	rec = do(t, r, http.MethodPatch, "/admin/settings/scheduler.min_interval_secs", "k", map[string]any{
-		"value": 1800, "expected_version": 0,
-	})
-	if rec.Code != http.StatusBadRequest {
-		t.Fatalf("too-small min interval: want 400, got %d (%s)", rec.Code, rec.Body.String())
-	}
 	rec = do(t, r, http.MethodPatch, "/admin/settings/auth.secret", "k", map[string]any{
 		"value": "new-secret", "expected_version": 0,
 	})
@@ -386,7 +380,7 @@ func TestAuthUsersLoginAndRuntimeToken(t *testing.T) {
 	}
 
 	rec = do(t, r, http.MethodPost, "/admin/runtime-token", "k", map[string]any{
-		"user_id": login.User.Email,
+		"email": login.User.Email,
 	})
 	if rec.Code != http.StatusOK {
 		t.Fatalf("runtime token: want 200, got %d (%s)", rec.Code, rec.Body.String())
@@ -420,7 +414,7 @@ func TestAuthUsersLoginAndRuntimeToken(t *testing.T) {
 		t.Fatalf("disabled login code: %+v", disabledBody)
 	}
 	rec = do(t, r, http.MethodPost, "/admin/runtime-token", "k", map[string]any{
-		"user_id": login.User.Email,
+		"email": login.User.Email,
 	})
 	if rec.Code != http.StatusForbidden {
 		t.Fatalf("disabled runtime token: want 403, got %d (%s)", rec.Code, rec.Body.String())

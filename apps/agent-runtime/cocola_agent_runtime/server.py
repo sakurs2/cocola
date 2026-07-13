@@ -412,10 +412,10 @@ def _acquire_env(model_env: dict[str, str], sandbox_token: str) -> dict[str, str
     """Env passed to sandbox acquire: model alias plus, when present, the
     per-user token as ANTHROPIC_AUTH_TOKEN.
 
-    On a COLD create this seeds the sandbox with the caller's token; on a WARM
-    reuse the sandbox already has the baked static token, but the provider's
-    per-turn exec env (shim_provider._model_env) re-injects this same token and
-    is the authoritative override, so identity is correct either way.
+    On a COLD create this seeds the sandbox with the caller's token. A WARM
+    sandbox is intentionally credential-free until claim; the provider's
+    per-turn exec env (shim_provider._model_env) applies the token on every
+    execution, so identity is correct for warm and reused sandboxes as well.
     """
     env = dict(model_env)
     if sandbox_token:
@@ -550,9 +550,9 @@ class AgentRuntimeServicer(pb_grpc.AgentRuntimeServiceServicer):
         model_env = _model_env(model_alias)
         # Per-user sandbox token (P0 identity fix): forwarded by the gateway as
         # gRPC metadata. When present it is injected into the sandbox as
-        # ANTHROPIC_AUTH_TOKEN per turn (creation-time exec env override), so the
-        # in-sandbox brain authenticates to the llm-gateway AS THE USER instead
-        # of via the static cluster-wide token baked at sandbox creation.
+        # ANTHROPIC_AUTH_TOKEN at acquire and on every shim exec, so the
+        # in-sandbox brain authenticates to the llm-gateway AS THE USER. Warm
+        # sandboxes remain credential-free until a session claims them.
         sandbox_token = _metadata_value(context, SANDBOX_TOKEN_METADATA_KEY)
         traceparent = _product_traceparent(context)
         preparing_environment = False

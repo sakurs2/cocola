@@ -125,10 +125,10 @@ shadcn/ui 在本项目中表示组件组织方式和 token 约定，不代表必
 - Chart.js 是当前 Admin 图表标准；不要在同一后台同时引入 Recharts 或 ECharts，除非现有方案无法满足明确需求。
 - React Flow 只在需要节点、边、缩放、拖拽和自动布局的真实图场景中引入；普通步骤列表或状态时间线继续使用常规 React 组件。
 - cmdk 用于命令搜索和大型可搜索选项集；小型固定选项使用 Dropdown Menu、Tabs 或原生控件。
-- Tasks 使用独立 `/tasks` 页面和 `TaskDrawer`：用户侧以真实任务卡片呈现并负责创建、编辑和启停；Admin 侧只提供紧凑管理表格、只读详情和删除能力。用户表单统一 Once / Hourly / Daily / Weekly / Monthly、时区与过期校验；不向用户暴露 Cron 或 Interval，新旧任务兼容逻辑留在 API 与调度层。
+- Tasks 使用独立 `/tasks` 页面和 `TaskDrawer`：用户侧以真实任务卡片呈现并负责创建、编辑和启停；Admin 侧只提供紧凑管理表格、只读详情和删除能力。用户表单与 API 统一只支持 Once / Hourly / Daily / Weekly / Monthly、时区与过期校验，不保留 Cron 或 Interval 兼容层。
 - 定时任务始终归属于用户并通过 Gateway 以 Owner 身份执行，结果复用固定 Conversation 进入 Chat History。Admin 只有跨用户管理权限，不是一种任务类型，也不提供无归属任务创建入口。
 - Admin 导航按管理员任务固定为 Configuration、Operations、Infrastructure 三组，Overview 固定在顶部，Settings 固定在底部。Configuration 包含 Users、Models、Skills、MCP Servers 和 Toolbox；Operations 包含 Tasks、Agent Runs 和 Token Usage；Infrastructure 包含 Sandboxes、Nodes、Architecture 和 Service Logs。不要为单一入口新增分组或二级折叠菜单。
-- Toolbox 是 `/admin/toolbox` 下的轻量管理员工具集合，不等同于 Agent Tools、Skills 或 MCP。System Prompt 作为首个工具通过卡片和 `AdminDrawer` 编辑；后续工具按独立组件增加，不建设动态插件协议、数据库注册表或通用表单 DSL。旧 `/admin/prompts` 只保留到 Toolbox 深链接的重定向。
+- Toolbox 是 `/admin/toolbox` 下的轻量管理员工具集合，不等同于 Agent Tools、Skills 或 MCP。System Prompt 作为首个工具通过卡片和 `AdminDrawer` 编辑；后续工具按独立组件增加，不建设动态插件协议、数据库注册表或通用表单 DSL。
 - Admin MCP 配置遵循“列表即状态、Drawer 即编辑”的单层结构。保存时只校验并安全持久化配置，不额外申请 sandbox；连接能力由首次真实 Agent 会话自然验证，不增加独立测试、健康页或发布状态。远程 URL 作为完整 secret 输入，界面只展示移除 userinfo、query 和 fragment 后的 `url_hint`。
 - Agent Runs 只展示 Conversation Audit：一次用户消息或用户所属定时任务执行对应一条 Agent Run，不展示普通读取、配置修改或管理操作。Trace Detail 按真实 `parent_span_id` 展示 Root → Request / Environment / Agent / Finalization → Model / Tool 层级，并使用左侧 Trace 树与右侧 Run/Metadata inspector；运行中每 2 秒刷新，进入终态即停止。日期范围使用 Admin 主题隔离的 Radix Popover 日历。Trace ID、Span ID 和高精度耗时使用 Geist Mono，模块使用 Phosphor 领域图标，刷新、返回和状态操作继续使用 Lucide。
 - Service Logs 只展示 Web、Gateway、Admin API、Agent Runtime、LLM Gateway 和 Sandbox Manager 六个核心运行时日志；不得把构建、测试、启动脚本或任意目录下的 `*.log` 暴露为产品日志源。日志 Tail 必须有读取字节上限，避免大文件被整份载入 Web 进程。

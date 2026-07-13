@@ -31,17 +31,16 @@ import (
 
 // Sentinel errors mapped to HTTP codes by the handler layer.
 var (
-	ErrInvalidArg          = errors.New("service: invalid argument")
-	ErrUnauthenticated     = errors.New("service: unauthenticated")
-	ErrAccountDisabled     = errors.New("service: account disabled")
-	ErrProtectedAdmin      = errors.New("service: protected admin")
-	ErrSelfPermission      = errors.New("service: self permission change")
-	ErrPermissionDenied    = errors.New("service: permission denied")
-	ErrScheduleTooFrequent = errors.New("service: schedule frequency below minimum")
-	ErrScheduleInPast      = errors.New("service: schedule time is in the past")
-	ErrScheduleExpiration  = errors.New("service: task expiration does not allow a future run")
-	ErrNotFound            = store.ErrNotFound
-	ErrConflict            = store.ErrConflict
+	ErrInvalidArg         = errors.New("service: invalid argument")
+	ErrUnauthenticated    = errors.New("service: unauthenticated")
+	ErrAccountDisabled    = errors.New("service: account disabled")
+	ErrProtectedAdmin     = errors.New("service: protected admin")
+	ErrSelfPermission     = errors.New("service: self permission change")
+	ErrPermissionDenied   = errors.New("service: permission denied")
+	ErrScheduleInPast     = errors.New("service: schedule time is in the past")
+	ErrScheduleExpiration = errors.New("service: task expiration does not allow a future run")
+	ErrNotFound           = store.ErrNotFound
+	ErrConflict           = store.ErrConflict
 )
 
 // Clock is injectable so tests get deterministic timestamps.
@@ -60,7 +59,6 @@ type Admin struct {
 	userEvents          UserEventBroker
 	modelSecretKey      string
 	configSecretKey     string
-	minScheduleInterval time.Duration
 	schedulerStarted    atomic.Bool
 }
 
@@ -112,25 +110,14 @@ func (a *Admin) WithModelSecretKey(secret string) *Admin {
 }
 
 // WithConfigSecretKey configures encryption for administrator-managed runtime
-// configuration secrets such as MCP env/header values. Empty falls back to the
-// legacy model secret for compatibility.
+// configuration secrets such as MCP env/header values.
 func (a *Admin) WithConfigSecretKey(secret string) *Admin {
 	a.configSecretKey = strings.TrimSpace(secret)
 	return a
 }
 
 func (a *Admin) configSecret() string {
-	if strings.TrimSpace(a.configSecretKey) != "" {
-		return strings.TrimSpace(a.configSecretKey)
-	}
-	return strings.TrimSpace(a.modelSecretKey)
-}
-
-func (a *Admin) WithMinScheduleInterval(d time.Duration) *Admin {
-	if d > 0 {
-		a.minScheduleInterval = d
-	}
-	return a
+	return strings.TrimSpace(a.configSecretKey)
 }
 
 // ---- Auth users / whitelist ----
@@ -539,34 +526,27 @@ func (a *Admin) BootstrapAdmin(ctx context.Context, in BootstrapAdminInput) erro
 	return nil
 }
 
-func (a *Admin) IssueRuntimeToken(ctx context.Context, userID, tenant string, ttl time.Duration) (string, error) {
+func (a *Admin) IssueRuntimeToken(ctx context.Context, email string, ttl time.Duration) (string, error) {
 	if a.issuer == nil {
 		return "", ErrInvalidArg
 	}
-	if strings.TrimSpace(userID) == "" {
+	email = normalizeEmail(email)
+	if email == "" {
 		return "", ErrInvalidArg
 	}
-	// Resolve the tenant from the persisted user record so the "ten" claim is
-	// authoritative (team quota + usage attribution). The record wins over any
-	// caller-supplied tenant; the caller value is only a fallback for principals
-	// that have no stored account (e.g. legacy id-only callers).
-	if strings.Contains(userID, "@") {
-		u, err := a.store.GetAuthUserByEmail(ctx, normalizeEmail(userID))
-		if err != nil {
-			return "", err
-		}
-		if isAuthUserUnavailable(u) {
-			return "", ErrAccountDisabled
-		}
-		userID = u.Email
-		if strings.TrimSpace(u.TenantID) != "" {
-			tenant = u.TenantID
-		}
+	// Runtime identity always comes from a persisted account. The caller cannot
+	// supply a fallback tenant or an unverified id-only principal.
+	u, err := a.store.GetAuthUserByEmail(ctx, email)
+	if err != nil {
+		return "", err
+	}
+	if isAuthUserUnavailable(u) {
+		return "", ErrAccountDisabled
 	}
 	if ttl <= 0 {
 		ttl = 10 * time.Minute
 	}
-	tok, _, err := a.issuer.Issue(strings.TrimSpace(userID), strings.TrimSpace(tenant), ttl, a.now().Unix())
+	tok, _, err := a.issuer.Issue(u.Email, strings.TrimSpace(u.TenantID), ttl, a.now().Unix())
 	return tok, err
 }
 
@@ -1348,11 +1328,7 @@ func normalizeID(v string) string {
 }
 
 func normalizeProviderType(v string) string {
-	v = strings.ToLower(strings.TrimSpace(v))
-	if v == "openai-compatible" || v == "openai" {
-		return ProviderOpenAICompat
-	}
-	return v
+	return strings.ToLower(strings.TrimSpace(v))
 }
 
 func validProviderType(v string) bool {
