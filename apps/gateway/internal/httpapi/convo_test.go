@@ -8,6 +8,7 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/cocola-project/cocola/apps/gateway/internal/agent"
 	"github.com/cocola-project/cocola/apps/gateway/internal/auth"
@@ -27,6 +28,17 @@ func newAPIWithConvo(t *testing.T, fs *fakeStreamer, cs convo.Store) http.Handle
 type fakeReleaser struct {
 	calls []string
 	err   error
+}
+
+type blockingReleaser struct {
+	started chan struct{}
+	unblock chan struct{}
+}
+
+func (r *blockingReleaser) ReleaseSession(_ context.Context, _, _ string) error {
+	close(r.started)
+	<-r.unblock
+	return nil
 }
 
 func (f *fakeReleaser) ReleaseSession(_ context.Context, userID, sessionID string) error {
@@ -310,6 +322,58 @@ func TestDeleteConversationReleaseFailureStillDeletes(t *testing.T) {
 	}
 	if _, err := cs.GetConversation(context.Background(), "conv-1", auth.DevIdentity.UserID); err != convo.ErrNotFound {
 		t.Fatalf("conversation should be deleted despite release failure, got %v", err)
+	}
+}
+
+func TestDeleteConversationReleaseDoesNotBlockStartingAnotherRun(t *testing.T) {
+	cs := convo.NewMemory()
+	_ = cs.UpsertConversation(context.Background(), convo.Conversation{
+		ID: "delete-me", UserID: auth.DevIdentity.UserID,
+	})
+	releaser := &blockingReleaser{started: make(chan struct{}), unblock: make(chan struct{})}
+	api := newConfiguredTestAPIWithConvo(
+		&fakeStreamer{script: []agent.Event{{Kind: "done"}}},
+		auth.NewVerifier(auth.Config{}), logger.Must(), cs,
+	).WithAgentReleaser(releaser)
+	handler := api.Handler()
+
+	deleteDone := make(chan struct{})
+	go func() {
+		recorder := httptest.NewRecorder()
+		handler.ServeHTTP(recorder, httptest.NewRequest(
+			http.MethodDelete, "/v1/conversations/delete-me", nil,
+		))
+		close(deleteDone)
+	}()
+	select {
+	case <-releaser.started:
+	case <-time.After(time.Second):
+		t.Fatal("session release did not start")
+	}
+
+	chatDone := make(chan *httptest.ResponseRecorder, 1)
+	go func() {
+		recorder := httptest.NewRecorder()
+		handler.ServeHTTP(recorder, httptest.NewRequest(
+			http.MethodPost, "/v1/chat",
+			strings.NewReader(`{"prompt":"hello","session_id":"other-conversation"}`),
+		))
+		chatDone <- recorder
+	}()
+	select {
+	case recorder := <-chatDone:
+		if recorder.Code != http.StatusOK {
+			t.Fatalf("chat start status = %d, body = %s", recorder.Code, recorder.Body.String())
+		}
+	case <-time.After(time.Second):
+		t.Fatal("session release blocked an unrelated chat start")
+	}
+
+	close(releaser.unblock)
+	select {
+	case <-deleteDone:
+	case <-time.After(time.Second):
+		t.Fatal("conversation delete did not finish")
 	}
 }
 

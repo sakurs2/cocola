@@ -270,6 +270,19 @@ func TestHealth_NonRunningIsUnhealthy(t *testing.T) {
 	}
 }
 
+func TestHealth_PendingIsTransitional(t *testing.T) {
+	p := newStub(t, func(r *http.Request) (*http.Response, error) {
+		return jsonResp(http.StatusOK, `{"id":"sbx-1","status":{"state":"Pending"}}`), nil
+	})
+	h, err := p.Health(context.Background(), "sbx-1")
+	if err != nil {
+		t.Fatalf("Health: %v", err)
+	}
+	if h.Healthy || !h.Transitional {
+		t.Errorf("health = %+v, want transitional Pending", h)
+	}
+}
+
 func TestDestroy_DeletesAndDropsMapping(t *testing.T) {
 	var gotMethod, gotPath string
 	p := newStub(t, func(r *http.Request) (*http.Response, error) {

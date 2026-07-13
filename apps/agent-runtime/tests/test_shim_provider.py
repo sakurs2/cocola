@@ -80,6 +80,32 @@ async def test_maps_tool_use_turn_and_reassembles_split_line():
     assert "resume" not in sent  # first turn has nothing to resume
 
 
+async def test_result_message_error_marks_the_turn_as_failed():
+    def stream_handler(sandbox_id, cmd, stdin):
+        yield ExecChunk(
+            kind="stdout",
+            data=_ndjson(
+                {
+                    "type": "result",
+                    "is_error": True,
+                    "result": "Reached max turns",
+                    "session_id": "sess-limit",
+                },
+                {"type": "done", "session_id": "sess-limit"},
+            ),
+        )
+        yield ExecChunk(kind="exit", exit_code=0)
+
+    provider = InSandboxShimProvider(StaticSandboxExecutor(stream_handler=stream_handler))
+    opts = AgentOptions(user_id="U1", session_id="S1", sandbox_id="box-1")
+
+    events = await _drain(provider, "complete the task", opts)
+
+    assert [event.kind for event in events] == ["result", "error", "done"]
+    assert events[1].data["error"] == "Reached max turns"
+    assert events[-1].data == {"session_id": "sess-limit"}
+
+
 async def test_request_includes_mcp_servers_when_configured():
     def stream_handler(sandbox_id, cmd, stdin):
         yield ExecChunk(kind="stdout", data=_ndjson({"type": "done", "session_id": "sess-1"}))
@@ -306,7 +332,7 @@ async def test_nonzero_exit_becomes_terminal_error():
     assert kinds[-1] == "done"  # still terminated cleanly
 
 
-async def test_sandbox_exec_timeout_gets_user_facing_error():
+async def test_sandbox_exec_timeout_preserves_the_actual_error():
     def stream_handler(sandbox_id, cmd, stdin):
         yield ExecChunk(
             kind="error",
@@ -321,8 +347,9 @@ async def test_sandbox_exec_timeout_gets_user_facing_error():
     kinds = [e.kind for e in events]
 
     assert kinds == ["error", "done"], kinds
-    assert "工具执行超时" in events[0].data["error"]
-    assert "opensandbox: sse read" not in events[0].data["error"]
+    assert events[0].data["error"] == (
+        "sandbox exec failed: opensandbox: sse read: context deadline exceeded"
+    )
 
 
 async def test_shim_error_event_is_relayed():
@@ -378,11 +405,18 @@ async def test_dangling_resume_retries_fresh_and_reindexes():
         calls["n"] += 1
         req = json.loads(stdin)
         if calls["n"] == 1:
-            # Attempt 1 carried the (now dangling) resume id and died.
+            # The shim protocol classifies the SDK ProcessError at its source.
             assert req["resume"] == "sess-stale"
             yield ExecChunk(
-                kind="stderr",
-                data="Error: No conversation found with session ID: sess-stale\n",
+                kind="stdout",
+                data=_ndjson(
+                    {
+                        "type": "error",
+                        "stage": "run",
+                        "code": "RESUME_NOT_FOUND",
+                        "error": "No conversation found with session ID: sess-stale",
+                    }
+                ),
             )
             yield ExecChunk(kind="exit", exit_code=1)
             return
@@ -443,15 +477,25 @@ async def test_unrelated_failure_is_not_retried():
 
 
 async def test_dangling_resume_not_retried_when_content_already_streamed():
-    # If the shim streamed real content before dying with a resume-ish marker,
+    # If the shim streamed real content before reporting a dangling resume,
     # replaying the turn would double the answer. We must NOT retry once any
     # content was emitted; the deferred error still surfaces.
     calls = {"n": 0}
 
     def stream_handler(sandbox_id, cmd, stdin):
         calls["n"] += 1
-        yield ExecChunk(kind="stdout", data=_ndjson({"type": "text", "text": "partial"}))
-        yield ExecChunk(kind="stderr", data="No conversation found with session ID: sess-stale\n")
+        yield ExecChunk(
+            kind="stdout",
+            data=_ndjson(
+                {"type": "text", "text": "partial"},
+                {
+                    "type": "error",
+                    "stage": "run",
+                    "code": "RESUME_NOT_FOUND",
+                    "error": "No conversation found with session ID: sess-stale",
+                },
+            ),
+        )
         yield ExecChunk(kind="exit", exit_code=1)
 
     smap = MemorySessionMap()
@@ -466,3 +510,33 @@ async def test_dangling_resume_not_retried_when_content_already_streamed():
     assert calls["n"] == 1  # no retry once content was streamed
     assert kinds == ["text", "error", "done"], kinds
     assert events[0].data["text"] == "partial"
+
+
+async def test_session_map_write_failure_marks_the_turn_as_failed():
+    class FailingPutSessionMap(MemorySessionMap):
+        async def put(self, *args, **kwargs):
+            raise RuntimeError("postgres unavailable")
+
+    def stream_handler(sandbox_id, cmd, stdin):
+        yield ExecChunk(
+            kind="stdout",
+            data=_ndjson(
+                {"type": "text", "text": "answer"},
+                {"type": "done", "session_id": "sess-new"},
+            ),
+        )
+        yield ExecChunk(kind="exit", exit_code=0)
+
+    provider = InSandboxShimProvider(
+        StaticSandboxExecutor(stream_handler=stream_handler),
+        session_map=FailingPutSessionMap(),
+    )
+    opts = AgentOptions(user_id="U1", session_id="S1", sandbox_id="box-1")
+
+    events = await _drain(provider, "hello", opts)
+
+    assert [event.kind for event in events] == ["text", "error", "done"]
+    assert events[1].data == {
+        "code": "SESSION_INDEX_WRITE_FAILED",
+        "error": "Session continuity could not be saved",
+    }

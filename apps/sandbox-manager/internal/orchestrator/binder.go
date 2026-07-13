@@ -320,7 +320,8 @@ func (b *Binder) lookup(ctx context.Context, sessionID, userID string) (*provide
 			return nil, false, err
 		}
 	}
-	if _, err := b.p.Health(ctx, sid); err != nil {
+	health, err := b.p.Health(ctx, sid)
+	if err != nil {
 		if errors.Is(err, fs.ErrNotExist) {
 			// The binding is durable but the provider has already lost the
 			// sandbox. Drop the stale mapping and let Acquire create a fresh
@@ -331,6 +332,22 @@ func (b *Binder) lookup(ctx context.Context, sessionID, userID string) (*provide
 			return nil, false, nil
 		}
 		return nil, false, fmt.Errorf("health sandbox: %w", err)
+	}
+	if health == nil || !health.Healthy {
+		if health != nil && health.Transitional {
+			return nil, false, fmt.Errorf("sandbox is not ready: %s", health.Detail)
+		}
+		// A provider can still resolve a terminal sandbox without a transport
+		// error. Never return one as a reusable execution environment. Remove
+		// the stale instance before dropping its binding so a failed destroy
+		// remains retryable on the next Acquire.
+		if err := b.p.Destroy(ctx, m.SandboxID); err != nil && !errors.Is(err, fs.ErrNotExist) {
+			return nil, false, fmt.Errorf("destroy unhealthy sandbox: %w", err)
+		}
+		if err := b.unbind(ctx, m.SessionID, m.SandboxID); err != nil {
+			return nil, false, err
+		}
+		return nil, false, nil
 	}
 	return &provider.Sandbox{
 		ID:        m.SandboxID,

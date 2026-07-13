@@ -472,11 +472,12 @@ func (p *Provider) Health(ctx context.Context, sid string) (*provider.HealthStat
 		return nil, err
 	}
 	healthy := info.Status.State == "Running"
+	transitional := info.Status.State == "Pending" || info.Status.State == "Pausing" || info.Status.State == "Paused"
 	detail := info.Status.State
 	if info.Status.Message != "" {
 		detail = info.Status.State + ": " + info.Status.Message
 	}
-	return &provider.HealthStatus{Healthy: healthy, Detail: detail}, nil
+	return &provider.HealthStatus{Healthy: healthy, Transitional: transitional, Detail: detail}, nil
 }
 
 // Destroy deletes the sandbox via DELETE /v1/sandboxes/{id} and drops the

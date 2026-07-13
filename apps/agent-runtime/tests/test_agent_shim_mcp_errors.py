@@ -75,6 +75,21 @@ def test_agent_error_unwraps_nested_exception_group_and_redacts_secrets():
     assert "header-secret" not in message
 
 
+def test_resume_not_found_is_classified_only_for_sdk_process_errors():
+    shim = _load_shim()
+
+    class ProcessError(Exception):
+        def __init__(self, message: str):
+            self.stderr = message
+            super().__init__(message)
+
+    error = ProcessError("No conversation found with session ID: stale")
+
+    assert shim._agent_error_code(error, {"resume": "stale"}) == "RESUME_NOT_FOUND"
+    assert shim._agent_error_code(error, {}) == ""
+    assert shim._agent_error_code(RuntimeError(str(error)), {"resume": "stale"}) == ""
+
+
 def test_environment_status_redacts_failed_mcp_and_marks_timeout():
     shim = _load_shim()
     request = {

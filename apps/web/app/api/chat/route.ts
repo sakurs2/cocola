@@ -52,47 +52,29 @@ export async function POST(req: NextRequest) {
       duplex: "half",
     });
   } catch (err) {
-    // Gateway unreachable: surface a single SSE error frame so the page can
-    // render it the same way it renders an in-band error event.
     const msg = err instanceof Error ? err.message : String(err);
-    const frame = `event: error\ndata: ${JSON.stringify({
-      kind: "error",
-      data: { error: `gateway unreachable: ${msg}` },
-    })}\n\n`;
-    return new Response(frame, {
-      status: 200,
-      headers: {
-        "content-type": "text/event-stream",
-        "x-cocola-upstream-status": "502",
+    return Response.json(
+      { error: { code: "GATEWAY_UNAVAILABLE", message: `gateway unreachable: ${msg}` } },
+      {
+        status: 502,
+        headers: { "cache-control": "no-store" },
       },
-    });
+    );
   }
 
-  // If the gateway rejected the request (e.g. 401/400), it replies JSON, not
-  // SSE. Convert that into a single SSE error frame so the page has one code
-  // path for everything.
-  const ct = upstream.headers.get("content-type") ?? "";
+  // Before an SSE stream is established, preserve the gateway's ordinary
+  // HTTP status and body. The browser can then distinguish a rejected start
+  // (especially 409 single-flight) from a successfully created Run.
+  const ct = upstream.headers.get("content-type") ?? "application/json";
   if (!upstream.ok || !ct.includes("text/event-stream")) {
-    const text = await upstream.text();
-    let runId = upstream.headers.get("x-cocola-run-id") ?? "";
-    if (!runId && upstream.status === 409) {
-      try {
-        const conflict = JSON.parse(text) as { run_id?: string };
-        runId = conflict.run_id ?? "";
-      } catch {
-        // Keep the original upstream diagnostic below.
-      }
-    }
-    const frame = `event: error\ndata: ${JSON.stringify({
-      kind: "error",
-      data: { error: `gateway ${upstream.status}: ${text}` },
-    })}\n\n`;
-    return new Response(frame, {
-      status: 200,
+    return new Response(upstream.body, {
+      status: upstream.status,
       headers: {
-        "content-type": "text/event-stream",
-        "x-cocola-upstream-status": String(upstream.status),
-        ...(runId ? { "x-cocola-run-id": runId } : {}),
+        "content-type": ct,
+        "cache-control": "no-store",
+        ...(upstream.headers.get("x-cocola-run-id")
+          ? { "x-cocola-run-id": upstream.headers.get("x-cocola-run-id")! }
+          : {}),
       },
     });
   }

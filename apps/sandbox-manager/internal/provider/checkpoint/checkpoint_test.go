@@ -3,10 +3,13 @@ package checkpoint
 import (
 	"context"
 	"errors"
+	"os"
 	"sort"
 	"strings"
 	"testing"
 
+	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5"
 	"github.com/minio/minio-go/v7"
 )
 
@@ -33,6 +36,57 @@ func TestConfigValidateRequiresDurableBackends(t *testing.T) {
 	missingPostgres.PGDSN = ""
 	if err := missingPostgres.Validate(); err == nil {
 		t.Fatal("checkpoint config without Postgres was accepted")
+	}
+}
+
+func TestRecordCheckpointRequiresOwner(t *testing.T) {
+	p := &Provider{}
+	if err := p.recordSuccess(context.Background(), "", "session", "checkpoint", 1); err == nil {
+		t.Fatal("ownerless checkpoint success was accepted")
+	}
+	if err := p.recordFailure(context.Background(), "", "session", "failed"); err == nil {
+		t.Fatal("ownerless checkpoint failure was accepted")
+	}
+}
+
+func TestRecordSuccessPreservesSessionOwner(t *testing.T) {
+	dsn := os.Getenv("COCOLA_TEST_PG_DSN")
+	if dsn == "" {
+		t.Skip("COCOLA_TEST_PG_DSN not set")
+	}
+	ctx := context.Background()
+	conn, err := pgx.Connect(ctx, dsn)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = conn.Close(ctx) }()
+
+	sessionID := "checkpoint-owner-" + uuid.NewString()
+	defer func() { _, _ = conn.Exec(ctx, `DELETE FROM session_map WHERE session_id=$1`, sessionID) }()
+	p := &Provider{cfg: Config{PGDSN: dsn}}
+	if err := p.recordSuccess(ctx, "user-1", sessionID, "checkpoint-1", 42); err != nil {
+		t.Fatal(err)
+	}
+
+	var owner, key string
+	if err := conn.QueryRow(ctx, `
+SELECT user_id, checkpoint_object_key FROM session_map WHERE session_id=$1
+`, sessionID).Scan(&owner, &key); err != nil {
+		t.Fatal(err)
+	}
+	if owner != "user-1" || key != "checkpoint-1" {
+		t.Fatalf("checkpoint metadata = owner %q key %q", owner, key)
+	}
+	if err := p.recordSuccess(ctx, "user-2", sessionID, "checkpoint-2", 84); err == nil {
+		t.Fatal("cross-owner checkpoint update succeeded")
+	}
+	if err := conn.QueryRow(ctx, `
+SELECT user_id, checkpoint_object_key FROM session_map WHERE session_id=$1
+`, sessionID).Scan(&owner, &key); err != nil {
+		t.Fatal(err)
+	}
+	if owner != "user-1" || key != "checkpoint-1" {
+		t.Fatalf("cross-owner update changed metadata to owner %q key %q", owner, key)
 	}
 }
 

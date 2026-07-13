@@ -664,11 +664,13 @@ func (a *API) deleteConversation(w http.ResponseWriter, r *http.Request) {
 	// Serialize with Run creation. A 202 from the cancel endpoint only means the
 	// cancellation was requested; deletion is safe only after Finalize committed
 	// the terminal Run and assistant message transaction.
+	unlockRunMutation := func() {}
 	if a.runs != nil {
-		a.runs.startMu.Lock()
-		defer a.runs.startMu.Unlock()
+		a.runs.mutationMu.Lock()
+		unlockRunMutation = a.runs.mutationMu.Unlock
 		active, err := a.runs.store.Active(r.Context(), convID, id.UserID)
 		if err == nil {
+			unlockRunMutation()
 			writeJSON(w, http.StatusConflict, map[string]any{
 				"error": map[string]string{
 					"code": "RUN_IN_PROGRESS", "message": "stop the running answer and wait for it to finish before deleting",
@@ -678,6 +680,7 @@ func (a *API) deleteConversation(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		if !errors.Is(err, chatrun.ErrNotFound) {
+			unlockRunMutation()
 			a.runs.databaseUnavailable.Store(true)
 			a.log.Warn("active run check before delete failed: " + err.Error())
 			writeErr(w, http.StatusServiceUnavailable, "RUN_STORE_UNAVAILABLE", "could not verify conversation run state")
@@ -685,14 +688,8 @@ func (a *API) deleteConversation(w http.ResponseWriter, r *http.Request) {
 		}
 		a.runs.databaseUnavailable.Store(false)
 	}
-	if a.releaser != nil {
-		releaseCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-		defer cancel()
-		if err := a.releaser.ReleaseSession(releaseCtx, id.UserID, convID); err != nil {
-			a.log.Warn("release conversation session failed: " + err.Error())
-		}
-	}
 	if err := a.convo.DeleteConversation(r.Context(), convID, id.UserID); err != nil {
+		unlockRunMutation()
 		if errors.Is(err, convo.ErrNotFound) {
 			writeErr(w, http.StatusNotFound, "NOT_FOUND", "conversation not found")
 			return
@@ -700,6 +697,16 @@ func (a *API) deleteConversation(w http.ResponseWriter, r *http.Request) {
 		a.log.Warn("delete conversation failed: " + err.Error())
 		writeErr(w, http.StatusInternalServerError, "INTERNAL", "could not delete conversation")
 		return
+	}
+	unlockRunMutation()
+	// Durable state is gone and new Runs can no longer target this conversation;
+	// release the external session afterward without holding the global mutation lock.
+	if a.releaser != nil {
+		releaseCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		defer cancel()
+		if err := a.releaser.ReleaseSession(releaseCtx, id.UserID, convID); err != nil {
+			a.log.Warn("release conversation session failed: " + err.Error())
+		}
 	}
 	w.WriteHeader(http.StatusNoContent)
 }

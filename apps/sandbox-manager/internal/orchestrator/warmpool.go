@@ -152,15 +152,15 @@ func (b *Binder) pruneDeadWarm(ctx context.Context, ids []string) []string {
 	alive := ids[:0:0]
 	for _, id := range ids {
 		hctx, cancel := context.WithTimeout(ctx, warmClaimVerify)
-		_, herr := b.p.Health(hctx, id)
+		health, herr := b.p.Health(hctx, id)
 		cancel()
-		if herr == nil {
+		if herr == nil && health != nil && (health.Healthy || health.Transitional) {
 			alive = append(alive, id)
-			continue // still alive: keep it in the pool
+			continue // ready or still starting: keep it in the pool
 		}
-		// Dead or unreachable. Claim the key (atomic DEL returns 1 for exactly
-		// one caller) so no racer double-drains, then best-effort tear down the
-		// pod unless the provider already lost it.
+		// Missing, unhealthy, or unreachable. Claim the key (atomic DEL returns
+		// 1 for exactly one caller) so no racer double-drains, then best-effort
+		// tear down the pod unless the provider already lost it.
 		n, derr := b.kv.Del(ctx, warmKey(id))
 		if derr != nil || n != 1 {
 			continue
@@ -366,21 +366,20 @@ func (b *Binder) claimWarm(ctx context.Context, spec AcquireSpec) (*provider.San
 		return nil, false
 	}
 	for _, id := range ids {
+		// Probe before claiming so a sandbox that is still starting remains in
+		// inventory for a later request instead of being handed out or destroyed.
+		hctx, cancel := context.WithTimeout(ctx, warmClaimVerify)
+		health, herr := b.p.Health(hctx, id)
+		cancel()
+		if herr != nil || health == nil || !health.Healthy {
+			if errors.Is(herr, fs.ErrNotExist) {
+				_, _ = b.kv.Del(ctx, warmKey(id))
+			}
+			continue
+		}
 		n, err := b.kv.Del(ctx, warmKey(id))
 		if err != nil || n != 1 {
 			continue // lost the race for this one
-		}
-		// We own it. Verify it is actually alive before handing it to a session.
-		hctx, cancel := context.WithTimeout(ctx, warmClaimVerify)
-		_, herr := b.p.Health(hctx, id)
-		cancel()
-		if herr != nil {
-			if errors.Is(herr, fs.ErrNotExist) {
-				// Provider already lost it; nothing to tear down.
-				continue
-			}
-			_ = b.p.Destroy(ctx, id)
-			continue
 		}
 		return &provider.Sandbox{
 			ID:        id,

@@ -101,10 +101,13 @@ func (f *fakeProvider) ReadFile(ctx context.Context, sid, path string) ([]byte, 
 func (f *fakeProvider) Health(ctx context.Context, sid string) (*provider.HealthStatus, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
-	if f.state[sid] == "" || f.state[sid] == "destroyed" {
+	state := f.state[sid]
+	if state == "" || state == "destroyed" {
 		return nil, fs.ErrNotExist
 	}
-	return &provider.HealthStatus{Healthy: true}, nil
+	return &provider.HealthStatus{
+		Healthy: state == "active", Transitional: state == "pending", Detail: state,
+	}, nil
 }
 
 func newTestBinder(t *testing.T) (*Binder, *fakeProvider) {
@@ -155,6 +158,58 @@ func TestDrainWarmPoolLeavesClaimedSandboxRunning(t *testing.T) {
 	ids, err := b.listWarm(ctx)
 	if err != nil || len(ids) != 0 {
 		t.Fatalf("remaining warm inventory = %v, %v", ids, err)
+	}
+}
+
+func TestClaimWarmRejectsUnhealthySandbox(t *testing.T) {
+	b, fp := newTestBinder(t)
+	ctx := context.Background()
+	b.WithWarmPool(WarmConfig{Image: "sandbox-image"})
+	if err := b.createOneWarm(ctx); err != nil {
+		t.Fatal(err)
+	}
+	ids, err := b.listWarm(ctx)
+	if err != nil || len(ids) != 1 {
+		t.Fatalf("warm inventory = %v, %v", ids, err)
+	}
+	fp.mu.Lock()
+	fp.state[ids[0]] = "pending"
+	fp.mu.Unlock()
+
+	if claimed, ok := b.claimWarm(ctx, AcquireSpec{SessionID: "session-1", UserID: "user-1"}); ok {
+		t.Fatalf("claimed unhealthy sandbox %+v", claimed)
+	}
+	remaining, err := b.listWarm(ctx)
+	if err != nil || len(remaining) != 1 || remaining[0] != ids[0] {
+		t.Fatalf("pending warm inventory = %v, %v; want %s retained", remaining, err, ids[0])
+	}
+}
+
+func TestPruneWarmKeepsStartingAndRemovesFailedSandboxes(t *testing.T) {
+	b, fp := newTestBinder(t)
+	ctx := context.Background()
+	b.WithWarmPool(WarmConfig{Image: "sandbox-image"})
+	for range 2 {
+		if err := b.createOneWarm(ctx); err != nil {
+			t.Fatal(err)
+		}
+	}
+	ids, err := b.listWarm(ctx)
+	if err != nil || len(ids) != 2 {
+		t.Fatalf("warm inventory = %v, %v", ids, err)
+	}
+	fp.mu.Lock()
+	fp.state[ids[0]] = "pending"
+	fp.state[ids[1]] = "failed"
+	fp.mu.Unlock()
+
+	alive := b.pruneDeadWarm(ctx, ids)
+	if len(alive) != 1 || alive[0] != ids[0] {
+		t.Fatalf("alive warm sandboxes = %v, want pending %s", alive, ids[0])
+	}
+	remaining, err := b.listWarm(ctx)
+	if err != nil || len(remaining) != 1 || remaining[0] != ids[0] {
+		t.Fatalf("remaining warm inventory = %v, %v", remaining, err)
 	}
 }
 
@@ -243,6 +298,29 @@ func TestAcquireReusesSameSandbox(t *testing.T) {
 	}
 	if got := fp.creates.Load(); got != 1 {
 		t.Fatalf("expected 1 create, got %d", got)
+	}
+}
+
+func TestAcquireReplacesUnhealthyBoundSandbox(t *testing.T) {
+	b, fp := newTestBinder(t)
+	ctx := context.Background()
+	first, err := b.Acquire(ctx, AcquireSpec{SessionID: "unhealthy", UserID: "u"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	fp.mu.Lock()
+	fp.state[first.ID] = "failed"
+	fp.mu.Unlock()
+
+	replacement, err := b.Acquire(ctx, AcquireSpec{SessionID: "unhealthy", UserID: "u"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if replacement.ID == first.ID {
+		t.Fatalf("reused unhealthy sandbox %s", first.ID)
+	}
+	if got := fp.creates.Load(); got != 2 {
+		t.Fatalf("creates = %d, want 2", got)
 	}
 }
 

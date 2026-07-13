@@ -1011,6 +1011,7 @@ export function CocolaRuntimeProvider({ children }: { children: ReactNode }) {
       const turnSessionId = sessionId;
       const model = selectedModel;
       if (!model) return;
+      if (abortMap.current.has(turnSessionId) || runCursors.current.has(turnSessionId)) return;
       const isInitialTurn = messages.length === 0;
       const assistantMetadata: UiMessageMetadata = {
         model_alias: model.alias,
@@ -1020,6 +1021,7 @@ export function CocolaRuntimeProvider({ children }: { children: ReactNode }) {
         ...(model.iconSlug ? { model_icon_slug: model.iconSlug } : {}),
         model_icon: model.icon,
       };
+      const userMessageId = genId();
       const assistantId = genId();
       const clientRequestId = genId();
       setConvMessages((prev) => {
@@ -1028,7 +1030,12 @@ export function CocolaRuntimeProvider({ children }: { children: ReactNode }) {
           ...prev,
           [turnSessionId]: [
             ...cur,
-            { id: genId(), role: "user", parts: [{ type: "text", text }], createdAt: Date.now() },
+            {
+              id: userMessageId,
+              role: "user",
+              parts: [{ type: "text", text }],
+              createdAt: Date.now(),
+            },
             {
               id: assistantId,
               role: "assistant",
@@ -1094,11 +1101,7 @@ export function CocolaRuntimeProvider({ children }: { children: ReactNode }) {
               body: requestBody,
               signal: ctrl.signal,
             });
-            const upstreamStatus = Number.parseInt(
-              candidate.headers.get("x-cocola-upstream-status") ?? "0",
-              10,
-            );
-            if (candidate.status >= 500 || upstreamStatus >= 500) {
+            if (candidate.status >= 500) {
               await candidate.body?.cancel().catch(() => {});
               if (startAttempts >= CHAT_START_MAX_ATTEMPTS) {
                 throw new Error(`chat start unavailable after ${startAttempts} attempts`);
@@ -1119,6 +1122,69 @@ export function CocolaRuntimeProvider({ children }: { children: ReactNode }) {
         if (isAccountDisabledResponse(res)) {
           redirectAccountDisabled();
           return;
+        }
+        if (res.status === 409) {
+          const conflict = (await res.json().catch(() => ({}))) as { run_id?: string };
+          const runId = conflict.run_id ?? "";
+          if (!runId) throw new Error("conversation already has an active run");
+          const durableAssistantId = `${runId}-assistant`;
+          setConvMessages((prev) => {
+            const current = (prev[turnSessionId] ?? []).filter(
+              (message) => message.id !== userMessageId && message.id !== assistantId,
+            );
+            if (current.some((message) => message.id === durableAssistantId)) {
+              return { ...prev, [turnSessionId]: current };
+            }
+            return {
+              ...prev,
+              [turnSessionId]: [
+                ...current,
+                {
+                  id: durableAssistantId,
+                  role: "assistant",
+                  parts: [],
+                  createdAt: Date.now(),
+                },
+              ],
+            };
+          });
+          const cursor = {
+            conversationId: turnSessionId,
+            runId,
+            assistantId: durableAssistantId,
+          };
+          runCursors.current.set(turnSessionId, cursor);
+          writeRunCursors(runCursors.current);
+          setRunning(turnSessionId, true);
+          try {
+            const history = await fetch(
+              `/api/conversations/${encodeURIComponent(turnSessionId)}/messages`,
+              { cache: "no-store", signal: ctrl.signal },
+            );
+            if (history.ok) {
+              const rows = (await history.json()) as WireMessage[];
+              const loaded = (Array.isArray(rows) ? rows : []).map(
+                (message): UiMessage => ({
+                  id: message.id,
+                  role: message.role,
+                  parts: normalizePersistedParts(message.parts),
+                  metadata: normalizeMetadata(message.metadata),
+                  createdAt: message.created_at
+                    ? new Date(message.created_at).getTime()
+                    : Date.now(),
+                }),
+              );
+              setConvMessages((prev) => ({ ...prev, [turnSessionId]: loaded }));
+            }
+          } catch {
+            // Keep the loaded history and continue with the authoritative Run snapshot.
+          }
+          await followRun(cursor, ctrl);
+          return;
+        }
+        if (!res.ok) {
+          const detail = await res.text().catch(() => "");
+          throw new Error(`chat start rejected (${res.status})${detail ? `: ${detail}` : ""}`);
         }
         if (!res.body) throw new Error("no response body");
 

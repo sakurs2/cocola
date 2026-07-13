@@ -129,14 +129,14 @@ func (p *Provider) CheckpointSession(ctx context.Context, userID, sessionID, san
 	}
 	data, err := p.archive(ctx, sandboxID)
 	if err != nil {
-		return p.withRecordedFailure(ctx, sessionID, err)
+		return p.withRecordedFailure(ctx, userID, sessionID, err)
 	}
 	if len(data) == 0 {
 		return nil
 	}
 	if p.cfg.MaxBytes > 0 && len(data) > p.cfg.MaxBytes {
 		err := fmt.Errorf("archive size %d exceeds max %d", len(data), p.cfg.MaxBytes)
-		return p.withRecordedFailure(ctx, sessionID, err)
+		return p.withRecordedFailure(ctx, userID, sessionID, err)
 	}
 	key := objectKey(userID, sessionID)
 	if _, err := p.minio.PutObject(
@@ -148,9 +148,9 @@ func (p *Provider) CheckpointSession(ctx context.Context, userID, sessionID, san
 		minio.PutObjectOptions{ContentType: "application/zstd"},
 	); err != nil {
 		err = fmt.Errorf("checkpoint upload: %w", err)
-		return p.withRecordedFailure(ctx, sessionID, err)
+		return p.withRecordedFailure(ctx, userID, sessionID, err)
 	}
-	if err := p.recordSuccess(ctx, sessionID, key, len(data)); err != nil {
+	if err := p.recordSuccess(ctx, userID, sessionID, key, len(data)); err != nil {
 		return fmt.Errorf("record checkpoint success: %w", err)
 	}
 	if err := removeSupersededCheckpointObjects(
@@ -161,8 +161,8 @@ func (p *Provider) CheckpointSession(ctx context.Context, userID, sessionID, san
 	return nil
 }
 
-func (p *Provider) withRecordedFailure(ctx context.Context, sessionID string, cause error) error {
-	if err := p.recordFailure(ctx, sessionID, cause.Error()); err != nil {
+func (p *Provider) withRecordedFailure(ctx context.Context, userID, sessionID string, cause error) error {
+	if err := p.recordFailure(ctx, userID, sessionID, cause.Error()); err != nil {
 		return errors.Join(cause, fmt.Errorf("record checkpoint failure: %w", err))
 	}
 	return cause
@@ -212,15 +212,19 @@ func (p *Provider) archive(ctx context.Context, sandboxID string) ([]byte, error
 	return data, nil
 }
 
-func (p *Provider) recordSuccess(ctx context.Context, sessionID, key string, size int) error {
+func (p *Provider) recordSuccess(ctx context.Context, userID, sessionID, key string, size int) error {
+	if userID == "" {
+		return fmt.Errorf("session owner is required")
+	}
 	conn, err := pgx.Connect(ctx, p.cfg.PGDSN)
 	if err != nil {
 		return err
 	}
 	defer func() { _ = conn.Close(ctx) }()
-	_, err = conn.Exec(ctx, `
+	tag, err := conn.Exec(ctx, `
 INSERT INTO session_map (
     session_id,
+    user_id,
     checkpoint_object_key,
     checkpoint_status,
     checkpoint_size_bytes,
@@ -228,7 +232,7 @@ INSERT INTO session_map (
     checkpoint_updated_at,
     updated_at
 )
-VALUES ($1, $2, 'uploaded', $3, '', now(), now())
+VALUES ($1, $2, $3, 'uploaded', $4, '', now(), now())
 ON CONFLICT (session_id)
 DO UPDATE SET checkpoint_object_key = EXCLUDED.checkpoint_object_key,
              checkpoint_status = EXCLUDED.checkpoint_status,
@@ -236,11 +240,21 @@ DO UPDATE SET checkpoint_object_key = EXCLUDED.checkpoint_object_key,
              checkpoint_error = EXCLUDED.checkpoint_error,
              checkpoint_updated_at = EXCLUDED.checkpoint_updated_at,
              updated_at = now()
-`, sessionID, key, size)
-	return err
+WHERE session_map.user_id = EXCLUDED.user_id
+`, sessionID, userID, key, size)
+	if err != nil {
+		return err
+	}
+	if tag.RowsAffected() != 1 {
+		return fmt.Errorf("session owner mismatch")
+	}
+	return nil
 }
 
-func (p *Provider) recordFailure(ctx context.Context, sessionID, reason string) error {
+func (p *Provider) recordFailure(ctx context.Context, userID, sessionID, reason string) error {
+	if userID == "" {
+		return fmt.Errorf("session owner is required")
+	}
 	conn, err := pgx.Connect(ctx, p.cfg.PGDSN)
 	if err != nil {
 		return err
@@ -249,22 +263,30 @@ func (p *Provider) recordFailure(ctx context.Context, sessionID, reason string) 
 	if len(reason) > 1000 {
 		reason = reason[:1000]
 	}
-	_, err = conn.Exec(ctx, `
+	tag, err := conn.Exec(ctx, `
 INSERT INTO session_map (
     session_id,
+    user_id,
     checkpoint_status,
     checkpoint_error,
     checkpoint_updated_at,
     updated_at
 )
-VALUES ($1, 'failed', $2, now(), now())
+VALUES ($1, $2, 'failed', $3, now(), now())
 ON CONFLICT (session_id)
 DO UPDATE SET checkpoint_status = EXCLUDED.checkpoint_status,
              checkpoint_error = EXCLUDED.checkpoint_error,
              checkpoint_updated_at = EXCLUDED.checkpoint_updated_at,
              updated_at = now()
-`, sessionID, reason)
-	return err
+WHERE session_map.user_id = EXCLUDED.user_id
+`, sessionID, userID, reason)
+	if err != nil {
+		return err
+	}
+	if tag.RowsAffected() != 1 {
+		return fmt.Errorf("session owner mismatch")
+	}
+	return nil
 }
 
 func archiveCommand(dirs []string) []string {

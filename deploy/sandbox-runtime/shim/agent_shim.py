@@ -414,18 +414,49 @@ def _redact_mcp_message(message: str, config: dict[str, Any]) -> str:
 
 def _exception_detail(error: BaseException) -> str:
     """Return the first useful leaf instead of a TaskGroup wrapper."""
-    pending: list[BaseException] = [error]
+    leaves = _exception_leaves(error)
     fallback = f"{type(error).__name__}: {error}"
-    while pending:
-        current = pending.pop(0)
-        if isinstance(current, BaseExceptionGroup):
-            pending[0:0] = list(current.exceptions)
-            continue
+    for current in leaves:
         detail = str(current).strip()
         if detail:
             return f"{type(current).__name__}: {detail}"
         fallback = type(current).__name__
     return fallback
+
+
+def _exception_leaves(error: BaseException) -> list[BaseException]:
+    pending: list[BaseException] = [error]
+    leaves: list[BaseException] = []
+    while pending:
+        current = pending.pop(0)
+        if isinstance(current, BaseExceptionGroup):
+            pending[0:0] = list(current.exceptions)
+        else:
+            leaves.append(current)
+    return leaves
+
+
+_RESUME_NOT_FOUND_MARKERS = (
+    "no conversation found with session id",
+    "no conversation found",
+    "session id not found",
+    "could not find session",
+    "no session found",
+    "session not found",
+)
+
+
+def _agent_error_code(error: BaseException, req: dict[str, Any]) -> str:
+    """Normalize SDK compatibility errors at the shim protocol boundary."""
+    if not req.get("resume"):
+        return ""
+    for leaf in _exception_leaves(error):
+        if type(leaf).__name__ != "ProcessError":
+            continue
+        detail = f"{leaf}\n{getattr(leaf, 'stderr', '')}".lower()
+        if any(marker in detail for marker in _RESUME_NOT_FOUND_MARKERS):
+            return "RESUME_NOT_FOUND"
+    return ""
 
 
 def _sanitize_agent_error(error: Exception, req: dict[str, Any]) -> str:
@@ -536,7 +567,10 @@ def main() -> int:
     try:
         return asyncio.run(_run(req))
     except Exception as e:  # noqa: BLE001
-        _emit({"type": "error", "stage": "run", "error": _sanitize_agent_error(e, req)})
+        event = {"type": "error", "stage": "run", "error": _sanitize_agent_error(e, req)}
+        if code := _agent_error_code(e, req):
+            event["code"] = code
+        _emit(event)
         return 1
 
 

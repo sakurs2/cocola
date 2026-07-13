@@ -49,7 +49,7 @@ type runController struct {
 	mergeWindow         time.Duration
 	draftInterval       time.Duration
 	finalizeRetry       time.Duration
-	startMu             sync.Mutex
+	mutationMu          sync.Mutex
 	mu                  sync.Mutex
 	live                map[string]*liveRun
 	shutting            atomic.Bool
@@ -151,7 +151,7 @@ func (a *API) chat(w http.ResponseWriter, r *http.Request) {
 		ClientRequestID: requestID, Status: chatrun.StatusRunning,
 		StartedAt: startedAt, LastActivityAt: startedAt,
 	}
-	a.runs.startMu.Lock()
+	a.runs.mutationMu.Lock()
 	result, err := a.runs.store.Start(r.Context(), chatrun.StartInput{
 		Run: run,
 		Conversation: convo.Conversation{
@@ -177,7 +177,7 @@ func (a *API) chat(w http.ResponseWriter, r *http.Request) {
 			live = a.runs.getLive(run.ID)
 		}
 	}
-	a.runs.startMu.Unlock()
+	a.runs.mutationMu.Unlock()
 	if errors.Is(err, chatrun.ErrNotFound) {
 		writeErr(w, http.StatusNotFound, "NOT_FOUND", "conversation not found")
 		return

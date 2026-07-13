@@ -29,7 +29,6 @@ through the prompt channel -- so this provider never puts secrets in the Request
 from __future__ import annotations
 
 import json
-import re
 import secrets
 import time
 from collections.abc import AsyncIterator
@@ -48,47 +47,10 @@ log = get_logger("cocola.agent-runtime.shim")
 # exec -i` STDIO -- never a listening port.
 SHIM_ENTRYPOINT = "/opt/cocola/shim/entrypoint.sh"
 
-# Substrings the claude CLI / Agent SDK emit when asked to `--resume` a session
-# id that has no on-disk conversation. The session_map is a pure INDEX (it only
-# records which id to reopen); the SUFFICIENT condition for resume is the
-# on-disk ~/.claude session file (ADR-0008). When the sandbox is fresh/recycled
-# or the file was GC'd, a stored id goes dangling and the shim exits non-zero
-# with one of these markers, surfacing an opaque "shim exited 1" to the user.
-# Matching one lets the provider degrade gracefully: forget the stale id and
-# retry the SAME turn as a fresh conversation (no --resume) -- see query().
-_RESUME_NOT_FOUND_MARKERS = (
-    "no conversation found with session id",
-    "no conversation found",
-    "session id not found",
-    "could not find session",
-    "no session found",
-    "session not found",
-)
-
-
-def _looks_like_resume_not_found(text: str) -> bool:
-    """True when *text* (a shim error / stderr tail) signals a dangling resume id."""
-    if not text:
-        return False
-    low = text.lower()
-    return any(marker in low for marker in _RESUME_NOT_FOUND_MARKERS)
-
-
-_SANDBOX_TIMEOUT_RE = re.compile(
-    r"(context deadline exceeded|deadlineexceeded|timed out|timeout)",
-    re.IGNORECASE,
-)
-
 
 def _user_facing_exec_error(raw: str) -> str:
-    """Map low-level sandbox transport errors to text safe to show users."""
+    """Return the actual sandbox error without guessing which tool caused it."""
     text = (raw or "").strip()
-    if _SANDBOX_TIMEOUT_RE.search(text):
-        return (
-            "工具执行超时：这次沙箱里的命令运行太久了，可能是网页加载、浏览器截图或脚本没有在"
-            "限定时间内结束。请缩小任务范围，或让浏览器脚本设置较短 timeout、使用 "
-            "waitUntil='domcontentloaded'，并确保最后关闭浏览器。"
-        )
     return f"sandbox exec failed: {text or 'unknown error'}"
 
 
@@ -127,17 +89,25 @@ def _shim_event_to_agent_events(ev: dict) -> list[AgentEvent]:
             )
         ]
     if t == "result":
+        result = AgentEvent(
+            kind="result",
+            data={
+                "is_error": bool(ev.get("is_error", False)),
+                "num_turns": ev.get("num_turns"),
+                "total_cost_usd": ev.get("total_cost_usd"),
+                "session_id": ev.get("session_id"),
+                "result": ev.get("result"),
+            },
+        )
+        if not result.data["is_error"]:
+            return [result]
+        message = str(result.data["result"] or "Agent execution failed")
         return [
+            result,
             AgentEvent(
-                kind="result",
-                data={
-                    "is_error": bool(ev.get("is_error", False)),
-                    "num_turns": ev.get("num_turns"),
-                    "total_cost_usd": ev.get("total_cost_usd"),
-                    "session_id": ev.get("session_id"),
-                    "result": ev.get("result"),
-                },
-            )
+                kind="error",
+                data={"error": message},
+            ),
         ]
     if t == "system":
         return [AgentEvent(kind="system", data={"subtype": ev.get("subtype", "")})]
@@ -158,10 +128,13 @@ def _shim_event_to_agent_events(ev: dict) -> list[AgentEvent]:
             )
         ]
     if t == "error":
+        data = {"stage": ev.get("stage", ""), "error": ev.get("error", "")}
+        if ev.get("code"):
+            data["code"] = ev["code"]
         return [
             AgentEvent(
                 kind="error",
-                data={"stage": ev.get("stage", ""), "error": ev.get("error", "")},
+                data=data,
             )
         ]
     # "start", "done", and unknown types are handled by the caller / dropped.
@@ -223,7 +196,7 @@ class _AttemptState:
 
     saw_content: bool = False
     saw_error: bool = False
-    error_text: str = ""  # concatenated error/stderr text, for resume-not-found detection
+    error_codes: set[str] = field(default_factory=set)
     last_session_id: str | None = None
     errors: list[AgentEvent] = field(default_factory=list)
 
@@ -364,7 +337,7 @@ class InSandboxShimProvider:
             resume
             and state.saw_error
             and not state.saw_content
-            and _looks_like_resume_not_found(state.error_text)
+            and "RESUME_NOT_FOUND" in state.error_codes
         ):
             log.info(
                 "resume id dangling; forgetting it and retrying without resume",
@@ -398,9 +371,9 @@ class InSandboxShimProvider:
         for err in state.errors:
             yield err
 
-        # Persist the session<->claude-session index for a later --resume. A
-        # Postgres-backed map makes this survive an agent-runtime restart; the
-        # write is best-effort so a transient index fault never fails the turn.
+        # Persist the session<->claude-session index before reporting success.
+        # Without this write the next turn cannot resume the conversation, so
+        # it is part of the user-visible result rather than best-effort metadata.
         if state.last_session_id:
             try:
                 await self._session_map.put(
@@ -409,11 +382,19 @@ class InSandboxShimProvider:
                     user_id=options.user_id,
                     sandbox_id=options.sandbox_id or "",
                 )
-            except Exception as exc:  # noqa: BLE001 - index write is best-effort
-                log.warning(
+            except Exception as exc:  # noqa: BLE001 - storage boundary
+                state.saw_error = True
+                log.error(
                     "session-map put failed",
                     session_id=options.session_id,
                     error=repr(exc),
+                )
+                yield AgentEvent(
+                    kind="error",
+                    data={
+                        "code": "SESSION_INDEX_WRITE_FAILED",
+                        "error": "Session continuity could not be saved",
+                    },
                 )
 
         yield AgentEvent(
@@ -444,8 +425,9 @@ class InSandboxShimProvider:
         def _record_error(ev: AgentEvent, text: str) -> None:
             state.saw_error = True
             state.errors.append(ev)
-            if text:
-                state.error_text = (state.error_text + "\n" + text)[-4000:]
+            code = str(ev.data.get("code") or "").strip()
+            if code:
+                state.error_codes.add(code)
 
         try:
             async for chunk in self._executor.exec_stream(
@@ -477,7 +459,7 @@ class InSandboxShimProvider:
                     )
                     continue
                 if chunk.kind == "exit":
-                    if chunk.exit_code != 0:
+                    if chunk.exit_code != 0 and not state.saw_error:
                         _record_error(
                             AgentEvent(
                                 kind="error",

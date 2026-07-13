@@ -75,8 +75,9 @@ const (
 
 // HealthStatus is returned by Health().
 type HealthStatus struct {
-	Healthy bool
-	Detail  string
+	Healthy      bool
+	Transitional bool // may become healthy without recreating the sandbox
+	Detail       string
 }
 
 // ErrSandboxNotResumable indicates a Resume was rejected because the sandbox is
