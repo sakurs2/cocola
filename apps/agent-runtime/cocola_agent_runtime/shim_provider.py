@@ -1,9 +1,9 @@
-"""InSandboxShimProvider -- the Route A agent provider (ADR-0009).
+"""InSandboxShimProvider -- runtime-neutral Sandbox Shim provider.
 
 Where the legacy central-SDK path (Route B, decommissioned) spawned the `claude`
 CLI *on the agent-runtime host* and forwarded only bash/file tools into a sandbox,
-this provider runs the WHOLE Claude Code brain inside the user's own container. It
-does that by driving the in-sandbox stdio shim
+this provider runs the selected Agent Runtime inside the user's own container.
+It does that by driving the in-sandbox stdio shim
 (`/opt/cocola/shim/entrypoint.sh`, see deploy/sandbox-runtime/shim/agent_shim.py):
 
     stdin   <- one JSON Request {prompt, system_prompt?, max_turns, resume?}
@@ -21,9 +21,9 @@ tool_use, tool_result, ...) and we must relay them as they arrive, not wait for
 the turn to finish. We therefore consume `SandboxExecutor.exec_stream` and
 reassemble whole NDJSON lines from byte chunks that may split mid-line.
 
-Security note (ADR-0009 sec.2): credentials (ANTHROPIC_BASE_URL / AUTH_TOKEN /
-CLAUDE_CONFIG_DIR) are injected into the sandbox ENV at creation time, never
-through the prompt channel -- so this provider never puts secrets in the Request.
+Security note (ADR-0009 sec.2): runtime credentials are injected into the
+per-turn exec environment, never through the prompt channel, so this provider
+never puts secrets in the request or logs.
 """
 
 from __future__ import annotations
@@ -127,6 +127,20 @@ def _shim_event_to_agent_events(ev: dict) -> list[AgentEvent]:
                 },
             )
         ]
+    if t == "progress":
+        return [
+            AgentEvent(
+                kind="progress",
+                data={
+                    "id": str(ev.get("id") or "todo-list"),
+                    "items": json.dumps(
+                        ev.get("items") if isinstance(ev.get("items"), list) else [],
+                        ensure_ascii=False,
+                        separators=(",", ":"),
+                    ),
+                },
+            )
+        ]
     if t == "error":
         data = {"stage": ev.get("stage", ""), "error": ev.get("error", "")}
         if ev.get("code"):
@@ -198,6 +212,7 @@ class _AttemptState:
     saw_error: bool = False
     error_codes: set[str] = field(default_factory=set)
     last_session_id: str | None = None
+    persisted_session_id: str | None = None
     errors: list[AgentEvent] = field(default_factory=list)
 
 
@@ -226,12 +241,12 @@ def _provider_trace_event(
 class InSandboxShimProvider:
     """AgentProvider that runs the agent inside the bound sandbox via the shim.
 
-    The resume binding (cocola session_id -> claude_session_id) lives in a
+    The resume binding (conversation/runtime -> native session ID) lives in a
     `SessionMap`. With a Postgres-backed map it survives an agent-runtime
-    restart, so a follow-up turn `--resume`s the on-disk Claude session (restored
-    from a MinIO checkpoint when the sandbox was replaced). The map is a pure INDEX: the
-    SUFFICIENT condition for resume is the on-disk `~/.claude` session file; the
-    map only records which id to reopen. Production injects Postgres; the
+    restart, so a follow-up turn resumes the on-disk native session (restored
+    from a MinIO checkpoint when the sandbox was replaced). The map is a pure
+    index: the on-disk `~/.claude` or `~/.codex` state is the source of truth;
+    the map only records which ID to reopen. Production injects Postgres; the
     in-process default exists only for isolated provider tests.
     """
 
@@ -249,8 +264,14 @@ class InSandboxShimProvider:
     def _build_request(self, prompt: str, options: AgentOptions, resume: str | None) -> str:
         req: dict = {
             "prompt": prompt,
+            "runtime_id": options.runtime_id,
+            "conversation_id": options.session_id,
             "max_turns": options.max_turns or self._default_max_turns,
         }
+        if options.model_alias:
+            req["model"] = options.model_alias
+        if options.traceparent:
+            req["traceparent"] = options.traceparent
         if options.system_prompt:
             req["system_prompt"] = options.system_prompt
         if options.mcp_servers:
@@ -262,8 +283,8 @@ class InSandboxShimProvider:
     def _model_env(self, options: AgentOptions) -> dict[str, str]:
         """Per-turn exec env for the shim.
 
-        Carries the model alias and, when the gateway minted a per-user token
-        for this turn, ANTHROPIC_AUTH_TOKEN. This exec env is applied on EVERY
+        Carries the model alias and, when the gateway minted a per-user token,
+        the selected runtime's auth variable. This exec env is applied on every
         turn's `exec_stream`, so cold, warm and reused sandboxes authenticate to
         the llm-gateway AS THE USER without a static provisioning credential --
         the warm-pool-safe injection point (ADR-0009 keeps creds in env, never
@@ -271,14 +292,18 @@ class InSandboxShimProvider:
         """
         env: dict[str, str] = {}
         alias = (options.model_alias or "").strip()
-        if alias:
+        if alias and options.runtime_id == "codex":
+            env["CODEX_MODEL"] = alias
+        elif alias:
             env["ANTHROPIC_MODEL"] = alias
             env["ANTHROPIC_SMALL_FAST_MODEL"] = alias
         token = (options.auth_token or "").strip()
-        if token:
+        if token and options.runtime_id == "codex":
+            env["CODEX_API_KEY"] = token
+        elif token:
             env["ANTHROPIC_AUTH_TOKEN"] = token
         traceparent = (options.traceparent or "").strip()
-        if traceparent:
+        if traceparent and options.runtime_id != "codex":
             # Claude/Anthropic parses this variable as newline-separated
             # ``Header-Name: value`` entries, not as JSON.
             env["ANTHROPIC_CUSTOM_HEADERS"] = f"traceparent: {traceparent}"
@@ -296,8 +321,8 @@ class InSandboxShimProvider:
         silently falling back (the composition root decides routing, not us).
 
         Graceful resume degradation: if a stored resume id is *dangling* (the
-        sandbox's on-disk ~/.claude has no such session -- fresh/recycled box or
-        a GC'd session file), the shim exits non-zero with a "no conversation
+        sandbox's restored runtime state has no such session), the shim exits
+        non-zero with a "no conversation
         found" marker BEFORE emitting any content. Rather than surfacing an
         opaque "shim exited 1", we forget the stale index entry and retry the
         SAME turn once as a fresh conversation (no --resume). The retry is only
@@ -312,8 +337,10 @@ class InSandboxShimProvider:
             yield AgentEvent(kind="done", data={})
             return
 
-        binding = await self._session_map.get_binding(options.session_id, user_id=options.user_id)
-        resume = binding.claude_session_id if binding else None
+        binding = await self._session_map.get_binding(
+            options.session_id, user_id=options.user_id, runtime_id=options.runtime_id
+        )
+        resume = binding.runtime_session_id if binding else None
         if binding and binding.sandbox_id and binding.sandbox_id != options.sandbox_id:
             log.info(
                 "session sandbox changed; trying stored resume id",
@@ -337,7 +364,7 @@ class InSandboxShimProvider:
             resume
             and state.saw_error
             and not state.saw_content
-            and "RESUME_NOT_FOUND" in state.error_codes
+            and "SESSION_NOT_FOUND" in state.error_codes
         ):
             log.info(
                 "resume id dangling; forgetting it and retrying without resume",
@@ -345,7 +372,11 @@ class InSandboxShimProvider:
                 resume=resume,
             )
             try:
-                await self._session_map.delete(options.session_id, user_id=options.user_id)
+                await self._session_map.delete(
+                    options.session_id,
+                    user_id=options.user_id,
+                    runtime_id=options.runtime_id,
+                )
             except Exception as exc:  # noqa: BLE001 - index delete is best-effort
                 log.warning(
                     "session-map delete failed",
@@ -371,17 +402,13 @@ class InSandboxShimProvider:
         for err in state.errors:
             yield err
 
-        # Persist the session<->claude-session index before reporting success.
+        # Persist the conversation<->native-session index before reporting success.
         # Without this write the next turn cannot resume the conversation, so
         # it is part of the user-visible result rather than best-effort metadata.
-        if state.last_session_id:
+        if state.last_session_id and state.persisted_session_id != state.last_session_id:
             try:
-                await self._session_map.put(
-                    options.session_id,
-                    state.last_session_id,
-                    user_id=options.user_id,
-                    sandbox_id=options.sandbox_id or "",
-                )
+                await self._persist_session_id(options, state.last_session_id)
+                state.persisted_session_id = state.last_session_id
             except Exception as exc:  # noqa: BLE001 - storage boundary
                 state.saw_error = True
                 log.error(
@@ -403,6 +430,15 @@ class InSandboxShimProvider:
         )
         if state.saw_error:
             log.info("shim turn completed with errors", session_id=options.session_id)
+
+    async def _persist_session_id(self, options: AgentOptions, runtime_session_id: str) -> None:
+        await self._session_map.put(
+            options.session_id,
+            runtime_session_id,
+            user_id=options.user_id,
+            sandbox_id=options.sandbox_id or "",
+            runtime_id=options.runtime_id,
+        )
 
     async def _stream_attempt(
         self,
@@ -486,6 +522,18 @@ class InSandboxShimProvider:
                         continue
                     if not isinstance(ev, dict):
                         continue
+                    if ev.get("type") == "start" and ev.get("session_id"):
+                        state.last_session_id = str(ev["session_id"])
+                        try:
+                            await self._persist_session_id(options, state.last_session_id)
+                            state.persisted_session_id = state.last_session_id
+                        except Exception as exc:  # noqa: BLE001 - retry after the stream completes
+                            log.warning(
+                                "early session-map put failed; will retry at turn end",
+                                session_id=options.session_id,
+                                error=repr(exc),
+                            )
+                        continue
                     if ev.get("type") == "done":
                         if ev.get("session_id"):
                             state.last_session_id = ev["session_id"]
@@ -507,7 +555,7 @@ class InSandboxShimProvider:
                 try:
                     ev = json.loads(tail)
                     if isinstance(ev, dict):
-                        if ev.get("type") == "done" and ev.get("session_id"):
+                        if ev.get("type") in {"start", "done"} and ev.get("session_id"):
                             state.last_session_id = ev["session_id"]
                         elif ev.get("type") != "done":
                             for out in _shim_event_to_agent_events(ev):

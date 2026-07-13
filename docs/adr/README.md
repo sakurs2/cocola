@@ -44,3 +44,4 @@ Code shows _what_ and _how_. ADRs preserve _why_ — invaluable when:
 | 0019 | Single-Gateway reconnectable chat runs                                                                | Accepted           |
 | 0020 | Configuration ownership and reload boundaries                                                         | Accepted           |
 | 0021 | Standalone CLI and release-asset bootstrap installer                                                  | Accepted           |
+| 0022 | Built-in Agent Runtime registry and immutable conversation runtime                                    | Accepted           |

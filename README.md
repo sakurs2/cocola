@@ -11,7 +11,7 @@
 
 ## 技术栈
 
-- **Agent 核心**：Claude Code Agent SDK
+- **Agent 核心**：Claude Code Agent SDK + OpenAI Codex SDK（对话创建时选择）
 - **沙箱**：K8s（默认 runc + 用户命名空间，零节点安装;gVisor 为可选增强;可通过 `SandboxProvider` 抽象切换至 Docker / E2B / CubeSandbox）
 - **后端**：Go（Gateway / Sandbox Manager / Admin API）+ Python（Agent Runtime / LLM Gateway）
 - **前端**：Next.js (App Router) + Tailwind CSS 3 + TypeScript
@@ -177,13 +177,13 @@ make dev   # dev 调试栈：OpenSandbox runtime + 本机原生 cocola 服务
 >
 > **真实 LLM 链路（Route A，ADR-0009）**：agent-runtime 必须通过
 > `COCOLA_SANDBOX_ADDR` 连接 sandbox-manager，并使用 `InSandboxShimProvider`。
-> 整个 Claude Code 大脑跑在用户自己的沙箱里，
-> agent-runtime 只做控制面路由。沙箱 provisioning 注入模型地址和 alias；用户 token
+> Claude Code 或 Codex 整体运行在用户自己的沙箱里，Runtime 在对话首次运行时确定且
+> 不可中途切换；agent-runtime 只做控制面路由。沙箱 provisioning 注入模型地址和 alias；用户 token
 > 由 Gateway 随每个 Run 的 gRPC metadata 下发，并在每次 sandbox exec 时通过 ENV
 > 注入，绝不进入 prompt，也不在 Warm Pool 中持久保存。
 >
 > ```bash
-> # agent-runtime 绑定 sandbox-manager；沙箱内 claude CLI 经注入的 ENV 回连 llm-gateway
+> # agent-runtime 绑定 sandbox-manager；沙箱内 claude/codex CLI 经注入的 ENV 回连 llm-gateway
 > export COCOLA_SANDBOX_ADDR=127.0.0.1:50051
 > export COCOLA_SANDBOX_IMAGE=cocola/sandbox-runtime:dev
 > export COCOLA_SANDBOX_LLM_BASE_URL=http://127.0.0.1:8080

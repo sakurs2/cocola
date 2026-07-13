@@ -4,7 +4,7 @@ version = "0.0.1"
 description = "Generated gRPC/protobuf Python stubs for cocola (buf output). Do not edit by hand; regenerate with `make proto-gen-py`."
 requires-python = ">=3.11"
 dependencies = [
-    "grpcio>=1.64",
+    "grpcio>=1.73.1",
     "protobuf>=6.30",
 ]
 

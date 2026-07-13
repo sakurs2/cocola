@@ -52,12 +52,14 @@ export function SessionStatusPanel({
   const skills = status.components.filter((component) => component.kind === "skill");
   const mcps = status.components.filter((component) => component.kind === "mcp");
   const connected = mcps.filter((component) => component.status === "connected").length;
+  const configured = mcps.filter((component) => component.status === "configured").length;
   const connecting = mcps.filter((component) => component.status === "pending").length;
   const unavailable = mcps.filter((component) =>
     ["failed", "needs-auth", "timeout", "unavailable"].includes(component.status),
   ).length;
   const statusCounts = [
     connected > 0 ? `${connected} ready` : "",
+    configured > 0 ? `${configured} configured` : "",
     connecting > 0 ? `${connecting} connecting` : "",
     unavailable > 0 ? `${unavailable} unavailable` : "",
   ].filter(Boolean);
@@ -247,7 +249,13 @@ function EnvironmentComponentRow({
           <p className="mt-1 text-xs text-muted-foreground">Version {component.version}</p>
         ) : component.kind === "mcp" && component.status === "connected" ? (
           <p className="mt-1 text-xs text-muted-foreground">
-            {component.toolCount} tool{component.toolCount === 1 ? "" : "s"} available
+            {component.toolCount > 0
+              ? `${component.toolCount} tool${component.toolCount === 1 ? "" : "s"} available`
+              : "Connection verified"}
+          </p>
+        ) : component.kind === "mcp" && component.status === "configured" ? (
+          <p className="mt-1 text-xs text-muted-foreground">
+            Connection will be verified on first use
           </p>
         ) : null}
       </div>
@@ -278,6 +286,9 @@ function ComponentStatusIcon({ component }: { component: EnvironmentComponent })
   if (component.status === "connected" || component.status === "loaded") {
     return <CheckCircle className="size-4 text-emerald-600" weight="duotone" />;
   }
+  if (component.status === "configured") {
+    return <PlugsConnected className="size-4 text-muted-foreground" weight="duotone" />;
+  }
   return <WarningCircle className="size-4 text-amber-600" weight="duotone" />;
 }
 
@@ -296,6 +307,8 @@ function environmentSummary(status: EnvironmentStatus): string {
   }
   const connected = mcps.filter((component) => component.status === "connected").length;
   if (connected > 0) parts.push(`${connected} MCP ready`);
+  const configured = mcps.filter((component) => component.status === "configured").length;
+  if (configured > 0) parts.push(`${configured} MCP configured`);
   return parts.length > 0 ? parts.join(" · ") : "Environment ready";
 }
 
@@ -305,6 +318,8 @@ function componentStatusLabel(component: EnvironmentComponent): string {
       return "Loaded";
     case "connected":
       return "Connected";
+    case "configured":
+      return "Configured";
     case "needs-auth":
       return "Needs auth";
     case "timeout":

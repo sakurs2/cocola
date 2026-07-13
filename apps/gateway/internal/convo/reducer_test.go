@@ -83,3 +83,31 @@ func TestReducerUpsertsVersionedEnvironmentSnapshotAsFirstPart(t *testing.T) {
 		t.Fatalf("unknown future field was dropped: %#v", component)
 	}
 }
+
+func TestReducerUpsertsProgressByID(t *testing.T) {
+	r := NewReducer()
+	r.Apply("progress", map[string]string{
+		"id":    "plan",
+		"items": `[{"text":"inspect","completed":false}]`,
+	})
+	r.Apply("progress", map[string]string{
+		"id":    "other",
+		"items": `[{"text":"separate","completed":false}]`,
+	})
+	r.Apply("progress", map[string]string{
+		"id":    "plan",
+		"items": `[{"text":"inspect","completed":true}]`,
+	})
+
+	parts := r.Parts()
+	if len(parts) != 2 {
+		t.Fatalf("progress parts = %d, want 2: %+v", len(parts), parts)
+	}
+	if parts[0].Type != PartProgress || parts[0].ProgressID != "plan" ||
+		string(parts[0].ProgressItems) != `[{"text":"inspect","completed":true}]` {
+		t.Fatalf("progress was not replaced by id: %+v", parts[0])
+	}
+	if parts[1].ProgressID != "other" {
+		t.Fatalf("independent progress item was overwritten: %+v", parts[1])
+	}
+}

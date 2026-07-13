@@ -99,7 +99,7 @@ services:
       COCOLA_MINIO_ACCESS_KEY: cocola
       COCOLA_MINIO_SECRET_KEY: "${COCOLA_MINIO_ROOT_PASSWORD}"
       COCOLA_MINIO_BUCKET: cocola
-      COCOLA_SESSION_CHECKPOINT_DIRS: "/home/cocola/.claude,/workspace/uploads,/workspace/outputs,/workspace/persist"
+      COCOLA_SESSION_CHECKPOINT_DIRS: "/home/cocola/.claude,/home/cocola/.codex,/workspace/uploads,/workspace/outputs,/workspace/persist"
       COCOLA_SESSION_CHECKPOINT_TIMEOUT_SECS: "60"
       COCOLA_SESSION_CHECKPOINT_MAX_BYTES: "268435456"
       COCOLA_SANDBOX_IMAGE: "${COCOLA_IMAGE_REGISTRY}/cocola-sandbox-runtime:${COCOLA_VERSION}"

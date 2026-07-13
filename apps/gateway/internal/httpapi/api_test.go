@@ -99,6 +99,71 @@ func TestHealthz(t *testing.T) {
 	}
 }
 
+func TestAgentRuntimeCatalog(t *testing.T) {
+	api := newConfiguredTestAPI(&fakeStreamer{}, auth.NewVerifier(auth.Config{}), logger.Must()).
+		WithAgentRuntimes([]agent.Runtime{
+			{ID: "claude-code", Label: "Claude Code", ModelProtocol: "anthropic-messages", IsDefault: true},
+			{ID: "codex", Label: "Codex", ModelProtocol: "openai-responses"},
+		})
+	recorder := httptest.NewRecorder()
+	api.Handler().ServeHTTP(recorder, httptest.NewRequest(http.MethodGet, "/v1/agent-runtimes", nil))
+
+	if recorder.Code != http.StatusOK {
+		t.Fatalf("runtime catalog status = %d, body=%s", recorder.Code, recorder.Body.String())
+	}
+	body := recorder.Body.String()
+	for _, want := range []string{`"id":"claude-code"`, `"id":"codex"`, `"model_protocol":"openai-responses"`} {
+		if !strings.Contains(body, want) {
+			t.Fatalf("runtime catalog missing %s: %s", want, body)
+		}
+	}
+}
+
+func TestChatRuntimeIsImmutableAndMismatchHasNoWrites(t *testing.T) {
+	streamer := &fakeStreamer{script: []agent.Event{{Kind: "done"}}}
+	conversations := convo.NewMemory()
+	api := newConfiguredTestAPIWithConvo(
+		streamer,
+		auth.NewVerifier(auth.Config{}),
+		logger.Must(),
+		conversations,
+	).WithAgentRuntimes([]agent.Runtime{
+		{ID: "claude-code", Label: "Claude Code", ModelProtocol: "anthropic-messages", IsDefault: true},
+		{ID: "codex", Label: "Codex", ModelProtocol: "openai-responses"},
+	})
+	handler := api.Handler()
+
+	first := httptest.NewRecorder()
+	handler.ServeHTTP(first, httptest.NewRequest(http.MethodPost, "/v1/chat", strings.NewReader(
+		`{"prompt":"hello","session_id":"conversation-1","client_request_id":"request-1","runtime_id":"codex"}`,
+	)))
+	if first.Code != http.StatusOK {
+		t.Fatalf("first chat status = %d, body=%s", first.Code, first.Body.String())
+	}
+	if streamer.gotQuery.RuntimeID != "codex" {
+		t.Fatalf("forwarded runtime = %q, want codex", streamer.gotQuery.RuntimeID)
+	}
+	before, err := conversations.GetMessages(context.Background(), "conversation-1", auth.DevIdentity.UserID)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	mismatch := httptest.NewRecorder()
+	handler.ServeHTTP(mismatch, httptest.NewRequest(http.MethodPost, "/v1/chat", strings.NewReader(
+		`{"prompt":"change runtime","session_id":"conversation-1","client_request_id":"request-2","runtime_id":"claude-code"}`,
+	)))
+	if mismatch.Code != http.StatusConflict || !strings.Contains(mismatch.Body.String(), "RUNTIME_MISMATCH") {
+		t.Fatalf("runtime mismatch = %d, body=%s", mismatch.Code, mismatch.Body.String())
+	}
+	after, err := conversations.GetMessages(context.Background(), "conversation-1", auth.DevIdentity.UserID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(after) != len(before) {
+		t.Fatalf("runtime mismatch wrote messages: before=%d after=%d", len(before), len(after))
+	}
+}
+
 func TestChatRequiresRunStore(t *testing.T) {
 	h := New(&fakeStreamer{}, auth.NewVerifier(auth.Config{}), logger.Must()).Handler()
 	rec := httptest.NewRecorder()

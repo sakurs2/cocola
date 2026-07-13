@@ -70,6 +70,35 @@ func TestMemoryStartDoesNotCrossConversationOwner(t *testing.T) {
 	}
 }
 
+func TestMemoryStartRejectsRuntimeChangeWithoutWrites(t *testing.T) {
+	ctx := context.Background()
+	conversations := convo.NewMemory()
+	store := NewMemory(conversations)
+	first := testStartInput("run-1", "request-1", "user-1", "conversation-1")
+	first.Conversation.RuntimeID = "codex"
+	if _, err := store.Start(ctx, first); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := store.Finalize(ctx, FinalizeInput{
+		RunID: "run-1", UserID: "user-1", Status: StatusSuccess,
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	mismatch := testStartInput("run-2", "request-2", "user-1", "conversation-1")
+	mismatch.Conversation.RuntimeID = "claude-code"
+	if _, err := store.Start(ctx, mismatch); !errors.Is(err, ErrRuntimeMismatch) {
+		t.Fatalf("runtime change error = %v, want runtime mismatch", err)
+	}
+	messages, err := conversations.GetMessages(ctx, "conversation-1", "user-1")
+	if err != nil || len(messages) != 1 || messages[0].ID != "run-1-user" {
+		t.Fatalf("messages after runtime mismatch = %+v, %v", messages, err)
+	}
+	if _, err := store.GetOwned(ctx, "run-2", "user-1"); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("mismatched run exists: %v", err)
+	}
+}
+
 func TestMemoryDraftAndTerminalStateAreStable(t *testing.T) {
 	ctx := context.Background()
 	conversations := convo.NewMemory()

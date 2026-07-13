@@ -60,6 +60,7 @@ func WarmConfigFromEnv() WarmConfig {
 	env := map[string]string{}
 	if v := strings.TrimSpace(os.Getenv("COCOLA_SANDBOX_LLM_BASE_URL")); v != "" {
 		env["ANTHROPIC_BASE_URL"] = v
+		env["COCOLA_LLM_BASE_URL"] = v
 	}
 	if v := strings.TrimSpace(os.Getenv("COCOLA_SANDBOX_MODEL_ALIAS")); v != "" {
 		env["ANTHROPIC_MODEL"] = v

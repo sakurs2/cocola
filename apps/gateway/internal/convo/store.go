@@ -22,7 +22,12 @@ import (
 // ErrNotFound is returned when a conversation lookup misses (or the caller does
 // not own it). Handlers map it to a 404 so ownership misses are indistinguishable
 // from "does not exist" (no cross-user existence oracle).
-var ErrNotFound = errors.New("convo: not found")
+var (
+	ErrNotFound        = errors.New("convo: not found")
+	ErrRuntimeMismatch = errors.New("convo: runtime mismatch")
+)
+
+const DefaultRuntimeID = "claude-code"
 
 // PartType enumerates the UiPart shapes the web client renders. These string
 // values are the WIRE CONTRACT with apps/web/app/runtime-provider.tsx (UiPart):
@@ -33,6 +38,7 @@ const (
 	PartToolCall    = "tool-call"
 	PartFile        = "file"
 	PartEnvironment = "environment"
+	PartProgress    = "progress"
 )
 
 // Part mirrors the frontend UiPart union. A text/reasoning part uses Text; a
@@ -67,6 +73,10 @@ type Part struct {
 	// environment: an opaque, versioned snapshot. Keeping the raw JSON intact
 	// lets newer component kinds/fields survive an older gateway unchanged.
 	Environment json.RawMessage `json:"environment,omitempty"`
+
+	// progress: one adapter-owned replaceable progress snapshot.
+	ProgressID    string          `json:"progressId,omitempty"`
+	ProgressItems json.RawMessage `json:"items,omitempty"`
 }
 
 // Conversation is one row in the sidebar. ID reuses the frontend session_id.
@@ -77,6 +87,7 @@ type Conversation struct {
 	Title     string    `json:"title"`
 	ChatType  string    `json:"chat_type"`
 	Hidden    bool      `json:"hidden"`
+	RuntimeID string    `json:"runtime_id"`
 	CreatedAt time.Time `json:"created_at"`
 	UpdatedAt time.Time `json:"updated_at"`
 }

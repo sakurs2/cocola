@@ -34,9 +34,15 @@ func (m *Memory) UpsertConversation(_ context.Context, c Conversation) error {
 	if c.ChatType == "" {
 		c.ChatType = "chat"
 	}
+	if c.RuntimeID == "" {
+		c.RuntimeID = DefaultRuntimeID
+	}
 	if existing, ok := m.convs[c.ID]; ok {
 		if c.UserID != "" && existing.UserID != c.UserID {
 			return ErrNotFound
+		}
+		if existing.RuntimeID != c.RuntimeID {
+			return ErrRuntimeMismatch
 		}
 		// Refresh updated_at only; keep the original title (MVP: never overwrite).
 		existing.UpdatedAt = c.UpdatedAt

@@ -924,12 +924,12 @@ func (p *Postgres) DeleteLLMProvider(ctx context.Context, id string) error {
 	return nil
 }
 
-const llmModelCols = `alias, provider_id, real_model, runtime, label, icon_type, icon_slug, icon_url, enabled, visible, is_default, sort_order, created_at, updated_at`
+const llmModelCols = `alias, provider_id, real_model, label, icon_type, icon_slug, icon_url, enabled, visible, is_default, sort_order, created_at, updated_at`
 
 func scanLLMModelRoute(row pgx.Row) (LLMModelRoute, error) {
 	var route LLMModelRoute
-	err := row.Scan(&route.Alias, &route.ProviderID, &route.RealModel, &route.Runtime,
-		&route.Label, &route.IconType, &route.IconSlug, &route.IconURL, &route.Enabled,
+	err := row.Scan(&route.Alias, &route.ProviderID, &route.RealModel, &route.Label,
+		&route.IconType, &route.IconSlug, &route.IconURL, &route.Enabled,
 		&route.Visible, &route.IsDefault, &route.SortOrder, &route.CreatedAt, &route.UpdatedAt)
 	return route, err
 }
@@ -946,9 +946,9 @@ func (p *Postgres) CreateLLMModelRoute(ctx context.Context, route LLMModelRoute)
 		}
 	}
 	const q = `INSERT INTO llm_model_routes (` + llmModelCols + `)
-		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14)`
+		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13)`
 	_, err = tx.Exec(ctx, q,
-		route.Alias, route.ProviderID, route.RealModel, route.Runtime, route.Label,
+		route.Alias, route.ProviderID, route.RealModel, route.Label,
 		route.IconType, route.IconSlug, route.IconURL, route.Enabled, route.Visible,
 		route.IsDefault, route.SortOrder, route.CreatedAt, route.UpdatedAt)
 	if isUniqueViolation(err) {
@@ -1001,12 +1001,12 @@ func (p *Postgres) UpdateLLMModelRoute(ctx context.Context, route LLMModelRoute)
 		}
 	}
 	const q = `UPDATE llm_model_routes
-		SET provider_id=$2, real_model=$3, runtime=$4, label=$5, icon_type=$6,
-		    icon_slug=$7, icon_url=$8, enabled=$9, visible=$10, is_default=$11,
-		    sort_order=$12, created_at=$13, updated_at=$14
+		SET provider_id=$2, real_model=$3, label=$4, icon_type=$5,
+		    icon_slug=$6, icon_url=$7, enabled=$8, visible=$9, is_default=$10,
+		    sort_order=$11, created_at=$12, updated_at=$13
 		WHERE alias=$1`
 	ct, err := tx.Exec(ctx, q,
-		route.Alias, route.ProviderID, route.RealModel, route.Runtime, route.Label,
+		route.Alias, route.ProviderID, route.RealModel, route.Label,
 		route.IconType, route.IconSlug, route.IconURL, route.Enabled, route.Visible,
 		route.IsDefault, route.SortOrder, route.CreatedAt, route.UpdatedAt)
 	if isUniqueViolation(err) {

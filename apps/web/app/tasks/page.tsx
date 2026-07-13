@@ -50,12 +50,15 @@ export default function TasksPage() {
       const taskBody = (await tasksResponse.json()) as { tasks?: ScheduledTask[] };
       const modelBody = (await modelsResponse.json()) as ModelOption[] | { models?: ModelOption[] };
       setTasks(Array.isArray(taskBody.tasks) ? taskBody.tasks : []);
+      const availableModels = Array.isArray(modelBody)
+        ? modelBody
+        : Array.isArray(modelBody.models)
+          ? modelBody.models
+          : [];
       setModels(
-        Array.isArray(modelBody)
-          ? modelBody
-          : Array.isArray(modelBody.models)
-            ? modelBody.models
-            : [],
+        availableModels.filter(
+          (model) => !model.protocols || model.protocols.includes("anthropic-messages"),
+        ),
       );
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : String(cause));

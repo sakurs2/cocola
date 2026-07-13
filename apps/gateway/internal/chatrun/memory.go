@@ -21,28 +21,46 @@ func NewMemory(conversations convo.Store) *Memory {
 func (m *Memory) Start(ctx context.Context, in StartInput) (StartResult, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
+	effective := in.Conversation
+	existing, err := m.convo.GetConversation(ctx, in.Conversation.ID, in.Conversation.UserID)
+	if err == nil {
+		if effective.RuntimeID != "" && effective.RuntimeID != existing.RuntimeID {
+			return StartResult{}, ErrRuntimeMismatch
+		}
+		effective = existing
+		effective.UpdatedAt = in.Conversation.UpdatedAt
+	} else if err == convo.ErrNotFound {
+		if effective.RuntimeID == "" {
+			effective.RuntimeID = convo.DefaultRuntimeID
+		}
+	} else {
+		return StartResult{}, err
+	}
 	for _, run := range m.runs {
 		if run.UserID == in.Run.UserID && run.ConversationID == in.Run.ConversationID &&
 			run.ClientRequestID != "" && run.ClientRequestID == in.Run.ClientRequestID {
-			return StartResult{Run: run}, nil
+			return StartResult{Run: run, Conversation: effective}, nil
 		}
 	}
-	if err := m.convo.UpsertConversation(ctx, in.Conversation); err != nil {
+	if err := m.convo.UpsertConversation(ctx, effective); err != nil {
 		if err == convo.ErrNotFound {
 			return StartResult{}, ErrNotFound
+		}
+		if err == convo.ErrRuntimeMismatch {
+			return StartResult{}, ErrRuntimeMismatch
 		}
 		return StartResult{}, err
 	}
 	for _, run := range m.runs {
 		if run.ConversationID == in.Run.ConversationID && run.Status == StatusRunning {
-			return StartResult{Run: run}, ErrConflict
+			return StartResult{Run: run, Conversation: effective}, ErrConflict
 		}
 	}
 	if err := m.convo.InsertMessage(ctx, in.UserMessage); err != nil {
 		return StartResult{}, err
 	}
 	m.runs[in.Run.ID] = in.Run
-	return StartResult{Run: in.Run, Created: true}, nil
+	return StartResult{Run: in.Run, Conversation: effective, Created: true}, nil
 }
 
 func (m *Memory) GetOwned(_ context.Context, runID, userID string) (Run, error) {

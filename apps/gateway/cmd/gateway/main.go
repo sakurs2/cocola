@@ -86,6 +86,12 @@ func main() {
 		log.Fatal("cannot dial agent-runtime: " + err.Error())
 	}
 	defer func() { _ = client.Close() }()
+	runtimeCtx, cancelRuntimes := context.WithTimeout(context.Background(), 5*time.Second)
+	runtimes, err := client.ListRuntimes(runtimeCtx)
+	cancelRuntimes()
+	if err != nil {
+		log.Fatal("cannot load agent runtime catalog: " + err.Error())
+	}
 
 	secret := config.SecretFromEnv("COCOLA_AUTH_SECRET")
 	if secret == "" {
@@ -97,7 +103,7 @@ func main() {
 	// is also exposed on a dedicated port so a scrape never competes with user
 	// traffic. COCOLA_METRICS_ADDR="" disables both the port and instrumentation.
 	reg := metrics.New("gateway")
-	api := httpapi.New(client, verifier, log).WithMetrics(reg)
+	api := httpapi.New(client, verifier, log).WithMetrics(reg).WithAgentRuntimes(runtimes)
 
 	// Per-user sandbox token issuer (P0 identity fix). The gateway mints a fresh
 	// cocola token per chat turn from the VERIFIED identity (sub=user, ten=tenant)

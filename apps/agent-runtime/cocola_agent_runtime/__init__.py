@@ -1,4 +1,4 @@
-"""Agent runtime — drives Claude Code Agent SDK sessions.
+"""Agent runtime — dispatches built-in Agent Runtime sessions.
 
 Layering (intentional, do not violate):
     cli / grpc server  →  agent_provider (Protocol) → concrete provider

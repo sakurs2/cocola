@@ -107,16 +107,17 @@ const browser = await chromium.launch({
 
 ## Persistence
 
-Two volumes are mounted by the provider:
+Four paths are mounted by the provider:
 
 | Mount in container     | Volume            | Survives                          |
 | ---------------------- | ----------------- | --------------------------------- |
 | `/workspace`           | per-session, RW   | hibernate, cleaned at session end |
 | `/home/cocola/.claude` | per-session, RW   | hibernate, cleaned at session end |
+| `/home/cocola/.codex`  | per-session, RW   | hibernate, cleaned at session end |
 | `/data/plugins`        | shared, read-only | platform-managed                  |
 
 For host-backed storage, the provider maps them under
-`<COCOLA_SANDBOX_ROOT>/users/<user>/sessions/<session>/{workspace,claude}`.
+`<COCOLA_SANDBOX_ROOT>/users/<user>/sessions/<session>/{workspace,claude,codex}`.
 Point `COCOLA_SANDBOX_ROOT` at an NFS/NAS mount to share session storage across
 nodes without changing the in-container contract.
 
@@ -124,6 +125,9 @@ nodes without changing the in-container contract.
 are isolated per cocola session without appearing in `/workspace` file listings.
 `--resume <session_id>` rebuilds the brain from that on-disk session (no RAM
 snapshot needed).
+
+`CODEX_HOME=/home/cocola/.codex` provides the same isolation and checkpoint
+behavior for Codex threads.
 
 ## Build
 

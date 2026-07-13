@@ -13,8 +13,10 @@ across two byte chunks), and we assert the provider:
 
 from __future__ import annotations
 
+import asyncio
 import json
 
+import pytest
 from cocola_agent_runtime.agent_provider import AgentOptions
 from cocola_agent_runtime.sandbox_binder import ExecChunk, StaticSandboxExecutor
 from cocola_agent_runtime.session_map import MemorySessionMap
@@ -275,7 +277,13 @@ async def test_stored_resume_is_reused_when_sandbox_changes():
         yield ExecChunk(kind="exit", exit_code=0)
 
     smap = MemorySessionMap()
-    await smap.put("S1", "sess-old", user_id="U1", sandbox_id="box-old")
+    await smap.put(
+        "S1",
+        "sess-old",
+        user_id="U1",
+        sandbox_id="box-old",
+        runtime_id="claude-code",
+    )
     execu = StaticSandboxExecutor(stream_handler=stream_handler)
     provider = InSandboxShimProvider(execu, session_map=smap)
     opts = AgentOptions(user_id="U1", session_id="S1", sandbox_id="box-new")
@@ -284,9 +292,9 @@ async def test_stored_resume_is_reused_when_sandbox_changes():
 
     assert [e.kind for e in events] == ["text", "done"]
     assert events[0].data["text"] == "resumed sandbox"
-    binding = await smap.get_binding("S1", user_id="U1")
+    binding = await smap.get_binding("S1", user_id="U1", runtime_id="claude-code")
     assert binding is not None
-    assert binding.claude_session_id == "sess-new"
+    assert binding.runtime_session_id == "sess-new"
     assert binding.sandbox_id == "box-new"
 
 
@@ -312,6 +320,96 @@ async def test_model_alias_is_injected_into_exec_env():
     env = execu.stream_calls[0]["env"]
     assert env["ANTHROPIC_MODEL"] == "claude-sonnet"
     assert env["ANTHROPIC_SMALL_FAST_MODEL"] == "claude-sonnet"
+
+
+async def test_codex_credentials_stay_in_exec_env_and_out_of_request():
+    def stream_handler(sandbox_id, cmd, stdin):
+        request = json.loads(stdin)
+        assert request["runtime_id"] == "codex"
+        assert request["model"] == "codex-model"
+        assert request["traceparent"] == "00-" + "a" * 32 + "-" + "b" * 16 + "-01"
+        assert "auth_token" not in request
+        yield ExecChunk(
+            kind="stdout",
+            data=_ndjson({"type": "done", "session_id": "thread-1"}),
+        )
+        yield ExecChunk(kind="exit", exit_code=0)
+
+    executor = StaticSandboxExecutor(stream_handler=stream_handler)
+    provider = InSandboxShimProvider(executor)
+    options = AgentOptions(
+        user_id="U1",
+        session_id="S1",
+        runtime_id="codex",
+        sandbox_id="box-1",
+        model_alias="codex-model",
+        auth_token="short-lived-cocola-token",
+        traceparent="00-" + "a" * 32 + "-" + "b" * 16 + "-01",
+    )
+
+    await _drain(provider, "hello", options)
+
+    env = executor.stream_calls[0]["env"]
+    assert env == {
+        "CODEX_API_KEY": "short-lived-cocola-token",
+        "CODEX_MODEL": "codex-model",
+    }
+
+
+async def test_thread_started_session_is_indexed_even_when_turn_fails():
+    def stream_handler(sandbox_id, cmd, stdin):
+        yield ExecChunk(
+            kind="stdout",
+            data=_ndjson(
+                {"type": "start", "session_id": "thread-created"},
+                {"type": "error", "stage": "run", "error": "turn failed"},
+            ),
+        )
+        yield ExecChunk(kind="exit", exit_code=1)
+
+    session_map = MemorySessionMap()
+    provider = InSandboxShimProvider(
+        StaticSandboxExecutor(stream_handler=stream_handler),
+        session_map=session_map,
+    )
+    options = AgentOptions(
+        user_id="U1",
+        session_id="S1",
+        runtime_id="codex",
+        sandbox_id="box-1",
+    )
+
+    events = await _drain(provider, "hello", options)
+
+    assert [event.kind for event in events] == ["error", "done"]
+    assert events[-1].data == {"session_id": "thread-created"}
+    assert await session_map.get("S1", user_id="U1", runtime_id="codex") == "thread-created"
+
+
+async def test_thread_started_session_is_indexed_before_cancellation():
+    def stream_handler(sandbox_id, cmd, stdin):
+        yield ExecChunk(
+            kind="stdout",
+            data=_ndjson({"type": "start", "session_id": "thread-created"}),
+        )
+        raise asyncio.CancelledError
+
+    session_map = MemorySessionMap()
+    provider = InSandboxShimProvider(
+        StaticSandboxExecutor(stream_handler=stream_handler),
+        session_map=session_map,
+    )
+    options = AgentOptions(
+        user_id="U1",
+        session_id="S1",
+        runtime_id="codex",
+        sandbox_id="box-1",
+    )
+
+    with pytest.raises(asyncio.CancelledError):
+        await _drain(provider, "hello", options)
+
+    assert await session_map.get("S1", user_id="U1", runtime_id="codex") == "thread-created"
 
 
 async def test_nonzero_exit_becomes_terminal_error():
@@ -413,7 +511,7 @@ async def test_dangling_resume_retries_fresh_and_reindexes():
                     {
                         "type": "error",
                         "stage": "run",
-                        "code": "RESUME_NOT_FOUND",
+                        "code": "SESSION_NOT_FOUND",
                         "error": "No conversation found with session ID: sess-stale",
                     }
                 ),
@@ -432,7 +530,7 @@ async def test_dangling_resume_retries_fresh_and_reindexes():
         yield ExecChunk(kind="exit", exit_code=0)
 
     smap = MemorySessionMap()
-    await smap.put("S1", "sess-stale", user_id="U1")
+    await smap.put("S1", "sess-stale", user_id="U1", runtime_id="claude-code")
     execu = StaticSandboxExecutor(stream_handler=stream_handler)
     provider = InSandboxShimProvider(execu, session_map=smap)
     opts = AgentOptions(user_id="U1", session_id="S1", sandbox_id="box-1")
@@ -446,7 +544,7 @@ async def test_dangling_resume_retries_fresh_and_reindexes():
     assert events[-1].data == {"session_id": "sess-new"}
     assert calls["n"] == 2  # exactly one retry
     # The stale id was forgotten and replaced by the fresh one.
-    assert await smap.get("S1", user_id="U1") == "sess-new"
+    assert await smap.get("S1", user_id="U1", runtime_id="claude-code") == "sess-new"
 
 
 async def test_unrelated_failure_is_not_retried():
@@ -461,7 +559,7 @@ async def test_unrelated_failure_is_not_retried():
         yield ExecChunk(kind="exit", exit_code=127)
 
     smap = MemorySessionMap()
-    await smap.put("S1", "sess-x", user_id="U1")
+    await smap.put("S1", "sess-x", user_id="U1", runtime_id="claude-code")
     execu = StaticSandboxExecutor(stream_handler=stream_handler)
     provider = InSandboxShimProvider(execu, session_map=smap)
     opts = AgentOptions(user_id="U1", session_id="S1", sandbox_id="box-1")
@@ -473,7 +571,7 @@ async def test_unrelated_failure_is_not_retried():
     assert kinds == ["error", "done"], kinds
     assert "shim exited 127" in events[0].data["error"]
     # A non-dangling failure must NOT clobber the stored resume id.
-    assert await smap.get("S1", user_id="U1") == "sess-x"
+    assert await smap.get("S1", user_id="U1", runtime_id="claude-code") == "sess-x"
 
 
 async def test_dangling_resume_not_retried_when_content_already_streamed():
@@ -491,7 +589,7 @@ async def test_dangling_resume_not_retried_when_content_already_streamed():
                 {
                     "type": "error",
                     "stage": "run",
-                    "code": "RESUME_NOT_FOUND",
+                    "code": "SESSION_NOT_FOUND",
                     "error": "No conversation found with session ID: sess-stale",
                 },
             ),
@@ -499,7 +597,7 @@ async def test_dangling_resume_not_retried_when_content_already_streamed():
         yield ExecChunk(kind="exit", exit_code=1)
 
     smap = MemorySessionMap()
-    await smap.put("S1", "sess-stale", user_id="U1")
+    await smap.put("S1", "sess-stale", user_id="U1", runtime_id="claude-code")
     execu = StaticSandboxExecutor(stream_handler=stream_handler)
     provider = InSandboxShimProvider(execu, session_map=smap)
     opts = AgentOptions(user_id="U1", session_id="S1", sandbox_id="box-1")

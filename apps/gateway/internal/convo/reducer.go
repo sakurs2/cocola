@@ -46,11 +46,27 @@ func (r *Reducer) Apply(kind string, data map[string]string) {
 		r.fillToolResult(data["tool_use_id"], data["content"], truthy(data["is_error"]))
 	case "file":
 		r.appendFile(data)
+	case "progress":
+		r.upsertProgress(data["id"], data["items"])
 	case "error":
 		r.appendText(PartText, "\n\n⚠️ "+errText(data))
 	default:
 		// result / system / sandbox / done / unknown: no body content.
 	}
+}
+
+func (r *Reducer) upsertProgress(id, items string) {
+	if id == "" || len(items) > maxEnvironmentSnapshotBytes || !json.Valid([]byte(items)) {
+		return
+	}
+	raw := append(json.RawMessage(nil), items...)
+	for i := range r.parts {
+		if r.parts[i].Type == PartProgress && r.parts[i].ProgressID == id {
+			r.parts[i].ProgressItems = raw
+			return
+		}
+	}
+	r.parts = append(r.parts, Part{Type: PartProgress, ProgressID: id, ProgressItems: raw})
 }
 
 const maxEnvironmentSnapshotBytes = 64 << 10

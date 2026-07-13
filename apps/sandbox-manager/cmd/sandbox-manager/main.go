@@ -180,8 +180,8 @@ func main() {
 	case s := <-sig:
 		log.Sugar().Infow("signal received; draining before exit", "signal", s.String())
 		// GracefulStop first: stop accepting new RPCs and wait for in-flight
-		// Exec calls to finish, so the sandbox's .claude reflects the latest
-		// completed turn before we archive it.
+		// Exec calls to finish, so the sandbox's runtime session state reflects
+		// the latest completed turn before we archive it.
 		gs.GracefulStop()
 		budget := checkpointDrainBudget()
 		dctx, dcancel := context.WithTimeout(context.Background(), budget)

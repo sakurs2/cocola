@@ -109,6 +109,8 @@ const (
 	guestWorkspace = "/workspace"
 	// guestClaudeConfig is the hidden session-local Claude Code config root.
 	guestClaudeConfig = "/home/cocola/.claude"
+	// guestCodexConfig is the hidden session-local Codex config and session root.
+	guestCodexConfig = "/home/cocola/.codex"
 	// guestPlugins is the read-only platform-skill mount.
 	guestPlugins = "/data/plugins"
 	// workspaceSubPath and claudeSubPath split one session PVC into a visible
@@ -116,6 +118,7 @@ const (
 	// leaking .claude into /workspace file listings.
 	workspaceSubPath = "workspace"
 	claudeSubPath    = "claude"
+	codexSubPath     = "codex"
 	// pluginsClaimName is the shared, pre-provisioned platform-skill volume.
 	// It is mounted read-only into every sandbox.
 	pluginsClaimName  = "cocola-plugins"
@@ -990,8 +993,9 @@ func chownEntrypoint(execUser string) []string {
 	paths := shellJoin([]string{
 		guestWorkspace,
 		guestClaudeConfig,
+		guestCodexConfig,
 	})
-	script := "mkdir -p " + shellJoin([]string{guestWorkspace, guestClaudeConfig}) +
+	script := "mkdir -p " + shellJoin([]string{guestWorkspace, guestClaudeConfig, guestCodexConfig}) +
 		" && chown -R " + owner + " " + paths +
 		" || true; exec sleep infinity"
 	return []string{"/bin/sh", "-c", script}
@@ -1078,16 +1082,16 @@ func volumeBackendFromEnv() string {
 //
 //   - workspace:       pvc cocola-session-<sid>, subPath workspace -> /workspace
 //   - Claude state:    pvc cocola-session-<sid>, subPath claude    -> /home/cocola/.claude
+//   - Codex state:     pvc cocola-session-<sid>, subPath codex     -> /home/cocola/.codex
 //   - platform skills: pvc cocola-plugins (shared)                 -> /data/plugins (RO)
 //
-// Claude Code state is mounted outside /workspace so file listings remain user
-// focused, while still being session-scoped and checkpoint-friendly. No per-user
-// writable volume is declared, so sessions cannot accidentally share Claude
-// config or files.
+// Runtime state is mounted outside /workspace so file listings remain user
+// focused, while still being session-scoped and checkpoint-friendly. No
+// per-user writable volume is declared, so sessions cannot share runtime state.
 //
 // Host mode maps the same guest paths to directories under:
 //
-//	<root>/users/<user>/sessions/<session>/{workspace,claude}
+//	<root>/users/<user>/sessions/<session>/{workspace,claude,codex}
 //
 // where <root> may be an NFS/NAS mount. CreateIfNotExists lets the server
 // provision PVC volumes lazily; host mode creates directories locally before
@@ -1098,7 +1102,7 @@ func (p *Provider) mapVolumes(userID, sessionID string, warm bool) ([]volumeSpec
 	// no bound session yet, and OpenSandbox has no hot-mount-volume API (ADR-0016)
 	// so a per-session PVC can never be attached after the fact. We therefore mount
 	// ONLY the shared read-only platform-skills volume. When a session later claims
-	// the warm sandbox its workspace/.claude state is delivered via checkpoint
+	// the warm sandbox its workspace and runtime state are delivered via checkpoint
 	// restore (agent-runtime restore_if_fresh on reused=false), not a PVC.
 	if warm {
 		return p.mapWarmVolumes(), nil
@@ -1113,8 +1117,8 @@ func (p *Provider) mapVolumes(userID, sessionID string, warm bool) ([]volumeSpec
 // the shared read-only plugins volume only. In host-backend mode the plugins
 // directory lives under <root>/plugins; in PVC mode it is the shared
 // cocola-plugins claim. No writable session volume is declared, so the warm
-// sandbox's /workspace and /home/cocola/.claude are the image's own ephemeral
-// dirs until a claim restores real state into them.
+// sandbox's /workspace, .claude and .codex are the image's own ephemeral dirs
+// until a claim restores real state into them.
 func (p *Provider) mapWarmVolumes() []volumeSpec {
 	if p.volumeBackend == volumeBackendHost {
 		return []volumeSpec{
@@ -1153,6 +1157,12 @@ func mapPVCVolumes(sessionID string) []volumeSpec {
 			SubPath:   claudeSubPath,
 		},
 		{
+			Name:      "codex",
+			PVC:       &pvcBackend{ClaimName: sessionClaim, CreateIfNotExists: true},
+			MountPath: guestCodexConfig,
+			SubPath:   codexSubPath,
+		},
+		{
 			Name:      "plugins",
 			PVC:       &pvcBackend{ClaimName: pluginsClaimName},
 			MountPath: guestPlugins,
@@ -1165,8 +1175,9 @@ func (p *Provider) mapHostVolumes(userID, sessionID string) ([]volumeSpec, error
 	sessionRoot := p.sessionRoot(userID, sessionID)
 	workspaceDir := filepath.Join(sessionRoot, workspaceSubPath)
 	claudeDir := filepath.Join(sessionRoot, claudeSubPath)
+	codexDir := filepath.Join(sessionRoot, codexSubPath)
 	pluginDir := filepath.Join(p.root, "plugins")
-	for _, d := range []string{workspaceDir, claudeDir, pluginDir} {
+	for _, d := range []string{workspaceDir, claudeDir, codexDir, pluginDir} {
 		if !isSubpath(p.root, d) {
 			return nil, fmt.Errorf("opensandbox: volume path outside root: %s", d)
 		}
@@ -1174,7 +1185,7 @@ func (p *Provider) mapHostVolumes(userID, sessionID string) ([]volumeSpec, error
 			return nil, fmt.Errorf("opensandbox: mkdir %s: %w", d, err)
 		}
 	}
-	for _, d := range []string{workspaceDir, claudeDir} {
+	for _, d := range []string{workspaceDir, claudeDir, codexDir} {
 		if err := os.Chown(d, 10001, 10001); err != nil {
 			// Best effort: a pre-created NFS directory may already have the right
 			// ownership or may reject chown due to export options.
@@ -1191,6 +1202,11 @@ func (p *Provider) mapHostVolumes(userID, sessionID string) ([]volumeSpec, error
 			Name:      "claude",
 			Host:      &hostBackend{Path: claudeDir},
 			MountPath: guestClaudeConfig,
+		},
+		{
+			Name:      "codex",
+			Host:      &hostBackend{Path: codexDir},
+			MountPath: guestCodexConfig,
 		},
 		{
 			Name:      "plugins",

@@ -16,6 +16,7 @@ from typing import Protocol
 class AgentOptions:
     user_id: str
     session_id: str
+    runtime_id: str = "claude-code"
     sandbox_id: str | None = None
     # Host working directory for an in-process provider (one whose brain runs
     # IN THIS PROCESS). When set, such a provider points its cwd here so native
@@ -31,11 +32,9 @@ class AgentOptions:
     # this sandbox. The Route-A provider folds these into the same environment
     # snapshot as MCP status; they never enter the model prompt.
     environment_skills: list[dict[str, str]] | None = None
-    # Per-user cocola token minted by the gateway for THIS turn (sub=user,
-    # ten=tenant). A Route A provider injects it into the sandbox as
-    # ANTHROPIC_AUTH_TOKEN so the in-sandbox brain calls the llm-gateway as the
-    # real user (per-user quota / usage / revocation), overriding the static
-    # token baked at sandbox creation. None => keep the baked default token.
+    # Per-user cocola token minted by the gateway for this turn. The provider
+    # injects it under the selected runtime's auth variable so the in-sandbox
+    # brain calls llm-gateway as the real user. None means no token is injected.
     auth_token: str | None = None
     # W3C context for Cocola-owned downstream services. It is injected only
     # into requests to the configured Cocola LLM gateway, never into MCP calls.

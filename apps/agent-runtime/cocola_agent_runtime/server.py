@@ -53,6 +53,7 @@ from cocola_agent_runtime.checkpoint import CheckpointManager
 from cocola_agent_runtime.mcp_loader import MCPCatalog
 from cocola_agent_runtime.objstore import Fetcher
 from cocola_agent_runtime.prompt_loader import PromptCatalog, PromptConfig
+from cocola_agent_runtime.runtime_registry import RuntimeDescriptor, RuntimeEntry, RuntimeRegistry
 from cocola_agent_runtime.sandbox_binder import SandboxBinder, SandboxExecutor, SandboxGoneError
 from cocola_agent_runtime.session_map import SessionMap
 from cocola_agent_runtime.skill_loader import Skill, SkillCatalog, skills_system_preamble
@@ -399,16 +400,20 @@ def _validated_model_alias(requested_alias: str) -> str | None:
     return alias or None
 
 
-def _model_env(model_alias: str | None) -> dict[str, str]:
+def _model_env(model_alias: str | None, *, runtime_id: str = "claude-code") -> dict[str, str]:
     if not model_alias:
         return {}
+    if runtime_id == "codex":
+        return {"CODEX_MODEL": model_alias}
     return {
         "ANTHROPIC_MODEL": model_alias,
         "ANTHROPIC_SMALL_FAST_MODEL": model_alias,
     }
 
 
-def _acquire_env(model_env: dict[str, str], sandbox_token: str) -> dict[str, str]:
+def _acquire_env(
+    model_env: dict[str, str], sandbox_token: str, *, runtime_id: str = "claude-code"
+) -> dict[str, str]:
     """Env passed to sandbox acquire: model alias plus, when present, the
     per-user token as ANTHROPIC_AUTH_TOKEN.
 
@@ -419,7 +424,7 @@ def _acquire_env(model_env: dict[str, str], sandbox_token: str) -> dict[str, str
     """
     env = dict(model_env)
     if sandbox_token:
-        env["ANTHROPIC_AUTH_TOKEN"] = sandbox_token
+        env["CODEX_API_KEY" if runtime_id == "codex" else "ANTHROPIC_AUTH_TOKEN"] = sandbox_token
     return env
 
 
@@ -430,6 +435,7 @@ class AgentRuntimeServicer(pb_grpc.AgentRuntimeServiceServicer):
         self,
         provider: AgentProvider,
         *,
+        runtimes: RuntimeRegistry | None = None,
         skills: SkillCatalog | None = None,
         mcps: MCPCatalog | None = None,
         prompts: PromptCatalog | None = None,
@@ -439,7 +445,19 @@ class AgentRuntimeServicer(pb_grpc.AgentRuntimeServiceServicer):
         session_map: SessionMap | None = None,
         checkpoint: CheckpointManager | None = None,
     ) -> None:
-        self._provider = provider
+        self._runtimes = runtimes or RuntimeRegistry(
+            [
+                RuntimeEntry(
+                    RuntimeDescriptor(
+                        id="claude-code",
+                        label="Claude Code",
+                        model_protocol="anthropic-messages",
+                        is_default=True,
+                    ),
+                    provider,
+                )
+            ]
+        )
         self._skills = skills
         self._mcps = mcps
         self._prompts = prompts
@@ -462,6 +480,19 @@ class AgentRuntimeServicer(pb_grpc.AgentRuntimeServiceServicer):
         )
         self._heartbeat_secs = _positive_env_int(
             "COCOLA_SANDBOX_HEARTBEAT_SECS", DEFAULT_SANDBOX_HEARTBEAT_SECS
+        )
+
+    async def ListRuntimes(self, request, context):  # noqa: N802, ARG002 - gRPC signature
+        return pb.ListRuntimesResponse(
+            runtimes=[
+                pb.Runtime(
+                    id=runtime.id,
+                    label=runtime.label,
+                    model_protocol=runtime.model_protocol,
+                    is_default=runtime.is_default,
+                )
+                for runtime in self._runtimes.descriptors
+            ]
         )
 
     async def _heartbeat_sandbox(
@@ -525,6 +556,17 @@ class AgentRuntimeServicer(pb_grpc.AgentRuntimeServiceServicer):
         a `done` here: the provider is responsible for its own terminal event
         (the shim provider yields `done`); on error we substitute one.
         """
+        try:
+            runtime = self._runtimes.resolve(getattr(request, "runtime_id", ""))
+        except KeyError:
+            await context.write(
+                pb.AgentEvent(
+                    kind="error",
+                    data={"code": "UNSUPPORTED_RUNTIME", "error": "Agent Runtime is not supported"},
+                )
+            )
+            return
+        runtime_id = runtime.descriptor.id
         sandbox_id = request.sandbox_id or None
         if self._binder is not None and sandbox_id is not None:
             log.warning(
@@ -547,12 +589,10 @@ class AgentRuntimeServicer(pb_grpc.AgentRuntimeServiceServicer):
                 )
             )
             return
-        model_env = _model_env(model_alias)
-        # Per-user sandbox token (P0 identity fix): forwarded by the gateway as
-        # gRPC metadata. When present it is injected into the sandbox as
-        # ANTHROPIC_AUTH_TOKEN at acquire and on every shim exec, so the
-        # in-sandbox brain authenticates to the llm-gateway AS THE USER. Warm
-        # sandboxes remain credential-free until a session claims them.
+        model_env = _model_env(model_alias, runtime_id=runtime_id)
+        # Per-user sandbox token is forwarded by the gateway as gRPC metadata
+        # and injected under the selected runtime's auth variable at acquire and
+        # on every shim exec. Warm sandboxes stay credential-free until claimed.
         sandbox_token = _metadata_value(context, SANDBOX_TOKEN_METADATA_KEY)
         traceparent = _product_traceparent(context)
         preparing_environment = False
@@ -571,12 +611,13 @@ class AgentRuntimeServicer(pb_grpc.AgentRuntimeServiceServicer):
                 box = await self._binder.acquire(
                     session_id=request.session_id,
                     user_id=request.user_id,
-                    env=_acquire_env(model_env, sandbox_token),
+                    env=_acquire_env(model_env, sandbox_token, runtime_id=runtime_id),
                 )
             except Exception as exc:  # noqa: BLE001 - bind failure -> clean terminal event
                 log.warning(
                     "sandbox acquire failed",
                     session_id=request.session_id,
+                    runtime_id=runtime_id,
                     error=str(exc),
                 )
                 await context.write(
@@ -639,6 +680,7 @@ class AgentRuntimeServicer(pb_grpc.AgentRuntimeServiceServicer):
                     sandbox_id=box.id,
                     user_id=request.user_id,
                     session_id=request.session_id,
+                    runtime_id=runtime_id,
                     reused=box.reused,
                 )
                 await context.write(
@@ -785,7 +827,11 @@ class AgentRuntimeServicer(pb_grpc.AgentRuntimeServiceServicer):
             try:
                 active_skills = self._skills.enabled_skills(request.user_id)
                 if sandbox_id and active_skills and self._executor is not None:
-                    await self._sync_skills_into_sandbox(sandbox_id, active_skills)
+                    await self._sync_skills_into_sandbox(
+                        sandbox_id,
+                        active_skills,
+                        runtime_id=runtime_id,
+                    )
                     loaded_skills = list(active_skills)
                 await context.write(
                     event_to_proto(
@@ -940,6 +986,7 @@ class AgentRuntimeServicer(pb_grpc.AgentRuntimeServiceServicer):
         opts = AgentOptions(
             user_id=request.user_id,
             session_id=request.session_id,
+            runtime_id=runtime_id,
             sandbox_id=sandbox_id,
             workspace=workspace,
             max_turns=request.max_turns or 30,
@@ -986,11 +1033,12 @@ class AgentRuntimeServicer(pb_grpc.AgentRuntimeServiceServicer):
             has_sandbox=bool(sandbox_id),
             attachments=len(request.attachments),
             model_alias=model_alias or "",
+            runtime_id=runtime_id,
         )
         outputs_before = await self._snapshot_outputs(sandbox_id) if artifacts_enabled else {}
         try:
             terminal_done: AgentEvent | None = None
-            async for event in self._provider.query(prompt, opts):
+            async for event in runtime.provider.query(prompt, opts):
                 if event.kind == "done":
                     terminal_done = event
                     continue
@@ -1052,11 +1100,18 @@ class AgentRuntimeServicer(pb_grpc.AgentRuntimeServiceServicer):
                 continue
         return out
 
-    async def _sync_skills_into_sandbox(self, sandbox_id: str, skills: list[Skill]) -> None:
+    async def _sync_skills_into_sandbox(
+        self,
+        sandbox_id: str,
+        skills: list[Skill],
+        *,
+        runtime_id: str = "claude-code",
+    ) -> None:
         if self._executor is None or not skills:
             return
         data = await _build_skill_batch_archive(skills, self._objstore)
         archive = f"/tmp/cocola-skills-{uuid.uuid4().hex}.zip"
+        runtime_home = "/home/cocola/.codex" if runtime_id == "codex" else "/home/cocola/.claude"
         await self._executor.write_bytes(sandbox_id=sandbox_id, path=archive, data=data)
         res = await self._executor.exec(
             sandbox_id=sandbox_id,
@@ -1065,7 +1120,7 @@ class AgentRuntimeServicer(pb_grpc.AgentRuntimeServiceServicer):
                 "-c",
                 _SKILLS_BATCH_INSTALL_SCRIPT,
                 archive,
-                "/home/cocola/.claude",
+                runtime_home,
                 "/data/plugins/skills",
             ],
             timeout_secs=max(30, min(300, len(skills) * 10)),

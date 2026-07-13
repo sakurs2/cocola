@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"os"
+	"sync"
 	"testing"
 	"time"
 
@@ -77,7 +78,68 @@ func TestPostgresStartFinalizeParity(t *testing.T) {
 	var assistantCreatedAt time.Time
 	err = store.pool.QueryRow(ctx, `SELECT created_at FROM messages WHERE id=$1`, final.ID).
 		Scan(&assistantCreatedAt)
-	if err != nil || !assistantCreatedAt.Equal(final.CreatedAt) {
-		t.Fatalf("final assistant timestamp = %s, %v; want %s", assistantCreatedAt, err, final.CreatedAt)
+	expectedCreatedAt := final.CreatedAt.Truncate(time.Microsecond)
+	if err != nil || !assistantCreatedAt.Equal(expectedCreatedAt) {
+		t.Fatalf("final assistant timestamp = %s, %v; want %s", assistantCreatedAt, err, expectedCreatedAt)
+	}
+}
+
+func TestPostgresConcurrentIdempotentStart(t *testing.T) {
+	dsn := os.Getenv("COCOLA_TEST_PG_DSN")
+	if dsn == "" {
+		t.Skip("COCOLA_TEST_PG_DSN not set")
+	}
+	ctx := context.Background()
+	store, err := NewPostgres(ctx, dsn)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer store.Close()
+	conversationID := "run-concurrent-test-" + uuid.NewString()
+	defer func() {
+		_, _ = store.pool.Exec(ctx, `DELETE FROM conversation_runs WHERE conversation_id=$1`, conversationID)
+		_, _ = store.pool.Exec(ctx, `DELETE FROM conversations WHERE id=$1`, conversationID)
+	}()
+
+	start := make(chan struct{})
+	results := make(chan StartResult, 2)
+	errorsOut := make(chan error, 2)
+	var wg sync.WaitGroup
+	for range 2 {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			<-start
+			result, startErr := store.Start(ctx, testStartInput(
+				uuid.NewString(), "same-request", "user-1", conversationID,
+			))
+			results <- result
+			errorsOut <- startErr
+		}()
+	}
+	close(start)
+	wg.Wait()
+	close(results)
+	close(errorsOut)
+
+	for startErr := range errorsOut {
+		if startErr != nil {
+			t.Fatalf("concurrent start error = %v", startErr)
+		}
+	}
+	var runID string
+	created := 0
+	for result := range results {
+		if runID == "" {
+			runID = result.Run.ID
+		} else if result.Run.ID != runID {
+			t.Fatalf("concurrent starts returned different runs: %q and %q", runID, result.Run.ID)
+		}
+		if result.Created {
+			created++
+		}
+	}
+	if created != 1 {
+		t.Fatalf("created count = %d, want 1", created)
 	}
 }

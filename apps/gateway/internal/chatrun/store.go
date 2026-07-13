@@ -12,8 +12,9 @@ import (
 )
 
 var (
-	ErrNotFound = errors.New("chatrun: not found")
-	ErrConflict = errors.New("chatrun: conversation already has an active run")
+	ErrNotFound        = errors.New("chatrun: not found")
+	ErrConflict        = errors.New("chatrun: conversation already has an active run")
+	ErrRuntimeMismatch = errors.New("chatrun: conversation runtime mismatch")
 )
 
 const (
@@ -47,8 +48,9 @@ type StartInput struct {
 }
 
 type StartResult struct {
-	Run     Run
-	Created bool
+	Run          Run
+	Conversation convo.Conversation
+	Created      bool
 }
 
 type FinalizeInput struct {

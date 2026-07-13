@@ -6,18 +6,17 @@
 #
 # What it proves (ADR-0009 / ADR-0008):
 #   1. build   : the image builds; CLI is pre-baked (offline tgz if vendored).
-#   2. selfcheck: Node + claude CLI + claude-agent-sdk present; config_dir /
-#                 workspace / auth env wired, plus common browser/document
-#                 tooling baked in. (no network)
+#   2. selfcheck: Node + Claude/Codex CLIs and SDKs present; runtime state dirs,
+#                 workspace and common browser/document tooling wired. (no network)
 #   3. query   : a real turn through the in-sandbox stdio shim -> reaches the
 #                llm-gateway (egress) AND exercises native bash/file IO inside
 #                the container. This is also the live TOOL-USE round-trip
 #                (ADR-0010): the model can only write proof.txt by emitting a
 #                tool_use that the gateway forwarded -- if tools were dropped the
 #                file never appears. Requires ANTHROPIC_BASE_URL + ANTHROPIC_AUTH_TOKEN.
-#   4. persist : the session storage keeps /home/cocola/.claude across a
-#                container destroy + recreate, and `--resume <session_id>`
-#                restores the session.
+#   4. persist : session storage keeps /home/cocola/.claude and
+#                /home/cocola/.codex across a container destroy + recreate;
+#                Claude `--resume <session_id>` is checked after a live turn.
 #
 # The shim is driven over `docker exec -i` STDIO -- never a listening port.
 #
@@ -41,7 +40,7 @@ MODEL="${MODEL:-cocola-default}"
 # Per-test scratch dir that stands in for the session workspace volume.
 WORK="$(mktemp -d)"
 SESS_VOL="$WORK/session"   # session root; subdirs emulate session volume subPaths
-mkdir -p "$SESS_VOL/workspace" "$SESS_VOL/claude"
+mkdir -p "$SESS_VOL/workspace" "$SESS_VOL/claude" "$SESS_VOL/codex"
 
 CTR="cocola-verify-$$"
 PASS=0; FAIL=0
@@ -55,21 +54,26 @@ cleanup() {
 }
 trap cleanup EXIT
 
-# Mounts shared by every container we spin up: the session workspace volume,
-# plus the env that redirects Claude Code at the cocola gateway (ADR-0009 sec.2).
+# Mounts shared by every container we spin up: the session workspace and both
+# runtimes' native state directories.
 run_args=(
   --rm -d --name "$CTR"
   --runtime "$DOCKER_RUNTIME"
   -v "$SESS_VOL/workspace:/workspace"
   -v "$SESS_VOL/claude:/home/cocola/.claude"
+  -v "$SESS_VOL/codex:/home/cocola/.codex"
   -e "CLAUDE_CONFIG_DIR=/home/cocola/.claude"
   -e "ANTHROPIC_CONFIG_DIR=/home/cocola/.claude"
+  -e "CODEX_HOME=/home/cocola/.codex"
   -e "COCOLA_WORKSPACE=/workspace"
   -e "CLAUDE_CODE_MAX_RETRIES=${CLAUDE_CODE_MAX_RETRIES:-3}"
 )
 [ -n "${ANTHROPIC_BASE_URL:-}" ]   && run_args+=( -e "ANTHROPIC_BASE_URL=$ANTHROPIC_BASE_URL" )
 [ -n "${ANTHROPIC_AUTH_TOKEN:-}" ] && run_args+=( -e "ANTHROPIC_AUTH_TOKEN=$ANTHROPIC_AUTH_TOKEN" )
 [ -n "${MODEL:-}" ]                && run_args+=( -e "ANTHROPIC_MODEL=$MODEL" )
+[ -n "${COCOLA_LLM_BASE_URL:-}" ]  && run_args+=( -e "COCOLA_LLM_BASE_URL=$COCOLA_LLM_BASE_URL" )
+[ -n "${CODEX_API_KEY:-}" ]         && run_args+=( -e "CODEX_API_KEY=$CODEX_API_KEY" )
+[ -n "${MODEL:-}" ]                 && run_args+=( -e "CODEX_MODEL=$MODEL" )
 
 start_ctr() { docker run "${run_args[@]}" "$IMAGE" >/dev/null; }
 
@@ -90,6 +94,8 @@ echo "$SELF"
 echo "$SELF" | grep -q '"node":"v2' && ok "Node 22+ present" || bad "Node missing / wrong major"
 echo "$SELF" | grep -q '"claude_cli":"[0-9]' && ok "claude CLI pre-baked" || bad "claude CLI missing"
 echo "$SELF" | grep -qv '"claude_agent_sdk":"missing' && ok "claude-agent-sdk importable" || bad "claude-agent-sdk missing"
+echo "$SELF" | grep -q '"codex_cli":"codex-cli [0-9]' && ok "codex CLI pre-baked" || bad "codex CLI missing"
+echo "$SELF" | grep -q '"codex_sdk":"0.144.1"' && ok "codex SDK pinned" || bad "codex SDK missing / wrong version"
 for tool in pnpm yarn playwright chromium fd jq yq tree file make imagemagick pdftotext rsvg_convert; do
   if echo "$SELF" | grep -Eq "\"$tool\":\"(missing|error:)"; then
     bad "$tool missing from sandbox runtime"
@@ -128,14 +134,18 @@ fi
 
 # ---- 4. persistence across container destroy + recreate ------------------
 note "persistence: session storage survives container teardown"
-# A marker that should outlive the container, written to the hidden session-local Claude config.
+# Markers that should outlive the container in both native state directories.
 docker exec -i "$CTR" bash -lc 'echo cocola-persist-marker > /home/cocola/.claude/persist_probe.txt'
+docker exec -i "$CTR" bash -lc 'echo cocola-persist-marker > /home/cocola/.codex/persist_probe.txt'
 docker rm -f "$CTR" >/dev/null
 ls "$SESS_VOL/claude/persist_probe.txt" >/dev/null 2>&1 && ok "session storage retained .claude file on host after destroy" || bad "session storage lost .claude data"
+ls "$SESS_VOL/codex/persist_probe.txt" >/dev/null 2>&1 && ok "session storage retained .codex file on host after destroy" || bad "session storage lost .codex data"
 
 start_ctr
 docker exec -i "$CTR" cat /home/cocola/.claude/persist_probe.txt 2>/dev/null | grep -q cocola-persist-marker \
   && ok "re-created container re-mounts the same /home/cocola/.claude" || bad "remount did not restore /home/cocola/.claude"
+docker exec -i "$CTR" cat /home/cocola/.codex/persist_probe.txt 2>/dev/null | grep -q cocola-persist-marker \
+  && ok "re-created container re-mounts the same /home/cocola/.codex" || bad "remount did not restore /home/cocola/.codex"
 
 # resume only if we got a session id from step 3
 if [ -n "$SESSION_ID" ]; then

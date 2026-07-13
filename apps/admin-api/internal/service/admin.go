@@ -979,11 +979,11 @@ func userSkillID(userID, skillID string) string {
 // ---- LLM model configuration ----
 
 const (
-	ProviderAnthropic    = "anthropic"
-	ProviderOpenAICompat = "openai_compat"
-	RuntimeClaudeCode    = "claude-code"
-	IconSimpleIcons      = "simple-icons"
-	IconImage            = "image"
+	ProviderAnthropic       = "anthropic"
+	ProviderOpenAICompat    = "openai_compat"
+	ProviderOpenAIResponses = "openai_responses"
+	IconSimpleIcons         = "simple-icons"
+	IconImage               = "image"
 )
 
 type LLMProviderInput struct {
@@ -1000,7 +1000,6 @@ type LLMModelInput struct {
 	Alias      string
 	ProviderID string
 	RealModel  string
-	Runtime    string
 	Label      string
 	IconType   string
 	IconSlug   string
@@ -1155,9 +1154,11 @@ func (a *Admin) ListPublicLLMModels(ctx context.Context) ([]store.PublicLLMModel
 	if err != nil {
 		return nil, err
 	}
-	enabledProviders := map[string]bool{}
+	enabledProviders := map[string]store.LLMProvider{}
 	for _, p := range providers {
-		enabledProviders[p.ID] = p.Enabled
+		if p.Enabled {
+			enabledProviders[p.ID] = p
+		}
 	}
 	routes, err := a.store.ListLLMModelRoutes(ctx)
 	if err != nil {
@@ -1165,10 +1166,11 @@ func (a *Admin) ListPublicLLMModels(ctx context.Context) ([]store.PublicLLMModel
 	}
 	out := make([]store.PublicLLMModel, 0, len(routes))
 	for _, route := range routes {
-		if !route.Enabled || !route.Visible || !enabledProviders[route.ProviderID] {
+		provider, ok := enabledProviders[route.ProviderID]
+		if !route.Enabled || !route.Visible || !ok {
 			continue
 		}
-		out = append(out, publicLLMModel(route))
+		out = append(out, publicLLMModel(route, provider.Type))
 	}
 	return out, nil
 }
@@ -1179,7 +1181,6 @@ func (a *Admin) llmRouteFromInput(existing store.LLMModelRoute, in LLMModelInput
 		route.Alias = normalizeID(in.Alias)
 		route.Enabled = true
 		route.Visible = true
-		route.Runtime = RuntimeClaudeCode
 		route.IconType = IconSimpleIcons
 		now := a.now().UTC()
 		route.CreatedAt = now
@@ -1193,12 +1194,6 @@ func (a *Admin) llmRouteFromInput(existing store.LLMModelRoute, in LLMModelInput
 	}
 	if in.RealModel != "" || create {
 		route.RealModel = strings.TrimSpace(in.RealModel)
-	}
-	if in.Runtime != "" {
-		route.Runtime = strings.TrimSpace(in.Runtime)
-	}
-	if route.Runtime == "" {
-		route.Runtime = RuntimeClaudeCode
 	}
 	if in.Label != "" || create {
 		route.Label = strings.TrimSpace(in.Label)
@@ -1332,7 +1327,7 @@ func normalizeProviderType(v string) string {
 }
 
 func validProviderType(v string) bool {
-	return v == ProviderAnthropic || v == ProviderOpenAICompat
+	return v == ProviderAnthropic || v == ProviderOpenAICompat || v == ProviderOpenAIResponses
 }
 
 func validIcon(route store.LLMModelRoute) bool {
@@ -1395,7 +1390,7 @@ func inferPublicModelFamily(route store.LLMModelRoute) string {
 	}
 }
 
-func publicLLMModel(route store.LLMModelRoute) store.PublicLLMModel {
+func publicLLMModel(route store.LLMModelRoute, providerType string) store.PublicLLMModel {
 	provider := publicModelSlug(route.ProviderID)
 	family := inferPublicModelFamily(route)
 	iconSlug := publicModelSlug(route.IconSlug)
@@ -1412,13 +1407,21 @@ func publicLLMModel(route store.LLMModelRoute) store.PublicLLMModel {
 		icon.Slug = iconSlug
 	}
 	return store.PublicLLMModel{
-		Alias:    route.Alias,
-		Label:    route.Label,
-		Provider: provider,
-		Family:   family,
-		IconSlug: iconSlug,
-		Icon:     icon,
+		Alias:     route.Alias,
+		Label:     route.Label,
+		Provider:  provider,
+		Family:    family,
+		IconSlug:  iconSlug,
+		Icon:      icon,
+		Protocols: modelProtocols(providerType),
 	}
+}
+
+func modelProtocols(providerType string) []string {
+	if providerType == ProviderOpenAIResponses {
+		return []string{"openai-responses"}
+	}
+	return []string{"anthropic-messages"}
 }
 
 func (a *Admin) GetConversationRun(ctx context.Context, traceID string) (store.ConversationRun, error) {

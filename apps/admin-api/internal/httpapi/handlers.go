@@ -1017,7 +1017,6 @@ type llmModelReq struct {
 	Alias      string `json:"alias,omitempty"`
 	ProviderID string `json:"provider_id,omitempty"`
 	RealModel  string `json:"real_model,omitempty"`
-	Runtime    string `json:"runtime,omitempty"`
 	Label      string `json:"label,omitempty"`
 	IconType   string `json:"icon_type,omitempty"`
 	IconSlug   string `json:"icon_slug,omitempty"`
@@ -1096,7 +1095,6 @@ func llmModelInput(req llmModelReq, actor string) service.LLMModelInput {
 		Alias:      req.Alias,
 		ProviderID: req.ProviderID,
 		RealModel:  req.RealModel,
-		Runtime:    req.Runtime,
 		Label:      req.Label,
 		IconType:   req.IconType,
 		IconSlug:   req.IconSlug,

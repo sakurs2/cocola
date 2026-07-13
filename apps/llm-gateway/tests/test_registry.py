@@ -1,5 +1,6 @@
 import pytest
 from cocola_common import CocolaError, ErrorCode
+from cocola_llm_gateway.config import _build_from_dict
 from cocola_llm_gateway.registry import ModelRoute, Pricing, Registry
 from cocola_llm_gateway.upstream.fake import FakeUpstream
 
@@ -62,3 +63,33 @@ def test_route_with_unknown_provider_rejected():
     routes = {"x": ModelRoute("x", "ghost", "m")}
     with pytest.raises(CocolaError):
         Registry({"fake": FakeUpstream()}, routes, default_alias="x")
+
+
+async def test_openai_responses_provider_is_isolated_from_chat_routes():
+    registry = _build_from_dict(
+        {
+            "default_alias": "codex",
+            "providers": {
+                "responses": {
+                    "type": "openai_responses",
+                    "base_url": "https://example.invalid/v1",
+                    "api_key": "test-only-key",
+                }
+            },
+            "routes": {
+                "codex": {
+                    "provider": "responses",
+                    "real_model": "gpt-real",
+                }
+            },
+        }
+    )
+    try:
+        route, _ = registry.resolve_responses("codex")
+        assert route.real_model == "gpt-real"
+        assert route.protocols == ("openai-responses",)
+        with pytest.raises(CocolaError) as error:
+            registry.resolve_chat("codex")
+        assert error.value.code is ErrorCode.NOT_FOUND
+    finally:
+        await registry.aclose()

@@ -12,6 +12,7 @@ option go_package = "github.com/cocola-project/cocola/packages/proto/gen/go/coco
 service AgentRuntimeService {
   rpc Query(QueryRequest) returns (stream AgentEvent);
   rpc ReleaseSession(ReleaseSessionRequest) returns (ReleaseSessionResponse);
+  rpc ListRuntimes(ListRuntimesRequest) returns (ListRuntimesResponse);
 }
 
 message QueryRequest {
@@ -24,6 +25,8 @@ message QueryRequest {
   // agent runs (push model, ADR-0017). P0 carries small files inline; large
   // binaries go through object storage in a later phase.
   repeated Attachment attachments = 6;
+  // Stable product runtime selected when the conversation was created.
+  string runtime_id = 7;
 }
 
 // Attachment is a single user-uploaded file delivered to the sandbox workspace
@@ -54,3 +57,16 @@ message ReleaseSessionRequest {
 }
 
 message ReleaseSessionResponse {}
+
+message ListRuntimesRequest {}
+
+message Runtime {
+  string id = 1;
+  string label = 2;
+  string model_protocol = 3;
+  bool is_default = 4;
+}
+
+message ListRuntimesResponse {
+  repeated Runtime runtimes = 1;
+}

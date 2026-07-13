@@ -41,6 +41,7 @@ from cocola_agent_runtime.grpc_limits import channel_options
 from cocola_agent_runtime.mcp_loader import AdminMCPCatalog, MCPCatalog
 from cocola_agent_runtime.objstore import fetcher_from_env
 from cocola_agent_runtime.prompt_loader import AdminPromptCatalog, PromptCatalog
+from cocola_agent_runtime.runtime_registry import built_in_registry
 from cocola_agent_runtime.sandbox_binder import (
     SandboxBinder,
     SandboxExecutor,
@@ -62,7 +63,7 @@ def _required_env(name: str) -> str:
 
 
 def _build_session_map():
-    """session_id -> claude_session_id index for Route A --resume continuation.
+    """Conversation/runtime -> native session index for continuation.
 
     Postgres survives an agent-runtime restart, so paired with MinIO checkpoint
     restore a follow-up turn resumes the real conversation.
@@ -120,17 +121,17 @@ def _build_prompt_catalog() -> PromptCatalog:
 def _sandbox_provisioning() -> tuple[str, dict[str, str]]:
     """Route A (ADR-0009) sandbox image + the ENV injected at creation time.
 
-    The session sandbox runs the WHOLE Claude Code brain, so it must be created
-    from the brain image (COCOLA_SANDBOX_IMAGE, e.g. cocola/sandbox-runtime)
-    rather than the provider's default alpine, and it must carry the model
-    routing configuration so the in-sandbox `claude` CLI can reach the llm-gateway:
+    The session sandbox contains both built-in Agent Runtimes, so it must be
+    created from COCOLA_SANDBOX_IMAGE rather than the provider's default image.
+    It also carries secret-free routing endpoints used by both adapters:
 
       ANTHROPIC_BASE_URL   <- COCOLA_SANDBOX_LLM_BASE_URL (the gateway root)
+      COCOLA_LLM_BASE_URL  <- COCOLA_SANDBOX_LLM_BASE_URL (Codex Responses root)
       ANTHROPIC_MODEL / ANTHROPIC_SMALL_FAST_MODEL <- COCOLA_SANDBOX_MODEL_ALIAS
           (both the main and the fast model resolve to a known gateway alias;
            the registry 404s unknown aliases, so an unset fast model would fail)
 
-    Gateway supplies ANTHROPIC_AUTH_TOKEN separately for each verified Run;
+    Gateway supplies the selected runtime's auth token for each verified Run;
     session-agnostic provisioning never bakes a static credential into a warm
     sandbox. Empty routing values are dropped rather than injecting blanks.
     """
@@ -139,6 +140,7 @@ def _sandbox_provisioning() -> tuple[str, dict[str, str]]:
     alias = _required_env("COCOLA_SANDBOX_MODEL_ALIAS")
     env = {
         "ANTHROPIC_BASE_URL": base_url,
+        "COCOLA_LLM_BASE_URL": base_url,
         "ANTHROPIC_MODEL": alias,
         "ANTHROPIC_SMALL_FAST_MODEL": alias,
     }
@@ -176,8 +178,10 @@ async def serve() -> None:
     session_map = _build_session_map()
     objstore = fetcher_from_env()
     checkpoint = CheckpointManager(objstore=objstore, executor=executor, session_map=session_map)
+    provider = _build_provider(executor, session_map)
     servicer = AgentRuntimeServicer(
-        _build_provider(executor, session_map),
+        provider,
+        runtimes=built_in_registry(provider),
         skills=_build_skill_catalog(),
         mcps=_build_mcp_catalog(),
         prompts=_build_prompt_catalog(),

@@ -1,4 +1,4 @@
-"""SessionMap tests: the session_id -> claude_session_id resume index (M7).
+"""SessionMap tests: the conversation/runtime -> native session index.
 
 Two legs:
 
@@ -8,9 +8,9 @@ Two legs:
     behaves like the in-memory one AND survives being reconstructed (the restart
     proxy: a new store instance over the same DSN must still read the binding).
 
-This is the durability anchor for Route A --resume: the on-disk ~/.claude file
-is the SUFFICIENT condition, but the index must outlive an agent-runtime restart
-so a follow-up turn knows which claude_session_id to reopen.
+The on-disk runtime session is the sufficient condition, but the index must
+outlive an agent-runtime restart so a follow-up turn knows which native session
+to reopen without crossing runtime or user boundaries.
 """
 
 from __future__ import annotations
@@ -25,35 +25,38 @@ pg_only = pytest.mark.skipif(not PG_DSN, reason="COCOLA_TEST_PG_DSN not set")
 
 
 async def _contract(store):
+    runtime_id = "claude-code"
     # Unknown session -> None.
-    assert await store.get("S-unknown") is None
+    assert await store.get("S-unknown", user_id="U1", runtime_id=runtime_id) is None
     # Put then get round-trips.
-    await store.put("S1", "claude-aaa", user_id="U1", sandbox_id="box-1")
-    assert await store.get("S1", user_id="U1") == "claude-aaa"
-    binding = await store.get_binding("S1", user_id="U1")
+    await store.put("S1", "claude-aaa", user_id="U1", sandbox_id="box-1", runtime_id=runtime_id)
+    assert await store.get("S1", user_id="U1", runtime_id=runtime_id) == "claude-aaa"
+    binding = await store.get_binding("S1", user_id="U1", runtime_id=runtime_id)
     assert binding is not None
-    assert binding.claude_session_id == "claude-aaa"
+    assert binding.runtime_session_id == "claude-aaa"
+    assert binding.runtime_id == runtime_id
     assert binding.sandbox_id == "box-1"
-    assert await store.get_checkpoint("S1", user_id="U1") is None
-    # Idempotent overwrite: the latest claude_session_id wins.
-    await store.put("S1", "claude-bbb", user_id="U1", sandbox_id="box-2")
-    assert await store.get("S1", user_id="U1") == "claude-bbb"
-    binding = await store.get_binding("S1", user_id="U1")
+    assert await store.get_checkpoint("S1", user_id="U1", runtime_id=runtime_id) is None
+    # Idempotent overwrite: the latest native session ID wins.
+    await store.put("S1", "claude-bbb", user_id="U1", sandbox_id="box-2", runtime_id=runtime_id)
+    assert await store.get("S1", user_id="U1", runtime_id=runtime_id) == "claude-bbb"
+    binding = await store.get_binding("S1", user_id="U1", runtime_id=runtime_id)
     assert binding is not None
-    assert binding.claude_session_id == "claude-bbb"
+    assert binding.runtime_session_id == "claude-bbb"
     assert binding.sandbox_id == "box-2"
     assert binding.checkpoint_object_key == ""
-    # Empty claude_session_id is a no-op (never clobbers a good binding).
-    await store.put("S1", "", user_id="U1")
-    assert await store.get("S1", user_id="U1") == "claude-bbb"
-    assert await store.get("S1", user_id="U2") is None
+    # Empty native session ID is a no-op (never clobbers a good binding).
+    await store.put("S1", "", user_id="U1", runtime_id=runtime_id)
+    assert await store.get("S1", user_id="U1", runtime_id=runtime_id) == "claude-bbb"
+    assert await store.get("S1", user_id="U2", runtime_id=runtime_id) is None
+    assert await store.get("S1", user_id="U1", runtime_id="codex") is None
     # delete forgets a binding (used to drop a dangling/stale resume id).
-    await store.delete("S1", user_id="U1")
-    assert await store.get("S1", user_id="U1") is None
-    assert await store.get_binding("S1", user_id="U1") is None
-    assert await store.get_checkpoint("S1", user_id="U1") is None
+    await store.delete("S1", user_id="U1", runtime_id=runtime_id)
+    assert await store.get("S1", user_id="U1", runtime_id=runtime_id) is None
+    assert await store.get_binding("S1", user_id="U1", runtime_id=runtime_id) is None
+    assert await store.get_checkpoint("S1", user_id="U1", runtime_id=runtime_id) is None
     # delete is idempotent: forgetting an unknown session is a no-op.
-    await store.delete("S-unknown", user_id="U1")
+    await store.delete("S-unknown", user_id="U1", runtime_id=runtime_id)
 
 
 async def test_memory_session_map_contract():
@@ -64,12 +67,33 @@ async def test_memory_session_map_contract():
 
 async def test_memory_session_map_rejects_cross_owner_overwrite_and_delete():
     store = MemorySessionMap()
-    await store.put("shared", "claude-u1", user_id="U1", sandbox_id="box-u1")
+    await store.put(
+        "shared",
+        "claude-u1",
+        user_id="U1",
+        sandbox_id="box-u1",
+        runtime_id="claude-code",
+    )
     with pytest.raises(PermissionError, match="owner mismatch"):
-        await store.put("shared", "claude-u2", user_id="U2", sandbox_id="box-u2")
-    await store.delete("shared", user_id="U2")
-    assert await store.get("shared", user_id="U1") == "claude-u1"
-    assert await store.get("shared", user_id="U2") is None
+        await store.put(
+            "shared",
+            "claude-u2",
+            user_id="U2",
+            sandbox_id="box-u2",
+            runtime_id="claude-code",
+        )
+    with pytest.raises(PermissionError, match="runtime mismatch"):
+        await store.put(
+            "shared",
+            "codex-u1",
+            user_id="U1",
+            sandbox_id="box-codex",
+            runtime_id="codex",
+        )
+    await store.delete("shared", user_id="U2", runtime_id="claude-code")
+    await store.delete("shared", user_id="U1", runtime_id="codex")
+    assert await store.get("shared", user_id="U1", runtime_id="claude-code") == "claude-u1"
+    assert await store.get("shared", user_id="U2", runtime_id="claude-code") is None
 
 
 async def _truncate(dsn: str) -> None:
@@ -98,7 +122,13 @@ async def test_postgres_session_map_survives_restart():
     await _truncate(PG_DSN)
     writer = PostgresSessionMap(PG_DSN)
     try:
-        await writer.put("S-restart", "claude-persist", user_id="U9", sandbox_id="box-9")
+        await writer.put(
+            "S-restart",
+            "claude-persist",
+            user_id="U9",
+            sandbox_id="box-9",
+            runtime_id="claude-code",
+        )
     finally:
         await writer.aclose()
 
@@ -106,8 +136,11 @@ async def test_postgres_session_map_survives_restart():
     # must come back from the durable table, not from any in-process state.
     reader = PostgresSessionMap(PG_DSN)
     try:
-        assert await reader.get("S-restart", user_id="U9") == "claude-persist"
-        binding = await reader.get_binding("S-restart", user_id="U9")
+        assert (
+            await reader.get("S-restart", user_id="U9", runtime_id="claude-code")
+            == "claude-persist"
+        )
+        binding = await reader.get_binding("S-restart", user_id="U9", runtime_id="claude-code")
         assert binding is not None
         assert binding.sandbox_id == "box-9"
     finally:

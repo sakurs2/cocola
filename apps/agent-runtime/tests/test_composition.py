@@ -35,6 +35,7 @@ def test_sandbox_provisioning_never_bakes_a_static_auth_token(monkeypatch):
         "ANTHROPIC_BASE_URL": "http://llm-gateway:8080",
         "ANTHROPIC_MODEL": "cocola-default",
         "ANTHROPIC_SMALL_FAST_MODEL": "cocola-default",
+        "COCOLA_LLM_BASE_URL": "http://llm-gateway:8080",
     }
 
 

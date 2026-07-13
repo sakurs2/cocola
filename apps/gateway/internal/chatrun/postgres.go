@@ -55,32 +55,68 @@ func (p *Postgres) findRequest(ctx context.Context, userID, conversationID, requ
 }
 
 func (p *Postgres) Start(ctx context.Context, in StartInput) (StartResult, error) {
-	if in.Run.ClientRequestID != "" {
-		if run, err := p.findRequest(ctx, in.Run.UserID, in.Run.ConversationID, in.Run.ClientRequestID); err == nil {
-			return StartResult{Run: run}, nil
-		} else if !errors.Is(err, ErrNotFound) {
-			return StartResult{}, err
-		}
-	}
 	tx, err := p.pool.Begin(ctx)
 	if err != nil {
 		return StartResult{}, err
 	}
 	defer func() { _ = tx.Rollback(ctx) }()
-	var conversationID string
-	err = tx.QueryRow(ctx, `INSERT INTO conversations
-		(id, user_id, tenant_id, title, chat_type, hidden, created_at, updated_at)
-		VALUES ($1,$2,$3,$4,$5,$6,$7,$8)
-		ON CONFLICT (id) DO UPDATE SET updated_at=EXCLUDED.updated_at
-		WHERE conversations.user_id=EXCLUDED.user_id
-		RETURNING id`, in.Conversation.ID, in.Conversation.UserID, in.Conversation.TenantID,
-		in.Conversation.Title, in.Conversation.ChatType, in.Conversation.Hidden,
-		in.Conversation.CreatedAt, in.Conversation.UpdatedAt).Scan(&conversationID)
-	if errors.Is(err, pgx.ErrNoRows) {
-		return StartResult{}, ErrNotFound
-	}
-	if err != nil {
+	effective, err := scanConversation(tx.QueryRow(ctx, `SELECT id, user_id, tenant_id,
+		title, chat_type, hidden, runtime_id, created_at, updated_at
+		FROM conversations WHERE id=$1 FOR UPDATE`, in.Conversation.ID))
+	createdConversation := false
+	if errors.Is(err, convo.ErrNotFound) {
+		effective = in.Conversation
+		if effective.RuntimeID == "" {
+			effective.RuntimeID = convo.DefaultRuntimeID
+		}
+		if effective.ChatType == "" {
+			effective.ChatType = "chat"
+		}
+		tag, insertErr := tx.Exec(ctx, `INSERT INTO conversations
+			(id, user_id, tenant_id, title, chat_type, hidden, runtime_id, created_at, updated_at)
+			VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)
+			ON CONFLICT (id) DO NOTHING`, effective.ID, effective.UserID,
+			effective.TenantID, effective.Title, effective.ChatType, effective.Hidden,
+			effective.RuntimeID, effective.CreatedAt, effective.UpdatedAt)
+		if insertErr != nil {
+			return StartResult{}, insertErr
+		}
+		if tag.RowsAffected() == 1 {
+			createdConversation = true
+		} else {
+			effective, err = scanConversation(tx.QueryRow(ctx, `SELECT id, user_id, tenant_id,
+				title, chat_type, hidden, runtime_id, created_at, updated_at
+				FROM conversations WHERE id=$1 FOR UPDATE`, in.Conversation.ID))
+			if err != nil {
+				return StartResult{}, err
+			}
+		}
+	} else if err != nil {
 		return StartResult{}, err
+	}
+	if !createdConversation {
+		if effective.UserID != in.Conversation.UserID {
+			return StartResult{}, ErrNotFound
+		}
+		if in.Conversation.RuntimeID != "" && in.Conversation.RuntimeID != effective.RuntimeID {
+			return StartResult{}, ErrRuntimeMismatch
+		}
+		if in.Run.ClientRequestID != "" {
+			run, requestErr := scanRun(tx.QueryRow(ctx, `SELECT `+runColumns+` FROM conversation_runs
+				WHERE user_id=$1 AND conversation_id=$2 AND client_request_id=$3`,
+				in.Run.UserID, in.Run.ConversationID, in.Run.ClientRequestID))
+			if requestErr == nil {
+				return StartResult{Run: run, Conversation: effective}, nil
+			}
+			if !errors.Is(requestErr, ErrNotFound) {
+				return StartResult{}, requestErr
+			}
+		}
+		effective.UpdatedAt = in.Conversation.UpdatedAt
+		if _, err = tx.Exec(ctx, `UPDATE conversations SET updated_at=$2 WHERE id=$1`,
+			effective.ID, effective.UpdatedAt); err != nil {
+			return StartResult{}, err
+		}
 	}
 	_, err = tx.Exec(ctx, `INSERT INTO conversation_runs (
 		trace_id, root_span_id, conversation_id, conversation_title, user_id,
@@ -96,11 +132,11 @@ func (p *Postgres) Start(ctx context.Context, in StartInput) (StartResult, error
 			_ = tx.Rollback(ctx)
 			if in.Run.ClientRequestID != "" {
 				if run, findErr := p.findRequest(ctx, in.Run.UserID, in.Run.ConversationID, in.Run.ClientRequestID); findErr == nil {
-					return StartResult{Run: run}, nil
+					return StartResult{Run: run, Conversation: effective}, nil
 				}
 			}
 			if run, activeErr := p.Active(ctx, in.Run.ConversationID, in.Run.UserID); activeErr == nil {
-				return StartResult{Run: run}, ErrConflict
+				return StartResult{Run: run, Conversation: effective}, ErrConflict
 			}
 		}
 		return StartResult{}, err
@@ -120,7 +156,20 @@ func (p *Postgres) Start(ctx context.Context, in StartInput) (StartResult, error
 	if err := tx.Commit(ctx); err != nil {
 		return StartResult{}, err
 	}
-	return StartResult{Run: in.Run, Created: true}, nil
+	return StartResult{Run: in.Run, Conversation: effective, Created: true}, nil
+}
+
+func scanConversation(row pgx.Row) (convo.Conversation, error) {
+	var conversation convo.Conversation
+	if err := row.Scan(&conversation.ID, &conversation.UserID, &conversation.TenantID,
+		&conversation.Title, &conversation.ChatType, &conversation.Hidden, &conversation.RuntimeID,
+		&conversation.CreatedAt, &conversation.UpdatedAt); err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return convo.Conversation{}, convo.ErrNotFound
+		}
+		return convo.Conversation{}, err
+	}
+	return conversation, nil
 }
 
 func (p *Postgres) GetOwned(ctx context.Context, runID, userID string) (Run, error) {

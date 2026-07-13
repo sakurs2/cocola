@@ -5,7 +5,7 @@ import warnings
 
 from cocola.agent.v1 import agent_pb2 as cocola_dot_agent_dot_v1_dot_agent__pb2
 
-GRPC_GENERATED_VERSION = '1.80.0'
+GRPC_GENERATED_VERSION = '1.73.1'
 GRPC_VERSION = grpc.__version__
 _version_not_supported = False
 
@@ -18,7 +18,7 @@ except ImportError:
 if _version_not_supported:
     raise RuntimeError(
         f'The grpc package installed is at version {GRPC_VERSION},'
-        + ' but the generated code in cocola/agent/v1/agent_pb2_grpc.py depends on'
+        + f' but the generated code in cocola/agent/v1/agent_pb2_grpc.py depends on'
         + f' grpcio>={GRPC_GENERATED_VERSION}.'
         + f' Please upgrade your grpc module to grpcio>={GRPC_GENERATED_VERSION}'
         + f' or downgrade your generated code using grpcio-tools<={GRPC_VERSION}.'
@@ -49,6 +49,11 @@ class AgentRuntimeServiceStub(object):
                 request_serializer=cocola_dot_agent_dot_v1_dot_agent__pb2.ReleaseSessionRequest.SerializeToString,
                 response_deserializer=cocola_dot_agent_dot_v1_dot_agent__pb2.ReleaseSessionResponse.FromString,
                 _registered_method=True)
+        self.ListRuntimes = channel.unary_unary(
+                '/cocola.agent.v1.AgentRuntimeService/ListRuntimes',
+                request_serializer=cocola_dot_agent_dot_v1_dot_agent__pb2.ListRuntimesRequest.SerializeToString,
+                response_deserializer=cocola_dot_agent_dot_v1_dot_agent__pb2.ListRuntimesResponse.FromString,
+                _registered_method=True)
 
 
 class AgentRuntimeServiceServicer(object):
@@ -71,6 +76,12 @@ class AgentRuntimeServiceServicer(object):
         context.set_details('Method not implemented!')
         raise NotImplementedError('Method not implemented!')
 
+    def ListRuntimes(self, request, context):
+        """Missing associated documentation comment in .proto file."""
+        context.set_code(grpc.StatusCode.UNIMPLEMENTED)
+        context.set_details('Method not implemented!')
+        raise NotImplementedError('Method not implemented!')
+
 
 def add_AgentRuntimeServiceServicer_to_server(servicer, server):
     rpc_method_handlers = {
@@ -83,6 +94,11 @@ def add_AgentRuntimeServiceServicer_to_server(servicer, server):
                     servicer.ReleaseSession,
                     request_deserializer=cocola_dot_agent_dot_v1_dot_agent__pb2.ReleaseSessionRequest.FromString,
                     response_serializer=cocola_dot_agent_dot_v1_dot_agent__pb2.ReleaseSessionResponse.SerializeToString,
+            ),
+            'ListRuntimes': grpc.unary_unary_rpc_method_handler(
+                    servicer.ListRuntimes,
+                    request_deserializer=cocola_dot_agent_dot_v1_dot_agent__pb2.ListRuntimesRequest.FromString,
+                    response_serializer=cocola_dot_agent_dot_v1_dot_agent__pb2.ListRuntimesResponse.SerializeToString,
             ),
     }
     generic_handler = grpc.method_handlers_generic_handler(
@@ -144,6 +160,33 @@ class AgentRuntimeService(object):
             '/cocola.agent.v1.AgentRuntimeService/ReleaseSession',
             cocola_dot_agent_dot_v1_dot_agent__pb2.ReleaseSessionRequest.SerializeToString,
             cocola_dot_agent_dot_v1_dot_agent__pb2.ReleaseSessionResponse.FromString,
+            options,
+            channel_credentials,
+            insecure,
+            call_credentials,
+            compression,
+            wait_for_ready,
+            timeout,
+            metadata,
+            _registered_method=True)
+
+    @staticmethod
+    def ListRuntimes(request,
+            target,
+            options=(),
+            channel_credentials=None,
+            call_credentials=None,
+            insecure=False,
+            compression=None,
+            wait_for_ready=None,
+            timeout=None,
+            metadata=None):
+        return grpc.experimental.unary_unary(
+            request,
+            target,
+            '/cocola.agent.v1.AgentRuntimeService/ListRuntimes',
+            cocola_dot_agent_dot_v1_dot_agent__pb2.ListRuntimesRequest.SerializeToString,
+            cocola_dot_agent_dot_v1_dot_agent__pb2.ListRuntimesResponse.FromString,
             options,
             channel_credentials,
             insecure,

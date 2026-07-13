@@ -29,6 +29,7 @@ const (
 
 var defaultDirs = []string{
 	"/home/cocola/.claude",
+	"/home/cocola/.codex",
 	"/workspace/uploads",
 	"/workspace/outputs",
 	"/workspace/persist",
@@ -225,6 +226,7 @@ func (p *Provider) recordSuccess(ctx context.Context, userID, sessionID, key str
 INSERT INTO session_map (
     session_id,
     user_id,
+    runtime_id,
     checkpoint_object_key,
     checkpoint_status,
     checkpoint_size_bytes,
@@ -232,7 +234,17 @@ INSERT INTO session_map (
     checkpoint_updated_at,
     updated_at
 )
-VALUES ($1, $2, $3, 'uploaded', $4, '', now(), now())
+VALUES (
+    $1,
+    $2,
+    COALESCE((SELECT runtime_id FROM conversations WHERE id = $1 AND user_id = $2), 'claude-code'),
+    $3,
+    'uploaded',
+    $4,
+    '',
+    now(),
+    now()
+)
 ON CONFLICT (session_id)
 DO UPDATE SET checkpoint_object_key = EXCLUDED.checkpoint_object_key,
              checkpoint_status = EXCLUDED.checkpoint_status,
@@ -267,12 +279,21 @@ func (p *Provider) recordFailure(ctx context.Context, userID, sessionID, reason 
 INSERT INTO session_map (
     session_id,
     user_id,
+    runtime_id,
     checkpoint_status,
     checkpoint_error,
     checkpoint_updated_at,
     updated_at
 )
-VALUES ($1, $2, 'failed', $3, now(), now())
+VALUES (
+    $1,
+    $2,
+    COALESCE((SELECT runtime_id FROM conversations WHERE id = $1 AND user_id = $2), 'claude-code'),
+    'failed',
+    $3,
+    now(),
+    now()
+)
 ON CONFLICT (session_id)
 DO UPDATE SET checkpoint_status = EXCLUDED.checkpoint_status,
              checkpoint_error = EXCLUDED.checkpoint_error,

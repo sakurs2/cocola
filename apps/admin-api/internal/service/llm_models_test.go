@@ -93,9 +93,48 @@ func TestLLMModelsDefaultAndPublicList(t *testing.T) {
 	if public[0].Provider != "anthropic" || public[0].Family != "claude" || public[0].IconSlug != "anthropic" {
 		t.Fatalf("public model identity = %+v", public[0])
 	}
+	if len(public[0].Protocols) != 1 || public[0].Protocols[0] != "anthropic-messages" {
+		t.Fatalf("public model protocols = %+v", public[0].Protocols)
+	}
 
 	if _, err := svc.SetDefaultLLMModel(ctx, "hidden", "admin"); !errors.Is(err, ErrInvalidArg) {
 		t.Fatalf("hidden default want ErrInvalidArg, got %v", err)
+	}
+}
+
+func TestResponsesProviderPublishesResponsesProtocol(t *testing.T) {
+	ctx := context.Background()
+	svc := New(store.NewMemory(), nil, authTestClock).WithModelSecretKey("secret")
+	key := "test-only-key"
+	if _, err := svc.CreateLLMProvider(ctx, LLMProviderInput{
+		ID:      "openai-responses",
+		Name:    "OpenAI Responses",
+		Type:    ProviderOpenAIResponses,
+		BaseURL: "https://api.openai.com/v1",
+		APIKey:  &key,
+		Enabled: boolPtr(true),
+	}); err != nil {
+		t.Fatalf("create responses provider: %v", err)
+	}
+	if _, err := svc.CreateLLMModel(ctx, LLMModelInput{
+		Alias:      "codex-model",
+		ProviderID: "openai-responses",
+		RealModel:  "gpt-real",
+		Label:      "Codex Model",
+		IconType:   IconSimpleIcons,
+		IconSlug:   "openai",
+		IsDefault:  true,
+	}); err != nil {
+		t.Fatalf("create responses model: %v", err)
+	}
+
+	models, err := svc.ListPublicLLMModels(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(models) != 1 || len(models[0].Protocols) != 1 ||
+		models[0].Protocols[0] != "openai-responses" {
+		t.Fatalf("responses model protocols = %+v", models)
 	}
 }
 

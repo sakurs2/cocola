@@ -90,6 +90,44 @@ SELECT user_id, checkpoint_object_key FROM session_map WHERE session_id=$1
 	}
 }
 
+func TestRecordSuccessInheritsConversationRuntime(t *testing.T) {
+	dsn := os.Getenv("COCOLA_TEST_PG_DSN")
+	if dsn == "" {
+		t.Skip("COCOLA_TEST_PG_DSN not set")
+	}
+	ctx := context.Background()
+	conn, err := pgx.Connect(ctx, dsn)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = conn.Close(ctx) }()
+
+	sessionID := "checkpoint-runtime-" + uuid.NewString()
+	if _, err := conn.Exec(ctx, `
+INSERT INTO conversations (id, user_id, tenant_id, title, runtime_id, created_at, updated_at)
+VALUES ($1, 'user-codex', '', 'Codex', 'codex', now(), now())
+`, sessionID); err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _, _ = conn.Exec(ctx, `DELETE FROM conversations WHERE id=$1`, sessionID) }()
+
+	p := &Provider{cfg: Config{PGDSN: dsn}}
+	if err := p.recordSuccess(ctx, "user-codex", sessionID, "checkpoint-codex", 42); err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _, _ = conn.Exec(ctx, `DELETE FROM session_map WHERE session_id=$1`, sessionID) }()
+
+	var runtimeID string
+	if err := conn.QueryRow(ctx, `
+SELECT runtime_id FROM session_map WHERE session_id=$1
+`, sessionID).Scan(&runtimeID); err != nil {
+		t.Fatal(err)
+	}
+	if runtimeID != "codex" {
+		t.Fatalf("checkpoint session runtime = %q, want codex", runtimeID)
+	}
+}
+
 func (f *fakeCheckpointObjectCleaner) ListObjects(
 	_ context.Context, _ string, opts minio.ListObjectsOptions,
 ) <-chan minio.ObjectInfo {

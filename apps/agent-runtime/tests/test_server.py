@@ -22,6 +22,11 @@ import pytest
 from cocola_agent_runtime.agent_provider import AgentEvent, AgentOptions
 from cocola_agent_runtime.checkpoint import CheckpointConfig, CheckpointManager
 from cocola_agent_runtime.prompt_loader import PromptMarker, StaticPromptCatalog
+from cocola_agent_runtime.runtime_registry import (
+    RuntimeDescriptor,
+    RuntimeEntry,
+    RuntimeRegistry,
+)
 from cocola_agent_runtime.sandbox_binder import (
     ExecOutcome,
     SandboxGoneError,
@@ -45,6 +50,7 @@ class FakeRequest:
     prompt: str = "hi"
     sandbox_id: str = ""
     max_turns: int = 0
+    runtime_id: str = "claude-code"
     attachments: list = field(default_factory=list)
 
 
@@ -153,32 +159,46 @@ class FakeSessionMap:
         self.bindings = {}
         self.checkpoints = {}
 
-    async def get(self, session_id: str, *, user_id: str = ""):
-        binding = await self.get_binding(session_id, user_id=user_id)
-        return binding.claude_session_id if binding else None
+    async def get(self, session_id: str, *, user_id: str = "", runtime_id: str = ""):
+        binding = await self.get_binding(session_id, user_id=user_id, runtime_id=runtime_id)
+        return binding.runtime_session_id if binding else None
 
-    async def get_binding(self, session_id: str, *, user_id: str = ""):
+    async def get_binding(self, session_id: str, *, user_id: str = "", runtime_id: str = ""):
         binding = self.bindings.get(session_id)
         if binding and binding.user_id and binding.user_id != user_id:
+            return None
+        if binding and runtime_id and binding.runtime_id != runtime_id:
             return None
         return binding
 
     async def put(
-        self, session_id: str, claude_session_id: str, *, user_id: str = "", sandbox_id: str = ""
+        self,
+        session_id: str,
+        runtime_session_id: str,
+        *,
+        user_id: str = "",
+        sandbox_id: str = "",
+        runtime_id: str = "",
     ):
         self.bindings[session_id] = SessionBinding(
-            claude_session_id=claude_session_id,
+            runtime_session_id=runtime_session_id,
+            runtime_id=runtime_id,
             user_id=user_id,
             sandbox_id=sandbox_id,
             checkpoint_object_key=self.checkpoints.get(session_id, ""),
         )
 
-    async def get_checkpoint(self, session_id: str, *, user_id: str = ""):
+    async def get_checkpoint(self, session_id: str, *, user_id: str = "", runtime_id: str = ""):
+        binding = self.bindings.get(session_id)
+        if binding and runtime_id and binding.runtime_id != runtime_id:
+            return None
         return self.checkpoints.get(session_id)
 
-    async def delete(self, session_id: str, *, user_id: str = ""):
+    async def delete(self, session_id: str, *, user_id: str = "", runtime_id: str = ""):
         binding = self.bindings.get(session_id)
         if binding and binding.user_id and binding.user_id != user_id:
+            return
+        if binding and runtime_id and binding.runtime_id != runtime_id:
             return
         self.deleted.append(session_id)
         if self.fail_delete:
@@ -365,6 +385,19 @@ async def test_skill_sync_uses_one_archive_write_and_one_exec():
     assert call["cmd"][3] == archive_path
 
 
+async def test_codex_skill_sync_targets_codex_home():
+    executor = StaticSandboxExecutor()
+    servicer = AgentRuntimeServicer(ListProvider([]), executor=executor)
+
+    await servicer._sync_skills_into_sandbox(
+        "box-1",
+        [Skill(id="review", name="Review", skill_md="# Review")],
+        runtime_id="codex",
+    )
+
+    assert executor.exec_calls[0]["cmd"][4] == "/home/cocola/.codex"
+
+
 async def test_skill_batch_installer_links_shared_and_installs_local_payloads(tmp_path):
     executor = StaticSandboxExecutor()
     store = FakeObjectStore()
@@ -515,11 +548,65 @@ async def test_query_maps_request_fields_to_options():
     assert o.sandbox_id == "box-1" and o.max_turns == 5
 
 
+async def test_runtime_catalog_and_provider_dispatch():
+    claude = ListProvider([AgentEvent(kind="done", data={})])
+    codex = ListProvider([AgentEvent(kind="done", data={})])
+    runtimes = RuntimeRegistry(
+        [
+            RuntimeEntry(
+                RuntimeDescriptor(
+                    id="claude-code",
+                    label="Claude Code",
+                    model_protocol="anthropic-messages",
+                    is_default=True,
+                ),
+                claude,
+            ),
+            RuntimeEntry(
+                RuntimeDescriptor(
+                    id="codex",
+                    label="Codex",
+                    model_protocol="openai-responses",
+                ),
+                codex,
+            ),
+        ]
+    )
+    servicer = AgentRuntimeServicer(claude, runtimes=runtimes)
+
+    catalog = await servicer.ListRuntimes(None, FakeContext())
+    assert [(item.id, item.model_protocol, item.is_default) for item in catalog.runtimes] == [
+        ("claude-code", "anthropic-messages", True),
+        ("codex", "openai-responses", False),
+    ]
+
+    await servicer.Query(FakeRequest(runtime_id="codex"), FakeContext())
+
+    assert claude.seen_options is None
+    assert codex.seen_options is not None
+    assert codex.seen_options.runtime_id == "codex"
+
+
+async def test_query_rejects_unsupported_runtime_before_provider_call():
+    provider = ListProvider([AgentEvent(kind="done", data={})])
+    context = FakeContext()
+
+    await AgentRuntimeServicer(provider).Query(FakeRequest(runtime_id="not-installed"), context)
+
+    assert provider.seen_options is None
+    assert len(context.written) == 1
+    assert context.written[0].kind == "error"
+    assert context.written[0].data["code"] == "UNSUPPORTED_RUNTIME"
+
+
 async def test_release_session_calls_binder_and_session_map():
     binder = StaticSandboxBinder()
     session_map = FakeSessionMap()
     session_map.bindings["sess-7"] = SessionBinding(
-        claude_session_id="claude-1", user_id="U1", sandbox_id="box-sess-7"
+        runtime_session_id="claude-1",
+        runtime_id="claude-code",
+        user_id="U1",
+        sandbox_id="box-sess-7",
     )
 
     await AgentRuntimeServicer(
@@ -536,7 +623,10 @@ async def test_release_session_wrong_owner_does_not_release_sandbox():
     binder = StaticSandboxBinder()
     session_map = FakeSessionMap()
     session_map.bindings["shared"] = SessionBinding(
-        claude_session_id="claude-u1", user_id="U1", sandbox_id="box-u1"
+        runtime_session_id="claude-u1",
+        runtime_id="claude-code",
+        user_id="U1",
+        sandbox_id="box-u1",
     )
 
     await AgentRuntimeServicer(
@@ -629,7 +719,9 @@ async def test_query_reports_missing_checkpoint_for_existing_session():
     store = FakeObjectStore()
     session_map = FakeSessionMap()
     session_map.bindings["S1"] = SessionBinding(
-        claude_session_id="claude-old",
+        runtime_session_id="claude-old",
+        runtime_id="claude-code",
+        user_id="U1",
         sandbox_id="box-old",
     )
     checkpoint = CheckpointManager(
@@ -703,7 +795,9 @@ async def test_query_reports_checkpoint_restore_failure():
     store = FakeObjectStore()
     session_map = FakeSessionMap()
     session_map.bindings["S1"] = SessionBinding(
-        claude_session_id="claude-old",
+        runtime_session_id="claude-old",
+        runtime_id="claude-code",
+        user_id="U1",
         sandbox_id="box-old",
         checkpoint_object_key="missing-object",
     )

@@ -7,20 +7,22 @@ from typing import ClassVar as _ClassVar, Optional as _Optional, Union as _Union
 DESCRIPTOR: _descriptor.FileDescriptor
 
 class QueryRequest(_message.Message):
-    __slots__ = ("user_id", "session_id", "prompt", "sandbox_id", "max_turns", "attachments")
+    __slots__ = ("user_id", "session_id", "prompt", "sandbox_id", "max_turns", "attachments", "runtime_id")
     USER_ID_FIELD_NUMBER: _ClassVar[int]
     SESSION_ID_FIELD_NUMBER: _ClassVar[int]
     PROMPT_FIELD_NUMBER: _ClassVar[int]
     SANDBOX_ID_FIELD_NUMBER: _ClassVar[int]
     MAX_TURNS_FIELD_NUMBER: _ClassVar[int]
     ATTACHMENTS_FIELD_NUMBER: _ClassVar[int]
+    RUNTIME_ID_FIELD_NUMBER: _ClassVar[int]
     user_id: str
     session_id: str
     prompt: str
     sandbox_id: str
     max_turns: int
     attachments: _containers.RepeatedCompositeFieldContainer[Attachment]
-    def __init__(self, user_id: _Optional[str] = ..., session_id: _Optional[str] = ..., prompt: _Optional[str] = ..., sandbox_id: _Optional[str] = ..., max_turns: _Optional[int] = ..., attachments: _Optional[_Iterable[_Union[Attachment, _Mapping]]] = ...) -> None: ...
+    runtime_id: str
+    def __init__(self, user_id: _Optional[str] = ..., session_id: _Optional[str] = ..., prompt: _Optional[str] = ..., sandbox_id: _Optional[str] = ..., max_turns: _Optional[int] = ..., attachments: _Optional[_Iterable[_Union[Attachment, _Mapping]]] = ..., runtime_id: _Optional[str] = ...) -> None: ...
 
 class Attachment(_message.Message):
     __slots__ = ("filename", "content", "mime", "oss_key", "size")
@@ -62,3 +64,25 @@ class ReleaseSessionRequest(_message.Message):
 class ReleaseSessionResponse(_message.Message):
     __slots__ = ()
     def __init__(self) -> None: ...
+
+class ListRuntimesRequest(_message.Message):
+    __slots__ = ()
+    def __init__(self) -> None: ...
+
+class Runtime(_message.Message):
+    __slots__ = ("id", "label", "model_protocol", "is_default")
+    ID_FIELD_NUMBER: _ClassVar[int]
+    LABEL_FIELD_NUMBER: _ClassVar[int]
+    MODEL_PROTOCOL_FIELD_NUMBER: _ClassVar[int]
+    IS_DEFAULT_FIELD_NUMBER: _ClassVar[int]
+    id: str
+    label: str
+    model_protocol: str
+    is_default: bool
+    def __init__(self, id: _Optional[str] = ..., label: _Optional[str] = ..., model_protocol: _Optional[str] = ..., is_default: bool = ...) -> None: ...
+
+class ListRuntimesResponse(_message.Message):
+    __slots__ = ("runtimes",)
+    RUNTIMES_FIELD_NUMBER: _ClassVar[int]
+    runtimes: _containers.RepeatedCompositeFieldContainer[Runtime]
+    def __init__(self, runtimes: _Optional[_Iterable[_Union[Runtime, _Mapping]]] = ...) -> None: ...

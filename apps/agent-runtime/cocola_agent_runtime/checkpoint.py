@@ -103,7 +103,13 @@ class CheckpointManager:
         )
 
     async def restore_if_fresh(
-        self, *, sandbox_id: str, user_id: str, session_id: str, reused: bool
+        self,
+        *,
+        sandbox_id: str,
+        user_id: str,
+        session_id: str,
+        runtime_id: str,
+        reused: bool,
     ) -> RestoreOutcome:
         """Restore the latest checkpoint before running the agent in a fresh sandbox."""
         if reused or not self.enabled or not sandbox_id:
@@ -113,8 +119,12 @@ class CheckpointManager:
         assert self._session_map is not None
         archive_path = _sandbox_tmp_path()
         try:
-            binding = await self._session_map.get_binding(session_id, user_id=user_id)
-            key = await self._session_map.get_checkpoint(session_id, user_id=user_id)
+            binding = await self._session_map.get_binding(
+                session_id, user_id=user_id, runtime_id=runtime_id
+            )
+            key = await self._session_map.get_checkpoint(
+                session_id, user_id=user_id, runtime_id=runtime_id
+            )
             if not key:
                 if binding is None:
                     return RestoreOutcome("skipped")

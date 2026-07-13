@@ -770,8 +770,8 @@ func TestSafe(t *testing.T) {
 
 func TestMapVolumes(t *testing.T) {
 	vols := mapPVCVolumes("s1")
-	if len(vols) != 3 {
-		t.Fatalf("mapVolumes returned %d volumes, want 3", len(vols))
+	if len(vols) != 4 {
+		t.Fatalf("mapVolumes returned %d volumes, want 4", len(vols))
 	}
 
 	// 0: session workspace, RW, must NOT delete on termination (cocola GC).
@@ -790,8 +790,17 @@ func TestMapVolumes(t *testing.T) {
 	if vols[0].PVC.ClaimName != vols[1].PVC.ClaimName {
 		t.Errorf("claude claim %q != workspace claim %q", vols[1].PVC.ClaimName, vols[0].PVC.ClaimName)
 	}
-	// 2: shared platform-skill volume, read-only, no createIfNotExists.
-	if v := vols[2]; v.PVC == nil || v.PVC.ClaimName != "cocola-plugins" ||
+	// 2: session-local Codex state, RW, on the same session claim.
+	if v := vols[2]; v.PVC == nil || v.PVC.ClaimName != "cocola-session-s1" ||
+		!v.PVC.CreateIfNotExists || v.PVC.DeleteOnSandboxTermination ||
+		v.MountPath != "/home/cocola/.codex" || v.ReadOnly || v.SubPath != "codex" {
+		t.Errorf("codex volume = %+v (pvc %+v)", v, v.PVC)
+	}
+	if vols[0].PVC.ClaimName != vols[2].PVC.ClaimName {
+		t.Errorf("codex claim %q != workspace claim %q", vols[2].PVC.ClaimName, vols[0].PVC.ClaimName)
+	}
+	// 3: shared platform-skill volume, read-only, no createIfNotExists.
+	if v := vols[3]; v.PVC == nil || v.PVC.ClaimName != "cocola-plugins" ||
 		v.PVC.CreateIfNotExists || v.MountPath != "/data/plugins" || !v.ReadOnly || v.SubPath != "" {
 		t.Errorf("plugins volume = %+v (pvc %+v)", v, v.PVC)
 	}
@@ -826,8 +835,8 @@ func TestMapHostVolumes(t *testing.T) {
 	if err != nil {
 		t.Fatalf("mapVolumes host: %v", err)
 	}
-	if len(vols) != 3 {
-		t.Fatalf("host volumes = %d, want 3", len(vols))
+	if len(vols) != 4 {
+		t.Fatalf("host volumes = %d, want 4", len(vols))
 	}
 	sessionRoot := filepath.Join(root, "users", safePathSegment("User/1"), "sessions", safePathSegment("Sess..1"))
 	assertHost := func(i int, name, path, mount string, ro bool) {
@@ -843,7 +852,8 @@ func TestMapHostVolumes(t *testing.T) {
 	}
 	assertHost(0, "workspace", filepath.Join(sessionRoot, "workspace"), guestWorkspace, false)
 	assertHost(1, "claude", filepath.Join(sessionRoot, "claude"), guestClaudeConfig, false)
-	assertHost(2, "plugins", filepath.Join(root, "plugins"), guestPlugins, true)
+	assertHost(2, "codex", filepath.Join(sessionRoot, "codex"), guestCodexConfig, false)
+	assertHost(3, "plugins", filepath.Join(root, "plugins"), guestPlugins, true)
 }
 
 // TestMapVolumes_WarmPVC asserts a warm sandbox mounts only the shared,
@@ -896,12 +906,13 @@ func TestCreate_SendsVolumes(t *testing.T) {
 	}); err != nil {
 		t.Fatalf("Create: %v", err)
 	}
-	if len(body.Volumes) != 3 {
-		t.Fatalf("wire volumes = %d, want 3\nbody=%+v", len(body.Volumes), body)
+	if len(body.Volumes) != 4 {
+		t.Fatalf("wire volumes = %d, want 4\nbody=%+v", len(body.Volumes), body)
 	}
 	want := map[string]bool{
 		"/workspace":           false,
 		"/home/cocola/.claude": false,
+		"/home/cocola/.codex":  false,
 		"/data/plugins":        true, // readOnly
 	}
 	for _, v := range body.Volumes {
@@ -935,8 +946,8 @@ func TestCreate_SendsHostVolumes(t *testing.T) {
 	}); err != nil {
 		t.Fatalf("Create: %v", err)
 	}
-	if len(body.Volumes) != 3 {
-		t.Fatalf("wire volumes = %d, want 3", len(body.Volumes))
+	if len(body.Volumes) != 4 {
+		t.Fatalf("wire volumes = %d, want 4", len(body.Volumes))
 	}
 	for _, v := range body.Volumes {
 		if v.PVC != nil || v.Host == nil {
@@ -1257,10 +1268,11 @@ func TestChownEntrypoint(t *testing.T) {
 	}
 	script := got[2]
 	for _, want := range []string{
-		"mkdir -p '/workspace' '/home/cocola/.claude'",
+		"mkdir -p '/workspace' '/home/cocola/.claude' '/home/cocola/.codex'",
 		"chown -R 'cocola':'cocola'",
 		"'/workspace'",
 		"'/home/cocola/.claude'",
+		"'/home/cocola/.codex'",
 		"|| true",
 		"exec sleep infinity",
 	} {

@@ -66,7 +66,11 @@ export type TaskFormState = {
   files: TaskAttachment[];
 };
 
-export type ModelOption = { alias: string; label: string };
+export type ModelOption = {
+  alias: string;
+  label: string;
+  protocols?: string[];
+};
 
 export function detectedTimezone(): string {
   return Intl.DateTimeFormat().resolvedOptions().timeZone || "Asia/Shanghai";

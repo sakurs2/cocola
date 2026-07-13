@@ -70,12 +70,19 @@ type UiEnvironmentPart = {
   environment: EnvironmentPreparationSnapshot;
 };
 
+type UiProgressPart = {
+  type: "progress";
+  progressId: string;
+  items: unknown[];
+};
+
 type UiPart =
   | { type: "text"; text: string }
   | { type: "reasoning"; text: string }
   | UiToolCall
   | UiFilePart
-  | UiEnvironmentPart;
+  | UiEnvironmentPart
+  | UiProgressPart;
 
 type UiMessage = {
   id: string;
@@ -131,6 +138,7 @@ export type SandboxInfo = {
 
 export type EnvironmentComponentStatus =
   | "pending"
+  | "configured"
   | "loaded"
   | "connected"
   | "failed"
@@ -162,6 +170,7 @@ export type ConversationSummary = {
   title: string;
   chat_type?: "chat" | "scheduled_task" | string;
   updated_at: string;
+  runtime_id: string;
 };
 
 type UserEvent = {
@@ -193,6 +202,14 @@ export type ModelOption = {
   family?: string;
   iconSlug?: string;
   icon: ModelIconConfig;
+  protocols: string[];
+};
+
+export type AgentRuntimeOption = {
+  id: string;
+  label: string;
+  model_protocol: string;
+  is_default: boolean;
 };
 
 export type UiMessageMetadata = {
@@ -246,6 +263,10 @@ type CocolaContextValue = {
   selectedModel: ModelOption | null;
   modelsLoaded: boolean;
   setSelectedModelAlias: (alias: string) => void;
+  runtimes: AgentRuntimeOption[];
+  selectedRuntime: AgentRuntimeOption | null;
+  runtimeLocked: boolean;
+  setSelectedRuntimeId: (id: string) => void;
 };
 
 const CocolaContext = createContext<CocolaContextValue | null>(null);
@@ -275,6 +296,7 @@ function parseSize(v: string | undefined): number {
 const ENVIRONMENT_PHASES = new Set<EnvironmentStatus["phase"]>(["preparing", "ready", "degraded"]);
 const ENVIRONMENT_COMPONENT_STATUSES = new Set<EnvironmentComponentStatus>([
   "pending",
+  "configured",
   "loaded",
   "connected",
   "failed",
@@ -394,6 +416,9 @@ function normalizeModelOption(raw: unknown): ModelOption | null {
     ...(family ? { family } : {}),
     ...(iconSlug ? { iconSlug } : {}),
     icon: normalizedIcon,
+    protocols: Array.isArray(row.protocols)
+      ? row.protocols.filter((value): value is string => typeof value === "string")
+      : [],
   };
 }
 
@@ -470,6 +495,22 @@ function upsertEnvironmentPreparation(
   return parts.map((part, partIndex) => (partIndex === index ? next : part));
 }
 
+function upsertProgress(parts: UiPart[], id: string, itemsJSON: string): UiPart[] {
+  let items: unknown[] = [];
+  try {
+    const parsed = JSON.parse(itemsJSON) as unknown;
+    if (Array.isArray(parsed)) items = parsed;
+  } catch {
+    return parts;
+  }
+  const next: UiProgressPart = { type: "progress", progressId: id, items };
+  const index = parts.findIndex(
+    (part) => part.type === "progress" && part.progressId === next.progressId,
+  );
+  if (index < 0) return [...parts, next];
+  return parts.map((part, partIndex) => (partIndex === index ? next : part));
+}
+
 // Reduce a single agent event into the assistant message's parts. Pure.
 function reducePart(parts: UiPart[], ev: AgentEvent): UiPart[] {
   const d = ev.data ?? {};
@@ -506,6 +547,8 @@ function reducePart(parts: UiPart[], ev: AgentEvent): UiPart[] {
           downloadUrl: d.download_url || d.downloadUrl || "",
         },
       ];
+    case "progress":
+      return upsertProgress(parts, d.id || "todo-list", d.items || "[]");
     case "error":
       return appendTo(parts, "text", `\n\n⚠️ ${d.error ?? "unknown error"}`);
     // result / system / sandbox / done carry no message-body content.
@@ -533,6 +576,16 @@ function convertMessage(message: UiMessage): ThreadMessageLike {
           url: p.downloadUrl,
           size: p.size,
         }),
+      };
+    }
+    if (p.type === "progress") {
+      const snapshot = JSON.stringify(p.items);
+      return {
+        type: "tool-call" as const,
+        toolCallId: p.progressId,
+        toolName: "Progress",
+        argsText: snapshot,
+        result: snapshot,
       };
     }
     // tool-call. We pass only argsText (the raw JSON string from the wire) —
@@ -588,10 +641,14 @@ export function CocolaRuntimeProvider({ children }: { children: ReactNode }) {
   const [models, setModels] = useState<ModelOption[]>([]);
   const [selectedModelAlias, setSelectedModelAlias] = useState("");
   const [modelsLoaded, setModelsLoaded] = useState(false);
+  const [runtimes, setRuntimes] = useState<AgentRuntimeOption[]>([]);
+  const [selectedRuntimeId, setSelectedRuntimeIdState] = useState("");
+  const [runtimesLoaded, setRuntimesLoaded] = useState(false);
   const abortMap = useRef<Map<string, AbortController>>(new Map());
   const runCursors = useRef<Map<string, RunCursor>>(new Map());
   const restoredRuns = useRef(false);
   const sessionIdRef = useRef(sessionId);
+  const preferredRuntimeIdRef = useRef("");
   const conversationsRef = useRef(conversations);
   const realtimeScheduledRunsRef = useRef<Set<string>>(new Set());
   const deletedScheduledConversationsRef = useRef<Map<string, number>>(new Map());
@@ -600,10 +657,50 @@ export function CocolaRuntimeProvider({ children }: { children: ReactNode }) {
   const isRunning = runningIds.has(sessionId);
   const sandbox = sandboxes[sessionId] ?? null;
   const environmentStatus = environmentStatuses[sessionId] ?? null;
-  const selectedModel = useMemo(
-    () => models.find((m) => m.alias === selectedModelAlias) ?? models[0] ?? null,
-    [models, selectedModelAlias],
+  const selectedRuntime = useMemo(
+    () => runtimes.find((runtime) => runtime.id === selectedRuntimeId) ?? null,
+    [runtimes, selectedRuntimeId],
   );
+  const compatibleModels = useMemo(
+    () =>
+      selectedRuntime
+        ? models.filter((model) => model.protocols.includes(selectedRuntime.model_protocol))
+        : [],
+    [models, selectedRuntime],
+  );
+  const selectedModel = useMemo(
+    () =>
+      compatibleModels.find((model) => model.alias === selectedModelAlias) ??
+      compatibleModels[0] ??
+      null,
+    [compatibleModels, selectedModelAlias],
+  );
+  const runtimeLocked = messages.length > 0 || conversations.some((item) => item.id === sessionId);
+
+  const setSelectedRuntimeId = useCallback(
+    (id: string) => {
+      if (runtimeLocked || !runtimes.some((runtime) => runtime.id === id)) return;
+      setSelectedRuntimeIdState(id);
+      preferredRuntimeIdRef.current = id;
+      try {
+        localStorage.setItem("cocola:last-agent-runtime", id);
+      } catch {
+        // Browser storage is an optional preference only.
+      }
+    },
+    [runtimeLocked, runtimes],
+  );
+
+  useEffect(() => {
+    if (selectedModel && selectedModel.alias !== selectedModelAlias) {
+      setSelectedModelAlias(selectedModel.alias);
+    }
+  }, [selectedModel, selectedModelAlias]);
+
+  useEffect(() => {
+    const conversation = conversations.find((item) => item.id === sessionId);
+    if (conversation?.runtime_id) setSelectedRuntimeIdState(conversation.runtime_id);
+  }, [conversations, runtimesLoaded, sessionId]);
 
   useEffect(() => {
     sessionIdRef.current = sessionId;
@@ -885,6 +982,7 @@ export function CocolaRuntimeProvider({ children }: { children: ReactNode }) {
               title: existing?.title || title,
               chat_type: existing?.chat_type || "scheduled_task",
               updated_at: updatedAt,
+              runtime_id: existing?.runtime_id || "claude-code",
             },
             ...rest,
           ];
@@ -1010,7 +1108,8 @@ export function CocolaRuntimeProvider({ children }: { children: ReactNode }) {
 
       const turnSessionId = sessionId;
       const model = selectedModel;
-      if (!model) return;
+      const agentRuntime = selectedRuntime;
+      if (!model || !agentRuntime) return;
       if (abortMap.current.has(turnSessionId) || runCursors.current.has(turnSessionId)) return;
       const isInitialTurn = messages.length === 0;
       const assistantMetadata: UiMessageMetadata = {
@@ -1071,7 +1170,15 @@ export function CocolaRuntimeProvider({ children }: { children: ReactNode }) {
         const existing = prev.find((c) => c.id === turnSessionId);
         const rest = prev.filter((c) => c.id !== turnSessionId);
         const title = existing?.title || text.slice(0, 40) || "New Chat";
-        return [{ id: turnSessionId, title, updated_at: now }, ...rest];
+        return [
+          {
+            id: turnSessionId,
+            title,
+            updated_at: now,
+            runtime_id: existing?.runtime_id || agentRuntime.id,
+          },
+          ...rest,
+        ];
       });
 
       const ctrl = new AbortController();
@@ -1081,6 +1188,7 @@ export function CocolaRuntimeProvider({ children }: { children: ReactNode }) {
           prompt: text,
           session_id: turnSessionId,
           client_request_id: clientRequestId,
+          runtime_id: agentRuntime.id,
           model_alias: model.alias,
           model_label: model.label,
           ...(model.provider ? { model_provider: model.provider } : {}),
@@ -1124,7 +1232,23 @@ export function CocolaRuntimeProvider({ children }: { children: ReactNode }) {
           return;
         }
         if (res.status === 409) {
-          const conflict = (await res.json().catch(() => ({}))) as { run_id?: string };
+          const conflict = (await res.json().catch(() => ({}))) as {
+            run_id?: string;
+            error?: { code?: string; message?: string };
+          };
+          if (conflict.error?.code === "RUNTIME_MISMATCH") {
+            setConvMessages((prev) => ({
+              ...prev,
+              [turnSessionId]: (prev[turnSessionId] ?? []).filter(
+                (message) => message.id !== userMessageId && message.id !== assistantId,
+              ),
+            }));
+            refreshConversations();
+            throw new Error(conflict.error.message || "conversation runtime cannot be changed");
+          }
+          if (conflict.error?.code && conflict.error.code !== "RUN_IN_PROGRESS") {
+            throw new Error(conflict.error.message || "chat start conflict");
+          }
           const runId = conflict.run_id ?? "";
           if (!runId) throw new Error("conversation already has an active run");
           const durableAssistantId = `${runId}-assistant`;
@@ -1217,7 +1341,16 @@ export function CocolaRuntimeProvider({ children }: { children: ReactNode }) {
         }
       }
     },
-    [sessionId, selectedModel, messages.length, applyEvent, followRun, setRunning],
+    [
+      sessionId,
+      selectedModel,
+      selectedRuntime,
+      messages.length,
+      applyEvent,
+      followRun,
+      refreshConversations,
+      setRunning,
+    ],
   );
 
   const onCancel = useCallback(async () => {
@@ -1305,6 +1438,8 @@ export function CocolaRuntimeProvider({ children }: { children: ReactNode }) {
   // continues the SAME conversation (and lets the backend --resume it).
   const loadConversation = useCallback(
     async (id: string) => {
+      const conversation = conversations.find((item) => item.id === id);
+      if (conversation?.runtime_id) setSelectedRuntimeIdState(conversation.runtime_id);
       setSandboxes((prev) => ({ ...prev, [id]: prev[id] ?? null }));
       setSessionId(id);
       setSelectedArtifact(null);
@@ -1345,7 +1480,7 @@ export function CocolaRuntimeProvider({ children }: { children: ReactNode }) {
         void connectActiveRun(id);
       }
     },
-    [connectActiveRun, convMessages, setRunning],
+    [connectActiveRun, conversations, convMessages, setRunning],
   );
 
   const renameConversation = useCallback(
@@ -1447,11 +1582,15 @@ export function CocolaRuntimeProvider({ children }: { children: ReactNode }) {
   // in the background; the fresh session_id prevents backend --resume.
   const newConversation = useCallback(() => {
     const fresh = genId();
+    const preferred =
+      runtimes.find((runtime) => runtime.id === preferredRuntimeIdRef.current) ??
+      runtimes.find((runtime) => runtime.is_default);
     setSessionId(fresh);
+    setSelectedRuntimeIdState(preferred?.id ?? "");
     setSelectedArtifact(null);
     setConvMessages((prev) => ({ ...prev, [fresh]: [] }));
     setSandboxes((prev) => ({ ...prev, [fresh]: null }));
-  }, []);
+  }, [runtimes]);
 
   // Initial load of the sidebar list.
   useEffect(() => {
@@ -1488,6 +1627,41 @@ export function CocolaRuntimeProvider({ children }: { children: ReactNode }) {
     })();
   }, []);
 
+  useEffect(() => {
+    void (async () => {
+      try {
+        const res = await fetch("/api/agent-runtimes", { cache: "no-store" });
+        if (!res.ok) return;
+        const rows = (await res.json()) as AgentRuntimeOption[];
+        const next = Array.isArray(rows)
+          ? rows.filter(
+              (item) =>
+                item &&
+                typeof item.id === "string" &&
+                typeof item.label === "string" &&
+                typeof item.model_protocol === "string",
+            )
+          : [];
+        setRuntimes(next);
+        let preferred = "";
+        try {
+          preferred = localStorage.getItem("cocola:last-agent-runtime") ?? "";
+        } catch {
+          // Ignore unavailable browser storage.
+        }
+        const selected =
+          next.find((item) => item.id === preferred) ?? next.find((item) => item.is_default);
+        preferredRuntimeIdRef.current = selected?.id ?? "";
+        setSelectedRuntimeIdState(selected?.id ?? "");
+      } catch {
+        setRuntimes([]);
+        setSelectedRuntimeIdState("");
+      } finally {
+        setRuntimesLoaded(true);
+      }
+    })();
+  }, []);
+
   const runtime = useExternalStoreRuntime<UiMessage>({
     messages,
     isRunning,
@@ -1517,11 +1691,15 @@ export function CocolaRuntimeProvider({ children }: { children: ReactNode }) {
       selectedArtifact,
       openArtifact,
       closeArtifact,
-      models,
+      models: compatibleModels,
       selectedModelAlias,
       selectedModel,
-      modelsLoaded,
+      modelsLoaded: modelsLoaded && runtimesLoaded,
       setSelectedModelAlias,
+      runtimes,
+      selectedRuntime,
+      runtimeLocked,
+      setSelectedRuntimeId,
     }),
     [
       sessionId,
@@ -1538,10 +1716,15 @@ export function CocolaRuntimeProvider({ children }: { children: ReactNode }) {
       selectedArtifact,
       openArtifact,
       closeArtifact,
-      models,
+      compatibleModels,
       selectedModelAlias,
       selectedModel,
       modelsLoaded,
+      runtimesLoaded,
+      runtimes,
+      selectedRuntime,
+      runtimeLocked,
+      setSelectedRuntimeId,
     ],
   );
 

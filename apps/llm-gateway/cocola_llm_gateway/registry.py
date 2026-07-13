@@ -27,6 +27,7 @@ from dataclasses import dataclass, field
 from cocola_common import CocolaError, ErrorCode
 
 from cocola_llm_gateway.upstream.base import UpstreamProvider
+from cocola_llm_gateway.upstream.responses_base import ResponsesProvider
 
 
 @dataclass(frozen=True)
@@ -51,7 +52,7 @@ class ModelRoute:
     provider_name: str
     real_model: str
     pricing: Pricing = field(default_factory=Pricing)
-    runtime: str = "claude-code"
+    protocols: tuple[str, ...] = ("anthropic-messages",)
     label: str = ""
     icon: dict[str, str] = field(default_factory=dict)
     enabled: bool = True
@@ -64,20 +65,24 @@ class Registry:
         providers: dict[str, UpstreamProvider],
         routes: dict[str, ModelRoute],
         default_alias: str,
+        responses_providers: dict[str, ResponsesProvider] | None = None,
     ):
         if default_alias and default_alias not in routes:
             raise CocolaError(
                 ErrorCode.INVALID_ARGUMENT,
                 f"default_alias '{default_alias}' has no route",
             )
-        # Validate every route points at a registered provider.
+        responses_providers = responses_providers or {}
+        # Validate every route points at a registered provider of its protocol.
         for r in routes.values():
-            if r.provider_name not in providers:
+            known = r.provider_name in providers or r.provider_name in responses_providers
+            if not known:
                 raise CocolaError(
                     ErrorCode.INVALID_ARGUMENT,
                     f"route '{r.alias}' references unknown provider '{r.provider_name}'",
                 )
         self._providers = providers
+        self._responses_providers = responses_providers
         self._routes = routes
         self._default_alias = default_alias
 
@@ -88,8 +93,7 @@ class Registry:
     def aliases(self) -> list[str]:
         return sorted(alias for alias, route in self._routes.items() if route.enabled)
 
-    def resolve(self, requested_alias: str | None) -> tuple[ModelRoute, UpstreamProvider]:
-        """Resolve an alias (or the default) to a route + provider instance."""
+    def _route(self, requested_alias: str | None) -> ModelRoute:
         alias = (requested_alias or "").strip() or self._default_alias
         route = self._routes.get(alias)
         if route is None or not route.enabled:
@@ -97,9 +101,33 @@ class Registry:
                 ErrorCode.NOT_FOUND,
                 f"unknown model alias '{alias}'; known: {', '.join(self.aliases()) or '(none)'}",
             )
-        provider = self._providers[route.provider_name]
+        return route
+
+    def resolve_chat(self, requested_alias: str | None) -> tuple[ModelRoute, UpstreamProvider]:
+        route = self._route(requested_alias)
+        provider = self._providers.get(route.provider_name)
+        if provider is None or "anthropic-messages" not in route.protocols:
+            raise CocolaError(
+                ErrorCode.NOT_FOUND, f"model alias '{route.alias}' is not chat compatible"
+            )
         return route, provider
+
+    def resolve_responses(
+        self, requested_alias: str | None
+    ) -> tuple[ModelRoute, ResponsesProvider]:
+        route = self._route(requested_alias)
+        provider = self._responses_providers.get(route.provider_name)
+        if provider is None or "openai-responses" not in route.protocols:
+            raise CocolaError(
+                ErrorCode.NOT_FOUND, f"model alias '{route.alias}' is not Responses compatible"
+            )
+        return route, provider
+
+    # Existing normalized-chat callers keep the concise name.
+    resolve = resolve_chat
 
     async def aclose(self) -> None:
         for p in self._providers.values():
+            await p.aclose()
+        for p in self._responses_providers.values():
             await p.aclose()

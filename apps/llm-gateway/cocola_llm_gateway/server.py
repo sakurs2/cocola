@@ -1,4 +1,4 @@
-"""FastAPI app exposing the Anthropic-compatible front-end + billing/quota reads.
+"""FastAPI app exposing Anthropic Messages and OpenAI Responses front-ends.
 
 Endpoints:
   POST /v1/messages   Anthropic Messages API. Honors `stream` (SSE vs JSON).
@@ -6,6 +6,7 @@ Endpoints:
                       ANTHROPIC_BASE_URL points at this gateway. The bearer token
                       it sends (as ANTHROPIC_API_KEY) is the cocola-issued JWT;
                       we verify it -> Identity (M4).
+  POST /v1/responses  Transparent OpenAI Responses API for the Codex runtime.
   GET  /healthz       Liveness + which model aliases are configured.
   GET  /v1/usage      Billing read: recent records + per-user/session aggregates.
   GET  /v1/quota      Current token-quota standings for the caller (M4).
@@ -45,6 +46,7 @@ from cocola_llm_gateway.auth.revocation import RevocationStore
 from cocola_llm_gateway.conversation_trace import TraceContext
 from cocola_llm_gateway.quota import QuotaExceeded
 from cocola_llm_gateway.service import GatewayService
+from cocola_llm_gateway.upstream.errors import UpstreamError
 
 log = get_logger("cocola.llm-gateway.server")
 
@@ -181,6 +183,92 @@ def create_app(
             return _err(ErrorCode.UNAVAILABLE, f"upstream error: {e}")
         return JSONResponse(payload)
 
+    @app.post("/v1/responses")
+    async def responses(request: Request):
+        try:
+            body = await request.json()
+        except Exception:
+            return _responses_err(400, "request body must be JSON")
+        if not isinstance(body, dict):
+            return _responses_err(400, "request body must be a JSON object")
+        requested_alias = str(body.get("model") or "").strip()
+        if not requested_alias:
+            return _responses_err(400, "model is required")
+        try:
+            identity = await _authenticate(request)
+        except JWTError as exc:
+            return _responses_err(401, str(exc), error_type="authentication_error")
+        try:
+            await service.resolve_responses_model(requested_alias)
+        except CocolaError as exc:
+            return _responses_err(_CODE_TO_HTTP.get(exc.code, 500), exc.message)
+        try:
+            await service.check_quota(identity)
+        except QuotaExceeded as exc:
+            return _responses_err(429, str(exc), error_type="rate_limit_error")
+
+        session_id = (
+            request.headers.get("x-cocola-conversation-id", "").strip()
+            or request.headers.get("x-cocola-session", "").strip()
+            or identity.user_id
+        )
+        if not bool(body.get("stream", False)):
+            try:
+                payload = await service.responses_create(
+                    body,
+                    requested_alias=requested_alias,
+                    identity=identity,
+                    session_id=session_id,
+                    trace_context=TraceContext.parse(request.headers.get("traceparent")),
+                )
+            except UpstreamError as exc:
+                log.warning(
+                    "responses upstream failed",
+                    error_type=type(exc).__name__,
+                    upstream_status=exc.status,
+                )
+                return _responses_upstream_err(exc)
+            except Exception as exc:  # noqa: BLE001 - sanitized provider errors only
+                log.warning("responses upstream failed", error_type=type(exc).__name__)
+                return _responses_err(503, "upstream Responses request failed")
+            return JSONResponse(payload)
+
+        event_stream = service.responses_stream(
+            body,
+            requested_alias=requested_alias,
+            identity=identity,
+            session_id=session_id,
+            trace_context=TraceContext.parse(request.headers.get("traceparent")),
+        )
+        try:
+            first = await anext(event_stream)
+        except UpstreamError as exc:
+            log.warning(
+                "responses stream start failed",
+                error_type=type(exc).__name__,
+                upstream_status=exc.status,
+            )
+            await event_stream.aclose()
+            return _responses_upstream_err(exc)
+        except Exception as exc:  # noqa: BLE001 - no response headers sent yet
+            log.warning("responses stream start failed", error_type=type(exc).__name__)
+            await event_stream.aclose()
+            return _responses_err(503, "upstream Responses stream failed")
+
+        async def stream_with_first():
+            try:
+                yield first
+                async for chunk in event_stream:
+                    yield chunk
+            finally:
+                await event_stream.aclose()
+
+        return StreamingResponse(
+            stream_with_first(),
+            media_type="text/event-stream",
+            headers={"cache-control": "no-cache", "x-accel-buffering": "no"},
+        )
+
     @app.get("/v1/usage")
     async def usage(request: Request):
         # Billing reads expose token usage, so they require identity. A caller
@@ -277,3 +365,28 @@ def _quota_err(exc: QuotaExceeded) -> JSONResponse:
         },
         status_code=429,
     )
+
+
+def _responses_err(status: int, message: str, *, error_type: str = "invalid_request_error"):
+    return JSONResponse(
+        {"error": {"type": error_type, "message": message}},
+        status_code=status,
+    )
+
+
+def _responses_upstream_err(exc: UpstreamError) -> JSONResponse:
+    """Preserve actionable status classes without exposing upstream bodies."""
+    status = exc.status or 503
+    if status == 429:
+        return _responses_err(429, "upstream rate limit exceeded", error_type="rate_limit_error")
+    if status == 401:
+        return _responses_err(
+            401,
+            "upstream authentication failed",
+            error_type="authentication_error",
+        )
+    if status == 403:
+        return _responses_err(403, "upstream request was forbidden", error_type="permission_error")
+    if status in {400, 404, 409, 422}:
+        return _responses_err(status, "upstream rejected the Responses request")
+    return _responses_err(503, "upstream Responses request failed", error_type="server_error")

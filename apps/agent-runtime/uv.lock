@@ -267,7 +267,7 @@ requires-dist = [
     { name = "anyio", specifier = ">=4.3" },
     { name = "cocola-common", editable = "../../packages/py-common" },
     { name = "cocola-proto", editable = "../../packages/proto/gen/python" },
-    { name = "grpcio", specifier = ">=1.64" },
+    { name = "grpcio", specifier = ">=1.73.1" },
     { name = "minio", specifier = ">=7.2" },
     { name = "opentelemetry-instrumentation-grpc", specifier = ">=0.49b0" },
     { name = "protobuf", specifier = ">=6.30" },
@@ -313,7 +313,7 @@ dependencies = [
 
 [package.metadata]
 requires-dist = [
-    { name = "grpcio", specifier = ">=1.64" },
+    { name = "grpcio", specifier = ">=1.73.1" },
     { name = "protobuf", specifier = ">=6.30" },
 ]
 

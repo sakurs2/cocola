@@ -30,7 +30,7 @@ func TestPostgresParity(t *testing.T) {
 	}
 	defer pg.Close()
 	// Clean slate.
-	if _, err := pg.pool.Exec(ctx, "TRUNCATE messages, conversations"); err != nil {
+	if _, err := pg.pool.Exec(ctx, "TRUNCATE messages, conversations CASCADE"); err != nil {
 		t.Fatalf("truncate: %v", err)
 	}
 

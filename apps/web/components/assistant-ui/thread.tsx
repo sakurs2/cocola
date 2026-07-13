@@ -219,7 +219,7 @@ const ThreadWelcome: FC = () => {
 };
 
 const Composer: FC = () => {
-  const { selectedModel, modelsLoaded } = useCocola();
+  const { selectedModel, selectedRuntime, modelsLoaded } = useCocola();
   const noModel = modelsLoaded && !selectedModel;
 
   return (
@@ -235,7 +235,11 @@ const Composer: FC = () => {
           autoFocus={!noModel}
           disabled={noModel}
           placeholder={
-            noModel ? "No model configured" : "Send a message... (@ to mention, / for commands)"
+            noModel
+              ? selectedRuntime
+                ? `No ${selectedRuntime.label} compatible model configured`
+                : "No Agent Runtime available"
+              : "Send a message... (@ to mention, / for commands)"
           }
           className="max-h-40 min-h-12 flex-grow resize-none border-none bg-transparent px-2 py-3 text-sm outline-none placeholder:text-muted-foreground focus:ring-0 disabled:cursor-not-allowed"
         />
@@ -251,12 +255,62 @@ const Composer: FC = () => {
                 <PaperclipIcon className="size-4" />
               </TooltipIconButton>
             </ComposerPrimitive.AddAttachment>
+            <RuntimePicker />
             <ModelPicker />
           </div>
           <ComposerAction />
         </div>
       </ComposerPrimitive.Root>
     </motion.div>
+  );
+};
+
+const RuntimePicker: FC = () => {
+  const { runtimes, selectedRuntime, runtimeLocked, setSelectedRuntimeId } = useCocola();
+  const [open, setOpen] = useState(false);
+
+  return (
+    <Popover.Root open={open} onOpenChange={setOpen}>
+      <Popover.Trigger asChild>
+        <button
+          type="button"
+          className="flex max-w-[11rem] min-w-0 items-center gap-1.5 rounded-full border border-transparent px-2 py-1.5 text-sm font-medium text-foreground transition-colors hover:border-border hover:bg-muted disabled:cursor-not-allowed disabled:opacity-70"
+          aria-label="Select Agent Runtime"
+          disabled={runtimeLocked || runtimes.length === 0}
+          title={runtimeLocked ? "Runtime is fixed for this conversation" : "Select Agent Runtime"}
+        >
+          <Code2 className="size-4 shrink-0 text-muted-foreground" />
+          <span className="truncate">{selectedRuntime?.label ?? "No runtime"}</span>
+          {runtimeLocked || runtimes.length === 0 ? null : (
+            <ChevronDown className="size-3.5 shrink-0 text-muted-foreground" />
+          )}
+        </button>
+      </Popover.Trigger>
+      <Popover.Portal>
+        <Popover.Content
+          side="top"
+          align="start"
+          sideOffset={10}
+          className="cocola-user-ui z-50 w-56 overflow-hidden rounded-2xl border border-border bg-popover p-1.5 text-popover-foreground shadow-xl"
+        >
+          {runtimes.map((runtime) => (
+            <button
+              key={runtime.id}
+              type="button"
+              className="flex w-full items-center gap-2 rounded-xl px-2 py-2 text-left text-sm hover:bg-accent"
+              onClick={() => {
+                setSelectedRuntimeId(runtime.id);
+                setOpen(false);
+              }}
+            >
+              <Code2 className="size-4 text-muted-foreground" />
+              <span className="min-w-0 flex-1 truncate font-medium">{runtime.label}</span>
+              {runtime.id === selectedRuntime?.id ? <Check className="size-4" /> : null}
+            </button>
+          ))}
+        </Popover.Content>
+      </Popover.Portal>
+    </Popover.Root>
   );
 };
 

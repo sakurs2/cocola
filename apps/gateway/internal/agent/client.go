@@ -49,6 +49,7 @@ func IsRuntimeInterruption(err error) bool {
 type Query struct {
 	UserID       string
 	SessionID    string
+	RuntimeID    string
 	Prompt       string
 	SandboxID    string
 	MaxTurns     int32
@@ -93,6 +94,15 @@ type Streamer interface {
 // be blocked by a transient runtime release failure.
 type Releaser interface {
 	ReleaseSession(ctx context.Context, userID, sessionID string) error
+}
+
+// Runtime describes one built-in Agent Runtime. IDs and model protocols are
+// stable product contracts; labels are display-only.
+type Runtime struct {
+	ID            string `json:"id"`
+	Label         string `json:"label"`
+	ModelProtocol string `json:"model_protocol"`
+	IsDefault     bool   `json:"is_default"`
 }
 
 // Client is the gRPC-backed Streamer. Build it with Dial.
@@ -194,6 +204,7 @@ func (c *Client) Stream(ctx context.Context, q Query, onEvent func(Event) error)
 		SandboxId:   q.SandboxID,
 		MaxTurns:    q.MaxTurns,
 		Attachments: atts,
+		RuntimeId:   q.RuntimeID,
 	})
 	if err != nil {
 		return fmt.Errorf("agent: query: %w", err)
@@ -212,6 +223,42 @@ func (c *Client) Stream(ctx context.Context, q Query, onEvent func(Event) error)
 			return err
 		}
 	}
+}
+
+// ListRuntimes fetches the authoritative built-in runtime catalog. The
+// gateway calls this once during startup and refuses to serve chat if the
+// catalog is unavailable or malformed.
+func (c *Client) ListRuntimes(ctx context.Context) ([]Runtime, error) {
+	response, err := c.rpc.ListRuntimes(ctx, &agentv1.ListRuntimesRequest{})
+	if err != nil {
+		return nil, fmt.Errorf("agent: list runtimes: %w", err)
+	}
+	runtimes := make([]Runtime, 0, len(response.GetRuntimes()))
+	seen := make(map[string]struct{}, len(response.GetRuntimes()))
+	defaults := 0
+	for _, runtime := range response.GetRuntimes() {
+		item := Runtime{
+			ID:            strings.TrimSpace(runtime.GetId()),
+			Label:         strings.TrimSpace(runtime.GetLabel()),
+			ModelProtocol: strings.TrimSpace(runtime.GetModelProtocol()),
+			IsDefault:     runtime.GetIsDefault(),
+		}
+		if item.ID == "" || item.Label == "" || item.ModelProtocol == "" {
+			return nil, fmt.Errorf("agent: invalid runtime descriptor")
+		}
+		if _, ok := seen[item.ID]; ok {
+			return nil, fmt.Errorf("agent: duplicate runtime %q", item.ID)
+		}
+		seen[item.ID] = struct{}{}
+		if item.IsDefault {
+			defaults++
+		}
+		runtimes = append(runtimes, item)
+	}
+	if len(runtimes) == 0 || defaults != 1 {
+		return nil, fmt.Errorf("agent: runtime catalog must contain exactly one default")
+	}
+	return runtimes, nil
 }
 
 // ReleaseSession asks agent-runtime to free any sandbox/resume state for a

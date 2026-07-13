@@ -204,8 +204,8 @@ func (b *Binder) AcquireWithOutcome(ctx context.Context, spec AcquireSpec) (Outc
 
 	// Warm-pool fast-create: prefer claiming a pre-warmed, session-agnostic
 	// sandbox over a cold create. A claimed sandbox has no per-session volume
-	// (OpenSandbox has no hot-mount API), so the session's workspace/.claude
-	// state is restored from its checkpoint by agent-runtime on reused=false —
+	// (OpenSandbox has no hot-mount API), so the session's workspace and native
+	// runtime state are restored by agent-runtime on reused=false —
 	// exactly the path a cold create would take. Claiming turns a multi-second
 	// cold start into a Redis DEL + bind. A claim failure/empty pool silently
 	// falls through to the normal create path below.

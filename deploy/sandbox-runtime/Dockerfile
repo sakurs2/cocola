@@ -2,11 +2,10 @@
 #
 # cocola Route-A sandbox runtime image (see ADR-0009).
 #
-# This image bakes the *whole* Claude Code agent runtime into the per-user
-# sandbox: Node.js + the `claude` CLI + claude-agent-sdk + a thin stdio shim,
-# plus Python/uv for user workloads. The agent's brain AND hands both run here,
-# inside the user's own container -- native Bash/Read/Write/Edit are naturally
-# isolated to this filesystem, so there is no MCP forwarding seam.
+# This image bakes both supported Agent Runtimes into the per-user sandbox:
+# Claude Code, Codex, their SDKs, and a thin stdio dispatcher, plus Python/uv
+# for user workloads. The selected agent's brain and tools run inside the
+# user's own container, so there is no MCP forwarding seam.
 #
 # Design rules honoured by this image:
 #   - The base is OpenSandbox's official `code-interpreter` image (Node 22 + uv
@@ -23,10 +22,9 @@
 #     This matches cocola's hard rule: a sandbox never binds a network port.
 #     (The base image's default entrypoint would start a Jupyter server; cocola
 #     OVERRIDES both ENTRYPOINT and CMD below, so that never runs.)
-#   - Persistence is via mounted volumes: /workspace holds user-visible files,
-#     while CLAUDE_CONFIG_DIR lives at /home/cocola/.claude on the same session
-#     storage unit, so Claude Code state is isolated per cocola session without
-#     appearing in workspace file listings.
+#   - Persistence is via mounted volumes: /workspace holds user-visible files;
+#     /home/cocola/.claude and /home/cocola/.codex hold runtime-native session
+#     state on the same session storage unit without appearing in workspace.
 #
 # Build:
 #   # optional: vendor the CLI for offline builds
@@ -110,6 +108,12 @@ RUN set -eux; \
     rm -rf /tmp/offline; \
     claude --version
 
+# ---- Codex CLI + SDK: exact, lockfile-backed versions --------------------
+COPY package.json package-lock.json /opt/cocola/
+RUN npm ci --prefix /opt/cocola --omit=dev \
+    && ln -sf /opt/cocola/node_modules/.bin/codex /usr/local/bin/codex \
+    && codex --version
+
 # ---- Python agent SDK in a uv-managed venv (matches the shim interpreter) -
 # Install into a dedicated venv (uv-managed, per project convention) so the SDK
 # never depends on system Python / pip skew. The shim's entrypoint execs this
@@ -135,9 +139,10 @@ RUN chmod +x /opt/cocola/shim/entrypoint.sh
 # ---- non-root user + mount points ----------------------------------------
 # /workspace           -> bound onto the SESSION volume (RW)
 # /home/cocola/.claude -> session-local Claude Code config/state
+# /home/cocola/.codex  -> session-local Codex config/state
 # /data/plugins        -> bound read-only platform skills
 RUN useradd -m -u 10001 -s /bin/bash cocola \
-    && mkdir -p /workspace /home/cocola/.claude /data/plugins \
+    && mkdir -p /workspace /home/cocola/.claude /home/cocola/.codex /data/plugins \
     && chown -R cocola:cocola /home/cocola /workspace /opt/cocola
 
 # NOTE: the container's main process runs as ROOT so firewall-entrypoint.sh can
@@ -152,6 +157,7 @@ WORKDIR /workspace
 # memory/sessions are isolated without appearing in user file listings.
 ENV CLAUDE_CONFIG_DIR=/home/cocola/.claude \
     ANTHROPIC_CONFIG_DIR=/home/cocola/.claude \
+    CODEX_HOME=/home/cocola/.codex \
     CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC=1 \
     CLAUDE_CODE_MAX_RETRIES=3 \
     COCOLA_WORKSPACE=/workspace \

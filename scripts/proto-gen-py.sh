@@ -21,7 +21,7 @@ docker run --rm \
   "$PY_IMAGE" \
   sh -c "
     set -e
-    pip install --no-cache-dir -i $PIP_INDEX --trusted-host $PIP_HOST 'grpcio-tools>=1.64'
+    pip install --no-cache-dir -i $PIP_INDEX --trusted-host $PIP_HOST 'grpcio-tools==1.73.1'
     python -m grpc_tools.protoc -I . \
       --python_out=gen/python --grpc_python_out=gen/python --pyi_out=gen/python \
       cocola/sandbox/v1/sandbox.proto cocola/agent/v1/*.proto cocola/common/v1/*.proto

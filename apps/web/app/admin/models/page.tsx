@@ -16,7 +16,7 @@ import { cn } from "@/lib/utils";
 type LLMProvider = {
   id: string;
   name: string;
-  type: "anthropic" | "openai_compat";
+  type: "anthropic" | "openai_compat" | "openai_responses";
   base_url: string;
   api_key_hint: string;
   enabled: boolean;
@@ -28,7 +28,6 @@ type LLMModel = {
   alias: string;
   provider_id: string;
   real_model: string;
-  runtime: string;
   label: string;
   icon_type: "simple-icons" | "image";
   icon_slug: string;
@@ -54,7 +53,6 @@ type ModelForm = {
   alias: string;
   provider_id: string;
   real_model: string;
-  runtime: string;
   label: string;
   icon_type: LLMModel["icon_type"];
   icon_slug: string;
@@ -78,7 +76,6 @@ const EMPTY_MODEL: ModelForm = {
   alias: "",
   provider_id: "",
   real_model: "",
-  runtime: "claude-code",
   label: "",
   icon_type: "simple-icons",
   icon_slug: "anthropic",
@@ -92,6 +89,7 @@ const EMPTY_MODEL: ModelForm = {
 const PROVIDER_TYPES = [
   { value: "anthropic", label: "Anthropic" },
   { value: "openai_compat", label: "OpenAI Compatible" },
+  { value: "openai_responses", label: "OpenAI Responses" },
 ] as const;
 
 const btn =
@@ -193,7 +191,6 @@ export default function AdminModelsPage() {
         alias: modelForm.alias,
         provider_id: modelForm.provider_id,
         real_model: modelForm.real_model,
-        runtime: modelForm.runtime,
         label: modelForm.label,
         icon_type: modelForm.icon_type,
         icon_slug: modelForm.icon_slug,
@@ -268,7 +265,6 @@ export default function AdminModelsPage() {
       alias: model.alias,
       provider_id: model.provider_id,
       real_model: model.real_model,
-      runtime: model.runtime,
       label: model.label,
       icon_type: model.icon_type,
       icon_slug: model.icon_slug,

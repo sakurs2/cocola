@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
-"""cocola in-sandbox stdio shim (Route A, see ADR-0009).
+"""cocola in-sandbox Agent Runtime dispatcher (see ADR-0009 and ADR-0022).
 
 This process is the in-sandbox endpoint of the cocola control plane. It runs
-*inside* the user's own container, where the Claude Code brain and hands both
+*inside* the user's own container, where the selected runtime and its tools
 live. The control-plane router (agent-runtime) invokes it via:
 
     docker exec -i <ctr> /opt/cocola/shim/entrypoint.sh   # local Docker (M1)
@@ -20,19 +20,19 @@ a sandbox must not bind a network port):
 
 Request schema:
   {
+    "runtime_id":    str,             # claude-code | codex
     "prompt":        str,             # required, the user turn
     "system_prompt": str | null,      # optional
     "max_turns":     int | null,      # optional, default 20
     "resume":        str | null,      # optional session_id to --resume
     "cwd":           str | null,      # optional, default $COCOLA_WORKSPACE
     "permission_mode": str | null,    # optional, default "bypassPermissions"
-    "mcp_servers":   object | null    # optional Claude SDK mcp_servers config
+    "mcp_servers":   object | null    # optional runtime MCP configuration
   }
 
-Auth/routing come from the ENV the container was started with (injected by the
-provider, ADR-0009 sec.2): ANTHROPIC_BASE_URL, ANTHROPIC_AUTH_TOKEN,
-CLAUDE_CONFIG_DIR (-> hidden session-local Claude config). The shim does NOT read
-credentials from the request, so they never transit the prompt channel.
+Auth/routing come from the exec environment injected by the provider. The shim
+does not read credentials from the JSON request, so they never transit the
+prompt channel or logs.
 
 The agent runs with the FULL native Claude Code toolset (no MCP forwarding, no
 disallowed_tools): native Bash/Read/Write/Edit are isolated to this container
@@ -44,11 +44,14 @@ boundary is the container + network egress allowlist, not a per-tool prompt.
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import json
 import os
 import re
+import signal
 import sys
 import time
+from pathlib import Path
 from typing import Any
 from urllib.parse import urlsplit, urlunsplit
 
@@ -242,6 +245,8 @@ def _environment_status_event(
     result: dict[str, Any] | None = None,
     *,
     timed_out: bool = False,
+    default_status: str = "pending",
+    status_overrides: dict[str, str] | None = None,
 ) -> dict[str, Any]:
     """Build one secret-safe, idempotent session environment snapshot."""
     configs = _mcp_configs(req)
@@ -253,7 +258,7 @@ def _environment_status_event(
     components: list[dict[str, Any]] = []
     for name, config in sorted(configs.items()):
         server = statuses.get(name, {})
-        status = str(server.get("status") or "pending")
+        status = str(server.get("status") or (status_overrides or {}).get(name) or default_status)
         if timed_out and status == "pending":
             status = "timeout"
         info = server.get("serverInfo") if isinstance(server.get("serverInfo"), dict) else {}
@@ -329,7 +334,7 @@ async def _watch_mcp_status(client: Any, req: dict[str, Any]) -> None:
         raise
 
 
-async def _run(req: dict[str, Any]) -> int:
+async def _run_claude(req: dict[str, Any]) -> int:
     import claude_agent_sdk
 
     options = _build_options(req)
@@ -366,6 +371,116 @@ async def _run(req: dict[str, Any]) -> int:
     # session<->sandbox binding and later --resume it.
     _emit({"type": "done", "session_id": last_session_id, "ts": time.time()})
     return 0
+
+
+async def _run_codex(req: dict[str, Any]) -> int:
+    """Run the Node Codex adapter while preserving the shim's NDJSON stream."""
+    report_environment = not req.get("resume")
+    mcp_configs = _mcp_configs(req)
+    connected_mcp_servers: set[str] = set()
+    if report_environment:
+        _emit(_environment_status_event(req, default_status="configured"))
+
+    process = await asyncio.create_subprocess_exec(
+        "node",
+        "/opt/cocola/shim/codex_adapter.mjs",
+        stdin=asyncio.subprocess.PIPE,
+        stdout=asyncio.subprocess.PIPE,
+        stderr=asyncio.subprocess.PIPE,
+        start_new_session=True,
+    )
+    assert process.stdin is not None
+    assert process.stdout is not None
+    assert process.stderr is not None
+    stderr_tail = ""
+
+    async def drain_stderr() -> None:
+        nonlocal stderr_tail
+        while chunk := await process.stderr.read(1024):
+            stderr_tail = (stderr_tail + chunk.decode(errors="replace"))[-4000:]
+
+    stderr_task = asyncio.create_task(drain_stderr())
+    loop = asyncio.get_running_loop()
+    current_task = asyncio.current_task()
+    installed_signals: list[signal.Signals] = []
+    if current_task is not None:
+        for sig in (signal.SIGTERM, signal.SIGINT):
+            with contextlib.suppress(NotImplementedError, RuntimeError):
+                loop.add_signal_handler(sig, current_task.cancel)
+                installed_signals.append(sig)
+
+    async def terminate() -> None:
+        if process.returncode is not None:
+            return
+        with contextlib.suppress(ProcessLookupError):
+            os.killpg(process.pid, signal.SIGTERM)
+        try:
+            await asyncio.wait_for(process.wait(), timeout=3)
+        except TimeoutError:
+            with contextlib.suppress(ProcessLookupError):
+                os.killpg(process.pid, signal.SIGKILL)
+            await process.wait()
+
+    emitted_error = False
+    try:
+        process.stdin.write(json.dumps(req, ensure_ascii=False).encode())
+        await process.stdin.drain()
+        process.stdin.close()
+        while line := await process.stdout.readline():
+            event = json.loads(line)
+            mcp_server = str(event.pop("_cocola_mcp_server", ""))
+            if (
+                report_environment
+                and mcp_server in mcp_configs
+                and mcp_server not in connected_mcp_servers
+            ):
+                connected_mcp_servers.add(mcp_server)
+                _emit(
+                    _environment_status_event(
+                        req,
+                        default_status="configured",
+                        status_overrides={name: "connected" for name in connected_mcp_servers},
+                    )
+                )
+            emitted_error = emitted_error or event.get("type") == "error"
+            _emit(event)
+        code = await process.wait()
+        await stderr_task
+    except asyncio.CancelledError:
+        await terminate()
+        raise
+    except BaseException:
+        await terminate()
+        raise
+    finally:
+        for sig in installed_signals:
+            loop.remove_signal_handler(sig)
+        if not stderr_task.done():
+            stderr_task.cancel()
+        await asyncio.gather(stderr_task, return_exceptions=True)
+    if code != 0 and not emitted_error:
+        _emit({"type": "error", "stage": "run", "error": stderr_tail[:500] or "Codex failed"})
+    return code
+
+
+async def _run(req: dict[str, Any]) -> int:
+    runtime_id = str(req.get("runtime_id") or "claude-code")
+    adapters = {
+        "claude-code": _run_claude,
+        "codex": _run_codex,
+    }
+    adapter = adapters.get(runtime_id)
+    if adapter is None:
+        _emit(
+            {
+                "type": "error",
+                "stage": "prepare",
+                "code": "UNSUPPORTED_RUNTIME",
+                "error": "Agent Runtime is not supported",
+            }
+        )
+        return 2
+    return await adapter(req)
 
 
 def _safe_remote_url(raw_url: str) -> str:
@@ -455,7 +570,7 @@ def _agent_error_code(error: BaseException, req: dict[str, Any]) -> str:
             continue
         detail = f"{leaf}\n{getattr(leaf, 'stderr', '')}".lower()
         if any(marker in detail for marker in _RESUME_NOT_FOUND_MARKERS):
-            return "RESUME_NOT_FOUND"
+            return "SESSION_NOT_FOUND"
     return ""
 
 
@@ -472,8 +587,8 @@ def _sanitize_agent_error(error: Exception, req: dict[str, Any]) -> str:
 def _selfcheck() -> int:
     """Environment sanity probe used by the verification script.
 
-    Reports the runtime facts the Route-A image must satisfy, as a single JSON
-    line, WITHOUT importing the SDK or making any network call.
+    Reports the runtime facts the image must satisfy as a single JSON line,
+    without making any network call.
     """
     import shutil
     import subprocess
@@ -494,6 +609,8 @@ def _selfcheck() -> int:
         "node": None,
         "claude_cli": None,
         "claude_agent_sdk": None,
+        "codex_cli": cmd_version("codex", "--version"),
+        "codex_sdk": None,
         "pnpm": cmd_version("pnpm", "--version"),
         "yarn": cmd_version("yarn", "--version"),
         "playwright": cmd_version("playwright", "--version"),
@@ -508,9 +625,12 @@ def _selfcheck() -> int:
         "pdftotext": cmd_version("pdftotext", "-v"),
         "rsvg_convert": cmd_version("rsvg-convert", "--version"),
         "config_dir": os.environ.get("CLAUDE_CONFIG_DIR"),
+        "codex_home": os.environ.get("CODEX_HOME"),
         "workspace": os.environ.get("COCOLA_WORKSPACE"),
         "base_url_set": bool(os.environ.get("ANTHROPIC_BASE_URL")),
+        "responses_base_url_set": bool(os.environ.get("COCOLA_LLM_BASE_URL")),
         "auth_token_set": bool(os.environ.get("ANTHROPIC_AUTH_TOKEN")),
+        "codex_auth_token_set": bool(os.environ.get("CODEX_API_KEY")),
     }
     if shutil.which("node"):
         try:
@@ -528,6 +648,11 @@ def _selfcheck() -> int:
         info["claude_agent_sdk"] = getattr(claude_agent_sdk, "__version__", "installed")
     except Exception as e:  # noqa: BLE001
         info["claude_agent_sdk"] = f"missing: {e}"
+    try:
+        package = Path("/opt/cocola/node_modules/@openai/codex-sdk/package.json")
+        info["codex_sdk"] = str(json.loads(package.read_text())["version"])
+    except Exception as e:  # noqa: BLE001
+        info["codex_sdk"] = f"missing: {e}"
 
     _emit(info)
     required_tools = [
@@ -551,6 +676,8 @@ def _selfcheck() -> int:
         and info["claude_cli"]
         and not str(info["claude_cli"]).startswith("error")
         and not str(info["claude_agent_sdk"]).startswith("missing")
+        and not str(info["codex_cli"]).startswith(("missing", "error"))
+        and not str(info["codex_sdk"]).startswith("missing")
         and all(not str(info[name]).startswith(("missing", "error")) for name in required_tools)
     )
     return 0 if ok else 1

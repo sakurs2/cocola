@@ -98,7 +98,7 @@ class PostgresRegistrySource:
         query = """
             SELECT
                 p.id, p.type, p.base_url, p.api_key_ciphertext,
-                r.alias, r.real_model, r.runtime, r.label, r.icon_type, r.icon_slug,
+                r.alias, r.real_model, r.label, r.icon_type, r.icon_slug,
                 r.icon_url, r.is_default
             FROM llm_model_routes r
             JOIN llm_providers p ON p.id = r.provider_id
@@ -123,7 +123,6 @@ class PostgresRegistrySource:
                 api_key_ciphertext,
                 alias,
                 real_model,
-                runtime,
                 label,
                 icon_type,
                 icon_slug,
@@ -151,7 +150,6 @@ class PostgresRegistrySource:
             routes[alias] = {
                 "provider": provider_id,
                 "real_model": real_model,
-                "runtime": runtime or "claude-code",
                 "label": label or alias,
                 "icon": icon,
                 "enabled": True,

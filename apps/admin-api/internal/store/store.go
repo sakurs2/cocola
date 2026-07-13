@@ -144,7 +144,7 @@ type AgentPrompt struct {
 type LLMProvider struct {
 	ID               string    `json:"id"`
 	Name             string    `json:"name"`
-	Type             string    `json:"type"` // "anthropic" | "openai_compat"
+	Type             string    `json:"type"` // anthropic | openai_compat | openai_responses
 	BaseURL          string    `json:"base_url"`
 	APIKeyCiphertext string    `json:"-"`
 	APIKeyHint       string    `json:"api_key_hint"`
@@ -160,7 +160,6 @@ type LLMModelRoute struct {
 	Alias      string    `json:"alias"`
 	ProviderID string    `json:"provider_id"`
 	RealModel  string    `json:"real_model"`
-	Runtime    string    `json:"runtime"`
 	Label      string    `json:"label"`
 	IconType   string    `json:"icon_type"`
 	IconSlug   string    `json:"icon_slug"`
@@ -180,12 +179,13 @@ type LLMModelIcon struct {
 }
 
 type PublicLLMModel struct {
-	Alias    string       `json:"alias"`
-	Label    string       `json:"label"`
-	Provider string       `json:"provider"`
-	Family   string       `json:"family"`
-	IconSlug string       `json:"icon_slug"`
-	Icon     LLMModelIcon `json:"icon"`
+	Alias     string       `json:"alias"`
+	Label     string       `json:"label"`
+	Provider  string       `json:"provider"`
+	Family    string       `json:"family"`
+	IconSlug  string       `json:"icon_slug"`
+	Icon      LLMModelIcon `json:"icon"`
+	Protocols []string     `json:"protocols"`
 }
 
 // ScheduledTask is always owned by one user. OwnerType remains internal during

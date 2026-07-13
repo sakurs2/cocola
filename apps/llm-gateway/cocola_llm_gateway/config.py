@@ -29,6 +29,11 @@ from cocola_llm_gateway.upstream.anthropic import AnthropicConfig, AnthropicUpst
 from cocola_llm_gateway.upstream.base import UpstreamProvider
 from cocola_llm_gateway.upstream.fake import FakeUpstream
 from cocola_llm_gateway.upstream.openai_compat import OpenAICompatConfig, OpenAICompatUpstream
+from cocola_llm_gateway.upstream.openai_responses import (
+    OpenAIResponsesConfig,
+    OpenAIResponsesUpstream,
+)
+from cocola_llm_gateway.upstream.responses_base import ResponsesProvider
 
 log = get_logger("cocola.llm-gateway.config")
 
@@ -80,14 +85,22 @@ def _build_from_dict(spec: dict) -> Registry:
         },
         "routes": {
           "claude-sonnet": {"provider": "anthropic", "real_model": "claude-3-5-sonnet-20241022",
-                            "runtime": "claude-code", "label": "Claude Sonnet",
+                            "label": "Claude Sonnet",
                             "icon": {"type": "simple-icons", "slug": "anthropic"}}
         }
       }
     """
     providers: dict[str, UpstreamProvider] = {}
+    responses_providers: dict[str, ResponsesProvider] = {}
+    provider_protocols: dict[str, tuple[str, ...]] = {}
     for name, pcfg in (spec.get("providers") or {}).items():
-        providers[name] = _build_provider(name, pcfg)
+        provider = _build_provider(name, pcfg)
+        if isinstance(provider, ResponsesProvider):
+            responses_providers[name] = provider
+            provider_protocols[name] = ("openai-responses",)
+        else:
+            providers[name] = provider
+            provider_protocols[name] = ("anthropic-messages",)
 
     routes: dict[str, ModelRoute] = {}
     for alias, rcfg in (spec.get("routes") or {}).items():
@@ -99,7 +112,7 @@ def _build_from_dict(spec: dict) -> Registry:
                 input_per_1k=float(rcfg.get("input_per_1k", 0.0)),
                 output_per_1k=float(rcfg.get("output_per_1k", 0.0)),
             ),
-            runtime=str(rcfg.get("runtime", "claude-code")),
+            protocols=provider_protocols.get(rcfg["provider"], ()),
             label=str(rcfg.get("label", alias)),
             icon={str(k): str(v) for k, v in (rcfg.get("icon") or {}).items()}
             if isinstance(rcfg.get("icon"), dict)
@@ -111,7 +124,7 @@ def _build_from_dict(spec: dict) -> Registry:
     default_alias = spec.get("default_alias", "")
     if not default_alias and routes:
         default_alias = sorted(routes.keys())[0]
-    return Registry(providers, routes, default_alias)
+    return Registry(providers, routes, default_alias, responses_providers)
 
 
 def _resolve_secret(cfg: dict, inline_key: str, env_key_field: str) -> str:
@@ -126,7 +139,7 @@ def _resolve_secret(cfg: dict, inline_key: str, env_key_field: str) -> str:
     return cfg.get(inline_key, "")
 
 
-def _build_provider(name: str, cfg: dict) -> UpstreamProvider:
+def _build_provider(name: str, cfg: dict) -> UpstreamProvider | ResponsesProvider:
     ptype = cfg.get("type", name)
     if ptype == "fake":
         return FakeUpstream(reply=cfg.get("reply", ""), chunk_size=int(cfg.get("chunk_size", 4)))
@@ -146,6 +159,14 @@ def _build_provider(name: str, cfg: dict) -> UpstreamProvider:
                 base_url=cfg.get("base_url", OpenAICompatConfig.base_url),
                 api_key=_resolve_secret(cfg, "api_key", "api_key_env"),
                 timeout_s=float(cfg.get("timeout_s", OpenAICompatConfig.timeout_s)),
+            )
+        )
+    if ptype == "openai_responses":
+        return OpenAIResponsesUpstream(
+            OpenAIResponsesConfig(
+                base_url=cfg.get("base_url", OpenAIResponsesConfig.base_url),
+                api_key=_resolve_secret(cfg, "api_key", "api_key_env"),
+                timeout_s=float(cfg.get("timeout_s", OpenAIResponsesConfig.timeout_s)),
             )
         )
     raise CocolaError(ErrorCode.INVALID_ARGUMENT, f"unknown provider type '{ptype}'")

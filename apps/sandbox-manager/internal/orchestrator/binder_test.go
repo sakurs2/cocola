@@ -241,6 +241,7 @@ func TestWarmPoolProvisioningNeverBakesStaticAuthToken(t *testing.T) {
 		t.Fatalf("warm sandbox contains a static auth token: %q", cfg.Env["ANTHROPIC_AUTH_TOKEN"])
 	}
 	if cfg.Env["ANTHROPIC_BASE_URL"] != "http://llm-gateway:8080" ||
+		cfg.Env["COCOLA_LLM_BASE_URL"] != "http://llm-gateway:8080" ||
 		cfg.Env["ANTHROPIC_MODEL"] != "cocola-default" {
 		t.Fatalf("warm routing env = %#v", cfg.Env)
 	}

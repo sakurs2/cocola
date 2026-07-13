@@ -50,6 +50,7 @@ var traceAttributeAllowlist = map[string]bool{
 	"object_count": true, "part_count": true, "prompt_count": true,
 	"prompt_ids": true, "prompt_versions": true, "restored": true,
 	"resumed": true, "reused": true, "sandbox_id": true, "session_id": true,
+	"runtime_id":  true,
 	"skill_count": true, "target": true, "text_chunk_count": true,
 	"thinking_chunk_count": true, "tool_name": true, "tool_result_count": true,
 	"tool_type": true, "tool_use_count": true,
@@ -98,6 +99,8 @@ type API struct {
 	sandboxTokenIssuer *token.Issuer
 	sandboxTokenTTL    time.Duration
 	runs               *runController
+	runtimes           []agent.Runtime
+	runtimeByID        map[string]agent.Runtime
 }
 
 // New builds the BFF API.
@@ -105,6 +108,19 @@ func New(streamer agent.Streamer, verifier *auth.Verifier, log logger.Logger) *A
 	a := &API{streamer: streamer, verifier: verifier, log: log}
 	if releaser, ok := streamer.(agent.Releaser); ok {
 		a.releaser = releaser
+	}
+	return a.WithAgentRuntimes([]agent.Runtime{{
+		ID: "claude-code", Label: "Claude Code", ModelProtocol: "anthropic-messages", IsDefault: true,
+	}})
+}
+
+// WithAgentRuntimes installs the startup-cached catalog returned by
+// agent-runtime. Production always calls this before serving HTTP.
+func (a *API) WithAgentRuntimes(runtimes []agent.Runtime) *API {
+	a.runtimes = append([]agent.Runtime(nil), runtimes...)
+	a.runtimeByID = make(map[string]agent.Runtime, len(runtimes))
+	for _, runtime := range runtimes {
+		a.runtimeByID[runtime.ID] = runtime
 	}
 	return a
 }
@@ -194,6 +210,8 @@ func (a *API) Handler() http.Handler {
 	// the whole chain so latency includes auth.
 	mux.Handle("POST /v1/chat", a.instrument("POST /v1/chat",
 		a.verifier.Middleware(writeErr)(http.HandlerFunc(a.chat))))
+	mux.Handle("GET /v1/agent-runtimes", a.instrument("GET /v1/agent-runtimes",
+		a.verifier.Middleware(writeErr)(http.HandlerFunc(a.listAgentRuntimes))))
 	mux.Handle("GET /v1/chat/runs/{run_id}", a.instrument("GET /v1/chat/runs/{run_id}",
 		a.verifier.Middleware(writeErr)(http.HandlerFunc(a.streamRun))))
 	mux.Handle("DELETE /v1/chat/runs/{run_id}", a.instrument("DELETE /v1/chat/runs/{run_id}",
@@ -217,6 +235,10 @@ func (a *API) Handler() http.Handler {
 	// flows into the agent gRPC call (client stats handler) for an end-to-end
 	// trace. No-op overhead when tracing is disabled.
 	return tracing.HTTPHandler("gateway.http", mux)
+}
+
+func (a *API) listAgentRuntimes(w http.ResponseWriter, _ *http.Request) {
+	writeJSON(w, http.StatusOK, a.runtimes)
 }
 
 func (a *API) health(w http.ResponseWriter, _ *http.Request) {
@@ -365,6 +387,7 @@ type chatRequest struct {
 	DeferConversationVisibilityUntilDone bool              `json:"defer_conversation_visibility_until_done"`
 	Attachments                          []attachmentDTO   `json:"attachments"`
 	ClientRequestID                      string            `json:"client_request_id"`
+	RuntimeID                            string            `json:"runtime_id"`
 }
 
 // attachmentDTO is one user-uploaded file carried inline in the chat body.
