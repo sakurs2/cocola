@@ -30,14 +30,14 @@ func NewPostgres(ctx context.Context, dsn string) (*Postgres, error) {
 func (p *Postgres) Close() { p.pool.Close() }
 
 const runColumns = `trace_id, root_span_id, conversation_id, conversation_title,
-	user_id, source, model_alias, client_request_id, status, started_at,
+	user_id, source, model_route_id, model_alias, client_request_id, status, started_at,
 	completed_at, last_activity_at, error_code`
 
 func scanRun(row pgx.Row) (Run, error) {
 	var run Run
 	if err := row.Scan(
 		&run.ID, &run.RootSpanID, &run.ConversationID, &run.ConversationTitle,
-		&run.UserID, &run.Source, &run.ModelAlias, &run.ClientRequestID, &run.Status,
+		&run.UserID, &run.Source, &run.ModelRouteID, &run.ModelAlias, &run.ClientRequestID, &run.Status,
 		&run.StartedAt, &run.CompletedAt, &run.LastActivityAt, &run.ErrorCode,
 	); err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
@@ -120,11 +120,11 @@ func (p *Postgres) Start(ctx context.Context, in StartInput) (StartResult, error
 	}
 	_, err = tx.Exec(ctx, `INSERT INTO conversation_runs (
 		trace_id, root_span_id, conversation_id, conversation_title, user_id,
-		user_email, source, model_alias, client_request_id, status, started_at,
+		user_email, source, model_route_id, model_alias, client_request_id, status, started_at,
 		last_activity_at, detail_status)
-		VALUES ($1,$2,$3,$4,$5,$5,$6,$7,$8,'running',$9,$9,'available')`,
+		VALUES ($1,$2,$3,$4,$5,$5,$6,$7,$8,$9,'running',$10,$10,'available')`,
 		in.Run.ID, in.Run.RootSpanID, in.Run.ConversationID, in.Run.ConversationTitle,
-		in.Run.UserID, in.Run.Source, in.Run.ModelAlias, in.Run.ClientRequestID,
+		in.Run.UserID, in.Run.Source, in.Run.ModelRouteID, in.Run.ModelAlias, in.Run.ClientRequestID,
 		in.Run.StartedAt)
 	if err != nil {
 		var pgErr *pgconn.PgError

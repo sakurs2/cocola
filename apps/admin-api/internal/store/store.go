@@ -153,12 +153,14 @@ type LLMProvider struct {
 	UpdatedAt        time.Time `json:"updated_at"`
 }
 
-// LLMModelRoute maps a user-facing alias to a provider's real model id. The
-// public chat UI sees only alias/label/icon, while the gateway consumes the full
-// route for provider/model resolution and billing.
+// LLMModelRoute maps an immutable route id to a provider-scoped alias and the
+// provider's real model id. Callers route by ID; alias remains presentation and
+// audit metadata and may be reused by another provider.
 type LLMModelRoute struct {
+	ID         string    `json:"id"`
 	Alias      string    `json:"alias"`
 	ProviderID string    `json:"provider_id"`
+	Protocol   string    `json:"protocol"`
 	RealModel  string    `json:"real_model"`
 	Label      string    `json:"label"`
 	IconType   string    `json:"icon_type"`
@@ -179,6 +181,7 @@ type LLMModelIcon struct {
 }
 
 type PublicLLMModel struct {
+	ID        string       `json:"id"`
 	Alias     string       `json:"alias"`
 	Label     string       `json:"label"`
 	Provider  string       `json:"provider"`
@@ -186,6 +189,7 @@ type PublicLLMModel struct {
 	IconSlug  string       `json:"icon_slug"`
 	Icon      LLMModelIcon `json:"icon"`
 	Protocols []string     `json:"protocols"`
+	IsDefault bool         `json:"is_default"`
 }
 
 // ScheduledTask is always owned by one user. OwnerType remains internal during
@@ -202,6 +206,7 @@ type ScheduledTask struct {
 	ScheduleSpec   json.RawMessage `json:"schedule_spec"`
 	Timezone       string          `json:"timezone"`
 	Prompt         string          `json:"prompt"`
+	ModelRouteID   string          `json:"model_route_id"`
 	ModelAlias     string          `json:"model_alias"`
 	MaxTurns       int             `json:"max_turns"`
 	ConfigJSON     json.RawMessage `json:"config_json"`
@@ -236,6 +241,7 @@ type ScheduledTaskRun struct {
 	Status       string    `json:"status"`
 	WorkerID     string    `json:"worker_id"`
 	SessionID    string    `json:"session_id"`
+	ModelRouteID string    `json:"model_route_id"`
 	ModelAlias   string    `json:"model_alias"`
 	OutputText   string    `json:"output_text"`
 	Error        string    `json:"error"`
@@ -506,10 +512,10 @@ type Store interface {
 	UpdateLLMProvider(ctx context.Context, p LLMProvider) error
 	DeleteLLMProvider(ctx context.Context, id string) error
 	CreateLLMModelRoute(ctx context.Context, m LLMModelRoute) error
-	GetLLMModelRoute(ctx context.Context, alias string) (LLMModelRoute, error)
+	GetLLMModelRoute(ctx context.Context, id string) (LLMModelRoute, error)
 	ListLLMModelRoutes(ctx context.Context) ([]LLMModelRoute, error)
 	UpdateLLMModelRoute(ctx context.Context, m LLMModelRoute) error
-	DeleteLLMModelRoute(ctx context.Context, alias string) error
+	DeleteLLMModelRoute(ctx context.Context, id string) error
 
 	// Scheduled tasks
 	CreateScheduledTask(ctx context.Context, task ScheduledTask, attachments []ScheduledTaskAttachment) error

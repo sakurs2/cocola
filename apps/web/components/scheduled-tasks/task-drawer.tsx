@@ -25,7 +25,7 @@ export function TaskDrawer({
   onOpenChange,
   task,
   models,
-  defaultModelAlias,
+  defaultModelID,
   admin = false,
   ownerOptions = [],
   recentRuns = [],
@@ -36,23 +36,26 @@ export function TaskDrawer({
   onOpenChange: (open: boolean) => void;
   task: ScheduledTask | null;
   models: ModelOption[];
-  defaultModelAlias?: string;
+  defaultModelID?: string;
   admin?: boolean;
   ownerOptions?: OwnerOption[];
   recentRuns?: TaskRun[];
   saving: boolean;
   onSave: (form: TaskFormState, ownerUserID?: string) => Promise<void>;
 }) {
-  const [form, setForm] = useState<TaskFormState>(() => emptyTaskForm(defaultModelAlias));
+  const [form, setForm] = useState<TaskFormState>(() => emptyTaskForm());
   const [ownerUserID, setOwnerUserID] = useState("");
   const [error, setError] = useState("");
 
   useEffect(() => {
     if (!open) return;
-    setForm(task ? taskToForm(task) : emptyTaskForm(defaultModelAlias || models[0]?.alias || ""));
+    const defaultModel = models.find((model) => model.id === defaultModelID) ?? models[0];
+    setForm(
+      task ? taskToForm(task) : emptyTaskForm(defaultModel?.id ?? "", defaultModel?.alias ?? ""),
+    );
     setOwnerUserID(task?.owner_user_id ?? "");
     setError("");
-  }, [defaultModelAlias, models, open, task]);
+  }, [defaultModelID, models, open, task]);
 
   async function submit() {
     const validation = validateTaskForm(form);
@@ -194,11 +197,17 @@ export function TaskDrawer({
                   <Field label="Model">
                     <select
                       className={inputClass}
-                      value={form.modelAlias}
-                      onChange={(event) => setForm({ ...form, modelAlias: event.target.value })}
+                      value={form.modelRouteID}
+                      onChange={(event) => {
+                        const model = models.find(
+                          (candidate) => candidate.id === event.target.value,
+                        );
+                        if (model)
+                          setForm({ ...form, modelRouteID: model.id, modelAlias: model.alias });
+                      }}
                     >
                       {models.map((model) => (
-                        <option key={model.alias} value={model.alias}>
+                        <option key={model.id} value={model.id}>
                           {model.label || model.alias}
                         </option>
                       ))}

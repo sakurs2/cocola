@@ -150,9 +150,12 @@ const SUGGESTIONS: SuggestionTile[] = [
   },
 ];
 
+const RUNTIME_ICONS: Record<string, ModelIconConfig> = {
+  "claude-code": { type: "lobe-icons", slug: "claudecode" },
+  codex: { type: "lobe-icons", slug: "codex" },
+};
+
 const ThreadWelcome: FC = () => {
-  const { selectedModel, modelsLoaded } = useCocola();
-  const noModel = modelsLoaded && !selectedModel;
   // Time-aware greeting resolved after mount so SSR/client markup agree.
   const [greeting, setGreeting] = useState("Welcome back");
   useEffect(() => {
@@ -176,12 +179,6 @@ const ThreadWelcome: FC = () => {
             <CocolaTagline />
           </div>
         </div>
-        {noModel ? (
-          <p className="mt-3 text-center text-sm text-muted-foreground">
-            Ask an admin to enable a model before starting a conversation.
-          </p>
-        ) : null}
-
         <div className="mt-7 w-full">
           <Composer />
         </div>
@@ -236,9 +233,11 @@ const Composer: FC = () => {
           disabled={noModel}
           placeholder={
             noModel
-              ? selectedRuntime
-                ? `No ${selectedRuntime.label} compatible model configured`
-                : "No Agent Runtime available"
+              ? selectedRuntime?.model_protocol === "openai-responses"
+                ? "Codex requires an OpenAI Responses model"
+                : selectedRuntime
+                  ? `No ${selectedRuntime.label} compatible model configured`
+                  : "No Agent Runtime available"
               : "Send a message... (@ to mention, / for commands)"
           }
           className="max-h-40 min-h-12 flex-grow resize-none border-none bg-transparent px-2 py-3 text-sm outline-none placeholder:text-muted-foreground focus:ring-0 disabled:cursor-not-allowed"
@@ -279,7 +278,7 @@ const RuntimePicker: FC = () => {
           disabled={runtimeLocked || runtimes.length === 0}
           title={runtimeLocked ? "Runtime is fixed for this conversation" : "Select Agent Runtime"}
         >
-          <Code2 className="size-4 shrink-0 text-muted-foreground" />
+          <ModelIcon icon={RUNTIME_ICONS[selectedRuntime?.id ?? ""]} className="size-5" />
           <span className="truncate">{selectedRuntime?.label ?? "No runtime"}</span>
           {runtimeLocked || runtimes.length === 0 ? null : (
             <ChevronDown className="size-3.5 shrink-0 text-muted-foreground" />
@@ -303,7 +302,7 @@ const RuntimePicker: FC = () => {
                 setOpen(false);
               }}
             >
-              <Code2 className="size-4 text-muted-foreground" />
+              <ModelIcon icon={RUNTIME_ICONS[runtime.id]} className="size-6" />
               <span className="min-w-0 flex-1 truncate font-medium">{runtime.label}</span>
               {runtime.id === selectedRuntime?.id ? <Check className="size-4" /> : null}
             </button>
@@ -315,8 +314,7 @@ const RuntimePicker: FC = () => {
 };
 
 const ModelPicker: FC = () => {
-  const { models, selectedModel, selectedModelAlias, setSelectedModelAlias, modelsLoaded } =
-    useCocola();
+  const { models, selectedModel, selectedModelID, setSelectedModelID, modelsLoaded } = useCocola();
   const [open, setOpen] = useState(false);
   const noModel = modelsLoaded && !selectedModel;
 
@@ -359,17 +357,23 @@ const ModelPicker: FC = () => {
               </Command.Empty>
               {models.map((model) => (
                 <Command.Item
-                  key={model.alias}
-                  value={`${model.label} ${model.alias}`}
+                  key={model.id}
+                  value={`${model.label} ${model.alias} ${model.provider ?? ""}`}
                   className="flex cursor-pointer items-center gap-2 rounded-xl px-2 py-2 text-sm outline-none data-[selected=true]:bg-accent data-[selected=true]:text-accent-foreground"
                   onSelect={() => {
-                    setSelectedModelAlias(model.alias);
+                    setSelectedModelID(model.id);
                     setOpen(false);
                   }}
                 >
                   <ModelIcon icon={model.icon} className="size-6" />
-                  <span className="min-w-0 flex-1 truncate font-medium">{model.label}</span>
-                  {model.alias === selectedModelAlias ? <Check className="size-4" /> : null}
+                  <span className="min-w-0 flex-1">
+                    <span className="block truncate font-medium">{model.label}</span>
+                    <span className="block truncate text-xs text-muted-foreground">
+                      {model.alias}
+                      {model.provider ? ` · ${model.provider}` : ""}
+                    </span>
+                  </span>
+                  {model.id === selectedModelID ? <Check className="size-4" /> : null}
                 </Command.Item>
               ))}
             </Command.List>

@@ -1,10 +1,40 @@
 "use client";
 
 import { Cpu as ModelsPageIcon } from "@phosphor-icons/react";
-import { Check, Eye, EyeOff, KeyRound, Plus, Save, Star, Trash2 } from "lucide-react";
+import {
+  Bot,
+  Boxes,
+  Check,
+  KeyRound,
+  MoreHorizontal,
+  Plus,
+  Route,
+  Search,
+  Star,
+  Trash2,
+} from "lucide-react";
 import Image from "next/image";
 import { useCallback, useEffect, useMemo, useState, type ReactNode } from "react";
-import { AdminRefreshButton } from "@/components/admin/admin-ui";
+import {
+  AdminAlert,
+  AdminConfirmDialog,
+  AdminDrawer,
+  AdminEmptyState,
+  AdminPage,
+  AdminPageHeader,
+  AdminRefreshButton,
+  AdminStatusBadge,
+  AdminTable,
+  AdminToolbar,
+} from "@/components/admin/admin-ui";
+import { Button } from "@/components/ui/button";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
 import {
   LOCAL_SIMPLE_ICON_PATHS,
   SIMPLE_ICON_FALLBACK_BADGES,
@@ -13,10 +43,14 @@ import {
 } from "@/lib/model-icons";
 import { cn } from "@/lib/utils";
 
+type ProviderType = "anthropic" | "openai_compat" | "openai_responses";
+type ModelProtocol = "anthropic-messages" | "openai-responses";
+type View = "models" | "providers";
+
 type LLMProvider = {
   id: string;
   name: string;
-  type: "anthropic" | "openai_compat" | "openai_responses";
+  type: ProviderType;
   base_url: string;
   api_key_hint: string;
   enabled: boolean;
@@ -25,8 +59,10 @@ type LLMProvider = {
 };
 
 type LLMModel = {
+  id: string;
   alias: string;
   provider_id: string;
+  protocol: ModelProtocol;
   real_model: string;
   label: string;
   icon_type: "simple-icons" | "image";
@@ -43,7 +79,7 @@ type LLMModel = {
 type ProviderForm = {
   id: string;
   name: string;
-  type: LLMProvider["type"];
+  type: ProviderType;
   base_url: string;
   api_key: string;
   enabled: boolean;
@@ -62,6 +98,10 @@ type ModelForm = {
   is_default: boolean;
   sort_order: string;
 };
+
+type DeleteTarget =
+  | { kind: "model"; id: string; name: string }
+  | { kind: "provider"; id: string; name: string };
 
 const EMPTY_PROVIDER: ProviderForm = {
   id: "",
@@ -86,41 +126,89 @@ const EMPTY_MODEL: ModelForm = {
   sort_order: "0",
 };
 
-const PROVIDER_TYPES = [
-  { value: "anthropic", label: "Anthropic" },
-  { value: "openai_compat", label: "OpenAI Compatible" },
-  { value: "openai_responses", label: "OpenAI Responses" },
-] as const;
+const PROVIDER_TYPES: Array<{
+  value: ProviderType;
+  label: string;
+  shortLabel: string;
+  description: string;
+  defaultBaseURL: string;
+}> = [
+  {
+    value: "anthropic",
+    label: "Anthropic Messages API",
+    shortLabel: "Anthropic Messages",
+    description: "Native Anthropic messages and tool events for Claude Code.",
+    defaultBaseURL: "https://api.anthropic.com",
+  },
+  {
+    value: "openai_compat",
+    label: "OpenAI Chat Completions",
+    shortLabel: "Chat Completions",
+    description:
+      "OpenAI-compatible /chat/completions adapter. Responses API compatibility is separate.",
+    defaultBaseURL: "https://api.openai.com/v1",
+  },
+  {
+    value: "openai_responses",
+    label: "OpenAI Responses API",
+    shortLabel: "Responses API",
+    description: "Structured /responses requests and events required by Codex.",
+    defaultBaseURL: "https://api.openai.com/v1",
+  },
+];
 
-const btn =
-  "inline-flex h-9 items-center justify-center gap-2 rounded-md border border-border bg-background px-3 text-sm font-medium transition-colors hover:bg-accent hover:text-accent-foreground disabled:pointer-events-none disabled:opacity-50";
-const primaryBtn =
-  "inline-flex h-9 items-center justify-center gap-2 rounded-md bg-primary px-3 text-sm font-medium text-primary-foreground transition-colors hover:bg-primary/90 disabled:pointer-events-none disabled:opacity-50";
-const iconBtn =
-  "inline-flex size-8 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-accent hover:text-accent-foreground disabled:pointer-events-none disabled:opacity-40";
-const input =
-  "h-9 min-w-0 rounded-md border border-input bg-background px-3 text-sm text-foreground outline-none transition-colors placeholder:text-muted-foreground focus:border-ring focus:ring-1 focus:ring-ring disabled:cursor-not-allowed disabled:opacity-60";
+const inputClass =
+  "h-10 w-full min-w-0 rounded-xl border border-input bg-background px-3 text-sm text-foreground outline-none transition disabled:cursor-not-allowed disabled:bg-muted/50 disabled:text-muted-foreground";
 
 export default function AdminModelsPage() {
   const [providers, setProviders] = useState<LLMProvider[]>([]);
   const [models, setModels] = useState<LLMModel[]>([]);
+  const [view, setView] = useState<View>("models");
+  const [query, setQuery] = useState("");
   const [providerForm, setProviderForm] = useState<ProviderForm>(EMPTY_PROVIDER);
   const [modelForm, setModelForm] = useState<ModelForm>(EMPTY_MODEL);
   const [editingProvider, setEditingProvider] = useState<string | null>(null);
   const [editingModel, setEditingModel] = useState<string | null>(null);
+  const [providerDrawerOpen, setProviderDrawerOpen] = useState(false);
+  const [modelDrawerOpen, setModelDrawerOpen] = useState(false);
+  const [deleteTarget, setDeleteTarget] = useState<DeleteTarget | null>(null);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
+  const [formError, setFormError] = useState("");
 
-  const stats = useMemo(
-    () => ({
-      providers: providers.length,
-      enabledProviders: providers.filter((p) => p.enabled).length,
-      models: models.length,
-      visibleModels: models.filter((m) => m.enabled && m.visible).length,
-    }),
-    [models, providers],
+  const providerByID = useMemo(
+    () => new Map(providers.map((provider) => [provider.id, provider])),
+    [providers],
   );
+  const routeCountByProvider = useMemo(() => {
+    const counts = new Map<string, number>();
+    for (const model of models)
+      counts.set(model.provider_id, (counts.get(model.provider_id) ?? 0) + 1);
+    return counts;
+  }, [models]);
+
+  const visibleModels = useMemo(() => {
+    const needle = query.trim().toLowerCase();
+    if (!needle) return models;
+    return models.filter((model) =>
+      [model.label, model.alias, model.real_model, model.provider_id]
+        .join(" ")
+        .toLowerCase()
+        .includes(needle),
+    );
+  }, [models, query]);
+
+  const visibleProviders = useMemo(() => {
+    const needle = query.trim().toLowerCase();
+    if (!needle) return providers;
+    return providers.filter((provider) =>
+      [provider.name, provider.id, provider.base_url, providerTypeMeta(provider.type).label]
+        .join(" ")
+        .toLowerCase()
+        .includes(needle),
+    );
+  }, [providers, query]);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -134,15 +222,10 @@ export default function AdminModelsPage() {
       if (!modelsRes.ok) throw new Error(await errorText(modelsRes));
       const providerBody = (await providersRes.json()) as { providers?: LLMProvider[] };
       const modelBody = (await modelsRes.json()) as { models?: LLMModel[] };
-      const nextProviders = providerBody.providers ?? [];
-      setProviders(nextProviders);
+      setProviders(providerBody.providers ?? []);
       setModels(modelBody.models ?? []);
-      setModelForm((prev) => ({
-        ...prev,
-        provider_id: prev.provider_id || nextProviders[0]?.id || "",
-      }));
-    } catch (err) {
-      setError(err instanceof Error ? err.message : String(err));
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : String(cause));
     } finally {
       setLoading(false);
     }
@@ -152,12 +235,63 @@ export default function AdminModelsPage() {
     void load();
   }, [load]);
 
+  function createProvider() {
+    setEditingProvider(null);
+    setProviderForm(EMPTY_PROVIDER);
+    setFormError("");
+    setProviderDrawerOpen(true);
+  }
+
+  function editProvider(provider: LLMProvider) {
+    setEditingProvider(provider.id);
+    setProviderForm({
+      id: provider.id,
+      name: provider.name,
+      type: provider.type,
+      base_url: provider.base_url,
+      api_key: "",
+      enabled: provider.enabled,
+    });
+    setFormError("");
+    setProviderDrawerOpen(true);
+  }
+
+  function createModel() {
+    if (providers.length === 0) {
+      createProvider();
+      return;
+    }
+    setEditingModel(null);
+    setModelForm({ ...EMPTY_MODEL, provider_id: providers[0]?.id ?? "" });
+    setFormError("");
+    setModelDrawerOpen(true);
+  }
+
+  function editModel(model: LLMModel) {
+    setEditingModel(model.id);
+    setModelForm({
+      alias: model.alias,
+      provider_id: model.provider_id,
+      real_model: model.real_model,
+      label: model.label,
+      icon_type: model.icon_type,
+      icon_slug: model.icon_slug,
+      icon_url: model.icon_url,
+      enabled: model.enabled,
+      visible: model.visible,
+      is_default: model.is_default,
+      sort_order: String(model.sort_order),
+    });
+    setFormError("");
+    setModelDrawerOpen(true);
+  }
+
   async function saveProvider() {
     setSaving(true);
-    setError("");
+    setFormError("");
     try {
       const body: Record<string, unknown> = {
-        id: providerForm.id,
+        id: providerForm.id.trim() || providerIDFromName(providerForm.name),
         name: providerForm.name,
         type: providerForm.type,
         base_url: providerForm.base_url,
@@ -167,17 +301,16 @@ export default function AdminModelsPage() {
       const url = editingProvider
         ? `/api/admin/model-providers/${encodeURIComponent(editingProvider)}`
         : "/api/admin/model-providers";
-      const res = await fetch(url, {
+      const response = await fetch(url, {
         method: editingProvider ? "PATCH" : "POST",
         headers: { "content-type": "application/json" },
         body: JSON.stringify(body),
       });
-      if (!res.ok) throw new Error(await errorText(res));
-      setProviderForm(EMPTY_PROVIDER);
-      setEditingProvider(null);
+      if (!response.ok) throw new Error(await errorText(response));
+      setProviderDrawerOpen(false);
       await load();
-    } catch (err) {
-      setError(err instanceof Error ? err.message : String(err));
+    } catch (cause) {
+      setFormError(cause instanceof Error ? cause.message : String(cause));
     } finally {
       setSaving(false);
     }
@@ -185,7 +318,7 @@ export default function AdminModelsPage() {
 
   async function saveModel() {
     setSaving(true);
-    setError("");
+    setFormError("");
     try {
       const body = {
         alias: modelForm.alias,
@@ -203,625 +336,954 @@ export default function AdminModelsPage() {
       const url = editingModel
         ? `/api/admin/models/${encodeURIComponent(editingModel)}`
         : "/api/admin/models";
-      const res = await fetch(url, {
+      const response = await fetch(url, {
         method: editingModel ? "PATCH" : "POST",
         headers: { "content-type": "application/json" },
         body: JSON.stringify(body),
       });
-      if (!res.ok) throw new Error(await errorText(res));
-      setModelForm({ ...EMPTY_MODEL, provider_id: providers[0]?.id || "" });
-      setEditingModel(null);
+      if (!response.ok) throw new Error(await errorText(response));
+      setModelDrawerOpen(false);
       await load();
-    } catch (err) {
-      setError(err instanceof Error ? err.message : String(err));
+    } catch (cause) {
+      setFormError(cause instanceof Error ? cause.message : String(cause));
     } finally {
       setSaving(false);
     }
   }
 
-  async function deleteProvider(id: string) {
-    if (!confirm(`Delete provider ${id}?`)) return;
-    await mutate(`/api/admin/model-providers/${encodeURIComponent(id)}`, "DELETE");
-  }
-
-  async function deleteModel(alias: string) {
-    if (!confirm(`Delete model ${alias}?`)) return;
-    await mutate(`/api/admin/models/${encodeURIComponent(alias)}`, "DELETE");
-  }
-
-  async function setDefault(alias: string) {
-    await mutate(`/api/admin/models/${encodeURIComponent(alias)}/default`, "POST");
-  }
-
-  async function mutate(url: string, method: string) {
+  async function setDefault(model: LLMModel) {
     setSaving(true);
     setError("");
     try {
-      const res = await fetch(url, { method });
-      if (!res.ok) throw new Error(await errorText(res));
+      const response = await fetch(`/api/admin/models/${encodeURIComponent(model.id)}/default`, {
+        method: "POST",
+      });
+      if (!response.ok) throw new Error(await errorText(response));
       await load();
-    } catch (err) {
-      setError(err instanceof Error ? err.message : String(err));
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : String(cause));
     } finally {
       setSaving(false);
     }
   }
 
-  function editProvider(provider: LLMProvider) {
-    setEditingProvider(provider.id);
-    setProviderForm({
-      id: provider.id,
-      name: provider.name,
-      type: provider.type,
-      base_url: provider.base_url,
-      api_key: "",
-      enabled: provider.enabled,
-    });
+  async function deleteResource() {
+    if (!deleteTarget) return;
+    setSaving(true);
+    setError("");
+    try {
+      const prefix = deleteTarget.kind === "model" ? "models" : "model-providers";
+      const response = await fetch(`/api/admin/${prefix}/${encodeURIComponent(deleteTarget.id)}`, {
+        method: "DELETE",
+      });
+      if (!response.ok) throw new Error(await errorText(response));
+      setDeleteTarget(null);
+      await load();
+    } catch (cause) {
+      setDeleteTarget(null);
+      setError(cause instanceof Error ? cause.message : String(cause));
+    } finally {
+      setSaving(false);
+    }
   }
 
-  function editModel(model: LLMModel) {
-    setEditingModel(model.alias);
-    setModelForm({
-      alias: model.alias,
-      provider_id: model.provider_id,
-      real_model: model.real_model,
-      label: model.label,
-      icon_type: model.icon_type,
-      icon_slug: model.icon_slug,
-      icon_url: model.icon_url,
-      enabled: model.enabled,
-      visible: model.visible,
-      is_default: model.is_default,
-      sort_order: String(model.sort_order),
-    });
-  }
+  const selectedProvider = providerByID.get(modelForm.provider_id);
+  const editingProviderHasRoutes = editingProvider
+    ? (routeCountByProvider.get(editingProvider) ?? 0) > 0
+    : false;
 
   return (
-    <main className="min-h-screen bg-background text-foreground">
-      <header className="border-b border-border">
-        <div className="mx-auto flex h-16 max-w-7xl items-center gap-3 px-6">
-          <div className="admin-page-icon">
-            <ModelsPageIcon className="size-[18px]" weight="duotone" />
-          </div>
-          <div className="min-w-0 flex-1">
-            <h1 className="truncate text-base font-semibold">Model Configuration</h1>
-            <p className="truncate text-xs text-muted-foreground">
-              Providers, API keys, model aliases, visibility, defaults, and logos
-            </p>
-          </div>
+    <AdminPage>
+      <AdminPageHeader
+        eyebrow="Intelligence"
+        title="Models"
+        description="Connect model providers and decide which routes are available to each Agent Runtime."
+        icon={<ModelsPageIcon className="size-5" weight="duotone" />}
+        actions={
           <AdminRefreshButton
-            className={btn}
-            type="button"
-            onClick={() => void load()}
-            disabled={loading}
-            refreshing={loading}
             variant="outline"
-            size="sm"
+            refreshing={loading}
+            disabled={loading}
+            onClick={() => void load()}
           >
             Refresh
           </AdminRefreshButton>
+        }
+      />
+
+      {error ? <AdminAlert tone="error">{error}</AdminAlert> : null}
+
+      <div className="flex flex-wrap items-center justify-between gap-3 border-b border-border/70">
+        <div className="flex items-center gap-1" role="tablist" aria-label="Model configuration">
+          <ViewTab
+            active={view === "models"}
+            onClick={() => {
+              setView("models");
+              setQuery("");
+            }}
+          >
+            Model routes <Count>{models.length}</Count>
+          </ViewTab>
+          <ViewTab
+            active={view === "providers"}
+            onClick={() => {
+              setView("providers");
+              setQuery("");
+            }}
+          >
+            Providers <Count>{providers.length}</Count>
+          </ViewTab>
         </div>
-      </header>
+        <Button className="mb-2 gap-2" onClick={view === "models" ? createModel : createProvider}>
+          <Plus className="size-4" />
+          {view === "models" ? "Add model" : "Add provider"}
+        </Button>
+      </div>
 
-      <div className="mx-auto max-w-7xl space-y-6 px-6 py-6">
-        <section className="grid gap-3 md:grid-cols-4">
-          <Metric label="Providers" value={String(stats.providers)} />
-          <Metric label="Enabled Providers" value={String(stats.enabledProviders)} />
-          <Metric label="Model Routes" value={String(stats.models)} />
-          <Metric label="Visible Models" value={String(stats.visibleModels)} />
-        </section>
+      <AdminToolbar>
+        <label className="flex min-w-0 flex-1 items-center gap-2 rounded-xl border border-input bg-background px-3 sm:max-w-md">
+          <Search className="size-4 shrink-0 text-muted-foreground" />
+          <input
+            value={query}
+            onChange={(event) => setQuery(event.target.value)}
+            placeholder={view === "models" ? "Find a model route" : "Find a provider"}
+            className="h-10 min-w-0 flex-1 bg-transparent text-sm outline-none placeholder:text-muted-foreground"
+          />
+        </label>
+      </AdminToolbar>
 
-        {error ? (
-          <div className="rounded-md border border-destructive/30 bg-destructive/10 px-3 py-2 text-sm text-destructive">
-            {error}
-          </div>
-        ) : null}
+      {view === "models" ? (
+        <ModelsTable
+          models={visibleModels}
+          providerByID={providerByID}
+          loading={loading}
+          saving={saving}
+          onAdd={createModel}
+          onEdit={editModel}
+          onDefault={(model) => void setDefault(model)}
+          onDelete={(model) =>
+            setDeleteTarget({ kind: "model", id: model.id, name: model.label || model.alias })
+          }
+        />
+      ) : (
+        <ProvidersTable
+          providers={visibleProviders}
+          routeCountByProvider={routeCountByProvider}
+          loading={loading}
+          onAdd={createProvider}
+          onEdit={editProvider}
+          onDelete={(provider) =>
+            setDeleteTarget({
+              kind: "provider",
+              id: provider.id,
+              name: provider.name || provider.id,
+            })
+          }
+        />
+      )}
 
-        <section className="grid gap-4 xl:grid-cols-[0.9fr_1.4fr]">
-          <div className="rounded-lg border border-border bg-card p-4">
-            <div className="mb-4 flex items-center justify-between gap-3">
-              <h2 className="text-sm font-semibold">Provider</h2>
-              <button
-                type="button"
-                className={btn}
-                onClick={() => {
-                  setEditingProvider(null);
-                  setProviderForm(EMPTY_PROVIDER);
-                }}
-              >
-                <Plus className="size-4" />
-                New
-              </button>
+      <AdminDrawer
+        open={providerDrawerOpen}
+        onOpenChange={(open) => !saving && setProviderDrawerOpen(open)}
+        title={editingProvider ? "Edit provider" : "Add provider"}
+        description="Choose the wire protocol the upstream actually implements."
+        size="lg"
+        footer={
+          <DrawerFooter
+            saving={saving}
+            saveLabel={editingProvider ? "Save changes" : "Add provider"}
+            onCancel={() => setProviderDrawerOpen(false)}
+            onSave={() => void saveProvider()}
+          />
+        }
+      >
+        <div className="grid gap-5">
+          {formError ? <AdminAlert tone="error">{formError}</AdminAlert> : null}
+          <FormGroup
+            label="Protocol"
+            hint={
+              editingProviderHasRoutes
+                ? "Remove its model routes before changing protocol."
+                : undefined
+            }
+          >
+            <div className="grid gap-2">
+              {PROVIDER_TYPES.map((type) => (
+                <button
+                  key={type.value}
+                  type="button"
+                  disabled={editingProviderHasRoutes}
+                  onClick={() =>
+                    setProviderForm((current) => ({
+                      ...current,
+                      type: type.value,
+                      base_url:
+                        !current.base_url ||
+                        PROVIDER_TYPES.some((item) => item.defaultBaseURL === current.base_url)
+                          ? type.defaultBaseURL
+                          : current.base_url,
+                    }))
+                  }
+                  className={cn(
+                    "rounded-2xl border p-3 text-left transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/30 disabled:cursor-not-allowed disabled:opacity-65",
+                    providerForm.type === type.value
+                      ? "border-primary/45 bg-primary/5 shadow-sm"
+                      : "border-border bg-background hover:border-primary/25 hover:bg-muted/25",
+                  )}
+                >
+                  <span className="flex items-center justify-between gap-3">
+                    <span className="text-sm font-semibold">{type.label}</span>
+                    {providerForm.type === type.value ? (
+                      <Check className="size-4 text-primary" />
+                    ) : null}
+                  </span>
+                  <span className="mt-1 block text-xs leading-5 text-muted-foreground">
+                    {type.description}
+                  </span>
+                </button>
+              ))}
             </div>
-            <div className="grid gap-3">
-              <Field label="Provider ID">
+          </FormGroup>
+
+          <div className="grid gap-4 sm:grid-cols-2">
+            <Field label="Name">
+              <input
+                className={inputClass}
+                value={providerForm.name}
+                onChange={(event) => setProviderForm({ ...providerForm, name: event.target.value })}
+                placeholder="OpenAI production"
+              />
+            </Field>
+            <Field label="Status">
+              <Toggle
+                checked={providerForm.enabled}
+                onChange={(enabled) => setProviderForm({ ...providerForm, enabled })}
+                label="Provider enabled"
+              />
+            </Field>
+          </div>
+
+          <Field label="Base URL">
+            <input
+              className={inputClass}
+              value={providerForm.base_url}
+              onChange={(event) =>
+                setProviderForm({ ...providerForm, base_url: event.target.value })
+              }
+              placeholder={providerTypeMeta(providerForm.type).defaultBaseURL}
+            />
+          </Field>
+
+          <div className="rounded-2xl border border-blue-500/20 bg-blue-500/[0.06] p-3">
+            <div className="text-[11px] font-semibold uppercase tracking-[0.12em] text-blue-700/75">
+              Request path
+            </div>
+            <code className="mt-1 block break-all text-xs text-foreground">
+              {providerEndpoint(providerForm.base_url, providerForm.type)}
+            </code>
+            <p className="mt-2 text-xs leading-5 text-muted-foreground">
+              {providerForm.type === "openai_responses"
+                ? "The upstream must implement POST /responses. Chat Completions compatibility is not sufficient."
+                : providerForm.type === "openai_compat"
+                  ? "This route uses /chat/completions; it does not imply Responses API support."
+                  : "This route uses the native Anthropic Messages API."}
+            </p>
+          </div>
+
+          <Field
+            label="API key"
+            hint={editingProvider ? "Leave blank to keep the current key." : undefined}
+          >
+            <div className="flex items-center gap-2 rounded-xl border border-input bg-background px-3">
+              <KeyRound className="size-4 shrink-0 text-muted-foreground" />
+              <input
+                className="h-10 min-w-0 flex-1 bg-transparent text-sm outline-none placeholder:text-muted-foreground"
+                value={providerForm.api_key}
+                onChange={(event) =>
+                  setProviderForm({ ...providerForm, api_key: event.target.value })
+                }
+                placeholder={editingProvider ? "Keep current key" : "Enter API key"}
+                type="password"
+                autoComplete="new-password"
+              />
+            </div>
+          </Field>
+
+          <details className="group rounded-2xl border border-border/70 p-3">
+            <summary className="cursor-pointer list-none text-sm font-medium [&::-webkit-details-marker]:hidden">
+              Advanced
+            </summary>
+            <div className="mt-4 border-t border-border/70 pt-4">
+              <Field
+                label="Provider ID"
+                hint="Generated from the provider name when left blank; it cannot be changed later."
+              >
                 <input
-                  className={input}
+                  className={cn(inputClass, "font-mono text-xs")}
                   value={providerForm.id}
                   disabled={Boolean(editingProvider)}
-                  onChange={(e) => setProviderForm({ ...providerForm, id: e.target.value })}
-                  placeholder="anthropic"
+                  onChange={(event) => setProviderForm({ ...providerForm, id: event.target.value })}
+                  placeholder="openai-prod"
                 />
               </Field>
-              <Field label="Name">
-                <input
-                  className={input}
-                  value={providerForm.name}
-                  onChange={(e) => setProviderForm({ ...providerForm, name: e.target.value })}
-                  placeholder="Anthropic"
-                />
-              </Field>
-              <Field label="Type">
+            </div>
+          </details>
+        </div>
+      </AdminDrawer>
+
+      <AdminDrawer
+        open={modelDrawerOpen}
+        onOpenChange={(open) => !saving && setModelDrawerOpen(open)}
+        title={editingModel ? "Edit model route" : "Add model route"}
+        description="Connect a user-visible model to one provider and upstream model ID."
+        size="lg"
+        footer={
+          <DrawerFooter
+            saving={saving}
+            saveLabel={editingModel ? "Save changes" : "Add model"}
+            onCancel={() => setModelDrawerOpen(false)}
+            onSave={() => void saveModel()}
+          />
+        }
+      >
+        <div className="grid gap-5">
+          {formError ? <AdminAlert tone="error">{formError}</AdminAlert> : null}
+          <Field label="Provider">
+            <select
+              className={inputClass}
+              value={modelForm.provider_id}
+              onChange={(event) => setModelForm({ ...modelForm, provider_id: event.target.value })}
+            >
+              <option value="">Select provider</option>
+              {providers
+                .filter((provider) => {
+                  if (!editingModel) return true;
+                  const original = models.find((model) => model.id === editingModel);
+                  return !original || protocolForType(provider.type) === original.protocol;
+                })
+                .map((provider) => (
+                  <option key={provider.id} value={provider.id}>
+                    {provider.name || provider.id} · {providerTypeMeta(provider.type).shortLabel}
+                  </option>
+                ))}
+            </select>
+          </Field>
+
+          {selectedProvider ? (
+            <div className="flex flex-wrap items-center gap-2 rounded-2xl border border-border/70 bg-muted/25 p-3">
+              <ProviderProtocolBadge type={selectedProvider.type} />
+              <span className="text-xs text-muted-foreground">
+                Compatible with {runtimeCompatibilityForType(selectedProvider.type)}
+              </span>
+            </div>
+          ) : null}
+
+          <div className="grid gap-4 sm:grid-cols-2">
+            <Field label="Display name">
+              <input
+                className={inputClass}
+                value={modelForm.label}
+                onChange={(event) => setModelForm({ ...modelForm, label: event.target.value })}
+                placeholder="GPT-5"
+              />
+            </Field>
+            <Field label="Alias" hint="Unique only inside the selected provider.">
+              <input
+                className={cn(inputClass, "font-mono text-xs")}
+                value={modelForm.alias}
+                disabled={Boolean(editingModel)}
+                onChange={(event) => setModelForm({ ...modelForm, alias: event.target.value })}
+                placeholder="gpt-5"
+              />
+            </Field>
+          </div>
+
+          <Field label="Upstream model ID">
+            <input
+              className={cn(inputClass, "font-mono text-xs")}
+              value={modelForm.real_model}
+              onChange={(event) => setModelForm({ ...modelForm, real_model: event.target.value })}
+              placeholder="gpt-5"
+            />
+          </Field>
+
+          <div className="grid gap-3 rounded-2xl border border-border/70 p-3 sm:grid-cols-3">
+            <Toggle
+              checked={modelForm.enabled}
+              onChange={(enabled) => setModelForm({ ...modelForm, enabled })}
+              label="Enabled"
+            />
+            <Toggle
+              checked={modelForm.visible}
+              onChange={(visible) => setModelForm({ ...modelForm, visible })}
+              label="Visible to users"
+            />
+            <Toggle
+              checked={modelForm.is_default}
+              onChange={(is_default) => setModelForm({ ...modelForm, is_default })}
+              label="Protocol default"
+            />
+          </div>
+
+          <details className="group rounded-2xl border border-border/70 p-3">
+            <summary className="cursor-pointer list-none text-sm font-medium [&::-webkit-details-marker]:hidden">
+              Appearance and order
+            </summary>
+            <div className="mt-4 grid gap-4 border-t border-border/70 pt-4 sm:grid-cols-2">
+              <Field label="Icon source">
                 <select
-                  className={input}
-                  value={providerForm.type}
-                  onChange={(e) =>
-                    setProviderForm({
-                      ...providerForm,
-                      type: e.target.value as ProviderForm["type"],
+                  className={inputClass}
+                  value={modelForm.icon_type}
+                  onChange={(event) =>
+                    setModelForm({
+                      ...modelForm,
+                      icon_type: event.target.value as ModelForm["icon_type"],
                     })
                   }
                 >
-                  {PROVIDER_TYPES.map((type) => (
-                    <option key={type.value} value={type.value}>
-                      {type.label}
-                    </option>
-                  ))}
+                  <option value="simple-icons">Brand icon</option>
+                  <option value="image">Image URL</option>
                 </select>
               </Field>
-              <Field label="Base URL">
-                <input
-                  className={input}
-                  value={providerForm.base_url}
-                  onChange={(e) => setProviderForm({ ...providerForm, base_url: e.target.value })}
-                  placeholder="https://api.anthropic.com"
-                />
-              </Field>
-              <Field label="API Key">
-                <div className="flex min-w-0 items-center gap-2">
-                  <KeyRound className="size-4 shrink-0 text-muted-foreground" />
+              {modelForm.icon_type === "image" ? (
+                <Field label="Image URL">
                   <input
-                    className={input}
-                    value={providerForm.api_key}
-                    onChange={(e) => setProviderForm({ ...providerForm, api_key: e.target.value })}
-                    placeholder={editingProvider ? "Leave blank to keep current key" : "sk-..."}
-                    type="password"
+                    className={inputClass}
+                    value={modelForm.icon_url}
+                    onChange={(event) =>
+                      setModelForm({ ...modelForm, icon_url: event.target.value })
+                    }
+                    placeholder="https://..."
                   />
-                </div>
-              </Field>
-              <label className="flex items-center gap-2 text-sm">
-                <input
-                  type="checkbox"
-                  checked={providerForm.enabled}
-                  onChange={(e) => setProviderForm({ ...providerForm, enabled: e.target.checked })}
-                />
-                Enabled
-              </label>
-              <button
-                type="button"
-                className={primaryBtn}
-                disabled={saving}
-                onClick={() => void saveProvider()}
-              >
-                <Save className="size-4" />
-                {editingProvider ? "Save Provider" : "Create Provider"}
-              </button>
-            </div>
-          </div>
-
-          <div className="rounded-lg border border-border bg-card p-4">
-            <div className="mb-4 flex items-center justify-between gap-3">
-              <h2 className="text-sm font-semibold">Model Route</h2>
-              <button
-                type="button"
-                className={btn}
-                onClick={() => {
-                  setEditingModel(null);
-                  setModelForm({ ...EMPTY_MODEL, provider_id: providers[0]?.id || "" });
-                }}
-              >
-                <Plus className="size-4" />
-                New
-              </button>
-            </div>
-            <div className="grid gap-3 md:grid-cols-2">
-              <Field label="Alias">
-                <input
-                  className={input}
-                  value={modelForm.alias}
-                  disabled={Boolean(editingModel)}
-                  onChange={(e) => setModelForm({ ...modelForm, alias: e.target.value })}
-                  placeholder="claude-sonnet"
-                />
-              </Field>
-              <Field label="Provider">
-                <select
-                  className={input}
-                  value={modelForm.provider_id}
-                  onChange={(e) => setModelForm({ ...modelForm, provider_id: e.target.value })}
-                >
-                  <option value="">Select provider</option>
-                  {providers.map((provider) => (
-                    <option key={provider.id} value={provider.id}>
-                      {provider.name || provider.id}
-                    </option>
-                  ))}
-                </select>
-              </Field>
-              <Field label="Real Model">
-                <input
-                  className={input}
-                  value={modelForm.real_model}
-                  onChange={(e) => setModelForm({ ...modelForm, real_model: e.target.value })}
-                  placeholder="claude-3-5-sonnet-20241022"
-                />
-              </Field>
-              <Field label="Label">
-                <input
-                  className={input}
-                  value={modelForm.label}
-                  onChange={(e) => setModelForm({ ...modelForm, label: e.target.value })}
-                  placeholder="Claude Sonnet"
-                />
-              </Field>
-              <Field label="Icon">
-                <div className="grid gap-2 sm:grid-cols-[9rem_1fr]">
+                </Field>
+              ) : (
+                <Field label="Brand">
                   <select
-                    className={input}
-                    value={modelForm.icon_type}
-                    onChange={(e) =>
-                      setModelForm({
-                        ...modelForm,
-                        icon_type: e.target.value as ModelForm["icon_type"],
-                      })
+                    className={inputClass}
+                    value={modelForm.icon_slug}
+                    onChange={(event) =>
+                      setModelForm({ ...modelForm, icon_slug: event.target.value })
                     }
                   >
-                    <option value="simple-icons">Brand icon</option>
-                    <option value="image">Image URL</option>
+                    {SIMPLE_ICON_SLUGS.map((slug) => (
+                      <option key={slug} value={slug}>
+                        {SIMPLE_ICON_LABELS[slug] ?? slug}
+                      </option>
+                    ))}
                   </select>
-                  {modelForm.icon_type === "image" ? (
-                    <input
-                      className={input}
-                      value={modelForm.icon_url}
-                      onChange={(e) => setModelForm({ ...modelForm, icon_url: e.target.value })}
-                      placeholder="https://..."
-                    />
-                  ) : (
-                    <select
-                      className={input}
-                      value={modelForm.icon_slug}
-                      onChange={(e) => setModelForm({ ...modelForm, icon_slug: e.target.value })}
-                    >
-                      {SIMPLE_ICON_SLUGS.map((slug) => (
-                        <option key={slug} value={slug}>
-                          {SIMPLE_ICON_LABELS[slug] ?? slug}
-                        </option>
-                      ))}
-                    </select>
-                  )}
-                </div>
-              </Field>
-              <Field label="Sort">
+                </Field>
+              )}
+              <Field label="Display priority" hint="Lower numbers appear first.">
                 <input
-                  className={input}
+                  className={inputClass}
                   value={modelForm.sort_order}
-                  onChange={(e) => setModelForm({ ...modelForm, sort_order: e.target.value })}
+                  onChange={(event) =>
+                    setModelForm({ ...modelForm, sort_order: event.target.value })
+                  }
                   inputMode="numeric"
                 />
               </Field>
-              <div className="flex flex-wrap items-center gap-4 md:col-span-2">
-                <CheckBox
-                  label="Enabled"
-                  checked={modelForm.enabled}
-                  onChange={(enabled) => setModelForm({ ...modelForm, enabled })}
-                />
-                <CheckBox
-                  label="Visible"
-                  checked={modelForm.visible}
-                  onChange={(visible) => setModelForm({ ...modelForm, visible })}
-                />
-                <CheckBox
-                  label="Default"
-                  checked={modelForm.is_default}
-                  onChange={(is_default) => setModelForm({ ...modelForm, is_default })}
-                />
-              </div>
-              <button
-                type="button"
-                className={cn(primaryBtn, "md:col-span-2")}
-                disabled={saving || providers.length === 0}
-                onClick={() => void saveModel()}
-              >
-                <Save className="size-4" />
-                {editingModel ? "Save Model" : "Create Model"}
-              </button>
             </div>
-          </div>
-        </section>
+          </details>
+        </div>
+      </AdminDrawer>
 
-        <section className="rounded-lg border border-border bg-card">
-          <SectionHeader title="Providers" loading={loading} />
-          <div className="overflow-x-auto">
-            <table className="min-w-[920px] text-sm">
-              <thead className="border-y border-border bg-muted/40 text-xs text-muted-foreground">
-                <tr>
-                  <Th>Provider ID</Th>
-                  <Th>Name</Th>
-                  <Th>Type</Th>
-                  <Th>Base URL</Th>
-                  <Th>API Key</Th>
-                  <Th>Status</Th>
-                  <Th>Actions</Th>
-                </tr>
-              </thead>
-              <tbody>
-                {providers.length === 0 ? (
-                  <EmptyRow colSpan={7} text="No providers configured" />
-                ) : (
-                  providers.map((provider) => (
-                    <tr key={provider.id} className="border-b border-border last:border-0">
-                      <Td title={provider.id}>{provider.id}</Td>
-                      <Td title={provider.name}>{provider.name}</Td>
-                      <Td>{provider.type}</Td>
-                      <Td title={provider.base_url}>{provider.base_url || "-"}</Td>
-                      <Td>{provider.api_key_hint || "-"}</Td>
-                      <Td>
-                        <Status on={provider.enabled} />
-                      </Td>
-                      <Td>
-                        <RowActions
-                          onEdit={() => editProvider(provider)}
-                          onDelete={() => void deleteProvider(provider.id)}
-                        />
-                      </Td>
-                    </tr>
-                  ))
-                )}
-              </tbody>
-            </table>
-          </div>
-        </section>
+      <AdminConfirmDialog
+        open={deleteTarget !== null}
+        onOpenChange={(open) => !open && setDeleteTarget(null)}
+        title={`Delete ${deleteTarget?.kind ?? "resource"}?`}
+        description={
+          deleteTarget?.kind === "provider"
+            ? `Delete ${deleteTarget.name}? Providers with model routes cannot be deleted.`
+            : `Delete ${deleteTarget?.name ?? "this model route"}? Historical run records will remain available.`
+        }
+        confirmLabel="Delete"
+        destructive
+        busy={saving}
+        onConfirm={() => void deleteResource()}
+      />
+    </AdminPage>
+  );
+}
 
-        <section className="rounded-lg border border-border bg-card">
-          <SectionHeader title="Model Routes" loading={loading} />
-          <div className="overflow-x-auto">
-            <table className="min-w-[1120px] text-sm">
-              <thead className="border-y border-border bg-muted/40 text-xs text-muted-foreground">
-                <tr>
-                  <Th>Alias</Th>
-                  <Th>Label</Th>
-                  <Th>Provider ID</Th>
-                  <Th>Real Model</Th>
-                  <Th>Icon</Th>
-                  <Th>Status</Th>
-                  <Th>Visible</Th>
-                  <Th>Default</Th>
-                  <Th>Actions</Th>
-                </tr>
-              </thead>
-              <tbody>
-                {models.length === 0 ? (
-                  <EmptyRow colSpan={9} text="No model routes configured" />
-                ) : (
-                  models.map((model) => (
-                    <tr key={model.alias} className="border-b border-border last:border-0">
-                      <Td title={model.alias}>{model.alias}</Td>
-                      <Td title={model.label}>{model.label}</Td>
-                      <Td title={model.provider_id}>{model.provider_id}</Td>
-                      <Td title={model.real_model}>{model.real_model}</Td>
-                      <Td title={model.icon_type === "image" ? model.icon_url : model.icon_slug}>
-                        <span className="inline-flex items-center gap-2">
-                          <ModelIcon model={model} />
-                          <span className="truncate">
-                            {model.icon_type === "image"
-                              ? "image"
-                              : SIMPLE_ICON_LABELS[model.icon_slug.toLowerCase()] ||
-                                model.icon_slug}
-                          </span>
-                        </span>
-                      </Td>
-                      <Td>
-                        <Status on={model.enabled} />
-                      </Td>
-                      <Td>
-                        {model.visible ? (
-                          <Eye className="size-4" />
-                        ) : (
-                          <EyeOff className="size-4 text-muted-foreground" />
-                        )}
-                      </Td>
-                      <Td>
+function ModelsTable({
+  models,
+  providerByID,
+  loading,
+  saving,
+  onAdd,
+  onEdit,
+  onDefault,
+  onDelete,
+}: {
+  models: LLMModel[];
+  providerByID: Map<string, LLMProvider>;
+  loading: boolean;
+  saving: boolean;
+  onAdd: () => void;
+  onEdit: (model: LLMModel) => void;
+  onDefault: (model: LLMModel) => void;
+  onDelete: (model: LLMModel) => void;
+}) {
+  if (!loading && models.length === 0) {
+    return (
+      <AdminTable>
+        <AdminEmptyState
+          icon={<Route className="size-5" />}
+          title="No model routes"
+          description="Add a model route after connecting at least one provider."
+          action={<Button onClick={onAdd}>Add model</Button>}
+        />
+      </AdminTable>
+    );
+  }
+  return (
+    <AdminTable>
+      <table className="w-full min-w-[880px] text-sm">
+        <thead className="border-b border-border/70 bg-muted/35 text-left text-xs text-muted-foreground">
+          <tr>
+            <Th>Model</Th>
+            <Th>Upstream API</Th>
+            <Th>Provider</Th>
+            <Th>Upstream model</Th>
+            <Th>Availability</Th>
+            <Th>
+              <span className="sr-only">Actions</span>
+            </Th>
+          </tr>
+        </thead>
+        <tbody>
+          {models.map((model) => {
+            const provider = providerByID.get(model.provider_id);
+            return (
+              <tr
+                key={model.id}
+                className="border-b border-border/60 last:border-0 hover:bg-muted/20"
+              >
+                <Td>
+                  <button
+                    type="button"
+                    onClick={() => onEdit(model)}
+                    className="flex max-w-xs items-center gap-3 text-left"
+                  >
+                    <ModelIcon model={model} />
+                    <span className="min-w-0">
+                      <span className="flex items-center gap-1.5 font-medium text-foreground">
+                        <span className="truncate">{model.label || model.alias}</span>
                         {model.is_default ? (
-                          <Star className="size-4 fill-primary text-primary" />
-                        ) : (
-                          "-"
-                        )}
-                      </Td>
-                      <Td>
-                        <div className="flex items-center gap-1">
-                          <button
-                            className={iconBtn}
-                            type="button"
-                            onClick={() => editModel(model)}
-                            title="Edit"
-                          >
-                            <Save className="size-4" />
-                          </button>
-                          <button
-                            className={iconBtn}
-                            type="button"
-                            onClick={() => void setDefault(model.alias)}
-                            title="Set default"
-                            disabled={model.is_default}
-                          >
-                            <Star className="size-4" />
-                          </button>
-                          <button
-                            className={iconBtn}
-                            type="button"
-                            onClick={() => void deleteModel(model.alias)}
-                            title="Delete"
-                          >
-                            <Trash2 className="size-4" />
-                          </button>
-                        </div>
-                      </Td>
-                    </tr>
-                  ))
+                          <Star className="size-3.5 fill-primary text-primary" />
+                        ) : null}
+                      </span>
+                      <code className="block truncate text-[11px] text-muted-foreground">
+                        {model.alias}
+                      </code>
+                    </span>
+                  </button>
+                </Td>
+                <Td>
+                  <div className="grid gap-1">
+                    {provider ? (
+                      <ProviderProtocolBadge type={provider.type} />
+                    ) : (
+                      <RuntimeProtocolBadge protocol={model.protocol} />
+                    )}
+                    <span className="text-[11px] text-muted-foreground">
+                      {provider
+                        ? runtimeCompatibilityForType(provider.type)
+                        : runtimeForProtocol(model.protocol)}
+                    </span>
+                  </div>
+                </Td>
+                <Td>
+                  <div className="font-medium">{provider?.name || model.provider_id}</div>
+                  <code className="text-[11px] text-muted-foreground">{model.provider_id}</code>
+                </Td>
+                <Td>
+                  <code className="text-xs text-muted-foreground">{model.real_model}</code>
+                </Td>
+                <Td>
+                  <div className="flex flex-wrap gap-1.5">
+                    <AdminStatusBadge tone={model.enabled ? "green" : "neutral"} dot>
+                      {model.enabled ? "Enabled" : "Disabled"}
+                    </AdminStatusBadge>
+                    <AdminStatusBadge tone={model.visible ? "sky" : "neutral"}>
+                      {model.visible ? "Visible" : "Hidden"}
+                    </AdminStatusBadge>
+                  </div>
+                </Td>
+                <Td>
+                  <ResourceMenu
+                    onEdit={() => onEdit(model)}
+                    onDefault={model.is_default ? undefined : () => onDefault(model)}
+                    onDelete={() => onDelete(model)}
+                    disabled={saving}
+                  />
+                </Td>
+              </tr>
+            );
+          })}
+        </tbody>
+      </table>
+    </AdminTable>
+  );
+}
+
+function ProvidersTable({
+  providers,
+  routeCountByProvider,
+  loading,
+  onAdd,
+  onEdit,
+  onDelete,
+}: {
+  providers: LLMProvider[];
+  routeCountByProvider: Map<string, number>;
+  loading: boolean;
+  onAdd: () => void;
+  onEdit: (provider: LLMProvider) => void;
+  onDelete: (provider: LLMProvider) => void;
+}) {
+  if (!loading && providers.length === 0) {
+    return (
+      <AdminTable>
+        <AdminEmptyState
+          icon={<Boxes className="size-5" />}
+          title="No providers connected"
+          description="Connect the API endpoint that will serve your first model."
+          action={<Button onClick={onAdd}>Add provider</Button>}
+        />
+      </AdminTable>
+    );
+  }
+  return (
+    <AdminTable>
+      <table className="w-full min-w-[820px] text-sm">
+        <thead className="border-b border-border/70 bg-muted/35 text-left text-xs text-muted-foreground">
+          <tr>
+            <Th>Provider</Th>
+            <Th>Upstream API</Th>
+            <Th>Endpoint</Th>
+            <Th>Credential</Th>
+            <Th>Models</Th>
+            <Th>Status</Th>
+            <Th>
+              <span className="sr-only">Actions</span>
+            </Th>
+          </tr>
+        </thead>
+        <tbody>
+          {providers.map((provider) => (
+            <tr
+              key={provider.id}
+              className="border-b border-border/60 last:border-0 hover:bg-muted/20"
+            >
+              <Td>
+                <button type="button" onClick={() => onEdit(provider)} className="text-left">
+                  <span className="block font-medium text-foreground">
+                    {provider.name || provider.id}
+                  </span>
+                  <code className="text-[11px] text-muted-foreground">{provider.id}</code>
+                </button>
+              </Td>
+              <Td>
+                <ProviderProtocolBadge type={provider.type} />
+              </Td>
+              <Td>
+                <code
+                  className="block max-w-xs truncate text-xs text-muted-foreground"
+                  title={provider.base_url}
+                >
+                  {provider.base_url || "—"}
+                </code>
+              </Td>
+              <Td>
+                {provider.api_key_hint ? (
+                  <span className="font-mono text-xs">{provider.api_key_hint}</span>
+                ) : (
+                  "—"
                 )}
-              </tbody>
-            </table>
-          </div>
-        </section>
-      </div>
-    </main>
+              </Td>
+              <Td>
+                <span className="tabular-nums">{routeCountByProvider.get(provider.id) ?? 0}</span>
+              </Td>
+              <Td>
+                <AdminStatusBadge tone={provider.enabled ? "green" : "neutral"} dot>
+                  {provider.enabled ? "Enabled" : "Disabled"}
+                </AdminStatusBadge>
+              </Td>
+              <Td>
+                <ResourceMenu onEdit={() => onEdit(provider)} onDelete={() => onDelete(provider)} />
+              </Td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </AdminTable>
   );
 }
 
-function Metric({ label, value }: { label: string; value: string }) {
+function ResourceMenu({
+  onEdit,
+  onDefault,
+  onDelete,
+  disabled = false,
+}: {
+  onEdit: () => void;
+  onDefault?: () => void;
+  onDelete: () => void;
+  disabled?: boolean;
+}) {
   return (
-    <div className="rounded-lg border border-border bg-card p-4">
-      <div className="text-xs font-medium text-muted-foreground">{label}</div>
-      <div className="mt-2 text-2xl font-semibold tabular-nums">{value}</div>
-    </div>
+    <DropdownMenu>
+      <DropdownMenuTrigger asChild>
+        <Button variant="ghost" size="icon" disabled={disabled} aria-label="Open actions">
+          <MoreHorizontal className="size-4" />
+        </Button>
+      </DropdownMenuTrigger>
+      <DropdownMenuContent align="end">
+        <DropdownMenuItem onSelect={onEdit}>Edit</DropdownMenuItem>
+        {onDefault ? (
+          <DropdownMenuItem onSelect={onDefault}>
+            <Star className="mr-2 size-4" /> Set as protocol default
+          </DropdownMenuItem>
+        ) : null}
+        <DropdownMenuSeparator />
+        <DropdownMenuItem className="text-destructive focus:text-destructive" onSelect={onDelete}>
+          <Trash2 className="mr-2 size-4" /> Delete
+        </DropdownMenuItem>
+      </DropdownMenuContent>
+    </DropdownMenu>
   );
 }
 
-function Field({ label, children }: { label: string; children: ReactNode }) {
+function ViewTab({
+  active,
+  onClick,
+  children,
+}: {
+  active: boolean;
+  onClick: () => void;
+  children: ReactNode;
+}) {
   return (
-    <label className="grid gap-1.5 text-xs font-medium text-muted-foreground">
-      {label}
+    <button
+      type="button"
+      role="tab"
+      aria-selected={active}
+      onClick={onClick}
+      className={cn(
+        "relative flex h-11 items-center gap-2 px-3 text-sm font-medium text-muted-foreground transition hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/30",
+        active &&
+          "text-foreground after:absolute after:inset-x-2 after:bottom-0 after:h-0.5 after:rounded-full after:bg-primary",
+      )}
+    >
+      {children}
+    </button>
+  );
+}
+
+function Count({ children }: { children: ReactNode }) {
+  return (
+    <span className="rounded-full bg-muted px-1.5 py-0.5 text-[11px] tabular-nums">{children}</span>
+  );
+}
+
+function Field({ label, hint, children }: { label: string; hint?: string; children: ReactNode }) {
+  return (
+    <label className="grid gap-1.5 text-sm font-medium text-foreground">
+      <span className="flex flex-wrap items-baseline justify-between gap-2">
+        <span>{label}</span>
+        {hint ? <span className="text-xs font-normal text-muted-foreground">{hint}</span> : null}
+      </span>
       {children}
     </label>
   );
 }
 
-function CheckBox({
+function FormGroup({
   label,
-  checked,
-  onChange,
+  hint,
+  children,
 }: {
   label: string;
-  checked: boolean;
-  onChange: (checked: boolean) => void;
+  hint?: string;
+  children: ReactNode;
 }) {
   return (
-    <label className="flex items-center gap-2 text-sm">
-      <input type="checkbox" checked={checked} onChange={(e) => onChange(e.target.checked)} />
+    <div className="grid gap-1.5 text-sm font-medium text-foreground">
+      <div className="flex flex-wrap items-baseline justify-between gap-2">
+        <span>{label}</span>
+        {hint ? <span className="text-xs font-normal text-muted-foreground">{hint}</span> : null}
+      </div>
+      {children}
+    </div>
+  );
+}
+
+function Toggle({
+  checked,
+  onChange,
+  label,
+}: {
+  checked: boolean;
+  onChange: (checked: boolean) => void;
+  label: string;
+}) {
+  return (
+    <label className="flex min-h-10 cursor-pointer items-center gap-2 rounded-xl border border-border/70 px-3 text-sm font-medium">
+      <input
+        type="checkbox"
+        checked={checked}
+        onChange={(event) => onChange(event.target.checked)}
+      />
       {label}
     </label>
   );
 }
 
-function SectionHeader({ title, loading }: { title: string; loading: boolean }) {
+function DrawerFooter({
+  saving,
+  saveLabel,
+  onCancel,
+  onSave,
+}: {
+  saving: boolean;
+  saveLabel: string;
+  onCancel: () => void;
+  onSave: () => void;
+}) {
   return (
-    <div className="flex h-12 items-center justify-between px-4">
-      <h2 className="text-sm font-semibold">{title}</h2>
-      {loading ? <span className="text-xs text-muted-foreground">Loading...</span> : null}
+    <div className="flex items-center justify-end gap-2">
+      <Button variant="outline" disabled={saving} onClick={onCancel}>
+        Cancel
+      </Button>
+      <Button disabled={saving} onClick={onSave}>
+        {saving ? "Saving…" : saveLabel}
+      </Button>
     </div>
+  );
+}
+
+function RuntimeProtocolBadge({ protocol }: { protocol: ModelProtocol }) {
+  const responses = protocol === "openai-responses";
+  return (
+    <span
+      className={cn(
+        "inline-flex w-fit items-center gap-1.5 rounded-full border px-2.5 py-1 text-xs font-medium",
+        responses
+          ? "border-violet-500/25 bg-violet-500/10 text-violet-700"
+          : "border-blue-500/25 bg-blue-500/10 text-blue-700",
+      )}
+    >
+      {responses ? <Bot className="size-3.5" /> : <Route className="size-3.5" />}
+      {responses ? "Responses" : "Messages"}
+    </span>
+  );
+}
+
+function ProviderProtocolBadge({ type }: { type: ProviderType }) {
+  const meta = providerTypeMeta(type);
+  const responses = type === "openai_responses";
+  const chatCompletions = type === "openai_compat";
+  return (
+    <span
+      className={cn(
+        "inline-flex w-fit items-center gap-1.5 rounded-full border px-2.5 py-1 text-xs font-medium",
+        responses
+          ? "border-violet-500/25 bg-violet-500/10 text-violet-700"
+          : chatCompletions
+            ? "border-cyan-500/25 bg-cyan-500/10 text-cyan-700"
+            : "border-blue-500/25 bg-blue-500/10 text-blue-700",
+      )}
+      title={meta.label}
+    >
+      {responses ? <Bot className="size-3.5" /> : <Route className="size-3.5" />}
+      {meta.shortLabel}
+    </span>
   );
 }
 
 function Th({ children }: { children: ReactNode }) {
-  return <th className="px-4 py-2 text-left font-medium">{children}</th>;
+  return <th className="px-4 py-3 font-medium">{children}</th>;
 }
 
-function Td({ children, title }: { children: ReactNode; title?: string }) {
-  return (
-    <td className="max-w-[16rem] px-4 py-3 align-middle">
-      <div className="truncate" title={title}>
-        {children}
-      </div>
-    </td>
-  );
+function Td({ children }: { children: ReactNode }) {
+  return <td className="px-4 py-3 align-middle">{children}</td>;
 }
 
-function EmptyRow({ colSpan, text }: { colSpan: number; text: string }) {
-  return (
-    <tr>
-      <td colSpan={colSpan} className="px-4 py-8 text-center text-sm text-muted-foreground">
-        {text}
-      </td>
-    </tr>
-  );
+function providerTypeMeta(type: ProviderType) {
+  return PROVIDER_TYPES.find((item) => item.value === type) ?? PROVIDER_TYPES[0]!;
 }
 
-function Status({ on }: { on: boolean }) {
-  return (
-    <span
-      className={cn(
-        "inline-flex items-center gap-1 rounded-full border px-2 py-0.5 text-xs font-medium",
-        on
-          ? "border-emerald-500/30 bg-emerald-500/10 text-emerald-700"
-          : "border-border bg-muted text-muted-foreground",
-      )}
-    >
-      {on ? <Check className="size-3" /> : null}
-      {on ? "Enabled" : "Disabled"}
-    </span>
-  );
+function protocolForType(type: ProviderType): ModelProtocol {
+  return type === "openai_responses" ? "openai-responses" : "anthropic-messages";
 }
 
-function RowActions({ onEdit, onDelete }: { onEdit: () => void; onDelete: () => void }) {
-  return (
-    <div className="flex items-center gap-1">
-      <button className={iconBtn} type="button" onClick={onEdit} title="Edit">
-        <Save className="size-4" />
-      </button>
-      <button className={iconBtn} type="button" onClick={onDelete} title="Delete">
-        <Trash2 className="size-4" />
-      </button>
-    </div>
-  );
+function runtimeForProtocol(protocol: ModelProtocol) {
+  return protocol === "openai-responses" ? "Codex" : "Claude Code";
+}
+
+function runtimeCompatibilityForType(type: ProviderType) {
+  if (type === "openai_responses") return "Codex";
+  if (type === "openai_compat") return "Claude Code via Cocola adapter";
+  return "Claude Code";
+}
+
+function providerEndpoint(baseURL: string, type: ProviderType) {
+  const base = baseURL.trim().replace(/\/$/, "") || providerTypeMeta(type).defaultBaseURL;
+  if (type === "anthropic") return `${base}/v1/messages`;
+  if (type === "openai_responses") return `${base}/responses`;
+  return `${base}/chat/completions`;
+}
+
+function providerIDFromName(name: string) {
+  return name
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-+|-+$/g, "");
 }
 
 function ModelIcon({ model }: { model: LLMModel }) {
-  const simpleIconPath =
-    model.icon_type === "simple-icons" && model.icon_slug
-      ? LOCAL_SIMPLE_ICON_PATHS[model.icon_slug.toLowerCase()]
-      : "";
-
   if (model.icon_type === "image" && model.icon_url) {
     return (
-      <span className="inline-flex size-6 shrink-0 overflow-hidden rounded-full border border-border bg-background">
-        <Image
-          src={model.icon_url}
-          alt=""
-          width={96}
-          height={96}
-          unoptimized
-          className="size-full object-contain"
-        />
+      <span className="relative size-9 shrink-0 overflow-hidden rounded-xl border border-border bg-background">
+        <Image src={model.icon_url} alt="" fill sizes="36px" className="object-cover" unoptimized />
       </span>
     );
   }
-  if (simpleIconPath) {
+  const slug = model.icon_slug.toLowerCase();
+  const localPath = LOCAL_SIMPLE_ICON_PATHS[slug];
+  if (localPath) {
     return (
-      <span className="inline-flex size-6 shrink-0 items-center justify-center overflow-hidden rounded-full border border-border bg-white">
+      <span className="relative size-9 shrink-0 overflow-hidden rounded-xl border border-border bg-background p-2">
         <Image
-          src={simpleIconPath}
+          src={localPath}
           alt=""
-          width={96}
-          height={96}
+          fill
+          sizes="36px"
+          className="object-contain p-2"
           unoptimized
-          className="size-[72%] object-contain"
         />
       </span>
     );
   }
   return (
-    <span className="inline-flex size-6 shrink-0 items-center justify-center rounded-full border border-border bg-muted text-[10px] font-semibold">
-      {SIMPLE_ICON_FALLBACK_BADGES[model.icon_slug.toLowerCase()] ||
-        (model.icon_slug || "AI").slice(0, 2).toUpperCase()}
+    <span className="grid size-9 shrink-0 place-items-center rounded-xl border border-border bg-muted text-xs font-semibold">
+      {SIMPLE_ICON_FALLBACK_BADGES[slug] || model.label.slice(0, 2).toUpperCase() || "AI"}
     </span>
   );
 }
 
-async function errorText(res: Response): Promise<string> {
+async function errorText(response: Response) {
+  const body = await response.text();
+  if (!body) return `${response.status} ${response.statusText}`;
   try {
-    const body = (await res.json()) as { error?: { message?: string }; error_description?: string };
-    return body.error?.message || body.error_description || `request failed: ${res.status}`;
+    const parsed = JSON.parse(body) as { error?: { message?: string } | string };
+    if (typeof parsed.error === "string") return parsed.error;
+    if (parsed.error?.message) return parsed.error.message;
   } catch {
-    return `request failed: ${res.status}`;
+    // Fall through to the safe response body returned by Admin API.
   }
+  return body;
 }

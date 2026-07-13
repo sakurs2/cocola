@@ -268,8 +268,8 @@ class InSandboxShimProvider:
             "conversation_id": options.session_id,
             "max_turns": options.max_turns or self._default_max_turns,
         }
-        if options.model_alias:
-            req["model"] = options.model_alias
+        if options.model_route_id:
+            req["model"] = options.model_route_id
         if options.traceparent:
             req["traceparent"] = options.traceparent
         if options.system_prompt:
@@ -283,7 +283,7 @@ class InSandboxShimProvider:
     def _model_env(self, options: AgentOptions) -> dict[str, str]:
         """Per-turn exec env for the shim.
 
-        Carries the model alias and, when the gateway minted a per-user token,
+        Carries the model route id and, when the gateway minted a per-user token,
         the selected runtime's auth variable. This exec env is applied on every
         turn's `exec_stream`, so cold, warm and reused sandboxes authenticate to
         the llm-gateway AS THE USER without a static provisioning credential --
@@ -291,12 +291,12 @@ class InSandboxShimProvider:
         the prompt channel).
         """
         env: dict[str, str] = {}
-        alias = (options.model_alias or "").strip()
-        if alias and options.runtime_id == "codex":
-            env["CODEX_MODEL"] = alias
-        elif alias:
-            env["ANTHROPIC_MODEL"] = alias
-            env["ANTHROPIC_SMALL_FAST_MODEL"] = alias
+        route_id = (options.model_route_id or "").strip()
+        if route_id and options.runtime_id == "codex":
+            env["CODEX_MODEL"] = route_id
+        elif route_id:
+            env["ANTHROPIC_MODEL"] = route_id
+            env["ANTHROPIC_SMALL_FAST_MODEL"] = route_id
         token = (options.auth_token or "").strip()
         if token and options.runtime_id == "codex":
             env["CODEX_API_KEY"] = token

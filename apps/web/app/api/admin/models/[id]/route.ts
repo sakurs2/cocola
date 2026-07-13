@@ -4,10 +4,10 @@ import { proxyAdmin } from "@/lib/admin-proxy";
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
-type Context = { params: Promise<{ alias: string }> };
+type Context = { params: Promise<{ id: string }> };
 
 async function path({ params }: Context) {
-  return `/admin/models/${encodeURIComponent((await params).alias)}`;
+  return `/admin/models/${encodeURIComponent((await params).id)}`;
 }
 
 export async function PATCH(req: NextRequest, context: Context) {

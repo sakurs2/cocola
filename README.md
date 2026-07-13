@@ -105,10 +105,11 @@ make dev   # dev 调试栈：OpenSandbox runtime + 本机原生 cocola 服务
 
 #### 接入模型
 
-启动后在 `Admin -> Models` 中配置 Provider、endpoint、API key、模型路由和默认
-模型。模型目录以 Postgres 为唯一事实源，LLM Gateway 自动加载变更；不再支持一份
-独立的模型 JSON 或 provider 环境变量，避免 Web、Agent Runtime 和 LLM Gateway
-读取到不同配置。API key 加密保存，不写入仓库文件。
+启动后在 `Admin -> Models` 中先配置 Provider，再添加模型路由。Provider 需要明确
+选择 Messages、Chat Completions 或 Responses 协议；Claude Code 使用
+`anthropic-messages`，Codex 使用 `openai-responses`。同一 alias 可由不同 Provider
+复用，执行链路使用不可变 route ID，默认模型按协议分别设置。模型目录以 Postgres
+为唯一事实源，LLM Gateway 自动加载变更；API key 加密保存，不写入仓库文件。
 
 > 鉴权闭环：Gateway 根据已验证的 Web/Scheduler 用户为每个 Run 签发短期 token，
 > Agent Runtime 在每次 shim exec 时把它作为 `ANTHROPIC_AUTH_TOKEN` 注入 sandbox。
@@ -178,7 +179,7 @@ make dev   # dev 调试栈：OpenSandbox runtime + 本机原生 cocola 服务
 > **真实 LLM 链路（Route A，ADR-0009）**：agent-runtime 必须通过
 > `COCOLA_SANDBOX_ADDR` 连接 sandbox-manager，并使用 `InSandboxShimProvider`。
 > Claude Code 或 Codex 整体运行在用户自己的沙箱里，Runtime 在对话首次运行时确定且
-> 不可中途切换；agent-runtime 只做控制面路由。沙箱 provisioning 注入模型地址和 alias；用户 token
+> 不可中途切换；agent-runtime 只做控制面路由。沙箱 provisioning 注入模型地址和默认 route ID；用户 token
 > 由 Gateway 随每个 Run 的 gRPC metadata 下发，并在每次 sandbox exec 时通过 ENV
 > 注入，绝不进入 prompt，也不在 Warm Pool 中持久保存。
 >
@@ -187,7 +188,7 @@ make dev   # dev 调试栈：OpenSandbox runtime + 本机原生 cocola 服务
 > export COCOLA_SANDBOX_ADDR=127.0.0.1:50051
 > export COCOLA_SANDBOX_IMAGE=cocola/sandbox-runtime:dev
 > export COCOLA_SANDBOX_LLM_BASE_URL=http://127.0.0.1:8080
-> export COCOLA_SANDBOX_MODEL_ALIAS=cocola-default   # 网关 registry 解析为真实模型
+> export COCOLA_SANDBOX_MODEL_ALIAS=cocola-default   # 历史变量名；值是默认 route ID
 > cd apps/agent-runtime && uv run python -m cocola_agent_runtime
 > # llm-gateway 侧的真实上游在 Admin -> Models 中配置
 > ```

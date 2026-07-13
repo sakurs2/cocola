@@ -102,3 +102,63 @@ func TestMCPCreateAndUpdateOnlyPersistConfiguration(t *testing.T) {
 		t.Fatalf("updated MCP = %+v", updated)
 	}
 }
+
+func TestMigrateLegacyMCPSecrets(t *testing.T) {
+	mem := store.NewMemory()
+	defaultEnabled := true
+	legacy := New(mem, nil, func() time.Time { return time.Unix(1_700_000_000, 0).UTC() }).
+		WithModelSecretKey("legacy-model-secret").
+		WithConfigSecretKey("legacy-model-secret")
+	_, err := legacy.CreateMCPServer(context.Background(), MCPServerInput{
+		ID:             "remote",
+		Name:           "Remote",
+		Transport:      MCPTransportHTTP,
+		URL:            "https://mcp.example.test/api?token=secret",
+		Headers:        map[string]string{"Authorization": "Bearer secret"},
+		DefaultEnabled: &defaultEnabled,
+	})
+	if err != nil {
+		t.Fatalf("create legacy MCP: %v", err)
+	}
+
+	current := New(mem, nil, func() time.Time { return time.Unix(1_800_000_000, 0).UTC() }).
+		WithModelSecretKey("legacy-model-secret").
+		WithConfigSecretKey("current-config-secret")
+	if _, err := current.ListMCPServers(context.Background(), false); err == nil {
+		t.Fatal("legacy ciphertext unexpectedly decrypted with current key")
+	}
+
+	if err := current.MigrateLegacyMCPSecrets(context.Background()); err != nil {
+		t.Fatalf("migrate legacy MCP secrets: %v", err)
+	}
+	servers, err := current.ListMCPServers(context.Background(), false)
+	if err != nil {
+		t.Fatalf("list migrated MCP servers: %v", err)
+	}
+	if len(servers) != 1 || servers[0].URLHint != "https://mcp.example.test/api" {
+		t.Fatalf("migrated MCP servers = %+v", servers)
+	}
+	stored, err := mem.GetMCPServer(context.Background(), "remote")
+	if err != nil {
+		t.Fatalf("get migrated MCP: %v", err)
+	}
+	runtimeConfig, err := current.mcpServerRuntimeConfig(stored)
+	if err != nil {
+		t.Fatalf("build migrated runtime config: %v", err)
+	}
+	if runtimeConfig["url"] != "https://mcp.example.test/api?token=secret" {
+		t.Fatalf("migrated runtime URL = %v", runtimeConfig["url"])
+	}
+
+	firstCiphertext := append([]byte(nil), stored.URLVarCiphertextJSON...)
+	if err := current.MigrateLegacyMCPSecrets(context.Background()); err != nil {
+		t.Fatalf("repeat legacy MCP migration: %v", err)
+	}
+	stored, err = mem.GetMCPServer(context.Background(), "remote")
+	if err != nil {
+		t.Fatalf("get repeatedly migrated MCP: %v", err)
+	}
+	if !bytes.Equal(firstCiphertext, stored.URLVarCiphertextJSON) {
+		t.Fatal("idempotent migration rewrote current ciphertext")
+	}
+}

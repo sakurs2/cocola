@@ -34,6 +34,7 @@ type ScheduledTaskInput struct {
 	ScheduleSpec       json.RawMessage
 	Timezone           string
 	Prompt             string
+	ModelRouteID       string
 	ModelAlias         string
 	ConfigJSON         json.RawMessage
 	ExpiresAt          time.Time
@@ -226,6 +227,13 @@ func (a *Admin) scheduledTaskFromInput(existing store.ScheduledTask, in Schedule
 	if !create && modelAlias == "" {
 		modelAlias = existing.ModelAlias
 	}
+	modelRouteID := strings.TrimSpace(in.ModelRouteID)
+	if !create && modelRouteID == "" {
+		modelRouteID = existing.ModelRouteID
+	}
+	if modelRouteID == "" {
+		modelRouteID = modelAlias
+	}
 	maxTurns := defaultMaxTurns
 	spec := rawOrEmptyObject(in.ScheduleSpec)
 	if !create && string(spec) == "{}" && len(existing.ScheduleSpec) > 0 {
@@ -235,7 +243,7 @@ func (a *Admin) scheduledTaskFromInput(existing store.ScheduledTask, in Schedule
 	if !create && string(configJSON) == "{}" && len(existing.ConfigJSON) > 0 {
 		configJSON = rawOrEmptyObject(existing.ConfigJSON)
 	}
-	if name == "" || kind == "" || prompt == "" || modelAlias == "" || !validTaskStatus(status) {
+	if name == "" || kind == "" || prompt == "" || modelRouteID == "" || modelAlias == "" || !validTaskStatus(status) {
 		return store.ScheduledTask{}, ErrInvalidArg
 	}
 	expiresAt := existing.ExpiresAt
@@ -285,6 +293,7 @@ func (a *Admin) scheduledTaskFromInput(existing store.ScheduledTask, in Schedule
 	task.ScheduleSpec = spec
 	task.Timezone = tz
 	task.Prompt = prompt
+	task.ModelRouteID = modelRouteID
 	task.ModelAlias = modelAlias
 	task.MaxTurns = maxTurns
 	task.ConfigJSON = configJSON

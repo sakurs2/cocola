@@ -1007,6 +1007,15 @@ func (a *API) updateLLMProvider(w http.ResponseWriter, r *http.Request) {
 
 func (a *API) deleteLLMProvider(w http.ResponseWriter, r *http.Request) {
 	if err := a.svc.DeleteLLMProvider(r.Context(), chi.URLParam(r, "id"), actorOf(r)); err != nil {
+		if errors.Is(err, store.ErrConflict) {
+			writeErr(
+				w,
+				http.StatusConflict,
+				"PROVIDER_IN_USE",
+				"Delete associated model routes before deleting this provider.",
+			)
+			return
+		}
 		mapErr(w, err)
 		return
 	}
@@ -1056,7 +1065,7 @@ func (a *API) updateLLMModel(w http.ResponseWriter, r *http.Request) {
 		mapErr(w, err)
 		return
 	}
-	model, err := a.svc.UpdateLLMModel(r.Context(), chi.URLParam(r, "alias"), llmModelInput(req, actorOf(r)))
+	model, err := a.svc.UpdateLLMModel(r.Context(), chi.URLParam(r, "id"), llmModelInput(req, actorOf(r)))
 	if err != nil {
 		mapErr(w, err)
 		return
@@ -1065,7 +1074,7 @@ func (a *API) updateLLMModel(w http.ResponseWriter, r *http.Request) {
 }
 
 func (a *API) deleteLLMModel(w http.ResponseWriter, r *http.Request) {
-	if err := a.svc.DeleteLLMModel(r.Context(), chi.URLParam(r, "alias"), actorOf(r)); err != nil {
+	if err := a.svc.DeleteLLMModel(r.Context(), chi.URLParam(r, "id"), actorOf(r)); err != nil {
 		mapErr(w, err)
 		return
 	}
@@ -1073,7 +1082,7 @@ func (a *API) deleteLLMModel(w http.ResponseWriter, r *http.Request) {
 }
 
 func (a *API) setDefaultLLMModel(w http.ResponseWriter, r *http.Request) {
-	model, err := a.svc.SetDefaultLLMModel(r.Context(), chi.URLParam(r, "alias"), actorOf(r))
+	model, err := a.svc.SetDefaultLLMModel(r.Context(), chi.URLParam(r, "id"), actorOf(r))
 	if err != nil {
 		mapErr(w, err)
 		return
@@ -1125,6 +1134,7 @@ type scheduledTaskReq struct {
 	ScheduleSpec json.RawMessage              `json:"schedule_spec"`
 	Timezone     string                       `json:"timezone,omitempty"`
 	Prompt       string                       `json:"prompt"`
+	ModelRouteID string                       `json:"model_route_id"`
 	ModelAlias   string                       `json:"model_alias"`
 	ConfigJSON   json.RawMessage              `json:"config_json,omitempty"`
 	ExpiresAt    json.RawMessage              `json:"expires_at"`
@@ -1236,6 +1246,7 @@ func scheduledTaskInput(req scheduledTaskReq, actor string, replaceAttachments b
 		ScheduleSpec:       req.ScheduleSpec,
 		Timezone:           req.Timezone,
 		Prompt:             req.Prompt,
+		ModelRouteID:       req.ModelRouteID,
 		ModelAlias:         req.ModelAlias,
 		ConfigJSON:         req.ConfigJSON,
 		Attachments:        scheduledTaskAttachments(req.Attachments),

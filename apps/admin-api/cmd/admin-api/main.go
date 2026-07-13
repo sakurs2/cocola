@@ -159,6 +159,12 @@ func main() {
 		WithWarmPoolConfigWriter(pub).
 		WithModelSecretKey(modelSecret).
 		WithConfigSecretKey(configSecret)
+	migrationCtx, migrationCancel := context.WithTimeout(context.Background(), 30*time.Second)
+	if err := svc.MigrateLegacyMCPSecrets(migrationCtx); err != nil {
+		migrationCancel()
+		log.Sugar().Fatalf("migrate legacy MCP secrets: %v", err)
+	}
+	migrationCancel()
 	svc.StartConversationTraceMaintenance(context.Background())
 	oc := objstore.ConfigFromEnv()
 	skillStore, err := objstore.New(oc)

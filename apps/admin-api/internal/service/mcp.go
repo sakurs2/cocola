@@ -3,6 +3,7 @@ package service
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"net/url"
 	"regexp"
 	"strings"
@@ -401,6 +402,73 @@ func safeMCPURLHint(rawURL string) string {
 	parsed.Fragment = ""
 	parsed.RawFragment = ""
 	return parsed.String()
+}
+
+// MigrateLegacyMCPSecrets re-encrypts MCP values written before
+// COCOLA_CONFIG_SECRET_KEY became independent from COCOLA_MODEL_SECRET_KEY.
+// It is idempotent and also handles records containing a mix of old and new
+// ciphertexts after a partially completed process start.
+func (a *Admin) MigrateLegacyMCPSecrets(ctx context.Context) error {
+	legacyKey := strings.TrimSpace(a.modelSecretKey)
+	currentKey := a.configSecret()
+	if legacyKey == "" || currentKey == "" || legacyKey == currentKey {
+		return nil
+	}
+
+	servers, err := a.store.ListMCPServers(ctx, false)
+	if err != nil {
+		return err
+	}
+	for _, server := range servers {
+		changed := false
+		for _, raw := range []*json.RawMessage{
+			&server.URLVarCiphertextJSON,
+			&server.EnvCiphertextJSON,
+			&server.HeaderCiphertextJSON,
+		} {
+			migrated, fieldChanged, err := migrateMCPSecretMap(*raw, currentKey, legacyKey)
+			if err != nil {
+				return fmt.Errorf("migrate MCP server %q secrets: %w", server.ID, err)
+			}
+			if fieldChanged {
+				*raw = migrated
+				changed = true
+			}
+		}
+		if !changed {
+			continue
+		}
+		server.UpdatedAt = a.now().UTC()
+		if err := a.store.UpdateMCPServer(ctx, server); err != nil {
+			return fmt.Errorf("save migrated MCP server %q: %w", server.ID, err)
+		}
+	}
+	return nil
+}
+
+func migrateMCPSecretMap(raw json.RawMessage, currentKey, legacyKey string) (json.RawMessage, bool, error) {
+	ciphers := mapFromJSON(raw)
+	changed := false
+	for name, ciphertext := range ciphers {
+		if _, err := decryptModelSecret(currentKey, ciphertext); err == nil {
+			continue
+		}
+		plaintext, err := decryptModelSecret(legacyKey, ciphertext)
+		if err != nil {
+			return nil, false, err
+		}
+		migrated, err := encryptModelSecret(currentKey, plaintext)
+		if err != nil {
+			return nil, false, err
+		}
+		ciphers[name] = migrated
+		changed = true
+	}
+	if !changed {
+		return raw, false, nil
+	}
+	migrated, err := json.Marshal(ciphers)
+	return migrated, true, err
 }
 
 func normalizeMCPTransport(v string) string {

@@ -65,7 +65,7 @@ ARTIFACT_SYSTEM_PROMPT = (
     "under ./outputs/. Only files in ./outputs/ are published to the user."
 )
 ADMIN_SYSTEM_PROMPT_HEADER = "Administrator-configured system instructions:"
-MODEL_ALIAS_METADATA_KEY = "x-cocola-model-alias"
+MODEL_ROUTE_ID_METADATA_KEY = "x-cocola-model-route-id"
 # Per-user sandbox token forwarded by the gateway (gRPC metadata seam, no
 # proto change). Injected into the sandbox as ANTHROPIC_AUTH_TOKEN per turn so
 # the in-sandbox brain calls the llm-gateway as the real user. Never logged.
@@ -389,25 +389,25 @@ def _product_traceparent(context) -> str:
     return ""
 
 
-def _validated_model_alias(requested_alias: str) -> str | None:
-    """Pass through the alias selected from the admin-managed model catalog.
+def _validated_model_route_id(requested_route_id: str) -> str | None:
+    """Pass through the route selected from the admin-managed model catalog.
 
     LLM Gateway is the authoritative routing and validation boundary. Reading a
     second JSON catalog here previously allowed the runtime and gateway to see
     different enabled/default models.
     """
-    alias = requested_alias.strip()
-    return alias or None
+    route_id = requested_route_id.strip()
+    return route_id or None
 
 
-def _model_env(model_alias: str | None, *, runtime_id: str = "claude-code") -> dict[str, str]:
-    if not model_alias:
+def _model_env(model_route_id: str | None, *, runtime_id: str = "claude-code") -> dict[str, str]:
+    if not model_route_id:
         return {}
     if runtime_id == "codex":
-        return {"CODEX_MODEL": model_alias}
+        return {"CODEX_MODEL": model_route_id}
     return {
-        "ANTHROPIC_MODEL": model_alias,
-        "ANTHROPIC_SMALL_FAST_MODEL": model_alias,
+        "ANTHROPIC_MODEL": model_route_id,
+        "ANTHROPIC_SMALL_FAST_MODEL": model_route_id,
     }
 
 
@@ -575,10 +575,12 @@ class AgentRuntimeServicer(pb_grpc.AgentRuntimeServiceServicer):
             )
             sandbox_id = None
         try:
-            model_alias = _validated_model_alias(_metadata_value(context, MODEL_ALIAS_METADATA_KEY))
-        except Exception as exc:  # noqa: BLE001 - config/alias error -> clean terminal event
+            model_route_id = _validated_model_route_id(
+                _metadata_value(context, MODEL_ROUTE_ID_METADATA_KEY)
+            )
+        except Exception as exc:  # noqa: BLE001 - route error -> clean terminal event
             log.warning(
-                "model alias validation failed",
+                "model route validation failed",
                 session_id=request.session_id,
                 error=str(exc),
             )
@@ -589,7 +591,7 @@ class AgentRuntimeServicer(pb_grpc.AgentRuntimeServiceServicer):
                 )
             )
             return
-        model_env = _model_env(model_alias, runtime_id=runtime_id)
+        model_env = _model_env(model_route_id, runtime_id=runtime_id)
         # Per-user sandbox token is forwarded by the gateway as gRPC metadata
         # and injected under the selected runtime's auth variable at acquire and
         # on every shim exec. Warm sandboxes stay credential-free until claimed.
@@ -991,7 +993,7 @@ class AgentRuntimeServicer(pb_grpc.AgentRuntimeServiceServicer):
             workspace=workspace,
             max_turns=request.max_turns or 30,
             run_timeout_secs=self._run_timeout_secs,
-            model_alias=model_alias,
+            model_route_id=model_route_id,
             mcp_servers=active_mcp_servers,
             environment_skills=[
                 {
@@ -1032,7 +1034,7 @@ class AgentRuntimeServicer(pb_grpc.AgentRuntimeServiceServicer):
             session_id=request.session_id,
             has_sandbox=bool(sandbox_id),
             attachments=len(request.attachments),
-            model_alias=model_alias or "",
+            model_route_id=model_route_id or "",
             runtime_id=runtime_id,
         )
         outputs_before = await self._snapshot_outputs(sandbox_id) if artifacts_enabled else {}

@@ -27,6 +27,7 @@ export type ScheduledTask = {
   schedule_spec: Record<string, unknown>;
   timezone: string;
   prompt: string;
+  model_route_id: string;
   model_alias: string;
   expires_at?: string;
   next_run_at?: string;
@@ -42,6 +43,7 @@ export type TaskRun = {
   task_id: string;
   status: string;
   session_id?: string;
+  model_route_id: string;
   model_alias: string;
   output_text: string;
   error: string;
@@ -62,21 +64,24 @@ export type TaskFormState = {
   ends: "never" | "on";
   expiresAt: string;
   timezone: string;
+  modelRouteID: string;
   modelAlias: string;
   files: TaskAttachment[];
 };
 
 export type ModelOption = {
+  id: string;
   alias: string;
   label: string;
   protocols?: string[];
+  is_default?: boolean;
 };
 
 export function detectedTimezone(): string {
   return Intl.DateTimeFormat().resolvedOptions().timeZone || "Asia/Shanghai";
 }
 
-export function emptyTaskForm(modelAlias = ""): TaskFormState {
+export function emptyTaskForm(modelRouteID = "", modelAlias = ""): TaskFormState {
   const now = new Date(Date.now() + 5 * 60 * 1000);
   return {
     name: "",
@@ -90,6 +95,7 @@ export function emptyTaskForm(modelAlias = ""): TaskFormState {
     ends: "never",
     expiresAt: "",
     timezone: detectedTimezone(),
+    modelRouteID,
     modelAlias,
     files: [],
   };
@@ -110,6 +116,7 @@ export function taskToForm(task: ScheduledTask): TaskFormState {
     ends: hasExpiration ? "on" : "never",
     expiresAt: hasExpiration ? toLocalInput(task.expires_at, timezone) : "",
     timezone,
+    modelRouteID: task.model_route_id || task.model_alias,
     modelAlias: task.model_alias,
     files: [],
   };
@@ -123,6 +130,7 @@ export function taskPayload(
     name: form.name.trim(),
     prompt: form.prompt.trim(),
     timezone: form.timezone,
+    model_route_id: form.modelRouteID,
     model_alias: form.modelAlias,
     status: options?.status ?? "active",
     expires_at:
@@ -162,7 +170,7 @@ function clampInt(value: string, min: number, max: number, fallback: number): nu
 export function validateTaskForm(form: TaskFormState): string {
   if (!form.name.trim()) return "Task name is required.";
   if (!form.prompt.trim()) return "Tell Cocola what the task should do.";
-  if (!form.modelAlias) return "Choose a model.";
+  if (!form.modelRouteID || !form.modelAlias) return "Choose a model.";
   if (form.scheduleKind === "once") {
     if (!isValidDateTimeInput(form.runAt)) {
       return "Choose a valid run date with a four-digit year.";

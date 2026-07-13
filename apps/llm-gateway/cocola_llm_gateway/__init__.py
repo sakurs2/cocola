@@ -16,7 +16,7 @@ Responsibilities:
 - Normalize the vendor schema at the edge (anthropic_codec) so routing,
   resilience, billing, and quota only ever see a small internal StreamEvent
   vocabulary.
-- Route a caller-facing alias to (provider, real model, pricing) via a
+- Route an immutable route ID to (provider, alias, real model, pricing) via a
   config-driven registry — vendors are swappable without code changes.
 - Stream resiliently (rate limit + timeout + pre-first-byte retry).
 - Meter every call and record usage to a ledger (Memory or Redis).

@@ -46,7 +46,7 @@ var traceAttributeAllowlist = map[string]bool{
 	"attachment_count": true, "chat_type": true, "content_length": true,
 	"conversation_id": true, "error_code": true, "error_type": true,
 	"event_count": true, "event_kind": true, "inline_count": true,
-	"mcp_count": true, "mcp_names": true, "model_alias": true,
+	"mcp_count": true, "mcp_names": true, "model_route_id": true, "model_alias": true,
 	"object_count": true, "part_count": true, "prompt_count": true,
 	"prompt_ids": true, "prompt_versions": true, "restored": true,
 	"resumed": true, "reused": true, "sandbox_id": true, "session_id": true,
@@ -376,6 +376,7 @@ type chatRequest struct {
 	SessionID                            string            `json:"session_id"`
 	SandboxID                            string            `json:"sandbox_id"`
 	MaxTurns                             int32             `json:"max_turns"`
+	ModelRouteID                         string            `json:"model_route_id"`
 	ModelAlias                           string            `json:"model_alias"`
 	ModelLabel                           string            `json:"model_label"`
 	ModelProvider                        string            `json:"model_provider"`
@@ -488,6 +489,9 @@ func chatStartedAt(r *http.Request) time.Time {
 
 func assistantMetadata(req chatRequest) map[string]any {
 	out := make(map[string]any)
+	if routeID := effectiveModelRouteID(req); routeID != "" {
+		out["model_route_id"] = routeID
+	}
 	if alias := strings.TrimSpace(req.ModelAlias); alias != "" {
 		out["model_alias"] = alias
 	}
@@ -518,6 +522,15 @@ func assistantMetadata(req chatRequest) map[string]any {
 		}
 	}
 	return out
+}
+
+func effectiveModelRouteID(req chatRequest) string {
+	if routeID := strings.TrimSpace(req.ModelRouteID); routeID != "" {
+		return routeID
+	}
+	// Existing routes were migrated with id=alias, so old browser tabs and
+	// scheduled tasks remain valid after a unified stack upgrade.
+	return strings.TrimSpace(req.ModelAlias)
 }
 
 // registerArtifact records a file event's private object-store key, then

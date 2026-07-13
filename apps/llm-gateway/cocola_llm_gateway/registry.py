@@ -1,7 +1,7 @@
 """Model registry + router.
 
-Callers (and the Claude Agent SDK) ask for a model by a *caller-facing alias*
-(e.g. "claude-sonnet", "cocola-fast"). The registry maps that alias to:
+Callers ask for a model by an immutable route id. The registry maps that id to:
+  - the provider-scoped display alias,
   - which UpstreamProvider handles it,
   - the *real* upstream model id to send on the wire,
   - the per-1K-token price used by billing.
@@ -10,10 +10,9 @@ This indirection is what lets ops re-point an alias from one vendor/model to
 another by editing config — zero code change — and is the single source of truth
 both routing and billing read from.
 
-Resolution order for an incoming request:
-  1. explicit request alias (if known),
-  2. otherwise the configured default alias,
-  3. unknown alias -> NOT_FOUND (callers must not silently get a wrong model).
+Legacy aliases remain resolvable only when exactly one compatible route uses
+that alias. This keeps pre-migration sessions working without guessing between
+two providers that intentionally expose the same alias.
 
 The registry holds provider *instances*; the composition root (config.build_*)
 constructs the concrete providers and hands them in. The registry never imports
@@ -46,7 +45,7 @@ class Pricing:
 
 @dataclass(frozen=True)
 class ModelRoute:
-    """A resolved routing decision for one alias."""
+    """A resolved provider decision; the containing registry key is its route id."""
 
     alias: str
     provider_name: str
@@ -57,6 +56,7 @@ class ModelRoute:
     icon: dict[str, str] = field(default_factory=dict)
     enabled: bool = True
     visible: bool = True
+    is_default: bool = False
 
 
 class Registry:
@@ -67,7 +67,11 @@ class Registry:
         default_alias: str,
         responses_providers: dict[str, ResponsesProvider] | None = None,
     ):
-        if default_alias and default_alias not in routes:
+        if (
+            default_alias
+            and default_alias not in routes
+            and not any(route.alias == default_alias for route in routes.values())
+        ):
             raise CocolaError(
                 ErrorCode.INVALID_ARGUMENT,
                 f"default_alias '{default_alias}' has no route",
@@ -85,6 +89,26 @@ class Registry:
         self._responses_providers = responses_providers
         self._routes = routes
         self._default_alias = default_alias
+        self._default_route_ids: dict[str, str] = {}
+        for route_id, route in routes.items():
+            if route.is_default:
+                for protocol in route.protocols:
+                    self._default_route_ids[protocol] = route_id
+        if default_alias:
+            exact = routes.get(default_alias)
+            if exact is not None:
+                for protocol in exact.protocols:
+                    self._default_route_ids.setdefault(protocol, default_alias)
+            else:
+                protocols = {protocol for route in routes.values() for protocol in route.protocols}
+                for protocol in protocols:
+                    matches = [
+                        route_id
+                        for route_id, route in routes.items()
+                        if route.alias == default_alias and protocol in route.protocols
+                    ]
+                    if len(matches) == 1:
+                        self._default_route_ids.setdefault(protocol, matches[0])
 
     @property
     def default_alias(self) -> str:
@@ -93,18 +117,28 @@ class Registry:
     def aliases(self) -> list[str]:
         return sorted(alias for alias, route in self._routes.items() if route.enabled)
 
-    def _route(self, requested_alias: str | None) -> ModelRoute:
-        alias = (requested_alias or "").strip() or self._default_alias
-        route = self._routes.get(alias)
+    def _route(self, requested_route_id: str | None, protocol: str) -> ModelRoute:
+        route_id = (requested_route_id or "").strip() or self._default_route_ids.get(protocol, "")
+        route = self._routes.get(route_id)
+        if route is None and route_id:
+            matches = [
+                candidate
+                for candidate in self._routes.values()
+                if candidate.enabled
+                and candidate.alias == route_id
+                and protocol in candidate.protocols
+            ]
+            if len(matches) == 1:
+                route = matches[0]
         if route is None or not route.enabled:
             raise CocolaError(
                 ErrorCode.NOT_FOUND,
-                f"unknown model alias '{alias}'; known: {', '.join(self.aliases()) or '(none)'}",
+                f"unknown model route '{route_id}'; known: {', '.join(self.aliases()) or '(none)'}",
             )
         return route
 
-    def resolve_chat(self, requested_alias: str | None) -> tuple[ModelRoute, UpstreamProvider]:
-        route = self._route(requested_alias)
+    def resolve_chat(self, requested_route_id: str | None) -> tuple[ModelRoute, UpstreamProvider]:
+        route = self._route(requested_route_id, "anthropic-messages")
         provider = self._providers.get(route.provider_name)
         if provider is None or "anthropic-messages" not in route.protocols:
             raise CocolaError(
@@ -113,9 +147,9 @@ class Registry:
         return route, provider
 
     def resolve_responses(
-        self, requested_alias: str | None
+        self, requested_route_id: str | None
     ) -> tuple[ModelRoute, ResponsesProvider]:
-        route = self._route(requested_alias)
+        route = self._route(requested_route_id, "openai-responses")
         provider = self._responses_providers.get(route.provider_name)
         if provider is None or "openai-responses" not in route.protocols:
             raise CocolaError(

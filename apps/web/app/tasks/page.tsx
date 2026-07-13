@@ -236,7 +236,7 @@ export default function TasksPage() {
         onOpenChange={setDrawerOpen}
         task={selectedTask}
         models={models}
-        defaultModelAlias={models[0]?.alias}
+        defaultModelID={models.find((model) => model.is_default)?.id ?? models[0]?.id}
         saving={saving}
         onSave={save}
       />

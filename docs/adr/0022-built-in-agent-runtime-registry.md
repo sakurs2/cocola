@@ -35,9 +35,10 @@ Anthropic-normalized `/v1/messages`。
 5. 模型兼容性由协议表达，而不是由管理员填写 Runtime 字符串。Anthropic 和
    OpenAI-compatible providers 发布 `anthropic-messages`；独立的
    `openai_responses` provider 发布 `openai-responses`。Web 根据 Runtime 协议过滤
-   模型；定时任务本轮固定使用 Claude Code 和 `anthropic-messages`。
+   模型；定时任务本轮固定使用 Claude Code 和 `anthropic-messages`。模型路由使用
+   不可变 route ID，alias 仅在同一 Provider 内唯一；每种协议分别维护一个默认模型。
 6. LLM Gateway 新增透明 `/v1/responses` 通道和独立 `ResponsesProvider` 协议。
-   它复用 Cocola Token 的认证、吊销、配额、alias 路由和 Ledger，但不把 Responses
+   它复用 Cocola Token 的认证、吊销、配额、route ID 路由和 Ledger，但不把 Responses
    SSE 转换成内部 Chat 事件；只允许首个上游事件前重试。
 
 ## Alternatives Considered
@@ -57,5 +58,6 @@ Anthropic-normalized `/v1/messages`。
   不可变约束和 Sandbox 生命周期。
 - Claude Code 历史会话在迁移后继续恢复；Codex thread 状态随 MinIO checkpoint 在
   Sandbox 删除、Warm Pool claim 和服务重启后恢复。
-- 管理员只管理模型 Provider、alias 和密钥，不承担 Runtime 组合正确性。
+- 管理员只管理模型 Provider、模型路由和密钥，不承担 Runtime 组合正确性。Provider
+  明确选择 Messages、Chat Completions 或 Responses 协议，管理页仅展示兼容组合。
 - 整栈必须在数据库迁移后统一升级；不支持新旧 Agent Runtime/Gateway 混部。

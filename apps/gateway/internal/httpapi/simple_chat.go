@@ -157,7 +157,7 @@ func (a *API) chat(w http.ResponseWriter, r *http.Request) {
 	run := chatrun.Run{
 		ID: runID, RootSpanID: rootSpanID, ConversationID: req.SessionID,
 		ConversationTitle: titleForConversation(req), UserID: identity.UserID,
-		Source: source, ModelAlias: strings.TrimSpace(req.ModelAlias),
+		Source: source, ModelRouteID: effectiveModelRouteID(req), ModelAlias: strings.TrimSpace(req.ModelAlias),
 		ClientRequestID: requestID, Status: chatrun.StatusRunning,
 		StartedAt: startedAt, LastActivityAt: startedAt,
 	}
@@ -303,7 +303,7 @@ func (a *API) executeLiveRun(live *liveRun) {
 		UserID: live.identity.UserID, SessionID: live.request.SessionID,
 		RuntimeID: live.request.RuntimeID,
 		Prompt:    live.request.Prompt, SandboxID: live.request.SandboxID,
-		MaxTurns: live.request.MaxTurns, ModelAlias: strings.TrimSpace(live.request.ModelAlias),
+		MaxTurns: live.request.MaxTurns, ModelRouteID: effectiveModelRouteID(live.request),
 		TraceID: live.run.ID, ParentSpanID: conversationRootSpan(live.traceCtx),
 		SandboxAuthToken: a.mintSandboxToken(live.identity), Attachments: attachments,
 	}

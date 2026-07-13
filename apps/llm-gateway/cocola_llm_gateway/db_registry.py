@@ -98,12 +98,12 @@ class PostgresRegistrySource:
         query = """
             SELECT
                 p.id, p.type, p.base_url, p.api_key_ciphertext,
-                r.alias, r.real_model, r.label, r.icon_type, r.icon_slug,
-                r.icon_url, r.is_default
+                r.id, r.alias, r.protocol, r.real_model, r.label, r.icon_type, r.icon_slug,
+                r.icon_url, r.visible, r.is_default
             FROM llm_model_routes r
             JOIN llm_providers p ON p.id = r.provider_id
             WHERE p.enabled = TRUE AND r.enabled = TRUE
-            ORDER BY r.is_default DESC, r.sort_order, r.alias
+            ORDER BY r.protocol, r.is_default DESC, r.sort_order, r.alias, p.id
         """
         async with self._pool.connection() as conn:
             cur = await conn.execute(query)
@@ -121,12 +121,15 @@ class PostgresRegistrySource:
                 provider_type,
                 base_url,
                 api_key_ciphertext,
+                route_id,
                 alias,
+                protocol,
                 real_model,
                 label,
                 icon_type,
                 icon_slug,
                 icon_url,
+                visible,
                 is_default,
             ) = row
             if provider_type == "fake":
@@ -147,16 +150,18 @@ class PostgresRegistrySource:
                 icon["src"] = icon_url or ""
             else:
                 icon["slug"] = icon_slug or ""
-            routes[alias] = {
+            routes[route_id] = {
+                "alias": alias,
                 "provider": provider_id,
                 "real_model": real_model,
                 "label": label or alias,
                 "icon": icon,
                 "enabled": True,
-                "visible": True,
+                "visible": visible,
+                "is_default": is_default,
             }
             if is_default and not default_alias:
-                default_alias = alias
+                default_alias = route_id
         return fingerprint, {
             "default_alias": default_alias,
             "providers": providers,

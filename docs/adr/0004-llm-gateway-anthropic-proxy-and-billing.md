@@ -80,13 +80,17 @@ Providers stay **dumb**: one provider == one vendor call. All cross-cutting
 behavior lives outside them (a standing project rule), so it applies uniformly
 across vendors and is testable with the Fake.
 
-### Config-driven model registry / router
+### Model route registry / router
 
-A registry maps a caller-facing **alias** (e.g. `claude-sonnet`, `cocola-fast`)
-to `(provider, real upstream model id, per-1K-token pricing)`. Resolution order:
-explicit request alias → configured default → unknown ⇒ `NOT_FOUND` (callers
-never silently get the wrong model). Re-pointing an alias from one vendor/model
-to another is a config edit; the registry never imports a concrete provider
+Each model route has an immutable route ID and a provider-scoped display alias
+(for example, two providers may both expose `gpt-5`). The registry maps the
+route ID to `(provider, alias, real upstream model id, per-1K-token pricing)`.
+Callers send the route ID, so duplicate aliases never make routing ambiguous.
+Legacy alias lookup is accepted only when exactly one compatible route matches;
+otherwise resolution fails with `NOT_FOUND` instead of guessing.
+
+Defaults are independent per wire protocol: `anthropic-messages` for Claude Code
+and `openai-responses` for Codex. The registry never imports a concrete provider
 class. The composition root (`config.py` / `bootstrap.py`) is the _only_ place
 that constructs concrete providers and reads secrets.
 

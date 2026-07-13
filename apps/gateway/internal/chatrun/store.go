@@ -32,6 +32,7 @@ type Run struct {
 	ConversationTitle string     `json:"-"`
 	UserID            string     `json:"-"`
 	Source            string     `json:"source"`
+	ModelRouteID      string     `json:"model_route_id,omitempty"`
 	ModelAlias        string     `json:"model_alias,omitempty"`
 	ClientRequestID   string     `json:"client_request_id,omitempty"`
 	Status            string     `json:"status"`

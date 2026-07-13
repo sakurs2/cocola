@@ -939,10 +939,7 @@
   }
 
   .cocola-admin-ui button:focus-visible,
-  .cocola-admin-ui a:focus-visible,
-  .cocola-admin-ui input:focus-visible,
-  .cocola-admin-ui textarea:focus-visible,
-  .cocola-admin-ui select:focus-visible {
+  .cocola-admin-ui a:focus-visible {
     outline: 2px solid hsl(var(--ring) / 0.4);
     outline-offset: 2px;
   }
@@ -1168,6 +1165,17 @@
       padding: 64px clamp(20px, 6vw, 48px) 48px;
     }
   }
+}
+
+/* Form controls use a quiet neutral border instead of the browser/Tailwind
+ * blue focus halo. Interactive buttons and links retain a visible keyboard
+ * focus indicator above. */
+.cocola-admin-ui input:focus,
+.cocola-admin-ui textarea:focus,
+.cocola-admin-ui select:focus {
+  border-color: hsl(215 18% 66% / 0.72);
+  outline: none;
+  box-shadow: inset 0 1px 0 hsl(0 0% 100% / 0.82);
 }
 
 @keyframes aui-soft-in {

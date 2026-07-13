@@ -53,7 +53,7 @@ type Query struct {
 	Prompt       string
 	SandboxID    string
 	MaxTurns     int32
-	ModelAlias   string
+	ModelRouteID string
 	TraceID      string
 	ParentSpanID string
 	// SandboxAuthToken is a fresh per-user cocola token the gateway mints from
@@ -172,11 +172,11 @@ func (c *Client) Close() error {
 // Stream forwards q to agent-runtime and relays each AgentEvent to onEvent. A
 // context cancel (client disconnect, deadline) aborts the RPC promptly.
 func (c *Client) Stream(ctx context.Context, q Query, onEvent func(Event) error) error {
-	if strings.TrimSpace(q.ModelAlias) != "" {
-		ctx = metadata.AppendToOutgoingContext(ctx, "x-cocola-model-alias", strings.TrimSpace(q.ModelAlias))
+	if strings.TrimSpace(q.ModelRouteID) != "" {
+		ctx = metadata.AppendToOutgoingContext(ctx, "x-cocola-model-route-id", strings.TrimSpace(q.ModelRouteID))
 	}
 	// Per-user sandbox token: carry it as gRPC metadata (same seam as the model
-	// alias) so agent-runtime can inject it as ANTHROPIC_AUTH_TOKEN per turn
+	// route ID) so agent-runtime can inject it as ANTHROPIC_AUTH_TOKEN per turn
 	// without a proto change. Never logged; treated as a credential.
 	if strings.TrimSpace(q.SandboxAuthToken) != "" {
 		ctx = metadata.AppendToOutgoingContext(ctx, "x-cocola-sandbox-token", strings.TrimSpace(q.SandboxAuthToken))

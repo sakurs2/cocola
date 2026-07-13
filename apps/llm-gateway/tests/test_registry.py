@@ -5,6 +5,18 @@ from cocola_llm_gateway.registry import ModelRoute, Pricing, Registry
 from cocola_llm_gateway.upstream.fake import FakeUpstream
 
 
+class FakeResponses:
+    async def create_response(self, payload):
+        return payload
+
+    async def stream_response(self, payload):
+        if False:
+            yield b""
+
+    async def aclose(self):
+        return None
+
+
 def _reg():
     fake = FakeUpstream()
     routes = {
@@ -63,6 +75,44 @@ def test_route_with_unknown_provider_rejected():
     routes = {"x": ModelRoute("x", "ghost", "m")}
     with pytest.raises(CocolaError):
         Registry({"fake": FakeUpstream()}, routes, default_alias="x")
+
+
+def test_duplicate_aliases_route_by_id_and_never_guess_provider():
+    routes = {
+        "route-a": ModelRoute("shared", "a", "real-a"),
+        "route-b": ModelRoute("shared", "b", "real-b"),
+    }
+    reg = Registry({"a": FakeUpstream(), "b": FakeUpstream()}, routes, default_alias="")
+
+    assert reg.resolve_chat("route-a")[0].real_model == "real-a"
+    assert reg.resolve_chat("route-b")[0].real_model == "real-b"
+    with pytest.raises(CocolaError) as error:
+        reg.resolve_chat("shared")
+    assert error.value.code is ErrorCode.NOT_FOUND
+
+
+def test_defaults_and_legacy_alias_resolution_are_scoped_to_protocol():
+    routes = {
+        "chat-route": ModelRoute("shared", "chat", "chat-real", is_default=True),
+        "responses-route": ModelRoute(
+            "shared",
+            "responses",
+            "responses-real",
+            protocols=("openai-responses",),
+            is_default=True,
+        ),
+    }
+    reg = Registry(
+        {"chat": FakeUpstream()},
+        routes,
+        default_alias="",
+        responses_providers={"responses": FakeResponses()},
+    )
+
+    assert reg.resolve_chat(None)[0].real_model == "chat-real"
+    assert reg.resolve_responses(None)[0].real_model == "responses-real"
+    assert reg.resolve_chat("shared")[0].real_model == "chat-real"
+    assert reg.resolve_responses("shared")[0].real_model == "responses-real"
 
 
 async def test_openai_responses_provider_is_isolated_from_chat_routes():

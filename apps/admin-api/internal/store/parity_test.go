@@ -15,6 +15,7 @@ package store
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"os"
 	"testing"
@@ -39,7 +40,7 @@ func newParityPostgres(t *testing.T) *Postgres {
 	}
 	// Clean slate: truncate every table this suite touches.
 	_, err = pg.pool.Exec(ctx,
-		`TRUNCATE conversation_trace_spans, conversation_runs, auth_user_identifiers, auth_users, token_records, quota_overrides, skill_entries RESTART IDENTITY`)
+		`TRUNCATE conversation_trace_spans, conversation_runs, auth_user_identifiers, auth_users, token_records, quota_overrides, skill_entries, llm_model_routes, llm_providers RESTART IDENTITY CASCADE`)
 	if err != nil {
 		t.Fatalf("truncate: %v", err)
 	}
@@ -220,6 +221,75 @@ func runStoreContract(t *testing.T, st Store) {
 	}
 	if _, err := st.GetSkill(ctx, "sk-1"); !errors.Is(err, ErrNotFound) {
 		t.Fatalf("deleted skill want ErrNotFound, got %v", err)
+	}
+
+	// ----- model routes -----
+	providers := []LLMProvider{
+		{ID: "provider-chat", Name: "Chat", Type: "anthropic", Enabled: true, CreatedAt: now, UpdatedAt: now},
+		{ID: "provider-responses", Name: "Responses", Type: "openai_responses", Enabled: true, CreatedAt: now, UpdatedAt: now},
+	}
+	for _, provider := range providers {
+		if err := st.CreateLLMProvider(ctx, provider); err != nil {
+			t.Fatalf("CreateLLMProvider(%s): %v", provider.ID, err)
+		}
+	}
+	routes := []LLMModelRoute{
+		{ID: "route-chat", Alias: "shared", ProviderID: "provider-chat", Protocol: "anthropic-messages", RealModel: "chat-model", Enabled: true, Visible: true, IsDefault: true, CreatedAt: now, UpdatedAt: now},
+		{ID: "route-responses", Alias: "shared", ProviderID: "provider-responses", Protocol: "openai-responses", RealModel: "responses-model", Enabled: true, Visible: true, IsDefault: true, CreatedAt: now, UpdatedAt: now},
+	}
+	for _, route := range routes {
+		if err := st.CreateLLMModelRoute(ctx, route); err != nil {
+			t.Fatalf("CreateLLMModelRoute(%s): %v", route.ID, err)
+		}
+	}
+	if err := st.CreateLLMModelRoute(ctx, LLMModelRoute{
+		ID: "route-duplicate", Alias: "shared", ProviderID: "provider-chat",
+		Protocol: "anthropic-messages", RealModel: "duplicate", CreatedAt: now, UpdatedAt: now,
+	}); !errors.Is(err, ErrConflict) {
+		t.Fatalf("same provider+alias want ErrConflict, got %v", err)
+	}
+	gotRoute, err := st.GetLLMModelRoute(ctx, "route-responses")
+	if err != nil || gotRoute.Alias != "shared" || gotRoute.ProviderID != "provider-responses" {
+		t.Fatalf("GetLLMModelRoute by id: %+v %v", gotRoute, err)
+	}
+	gotRoutes, err := st.ListLLMModelRoutes(ctx)
+	if err != nil || len(gotRoutes) != 2 || !gotRoutes[0].IsDefault || !gotRoutes[1].IsDefault {
+		t.Fatalf("provider-scoped routes and protocol defaults: %+v %v", gotRoutes, err)
+	}
+
+	// ----- scheduled task model route identity -----
+	task := ScheduledTask{
+		ID: "task-route", OwnerType: "user", OwnerUserID: "user-1", ConversationID: "sched-task-route",
+		Name: "Route task", Status: "active", ScheduleKind: "once",
+		ScheduleSpec: json.RawMessage(`{"run_at":"2023-11-14T22:13:20Z"}`), Timezone: "UTC",
+		Prompt: "run", ModelRouteID: "route-chat", ModelAlias: "shared", MaxTurns: 30,
+		ConfigJSON: json.RawMessage(`{}`), NextRunAt: now, CreatedAt: now, UpdatedAt: now,
+	}
+	if err := st.CreateScheduledTask(ctx, task, nil); err != nil {
+		t.Fatalf("CreateScheduledTask: %v", err)
+	}
+	storedTask, err := st.GetScheduledTask(ctx, task.ID)
+	if err != nil || storedTask.ModelRouteID != "route-chat" || storedTask.ModelAlias != "shared" {
+		t.Fatalf("scheduled task model route roundtrip: %+v %v", storedTask, err)
+	}
+	run := ScheduledTaskRun{
+		ID: "task-run-route", TaskID: task.ID, ScheduledFor: now, Status: "running",
+		WorkerID: "worker-1", SessionID: task.ConversationID,
+		ModelRouteID: "route-chat", ModelAlias: "shared", StartedAt: now, CreatedAt: now, UpdatedAt: now,
+	}
+	if _, ok, err := st.TryStartScheduledTaskRun(ctx, task.ID, run, time.Time{}); err != nil || !ok {
+		t.Fatalf("TryStartScheduledTaskRun: ok=%v err=%v", ok, err)
+	}
+	storedRun, err := st.GetScheduledTaskRun(ctx, run.ID)
+	if err != nil || storedRun.ModelRouteID != "route-chat" || storedRun.ModelAlias != "shared" {
+		t.Fatalf("scheduled task run model route roundtrip: %+v %v", storedRun, err)
+	}
+	storedRun.Status = "success"
+	storedRun.OutputText = "done"
+	storedRun.FinishedAt = now.Add(time.Minute)
+	storedRun.UpdatedAt = storedRun.FinishedAt
+	if err := st.UpdateScheduledTaskRun(ctx, storedRun, time.Time{}, true); err != nil {
+		t.Fatalf("UpdateScheduledTaskRun: %v", err)
 	}
 
 }

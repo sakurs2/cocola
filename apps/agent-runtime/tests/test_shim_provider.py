@@ -298,7 +298,7 @@ async def test_stored_resume_is_reused_when_sandbox_changes():
     assert binding.sandbox_id == "box-new"
 
 
-async def test_model_alias_is_injected_into_exec_env():
+async def test_model_route_id_is_injected_into_exec_env():
     def stream_handler(sandbox_id, cmd, stdin):
         yield ExecChunk(
             kind="stdout",
@@ -312,21 +312,21 @@ async def test_model_alias_is_injected_into_exec_env():
         user_id="U1",
         session_id="S1",
         sandbox_id="box-1",
-        model_alias="claude-sonnet",
+        model_route_id="route-claude",
     )
 
     await _drain(provider, "hello", opts)
 
     env = execu.stream_calls[0]["env"]
-    assert env["ANTHROPIC_MODEL"] == "claude-sonnet"
-    assert env["ANTHROPIC_SMALL_FAST_MODEL"] == "claude-sonnet"
+    assert env["ANTHROPIC_MODEL"] == "route-claude"
+    assert env["ANTHROPIC_SMALL_FAST_MODEL"] == "route-claude"
 
 
 async def test_codex_credentials_stay_in_exec_env_and_out_of_request():
     def stream_handler(sandbox_id, cmd, stdin):
         request = json.loads(stdin)
         assert request["runtime_id"] == "codex"
-        assert request["model"] == "codex-model"
+        assert request["model"] == "route-codex"
         assert request["traceparent"] == "00-" + "a" * 32 + "-" + "b" * 16 + "-01"
         assert "auth_token" not in request
         yield ExecChunk(
@@ -342,7 +342,7 @@ async def test_codex_credentials_stay_in_exec_env_and_out_of_request():
         session_id="S1",
         runtime_id="codex",
         sandbox_id="box-1",
-        model_alias="codex-model",
+        model_route_id="route-codex",
         auth_token="short-lived-cocola-token",
         traceparent="00-" + "a" * 32 + "-" + "b" * 16 + "-01",
     )
@@ -352,7 +352,7 @@ async def test_codex_credentials_stay_in_exec_env_and_out_of_request():
     env = executor.stream_calls[0]["env"]
     assert env == {
         "CODEX_API_KEY": "short-lived-cocola-token",
-        "CODEX_MODEL": "codex-model",
+        "CODEX_MODEL": "route-codex",
     }
 
 

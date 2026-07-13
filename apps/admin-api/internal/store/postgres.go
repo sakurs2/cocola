@@ -924,11 +924,11 @@ func (p *Postgres) DeleteLLMProvider(ctx context.Context, id string) error {
 	return nil
 }
 
-const llmModelCols = `alias, provider_id, real_model, label, icon_type, icon_slug, icon_url, enabled, visible, is_default, sort_order, created_at, updated_at`
+const llmModelCols = `id, alias, provider_id, protocol, real_model, label, icon_type, icon_slug, icon_url, enabled, visible, is_default, sort_order, created_at, updated_at`
 
 func scanLLMModelRoute(row pgx.Row) (LLMModelRoute, error) {
 	var route LLMModelRoute
-	err := row.Scan(&route.Alias, &route.ProviderID, &route.RealModel, &route.Label,
+	err := row.Scan(&route.ID, &route.Alias, &route.ProviderID, &route.Protocol, &route.RealModel, &route.Label,
 		&route.IconType, &route.IconSlug, &route.IconURL, &route.Enabled,
 		&route.Visible, &route.IsDefault, &route.SortOrder, &route.CreatedAt, &route.UpdatedAt)
 	return route, err
@@ -941,14 +941,14 @@ func (p *Postgres) CreateLLMModelRoute(ctx context.Context, route LLMModelRoute)
 	}
 	defer tx.Rollback(ctx)
 	if route.IsDefault {
-		if _, err := tx.Exec(ctx, `UPDATE llm_model_routes SET is_default=FALSE WHERE is_default=TRUE`); err != nil {
+		if _, err := tx.Exec(ctx, `UPDATE llm_model_routes SET is_default=FALSE WHERE protocol=$1 AND is_default=TRUE`, route.Protocol); err != nil {
 			return err
 		}
 	}
 	const q = `INSERT INTO llm_model_routes (` + llmModelCols + `)
-		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13)`
+		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15)`
 	_, err = tx.Exec(ctx, q,
-		route.Alias, route.ProviderID, route.RealModel, route.Label,
+		route.ID, route.Alias, route.ProviderID, route.Protocol, route.RealModel, route.Label,
 		route.IconType, route.IconSlug, route.IconURL, route.Enabled, route.Visible,
 		route.IsDefault, route.SortOrder, route.CreatedAt, route.UpdatedAt)
 	if isUniqueViolation(err) {
@@ -963,8 +963,8 @@ func (p *Postgres) CreateLLMModelRoute(ctx context.Context, route LLMModelRoute)
 	return tx.Commit(ctx)
 }
 
-func (p *Postgres) GetLLMModelRoute(ctx context.Context, alias string) (LLMModelRoute, error) {
-	row := p.pool.QueryRow(ctx, `SELECT `+llmModelCols+` FROM llm_model_routes WHERE alias=$1`, alias)
+func (p *Postgres) GetLLMModelRoute(ctx context.Context, id string) (LLMModelRoute, error) {
+	row := p.pool.QueryRow(ctx, `SELECT `+llmModelCols+` FROM llm_model_routes WHERE id=$1`, id)
 	route, err := scanLLMModelRoute(row)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return LLMModelRoute{}, ErrNotFound
@@ -973,7 +973,7 @@ func (p *Postgres) GetLLMModelRoute(ctx context.Context, alias string) (LLMModel
 }
 
 func (p *Postgres) ListLLMModelRoutes(ctx context.Context) ([]LLMModelRoute, error) {
-	rows, err := p.pool.Query(ctx, `SELECT `+llmModelCols+` FROM llm_model_routes ORDER BY is_default DESC, sort_order, alias`)
+	rows, err := p.pool.Query(ctx, `SELECT `+llmModelCols+` FROM llm_model_routes ORDER BY protocol, is_default DESC, sort_order, alias, provider_id`)
 	if err != nil {
 		return nil, err
 	}
@@ -996,17 +996,17 @@ func (p *Postgres) UpdateLLMModelRoute(ctx context.Context, route LLMModelRoute)
 	}
 	defer tx.Rollback(ctx)
 	if route.IsDefault {
-		if _, err := tx.Exec(ctx, `UPDATE llm_model_routes SET is_default=FALSE WHERE alias<>$1 AND is_default=TRUE`, route.Alias); err != nil {
+		if _, err := tx.Exec(ctx, `UPDATE llm_model_routes SET is_default=FALSE WHERE id<>$1 AND protocol=$2 AND is_default=TRUE`, route.ID, route.Protocol); err != nil {
 			return err
 		}
 	}
 	const q = `UPDATE llm_model_routes
-		SET provider_id=$2, real_model=$3, label=$4, icon_type=$5,
-		    icon_slug=$6, icon_url=$7, enabled=$8, visible=$9, is_default=$10,
-		    sort_order=$11, created_at=$12, updated_at=$13
-		WHERE alias=$1`
+		SET alias=$2, provider_id=$3, protocol=$4, real_model=$5, label=$6, icon_type=$7,
+		    icon_slug=$8, icon_url=$9, enabled=$10, visible=$11, is_default=$12,
+		    sort_order=$13, created_at=$14, updated_at=$15
+		WHERE id=$1`
 	ct, err := tx.Exec(ctx, q,
-		route.Alias, route.ProviderID, route.RealModel, route.Label,
+		route.ID, route.Alias, route.ProviderID, route.Protocol, route.RealModel, route.Label,
 		route.IconType, route.IconSlug, route.IconURL, route.Enabled, route.Visible,
 		route.IsDefault, route.SortOrder, route.CreatedAt, route.UpdatedAt)
 	if isUniqueViolation(err) {
@@ -1024,8 +1024,8 @@ func (p *Postgres) UpdateLLMModelRoute(ctx context.Context, route LLMModelRoute)
 	return tx.Commit(ctx)
 }
 
-func (p *Postgres) DeleteLLMModelRoute(ctx context.Context, alias string) error {
-	ct, err := p.pool.Exec(ctx, `DELETE FROM llm_model_routes WHERE alias=$1`, alias)
+func (p *Postgres) DeleteLLMModelRoute(ctx context.Context, id string) error {
+	ct, err := p.pool.Exec(ctx, `DELETE FROM llm_model_routes WHERE id=$1`, id)
 	if err != nil {
 		return err
 	}
@@ -1037,13 +1037,13 @@ func (p *Postgres) DeleteLLMModelRoute(ctx context.Context, alias string) error 
 
 // ---- Scheduled tasks ----
 
-const scheduledTaskCols = `id, owner_type, owner_user_id, conversation_id, name, description, status, schedule_kind, schedule_spec, timezone, prompt, model_alias, max_turns, config_json, expires_at, next_run_at, last_run_at, run_count, last_status, last_error, created_at, updated_at, created_by, updated_by`
+const scheduledTaskCols = `id, owner_type, owner_user_id, conversation_id, name, description, status, schedule_kind, schedule_spec, timezone, prompt, model_route_id, model_alias, max_turns, config_json, expires_at, next_run_at, last_run_at, run_count, last_status, last_error, created_at, updated_at, created_by, updated_by`
 
 func scanScheduledTask(row pgx.Row) (ScheduledTask, error) {
 	var task ScheduledTask
 	var expiresAt, nextRun, lastRun *time.Time
 	err := row.Scan(&task.ID, &task.OwnerType, &task.OwnerUserID, &task.ConversationID, &task.Name, &task.Description, &task.Status,
-		&task.ScheduleKind, &task.ScheduleSpec, &task.Timezone, &task.Prompt, &task.ModelAlias,
+		&task.ScheduleKind, &task.ScheduleSpec, &task.Timezone, &task.Prompt, &task.ModelRouteID, &task.ModelAlias,
 		&task.MaxTurns, &task.ConfigJSON, &expiresAt, &nextRun, &lastRun, &task.RunCount, &task.LastStatus,
 		&task.LastError, &task.CreatedAt, &task.UpdatedAt, &task.CreatedBy, &task.UpdatedBy)
 	if err != nil {
@@ -1074,10 +1074,10 @@ func (p *Postgres) CreateScheduledTask(ctx context.Context, task ScheduledTask, 
 	}
 	defer tx.Rollback(ctx)
 	const q = `INSERT INTO scheduled_tasks (` + scheduledTaskCols + `)
-		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23,$24)`
+		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23,$24,$25)`
 	_, err = tx.Exec(ctx, q,
 		task.ID, task.OwnerType, task.OwnerUserID, task.ConversationID, task.Name, task.Description, task.Status, task.ScheduleKind,
-		task.ScheduleSpec, task.Timezone, task.Prompt, task.ModelAlias, task.MaxTurns,
+		task.ScheduleSpec, task.Timezone, task.Prompt, task.ModelRouteID, task.ModelAlias, task.MaxTurns,
 		task.ConfigJSON, nullableTime(task.ExpiresAt), nullableTime(task.NextRunAt), nullableTime(task.LastRunAt), task.RunCount,
 		task.LastStatus, task.LastError, task.CreatedAt, task.UpdatedAt, task.CreatedBy, task.UpdatedBy)
 	if isUniqueViolation(err) {
@@ -1174,13 +1174,13 @@ func (p *Postgres) UpdateScheduledTask(ctx context.Context, task ScheduledTask, 
 	const q = `UPDATE scheduled_tasks
 		SET owner_type=$2, owner_user_id=$3, conversation_id=$4, name=$5, description=$6,
 		    status=$7, schedule_kind=$8, schedule_spec=$9, timezone=$10, prompt=$11,
-		    model_alias=$12, max_turns=$13, config_json=$14, expires_at=$15, next_run_at=$16,
-		    last_run_at=$17, run_count=$18, last_status=$19, last_error=$20,
-		    created_at=$21, updated_at=$22, created_by=$23, updated_by=$24
+		    model_route_id=$12, model_alias=$13, max_turns=$14, config_json=$15, expires_at=$16, next_run_at=$17,
+		    last_run_at=$18, run_count=$19, last_status=$20, last_error=$21,
+		    created_at=$22, updated_at=$23, created_by=$24, updated_by=$25
 		WHERE id=$1`
 	ct, err := tx.Exec(ctx, q,
 		task.ID, task.OwnerType, task.OwnerUserID, task.ConversationID, task.Name, task.Description, task.Status, task.ScheduleKind,
-		task.ScheduleSpec, task.Timezone, task.Prompt, task.ModelAlias, task.MaxTurns,
+		task.ScheduleSpec, task.Timezone, task.Prompt, task.ModelRouteID, task.ModelAlias, task.MaxTurns,
 		task.ConfigJSON, nullableTime(task.ExpiresAt), nullableTime(task.NextRunAt), nullableTime(task.LastRunAt), task.RunCount,
 		task.LastStatus, task.LastError, task.CreatedAt, task.UpdatedAt, task.CreatedBy, task.UpdatedBy)
 	if err != nil {
@@ -1316,11 +1316,11 @@ func (p *Postgres) TryStartScheduledTaskRun(ctx context.Context, taskID string, 
 		return ScheduledTask{}, false, err
 	}
 	const rq = `INSERT INTO scheduled_task_runs
-		(id, task_id, scheduled_for, status, worker_id, session_id, model_alias, output_text, error, started_at, finished_at, created_at, updated_at)
-		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13)`
+		(id, task_id, scheduled_for, status, worker_id, session_id, model_route_id, model_alias, output_text, error, started_at, finished_at, created_at, updated_at)
+		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14)`
 	_, err = tx.Exec(ctx, rq,
 		run.ID, run.TaskID, nullableTime(run.ScheduledFor), run.Status, run.WorkerID,
-		run.SessionID, run.ModelAlias, run.OutputText, run.Error, nullableTime(run.StartedAt),
+		run.SessionID, run.ModelRouteID, run.ModelAlias, run.OutputText, run.Error, nullableTime(run.StartedAt),
 		nullableTime(run.FinishedAt), run.CreatedAt, run.UpdatedAt)
 	if isUniqueViolation(err) {
 		return ScheduledTask{}, false, ErrConflict
@@ -1347,7 +1347,7 @@ func scanScheduledTaskRun(row pgx.Row) (ScheduledTaskRun, error) {
 	var run ScheduledTaskRun
 	var scheduledFor, startedAt, finishedAt *time.Time
 	err := row.Scan(&run.ID, &run.TaskID, &scheduledFor, &run.Status, &run.WorkerID,
-		&run.SessionID, &run.ModelAlias, &run.OutputText, &run.Error, &startedAt,
+		&run.SessionID, &run.ModelRouteID, &run.ModelAlias, &run.OutputText, &run.Error, &startedAt,
 		&finishedAt, &run.CreatedAt, &run.UpdatedAt)
 	if err != nil {
 		return ScheduledTaskRun{}, err
@@ -1365,7 +1365,7 @@ func scanScheduledTaskRun(row pgx.Row) (ScheduledTaskRun, error) {
 }
 
 func (p *Postgres) GetScheduledTaskRun(ctx context.Context, id string) (ScheduledTaskRun, error) {
-	row := p.pool.QueryRow(ctx, `SELECT id, task_id, scheduled_for, status, worker_id, session_id, model_alias, output_text, error, started_at, finished_at, created_at, updated_at
+	row := p.pool.QueryRow(ctx, `SELECT id, task_id, scheduled_for, status, worker_id, session_id, model_route_id, model_alias, output_text, error, started_at, finished_at, created_at, updated_at
 		FROM scheduled_task_runs WHERE id=$1`, id)
 	run, err := scanScheduledTaskRun(row)
 	if errors.Is(err, pgx.ErrNoRows) {
@@ -1375,7 +1375,7 @@ func (p *Postgres) GetScheduledTaskRun(ctx context.Context, id string) (Schedule
 }
 
 func (p *Postgres) ListScheduledTaskRuns(ctx context.Context, taskID, status string, limit int) ([]ScheduledTaskRun, error) {
-	q := `SELECT id, task_id, scheduled_for, status, worker_id, session_id, model_alias, output_text, error, started_at, finished_at, created_at, updated_at
+	q := `SELECT id, task_id, scheduled_for, status, worker_id, session_id, model_route_id, model_alias, output_text, error, started_at, finished_at, created_at, updated_at
 		FROM scheduled_task_runs WHERE TRUE`
 	args := []any{}
 	if taskID != "" {
@@ -1426,7 +1426,7 @@ func (p *Postgres) ExpireStaleScheduledTaskRuns(ctx context.Context, before, now
 		return nil, err
 	}
 	defer tx.Rollback(ctx)
-	rows, err := tx.Query(ctx, `SELECT id, task_id, scheduled_for, status, worker_id, session_id, model_alias, output_text, error, started_at, finished_at, created_at, updated_at
+	rows, err := tx.Query(ctx, `SELECT id, task_id, scheduled_for, status, worker_id, session_id, model_route_id, model_alias, output_text, error, started_at, finished_at, created_at, updated_at
 		FROM scheduled_task_runs
 		WHERE status='running' AND updated_at < $1
 		ORDER BY updated_at ASC
@@ -1495,11 +1495,11 @@ func (p *Postgres) UpdateScheduledTaskRun(ctx context.Context, run ScheduledTask
 	}
 	defer tx.Rollback(ctx)
 	const q = `UPDATE scheduled_task_runs
-		SET status=$2, worker_id=$3, session_id=$4, model_alias=$5, output_text=$6,
-		    error=$7, started_at=$8, finished_at=$9, created_at=$10, updated_at=$11
+		SET status=$2, worker_id=$3, session_id=$4, model_route_id=$5, model_alias=$6, output_text=$7,
+		    error=$8, started_at=$9, finished_at=$10, created_at=$11, updated_at=$12
 		WHERE id=$1`
 	ct, err := tx.Exec(ctx, q,
-		run.ID, run.Status, run.WorkerID, run.SessionID, run.ModelAlias, run.OutputText,
+		run.ID, run.Status, run.WorkerID, run.SessionID, run.ModelRouteID, run.ModelAlias, run.OutputText,
 		run.Error, nullableTime(run.StartedAt), nullableTime(run.FinishedAt), run.CreatedAt, run.UpdatedAt)
 	if err != nil {
 		return err

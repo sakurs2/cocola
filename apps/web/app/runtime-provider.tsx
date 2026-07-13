@@ -196,6 +196,7 @@ export type ModelIconConfig = {
 };
 
 export type ModelOption = {
+  id: string;
   alias: string;
   label: string;
   provider?: string;
@@ -203,6 +204,7 @@ export type ModelOption = {
   iconSlug?: string;
   icon: ModelIconConfig;
   protocols: string[];
+  isDefault: boolean;
 };
 
 export type AgentRuntimeOption = {
@@ -213,6 +215,7 @@ export type AgentRuntimeOption = {
 };
 
 export type UiMessageMetadata = {
+  model_route_id?: string;
   model_alias?: string;
   model_label?: string;
   model_provider?: string;
@@ -259,10 +262,10 @@ type CocolaContextValue = {
   openArtifact: (artifact: ArtifactPreview) => void;
   closeArtifact: () => void;
   models: ModelOption[];
-  selectedModelAlias: string;
+  selectedModelID: string;
   selectedModel: ModelOption | null;
   modelsLoaded: boolean;
-  setSelectedModelAlias: (alias: string) => void;
+  setSelectedModelID: (id: string) => void;
   runtimes: AgentRuntimeOption[];
   selectedRuntime: AgentRuntimeOption | null;
   runtimeLocked: boolean;
@@ -371,6 +374,7 @@ function normalizeMetadata(raw: UiMessageMetadata | undefined): UiMessageMetadat
   if (!raw) return undefined;
   const icon = normalizeIcon(raw.model_icon);
   return {
+    ...(typeof raw.model_route_id === "string" ? { model_route_id: raw.model_route_id } : {}),
     ...(typeof raw.model_alias === "string" ? { model_alias: raw.model_alias } : {}),
     ...(typeof raw.model_label === "string" ? { model_label: raw.model_label } : {}),
     ...(typeof raw.model_provider === "string" ? { model_provider: raw.model_provider } : {}),
@@ -397,8 +401,9 @@ function normalizeModelOption(raw: unknown): ModelOption | null {
   if (!raw || typeof raw !== "object") return null;
   const row = raw as Record<string, unknown>;
   const alias = typeof row.alias === "string" ? row.alias : "";
+  const id = typeof row.id === "string" ? row.id : alias;
   const label = typeof row.label === "string" ? row.label : "";
-  if (!alias || !label) return null;
+  if (!id || !alias || !label) return null;
   const provider = typeof row.provider === "string" ? row.provider : "";
   const family = typeof row.family === "string" ? row.family : "";
   const iconSlug = typeof row.icon_slug === "string" ? row.icon_slug : "";
@@ -410,6 +415,7 @@ function normalizeModelOption(raw: unknown): ModelOption | null {
         ? { type: "lobe-icons" as const, slug: iconSlug }
         : (icon ?? { type: "lobe-icons" as const, slug: family || provider || alias });
   return {
+    id,
     alias,
     label,
     ...(provider ? { provider } : {}),
@@ -419,6 +425,7 @@ function normalizeModelOption(raw: unknown): ModelOption | null {
     protocols: Array.isArray(row.protocols)
       ? row.protocols.filter((value): value is string => typeof value === "string")
       : [],
+    isDefault: row.is_default === true,
   };
 }
 
@@ -639,7 +646,7 @@ export function CocolaRuntimeProvider({ children }: { children: ReactNode }) {
   const [unreadCompletedIds, setUnreadCompletedIds] = useState<Set<string>>(() => new Set());
   const [selectedArtifact, setSelectedArtifact] = useState<ArtifactPreview | null>(null);
   const [models, setModels] = useState<ModelOption[]>([]);
-  const [selectedModelAlias, setSelectedModelAlias] = useState("");
+  const [selectedModelID, setSelectedModelID] = useState("");
   const [modelsLoaded, setModelsLoaded] = useState(false);
   const [runtimes, setRuntimes] = useState<AgentRuntimeOption[]>([]);
   const [selectedRuntimeId, setSelectedRuntimeIdState] = useState("");
@@ -670,10 +677,8 @@ export function CocolaRuntimeProvider({ children }: { children: ReactNode }) {
   );
   const selectedModel = useMemo(
     () =>
-      compatibleModels.find((model) => model.alias === selectedModelAlias) ??
-      compatibleModels[0] ??
-      null,
-    [compatibleModels, selectedModelAlias],
+      compatibleModels.find((model) => model.id === selectedModelID) ?? compatibleModels[0] ?? null,
+    [compatibleModels, selectedModelID],
   );
   const runtimeLocked = messages.length > 0 || conversations.some((item) => item.id === sessionId);
 
@@ -692,10 +697,10 @@ export function CocolaRuntimeProvider({ children }: { children: ReactNode }) {
   );
 
   useEffect(() => {
-    if (selectedModel && selectedModel.alias !== selectedModelAlias) {
-      setSelectedModelAlias(selectedModel.alias);
+    if (selectedModel && selectedModel.id !== selectedModelID) {
+      setSelectedModelID(selectedModel.id);
     }
-  }, [selectedModel, selectedModelAlias]);
+  }, [selectedModel, selectedModelID]);
 
   useEffect(() => {
     const conversation = conversations.find((item) => item.id === sessionId);
@@ -1113,6 +1118,7 @@ export function CocolaRuntimeProvider({ children }: { children: ReactNode }) {
       if (abortMap.current.has(turnSessionId) || runCursors.current.has(turnSessionId)) return;
       const isInitialTurn = messages.length === 0;
       const assistantMetadata: UiMessageMetadata = {
+        model_route_id: model.id,
         model_alias: model.alias,
         model_label: model.label,
         ...(model.provider ? { model_provider: model.provider } : {}),
@@ -1189,6 +1195,7 @@ export function CocolaRuntimeProvider({ children }: { children: ReactNode }) {
           session_id: turnSessionId,
           client_request_id: clientRequestId,
           runtime_id: agentRuntime.id,
+          model_route_id: model.id,
           model_alias: model.alias,
           model_label: model.label,
           ...(model.provider ? { model_provider: model.provider } : {}),
@@ -1613,14 +1620,12 @@ export function CocolaRuntimeProvider({ children }: { children: ReactNode }) {
               return model ? [model] : [];
             })
           : [];
-        const fallbackAlias = next[0]?.alias ?? "";
+        const fallbackID = next.find((model) => model.isDefault)?.id ?? next[0]?.id ?? "";
         setModels(next);
-        setSelectedModelAlias((prev) =>
-          next.some((m) => m.alias === prev) ? prev : fallbackAlias,
-        );
+        setSelectedModelID((prev) => (next.some((m) => m.id === prev) ? prev : fallbackID));
       } catch {
         setModels([]);
-        setSelectedModelAlias("");
+        setSelectedModelID("");
       } finally {
         setModelsLoaded(true);
       }
@@ -1692,10 +1697,10 @@ export function CocolaRuntimeProvider({ children }: { children: ReactNode }) {
       openArtifact,
       closeArtifact,
       models: compatibleModels,
-      selectedModelAlias,
+      selectedModelID,
       selectedModel,
       modelsLoaded: modelsLoaded && runtimesLoaded,
-      setSelectedModelAlias,
+      setSelectedModelID,
       runtimes,
       selectedRuntime,
       runtimeLocked,
@@ -1717,7 +1722,7 @@ export function CocolaRuntimeProvider({ children }: { children: ReactNode }) {
       openArtifact,
       closeArtifact,
       compatibleModels,
-      selectedModelAlias,
+      selectedModelID,
       selectedModel,
       modelsLoaded,
       runtimesLoaded,

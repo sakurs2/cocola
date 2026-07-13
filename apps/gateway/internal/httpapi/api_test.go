@@ -292,14 +292,14 @@ func TestChatConversationRunExcludesPrompt(t *testing.T) {
 	}
 }
 
-func TestChatForwardsModelAlias(t *testing.T) {
+func TestChatForwardsModelRouteID(t *testing.T) {
 	fs := &fakeStreamer{script: []agent.Event{{Kind: "done"}}}
 	h := newAPI(t, fs)
 
 	req := httptest.NewRequest(
 		"POST",
 		"/v1/chat",
-		strings.NewReader(`{"prompt":"hi","session_id":"s1","model_alias":"claude-sonnet"}`),
+		strings.NewReader(`{"prompt":"hi","session_id":"s1","model_route_id":"route-1","model_alias":"claude-sonnet"}`),
 	)
 	rec := httptest.NewRecorder()
 	h.ServeHTTP(rec, req)
@@ -307,8 +307,8 @@ func TestChatForwardsModelAlias(t *testing.T) {
 	if rec.Code != http.StatusOK {
 		t.Fatalf("want 200, got %d", rec.Code)
 	}
-	if fs.gotQuery.ModelAlias != "claude-sonnet" {
-		t.Fatalf("model alias not forwarded, got %q", fs.gotQuery.ModelAlias)
+	if fs.gotQuery.ModelRouteID != "route-1" {
+		t.Fatalf("model route id not forwarded, got %q", fs.gotQuery.ModelRouteID)
 	}
 }
 

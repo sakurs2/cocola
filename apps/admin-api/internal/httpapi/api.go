@@ -185,9 +185,9 @@ func (a *API) Router() http.Handler {
 			r.Get("/", a.listLLMModels)
 			r.Post("/", a.createLLMModel)
 			r.Get("/public", a.listPublicLLMModels)
-			r.Patch("/{alias}", a.updateLLMModel)
-			r.Delete("/{alias}", a.deleteLLMModel)
-			r.Post("/{alias}/default", a.setDefaultLLMModel)
+			r.Patch("/{id}", a.updateLLMModel)
+			r.Delete("/{id}", a.deleteLLMModel)
+			r.Post("/{id}/default", a.setDefaultLLMModel)
 		})
 
 		r.Route("/scheduled-tasks", func(r chi.Router) {

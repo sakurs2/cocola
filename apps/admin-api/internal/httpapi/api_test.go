@@ -725,6 +725,39 @@ func TestSkillCRUD(t *testing.T) {
 	}
 }
 
+func TestDeleteReferencedLLMProviderReturnsActionableConflict(t *testing.T) {
+	api := newTestAPI("k")
+	router := api.Router()
+	rec := do(t, router, http.MethodPost, "/admin/model-providers", "k", map[string]any{
+		"id": "deepseek", "name": "DeepSeek", "type": "anthropic",
+		"base_url": "https://api.deepseek.com/anthropic", "enabled": false,
+	})
+	if rec.Code != http.StatusCreated {
+		t.Fatalf("create provider: want 201, got %d (%s)", rec.Code, rec.Body.String())
+	}
+	rec = do(t, router, http.MethodPost, "/admin/models", "k", map[string]any{
+		"alias": "deepseek-v4-pro", "provider_id": "deepseek",
+		"real_model": "deepseek-v4-pro", "label": "DeepSeek V4 Pro",
+		"icon_type": "simple-icons", "icon_slug": "deepseek",
+	})
+	if rec.Code != http.StatusCreated {
+		t.Fatalf("create model route: want 201, got %d (%s)", rec.Code, rec.Body.String())
+	}
+
+	rec = do(t, router, http.MethodDelete, "/admin/model-providers/deepseek", "k", nil)
+	if rec.Code != http.StatusConflict {
+		t.Fatalf("delete referenced provider: want 409, got %d (%s)", rec.Code, rec.Body.String())
+	}
+	var body errBody
+	if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
+		t.Fatalf("decode error response: %v", err)
+	}
+	if body.Error.Code != "PROVIDER_IN_USE" ||
+		body.Error.Message != "Delete associated model routes before deleting this provider." {
+		t.Fatalf("unexpected provider conflict: %+v", body.Error)
+	}
+}
+
 func TestMCPCRUDAndEffectiveConfig(t *testing.T) {
 	api := newTestAPI("k")
 	r := api.Router()

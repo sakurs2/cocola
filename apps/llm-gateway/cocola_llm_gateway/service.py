@@ -6,7 +6,7 @@ ledger, quota) at once; each collaborator stays unaware of the others.
 
 Flow for one request:
   0. check_quota(identity)               -> raise QuotaExceeded (HTTP 429) early
-  1. registry.resolve(alias)             -> (route, provider)
+  1. registry.resolve(route_id)          -> (route, provider)
   2. ResilientStreamer(provider).stream  -> normalized StreamEvent stream
   3. pass events through UNCHANGED, accumulating Usage
   4. at stream end: write ONE UsageRecord (billing) AND commit the token total to

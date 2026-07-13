@@ -103,22 +103,24 @@ def _build_from_dict(spec: dict) -> Registry:
             provider_protocols[name] = ("anthropic-messages",)
 
     routes: dict[str, ModelRoute] = {}
-    for alias, rcfg in (spec.get("routes") or {}).items():
-        routes[alias] = ModelRoute(
-            alias=alias,
+    for route_id, rcfg in (spec.get("routes") or {}).items():
+        route_alias = str(rcfg.get("alias", route_id))
+        routes[route_id] = ModelRoute(
+            alias=route_alias,
             provider_name=rcfg["provider"],
-            real_model=rcfg.get("real_model", alias),
+            real_model=rcfg.get("real_model", route_alias),
             pricing=Pricing(
                 input_per_1k=float(rcfg.get("input_per_1k", 0.0)),
                 output_per_1k=float(rcfg.get("output_per_1k", 0.0)),
             ),
             protocols=provider_protocols.get(rcfg["provider"], ()),
-            label=str(rcfg.get("label", alias)),
+            label=str(rcfg.get("label", route_alias)),
             icon={str(k): str(v) for k, v in (rcfg.get("icon") or {}).items()}
             if isinstance(rcfg.get("icon"), dict)
             else {},
             enabled=_cfg_bool(rcfg.get("enabled", True)),
             visible=_cfg_bool(rcfg.get("visible", True)),
+            is_default=_cfg_bool(rcfg.get("is_default", False)),
         )
 
     default_alias = spec.get("default_alias", "")

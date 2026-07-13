@@ -13,7 +13,7 @@ Env (listen/metrics have defaults; runtime dependencies are required):
                                              hosts the Route A brain; required)
     COCOLA_SANDBOX_IMAGE                      required Route A brain image
     COCOLA_SANDBOX_LLM_BASE_URL              gateway root injected as ANTHROPIC_BASE_URL
-    COCOLA_SANDBOX_MODEL_ALIAS               alias injected as ANTHROPIC_MODEL / _SMALL_FAST_MODEL
+    COCOLA_SANDBOX_MODEL_ALIAS               default route ID (legacy name) injected as ANTHROPIC_MODEL
     COCOLA_PG_DSN                            required Postgres DSN for durable resume
 
 Provider selection (ADR-0009, Route B decommissioned): Route A runs the whole
@@ -128,8 +128,8 @@ def _sandbox_provisioning() -> tuple[str, dict[str, str]]:
       ANTHROPIC_BASE_URL   <- COCOLA_SANDBOX_LLM_BASE_URL (the gateway root)
       COCOLA_LLM_BASE_URL  <- COCOLA_SANDBOX_LLM_BASE_URL (Codex Responses root)
       ANTHROPIC_MODEL / ANTHROPIC_SMALL_FAST_MODEL <- COCOLA_SANDBOX_MODEL_ALIAS
-          (both the main and the fast model resolve to a known gateway alias;
-           the registry 404s unknown aliases, so an unset fast model would fail)
+          (the legacy environment variable contains a model route ID; the
+           selected route overrides it in each sandbox exec)
 
     Gateway supplies the selected runtime's auth token for each verified Run;
     session-agnostic provisioning never bakes a static credential into a warm
@@ -137,12 +137,12 @@ def _sandbox_provisioning() -> tuple[str, dict[str, str]]:
     """
     image = _required_env("COCOLA_SANDBOX_IMAGE")
     base_url = _required_env("COCOLA_SANDBOX_LLM_BASE_URL")
-    alias = _required_env("COCOLA_SANDBOX_MODEL_ALIAS")
+    default_route_id = _required_env("COCOLA_SANDBOX_MODEL_ALIAS")
     env = {
         "ANTHROPIC_BASE_URL": base_url,
         "COCOLA_LLM_BASE_URL": base_url,
-        "ANTHROPIC_MODEL": alias,
-        "ANTHROPIC_SMALL_FAST_MODEL": alias,
+        "ANTHROPIC_MODEL": default_route_id,
+        "ANTHROPIC_SMALL_FAST_MODEL": default_route_id,
     }
     return image, env
 

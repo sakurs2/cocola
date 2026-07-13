@@ -738,26 +738,34 @@ func (m *Memory) DeleteLLMProvider(ctx context.Context, id string) error {
 func (m *Memory) CreateLLMModelRoute(ctx context.Context, route LLMModelRoute) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	if _, ok := m.llmModels[route.Alias]; ok {
+	if _, ok := m.llmModels[route.ID]; ok {
 		return ErrConflict
 	}
 	if _, ok := m.llmProviders[route.ProviderID]; !ok {
 		return ErrNotFound
 	}
-	if route.IsDefault {
-		for alias, existing := range m.llmModels {
-			existing.IsDefault = false
-			m.llmModels[alias] = existing
+	for _, existing := range m.llmModels {
+		if existing.ProviderID == route.ProviderID && existing.Alias == route.Alias {
+			return ErrConflict
 		}
 	}
-	m.llmModels[route.Alias] = route
+	if route.IsDefault {
+		for id, existing := range m.llmModels {
+			if existing.Protocol != route.Protocol {
+				continue
+			}
+			existing.IsDefault = false
+			m.llmModels[id] = existing
+		}
+	}
+	m.llmModels[route.ID] = route
 	return nil
 }
 
-func (m *Memory) GetLLMModelRoute(ctx context.Context, alias string) (LLMModelRoute, error) {
+func (m *Memory) GetLLMModelRoute(ctx context.Context, id string) (LLMModelRoute, error) {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
-	route, ok := m.llmModels[alias]
+	route, ok := m.llmModels[id]
 	if !ok {
 		return LLMModelRoute{}, ErrNotFound
 	}
@@ -778,7 +786,10 @@ func (m *Memory) ListLLMModelRoutes(ctx context.Context) ([]LLMModelRoute, error
 		if out[i].SortOrder != out[j].SortOrder {
 			return out[i].SortOrder < out[j].SortOrder
 		}
-		return out[i].Alias < out[j].Alias
+		if out[i].Alias != out[j].Alias {
+			return out[i].Alias < out[j].Alias
+		}
+		return out[i].ProviderID < out[j].ProviderID
 	})
 	return out, nil
 }
@@ -786,32 +797,37 @@ func (m *Memory) ListLLMModelRoutes(ctx context.Context) ([]LLMModelRoute, error
 func (m *Memory) UpdateLLMModelRoute(ctx context.Context, route LLMModelRoute) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	if _, ok := m.llmModels[route.Alias]; !ok {
+	if _, ok := m.llmModels[route.ID]; !ok {
 		return ErrNotFound
 	}
 	if _, ok := m.llmProviders[route.ProviderID]; !ok {
 		return ErrNotFound
 	}
+	for id, existing := range m.llmModels {
+		if id != route.ID && existing.ProviderID == route.ProviderID && existing.Alias == route.Alias {
+			return ErrConflict
+		}
+	}
 	if route.IsDefault {
-		for alias, existing := range m.llmModels {
-			if alias == route.Alias {
+		for id, existing := range m.llmModels {
+			if id == route.ID || existing.Protocol != route.Protocol {
 				continue
 			}
 			existing.IsDefault = false
-			m.llmModels[alias] = existing
+			m.llmModels[id] = existing
 		}
 	}
-	m.llmModels[route.Alias] = route
+	m.llmModels[route.ID] = route
 	return nil
 }
 
-func (m *Memory) DeleteLLMModelRoute(ctx context.Context, alias string) error {
+func (m *Memory) DeleteLLMModelRoute(ctx context.Context, id string) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	if _, ok := m.llmModels[alias]; !ok {
+	if _, ok := m.llmModels[id]; !ok {
 		return ErrNotFound
 	}
-	delete(m.llmModels, alias)
+	delete(m.llmModels, id)
 	return nil
 }
 

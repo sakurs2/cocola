@@ -1060,6 +1060,17 @@ func (a *Admin) UpdateLLMProvider(ctx context.Context, id string, in LLMProvider
 		if !validProviderType(ptype) {
 			return store.LLMProvider{}, ErrInvalidArg
 		}
+		if ptype != provider.Type {
+			routes, listErr := a.store.ListLLMModelRoutes(ctx)
+			if listErr != nil {
+				return store.LLMProvider{}, listErr
+			}
+			for _, route := range routes {
+				if route.ProviderID == provider.ID {
+					return store.LLMProvider{}, store.ErrConflict
+				}
+			}
+		}
 		provider.Type = ptype
 	}
 	if in.BaseURL != "" {
@@ -1094,9 +1105,11 @@ func (a *Admin) CreateLLMModel(ctx context.Context, in LLMModelInput) (store.LLM
 	if err != nil {
 		return store.LLMModelRoute{}, err
 	}
-	if _, err := a.store.GetLLMProvider(ctx, route.ProviderID); err != nil {
+	provider, err := a.store.GetLLMProvider(ctx, route.ProviderID)
+	if err != nil {
 		return store.LLMModelRoute{}, err
 	}
+	route.Protocol = modelProtocol(provider.Type)
 	if err := a.store.CreateLLMModelRoute(ctx, route); err != nil {
 		return store.LLMModelRoute{}, err
 	}
@@ -1107,8 +1120,8 @@ func (a *Admin) ListLLMModels(ctx context.Context) ([]store.LLMModelRoute, error
 	return a.store.ListLLMModelRoutes(ctx)
 }
 
-func (a *Admin) UpdateLLMModel(ctx context.Context, alias string, in LLMModelInput) (store.LLMModelRoute, error) {
-	existing, err := a.store.GetLLMModelRoute(ctx, normalizeID(alias))
+func (a *Admin) UpdateLLMModel(ctx context.Context, id string, in LLMModelInput) (store.LLMModelRoute, error) {
+	existing, err := a.store.GetLLMModelRoute(ctx, normalizeID(id))
 	if err != nil {
 		return store.LLMModelRoute{}, err
 	}
@@ -1116,25 +1129,31 @@ func (a *Admin) UpdateLLMModel(ctx context.Context, alias string, in LLMModelInp
 	if err != nil {
 		return store.LLMModelRoute{}, err
 	}
-	if _, err := a.store.GetLLMProvider(ctx, route.ProviderID); err != nil {
+	provider, err := a.store.GetLLMProvider(ctx, route.ProviderID)
+	if err != nil {
 		return store.LLMModelRoute{}, err
 	}
+	protocol := modelProtocol(provider.Type)
+	if existing.Protocol != "" && existing.Protocol != protocol {
+		return store.LLMModelRoute{}, store.ErrConflict
+	}
+	route.Protocol = protocol
 	if err := a.store.UpdateLLMModelRoute(ctx, route); err != nil {
 		return store.LLMModelRoute{}, err
 	}
 	return route, nil
 }
 
-func (a *Admin) DeleteLLMModel(ctx context.Context, alias, actor string) error {
-	alias = normalizeID(alias)
-	if err := a.store.DeleteLLMModelRoute(ctx, alias); err != nil {
+func (a *Admin) DeleteLLMModel(ctx context.Context, id, actor string) error {
+	id = normalizeID(id)
+	if err := a.store.DeleteLLMModelRoute(ctx, id); err != nil {
 		return err
 	}
 	return nil
 }
 
-func (a *Admin) SetDefaultLLMModel(ctx context.Context, alias, actor string) (store.LLMModelRoute, error) {
-	route, err := a.store.GetLLMModelRoute(ctx, normalizeID(alias))
+func (a *Admin) SetDefaultLLMModel(ctx context.Context, id, actor string) (store.LLMModelRoute, error) {
+	route, err := a.store.GetLLMModelRoute(ctx, normalizeID(id))
 	if err != nil {
 		return store.LLMModelRoute{}, err
 	}
@@ -1178,6 +1197,7 @@ func (a *Admin) ListPublicLLMModels(ctx context.Context) ([]store.PublicLLMModel
 func (a *Admin) llmRouteFromInput(existing store.LLMModelRoute, in LLMModelInput, create bool) (store.LLMModelRoute, error) {
 	route := existing
 	if create {
+		route.ID = newID()
 		route.Alias = normalizeID(in.Alias)
 		route.Enabled = true
 		route.Visible = true
@@ -1186,7 +1206,7 @@ func (a *Admin) llmRouteFromInput(existing store.LLMModelRoute, in LLMModelInput
 		route.CreatedAt = now
 		route.UpdatedAt = now
 	}
-	if route.Alias == "" {
+	if route.ID == "" || route.Alias == "" {
 		return store.LLMModelRoute{}, ErrInvalidArg
 	}
 	if in.ProviderID != "" || create {
@@ -1407,21 +1427,23 @@ func publicLLMModel(route store.LLMModelRoute, providerType string) store.Public
 		icon.Slug = iconSlug
 	}
 	return store.PublicLLMModel{
+		ID:        route.ID,
 		Alias:     route.Alias,
 		Label:     route.Label,
 		Provider:  provider,
 		Family:    family,
 		IconSlug:  iconSlug,
 		Icon:      icon,
-		Protocols: modelProtocols(providerType),
+		Protocols: []string{modelProtocol(providerType)},
+		IsDefault: route.IsDefault,
 	}
 }
 
-func modelProtocols(providerType string) []string {
+func modelProtocol(providerType string) string {
 	if providerType == ProviderOpenAIResponses {
-		return []string{"openai-responses"}
+		return "openai-responses"
 	}
-	return []string{"anthropic-messages"}
+	return "anthropic-messages"
 }
 
 func (a *Admin) GetConversationRun(ctx context.Context, traceID string) (store.ConversationRun, error) {
