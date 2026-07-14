@@ -980,7 +980,6 @@ func userSkillID(userID, skillID string) string {
 
 const (
 	ProviderAnthropic       = "anthropic"
-	ProviderOpenAICompat    = "openai_compat"
 	ProviderOpenAIResponses = "openai_responses"
 	IconSimpleIcons         = "simple-icons"
 	IconImage               = "image"
@@ -1347,7 +1346,7 @@ func normalizeProviderType(v string) string {
 }
 
 func validProviderType(v string) bool {
-	return v == ProviderAnthropic || v == ProviderOpenAICompat || v == ProviderOpenAIResponses
+	return v == ProviderAnthropic || v == ProviderOpenAIResponses
 }
 
 func validIcon(route store.LLMModelRoute) bool {

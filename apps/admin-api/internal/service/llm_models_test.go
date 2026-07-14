@@ -45,6 +45,18 @@ func TestLLMProviderRequiresSecretForAPIKeyAndMasks(t *testing.T) {
 	}
 }
 
+func TestLLMProviderRejectsRemovedOpenAICompatType(t *testing.T) {
+	ctx := context.Background()
+	svc := New(store.NewMemory(), nil, authTestClock).WithModelSecretKey("secret")
+	key := "test-only-key"
+	if _, err := svc.CreateLLMProvider(ctx, LLMProviderInput{
+		ID: "legacy", Name: "Legacy", Type: "openai_compat",
+		BaseURL: "https://example.invalid/v1", APIKey: &key,
+	}); !errors.Is(err, ErrInvalidArg) {
+		t.Fatalf("removed provider type want ErrInvalidArg, got %v", err)
+	}
+}
+
 func TestLLMModelsDefaultAndPublicList(t *testing.T) {
 	ctx := context.Background()
 	st := store.NewMemory()
@@ -110,7 +122,7 @@ func TestLLMModelAliasIsScopedToProviderAndDefaultsToProtocol(t *testing.T) {
 	key := "test-only-key"
 	for _, provider := range []LLMProviderInput{
 		{ID: "chat-a", Name: "Chat A", Type: ProviderAnthropic, BaseURL: "https://a.invalid", APIKey: &key},
-		{ID: "chat-b", Name: "Chat B", Type: ProviderOpenAICompat, BaseURL: "https://b.invalid/v1", APIKey: &key},
+		{ID: "chat-b", Name: "Chat B", Type: ProviderAnthropic, BaseURL: "https://b.invalid", APIKey: &key},
 		{ID: "responses", Name: "Responses", Type: ProviderOpenAIResponses, BaseURL: "https://r.invalid/v1", APIKey: &key},
 	} {
 		if _, err := svc.CreateLLMProvider(ctx, provider); err != nil {

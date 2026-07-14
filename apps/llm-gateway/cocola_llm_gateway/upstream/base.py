@@ -2,8 +2,8 @@
 
 This mirrors the role `SandboxProvider` plays in sandbox-manager: the service
 layer depends ONLY on this Protocol, never on a concrete vendor client. Swapping
-Anthropic for an OpenAI-compatible endpoint (or a Fake in tests) is therefore
-invisible above this line.
+Anthropic for another Messages-compatible endpoint (or a Fake in tests) is
+therefore invisible above this line.
 
 A provider has exactly one job: take a normalized `ChatRequest` and yield a
 stream of normalized `StreamEvent`s. Everything cross-cutting — routing,

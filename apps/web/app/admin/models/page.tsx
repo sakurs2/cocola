@@ -43,7 +43,7 @@ import {
 } from "@/lib/model-icons";
 import { cn } from "@/lib/utils";
 
-type ProviderType = "anthropic" | "openai_compat" | "openai_responses";
+type ProviderType = "anthropic" | "openai_responses";
 type ModelProtocol = "anthropic-messages" | "openai-responses";
 type View = "models" | "providers";
 
@@ -139,14 +139,6 @@ const PROVIDER_TYPES: Array<{
     shortLabel: "Anthropic Messages",
     description: "Native Anthropic messages and tool events for Claude Code.",
     defaultBaseURL: "https://api.anthropic.com",
-  },
-  {
-    value: "openai_compat",
-    label: "OpenAI Chat Completions",
-    shortLabel: "Chat Completions",
-    description:
-      "OpenAI-compatible /chat/completions adapter. Responses API compatibility is separate.",
-    defaultBaseURL: "https://api.openai.com/v1",
   },
   {
     value: "openai_responses",
@@ -551,7 +543,7 @@ export default function AdminModelsPage() {
                 className={inputClass}
                 value={providerForm.name}
                 onChange={(event) => setProviderForm({ ...providerForm, name: event.target.value })}
-                placeholder="OpenAI production"
+                placeholder="Production provider"
               />
             </Field>
             <Field label="Status">
@@ -583,10 +575,8 @@ export default function AdminModelsPage() {
             </code>
             <p className="mt-2 text-xs leading-5 text-muted-foreground">
               {providerForm.type === "openai_responses"
-                ? "The upstream must implement POST /responses. Chat Completions compatibility is not sufficient."
-                : providerForm.type === "openai_compat"
-                  ? "This route uses /chat/completions; it does not imply Responses API support."
-                  : "This route uses the native Anthropic Messages API."}
+                ? "The upstream must implement POST /responses with Codex-compatible tool events."
+                : "This route uses the native Anthropic Messages API."}
             </p>
           </div>
 
@@ -1184,16 +1174,13 @@ function RuntimeProtocolBadge({ protocol }: { protocol: ModelProtocol }) {
 function ProviderProtocolBadge({ type }: { type: ProviderType }) {
   const meta = providerTypeMeta(type);
   const responses = type === "openai_responses";
-  const chatCompletions = type === "openai_compat";
   return (
     <span
       className={cn(
         "inline-flex w-fit items-center gap-1.5 rounded-full border px-2.5 py-1 text-xs font-medium",
         responses
           ? "border-violet-500/25 bg-violet-500/10 text-violet-700"
-          : chatCompletions
-            ? "border-cyan-500/25 bg-cyan-500/10 text-cyan-700"
-            : "border-blue-500/25 bg-blue-500/10 text-blue-700",
+          : "border-blue-500/25 bg-blue-500/10 text-blue-700",
       )}
       title={meta.label}
     >
@@ -1225,15 +1212,13 @@ function runtimeForProtocol(protocol: ModelProtocol) {
 
 function runtimeCompatibilityForType(type: ProviderType) {
   if (type === "openai_responses") return "Codex";
-  if (type === "openai_compat") return "Claude Code via Cocola adapter";
   return "Claude Code";
 }
 
 function providerEndpoint(baseURL: string, type: ProviderType) {
   const base = baseURL.trim().replace(/\/$/, "") || providerTypeMeta(type).defaultBaseURL;
   if (type === "anthropic") return `${base}/v1/messages`;
-  if (type === "openai_responses") return `${base}/responses`;
-  return `${base}/chat/completions`;
+  return `${base}/responses`;
 }
 
 function providerIDFromName(name: string) {

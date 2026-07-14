@@ -28,7 +28,6 @@ from cocola_llm_gateway.registry import ModelRoute, Pricing, Registry
 from cocola_llm_gateway.upstream.anthropic import AnthropicConfig, AnthropicUpstream
 from cocola_llm_gateway.upstream.base import UpstreamProvider
 from cocola_llm_gateway.upstream.fake import FakeUpstream
-from cocola_llm_gateway.upstream.openai_compat import OpenAICompatConfig, OpenAICompatUpstream
 from cocola_llm_gateway.upstream.openai_responses import (
     OpenAIResponsesConfig,
     OpenAIResponsesUpstream,
@@ -153,14 +152,6 @@ def _build_provider(name: str, cfg: dict) -> UpstreamProvider | ResponsesProvide
                 anthropic_version=cfg.get("anthropic_version", AnthropicConfig.anthropic_version),
                 timeout_s=float(cfg.get("timeout_s", AnthropicConfig.timeout_s)),
                 stream=bool(cfg.get("stream", AnthropicConfig.stream)),
-            )
-        )
-    if ptype == "openai_compat":
-        return OpenAICompatUpstream(
-            OpenAICompatConfig(
-                base_url=cfg.get("base_url", OpenAICompatConfig.base_url),
-                api_key=_resolve_secret(cfg, "api_key", "api_key_env"),
-                timeout_s=float(cfg.get("timeout_s", OpenAICompatConfig.timeout_s)),
             )
         )
     if ptype == "openai_responses":

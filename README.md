@@ -105,11 +105,11 @@ make dev   # dev 调试栈：OpenSandbox runtime + 本机原生 cocola 服务
 
 #### 接入模型
 
-启动后在 `Admin -> Models` 中先配置 Provider，再添加模型路由。Provider 需要明确
-选择 Messages、Chat Completions 或 Responses 协议；Claude Code 使用
-`anthropic-messages`，Codex 使用 `openai-responses`。同一 alias 可由不同 Provider
-复用，执行链路使用不可变 route ID，默认模型按协议分别设置。模型目录以 Postgres
-为唯一事实源，LLM Gateway 自动加载变更；API key 加密保存，不写入仓库文件。
+启动后在 `Admin -> Models` 中先配置 Provider，再添加模型路由。Claude Code 使用
+Anthropic Messages，Codex 使用 OpenAI Responses；只实现 Chat Completions 的上游不具备
+完整 Agent 工具协议，因此不作为可配置 Provider。同一 alias 可由不同 Provider 复用，
+执行链路使用不可变 route ID，默认模型按协议分别设置。模型目录以 Postgres 为唯一
+事实源，LLM Gateway 自动加载变更；API key 加密保存，不写入仓库文件。
 
 > 鉴权闭环：Gateway 根据已验证的 Web/Scheduler 用户为每个 Run 签发短期 token，
 > Agent Runtime 在每次 shim exec 时把它作为 `ANTHROPIC_AUTH_TOKEN` 注入 sandbox。

@@ -9,8 +9,8 @@ ONLY place that knows the Anthropic schema on the inbound/outbound edge:
     StreamEvent stream      --collect-> Anthropic JSON      (non-stream out)
 
 Keeping this isolated means the rest of the gateway (routing, billing, upstream
-adapters) never imports the vendor schema, and a second front-end (e.g. an
-OpenAI-style `/v1/chat/completions`) can be added later as a sibling codec.
+adapters) never imports the vendor schema, and a different public protocol can
+be added later as a sibling codec.
 
 SSE event sequence we emit (matching Anthropic's documented order):
     message_start -> content_block_start -> (content_block_delta)* ->

@@ -77,6 +77,22 @@ def test_route_with_unknown_provider_rejected():
         Registry({"fake": FakeUpstream()}, routes, default_alias="x")
 
 
+def test_removed_openai_compat_provider_rejected():
+    with pytest.raises(CocolaError) as error:
+        _build_from_dict(
+            {
+                "providers": {
+                    "legacy": {
+                        "type": "openai_compat",
+                        "base_url": "https://example.invalid/v1",
+                        "api_key": "test-only-key",
+                    }
+                }
+            }
+        )
+    assert error.value.code is ErrorCode.INVALID_ARGUMENT
+
+
 def test_duplicate_aliases_route_by_id_and_never_guess_provider():
     routes = {
         "route-a": ModelRoute("shared", "a", "real-a"),

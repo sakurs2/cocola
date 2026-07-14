@@ -17,8 +17,8 @@ choice here:
    that — it is to sit between the SDK and the model so we can route, meter, and
    (later) bill every call.
 2. **The platform must be self-hostable and vendor-swappable.** An operator must
-   be able to point cocola at Anthropic, an OpenAI-compatible endpoint, or an
-   internal inference service by editing config — never by changing code — and
+   be able to point cocola at Anthropic or another endpoint implementing the
+   Anthropic Messages contract by editing config — never by changing code — and
    must be able to run the entire test suite with no model, no API key, and no
    network.
 
@@ -59,22 +59,20 @@ MESSAGE_STOP / ERROR`, carrying a `Usage`). The codec does three translations:
     StreamEvent stream      --encode-->  Anthropic SSE      (normalized out)
     StreamEvent stream      --collect->  Anthropic JSON     (non-stream out)
 
-Because routing, resilience, and billing only ever see `StreamEvent`, a second
-front-end (e.g. an OpenAI-style `/v1/chat/completions`) is an additive sibling
-codec, and a new upstream vendor never leaks its schema past its adapter.
+Because routing, resilience, and billing only ever see `StreamEvent`, another
+public protocol can be added as an explicit sibling codec, and a new upstream
+vendor never leaks its schema past its adapter.
 
 ### Pluggable upstreams behind an `UpstreamProvider` Protocol
 
 Upstreams implement a single Protocol (`chat_stream(req) -> AsyncIterator[
-StreamEvent]`, `aclose()`), mirroring M2's `SandboxProvider` seam. Three
+StreamEvent]`, `aclose()`), mirroring M2's `SandboxProvider` seam. Two
 adapters ship:
 
 - **`FakeUpstream`** — deterministic, in-process, no network; the _only_ provider
   unit tests are allowed to use.
 - **`AnthropicUpstream`** — passthrough to a real Anthropic-compatible endpoint;
   base URL + key are config-injected.
-- **`OpenAICompatUpstream`** — reserved adapter proving the seam generalizes
-  beyond Anthropic.
 
 Providers stay **dumb**: one provider == one vendor call. All cross-cutting
 behavior lives outside them (a standing project rule), so it applies uniformly
@@ -151,12 +149,12 @@ Postgres became the durable accounting source.
 - **Positive:** the Claude Agent SDK runs unmodified against cocola via one env
   var; every model call flows through one routing + metering choke point;
   vendors are swappable by config; the whole suite runs hermetically (no model,
-  no key, no port); the normalized event stream leaves room for gRPC and an
-  OpenAI front-end as additive work.
+  no key, no port); the normalized event stream leaves room for additional
+  explicit front-end protocols.
 - **Negative:** the gateway is bound to the Anthropic Messages schema on its
   public edge for now; M3 flattens non-text content blocks (tool_use/image) to
   text in the codec — a documented limitation to be lifted with richer
   passthrough; cost is recorded but not enforced until M4.
 - **Follow-ups:** real identity/tenancy + quota enforcement and debiting (M4);
   richer content-block passthrough; export gateway metrics via Prometheus/OTel;
-  optional gRPC and OpenAI-compatible front-ends.
+  optional gRPC front-end.

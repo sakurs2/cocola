@@ -1,9 +1,9 @@
 """Normalized, provider-agnostic domain types for the LLM gateway.
 
-These types are the gateway's *internal* lingua franca. Every concrete
-upstream (Anthropic passthrough, OpenAI-compatible translation, Fake) maps the
-wire format it speaks to/from these structures, so the service layer, billing,
-routing and middleware never depend on a vendor schema.
+These types are the gateway's *internal* lingua franca. Every concrete upstream
+(Anthropic passthrough or Fake) maps the wire format it speaks to/from these
+structures, so the service layer, billing, routing and middleware never depend
+on a vendor schema.
 
 Design rules:
 - Pydantic for validation at the HTTP edge; plain dataclasses for the hot

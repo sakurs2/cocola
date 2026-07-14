@@ -32,11 +32,12 @@ Anthropic-normalized `/v1/messages`。
    通用 Shim 只负责分派和统一 NDJSON 终态；Adapter 负责各自 SDK 配置与事件映射。
    Codex 关闭嵌套 Sandbox 和交互审批，安全边界仍由 Cocola 的 OpenSandbox、非 root
    用户和网络策略提供。
-5. 模型兼容性由协议表达，而不是由管理员填写 Runtime 字符串。Anthropic 和
-   OpenAI-compatible providers 发布 `anthropic-messages`；独立的
-   `openai_responses` provider 发布 `openai-responses`。Web 根据 Runtime 协议过滤
-   模型；定时任务本轮固定使用 Claude Code 和 `anthropic-messages`。模型路由使用
-   不可变 route ID，alias 仅在同一 Provider 内唯一；每种协议分别维护一个默认模型。
+5. 模型兼容性由协议表达，而不是由管理员填写 Runtime 字符串。Anthropic provider
+   发布 `anthropic-messages`；`openai_responses` provider 发布 `openai-responses`。
+   Chat Completions 无法无损表达 Claude Code 的工具和内容块协议，不作为 Agent
+   Runtime Provider。Web 根据 Runtime 协议过滤模型；定时任务本轮固定使用 Claude
+   Code 和 `anthropic-messages`。模型路由使用不可变 route ID，alias 仅在同一
+   Provider 内唯一；每种协议分别维护一个默认模型。
 6. LLM Gateway 新增透明 `/v1/responses` 通道和独立 `ResponsesProvider` 协议。
    它复用 Cocola Token 的认证、吊销、配额、route ID 路由和 Ledger，但不把 Responses
    SSE 转换成内部 Chat 事件；只允许首个上游事件前重试。
@@ -59,5 +60,5 @@ Anthropic-normalized `/v1/messages`。
 - Claude Code 历史会话在迁移后继续恢复；Codex thread 状态随 MinIO checkpoint 在
   Sandbox 删除、Warm Pool claim 和服务重启后恢复。
 - 管理员只管理模型 Provider、模型路由和密钥，不承担 Runtime 组合正确性。Provider
-  明确选择 Messages、Chat Completions 或 Responses 协议，管理页仅展示兼容组合。
+  明确选择 Messages 或 Responses 协议，管理页仅展示兼容组合。
 - 整栈必须在数据库迁移后统一升级；不支持新旧 Agent Runtime/Gateway 混部。
