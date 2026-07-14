@@ -17,10 +17,11 @@ jobs:
     name: proto / buf
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: bufbuild/buf-setup-action@v1
+      - uses: actions/checkout@v5
+      - uses: bufbuild/buf-action@v1
         with:
           version: "1.35.1"
+          setup_only: true
       - name: buf lint
         working-directory: packages/proto
         run: buf lint
@@ -30,8 +31,8 @@ jobs:
     name: go / build + test + lint
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-go@v5
+      - uses: actions/checkout@v5
+      - uses: actions/setup-go@v6
         with:
           go-version: "1.22"
           cache: true
@@ -39,10 +40,10 @@ jobs:
         run: go vet ./...
       - name: go test (workspace)
         run: go test ./...
-      - uses: golangci/golangci-lint-action@v6
-        with:
-          version: v1.59
-          args: --timeout=5m
+      - name: install golangci-lint
+        run: go install github.com/golangci/golangci-lint/cmd/golangci-lint@v1.59.1
+      - name: golangci-lint
+        run: "$(go env GOPATH)/bin/golangci-lint run --timeout=5m"
 
   # ------------------------------------------------------------------ python
   python:
@@ -52,8 +53,8 @@ jobs:
       matrix:
         app: [agent-runtime, llm-gateway]
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - uses: actions/checkout@v5
+      - uses: actions/setup-python@v6
         with:
           python-version: "3.11"
       - name: install uv
@@ -74,13 +75,13 @@ jobs:
     name: web / build + lint
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: pnpm/action-setup@v4
+      - uses: actions/checkout@v5
+      - uses: pnpm/action-setup@v5
         with:
           version: 9
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v5
         with:
-          node-version: "20"
+          node-version: "22"
           cache: pnpm
       - run: pnpm install --frozen-lockfile
       - run: pnpm --filter @cocola/web lint
