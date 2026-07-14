@@ -27,6 +27,9 @@ class AgentOptions:
     max_turns: int = 30
     run_timeout_secs: int = 3600
     model_route_id: str | None = None
+    # Effective skill explicitly selected for this turn. The in-sandbox
+    # adapter converts it to the selected runtime's native invocation syntax.
+    selected_skill_id: str | None = None
     mcp_servers: dict[str, dict] | None = None
     # Secret-free metadata for skills that were successfully materialized in
     # this sandbox. The Route-A provider folds these into the same environment

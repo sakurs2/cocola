@@ -624,6 +624,34 @@ func (a *API) listMySkills(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]any{"skills": skills})
 }
 
+type effectiveSkillSummary struct {
+	ID          string `json:"id"`
+	Name        string `json:"name"`
+	Description string `json:"description"`
+	Version     string `json:"version"`
+	Scope       string `json:"scope"`
+}
+
+func (a *API) listMyEffectiveSkills(w http.ResponseWriter, r *http.Request) {
+	skills, err := a.svc.ListEffectiveSkills(r.Context(), actorOf(r))
+	if err != nil {
+		mapErr(w, err)
+		return
+	}
+	out := make([]effectiveSkillSummary, 0, len(skills))
+	for _, skill := range skills {
+		scope := skill.Scope
+		if scope == "" || scope == "admin" {
+			scope = "system"
+		}
+		out = append(out, effectiveSkillSummary{
+			ID: skill.RuntimeID, Name: skill.Name, Description: skill.Description,
+			Version: skill.Version, Scope: scope,
+		})
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"skills": out})
+}
+
 func (a *API) scanMySkillArchive(w http.ResponseWriter, r *http.Request) {
 	data, _, err := readSkillArchiveUpload(r)
 	if err != nil {

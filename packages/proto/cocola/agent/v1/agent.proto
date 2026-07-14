@@ -27,6 +27,8 @@ message QueryRequest {
   repeated Attachment attachments = 6;
   // Stable product runtime selected when the conversation was created.
   string runtime_id = 7;
+  // Optional effective skill explicitly selected for this user turn.
+  string skill_id = 8;
 }
 
 // Attachment is a single user-uploaded file delivered to the sandbox workspace
@@ -39,16 +41,16 @@ message QueryRequest {
 //     agent-runtime back-end pulls the bytes from object storage before the run.
 // Either way the model just reads a local file — no agent-side tool involved.
 message Attachment {
-  string filename = 1;  // sanitized basename; landed under ./uploads/ in the workspace
-  bytes content = 2;    // raw file bytes; empty when the file is delivered via oss_key
-  string mime = 3;      // best-effort MIME type from the browser
-  string oss_key = 4;   // object-storage key (source of truth); set for every upload
-  int64 size = 5;       // original byte length; drives threshold + logging
+  string filename = 1; // sanitized basename; landed under ./uploads/ in the workspace
+  bytes content = 2; // raw file bytes; empty when the file is delivered via oss_key
+  string mime = 3; // best-effort MIME type from the browser
+  string oss_key = 4; // object-storage key (source of truth); set for every upload
+  int64 size = 5; // original byte length; drives threshold + logging
 }
 
 message AgentEvent {
-  string kind = 1;         // text | tool_use | tool_result | error | done | ...
-  map<string, string> data = 2;  // simple key/value payload; complex payloads land in M2
+  string kind = 1; // text | tool_use | tool_result | error | done | ...
+  map<string, string> data = 2; // simple key/value payload; complex payloads land in M2
 }
 
 message ReleaseSessionRequest {

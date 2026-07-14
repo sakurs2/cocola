@@ -20,19 +20,12 @@ a disabled skill into a session.
 
 from __future__ import annotations
 
-import dataclasses
 import json
 import urllib.parse
 import urllib.request
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 from typing import Protocol
-
-from cocola_common import get_logger
-
-from cocola_agent_runtime.agent_provider import AgentOptions
-
-log = get_logger("cocola.agent-runtime.skills")
 
 
 @dataclass(frozen=True)
@@ -46,6 +39,7 @@ class Skill:
 
     id: str
     name: str
+    runtime_id: str = ""
     description: str = ""
     version: str = ""
     entrypoint: str = ""
@@ -54,11 +48,17 @@ class Skill:
     bundle_object_key: str = ""
     skill_md: str = ""
 
+    @property
+    def native_id(self) -> str:
+        """Claude/Codex-visible identity; catalog ``id`` stays internal."""
+        return self.runtime_id.strip() or self.id.strip()
+
     @classmethod
     def from_json(cls, d: dict) -> Skill:
         return cls(
             id=str(d.get("id", "")),
             name=str(d.get("name", "")),
+            runtime_id=str(d.get("runtime_id", "")),
             description=str(d.get("description", "")),
             version=str(d.get("version", "")),
             entrypoint=str(d.get("entrypoint", "")),
@@ -89,12 +89,12 @@ def _urllib_fetch(url: str, headers: dict[str, str], timeout: float) -> bytes:
 
 
 class AdminSkillCatalog:
-    """SkillCatalog backed by the admin-api `GET /admin/skills?enabled=true`.
+    """SkillCatalog backed by the admin-api effective-skill endpoint.
 
     The admin key (if the admin-api has auth enabled) is sent as a bearer token,
-    matching the admin-api's static-key middleware. A fetch failure returns an
-    empty list (logged): a control-plane blip must not break session startup —
-    the agent simply runs with no market skills until the next refresh.
+    matching the admin-api's static-key middleware. Fetch and parse failures are
+    propagated so the runtime cannot mistake an unavailable catalog for an
+    authoritative empty set and expose stale sandbox skills.
     """
 
     def __init__(
@@ -118,12 +118,8 @@ class AdminSkillCatalog:
         headers = {"Accept": "application/json"}
         if self._admin_key:
             headers["Authorization"] = "Bearer " + self._admin_key
-        try:
-            raw = self._fetch(url, headers, self._timeout)
-            payload = json.loads(raw)
-        except Exception as exc:  # noqa: BLE001 - degrade gracefully on any transport/parse error
-            log.warning("skill catalog fetch failed; running with no market skills", error=str(exc))
-            return []
+        raw = self._fetch(url, headers, self._timeout)
+        payload = json.loads(raw)
         items = payload.get("skills") or []
         skills = [Skill.from_json(d) for d in items if isinstance(d, dict)]
         # Defensive re-filter: only enabled entries, only ones with an id.
@@ -138,47 +134,3 @@ class StaticSkillCatalog:
 
     def enabled_skills(self, user_id: str = "") -> list[Skill]:
         return list(self._skills)
-
-
-def skills_system_preamble(skills: Sequence[Skill]) -> str:
-    """Render enabled skills as a system-prompt preamble for the agent.
-
-    This is the transport-neutral consumption point: rather than coupling to a
-    specific SDK tool-registration API (which varies by SDK version), we surface
-    the enabled capabilities to the model in the system prompt. Mapping a skill's
-    entrypoint to a concrete SDK tool/MCP server is a follow-up; listing them is
-    what makes an enabled skill observable to the agent today.
-
-    Returns an empty string when there are no skills, so callers can append
-    unconditionally without introducing a blank section.
-    """
-    enabled = [s for s in skills if s.id]
-    if not enabled:
-        return ""
-    lines = ["Available cocola skills (enabled by your administrator):"]
-    for s in enabled:
-        label = s.name or s.id
-        ver = f" v{s.version}" if s.version else ""
-        desc = f" — {s.description}" if s.description else ""
-        lines.append(f"- {label}{ver}{desc}")
-    return "\n".join(lines)
-
-
-def apply_skills_to_options(options: AgentOptions, catalog: SkillCatalog) -> AgentOptions:
-    """Return a copy of `options` with the enabled-skills preamble merged in.
-
-    This is the runtime's consumption seam: the M2 gRPC server builds base
-    `AgentOptions`, then calls this to fold the control-plane's enabled skills
-    into the system prompt before handing the options to a provider. The base
-    system prompt (if any) is preserved and appended after the preamble.
-
-    A catalog failure degrades to no skills (the catalog itself logs and returns
-    an empty list), so this never raises on a control-plane blip — `options` is
-    returned effectively unchanged.
-    """
-    preamble = skills_system_preamble(catalog.enabled_skills(options.user_id or ""))
-    if not preamble:
-        return options
-    base = options.system_prompt or ""
-    merged = preamble + "\n\n" + base if base else preamble
-    return dataclasses.replace(options, system_prompt=merged)

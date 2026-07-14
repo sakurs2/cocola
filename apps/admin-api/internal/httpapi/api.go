@@ -80,6 +80,7 @@ func (a *API) Router() http.Handler {
 		r.Get("/events", a.streamMyEvents)
 		r.Route("/skills", func(r chi.Router) {
 			r.Get("/", a.listMySkills)
+			r.Get("/effective", a.listMyEffectiveSkills)
 			r.Post("/scan/archive", a.scanMySkillArchive)
 			r.Post("/scan/git", a.scanMySkillGit)
 			r.Post("/import/archive", a.importMySkillArchive)

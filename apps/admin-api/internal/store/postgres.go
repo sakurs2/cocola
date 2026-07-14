@@ -484,11 +484,11 @@ func (p *Postgres) DeleteSystemSetting(ctx context.Context, key string, expected
 
 // ---- Skills ----
 
-const skillCols = `id, name, description, version, entrypoint, enabled, scope, owner_user_id, source_type, source_url, source_ref, source_path, bundle_object_key, content_sha256, manifest_json, frontmatter_json, skill_md, file_count, size_bytes, created_at, updated_at, created_by, updated_by`
+const skillCols = `id, runtime_id, name, description, version, entrypoint, enabled, scope, owner_user_id, source_type, source_url, source_ref, source_path, bundle_object_key, content_sha256, manifest_json, frontmatter_json, skill_md, file_count, size_bytes, created_at, updated_at, created_by, updated_by`
 
 func scanSkill(row pgx.Row) (Skill, error) {
 	var s Skill
-	err := row.Scan(&s.ID, &s.Name, &s.Description, &s.Version, &s.Entrypoint,
+	err := row.Scan(&s.ID, &s.RuntimeID, &s.Name, &s.Description, &s.Version, &s.Entrypoint,
 		&s.Enabled, &s.Scope, &s.OwnerUserID, &s.SourceType, &s.SourceURL,
 		&s.SourceRef, &s.SourcePath, &s.BundleObjectKey, &s.ContentSHA256,
 		&s.ManifestJSON, &s.FrontmatterJSON, &s.SkillMD, &s.FileCount,
@@ -499,9 +499,9 @@ func scanSkill(row pgx.Row) (Skill, error) {
 func (p *Postgres) CreateSkill(ctx context.Context, s Skill) error {
 	s = normalizeSkill(s)
 	const q = `INSERT INTO skill_entries (` + skillCols + `)
-		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23)`
+		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23,$24)`
 	_, err := p.pool.Exec(ctx, q,
-		s.ID, s.Name, s.Description, s.Version, s.Entrypoint, s.Enabled,
+		s.ID, s.RuntimeID, s.Name, s.Description, s.Version, s.Entrypoint, s.Enabled,
 		s.Scope, s.OwnerUserID, s.SourceType, s.SourceURL, s.SourceRef, s.SourcePath,
 		s.BundleObjectKey, s.ContentSHA256, s.ManifestJSON, s.FrontmatterJSON, s.SkillMD,
 		s.FileCount, s.SizeBytes, s.CreatedAt, s.UpdatedAt, s.CreatedBy, s.UpdatedBy)
@@ -565,14 +565,14 @@ func (p *Postgres) ListSkillsForUser(ctx context.Context, userID string) ([]Skil
 func (p *Postgres) UpdateSkill(ctx context.Context, s Skill) error {
 	s = normalizeSkill(s)
 	const q = `UPDATE skill_entries
-		SET name=$2, description=$3, version=$4, entrypoint=$5, enabled=$6,
-		    scope=$7, owner_user_id=$8, source_type=$9, source_url=$10, source_ref=$11,
-		    source_path=$12, bundle_object_key=$13, content_sha256=$14, manifest_json=$15,
-		    frontmatter_json=$16, skill_md=$17, file_count=$18, size_bytes=$19,
-		    created_at=$20, updated_at=$21, created_by=$22, updated_by=$23
+		SET runtime_id=$2, name=$3, description=$4, version=$5, entrypoint=$6, enabled=$7,
+		    scope=$8, owner_user_id=$9, source_type=$10, source_url=$11, source_ref=$12,
+		    source_path=$13, bundle_object_key=$14, content_sha256=$15, manifest_json=$16,
+		    frontmatter_json=$17, skill_md=$18, file_count=$19, size_bytes=$20,
+		    created_at=$21, updated_at=$22, created_by=$23, updated_by=$24
 		WHERE id=$1`
 	ct, err := p.pool.Exec(ctx, q,
-		s.ID, s.Name, s.Description, s.Version, s.Entrypoint, s.Enabled,
+		s.ID, s.RuntimeID, s.Name, s.Description, s.Version, s.Entrypoint, s.Enabled,
 		s.Scope, s.OwnerUserID, s.SourceType, s.SourceURL, s.SourceRef, s.SourcePath,
 		s.BundleObjectKey, s.ContentSHA256, s.ManifestJSON, s.FrontmatterJSON, s.SkillMD,
 		s.FileCount, s.SizeBytes, s.CreatedAt, s.UpdatedAt, s.CreatedBy, s.UpdatedBy)

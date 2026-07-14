@@ -42,6 +42,8 @@ def test_agent_shim_passes_mcp_servers_to_claude_options(monkeypatch):
     assert captured["mcp_servers"]["github"]["command"] == "npx"
     assert captured["mcp_servers"]["github"]["env"]["GITHUB_TOKEN"] == "secret"
     assert captured["strict_mcp_config"] is True
+    assert captured["setting_sources"] == ["user", "project"]
+    assert captured["skills"] == "all"
 
 
 async def test_agent_shim_streams_mcp_status_without_blocking_query(monkeypatch):
@@ -108,11 +110,12 @@ async def test_agent_shim_streams_mcp_status_without_blocking_query(monkeypatch)
     await module._run(
         {
             "prompt": "weather?",
+            "skill_id": "weather",
             "mcp_servers": {"maps": {"type": "http", "url": "https://mcp.example.test/mcp"}},
         }
     )
 
-    assert captured["prompt"] == "weather?"
+    assert captured["prompt"] == "/weather\n\nweather?"
     assert calls[:2] == ["query", "status"]
     snapshots = [event for event in emitted if event.get("type") == "environment_status"]
     assert [snapshot["phase"] for snapshot in snapshots] == ["preparing", "ready"]

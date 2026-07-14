@@ -400,6 +400,7 @@ type chatRequest struct {
 	ClientRequestID                      string            `json:"client_request_id"`
 	RuntimeID                            string            `json:"runtime_id"`
 	FolderID                             string            `json:"folder_id"`
+	SkillID                              string            `json:"skill_id"`
 }
 
 // attachmentDTO is one user-uploaded file carried inline in the chat body.
@@ -531,6 +532,14 @@ func assistantMetadata(req chatRequest) map[string]any {
 		} else if iconType != "" && slug != "" {
 			out["model_icon"] = map[string]string{"type": iconType, "slug": slug}
 		}
+	}
+	return out
+}
+
+func userMetadata(req chatRequest) map[string]any {
+	out := make(map[string]any)
+	if skillID := strings.TrimSpace(req.SkillID); skillID != "" {
+		out["skill_id"] = skillID
 	}
 	return out
 }

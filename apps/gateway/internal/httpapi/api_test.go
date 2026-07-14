@@ -312,6 +312,57 @@ func TestChatForwardsModelRouteID(t *testing.T) {
 	}
 }
 
+func TestChatForwardsAndPersistsSelectedSkill(t *testing.T) {
+	fs := &fakeStreamer{script: []agent.Event{{Kind: "done"}}}
+	store := convo.NewMemory()
+	h := newConfiguredTestAPIWithConvo(
+		fs, auth.NewVerifier(auth.Config{}), logger.Must(), store,
+	).Handler()
+	rec := httptest.NewRecorder()
+	h.ServeHTTP(rec, httptest.NewRequest(
+		http.MethodPost,
+		"/v1/chat",
+		strings.NewReader(`{"prompt":"summarize","session_id":"s1","skill_id":"pdf"}`),
+	))
+	if rec.Code != http.StatusOK {
+		t.Fatalf("chat status = %d, body=%s", rec.Code, rec.Body.String())
+	}
+	if fs.gotQuery.SkillID != "pdf" {
+		t.Fatalf("forwarded skill = %q, want pdf", fs.gotQuery.SkillID)
+	}
+	messages, err := store.GetMessages(context.Background(), "s1", auth.DevIdentity.UserID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(messages) == 0 || messages[0].Metadata["skill_id"] != "pdf" {
+		t.Fatalf("user skill metadata = %#v", messages)
+	}
+}
+
+func TestChatRejectsInvalidSkillBeforeWrites(t *testing.T) {
+	fs := &fakeStreamer{script: []agent.Event{{Kind: "done"}}}
+	store := convo.NewMemory()
+	h := newConfiguredTestAPIWithConvo(
+		fs, auth.NewVerifier(auth.Config{}), logger.Must(), store,
+	).Handler()
+	rec := httptest.NewRecorder()
+	h.ServeHTTP(rec, httptest.NewRequest(
+		http.MethodPost,
+		"/v1/chat",
+		strings.NewReader(`{"prompt":"hello","session_id":"s1","skill_id":"../private"}`),
+	))
+	if rec.Code != http.StatusBadRequest || !strings.Contains(rec.Body.String(), "INVALID_SKILL_ID") {
+		t.Fatalf("invalid skill status = %d, body=%s", rec.Code, rec.Body.String())
+	}
+	conversations, err := store.ListConversations(context.Background(), auth.DevIdentity.UserID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(conversations) != 0 || fs.gotQuery.SessionID != "" {
+		t.Fatalf("invalid skill produced side effects: conversations=%+v query=%+v", conversations, fs.gotQuery)
+	}
+}
+
 func TestChatPersistsAssistantModelMetadata(t *testing.T) {
 	fs := &fakeStreamer{script: []agent.Event{
 		{Kind: "text", Data: map[string]string{"text": "hello"}},

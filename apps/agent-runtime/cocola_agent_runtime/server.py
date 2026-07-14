@@ -18,9 +18,8 @@ Design choices, all to avoid reinventing what we already have:
   payloads (tool input dicts, costs) are JSON/str-encoded into the map so the
   schema stays flat and consumers can tolerate unknown kinds, exactly as the
   proto comment requires.
-- Enabled Skill-Market skills are folded into the session via
-  `apply_skills_to_options` before the provider runs, so toggling a skill in the
-  control plane changes the agent with no redeploy.
+- Enabled Skill-Market skills are materialized into the selected runtime's
+  native discovery directory before the provider runs.
 - Enabled MCP servers are passed through to the in-sandbox Claude SDK via
   `mcp_servers`; the old host-side MCP forwarding seam remains deleted.
 """
@@ -56,7 +55,7 @@ from cocola_agent_runtime.prompt_loader import PromptCatalog, PromptConfig
 from cocola_agent_runtime.runtime_registry import RuntimeDescriptor, RuntimeEntry, RuntimeRegistry
 from cocola_agent_runtime.sandbox_binder import SandboxBinder, SandboxExecutor, SandboxGoneError
 from cocola_agent_runtime.session_map import SessionMap
-from cocola_agent_runtime.skill_loader import Skill, SkillCatalog, skills_system_preamble
+from cocola_agent_runtime.skill_loader import Skill, SkillCatalog
 
 log = get_logger("cocola.agent-runtime.server")
 
@@ -118,9 +117,10 @@ import zipfile
 archive_path, base, shared_root = sys.argv[1:4]
 skills_root = os.path.join(base, "skills")
 state_root = os.path.join(base, ".cocola")
-os.makedirs(skills_root, exist_ok=True)
 os.makedirs(state_root, exist_ok=True)
 stage_root = tempfile.mkdtemp(prefix="skill-sync-", dir=state_root)
+stage_skills = os.path.join(stage_root, "skills")
+os.makedirs(stage_skills)
 
 
 def remove_path(path):
@@ -166,7 +166,7 @@ try:
             if os.path.isfile(os.path.join(shared, "SKILL.md")):
                 continue
 
-            staged = os.path.join(stage_root, skill_id)
+            staged = os.path.join(stage_skills, skill_id)
             kind = item.get("kind")
             if kind == "bundle":
                 extract_bundle(batch.read(item["member"]), staged)
@@ -183,13 +183,16 @@ try:
 
         for item in manifest:
             skill_id = item["id"]
-            target = os.path.join(skills_root, skill_id)
+            target = os.path.join(stage_skills, skill_id)
             shared = os.path.join(shared_root, skill_id)
-            remove_path(target)
             if os.path.isfile(os.path.join(shared, "SKILL.md")):
                 os.symlink(shared, target)
-            else:
-                os.replace(os.path.join(stage_root, skill_id), target)
+
+        # The catalog is the complete desired state. Replace Cocola's managed
+        # directory only after every package has been validated and staged, so
+        # disabled/deleted skills and checkpoint residue cannot stay visible.
+        remove_path(skills_root)
+        os.replace(stage_skills, skills_root)
 finally:
     shutil.rmtree(stage_root, ignore_errors=True)
     try:
@@ -197,7 +200,7 @@ finally:
     except OSError:
         pass
 """
-_SAFE_SKILL_ID_RE = re.compile(r"[^a-zA-Z0-9_.-]+")
+_NATIVE_SKILL_ID_RE = re.compile(r"^[a-zA-Z0-9][a-zA-Z0-9_.-]{0,127}$")
 
 
 async def _build_skill_batch_archive(skills: list[Skill], objstore: Fetcher | None) -> bytes:
@@ -219,7 +222,9 @@ async def _build_skill_batch_archive(skills: list[Skill], objstore: Fetcher | No
     skill_ids: list[str] = []
     seen_ids: set[str] = set()
     for skill in skills:
-        skill_id = _SAFE_SKILL_ID_RE.sub("-", skill.id).strip(".-") or "skill"
+        skill_id = skill.native_id
+        if not _NATIVE_SKILL_ID_RE.fullmatch(skill_id):
+            raise RuntimeError(f"invalid Runtime skill id: {skill_id}")
         if skill_id in seen_ids:
             raise RuntimeError(f"duplicate normalized skill id: {skill_id}")
         seen_ids.add(skill_id)
@@ -567,6 +572,57 @@ class AgentRuntimeServicer(pb_grpc.AgentRuntimeServiceServicer):
             )
             return
         runtime_id = runtime.descriptor.id
+        requested_skill_id = str(getattr(request, "skill_id", "") or "").strip()
+        active_skills: list[Skill] = []
+        selected_skill_id: str | None = None
+        skills_load_start_ns = time.time_ns()
+        if self._skills is not None:
+            try:
+                active_skills = self._skills.enabled_skills(request.user_id)
+            except Exception as exc:  # noqa: BLE001 - unavailable catalog must fail closed
+                log.error(
+                    "skill catalog unavailable",
+                    session_id=request.session_id,
+                    error_type=type(exc).__name__,
+                )
+                await context.write(
+                    event_to_proto(
+                        trace_event(
+                            "skills.catalog_load",
+                            "agent_init",
+                            skills_load_start_ns,
+                            status="error",
+                            error_type=type(exc).__name__,
+                        )
+                    )
+                )
+                await context.write(
+                    pb.AgentEvent(
+                        kind="error",
+                        data={
+                            "code": "SKILL_CATALOG_UNAVAILABLE",
+                            "error": "Skills are temporarily unavailable. Please retry.",
+                        },
+                    )
+                )
+                return
+        if requested_skill_id:
+            selected = next(
+                (skill for skill in active_skills if skill.native_id == requested_skill_id),
+                None,
+            )
+            if selected is None:
+                await context.write(
+                    pb.AgentEvent(
+                        kind="error",
+                        data={
+                            "code": "SKILL_NOT_AVAILABLE",
+                            "error": "The selected skill is no longer available.",
+                        },
+                    )
+                )
+                return
+            selected_skill_id = selected.native_id
         sandbox_id = request.sandbox_id or None
         if self._binder is not None and sandbox_id is not None:
             log.warning(
@@ -822,19 +878,19 @@ class AgentRuntimeServicer(pb_grpc.AgentRuntimeServiceServicer):
                     }
                 )
 
-        active_skills: list[Skill] = []
         loaded_skills: list[Skill] = []
         if self._skills is not None:
             skills_start_ns = time.time_ns()
             try:
-                active_skills = self._skills.enabled_skills(request.user_id)
-                if sandbox_id and active_skills and self._executor is not None:
+                if sandbox_id and self._executor is not None:
                     await self._sync_skills_into_sandbox(
                         sandbox_id,
                         active_skills,
                         runtime_id=runtime_id,
                     )
                     loaded_skills = list(active_skills)
+                elif selected_skill_id:
+                    raise RuntimeError("selected skill requires a sandbox executor")
                 await context.write(
                     event_to_proto(
                         trace_event(
@@ -846,10 +902,8 @@ class AgentRuntimeServicer(pb_grpc.AgentRuntimeServiceServicer):
                         )
                     )
                 )
-            except Exception as exc:  # noqa: BLE001 - skills degrade to prompt-less session
-                active_skills = []
+            except Exception as exc:  # noqa: BLE001 - incomplete skill state must stop the turn
                 if preparing_environment:
-                    environment_degraded = True
                     environment_components.append(
                         {
                             "kind": "skills",
@@ -858,7 +912,16 @@ class AgentRuntimeServicer(pb_grpc.AgentRuntimeServiceServicer):
                             "summary": "Could not load configured skills",
                         }
                     )
-                log.warning("skill sync failed; running without skills", error=str(exc))
+                    await context.write(
+                        event_to_proto(
+                            environment_preparation_event("degraded", environment_components)
+                        )
+                    )
+                log.error(
+                    "skill sync failed; refusing turn",
+                    session_id=request.session_id,
+                    error_type=type(exc).__name__,
+                )
                 await context.write(
                     event_to_proto(
                         trace_event(
@@ -871,6 +934,20 @@ class AgentRuntimeServicer(pb_grpc.AgentRuntimeServiceServicer):
                         )
                     )
                 )
+                await context.write(
+                    pb.AgentEvent(
+                        kind="error",
+                        data={
+                            "code": "SKILL_SYNC_FAILED",
+                            "error": "Skills could not be prepared. Please retry.",
+                        },
+                    )
+                )
+                if heartbeat_task is not None:
+                    heartbeat_task.cancel()
+                    with contextlib.suppress(asyncio.CancelledError):
+                        await heartbeat_task
+                return
 
         if preparing_environment:
             if loaded_skills:
@@ -884,8 +961,8 @@ class AgentRuntimeServicer(pb_grpc.AgentRuntimeServiceServicer):
                         "metadata": {
                             "items": [
                                 {
-                                    "id": skill.id,
-                                    "label": skill.name or skill.id,
+                                    "id": skill.native_id,
+                                    "label": skill.name or skill.native_id,
                                     "version": skill.version,
                                 }
                                 for skill in loaded_skills
@@ -994,11 +1071,12 @@ class AgentRuntimeServicer(pb_grpc.AgentRuntimeServiceServicer):
             max_turns=request.max_turns or 30,
             run_timeout_secs=self._run_timeout_secs,
             model_route_id=model_route_id,
+            selected_skill_id=selected_skill_id,
             mcp_servers=active_mcp_servers,
             environment_skills=[
                 {
-                    "id": skill.id,
-                    "name": skill.name or skill.id,
+                    "id": skill.native_id,
+                    "name": skill.name or skill.native_id,
                     "version": skill.version,
                 }
                 for skill in loaded_skills
@@ -1006,12 +1084,6 @@ class AgentRuntimeServicer(pb_grpc.AgentRuntimeServiceServicer):
             auth_token=sandbox_token or None,
             traceparent=traceparent or None,
         )
-        skills_preamble = skills_system_preamble(active_skills)
-        if skills_preamble:
-            opts = dataclasses.replace(
-                opts,
-                system_prompt=_merge_system_prompt(opts.system_prompt, skills_preamble),
-            )
         admin_prompt = active_prompt.system_prompt.strip()
         if admin_prompt:
             opts = dataclasses.replace(
@@ -1109,11 +1181,11 @@ class AgentRuntimeServicer(pb_grpc.AgentRuntimeServiceServicer):
         *,
         runtime_id: str = "claude-code",
     ) -> None:
-        if self._executor is None or not skills:
+        if self._executor is None:
             return
         data = await _build_skill_batch_archive(skills, self._objstore)
         archive = f"/tmp/cocola-skills-{uuid.uuid4().hex}.zip"
-        runtime_home = "/home/cocola/.codex" if runtime_id == "codex" else "/home/cocola/.claude"
+        runtime_home = "/home/cocola/.agents" if runtime_id == "codex" else "/home/cocola/.claude"
         await self._executor.write_bytes(sandbox_id=sandbox_id, path=archive, data=data)
         res = await self._executor.exec(
             sandbox_id=sandbox_id,

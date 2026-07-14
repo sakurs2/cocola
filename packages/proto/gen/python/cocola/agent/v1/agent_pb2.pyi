@@ -7,7 +7,7 @@ from typing import ClassVar as _ClassVar, Optional as _Optional, Union as _Union
 DESCRIPTOR: _descriptor.FileDescriptor
 
 class QueryRequest(_message.Message):
-    __slots__ = ("user_id", "session_id", "prompt", "sandbox_id", "max_turns", "attachments", "runtime_id")
+    __slots__ = ("user_id", "session_id", "prompt", "sandbox_id", "max_turns", "attachments", "runtime_id", "skill_id")
     USER_ID_FIELD_NUMBER: _ClassVar[int]
     SESSION_ID_FIELD_NUMBER: _ClassVar[int]
     PROMPT_FIELD_NUMBER: _ClassVar[int]
@@ -15,6 +15,7 @@ class QueryRequest(_message.Message):
     MAX_TURNS_FIELD_NUMBER: _ClassVar[int]
     ATTACHMENTS_FIELD_NUMBER: _ClassVar[int]
     RUNTIME_ID_FIELD_NUMBER: _ClassVar[int]
+    SKILL_ID_FIELD_NUMBER: _ClassVar[int]
     user_id: str
     session_id: str
     prompt: str
@@ -22,7 +23,8 @@ class QueryRequest(_message.Message):
     max_turns: int
     attachments: _containers.RepeatedCompositeFieldContainer[Attachment]
     runtime_id: str
-    def __init__(self, user_id: _Optional[str] = ..., session_id: _Optional[str] = ..., prompt: _Optional[str] = ..., sandbox_id: _Optional[str] = ..., max_turns: _Optional[int] = ..., attachments: _Optional[_Iterable[_Union[Attachment, _Mapping]]] = ..., runtime_id: _Optional[str] = ...) -> None: ...
+    skill_id: str
+    def __init__(self, user_id: _Optional[str] = ..., session_id: _Optional[str] = ..., prompt: _Optional[str] = ..., sandbox_id: _Optional[str] = ..., max_turns: _Optional[int] = ..., attachments: _Optional[_Iterable[_Union[Attachment, _Mapping]]] = ..., runtime_id: _Optional[str] = ..., skill_id: _Optional[str] = ...) -> None: ...
 
 class Attachment(_message.Message):
     __slots__ = ("filename", "content", "mime", "oss_key", "size")

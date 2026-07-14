@@ -22,6 +22,7 @@ Request schema:
   {
     "runtime_id":    str,             # claude-code | codex
     "prompt":        str,             # required, the user turn
+    "skill_id":      str | null,      # optional effective skill selected for this turn
     "system_prompt": str | null,      # optional
     "max_turns":     int | null,      # optional, default 20
     "resume":        str | null,      # optional session_id to --resume
@@ -103,6 +104,8 @@ def _build_options(req: dict[str, Any]):
     # "I don't have a Bash tool available" reply and the hallucinated host cwd.
     # Opt back into the `claude_code` presets so the in-sandbox agent has hands.
     kwargs["tools"] = {"type": "preset", "preset": "claude_code"}
+    kwargs["setting_sources"] = ["user", "project"]
+    kwargs["skills"] = "all"
 
     # System prompt: default to Claude Code's preset (which injects the live
     # <env> block, incl. the genuine /workspace cwd). A caller-supplied prompt
@@ -127,6 +130,12 @@ def _build_options(req: dict[str, Any]):
         kwargs["strict_mcp_config"] = True
 
     return claude_agent_sdk.ClaudeAgentOptions(**kwargs)
+
+
+def _claude_prompt(req: dict[str, Any]) -> str:
+    prompt = str(req["prompt"])
+    skill_id = str(req.get("skill_id") or "").strip()
+    return f"/{skill_id}\n\n{prompt}" if skill_id else prompt
 
 
 # Cap on tool_result content forwarded to the UI. Tool outputs (Read of a big
@@ -338,6 +347,7 @@ async def _run_claude(req: dict[str, Any]) -> int:
     import claude_agent_sdk
 
     options = _build_options(req)
+    prompt = _claude_prompt(req)
     _emit({"type": "start", "ts": time.time()})
 
     last_session_id: str | None = None
@@ -351,7 +361,7 @@ async def _run_claude(req: dict[str, Any]) -> int:
                 _emit(ev)
 
     if req.get("resume"):
-        await relay(claude_agent_sdk.query(prompt=req["prompt"], options=options))
+        await relay(claude_agent_sdk.query(prompt=prompt, options=options))
     else:
         _emit(_environment_status_event(req))
         status_task: asyncio.Task[None] | None = None
@@ -359,7 +369,7 @@ async def _run_claude(req: dict[str, Any]) -> int:
             if _mcp_configs(req):
                 status_task = asyncio.create_task(_watch_mcp_status(client, req))
             try:
-                await client.query(req["prompt"])
+                await client.query(prompt)
                 await relay(client.receive_response())
             finally:
                 if status_task is not None:

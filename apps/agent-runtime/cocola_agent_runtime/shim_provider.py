@@ -270,6 +270,8 @@ class InSandboxShimProvider:
         }
         if options.model_route_id:
             req["model"] = options.model_route_id
+        if options.selected_skill_id:
+            req["skill_id"] = options.selected_skill_id
         if options.traceparent:
             req["traceparent"] = options.traceparent
         if options.system_prompt:

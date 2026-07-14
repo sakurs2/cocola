@@ -50,6 +50,7 @@ type Query struct {
 	UserID       string
 	SessionID    string
 	RuntimeID    string
+	SkillID      string
 	Prompt       string
 	SandboxID    string
 	MaxTurns     int32
@@ -205,6 +206,7 @@ func (c *Client) Stream(ctx context.Context, q Query, onEvent func(Event) error)
 		MaxTurns:    q.MaxTurns,
 		Attachments: atts,
 		RuntimeId:   q.RuntimeID,
+		SkillId:     q.SkillID,
 	})
 	if err != nil {
 		return fmt.Errorf("agent: query: %w", err)

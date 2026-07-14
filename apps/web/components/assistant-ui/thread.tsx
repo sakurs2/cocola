@@ -10,6 +10,8 @@ import {
   type TextMessagePartProps,
   ThreadPrimitive,
   type ToolCallMessagePartProps,
+  unstable_useComposerInput,
+  unstable_useSlashCommandAdapter,
   useMessage,
   useThread,
 } from "@assistant-ui/react";
@@ -31,12 +33,13 @@ import {
   ArrowUp as ArrowUpIcon,
   BarChart3,
   Code2,
+  FileText,
   Lightbulb,
   Pencil,
   Sparkles,
 } from "lucide-react";
 import Image from "next/image";
-import { useEffect, useState, type FC } from "react";
+import { Fragment, useEffect, useMemo, useRef, useState, type FC } from "react";
 import { useCocola, type ModelIconConfig, type UiMessageMetadata } from "@/app/runtime-provider";
 import { CocolaWordmark } from "@/components/assistant-ui/cocola-wordmark";
 import { CocolaLogo } from "@/components/cocola-logo";
@@ -216,51 +219,196 @@ const ThreadWelcome: FC = () => {
 };
 
 export const ConversationComposer: FC<{ placeholder?: string }> = ({ placeholder }) => {
-  const { selectedModel, selectedRuntime, modelsLoaded } = useCocola();
+  const { selectedModel, selectedRuntime, selectedSkill, modelsLoaded } = useCocola();
+  const [skillChipWidth, setSkillChipWidth] = useState(0);
   const noModel = modelsLoaded && !selectedModel;
 
   return (
     <motion.div
-      className="w-full"
+      className="relative w-full"
       whileFocus={{ y: -1 }}
       transition={{ type: "spring", stiffness: 420, damping: 32 }}
     >
-      <ComposerPrimitive.Root className="composer-lift relative z-10 flex w-full flex-col rounded-2xl border px-3 py-2">
-        <ComposerAttachments />
-        <ComposerPrimitive.Input
-          rows={1}
-          autoFocus={!noModel}
-          disabled={noModel}
-          placeholder={
-            noModel
-              ? selectedRuntime?.model_protocol === "openai-responses"
-                ? "Codex requires an OpenAI Responses model"
-                : selectedRuntime
-                  ? `No ${selectedRuntime.label} compatible model configured`
-                  : "No Agent Runtime available"
-              : placeholder || "Send a message... (@ to mention, / for commands)"
-          }
-          className="max-h-40 min-h-12 flex-grow resize-none border-none bg-transparent px-2 py-3 text-sm outline-none placeholder:text-muted-foreground focus:ring-0 disabled:cursor-not-allowed"
-        />
-        <div className="flex w-full items-center justify-between gap-2">
-          <div className="flex min-w-0 items-center gap-1.5">
-            <ComposerPrimitive.AddAttachment asChild>
-              <TooltipIconButton
-                tooltip={noModel ? "No model configured" : "Attach file"}
-                variant="ghost"
-                disabled={noModel}
-                className="size-8 shrink-0 rounded-full p-2 text-muted-foreground"
-              >
-                <PaperclipIcon className="size-4" />
-              </TooltipIconButton>
-            </ComposerPrimitive.AddAttachment>
-            <RuntimePicker />
-            <ModelPicker />
+      <ComposerPrimitive.Unstable_TriggerPopoverRoot>
+        <SkillTriggerMenu />
+        <ComposerPrimitive.Root className="composer-lift relative z-10 flex w-full flex-col rounded-2xl border px-3 py-2">
+          <div className="relative min-w-0">
+            <SelectedSkillChip onWidthChange={setSkillChipWidth} />
+            <ComposerPrimitive.Input
+              rows={1}
+              autoFocus={!noModel}
+              disabled={noModel}
+              style={
+                selectedSkill && skillChipWidth > 0
+                  ? { textIndent: `${skillChipWidth + 8}px` }
+                  : undefined
+              }
+              placeholder={
+                noModel
+                  ? selectedRuntime?.model_protocol === "openai-responses"
+                    ? "Codex requires an OpenAI Responses model"
+                    : selectedRuntime
+                      ? `No ${selectedRuntime.label} compatible model configured`
+                      : "No Agent Runtime available"
+                  : placeholder || "Send a message... (/ to choose a skill)"
+              }
+              className="max-h-40 min-h-12 w-full resize-none border-none bg-transparent px-2 py-2.5 text-sm leading-6 outline-none placeholder:text-muted-foreground focus:ring-0 disabled:cursor-not-allowed"
+            />
           </div>
-          <ComposerAction />
-        </div>
-      </ComposerPrimitive.Root>
+          <ComposerAttachments />
+          <div className="flex w-full items-center justify-between gap-2">
+            <div className="flex min-w-0 items-center gap-1.5">
+              <ComposerPrimitive.AddAttachment asChild>
+                <TooltipIconButton
+                  tooltip={noModel ? "No model configured" : "Attach file"}
+                  variant="ghost"
+                  disabled={noModel}
+                  className="size-8 shrink-0 rounded-full p-2 text-muted-foreground"
+                >
+                  <PaperclipIcon className="size-4" />
+                </TooltipIconButton>
+              </ComposerPrimitive.AddAttachment>
+              <RuntimePicker />
+              <ModelPicker />
+            </div>
+            <ComposerAction />
+          </div>
+        </ComposerPrimitive.Root>
+      </ComposerPrimitive.Unstable_TriggerPopoverRoot>
     </motion.div>
+  );
+};
+
+const SkillTriggerMenu: FC = () => {
+  const { skills, skillsLoaded, selectedSkill, setSelectedSkillId } = useCocola();
+  const { value } = unstable_useComposerInput();
+  const skillByID = useMemo(() => new Map(skills.map((skill) => [skill.id, skill])), [skills]);
+  const commands = useMemo(
+    () =>
+      value.startsWith("/") && !selectedSkill
+        ? skills.map((skill) => ({
+            id: skill.id,
+            label: skill.name,
+            description: skill.description,
+            execute: () => setSelectedSkillId(skill.id),
+          }))
+        : [],
+    [selectedSkill, setSelectedSkillId, skills, value],
+  );
+  const slash = unstable_useSlashCommandAdapter({ commands, removeOnExecute: true });
+
+  if (!value.startsWith("/") || selectedSkill) return null;
+
+  return (
+    <ComposerPrimitive.Unstable_TriggerPopover
+      char="/"
+      adapter={slash.adapter}
+      isLoading={!skillsLoaded}
+      aria-label="Choose a skill"
+      className="absolute bottom-[calc(100%+0.625rem)] left-0 z-50 w-full max-w-2xl overflow-hidden rounded-2xl border border-border bg-popover/95 text-popover-foreground shadow-xl backdrop-blur-xl"
+    >
+      <ComposerPrimitive.Unstable_TriggerPopover.Action {...slash.action} />
+      <div className="flex items-center justify-between border-b border-border/70 px-4 py-3">
+        <span className="text-sm font-medium text-foreground">Skills</span>
+        <span className="text-xs text-muted-foreground">Select for this message</span>
+      </div>
+      <ComposerPrimitive.Unstable_TriggerPopoverItems className="max-h-72 overflow-y-auto p-1.5">
+        {(items) => {
+          const groups = [
+            {
+              label: "Personal",
+              items: items.filter((item) => skillByID.get(item.id)?.scope === "user"),
+            },
+            {
+              label: "Shared",
+              items: items.filter((item) => skillByID.get(item.id)?.scope !== "user"),
+            },
+          ].filter((group) => group.items.length > 0);
+
+          if (groups.length === 0) {
+            return (
+              <div className="px-3 py-6 text-center text-xs text-muted-foreground">
+                {skillsLoaded ? "No skills found." : "Loading skills…"}
+              </div>
+            );
+          }
+
+          const rows = groups.flatMap((group) =>
+            group.items.map((item, index) => ({
+              groupLabel: index === 0 ? group.label : "",
+              item,
+            })),
+          );
+          return rows.map(({ groupLabel, item }, index) => {
+            const skill = skillByID.get(item.id);
+            return (
+              <Fragment key={item.id}>
+                {groupLabel ? (
+                  <div className="px-2.5 pt-2 pb-1 text-xs font-medium text-muted-foreground">
+                    {groupLabel}
+                  </div>
+                ) : null}
+                <ComposerPrimitive.Unstable_TriggerPopoverItem
+                  item={item}
+                  index={index}
+                  className="flex w-full items-center gap-2.5 rounded-xl px-2.5 py-2 text-left outline-none transition-colors hover:bg-muted/80 data-[highlighted]:bg-muted"
+                >
+                  <FileText className="size-4 shrink-0 text-foreground/75" />
+                  <span
+                    className="max-w-[45%] shrink-0 truncate text-sm font-medium text-foreground"
+                    title={skill?.name || item.label}
+                  >
+                    {skill?.name || item.label}
+                  </span>
+                  <span
+                    className="min-w-0 flex-1 truncate text-sm text-muted-foreground"
+                    title={skill?.description || undefined}
+                  >
+                    {skill?.description || `/${item.id}`}
+                  </span>
+                </ComposerPrimitive.Unstable_TriggerPopoverItem>
+              </Fragment>
+            );
+          });
+        }}
+      </ComposerPrimitive.Unstable_TriggerPopoverItems>
+    </ComposerPrimitive.Unstable_TriggerPopover>
+  );
+};
+
+const SelectedSkillChip: FC<{ onWidthChange: (width: number) => void }> = ({ onWidthChange }) => {
+  const { selectedSkill, setSelectedSkillId } = useCocola();
+  const ref = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    const element = ref.current;
+    if (!selectedSkill || !element) {
+      onWidthChange(0);
+      return;
+    }
+    const reportWidth = () => onWidthChange(element.getBoundingClientRect().width);
+    reportWidth();
+    const observer = new ResizeObserver(reportWidth);
+    observer.observe(element);
+    return () => observer.disconnect();
+  }, [onWidthChange, selectedSkill]);
+
+  if (!selectedSkill) return null;
+  return (
+    <div ref={ref} className="absolute top-2.5 left-2 z-10 flex max-w-[45%]">
+      <span className="inline-flex h-6 max-w-full items-center gap-1 rounded-full border border-primary/20 bg-primary/10 pr-1 pl-2 text-xs font-medium text-primary">
+        <Sparkles className="size-3 shrink-0" />
+        <span className="truncate">{selectedSkill.name}</span>
+        <button
+          type="button"
+          onClick={() => setSelectedSkillId(null)}
+          aria-label={`Remove ${selectedSkill.name} skill`}
+          className="grid size-4 shrink-0 place-items-center rounded-full text-primary/70 transition-colors hover:bg-primary/10 hover:text-primary"
+        >
+          <XIcon className="size-2.5" />
+        </button>
+      </span>
+    </div>
   );
 };
 
@@ -558,6 +706,7 @@ const ComposerAction: FC = () => {
 const UserMessage: FC = () => (
   <MessagePrimitive.Root className="message-enter grid w-full max-w-[var(--thread-max-width)] auto-rows-auto grid-cols-[minmax(72px,1fr)_auto] gap-y-1 py-3">
     <div className="col-start-2 row-start-1 flex flex-col items-end gap-1.5">
+      <UserSkillBadge />
       <div className="flex flex-wrap justify-end gap-1.5 empty:hidden">
         <MessagePrimitive.Attachments
           components={{
@@ -580,6 +729,22 @@ const UserMessage: FC = () => (
     </div>
   </MessagePrimitive.Root>
 );
+
+const UserSkillBadge: FC = () => {
+  const metadata = useMessage((message) => message.metadata.custom) as
+    | UiMessageMetadata
+    | undefined;
+  const { skills } = useCocola();
+  const skillID = metadata?.skill_id;
+  if (!skillID) return null;
+  const label = skills.find((skill) => skill.id === skillID)?.name || skillID;
+  return (
+    <span className="inline-flex max-w-full items-center gap-1.5 rounded-full border border-primary/15 bg-primary/10 px-2.5 py-1 text-[11px] font-medium text-primary">
+      <Sparkles className="size-3 shrink-0" />
+      <span className="truncate">{label}</span>
+    </span>
+  );
+};
 
 const AssistantMessage: FC = () => (
   <MessagePrimitive.Root className="message-enter relative grid w-full max-w-[var(--thread-max-width)] grid-cols-[auto_1fr] grid-rows-[auto_1fr] py-3">

@@ -5,7 +5,7 @@ directly with a fake provider, a fake streaming context that records written
 proto events, and a plain request object. We assert (a) generic AgentEvents map
 onto proto AgentEvents with non-string data flattened, (b) a provider error
 becomes a terminal proto `error` event instead of propagating, and (c) enabled
-skills are folded into the AgentOptions the provider receives.
+skills are validated and synchronized before the provider runs.
 """
 
 import io
@@ -51,6 +51,7 @@ class FakeRequest:
     sandbox_id: str = ""
     max_turns: int = 0
     runtime_id: str = "claude-code"
+    skill_id: str = ""
     attachments: list = field(default_factory=list)
 
 
@@ -306,7 +307,7 @@ async def test_query_error_becomes_terminal_event():
     assert "provider exploded" in ctx.written[-1].data["error"]
 
 
-async def test_query_folds_enabled_skills_into_options():
+async def test_query_materializes_enabled_skills_without_prompt_injection():
     prov = ListProvider([AgentEvent(kind="done", data={})])
     cat = StaticSkillCatalog(
         [Skill(id="web", name="Web Search", version="1.2", skill_md="# Web Search")]
@@ -316,11 +317,100 @@ async def test_query_folds_enabled_skills_into_options():
         skills=cat,
         executor=StaticSandboxExecutor(),
     ).Query(FakeRequest(sandbox_id="box-1"), FakeContext())
-    assert prov.seen_options.system_prompt is not None
-    assert "Web Search" in prov.seen_options.system_prompt
+    assert prov.seen_options.system_prompt is None
     assert prov.seen_options.environment_skills == [
         {"id": "web", "name": "Web Search", "version": "1.2"}
     ]
+
+
+async def test_query_validates_and_forwards_selected_skill():
+    prov = ListProvider([AgentEvent(kind="done", data={})])
+    cat = StaticSkillCatalog([Skill(id="pdf", name="PDF", skill_md="# PDF")])
+
+    await AgentRuntimeServicer(
+        prov,
+        skills=cat,
+        executor=StaticSandboxExecutor(),
+    ).Query(FakeRequest(sandbox_id="box-1", skill_id="pdf"), FakeContext())
+
+    assert prov.seen_options.selected_skill_id == "pdf"
+
+
+async def test_query_keeps_personal_catalog_id_out_of_runtime():
+    prov = ListProvider([AgentEvent(kind="done", data={})])
+    cat = StaticSkillCatalog(
+        [
+            Skill(
+                id="user-32970b55-frontend-design",
+                runtime_id="frontend-design",
+                name="Frontend Design",
+                skill_md="# Frontend Design",
+            )
+        ]
+    )
+
+    await AgentRuntimeServicer(
+        prov,
+        skills=cat,
+        executor=StaticSandboxExecutor(),
+    ).Query(FakeRequest(sandbox_id="box-1", skill_id="frontend-design"), FakeContext())
+
+    assert prov.seen_options.selected_skill_id == "frontend-design"
+    assert prov.seen_options.environment_skills == [
+        {"id": "frontend-design", "name": "Frontend Design", "version": ""}
+    ]
+
+
+async def test_query_rejects_unavailable_selected_skill_before_provider():
+    prov = ListProvider([AgentEvent(kind="done", data={})])
+    ctx = FakeContext()
+
+    await AgentRuntimeServicer(
+        prov,
+        skills=StaticSkillCatalog([Skill(id="web", name="Web")]),
+    ).Query(FakeRequest(skill_id="pdf"), ctx)
+
+    assert prov.seen_options is None
+    assert ctx.written[-1].kind == "error"
+    assert ctx.written[-1].data["code"] == "SKILL_NOT_AVAILABLE"
+
+
+async def test_query_rejects_unavailable_skill_catalog_before_sandbox():
+    class FailingSkillCatalog:
+        def enabled_skills(self, user_id=""):
+            raise RuntimeError("catalog offline")
+
+    prov = ListProvider([AgentEvent(kind="done", data={})])
+    ctx = FakeContext()
+    binder = StaticSandboxBinder()
+    await AgentRuntimeServicer(
+        prov,
+        skills=FailingSkillCatalog(),
+        binder=binder,
+    ).Query(FakeRequest(), ctx)
+
+    assert prov.seen_options is None
+    assert binder.acquired == []
+    assert ctx.written[-1].kind == "error"
+    assert ctx.written[-1].data["code"] == "SKILL_CATALOG_UNAVAILABLE"
+
+
+async def test_query_stops_when_skill_sync_fails():
+    executor = StaticSandboxExecutor(
+        exec_handler=lambda _sandbox_id, _cmd: ExecOutcome(exit_code=1, stderr="write failed")
+    )
+    prov = ListProvider([AgentEvent(kind="done", data={})])
+    ctx = FakeContext()
+
+    await AgentRuntimeServicer(
+        prov,
+        skills=StaticSkillCatalog([Skill(id="pdf", name="PDF", skill_md="# PDF")]),
+        executor=executor,
+    ).Query(FakeRequest(sandbox_id="box-1"), ctx)
+
+    assert prov.seen_options is None
+    assert ctx.written[-1].kind == "error"
+    assert ctx.written[-1].data["code"] == "SKILL_SYNC_FAILED"
 
 
 async def test_fresh_environment_snapshot_reports_loaded_skills_without_mcp():
@@ -385,6 +475,28 @@ async def test_skill_sync_uses_one_archive_write_and_one_exec():
     assert call["cmd"][3] == archive_path
 
 
+async def test_skill_sync_uses_runtime_id_as_native_directory():
+    executor = StaticSandboxExecutor()
+    servicer = AgentRuntimeServicer(ListProvider([]), executor=executor)
+
+    await servicer._sync_skills_into_sandbox(
+        "box-1",
+        [
+            Skill(
+                id="user-32970b55-frontend-design",
+                runtime_id="frontend-design",
+                name="Frontend Design",
+                skill_md="# Frontend Design",
+            )
+        ],
+    )
+
+    with zipfile.ZipFile(io.BytesIO(executor.byte_writes[0][2])) as batch:
+        assert json.loads(batch.read("manifest.json")) == [
+            {"id": "frontend-design", "kind": "markdown", "member": "payloads/0000.md"}
+        ]
+
+
 async def test_codex_skill_sync_targets_codex_home():
     executor = StaticSandboxExecutor()
     servicer = AgentRuntimeServicer(ListProvider([]), executor=executor)
@@ -395,7 +507,40 @@ async def test_codex_skill_sync_targets_codex_home():
         runtime_id="codex",
     )
 
-    assert executor.exec_calls[0]["cmd"][4] == "/home/cocola/.codex"
+    assert executor.exec_calls[0]["cmd"][4] == "/home/cocola/.agents"
+
+
+async def test_empty_skill_sync_removes_stale_managed_skills(tmp_path):
+    executor = StaticSandboxExecutor()
+    servicer = AgentRuntimeServicer(ListProvider([]), executor=executor)
+    await servicer._sync_skills_into_sandbox("box-1", [])
+
+    archive = tmp_path / "skills.zip"
+    archive.write_bytes(executor.byte_writes[0][2])
+    base = tmp_path / "claude"
+    stale = base / "skills" / "disabled"
+    stale.mkdir(parents=True)
+    (stale / "SKILL.md").write_text("# Disabled", encoding="utf-8")
+    shared_root = tmp_path / "shared"
+    shared_root.mkdir()
+
+    result = subprocess.run(
+        [
+            sys.executable,
+            "-c",
+            _SKILLS_BATCH_INSTALL_SCRIPT,
+            str(archive),
+            str(base),
+            str(shared_root),
+        ],
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+
+    assert result.returncode == 0, result.stderr
+    assert list((base / "skills").iterdir()) == []
+    assert not archive.exists()
 
 
 async def test_skill_batch_installer_links_shared_and_installs_local_payloads(tmp_path):

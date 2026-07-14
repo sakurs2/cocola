@@ -134,7 +134,9 @@ const run = async (request) => {
   const thread = request.resume
     ? codex.resumeThread(request.resume, threadOptions)
     : codex.startThread(threadOptions);
-  const { events } = await thread.runStreamed(request.prompt);
+  const skillId = String(request.skill_id || "").trim();
+  const prompt = skillId ? `$${skillId}\n\n${request.prompt}` : request.prompt;
+  const { events } = await thread.runStreamed(prompt);
   const textByItem = new Map();
   const startedTools = new Set();
   let threadId = request.resume || "";

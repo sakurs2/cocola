@@ -56,8 +56,9 @@ type SystemSetting struct {
 // Skill is a Skill-Market entry: a named, versioned capability employees can
 // enable. The admin-api owns the catalog; the runtime consumes Enabled entries.
 type Skill struct {
-	ID              string          `json:"id"`   // stable kebab id, unique per scope/owner in v1
-	Name            string          `json:"name"` // display name
+	ID              string          `json:"id"`         // internal catalog and object-storage identity
+	RuntimeID       string          `json:"runtime_id"` // native Claude/Codex skill identity
+	Name            string          `json:"name"`       // display name
 	Description     string          `json:"description"`
 	Version         string          `json:"version"`
 	Entrypoint      string          `json:"entrypoint"` // module/path the runtime loads

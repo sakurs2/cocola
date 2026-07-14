@@ -41,6 +41,16 @@ Anthropic-normalized `/v1/messages`。
 6. LLM Gateway 新增透明 `/v1/responses` 通道和独立 `ResponsesProvider` 协议。
    它复用 Cocola Token 的认证、吊销、配额、route ID 路由和 Ledger，但不把 Responses
    SSE 转换成内部 Chat 事件；只允许首个上游事件前重试。
+7. Skill 仍是用户控制面的派生数据，不写入 conversation 配置或 session checkpoint。
+   每个 Turn 开始前，Agent Runtime 都用当前用户的有效 Skill 集合替换 Sandbox 中由
+   Cocola 管理的目录：Claude 使用 `~/.claude/skills`，Codex 使用
+   `~/.agents/skills`。前端传递结构化 `skill_id`，Adapter 在 Sandbox 内分别转换为
+   Claude 的 `/skill-id` 和 Codex 的 `$skill-id`；数据库始终保存原始用户问题。Skill
+   Catalog、权限校验或同步失败时不启动 Agent，避免声称使用了实际不可用的 Skill。
+   Skill 的 `id` 是按用户隔离的内部 catalog/object-storage identity；独立的
+   `runtime_id` 才是用户消息、Sandbox 原生目录和 Adapter 可见的稳定名称。Personal
+   Skill 与 Shared Skill 的 `runtime_id` 相同时，当前用户的 Personal Skill 覆盖
+   Shared Skill，Sandbox 中始终只有一个无歧义的原生 Skill。
 
 ## Alternatives Considered
 
@@ -61,4 +71,8 @@ Anthropic-normalized `/v1/messages`。
   Sandbox 删除、Warm Pool claim 和服务重启后恢复。
 - 管理员只管理模型 Provider、模型路由和密钥，不承担 Runtime 组合正确性。Provider
   明确选择 Messages 或 Responses 协议，管理页仅展示兼容组合。
+- Claude 和 Codex 使用各自原生的 Skill 发现与渐进加载机制，不再把全部 Skill 描述
+  拼入 system prompt。用户可以为单个 Turn 显式选择一个 Skill，同时不妨碍 Runtime
+  根据任务自动使用其他有效 Skill。用户隔离前缀仅存在于内部 catalog ID，不进入模型
+  上下文、环境状态或对话消息。
 - 整栈必须在数据库迁移后统一升级；不支持新旧 Agent Runtime/Gateway 混部。

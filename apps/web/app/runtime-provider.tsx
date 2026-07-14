@@ -222,7 +222,16 @@ export type AgentRuntimeOption = {
   is_default: boolean;
 };
 
+export type SkillOption = {
+  id: string;
+  name: string;
+  description: string;
+  version: string;
+  scope: string;
+};
+
 export type UiMessageMetadata = {
+  skill_id?: string;
   model_route_id?: string;
   model_alias?: string;
   model_label?: string;
@@ -285,6 +294,10 @@ type CocolaContextValue = {
   selectedRuntime: AgentRuntimeOption | null;
   runtimeLocked: boolean;
   setSelectedRuntimeId: (id: string) => void;
+  skills: SkillOption[];
+  skillsLoaded: boolean;
+  selectedSkill: SkillOption | null;
+  setSelectedSkillId: (id: string | null) => void;
 };
 
 const CocolaContext = createContext<CocolaContextValue | null>(null);
@@ -408,6 +421,7 @@ function normalizeMetadata(raw: UiMessageMetadata | undefined): UiMessageMetadat
   if (!raw) return undefined;
   const icon = normalizeIcon(raw.model_icon);
   return {
+    ...(typeof raw.skill_id === "string" ? { skill_id: raw.skill_id } : {}),
     ...(typeof raw.model_route_id === "string" ? { model_route_id: raw.model_route_id } : {}),
     ...(typeof raw.model_alias === "string" ? { model_alias: raw.model_alias } : {}),
     ...(typeof raw.model_label === "string" ? { model_label: raw.model_label } : {}),
@@ -687,6 +701,9 @@ export function CocolaRuntimeProvider({ children }: { children: ReactNode }) {
   const [runtimes, setRuntimes] = useState<AgentRuntimeOption[]>([]);
   const [selectedRuntimeId, setSelectedRuntimeIdState] = useState("");
   const [runtimesLoaded, setRuntimesLoaded] = useState(false);
+  const [skills, setSkills] = useState<SkillOption[]>([]);
+  const [skillsLoaded, setSkillsLoaded] = useState(false);
+  const [selectedSkillIds, setSelectedSkillIds] = useState<Record<string, string>>({});
   const abortMap = useRef<Map<string, AbortController>>(new Map());
   const runCursors = useRef<Map<string, RunCursor>>(new Map());
   const restoredRuns = useRef(false);
@@ -717,7 +734,24 @@ export function CocolaRuntimeProvider({ children }: { children: ReactNode }) {
       compatibleModels.find((model) => model.id === selectedModelID) ?? compatibleModels[0] ?? null,
     [compatibleModels, selectedModelID],
   );
+  const selectedSkill = useMemo(() => {
+    const selectedID = selectedSkillIds[sessionId] ?? "";
+    return skills.find((skill) => skill.id === selectedID) ?? null;
+  }, [selectedSkillIds, sessionId, skills]);
   const runtimeLocked = messages.length > 0 || conversations.some((item) => item.id === sessionId);
+
+  const setSelectedSkillId = useCallback(
+    (id: string | null) => {
+      if (id && !skills.some((skill) => skill.id === id)) return;
+      setSelectedSkillIds((prev) => {
+        const next = { ...prev };
+        if (id) next[sessionId] = id;
+        else delete next[sessionId];
+        return next;
+      });
+    },
+    [sessionId, skills],
+  );
 
   const setSelectedRuntimeId = useCallback(
     (id: string) => {
@@ -884,6 +918,47 @@ export function CocolaRuntimeProvider({ children }: { children: ReactNode }) {
         // A transient failure should not discard folders already on screen.
       } finally {
         setFoldersLoaded(true);
+      }
+    })();
+  }, []);
+
+  const refreshSkills = useCallback(() => {
+    void (async () => {
+      try {
+        const res = await fetch("/api/skills/effective", { cache: "no-store" });
+        if (isAccountDisabledResponse(res)) {
+          redirectAccountDisabled();
+          return;
+        }
+        if (!res.ok) return;
+        const body = (await res.json()) as { skills?: unknown[] };
+        const next = (Array.isArray(body.skills) ? body.skills : [])
+          .flatMap((raw): SkillOption[] => {
+            if (!raw || typeof raw !== "object") return [];
+            const item = raw as Record<string, unknown>;
+            const id = stringValue(item.id).trim();
+            const name = stringValue(item.name).trim();
+            if (!id || !name) return [];
+            return [
+              {
+                id,
+                name,
+                description: stringValue(item.description).trim(),
+                version: stringValue(item.version).trim(),
+                scope: stringValue(item.scope).trim(),
+              },
+            ];
+          })
+          .sort((left, right) => left.name.localeCompare(right.name));
+        const available = new Set(next.map((skill) => skill.id));
+        setSkills(next);
+        setSelectedSkillIds((prev) =>
+          Object.fromEntries(Object.entries(prev).filter(([, id]) => available.has(id))),
+        );
+      } catch {
+        // Keep the last authoritative list during a transient refresh failure.
+      } finally {
+        setSkillsLoaded(true);
       }
     })();
   }, []);
@@ -1171,8 +1246,15 @@ export function CocolaRuntimeProvider({ children }: { children: ReactNode }) {
       const folderHint = sessionFolderHintsRef.current.get(turnSessionId) ?? "";
       const model = selectedModel;
       const agentRuntime = selectedRuntime;
+      const turnSkill = selectedSkill;
       if (!model || !agentRuntime) return;
       if (abortMap.current.has(turnSessionId) || runCursors.current.has(turnSessionId)) return;
+      setSelectedSkillIds((prev) => {
+        if (!(turnSessionId in prev)) return prev;
+        const next = { ...prev };
+        delete next[turnSessionId];
+        return next;
+      });
       const isInitialTurn = messages.length === 0;
       const assistantMetadata: UiMessageMetadata = {
         model_route_id: model.id,
@@ -1197,6 +1279,7 @@ export function CocolaRuntimeProvider({ children }: { children: ReactNode }) {
               role: "user",
               parts: [{ type: "text", text }],
               createdAt: Date.now(),
+              ...(turnSkill ? { metadata: { skill_id: turnSkill.id } } : {}),
             },
             {
               id: assistantId,
@@ -1256,6 +1339,7 @@ export function CocolaRuntimeProvider({ children }: { children: ReactNode }) {
           session_id: turnSessionId,
           client_request_id: clientRequestId,
           runtime_id: agentRuntime.id,
+          ...(turnSkill ? { skill_id: turnSkill.id } : {}),
           model_route_id: model.id,
           model_alias: model.alias,
           model_label: model.label,
@@ -1420,6 +1504,7 @@ export function CocolaRuntimeProvider({ children }: { children: ReactNode }) {
       sessionId,
       selectedModel,
       selectedRuntime,
+      selectedSkill,
       messages.length,
       applyEvent,
       followRun,
@@ -1776,7 +1861,13 @@ export function CocolaRuntimeProvider({ children }: { children: ReactNode }) {
   useEffect(() => {
     refreshConversations();
     refreshFolders();
-  }, [refreshConversations, refreshFolders]);
+    refreshSkills();
+  }, [refreshConversations, refreshFolders, refreshSkills]);
+
+  useEffect(() => {
+    window.addEventListener("focus", refreshSkills);
+    return () => window.removeEventListener("focus", refreshSkills);
+  }, [refreshSkills]);
 
   useEffect(() => {
     void (async () => {
@@ -1886,6 +1977,10 @@ export function CocolaRuntimeProvider({ children }: { children: ReactNode }) {
       selectedRuntime,
       runtimeLocked,
       setSelectedRuntimeId,
+      skills,
+      skillsLoaded,
+      selectedSkill,
+      setSelectedSkillId,
     }),
     [
       sessionId,
@@ -1918,6 +2013,10 @@ export function CocolaRuntimeProvider({ children }: { children: ReactNode }) {
       selectedRuntime,
       runtimeLocked,
       setSelectedRuntimeId,
+      skills,
+      skillsLoaded,
+      selectedSkill,
+      setSelectedSkillId,
     ],
   );
 

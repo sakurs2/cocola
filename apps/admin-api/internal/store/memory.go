@@ -350,6 +350,9 @@ func (m *Memory) DeleteSystemSetting(ctx context.Context, key string, expectedVe
 // ---- Skills ----
 
 func normalizeSkill(s Skill) Skill {
+	if s.RuntimeID == "" {
+		s.RuntimeID = s.ID
+	}
 	if s.Scope == "" {
 		s.Scope = "admin"
 	}

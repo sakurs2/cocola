@@ -62,7 +62,12 @@ async def test_maps_tool_use_turn_and_reassembles_split_line():
 
     execu = StaticSandboxExecutor(stream_handler=stream_handler)
     provider = InSandboxShimProvider(execu)
-    opts = AgentOptions(user_id="U1", session_id="S1", sandbox_id="box-1")
+    opts = AgentOptions(
+        user_id="U1",
+        session_id="S1",
+        sandbox_id="box-1",
+        selected_skill_id="weather",
+    )
 
     events = await _drain(provider, "weather?", opts)
     kinds = [e.kind for e in events]
@@ -79,6 +84,7 @@ async def test_maps_tool_use_turn_and_reassembles_split_line():
     assert execu.stream_calls[0]["timeout_secs"] == 3600
     sent = json.loads(execu.stream_calls[0]["stdin"])
     assert sent["prompt"] == "weather?"
+    assert sent["skill_id"] == "weather"
     assert "resume" not in sent  # first turn has nothing to resume
 
 

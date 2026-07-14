@@ -59,6 +59,9 @@ Use browser tools to inspect pages and cite sources.
 	if len(imported) != 1 || imported[0].BundleObjectKey == "" {
 		t.Fatalf("imported skill missing bundle key: %#v", imported)
 	}
+	if imported[0].RuntimeID != "web-search" {
+		t.Fatalf("imported Runtime ID = %q, want web-search", imported[0].RuntimeID)
+	}
 	if len(bundles.objects) != 1 {
 		t.Fatalf("bundle store object count = %d, want 1", len(bundles.objects))
 	}
@@ -79,6 +82,38 @@ Use browser tools to inspect pages and cite sources.
 	}
 	if len(effective) != 0 {
 		t.Fatalf("effective after disable = %d, want 0", len(effective))
+	}
+}
+
+func TestEffectivePersonalSkillOverridesSharedByRuntimeID(t *testing.T) {
+	ctx := context.Background()
+	mem := store.NewMemory()
+	svc := New(mem, nil, func() time.Time {
+		return time.Date(2026, 7, 14, 12, 0, 0, 0, time.UTC)
+	})
+
+	if _, err := svc.CreateSkill(ctx, store.Skill{
+		ID: "frontend-design", RuntimeID: "frontend-design", Name: "Shared",
+		Enabled: true, Scope: "admin",
+	}, "admin"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := svc.CreateSkill(ctx, store.Skill{
+		ID: "user-32970b55-frontend-design", RuntimeID: "frontend-design", Name: "Personal",
+		Enabled: true, Scope: "user", OwnerUserID: "alice",
+	}, "alice"); err != nil {
+		t.Fatal(err)
+	}
+
+	effective, err := svc.ListEffectiveSkills(ctx, "alice")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(effective) != 1 {
+		t.Fatalf("effective skill count = %d, want 1", len(effective))
+	}
+	if effective[0].ID != "user-32970b55-frontend-design" || effective[0].RuntimeID != "frontend-design" {
+		t.Fatalf("unexpected effective personal skill: %#v", effective[0])
 	}
 }
 

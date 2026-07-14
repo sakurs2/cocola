@@ -725,6 +725,76 @@ func TestSkillCRUD(t *testing.T) {
 	}
 }
 
+func TestMyEffectiveSkillsReturnsSummaryOnly(t *testing.T) {
+	mem := store.NewMemory()
+	issuer := token.NewIssuer("runtime-secret", "cocola", time.Hour)
+	svc := service.New(mem, issuer, fixedClock)
+	api := New(svc, "k").WithRuntimeAuth("runtime-secret", "cocola")
+	if _, err := svc.CreateSkill(context.Background(), store.Skill{
+		ID: "pdf", Name: "PDF", Description: "Read PDF files", Version: "1.0.0",
+		Enabled: true, SkillMD: "sensitive skill instructions", BundleObjectKey: "skills/pdf.zip",
+	}, "admin"); err != nil {
+		t.Fatal(err)
+	}
+	runtimeToken, _, err := issuer.Issue("alice", "", -1, time.Now().Unix())
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	rec := do(t, api.Router(), http.MethodGet, "/me/skills/effective", runtimeToken, nil)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("effective skills: want 200, got %d (%s)", rec.Code, rec.Body.String())
+	}
+	var body struct {
+		Skills []effectiveSkillSummary `json:"skills"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
+		t.Fatal(err)
+	}
+	if len(body.Skills) != 1 || body.Skills[0].ID != "pdf" || body.Skills[0].Name != "PDF" {
+		t.Fatalf("unexpected effective skill summary: %+v", body.Skills)
+	}
+	if body.Skills[0].Scope != "system" {
+		t.Fatalf("effective skill scope = %q, want system", body.Skills[0].Scope)
+	}
+	for _, forbidden := range []string{"sensitive skill instructions", "skills/pdf.zip", "skill_md"} {
+		if strings.Contains(rec.Body.String(), forbidden) {
+			t.Fatalf("effective skill response leaked %q: %s", forbidden, rec.Body.String())
+		}
+	}
+}
+
+func TestMyEffectiveSkillsReturnsRuntimeIDForPersonalSkill(t *testing.T) {
+	mem := store.NewMemory()
+	issuer := token.NewIssuer("runtime-secret", "cocola", time.Hour)
+	svc := service.New(mem, issuer, fixedClock)
+	api := New(svc, "k").WithRuntimeAuth("runtime-secret", "cocola")
+	if _, err := svc.CreateSkill(context.Background(), store.Skill{
+		ID: "user-32970b55-frontend-design", RuntimeID: "frontend-design",
+		Name: "Frontend Design", Enabled: true, Scope: "user", OwnerUserID: "alice",
+	}, "alice"); err != nil {
+		t.Fatal(err)
+	}
+	runtimeToken, _, err := issuer.Issue("alice", "", -1, time.Now().Unix())
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	rec := do(t, api.Router(), http.MethodGet, "/me/skills/effective", runtimeToken, nil)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("effective skills: want 200, got %d (%s)", rec.Code, rec.Body.String())
+	}
+	var body struct {
+		Skills []effectiveSkillSummary `json:"skills"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
+		t.Fatal(err)
+	}
+	if len(body.Skills) != 1 || body.Skills[0].ID != "frontend-design" {
+		t.Fatalf("personal catalog ID leaked to user response: %+v", body.Skills)
+	}
+}
+
 func TestDeleteReferencedLLMProviderReturnsActionableConflict(t *testing.T) {
 	api := newTestAPI("k")
 	router := api.Router()

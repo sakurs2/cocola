@@ -128,6 +128,11 @@ func (a *API) chat(w http.ResponseWriter, r *http.Request) {
 	}
 	req.RuntimeID = strings.TrimSpace(req.RuntimeID)
 	req.FolderID = strings.TrimSpace(req.FolderID)
+	req.SkillID = strings.TrimSpace(req.SkillID)
+	if req.SkillID != "" && !validSkillID(req.SkillID) {
+		writeErr(w, http.StatusBadRequest, "INVALID_SKILL_ID", "skill_id is invalid")
+		return
+	}
 	if req.RuntimeID != "" {
 		if _, supported := a.runtimeByID[req.RuntimeID]; !supported {
 			writeErr(w, http.StatusBadRequest, "UNSUPPORTED_RUNTIME", "agent runtime is not supported")
@@ -179,7 +184,8 @@ func (a *API) chat(w http.ResponseWriter, r *http.Request) {
 		},
 		UserMessage: convo.Message{
 			ID: runID + "-user", ConversationID: req.SessionID, Role: "user",
-			Parts: []convo.Part{{Type: convo.PartText, Text: req.Prompt}}, CreatedAt: startedAt,
+			Parts:    []convo.Part{{Type: convo.PartText, Text: req.Prompt}},
+			Metadata: userMetadata(req), CreatedAt: startedAt,
 		},
 	})
 	var live *liveRun
@@ -316,8 +322,8 @@ func (a *API) executeLiveRun(live *liveRun) {
 	attachments := a.prepareRunAttachments(live.ctx, live.request)
 	live.query = agent.Query{
 		UserID: live.identity.UserID, SessionID: live.request.SessionID,
-		RuntimeID: live.request.RuntimeID,
-		Prompt:    live.request.Prompt, SandboxID: live.request.SandboxID,
+		RuntimeID: live.request.RuntimeID, SkillID: live.request.SkillID,
+		Prompt: live.request.Prompt, SandboxID: live.request.SandboxID,
 		MaxTurns: live.request.MaxTurns, ModelRouteID: effectiveModelRouteID(live.request),
 		TraceID: live.run.ID, ParentSpanID: conversationRootSpan(live.traceCtx),
 		SandboxAuthToken: a.mintSandboxToken(live.identity), Attachments: attachments,
@@ -417,6 +423,22 @@ func (a *API) executeLiveRun(live *liveRun) {
 		delete(live.subs, subscriber)
 	}
 	live.mu.Unlock()
+}
+
+func validSkillID(value string) bool {
+	if len(value) == 0 || len(value) > 128 {
+		return false
+	}
+	for i, char := range value {
+		if (char >= 'a' && char <= 'z') || (char >= '0' && char <= '9') {
+			continue
+		}
+		if i > 0 && (char == '-' || char == '_' || char == '.') {
+			continue
+		}
+		return false
+	}
+	return true
 }
 
 func (a *API) prepareRunAttachments(ctx context.Context, req chatRequest) []agent.Attachment {

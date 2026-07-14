@@ -665,6 +665,9 @@ func (a *Admin) CreateSkill(ctx context.Context, s store.Skill, actor string) (s
 	if s.ID == "" || s.Name == "" {
 		return store.Skill{}, ErrInvalidArg
 	}
+	if s.RuntimeID == "" {
+		s.RuntimeID = s.ID
+	}
 	now := a.now().UTC()
 	s.CreatedAt = now
 	s.UpdatedAt = now
@@ -701,6 +704,20 @@ func (a *Admin) ListEffectiveSkills(ctx context.Context, userID string) ([]store
 		prefMap[pref.SkillID] = pref.Enabled
 	}
 	out := make([]store.Skill, 0)
+	byRuntimeID := make(map[string]int)
+	appendSkill := func(s store.Skill, replace bool) {
+		if s.RuntimeID == "" {
+			s.RuntimeID = s.ID
+		}
+		if index, ok := byRuntimeID[s.RuntimeID]; ok {
+			if replace {
+				out[index] = s
+			}
+			return
+		}
+		byRuntimeID[s.RuntimeID] = len(out)
+		out = append(out, s)
+	}
 	for _, s := range adminSkills {
 		if s.Scope != "" && s.Scope != "admin" {
 			continue
@@ -708,7 +725,7 @@ func (a *Admin) ListEffectiveSkills(ctx context.Context, userID string) ([]store
 		if enabled, ok := prefMap[s.ID]; ok && !enabled {
 			continue
 		}
-		out = append(out, s)
+		appendSkill(s, false)
 	}
 	userSkills, err := a.store.ListSkillsForUser(ctx, userID)
 	if err != nil {
@@ -716,7 +733,10 @@ func (a *Admin) ListEffectiveSkills(ctx context.Context, userID string) ([]store
 	}
 	for _, s := range userSkills {
 		if s.Enabled {
-			out = append(out, s)
+			// A personal Skill with the same Runtime-native ID intentionally
+			// overrides the shared Skill for this user. The internal catalog IDs
+			// remain distinct, while the sandbox receives one unambiguous name.
+			appendSkill(s, true)
 		}
 	}
 	return out, nil
@@ -830,10 +850,11 @@ func (a *Admin) ImportSkillArchive(ctx context.Context, scope, ownerUserID, acto
 		now := a.now().UTC()
 		s := store.Skill{
 			ID:              skillID,
+			RuntimeID:       c.ID,
 			Name:            c.Name,
 			Description:     c.Description,
 			Version:         c.Version,
-			Entrypoint:      "$CLAUDE_CONFIG_DIR/skills/" + skillID,
+			Entrypoint:      "$CLAUDE_CONFIG_DIR/skills/" + c.ID,
 			Enabled:         true,
 			Scope:           scope,
 			OwnerUserID:     ownerUserID,
