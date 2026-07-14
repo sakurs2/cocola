@@ -206,11 +206,9 @@ stop_stack() {
 
 graceful_stop() {
   trap '' INT TERM
-  log "stopping cocola dev mode gracefully"
   stop_stack
   stop_forward
   rm -f "$STACK_PID_FILE"
-  log "stopped"
   exit 0
 }
 
@@ -265,6 +263,9 @@ up() {
   ) &
   local stack_pid="$!"
   echo "$stack_pid" >"$STACK_PID_FILE"
+  # Background jobs already have their own process groups. Disable monitor
+  # mode before waiting so Bash does not print one termination line per job.
+  set +m
   set +e
   wait "$stack_pid"
   local status="$?"

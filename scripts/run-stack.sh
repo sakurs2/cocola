@@ -150,11 +150,35 @@ process_group_alive() {
   kill -0 -- "-$pid" 2>/dev/null || kill -0 "$pid" 2>/dev/null
 }
 
+shutdown_heading() {
+  if [[ -t 1 ]]; then
+    printf '\n\033[1;36m◇\033[0m  Graceful shutdown\n'
+  else
+    printf '\n[dev] Graceful shutdown\n'
+  fi
+}
+
+shutdown_step() {
+  printf '   %s\n' "$*"
+}
+
+shutdown_complete() {
+  if [[ -t 1 ]]; then
+    printf '\033[1;32m✓\033[0m  %s\n' "$*"
+  else
+    printf '[dev] %s\n' "$*"
+  fi
+}
+
 cleanup() {
   # The trap fires for INT/TERM and again for the subsequent EXIT; run once.
   [[ "$_SHUTTING_DOWN" == "1" ]] && return
   _SHUTTING_DOWN=1
   trap '' INT TERM   # ignore repeat Ctrl-C while we tear down
+  local started_at="$SECONDS"
+
+  shutdown_heading
+  shutdown_step "1/3  Stop services and wait for session checkpoints (up to 30s)"
 
   # Phase 1: polite SIGTERM to each process group (fall back to the bare pid).
   for pid in "${PIDS[@]:-}"; do
@@ -177,6 +201,7 @@ cleanup() {
   done
 
   # Phase 3a: SIGKILL any process groups still standing.
+  shutdown_step "2/3  Clean up remaining service processes"
   for pid in "${PIDS[@]:-}"; do
     [[ -n "$pid" ]] || continue
     if process_group_alive "$pid"; then
@@ -187,12 +212,14 @@ cleanup() {
 
   # Phase 3b: backstop -- guarantee every port we own is released, whatever still
   # holds it (reparented children are unreachable via the process group).
+  shutdown_step "3/3  Release development ports"
   for port in "${OWNED_PORTS[@]:-}"; do
     [[ -n "$port" ]] || continue
     free_port "$port" "teardown" >>"$LOG_DIR/cleanup.log" 2>&1 || true
   done
 
   wait 2>>"$LOG_DIR/cleanup.log" || true
+  shutdown_complete "Stopped in $((SECONDS - started_at))s · details: .run-logs/cleanup.log"
 }
 trap cleanup EXIT INT TERM
 
@@ -530,6 +557,11 @@ echo "  Login  ${COCOLA_BOOTSTRAP_ADMIN_USERNAME} / ${COCOLA_BOOTSTRAP_ADMIN_PAS
 echo "  Logs   .run-logs/"
 echo "  Stop   Ctrl-C"
 echo
+
+# Jobs keep the process groups assigned when monitor mode was enabled above.
+# Turning it off here suppresses Bash's per-job termination notices on Ctrl+C;
+# cleanup still signals and waits for every process group exactly as before.
+set +m
 
 # Block until interrupted; cleanup() runs on the way out.
 wait
