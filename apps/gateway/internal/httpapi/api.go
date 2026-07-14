@@ -222,8 +222,18 @@ func (a *API) Handler() http.Handler {
 	// sees their own conversations (ownership from the verified identity).
 	mux.Handle("GET /v1/conversations", a.instrument("GET /v1/conversations",
 		a.verifier.Middleware(writeErr)(http.HandlerFunc(a.listConversations))))
+	mux.Handle("GET /v1/folders", a.instrument("GET /v1/folders",
+		a.verifier.Middleware(writeErr)(http.HandlerFunc(a.listFolders))))
+	mux.Handle("POST /v1/folders", a.instrument("POST /v1/folders",
+		a.verifier.Middleware(writeErr)(http.HandlerFunc(a.createFolder))))
+	mux.Handle("PATCH /v1/folders/{id}", a.instrument("PATCH /v1/folders/{id}",
+		a.verifier.Middleware(writeErr)(http.HandlerFunc(a.renameFolder))))
+	mux.Handle("DELETE /v1/folders/{id}", a.instrument("DELETE /v1/folders/{id}",
+		a.verifier.Middleware(writeErr)(http.HandlerFunc(a.deleteFolder))))
 	mux.Handle("PATCH /v1/conversations/{id}", a.instrument("PATCH /v1/conversations/{id}",
 		a.verifier.Middleware(writeErr)(http.HandlerFunc(a.renameConversation))))
+	mux.Handle("PUT /v1/conversations/{id}/folder", a.instrument("PUT /v1/conversations/{id}/folder",
+		a.verifier.Middleware(writeErr)(http.HandlerFunc(a.moveConversationToFolder))))
 	mux.Handle("DELETE /v1/conversations/{id}", a.instrument("DELETE /v1/conversations/{id}",
 		a.verifier.Middleware(writeErr)(http.HandlerFunc(a.deleteConversation))))
 	mux.Handle("GET /v1/conversations/{id}/messages", a.instrument("GET /v1/conversations/{id}/messages",
@@ -389,6 +399,7 @@ type chatRequest struct {
 	Attachments                          []attachmentDTO   `json:"attachments"`
 	ClientRequestID                      string            `json:"client_request_id"`
 	RuntimeID                            string            `json:"runtime_id"`
+	FolderID                             string            `json:"folder_id"`
 }
 
 // attachmentDTO is one user-uploaded file carried inline in the chat body.

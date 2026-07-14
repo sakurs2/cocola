@@ -15,6 +15,8 @@ var (
 	ErrNotFound        = errors.New("chatrun: not found")
 	ErrConflict        = errors.New("chatrun: conversation already has an active run")
 	ErrRuntimeMismatch = errors.New("chatrun: conversation runtime mismatch")
+	ErrFolderNotFound  = errors.New("chatrun: folder not found")
+	ErrFolderMismatch  = errors.New("chatrun: conversation folder mismatch")
 )
 
 const (

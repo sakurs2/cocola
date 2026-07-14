@@ -91,7 +91,7 @@ export const Thread: FC = () => {
         <ThreadPrimitive.If empty={false}>
           <div className="sticky bottom-0 z-30 mt-3 flex w-full max-w-[var(--thread-max-width)] flex-col items-center justify-end bg-gradient-to-t from-background via-background to-background/0 pt-4 pb-5">
             <ScrollToBottom />
-            <Composer />
+            <ConversationComposer />
           </div>
         </ThreadPrimitive.If>
       </ThreadPrimitive.Viewport>
@@ -180,7 +180,7 @@ const ThreadWelcome: FC = () => {
           </div>
         </div>
         <div className="mt-7 w-full">
-          <Composer />
+          <ConversationComposer />
         </div>
 
         <div className="mt-8 w-full">
@@ -215,7 +215,7 @@ const ThreadWelcome: FC = () => {
   );
 };
 
-const Composer: FC = () => {
+export const ConversationComposer: FC<{ placeholder?: string }> = ({ placeholder }) => {
   const { selectedModel, selectedRuntime, modelsLoaded } = useCocola();
   const noModel = modelsLoaded && !selectedModel;
 
@@ -238,7 +238,7 @@ const Composer: FC = () => {
                 : selectedRuntime
                   ? `No ${selectedRuntime.label} compatible model configured`
                   : "No Agent Runtime available"
-              : "Send a message... (@ to mention, / for commands)"
+              : placeholder || "Send a message... (@ to mention, / for commands)"
           }
           className="max-h-40 min-h-12 flex-grow resize-none border-none bg-transparent px-2 py-3 text-sm outline-none placeholder:text-muted-foreground focus:ring-0 disabled:cursor-not-allowed"
         />

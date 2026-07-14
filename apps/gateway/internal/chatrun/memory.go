@@ -33,6 +33,11 @@ func (m *Memory) Start(ctx context.Context, in StartInput) (StartResult, error) 
 		if effective.RuntimeID == "" {
 			effective.RuntimeID = convo.DefaultRuntimeID
 		}
+		if effective.FolderID != "" {
+			if _, folderErr := m.convo.GetFolder(ctx, effective.FolderID, effective.UserID); folderErr != nil {
+				return StartResult{}, ErrFolderNotFound
+			}
+		}
 	} else {
 		return StartResult{}, err
 	}
@@ -41,6 +46,9 @@ func (m *Memory) Start(ctx context.Context, in StartInput) (StartResult, error) 
 			run.ClientRequestID != "" && run.ClientRequestID == in.Run.ClientRequestID {
 			return StartResult{Run: run, Conversation: effective}, nil
 		}
+	}
+	if err == nil && in.Conversation.FolderID != "" && in.Conversation.FolderID != effective.FolderID {
+		return StartResult{}, ErrFolderMismatch
 	}
 	if err := m.convo.UpsertConversation(ctx, effective); err != nil {
 		if err == convo.ErrNotFound {

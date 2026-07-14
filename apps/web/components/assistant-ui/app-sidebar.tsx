@@ -1,6 +1,7 @@
 "use client";
 
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useRef, useState } from "react";
+import * as DropdownMenu from "@radix-ui/react-dropdown-menu";
 import {
   CalendarDots,
   ChatsCircle,
@@ -8,7 +9,6 @@ import {
   DotsThree,
   Folder,
   Gear,
-  Hash,
   MagnifyingGlass,
   Notebook,
   PencilSimple,
@@ -27,14 +27,21 @@ import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { cn } from "@/lib/utils";
 import { CocolaLogo } from "@/components/cocola-logo";
-import { useCocola } from "@/app/runtime-provider";
+import {
+  useCocola,
+  type ConversationFolder,
+  type ConversationSummary,
+} from "@/app/runtime-provider";
+import { ConversationActionsMenu } from "@/components/assistant-ui/conversation-actions-menu";
+import { DeleteConfirmDialog } from "@/components/assistant-ui/delete-confirm-dialog";
+import { useWorkspaceToast } from "@/components/assistant-ui/workspace-toast";
 
 // User workspace sidebar. New Chat + the Chats list are wired to the backend
 // (conversation persistence, route A); secondary areas remain lightweight
 // product shells until their backing features land.
 
 type NavItem = { icon: PhosphorIcon; label: string; href?: string };
-type SidebarSection = "actions" | "navigation" | "channels" | "folders" | "chats" | "account";
+type SidebarSection = "actions" | "navigation" | "folders" | "chats" | "account";
 
 type PrimaryNavItem = NavItem & {
   section: SidebarSection;
@@ -49,30 +56,30 @@ const PRIMARY_NAV: PrimaryNavItem[] = [
   { icon: ShieldCheck, label: "Admin", href: "/admin", section: "navigation" },
 ];
 
-const CHANNELS = [{ icon: Hash, label: "general" }];
-
-const FOLDERS = [
-  { emoji: "💵", label: "Finance" },
-  { emoji: "📕", label: "Study" },
-];
-
 export function AppSidebar() {
   const { data: session } = useSession();
   const pathname = usePathname();
   const router = useRouter();
+  const { showSuccess } = useWorkspaceToast();
   const [collapsed, setCollapsed] = useState(true);
   const sectionRefs = useRef<Record<SidebarSection, HTMLDivElement | null>>({
     actions: null,
     navigation: null,
-    channels: null,
     folders: null,
     chats: null,
     account: null,
   });
-  const [menuOpenId, setMenuOpenId] = useState<string | null>(null);
   const [editingId, setEditingId] = useState<string | null>(null);
   const [draftTitle, setDraftTitle] = useState("");
-  const [deleteTarget, setDeleteTarget] = useState<{ id: string; title: string } | null>(null);
+  const [creatingFolder, setCreatingFolder] = useState(false);
+  const [editingFolderId, setEditingFolderId] = useState<string | null>(null);
+  const [folderDraft, setFolderDraft] = useState("");
+  const [sidebarError, setSidebarError] = useState<string | null>(null);
+  const [deleteTarget, setDeleteTarget] = useState<{
+    kind: "conversation" | "folder";
+    id: string;
+    title: string;
+  } | null>(null);
   const [deleting, setDeleting] = useState(false);
   const [deleteError, setDeleteError] = useState<string | null>(null);
   const {
@@ -81,6 +88,11 @@ export function AppSidebar() {
     loadConversation,
     renameConversation,
     deleteConversation,
+    folders,
+    createFolder,
+    renameFolder,
+    deleteFolder,
+    moveConversation,
     activeSessionId,
     runningSessionIds,
     unreadCompletedSessionIds,
@@ -118,7 +130,6 @@ export function AppSidebar() {
   };
 
   const openConversation = (id: string) => {
-    setMenuOpenId(null);
     if (pathname !== "/") {
       router.push(`/?conversation=${encodeURIComponent(id)}`);
       return;
@@ -127,7 +138,6 @@ export function AppSidebar() {
   };
 
   const startRename = (id: string, title: string) => {
-    setMenuOpenId(null);
     setEditingId(id);
     setDraftTitle(title);
   };
@@ -143,10 +153,9 @@ export function AppSidebar() {
     }
   };
 
-  const openDeleteDialog = (id: string, title: string) => {
-    setMenuOpenId(null);
+  const openDeleteDialog = (kind: "conversation" | "folder", id: string, title: string) => {
     setDeleteError(null);
-    setDeleteTarget({ id, title });
+    setDeleteTarget({ kind, id, title });
   };
 
   const confirmDelete = async () => {
@@ -154,12 +163,64 @@ export function AppSidebar() {
     setDeleting(true);
     setDeleteError(null);
     try {
-      await deleteConversation(deleteTarget.id);
+      if (deleteTarget.kind === "folder") {
+        await deleteFolder(deleteTarget.id);
+        if (pathname === `/folders/${deleteTarget.id}`) router.push("/");
+      } else {
+        await deleteConversation(deleteTarget.id);
+      }
       setDeleteTarget(null);
     } catch (error) {
       setDeleteError(error instanceof Error ? error.message : "Delete failed. Please try again.");
     } finally {
       setDeleting(false);
+    }
+  };
+
+  const commitCreateFolder = async () => {
+    const name = folderDraft.trim();
+    if (!name) {
+      setCreatingFolder(false);
+      setFolderDraft("");
+      return;
+    }
+    try {
+      await createFolder(name);
+      setCreatingFolder(false);
+      setFolderDraft("");
+      setSidebarError(null);
+    } catch (error) {
+      setSidebarError(error instanceof Error ? error.message : "Could not create folder");
+    }
+  };
+
+  const commitRenameFolder = async (id: string) => {
+    const name = folderDraft.trim();
+    if (!name) {
+      setEditingFolderId(null);
+      setFolderDraft("");
+      return;
+    }
+    try {
+      await renameFolder(id, name);
+      setEditingFolderId(null);
+      setFolderDraft("");
+      setSidebarError(null);
+    } catch (error) {
+      setSidebarError(error instanceof Error ? error.message : "Could not rename folder");
+    }
+  };
+
+  const moveChat = async (conversationId: string, folderId: string | null) => {
+    try {
+      await moveConversation(conversationId, folderId);
+      setSidebarError(null);
+      const destination = folderId
+        ? folders.find((folder) => folder.id === folderId)?.name || "folder"
+        : "Chats";
+      showSuccess(`Moved to ${destination}`);
+    } catch (error) {
+      setSidebarError(error instanceof Error ? error.message : "Could not move conversation");
     }
   };
 
@@ -239,9 +300,6 @@ export function AppSidebar() {
                 );
               })}
               <div className="my-1 h-px w-8 bg-white/36" />
-              <SidebarRailButton title="Channels" onClick={() => revealSection("channels")}>
-                <Hash className="size-4 text-sidebar-accent-foreground" weight="duotone" />
-              </SidebarRailButton>
               <SidebarRailButton title="Folders" onClick={() => revealSection("folders")}>
                 <Folder className="size-4 text-sidebar-accent-foreground" weight="duotone" />
               </SidebarRailButton>
@@ -298,33 +356,64 @@ export function AppSidebar() {
                 })}
               </SidebarSectionPanel>
 
-              <SidebarSectionPanel refSetter={setSectionRef("channels")}>
-                <SectionLabel>Channels</SectionLabel>
-                <div className="flex flex-col gap-0.5">
-                  {CHANNELS.map(({ icon: Icon, label }) => (
-                    <SidebarExpandedRow key={label} title={label}>
-                      <Icon
-                        className="size-4 shrink-0 text-sidebar-accent-foreground"
-                        weight="duotone"
-                      />
-                      <span className="truncate">{label}</span>
-                    </SidebarExpandedRow>
-                  ))}
-                </div>
-              </SidebarSectionPanel>
-
               <SidebarSectionPanel refSetter={setSectionRef("folders")}>
-                <SectionLabel>Folders</SectionLabel>
+                <div className="flex items-center justify-between px-2.5 pb-1 pt-4 text-xs font-medium text-sidebar-foreground/50">
+                  <span>Folders</span>
+                  <button
+                    type="button"
+                    aria-label="Create folder"
+                    title="Create folder"
+                    onClick={() => {
+                      setCreatingFolder(true);
+                      setEditingFolderId(null);
+                      setFolderDraft("");
+                      setSidebarError(null);
+                    }}
+                    className="grid size-6 place-items-center rounded-lg transition hover:bg-white/40 hover:text-sidebar-accent-foreground focus:outline-none"
+                  >
+                    <PlusCircle className="size-4" weight="duotone" />
+                  </button>
+                </div>
                 <div className="flex flex-col gap-0.5">
-                  {FOLDERS.map(({ emoji, label }) => (
-                    <SidebarExpandedRow key={label} title={label}>
-                      <span className="grid size-4 shrink-0 place-items-center text-xs">
-                        {emoji}
-                      </span>
-                      <span className="truncate">{label}</span>
-                    </SidebarExpandedRow>
+                  {creatingFolder ? (
+                    <FolderNameInput
+                      value={folderDraft}
+                      placeholder="Folder name"
+                      onChange={setFolderDraft}
+                      onBlur={() => void commitCreateFolder()}
+                      onCancel={() => {
+                        setCreatingFolder(false);
+                        setFolderDraft("");
+                      }}
+                    />
+                  ) : null}
+                  {folders.map((folder) => (
+                    <FolderSidebarItem
+                      key={folder.id}
+                      folder={folder}
+                      active={pathname === `/folders/${folder.id}`}
+                      editing={editingFolderId === folder.id}
+                      draft={folderDraft}
+                      onOpen={() => router.push(`/folders/${encodeURIComponent(folder.id)}`)}
+                      onStartRename={() => {
+                        setCreatingFolder(false);
+                        setEditingFolderId(folder.id);
+                        setFolderDraft(folder.name);
+                        setSidebarError(null);
+                      }}
+                      onDelete={() => openDeleteDialog("folder", folder.id, folder.name)}
+                      onDraftChange={setFolderDraft}
+                      onCommitRename={() => void commitRenameFolder(folder.id)}
+                      onCancelRename={() => {
+                        setEditingFolderId(null);
+                        setFolderDraft("");
+                      }}
+                    />
                   ))}
                 </div>
+                {sidebarError ? (
+                  <p className="px-2.5 pt-1.5 text-[11px] leading-4 text-red-600">{sidebarError}</p>
+                ) : null}
               </SidebarSectionPanel>
 
               <SidebarSectionPanel refSetter={setSectionRef("chats")}>
@@ -338,20 +427,21 @@ export function AppSidebar() {
                     {conversations.map((c) => (
                       <ChatHistoryItem
                         key={c.id}
-                        title={c.title || "Untitled"}
-                        chatType={c.chat_type || "chat"}
+                        conversation={c}
+                        folders={folders}
                         active={c.id === activeSessionId}
                         running={runningSessionIds.has(c.id)}
                         unread={unreadCompletedSessionIds.has(c.id)}
-                        menuOpen={menuOpenId === c.id}
                         editing={editingId === c.id}
                         draftTitle={draftTitle}
                         onOpen={() => {
                           openConversation(c.id);
                         }}
-                        onToggleMenu={() => setMenuOpenId((prev) => (prev === c.id ? null : c.id))}
                         onRename={() => startRename(c.id, c.title || "Untitled")}
-                        onDelete={() => openDeleteDialog(c.id, c.title || "Untitled")}
+                        onDelete={() =>
+                          openDeleteDialog("conversation", c.id, c.title || "Untitled")
+                        }
+                        onMove={(folderId) => void moveChat(c.id, folderId)}
                         onDraftChange={setDraftTitle}
                         onCommitRename={() => void commitRename(c.id)}
                         onCancelRename={() => setEditingId(null)}
@@ -392,19 +482,33 @@ export function AppSidebar() {
         )}
       </motion.aside>
 
-      {deleteTarget && (
-        <DeleteConversationDialog
-          title={deleteTarget.title}
-          deleting={deleting}
-          error={deleteError}
-          onCancel={() => {
-            if (deleting) return;
-            setDeleteTarget(null);
-            setDeleteError(null);
-          }}
-          onConfirm={() => void confirmDelete()}
-        />
-      )}
+      <DeleteConfirmDialog
+        open={deleteTarget !== null}
+        title={
+          deleteTarget?.kind === "folder" ? "Delete folder and chats?" : "Delete conversation?"
+        }
+        description={
+          deleteTarget?.kind === "folder" ? (
+            <>
+              <span className="font-medium text-foreground">{deleteTarget.title}</span> and every
+              conversation inside it will be permanently deleted. Stop any running answers first.
+            </>
+          ) : (
+            <>
+              <span className="font-medium text-foreground">{deleteTarget?.title}</span> will be
+              permanently deleted. Stop its running answer first.
+            </>
+          )
+        }
+        busy={deleting}
+        error={deleteError}
+        onOpenChange={(open) => {
+          if (open) return;
+          setDeleteTarget(null);
+          setDeleteError(null);
+        }}
+        onConfirm={() => void confirmDelete()}
+      />
     </>
   );
 }
@@ -481,38 +585,37 @@ function SidebarSectionPanel({
 }
 
 function ChatHistoryItem({
-  title,
-  chatType,
+  conversation,
+  folders,
   active,
   running,
   unread,
-  menuOpen,
   editing,
   draftTitle,
   onOpen,
-  onToggleMenu,
   onRename,
   onDelete,
+  onMove,
   onDraftChange,
   onCommitRename,
   onCancelRename,
 }: {
-  title: string;
-  chatType: string;
+  conversation: ConversationSummary;
+  folders: ConversationFolder[];
   active: boolean;
   running: boolean;
   unread: boolean;
-  menuOpen: boolean;
   editing: boolean;
   draftTitle: string;
   onOpen: () => void;
-  onToggleMenu: () => void;
   onRename: () => void;
   onDelete: () => void;
+  onMove: (folderId: string | null) => void;
   onDraftChange: (title: string) => void;
   onCommitRename: () => void;
   onCancelRename: () => void;
 }) {
+  const title = conversation.title || "Untitled";
   return (
     <div
       className={cn(
@@ -520,9 +623,6 @@ function ChatHistoryItem({
         active && "bg-sidebar-accent text-sidebar-accent-foreground shadow-sm",
       )}
       title={title}
-      onMouseLeave={() => {
-        if (menuOpen) onToggleMenu();
-      }}
     >
       {editing ? (
         <>
@@ -551,7 +651,7 @@ function ChatHistoryItem({
           aria-label={title}
           onClick={onOpen}
         >
-          <ChatTypeIcon type={chatType} />
+          <ChatTypeIcon type={conversation.chat_type || "chat"} />
           <span className="min-w-0 flex-1 truncate">{title}</span>
         </button>
       )}
@@ -563,59 +663,142 @@ function ChatHistoryItem({
           aria-label="Agent is answering"
         />
       ) : !editing ? (
-        <div className="relative size-3.5 shrink-0">
-          {unread && !menuOpen && (
+        <div className="flex shrink-0 items-center gap-0.5">
+          {unread ? (
             <CheckCircle
-              className="absolute inset-0 size-3.5 text-emerald-500 transition-opacity group-hover:opacity-0"
+              className="size-3.5 text-emerald-500 transition-opacity group-hover:hidden"
               weight="duotone"
               aria-label="Answer completed"
             />
-          )}
+          ) : null}
+          <ConversationActionsMenu
+            conversation={conversation}
+            folders={folders}
+            onRename={onRename}
+            onDelete={onDelete}
+            onMove={onMove}
+            triggerClassName="text-sidebar-foreground/60 hover:bg-white/30 hover:text-sidebar-foreground"
+          />
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
+function FolderSidebarItem({
+  folder,
+  active,
+  editing,
+  draft,
+  onOpen,
+  onStartRename,
+  onDelete,
+  onDraftChange,
+  onCommitRename,
+  onCancelRename,
+}: {
+  folder: ConversationFolder;
+  active: boolean;
+  editing: boolean;
+  draft: string;
+  onOpen: () => void;
+  onStartRename: () => void;
+  onDelete: () => void;
+  onDraftChange: (value: string) => void;
+  onCommitRename: () => void;
+  onCancelRename: () => void;
+}) {
+  if (editing) {
+    return (
+      <FolderNameInput
+        value={draft}
+        onChange={onDraftChange}
+        onBlur={onCommitRename}
+        onCancel={onCancelRename}
+      />
+    );
+  }
+  return (
+    <div
+      className={cn(
+        "group flex h-9 items-center gap-1 rounded-2xl px-2.5 text-sm text-sidebar-foreground/80 transition hover:bg-white/38 hover:text-sidebar-accent-foreground",
+        active && "bg-white/42 text-sidebar-accent-foreground shadow-sm",
+      )}
+    >
+      <button type="button" onClick={onOpen} className="flex min-w-0 flex-1 items-center gap-2">
+        <Folder className="size-4 shrink-0" weight="duotone" />
+        <span className="truncate">{folder.name}</span>
+      </button>
+      <DropdownMenu.Root>
+        <DropdownMenu.Trigger asChild>
           <button
             type="button"
-            className={cn(
-              "absolute left-1/2 top-1/2 grid size-6 -translate-x-1/2 -translate-y-1/2 place-items-center rounded-md text-sidebar-foreground/60 opacity-0 transition hover:text-sidebar-foreground group-hover:opacity-100",
-              menuOpen && "opacity-100",
-            )}
-            aria-label={`Conversation actions for ${title}`}
-            aria-haspopup="menu"
-            aria-expanded={menuOpen}
-            onClick={(e) => {
-              e.stopPropagation();
-              onToggleMenu();
-            }}
+            aria-label={`Actions for folder ${folder.name}`}
+            className="grid size-7 shrink-0 place-items-center rounded-lg opacity-0 transition hover:bg-white/35 focus:opacity-100 focus:outline-none group-hover:opacity-100 data-[state=open]:opacity-100"
           >
             <DotsThree className="size-4" weight="bold" />
           </button>
-        </div>
-      ) : null}
+        </DropdownMenu.Trigger>
+        <DropdownMenu.Portal>
+          <DropdownMenu.Content
+            align="end"
+            sideOffset={5}
+            className="cocola-user-ui z-50 min-w-36 rounded-xl border border-border bg-popover p-1 text-foreground shadow-xl outline-none"
+          >
+            <DropdownMenu.Item
+              onSelect={onStartRename}
+              className="flex cursor-default items-center gap-2 rounded-lg px-2 py-1.5 text-sm text-foreground outline-none focus:bg-accent focus:text-foreground data-[highlighted]:bg-accent data-[highlighted]:text-foreground"
+            >
+              <PencilSimple className="size-4" weight="duotone" />
+              Rename
+            </DropdownMenu.Item>
+            <DropdownMenu.Item
+              onSelect={onDelete}
+              className="flex cursor-default items-center gap-2 rounded-lg px-2 py-1.5 text-sm text-red-500 outline-none focus:bg-red-500/10 focus:text-red-600"
+            >
+              <Trash className="size-4" weight="duotone" />
+              Delete
+            </DropdownMenu.Item>
+          </DropdownMenu.Content>
+        </DropdownMenu.Portal>
+      </DropdownMenu.Root>
+    </div>
+  );
+}
 
-      {menuOpen && !editing && (
-        <div
-          role="menu"
-          className="absolute right-1 top-7 z-20 w-32 overflow-hidden rounded-md border border-sidebar-border bg-sidebar p-1 shadow-lg"
-          onClick={(e) => e.stopPropagation()}
-        >
-          <button
-            type="button"
-            role="menuitem"
-            className="flex w-full items-center gap-2 rounded px-2 py-1.5 text-left text-sm hover:bg-sidebar-accent"
-            onClick={onRename}
-          >
-            <PencilSimple className="size-3.5" weight="duotone" />
-            Rename
-          </button>
-          <button
-            type="button"
-            role="menuitem"
-            className="flex w-full items-center gap-2 rounded px-2 py-1.5 text-left text-sm text-red-500 hover:bg-red-500/10"
-            onClick={onDelete}
-          >
-            <Trash className="size-3.5" weight="duotone" />
-            Delete
-          </button>
-        </div>
-      )}
+function FolderNameInput({
+  value,
+  placeholder,
+  onChange,
+  onBlur,
+  onCancel,
+}: {
+  value: string;
+  placeholder?: string;
+  onChange: (value: string) => void;
+  onBlur: () => void;
+  onCancel: () => void;
+}) {
+  return (
+    <div className="flex h-9 items-center gap-2 rounded-2xl bg-white/32 px-2.5">
+      <Folder className="size-4 shrink-0 text-sidebar-accent-foreground" weight="duotone" />
+      <input
+        autoFocus
+        value={value}
+        placeholder={placeholder}
+        onChange={(event) => onChange(event.target.value)}
+        onBlur={onBlur}
+        onKeyDown={(event) => {
+          if (event.key === "Enter") {
+            event.preventDefault();
+            event.currentTarget.blur();
+          } else if (event.key === "Escape") {
+            event.preventDefault();
+            onCancel();
+          }
+        }}
+        className="min-w-0 flex-1 bg-transparent text-sm outline-none placeholder:text-sidebar-foreground/45"
+      />
     </div>
   );
 }
@@ -628,72 +811,6 @@ function ChatTypeIcon({ type }: { type: string }) {
   }
   return (
     <ChatsCircle className="size-4 shrink-0 text-sidebar-accent-foreground" weight="duotone" />
-  );
-}
-
-function DeleteConversationDialog({
-  title,
-  deleting,
-  error,
-  onCancel,
-  onConfirm,
-}: {
-  title: string;
-  deleting: boolean;
-  error: string | null;
-  onCancel: () => void;
-  onConfirm: () => void;
-}) {
-  return (
-    <div className="fixed inset-0 z-50 grid place-items-center bg-black/35 px-4">
-      <div
-        role="dialog"
-        aria-modal="true"
-        aria-labelledby="delete-conversation-title"
-        className="w-full max-w-sm rounded-lg border border-border bg-background p-4 text-foreground shadow-xl"
-      >
-        <div className="flex items-start gap-3">
-          <div className="grid size-9 shrink-0 place-items-center rounded-md bg-red-500/10 text-red-500">
-            <Trash className="size-4" weight="duotone" />
-          </div>
-          <div className="min-w-0 flex-1">
-            <h2 id="delete-conversation-title" className="text-sm font-semibold">
-              Delete conversation
-            </h2>
-            <p className="mt-1 text-sm text-muted-foreground">
-              This will permanently delete{" "}
-              <span className="font-medium text-foreground">{title}</span>. Running answers must be
-              stopped and finished first.
-            </p>
-          </div>
-        </div>
-
-        {error && (
-          <div className="mt-3 rounded-md border border-red-500/20 bg-red-500/10 px-3 py-2 text-sm text-red-500">
-            {error}
-          </div>
-        )}
-
-        <div className="mt-4 flex justify-end gap-2">
-          <button
-            type="button"
-            disabled={deleting}
-            onClick={onCancel}
-            className="h-8 rounded-md px-3 text-sm text-muted-foreground transition-colors hover:bg-muted hover:text-foreground disabled:cursor-not-allowed disabled:opacity-50"
-          >
-            Cancel
-          </button>
-          <button
-            type="button"
-            disabled={deleting}
-            onClick={onConfirm}
-            className="h-8 rounded-md bg-red-500 px-3 text-sm font-medium text-white transition-colors hover:bg-red-600 disabled:cursor-not-allowed disabled:opacity-70"
-          >
-            {deleting ? "Deleting..." : "Delete"}
-          </button>
-        </div>
-      </div>
-    </div>
   );
 }
 

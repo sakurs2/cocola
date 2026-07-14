@@ -3,6 +3,7 @@ package convo
 import (
 	"context"
 	"sort"
+	"strings"
 	"sync"
 	"time"
 )
@@ -11,10 +12,11 @@ import (
 // returned slices are freshly built so
 // callers cannot mutate shared state. Not durable — data is lost on restart.
 type Memory struct {
-	mu    sync.RWMutex
-	convs map[string]Conversation
-	msgs  map[string][]Message // conversation_id -> messages (append order)
-	arts  map[string]Artifact  // artifact_id -> metadata
+	mu      sync.RWMutex
+	convs   map[string]Conversation
+	msgs    map[string][]Message // conversation_id -> messages (append order)
+	arts    map[string]Artifact  // artifact_id -> metadata
+	folders map[string]Folder
 }
 
 var _ Store = (*Memory)(nil)
@@ -22,9 +24,10 @@ var _ Store = (*Memory)(nil)
 // NewMemory returns an empty in-memory store.
 func NewMemory() *Memory {
 	return &Memory{
-		convs: make(map[string]Conversation),
-		msgs:  make(map[string][]Message),
-		arts:  make(map[string]Artifact),
+		convs:   make(map[string]Conversation),
+		msgs:    make(map[string][]Message),
+		arts:    make(map[string]Artifact),
+		folders: make(map[string]Folder),
 	}
 }
 
@@ -36,6 +39,14 @@ func (m *Memory) UpsertConversation(_ context.Context, c Conversation) error {
 	}
 	if c.RuntimeID == "" {
 		c.RuntimeID = DefaultRuntimeID
+	}
+	if c.FolderID != "" {
+		if c.ChatType != "chat" {
+			return ErrUnsupportedChatType
+		}
+		if folder, ok := m.folders[c.FolderID]; !ok || folder.UserID != c.UserID {
+			return ErrNotFound
+		}
 	}
 	if existing, ok := m.convs[c.ID]; ok {
 		if c.UserID != "" && existing.UserID != c.UserID {
@@ -54,6 +65,139 @@ func (m *Memory) UpsertConversation(_ context.Context, c Conversation) error {
 	}
 	m.convs[c.ID] = c
 	return nil
+}
+
+func (m *Memory) ListFolders(_ context.Context, userID string) ([]Folder, error) {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	out := make([]Folder, 0)
+	for _, folder := range m.folders {
+		if folder.UserID == userID {
+			out = append(out, folder)
+		}
+	}
+	sort.Slice(out, func(i, j int) bool {
+		left, right := strings.ToLower(out[i].Name), strings.ToLower(out[j].Name)
+		if left == right {
+			return out[i].ID < out[j].ID
+		}
+		return left < right
+	})
+	return out, nil
+}
+
+func (m *Memory) GetFolder(_ context.Context, folderID, userID string) (Folder, error) {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	folder, ok := m.folders[folderID]
+	if !ok || folder.UserID != userID {
+		return Folder{}, ErrNotFound
+	}
+	return folder, nil
+}
+
+func (m *Memory) CreateFolder(_ context.Context, folder Folder) (Folder, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	name, err := normalizeFolderName(folder.Name)
+	if err != nil {
+		return Folder{}, err
+	}
+	folder.Name = name
+	for _, existing := range m.folders {
+		if existing.UserID == folder.UserID && strings.EqualFold(existing.Name, folder.Name) {
+			return Folder{}, ErrFolderNameConflict
+		}
+	}
+	m.folders[folder.ID] = folder
+	return folder, nil
+}
+
+func (m *Memory) RenameFolder(_ context.Context, folderID, userID, name string, updatedAt time.Time) (Folder, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	name, err := normalizeFolderName(name)
+	if err != nil {
+		return Folder{}, err
+	}
+	folder, ok := m.folders[folderID]
+	if !ok || folder.UserID != userID {
+		return Folder{}, ErrNotFound
+	}
+	for id, existing := range m.folders {
+		if id != folderID && existing.UserID == userID && strings.EqualFold(existing.Name, name) {
+			return Folder{}, ErrFolderNameConflict
+		}
+	}
+	folder.Name = name
+	folder.UpdatedAt = updatedAt
+	m.folders[folderID] = folder
+	return folder, nil
+}
+
+func (m *Memory) ListFolderConversationIDs(_ context.Context, folderID, userID string) ([]string, error) {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	folder, ok := m.folders[folderID]
+	if !ok || folder.UserID != userID {
+		return nil, ErrNotFound
+	}
+	ids := make([]string, 0)
+	for _, conversation := range m.convs {
+		if conversation.UserID == userID && conversation.FolderID == folderID {
+			ids = append(ids, conversation.ID)
+		}
+	}
+	sort.Strings(ids)
+	return ids, nil
+}
+
+func (m *Memory) DeleteFolder(_ context.Context, folderID, userID string) ([]string, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	folder, ok := m.folders[folderID]
+	if !ok || folder.UserID != userID {
+		return nil, ErrNotFound
+	}
+	ids := make([]string, 0)
+	for id, conversation := range m.convs {
+		if conversation.UserID != userID || conversation.FolderID != folderID {
+			continue
+		}
+		ids = append(ids, id)
+		delete(m.convs, id)
+		delete(m.msgs, id)
+		for artifactID, artifact := range m.arts {
+			if artifact.ConversationID == id {
+				delete(m.arts, artifactID)
+			}
+		}
+	}
+	delete(m.folders, folderID)
+	sort.Strings(ids)
+	return ids, nil
+}
+
+func (m *Memory) MoveConversation(_ context.Context, convID, userID, folderID string, updatedAt time.Time) (Conversation, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	conversation, ok := m.convs[convID]
+	if !ok || conversation.UserID != userID {
+		return Conversation{}, ErrNotFound
+	}
+	if conversation.ChatType != "chat" {
+		return Conversation{}, ErrUnsupportedChatType
+	}
+	if folderID != "" {
+		folder, exists := m.folders[folderID]
+		if !exists || folder.UserID != userID {
+			return Conversation{}, ErrNotFound
+		}
+	}
+	conversation.FolderID = folderID
+	conversation.UpdatedAt = updatedAt
+	m.convs[convID] = conversation
+	return conversation, nil
 }
 
 func (m *Memory) RevealConversation(_ context.Context, convID, userID, title string, updatedAt time.Time) error {

@@ -16,18 +16,31 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"strings"
 	"time"
+	"unicode/utf8"
 )
 
 // ErrNotFound is returned when a conversation lookup misses (or the caller does
 // not own it). Handlers map it to a 404 so ownership misses are indistinguishable
 // from "does not exist" (no cross-user existence oracle).
 var (
-	ErrNotFound        = errors.New("convo: not found")
-	ErrRuntimeMismatch = errors.New("convo: runtime mismatch")
+	ErrNotFound            = errors.New("convo: not found")
+	ErrRuntimeMismatch     = errors.New("convo: runtime mismatch")
+	ErrFolderNameConflict  = errors.New("convo: folder name conflict")
+	ErrInvalidFolderName   = errors.New("convo: invalid folder name")
+	ErrUnsupportedChatType = errors.New("convo: unsupported chat type")
 )
 
 const DefaultRuntimeID = "claude-code"
+
+func normalizeFolderName(name string) (string, error) {
+	name = strings.TrimSpace(name)
+	if name == "" || utf8.RuneCountInString(name) > 80 {
+		return "", ErrInvalidFolderName
+	}
+	return name, nil
+}
 
 // PartType enumerates the UiPart shapes the web client renders. These string
 // values are the WIRE CONTRACT with apps/web/app/runtime-provider.tsx (UiPart):
@@ -86,8 +99,18 @@ type Conversation struct {
 	TenantID  string    `json:"tenant_id"`
 	Title     string    `json:"title"`
 	ChatType  string    `json:"chat_type"`
+	FolderID  string    `json:"folder_id,omitempty"`
 	Hidden    bool      `json:"hidden"`
 	RuntimeID string    `json:"runtime_id"`
+	CreatedAt time.Time `json:"created_at"`
+	UpdatedAt time.Time `json:"updated_at"`
+}
+
+// Folder is one user-owned, flat container for ordinary conversations.
+type Folder struct {
+	ID        string    `json:"id"`
+	UserID    string    `json:"-"`
+	Name      string    `json:"name"`
 	CreatedAt time.Time `json:"created_at"`
 	UpdatedAt time.Time `json:"updated_at"`
 }
@@ -143,6 +166,15 @@ type Store interface {
 	RenameConversation(ctx context.Context, convID, userID, title string) (Conversation, error)
 	// DeleteConversation deletes a conversation only when userID owns it.
 	DeleteConversation(ctx context.Context, convID, userID string) error
+	// Folder operations are always scoped by userID. DeleteFolder returns the
+	// conversation ids removed by the database cascade for external cleanup.
+	ListFolders(ctx context.Context, userID string) ([]Folder, error)
+	GetFolder(ctx context.Context, folderID, userID string) (Folder, error)
+	CreateFolder(ctx context.Context, folder Folder) (Folder, error)
+	RenameFolder(ctx context.Context, folderID, userID, name string, updatedAt time.Time) (Folder, error)
+	ListFolderConversationIDs(ctx context.Context, folderID, userID string) ([]string, error)
+	DeleteFolder(ctx context.Context, folderID, userID string) ([]string, error)
+	MoveConversation(ctx context.Context, convID, userID, folderID string, updatedAt time.Time) (Conversation, error)
 	// UpsertArtifact records a downloadable artifact's metadata.
 	UpsertArtifact(ctx context.Context, a Artifact) error
 	// GetArtifact returns an artifact only when userID owns its conversation.

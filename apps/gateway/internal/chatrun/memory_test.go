@@ -99,6 +99,61 @@ func TestMemoryStartRejectsRuntimeChangeWithoutWrites(t *testing.T) {
 	}
 }
 
+func TestMemoryStartBindsFolderAndRejectsFolderChange(t *testing.T) {
+	ctx := context.Background()
+	conversations := convo.NewMemory()
+	store := NewMemory(conversations)
+	now := time.Now().UTC()
+	for _, folder := range []convo.Folder{
+		{ID: "folder-1", UserID: "user-1", Name: "One", CreatedAt: now, UpdatedAt: now},
+		{ID: "folder-2", UserID: "user-1", Name: "Two", CreatedAt: now, UpdatedAt: now},
+	} {
+		if _, err := conversations.CreateFolder(ctx, folder); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	first := testStartInput("run-1", "request-1", "user-1", "conversation-1")
+	first.Conversation.FolderID = "folder-1"
+	result, err := store.Start(ctx, first)
+	if err != nil || result.Conversation.FolderID != "folder-1" {
+		t.Fatalf("folder start = %+v, %v", result, err)
+	}
+	if _, err := store.Finalize(ctx, FinalizeInput{
+		RunID: "run-1", UserID: "user-1", Status: StatusSuccess,
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	// A transport retry is authoritative by request id even when an old client
+	// accidentally repeats a stale folder hint.
+	retry := testStartInput("run-retry", "request-1", "user-1", "conversation-1")
+	retry.Conversation.FolderID = "folder-2"
+	retried, err := store.Start(ctx, retry)
+	if err != nil || retried.Created || retried.Run.ID != "run-1" {
+		t.Fatalf("idempotent folder retry = %+v, %v", retried, err)
+	}
+
+	mismatch := testStartInput("run-2", "request-2", "user-1", "conversation-1")
+	mismatch.Conversation.FolderID = "folder-2"
+	if _, err := store.Start(ctx, mismatch); !errors.Is(err, ErrFolderMismatch) {
+		t.Fatalf("folder change = %v, want ErrFolderMismatch", err)
+	}
+	messages, err := conversations.GetMessages(ctx, "conversation-1", "user-1")
+	if err != nil || len(messages) != 1 {
+		t.Fatalf("messages after folder mismatch = %+v, %v", messages, err)
+	}
+
+	missing := testStartInput("run-missing", "request-missing", "user-1", "conversation-missing")
+	missing.Conversation.FolderID = "missing"
+	if _, err := store.Start(ctx, missing); !errors.Is(err, ErrFolderNotFound) {
+		t.Fatalf("missing folder = %v, want ErrFolderNotFound", err)
+	}
+	if _, err := conversations.GetConversation(ctx, "conversation-missing", "user-1"); !errors.Is(err, convo.ErrNotFound) {
+		t.Fatalf("invalid folder created conversation: %v", err)
+	}
+}
+
 func TestMemoryDraftAndTerminalStateAreStable(t *testing.T) {
 	ctx := context.Background()
 	conversations := convo.NewMemory()

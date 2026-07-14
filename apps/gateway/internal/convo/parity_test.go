@@ -2,6 +2,7 @@ package convo
 
 import (
 	"context"
+	"errors"
 	"os"
 	"testing"
 	"time"
@@ -30,7 +31,7 @@ func TestPostgresParity(t *testing.T) {
 	}
 	defer pg.Close()
 	// Clean slate.
-	if _, err := pg.pool.Exec(ctx, "TRUNCATE messages, conversations CASCADE"); err != nil {
+	if _, err := pg.pool.Exec(ctx, "TRUNCATE messages, conversations, conversation_folders CASCADE"); err != nil {
 		t.Fatalf("truncate: %v", err)
 	}
 
@@ -66,5 +67,28 @@ func TestPostgresParity(t *testing.T) {
 	// Ownership gate on the real backend.
 	if _, err := pg.GetMessages(ctx, "a", "intruder"); err != ErrNotFound {
 		t.Fatalf("non-owner should get ErrNotFound, got %v", err)
+	}
+
+	folder, err := pg.CreateFolder(ctx, Folder{
+		ID: "folder-a", UserID: "u1", Name: "  Research  ", CreatedAt: t0, UpdatedAt: t0,
+	})
+	if err != nil || folder.Name != "Research" {
+		t.Fatalf("folder create = %+v, %v", folder, err)
+	}
+	if _, err := pg.CreateFolder(ctx, Folder{
+		ID: "folder-b", UserID: "u1", Name: "research", CreatedAt: t0, UpdatedAt: t0,
+	}); !errors.Is(err, ErrFolderNameConflict) {
+		t.Fatalf("case-insensitive duplicate = %v, want ErrFolderNameConflict", err)
+	}
+	moved, err := pg.MoveConversation(ctx, "a", "u1", folder.ID, t0.Add(2*time.Minute))
+	if err != nil || moved.FolderID != folder.ID {
+		t.Fatalf("folder move = %+v, %v", moved, err)
+	}
+	deleted, err := pg.DeleteFolder(ctx, folder.ID, "u1")
+	if err != nil || len(deleted) != 1 || deleted[0] != "a" {
+		t.Fatalf("folder delete = %v, %v", deleted, err)
+	}
+	if _, err := pg.GetConversation(ctx, "a", "u1"); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("folder cascade left conversation: %v", err)
 	}
 }

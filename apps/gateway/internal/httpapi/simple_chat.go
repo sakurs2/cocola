@@ -127,14 +127,21 @@ func (a *API) chat(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	req.RuntimeID = strings.TrimSpace(req.RuntimeID)
+	req.FolderID = strings.TrimSpace(req.FolderID)
 	if req.RuntimeID != "" {
 		if _, supported := a.runtimeByID[req.RuntimeID]; !supported {
 			writeErr(w, http.StatusBadRequest, "UNSUPPORTED_RUNTIME", "agent runtime is not supported")
 			return
 		}
 	}
-	if chatTypeForConversation(req) == "scheduled_task" && req.RuntimeID == "" {
-		req.RuntimeID = convo.DefaultRuntimeID
+	if chatTypeForConversation(req) == "scheduled_task" {
+		if req.FolderID != "" {
+			writeErr(w, http.StatusConflict, "FOLDER_UNSUPPORTED_CONVERSATION_TYPE", "scheduled task conversations cannot be moved into folders")
+			return
+		}
+		if req.RuntimeID == "" {
+			req.RuntimeID = convo.DefaultRuntimeID
+		}
 	}
 	if _, ok := w.(http.Flusher); !ok {
 		writeErr(w, http.StatusInternalServerError, "INTERNAL", "streaming unsupported")
@@ -167,7 +174,7 @@ func (a *API) chat(w http.ResponseWriter, r *http.Request) {
 		Conversation: convo.Conversation{
 			ID: req.SessionID, UserID: identity.UserID, TenantID: identity.TenantID,
 			Title: titleForConversation(req), ChatType: chatTypeForConversation(req),
-			Hidden: req.DeferConversationVisibilityUntilDone, RuntimeID: req.RuntimeID,
+			FolderID: req.FolderID, Hidden: req.DeferConversationVisibilityUntilDone, RuntimeID: req.RuntimeID,
 			CreatedAt: startedAt, UpdatedAt: startedAt,
 		},
 		UserMessage: convo.Message{
@@ -204,6 +211,14 @@ func (a *API) chat(w http.ResponseWriter, r *http.Request) {
 	}
 	if errors.Is(err, chatrun.ErrRuntimeMismatch) {
 		writeErr(w, http.StatusConflict, "RUNTIME_MISMATCH", "conversation runtime cannot be changed")
+		return
+	}
+	if errors.Is(err, chatrun.ErrFolderNotFound) {
+		writeErr(w, http.StatusNotFound, "FOLDER_NOT_FOUND", "folder not found")
+		return
+	}
+	if errors.Is(err, chatrun.ErrFolderMismatch) {
+		writeErr(w, http.StatusConflict, "FOLDER_MISMATCH", "conversation folder cannot be changed by a chat request")
 		return
 	}
 	if err != nil {

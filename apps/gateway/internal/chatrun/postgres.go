@@ -61,7 +61,7 @@ func (p *Postgres) Start(ctx context.Context, in StartInput) (StartResult, error
 	}
 	defer func() { _ = tx.Rollback(ctx) }()
 	effective, err := scanConversation(tx.QueryRow(ctx, `SELECT id, user_id, tenant_id,
-		title, chat_type, hidden, runtime_id, created_at, updated_at
+		title, chat_type, COALESCE(folder_id, ''), hidden, runtime_id, created_at, updated_at
 		FROM conversations WHERE id=$1 FOR UPDATE`, in.Conversation.ID))
 	createdConversation := false
 	if errors.Is(err, convo.ErrNotFound) {
@@ -72,12 +72,23 @@ func (p *Postgres) Start(ctx context.Context, in StartInput) (StartResult, error
 		if effective.ChatType == "" {
 			effective.ChatType = "chat"
 		}
+		if effective.FolderID != "" {
+			var folderID string
+			folderErr := tx.QueryRow(ctx, `SELECT id FROM conversation_folders
+				WHERE id=$1 AND user_id=$2 FOR SHARE`, effective.FolderID, effective.UserID).Scan(&folderID)
+			if folderErr == pgx.ErrNoRows {
+				return StartResult{}, ErrFolderNotFound
+			}
+			if folderErr != nil {
+				return StartResult{}, folderErr
+			}
+		}
 		tag, insertErr := tx.Exec(ctx, `INSERT INTO conversations
-			(id, user_id, tenant_id, title, chat_type, hidden, runtime_id, created_at, updated_at)
-			VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)
+			(id, user_id, tenant_id, title, chat_type, folder_id, hidden, runtime_id, created_at, updated_at)
+			VALUES ($1,$2,$3,$4,$5,NULLIF($6,''),$7,$8,$9,$10)
 			ON CONFLICT (id) DO NOTHING`, effective.ID, effective.UserID,
-			effective.TenantID, effective.Title, effective.ChatType, effective.Hidden,
-			effective.RuntimeID, effective.CreatedAt, effective.UpdatedAt)
+			effective.TenantID, effective.Title, effective.ChatType, effective.FolderID,
+			effective.Hidden, effective.RuntimeID, effective.CreatedAt, effective.UpdatedAt)
 		if insertErr != nil {
 			return StartResult{}, insertErr
 		}
@@ -85,7 +96,7 @@ func (p *Postgres) Start(ctx context.Context, in StartInput) (StartResult, error
 			createdConversation = true
 		} else {
 			effective, err = scanConversation(tx.QueryRow(ctx, `SELECT id, user_id, tenant_id,
-				title, chat_type, hidden, runtime_id, created_at, updated_at
+				title, chat_type, COALESCE(folder_id, ''), hidden, runtime_id, created_at, updated_at
 				FROM conversations WHERE id=$1 FOR UPDATE`, in.Conversation.ID))
 			if err != nil {
 				return StartResult{}, err
@@ -111,6 +122,9 @@ func (p *Postgres) Start(ctx context.Context, in StartInput) (StartResult, error
 			if !errors.Is(requestErr, ErrNotFound) {
 				return StartResult{}, requestErr
 			}
+		}
+		if in.Conversation.FolderID != "" && in.Conversation.FolderID != effective.FolderID {
+			return StartResult{}, ErrFolderMismatch
 		}
 		effective.UpdatedAt = in.Conversation.UpdatedAt
 		if _, err = tx.Exec(ctx, `UPDATE conversations SET updated_at=$2 WHERE id=$1`,
@@ -162,7 +176,7 @@ func (p *Postgres) Start(ctx context.Context, in StartInput) (StartResult, error
 func scanConversation(row pgx.Row) (convo.Conversation, error) {
 	var conversation convo.Conversation
 	if err := row.Scan(&conversation.ID, &conversation.UserID, &conversation.TenantID,
-		&conversation.Title, &conversation.ChatType, &conversation.Hidden, &conversation.RuntimeID,
+		&conversation.Title, &conversation.ChatType, &conversation.FolderID, &conversation.Hidden, &conversation.RuntimeID,
 		&conversation.CreatedAt, &conversation.UpdatedAt); err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
 			return convo.Conversation{}, convo.ErrNotFound

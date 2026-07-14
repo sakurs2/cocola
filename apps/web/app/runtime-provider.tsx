@@ -169,8 +169,16 @@ export type ConversationSummary = {
   id: string;
   title: string;
   chat_type?: "chat" | "scheduled_task" | string;
+  folder_id?: string;
   updated_at: string;
   runtime_id: string;
+};
+
+export type ConversationFolder = {
+  id: string;
+  name: string;
+  created_at: string;
+  updated_at: string;
 };
 
 type UserEvent = {
@@ -245,7 +253,7 @@ type CocolaContextValue = {
   // session_id to a NEW random id. A never-before-seen session_id has no
   // resume entry in the backend session_map, so Route A's claude CLI starts
   // from zero — this is the boundary that severs prior-turn history.
-  newConversation: () => void;
+  newConversation: (folderId?: string) => string;
   // Persisted conversation list (sidebar) + loaders. conversations is refreshed
   // after each turn and on mount; loadConversation replays a stored conversation
   // into the thread and points session_id at it so follow-ups continue it.
@@ -254,6 +262,13 @@ type CocolaContextValue = {
   loadConversation: (id: string) => Promise<void>;
   renameConversation: (id: string, title: string) => Promise<void>;
   deleteConversation: (id: string) => Promise<void>;
+  folders: ConversationFolder[];
+  foldersLoaded: boolean;
+  refreshFolders: () => void;
+  createFolder: (name: string) => Promise<ConversationFolder>;
+  renameFolder: (id: string, name: string) => Promise<ConversationFolder>;
+  deleteFolder: (id: string) => Promise<void>;
+  moveConversation: (id: string, folderId: string | null) => Promise<void>;
   activeSessionId: string;
   runningSessionIds: Set<string>;
   unreadCompletedSessionIds: Set<string>;
@@ -285,6 +300,25 @@ export function useCocola(): CocolaContextValue {
 function genId(): string {
   if (typeof crypto !== "undefined" && "randomUUID" in crypto) return crypto.randomUUID();
   return `id-${Date.now()}-${Math.random().toString(36).slice(2)}`;
+}
+
+async function apiError(response: Response, fallback: string): Promise<Error> {
+  const text = await response.text().catch(() => "");
+  try {
+    const body = JSON.parse(text) as { error?: { message?: string } | string };
+    if (typeof body.error === "string" && body.error) return new Error(body.error);
+    if (
+      body.error &&
+      typeof body.error === "object" &&
+      typeof body.error.message === "string" &&
+      body.error.message
+    ) {
+      return new Error(body.error.message);
+    }
+  } catch {
+    // The fallback below is clearer than a malformed upstream response.
+  }
+  return new Error(text || fallback);
 }
 
 function isTruthy(v: string | undefined): boolean {
@@ -643,6 +677,8 @@ export function CocolaRuntimeProvider({ children }: { children: ReactNode }) {
     {},
   );
   const [conversations, setConversations] = useState<ConversationSummary[]>([]);
+  const [folders, setFolders] = useState<ConversationFolder[]>([]);
+  const [foldersLoaded, setFoldersLoaded] = useState(false);
   const [unreadCompletedIds, setUnreadCompletedIds] = useState<Set<string>>(() => new Set());
   const [selectedArtifact, setSelectedArtifact] = useState<ArtifactPreview | null>(null);
   const [models, setModels] = useState<ModelOption[]>([]);
@@ -655,6 +691,7 @@ export function CocolaRuntimeProvider({ children }: { children: ReactNode }) {
   const runCursors = useRef<Map<string, RunCursor>>(new Map());
   const restoredRuns = useRef(false);
   const sessionIdRef = useRef(sessionId);
+  const sessionFolderHintsRef = useRef<Map<string, string>>(new Map());
   const preferredRuntimeIdRef = useRef("");
   const conversationsRef = useRef(conversations);
   const realtimeScheduledRunsRef = useRef<Set<string>>(new Set());
@@ -828,6 +865,25 @@ export function CocolaRuntimeProvider({ children }: { children: ReactNode }) {
         if (Array.isArray(rows)) setConversations(rows);
       } catch {
         // ignore — sidebar list is non-critical
+      }
+    })();
+  }, []);
+
+  const refreshFolders = useCallback(() => {
+    void (async () => {
+      try {
+        const res = await fetch("/api/folders", { cache: "no-store" });
+        if (isAccountDisabledResponse(res)) {
+          redirectAccountDisabled();
+          return;
+        }
+        if (!res.ok) return;
+        const rows = (await res.json()) as ConversationFolder[];
+        if (Array.isArray(rows)) setFolders(rows);
+      } catch {
+        // A transient failure should not discard folders already on screen.
+      } finally {
+        setFoldersLoaded(true);
       }
     })();
   }, []);
@@ -1112,6 +1168,7 @@ export function CocolaRuntimeProvider({ children }: { children: ReactNode }) {
       );
 
       const turnSessionId = sessionId;
+      const folderHint = sessionFolderHintsRef.current.get(turnSessionId) ?? "";
       const model = selectedModel;
       const agentRuntime = selectedRuntime;
       if (!model || !agentRuntime) return;
@@ -1180,6 +1237,10 @@ export function CocolaRuntimeProvider({ children }: { children: ReactNode }) {
           {
             id: turnSessionId,
             title,
+            chat_type: existing?.chat_type ?? "chat",
+            ...(existing?.folder_id || folderHint
+              ? { folder_id: existing?.folder_id || folderHint }
+              : {}),
             updated_at: now,
             runtime_id: existing?.runtime_id || agentRuntime.id,
           },
@@ -1202,6 +1263,7 @@ export function CocolaRuntimeProvider({ children }: { children: ReactNode }) {
           ...(model.family ? { model_family: model.family } : {}),
           ...(model.iconSlug ? { model_icon_slug: model.iconSlug } : {}),
           model_icon: model.icon,
+          ...(folderHint ? { folder_id: folderHint } : {}),
           ...(attachments.length > 0 ? { attachments } : {}),
         });
         let res: Response | undefined;
@@ -1243,7 +1305,11 @@ export function CocolaRuntimeProvider({ children }: { children: ReactNode }) {
             run_id?: string;
             error?: { code?: string; message?: string };
           };
-          if (conflict.error?.code === "RUNTIME_MISMATCH") {
+          if (
+            conflict.error?.code === "RUNTIME_MISMATCH" ||
+            conflict.error?.code === "FOLDER_MISMATCH"
+          ) {
+            sessionFolderHintsRef.current.delete(turnSessionId);
             setConvMessages((prev) => ({
               ...prev,
               [turnSessionId]: (prev[turnSessionId] ?? []).filter(
@@ -1258,6 +1324,7 @@ export function CocolaRuntimeProvider({ children }: { children: ReactNode }) {
           }
           const runId = conflict.run_id ?? "";
           if (!runId) throw new Error("conversation already has an active run");
+          sessionFolderHintsRef.current.delete(turnSessionId);
           const durableAssistantId = `${runId}-assistant`;
           setConvMessages((prev) => {
             const current = (prev[turnSessionId] ?? []).filter(
@@ -1318,6 +1385,7 @@ export function CocolaRuntimeProvider({ children }: { children: ReactNode }) {
           throw new Error(`chat start rejected (${res.status})${detail ? `: ${detail}` : ""}`);
         }
         if (!res.body) throw new Error("no response body");
+        sessionFolderHintsRef.current.delete(turnSessionId);
 
         const runId = res.headers.get("x-cocola-run-id") ?? "";
         const durableAssistantId = runId ? `${runId}-assistant` : assistantId;
@@ -1448,6 +1516,9 @@ export function CocolaRuntimeProvider({ children }: { children: ReactNode }) {
       const conversation = conversations.find((item) => item.id === id);
       if (conversation?.runtime_id) setSelectedRuntimeIdState(conversation.runtime_id);
       setSandboxes((prev) => ({ ...prev, [id]: prev[id] ?? null }));
+      sessionFolderHintsRef.current.delete(sessionIdRef.current);
+      sessionFolderHintsRef.current.delete(id);
+      sessionIdRef.current = id;
       setSessionId(id);
       setSelectedArtifact(null);
       setUnreadCompletedIds((prev) => {
@@ -1526,6 +1597,40 @@ export function CocolaRuntimeProvider({ children }: { children: ReactNode }) {
     [refreshConversations],
   );
 
+  const removeLocalConversations = useCallback((ids: string[]) => {
+    if (ids.length === 0) return;
+    const removed = new Set(ids);
+    for (const id of removed) {
+      abortMap.current.get(id)?.abort();
+      abortMap.current.delete(id);
+      runCursors.current.delete(id);
+      sessionFolderHintsRef.current.delete(id);
+      realtimeScheduledRunsRef.current.delete(id);
+      deletedScheduledConversationsRef.current.set(id, Date.now());
+    }
+    writeRunCursors(runCursors.current);
+    setRunningIds((prev) => new Set([...prev].filter((id) => !removed.has(id))));
+    setConversations((prev) => prev.filter((conversation) => !removed.has(conversation.id)));
+    setUnreadCompletedIds((prev) => new Set([...prev].filter((id) => !removed.has(id))));
+    setConvMessages((prev) =>
+      Object.fromEntries(Object.entries(prev).filter(([id]) => !removed.has(id))),
+    );
+    setSandboxes((prev) =>
+      Object.fromEntries(Object.entries(prev).filter(([id]) => !removed.has(id))),
+    );
+    setEnvironmentStatuses((prev) =>
+      Object.fromEntries(Object.entries(prev).filter(([id]) => !removed.has(id))),
+    );
+    setSelectedArtifact((prev) => (prev && removed.has(prev.sessionId) ? null : prev));
+    if (removed.has(sessionIdRef.current)) {
+      const fresh = genId();
+      sessionIdRef.current = fresh;
+      setSessionId(fresh);
+      setConvMessages((prev) => ({ ...prev, [fresh]: [] }));
+      setSandboxes((prev) => ({ ...prev, [fresh]: null }));
+    }
+  }, []);
+
   const deleteConversation = useCallback(
     async (id: string) => {
       const res = await fetch(`/api/conversations/${encodeURIComponent(id)}`, {
@@ -1543,66 +1648,135 @@ export function CocolaRuntimeProvider({ children }: { children: ReactNode }) {
         throw new Error(`delete failed (${res.status})`);
       }
 
-      const ctrl = abortMap.current.get(id);
-      ctrl?.abort();
-      abortMap.current.delete(id);
-      runCursors.current.delete(id);
-      writeRunCursors(runCursors.current);
-      setRunning(id, false);
+      removeLocalConversations([id]);
+    },
+    [refreshConversations, removeLocalConversations],
+  );
 
-      setConversations((prev) => prev.filter((c) => c.id !== id));
-      realtimeScheduledRunsRef.current.delete(id);
-      deletedScheduledConversationsRef.current.set(id, Date.now());
-      setUnreadCompletedIds((prev) => {
-        const next = new Set(prev);
-        next.delete(id);
-        return next;
-      });
-      setConvMessages((prev) => {
-        const next = { ...prev };
-        delete next[id];
-        return next;
-      });
-      setSandboxes((prev) => {
-        const next = { ...prev };
-        delete next[id];
-        return next;
-      });
-      setEnvironmentStatuses((prev) => {
-        const next = { ...prev };
-        delete next[id];
-        return next;
-      });
-      setSelectedArtifact((prev) => (prev?.sessionId === id ? null : prev));
-      if (sessionIdRef.current === id) {
+  const createFolder = useCallback(async (name: string) => {
+    const res = await fetch("/api/folders", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ name }),
+    });
+    if (isAccountDisabledResponse(res)) {
+      redirectAccountDisabled();
+      throw new Error("Account disabled");
+    }
+    if (!res.ok) throw await apiError(res, `create folder failed (${res.status})`);
+    const folder = (await res.json()) as ConversationFolder;
+    setFolders((prev) =>
+      [...prev.filter((item) => item.id !== folder.id), folder].sort((a, b) =>
+        a.name.localeCompare(b.name, undefined, { sensitivity: "base" }),
+      ),
+    );
+    return folder;
+  }, []);
+
+  const renameFolder = useCallback(async (id: string, name: string) => {
+    const res = await fetch(`/api/folders/${encodeURIComponent(id)}`, {
+      method: "PATCH",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ name }),
+    });
+    if (isAccountDisabledResponse(res)) {
+      redirectAccountDisabled();
+      throw new Error("Account disabled");
+    }
+    if (!res.ok) throw await apiError(res, `rename folder failed (${res.status})`);
+    const folder = (await res.json()) as ConversationFolder;
+    setFolders((prev) =>
+      prev
+        .map((item) => (item.id === id ? folder : item))
+        .sort((a, b) => a.name.localeCompare(b.name, undefined, { sensitivity: "base" })),
+    );
+    return folder;
+  }, []);
+
+  const deleteFolder = useCallback(
+    async (id: string) => {
+      const deletedConversationIDs = conversationsRef.current
+        .filter((conversation) => conversation.folder_id === id)
+        .map((conversation) => conversation.id);
+      const res = await fetch(`/api/folders/${encodeURIComponent(id)}`, { method: "DELETE" });
+      if (isAccountDisabledResponse(res)) {
+        redirectAccountDisabled();
+        throw new Error("Account disabled");
+      }
+      if (!res.ok) throw await apiError(res, `delete folder failed (${res.status})`);
+      setFolders((prev) => prev.filter((folder) => folder.id !== id));
+      removeLocalConversations(deletedConversationIDs);
+      let deletedPendingSession = false;
+      for (const [sessionID, folderID] of sessionFolderHintsRef.current) {
+        if (folderID !== id) continue;
+        sessionFolderHintsRef.current.delete(sessionID);
+        if (sessionID === sessionIdRef.current) deletedPendingSession = true;
+      }
+      if (deletedPendingSession) {
         const fresh = genId();
         sessionIdRef.current = fresh;
         setSessionId(fresh);
         setConvMessages((prev) => ({ ...prev, [fresh]: [] }));
         setSandboxes((prev) => ({ ...prev, [fresh]: null }));
       }
+      refreshConversations();
     },
-    [refreshConversations, setRunning],
+    [refreshConversations, removeLocalConversations],
   );
+
+  const moveConversation = useCallback(async (id: string, folderId: string | null) => {
+    const res = await fetch(`/api/conversations/${encodeURIComponent(id)}/folder`, {
+      method: "PUT",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ folder_id: folderId }),
+    });
+    if (isAccountDisabledResponse(res)) {
+      redirectAccountDisabled();
+      throw new Error("Account disabled");
+    }
+    if (!res.ok) throw await apiError(res, `move conversation failed (${res.status})`);
+    const updated = (await res.json()) as ConversationSummary;
+    sessionFolderHintsRef.current.delete(id);
+    setConversations((prev) =>
+      prev.map((conversation) =>
+        conversation.id === id
+          ? {
+              ...conversation,
+              ...updated,
+              folder_id: updated.folder_id || undefined,
+            }
+          : conversation,
+      ),
+    );
+  }, []);
 
   // Start a fresh conversation. Other conversations' in-flight streams continue
   // in the background; the fresh session_id prevents backend --resume.
-  const newConversation = useCallback(() => {
-    const fresh = genId();
-    const preferred =
-      runtimes.find((runtime) => runtime.id === preferredRuntimeIdRef.current) ??
-      runtimes.find((runtime) => runtime.is_default);
-    setSessionId(fresh);
-    setSelectedRuntimeIdState(preferred?.id ?? "");
-    setSelectedArtifact(null);
-    setConvMessages((prev) => ({ ...prev, [fresh]: [] }));
-    setSandboxes((prev) => ({ ...prev, [fresh]: null }));
-  }, [runtimes]);
+  const newConversation = useCallback(
+    (folderId?: string) => {
+      const fresh = genId();
+      const preferred =
+        runtimes.find((runtime) => runtime.id === preferredRuntimeIdRef.current) ??
+        runtimes.find((runtime) => runtime.is_default);
+      sessionFolderHintsRef.current.delete(sessionIdRef.current);
+      sessionIdRef.current = fresh;
+      if (folderId) sessionFolderHintsRef.current.set(fresh, folderId);
+      else sessionFolderHintsRef.current.delete(fresh);
+      setSessionId(fresh);
+      setSelectedRuntimeIdState(preferred?.id ?? "");
+      setSelectedArtifact(null);
+      setConvMessages((prev) => ({ ...prev, [fresh]: [] }));
+      setSandboxes((prev) => ({ ...prev, [fresh]: null }));
+      return fresh;
+    },
+    [runtimes],
+  );
 
   // Initial load of the sidebar list.
   useEffect(() => {
     refreshConversations();
-  }, [refreshConversations]);
+    refreshFolders();
+  }, [refreshConversations, refreshFolders]);
 
   useEffect(() => {
     void (async () => {
@@ -1689,6 +1863,13 @@ export function CocolaRuntimeProvider({ children }: { children: ReactNode }) {
       loadConversation,
       renameConversation,
       deleteConversation,
+      folders,
+      foldersLoaded,
+      refreshFolders,
+      createFolder,
+      renameFolder,
+      deleteFolder,
+      moveConversation,
       activeSessionId: sessionId,
       runningSessionIds: runningIds,
       unreadCompletedSessionIds: unreadCompletedIds,
@@ -1715,6 +1896,13 @@ export function CocolaRuntimeProvider({ children }: { children: ReactNode }) {
       loadConversation,
       renameConversation,
       deleteConversation,
+      folders,
+      foldersLoaded,
+      refreshFolders,
+      createFolder,
+      renameFolder,
+      deleteFolder,
+      moveConversation,
       runningIds,
       unreadCompletedIds,
       environmentStatus,
