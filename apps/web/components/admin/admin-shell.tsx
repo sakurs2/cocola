@@ -38,6 +38,9 @@ type AdminNavItem = {
   match?: string[];
 };
 
+const OVERVIEW_ITEM: AdminNavItem = { href: "/admin", label: "Overview", icon: SquaresFour };
+const SETTINGS_ITEM: AdminNavItem = { href: "/admin/settings", label: "Settings", icon: Gear };
+
 const NAV_GROUPS: { label: string; items: AdminNavItem[] }[] = [
   {
     label: "Configuration",
@@ -67,15 +70,15 @@ const NAV_GROUPS: { label: string; items: AdminNavItem[] }[] = [
       { href: "/admin/component-logs", label: "Service Logs", icon: TerminalWindow },
     ],
   },
+  {
+    label: "System",
+    items: [SETTINGS_ITEM],
+  },
 ];
-
-const OVERVIEW_ITEM: AdminNavItem = { href: "/admin", label: "Overview", icon: SquaresFour };
-const SETTINGS_ITEM: AdminNavItem = { href: "/admin/settings", label: "Settings", icon: Gear };
 
 const navItems = [
   { ...OVERVIEW_ITEM, group: "Overview" },
   ...NAV_GROUPS.flatMap((group) => group.items.map((item) => ({ ...item, group: group.label }))),
-  { ...SETTINGS_ITEM, group: "Settings" },
 ];
 
 function isActive(pathname: string, item: AdminNavItem) {
@@ -103,7 +106,7 @@ export function AdminShell({ children }: { children: ReactNode }) {
         >
           <AdminBrand collapsed={collapsed} onCollapse={() => setCollapsed((value) => !value)} />
           <AdminNavigation pathname={pathname} collapsed={collapsed} />
-          <AdminSidebarFooter pathname={pathname} collapsed={collapsed} />
+          <AdminSidebarFooter collapsed={collapsed} />
         </motion.aside>
 
         <section className="min-w-0 flex-1 py-1.5 pr-1.5 max-md:pl-1.5">
@@ -145,12 +148,7 @@ export function AdminShell({ children }: { children: ReactNode }) {
                         <AdminNavigation pathname={pathname} collapsed={false} mobile />
                       </div>
                     </Dialog.Close>
-                    <AdminSidebarFooter
-                      pathname={pathname}
-                      collapsed={false}
-                      mobile
-                      onNavigate={() => setMobileOpen(false)}
-                    />
+                    <AdminSidebarFooter collapsed={false} onNavigate={() => setMobileOpen(false)} />
                   </Dialog.Content>
                 </Dialog.Portal>
               </Dialog.Root>
@@ -311,25 +309,14 @@ function AdminNavLink({
 }
 
 function AdminSidebarFooter({
-  pathname,
   collapsed,
-  mobile = false,
   onNavigate,
 }: {
-  pathname: string;
   collapsed: boolean;
-  mobile?: boolean;
   onNavigate?: () => void;
 }) {
   return (
-    <div className="space-y-1.5 border-t border-white/35 p-2.5">
-      <AdminNavLink
-        item={SETTINGS_ITEM}
-        pathname={pathname}
-        collapsed={collapsed}
-        mobile={mobile}
-        onNavigate={onNavigate}
-      />
+    <div className="border-t border-white/35 p-2.5">
       <Link
         href="/"
         title={collapsed ? "Back to workspace" : undefined}
