@@ -10,7 +10,13 @@ set -euo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$ROOT"
 
-export PATH="/Applications/OrbStack.app/Contents/MacOS/xbin:/opt/homebrew/bin:/usr/local/bin:$PATH"
+# Non-interactive shells do not read ~/.zshrc. Reuse GVM's selected default
+# environment when Go is otherwise absent, without hard-coding a Go version.
+if ! command -v go >/dev/null 2>&1 && [[ -r "$HOME/.gvm/environments/default" ]]; then
+  # shellcheck disable=SC1091
+  source "$HOME/.gvm/environments/default"
+fi
+export PATH="$HOME/.local/bin:/Applications/OrbStack.app/Contents/MacOS/xbin:/opt/homebrew/bin:/usr/local/bin:$PATH"
 
 # Keep background helpers out of the terminal's foreground process group so
 # Ctrl+C reaches this supervisor first and dependencies can stop in order.
@@ -34,7 +40,10 @@ SANDBOX_NAMESPACE="${COCOLA_OPENSANDBOX_K8S_NAMESPACE:-opensandbox}"
 OPENSANDBOX_REPO="${OPENSANDBOX_REPO:-$HOME/Desktop/github/opensandbox}"
 CHART_DIR="${COCOLA_OPENSANDBOX_K8S_CHART:-$OPENSANDBOX_REPO/kubernetes/charts/opensandbox}"
 VALUES_FILE="${COCOLA_OPENSANDBOX_K8S_VALUES:-$ROOT/deploy/opensandbox-k8s/values.local.yaml}"
-PVC_FILE="${COCOLA_OPENSANDBOX_K8S_PVC:-$ROOT/deploy/opensandbox-k8s/cocola-plugins-pvc.yaml}"
+SESSION_STORAGE_CLASS_FILE="${COCOLA_SESSION_STORAGE_CLASS_FILE:-$ROOT/deploy/opensandbox-k8s/cocola-local-session-storageclass.yaml}"
+STORAGE_PROBE_FILE="${COCOLA_STORAGE_PROBE_FILE:-$ROOT/deploy/opensandbox-k8s/cocola-storage-probe.yaml}"
+STORAGE_PROBE_IMAGE="${COCOLA_STORAGE_PROBE_IMAGE:-cocola/storage-probe:dev}"
+STORAGE_PROBE_DOCKERFILE="${COCOLA_STORAGE_PROBE_DOCKERFILE:-$ROOT/deploy/opensandbox-k8s/storage-probe-runtime.Dockerfile}"
 BATCHSANDBOX_TEMPLATE_FILE="${COCOLA_OPENSANDBOX_K8S_BATCHSANDBOX_TEMPLATE:-$ROOT/deploy/opensandbox-k8s/batchsandbox-template.yaml}"
 BATCHSANDBOX_TEMPLATE_CM="cocola-batchsandbox-template"
 SERVER_SERVICE="${COCOLA_OPENSANDBOX_K8S_SERVER_SERVICE:-opensandbox-server}"
@@ -51,11 +60,26 @@ require_cmd() {
 }
 
 preflight() {
-  require_cmd docker
-  require_cmd k3d
-  require_cmd kubectl
-  require_cmd helm
+  require_cmd docker || return
+  require_cmd k3d || return
+  require_cmd kubectl || return
+  require_cmd helm || return
+  require_cmd go || return
   docker info >/dev/null 2>&1 || { err "Docker daemon is unavailable"; return 1; }
+}
+
+build_storage_probe() {
+  local build_dir="$LOG_DIR/storage-probe-build"
+  mkdir -p "$build_dir"
+  log "building storage probe image: $STORAGE_PROBE_IMAGE"
+  (
+    cd "$ROOT/apps/admin-api"
+    CGO_ENABLED=0 GOOS=linux GOWORK=off go build -trimpath -ldflags="-s -w" \
+      -o "$build_dir/storage-probe" ./cmd/storage-probe
+  ) || return
+  docker build -f "$STORAGE_PROBE_DOCKERFILE" -t "$STORAGE_PROBE_IMAGE" "$build_dir" || return
+  k3d image import "$STORAGE_PROBE_IMAGE" -c "$CLUSTER" || return
+  rm -f "$build_dir/storage-probe"
 }
 
 cluster_exists() {
@@ -71,16 +95,17 @@ ensure_chart() {
 }
 
 ensure_cluster() {
-  preflight
+  preflight || return
   if cluster_exists; then
     log "using existing k3d cluster: $CLUSTER"
   else
     log "creating single-node k3d cluster: $CLUSTER"
     k3d cluster create "$CLUSTER" \
       --servers 1 \
-      --agents 0
+      --agents 0 \
+      --k3s-arg "--default-local-storage-path=/var/lib/cocola/storage@server:0" || return
   fi
-  k3d kubeconfig merge "$CLUSTER" --kubeconfig-switch-context >/dev/null
+  k3d kubeconfig merge "$CLUSTER" --kubeconfig-switch-context >/dev/null || return
 }
 
 prepull_sandbox_image() {
@@ -99,52 +124,63 @@ prepull_sandbox_image() {
 }
 
 install_opensandbox() {
-  ensure_chart
+  ensure_chart || return
 
   log "building Helm dependencies for $CHART_DIR"
-  helm dependency build "$CHART_DIR"
+  helm dependency build "$CHART_DIR" || return
 
   log "creating sandbox namespace $SANDBOX_NAMESPACE"
   kubectl create namespace "$SANDBOX_NAMESPACE" \
     --dry-run=client \
     -o yaml \
-    | kubectl apply -f -
+    | kubectl apply -f - || return
 
   log "creating OpenSandbox system namespace $SYSTEM_NAMESPACE"
   kubectl create namespace "$SYSTEM_NAMESPACE" \
     --dry-run=client \
     -o yaml \
-    | kubectl apply -f -
+    | kubectl apply -f - || return
 
-  log "creating cocola-plugins PVC"
-  kubectl -n "$SANDBOX_NAMESPACE" apply -f "$PVC_FILE"
+  log "configuring local-path storage root"
+  kubectl -n kube-system patch configmap local-path-config --type merge \
+    --patch '{"data":{"config.json":"{\n  \"nodePathMap\": [\n    {\n      \"node\": \"DEFAULT_PATH_FOR_NON_LISTED_NODES\",\n      \"paths\": [\"/var/lib/cocola/storage\"]\n    }\n  ]\n}"}}' || return
+
+  log "creating node-local Session StorageClass"
+  kubectl apply -f "$SESSION_STORAGE_CLASS_FILE" || return
+
+  log "deploying request-driven storage probes"
+  kubectl -n "$SANDBOX_NAMESPACE" apply -f "$STORAGE_PROBE_FILE" || return
+  kubectl -n "$SANDBOX_NAMESPACE" set image daemonset/cocola-storage-probe \
+    storage-probe="$STORAGE_PROBE_IMAGE" || return
+  kubectl -n "$SANDBOX_NAMESPACE" rollout restart daemonset/cocola-storage-probe || return
+  kubectl -n "$SANDBOX_NAMESPACE" rollout status daemonset/cocola-storage-probe --timeout=120s || return
 
   log "creating BatchSandbox template ConfigMap $BATCHSANDBOX_TEMPLATE_CM"
   kubectl -n "$SYSTEM_NAMESPACE" create configmap "$BATCHSANDBOX_TEMPLATE_CM" \
     --from-file=batchsandbox-template.yaml="$BATCHSANDBOX_TEMPLATE_FILE" \
     --dry-run=client \
     -o yaml \
-    | kubectl apply -f -
+    | kubectl apply -f - || return
 
   log "installing OpenSandbox release=$RELEASE namespace=$SYSTEM_NAMESPACE"
   helm upgrade --install "$RELEASE" "$CHART_DIR" \
     --namespace "$SYSTEM_NAMESPACE" \
     --create-namespace \
-    -f "$VALUES_FILE"
+    -f "$VALUES_FILE" || return
 
   log "waiting for OpenSandbox deployments"
   kubectl -n "$SYSTEM_NAMESPACE" rollout status deployment \
     -l app.kubernetes.io/instance="$RELEASE" \
-    --timeout=240s
+    --timeout=240s || return
 }
 
 uninstall_opensandbox() {
+  log "deleting storage probes"
+  kubectl -n "$SANDBOX_NAMESPACE" delete daemonset cocola-storage-probe --ignore-not-found=true
   log "uninstalling OpenSandbox release=$RELEASE from namespace=$SYSTEM_NAMESPACE"
   helm uninstall "$RELEASE" --namespace "$SYSTEM_NAMESPACE" || true
   log "deleting local BatchSandbox template ConfigMap"
   kubectl -n "$SYSTEM_NAMESPACE" delete configmap "$BATCHSANDBOX_TEMPLATE_CM" --ignore-not-found=true
-  log "deleting local cocola-plugins PVC"
-  kubectl -n "$SANDBOX_NAMESPACE" delete -f "$PVC_FILE" --ignore-not-found=true
 }
 
 print_opensandbox_status() {
@@ -236,10 +272,11 @@ up() {
   printf '\n=== make dev %s ===\n' "$(date '+%Y-%m-%d %H:%M:%S %z')" >>"$SETUP_LOG"
   log "preparing sandbox runtime"
   if ! {
-    ensure_cluster
-    prepull_sandbox_image
-    install_opensandbox
-    start_forward
+    ensure_cluster &&
+      build_storage_probe &&
+      prepull_sandbox_image &&
+      install_opensandbox &&
+      start_forward
   } >>"$SETUP_LOG" 2>&1; then
     err "sandbox runtime preparation failed; see .run-logs/dev-setup.log"
     tail -40 "$SETUP_LOG" >&2 || true
@@ -345,6 +382,7 @@ Environment:
   COCOLA_K8S_CLUSTER              default: cocola-sandbox
   COCOLA_K8S_SANDBOX_IMAGE_REMOTE default: ghcr.io/sakurs2/cocola-sandbox-runtime:latest
   COCOLA_K8S_PREPULL_SANDBOX_IMAGE default: 1; pre-pull the remote image during make dev
+  COCOLA_STORAGE_PROBE_IMAGE       default: cocola/storage-probe:dev
   COCOLA_OPENSANDBOX_K8S_BATCHSANDBOX_TEMPLATE default: deploy/opensandbox-k8s/batchsandbox-template.yaml
   OPENSANDBOX_REPO                default: \$HOME/Desktop/github/opensandbox
 TXT

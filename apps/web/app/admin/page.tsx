@@ -6,6 +6,7 @@ import {
   Cpu,
   FileText,
   Graph,
+  HardDrives,
   PlugsConnected,
   ShieldCheck,
   Sparkle,
@@ -118,6 +119,13 @@ const MODULE_GROUPS: { label: string; description: string; modules: AdminModule[
         icon: Cpu,
         summary: "Track node health, pod capacity, placement, and node operations.",
         accent: "text-teal-700 bg-teal-500/10",
+      },
+      {
+        title: "Storage",
+        href: "/admin/storage",
+        icon: HardDrives,
+        summary: "Inspect node disk headroom, Session Volumes, and on-demand usage.",
+        accent: "text-emerald-700 bg-emerald-500/10",
       },
       {
         title: "Architecture",

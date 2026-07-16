@@ -183,9 +183,7 @@ async def test_no_executor_defaults_workspace_root(tmp_path, monkeypatch):
     monkeypatch.setattr("tempfile.gettempdir", lambda: str(tmp_path))
     prov = RecordingProvider()
     ctx = FakeContext()
-    req = FakeRequest(
-        session_id="S8", attachments=[FakeAttachment("d.txt", b"z")]
-    )
+    req = FakeRequest(session_id="S8", attachments=[FakeAttachment("d.txt", b"z")])
     await AgentRuntimeServicer(prov, binder=StaticSandboxBinder()).Query(req, ctx)
 
     expected = tmp_path / "cocola-workspaces" / "S8"

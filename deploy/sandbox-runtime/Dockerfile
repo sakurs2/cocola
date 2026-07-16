@@ -137,13 +137,13 @@ COPY shim/ /opt/cocola/shim/
 RUN chmod +x /opt/cocola/shim/entrypoint.sh
 
 # ---- non-root user + mount points ----------------------------------------
-# /workspace           -> bound onto the SESSION volume (RW)
-# /home/cocola/.claude -> session-local Claude Code config/state
-# /home/cocola/.codex  -> session-local Codex config/state
-# /data/plugins        -> bound read-only platform skills
+# /session             -> bound onto the SESSION volume (RW); sandbox-manager
+#                         links the runtime paths below into its stable layout
 RUN useradd -m -u 10001 -s /bin/bash cocola \
-    && mkdir -p /workspace /home/cocola/.claude /home/cocola/.codex /data/plugins \
-    && chown -R cocola:cocola /home/cocola /workspace /opt/cocola
+    && mkdir -p /session /workspace /cache \
+        /home/cocola/.claude /home/cocola/.codex /home/cocola/.cocola /home/cocola/.local \
+        /data/plugins \
+    && chown -R cocola:cocola /home/cocola /session /workspace /cache /opt/cocola
 
 # NOTE: the container's main process runs as ROOT so firewall-entrypoint.sh can
 # install the egress firewall (needs NET_ADMIN). This is NOT a privilege
@@ -158,6 +158,15 @@ WORKDIR /workspace
 ENV CLAUDE_CONFIG_DIR=/home/cocola/.claude \
     ANTHROPIC_CONFIG_DIR=/home/cocola/.claude \
     CODEX_HOME=/home/cocola/.codex \
+    HOME=/home/cocola \
+    XDG_CACHE_HOME=/cache/xdg \
+    UV_CACHE_DIR=/cache/uv \
+    PIP_CACHE_DIR=/cache/pip \
+    npm_config_cache=/cache/npm \
+    npm_config_prefix=/home/cocola/.local \
+    PNPM_HOME=/home/cocola/.local/share/pnpm \
+    GOCACHE=/cache/go-build \
+    GOMODCACHE=/cache/go-mod \
     CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC=1 \
     CLAUDE_CODE_MAX_RETRIES=3 \
     COCOLA_WORKSPACE=/workspace \
@@ -165,7 +174,8 @@ ENV CLAUDE_CONFIG_DIR=/home/cocola/.claude \
     PLAYWRIGHT_BROWSERS_PATH=/ms-playwright \
     CHROME_BIN=/usr/local/bin/chromium \
     PUPPETEER_EXECUTABLE_PATH=/usr/local/bin/chromium \
-    PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH=/usr/local/bin/chromium
+    PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH=/usr/local/bin/chromium \
+    PATH=/home/cocola/.local/bin:/home/cocola/.local/share/pnpm:$PATH
 
 # tini reaps the `claude` CLI subprocesses the SDK spawns. Default command keeps
 # the container alive (session-lived per ADR-0009); the shim is invoked on

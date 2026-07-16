@@ -3,6 +3,7 @@ package httpapi
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -167,6 +168,81 @@ func TestFolderDeleteCascadesAndReleasesSessions(t *testing.T) {
 	}
 	if _, err := store.GetConversation(ctx, "chat-1", auth.DevIdentity.UserID); err != convo.ErrNotFound {
 		t.Fatalf("deleted conversation = %v", err)
+	}
+}
+
+func TestFolderDeleteFailureLeavesCleanupRetryable(t *testing.T) {
+	ctx := context.Background()
+	store := convo.NewMemory()
+	now := time.Now().UTC()
+	if _, err := store.CreateFolder(ctx, convo.Folder{
+		ID: "folder-1", UserID: auth.DevIdentity.UserID, Name: "Work", CreatedAt: now, UpdatedAt: now,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.UpsertConversation(ctx, convo.Conversation{
+		ID: "chat-1", UserID: auth.DevIdentity.UserID, FolderID: "folder-1", CreatedAt: now, UpdatedAt: now,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	releaser := &fakeReleaser{err: errors.New("storage unavailable")}
+	handler := newConfiguredTestAPIWithConvo(
+		&fakeStreamer{}, auth.NewVerifier(auth.Config{}), logger.Must(), store,
+	).WithAgentReleaser(releaser).Handler()
+
+	recorder := httptest.NewRecorder()
+	handler.ServeHTTP(recorder, httptest.NewRequest(http.MethodDelete, "/v1/folders/folder-1", nil))
+	if recorder.Code != http.StatusNoContent {
+		t.Fatalf("delete status = %d, body=%s", recorder.Code, recorder.Body.String())
+	}
+	if _, err := store.GetFolder(ctx, "folder-1", auth.DevIdentity.UserID); !errors.Is(err, convo.ErrNotFound) {
+		t.Fatalf("folder must remain deleted after cleanup failure: %v", err)
+	}
+}
+
+func TestFolderDeleteReleasesMutationLockBeforeRemoteCleanup(t *testing.T) {
+	ctx := context.Background()
+	store := convo.NewMemory()
+	runStore := chatrun.NewMemory(store)
+	now := time.Now().UTC()
+	if _, err := store.CreateFolder(ctx, convo.Folder{
+		ID: "folder-1", UserID: auth.DevIdentity.UserID, Name: "Work", CreatedAt: now, UpdatedAt: now,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.UpsertConversation(ctx, convo.Conversation{
+		ID: "chat-1", UserID: auth.DevIdentity.UserID, FolderID: "folder-1", CreatedAt: now, UpdatedAt: now,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	releaser := &blockingReleaser{started: make(chan struct{}), unblock: make(chan struct{})}
+	api := newConfiguredTestAPIWithConvo(
+		&fakeStreamer{}, auth.NewVerifier(auth.Config{}), logger.Must(), store,
+	).WithChatRuns(runStore, RunConfig{}).WithAgentReleaser(releaser)
+
+	done := make(chan int, 1)
+	go func() {
+		recorder := httptest.NewRecorder()
+		api.Handler().ServeHTTP(recorder, httptest.NewRequest(http.MethodDelete, "/v1/folders/folder-1", nil))
+		done <- recorder.Code
+	}()
+	select {
+	case <-releaser.started:
+	case <-time.After(time.Second):
+		t.Fatal("remote cleanup did not start")
+	}
+	if !api.runs.mutationMu.TryLock() {
+		t.Fatal("folder cleanup still holds the global run mutation lock")
+	}
+	api.runs.mutationMu.Unlock()
+	close(releaser.unblock)
+	select {
+	case status := <-done:
+		if status != http.StatusNoContent {
+			t.Fatalf("delete status = %d", status)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("folder delete did not finish")
 	}
 }
 

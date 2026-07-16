@@ -68,10 +68,11 @@ LLM Gateway URL，CLI 会拒绝会产生失联 sandbox 的不完整配置。
 用户检查配置后显式执行 `cocola up`。自定义安装目录后，后续命令需继续使用同一个
 `--home`，或设置 `COCOLA_HOME`。
 
-内置 OpenSandbox 模式下，`cocola down` 会先停止对话入口和 Agent Runtime，再给
-Sandbox Manager 留出 checkpoint 与 Warm Pool drain 时间，清理本次安装镜像产生的
-动态 sandbox，最后移除 Compose 服务。外部 OpenSandbox 由调用方管理，CLI 不会清理
-其中的 sandbox。
+内置 OpenSandbox 模式下，`cocola down` 会先停止对话入口和 Agent Runtime，再清理
+本次安装产生的动态 sandbox，最后移除 Compose 服务。Compose 属于 legacy Docker
+部署，Session 文件直接保存在 `~/.cocola/sandboxes` 的宿主机目录；不使用
+checkpoint 或 Warm Pool。外部 OpenSandbox 由调用方管理，CLI 不会清理其中的
+sandbox。
 
 ## 开发与发布
 

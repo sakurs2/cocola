@@ -1471,6 +1471,47 @@ func (a *API) offlineSandboxNode(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, out)
 }
 
+// ---- node-local session storage ----
+
+func (a *API) listSessionStorage(w http.ResponseWriter, r *http.Request) {
+	items, err := a.svc.ListSessionStorage(r.Context())
+	if err != nil {
+		mapErr(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"volumes": items})
+}
+
+func (a *API) listNodeStorageFilesystems(w http.ResponseWriter, r *http.Request) {
+	items, err := a.svc.ListNodeStorageFilesystems(r.Context())
+	if err != nil {
+		mapErr(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"nodes": items})
+}
+
+func (a *API) measureSessionStorage(w http.ResponseWriter, r *http.Request) {
+	out, err := a.svc.MeasureSessionStorage(
+		r.Context(), chi.URLParam(r, "storage_id"), r.URL.Query().Get("pvc_name"),
+	)
+	if err != nil {
+		mapErr(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, out)
+}
+
+func (a *API) deleteOrphanSessionStorage(w http.ResponseWriter, r *http.Request) {
+	if err := a.svc.DeleteOrphanSessionStorage(
+		r.Context(), chi.URLParam(r, "storage_id"), r.URL.Query().Get("pvc_name"),
+	); err != nil {
+		mapErr(w, err)
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
+}
+
 // ---- sandbox runtimes ----
 
 func (a *API) listSandboxes(w http.ResponseWriter, r *http.Request) {

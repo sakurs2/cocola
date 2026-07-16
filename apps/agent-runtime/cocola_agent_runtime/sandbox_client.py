@@ -37,6 +37,9 @@ class AcquireResult:
 
     sandbox: pb.Sandbox
     reused: bool = False
+    workspace_state: int = pb.WORKSPACE_STATE_UNSPECIFIED
+    workspace_node: str = ""
+    previous_workspace_node: str = ""
 
 
 @dataclass
@@ -152,6 +155,7 @@ class SandboxClient:
         user_id: str = "",
         image: str = "",
         env: dict[str, str] | None = None,
+        allow_workspace_reset: bool = False,
     ) -> AcquireResult:
         """Bind a session to a sandbox (create-or-reuse).
 
@@ -165,17 +169,28 @@ class SandboxClient:
                 user_id=user_id,
                 image=image,
                 env=env or {},
+                allow_workspace_reset=allow_workspace_reset,
             )
         )
-        return AcquireResult(sandbox=resp.sandbox, reused=resp.reused)
+        return AcquireResult(
+            sandbox=resp.sandbox,
+            reused=resp.reused,
+            workspace_state=resp.workspace_state,
+            workspace_node=resp.workspace_node,
+            previous_workspace_node=resp.previous_workspace_node,
+        )
 
     def heartbeat(self, sandbox_id: str) -> None:
         """Renew the lease for a bound sandbox so it is not reclaimed."""
         self.stub.Heartbeat(pb.HeartbeatRequest(sandbox_id=sandbox_id))
 
-    def release(self, session_id: str) -> None:
+    def release(self, session_id: str, user_id: str, *, timeout_s: float | None = None) -> None:
         """Explicitly release a session's sandbox (unbind + destroy)."""
-        self.stub.Release(pb.ReleaseRequest(session_id=session_id))
+        request = pb.ReleaseRequest(session_id=session_id, user_id=user_id)
+        if timeout_s is None:
+            self.stub.Release(request)
+        else:
+            self.stub.Release(request, timeout=timeout_s)
 
     def destroy(self, sandbox_id: str) -> None:
         self.stub.Destroy(pb.DestroyRequest(sandbox_id=sandbox_id))

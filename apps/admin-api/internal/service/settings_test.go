@@ -11,6 +11,7 @@ import (
 
 func TestSystemSettingsListOnlyIncludesRuntimeSettingsAndReadsEnvDefaults(t *testing.T) {
 	t.Setenv("COCOLA_SCHEDULER_POLL_SECS", "45")
+	t.Setenv("COCOLA_SESSION_VOLUME_SIZE", "4Gi")
 
 	svc := New(store.NewMemory(), nil, func() time.Time {
 		return time.Date(2026, 7, 5, 8, 0, 0, 0, time.UTC)
@@ -24,8 +25,8 @@ func TestSystemSettingsListOnlyIncludesRuntimeSettingsAndReadsEnvDefaults(t *tes
 	if poll.Source != "env" || poll.Value != 45 {
 		t.Fatalf("poll setting = source %q value %#v, want env 45", poll.Source, poll.Value)
 	}
-	if len(settings) != 8 {
-		t.Fatalf("settings count = %d, want 8 runtime settings", len(settings))
+	if len(settings) != 7 {
+		t.Fatalf("settings count = %d, want 7 runtime settings", len(settings))
 	}
 	expected := map[string]bool{
 		SettingSchedulerEnabled:          true,
@@ -33,13 +34,12 @@ func TestSystemSettingsListOnlyIncludesRuntimeSettingsAndReadsEnvDefaults(t *tes
 		SettingSchedulerRunTimeoutSecs:   true,
 		SettingSchedulerHeartbeatSecs:    true,
 		SettingSchedulerLeaseTimeoutSecs: true,
-		SettingWarmPoolEnabled:           true,
-		SettingWarmPoolSize:              true,
+		SettingSessionVolumeDefaultSize:  true,
 		SettingTraceRetentionDays:        true,
 	}
-	warm := settingByKey(t, settings, SettingWarmPoolSize)
-	if warm.Value != 10 || warm.Editable {
-		t.Fatalf("warm setting without Redis writer = %+v, want visible read-only default", warm)
+	volume := settingByKey(t, settings, SettingSessionVolumeDefaultSize)
+	if volume.Source != "env" || volume.Value != "4Gi" || !volume.Editable {
+		t.Fatalf("session volume setting = %+v, want editable env 4Gi", volume)
 	}
 	for _, setting := range settings {
 		if !expected[setting.Key] {
@@ -48,51 +48,23 @@ func TestSystemSettingsListOnlyIncludesRuntimeSettingsAndReadsEnvDefaults(t *tes
 	}
 }
 
-type warmPoolRecorder struct {
-	enabled bool
-	size    int
-	calls   int
-	err     error
-}
-
-func (w *warmPoolRecorder) SetWarmPoolConfig(_ context.Context, enabled bool, size int) error {
-	w.enabled = enabled
-	w.size = size
-	w.calls++
-	return w.err
-}
-
-func TestWarmPoolSettingsPublishAndRecoverAfterTransientFailure(t *testing.T) {
+func TestSessionVolumeSettingNormalizesQuantity(t *testing.T) {
 	ctx := context.Background()
-	writer := &warmPoolRecorder{err: errors.New("redis unavailable")}
-	svc := New(store.NewMemory(), nil, time.Now).WithWarmPoolConfigWriter(writer)
+	svc := New(store.NewMemory(), nil, time.Now)
 
-	if _, err := svc.UpdateSystemSetting(ctx, SettingWarmPoolSize, SystemSettingUpdateInput{
-		Value: 25, Actor: "admin@example.com",
-	}); err != nil {
-		t.Fatalf("durable warm-pool update: %v", err)
-	}
-	stored, err := svc.store.GetSystemSetting(ctx, SettingWarmPoolSize)
-	if err != nil || stored.Version != 1 {
-		t.Fatalf("durable desired value was not saved: %+v, %v", stored, err)
-	}
-
-	if err := svc.PublishWarmPoolConfig(ctx); err == nil {
-		t.Fatal("reconciliation should surface Redis failure")
-	}
-	writer.err = nil
-	if err := svc.PublishWarmPoolConfig(ctx); err != nil {
-		t.Fatalf("reconcile warm-pool config: %v", err)
-	}
-	if !writer.enabled || writer.size != 25 || writer.calls != 2 {
-		t.Fatalf("published warm config = enabled %v size %d calls %d", writer.enabled, writer.size, writer.calls)
-	}
-	settings, err := svc.ListSystemSettings(ctx)
+	updated, err := svc.UpdateSystemSetting(ctx, SettingSessionVolumeDefaultSize, SystemSettingUpdateInput{
+		Value: "2048Mi", Actor: "admin@example.com",
+	})
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("update session volume size: %v", err)
 	}
-	if !settingByKey(t, settings, SettingWarmPoolSize).Editable {
-		t.Fatal("warm-pool size should be editable when propagation is configured")
+	if updated.Source != "db" || updated.Value != "2Gi" {
+		t.Fatalf("normalized setting = %+v, want db 2Gi", updated)
+	}
+	if _, err := svc.UpdateSystemSetting(ctx, SettingSessionVolumeDefaultSize, SystemSettingUpdateInput{
+		Value: "0Gi", ExpectedVersion: updated.Version,
+	}); !errors.Is(err, ErrInvalidArg) {
+		t.Fatalf("zero quantity error = %v, want invalid argument", err)
 	}
 }
 

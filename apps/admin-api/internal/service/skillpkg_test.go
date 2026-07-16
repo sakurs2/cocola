@@ -4,6 +4,7 @@ import (
 	"archive/zip"
 	"bytes"
 	"context"
+	"errors"
 	"testing"
 	"time"
 
@@ -94,13 +95,13 @@ func TestEffectivePersonalSkillOverridesSharedByRuntimeID(t *testing.T) {
 
 	if _, err := svc.CreateSkill(ctx, store.Skill{
 		ID: "frontend-design", RuntimeID: "frontend-design", Name: "Shared",
-		Enabled: true, Scope: "admin",
+		Enabled: true, Scope: "admin", SkillMD: "# Shared",
 	}, "admin"); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := svc.CreateSkill(ctx, store.Skill{
 		ID: "user-32970b55-frontend-design", RuntimeID: "frontend-design", Name: "Personal",
-		Enabled: true, Scope: "user", OwnerUserID: "alice",
+		Enabled: true, Scope: "user", OwnerUserID: "alice", SkillMD: "# Personal",
 	}, "alice"); err != nil {
 		t.Fatal(err)
 	}
@@ -114,6 +115,26 @@ func TestEffectivePersonalSkillOverridesSharedByRuntimeID(t *testing.T) {
 	}
 	if effective[0].ID != "user-32970b55-frontend-design" || effective[0].RuntimeID != "frontend-design" {
 		t.Fatalf("unexpected effective personal skill: %#v", effective[0])
+	}
+}
+
+func TestEnabledSkillRequiresMaterializablePayload(t *testing.T) {
+	ctx := context.Background()
+	mem := store.NewMemory()
+	svc := New(mem, nil, time.Now)
+
+	if _, err := svc.CreateSkill(ctx, store.Skill{
+		ID: "metadata-only", Name: "Metadata only", Enabled: true,
+	}, "admin"); !errors.Is(err, ErrInvalidArg) {
+		t.Fatalf("CreateSkill error = %v, want ErrInvalidArg", err)
+	}
+	if _, err := svc.CreateSkill(ctx, store.Skill{
+		ID: "disabled", Name: "Disabled",
+	}, "admin"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := svc.SetSkillEnabled(ctx, "disabled", true, "admin"); !errors.Is(err, ErrInvalidArg) {
+		t.Fatalf("SetSkillEnabled error = %v, want ErrInvalidArg", err)
 	}
 }
 

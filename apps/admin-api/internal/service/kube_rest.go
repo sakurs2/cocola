@@ -14,6 +14,7 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"time"
 )
@@ -188,10 +189,14 @@ func (c *kubeClient) patchNodeAnnotation(ctx context.Context, name, key string, 
 }
 
 func (c *kubeClient) listSandboxPods(ctx context.Context) ([]kubePod, error) {
-	path := "/api/v1/namespaces/" + url.PathEscape(c.cfg.SandboxNamespace) + "/pods"
+	return c.listPods(ctx, c.cfg.SandboxNamespace, c.cfg.PodSelector)
+}
+
+func (c *kubeClient) listPods(ctx context.Context, namespace, labelSelector string) ([]kubePod, error) {
+	path := "/api/v1/namespaces/" + url.PathEscape(namespace) + "/pods"
 	q := url.Values{}
-	if c.cfg.PodSelector != "" {
-		q.Set("labelSelector", c.cfg.PodSelector)
+	if labelSelector != "" {
+		q.Set("labelSelector", labelSelector)
 	}
 	if enc := q.Encode(); enc != "" {
 		path += "?" + enc
@@ -224,17 +229,168 @@ func (c *kubeClient) deleteBatchSandbox(ctx context.Context, namespace, name str
 	return c.do(ctx, http.MethodDelete, path, nil, nil, "application/json")
 }
 
-func (c *kubeClient) evictPod(ctx context.Context, namespace, name string) error {
-	body := map[string]any{
-		"apiVersion": "policy/v1",
-		"kind":       "Eviction",
-		"metadata": map[string]string{
-			"name":      name,
-			"namespace": namespace,
-		},
+type sessionPVC struct {
+	Name           string
+	Namespace      string
+	Phase          string
+	VolumeName     string
+	StorageClass   string
+	StorageID      string
+	Generation     int64
+	NodeName       string
+	RequestedBytes int64
+}
+
+func (c *kubeClient) listSessionPVCs(ctx context.Context, namespace string) ([]sessionPVC, error) {
+	path := "/api/v1/namespaces/" + url.PathEscape(namespace) + "/persistentvolumeclaims"
+	q := url.Values{}
+	q.Set("labelSelector", "app.kubernetes.io/managed-by=cocola")
+	path += "?" + q.Encode()
+	var out struct {
+		Items []struct {
+			Metadata kubeMeta `json:"metadata"`
+			Spec     struct {
+				VolumeName       string `json:"volumeName"`
+				StorageClassName string `json:"storageClassName"`
+			} `json:"spec"`
+			Status struct {
+				Phase string `json:"phase"`
+			} `json:"status"`
+		} `json:"items"`
 	}
-	path := "/api/v1/namespaces/" + url.PathEscape(namespace) + "/pods/" + url.PathEscape(name) + "/eviction"
-	return c.do(ctx, http.MethodPost, path, body, nil, "application/json")
+	if err := c.do(ctx, http.MethodGet, path, nil, &out, "application/json"); err != nil {
+		return nil, err
+	}
+	pvcs := make([]sessionPVC, 0, len(out.Items))
+	for _, pvc := range out.Items {
+		if pvc.Metadata.Labels["app.kubernetes.io/managed-by"] == "cocola" {
+			phase := pvc.Status.Phase
+			if pvc.Metadata.DeletionTimestamp != nil {
+				phase = "Terminating"
+			}
+			generation, _ := strconv.ParseInt(pvc.Metadata.Labels["cocola.dev/generation"], 10, 64)
+			requestedBytes, _ := strconv.ParseInt(pvc.Metadata.Labels["cocola.dev/requested-bytes"], 10, 64)
+			pvcs = append(pvcs, sessionPVC{
+				Name: pvc.Metadata.Name, Namespace: pvc.Metadata.Namespace, Phase: phase,
+				VolumeName: pvc.Spec.VolumeName, StorageClass: pvc.Spec.StorageClassName,
+				StorageID:  pvc.Metadata.Labels["cocola.dev/storage-id"],
+				Generation: generation, NodeName: pvc.Metadata.Labels["cocola.dev/node-name"],
+				RequestedBytes: requestedBytes,
+			})
+		}
+	}
+	return pvcs, nil
+}
+
+func (c *kubeClient) getSessionPVC(ctx context.Context, namespace, name string) (sessionPVC, bool, error) {
+	path := "/api/v1/namespaces/" + url.PathEscape(namespace) + "/persistentvolumeclaims/" + url.PathEscape(name)
+	var out struct {
+		Metadata kubeMeta `json:"metadata"`
+		Spec     struct {
+			VolumeName       string `json:"volumeName"`
+			StorageClassName string `json:"storageClassName"`
+		} `json:"spec"`
+		Status struct {
+			Phase string `json:"phase"`
+		} `json:"status"`
+	}
+	if err := c.do(ctx, http.MethodGet, path, nil, &out, "application/json"); err != nil {
+		if errors.Is(err, ErrNotFound) {
+			return sessionPVC{}, false, nil
+		}
+		return sessionPVC{}, false, err
+	}
+	phase := out.Status.Phase
+	if out.Metadata.DeletionTimestamp != nil {
+		phase = "Terminating"
+	}
+	generation, _ := strconv.ParseInt(out.Metadata.Labels["cocola.dev/generation"], 10, 64)
+	requestedBytes, _ := strconv.ParseInt(out.Metadata.Labels["cocola.dev/requested-bytes"], 10, 64)
+	return sessionPVC{
+		Name: out.Metadata.Name, Namespace: out.Metadata.Namespace, Phase: phase,
+		VolumeName: out.Spec.VolumeName, StorageClass: out.Spec.StorageClassName,
+		StorageID:  out.Metadata.Labels["cocola.dev/storage-id"],
+		Generation: generation, NodeName: out.Metadata.Labels["cocola.dev/node-name"],
+		RequestedBytes: requestedBytes,
+	}, true, nil
+}
+
+type sessionPV struct {
+	Name         string
+	StorageClass string
+	LocalPath    string
+}
+
+func (c *kubeClient) getSessionPV(ctx context.Context, name string) (sessionPV, error) {
+	var out struct {
+		Metadata kubeMeta `json:"metadata"`
+		Spec     struct {
+			StorageClassName string `json:"storageClassName"`
+			Local            *struct {
+				Path string `json:"path"`
+			} `json:"local"`
+			HostPath *struct {
+				Path string `json:"path"`
+			} `json:"hostPath"`
+		} `json:"spec"`
+	}
+	if err := c.do(ctx, http.MethodGet, "/api/v1/persistentvolumes/"+url.PathEscape(name), nil, &out, "application/json"); err != nil {
+		return sessionPV{}, err
+	}
+	path := ""
+	if out.Spec.Local != nil {
+		path = out.Spec.Local.Path
+	} else if out.Spec.HostPath != nil {
+		path = out.Spec.HostPath.Path
+	}
+	return sessionPV{Name: out.Metadata.Name, StorageClass: out.Spec.StorageClassName, LocalPath: path}, nil
+}
+
+type storageProbeFilesystem struct {
+	NodeName       string    `json:"node_name"`
+	TotalBytes     int64     `json:"total_bytes"`
+	UsedBytes      int64     `json:"used_bytes"`
+	AvailableBytes int64     `json:"available_bytes"`
+	MeasuredAt     time.Time `json:"measured_at"`
+}
+
+type storageProbeUsage struct {
+	NodeName       string    `json:"node_name"`
+	AllocatedBytes int64     `json:"allocated_bytes"`
+	FileCount      int64     `json:"file_count"`
+	DirectoryCount int64     `json:"directory_count"`
+	MeasuredAt     time.Time `json:"measured_at"`
+}
+
+func (c *kubeClient) storageProbeFilesystem(ctx context.Context, namespace, podName string) (storageProbeFilesystem, error) {
+	var out storageProbeFilesystem
+	err := c.do(ctx, http.MethodGet, c.storageProbeProxyPath(namespace, podName, "/v1/filesystem", nil), nil, &out, "application/json")
+	return out, err
+}
+
+func (c *kubeClient) storageProbeUsage(ctx context.Context, namespace, podName, relativePath string) (storageProbeUsage, error) {
+	query := url.Values{"path": []string{relativePath}}
+	var out storageProbeUsage
+	err := c.do(ctx, http.MethodGet, c.storageProbeProxyPath(namespace, podName, "/v1/usage", query), nil, &out, "application/json")
+	return out, err
+}
+
+func (c *kubeClient) storageProbeProxyPath(namespace, podName, endpoint string, query url.Values) string {
+	path := "/api/v1/namespaces/" + url.PathEscape(namespace) + "/pods/" + url.PathEscape(podName) + ":8095/proxy" + endpoint
+	if encoded := query.Encode(); encoded != "" {
+		path += "?" + encoded
+	}
+	return path
+}
+
+func (c *kubeClient) deletePVC(ctx context.Context, namespace, name string) error {
+	path := "/api/v1/namespaces/" + url.PathEscape(namespace) + "/persistentvolumeclaims/" + url.PathEscape(name)
+	body := map[string]any{"propagationPolicy": "Foreground"}
+	err := c.do(ctx, http.MethodDelete, path, body, nil, "application/json")
+	if errors.Is(err, ErrNotFound) {
+		return nil
+	}
+	return err
 }
 
 func (c *kubeClient) do(ctx context.Context, method, path string, body any, out any, contentType string) error {
@@ -310,10 +466,11 @@ type kubePod struct {
 }
 
 type kubeMeta struct {
-	Name        string            `json:"name"`
-	Namespace   string            `json:"namespace"`
-	Labels      map[string]string `json:"labels"`
-	Annotations map[string]string `json:"annotations"`
+	Name              string            `json:"name"`
+	Namespace         string            `json:"namespace"`
+	Labels            map[string]string `json:"labels"`
+	Annotations       map[string]string `json:"annotations"`
+	DeletionTimestamp *time.Time        `json:"deletionTimestamp"`
 }
 
 type kubeconfigDoc struct {

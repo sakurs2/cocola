@@ -44,6 +44,7 @@ class Skill:
     version: str = ""
     entrypoint: str = ""
     scope: str = ""
+    owner_user_id: str = ""
     content_sha256: str = ""
     bundle_object_key: str = ""
     skill_md: str = ""
@@ -63,6 +64,7 @@ class Skill:
             version=str(d.get("version", "")),
             entrypoint=str(d.get("entrypoint", "")),
             scope=str(d.get("scope", "")),
+            owner_user_id=str(d.get("owner_user_id", "")),
             content_sha256=str(d.get("content_sha256", "")),
             bundle_object_key=str(d.get("bundle_object_key", "")),
             skill_md=str(d.get("skill_md", "")),

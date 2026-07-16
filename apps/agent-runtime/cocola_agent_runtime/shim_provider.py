@@ -244,7 +244,7 @@ class InSandboxShimProvider:
     The resume binding (conversation/runtime -> native session ID) lives in a
     `SessionMap`. With a Postgres-backed map it survives an agent-runtime
     restart, so a follow-up turn resumes the on-disk native session (restored
-    from a MinIO checkpoint when the sandbox was replaced). The map is a pure
+    from the remounted Session Volume when the sandbox was replaced). The map is a pure
     index: the on-disk `~/.claude` or `~/.codex` state is the source of truth;
     the map only records which ID to reopen. Production injects Postgres; the
     in-process default exists only for isolated provider tests.
@@ -289,7 +289,7 @@ class InSandboxShimProvider:
         the selected runtime's auth variable. This exec env is applied on every
         turn's `exec_stream`, so cold, warm and reused sandboxes authenticate to
         the llm-gateway AS THE USER without a static provisioning credential --
-        the warm-pool-safe injection point (ADR-0009 keeps creds in env, never
+        the per-turn injection point (ADR-0009 keeps creds in env, never
         the prompt channel).
         """
         env: dict[str, str] = {}

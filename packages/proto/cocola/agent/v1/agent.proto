@@ -29,6 +29,8 @@ message QueryRequest {
   string runtime_id = 7;
   // Optional effective skill explicitly selected for this user turn.
   string skill_id = 8;
+  // Explicitly allows replacing an unavailable node-local workspace.
+  bool allow_workspace_reset = 9;
 }
 
 // Attachment is a single user-uploaded file delivered to the sandbox workspace

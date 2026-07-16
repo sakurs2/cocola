@@ -1,8 +1,7 @@
 // Package orchestrator owns the session<->sandbox binding lifecycle: it maps a
 // logical session to exactly one live sandbox, guarantees that concurrent
 // requests for the same session converge on a single sandbox (distributed
-// lock), and reclaims idle sandboxes via a lease/heartbeat + two-stage
-// (Pause-then-Destroy) garbage collector.
+// lock), and destroys idle sandboxes after their heartbeat lease expires.
 //
 // All binding state lives in Redis (behind the go-common KV interface) so that
 // sandbox-manager can run as multiple stateless replicas behind a load
@@ -15,24 +14,18 @@ import "time"
 // Redis can host other tenants/components without collision.
 const keyPrefix = "cocola:sb:"
 
-// Default lifecycle timings. The user picked these:
+// Default lifecycle timings:
 //   - leaseTTL:       a sandbox whose lease is not renewed within this window is
-//     considered idle and becomes eligible for stage-1 reclaim.
-//   - heartbeatEvery: how often the heartbeat worker renews live leases. Must be
-//     comfortably less than leaseTTL so missed ticks do not expire a healthy
-//     lease.
-//   - destroyGrace:   after a sandbox is Paused (stage 1), how long it lingers
-//     before it is Destroyed (stage 2). A re-acquire during this
-//     window resurrects it (Resume) instead of paying a cold
-//     create.
+//     considered idle and becomes eligible for reclaim.
 //   - lockTTL:        safety cap on the per-session create lock so a crashed
 //     holder cannot wedge a session forever.
 const (
-	DefaultLeaseTTL       = 10 * time.Minute
-	DefaultHeartbeatEvery = 20 * time.Second
-	DefaultDestroyGrace   = 120 * time.Second
-	DefaultLockTTL        = 30 * time.Second
-	DefaultReaperEvery    = 10 * time.Second
+	DefaultLeaseTTL = 10 * time.Minute
+	// OpenSandbox create calls may spend up to four minutes pulling an image and
+	// waiting for Kubernetes. CAS binding remains the final fencing boundary, but
+	// a five-minute lock avoids routinely creating a loser during a cold start.
+	DefaultLockTTL     = 5 * time.Minute
+	DefaultReaperEvery = 10 * time.Second
 )
 
 // convKey maps a session id to its bound sandbox id (forward lookup).
@@ -83,8 +76,6 @@ func warmScanPattern() string { return warmPrefix + "*" }
 
 // warmConfigKey is the runtime delivery cache written by admin-api from the
 // durable system setting. It only contains sizing; provisioning remains local.
-const warmConfigKey = keyPrefix + "warmpool:config"
-
 // warmRefillLockKey serialises the refill loop across replicas so only one
 // replica creates warm sandboxes per tick (avoids N replicas each creating a
 // full pool). Short TTL so a crashed holder frees it quickly.
@@ -96,20 +87,21 @@ type State string
 const (
 	// StateActive: sandbox is running and serving; lease is being renewed.
 	StateActive State = "active"
-	// StatePaused: stage-1 reclaim done (provider.Pause called); awaiting
-	// either resurrection (Resume on re-acquire) or stage-2 Destroy.
-	StatePaused State = "paused"
 )
 
 // meta is the durable registry record for one bound sandbox.
 type meta struct {
-	SandboxID   string `json:"sandbox_id"`
-	SessionID   string `json:"session_id"`
-	UserID      string `json:"user_id"`
-	Image       string `json:"image"`
-	State       State  `json:"state"`
-	CreatedUnix int64  `json:"created_unix"`
-	PausedUnix  int64  `json:"paused_unix"` // 0 unless StatePaused
+	SandboxID         string `json:"sandbox_id"`
+	SessionID         string `json:"session_id"`
+	UserID            string `json:"user_id"`
+	Image             string `json:"image"`
+	State             State  `json:"state"`
+	CreatedUnix       int64  `json:"created_unix"`
+	NodeName          string `json:"node_name,omitempty"`
+	StorageID         string `json:"storage_id,omitempty"`
+	PVCNamespace      string `json:"pvc_namespace,omitempty"`
+	SessionClaim      string `json:"session_claim,omitempty"`
+	StorageGeneration int64  `json:"storage_generation,omitempty"`
 }
 
 // warmMeta is the durable registry record for one pre-warmed sandbox.

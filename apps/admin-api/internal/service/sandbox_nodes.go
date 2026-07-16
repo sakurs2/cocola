@@ -28,25 +28,29 @@ type SandboxNodeList struct {
 }
 
 type SandboxNode struct {
-	Name              string            `json:"name"`
-	Status            string            `json:"status"`
-	Ready             bool              `json:"ready"`
-	Schedulable       bool              `json:"schedulable"`
-	CPUCapacity       string            `json:"cpu_capacity"`
-	MemoryCapacity    string            `json:"memory_capacity"`
-	CPUAllocatable    string            `json:"cpu_allocatable"`
-	MemoryAllocatable string            `json:"memory_allocatable"`
-	SandboxPods       int               `json:"sandbox_pods"`
-	MaxSandboxPods    *int              `json:"max_sandbox_pods,omitempty"`
-	Reason            string            `json:"reason,omitempty"`
-	Labels            map[string]string `json:"labels,omitempty"`
+	Name                  string            `json:"name"`
+	Status                string            `json:"status"`
+	Ready                 bool              `json:"ready"`
+	Schedulable           bool              `json:"schedulable"`
+	DiskPressure          bool              `json:"disk_pressure"`
+	CPUCapacity           string            `json:"cpu_capacity"`
+	MemoryCapacity        string            `json:"memory_capacity"`
+	CPUAllocatable        string            `json:"cpu_allocatable"`
+	MemoryAllocatable     string            `json:"memory_allocatable"`
+	SandboxPods           int               `json:"sandbox_pods"`
+	MaxSandboxPods        *int              `json:"max_sandbox_pods,omitempty"`
+	SessionCount          int               `json:"session_count"`
+	SessionRequestedBytes int64             `json:"session_requested_bytes"`
+	WorkspaceResetCount   int               `json:"workspace_reset_count"`
+	Reason                string            `json:"reason,omitempty"`
+	Labels                map[string]string `json:"labels,omitempty"`
 }
 
 type OfflineNodeResult struct {
-	Node        SandboxNode `json:"node"`
-	EvictedPods []string    `json:"evicted_pods,omitempty"`
-	PendingPods []string    `json:"pending_pods,omitempty"`
-	Message     string      `json:"message"`
+	Node             SandboxNode `json:"node"`
+	PendingPods      []string    `json:"pending_pods,omitempty"`
+	AffectedSessions int         `json:"affected_sessions,omitempty"`
+	Message          string      `json:"message"`
 }
 
 type JoinCommand struct {
@@ -58,7 +62,24 @@ func (a *Admin) ListSandboxNodes(ctx context.Context) (SandboxNodeList, error) {
 	if a.sandboxNodes == nil {
 		return SandboxNodeList{}, ErrNotConfigured
 	}
-	return a.sandboxNodes.ListNodes(ctx)
+	if a.sessionStorage == nil {
+		return SandboxNodeList{}, ErrNotConfigured
+	}
+	out, err := a.sandboxNodes.ListNodes(ctx)
+	if err != nil {
+		return out, err
+	}
+	usage, err := a.sessionStorage.NodeUsage(ctx)
+	if err != nil {
+		return SandboxNodeList{}, err
+	}
+	for i := range out.Nodes {
+		nodeUsage := usage[out.Nodes[i].Name]
+		out.Nodes[i].SessionCount = nodeUsage.SessionCount
+		out.Nodes[i].SessionRequestedBytes = nodeUsage.RequestedBytes
+		out.Nodes[i].WorkspaceResetCount = nodeUsage.ResetCount
+	}
+	return out, nil
 }
 
 func (a *Admin) DisableSandboxNode(ctx context.Context, name, actor string) (SandboxNode, error) {
@@ -112,6 +133,33 @@ func (a *Admin) OfflineSandboxNode(ctx context.Context, name string, force bool,
 	}
 	if strings.TrimSpace(name) == "" {
 		return OfflineNodeResult{}, ErrInvalidArg
+	}
+	if a.sessionStorage == nil {
+		return OfflineNodeResult{}, ErrNotConfigured
+	}
+	if !force {
+		usage, err := a.sessionStorage.NodeUsage(ctx)
+		if err != nil {
+			return OfflineNodeResult{}, err
+		}
+		if affected := usage[name].SessionCount; affected > 0 {
+			nodes, err := a.sandboxNodes.ListNodes(ctx)
+			if err != nil {
+				return OfflineNodeResult{}, err
+			}
+			for _, node := range nodes.Nodes {
+				if node.Name == name {
+					nodeUsage := usage[name]
+					node.SessionCount = nodeUsage.SessionCount
+					node.SessionRequestedBytes = nodeUsage.RequestedBytes
+					node.WorkspaceResetCount = nodeUsage.ResetCount
+					return OfflineNodeResult{
+						Node: node, AffectedSessions: affected,
+						Message: "confirmation required: node holds local session workspaces",
+					}, nil
+				}
+			}
+		}
 	}
 	out, err := a.sandboxNodes.OfflineNode(ctx, name, force)
 	if err != nil {
@@ -199,7 +247,7 @@ func (m *KubeSandboxNodeManager) SetMaxSandboxPods(ctx context.Context, name str
 	return m.getNode(ctx, name)
 }
 
-func (m *KubeSandboxNodeManager) OfflineNode(ctx context.Context, name string, force bool) (OfflineNodeResult, error) {
+func (m *KubeSandboxNodeManager) OfflineNode(ctx context.Context, name string, _ bool) (OfflineNodeResult, error) {
 	if err := m.client.patchNodeState(ctx, name, true, "offline"); err != nil {
 		return OfflineNodeResult{}, err
 	}
@@ -213,7 +261,7 @@ func (m *KubeSandboxNodeManager) OfflineNode(ctx context.Context, name string, f
 			pending = append(pending, p)
 		}
 	}
-	if len(pending) > 0 && !force {
+	if len(pending) > 0 {
 		node, getErr := m.getNode(ctx, name)
 		if getErr != nil {
 			return OfflineNodeResult{}, getErr
@@ -224,24 +272,12 @@ func (m *KubeSandboxNodeManager) OfflineNode(ctx context.Context, name string, f
 		return OfflineNodeResult{
 			Node:        node,
 			PendingPods: names,
-			Message:     "node cordoned; confirm force=true to evict sandbox pods",
+			Message:     "node cordoned; running sandboxes remain until they stop or are reclaimed",
 		}, nil
-	}
-	evicted := make([]string, 0, len(pending))
-	for _, p := range pending {
-		if err := m.client.evictPod(ctx, p.Metadata.Namespace, p.Metadata.Name); err != nil {
-			return OfflineNodeResult{}, err
-		}
-		evicted = append(evicted, p.Metadata.Name)
 	}
 	node, err := m.getNode(ctx, name)
 	if err != nil {
 		return OfflineNodeResult{}, err
-	}
-	if len(evicted) > 0 {
-		node.Status = "offline_pending"
-		node.SandboxPods = len(evicted)
-		return OfflineNodeResult{Node: node, EvictedPods: evicted, Message: "node cordoned; sandbox pod eviction requested"}, nil
 	}
 	node.Status = "offline"
 	return OfflineNodeResult{Node: node, Message: "node cordoned and has no running sandbox pods"}, nil
@@ -249,7 +285,10 @@ func (m *KubeSandboxNodeManager) OfflineNode(ctx context.Context, name string, f
 
 func (m *KubeSandboxNodeManager) JoinCommand(context.Context) (JoinCommand, error) {
 	if cmd := strings.TrimSpace(os.Getenv("COCOLA_K3S_JOIN_COMMAND")); cmd != "" {
-		return JoinCommand{Command: cmd, Note: "Run this on a Linux machine to join it as a k3s agent."}, nil
+		return JoinCommand{
+			Command: cmd,
+			Note:    "Before joining, mount the intended local disk at /var/lib/cocola/storage. Workspaces on that node are lost if the disk fails.",
+		}, nil
 	}
 	server := strings.TrimSpace(os.Getenv("COCOLA_K3S_SERVER_URL"))
 	if server == "" {
@@ -261,7 +300,7 @@ func (m *KubeSandboxNodeManager) JoinCommand(context.Context) (JoinCommand, erro
 	}
 	return JoinCommand{
 		Command: fmt.Sprintf("curl -sfL https://get.k3s.io | K3S_URL=%s K3S_TOKEN=%s sh -", server, tokenRef),
-		Note:    "cocola only displays the join command; the operator runs it on the target machine.",
+		Note:    "Before joining, ensure /var/lib/cocola/storage is on the intended local disk. Local workspace data is lost if that disk fails.",
 	}, nil
 }
 
@@ -305,6 +344,7 @@ func nodeSummary(n kubeNode, sandboxPods int) SandboxNode {
 		Status:            status,
 		Ready:             ready,
 		Schedulable:       schedulable,
+		DiskPressure:      nodeDiskPressure(n),
 		CPUCapacity:       n.Status.Capacity["cpu"],
 		MemoryCapacity:    n.Status.Capacity["memory"],
 		CPUAllocatable:    n.Status.Allocatable["cpu"],
@@ -314,6 +354,15 @@ func nodeSummary(n kubeNode, sandboxPods int) SandboxNode {
 		Reason:            reason,
 		Labels:            n.Metadata.Labels,
 	}
+}
+
+func nodeDiskPressure(n kubeNode) bool {
+	for _, condition := range n.Status.Conditions {
+		if condition.Type == "DiskPressure" {
+			return condition.Status == "True"
+		}
+	}
+	return false
 }
 
 func parseMaxSandboxPods(raw string) *int {

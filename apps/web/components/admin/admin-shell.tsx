@@ -9,6 +9,7 @@ import {
   FileText,
   Gear,
   Graph,
+  HardDrives,
   List,
   PlugsConnected,
   ShieldCheck,
@@ -61,6 +62,7 @@ const NAV_GROUPS: { label: string; items: AdminNavItem[] }[] = [
     items: [
       { href: "/admin/sandboxes", label: "Sandboxes", icon: Stack },
       { href: "/admin/sandbox-nodes", label: "Nodes", icon: Cpu },
+      { href: "/admin/storage", label: "Storage", icon: HardDrives },
       { href: "/admin/architecture", label: "Architecture", icon: Graph },
       { href: "/admin/component-logs", label: "Service Logs", icon: TerminalWindow },
     ],

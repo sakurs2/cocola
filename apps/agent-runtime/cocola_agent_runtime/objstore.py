@@ -13,7 +13,7 @@ of the runtime uses.
 
 Configuration is env-driven (COCOLA_MINIO_*), mirroring the gateway. Object
 storage is required by the production composition root so attachments,
-artifacts, and checkpoint restores cannot silently disappear.
+artifacts and Skill bundles cannot silently disappear.
 """
 
 from __future__ import annotations
@@ -28,7 +28,7 @@ log = get_logger("cocola.agent-runtime.objstore")
 
 
 class Fetcher(Protocol):
-    """Fetches attachments/checkpoints and publishes output artifacts."""
+    """Fetches attachments/Skill bundles and publishes output artifacts."""
 
     def get(self, key: str) -> bytes: ...
     def put(self, key: str, data: bytes, mime: str) -> None: ...

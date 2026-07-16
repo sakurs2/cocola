@@ -105,23 +105,15 @@ const execEventBuffer = 32
 // (deploy/sandbox-runtime/Dockerfile). The in-container paths are a shared
 // platform contract, not a per-provider choice.
 const (
+	// guestSession is the single persistent session-volume mount. User-facing
+	// paths below are symlinked into its stable directory layout at startup.
+	guestSession = "/session"
 	// guestWorkspace is the user-visible per-session workspace root.
 	guestWorkspace = "/workspace"
 	// guestClaudeConfig is the hidden session-local Claude Code config root.
 	guestClaudeConfig = "/home/cocola/.claude"
 	// guestCodexConfig is the hidden session-local Codex config and session root.
-	guestCodexConfig = "/home/cocola/.codex"
-	// guestPlugins is the read-only platform-skill mount.
-	guestPlugins = "/data/plugins"
-	// workspaceSubPath and claudeSubPath split one session PVC into a visible
-	// workspace and hidden Claude state. The state remains session-scoped without
-	// leaking .claude into /workspace file listings.
-	workspaceSubPath = "workspace"
-	claudeSubPath    = "claude"
-	codexSubPath     = "codex"
-	// pluginsClaimName is the shared, pre-provisioned platform-skill volume.
-	// It is mounted read-only into every sandbox.
-	pluginsClaimName  = "cocola-plugins"
+	guestCodexConfig  = "/home/cocola/.codex"
 	volumeBackendPVC  = "pvc"
 	volumeBackendHost = "host"
 	// defaultCPU / defaultMemory are applied when a SandboxSpec carries no
@@ -173,10 +165,9 @@ type Provider struct {
 	execUser    string
 	execTimeout time.Duration
 
-	// volumeBackend selects how cocola exposes persistent session storage to
-	// OpenSandbox. "pvc" preserves the historical Docker-volume/K8s-PVC request
-	// shape; "host" points OpenSandbox at directories under root, which may be an
-	// NFS/NAS mount already present on every node.
+	// volumeBackend selects how cocola exposes the single /session volume.
+	// Production k3s uses a local-path PVC; the legacy Docker deployment maps a
+	// host directory under root into the same in-container contract.
 	volumeBackend string
 	root          string
 }
@@ -394,7 +385,6 @@ func (p *Provider) Create(ctx context.Context, spec provider.SandboxSpec) (*prov
 		Metadata: map[string]string{
 			"cocola.user_id":    safeMetadataLabelValue(spec.UserID),
 			"cocola.session_id": safeMetadataLabelValue(spec.SessionID),
-			"cocola.warm":       safeMetadataLabelValue(boolLabel(spec.Warm)),
 		},
 	}
 	if spec.TargetNodeName != "" {
@@ -416,15 +406,14 @@ func (p *Provider) Create(ctx context.Context, spec provider.SandboxSpec) (*prov
 		// provider fixes this by chowning the host bind-mount; opensandbox volumes
 		// live inside the server runtime and are unreachable from here, and the server
 		// API exposes no fsGroup/securityContext, so the entrypoint is the only seam.
-		req.Entrypoint = chownEntrypoint(p.execUser)
+		req.Entrypoint = sessionEntrypoint(p.execUser)
 	}
 	if rl := mapResources(spec.Resources); len(rl) > 0 {
 		req.ResourceLimits = rl
 	}
-	// Volume mapping: per-session workspace, per-session Claude config, plus
-	// read-only platform skills. See mapVolumes. Claude config is mounted outside
-	// /workspace so user file listings do not expose it.
-	vols, err := p.mapVolumes(spec.UserID, spec.SessionID, spec.Warm)
+	// Volume mapping: one per-session root. The entrypoint creates the stable
+	// directory layout and exposes it at the runtime-specific paths.
+	vols, err := p.mapVolumes(spec)
 	if err != nil {
 		return nil, err
 	}
@@ -674,7 +663,7 @@ func (p *Provider) Pause(ctx context.Context, sid string) error {
 //
 // A resume can race the sandbox's real lifecycle: our durable binding may still
 // say Paused while OpenSandbox has already driven the pod to a terminal phase
-// (Succeed/Failed/Terminated) and discarded the paused checkpoint. That returns
+// (Succeed/Failed/Terminated) and discarded the paused compute state. That returns
 // 409 KUBERNETES::INVALID_STATE ("Cannot resume sandbox in phase Succeed,
 // expected Paused"), which is NOT a transient error — the sandbox can never be
 // resumed. We re-read the authoritative phase to disambiguate: an already-Running
@@ -713,7 +702,7 @@ func (p *Provider) classifyResumeErr(ctx context.Context, osbID string, resumeEr
 		// Still (or not yet) resumable — treat as transient, let the caller retry.
 		return resumeErr
 	default:
-		// Succeed / Failed / Terminated / Stopping: terminal, checkpoint gone.
+		// Succeed / Failed / Terminated / Stopping: terminal compute state.
 		return fmt.Errorf("opensandbox: resume %s in phase %s: %w", osbID, info.Status.State, provider.ErrSandboxNotResumable)
 	}
 }
@@ -980,33 +969,38 @@ func shellJoin(argv []string) string {
 	return strings.Join(parts, " ")
 }
 
-// chownEntrypoint builds the sandbox entry process. It is a no-op idle-blocker
-// (sleep infinity), optionally prefixed by a one-time chown of the mounted,
-// root-owned session mounts to execUser so the non-root Exec user can write
-// them (see the Create call site for the full rationale). When execUser is
-// empty, Exec runs as root, so no chown is needed and we return a bare blocker.
-func chownEntrypoint(execUser string) []string {
-	if execUser == "" {
-		return []string{"sleep", "infinity"}
+// sessionEntrypoint initializes the mounted session volume and exposes its
+// directories at the paths expected by Claude, Codex and user tooling. The
+// container entry process runs as root, while subsequent Exec calls drop to
+// execUser, so ownership is fixed here once per sandbox creation.
+func sessionEntrypoint(execUser string) []string {
+	dirs := []string{
+		guestSession + "/workspace",
+		guestSession + "/runtime/claude",
+		guestSession + "/runtime/codex",
+		guestSession + "/runtime/cocola",
+		guestSession + "/home/local",
 	}
-	owner := shellQuote(execUser) + ":" + shellQuote(execUser)
-	paths := shellJoin([]string{
-		guestWorkspace,
-		guestClaudeConfig,
-		guestCodexConfig,
-	})
-	script := "mkdir -p " + shellJoin([]string{guestWorkspace, guestClaudeConfig, guestCodexConfig}) +
-		" && chown -R " + owner + " " + paths +
-		" || true; exec sleep infinity"
+	script := "mkdir -p " + shellJoin(dirs)
+	if execUser != "" {
+		owner := shellQuote(execUser) + ":" + shellQuote(execUser)
+		script += " && chown " + owner + " " + shellJoin(dirs)
+	}
+	script += symlinkCommand(guestWorkspace, guestSession+"/workspace")
+	script += symlinkCommand(guestClaudeConfig, guestSession+"/runtime/claude")
+	script += symlinkCommand(guestCodexConfig, guestSession+"/runtime/codex")
+	script += symlinkCommand("/home/cocola/.cocola", guestSession+"/runtime/cocola")
+	script += symlinkCommand("/home/cocola/.local", guestSession+"/home/local")
+	// A Running sandbox must imply that every persistent path is ready. Keeping
+	// the final exec in the && chain prevents a mount/link failure from silently
+	// falling back to directories in the ephemeral image rootfs.
+	script += " && exec sleep infinity"
 	return []string{"/bin/sh", "-c", script}
 }
 
-// boolLabel renders a bool as a metadata-friendly "true"/"false" string.
-func boolLabel(b bool) string {
-	if b {
-		return "true"
-	}
-	return "false"
+func symlinkCommand(link, target string) string {
+	return " && rm -rf " + shellQuote(link) +
+		" && ln -s " + shellQuote(target) + " " + shellQuote(link)
 }
 
 // shellQuote wraps s in single quotes, escaping any embedded single quotes
@@ -1076,143 +1070,46 @@ func volumeBackendFromEnv() string {
 	return raw
 }
 
-// mapVolumes translates cocola's filesystem model into the OpenSandbox volumes
-// list. It presents the filesystem expected by the brain image. PVC mode keeps
-// the historical request shape:
-//
-//   - workspace:       pvc cocola-session-<sid>, subPath workspace -> /workspace
-//   - Claude state:    pvc cocola-session-<sid>, subPath claude    -> /home/cocola/.claude
-//   - Codex state:     pvc cocola-session-<sid>, subPath codex     -> /home/cocola/.codex
-//   - platform skills: pvc cocola-plugins (shared)                 -> /data/plugins (RO)
-//
-// Runtime state is mounted outside /workspace so file listings remain user
-// focused, while still being session-scoped and checkpoint-friendly. No
-// per-user writable volume is declared, so sessions cannot share runtime state.
-//
-// Host mode maps the same guest paths to directories under:
-//
-//	<root>/users/<user>/sessions/<session>/{workspace,claude,codex}
-//
-// where <root> may be an NFS/NAS mount. CreateIfNotExists lets the server
-// provision PVC volumes lazily; host mode creates directories locally before
-// sending the create request. Neither backend deletes storage on sandbox
-// termination; explicit conversation deletion calls CleanupSessionStorage.
-func (p *Provider) mapVolumes(userID, sessionID string, warm bool) ([]volumeSpec, error) {
-	// Warm sandboxes are session-agnostic: they are created ahead of demand with
-	// no bound session yet, and OpenSandbox has no hot-mount-volume API (ADR-0016)
-	// so a per-session PVC can never be attached after the fact. We therefore mount
-	// ONLY the shared read-only platform-skills volume. When a session later claims
-	// the warm sandbox its workspace and runtime state are delivered via checkpoint
-	// restore (agent-runtime restore_if_fresh on reused=false), not a PVC.
-	if warm {
-		return p.mapWarmVolumes(), nil
-	}
+// mapVolumes mounts one session root. In managed k3s mode the request-driven
+// storage manager creates the claim first. Host mode maps the same layout from
+// <root>/users/<user>/sessions/<session>.
+func (p *Provider) mapVolumes(spec provider.SandboxSpec) ([]volumeSpec, error) {
 	if p.volumeBackend == volumeBackendHost {
-		return p.mapHostVolumes(userID, sessionID)
+		return p.mapHostVolumes(spec.UserID, spec.SessionID)
 	}
-	return mapPVCVolumes(sessionID), nil
+	if strings.TrimSpace(spec.SessionClaim) == "" {
+		return nil, provider.ErrSessionClaimRequired
+	}
+	return mapPVCVolumes(spec.SessionClaim), nil
 }
 
-// mapWarmVolumes returns the volume set for a session-agnostic warm sandbox:
-// the shared read-only plugins volume only. In host-backend mode the plugins
-// directory lives under <root>/plugins; in PVC mode it is the shared
-// cocola-plugins claim. No writable session volume is declared, so the warm
-// sandbox's /workspace, .claude and .codex are the image's own ephemeral dirs
-// until a claim restores real state into them.
-func (p *Provider) mapWarmVolumes() []volumeSpec {
-	if p.volumeBackend == volumeBackendHost {
-		return []volumeSpec{
-			{
-				Name:      "plugins",
-				Host:      &hostBackend{Path: filepath.Join(p.root, "plugins")},
-				MountPath: guestPlugins,
-				ReadOnly:  true,
-			},
-		}
-	}
-	return []volumeSpec{
-		{
-			Name:      "plugins",
-			PVC:       &pvcBackend{ClaimName: pluginsClaimName},
-			MountPath: guestPlugins,
-			ReadOnly:  true,
-		},
-	}
-}
-
-func mapPVCVolumes(sessionID string) []volumeSpec {
-	sid := safe(sessionID)
-	sessionClaim := "cocola-session-" + sid
+func mapPVCVolumes(claimName string) []volumeSpec {
 	return []volumeSpec{
 		{
 			Name:      "session",
-			PVC:       &pvcBackend{ClaimName: sessionClaim, CreateIfNotExists: true},
-			MountPath: guestWorkspace,
-			SubPath:   workspaceSubPath,
-		},
-		{
-			Name:      "claude",
-			PVC:       &pvcBackend{ClaimName: sessionClaim, CreateIfNotExists: true},
-			MountPath: guestClaudeConfig,
-			SubPath:   claudeSubPath,
-		},
-		{
-			Name:      "codex",
-			PVC:       &pvcBackend{ClaimName: sessionClaim, CreateIfNotExists: true},
-			MountPath: guestCodexConfig,
-			SubPath:   codexSubPath,
-		},
-		{
-			Name:      "plugins",
-			PVC:       &pvcBackend{ClaimName: pluginsClaimName},
-			MountPath: guestPlugins,
-			ReadOnly:  true,
+			PVC:       &pvcBackend{ClaimName: claimName},
+			MountPath: guestSession,
 		},
 	}
 }
 
 func (p *Provider) mapHostVolumes(userID, sessionID string) ([]volumeSpec, error) {
 	sessionRoot := p.sessionRoot(userID, sessionID)
-	workspaceDir := filepath.Join(sessionRoot, workspaceSubPath)
-	claudeDir := filepath.Join(sessionRoot, claudeSubPath)
-	codexDir := filepath.Join(sessionRoot, codexSubPath)
-	pluginDir := filepath.Join(p.root, "plugins")
-	for _, d := range []string{workspaceDir, claudeDir, codexDir, pluginDir} {
-		if !isSubpath(p.root, d) {
-			return nil, fmt.Errorf("opensandbox: volume path outside root: %s", d)
-		}
-		if err := os.MkdirAll(d, 0o755); err != nil {
-			return nil, fmt.Errorf("opensandbox: mkdir %s: %w", d, err)
-		}
+	if !isSubpath(p.root, sessionRoot) {
+		return nil, fmt.Errorf("opensandbox: volume path outside root: %s", sessionRoot)
 	}
-	for _, d := range []string{workspaceDir, claudeDir, codexDir} {
-		if err := os.Chown(d, 10001, 10001); err != nil {
-			// Best effort: a pre-created NFS directory may already have the right
-			// ownership or may reject chown due to export options.
-			continue
-		}
+	if err := os.MkdirAll(sessionRoot, 0o755); err != nil {
+		return nil, fmt.Errorf("opensandbox: mkdir %s: %w", sessionRoot, err)
+	}
+	if err := os.Chown(sessionRoot, 10001, 10001); err != nil {
+		// Best effort: an externally-mounted directory may already have the right
+		// ownership or may reject chown due to export options.
 	}
 	return []volumeSpec{
 		{
-			Name:      "workspace",
-			Host:      &hostBackend{Path: workspaceDir},
-			MountPath: guestWorkspace,
-		},
-		{
-			Name:      "claude",
-			Host:      &hostBackend{Path: claudeDir},
-			MountPath: guestClaudeConfig,
-		},
-		{
-			Name:      "codex",
-			Host:      &hostBackend{Path: codexDir},
-			MountPath: guestCodexConfig,
-		},
-		{
-			Name:      "plugins",
-			Host:      &hostBackend{Path: pluginDir},
-			MountPath: guestPlugins,
-			ReadOnly:  true,
+			Name:      "session",
+			Host:      &hostBackend{Path: sessionRoot},
+			MountPath: guestSession,
 		},
 	}, nil
 }

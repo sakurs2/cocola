@@ -33,7 +33,6 @@ type SandboxRuntime struct {
 	LifecycleState string    `json:"lifecycle_state"`
 	Image          string    `json:"image,omitempty"`
 	CreatedAt      time.Time `json:"created_at,omitempty"`
-	PausedAt       time.Time `json:"paused_at,omitempty"`
 	PodName        string    `json:"pod_name,omitempty"`
 	PodPhase       string    `json:"pod_phase,omitempty"`
 	NodeName       string    `json:"node_name,omitempty"`
@@ -45,7 +44,7 @@ type SandboxPodReader interface {
 
 // SandboxPodDeleter is the optional teardown surface: an implementation can
 // delete the BatchSandbox CRD that owns a sandbox pod. A pod reader that also
-// implements this enables the admin manual-delete flow (warm + orphan cleanup).
+// implements this enables the admin manual-delete flow for orphan cleanup.
 type SandboxPodDeleter interface {
 	DeleteSandboxObject(ctx context.Context, sandboxID string) error
 }
@@ -115,9 +114,8 @@ func (m *RedisSandboxRuntimeManager) ListSandboxes(ctx context.Context) (Sandbox
 	}
 
 	var out []SandboxRuntime
-	// accounted tracks every sandbox id that a meta or warm record explains, so
-	// the orphan pass below can flag pods that no Redis record covers (B-class
-	// orphans: a live pod with no binding and no warm entry).
+	// accounted tracks every sandbox id that a binding record explains, so the
+	// orphan pass below can flag pods that no Redis record covers.
 	accounted := map[string]bool{}
 	err := m.kv.ScanKeys(ctx, sandboxMetaScanPattern(), 100, func(keys []string) error {
 		for _, key := range keys {
@@ -161,36 +159,8 @@ func (m *RedisSandboxRuntimeManager) ListSandboxes(ctx context.Context) (Sandbox
 		return SandboxRuntimeList{}, err
 	}
 
-	// Warm pool: session-agnostic pre-warmed sandboxes waiting to be claimed.
-	// They live under warm:* (not meta:*), so surface them here with a fixed
-	// "ready" status. Once claimed they migrate to meta:* and show as running.
-	if err := m.kv.ScanKeys(ctx, warmScanPattern(), 100, func(keys []string) error {
-		for _, key := range keys {
-			raw, err := m.kv.Get(ctx, key)
-			if errors.Is(err, rds.ErrNil) {
-				continue
-			}
-			if err != nil {
-				return err
-			}
-			var wm warmRuntimeMeta
-			if err := json.Unmarshal([]byte(raw), &wm); err != nil {
-				continue
-			}
-			if wm.SandboxID == "" {
-				continue
-			}
-			accounted[wm.SandboxID] = true
-			pod := podsBySandbox[wm.SandboxID]
-			out = append(out, warmRuntime(wm, pod))
-		}
-		return nil
-	}); err != nil {
-		return SandboxRuntimeList{}, err
-	}
-
-	// B-class orphans: a pod exists but no meta/warm record explains it (e.g. a
-	// crashed bind, a leaked warm create, or manual kubectl tinkering). Only
+	// B-class orphans: a pod exists but no binding record explains it (e.g. a
+	// crashed bind or manual kubectl tinkering). Only
 	// detectable when pod state is available. Surfaced as "orphan" so an admin
 	// can reclaim it from the UI.
 	if podStateAvailable {
@@ -210,8 +180,8 @@ func (m *RedisSandboxRuntimeManager) ListSandboxes(ctx context.Context) (Sandbox
 
 // DeleteSandbox tears down a sandbox by deleting its BatchSandbox CRD (which
 // garbage-collects the pod) and clearing every Redis record that could reference
-// it (warm/meta/conv/rev/lease). It is the admin manual-reclaim path for warm
-// and orphan entries. Requires a pod reader that also implements
+// it (meta/conv/rev/lease). It is the admin manual-reclaim path for orphan
+// entries. Requires a pod reader that also implements
 // SandboxPodDeleter (i.e. Kubernetes access); otherwise returns
 // ErrSandboxRuntimeNotConfigured. A CRD already gone is not an error — the Redis
 // cleanup still runs so a stale record never lingers.
@@ -239,7 +209,6 @@ func (m *RedisSandboxRuntimeManager) DeleteSandbox(ctx context.Context, sandboxI
 		return err
 	}
 	keys := []string{
-		warmKey(sandboxID),
 		sandboxMetaKey(sandboxID),
 		sandboxRevKey(sandboxID),
 		sandboxLeaseKey(sandboxID),
@@ -310,52 +279,16 @@ type sandboxRuntimeMeta struct {
 	Image       string `json:"image"`
 	State       string `json:"state"`
 	CreatedUnix int64  `json:"created_unix"`
-	PausedUnix  int64  `json:"paused_unix"`
 }
 
 const sandboxRuntimeKeyPrefix = "cocola:sb:"
 
-func sandboxMetaScanPattern() string { return sandboxRuntimeKeyPrefix + "meta:*" }
+func sandboxMetaScanPattern() string         { return sandboxRuntimeKeyPrefix + "meta:*" }
 func sandboxMetaKey(sandboxID string) string { return sandboxRuntimeKeyPrefix + "meta:" + sandboxID }
 func sandboxConvKey(sessionID string) string { return sandboxRuntimeKeyPrefix + "conv:" + sessionID }
 func sandboxRevKey(sandboxID string) string  { return sandboxRuntimeKeyPrefix + "rev:" + sandboxID }
 func sandboxLeaseKey(sandboxID string) string {
 	return sandboxRuntimeKeyPrefix + "lease:" + sandboxID
-}
-
-// warm:{sandbox} holds one pre-warmed, session-agnostic sandbox awaiting a
-// claim. Mirrors sandbox-manager's key layout so admin-api can read the pool.
-func warmScanPattern() string       { return sandboxRuntimeKeyPrefix + "warm:*" }
-func warmKey(sandboxID string) string { return sandboxRuntimeKeyPrefix + "warm:" + sandboxID }
-
-// warmRuntimeMeta mirrors the JSON sandbox-manager writes under warm:{id}. Only
-// the fields admin-api displays are decoded; unknown fields are ignored.
-type warmRuntimeMeta struct {
-	SandboxID   string `json:"sandbox_id"`
-	Image       string `json:"image"`
-	NodeName    string `json:"node_name"`
-	CreatedUnix int64  `json:"created_unix"`
-}
-
-// warmRuntime renders a warm-pool entry as a "ready" runtime row. Pod fields are
-// filled when cluster state is available so the admin can see where it landed.
-func warmRuntime(wm warmRuntimeMeta, pod kubePod) SandboxRuntime {
-	rt := SandboxRuntime{
-		SandboxID:      wm.SandboxID,
-		Status:         "ready",
-		LifecycleState: "warm",
-		Image:          wm.Image,
-		NodeName:       wm.NodeName,
-		PodName:        pod.Metadata.Name,
-		PodPhase:       pod.Status.Phase,
-	}
-	if pod.Spec.NodeName != "" {
-		rt.NodeName = pod.Spec.NodeName
-	}
-	if wm.CreatedUnix > 0 {
-		rt.CreatedAt = time.Unix(wm.CreatedUnix, 0).UTC()
-	}
-	return rt
 }
 
 // orphanRuntime renders a pod that no Redis record explains as an "orphan" row
@@ -396,9 +329,6 @@ func runtimeFromMeta(meta sandboxRuntimeMeta, leasePresent bool, pod kubePod) Sa
 	if meta.CreatedUnix > 0 {
 		rt.CreatedAt = time.Unix(meta.CreatedUnix, 0).UTC()
 	}
-	if meta.PausedUnix > 0 {
-		rt.PausedAt = time.Unix(meta.PausedUnix, 0).UTC()
-	}
 	return rt
 }
 
@@ -410,8 +340,6 @@ func sandboxRuntimeStatus(lifecycle string, leasePresent bool, podPhase string) 
 		return "stopped"
 	}
 	switch lifecycle {
-	case "paused":
-		return "reclaiming"
 	case "active":
 		if !leasePresent {
 			return "pending_reclaim"

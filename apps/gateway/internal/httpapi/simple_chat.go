@@ -325,7 +325,8 @@ func (a *API) executeLiveRun(live *liveRun) {
 		RuntimeID: live.request.RuntimeID, SkillID: live.request.SkillID,
 		Prompt: live.request.Prompt, SandboxID: live.request.SandboxID,
 		MaxTurns: live.request.MaxTurns, ModelRouteID: effectiveModelRouteID(live.request),
-		TraceID: live.run.ID, ParentSpanID: conversationRootSpan(live.traceCtx),
+		AllowWorkspaceReset: live.request.AllowWorkspaceReset,
+		TraceID:             live.run.ID, ParentSpanID: conversationRootSpan(live.traceCtx),
 		SandboxAuthToken: a.mintSandboxToken(live.identity), Attachments: attachments,
 	}
 	coalescer := memoryEventCoalescer{run: live, window: a.runs.mergeWindow}

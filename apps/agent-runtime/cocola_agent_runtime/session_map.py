@@ -4,9 +4,8 @@ Continuation needs the native session ID emitted by the selected runtime.
 Two facts shape this module:
 
   1. The sufficient condition for a real resume is the selected runtime's
-     on-disk session state in the active sandbox (``~/.claude`` or
-     ``~/.codex``). When a sandbox is replaced, it is restored from the latest
-     MinIO checkpoint; no session persistent volume is assumed.
+     on-disk session state in the session volume (``~/.claude`` or
+     ``~/.codex``), which is remounted when a sandbox is replaced.
   2. This table is therefore a pure *INDEX*: cocola's session_id -> the
      runtime_session_id to pass as ``resume``. It survives an agent-runtime
      restart so a follow-up turn still knows which on-disk session to reopen;
@@ -22,8 +21,8 @@ lives. Two implementations:
     Durable index in the ``session_map`` table (schema owned by
     ``db/migrations``; this module only reads/writes). ``put`` is an idempotent
     ``INSERT ... ON CONFLICT DO UPDATE`` keyed by ``session_id``. Survives a
-    restart, so paired with checkpoint restore a follow-up turn resumes the real
-    conversation even after the previous sandbox was destroyed.
+    restart, so paired with the persistent session volume a follow-up turn
+    resumes the real conversation after the previous sandbox was destroyed.
 """
 
 from __future__ import annotations
@@ -44,7 +43,6 @@ class SessionBinding:
     runtime_id: str = ""
     user_id: str = ""
     sandbox_id: str = ""
-    checkpoint_object_key: str = ""
 
 
 @runtime_checkable
@@ -69,11 +67,6 @@ class SessionMap(Protocol):
         runtime_id: str = "",
     ) -> None:
         """Record the latest native session ID for a cocola conversation."""
-
-    async def get_checkpoint(
-        self, session_id: str, *, user_id: str = "", runtime_id: str = ""
-    ) -> str | None:
-        """Return the latest checkpoint object key for a cocola session."""
 
     async def delete(self, session_id: str, *, user_id: str = "", runtime_id: str = "") -> None:
         """Forget a session's binding (e.g. a dangling/stale resume id)."""
@@ -112,7 +105,6 @@ class MemorySessionMap:
             runtime_id=binding.runtime_id,
             user_id=binding.user_id,
             sandbox_id=binding.sandbox_id,
-            checkpoint_object_key=binding.checkpoint_object_key,
         )
 
     async def put(
@@ -139,21 +131,7 @@ class MemorySessionMap:
                 runtime_id=runtime_id,
                 user_id=user_id,
                 sandbox_id=sandbox_id,
-                checkpoint_object_key=current.checkpoint_object_key if current else "",
             )
-
-    async def get_checkpoint(
-        self, session_id: str, *, user_id: str = "", runtime_id: str = ""
-    ) -> str | None:
-        if not user_id:
-            return None
-        binding = self._d.get(session_id)
-        if binding and (
-            binding.user_id != user_id or (runtime_id and binding.runtime_id != runtime_id)
-        ):
-            return None
-        key = binding.checkpoint_object_key if binding else ""
-        return key or None
 
     async def delete(self, session_id: str, *, user_id: str = "", runtime_id: str = "") -> None:
         if not user_id:
@@ -170,13 +148,13 @@ class MemorySessionMap:
 
 
 _GET = """
-SELECT runtime_session_id, sandbox_id, checkpoint_object_key, user_id, runtime_id
+SELECT runtime_session_id, sandbox_id, user_id, runtime_id
 FROM session_map
 WHERE session_id = %s AND user_id = %s AND runtime_id = %s
 """
 
 _GET_OWNED = """
-SELECT runtime_session_id, sandbox_id, checkpoint_object_key, user_id, runtime_id
+SELECT runtime_session_id, sandbox_id, user_id, runtime_id
 FROM session_map
 WHERE session_id = %s AND user_id = %s
 """
@@ -194,13 +172,6 @@ DO UPDATE SET runtime_session_id = EXCLUDED.runtime_session_id,
 WHERE session_map.user_id = EXCLUDED.user_id
   AND session_map.runtime_id = EXCLUDED.runtime_id
 RETURNING session_id
-"""
-
-_GET_CHECKPOINT = """
-SELECT checkpoint_object_key
-FROM session_map
-WHERE session_id = %s AND user_id = %s
-  AND runtime_id = %s
 """
 
 _DELETE = "DELETE FROM session_map WHERE session_id = %s AND user_id = %s AND runtime_id = %s"
@@ -249,10 +220,9 @@ class PostgresSessionMap:
             return None
         return SessionBinding(
             runtime_session_id=cid,
-            runtime_id=row[4] or "",
-            user_id=row[3] or "",
+            runtime_id=row[3] or "",
+            user_id=row[2] or "",
             sandbox_id=row[1] or "",
-            checkpoint_object_key=row[2] or "",
         )
 
     async def put(
@@ -277,21 +247,6 @@ class PostgresSessionMap:
             )
             if await cur.fetchone() is None:
                 raise PermissionError("session owner mismatch")
-
-    async def get_checkpoint(
-        self, session_id: str, *, user_id: str = "", runtime_id: str = ""
-    ) -> str | None:
-        if not user_id:
-            return None
-        await self._ready()
-        async with self._pool.connection() as conn:
-            if not runtime_id:
-                return None
-            cur = await conn.execute(_GET_CHECKPOINT, (session_id, user_id, runtime_id))
-            row = await cur.fetchone()
-        if not row:
-            return None
-        return row[0] or None
 
     async def delete(self, session_id: str, *, user_id: str = "", runtime_id: str = "") -> None:
         if not user_id:

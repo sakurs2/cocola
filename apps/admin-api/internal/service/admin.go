@@ -39,6 +39,8 @@ var (
 	ErrPermissionDenied   = errors.New("service: permission denied")
 	ErrScheduleInPast     = errors.New("service: schedule time is in the past")
 	ErrScheduleExpiration = errors.New("service: task expiration does not allow a future run")
+	ErrStorageUnavailable = errors.New("service: storage measurement unavailable")
+	ErrStorageUnsupported = errors.New("service: storage measurement unsupported")
 	ErrNotFound           = store.ErrNotFound
 	ErrConflict           = store.ErrConflict
 )
@@ -54,7 +56,7 @@ type Admin struct {
 	skillBundles        SkillBundleStore
 	sandboxNodes        SandboxNodeManager
 	sandboxRuntimes     SandboxRuntimeManager
-	warmPool            WarmPoolConfigWriter
+	sessionStorage      SessionStorageMonitor
 	architectureChecker ArchitectureHealthChecker
 	userEvents          UserEventBroker
 	modelSecretKey      string
@@ -665,6 +667,9 @@ func (a *Admin) CreateSkill(ctx context.Context, s store.Skill, actor string) (s
 	if s.ID == "" || s.Name == "" {
 		return store.Skill{}, ErrInvalidArg
 	}
+	if err := validateEnabledSkill(s); err != nil {
+		return store.Skill{}, err
+	}
 	if s.RuntimeID == "" {
 		s.RuntimeID = s.ID
 	}
@@ -785,6 +790,9 @@ func (a *Admin) SetSkillEnabled(ctx context.Context, id string, enabled bool, ac
 		return store.Skill{}, err
 	}
 	s.Enabled = enabled
+	if err := validateEnabledSkill(s); err != nil {
+		return store.Skill{}, err
+	}
 	s.UpdatedAt = a.now().UTC()
 	s.UpdatedBy = actor
 	if err := a.store.UpdateSkill(ctx, s); err != nil {
@@ -949,6 +957,13 @@ func (a *Admin) SetUserSkillEnabled(ctx context.Context, userID, skillID string,
 	if err != nil {
 		return err
 	}
+	if enabled {
+		candidate := s
+		candidate.Enabled = true
+		if err := validateEnabledSkill(candidate); err != nil {
+			return err
+		}
+	}
 	now := a.now().UTC()
 	if s.Scope == "user" {
 		if s.OwnerUserID != userID {
@@ -965,6 +980,13 @@ func (a *Admin) SetUserSkillEnabled(ctx context.Context, userID, skillID string,
 		Enabled:   enabled,
 		UpdatedAt: now,
 	})
+}
+
+func validateEnabledSkill(s store.Skill) error {
+	if s.Enabled && strings.TrimSpace(s.BundleObjectKey) == "" && strings.TrimSpace(s.SkillMD) == "" {
+		return ErrInvalidArg
+	}
+	return nil
 }
 
 func (a *Admin) DeleteUserSkill(ctx context.Context, userID, skillID string) error {

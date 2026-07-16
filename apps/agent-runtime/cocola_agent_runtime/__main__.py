@@ -13,7 +13,8 @@ Env (listen/metrics have defaults; runtime dependencies are required):
                                              hosts the Route A brain; required)
     COCOLA_SANDBOX_IMAGE                      required Route A brain image
     COCOLA_SANDBOX_LLM_BASE_URL              gateway root injected as ANTHROPIC_BASE_URL
-    COCOLA_SANDBOX_MODEL_ALIAS               default route ID (legacy name) injected as ANTHROPIC_MODEL
+    COCOLA_SANDBOX_MODEL_ALIAS               default route ID (legacy name), injected as
+                                             ANTHROPIC_MODEL
     COCOLA_PG_DSN                            required Postgres DSN for durable resume
 
 Provider selection (ADR-0009, Route B decommissioned): Route A runs the whole
@@ -36,7 +37,6 @@ from cocola_common.metrics_grpc import PrometheusServerInterceptor
 from cocola_common.tracing import grpc_aio_server_interceptor
 
 from cocola_agent_runtime.agent_provider import AgentProvider
-from cocola_agent_runtime.checkpoint import CheckpointManager
 from cocola_agent_runtime.grpc_limits import channel_options
 from cocola_agent_runtime.mcp_loader import AdminMCPCatalog, MCPCatalog
 from cocola_agent_runtime.objstore import fetcher_from_env
@@ -65,8 +65,8 @@ def _required_env(name: str) -> str:
 def _build_session_map():
     """Conversation/runtime -> native session index for continuation.
 
-    Postgres survives an agent-runtime restart, so paired with MinIO checkpoint
-    restore a follow-up turn resumes the real conversation.
+    Postgres survives an agent-runtime restart; the native runtime state itself
+    lives on the remounted session volume.
     """
     dsn = _required_env("COCOLA_PG_DSN")
     from cocola_agent_runtime.session_map import PostgresSessionMap
@@ -177,7 +177,6 @@ async def serve() -> None:
     executor = _build_executor()
     session_map = _build_session_map()
     objstore = fetcher_from_env()
-    checkpoint = CheckpointManager(objstore=objstore, executor=executor, session_map=session_map)
     provider = _build_provider(executor, session_map)
     servicer = AgentRuntimeServicer(
         provider,
@@ -189,7 +188,6 @@ async def serve() -> None:
         executor=executor,
         objstore=objstore,
         session_map=session_map,
-        checkpoint=checkpoint,
     )
     # Observability: RED metrics for every RPC. agent-runtime has no HTTP server
     # of its own, so unlike the llm-gateway it exposes /metrics on a dedicated

@@ -53,6 +53,9 @@ func (s *Server) Create(ctx context.Context, req *sandboxv1.CreateRequest) (*san
 		Networking: provider.Networking{EgressAllowlist: spec.GetEgressAllowlist()},
 	})
 	if err != nil {
+		if errors.Is(err, provider.ErrSessionClaimRequired) {
+			return nil, status.Error(codes.FailedPrecondition, "managed session claim is required; use Acquire")
+		}
 		return nil, status.Errorf(codes.Internal, "create: %v", err)
 	}
 	return &sandboxv1.CreateResponse{Sandbox: toProtoSandbox(sb)}, nil
@@ -131,9 +134,6 @@ func (s *Server) Resume(ctx context.Context, req *sandboxv1.ResumeRequest) (*san
 
 // Destroy tears down the sandbox.
 func (s *Server) Destroy(ctx context.Context, req *sandboxv1.DestroyRequest) (*sandboxv1.DestroyResponse, error) {
-	if s.b != nil {
-		s.b.CheckpointSandbox(ctx, req.GetSandboxId())
-	}
 	if err := s.p.Destroy(ctx, req.GetSandboxId()); err != nil {
 		return nil, status.Errorf(codes.Internal, "destroy: %v", err)
 	}
@@ -158,10 +158,11 @@ func (s *Server) Acquire(ctx context.Context, req *sandboxv1.AcquireRequest) (*s
 		return nil, status.Error(codes.InvalidArgument, "session_id is required")
 	}
 	res, err := s.b.AcquireWithOutcome(ctx, orchestrator.AcquireSpec{
-		SessionID: req.GetSessionId(),
-		UserID:    req.GetUserId(),
-		Image:     req.GetImage(),
-		Env:       req.GetEnv(),
+		SessionID:           req.GetSessionId(),
+		UserID:              req.GetUserId(),
+		Image:               req.GetImage(),
+		Env:                 req.GetEnv(),
+		AllowWorkspaceReset: req.GetAllowWorkspaceReset(),
 	})
 	if err != nil {
 		if errors.Is(err, orchestrator.ErrCapacityBusy) {
@@ -170,11 +171,20 @@ func (s *Server) Acquire(ctx context.Context, req *sandboxv1.AcquireRequest) (*s
 		if errors.Is(err, orchestrator.ErrSessionOwnerMismatch) {
 			return nil, status.Error(codes.NotFound, "session not found")
 		}
+		if errors.Is(err, orchestrator.ErrSessionStorageOwnerMismatch) {
+			return nil, status.Error(codes.NotFound, "session not found")
+		}
+		if errors.Is(err, orchestrator.ErrWorkspaceNodeUnavailable) {
+			return nil, status.Error(codes.FailedPrecondition, "workspace node unavailable")
+		}
 		return nil, status.Errorf(codes.Internal, "acquire: %v", err)
 	}
 	return &sandboxv1.AcquireResponse{
-		Sandbox: toProtoSandbox(res.Sandbox),
-		Reused:  res.Reused,
+		Sandbox:               toProtoSandbox(res.Sandbox),
+		Reused:                res.Reused,
+		WorkspaceState:        toProtoWorkspaceState(res.WorkspaceState),
+		WorkspaceNode:         res.WorkspaceNode,
+		PreviousWorkspaceNode: res.PreviousWorkspaceNode,
 	}, nil
 }
 
@@ -197,10 +207,26 @@ func (s *Server) Release(ctx context.Context, req *sandboxv1.ReleaseRequest) (*s
 	if s.b == nil {
 		return nil, status.Error(codes.Unimplemented, "binder not configured")
 	}
-	if err := s.b.Release(ctx, req.GetSessionId()); err != nil {
+	if req.GetUserId() == "" {
+		return nil, status.Error(codes.InvalidArgument, "user_id is required")
+	}
+	if err := s.b.Release(ctx, req.GetUserId(), req.GetSessionId()); err != nil {
 		return nil, status.Errorf(codes.Internal, "release: %v", err)
 	}
 	return &sandboxv1.ReleaseResponse{}, nil
+}
+
+func toProtoWorkspaceState(state provider.WorkspaceState) sandboxv1.WorkspaceState {
+	switch state {
+	case provider.WorkspaceFresh:
+		return sandboxv1.WorkspaceState_WORKSPACE_STATE_FRESH
+	case provider.WorkspacePreserved:
+		return sandboxv1.WorkspaceState_WORKSPACE_STATE_PRESERVED
+	case provider.WorkspaceReset:
+		return sandboxv1.WorkspaceState_WORKSPACE_STATE_RESET
+	default:
+		return sandboxv1.WorkspaceState_WORKSPACE_STATE_UNSPECIFIED
+	}
 }
 
 func toProtoSandbox(sb *provider.Sandbox) *sandboxv1.Sandbox {

@@ -32,9 +32,6 @@ const (
 	OverrideKey  = "cocola:quota:override"
 	UserEventsCh = "cocola:user-events"
 	fieldSepRune = "/"
-	// WarmPoolConfigKey is a delivery cache. Postgres system_settings remains
-	// authoritative and admin-api periodically reconciles this value.
-	WarmPoolConfigKey = "cocola:sb:warmpool:config"
 )
 
 func overrideField(scope, subject string) string { return scope + fieldSepRune + subject }
@@ -148,19 +145,6 @@ func (p *Publisher) SubscribeUserEvents(ctx context.Context) (<-chan service.Use
 		}
 	}
 	return out, cancel, nil
-}
-
-// SetWarmPoolConfig atomically replaces the runtime warm-pool sizing consumed
-// by sandbox-manager. Provisioning fields intentionally remain process config.
-func (p *Publisher) SetWarmPoolConfig(ctx context.Context, enabled bool, size int) error {
-	raw, err := json.Marshal(struct {
-		Enabled bool `json:"enabled"`
-		Size    int  `json:"size"`
-	}{Enabled: enabled, Size: size})
-	if err != nil {
-		return err
-	}
-	return p.rdb.Set(ctx, WarmPoolConfigKey, raw, 0).Err()
 }
 
 // Close releases the connection pool.

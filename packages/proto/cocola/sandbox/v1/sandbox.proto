@@ -128,16 +128,32 @@ message AcquireRequest {
   string user_id = 2;
   string image = 3;
   map<string, string> env = 4;
+  // Explicit user consent to discard an unavailable node-local workspace.
+  bool allow_workspace_reset = 5;
 }
+
+enum WorkspaceState {
+  WORKSPACE_STATE_UNSPECIFIED = 0;
+  WORKSPACE_STATE_FRESH = 1;
+  WORKSPACE_STATE_PRESERVED = 2;
+  WORKSPACE_STATE_RESET = 3;
+}
+
 message AcquireResponse {
   Sandbox sandbox = 1;
   // reused is true when an existing sandbox was returned (hit), false on a
   // fresh create (miss). Lets callers observe pool behaviour.
   bool reused = 2;
+  WorkspaceState workspace_state = 3;
+  string workspace_node = 4;
+  string previous_workspace_node = 5;
 }
 
 message HeartbeatRequest { string sandbox_id = 1; }
 message HeartbeatResponse {}
 
-message ReleaseRequest { string session_id = 1; }
+message ReleaseRequest {
+  string session_id = 1;
+  string user_id = 2;
+}
 message ReleaseResponse {}

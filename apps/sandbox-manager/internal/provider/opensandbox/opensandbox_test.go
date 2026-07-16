@@ -124,11 +124,12 @@ func TestCreate_HappyPath(t *testing.T) {
 	})
 
 	sb, err := p.Create(context.Background(), provider.SandboxSpec{
-		UserID:     "u1",
-		SessionID:  "s1",
-		Image:      "cocola/sandbox-runtime:dev",
-		Resources:  provider.Resources{CPUCores: 0.5, MemoryMiB: 512},
-		Networking: provider.Networking{EgressAllowlist: []string{"api.anthropic.com"}},
+		UserID:       "u1",
+		SessionID:    "s1",
+		SessionClaim: "cocola-sv-test",
+		Image:        "cocola/sandbox-runtime:dev",
+		Resources:    provider.Resources{CPUCores: 0.5, MemoryMiB: 512},
+		Networking:   provider.Networking{EgressAllowlist: []string{"api.anthropic.com"}},
 	})
 	if err != nil {
 		t.Fatalf("Create: %v", err)
@@ -149,7 +150,7 @@ func TestCreate_HappyPath(t *testing.T) {
 		t.Errorf("content-type = %q, want application/json", gotCT)
 	}
 	// Body assertions: resource + egress mapping landed on the wire.
-	for _, want := range []string{`"uri":"cocola/sandbox-runtime:dev"`, `"entrypoint":["sleep","infinity"]`, `"cpu":"500m"`, `"memory":"512Mi"`, `"defaultAction":"deny"`, `"target":"api.anthropic.com"`} {
+	for _, want := range []string{`"uri":"cocola/sandbox-runtime:dev"`, `"entrypoint":["/bin/sh","-c"`, `mkdir -p '/session/workspace'`, `"cpu":"500m"`, `"memory":"512Mi"`, `"defaultAction":"deny"`, `"target":"api.anthropic.com"`} {
 		if !strings.Contains(gotBody, want) {
 			t.Errorf("request body missing %s\nbody: %s", want, gotBody)
 		}
@@ -170,9 +171,10 @@ func TestCreate_SanitisesMetadataLabelValues(t *testing.T) {
 	})
 
 	sb, err := p.Create(context.Background(), provider.SandboxSpec{
-		UserID:    "admin@cocola.local",
-		SessionID: "Session/With Spaces",
-		Image:     "cocola/sandbox-runtime:dev",
+		UserID:       "admin@cocola.local",
+		SessionID:    "Session/With Spaces",
+		SessionClaim: "cocola-sv-test",
+		Image:        "cocola/sandbox-runtime:dev",
 	})
 	if err != nil {
 		t.Fatalf("Create: %v", err)
@@ -205,6 +207,7 @@ func TestCreate_SendsTargetNodeSelector(t *testing.T) {
 	if _, err := p.Create(context.Background(), provider.SandboxSpec{
 		UserID:         "u1",
 		SessionID:      "s1",
+		SessionClaim:   "cocola-sv-test",
 		Image:          "cocola/sandbox-runtime:dev",
 		TargetNodeName: "node-b",
 	}); err != nil {
@@ -223,7 +226,7 @@ func TestCreate_EmptyIDFails(t *testing.T) {
 	p := newStub(t, func(r *http.Request) (*http.Response, error) {
 		return jsonResp(http.StatusOK, `{"id":"","status":{"state":"Pending"}}`), nil
 	})
-	if _, err := p.Create(context.Background(), provider.SandboxSpec{}); err == nil {
+	if _, err := p.Create(context.Background(), provider.SandboxSpec{SessionClaim: "cocola-sv-test"}); err == nil {
 		t.Fatal("expected error on empty id, got nil")
 	}
 }
@@ -232,7 +235,7 @@ func TestCreate_ServerErrorPropagates(t *testing.T) {
 	p := newStub(t, func(r *http.Request) (*http.Response, error) {
 		return jsonResp(http.StatusInternalServerError, `{"error":"boom"}`), nil
 	})
-	_, err := p.Create(context.Background(), provider.SandboxSpec{Image: "x"})
+	_, err := p.Create(context.Background(), provider.SandboxSpec{Image: "x", SessionClaim: "cocola-sv-test"})
 	if err == nil || !strings.Contains(err.Error(), "status 500") {
 		t.Fatalf("want status 500 error, got %v", err)
 	}
@@ -769,128 +772,45 @@ func TestSafe(t *testing.T) {
 }
 
 func TestMapVolumes(t *testing.T) {
-	vols := mapPVCVolumes("s1")
-	if len(vols) != 4 {
-		t.Fatalf("mapVolumes returned %d volumes, want 4", len(vols))
+	vols := mapPVCVolumes("cocola-sv-uuid")
+	if len(vols) != 1 {
+		t.Fatalf("mapVolumes returned %d volumes, want 1", len(vols))
 	}
-
-	// 0: session workspace, RW, must NOT delete on termination (cocola GC).
-	if v := vols[0]; v.PVC == nil || v.PVC.ClaimName != "cocola-session-s1" ||
-		!v.PVC.CreateIfNotExists || v.PVC.DeleteOnSandboxTermination ||
-		v.MountPath != "/workspace" || v.ReadOnly || v.SubPath != "workspace" {
+	if v := vols[0]; v.PVC == nil || v.PVC.ClaimName != "cocola-sv-uuid" ||
+		v.PVC.CreateIfNotExists || v.PVC.DeleteOnSandboxTermination ||
+		v.MountPath != guestSession || v.ReadOnly || v.SubPath != "" {
 		t.Errorf("session volume = %+v (pvc %+v)", v, v.PVC)
 	}
-	// 1: session-local Claude config, RW, hidden outside /workspace.
-	if v := vols[1]; v.PVC == nil || v.PVC.ClaimName != "cocola-session-s1" ||
-		!v.PVC.CreateIfNotExists || v.PVC.DeleteOnSandboxTermination ||
-		v.MountPath != "/home/cocola/.claude" || v.ReadOnly || v.SubPath != "claude" {
-		t.Errorf("claude volume = %+v (pvc %+v)", v, v.PVC)
-	}
-	// Workspace and Claude state must share the same session claim.
-	if vols[0].PVC.ClaimName != vols[1].PVC.ClaimName {
-		t.Errorf("claude claim %q != workspace claim %q", vols[1].PVC.ClaimName, vols[0].PVC.ClaimName)
-	}
-	// 2: session-local Codex state, RW, on the same session claim.
-	if v := vols[2]; v.PVC == nil || v.PVC.ClaimName != "cocola-session-s1" ||
-		!v.PVC.CreateIfNotExists || v.PVC.DeleteOnSandboxTermination ||
-		v.MountPath != "/home/cocola/.codex" || v.ReadOnly || v.SubPath != "codex" {
-		t.Errorf("codex volume = %+v (pvc %+v)", v, v.PVC)
-	}
-	if vols[0].PVC.ClaimName != vols[2].PVC.ClaimName {
-		t.Errorf("codex claim %q != workspace claim %q", vols[2].PVC.ClaimName, vols[0].PVC.ClaimName)
-	}
-	// 3: shared platform-skill volume, read-only, no createIfNotExists.
-	if v := vols[3]; v.PVC == nil || v.PVC.ClaimName != "cocola-plugins" ||
-		v.PVC.CreateIfNotExists || v.MountPath != "/data/plugins" || !v.ReadOnly || v.SubPath != "" {
-		t.Errorf("plugins volume = %+v (pvc %+v)", v, v.PVC)
-	}
-	// Every volume needs a non-empty, request-unique Name (server-required:
-	// real OpenSandbox 422s on a missing volumes[*].name).
-	seen := map[string]bool{}
-	for i, v := range vols {
-		if v.Name == "" {
-			t.Errorf("volume %d has empty Name", i)
-		}
-		if seen[v.Name] {
-			t.Errorf("duplicate volume Name %q", v.Name)
-		}
-		seen[v.Name] = true
+	if vols[0].Name != "session" {
+		t.Fatalf("volume name = %q, want session", vols[0].Name)
 	}
 }
 
-func TestMapVolumes_SanitisesIDs(t *testing.T) {
-	vols := mapPVCVolumes("Sess..1")
-	if vols[0].PVC.ClaimName != "cocola-session-sess-1" {
-		t.Errorf("session claim = %q, want cocola-session-sess-1", vols[0].PVC.ClaimName)
-	}
-	if vols[0].MountPath != "/workspace" {
-		t.Errorf("session mountPath = %q", vols[0].MountPath)
+func TestMapVolumes_PVCRequiresManagedClaim(t *testing.T) {
+	p := &Provider{volumeBackend: volumeBackendPVC}
+	if _, err := p.mapVolumes(provider.SandboxSpec{SessionID: "s1"}); !errors.Is(err, provider.ErrSessionClaimRequired) {
+		t.Fatalf("mapVolumes error = %v, want ErrSessionClaimRequired", err)
 	}
 }
 
 func TestMapHostVolumes(t *testing.T) {
 	root := t.TempDir()
 	p := &Provider{volumeBackend: volumeBackendHost, root: root}
-	vols, err := p.mapVolumes("User/1", "Sess..1", false)
+	vols, err := p.mapVolumes(provider.SandboxSpec{UserID: "User/1", SessionID: "Sess..1"})
 	if err != nil {
 		t.Fatalf("mapVolumes host: %v", err)
 	}
-	if len(vols) != 4 {
-		t.Fatalf("host volumes = %d, want 4", len(vols))
+	if len(vols) != 1 {
+		t.Fatalf("host volumes = %d, want 1", len(vols))
 	}
 	sessionRoot := filepath.Join(root, "users", safePathSegment("User/1"), "sessions", safePathSegment("Sess..1"))
-	assertHost := func(i int, name, path, mount string, ro bool) {
-		t.Helper()
-		v := vols[i]
-		if v.Name != name || v.Host == nil || v.Host.Path != path || v.PVC != nil ||
-			v.MountPath != mount || v.ReadOnly != ro || v.SubPath != "" {
-			t.Fatalf("volume %d = %+v host=%+v pvc=%+v", i, v, v.Host, v.PVC)
-		}
-		if _, err := os.Stat(path); err != nil {
-			t.Fatalf("host path %s not created: %v", path, err)
-		}
-	}
-	assertHost(0, "workspace", filepath.Join(sessionRoot, "workspace"), guestWorkspace, false)
-	assertHost(1, "claude", filepath.Join(sessionRoot, "claude"), guestClaudeConfig, false)
-	assertHost(2, "codex", filepath.Join(sessionRoot, "codex"), guestCodexConfig, false)
-	assertHost(3, "plugins", filepath.Join(root, "plugins"), guestPlugins, true)
-}
-
-// TestMapVolumes_WarmPVC asserts a warm sandbox mounts only the shared,
-// read-only plugins volume in PVC mode — no per-session claim (OpenSandbox has
-// no hot-mount API, so warm sandboxes are session-agnostic).
-func TestMapVolumes_WarmPVC(t *testing.T) {
-	p := &Provider{volumeBackend: volumeBackendPVC}
-	vols, err := p.mapVolumes("u1", "", true)
-	if err != nil {
-		t.Fatalf("mapVolumes warm pvc: %v", err)
-	}
-	if len(vols) != 1 {
-		t.Fatalf("warm volumes = %d, want 1", len(vols))
-	}
 	v := vols[0]
-	if v.Name != "plugins" || v.PVC == nil || v.PVC.ClaimName != pluginsClaimName ||
-		v.MountPath != guestPlugins || !v.ReadOnly {
-		t.Fatalf("warm volume = %+v pvc=%+v", v, v.PVC)
+	if v.Name != "session" || v.Host == nil || v.Host.Path != sessionRoot || v.PVC != nil ||
+		v.MountPath != guestSession || v.ReadOnly || v.SubPath != "" {
+		t.Fatalf("volume = %+v host=%+v pvc=%+v", v, v.Host, v.PVC)
 	}
-}
-
-// TestMapVolumes_WarmHost asserts a warm sandbox in host mode mounts only the
-// shared read-only plugins directory.
-func TestMapVolumes_WarmHost(t *testing.T) {
-	root := t.TempDir()
-	p := &Provider{volumeBackend: volumeBackendHost, root: root}
-	vols, err := p.mapVolumes("u1", "", true)
-	if err != nil {
-		t.Fatalf("mapVolumes warm host: %v", err)
-	}
-	if len(vols) != 1 {
-		t.Fatalf("warm host volumes = %d, want 1", len(vols))
-	}
-	v := vols[0]
-	if v.Name != "plugins" || v.Host == nil || v.Host.Path != filepath.Join(root, "plugins") ||
-		v.MountPath != guestPlugins || !v.ReadOnly {
-		t.Fatalf("warm host volume = %+v host=%+v", v, v.Host)
+	if _, err := os.Stat(sessionRoot); err != nil {
+		t.Fatalf("host path %s not created: %v", sessionRoot, err)
 	}
 }
 
@@ -902,35 +822,16 @@ func TestCreate_SendsVolumes(t *testing.T) {
 		return jsonResp(http.StatusOK, `{"id":"sbx-9","status":{"state":"Pending"}}`), nil
 	})
 	if _, err := p.Create(context.Background(), provider.SandboxSpec{
-		UserID: "u1", SessionID: "s1", Image: "img",
+		UserID: "u1", SessionID: "s1", SessionClaim: "cocola-sv-test", Image: "img",
 	}); err != nil {
 		t.Fatalf("Create: %v", err)
 	}
-	if len(body.Volumes) != 4 {
-		t.Fatalf("wire volumes = %d, want 4\nbody=%+v", len(body.Volumes), body)
+	if len(body.Volumes) != 1 {
+		t.Fatalf("wire volumes = %d, want 1\nbody=%+v", len(body.Volumes), body)
 	}
-	want := map[string]bool{
-		"/workspace":           false,
-		"/home/cocola/.claude": false,
-		"/home/cocola/.codex":  false,
-		"/data/plugins":        true, // readOnly
-	}
-	for _, v := range body.Volumes {
-		ro, ok := want[v.MountPath]
-		if !ok {
-			t.Errorf("unexpected volume mountPath %q", v.MountPath)
-			continue
-		}
-		if v.ReadOnly != ro {
-			t.Errorf("%s readOnly = %v, want %v", v.MountPath, v.ReadOnly, ro)
-		}
-		if v.PVC == nil || v.PVC.ClaimName == "" {
-			t.Errorf("%s missing pvc claimName", v.MountPath)
-		}
-		delete(want, v.MountPath)
-	}
-	if len(want) != 0 {
-		t.Errorf("missing volumes on wire: %v", want)
+	v := body.Volumes[0]
+	if v.MountPath != guestSession || v.PVC == nil || v.PVC.ClaimName != "cocola-sv-test" || v.PVC.CreateIfNotExists {
+		t.Fatalf("wire session volume = %+v", v)
 	}
 }
 
@@ -946,8 +847,8 @@ func TestCreate_SendsHostVolumes(t *testing.T) {
 	}); err != nil {
 		t.Fatalf("Create: %v", err)
 	}
-	if len(body.Volumes) != 4 {
-		t.Fatalf("wire volumes = %d, want 4", len(body.Volumes))
+	if len(body.Volumes) != 1 {
+		t.Fatalf("wire volumes = %d, want 1", len(body.Volumes))
 	}
 	for _, v := range body.Volumes {
 		if v.PVC != nil || v.Host == nil {
@@ -1255,29 +1156,27 @@ func TestReadFile_NotFound(t *testing.T) {
 	}
 }
 
-func TestChownEntrypoint(t *testing.T) {
-	// Empty exec user runs Exec as root -> no chown needed, bare blocker.
-	if got := chownEntrypoint(""); len(got) != 2 || got[0] != "sleep" || got[1] != "infinity" {
-		t.Fatalf("empty execUser entrypoint = %v, want [sleep infinity]", got)
-	}
-
-	// Non-empty exec user -> one-time chown of the session mounts, then exec blocker.
-	got := chownEntrypoint("cocola")
+func TestSessionEntrypoint(t *testing.T) {
+	got := sessionEntrypoint("cocola")
 	if len(got) != 3 || got[0] != "/bin/sh" || got[1] != "-c" {
 		t.Fatalf("entrypoint prefix = %v, want [/bin/sh -c ...]", got)
 	}
 	script := got[2]
 	for _, want := range []string{
-		"mkdir -p '/workspace' '/home/cocola/.claude' '/home/cocola/.codex'",
-		"chown -R 'cocola':'cocola'",
-		"'/workspace'",
-		"'/home/cocola/.claude'",
-		"'/home/cocola/.codex'",
-		"|| true",
-		"exec sleep infinity",
+		"mkdir -p '/session/workspace' '/session/runtime/claude' '/session/runtime/codex' '/session/runtime/cocola' '/session/home/local'",
+		"chown 'cocola':'cocola'",
+		"ln -s '/session/workspace' '/workspace'",
+		"ln -s '/session/runtime/claude' '/home/cocola/.claude'",
+		"ln -s '/session/runtime/codex' '/home/cocola/.codex'",
+		"ln -s '/session/runtime/cocola' '/home/cocola/.cocola'",
+		"ln -s '/session/home/local' '/home/cocola/.local'",
+		"&& exec sleep infinity",
 	} {
 		if !strings.Contains(script, want) {
 			t.Errorf("chown script missing %q\nscript: %s", want, script)
 		}
+	}
+	if strings.Contains(script, "; exec sleep infinity") {
+		t.Fatalf("entrypoint must not hide initialization failures: %s", script)
 	}
 }

@@ -4,10 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
-	"io/fs"
-	"time"
 
-	"github.com/cocola-project/cocola/apps/sandbox-manager/internal/provider"
 	rds "github.com/cocola-project/cocola/packages/go-common/redis"
 )
 
@@ -34,31 +31,36 @@ func (b *Binder) Heartbeat(ctx context.Context, sandboxID string) error {
 	if err != nil {
 		return err
 	}
-	var m meta
-	if err := json.Unmarshal([]byte(raw), &m); err != nil {
+	var meta meta
+	if err := json.Unmarshal([]byte(raw), &meta); err != nil {
 		return err
 	}
-	// A heartbeat on a paused sandbox means the holder came back: resume it and
-	// flip state to active before renewing.
-	if m.State == StatePaused {
-		if err := b.p.Resume(ctx, sandboxID); err != nil {
-			if errors.Is(err, fs.ErrNotExist) || errors.Is(err, provider.ErrSandboxNotResumable) {
-				// The sandbox is gone or terminal (checkpoint discarded): the
-				// pulse can't revive it. Drop the stale binding and tell the
-				// caller so its heartbeat loop stops; the next Acquire will
-				// cold-create a fresh sandbox for the session.
-				if unbindErr := b.unbind(ctx, m.SessionID, sandboxID); unbindErr != nil {
-					return unbindErr
-				}
-				return ErrUnknownSandbox
-			}
-			return err
-		}
-		m.State = StateActive
-		m.PausedUnix = 0
-		if err := b.putMeta(ctx, m); err != nil {
-			return err
-		}
+	if meta.SessionID == "" || meta.SandboxID != sandboxID {
+		return ErrUnknownSandbox
+	}
+
+	// Use the same Session lock as Acquire, Release and Reaper. Heartbeat is a
+	// single attempt: contention is surfaced as a transient error instead of
+	// waiting in a new retry loop or falsely reporting a successful renewal.
+	lock, err := tryLock(ctx, b.kv, meta.SessionID, b.cfg.LockTTL)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = lock.release(ctx) }()
+
+	// A reaper or release may have removed the sandbox before this lock was won.
+	raw, err = b.kv.Get(ctx, metaKey(sandboxID))
+	if errors.Is(err, rds.ErrNil) {
+		return ErrUnknownSandbox
+	}
+	if err != nil {
+		return err
+	}
+	if err := json.Unmarshal([]byte(raw), &meta); err != nil {
+		return err
+	}
+	if meta.SessionID == "" || meta.SandboxID != sandboxID {
+		return ErrUnknownSandbox
 	}
 	return b.renewLease(ctx, sandboxID)
 }
@@ -66,24 +68,3 @@ func (b *Binder) Heartbeat(ctx context.Context, sandboxID string) error {
 // ErrUnknownSandbox is returned when an operation targets a sandbox that has no
 // binding record (never existed, or already reclaimed).
 var ErrUnknownSandbox = errors.New("orchestrator: unknown sandbox")
-
-// HeartbeatLoop is a convenience driver for in-process callers (e.g. tests or a
-// co-located runtime) that want a sandbox kept alive on a fixed cadence until
-// ctx is cancelled. Network callers use the Heartbeat RPC instead.
-func (b *Binder) HeartbeatLoop(ctx context.Context, sandboxID string) {
-	t := time.NewTicker(b.cfg.HeartbeatEvery)
-	defer t.Stop()
-	for {
-		select {
-		case <-ctx.Done():
-			return
-		case <-t.C:
-			if err := b.Heartbeat(ctx, sandboxID); err != nil {
-				// Sandbox is gone — nothing left to pulse.
-				if errors.Is(err, ErrUnknownSandbox) {
-					return
-				}
-			}
-		}
-	}
-}

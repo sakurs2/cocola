@@ -109,6 +109,23 @@ func (f *Fake) Eval(ctx context.Context, script string, keys []string, args ...a
 	defer f.mu.Unlock()
 
 	switch {
+	// Conditional unbind: remove the forward key only if it still points at the
+	// sandbox being removed, then always remove that sandbox's own keys.
+	case len(keys) == 4 && strings.Contains(script, `redis.call("GET", KEYS[1]) == ARGV[1]`) &&
+		strings.Contains(script, `KEYS[2], KEYS[3], KEYS[4]`):
+		cur, ok := f.liveLocked(keys[0])
+		if ok && cur == toStr(args[0]) {
+			delete(f.data, keys[0])
+		}
+		var removed int64
+		for _, key := range keys[1:] {
+			if _, exists := f.data[key]; exists {
+				delete(f.data, key)
+				removed++
+			}
+		}
+		return removed, nil
+
 	// CAS unlock: delete KEYS[1] iff its value == ARGV[1].
 	case strings.Contains(script, `redis.call("DEL", KEYS[1])`) &&
 		strings.Contains(script, `== ARGV[1]`):
@@ -119,13 +136,25 @@ func (f *Fake) Eval(ctx context.Context, script string, keys []string, args ...a
 		}
 		return int64(0), nil
 
-	// Bind dual-write: SET conv, rev, meta (no TTL) + lease (EX ARGV[4]).
+	// CAS bind: an existing forward pointer wins; otherwise write the complete
+	// mapping and lease atomically.
 	case strings.Contains(script, `redis.call("SET", KEYS[4], "1", "EX"`):
+		lockToken, lockOK := f.liveLocked(keys[4])
+		if !lockOK || lockToken != toStr(args[4]) {
+			return int64(-1), nil
+		}
+		if _, ok := f.liveLocked(keys[0]); ok {
+			return int64(0), nil
+		}
 		f.setLocked(keys[0], toStr(args[0]), 0)
 		f.setLocked(keys[1], toStr(args[1]), 0)
 		f.setLocked(keys[2], toStr(args[2]), 0)
 		ttl, _ := strconv.Atoi(toStr(args[3]))
 		f.setLocked(keys[3], "1", time.Duration(ttl)*time.Second)
+		if len(args) > 5 {
+			lockTTL, _ := strconv.Atoi(toStr(args[5]))
+			f.setLocked(keys[4], lockToken, time.Duration(lockTTL)*time.Millisecond)
+		}
 		return int64(1), nil
 	}
 	// Unknown script: surface clearly so a new script isn't silently ignored.

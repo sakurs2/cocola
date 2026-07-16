@@ -107,27 +107,27 @@ const browser = await chromium.launch({
 
 ## Persistence
 
-Four paths are mounted by the provider:
+The provider mounts one per-session volume at `/session`. Startup creates the
+following layout and links the runtime paths into it:
 
-| Mount in container     | Volume            | Survives                          |
-| ---------------------- | ----------------- | --------------------------------- |
-| `/workspace`           | per-session, RW   | hibernate, cleaned at session end |
-| `/home/cocola/.claude` | per-session, RW   | hibernate, cleaned at session end |
-| `/home/cocola/.codex`  | per-session, RW   | hibernate, cleaned at session end |
-| `/data/plugins`        | shared, read-only | platform-managed                  |
+| Volume directory          | Runtime path           | Content                            |
+| ------------------------- | ---------------------- | ---------------------------------- |
+| `/session/workspace`      | `/workspace`           | project, dependencies and output   |
+| `/session/runtime/claude` | `/home/cocola/.claude` | Claude session state               |
+| `/session/runtime/codex`  | `/home/cocola/.codex`  | Codex session state                |
+| `/session/runtime/cocola` | `/home/cocola/.cocola` | Skills and future browser/IDE data |
+| `/session/home/local`     | `/home/cocola/.local`  | user-installed tools               |
 
-For host-backed storage, the provider maps them under
-`<COCOLA_SANDBOX_ROOT>/users/<user>/sessions/<session>/{workspace,claude,codex}`.
-Point `COCOLA_SANDBOX_ROOT` at an NFS/NAS mount to share session storage across
-nodes without changing the in-container contract.
+`/cache` remains ephemeral so package downloads do not consume the default
+`2Gi` local-path PVC request. Shared and Personal Skill bundles are reconciled
+into the Session Volume's unified Skill Set; `/data/plugins` is not required for
+Session recovery. Secrets, rootfs files and the rest of `$HOME` are never copied
+into the Session Volume.
 
-`CLAUDE_CONFIG_DIR=/home/cocola/.claude` so Claude Code memory/sessions/projects
-are isolated per cocola session without appearing in `/workspace` file listings.
-`--resume <session_id>` rebuilds the brain from that on-disk session (no RAM
-snapshot needed).
-
-`CODEX_HOME=/home/cocola/.codex` provides the same isolation and checkpoint
-behavior for Codex threads.
+Destroying a sandbox preserves the volume. A later run is scheduled back to
+the volume's node and mounts the same claim; no MinIO checkpoint is involved.
+Claude and Codex share the reconciled Skill Set through symlinks under
+`/home/cocola/.cocola/skillsets/agents-skill-v1`.
 
 ## Build
 

@@ -95,6 +95,23 @@ func (f fakeRuntimeManager) ListSandboxes(context.Context) (service.SandboxRunti
 	}}}, nil
 }
 
+type fakeStorageMonitor struct{}
+
+func (fakeStorageMonitor) List(context.Context) ([]service.SessionStorageView, error) {
+	return nil, nil
+}
+func (fakeStorageMonitor) NodeUsage(context.Context) (map[string]service.NodeStorageUsage, error) {
+	return map[string]service.NodeStorageUsage{}, nil
+}
+func (fakeStorageMonitor) NodeFilesystems(context.Context) ([]service.NodeStorageFilesystem, error) {
+	return []service.NodeStorageFilesystem{{NodeName: "node-a", Available: true, TotalBytes: 100, UsedBytes: 40, AvailableBytes: 60}}, nil
+}
+func (fakeStorageMonitor) Measure(_ context.Context, storageID, pvcName string) (service.SessionStorageMeasurement, error) {
+	return service.SessionStorageMeasurement{StorageID: storageID, PVCName: pvcName, AllocatedBytes: 42}, nil
+}
+func (fakeStorageMonitor) DeleteOrphan(context.Context, string, string) error { return nil }
+func (fakeStorageMonitor) Close()                                             {}
+
 type fakeArchitectureChecker struct {
 	http map[string]bool
 	tcp  map[string]bool
@@ -111,7 +128,9 @@ func (f fakeArchitectureChecker) CheckTCP(_ context.Context, addr string) bool {
 func newTestNodeAPI(adminKey string, mgr service.SandboxNodeManager) *API {
 	mem := store.NewMemory()
 	iss := token.NewIssuer("test-secret", "cocola", 24*time.Hour)
-	svc := service.New(mem, iss, fixedClock).WithSandboxNodeManager(mgr)
+	svc := service.New(mem, iss, fixedClock).
+		WithSandboxNodeManager(mgr).
+		WithSessionStorageMonitor(fakeStorageMonitor{})
 	return New(svc, adminKey)
 }
 
@@ -127,6 +146,7 @@ func newTestArchitectureAPI(adminKey string, checker service.ArchitectureHealthC
 	iss := token.NewIssuer("test-secret", "cocola", 24*time.Hour)
 	svc := service.New(mem, iss, fixedClock).
 		WithSandboxNodeManager(&fakeNodeManager{}).
+		WithSessionStorageMonitor(fakeStorageMonitor{}).
 		WithSandboxRuntimeManager(fakeRuntimeManager{}).
 		WithArchitectureHealthChecker(checker)
 	return New(svc, adminKey)
@@ -686,22 +706,20 @@ func TestSkillCRUD(t *testing.T) {
 		t.Fatalf("get skill: want 200, got %d", rec.Code)
 	}
 
-	// enable
+	// Metadata-only manual records cannot be enabled until a bundle is imported.
 	rec = do(t, r, http.MethodPost, "/admin/skills/web-search/enable", "k", nil)
-	var s store.Skill
-	_ = json.Unmarshal(rec.Body.Bytes(), &s)
-	if rec.Code != http.StatusOK || !s.Enabled {
-		t.Fatalf("enable: code=%d enabled=%v", rec.Code, s.Enabled)
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("enable metadata-only skill: want 400, got %d", rec.Code)
 	}
 
-	// list enabled -> 1
+	// list enabled -> 0
 	rec = do(t, r, http.MethodGet, "/admin/skills?enabled=true", "k", nil)
 	var sl struct {
 		Skills []store.Skill `json:"skills"`
 	}
 	_ = json.Unmarshal(rec.Body.Bytes(), &sl)
-	if len(sl.Skills) != 1 {
-		t.Fatalf("list enabled: want 1, got %d", len(sl.Skills))
+	if len(sl.Skills) != 0 {
+		t.Fatalf("list enabled: want 0, got %d", len(sl.Skills))
 	}
 
 	// disable -> list enabled now 0
@@ -772,6 +790,7 @@ func TestMyEffectiveSkillsReturnsRuntimeIDForPersonalSkill(t *testing.T) {
 	if _, err := svc.CreateSkill(context.Background(), store.Skill{
 		ID: "user-32970b55-frontend-design", RuntimeID: "frontend-design",
 		Name: "Frontend Design", Enabled: true, Scope: "user", OwnerUserID: "alice",
+		SkillMD: "# Frontend Design",
 	}, "alice"); err != nil {
 		t.Fatal(err)
 	}
@@ -1143,6 +1162,19 @@ func TestSandboxNodeRoutesNotConfigured(t *testing.T) {
 	rec := do(t, api.Router(), http.MethodGet, "/admin/sandbox-nodes", "k", nil)
 	if rec.Code != http.StatusNotImplemented {
 		t.Fatalf("not configured: want 501, got %d", rec.Code)
+	}
+}
+
+func TestStorageRoutes(t *testing.T) {
+	api := newTestNodeAPI("k", &fakeNodeManager{})
+	router := api.Router()
+	rec := do(t, router, http.MethodGet, "/admin/storage/nodes", "k", nil)
+	if rec.Code != http.StatusOK || !strings.Contains(rec.Body.String(), `"node_name":"node-a"`) {
+		t.Fatalf("storage nodes: got %d %s", rec.Code, rec.Body.String())
+	}
+	rec = do(t, router, http.MethodPost, "/admin/session-storage/storage-a/measure?pvc_name=pvc-a", "k", nil)
+	if rec.Code != http.StatusOK || !strings.Contains(rec.Body.String(), `"allocated_bytes":42`) {
+		t.Fatalf("storage measurement: got %d %s", rec.Code, rec.Body.String())
 	}
 }
 

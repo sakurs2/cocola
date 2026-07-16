@@ -29,12 +29,10 @@ func TestLive_OnDemandAllocation_OpenSandbox(t *testing.T) {
 		t.Fatalf("opensandbox.New: %v", err)
 	}
 	b := NewBinder(rds.NewFake(), p, Config{
-		LeaseTTL:       30 * time.Second,
-		HeartbeatEvery: 10 * time.Second,
-		DestroyGrace:   5 * time.Second,
-		LockTTL:        15 * time.Second,
-		ReaperEvery:    time.Second,
-		LockRetry:      10 * time.Millisecond,
+		LeaseTTL:    30 * time.Second,
+		LockTTL:     15 * time.Second,
+		ReaperEvery: time.Second,
+		LockRetry:   10 * time.Millisecond,
 	})
 	ctx, cancel := context.WithTimeout(context.Background(), 120*time.Second)
 	defer cancel()

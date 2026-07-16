@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"io/fs"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -17,33 +18,146 @@ import (
 // fakeProvider is a minimal in-memory SandboxProvider for binder tests. It only
 // implements the lifecycle methods the binder touches; the rest are stubs.
 type fakeProvider struct {
-	creates       atomic.Int64
-	destroys      atomic.Int64
-	mu            sync.Mutex
-	state         map[string]string // sandbox id -> "active"|"paused"|"destroyed"
-	pauseErr      map[string]error
-	resumeErr     map[string]error
-	destroyErr    map[string]error
-	checkpointErr map[string]error
-	cleanups      []string
-	checkpoints   []string
-	lastSpec      provider.SandboxSpec
+	creates    atomic.Int64
+	destroys   atomic.Int64
+	mu         sync.Mutex
+	state      map[string]string // sandbox id -> "active"|"paused"|"destroyed"
+	pauseErr   map[string]error
+	resumeErr  map[string]error
+	destroyErr map[string]error
+	createErr  error
+	cleanups   []string
+	lastSpec   provider.SandboxSpec
+	createHook func(int64)
 }
 
 func newFakeProvider() *fakeProvider {
 	return &fakeProvider{
-		state:         map[string]string{},
-		pauseErr:      map[string]error{},
-		resumeErr:     map[string]error{},
-		destroyErr:    map[string]error{},
-		checkpointErr: map[string]error{},
+		state:      map[string]string{},
+		pauseErr:   map[string]error{},
+		resumeErr:  map[string]error{},
+		destroyErr: map[string]error{},
 	}
 }
 
+type fakeSessionStorage struct {
+	mu         sync.Mutex
+	binding    *SessionStorageBinding
+	creates    int
+	prepared   int
+	resets     int
+	commitErr  error
+	commitHook func()
+	ensures    []string
+	discards   []string
+	deletes    []string
+}
+
+func (f *fakeSessionStorage) Get(_ context.Context, userID, sessionID string) (SessionStorageBinding, bool, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if f.binding == nil || f.binding.SessionID != sessionID {
+		return SessionStorageBinding{}, false, nil
+	}
+	if f.binding.UserID != userID {
+		return SessionStorageBinding{}, false, ErrSessionStorageOwnerMismatch
+	}
+	return *f.binding, true, nil
+}
+
+func (f *fakeSessionStorage) Create(_ context.Context, userID, sessionID, nodeName string) (SessionStorageBinding, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.creates++
+	binding := SessionStorageBinding{
+		StorageID: "storage-1", SessionID: sessionID, UserID: userID,
+		PVCNamespace: "opensandbox", PVCName: "cocola-sv-new", NodeName: nodeName,
+		Generation: 1, RequestedBytes: 2 * 1024 * 1024 * 1024,
+	}
+	f.binding = &binding
+	f.ensures = append(f.ensures, binding.PVCName)
+	return binding, nil
+}
+
+func (f *fakeSessionStorage) PrepareReset(_ context.Context, current SessionStorageBinding, nodeName, reason string) (SessionStorageBinding, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.prepared++
+	next := current
+	next.PVCName = "cocola-sv-reset"
+	next.NodeName = nodeName
+	next.Generation++
+	next.LastResetReason = reason
+	f.ensures = append(f.ensures, next.PVCName)
+	return next, nil
+}
+
+func (f *fakeSessionStorage) CommitReset(_ context.Context, current, next SessionStorageBinding) (SessionStorageBinding, error) {
+	if f.commitHook != nil {
+		f.commitHook()
+	}
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if f.commitErr != nil {
+		return SessionStorageBinding{}, f.commitErr
+	}
+	if f.binding == nil || f.binding.PVCName != current.PVCName || f.binding.Generation != current.Generation {
+		return SessionStorageBinding{}, errors.New("session storage changed concurrently")
+	}
+	f.resets++
+	f.binding = &next
+	return next, nil
+}
+
+func (f *fakeSessionStorage) DiscardReset(_ context.Context, next SessionStorageBinding) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.discards = append(f.discards, next.PVCName)
+	return nil
+}
+
+func (f *fakeSessionStorage) EnsurePVC(_ context.Context, binding SessionStorageBinding) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.ensures = append(f.ensures, binding.PVCName)
+	return nil
+}
+
+func (f *fakeSessionStorage) NodeRequestedBytes(context.Context) (map[string]int64, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	out := map[string]int64{}
+	if f.binding != nil {
+		out[f.binding.NodeName] = f.binding.RequestedBytes
+	}
+	return out, nil
+}
+
+func (f *fakeSessionStorage) Delete(_ context.Context, userID, sessionID string) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if f.binding != nil && f.binding.UserID != userID {
+		return ErrSessionStorageOwnerMismatch
+	}
+	f.deletes = append(f.deletes, userID+"/"+sessionID)
+	f.binding = nil
+	return nil
+}
+
+func (*fakeSessionStorage) Close() {}
+
 func (f *fakeProvider) Create(ctx context.Context, spec provider.SandboxSpec) (*provider.Sandbox, error) {
 	n := f.creates.Add(1)
+	if f.createHook != nil {
+		f.createHook(n)
+	}
 	id := fmt.Sprintf("sbx-%d", n)
 	f.mu.Lock()
+	if f.createErr != nil {
+		err := f.createErr
+		f.mu.Unlock()
+		return nil, err
+	}
 	f.state[id] = "active"
 	f.lastSpec = spec
 	f.mu.Unlock()
@@ -83,12 +197,6 @@ func (f *fakeProvider) CleanupSessionStorage(ctx context.Context, userID, sessio
 	f.cleanups = append(f.cleanups, userID+"/"+sessionID)
 	return nil
 }
-func (f *fakeProvider) CheckpointSession(ctx context.Context, userID, sessionID, sandboxID string) error {
-	f.mu.Lock()
-	defer f.mu.Unlock()
-	f.checkpoints = append(f.checkpoints, userID+"/"+sessionID+"/"+sandboxID)
-	return f.checkpointErr[sandboxID]
-}
 func (f *fakeProvider) Exec(ctx context.Context, sid string, req provider.ExecRequest) (<-chan provider.ExecEvent, error) {
 	return nil, nil
 }
@@ -115,170 +223,12 @@ func newTestBinder(t *testing.T) (*Binder, *fakeProvider) {
 	kv := rds.NewFake()
 	fp := newFakeProvider()
 	b := NewBinder(kv, fp, Config{
-		LeaseTTL:       2 * time.Second,
-		HeartbeatEvery: time.Second,
-		DestroyGrace:   2 * time.Second,
-		LockTTL:        2 * time.Second,
-		ReaperEvery:    200 * time.Millisecond,
-		LockRetry:      5 * time.Millisecond,
+		LeaseTTL:    2 * time.Second,
+		LockTTL:     2 * time.Second,
+		ReaperEvery: 200 * time.Millisecond,
+		LockRetry:   5 * time.Millisecond,
 	})
 	return b, fp
-}
-
-func TestDrainWarmPoolLeavesClaimedSandboxRunning(t *testing.T) {
-	b, fp := newTestBinder(t)
-	ctx := context.Background()
-	b.WithWarmPool(WarmConfig{Image: "sandbox-image"})
-	for i := 0; i < 3; i++ {
-		if err := b.createOneWarm(ctx); err != nil {
-			t.Fatalf("create warm sandbox: %v", err)
-		}
-	}
-	claimed, ok := b.claimWarm(ctx, AcquireSpec{SessionID: "session-1", UserID: "user-1"})
-	if !ok {
-		t.Fatal("expected one warm sandbox to be claimed")
-	}
-
-	drained, err := b.DrainWarmPool(ctx)
-	if err != nil {
-		t.Fatalf("drain warm pool: %v", err)
-	}
-	if drained != 2 {
-		t.Fatalf("drained = %d, want 2 unclaimed sandboxes", drained)
-	}
-	if got := fp.destroys.Load(); got != 2 {
-		t.Fatalf("provider destroys = %d, want 2", got)
-	}
-	fp.mu.Lock()
-	claimedState := fp.state[claimed.ID]
-	fp.mu.Unlock()
-	if claimedState != "active" {
-		t.Fatalf("claimed sandbox state = %q, want active", claimedState)
-	}
-	ids, err := b.listWarm(ctx)
-	if err != nil || len(ids) != 0 {
-		t.Fatalf("remaining warm inventory = %v, %v", ids, err)
-	}
-}
-
-func TestClaimWarmRejectsUnhealthySandbox(t *testing.T) {
-	b, fp := newTestBinder(t)
-	ctx := context.Background()
-	b.WithWarmPool(WarmConfig{Image: "sandbox-image"})
-	if err := b.createOneWarm(ctx); err != nil {
-		t.Fatal(err)
-	}
-	ids, err := b.listWarm(ctx)
-	if err != nil || len(ids) != 1 {
-		t.Fatalf("warm inventory = %v, %v", ids, err)
-	}
-	fp.mu.Lock()
-	fp.state[ids[0]] = "pending"
-	fp.mu.Unlock()
-
-	if claimed, ok := b.claimWarm(ctx, AcquireSpec{SessionID: "session-1", UserID: "user-1"}); ok {
-		t.Fatalf("claimed unhealthy sandbox %+v", claimed)
-	}
-	remaining, err := b.listWarm(ctx)
-	if err != nil || len(remaining) != 1 || remaining[0] != ids[0] {
-		t.Fatalf("pending warm inventory = %v, %v; want %s retained", remaining, err, ids[0])
-	}
-}
-
-func TestPruneWarmKeepsStartingAndRemovesFailedSandboxes(t *testing.T) {
-	b, fp := newTestBinder(t)
-	ctx := context.Background()
-	b.WithWarmPool(WarmConfig{Image: "sandbox-image"})
-	for range 2 {
-		if err := b.createOneWarm(ctx); err != nil {
-			t.Fatal(err)
-		}
-	}
-	ids, err := b.listWarm(ctx)
-	if err != nil || len(ids) != 2 {
-		t.Fatalf("warm inventory = %v, %v", ids, err)
-	}
-	fp.mu.Lock()
-	fp.state[ids[0]] = "pending"
-	fp.state[ids[1]] = "failed"
-	fp.mu.Unlock()
-
-	alive := b.pruneDeadWarm(ctx, ids)
-	if len(alive) != 1 || alive[0] != ids[0] {
-		t.Fatalf("alive warm sandboxes = %v, want pending %s", alive, ids[0])
-	}
-	remaining, err := b.listWarm(ctx)
-	if err != nil || len(remaining) != 1 || remaining[0] != ids[0] {
-		t.Fatalf("remaining warm inventory = %v, %v", remaining, err)
-	}
-}
-
-func TestWarmPoolSizingUsesHotRuntimeOverride(t *testing.T) {
-	b, _ := newTestBinder(t)
-	ctx := context.Background()
-	b.WithWarmPool(WarmConfig{Enabled: true, Size: 10, Image: "sandbox-image"})
-
-	if err := b.kv.Set(ctx, warmConfigKey, `{"enabled":true,"size":3}`, 0); err != nil {
-		t.Fatal(err)
-	}
-	sizing, ok := b.effectiveWarmSizing(ctx)
-	if !ok {
-		t.Fatal("runtime warm sizing should be available")
-	}
-	if !sizing.Enabled || sizing.Size != 3 {
-		t.Fatalf("effective warm sizing = %+v, want enabled size 3", sizing)
-	}
-}
-
-func TestWarmPoolProvisioningNeverBakesStaticAuthToken(t *testing.T) {
-	t.Setenv("COCOLA_SANDBOX_IMAGE", "registry/runtime:v1")
-	t.Setenv("COCOLA_SANDBOX_LLM_BASE_URL", "http://llm-gateway:8080")
-	t.Setenv("COCOLA_SANDBOX_MODEL_ALIAS", "cocola-default")
-	t.Setenv("COCOLA_SANDBOX_LLM_TOKEN", "legacy-shared-token")
-
-	cfg := WarmConfigFromEnv()
-	if cfg.Env["ANTHROPIC_AUTH_TOKEN"] != "" {
-		t.Fatalf("warm sandbox contains a static auth token: %q", cfg.Env["ANTHROPIC_AUTH_TOKEN"])
-	}
-	if cfg.Env["ANTHROPIC_BASE_URL"] != "http://llm-gateway:8080" ||
-		cfg.Env["COCOLA_LLM_BASE_URL"] != "http://llm-gateway:8080" ||
-		cfg.Env["ANTHROPIC_MODEL"] != "cocola-default" {
-		t.Fatalf("warm routing env = %#v", cfg.Env)
-	}
-}
-
-func TestWarmPoolSizingWaitsForRuntimeDelivery(t *testing.T) {
-	b, _ := newTestBinder(t)
-	b.WithWarmPool(WarmConfig{Enabled: true, Size: 10, Image: "sandbox-image"})
-
-	if _, ok := b.effectiveWarmSizing(context.Background()); ok {
-		t.Fatal("missing runtime warm sizing must not fall back to startup defaults")
-	}
-}
-
-func TestDrainWarmPoolRetainsInventoryWhenDestroyFails(t *testing.T) {
-	b, fp := newTestBinder(t)
-	ctx := context.Background()
-	b.WithWarmPool(WarmConfig{Image: "sandbox-image"})
-	if err := b.createOneWarm(ctx); err != nil {
-		t.Fatalf("create warm sandbox: %v", err)
-	}
-	ids, err := b.listWarm(ctx)
-	if err != nil || len(ids) != 1 {
-		t.Fatalf("warm inventory = %v, %v", ids, err)
-	}
-	fp.mu.Lock()
-	fp.destroyErr[ids[0]] = errors.New("provider unavailable")
-	fp.mu.Unlock()
-
-	drained, err := b.DrainWarmPool(ctx)
-	if drained != 0 || err == nil {
-		t.Fatalf("drain result = %d, %v; want failure", drained, err)
-	}
-	remaining, listErr := b.listWarm(ctx)
-	if listErr != nil || len(remaining) != 1 || remaining[0] != ids[0] {
-		t.Fatalf("failed sandbox inventory = %v, %v; want %s retained", remaining, listErr, ids[0])
-	}
 }
 
 // TestAcquireReusesSameSandbox: two sequential acquires for one session return
@@ -299,6 +249,368 @@ func TestAcquireReusesSameSandbox(t *testing.T) {
 	}
 	if got := fp.creates.Load(); got != 1 {
 		t.Fatalf("expected 1 create, got %d", got)
+	}
+}
+
+func TestAcquireCreatesAndRemountsNodeLocalSessionStorage(t *testing.T) {
+	b, fp := newTestBinder(t)
+	storage := &fakeSessionStorage{}
+	b.WithCapacityGuard(staticNodeGuard("node-a")).WithSessionStorage(storage)
+	ctx := context.Background()
+
+	first, err := b.AcquireWithOutcome(ctx, AcquireSpec{SessionID: "persisted", UserID: "u1"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if first.WorkspaceState != provider.WorkspaceFresh || first.WorkspaceNode != "node-a" {
+		t.Fatalf("first workspace = state %q node %q", first.WorkspaceState, first.WorkspaceNode)
+	}
+	fp.mu.Lock()
+	firstSpec := fp.lastSpec
+	fp.mu.Unlock()
+	if firstSpec.SessionClaim != "cocola-sv-new" || firstSpec.TargetNodeName != "node-a" {
+		t.Fatalf("first provider spec = %+v", firstSpec)
+	}
+
+	if _, err := b.kv.Del(ctx, leaseKey(first.Sandbox.ID)); err != nil {
+		t.Fatal(err)
+	}
+	if err := b.reapOnce(ctx, time.Now()); err != nil {
+		t.Fatal(err)
+	}
+	second, err := b.AcquireWithOutcome(ctx, AcquireSpec{SessionID: "persisted", UserID: "u1"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if second.WorkspaceState != provider.WorkspacePreserved || second.WorkspaceNode != "node-a" {
+		t.Fatalf("restored workspace = state %q node %q", second.WorkspaceState, second.WorkspaceNode)
+	}
+	storage.mu.Lock()
+	creates := storage.creates
+	storage.mu.Unlock()
+	if creates != 1 || fp.creates.Load() != 2 {
+		t.Fatalf("storage creates=%d sandbox creates=%d, want 1 and 2", creates, fp.creates.Load())
+	}
+}
+
+func TestAcquireRejectsRedisBindingForUncommittedWorkspaceGeneration(t *testing.T) {
+	b, fp := newTestBinder(t)
+	storage := &fakeSessionStorage{}
+	b.WithCapacityGuard(staticNodeGuard("node-a")).WithSessionStorage(storage)
+	ctx := context.Background()
+
+	first, err := b.AcquireWithOutcome(ctx, AcquireSpec{SessionID: "persisted", UserID: "u1"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := b.putMeta(ctx, meta{
+		SandboxID: first.Sandbox.ID, SessionID: "persisted", UserID: "u1",
+		State: StateActive, NodeName: "node-b", StorageID: "storage-1",
+		PVCNamespace: "opensandbox", SessionClaim: "cocola-sv-reset", StorageGeneration: 2,
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	second, err := b.AcquireWithOutcome(ctx, AcquireSpec{SessionID: "persisted", UserID: "u1"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if second.Reused || second.Sandbox.ID == first.Sandbox.ID {
+		t.Fatalf("stale storage binding was reused: first=%+v second=%+v", first, second)
+	}
+	storage.mu.Lock()
+	discards := append([]string(nil), storage.discards...)
+	storage.mu.Unlock()
+	if len(discards) != 1 || discards[0] != "cocola-sv-reset" {
+		t.Fatalf("discarded claims = %v, want reset candidate", discards)
+	}
+	fp.mu.Lock()
+	claim := fp.lastSpec.SessionClaim
+	fp.mu.Unlock()
+	if claim != "cocola-sv-new" {
+		t.Fatalf("replacement claim = %q, want PostgreSQL binding", claim)
+	}
+}
+
+func TestAcquireRequiresExplicitResetWhenWorkspaceNodeUnavailable(t *testing.T) {
+	b, fp := newTestBinder(t)
+	storage := &fakeSessionStorage{binding: &SessionStorageBinding{
+		StorageID: "storage-1", SessionID: "persisted", UserID: "u1",
+		PVCNamespace: "opensandbox", PVCName: "cocola-sv-old", NodeName: "node-a",
+		Generation: 1, RequestedBytes: 2 * 1024 * 1024 * 1024,
+	}}
+	b.WithCapacityGuard(unavailablePreferredGuard{}).WithSessionStorage(storage)
+
+	if _, err := b.AcquireWithOutcome(context.Background(), AcquireSpec{
+		SessionID: "persisted", UserID: "u1",
+	}); !errors.Is(err, ErrWorkspaceNodeUnavailable) {
+		t.Fatalf("acquire error = %v, want workspace node unavailable", err)
+	}
+	if fp.creates.Load() != 0 {
+		t.Fatal("unavailable workspace must not create a blank sandbox")
+	}
+
+	out, err := b.AcquireWithOutcome(context.Background(), AcquireSpec{
+		SessionID: "persisted", UserID: "u1", AllowWorkspaceReset: true,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if out.WorkspaceState != provider.WorkspaceReset || out.WorkspaceNode != "node-b" ||
+		out.PreviousWorkspaceNode != "node-a" {
+		t.Fatalf("reset outcome = %+v", out)
+	}
+	storage.mu.Lock()
+	binding := *storage.binding
+	resets := storage.resets
+	storage.mu.Unlock()
+	if resets != 1 || binding.Generation != 2 || binding.PVCName != "cocola-sv-reset" {
+		t.Fatalf("reset binding = %+v, resets=%d", binding, resets)
+	}
+}
+
+func TestWorkspaceResetProviderCreateFailurePreservesBinding(t *testing.T) {
+	b, fp := newTestBinder(t)
+	storage := &fakeSessionStorage{binding: &SessionStorageBinding{
+		StorageID: "storage-1", SessionID: "persisted", UserID: "u1",
+		PVCNamespace: "opensandbox", PVCName: "cocola-sv-old", NodeName: "node-a",
+		Generation: 1, RequestedBytes: 2 * 1024 * 1024 * 1024,
+	}}
+	fp.createErr = errors.New("create failed")
+	b.WithCapacityGuard(unavailablePreferredGuard{}).WithSessionStorage(storage)
+
+	_, err := b.AcquireWithOutcome(context.Background(), AcquireSpec{
+		SessionID: "persisted", UserID: "u1", AllowWorkspaceReset: true,
+	})
+	if err == nil || !strings.Contains(err.Error(), "provider create") {
+		t.Fatalf("reset error = %v, want provider create failure", err)
+	}
+	storage.mu.Lock()
+	defer storage.mu.Unlock()
+	if storage.binding.Generation != 1 || storage.binding.PVCName != "cocola-sv-old" || storage.resets != 0 {
+		t.Fatalf("binding committed before sandbox success: %+v, resets=%d", *storage.binding, storage.resets)
+	}
+	if storage.prepared != 1 || len(storage.discards) != 1 || storage.discards[0] != "cocola-sv-reset" {
+		t.Fatalf("prepared=%d discards=%v", storage.prepared, storage.discards)
+	}
+}
+
+func TestWorkspaceResetCommitFailureDestroysCandidateAndPreservesBinding(t *testing.T) {
+	b, fp := newTestBinder(t)
+	storage := &fakeSessionStorage{
+		binding: &SessionStorageBinding{
+			StorageID: "storage-1", SessionID: "persisted", UserID: "u1",
+			PVCNamespace: "opensandbox", PVCName: "cocola-sv-old", NodeName: "node-a",
+			Generation: 1, RequestedBytes: 2 * 1024 * 1024 * 1024,
+		},
+		commitErr: errors.New("database unavailable"),
+	}
+	b.WithCapacityGuard(unavailablePreferredGuard{}).WithSessionStorage(storage)
+
+	_, err := b.AcquireWithOutcome(context.Background(), AcquireSpec{
+		SessionID: "persisted", UserID: "u1", AllowWorkspaceReset: true,
+	})
+	if err == nil || !strings.Contains(err.Error(), "commit workspace reset") {
+		t.Fatalf("reset error = %v, want commit failure", err)
+	}
+	if fp.destroys.Load() != 1 {
+		t.Fatalf("candidate destroys = %d, want 1", fp.destroys.Load())
+	}
+	if _, ok, lookupErr := b.lookup(context.Background(), "persisted", "u1"); lookupErr != nil || ok {
+		t.Fatalf("candidate remained bound: ok=%v err=%v", ok, lookupErr)
+	}
+	storage.mu.Lock()
+	defer storage.mu.Unlock()
+	if storage.binding.Generation != 1 || storage.binding.PVCName != "cocola-sv-old" || storage.resets != 0 {
+		t.Fatalf("binding changed after failed commit: %+v, resets=%d", *storage.binding, storage.resets)
+	}
+	if len(storage.discards) != 1 || storage.discards[0] != "cocola-sv-reset" {
+		t.Fatalf("discarded reset claims = %v", storage.discards)
+	}
+}
+
+func TestWorkspaceResetExtendsCreateLockThroughCommit(t *testing.T) {
+	type acquireResult struct {
+		sandbox *provider.Sandbox
+		err     error
+	}
+	b, fp := newTestBinder(t)
+	b.cfg.LockTTL = 500 * time.Millisecond
+	commitStarted := make(chan struct{})
+	allowCommit := make(chan struct{})
+	storage := &fakeSessionStorage{
+		binding: &SessionStorageBinding{
+			StorageID: "storage-1", SessionID: "persisted", UserID: "u1",
+			PVCNamespace: "opensandbox", PVCName: "cocola-sv-old", NodeName: "node-a",
+			Generation: 1, RequestedBytes: 2 * 1024 * 1024 * 1024,
+		},
+		commitHook: func() {
+			close(commitStarted)
+			<-allowCommit
+		},
+	}
+	fp.createHook = func(number int64) {
+		if number == 1 {
+			time.Sleep(400 * time.Millisecond)
+		}
+	}
+	b.WithCapacityGuard(unavailablePreferredGuard{}).WithSessionStorage(storage)
+
+	firstDone := make(chan acquireResult, 1)
+	go func() {
+		out, err := b.AcquireWithOutcome(context.Background(), AcquireSpec{
+			SessionID: "persisted", UserID: "u1", AllowWorkspaceReset: true,
+		})
+		firstDone <- acquireResult{sandbox: out.Sandbox, err: err}
+	}()
+	<-commitStarted
+	time.Sleep(150 * time.Millisecond) // the original pre-create lock TTL has elapsed
+
+	secondDone := make(chan acquireResult, 1)
+	go func() {
+		out, err := b.AcquireWithOutcome(context.Background(), AcquireSpec{
+			SessionID: "persisted", UserID: "u1",
+		})
+		secondDone <- acquireResult{sandbox: out.Sandbox, err: err}
+	}()
+	time.Sleep(50 * time.Millisecond)
+	if got := fp.destroys.Load(); got != 0 {
+		t.Fatalf("reset candidate destroyed before commit completed: %d", got)
+	}
+	close(allowCommit)
+
+	first := <-firstDone
+	second := <-secondDone
+	if first.err != nil || second.err != nil {
+		t.Fatalf("acquire errors: first=%v second=%v", first.err, second.err)
+	}
+	if first.sandbox.ID != second.sandbox.ID {
+		t.Fatalf("reset acquire did not converge: %s vs %s", first.sandbox.ID, second.sandbox.ID)
+	}
+}
+
+func TestWorkspaceResetCleanupKeepsBindingWhenDestroyFails(t *testing.T) {
+	b, fp := newTestBinder(t)
+	storage := &fakeSessionStorage{
+		binding: &SessionStorageBinding{
+			StorageID: "storage-1", SessionID: "persisted", UserID: "u1",
+			PVCNamespace: "opensandbox", PVCName: "cocola-sv-old", NodeName: "node-a",
+			Generation: 1, RequestedBytes: 2 * 1024 * 1024 * 1024,
+		},
+		commitErr: errors.New("database unavailable"),
+	}
+	fp.destroyErr["sbx-1"] = errors.New("control plane unavailable")
+	b.WithCapacityGuard(unavailablePreferredGuard{}).WithSessionStorage(storage)
+
+	_, err := b.AcquireWithOutcome(context.Background(), AcquireSpec{
+		SessionID: "persisted", UserID: "u1", AllowWorkspaceReset: true,
+	})
+	if err == nil || !strings.Contains(err.Error(), "control plane unavailable") {
+		t.Fatalf("reset error = %v, want destroy failure", err)
+	}
+	if sid, getErr := b.kv.Get(context.Background(), convKey("persisted")); getErr != nil || sid != "sbx-1" {
+		t.Fatalf("running candidate binding = %q, %v; want retained", sid, getErr)
+	}
+	storage.mu.Lock()
+	discards := append([]string(nil), storage.discards...)
+	storage.mu.Unlock()
+	if len(discards) != 0 {
+		t.Fatalf("candidate PVC discarded while sandbox may still be running: %v", discards)
+	}
+}
+
+type unavailablePreferredGuard struct{}
+
+func (unavailablePreferredGuard) SelectNode(_ context.Context, preferred, excluded string, _ map[string]int64) (string, error) {
+	if preferred != "" {
+		return "", ErrWorkspaceNodeUnavailable
+	}
+	if excluded == "node-a" {
+		return "node-b", nil
+	}
+	return "", ErrCapacityBusy
+}
+
+type switchableNodeGuard struct{ unavailable bool }
+
+func (g *switchableNodeGuard) SelectNode(_ context.Context, preferred, excluded string, _ map[string]int64) (string, error) {
+	if preferred != "" {
+		if g.unavailable {
+			return "", ErrWorkspaceNodeUnavailable
+		}
+		return preferred, nil
+	}
+	if excluded == "node-a" {
+		return "node-b", nil
+	}
+	return "node-a", nil
+}
+
+func (g *switchableNodeGuard) NodeAvailable(_ context.Context, nodeName string) (bool, error) {
+	return nodeName != "node-a" || !g.unavailable, nil
+}
+
+func TestAcquireDoesNotRenewSandboxOnUnavailableWorkspaceNode(t *testing.T) {
+	b, fp := newTestBinder(t)
+	storage := &fakeSessionStorage{}
+	guard := &switchableNodeGuard{}
+	b.WithCapacityGuard(guard).WithSessionStorage(storage)
+
+	first, err := b.AcquireWithOutcome(context.Background(), AcquireSpec{SessionID: "active", UserID: "u1"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	guard.unavailable = true
+	if _, err := b.AcquireWithOutcome(context.Background(), AcquireSpec{
+		SessionID: "active", UserID: "u1",
+	}); !errors.Is(err, ErrWorkspaceNodeUnavailable) {
+		t.Fatalf("acquire error = %v, want workspace node unavailable", err)
+	}
+	if fp.creates.Load() != 1 {
+		t.Fatal("unavailable running sandbox must not be replaced without confirmation")
+	}
+
+	reset, err := b.AcquireWithOutcome(context.Background(), AcquireSpec{
+		SessionID: "active", UserID: "u1", AllowWorkspaceReset: true,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if reset.Sandbox.ID == first.Sandbox.ID || reset.WorkspaceState != provider.WorkspaceReset ||
+		reset.WorkspaceNode != "node-b" || reset.PreviousWorkspaceNode != "node-a" {
+		t.Fatalf("reset outcome = %+v, first = %+v", reset, first)
+	}
+}
+
+func TestWorkspaceResetStopsWhenOldSandboxDeletionFails(t *testing.T) {
+	b, fp := newTestBinder(t)
+	storage := &fakeSessionStorage{}
+	guard := &switchableNodeGuard{}
+	b.WithCapacityGuard(guard).WithSessionStorage(storage)
+
+	first, err := b.AcquireWithOutcome(context.Background(), AcquireSpec{
+		SessionID: "reset-delete-failure", UserID: "u1",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	guard.unavailable = true
+	fp.mu.Lock()
+	fp.destroyErr[first.Sandbox.ID] = errors.New("control plane unavailable")
+	fp.mu.Unlock()
+
+	_, err = b.AcquireWithOutcome(context.Background(), AcquireSpec{
+		SessionID: "reset-delete-failure", UserID: "u1", AllowWorkspaceReset: true,
+	})
+	if err == nil || !strings.Contains(err.Error(), "destroy sandbox before workspace reset") {
+		t.Fatalf("reset error = %v, want old sandbox deletion failure", err)
+	}
+	storage.mu.Lock()
+	resets := storage.resets
+	generation := storage.binding.Generation
+	storage.mu.Unlock()
+	if resets != 0 || generation != 1 {
+		t.Fatalf("storage changed after failed destroy: resets=%d generation=%d", resets, generation)
 	}
 }
 
@@ -374,6 +686,131 @@ func TestConcurrentAcquireConverges(t *testing.T) {
 	}
 }
 
+func TestExpiredCreateLockStillConvergesThroughCASBind(t *testing.T) {
+	b, fp := newTestBinder(t)
+	b.cfg.LockTTL = 25 * time.Millisecond
+	firstCreateStarted := make(chan struct{})
+	releaseFirstCreate := make(chan struct{})
+	fp.createHook = func(number int64) {
+		if number == 1 {
+			close(firstCreateStarted)
+			<-releaseFirstCreate
+		}
+	}
+
+	type result struct {
+		sandbox *provider.Sandbox
+		err     error
+	}
+	firstResult := make(chan result, 1)
+	go func() {
+		sandbox, err := b.Acquire(context.Background(), AcquireSpec{SessionID: "slow", UserID: "u"})
+		firstResult <- result{sandbox: sandbox, err: err}
+	}()
+	<-firstCreateStarted
+	time.Sleep(2 * b.cfg.LockTTL)
+
+	second, err := b.Acquire(context.Background(), AcquireSpec{SessionID: "slow", UserID: "u"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	close(releaseFirstCreate)
+	first := <-firstResult
+	if first.err != nil {
+		t.Fatal(first.err)
+	}
+	if first.sandbox.ID != second.ID {
+		t.Fatalf("CAS bind returned different winners: %s and %s", first.sandbox.ID, second.ID)
+	}
+	if got := fp.creates.Load(); got != 2 {
+		t.Fatalf("creates = %d, want the expired-lock race to create two candidates", got)
+	}
+	if got := fp.destroys.Load(); got != 1 {
+		t.Fatalf("destroys = %d, want exactly one loser cleanup", got)
+	}
+}
+
+func TestExpiredAcquireCannotRebindAfterRelease(t *testing.T) {
+	b, fp := newTestBinder(t)
+	b.cfg.LockTTL = 25 * time.Millisecond
+	storage := &fakeSessionStorage{}
+	b.WithCapacityGuard(staticNodeGuard("node-a")).WithSessionStorage(storage)
+	createStarted := make(chan struct{})
+	allowCreate := make(chan struct{})
+	fp.createHook = func(number int64) {
+		if number == 1 {
+			close(createStarted)
+			<-allowCreate
+		}
+	}
+
+	acquireDone := make(chan error, 1)
+	go func() {
+		_, err := b.Acquire(context.Background(), AcquireSpec{
+			SessionID: "deleted-during-create", UserID: "u",
+		})
+		acquireDone <- err
+	}()
+	<-createStarted
+	time.Sleep(2 * b.cfg.LockTTL)
+	if err := b.Release(context.Background(), "u", "deleted-during-create"); err != nil {
+		t.Fatal(err)
+	}
+	close(allowCreate)
+	if err := <-acquireDone; !errors.Is(err, ErrSessionLockLost) {
+		t.Fatalf("acquire error = %v, want lock-lost fencing", err)
+	}
+	if _, err := b.kv.Get(context.Background(), convKey("deleted-during-create")); !errors.Is(err, rds.ErrNil) {
+		t.Fatalf("deleted Session was rebound: %v", err)
+	}
+	storage.mu.Lock()
+	binding := storage.binding
+	storage.mu.Unlock()
+	if binding != nil {
+		t.Fatalf("storage binding survived Release: %+v", binding)
+	}
+	if got := fp.destroys.Load(); got != 1 {
+		t.Fatalf("destroys = %d, want late candidate cleanup", got)
+	}
+}
+
+func TestReleaseWaitsForAcquireSessionLock(t *testing.T) {
+	b, fp := newTestBinder(t)
+	createStarted := make(chan struct{})
+	allowCreate := make(chan struct{})
+	fp.createHook = func(number int64) {
+		if number == 1 {
+			close(createStarted)
+			<-allowCreate
+		}
+	}
+
+	acquireDone := make(chan error, 1)
+	go func() {
+		_, err := b.Acquire(context.Background(), AcquireSpec{SessionID: "release-race", UserID: "u"})
+		acquireDone <- err
+	}()
+	<-createStarted
+	releaseDone := make(chan error, 1)
+	go func() { releaseDone <- b.Release(context.Background(), "u", "release-race") }()
+
+	select {
+	case err := <-releaseDone:
+		t.Fatalf("release completed before acquire released the Session lock: %v", err)
+	case <-time.After(50 * time.Millisecond):
+	}
+	close(allowCreate)
+	if err := <-acquireDone; err != nil {
+		t.Fatal(err)
+	}
+	if err := <-releaseDone; err != nil {
+		t.Fatal(err)
+	}
+	if _, err := b.kv.Get(context.Background(), convKey("release-race")); !errors.Is(err, rds.ErrNil) {
+		t.Fatalf("forward binding survived release: %v", err)
+	}
+}
+
 // TestDistinctSessionsDistinctSandboxes: N sessions => N sandboxes.
 func TestDistinctSessionsDistinctSandboxes(t *testing.T) {
 	b, fp := newTestBinder(t)
@@ -405,8 +842,7 @@ func TestDistinctSessionsDistinctSandboxes(t *testing.T) {
 	}
 }
 
-// TestReaperPauseThenDestroy: an idle sandbox is first paused, then destroyed.
-func TestReaperPauseThenDestroy(t *testing.T) {
+func TestReaperDestroysIdleSandboxWithoutCleaningSessionStorage(t *testing.T) {
 	b, fp := newTestBinder(t)
 	ctx := context.Background()
 	sb, err := b.Acquire(ctx, AcquireSpec{SessionID: "idle", UserID: "u"})
@@ -415,40 +851,11 @@ func TestReaperPauseThenDestroy(t *testing.T) {
 	}
 	id := sb.ID
 
-	// Stage 1: after the lease lapses, a reap pass should pause it.
-	deadline := time.Now().Add(8 * time.Second)
-	sawPaused := false
-	for time.Now().Before(deadline) {
-		_ = b.reapOnce(ctx, time.Now())
-		fp.mu.Lock()
-		st := fp.state[id]
-		fp.mu.Unlock()
-		if st == "paused" {
-			sawPaused = true
-			break
-		}
-		time.Sleep(100 * time.Millisecond)
+	if _, err := b.kv.Del(ctx, leaseKey(id)); err != nil {
+		t.Fatal(err)
 	}
-	if !sawPaused {
-		t.Fatal("sandbox was never paused (stage 1 failed)")
-	}
-
-	// Stage 2: after the destroy grace, a reap pass should destroy + unbind it.
-	deadline = time.Now().Add(8 * time.Second)
-	sawDestroyed := false
-	for time.Now().Before(deadline) {
-		_ = b.reapOnce(ctx, time.Now())
-		fp.mu.Lock()
-		st := fp.state[id]
-		fp.mu.Unlock()
-		if st == "destroyed" {
-			sawDestroyed = true
-			break
-		}
-		time.Sleep(100 * time.Millisecond)
-	}
-	if !sawDestroyed {
-		t.Fatal("sandbox was never destroyed (stage 2 failed)")
+	if err := b.reapOnce(ctx, time.Now()); err != nil {
+		t.Fatal(err)
 	}
 
 	// Mapping must be gone.
@@ -457,14 +864,15 @@ func TestReaperPauseThenDestroy(t *testing.T) {
 	}
 	fp.mu.Lock()
 	cleanups := append([]string(nil), fp.cleanups...)
-	checkpoints := append([]string(nil), fp.checkpoints...)
 	fp.mu.Unlock()
 	if len(cleanups) != 0 {
 		t.Fatalf("idle reaper must not clean session storage, got %v", cleanups)
 	}
-	wantCheckpoint := "u/idle/" + id
-	if len(checkpoints) != 1 || checkpoints[0] != wantCheckpoint {
-		t.Fatalf("checkpoints = %v, want [%s]", checkpoints, wantCheckpoint)
+	fp.mu.Lock()
+	state := fp.state[id]
+	fp.mu.Unlock()
+	if state != "destroyed" {
+		t.Fatalf("sandbox state = %q, want destroyed", state)
 	}
 }
 
@@ -476,7 +884,7 @@ func TestReaperUnbindsMissingActiveSandbox(t *testing.T) {
 		t.Fatal(err)
 	}
 	fp.mu.Lock()
-	fp.pauseErr[sb.ID] = fs.ErrNotExist
+	fp.destroyErr[sb.ID] = fs.ErrNotExist
 	fp.mu.Unlock()
 
 	if _, err := b.kv.Del(ctx, leaseKey(sb.ID)); err != nil {
@@ -486,36 +894,6 @@ func TestReaperUnbindsMissingActiveSandbox(t *testing.T) {
 		t.Fatalf("reapOnce: %v", err)
 	}
 	if _, ok, err := b.lookup(ctx, "missing-active", "u"); err != nil || ok {
-		t.Fatalf("lookup after reap ok=%v err=%v, want unbound", ok, err)
-	}
-}
-
-func TestReaperUnbindsMissingPausedSandbox(t *testing.T) {
-	b, fp := newTestBinder(t)
-	ctx := context.Background()
-	sb, err := b.Acquire(ctx, AcquireSpec{SessionID: "missing-paused", UserID: "u"})
-	if err != nil {
-		t.Fatal(err)
-	}
-	m := meta{
-		SandboxID:   sb.ID,
-		SessionID:   "missing-paused",
-		UserID:      "u",
-		State:       StatePaused,
-		CreatedUnix: time.Now().Unix(),
-		PausedUnix:  time.Now().Add(-time.Hour).Unix(),
-	}
-	if err := b.putMeta(ctx, m); err != nil {
-		t.Fatalf("put meta: %v", err)
-	}
-	fp.mu.Lock()
-	fp.destroyErr[sb.ID] = fs.ErrNotExist
-	fp.mu.Unlock()
-
-	if err := b.reapOnce(ctx, time.Now()); err != nil {
-		t.Fatalf("reapOnce: %v", err)
-	}
-	if _, ok, err := b.lookup(ctx, "missing-paused", "u"); err != nil || ok {
 		t.Fatalf("lookup after reap ok=%v err=%v, want unbound", ok, err)
 	}
 }
@@ -544,6 +922,66 @@ func TestHeartbeatKeepsAlive(t *testing.T) {
 	}
 }
 
+func TestReaperSkipsSandboxWhileSessionLockIsHeld(t *testing.T) {
+	b, fp := newTestBinder(t)
+	ctx := context.Background()
+	sb, err := b.Acquire(ctx, AcquireSpec{SessionID: "locked", UserID: "u"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := b.kv.Del(ctx, leaseKey(sb.ID)); err != nil {
+		t.Fatal(err)
+	}
+	lock, err := tryLock(ctx, b.kv, "locked", b.cfg.LockTTL)
+	if err != nil {
+		t.Fatal(err)
+	}
+	count, err := b.reapMeta(ctx, metaKey(sb.ID))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if count != 1 || fp.destroys.Load() != 0 {
+		t.Fatalf("locked reap count=%d destroys=%d", count, fp.destroys.Load())
+	}
+	if err := lock.release(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := b.reapMeta(ctx, metaKey(sb.ID)); err != nil {
+		t.Fatal(err)
+	}
+	if fp.destroys.Load() != 1 {
+		t.Fatalf("unlocked destroys=%d, want 1", fp.destroys.Load())
+	}
+}
+
+func TestHeartbeatDoesNotReportSuccessDuringSessionLockContention(t *testing.T) {
+	b, _ := newTestBinder(t)
+	ctx := context.Background()
+	sb, err := b.Acquire(ctx, AcquireSpec{SessionID: "locked-heartbeat", UserID: "u"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := b.kv.Del(ctx, leaseKey(sb.ID)); err != nil {
+		t.Fatal(err)
+	}
+	lock, err := tryLock(ctx, b.kv, "locked-heartbeat", b.cfg.LockTTL)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := b.Heartbeat(ctx, sb.ID); !errors.Is(err, ErrLockHeld) {
+		t.Fatalf("heartbeat error = %v, want ErrLockHeld", err)
+	}
+	if _, err := b.kv.Get(ctx, leaseKey(sb.ID)); !errors.Is(err, rds.ErrNil) {
+		t.Fatalf("heartbeat renewed lease under contention: %v", err)
+	}
+	if err := lock.release(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if err := b.Heartbeat(ctx, sb.ID); err != nil {
+		t.Fatal(err)
+	}
+}
+
 func TestReleaseDestroysUnbindsAndCleansSessionStorage(t *testing.T) {
 	b, fp := newTestBinder(t)
 	ctx := context.Background()
@@ -551,7 +989,7 @@ func TestReleaseDestroysUnbindsAndCleansSessionStorage(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := b.Release(ctx, "s1"); err != nil {
+	if err := b.Release(ctx, "u1", "s1"); err != nil {
 		t.Fatalf("Release: %v", err)
 	}
 	if got := fp.destroys.Load(); got != 1 {
@@ -567,101 +1005,6 @@ func TestReleaseDestroysUnbindsAndCleansSessionStorage(t *testing.T) {
 	}
 	if len(fp.cleanups) != 1 || fp.cleanups[0] != "u1/s1" {
 		t.Fatalf("cleanups = %v, want [u1/s1]", fp.cleanups)
-	}
-	if len(fp.checkpoints) != 0 {
-		t.Fatalf("explicit release must not checkpoint deleted conversation, got %v", fp.checkpoints)
-	}
-}
-
-func TestAcquireRecreatesWhenPausedSandboxDisappeared(t *testing.T) {
-	b, fp := newTestBinder(t)
-	ctx := context.Background()
-	spec := AcquireSpec{SessionID: "gone", UserID: "u"}
-
-	sb1, err := b.Acquire(ctx, spec)
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	fp.mu.Lock()
-	fp.state[sb1.ID] = "destroyed"
-	fp.resumeErr[sb1.ID] = fs.ErrNotExist
-	fp.mu.Unlock()
-
-	if err := b.putMeta(ctx, meta{
-		SandboxID:   sb1.ID,
-		SessionID:   spec.SessionID,
-		UserID:      spec.UserID,
-		State:       StatePaused,
-		CreatedUnix: time.Now().Unix(),
-		PausedUnix:  time.Now().Unix(),
-	}); err != nil {
-		t.Fatal(err)
-	}
-
-	out, err := b.AcquireWithOutcome(ctx, spec)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if out.Reused {
-		t.Fatal("expected fresh sandbox after stale paused binding, got reused")
-	}
-	if out.Sandbox.ID == sb1.ID {
-		t.Fatalf("expected new sandbox id, got stale %s", out.Sandbox.ID)
-	}
-	if got := fp.creates.Load(); got != 2 {
-		t.Fatalf("expected 2 creates, got %d", got)
-	}
-	if sid, err := b.kv.Get(ctx, convKey(spec.SessionID)); err != nil || sid != out.Sandbox.ID {
-		t.Fatalf("forward binding = %q, %v; want %q", sid, err, out.Sandbox.ID)
-	}
-}
-
-// TestAcquireRecreatesWhenPausedSandboxNotResumable covers the state-divergence
-// bug: our durable binding says StatePaused but the provider has driven the
-// sandbox to a terminal phase and discarded the paused checkpoint, so Resume
-// returns provider.ErrSandboxNotResumable (the 409 INVALID_STATE case). Acquire
-// must self-heal — drop the stale binding and cold-create — rather than fail.
-func TestAcquireRecreatesWhenPausedSandboxNotResumable(t *testing.T) {
-	b, fp := newTestBinder(t)
-	ctx := context.Background()
-	spec := AcquireSpec{SessionID: "terminal", UserID: "u"}
-
-	sb1, err := b.Acquire(ctx, spec)
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	fp.mu.Lock()
-	fp.resumeErr[sb1.ID] = provider.ErrSandboxNotResumable
-	fp.mu.Unlock()
-
-	if err := b.putMeta(ctx, meta{
-		SandboxID:   sb1.ID,
-		SessionID:   spec.SessionID,
-		UserID:      spec.UserID,
-		State:       StatePaused,
-		CreatedUnix: time.Now().Unix(),
-		PausedUnix:  time.Now().Unix(),
-	}); err != nil {
-		t.Fatal(err)
-	}
-
-	out, err := b.AcquireWithOutcome(ctx, spec)
-	if err != nil {
-		t.Fatalf("acquire must self-heal a non-resumable paused sandbox, got err: %v", err)
-	}
-	if out.Reused {
-		t.Fatal("expected fresh sandbox after non-resumable paused binding, got reused")
-	}
-	if out.Sandbox.ID == sb1.ID {
-		t.Fatalf("expected new sandbox id, got stale %s", out.Sandbox.ID)
-	}
-	if got := fp.creates.Load(); got != 2 {
-		t.Fatalf("expected 2 creates, got %d", got)
-	}
-	if sid, err := b.kv.Get(ctx, convKey(spec.SessionID)); err != nil || sid != out.Sandbox.ID {
-		t.Fatalf("forward binding = %q, %v; want %q", sid, err, out.Sandbox.ID)
 	}
 }
 
@@ -694,110 +1037,5 @@ func TestAcquireRecreatesWhenActiveSandboxDisappeared(t *testing.T) {
 	}
 	if sid, err := b.kv.Get(ctx, convKey(spec.SessionID)); err != nil || sid != out.Sandbox.ID {
 		t.Fatalf("forward binding = %q, %v; want %q", sid, err, out.Sandbox.ID)
-	}
-}
-
-// TestCheckpointAllActiveArchivesOnlyActive: the graceful-teardown drain sweep
-// checkpoints every ACTIVE bound sandbox exactly once and skips PAUSED ones
-// (those were already archived at Pause time; archiving one would need a thaw).
-func TestCheckpointAllActiveArchivesOnlyActive(t *testing.T) {
-	b, fp := newTestBinder(t)
-	ctx := context.Background()
-
-	sb1, err := b.Acquire(ctx, AcquireSpec{SessionID: "live-1", UserID: "u1"})
-	if err != nil {
-		t.Fatal(err)
-	}
-	sb2, err := b.Acquire(ctx, AcquireSpec{SessionID: "live-2", UserID: "u2"})
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	pausedID := "sbx-paused"
-	if err := b.putMeta(ctx, meta{
-		SandboxID:   pausedID,
-		SessionID:   "dozing",
-		UserID:      "u3",
-		State:       StatePaused,
-		CreatedUnix: time.Now().Unix(),
-		PausedUnix:  time.Now().Unix(),
-	}); err != nil {
-		t.Fatal(err)
-	}
-
-	summary := b.CheckpointAllActive(ctx)
-
-	fp.mu.Lock()
-	got := map[string]bool{}
-	for _, c := range fp.checkpoints {
-		got[c] = true
-	}
-	fp.mu.Unlock()
-
-	if len(got) != 2 {
-		t.Fatalf("expected exactly 2 checkpoints, got %v", got)
-	}
-	if !got["u1/live-1/"+sb1.ID] {
-		t.Fatalf("missing checkpoint for live-1; got %v", got)
-	}
-	if !got["u2/live-2/"+sb2.ID] {
-		t.Fatalf("missing checkpoint for live-2; got %v", got)
-	}
-	if got["u3/dozing/"+pausedID] {
-		t.Fatalf("paused sandbox must not be checkpointed; got %v", got)
-	}
-	if summary.Scanned != 3 || summary.Succeeded != 2 || summary.Skipped != 1 || len(summary.Failures) != 0 {
-		t.Fatalf("unexpected checkpoint summary: %+v", summary)
-	}
-}
-
-func TestCheckpointAllActiveReportsProviderFailure(t *testing.T) {
-	b, fp := newTestBinder(t)
-	ctx := context.Background()
-
-	sb, err := b.Acquire(ctx, AcquireSpec{SessionID: "live-fail", UserID: "u1"})
-	if err != nil {
-		t.Fatal(err)
-	}
-	fp.mu.Lock()
-	fp.checkpointErr[sb.ID] = errors.New("minio upload unavailable")
-	fp.mu.Unlock()
-
-	summary := b.CheckpointAllActive(ctx)
-	if summary.Scanned != 1 || summary.Succeeded != 0 || len(summary.Failures) != 1 {
-		t.Fatalf("unexpected checkpoint summary: %+v", summary)
-	}
-	failure := summary.Failures[0]
-	if failure.SessionID != "live-fail" || failure.SandboxID != sb.ID {
-		t.Fatalf("unexpected failure identity: %+v", failure)
-	}
-	if failure.Err == nil || failure.Err.Error() != "minio upload unavailable" {
-		t.Fatalf("unexpected failure error: %v", failure.Err)
-	}
-}
-
-// TestCheckpointAllActiveStopsWhenBudgetExhausted: a cancelled context (the
-// teardown budget elapsed) halts the sweep without archiving anything.
-func TestCheckpointAllActiveStopsWhenBudgetExhausted(t *testing.T) {
-	b, fp := newTestBinder(t)
-	ctx := context.Background()
-
-	if _, err := b.Acquire(ctx, AcquireSpec{SessionID: "live-1", UserID: "u1"}); err != nil {
-		t.Fatal(err)
-	}
-
-	cctx, cancel := context.WithCancel(ctx)
-	cancel() // budget already exhausted before the sweep starts
-
-	summary := b.CheckpointAllActive(cctx)
-
-	fp.mu.Lock()
-	n := len(fp.checkpoints)
-	fp.mu.Unlock()
-	if n != 0 {
-		t.Fatalf("expected no checkpoints under an exhausted budget, got %d", n)
-	}
-	if !errors.Is(summary.ScanError, context.Canceled) {
-		t.Fatalf("scan error = %v, want context.Canceled", summary.ScanError)
 	}
 }

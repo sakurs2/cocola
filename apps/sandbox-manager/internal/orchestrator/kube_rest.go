@@ -34,6 +34,20 @@ type kubeClient struct {
 	http *http.Client
 }
 
+type kubeStatusError struct {
+	StatusCode int
+	Body       string
+}
+
+func (e *kubeStatusError) Error() string {
+	return fmt.Sprintf("kubernetes api status %d: %s", e.StatusCode, e.Body)
+}
+
+func isKubeStatus(err error, status int) bool {
+	var target *kubeStatusError
+	return errors.As(err, &target) && target.StatusCode == status
+}
+
 func newKubeClient(cfg kubeConfig) *kubeClient {
 	tr := &http.Transport{}
 	tlsCfg := &tls.Config{InsecureSkipVerify: cfg.InsecureSkipTLS} //nolint:gosec // operator-controlled kubeconfig
@@ -184,13 +198,51 @@ func (c *kubeClient) do(ctx context.Context, method, path string, body any, out 
 	defer resp.Body.Close()
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
 		b, _ := io.ReadAll(io.LimitReader(resp.Body, 4096))
-		return fmt.Errorf("kubernetes api status %d: %s", resp.StatusCode, strings.TrimSpace(string(b)))
+		return &kubeStatusError{StatusCode: resp.StatusCode, Body: strings.TrimSpace(string(b))}
 	}
 	if out == nil {
 		return nil
 	}
 	if err := json.NewDecoder(resp.Body).Decode(out); err != nil {
 		return fmt.Errorf("kubernetes decode: %w", err)
+	}
+	return nil
+}
+
+func (c *kubeClient) ensureSessionPVC(ctx context.Context, namespace, name, storageClass, size string, labels map[string]string) error {
+	path := "/api/v1/namespaces/" + url.PathEscape(namespace) + "/persistentvolumeclaims/" + url.PathEscape(name)
+	var pvc map[string]any
+	err := c.do(ctx, http.MethodGet, path, nil, &pvc, "application/json")
+	if err == nil {
+		return nil
+	}
+	if !isKubeStatus(err, http.StatusNotFound) {
+		return err
+	}
+	body := map[string]any{
+		"apiVersion": "v1",
+		"kind":       "PersistentVolumeClaim",
+		"metadata": map[string]any{
+			"name": name, "namespace": namespace, "labels": labels,
+		},
+		"spec": map[string]any{
+			"accessModes":      []string{"ReadWriteOnce"},
+			"storageClassName": storageClass,
+			"resources":        map[string]any{"requests": map[string]string{"storage": size}},
+		},
+	}
+	collection := "/api/v1/namespaces/" + url.PathEscape(namespace) + "/persistentvolumeclaims"
+	if err := c.do(ctx, http.MethodPost, collection, body, &pvc, "application/json"); err != nil && !isKubeStatus(err, http.StatusConflict) {
+		return err
+	}
+	return nil
+}
+
+func (c *kubeClient) deleteSessionPVC(ctx context.Context, namespace, claimName string) error {
+	path := "/api/v1/namespaces/" + url.PathEscape(namespace) + "/persistentvolumeclaims/" + url.PathEscape(claimName)
+	body := map[string]any{"propagationPolicy": "Foreground"}
+	if err := c.do(ctx, http.MethodDelete, path, body, nil, "application/json"); err != nil && !isKubeStatus(err, http.StatusNotFound) {
+		return err
 	}
 	return nil
 }
@@ -213,7 +265,8 @@ type kubeNode struct {
 type kubePod struct {
 	Metadata kubeMeta `json:"metadata"`
 	Spec     struct {
-		NodeName string `json:"nodeName"`
+		NodeName     string            `json:"nodeName"`
+		NodeSelector map[string]string `json:"nodeSelector"`
 	} `json:"spec"`
 	Status struct {
 		Phase string `json:"phase"`

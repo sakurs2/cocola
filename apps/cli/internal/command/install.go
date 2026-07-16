@@ -95,6 +95,7 @@ func (a *application) installCommand() *cobra.Command {
 	flags.BoolVar(&options.ManagedOpenSandbox, "managed-opensandbox", true, "run the bundled OpenSandbox server")
 	flags.StringVar(&options.ExternalOpenSandboxURL, "external-opensandbox-url", "", "use an externally managed OpenSandbox URL")
 	flags.StringVar(&options.SandboxLLMBaseURL, "sandbox-llm-base-url", "", "LLM Gateway URL reachable from external sandboxes")
+	flags.StringVar(&options.SessionVolumeSize, "session-volume-size", options.SessionVolumeSize, "soft capacity request for each new Session Volume")
 	flags.BoolVarP(&yes, "yes", "y", false, "accept flags/defaults without prompting")
 	return command
 }

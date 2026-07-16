@@ -37,6 +37,7 @@ class FakeRequest:
     prompt: str = "hi"
     sandbox_id: str = ""
     max_turns: int = 0
+    allow_workspace_reset: bool = False
     attachments: list = field(default_factory=list)
 
 
@@ -192,12 +193,25 @@ async def test_manager_binder_bridges_blocking_client(monkeypatch):
         def __exit__(self, *a):
             return False
 
-        def acquire(self, session_id, user_id="", image="", env=None):
-            captured["acquire"] = (session_id, user_id, image, env)
+        def acquire(
+            self,
+            session_id,
+            user_id="",
+            image="",
+            env=None,
+            allow_workspace_reset=False,
+        ):
+            captured["acquire"] = (
+                session_id,
+                user_id,
+                image,
+                env,
+                allow_workspace_reset,
+            )
             return _Acq(sandbox=_Box(id="real-box", endpoint="tcp://h:1"), reused=True)
 
-        def release(self, session_id):
-            captured["release"] = session_id
+        def release(self, session_id, user_id="", *, timeout_s=None):
+            captured["release"] = (session_id, user_id, timeout_s)
 
     monkeypatch.setattr(mod, "SandboxClient", FakeClient)
 
@@ -206,10 +220,10 @@ async def test_manager_binder_bridges_blocking_client(monkeypatch):
     assert isinstance(box, BoundSandbox)
     assert box.id == "real-box" and box.endpoint == "tcp://h:1" and box.reused is True
     assert captured["addr"] == "127.0.0.1:50051"
-    assert captured["acquire"] == ("S2", "emp-1", "img", {})
+    assert captured["acquire"] == ("S2", "emp-1", "img", {}, False)
 
-    await binder.release(session_id="S2")
-    assert captured["release"] == "S2"
+    await binder.release(session_id="S2", user_id="emp-1")
+    assert captured["release"] == ("S2", "emp-1", 8.0)
 
 
 async def test_manager_binder_applies_provisioning_defaults(monkeypatch):
@@ -243,7 +257,14 @@ async def test_manager_binder_applies_provisioning_defaults(monkeypatch):
         def __exit__(self, *a):
             return False
 
-        def acquire(self, session_id, user_id="", image="", env=None):
+        def acquire(
+            self,
+            session_id,
+            user_id="",
+            image="",
+            env=None,
+            allow_workspace_reset=False,
+        ):
             captured["image"] = image
             captured["env"] = env
             return _Acq(sandbox=_Box(id="b", endpoint="e"), reused=False)
@@ -287,7 +308,14 @@ async def test_manager_binder_maps_capacity_exhausted(monkeypatch):
         def __exit__(self, *a):
             return False
 
-        def acquire(self, session_id, user_id="", image="", env=None):
+        def acquire(
+            self,
+            session_id,
+            user_id="",
+            image="",
+            env=None,
+            allow_workspace_reset=False,
+        ):
             raise CapacityRpcError()
 
     monkeypatch.setattr(mod, "SandboxClient", FakeClient)

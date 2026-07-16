@@ -18,11 +18,7 @@ type SandboxSpec struct {
 	Resources      Resources         // CPU/mem/disk caps
 	Networking     Networking        // egress policy
 	TargetNodeName string            // optional node placement for schedulable backends
-	// Warm marks a session-agnostic pre-warmed sandbox created ahead of demand
-	// (see orchestrator.WarmPool). A warm sandbox mounts NO per-session volume
-	// (OpenSandbox has no hot-mount API, ADR-0016), so its workspace is ephemeral
-	// until a session claims it and its state is restored via checkpoint/restore.
-	Warm bool
+	SessionClaim   string            // existing PVC; required by the managed PVC backend
 }
 
 // Resources defines the resource quota.
@@ -39,11 +35,25 @@ type Networking struct {
 
 // Sandbox identifies a running sandbox.
 type Sandbox struct {
-	ID        string
-	UserID    string
-	SessionID string
-	Endpoint  string // provider-specific (e.g. unix socket, gRPC addr)
+	ID                string
+	UserID            string
+	SessionID         string
+	NodeName          string
+	StorageID         string
+	SessionClaim      string
+	StorageGeneration int64
+	PVCNamespace      string
+	Endpoint          string // provider-specific (e.g. unix socket, gRPC addr)
 }
+
+// WorkspaceState describes the persistent workspace selected for an Acquire.
+type WorkspaceState string
+
+const (
+	WorkspaceFresh     WorkspaceState = "fresh"
+	WorkspacePreserved WorkspaceState = "preserved"
+	WorkspaceReset     WorkspaceState = "reset"
+)
 
 // ExecRequest describes a command to execute inside the sandbox.
 type ExecRequest struct {
@@ -81,12 +91,13 @@ type HealthStatus struct {
 }
 
 // ErrSandboxNotResumable indicates a Resume was rejected because the sandbox is
-// no longer in a resumable (Paused) state: it has reached a terminal phase
-// (completed / failed / terminated) and its paused checkpoint is gone. The
-// orchestrator treats this exactly like a missing sandbox — it drops the stale
-// binding and cold-creates a fresh one (session state is restored from the
-// durable checkpoint by agent-runtime).
+// no longer in a resumable (Paused) state. The orchestrator treats this like a
+// missing compute sandbox; persistent state remains on the session volume.
 var ErrSandboxNotResumable = errors.New("provider: sandbox not resumable")
+
+// ErrSessionClaimRequired prevents the managed PVC backend from provisioning a
+// claim outside the authoritative session_storage path.
+var ErrSessionClaimRequired = errors.New("provider: existing session claim required")
 
 // SandboxProvider is the contract every backend must implement.
 type SandboxProvider interface {
@@ -105,12 +116,4 @@ type SandboxProvider interface {
 // conversation deletion; idle reaping still preserves session directories.
 type SessionStorageCleaner interface {
 	CleanupSessionStorage(ctx context.Context, userID, sessionID string) error
-}
-
-// SessionCheckpointer is an optional extension implemented by providers that
-// can snapshot a live sandbox before the orchestrator reclaims it. Errors are
-// intentionally best-effort at the call site so reclamation cannot be blocked
-// forever by persistence failures.
-type SessionCheckpointer interface {
-	CheckpointSession(ctx context.Context, userID, sessionID, sandboxID string) error
 }

@@ -401,6 +401,7 @@ type chatRequest struct {
 	RuntimeID                            string            `json:"runtime_id"`
 	FolderID                             string            `json:"folder_id"`
 	SkillID                              string            `json:"skill_id"`
+	AllowWorkspaceReset                  bool              `json:"allow_workspace_reset"`
 }
 
 // attachmentDTO is one user-uploaded file carried inline in the chat body.
@@ -755,14 +756,15 @@ func (a *API) deleteConversation(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	unlockRunMutation()
-	// Durable state is gone and new Runs can no longer target this conversation;
-	// release the external session afterward without holding the global mutation lock.
+	// Storage cleanup is request-driven but must not hold the process-wide Run
+	// mutation lock. Once the conversation is gone, a failure is visible as an
+	// orphan in Admin and can be retried manually without blocking user deletion.
 	if a.releaser != nil {
-		releaseCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-		defer cancel()
+		releaseCtx, cancel := context.WithTimeout(context.WithoutCancel(r.Context()), 10*time.Second)
 		if err := a.releaser.ReleaseSession(releaseCtx, id.UserID, convID); err != nil {
-			a.log.Warn("release conversation session failed: " + err.Error())
+			a.log.Warn("release deleted conversation session failed: " + err.Error())
 		}
+		cancel()
 	}
 	w.WriteHeader(http.StatusNoContent)
 }

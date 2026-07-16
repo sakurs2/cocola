@@ -18,7 +18,6 @@ type SandboxRuntime = {
     | "ready"
     | "starting"
     | "pending_reclaim"
-    | "reclaiming"
     | "stale_metadata"
     | "stopped"
     | "orphan"
@@ -40,7 +39,6 @@ const STATUS_LABELS: Record<string, string> = {
   ready: "Ready",
   starting: "Starting",
   pending_reclaim: "Pending reclaim",
-  reclaiming: "Reclaiming",
   stale_metadata: "Stale metadata",
   stopped: "Stopped",
   orphan: "Orphan",
@@ -111,8 +109,7 @@ export default function SandboxesPage() {
       running: sandboxes.filter((s) => s.status === "running").length,
       ready: sandboxes.filter((s) => s.status === "ready").length,
       orphan: sandboxes.filter((s) => s.status === "orphan").length,
-      reclaiming: sandboxes.filter((s) => ["pending_reclaim", "reclaiming"].includes(s.status))
-        .length,
+      reclaiming: sandboxes.filter((s) => s.status === "pending_reclaim").length,
     }),
     [sandboxes],
   );
@@ -397,16 +394,13 @@ function StatusPill({ status }: { status: string }) {
         status === "ready" && "bg-teal-500/15 text-teal-400",
         status === "starting" && "bg-sky-500/15 text-sky-400",
         status === "pending_reclaim" && "bg-amber-500/15 text-amber-400",
-        status === "reclaiming" && "bg-amber-500/15 text-amber-400",
         status === "stale_metadata" && "bg-muted text-muted-foreground",
         status === "stopped" && "bg-muted text-muted-foreground",
         status === "orphan" && "bg-rose-500/15 text-rose-400",
         status === "unknown" && "bg-muted text-muted-foreground",
       )}
     >
-      {status === "pending_reclaim" || status === "reclaiming" ? (
-        <Clock3 className="mr-1 size-3" />
-      ) : null}
+      {status === "pending_reclaim" ? <Clock3 className="mr-1 size-3" /> : null}
       {STATUS_LABELS[status] ?? status}
     </span>
   );

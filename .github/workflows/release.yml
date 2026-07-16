@@ -50,6 +50,9 @@ jobs:
           - name: admin-api
             dockerfile: apps/admin-api/Dockerfile
             context: .
+          - name: storage-probe
+            dockerfile: apps/admin-api/storage-probe.Dockerfile
+            context: .
           - name: agent-runtime
             dockerfile: apps/agent-runtime/Dockerfile
             context: .

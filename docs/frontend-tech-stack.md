@@ -34,7 +34,7 @@ Gateway SSE
 - 不绕过 runtime 另建一套聊天消息状态。
 - 新的消息 part 或 SSE event 先在 runtime adapter 中完成类型化和容错，再交给渲染层。
 - `environment_status` 是当前 Agent 会话首次初始化的环境快照，包含已加载的 Skills 和 MCP 连接状态；不写入消息历史，也不在正常 follow-up 中重复检查。它与 artifact 共用右侧 Context Dock，移动端使用覆盖面板。
-- `environment_prepare` 是某一轮消息的阻塞性环境准备快照，仅在绑定新 sandbox 时产生，并作为消息的第一个 Rail 节点持久化；复用现有 sandbox 时不产生。它使用开放的 `schema_version + part_id + state + components[]` 结构，当前只展示 workspace、checkpoint、attachments 和 Skills，不包含 MCP。
+- `environment_prepare` 是某一轮消息的阻塞性环境准备快照，仅在绑定新 sandbox 时产生，并作为消息的第一个 Rail 节点持久化；复用现有 sandbox 时不产生。它使用开放的 `schema_version + part_id + state + components[]` 结构，当前展示 workspace、attachments 和 Skills，不包含 MCP 或 checkpoint。原节点不可用时界面必须先要求用户确认；确认后创建空白 Workspace，并在 Environment 中保留 reset 与原节点提示。
 - Environment 已完成但首个模型输出尚未到达时，消息 Rail 根据本地 running 状态显示临时的 `Starting response` 节点；首个 reasoning、text、tool 或 file part 到达后自动替换。该节点不进入 SSE 协议和消息历史。
 - composer、附件、消息流和 tool call 优先复用 assistant-ui primitive。
 - cocola 的视觉组合集中在 `components/assistant-ui/`，不要修改 assistant-ui 内部实现。
@@ -149,6 +149,7 @@ shadcn/ui 在本项目中表示组件组织方式和 token 约定，不代表必
 - `apps/web/components/assistant-ui/rail.tsx`：Agent 过程 Phosphor 图标体系。
 - `apps/web/components/admin/admin-shell.tsx`：Admin 响应式侧栏、移动导航和控制面上下文。
 - `apps/web/app/admin/toolbox/`：轻量管理员工具卡片、深链接和 System Prompt Drawer。
+- `apps/web/app/admin/storage/`：节点本地存储容量、Session PVC 明细与显式按需占用测量；页面不轮询，也不提供文件内容浏览。
 - `apps/web/components/admin/admin-ui.tsx`：Admin Page、Panel、Metric、Table、状态与 Drawer primitives。
 - `apps/web/components/cocola-logo.tsx`：cocola 品牌标志。
 - `apps/web/lib/model-icons.ts`：Lobe Icons slug 和回退规则。

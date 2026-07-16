@@ -36,7 +36,6 @@ async def _contract(store):
     assert binding.runtime_session_id == "claude-aaa"
     assert binding.runtime_id == runtime_id
     assert binding.sandbox_id == "box-1"
-    assert await store.get_checkpoint("S1", user_id="U1", runtime_id=runtime_id) is None
     # Idempotent overwrite: the latest native session ID wins.
     await store.put("S1", "claude-bbb", user_id="U1", sandbox_id="box-2", runtime_id=runtime_id)
     assert await store.get("S1", user_id="U1", runtime_id=runtime_id) == "claude-bbb"
@@ -44,7 +43,6 @@ async def _contract(store):
     assert binding is not None
     assert binding.runtime_session_id == "claude-bbb"
     assert binding.sandbox_id == "box-2"
-    assert binding.checkpoint_object_key == ""
     # Empty native session ID is a no-op (never clobbers a good binding).
     await store.put("S1", "", user_id="U1", runtime_id=runtime_id)
     assert await store.get("S1", user_id="U1", runtime_id=runtime_id) == "claude-bbb"
@@ -54,7 +52,6 @@ async def _contract(store):
     await store.delete("S1", user_id="U1", runtime_id=runtime_id)
     assert await store.get("S1", user_id="U1", runtime_id=runtime_id) is None
     assert await store.get_binding("S1", user_id="U1", runtime_id=runtime_id) is None
-    assert await store.get_checkpoint("S1", user_id="U1", runtime_id=runtime_id) is None
     # delete is idempotent: forgetting an unknown session is a no-op.
     await store.delete("S-unknown", user_id="U1", runtime_id=runtime_id)
 

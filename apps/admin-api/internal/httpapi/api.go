@@ -210,6 +210,10 @@ func (a *API) Router() http.Handler {
 			r.Patch("/{name}/capacity", a.setSandboxNodeCapacity)
 			r.Post("/{name}/offline", a.offlineSandboxNode)
 		})
+		r.Get("/session-storage", a.listSessionStorage)
+		r.Post("/session-storage/{storage_id}/measure", a.measureSessionStorage)
+		r.Delete("/session-storage/{storage_id}", a.deleteOrphanSessionStorage)
+		r.Get("/storage/nodes", a.listNodeStorageFilesystems)
 
 		r.Get("/sandboxes", a.listSandboxes)
 		r.Delete("/sandboxes/{id}", a.deleteSandbox)
@@ -351,6 +355,10 @@ func mapErr(w http.ResponseWriter, err error) {
 		writeErr(w, http.StatusConflict, "CONFLICT", "resource already exists")
 	case errors.Is(err, service.ErrNotConfigured):
 		writeErr(w, http.StatusNotImplemented, "NOT_CONFIGURED", err.Error())
+	case errors.Is(err, service.ErrStorageUnavailable):
+		writeErr(w, http.StatusServiceUnavailable, "STORAGE_UNAVAILABLE", err.Error())
+	case errors.Is(err, service.ErrStorageUnsupported):
+		writeErr(w, http.StatusUnprocessableEntity, "STORAGE_UNSUPPORTED", err.Error())
 	case errors.Is(err, service.ErrSandboxRuntimeNotConfigured):
 		writeErr(w, http.StatusNotImplemented, "NOT_CONFIGURED", err.Error())
 	default:

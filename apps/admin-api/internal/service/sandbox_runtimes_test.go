@@ -40,19 +40,9 @@ func TestSandboxRuntimeManagerMapsStateUserAndPod(t *testing.T) {
 		State:       "active",
 		CreatedUnix: 200,
 	})
-	putRuntimeMeta(t, kv, sandboxRuntimeMeta{
-		SandboxID:   "sb-paused",
-		SessionID:   "conv-3",
-		UserID:      "alice@example.com",
-		State:       "paused",
-		CreatedUnix: 300,
-		PausedUnix:  360,
-	})
-
 	pods := fakeSandboxPodReader{pods: []kubePod{
 		runtimePod("pod-running", "sb-running", "Running", "node-a"),
 		runtimePod("pod-starting", "sb-idle", "Pending", "node-b"),
-		runtimePod("pod-paused", "sb-paused", "Running", "node-c"),
 	}}
 	mgr := NewRedisSandboxRuntimeManager(kv, WithSandboxPodReader(pods))
 
@@ -76,8 +66,8 @@ func TestSandboxRuntimeManagerMapsStateUserAndPod(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ListSandboxes: %v", err)
 	}
-	if len(list.Sandboxes) != 3 {
-		t.Fatalf("sandboxes: want 3, got %+v", list.Sandboxes)
+	if len(list.Sandboxes) != 2 {
+		t.Fatalf("sandboxes: want 2, got %+v", list.Sandboxes)
 	}
 	byID := map[string]SandboxRuntime{}
 	for _, sb := range list.Sandboxes {
@@ -90,10 +80,6 @@ func TestSandboxRuntimeManagerMapsStateUserAndPod(t *testing.T) {
 	starting := byID["sb-idle"]
 	if starting.Status != "starting" || starting.PodPhase != "Pending" {
 		t.Fatalf("starting sandbox wrong: %+v", starting)
-	}
-	paused := byID["sb-paused"]
-	if paused.Status != "reclaiming" || paused.PausedAt.IsZero() {
-		t.Fatalf("paused sandbox wrong: %+v", paused)
 	}
 }
 

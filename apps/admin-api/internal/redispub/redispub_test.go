@@ -13,9 +13,6 @@ func TestKeyContractMatchesGateway(t *testing.T) {
 	if OverrideKey != "cocola:quota:override" {
 		t.Fatalf("override key drifted from gateway: %q", OverrideKey)
 	}
-	if WarmPoolConfigKey != "cocola:sb:warmpool:config" {
-		t.Fatalf("warm-pool key drifted from sandbox-manager: %q", WarmPoolConfigKey)
-	}
 }
 
 func TestOverrideFieldEncoding(t *testing.T) {

@@ -713,6 +713,8 @@ export function CocolaRuntimeProvider({ children }: { children: ReactNode }) {
   const conversationsRef = useRef(conversations);
   const realtimeScheduledRunsRef = useRef<Set<string>>(new Set());
   const deletedScheduledConversationsRef = useRef<Map<string, number>>(new Map());
+  const workspaceResetAllowedRef = useRef<Set<string>>(new Set());
+  const workspaceResetPromptedRef = useRef<Set<string>>(new Set());
 
   const messages = useMemo(() => convMessages[sessionId] ?? [], [convMessages, sessionId]);
   const isRunning = runningIds.has(sessionId);
@@ -1016,6 +1018,27 @@ export function CocolaRuntimeProvider({ children }: { children: ReactNode }) {
             buffer = parsed.rest;
             for (const event of parsed.events) {
               applyEvent(cursor.conversationId, cursor.assistantId, event);
+              if (
+                event.kind === "error" &&
+                event.data?.code === "WORKSPACE_NODE_UNAVAILABLE" &&
+                !workspaceResetPromptedRef.current.has(cursor.conversationId)
+              ) {
+                workspaceResetPromptedRef.current.add(cursor.conversationId);
+                const confirmed = window.confirm(
+                  "The node holding this Workspace is unavailable. Use an empty Workspace on another node for your next retry? This cannot recover files from the previous node.",
+                );
+                if (confirmed) {
+                  workspaceResetAllowedRef.current.add(cursor.conversationId);
+                  applyEvent(cursor.conversationId, cursor.assistantId, {
+                    kind: "error",
+                    data: {
+                      error: "Empty Workspace confirmed. Send the message again to continue.",
+                    },
+                  });
+                } else {
+                  workspaceResetPromptedRef.current.delete(cursor.conversationId);
+                }
+              }
               if (isTerminalAgentEvent(event)) {
                 terminal = true;
                 break;
@@ -1334,11 +1357,13 @@ export function CocolaRuntimeProvider({ children }: { children: ReactNode }) {
       const ctrl = new AbortController();
       abortMap.current.set(turnSessionId, ctrl);
       try {
+        const allowWorkspaceReset = workspaceResetAllowedRef.current.has(turnSessionId);
         const requestBody = JSON.stringify({
           prompt: text,
           session_id: turnSessionId,
           client_request_id: clientRequestId,
           runtime_id: agentRuntime.id,
+          ...(allowWorkspaceReset ? { allow_workspace_reset: true } : {}),
           ...(turnSkill ? { skill_id: turnSkill.id } : {}),
           model_route_id: model.id,
           model_alias: model.alias,
@@ -1372,6 +1397,10 @@ export function CocolaRuntimeProvider({ children }: { children: ReactNode }) {
               continue;
             }
             res = candidate;
+            if (candidate.ok && allowWorkspaceReset) {
+              workspaceResetAllowedRef.current.delete(turnSessionId);
+              workspaceResetPromptedRef.current.delete(turnSessionId);
+            }
           } catch (error) {
             if (ctrl.signal.aborted) throw error;
             if (startAttempts >= CHAT_START_MAX_ATTEMPTS) throw error;

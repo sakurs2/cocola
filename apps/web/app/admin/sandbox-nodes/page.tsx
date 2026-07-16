@@ -23,12 +23,16 @@ type SandboxNode = {
   status: "active" | "disabled" | "offline_pending" | "offline" | "unhealthy" | string;
   ready: boolean;
   schedulable: boolean;
+  disk_pressure: boolean;
   cpu_capacity: string;
   memory_capacity: string;
   cpu_allocatable: string;
   memory_allocatable: string;
   sandbox_pods: number;
   max_sandbox_pods?: number | null;
+  session_count: number;
+  session_requested_bytes: number;
+  workspace_reset_count: number;
   reason?: string;
   labels?: Record<string, string>;
 };
@@ -37,12 +41,11 @@ type NodeListResponse = { nodes: SandboxNode[] };
 type JoinCommand = { command: string; note: string };
 type OfflineNodeResult = {
   node: SandboxNode;
-  evicted_pods?: string[];
   pending_pods?: string[];
+  affected_sessions?: number;
   message: string;
 };
-type OfflineTarget = { node: SandboxNode; pendingPods: string[] };
-
+type OfflineTarget = { node: SandboxNode; pendingPods: string[]; affectedSessions: number };
 const STATUS_LABELS: Record<string, string> = {
   active: "Active",
   disabled: "Disabled",
@@ -115,6 +118,7 @@ export default function SandboxNodesPage() {
       ).length,
       unhealthy: nodes.filter((n) => n.status === "unhealthy").length,
       sandboxPods: nodes.reduce((sum, n) => sum + n.sandbox_pods, 0),
+      sessions: nodes.reduce((sum, n) => sum + n.session_count, 0),
     }),
     [nodes],
   );
@@ -141,9 +145,10 @@ export default function SandboxNodesPage() {
       if (action === "offline") {
         const body = (await res.json()) as OfflineNodeResult;
         const pendingPods = body.pending_pods ?? [];
-        if (!force && pendingPods.length > 0) {
+        const affectedSessions = body.affected_sessions ?? body.node.session_count ?? 0;
+        if (!force && affectedSessions > 0) {
           await refresh();
-          setOfflineTarget({ node: body.node, pendingPods });
+          setOfflineTarget({ node: body.node, pendingPods, affectedSessions });
           return;
         }
         setNotice(body.message || "Node offline requested");
@@ -251,12 +256,13 @@ export default function SandboxNodesPage() {
           <UnsupportedState />
         ) : (
           <>
-            <section className="grid gap-3 md:grid-cols-5">
+            <section className="grid gap-3 md:grid-cols-2 xl:grid-cols-6">
               <Metric label="Nodes" value={String(totals.nodes)} />
               <Metric label="Active" value={String(totals.active)} />
               <Metric label="Disabled/Offline" value={String(totals.unavailable)} />
               <Metric label="Unhealthy" value={String(totals.unhealthy)} />
               <Metric label="Sandbox Pods" value={String(totals.sandboxPods)} />
+              <Metric label="Session Workspaces" value={String(totals.sessions)} />
             </section>
 
             <section className="rounded-lg border border-border bg-card px-4 py-3">
@@ -278,7 +284,7 @@ export default function SandboxNodesPage() {
             </section>
 
             <section className="overflow-hidden rounded-lg border border-border bg-card">
-              <table className="w-full min-w-[1080px] text-sm">
+              <table className="w-full min-w-[1320px] text-sm">
                 <thead className="border-b border-border bg-muted/50 text-xs text-muted-foreground">
                   <tr>
                     <th className="px-4 py-3 text-left font-medium">Node</th>
@@ -286,6 +292,8 @@ export default function SandboxNodesPage() {
                     <th className="px-4 py-3 text-left font-medium">CPU</th>
                     <th className="px-4 py-3 text-left font-medium">Memory</th>
                     <th className="px-4 py-3 text-left font-medium">Sandbox Pods</th>
+                    <th className="px-4 py-3 text-left font-medium">Local Workspaces</th>
+                    <th className="px-4 py-3 text-left font-medium">Disk</th>
                     <th className="px-4 py-3 text-left font-medium">Max Sandbox Pods</th>
                     <th className="px-4 py-3 text-left font-medium">Reason</th>
                     <th className="px-4 py-3 text-right font-medium">Actions</th>
@@ -294,20 +302,20 @@ export default function SandboxNodesPage() {
                 <tbody>
                   {loading && nodes.length === 0 ? (
                     <tr>
-                      <td colSpan={8} className="px-4 py-10 text-center text-muted-foreground">
+                      <td colSpan={10} className="px-4 py-10 text-center text-muted-foreground">
                         Loading nodes...
                       </td>
                     </tr>
                   ) : nodes.length === 0 ? (
                     <tr>
-                      <td colSpan={8} className="px-4 py-10 text-center text-muted-foreground">
+                      <td colSpan={10} className="px-4 py-10 text-center text-muted-foreground">
                         No nodes found
                       </td>
                     </tr>
                   ) : (
                     nodes.map((node) => {
                       const offlining = actingNode === `${node.name}:offline`;
-                      const alreadyOffline = node.status === "offline";
+                      const alreadyOffline = ["offline", "offline_pending"].includes(node.status);
                       return (
                         <tr key={node.name} className="border-b border-border/70 last:border-0">
                           <td className="px-4 py-3">
@@ -340,6 +348,22 @@ export default function SandboxNodesPage() {
                             {node.memory_allocatable || "-"} / {node.memory_capacity || "-"}
                           </td>
                           <td className="px-4 py-3">{node.sandbox_pods}</td>
+                          <td className="px-4 py-3">
+                            <div>{node.session_count}</div>
+                            <div className="text-xs text-muted-foreground">
+                              {formatBytes(node.session_requested_bytes)} requested ·{" "}
+                              {node.workspace_reset_count} resets
+                            </div>
+                          </td>
+                          <td className="px-4 py-3">
+                            <span
+                              className={
+                                node.disk_pressure ? "text-destructive" : "text-emerald-500"
+                              }
+                            >
+                              {node.disk_pressure ? "Pressure" : "Normal"}
+                            </span>
+                          </td>
                           <td className="px-4 py-3">
                             <div className="flex items-center gap-2">
                               <span
@@ -525,23 +549,31 @@ function OfflineDialog({
           <div className="min-w-0 flex-1">
             <h2 className="text-sm font-semibold">Offline {target.node.name}</h2>
             <p className="mt-1 text-sm text-muted-foreground">
-              This will cordon the node and request eviction for {target.pendingPods.length} sandbox
-              pod{target.pendingPods.length === 1 ? "" : "s"}.
+              This node holds {target.affectedSessions} local Workspace
+              {target.affectedSessions === 1 ? "" : "s"} and runs {target.pendingPods.length}{" "}
+              sandbox pod{target.pendingPods.length === 1 ? "" : "s"}.
             </p>
           </div>
         </div>
-        {target.pendingPods.length > 0 && (
+        {target.affectedSessions > 0 && (
           <div className="mt-3 rounded-md border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-sm text-amber-300">
-            Running sandboxes may lose local-path workspace state if storage is node-local.
+            Existing conversations cannot resume while this node is offline. No Workspace will be
+            cleared automatically.
           </div>
         )}
         {target.pendingPods.length > 0 && (
-          <div className="mt-3 max-h-32 overflow-y-auto rounded-md border border-border bg-muted px-3 py-2">
-            {target.pendingPods.map((pod) => (
-              <div key={pod} className="truncate font-mono text-xs text-muted-foreground">
-                {pod}
-              </div>
-            ))}
+          <div className="mt-3 rounded-md border border-border bg-muted px-3 py-2">
+            <p className="mb-2 text-xs text-muted-foreground">
+              Offlining cordons the node. Running sandboxes are not evicted and remain until they
+              stop or are reclaimed.
+            </p>
+            <div className="max-h-24 overflow-y-auto">
+              {target.pendingPods.map((pod) => (
+                <div key={pod} className="truncate font-mono text-xs text-muted-foreground">
+                  {pod}
+                </div>
+              ))}
+            </div>
           </div>
         )}
         <div className="mt-4 flex justify-end gap-2">
@@ -549,7 +581,7 @@ function OfflineDialog({
             Cancel
           </Button>
           <Button variant="destructive" size="sm" disabled={acting} onClick={onConfirm}>
-            {acting ? "Offlining..." : "Offline"}
+            {acting ? "Offlining..." : "Cordon node"}
           </Button>
         </div>
       </div>
@@ -785,6 +817,14 @@ function capacityEffect(node: SandboxNode, raw: string) {
     title: "The node will keep available sandbox capacity.",
     description: `This node currently has ${node.sandbox_pods} sandbox pods and will allow up to ${max}.`,
   };
+}
+
+function formatBytes(value: number) {
+  if (!Number.isFinite(value) || value <= 0) return "0 B";
+  const units = ["B", "KiB", "MiB", "GiB", "TiB"];
+  const index = Math.min(Math.floor(Math.log(value) / Math.log(1024)), units.length - 1);
+  const amount = value / 1024 ** index;
+  return `${amount >= 10 || index === 0 ? amount.toFixed(0) : amount.toFixed(1)} ${units[index]}`;
 }
 
 async function responseError(res: Response) {

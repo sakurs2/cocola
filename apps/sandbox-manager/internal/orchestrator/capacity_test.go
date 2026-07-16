@@ -27,7 +27,7 @@ func TestKubeCapacityGuardRejectsWhenAllNodesFull(t *testing.T) {
 			pods:  []kubePod{sandboxPod("node-a", "Running")},
 		},
 	}
-	if node, err := guard.SelectNode(context.Background()); !errors.Is(err, ErrCapacityBusy) {
+	if node, err := guard.SelectNode(context.Background(), "", "", nil); !errors.Is(err, ErrCapacityBusy) {
 		t.Fatalf("SelectNode = %q, %v, want ErrCapacityBusy", node, err)
 	}
 }
@@ -39,12 +39,28 @@ func TestKubeCapacityGuardSelectsNodeWithRoom(t *testing.T) {
 			pods:  []kubePod{sandboxPod("node-a", "Running"), sandboxPod("node-b", "Running")},
 		},
 	}
-	node, err := guard.SelectNode(context.Background())
+	node, err := guard.SelectNode(context.Background(), "", "", nil)
 	if err != nil {
 		t.Fatalf("SelectNode error = %v, want nil", err)
 	}
 	if node != "node-b" {
 		t.Fatalf("SelectNode = %q, want node-b", node)
+	}
+}
+
+func TestKubeCapacityGuardChecksExistingNodeWithoutColdCapacity(t *testing.T) {
+	guard := &KubeCapacityGuard{
+		client: fakeKubeReader{
+			nodes: []kubeNode{readyNode("node-a", 1)},
+			pods:  []kubePod{sandboxPod("node-a", "Running")},
+		},
+	}
+	available, err := guard.NodeAvailable(context.Background(), "node-a")
+	if err != nil || !available {
+		t.Fatalf("NodeAvailable = %v, %v, want true", available, err)
+	}
+	if available, err := guard.NodeAvailable(context.Background(), "missing"); err != nil || available {
+		t.Fatalf("missing NodeAvailable = %v, %v, want false", available, err)
 	}
 }
 
@@ -55,8 +71,26 @@ func TestKubeCapacityGuardCountsPendingPodsAgainstTotalCapacity(t *testing.T) {
 			pods:  []kubePod{sandboxPod("node-a", "Running"), sandboxPod("", "Pending")},
 		},
 	}
-	if node, err := guard.SelectNode(context.Background()); !errors.Is(err, ErrCapacityBusy) {
+	if node, err := guard.SelectNode(context.Background(), "", "", nil); !errors.Is(err, ErrCapacityBusy) {
 		t.Fatalf("SelectNode = %q, %v, want ErrCapacityBusy", node, err)
+	}
+}
+
+func TestKubeCapacityGuardCountsNodeSelectedPendingPodOnTargetNode(t *testing.T) {
+	pending := sandboxPod("", "Pending")
+	pending.Spec.NodeSelector = map[string]string{"kubernetes.io/hostname": "node-a"}
+	guard := &KubeCapacityGuard{
+		client: fakeKubeReader{
+			nodes: []kubeNode{readyNode("node-a", 1), readyNode("node-b", 1)},
+			pods:  []kubePod{pending},
+		},
+	}
+	node, err := guard.SelectNode(context.Background(), "", "", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if node != "node-b" {
+		t.Fatalf("SelectNode = %q, want node-b", node)
 	}
 }
 
@@ -67,7 +101,7 @@ func TestKubeCapacityGuardTreatsUnsetAsUnlimitedAndZeroAsZero(t *testing.T) {
 			pods:  []kubePod{sandboxPod("node-a", "Running")},
 		},
 	}
-	node, err := unlimited.SelectNode(context.Background())
+	node, err := unlimited.SelectNode(context.Background(), "", "", nil)
 	if err != nil {
 		t.Fatalf("unset max error = %v, want nil", err)
 	}
@@ -80,7 +114,7 @@ func TestKubeCapacityGuardTreatsUnsetAsUnlimitedAndZeroAsZero(t *testing.T) {
 			nodes: []kubeNode{readyNode("node-a", 0)},
 		},
 	}
-	if node, err := zero.SelectNode(context.Background()); !errors.Is(err, ErrCapacityBusy) {
+	if node, err := zero.SelectNode(context.Background(), "", "", nil); !errors.Is(err, ErrCapacityBusy) {
 		t.Fatalf("zero max SelectNode = %q, %v, want ErrCapacityBusy", node, err)
 	}
 }
@@ -96,7 +130,7 @@ func TestKubeCapacityGuardPrefersLeastUsedUnlimitedNode(t *testing.T) {
 			},
 		},
 	}
-	node, err := guard.SelectNode(context.Background())
+	node, err := guard.SelectNode(context.Background(), "", "", nil)
 	if err != nil {
 		t.Fatalf("SelectNode error = %v, want nil", err)
 	}
@@ -141,13 +175,13 @@ func TestBinderPassesSelectedNodeToProvider(t *testing.T) {
 
 type alwaysBusyGuard struct{}
 
-func (alwaysBusyGuard) SelectNode(context.Context) (string, error) {
+func (alwaysBusyGuard) SelectNode(context.Context, string, string, map[string]int64) (string, error) {
 	return "", ErrCapacityBusy
 }
 
 type staticNodeGuard string
 
-func (g staticNodeGuard) SelectNode(context.Context) (string, error) {
+func (g staticNodeGuard) SelectNode(context.Context, string, string, map[string]int64) (string, error) {
 	return string(g), nil
 }
 

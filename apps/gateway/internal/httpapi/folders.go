@@ -5,9 +5,9 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net/http"
 	"strings"
-	"sync"
 	"time"
 	"unicode/utf8"
 
@@ -19,9 +19,8 @@ import (
 )
 
 const (
-	maxFolderNameRunes    = 80
-	folderCleanupTimeout  = 10 * time.Second
-	folderCleanupParallel = 4
+	maxFolderNameRunes          = 80
+	folderSessionCleanupTimeout = 10 * time.Second
 )
 
 type folderNameRequest struct {
@@ -184,13 +183,22 @@ func (a *API) deleteFolder(w http.ResponseWriter, r *http.Request) {
 		}
 		a.runs.databaseUnavailable.Store(false)
 	}
-	deletedIDs, err := a.convo.DeleteFolder(r.Context(), folderID, identity.UserID)
-	unlock()
-	if err != nil {
+	if _, err := a.convo.DeleteFolder(r.Context(), folderID, identity.UserID); err != nil {
+		unlock()
 		writeFolderDeleteError(a, w, err)
 		return
 	}
-	a.releaseFolderSessions(identity.UserID, deletedIDs)
+	unlock()
+
+	// Remote cleanup must not hold the process-wide run mutation lock. The
+	// database deletion is authoritative; a failed release leaves the existing
+	// session_storage row visible to Admin for manual retry.
+	cleanupCtx, cancel := context.WithTimeout(context.WithoutCancel(r.Context()), folderSessionCleanupTimeout)
+	err = a.releaseFolderSessions(cleanupCtx, identity.UserID, conversationIDs)
+	cancel()
+	if err != nil {
+		a.log.Warn("release deleted folder sessions failed: " + err.Error())
+	}
 	w.WriteHeader(http.StatusNoContent)
 }
 
@@ -272,44 +280,19 @@ func writeRunInProgress(w http.ResponseWriter, run chatrun.Run, conversationID, 
 	})
 }
 
-func (a *API) releaseFolderSessions(userID string, conversationIDs []string) {
+func (a *API) releaseFolderSessions(ctx context.Context, userID string, conversationIDs []string) error {
 	if a.releaser == nil || len(conversationIDs) == 0 {
-		return
+		return nil
 	}
-	ctx, cancel := context.WithTimeout(context.Background(), folderCleanupTimeout)
-	defer cancel()
-	sem := make(chan struct{}, folderCleanupParallel)
-	var wg sync.WaitGroup
-	timedOut := false
-
-schedule:
+	var errs []error
 	for _, conversationID := range conversationIDs {
-		select {
-		case sem <- struct{}{}:
-		case <-ctx.Done():
-			timedOut = true
-			break schedule
+		if err := ctx.Err(); err != nil {
+			errs = append(errs, err)
+			break
 		}
-		wg.Add(1)
-		go func(id string) {
-			defer wg.Done()
-			defer func() { <-sem }()
-			if err := a.releaser.ReleaseSession(ctx, userID, id); err != nil {
-				a.log.Warn("release folder conversation session failed: " + err.Error())
-			}
-		}(conversationID)
-	}
-	done := make(chan struct{})
-	go func() {
-		wg.Wait()
-		close(done)
-	}()
-	select {
-	case <-done:
-		if timedOut {
-			a.log.Warn("folder session cleanup timed out before all sessions were scheduled")
+		if err := a.releaser.ReleaseSession(ctx, userID, conversationID); err != nil {
+			errs = append(errs, fmt.Errorf("release session %s: %w", conversationID, err))
 		}
-	case <-ctx.Done():
-		a.log.Warn("folder session cleanup exceeded its 10 second budget")
 	}
+	return errors.Join(errs...)
 }

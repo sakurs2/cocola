@@ -10,7 +10,6 @@ skills are validated and synchronized before the provider runs.
 
 import io
 import json
-import re
 import subprocess
 import sys
 import zipfile
@@ -20,7 +19,6 @@ from types import SimpleNamespace
 import grpc
 import pytest
 from cocola_agent_runtime.agent_provider import AgentEvent, AgentOptions
-from cocola_agent_runtime.checkpoint import CheckpointConfig, CheckpointManager
 from cocola_agent_runtime.prompt_loader import PromptMarker, StaticPromptCatalog
 from cocola_agent_runtime.runtime_registry import (
     RuntimeDescriptor,
@@ -28,19 +26,22 @@ from cocola_agent_runtime.runtime_registry import (
     RuntimeRegistry,
 )
 from cocola_agent_runtime.sandbox_binder import (
+    BoundSandbox,
     ExecOutcome,
     SandboxGoneError,
     StaticSandboxBinder,
     StaticSandboxExecutor,
 )
-from cocola_agent_runtime.server import (
-    _SKILLS_BATCH_INSTALL_SCRIPT,
-    AgentRuntimeServicer,
-    _product_traceparent,
-    event_to_proto,
-)
+from cocola_agent_runtime.server import AgentRuntimeServicer, _product_traceparent, event_to_proto
 from cocola_agent_runtime.session_map import SessionBinding
 from cocola_agent_runtime.skill_loader import Skill, StaticSkillCatalog
+from cocola_agent_runtime.skill_reconciler import (
+    SKILLS_INSPECT_SCRIPT as _SKILLS_INSPECT_SCRIPT,
+)
+from cocola_agent_runtime.skill_reconciler import (
+    SKILLS_RECONCILE_SCRIPT as _SKILLS_RECONCILE_SCRIPT,
+)
+from cocola_agent_runtime.skill_reconciler import skill_descriptors as _skill_descriptors
 
 
 @dataclass
@@ -52,18 +53,23 @@ class FakeRequest:
     max_turns: int = 0
     runtime_id: str = "claude-code"
     skill_id: str = ""
+    allow_workspace_reset: bool = False
     attachments: list = field(default_factory=list)
 
 
 class FakeContext:
     """Records proto events the servicer streams via context.write()."""
 
-    def __init__(self, metadata=()):
+    def __init__(self, metadata=(), remaining=None):
         self.written = []
         self.metadata = metadata
+        self.remaining = remaining
 
     def invocation_metadata(self):
         return self.metadata
+
+    def time_remaining(self):
+        return self.remaining
 
     async def write(self, event):
         self.written.append(event)
@@ -158,7 +164,6 @@ class FakeSessionMap:
         self.deleted = []
         self.fail_delete = fail_delete
         self.bindings = {}
-        self.checkpoints = {}
 
     async def get(self, session_id: str, *, user_id: str = "", runtime_id: str = ""):
         binding = await self.get_binding(session_id, user_id=user_id, runtime_id=runtime_id)
@@ -186,14 +191,7 @@ class FakeSessionMap:
             runtime_id=runtime_id,
             user_id=user_id,
             sandbox_id=sandbox_id,
-            checkpoint_object_key=self.checkpoints.get(session_id, ""),
         )
-
-    async def get_checkpoint(self, session_id: str, *, user_id: str = "", runtime_id: str = ""):
-        binding = self.bindings.get(session_id)
-        if binding and runtime_id and binding.runtime_id != runtime_id:
-            return None
-        return self.checkpoints.get(session_id)
 
     async def delete(self, session_id: str, *, user_id: str = "", runtime_id: str = ""):
         binding = self.bindings.get(session_id)
@@ -205,7 +203,6 @@ class FakeSessionMap:
         if self.fail_delete:
             raise RuntimeError("delete failed")
         self.bindings.pop(session_id, None)
-        self.checkpoints.pop(session_id, None)
 
     async def aclose(self):
         return None
@@ -440,8 +437,13 @@ async def test_fresh_environment_snapshot_reports_loaded_skills_without_mcp():
     assert skills["metadata"]["items"] == [{"id": "web", "label": "Web Search", "version": "1.2"}]
 
 
-async def test_skill_sync_uses_one_archive_write_and_one_exec():
-    executor = StaticSandboxExecutor()
+async def test_skill_sync_uses_one_archive_write_and_reconcile():
+    def exec_handler(_sandbox_id, cmd):
+        if cmd[2] == _SKILLS_INSPECT_SCRIPT:
+            return ExecOutcome(stdout="{}")
+        return ExecOutcome()
+
+    executor = StaticSandboxExecutor(exec_handler=exec_handler)
     store = FakeObjectStore()
     store.puts["bundle-a"] = skill_bundle(**{"SKILL.md": "# A", "scripts/run.py": "pass"})
     skills = [
@@ -457,26 +459,29 @@ async def test_skill_sync_uses_one_archive_write_and_one_exec():
     await servicer._sync_skills_into_sandbox("box-1", skills)
 
     assert len(executor.byte_writes) == 1
-    assert len(executor.exec_calls) == 1
+    assert len(executor.exec_calls) == 2
     sandbox_id, archive_path, batch_data = executor.byte_writes[0]
     assert sandbox_id == "box-1"
     assert archive_path.startswith("/tmp/cocola-skills-")
     with zipfile.ZipFile(io.BytesIO(batch_data)) as batch:
         manifest = json.loads(batch.read("manifest.json"))
-        assert manifest == [
-            {"id": "bundle-a", "kind": "bundle", "member": "payloads/0000.zip"},
-            {"id": "markdown-b", "kind": "markdown", "member": "payloads/0001.md"},
-        ]
+        assert manifest["digest"]
+        assert [item["kind"] for item in manifest["skills"]] == ["bundle", "markdown"]
+        assert [item["id"] for item in manifest["skills"]] == ["bundle-a", "markdown-b"]
         with zipfile.ZipFile(io.BytesIO(batch.read("payloads/0000.zip"))) as bundle:
             assert bundle.read("SKILL.md") == b"# A"
         assert batch.read("payloads/0001.md") == b"# B"
-    call = executor.exec_calls[0]
-    assert call["cmd"][:3] == ["python3", "-c", _SKILLS_BATCH_INSTALL_SCRIPT]
+    call = executor.exec_calls[1]
+    assert call["cmd"][:3] == ["python3", "-c", _SKILLS_RECONCILE_SCRIPT]
     assert call["cmd"][3] == archive_path
 
 
 async def test_skill_sync_uses_runtime_id_as_native_directory():
-    executor = StaticSandboxExecutor()
+    executor = StaticSandboxExecutor(
+        exec_handler=lambda _sandbox_id, cmd: (
+            ExecOutcome(stdout="{}") if cmd[2] == _SKILLS_INSPECT_SCRIPT else ExecOutcome()
+        )
+    )
     servicer = AgentRuntimeServicer(ListProvider([]), executor=executor)
 
     await servicer._sync_skills_into_sandbox(
@@ -492,13 +497,17 @@ async def test_skill_sync_uses_runtime_id_as_native_directory():
     )
 
     with zipfile.ZipFile(io.BytesIO(executor.byte_writes[0][2])) as batch:
-        assert json.loads(batch.read("manifest.json")) == [
-            {"id": "frontend-design", "kind": "markdown", "member": "payloads/0000.md"}
-        ]
+        manifest = json.loads(batch.read("manifest.json"))
+        assert manifest["skills"][0]["id"] == "frontend-design"
+        assert manifest["skills"][0]["kind"] == "markdown"
 
 
-async def test_codex_skill_sync_targets_codex_home():
-    executor = StaticSandboxExecutor()
+async def test_claude_and_codex_share_compatible_skill_set():
+    executor = StaticSandboxExecutor(
+        exec_handler=lambda _sandbox_id, cmd: (
+            ExecOutcome(stdout="{}") if cmd[2] == _SKILLS_INSPECT_SCRIPT else ExecOutcome()
+        )
+    )
     servicer = AgentRuntimeServicer(ListProvider([]), executor=executor)
 
     await servicer._sync_skills_into_sandbox(
@@ -507,71 +516,107 @@ async def test_codex_skill_sync_targets_codex_home():
         runtime_id="codex",
     )
 
-    assert executor.exec_calls[0]["cmd"][4] == "/home/cocola/.agents"
+    assert executor.exec_calls[0]["cmd"][2] == _SKILLS_INSPECT_SCRIPT
+    assert "/home/cocola/.claude/skills" in _SKILLS_INSPECT_SCRIPT
+    assert "/home/cocola/.agents/skills" in _SKILLS_INSPECT_SCRIPT
 
 
-async def test_empty_skill_sync_removes_stale_managed_skills(tmp_path):
-    executor = StaticSandboxExecutor()
+async def test_skill_digest_hit_skips_minio_and_archive_write():
+    skill = Skill(id="cached", name="Cached", bundle_object_key="must-not-read")
+    descriptors, digest = _skill_descriptors([skill], "U1")
+
+    class NoReadStore(FakeObjectStore):
+        def get(self, key: str) -> bytes:
+            raise AssertionError(f"unexpected MinIO read: {key}")
+
+    executor = StaticSandboxExecutor(
+        exec_handler=lambda _sandbox_id, _cmd: ExecOutcome(
+            stdout=json.dumps({"digest": digest, "skills": descriptors})
+        )
+    )
+    servicer = AgentRuntimeServicer(ListProvider([]), executor=executor, objstore=NoReadStore())
+    await servicer._sync_skills_into_sandbox("box-1", [skill], user_id="U1")
+
+    assert executor.byte_writes == []
+    assert len(executor.exec_calls) == 1
+
+
+async def test_skill_sync_rejects_bundle_checksum_mismatch_before_archive_write():
+    executor = StaticSandboxExecutor(
+        exec_handler=lambda _sandbox_id, cmd: (
+            ExecOutcome(stdout="{}") if cmd[2] == _SKILLS_INSPECT_SCRIPT else ExecOutcome()
+        )
+    )
+    store = FakeObjectStore()
+    store.puts["bundle"] = skill_bundle(**{"SKILL.md": "# Wrong"})
+    servicer = AgentRuntimeServicer(ListProvider([]), executor=executor, objstore=store)
+
+    with pytest.raises(RuntimeError, match="checksum mismatch"):
+        await servicer._sync_skills_into_sandbox(
+            "box-1",
+            [
+                Skill(
+                    id="checked",
+                    name="Checked",
+                    bundle_object_key="bundle",
+                    content_sha256="0" * 64,
+                )
+            ],
+        )
+
+    assert executor.byte_writes == []
+
+
+async def test_empty_skill_sync_builds_empty_set():
+    executor = StaticSandboxExecutor(
+        exec_handler=lambda _sandbox_id, cmd: (
+            ExecOutcome(stdout="{}") if cmd[2] == _SKILLS_INSPECT_SCRIPT else ExecOutcome()
+        )
+    )
     servicer = AgentRuntimeServicer(ListProvider([]), executor=executor)
     await servicer._sync_skills_into_sandbox("box-1", [])
 
-    archive = tmp_path / "skills.zip"
-    archive.write_bytes(executor.byte_writes[0][2])
-    base = tmp_path / "claude"
-    stale = base / "skills" / "disabled"
-    stale.mkdir(parents=True)
-    (stale / "SKILL.md").write_text("# Disabled", encoding="utf-8")
-    shared_root = tmp_path / "shared"
-    shared_root.mkdir()
+    with zipfile.ZipFile(io.BytesIO(executor.byte_writes[0][2])) as batch:
+        manifest = json.loads(batch.read("manifest.json"))
+    assert manifest["skills"] == []
 
-    result = subprocess.run(
-        [
-            sys.executable,
-            "-c",
-            _SKILLS_BATCH_INSTALL_SCRIPT,
-            str(archive),
-            str(base),
-            str(shared_root),
-        ],
-        check=False,
-        capture_output=True,
-        text=True,
+
+async def test_skill_batch_installer_persists_shared_and_local_payloads(tmp_path):
+    executor = StaticSandboxExecutor(
+        exec_handler=lambda _sandbox_id, cmd: (
+            ExecOutcome(stdout="{}") if cmd[2] == _SKILLS_INSPECT_SCRIPT else ExecOutcome()
+        )
     )
-
-    assert result.returncode == 0, result.stderr
-    assert list((base / "skills").iterdir()) == []
-    assert not archive.exists()
-
-
-async def test_skill_batch_installer_links_shared_and_installs_local_payloads(tmp_path):
-    executor = StaticSandboxExecutor()
     store = FakeObjectStore()
     store.puts["local-bundle"] = skill_bundle(**{"SKILL.md": "# Local"})
-    store.puts["shared-bundle"] = skill_bundle(**{"SKILL.md": "# Stale copy"})
+    store.puts["shared-bundle"] = skill_bundle(**{"SKILL.md": "# Shared"})
     skills = [
         Skill(id="local", name="Local", bundle_object_key="local-bundle"),
         Skill(id="markdown", name="Markdown", skill_md="# Markdown"),
-        Skill(id="shared", name="Shared", bundle_object_key="shared-bundle"),
+        Skill(
+            id="shared",
+            name="Shared",
+            bundle_object_key="shared-bundle",
+            entrypoint="/data/plugins/skills/shared",
+        ),
     ]
     servicer = AgentRuntimeServicer(ListProvider([]), executor=executor, objstore=store)
     await servicer._sync_skills_into_sandbox("box-1", skills)
     batch_data = executor.byte_writes[0][2]
 
     archive = tmp_path / "skills.zip"
+    home = tmp_path / "home" / "cocola"
     archive.write_bytes(batch_data)
-    base = tmp_path / "claude"
-    shared_root = tmp_path / "shared"
-    (shared_root / "shared").mkdir(parents=True)
-    (shared_root / "shared" / "SKILL.md").write_text("# Shared", encoding="utf-8")
+    script = _SKILLS_RECONCILE_SCRIPT.replace("/home/cocola", str(home))
+    digest = json.loads(zipfile.ZipFile(io.BytesIO(batch_data)).read("manifest.json"))["digest"]
 
     result = subprocess.run(
         [
             sys.executable,
             "-c",
-            _SKILLS_BATCH_INSTALL_SCRIPT,
+            script,
             str(archive),
-            str(base),
-            str(shared_root),
+            digest,
         ],
         check=False,
         capture_output=True,
@@ -579,15 +624,20 @@ async def test_skill_batch_installer_links_shared_and_installs_local_payloads(tm
     )
 
     assert result.returncode == 0, result.stderr
-    assert (base / "skills" / "local" / "SKILL.md").read_text() == "# Local"
-    assert (base / "skills" / "markdown" / "SKILL.md").read_text() == "# Markdown"
-    assert (base / "skills" / "shared").is_symlink()
-    assert (base / "skills" / "shared" / "SKILL.md").read_text() == "# Shared"
+    current = home / ".cocola" / "skillsets" / "agents-skill-v1" / "current"
+    assert (current / "local" / "SKILL.md").read_text() == "# Local"
+    assert (current / "markdown" / "SKILL.md").read_text() == "# Markdown"
+    assert not (current / "shared").is_symlink()
+    assert (current / "shared" / "SKILL.md").read_text() == "# Shared"
     assert not archive.exists()
 
 
 async def test_skill_batch_installer_rejects_unsafe_bundle_before_replacing_targets(tmp_path):
-    executor = StaticSandboxExecutor()
+    executor = StaticSandboxExecutor(
+        exec_handler=lambda _sandbox_id, cmd: (
+            ExecOutcome(stdout="{}") if cmd[2] == _SKILLS_INSPECT_SCRIPT else ExecOutcome()
+        )
+    )
     store = FakeObjectStore()
     store.puts["bad-bundle"] = skill_bundle(
         **{"SKILL.md": "# Bad", "../escaped.txt": "not allowed"}
@@ -600,21 +650,23 @@ async def test_skill_batch_installer_rejects_unsafe_bundle_before_replacing_targ
 
     archive = tmp_path / "skills.zip"
     archive.write_bytes(executor.byte_writes[0][2])
-    base = tmp_path / "claude"
-    existing = base / "skills" / "bad"
+    home = tmp_path / "home" / "cocola"
+    state_root = home / ".cocola" / "skillsets" / "agents-skill-v1"
+    existing = state_root / "sets" / "old" / "bad"
     existing.mkdir(parents=True)
     (existing / "SKILL.md").write_text("# Existing", encoding="utf-8")
-    shared_root = tmp_path / "shared"
-    shared_root.mkdir()
+    (state_root / "current").symlink_to("sets/old")
+    script = _SKILLS_RECONCILE_SCRIPT.replace("/home/cocola", str(home))
+    batch_archive = zipfile.ZipFile(io.BytesIO(executor.byte_writes[0][2]))
+    digest = json.loads(batch_archive.read("manifest.json"))["digest"]
 
     result = subprocess.run(
         [
             sys.executable,
             "-c",
-            _SKILLS_BATCH_INSTALL_SCRIPT,
+            script,
             str(archive),
-            str(base),
-            str(shared_root),
+            digest,
         ],
         check=False,
         capture_output=True,
@@ -624,7 +676,8 @@ async def test_skill_batch_installer_rejects_unsafe_bundle_before_replacing_targ
     assert result.returncode != 0
     assert "unsafe skill archive path" in result.stderr
     assert (existing / "SKILL.md").read_text() == "# Existing"
-    assert not (base / ".cocola" / "escaped.txt").exists()
+    assert (state_root / "current").resolve() == (state_root / "sets" / "old").resolve()
+    assert not (state_root / "escaped.txt").exists()
 
 
 async def test_query_loads_mcp_servers_into_options_and_trace():
@@ -764,7 +817,50 @@ async def test_release_session_calls_binder_and_session_map():
     assert session_map.deleted == ["sess-7"]
 
 
-async def test_release_session_wrong_owner_does_not_release_sandbox():
+async def test_workspace_reset_clears_runtime_session_before_provider_runs():
+    class ResetBinder(StaticSandboxBinder):
+        async def acquire(self, **kwargs):
+            box = await super().acquire(**kwargs)
+            return BoundSandbox(
+                id=box.id,
+                endpoint=box.endpoint,
+                reused=False,
+                workspace_state="reset",
+                workspace_node="node-b",
+                previous_workspace_node="node-a",
+            )
+
+    session_map = FakeSessionMap()
+    session_map.bindings["reset-me"] = SessionBinding(
+        runtime_session_id="claude-old",
+        runtime_id="claude-code",
+        user_id="U1",
+        sandbox_id="box-old",
+    )
+    provider = ListProvider([AgentEvent(kind="done", data={})])
+
+    await AgentRuntimeServicer(
+        provider,
+        binder=ResetBinder(),
+        session_map=session_map,
+    ).Query(FakeRequest(session_id="reset-me"), FakeContext())
+
+    assert session_map.deleted == ["reset-me"]
+    assert "reset-me" not in session_map.bindings
+    assert provider.seen_options is not None
+
+
+async def test_release_session_propagates_remaining_deadline():
+    binder = StaticSandboxBinder()
+
+    await AgentRuntimeServicer(ListProvider([]), binder=binder).ReleaseSession(
+        FakeRequest(session_id="sess-deadline"), FakeContext(remaining=3.0)
+    )
+
+    assert binder.release_timeouts == [2.75]
+
+
+async def test_release_session_delegates_owner_check_to_sandbox_manager():
     binder = StaticSandboxBinder()
     session_map = FakeSessionMap()
     session_map.bindings["shared"] = SessionBinding(
@@ -778,7 +874,7 @@ async def test_release_session_wrong_owner_does_not_release_sandbox():
         ListProvider([]), binder=binder, session_map=session_map
     ).ReleaseSession(FakeRequest(user_id="U2", session_id="shared"), FakeContext())
 
-    assert binder.released == []
+    assert binder.released == ["shared"]
     assert session_map.deleted == []
 
 
@@ -792,189 +888,6 @@ async def test_release_session_without_binder_succeeds_and_delete_failure_is_bes
 
     assert resp is not None
     assert session_map.deleted == ["sess-8"]
-
-
-async def test_query_restores_checkpoint_for_fresh_sandbox_before_agent_runs():
-    prov = ListProvider([AgentEvent(kind="done", data={})])
-    executor = StaticSandboxExecutor()
-    store = FakeObjectStore()
-    store.puts["ck-latest"] = b"checkpoint-bytes"
-    session_map = FakeSessionMap()
-    session_map.checkpoints["S1"] = "ck-latest"
-    checkpoint = CheckpointManager(
-        objstore=store,
-        executor=executor,
-        session_map=session_map,
-        config=CheckpointConfig(),
-    )
-
-    await AgentRuntimeServicer(
-        prov,
-        binder=StaticSandboxBinder(),
-        executor=executor,
-        objstore=store,
-        session_map=session_map,
-        checkpoint=checkpoint,
-    ).Query(FakeRequest(), FakeContext())
-
-    assert executor.exec_calls
-    first = executor.exec_calls[0]
-    assert first["sandbox_id"] == "box-S1"
-    assert "zstd -d -c" in first["cmd"][2]
-    # The archive bytes are delivered over the binary file channel, then the
-    # unpack command reads them from that on-disk path -- no stdin base64 blob.
-    assert first["stdin"] == ""
-    match = re.search(r"(/tmp/cocola-checkpoint-[0-9a-f]+\.tar\.zst)", first["cmd"][2])
-    assert match, first["cmd"][2]
-    assert executor.byte_files[("box-S1", match.group(1))] == b"checkpoint-bytes"
-    assert executor.byte_writes == [("box-S1", match.group(1), b"checkpoint-bytes")]
-
-
-async def test_query_does_not_restore_checkpoint_for_reused_sandbox():
-    prov = ListProvider([AgentEvent(kind="done", data={})])
-    binder = StaticSandboxBinder()
-    await binder.acquire(session_id="S1", user_id="U1")
-    executor = StaticSandboxExecutor()
-    store = FakeObjectStore()
-    store.puts["ck-latest"] = b"checkpoint-bytes"
-    session_map = FakeSessionMap()
-    session_map.checkpoints["S1"] = "ck-latest"
-    checkpoint = CheckpointManager(
-        objstore=store,
-        executor=executor,
-        session_map=session_map,
-        config=CheckpointConfig(),
-    )
-
-    await AgentRuntimeServicer(
-        prov,
-        binder=binder,
-        executor=executor,
-        objstore=store,
-        session_map=session_map,
-        checkpoint=checkpoint,
-    ).Query(FakeRequest(), FakeContext())
-
-    assert not any("zstd -d -c" in call["cmd"][2] for call in executor.exec_calls)
-
-
-async def test_query_reports_missing_checkpoint_for_existing_session():
-    prov = ListProvider([AgentEvent(kind="done", data={})])
-    executor = StaticSandboxExecutor()
-    store = FakeObjectStore()
-    session_map = FakeSessionMap()
-    session_map.bindings["S1"] = SessionBinding(
-        runtime_session_id="claude-old",
-        runtime_id="claude-code",
-        user_id="U1",
-        sandbox_id="box-old",
-    )
-    checkpoint = CheckpointManager(
-        objstore=store,
-        executor=executor,
-        session_map=session_map,
-        config=CheckpointConfig(),
-    )
-    ctx = FakeContext()
-
-    await AgentRuntimeServicer(
-        prov,
-        binder=StaticSandboxBinder(),
-        executor=executor,
-        objstore=store,
-        session_map=session_map,
-        checkpoint=checkpoint,
-    ).Query(FakeRequest(), ctx)
-
-    snapshots = [
-        json.loads(event.data["snapshot"])
-        for event in ctx.written
-        if event.kind == "environment_prepare"
-    ]
-    assert [snapshot["state"] for snapshot in snapshots] == ["preparing", "degraded"]
-    restore = next(
-        component for component in snapshots[-1]["components"] if component["kind"] == "checkpoint"
-    )
-    assert restore == {
-        "kind": "checkpoint",
-        "status": "failed",
-        "label": "Session restore",
-        "summary": "Saved session data is unavailable",
-    }
-
-
-async def test_query_does_not_report_missing_checkpoint_for_new_session():
-    prov = ListProvider([AgentEvent(kind="done", data={})])
-    executor = StaticSandboxExecutor()
-    store = FakeObjectStore()
-    session_map = FakeSessionMap()
-    checkpoint = CheckpointManager(
-        objstore=store,
-        executor=executor,
-        session_map=session_map,
-        config=CheckpointConfig(),
-    )
-    ctx = FakeContext()
-
-    await AgentRuntimeServicer(
-        prov,
-        binder=StaticSandboxBinder(),
-        executor=executor,
-        objstore=store,
-        session_map=session_map,
-        checkpoint=checkpoint,
-    ).Query(FakeRequest(), ctx)
-
-    snapshots = [
-        json.loads(event.data["snapshot"])
-        for event in ctx.written
-        if event.kind == "environment_prepare"
-    ]
-    assert [snapshot["state"] for snapshot in snapshots] == ["preparing", "ready"]
-    assert all(component["kind"] != "checkpoint" for component in snapshots[-1]["components"])
-
-
-async def test_query_reports_checkpoint_restore_failure():
-    prov = ListProvider([AgentEvent(kind="done", data={})])
-    executor = StaticSandboxExecutor()
-    store = FakeObjectStore()
-    session_map = FakeSessionMap()
-    session_map.bindings["S1"] = SessionBinding(
-        runtime_session_id="claude-old",
-        runtime_id="claude-code",
-        user_id="U1",
-        sandbox_id="box-old",
-        checkpoint_object_key="missing-object",
-    )
-    session_map.checkpoints["S1"] = "missing-object"
-    checkpoint = CheckpointManager(
-        objstore=store,
-        executor=executor,
-        session_map=session_map,
-        config=CheckpointConfig(),
-    )
-    ctx = FakeContext()
-
-    await AgentRuntimeServicer(
-        prov,
-        binder=StaticSandboxBinder(),
-        executor=executor,
-        objstore=store,
-        session_map=session_map,
-        checkpoint=checkpoint,
-    ).Query(FakeRequest(), ctx)
-
-    snapshots = [
-        json.loads(event.data["snapshot"])
-        for event in ctx.written
-        if event.kind == "environment_prepare"
-    ]
-    assert snapshots[-1]["state"] == "degraded"
-    restore = next(
-        component for component in snapshots[-1]["components"] if component["kind"] == "checkpoint"
-    )
-    assert restore["status"] == "failed"
-    assert restore["summary"] == "Could not restore saved session data"
 
 
 async def test_query_publishes_outputs_artifacts():

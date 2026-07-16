@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/cocola-project/cocola/apps/admin-api/internal/store"
+	"k8s.io/apimachinery/pkg/api/resource"
 )
 
 const (
@@ -19,9 +20,8 @@ const (
 	SettingSchedulerHeartbeatSecs    = "scheduler.heartbeat_secs"
 	SettingSchedulerLeaseTimeoutSecs = "scheduler.lease_timeout_secs"
 
-	SettingWarmPoolEnabled    = "sandbox.warm_pool_enabled"
-	SettingWarmPoolSize       = "sandbox.warm_pool_size"
-	SettingTraceRetentionDays = "observability.trace_retention_days"
+	SettingSessionVolumeDefaultSize = "storage.session_volume_default_size"
+	SettingTraceRetentionDays       = "observability.trace_retention_days"
 )
 
 type SystemSettingDefinition struct {
@@ -81,14 +81,9 @@ func settingDefinitions() []SystemSettingDefinition {
 			Kind:        "int", Env: "COCOLA_SCHEDULER_LEASE_TIMEOUT_SECS", Default: 300, Editable: true, Min: 60, Max: 86400,
 		},
 		{
-			Key: SettingWarmPoolEnabled, Group: "Sandbox", Label: "Warm Pool Enabled",
-			Description: "Create session-agnostic sandboxes ahead of demand. Applied without restarting sandbox-manager.",
-			Kind:        "bool", Env: "COCOLA_SANDBOX_WARM_POOL_ENABLED", Default: true, Editable: true,
-		},
-		{
-			Key: SettingWarmPoolSize, Group: "Sandbox", Label: "Warm Idle Target",
-			Description: "Target number of idle pre-warmed sandboxes, excluding sandboxes already claimed by active sessions.",
-			Kind:        "int", Env: "COCOLA_SANDBOX_WARM_POOL_SIZE", Default: 10, Editable: true, Min: 0, Max: 500,
+			Key: SettingSessionVolumeDefaultSize, Group: "Storage", Label: "Session Volume Request",
+			Description: "Soft capacity request for the next new local Workspace. Existing volumes are unchanged.",
+			Kind:        "quantity", Env: "COCOLA_SESSION_VOLUME_SIZE", Default: "2Gi", Editable: true,
 		},
 		{
 			Key: SettingTraceRetentionDays, Group: "Observability", Label: "Trace Retention",
@@ -134,9 +129,6 @@ func (a *Admin) UpdateSystemSetting(ctx context.Context, key string, in SystemSe
 	if def.Key == SettingSchedulerEnabled && !a.schedulerStarted.Load() {
 		return SystemSettingView{}, ErrPermissionDenied
 	}
-	if isWarmPoolSetting(key) && a.warmPool == nil {
-		return SystemSettingView{}, ErrNotConfigured
-	}
 	_, raw, err := normalizeSettingValue(def, in.Value)
 	if err != nil {
 		return SystemSettingView{}, err
@@ -165,9 +157,6 @@ func (a *Admin) ResetSystemSetting(ctx context.Context, key string, expectedVers
 	if def.Key == SettingSchedulerEnabled && !a.schedulerStarted.Load() {
 		return ErrPermissionDenied
 	}
-	if isWarmPoolSetting(key) && a.warmPool == nil {
-		return ErrNotConfigured
-	}
 	if err := a.store.DeleteSystemSetting(ctx, key, expectedVersion); err != nil {
 		if errors.Is(err, store.ErrNotFound) {
 			return nil
@@ -181,9 +170,6 @@ func (a *Admin) settingView(def SystemSettingDefinition, override store.SystemSe
 	value, source, configured := effectiveSettingValue(def, override)
 	editable := def.Editable
 	if def.Key == SettingSchedulerEnabled && !a.schedulerStarted.Load() {
-		editable = false
-	}
-	if isWarmPoolSetting(def.Key) && a.warmPool == nil {
 		editable = false
 	}
 	view := SystemSettingView{
@@ -271,6 +257,16 @@ func coerceSettingValue(def SystemSettingDefinition, value any) (any, error) {
 			return nil, ErrInvalidArg
 		}
 		return strings.TrimSpace(s), nil
+	case "quantity":
+		s, ok := value.(string)
+		if !ok {
+			return nil, ErrInvalidArg
+		}
+		quantity, err := resource.ParseQuantity(strings.TrimSpace(s))
+		if err != nil || quantity.Sign() <= 0 || quantity.Value() <= 0 {
+			return nil, ErrInvalidArg
+		}
+		return quantity.String(), nil
 	default:
 		return nil, ErrPermissionDenied
 	}
@@ -291,6 +287,8 @@ func parseSettingString(def SystemSettingDefinition, raw string) (any, error) {
 		return coerceSettingValue(def, n)
 	case "string":
 		return strings.TrimSpace(raw), nil
+	case "quantity":
+		return coerceSettingValue(def, strings.TrimSpace(raw))
 	default:
 		return def.Default, nil
 	}
@@ -356,38 +354,6 @@ func (a *Admin) settingBool(ctx context.Context, key string, fallback bool) bool
 		return b
 	}
 	return fallback
-}
-
-// WarmPoolConfigWriter propagates the durable desired warm-pool size to the
-// Redis key sandbox-manager reads on every reconciliation tick.
-type WarmPoolConfigWriter interface {
-	SetWarmPoolConfig(ctx context.Context, enabled bool, size int) error
-}
-
-// WithWarmPoolConfigWriter enables hot warm-pool sizing. Without the writer the
-// settings remain visible but read-only, because changing them could not affect
-// sandbox-manager.
-func (a *Admin) WithWarmPoolConfigWriter(w WarmPoolConfigWriter) *Admin {
-	a.warmPool = w
-	return a
-}
-
-// PublishWarmPoolConfig reconciles the Redis delivery value from the durable
-// DB override (or its env/default fallback). Callers retry this operation so a
-// transient Redis failure cannot leave the runtime stale indefinitely.
-func (a *Admin) PublishWarmPoolConfig(ctx context.Context) error {
-	if a.warmPool == nil {
-		return ErrNotConfigured
-	}
-	return a.warmPool.SetWarmPoolConfig(
-		ctx,
-		a.settingBool(ctx, SettingWarmPoolEnabled, true),
-		a.settingInt(ctx, SettingWarmPoolSize, 10),
-	)
-}
-
-func isWarmPoolSetting(key string) bool {
-	return key == SettingWarmPoolEnabled || key == SettingWarmPoolSize
 }
 
 func secondsDuration(n int) time.Duration {

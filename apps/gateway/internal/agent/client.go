@@ -47,16 +47,17 @@ func IsRuntimeInterruption(err error) bool {
 // caller (HTTP layer) fills UserID/SessionId from the verified identity, never
 // from client-supplied fields.
 type Query struct {
-	UserID       string
-	SessionID    string
-	RuntimeID    string
-	SkillID      string
-	Prompt       string
-	SandboxID    string
-	MaxTurns     int32
-	ModelRouteID string
-	TraceID      string
-	ParentSpanID string
+	UserID              string
+	SessionID           string
+	RuntimeID           string
+	SkillID             string
+	Prompt              string
+	SandboxID           string
+	AllowWorkspaceReset bool
+	MaxTurns            int32
+	ModelRouteID        string
+	TraceID             string
+	ParentSpanID        string
 	// SandboxAuthToken is a fresh per-user cocola token the gateway mints from
 	// the verified identity (sub=UserID, ten=TenantID) for THIS turn. It is
 	// forwarded to agent-runtime over gRPC metadata and injected into the
@@ -199,14 +200,15 @@ func (c *Client) Stream(ctx context.Context, q Query, onEvent func(Event) error)
 		})
 	}
 	stream, err := c.rpc.Query(ctx, &agentv1.QueryRequest{
-		UserId:      q.UserID,
-		SessionId:   q.SessionID,
-		Prompt:      q.Prompt,
-		SandboxId:   q.SandboxID,
-		MaxTurns:    q.MaxTurns,
-		Attachments: atts,
-		RuntimeId:   q.RuntimeID,
-		SkillId:     q.SkillID,
+		UserId:              q.UserID,
+		SessionId:           q.SessionID,
+		Prompt:              q.Prompt,
+		SandboxId:           q.SandboxID,
+		MaxTurns:            q.MaxTurns,
+		Attachments:         atts,
+		RuntimeId:           q.RuntimeID,
+		SkillId:             q.SkillID,
+		AllowWorkspaceReset: q.AllowWorkspaceReset,
 	})
 	if err != nil {
 		return fmt.Errorf("agent: query: %w", err)

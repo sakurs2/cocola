@@ -12,6 +12,7 @@ import (
 
 	"github.com/cocola-project/cocola/apps/gateway/internal/agent"
 	"github.com/cocola-project/cocola/apps/gateway/internal/auth"
+	"github.com/cocola-project/cocola/apps/gateway/internal/chatrun"
 	"github.com/cocola-project/cocola/apps/gateway/internal/convo"
 	"github.com/cocola-project/cocola/packages/go-common/logger"
 )
@@ -307,7 +308,7 @@ func TestDeleteConversationEndpointReleasesAndDeletes(t *testing.T) {
 	}
 }
 
-func TestDeleteConversationReleaseFailureStillDeletes(t *testing.T) {
+func TestDeleteConversationReleaseFailureLeavesOrphanForAdminCleanup(t *testing.T) {
 	cs := convo.NewMemory()
 	_ = cs.UpsertConversation(context.Background(), convo.Conversation{ID: "conv-1", UserID: auth.DevIdentity.UserID})
 	releaser := &fakeReleaser{err: errors.New("release failed")}
@@ -320,12 +321,12 @@ func TestDeleteConversationReleaseFailureStillDeletes(t *testing.T) {
 	if rec.Code != http.StatusNoContent {
 		t.Fatalf("delete status = %d body=%s", rec.Code, rec.Body.String())
 	}
-	if _, err := cs.GetConversation(context.Background(), "conv-1", auth.DevIdentity.UserID); err != convo.ErrNotFound {
-		t.Fatalf("conversation should be deleted despite release failure, got %v", err)
+	if _, err := cs.GetConversation(context.Background(), "conv-1", auth.DevIdentity.UserID); !errors.Is(err, convo.ErrNotFound) {
+		t.Fatalf("conversation should remain deleted after cleanup failure, got %v", err)
 	}
 }
 
-func TestDeleteConversationReleaseDoesNotBlockStartingAnotherRun(t *testing.T) {
+func TestDeleteConversationReleasesMutationLockBeforeWorkspaceCleanup(t *testing.T) {
 	cs := convo.NewMemory()
 	_ = cs.UpsertConversation(context.Background(), convo.Conversation{
 		ID: "delete-me", UserID: auth.DevIdentity.UserID,
@@ -334,7 +335,7 @@ func TestDeleteConversationReleaseDoesNotBlockStartingAnotherRun(t *testing.T) {
 	api := newConfiguredTestAPIWithConvo(
 		&fakeStreamer{script: []agent.Event{{Kind: "done"}}},
 		auth.NewVerifier(auth.Config{}), logger.Must(), cs,
-	).WithAgentReleaser(releaser)
+	).WithChatRuns(chatrun.NewMemory(cs), RunConfig{}).WithAgentReleaser(releaser)
 	handler := api.Handler()
 
 	deleteDone := make(chan struct{})
@@ -351,22 +352,12 @@ func TestDeleteConversationReleaseDoesNotBlockStartingAnotherRun(t *testing.T) {
 		t.Fatal("session release did not start")
 	}
 
-	chatDone := make(chan *httptest.ResponseRecorder, 1)
-	go func() {
-		recorder := httptest.NewRecorder()
-		handler.ServeHTTP(recorder, httptest.NewRequest(
-			http.MethodPost, "/v1/chat",
-			strings.NewReader(`{"prompt":"hello","session_id":"other-conversation"}`),
-		))
-		chatDone <- recorder
-	}()
-	select {
-	case recorder := <-chatDone:
-		if recorder.Code != http.StatusOK {
-			t.Fatalf("chat start status = %d, body = %s", recorder.Code, recorder.Body.String())
-		}
-	case <-time.After(time.Second):
-		t.Fatal("session release blocked an unrelated chat start")
+	if !api.runs.mutationMu.TryLock() {
+		t.Fatal("workspace cleanup still holds the global run mutation lock")
+	}
+	api.runs.mutationMu.Unlock()
+	if _, err := cs.GetConversation(context.Background(), "delete-me", auth.DevIdentity.UserID); !errors.Is(err, convo.ErrNotFound) {
+		t.Fatalf("conversation must be deleted before workspace cleanup: %v", err)
 	}
 
 	close(releaser.unblock)

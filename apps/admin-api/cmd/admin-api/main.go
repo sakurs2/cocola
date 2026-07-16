@@ -156,7 +156,6 @@ func main() {
 
 	svc := service.New(st, iss, time.Now).
 		WithUserEventBroker(pub).
-		WithWarmPoolConfigWriter(pub).
 		WithModelSecretKey(modelSecret).
 		WithConfigSecretKey(configSecret)
 	migrationCtx, migrationCancel := context.WithTimeout(context.Background(), 30*time.Second)
@@ -189,22 +188,16 @@ func main() {
 		svc.WithSandboxRuntimeManager(runtimeMgr)
 		log.Info("sandbox runtime monitor enabled (Redis metadata)")
 	}
-	syncWarmPool := func() {
-		ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
-		defer cancel()
-		if err := svc.PublishWarmPoolConfig(ctx); err != nil {
-			log.Sugar().Errorw("warm-pool config reconciliation failed", "err", err)
-		}
+	storageMonitorCtx, storageMonitorCancel := context.WithTimeout(context.Background(), 10*time.Second)
+	storageMonitor, err := service.NewSessionStorageMonitorFromEnv(storageMonitorCtx)
+	storageMonitorCancel()
+	if err != nil {
+		log.Sugar().Warnw("session storage monitor disabled", "err", err)
+	} else if storageMonitor != nil {
+		defer storageMonitor.Close()
+		svc.WithSessionStorageMonitor(storageMonitor)
+		log.Info("session storage monitor enabled")
 	}
-	syncWarmPool()
-	go func() {
-		ticker := time.NewTicker(5 * time.Second)
-		defer ticker.Stop()
-		for range ticker.C {
-			syncWarmPool()
-		}
-	}()
-	log.Info("warm-pool sizing hot reload enabled")
 	if email := os.Getenv("COCOLA_BOOTSTRAP_ADMIN_EMAIL"); email != "" {
 		username := os.Getenv("COCOLA_BOOTSTRAP_ADMIN_USERNAME")
 		password := config.SecretFromEnv("COCOLA_BOOTSTRAP_ADMIN_PASSWORD")

@@ -12,6 +12,8 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+
+	"k8s.io/apimachinery/pkg/api/resource"
 )
 
 const DefaultRegistry = "ghcr.io/sakurs2"
@@ -39,6 +41,7 @@ type Options struct {
 	ManagedOpenSandbox     bool
 	ExternalOpenSandboxURL string
 	SandboxLLMBaseURL      string
+	SessionVolumeSize      string
 }
 
 type State struct {
@@ -75,7 +78,7 @@ func Defaults(imageTag string) Options {
 		Home: DefaultHome(), Version: imageTag, Registry: DefaultRegistry,
 		AdminUsername: "admin", AdminEmail: "admin@cocola.local",
 		WebPort: 3000, GatewayPort: 8080, LLMPort: 18091,
-		ManagedOpenSandbox: true,
+		ManagedOpenSandbox: true, SessionVolumeSize: "2Gi",
 	}
 }
 
@@ -159,6 +162,10 @@ func (o Options) Validate() error {
 		if err != nil || (parsed.Scheme != "http" && parsed.Scheme != "https") || parsed.Host == "" {
 			return errors.New("sandbox LLM base URL must be an absolute http(s) URL")
 		}
+	}
+	quantity, err := resource.ParseQuantity(strings.TrimSpace(o.SessionVolumeSize))
+	if err != nil || quantity.Sign() <= 0 || quantity.Value() <= 0 {
+		return errors.New("session volume size must be a positive Kubernetes quantity")
 	}
 	return nil
 }
@@ -271,6 +278,7 @@ func renderEnvironment(paths Paths, o Options, s secrets, password string) strin
 		{"AUTH_SECRET", s.authJS}, {"COCOLA_ADMIN_KEY", s.admin},
 		{"COCOLA_MODEL_SECRET_KEY", s.model}, {"COCOLA_CONFIG_SECRET_KEY", s.config},
 		{"COCOLA_PG_PASSWORD", s.postgres}, {"COCOLA_MINIO_ROOT_PASSWORD", s.minio},
+		{"COCOLA_SESSION_VOLUME_SIZE", o.SessionVolumeSize},
 		{"COCOLA_BOOTSTRAP_ADMIN_USERNAME", o.AdminUsername}, {"COCOLA_BOOTSTRAP_ADMIN_EMAIL", o.AdminEmail},
 		{"COCOLA_BOOTSTRAP_ADMIN_PASSWORD", password}, {"COCOLA_BOOTSTRAP_ADMIN_RESET", "false"},
 	}

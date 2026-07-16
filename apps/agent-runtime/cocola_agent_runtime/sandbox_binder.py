@@ -51,6 +51,8 @@ from cocola_agent_runtime.sandbox_client import SandboxClient
 
 log = get_logger("cocola.agent-runtime.sandbox")
 
+DEFAULT_RELEASE_TIMEOUT_S = 8.0
+
 
 @dataclass(frozen=True)
 class BoundSandbox:
@@ -63,18 +65,29 @@ class BoundSandbox:
     id: str
     endpoint: str = ""
     reused: bool = False
+    workspace_state: str = ""
+    workspace_node: str = ""
+    previous_workspace_node: str = ""
 
 
 class SandboxBinder(Protocol):
     """The runtime depends on this Protocol only, never a concrete client."""
 
     async def acquire(
-        self, *, session_id: str, user_id: str, image: str = "", env: dict | None = None
+        self,
+        *,
+        session_id: str,
+        user_id: str,
+        image: str = "",
+        env: dict | None = None,
+        allow_workspace_reset: bool = False,
     ) -> BoundSandbox:
         """Bind the session to a sandbox (create-or-reuse), renewing its lease."""
         ...
 
-    async def release(self, *, session_id: str) -> None:
+    async def release(
+        self, *, session_id: str, user_id: str, timeout_s: float | None = None
+    ) -> None:
         """Best-effort unbind+destroy of the session's sandbox."""
         ...
 
@@ -85,6 +98,10 @@ class SandboxBinder(Protocol):
 
 class SandboxGoneError(RuntimeError):
     """The sandbox manager no longer knows an actively-used sandbox."""
+
+
+class WorkspaceNodeUnavailableError(RuntimeError):
+    """The node holding a session's local workspace cannot accept a sandbox."""
 
 
 class SandboxManagerBinder:
@@ -113,7 +130,13 @@ class SandboxManagerBinder:
         self._default_env = dict(default_env or {})
 
     async def acquire(
-        self, *, session_id: str, user_id: str, image: str = "", env: dict | None = None
+        self,
+        *,
+        session_id: str,
+        user_id: str,
+        image: str = "",
+        env: dict | None = None,
+        allow_workspace_reset: bool = False,
     ) -> BoundSandbox:
         eff_image = image or self._default_image
         eff_env = {**self._default_env, **(env or {})}
@@ -122,25 +145,56 @@ class SandboxManagerBinder:
             with SandboxClient(addr=self._addr) as sb:
                 try:
                     res = sb.acquire(
-                        session_id=session_id, user_id=user_id, image=eff_image, env=eff_env
+                        session_id=session_id,
+                        user_id=user_id,
+                        image=eff_image,
+                        env=eff_env,
+                        allow_workspace_reset=allow_workspace_reset,
                     )
                 except grpc.RpcError as exc:
                     if exc.code() == grpc.StatusCode.RESOURCE_EXHAUSTED:
                         raise RuntimeError(
                             "current resources are busy; no sandbox capacity available"
                         ) from exc
+                    if exc.code() == grpc.StatusCode.FAILED_PRECONDITION:
+                        raise WorkspaceNodeUnavailableError(
+                            "workspace node unavailable; confirm reset to continue with "
+                            "an empty workspace"
+                        ) from exc
                     raise
             box = res.sandbox
-            return BoundSandbox(id=box.id, endpoint=box.endpoint, reused=res.reused)
+            states = {
+                pb.WORKSPACE_STATE_FRESH: "fresh",
+                pb.WORKSPACE_STATE_PRESERVED: "preserved",
+                pb.WORKSPACE_STATE_RESET: "reset",
+            }
+            return BoundSandbox(
+                id=box.id,
+                endpoint=box.endpoint,
+                reused=res.reused,
+                workspace_state=states.get(getattr(res, "workspace_state", 0), ""),
+                workspace_node=getattr(res, "workspace_node", ""),
+                previous_workspace_node=getattr(res, "previous_workspace_node", ""),
+            )
 
         return await anyio.to_thread.run_sync(_call)
 
-    async def release(self, *, session_id: str) -> None:
+    async def release(
+        self, *, session_id: str, user_id: str, timeout_s: float | None = None
+    ) -> None:
+        effective_timeout = DEFAULT_RELEASE_TIMEOUT_S
+        if timeout_s is not None:
+            effective_timeout = max(0.1, min(timeout_s, DEFAULT_RELEASE_TIMEOUT_S))
+
         def _call() -> None:
             with SandboxClient(addr=self._addr) as sb:
-                sb.release(session_id=session_id)
+                sb.release(
+                    session_id=session_id,
+                    user_id=user_id,
+                    timeout_s=effective_timeout,
+                )
 
-        await anyio.to_thread.run_sync(_call)
+        await anyio.to_thread.run_sync(_call, abandon_on_cancel=True)
 
     async def heartbeat(self, *, sandbox_id: str) -> None:
         def _call() -> None:
@@ -167,11 +221,18 @@ class StaticSandboxBinder:
         self._fail = fail_with
         self.acquired: list[str] = []
         self.released: list[str] = []
+        self.release_timeouts: list[float | None] = []
         self.heartbeats: list[str] = []
         self._seen: set[str] = set()
 
     async def acquire(
-        self, *, session_id: str, user_id: str, image: str = "", env: dict | None = None
+        self,
+        *,
+        session_id: str,
+        user_id: str,
+        image: str = "",
+        env: dict | None = None,
+        allow_workspace_reset: bool = False,
     ) -> BoundSandbox:
         if self._fail is not None:
             raise self._fail
@@ -180,8 +241,11 @@ class StaticSandboxBinder:
         self._seen.add(session_id)
         return BoundSandbox(id=f"box-{session_id}", endpoint="inmem://local", reused=reused)
 
-    async def release(self, *, session_id: str) -> None:
+    async def release(
+        self, *, session_id: str, user_id: str, timeout_s: float | None = None
+    ) -> None:
         self.released.append(session_id)
+        self.release_timeouts.append(timeout_s)
 
     async def heartbeat(self, *, sandbox_id: str) -> None:
         self.heartbeats.append(sandbox_id)

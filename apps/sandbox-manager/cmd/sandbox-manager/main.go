@@ -20,7 +20,6 @@ import (
 	"github.com/cocola-project/cocola/apps/sandbox-manager/internal/obs"
 	"github.com/cocola-project/cocola/apps/sandbox-manager/internal/orchestrator"
 	"github.com/cocola-project/cocola/apps/sandbox-manager/internal/provider"
-	checkpointprovider "github.com/cocola-project/cocola/apps/sandbox-manager/internal/provider/checkpoint"
 	"github.com/cocola-project/cocola/apps/sandbox-manager/internal/provider/opensandbox"
 	"github.com/cocola-project/cocola/apps/sandbox-manager/internal/server"
 	"github.com/cocola-project/cocola/packages/go-common/logger"
@@ -52,18 +51,11 @@ func main() {
 		log.Sugar().Fatalf("init OpenSandbox provider: %v", err)
 	}
 	var p provider.SandboxProvider = base
-	if wrapped, werr := checkpointprovider.Wrap(p, checkpointprovider.ConfigFromEnv()); werr != nil {
-		log.Sugar().Fatalf("init required sandbox checkpointing: %v", werr)
-	} else {
-		p = wrapped
-		log.Info("sandbox checkpointing enabled")
-	}
 
 	// Redis is required by the session<->sandbox binder. Starting without it
 	// would expose a healthy server whose core binding RPCs are unusable.
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	var warmDone chan struct{}
 	// Retry the initial dial instead of a single shot: Compose orders us after
 	// redis is healthy, but transient DNS/network races (or a slow-to-DNS bridge)
 	// would otherwise permanently disable binding RPCs until a manual restart.
@@ -84,49 +76,28 @@ func main() {
 		WithNetworking(networking)
 	capGuard, capErr := orchestrator.NewCapacityGuardFromEnv()
 	if capErr != nil {
-		log.Sugar().Warnw("sandbox capacity guard disabled", "err", capErr)
+		log.Sugar().Fatalf("init sandbox capacity guard: %v", capErr)
 	} else if capGuard != nil {
 		binder.WithCapacityGuard(capGuard)
 		log.Info("sandbox capacity guard enabled (Kubernetes REST)")
 	}
-
-	// Warm pool (re-introduced): pre-create session-agnostic sandboxes ahead
-	// of demand so a cold-start becomes a claim (Redis DEL + bind) instead of a
-	// multi-second backend create. This is compatible with OpenSandbox's
-	// no-hot-mount constraint (ADR-0016): warm sandboxes carry NO per-session
-	// volume, and a claim restores session state via checkpoint/restore exactly
-	// as a cold create would. Sizing is admin-tunable (default 10) and
-	// hot-reloads from a shared Redis config key written by admin-api. Multi-node
-	// spread reuses the capacity guard (each warm create targets the node with
-	// the most remaining capacity).
-	warmCfg := orchestrator.WarmConfigFromEnv()
-	binder.WithWarmPool(warmCfg)
-
-	go binder.RunReaper(ctx) // background two-stage Pause-then-Destroy GC
-	if binder.WarmEnabled() {
-		// The refill loop self-heals on every tick: each tick probes warm
-		// sandbox health and prunes stale records before resizing, so a
-		// restart with leftover warm keys is reconciled by the first tick
-		// (which runs immediately). No separate synchronous startup pass is
-		// needed — this keeps startup non-blocking and the reconcile logic
-		// in exactly one place.
-		warmDone = make(chan struct{})
-		go func() {
-			defer close(warmDone)
-			binder.RunWarmPool(ctx) // background pre-warm refill + self-heal loop
-		}()
-		log.Sugar().Infow("sandbox warm pool enabled",
-			"size", warmCfg.Size,
-			"enabled", warmCfg.Enabled,
-			"refill_every", warmCfg.RefillEvery)
-	} else {
-		log.Info("sandbox warm pool disabled (no COCOLA_SANDBOX_IMAGE)")
+	storage, storageErr := orchestrator.NewSessionStorageManagerFromEnv(ctx)
+	if storageErr != nil {
+		log.Sugar().Fatalf("init session storage: %v", storageErr)
 	}
+	if storage != nil {
+		if capGuard == nil {
+			log.Fatal("session storage requires Kubernetes capacity guard")
+		}
+		defer storage.Close()
+		binder.WithSessionStorage(storage)
+		log.Info("node-local session storage enabled")
+	}
+
+	go binder.RunReaper(ctx)
 	eff := binder.EffectiveConfig()
 	log.Sugar().Infow("session<->sandbox binder enabled",
 		"lease_ttl", eff.LeaseTTL,
-		"heartbeat_every", eff.HeartbeatEvery,
-		"destroy_grace", eff.DestroyGrace,
 		"reaper_every", eff.ReaperEvery)
 
 	lis, err := net.Listen("tcp", addr)
@@ -161,11 +132,9 @@ func main() {
 	log.Sugar().Infow("cocola sandbox-manager listening",
 		"milestone", "M2", "addr", addr, "provider", "opensandbox")
 
-	// Serve on a goroutine so main can block on the signal channel and drive an
-	// orderly teardown (plan A): on SIGINT/SIGTERM we stop accepting new work,
-	// let in-flight RPCs drain, then checkpoint every ACTIVE session so a
-	// non-reclaim exit (Ctrl+C, rollout/drain/scale-in, pod eviction) does not
-	// drop the turns accumulated since each session's last clean reclaim.
+	// Serve on a goroutine so main can stop accepting work and let in-flight RPCs
+	// finish. Persistent state already lives on Session PVCs; shutdown performs
+	// no archive or object-store sweep.
 	serveErr := make(chan error, 1)
 	go func() { serveErr <- gs.Serve(lis) }()
 
@@ -179,57 +148,9 @@ func main() {
 		}
 	case s := <-sig:
 		log.Sugar().Infow("signal received; draining before exit", "signal", s.String())
-		// GracefulStop first: stop accepting new RPCs and wait for in-flight
-		// Exec calls to finish, so the sandbox's runtime session state reflects
-		// the latest completed turn before we archive it.
 		gs.GracefulStop()
-		budget := checkpointDrainBudget()
-		dctx, dcancel := context.WithTimeout(context.Background(), budget)
-		log.Sugar().Infow("checkpointing active sessions before exit", "budget", budget.String())
-		summary := binder.CheckpointAllActive(dctx)
-		dcancel()
-		for _, failure := range summary.Failures {
-			log.Sugar().Errorw("session checkpoint failed",
-				"session_id", failure.SessionID,
-				"sandbox_id", failure.SandboxID,
-				"err", failure.Err)
-		}
-		if summary.ScanError != nil {
-			log.Sugar().Errorw("active session checkpoint scan failed", "err", summary.ScanError)
-		}
-		log.Sugar().Infow("active session checkpoint sweep completed",
-			"scanned", summary.Scanned,
-			"succeeded", summary.Succeeded,
-			"skipped", summary.Skipped,
-			"failed", len(summary.Failures))
-		// Stop the refill loop before draining its inventory; otherwise it could
-		// recreate a warm sandbox while shutdown is deleting the previous ones.
 		cancel()
-		if warmDone != nil {
-			<-warmDone
-		}
-		dctx, dcancel = context.WithTimeout(context.Background(), 5*time.Second)
-		drained, drainErr := binder.DrainWarmPool(dctx)
-		dcancel()
-		if drainErr != nil {
-			log.Sugar().Errorw("warm pool drain incomplete", "drained", drained, "err", drainErr)
-		} else {
-			log.Sugar().Infow("warm pool drain completed", "drained", drained)
-		}
 	}
-}
-
-// checkpointDrainBudget bounds the pre-exit checkpoint sweep so a slow backend
-// cannot wedge teardown past the orchestrator's terminationGracePeriod. A
-// non-positive/invalid COCOLA_SANDBOX_CHECKPOINT_DRAIN_SECS falls back to 25s
-// (comfortably under a typical 30s grace period).
-func checkpointDrainBudget() time.Duration {
-	if v := os.Getenv("COCOLA_SANDBOX_CHECKPOINT_DRAIN_SECS"); v != "" {
-		if n, err := strconv.Atoi(v); err == nil && n > 0 {
-			return time.Duration(n) * time.Second
-		}
-	}
-	return 25 * time.Second
 }
 
 // defaultMaxMessageBytes is 64 MiB -- above the 32 MiB frontend upload cap,

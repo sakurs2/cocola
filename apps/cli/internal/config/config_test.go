@@ -43,6 +43,7 @@ func TestWriteInstallationCreatesPrivateConfigAndStableState(t *testing.T) {
 		`COCOLA_BOOTSTRAP_ADMIN_PASSWORD="strong-password"`,
 		`COCOLA_AUTH_SECRET="`,
 		`COCOLA_SANDBOX_LLM_BASE_URL="http://host.docker.internal:18091"`,
+		`COCOLA_SESSION_VOLUME_SIZE="2Gi"`,
 	} {
 		if !strings.Contains(text, expected) {
 			t.Fatalf("config missing %q", expected)
@@ -84,6 +85,7 @@ func TestOptionsValidation(t *testing.T) {
 			o.ExternalOpenSandboxURL = "https://sandbox.example.com/v1"
 		}},
 		{"short password", func(o *Options) { o.AdminPassword = "short" }},
+		{"invalid session volume", func(o *Options) { o.SessionVolumeSize = "0Gi" }},
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {

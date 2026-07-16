@@ -14,11 +14,22 @@ class ExecEventKind(int, metaclass=_enum_type_wrapper.EnumTypeWrapper):
     EXEC_EVENT_KIND_STDERR: _ClassVar[ExecEventKind]
     EXEC_EVENT_KIND_EXIT: _ClassVar[ExecEventKind]
     EXEC_EVENT_KIND_ERROR: _ClassVar[ExecEventKind]
+
+class WorkspaceState(int, metaclass=_enum_type_wrapper.EnumTypeWrapper):
+    __slots__ = ()
+    WORKSPACE_STATE_UNSPECIFIED: _ClassVar[WorkspaceState]
+    WORKSPACE_STATE_FRESH: _ClassVar[WorkspaceState]
+    WORKSPACE_STATE_PRESERVED: _ClassVar[WorkspaceState]
+    WORKSPACE_STATE_RESET: _ClassVar[WorkspaceState]
 EXEC_EVENT_KIND_UNSPECIFIED: ExecEventKind
 EXEC_EVENT_KIND_STDOUT: ExecEventKind
 EXEC_EVENT_KIND_STDERR: ExecEventKind
 EXEC_EVENT_KIND_EXIT: ExecEventKind
 EXEC_EVENT_KIND_ERROR: ExecEventKind
+WORKSPACE_STATE_UNSPECIFIED: WorkspaceState
+WORKSPACE_STATE_FRESH: WorkspaceState
+WORKSPACE_STATE_PRESERVED: WorkspaceState
+WORKSPACE_STATE_RESET: WorkspaceState
 
 class Resources(_message.Message):
     __slots__ = ("cpu_cores", "memory_mib", "disk_mib")
@@ -187,7 +198,7 @@ class HealthResponse(_message.Message):
     def __init__(self, healthy: bool = ..., detail: _Optional[str] = ...) -> None: ...
 
 class AcquireRequest(_message.Message):
-    __slots__ = ("session_id", "user_id", "image", "env")
+    __slots__ = ("session_id", "user_id", "image", "env", "allow_workspace_reset")
     class EnvEntry(_message.Message):
         __slots__ = ("key", "value")
         KEY_FIELD_NUMBER: _ClassVar[int]
@@ -199,19 +210,27 @@ class AcquireRequest(_message.Message):
     USER_ID_FIELD_NUMBER: _ClassVar[int]
     IMAGE_FIELD_NUMBER: _ClassVar[int]
     ENV_FIELD_NUMBER: _ClassVar[int]
+    ALLOW_WORKSPACE_RESET_FIELD_NUMBER: _ClassVar[int]
     session_id: str
     user_id: str
     image: str
     env: _containers.ScalarMap[str, str]
-    def __init__(self, session_id: _Optional[str] = ..., user_id: _Optional[str] = ..., image: _Optional[str] = ..., env: _Optional[_Mapping[str, str]] = ...) -> None: ...
+    allow_workspace_reset: bool
+    def __init__(self, session_id: _Optional[str] = ..., user_id: _Optional[str] = ..., image: _Optional[str] = ..., env: _Optional[_Mapping[str, str]] = ..., allow_workspace_reset: bool = ...) -> None: ...
 
 class AcquireResponse(_message.Message):
-    __slots__ = ("sandbox", "reused")
+    __slots__ = ("sandbox", "reused", "workspace_state", "workspace_node", "previous_workspace_node")
     SANDBOX_FIELD_NUMBER: _ClassVar[int]
     REUSED_FIELD_NUMBER: _ClassVar[int]
+    WORKSPACE_STATE_FIELD_NUMBER: _ClassVar[int]
+    WORKSPACE_NODE_FIELD_NUMBER: _ClassVar[int]
+    PREVIOUS_WORKSPACE_NODE_FIELD_NUMBER: _ClassVar[int]
     sandbox: Sandbox
     reused: bool
-    def __init__(self, sandbox: _Optional[_Union[Sandbox, _Mapping]] = ..., reused: bool = ...) -> None: ...
+    workspace_state: WorkspaceState
+    workspace_node: str
+    previous_workspace_node: str
+    def __init__(self, sandbox: _Optional[_Union[Sandbox, _Mapping]] = ..., reused: bool = ..., workspace_state: _Optional[_Union[WorkspaceState, str]] = ..., workspace_node: _Optional[str] = ..., previous_workspace_node: _Optional[str] = ...) -> None: ...
 
 class HeartbeatRequest(_message.Message):
     __slots__ = ("sandbox_id",)
@@ -224,10 +243,12 @@ class HeartbeatResponse(_message.Message):
     def __init__(self) -> None: ...
 
 class ReleaseRequest(_message.Message):
-    __slots__ = ("session_id",)
+    __slots__ = ("session_id", "user_id")
     SESSION_ID_FIELD_NUMBER: _ClassVar[int]
+    USER_ID_FIELD_NUMBER: _ClassVar[int]
     session_id: str
-    def __init__(self, session_id: _Optional[str] = ...) -> None: ...
+    user_id: str
+    def __init__(self, session_id: _Optional[str] = ..., user_id: _Optional[str] = ...) -> None: ...
 
 class ReleaseResponse(_message.Message):
     __slots__ = ()

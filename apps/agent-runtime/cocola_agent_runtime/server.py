@@ -29,7 +29,6 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import dataclasses
-import io
 import json
 import mimetypes
 import os
@@ -39,7 +38,6 @@ import re
 import tempfile
 import time
 import uuid
-import zipfile
 from typing import Any, NamedTuple
 
 import grpc
@@ -48,14 +46,24 @@ from cocola.agent.v1 import agent_pb2_grpc as pb_grpc
 from cocola_common import get_logger
 
 from cocola_agent_runtime.agent_provider import AgentEvent, AgentOptions, AgentProvider
-from cocola_agent_runtime.checkpoint import CheckpointManager
 from cocola_agent_runtime.mcp_loader import MCPCatalog
 from cocola_agent_runtime.objstore import Fetcher
 from cocola_agent_runtime.prompt_loader import PromptCatalog, PromptConfig
 from cocola_agent_runtime.runtime_registry import RuntimeDescriptor, RuntimeEntry, RuntimeRegistry
-from cocola_agent_runtime.sandbox_binder import SandboxBinder, SandboxExecutor, SandboxGoneError
+from cocola_agent_runtime.sandbox_binder import (
+    SandboxBinder,
+    SandboxExecutor,
+    SandboxGoneError,
+    WorkspaceNodeUnavailableError,
+)
 from cocola_agent_runtime.session_map import SessionMap
 from cocola_agent_runtime.skill_loader import Skill, SkillCatalog
+from cocola_agent_runtime.skill_reconciler import (
+    SKILLS_INSPECT_SCRIPT,
+    SKILLS_RECONCILE_SCRIPT,
+    build_skill_batch_archive,
+    skill_descriptors,
+)
 
 log = get_logger("cocola.agent-runtime.server")
 
@@ -105,155 +113,6 @@ for dirpath, _, files in os.walk(root):
         out[rel] = {"size": st.st_size, "mtime_ns": st.st_mtime_ns}
 print(json.dumps(out, sort_keys=True))
 """
-_SKILLS_BATCH_INSTALL_SCRIPT = r"""
-import io
-import json
-import os
-import shutil
-import sys
-import tempfile
-import zipfile
-
-archive_path, base, shared_root = sys.argv[1:4]
-skills_root = os.path.join(base, "skills")
-state_root = os.path.join(base, ".cocola")
-os.makedirs(state_root, exist_ok=True)
-stage_root = tempfile.mkdtemp(prefix="skill-sync-", dir=state_root)
-stage_skills = os.path.join(stage_root, "skills")
-os.makedirs(stage_skills)
-
-
-def remove_path(path):
-    if not os.path.lexists(path):
-        return
-    if os.path.islink(path) or os.path.isfile(path):
-        os.unlink(path)
-    else:
-        shutil.rmtree(path)
-
-
-def extract_bundle(data, target):
-    os.makedirs(target, exist_ok=True)
-    with zipfile.ZipFile(io.BytesIO(data)) as bundle:
-        for info in bundle.infolist():
-            name = info.filename.replace("\\", "/")
-            if not name or name.startswith("/") or ".." in name.split("/"):
-                raise SystemExit(f"unsafe skill archive path: {name}")
-            if info.is_dir():
-                continue
-            dest = os.path.join(target, name)
-            os.makedirs(os.path.dirname(dest), exist_ok=True)
-            with bundle.open(info) as src, open(dest, "wb") as out:
-                shutil.copyfileobj(src, out)
-
-
-try:
-    with zipfile.ZipFile(archive_path) as batch:
-        manifest = json.loads(batch.read("manifest.json"))
-        if not isinstance(manifest, list):
-            raise SystemExit("invalid skill batch manifest")
-
-        # Validate and stage every local package before changing live targets.
-        # A malformed bundle therefore cannot leave a partially-updated set.
-        for item in manifest:
-            if not isinstance(item, dict):
-                raise SystemExit("invalid skill batch entry")
-            skill_id = item.get("id", "")
-            allowed = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789_.-"
-            if not skill_id or any(ch not in allowed for ch in skill_id):
-                raise SystemExit(f"invalid skill id: {skill_id}")
-            shared = os.path.join(shared_root, skill_id)
-            if os.path.isfile(os.path.join(shared, "SKILL.md")):
-                continue
-
-            staged = os.path.join(stage_skills, skill_id)
-            kind = item.get("kind")
-            if kind == "bundle":
-                extract_bundle(batch.read(item["member"]), staged)
-            elif kind == "markdown":
-                os.makedirs(staged, exist_ok=True)
-                with open(os.path.join(staged, "SKILL.md"), "wb") as out:
-                    out.write(batch.read(item["member"]))
-            elif kind == "empty":
-                os.makedirs(staged, exist_ok=True)
-            else:
-                raise SystemExit(f"invalid skill payload kind: {kind}")
-            if kind != "empty" and not os.path.isfile(os.path.join(staged, "SKILL.md")):
-                raise SystemExit(f"skill archive missing SKILL.md: {skill_id}")
-
-        for item in manifest:
-            skill_id = item["id"]
-            target = os.path.join(stage_skills, skill_id)
-            shared = os.path.join(shared_root, skill_id)
-            if os.path.isfile(os.path.join(shared, "SKILL.md")):
-                os.symlink(shared, target)
-
-        # The catalog is the complete desired state. Replace Cocola's managed
-        # directory only after every package has been validated and staged, so
-        # disabled/deleted skills and checkpoint residue cannot stay visible.
-        remove_path(skills_root)
-        os.replace(stage_skills, skills_root)
-finally:
-    shutil.rmtree(stage_root, ignore_errors=True)
-    try:
-        os.unlink(archive_path)
-    except OSError:
-        pass
-"""
-_NATIVE_SKILL_ID_RE = re.compile(r"^[a-zA-Z0-9][a-zA-Z0-9_.-]{0,127}$")
-
-
-async def _build_skill_batch_archive(skills: list[Skill], objstore: Fetcher | None) -> bytes:
-    """Build one transport archive for every enabled non-shared skill payload.
-
-    Shared-image skills are still represented in the manifest; the in-sandbox
-    installer chooses the shared copy before reading their payload. Object-store
-    reads run concurrently, while sandbox I/O remains one write plus one exec.
-    """
-
-    async def load_payload(skill: Skill) -> tuple[str, bytes]:
-        if skill.bundle_object_key and objstore is not None:
-            data = await asyncio.to_thread(objstore.get, skill.bundle_object_key)
-            return "bundle", data
-        if skill.skill_md:
-            return "markdown", skill.skill_md.encode("utf-8")
-        return "empty", b""
-
-    skill_ids: list[str] = []
-    seen_ids: set[str] = set()
-    for skill in skills:
-        skill_id = skill.native_id
-        if not _NATIVE_SKILL_ID_RE.fullmatch(skill_id):
-            raise RuntimeError(f"invalid Runtime skill id: {skill_id}")
-        if skill_id in seen_ids:
-            raise RuntimeError(f"duplicate normalized skill id: {skill_id}")
-        seen_ids.add(skill_id)
-        skill_ids.append(skill_id)
-
-    payloads = await asyncio.gather(*(load_payload(skill) for skill in skills))
-    manifest: list[dict[str, str]] = []
-    out = io.BytesIO()
-    with zipfile.ZipFile(out, "w", compression=zipfile.ZIP_DEFLATED) as batch:
-        for index, (skill_id, payload) in enumerate(zip(skill_ids, payloads, strict=True)):
-            kind, data = payload
-            entry: dict[str, str] = {"id": skill_id, "kind": kind}
-            if kind != "empty":
-                suffix = "zip" if kind == "bundle" else "md"
-                member = f"payloads/{index:04d}.{suffix}"
-                batch.writestr(
-                    member,
-                    data,
-                    compress_type=(
-                        zipfile.ZIP_STORED if kind == "bundle" else zipfile.ZIP_DEFLATED
-                    ),
-                )
-                entry["member"] = member
-            manifest.append(entry)
-        batch.writestr(
-            "manifest.json",
-            json.dumps(manifest, ensure_ascii=False, separators=(",", ":")),
-        )
-    return out.getvalue()
 
 
 class _ResolvedAttachment(NamedTuple):
@@ -448,7 +307,6 @@ class AgentRuntimeServicer(pb_grpc.AgentRuntimeServiceServicer):
         executor: SandboxExecutor | None = None,
         objstore: Fetcher | None = None,
         session_map: SessionMap | None = None,
-        checkpoint: CheckpointManager | None = None,
     ) -> None:
         self._runtimes = runtimes or RuntimeRegistry(
             [
@@ -479,7 +337,6 @@ class AgentRuntimeServicer(pb_grpc.AgentRuntimeServiceServicer):
         # before provisioning. Optional: unset => a key-only attachment surfaces
         # as a clean provisioning error rather than a silent empty file.
         self._objstore = objstore
-        self._checkpoint = checkpoint
         self._run_timeout_secs = _positive_env_int(
             "COCOLA_AGENT_RUN_TIMEOUT_SECS", DEFAULT_AGENT_RUN_TIMEOUT_SECS
         )
@@ -527,25 +384,25 @@ class AgentRuntimeServicer(pb_grpc.AgentRuntimeServiceServicer):
         session_id = request.session_id
         if not session_id:
             return pb.ReleaseSessionResponse()
-        owned_binding = None
-        if self._session_map is not None:
+        # sandbox-manager receives the verified user id and checks ownership
+        # against session_storage. The runtime resume index is not authoritative
+        # for volume ownership and may legitimately be absent.
+        if self._binder is not None:
             try:
-                owned_binding = await self._session_map.get_binding(
-                    session_id, user_id=request.user_id
-                )
-            except Exception as exc:  # noqa: BLE001 - release must continue
-                log.warning(
-                    "session ownership lookup before release failed",
+                timeout_s = None
+                time_remaining = getattr(context, "time_remaining", None)
+                if callable(time_remaining):
+                    remaining = time_remaining()
+                    if remaining is not None:
+                        timeout_s = max(0.1, remaining - 0.25)
+                await self._binder.release(
                     session_id=session_id,
-                    error=str(exc),
+                    user_id=request.user_id,
+                    timeout_s=timeout_s,
                 )
-        # Release carries a caller-controlled session id. When the durable map
-        # is present, fail closed unless it confirms that caller's ownership.
-        if self._binder is not None and (self._session_map is None or owned_binding is not None):
-            try:
-                await self._binder.release(session_id=session_id)
-            except Exception as exc:  # noqa: BLE001 - delete should not fail on cleanup
+            except Exception as exc:  # noqa: BLE001 - map to an explicit RPC failure
                 log.warning("sandbox release failed", session_id=session_id, error=str(exc))
+                await context.abort(grpc.StatusCode.INTERNAL, "session storage cleanup failed")
         if self._session_map is not None:
             try:
                 await self._session_map.delete(session_id, user_id=request.user_id)
@@ -669,6 +526,7 @@ class AgentRuntimeServicer(pb_grpc.AgentRuntimeServiceServicer):
                 box = await self._binder.acquire(
                     session_id=request.session_id,
                     user_id=request.user_id,
+                    allow_workspace_reset=bool(getattr(request, "allow_workspace_reset", False)),
                     env=_acquire_env(model_env, sandbox_token, runtime_id=runtime_id),
                 )
             except Exception as exc:  # noqa: BLE001 - bind failure -> clean terminal event
@@ -690,14 +548,37 @@ class AgentRuntimeServicer(pb_grpc.AgentRuntimeServiceServicer):
                         )
                     )
                 )
-                await context.write(
-                    pb.AgentEvent(
-                        kind="error",
-                        data={"error": f"sandbox acquire failed: {exc}"},
-                    )
-                )
+                error_data = {"error": f"sandbox acquire failed: {exc}"}
+                if isinstance(exc, WorkspaceNodeUnavailableError):
+                    error_data["code"] = "WORKSPACE_NODE_UNAVAILABLE"
+                await context.write(pb.AgentEvent(kind="error", data=error_data))
                 return
             sandbox_id = box.id
+            if box.workspace_state == "reset" and self._session_map is not None:
+                try:
+                    await self._session_map.delete(
+                        request.session_id,
+                        user_id=request.user_id,
+                        runtime_id=runtime_id,
+                    )
+                except Exception as exc:  # noqa: BLE001 - stale resume state must not survive reset
+                    log.warning(
+                        "workspace reset session cleanup failed",
+                        session_id=request.session_id,
+                        runtime_id=runtime_id,
+                        error=str(exc),
+                    )
+                    await context.write(
+                        pb.AgentEvent(
+                            kind="error",
+                            data={
+                                "error": (
+                                    "workspace reset failed to clear previous Runtime session"
+                                )
+                            },
+                        )
+                    )
+                    return
             heartbeat_task = asyncio.create_task(
                 self._heartbeat_sandbox(box.id, context, asyncio.current_task())
             )
@@ -732,53 +613,17 @@ class AgentRuntimeServicer(pb_grpc.AgentRuntimeServiceServicer):
                         environment_preparation_event("preparing", environment_components)
                     )
                 )
-            if self._checkpoint is not None:
-                restore_start_ns = time.time_ns()
-                restore = await self._checkpoint.restore_if_fresh(
-                    sandbox_id=box.id,
-                    user_id=request.user_id,
-                    session_id=request.session_id,
-                    runtime_id=runtime_id,
-                    reused=box.reused,
+            if preparing_environment and box.workspace_state == "reset":
+                environment_degraded = True
+                previous = box.previous_workspace_node or "the previous node"
+                environment_components.append(
+                    {
+                        "kind": "workspace",
+                        "status": "failed",
+                        "label": "Workspace reset",
+                        "summary": f"Previous workspace on {previous} was cleared",
+                    }
                 )
-                await context.write(
-                    event_to_proto(
-                        trace_event(
-                            "sandbox.checkpoint_restore",
-                            "sandbox",
-                            restore_start_ns,
-                            status="error" if restore.degraded else "success",
-                            sandbox_id=box.id,
-                            reused=box.reused,
-                            restored=restore.restored,
-                            restore_status=restore.status,
-                        )
-                    )
-                )
-                if preparing_environment:
-                    if restore.restored:
-                        environment_components.append(
-                            {
-                                "kind": "checkpoint",
-                                "status": "ready",
-                                "label": "Session restore",
-                                "summary": "Saved state restored",
-                            }
-                        )
-                    elif restore.degraded:
-                        environment_degraded = True
-                        environment_components.append(
-                            {
-                                "kind": "checkpoint",
-                                "status": "failed",
-                                "label": "Session restore",
-                                "summary": (
-                                    "Saved session data is unavailable"
-                                    if restore.status == "missing"
-                                    else "Could not restore saved session data"
-                                ),
-                            }
-                        )
             # Make the binding observable to the BFF/client.
             await context.write(
                 event_to_proto(
@@ -788,6 +633,9 @@ class AgentRuntimeServicer(pb_grpc.AgentRuntimeServiceServicer):
                             "sandbox_id": box.id,
                             "endpoint": box.endpoint,
                             "reused": box.reused,
+                            "workspace_state": box.workspace_state,
+                            "workspace_node": box.workspace_node,
+                            "previous_workspace_node": box.previous_workspace_node,
                         },
                     )
                 )
@@ -887,6 +735,7 @@ class AgentRuntimeServicer(pb_grpc.AgentRuntimeServiceServicer):
                         sandbox_id,
                         active_skills,
                         runtime_id=runtime_id,
+                        user_id=request.user_id,
                     )
                     loaded_skills = list(active_skills)
                 elif selected_skill_id:
@@ -1180,22 +1029,38 @@ class AgentRuntimeServicer(pb_grpc.AgentRuntimeServiceServicer):
         skills: list[Skill],
         *,
         runtime_id: str = "claude-code",
+        user_id: str = "",
     ) -> None:
         if self._executor is None:
             return
-        data = await _build_skill_batch_archive(skills, self._objstore)
+        del runtime_id  # Claude and Codex share the agents-skill-v1 compatibility set.
+        descriptors, digest = skill_descriptors(skills, user_id)
+        inspected = await self._executor.exec(
+            sandbox_id=sandbox_id,
+            cmd=["python3", "-c", SKILLS_INSPECT_SCRIPT],
+            timeout_secs=30,
+        )
+        if not inspected.ok:
+            raise RuntimeError(inspected.error or inspected.stderr or "skill set inspection failed")
+        try:
+            previous = json.loads(inspected.stdout or "{}")
+        except ValueError:
+            previous = {}
+        if isinstance(previous, dict) and previous.get("digest") == digest:
+            return
+        data = await build_skill_batch_archive(
+            skills, self._objstore, descriptors, digest, previous
+        )
         archive = f"/tmp/cocola-skills-{uuid.uuid4().hex}.zip"
-        runtime_home = "/home/cocola/.agents" if runtime_id == "codex" else "/home/cocola/.claude"
         await self._executor.write_bytes(sandbox_id=sandbox_id, path=archive, data=data)
         res = await self._executor.exec(
             sandbox_id=sandbox_id,
             cmd=[
                 "python3",
                 "-c",
-                _SKILLS_BATCH_INSTALL_SCRIPT,
+                SKILLS_RECONCILE_SCRIPT,
                 archive,
-                runtime_home,
-                "/data/plugins/skills",
+                digest,
             ],
             timeout_secs=max(30, min(300, len(skills) * 10)),
         )

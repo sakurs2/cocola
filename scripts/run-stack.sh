@@ -178,7 +178,7 @@ cleanup() {
   local started_at="$SECONDS"
 
   shutdown_heading
-  shutdown_step "1/3  Stop services and wait for session checkpoints (up to 30s)"
+  shutdown_step "1/3  Stop services gracefully (up to 30s)"
 
   # Phase 1: polite SIGTERM to each process group (fall back to the bare pid).
   for pid in "${PIDS[@]:-}"; do
@@ -189,7 +189,7 @@ cleanup() {
 
   # Phase 2: give process groups up to 30s to exit cleanly. Checking the group
   # matters for wrappers such as `go run`: the wrapper may exit immediately on
-  # TERM while its child is still flushing a checkpoint in the same group.
+  # TERM while its child is still shutting down in the same group.
   for ((i=0; i<150; i++)); do
     alive=0
     for pid in "${PIDS[@]:-}"; do
@@ -328,7 +328,7 @@ fi
 #
 # Result: REAL Route A (brain in sandbox) + real model, and editing ANY cocola
 # service means just Ctrl-C + re-run -- ZERO image rebuilds. The idempotent
-# `up -d` leaves the warm sandbox/infra containers untouched between runs.
+# `up -d` leaves the sandbox infrastructure containers untouched between runs.
 #
 # Wiring pitfalls handled here:
 #   * sandbox-manager is native, so it CANNOT use host.docker.internal:8090 from
@@ -444,6 +444,7 @@ dev_up() {
   free_port 50051 sandbox-manager
   (
     cd apps/sandbox-manager
+    unset COCOLA_MINIO_ENDPOINT COCOLA_MINIO_ACCESS_KEY COCOLA_MINIO_SECRET_KEY COCOLA_MINIO_SECRET_KEY_FILE COCOLA_MINIO_BUCKET
     GOWORK=off \
     COCOLA_SANDBOX_ADDR=":50051" \
     COCOLA_OPENSANDBOX_URL="$osb_url" \

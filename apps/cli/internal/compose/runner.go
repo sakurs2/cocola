@@ -100,8 +100,8 @@ func (r *Runner) Down(ctx context.Context) error {
 	}
 
 	// Keep the dedicated OpenSandbox server alive until app workers have stopped:
-	// sandbox-manager uses it during SIGTERM to checkpoint active sessions and
-	// drain the warm pool. Teardown is best-effort but exhaustive, so one failed
+	// sandbox-manager still uses it to destroy active compute sandboxes during
+	// SIGTERM. Teardown is best-effort but exhaustive, so one failed
 	// phase cannot leave the rest of the stack in an avoidable intermediate state.
 	var failures []error
 	if err := r.run(ctx, "stop", "--timeout", "30", "web", "gateway", "agent-runtime"); err != nil {

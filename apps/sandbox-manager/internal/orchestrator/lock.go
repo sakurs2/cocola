@@ -76,6 +76,11 @@ func acquireLock(ctx context.Context, kv rds.KV, sessionID string, ttl, retry ti
 // release performs the CAS unlock. Safe to call even if the lock already
 // expired — it simply no-ops when the stored token no longer matches.
 func (l *distLock) release(ctx context.Context) error {
-	_, err := l.kv.Eval(ctx, luaUnlock, []string{l.key}, l.token)
+	// Release must still run when the caller's request deadline fired during a
+	// slow provider call; otherwise the longer safety TTL would block the next
+	// request unnecessarily. Keep this cleanup bounded and detached from cancel.
+	releaseCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 2*time.Second)
+	defer cancel()
+	_, err := l.kv.Eval(releaseCtx, luaUnlock, []string{l.key}, l.token)
 	return err
 }

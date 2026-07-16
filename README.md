@@ -15,7 +15,7 @@
 - **沙箱**：K8s（默认 runc + 用户命名空间，零节点安装;gVisor 为可选增强;可通过 `SandboxProvider` 抽象切换至 Docker / E2B / CubeSandbox）
 - **后端**：Go（Gateway / Sandbox Manager / Admin API）+ Python（Agent Runtime / LLM Gateway）
 - **前端**：Next.js (App Router) + Tailwind CSS 3 + TypeScript
-- **存储**：PostgreSQL + Redis + S3-compatible（MinIO）+ NFS/CephFS + HashiCorp Vault
+- **存储**：PostgreSQL + Redis + k3s local-path Session PVC + S3-compatible（MinIO）+ HashiCorp Vault
 - **通信**：服务间 gRPC，对前端 SSE/WebSocket
 
 ## 仓库结构
@@ -113,7 +113,7 @@ Anthropic Messages，Codex 使用 OpenAI Responses；只实现 Chat Completions 
 
 > 鉴权闭环：Gateway 根据已验证的 Web/Scheduler 用户为每个 Run 签发短期 token，
 > Agent Runtime 在每次 shim exec 时把它作为 `ANTHROPIC_AUTH_TOKEN` 注入 sandbox。
-> Warm Pool 不保存静态共享凭据；LLM Gateway 按真实用户执行配额和计费。
+> Sandbox 按 Session 创建且不保存静态共享凭据；LLM Gateway 按真实用户执行配额和计费。
 
 > 当前里程碑：**Route A 真实模型全链路打通** — 已完成 M0–M5、后端 MVP，并落地
 > ADR-0009 的 Route A（Claude Code 大脑进沙箱），接入真实模型，Web 端对话与原生
@@ -181,7 +181,7 @@ Anthropic Messages，Codex 使用 OpenAI Responses；只实现 Chat Completions 
 > Claude Code 或 Codex 整体运行在用户自己的沙箱里，Runtime 在对话首次运行时确定且
 > 不可中途切换；agent-runtime 只做控制面路由。沙箱 provisioning 注入模型地址和默认 route ID；用户 token
 > 由 Gateway 随每个 Run 的 gRPC metadata 下发，并在每次 sandbox exec 时通过 ENV
-> 注入，绝不进入 prompt，也不在 Warm Pool 中持久保存。
+> 注入，绝不进入 prompt，也不进入 Session Volume。
 >
 > ```bash
 > # agent-runtime 绑定 sandbox-manager；沙箱内 claude/codex CLI 经注入的 ENV 回连 llm-gateway
@@ -250,7 +250,7 @@ Anthropic Messages，Codex 使用 OpenAI Responses；只实现 Chat Completions 
 | M6      | K8s Provider:client-go 实现 8 方法 + 休眠(删 Pod 留 PVC)/恢复(凭 binding 重建)/Exec 自愈 + egress NetworkPolicy + 部署物(K8s 清单 / Helm Chart);默认 runc + 用户命名空间(零节点安装),gVisor 为可选增强;代码与单测就绪,真实集群端到端验收(Layer C)已在 k3d(本地)跑通,发行版无关(k3d/k3s/EKS/GKE/AKS) | ✅   |
 | M7      | 持久化数据分层：会话 `session_map`／计费账本／控制面元数据落 Postgres，重启不丢、可自托管、多副本可共享（Vault 密钥托管按 ADR-0008 留待后续）                                                                                                                                                       | ✅   |
 | M8      | 可观测性与压测：五服务统一 RED 指标(Prometheus)+ OTel 链路(默认关，Tempo)+ 部署观测栈(Grafana 看板)+ 压测套件(k6 SSE / ghz gRPC)与容量基线 runbook                                                                                                                                                  | ✅   |
-| WP      | Warm Pool 默认开启；预热沙箱 claim 后按 `reused=false` 从 MinIO checkpoint 恢复 session 数据，不依赖运行中热挂载持久卷。活跃沙箱与冷启动沙箱使用相同 owner 校验和 heartbeat，见 ADR-0019。                                                                                                          | ✅   |
+| SP      | 每个 Session 使用节点本地 PVC；Sandbox 回收后重新调度到原节点并挂载同一 Volume。原节点不可用时拒绝静默清空，仅在用户确认后重置 Workspace。MinIO 不再保存 Session checkpoint，见 ADR-0023。                                                                                                          | ✅   |
 | GV      | gVisor(runsc)兼容性 spike:Node + Claude Code 在 `RuntimeClass=runsc` 下跑通 Route A 的 pre-prod 验收门。Layer A/B 本机可做,Layer C(真集群 + gVisor 端到端)待目标集群                                                                                                                                | ⏳   |
 
 ## 安全：沙箱出网模型（egress）
