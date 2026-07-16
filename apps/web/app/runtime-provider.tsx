@@ -70,6 +70,11 @@ type UiEnvironmentPart = {
   environment: EnvironmentPreparationSnapshot;
 };
 
+type UiSessionStatusPart = {
+  type: "session-status";
+  sessionStatus: EnvironmentStatus;
+};
+
 type UiProgressPart = {
   type: "progress";
   progressId: string;
@@ -82,6 +87,7 @@ type UiPart =
   | UiToolCall
   | UiFilePart
   | UiEnvironmentPart
+  | UiSessionStatusPart
   | UiProgressPart;
 
 type UiMessage = {
@@ -358,10 +364,22 @@ const ENVIRONMENT_COMPONENT_STATUSES = new Set<EnvironmentComponentStatus>([
 
 function parseEnvironmentStatus(event: AgentEvent): EnvironmentStatus | null {
   const data = event.data ?? {};
-  if (!ENVIRONMENT_PHASES.has(data.phase as EnvironmentStatus["phase"])) return null;
-  let rawComponents: unknown;
+  return parseEnvironmentStatusSnapshot({
+    version: data.version,
+    phase: data.phase,
+    components: data.components ?? "[]",
+  });
+}
+
+function parseEnvironmentStatusSnapshot(raw: unknown): EnvironmentStatus | null {
+  if (!raw || typeof raw !== "object") return null;
+  const snapshot = raw as Record<string, unknown>;
+  const phase = stringValue(snapshot.phase) as EnvironmentStatus["phase"];
+  if (!ENVIRONMENT_PHASES.has(phase)) return null;
+
+  let rawComponents = snapshot.components;
   try {
-    rawComponents = JSON.parse(data.components ?? "[]");
+    if (typeof rawComponents === "string") rawComponents = JSON.parse(rawComponents);
   } catch {
     return null;
   }
@@ -387,10 +405,10 @@ function parseEnvironmentStatus(event: AgentEvent): EnvironmentStatus | null {
       },
     ];
   });
-  const version = Number.parseInt(data.version ?? "1", 10);
+  const version = Number(snapshot.version ?? 1);
   return {
     version: Number.isFinite(version) && version > 0 ? version : 1,
-    phase: data.phase as EnvironmentStatus["phase"],
+    phase,
     components,
     updatedAt: Date.now(),
   };
@@ -435,14 +453,50 @@ function normalizeMetadata(raw: UiMessageMetadata | undefined): UiMessageMetadat
 function normalizePersistedParts(parts: UiPart[] | undefined): UiPart[] {
   const normalized: UiPart[] = [];
   for (const part of parts ?? []) {
-    if (part.type !== "environment") {
+    if (part.type === "environment") {
+      const environment = parseEnvironmentPreparationSnapshot(part.environment);
+      if (environment) normalized.push({ type: "environment", environment });
+    } else if (part.type === "session-status") {
+      const sessionStatus = parseEnvironmentStatusSnapshot(part.sessionStatus);
+      if (sessionStatus) normalized.push({ type: "session-status", sessionStatus });
+    } else {
       normalized.push(part);
-      continue;
     }
-    const environment = parseEnvironmentPreparationSnapshot(part.environment);
-    if (environment) normalized.push({ type: "environment", environment });
   }
   return normalized;
+}
+
+function normalizeWireMessages(raw: unknown): UiMessage[] {
+  if (!Array.isArray(raw)) return [];
+  return (raw as WireMessage[]).map((message) => ({
+    id: message.id,
+    role: message.role,
+    parts: normalizePersistedParts(message.parts),
+    metadata: normalizeMetadata(message.metadata),
+    createdAt: message.created_at ? new Date(message.created_at).getTime() : Date.now(),
+  }));
+}
+
+function sessionStatusFromParts(parts: UiPart[]): EnvironmentStatus | null {
+  return (
+    parts.find((part): part is UiSessionStatusPart => part.type === "session-status")
+      ?.sessionStatus ?? null
+  );
+}
+
+function latestSessionStatus(messages: UiMessage[]): EnvironmentStatus | null {
+  return messages.reduce<EnvironmentStatus | null>(
+    (latest, message) => sessionStatusFromParts(message.parts) ?? latest,
+    null,
+  );
+}
+
+function withSessionStatus(
+  statuses: Record<string, EnvironmentStatus>,
+  sessionId: string,
+  status: EnvironmentStatus | null,
+): Record<string, EnvironmentStatus> {
+  return status ? { ...statuses, [sessionId]: status } : statuses;
 }
 
 function normalizeModelOption(raw: unknown): ModelOption | null {
@@ -618,7 +672,7 @@ function convertMessage(message: UiMessage): ThreadMessageLike {
     (part): part is UiEnvironmentPart => part.type === "environment",
   )?.environment;
   const content = message.parts.flatMap((p) => {
-    if (p.type === "environment") return [];
+    if (p.type === "environment" || p.type === "session-status") return [];
     if (p.type === "text") return { type: "text" as const, text: p.text };
     if (p.type === "reasoning") return { type: "reasoning" as const, text: p.text };
     if (p.type === "file") {
@@ -814,6 +868,9 @@ export function CocolaRuntimeProvider({ children }: { children: ReactNode }) {
       } catch {
         return;
       }
+      setEnvironmentStatuses((prev) =>
+        withSessionStatus(prev, targetSessionId, sessionStatusFromParts(parts)),
+      );
       setConvMessages((prev) => {
         const current = prev[targetSessionId] ?? [];
         const index = current.findIndex((message) => message.id === assistantId);
@@ -834,10 +891,9 @@ export function CocolaRuntimeProvider({ children }: { children: ReactNode }) {
       return;
     }
     if (ev.kind === "environment_status") {
-      const status = parseEnvironmentStatus(ev);
-      if (status) {
-        setEnvironmentStatuses((prev) => ({ ...prev, [targetSessionId]: status }));
-      }
+      setEnvironmentStatuses((prev) =>
+        withSessionStatus(prev, targetSessionId, parseEnvironmentStatus(ev)),
+      );
       return;
     }
     if (ev.kind === "done" || ev.kind === "error") {
@@ -1095,17 +1151,11 @@ export function CocolaRuntimeProvider({ children }: { children: ReactNode }) {
             { cache: "no-store" },
           );
           if (history.ok) {
-            const rows = (await history.json()) as WireMessage[];
-            const loaded = (Array.isArray(rows) ? rows : []).map(
-              (message): UiMessage => ({
-                id: message.id,
-                role: message.role,
-                parts: normalizePersistedParts(message.parts),
-                metadata: normalizeMetadata(message.metadata),
-                createdAt: message.created_at ? new Date(message.created_at).getTime() : Date.now(),
-              }),
-            );
+            const loaded = normalizeWireMessages(await history.json());
             setConvMessages((prev) => ({ ...prev, [cursor.conversationId]: loaded }));
+            setEnvironmentStatuses((prev) =>
+              withSessionStatus(prev, cursor.conversationId, latestSessionStatus(loaded)),
+            );
           }
         } catch {
           // The run snapshot below remains sufficient to continue rendering.
@@ -1473,19 +1523,11 @@ export function CocolaRuntimeProvider({ children }: { children: ReactNode }) {
               { cache: "no-store", signal: ctrl.signal },
             );
             if (history.ok) {
-              const rows = (await history.json()) as WireMessage[];
-              const loaded = (Array.isArray(rows) ? rows : []).map(
-                (message): UiMessage => ({
-                  id: message.id,
-                  role: message.role,
-                  parts: normalizePersistedParts(message.parts),
-                  metadata: normalizeMetadata(message.metadata),
-                  createdAt: message.created_at
-                    ? new Date(message.created_at).getTime()
-                    : Date.now(),
-                }),
-              );
+              const loaded = normalizeWireMessages(await history.json());
               setConvMessages((prev) => ({ ...prev, [turnSessionId]: loaded }));
+              setEnvironmentStatuses((prev) =>
+                withSessionStatus(prev, turnSessionId, latestSessionStatus(loaded)),
+              );
             }
           } catch {
             // Keep the loaded history and continue with the authoritative Run snapshot.
@@ -1642,6 +1684,7 @@ export function CocolaRuntimeProvider({ children }: { children: ReactNode }) {
       });
       const cached = convMessages[id] ?? [];
       if (cached.length > 0) {
+        setEnvironmentStatuses((prev) => withSessionStatus(prev, id, latestSessionStatus(cached)));
         if (hasAssistantResponse(cached)) setRunning(id, false);
         void connectActiveRun(id);
         return;
@@ -1656,15 +1699,9 @@ export function CocolaRuntimeProvider({ children }: { children: ReactNode }) {
           void connectActiveRun(id);
           return;
         }
-        const rows = (await res.json()) as WireMessage[];
-        const loaded: UiMessage[] = (Array.isArray(rows) ? rows : []).map((m) => ({
-          id: m.id,
-          role: m.role,
-          parts: normalizePersistedParts(m.parts),
-          metadata: normalizeMetadata(m.metadata),
-          createdAt: m.created_at ? new Date(m.created_at).getTime() : Date.now(),
-        }));
+        const loaded = normalizeWireMessages(await res.json());
         setConvMessages((prev) => ({ ...prev, [id]: loaded }));
+        setEnvironmentStatuses((prev) => withSessionStatus(prev, id, latestSessionStatus(loaded)));
         if (hasAssistantResponse(loaded)) setRunning(id, false);
         void connectActiveRun(id);
       } catch {

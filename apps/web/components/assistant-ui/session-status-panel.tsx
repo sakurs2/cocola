@@ -8,7 +8,7 @@ import {
   SpinnerGap,
   WarningCircle,
 } from "@phosphor-icons/react";
-import { ChevronRight, FileText, X } from "lucide-react";
+import { ChevronRight, FileText, Info, X } from "lucide-react";
 import { useState, type ReactNode } from "react";
 
 export function SessionStatusButton({
@@ -28,7 +28,7 @@ export function SessionStatusButton({
       onClick={onClick}
       className="relative inline-flex size-8 items-center justify-center rounded-full text-muted-foreground transition-colors hover:bg-muted hover:text-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
     >
-      <EnvironmentPhaseIcon status={status} className="size-4" />
+      <Info className="size-4" />
       <span
         className={`absolute right-1 top-1 size-1.5 rounded-full ${environmentDotClass(status.phase)}`}
       />

@@ -84,6 +84,59 @@ func TestReducerUpsertsVersionedEnvironmentSnapshotAsFirstPart(t *testing.T) {
 	}
 }
 
+func TestReducerUpsertsSessionStatusWithoutSplittingText(t *testing.T) {
+	r := NewReducer()
+	r.Apply("environment_prepare", map[string]string{
+		"snapshot": `{"schema_version":1,"part_id":"environment","state":"ready","components":[]}`,
+	})
+	r.Apply("text", map[string]string{"text": "Hel"})
+	r.Apply("environment_status", map[string]string{
+		"version":    "1",
+		"phase":      "ready",
+		"components": `[{"kind":"mcp","id":"docs","label":"Docs","status":"connected","tool_count":2}]`,
+	})
+	r.Apply("text", map[string]string{"text": "lo"})
+	r.Apply("environment_status", map[string]string{
+		"version":    "2",
+		"phase":      "degraded",
+		"components": `[{"kind":"future","id":"next","label":"Next","status":"unavailable","tool_count":0,"future_field":{"kept":true}}]`,
+	})
+
+	parts := r.Parts()
+	if len(parts) != 3 || parts[0].Type != PartEnvironment ||
+		parts[1].Type != PartSessionStatus || parts[2].Type != PartText {
+		t.Fatalf("session status should sit before message content: %+v", parts)
+	}
+	if parts[2].Text != "Hello" {
+		t.Fatalf("session status split text aggregation: %+v", parts[2])
+	}
+	var snapshot map[string]any
+	if err := json.Unmarshal(parts[1].SessionStatus, &snapshot); err != nil {
+		t.Fatal(err)
+	}
+	if snapshot["version"] != float64(2) || snapshot["phase"] != "degraded" {
+		t.Fatalf("session status was not replaced: %#v", snapshot)
+	}
+	components := snapshot["components"].([]any)
+	component := components[0].(map[string]any)
+	if _, ok := component["future_field"]; !ok {
+		t.Fatalf("unknown session status field was dropped: %#v", component)
+	}
+}
+
+func TestReducerRejectsInvalidSessionStatus(t *testing.T) {
+	r := NewReducer()
+	r.Apply("environment_status", map[string]string{
+		"phase": "unknown", "components": `[]`,
+	})
+	r.Apply("environment_status", map[string]string{
+		"phase": "ready", "components": `{}`,
+	})
+	if len(r.Parts()) != 0 {
+		t.Fatalf("invalid session status should be ignored: %+v", r.Parts())
+	}
+}
+
 func TestReducerUpsertsProgressByID(t *testing.T) {
 	r := NewReducer()
 	r.Apply("progress", map[string]string{

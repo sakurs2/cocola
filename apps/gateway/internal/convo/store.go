@@ -46,12 +46,13 @@ func normalizeFolderName(name string) (string, error) {
 // values are the WIRE CONTRACT with apps/web/app/runtime-provider.tsx (UiPart):
 // changing them requires a matching frontend change.
 const (
-	PartText        = "text"
-	PartReasoning   = "reasoning"
-	PartToolCall    = "tool-call"
-	PartFile        = "file"
-	PartEnvironment = "environment"
-	PartProgress    = "progress"
+	PartText          = "text"
+	PartReasoning     = "reasoning"
+	PartToolCall      = "tool-call"
+	PartFile          = "file"
+	PartEnvironment   = "environment"
+	PartSessionStatus = "session-status"
+	PartProgress      = "progress"
 )
 
 // Part mirrors the frontend UiPart union. A text/reasoning part uses Text; a
@@ -86,6 +87,9 @@ type Part struct {
 	// environment: an opaque, versioned snapshot. Keeping the raw JSON intact
 	// lets newer component kinds/fields survive an older gateway unchanged.
 	Environment json.RawMessage `json:"environment,omitempty"`
+
+	// session-status: the latest secret-free Skills/MCP initialization snapshot.
+	SessionStatus json.RawMessage `json:"sessionStatus,omitempty"`
 
 	// progress: one adapter-owned replaceable progress snapshot.
 	ProgressID    string          `json:"progressId,omitempty"`

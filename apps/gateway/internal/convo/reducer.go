@@ -11,8 +11,8 @@ import (
 // renders is what makes route A a zero-drift mirror: a stored message replays
 // straight through convertMessage.
 //
-// Event vocabulary (kind): environment_prepare | text | thinking | tool_use |
-// tool_result | file | error; result / system / sandbox / done carry no
+// Event vocabulary (kind): environment_prepare | environment_status | text |
+// thinking | tool_use | tool_result | file | error; result / system / sandbox / done carry no
 // message-body content and are dropped (identical to the frontend).
 type Reducer struct {
 	parts []Part
@@ -26,6 +26,8 @@ func (r *Reducer) Apply(kind string, data map[string]string) {
 	switch kind {
 	case "environment_prepare":
 		r.upsertEnvironment(data["snapshot"])
+	case "environment_status":
+		r.upsertSessionStatus(data)
 	case "text":
 		r.appendText(PartText, data["text"])
 	case "thinking":
@@ -53,6 +55,55 @@ func (r *Reducer) Apply(kind string, data map[string]string) {
 	default:
 		// result / system / sandbox / done / unknown: no body content.
 	}
+}
+
+type sessionStatusEnvelope struct {
+	Version    int             `json:"version"`
+	Phase      string          `json:"phase"`
+	Components json.RawMessage `json:"components"`
+}
+
+func (r *Reducer) upsertSessionStatus(data map[string]string) {
+	phase := data["phase"]
+	if phase != "preparing" && phase != "ready" && phase != "degraded" {
+		return
+	}
+	componentsJSON := data["components"]
+	if componentsJSON == "" || len(componentsJSON) > maxEnvironmentSnapshotBytes {
+		return
+	}
+	var components []json.RawMessage
+	if err := json.Unmarshal([]byte(componentsJSON), &components); err != nil || components == nil {
+		return
+	}
+	version, _ := strconv.Atoi(data["version"])
+	if version < 1 {
+		version = 1
+	}
+	raw, err := json.Marshal(sessionStatusEnvelope{
+		Version:    version,
+		Phase:      phase,
+		Components: json.RawMessage(componentsJSON),
+	})
+	if err != nil {
+		return
+	}
+	for i := range r.parts {
+		if r.parts[i].Type == PartSessionStatus {
+			r.parts[i].SessionStatus = raw
+			return
+		}
+	}
+	part := Part{Type: PartSessionStatus, SessionStatus: raw}
+	insertAt := 0
+	if len(r.parts) > 0 && r.parts[0].Type == PartEnvironment {
+		insertAt = 1
+	}
+	next := make([]Part, 0, len(r.parts)+1)
+	next = append(next, r.parts[:insertAt]...)
+	next = append(next, part)
+	next = append(next, r.parts[insertAt:]...)
+	r.parts = next
 }
 
 func (r *Reducer) upsertProgress(id, items string) {

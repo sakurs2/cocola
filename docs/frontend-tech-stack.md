@@ -33,7 +33,7 @@ Gateway SSE
 
 - 不绕过 runtime 另建一套聊天消息状态。
 - 新的消息 part 或 SSE event 先在 runtime adapter 中完成类型化和容错，再交给渲染层。
-- `environment_status` 是当前 Agent 会话首次初始化的环境快照，包含已加载的 Skills 和 MCP 连接状态；不写入消息历史，也不在正常 follow-up 中重复检查。它与 artifact 共用右侧 Context Dock，移动端使用覆盖面板。
+- `environment_status` 是当前 Agent 会话首次初始化的环境快照，包含已加载的 Skills 和 MCP 连接状态；Gateway 将最后一份脱敏快照作为内部消息部件持久化，历史对话加载时恢复到 Session Status，但不渲染进消息正文，也不在正常 follow-up 中重复检查。它与 artifact 共用右侧 Context Dock，移动端使用覆盖面板。
 - `environment_prepare` 是某一轮消息的阻塞性环境准备快照，仅在绑定新 sandbox 时产生，并作为消息的第一个 Rail 节点持久化；复用现有 sandbox 时不产生。它使用开放的 `schema_version + part_id + state + components[]` 结构，当前展示 workspace、attachments 和 Skills，不包含 MCP 或 checkpoint。原节点不可用时界面必须先要求用户确认；确认后创建空白 Workspace，并在 Environment 中保留 reset 与原节点提示。
 - Environment 已完成但首个模型输出尚未到达时，消息 Rail 根据本地 running 状态显示临时的 `Starting response` 节点；首个 reasoning、text、tool 或 file part 到达后自动替换。该节点不进入 SSE 协议和消息历史。
 - composer、附件、消息流和 tool call 优先复用 assistant-ui primitive。
