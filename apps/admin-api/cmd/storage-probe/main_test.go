@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -70,5 +71,27 @@ func TestProbeRejectsTraversalAndEscapingSymlink(t *testing.T) {
 		if recorder.Code != http.StatusBadRequest {
 			t.Fatalf("path %q status = %d, want 400", path, recorder.Code)
 		}
+	}
+}
+
+func TestWriteUsageError(t *testing.T) {
+	tests := []struct {
+		name   string
+		err    error
+		status int
+	}{
+		{name: "permission", err: os.ErrPermission, status: http.StatusForbidden},
+		{name: "missing", err: os.ErrNotExist, status: http.StatusNotFound},
+		{name: "timeout", err: context.DeadlineExceeded, status: http.StatusGatewayTimeout},
+		{name: "fallback", err: errors.New("disk error"), status: http.StatusInternalServerError},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			recorder := httptest.NewRecorder()
+			writeUsageError(recorder, tt.err, http.StatusInternalServerError, "failed")
+			if recorder.Code != tt.status {
+				t.Fatalf("status = %d, want %d", recorder.Code, tt.status)
+			}
+		})
 	}
 }

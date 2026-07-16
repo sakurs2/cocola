@@ -141,26 +141,16 @@ func (s *probeServer) usage(w http.ResponseWriter, r *http.Request) {
 	}
 	target, err := s.resolveTarget(r.URL.Query().Get("path"))
 	if err != nil {
-		if errors.Is(err, fs.ErrNotExist) {
-			writeError(w, http.StatusNotFound, "storage path not found")
-			return
-		}
-		writeError(w, http.StatusBadRequest, "invalid storage path")
+		log.Printf("storage path resolution failed: %v", err)
+		writeUsageError(w, err, http.StatusBadRequest, "invalid storage path")
 		return
 	}
 	ctx, cancel := context.WithTimeout(r.Context(), s.measureTimeout)
 	defer cancel()
 	result, err := measureUsage(ctx, target)
-	if errors.Is(err, context.DeadlineExceeded) || errors.Is(err, context.Canceled) {
-		writeError(w, http.StatusGatewayTimeout, "storage measurement timed out")
-		return
-	}
-	if errors.Is(err, fs.ErrNotExist) {
-		writeError(w, http.StatusNotFound, "storage path not found")
-		return
-	}
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, "storage measurement failed")
+		log.Printf("storage usage measurement failed: %v", err)
+		writeUsageError(w, err, http.StatusInternalServerError, "storage measurement failed")
 		return
 	}
 	result.NodeName = s.nodeName
@@ -229,6 +219,19 @@ func writeJSON(w http.ResponseWriter, status int, value any) {
 
 func writeError(w http.ResponseWriter, status int, message string) {
 	writeJSON(w, status, map[string]string{"error": message})
+}
+
+func writeUsageError(w http.ResponseWriter, err error, fallbackStatus int, fallbackMessage string) {
+	switch {
+	case errors.Is(err, context.DeadlineExceeded), errors.Is(err, context.Canceled):
+		writeError(w, http.StatusGatewayTimeout, "storage measurement timed out")
+	case errors.Is(err, fs.ErrNotExist):
+		writeError(w, http.StatusNotFound, "storage path not found")
+	case errors.Is(err, fs.ErrPermission):
+		writeError(w, http.StatusForbidden, "storage path is not readable")
+	default:
+		writeError(w, fallbackStatus, fallbackMessage)
+	}
 }
 
 func envOr(key, fallback string) string {

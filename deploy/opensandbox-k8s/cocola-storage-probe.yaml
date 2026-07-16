@@ -54,6 +54,12 @@ spec:
             readOnlyRootFilesystem: true
             capabilities:
               drop: ["ALL"]
+              # Session runtimes legitimately create 0700/0600 state owned by
+              # uid 10001. The host storage root itself may be root:root 0700,
+              # so changing uid cannot traverse both layers. This read-only
+              # capability is narrower than DAC_OVERRIDE and the hostPath
+              # remains mounted read-only.
+              add: ["DAC_READ_SEARCH"]
           volumeMounts:
             - name: session-storage
               mountPath: /storage
