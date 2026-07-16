@@ -104,6 +104,10 @@ func (a *API) Router() http.Handler {
 			r.Post("/{id}/pause", a.pauseMyScheduledTask)
 			r.Post("/{id}/resume", a.resumeMyScheduledTask)
 		})
+		r.Route("/workspaces/{session_id}", func(r chi.Router) {
+			r.Get("/entries", a.listMyWorkspaceEntries)
+			r.Get("/file", a.readMyWorkspaceFile)
+		})
 	})
 
 	r.Route("/admin", func(r chi.Router) {
@@ -349,6 +353,18 @@ func mapErr(w http.ResponseWriter, err error) {
 		writeErr(w, http.StatusBadRequest, "INVALID_EXPIRATION", "expiration must allow at least one future run")
 	case errors.Is(err, service.ErrInvalidArg):
 		writeErr(w, http.StatusBadRequest, "INVALID_ARGUMENT", err.Error())
+	case errors.Is(err, service.ErrWorkspaceNotFound):
+		writeErr(w, http.StatusNotFound, "WORKSPACE_NOT_FOUND", "workspace not found")
+	case errors.Is(err, service.ErrWorkspaceFileTooLarge):
+		writeErr(w, http.StatusRequestEntityTooLarge, "WORKSPACE_FILE_TOO_LARGE", "workspace file is too large to preview")
+	case errors.Is(err, service.ErrWorkspacePreviewUnsupported):
+		writeErr(w, http.StatusUnsupportedMediaType, "WORKSPACE_PREVIEW_UNSUPPORTED", "workspace file cannot be previewed")
+	case errors.Is(err, service.ErrWorkspaceDirectoryTooLarge):
+		writeErr(w, http.StatusUnprocessableEntity, "DIRECTORY_TOO_LARGE", "workspace directory has too many entries")
+	case errors.Is(err, service.ErrTooManyRequests):
+		writeErr(w, http.StatusTooManyRequests, "TOO_MANY_REQUESTS", "too many workspace requests")
+	case errors.Is(err, service.ErrWorkspaceNodeUnavailable):
+		writeErr(w, http.StatusServiceUnavailable, "WORKSPACE_NODE_UNAVAILABLE", "workspace node is unavailable")
 	case errors.Is(err, store.ErrNotFound):
 		writeErr(w, http.StatusNotFound, "NOT_FOUND", "resource not found")
 	case errors.Is(err, store.ErrConflict):

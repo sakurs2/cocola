@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	pathpkg "path"
 	"path/filepath"
 	"sort"
 	"strings"
@@ -23,6 +24,38 @@ type SessionStorageMonitor interface {
 	Measure(ctx context.Context, storageID, pvcName string) (SessionStorageMeasurement, error)
 	DeleteOrphan(ctx context.Context, storageID, pvcName string) error
 	Close()
+}
+
+type WorkspaceBrowser interface {
+	ListWorkspaceEntries(ctx context.Context, userID, sessionID, relativePath, cursor string) (WorkspaceEntries, error)
+	ReadWorkspaceFile(ctx context.Context, userID, sessionID, relativePath string) (WorkspaceFile, error)
+}
+
+type WorkspaceEntry struct {
+	Name        string    `json:"name"`
+	Path        string    `json:"path"`
+	Kind        string    `json:"kind"`
+	Size        int64     `json:"size"`
+	ModifiedAt  time.Time `json:"modified_at"`
+	Previewable bool      `json:"previewable"`
+	PreviewKind string    `json:"preview_kind,omitempty"`
+}
+
+type WorkspaceEntries struct {
+	Path       string           `json:"path"`
+	Entries    []WorkspaceEntry `json:"entries"`
+	NextCursor string           `json:"next_cursor"`
+}
+
+type WorkspaceFile struct {
+	Data        []byte
+	ContentType string
+}
+
+type workspaceVolumeTarget struct {
+	PVC          sessionPVC
+	ProbeName    string
+	RelativeRoot string
 }
 
 type NodeStorageUsage struct {
@@ -288,48 +321,15 @@ SELECT pvc_namespace, pvc_name FROM session_storage WHERE storage_id::text=$1`, 
 	if namespace == "" {
 		namespace = m.namespace
 	}
-	pvc, exists, err := m.kube.getSessionPVC(ctx, namespace, targetPVC)
+	target, err := m.resolveBoundVolumeTarget(ctx, namespace, targetPVC)
 	if err != nil {
 		return SessionStorageMeasurement{}, err
 	}
-	if !exists {
-		return SessionStorageMeasurement{}, ErrNotFound
-	}
+	pvc := target.PVC
 	if pvc.StorageID != storageID {
 		return SessionStorageMeasurement{}, ErrConflict
 	}
-	if pvc.Phase != "Bound" || pvc.VolumeName == "" || pvc.NodeName == "" {
-		return SessionStorageMeasurement{}, fmt.Errorf("%w: session volume is not bound", ErrStorageUnavailable)
-	}
-	if pvc.StorageClass != m.storageClass {
-		return SessionStorageMeasurement{}, fmt.Errorf("%w: storage class %q", ErrStorageUnsupported, pvc.StorageClass)
-	}
-	pv, err := m.kube.getSessionPV(ctx, pvc.VolumeName)
-	if err != nil {
-		return SessionStorageMeasurement{}, err
-	}
-	if pv.StorageClass != m.storageClass || strings.TrimSpace(pv.LocalPath) == "" {
-		return SessionStorageMeasurement{}, fmt.Errorf("%w: persistent volume backend", ErrStorageUnsupported)
-	}
-	relativePath, err := relativeStoragePath(m.storageRoot, pv.LocalPath)
-	if err != nil {
-		return SessionStorageMeasurement{}, fmt.Errorf("%w: persistent volume path", ErrStorageUnsupported)
-	}
-	pods, err := m.kube.listPods(ctx, m.probeNamespace, storageProbeSelector)
-	if err != nil {
-		return SessionStorageMeasurement{}, err
-	}
-	probeName := ""
-	for _, pod := range pods {
-		if pod.Spec.NodeName == pvc.NodeName && pod.Status.Phase == "Running" && pod.Metadata.DeletionTimestamp == nil {
-			probeName = pod.Metadata.Name
-			break
-		}
-	}
-	if probeName == "" {
-		return SessionStorageMeasurement{}, fmt.Errorf("%w: node probe is not ready", ErrStorageUnavailable)
-	}
-	measurement, err := m.kube.storageProbeUsage(ctx, m.probeNamespace, probeName, relativePath)
+	measurement, err := m.kube.storageProbeUsage(ctx, m.probeNamespace, target.ProbeName, target.RelativeRoot)
 	if err != nil {
 		return SessionStorageMeasurement{}, fmt.Errorf("%w: %v", ErrStorageUnavailable, err)
 	}
@@ -341,6 +341,204 @@ SELECT pvc_namespace, pvc_name FROM session_storage WHERE storage_id::text=$1`, 
 		AllocatedBytes: measurement.AllocatedBytes, FileCount: measurement.FileCount,
 		DirectoryCount: measurement.DirectoryCount, MeasuredAt: measurement.MeasuredAt,
 	}, nil
+}
+
+func (m *postgresSessionStorageMonitor) resolveBoundVolumeTarget(
+	ctx context.Context,
+	namespace, pvcName string,
+) (workspaceVolumeTarget, error) {
+	pvc, exists, err := m.kube.getSessionPVC(ctx, namespace, pvcName)
+	if err != nil {
+		return workspaceVolumeTarget{}, err
+	}
+	if !exists {
+		return workspaceVolumeTarget{}, ErrNotFound
+	}
+	if pvc.Phase != "Bound" || pvc.VolumeName == "" || pvc.NodeName == "" {
+		return workspaceVolumeTarget{}, fmt.Errorf("%w: session volume is not bound", ErrStorageUnavailable)
+	}
+	if pvc.StorageClass != m.storageClass {
+		return workspaceVolumeTarget{}, fmt.Errorf("%w: storage class %q", ErrStorageUnsupported, pvc.StorageClass)
+	}
+	pv, err := m.kube.getSessionPV(ctx, pvc.VolumeName)
+	if err != nil {
+		return workspaceVolumeTarget{}, err
+	}
+	if pv.StorageClass != m.storageClass || strings.TrimSpace(pv.LocalPath) == "" {
+		return workspaceVolumeTarget{}, fmt.Errorf("%w: persistent volume backend", ErrStorageUnsupported)
+	}
+	relativeRoot, err := relativeStoragePath(m.storageRoot, pv.LocalPath)
+	if err != nil {
+		return workspaceVolumeTarget{}, fmt.Errorf("%w: persistent volume path", ErrStorageUnsupported)
+	}
+	probeName, err := m.storageProbeForNode(ctx, pvc.NodeName)
+	if err != nil {
+		return workspaceVolumeTarget{}, err
+	}
+	return workspaceVolumeTarget{PVC: pvc, ProbeName: probeName, RelativeRoot: relativeRoot}, nil
+}
+
+func (m *postgresSessionStorageMonitor) storageProbeForNode(ctx context.Context, nodeName string) (string, error) {
+	pods, err := m.kube.listPods(ctx, m.probeNamespace, storageProbeSelector)
+	if err != nil {
+		return "", err
+	}
+	for _, pod := range pods {
+		if pod.Spec.NodeName == nodeName && pod.Status.Phase == "Running" && pod.Metadata.DeletionTimestamp == nil {
+			return pod.Metadata.Name, nil
+		}
+	}
+	return "", fmt.Errorf("%w: node probe is not ready", ErrStorageUnavailable)
+}
+
+func (m *postgresSessionStorageMonitor) workspaceTarget(
+	ctx context.Context,
+	userID, sessionID string,
+) (workspaceVolumeTarget, error) {
+	userID = strings.TrimSpace(userID)
+	sessionID = strings.TrimSpace(sessionID)
+	if userID == "" || sessionID == "" {
+		return workspaceVolumeTarget{}, ErrInvalidArg
+	}
+	var storageID, namespace, pvcName, nodeName string
+	var generation int64
+	err := m.pool.QueryRow(ctx, `
+SELECT s.storage_id::text, s.pvc_namespace, s.pvc_name, s.node_name, s.generation
+FROM session_storage s
+JOIN conversations c ON c.id=s.session_id AND c.user_id=s.user_id
+WHERE s.session_id=$1 AND s.user_id=$2`, sessionID, userID).Scan(
+		&storageID, &namespace, &pvcName, &nodeName, &generation,
+	)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return workspaceVolumeTarget{}, ErrWorkspaceNotFound
+	}
+	if err != nil {
+		return workspaceVolumeTarget{}, err
+	}
+	if namespace == "" {
+		namespace = m.namespace
+	}
+	target, err := m.resolveBoundVolumeTarget(ctx, namespace, pvcName)
+	if err != nil {
+		return workspaceVolumeTarget{}, mapWorkspaceProbeError(err)
+	}
+	if target.PVC.StorageID != storageID || target.PVC.Generation != generation || target.PVC.NodeName != nodeName {
+		return workspaceVolumeTarget{}, ErrWorkspaceNodeUnavailable
+	}
+	target.RelativeRoot = pathpkg.Join(filepath.ToSlash(target.RelativeRoot), "workspace")
+	return target, nil
+}
+
+func (m *postgresSessionStorageMonitor) ListWorkspaceEntries(
+	ctx context.Context,
+	userID, sessionID, relativePath, cursor string,
+) (WorkspaceEntries, error) {
+	cleanPath, err := cleanWorkspaceRequestPath(relativePath, true)
+	if err != nil || len(cursor) > 2048 {
+		return WorkspaceEntries{}, ErrInvalidArg
+	}
+	target, err := m.workspaceTarget(ctx, userID, sessionID)
+	if err != nil {
+		return WorkspaceEntries{}, err
+	}
+	result, err := m.kube.storageProbeWorkspaceEntries(
+		ctx, m.probeNamespace, target.ProbeName, target.RelativeRoot, cleanPath, strings.TrimSpace(cursor),
+	)
+	if err != nil {
+		return WorkspaceEntries{}, mapWorkspaceProbeError(err)
+	}
+	entries := make([]WorkspaceEntry, 0, len(result.Entries))
+	for _, entry := range result.Entries {
+		entries = append(entries, WorkspaceEntry{
+			Name: entry.Name, Path: entry.Path, Kind: entry.Kind, Size: entry.Size,
+			ModifiedAt: entry.ModifiedAt, Previewable: entry.Previewable, PreviewKind: entry.PreviewKind,
+		})
+	}
+	return WorkspaceEntries{Path: result.Path, Entries: entries, NextCursor: result.NextCursor}, nil
+}
+
+func (m *postgresSessionStorageMonitor) ReadWorkspaceFile(
+	ctx context.Context,
+	userID, sessionID, relativePath string,
+) (WorkspaceFile, error) {
+	cleanPath, err := cleanWorkspaceRequestPath(relativePath, false)
+	if err != nil {
+		return WorkspaceFile{}, ErrInvalidArg
+	}
+	target, err := m.workspaceTarget(ctx, userID, sessionID)
+	if err != nil {
+		return WorkspaceFile{}, err
+	}
+	result, err := m.kube.storageProbeWorkspaceFile(
+		ctx, m.probeNamespace, target.ProbeName, target.RelativeRoot, cleanPath,
+	)
+	if err != nil {
+		return WorkspaceFile{}, mapWorkspaceProbeError(err)
+	}
+	contentType := strings.TrimSpace(result.ContentType)
+	if contentType == "" {
+		contentType = "application/octet-stream"
+	}
+	return WorkspaceFile{Data: result.Data, ContentType: contentType}, nil
+}
+
+func cleanWorkspaceRequestPath(raw string, allowRoot bool) (string, error) {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		if allowRoot {
+			return "", nil
+		}
+		return "", ErrInvalidArg
+	}
+	if len(raw) > 4096 || strings.ContainsRune(raw, '\x00') || strings.HasPrefix(raw, "/") {
+		return "", ErrInvalidArg
+	}
+	clean := pathpkg.Clean(raw)
+	if clean == "." {
+		if allowRoot {
+			return "", nil
+		}
+		return "", ErrInvalidArg
+	}
+	if clean == ".." || strings.HasPrefix(clean, "../") {
+		return "", ErrInvalidArg
+	}
+	return clean, nil
+}
+
+func mapWorkspaceProbeError(err error) error {
+	if errors.Is(err, ErrWorkspaceNotFound) {
+		return ErrWorkspaceNotFound
+	}
+	if errors.Is(err, ErrNotFound) {
+		return ErrWorkspaceNotFound
+	}
+	if errors.Is(err, ErrInvalidArg) {
+		return ErrInvalidArg
+	}
+	var statusErr *kubeStatusError
+	if errors.As(err, &statusErr) {
+		switch statusErr.StatusCode {
+		case 400:
+			return ErrInvalidArg
+		case 404:
+			return ErrWorkspaceNotFound
+		case 413:
+			return ErrWorkspaceFileTooLarge
+		case 415:
+			return ErrWorkspacePreviewUnsupported
+		case 422:
+			return ErrWorkspaceDirectoryTooLarge
+		case 429:
+			return ErrTooManyRequests
+		default:
+			return ErrWorkspaceNodeUnavailable
+		}
+	}
+	if errors.Is(err, ErrStorageUnavailable) || errors.Is(err, ErrStorageUnsupported) {
+		return ErrWorkspaceNodeUnavailable
+	}
+	return ErrWorkspaceNodeUnavailable
 }
 
 func relativeStoragePath(root, target string) (string, error) {
@@ -408,6 +606,14 @@ FROM session_storage s WHERE s.storage_id=$1::uuid`, storageID).Scan(
 
 func (a *Admin) WithSessionStorageMonitor(m SessionStorageMonitor) *Admin {
 	a.sessionStorage = m
+	if browser, ok := m.(WorkspaceBrowser); ok {
+		a.workspaceBrowser = browser
+	}
+	return a
+}
+
+func (a *Admin) WithWorkspaceBrowser(browser WorkspaceBrowser) *Admin {
+	a.workspaceBrowser = browser
 	return a
 }
 
@@ -440,4 +646,24 @@ func (a *Admin) DeleteOrphanSessionStorage(ctx context.Context, storageID, pvcNa
 		return ErrInvalidArg
 	}
 	return a.sessionStorage.DeleteOrphan(ctx, storageID, pvcName)
+}
+
+func (a *Admin) ListWorkspaceEntries(
+	ctx context.Context,
+	userID, sessionID, relativePath, cursor string,
+) (WorkspaceEntries, error) {
+	if a.workspaceBrowser == nil {
+		return WorkspaceEntries{}, ErrNotConfigured
+	}
+	return a.workspaceBrowser.ListWorkspaceEntries(ctx, userID, sessionID, relativePath, cursor)
+}
+
+func (a *Admin) ReadWorkspaceFile(
+	ctx context.Context,
+	userID, sessionID, relativePath string,
+) (WorkspaceFile, error) {
+	if a.workspaceBrowser == nil {
+		return WorkspaceFile{}, ErrNotConfigured
+	}
+	return a.workspaceBrowser.ReadWorkspaceFile(ctx, userID, sessionID, relativePath)
 }

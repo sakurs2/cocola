@@ -19,30 +19,43 @@
 
 import { useThread } from "@assistant-ui/react";
 import { useCocola, type EnvironmentStatus } from "@/app/runtime-provider";
-import { MarkdownContent } from "@/components/assistant-ui/markdown-text";
+import {
+  ReadonlyFilePreview,
+  formatBytes,
+  isHtmlPreview,
+  type PreviewFile,
+} from "@/components/assistant-ui/file-preview";
 import {
   SessionStatusButton,
   SessionStatusPanel,
 } from "@/components/assistant-ui/session-status-panel";
 import { Thread } from "@/components/assistant-ui/thread";
+import { WorkspacePanel } from "@/components/assistant-ui/workspace-panel";
+import { cn } from "@/lib/utils";
 import { AnimatePresence, motion } from "framer-motion";
-import { Check, Code2, Download, Eye, FileQuestion, Share2, X } from "lucide-react";
-import dynamic from "next/dynamic";
+import { Check, Code2, Download, Eye, FolderOpen, Share2, X } from "lucide-react";
 import { useRouter } from "next/navigation";
-import { type PointerEvent, useCallback, useEffect, useState } from "react";
-
-const MonacoEditor = dynamic(() => import("@monaco-editor/react"), { ssr: false });
+import {
+  type Dispatch,
+  type PointerEvent,
+  type SetStateAction,
+  useCallback,
+  useEffect,
+  useState,
+} from "react";
 
 export default function Home() {
   return <Workspace />;
 }
 
 function Workspace() {
-  const { loadConversation, selectedArtifact, environmentStatus } = useCocola();
+  const { loadConversation, selectedArtifact, environmentStatus, activeSessionId } = useCocola();
   const router = useRouter();
   const [previewWidth, setPreviewWidth] = useState(448);
-  const [dockView, setDockView] = useState<"status" | "artifact">("status");
+  const [workspaceWidth, setWorkspaceWidth] = useState(640);
+  const [dockView, setDockView] = useState<"status" | "artifact" | "workspace">("status");
   const [statusOpen, setStatusOpen] = useState(false);
+  const [workspaceOpen, setWorkspaceOpen] = useState(false);
 
   useEffect(() => {
     const id = new URLSearchParams(window.location.search).get("conversation")?.trim();
@@ -65,34 +78,15 @@ function Workspace() {
 
   const startPreviewResize = useCallback(
     (event: PointerEvent<HTMLDivElement>) => {
-      event.preventDefault();
-      const startX = event.clientX;
-      const startWidth = previewWidth;
-      const previousCursor = document.body.style.cursor;
-      const previousUserSelect = document.body.style.userSelect;
-      document.body.style.cursor = "col-resize";
-      document.body.style.userSelect = "none";
-
-      const clampPreviewWidth = (value: number) => {
-        const max = Math.max(352, Math.min(window.innerWidth * 0.55, 760));
-        return Math.min(Math.max(value, 352), max);
-      };
-      const onPointerMove = (moveEvent: globalThis.PointerEvent) => {
-        setPreviewWidth(clampPreviewWidth(startWidth - (moveEvent.clientX - startX)));
-      };
-      const onPointerUp = () => {
-        document.body.style.cursor = previousCursor;
-        document.body.style.userSelect = previousUserSelect;
-        window.removeEventListener("pointermove", onPointerMove);
-        window.removeEventListener("pointerup", onPointerUp);
-        window.removeEventListener("pointercancel", onPointerUp);
-      };
-
-      window.addEventListener("pointermove", onPointerMove);
-      window.addEventListener("pointerup", onPointerUp);
-      window.addEventListener("pointercancel", onPointerUp);
+      beginDockResize(event, previewWidth, 352, setPreviewWidth);
     },
     [previewWidth],
+  );
+  const startWorkspaceResize = useCallback(
+    (event: PointerEvent<HTMLDivElement>) => {
+      beginDockResize(event, workspaceWidth, 480, setWorkspaceWidth);
+    },
+    [workspaceWidth],
   );
 
   return (
@@ -101,9 +95,18 @@ function Workspace() {
         <div className="relative min-w-0 flex-1">
           <TopBar
             environmentStatus={environmentStatus}
+            workspaceOpen={workspaceOpen && dockView === "workspace"}
             onOpenStatus={() => {
               setDockView("status");
               setStatusOpen(true);
+            }}
+            onOpenWorkspace={() => {
+              if (workspaceOpen && dockView === "workspace") {
+                setWorkspaceOpen(false);
+                return;
+              }
+              setDockView("workspace");
+              setWorkspaceOpen(true);
             }}
           />
           <Thread />
@@ -134,6 +137,34 @@ function Workspace() {
                 <ArtifactPreviewPanel />
               </motion.aside>
             </>
+          ) : activeSessionId && workspaceOpen && dockView === "workspace" ? (
+            <>
+              <div
+                role="separator"
+                aria-label="Resize workspace browser"
+                aria-orientation="vertical"
+                title="Resize workspace browser"
+                onPointerDown={startWorkspaceResize}
+                className="group relative z-10 hidden w-3 shrink-0 cursor-col-resize touch-none md:block"
+              >
+                <div className="absolute inset-y-4 left-1/2 w-px -translate-x-1/2 rounded-full bg-border transition-colors group-hover:bg-primary/70" />
+                <div className="absolute inset-y-4 left-1/2 w-1 -translate-x-1/2 rounded-full bg-transparent transition-colors group-hover:bg-primary/20" />
+              </div>
+              <motion.aside
+                key={`workspace-${activeSessionId}`}
+                initial={{ opacity: 0, x: 28 }}
+                animate={{ opacity: 1, x: 0 }}
+                exit={{ opacity: 0, x: 28 }}
+                transition={{ duration: 0.18, ease: "easeOut" }}
+                className="fixed inset-x-2 bottom-2 top-14 z-30 w-auto overflow-hidden rounded-2xl border border-border bg-card/95 shadow-xl backdrop-blur-xl md:static md:inset-auto md:z-auto md:m-2 md:ml-0 md:w-[var(--workspace-width)] md:shrink-0"
+                style={{ ["--workspace-width" as string]: `${workspaceWidth}px` }}
+              >
+                <WorkspacePanel
+                  sessionID={activeSessionId}
+                  onClose={() => setWorkspaceOpen(false)}
+                />
+              </motion.aside>
+            </>
           ) : environmentStatus && statusOpen && dockView === "status" ? (
             <motion.aside
               key="session-status"
@@ -160,15 +191,47 @@ function Workspace() {
   );
 }
 
+function beginDockResize(
+  event: PointerEvent<HTMLDivElement>,
+  currentWidth: number,
+  minWidth: number,
+  setWidth: Dispatch<SetStateAction<number>>,
+) {
+  event.preventDefault();
+  const startX = event.clientX;
+  const previousCursor = document.body.style.cursor;
+  const previousUserSelect = document.body.style.userSelect;
+  document.body.style.cursor = "col-resize";
+  document.body.style.userSelect = "none";
+  const maxWidth = Math.max(minWidth, Math.min(window.innerWidth * 0.62, 760));
+  const onPointerMove = (moveEvent: globalThis.PointerEvent) => {
+    setWidth(Math.min(Math.max(currentWidth - (moveEvent.clientX - startX), minWidth), maxWidth));
+  };
+  const onPointerUp = () => {
+    document.body.style.cursor = previousCursor;
+    document.body.style.userSelect = previousUserSelect;
+    window.removeEventListener("pointermove", onPointerMove);
+    window.removeEventListener("pointerup", onPointerUp);
+    window.removeEventListener("pointercancel", onPointerUp);
+  };
+  window.addEventListener("pointermove", onPointerMove);
+  window.addEventListener("pointerup", onPointerUp);
+  window.addEventListener("pointercancel", onPointerUp);
+}
+
 // Slim status bar: model selection now lives inside the composer, matching the
 // input-first chat layout. Keep sandbox state visible without competing with the
 // conversation controls.
 function TopBar({
   environmentStatus,
   onOpenStatus,
+  onOpenWorkspace,
+  workspaceOpen,
 }: {
   environmentStatus: EnvironmentStatus | null;
   onOpenStatus: () => void;
+  onOpenWorkspace: () => void;
+  workspaceOpen: boolean;
 }) {
   const { activeSessionId, conversations } = useCocola();
   const [copied, setCopied] = useState(false);
@@ -200,6 +263,24 @@ function TopBar({
           ) : null}
           <button
             type="button"
+            title={canShare ? "Open workspace" : "Start a conversation to browse its workspace"}
+            aria-label={
+              canShare ? "Open workspace" : "Start a conversation to browse its workspace"
+            }
+            aria-pressed={workspaceOpen}
+            disabled={!canShare}
+            onClick={onOpenWorkspace}
+            className={cn(
+              "inline-flex size-8 items-center justify-center rounded-full transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring disabled:pointer-events-none disabled:opacity-40",
+              workspaceOpen
+                ? "bg-primary/10 text-primary"
+                : "text-muted-foreground hover:bg-muted hover:text-foreground",
+            )}
+          >
+            <FolderOpen className="size-4" />
+          </button>
+          <button
+            type="button"
             title={
               canShare
                 ? copied
@@ -222,41 +303,21 @@ function TopBar({
 
 function ArtifactPreviewPanel() {
   const { selectedArtifact, closeArtifact } = useCocola();
-  const [text, setText] = useState<string>("");
-  const [error, setError] = useState<string>("");
   const [htmlSourceMode, setHtmlSourceMode] = useState(false);
 
   useEffect(() => {
-    let cancelled = false;
-    setText("");
-    setError("");
     setHtmlSourceMode(false);
-    if (!selectedArtifact || !isTextPreview(selectedArtifact.mimeType, selectedArtifact.filename)) {
-      return;
-    }
-    void (async () => {
-      try {
-        const res = await fetch(selectedArtifact.downloadUrl, { cache: "no-store" });
-        if (!res.ok) throw new Error(`preview failed: ${res.status}`);
-        const body = await res.text();
-        if (!cancelled) setText(body);
-      } catch (err) {
-        if (!cancelled) setError(err instanceof Error ? err.message : String(err));
-      }
-    })();
-    return () => {
-      cancelled = true;
-    };
   }, [selectedArtifact]);
 
   if (!selectedArtifact) return null;
 
-  const canText = isTextPreview(selectedArtifact.mimeType, selectedArtifact.filename);
   const canHtml = isHtmlPreview(selectedArtifact.mimeType, selectedArtifact.filename);
-  const canImage = selectedArtifact.mimeType.startsWith("image/");
-  const canPdf = selectedArtifact.mimeType === "application/pdf";
-  const previewKind = getTextPreviewKind(selectedArtifact.mimeType, selectedArtifact.filename);
-  const language = getCodeLanguage(selectedArtifact.mimeType, selectedArtifact.filename);
+  const previewFile: PreviewFile = {
+    filename: selectedArtifact.filename,
+    size: selectedArtifact.size,
+    mimeType: selectedArtifact.mimeType,
+    url: selectedArtifact.downloadUrl,
+  };
 
   return (
     <div className="flex h-full flex-col">
@@ -298,215 +359,12 @@ function ArtifactPreviewPanel() {
         </button>
       </header>
       <div className="min-h-0 flex-1 overflow-auto bg-background">
-        {canImage ? (
-          <div className="flex min-h-full items-start justify-center p-4">
-            {/* eslint-disable-next-line @next/next/no-img-element */}
-            <img
-              src={selectedArtifact.downloadUrl}
-              alt={selectedArtifact.filename}
-              className="max-h-full max-w-full rounded-xl border border-border bg-card object-contain shadow-sm"
-            />
-          </div>
-        ) : canPdf ? (
-          <iframe
-            title={selectedArtifact.filename}
-            src={selectedArtifact.downloadUrl}
-            className="h-full w-full"
-          />
-        ) : canHtml && !htmlSourceMode && !error && text ? (
-          <iframe
-            title={selectedArtifact.filename}
-            srcDoc={text}
-            sandbox="allow-forms allow-modals allow-popups allow-scripts"
-            className="h-full w-full bg-white"
-          />
-        ) : canText ? (
-          <TextArtifactPreview error={error} text={text} kind={previewKind} language={language} />
-        ) : (
-          <div className="flex h-full flex-col items-center justify-center gap-3 p-8 text-center text-muted-foreground">
-            <FileQuestion className="size-8" />
-            <p className="text-sm font-medium text-foreground">Preview not supported</p>
-            <p className="text-xs">Download the file to open it locally.</p>
-          </div>
-        )}
-      </div>
-    </div>
-  );
-}
-
-function TextArtifactPreview({
-  error,
-  text,
-  kind,
-  language,
-}: {
-  error: string;
-  text: string;
-  kind: "markdown" | "code" | "plain";
-  language: string;
-}) {
-  if (error) {
-    return (
-      <pre className="min-h-full whitespace-pre-wrap break-words p-4 font-mono text-xs leading-5 text-destructive">
-        {error}
-      </pre>
-    );
-  }
-  if (!text) {
-    return <div className="p-4 text-sm text-muted-foreground">Loading preview...</div>;
-  }
-  if (kind === "markdown") {
-    return <MarkdownContent value={text} className="p-4" />;
-  }
-  if (kind === "code") {
-    return (
-      <div className="h-full min-h-[420px]">
-        <MonacoEditor
-          language={toMonacoLanguage(language)}
-          value={text}
-          theme="vs"
-          options={{
-            readOnly: true,
-            minimap: { enabled: false },
-            fontSize: 12,
-            lineHeight: 20,
-            scrollBeyondLastLine: false,
-            wordWrap: "on",
-            renderLineHighlight: "none",
-            overviewRulerBorder: false,
-          }}
+        <ReadonlyFilePreview
+          file={previewFile}
+          renderHtml={canHtml && !htmlSourceMode}
+          unsupportedMessage="Download the file to open it locally."
         />
       </div>
-    );
-  }
-  return (
-    <div className="h-full min-h-[420px]">
-      <MonacoEditor
-        language="plaintext"
-        value={text}
-        theme="vs"
-        options={{
-          readOnly: true,
-          minimap: { enabled: false },
-          fontSize: 12,
-          lineHeight: 20,
-          scrollBeyondLastLine: false,
-          wordWrap: "on",
-          renderLineHighlight: "none",
-          overviewRulerBorder: false,
-        }}
-      />
     </div>
   );
-}
-
-function toMonacoLanguage(language: string): string {
-  if (language === "shell") return "shell";
-  if (language === "text") return "plaintext";
-  return language;
-}
-
-function isHtmlPreview(mime: string, filename: string): boolean {
-  const ext = getKnownTextExtension(filename);
-  return mime === "text/html" || ext === "html" || ext === "htm";
-}
-
-function isTextPreview(mime: string, filename: string): boolean {
-  if (mime.startsWith("text/")) return true;
-  if (["application/json", "application/xml", "application/javascript"].includes(mime)) return true;
-  return getKnownTextExtension(filename) !== "";
-}
-
-function getTextPreviewKind(mime: string, filename: string): "markdown" | "code" | "plain" {
-  const ext = getKnownTextExtension(filename);
-  if (mime === "text/markdown" || ext === "md" || ext === "markdown") return "markdown";
-  if (getCodeLanguage(mime, filename) !== "text") return "code";
-  return "plain";
-}
-
-function getCodeLanguage(mime: string, filename: string): string {
-  if (mime === "application/json") return "json";
-  if (mime === "application/xml") return "xml";
-  if (mime === "application/javascript") return "javascript";
-
-  const ext = getKnownTextExtension(filename);
-  const languages: Record<string, string> = {
-    bash: "shell",
-    c: "c",
-    cpp: "cpp",
-    css: "css",
-    csv: "text",
-    diff: "diff",
-    go: "go",
-    h: "c",
-    htm: "html",
-    html: "html",
-    java: "java",
-    js: "javascript",
-    jsx: "javascript",
-    json: "json",
-    kt: "kotlin",
-    md: "markdown",
-    patch: "diff",
-    py: "python",
-    rs: "rust",
-    sh: "shell",
-    toml: "toml",
-    ts: "typescript",
-    tsx: "typescript",
-    xml: "xml",
-    yaml: "yaml",
-    yml: "yaml",
-    zsh: "shell",
-  };
-  return languages[ext] ?? "text";
-}
-
-function getKnownTextExtension(filename: string): string {
-  const match = /\.([a-z0-9]+)$/i.exec(filename);
-  const ext = match?.[1]?.toLowerCase() ?? "";
-  const known = new Set([
-    "bash",
-    "c",
-    "cpp",
-    "css",
-    "csv",
-    "diff",
-    "go",
-    "h",
-    "htm",
-    "html",
-    "java",
-    "js",
-    "jsx",
-    "json",
-    "kt",
-    "markdown",
-    "md",
-    "patch",
-    "py",
-    "rs",
-    "sh",
-    "toml",
-    "ts",
-    "tsx",
-    "txt",
-    "xml",
-    "yaml",
-    "yml",
-    "zsh",
-  ]);
-  return known.has(ext) ? ext : "";
-}
-
-function formatBytes(bytes: number): string {
-  if (!bytes) return "Unknown size";
-  const units = ["B", "KB", "MB", "GB"];
-  let value = bytes;
-  let unit = 0;
-  while (value >= 1024 && unit < units.length - 1) {
-    value /= 1024;
-    unit += 1;
-  }
-  return `${value >= 10 || unit === 0 ? value.toFixed(0) : value.toFixed(1)} ${units[unit]}`;
 }

@@ -91,6 +91,38 @@ func (a *API) streamMyEvents(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
+func (a *API) listMyWorkspaceEntries(w http.ResponseWriter, r *http.Request) {
+	out, err := a.svc.ListWorkspaceEntries(
+		r.Context(), actorOf(r), chi.URLParam(r, "session_id"),
+		r.URL.Query().Get("path"), r.URL.Query().Get("cursor"),
+	)
+	if err != nil {
+		mapErr(w, err)
+		return
+	}
+	w.Header().Set("cache-control", "no-store")
+	writeJSON(w, http.StatusOK, out)
+}
+
+func (a *API) readMyWorkspaceFile(w http.ResponseWriter, r *http.Request) {
+	out, err := a.svc.ReadWorkspaceFile(
+		r.Context(), actorOf(r), chi.URLParam(r, "session_id"), r.URL.Query().Get("path"),
+	)
+	if err != nil {
+		mapErr(w, err)
+		return
+	}
+	w.Header().Set("cache-control", "no-store")
+	w.Header().Set("x-content-type-options", "nosniff")
+	w.Header().Set("content-disposition", "inline")
+	w.Header().Set("content-type", out.ContentType)
+	if strings.EqualFold(strings.TrimSpace(strings.Split(out.ContentType, ";")[0]), "image/svg+xml") {
+		w.Header().Set("content-security-policy", "sandbox; default-src 'none'; style-src 'unsafe-inline'; img-src data:")
+	}
+	w.WriteHeader(http.StatusOK)
+	_, _ = w.Write(out.Data)
+}
+
 // ---- auth users ----
 
 type loginReq struct {

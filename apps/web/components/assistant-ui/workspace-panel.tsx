@@ -1,0 +1,524 @@
+"use client";
+
+import {
+  ReadonlyFilePreview,
+  formatBytes,
+  type PreviewFile,
+} from "@/components/assistant-ui/file-preview";
+import { cn } from "@/lib/utils";
+import {
+  AlertTriangle,
+  ArrowLeft,
+  ChevronRight,
+  File,
+  FileCode2,
+  FileQuestion,
+  Folder,
+  FolderOpen,
+  LoaderCircle,
+  RefreshCw,
+  X,
+} from "lucide-react";
+import { useCallback, useEffect, useMemo, useState } from "react";
+
+type WorkspaceEntry = {
+  name: string;
+  path: string;
+  kind: "directory" | "file" | "symlink" | "other";
+  size: number;
+  modified_at: string;
+  previewable: boolean;
+  preview_kind?: "markdown" | "code" | "image" | "pdf";
+};
+
+type DirectoryResponse = {
+  path: string;
+  entries: WorkspaceEntry[];
+  next_cursor: string;
+};
+
+type DirectoryState = {
+  entries: WorkspaceEntry[];
+  nextCursor: string;
+  loading: boolean;
+  error: string;
+  errorCode: string;
+};
+
+const EMPTY_DIRECTORY: DirectoryState = {
+  entries: [],
+  nextCursor: "",
+  loading: false,
+  error: "",
+  errorCode: "",
+};
+
+export function WorkspacePanel({ sessionID, onClose }: { sessionID: string; onClose: () => void }) {
+  const [directories, setDirectories] = useState<Record<string, DirectoryState>>({});
+  const [expanded, setExpanded] = useState<Set<string>>(new Set());
+  const [selected, setSelected] = useState<WorkspaceEntry | null>(null);
+  const [refreshing, setRefreshing] = useState(false);
+
+  const loadDirectory = useCallback(
+    async (path: string, append = false, cursor = "") => {
+      setDirectories((current) => ({
+        ...current,
+        [path]: {
+          ...(current[path] ?? EMPTY_DIRECTORY),
+          loading: true,
+          error: "",
+          errorCode: "",
+        },
+      }));
+      const query = new URLSearchParams();
+      if (path) query.set("path", path);
+      if (cursor) query.set("cursor", cursor);
+      try {
+        const response = await fetch(
+          `/api/conversations/${encodeURIComponent(sessionID)}/workspace/entries?${query}`,
+          { cache: "no-store" },
+        );
+        if (!response.ok) {
+          const failure = await workspaceFailure(response);
+          throw new WorkspaceRequestError(failure.code, failure.message);
+        }
+        const result = (await response.json()) as DirectoryResponse;
+        setDirectories((current) => ({
+          ...current,
+          [path]: {
+            entries: append
+              ? [...(current[path]?.entries ?? []), ...result.entries]
+              : result.entries,
+            nextCursor: result.next_cursor,
+            loading: false,
+            error: "",
+            errorCode: "",
+          },
+        }));
+      } catch (err) {
+        const failure = workspaceErrorMessage(err);
+        setDirectories((current) => ({
+          ...current,
+          [path]: {
+            ...(current[path] ?? EMPTY_DIRECTORY),
+            loading: false,
+            error: failure.message,
+            errorCode: failure.code,
+          },
+        }));
+      }
+    },
+    [sessionID],
+  );
+
+  useEffect(() => {
+    setDirectories({});
+    setExpanded(new Set());
+    setSelected(null);
+    void loadDirectory("");
+  }, [loadDirectory]);
+
+  const refresh = useCallback(async () => {
+    setRefreshing(true);
+    setDirectories({});
+    setExpanded(new Set());
+    setSelected(null);
+    await loadDirectory("");
+    setRefreshing(false);
+  }, [loadDirectory]);
+
+  const toggleDirectory = useCallback(
+    (path: string) => {
+      setExpanded((current) => {
+        const next = new Set(current);
+        if (next.has(path)) {
+          next.delete(path);
+        } else {
+          next.add(path);
+          if (!directories[path]) void loadDirectory(path);
+        }
+        return next;
+      });
+    },
+    [directories, loadDirectory],
+  );
+
+  const root = directories[""];
+
+  return (
+    <div className="flex h-full min-h-0 flex-col bg-card">
+      <header className="flex min-h-14 items-center gap-3 border-b border-border px-4">
+        <span className="grid size-8 place-items-center rounded-xl bg-primary/10 text-primary">
+          <FolderOpen className="size-4" />
+        </span>
+        <div className="min-w-0 flex-1">
+          <div className="text-sm font-semibold text-foreground">Workspace</div>
+          <div className="truncate font-mono text-[11px] text-muted-foreground">/workspace</div>
+        </div>
+        <button
+          type="button"
+          title="Refresh workspace"
+          aria-label="Refresh workspace"
+          disabled={refreshing}
+          onClick={() => void refresh()}
+          className="inline-flex size-8 items-center justify-center rounded-full text-muted-foreground transition-colors hover:bg-muted hover:text-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring disabled:opacity-50"
+        >
+          <RefreshCw className={cn("size-4", refreshing && "animate-spin")} />
+        </button>
+        <button
+          type="button"
+          title="Close workspace"
+          aria-label="Close workspace"
+          onClick={onClose}
+          className="inline-flex size-8 items-center justify-center rounded-full text-muted-foreground transition-colors hover:bg-muted hover:text-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+        >
+          <X className="size-4" />
+        </button>
+      </header>
+
+      <div className="grid min-h-0 flex-1 grid-cols-1 md:grid-cols-[240px_minmax(0,1fr)]">
+        <section
+          aria-label="Workspace files"
+          className={cn(
+            "min-h-0 flex-col border-border bg-muted/20 md:flex md:border-r",
+            selected ? "hidden" : "flex",
+          )}
+        >
+          <div className="border-b border-border/70 px-3 py-2 font-mono text-[11px] text-muted-foreground">
+            workspace
+          </div>
+          <div className="min-h-0 flex-1 overflow-y-auto py-1" role="tree">
+            {!root || root.loading ? (
+              <WorkspaceLoading />
+            ) : root.error ? (
+              <WorkspaceError
+                code={root.errorCode}
+                message={root.error}
+                onRetry={() => void loadDirectory("")}
+              />
+            ) : root.entries.length === 0 ? (
+              <div className="flex flex-col items-center gap-2 px-5 py-12 text-center">
+                <Folder className="size-7 text-muted-foreground/70" />
+                <div className="text-sm font-medium text-foreground">Workspace is empty</div>
+                <div className="text-xs text-muted-foreground">
+                  Files created by the agent will appear here after refresh.
+                </div>
+              </div>
+            ) : (
+              <WorkspaceTree
+                path=""
+                depth={0}
+                directories={directories}
+                expanded={expanded}
+                selectedPath={selected?.path ?? ""}
+                onToggle={toggleDirectory}
+                onSelect={setSelected}
+                onLoadMore={(path, cursor) => void loadDirectory(path, true, cursor)}
+                onReload={(path) => void loadDirectory(path)}
+              />
+            )}
+          </div>
+        </section>
+
+        <section
+          aria-label="Workspace file preview"
+          className={cn("min-h-0 flex-col bg-background md:flex", selected ? "flex" : "hidden")}
+        >
+          {selected ? (
+            <WorkspaceFilePreview
+              entry={selected}
+              sessionID={sessionID}
+              onBack={() => setSelected(null)}
+            />
+          ) : (
+            <div className="flex h-full flex-col items-center justify-center gap-3 p-8 text-center text-muted-foreground">
+              <FileCode2 className="size-9 stroke-[1.4]" />
+              <div>
+                <p className="text-sm font-medium text-foreground">Select a file to preview</p>
+                <p className="mt-1 text-xs">Workspace access is read-only.</p>
+              </div>
+            </div>
+          )}
+        </section>
+      </div>
+    </div>
+  );
+}
+
+function WorkspaceTree({
+  path,
+  depth,
+  directories,
+  expanded,
+  selectedPath,
+  onToggle,
+  onSelect,
+  onLoadMore,
+  onReload,
+}: {
+  path: string;
+  depth: number;
+  directories: Record<string, DirectoryState>;
+  expanded: Set<string>;
+  selectedPath: string;
+  onToggle: (path: string) => void;
+  onSelect: (entry: WorkspaceEntry) => void;
+  onLoadMore: (path: string, cursor: string) => void;
+  onReload: (path: string) => void;
+}) {
+  const directory = directories[path];
+  if (!directory) return null;
+  return (
+    <>
+      {directory.entries.map((entry) => {
+        const isDirectory = entry.kind === "directory";
+        const isExpanded = isDirectory && expanded.has(entry.path);
+        const child = directories[entry.path];
+        return (
+          <div key={entry.path}>
+            <button
+              type="button"
+              role="treeitem"
+              aria-expanded={isDirectory ? isExpanded : undefined}
+              aria-selected={selectedPath === entry.path}
+              onClick={() => (isDirectory ? onToggle(entry.path) : onSelect(entry))}
+              className={cn(
+                "group flex h-8 w-full items-center gap-1.5 border-l-2 pr-2 text-left text-xs transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-inset focus-visible:ring-ring",
+                selectedPath === entry.path
+                  ? "border-l-primary bg-primary/10 text-foreground"
+                  : "border-l-transparent text-muted-foreground hover:bg-muted/70 hover:text-foreground",
+              )}
+              style={{ paddingLeft: `${8 + depth * 14}px` }}
+            >
+              {isDirectory ? (
+                <ChevronRight
+                  className={cn(
+                    "size-3.5 shrink-0 transition-transform",
+                    isExpanded && "rotate-90",
+                  )}
+                />
+              ) : (
+                <span className="w-3.5 shrink-0" />
+              )}
+              {isDirectory ? (
+                isExpanded ? (
+                  <FolderOpen className="size-4 shrink-0 text-primary/80" />
+                ) : (
+                  <Folder className="size-4 shrink-0 text-primary/70" />
+                )
+              ) : entry.kind === "file" ? (
+                <FileCode2 className="size-4 shrink-0" />
+              ) : (
+                <File className="size-4 shrink-0" />
+              )}
+              <span className="min-w-0 flex-1 truncate">{entry.name}</span>
+            </button>
+            {isExpanded ? (
+              child?.loading && child.entries.length === 0 ? (
+                <div
+                  className="flex h-8 items-center gap-2 text-xs text-muted-foreground"
+                  style={{ paddingLeft: `${32 + depth * 14}px` }}
+                >
+                  <LoaderCircle className="size-3.5 animate-spin" /> Loading
+                </div>
+              ) : child?.error ? (
+                <button
+                  type="button"
+                  onClick={() => onReload(entry.path)}
+                  className="block w-full py-2 pr-2 text-left text-[11px] text-destructive"
+                  style={{ paddingLeft: `${32 + depth * 14}px` }}
+                >
+                  {child.error} · retry
+                </button>
+              ) : (
+                <WorkspaceTree
+                  path={entry.path}
+                  depth={depth + 1}
+                  directories={directories}
+                  expanded={expanded}
+                  selectedPath={selectedPath}
+                  onToggle={onToggle}
+                  onSelect={onSelect}
+                  onLoadMore={onLoadMore}
+                  onReload={onReload}
+                />
+              )
+            ) : null}
+          </div>
+        );
+      })}
+      {directory.nextCursor ? (
+        <button
+          type="button"
+          disabled={directory.loading}
+          onClick={() => onLoadMore(path, directory.nextCursor)}
+          className="flex h-8 w-full items-center gap-2 pr-2 text-left text-[11px] font-medium text-primary hover:bg-primary/5 disabled:opacity-50"
+          style={{ paddingLeft: `${28 + depth * 14}px` }}
+        >
+          {directory.loading ? <LoaderCircle className="size-3.5 animate-spin" /> : null}
+          Load more
+        </button>
+      ) : null}
+    </>
+  );
+}
+
+function WorkspaceFilePreview({
+  entry,
+  sessionID,
+  onBack,
+}: {
+  entry: WorkspaceEntry;
+  sessionID: string;
+  onBack: () => void;
+}) {
+  const previewFile = useMemo<PreviewFile>(() => {
+    const query = new URLSearchParams({ path: entry.path });
+    return {
+      filename: entry.name,
+      size: entry.size,
+      mimeType: workspaceMimeType(entry),
+      previewKind: entry.preview_kind,
+      url: `/api/conversations/${encodeURIComponent(sessionID)}/workspace/file?${query}`,
+    };
+  }, [entry, sessionID]);
+
+  return (
+    <div className="flex h-full min-h-0 flex-col">
+      <header className="flex min-h-12 items-center gap-2 border-b border-border px-3">
+        <button
+          type="button"
+          onClick={onBack}
+          aria-label="Back to workspace files"
+          title="Back to workspace files"
+          className="inline-flex size-8 items-center justify-center rounded-full text-muted-foreground hover:bg-muted hover:text-foreground md:hidden"
+        >
+          <ArrowLeft className="size-4" />
+        </button>
+        <div className="min-w-0 flex-1">
+          <div className="truncate text-xs font-medium text-foreground">{entry.name}</div>
+          <div className="truncate text-[11px] text-muted-foreground">
+            {formatBytes(entry.size)} · {entry.path}
+          </div>
+        </div>
+      </header>
+      <div className="min-h-0 flex-1 overflow-auto">
+        {entry.previewable ? (
+          <ReadonlyFilePreview file={previewFile} renderHtml={false} fetchBinary />
+        ) : (
+          <div className="flex h-full flex-col items-center justify-center gap-3 p-8 text-center text-muted-foreground">
+            <FileQuestion className="size-8" />
+            <p className="text-sm font-medium text-foreground">Preview unavailable</p>
+            <p className="max-w-64 text-xs">
+              This file is sensitive, unsupported, too large, or not a regular file.
+            </p>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+function WorkspaceLoading() {
+  return (
+    <div className="flex items-center gap-2 px-4 py-5 text-xs text-muted-foreground">
+      <LoaderCircle className="size-4 animate-spin" /> Loading workspace
+    </div>
+  );
+}
+
+function WorkspaceError({
+  code,
+  message,
+  onRetry,
+}: {
+  code: string;
+  message: string;
+  onRetry: () => void;
+}) {
+  return (
+    <div className="flex flex-col items-center gap-3 px-5 py-10 text-center">
+      <AlertTriangle className="size-7 text-amber-500" />
+      <div>
+        <p className="text-sm font-medium text-foreground">{workspaceErrorTitle(code)}</p>
+        <p className="mt-1 text-xs leading-5 text-muted-foreground">{message}</p>
+      </div>
+      <button
+        type="button"
+        onClick={onRetry}
+        className="rounded-lg border border-border bg-background px-3 py-1.5 text-xs font-medium text-foreground hover:bg-muted focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+      >
+        Retry
+      </button>
+    </div>
+  );
+}
+
+class WorkspaceRequestError extends Error {
+  constructor(
+    readonly code: string,
+    message: string,
+  ) {
+    super(message);
+  }
+}
+
+async function workspaceFailure(response: Response): Promise<{ code: string; message: string }> {
+  const body = (await response.json().catch(() => null)) as {
+    error?: { code?: string; message?: string } | string;
+  } | null;
+  if (typeof body?.error === "string") return { code: "", message: body.error };
+  return {
+    code: body?.error?.code ?? "",
+    message: body?.error?.message ?? `Workspace request failed (${response.status})`,
+  };
+}
+
+function workspaceErrorMessage(err: unknown): { code: string; message: string } {
+  if (err instanceof WorkspaceRequestError) {
+    return { code: err.code, message: friendlyWorkspaceError(err.code, err.message) };
+  }
+  return { code: "", message: err instanceof Error ? err.message : String(err) };
+}
+
+function friendlyWorkspaceError(code: string, fallback: string): string {
+  switch (code) {
+    case "WORKSPACE_NODE_UNAVAILABLE":
+      return "The node storing this workspace is unavailable. Try again after it recovers.";
+    case "WORKSPACE_NOT_FOUND":
+      return "This workspace has not been created yet or is no longer available.";
+    case "DIRECTORY_TOO_LARGE":
+      return "This directory contains too many entries to browse safely.";
+    case "NOT_CONFIGURED":
+      return "Workspace browsing requires the managed k3s storage mode.";
+    case "TOO_MANY_REQUESTS":
+      return "The storage node is busy. Wait a moment and retry.";
+    default:
+      return fallback;
+  }
+}
+
+function workspaceErrorTitle(code: string): string {
+  if (code === "WORKSPACE_NODE_UNAVAILABLE") return "Workspace node unavailable";
+  if (code === "WORKSPACE_NOT_FOUND") return "Workspace not ready";
+  if (code === "NOT_CONFIGURED") return "Workspace browsing unavailable";
+  return "Could not open workspace";
+}
+
+function workspaceMimeType(entry: WorkspaceEntry): string {
+  if (entry.preview_kind === "pdf") return "application/pdf";
+  if (entry.preview_kind === "markdown") return "text/markdown";
+  if (entry.preview_kind !== "image") {
+    return /\.html?$/i.test(entry.name) ? "text/html" : "text/plain";
+  }
+  const extension = entry.name.split(".").pop()?.toLowerCase();
+  const imageTypes: Record<string, string> = {
+    gif: "image/gif",
+    jpeg: "image/jpeg",
+    jpg: "image/jpeg",
+    png: "image/png",
+    svg: "image/svg+xml",
+    webp: "image/webp",
+  };
+  return imageTypes[extension ?? ""] ?? "image/*";
+}

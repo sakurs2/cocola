@@ -362,6 +362,36 @@ type storageProbeUsage struct {
 	MeasuredAt     time.Time `json:"measured_at"`
 }
 
+type storageProbeWorkspaceEntry struct {
+	Name        string    `json:"name"`
+	Path        string    `json:"path"`
+	Kind        string    `json:"kind"`
+	Size        int64     `json:"size"`
+	ModifiedAt  time.Time `json:"modified_at"`
+	Previewable bool      `json:"previewable"`
+	PreviewKind string    `json:"preview_kind,omitempty"`
+}
+
+type storageProbeWorkspaceEntries struct {
+	Path       string                       `json:"path"`
+	Entries    []storageProbeWorkspaceEntry `json:"entries"`
+	NextCursor string                       `json:"next_cursor"`
+}
+
+type storageProbeWorkspaceFile struct {
+	Data        []byte
+	ContentType string
+}
+
+type kubeStatusError struct {
+	StatusCode int
+	Body       string
+}
+
+func (e *kubeStatusError) Error() string {
+	return fmt.Sprintf("kubernetes api status %d: %s", e.StatusCode, e.Body)
+}
+
 func (c *kubeClient) storageProbeFilesystem(ctx context.Context, namespace, podName string) (storageProbeFilesystem, error) {
 	var out storageProbeFilesystem
 	err := c.do(ctx, http.MethodGet, c.storageProbeProxyPath(namespace, podName, "/v1/filesystem", nil), nil, &out, "application/json")
@@ -373,6 +403,62 @@ func (c *kubeClient) storageProbeUsage(ctx context.Context, namespace, podName, 
 	var out storageProbeUsage
 	err := c.do(ctx, http.MethodGet, c.storageProbeProxyPath(namespace, podName, "/v1/usage", query), nil, &out, "application/json")
 	return out, err
+}
+
+func (c *kubeClient) storageProbeWorkspaceEntries(
+	ctx context.Context,
+	namespace, podName, root, relativePath, cursor string,
+) (storageProbeWorkspaceEntries, error) {
+	query := url.Values{"root": []string{root}}
+	if relativePath != "" {
+		query.Set("path", relativePath)
+	}
+	if cursor != "" {
+		query.Set("cursor", cursor)
+	}
+	var out storageProbeWorkspaceEntries
+	err := c.do(ctx, http.MethodGet, c.storageProbeProxyPath(namespace, podName, "/v1/workspace/entries", query), nil, &out, "application/json")
+	return out, err
+}
+
+func (c *kubeClient) storageProbeWorkspaceFile(
+	ctx context.Context,
+	namespace, podName, root, relativePath string,
+) (storageProbeWorkspaceFile, error) {
+	query := url.Values{"root": []string{root}, "path": []string{relativePath}}
+	path := c.storageProbeProxyPath(namespace, podName, "/v1/workspace/file", query)
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, c.cfg.Server+path, nil)
+	if err != nil {
+		return storageProbeWorkspaceFile{}, ErrInvalidArg
+	}
+	req.Header.Set("accept", "*/*")
+	if c.cfg.BearerToken != "" {
+		req.Header.Set("authorization", "Bearer "+c.cfg.BearerToken)
+	}
+	resp, err := c.http.Do(req)
+	if err != nil {
+		return storageProbeWorkspaceFile{}, fmt.Errorf("kubernetes api: %w", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode == http.StatusNotFound {
+		return storageProbeWorkspaceFile{}, ErrNotFound
+	}
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		body, _ := io.ReadAll(io.LimitReader(resp.Body, 4096))
+		return storageProbeWorkspaceFile{}, &kubeStatusError{
+			StatusCode: resp.StatusCode,
+			Body:       strings.TrimSpace(string(body)),
+		}
+	}
+	const maxWorkspaceFileResponse = 10 << 20
+	data, err := io.ReadAll(io.LimitReader(resp.Body, maxWorkspaceFileResponse+1))
+	if err != nil {
+		return storageProbeWorkspaceFile{}, err
+	}
+	if len(data) > maxWorkspaceFileResponse {
+		return storageProbeWorkspaceFile{}, &kubeStatusError{StatusCode: http.StatusRequestEntityTooLarge, Body: "workspace preview exceeded response limit"}
+	}
+	return storageProbeWorkspaceFile{Data: data, ContentType: resp.Header.Get("content-type")}, nil
 }
 
 func (c *kubeClient) storageProbeProxyPath(namespace, podName, endpoint string, query url.Values) string {
@@ -427,7 +513,7 @@ func (c *kubeClient) do(ctx context.Context, method, path string, body any, out 
 	}
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
 		b, _ := io.ReadAll(io.LimitReader(resp.Body, 4096))
-		return fmt.Errorf("kubernetes api status %d: %s", resp.StatusCode, strings.TrimSpace(string(b)))
+		return &kubeStatusError{StatusCode: resp.StatusCode, Body: strings.TrimSpace(string(b))}
 	}
 	if out == nil {
 		return nil

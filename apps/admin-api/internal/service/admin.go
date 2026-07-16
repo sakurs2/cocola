@@ -31,18 +31,24 @@ import (
 
 // Sentinel errors mapped to HTTP codes by the handler layer.
 var (
-	ErrInvalidArg         = errors.New("service: invalid argument")
-	ErrUnauthenticated    = errors.New("service: unauthenticated")
-	ErrAccountDisabled    = errors.New("service: account disabled")
-	ErrProtectedAdmin     = errors.New("service: protected admin")
-	ErrSelfPermission     = errors.New("service: self permission change")
-	ErrPermissionDenied   = errors.New("service: permission denied")
-	ErrScheduleInPast     = errors.New("service: schedule time is in the past")
-	ErrScheduleExpiration = errors.New("service: task expiration does not allow a future run")
-	ErrStorageUnavailable = errors.New("service: storage measurement unavailable")
-	ErrStorageUnsupported = errors.New("service: storage measurement unsupported")
-	ErrNotFound           = store.ErrNotFound
-	ErrConflict           = store.ErrConflict
+	ErrInvalidArg                  = errors.New("service: invalid argument")
+	ErrUnauthenticated             = errors.New("service: unauthenticated")
+	ErrAccountDisabled             = errors.New("service: account disabled")
+	ErrProtectedAdmin              = errors.New("service: protected admin")
+	ErrSelfPermission              = errors.New("service: self permission change")
+	ErrPermissionDenied            = errors.New("service: permission denied")
+	ErrScheduleInPast              = errors.New("service: schedule time is in the past")
+	ErrScheduleExpiration          = errors.New("service: task expiration does not allow a future run")
+	ErrStorageUnavailable          = errors.New("service: storage measurement unavailable")
+	ErrStorageUnsupported          = errors.New("service: storage measurement unsupported")
+	ErrWorkspaceNotFound           = errors.New("service: workspace not found")
+	ErrWorkspaceNodeUnavailable    = errors.New("service: workspace node unavailable")
+	ErrWorkspaceFileTooLarge       = errors.New("service: workspace file too large")
+	ErrWorkspacePreviewUnsupported = errors.New("service: workspace preview unsupported")
+	ErrWorkspaceDirectoryTooLarge  = errors.New("service: workspace directory too large")
+	ErrTooManyRequests             = errors.New("service: too many requests")
+	ErrNotFound                    = store.ErrNotFound
+	ErrConflict                    = store.ErrConflict
 )
 
 // Clock is injectable so tests get deterministic timestamps.
@@ -57,6 +63,7 @@ type Admin struct {
 	sandboxNodes        SandboxNodeManager
 	sandboxRuntimes     SandboxRuntimeManager
 	sessionStorage      SessionStorageMonitor
+	workspaceBrowser    WorkspaceBrowser
 	architectureChecker ArchitectureHealthChecker
 	userEvents          UserEventBroker
 	modelSecretKey      string

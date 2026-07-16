@@ -112,6 +112,48 @@ func (fakeStorageMonitor) Measure(_ context.Context, storageID, pvcName string) 
 func (fakeStorageMonitor) DeleteOrphan(context.Context, string, string) error { return nil }
 func (fakeStorageMonitor) Close()                                             {}
 
+type fakeWorkspaceBrowser struct {
+	userID     string
+	sessionID  string
+	path       string
+	cursor     string
+	entriesErr error
+	fileErr    error
+	fileType   string
+}
+
+func (f *fakeWorkspaceBrowser) ListWorkspaceEntries(
+	_ context.Context,
+	userID, sessionID, path, cursor string,
+) (service.WorkspaceEntries, error) {
+	f.userID, f.sessionID, f.path, f.cursor = userID, sessionID, path, cursor
+	if f.entriesErr != nil {
+		return service.WorkspaceEntries{}, f.entriesErr
+	}
+	return service.WorkspaceEntries{
+		Path: path,
+		Entries: []service.WorkspaceEntry{{
+			Name: "main.go", Path: "src/main.go", Kind: "file", Size: 13,
+			Previewable: true, PreviewKind: "code",
+		}},
+	}, nil
+}
+
+func (f *fakeWorkspaceBrowser) ReadWorkspaceFile(
+	_ context.Context,
+	userID, sessionID, path string,
+) (service.WorkspaceFile, error) {
+	f.userID, f.sessionID, f.path = userID, sessionID, path
+	if f.fileErr != nil {
+		return service.WorkspaceFile{}, f.fileErr
+	}
+	contentType := f.fileType
+	if contentType == "" {
+		contentType = "text/plain; charset=utf-8"
+	}
+	return service.WorkspaceFile{Data: []byte("package main\n"), ContentType: contentType}, nil
+}
+
 type fakeArchitectureChecker struct {
 	http map[string]bool
 	tcp  map[string]bool
@@ -811,6 +853,83 @@ func TestMyEffectiveSkillsReturnsRuntimeIDForPersonalSkill(t *testing.T) {
 	}
 	if len(body.Skills) != 1 || body.Skills[0].ID != "frontend-design" {
 		t.Fatalf("personal catalog ID leaked to user response: %+v", body.Skills)
+	}
+}
+
+func TestMyWorkspaceRoutesUseRuntimeIdentity(t *testing.T) {
+	mem := store.NewMemory()
+	issuer := token.NewIssuer("runtime-secret", "cocola", time.Hour)
+	browser := &fakeWorkspaceBrowser{}
+	svc := service.New(mem, issuer, fixedClock).WithWorkspaceBrowser(browser)
+	api := New(svc, "k").WithRuntimeAuth("runtime-secret", "cocola")
+	runtimeToken, _, err := issuer.Issue("alice", "", -1, time.Now().Unix())
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	rec := do(t, api.Router(), http.MethodGet, "/me/workspaces/conv-1/entries?path=src&cursor=next", runtimeToken, nil)
+	if rec.Code != http.StatusOK || !strings.Contains(rec.Body.String(), `"path":"src/main.go"`) {
+		t.Fatalf("workspace entries: got %d %s", rec.Code, rec.Body.String())
+	}
+	if browser.userID != "alice" || browser.sessionID != "conv-1" || browser.path != "src" || browser.cursor != "next" {
+		t.Fatalf("workspace identity = %+v", browser)
+	}
+	if rec.Header().Get("Cache-Control") != "no-store" {
+		t.Fatalf("workspace entries cache control = %q", rec.Header().Get("Cache-Control"))
+	}
+
+	rec = do(t, api.Router(), http.MethodGet, "/me/workspaces/conv-1/file?path=src/main.go", runtimeToken, nil)
+	if rec.Code != http.StatusOK || rec.Body.String() != "package main\n" {
+		t.Fatalf("workspace file: got %d %q", rec.Code, rec.Body.String())
+	}
+	if rec.Header().Get("Content-Type") != "text/plain; charset=utf-8" ||
+		rec.Header().Get("X-Content-Type-Options") != "nosniff" ||
+		rec.Header().Get("Content-Disposition") != "inline" {
+		t.Fatalf("workspace file headers = %v", rec.Header())
+	}
+
+	browser.fileType = "image/svg+xml"
+	rec = do(t, api.Router(), http.MethodGet, "/me/workspaces/conv-1/file?path=diagram.svg", runtimeToken, nil)
+	if !strings.HasPrefix(rec.Header().Get("Content-Security-Policy"), "sandbox;") {
+		t.Fatalf("workspace SVG content security policy = %q", rec.Header().Get("Content-Security-Policy"))
+	}
+
+	rec = do(t, api.Router(), http.MethodGet, "/me/workspaces/conv-1/entries", "", nil)
+	if rec.Code != http.StatusUnauthorized {
+		t.Fatalf("workspace unauthenticated status = %d", rec.Code)
+	}
+}
+
+func TestMyWorkspaceErrorCodes(t *testing.T) {
+	tests := []struct {
+		name   string
+		err    error
+		status int
+		code   string
+	}{
+		{name: "missing", err: service.ErrWorkspaceNotFound, status: 404, code: "WORKSPACE_NOT_FOUND"},
+		{name: "node", err: service.ErrWorkspaceNodeUnavailable, status: 503, code: "WORKSPACE_NODE_UNAVAILABLE"},
+		{name: "large file", err: service.ErrWorkspaceFileTooLarge, status: 413, code: "WORKSPACE_FILE_TOO_LARGE"},
+		{name: "unsupported", err: service.ErrWorkspacePreviewUnsupported, status: 415, code: "WORKSPACE_PREVIEW_UNSUPPORTED"},
+		{name: "large directory", err: service.ErrWorkspaceDirectoryTooLarge, status: 422, code: "DIRECTORY_TOO_LARGE"},
+		{name: "busy", err: service.ErrTooManyRequests, status: 429, code: "TOO_MANY_REQUESTS"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			mem := store.NewMemory()
+			issuer := token.NewIssuer("runtime-secret", "cocola", time.Hour)
+			browser := &fakeWorkspaceBrowser{entriesErr: tt.err}
+			svc := service.New(mem, issuer, fixedClock).WithWorkspaceBrowser(browser)
+			api := New(svc, "k").WithRuntimeAuth("runtime-secret", "cocola")
+			runtimeToken, _, err := issuer.Issue("alice", "", -1, time.Now().Unix())
+			if err != nil {
+				t.Fatal(err)
+			}
+			rec := do(t, api.Router(), http.MethodGet, "/me/workspaces/conv-1/entries", runtimeToken, nil)
+			if rec.Code != tt.status || !strings.Contains(rec.Body.String(), `"code":"`+tt.code+`"`) {
+				t.Fatalf("workspace error: got %d %s", rec.Code, rec.Body.String())
+			}
+		})
 	}
 }
 

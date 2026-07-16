@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -90,6 +91,17 @@ func TestStorageProbeKubernetesProxyAndPV(t *testing.T) {
 				t.Fatalf("usage path = %q", got)
 			}
 			_, _ = w.Write([]byte(`{"node_name":"node-a","allocated_bytes":42,"file_count":2,"directory_count":1,"measured_at":"2026-07-16T00:00:00Z"}`))
+		case "/api/v1/namespaces/opensandbox/pods/probe-a:8095/proxy/v1/workspace/entries":
+			if r.URL.Query().Get("root") != "pvc-a/workspace" || r.URL.Query().Get("path") != "src" || r.URL.Query().Get("cursor") != "next" {
+				t.Fatalf("workspace entries query = %q", r.URL.RawQuery)
+			}
+			_, _ = w.Write([]byte(`{"path":"src","entries":[{"name":"main.go","path":"src/main.go","kind":"file","size":12,"modified_at":"2026-07-16T00:00:00Z","previewable":true,"preview_kind":"code"}],"next_cursor":""}`))
+		case "/api/v1/namespaces/opensandbox/pods/probe-a:8095/proxy/v1/workspace/file":
+			if r.URL.Query().Get("root") != "pvc-a/workspace" || r.URL.Query().Get("path") != "src/main.go" {
+				t.Fatalf("workspace file query = %q", r.URL.RawQuery)
+			}
+			w.Header().Set("content-type", "text/plain; charset=utf-8")
+			_, _ = w.Write([]byte("package main\n"))
 		default:
 			t.Fatalf("unexpected path %s", r.URL.Path)
 		}
@@ -108,5 +120,28 @@ func TestStorageProbeKubernetesProxyAndPV(t *testing.T) {
 	usage, err := client.storageProbeUsage(context.Background(), "opensandbox", "probe-a", "pvc-a")
 	if err != nil || usage.AllocatedBytes != 42 || usage.FileCount != 2 {
 		t.Fatalf("usage = %+v, err = %v", usage, err)
+	}
+	entries, err := client.storageProbeWorkspaceEntries(context.Background(), "opensandbox", "probe-a", "pvc-a/workspace", "src", "next")
+	if err != nil || len(entries.Entries) != 1 || entries.Entries[0].Path != "src/main.go" {
+		t.Fatalf("workspace entries = %+v, err = %v", entries, err)
+	}
+	file, err := client.storageProbeWorkspaceFile(context.Background(), "opensandbox", "probe-a", "pvc-a/workspace", "src/main.go")
+	if err != nil || string(file.Data) != "package main\n" || file.ContentType != "text/plain; charset=utf-8" {
+		t.Fatalf("workspace file = %+v, err = %v", file, err)
+	}
+}
+
+func TestStorageProbeWorkspaceFilePreservesStatus(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusUnsupportedMediaType)
+		_, _ = w.Write([]byte(`{"error":"workspace preview is unsupported"}`))
+	}))
+	defer server.Close()
+
+	client := newKubeClient(kubeConfig{Server: server.URL})
+	_, err := client.storageProbeWorkspaceFile(context.Background(), "opensandbox", "probe-a", "pvc-a/workspace", ".env")
+	var statusErr *kubeStatusError
+	if !errors.As(err, &statusErr) || statusErr.StatusCode != http.StatusUnsupportedMediaType {
+		t.Fatalf("workspace status error = %v", err)
 	}
 }

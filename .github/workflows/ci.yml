@@ -34,16 +34,16 @@ jobs:
       - uses: actions/checkout@v5
       - uses: actions/setup-go@v6
         with:
-          go-version: "1.22"
+          go-version: "1.24"
           cache: true
       - name: go vet (workspace)
-        run: go vet ./...
+        run: go vet ./apps/admin-api/... ./apps/gateway/... ./apps/cli/... ./db/... ./packages/go-common/... ./packages/proto/gen/go/...
       - name: go test (workspace)
-        run: go test ./...
+        run: go test ./apps/admin-api/... ./apps/gateway/... ./apps/cli/... ./db/... ./packages/go-common/... ./packages/proto/gen/go/...
       - name: install golangci-lint
-        run: go install github.com/golangci/golangci-lint/cmd/golangci-lint@v1.59.1
+        run: go install github.com/golangci/golangci-lint/cmd/golangci-lint@v1.64.8
       - name: golangci-lint
-        run: "$(go env GOPATH)/bin/golangci-lint run --timeout=5m"
+        run: "$(go env GOPATH)/bin/golangci-lint run --timeout=5m ./apps/admin-api/... ./apps/gateway/... ./apps/cli/... ./db/... ./packages/go-common/... ./packages/proto/gen/go/..."
 
   # ------------------------------------------------------------------ python
   python:
