@@ -19,7 +19,15 @@ import {
   RefreshCw,
   X,
 } from "lucide-react";
-import { useCallback, useEffect, useMemo, useState } from "react";
+import {
+  type KeyboardEvent,
+  type PointerEvent,
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
 
 type WorkspaceEntry = {
   name: string;
@@ -53,11 +61,97 @@ const EMPTY_DIRECTORY: DirectoryState = {
   errorCode: "",
 };
 
+const DEFAULT_TREE_WIDTH = 240;
+const MIN_TREE_WIDTH = 180;
+const MAX_TREE_WIDTH = 360;
+const MIN_PREVIEW_WIDTH = 220;
+const TREE_RESIZE_STEP = 16;
+
+type TreeResizeSession = {
+  pointerID: number;
+  startX: number;
+  startWidth: number;
+  maxWidth: number;
+  previousCursor: string;
+  previousUserSelect: string;
+};
+
 export function WorkspacePanel({ sessionID, onClose }: { sessionID: string; onClose: () => void }) {
   const [directories, setDirectories] = useState<Record<string, DirectoryState>>({});
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
   const [selected, setSelected] = useState<WorkspaceEntry | null>(null);
   const [refreshing, setRefreshing] = useState(false);
+  const [treeWidth, setTreeWidth] = useState(DEFAULT_TREE_WIDTH);
+  const [resizingTree, setResizingTree] = useState(false);
+  const layoutRef = useRef<HTMLDivElement>(null);
+  const treeResizeRef = useRef<TreeResizeSession | null>(null);
+
+  const treeMaxWidth = useCallback(() => {
+    const layoutWidth = layoutRef.current?.getBoundingClientRect().width ?? 0;
+    if (layoutWidth === 0) return MAX_TREE_WIDTH;
+    return Math.max(MIN_TREE_WIDTH, Math.min(MAX_TREE_WIDTH, layoutWidth - MIN_PREVIEW_WIDTH - 1));
+  }, []);
+
+  const beginTreeResize = useCallback(
+    (event: PointerEvent<HTMLDivElement>) => {
+      if (event.button !== 0) return;
+      event.preventDefault();
+      event.currentTarget.setPointerCapture(event.pointerId);
+      treeResizeRef.current = {
+        pointerID: event.pointerId,
+        startX: event.clientX,
+        startWidth: treeWidth,
+        maxWidth: treeMaxWidth(),
+        previousCursor: document.body.style.cursor,
+        previousUserSelect: document.body.style.userSelect,
+      };
+      document.body.style.cursor = "col-resize";
+      document.body.style.userSelect = "none";
+      setResizingTree(true);
+    },
+    [treeMaxWidth, treeWidth],
+  );
+
+  const moveTreeResize = useCallback((event: PointerEvent<HTMLDivElement>) => {
+    const session = treeResizeRef.current;
+    if (!session || session.pointerID !== event.pointerId) return;
+    const nextWidth = session.startWidth + event.clientX - session.startX;
+    setTreeWidth(Math.min(Math.max(nextWidth, MIN_TREE_WIDTH), session.maxWidth));
+  }, []);
+
+  const endTreeResize = useCallback((event: PointerEvent<HTMLDivElement>) => {
+    const session = treeResizeRef.current;
+    if (!session || session.pointerID !== event.pointerId) return;
+    treeResizeRef.current = null;
+    document.body.style.cursor = session.previousCursor;
+    document.body.style.userSelect = session.previousUserSelect;
+    setResizingTree(false);
+  }, []);
+
+  const resizeTreeWithKeyboard = useCallback(
+    (event: KeyboardEvent<HTMLDivElement>) => {
+      const maxWidth = treeMaxWidth();
+      let nextWidth: number | null = null;
+      if (event.key === "ArrowLeft") nextWidth = treeWidth - TREE_RESIZE_STEP;
+      if (event.key === "ArrowRight") nextWidth = treeWidth + TREE_RESIZE_STEP;
+      if (event.key === "Home") nextWidth = MIN_TREE_WIDTH;
+      if (event.key === "End") nextWidth = maxWidth;
+      if (nextWidth === null) return;
+      event.preventDefault();
+      setTreeWidth(Math.min(Math.max(nextWidth, MIN_TREE_WIDTH), maxWidth));
+    },
+    [treeMaxWidth, treeWidth],
+  );
+
+  useEffect(
+    () => () => {
+      const session = treeResizeRef.current;
+      if (!session) return;
+      document.body.style.cursor = session.previousCursor;
+      document.body.style.userSelect = session.previousUserSelect;
+    },
+    [],
+  );
 
   const loadDirectory = useCallback(
     async (path: string, append = false, cursor = "") => {
@@ -176,13 +270,14 @@ export function WorkspacePanel({ sessionID, onClose }: { sessionID: string; onCl
         </button>
       </header>
 
-      <div className="grid min-h-0 flex-1 grid-cols-1 md:grid-cols-[240px_minmax(0,1fr)]">
+      <div
+        ref={layoutRef}
+        className="grid min-h-0 flex-1 grid-cols-1 md:grid-cols-[var(--workspace-tree-width)_1px_minmax(0,1fr)]"
+        style={{ ["--workspace-tree-width" as string]: `${treeWidth}px` }}
+      >
         <section
           aria-label="Workspace files"
-          className={cn(
-            "min-h-0 flex-col border-border bg-muted/20 md:flex md:border-r",
-            selected ? "hidden" : "flex",
-          )}
+          className={cn("min-h-0 flex-col bg-muted/20 md:flex", selected ? "hidden" : "flex")}
         >
           <div className="border-b border-border/70 px-3 py-2 font-mono text-[11px] text-muted-foreground">
             workspace
@@ -219,6 +314,38 @@ export function WorkspacePanel({ sessionID, onClose }: { sessionID: string; onCl
             )}
           </div>
         </section>
+
+        <div
+          role="separator"
+          aria-label="Resize workspace file tree"
+          aria-orientation="vertical"
+          aria-valuemin={MIN_TREE_WIDTH}
+          aria-valuemax={MAX_TREE_WIDTH}
+          aria-valuenow={Math.round(treeWidth)}
+          aria-valuetext={`${Math.round(treeWidth)} pixels`}
+          tabIndex={0}
+          title="Drag to resize file tree"
+          onKeyDown={resizeTreeWithKeyboard}
+          onPointerDown={beginTreeResize}
+          onPointerMove={moveTreeResize}
+          onPointerUp={endTreeResize}
+          onPointerCancel={endTreeResize}
+          onLostPointerCapture={endTreeResize}
+          className="group relative z-10 hidden w-px cursor-col-resize touch-none focus-visible:outline-none md:block"
+        >
+          <span
+            className={cn(
+              "absolute inset-y-0 left-1/2 w-3 -translate-x-1/2 bg-transparent transition-colors group-hover:bg-primary/10 group-focus-visible:bg-primary/10",
+              resizingTree && "bg-primary/10",
+            )}
+          />
+          <span
+            className={cn(
+              "absolute inset-y-0 left-1/2 w-px -translate-x-1/2 bg-border transition-colors group-hover:bg-primary/80 group-focus-visible:bg-primary/80",
+              resizingTree && "bg-primary",
+            )}
+          />
+        </div>
 
         <section
           aria-label="Workspace file preview"
