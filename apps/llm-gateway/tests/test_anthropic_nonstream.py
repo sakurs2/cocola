@@ -113,6 +113,43 @@ async def test_nonstream_reconstructs_tool_use_block():
     await up.aclose()
 
 
+async def test_nonstream_replays_thinking_and_signature_deltas():
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(
+            200,
+            json={
+                "id": "msg_thinking",
+                "type": "message",
+                "role": "assistant",
+                "model": "deepseek-reasoner",
+                "content": [
+                    {
+                        "type": "thinking",
+                        "thinking": "reasoning",
+                        "signature": "signed",
+                    }
+                ],
+                "stop_reason": "end_turn",
+                "usage": {"input_tokens": 7, "output_tokens": 4},
+            },
+        )
+
+    up = _upstream_with_handler(handler, stream=False)
+    events = await _drain(up, _req())
+    deltas = [
+        event.extra["frame"]["delta"]
+        for event in events
+        if event.type is StreamEventType.PASSTHROUGH
+        and event.extra["frame"]["type"] == "content_block_delta"
+    ]
+
+    assert deltas == [
+        {"type": "thinking_delta", "thinking": "reasoning"},
+        {"type": "signature_delta", "signature": "signed"},
+    ]
+    await up.aclose()
+
+
 async def test_nonstream_timeout_maps_to_error_event():
     def handler(request: httpx.Request) -> httpx.Response:
         raise httpx.ReadTimeout("boom", request=request)

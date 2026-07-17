@@ -20,6 +20,7 @@ SSE event sequence we emit (matching Anthropic's documented order):
 from __future__ import annotations
 
 import json
+import secrets
 from collections.abc import AsyncIterator
 from typing import Any
 
@@ -187,10 +188,14 @@ def _message_start_payload(message_id: str, model: str, usage: Usage) -> dict[st
     }
 
 
+def _resolve_message_id(message_id: str | None) -> str:
+    return message_id or f"msg_{secrets.token_hex(12)}"
+
+
 async def stream_to_anthropic_sse(
     events: AsyncIterator[StreamEvent],
     *,
-    message_id: str = "msg_cocola",
+    message_id: str | None = None,
     fallback_model: str = "",
 ) -> AsyncIterator[bytes]:
     """Transcode a normalized StreamEvent stream into Anthropic SSE bytes.
@@ -199,6 +204,7 @@ async def stream_to_anthropic_sse(
     text deltas, and fold our terminal MESSAGE_STOP into Anthropic's
     message_delta(usage,stop_reason) + message_stop pair.
     """
+    message_id = _resolve_message_id(message_id)
     started = False
     text_block_open = False
     out_tokens = 0
@@ -333,7 +339,7 @@ async def stream_to_anthropic_sse(
 async def collect_to_anthropic_response(
     events: AsyncIterator[StreamEvent],
     *,
-    message_id: str = "msg_cocola",
+    message_id: str | None = None,
     fallback_model: str = "",
 ) -> dict[str, Any]:
     """Drain a StreamEvent stream into a single Anthropic Messages response.
@@ -342,6 +348,7 @@ async def collect_to_anthropic_response(
     same way the metering hook does, so billing is consistent regardless of
     stream mode.
     """
+    message_id = _resolve_message_id(message_id)
     text_parts: list[str] = []
     usage = Usage()
     model = fallback_model
@@ -404,6 +411,20 @@ async def collect_to_anthropic_response(
                         )
                     elif dtype == "input_json_delta":
                         json_buf.setdefault(idx, []).append(str(delta.get("partial_json", "")))
+                    elif dtype == "thinking_delta":
+                        blocks.setdefault(idx, {"type": "thinking", "thinking": ""})
+                        if idx not in block_order:
+                            block_order.append(idx)
+                        blocks[idx]["thinking"] = blocks[idx].get("thinking", "") + str(
+                            delta.get("thinking", "")
+                        )
+                    elif dtype == "signature_delta":
+                        blocks.setdefault(idx, {"type": "thinking", "thinking": ""})
+                        if idx not in block_order:
+                            block_order.append(idx)
+                        blocks[idx]["signature"] = blocks[idx].get("signature", "") + str(
+                            delta.get("signature", "")
+                        )
                 elif ftype == "content_block_stop":
                     _finalize_block(idx)
             elif ev.type is StreamEventType.CONTENT_DELTA:

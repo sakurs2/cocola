@@ -96,7 +96,7 @@ func buildHandler(t *testing.T, conn *grpc.ClientConn) http.Handler {
 	return httpapi.New(client, verifier, logger.Must()).
 		WithConvoStore(conversations).
 		WithChatRuns(runs, httpapi.RunConfig{
-			RunTimeout: time.Minute, PingEvery: time.Hour,
+			PingEvery: time.Hour,
 			MergeWindow: time.Millisecond, DraftInterval: time.Millisecond,
 		}).Handler()
 }

@@ -471,9 +471,12 @@ class InSandboxShimProvider:
             async for chunk in self._executor.exec_stream(
                 sandbox_id=options.sandbox_id,
                 cmd=[SHIM_ENTRYPOINT],
+                cwd="/workspace",
                 env=self._model_env(options),
                 stdin=request_json,
-                timeout_secs=options.run_timeout_secs,
+                # A full Agent run has no aggregate deadline. Gateway enforces
+                # each tool step independently and cancellation propagates here.
+                timeout_secs=-1,
             ):
                 if chunk.kind == "stderr":
                     # Shim diagnostics; keep a short tail for error context only.

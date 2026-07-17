@@ -29,6 +29,14 @@ func NewPostgres(ctx context.Context, dsn string) (*Postgres, error) {
 
 func (p *Postgres) Close() { p.pool.Close() }
 
+// RuntimeSetting reads a dynamic execution setting at the start of a new Run.
+// Admin API remains the only writer and validator of system_settings.
+func (p *Postgres) RuntimeSetting(ctx context.Context, key string) (json.RawMessage, error) {
+	var value json.RawMessage
+	err := p.pool.QueryRow(ctx, `SELECT value_json FROM system_settings WHERE key=$1`, key).Scan(&value)
+	return value, err
+}
+
 const runColumns = `trace_id, root_span_id, conversation_id, conversation_title,
 	user_id, source, model_route_id, model_alias, client_request_id, status, started_at,
 	completed_at, last_activity_at, error_code`

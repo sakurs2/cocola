@@ -465,7 +465,7 @@ type ExecRequest struct {
 	Cwd         string            `protobuf:"bytes,3,opt,name=cwd,proto3" json:"cwd,omitempty"`
 	Env         map[string]string `protobuf:"bytes,4,rep,name=env,proto3" json:"env,omitempty" protobuf_key:"bytes,1,opt,name=key,proto3" protobuf_val:"bytes,2,opt,name=value,proto3"`
 	Stdin       []byte            `protobuf:"bytes,5,opt,name=stdin,proto3" json:"stdin,omitempty"`
-	TimeoutSecs int32             `protobuf:"varint,6,opt,name=timeout_secs,json=timeoutSecs,proto3" json:"timeout_secs,omitempty"` // 0 = provider default
+	TimeoutSecs int32             `protobuf:"varint,6,opt,name=timeout_secs,json=timeoutSecs,proto3" json:"timeout_secs,omitempty"` // 0 = provider default; negative = no deadline
 }
 
 func (x *ExecRequest) Reset() {

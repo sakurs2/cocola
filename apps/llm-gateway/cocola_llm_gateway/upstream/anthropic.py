@@ -31,7 +31,7 @@ class AnthropicConfig:
     base_url: str = "https://api.anthropic.com"
     api_key: str = ""
     anthropic_version: str = "2023-06-01"
-    timeout_s: float = 300.0
+    timeout_s: float = 600.0
     connect_timeout_s: float = 10.0
     # When False, talk to the upstream in NON-streaming mode (POST once, read the
     # whole JSON body) and re-synthesize the downstream StreamEvent sequence
@@ -451,6 +451,8 @@ class AnthropicUpstream:
                     "name": block.get("name", ""),
                     "input": {},
                 }
+            elif btype == "thinking":
+                start_block = {"type": "thinking", "thinking": ""}
             else:
                 start_block = {"type": btype or "text", "text": ""}
             yield StreamEvent(
@@ -493,6 +495,35 @@ class AnthropicUpstream:
                         }
                     },
                 )
+            elif btype == "thinking":
+                yield StreamEvent(
+                    StreamEventType.PASSTHROUGH,
+                    extra={
+                        "frame": {
+                            "type": "content_block_delta",
+                            "index": idx,
+                            "delta": {
+                                "type": "thinking_delta",
+                                "thinking": str(block.get("thinking", "")),
+                            },
+                        }
+                    },
+                )
+                signature = str(block.get("signature", ""))
+                if signature:
+                    yield StreamEvent(
+                        StreamEventType.PASSTHROUGH,
+                        extra={
+                            "frame": {
+                                "type": "content_block_delta",
+                                "index": idx,
+                                "delta": {
+                                    "type": "signature_delta",
+                                    "signature": signature,
+                                },
+                            }
+                        },
+                    )
             yield StreamEvent(
                 StreamEventType.PASSTHROUGH,
                 extra={"frame": {"type": "content_block_stop", "index": idx}},

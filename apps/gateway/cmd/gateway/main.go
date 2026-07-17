@@ -13,7 +13,8 @@
 //	COCOLA_METRICS_ADDR     observability listen address; empty => disabled
 //	                        (default :9091, serving /metrics and /healthz)
 //	COCOLA_PG_DSN           required Postgres DSN for conversations and chat runs
-//	COCOLA_AGENT_RUN_TIMEOUT_SECS maximum wall time for one Agent run (default 3600)
+//	COCOLA_AGENT_MAX_TURNS maximum model turns in one Agent run (default 200)
+//	COCOLA_AGENT_TOOL_STEP_TIMEOUT_SECS maximum wall time for one tool step (default 600)
 //
 // Required attachment/session object storage (ADR-0017 P1a):
 //
@@ -27,6 +28,7 @@ package main
 
 import (
 	"context"
+	"fmt"
 	"net/http"
 	"os"
 	"os/signal"
@@ -56,6 +58,15 @@ func env(key, def string) string {
 	return def
 }
 
+func boundedEnvInt(key string, fallback, minValue, maxValue int) (int, error) {
+	value := env(key, strconv.Itoa(fallback))
+	parsed, parseErr := strconv.Atoi(value)
+	if parseErr != nil || parsed < minValue || parsed > maxValue {
+		return 0, fmt.Errorf("invalid %s=%s", key, value)
+	}
+	return parsed, nil
+}
+
 func main() {
 	log := logger.WithService(logger.Must(), "gateway", "gateway")
 	defer func() { _ = log.Sync() }()
@@ -72,14 +83,15 @@ func main() {
 
 	addr := env("COCOLA_GATEWAY_ADDR", ":8080")
 	agentAddr := env("COCOLA_AGENT_ADDR", "127.0.0.1:50061")
-	runTimeout := 60 * time.Minute
-	if value := os.Getenv("COCOLA_AGENT_RUN_TIMEOUT_SECS"); value != "" {
-		seconds, parseErr := strconv.Atoi(value)
-		if parseErr != nil || seconds <= 0 {
-			log.Fatal("invalid COCOLA_AGENT_RUN_TIMEOUT_SECS=" + value)
-		}
-		runTimeout = time.Duration(seconds) * time.Second
+	agentMaxTurns, err := boundedEnvInt("COCOLA_AGENT_MAX_TURNS", 200, 1, 1000)
+	if err != nil {
+		log.Fatal(err.Error())
 	}
+	toolTimeoutSecs, err := boundedEnvInt("COCOLA_AGENT_TOOL_STEP_TIMEOUT_SECS", 600, 30, 86400)
+	if err != nil {
+		log.Fatal(err.Error())
+	}
+	toolTimeout := time.Duration(toolTimeoutSecs) * time.Second
 
 	client, err := agent.Dial(agentAddr)
 	if err != nil {
@@ -113,17 +125,13 @@ func main() {
 	// llm-gateway verifies with (COCOLA_AUTH_SECRET / COCOLA_AUTH_ISSUER), so the
 	// minted token verifies offline downstream. There is no shared or anonymous
 	// fallback identity.
-	minimumTTL := runTimeout + 15*time.Minute
-	ttl := minimumTTL
+	ttl := 7 * 24 * time.Hour
 	if v := os.Getenv("COCOLA_SANDBOX_TOKEN_TTL_SECONDS"); v != "" {
 		if n, perr := strconv.Atoi(v); perr == nil && n > 0 {
 			ttl = time.Duration(n) * time.Second
 		} else {
 			log.Fatal("invalid COCOLA_SANDBOX_TOKEN_TTL_SECONDS=" + v)
 		}
-	}
-	if ttl < minimumTTL {
-		log.Fatal("COCOLA_SANDBOX_TOKEN_TTL_SECONDS must be at least run timeout + 900 seconds")
 	}
 	issuer := token.NewIssuer(secret, issuerName, ttl)
 	api = api.WithSandboxTokenIssuer(issuer, ttl)
@@ -171,7 +179,9 @@ func main() {
 			log.Fatal("chat run store connect failed: " + runErr.Error())
 		}
 		defer runStore.Close()
-		api = api.WithChatRuns(runStore, httpapi.RunConfig{RunTimeout: runTimeout})
+		api = api.WithChatRuns(runStore, httpapi.RunConfig{
+			AgentMaxTurns: int32(agentMaxTurns), ToolTimeout: toolTimeout,
+		})
 		if err := api.InterruptStaleRuns(context.Background()); err != nil {
 			log.Fatal("stale chat run recovery failed: " + err.Error())
 		}

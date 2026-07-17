@@ -44,6 +44,10 @@ func TestWriteInstallationCreatesPrivateConfigAndStableState(t *testing.T) {
 		`COCOLA_AUTH_SECRET="`,
 		`COCOLA_SANDBOX_LLM_BASE_URL="http://host.docker.internal:18091"`,
 		`COCOLA_SESSION_VOLUME_SIZE="2Gi"`,
+		`COCOLA_AGENT_MAX_TURNS="200"`,
+		`COCOLA_AGENT_TOOL_STEP_TIMEOUT_SECS="600"`,
+		`COCOLA_LLM_TIMEOUT_SECS="600"`,
+		`COCOLA_SANDBOX_TOKEN_TTL_SECONDS="604800"`,
 	} {
 		if !strings.Contains(text, expected) {
 			t.Fatalf("config missing %q", expected)

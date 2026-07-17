@@ -23,7 +23,8 @@ import (
 )
 
 const (
-	defaultRunTimeout    = time.Hour
+	defaultAgentMaxTurns = int32(200)
+	defaultToolTimeout   = 10 * time.Minute
 	defaultSSEPing       = 15 * time.Second
 	defaultMergeWindow   = 100 * time.Millisecond
 	defaultDraftInterval = time.Second
@@ -35,7 +36,8 @@ const (
 )
 
 type RunConfig struct {
-	RunTimeout    time.Duration
+	AgentMaxTurns int32
+	ToolTimeout   time.Duration
 	PingEvery     time.Duration
 	MergeWindow   time.Duration
 	DraftInterval time.Duration
@@ -44,7 +46,8 @@ type RunConfig struct {
 
 type runController struct {
 	store               chatrun.Store
-	runTimeout          time.Duration
+	agentMaxTurns       int32
+	toolTimeout         time.Duration
 	pingEvery           time.Duration
 	mergeWindow         time.Duration
 	draftInterval       time.Duration
@@ -63,6 +66,7 @@ type liveRun struct {
 	identity  auth.Identity
 	request   chatRequest
 	query     agent.Query
+	policy    executionPolicy
 	traceCtx  context.Context
 	traceRun  traceevents.Run
 	ctx       context.Context
@@ -78,8 +82,11 @@ type liveRun struct {
 }
 
 func newRunController(store chatrun.Store, cfg RunConfig) *runController {
-	if cfg.RunTimeout <= 0 {
-		cfg.RunTimeout = defaultRunTimeout
+	if cfg.AgentMaxTurns <= 0 {
+		cfg.AgentMaxTurns = defaultAgentMaxTurns
+	}
+	if cfg.ToolTimeout <= 0 {
+		cfg.ToolTimeout = defaultToolTimeout
 	}
 	if cfg.PingEvery <= 0 {
 		cfg.PingEvery = defaultSSEPing
@@ -94,7 +101,8 @@ func newRunController(store chatrun.Store, cfg RunConfig) *runController {
 		cfg.FinalizeRetry = defaultFinalizeRetry
 	}
 	return &runController{
-		store: store, runTimeout: cfg.RunTimeout, pingEvery: cfg.PingEvery,
+		store: store, agentMaxTurns: cfg.AgentMaxTurns, toolTimeout: cfg.ToolTimeout,
+		pingEvery:   cfg.PingEvery,
 		mergeWindow: cfg.MergeWindow, draftInterval: cfg.DraftInterval,
 		finalizeRetry: cfg.FinalizeRetry,
 		live:          make(map[string]*liveRun), stop: make(chan struct{}),
@@ -247,12 +255,13 @@ func (a *API) chat(w http.ResponseWriter, r *http.Request) {
 }
 
 func (a *API) newLiveRun(r *http.Request, identity auth.Identity, req chatRequest, run chatrun.Run) *liveRun {
-	ctx, cancel := context.WithTimeout(context.Background(), a.runs.runTimeout)
+	ctx, cancel := context.WithCancel(context.Background())
 	traceCtx := context.WithValue(context.Background(), conversationRootSpanKey{}, run.RootSpanID)
 	traceRun := a.startConversationRun(traceCtx, identity, req, run.ID, run.RootSpanID, run.StartedAt)
 	return &liveRun{
 		run: run, identity: identity, request: req, traceCtx: traceCtx, traceRun: traceRun,
-		ctx: ctx, cancel: cancel, done: make(chan struct{}), reducer: convo.NewReducer(),
+		policy: a.runs.executionPolicy(r.Context()), ctx: ctx, cancel: cancel,
+		done: make(chan struct{}), reducer: convo.NewReducer(),
 		subs: make(map[chan agent.Event]struct{}), status: chatrun.StatusRunning,
 	}
 }
@@ -324,7 +333,8 @@ func (a *API) executeLiveRun(live *liveRun) {
 		UserID: live.identity.UserID, SessionID: live.request.SessionID,
 		RuntimeID: live.request.RuntimeID, SkillID: live.request.SkillID,
 		Prompt: live.request.Prompt, SandboxID: live.request.SandboxID,
-		MaxTurns: live.request.MaxTurns, ModelRouteID: effectiveModelRouteID(live.request),
+		MaxTurns:            effectiveMaxTurns(live.request.MaxTurns, live.policy.agentMaxTurns),
+		ModelRouteID:        effectiveModelRouteID(live.request),
 		AllowWorkspaceReset: live.request.AllowWorkspaceReset,
 		TraceID:             live.run.ID, ParentSpanID: conversationRootSpan(live.traceCtx),
 		SandboxAuthToken: a.mintSandboxToken(live.identity), Attachments: attachments,
@@ -337,6 +347,7 @@ func (a *API) executeLiveRun(live *liveRun) {
 	draftResult := make(chan error, 1)
 	go func() { draftResult <- a.persistRunDrafts(draftContext, live) }()
 	streamStarted := time.Now()
+	watchdog := newToolStepWatchdog(live.policy.toolTimeout, live.cancel)
 	err := a.streamer.Stream(live.ctx, live.query, func(event agent.Event) error {
 		if event.Kind == "trace" {
 			a.recordAgentTrace(live.traceCtx, live.run.ID, event.Data)
@@ -358,6 +369,7 @@ func (a *API) executeLiveRun(live *liveRun) {
 		if event.Kind == "tool_use" {
 			toolCalls++
 		}
+		watchdog.Observe(event)
 		if event.Kind == "error" {
 			sawError = true
 		}
@@ -366,6 +378,8 @@ func (a *API) executeLiveRun(live *liveRun) {
 		}
 		return nil
 	})
+	watchdog.Close()
+	stepTimeout := watchdog.Failure()
 	coalescer.Flush()
 	stopDrafts()
 	if draftErr := <-draftResult; draftErr != nil {
@@ -378,14 +392,21 @@ func (a *API) executeLiveRun(live *liveRun) {
 	live.mu.Unlock()
 	if cancelled {
 		status, errorCode = chatrun.StatusCancelled, "USER_CANCELLED"
+	} else if stepTimeout != nil {
+		status, errorCode = chatrun.StatusError, "STEP_TIMEOUT"
 	} else if interrupted || agent.IsRuntimeInterruption(err) {
 		status, errorCode = chatrun.StatusInterrupted, "RUNTIME_INTERRUPTED"
-	} else if errors.Is(err, context.DeadlineExceeded) || errors.Is(live.ctx.Err(), context.DeadlineExceeded) {
-		status, errorCode = chatrun.StatusError, "RUN_TIMEOUT"
 	} else if err != nil || sawError {
 		status, errorCode = chatrun.StatusError, "AGENT_ERROR"
 	}
-	if err != nil && !cancelled && status != chatrun.StatusInterrupted {
+	if stepTimeout != nil && !cancelled {
+		errorData := map[string]string{
+			"error": fmt.Sprintf("tool step %q timed out after %s", stepTimeout.Name, stepTimeout.Limit),
+			"code":  errorCode,
+		}
+		live.apply(agent.Event{Kind: "error", Data: errorData})
+		live.publish(agent.Event{Kind: "error", Data: errorData})
+	} else if err != nil && !cancelled && status != chatrun.StatusInterrupted {
 		errorData := map[string]string{"error": safeBackgroundRunError(err), "code": errorCode}
 		live.apply(agent.Event{Kind: "error", Data: errorData})
 		live.publish(agent.Event{Kind: "error", Data: errorData})
@@ -631,7 +652,7 @@ func cloneStringMap(data map[string]string) map[string]string {
 
 func safeBackgroundRunError(err error) string {
 	if errors.Is(err, context.DeadlineExceeded) {
-		return "agent run timed out"
+		return "agent request timed out"
 	}
 	if errors.Is(err, context.Canceled) {
 		return "agent run stopped"

@@ -14,6 +14,9 @@ import (
 )
 
 const (
+	SettingAgentMaxTurns       = "execution.agent_max_turns"
+	SettingToolStepTimeoutSecs = "execution.tool_step_timeout_secs"
+
 	SettingSchedulerEnabled          = "scheduler.enabled"
 	SettingSchedulerPollSecs         = "scheduler.poll_secs"
 	SettingSchedulerRunTimeoutSecs   = "scheduler.run_timeout_secs"
@@ -55,6 +58,16 @@ type SystemSettingUpdateInput struct {
 
 func settingDefinitions() []SystemSettingDefinition {
 	return []SystemSettingDefinition{
+		{
+			Key: SettingAgentMaxTurns, Group: "Execution", Label: "Agent Max Turns",
+			Description: "Maximum model turns for the next new Agent Run. Client requests may choose a lower value.",
+			Kind:        "int", Env: "COCOLA_AGENT_MAX_TURNS", Default: 200, Editable: true, Min: 1, Max: 1000,
+		},
+		{
+			Key: SettingToolStepTimeoutSecs, Group: "Execution", Label: "Tool Step Timeout",
+			Description: "Maximum seconds for one tool step in the next new Agent Run. A timeout stops that Run but preserves its Workspace.",
+			Kind:        "int", Env: "COCOLA_AGENT_TOOL_STEP_TIMEOUT_SECS", Default: 600, Editable: true, Min: 30, Max: 86400,
+		},
 		{
 			Key: SettingSchedulerEnabled, Group: "Scheduler", Label: "Scheduler Enabled",
 			Description: "Pause or resume due-task execution while the scheduler worker is running.",

@@ -61,7 +61,7 @@ type ExecRequest struct {
 	Cwd     string
 	Env     map[string]string
 	Stdin   []byte
-	Timeout int // seconds; 0 = provider default
+	Timeout int // seconds; 0 = provider default, negative = no deadline
 }
 
 // ExecEvent is streamed back to the caller during command execution.

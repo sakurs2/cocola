@@ -12,7 +12,7 @@ type SystemSetting = {
   group: string;
   label: string;
   description: string;
-  kind: "bool" | "int" | "string";
+  kind: "bool" | "int" | "string" | "quantity";
   env?: string;
   default?: SettingValue;
   value?: SettingValue;
@@ -280,6 +280,7 @@ function SettingControl({
     return (
       <label className="flex h-9 items-center gap-3 text-sm">
         <input
+          aria-label={setting.label}
           className="size-4 rounded border-border accent-primary"
           type="checkbox"
           checked={value === true}
@@ -294,6 +295,7 @@ function SettingControl({
   if (setting.kind === "int") {
     return (
       <input
+        aria-label={setting.label}
         className={input}
         type="number"
         min={setting.min}
@@ -309,6 +311,7 @@ function SettingControl({
 
   return (
     <input
+      aria-label={setting.label}
       className={input}
       value={typeof value === "string" ? value : ""}
       disabled={!setting.editable}

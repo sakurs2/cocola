@@ -523,8 +523,9 @@ func (p *Provider) CleanupSessionStorage(ctx context.Context, userID, sessionID 
 //     execution_complete -> ExecEventExit{Exit:0} when no error preceded it.
 //
 // The channel is closed exactly once, when the stream ends or the context is
-// cancelled. A non-zero req.Timeout bounds the run; 0 falls back to
-// defaultExecTimeout. cocola joins req.Cmd with spaces into a single shell
+// cancelled. A positive req.Timeout bounds the run, 0 falls back to
+// defaultExecTimeout, and a negative value relies only on caller cancellation.
+// cocola joins req.Cmd with spaces into a single shell
 // command, matching cocola's shell-exec contract.
 func (p *Provider) Exec(ctx context.Context, sid string, req provider.ExecRequest) (<-chan provider.ExecEvent, error) {
 	osbID, err := p.resolve(sid)
@@ -612,9 +613,15 @@ func (p *Provider) Exec(ctx context.Context, sid string, req provider.ExecReques
 	if req.Timeout > 0 {
 		timeout = time.Duration(req.Timeout) * time.Second
 	}
-	// Child context bounds the stream lifetime; cancelled when the bridge
-	// goroutine returns so the underlying connection is always released.
-	runCtx, cancel := context.WithTimeout(ctx, timeout)
+	// The Agent brain uses a negative timeout because its individual tool steps
+	// are bounded by Gateway. Other callers retain the provider default.
+	var runCtx context.Context
+	var cancel context.CancelFunc
+	if req.Timeout < 0 {
+		runCtx, cancel = context.WithCancel(ctx)
+	} else {
+		runCtx, cancel = context.WithTimeout(ctx, timeout)
+	}
 
 	httpReq, err := http.NewRequestWithContext(runCtx, http.MethodPost, execdURL+"/command", bytes.NewReader(b))
 	if err != nil {

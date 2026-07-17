@@ -107,3 +107,48 @@ async def test_collect_closes_source_generator():
     out = await collect_to_anthropic_response(gen(), fallback_model="m")
     assert out["content"][0]["text"] == "hi"
     assert closed["v"] is True
+
+
+async def test_collect_preserves_thinking_and_signature_deltas():
+    seq = [
+        StreamEvent(StreamEventType.MESSAGE_START, model="deepseek-reasoner"),
+        StreamEvent(
+            StreamEventType.PASSTHROUGH,
+            extra={
+                "frame": {
+                    "type": "content_block_start",
+                    "index": 0,
+                    "content_block": {"type": "thinking", "thinking": ""},
+                }
+            },
+        ),
+        StreamEvent(
+            StreamEventType.PASSTHROUGH,
+            extra={
+                "frame": {
+                    "type": "content_block_delta",
+                    "index": 0,
+                    "delta": {"type": "thinking_delta", "thinking": "reasoning"},
+                }
+            },
+        ),
+        StreamEvent(
+            StreamEventType.PASSTHROUGH,
+            extra={
+                "frame": {
+                    "type": "content_block_delta",
+                    "index": 0,
+                    "delta": {"type": "signature_delta", "signature": "signed"},
+                }
+            },
+        ),
+        StreamEvent(
+            StreamEventType.PASSTHROUGH,
+            extra={"frame": {"type": "content_block_stop", "index": 0}},
+        ),
+        StreamEvent(StreamEventType.MESSAGE_STOP),
+    ]
+
+    out = await collect_to_anthropic_response(_events(seq), fallback_model="deepseek-reasoner")
+
+    assert out["content"] == [{"type": "thinking", "thinking": "reasoning", "signature": "signed"}]

@@ -88,12 +88,6 @@ class ListProvider:
             yield e
 
 
-def test_invalid_run_timeout_fails_servicer_startup(monkeypatch):
-    monkeypatch.setenv("COCOLA_AGENT_RUN_TIMEOUT_SECS", "0")
-    with pytest.raises(RuntimeError, match="positive integer"):
-        AgentRuntimeServicer(ListProvider([]))
-
-
 async def test_missing_active_sandbox_aborts_query_as_unavailable(monkeypatch):
     class GoneBinder(StaticSandboxBinder):
         async def heartbeat(self, *, sandbox_id: str) -> None:
@@ -921,3 +915,12 @@ async def test_query_publishes_outputs_artifacts():
     assert key.startswith("artifacts/U1/S1/")
     assert store.puts[key] == (b"hello world", "text/plain")
     assert "Only files in ./outputs/" in prov.seen_options.system_prompt
+
+
+async def test_outputs_snapshot_runs_from_persistent_workspace():
+    ex = outputs_snapshot_executor()
+    servicer = AgentRuntimeServicer(ListProvider([]), executor=ex)
+
+    await servicer._snapshot_outputs("box-1")
+
+    assert ex.exec_calls[-1]["cwd"] == "/workspace"

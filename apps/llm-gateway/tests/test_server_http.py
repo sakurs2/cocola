@@ -4,6 +4,8 @@ These are the regression guard for the streaming/non-streaming billing bug:
 both paths MUST write exactly one usage record per call.
 """
 
+import json
+
 import httpx
 from cocola_llm_gateway.server import create_app
 from tests.conftest import build_service
@@ -12,6 +14,34 @@ from tests.conftest import build_service
 def _client(app):
     transport = httpx.ASGITransport(app=app)
     return httpx.AsyncClient(transport=transport, base_url="http://t")
+
+
+def _message_request(*, stream: bool) -> dict:
+    return {
+        "model": "default",
+        "max_tokens": 32,
+        "stream": stream,
+        "messages": [{"role": "user", "content": "hi"}],
+    }
+
+
+async def _streaming_message_id(client: httpx.AsyncClient) -> str:
+    message_id = ""
+    async with client.stream(
+        "POST",
+        "/v1/messages",
+        json=_message_request(stream=True),
+        headers={"x-cocola-session": "S1"},
+    ) as response:
+        assert response.status_code == 200
+        async for line in response.aiter_lines():
+            if not line.startswith("data: "):
+                continue
+            payload = json.loads(line.removeprefix("data: "))
+            if payload.get("type") == "message_start":
+                message_id = payload["message"]["id"]
+    assert message_id.startswith("msg_")
+    return message_id
 
 
 async def test_healthz():
@@ -68,6 +98,28 @@ async def test_non_streaming_returns_json_and_bills_once():
         assert body["usage"]["input_tokens"] >= 1
     recent = await ledger.recent(user_id="dev-user")
     assert len(recent) == 1
+
+
+async def test_streaming_responses_use_unique_message_ids():
+    svc, _ = build_service(reply="hello world")
+    async with _client(create_app(svc)) as client:
+        first_id = await _streaming_message_id(client)
+        second_id = await _streaming_message_id(client)
+
+    assert first_id != second_id
+
+
+async def test_non_streaming_responses_use_unique_message_ids():
+    svc, _ = build_service(reply="hello world")
+    async with _client(create_app(svc)) as client:
+        first = await client.post("/v1/messages", json=_message_request(stream=False))
+        second = await client.post("/v1/messages", json=_message_request(stream=False))
+
+    assert first.status_code == 200
+    assert second.status_code == 200
+    assert first.json()["id"].startswith("msg_")
+    assert second.json()["id"].startswith("msg_")
+    assert first.json()["id"] != second.json()["id"]
 
 
 async def test_both_paths_accumulate_two_records():

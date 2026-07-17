@@ -18,6 +18,13 @@ import (
 
 const DefaultRegistry = "ghcr.io/sakurs2"
 
+const (
+	defaultAgentMaxTurns       = "200"
+	defaultToolStepTimeoutSecs = "600"
+	defaultLLMTimeoutSecs      = "600"
+	defaultSandboxTokenTTL     = "604800"
+)
+
 var ErrAlreadyInstalled = errors.New("cocola is already installed in this directory")
 
 type Paths struct {
@@ -279,6 +286,10 @@ func renderEnvironment(paths Paths, o Options, s secrets, password string) strin
 		{"COCOLA_MODEL_SECRET_KEY", s.model}, {"COCOLA_CONFIG_SECRET_KEY", s.config},
 		{"COCOLA_PG_PASSWORD", s.postgres}, {"COCOLA_MINIO_ROOT_PASSWORD", s.minio},
 		{"COCOLA_SESSION_VOLUME_SIZE", o.SessionVolumeSize},
+		{"COCOLA_AGENT_MAX_TURNS", defaultAgentMaxTurns},
+		{"COCOLA_AGENT_TOOL_STEP_TIMEOUT_SECS", defaultToolStepTimeoutSecs},
+		{"COCOLA_LLM_TIMEOUT_SECS", defaultLLMTimeoutSecs},
+		{"COCOLA_SANDBOX_TOKEN_TTL_SECONDS", defaultSandboxTokenTTL},
 		{"COCOLA_BOOTSTRAP_ADMIN_USERNAME", o.AdminUsername}, {"COCOLA_BOOTSTRAP_ADMIN_EMAIL", o.AdminEmail},
 		{"COCOLA_BOOTSTRAP_ADMIN_PASSWORD", password}, {"COCOLA_BOOTSTRAP_ADMIN_RESET", "false"},
 	}

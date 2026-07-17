@@ -81,7 +81,8 @@ async def test_maps_tool_use_turn_and_reassembles_split_line():
 
     # The shim was driven via the shim entrypoint with our Request JSON on stdin.
     assert execu.stream_calls[0]["cmd"] == ["/opt/cocola/shim/entrypoint.sh"]
-    assert execu.stream_calls[0]["timeout_secs"] == 3600
+    assert execu.stream_calls[0]["cwd"] == "/workspace"
+    assert execu.stream_calls[0]["timeout_secs"] == -1
     sent = json.loads(execu.stream_calls[0]["stdin"])
     assert sent["prompt"] == "weather?"
     assert sent["skill_id"] == "weather"

@@ -81,7 +81,6 @@ TRACEPARENT_METADATA_KEY = "traceparent"
 PRODUCT_TRACEPARENT_METADATA_KEY = "x-cocola-product-traceparent"
 ENVIRONMENT_PREPARATION_SCHEMA_VERSION = 1
 ENVIRONMENT_PREPARATION_PART_ID = "environment"
-DEFAULT_AGENT_RUN_TIMEOUT_SECS = 3600
 DEFAULT_SANDBOX_HEARTBEAT_SECS = 20
 
 
@@ -99,7 +98,8 @@ _OUTPUTS_SNAPSHOT_SCRIPT = r"""
 import json
 import os
 
-root = "outputs"
+workspace = "/workspace"
+root = os.path.join(workspace, "outputs")
 os.makedirs(root, exist_ok=True)
 out = {}
 for dirpath, _, files in os.walk(root):
@@ -109,7 +109,7 @@ for dirpath, _, files in os.walk(root):
             st = os.stat(path)
         except OSError:
             continue
-        rel = os.path.relpath(path, ".").replace(os.sep, "/")
+        rel = os.path.relpath(path, workspace).replace(os.sep, "/")
         out[rel] = {"size": st.st_size, "mtime_ns": st.st_mtime_ns}
 print(json.dumps(out, sort_keys=True))
 """
@@ -337,9 +337,6 @@ class AgentRuntimeServicer(pb_grpc.AgentRuntimeServiceServicer):
         # before provisioning. Optional: unset => a key-only attachment surfaces
         # as a clean provisioning error rather than a silent empty file.
         self._objstore = objstore
-        self._run_timeout_secs = _positive_env_int(
-            "COCOLA_AGENT_RUN_TIMEOUT_SECS", DEFAULT_AGENT_RUN_TIMEOUT_SECS
-        )
         self._heartbeat_secs = _positive_env_int(
             "COCOLA_SANDBOX_HEARTBEAT_SECS", DEFAULT_SANDBOX_HEARTBEAT_SECS
         )
@@ -918,7 +915,6 @@ class AgentRuntimeServicer(pb_grpc.AgentRuntimeServiceServicer):
             sandbox_id=sandbox_id,
             workspace=workspace,
             max_turns=request.max_turns or 30,
-            run_timeout_secs=self._run_timeout_secs,
             model_route_id=model_route_id,
             selected_skill_id=selected_skill_id,
             mcp_servers=active_mcp_servers,
@@ -993,6 +989,7 @@ class AgentRuntimeServicer(pb_grpc.AgentRuntimeServiceServicer):
             res = await self._executor.exec(
                 sandbox_id=sandbox_id,
                 cmd=["python3", "-c", _OUTPUTS_SNAPSHOT_SCRIPT],
+                cwd="/workspace",
             )
         except Exception as exc:  # noqa: BLE001 - artifact scan is best-effort
             log.warning("outputs snapshot failed", sandbox_id=sandbox_id, error=str(exc))

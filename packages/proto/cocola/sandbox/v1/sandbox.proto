@@ -77,7 +77,7 @@ message ExecRequest {
   string cwd = 3;
   map<string, string> env = 4;
   bytes stdin = 5;
-  int32 timeout_secs = 6; // 0 = provider default
+  int32 timeout_secs = 6; // 0 = provider default; negative = no deadline
 }
 
 enum ExecEventKind {

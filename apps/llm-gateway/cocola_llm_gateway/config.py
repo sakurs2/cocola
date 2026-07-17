@@ -66,7 +66,7 @@ class GatewayConfig:
     host: str = "127.0.0.1"
     port: int = 8080
     # Resilience knobs (consumed by middleware in the next task).
-    request_timeout_s: float = 300.0
+    request_timeout_s: float = 600.0
     max_retries: int = 2
     rate_limit_rps: float = 0.0  # 0 disables rate limiting
 
@@ -169,7 +169,7 @@ def gateway_config_from_env() -> GatewayConfig:
     return GatewayConfig(
         host=os.getenv("COCOLA_LLM_HOST", "127.0.0.1"),
         port=int(os.getenv("COCOLA_LLM_PORT", "8080")),
-        request_timeout_s=float(os.getenv("COCOLA_LLM_TIMEOUT_SECS", "300")),
+        request_timeout_s=float(os.getenv("COCOLA_LLM_TIMEOUT_SECS", "600")),
         max_retries=int(os.getenv("COCOLA_LLM_MAX_RETRIES", "2")),
         rate_limit_rps=float(os.getenv("COCOLA_LLM_RATE_LIMIT_RPS", "0")),
     )

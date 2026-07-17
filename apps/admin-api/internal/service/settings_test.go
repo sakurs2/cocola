@@ -12,6 +12,7 @@ import (
 func TestSystemSettingsListOnlyIncludesRuntimeSettingsAndReadsEnvDefaults(t *testing.T) {
 	t.Setenv("COCOLA_SCHEDULER_POLL_SECS", "45")
 	t.Setenv("COCOLA_SESSION_VOLUME_SIZE", "4Gi")
+	t.Setenv("COCOLA_AGENT_TOOL_STEP_TIMEOUT_SECS", "900")
 
 	svc := New(store.NewMemory(), nil, func() time.Time {
 		return time.Date(2026, 7, 5, 8, 0, 0, 0, time.UTC)
@@ -25,10 +26,12 @@ func TestSystemSettingsListOnlyIncludesRuntimeSettingsAndReadsEnvDefaults(t *tes
 	if poll.Source != "env" || poll.Value != 45 {
 		t.Fatalf("poll setting = source %q value %#v, want env 45", poll.Source, poll.Value)
 	}
-	if len(settings) != 7 {
-		t.Fatalf("settings count = %d, want 7 runtime settings", len(settings))
+	if len(settings) != 9 {
+		t.Fatalf("settings count = %d, want 9 runtime settings", len(settings))
 	}
 	expected := map[string]bool{
+		SettingAgentMaxTurns:             true,
+		SettingToolStepTimeoutSecs:       true,
 		SettingSchedulerEnabled:          true,
 		SettingSchedulerPollSecs:         true,
 		SettingSchedulerRunTimeoutSecs:   true,
@@ -40,6 +43,10 @@ func TestSystemSettingsListOnlyIncludesRuntimeSettingsAndReadsEnvDefaults(t *tes
 	volume := settingByKey(t, settings, SettingSessionVolumeDefaultSize)
 	if volume.Source != "env" || volume.Value != "4Gi" || !volume.Editable {
 		t.Fatalf("session volume setting = %+v, want editable env 4Gi", volume)
+	}
+	toolTimeout := settingByKey(t, settings, SettingToolStepTimeoutSecs)
+	if toolTimeout.Source != "env" || toolTimeout.Value != 900 || !toolTimeout.Editable {
+		t.Fatalf("tool timeout setting = %+v, want editable env 900", toolTimeout)
 	}
 	for _, setting := range settings {
 		if !expected[setting.Key] {

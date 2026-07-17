@@ -429,6 +429,42 @@ func TestExec_BridgesSSEStream(t *testing.T) {
 	}
 }
 
+func TestExec_NegativeTimeoutHasNoDeadline(t *testing.T) {
+	var commandBody string
+	var commandHadDeadline bool
+	p := newStub(t, func(r *http.Request) (*http.Response, error) {
+		switch {
+		case r.Method == http.MethodGet && strings.HasSuffix(r.URL.Path, "/sandboxes/sbx-1"):
+			return jsonResp(http.StatusOK, `{"id":"sbx-1","status":{"state":"Running"}}`), nil
+		case r.Method == http.MethodGet && strings.Contains(r.URL.Path, "/endpoints/44772"):
+			return jsonResp(http.StatusOK, `{"endpoint":"http://execd.test:44772"}`), nil
+		case r.Method == http.MethodPost && r.URL.Path == "/command":
+			_, commandHadDeadline = r.Context().Deadline()
+			body, _ := io.ReadAll(r.Body)
+			commandBody = string(body)
+			return sseResp(`{"type":"execution_complete","exit_code":0}` + "\n"), nil
+		default:
+			t.Fatalf("unexpected request %s %s", r.Method, r.URL.Path)
+			return nil, nil
+		}
+	})
+
+	ch, err := p.Exec(context.Background(), "sbx-1", provider.ExecRequest{
+		Cmd: []string{"echo", "hi"}, Timeout: -1,
+	})
+	if err != nil {
+		t.Fatalf("Exec: %v", err)
+	}
+	drainExec(ch)
+
+	if commandHadDeadline {
+		t.Fatal("negative timeout unexpectedly added a request deadline")
+	}
+	if strings.Contains(commandBody, `"timeout"`) {
+		t.Fatalf("negative timeout leaked into execd body: %s", commandBody)
+	}
+}
+
 // TestExec_StdinPipedAsBase64 verifies that ExecRequest.Stdin is delivered to
 // the command despite execd's /command API having no stdin field: the provider
 // base64-encodes the bytes and pipes them in-shell into the real command. This

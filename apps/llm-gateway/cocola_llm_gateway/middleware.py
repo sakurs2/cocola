@@ -37,7 +37,7 @@ log = get_logger("cocola.llm-gateway.middleware")
 
 @dataclass
 class ResiliencePolicy:
-    timeout_s: float = 300.0
+    timeout_s: float = 600.0
     max_retries: int = 2  # attempts beyond the first, pre-first-byte only
     backoff_base_s: float = 0.2  # exponential: base * 2**attempt
     rate_limit_rps: float = 0.0  # 0 disables; otherwise tokens/sec per key

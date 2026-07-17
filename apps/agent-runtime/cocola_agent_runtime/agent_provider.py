@@ -25,7 +25,6 @@ class AgentOptions:
     workspace: str | None = None
     system_prompt: str | None = None
     max_turns: int = 30
-    run_timeout_secs: int = 3600
     model_route_id: str | None = None
     # Effective skill explicitly selected for this turn. The in-sandbox
     # adapter converts it to the selected runtime's native invocation syntax.

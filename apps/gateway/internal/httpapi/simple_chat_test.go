@@ -67,7 +67,7 @@ func durableTestAPI(streamer agent.Streamer) (*API, *chatrun.Memory, *convo.Memo
 	api := New(streamer, auth.NewVerifier(auth.Config{}), logger.Must()).
 		WithConvoStore(conversations).
 		WithChatRuns(runs, RunConfig{
-			RunTimeout: time.Minute, PingEvery: time.Hour,
+			PingEvery: time.Hour,
 			MergeWindow: time.Millisecond, DraftInterval: time.Millisecond,
 		})
 	return api, runs, conversations
@@ -301,7 +301,7 @@ func TestReconnectSnapshotDoesNotDuplicateBufferedText(t *testing.T) {
 	api := New(streamer, auth.NewVerifier(auth.Config{}), logger.Must()).
 		WithConvoStore(conversations).
 		WithChatRuns(runs, RunConfig{
-			RunTimeout: time.Minute, PingEvery: time.Hour,
+			PingEvery: time.Hour,
 			MergeWindow: 500 * time.Millisecond, DraftInterval: time.Hour,
 		})
 	handler := api.Handler()

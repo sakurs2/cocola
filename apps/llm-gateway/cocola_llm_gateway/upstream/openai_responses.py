@@ -15,7 +15,7 @@ from cocola_llm_gateway.upstream.errors import UpstreamError
 class OpenAIResponsesConfig:
     base_url: str = "https://api.openai.com/v1"
     api_key: str = ""
-    timeout_s: float = 300.0
+    timeout_s: float = 600.0
     connect_timeout_s: float = 10.0
 
 
