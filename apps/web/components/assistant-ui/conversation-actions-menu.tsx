@@ -2,14 +2,14 @@
 
 import * as DropdownMenu from "@radix-ui/react-dropdown-menu";
 import {
-  CaretRight,
+  ChevronRight as CaretRight,
   Check,
-  DotsThree,
+  MoreHorizontal as DotsThree,
   Folder,
   FolderOpen,
-  PencilSimple,
-  Trash,
-} from "@phosphor-icons/react";
+  Pencil as PencilSimple,
+  Trash2 as Trash,
+} from "lucide-react";
 import type { ConversationFolder, ConversationSummary } from "@/app/runtime-provider";
 import { cn } from "@/lib/utils";
 
@@ -39,7 +39,7 @@ export function ConversationActionsMenu({
             triggerClassName,
           )}
         >
-          <DotsThree className="size-4" weight="bold" />
+          <DotsThree className="size-4" />
         </button>
       </DropdownMenu.Trigger>
       <DropdownMenu.Portal>
@@ -49,13 +49,13 @@ export function ConversationActionsMenu({
           className="cocola-user-ui z-50 min-w-44 rounded-xl border border-border bg-popover p-1 text-foreground shadow-xl outline-none"
         >
           <MenuItem onSelect={onRename}>
-            <PencilSimple className="size-4" weight="duotone" />
+            <PencilSimple className="size-4" />
             Rename
           </MenuItem>
           {conversation.chat_type !== "scheduled_task" ? (
             <DropdownMenu.Sub>
               <DropdownMenu.SubTrigger className="flex cursor-default select-none items-center gap-2 rounded-lg px-2 py-1.5 text-sm outline-none focus:bg-accent data-[state=open]:bg-accent">
-                <FolderOpen className="size-4" weight="duotone" />
+                <FolderOpen className="size-4" />
                 <span className="flex-1">Move to folder</span>
                 <CaretRight className="size-3.5" />
               </DropdownMenu.SubTrigger>
@@ -66,19 +66,19 @@ export function ConversationActionsMenu({
                   className="cocola-user-ui z-[51] min-w-48 rounded-xl border border-border bg-popover p-1 text-popover-foreground shadow-xl outline-none"
                 >
                   <MenuItem onSelect={() => onMove(null)}>
-                    <Folder className="size-4" weight="duotone" />
+                    <Folder className="size-4" />
                     <span className="flex-1">No folder</span>
-                    {!conversation.folder_id ? <Check className="size-4" weight="bold" /> : null}
+                    {!conversation.folder_id ? <Check className="size-4" /> : null}
                   </MenuItem>
                   {folders.length > 0 ? (
                     <DropdownMenu.Separator className="my-1 h-px bg-border" />
                   ) : null}
                   {folders.map((folder) => (
                     <MenuItem key={folder.id} onSelect={() => onMove(folder.id)}>
-                      <Folder className="size-4" weight="duotone" />
+                      <Folder className="size-4" />
                       <span className="max-w-40 flex-1 truncate">{folder.name}</span>
                       {conversation.folder_id === folder.id ? (
-                        <Check className="size-4" weight="bold" />
+                        <Check className="size-4" />
                       ) : null}
                     </MenuItem>
                   ))}
@@ -88,7 +88,7 @@ export function ConversationActionsMenu({
           ) : null}
           <DropdownMenu.Separator className="my-1 h-px bg-border" />
           <MenuItem destructive onSelect={onDelete}>
-            <Trash className="size-4" weight="duotone" />
+            <Trash className="size-4" />
             Delete
           </MenuItem>
         </DropdownMenu.Content>

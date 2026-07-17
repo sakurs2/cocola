@@ -2,12 +2,12 @@
 
 import { type EnvironmentComponent, type EnvironmentStatus } from "@/app/runtime-provider";
 import {
-  CheckCircle,
-  PlugsConnected,
-  Sparkle,
-  SpinnerGap,
-  WarningCircle,
-} from "@phosphor-icons/react";
+  CheckCircle2 as CheckCircle,
+  Plug as PlugsConnected,
+  Sparkles as Sparkle,
+  Loader2 as SpinnerGap,
+  AlertCircle as WarningCircle,
+} from "lucide-react";
 import { ChevronRight, FileText, Info, X } from "lucide-react";
 import { useState, type ReactNode } from "react";
 
@@ -68,7 +68,7 @@ export function SessionStatusPanel({
     <div className="flex h-full flex-col">
       <header className="flex min-h-14 items-center gap-3 border-b border-border px-4">
         <div className="grid size-8 shrink-0 place-items-center rounded-full bg-primary/10 text-primary">
-          <PlugsConnected className="size-4" weight="duotone" />
+          <PlugsConnected className="size-4" />
         </div>
         <div className="min-w-0 flex-1">
           <div className="text-sm font-medium text-foreground">Session status</div>
@@ -122,7 +122,7 @@ export function SessionStatusPanel({
             <EnvironmentGroup
               title="Skills"
               summary={skills.length > 0 ? `${skills.length} loaded` : "None loaded"}
-              icon={<Sparkle className="size-4" weight="duotone" />}
+              icon={<Sparkle className="size-4" />}
               open={skillsOpen}
               onToggle={() => setSkillsOpen((open) => !open)}
             >
@@ -144,7 +144,7 @@ export function SessionStatusPanel({
             <EnvironmentGroup
               title="MCP servers"
               summary={statusCounts.length > 0 ? statusCounts.join(" · ") : "None enabled"}
-              icon={<PlugsConnected className="size-4" weight="duotone" />}
+              icon={<PlugsConnected className="size-4" />}
               open={mcpsOpen}
               onToggle={() => setMcpsOpen((open) => !open)}
             >
@@ -271,25 +271,25 @@ function EnvironmentPhaseIcon({
   className?: string;
 }) {
   if (status.phase === "preparing") {
-    return <SpinnerGap className={`${className ?? ""} animate-spin text-sky-600`} weight="bold" />;
+    return <SpinnerGap className={`${className ?? ""} animate-spin text-sky-600`} />;
   }
   if (status.phase === "degraded") {
-    return <WarningCircle className={`${className ?? ""} text-amber-600`} weight="duotone" />;
+    return <WarningCircle className={`${className ?? ""} text-amber-600`} />;
   }
-  return <CheckCircle className={`${className ?? ""} text-emerald-600`} weight="duotone" />;
+  return <CheckCircle className={`${className ?? ""} text-emerald-600`} />;
 }
 
 function ComponentStatusIcon({ component }: { component: EnvironmentComponent }) {
   if (component.status === "pending") {
-    return <SpinnerGap className="size-4 animate-spin text-sky-600" weight="bold" />;
+    return <SpinnerGap className="size-4 animate-spin text-sky-600" />;
   }
   if (component.status === "connected" || component.status === "loaded") {
-    return <CheckCircle className="size-4 text-emerald-600" weight="duotone" />;
+    return <CheckCircle className="size-4 text-emerald-600" />;
   }
   if (component.status === "configured") {
-    return <PlugsConnected className="size-4 text-muted-foreground" weight="duotone" />;
+    return <PlugsConnected className="size-4 text-muted-foreground" />;
   }
-  return <WarningCircle className="size-4 text-amber-600" weight="duotone" />;
+  return <WarningCircle className="size-4 text-amber-600" />;
 }
 
 function environmentSummary(status: EnvironmentStatus): string {

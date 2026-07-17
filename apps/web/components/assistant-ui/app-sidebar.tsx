@@ -3,26 +3,24 @@
 import { useCallback, useRef, useState } from "react";
 import * as DropdownMenu from "@radix-ui/react-dropdown-menu";
 import {
-  CalendarDots,
-  ChatsCircle,
-  CheckCircle,
-  DotsThree,
+  CalendarCheck as CalendarDots,
+  MessagesSquare as ChatsCircle,
+  CheckCircle2 as CheckCircle,
+  MoreHorizontal as DotsThree,
   Folder,
-  Gear,
-  MagnifyingGlass,
+  Settings as Gear,
+  Search as MagnifyingGlass,
   Notebook,
-  PencilSimple,
-  PlugsConnected,
-  PlusCircle,
+  Pencil as PencilSimple,
+  Plug as PlugsConnected,
+  Plus as PlusCircle,
   ShieldCheck,
-  SidebarSimple,
-  Sparkle,
-  SpinnerGap,
-  Trash,
-  type Icon as PhosphorIcon,
-} from "@phosphor-icons/react";
+  Sparkles as Sparkle,
+  Loader2 as SpinnerGap,
+  Trash2 as Trash,
+  type LucideIcon as PhosphorIcon,
+} from "lucide-react";
 import { useSession } from "next-auth/react";
-import { motion } from "framer-motion";
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { cn } from "@/lib/utils";
@@ -40,7 +38,7 @@ import { useWorkspaceToast } from "@/components/assistant-ui/workspace-toast";
 // (conversation persistence, route A); secondary areas remain lightweight
 // product shells until their backing features land.
 
-type NavItem = { icon: PhosphorIcon; label: string; href?: string };
+type NavItem = { icon: PhosphorIcon; label: string; href?: string; iconClassName?: string };
 type SidebarSection = "actions" | "navigation" | "folders" | "chats" | "account";
 
 type PrimaryNavItem = NavItem & {
@@ -48,12 +46,12 @@ type PrimaryNavItem = NavItem & {
 };
 
 const PRIMARY_NAV: PrimaryNavItem[] = [
-  { icon: CalendarDots, label: "Tasks", href: "/tasks", section: "navigation" },
-  { icon: MagnifyingGlass, label: "Search", section: "navigation" },
-  { icon: Notebook, label: "Notes", section: "navigation" },
-  { icon: Sparkle, label: "Skills", href: "/skills", section: "navigation" },
-  { icon: PlugsConnected, label: "MCP", href: "/mcps", section: "navigation" },
-  { icon: ShieldCheck, label: "Admin", href: "/admin", section: "navigation" },
+  { icon: CalendarDots, label: "Tasks", href: "/tasks", section: "navigation", iconClassName: "text-blue-600" },
+  { icon: MagnifyingGlass, label: "Search", section: "navigation", iconClassName: "text-green-600" },
+  { icon: Notebook, label: "Notes", section: "navigation", iconClassName: "text-cyan-600" },
+  { icon: Sparkle, label: "Skills", href: "/skills", section: "navigation", iconClassName: "text-violet-600" },
+  { icon: PlugsConnected, label: "MCP", href: "/mcps", section: "navigation", iconClassName: "text-orange-600" },
+  { icon: ShieldCheck, label: "Admin", href: "/admin", section: "navigation", iconClassName: "text-slate-500" },
 ];
 
 export function AppSidebar() {
@@ -61,7 +59,6 @@ export function AppSidebar() {
   const pathname = usePathname();
   const router = useRouter();
   const { showSuccess } = useWorkspaceToast();
-  const [collapsed, setCollapsed] = useState(true);
   const sectionRefs = useRef<Record<SidebarSection, HTMLDivElement | null>>({
     actions: null,
     navigation: null,
@@ -107,13 +104,6 @@ export function AppSidebar() {
 
   const setSectionRef = (section: SidebarSection) => (node: HTMLDivElement | null) => {
     sectionRefs.current[section] = node;
-  };
-
-  const revealSection = (section: SidebarSection) => {
-    setCollapsed(false);
-    window.setTimeout(() => {
-      sectionRefs.current[section]?.scrollIntoView({ block: "nearest", behavior: "smooth" });
-    }, 180);
   };
 
   const navigateTo = useCallback(
@@ -226,114 +216,37 @@ export function AppSidebar() {
 
   return (
     <>
-      <motion.aside
-        initial={false}
-        animate={{ width: collapsed ? 64 : 272 }}
-        transition={{ type: "spring", stiffness: 380, damping: 36 }}
-        className={cn(
-          "sky-glass-sidebar my-1.5 ml-1.5 flex h-[calc(100%-0.75rem)] shrink-0 flex-col overflow-hidden rounded-[1.4rem] border text-sidebar-foreground max-sm:absolute max-sm:left-0 max-sm:top-0 max-sm:z-40",
-          collapsed ? "w-16" : "w-[17rem]",
-        )}
-      >
-        <div
-          className={cn(
-            "flex h-16 items-center gap-2 px-3",
-            collapsed ? "justify-center px-2" : "justify-between",
-          )}
-        >
-          {collapsed ? (
-            <SidebarRailButton
-              title="Expand sidebar"
-              active={false}
-              onClick={() => revealSection("navigation")}
-            >
-              <CocolaLogo className="size-7" />
-            </SidebarRailButton>
-          ) : (
-            <>
-              <div className="flex min-w-0 items-center gap-2">
-                <div className="flex size-9 shrink-0 items-center justify-center rounded-2xl bg-primary text-primary-foreground shadow-lg shadow-primary/20">
-                  <CocolaLogo mono className="size-5" />
-                </div>
-                <div className="min-w-0 flex-1">
-                  <span className="block truncate text-sm font-semibold">cocola</span>
-                  <span className="block truncate text-[11px] text-sidebar-foreground/55">
-                    agent workspace
-                  </span>
-                </div>
-              </div>
-              <button
-                type="button"
-                onClick={() => setCollapsed(true)}
-                aria-label="Collapse sidebar"
-                title="Collapse sidebar"
-                className="flex size-8 shrink-0 items-center justify-center rounded-xl text-sidebar-foreground/70 transition-colors hover:bg-white/38 hover:text-sidebar-accent-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/45"
-              >
-                <SidebarSimple className="size-4 text-sidebar-accent-foreground" weight="duotone" />
-              </button>
-            </>
-          )}
+      <aside className="sky-glass-sidebar flex h-full w-[17rem] shrink-0 flex-col overflow-hidden border-r border-sidebar-border text-sidebar-foreground max-sm:absolute max-sm:left-0 max-sm:top-0 max-sm:z-40">
+        <div className="flex h-16 items-center justify-between gap-2 px-3">
+          <div className="flex min-w-0 items-center gap-2">
+            <div className="flex size-9 shrink-0 items-center justify-center rounded-2xl bg-primary text-primary-foreground shadow-lg shadow-primary/20">
+              <CocolaLogo mono className="size-5" />
+            </div>
+            <div className="min-w-0 flex-1">
+              <span className="block truncate text-[15px] font-bold text-sidebar-foreground">cocola</span>
+              <span className="block truncate text-xs font-medium text-sidebar-foreground/70">
+                agent workspace
+              </span>
+            </div>
+          </div>
         </div>
 
-        {collapsed ? (
-          <>
-            <nav className="flex flex-1 flex-col items-center gap-2 px-2 pb-2">
-              <SidebarRailButton title="New Chat" onClick={openNewChat}>
-                <PlusCircle className="size-4 text-sidebar-accent-foreground" weight="duotone" />
-              </SidebarRailButton>
-              <div className="my-1 h-px w-8 bg-white/36" />
-              {visiblePrimaryNav.map(({ icon: Icon, label, href, section }) => {
-                const active = href
-                  ? href === "/"
-                    ? pathname === "/"
-                    : pathname === href || pathname?.startsWith(`${href}/`)
-                  : false;
-                return (
-                  <SidebarRailButton
-                    key={label}
-                    title={label}
-                    active={active}
-                    onClick={() => revealSection(section)}
-                  >
-                    <Icon className="size-4 text-sidebar-accent-foreground" weight="duotone" />
-                  </SidebarRailButton>
-                );
-              })}
-              <div className="my-1 h-px w-8 bg-white/36" />
-              <SidebarRailButton title="Folders" onClick={() => revealSection("folders")}>
-                <Folder className="size-4 text-sidebar-accent-foreground" weight="duotone" />
-              </SidebarRailButton>
-              <SidebarRailButton
-                title="Chats"
-                active={conversations.some((c) => c.id === activeSessionId)}
-                onClick={() => revealSection("chats")}
-              >
-                <ChatsCircle className="size-4 text-sidebar-accent-foreground" weight="duotone" />
-              </SidebarRailButton>
-            </nav>
-            <div className="flex flex-col items-center gap-2 px-2 pb-3">
-              <SidebarRailButton title="Profile" onClick={() => revealSection("account")}>
-                <span className="grid size-6 place-items-center rounded-full bg-primary text-[10px] font-semibold text-primary-foreground">
-                  {userInitial}
-                </span>
-              </SidebarRailButton>
-            </div>
-          </>
-        ) : (
-          <>
-            <nav className="flex-1 overflow-y-auto px-2 pb-2">
+        <nav className="flex-1 overflow-y-auto px-2 pb-2">
               <SidebarSectionPanel refSetter={setSectionRef("actions")}>
-                <SidebarExpandedRow title="New Chat" onClick={openNewChat}>
-                  <PlusCircle
-                    className="size-4 shrink-0 text-sidebar-accent-foreground"
-                    weight="duotone"
-                  />
-                  <span className="truncate">New Chat</span>
-                </SidebarExpandedRow>
+                <button
+                  type="button"
+                  title="New Chat"
+                  onClick={openNewChat}
+                  className="flex w-full items-center justify-center gap-2 rounded-xl px-3 py-2.5 text-[13.5px] font-semibold text-white transition-opacity hover:opacity-90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/45"
+                  style={{ background: "linear-gradient(135deg,#2563eb,#7c3aed)" }}
+                >
+                  <PlusCircle className="size-4 shrink-0" />
+                  New Chat
+                </button>
               </SidebarSectionPanel>
 
               <SidebarSectionPanel refSetter={setSectionRef("navigation")}>
-                {visiblePrimaryNav.map(({ icon: Icon, label, href }) => {
+                {visiblePrimaryNav.map(({ icon: Icon, label, href, iconClassName }) => {
                   const active = href
                     ? href === "/"
                       ? pathname === "/"
@@ -347,8 +260,7 @@ export function AppSidebar() {
                       onClick={href ? () => navigateTo(href) : undefined}
                     >
                       <Icon
-                        className="size-4 shrink-0 text-sidebar-accent-foreground"
-                        weight="duotone"
+                        className={cn("size-4 shrink-0", iconClassName ?? "text-sidebar-accent-foreground")}
                       />
                       <span className="truncate">{label}</span>
                     </SidebarExpandedRow>
@@ -357,7 +269,7 @@ export function AppSidebar() {
               </SidebarSectionPanel>
 
               <SidebarSectionPanel refSetter={setSectionRef("folders")}>
-                <div className="flex items-center justify-between px-2.5 pb-1 pt-4 text-xs font-medium text-sidebar-foreground/50">
+                <div className="flex items-center justify-between px-2.5 pb-1 pt-3 text-[13px] font-semibold text-sidebar-foreground/70">
                   <span>Folders</span>
                   <button
                     type="button"
@@ -369,9 +281,9 @@ export function AppSidebar() {
                       setFolderDraft("");
                       setSidebarError(null);
                     }}
-                    className="grid size-6 place-items-center rounded-lg transition hover:bg-white/40 hover:text-sidebar-accent-foreground focus:outline-none"
+                    className="grid size-6 place-items-center rounded-lg transition hover:bg-sidebar-accent hover:text-sidebar-accent-foreground focus:outline-none"
                   >
-                    <PlusCircle className="size-4" weight="duotone" />
+                    <PlusCircle className="size-4" />
                   </button>
                 </div>
                 <div className="flex flex-col gap-0.5">
@@ -454,33 +366,30 @@ export function AppSidebar() {
 
             <div
               ref={setSectionRef("account")}
-              className="border-t border-white/35 bg-white/10 p-2"
+              className="border-t border-sidebar-border p-2"
             >
               <Link
                 href="/profile"
                 title="Profile"
-                className="group flex min-w-0 items-center gap-2 rounded-2xl px-2 py-1.5 text-sidebar-foreground/90 transition-colors hover:bg-white/38 hover:text-sidebar-accent-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/45"
+                className="group flex min-w-0 items-center gap-2 rounded-2xl px-2 py-1.5 text-sidebar-foreground/90 transition-colors hover:bg-sidebar-accent hover:text-sidebar-accent-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/45"
               >
                 <div className="grid size-8 shrink-0 place-items-center rounded-full bg-primary text-[11px] font-medium text-primary-foreground">
                   {userInitial}
                 </div>
                 <div className="min-w-0 flex-1">
-                  <div className="truncate text-sm">{userLabel}</div>
+                  <div className="truncate text-[15px] font-semibold text-sidebar-foreground">{userLabel}</div>
                   {userSubtitle && (
-                    <div className="truncate text-[11px] text-sidebar-foreground/55">
+                    <div className="truncate text-xs font-medium text-sidebar-foreground/70">
                       {userSubtitle}
                     </div>
                   )}
                 </div>
                 <Gear
                   className="size-4 shrink-0 text-sidebar-foreground/45 transition-colors group-hover:text-sidebar-accent-foreground"
-                  weight="duotone"
                 />
               </Link>
             </div>
-          </>
-        )}
-      </motion.aside>
+      </aside>
 
       <DeleteConfirmDialog
         open={deleteTarget !== null}
@@ -513,36 +422,6 @@ export function AppSidebar() {
   );
 }
 
-function SidebarRailButton({
-  children,
-  title,
-  onClick,
-  active,
-}: {
-  children: React.ReactNode;
-  title: string;
-  onClick?: () => void;
-  active?: boolean;
-}) {
-  return (
-    <motion.button
-      type="button"
-      title={title}
-      aria-label={title}
-      onClick={onClick}
-      whileHover={{ scale: 1.04, y: -1 }}
-      whileTap={{ scale: 0.97 }}
-      className={cn(
-        "grid size-10 place-items-center rounded-2xl text-sidebar-foreground/70 transition-colors hover:bg-white/38 hover:text-sidebar-accent-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/45",
-        active &&
-          "bg-white/44 text-sidebar-accent-foreground shadow-[inset_0_1px_0_hsl(0_0%_100%/0.7),0_10px_26px_hsl(207_78%_38%/0.14)] backdrop-blur-md",
-      )}
-    >
-      {children}
-    </motion.button>
-  );
-}
-
 function SidebarExpandedRow({
   children,
   title,
@@ -560,9 +439,9 @@ function SidebarExpandedRow({
       title={title}
       onClick={onClick}
       className={cn(
-        "flex h-9 w-full items-center gap-2 rounded-2xl px-2.5 text-sm text-sidebar-foreground/80 transition-all hover:bg-white/38 hover:text-sidebar-accent-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/45",
+        "flex w-full items-center gap-2.5 rounded-2xl px-2.5 py-2 text-[13.5px] font-medium text-sidebar-foreground transition-all hover:bg-sidebar-accent hover:text-sidebar-accent-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/45",
         active &&
-          "bg-white/42 text-sidebar-accent-foreground shadow-[inset_0_1px_0_hsl(0_0%_100%/0.68),0_10px_24px_hsl(207_78%_38%/0.12)] backdrop-blur-md",
+          "bg-sidebar-accent text-sidebar-accent-foreground",
       )}
     >
       {children}
@@ -578,7 +457,7 @@ function SidebarSectionPanel({
   refSetter: (node: HTMLDivElement | null) => void;
 }) {
   return (
-    <div ref={refSetter} className="mb-2 p-1">
+    <div ref={refSetter} className="p-1">
       {children}
     </div>
   );
@@ -619,14 +498,14 @@ function ChatHistoryItem({
   return (
     <div
       className={cn(
-        "group relative flex h-8 items-center gap-2 rounded-xl px-2.5 text-sm text-sidebar-foreground/85 transition-colors hover:bg-sidebar-accent hover:text-sidebar-accent-foreground",
+        "group relative flex h-8 items-center gap-2 rounded-xl px-2.5 text-[13px] text-sidebar-foreground/70 transition-colors hover:bg-sidebar-accent hover:text-sidebar-accent-foreground",
         active && "bg-sidebar-accent text-sidebar-accent-foreground shadow-sm",
       )}
       title={title}
     >
       {editing ? (
         <>
-          <Folder className="size-4 shrink-0 opacity-0" weight="duotone" />
+          <Folder className="size-4 shrink-0 opacity-0" />
           <input
             autoFocus
             value={draftTitle}
@@ -659,7 +538,6 @@ function ChatHistoryItem({
       {running ? (
         <SpinnerGap
           className="size-3.5 shrink-0 animate-spin text-sidebar-accent-foreground/70"
-          weight="bold"
           aria-label="Agent is answering"
         />
       ) : !editing ? (
@@ -667,7 +545,6 @@ function ChatHistoryItem({
           {unread ? (
             <CheckCircle
               className="size-3.5 text-emerald-500 transition-opacity group-hover:hidden"
-              weight="duotone"
               aria-label="Answer completed"
             />
           ) : null}
@@ -677,7 +554,7 @@ function ChatHistoryItem({
             onRename={onRename}
             onDelete={onDelete}
             onMove={onMove}
-            triggerClassName="text-sidebar-foreground/60 hover:bg-white/30 hover:text-sidebar-foreground"
+            triggerClassName="text-sidebar-foreground/60 hover:bg-sidebar-accent hover:text-sidebar-foreground"
           />
         </div>
       ) : null}
@@ -721,12 +598,12 @@ function FolderSidebarItem({
   return (
     <div
       className={cn(
-        "group flex h-9 items-center gap-1 rounded-2xl px-2.5 text-sm text-sidebar-foreground/80 transition hover:bg-white/38 hover:text-sidebar-accent-foreground",
-        active && "bg-white/42 text-sidebar-accent-foreground shadow-sm",
+        "group flex h-9 items-center gap-1 rounded-2xl px-2.5 text-[15px] font-medium text-sidebar-foreground transition hover:bg-sidebar-accent hover:text-sidebar-accent-foreground",
+        active && "bg-sidebar-accent text-sidebar-accent-foreground",
       )}
     >
       <button type="button" onClick={onOpen} className="flex min-w-0 flex-1 items-center gap-2">
-        <Folder className="size-4 shrink-0" weight="duotone" />
+        <Folder className="size-4 shrink-0" />
         <span className="truncate">{folder.name}</span>
       </button>
       <DropdownMenu.Root>
@@ -734,9 +611,9 @@ function FolderSidebarItem({
           <button
             type="button"
             aria-label={`Actions for folder ${folder.name}`}
-            className="grid size-7 shrink-0 place-items-center rounded-lg opacity-0 transition hover:bg-white/35 focus:opacity-100 focus:outline-none group-hover:opacity-100 data-[state=open]:opacity-100"
+            className="grid size-7 shrink-0 place-items-center rounded-lg opacity-0 transition hover:bg-sidebar-accent focus:opacity-100 focus:outline-none group-hover:opacity-100 data-[state=open]:opacity-100"
           >
-            <DotsThree className="size-4" weight="bold" />
+            <DotsThree className="size-4" />
           </button>
         </DropdownMenu.Trigger>
         <DropdownMenu.Portal>
@@ -749,14 +626,14 @@ function FolderSidebarItem({
               onSelect={onStartRename}
               className="flex cursor-default items-center gap-2 rounded-lg px-2 py-1.5 text-sm text-foreground outline-none focus:bg-accent focus:text-foreground data-[highlighted]:bg-accent data-[highlighted]:text-foreground"
             >
-              <PencilSimple className="size-4" weight="duotone" />
+              <PencilSimple className="size-4" />
               Rename
             </DropdownMenu.Item>
             <DropdownMenu.Item
               onSelect={onDelete}
               className="flex cursor-default items-center gap-2 rounded-lg px-2 py-1.5 text-sm text-red-500 outline-none focus:bg-red-500/10 focus:text-red-600"
             >
-              <Trash className="size-4" weight="duotone" />
+              <Trash className="size-4" />
               Delete
             </DropdownMenu.Item>
           </DropdownMenu.Content>
@@ -780,8 +657,8 @@ function FolderNameInput({
   onCancel: () => void;
 }) {
   return (
-    <div className="flex h-9 items-center gap-2 rounded-2xl bg-white/32 px-2.5">
-      <Folder className="size-4 shrink-0 text-sidebar-accent-foreground" weight="duotone" />
+    <div className="flex h-9 items-center gap-2 rounded-2xl bg-sidebar-accent px-2.5">
+      <Folder className="size-4 shrink-0 text-sidebar-accent-foreground" />
       <input
         autoFocus
         value={value}
@@ -806,17 +683,17 @@ function FolderNameInput({
 function ChatTypeIcon({ type }: { type: string }) {
   if (type === "scheduled_task") {
     return (
-      <CalendarDots className="size-4 shrink-0 text-sidebar-accent-foreground" weight="duotone" />
+      <CalendarDots className="size-4 shrink-0 text-sidebar-accent-foreground" />
     );
   }
   return (
-    <ChatsCircle className="size-4 shrink-0 text-sidebar-accent-foreground" weight="duotone" />
+    <ChatsCircle className="size-4 shrink-0 text-sidebar-accent-foreground" />
   );
 }
 
 function SectionLabel({ children }: { children: React.ReactNode }) {
   return (
-    <div className="px-2.5 pb-1 pt-4 text-xs font-medium text-sidebar-foreground/50">
+    <div className="px-2.5 pb-1 pt-3 text-[13px] font-semibold text-sidebar-foreground/70">
       {children}
     </div>
   );

@@ -1,6 +1,6 @@
 "use client";
 
-import { CheckCircle } from "@phosphor-icons/react";
+import { CheckCircle2 as CheckCircle } from "lucide-react";
 import { AnimatePresence, motion, useReducedMotion } from "framer-motion";
 import {
   createContext,
@@ -58,7 +58,7 @@ export function WorkspaceToastProvider({ children }: { children: ReactNode }) {
               transition={{ duration: 0.16, ease: "easeOut" }}
               className="flex max-w-[min(28rem,calc(100vw-3rem))] items-center gap-2.5 rounded-2xl border border-slate-700/60 bg-slate-950/90 px-4 py-3 text-sm font-medium text-white shadow-[0_18px_50px_rgb(15_23_42/0.28)] backdrop-blur-xl"
             >
-              <CheckCircle className="size-[18px] shrink-0 text-emerald-400" weight="fill" />
+              <CheckCircle className="size-[18px] shrink-0 text-emerald-400" />
               <span className="truncate">{toast.text}</span>
             </motion.div>
           ) : null}

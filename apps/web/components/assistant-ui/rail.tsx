@@ -13,21 +13,21 @@
 
 import {
   Brain,
-  ChatCircle,
-  Cube,
+  MessageCircle as ChatCircle,
+  Box as Cube,
   FilePlus,
   FileText as PhFileText,
   FolderOpen,
   Globe as PhGlobe,
   ListChecks,
-  MagnifyingGlass,
-  PencilSimple,
-  Sparkle,
-  SpinnerGap,
-  TerminalWindow,
+  Search as MagnifyingGlass,
+  Pencil as PencilSimple,
+  Sparkles as Sparkle,
+  Loader2 as SpinnerGap,
+  Terminal as TerminalWindow,
   Wrench as PhWrench,
-  type Icon as PhosphorIcon,
-} from "@phosphor-icons/react";
+  type LucideIcon as PhosphorIcon,
+} from "lucide-react";
 import { ChevronRight, Download, ExternalLink, Eye, FileText } from "lucide-react";
 import Image from "next/image";
 import { type FC, type ReactNode } from "react";
@@ -63,9 +63,9 @@ export const RailRow: FC<{
         )}
       >
         {running ? (
-          <SpinnerGap className="size-[18px] animate-spin" weight="bold" />
+          <SpinnerGap className="size-[18px] animate-spin" />
         ) : (
-          <Icon className="size-[18px]" weight="duotone" />
+          <Icon className="size-[18px]" />
         )}
       </span>
     </div>
@@ -274,7 +274,7 @@ const CommandPreview: FC<{ command: string }> = ({ command }) => (
       <span className="size-2 rounded-full bg-yellow-400/80" />
       <span className="size-2 rounded-full bg-green-400/80" />
       <span className="ml-1.5 flex items-center gap-1 text-[10px] font-medium uppercase tracking-wide text-zinc-400">
-        <TerminalWindow className="size-3" weight="bold" />
+        <TerminalWindow className="size-3" />
         Terminal
       </span>
     </div>

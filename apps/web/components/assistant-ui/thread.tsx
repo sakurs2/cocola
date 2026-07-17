@@ -29,7 +29,6 @@ import {
   SendHorizontalIcon,
   Square,
   XIcon,
-  ArrowRight,
   ArrowUp as ArrowUpIcon,
   BarChart3,
   Code2,
@@ -116,39 +115,34 @@ const ScrollToBottom: FC = () => (
 
 type SuggestionTile = {
   icon: typeof BarChart3;
-  tile: string;
-  title: string;
-  subtitle: string;
+  label: string;
+  color: string;
   prompt: string;
 };
 
 const SUGGESTIONS: SuggestionTile[] = [
   {
     icon: BarChart3,
-    tile: "bg-emerald-100 text-emerald-600",
-    title: "Analyze this data",
-    subtitle: "and create insights",
+    label: "Analyze data",
+    color: "text-green-600",
     prompt: "Analyze this data and create insights",
   },
   {
     icon: Pencil,
-    tile: "bg-sky-100 text-sky-600",
-    title: "Draft a project plan",
-    subtitle: "for a new product",
+    label: "Write a draft",
+    color: "text-blue-600",
     prompt: "Draft a project plan for a new product",
   },
   {
     icon: Code2,
-    tile: "bg-violet-100 text-violet-600",
-    title: "Write a Python script",
-    subtitle: "to automate this task",
+    label: "Write code",
+    color: "text-violet-600",
     prompt: "Write a Python script to automate this task",
   },
   {
     icon: Lightbulb,
-    tile: "bg-pink-100 text-pink-600",
-    title: "Brainstorm creative ideas",
-    subtitle: "for a campaign",
+    label: "Brainstorm",
+    color: "text-pink-600",
     prompt: "Brainstorm creative ideas for a campaign",
   },
 ];
@@ -172,7 +166,7 @@ const ThreadWelcome: FC = () => {
         initial={{ opacity: 0, y: 8 }}
         animate={{ opacity: 1, y: 0 }}
         transition={{ duration: 0.22, ease: "easeOut" }}
-        className="flex w-full max-w-[var(--thread-max-width)] flex-grow flex-col items-center justify-center"
+        className="flex w-full max-w-[700px] flex-grow flex-col items-center justify-center"
       >
         <div className="flex flex-col items-center gap-2 sm:flex-row sm:items-center sm:justify-center sm:gap-3">
           <h1 className="sr-only">{greeting}</h1>
@@ -186,32 +180,18 @@ const ThreadWelcome: FC = () => {
           <ConversationComposer />
         </div>
 
-        <div className="mt-8 w-full">
-          <div className="mb-3 flex items-center gap-1.5 px-1 text-sm font-semibold text-foreground">
-            <Sparkles className="size-4 text-primary" />
-            Suggested prompts
-          </div>
-          <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
-            {SUGGESTIONS.map(({ icon: Icon, tile, title, subtitle, prompt }) => (
-              <ThreadPrimitive.Suggestion
-                key={title}
-                prompt={prompt}
-                send
-                className="cocola-prompt-card group relative flex flex-col gap-3 rounded-2xl border p-4 text-left"
-              >
-                <span className={cn("flex size-11 items-center justify-center rounded-xl", tile)}>
-                  <Icon className="size-5" />
-                </span>
-                <div className="min-w-0 pr-6">
-                  <div className="text-sm font-semibold leading-snug text-foreground">{title}</div>
-                  <div className="text-xs text-muted-foreground">{subtitle}</div>
-                </div>
-                <span className="cocola-prompt-arrow absolute bottom-4 right-4 grid size-7 place-items-center rounded-full border border-border bg-white/80 text-muted-foreground">
-                  <ArrowRight className="size-3.5" />
-                </span>
-              </ThreadPrimitive.Suggestion>
-            ))}
-          </div>
+        <div className="mt-5 flex w-full flex-wrap justify-center gap-2.5">
+          {SUGGESTIONS.map(({ icon: Icon, label, color, prompt }) => (
+            <ThreadPrimitive.Suggestion
+              key={label}
+              prompt={prompt}
+              send
+              className="cocola-prompt-chip flex items-center gap-2 rounded-full border border-border bg-card px-3.5 py-2 text-[13px] font-medium text-foreground transition-colors hover:bg-accent"
+            >
+              <Icon className={cn("size-4", color)} />
+              {label}
+            </ThreadPrimitive.Suggestion>
+          ))}
         </div>
       </motion.div>
     </ThreadPrimitive.Empty>
@@ -231,7 +211,7 @@ export const ConversationComposer: FC<{ placeholder?: string }> = ({ placeholder
     >
       <ComposerPrimitive.Unstable_TriggerPopoverRoot>
         <SkillTriggerMenu />
-        <ComposerPrimitive.Root className="composer-lift relative z-10 flex w-full flex-col rounded-2xl border px-3 py-2">
+        <ComposerPrimitive.Root className="composer-lift relative z-10 flex w-full flex-col rounded-2xl border p-3">
           <div className="relative min-w-0">
             <SelectedSkillChip onWidthChange={setSkillChipWidth} />
             <ComposerPrimitive.Input
@@ -250,9 +230,9 @@ export const ConversationComposer: FC<{ placeholder?: string }> = ({ placeholder
                     : selectedRuntime
                       ? `No ${selectedRuntime.label} compatible model configured`
                       : "No Agent Runtime available"
-                  : placeholder || "Send a message... (/ to choose a skill)"
+                  : placeholder || 'Ask anything, use "/" to select a skill'
               }
-              className="max-h-40 min-h-12 w-full resize-none border-none bg-transparent px-2 py-2.5 text-sm leading-6 outline-none placeholder:text-muted-foreground focus:ring-0 disabled:cursor-not-allowed"
+              className="max-h-40 min-h-12 w-full resize-none border-none bg-transparent px-2 py-2.5 text-[15px] leading-6 outline-none placeholder:text-muted-foreground focus:ring-0 disabled:cursor-not-allowed"
             />
           </div>
           <ComposerAttachments />
@@ -421,12 +401,12 @@ const RuntimePicker: FC = () => {
       <Popover.Trigger asChild>
         <button
           type="button"
-          className="flex max-w-[11rem] min-w-0 items-center gap-1.5 rounded-full border border-transparent px-2 py-1.5 text-sm font-medium text-foreground transition-colors hover:border-border hover:bg-muted disabled:cursor-not-allowed disabled:opacity-70"
+          className="flex max-w-[11rem] min-w-0 items-center gap-1.5 rounded-full border border-border px-2.5 py-1.5 text-[12.5px] font-medium text-foreground transition-colors hover:bg-muted disabled:cursor-not-allowed disabled:opacity-70"
           aria-label="Select Agent Runtime"
           disabled={runtimeLocked || runtimes.length === 0}
           title={runtimeLocked ? "Runtime is fixed for this conversation" : "Select Agent Runtime"}
         >
-          <ModelIcon icon={RUNTIME_ICONS[selectedRuntime?.id ?? ""]} className="size-5" />
+          <ModelIcon icon={RUNTIME_ICONS[selectedRuntime?.id ?? ""]} className="size-4" bare />
           <span className="truncate">{selectedRuntime?.label ?? "No runtime"}</span>
           {runtimeLocked || runtimes.length === 0 ? null : (
             <ChevronDown className="size-3.5 shrink-0 text-muted-foreground" />
@@ -471,13 +451,13 @@ const ModelPicker: FC = () => {
       <Popover.Trigger asChild>
         <button
           type="button"
-          className="flex max-w-[14rem] min-w-0 items-center gap-2 rounded-full border border-transparent px-2 py-1.5 text-sm font-medium text-foreground transition-colors hover:border-border hover:bg-muted focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+          className="flex max-w-[14rem] min-w-0 items-center gap-1.5 rounded-full border border-border px-2.5 py-1.5 text-[12.5px] font-medium text-foreground transition-colors hover:bg-muted focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
           aria-label={noModel ? "No model configured" : "Select model"}
           disabled={noModel}
         >
-          <ModelIcon icon={selectedModel?.icon} className="size-5" />
+          <ModelIcon icon={selectedModel?.icon} className="size-4" bare />
           <span className="truncate">{selectedModel?.label ?? "No model"}</span>
-          {noModel ? null : <ChevronDown className="size-4 shrink-0 text-muted-foreground" />}
+          {noModel ? null : <ChevronDown className="size-3.5 shrink-0 text-muted-foreground" />}
         </button>
       </Popover.Trigger>
       <Popover.Portal>
@@ -532,9 +512,10 @@ const ModelPicker: FC = () => {
   );
 };
 
-export const ModelIcon: FC<{ icon?: ModelIconConfig; className?: string }> = ({
+export const ModelIcon: FC<{ icon?: ModelIconConfig; className?: string; bare?: boolean }> = ({
   icon,
   className,
+  bare = false,
 }) => {
   const [lobeFailed, setLobeFailed] = useState(false);
   const normalizedSlug = normalizeLobeIconSlug(icon?.slug);
@@ -550,14 +531,19 @@ export const ModelIcon: FC<{ icon?: ModelIconConfig; className?: string }> = ({
     setLobeFailed(false);
   }, [icon?.slug, icon?.src, icon?.type]);
 
+  // `bare` drops the round chip frame (border/bg/rounded) so the logo sits
+  // directly on the button and fills its box — used by the composer pill pickers.
+  const frame = (tone: string) =>
+    cn(
+      "flex shrink-0 items-center justify-center overflow-hidden",
+      bare ? "" : cn("rounded-full border border-border", tone),
+      className,
+    );
+  const imgSize = bare ? "size-full object-contain" : "size-[72%] object-contain";
+
   if (icon?.type === "image" && icon.src) {
     return (
-      <span
-        className={cn(
-          "relative flex shrink-0 items-center justify-center overflow-hidden rounded-full border border-border bg-card",
-          className,
-        )}
-      >
+      <span className={cn(frame("bg-card"), "relative")}>
         <Image
           src={icon.src}
           alt=""
@@ -572,20 +558,14 @@ export const ModelIcon: FC<{ icon?: ModelIconConfig; className?: string }> = ({
   }
   if (lobePath) {
     return (
-      <span
-        className={cn(
-          "flex shrink-0 items-center justify-center overflow-hidden rounded-full border border-border bg-white",
-          className,
-        )}
-        aria-hidden="true"
-      >
+      <span className={frame("bg-white")} aria-hidden="true">
         <Image
           src={lobePath}
           alt=""
           width={96}
           height={96}
           unoptimized
-          className="size-[72%] object-contain"
+          className={imgSize}
           onError={() => setLobeFailed(true)}
         />
       </span>
@@ -593,20 +573,14 @@ export const ModelIcon: FC<{ icon?: ModelIconConfig; className?: string }> = ({
   }
   if (simpleIconPath) {
     return (
-      <span
-        className={cn(
-          "flex shrink-0 items-center justify-center overflow-hidden rounded-full border border-border bg-white",
-          className,
-        )}
-        aria-hidden="true"
-      >
+      <span className={frame("bg-white")} aria-hidden="true">
         <Image
           src={simpleIconPath}
           alt=""
           width={96}
           height={96}
           unoptimized
-          className="size-[72%] object-contain"
+          className={imgSize}
         />
       </span>
     );
@@ -618,22 +592,14 @@ export const ModelIcon: FC<{ icon?: ModelIconConfig; className?: string }> = ({
       : "";
   if (!fallbackBadge) {
     return (
-      <span
-        className={cn(
-          "flex shrink-0 items-center justify-center rounded-full border border-border bg-background text-muted-foreground",
-          className,
-        )}
-      >
-        <BrainCircuit className="size-[70%]" />
+      <span className={cn(frame("bg-background"), "text-muted-foreground")}>
+        <BrainCircuit className={bare ? "size-full" : "size-[70%]"} />
       </span>
     );
   }
   return (
     <span
-      className={cn(
-        "flex shrink-0 items-center justify-center rounded-full border border-border bg-muted text-[9px] font-bold leading-none text-foreground",
-        className,
-      )}
+      className={cn(frame("bg-muted"), "text-[9px] font-bold leading-none text-foreground")}
       aria-hidden="true"
     >
       {fallbackBadge}
@@ -750,11 +716,6 @@ const AssistantMessage: FC = () => (
   <MessagePrimitive.Root className="message-enter relative grid w-full max-w-[var(--thread-max-width)] grid-cols-[auto_1fr] grid-rows-[auto_1fr] py-3">
     <div className="col-span-2 col-start-1 row-start-1 max-w-full break-words px-0.5 py-1 leading-7 text-foreground">
       <div className="relative">
-        <MessagePrimitive.If last>
-          <ThreadPrimitive.If running>
-            <span className="aui-answer-border-beam" aria-hidden="true" />
-          </ThreadPrimitive.If>
-        </MessagePrimitive.If>
         <div className="relative z-[1]">
           <AssistantMessageHeader />
           {/* Vertical timeline rail: one continuous line (the ::before pseudo)

@@ -1,7 +1,7 @@
 "use client";
 
 import * as Dialog from "@radix-ui/react-dialog";
-import { Trash, X } from "@phosphor-icons/react";
+import { Trash2 as Trash, X } from "lucide-react";
 
 export function DeleteConfirmDialog({
   open,
@@ -29,7 +29,7 @@ export function DeleteConfirmDialog({
         <Dialog.Content className="cocola-user-ui fixed left-1/2 top-1/2 z-[51] w-[calc(100%-2rem)] max-w-md -translate-x-1/2 -translate-y-1/2 rounded-2xl border border-border bg-background p-5 text-foreground shadow-2xl outline-none">
           <div className="flex items-start gap-3">
             <div className="grid size-10 shrink-0 place-items-center rounded-xl bg-red-500/10 text-red-500">
-              <Trash className="size-5" weight="duotone" />
+              <Trash className="size-5" />
             </div>
             <div className="min-w-0 flex-1">
               <Dialog.Title className="text-base font-semibold">{title}</Dialog.Title>
