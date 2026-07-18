@@ -18,6 +18,15 @@ if [ -n "${COCOLA_EGRESS_ALLOWLIST+x}" ]; then
   fi
 fi
 
+# Start the resident code-server editor in the background (see
+# code-server-launch.sh for the ADR-0009 reconciliation). It drops to the
+# non-root brain user itself and self-supervises, so it never blocks the
+# keep-alive `wait` below. Launched AFTER the firewall so its in-container
+# service port is already allowed on the INPUT chain.
+if [ -x /opt/cocola/code-server-launch.sh ]; then
+  /opt/cocola/code-server-launch.sh &
+fi
+
 # Keep the session-lived container alive; the shim/user code arrive via exec.
 trap : TERM INT
 sleep infinity &

@@ -253,3 +253,28 @@ class ReleaseRequest(_message.Message):
 class ReleaseResponse(_message.Message):
     __slots__ = ()
     def __init__(self) -> None: ...
+
+class ResolveEndpointRequest(_message.Message):
+    __slots__ = ("session_id", "user_id", "port")
+    SESSION_ID_FIELD_NUMBER: _ClassVar[int]
+    USER_ID_FIELD_NUMBER: _ClassVar[int]
+    PORT_FIELD_NUMBER: _ClassVar[int]
+    session_id: str
+    user_id: str
+    port: int
+    def __init__(self, session_id: _Optional[str] = ..., user_id: _Optional[str] = ..., port: _Optional[int] = ...) -> None: ...
+
+class ResolveEndpointResponse(_message.Message):
+    __slots__ = ("url", "headers")
+    class HeadersEntry(_message.Message):
+        __slots__ = ("key", "value")
+        KEY_FIELD_NUMBER: _ClassVar[int]
+        VALUE_FIELD_NUMBER: _ClassVar[int]
+        key: str
+        value: str
+        def __init__(self, key: _Optional[str] = ..., value: _Optional[str] = ...) -> None: ...
+    URL_FIELD_NUMBER: _ClassVar[int]
+    HEADERS_FIELD_NUMBER: _ClassVar[int]
+    url: str
+    headers: _containers.ScalarMap[str, str]
+    def __init__(self, url: _Optional[str] = ..., headers: _Optional[_Mapping[str, str]] = ...) -> None: ...

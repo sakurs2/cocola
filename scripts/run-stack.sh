@@ -547,7 +547,7 @@ free_port "$WEB_PORT" web
     COCOLA_ADMIN_URL="${COCOLA_ADMIN_URL:-http://127.0.0.1:8092}" \
     COCOLA_ADMIN_KEY="$COCOLA_ADMIN_KEY" \
     AUTH_SECRET="$AUTH_SECRET" \
-      $SETSID pnpm dev --port "$WEB_PORT"
+      $SETSID node server.mjs --port "$WEB_PORT"
   ) >"$(log_redirect web)" 2>&1 &
   PIDS+=("$!")
 wait_port "127.0.0.1" "$WEB_PORT" "web" 240

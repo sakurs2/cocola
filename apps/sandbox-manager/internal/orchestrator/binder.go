@@ -162,6 +162,23 @@ func (b *Binder) Acquire(ctx context.Context, spec AcquireSpec) (*provider.Sandb
 	return out.Sandbox, nil
 }
 
+// LookupBinding returns the sandbox currently bound to a session without
+// creating one. It is a read-only path for callers (e.g. the Preview Proxy)
+// that need a session's live sandbox id but must never provision. Returns
+// ok=false when no healthy sandbox is bound. Unlike Acquire it takes no
+// per-session lock: a concurrent Release may race, in which case the caller
+// simply gets ok=false or a subsequently-invalid id, which the downstream
+// resolve tolerates.
+func (b *Binder) LookupBinding(ctx context.Context, sessionID, userID string) (*provider.Sandbox, bool, error) {
+	if sessionID == "" {
+		return nil, false, errors.New("orchestrator: session id required")
+	}
+	if userID == "" {
+		return nil, false, errors.New("orchestrator: user id required")
+	}
+	return b.lookup(ctx, sessionID, userID)
+}
+
 // AcquireWithOutcome is the heart of M2's "same session reuses same sandbox"
 // guarantee.
 //

@@ -1255,8 +1255,24 @@ func envOr(key, def string) string {
 // auth header, the provider API key is added as a fallback, matching the SDK's
 // server-proxy behaviour.
 func (p *Provider) resolveExecd(ctx context.Context, osbID string) (string, map[string]string, error) {
+	url, headers, err := p.resolveEndpoint(ctx, osbID, execdPort)
+	if err != nil {
+		return "", nil, err
+	}
+	// execd's auth header is added as a fallback when the lifecycle response
+	// omits it, matching the SDK's server-proxy behaviour.
+	if _, ok := headers[execdAuthHeader]; !ok && p.apiKey != "" {
+		headers[execdAuthHeader] = p.apiKey
+	}
+	return url, headers, nil
+}
+
+// resolveEndpoint asks the lifecycle endpoints API for the reachable URL of an
+// arbitrary in-sandbox port and the headers to replay on requests to it. It is
+// the shared primitive behind both execd resolution and the Preview Proxy.
+func (p *Provider) resolveEndpoint(ctx context.Context, osbID string, port int) (string, map[string]string, error) {
 	var ep endpointInfo
-	path := fmt.Sprintf("/sandboxes/%s/endpoints/%d", osbID, execdPort)
+	path := fmt.Sprintf("/sandboxes/%s/endpoints/%d", osbID, port)
 	if p.useServerProxy {
 		// Ask for a server-proxied URL ({server}/sandboxes/{id}/proxy/{port}),
 		// reachable by any client that can reach the server -- unlike the direct
@@ -1267,7 +1283,7 @@ func (p *Provider) resolveExecd(ctx context.Context, osbID string) (string, map[
 		return "", nil, err
 	}
 	if ep.Endpoint == "" {
-		return "", nil, fmt.Errorf("opensandbox: empty execd endpoint for %s", osbID)
+		return "", nil, fmt.Errorf("opensandbox: empty endpoint for %s port %d", osbID, port)
 	}
 	url := ep.Endpoint
 	if !strings.HasPrefix(url, "http") {
@@ -1279,10 +1295,33 @@ func (p *Provider) resolveExecd(ctx context.Context, osbID string) (string, map[
 	for k, v := range ep.Headers {
 		headers[k] = v
 	}
-	if _, ok := headers[execdAuthHeader]; !ok && p.apiKey != "" {
-		headers[execdAuthHeader] = p.apiKey
-	}
 	return url, headers, nil
+}
+
+// ResolveEndpoint maps a cocola sandbox id + in-sandbox port to a reachable URL
+// and the headers to replay. It implements provider.EndpointResolver, powering
+// the gateway's Preview Proxy. The OpenSandbox server-proxy form is preferred so
+// the URL is reachable from any client that can reach the server; the provider
+// API key is folded in as a fallback so the proxy authenticates.
+func (p *Provider) ResolveEndpoint(ctx context.Context, sid string, port int) (*provider.ResolvedEndpoint, error) {
+	if port <= 0 || port > 65535 {
+		return nil, fmt.Errorf("opensandbox: invalid port %d", port)
+	}
+	osbID, err := p.resolve(sid)
+	if err != nil {
+		return nil, err
+	}
+	if err := p.thawIfPaused(ctx, osbID); err != nil {
+		return nil, err
+	}
+	url, headers, err := p.resolveEndpoint(ctx, osbID, port)
+	if err != nil {
+		return nil, err
+	}
+	if _, ok := headers[apiKeyHeader]; !ok && p.apiKey != "" {
+		headers[apiKeyHeader] = p.apiKey
+	}
+	return &provider.ResolvedEndpoint{URL: url, Headers: headers}, nil
 }
 
 // bridgeExecSSE reads an execd SSE/NDJSON stream from r and emits cocola
@@ -1481,3 +1520,6 @@ func (p *Provider) do(ctx context.Context, method, path string, body, out any) e
 
 // compile-time assertion: Provider satisfies the core contract.
 var _ provider.SandboxProvider = (*Provider)(nil)
+
+// compile-time assertion: Provider can resolve arbitrary in-sandbox ports.
+var _ provider.EndpointResolver = (*Provider)(nil)

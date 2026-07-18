@@ -111,6 +111,22 @@ type SandboxProvider interface {
 	Health(ctx context.Context, sid string) (*HealthStatus, error)
 }
 
+// ResolvedEndpoint is a server-reachable URL for an in-sandbox port plus the
+// headers a caller must replay on every request to it (auth/routing).
+type ResolvedEndpoint struct {
+	URL     string
+	Headers map[string]string
+}
+
+// EndpointResolver is an optional extension implemented by providers that can
+// map an in-sandbox port to a reachable URL. It powers the Preview Proxy: a
+// user-launched dev server on port N inside the sandbox becomes browsable
+// without exposing the sandbox network. Providers that cannot proxy arbitrary
+// ports simply do not implement it.
+type EndpointResolver interface {
+	ResolveEndpoint(ctx context.Context, sid string, port int) (*ResolvedEndpoint, error)
+}
+
 // SessionStorageCleaner is an optional extension implemented by providers that
 // own host-visible session storage. The orchestrator calls it only for explicit
 // conversation deletion; idle reaping still preserves session directories.

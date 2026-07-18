@@ -37,6 +37,17 @@ iptables -P FORWARD DROP
 iptables -A INPUT -i lo -j ACCEPT
 iptables -A INPUT -m state --state ESTABLISHED,RELATED -j ACCEPT
 
+# In-container service ports the OpenSandbox server-proxy connects to (execd for
+# exec/file ops, code-server for the resident editor). These are reached ONLY
+# via the server-proxy, never published to the host, so allowing their inbound
+# SYN keeps INPUT default-DROP for everything else. code-server's port is
+# overridable via COCOLA_CODE_SERVER_PORT (kept in sync with the launcher).
+COCOLA_EXECD_PORT="${COCOLA_EXECD_PORT:-44772}"
+COCOLA_CODE_SERVER_PORT="${COCOLA_CODE_SERVER_PORT:-39378}"
+for svc_port in "$COCOLA_EXECD_PORT" "$COCOLA_CODE_SERVER_PORT"; do
+  [ -n "$svc_port" ] && iptables -A INPUT -p tcp --dport "$svc_port" -j ACCEPT
+done
+
 # --- output baseline: loopback + established + DNS -------------------------
 iptables -A OUTPUT -o lo -j ACCEPT
 iptables -A OUTPUT -m state --state ESTABLISHED,RELATED -j ACCEPT

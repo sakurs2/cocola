@@ -1060,6 +1060,36 @@ func TestMCPCRUDAndEffectiveConfig(t *testing.T) {
 		t.Fatalf("runtime headers not decrypted: %#v", amap["headers"])
 	}
 
+	rec = do(t, r, http.MethodGet, "/admin/mcps/hub?user_id=alice", "k", nil)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("mcp hub: want 200, got %d (%s)", rec.Code, rec.Body.String())
+	}
+	if bytes.Contains(rec.Body.Bytes(), []byte("ghp_secret123")) ||
+		bytes.Contains(rec.Body.Bytes(), []byte("amap_secret456")) ||
+		bytes.Contains(rec.Body.Bytes(), []byte("header_secret789")) {
+		t.Fatal("hub response leaked plaintext secret")
+	}
+	var hub struct {
+		TotalPublished int            `json:"total_published"`
+		TotalEffective int            `json:"total_effective"`
+		Transports     map[string]int `json:"transports"`
+		Servers        []struct {
+			ID        string `json:"id"`
+			Transport string `json:"transport"`
+			URLHint   string `json:"url_hint"`
+			Effective bool   `json:"effective"`
+		} `json:"servers"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &hub); err != nil {
+		t.Fatalf("decode hub: %v", err)
+	}
+	if hub.TotalPublished != 2 || hub.TotalEffective != 2 {
+		t.Fatalf("hub totals = %+v", hub)
+	}
+	if hub.Transports["stdio"] != 1 || hub.Transports["http"] != 1 {
+		t.Fatalf("hub transports = %+v", hub.Transports)
+	}
+
 	rec = do(t, r, http.MethodDelete, "/admin/mcps/github", "k", nil)
 	if rec.Code != http.StatusNoContent {
 		t.Fatalf("delete mcp: want 204, got %d", rec.Code)

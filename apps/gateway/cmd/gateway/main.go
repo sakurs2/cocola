@@ -43,6 +43,7 @@ import (
 	"github.com/cocola-project/cocola/apps/gateway/internal/convo"
 	"github.com/cocola-project/cocola/apps/gateway/internal/httpapi"
 	"github.com/cocola-project/cocola/apps/gateway/internal/objstore"
+	"github.com/cocola-project/cocola/apps/gateway/internal/sandboxmgr"
 	traceevents "github.com/cocola-project/cocola/apps/gateway/internal/traceevent"
 	"github.com/cocola-project/cocola/packages/go-common/config"
 	"github.com/cocola-project/cocola/packages/go-common/logger"
@@ -136,6 +137,22 @@ func main() {
 	issuer := token.NewIssuer(secret, issuerName, ttl)
 	api = api.WithSandboxTokenIssuer(issuer, ttl)
 	log.Info("per-user sandbox token issuer enabled (ttl " + ttl.String() + ")")
+
+	// Preview Proxy: optionally dial sandbox-manager so the gateway can resolve
+	// a session's in-sandbox dev-server port to a reachable URL and reverse-proxy
+	// it. Disabled (route returns 501) when COCOLA_SANDBOX_ADDR is unset, so
+	// environments without a directly-reachable sandbox-manager stay dark.
+	if sandboxAddr := strings.TrimSpace(os.Getenv("COCOLA_SANDBOX_ADDR")); sandboxAddr != "" {
+		sbClient, sberr := sandboxmgr.Dial(sandboxAddr)
+		if sberr != nil {
+			log.Fatal("cannot dial sandbox-manager: " + sberr.Error())
+		}
+		defer func() { _ = sbClient.Close() }()
+		api = api.WithSandboxResolver(sbClient)
+		log.Info("preview proxy enabled (sandbox-manager: " + sandboxAddr + ")")
+	} else {
+		log.Info("preview proxy disabled (COCOLA_SANDBOX_ADDR unset)")
+	}
 
 	// Attachment source of truth. MinIO is required so large attachments and
 	// restart behavior do not depend on an implicit inline-only mode.

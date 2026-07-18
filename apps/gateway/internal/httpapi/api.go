@@ -27,6 +27,7 @@ import (
 	"github.com/cocola-project/cocola/apps/gateway/internal/chatrun"
 	"github.com/cocola-project/cocola/apps/gateway/internal/convo"
 	"github.com/cocola-project/cocola/apps/gateway/internal/objstore"
+	"github.com/cocola-project/cocola/apps/gateway/internal/sandboxmgr"
 	traceevents "github.com/cocola-project/cocola/apps/gateway/internal/traceevent"
 	"github.com/cocola-project/cocola/packages/go-common/logger"
 	"github.com/cocola-project/cocola/packages/go-common/metrics"
@@ -101,6 +102,10 @@ type API struct {
 	runs               *runController
 	runtimes           []agent.Runtime
 	runtimeByID        map[string]agent.Runtime
+	// sandboxResolver powers the Preview Proxy: it maps a session + in-sandbox
+	// port to a reachable URL via sandbox-manager. nil disables /v1/preview
+	// (the route returns 501), keeping the feature dark until wired in main.
+	sandboxResolver sandboxmgr.EndpointResolver
 }
 
 // New builds the BFF API.
@@ -129,6 +134,14 @@ func (a *API) WithAgentRuntimes(runtimes []agent.Runtime) *API {
 // shared with the observability port mounted in main; passing nil (the default)
 // leaves the API uninstrumented, which keeps unit tests dependency-light.
 func (a *API) WithMetrics(reg *metrics.Registry) *API { a.metrics = reg; return a }
+
+// WithSandboxResolver enables the Preview Proxy route. Production passes the
+// sandbox-manager gRPC client; nil (the default) leaves /v1/preview returning
+// 501 so environments without a reachable sandbox-manager stay dark.
+func (a *API) WithSandboxResolver(r sandboxmgr.EndpointResolver) *API {
+	a.sandboxResolver = r
+	return a
+}
 
 // WithObjStore enables the attachment source-of-truth path: every uploaded file
 // is PutObject'd to the store, then split by inlineMaxBytes — files at or below
@@ -240,6 +253,13 @@ func (a *API) Handler() http.Handler {
 		a.verifier.Middleware(writeErr)(http.HandlerFunc(a.conversationMessages))))
 	mux.Handle("GET /v1/conversations/{id}/artifacts/{artifact_id}", a.instrument("GET /v1/conversations/{id}/artifacts/{artifact_id}",
 		a.verifier.Middleware(writeErr)(http.HandlerFunc(a.downloadArtifact))))
+	// Preview Proxy: reverse-proxy a user-launched in-sandbox dev server. The
+	// trailing {rest...} wildcard captures the remaining path so nested asset
+	// requests are proxied too.
+	mux.Handle("/v1/preview/{session_id}/{port}/{rest...}", a.instrument("/v1/preview",
+		a.verifier.Middleware(writeErr)(http.HandlerFunc(a.previewProxy))))
+	mux.Handle("/v1/preview/{session_id}/{port}", a.instrument("/v1/preview",
+		a.verifier.Middleware(writeErr)(http.HandlerFunc(a.previewProxy))))
 	// Tracing: wrap the whole mux so an inbound W3C traceparent is extracted and
 	// a server span is started before auth/handlers run; the span context then
 	// flows into the agent gRPC call (client stats handler) for an end-to-end

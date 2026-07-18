@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
-import { LoaderCircle, Plug, Power } from "lucide-react";
+import { LayoutGrid, LoaderCircle, Plug, Power, Zap } from "lucide-react";
 import Link from "next/link";
 
 import { cn } from "@/lib/utils";
@@ -21,8 +21,15 @@ type MCPServer = {
   effective_enabled: boolean;
 };
 
+type MCPHub = {
+  total_published: number;
+  total_effective: number;
+  transports: Record<string, number>;
+};
+
 export default function MCPPage() {
   const [mcps, setMcps] = useState<MCPServer[]>([]);
+  const [hub, setHub] = useState<MCPHub | null>(null);
   const [loading, setLoading] = useState(true);
   const [workingId, setWorkingId] = useState<string | null>(null);
   const [error, setError] = useState("");
@@ -31,14 +38,32 @@ export default function MCPPage() {
     setLoading(true);
     setError("");
     try {
-      const res = await fetch("/api/mcps", { cache: "no-store" });
+      const [res, hubRes] = await Promise.all([
+        fetch("/api/mcps", { cache: "no-store" }),
+        fetch("/api/mcps/hub", { cache: "no-store" }),
+      ]);
       if (!res.ok) throw new Error(await readError(res));
       const data = (await res.json()) as { mcps?: MCPServer[] };
       setMcps(data.mcps ?? []);
+      // The hub rollup is supplementary; a failure here must not blank the page.
+      if (hubRes.ok) {
+        setHub((await hubRes.json()) as MCPHub);
+      } else {
+        setHub(null);
+      }
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
     } finally {
       setLoading(false);
+    }
+  }, []);
+
+  const refreshHub = useCallback(async () => {
+    try {
+      const res = await fetch("/api/mcps/hub", { cache: "no-store" });
+      setHub(res.ok ? ((await res.json()) as MCPHub) : null);
+    } catch {
+      setHub(null);
     }
   }, []);
 
@@ -66,6 +91,8 @@ export default function MCPPage() {
       setError(err instanceof Error ? err.message : String(err));
     } finally {
       setWorkingId(null);
+      // Refresh the aggregated rollup so effective counts track the toggle.
+      void refreshHub();
     }
   };
 
@@ -78,6 +105,47 @@ export default function MCPPage() {
             Choose which administrator-published MCP servers are available in your agent sessions.
           </p>
         </header>
+
+        {hub ? (
+          <section className="grid gap-3 sm:grid-cols-3">
+            <div className="flex items-center gap-3 rounded-xl border border-border bg-card p-4 shadow-card">
+              <div className="grid size-10 shrink-0 place-items-center rounded-xl bg-orange-50 text-orange-600 ring-1 ring-orange-100">
+                <LayoutGrid className="size-5" />
+              </div>
+              <div className="min-w-0">
+                <div className="text-2xl font-bold leading-none">{hub.total_published}</div>
+                <div className="mt-1 text-xs text-muted-foreground">Published servers</div>
+              </div>
+            </div>
+            <div className="flex items-center gap-3 rounded-xl border border-border bg-card p-4 shadow-card">
+              <div className="grid size-10 shrink-0 place-items-center rounded-xl bg-emerald-50 text-emerald-600 ring-1 ring-emerald-100">
+                <Zap className="size-5" />
+              </div>
+              <div className="min-w-0">
+                <div className="text-2xl font-bold leading-none">{hub.total_effective}</div>
+                <div className="mt-1 text-xs text-muted-foreground">Active in your sessions</div>
+              </div>
+            </div>
+            <div className="flex items-center gap-3 rounded-xl border border-border bg-card p-4 shadow-card">
+              <div className="min-w-0">
+                <div className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
+                  By transport
+                </div>
+                <div className="mt-2 flex flex-wrap gap-1.5">
+                  {Object.keys(hub.transports).length ? (
+                    Object.entries(hub.transports).map(([transport, count]) => (
+                      <Badge key={transport} variant="outline">
+                        {transport} · {count}
+                      </Badge>
+                    ))
+                  ) : (
+                    <span className="text-xs text-muted-foreground">None active</span>
+                  )}
+                </div>
+              </div>
+            </div>
+          </section>
+        ) : null}
 
         {error ? (
           <div className="rounded-xl border border-red-500/30 bg-red-500/10 px-3.5 py-2.5 text-sm text-red-600">

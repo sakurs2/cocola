@@ -32,6 +32,15 @@ service SandboxService {
   // Release explicitly unbinds and destroys a session's sandbox immediately,
   // skipping the lease grace period (clean session end).
   rpc Release(ReleaseRequest) returns (ReleaseResponse);
+
+  // --- Preview Proxy: resolve an in-sandbox port to a reachable URL ---------
+  // ResolveEndpoint maps a session's bound sandbox + an in-sandbox port to a
+  // server-reachable URL (plus any auth headers to replay). It powers the
+  // gateway's Preview Proxy: a user-launched dev server on port N inside the
+  // sandbox becomes browsable through the gateway without exposing the sandbox
+  // network. Reuses the same OpenSandbox lifecycle endpoints API the provider
+  // already uses to reach execd.
+  rpc ResolveEndpoint(ResolveEndpointRequest) returns (ResolveEndpointResponse);
 }
 
 message Resources {
@@ -157,3 +166,22 @@ message ReleaseRequest {
   string user_id = 2;
 }
 message ReleaseResponse {}
+
+// --- Preview Proxy messages ----------------------------------------------
+
+message ResolveEndpointRequest {
+  string session_id = 1;
+  string user_id = 2;
+  // port is the in-sandbox TCP port to expose (e.g. a dev server on 3000).
+  int32 port = 3;
+}
+
+message ResolveEndpointResponse {
+  // url is a server-reachable base URL for the in-sandbox port. Callers append
+  // the request path/query. It already includes any scheme + host + base path
+  // the provider proxy requires.
+  string url = 1;
+  // headers carries per-sandbox auth/routing to replay on every proxied request
+  // (e.g. X-EXECD-ACCESS-TOKEN / OPEN-SANDBOX-API-KEY).
+  map<string, string> headers = 2;
+}

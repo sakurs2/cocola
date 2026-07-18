@@ -310,6 +310,78 @@ func (a *Admin) ListEffectiveMCPRuntimeConfig(ctx context.Context, userID string
 	return out, nil
 }
 
+// MCPHubEntry is a single server's safe (secret-free) summary inside the
+// aggregated hub view.
+type MCPHubEntry struct {
+	ID          string `json:"id"`
+	Name        string `json:"name"`
+	Description string `json:"description"`
+	Transport   string `json:"transport"`
+	Command     string `json:"command,omitempty"`
+	URLHint     string `json:"url_hint,omitempty"`
+	// Effective reports whether this server is active for the user right now
+	// (admin-enabled AND selected by the user's preference/default), i.e. it is
+	// one of the servers agent-runtime loads for the user's next turn.
+	Effective bool `json:"effective"`
+	// PreferenceSet is true when the user has an explicit opt-in/out, as opposed
+	// to inheriting the admin default.
+	PreferenceSet bool `json:"preference_set"`
+	DefaultOn     bool `json:"default_on"`
+}
+
+// MCPHub is the aggregated, user-scoped view of the MCP catalog: the full set of
+// admin-published servers annotated with the user's effective selection, plus
+// rollups (counts, transport breakdown). It is the single "hub" projection over
+// the per-server CRUD + preference primitives, mirroring exactly what
+// agent-runtime's mcp_loader would resolve for this user.
+type MCPHub struct {
+	UserID         string         `json:"user_id"`
+	TotalPublished int            `json:"total_published"`
+	TotalEffective int            `json:"total_effective"`
+	Transports     map[string]int `json:"transports"`
+	Servers        []MCPHubEntry  `json:"servers"`
+}
+
+// AggregateMCPHub builds the user-scoped hub summary. It reuses ListUserMCPCatalog
+// (admin-published + user preference resolution) so the "effective" flags stay
+// consistent with ListEffectiveMCPRuntimeConfig, and never surfaces secrets:
+// only names, transports, commands and sanitized URL hints.
+func (a *Admin) AggregateMCPHub(ctx context.Context, userID string) (MCPHub, error) {
+	userID = strings.TrimSpace(userID)
+	if userID == "" {
+		return MCPHub{}, ErrInvalidArg
+	}
+	views, err := a.ListUserMCPCatalog(ctx, userID)
+	if err != nil {
+		return MCPHub{}, err
+	}
+	hub := MCPHub{
+		UserID:     userID,
+		Transports: map[string]int{},
+		Servers:    make([]MCPHubEntry, 0, len(views)),
+	}
+	for _, view := range views {
+		effective := view.EffectiveEnabled && view.Enabled
+		hub.TotalPublished++
+		if effective {
+			hub.TotalEffective++
+			hub.Transports[view.Transport]++
+		}
+		hub.Servers = append(hub.Servers, MCPHubEntry{
+			ID:            view.ID,
+			Name:          view.Name,
+			Description:   view.Description,
+			Transport:     view.Transport,
+			Command:       view.Command,
+			URLHint:       view.URLHint,
+			Effective:     effective,
+			PreferenceSet: view.PreferenceSet,
+			DefaultOn:     view.DefaultEnabled,
+		})
+	}
+	return hub, nil
+}
+
 func (a *Admin) mcpServerRuntimeConfig(server store.MCPServer) (map[string]any, error) {
 	switch server.Transport {
 	case MCPTransportStdio:

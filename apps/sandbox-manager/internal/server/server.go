@@ -216,6 +216,42 @@ func (s *Server) Release(ctx context.Context, req *sandboxv1.ReleaseRequest) (*s
 	return &sandboxv1.ReleaseResponse{}, nil
 }
 
+// ResolveEndpoint maps a session's bound sandbox + in-sandbox port to a
+// reachable URL. It powers the gateway's Preview Proxy. Requires both a binder
+// (to find the session's sandbox without provisioning) and a provider that
+// implements EndpointResolver.
+func (s *Server) ResolveEndpoint(ctx context.Context, req *sandboxv1.ResolveEndpointRequest) (*sandboxv1.ResolveEndpointResponse, error) {
+	if s.b == nil {
+		return nil, status.Error(codes.Unimplemented, "binder not configured")
+	}
+	resolver, ok := s.p.(provider.EndpointResolver)
+	if !ok {
+		return nil, status.Error(codes.Unimplemented, "provider cannot resolve endpoints")
+	}
+	if req.GetSessionId() == "" || req.GetUserId() == "" {
+		return nil, status.Error(codes.InvalidArgument, "session_id and user_id are required")
+	}
+	port := int(req.GetPort())
+	if port <= 0 || port > 65535 {
+		return nil, status.Error(codes.InvalidArgument, "port must be in 1..65535")
+	}
+	sb, ok, err := s.b.LookupBinding(ctx, req.GetSessionId(), req.GetUserId())
+	if err != nil {
+		if errors.Is(err, orchestrator.ErrSessionOwnerMismatch) {
+			return nil, status.Error(codes.PermissionDenied, "session owned by another user")
+		}
+		return nil, status.Errorf(codes.Internal, "lookup binding: %v", err)
+	}
+	if !ok {
+		return nil, status.Error(codes.FailedPrecondition, "no sandbox bound to session")
+	}
+	ep, err := resolver.ResolveEndpoint(ctx, sb.ID, port)
+	if err != nil {
+		return nil, status.Errorf(codes.Internal, "resolve endpoint: %v", err)
+	}
+	return &sandboxv1.ResolveEndpointResponse{Url: ep.URL, Headers: ep.Headers}, nil
+}
+
 func toProtoWorkspaceState(state provider.WorkspaceState) sandboxv1.WorkspaceState {
 	switch state {
 	case provider.WorkspaceFresh:

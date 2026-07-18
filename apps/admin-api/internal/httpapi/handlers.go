@@ -910,6 +910,29 @@ func (a *API) listEffectiveMCPs(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, cfg)
 }
 
+func (a *API) getMCPHub(w http.ResponseWriter, r *http.Request) {
+	userID := strings.TrimSpace(r.URL.Query().Get("user_id"))
+	if userID == "" {
+		mapErr(w, service.ErrInvalidArg)
+		return
+	}
+	hub, err := a.svc.AggregateMCPHub(r.Context(), userID)
+	if err != nil {
+		mapErr(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, hub)
+}
+
+func (a *API) getMyMCPHub(w http.ResponseWriter, r *http.Request) {
+	hub, err := a.svc.AggregateMCPHub(r.Context(), actorOf(r))
+	if err != nil {
+		mapErr(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, hub)
+}
+
 func (a *API) listMyMCPs(w http.ResponseWriter, r *http.Request) {
 	mcps, err := a.svc.ListUserMCPCatalog(r.Context(), actorOf(r))
 	if err != nil {

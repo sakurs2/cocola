@@ -32,6 +32,9 @@ COPY --from=build /repo ./
 WORKDIR /repo/apps/web
 EXPOSE 3000
 ENV HOSTNAME=0.0.0.0 PORT=3000
-# Invoke next directly (avoid pnpm's `--` arg-forwarding quirk). next start reads
-# HOSTNAME/PORT from the env, binding 0.0.0.0:3000.
-ENTRYPOINT ["pnpm", "exec", "next", "start"]
+# Custom Node server (server.mjs) instead of `next start`: it wraps Next but adds
+# an `upgrade` handler so the same-origin Preview Proxy can carry WebSockets
+# (code-server editor + dev-server HMR). It reads HOSTNAME/PORT from the env,
+# binding 0.0.0.0:3000, and uses the prebuilt .next (NODE_ENV=production -> dev
+# off). See apps/web/server.mjs for the ADR/auth rationale.
+ENTRYPOINT ["node", "server.mjs"]

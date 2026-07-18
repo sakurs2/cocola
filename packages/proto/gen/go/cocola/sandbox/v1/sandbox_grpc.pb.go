@@ -19,17 +19,18 @@ import (
 const _ = grpc.SupportPackageIsVersion7
 
 const (
-	SandboxService_Create_FullMethodName    = "/cocola.sandbox.v1.SandboxService/Create"
-	SandboxService_Exec_FullMethodName      = "/cocola.sandbox.v1.SandboxService/Exec"
-	SandboxService_WriteFile_FullMethodName = "/cocola.sandbox.v1.SandboxService/WriteFile"
-	SandboxService_ReadFile_FullMethodName  = "/cocola.sandbox.v1.SandboxService/ReadFile"
-	SandboxService_Pause_FullMethodName     = "/cocola.sandbox.v1.SandboxService/Pause"
-	SandboxService_Resume_FullMethodName    = "/cocola.sandbox.v1.SandboxService/Resume"
-	SandboxService_Destroy_FullMethodName   = "/cocola.sandbox.v1.SandboxService/Destroy"
-	SandboxService_Health_FullMethodName    = "/cocola.sandbox.v1.SandboxService/Health"
-	SandboxService_Acquire_FullMethodName   = "/cocola.sandbox.v1.SandboxService/Acquire"
-	SandboxService_Heartbeat_FullMethodName = "/cocola.sandbox.v1.SandboxService/Heartbeat"
-	SandboxService_Release_FullMethodName   = "/cocola.sandbox.v1.SandboxService/Release"
+	SandboxService_Create_FullMethodName          = "/cocola.sandbox.v1.SandboxService/Create"
+	SandboxService_Exec_FullMethodName            = "/cocola.sandbox.v1.SandboxService/Exec"
+	SandboxService_WriteFile_FullMethodName       = "/cocola.sandbox.v1.SandboxService/WriteFile"
+	SandboxService_ReadFile_FullMethodName        = "/cocola.sandbox.v1.SandboxService/ReadFile"
+	SandboxService_Pause_FullMethodName           = "/cocola.sandbox.v1.SandboxService/Pause"
+	SandboxService_Resume_FullMethodName          = "/cocola.sandbox.v1.SandboxService/Resume"
+	SandboxService_Destroy_FullMethodName         = "/cocola.sandbox.v1.SandboxService/Destroy"
+	SandboxService_Health_FullMethodName          = "/cocola.sandbox.v1.SandboxService/Health"
+	SandboxService_Acquire_FullMethodName         = "/cocola.sandbox.v1.SandboxService/Acquire"
+	SandboxService_Heartbeat_FullMethodName       = "/cocola.sandbox.v1.SandboxService/Heartbeat"
+	SandboxService_Release_FullMethodName         = "/cocola.sandbox.v1.SandboxService/Release"
+	SandboxService_ResolveEndpoint_FullMethodName = "/cocola.sandbox.v1.SandboxService/ResolveEndpoint"
 )
 
 // SandboxServiceClient is the client API for SandboxService service.
@@ -56,6 +57,14 @@ type SandboxServiceClient interface {
 	// Release explicitly unbinds and destroys a session's sandbox immediately,
 	// skipping the lease grace period (clean session end).
 	Release(ctx context.Context, in *ReleaseRequest, opts ...grpc.CallOption) (*ReleaseResponse, error)
+	// --- Preview Proxy: resolve an in-sandbox port to a reachable URL ---------
+	// ResolveEndpoint maps a session's bound sandbox + an in-sandbox port to a
+	// server-reachable URL (plus any auth headers to replay). It powers the
+	// gateway's Preview Proxy: a user-launched dev server on port N inside the
+	// sandbox becomes browsable through the gateway without exposing the sandbox
+	// network. Reuses the same OpenSandbox lifecycle endpoints API the provider
+	// already uses to reach execd.
+	ResolveEndpoint(ctx context.Context, in *ResolveEndpointRequest, opts ...grpc.CallOption) (*ResolveEndpointResponse, error)
 }
 
 type sandboxServiceClient struct {
@@ -188,6 +197,15 @@ func (c *sandboxServiceClient) Release(ctx context.Context, in *ReleaseRequest, 
 	return out, nil
 }
 
+func (c *sandboxServiceClient) ResolveEndpoint(ctx context.Context, in *ResolveEndpointRequest, opts ...grpc.CallOption) (*ResolveEndpointResponse, error) {
+	out := new(ResolveEndpointResponse)
+	err := c.cc.Invoke(ctx, SandboxService_ResolveEndpoint_FullMethodName, in, out, opts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 // SandboxServiceServer is the server API for SandboxService service.
 // All implementations must embed UnimplementedSandboxServiceServer
 // for forward compatibility
@@ -212,6 +230,14 @@ type SandboxServiceServer interface {
 	// Release explicitly unbinds and destroys a session's sandbox immediately,
 	// skipping the lease grace period (clean session end).
 	Release(context.Context, *ReleaseRequest) (*ReleaseResponse, error)
+	// --- Preview Proxy: resolve an in-sandbox port to a reachable URL ---------
+	// ResolveEndpoint maps a session's bound sandbox + an in-sandbox port to a
+	// server-reachable URL (plus any auth headers to replay). It powers the
+	// gateway's Preview Proxy: a user-launched dev server on port N inside the
+	// sandbox becomes browsable through the gateway without exposing the sandbox
+	// network. Reuses the same OpenSandbox lifecycle endpoints API the provider
+	// already uses to reach execd.
+	ResolveEndpoint(context.Context, *ResolveEndpointRequest) (*ResolveEndpointResponse, error)
 	mustEmbedUnimplementedSandboxServiceServer()
 }
 
@@ -251,6 +277,9 @@ func (UnimplementedSandboxServiceServer) Heartbeat(context.Context, *HeartbeatRe
 }
 func (UnimplementedSandboxServiceServer) Release(context.Context, *ReleaseRequest) (*ReleaseResponse, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method Release not implemented")
+}
+func (UnimplementedSandboxServiceServer) ResolveEndpoint(context.Context, *ResolveEndpointRequest) (*ResolveEndpointResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method ResolveEndpoint not implemented")
 }
 func (UnimplementedSandboxServiceServer) mustEmbedUnimplementedSandboxServiceServer() {}
 
@@ -466,6 +495,24 @@ func _SandboxService_Release_Handler(srv interface{}, ctx context.Context, dec f
 	return interceptor(ctx, in, info, handler)
 }
 
+func _SandboxService_ResolveEndpoint_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(ResolveEndpointRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(SandboxServiceServer).ResolveEndpoint(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: SandboxService_ResolveEndpoint_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(SandboxServiceServer).ResolveEndpoint(ctx, req.(*ResolveEndpointRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 // SandboxService_ServiceDesc is the grpc.ServiceDesc for SandboxService service.
 // It's only intended for direct use with grpc.RegisterService,
 // and not to be introspected or modified (even as a copy)
@@ -512,6 +559,10 @@ var SandboxService_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "Release",
 			Handler:    _SandboxService_Release_Handler,
+		},
+		{
+			MethodName: "ResolveEndpoint",
+			Handler:    _SandboxService_ResolveEndpoint_Handler,
 		},
 	},
 	Streams: []grpc.StreamDesc{

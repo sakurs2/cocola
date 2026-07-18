@@ -5,7 +5,7 @@ import warnings
 
 from cocola.sandbox.v1 import sandbox_pb2 as cocola_dot_sandbox_dot_v1_dot_sandbox__pb2
 
-GRPC_GENERATED_VERSION = '1.80.0'
+GRPC_GENERATED_VERSION = '1.73.1'
 GRPC_VERSION = grpc.__version__
 _version_not_supported = False
 
@@ -18,7 +18,7 @@ except ImportError:
 if _version_not_supported:
     raise RuntimeError(
         f'The grpc package installed is at version {GRPC_VERSION},'
-        + ' but the generated code in cocola/sandbox/v1/sandbox_pb2_grpc.py depends on'
+        + f' but the generated code in cocola/sandbox/v1/sandbox_pb2_grpc.py depends on'
         + f' grpcio>={GRPC_GENERATED_VERSION}.'
         + f' Please upgrade your grpc module to grpcio>={GRPC_GENERATED_VERSION}'
         + f' or downgrade your generated code using grpcio-tools<={GRPC_VERSION}.'
@@ -94,6 +94,11 @@ class SandboxServiceStub(object):
                 '/cocola.sandbox.v1.SandboxService/Release',
                 request_serializer=cocola_dot_sandbox_dot_v1_dot_sandbox__pb2.ReleaseRequest.SerializeToString,
                 response_deserializer=cocola_dot_sandbox_dot_v1_dot_sandbox__pb2.ReleaseResponse.FromString,
+                _registered_method=True)
+        self.ResolveEndpoint = channel.unary_unary(
+                '/cocola.sandbox.v1.SandboxService/ResolveEndpoint',
+                request_serializer=cocola_dot_sandbox_dot_v1_dot_sandbox__pb2.ResolveEndpointRequest.SerializeToString,
+                response_deserializer=cocola_dot_sandbox_dot_v1_dot_sandbox__pb2.ResolveEndpointResponse.FromString,
                 _registered_method=True)
 
 
@@ -181,6 +186,19 @@ class SandboxServiceServicer(object):
         context.set_details('Method not implemented!')
         raise NotImplementedError('Method not implemented!')
 
+    def ResolveEndpoint(self, request, context):
+        """--- Preview Proxy: resolve an in-sandbox port to a reachable URL ---------
+        ResolveEndpoint maps a session's bound sandbox + an in-sandbox port to a
+        server-reachable URL (plus any auth headers to replay). It powers the
+        gateway's Preview Proxy: a user-launched dev server on port N inside the
+        sandbox becomes browsable through the gateway without exposing the sandbox
+        network. Reuses the same OpenSandbox lifecycle endpoints API the provider
+        already uses to reach execd.
+        """
+        context.set_code(grpc.StatusCode.UNIMPLEMENTED)
+        context.set_details('Method not implemented!')
+        raise NotImplementedError('Method not implemented!')
+
 
 def add_SandboxServiceServicer_to_server(servicer, server):
     rpc_method_handlers = {
@@ -238,6 +256,11 @@ def add_SandboxServiceServicer_to_server(servicer, server):
                     servicer.Release,
                     request_deserializer=cocola_dot_sandbox_dot_v1_dot_sandbox__pb2.ReleaseRequest.FromString,
                     response_serializer=cocola_dot_sandbox_dot_v1_dot_sandbox__pb2.ReleaseResponse.SerializeToString,
+            ),
+            'ResolveEndpoint': grpc.unary_unary_rpc_method_handler(
+                    servicer.ResolveEndpoint,
+                    request_deserializer=cocola_dot_sandbox_dot_v1_dot_sandbox__pb2.ResolveEndpointRequest.FromString,
+                    response_serializer=cocola_dot_sandbox_dot_v1_dot_sandbox__pb2.ResolveEndpointResponse.SerializeToString,
             ),
     }
     generic_handler = grpc.method_handlers_generic_handler(
@@ -543,6 +566,33 @@ class SandboxService(object):
             '/cocola.sandbox.v1.SandboxService/Release',
             cocola_dot_sandbox_dot_v1_dot_sandbox__pb2.ReleaseRequest.SerializeToString,
             cocola_dot_sandbox_dot_v1_dot_sandbox__pb2.ReleaseResponse.FromString,
+            options,
+            channel_credentials,
+            insecure,
+            call_credentials,
+            compression,
+            wait_for_ready,
+            timeout,
+            metadata,
+            _registered_method=True)
+
+    @staticmethod
+    def ResolveEndpoint(request,
+            target,
+            options=(),
+            channel_credentials=None,
+            call_credentials=None,
+            insecure=False,
+            compression=None,
+            wait_for_ready=None,
+            timeout=None,
+            metadata=None):
+        return grpc.experimental.unary_unary(
+            request,
+            target,
+            '/cocola.sandbox.v1.SandboxService/ResolveEndpoint',
+            cocola_dot_sandbox_dot_v1_dot_sandbox__pb2.ResolveEndpointRequest.SerializeToString,
+            cocola_dot_sandbox_dot_v1_dot_sandbox__pb2.ResolveEndpointResponse.FromString,
             options,
             channel_credentials,
             insecure,

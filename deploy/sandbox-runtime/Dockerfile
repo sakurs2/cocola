@@ -46,12 +46,17 @@ ARG COCOLA_VENV_PYTHON=3.12
 ARG NPM_REGISTRY=https://registry.npmjs.org
 # Pin a known-good agent SDK range. >=0.2.x is not on PyPI yet; 0.1.x is.
 ARG CLAUDE_AGENT_SDK_SPEC=claude-agent-sdk>=0.2.0
+# Resident in-sandbox editor. Pinned to a known-good standalone release (bundles
+# its own Node, so no native build). Offline builds can drop the matching
+# code-server-<ver>-linux-<arch>.tar.gz under ./offline/ (see the install step).
+ARG CODE_SERVER_VERSION=4.117.0
 
 FROM ${OPENSANDBOX_BASE}
 
 ARG COCOLA_VENV_PYTHON
 ARG NPM_REGISTRY
 ARG CLAUDE_AGENT_SDK_SPEC
+ARG CODE_SERVER_VERSION
 
 ENV DEBIAN_FRONTEND=noninteractive \
     LANG=C.UTF-8 \
@@ -114,6 +119,37 @@ RUN npm ci --prefix /opt/cocola --omit=dev \
     && ln -sf /opt/cocola/node_modules/.bin/codex /usr/local/bin/codex \
     && codex --version
 
+# ---- resident code-server (in-sandbox VS Code) ---------------------------
+# The browser-facing editor for the Code dock tab. Reached ONLY via the
+# OpenSandbox server-proxy (like execd), never published to the host, so it does
+# not break "a sandbox never binds a HOST port" (ADR-0009); see
+# code-server-launch.sh for the full reconciliation. Installed as a standalone
+# release (self-contained Node) to avoid native rebuilds. Offline builds use
+# offline/code-server-<ver>-linux-<arch>.tar.gz when present; otherwise the
+# release is fetched from GitHub at build time (never at container runtime).
+COPY offline/ /tmp/cs-offline/
+RUN set -eux; \
+    arch="$(dpkg --print-architecture)"; \
+    case "$arch" in \
+        amd64) cs_arch=amd64 ;; \
+        arm64) cs_arch=arm64 ;; \
+        *) echo "unsupported arch for code-server: $arch" >&2; exit 1 ;; \
+    esac; \
+    tgz="$(ls /tmp/cs-offline/code-server-*-linux-${cs_arch}.tar.gz 2>/dev/null | head -n1 || true)"; \
+    if [ -z "$tgz" ]; then \
+        echo "no offline code-server tgz; fetching v${CODE_SERVER_VERSION} from GitHub"; \
+        tgz=/tmp/code-server.tar.gz; \
+        curl -fSL -o "$tgz" \
+            "https://github.com/coder/code-server/releases/download/v${CODE_SERVER_VERSION}/code-server-${CODE_SERVER_VERSION}-linux-${cs_arch}.tar.gz"; \
+    else \
+        echo "installing code-server from offline tgz: $tgz"; \
+    fi; \
+    mkdir -p /opt/code-server; \
+    tar -C /opt/code-server --strip-components=1 -xzf "$tgz"; \
+    ln -sf /opt/code-server/bin/code-server /usr/local/bin/code-server; \
+    rm -rf /tmp/cs-offline /tmp/code-server.tar.gz; \
+    code-server --version
+
 # ---- Python agent SDK in a uv-managed venv (matches the shim interpreter) -
 # Install into a dedicated venv (uv-managed, per project convention) so the SDK
 # never depends on system Python / pip skew. The shim's entrypoint execs this
@@ -130,7 +166,8 @@ RUN uv venv --python "${COCOLA_VENV_PYTHON}" /opt/cocola/venv \
 # Docker provider grants only when an egress policy is configured.
 COPY init-firewall.sh /opt/cocola/init-firewall.sh
 COPY firewall-entrypoint.sh /opt/cocola/firewall-entrypoint.sh
-RUN chmod +x /opt/cocola/init-firewall.sh /opt/cocola/firewall-entrypoint.sh
+COPY code-server-launch.sh /opt/cocola/code-server-launch.sh
+RUN chmod +x /opt/cocola/init-firewall.sh /opt/cocola/firewall-entrypoint.sh /opt/cocola/code-server-launch.sh
 
 # ---- the stdio shim ------------------------------------------------------
 COPY shim/ /opt/cocola/shim/
@@ -170,6 +207,7 @@ ENV CLAUDE_CONFIG_DIR=/home/cocola/.claude \
     CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC=1 \
     CLAUDE_CODE_MAX_RETRIES=3 \
     COCOLA_WORKSPACE=/workspace \
+    COCOLA_CODE_SERVER_PORT=39378 \
     NODE_PATH=/usr/local/lib/node_modules \
     PLAYWRIGHT_BROWSERS_PATH=/ms-playwright \
     CHROME_BIN=/usr/local/bin/chromium \

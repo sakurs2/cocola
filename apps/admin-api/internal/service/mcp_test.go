@@ -162,3 +162,87 @@ func TestMigrateLegacyMCPSecrets(t *testing.T) {
 		t.Fatal("idempotent migration rewrote current ciphertext")
 	}
 }
+
+func TestAggregateMCPHubReflectsEffectiveSelection(t *testing.T) {
+	mem := store.NewMemory()
+	admin := newMCPTestAdmin(mem)
+	ctx := context.Background()
+	defaultOn := true
+
+	// Two admin-published servers: one default-on (stdio), one default-off (http).
+	if _, err := admin.CreateMCPServer(ctx, MCPServerInput{
+		ID: "fs", Name: "Filesystem", Transport: MCPTransportStdio, Command: "mcp-fs",
+		DefaultEnabled: &defaultOn,
+	}); err != nil {
+		t.Fatalf("create fs: %v", err)
+	}
+	if _, err := admin.CreateMCPServer(ctx, MCPServerInput{
+		ID: "search", Name: "Search", Transport: MCPTransportHTTP,
+		URL: "https://mcp.example.test/search",
+	}); err != nil {
+		t.Fatalf("create search: %v", err)
+	}
+
+	const user = "user-1"
+
+	// Before any preference: default-on server is effective, default-off is not.
+	hub, err := admin.AggregateMCPHub(ctx, user)
+	if err != nil {
+		t.Fatalf("aggregate hub: %v", err)
+	}
+	if hub.TotalPublished != 2 {
+		t.Fatalf("TotalPublished = %d, want 2", hub.TotalPublished)
+	}
+	if hub.TotalEffective != 1 {
+		t.Fatalf("TotalEffective = %d, want 1", hub.TotalEffective)
+	}
+	if hub.Transports[MCPTransportStdio] != 1 || hub.Transports[MCPTransportHTTP] != 0 {
+		t.Fatalf("Transports = %+v", hub.Transports)
+	}
+
+	// The aggregate must agree with the runtime config agent-runtime loads.
+	cfg, err := admin.ListEffectiveMCPRuntimeConfig(ctx, user)
+	if err != nil {
+		t.Fatalf("effective runtime config: %v", err)
+	}
+	if len(cfg.MCPServers) != hub.TotalEffective {
+		t.Fatalf("runtime config count %d != hub effective %d", len(cfg.MCPServers), hub.TotalEffective)
+	}
+
+	// User opts into the default-off server: hub now reports 2 effective.
+	if err := admin.SetUserMCPEnabled(ctx, user, "search", true); err != nil {
+		t.Fatalf("opt into search: %v", err)
+	}
+	hub, err = admin.AggregateMCPHub(ctx, user)
+	if err != nil {
+		t.Fatalf("aggregate hub after opt-in: %v", err)
+	}
+	if hub.TotalEffective != 2 {
+		t.Fatalf("TotalEffective after opt-in = %d, want 2", hub.TotalEffective)
+	}
+	var search MCPHubEntry
+	var found bool
+	for _, entry := range hub.Servers {
+		if entry.ID == "search" {
+			search = entry
+			found = true
+		}
+	}
+	if !found {
+		t.Fatal("search entry missing from hub")
+	}
+	if !search.Effective || !search.PreferenceSet || search.DefaultOn {
+		t.Fatalf("search entry = %+v", search)
+	}
+	// The hub must never leak secrets: only a sanitized URL hint.
+	if search.URLHint != "https://mcp.example.test/search" {
+		t.Fatalf("search URLHint = %q", search.URLHint)
+	}
+}
+
+func TestAggregateMCPHubRequiresUser(t *testing.T) {
+	admin := newMCPTestAdmin(store.NewMemory())
+	if _, err := admin.AggregateMCPHub(context.Background(), "  "); !errors.Is(err, ErrInvalidArg) {
+		t.Fatalf("empty user error = %v, want ErrInvalidArg", err)
+	}
+}

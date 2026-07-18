@@ -17,14 +17,17 @@ import {
   AlertTriangle,
   ArrowLeft,
   ChevronRight,
+  Code2,
   File,
   FileCode2,
   FileQuestion,
   Folder,
   FolderOpen,
+  Globe,
   LoaderCircle,
   Plus,
   RefreshCw,
+  ExternalLink,
   X,
   type LucideIcon,
 } from "lucide-react";
@@ -69,6 +72,30 @@ const DOCK_PAGES: DockPage[] = [
     icon: FolderOpen,
     render: ({ sessionID, active, setHeaderActions }) => (
       <WorkspaceFilesPage
+        sessionID={sessionID}
+        active={active}
+        setHeaderActions={setHeaderActions}
+      />
+    ),
+  },
+  {
+    id: "preview",
+    label: "Preview",
+    icon: Globe,
+    render: ({ sessionID, active, setHeaderActions }) => (
+      <PreviewPage
+        sessionID={sessionID}
+        active={active}
+        setHeaderActions={setHeaderActions}
+      />
+    ),
+  },
+  {
+    id: "code",
+    label: "Code",
+    icon: Code2,
+    render: ({ sessionID, active, setHeaderActions }) => (
+      <CodePage
         sessionID={sessionID}
         active={active}
         setHeaderActions={setHeaderActions}
@@ -881,4 +908,207 @@ function workspaceMimeType(entry: WorkspaceEntry): string {
     webp: "image/webp",
   };
   return imageTypes[extension ?? ""] ?? "image/*";
+}
+
+// -- Sub-page: Preview Proxy --------------------------------------------------
+//
+// Renders a user-launched in-sandbox dev server (Vite/Next/etc.) inside an
+// iframe, reached through the same-origin Preview Proxy:
+//
+//   /api/preview/{sessionID}/{port}/  ->  gateway /v1/preview/...  ->  sandbox
+//
+// The user types the port their dev server listens on; the iframe (and the
+// "open in new tab" affordance) point at the proxied root. Because the proxy
+// serves the app under a subpath, apps that hard-code root-absolute asset URLs
+// may need their dev server's base/publicPath set to the preview prefix (same
+// caveat as AIO Sandbox's /proxy vs /absproxy).
+
+function previewBasePath(sessionID: string, port: number): string {
+  return `/api/preview/${encodeURIComponent(sessionID)}/${port}/`;
+}
+
+function PreviewPage({
+  sessionID,
+  active,
+  setHeaderActions,
+}: {
+  sessionID: string;
+  active: boolean;
+  setHeaderActions: (node: ReactNode) => void;
+}) {
+  // Draft is the text in the input; committed is the port actually being
+  // previewed. Committing (Enter / Preview button) mounts the iframe.
+  const [draftPort, setDraftPort] = useState("3000");
+  const [committedPort, setCommittedPort] = useState<number | null>(null);
+  // Bumping this key forces the iframe to remount (a reload that also drops any
+  // in-frame history), used by the refresh control.
+  const [reloadKey, setReloadKey] = useState(0);
+
+  const commit = useCallback(() => {
+    const port = Number(draftPort.trim());
+    if (!Number.isInteger(port) || port <= 0 || port > 65535) {
+      setCommittedPort(null);
+      return;
+    }
+    setCommittedPort(port);
+    setReloadKey((k) => k + 1);
+  }, [draftPort]);
+
+  const src = committedPort != null ? previewBasePath(sessionID, committedPort) : "";
+
+  // Publish refresh + open-in-new-tab into the shared dock header while active.
+  useEffect(() => {
+    if (!active) return;
+    setHeaderActions(
+      <div className="flex items-center gap-1">
+        <button
+          type="button"
+          title="Reload preview"
+          aria-label="Reload preview"
+          disabled={committedPort == null}
+          onClick={() => setReloadKey((k) => k + 1)}
+          className="inline-flex size-8 shrink-0 items-center justify-center rounded-full text-muted-foreground transition-colors hover:bg-muted hover:text-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring disabled:opacity-50"
+        >
+          <RefreshCw className="size-4" />
+        </button>
+        <a
+          href={src || "#"}
+          target="_blank"
+          rel="noreferrer"
+          title="Open preview in a new tab"
+          aria-label="Open preview in a new tab"
+          aria-disabled={committedPort == null}
+          onClick={(event) => {
+            if (committedPort == null) event.preventDefault();
+          }}
+          className={cn(
+            "inline-flex size-8 shrink-0 items-center justify-center rounded-full text-muted-foreground transition-colors hover:bg-muted hover:text-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring",
+            committedPort == null && "pointer-events-none opacity-50",
+          )}
+        >
+          <ExternalLink className="size-4" />
+        </a>
+      </div>,
+    );
+    return () => setHeaderActions(null);
+  }, [active, committedPort, src, setHeaderActions]);
+
+  return (
+    <div className="flex h-full min-h-0 flex-col bg-card">
+      <div className="flex items-center gap-2 border-b border-border px-3 py-2">
+        <div className="flex min-w-0 flex-1 items-center gap-1.5 rounded-md border border-input bg-background px-2 py-1 text-xs text-muted-foreground focus-within:ring-1 focus-within:ring-ring">
+          <Globe className="size-3.5 shrink-0 text-primary/70" />
+          <span className="shrink-0 select-none">localhost:</span>
+          <input
+            type="text"
+            inputMode="numeric"
+            value={draftPort}
+            onChange={(event) => setDraftPort(event.target.value.replace(/[^0-9]/g, ""))}
+            onKeyDown={(event) => {
+              if (event.key === "Enter") commit();
+            }}
+            placeholder="3000"
+            aria-label="Dev server port"
+            className="w-full min-w-0 bg-transparent text-foreground outline-none placeholder:text-muted-foreground/60"
+          />
+        </div>
+        <button
+          type="button"
+          onClick={commit}
+          className="inline-flex h-7 shrink-0 items-center rounded-md bg-primary px-3 text-xs font-medium text-primary-foreground transition-colors hover:bg-primary/90 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+        >
+          Preview
+        </button>
+      </div>
+
+      <div className="min-h-0 flex-1">
+        {committedPort != null ? (
+          <iframe
+            key={reloadKey}
+            src={src}
+            title={`Preview of port ${committedPort}`}
+            className="h-full w-full border-0 bg-white"
+            sandbox="allow-scripts allow-forms allow-same-origin allow-popups allow-modals"
+          />
+        ) : (
+          <div className="flex h-full min-h-0 flex-col items-center justify-center px-6 text-center">
+            <Globe className="mb-3 size-8 text-muted-foreground/50" />
+            <p className="text-sm font-medium text-foreground">Preview a dev server</p>
+            <p className="mt-1 max-w-xs text-xs text-muted-foreground">
+              Enter the port your in-sandbox dev server listens on (e.g. 3000), then
+              press Preview to load it here.
+            </p>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+// -- Code (resident code-server editor) --------------------------------------
+//
+// Unlike PreviewPage (which previews an arbitrary user dev-server port), the
+// code-server editor is a resident service the sandbox image always starts on a
+// FIXED in-container port (COCOLA_CODE_SERVER_PORT, default 39378; see
+// deploy/sandbox-runtime/code-server-launch.sh). So there is no port to pick:
+// we point straight at that port through the same same-origin Preview Proxy
+// path. The editor is 100% WebSocket-driven; those upgrades are carried by the
+// custom web server (apps/web/server.mjs), not the /api/preview route handler.
+
+const CODE_SERVER_PORT = 39378;
+
+function CodePage({
+  sessionID,
+  active,
+  setHeaderActions,
+}: {
+  sessionID: string;
+  active: boolean;
+  setHeaderActions: (node: ReactNode) => void;
+}) {
+  // Bumping this key remounts the iframe (a hard reload of the editor).
+  const [reloadKey, setReloadKey] = useState(0);
+  const src = previewBasePath(sessionID, CODE_SERVER_PORT);
+
+  useEffect(() => {
+    if (!active) return;
+    setHeaderActions(
+      <div className="flex items-center gap-1">
+        <button
+          type="button"
+          title="Reload editor"
+          aria-label="Reload editor"
+          onClick={() => setReloadKey((k) => k + 1)}
+          className="inline-flex size-8 shrink-0 items-center justify-center rounded-full text-muted-foreground transition-colors hover:bg-muted hover:text-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+        >
+          <RefreshCw className="size-4" />
+        </button>
+        <a
+          href={src}
+          target="_blank"
+          rel="noreferrer"
+          title="Open editor in a new tab"
+          aria-label="Open editor in a new tab"
+          className="inline-flex size-8 shrink-0 items-center justify-center rounded-full text-muted-foreground transition-colors hover:bg-muted hover:text-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+        >
+          <ExternalLink className="size-4" />
+        </a>
+      </div>,
+    );
+    return () => setHeaderActions(null);
+  }, [active, src, setHeaderActions]);
+
+  return (
+    <div className="flex h-full min-h-0 flex-col bg-card">
+      <div className="min-h-0 flex-1">
+        <iframe
+          key={reloadKey}
+          src={src}
+          title="Code editor"
+          className="h-full w-full border-0 bg-white"
+          sandbox="allow-scripts allow-forms allow-same-origin allow-popups allow-modals allow-downloads"
+        />
+      </div>
+    </div>
+  );
 }

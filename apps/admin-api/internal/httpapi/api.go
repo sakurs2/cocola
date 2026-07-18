@@ -92,6 +92,7 @@ func (a *API) Router() http.Handler {
 		})
 		r.Route("/mcps", func(r chi.Router) {
 			r.Get("/", a.listMyMCPs)
+			r.Get("/hub", a.getMyMCPHub)
 			r.Post("/{id}/enable", a.enableMyMCP)
 			r.Post("/{id}/disable", a.disableMyMCP)
 		})
@@ -164,6 +165,7 @@ func (a *API) Router() http.Handler {
 			r.Post("/", a.createMCP)
 			r.Get("/", a.listMCPs)
 			r.Get("/effective", a.listEffectiveMCPs)
+			r.Get("/hub", a.getMCPHub)
 			r.Get("/{id}", a.getMCP)
 			r.Patch("/{id}", a.updateMCP)
 			r.Post("/{id}/enable", a.enableMCP)
