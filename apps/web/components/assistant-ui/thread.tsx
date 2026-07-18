@@ -669,8 +669,12 @@ const ComposerAction: FC = () => {
   );
 };
 
-const UserMessage: FC = () => (
-  <MessagePrimitive.Root className="message-enter grid w-full max-w-[var(--thread-max-width)] auto-rows-auto grid-cols-[minmax(72px,1fr)_auto] gap-y-1 py-3">
+const UserMessage: FC = () => {
+  const id = useMessage((m) => m.id);
+  return (
+  <MessagePrimitive.Root
+    data-message-id={id}
+    className="message-enter grid w-full max-w-[var(--thread-max-width)] auto-rows-auto grid-cols-[minmax(72px,1fr)_auto] gap-y-1 py-3">
     <div className="col-start-2 row-start-1 flex flex-col items-end gap-1.5">
       <UserSkillBadge />
       <div className="flex flex-wrap justify-end gap-1.5 empty:hidden">
@@ -694,7 +698,8 @@ const UserMessage: FC = () => (
       </MessagePrimitive.If>
     </div>
   </MessagePrimitive.Root>
-);
+  );
+};
 
 const UserSkillBadge: FC = () => {
   const metadata = useMessage((message) => message.metadata.custom) as

@@ -30,6 +30,7 @@ import {
   SessionStatusPanel,
 } from "@/components/assistant-ui/session-status-panel";
 import { Thread } from "@/components/assistant-ui/thread";
+import { ConversationMinimap } from "@/components/assistant-ui/conversation-minimap";
 import { WorkspaceDock } from "@/components/assistant-ui/workspace-panel";
 import { cn } from "@/lib/utils";
 import { AnimatePresence, motion } from "framer-motion";
@@ -110,6 +111,7 @@ function Workspace() {
             }}
           />
           <Thread />
+          <ConversationMinimap />
         </div>
         <AnimatePresence initial={false}>
           {selectedArtifact && dockView === "artifact" ? (
