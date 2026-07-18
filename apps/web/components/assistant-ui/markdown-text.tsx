@@ -62,7 +62,7 @@ export function CodeBlock({
 }
 
 const markdownClassName = cn(
-  "aui-stream-in text-sm leading-7 text-foreground",
+  "aui-stream-in text-[15px] leading-7 text-foreground",
   "[&_p]:my-2.5 [&_p:first-child]:mt-0 [&_p:last-child]:mb-0",
   "[&_ul]:my-2.5 [&_ol]:my-2.5 [&_li]:my-1 [&_li>p]:my-1",
   "[&_ul]:list-disc [&_ul]:pl-5 [&_ol]:list-decimal [&_ol]:pl-5",

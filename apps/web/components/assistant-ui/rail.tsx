@@ -28,12 +28,14 @@ import {
   Wrench as PhWrench,
   type LucideIcon as PhosphorIcon,
 } from "lucide-react";
-import { ChevronRight, Download, ExternalLink, Eye, FileText } from "lucide-react";
+import { ChevronRight, Download, ExternalLink, Eye } from "lucide-react";
 import Image from "next/image";
 import { type FC, type ReactNode } from "react";
 import { TooltipIconButton } from "@/components/assistant-ui/tooltip-icon-button";
 import { cn } from "@/lib/utils";
 import { type EnvironmentPreparationSnapshot } from "@/lib/environment";
+import { resolveFileType } from "@/lib/file-type";
+import { MaterialFileIcon } from "@/lib/material-file-icons";
 
 // All rail action icons come from Phosphor; reuse its component type so the
 // `weight` prop (duotone/bold/...) type-checks.
@@ -55,7 +57,7 @@ export const RailRow: FC<{
   // RailRow is the final sibling we hide its connector via :last-child (scoped
   // to the `.aui-rail-streaming` ancestor the caller toggles while streaming).
   <div className="grid grid-cols-[1.75rem_1fr] gap-x-2.5 [.aui-rail-streaming_&:last-child_.rail-connector]:after:hidden">
-    <div className="rail-connector relative flex justify-center after:absolute after:left-1/2 after:top-8 after:bottom-0 after:w-0.5 after:-translate-x-1/2 after:rounded-full after:bg-border/50">
+    <div className="rail-connector relative flex items-start justify-center after:absolute after:left-1/2 after:top-8 after:bottom-0 after:w-0.5 after:-translate-x-1/2 after:rounded-full after:bg-border/50">
       <span
         className={cn(
           "relative z-[1] flex size-7 items-center justify-center",
@@ -63,18 +65,18 @@ export const RailRow: FC<{
         )}
       >
         {running ? (
-          <SpinnerGap className="size-[18px] animate-spin" />
+          <SpinnerGap className="size-5 animate-spin" />
         ) : (
-          <Icon className="size-[18px]" />
+          <Icon className="size-5" />
         )}
       </span>
     </div>
-    <div className="min-w-0 pb-4 pt-1.5">
+    <div className="min-w-0 pb-4">
       {label ? (
         <div
           className={cn(
-            "mb-1 text-xs font-medium",
-            tone === "error" ? "text-destructive" : "text-muted-foreground",
+            "mb-1 flex min-h-7 items-center text-[13px] font-medium leading-none",
+            tone === "error" ? "text-destructive" : "text-foreground",
           )}
         >
           {label}
@@ -119,7 +121,7 @@ export const RailEnvironment: FC<{
       color={degraded ? "text-amber-500" : "text-sky-500"}
     >
       {summaries.length > 0 ? (
-        <p className="text-xs leading-5 text-muted-foreground">{summaries.join(" · ")}</p>
+        <p className="text-[13px] leading-5 text-muted-foreground">{summaries.join(" · ")}</p>
       ) : null}
     </RailRow>
   );
@@ -140,11 +142,11 @@ export const RailReasoning: FC<{ text: string; running?: boolean }> = ({ text, r
     color="text-purple-500"
   >
     <details className="aui-details group text-sm">
-      <summary className="flex w-fit cursor-pointer select-none items-center gap-1 py-0.5 text-xs text-muted-foreground transition-colors hover:text-foreground [&::-webkit-details-marker]:hidden">
+      <summary className="flex w-fit cursor-pointer select-none items-center gap-1 py-0.5 text-[13px] text-muted-foreground transition-colors hover:text-foreground [&::-webkit-details-marker]:hidden">
         <ChevronRight className="size-3 shrink-0 transition-transform group-open:rotate-90" />
         <span>Show reasoning</span>
       </summary>
-      <div className="aui-details-body mt-1 border-l-2 border-border/70 pl-3 text-[13px] leading-6 text-muted-foreground">
+      <div className="aui-details-body mt-1 border-l-2 border-border/70 pl-3 text-sm leading-6 text-muted-foreground">
         {text}
       </div>
     </details>
@@ -446,44 +448,65 @@ export const RailFile: FC<{
   size: number;
   downloadUrl: string;
   onPreview?: () => void;
-}> = ({ filename, mimeType, size, downloadUrl, onPreview }) => (
-  <RailRow icon={FilePlus} label="Generated file" color="text-teal-500">
-    <div className="flex max-w-xl items-center gap-3 rounded-xl border border-border/60 bg-muted/40 p-3 text-sm">
-      <span className="flex size-9 shrink-0 items-center justify-center rounded-lg bg-background text-muted-foreground">
-        <FileText className="size-4" />
-      </span>
-      <div className="min-w-0 flex-1">
-        <div className="truncate font-medium text-foreground">{filename}</div>
-        <div className="mt-0.5 truncate text-xs text-muted-foreground">
-          {formatBytes(size)} · {mimeType}
+}> = ({ filename, mimeType, size, downloadUrl, onPreview }) => {
+  const kind = resolveFileType(filename, mimeType);
+  const showThumbnail = kind.isImage && Boolean(downloadUrl);
+
+  return (
+    <RailRow icon={FilePlus} label="Generated file" color="text-teal-500">
+      <div className="inline-flex w-fit max-w-full items-center gap-3 rounded-xl border border-border/60 bg-muted/40 p-3 text-sm">
+        <span className="flex size-9 shrink-0 items-center justify-center overflow-hidden rounded-lg bg-background">
+          {showThumbnail ? (
+            <Image
+              src={downloadUrl}
+              alt=""
+              width={36}
+              height={36}
+              unoptimized
+              className="size-9 rounded-lg object-cover"
+              aria-hidden="true"
+            />
+          ) : (
+            <MaterialFileIcon name={kind.icon} className="flex size-6 items-center justify-center" />
+          )}
+        </span>
+        <div className="min-w-0 flex-1">
+          <div className="truncate font-medium text-foreground">{filename}</div>
+          <div className="mt-0.5 flex items-center gap-1.5 truncate text-xs text-muted-foreground">
+            <span className="rounded bg-muted px-1.5 py-px font-medium tracking-wide text-muted-foreground/90">
+              {kind.badge}
+            </span>
+            <span aria-hidden>·</span>
+            <span className="truncate">{formatBytes(size)}</span>
+          </div>
+        </div>
+        <div className="flex shrink-0 items-center gap-1">
+          {onPreview && kind.previewable ? (
+            <TooltipIconButton
+              tooltip="Preview"
+              variant="ghost"
+              className="size-8 rounded-full p-2"
+              onClick={onPreview}
+            >
+              <Eye className="size-4" />
+            </TooltipIconButton>
+          ) : null}
+          {downloadUrl ? (
+            <a
+              href={downloadUrl}
+              download={filename}
+              title="Download"
+              aria-label={`Download ${filename}`}
+              className="inline-flex size-8 items-center justify-center rounded-full text-muted-foreground transition-colors hover:bg-accent hover:text-accent-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+            >
+              <Download className="size-4" />
+            </a>
+          ) : null}
         </div>
       </div>
-      <div className="flex shrink-0 items-center gap-1">
-        {onPreview ? (
-          <TooltipIconButton
-            tooltip="Preview"
-            variant="ghost"
-            className="size-8 rounded-full p-2"
-            onClick={onPreview}
-          >
-            <Eye className="size-4" />
-          </TooltipIconButton>
-        ) : null}
-        {downloadUrl ? (
-          <a
-            href={downloadUrl}
-            download={filename}
-            title="Download"
-            aria-label={`Download ${filename}`}
-            className="inline-flex size-8 items-center justify-center rounded-full text-muted-foreground transition-colors hover:bg-accent hover:text-accent-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
-          >
-            <Download className="size-4" />
-          </a>
-        ) : null}
-      </div>
-    </div>
-  </RailRow>
-);
+    </RailRow>
+  );
+};
 
 export const formatBytes = (bytes: number): string => {
   if (!bytes) return "Unknown size";

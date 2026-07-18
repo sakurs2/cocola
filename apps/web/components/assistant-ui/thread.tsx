@@ -32,7 +32,6 @@ import {
   ArrowUp as ArrowUpIcon,
   BarChart3,
   Code2,
-  FileText,
   Lightbulb,
   Pencil,
   Sparkles,
@@ -61,6 +60,7 @@ import {
   normalizeLobeIconSlug,
 } from "@/lib/model-icons";
 import { cn } from "@/lib/utils";
+import { SkillIcon } from "@/components/ui/skill-icon";
 
 // Product Thread for cocola, authored against the white workspace design tokens.
 // assistant-ui owns chat semantics; this file owns the composed product chrome.
@@ -285,7 +285,7 @@ const SkillTriggerMenu: FC = () => {
       adapter={slash.adapter}
       isLoading={!skillsLoaded}
       aria-label="Choose a skill"
-      className="absolute bottom-[calc(100%+0.625rem)] left-0 z-50 w-full max-w-2xl overflow-hidden rounded-2xl border border-border bg-popover/95 text-popover-foreground shadow-xl backdrop-blur-xl"
+      className="absolute bottom-[calc(100%+0.625rem)] left-0 z-50 w-full max-w-2xl overflow-hidden rounded-2xl border border-border bg-popover text-popover-foreground shadow-xl"
     >
       <ComposerPrimitive.Unstable_TriggerPopover.Action {...slash.action} />
       <div className="flex items-center justify-between border-b border-border/70 px-4 py-3">
@@ -333,7 +333,7 @@ const SkillTriggerMenu: FC = () => {
                   index={index}
                   className="flex w-full items-center gap-2.5 rounded-xl px-2.5 py-2 text-left outline-none transition-colors hover:bg-muted/80 data-[highlighted]:bg-muted"
                 >
-                  <FileText className="size-4 shrink-0 text-foreground/75" />
+                  <SkillIcon name={skill?.name || item.label} size="sm" />
                   <span
                     className="max-w-[45%] shrink-0 truncate text-sm font-medium text-foreground"
                     title={skill?.name || item.label}
@@ -688,7 +688,7 @@ const UserMessage: FC = () => (
         />
       </div>
       <MessagePrimitive.If hasContent>
-        <div className="max-w-[calc(var(--thread-max-width)*0.8)] whitespace-pre-wrap break-words rounded-2xl bg-muted px-4 py-2.5 text-sm leading-6 text-foreground">
+        <div className="max-w-[calc(var(--thread-max-width)*0.8)] whitespace-pre-wrap break-words rounded-2xl bg-muted px-4 py-2.5 text-[15px] leading-6 text-foreground">
           <MessagePrimitive.Parts />
         </div>
       </MessagePrimitive.If>
@@ -774,11 +774,9 @@ const AssistantMessageHeader: FC = () => {
   const icon = metadata?.model_icon || selectedModel?.icon;
 
   return (
-    <div className="mb-2 grid grid-cols-[1.75rem_1fr] gap-x-2.5 text-sm text-muted-foreground">
-      <div className="flex items-center justify-center">
-        <ModelIcon icon={icon} className="size-5 opacity-90" />
-      </div>
-      <span className="min-w-0 self-center truncate font-medium">{label}</span>
+    <div className="mb-2 flex items-center gap-x-2.5">
+      <ModelIcon icon={icon} className="size-7 shrink-0" bare />
+      <span className="min-w-0 truncate text-base font-bold leading-none text-foreground">{label}</span>
     </div>
   );
 };

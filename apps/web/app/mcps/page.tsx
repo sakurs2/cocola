@@ -1,8 +1,12 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
-import { LoaderCircle, PlugZap, ToggleLeft, ToggleRight } from "lucide-react";
+import { LoaderCircle, Plug, Power } from "lucide-react";
 import Link from "next/link";
+
+import { cn } from "@/lib/utils";
+import { Badge } from "@/components/ui/badge";
+import { Card } from "@/components/ui/card";
 
 type MCPServer = {
   id: string;
@@ -16,9 +20,6 @@ type MCPServer = {
   default_enabled: boolean;
   effective_enabled: boolean;
 };
-
-const btn =
-  "inline-flex h-9 items-center justify-center gap-2 rounded-md border border-border bg-background px-3 text-sm font-medium transition-colors hover:bg-accent hover:text-accent-foreground disabled:pointer-events-none disabled:opacity-50";
 
 export default function MCPPage() {
   const [mcps, setMcps] = useState<MCPServer[]>([]);
@@ -69,17 +70,17 @@ export default function MCPPage() {
   };
 
   return (
-    <main className="h-full min-w-0 overflow-y-auto">
-      <div className="mx-auto max-w-6xl space-y-6 px-6 py-6">
-        <header>
-          <h1 className="text-xl font-semibold">MCP</h1>
-          <p className="mt-1 text-sm text-muted-foreground">
+    <main className="h-full min-w-0 flex-1 overflow-y-auto bg-background">
+      <div className="mx-auto max-w-6xl space-y-8 px-8 py-10">
+        <header className="space-y-1">
+          <h1 className="text-2xl font-bold tracking-tight">MCP</h1>
+          <p className="text-sm text-muted-foreground">
             Choose which administrator-published MCP servers are available in your agent sessions.
           </p>
         </header>
 
         {error ? (
-          <div className="rounded-md border border-red-500/30 bg-red-500/10 px-3 py-2 text-sm text-red-600">
+          <div className="rounded-xl border border-red-500/30 bg-red-500/10 px-3.5 py-2.5 text-sm text-red-600">
             {error}
           </div>
         ) : null}
@@ -90,62 +91,86 @@ export default function MCPPage() {
             Loading MCP servers
           </div>
         ) : mcps.length ? (
-          <section className="grid gap-3 md:grid-cols-2">
-            {mcps.map((mcp) => (
-              <article key={mcp.id} className="rounded-lg border border-border bg-card p-4">
-                <div className="flex items-start gap-3">
-                  <div className="grid size-10 shrink-0 place-items-center rounded-md bg-muted">
-                    <PlugZap className="size-5 text-muted-foreground" />
-                  </div>
-                  <div className="min-w-0 flex-1">
-                    <div className="flex items-center gap-2">
-                      <Link
-                        href={`/mcps/${encodeURIComponent(mcp.id)}`}
-                        className="truncate text-sm font-semibold hover:underline"
-                      >
-                        {mcp.name || mcp.id}
-                      </Link>
-                      <span className="rounded-md border border-border px-2 py-0.5 text-xs text-muted-foreground">
-                        {mcp.transport}
-                      </span>
+          <section className="grid gap-4 md:grid-cols-2">
+            {mcps.map((mcp) => {
+              const working = workingId === mcp.id;
+              return (
+                <Card key={mcp.id} className="flex flex-col p-5 shadow-card transition hover:-translate-y-0.5 hover:shadow-lg">
+                  <div className="flex items-start gap-3">
+                    <div className="grid size-10 shrink-0 place-items-center rounded-xl bg-orange-50 text-orange-600 ring-1 ring-orange-100">
+                      <Plug className="size-5" />
                     </div>
-                    <p className="mt-1 line-clamp-2 text-sm text-muted-foreground">
-                      {mcp.description || "No description"}
-                    </p>
-                    <div className="mt-3 truncate text-xs text-muted-foreground">
-                      {mcp.transport === "stdio" ? mcp.command : mcp.url_hint}
+                    <div className="min-w-0 flex-1">
+                      <div className="flex flex-wrap items-center gap-2">
+                        <Link
+                          href={`/mcps/${encodeURIComponent(mcp.id)}`}
+                          className="truncate text-sm font-bold hover:underline"
+                        >
+                          {mcp.name || mcp.id}
+                        </Link>
+                        <Badge variant="outline">{mcp.transport}</Badge>
+                      </div>
+                      <p className="mt-1 line-clamp-2 text-sm text-muted-foreground">
+                        {mcp.description || "No description"}
+                      </p>
+                      <div className="mt-3 truncate text-xs text-muted-foreground">
+                        {mcp.transport === "stdio" ? mcp.command : mcp.url_hint}
+                      </div>
                     </div>
                   </div>
-                  <button
-                    type="button"
-                    className={btn}
-                    disabled={workingId === mcp.id}
-                    onClick={() => void toggle(mcp)}
-                  >
-                    {workingId === mcp.id ? (
-                      <LoaderCircle className="size-4 animate-spin" />
-                    ) : mcp.effective_enabled ? (
-                      <ToggleRight className="size-4" />
+                  <div className="mt-4 flex flex-wrap items-center gap-2">
+                    {mcp.effective_enabled ? (
+                      <Badge variant="success">
+                        <span className="size-1.5 rounded-full bg-emerald-500" /> enabled
+                      </Badge>
                     ) : (
-                      <ToggleLeft className="size-4" />
+                      <Badge>disabled</Badge>
                     )}
-                    {mcp.effective_enabled ? "Disable" : "Enable"}
-                  </button>
-                </div>
-                <div className="mt-3 flex flex-wrap gap-2 text-xs text-muted-foreground">
-                  <span className="rounded-md border border-border px-2 py-0.5">
-                    {mcp.effective_enabled ? "enabled" : "disabled"}
-                  </span>
-                  <span className="rounded-md border border-border px-2 py-0.5">
-                    {mcp.default_enabled ? "default on" : "default off"}
-                  </span>
-                </div>
-              </article>
-            ))}
+                    <Badge>{mcp.default_enabled ? "default on" : "default off"}</Badge>
+                  </div>
+                  <div className="mt-5 flex items-center gap-2 border-t border-border pt-4">
+                    {mcp.effective_enabled ? (
+                      <button
+                        type="button"
+                        className="inline-flex h-8 flex-1 items-center justify-center gap-2 rounded-lg border border-border bg-background px-3 text-xs font-medium shadow-xs transition-colors hover:bg-muted disabled:opacity-50"
+                        disabled={working}
+                        onClick={() => void toggle(mcp)}
+                      >
+                        {working ? (
+                          <LoaderCircle className="size-3.5 animate-spin" />
+                        ) : (
+                          <Power className="size-3.5 text-emerald-600" />
+                        )}
+                        Disable
+                      </button>
+                    ) : (
+                      <button
+                        type="button"
+                        className="inline-flex h-8 flex-1 items-center justify-center gap-2 rounded-lg px-3 text-xs font-semibold text-white shadow-xs transition-opacity brand-gradient hover:opacity-90 disabled:opacity-50"
+                        disabled={working}
+                        onClick={() => void toggle(mcp)}
+                      >
+                        {working ? (
+                          <LoaderCircle className="size-3.5 animate-spin" />
+                        ) : (
+                          <Power className="size-3.5" />
+                        )}
+                        Enable
+                      </button>
+                    )}
+                  </div>
+                </Card>
+              );
+            })}
           </section>
         ) : (
-          <div className="rounded-lg border border-dashed border-border p-8 text-center text-sm text-muted-foreground">
-            No MCP servers published by administrators.
+          <div className="flex min-h-[140px] flex-col items-center justify-center gap-2 rounded-2xl border border-dashed border-border p-8 text-center">
+            <div className={cn("grid size-10 place-items-center rounded-xl bg-muted")}>
+              <Plug className="size-4 text-muted-foreground" />
+            </div>
+            <p className="text-sm text-muted-foreground">
+              No MCP servers published by administrators.
+            </p>
           </div>
         )}
       </div>

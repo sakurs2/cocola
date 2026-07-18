@@ -24,6 +24,17 @@ const config: Config = {
           "Noto Sans SC",
           ...defaultTheme.fontFamily.sans,
         ],
+        // System/native stack (SF Pro + PingFang SC on macOS) used by the
+        // session status panel so it matches the platform chrome look.
+        system: [
+          "-apple-system",
+          "BlinkMacSystemFont",
+          "\"SF Pro Text\"",
+          "\"PingFang SC\"",
+          "\"Segoe UI\"",
+          "\"Microsoft YaHei\"",
+          ...defaultTheme.fontFamily.sans,
+        ],
         mono: [
           "var(--font-geist-mono)",
           ...defaultTheme.fontFamily.mono,

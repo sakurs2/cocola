@@ -91,7 +91,7 @@ function LoginForm() {
             autoComplete="username"
             value={identifier}
             onChange={(event) => setIdentifier(event.target.value)}
-            className="h-10 w-full rounded-md border border-input bg-background px-3 text-sm outline-none focus:border-ring"
+            className="h-10 w-full rounded-xl border border-input bg-background px-3 text-sm outline-none focus:border-ring"
             required
           />
         </label>
@@ -103,7 +103,7 @@ function LoginForm() {
               autoComplete="current-password"
               value={password}
               onChange={(event) => setPassword(event.target.value)}
-              className="h-10 w-full rounded-md border border-input bg-background px-3 pr-10 text-sm outline-none focus:border-ring"
+              className="h-10 w-full rounded-xl border border-input bg-background px-3 pr-10 text-sm outline-none focus:border-ring"
               required
             />
             <button
@@ -111,7 +111,7 @@ function LoginForm() {
               aria-label={showPassword ? "Hide password" : "Show password"}
               title={showPassword ? "Hide password" : "Show password"}
               onClick={() => setShowPassword((v) => !v)}
-              className="absolute right-2 top-1/2 grid size-7 -translate-y-1/2 place-items-center rounded-md text-muted-foreground hover:bg-muted hover:text-foreground"
+              className="absolute right-2 top-1/2 grid size-7 -translate-y-1/2 place-items-center rounded-xl text-muted-foreground hover:bg-muted hover:text-foreground"
             >
               {showPassword ? <EyeOff className="size-4" /> : <Eye className="size-4" />}
             </button>
@@ -121,7 +121,7 @@ function LoginForm() {
           <div
             role="alert"
             aria-live="polite"
-            className="rounded-md border border-destructive/30 bg-destructive/10 px-3 py-2 text-sm text-destructive"
+            className="rounded-xl border border-destructive/30 bg-destructive/10 px-3 py-2 text-sm text-destructive"
           >
             {error}
           </div>
@@ -129,7 +129,7 @@ function LoginForm() {
         <button
           type="submit"
           disabled={pending}
-          className="cocola-login-signin h-10 rounded-md px-4 text-sm font-medium text-primary-foreground transition-opacity disabled:opacity-60"
+          className="cocola-login-signin h-10 rounded-xl px-4 text-sm font-medium text-primary-foreground transition-opacity disabled:opacity-60"
         >
           {pending ? "Signing in..." : "Sign in"}
         </button>

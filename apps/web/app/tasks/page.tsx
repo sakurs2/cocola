@@ -1,6 +1,6 @@
 "use client";
 
-import { CalendarDots, ClockCountdown, DotsThree, Plus, Sparkle } from "@phosphor-icons/react";
+import { CalendarClock, Clock, MoreHorizontal, Plus, Sparkles } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { Button } from "@/components/ui/button";
@@ -148,7 +148,7 @@ export default function TasksPage() {
           </div>
           {!loading && tasks.length ? (
             <Button onClick={openCreate} className="rounded-xl">
-              <Plus className="size-4" weight="bold" /> New task
+              <Plus className="size-4" /> New task
             </Button>
           ) : null}
         </header>
@@ -183,7 +183,7 @@ export default function TasksPage() {
             {[0, 1, 2].map((item) => (
               <div
                 key={item}
-                className="h-44 animate-pulse rounded-3xl border border-white/60 bg-white/35"
+                className="h-44 animate-pulse rounded-2xl border border-border bg-muted"
               />
             ))}
           </div>
@@ -205,8 +205,8 @@ export default function TasksPage() {
           </div>
         ) : (
           <div className="flex min-h-[55vh] flex-col items-center justify-center text-center">
-            <span className="grid size-14 place-items-center rounded-3xl bg-sky-500/10 text-sky-600">
-              <ClockCountdown className="size-7" weight="duotone" />
+            <span className="grid size-14 place-items-center rounded-2xl bg-sky-500/10 text-sky-600">
+              <Clock className="size-7" />
             </span>
             <h2 className="mt-4 text-base font-semibold">
               {tab === "today" && tasks.length
@@ -224,7 +224,7 @@ export default function TasksPage() {
               </Button>
             ) : (
               <Button variant="outline" className="mt-4 rounded-xl" onClick={openCreate}>
-                <Plus className="size-4" weight="bold" /> New task
+                <Plus className="size-4" /> New task
               </Button>
             )}
           </div>
@@ -275,11 +275,11 @@ function TaskCard({
       onKeyDown={(event) =>
         event.target === event.currentTarget && event.key === "Enter" && onEdit()
       }
-      className="group relative min-h-44 cursor-pointer rounded-3xl border border-white/65 bg-white/52 p-5 shadow-[0_18px_50px_-36px_rgba(37,99,235,0.55)] backdrop-blur-xl transition duration-200 hover:-translate-y-0.5 hover:border-white hover:bg-white/65 hover:shadow-[0_22px_55px_-32px_rgba(37,99,235,0.55)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/40"
+      className="group relative min-h-44 cursor-pointer rounded-2xl border border-border bg-card p-5 shadow-card transition duration-200 hover:-translate-y-0.5 hover:shadow-lg focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/40"
     >
       <div className="flex items-start gap-3">
         <span className="mt-0.5 grid size-9 shrink-0 place-items-center rounded-2xl bg-sky-500/10 text-sky-600">
-          <Sparkle className="size-[18px]" weight="duotone" />
+          <Sparkles className="size-[18px]" />
         </span>
         <div className="min-w-0 flex-1">
           <div className="flex items-center gap-2">
@@ -296,15 +296,15 @@ function TaskCard({
               type="button"
               aria-label={`Actions for ${task.name}`}
               onClick={(event) => event.stopPropagation()}
-              className="grid size-8 shrink-0 place-items-center rounded-xl text-muted-foreground hover:bg-white/70 hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/40"
+              className="grid size-8 shrink-0 place-items-center rounded-xl text-muted-foreground hover:bg-muted hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/40"
             >
-              <DotsThree className="size-5" weight="bold" />
+              <MoreHorizontal className="size-5" />
             </button>
           </DropdownMenuTrigger>
           <DropdownMenuContent
             align="end"
             onClick={(event) => event.stopPropagation()}
-            className="cocola-user-ui rounded-xl border-white/70 bg-popover/95 shadow-xl backdrop-blur-xl"
+            className="cocola-user-ui rounded-xl border-border bg-popover shadow-xl"
           >
             <DropdownMenuItem onSelect={onEdit}>Edit</DropdownMenuItem>
             {(task.status === "active" || task.status === "paused") && (
@@ -330,7 +330,7 @@ function TaskCard({
       </div>
       <div className="mt-4 border-t border-border/45 pt-3 text-xs text-muted-foreground">
         <div className="flex items-center gap-2 text-foreground/80">
-          <CalendarDots className="size-4 text-sky-600" weight="duotone" />
+          <CalendarClock className="size-4 text-sky-600" />
           <span className="truncate">{scheduleLabel(task)}</span>
         </div>
         <div className="mt-1.5 pl-6 tabular-nums">Next: {formatDateTime(task.next_run_at)}</div>

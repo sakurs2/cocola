@@ -39,12 +39,12 @@ export default async function ProfilePage() {
             <div className="mx-auto flex h-16 max-w-5xl items-center gap-3 px-6">
               <Link
                 href="/"
-                className="grid size-9 place-items-center rounded-md text-muted-foreground hover:bg-accent hover:text-accent-foreground"
+                className="grid size-9 place-items-center rounded-xl text-muted-foreground hover:bg-accent hover:text-accent-foreground"
                 title="Back to chat"
               >
                 <ArrowLeft className="size-4" />
               </Link>
-              <div className="grid size-9 place-items-center rounded-md bg-primary text-primary-foreground">
+              <div className="grid size-9 place-items-center rounded-xl text-white brand-gradient">
                 <UserRound className="size-4" />
               </div>
               <div className="min-w-0 flex-1">
@@ -58,7 +58,7 @@ export default async function ProfilePage() {
 
           <div className="mx-auto max-w-5xl space-y-6 px-6 py-6">
             {/* Identity card */}
-            <section className="rounded-lg border border-border bg-card p-5">
+            <section className="rounded-2xl border border-border bg-card shadow-card p-5">
               <div className="flex items-center gap-4">
                 <div className="grid size-14 shrink-0 place-items-center rounded-full bg-primary text-lg font-semibold text-primary-foreground">
                   {initial}
@@ -77,10 +77,10 @@ export default async function ProfilePage() {
             </section>
 
             {/* Personal information */}
-            <section className="rounded-lg border border-border bg-card">
+            <section className="rounded-2xl border border-border bg-card shadow-card">
               <div className="flex items-center gap-3 border-b border-border px-4 py-3">
-                <div className="grid size-8 place-items-center rounded-md bg-muted">
-                  <IdCard className="size-4 text-muted-foreground" />
+                <div className="grid size-8 place-items-center rounded-xl bg-sky-500/10">
+                  <IdCard className="size-4 text-sky-600" />
                 </div>
                 <h2 className="text-sm font-semibold">Personal Information</h2>
               </div>
@@ -100,10 +100,10 @@ export default async function ProfilePage() {
             </section>
 
             {/* Account status */}
-            <section className="rounded-lg border border-border bg-card">
+            <section className="rounded-2xl border border-border bg-card shadow-card">
               <div className="flex items-center gap-3 border-b border-border px-4 py-3">
-                <div className="grid size-8 place-items-center rounded-md bg-muted">
-                  <BadgeCheck className="size-4 text-muted-foreground" />
+                <div className="grid size-8 place-items-center rounded-xl bg-emerald-500/10">
+                  <BadgeCheck className="size-4 text-emerald-600" />
                 </div>
                 <h2 className="text-sm font-semibold">Account Status</h2>
               </div>
@@ -124,7 +124,7 @@ export default async function ProfilePage() {
               <SignOutButton />
               <Link
                 href="/"
-                className="inline-flex h-9 items-center justify-center rounded-md border border-input bg-background px-3 text-sm font-medium hover:bg-accent hover:text-accent-foreground"
+                className="inline-flex h-9 items-center justify-center rounded-xl border border-input bg-background px-3 text-sm font-medium hover:bg-accent hover:text-accent-foreground"
               >
                 Back to chat
               </Link>
@@ -142,8 +142,8 @@ function RolePill({ role }: { role: string }) {
     <span
       className={
         admin
-          ? "inline-flex items-center gap-1 rounded-md border border-primary/30 bg-primary/10 px-2 py-0.5 text-xs font-medium text-primary"
-          : "inline-flex items-center gap-1 rounded-md border border-border bg-muted px-2 py-0.5 text-xs text-muted-foreground"
+          ? "inline-flex items-center gap-1 rounded-xl border border-primary/30 bg-primary/10 px-2 py-0.5 text-xs font-medium text-primary"
+          : "inline-flex items-center gap-1 rounded-xl border border-border bg-muted px-2 py-0.5 text-xs text-muted-foreground"
       }
     >
       <ShieldCheck className="size-3" />
@@ -168,7 +168,7 @@ function StatusTile({
         ? "bg-primary"
         : "bg-muted-foreground/40";
   return (
-    <div className="rounded-md border border-border bg-background px-3 py-2">
+    <div className="rounded-xl border border-border bg-background px-3 py-2">
       <div className="text-xs text-muted-foreground">{label}</div>
       <div className="mt-1 flex items-center gap-2 text-sm font-medium">
         <span className={`size-2 rounded-full ${dot}`} />

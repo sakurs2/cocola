@@ -213,12 +213,12 @@ function AssistantHeader({ message }: { message: WireMessage }) {
   const icon = message.metadata?.model_icon;
 
   return (
-    <div className="mb-2 flex items-center gap-2 text-xs text-muted-foreground">
-      <span className="inline-flex min-w-0 items-center gap-1.5 rounded-full border border-border bg-muted/35 px-2 py-1">
-        <ModelIcon icon={icon} className="size-4" />
-        <span className="truncate font-medium text-foreground">{label}</span>
-      </span>
-      {message.created_at ? <span>{formatDate(message.created_at)}</span> : null}
+    <div className="mb-2 flex items-center gap-x-2.5">
+      <ModelIcon icon={icon} className="size-7 shrink-0" bare />
+      <span className="min-w-0 truncate text-base font-bold leading-none text-foreground">{label}</span>
+      {message.created_at ? (
+        <span className="shrink-0 text-xs text-muted-foreground">{formatDate(message.created_at)}</span>
+      ) : null}
     </div>
   );
 }

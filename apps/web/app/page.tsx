@@ -156,7 +156,7 @@ function Workspace() {
                 animate={{ opacity: 1, x: 0 }}
                 exit={{ opacity: 0, x: 28 }}
                 transition={{ duration: 0.18, ease: "easeOut" }}
-                className="fixed inset-x-2 bottom-2 top-14 z-30 w-auto overflow-hidden rounded-2xl border border-border bg-card/95 shadow-xl backdrop-blur-xl md:static md:inset-auto md:z-auto md:m-2 md:ml-0 md:w-[var(--workspace-width)] md:shrink-0"
+                className="fixed inset-x-2 bottom-2 top-14 z-30 w-auto overflow-hidden bg-card md:static md:inset-auto md:z-auto md:w-[var(--workspace-width)] md:shrink-0"
                 style={{ ["--workspace-width" as string]: `${workspaceWidth}px` }}
               >
                 <WorkspacePanel
@@ -172,7 +172,7 @@ function Workspace() {
               animate={{ opacity: 1, x: 0 }}
               exit={{ opacity: 0, x: 24 }}
               transition={{ duration: 0.18, ease: "easeOut" }}
-              className="fixed inset-x-2 bottom-2 top-14 z-30 overflow-hidden rounded-2xl border border-border bg-card/95 shadow-xl backdrop-blur-xl md:static md:inset-auto md:z-auto md:m-2 md:ml-0 md:w-80 md:shrink-0"
+              className="fixed inset-x-2 bottom-2 top-14 z-30 overflow-hidden rounded-2xl border border-border bg-card/95 shadow-xl backdrop-blur-xl md:static md:inset-auto md:z-auto md:m-2 md:ml-0 md:w-80 md:shrink-0 md:self-start md:max-h-[calc(100vh-4.5rem)]"
             >
               <SessionStatusPanel
                 status={environmentStatus}

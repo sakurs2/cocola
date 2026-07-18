@@ -3,15 +3,22 @@
 import { ChangeEvent, useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import {
-  CheckCircle2,
+  Check,
   FileArchive,
+  GitBranch,
   LoaderCircle,
-  Sparkles,
-  ToggleLeft,
-  ToggleRight,
+  Power,
+  Search,
   Trash2,
   Upload,
 } from "lucide-react";
+
+import { cn } from "@/lib/utils";
+import { Badge } from "@/components/ui/badge";
+import { Card } from "@/components/ui/card";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import { SkillIcon } from "@/components/ui/skill-icon";
 
 type Skill = {
   id: string;
@@ -201,16 +208,16 @@ function SkillsWorkspace() {
   };
 
   return (
-    <main className="h-full min-w-0 overflow-y-auto">
-      <div className="mx-auto max-w-6xl space-y-6 px-6 py-6">
+    <main className="h-full min-w-0 flex-1 overflow-y-auto bg-background">
+      <div className="mx-auto max-w-5xl space-y-8 px-8 py-10">
         <header className="flex flex-wrap items-start justify-between gap-4">
-          <div>
-            <h1 className="text-xl font-semibold">Skills</h1>
-            <p className="mt-1 text-sm text-muted-foreground">
+          <div className="space-y-1">
+            <h1 className="text-2xl font-bold tracking-tight">Skills</h1>
+            <p className="text-sm text-muted-foreground">
               Choose shared skills and manage your personal skill packages.
             </p>
           </div>
-          <label className="inline-flex h-9 cursor-pointer items-center gap-2 rounded-md bg-primary px-3 text-sm font-medium text-primary-foreground hover:bg-primary/90">
+          <label className="inline-flex h-9 cursor-pointer items-center gap-2 rounded-xl px-3.5 text-sm font-semibold text-white shadow-xs transition-opacity brand-gradient hover:opacity-90">
             <Upload className="size-4" />
             Upload zip
             <input
@@ -223,54 +230,74 @@ function SkillsWorkspace() {
         </header>
 
         {error ? (
-          <div className="rounded-md border border-red-500/30 bg-red-500/10 px-3 py-2 text-sm text-red-600">
+          <div className="rounded-xl border border-red-500/30 bg-red-500/10 px-3.5 py-2.5 text-sm text-red-600">
             {error}
           </div>
         ) : null}
 
-        <section className="rounded-lg border border-border bg-card p-4">
-          <div className="mb-3 text-sm font-semibold">Import from Git</div>
-          <div className="grid gap-3 md:grid-cols-[1fr_160px_160px_auto]">
-            <input
-              className="h-9 rounded-md border border-border bg-background px-3 text-sm outline-none focus:border-foreground/30"
-              placeholder="https://github.com/org/repo.git"
-              value={gitRepo}
-              onChange={(event) => setGitRepo(event.target.value)}
-            />
-            <input
-              className="h-9 rounded-md border border-border bg-background px-3 text-sm outline-none focus:border-foreground/30"
-              placeholder="branch/tag"
-              value={gitRef}
-              onChange={(event) => setGitRef(event.target.value)}
-            />
-            <input
-              className="h-9 rounded-md border border-border bg-background px-3 text-sm outline-none focus:border-foreground/30"
-              placeholder="skills"
-              value={gitPath}
-              onChange={(event) => setGitPath(event.target.value)}
-            />
-            <button
-              className="inline-flex h-9 items-center justify-center gap-2 rounded-md border border-border px-3 text-sm hover:bg-accent disabled:opacity-50"
-              disabled={gitScanning || working || !gitRepo.trim()}
-              onClick={scanGit}
-            >
-              {gitScanning ? <LoaderCircle className="size-4 animate-spin" /> : null}
-              {gitScanning ? "Scanning" : "Scan"}
-            </button>
+        {/* Import from Git */}
+        <Card className="shadow-card">
+          <div className="flex items-center gap-2 border-b border-border px-5 py-4">
+            <GitBranch className="size-4 text-orange-500" />
+            <h2 className="text-sm font-semibold">Import from Git</h2>
           </div>
-        </section>
+          <div className="grid gap-4 p-5 md:grid-cols-[1fr_150px_150px_auto]">
+            <div className="space-y-1.5">
+              <Label htmlFor="git-repo">Repository</Label>
+              <Input
+                id="git-repo"
+                placeholder="https://github.com/org/repo.git"
+                value={gitRepo}
+                onChange={(event) => setGitRepo(event.target.value)}
+              />
+            </div>
+            <div className="space-y-1.5">
+              <Label htmlFor="git-ref">Ref</Label>
+              <Input
+                id="git-ref"
+                placeholder="branch / tag"
+                value={gitRef}
+                onChange={(event) => setGitRef(event.target.value)}
+              />
+            </div>
+            <div className="space-y-1.5">
+              <Label htmlFor="git-path">Path</Label>
+              <Input
+                id="git-path"
+                placeholder="skills"
+                value={gitPath}
+                onChange={(event) => setGitPath(event.target.value)}
+              />
+            </div>
+            <div className="flex items-end">
+              <button
+                className="inline-flex h-9 w-full items-center justify-center gap-2 rounded-xl border border-border bg-background px-4 text-sm font-medium shadow-xs transition-colors hover:bg-muted disabled:opacity-50"
+                disabled={gitScanning || working || !gitRepo.trim()}
+                onClick={scanGit}
+              >
+                {gitScanning ? (
+                  <LoaderCircle className="size-4 animate-spin" />
+                ) : (
+                  <Search className="size-4" />
+                )}
+                {gitScanning ? "Scanning" : "Scan"}
+              </button>
+            </div>
+          </div>
+        </Card>
 
+        {/* Archive / Git candidates */}
         {candidates.length ? (
-          <section className="rounded-lg border border-border bg-card">
-            <div className="flex flex-wrap items-center justify-between gap-3 border-b border-border px-4 py-3">
+          <Card className="shadow-card">
+            <div className="flex flex-wrap items-center justify-between gap-3 border-b border-border px-5 py-4">
               <div className="flex items-center gap-2">
                 <FileArchive className="size-4 text-muted-foreground" />
-                <div className="text-sm font-semibold">Archive candidates</div>
-                <div className="text-xs text-muted-foreground">{validCandidates.length} valid</div>
+                <h2 className="text-sm font-semibold">Candidates</h2>
+                <Badge>{validCandidates.length} valid</Badge>
               </div>
               <div className="flex gap-2">
                 <button
-                  className="rounded-md border border-border px-3 py-1.5 text-sm hover:bg-accent"
+                  className="inline-flex h-8 items-center rounded-xl border border-border bg-background px-3 text-sm font-medium shadow-xs transition-colors hover:bg-muted"
                   onClick={() =>
                     setSelected(
                       allValidSelected
@@ -282,7 +309,7 @@ function SkillsWorkspace() {
                   {allValidSelected ? "Clear all" : "Select all"}
                 </button>
                 <button
-                  className="rounded-md bg-primary px-3 py-1.5 text-sm font-medium text-primary-foreground disabled:opacity-50"
+                  className="inline-flex h-8 items-center rounded-xl px-3 text-sm font-semibold text-white shadow-xs transition-opacity brand-gradient hover:opacity-90 disabled:opacity-50"
                   disabled={working || !Object.values(selected).some(Boolean)}
                   onClick={importSelected}
                 >
@@ -290,32 +317,35 @@ function SkillsWorkspace() {
                 </button>
               </div>
             </div>
-            <div className="grid gap-3 p-4 md:grid-cols-2">
+            <div className="grid gap-3 p-5 md:grid-cols-2">
               {candidates.map((candidate) => (
-                <label key={`${candidate.path}:${candidate.id}`} className="rounded-lg border border-border p-4">
-                  <div className="flex gap-3">
-                    <input
-                      type="checkbox"
-                      className="mt-1"
-                      checked={!!selected[candidate.id]}
-                      disabled={!candidate.valid}
-                      onChange={(event) =>
-                        setSelected((prev) => ({ ...prev, [candidate.id]: event.target.checked }))
-                      }
-                    />
-                    <div className="min-w-0 flex-1">
-                      <div className="truncate text-sm font-semibold">
-                        {displaySkillName(candidate)}
-                      </div>
-                      <div className="mt-1 line-clamp-2 text-sm text-muted-foreground">
-                        {candidate.description || candidate.errors?.join("; ")}
-                      </div>
+                <label
+                  key={`${candidate.path}:${candidate.id}`}
+                  className={cn(
+                    "flex cursor-pointer gap-3 rounded-2xl border border-border p-4 transition-colors hover:bg-muted/50",
+                    !candidate.valid && "cursor-not-allowed opacity-60",
+                  )}
+                >
+                  <input
+                    type="checkbox"
+                    className="mt-1 size-4 shrink-0 accent-blue-600"
+                    checked={!!selected[candidate.id]}
+                    disabled={!candidate.valid}
+                    onChange={(event) =>
+                      setSelected((prev) => ({ ...prev, [candidate.id]: event.target.checked }))
+                    }
+                  />
+                  <SkillIcon name={displaySkillName(candidate) || candidate.id} size="sm" />
+                  <div className="min-w-0 flex-1">
+                    <div className="truncate text-sm font-bold">{displaySkillName(candidate)}</div>
+                    <div className="mt-1 line-clamp-2 text-sm text-muted-foreground">
+                      {candidate.description || candidate.errors?.join("; ")}
                     </div>
                   </div>
                 </label>
               ))}
             </div>
-          </section>
+          </Card>
         ) : null}
 
         {loading ? (
@@ -327,6 +357,7 @@ function SkillsWorkspace() {
           <>
             <SkillSection
               title="Shared Skills"
+              count={shared.length}
               empty="No shared skills published by administrators."
               skills={shared}
               working={working}
@@ -335,6 +366,7 @@ function SkillsWorkspace() {
             />
             <SkillSection
               title="My Skills"
+              count={mine.length}
               empty="Upload a zip package to add your own skills."
               skills={mine}
               working={working}
@@ -351,6 +383,7 @@ function SkillsWorkspace() {
 
 function SkillSection({
   title,
+  count,
   empty,
   skills,
   working,
@@ -359,6 +392,7 @@ function SkillSection({
   onDelete,
 }: {
   title: string;
+  count: number;
   empty: string;
   skills: Skill[];
   working: boolean;
@@ -367,9 +401,12 @@ function SkillSection({
   onDelete?: (skill: Skill) => void;
 }) {
   return (
-    <section className="space-y-3">
-      <h2 className="text-sm font-semibold">{title}</h2>
-      <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
+    <section className="space-y-4">
+      <div className="flex items-center gap-2">
+        <h2 className="text-sm font-semibold">{title}</h2>
+        <Badge>{count}</Badge>
+      </div>
+      <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
         {skills.length ? (
           skills.map((skill) => (
             <SkillCard
@@ -381,9 +418,12 @@ function SkillSection({
             />
           ))
         ) : (
-          <div className="col-span-full rounded-lg border border-dashed border-border p-6 text-center text-sm text-muted-foreground">
-            {empty}
-          </div>
+          <label className="col-span-full flex min-h-[140px] cursor-pointer flex-col items-center justify-center gap-2 rounded-2xl border border-dashed border-border p-6 text-center transition-colors hover:border-foreground/25 hover:bg-muted/50">
+            <div className="grid size-10 place-items-center rounded-xl bg-muted">
+              <Upload className="size-4 text-muted-foreground" />
+            </div>
+            <p className="text-sm text-muted-foreground">{empty}</p>
+          </label>
         )}
       </div>
     </section>
@@ -402,52 +442,66 @@ function SkillCard({
   onDelete?: () => void;
 }) {
   return (
-    <div className="rounded-lg border border-border bg-card p-4 transition hover:border-foreground/20">
+    <Card className="group flex flex-col p-5 shadow-card transition hover:-translate-y-0.5 hover:shadow-lg">
       <Link href={`/skills/${encodeURIComponent(skill.id)}`} className="block">
         <div className="flex items-start gap-3">
-          <div className="grid size-9 shrink-0 place-items-center rounded-md bg-muted">
-            <Sparkles className="size-4 text-muted-foreground" />
-          </div>
+          <SkillIcon name={displaySkillName(skill) || skill.id} />
           <div className="min-w-0 flex-1">
-            <div className="truncate text-sm font-semibold">{displaySkillName(skill)}</div>
+            <h3 className="truncate text-sm font-bold">{displaySkillName(skill)}</h3>
             <p className="mt-1 line-clamp-2 min-h-10 text-sm text-muted-foreground">
               {skill.description || "No description"}
             </p>
           </div>
         </div>
-        <div className="mt-4 flex flex-wrap gap-2 text-xs text-muted-foreground">
-          <span className="rounded-md border border-border px-2 py-0.5">
-            {skill.scope === "user" ? "personal" : "shared"}
-          </span>
+        <div className="mt-4 flex flex-wrap items-center gap-2">
+          <Badge>{skill.scope === "user" ? "personal" : "shared"}</Badge>
           {skill.enabled ? (
-            <span className="inline-flex items-center gap-1 rounded-md border border-emerald-500/30 px-2 py-0.5 text-emerald-600">
-              <CheckCircle2 className="size-3" />
-              enabled
-            </span>
+            <Badge variant="success">
+              <span className="size-1.5 rounded-full bg-emerald-500" /> enabled
+            </Badge>
           ) : null}
         </div>
       </Link>
-      <div className="mt-4 flex gap-2">
-        <button
-          className="inline-flex h-8 items-center gap-2 rounded-md border border-border px-2.5 text-sm hover:bg-accent disabled:opacity-50"
-          disabled={working}
-          onClick={onToggle}
-        >
-          {skill.enabled ? <ToggleRight className="size-4" /> : <ToggleLeft className="size-4" />}
-          {skill.enabled ? "Disable" : "Enable"}
-        </button>
+      <div className="mt-5 flex items-center gap-2 border-t border-border pt-4">
+        {skill.enabled ? (
+          <button
+            className="inline-flex h-8 flex-1 items-center justify-center gap-2 rounded-lg border border-border bg-background px-3 text-xs font-medium shadow-xs transition-colors hover:bg-muted disabled:opacity-50"
+            disabled={working}
+            onClick={onToggle}
+          >
+            {working ? (
+              <LoaderCircle className="size-3.5 animate-spin" />
+            ) : (
+              <Check className="size-3.5 text-emerald-600" />
+            )}
+            Enabled
+          </button>
+        ) : (
+          <button
+            className="inline-flex h-8 flex-1 items-center justify-center gap-2 rounded-lg px-3 text-xs font-semibold text-white shadow-xs transition-opacity brand-gradient hover:opacity-90 disabled:opacity-50"
+            disabled={working}
+            onClick={onToggle}
+          >
+            {working ? (
+              <LoaderCircle className="size-3.5 animate-spin" />
+            ) : (
+              <Power className="size-3.5" />
+            )}
+            Enable
+          </button>
+        )}
         {onDelete ? (
           <button
-            className="inline-flex h-8 items-center gap-2 rounded-md border border-border px-2.5 text-sm text-red-600 hover:bg-red-500/10 disabled:opacity-50"
+            className="inline-flex size-8 items-center justify-center rounded-lg border border-border bg-background text-muted-foreground shadow-xs transition-colors hover:border-red-200 hover:bg-red-50 hover:text-red-600 disabled:opacity-50"
             disabled={working}
             onClick={onDelete}
+            title="Remove"
           >
-            <Trash2 className="size-4" />
-            Remove
+            <Trash2 className="size-3.5" />
           </button>
         ) : null}
       </div>
-    </div>
+    </Card>
   );
 }
 

@@ -152,15 +152,15 @@ export function UsagePanel() {
   return (
     <div className="space-y-5">
       {error && (
-        <div className="rounded-md border border-destructive/40 bg-destructive/10 px-4 py-3 text-sm text-destructive">
+        <div className="rounded-xl border border-destructive/40 bg-destructive/10 px-4 py-3 text-sm text-destructive">
           {error}
         </div>
       )}
 
-      <section className="rounded-lg border border-border bg-card">
+      <section className="rounded-2xl border border-border bg-card shadow-card">
         <div className="flex items-center gap-3 border-b border-border px-4 py-3">
-          <div className="grid size-8 place-items-center rounded-md bg-muted">
-            <Gauge className="size-4 text-muted-foreground" />
+          <div className="grid size-8 place-items-center rounded-xl bg-violet-500/10">
+            <Gauge className="size-4 text-violet-600" />
           </div>
           <div className="min-w-0 flex-1">
             <h2 className="text-sm font-semibold">Remaining Quota</h2>
@@ -199,10 +199,10 @@ export function UsagePanel() {
 
       {!loading && (
         <>
-          <section className="rounded-lg border border-border bg-card">
+          <section className="rounded-2xl border border-border bg-card shadow-card">
             <div className="flex items-center gap-3 border-b border-border px-4 py-3">
-              <div className="grid size-8 place-items-center rounded-md bg-muted">
-                <Receipt className="size-4 text-muted-foreground" />
+              <div className="grid size-8 place-items-center rounded-xl bg-amber-500/10">
+                <Receipt className="size-4 text-amber-600" />
               </div>
               <h2 className="text-sm font-semibold">Lifetime Totals</h2>
             </div>
@@ -214,10 +214,10 @@ export function UsagePanel() {
             </div>
           </section>
 
-          <section className="rounded-lg border border-border bg-card">
+          <section className="rounded-2xl border border-border bg-card shadow-card">
             <div className="flex items-center gap-3 border-b border-border px-4 py-3">
-              <div className="grid size-8 place-items-center rounded-md bg-muted">
-                <Receipt className="size-4 text-muted-foreground" />
+              <div className="grid size-8 place-items-center rounded-xl bg-amber-500/10">
+                <Receipt className="size-4 text-amber-600" />
               </div>
               <h2 className="text-sm font-semibold">Recent Activity</h2>
             </div>
@@ -278,7 +278,7 @@ function QuotaTile({ scope }: { scope: QuotaScope }) {
       ? "bg-amber-500"
       : "bg-emerald-500";
   return (
-    <div className="rounded-md border border-border bg-background p-3">
+    <div className="rounded-xl border border-border bg-background p-3">
       <div className="flex items-center justify-between">
         <div className="text-sm font-medium">{scopeLabel(scope.scope)}</div>
         <div className="text-xs text-muted-foreground">{scope.period}</div>
@@ -311,7 +311,7 @@ function QuotaTile({ scope }: { scope: QuotaScope }) {
 
 function StatTile({ label, value }: { label: string; value: string }) {
   return (
-    <div className="rounded-md border border-border bg-background px-3 py-2">
+    <div className="rounded-xl border border-border bg-background px-3 py-2">
       <div className="text-xs text-muted-foreground">{label}</div>
       <div className="mt-1 text-sm font-medium tabular-nums">{value}</div>
     </div>

@@ -5,7 +5,62 @@ import { FileQuestion, LoaderCircle, RefreshCw } from "lucide-react";
 import dynamic from "next/dynamic";
 import { useEffect, useState } from "react";
 
+import type { BeforeMount } from "@monaco-editor/react";
+
 const MonacoEditor = dynamic(() => import("@monaco-editor/react"), { ssr: false });
+
+// Dark theme mirroring the app's markdown code blocks (globals.css / markdown-text.tsx):
+// violet keywords, amber strings, emerald identifiers, sky numbers, slate comments on #0f1011.
+const COCOLA_CODE_THEME = "cocola-code-dark";
+let cocolaThemeRegistered = false;
+
+const defineCocolaTheme: BeforeMount = (monaco) => {
+  if (cocolaThemeRegistered) return;
+  cocolaThemeRegistered = true;
+  monaco.editor.defineTheme(COCOLA_CODE_THEME, {
+    base: "vs-dark",
+    inherit: true,
+    rules: [
+      { token: "", foreground: "eceff4" },
+      { token: "comment", foreground: "64748b", fontStyle: "italic" },
+      { token: "keyword", foreground: "c4b5fd" },
+      { token: "keyword.control", foreground: "c4b5fd" },
+      { token: "operator", foreground: "cbd5f5" },
+      { token: "string", foreground: "fcd34d" },
+      { token: "string.escape", foreground: "fbbf24" },
+      { token: "number", foreground: "7dd3fc" },
+      { token: "regexp", foreground: "fcd34d" },
+      { token: "type", foreground: "6ee7b7" },
+      { token: "type.identifier", foreground: "6ee7b7" },
+      { token: "identifier", foreground: "6ee7b7" },
+      { token: "function", foreground: "93c5fd" },
+      { token: "variable", foreground: "eceff4" },
+      { token: "variable.predefined", foreground: "c4b5fd" },
+      { token: "constant", foreground: "7dd3fc" },
+      { token: "tag", foreground: "c4b5fd" },
+      { token: "attribute.name", foreground: "6ee7b7" },
+      { token: "attribute.value", foreground: "fcd34d" },
+      { token: "delimiter", foreground: "94a3b8" },
+      { token: "delimiter.bracket", foreground: "cbd5f5" },
+      { token: "namespace", foreground: "6ee7b7" },
+    ],
+    colors: {
+      "editor.background": "#0f1011",
+      "editor.foreground": "#eceff4",
+      "editorLineNumber.foreground": "#4b5563",
+      "editorLineNumber.activeForeground": "#94a3b8",
+      "editor.lineHighlightBackground": "#17181a",
+      "editor.selectionBackground": "#334155",
+      "editor.inactiveSelectionBackground": "#1e293b",
+      "editorIndentGuide.background": "#1f2124",
+      "editorIndentGuide.activeBackground": "#334155",
+      "editorGutter.background": "#0f1011",
+      "editorWidget.background": "#17181a",
+      "scrollbarSlider.background": "#33415580",
+      "scrollbarSlider.hoverBackground": "#475569aa",
+    },
+  });
+};
 
 export type PreviewFile = {
   filename: string;
@@ -162,20 +217,35 @@ function TextFilePreview({
     return <MarkdownContent value={text} className="p-4" />;
   }
   return (
-    <div className="h-full min-h-[420px]">
+    <div className="h-full min-h-[420px] bg-[#0f1011]">
       <MonacoEditor
         language={kind === "code" ? toMonacoLanguage(language) : "plaintext"}
         value={text}
-        theme="vs"
+        theme={COCOLA_CODE_THEME}
+        beforeMount={defineCocolaTheme}
         options={{
           readOnly: true,
+          domReadOnly: true,
           minimap: { enabled: false },
-          fontSize: 12,
+          fontSize: 12.5,
           lineHeight: 20,
+          letterSpacing: 0.2,
+          fontLigatures: true,
+          padding: { top: 12, bottom: 12 },
           scrollBeyondLastLine: false,
+          smoothScrolling: true,
           wordWrap: "on",
-          renderLineHighlight: "none",
+          renderLineHighlight: "line",
+          renderWhitespace: "selection",
+          guides: { indentation: true, bracketPairs: true },
+          bracketPairColorization: { enabled: true },
+          lineNumbersMinChars: 3,
+          glyphMargin: false,
+          folding: true,
           overviewRulerBorder: false,
+          overviewRulerLanes: 0,
+          scrollbar: { verticalScrollbarSize: 10, horizontalScrollbarSize: 10 },
+          contextmenu: false,
         }}
       />
     </div>

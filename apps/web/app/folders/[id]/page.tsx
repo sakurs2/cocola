@@ -2,13 +2,13 @@
 
 import * as DropdownMenu from "@radix-ui/react-dropdown-menu";
 import {
-  CaretRight,
-  ChatsCircle,
-  DotsThree,
+  ChevronRight,
   Folder,
-  PencilSimple,
-  Trash,
-} from "@phosphor-icons/react";
+  MessagesSquare,
+  MoreHorizontal,
+  Pencil,
+  Trash2,
+} from "lucide-react";
 import { useParams, useRouter } from "next/navigation";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useCocola, type ConversationSummary } from "@/app/runtime-provider";
@@ -145,7 +145,7 @@ export default function FolderPage() {
     return (
       <div className="grid h-full place-items-center px-6 text-center">
         <div>
-          <Folder className="mx-auto size-9 text-muted-foreground" weight="duotone" />
+          <Folder className="mx-auto size-9 text-muted-foreground" />
           <h1 className="mt-3 text-lg font-semibold">Folder not found</h1>
           <p className="mt-1 text-sm text-muted-foreground">
             It may have been deleted or belongs to another account.
@@ -169,14 +169,14 @@ export default function FolderPage() {
       <div className="mx-auto w-full max-w-4xl pb-16">
         <div className="flex items-center gap-1.5 text-xs font-medium text-muted-foreground">
           <span>Folders</span>
-          <CaretRight className="size-3.5" />
+          <ChevronRight className="size-3.5" />
           <span className="truncate text-foreground/75">{folder.name}</span>
         </div>
 
         <section className="relative mt-8 pl-8 sm:pl-11">
           <div className="absolute bottom-[-2.5rem] left-[0.9rem] top-10 w-px bg-gradient-to-b from-primary/55 via-primary/20 to-transparent sm:left-[1.15rem]" />
           <div className="absolute left-0 top-0 grid size-8 place-items-center rounded-xl border border-primary/15 bg-primary/10 text-primary shadow-sm sm:size-9">
-            <Folder className="size-4 sm:size-[18px]" weight="duotone" />
+            <Folder className="size-4 sm:size-[18px]" />
           </div>
           <div className="flex min-w-0 items-start justify-between gap-3">
             <div className="min-w-0 flex-1">
@@ -208,7 +208,7 @@ export default function FolderPage() {
                   aria-label="Folder actions"
                   className="grid size-9 shrink-0 place-items-center rounded-xl text-muted-foreground transition hover:bg-muted hover:text-foreground focus:outline-none"
                 >
-                  <DotsThree className="size-5" weight="bold" />
+                  <MoreHorizontal className="size-5" />
                 </button>
               </DropdownMenu.Trigger>
               <DropdownMenu.Portal>
@@ -224,7 +224,7 @@ export default function FolderPage() {
                     }}
                     className="flex cursor-default items-center gap-2 rounded-lg px-2 py-1.5 text-sm text-foreground outline-none focus:bg-accent focus:text-foreground data-[highlighted]:bg-accent data-[highlighted]:text-foreground"
                   >
-                    <PencilSimple className="size-4" weight="duotone" />
+                    <Pencil className="size-4" />
                     Rename
                   </DropdownMenu.Item>
                   <DropdownMenu.Item
@@ -233,7 +233,7 @@ export default function FolderPage() {
                     }
                     className="flex cursor-default items-center gap-2 rounded-lg px-2 py-1.5 text-sm text-red-500 outline-none focus:bg-red-500/10 focus:text-red-600"
                   >
-                    <Trash className="size-4" weight="duotone" />
+                    <Trash2 className="size-4" />
                     Delete
                   </DropdownMenu.Item>
                 </DropdownMenu.Content>
@@ -241,7 +241,7 @@ export default function FolderPage() {
             </DropdownMenu.Root>
           </div>
 
-          <div className="mt-8 rounded-[1.35rem] border border-border/80 bg-white/42 p-2 shadow-[0_18px_55px_hsl(204_70%_35%/0.08)] backdrop-blur-xl">
+          <div className="mt-8 rounded-2xl border border-border bg-card p-2 shadow-card">
             <ConversationComposer placeholder={`Start a chat in ${folder.name}...`} />
           </div>
         </section>
@@ -262,7 +262,7 @@ export default function FolderPage() {
           ) : null}
           {folderConversations.length === 0 ? (
             <div className="mt-6 rounded-2xl border border-dashed border-border px-5 py-10 text-center">
-              <ChatsCircle className="mx-auto size-7 text-muted-foreground" weight="duotone" />
+              <MessagesSquare className="mx-auto size-7 text-muted-foreground" />
               <p className="mt-2 text-sm font-medium">No chats in this folder yet</p>
               <p className="mt-1 text-xs text-muted-foreground">
                 Use the composer above to start the first one.
@@ -273,7 +273,7 @@ export default function FolderPage() {
               {folderConversations.map((conversation) => (
                 <div
                   key={conversation.id}
-                  className="group flex min-h-16 items-center gap-3 rounded-xl px-3 py-3 transition hover:bg-white/45"
+                  className="group flex min-h-16 items-center gap-3 rounded-xl px-3 py-3 transition hover:bg-muted"
                 >
                   <div className="min-w-0 flex-1">
                     {editingConversationID === conversation.id ? (

@@ -2,10 +2,11 @@
 
 import {
   ReadonlyFilePreview,
-  formatBytes,
   type PreviewFile,
 } from "@/components/assistant-ui/file-preview";
 import { cn } from "@/lib/utils";
+import { resolveFileType } from "@/lib/file-type";
+import { MaterialFileIcon } from "@/lib/material-file-icons";
 import {
   AlertTriangle,
   ArrowLeft,
@@ -242,12 +243,9 @@ export function WorkspacePanel({ sessionID, onClose }: { sessionID: string; onCl
   return (
     <div className="flex h-full min-h-0 flex-col bg-card">
       <header className="flex min-h-14 items-center gap-3 border-b border-border px-4">
-        <span className="grid size-8 place-items-center rounded-xl bg-primary/10 text-primary">
-          <FolderOpen className="size-4" />
-        </span>
+        <FolderOpen className="size-4 shrink-0 text-primary" />
         <div className="min-w-0 flex-1">
           <div className="text-sm font-semibold text-foreground">Workspace</div>
-          <div className="truncate font-mono text-[11px] text-muted-foreground">/workspace</div>
         </div>
         <button
           type="button"
@@ -277,11 +275,8 @@ export function WorkspacePanel({ sessionID, onClose }: { sessionID: string; onCl
       >
         <section
           aria-label="Workspace files"
-          className={cn("min-h-0 flex-col bg-muted/20 md:flex", selected ? "hidden" : "flex")}
+          className={cn("min-h-0 flex-col bg-background md:flex", selected ? "hidden" : "flex")}
         >
-          <div className="border-b border-border/70 px-3 py-2 font-mono text-[11px] text-muted-foreground">
-            workspace
-          </div>
           <div className="min-h-0 flex-1 overflow-y-auto py-1" role="tree">
             {!root || root.loading ? (
               <WorkspaceLoading />
@@ -434,7 +429,10 @@ function WorkspaceTree({
                   <Folder className="size-4 shrink-0 text-primary/70" />
                 )
               ) : entry.kind === "file" ? (
-                <FileCode2 className="size-4 shrink-0" />
+                <MaterialFileIcon
+                  name={resolveFileType(entry.name).icon}
+                  className="flex size-4 shrink-0 items-center justify-center"
+                />
               ) : (
                 <File className="size-4 shrink-0" />
               )}
@@ -524,9 +522,6 @@ function WorkspaceFilePreview({
         </button>
         <div className="min-w-0 flex-1">
           <div className="truncate text-xs font-medium text-foreground">{entry.name}</div>
-          <div className="truncate text-[11px] text-muted-foreground">
-            {formatBytes(entry.size)} · {entry.path}
-          </div>
         </div>
       </header>
       <div className="min-h-0 flex-1 overflow-auto">

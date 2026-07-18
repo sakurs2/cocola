@@ -1,8 +1,7 @@
 "use client";
 
 import * as Dialog from "@radix-ui/react-dialog";
-import { CalendarDots, Paperclip, UserCircle } from "@phosphor-icons/react";
-import { ChevronRight, X } from "lucide-react";
+import { CalendarClock, ChevronRight, Paperclip, UserCircle, X } from "lucide-react";
 import { useEffect, useState } from "react";
 import {
   emptyTaskForm,
@@ -83,14 +82,14 @@ export function TaskDrawer({
         <Dialog.Overlay className="fixed inset-0 z-50 bg-slate-950/20 backdrop-blur-sm data-[state=closed]:animate-out data-[state=open]:animate-in data-[state=closed]:fade-out data-[state=open]:fade-in" />
         <Dialog.Content
           className={cn(
-            "fixed inset-y-2 right-2 z-50 flex w-[min(32rem,calc(100vw-1rem))] flex-col overflow-hidden rounded-3xl border border-border bg-background/95 text-foreground shadow-2xl backdrop-blur-xl outline-none",
+            "fixed inset-y-2 right-2 z-50 flex w-[min(32rem,calc(100vw-1rem))] flex-col overflow-hidden rounded-2xl border border-border bg-background text-foreground shadow-2xl outline-none",
             "data-[state=closed]:animate-out data-[state=open]:animate-in data-[state=closed]:slide-out-to-right data-[state=open]:slide-in-from-right",
             admin ? "cocola-admin-ui admin-drawer" : "cocola-user-ui",
           )}
         >
           <header className="flex min-h-16 items-center gap-3 border-b border-border/70 px-5">
             <span className="grid size-9 place-items-center rounded-2xl bg-sky-500/10 text-sky-600">
-              <CalendarDots className="size-[18px]" weight="duotone" />
+              <CalendarClock className="size-[18px]" />
             </span>
             <div className="min-w-0 flex-1">
               <Dialog.Title className="truncate text-base font-semibold">
@@ -111,7 +110,7 @@ export function TaskDrawer({
               {admin && task ? (
                 <div className="rounded-2xl border border-border/70 bg-muted/30 p-3">
                   <div className="flex items-center gap-2 text-xs font-medium text-muted-foreground">
-                    <UserCircle className="size-4" weight="duotone" /> Owner
+                    <UserCircle className="size-4" /> Owner
                   </div>
                   {task.owner_user_id ? (
                     <div className="mt-1 text-sm">
@@ -215,7 +214,7 @@ export function TaskDrawer({
                   </Field>
                   <Field label="Attachments">
                     <label className="flex min-h-12 cursor-pointer items-center gap-2 rounded-xl border border-dashed border-border px-3 text-sm text-muted-foreground hover:bg-muted/40">
-                      <Paperclip className="size-4" weight="duotone" />
+                      <Paperclip className="size-4" />
                       <span className="truncate">
                         {form.files.length
                           ? form.files.map((file) => file.filename).join(", ")
@@ -456,7 +455,7 @@ export function TaskConfirmDialog({
         <Dialog.Overlay className="fixed inset-0 z-[60] bg-slate-950/25 backdrop-blur-sm" />
         <Dialog.Content
           className={cn(
-            "fixed left-1/2 top-1/2 z-[60] w-[min(28rem,calc(100vw-2rem))] -translate-x-1/2 -translate-y-1/2 rounded-3xl border border-border bg-background p-5 text-foreground shadow-2xl outline-none",
+            "fixed left-1/2 top-1/2 z-[60] w-[min(28rem,calc(100vw-2rem))] -translate-x-1/2 -translate-y-1/2 rounded-2xl border border-border bg-background p-5 text-foreground shadow-2xl outline-none",
             admin ? "cocola-admin-ui admin-drawer" : "cocola-user-ui",
           )}
         >
