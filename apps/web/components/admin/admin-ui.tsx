@@ -4,7 +4,9 @@ import * as Dialog from "@radix-ui/react-dialog";
 import { motion } from "framer-motion";
 import { RefreshCw, X } from "lucide-react";
 import { type ComponentPropsWithoutRef, type ReactNode, useState } from "react";
+import { Badge } from "@/components/ui/badge";
 import { Button, type ButtonProps } from "@/components/ui/button";
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { cn } from "@/lib/utils";
 
 export function AdminPage({
@@ -94,20 +96,20 @@ export function AdminPanel({
   contentClassName?: string;
 }) {
   return (
-    <section className={cn("admin-glass-panel overflow-hidden rounded-2xl border", className)}>
+    <Card className={cn("overflow-hidden", className)}>
       {title || description || actions ? (
-        <div className="flex min-h-14 items-center justify-between gap-4 border-b border-border/70 px-4 py-3 sm:px-5">
+        <CardHeader className="min-h-14 flex-row items-center justify-between gap-4 border-b border-border/70 px-4 py-3 sm:px-5">
           <div className="min-w-0">
-            {title ? <h2 className="text-sm font-semibold text-foreground">{title}</h2> : null}
+            {title ? <CardTitle className="text-sm">{title}</CardTitle> : null}
             {description ? (
-              <p className="mt-0.5 text-xs text-muted-foreground">{description}</p>
+              <CardDescription className="mt-0.5 text-xs">{description}</CardDescription>
             ) : null}
           </div>
           {actions ? <div className="flex shrink-0 items-center gap-2">{actions}</div> : null}
-        </div>
+        </CardHeader>
       ) : null}
-      <div className={cn("p-4 sm:p-5", contentClassName)}>{children}</div>
-    </section>
+      <CardContent className={cn("p-4 sm:p-5", contentClassName)}>{children}</CardContent>
+    </Card>
   );
 }
 
@@ -127,7 +129,7 @@ export function AdminMetric({
   className?: string;
 }) {
   return (
-    <div className={cn("admin-metric rounded-2xl border px-4 py-3.5", className)} data-tone={tone}>
+    <Card className={cn("px-4 py-3.5", className)} data-tone={tone}>
       <div className="flex items-center justify-between gap-3 text-xs text-muted-foreground">
         <span>{label}</span>
         {icon ? <span className="admin-metric-icon">{icon}</span> : null}
@@ -136,29 +138,25 @@ export function AdminMetric({
         {value}
       </div>
       {detail ? <div className="mt-1 text-xs text-muted-foreground">{detail}</div> : null}
-    </div>
+    </Card>
   );
 }
 
 export function AdminToolbar({ children, className }: { children: ReactNode; className?: string }) {
   return (
-    <div
+    <Card
       className={cn(
-        "admin-toolbar flex flex-col gap-3 rounded-2xl border p-3 sm:flex-row sm:flex-wrap sm:items-end",
+        "flex flex-col gap-3 p-3 sm:flex-row sm:flex-wrap sm:items-end",
         className,
       )}
     >
       {children}
-    </div>
+    </Card>
   );
 }
 
 export function AdminTable({ children, className }: { children: ReactNode; className?: string }) {
-  return (
-    <div className={cn("admin-table-surface overflow-x-auto rounded-2xl border", className)}>
-      {children}
-    </div>
-  );
+  return <Card className={cn("overflow-x-auto", className)}>{children}</Card>;
 }
 
 const statusTone = {
@@ -181,16 +179,10 @@ export function AdminStatusBadge({
   className?: string;
 }) {
   return (
-    <span
-      className={cn(
-        "inline-flex min-h-6 items-center gap-1.5 rounded-full border px-2.5 py-0.5 text-xs font-medium",
-        statusTone[tone],
-        className,
-      )}
-    >
+    <Badge className={cn("min-h-6 gap-1.5 border px-2.5 py-0.5", statusTone[tone], className)}>
       {dot ? <span className="size-1.5 rounded-full bg-current" /> : null}
       {children}
-    </span>
+    </Badge>
   );
 }
 
