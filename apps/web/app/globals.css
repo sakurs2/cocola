@@ -358,61 +358,29 @@
     -webkit-text-fill-color: transparent;
   }
 
-  /* Send button: blue -> violet diagonal gradient with soft halo (ref image) */
+  /* Send button: white fill + blue->violet gradient ring, tinted icon (option 6) */
   .cocola-user-ui .cocola-send-btn {
     position: relative;
     isolation: isolate;
-    background: linear-gradient(
-      45deg,
-      hsl(214 92% 54%) 0%,
-      hsl(232 84% 60%) 46%,
-      hsl(270 82% 62%) 100%
-    );
-    box-shadow:
-      inset 0 1px 0 hsl(0 0% 100% / 0.45),
-      inset 0 -3px 8px hsl(266 70% 40% / 0.28),
-      0 6px 16px hsl(240 78% 52% / 0.34),
-      0 0 0 0 hsl(255 85% 62% / 0.5);
+    color: hsl(258 80% 52%);
+    background:
+      linear-gradient(hsl(0 0% 100%), hsl(0 0% 100%)) padding-box,
+      linear-gradient(135deg, hsl(214 92% 54%), hsl(300 82% 62%)) border-box;
+    border: 2px solid transparent;
+    box-shadow: 0 1px 2px hsl(240 40% 40% / 0.06);
     transition:
-      transform 240ms cubic-bezier(0.34, 1.56, 0.64, 1),
+      transform 220ms cubic-bezier(0.34, 1.56, 0.64, 1),
       box-shadow 260ms ease,
-      filter 240ms ease;
-  }
-
-  /* Soft outer glow halo, like the reference image */
-  .cocola-user-ui .cocola-send-btn::before {
-    content: "";
-    position: absolute;
-    inset: -6px;
-    z-index: -1;
-    border-radius: inherit;
-    pointer-events: none;
-    background: radial-gradient(circle at 50% 55%, hsl(252 88% 66% / 0.55) 0%, transparent 70%);
-    opacity: 0.65;
-    filter: blur(6px);
-    transition:
-      opacity 260ms ease,
-      transform 320ms ease;
+      filter 220ms ease;
   }
 
   .cocola-user-ui .cocola-send-btn svg {
-    filter: drop-shadow(0 1px 1.5px hsl(240 70% 30% / 0.4));
-    transition: transform 240ms cubic-bezier(0.34, 1.56, 0.64, 1);
+    transition: transform 250ms cubic-bezier(0.34, 1.56, 0.64, 1);
   }
 
   .cocola-user-ui .cocola-send-btn:hover {
-    transform: translateY(-1px) scale(1.08);
-    filter: brightness(1.05) saturate(1.08);
-    box-shadow:
-      inset 0 1px 0 hsl(0 0% 100% / 0.55),
-      inset 0 -3px 10px hsl(266 70% 40% / 0.32),
-      0 10px 26px hsl(240 80% 52% / 0.42),
-      0 0 0 5px hsl(255 85% 64% / 0.16);
-  }
-
-  .cocola-user-ui .cocola-send-btn:hover::before {
-    opacity: 1;
-    transform: scale(1.18);
+    transform: translateY(-1px);
+    box-shadow: 0 6px 18px hsl(258 80% 60% / 0.35);
   }
 
   .cocola-user-ui .cocola-send-btn:hover svg {
@@ -420,26 +388,23 @@
   }
 
   .cocola-user-ui .cocola-send-btn:active {
-    transform: translateY(0) scale(0.94);
+    transform: scale(0.93);
     transition-duration: 90ms;
   }
 
   .cocola-user-ui .cocola-send-btn:disabled {
-    background: linear-gradient(45deg, hsl(220 14% 78%), hsl(230 12% 72%));
-    box-shadow:
-      inset 0 1px 0 hsl(0 0% 100% / 0.4),
-      0 2px 6px hsl(222 20% 40% / 0.14);
+    color: hsl(220 12% 68%);
+    background:
+      linear-gradient(hsl(0 0% 100%), hsl(0 0% 100%)) padding-box,
+      linear-gradient(135deg, hsl(220 14% 82%), hsl(230 12% 80%)) border-box;
+    box-shadow: none;
     transform: none;
     filter: none;
-    opacity: 0.75;
-  }
-
-  .cocola-user-ui .cocola-send-btn:disabled::before {
-    opacity: 0;
+    opacity: 0.85;
   }
 
   .cocola-user-ui .cocola-send-btn:disabled svg {
-    filter: none;
+    transform: none;
   }
 
   .cocola-user-ui .cocola-prompt-card {
@@ -984,7 +949,6 @@
   .cocola-user-ui .cocola-prompt-card,
   .cocola-user-ui .cocola-prompt-card .cocola-prompt-arrow,
   .cocola-user-ui .cocola-send-btn,
-  .cocola-user-ui .cocola-send-btn::before,
   .cocola-user-ui .cocola-send-btn svg {
     transition: none;
   }
@@ -995,8 +959,7 @@
     transform: none;
   }
 
-  .cocola-user-ui .cocola-send-btn:hover svg,
-  .cocola-user-ui .cocola-send-btn:hover::before {
+  .cocola-user-ui .cocola-send-btn:hover svg {
     transform: none;
   }
 

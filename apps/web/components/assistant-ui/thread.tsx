@@ -648,7 +648,7 @@ const ComposerAction: FC = () => {
             tooltip={noModel ? "No model configured" : "Send"}
             variant="default"
             disabled={noModel}
-            className="cocola-send-btn my-1 size-9 rounded-full p-2 text-white"
+            className="cocola-send-btn my-1 size-9 rounded-full p-2"
           >
             <ArrowUpIcon className="h-4 w-4" />
           </TooltipIconButton>

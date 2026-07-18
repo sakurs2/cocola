@@ -4,6 +4,12 @@ import {
   ReadonlyFilePreview,
   type PreviewFile,
 } from "@/components/assistant-ui/file-preview";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
 import { cn } from "@/lib/utils";
 import { resolveFileType } from "@/lib/file-type";
 import { MaterialFileIcon } from "@/lib/material-file-icons";
@@ -17,18 +23,249 @@ import {
   Folder,
   FolderOpen,
   LoaderCircle,
+  Plus,
   RefreshCw,
   X,
+  type LucideIcon,
 } from "lucide-react";
 import {
   type KeyboardEvent,
   type PointerEvent,
+  type ReactNode,
   useCallback,
   useEffect,
   useMemo,
   useRef,
   useState,
 } from "react";
+
+// -- Extensible workspace dock ------------------------------------------------
+//
+// The right-hand dock is a tabbed container: a strip of open sub-pages plus a
+// "+" menu to add and switch to another sub-page. Every sub-page is registered
+// in DOCK_PAGES with an id/label/icon and a self-contained renderer, so growing
+// the dock is a one-entry change. Today the only sub-page is the workspace file
+// browser; future pages (terminal, todo, preview, ...) slot in beside it.
+
+type DockPageContext = {
+  sessionID: string;
+  active: boolean;
+  // Lets a page publish header controls (e.g. refresh) into the shared dock
+  // header, so no sub-page needs its own toolbar row.
+  setHeaderActions: (node: ReactNode) => void;
+};
+
+type DockPage = {
+  id: string;
+  label: string;
+  icon: LucideIcon;
+  render: (context: DockPageContext) => ReactNode;
+};
+
+const DOCK_PAGES: DockPage[] = [
+  {
+    id: "files",
+    label: "Workspace files",
+    icon: FolderOpen,
+    render: ({ sessionID, active, setHeaderActions }) => (
+      <WorkspaceFilesPage
+        sessionID={sessionID}
+        active={active}
+        setHeaderActions={setHeaderActions}
+      />
+    ),
+  },
+];
+
+const DEFAULT_PAGE_ID = DOCK_PAGES[0]?.id ?? "";
+
+export function WorkspaceDock({
+  sessionID,
+  onClose,
+}: {
+  sessionID: string;
+  onClose: () => void;
+}) {
+  // No tab is opened by default: the dock lands on an empty launcher that lists
+  // the available panels; the user picks one to open it.
+  const [openPageIds, setOpenPageIds] = useState<string[]>([]);
+  const [activePageId, setActivePageId] = useState<string>("");
+  // The active page publishes its header controls here; keyed by page id so a
+  // backgrounded page can never leak its actions into the header.
+  const [headerActions, setHeaderActions] = useState<Record<string, ReactNode>>({});
+
+  const openPages = useMemo(
+    () =>
+      openPageIds
+        .map((id) => DOCK_PAGES.find((page) => page.id === id))
+        .filter((page): page is DockPage => Boolean(page)),
+    [openPageIds],
+  );
+  const addablePages = useMemo(
+    () => DOCK_PAGES.filter((page) => !openPageIds.includes(page.id)),
+    [openPageIds],
+  );
+
+  const openPage = useCallback((id: string) => {
+    setOpenPageIds((current) => (current.includes(id) ? current : [...current, id]));
+    setActivePageId(id);
+  }, []);
+
+  const closePage = useCallback((id: string) => {
+    setOpenPageIds((current) => {
+      const next = current.filter((pageId) => pageId !== id);
+      // Closing the last tab returns to the launcher; the dock stays open (the
+      // header close button collapses the whole dock).
+      setActivePageId((active) =>
+        active === id ? (next[next.length - 1] ?? "") : active,
+      );
+      return next;
+    });
+  }, []);
+
+  const activePage = openPages.find((page) => page.id === activePageId) ?? openPages[0];
+  const hasOpenPages = openPages.length > 0;
+
+  return (
+    <div className="flex h-full min-h-0 flex-col bg-card">
+      <header className="flex min-h-11 items-center gap-1 border-b border-border pl-2 pr-1">
+        <div role="tablist" className="flex min-w-0 flex-1 items-center gap-1 overflow-x-auto">
+          {openPages.map((page) => {
+            const Icon = page.icon;
+            const active = page.id === activePage?.id;
+            return (
+              <div
+                key={page.id}
+                className={cn(
+                  "group flex h-8 shrink-0 items-center gap-1.5 rounded-md pl-2.5 pr-1.5 text-xs transition-colors",
+                  active
+                    ? "bg-muted text-foreground"
+                    : "text-muted-foreground hover:bg-muted/60 hover:text-foreground",
+                )}
+              >
+                <button
+                  type="button"
+                  role="tab"
+                  aria-selected={active}
+                  onClick={() => setActivePageId(page.id)}
+                  className="flex items-center gap-1.5 focus-visible:outline-none"
+                >
+                  <Icon className={cn("size-4 shrink-0", active ? "text-primary" : "text-primary/70")} />
+                  <span className="whitespace-nowrap font-medium">{page.label}</span>
+                </button>
+                <button
+                  type="button"
+                  aria-label={`Close ${page.label}`}
+                  title={`Close ${page.label}`}
+                  onClick={() => closePage(page.id)}
+                  className="inline-flex size-4 items-center justify-center rounded-full text-muted-foreground/70 opacity-0 transition hover:bg-background hover:text-foreground focus-visible:opacity-100 group-hover:opacity-100"
+                >
+                  <X className="size-3" />
+                </button>
+              </div>
+            );
+          })}
+
+          {hasOpenPages ? (
+            <DropdownMenu>
+              <DropdownMenuTrigger asChild>
+                <button
+                  type="button"
+                  title="Add a panel"
+                  aria-label="Add a panel"
+                  className="inline-flex size-7 shrink-0 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-muted hover:text-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+                >
+                  <Plus className="size-4" />
+                </button>
+              </DropdownMenuTrigger>
+              <DropdownMenuContent align="start" className="cocola-user-ui min-w-44 bg-popover">
+                {addablePages.length > 0 ? (
+                  addablePages.map((page) => {
+                    const Icon = page.icon;
+                    return (
+                      <DropdownMenuItem key={page.id} onSelect={() => openPage(page.id)}>
+                        <Icon className="size-4 text-primary/80" />
+                        <span>{page.label}</span>
+                      </DropdownMenuItem>
+                    );
+                  })
+                ) : (
+                  <div className="px-2 py-1.5 text-xs text-muted-foreground">empty</div>
+                )}
+              </DropdownMenuContent>
+            </DropdownMenu>
+          ) : null}
+        </div>
+
+        {activePage ? headerActions[activePage.id] ?? null : null}
+
+        <button
+          type="button"
+          title="Close workspace"
+          aria-label="Close workspace"
+          onClick={onClose}
+          className="inline-flex size-8 shrink-0 items-center justify-center rounded-full text-muted-foreground transition-colors hover:bg-muted hover:text-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+        >
+          <X className="size-4" />
+        </button>
+      </header>
+
+      <div className="min-h-0 flex-1">
+        {hasOpenPages ? null : <WorkspaceLauncher onOpen={openPage} />}
+        {openPages.map((page) => {
+          const isActive = page.id === activePage?.id;
+          return (
+            <div
+              key={page.id}
+              role="tabpanel"
+              hidden={!isActive}
+              className={cn("h-full min-h-0", isActive ? "flex flex-col" : "hidden")}
+            >
+              {page.render({
+                sessionID,
+                active: isActive,
+                setHeaderActions: (node) =>
+                  setHeaderActions((current) => ({ ...current, [page.id]: node })),
+              })}
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
+// Empty-state launcher: lists the available panels centered in the dock so the
+// user can pick one to open (mirrors a command-menu style row list).
+function WorkspaceLauncher({ onOpen }: { onOpen: (id: string) => void }) {
+  return (
+    <div className="flex h-full min-h-0 flex-col items-center justify-center px-6">
+      <div className="w-full max-w-sm">
+        <p className="mb-3 px-3 text-xs font-medium uppercase tracking-wide text-muted-foreground">
+          Panels
+        </p>
+        <div className="flex flex-col">
+          {DOCK_PAGES.map((page) => {
+            const Icon = page.icon;
+            return (
+              <button
+                key={page.id}
+                type="button"
+                onClick={() => onOpen(page.id)}
+                className="flex items-center gap-3 rounded-lg px-3 py-2.5 text-left text-sm text-foreground transition-colors hover:bg-muted focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+              >
+                <Icon className="size-5 shrink-0 text-primary/80" />
+                <span className="font-medium">{page.label}</span>
+              </button>
+            );
+          })}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// -- Sub-page: workspace file browser ----------------------------------------
 
 type WorkspaceEntry = {
   name: string;
@@ -77,7 +314,15 @@ type TreeResizeSession = {
   previousUserSelect: string;
 };
 
-export function WorkspacePanel({ sessionID, onClose }: { sessionID: string; onClose: () => void }) {
+function WorkspaceFilesPage({
+  sessionID,
+  active,
+  setHeaderActions,
+}: {
+  sessionID: string;
+  active: boolean;
+  setHeaderActions: (node: ReactNode) => void;
+}) {
   const [directories, setDirectories] = useState<Record<string, DirectoryState>>({});
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
   const [selected, setSelected] = useState<WorkspaceEntry | null>(null);
@@ -240,34 +485,27 @@ export function WorkspacePanel({ sessionID, onClose }: { sessionID: string; onCl
 
   const root = directories[""];
 
+  // Publish this page's refresh control into the shared dock header while it is
+  // the active tab; clear it when the page is hidden or unmounts.
+  useEffect(() => {
+    if (!active) return;
+    setHeaderActions(
+      <button
+        type="button"
+        title="Refresh workspace"
+        aria-label="Refresh workspace"
+        disabled={refreshing}
+        onClick={() => void refresh()}
+        className="inline-flex size-8 shrink-0 items-center justify-center rounded-full text-muted-foreground transition-colors hover:bg-muted hover:text-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring disabled:opacity-50"
+      >
+        <RefreshCw className={cn("size-4", refreshing && "animate-spin")} />
+      </button>,
+    );
+    return () => setHeaderActions(null);
+  }, [active, refreshing, refresh, setHeaderActions]);
+
   return (
     <div className="flex h-full min-h-0 flex-col bg-card">
-      <header className="flex min-h-14 items-center gap-3 border-b border-border px-4">
-        <FolderOpen className="size-4 shrink-0 text-primary" />
-        <div className="min-w-0 flex-1">
-          <div className="text-sm font-semibold text-foreground">Workspace</div>
-        </div>
-        <button
-          type="button"
-          title="Refresh workspace"
-          aria-label="Refresh workspace"
-          disabled={refreshing}
-          onClick={() => void refresh()}
-          className="inline-flex size-8 items-center justify-center rounded-full text-muted-foreground transition-colors hover:bg-muted hover:text-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring disabled:opacity-50"
-        >
-          <RefreshCw className={cn("size-4", refreshing && "animate-spin")} />
-        </button>
-        <button
-          type="button"
-          title="Close workspace"
-          aria-label="Close workspace"
-          onClick={onClose}
-          className="inline-flex size-8 items-center justify-center rounded-full text-muted-foreground transition-colors hover:bg-muted hover:text-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
-        >
-          <X className="size-4" />
-        </button>
-      </header>
-
       <div
         ref={layoutRef}
         className="grid min-h-0 flex-1 grid-cols-1 md:grid-cols-[var(--workspace-tree-width)_1px_minmax(0,1fr)]"

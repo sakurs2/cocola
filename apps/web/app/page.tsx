@@ -30,10 +30,10 @@ import {
   SessionStatusPanel,
 } from "@/components/assistant-ui/session-status-panel";
 import { Thread } from "@/components/assistant-ui/thread";
-import { WorkspacePanel } from "@/components/assistant-ui/workspace-panel";
+import { WorkspaceDock } from "@/components/assistant-ui/workspace-panel";
 import { cn } from "@/lib/utils";
 import { AnimatePresence, motion } from "framer-motion";
-import { Check, Code2, Download, Eye, FolderOpen, Share2, X } from "lucide-react";
+import { Check, Code2, Download, Eye, PanelRight, Share2, X } from "lucide-react";
 import { useRouter } from "next/navigation";
 import {
   type Dispatch,
@@ -122,8 +122,8 @@ function Workspace() {
                 onPointerDown={startPreviewResize}
                 className="group relative z-10 w-3 shrink-0 cursor-col-resize touch-none"
               >
-                <div className="absolute inset-y-4 left-1/2 w-px -translate-x-1/2 rounded-full bg-border transition-colors group-hover:bg-primary/70" />
-                <div className="absolute inset-y-4 left-1/2 w-1 -translate-x-1/2 rounded-full bg-transparent transition-colors group-hover:bg-primary/20" />
+                <div className="absolute inset-y-0 left-1/2 w-px -translate-x-1/2 bg-border transition-colors group-hover:bg-primary/70" />
+                <div className="absolute inset-y-0 left-1/2 w-1 -translate-x-1/2 bg-transparent transition-colors group-hover:bg-primary/20" />
               </div>
               <motion.aside
                 key="artifact-preview"
@@ -147,8 +147,8 @@ function Workspace() {
                 onPointerDown={startWorkspaceResize}
                 className="group relative z-10 hidden w-3 shrink-0 cursor-col-resize touch-none md:block"
               >
-                <div className="absolute inset-y-4 left-1/2 w-px -translate-x-1/2 rounded-full bg-border transition-colors group-hover:bg-primary/70" />
-                <div className="absolute inset-y-4 left-1/2 w-1 -translate-x-1/2 rounded-full bg-transparent transition-colors group-hover:bg-primary/20" />
+                <div className="absolute inset-y-0 right-0 w-px bg-border transition-colors group-hover:bg-primary/70" />
+                <div className="absolute inset-y-0 right-0 w-1 bg-transparent transition-colors group-hover:bg-primary/20" />
               </div>
               <motion.aside
                 key={`workspace-${activeSessionId}`}
@@ -159,7 +159,7 @@ function Workspace() {
                 className="fixed inset-x-2 bottom-2 top-14 z-30 w-auto overflow-hidden bg-card md:static md:inset-auto md:z-auto md:w-[var(--workspace-width)] md:shrink-0"
                 style={{ ["--workspace-width" as string]: `${workspaceWidth}px` }}
               >
-                <WorkspacePanel
+                <WorkspaceDock
                   sessionID={activeSessionId}
                   onClose={() => setWorkspaceOpen(false)}
                 />
@@ -277,7 +277,7 @@ function TopBar({
                 : "text-muted-foreground hover:bg-muted hover:text-foreground",
             )}
           >
-            <FolderOpen className="size-4" />
+            <PanelRight className="size-4" />
           </button>
           <button
             type="button"
