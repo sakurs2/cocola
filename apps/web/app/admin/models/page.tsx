@@ -1,6 +1,8 @@
 "use client";
 
-import { Cpu as ModelsPageIcon } from "@phosphor-icons/react";
+import {
+  Cpu as ModelsPageIcon,
+} from "lucide-react";
 import {
   Bot,
   Boxes,
@@ -390,7 +392,7 @@ export default function AdminModelsPage() {
         eyebrow="Intelligence"
         title="Models"
         description="Connect model providers and decide which routes are available to each Agent Runtime."
-        icon={<ModelsPageIcon className="size-5" weight="duotone" />}
+        icon={<ModelsPageIcon className="size-5" />}
         actions={
           <AdminRefreshButton
             variant="outline"

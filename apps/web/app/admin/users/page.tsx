@@ -1,6 +1,8 @@
 "use client";
 
-import { UsersThree as UsersPageIcon } from "@phosphor-icons/react";
+import {
+  Users as UsersPageIcon,
+} from "lucide-react";
 import { Button } from "@/components/ui/button";
 import {
   AdminAlert,
@@ -345,7 +347,7 @@ export default function AdminUsersPage() {
       <header className="border-b border-border">
         <div className="mx-auto flex h-16 max-w-7xl items-center gap-3 px-6">
           <div className="admin-page-icon">
-            <UsersPageIcon className="size-[18px]" weight="duotone" />
+            <UsersPageIcon className="size-[18px]" />
           </div>
           <div className="min-w-0 flex-1">
             <h1 className="truncate text-base font-semibold">Users</h1>

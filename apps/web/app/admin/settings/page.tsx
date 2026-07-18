@@ -1,6 +1,8 @@
 "use client";
 
-import { Gear as SettingsPageIcon } from "@phosphor-icons/react";
+import {
+  Settings as SettingsPageIcon,
+} from "lucide-react";
 import { AlertTriangle, Check, Loader2, RotateCcw, Save, SlidersHorizontal } from "lucide-react";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { AdminRefreshButton } from "@/components/admin/admin-ui";
@@ -128,7 +130,7 @@ export default function AdminSettingsPage() {
       <header className="border-b border-border">
         <div className="mx-auto flex h-16 max-w-7xl items-center gap-3 px-6">
           <div className="admin-page-icon">
-            <SettingsPageIcon className="size-[18px]" weight="duotone" />
+            <SettingsPageIcon className="size-[18px]" />
           </div>
           <div className="min-w-0 flex-1">
             <h1 className="truncate text-base font-semibold">Settings</h1>

@@ -1,6 +1,8 @@
 "use client";
 
-import { Graph as ArchitecturePageIcon } from "@phosphor-icons/react";
+import {
+  Workflow as ArchitecturePageIcon,
+} from "lucide-react";
 import { ExternalLink, LoaderCircle } from "lucide-react";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { AdminPageHeader, AdminRefreshButton } from "@/components/admin/admin-ui";
@@ -130,7 +132,7 @@ export default function AdminArchitecturePage() {
   return (
     <main className="flex min-h-screen flex-col gap-5 px-6 py-5">
       <AdminPageHeader
-        icon={<ArchitecturePageIcon className="size-[18px]" weight="duotone" />}
+        icon={<ArchitecturePageIcon className="size-[18px]" />}
         title="Architecture"
         description="System topology and health states for the current cocola deployment."
         actions={

@@ -1,6 +1,8 @@
 "use client";
 
-import { TerminalWindow as ComponentLogsPageIcon } from "@phosphor-icons/react";
+import {
+  SquareTerminal as ComponentLogsPageIcon,
+} from "lucide-react";
 import { AlertTriangle, CheckCircle2, Loader2, ScrollText } from "lucide-react";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { AdminRefreshButton } from "@/components/admin/admin-ui";
@@ -70,7 +72,7 @@ export default function ComponentLogsPage() {
       <header className="border-b border-border">
         <div className="mx-auto flex h-16 max-w-7xl items-center gap-3 px-6">
           <div className="admin-page-icon">
-            <ComponentLogsPageIcon className="size-[18px]" weight="duotone" />
+            <ComponentLogsPageIcon className="size-[18px]" />
           </div>
           <div className="min-w-0 flex-1">
             <h1 className="truncate text-base font-semibold">Service Logs</h1>

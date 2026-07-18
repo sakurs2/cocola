@@ -1,6 +1,8 @@
 "use client";
 
-import { Sparkle as SkillsPageIcon } from "@phosphor-icons/react";
+import {
+  Sparkles as SkillsPageIcon,
+} from "lucide-react";
 import { ChangeEvent, useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import {
@@ -206,7 +208,7 @@ export default function AdminSkillsPage() {
   return (
     <main className="mx-auto max-w-6xl space-y-6 px-6 py-6">
       <AdminPageHeader
-        icon={<SkillsPageIcon className="size-[18px]" weight="duotone" />}
+        icon={<SkillsPageIcon className="size-[18px]" />}
         title="Skills"
         description="Publish shared skills for every user sandbox."
         actions={

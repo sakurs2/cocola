@@ -1,6 +1,8 @@
 "use client";
 
-import { ToolboxIcon } from "@phosphor-icons/react";
+import {
+  Wrench as ToolboxIcon,
+} from "lucide-react";
 import { useRouter } from "next/navigation";
 import { useState, type ComponentType } from "react";
 import { AdminPage, AdminPageHeader, AdminPanel } from "@/components/admin/admin-ui";
@@ -37,7 +39,7 @@ export function ToolboxClient({ initialTool }: { initialTool: ToolboxToolId | nu
     <AdminPage width="standard">
       <AdminPageHeader
         eyebrow="Configuration"
-        icon={<ToolboxIcon className="size-[18px]" weight="duotone" />}
+        icon={<ToolboxIcon className="size-[18px]" />}
         title="Toolbox"
         description="Open lightweight controls that shape how Cocola operates."
       />

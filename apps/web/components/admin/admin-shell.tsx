@@ -3,27 +3,25 @@
 import * as Dialog from "@radix-ui/react-dialog";
 import {
   ArrowLeft,
-  ChartLineUp,
-  ClockCountdown,
+  BarChart3 as ChartLineUp,
+  Timer as ClockCountdown,
   Cpu,
   FileText,
-  Gear,
-  Graph,
-  HardDrives,
-  List,
-  PlugsConnected,
+  Settings as Gear,
+  Workflow as Graph,
+  HardDrive as HardDrives,
+  Menu as List,
+  Plug as PlugsConnected,
   ShieldCheck,
-  SidebarSimple,
-  Sparkle,
-  SquaresFour,
-  Stack,
-  TerminalWindow,
-  ToolboxIcon,
-  UsersThree,
+  Sparkles as Sparkle,
+  LayoutGrid as SquaresFour,
+  Layers as Stack,
+  SquareTerminal as TerminalWindow,
+  Wrench as ToolboxIcon,
+  Users as UsersThree,
   X,
-  type Icon as PhosphorIcon,
-} from "@phosphor-icons/react";
-import { MotionConfig, motion } from "framer-motion";
+  type LucideIcon,
+} from "lucide-react";
 import { useSession } from "next-auth/react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
@@ -34,40 +32,51 @@ import { cn } from "@/lib/utils";
 type AdminNavItem = {
   href: string;
   label: string;
-  icon: PhosphorIcon;
+  icon: LucideIcon;
   match?: string[];
+  iconClassName?: string;
 };
 
-const OVERVIEW_ITEM: AdminNavItem = { href: "/admin", label: "Overview", icon: SquaresFour };
-const SETTINGS_ITEM: AdminNavItem = { href: "/admin/settings", label: "Settings", icon: Gear };
+const OVERVIEW_ITEM: AdminNavItem = {
+  href: "/admin",
+  label: "Overview",
+  icon: SquaresFour,
+  iconClassName: "text-blue-600",
+};
+const SETTINGS_ITEM: AdminNavItem = {
+  href: "/admin/settings",
+  label: "Settings",
+  icon: Gear,
+  iconClassName: "text-slate-500",
+};
 
 const NAV_GROUPS: { label: string; items: AdminNavItem[] }[] = [
   {
     label: "Configuration",
     items: [
-      { href: "/admin/users", label: "Users", icon: UsersThree },
-      { href: "/admin/models", label: "Models", icon: Cpu },
-      { href: "/admin/skills", label: "Skills", icon: Sparkle },
-      { href: "/admin/mcps", label: "MCP Servers", icon: PlugsConnected },
-      { href: "/admin/toolbox", label: "Toolbox", icon: ToolboxIcon },
+      { href: "/admin/users", label: "Users", icon: UsersThree, iconClassName: "text-blue-600" },
+      { href: "/admin/models", label: "Models", icon: Cpu, iconClassName: "text-violet-600" },
+      { href: "/admin/skills", label: "Skills", icon: Sparkle, iconClassName: "text-amber-500" },
+      { href: "/admin/mcps", label: "MCP Servers", icon: PlugsConnected, iconClassName: "text-orange-600" },
+      { href: "/admin/toolbox", label: "Toolbox", icon: ToolboxIcon, iconClassName: "text-cyan-600" },
     ],
   },
   {
     label: "Operations",
     items: [
-      { href: "/admin/scheduled-tasks", label: "Tasks", icon: ClockCountdown },
-      { href: "/admin/audit", label: "Agent Runs", icon: FileText, match: ["/admin/traces"] },
-      { href: "/admin/token-usage", label: "Token Usage", icon: ChartLineUp },
+      { href: "/admin/scheduled-tasks", label: "Tasks", icon: ClockCountdown, iconClassName: "text-green-600" },
+      { href: "/admin/audit", label: "Agent Runs", icon: FileText, match: ["/admin/traces"], iconClassName: "text-indigo-600" },
+      { href: "/admin/token-usage", label: "Token Usage", icon: ChartLineUp, iconClassName: "text-rose-600" },
     ],
   },
   {
     label: "Infrastructure",
     items: [
-      { href: "/admin/sandboxes", label: "Sandboxes", icon: Stack },
-      { href: "/admin/sandbox-nodes", label: "Nodes", icon: Cpu },
-      { href: "/admin/storage", label: "Storage", icon: HardDrives },
-      { href: "/admin/architecture", label: "Architecture", icon: Graph },
-      { href: "/admin/component-logs", label: "Service Logs", icon: TerminalWindow },
+      { href: "/admin/sandboxes", label: "Sandboxes", icon: Stack, iconClassName: "text-teal-600" },
+      { href: "/admin/sandbox-nodes", label: "Nodes", icon: Cpu, iconClassName: "text-sky-600" },
+      { href: "/admin/storage", label: "Storage", icon: HardDrives, iconClassName: "text-purple-600" },
+      { href: "/admin/architecture", label: "Architecture", icon: Graph, iconClassName: "text-fuchsia-600" },
+      { href: "/admin/component-logs", label: "Service Logs", icon: TerminalWindow, iconClassName: "text-slate-600" },
     ],
   },
   {
@@ -90,176 +99,123 @@ function isActive(pathname: string, item: AdminNavItem) {
 export function AdminShell({ children }: { children: ReactNode }) {
   const pathname = usePathname();
   const { data: session } = useSession();
-  const [collapsed, setCollapsed] = useState(false);
   const [mobileOpen, setMobileOpen] = useState(false);
   const currentItem = navItems.find((item) => isActive(pathname, item)) ?? navItems[0];
   const userLabel = session?.user?.name || session?.user?.email || "Administrator";
 
   return (
-    <MotionConfig reducedMotion="user">
-      <div className="cocola-admin-ui admin-ops-bg flex h-screen overflow-hidden font-sans text-foreground">
-        <motion.aside
-          initial={false}
-          animate={{ width: collapsed ? 64 : 272 }}
-          transition={{ type: "spring", stiffness: 380, damping: 36 }}
-          className="admin-glass-sidebar m-1.5 hidden shrink-0 flex-col overflow-hidden rounded-[1.4rem] border md:flex"
-        >
-          <AdminBrand collapsed={collapsed} onCollapse={() => setCollapsed((value) => !value)} />
-          <AdminNavigation pathname={pathname} collapsed={collapsed} />
-          <AdminSidebarFooter collapsed={collapsed} />
-        </motion.aside>
+    <div className="cocola-admin-ui admin-ops-bg flex h-screen overflow-hidden font-sans text-foreground">
+      <aside className="admin-glass-sidebar hidden w-[17rem] shrink-0 flex-col overflow-hidden border-r md:flex">
+        <AdminBrand />
+        <AdminNavigation pathname={pathname} />
+        <AdminSidebarFooter />
+      </aside>
 
-        <section className="min-w-0 flex-1 py-1.5 pr-1.5 max-md:pl-1.5">
-          <div className="admin-glass-shell flex h-full min-w-0 flex-col overflow-hidden rounded-[1.4rem] border">
-            <header className="admin-topbar relative z-20 flex h-14 shrink-0 items-center gap-3 border-b px-3 sm:px-5">
-              <Dialog.Root open={mobileOpen} onOpenChange={setMobileOpen}>
-                <Dialog.Trigger asChild>
-                  <button
-                    type="button"
-                    aria-label="Open admin navigation"
-                    className="inline-flex size-9 items-center justify-center rounded-xl text-muted-foreground transition-colors hover:bg-white/55 hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/40 md:hidden"
-                  >
-                    <List className="size-[18px]" weight="duotone" />
-                  </button>
-                </Dialog.Trigger>
-                <Dialog.Portal>
-                  <Dialog.Overlay className="fixed inset-0 z-50 bg-slate-950/20 backdrop-blur-sm data-[state=closed]:animate-out data-[state=open]:animate-in data-[state=closed]:fade-out data-[state=open]:fade-in" />
-                  <Dialog.Content className="cocola-admin-ui admin-mobile-nav fixed inset-y-2 left-2 z-50 flex w-[min(19rem,calc(100vw-1rem))] flex-col overflow-hidden rounded-3xl border text-foreground outline-none data-[state=closed]:animate-out data-[state=open]:animate-in data-[state=closed]:slide-out-to-left data-[state=open]:slide-in-from-left">
-                    <Dialog.Title className="sr-only">Admin navigation</Dialog.Title>
-                    <Dialog.Description className="sr-only">
-                      Navigate between control plane pages.
-                    </Dialog.Description>
-                    <div className="flex h-16 items-center gap-3 border-b border-border/70 px-4">
-                      <div className="grid size-9 place-items-center rounded-2xl bg-primary text-primary-foreground shadow-lg shadow-primary/20">
-                        <CocolaLogo mono className="size-5" />
-                      </div>
-                      <div className="min-w-0 flex-1">
-                        <div className="truncate text-sm font-semibold">cocola admin</div>
-                        <div className="truncate text-[11px] text-muted-foreground">
-                          control plane
-                        </div>
-                      </div>
-                      <Dialog.Close className="inline-flex size-9 items-center justify-center rounded-xl text-muted-foreground hover:bg-muted hover:text-foreground">
-                        <X className="size-4" />
-                      </Dialog.Close>
+      <section className="flex min-w-0 flex-1 flex-col">
+        <div className="admin-glass-shell flex h-full min-w-0 flex-col overflow-hidden">
+          <header className="admin-topbar relative z-20 flex h-14 shrink-0 items-center gap-3 border-b px-3 sm:px-5">
+            <Dialog.Root open={mobileOpen} onOpenChange={setMobileOpen}>
+              <Dialog.Trigger asChild>
+                <button
+                  type="button"
+                  aria-label="Open admin navigation"
+                  className="inline-flex size-9 items-center justify-center rounded-xl text-muted-foreground transition-colors hover:bg-sidebar-accent hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/40 md:hidden"
+                >
+                  <List className="size-[18px]" />
+                </button>
+              </Dialog.Trigger>
+              <Dialog.Portal>
+                <Dialog.Overlay className="fixed inset-0 z-50 bg-slate-950/20 data-[state=closed]:animate-out data-[state=open]:animate-in data-[state=closed]:fade-out data-[state=open]:fade-in" />
+                <Dialog.Content className="cocola-admin-ui admin-mobile-nav fixed inset-y-2 left-2 z-50 flex w-[min(19rem,calc(100vw-1rem))] flex-col overflow-hidden rounded-3xl border text-foreground outline-none data-[state=closed]:animate-out data-[state=open]:animate-in data-[state=closed]:slide-out-to-left data-[state=open]:slide-in-from-left">
+                  <Dialog.Title className="sr-only">Admin navigation</Dialog.Title>
+                  <Dialog.Description className="sr-only">
+                    Navigate between control plane pages.
+                  </Dialog.Description>
+                  <div className="flex h-16 items-center gap-3 border-b border-border px-4">
+                    <div className="grid size-9 place-items-center rounded-2xl bg-primary text-primary-foreground shadow-lg shadow-primary/20">
+                      <CocolaLogo mono className="size-5" />
                     </div>
-                    <Dialog.Close asChild>
-                      <div className="min-h-0 flex-1 overflow-y-auto">
-                        <AdminNavigation pathname={pathname} collapsed={false} mobile />
+                    <div className="min-w-0 flex-1">
+                      <div className="truncate text-sm font-semibold">cocola admin</div>
+                      <div className="truncate text-[11px] text-muted-foreground">
+                        control plane
                       </div>
+                    </div>
+                    <Dialog.Close className="inline-flex size-9 items-center justify-center rounded-xl text-muted-foreground hover:bg-muted hover:text-foreground">
+                      <X className="size-4" />
                     </Dialog.Close>
-                    <AdminSidebarFooter collapsed={false} onNavigate={() => setMobileOpen(false)} />
-                  </Dialog.Content>
-                </Dialog.Portal>
-              </Dialog.Root>
+                  </div>
+                  <Dialog.Close asChild>
+                    <div className="min-h-0 flex-1 overflow-y-auto">
+                      <AdminNavigation pathname={pathname} mobile />
+                    </div>
+                  </Dialog.Close>
+                  <AdminSidebarFooter onNavigate={() => setMobileOpen(false)} />
+                </Dialog.Content>
+              </Dialog.Portal>
+            </Dialog.Root>
 
-              <div className="min-w-0 flex-1">
-                <div className="truncate text-[11px] font-semibold uppercase tracking-[0.14em] text-primary/65">
-                  Control plane
-                </div>
-                <div className="truncate text-sm font-medium text-foreground">
-                  {currentItem?.group}
-                </div>
+            <div className="min-w-0 flex-1">
+              <div className="truncate text-[11px] font-semibold uppercase tracking-[0.14em] text-primary/65">
+                Control plane
               </div>
+              <div className="truncate text-sm font-medium text-foreground">
+                {currentItem?.group}
+              </div>
+            </div>
 
-              <div className="hidden items-center gap-2 sm:flex">
-                <span className="admin-context-pill">
-                  <span className="size-1.5 rounded-full bg-emerald-500" />
-                  Self-hosted
-                </span>
-                <span className="admin-context-pill max-w-48 truncate">
-                  <ShieldCheck className="size-3.5 text-primary" weight="duotone" />
-                  {userLabel}
-                </span>
-              </div>
-            </header>
-            <div className="min-w-0 flex-1 overflow-y-auto">{children}</div>
-          </div>
-        </section>
-      </div>
-    </MotionConfig>
+            <div className="hidden items-center gap-2 sm:flex">
+              <span className="admin-context-pill">
+                <span className="size-1.5 rounded-full bg-emerald-500" />
+                Self-hosted
+              </span>
+              <span className="admin-context-pill max-w-48 truncate">
+                <ShieldCheck className="size-3.5 text-primary" />
+                {userLabel}
+              </span>
+            </div>
+          </header>
+          <div className="min-w-0 flex-1 overflow-y-auto">{children}</div>
+        </div>
+      </section>
+    </div>
   );
 }
 
-function AdminBrand({ collapsed, onCollapse }: { collapsed: boolean; onCollapse: () => void }) {
+function AdminBrand() {
   return (
-    <div
-      className={cn(
-        "flex h-16 shrink-0 items-center gap-2 px-3",
-        collapsed && "justify-center px-2",
-      )}
-    >
-      {collapsed ? (
-        <button
-          type="button"
-          title="Expand sidebar"
-          aria-label="Expand sidebar"
-          onClick={onCollapse}
-          className="admin-rail-button"
-        >
-          <CocolaLogo className="size-7" />
-        </button>
-      ) : (
-        <>
-          <div className="grid size-9 shrink-0 place-items-center rounded-2xl bg-primary text-primary-foreground shadow-lg shadow-primary/20">
-            <CocolaLogo mono className="size-5" />
-          </div>
-          <div className="min-w-0 flex-1">
-            <div className="truncate text-sm font-semibold">cocola admin</div>
-            <div className="truncate text-[11px] text-muted-foreground">control plane</div>
-          </div>
-          <button
-            type="button"
-            title="Collapse sidebar"
-            aria-label="Collapse sidebar"
-            onClick={onCollapse}
-            className="admin-rail-button"
-          >
-            <SidebarSimple className="size-4" weight="duotone" />
-          </button>
-        </>
-      )}
+    <div className="flex h-16 shrink-0 items-center gap-2 px-3">
+      <div className="grid size-9 shrink-0 place-items-center rounded-2xl bg-primary text-primary-foreground shadow-lg shadow-primary/20">
+        <CocolaLogo mono className="size-5" />
+      </div>
+      <div className="min-w-0 flex-1">
+        <div className="truncate text-[15px] font-bold text-sidebar-foreground">cocola admin</div>
+        <div className="truncate text-xs font-medium text-sidebar-foreground/70">control plane</div>
+      </div>
     </div>
   );
 }
 
 function AdminNavigation({
   pathname,
-  collapsed,
   mobile = false,
 }: {
   pathname: string;
-  collapsed: boolean;
   mobile?: boolean;
 }) {
   return (
     <nav className={cn("min-h-0 flex-1 overflow-y-auto px-2 pb-3", mobile && "px-3 pt-3")}>
-      <div className={cn("mb-4", collapsed && "mb-3")}>
-        <AdminNavLink
-          item={OVERVIEW_ITEM}
-          pathname={pathname}
-          collapsed={collapsed}
-          mobile={mobile}
-        />
+      <div className="mb-4">
+        <AdminNavLink item={OVERVIEW_ITEM} pathname={pathname} />
       </div>
       {NAV_GROUPS.map((group) => (
-        <div key={group.label} className={cn("mb-3", collapsed && "mb-2")}>
-          {!collapsed ? (
-            <div className="mb-1 px-2 text-[10px] font-semibold uppercase tracking-[0.14em] text-muted-foreground/75">
-              {group.label}
-            </div>
-          ) : null}
-          <div
-            className={cn("space-y-1", collapsed && "flex flex-col items-center gap-1 space-y-0")}
-          >
+        <div key={group.label} className="mb-3">
+          <div className="mb-1 px-2 text-[10px] font-semibold uppercase tracking-[0.14em] text-muted-foreground/75">
+            {group.label}
+          </div>
+          <div className="space-y-1">
             {group.items.map((item) => (
-              <AdminNavLink
-                key={item.href}
-                item={item}
-                pathname={pathname}
-                collapsed={collapsed}
-                mobile={mobile}
-              />
+              <AdminNavLink key={item.href} item={item} pathname={pathname} />
             ))}
           </div>
         </div>
@@ -271,14 +227,10 @@ function AdminNavigation({
 function AdminNavLink({
   item,
   pathname,
-  collapsed,
-  mobile = false,
   onNavigate,
 }: {
   item: AdminNavItem;
   pathname: string;
-  collapsed: boolean;
-  mobile?: boolean;
   onNavigate?: () => void;
 }) {
   const active = isActive(pathname, item);
@@ -286,48 +238,30 @@ function AdminNavLink({
   return (
     <Link
       href={item.href}
-      title={collapsed ? item.label : undefined}
-      aria-label={collapsed ? item.label : undefined}
       onClick={onNavigate}
       className={cn(
-        "admin-nav-item group relative flex h-9 items-center gap-2.5 overflow-hidden rounded-xl px-2.5 text-sm",
-        collapsed && "size-10 justify-center px-0",
-        active ? "text-primary" : "text-muted-foreground hover:text-foreground",
+        "admin-nav-item group flex h-9 items-center gap-2.5 rounded-xl px-2.5 text-[13.5px] font-medium",
+        active
+          ? "bg-sidebar-accent text-sidebar-accent-foreground"
+          : "text-sidebar-foreground hover:bg-sidebar-accent hover:text-sidebar-accent-foreground",
       )}
     >
-      {active ? (
-        <motion.span
-          layoutId={mobile ? "admin-mobile-active-nav" : "admin-active-nav"}
-          className="absolute inset-0 rounded-xl border border-white/65 bg-white/58 shadow-[inset_0_1px_0_hsl(0_0%_100%/0.85),0_8px_20px_hsl(221_83%_53%/0.1)]"
-          transition={{ type: "spring", stiffness: 420, damping: 38 }}
-        />
-      ) : null}
-      <Icon className="relative z-[1] size-[17px] shrink-0" weight="duotone" />
-      {!collapsed ? <span className="relative z-[1] truncate">{item.label}</span> : null}
+      <Icon className={cn("size-4 shrink-0", item.iconClassName ?? "text-sidebar-accent-foreground")} />
+      <span className="truncate">{item.label}</span>
     </Link>
   );
 }
 
-function AdminSidebarFooter({
-  collapsed,
-  onNavigate,
-}: {
-  collapsed: boolean;
-  onNavigate?: () => void;
-}) {
+function AdminSidebarFooter({ onNavigate }: { onNavigate?: () => void }) {
   return (
-    <div className="border-t border-white/35 p-2.5">
+    <div className="border-t border-sidebar-border p-2.5">
       <Link
         href="/"
-        title={collapsed ? "Back to workspace" : undefined}
         onClick={onNavigate}
-        className={cn(
-          "flex h-10 items-center gap-2 rounded-xl border border-white/50 bg-white/28 px-3 text-sm font-medium text-foreground shadow-[inset_0_1px_0_hsl(0_0%_100%/0.7)] transition-colors hover:bg-white/52 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/40",
-          collapsed && "justify-center px-0",
-        )}
+        className="flex h-10 items-center gap-2 rounded-xl border border-sidebar-border bg-sidebar px-3 text-sm font-medium text-sidebar-foreground transition-colors hover:bg-sidebar-accent hover:text-sidebar-accent-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/40"
       >
-        <ArrowLeft className="size-4 shrink-0 text-primary" weight="duotone" />
-        {!collapsed ? <span className="truncate">Back to workspace</span> : null}
+        <ArrowLeft className="size-4 shrink-0 text-primary" />
+        <span className="truncate">Back to workspace</span>
       </Link>
     </div>
   );

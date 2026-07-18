@@ -1,21 +1,21 @@
 "use client";
 
 import {
-  ChartLineUp,
-  ClockCountdown,
+  BarChart3 as ChartLineUp,
+  Timer as ClockCountdown,
   Cpu,
   FileText,
-  Graph,
-  HardDrives,
-  PlugsConnected,
+  Workflow as Graph,
+  HardDrive as HardDrives,
+  Plug as PlugsConnected,
   ShieldCheck,
-  Sparkle,
-  Stack,
-  TerminalWindow,
-  ToolboxIcon,
-  UsersThree,
-  type Icon as PhosphorIcon,
-} from "@phosphor-icons/react";
+  Sparkles as Sparkle,
+  Layers as Stack,
+  SquareTerminal as TerminalWindow,
+  Wrench as ToolboxIcon,
+  Users as UsersThree,
+  type LucideIcon as PhosphorIcon,
+} from "lucide-react";
 import { motion } from "framer-motion";
 import { ArrowRight } from "lucide-react";
 import Link from "next/link";
@@ -153,7 +153,7 @@ export default function AdminPage() {
           eyebrow="Sky Glass Control Plane"
           title="Operate cocola with context"
           description="Configure access and agent capabilities, observe usage, and inspect the infrastructure that keeps every conversation isolated."
-          icon={<ShieldCheck className="size-5" weight="duotone" />}
+          icon={<ShieldCheck className="size-5" />}
           actions={
             <AdminStatusBadge tone="green" dot>
               Self-hosted
@@ -194,7 +194,7 @@ export default function AdminPage() {
                 return (
                   <Link key={module.href} href={module.href} className="admin-module-card group">
                     <span className={`admin-module-icon ${module.accent}`}>
-                      <Icon className="size-[18px]" weight="duotone" />
+                      <Icon className="size-[18px]" />
                     </span>
                     <span className="min-w-0 flex-1">
                       <span className="block text-sm font-semibold text-foreground">

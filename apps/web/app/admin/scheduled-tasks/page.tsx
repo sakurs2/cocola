@@ -1,6 +1,8 @@
 "use client";
 
-import { ClockCountdown } from "@phosphor-icons/react";
+import {
+  Timer as ClockCountdown,
+} from "lucide-react";
 import { MoreHorizontal, Trash2 } from "lucide-react";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import {
@@ -122,7 +124,7 @@ export default function ScheduledTasksPage() {
         eyebrow="Operations"
         title="Tasks"
         description="Review scheduled work across all users. Tasks can only be changed by their owners."
-        icon={<ClockCountdown className="size-5" weight="duotone" />}
+        icon={<ClockCountdown className="size-5" />}
         actions={
           <AdminRefreshButton
             variant="outline"
@@ -169,7 +171,7 @@ export default function ScheduledTasksPage() {
           <div className="p-10 text-center text-sm text-muted-foreground">Loading tasks…</div>
         ) : visibleTasks.length === 0 ? (
           <AdminEmptyState
-            icon={<ClockCountdown className="size-6" weight="duotone" />}
+            icon={<ClockCountdown className="size-6" />}
             title={tasks.length ? "No matching tasks" : "No scheduled tasks"}
             description={
               tasks.length

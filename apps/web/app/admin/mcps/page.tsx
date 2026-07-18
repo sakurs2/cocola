@@ -1,6 +1,8 @@
 "use client";
 
-import { PlugsConnected as McpPageIcon } from "@phosphor-icons/react";
+import {
+  Plug as McpPageIcon,
+} from "lucide-react";
 import { useCallback, useEffect, useState, type ReactNode } from "react";
 import {
   ChevronDown,
@@ -236,7 +238,7 @@ export default function AdminMCPPage() {
   return (
     <AdminPage width="standard">
       <AdminPageHeader
-        icon={<McpPageIcon className="size-[18px]" weight="duotone" />}
+        icon={<McpPageIcon className="size-[18px]" />}
         title="MCP Servers"
         actions={
           <>
@@ -283,7 +285,7 @@ export default function AdminMCPPage() {
           </div>
         ) : (
           <AdminEmptyState
-            icon={<McpPageIcon className="size-6" weight="duotone" />}
+            icon={<McpPageIcon className="size-6" />}
             title="No MCP servers configured"
             description="Add a server now; Cocola checks the connection when an agent first uses it."
             action={

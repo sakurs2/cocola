@@ -1,6 +1,8 @@
 "use client";
 
-import { Graph as TracePageIcon } from "@phosphor-icons/react";
+import {
+  Workflow as TracePageIcon,
+} from "lucide-react";
 import {
   AlertTriangle,
   ArrowLeft,
@@ -118,7 +120,7 @@ export default function AdminTracePage({ params }: { params: { traceId: string }
   return (
     <AdminPage>
       <AdminPageHeader
-        icon={<TracePageIcon className="size-5" weight="duotone" />}
+        icon={<TracePageIcon className="size-5" />}
         eyebrow="Conversation trace"
         title={run?.conversation_title || "Agent run"}
         description={traceId}

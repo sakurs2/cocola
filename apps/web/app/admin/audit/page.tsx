@@ -1,6 +1,8 @@
 "use client";
 
-import { ChatCircleDots } from "@phosphor-icons/react";
+import {
+  MessageCircle as ChatCircleDots,
+} from "lucide-react";
 import * as Popover from "@radix-ui/react-popover";
 import {
   AlertTriangle,
@@ -87,7 +89,7 @@ export default function AdminAuditPage() {
   return (
     <AdminPage>
       <AdminPageHeader
-        icon={<ChatCircleDots className="size-5" weight="duotone" />}
+        icon={<ChatCircleDots className="size-5" />}
         eyebrow="Operations"
         title="Agent Runs"
         description="One safe metadata record for every user–agent run. Chat content stays in its conversation."

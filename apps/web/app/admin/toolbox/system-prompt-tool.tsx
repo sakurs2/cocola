@@ -1,6 +1,8 @@
 "use client";
 
-import { FileText } from "@phosphor-icons/react";
+import {
+  FileText,
+} from "lucide-react";
 import { ArrowRight, CircleAlert, LoaderCircle, Save, ToggleLeft, ToggleRight } from "lucide-react";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { AdminAlert, AdminDrawer, AdminStatusBadge } from "@/components/admin/admin-ui";
@@ -101,7 +103,7 @@ export function SystemPromptTool({
         onClick={() => setOpen(true)}
       >
         <span className="admin-module-icon bg-sky-500/10 text-sky-700">
-          <FileText className="size-[18px]" weight="duotone" />
+          <FileText className="size-[18px]" />
         </span>
         <span className="min-w-0 flex-1">
           <span className="block text-sm font-semibold text-foreground">System Prompt</span>

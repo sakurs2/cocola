@@ -1,6 +1,8 @@
 "use client";
 
-import { HardDrives as StoragePageIcon } from "@phosphor-icons/react";
+import {
+  HardDrive as StoragePageIcon,
+} from "lucide-react";
 import { AlertTriangle, Database, Gauge, HardDrive, LoaderCircle, Trash2 } from "lucide-react";
 import { signOut } from "next-auth/react";
 import { useCallback, useEffect, useMemo, useState } from "react";
@@ -163,7 +165,7 @@ export default function StoragePage() {
         eyebrow="Node-local persistence"
         title="Storage"
         description="Inspect physical node headroom and measure individual Session Volumes without starting their Sandboxes."
-        icon={<StoragePageIcon className="size-5" weight="duotone" />}
+        icon={<StoragePageIcon className="size-5" />}
         actions={
           <AdminRefreshButton
             onClick={() => void refresh()}

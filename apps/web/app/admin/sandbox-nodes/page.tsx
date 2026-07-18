@@ -1,6 +1,8 @@
 "use client";
 
-import { Cpu as SandboxNodesPageIcon } from "@phosphor-icons/react";
+import {
+  Cpu as SandboxNodesPageIcon,
+} from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { AdminRefreshButton } from "@/components/admin/admin-ui";
 import { cn } from "@/lib/utils";
@@ -219,7 +221,7 @@ export default function SandboxNodesPage() {
       <header className="border-b border-border">
         <div className="mx-auto flex h-16 max-w-7xl items-center gap-3 px-6">
           <div className="admin-page-icon">
-            <SandboxNodesPageIcon className="size-[18px]" weight="duotone" />
+            <SandboxNodesPageIcon className="size-[18px]" />
           </div>
           <div className="min-w-0 flex-1">
             <h1 className="truncate text-base font-semibold">Nodes</h1>

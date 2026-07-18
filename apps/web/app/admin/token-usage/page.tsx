@@ -1,6 +1,8 @@
 "use client";
 
-import { ChartLineUp as TokenUsagePageIcon } from "@phosphor-icons/react";
+import {
+  BarChart3 as TokenUsagePageIcon,
+} from "lucide-react";
 import {
   BarElement,
   CategoryScale,
@@ -248,7 +250,7 @@ export default function AdminTokenUsagePage() {
       <header className="border-b border-border">
         <div className="mx-auto flex h-16 max-w-7xl items-center gap-3 px-6">
           <div className="admin-page-icon">
-            <TokenUsagePageIcon className="size-[18px]" weight="duotone" />
+            <TokenUsagePageIcon className="size-[18px]" />
           </div>
           <div className="min-w-0 flex-1">
             <h1 className="truncate text-base font-semibold">Token Usage</h1>
