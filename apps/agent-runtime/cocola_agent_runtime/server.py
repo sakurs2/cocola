@@ -1092,8 +1092,12 @@ class AgentRuntimeServicer(pb_grpc.AgentRuntimeServiceServicer):
                     },
                 )
                 continue
+            # ``path`` is relative to /workspace (the snapshot's cwd); execd's
+            # download endpoint resolves relative paths against its own cwd, so
+            # anchor it to the session workspace before reading.
+            read_path = path if posixpath.isabs(path) else posixpath.join("/workspace", path)
             try:
-                data = await self._executor.read_bytes(sandbox_id=sandbox_id, path=path)
+                data = await self._executor.read_bytes(sandbox_id=sandbox_id, path=read_path)
             except Exception as exc:  # noqa: BLE001 - per-file failure should not fail the turn
                 yield AgentEvent(
                     kind="error",

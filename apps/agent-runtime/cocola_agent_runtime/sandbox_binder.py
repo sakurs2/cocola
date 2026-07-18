@@ -555,26 +555,36 @@ class StaticSandboxExecutor:
             return self._exec_handler(sandbox_id, cmd)
         return ExecOutcome(exit_code=0, stdout="ran: " + " ".join(cmd))
 
+    @staticmethod
+    def _candidate_keys(sandbox_id: str, path: str) -> list[tuple[str, str]]:
+        # execd resolves relative download paths against the session workspace,
+        # so an absolute /workspace/<rel> read must also match a stored <rel>.
+        keys = [(sandbox_id, path)]
+        prefix = "/workspace/"
+        if path.startswith(prefix):
+            keys.append((sandbox_id, path[len(prefix):]))
+        return keys
+
     async def read_file(self, *, sandbox_id: str, path: str) -> str:
         if self._fail is not None:
             raise self._fail
         self.reads.append((sandbox_id, path))
-        key = (sandbox_id, path)
-        if key in self.files:
-            return self.files[key]
-        if key in self.byte_files:
-            return self.byte_files[key].decode("utf-8", "replace")
+        for key in self._candidate_keys(sandbox_id, path):
+            if key in self.files:
+                return self.files[key]
+            if key in self.byte_files:
+                return self.byte_files[key].decode("utf-8", "replace")
         raise FileNotFoundError(path)
 
     async def read_bytes(self, *, sandbox_id: str, path: str) -> bytes:
         if self._fail is not None:
             raise self._fail
         self.reads.append((sandbox_id, path))
-        key = (sandbox_id, path)
-        if key in self.byte_files:
-            return self.byte_files[key]
-        if key in self.files:
-            return self.files[key].encode("utf-8")
+        for key in self._candidate_keys(sandbox_id, path):
+            if key in self.byte_files:
+                return self.byte_files[key]
+            if key in self.files:
+                return self.files[key].encode("utf-8")
         raise FileNotFoundError(path)
 
     async def write_file(self, *, sandbox_id: str, path: str, content: str) -> None:
