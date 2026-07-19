@@ -40,6 +40,7 @@ import (
 	"io"
 	"io/fs"
 	"mime/multipart"
+	"net"
 	"net/http"
 	"net/textproto"
 	neturl "net/url"
@@ -110,6 +111,12 @@ const (
 	guestSession = "/session"
 	// guestWorkspace is the user-visible per-session workspace root.
 	guestWorkspace = "/workspace"
+	// guestDaemonCWD is the immutable cwd inherited by OpenSandbox bootstrap and
+	// execd. It must never be a path sessionEntrypoint replaces with a symlink.
+	guestDaemonCWD = "/"
+	// guestCodeServerLaunch backgrounds the resident code-server. It matches
+	// deploy/sandbox-runtime/code-server-launch.sh in the brain image.
+	guestCodeServerLaunch = "/opt/cocola/code-server-launch.sh"
 	// guestClaudeConfig is the hidden session-local Claude Code config root.
 	guestClaudeConfig = "/home/cocola/.claude"
 	// guestCodexConfig is the hidden session-local Codex config and session root.
@@ -132,6 +139,9 @@ const (
 	// plane MUST drop to this user. Overridable via COCOLA_OPENSANDBOX_EXEC_USER
 	// (empty disables the drop, i.e. run as the image default / root).
 	sandboxExecUser = "cocola"
+	// codeServerTrustedOriginsEnv is owned by the platform. Agent/runtime callers
+	// must not override the browser origins trusted by the resident editor.
+	codeServerTrustedOriginsEnv = "COCOLA_CODE_SERVER_TRUSTED_ORIGINS"
 )
 
 // Provider is an OpenSandbox-backed SandboxProvider. It holds no sandbox state
@@ -170,6 +180,12 @@ type Provider struct {
 	// host directory under root into the same in-container contract.
 	volumeBackend string
 	root          string
+
+	// publicOrigins is the operator-facing, comma-separated list of external
+	// Cocola origins. codeServerTrustedOrigins is its normalized host-only form,
+	// injected into the sandbox for code-server's native Origin check.
+	publicOrigins            string
+	codeServerTrustedOrigins string
 }
 
 // Option configures the Provider.
@@ -206,6 +222,10 @@ func WithVolumeBackend(v string) Option {
 
 // WithRoot overrides COCOLA_SANDBOX_ROOT for host-backed volumes.
 func WithRoot(root string) Option { return func(p *Provider) { p.root = root } }
+
+// WithPublicOrigins overrides COCOLA_PUBLIC_ORIGINS. Values must be explicit
+// http(s) origins; wildcards are rejected. This option is primarily a test seam.
+func WithPublicOrigins(origins string) Option { return func(p *Provider) { p.publicOrigins = origins } }
 
 // WithHTTPClient injects a custom http.Client used for BOTH the lifecycle REST
 // calls and the execd SSE stream. This is the seam unit tests use to supply a
@@ -251,6 +271,7 @@ func New(opts ...Option) (*Provider, error) {
 		execTimeout:   execTimeoutFromEnv(),
 		volumeBackend: volumeBackendFromEnv(),
 		root:          root,
+		publicOrigins: os.Getenv("COCOLA_PUBLIC_ORIGINS"),
 	}
 	for _, o := range opts {
 		o(p)
@@ -268,6 +289,11 @@ func New(opts ...Option) (*Provider, error) {
 	default:
 		return nil, fmt.Errorf("opensandbox: unsupported volume backend %q (want pvc or host)", p.volumeBackend)
 	}
+	trustedOrigins, err := parsePublicOriginHosts(p.publicOrigins)
+	if err != nil {
+		return nil, fmt.Errorf("opensandbox: COCOLA_PUBLIC_ORIGINS: %w", err)
+	}
+	p.codeServerTrustedOrigins = strings.Join(trustedOrigins, ",")
 	return p, nil
 }
 
@@ -381,7 +407,7 @@ type ssePayload struct {
 // cocola->opensandbox id mapping.
 func (p *Provider) Create(ctx context.Context, spec provider.SandboxSpec) (*provider.Sandbox, error) {
 	req := createSandboxRequest{
-		Env: spec.Env,
+		Env: p.sandboxEnv(spec.Env),
 		Metadata: map[string]string{
 			"cocola.user_id":    safeMetadataLabelValue(spec.UserID),
 			"cocola.session_id": safeMetadataLabelValue(spec.SessionID),
@@ -590,9 +616,15 @@ func (p *Provider) Exec(ctx context.Context, sid string, req provider.ExecReques
 		command = fmt.Sprintf("printf %%s '%s' | base64 -d | %s", b64, command)
 	}
 
+	cwd := req.Cwd
+	if cwd == "" {
+		// The image WORKDIR is intentionally stable for execd, but Cocola's Exec
+		// contract still lands user and Agent commands in the workspace by default.
+		cwd = guestWorkspace
+	}
 	body := runCommandRequest{
 		Command: command,
-		Cwd:     req.Cwd,
+		Cwd:     cwd,
 		Envs:    req.Env,
 	}
 	if req.Timeout > 0 {
@@ -770,8 +802,10 @@ func (p *Provider) thawIfPaused(ctx context.Context, osbID string) error {
 // last observed error is returned so the caller surfaces the true cause.
 func (p *Provider) waitExecdReady(ctx context.Context, execdURL string, headers map[string]string) error {
 	// `true` is a shell builtin that always exits 0 with no output -- the
-	// cheapest possible idempotent probe.
-	b, _ := json.Marshal(runCommandRequest{Command: "true"})
+	// cheapest possible idempotent probe. Keep it in the same immutable cwd as
+	// execd itself: /workspace may be replaced while the entrypoint is preparing
+	// the session symlink.
+	b, _ := json.Marshal(runCommandRequest{Command: "true", Cwd: guestDaemonCWD})
 	deadline := time.Now().Add(execReadyTimeout)
 	var lastErr error
 	for {
@@ -998,9 +1032,21 @@ func sessionEntrypoint(execUser string) []string {
 	script += symlinkCommand(guestCodexConfig, guestSession+"/runtime/codex")
 	script += symlinkCommand("/home/cocola/.cocola", guestSession+"/runtime/cocola")
 	script += symlinkCommand("/home/cocola/.local", guestSession+"/home/local")
+	// The image and OpenSandbox infrastructure stay in guestDaemonCWD so replacing
+	// /workspace cannot invalidate execd's cwd. Re-enter the freshly prepared
+	// workspace only for Cocola's session process and resident code-server.
+	script += " && cd " + shellQuote(guestWorkspace)
 	// A Running sandbox must imply that every persistent path is ready. Keeping
 	// the final exec in the && chain prevents a mount/link failure from silently
 	// falling back to directories in the ephemeral image rootfs.
+	// Launch the resident code-server before blocking on sleep. OpenSandbox
+	// replaces the image CMD with this entrypoint, so the image's
+	// firewall-entrypoint.sh (which normally backgrounds code-server) never
+	// runs; without this the in-container editor port is never bound. The
+	// launch is guarded and self-backgrounding so it cannot break the &&
+	// chain that guards the persistent-path setup above.
+	script += " && { if [ -x " + shellQuote(guestCodeServerLaunch) +
+		" ]; then " + shellQuote(guestCodeServerLaunch) + " & fi; }"
 	script += " && exec sleep infinity"
 	return []string{"/bin/sh", "-c", script}
 }
@@ -1067,6 +1113,78 @@ func execTimeoutFromEnv() time.Duration {
 		return defaultExecTimeout
 	}
 	return d
+}
+
+// parsePublicOriginHosts validates the external Cocola origins and returns the
+// host[:port] values code-server expects in --trusted-origins. The Web BFF uses
+// the same COCOLA_PUBLIC_ORIGINS list for full scheme+host validation before it
+// mints a runtime token. Empty configuration is allowed but fail-closed: no
+// trusted-origin env is injected and browser WebSocket upgrades remain blocked.
+func parsePublicOriginHosts(raw string) ([]string, error) {
+	seen := make(map[string]struct{})
+	hosts := make([]string, 0)
+	for _, item := range strings.Split(raw, ",") {
+		origin := strings.TrimSpace(item)
+		if origin == "" {
+			continue
+		}
+		if origin == "*" {
+			return nil, errors.New("wildcard origin is not allowed")
+		}
+		parsed, err := neturl.Parse(origin)
+		if err != nil {
+			return nil, fmt.Errorf("invalid public origin %q", origin)
+		}
+		scheme := strings.ToLower(parsed.Scheme)
+		if (scheme != "http" && scheme != "https") ||
+			parsed.Host == "" || parsed.User != nil ||
+			(parsed.Path != "" && parsed.Path != "/") || parsed.RawQuery != "" || parsed.Fragment != "" ||
+			strings.Contains(parsed.Hostname(), "*") {
+			return nil, fmt.Errorf("invalid public origin %q", origin)
+		}
+		parsed.Scheme = scheme
+		host := normalizedOriginHost(parsed)
+		if _, ok := seen[host]; ok {
+			continue
+		}
+		seen[host] = struct{}{}
+		hosts = append(hosts, host)
+	}
+	return hosts, nil
+}
+
+func normalizedOriginHost(parsed *neturl.URL) string {
+	hostname := strings.ToLower(parsed.Hostname())
+	port := parsed.Port()
+	if (parsed.Scheme == "http" && port == "80") || (parsed.Scheme == "https" && port == "443") {
+		port = ""
+	}
+	if port != "" {
+		return net.JoinHostPort(hostname, port)
+	}
+	if strings.Contains(hostname, ":") {
+		return "[" + hostname + "]"
+	}
+	return hostname
+}
+
+// sandboxEnv copies caller-provided environment and then enforces the resident
+// editor's trusted origins as a platform-owned value. Deleting the key even
+// when no public origins are configured prevents a caller from smuggling "*"
+// into an otherwise fail-closed deployment.
+func (p *Provider) sandboxEnv(input map[string]string) map[string]string {
+	out := make(map[string]string, len(input)+1)
+	for key, value := range input {
+		out[key] = value
+	}
+	delete(out, codeServerTrustedOriginsEnv)
+	if p.codeServerTrustedOrigins != "" {
+		out[codeServerTrustedOriginsEnv] = p.codeServerTrustedOrigins
+	}
+	if len(out) == 0 {
+		return nil
+	}
+	return out
 }
 
 func volumeBackendFromEnv() string {

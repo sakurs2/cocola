@@ -98,6 +98,7 @@ services:
       COCOLA_SANDBOX_IMAGE: "${COCOLA_IMAGE_REGISTRY}/cocola-sandbox-runtime:${COCOLA_VERSION}"
       COCOLA_SANDBOX_LLM_BASE_URL: "${COCOLA_SANDBOX_LLM_BASE_URL}"
       COCOLA_SANDBOX_MODEL_ALIAS: cocola-default
+      COCOLA_PUBLIC_ORIGINS: "${COCOLA_PUBLIC_ORIGINS}"
     extra_hosts:
       - host.docker.internal:host-gateway
 
@@ -250,6 +251,7 @@ services:
       COCOLA_ADMIN_URL: http://admin-api:8090
       COCOLA_ADMIN_KEY: "${COCOLA_ADMIN_KEY}"
       AUTH_SECRET: "${AUTH_SECRET}"
+      COCOLA_PUBLIC_ORIGINS: "${COCOLA_PUBLIC_ORIGINS}"
     ports:
       - "${COCOLA_WEB_HOST_PORT}:3000"
 

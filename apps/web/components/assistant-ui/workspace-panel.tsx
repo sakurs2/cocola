@@ -1,9 +1,7 @@
 "use client";
 
-import {
-  ReadonlyFilePreview,
-  type PreviewFile,
-} from "@/components/assistant-ui/file-preview";
+import { useThread } from "@assistant-ui/react";
+import { ReadonlyFilePreview, type PreviewFile } from "@/components/assistant-ui/file-preview";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -11,6 +9,7 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { cn } from "@/lib/utils";
+import { classifyCodeEditorProbe, codeEditorRetryDelay } from "@/lib/code-editor-readiness.mjs";
 import { resolveFileType } from "@/lib/file-type";
 import { MaterialFileIcon } from "@/lib/material-file-icons";
 import {
@@ -83,11 +82,7 @@ const DOCK_PAGES: DockPage[] = [
     label: "Preview",
     icon: Globe,
     render: ({ sessionID, active, setHeaderActions }) => (
-      <PreviewPage
-        sessionID={sessionID}
-        active={active}
-        setHeaderActions={setHeaderActions}
-      />
+      <PreviewPage sessionID={sessionID} active={active} setHeaderActions={setHeaderActions} />
     ),
   },
   {
@@ -95,26 +90,14 @@ const DOCK_PAGES: DockPage[] = [
     label: "Code",
     icon: Code2,
     render: ({ sessionID, active, setHeaderActions }) => (
-      <CodePage
-        sessionID={sessionID}
-        active={active}
-        setHeaderActions={setHeaderActions}
-      />
+      <CodePage sessionID={sessionID} active={active} setHeaderActions={setHeaderActions} />
     ),
   },
 ];
 
-const DEFAULT_PAGE_ID = DOCK_PAGES[0]?.id ?? "";
-
-export function WorkspaceDock({
-  sessionID,
-  onClose,
-}: {
-  sessionID: string;
-  onClose: () => void;
-}) {
-  // No tab is opened by default: the dock lands on an empty launcher that lists
-  // the available panels; the user picks one to open it.
+export function WorkspaceDock({ sessionID, onClose }: { sessionID: string; onClose: () => void }) {
+  // Opening the workspace dock must not contact code-server. Land on the
+  // launcher and load Code only after the user explicitly selects that panel.
   const [openPageIds, setOpenPageIds] = useState<string[]>([]);
   const [activePageId, setActivePageId] = useState<string>("");
   // The active page publishes its header controls here; keyed by page id so a
@@ -143,9 +126,7 @@ export function WorkspaceDock({
       const next = current.filter((pageId) => pageId !== id);
       // Closing the last tab returns to the launcher; the dock stays open (the
       // header close button collapses the whole dock).
-      setActivePageId((active) =>
-        active === id ? (next[next.length - 1] ?? "") : active,
-      );
+      setActivePageId((active) => (active === id ? (next[next.length - 1] ?? "") : active));
       return next;
     });
   }, []);
@@ -177,7 +158,9 @@ export function WorkspaceDock({
                   onClick={() => setActivePageId(page.id)}
                   className="flex items-center gap-1.5 focus-visible:outline-none"
                 >
-                  <Icon className={cn("size-4 shrink-0", active ? "text-primary" : "text-primary/70")} />
+                  <Icon
+                    className={cn("size-4 shrink-0", active ? "text-primary" : "text-primary/70")}
+                  />
                   <span className="whitespace-nowrap font-medium">{page.label}</span>
                 </button>
                 <button
@@ -224,7 +207,7 @@ export function WorkspaceDock({
           ) : null}
         </div>
 
-        {activePage ? headerActions[activePage.id] ?? null : null}
+        {activePage ? (headerActions[activePage.id] ?? null) : null}
 
         <button
           type="button"
@@ -1035,8 +1018,8 @@ function PreviewPage({
             <Globe className="mb-3 size-8 text-muted-foreground/50" />
             <p className="text-sm font-medium text-foreground">Preview a dev server</p>
             <p className="mt-1 max-w-xs text-xs text-muted-foreground">
-              Enter the port your in-sandbox dev server listens on (e.g. 3000), then
-              press Preview to load it here.
+              Enter the port your in-sandbox dev server listens on (e.g. 3000), then press Preview
+              to load it here.
             </p>
           </div>
         )}
@@ -1056,6 +1039,14 @@ function PreviewPage({
 // custom web server (apps/web/server.mjs), not the /api/preview route handler.
 
 const CODE_SERVER_PORT = 39378;
+const CODE_SERVER_PROBE_TIMEOUT_MS = 8000;
+
+type CodeEditorReadiness = "not-started" | "checking" | "waiting" | "ready" | "reclaimed" | "error";
+
+type CodeEditorProbeResult = {
+  kind: CodeEditorReadiness;
+  retry: boolean;
+};
 
 function CodePage({
   sessionID,
@@ -1066,12 +1057,85 @@ function CodePage({
   active: boolean;
   setHeaderActions: (node: ReactNode) => void;
 }) {
+  const hasMessages = useThread((thread) => thread.messages.length > 0);
+  const isRunning = useThread((thread) => thread.isRunning);
+  // Persisted Environment snapshots can be stale after an interrupted run;
+  // only the live thread state proves that Acquire may currently be in flight.
+  const environmentPreparing = isRunning;
   // Bumping this key remounts the iframe (a hard reload of the editor).
   const [reloadKey, setReloadKey] = useState(0);
+  const [probeKey, setProbeKey] = useState(0);
+  const [readiness, setReadiness] = useState<CodeEditorReadiness>(() =>
+    hasMessages ? "checking" : "not-started",
+  );
   const src = previewBasePath(sessionID, CODE_SERVER_PORT);
 
   useEffect(() => {
     if (!active) return;
+    const initial = classifyCodeEditorProbe({
+      hasMessages,
+      environmentPreparing,
+    }) as CodeEditorProbeResult;
+    setReadiness(initial.kind);
+    if (!hasMessages) return;
+
+    let disposed = false;
+    let retryTimer: number | undefined;
+    let requestController: AbortController | undefined;
+
+    const probe = async (attempt: number) => {
+      requestController = new AbortController();
+      const timeout = window.setTimeout(
+        () => requestController?.abort(),
+        CODE_SERVER_PROBE_TIMEOUT_MS,
+      );
+      let result: CodeEditorProbeResult;
+      try {
+        const response = await fetch(src, {
+          method: "HEAD",
+          cache: "no-store",
+          signal: requestController.signal,
+        });
+        result = classifyCodeEditorProbe({
+          hasMessages: true,
+          environmentPreparing,
+          responseStatus: response.status,
+        }) as CodeEditorProbeResult;
+      } catch {
+        if (disposed) return;
+        result = classifyCodeEditorProbe({
+          hasMessages: true,
+          environmentPreparing,
+          networkFailed: true,
+        }) as CodeEditorProbeResult;
+      } finally {
+        window.clearTimeout(timeout);
+      }
+
+      if (disposed) return;
+      setReadiness(result.kind);
+      if (result.retry) {
+        retryTimer = window.setTimeout(
+          () => void probe(attempt + 1),
+          codeEditorRetryDelay(attempt),
+        );
+      }
+    };
+
+    void probe(0);
+    return () => {
+      disposed = true;
+      requestController?.abort();
+      if (retryTimer != null) window.clearTimeout(retryTimer);
+    };
+  }, [active, environmentPreparing, hasMessages, probeKey, src]);
+
+  useEffect(() => {
+    if (!active) return;
+    if (readiness !== "ready") {
+      setHeaderActions(null);
+      return () => setHeaderActions(null);
+    }
     setHeaderActions(
       <div className="flex items-center gap-1">
         <button
@@ -1096,19 +1160,80 @@ function CodePage({
       </div>,
     );
     return () => setHeaderActions(null);
-  }, [active, src, setHeaderActions]);
+  }, [active, readiness, src, setHeaderActions]);
 
   return (
     <div className="flex h-full min-h-0 flex-col bg-card">
       <div className="min-h-0 flex-1">
-        <iframe
-          key={reloadKey}
-          src={src}
-          title="Code editor"
-          className="h-full w-full border-0 bg-white"
-          sandbox="allow-scripts allow-forms allow-same-origin allow-popups allow-modals allow-downloads"
-        />
+        {readiness === "ready" ? (
+          <iframe
+            key={reloadKey}
+            src={src}
+            title="Code editor"
+            className="h-full w-full border-0 bg-white"
+            sandbox="allow-scripts allow-forms allow-same-origin allow-popups allow-modals allow-downloads"
+          />
+        ) : (
+          <CodeEditorPlaceholder
+            readiness={readiness}
+            onRetry={readiness === "error" ? () => setProbeKey((key) => key + 1) : undefined}
+          />
+        )}
       </div>
+    </div>
+  );
+}
+
+function CodeEditorPlaceholder({
+  readiness,
+  onRetry,
+}: {
+  readiness: Exclude<CodeEditorReadiness, "ready">;
+  onRetry?: () => void;
+}) {
+  const content = {
+    "not-started": {
+      title: "Environment not started",
+      description:
+        "Send your first message to prepare the sandbox. Code will be available when the environment is ready.",
+    },
+    checking: {
+      title: "Checking environment",
+      description: "Checking whether the Code editor is available for this conversation.",
+    },
+    waiting: {
+      title: "Preparing environment",
+      description: "Code will open automatically when the sandbox is ready.",
+    },
+    reclaimed: {
+      title: "Sandbox has been reclaimed",
+      description: "Continue this conversation to restore the sandbox and reopen Code.",
+    },
+    error: {
+      title: "Code editor unavailable",
+      description: "The sandbox could not be reached. Check the environment and try again.",
+    },
+  }[readiness];
+  const loading = readiness === "checking" || readiness === "waiting";
+  const Icon = loading ? LoaderCircle : readiness === "error" ? AlertTriangle : Code2;
+
+  return (
+    <div className="flex h-full min-h-0 flex-col items-center justify-center px-6 text-center">
+      <div className="flex size-11 items-center justify-center rounded-xl bg-muted text-muted-foreground">
+        <Icon className={cn("size-5", loading && "animate-spin")} />
+      </div>
+      <p className="mt-4 text-sm font-medium text-foreground">{content.title}</p>
+      <p className="mt-1 max-w-sm text-xs leading-5 text-muted-foreground">{content.description}</p>
+      {onRetry ? (
+        <button
+          type="button"
+          onClick={onRetry}
+          className="mt-4 inline-flex h-8 items-center gap-1.5 rounded-md border border-border bg-background px-3 text-xs font-medium text-foreground transition-colors hover:bg-muted focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+        >
+          <RefreshCw className="size-3.5" />
+          Try again
+        </button>
+      ) : null}
     </div>
   );
 }

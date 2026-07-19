@@ -30,10 +30,19 @@ import { parse as parseUrl } from "node:url";
 import next from "next";
 import { getToken } from "next-auth/jwt";
 
+import { isAllowedWebSocketOrigin, parsePublicOrigins } from "./lib/public-origins.mjs";
+
 const GATEWAY_URL = process.env.COCOLA_GATEWAY_URL ?? "http://127.0.0.1:8080";
 const ADMIN_URL = process.env.COCOLA_ADMIN_URL ?? "http://127.0.0.1:8092";
 const AUTH_SECRET = process.env.AUTH_SECRET;
 const RUNTIME_TOKEN_TTL_SECONDS = 600;
+const PUBLIC_ORIGINS = parsePublicOrigins(process.env.COCOLA_PUBLIC_ORIGINS);
+
+if (PUBLIC_ORIGINS.size === 0) {
+  console.warn(
+    "[web] COCOLA_PUBLIC_ORIGINS is empty; Preview Proxy WebSocket upgrades will fail closed",
+  );
+}
 
 const dev = process.env.NODE_ENV !== "production";
 const hostname = process.env.HOSTNAME || "0.0.0.0";
@@ -131,9 +140,7 @@ function buildPreviewPath(reqUrl) {
 
 function writeUpgradeError(socket, status, message) {
   try {
-    socket.write(
-      `HTTP/1.1 ${status} ${message}\r\nConnection: close\r\nContent-Length: 0\r\n\r\n`,
-    );
+    socket.write(`HTTP/1.1 ${status} ${message}\r\nConnection: close\r\nContent-Length: 0\r\n\r\n`);
   } catch {
     // socket may already be gone
   }
@@ -160,14 +167,44 @@ function tunnelToGateway(req, clientSocket, head, upstreamPath, runtimeToken) {
     method: req.method,
     path: upstreamPath,
     headers: outHeaders,
+    // A WebSocket handshake must ride a brand-new socket. Node's global agent
+    // defaults to keepAlive:true (Node 19+), so the socket from any earlier
+    // non-101 gateway response (302/404/502 for a stale or unbound session)
+    // gets returned to the pool. The next `Upgrade` then grabs that pooled
+    // socket -- which the gateway has since idle-closed on its end -- and the
+    // client `request` layer does NOT retry an upgrade on a stale connection:
+    // our bytes vanish into a half-closed socket and the browser sees a bare
+    // FIN (close code 1006). Long-lived dev servers accumulate these poisoned
+    // sockets, so the tunnel works on a fresh process and then permanently
+    // breaks. `agent: false` forces a fresh, unpooled connection every time.
+    agent: false,
   });
 
+  // Whether the request reached a terminal handler (upgrade/response/error). If
+  // proxyReq closes without any of them firing, the WS handshake was silently
+  // dropped -- the browser then sees a bare FIN (close code 1006) with no log.
+  // That exact failure mode bit us on a long-lived dev server, so make it
+  // observable instead of letting the socket die quietly.
+  let settled = false;
+
   proxyReq.on("error", (err) => {
+    settled = true;
     console.error("[web] preview WS gateway error:", err.message);
     clientSocket.destroy();
   });
 
+  proxyReq.on("close", () => {
+    if (settled) return;
+    settled = true;
+    console.error(
+      "[web] preview WS tunnel closed before upgrade/response " +
+        `(silent FIN) path=${upstreamPath}`,
+    );
+    clientSocket.destroy();
+  });
+
   proxyReq.on("upgrade", (proxyRes, proxySocket, proxyHead) => {
+    settled = true;
     trackSocket(proxySocket);
     proxySocket.on("error", () => clientSocket.destroy());
     clientSocket.on("error", () => proxySocket.destroy());
@@ -190,6 +227,7 @@ function tunnelToGateway(req, clientSocket, head, upstreamPath, runtimeToken) {
 
   // Non-101 responses (e.g. 401/502 from the gateway) never fire `upgrade`.
   proxyReq.on("response", (proxyRes) => {
+    settled = true;
     writeUpgradeError(
       clientSocket,
       proxyRes.statusCode || 502,
@@ -201,85 +239,97 @@ function tunnelToGateway(req, clientSocket, head, upstreamPath, runtimeToken) {
   proxyReq.end();
 }
 
-app.prepare().then(() => {
-  const server = createServer((req, res) => {
-    handle(req, res).catch((err) => {
-      console.error("[web] request handler error:", err);
-      res.statusCode = 500;
-      res.end("internal server error");
+app
+  .prepare()
+  .then(() => {
+    const server = createServer((req, res) => {
+      handle(req, res).catch((err) => {
+        console.error("[web] request handler error:", err);
+        res.statusCode = 500;
+        res.end("internal server error");
+      });
     });
-  });
 
-  server.on("upgrade", (req, socket, head) => {
-    trackSocket(socket);
-    const upstreamPath = buildPreviewPath(req.url ?? "");
-    if (!upstreamPath) {
-      // Not a preview target -> let Next handle it (dev HMR, etc.).
-      upgradeNext(req, socket, head).catch(() => socket.destroy());
-      return;
+    server.on("upgrade", (req, socket, head) => {
+      trackSocket(socket);
+      const upstreamPath = buildPreviewPath(req.url ?? "");
+      if (!upstreamPath) {
+        // Not a preview target -> let Next handle it (dev HMR, etc.).
+        upgradeNext(req, socket, head).catch(() => socket.destroy());
+        return;
+      }
+
+      (async () => {
+        // The browser-facing cookie boundary owns CSWSH protection. Validate the
+        // full external Origin before reading the Auth.js cookie or minting a
+        // runtime token; code-server independently checks the same explicit host
+        // allowlist inside the sandbox. Preserve the accepted Origin downstream
+        // because arbitrary Preview dev servers may rely on it.
+        if (!isAllowedWebSocketOrigin(req.headers.origin, PUBLIC_ORIGINS)) {
+          writeUpgradeError(socket, 403, "Forbidden");
+          return;
+        }
+        const email = await resolveUserEmail(req);
+        if (!email) {
+          writeUpgradeError(socket, 401, "Unauthorized");
+          return;
+        }
+        let runtimeToken;
+        try {
+          runtimeToken = await mintRuntimeToken(email);
+        } catch (err) {
+          console.error("[web] preview WS auth failed:", err.message);
+          writeUpgradeError(socket, 502, "Bad Gateway");
+          return;
+        }
+        tunnelToGateway(req, socket, head, upstreamPath, runtimeToken);
+      })().catch((err) => {
+        console.error("[web] preview WS upgrade error:", err);
+        socket.destroy();
+      });
+    });
+
+    server.listen(port, hostname, () => {
+      console.log(`[web] ready on http://${hostname}:${port} (dev=${dev})`);
+    });
+
+    // --- graceful teardown -----------------------------------------------------
+    // On SIGTERM/SIGINT: stop accepting new connections, proactively tear down
+    // live WS tunnels (they'd otherwise keep the loop alive), close Next, quit.
+    let closing = false;
+    const gracefulClose = (signal) => {
+      if (closing) return;
+      closing = true;
+      console.log(`[web] ${signal} received, closing gracefully...`);
+
+      const forceQuit = setTimeout(() => {
+        console.error("[web] graceful close timed out, forcing quit");
+        process.exit(1);
+      }, 10000);
+      forceQuit.unref();
+
+      server.close((err) => {
+        if (err) console.error("[web] server.close error:", err.message);
+        Promise.resolve(app.close?.())
+          .catch((e) => console.error("[web] next close error:", e?.message))
+          .finally(() => {
+            clearTimeout(forceQuit);
+            console.log("[web] graceful close complete");
+            process.exit(0);
+          });
+      });
+
+      // Destroy in-flight WS/upgrade sockets so keep-alive connections don't
+      // block server.close() from ever completing.
+      for (const socket of activeSockets) socket.destroy();
+      activeSockets.clear();
+    };
+
+    for (const signal of ["SIGTERM", "SIGINT"]) {
+      process.on(signal, () => gracefulClose(signal));
     }
-
-    (async () => {
-      const email = await resolveUserEmail(req);
-      if (!email) {
-        writeUpgradeError(socket, 401, "Unauthorized");
-        return;
-      }
-      let runtimeToken;
-      try {
-        runtimeToken = await mintRuntimeToken(email);
-      } catch (err) {
-        console.error("[web] preview WS auth failed:", err.message);
-        writeUpgradeError(socket, 502, "Bad Gateway");
-        return;
-      }
-      tunnelToGateway(req, socket, head, upstreamPath, runtimeToken);
-    })().catch((err) => {
-      console.error("[web] preview WS upgrade error:", err);
-      socket.destroy();
-    });
+  })
+  .catch((err) => {
+    console.error("[web] failed to start:", err);
+    process.exit(1);
   });
-
-  server.listen(port, hostname, () => {
-    console.log(`[web] ready on http://${hostname}:${port} (dev=${dev})`);
-  });
-
-  // --- graceful teardown -----------------------------------------------------
-  // On SIGTERM/SIGINT: stop accepting new connections, proactively tear down
-  // live WS tunnels (they'd otherwise keep the loop alive), close Next, quit.
-  let closing = false;
-  const gracefulClose = (signal) => {
-    if (closing) return;
-    closing = true;
-    console.log(`[web] ${signal} received, closing gracefully...`);
-
-    const forceQuit = setTimeout(() => {
-      console.error("[web] graceful close timed out, forcing quit");
-      process.exit(1);
-    }, 10000);
-    forceQuit.unref();
-
-    server.close((err) => {
-      if (err) console.error("[web] server.close error:", err.message);
-      Promise.resolve(app.close?.())
-        .catch((e) => console.error("[web] next close error:", e?.message))
-        .finally(() => {
-          clearTimeout(forceQuit);
-          console.log("[web] graceful close complete");
-          process.exit(0);
-        });
-    });
-
-    // Destroy in-flight WS/upgrade sockets so keep-alive connections don't
-    // block server.close() from ever completing.
-    for (const socket of activeSockets) socket.destroy();
-    activeSockets.clear();
-  };
-
-  for (const signal of ["SIGTERM", "SIGINT"]) {
-    process.on(signal, () => gracefulClose(signal));
-  }
-}).catch((err) => {
-  console.error("[web] failed to start:", err);
-  process.exit(1);
-});

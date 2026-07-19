@@ -86,6 +86,11 @@ else
   note "SKIP_BUILD=1, reusing $IMAGE"
 fi
 
+IMAGE_WORKDIR="$(docker image inspect --format '{{.Config.WorkingDir}}' "$IMAGE")"
+[ "$IMAGE_WORKDIR" = "/" ] \
+  && ok "image uses stable / working directory for OpenSandbox execd" \
+  || bad "image WorkingDir is $IMAGE_WORKDIR (must be /; /workspace is replaced at startup)"
+
 # ---- 2. selfcheck (no network) ------------------------------------------
 note "selfcheck: runtime components baked into the image"
 start_ctr

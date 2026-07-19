@@ -103,6 +103,10 @@ LLM_HOST="${COCOLA_LLM_HOST:-$_llm_host_default}"
 LLM_PORT="${COCOLA_LLM_PORT:-8081}"   # NOT 8080: that is the gateway port.
 
 WEB_PORT="${COCOLA_WEB_PORT:-3000}"
+# Single source of truth for browser-facing origins. The Web BFF validates the
+# full Origin before minting a runtime token; sandbox-manager derives the
+# host[:port] values passed to code-server. Explicit environment/.env values win.
+export COCOLA_PUBLIC_ORIGINS="${COCOLA_PUBLIC_ORIGINS:-http://127.0.0.1:$WEB_PORT,http://localhost:$WEB_PORT}"
 
 # cleanup.log is append-only during teardown. Reset it for each stack run so
 # repeated local starts do not accumulate thousands of stale process checks.
@@ -289,6 +293,23 @@ free_port() {
   done
   # shellcheck disable=SC2086
   kill -9 $pids 2>/dev/null || true
+  # Verify the port is actually free. On locked-down hosts a kill against a
+  # process from another login session is silently rejected ("Operation not
+  # permitted"), so the old listener keeps serving on the port. If we returned
+  # 0 here the caller would start a new child that either hits EADDRINUSE or --
+  # worse -- lets the stale (possibly wedged) process keep answering requests.
+  # Fail loudly instead so the operator knows to kill it from its owning shell.
+  for ((i=0; i<10; i++)); do
+    pids="$(_reapable_pids_on_port "$port" | tr '\n' ' ')"; pids="$(echo $pids)"
+    [[ -z "$pids" ]] && return 0
+    sleep 0.3
+  done
+  echo "==> ERROR: port $port ($name) is STILL held by native listener(s): $pids" >&2
+  echo "    kill(2) was rejected -- likely a cross-session process this shell" >&2
+  echo "    cannot signal. Kill it from the terminal that started it:" >&2
+  echo "        kill -9 $pids" >&2
+  echo "    then re-run this command." >&2
+  return 1
 }
 
 # Wait until a TCP port accepts a connection. Uses nc (preinstalled on macOS).
@@ -547,6 +568,7 @@ free_port "$WEB_PORT" web
     COCOLA_ADMIN_URL="${COCOLA_ADMIN_URL:-http://127.0.0.1:8092}" \
     COCOLA_ADMIN_KEY="$COCOLA_ADMIN_KEY" \
     AUTH_SECRET="$AUTH_SECRET" \
+    COCOLA_PUBLIC_ORIGINS="$COCOLA_PUBLIC_ORIGINS" \
       $SETSID node server.mjs --port "$WEB_PORT"
   ) >"$(log_redirect web)" 2>&1 &
   PIDS+=("$!")

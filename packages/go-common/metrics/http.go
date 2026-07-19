@@ -1,6 +1,9 @@
 package metrics
 
 import (
+	"bufio"
+	"fmt"
+	"net"
 	"net/http"
 	"strconv"
 	"time"
@@ -39,7 +42,8 @@ func (r *Registry) HTTPHandler(routeFn func(*http.Request) string, next http.Han
 
 // statusWriter captures the response status code for the RED "code" label while
 // transparently forwarding writes. It implements http.Flusher so SSE streams
-// (gateway BFF) keep flushing.
+// (gateway BFF) keep flushing, and http.Hijacker so WebSocket upgrades (the
+// Preview Proxy reverse-proxied editor sockets) can take over the raw TCP conn.
 type statusWriter struct {
 	http.ResponseWriter
 	status      int
@@ -67,4 +71,17 @@ func (w *statusWriter) Flush() {
 	if f, ok := w.ResponseWriter.(http.Flusher); ok {
 		f.Flush()
 	}
+}
+
+// Hijack forwards to the underlying ResponseWriter if it supports connection
+// hijacking, so WebSocket upgrades (HTTP 101) proxied through this middleware
+// can take over the raw TCP conn. Without this, wrapping the writer masks the
+// server Hijacker and every upgrade fails with "can't switch protocols using
+// non-Hijacker ResponseWriter".
+func (w *statusWriter) Hijack() (net.Conn, *bufio.ReadWriter, error) {
+	h, ok := w.ResponseWriter.(http.Hijacker)
+	if !ok {
+		return nil, nil, fmt.Errorf("metrics: underlying ResponseWriter (%T) is not an http.Hijacker", w.ResponseWriter)
+	}
+	return h.Hijack()
 }

@@ -188,7 +188,13 @@ RUN useradd -m -u 10001 -s /bin/bash cocola \
 # arrives via exec (docker exec / kubectl exec), which the sandbox-manager pins
 # to the non-root cocola user (uid 10001). The keep-alive entrypoint does
 # nothing exploitable.
-WORKDIR /workspace
+# OpenSandbox starts bootstrap.sh (and therefore execd) in the image WORKDIR
+# before Cocola's custom entrypoint prepares the session symlinks. /workspace
+# is replaced with a symlink during that preparation, so using it here leaves
+# the already-running execd holding a deleted cwd inode. Keep infrastructure
+# daemons rooted at an immutable directory; Cocola Exec requests and
+# code-server select /workspace explicitly after it is ready.
+WORKDIR /
 
 # CLAUDE_CONFIG_DIR points to a hidden session-local mount outside /workspace so
 # memory/sessions are isolated without appearing in user file listings.

@@ -23,6 +23,7 @@ CODE_SERVER_PORT="${COCOLA_CODE_SERVER_PORT:-39378}"
 CODE_SERVER_BIN="${COCOLA_CODE_SERVER_BIN:-/usr/local/bin/code-server}"
 CODE_SERVER_USER="${COCOLA_CODE_SERVER_USER:-cocola}"
 CODE_SERVER_DIR="${COCOLA_CODE_SERVER_DIR:-/workspace}"
+CODE_SERVER_TRUSTED_ORIGINS="${COCOLA_CODE_SERVER_TRUSTED_ORIGINS:-}"
 
 log() { echo "[code-server] $*"; }
 
@@ -39,6 +40,28 @@ if [ ! -x "$CODE_SERVER_BIN" ]; then
   exit 0
 fi
 
+# sandbox-manager derives this host-only list from COCOLA_PUBLIC_ORIGINS and
+# owns the environment key, so an Agent request cannot weaken the policy. Keep
+# a second validation layer here because the image may also be run directly.
+trusted_origin_args=()
+IFS=',' read -r -a trusted_origins <<< "$CODE_SERVER_TRUSTED_ORIGINS"
+for origin in "${trusted_origins[@]}"; do
+  # Trim only surrounding whitespace. Internal whitespace remains invalid so a
+  # malformed value cannot be silently rewritten into a different host.
+  origin="${origin#"${origin%%[![:space:]]*}"}"
+  origin="${origin%"${origin##*[![:space:]]}"}"
+  [ -z "$origin" ] && continue
+  if [[ "$origin" == *[[:space:]]* || "$origin" == *"*"* || "$origin" == *"://"* || "$origin" == *"/"* ||
+        "$origin" == *"?"* || "$origin" == *"#"* || "$origin" == *"@"* ]]; then
+    log "ERROR: invalid trusted origin host: $origin" >&2
+    exit 1
+  fi
+  trusted_origin_args+=(--trusted-origins "$origin")
+done
+if [ "${#trusted_origin_args[@]}" -eq 0 ]; then
+  log "WARNING: no trusted origins configured; browser WebSocket upgrades will remain blocked" >&2
+fi
+
 # runuser drops to the brain user with a login-like env (HOME=/home/cocola), so
 # code-server's user-data/extensions default under the writable brain home.
 start_one() {
@@ -50,6 +73,7 @@ start_one() {
     --disable-telemetry \
     --disable-update-check \
     --disable-workspace-trust \
+    "${trusted_origin_args[@]}" \
     "$CODE_SERVER_DIR"
 }
 

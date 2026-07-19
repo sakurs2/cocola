@@ -41,6 +41,16 @@ func TestNonInteractiveInstallWritesEmbeddedRelease(t *testing.T) {
 	if !strings.Contains(string(compose), "cocola-gateway:${COCOLA_VERSION}") {
 		t.Fatal("embedded release compose does not use versioned images")
 	}
+	environment, err := os.ReadFile(filepath.Join(home, "config.env"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(environment), `COCOLA_PUBLIC_ORIGINS="http://127.0.0.1:3000,http://localhost:3000"`) {
+		t.Fatal("generated environment does not configure explicit local public origins")
+	}
+	if strings.Contains(string(environment), `COCOLA_PUBLIC_ORIGINS="*"`) {
+		t.Fatal("generated environment must not trust wildcard origins")
+	}
 	if !strings.Contains(output.String(), "cocola up") {
 		t.Fatalf("install output must explain how to start Cocola: %q", output.String())
 	}

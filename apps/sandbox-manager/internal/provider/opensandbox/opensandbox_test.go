@@ -84,6 +84,39 @@ func TestNew_EnvDefaults(t *testing.T) {
 	}
 }
 
+func TestParsePublicOriginHosts(t *testing.T) {
+	hosts, err := parsePublicOriginHosts("https://Cocola.Example.com:443/, http://127.0.0.1:3000,https://cocola.example.com,http://localhost:80,https://[::1]:443")
+	if err != nil {
+		t.Fatalf("parsePublicOriginHosts: %v", err)
+	}
+	if got, want := strings.Join(hosts, ","), "cocola.example.com,127.0.0.1:3000,localhost,[::1]"; got != want {
+		t.Fatalf("trusted hosts = %q, want %q", got, want)
+	}
+
+	for _, raw := range []string{
+		"*",
+		"https://*.example.com",
+		"ftp://example.com",
+		"https://user@example.com",
+		"https://example.com/path",
+		"https://example.com?query=1",
+	} {
+		if _, err := parsePublicOriginHosts(raw); err == nil {
+			t.Errorf("parsePublicOriginHosts(%q) succeeded, want error", raw)
+		}
+	}
+}
+
+func TestNew_RejectsInvalidPublicOrigins(t *testing.T) {
+	_, err := New(
+		WithBaseURL("http://opensandbox.test/v1"),
+		WithPublicOrigins("*"),
+	)
+	if err == nil || !strings.Contains(err.Error(), "wildcard origin") {
+		t.Fatalf("New error = %v, want wildcard origin rejection", err)
+	}
+}
+
 func TestNew_HTTPTimeoutEnv(t *testing.T) {
 	t.Setenv("COCOLA_OPENSANDBOX_URL", "http://from-env:8090/v1/")
 	t.Setenv("COCOLA_OPENSANDBOX_HTTP_TIMEOUT", "2m")
@@ -192,6 +225,51 @@ func TestCreate_SanitisesMetadataLabelValues(t *testing.T) {
 	sessionMeta := body.Metadata["cocola.session_id"]
 	if strings.Contains(sessionMeta, "/") || strings.Contains(sessionMeta, " ") || len(sessionMeta) > 63 {
 		t.Fatalf("unsafe metadata session id %q", sessionMeta)
+	}
+}
+
+func TestCreate_InjectsPlatformCodeServerTrustedOrigins(t *testing.T) {
+	var body createSandboxRequest
+	p := newStub(t, func(r *http.Request) (*http.Response, error) {
+		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+			t.Fatalf("decode create body: %v", err)
+		}
+		return jsonResp(http.StatusOK, `{"id":"sbx-123","status":{"state":"Pending"}}`), nil
+	}, WithPublicOrigins("https://cocola.example.com,http://127.0.0.1:3000"))
+
+	callerEnv := map[string]string{
+		"CALLER_VALUE":              "kept",
+		codeServerTrustedOriginsEnv: "*",
+	}
+	if _, err := p.Create(context.Background(), provider.SandboxSpec{
+		UserID: "u1", SessionID: "s1", SessionClaim: "cocola-sv-test", Image: "img", Env: callerEnv,
+	}); err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+
+	if got := body.Env[codeServerTrustedOriginsEnv]; got != "cocola.example.com,127.0.0.1:3000" {
+		t.Fatalf("trusted origins env = %q", got)
+	}
+	if got := body.Env["CALLER_VALUE"]; got != "kept" {
+		t.Fatalf("caller env = %q, want kept", got)
+	}
+	if got := callerEnv[codeServerTrustedOriginsEnv]; got != "*" {
+		t.Fatalf("Create mutated caller env: %q", got)
+	}
+}
+
+func TestSandboxEnv_StripsCallerTrustedOriginsWhenUnconfigured(t *testing.T) {
+	p := &Provider{}
+	got := p.sandboxEnv(map[string]string{
+		"CALLER_VALUE":              "kept",
+		codeServerTrustedOriginsEnv: "*",
+	})
+
+	if _, ok := got[codeServerTrustedOriginsEnv]; ok {
+		t.Fatal("caller-controlled trusted origins were not removed")
+	}
+	if got["CALLER_VALUE"] != "kept" {
+		t.Fatalf("caller env = %q, want kept", got["CALLER_VALUE"])
 	}
 }
 
@@ -462,6 +540,9 @@ func TestExec_NegativeTimeoutHasNoDeadline(t *testing.T) {
 	}
 	if strings.Contains(commandBody, `"timeout"`) {
 		t.Fatalf("negative timeout leaked into execd body: %s", commandBody)
+	}
+	if !strings.Contains(commandBody, `"cwd":"/workspace"`) {
+		t.Fatalf("empty Exec cwd did not default to /workspace: %s", commandBody)
 	}
 }
 
@@ -970,6 +1051,7 @@ func TestExec_StdoutNewlineFraming(t *testing.T) {
 func TestExec_WaitsForExecdReady(t *testing.T) {
 	var probeCount, realRan int
 	var ranTrueProbe bool
+	var probeCwd string
 	p := newStub(t, func(r *http.Request) (*http.Response, error) {
 		switch {
 		case r.Method == http.MethodGet && strings.HasSuffix(r.URL.Path, "/sandboxes/sbx-1"):
@@ -980,6 +1062,11 @@ func TestExec_WaitsForExecdReady(t *testing.T) {
 			b, _ := io.ReadAll(r.Body)
 			body := string(b)
 			if strings.Contains(body, `"command":"true"`) {
+				var request runCommandRequest
+				if err := json.Unmarshal(b, &request); err != nil {
+					t.Fatalf("decode readiness probe: %v", err)
+				}
+				probeCwd = request.Cwd
 				ranTrueProbe = true
 				probeCount++
 				// First probe: execd not yet listening -> proxy 500.
@@ -1008,6 +1095,9 @@ func TestExec_WaitsForExecdReady(t *testing.T) {
 
 	if !ranTrueProbe {
 		t.Fatal("expected an idempotent `true` readiness probe before the real command")
+	}
+	if probeCwd != guestDaemonCWD {
+		t.Fatalf("readiness probe cwd = %q, want stable %q", probeCwd, guestDaemonCWD)
 	}
 	if probeCount < 2 {
 		t.Errorf("probeCount = %d, want >= 2 (first 500 must be retried)", probeCount)
@@ -1206,6 +1296,8 @@ func TestSessionEntrypoint(t *testing.T) {
 		"ln -s '/session/runtime/codex' '/home/cocola/.codex'",
 		"ln -s '/session/runtime/cocola' '/home/cocola/.cocola'",
 		"ln -s '/session/home/local' '/home/cocola/.local'",
+		"&& cd '/workspace'",
+		"'/opt/cocola/code-server-launch.sh' &",
 		"&& exec sleep infinity",
 	} {
 		if !strings.Contains(script, want) {

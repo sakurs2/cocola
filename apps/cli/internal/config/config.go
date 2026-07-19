@@ -279,6 +279,7 @@ func renderEnvironment(paths Paths, o Options, s secrets, password string) strin
 		{"COCOLA_VERSION", o.Version}, {"COCOLA_IMAGE_REGISTRY", strings.TrimSuffix(o.Registry, "/")},
 		{"COCOLA_HOME", paths.Home}, {"COCOLA_SANDBOX_ROOT", paths.SandboxRoot},
 		{"COCOLA_WEB_HOST_PORT", strconv.Itoa(o.WebPort)}, {"COCOLA_GATEWAY_HOST_PORT", strconv.Itoa(o.GatewayPort)},
+		{"COCOLA_PUBLIC_ORIGINS", fmt.Sprintf("http://127.0.0.1:%d,http://localhost:%d", o.WebPort, o.WebPort)},
 		{"COCOLA_LLM_HOST_PORT", strconv.Itoa(o.LLMPort)}, {"COCOLA_OPENSANDBOX_MANAGED", managed},
 		{"COCOLA_OPENSANDBOX_URL", opensandboxURL}, {"COCOLA_SANDBOX_LLM_BASE_URL", sandboxLLMBaseURL},
 		{"COCOLA_AUTH_SECRET", s.auth},
