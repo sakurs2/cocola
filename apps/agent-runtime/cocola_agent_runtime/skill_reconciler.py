@@ -14,12 +14,14 @@ from cocola_agent_runtime.objstore import Fetcher
 from cocola_agent_runtime.skill_loader import Skill
 
 SKILLS_INSPECT_SCRIPT = r"""
+import hashlib
 import json
 import os
 import shutil
 
 state_root = "/home/cocola/.cocola/skillsets/agents-skill-v1"
 current = os.path.join(state_root, "current")
+platform_root = "/opt/cocola/skills"
 
 
 def replace_link(path, target):
@@ -34,6 +36,54 @@ def replace_link(path, target):
     os.symlink(target, path)
 
 
+def platform_skills():
+    manifest_path = os.path.join(platform_root, "manifest.json")
+    if not os.path.isfile(manifest_path):
+        return [], ""
+    try:
+        with open(manifest_path, encoding="utf-8") as src:
+            platform_manifest = json.load(src)
+    except (OSError, ValueError) as exc:
+        raise SystemExit(f"invalid platform Skill manifest: {exc}")
+    if platform_manifest.get("schema_version") != 1 or not isinstance(
+        platform_manifest.get("skills"), list
+    ):
+        raise SystemExit("invalid platform Skill manifest schema")
+    root = os.path.realpath(platform_root)
+    items = []
+    seen = set()
+    for raw in platform_manifest["skills"]:
+        if not isinstance(raw, dict):
+            raise SystemExit("invalid platform Skill descriptor")
+        skill_id = str(raw.get("id") or "")
+        if not skill_id or not all(ch.isalnum() or ch in "_.-" for ch in skill_id):
+            raise SystemExit(f"invalid platform Skill id: {skill_id}")
+        if skill_id in seen:
+            raise SystemExit(f"duplicate platform Skill id: {skill_id}")
+        seen.add(skill_id)
+        relative = str(raw.get("path") or skill_id)
+        source = os.path.realpath(os.path.join(root, relative))
+        if os.path.commonpath((root, source)) != root:
+            raise SystemExit(f"unsafe platform Skill path: {relative}")
+        skill_md = os.path.join(source, "SKILL.md")
+        if not os.path.isfile(skill_md):
+            raise SystemExit(f"platform Skill missing SKILL.md: {skill_id}")
+        with open(skill_md, "rb") as src:
+            content_sha256 = hashlib.sha256(src.read()).hexdigest()
+        items.append(
+            {
+                "id": skill_id,
+                "name": str(raw.get("name") or skill_id),
+                "version": str(raw.get("version") or ""),
+                "path": relative,
+                "content_sha256": content_sha256,
+            }
+        )
+    items.sort(key=lambda item: item["id"])
+    encoded = json.dumps(items, sort_keys=True, separators=(",", ":")).encode()
+    return items, hashlib.sha256(encoded).hexdigest()
+
+
 os.makedirs(state_root, exist_ok=True)
 replace_link("/home/cocola/.claude/skills", current)
 replace_link("/home/cocola/.agents/skills", current)
@@ -43,11 +93,15 @@ try:
         manifest = json.load(src)
 except (OSError, ValueError):
     pass
+available_platform_skills, available_platform_digest = platform_skills()
+manifest["available_platform_skills"] = available_platform_skills
+manifest["available_platform_digest"] = available_platform_digest
 print(json.dumps(manifest, sort_keys=True, separators=(",", ":")))
 """
 
 SKILLS_RECONCILE_SCRIPT = r"""
 import fcntl
+import hashlib
 import io
 import json
 import os
@@ -61,6 +115,7 @@ state_root = "/home/cocola/.cocola/skillsets/agents-skill-v1"
 sets_root = os.path.join(state_root, "sets")
 current = os.path.join(state_root, "current")
 lock_path = os.path.join(state_root, "reconcile.lock")
+platform_root = "/opt/cocola/skills"
 os.makedirs(sets_root, exist_ok=True)
 
 
@@ -79,6 +134,56 @@ def extract_bundle(data, target):
                 shutil.copyfileobj(src, out)
 
 
+def platform_skills():
+    manifest_path = os.path.join(platform_root, "manifest.json")
+    if not os.path.isfile(manifest_path):
+        return [], "", {}
+    try:
+        with open(manifest_path, encoding="utf-8") as src:
+            platform_manifest = json.load(src)
+    except (OSError, ValueError) as exc:
+        raise SystemExit(f"invalid platform Skill manifest: {exc}")
+    if platform_manifest.get("schema_version") != 1 or not isinstance(
+        platform_manifest.get("skills"), list
+    ):
+        raise SystemExit("invalid platform Skill manifest schema")
+    root = os.path.realpath(platform_root)
+    items = []
+    sources = {}
+    seen = set()
+    for raw in platform_manifest["skills"]:
+        if not isinstance(raw, dict):
+            raise SystemExit("invalid platform Skill descriptor")
+        skill_id = str(raw.get("id") or "")
+        if not skill_id or not all(ch.isalnum() or ch in "_.-" for ch in skill_id):
+            raise SystemExit(f"invalid platform Skill id: {skill_id}")
+        if skill_id in seen:
+            raise SystemExit(f"duplicate platform Skill id: {skill_id}")
+        seen.add(skill_id)
+        relative = str(raw.get("path") or skill_id)
+        source = os.path.realpath(os.path.join(root, relative))
+        if os.path.commonpath((root, source)) != root:
+            raise SystemExit(f"unsafe platform Skill path: {relative}")
+        skill_md = os.path.join(source, "SKILL.md")
+        if not os.path.isfile(skill_md):
+            raise SystemExit(f"platform Skill missing SKILL.md: {skill_id}")
+        with open(skill_md, "rb") as src:
+            content_sha256 = hashlib.sha256(src.read()).hexdigest()
+        items.append(
+            {
+                "id": skill_id,
+                "name": str(raw.get("name") or skill_id),
+                "version": str(raw.get("version") or ""),
+                "path": relative,
+                "content_sha256": content_sha256,
+            }
+        )
+        sources[skill_id] = source
+    items.sort(key=lambda item: item["id"])
+    encoded = json.dumps(items, sort_keys=True, separators=(",", ":")).encode()
+    return items, hashlib.sha256(encoded).hexdigest(), sources
+
+
 with open(lock_path, "a+") as lock:
     fcntl.flock(lock, fcntl.LOCK_EX)
     stage = tempfile.mkdtemp(prefix=f"{digest}-", dir=sets_root)
@@ -91,10 +196,12 @@ with open(lock_path, "a+") as lock:
             manifest = json.loads(batch.read("manifest.json"))
             if manifest.get("digest") != digest or not isinstance(manifest.get("skills"), list):
                 raise SystemExit("invalid skill reconcile manifest")
+            configured_ids = set()
             for item in manifest["skills"]:
                 skill_id = item.get("id", "")
                 if not skill_id or not all(ch.isalnum() or ch in "_.-" for ch in skill_id):
                     raise SystemExit(f"invalid skill id: {skill_id}")
+                configured_ids.add(skill_id)
                 target = os.path.join(stage, skill_id)
                 kind = item.get("kind")
                 if kind == "reuse":
@@ -112,6 +219,14 @@ with open(lock_path, "a+") as lock:
                     raise SystemExit(f"invalid skill payload kind: {kind}")
                 if not os.path.isfile(os.path.join(target, "SKILL.md")):
                     raise SystemExit(f"skill archive missing SKILL.md: {skill_id}")
+            platform_items, platform_digest, platform_sources = platform_skills()
+            for item in platform_items:
+                skill_id = item["id"]
+                if skill_id in configured_ids:
+                    raise SystemExit(f"configured Skill uses reserved platform id: {skill_id}")
+                os.symlink(platform_sources[skill_id], os.path.join(stage, skill_id))
+            manifest["platform_skills"] = platform_items
+            manifest["platform_digest"] = platform_digest
             with open(os.path.join(stage, "manifest.json"), "w", encoding="utf-8") as out:
                 json.dump(manifest, out, sort_keys=True, separators=(",", ":"))
 
@@ -139,6 +254,55 @@ with open(lock_path, "a+") as lock:
 
 _NATIVE_SKILL_ID_RE = re.compile(r"^[a-zA-Z0-9][a-zA-Z0-9_.-]{0,127}$")
 _SKILL_SET_FORMAT = "session-bundle-v2"
+
+
+def platform_skill_descriptors(snapshot: dict[str, Any]) -> tuple[list[dict[str, str]], str]:
+    """Return validated root-owned Skill metadata reported by the Runtime image."""
+
+    raw_items = snapshot.get("available_platform_skills")
+    if raw_items is None:
+        raw_items = []
+    if not isinstance(raw_items, list):
+        raise RuntimeError("invalid platform Skill inventory")
+    descriptors: list[dict[str, str]] = []
+    seen_ids: set[str] = set()
+    for raw in raw_items:
+        if not isinstance(raw, dict):
+            raise RuntimeError("invalid platform Skill descriptor")
+        skill_id = str(raw.get("id") or "").strip()
+        if not _NATIVE_SKILL_ID_RE.fullmatch(skill_id):
+            raise RuntimeError(f"invalid platform Skill id: {skill_id}")
+        if skill_id in seen_ids:
+            raise RuntimeError(f"duplicate platform Skill id: {skill_id}")
+        seen_ids.add(skill_id)
+        descriptors.append(
+            {
+                "id": skill_id,
+                "name": str(raw.get("name") or skill_id).strip() or skill_id,
+                "version": str(raw.get("version") or "").strip(),
+            }
+        )
+    descriptors.sort(key=lambda item: item["id"])
+    return descriptors, str(snapshot.get("available_platform_digest") or "")
+
+
+def loaded_skill_metadata(
+    skills: list[Skill], platform_skills: list[dict[str, str]]
+) -> list[dict[str, str]]:
+    """Merge configured and image-baked Skills for runtime/UI status reporting."""
+
+    configured_ids = {skill.native_id for skill in skills}
+    platform_ids = {item["id"] for item in platform_skills}
+    collisions = sorted(configured_ids & platform_ids)
+    if collisions:
+        raise RuntimeError(f"configured Skill uses reserved platform id: {collisions[0]}")
+    loaded = [
+        {"id": skill.native_id, "name": skill.name or skill.native_id, "version": skill.version}
+        for skill in skills
+    ]
+    loaded.extend(platform_skills)
+    loaded.sort(key=lambda item: item["id"])
+    return loaded
 
 
 def skill_descriptors(skills: list[Skill], user_id: str) -> tuple[list[dict[str, str]], str]:

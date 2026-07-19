@@ -82,6 +82,48 @@ func TestNew_EnvDefaults(t *testing.T) {
 	if p.root != "/mnt/cocola" {
 		t.Errorf("root = %q, want /mnt/cocola", p.root)
 	}
+	if p.profile != profileCoding {
+		t.Errorf("profile = %q, want %q", p.profile, profileCoding)
+	}
+}
+
+func TestNew_ValidatesRuntimePolicy(t *testing.T) {
+	t.Setenv("COCOLA_OPENSANDBOX_URL", "http://from-env:8090/v1")
+	t.Setenv(sandboxProfileEnv, "desktop")
+	if _, err := New(); err == nil || !strings.Contains(err.Error(), sandboxProfileEnv) {
+		t.Fatalf("invalid profile error = %v", err)
+	}
+
+	t.Setenv(sandboxProfileEnv, profileCoding)
+	t.Setenv(codeServerEnabledEnv, "sometimes")
+	if _, err := New(); err == nil || !strings.Contains(err.Error(), codeServerEnabledEnv) {
+		t.Fatalf("invalid code-server override error = %v", err)
+	}
+
+	t.Setenv(codeServerEnabledEnv, "")
+	t.Setenv(browserEnabledEnv, "sometimes")
+	if _, err := New(); err == nil || !strings.Contains(err.Error(), browserEnabledEnv) {
+		t.Fatalf("invalid browser override error = %v", err)
+	}
+}
+
+func TestNew_NormalizesRuntimePolicy(t *testing.T) {
+	t.Setenv("COCOLA_OPENSANDBOX_URL", "http://from-env:8090/v1")
+	t.Setenv(sandboxProfileEnv, " MINIMAL ")
+	t.Setenv(codeServerEnabledEnv, "off")
+	t.Setenv(browserEnabledEnv, "on")
+	p, err := New()
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	if p.profile != profileMinimal || p.codeServerEnabled != "0" || p.browserEnabled != "1" {
+		t.Fatalf(
+			"runtime policy = profile %q, code-server %q, browser %q",
+			p.profile,
+			p.codeServerEnabled,
+			p.browserEnabled,
+		)
+	}
 }
 
 func TestParsePublicOriginHosts(t *testing.T) {
@@ -183,7 +225,7 @@ func TestCreate_HappyPath(t *testing.T) {
 		t.Errorf("content-type = %q, want application/json", gotCT)
 	}
 	// Body assertions: resource + egress mapping landed on the wire.
-	for _, want := range []string{`"uri":"cocola/sandbox-runtime:dev"`, `"entrypoint":["/bin/sh","-c"`, `mkdir -p '/session/workspace'`, `"cpu":"500m"`, `"memory":"512Mi"`, `"defaultAction":"deny"`, `"target":"api.anthropic.com"`} {
+	for _, want := range []string{`"uri":"cocola/sandbox-runtime:dev"`, `"entrypoint":["/bin/sh","-c"`, `mkdir -p '/session/workspace'`, `exec '/opt/cocola/runtime-entrypoint.sh'`, `"COCOLA_SANDBOX_PROFILE":"coding"`, `"cpu":"500m"`, `"memory":"512Mi"`, `"defaultAction":"deny"`, `"target":"api.anthropic.com"`} {
 		if !strings.Contains(gotBody, want) {
 			t.Errorf("request body missing %s\nbody: %s", want, gotBody)
 		}
@@ -259,10 +301,13 @@ func TestCreate_InjectsPlatformCodeServerTrustedOrigins(t *testing.T) {
 }
 
 func TestSandboxEnv_StripsCallerTrustedOriginsWhenUnconfigured(t *testing.T) {
-	p := &Provider{}
+	p := &Provider{profile: profileMinimal, codeServerEnabled: "0", browserEnabled: "1"}
 	got := p.sandboxEnv(map[string]string{
 		"CALLER_VALUE":              "kept",
 		codeServerTrustedOriginsEnv: "*",
+		sandboxProfileEnv:           profileCoding,
+		codeServerEnabledEnv:        "1",
+		browserEnabledEnv:           "0",
 	})
 
 	if _, ok := got[codeServerTrustedOriginsEnv]; ok {
@@ -270,6 +315,12 @@ func TestSandboxEnv_StripsCallerTrustedOriginsWhenUnconfigured(t *testing.T) {
 	}
 	if got["CALLER_VALUE"] != "kept" {
 		t.Fatalf("caller env = %q, want kept", got["CALLER_VALUE"])
+	}
+	if got[sandboxProfileEnv] != profileMinimal || got[codeServerEnabledEnv] != "0" {
+		t.Fatalf("caller overrode runtime policy: %v", got)
+	}
+	if got[browserEnabledEnv] != "1" {
+		t.Fatalf("caller overrode browser policy: %v", got)
 	}
 }
 
@@ -822,7 +873,7 @@ func TestExec_StreamEndSynthesizesExit(t *testing.T) {
 }
 
 func TestMapResources(t *testing.T) {
-	got := mapResources(provider.Resources{CPUCores: 2, MemoryMiB: 1024})
+	got := mapResources(provider.Resources{CPUCores: 2, MemoryMiB: 1024}, profileCoding)
 	if got["cpu"] != "2000m" || got["memory"] != "1024Mi" {
 		t.Errorf("mapResources = %v, want cpu=2000m memory=1024Mi", got)
 	}
@@ -830,16 +881,20 @@ func TestMapResources(t *testing.T) {
 	// non-pooled create without resourceLimits, and the on-demand path
 	// (binder -> Create, ADR-0015) sets no Resources. The provider supplies a
 	// default floor so /v1/chat never 422s. See mapResources / envOr.
-	def := mapResources(provider.Resources{})
-	if def["cpu"] != defaultCPU || def["memory"] != defaultMemory {
-		t.Errorf("zero resources = %v, want cpu=%s memory=%s (default floor)", def, defaultCPU, defaultMemory)
+	def := mapResources(provider.Resources{}, profileCoding)
+	if def["cpu"] != defaultCodingCPU || def["memory"] != defaultCodingMemory {
+		t.Errorf("coding defaults = %v, want cpu=%s memory=%s", def, defaultCodingCPU, defaultCodingMemory)
+	}
+	minimal := mapResources(provider.Resources{}, profileMinimal)
+	if minimal["cpu"] != defaultMinimalCPU || minimal["memory"] != defaultMinimalMemory {
+		t.Errorf("minimal defaults = %v, want cpu=%s memory=%s", minimal, defaultMinimalCPU, defaultMinimalMemory)
 	}
 }
 
 func TestMapResources_EnvOverride(t *testing.T) {
 	t.Setenv("COCOLA_OPENSANDBOX_DEFAULT_CPU", "250m")
 	t.Setenv("COCOLA_OPENSANDBOX_DEFAULT_MEMORY", "256Mi")
-	got := mapResources(provider.Resources{})
+	got := mapResources(provider.Resources{}, profileCoding)
 	if got["cpu"] != "250m" || got["memory"] != "256Mi" {
 		t.Errorf("env-overridden defaults = %v, want cpu=250m memory=256Mi", got)
 	}
@@ -1289,22 +1344,21 @@ func TestSessionEntrypoint(t *testing.T) {
 	}
 	script := got[2]
 	for _, want := range []string{
-		"mkdir -p '/session/workspace' '/session/runtime/claude' '/session/runtime/codex' '/session/runtime/cocola' '/session/home/local'",
+		"mkdir -p '/session/workspace' '/session/runtime/claude' '/session/runtime/codex' '/session/runtime/cocola' '/session/runtime/browser' '/session/home/local'",
 		"chown 'cocola':'cocola'",
 		"ln -s '/session/workspace' '/workspace'",
 		"ln -s '/session/runtime/claude' '/home/cocola/.claude'",
 		"ln -s '/session/runtime/codex' '/home/cocola/.codex'",
 		"ln -s '/session/runtime/cocola' '/home/cocola/.cocola'",
 		"ln -s '/session/home/local' '/home/cocola/.local'",
-		"&& cd '/workspace'",
-		"'/opt/cocola/code-server-launch.sh' &",
-		"&& exec sleep infinity",
+		"&& cd '/'",
+		"&& exec '/opt/cocola/runtime-entrypoint.sh'",
 	} {
 		if !strings.Contains(script, want) {
 			t.Errorf("chown script missing %q\nscript: %s", want, script)
 		}
 	}
-	if strings.Contains(script, "; exec sleep infinity") {
+	if strings.Contains(script, "code-server-launch.sh") || strings.Contains(script, "sleep infinity") {
 		t.Fatalf("entrypoint must not hide initialization failures: %s", script)
 	}
 }

@@ -21,7 +21,10 @@ set -uo pipefail
 
 CODE_SERVER_PORT="${COCOLA_CODE_SERVER_PORT:-39378}"
 CODE_SERVER_BIN="${COCOLA_CODE_SERVER_BIN:-/usr/local/bin/code-server}"
-CODE_SERVER_USER="${COCOLA_CODE_SERVER_USER:-cocola}"
+# Supervisor executes this root-owned launcher as root, so the privilege-drop
+# target must not be caller-configurable. The binary and workspace arguments
+# are evaluated only after runuser has switched to this fixed guest identity.
+CODE_SERVER_USER="cocola"
 CODE_SERVER_DIR="${COCOLA_CODE_SERVER_DIR:-/workspace}"
 CODE_SERVER_TRUSTED_ORIGINS="${COCOLA_CODE_SERVER_TRUSTED_ORIGINS:-}"
 
@@ -35,9 +38,10 @@ fi
 
 if [ ! -x "$CODE_SERVER_BIN" ]; then
   # Pre-baked at build time; a missing binary means a broken image, but we must
-  # not take the whole container down -- exec/agent workloads still work.
+  # not take the whole container down -- supervisor records this optional
+  # service as failed while exec/agent workloads remain available.
   log "WARNING: $CODE_SERVER_BIN not found or not executable; editor unavailable" >&2
-  exit 0
+  exit 127
 fi
 
 # sandbox-manager derives this host-only list from COCOLA_PUBLIC_ORIGINS and
@@ -64,25 +68,14 @@ fi
 
 # runuser drops to the brain user with a login-like env (HOME=/home/cocola), so
 # code-server's user-data/extensions default under the writable brain home.
-start_one() {
-  runuser -u "$CODE_SERVER_USER" -- \
-    env HOME="/home/${CODE_SERVER_USER}" \
-    "$CODE_SERVER_BIN" \
-    --bind-addr "0.0.0.0:${CODE_SERVER_PORT}" \
-    --auth none \
-    --disable-telemetry \
-    --disable-update-check \
-    --disable-workspace-trust \
-    "${trusted_origin_args[@]}" \
-    "$CODE_SERVER_DIR"
-}
-
-# Resident supervision: code-server is meant to stay up for the session's life,
-# so a crash is retried with a short backoff rather than left dead. The loop is
-# backgrounded by the caller (firewall-entrypoint.sh) so the container's
-# keep-alive wait is never blocked.
 log "starting resident code-server on 0.0.0.0:${CODE_SERVER_PORT} as ${CODE_SERVER_USER} (root=${CODE_SERVER_DIR})"
-while true; do
-  start_one || log "code-server exited ($?); restarting in 2s" >&2
-  sleep 2
-done
+exec runuser -u "$CODE_SERVER_USER" -- \
+  env HOME="/home/${CODE_SERVER_USER}" \
+  "$CODE_SERVER_BIN" \
+  --bind-addr "0.0.0.0:${CODE_SERVER_PORT}" \
+  --auth none \
+  --disable-telemetry \
+  --disable-update-check \
+  --disable-workspace-trust \
+  "${trusted_origin_args[@]}" \
+  "$CODE_SERVER_DIR"

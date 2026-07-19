@@ -1,0 +1,68 @@
+{
+  "schema_version": 1,
+  "runtime": "cocola-sandbox-runtime",
+  "workspace": {
+    "root": "/workspace",
+    "outputs": "/workspace/outputs",
+    "downloads": "/workspace/downloads",
+    "session": "/session",
+    "runtime_state": "/session/runtime",
+    "cache": "/cache"
+  },
+  "profiles": {
+    "coding": {
+      "default_resources": {
+        "cpu": "1000m",
+        "memory": "2048Mi"
+      },
+      "services": {
+        "code-server": {
+          "enabled": true,
+          "startup": "resident"
+        }
+      },
+      "capabilities": {
+        "browser": {
+          "enabled": true,
+          "startup": "on-demand"
+        }
+      }
+    },
+    "minimal": {
+      "default_resources": {
+        "cpu": "500m",
+        "memory": "512Mi"
+      },
+      "services": {
+        "code-server": {
+          "enabled": false,
+          "startup": "disabled"
+        }
+      },
+      "capabilities": {
+        "browser": {
+          "enabled": false,
+          "startup": "disabled"
+        }
+      }
+    }
+  },
+  "services": {
+    "code-server": {
+      "supervisor_program": "code-server",
+      "kind": "http",
+      "port": 39378,
+      "required": false
+    }
+  },
+  "capabilities": {
+    "browser": {
+      "kind": "on-demand",
+      "runner": "/opt/cocola/browser-runner.js",
+      "state_dir": "/session/runtime/browser/profile",
+      "output_dir": "/workspace/outputs/browser",
+      "required": false,
+      "commands": ["inspect", "screenshot", "pdf"]
+    }
+  }
+}

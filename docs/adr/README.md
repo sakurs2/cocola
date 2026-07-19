@@ -46,3 +46,5 @@ Code shows _what_ and _how_. ADRs preserve _why_ — invaluable when:
 | 0021 | Standalone CLI and release-asset bootstrap installer                                                  | Accepted           |
 | 0022 | Built-in Agent Runtime registry and immutable conversation runtime                                    | Accepted           |
 | 0023 | Node-local Session storage with sticky scheduling and explicit reset                                  | Accepted           |
+| 0024 | Versioned Sandbox Runtime contract and operator profiles                                              | Accepted           |
+| 0025 | On-demand headless Browser capability and built-in Agent Skill                                        | Accepted           |

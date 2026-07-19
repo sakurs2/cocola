@@ -40,13 +40,17 @@ MODEL="${MODEL:-cocola-default}"
 # Per-test scratch dir that stands in for the session workspace volume.
 WORK="$(mktemp -d)"
 SESS_VOL="$WORK/session"   # session root; subdirs emulate session volume subPaths
-mkdir -p "$SESS_VOL/workspace" "$SESS_VOL/claude" "$SESS_VOL/codex"
+mkdir -p "$SESS_VOL/workspace" "$SESS_VOL/claude" "$SESS_VOL/codex" "$SESS_VOL/browser"
 
 CTR="cocola-verify-$$"
 PASS=0; FAIL=0
 ok()   { echo "  PASS: $*"; PASS=$((PASS+1)); }
 bad()  { echo "  FAIL: $*"; FAIL=$((FAIL+1)); }
 note() { echo "==> $*"; }
+
+python_string_constant() {
+  python3 -c 'import ast, pathlib, sys; tree = ast.parse(pathlib.Path(sys.argv[1]).read_text(encoding="utf-8")); print(next(node.value.value for node in tree.body if isinstance(node, ast.Assign) and any(isinstance(target, ast.Name) and target.id == sys.argv[2] for target in node.targets) and isinstance(node.value, ast.Constant) and isinstance(node.value.value, str)), end="")' "$1" "$2"
+}
 
 cleanup() {
   docker rm -f "$CTR" >/dev/null 2>&1 || true
@@ -62,6 +66,7 @@ run_args=(
   -v "$SESS_VOL/workspace:/workspace"
   -v "$SESS_VOL/claude:/home/cocola/.claude"
   -v "$SESS_VOL/codex:/home/cocola/.codex"
+  -v "$SESS_VOL/browser:/session/runtime/browser"
   -e "CLAUDE_CONFIG_DIR=/home/cocola/.claude"
   -e "ANTHROPIC_CONFIG_DIR=/home/cocola/.claude"
   -e "CODEX_HOME=/home/cocola/.codex"
@@ -109,6 +114,81 @@ for tool in pnpm yarn playwright chromium fd jq yq tree file make imagemagick pd
   fi
 done
 
+RUNTIME_INFO="$(docker exec -i "$CTR" cocola-sandbox info --json || true)"
+echo "$RUNTIME_INFO"
+echo "$RUNTIME_INFO" | grep -q '"schema_version": 1' \
+  && ok "versioned runtime manifest is readable through cocola-sandbox" \
+  || bad "cocola-sandbox runtime manifest probe failed"
+echo "$RUNTIME_INFO" | grep -q '"profile": "coding"' \
+  && ok "coding runtime profile is active by default" \
+  || bad "unexpected default runtime profile"
+
+BUILTIN_SKILL_OWNER="$(docker exec -i "$CTR" stat -c '%U:%G' \
+  /opt/cocola/skills/cocola-sandbox-browser/SKILL.md 2>/dev/null || true)"
+docker exec -i "$CTR" test -f /opt/cocola/skills/manifest.json \
+  && docker exec -i "$CTR" test -s /opt/cocola/skills/cocola-sandbox-browser/SKILL.md \
+  && ok "built-in Sandbox Browser Skill is baked into the runtime" \
+  || bad "built-in Sandbox Browser Skill is missing"
+[ "$BUILTIN_SKILL_OWNER" = "root:root" ] \
+  && ok "built-in Skill remains a root-owned runtime asset" \
+  || bad "built-in Skill owner is ${BUILTIN_SKILL_OWNER:-unknown} (must be root:root)"
+
+WORKSPACE_INFO="$(docker exec -i "$CTR" cocola-sandbox workspace info --json || true)"
+echo "$WORKSPACE_INFO" | grep -q '"outputs".*"exists": true' \
+  && ok "workspace outputs contract is prepared" \
+  || bad "workspace outputs contract missing"
+
+CODE_SERVER_READY=0
+for _ in {1..10}; do
+  SERVICE_INFO="$(docker exec -i "$CTR" cocola-sandbox service status --json || true)"
+  if echo "$SERVICE_INFO" | grep -q '"state": "ready"'; then
+    CODE_SERVER_READY=1
+    break
+  fi
+  sleep 1
+done
+[ "$CODE_SERVER_READY" = "1" ] \
+  && ok "supervisor reports resident code-server ready" \
+  || bad "resident code-server did not become ready: ${SERVICE_INFO:-no status}"
+
+# ---- 2b. on-demand Browser capability (local HTTP only; no external network) -
+note "browser: one-shot inspect, screenshot, and PDF without a resident port"
+docker exec -i "$CTR" sh -c \
+  'printf "%s" "<!doctype html><title>Cocola Browser Probe</title><main>COCOLA_BROWSER_OK <span id=state></span></main><a href=\"/next\">Next</a><script>const key=\"cocola-browser-probe\";document.getElementById(\"state\").textContent=localStorage.getItem(key)||\"COCOLA_BROWSER_FIRST\";localStorage.setItem(key,\"COCOLA_BROWSER_PERSISTED\")</script>" > /workspace/browser-probe.html'
+docker exec -d -u cocola "$CTR" \
+  python3 -m http.server 39400 --bind 127.0.0.1 --directory /workspace
+for _ in {1..10}; do
+  if docker exec -u cocola "$CTR" curl -fsS http://127.0.0.1:39400/browser-probe.html >/dev/null 2>&1; then
+    break
+  fi
+  sleep 1
+done
+
+BROWSER_STATUS="$(docker exec -u cocola "$CTR" cocola-sandbox browser status --json || true)"
+echo "$BROWSER_STATUS" | grep -q '"state": "ready"' \
+  && ok "coding profile exposes the on-demand Browser capability" \
+  || bad "Browser capability is not ready: $BROWSER_STATUS"
+
+BROWSER_INSPECT="$(docker exec -u cocola "$CTR" cocola-sandbox browser inspect \
+  http://127.0.0.1:39400/browser-probe.html --json || true)"
+echo "$BROWSER_INSPECT" | grep -q 'COCOLA_BROWSER_OK' \
+  && ok "Browser inspect returns rendered page text" \
+  || bad "Browser inspect failed: $BROWSER_INSPECT"
+
+BROWSER_SCREENSHOT="$(docker exec -u cocola "$CTR" cocola-sandbox browser screenshot \
+  http://127.0.0.1:39400/browser-probe.html --output verify.png --json || true)"
+echo "$BROWSER_SCREENSHOT" | grep -q '"mime_type": "image/png"' \
+  && docker exec -u cocola "$CTR" test -s /workspace/outputs/browser/verify.png \
+  && ok "Browser screenshot writes a non-empty Workspace PNG" \
+  || bad "Browser screenshot failed: $BROWSER_SCREENSHOT"
+
+BROWSER_PDF="$(docker exec -u cocola "$CTR" cocola-sandbox browser pdf \
+  http://127.0.0.1:39400/browser-probe.html --output verify.pdf --json || true)"
+echo "$BROWSER_PDF" | grep -q '"mime_type": "application/pdf"' \
+  && docker exec -u cocola "$CTR" test -s /workspace/outputs/browser/verify.pdf \
+  && ok "Browser PDF writes a non-empty Workspace document" \
+  || bad "Browser PDF failed: $BROWSER_PDF"
+
 # ---- 3. real query: egress + native bash/file IO -------------------------
 if [ -n "${ANTHROPIC_BASE_URL:-}" ] && [ -n "${ANTHROPIC_AUTH_TOKEN:-}" ]; then
   note "live turn: reach the gateway AND run native bash/file IO in-sandbox"
@@ -145,12 +225,53 @@ docker exec -i "$CTR" bash -lc 'echo cocola-persist-marker > /home/cocola/.codex
 docker rm -f "$CTR" >/dev/null
 ls "$SESS_VOL/claude/persist_probe.txt" >/dev/null 2>&1 && ok "session storage retained .claude file on host after destroy" || bad "session storage lost .claude data"
 ls "$SESS_VOL/codex/persist_probe.txt" >/dev/null 2>&1 && ok "session storage retained .codex file on host after destroy" || bad "session storage lost .codex data"
+find "$SESS_VOL/browser/profile" -mindepth 1 -print -quit 2>/dev/null | grep -q . \
+  && ok "session storage retained Browser profile on host after destroy" \
+  || bad "session storage lost Browser profile data"
 
 start_ctr
 docker exec -i "$CTR" cat /home/cocola/.claude/persist_probe.txt 2>/dev/null | grep -q cocola-persist-marker \
   && ok "re-created container re-mounts the same /home/cocola/.claude" || bad "remount did not restore /home/cocola/.claude"
 docker exec -i "$CTR" cat /home/cocola/.codex/persist_probe.txt 2>/dev/null | grep -q cocola-persist-marker \
   && ok "re-created container re-mounts the same /home/cocola/.codex" || bad "remount did not restore /home/cocola/.codex"
+docker exec -d -u cocola "$CTR" \
+  python3 -m http.server 39400 --bind 127.0.0.1 --directory /workspace
+for _ in {1..10}; do
+  if docker exec -u cocola "$CTR" curl -fsS http://127.0.0.1:39400/browser-probe.html >/dev/null 2>&1; then
+    break
+  fi
+  sleep 1
+done
+BROWSER_RESTORED="$(docker exec -u cocola "$CTR" cocola-sandbox browser inspect \
+  http://127.0.0.1:39400/browser-probe.html --json || true)"
+echo "$BROWSER_RESTORED" | grep -q 'COCOLA_BROWSER_PERSISTED' \
+  && ok "re-created container restores Browser local state" \
+  || bad "Browser profile state was not restored: $BROWSER_RESTORED"
+
+# Exercise the exact Agent Runtime scripts against the built image. An empty
+# Admin/Personal catalog must still reconcile the image-baked platform Skill
+# into the shared Claude/Codex Session Skill Set.
+note "skills: reconcile image-baked platform Skill into both Agent runtimes"
+SKILL_RECONCILER="$ROOT/apps/agent-runtime/cocola_agent_runtime/skill_reconciler.py"
+SKILLS_INSPECT_SCRIPT="$(python_string_constant "$SKILL_RECONCILER" SKILLS_INSPECT_SCRIPT)"
+SKILLS_RECONCILE_SCRIPT="$(python_string_constant "$SKILL_RECONCILER" SKILLS_RECONCILE_SCRIPT)"
+SKILL_DIGEST="runtime-verify-empty-catalog"
+SKILL_ARCHIVE="/tmp/cocola-runtime-verify-skills.zip"
+SKILL_AVAILABLE="$(docker exec -i -u cocola "$CTR" python3 -c "$SKILLS_INSPECT_SCRIPT" || true)"
+echo "$SKILL_AVAILABLE" | grep -q '"id":"cocola-sandbox-browser"' \
+  && ok "Agent Runtime discovers the image platform Skill manifest" \
+  || bad "Agent Runtime did not discover the platform Skill: $SKILL_AVAILABLE"
+docker exec -i -u cocola "$CTR" python3 -c \
+  'import json, sys, zipfile; archive = zipfile.ZipFile(sys.argv[1], "w"); archive.writestr("manifest.json", json.dumps({"format": "session-bundle-v2", "digest": sys.argv[2], "skills": []})); archive.close()' \
+  "$SKILL_ARCHIVE" "$SKILL_DIGEST"
+docker exec -i -u cocola "$CTR" python3 -c "$SKILLS_RECONCILE_SCRIPT" \
+  "$SKILL_ARCHIVE" "$SKILL_DIGEST"
+docker exec -i -u cocola "$CTR" test -s \
+  /home/cocola/.claude/skills/cocola-sandbox-browser/SKILL.md \
+  && docker exec -i -u cocola "$CTR" test -s \
+    /home/cocola/.agents/skills/cocola-sandbox-browser/SKILL.md \
+  && ok "empty catalog still loads the built-in Skill for Claude and Codex" \
+  || bad "built-in Skill was not loaded into both Agent runtime directories"
 
 # resume only if we got a session id from step 3
 if [ -n "$SESSION_ID" ]; then
@@ -159,6 +280,33 @@ if [ -n "$SESSION_ID" ]; then
   OUT2="$(printf '%s' "$REQ2" | docker exec -i "$CTR" /opt/cocola/shim/entrypoint.sh || true)"
   echo "$OUT2" | tail -10
   echo "$OUT2" | grep -qi 'proof.txt' && ok "--resume restored prior session context" || bad "resume lost prior context"
+fi
+
+# A resident editor crash after RUNNING must remain visible as EXITED. Initial
+# startup retries are bounded separately by supervisor's startretries=3.
+note "lifecycle: a running Code Server crash does not enter an unbounded restart loop"
+CODE_SERVER_RUNNING=0
+for _ in {1..10}; do
+  CODE_SERVER_BEFORE_CRASH="$(docker exec -i "$CTR" supervisorctl \
+    -c /opt/cocola/supervisord.conf status code-server 2>/dev/null || true)"
+  if echo "$CODE_SERVER_BEFORE_CRASH" | grep -q 'RUNNING'; then
+    CODE_SERVER_RUNNING=1
+    break
+  fi
+  sleep 1
+done
+CODE_SERVER_PID="$(docker exec -i "$CTR" supervisorctl -c /opt/cocola/supervisord.conf \
+  pid code-server 2>/dev/null || true)"
+if [ "$CODE_SERVER_RUNNING" = "1" ] && [[ "$CODE_SERVER_PID" =~ ^[1-9][0-9]*$ ]]; then
+  docker exec -i "$CTR" kill -KILL "$CODE_SERVER_PID"
+  sleep 3
+  CODE_SERVER_AFTER_CRASH="$(docker exec -i "$CTR" supervisorctl \
+    -c /opt/cocola/supervisord.conf status code-server 2>/dev/null || true)"
+  echo "$CODE_SERVER_AFTER_CRASH" | grep -q 'EXITED' \
+    && ok "Code Server remains EXITED after an unexpected running-state crash" \
+    || bad "Code Server restarted after crash: $CODE_SERVER_AFTER_CRASH"
+else
+  bad "could not resolve RUNNING Code Server pid: ${CODE_SERVER_PID:-empty}; status=${CODE_SERVER_BEFORE_CRASH:-empty}"
 fi
 
 # ---- summary -------------------------------------------------------------

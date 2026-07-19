@@ -287,6 +287,7 @@ func renderEnvironment(paths Paths, o Options, s secrets, password string) strin
 		{"COCOLA_MODEL_SECRET_KEY", s.model}, {"COCOLA_CONFIG_SECRET_KEY", s.config},
 		{"COCOLA_PG_PASSWORD", s.postgres}, {"COCOLA_MINIO_ROOT_PASSWORD", s.minio},
 		{"COCOLA_SESSION_VOLUME_SIZE", o.SessionVolumeSize},
+		{"COCOLA_SANDBOX_PROFILE", "coding"},
 		{"COCOLA_AGENT_MAX_TURNS", defaultAgentMaxTurns},
 		{"COCOLA_AGENT_TOOL_STEP_TIMEOUT_SECS", defaultToolStepTimeoutSecs},
 		{"COCOLA_LLM_TIMEOUT_SECS", defaultLLMTimeoutSecs},

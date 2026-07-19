@@ -12,8 +12,9 @@ The image is built **`FROM opensandbox/code-interpreter`** -- OpenSandbox's
 official multi-language runtime (Node 22 + uv + Python already inside), which
 is also cocola's sandbox backend (see `docs/adr/0014-...`). cocola reuses it
 and layers only the pieces it lacks: Claude Code CLI, `claude-agent-sdk` venv,
-the stdio shim, the egress-firewall toolchain, and common browser/document
-tools. This honours cocola's "prefer upstream over reinventing" rule while
+the stdio shim, the versioned Cocola Runtime contract, the egress-firewall
+toolchain, and common browser/document tools. This honours cocola's "prefer
+upstream over reinventing" rule while
 keeping the CLI **build-time baked** (ADR-0009 sec.3): nothing is installed on
 container start. Override the base with `--build-arg OPENSANDBOX_BASE=...` for a
 pinned/offline mirror.
@@ -24,7 +25,13 @@ pinned/offline mirror.
 deploy/sandbox-runtime/
   Dockerfile               # FROM opensandbox/code-interpreter + Claude Code CLI + SDK venv + shim
   init-firewall.sh         # iptables+ipset egress allowlist (ADR-0009)
-  firewall-entrypoint.sh   # runs the firewall as root, then keep-alives
+  runtime-entrypoint.sh    # canonical lifecycle entrypoint for every provider
+  runtime-manifest.json    # versioned workspace/profile/service contract
+  supervisord.conf         # resident optional-service lifecycle
+  cocola_sandbox.py        # guest CLI: info, service status, workspace info
+  browser-runner.js        # one-shot persistent-context Playwright runner
+  firewall-entrypoint.sh   # compatibility wrapper for the old entrypoint path
+  code-server-launch.sh    # one-shot non-root Code Server launcher
   offline/                 # optional: vendored `npm pack` tgz for offline builds
   shim/
     agent_shim.py          # stdio shim: one JSON request -> NDJSON event stream
@@ -38,7 +45,7 @@ The sandbox can optionally lock outbound network access down to a
 Anthropic's Claude Code devcontainer `init-firewall.sh`). Public access is open
 by default; setting `COCOLA_SANDBOX_EGRESS_ALLOWLIST` opts into this policy:
 
-- The container's **main process runs as root** so `firewall-entrypoint.sh` can
+- The container's **main process runs as root** so `runtime-entrypoint.sh` can
   install the rules (needs `NET_ADMIN`) _before_ any `exec` lands. User/agent
   code never runs as that main process -- it arrives via `docker exec` /
   `kubectl exec`, which sandbox-manager pins to the non-root `cocola` user
@@ -52,10 +59,80 @@ by default; setting `COCOLA_SANDBOX_EGRESS_ALLOWLIST` opts into this policy:
   policy (it passes `CAP_NET_ADMIN` + the env). The legacy alpine demo image,
   with no policy, stays on the plain keep-alive command.
 
-## How the control plane drives it (STDIO, never a port)
+## Runtime contract and profiles
 
-A sandbox must **never bind a network port** (cocola hard rule). The
-control-plane router invokes the shim over stdio:
+Both the image `CMD` and OpenSandbox's custom create entrypoint converge on
+`/opt/cocola/runtime-entrypoint.sh`. Provider-specific code only prepares the
+Session Volume links; the shared entrypoint validates the selected profile,
+creates the workspace contract, installs the firewall, and starts
+`supervisord`. Supervisor owns Code Server restart/failure state, so optional
+service failure does not take down Agent Exec.
+
+Profiles are operator-level policy injected by Sandbox Manager:
+
+| Profile   | Default resources  | Code Server | Browser   |
+| --------- | ------------------ | ----------- | --------- |
+| `coding`  | `1000m` / `2048Mi` | enabled     | on-demand |
+| `minimal` | `500m` / `512Mi`   | disabled    | disabled  |
+
+Explicit Sandbox resources override the profile. Operators may override the
+defaults with `COCOLA_OPENSANDBOX_DEFAULT_CPU/MEMORY`,
+`COCOLA_CODE_SERVER_ENABLED`, and `COCOLA_BROWSER_ENABLED`; Agent requests
+cannot overwrite these keys.
+
+Inside a sandbox, the stable guest CLI exposes the effective contract without
+requiring access to the OpenSandbox control plane:
+
+```bash
+cocola-sandbox info
+cocola-sandbox info --json
+cocola-sandbox service status --json
+cocola-sandbox workspace info --json
+cocola-sandbox browser status --json
+cocola-sandbox browser inspect https://example.com --json
+cocola-sandbox browser screenshot https://example.com --output page.png --json
+cocola-sandbox browser screenshot https://example.com --full-page --json
+cocola-sandbox browser pdf https://example.com --output page.pdf --json
+```
+
+## On-demand headless Browser
+
+Browser commands launch one Playwright persistent context for the duration of
+the command and close Chromium before returning. No Browser daemon, CDP port,
+visual desktop, or host port is created. Cookie and LocalStorage state lives in
+`/session/runtime/browser/profile`, so it survives Sandbox compute reclamation;
+screenshots and PDFs default to `/workspace/outputs/browser`.
+
+Only `http://` and `https://` navigation is accepted. Browser output paths are
+resolved beneath `/workspace`, Chromium runs as the fixed non-root `cocola`
+identity, and Sandbox egress policy remains the network authority. An Agent may
+serve local HTML on a temporary loopback HTTP port for inspection, but Cocola's
+automatic Artifact publication/preview UI belongs to a later phase.
+
+### Built-in Agent Skill
+
+The image ships the versioned, root-owned `cocola-sandbox-browser` Skill under
+`/opt/cocola/skills`. It teaches the Agent when and how to use the stable guest
+CLI; the Skill does not add a second Browser implementation.
+
+At the beginning of a Run, Agent Runtime inspects the image's platform Skill
+manifest and atomically reconciles platform Skills with the effective Admin and
+Personal Skill catalog in the Session Volume. The same snapshot is exposed at
+`/home/cocola/.claude/skills` and `/home/cocola/.agents/skills`. Platform Skill
+IDs are reserved and cannot be shadowed by catalog entries. Because the image
+reports its actual inventory, a rolling rollout tolerates old images with no
+platform Skills and automatically rebuilds the snapshot when a new image or
+built-in Skill version appears.
+
+Phase 2 intentionally does not add Jupyter, a visual desktop, per-Sandbox
+observe endpoints, HTML publication, or a Sandbox MCP server.
+
+## How the control plane drives the Agent
+
+Agent execution does not expose a server: the control-plane router invokes the
+shim over stdio. The optional Code Server binds only its in-container port and
+is reachable through Cocola's authenticated OpenSandbox server-proxy; it is
+never published as a host port.
 
 ```
 # local Docker (M1 / runc)
@@ -110,19 +187,26 @@ const browser = await chromium.launch({
 The provider mounts one per-session volume at `/session`. Startup creates the
 following layout and links the runtime paths into it:
 
-| Volume directory          | Runtime path           | Content                            |
-| ------------------------- | ---------------------- | ---------------------------------- |
-| `/session/workspace`      | `/workspace`           | project, dependencies and output   |
-| `/session/runtime/claude` | `/home/cocola/.claude` | Claude session state               |
-| `/session/runtime/codex`  | `/home/cocola/.codex`  | Codex session state                |
-| `/session/runtime/cocola` | `/home/cocola/.cocola` | Skills and future browser/IDE data |
-| `/session/home/local`     | `/home/cocola/.local`  | user-installed tools               |
+| Volume directory           | Runtime path           | Content                          |
+| -------------------------- | ---------------------- | -------------------------------- |
+| `/session/workspace`       | `/workspace`           | project, dependencies and output |
+| `/session/runtime/claude`  | `/home/cocola/.claude` | Claude session state             |
+| `/session/runtime/codex`   | `/home/cocola/.codex`  | Codex session state              |
+| `/session/runtime/cocola`  | `/home/cocola/.cocola` | Cocola Skills and runtime state  |
+| `/session/runtime/browser` | internal               | persistent Browser profile/state |
+| `/session/home/local`      | `/home/cocola/.local`  | user-installed tools             |
 
 `/cache` remains ephemeral so package downloads do not consume the default
-`2Gi` local-path PVC request. Shared and Personal Skill bundles are reconciled
-into the Session Volume's unified Skill Set; `/data/plugins` is not required for
-Session recovery. Secrets, rootfs files and the rest of `$HOME` are never copied
-into the Session Volume.
+`2Gi` local-path PVC request. Root-owned platform Skills plus Shared and Personal
+Skill bundles are reconciled into the Session Volume's unified Skill Set;
+`/data/plugins` is not required for Session recovery. Platform entries remain
+links to immutable image assets. Secrets, other rootfs files and the rest of
+`$HOME` are never copied into the Session Volume.
+
+Every start also guarantees `/workspace/outputs`,
+`/workspace/outputs/browser`, and `/workspace/downloads`. These paths are part
+of the manifest contract and survive Sandbox compute reclamation with the
+workspace.
 
 Destroying a sandbox preserves the volume. A later run is scheduled back to
 the volume's node and mounts the same claim; no MinIO checkpoint is involved.

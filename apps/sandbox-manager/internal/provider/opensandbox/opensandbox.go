@@ -114,24 +114,25 @@ const (
 	// guestDaemonCWD is the immutable cwd inherited by OpenSandbox bootstrap and
 	// execd. It must never be a path sessionEntrypoint replaces with a symlink.
 	guestDaemonCWD = "/"
-	// guestCodeServerLaunch backgrounds the resident code-server. It matches
-	// deploy/sandbox-runtime/code-server-launch.sh in the brain image.
-	guestCodeServerLaunch = "/opt/cocola/code-server-launch.sh"
+	// guestRuntimeEntrypoint is the single image lifecycle entrypoint shared by
+	// direct Docker and OpenSandbox after provider-specific volume preparation.
+	guestRuntimeEntrypoint = "/opt/cocola/runtime-entrypoint.sh"
 	// guestClaudeConfig is the hidden session-local Claude Code config root.
 	guestClaudeConfig = "/home/cocola/.claude"
 	// guestCodexConfig is the hidden session-local Codex config and session root.
 	guestCodexConfig  = "/home/cocola/.codex"
 	volumeBackendPVC  = "pvc"
 	volumeBackendHost = "host"
-	// defaultCPU / defaultMemory are applied when a SandboxSpec carries no
-	// Resources. OpenSandbox rejects a non-pooled create without resourceLimits
-	// ("resourceLimits is required when poolRef is not provided"), and the
-	// on-demand allocation path (binder -> Create, ADR-0015) sets no Resources,
-	// so the provider must supply a sane floor itself. Override via
+	// Profile resource defaults are applied when a SandboxSpec carries no
+	// Resources. OpenSandbox rejects a non-pooled create without resourceLimits.
+	// The coding profile is the operator default; minimal keeps the old floor.
+	// Override either profile via
 	// COCOLA_OPENSANDBOX_DEFAULT_CPU / _DEFAULT_MEMORY (raw resourceLimits
 	// strings, e.g. "500m" / "512Mi").
-	defaultCPU    = "500m"
-	defaultMemory = "512Mi"
+	defaultCodingCPU     = "1000m"
+	defaultCodingMemory  = "2048Mi"
+	defaultMinimalCPU    = "500m"
+	defaultMinimalMemory = "512Mi"
 	// sandboxExecUser is the non-root user every Exec runs as, matching the
 	// brain image's Dockerfile (useradd -u 10001 cocola). execd runs the
 	// /command body as root by default; the claude CLI refuses
@@ -142,6 +143,11 @@ const (
 	// codeServerTrustedOriginsEnv is owned by the platform. Agent/runtime callers
 	// must not override the browser origins trusted by the resident editor.
 	codeServerTrustedOriginsEnv = "COCOLA_CODE_SERVER_TRUSTED_ORIGINS"
+	sandboxProfileEnv           = "COCOLA_SANDBOX_PROFILE"
+	codeServerEnabledEnv        = "COCOLA_CODE_SERVER_ENABLED"
+	browserEnabledEnv           = "COCOLA_BROWSER_ENABLED"
+	profileCoding               = "coding"
+	profileMinimal              = "minimal"
 )
 
 // Provider is an OpenSandbox-backed SandboxProvider. It holds no sandbox state
@@ -186,6 +192,12 @@ type Provider struct {
 	// injected into the sandbox for code-server's native Origin check.
 	publicOrigins            string
 	codeServerTrustedOrigins string
+
+	// Runtime policy is operator-owned. Empty capability overrides delegate to
+	// the selected profile's manifest defaults.
+	profile           string
+	codeServerEnabled string
+	browserEnabled    string
 }
 
 // Option configures the Provider.
@@ -272,6 +284,7 @@ func New(opts ...Option) (*Provider, error) {
 		volumeBackend: volumeBackendFromEnv(),
 		root:          root,
 		publicOrigins: os.Getenv("COCOLA_PUBLIC_ORIGINS"),
+		profile:       strings.TrimSpace(strings.ToLower(os.Getenv(sandboxProfileEnv))),
 	}
 	for _, o := range opts {
 		o(p)
@@ -279,6 +292,22 @@ func New(opts ...Option) (*Provider, error) {
 	if p.baseURL == "" {
 		return nil, fmt.Errorf("opensandbox: base URL not set (COCOLA_OPENSANDBOX_URL or WithBaseURL)")
 	}
+	if p.profile == "" {
+		p.profile = profileCoding
+	}
+	if p.profile != profileCoding && p.profile != profileMinimal {
+		return nil, fmt.Errorf("opensandbox: unsupported %s %q (want coding or minimal)", sandboxProfileEnv, p.profile)
+	}
+	codeServerEnabled, err := normalizedOptionalBoolEnv(codeServerEnabledEnv)
+	if err != nil {
+		return nil, fmt.Errorf("opensandbox: %w", err)
+	}
+	p.codeServerEnabled = codeServerEnabled
+	browserEnabled, err := normalizedOptionalBoolEnv(browserEnabledEnv)
+	if err != nil {
+		return nil, fmt.Errorf("opensandbox: %w", err)
+	}
+	p.browserEnabled = browserEnabled
 	switch p.volumeBackend {
 	case "", volumeBackendPVC:
 		p.volumeBackend = volumeBackendPVC
@@ -420,8 +449,9 @@ func (p *Provider) Create(ctx context.Context, spec provider.SandboxSpec) (*prov
 	if spec.Image != "" {
 		req.Image = &imageSpec{URI: spec.Image}
 		// OpenSandbox requires a non-empty entrypoint whenever an image is given.
-		// cocola sandboxes are long-lived (create once, then Exec into them), so the
-		// entry process is a no-op idle-blocker and real work is driven via Exec.
+		// cocola sandboxes are long-lived (create once, then Exec into them). The
+		// entry process prepares session links and enters the image's canonical
+		// lifecycle manager; real agent work is still driven via Exec.
 		//
 		// The entry process runs as root (the brain image has no USER directive), so
 		// we use it for a ONE-TIME chown of the freshly-provisioned, root-owned PVCs
@@ -434,7 +464,7 @@ func (p *Provider) Create(ctx context.Context, spec provider.SandboxSpec) (*prov
 		// API exposes no fsGroup/securityContext, so the entrypoint is the only seam.
 		req.Entrypoint = sessionEntrypoint(p.execUser)
 	}
-	if rl := mapResources(spec.Resources); len(rl) > 0 {
+	if rl := mapResources(spec.Resources, p.profile); len(rl) > 0 {
 		req.ResourceLimits = rl
 	}
 	// Volume mapping: one per-session root. The entrypoint creates the stable
@@ -1020,6 +1050,7 @@ func sessionEntrypoint(execUser string) []string {
 		guestSession + "/runtime/claude",
 		guestSession + "/runtime/codex",
 		guestSession + "/runtime/cocola",
+		guestSession + "/runtime/browser",
 		guestSession + "/home/local",
 	}
 	script := "mkdir -p " + shellJoin(dirs)
@@ -1032,22 +1063,13 @@ func sessionEntrypoint(execUser string) []string {
 	script += symlinkCommand(guestCodexConfig, guestSession+"/runtime/codex")
 	script += symlinkCommand("/home/cocola/.cocola", guestSession+"/runtime/cocola")
 	script += symlinkCommand("/home/cocola/.local", guestSession+"/home/local")
-	// The image and OpenSandbox infrastructure stay in guestDaemonCWD so replacing
-	// /workspace cannot invalidate execd's cwd. Re-enter the freshly prepared
-	// workspace only for Cocola's session process and resident code-server.
-	script += " && cd " + shellQuote(guestWorkspace)
 	// A Running sandbox must imply that every persistent path is ready. Keeping
 	// the final exec in the && chain prevents a mount/link failure from silently
 	// falling back to directories in the ephemeral image rootfs.
-	// Launch the resident code-server before blocking on sleep. OpenSandbox
-	// replaces the image CMD with this entrypoint, so the image's
-	// firewall-entrypoint.sh (which normally backgrounds code-server) never
-	// runs; without this the in-container editor port is never bound. The
-	// launch is guarded and self-backgrounding so it cannot break the &&
-	// chain that guards the persistent-path setup above.
-	script += " && { if [ -x " + shellQuote(guestCodeServerLaunch) +
-		" ]; then " + shellQuote(guestCodeServerLaunch) + " & fi; }"
-	script += " && exec sleep infinity"
+	// Keep the infrastructure process cwd at guestDaemonCWD. The runtime
+	// entrypoint owns service lifecycle and creates the workspace sub-contract.
+	script += " && cd " + shellQuote(guestDaemonCWD)
+	script += " && exec " + shellQuote(guestRuntimeEntrypoint)
 	return []string{"/bin/sh", "-c", script}
 }
 
@@ -1168,16 +1190,28 @@ func normalizedOriginHost(parsed *neturl.URL) string {
 	return hostname
 }
 
-// sandboxEnv copies caller-provided environment and then enforces the resident
-// editor's trusted origins as a platform-owned value. Deleting the key even
-// when no public origins are configured prevents a caller from smuggling "*"
-// into an otherwise fail-closed deployment.
+// sandboxEnv copies caller-provided environment and then enforces runtime
+// profile and resident-editor settings as platform-owned values.
 func (p *Provider) sandboxEnv(input map[string]string) map[string]string {
-	out := make(map[string]string, len(input)+1)
+	out := make(map[string]string, len(input)+4)
 	for key, value := range input {
 		out[key] = value
 	}
 	delete(out, codeServerTrustedOriginsEnv)
+	delete(out, sandboxProfileEnv)
+	delete(out, codeServerEnabledEnv)
+	delete(out, browserEnabledEnv)
+	profile := p.profile
+	if profile == "" {
+		profile = profileCoding
+	}
+	out[sandboxProfileEnv] = profile
+	if p.codeServerEnabled != "" {
+		out[codeServerEnabledEnv] = p.codeServerEnabled
+	}
+	if p.browserEnabled != "" {
+		out[browserEnabledEnv] = p.browserEnabled
+	}
 	if p.codeServerTrustedOrigins != "" {
 		out[codeServerTrustedOriginsEnv] = p.codeServerTrustedOrigins
 	}
@@ -1345,7 +1379,11 @@ func isSubpath(root, path string) bool {
 	return rel != "." && rel != ".." && !strings.HasPrefix(rel, ".."+string(os.PathSeparator))
 }
 
-func mapResources(r provider.Resources) map[string]string {
+func mapResources(r provider.Resources, profile string) map[string]string {
+	defaultCPU, defaultMemory := defaultCodingCPU, defaultCodingMemory
+	if profile == profileMinimal {
+		defaultCPU, defaultMemory = defaultMinimalCPU, defaultMinimalMemory
+	}
 	out := map[string]string{}
 	if r.CPUCores > 0 {
 		out["cpu"] = fmt.Sprintf("%dm", int64(r.CPUCores*1000))
@@ -1358,6 +1396,21 @@ func mapResources(r provider.Resources) map[string]string {
 		out["memory"] = envOr("COCOLA_OPENSANDBOX_DEFAULT_MEMORY", defaultMemory)
 	}
 	return out
+}
+
+func normalizedOptionalBoolEnv(key string) (string, error) {
+	value := strings.TrimSpace(strings.ToLower(os.Getenv(key)))
+	if value == "" {
+		return "", nil
+	}
+	switch value {
+	case "1", "true", "yes", "on":
+		return "1", nil
+	case "0", "false", "no", "off":
+		return "0", nil
+	default:
+		return "", fmt.Errorf("invalid %s %q (want true or false)", key, value)
+	}
 }
 
 // envOr returns the env var value if set & non-empty, else def.

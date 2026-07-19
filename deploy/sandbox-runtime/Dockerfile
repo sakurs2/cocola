@@ -70,7 +70,7 @@ ENV DEBIAN_FRONTEND=noninteractive \
 # document/media CLIs.
 # Node/uv/python install steps are GONE -- inherited from base.
 RUN apt-get update && apt-get install -y --no-install-recommends \
-        ca-certificates tini \
+        ca-certificates tini supervisor \
         iptables ipset \
         ripgrep fd-find jq yq tree file less procps psmisc \
         wget unzip zip tar gzip zstd make build-essential pkg-config sqlite3 \
@@ -158,6 +158,17 @@ RUN uv venv --python "${COCOLA_VENV_PYTHON}" /opt/cocola/venv \
     && uv pip install --python /opt/cocola/venv/bin/python --no-cache \
         "${CLAUDE_AGENT_SDK_SPEC}"
 
+# The upstream base installs global npm packages under its versioned Node root
+# (/opt/node/<version>/lib/node_modules), while Cocola deliberately exposes the
+# stable NODE_PATH below. Resolve the installed Playwright package at build time
+# and bridge only that package into the stable path; do not hardcode Node's
+# versioned directory in the Browser runner.
+RUN playwright_cli="$(readlink -f "$(command -v playwright)")" \
+    && test -f "$playwright_cli" \
+    && mkdir -p /usr/local/lib/node_modules \
+    && ln -sfn "$(dirname "$playwright_cli")" /usr/local/lib/node_modules/playwright \
+    && NODE_PATH=/usr/local/lib/node_modules node -e 'require("playwright")'
+
 # ---- egress firewall (ADR-0009 hardening) --------------------------------
 # init-firewall.sh installs an iptables+ipset default-DROP egress allowlist; the
 # container entrypoint runs it as root at start, BEFORE any user exec lands.
@@ -167,7 +178,19 @@ RUN uv venv --python "${COCOLA_VENV_PYTHON}" /opt/cocola/venv \
 COPY init-firewall.sh /opt/cocola/init-firewall.sh
 COPY firewall-entrypoint.sh /opt/cocola/firewall-entrypoint.sh
 COPY code-server-launch.sh /opt/cocola/code-server-launch.sh
-RUN chmod +x /opt/cocola/init-firewall.sh /opt/cocola/firewall-entrypoint.sh /opt/cocola/code-server-launch.sh
+COPY runtime-entrypoint.sh /opt/cocola/runtime-entrypoint.sh
+COPY supervisord.conf /opt/cocola/supervisord.conf
+COPY runtime-manifest.json /opt/cocola/runtime-manifest.json
+COPY cocola_sandbox.py /opt/cocola/cocola_sandbox.py
+COPY browser-runner.js /opt/cocola/browser-runner.js
+COPY skills/ /opt/cocola/skills/
+RUN chmod +x \
+        /opt/cocola/init-firewall.sh \
+        /opt/cocola/firewall-entrypoint.sh \
+        /opt/cocola/code-server-launch.sh \
+        /opt/cocola/runtime-entrypoint.sh \
+        /opt/cocola/cocola_sandbox.py \
+    && ln -sf /opt/cocola/cocola_sandbox.py /usr/local/bin/cocola-sandbox
 
 # ---- the stdio shim ------------------------------------------------------
 COPY shim/ /opt/cocola/shim/
@@ -180,7 +203,10 @@ RUN useradd -m -u 10001 -s /bin/bash cocola \
     && mkdir -p /session /workspace /cache \
         /home/cocola/.claude /home/cocola/.codex /home/cocola/.cocola /home/cocola/.local \
         /data/plugins \
-    && chown -R cocola:cocola /home/cocola /session /workspace /cache /opt/cocola
+    # Keep /opt/cocola root-owned. Supervisor runs as root and may restart the
+    # fixed launchers stored there; making those files guest-writable would turn
+    # an optional-service restart into a privilege-escalation path.
+    && chown -R cocola:cocola /home/cocola /session /workspace /cache
 
 # NOTE: the container's main process runs as ROOT so firewall-entrypoint.sh can
 # install the egress firewall (needs NET_ADMIN). This is NOT a privilege
@@ -224,6 +250,7 @@ ENV CLAUDE_CONFIG_DIR=/home/cocola/.claude \
 # tini reaps the `claude` CLI subprocesses the SDK spawns. Default command keeps
 # the container alive (session-lived per ADR-0009); the shim is invoked on
 # demand via `docker exec ... /opt/cocola/shim/entrypoint.sh`. Both ENTRYPOINT
-# and CMD override the base image's Jupyter launcher, so no port is ever bound.
+# and CMD override the base image's Jupyter launcher. The optional Code Server
+# binds only its in-container port and is never published to the host.
 ENTRYPOINT ["/usr/bin/tini", "--"]
-CMD ["/opt/cocola/firewall-entrypoint.sh"]
+CMD ["/opt/cocola/runtime-entrypoint.sh"]

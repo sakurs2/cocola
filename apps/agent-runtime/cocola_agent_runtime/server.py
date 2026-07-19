@@ -62,6 +62,8 @@ from cocola_agent_runtime.skill_reconciler import (
     SKILLS_INSPECT_SCRIPT,
     SKILLS_RECONCILE_SCRIPT,
     build_skill_batch_archive,
+    loaded_skill_metadata,
+    platform_skill_descriptors,
     skill_descriptors,
 )
 
@@ -723,20 +725,16 @@ class AgentRuntimeServicer(pb_grpc.AgentRuntimeServiceServicer):
                     }
                 )
 
-        loaded_skills: list[Skill] = []
-        if self._skills is not None:
+        loaded_skills: list[dict[str, str]] = []
+        if self._skills is not None and sandbox_id and self._executor is not None:
             skills_start_ns = time.time_ns()
             try:
-                if sandbox_id and self._executor is not None:
-                    await self._sync_skills_into_sandbox(
-                        sandbox_id,
-                        active_skills,
-                        runtime_id=runtime_id,
-                        user_id=request.user_id,
-                    )
-                    loaded_skills = list(active_skills)
-                elif selected_skill_id:
-                    raise RuntimeError("selected skill requires a sandbox executor")
+                loaded_skills = await self._sync_skills_into_sandbox(
+                    sandbox_id,
+                    active_skills,
+                    runtime_id=runtime_id,
+                    user_id=request.user_id,
+                )
                 await context.write(
                     event_to_proto(
                         trace_event(
@@ -744,7 +742,7 @@ class AgentRuntimeServicer(pb_grpc.AgentRuntimeServiceServicer):
                             "sandbox",
                             skills_start_ns,
                             sandbox_id=sandbox_id or "",
-                            skill_count=len(active_skills),
+                            skill_count=len(loaded_skills),
                         )
                     )
                 )
@@ -794,6 +792,17 @@ class AgentRuntimeServicer(pb_grpc.AgentRuntimeServiceServicer):
                     with contextlib.suppress(asyncio.CancelledError):
                         await heartbeat_task
                 return
+        elif selected_skill_id:
+            await context.write(
+                pb.AgentEvent(
+                    kind="error",
+                    data={
+                        "code": "SKILL_SYNC_FAILED",
+                        "error": "The selected Skill requires a Sandbox environment.",
+                    },
+                )
+            )
+            return
 
         if preparing_environment:
             if loaded_skills:
@@ -807,9 +816,9 @@ class AgentRuntimeServicer(pb_grpc.AgentRuntimeServiceServicer):
                         "metadata": {
                             "items": [
                                 {
-                                    "id": skill.native_id,
-                                    "label": skill.name or skill.native_id,
-                                    "version": skill.version,
+                                    "id": skill["id"],
+                                    "label": skill["name"],
+                                    "version": skill["version"],
                                 }
                                 for skill in loaded_skills
                             ]
@@ -918,14 +927,7 @@ class AgentRuntimeServicer(pb_grpc.AgentRuntimeServiceServicer):
             model_route_id=model_route_id,
             selected_skill_id=selected_skill_id,
             mcp_servers=active_mcp_servers,
-            environment_skills=[
-                {
-                    "id": skill.native_id,
-                    "name": skill.name or skill.native_id,
-                    "version": skill.version,
-                }
-                for skill in loaded_skills
-            ],
+            environment_skills=loaded_skills,
             auth_token=sandbox_token or None,
             traceparent=traceparent or None,
         )
@@ -1027,9 +1029,9 @@ class AgentRuntimeServicer(pb_grpc.AgentRuntimeServiceServicer):
         *,
         runtime_id: str = "claude-code",
         user_id: str = "",
-    ) -> None:
+    ) -> list[dict[str, str]]:
         if self._executor is None:
-            return
+            return []
         del runtime_id  # Claude and Codex share the agents-skill-v1 compatibility set.
         descriptors, digest = skill_descriptors(skills, user_id)
         inspected = await self._executor.exec(
@@ -1043,8 +1045,15 @@ class AgentRuntimeServicer(pb_grpc.AgentRuntimeServiceServicer):
             previous = json.loads(inspected.stdout or "{}")
         except ValueError:
             previous = {}
-        if isinstance(previous, dict) and previous.get("digest") == digest:
-            return
+        if not isinstance(previous, dict):
+            previous = {}
+        platform_skills, available_platform_digest = platform_skill_descriptors(previous)
+        loaded = loaded_skill_metadata(skills, platform_skills)
+        if (
+            previous.get("digest") == digest
+            and str(previous.get("platform_digest") or "") == available_platform_digest
+        ):
+            return loaded
         data = await build_skill_batch_archive(
             skills, self._objstore, descriptors, digest, previous
         )
@@ -1063,6 +1072,7 @@ class AgentRuntimeServicer(pb_grpc.AgentRuntimeServiceServicer):
         )
         if not res.ok:
             raise RuntimeError(res.error or res.stderr or "batch skill sync failed")
+        return loaded
 
     async def _publish_output_artifacts(
         self,

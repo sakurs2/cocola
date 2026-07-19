@@ -14,6 +14,7 @@ import subprocess
 import sys
 import zipfile
 from dataclasses import dataclass, field
+from pathlib import Path
 from types import SimpleNamespace
 
 import grpc
@@ -241,6 +242,49 @@ def skill_bundle(**files: str) -> bytes:
     return out.getvalue()
 
 
+def platform_skill_snapshot(*, digest: str = "platform-v1") -> dict:
+    return {
+        "available_platform_digest": digest,
+        "available_platform_skills": [
+            {
+                "id": "cocola-sandbox-browser",
+                "name": "Cocola Sandbox Browser",
+                "version": "1.0.0",
+                "path": "cocola-sandbox-browser",
+                "content_sha256": "a" * 64,
+            }
+        ],
+    }
+
+
+def write_platform_browser_skill(root: Path) -> None:
+    skill = root / "cocola-sandbox-browser"
+    skill.mkdir(parents=True)
+    (skill / "SKILL.md").write_text("# Cocola Sandbox Browser\n", encoding="utf-8")
+    (root / "manifest.json").write_text(
+        json.dumps(
+            {
+                "schema_version": 1,
+                "skills": [
+                    {
+                        "id": "cocola-sandbox-browser",
+                        "name": "Cocola Sandbox Browser",
+                        "version": "1.0.0",
+                        "path": "cocola-sandbox-browser",
+                    }
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
+
+
+def local_skill_script(script: str, home: Path, platform_root: Path) -> str:
+    return script.replace("/home/cocola", str(home)).replace(
+        "/opt/cocola/skills", str(platform_root)
+    )
+
+
 def outputs_snapshot_executor() -> StaticSandboxExecutor:
     ex: StaticSandboxExecutor
 
@@ -312,6 +356,31 @@ async def test_query_materializes_enabled_skills_without_prompt_injection():
     assert prov.seen_options.environment_skills == [
         {"id": "web", "name": "Web Search", "version": "1.2"}
     ]
+
+
+async def test_query_reports_image_baked_skill_when_market_is_empty():
+    _, digest = _skill_descriptors([], "U1")
+    snapshot = platform_skill_snapshot()
+    snapshot.update({"digest": digest, "platform_digest": "platform-v1"})
+    executor = StaticSandboxExecutor(
+        exec_handler=lambda _sandbox_id, _cmd: ExecOutcome(stdout=json.dumps(snapshot))
+    )
+    prov = ListProvider([AgentEvent(kind="done", data={})])
+
+    await AgentRuntimeServicer(
+        prov,
+        skills=StaticSkillCatalog([]),
+        executor=executor,
+    ).Query(FakeRequest(sandbox_id="box-1"), FakeContext())
+
+    assert prov.seen_options.environment_skills == [
+        {
+            "id": "cocola-sandbox-browser",
+            "name": "Cocola Sandbox Browser",
+            "version": "1.0.0",
+        }
+    ]
+    assert executor.byte_writes == []
 
 
 async def test_query_validates_and_forwards_selected_skill():
@@ -535,6 +604,66 @@ async def test_skill_digest_hit_skips_minio_and_archive_write():
     assert len(executor.exec_calls) == 1
 
 
+async def test_platform_skill_change_rebuilds_an_unchanged_configured_set():
+    skill = Skill(id="cached", name="Cached", skill_md="# Cached")
+    descriptors, digest = _skill_descriptors([skill], "U1")
+    snapshot = platform_skill_snapshot(digest="platform-v2")
+    snapshot.update(
+        {
+            "digest": digest,
+            "platform_digest": "platform-v1",
+            "skills": descriptors,
+        }
+    )
+    executor = StaticSandboxExecutor(
+        exec_handler=lambda _sandbox_id, cmd: (
+            ExecOutcome(stdout=json.dumps(snapshot))
+            if cmd[2] == _SKILLS_INSPECT_SCRIPT
+            else ExecOutcome()
+        )
+    )
+
+    loaded = await AgentRuntimeServicer(
+        ListProvider([]), executor=executor
+    )._sync_skills_into_sandbox("box-1", [skill], user_id="U1")
+
+    assert len(executor.byte_writes) == 1
+    assert loaded == [
+        {
+            "id": "cached",
+            "name": "Cached",
+            "version": "",
+        },
+        {
+            "id": "cocola-sandbox-browser",
+            "name": "Cocola Sandbox Browser",
+            "version": "1.0.0",
+        },
+    ]
+
+
+async def test_configured_skill_cannot_shadow_reserved_platform_skill():
+    snapshot = platform_skill_snapshot()
+    executor = StaticSandboxExecutor(
+        exec_handler=lambda _sandbox_id, _cmd: ExecOutcome(stdout=json.dumps(snapshot))
+    )
+    servicer = AgentRuntimeServicer(ListProvider([]), executor=executor)
+
+    with pytest.raises(RuntimeError, match="reserved platform id"):
+        await servicer._sync_skills_into_sandbox(
+            "box-1",
+            [
+                Skill(
+                    id="cocola-sandbox-browser",
+                    name="Shadow",
+                    skill_md="# Shadow",
+                )
+            ],
+        )
+
+    assert executor.byte_writes == []
+
+
 async def test_skill_sync_rejects_bundle_checksum_mismatch_before_archive_write():
     executor = StaticSandboxExecutor(
         exec_handler=lambda _sandbox_id, cmd: (
@@ -624,6 +753,68 @@ async def test_skill_batch_installer_persists_shared_and_local_payloads(tmp_path
     assert not (current / "shared").is_symlink()
     assert (current / "shared" / "SKILL.md").read_text() == "# Shared"
     assert not archive.exists()
+
+
+async def test_platform_and_configured_skills_share_claude_and_codex_set(tmp_path):
+    executor = StaticSandboxExecutor(
+        exec_handler=lambda _sandbox_id, cmd: (
+            ExecOutcome(stdout="{}") if cmd[2] == _SKILLS_INSPECT_SCRIPT else ExecOutcome()
+        )
+    )
+    servicer = AgentRuntimeServicer(ListProvider([]), executor=executor)
+    await servicer._sync_skills_into_sandbox(
+        "box-1", [Skill(id="review", name="Review", skill_md="# Review")]
+    )
+
+    archive = tmp_path / "skills.zip"
+    archive.write_bytes(executor.byte_writes[0][2])
+    home = tmp_path / "home" / "cocola"
+    platform_root = tmp_path / "platform-skills"
+    write_platform_browser_skill(platform_root)
+    inspect_script = local_skill_script(_SKILLS_INSPECT_SCRIPT, home, platform_root)
+    reconcile_script = local_skill_script(_SKILLS_RECONCILE_SCRIPT, home, platform_root)
+
+    inspected_before = subprocess.run(
+        [sys.executable, "-c", inspect_script],
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+    assert inspected_before.returncode == 0, inspected_before.stderr
+    available = json.loads(inspected_before.stdout)
+    assert [item["id"] for item in available["available_platform_skills"]] == [
+        "cocola-sandbox-browser"
+    ]
+
+    digest = json.loads(zipfile.ZipFile(io.BytesIO(archive.read_bytes())).read("manifest.json"))[
+        "digest"
+    ]
+    reconciled = subprocess.run(
+        [sys.executable, "-c", reconcile_script, str(archive), digest],
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+    assert reconciled.returncode == 0, reconciled.stderr
+
+    current = home / ".cocola" / "skillsets" / "agents-skill-v1" / "current"
+    assert (current / "review" / "SKILL.md").read_text(encoding="utf-8") == "# Review"
+    assert (current / "cocola-sandbox-browser").is_symlink()
+    assert (current / "cocola-sandbox-browser").resolve() == (
+        platform_root / "cocola-sandbox-browser"
+    ).resolve()
+    assert (home / ".claude" / "skills").resolve() == current.resolve()
+    assert (home / ".agents" / "skills").resolve() == current.resolve()
+
+    inspected_after = subprocess.run(
+        [sys.executable, "-c", inspect_script],
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+    assert inspected_after.returncode == 0, inspected_after.stderr
+    installed = json.loads(inspected_after.stdout)
+    assert installed["platform_digest"] == installed["available_platform_digest"]
 
 
 async def test_skill_batch_installer_rejects_unsafe_bundle_before_replacing_targets(tmp_path):
