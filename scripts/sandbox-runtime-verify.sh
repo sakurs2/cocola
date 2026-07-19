@@ -125,18 +125,34 @@ echo "$RUNTIME_INFO" | grep -q '"profile": "coding"' \
 
 BUILTIN_SKILL_OWNER="$(docker exec -i "$CTR" stat -c '%U:%G' \
   /opt/cocola/skills/cocola-sandbox-browser/SKILL.md 2>/dev/null || true)"
+BUILTIN_ARTIFACT_SKILL_OWNER="$(docker exec -i "$CTR" stat -c '%U:%G' \
+  /opt/cocola/skills/cocola-sandbox-artifacts/SKILL.md 2>/dev/null || true)"
 docker exec -i "$CTR" test -f /opt/cocola/skills/manifest.json \
   && docker exec -i "$CTR" test -s /opt/cocola/skills/cocola-sandbox-browser/SKILL.md \
-  && ok "built-in Sandbox Browser Skill is baked into the runtime" \
-  || bad "built-in Sandbox Browser Skill is missing"
+  && docker exec -i "$CTR" test -s /opt/cocola/skills/cocola-sandbox-artifacts/SKILL.md \
+  && ok "built-in Browser and Artifact Skills are baked into the runtime" \
+  || bad "one or more built-in Sandbox Skills are missing"
 [ "$BUILTIN_SKILL_OWNER" = "root:root" ] \
-  && ok "built-in Skill remains a root-owned runtime asset" \
-  || bad "built-in Skill owner is ${BUILTIN_SKILL_OWNER:-unknown} (must be root:root)"
+  && [ "$BUILTIN_ARTIFACT_SKILL_OWNER" = "root:root" ] \
+  && ok "built-in Skills remain root-owned runtime assets" \
+  || bad "built-in Skill owners are ${BUILTIN_SKILL_OWNER:-unknown}/${BUILTIN_ARTIFACT_SKILL_OWNER:-unknown} (must be root:root)"
 
 WORKSPACE_INFO="$(docker exec -i "$CTR" cocola-sandbox workspace info --json || true)"
 echo "$WORKSPACE_INFO" | grep -q '"outputs".*"exists": true' \
   && ok "workspace outputs contract is prepared" \
   || bad "workspace outputs contract missing"
+
+ARTIFACT_STATUS="$(docker exec -u cocola "$CTR" cocola-sandbox artifact status --json || true)"
+echo "$ARTIFACT_STATUS" | grep -q '"state": "ready"' \
+  && ok "Artifact output capability is ready" \
+  || bad "Artifact output capability is not ready: $ARTIFACT_STATUS"
+docker exec -u cocola "$CTR" sh -c \
+  'printf "%s" "<!doctype html><title>Cocola Artifact Probe</title><main>COCOLA_ARTIFACT_OK</main>" > /workspace/outputs/runtime-verify.html && ln -s /etc/hosts /workspace/outputs/ignored-link.txt'
+ARTIFACT_LIST="$(docker exec -u cocola "$CTR" cocola-sandbox artifact list --json || true)"
+echo "$ARTIFACT_LIST" | grep -q '"path": "runtime-verify.html"' \
+  && ! echo "$ARTIFACT_LIST" | grep -q 'ignored-link.txt' \
+  && ok "Artifact inventory lists regular outputs and ignores symbolic links" \
+  || bad "Artifact inventory contract failed: $ARTIFACT_LIST"
 
 CODE_SERVER_READY=0
 for _ in {1..10}; do
@@ -259,8 +275,9 @@ SKILL_DIGEST="runtime-verify-empty-catalog"
 SKILL_ARCHIVE="/tmp/cocola-runtime-verify-skills.zip"
 SKILL_AVAILABLE="$(docker exec -i -u cocola "$CTR" python3 -c "$SKILLS_INSPECT_SCRIPT" || true)"
 echo "$SKILL_AVAILABLE" | grep -q '"id":"cocola-sandbox-browser"' \
-  && ok "Agent Runtime discovers the image platform Skill manifest" \
-  || bad "Agent Runtime did not discover the platform Skill: $SKILL_AVAILABLE"
+  && echo "$SKILL_AVAILABLE" | grep -q '"id":"cocola-sandbox-artifacts"' \
+  && ok "Agent Runtime discovers both image platform Skills" \
+  || bad "Agent Runtime did not discover both platform Skills: $SKILL_AVAILABLE"
 docker exec -i -u cocola "$CTR" python3 -c \
   'import json, sys, zipfile; archive = zipfile.ZipFile(sys.argv[1], "w"); archive.writestr("manifest.json", json.dumps({"format": "session-bundle-v2", "digest": sys.argv[2], "skills": []})); archive.close()' \
   "$SKILL_ARCHIVE" "$SKILL_DIGEST"
@@ -270,8 +287,12 @@ docker exec -i -u cocola "$CTR" test -s \
   /home/cocola/.claude/skills/cocola-sandbox-browser/SKILL.md \
   && docker exec -i -u cocola "$CTR" test -s \
     /home/cocola/.agents/skills/cocola-sandbox-browser/SKILL.md \
-  && ok "empty catalog still loads the built-in Skill for Claude and Codex" \
-  || bad "built-in Skill was not loaded into both Agent runtime directories"
+  && docker exec -i -u cocola "$CTR" test -s \
+    /home/cocola/.claude/skills/cocola-sandbox-artifacts/SKILL.md \
+  && docker exec -i -u cocola "$CTR" test -s \
+    /home/cocola/.agents/skills/cocola-sandbox-artifacts/SKILL.md \
+  && ok "empty catalog still loads both built-in Skills for Claude and Codex" \
+  || bad "built-in Skills were not loaded into both Agent runtime directories"
 
 # resume only if we got a session id from step 3
 if [ -n "$SESSION_ID" ]; then

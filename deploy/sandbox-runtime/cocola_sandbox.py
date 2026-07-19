@@ -5,8 +5,10 @@ from __future__ import annotations
 
 import argparse
 import json
+import mimetypes
 import os
 import shutil
+import stat
 import subprocess
 import sys
 import time
@@ -58,6 +60,11 @@ def browser_enabled(manifest: dict[str, Any], profile: str) -> bool:
     if os.environ.get("COCOLA_BROWSER_ENABLED", ""):
         return parse_bool(os.environ["COCOLA_BROWSER_ENABLED"])
     profile_capability = manifest["profiles"][profile].get("capabilities", {}).get("browser", {})
+    return bool(profile_capability.get("enabled", False))
+
+
+def artifact_enabled(manifest: dict[str, Any], profile: str) -> bool:
+    profile_capability = manifest["profiles"][profile].get("capabilities", {}).get("artifacts", {})
     return bool(profile_capability.get("enabled", False))
 
 
@@ -151,10 +158,98 @@ def browser_status(manifest: dict[str, Any], profile: str) -> dict[str, Any]:
     }
 
 
+def artifact_status(manifest: dict[str, Any], profile: str) -> dict[str, Any]:
+    contract = manifest.get("capabilities", {}).get("artifacts", {})
+    enabled = artifact_enabled(manifest, profile)
+    workspace = Path(manifest["workspace"]["root"]).resolve()
+    output_value = str(contract.get("output_dir", "")).strip()
+    output_dir = Path(output_value) if output_value else Path("/")
+    try:
+        output_resolved = output_dir.resolve()
+        scoped = output_resolved.is_relative_to(workspace)
+    except (OSError, RuntimeError):
+        scoped = False
+    checks = {
+        "output_dir": bool(output_value) and output_dir.is_dir(),
+        "writable": bool(output_value) and os.access(output_dir, os.W_OK),
+        "absolute": bool(output_value) and output_dir.is_absolute(),
+        "workspace_scoped": scoped,
+    }
+    available = all(checks.values())
+    if not enabled:
+        state = "disabled"
+        detail = "disabled by active Sandbox Profile"
+    elif available:
+        state = "ready"
+        detail = "changed regular files are published after the Agent turn"
+    else:
+        state = "unavailable"
+        missing = ", ".join(name for name, present in checks.items() if not present)
+        detail = f"invalid artifact output contract: {missing}"
+    return {
+        "name": "artifacts",
+        "enabled": enabled,
+        "state": state,
+        "kind": contract.get("kind", "workspace-output"),
+        "required": bool(contract.get("required", True)),
+        "commands": list(contract.get("commands", [])),
+        "output_dir": output_value,
+        "html_preview": contract.get("html_preview", "isolated-self-contained"),
+        "checks": checks,
+        "detail": detail,
+    }
+
+
+def artifact_files(manifest: dict[str, Any], profile: str, limit: int) -> dict[str, Any]:
+    status_payload = artifact_status(manifest, profile)
+    if not status_payload["enabled"]:
+        raise RuntimeError("artifact capability is disabled by the active Sandbox Profile")
+    if status_payload["state"] != "ready":
+        raise RuntimeError(status_payload["detail"])
+
+    output_dir = Path(status_payload["output_dir"])
+    files: list[dict[str, Any]] = []
+    truncated = False
+    for dirpath, dirnames, filenames in os.walk(output_dir, followlinks=False):
+        dirnames[:] = sorted(name for name in dirnames if not Path(dirpath, name).is_symlink())
+        for name in sorted(filenames):
+            path = Path(dirpath, name)
+            try:
+                file_stat = path.lstat()
+            except OSError:
+                continue
+            if not stat.S_ISREG(file_stat.st_mode):
+                continue
+            if len(files) >= limit:
+                truncated = True
+                break
+            relative = path.relative_to(output_dir).as_posix()
+            files.append(
+                {
+                    "path": relative,
+                    "size": file_stat.st_size,
+                    "mime_type": mimetypes.guess_type(relative)[0] or "application/octet-stream",
+                    "mtime_ns": file_stat.st_mtime_ns,
+                }
+            )
+        if truncated:
+            break
+    return {
+        "root": str(output_dir),
+        "count": len(files),
+        "limit": limit,
+        "truncated": truncated,
+        "files": files,
+    }
+
+
 def capability_info(manifest: dict[str, Any], profile: str) -> list[dict[str, Any]]:
-    if "browser" not in manifest.get("capabilities", {}):
-        return []
-    return [browser_status(manifest, profile)]
+    capabilities = []
+    if "browser" in manifest.get("capabilities", {}):
+        capabilities.append(browser_status(manifest, profile))
+    if "artifacts" in manifest.get("capabilities", {}):
+        capabilities.append(artifact_status(manifest, profile))
+    return capabilities
 
 
 def workspace_info(manifest: dict[str, Any]) -> dict[str, Any]:
@@ -309,6 +404,16 @@ def emit(value: Any, as_json: bool) -> None:
     if isinstance(value, dict) and value.get("name") == "browser":
         print(f"Browser: {value['state']} ({value['detail']})")
         return
+    if isinstance(value, dict) and value.get("name") == "artifacts":
+        print(f"Artifacts: {value['state']} ({value['detail']})")
+        return
+    if isinstance(value, dict) and "files" in value and "root" in value:
+        print(f"Artifacts: {value['count']} file(s) under {value['root']}")
+        for item in value["files"]:
+            print(f"  {item['path']} ({item['size']} bytes, {item['mime_type']})")
+        if value.get("truncated"):
+            print(f"  ... truncated at {value['limit']} files")
+        return
     if isinstance(value, dict) and value.get("action") == "inspect":
         print(f"URL: {value['url']}")
         print(f"Title: {value['title']}")
@@ -366,6 +471,18 @@ def build_parser() -> argparse.ArgumentParser:
     pdf = browser_commands.add_parser("pdf", help="render the page to PDF")
     add_navigation_options(pdf)
     pdf.add_argument("--output")
+
+    artifact = commands.add_parser("artifact", help="inspect publishable output artifacts")
+    artifact_commands = artifact.add_subparsers(dest="artifact_command")
+    artifact_status_parser = artifact_commands.add_parser(
+        "status", help="show the artifact output contract"
+    )
+    artifact_status_parser.add_argument("--json", action="store_true")
+    artifact_list_parser = artifact_commands.add_parser(
+        "list", help="list regular files waiting under the output directory"
+    )
+    artifact_list_parser.add_argument("--limit", type=int, default=200)
+    artifact_list_parser.add_argument("--json", action="store_true")
     return parser
 
 
@@ -392,6 +509,11 @@ def main(argv: list[str] | None = None) -> int:
         }:
             request = browser_request(args, manifest)
             emit(run_browser(manifest, profile, request), args.json)
+        elif args.command == "artifact" and args.artifact_command == "status":
+            emit(artifact_status(manifest, profile), args.json)
+        elif args.command == "artifact" and args.artifact_command == "list":
+            limit = bounded(args.limit, "limit", 1, 1000)
+            emit(artifact_files(manifest, profile, limit), args.json)
         else:
             parser.print_help()
             return 2

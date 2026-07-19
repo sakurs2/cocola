@@ -25,6 +25,10 @@
         "browser": {
           "enabled": true,
           "startup": "on-demand"
+        },
+        "artifacts": {
+          "enabled": true,
+          "startup": "workspace-output"
         }
       }
     },
@@ -43,6 +47,10 @@
         "browser": {
           "enabled": false,
           "startup": "disabled"
+        },
+        "artifacts": {
+          "enabled": true,
+          "startup": "workspace-output"
         }
       }
     }
@@ -63,6 +71,13 @@
       "output_dir": "/workspace/outputs/browser",
       "required": false,
       "commands": ["inspect", "screenshot", "pdf"]
+    },
+    "artifacts": {
+      "kind": "workspace-output",
+      "output_dir": "/workspace/outputs",
+      "html_preview": "isolated-self-contained",
+      "required": true,
+      "commands": ["status", "list"]
     }
   }
 }

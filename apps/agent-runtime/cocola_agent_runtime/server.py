@@ -71,7 +71,12 @@ log = get_logger("cocola.agent-runtime.server")
 
 ARTIFACT_SYSTEM_PROMPT = (
     "When you create files that the user should download or preview, save them "
-    "under ./outputs/. Only files in ./outputs/ are published to the user."
+    "under ./outputs/. Only changed regular files in ./outputs/ are published "
+    "to the user after the turn; symbolic links are ignored. Use "
+    "`cocola-sandbox artifact status --json` and "
+    "`cocola-sandbox artifact list --json` to inspect the contract. HTML "
+    "artifacts must be a single self-contained file "
+    "because their isolated preview blocks network and relative asset loading."
 )
 ADMIN_SYSTEM_PROMPT_HEADER = "Administrator-configured system instructions:"
 MODEL_ROUTE_ID_METADATA_KEY = "x-cocola-model-route-id"
@@ -99,17 +104,30 @@ def _positive_env_int(name: str, default: int) -> int:
 _OUTPUTS_SNAPSHOT_SCRIPT = r"""
 import json
 import os
+import stat
 
 workspace = "/workspace"
 root = os.path.join(workspace, "outputs")
 os.makedirs(root, exist_ok=True)
+root_real = os.path.realpath(root)
 out = {}
-for dirpath, _, files in os.walk(root):
+for dirpath, dirnames, files in os.walk(root, followlinks=False):
+    dirnames[:] = [
+        name for name in dirnames
+        if not os.path.islink(os.path.join(dirpath, name))
+    ]
     for name in files:
         path = os.path.join(dirpath, name)
         try:
-            st = os.stat(path)
+            st = os.lstat(path)
         except OSError:
+            continue
+        if not stat.S_ISREG(st.st_mode):
+            continue
+        try:
+            if os.path.commonpath([root_real, os.path.realpath(path)]) != root_real:
+                continue
+        except ValueError:
             continue
         rel = os.path.relpath(path, workspace).replace(os.sep, "/")
         out[rel] = {"size": st.st_size, "mtime_ns": st.st_mtime_ns}

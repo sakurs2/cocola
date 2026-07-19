@@ -6,6 +6,12 @@
       "name": "Cocola Sandbox Browser",
       "version": "1.0.0",
       "path": "cocola-sandbox-browser"
+    },
+    {
+      "id": "cocola-sandbox-artifacts",
+      "name": "Cocola Sandbox Artifacts",
+      "version": "1.0.0",
+      "path": "cocola-sandbox-artifacts"
     }
   ]
 }

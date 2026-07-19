@@ -28,7 +28,7 @@ deploy/sandbox-runtime/
   runtime-entrypoint.sh    # canonical lifecycle entrypoint for every provider
   runtime-manifest.json    # versioned workspace/profile/service contract
   supervisord.conf         # resident optional-service lifecycle
-  cocola_sandbox.py        # guest CLI: info, service status, workspace info
+  cocola_sandbox.py        # guest CLI: runtime, service, workspace, browser, artifacts
   browser-runner.js        # one-shot persistent-context Playwright runner
   firewall-entrypoint.sh   # compatibility wrapper for the old entrypoint path
   code-server-launch.sh    # one-shot non-root Code Server launcher
@@ -70,10 +70,10 @@ service failure does not take down Agent Exec.
 
 Profiles are operator-level policy injected by Sandbox Manager:
 
-| Profile   | Default resources  | Code Server | Browser   |
-| --------- | ------------------ | ----------- | --------- |
-| `coding`  | `1000m` / `2048Mi` | enabled     | on-demand |
-| `minimal` | `500m` / `512Mi`   | disabled    | disabled  |
+| Profile   | Default resources  | Code Server | Browser   | Artifacts        |
+| --------- | ------------------ | ----------- | --------- | ---------------- |
+| `coding`  | `1000m` / `2048Mi` | enabled     | on-demand | workspace output |
+| `minimal` | `500m` / `512Mi`   | disabled    | disabled  | workspace output |
 
 Explicit Sandbox resources override the profile. Operators may override the
 defaults with `COCOLA_OPENSANDBOX_DEFAULT_CPU/MEMORY`,
@@ -93,6 +93,8 @@ cocola-sandbox browser inspect https://example.com --json
 cocola-sandbox browser screenshot https://example.com --output page.png --json
 cocola-sandbox browser screenshot https://example.com --full-page --json
 cocola-sandbox browser pdf https://example.com --output page.pdf --json
+cocola-sandbox artifact status --json
+cocola-sandbox artifact list --json
 ```
 
 ## On-demand headless Browser
@@ -106,14 +108,14 @@ screenshots and PDFs default to `/workspace/outputs/browser`.
 Only `http://` and `https://` navigation is accepted. Browser output paths are
 resolved beneath `/workspace`, Chromium runs as the fixed non-root `cocola`
 identity, and Sandbox egress policy remains the network authority. An Agent may
-serve local HTML on a temporary loopback HTTP port for inspection, but Cocola's
-automatic Artifact publication/preview UI belongs to a later phase.
+serve local HTML on a temporary loopback HTTP port for interactive inspection.
 
 ### Built-in Agent Skill
 
-The image ships the versioned, root-owned `cocola-sandbox-browser` Skill under
-`/opt/cocola/skills`. It teaches the Agent when and how to use the stable guest
-CLI; the Skill does not add a second Browser implementation.
+The image ships versioned, root-owned `cocola-sandbox-browser` and
+`cocola-sandbox-artifacts` Skills under `/opt/cocola/skills`. They teach the
+Agent when and how to use the stable guest CLI; neither Skill adds a second
+execution implementation.
 
 At the beginning of a Run, Agent Runtime inspects the image's platform Skill
 manifest and atomically reconciles platform Skills with the effective Admin and
@@ -124,8 +126,25 @@ reports its actual inventory, a rolling rollout tolerates old images with no
 platform Skills and automatically rebuilds the snapshot when a new image or
 built-in Skill version appears.
 
-Phase 2 intentionally does not add Jupyter, a visual desktop, per-Sandbox
-observe endpoints, HTML publication, or a Sandbox MCP server.
+## Artifact publication and isolated HTML preview
+
+Changed regular files written beneath `/workspace/outputs` are uploaded by
+Agent Runtime after a successful turn and emitted as authenticated,
+conversation-owned Artifacts. Symbolic links, linked directories, sockets and
+other non-regular entries are ignored. `cocola-sandbox artifact status/list`
+lets the Agent inspect the same output contract before it finishes.
+
+Downloads are served with `Content-Disposition: attachment`, `nosniff`, a
+deny-by-default CSP and no-store caching, so user-authored active content is
+never executed directly on Cocola's authenticated origin. The Web UI fetches
+preview bytes itself. HTML is parsed as an inert document, stripped of scripts,
+event handlers, external URLs and embedded browsing contexts, then rendered in
+an opaque-origin sandboxed iframe with a second deny-by-default CSP. Therefore
+HTML deliverables should be one self-contained file using inline CSS and
+`data:` media; JavaScript is visible in source mode but does not execute.
+
+Phase 3 intentionally does not add Jupyter, a visual desktop, per-Sandbox
+observe endpoints, automatic live-site tabs, or a Sandbox MCP server.
 
 ## How the control plane drives the Agent
 

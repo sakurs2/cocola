@@ -48,3 +48,4 @@ Code shows _what_ and _how_. ADRs preserve _why_ — invaluable when:
 | 0023 | Node-local Session storage with sticky scheduling and explicit reset                                  | Accepted           |
 | 0024 | Versioned Sandbox Runtime contract and operator profiles                                              | Accepted           |
 | 0025 | On-demand headless Browser capability and built-in Agent Skill                                        | Accepted           |
+| 0026 | Workspace Artifacts and isolated static HTML preview                                                  | Accepted           |

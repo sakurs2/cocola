@@ -863,7 +863,17 @@ func (a *API) downloadArtifact(w http.ResponseWriter, r *http.Request) {
 	filename := sanitizeKeySegment(artifact.Filename)
 	w.Header().Set("content-type", mime)
 	w.Header().Set("content-length", strconv.Itoa(len(data)))
-	w.Header().Set("content-disposition", fmt.Sprintf("inline; filename=%q", filename))
+	// Artifact bytes are always a download response. The Web UI fetches them and
+	// creates an isolated blob/srcdoc preview; serving user-controlled HTML inline
+	// on Cocola's authenticated origin would otherwise create a stored-XSS path.
+	w.Header().Set("content-disposition", fmt.Sprintf("attachment; filename=%q", filename))
+	w.Header().Set("x-content-type-options", "nosniff")
+	w.Header().Set("cache-control", "private, no-store")
+	w.Header().Set("cross-origin-resource-policy", "same-origin")
+	w.Header().Set(
+		"content-security-policy",
+		"sandbox; default-src 'none'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'",
+	)
 	w.WriteHeader(http.StatusOK)
 	_, _ = w.Write(data)
 }

@@ -364,6 +364,7 @@ function ArtifactPreviewPanel() {
         <ReadonlyFilePreview
           file={previewFile}
           renderHtml={canHtml && !htmlSourceMode}
+          fetchBinary
           unsupportedMessage="Download the file to open it locally."
         />
       </div>

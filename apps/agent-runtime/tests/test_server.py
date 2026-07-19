@@ -33,7 +33,12 @@ from cocola_agent_runtime.sandbox_binder import (
     StaticSandboxBinder,
     StaticSandboxExecutor,
 )
-from cocola_agent_runtime.server import AgentRuntimeServicer, _product_traceparent, event_to_proto
+from cocola_agent_runtime.server import (
+    _OUTPUTS_SNAPSHOT_SCRIPT,
+    AgentRuntimeServicer,
+    _product_traceparent,
+    event_to_proto,
+)
 from cocola_agent_runtime.session_map import SessionBinding
 from cocola_agent_runtime.skill_loader import Skill, StaticSkillCatalog
 from cocola_agent_runtime.skill_reconciler import (
@@ -1105,7 +1110,9 @@ async def test_query_publishes_outputs_artifacts():
     key = file_event.data["object_key"]
     assert key.startswith("artifacts/U1/S1/")
     assert store.puts[key] == (b"hello world", "text/plain")
-    assert "Only files in ./outputs/" in prov.seen_options.system_prompt
+    assert "Only changed regular files in ./outputs/" in prov.seen_options.system_prompt
+    assert "cocola-sandbox artifact list --json" in prov.seen_options.system_prompt
+    assert "self-contained file" in prov.seen_options.system_prompt
 
 
 async def test_outputs_snapshot_runs_from_persistent_workspace():
@@ -1115,3 +1122,27 @@ async def test_outputs_snapshot_runs_from_persistent_workspace():
     await servicer._snapshot_outputs("box-1")
 
     assert ex.exec_calls[-1]["cwd"] == "/workspace"
+
+
+def test_outputs_snapshot_ignores_symbolic_links(tmp_path):
+    outputs = tmp_path / "outputs"
+    outputs.mkdir()
+    (outputs / "report.txt").write_text("safe", encoding="utf-8")
+    outside = tmp_path / "secret.txt"
+    outside.write_text("secret", encoding="utf-8")
+    (outputs / "secret-link.txt").symlink_to(outside)
+    linked_dir = outputs / "linked-dir"
+    linked_dir.symlink_to(tmp_path, target_is_directory=True)
+    script = _OUTPUTS_SNAPSHOT_SCRIPT.replace(
+        'workspace = "/workspace"', f"workspace = {str(tmp_path)!r}", 1
+    )
+
+    result = subprocess.run(
+        [sys.executable, "-c", script],
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+
+    payload = json.loads(result.stdout)
+    assert list(payload) == ["outputs/report.txt"]

@@ -216,6 +216,20 @@ func TestChatPersistsArtifactAndDownloads(t *testing.T) {
 	if rec.Header().Get("content-type") != "text/plain" {
 		t.Fatalf("content-type = %q", rec.Header().Get("content-type"))
 	}
+	if got := rec.Header().Get("content-disposition"); got != `attachment; filename="report.txt"` {
+		t.Fatalf("content-disposition = %q", got)
+	}
+	if got := rec.Header().Get("x-content-type-options"); got != "nosniff" {
+		t.Fatalf("x-content-type-options = %q", got)
+	}
+	if got := rec.Header().Get("content-security-policy"); !strings.Contains(got, "sandbox") ||
+		!strings.Contains(got, "default-src 'none'") ||
+		!strings.Contains(got, "frame-ancestors 'none'") {
+		t.Fatalf("content-security-policy = %q", got)
+	}
+	if got := rec.Header().Get("cache-control"); got != "private, no-store" {
+		t.Fatalf("cache-control = %q", got)
+	}
 	if rec.Body.String() != "hello world" {
 		t.Fatalf("download body = %q", rec.Body.String())
 	}

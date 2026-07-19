@@ -23,10 +23,19 @@ export async function GET(
       headers: authHeaders,
     });
     const headers = new Headers();
-    for (const key of ["content-type", "content-length", "content-disposition"]) {
+    for (const key of [
+      "content-type",
+      "content-length",
+      "content-disposition",
+      "content-security-policy",
+      "x-content-type-options",
+      "cross-origin-resource-policy",
+      "cache-control",
+    ]) {
       const value = upstream.headers.get(key);
       if (value) headers.set(key, value);
     }
+    if (!headers.has("cache-control")) headers.set("cache-control", "private, no-store");
     return new Response(upstream.body, {
       status: upstream.status,
       headers,
