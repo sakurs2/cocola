@@ -46,6 +46,29 @@ export function classifyCodeEditorProbe({
   return { kind: "error", retry: false };
 }
 
+/**
+ * Probe with GET because the OpenSandbox server proxy rejects HEAD before the
+ * request reaches code-server. Cancel the body after the response headers so
+ * readiness checks do not download the editor page twice.
+ *
+ * @param {string} url
+ * @param {AbortSignal} signal
+ * @param {typeof fetch} [fetcher]
+ */
+export async function probeCodeEditorStatus(url, signal, fetcher = globalThis.fetch) {
+  const response = await fetcher(url, {
+    method: "GET",
+    cache: "no-store",
+    signal,
+  });
+  try {
+    await response.body?.cancel();
+  } catch {
+    // The status is already sufficient for readiness; cancellation is best effort.
+  }
+  return response.status;
+}
+
 /** @param {number} attempt */
 export function codeEditorRetryDelay(attempt) {
   const safeAttempt = Number.isFinite(attempt) ? Math.max(0, Math.floor(attempt)) : 0;

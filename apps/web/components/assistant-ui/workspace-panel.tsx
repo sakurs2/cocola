@@ -9,7 +9,11 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { cn } from "@/lib/utils";
-import { classifyCodeEditorProbe, codeEditorRetryDelay } from "@/lib/code-editor-readiness.mjs";
+import {
+  classifyCodeEditorProbe,
+  codeEditorRetryDelay,
+  probeCodeEditorStatus,
+} from "@/lib/code-editor-readiness.mjs";
 import { resolveFileType } from "@/lib/file-type";
 import { MaterialFileIcon } from "@/lib/material-file-icons";
 import {
@@ -1091,15 +1095,11 @@ function CodePage({
       );
       let result: CodeEditorProbeResult;
       try {
-        const response = await fetch(src, {
-          method: "HEAD",
-          cache: "no-store",
-          signal: requestController.signal,
-        });
+        const responseStatus = await probeCodeEditorStatus(src, requestController.signal);
         result = classifyCodeEditorProbe({
           hasMessages: true,
           environmentPreparing,
-          responseStatus: response.status,
+          responseStatus,
         }) as CodeEditorProbeResult;
       } catch {
         if (disposed) return;

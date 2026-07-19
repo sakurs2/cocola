@@ -1,7 +1,11 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { classifyCodeEditorProbe, codeEditorRetryDelay } from "./code-editor-readiness.mjs";
+import {
+  classifyCodeEditorProbe,
+  codeEditorRetryDelay,
+  probeCodeEditorStatus,
+} from "./code-editor-readiness.mjs";
 
 test("a blank conversation does not probe or load code-server", () => {
   assert.deepEqual(
@@ -76,6 +80,36 @@ test("successful and unexpected responses are classified explicitly", () => {
     }),
     { kind: "error", retry: false },
   );
+});
+
+test("the editor probe uses GET and cancels the response body", async () => {
+  const controller = new AbortController();
+  let requestURL;
+  let requestInit;
+  let bodyCancelled = false;
+  const status = await probeCodeEditorStatus(
+    "/api/preview/session/39378/",
+    controller.signal,
+    async (url, init) => {
+      requestURL = url;
+      requestInit = init;
+      return {
+        status: 302,
+        body: {
+          async cancel() {
+            bodyCancelled = true;
+          },
+        },
+      };
+    },
+  );
+
+  assert.equal(requestURL, "/api/preview/session/39378/");
+  assert.equal(requestInit.method, "GET");
+  assert.equal(requestInit.cache, "no-store");
+  assert.equal(requestInit.signal, controller.signal);
+  assert.equal(bodyCancelled, true);
+  assert.equal(status, 302);
 });
 
 test("retry delay backs off and caps at five seconds", () => {
