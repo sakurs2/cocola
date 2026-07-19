@@ -33,6 +33,8 @@ CLUSTER="${COCOLA_K8S_CLUSTER:-cocola-sandbox}"
 PREPULL_SANDBOX_IMAGE="${COCOLA_K8S_PREPULL_SANDBOX_IMAGE:-1}"
 SANDBOX_IMAGE_REMOTE_DEFAULT="ghcr.io/sakurs2/cocola-sandbox-runtime:latest"
 SANDBOX_IMAGE_REMOTE="${COCOLA_K8S_SANDBOX_IMAGE_REMOTE:-$SANDBOX_IMAGE_REMOTE_DEFAULT}"
+SANDBOX_IMAGE_FS_PATH="/var/lib/rancher/k3s/agent/containerd"
+SANDBOX_IMAGE_FS_MAX_USAGE_PERCENT=80
 SERVER_PORT="${COCOLA_OPENSANDBOX_HOST_PORT:-8090}"
 RELEASE="${COCOLA_OPENSANDBOX_K8S_RELEASE:-opensandbox}"
 SYSTEM_NAMESPACE="${COCOLA_OPENSANDBOX_K8S_SYSTEM_NAMESPACE:-opensandbox-system}"
@@ -119,6 +121,30 @@ prepull_sandbox_image() {
   if ! docker exec "$node" crictl pull "$SANDBOX_IMAGE_REMOTE"; then
     err "failed to pre-pull $SANDBOX_IMAGE_REMOTE inside k3d node $node"
     err "check GHCR package visibility/network access, or set COCOLA_K8S_PREPULL_SANDBOX_IMAGE=0 to skip"
+    return 1
+  fi
+
+  local image_fs_usage_output
+  if ! image_fs_usage_output="$(docker exec "$node" df -P "$SANDBOX_IMAGE_FS_PATH")"; then
+    err "failed to inspect sandbox image filesystem usage inside k3d node $node"
+    err "inspect manually: docker exec $node df -h $SANDBOX_IMAGE_FS_PATH"
+    return 1
+  fi
+
+  local image_fs_usage_percent
+  image_fs_usage_percent="$(awk 'END { gsub(/%/, "", $5); print $5 }' <<<"$image_fs_usage_output")"
+  if [[ ! "$image_fs_usage_percent" =~ ^[0-9]+$ ]]; then
+    err "could not parse sandbox image filesystem usage inside k3d node $node"
+    err "inspect manually: docker exec $node df -h $SANDBOX_IMAGE_FS_PATH"
+    return 1
+  fi
+
+  log "sandbox image filesystem usage after pre-pull: ${image_fs_usage_percent}%"
+  if (( image_fs_usage_percent > SANDBOX_IMAGE_FS_MAX_USAGE_PERCENT )); then
+    err "sandbox image filesystem usage is ${image_fs_usage_percent}% after pre-pull; expected at most ${SANDBOX_IMAGE_FS_MAX_USAGE_PERCENT}%"
+    err "kubelet may garbage-collect the runtime image and make sandbox startup time out"
+    err "free Docker build cache with 'docker builder prune -f' or increase Docker Desktop disk capacity, then rerun make dev"
+    err "inspect usage: docker exec $node df -h $SANDBOX_IMAGE_FS_PATH"
     return 1
   fi
 }
