@@ -30,6 +30,7 @@ import { parse as parseUrl } from "node:url";
 import next from "next";
 import { getToken } from "next-auth/jwt";
 
+import { maskPreviewUpgradeFromNext } from "./lib/preview-ws-routing.mjs";
 import { isAllowedWebSocketOrigin, parsePublicOrigins } from "./lib/public-origins.mjs";
 
 const GATEWAY_URL = process.env.COCOLA_GATEWAY_URL ?? "http://127.0.0.1:8080";
@@ -60,7 +61,6 @@ function resolvePort() {
 
 const app = next({ dev, hostname, port });
 const handle = app.getRequestHandler();
-const upgradeNext = app.getUpgradeHandler();
 
 // Hop-by-hop / identity headers we must not forward upstream. The minted runtime
 // token replaces the browser's cookie; the gateway sets its own framing. Mirror
@@ -254,10 +254,18 @@ app
       trackSocket(socket);
       const upstreamPath = buildPreviewPath(req.url ?? "");
       if (!upstreamPath) {
-        // Not a preview target -> let Next handle it (dev HMR, etc.).
-        upgradeNext(req, socket, head).catch(() => socket.destroy());
+        // Next lazily appends its own Upgrade listener after the first HTTP
+        // request; it remains the sole owner of dev HMR and other upgrades.
         return;
       }
+
+      // Next's listener sees this same EventEmitter event after ours. The real
+      // URL matches the App Router's HTTP preview route, so Next would call
+      // socket.end() while our async authentication is still running. Hide the
+      // claimed upgrade behind an intentionally nonexistent API path; the real
+      // Gateway path was already captured above.
+      maskPreviewUpgradeFromNext(req);
+      socket.pause();
 
       (async () => {
         // The browser-facing cookie boundary owns CSWSH protection. Validate the
