@@ -116,7 +116,10 @@ func (m *Memory) Finalize(ctx context.Context, in FinalizeInput) (Run, error) {
 		m.mu.Unlock()
 		return run, nil
 	}
-	now := time.Now().UTC()
+	now := in.CompletedAt
+	if now.IsZero() {
+		now = time.Now().UTC()
+	}
 	run.Status = in.Status
 	run.ErrorCode = in.ErrorCode
 	run.CompletedAt = &now

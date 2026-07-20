@@ -281,7 +281,10 @@ func (p *Postgres) Finalize(ctx context.Context, in FinalizeInput) (Run, error) 
 			return Run{}, err
 		}
 	}
-	now := time.Now().UTC()
+	now := in.CompletedAt
+	if now.IsZero() {
+		now = time.Now().UTC()
+	}
 	_, err = tx.Exec(ctx, `UPDATE conversation_runs SET status=$2, error_code=$3,
 		completed_at=$4, last_activity_at=$4, duration_ms=GREATEST(0, EXTRACT(EPOCH FROM ($4-started_at))*1000)::bigint,
 		updated_at=now() WHERE trace_id=$1 AND status='running'`,

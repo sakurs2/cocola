@@ -64,6 +64,7 @@ type FinalizeInput struct {
 	AssistantMessage  *convo.Message
 	Reveal            bool
 	ConversationTitle string
+	CompletedAt       time.Time
 }
 
 type Store interface {

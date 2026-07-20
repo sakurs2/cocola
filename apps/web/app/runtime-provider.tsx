@@ -35,6 +35,7 @@ import {
   parseEnvironmentPreparationSnapshot,
   type EnvironmentPreparationSnapshot,
 } from "@/lib/environment";
+import { inferAgentDurationMs } from "@/lib/agent-turn-summary.mjs";
 
 // ---- Local message model (carries cocola semantics) ------------------------
 
@@ -245,6 +246,7 @@ export type UiMessageMetadata = {
   model_family?: string;
   model_icon_slug?: string;
   model_icon?: ModelIconConfig;
+  duration_ms?: number;
 };
 
 // Wire shape of a persisted message (gateway GET /v1/conversations/{id}/messages).
@@ -438,6 +440,10 @@ function normalizeIcon(raw: ModelIconConfig | undefined): ModelIconConfig | unde
 function normalizeMetadata(raw: UiMessageMetadata | undefined): UiMessageMetadata | undefined {
   if (!raw) return undefined;
   const icon = normalizeIcon(raw.model_icon);
+  const duration =
+    typeof raw.duration_ms === "number" && Number.isFinite(raw.duration_ms) && raw.duration_ms >= 0
+      ? raw.duration_ms
+      : undefined;
   return {
     ...(typeof raw.skill_id === "string" ? { skill_id: raw.skill_id } : {}),
     ...(typeof raw.model_route_id === "string" ? { model_route_id: raw.model_route_id } : {}),
@@ -447,6 +453,7 @@ function normalizeMetadata(raw: UiMessageMetadata | undefined): UiMessageMetadat
     ...(typeof raw.model_family === "string" ? { model_family: raw.model_family } : {}),
     ...(typeof raw.model_icon_slug === "string" ? { model_icon_slug: raw.model_icon_slug } : {}),
     ...(icon ? { model_icon: icon } : {}),
+    ...(duration !== undefined ? { duration_ms: duration } : {}),
   };
 }
 
@@ -468,13 +475,28 @@ function normalizePersistedParts(parts: UiPart[] | undefined): UiPart[] {
 
 function normalizeWireMessages(raw: unknown): UiMessage[] {
   if (!Array.isArray(raw)) return [];
-  return (raw as WireMessage[]).map((message) => ({
-    id: message.id,
-    role: message.role,
-    parts: normalizePersistedParts(message.parts),
-    metadata: normalizeMetadata(message.metadata),
-    createdAt: message.created_at ? new Date(message.created_at).getTime() : Date.now(),
-  }));
+  return (raw as WireMessage[]).map((message, index, messages) => {
+    const createdAt = message.created_at ? new Date(message.created_at).getTime() : Date.now();
+    const metadata = normalizeMetadata(message.metadata);
+    const previous = index > 0 ? messages[index - 1] : undefined;
+    const duration =
+      message.role === "assistant" && previous?.role === "user"
+        ? inferAgentDurationMs(metadata?.duration_ms, previous.created_at, message.created_at)
+        : metadata?.duration_ms;
+    return {
+      id: message.id,
+      role: message.role,
+      parts: normalizePersistedParts(message.parts),
+      metadata:
+        duration !== undefined
+          ? {
+              ...(metadata ?? {}),
+              duration_ms: duration,
+            }
+          : metadata,
+      createdAt,
+    };
+  });
 }
 
 function sessionStatusFromParts(parts: UiPart[]): EnvironmentStatus | null {
@@ -935,9 +957,20 @@ export function CocolaRuntimeProvider({ children }: { children: ReactNode }) {
     }
     setConvMessages((prev) => {
       const cur = prev[targetSessionId] ?? [];
-      const next = cur.map((m) =>
-        m.id === assistantId ? { ...m, parts: reducePart(m.parts, ev) } : m,
-      );
+      const duration =
+        ev.kind === "done"
+          ? inferAgentDurationMs(ev.data?.duration_ms, undefined, undefined)
+          : undefined;
+      const next = cur.map((m) => {
+        if (m.id !== assistantId) return m;
+        return {
+          ...m,
+          parts: reducePart(m.parts, ev),
+          ...(duration !== undefined
+            ? { metadata: { ...(m.metadata ?? {}), duration_ms: duration } }
+            : {}),
+        };
+      });
       return { ...prev, [targetSessionId]: next };
     });
   }, []);

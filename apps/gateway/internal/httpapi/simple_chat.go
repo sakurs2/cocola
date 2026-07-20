@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"strconv"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -277,7 +278,7 @@ func (r *liveRun) subscribe() (agent.Event, <-chan agent.Event, func()) {
 	defer r.mu.Unlock()
 	updates := make(chan agent.Event, subscriberBuffer)
 	if chatrun.IsTerminal(r.status) {
-		updates <- agent.Event{Kind: "done", Data: map[string]string{"status": r.status}}
+		updates <- agent.Event{Kind: "done", Data: terminalRunData(r.run)}
 		close(updates)
 	} else {
 		r.subs[updates] = struct{}{}
@@ -291,6 +292,21 @@ func (r *liveRun) subscribe() (agent.Event, <-chan agent.Event, func()) {
 		delete(r.subs, updates)
 		r.mu.Unlock()
 	}
+}
+
+func runDurationMS(run chatrun.Run) (int64, bool) {
+	if run.StartedAt.IsZero() || run.CompletedAt == nil || run.CompletedAt.Before(run.StartedAt) {
+		return 0, false
+	}
+	return run.CompletedAt.Sub(run.StartedAt).Milliseconds(), true
+}
+
+func terminalRunData(run chatrun.Run) map[string]string {
+	data := map[string]string{"status": run.Status}
+	if durationMS, ok := runDurationMS(run); ok {
+		data["duration_ms"] = strconv.FormatInt(durationMS, 10)
+	}
+	return data
 }
 
 func (r *liveRun) publish(event agent.Event) {
@@ -399,6 +415,15 @@ func (a *API) executeLiveRun(live *liveRun) {
 	} else if err != nil || sawError {
 		status, errorCode = chatrun.StatusError, "AGENT_ERROR"
 	}
+	if status == chatrun.StatusCancelled || status == chatrun.StatusInterrupted {
+		notice := "Run was cancelled."
+		if status == chatrun.StatusInterrupted {
+			notice = "Run was interrupted before completion."
+		}
+		noticeEvent := agent.Event{Kind: "text", Data: map[string]string{"text": "\n\n" + notice}}
+		live.apply(noticeEvent)
+		live.publish(noticeEvent)
+	}
 	if stepTimeout != nil && !cancelled {
 		errorData := map[string]string{
 			"error": fmt.Sprintf("tool step %q timed out after %s", stepTimeout.Name, stepTimeout.Limit),
@@ -411,14 +436,21 @@ func (a *API) executeLiveRun(live *liveRun) {
 		live.apply(agent.Event{Kind: "error", Data: errorData})
 		live.publish(agent.Event{Kind: "error", Data: errorData})
 	}
+	completedAt := time.Now().UTC()
+	durationMS, hasDuration := runDurationMS(chatrun.Run{
+		StartedAt: live.run.StartedAt, CompletedAt: &completedAt,
+	})
 	metadata := assistantMetadata(live.request)
 	metadata["partial"] = false
+	if hasDuration {
+		metadata["duration_ms"] = durationMS
+	}
 	if status == chatrun.StatusInterrupted {
 		metadata["interrupted"] = true
 	}
 	message := &convo.Message{
 		ID: live.run.ID + "-assistant", ConversationID: live.run.ConversationID,
-		Role: "assistant", Parts: live.parts(), Metadata: metadata, CreatedAt: time.Now().UTC(),
+		Role: "assistant", Parts: live.parts(), Metadata: metadata, CreatedAt: completedAt,
 	}
 	if len(message.Parts) == 0 {
 		message = nil
@@ -426,15 +458,16 @@ func (a *API) executeLiveRun(live *liveRun) {
 	finalizedRun, finalized := a.finalizeRun(chatrun.FinalizeInput{
 		RunID: live.run.ID, UserID: live.run.UserID, Status: status, ErrorCode: errorCode,
 		AssistantMessage: message, Reveal: live.request.DeferConversationVisibilityUntilDone,
-		ConversationTitle: titleForConversation(live.request),
+		ConversationTitle: titleForConversation(live.request), CompletedAt: completedAt,
 	})
 	if finalized {
 		status, errorCode = finalizedRun.Status, finalizedRun.ErrorCode
 		a.finishConversationRun(live.traceCtx, live.traceRun, status, errorCode, ttftMS, toolCalls)
 		live.mu.Lock()
 		live.status = status
+		live.run = finalizedRun
 		live.mu.Unlock()
-		live.publish(agent.Event{Kind: "done", Data: map[string]string{"status": status}})
+		live.publish(agent.Event{Kind: "done", Data: terminalRunData(finalizedRun)})
 	}
 	a.runs.mu.Lock()
 	delete(a.runs.live, live.run.ID)
@@ -735,7 +768,7 @@ func (a *API) streamStoredRun(w http.ResponseWriter, r *http.Request, run chatru
 	_ = writeSSE(w, flusher, agent.Event{Kind: "snapshot", Data: map[string]string{
 		"parts": string(encodedParts), "status": run.Status,
 	}})
-	_ = writeSSE(w, flusher, agent.Event{Kind: "done", Data: map[string]string{"status": run.Status}})
+	_ = writeSSE(w, flusher, agent.Event{Kind: "done", Data: terminalRunData(run)})
 }
 
 func (a *API) streamRun(w http.ResponseWriter, r *http.Request) {

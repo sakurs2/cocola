@@ -3,6 +3,7 @@ package httpapi
 import (
 	"context"
 	"errors"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -67,7 +68,7 @@ func durableTestAPI(streamer agent.Streamer) (*API, *chatrun.Memory, *convo.Memo
 	api := New(streamer, auth.NewVerifier(auth.Config{}), logger.Must()).
 		WithConvoStore(conversations).
 		WithChatRuns(runs, RunConfig{
-			PingEvery: time.Hour,
+			PingEvery:   time.Hour,
 			MergeWindow: time.Millisecond, DraftInterval: time.Millisecond,
 		})
 	return api, runs, conversations
@@ -160,7 +161,9 @@ func TestDurableChatDisconnectDoesNotCancelRun(t *testing.T) {
 	}
 	waitForRunStatus(t, runs, runID, chatrun.StatusCancelled)
 	messages, err = conversations.GetMessages(context.Background(), "conversation-1", auth.DevIdentity.UserID)
-	if err != nil || len(messages) != 2 || messages[1].Parts[0].Text != "partial" {
+	if err != nil || len(messages) != 2 ||
+		!strings.Contains(messages[1].Parts[0].Text, "partial") ||
+		!strings.Contains(messages[1].Parts[0].Text, "Run was cancelled.") {
 		t.Fatalf("cancelled partial output = %+v, %v", messages, err)
 	}
 }
@@ -276,7 +279,7 @@ func TestDurableChatBusinessErrorCannotBecomeSuccess(t *testing.T) {
 		{Kind: "error", Data: map[string]string{"error": "tool failed"}},
 		{Kind: "done", Data: map[string]string{"reason": "complete"}},
 	}}
-	api, runs, _ := durableTestAPI(streamer)
+	api, runs, conversations := durableTestAPI(streamer)
 	recorder := httptest.NewRecorder()
 	api.Handler().ServeHTTP(recorder, httptest.NewRequest(http.MethodPost, "/v1/chat", strings.NewReader(
 		`{"prompt":"hello","session_id":"conversation-1","client_request_id":"request-1"}`,
@@ -292,6 +295,39 @@ func TestDurableChatBusinessErrorCannotBecomeSuccess(t *testing.T) {
 	if !strings.Contains(recorder.Body.String(), `"status":"error"`) {
 		t.Fatalf("terminal SSE did not report error: %s", recorder.Body.String())
 	}
+	if !strings.Contains(recorder.Body.String(), `"duration_ms":"`) {
+		t.Fatalf("terminal SSE did not report duration: %s", recorder.Body.String())
+	}
+	messages, err := conversations.GetMessages(context.Background(), "conversation-1", auth.DevIdentity.UserID)
+	if err != nil || len(messages) != 2 {
+		t.Fatalf("saved messages = %+v, %v", messages, err)
+	}
+	duration, ok := messages[1].Metadata["duration_ms"].(int64)
+	if !ok || duration < 0 {
+		t.Fatalf("assistant duration metadata = %#v", messages[1].Metadata["duration_ms"])
+	}
+	if !strings.Contains(recorder.Body.String(), `"duration_ms":"`+fmt.Sprint(duration)+`"`) {
+		t.Fatalf("SSE and metadata durations differ: metadata=%d body=%s", duration, recorder.Body.String())
+	}
+}
+
+func TestTerminalRunDataOmitsInvalidDuration(t *testing.T) {
+	startedAt := time.Date(2026, time.July, 20, 10, 0, 0, 0, time.UTC)
+	completedAt := startedAt.Add(118 * time.Second)
+	data := terminalRunData(chatrun.Run{
+		Status: chatrun.StatusSuccess, StartedAt: startedAt, CompletedAt: &completedAt,
+	})
+	if data["duration_ms"] != "118000" {
+		t.Fatalf("duration_ms = %q, want 118000", data["duration_ms"])
+	}
+
+	invalid := startedAt.Add(-time.Second)
+	data = terminalRunData(chatrun.Run{
+		Status: chatrun.StatusError, StartedAt: startedAt, CompletedAt: &invalid,
+	})
+	if _, exists := data["duration_ms"]; exists {
+		t.Fatalf("invalid duration was included: %+v", data)
+	}
 }
 
 func TestReconnectSnapshotDoesNotDuplicateBufferedText(t *testing.T) {
@@ -301,7 +337,7 @@ func TestReconnectSnapshotDoesNotDuplicateBufferedText(t *testing.T) {
 	api := New(streamer, auth.NewVerifier(auth.Config{}), logger.Must()).
 		WithConvoStore(conversations).
 		WithChatRuns(runs, RunConfig{
-			PingEvery: time.Hour,
+			PingEvery:   time.Hour,
 			MergeWindow: 500 * time.Millisecond, DraftInterval: time.Hour,
 		})
 	handler := api.Handler()
@@ -361,6 +397,9 @@ func TestStoredRunReplayIncludesSavedAssistantSnapshot(t *testing.T) {
 	handler.ServeHTTP(replay, httptest.NewRequest(http.MethodGet, "/v1/chat/runs/"+runID, nil))
 	if replay.Code != http.StatusOK || !strings.Contains(replay.Body.String(), "saved answer") {
 		t.Fatalf("stored replay = %d %s", replay.Code, replay.Body.String())
+	}
+	if !strings.Contains(replay.Body.String(), `"duration_ms":"`) {
+		t.Fatalf("stored replay did not report duration: %s", replay.Body.String())
 	}
 	assertNoActiveRun(t, handler, "conversation-1")
 }

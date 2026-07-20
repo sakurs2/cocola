@@ -6,6 +6,7 @@ import { MarkdownContent } from "@/components/assistant-ui/markdown-text";
 import {
   RailEnvironment,
   RailFile,
+  RailProcessSummary,
   RailReasoning,
   RailText,
   RailTool,
@@ -14,6 +15,11 @@ import { parseEnvironmentPreparationSnapshot } from "@/lib/environment";
 import { ModelIcon } from "@/components/assistant-ui/thread";
 import { cn } from "@/lib/utils";
 import { type ModelIconConfig } from "@/app/runtime-provider";
+import {
+  finalAgentOutputText,
+  inferAgentDurationMs,
+  splitAgentTurnParts,
+} from "@/lib/agent-turn-summary.mjs";
 
 type ToolPart = {
   type: "tool-call";
@@ -40,12 +46,19 @@ type EnvironmentPart = {
   environment?: unknown;
 };
 
+type ProgressPart = {
+  type: "progress";
+  progressId?: string;
+  items?: unknown[];
+};
+
 type MessagePart =
   | { type: "text"; text?: string }
   | { type: "reasoning"; text?: string }
   | ToolPart
   | FilePart
-  | EnvironmentPart;
+  | EnvironmentPart
+  | ProgressPart;
 
 type WireMessage = {
   id: string;
@@ -55,6 +68,7 @@ type WireMessage = {
     model_label?: string;
     model_alias?: string;
     model_icon?: ModelIconConfig;
+    duration_ms?: number;
   };
   created_at?: string;
 };
@@ -158,8 +172,16 @@ export function ConversationReadOnly({ conversationId }: { conversationId: strin
           className="flex flex-col items-center"
           style={{ ["--thread-max-width" as string]: "52rem" }}
         >
-          {state.messages.map((message) => (
-            <MessageBubble key={message.id} message={message} />
+          {state.messages.map((message, index) => (
+            <MessageBubble
+              key={message.id}
+              message={message}
+              previousUserCreatedAt={
+                index > 0 && state.messages[index - 1]?.role === "user"
+                  ? state.messages[index - 1]?.created_at
+                  : undefined
+              }
+            />
           ))}
         </div>
       </div>
@@ -167,7 +189,13 @@ export function ConversationReadOnly({ conversationId }: { conversationId: strin
   );
 }
 
-function MessageBubble({ message }: { message: WireMessage }) {
+function MessageBubble({
+  message,
+  previousUserCreatedAt,
+}: {
+  message: WireMessage;
+  previousUserCreatedAt?: string;
+}) {
   const isUser = message.role === "user";
   const parts = message.parts ?? [];
 
@@ -189,15 +217,39 @@ function MessageBubble({ message }: { message: WireMessage }) {
     );
   }
 
+  const split = splitAgentTurnParts(parts);
+  const durationMs = inferAgentDurationMs(
+    message.metadata?.duration_ms,
+    previousUserCreatedAt,
+    message.created_at,
+  );
+
   return (
     <article className="relative grid w-full max-w-[var(--thread-max-width)] grid-cols-[auto_1fr] grid-rows-[auto_1fr] py-3">
       <div className="col-span-2 col-start-1 row-start-1 my-1.5 max-w-full break-words leading-7 text-foreground">
         <AssistantHeader message={message} />
         <div>
           {parts.length > 0 ? (
-            parts.map((part, index) => (
-              <MessagePartView key={`${message.id}-${index}`} part={part} role={message.role} />
-            ))
+            <>
+              {split.hasProcess ? (
+                <RailProcessSummary durationMs={durationMs}>
+                  {split.processIndices.map((index) => (
+                    <MessagePartView
+                      key={`${message.id}-process-${index}`}
+                      part={parts[index]!}
+                      role={message.role}
+                    />
+                  ))}
+                </RailProcessSummary>
+              ) : null}
+              {split.outputIndices.map((index) => (
+                <MessagePartView
+                  key={`${message.id}-output-${index}`}
+                  part={parts[index]!}
+                  role={message.role}
+                />
+              ))}
+            </>
           ) : (
             <TypingDots />
           )}
@@ -215,9 +267,13 @@ function AssistantHeader({ message }: { message: WireMessage }) {
   return (
     <div className="mb-2 flex items-center gap-x-2.5">
       <ModelIcon icon={icon} className="size-7 shrink-0" bare />
-      <span className="min-w-0 truncate text-base font-bold leading-none text-foreground">{label}</span>
+      <span className="min-w-0 truncate text-base font-bold leading-none text-foreground">
+        {label}
+      </span>
       {message.created_at ? (
-        <span className="shrink-0 text-xs text-muted-foreground">{formatDate(message.created_at)}</span>
+        <span className="shrink-0 text-xs text-muted-foreground">
+          {formatDate(message.created_at)}
+        </span>
       ) : null}
     </div>
   );
@@ -253,6 +309,10 @@ function MessagePartView({ part, role }: { part: MessagePart; role: "user" | "as
       />
     );
   }
+  if (part.type === "progress") {
+    const snapshot = JSON.stringify(part.items ?? []);
+    return <RailTool toolName="Progress" argsText={snapshot} result={snapshot} />;
+  }
   if (part.type === "file") {
     // Read-only page has no Artifact side panel, so omit onPreview → download only.
     return (
@@ -269,7 +329,8 @@ function MessagePartView({ part, role }: { part: MessagePart; role: "user" | "as
 
 function CopyMessageButton({ message }: { message: WireMessage }) {
   const [copied, setCopied] = useState(false);
-  const text = messageText(message);
+  const parts = message.parts ?? [];
+  const text = finalAgentOutputText(parts, splitAgentTurnParts(parts).outputIndices);
 
   const copy = async () => {
     if (!text) return;
@@ -302,45 +363,6 @@ function TypingDots() {
       <span className="size-2 animate-bounce rounded-full bg-muted-foreground/60" />
     </div>
   );
-}
-
-function messageText(message: WireMessage): string {
-  return (message.parts ?? [])
-    .map((part) => {
-      if (part.type === "text" || part.type === "reasoning") return part.text ?? "";
-      if (part.type === "tool-call") {
-        return [
-          part.toolName ? `[tool] ${part.toolName}` : "[tool]",
-          part.argsText ? `Arguments:\n${formatPayload(part.argsText)}` : "",
-          part.result !== undefined ? `Result:\n${formatPayload(part.result)}` : "",
-        ]
-          .filter(Boolean)
-          .join("\n");
-      }
-      if (part.type === "file") {
-        return `[file] ${part.filename || "file"} ${part.downloadUrl || part.download_url || ""}`.trim();
-      }
-      return "";
-    })
-    .filter(Boolean)
-    .join("\n\n");
-}
-
-function formatPayload(value: unknown): string {
-  if (typeof value === "string") {
-    const trimmed = value.trim();
-    if (!trimmed) return "";
-    try {
-      return JSON.stringify(JSON.parse(trimmed), null, 2);
-    } catch {
-      return value;
-    }
-  }
-  try {
-    return JSON.stringify(value, null, 2);
-  } catch {
-    return String(value);
-  }
 }
 
 function formatDate(value: string) {

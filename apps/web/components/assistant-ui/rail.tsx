@@ -28,10 +28,11 @@ import {
   Wrench as PhWrench,
   type LucideIcon as PhosphorIcon,
 } from "lucide-react";
-import { ChevronRight, Download, ExternalLink, Eye } from "lucide-react";
+import { CheckCircle2, ChevronRight, Download, ExternalLink, Eye } from "lucide-react";
 import Image from "next/image";
-import { type FC, type ReactNode } from "react";
+import { useState, type FC, type ReactNode } from "react";
 import { TooltipIconButton } from "@/components/assistant-ui/tooltip-icon-button";
+import { formatAgentDuration } from "@/lib/agent-turn-summary.mjs";
 import { cn } from "@/lib/utils";
 import { type EnvironmentPreparationSnapshot } from "@/lib/environment";
 import { resolveFileType } from "@/lib/file-type";
@@ -40,6 +41,35 @@ import { MaterialFileIcon } from "@/lib/material-file-icons";
 // All rail action icons come from Phosphor; reuse its component type so the
 // `weight` prop (duotone/bold/...) type-checks.
 export type RailIcon = PhosphorIcon;
+
+export const RailProcessSummary: FC<{
+  durationMs?: number;
+  children: ReactNode;
+}> = ({ durationMs, children }) => {
+  const [expanded, setExpanded] = useState(false);
+  const duration = formatAgentDuration(durationMs);
+
+  return (
+    <div className="mb-2">
+      <button
+        type="button"
+        aria-expanded={expanded}
+        onClick={() => setExpanded((value) => !value)}
+        className="group grid min-h-10 w-full grid-cols-[1.75rem_minmax(0,1fr)_auto] items-center gap-x-2.5 rounded-xl border border-border/60 bg-muted/35 py-2 pr-3.5 text-left text-sm font-medium text-muted-foreground transition-colors hover:bg-muted/60 hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
+      >
+        <span className="flex items-center justify-center">
+          <CheckCircle2 className="size-4 shrink-0 text-emerald-500" aria-hidden="true" />
+        </span>
+        <span className="truncate">{duration ? `Processed in ${duration}` : "Processed"}</span>
+        <ChevronRight
+          className={cn("size-4 shrink-0 transition-transform", expanded && "rotate-90")}
+          aria-hidden="true"
+        />
+      </button>
+      {expanded ? <div className="mt-2">{children}</div> : null}
+    </div>
+  );
+};
 
 // Shared vertical-rail row. Every response node hangs off one continuous line
 // (drawn by the icon column's `after:` pseudo): an icon badge sits on the line,
@@ -64,11 +94,7 @@ export const RailRow: FC<{
           tone === "error" ? "text-destructive" : (color ?? "text-muted-foreground"),
         )}
       >
-        {running ? (
-          <SpinnerGap className="size-5 animate-spin" />
-        ) : (
-          <Icon className="size-5" />
-        )}
+        {running ? <SpinnerGap className="size-5 animate-spin" /> : <Icon className="size-5" />}
       </span>
     </div>
     <div className="min-w-0 pb-4">
@@ -467,7 +493,10 @@ export const RailFile: FC<{
               aria-hidden="true"
             />
           ) : (
-            <MaterialFileIcon name={kind.icon} className="flex size-6 items-center justify-center" />
+            <MaterialFileIcon
+              name={kind.icon}
+              className="flex size-6 items-center justify-center"
+            />
           )}
         </span>
         <div className="min-w-0 flex-1">

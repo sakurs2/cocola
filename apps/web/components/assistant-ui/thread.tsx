@@ -47,12 +47,14 @@ import { MarkdownText } from "@/components/assistant-ui/markdown-text";
 import {
   RailEnvironment,
   RailFile,
+  RailProcessSummary,
   RailReasoning,
   RailResponsePending,
   RailText,
   RailTool,
 } from "@/components/assistant-ui/rail";
 import { type EnvironmentPreparationSnapshot } from "@/lib/environment";
+import { finalAgentOutputText, splitAgentTurnParts } from "@/lib/agent-turn-summary.mjs";
 import {
   LOCAL_SIMPLE_ICON_PATHS,
   SIMPLE_ICON_FALLBACK_BADGES,
@@ -574,14 +576,7 @@ export const ModelIcon: FC<{ icon?: ModelIconConfig; className?: string; bare?: 
   if (simpleIconPath) {
     return (
       <span className={frame("bg-white")} aria-hidden="true">
-        <Image
-          src={simpleIconPath}
-          alt=""
-          width={96}
-          height={96}
-          unoptimized
-          className={imgSize}
-        />
+        <Image src={simpleIconPath} alt="" width={96} height={96} unoptimized className={imgSize} />
       </span>
     );
   }
@@ -672,32 +667,33 @@ const ComposerAction: FC = () => {
 const UserMessage: FC = () => {
   const id = useMessage((m) => m.id);
   return (
-  <MessagePrimitive.Root
-    data-message-id={id}
-    className="message-enter grid w-full max-w-[var(--thread-max-width)] auto-rows-auto grid-cols-[minmax(72px,1fr)_auto] gap-y-1 py-3">
-    <div className="col-start-2 row-start-1 flex flex-col items-end gap-1.5">
-      <UserSkillBadge />
-      <div className="flex flex-wrap justify-end gap-1.5 empty:hidden">
-        <MessagePrimitive.Attachments
-          components={{
-            Attachment: () => (
-              <AttachmentPrimitive.Root className="flex w-fit max-w-full items-center gap-2 rounded-lg border border-border bg-muted/60 px-3 py-1.5 text-xs text-foreground">
-                <PaperclipIcon className="size-3.5 shrink-0 text-muted-foreground" />
-                <span className="max-w-[16rem] truncate">
-                  <AttachmentPrimitive.Name />
-                </span>
-              </AttachmentPrimitive.Root>
-            ),
-          }}
-        />
-      </div>
-      <MessagePrimitive.If hasContent>
-        <div className="max-w-[calc(var(--thread-max-width)*0.8)] whitespace-pre-wrap break-words rounded-2xl bg-muted px-4 py-2.5 text-[15px] leading-6 text-foreground">
-          <MessagePrimitive.Parts />
+    <MessagePrimitive.Root
+      data-message-id={id}
+      className="message-enter grid w-full max-w-[var(--thread-max-width)] auto-rows-auto grid-cols-[minmax(72px,1fr)_auto] gap-y-1 py-3"
+    >
+      <div className="col-start-2 row-start-1 flex flex-col items-end gap-1.5">
+        <UserSkillBadge />
+        <div className="flex flex-wrap justify-end gap-1.5 empty:hidden">
+          <MessagePrimitive.Attachments
+            components={{
+              Attachment: () => (
+                <AttachmentPrimitive.Root className="flex w-fit max-w-full items-center gap-2 rounded-lg border border-border bg-muted/60 px-3 py-1.5 text-xs text-foreground">
+                  <PaperclipIcon className="size-3.5 shrink-0 text-muted-foreground" />
+                  <span className="max-w-[16rem] truncate">
+                    <AttachmentPrimitive.Name />
+                  </span>
+                </AttachmentPrimitive.Root>
+              ),
+            }}
+          />
         </div>
-      </MessagePrimitive.If>
-    </div>
-  </MessagePrimitive.Root>
+        <MessagePrimitive.If hasContent>
+          <div className="max-w-[calc(var(--thread-max-width)*0.8)] whitespace-pre-wrap break-words rounded-2xl bg-muted px-4 py-2.5 text-[15px] leading-6 text-foreground">
+            <MessagePrimitive.Parts />
+          </div>
+        </MessagePrimitive.If>
+      </div>
+    </MessagePrimitive.Root>
   );
 };
 
@@ -742,6 +738,7 @@ const AssistantMessage: FC = () => (
 const AssistantMessageParts: FC = () => {
   const isLast = useMessage((m) => m.isLast);
   const isRunning = useThread((t) => t.isRunning);
+  const parts = useMessage((m) => m.content);
   const custom = useMessage((m) => m.metadata.custom) as UiMessageMetadata & {
     environmentPreparation?: EnvironmentPreparationSnapshot;
     environmentOnly?: boolean;
@@ -752,6 +749,38 @@ const AssistantMessageParts: FC = () => {
     custom.environmentOnly === true &&
     custom.environmentPreparation != null &&
     custom.environmentPreparation.state !== "preparing";
+  const split = splitAgentTurnParts(parts, custom.environmentPreparation != null);
+
+  if (!streaming) {
+    return (
+      <div>
+        {split.hasProcess ? (
+          <RailProcessSummary durationMs={custom.duration_ms}>
+            {custom.environmentPreparation ? (
+              <RailEnvironment environment={custom.environmentPreparation} />
+            ) : null}
+            {split.processIndices.map((index) => (
+              <MessagePrimitive.PartByIndex
+                key={index}
+                index={index}
+                components={ASSISTANT_PART_COMPONENTS}
+              />
+            ))}
+          </RailProcessSummary>
+        ) : null}
+        {!custom.environmentOnly
+          ? split.outputIndices.map((index) => (
+              <MessagePrimitive.PartByIndex
+                key={index}
+                index={index}
+                components={ASSISTANT_PART_COMPONENTS}
+              />
+            ))
+          : null}
+      </div>
+    );
+  }
+
   return (
     <div className={streaming ? "aui-rail-streaming" : undefined}>
       {custom.environmentPreparation ? (
@@ -759,14 +788,7 @@ const AssistantMessageParts: FC = () => {
       ) : null}
       {awaitingFirstResponsePart ? <RailResponsePending /> : null}
       {!custom.environmentOnly ? (
-        <MessagePrimitive.Parts
-          components={{
-            Text: TextPart,
-            Reasoning: ReasoningPart,
-            File: ArtifactFilePart,
-            tools: { Fallback: ToolFallback },
-          }}
-        />
+        <MessagePrimitive.Parts components={ASSISTANT_PART_COMPONENTS} />
       ) : null}
     </div>
   );
@@ -781,7 +803,9 @@ const AssistantMessageHeader: FC = () => {
   return (
     <div className="mb-2 flex items-center gap-x-2.5">
       <ModelIcon icon={icon} className="size-7 shrink-0" bare />
-      <span className="min-w-0 truncate text-base font-bold leading-none text-foreground">{label}</span>
+      <span className="min-w-0 truncate text-base font-bold leading-none text-foreground">
+        {label}
+      </span>
     </div>
   );
 };
@@ -858,6 +882,13 @@ const ToolFallback: FC<ToolCallMessagePartProps> = ({
   />
 );
 
+const ASSISTANT_PART_COMPONENTS = {
+  Text: TextPart,
+  Reasoning: ReasoningPart,
+  File: ArtifactFilePart,
+  tools: { Fallback: ToolFallback },
+};
+
 const AssistantActionBar: FC = () => {
   // Copy control stays resident: autohide="never" so every completed assistant
   // turn keeps its copy button, not just on hover.
@@ -868,17 +899,27 @@ const AssistantActionBar: FC = () => {
   // message that is actively streaming (the last one while the thread runs).
   const isLast = useMessage((m) => m.isLast);
   const isRunning = useThread((t) => t.isRunning);
+  const parts = useMessage((m) => m.content);
+  const [copied, setCopied] = useState(false);
+  const { outputIndices } = splitAgentTurnParts(parts);
+  const text = finalAgentOutputText(parts, outputIndices);
   if (isLast && isRunning) return null;
+
+  const copy = async () => {
+    if (!text) return;
+    await navigator.clipboard.writeText(text);
+    setCopied(true);
+    window.setTimeout(() => setCopied(false), 1_400);
+  };
+
   return (
     <ActionBarPrimitive.Root
       autohide="never"
       className="col-start-1 row-start-2 ml-1 flex gap-1 text-muted-foreground"
     >
-      <ActionBarPrimitive.Copy asChild>
-        <TooltipIconButton tooltip="Copy">
-          <CopyIcon className="h-4 w-4" />
-        </TooltipIconButton>
-      </ActionBarPrimitive.Copy>
+      <TooltipIconButton tooltip={copied ? "Copied" : "Copy"} disabled={!text} onClick={copy}>
+        {copied ? <Check className="h-4 w-4 text-emerald-500" /> : <CopyIcon className="h-4 w-4" />}
+      </TooltipIconButton>
     </ActionBarPrimitive.Root>
   );
 };
