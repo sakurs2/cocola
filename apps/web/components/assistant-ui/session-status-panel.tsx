@@ -8,7 +8,7 @@ import {
   Loader2 as SpinnerGap,
   AlertCircle as WarningCircle,
 } from "lucide-react";
-import { ChevronRight, FileText, Info, X } from "lucide-react";
+import { Activity, ChevronRight, FileText, X } from "lucide-react";
 import { useState, type ReactNode } from "react";
 
 export function SessionStatusButton({
@@ -28,7 +28,7 @@ export function SessionStatusButton({
       onClick={onClick}
       className="relative inline-flex size-8 items-center justify-center rounded-full text-muted-foreground transition-colors hover:bg-muted hover:text-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
     >
-      <Info className="size-4" />
+      <Activity className="size-4" />
       <span
         className={`absolute right-1 top-1 size-1.5 rounded-full ${environmentDotClass(status.phase)}`}
       />
@@ -200,9 +200,7 @@ function EnvironmentGroup({
       >
         <span className="flex min-w-0 items-center gap-2">
           <span className="shrink-0">{icon}</span>
-          <span className="text-[13px] font-semibold tracking-wide text-foreground">
-            {title}
-          </span>
+          <span className="text-[13px] font-semibold tracking-wide text-foreground">{title}</span>
         </span>
         <span className="flex min-w-0 items-center gap-2">
           <span className="truncate text-xs text-muted-foreground/80">{summary}</span>
