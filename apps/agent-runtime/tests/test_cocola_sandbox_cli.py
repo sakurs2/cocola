@@ -11,6 +11,7 @@ import pytest
 REPO_ROOT = Path(__file__).resolve().parents[3]
 CLI_PATH = REPO_ROOT / "deploy" / "sandbox-runtime" / "cocola_sandbox.py"
 MANIFEST_PATH = REPO_ROOT / "deploy" / "sandbox-runtime" / "runtime-manifest.json"
+EXTENSION_LOCK_PATH = REPO_ROOT / "deploy" / "sandbox-runtime" / "code-server-extensions.lock.json"
 BUILTIN_SKILLS_PATH = REPO_ROOT / "deploy" / "sandbox-runtime" / "skills"
 
 
@@ -46,6 +47,7 @@ def test_info_reports_coding_profile_and_ready_service(cli, monkeypatch, capsys)
     assert payload["schema_version"] == 1
     assert payload["profile"] == "coding"
     assert payload["workspace"]["root"] == "/workspace"
+    assert payload["editor"]["update_policy"] == "runtime-image-only"
     assert payload["services"][0]["state"] == "ready"
     assert payload["capabilities"][0]["name"] == "browser"
     assert payload["capabilities"][0]["enabled"] is True
@@ -298,10 +300,74 @@ def test_supervised_launcher_cannot_be_replaced_or_raise_its_user():
     )
     assert 'CODE_SERVER_USER="cocola"' in launcher
     assert "COCOLA_CODE_SERVER_USER" not in launcher
+    assert 'CODE_SERVER_EXTENSIONS_DIR="/opt/cocola/code-server/extensions"' in launcher
+    assert "COCOLA_CODE_SERVER_EXTENSIONS_DIR" not in launcher
+    assert 'CODE_SERVER_STATE_DIR="/session/runtime/cocola/code-server"' in launcher
+    assert "COCOLA_CODE_SERVER_STATE_DIR" not in launcher
+    assert 'XDG_CONFIG_HOME="$CODE_SERVER_CONFIG_DIR"' in launcher
+    assert '--user-data-dir "$CODE_SERVER_USER_DATA_DIR"' in launcher
+    assert '--extensions-dir "$CODE_SERVER_EXTENSIONS_DIR"' in launcher
     assert "autorestart=false" in supervisor
     assert "autorestart=unexpected" not in supervisor
     assert "startretries=3" in supervisor
     assert manifest["capabilities"]["browser"]["state_dir"] in browser_runner
+
+
+def test_platform_code_server_extensions_and_language_tools_are_exactly_locked():
+    lock = json.loads(EXTENSION_LOCK_PATH.read_text(encoding="utf-8"))
+    manifest = json.loads(MANIFEST_PATH.read_text(encoding="utf-8"))
+    dockerfile = (REPO_ROOT / "deploy" / "sandbox-runtime" / "Dockerfile").read_text(
+        encoding="utf-8"
+    )
+
+    assert lock["schema_version"] == 1
+    assert lock["code_server_version"] == "4.117.0"
+    assert lock["code_version"] == "1.117.0"
+    extensions = {item["id"]: item for item in lock["extensions"]}
+    assert set(extensions) == {
+        "ms-python.python",
+        "detachhead.basedpyright",
+        "charliermarsh.ruff",
+        "golang.Go",
+        "redhat.java",
+        "llvm-vs-code-extensions.vscode-clangd",
+        "mads-hartmann.bash-ide-vscode",
+        "redhat.vscode-yaml",
+        "DavidAnson.vscode-markdownlint",
+        "yzhang.markdown-all-in-one",
+    }
+    assert "ms-python.vscode-pylance" not in extensions
+    for extension in extensions.values():
+        assert extension["version"] not in {"latest", "stable", "pre-release"}
+        if extension["install"] in {"vsix", "vsix-unpacked"}:
+            assert extension["version"] in extension["url"]
+            assert re.fullmatch(r"[0-9a-f]{64}", extension["sha256"])
+            if extension["install"] == "vsix-unpacked":
+                assert extension["id"] == "ms-python.python"
+        else:
+            assert extension["id"] == "charliermarsh.ruff"
+            assert extension["install"] == "platform-vsix"
+            assert "{platform}" in extension["url"]
+            assert "{platform}" in extension["sha256_url"]
+
+    tools = {item["name"]: item for item in lock["language_tools"]}
+    assert set(tools) == {"gopls", "clangd", "shellcheck", "shfmt", "java"}
+    for tool in tools.values():
+        assert tool["version"] not in {"latest", "stable"}
+
+    assert manifest["editor"] == {
+        "kind": "code-server",
+        "extensions_dir": "/opt/cocola/code-server/extensions",
+        "extensions_lock": "/opt/cocola/code-server-extensions.lock.json",
+        "language_tools_dir": "/opt/cocola/toolchains/bin",
+        "update_policy": "runtime-image-only",
+    }
+    assert (
+        "COPY code-server-extensions.lock.json /opt/cocola/code-server-extensions.lock.json"
+        in dockerfile
+    )
+    assert "COPY install-code-server-extensions.sh" in dockerfile
+    assert "GOTOOLCHAIN=auto" in dockerfile
 
 
 def test_builtin_browser_skill_matches_the_guest_cli_contract():

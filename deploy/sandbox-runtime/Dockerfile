@@ -150,6 +150,59 @@ RUN set -eux; \
     rm -rf /tmp/cs-offline /tmp/code-server.tar.gz; \
     code-server --version
 
+# ---- platform Code Server extensions + language tooling -----------------
+# Extensions are exact-version image assets. Universal VSIX files are fetched
+# from their pinned Open VSX URLs and checksum-verified; Ruff is selected by
+# Open VSX for the build platform because it bundles a native executable. The
+# installer verifies the final inventory exactly, so dependency packs or new
+# transitive extensions cannot silently enter the image.
+#
+# Language servers that are not bundled by their extension are installed next
+# to the platform extensions. Nothing is downloaded when a sandbox starts.
+COPY code-server-extensions.lock.json /opt/cocola/code-server-extensions.lock.json
+RUN set -eux; \
+    lock=/opt/cocola/code-server-extensions.lock.json; \
+    clangd_package="$(jq -er '.language_tools[] | select(.name == "clangd") | .package' "$lock")"; \
+    clangd_package_version="$(jq -er '.language_tools[] | select(.name == "clangd") | .package_version' "$lock")"; \
+    shellcheck_package="$(jq -er '.language_tools[] | select(.name == "shellcheck") | .package' "$lock")"; \
+    shellcheck_package_version="$(jq -er '.language_tools[] | select(.name == "shellcheck") | .package_version' "$lock")"; \
+    apt-get update; \
+    apt-get install -y --no-install-recommends \
+        "${clangd_package}=${clangd_package_version}" \
+        "${shellcheck_package}=${shellcheck_package_version}"; \
+    rm -rf /var/lib/apt/lists/*; \
+    mkdir -p /opt/cocola/toolchains/bin /tmp/cocola-go-cache /tmp/cocola-go-mod; \
+    gopls_module="$(jq -er '.language_tools[] | select(.name == "gopls") | .module' "$lock")"; \
+    gopls_version="$(jq -er '.language_tools[] | select(.name == "gopls") | .version' "$lock")"; \
+    shfmt_module="$(jq -er '.language_tools[] | select(.name == "shfmt") | .module' "$lock")"; \
+    shfmt_version="$(jq -er '.language_tools[] | select(.name == "shfmt") | .version' "$lock")"; \
+    java_version="$(jq -er '.language_tools[] | select(.name == "java") | .version' "$lock")"; \
+    GOBIN=/opt/cocola/toolchains/bin \
+        GOCACHE=/tmp/cocola-go-cache \
+        GOMODCACHE=/tmp/cocola-go-mod \
+        GOTOOLCHAIN=auto \
+        go install "${gopls_module}@${gopls_version}"; \
+    GOBIN=/opt/cocola/toolchains/bin \
+        GOCACHE=/tmp/cocola-go-cache \
+        GOMODCACHE=/tmp/cocola-go-mod \
+        GOTOOLCHAIN=auto \
+        go install "${shfmt_module}@${shfmt_version}"; \
+    rm -rf /tmp/cocola-go-cache /tmp/cocola-go-mod; \
+    ln -sfn "$(command -v clangd-18)" /opt/cocola/toolchains/bin/clangd; \
+    ln -sfn "$(command -v shellcheck)" /opt/cocola/toolchains/bin/shellcheck; \
+    java_binary="$(readlink -f "$(command -v java)")"; \
+    ln -sfn "$(dirname "$(dirname "$java_binary")")" /opt/cocola/toolchains/java; \
+    /opt/cocola/toolchains/bin/gopls version; \
+    /opt/cocola/toolchains/bin/clangd --version; \
+    /opt/cocola/toolchains/bin/shellcheck --version; \
+    /opt/cocola/toolchains/bin/shfmt --version; \
+    /opt/cocola/toolchains/java/bin/java -version 2>&1 | grep -F "openjdk version \"${java_version}\""; \
+    chmod -R u=rwX,go=rX /opt/cocola/toolchains
+
+COPY install-code-server-extensions.sh /opt/cocola/install-code-server-extensions.sh
+RUN chmod 0755 /opt/cocola/install-code-server-extensions.sh \
+    && /opt/cocola/install-code-server-extensions.sh
+
 # ---- Python agent SDK in a uv-managed venv (matches the shim interpreter) -
 # Install into a dedicated venv (uv-managed, per project convention) so the SDK
 # never depends on system Python / pip skew. The shim's entrypoint execs this
@@ -240,12 +293,13 @@ ENV CLAUDE_CONFIG_DIR=/home/cocola/.claude \
     CLAUDE_CODE_MAX_RETRIES=3 \
     COCOLA_WORKSPACE=/workspace \
     COCOLA_CODE_SERVER_PORT=39378 \
+    JAVA_HOME=/opt/cocola/toolchains/java \
     NODE_PATH=/usr/local/lib/node_modules \
     PLAYWRIGHT_BROWSERS_PATH=/ms-playwright \
     CHROME_BIN=/usr/local/bin/chromium \
     PUPPETEER_EXECUTABLE_PATH=/usr/local/bin/chromium \
     PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH=/usr/local/bin/chromium \
-    PATH=/home/cocola/.local/bin:/home/cocola/.local/share/pnpm:$PATH
+    PATH=/opt/cocola/toolchains/bin:/home/cocola/.local/bin:/home/cocola/.local/share/pnpm:$PATH
 
 # tini reaps the `claude` CLI subprocesses the SDK spawns. Default command keeps
 # the container alive (session-lived per ADR-0009); the shim is invoked on

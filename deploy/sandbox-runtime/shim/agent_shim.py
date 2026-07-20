@@ -634,6 +634,11 @@ def _selfcheck() -> int:
         "imagemagick": cmd_version("convert", "-version"),
         "pdftotext": cmd_version("pdftotext", "-v"),
         "rsvg_convert": cmd_version("rsvg-convert", "--version"),
+        "gopls": cmd_version("gopls", "version"),
+        "clangd": cmd_version("clangd", "--version"),
+        "shellcheck": cmd_version("shellcheck", "--version"),
+        "shfmt": cmd_version("shfmt", "--version"),
+        "java": cmd_version("java", "-version"),
         "config_dir": os.environ.get("CLAUDE_CONFIG_DIR"),
         "codex_home": os.environ.get("CODEX_HOME"),
         "workspace": os.environ.get("COCOLA_WORKSPACE"),
@@ -679,6 +684,11 @@ def _selfcheck() -> int:
         "imagemagick",
         "pdftotext",
         "rsvg_convert",
+        "gopls",
+        "clangd",
+        "shellcheck",
+        "shfmt",
+        "java",
     ]
     ok = (
         info["node"]

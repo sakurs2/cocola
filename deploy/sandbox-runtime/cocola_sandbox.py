@@ -272,6 +272,7 @@ def runtime_info(manifest: dict[str, Any], profile: str) -> dict[str, Any]:
         "profile": profile,
         "workspace": workspace_info(manifest),
         "services": service_info(manifest, profile),
+        "editor": manifest.get("editor"),
         "capabilities": capability_info(manifest, profile),
     }
 

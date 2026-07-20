@@ -63,6 +63,13 @@
       "required": false
     }
   },
+  "editor": {
+    "kind": "code-server",
+    "extensions_dir": "/opt/cocola/code-server/extensions",
+    "extensions_lock": "/opt/cocola/code-server-extensions.lock.json",
+    "language_tools_dir": "/opt/cocola/toolchains/bin",
+    "update_policy": "runtime-image-only"
+  },
   "capabilities": {
     "browser": {
       "kind": "on-demand",

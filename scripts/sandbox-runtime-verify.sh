@@ -106,7 +106,8 @@ echo "$SELF" | grep -q '"claude_cli":"[0-9]' && ok "claude CLI pre-baked" || bad
 echo "$SELF" | grep -qv '"claude_agent_sdk":"missing' && ok "claude-agent-sdk importable" || bad "claude-agent-sdk missing"
 echo "$SELF" | grep -q '"codex_cli":"codex-cli [0-9]' && ok "codex CLI pre-baked" || bad "codex CLI missing"
 echo "$SELF" | grep -q '"codex_sdk":"0.144.1"' && ok "codex SDK pinned" || bad "codex SDK missing / wrong version"
-for tool in pnpm yarn playwright chromium fd jq yq tree file make imagemagick pdftotext rsvg_convert; do
+for tool in pnpm yarn playwright chromium fd jq yq tree file make imagemagick pdftotext rsvg_convert \
+  gopls clangd shellcheck shfmt java; do
   if echo "$SELF" | grep -Eq "\"$tool\":\"(missing|error:)"; then
     bad "$tool missing from sandbox runtime"
   else
@@ -122,6 +123,30 @@ echo "$RUNTIME_INFO" | grep -q '"schema_version": 1' \
 echo "$RUNTIME_INFO" | grep -q '"profile": "coding"' \
   && ok "coding runtime profile is active by default" \
   || bad "unexpected default runtime profile"
+
+EDITOR_EXTENSIONS_DIR="$(echo "$RUNTIME_INFO" | jq -r '.editor.extensions_dir // empty')"
+EDITOR_EXTENSIONS_LOCK="$(echo "$RUNTIME_INFO" | jq -r '.editor.extensions_lock // empty')"
+if [ "$EDITOR_EXTENSIONS_DIR" = "/opt/cocola/code-server/extensions" ] \
+  && [ "$EDITOR_EXTENSIONS_LOCK" = "/opt/cocola/code-server-extensions.lock.json" ]; then
+  EXPECTED_EXTENSIONS="$(docker exec -i "$CTR" jq -r \
+    '.extensions[] | ((.id | ascii_downcase) + "@" + .version)' \
+    "$EDITOR_EXTENSIONS_LOCK" | sort)"
+  ACTUAL_EXTENSIONS="$(docker exec -i -u cocola \
+    -e XDG_CONFIG_HOME=/tmp/cocola-code-server-verify-config \
+    "$CTR" code-server \
+    --user-data-dir /tmp/cocola-code-server-verify-data \
+    --extensions-dir "$EDITOR_EXTENSIONS_DIR" --list-extensions --show-versions \
+    | tr '[:upper:]' '[:lower:]' | sed '/^\[/d; /^$/d' | sort)"
+  [ "$ACTUAL_EXTENSIONS" = "$EXPECTED_EXTENSIONS" ] \
+    && ok "Code Server extension inventory matches the image lock" \
+    || bad "Code Server extensions differ from lock: expected=[$EXPECTED_EXTENSIONS] actual=[$ACTUAL_EXTENSIONS]"
+  docker exec -i -u cocola "$CTR" test ! -w "$EDITOR_EXTENSIONS_DIR" \
+    && [ "$(docker exec -i "$CTR" stat -c '%U:%G' "$EDITOR_EXTENSIONS_DIR")" = "root:root" ] \
+    && ok "platform Code Server extensions are root-owned and guest read-only" \
+    || bad "platform Code Server extension directory is guest-writable or not root-owned"
+else
+  bad "runtime editor contract does not expose the platform extension lock"
+fi
 
 BUILTIN_SKILL_OWNER="$(docker exec -i "$CTR" stat -c '%U:%G' \
   /opt/cocola/skills/cocola-sandbox-browser/SKILL.md 2>/dev/null || true)"

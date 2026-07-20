@@ -32,6 +32,8 @@ deploy/sandbox-runtime/
   browser-runner.js        # one-shot persistent-context Playwright runner
   firewall-entrypoint.sh   # compatibility wrapper for the old entrypoint path
   code-server-launch.sh    # one-shot non-root Code Server launcher
+  code-server-extensions.lock.json # exact platform extension/tool inventory
+  install-code-server-extensions.sh # deterministic build-time installer
   offline/                 # optional: vendored `npm pack` tgz for offline builds
   shim/
     agent_shim.py          # stdio shim: one JSON request -> NDJSON event stream
@@ -79,6 +81,30 @@ Explicit Sandbox resources override the profile. Operators may override the
 defaults with `COCOLA_OPENSANDBOX_DEFAULT_CPU/MEMORY`,
 `COCOLA_CODE_SERVER_ENABLED`, and `COCOLA_BROWSER_ENABLED`; Agent requests
 cannot overwrite these keys.
+
+## Image-managed Code Server extensions
+
+The coding profile uses a fixed, root-owned extension directory at
+`/opt/cocola/code-server/extensions`. Extension versions are locked in
+`code-server-extensions.lock.json`, installed while the runtime image is built,
+and verified against the complete installed inventory. Sandboxes never install
+or update platform extensions when Code Server starts.
+
+The standard image includes:
+
+- Python (`ms-python.python`, BasedPyright, Ruff)
+- Go (`golang.Go`)
+- Java (`redhat.java`)
+- C/C++ (`vscode-clangd`)
+- Bash, YAML, Markdown linting, and Markdown All in One
+- Code's built-in JavaScript, TypeScript, JSON, HTML, CSS, and Markdown language
+  features
+
+Extensions that do not bundle their server use the fixed tools under
+`/opt/cocola/toolchains/bin`: `gopls`, `clangd`, `shellcheck`, and `shfmt`.
+The existing JDK 21 launches the Java language server. All tool versions are in
+the same lock file, and the runtime selfcheck fails when a required tool is
+missing.
 
 Inside a sandbox, the stable guest CLI exposes the effective contract without
 requiring access to the OpenSandbox control plane:

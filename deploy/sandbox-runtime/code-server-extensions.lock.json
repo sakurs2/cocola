@@ -1,0 +1,111 @@
+{
+  "schema_version": 1,
+  "code_server_version": "4.117.0",
+  "code_version": "1.117.0",
+  "extensions": [
+    {
+      "id": "ms-python.python",
+      "version": "2026.4.0",
+      "install": "vsix-unpacked",
+      "url": "https://open-vsx.org/api/ms-python/python/2026.4.0/file/ms-python.python-2026.4.0.vsix",
+      "sha256": "232aeafb01f069824fdd92d3e628c1c442bbcfa1d3cc945ff97076340bb2b4a6"
+    },
+    {
+      "id": "detachhead.basedpyright",
+      "version": "1.39.9",
+      "install": "vsix",
+      "url": "https://open-vsx.org/api/detachhead/basedpyright/1.39.9/file/detachhead.basedpyright-1.39.9.vsix",
+      "sha256": "23272e8fb117cd1c1582fa64d0a5daddd370dab2f6d439c6e2886a204c52e86a"
+    },
+    {
+      "id": "charliermarsh.ruff",
+      "version": "2026.62.0",
+      "install": "platform-vsix",
+      "url": "https://open-vsx.org/api/charliermarsh/ruff/{platform}/2026.62.0/file/charliermarsh.ruff-2026.62.0@{platform}.vsix",
+      "sha256_url": "https://open-vsx.org/api/charliermarsh/ruff/{platform}/2026.62.0/file/charliermarsh.ruff-2026.62.0@{platform}.sha256"
+    },
+    {
+      "id": "golang.Go",
+      "version": "0.56.0",
+      "install": "vsix",
+      "url": "https://open-vsx.org/api/golang/Go/0.56.0/file/golang.Go-0.56.0.vsix",
+      "sha256": "9f5959fb17ba0a8dbd804387ddda50975fcaa9dd5267aa33eaaa89912072aacb"
+    },
+    {
+      "id": "redhat.java",
+      "version": "1.55.0",
+      "install": "vsix",
+      "url": "https://open-vsx.org/api/redhat/java/1.55.0/file/redhat.java-1.55.0.vsix",
+      "sha256": "011639c3ee347b9591895bfc77d8cf28f836c053d0a49ae4a83efe9dc473a603"
+    },
+    {
+      "id": "llvm-vs-code-extensions.vscode-clangd",
+      "version": "0.6.0",
+      "install": "vsix",
+      "url": "https://open-vsx.org/api/llvm-vs-code-extensions/vscode-clangd/0.6.0/file/llvm-vs-code-extensions.vscode-clangd-0.6.0.vsix",
+      "sha256": "32030694fa6c0ef438f4e4219f84677cd32f603c7faa4c71a283efc1f5b51751"
+    },
+    {
+      "id": "mads-hartmann.bash-ide-vscode",
+      "version": "1.43.0",
+      "install": "vsix",
+      "url": "https://open-vsx.org/api/mads-hartmann/bash-ide-vscode/1.43.0/file/mads-hartmann.bash-ide-vscode-1.43.0.vsix",
+      "sha256": "ac27482c24be963787b536389b94e8514d24d04e79b941c4a97339181b82acc6"
+    },
+    {
+      "id": "redhat.vscode-yaml",
+      "version": "1.24.0",
+      "install": "vsix",
+      "url": "https://open-vsx.org/api/redhat/vscode-yaml/1.24.0/file/redhat.vscode-yaml-1.24.0.vsix",
+      "sha256": "0668758312a7fa6beda259ca5a6849d90c5d519df6415edbe246c135e06d7168"
+    },
+    {
+      "id": "DavidAnson.vscode-markdownlint",
+      "version": "0.61.2",
+      "install": "vsix",
+      "url": "https://open-vsx.org/api/DavidAnson/vscode-markdownlint/0.61.2/file/DavidAnson.vscode-markdownlint-0.61.2.vsix",
+      "sha256": "0c9222267e7ca29ec407f7348026179f10d325875d301346c0688f82bfedeeff"
+    },
+    {
+      "id": "yzhang.markdown-all-in-one",
+      "version": "3.6.2",
+      "install": "vsix",
+      "url": "https://open-vsx.org/api/yzhang/markdown-all-in-one/3.6.2/file/yzhang.markdown-all-in-one-3.6.2.vsix",
+      "sha256": "75037cc2e0f940ead6cb2db25c5e6f139031885f7dc07d56abe1e0bc0781dd1a"
+    }
+  ],
+  "language_tools": [
+    {
+      "name": "gopls",
+      "version": "v0.23.0",
+      "install": "go",
+      "module": "golang.org/x/tools/gopls"
+    },
+    {
+      "name": "clangd",
+      "version": "18.1.3",
+      "install": "apt",
+      "package": "clangd-18",
+      "package_version": "1:18.1.3-1ubuntu1"
+    },
+    {
+      "name": "shellcheck",
+      "version": "0.9.0",
+      "install": "apt",
+      "package": "shellcheck",
+      "package_version": "0.9.0-1"
+    },
+    {
+      "name": "shfmt",
+      "version": "v3.13.1",
+      "install": "go",
+      "module": "mvdan.cc/sh/v3/cmd/shfmt"
+    },
+    {
+      "name": "java",
+      "version": "21.0.11",
+      "install": "base-image",
+      "executable": "java"
+    }
+  ]
+}

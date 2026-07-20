@@ -26,6 +26,16 @@ CODE_SERVER_BIN="${COCOLA_CODE_SERVER_BIN:-/usr/local/bin/code-server}"
 # are evaluated only after runuser has switched to this fixed guest identity.
 CODE_SERVER_USER="cocola"
 CODE_SERVER_DIR="${COCOLA_CODE_SERVER_DIR:-/workspace}"
+# Platform extensions are immutable runtime assets. Keeping this path fixed
+# prevents a sandbox request from replacing the operator-approved extension
+# set or moving updates into the persisted user home.
+CODE_SERVER_EXTENSIONS_DIR="/opt/cocola/code-server/extensions"
+# Keep mutable Workbench state out of HOME and separate from the immutable
+# extension set. The path is fixed so a request cannot redirect the root-owned
+# launcher into changing ownership of an arbitrary location.
+CODE_SERVER_STATE_DIR="/session/runtime/cocola/code-server"
+CODE_SERVER_CONFIG_DIR="$CODE_SERVER_STATE_DIR/config"
+CODE_SERVER_USER_DATA_DIR="$CODE_SERVER_STATE_DIR/user-data"
 CODE_SERVER_TRUSTED_ORIGINS="${COCOLA_CODE_SERVER_TRUSTED_ORIGINS:-}"
 
 log() { echo "[code-server] $*"; }
@@ -42,6 +52,18 @@ if [ ! -x "$CODE_SERVER_BIN" ]; then
   # service as failed while exec/agent workloads remain available.
   log "WARNING: $CODE_SERVER_BIN not found or not executable; editor unavailable" >&2
   exit 127
+fi
+if [ ! -d "$CODE_SERVER_EXTENSIONS_DIR" ]; then
+  log "WARNING: platform extension directory missing: $CODE_SERVER_EXTENSIONS_DIR" >&2
+  exit 127
+fi
+
+# Supervisor invokes this launcher as root. Prepare only the fixed editor state
+# directories before dropping privileges; extension assets remain root-owned.
+if ! install -d -o "$CODE_SERVER_USER" -g "$CODE_SERVER_USER" -m 0750 \
+  "$CODE_SERVER_CONFIG_DIR" "$CODE_SERVER_USER_DATA_DIR"; then
+  log "WARNING: could not prepare Code Server state under $CODE_SERVER_STATE_DIR" >&2
+  exit 1
 fi
 
 # sandbox-manager derives this host-only list from COCOLA_PUBLIC_ORIGINS and
@@ -66,16 +88,19 @@ if [ "${#trusted_origin_args[@]}" -eq 0 ]; then
   log "WARNING: no trusted origins configured; browser WebSocket upgrades will remain blocked" >&2
 fi
 
-# runuser drops to the brain user with a login-like env (HOME=/home/cocola), so
-# code-server's user-data/extensions default under the writable brain home.
+# Mutable config and Workbench data are session-scoped, while HOME remains the
+# guest's normal home for terminals and language servers spawned by Workbench.
 log "starting resident code-server on 0.0.0.0:${CODE_SERVER_PORT} as ${CODE_SERVER_USER} (root=${CODE_SERVER_DIR})"
 exec runuser -u "$CODE_SERVER_USER" -- \
   env HOME="/home/${CODE_SERVER_USER}" \
+  XDG_CONFIG_HOME="$CODE_SERVER_CONFIG_DIR" \
   "$CODE_SERVER_BIN" \
   --bind-addr "0.0.0.0:${CODE_SERVER_PORT}" \
   --auth none \
   --disable-telemetry \
   --disable-update-check \
   --disable-workspace-trust \
+  --user-data-dir "$CODE_SERVER_USER_DATA_DIR" \
+  --extensions-dir "$CODE_SERVER_EXTENSIONS_DIR" \
   "${trusted_origin_args[@]}" \
   "$CODE_SERVER_DIR"
