@@ -11,6 +11,7 @@ from cocola_llm_gateway.middleware import ResiliencePolicy
 from cocola_llm_gateway.registry import ModelRoute, Registry
 from cocola_llm_gateway.server import create_app
 from cocola_llm_gateway.service import GatewayService
+from cocola_llm_gateway.types import StreamEvent, StreamEventType, Usage
 from cocola_llm_gateway.upstream.fake import FakeUpstream
 
 
@@ -23,6 +24,53 @@ class RecordingChatProvider(FakeUpstream):
         self.requests.append(request)
         async for event in super().chat_stream(request):
             yield event
+
+
+class AnthropicPassthroughProvider(RecordingChatProvider):
+    async def chat_stream(self, request):
+        self.requests.append(request)
+        yield StreamEvent(
+            StreamEventType.MESSAGE_START,
+            usage=Usage(prompt_tokens=3),
+            model=request.model,
+        )
+        yield StreamEvent(
+            StreamEventType.PASSTHROUGH,
+            extra={
+                "frame": {
+                    "type": "content_block_delta",
+                    "index": 0,
+                    "delta": {"type": "thinking_delta", "thinking": "not output"},
+                }
+            },
+        )
+        yield StreamEvent(
+            StreamEventType.PASSTHROUGH,
+            extra={
+                "frame": {
+                    "type": "content_block_delta",
+                    "index": 0,
+                    "delta": {"type": "input_json_delta", "partial_json": "not output"},
+                }
+            },
+        )
+        for text in ('{"memory":', "true}"):
+            yield StreamEvent(
+                StreamEventType.PASSTHROUGH,
+                extra={
+                    "frame": {
+                        "type": "content_block_delta",
+                        "index": 1,
+                        "delta": {"type": "text_delta", "text": text},
+                    }
+                },
+            )
+        yield StreamEvent(
+            StreamEventType.MESSAGE_DELTA,
+            usage=Usage(completion_tokens=2),
+            finish_reason="end_turn",
+        )
+        yield StreamEvent(StreamEventType.MESSAGE_STOP)
 
 
 class FakeEmbeddingsProvider:
@@ -72,8 +120,8 @@ def _client(service: GatewayService, token: str = "memory-secret"):
     return httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://test")
 
 
-def _chat_embedding_service(*, embedding_dimension: int = 3):
-    chat = RecordingChatProvider()
+def _chat_embedding_service(*, embedding_dimension: int = 3, chat=None):
+    chat = chat or RecordingChatProvider()
     embedding = FakeEmbeddingsProvider(dimension=embedding_dimension)
     routes = {
         "extract": ModelRoute(
@@ -157,6 +205,28 @@ async def test_anthropic_memory_adapter_supports_json_and_platform_usage():
     assert records[0].session_id == "memory-service"
 
 
+async def test_anthropic_memory_adapter_extracts_passthrough_text_only():
+    chat = AnthropicPassthroughProvider()
+    service, ledger, _, _ = _chat_embedding_service(chat=chat)
+    async with _client(service) as client:
+        response = await client.post(
+            "/internal/memory/v1/chat/completions",
+            json=_chat_request(response_format={"type": "json_object"}),
+            headers={"authorization": "Bearer memory-secret"},
+        )
+
+    assert response.status_code == 200
+    assert response.json()["choices"][0]["message"]["content"] == '{"memory":true}'
+    assert response.json()["usage"] == {
+        "prompt_tokens": 3,
+        "completion_tokens": 2,
+        "total_tokens": 5,
+    }
+    records = await ledger.recent(user_id="memory-service")
+    assert len(records) == 1
+    assert records[0].completion_tokens == 2
+
+
 @pytest.mark.parametrize(
     "overrides",
     [
@@ -193,7 +263,6 @@ async def test_embedding_adapter_rewrites_model_and_enforces_dimension():
             "model": "embedding-real",
             "input": ["one", "two"],
             "encoding_format": "float",
-            "dimensions": 3,
         }
     ]
     records = await ledger.recent(user_id="memory-service")

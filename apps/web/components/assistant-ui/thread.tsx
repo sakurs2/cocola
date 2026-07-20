@@ -886,10 +886,11 @@ const ToolFallback: FC<ToolCallMessagePartProps> = ({
 
 const MemoryRecallPart: FC<
   DataMessagePartProps<{
-    status: "running" | "hit" | "degraded" | "unavailable";
+    status: "running" | "hit" | "miss" | "degraded" | "unavailable";
     count: number;
   }>
-> = ({ data }) => <RailMemoryRecall status={data.status} count={data.count} />;
+> = ({ data }) =>
+  data.status === "miss" ? null : <RailMemoryRecall status={data.status} count={data.count} />;
 
 const ASSISTANT_PART_COMPONENTS = {
   Text: TextPart,

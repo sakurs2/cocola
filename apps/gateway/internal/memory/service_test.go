@@ -53,6 +53,34 @@ func TestBuildRecallResultSurfacesSanitizedOutcomes(t *testing.T) {
 	}
 }
 
+func TestBeginRecallOnlyNotifiesWhenEnabled(t *testing.T) {
+	tests := []struct {
+		name     string
+		settings Settings
+		want     bool
+	}{
+		{name: "enabled", settings: Settings{GlobalEnabled: true, UseEnabled: true}, want: true},
+		{name: "disabled globally", settings: Settings{UseEnabled: true}},
+		{name: "disabled by user", settings: Settings{GlobalEnabled: true}},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			calls := 0
+			got := beginRecall(test.settings, func() { calls++ })
+			if got != test.want {
+				t.Fatalf("beginRecall() = %v, want %v", got, test.want)
+			}
+			wantCalls := 0
+			if test.want {
+				wantCalls = 1
+			}
+			if calls != wantCalls {
+				t.Fatalf("onStart calls = %d, want %d", calls, wantCalls)
+			}
+		})
+	}
+}
+
 func TestFormatRecallCapsItemsAndCharacters(t *testing.T) {
 	items := make([]memoryResult, 0, 8)
 	for index := 0; index < 8; index++ {

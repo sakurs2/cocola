@@ -1,10 +1,14 @@
 const PROCESS_PART_TYPES = new Set(["environment", "reasoning", "tool-call", "progress"]);
 
 const isFilePart = (part) => part?.type === "file";
+const isHiddenMemoryMiss = (part) =>
+  (part?.type === "memory-recall" && part?.status === "miss") ||
+  (part?.type === "data" && part?.name === "memory-recall" && part?.data?.status === "miss");
 const isProcessPart = (part) =>
-  PROCESS_PART_TYPES.has(part?.type) ||
-  part?.type === "memory-recall" ||
-  (part?.type === "data" && part?.name === "memory-recall");
+  !isHiddenMemoryMiss(part) &&
+  (PROCESS_PART_TYPES.has(part?.type) ||
+    part?.type === "memory-recall" ||
+    (part?.type === "data" && part?.name === "memory-recall"));
 
 /**
  * Splits one assistant turn into the collapsible process and the always-visible

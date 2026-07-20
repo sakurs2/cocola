@@ -6,8 +6,11 @@ import {
   Bot,
   Boxes,
   Check,
+  CircleCheck,
   KeyRound,
+  LoaderCircle,
   MoreHorizontal,
+  PlugZap,
   Plus,
   Route,
   Search,
@@ -45,8 +48,10 @@ import {
 import { cn } from "@/lib/utils";
 
 type ProviderType = "anthropic" | "openai_responses" | "openai_embeddings";
+type ConfigurableProviderType = Exclude<ProviderType, "openai_embeddings">;
 type ModelProtocol = "anthropic-messages" | "openai-responses" | "openai-embeddings";
 type View = "models" | "providers";
+type ModelKind = "chat" | "embedding";
 
 type LLMProvider = {
   id: string;
@@ -81,7 +86,7 @@ type LLMModel = {
 type ProviderForm = {
   id: string;
   name: string;
-  type: ProviderType;
+  type: ConfigurableProviderType;
   base_url: string;
   api_key: string;
   enabled: boolean;
@@ -99,7 +104,20 @@ type ModelForm = {
   visible: boolean;
   is_default: boolean;
   sort_order: string;
-  embedding_dimension: string;
+};
+
+type EmbeddingForm = {
+  model: string;
+  base_url: string;
+  api_key: string;
+};
+
+type EmbeddingTestResult = {
+  ok: boolean;
+  latency_ms: number;
+  dimension?: number;
+  error_code?: string;
+  error?: string;
 };
 
 type DeleteTarget =
@@ -127,11 +145,16 @@ const EMPTY_MODEL: ModelForm = {
   visible: true,
   is_default: false,
   sort_order: "0",
-  embedding_dimension: "1024",
+};
+
+const EMPTY_EMBEDDING: EmbeddingForm = {
+  model: "",
+  base_url: "https://api.openai.com/v1",
+  api_key: "",
 };
 
 const PROVIDER_TYPES: Array<{
-  value: ProviderType;
+  value: ConfigurableProviderType;
   label: string;
   shortLabel: string;
   description: string;
@@ -151,13 +174,6 @@ const PROVIDER_TYPES: Array<{
     description: "Structured /responses requests and events required by Codex.",
     defaultBaseURL: "https://api.openai.com/v1",
   },
-  {
-    value: "openai_embeddings",
-    label: "OpenAI Embeddings API",
-    shortLabel: "Embeddings API",
-    description: "Text embeddings only; never exposed to Agent Runtime or chat model lists.",
-    defaultBaseURL: "https://api.openai.com/v1",
-  },
 ];
 
 const inputClass =
@@ -170,6 +186,10 @@ export default function AdminModelsPage() {
   const [query, setQuery] = useState("");
   const [providerForm, setProviderForm] = useState<ProviderForm>(EMPTY_PROVIDER);
   const [modelForm, setModelForm] = useState<ModelForm>(EMPTY_MODEL);
+  const [modelKind, setModelKind] = useState<ModelKind>("chat");
+  const [embeddingForm, setEmbeddingForm] = useState<EmbeddingForm>(EMPTY_EMBEDDING);
+  const [embeddingTest, setEmbeddingTest] = useState<EmbeddingTestResult | null>(null);
+  const [testingEmbedding, setTestingEmbedding] = useState(false);
   const [editingProvider, setEditingProvider] = useState<string | null>(null);
   const [editingModel, setEditingModel] = useState<string | null>(null);
   const [providerDrawerOpen, setProviderDrawerOpen] = useState(false);
@@ -204,12 +224,14 @@ export default function AdminModelsPage() {
 
   const visibleProviders = useMemo(() => {
     const needle = query.trim().toLowerCase();
-    if (!needle) return providers;
-    return providers.filter((provider) =>
-      [provider.name, provider.id, provider.base_url, providerTypeMeta(provider.type).label]
-        .join(" ")
-        .toLowerCase()
-        .includes(needle),
+    return providers.filter(
+      (provider) =>
+        provider.type !== "openai_embeddings" &&
+        (!needle ||
+          [provider.name, provider.id, provider.base_url, providerTypeMeta(provider.type).label]
+            .join(" ")
+            .toLowerCase()
+            .includes(needle)),
     );
   }, [providers, query]);
 
@@ -246,6 +268,7 @@ export default function AdminModelsPage() {
   }
 
   function editProvider(provider: LLMProvider) {
+    if (provider.type === "openai_embeddings") return;
     setEditingProvider(provider.id);
     setProviderForm({
       id: provider.id,
@@ -260,18 +283,28 @@ export default function AdminModelsPage() {
   }
 
   function createModel() {
-    if (providers.length === 0) {
-      createProvider();
-      return;
-    }
+    const firstChatProvider = providers.find((provider) => provider.type !== "openai_embeddings");
     setEditingModel(null);
-    setModelForm({ ...EMPTY_MODEL, provider_id: providers[0]?.id ?? "" });
+    setModelKind("chat");
+    setModelForm({ ...EMPTY_MODEL, provider_id: firstChatProvider?.id ?? "" });
+    setEmbeddingForm(EMPTY_EMBEDDING);
+    setEmbeddingTest(null);
     setFormError("");
     setModelDrawerOpen(true);
   }
 
   function editModel(model: LLMModel) {
     setEditingModel(model.id);
+    const embedding = model.protocol === "openai-embeddings";
+    setModelKind(embedding ? "embedding" : "chat");
+    if (embedding) {
+      setEmbeddingForm({
+        model: model.real_model,
+        base_url: providerByID.get(model.provider_id)?.base_url ?? "",
+        api_key: "",
+      });
+      setEmbeddingTest(null);
+    }
     setModelForm({
       alias: model.alias,
       provider_id: model.provider_id,
@@ -284,7 +317,6 @@ export default function AdminModelsPage() {
       visible: model.visible,
       is_default: model.is_default,
       sort_order: String(model.sort_order),
-      embedding_dimension: String(model.embedding_dimension || 1024),
     });
     setFormError("");
     setModelDrawerOpen(true);
@@ -324,6 +356,25 @@ export default function AdminModelsPage() {
     setSaving(true);
     setFormError("");
     try {
+      if (modelKind === "embedding") {
+        const body: Record<string, string> = {
+          model: embeddingForm.model.trim(),
+          base_url: embeddingForm.base_url.trim(),
+        };
+        if (embeddingForm.api_key.trim()) body.api_key = embeddingForm.api_key.trim();
+        const url = editingModel
+          ? `/api/admin/embedding-models/${encodeURIComponent(editingModel)}`
+          : "/api/admin/embedding-models";
+        const response = await fetch(url, {
+          method: editingModel ? "PATCH" : "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify(body),
+        });
+        if (!response.ok) throw new Error(await errorText(response));
+        setModelDrawerOpen(false);
+        await load();
+        return;
+      }
       const body = {
         alias: modelForm.alias,
         provider_id: modelForm.provider_id,
@@ -336,10 +387,6 @@ export default function AdminModelsPage() {
         visible: modelForm.visible,
         is_default: modelForm.is_default,
         sort_order: Number.parseInt(modelForm.sort_order || "0", 10) || 0,
-        embedding_dimension:
-          selectedProvider?.type === "openai_embeddings"
-            ? Number.parseInt(modelForm.embedding_dimension || "0", 10) || 0
-            : 0,
       };
       const url = editingModel
         ? `/api/admin/models/${encodeURIComponent(editingModel)}`
@@ -356,6 +403,32 @@ export default function AdminModelsPage() {
       setFormError(cause instanceof Error ? cause.message : String(cause));
     } finally {
       setSaving(false);
+    }
+  }
+
+  async function testEmbeddingConnection() {
+    if (testingEmbedding) return;
+    setTestingEmbedding(true);
+    setEmbeddingTest(null);
+    setFormError("");
+    try {
+      const body: Record<string, string> = {
+        model: embeddingForm.model.trim(),
+        base_url: embeddingForm.base_url.trim(),
+      };
+      if (editingModel) body.route_id = editingModel;
+      if (embeddingForm.api_key.trim()) body.api_key = embeddingForm.api_key.trim();
+      const response = await fetch("/api/admin/embedding-models/test", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify(body),
+      });
+      if (!response.ok) throw new Error(await errorText(response));
+      setEmbeddingTest((await response.json()) as EmbeddingTestResult);
+    } catch (cause) {
+      setFormError(cause instanceof Error ? cause.message : String(cause));
+    } finally {
+      setTestingEmbedding(false);
     }
   }
 
@@ -396,6 +469,13 @@ export default function AdminModelsPage() {
   }
 
   const selectedProvider = providerByID.get(modelForm.provider_id);
+  const embeddingProvider = editingModel
+    ? providerByID.get(models.find((model) => model.id === editingModel)?.provider_id ?? "")
+    : undefined;
+  const canTestEmbedding =
+    embeddingForm.model.trim() !== "" &&
+    embeddingForm.base_url.trim() !== "" &&
+    (embeddingForm.api_key.trim() !== "" || Boolean(embeddingProvider?.api_key_hint));
   const editingProviderHasRoutes = editingProvider
     ? (routeCountByProvider.get(editingProvider) ?? 0) > 0
     : false;
@@ -439,7 +519,7 @@ export default function AdminModelsPage() {
               setQuery("");
             }}
           >
-            Providers <Count>{providers.length}</Count>
+            Providers <Count>{visibleProviders.length}</Count>
           </ViewTab>
         </div>
         <Button className="mb-2 gap-2" onClick={view === "models" ? createModel : createProvider}>
@@ -592,9 +672,7 @@ export default function AdminModelsPage() {
             <p className="mt-2 text-xs leading-5 text-muted-foreground">
               {providerForm.type === "openai_responses"
                 ? "The upstream must implement POST /responses with Codex-compatible tool events."
-                : providerForm.type === "openai_embeddings"
-                  ? "The upstream must implement POST /embeddings. It is isolated from chat and tools."
-                  : "This route uses the native Anthropic Messages API."}
+                : "This route uses the native Anthropic Messages API."}
             </p>
           </div>
 
@@ -642,8 +720,18 @@ export default function AdminModelsPage() {
       <AdminDrawer
         open={modelDrawerOpen}
         onOpenChange={(open) => !saving && setModelDrawerOpen(open)}
-        title={editingModel ? "Edit model route" : "Add model route"}
-        description="Connect a user-visible model to one provider and upstream model ID."
+        title={
+          editingModel
+            ? modelKind === "embedding"
+              ? "Edit embedding model"
+              : "Edit model route"
+            : "Add model"
+        }
+        description={
+          modelKind === "embedding"
+            ? "Add an OpenAI-compatible embedding model for Memory and future knowledge sources."
+            : "Connect a user-visible model to one provider and upstream model ID."
+        }
         size="lg"
         footer={
           <DrawerFooter
@@ -656,179 +744,283 @@ export default function AdminModelsPage() {
       >
         <div className="grid gap-5">
           {formError ? <AdminAlert tone="error">{formError}</AdminAlert> : null}
-          <Field label="Provider">
-            <select
-              className={inputClass}
-              value={modelForm.provider_id}
-              onChange={(event) => {
-                const provider = providerByID.get(event.target.value);
-                setModelForm({
-                  ...modelForm,
-                  provider_id: event.target.value,
-                  visible: provider?.type === "openai_embeddings" ? false : modelForm.visible,
-                  is_default: provider?.type === "openai_embeddings" ? false : modelForm.is_default,
-                });
-              }}
-            >
-              <option value="">Select provider</option>
-              {providers
-                .filter((provider) => {
-                  if (!editingModel) return true;
-                  const original = models.find((model) => model.id === editingModel);
-                  return !original || protocolForType(provider.type) === original.protocol;
-                })
-                .map((provider) => (
-                  <option key={provider.id} value={provider.id}>
-                    {provider.name || provider.id} · {providerTypeMeta(provider.type).shortLabel}
-                  </option>
-                ))}
-            </select>
-          </Field>
-
-          {selectedProvider ? (
-            <div className="flex flex-wrap items-center gap-2 rounded-2xl border border-border/70 bg-muted/25 p-3">
-              <ProviderProtocolBadge type={selectedProvider.type} />
-              <span className="text-xs text-muted-foreground">
-                Compatible with {runtimeCompatibilityForType(selectedProvider.type)}
-              </span>
-            </div>
-          ) : null}
-
-          <div className="grid gap-4 sm:grid-cols-2">
-            <Field label="Display name">
-              <input
-                className={inputClass}
-                value={modelForm.label}
-                onChange={(event) => setModelForm({ ...modelForm, label: event.target.value })}
-                placeholder="GPT-5"
-              />
-            </Field>
-            <Field label="Alias" hint="Unique only inside the selected provider.">
-              <input
-                className={cn(inputClass, "font-mono text-xs")}
-                value={modelForm.alias}
-                disabled={Boolean(editingModel)}
-                onChange={(event) => setModelForm({ ...modelForm, alias: event.target.value })}
-                placeholder="gpt-5"
-              />
-            </Field>
-          </div>
-
-          <Field label="Upstream model ID">
-            <input
-              className={cn(inputClass, "font-mono text-xs")}
-              value={modelForm.real_model}
-              onChange={(event) => setModelForm({ ...modelForm, real_model: event.target.value })}
-              placeholder="gpt-5"
-            />
-          </Field>
-
-          {selectedProvider?.type === "openai_embeddings" ? (
-            <Field
-              label="Embedding dimension"
-              hint="Must match the dimension locked by the Memory index (1024 by default)."
-            >
-              <input
-                className={inputClass}
-                value={modelForm.embedding_dimension}
-                onChange={(event) =>
-                  setModelForm({ ...modelForm, embedding_dimension: event.target.value })
-                }
-                inputMode="numeric"
-                min={1}
-                type="number"
-              />
-            </Field>
-          ) : null}
-
-          <div className="grid gap-3 rounded-2xl border border-border/70 p-3 sm:grid-cols-3">
-            <Toggle
-              checked={modelForm.enabled}
-              onChange={(enabled) => setModelForm({ ...modelForm, enabled })}
-              label="Enabled"
-            />
-            <Toggle
-              checked={modelForm.visible}
-              onChange={(visible) => setModelForm({ ...modelForm, visible })}
-              label={
-                selectedProvider?.type === "openai_embeddings"
-                  ? "Always hidden"
-                  : "Visible to users"
-              }
-              disabled={selectedProvider?.type === "openai_embeddings"}
-            />
-            <Toggle
-              checked={modelForm.is_default}
-              onChange={(is_default) => setModelForm({ ...modelForm, is_default })}
-              label={
-                selectedProvider?.type === "openai_embeddings"
-                  ? "Not a chat default"
-                  : "Protocol default"
-              }
-              disabled={selectedProvider?.type === "openai_embeddings"}
-            />
-          </div>
-
-          <details className="group rounded-2xl border border-border/70 p-3">
-            <summary className="cursor-pointer list-none text-sm font-medium [&::-webkit-details-marker]:hidden">
-              Appearance and order
-            </summary>
-            <div className="mt-4 grid gap-4 border-t border-border/70 pt-4 sm:grid-cols-2">
-              <Field label="Icon source">
-                <select
-                  className={inputClass}
-                  value={modelForm.icon_type}
-                  onChange={(event) =>
-                    setModelForm({
-                      ...modelForm,
-                      icon_type: event.target.value as ModelForm["icon_type"],
-                    })
-                  }
+          {!editingModel ? (
+            <FormGroup label="Model type">
+              <div className="grid gap-2 sm:grid-cols-2">
+                <button
+                  type="button"
+                  onClick={() => setModelKind("chat")}
+                  className={cn(
+                    "rounded-2xl border p-3 text-left transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/30",
+                    modelKind === "chat"
+                      ? "border-primary/45 bg-primary/5 shadow-sm"
+                      : "border-border bg-background hover:border-primary/25 hover:bg-muted/25",
+                  )}
                 >
-                  <option value="simple-icons">Brand icon</option>
-                  <option value="image">Image URL</option>
-                </select>
-              </Field>
-              {modelForm.icon_type === "image" ? (
-                <Field label="Image URL">
-                  <input
-                    className={inputClass}
-                    value={modelForm.icon_url}
-                    onChange={(event) =>
-                      setModelForm({ ...modelForm, icon_url: event.target.value })
-                    }
-                    placeholder="https://..."
-                  />
-                </Field>
-              ) : (
-                <Field label="Brand">
-                  <select
-                    className={inputClass}
-                    value={modelForm.icon_slug}
-                    onChange={(event) =>
-                      setModelForm({ ...modelForm, icon_slug: event.target.value })
-                    }
-                  >
-                    {SIMPLE_ICON_SLUGS.map((slug) => (
-                      <option key={slug} value={slug}>
-                        {SIMPLE_ICON_LABELS[slug] ?? slug}
-                      </option>
-                    ))}
-                  </select>
-                </Field>
-              )}
-              <Field label="Display priority" hint="Lower numbers appear first.">
+                  <span className="flex items-center justify-between gap-3 text-sm font-semibold">
+                    Chat model{" "}
+                    {modelKind === "chat" ? <Check className="size-4 text-primary" /> : null}
+                  </span>
+                  <span className="mt-1 block text-xs leading-5 text-muted-foreground">
+                    Used directly by Agent Runtimes.
+                  </span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setModelKind("embedding")}
+                  className={cn(
+                    "rounded-2xl border p-3 text-left transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/30",
+                    modelKind === "embedding"
+                      ? "border-primary/45 bg-primary/5 shadow-sm"
+                      : "border-border bg-background hover:border-primary/25 hover:bg-muted/25",
+                  )}
+                >
+                  <span className="flex items-center justify-between gap-3 text-sm font-semibold">
+                    Embedding model
+                    {modelKind === "embedding" ? <Check className="size-4 text-primary" /> : null}
+                  </span>
+                  <span className="mt-1 block text-xs leading-5 text-muted-foreground">
+                    Shared by Memory and knowledge features; never shown to users.
+                  </span>
+                </button>
+              </div>
+            </FormGroup>
+          ) : null}
+
+          {modelKind === "embedding" ? (
+            <div className="grid gap-5">
+              <Field label="Model name">
                 <input
-                  className={inputClass}
-                  value={modelForm.sort_order}
-                  onChange={(event) =>
-                    setModelForm({ ...modelForm, sort_order: event.target.value })
-                  }
-                  inputMode="numeric"
+                  className={cn(inputClass, "font-mono text-xs")}
+                  value={embeddingForm.model}
+                  onChange={(event) => {
+                    setEmbeddingForm({ ...embeddingForm, model: event.target.value });
+                    setEmbeddingTest(null);
+                  }}
+                  placeholder="text-embedding-3-large"
                 />
               </Field>
+
+              <Field label="Base URL">
+                <input
+                  className={cn(inputClass, "font-mono text-xs")}
+                  value={embeddingForm.base_url}
+                  onChange={(event) => {
+                    setEmbeddingForm({ ...embeddingForm, base_url: event.target.value });
+                    setEmbeddingTest(null);
+                  }}
+                  placeholder="https://api.openai.com/v1"
+                  inputMode="url"
+                />
+              </Field>
+
+              <Field
+                label="API key"
+                hint={editingModel ? "Leave blank to keep the current key." : undefined}
+              >
+                <div className="flex items-center gap-2 rounded-xl border border-input bg-background px-3">
+                  <KeyRound className="size-4 shrink-0 text-muted-foreground" />
+                  <input
+                    className="h-10 min-w-0 flex-1 bg-transparent text-sm outline-none placeholder:text-muted-foreground"
+                    value={embeddingForm.api_key}
+                    onChange={(event) => {
+                      setEmbeddingForm({ ...embeddingForm, api_key: event.target.value });
+                      setEmbeddingTest(null);
+                    }}
+                    placeholder={
+                      editingModel && embeddingProvider?.api_key_hint
+                        ? `Keep current key (${embeddingProvider.api_key_hint})`
+                        : "Enter API key"
+                    }
+                    type="password"
+                    autoComplete="new-password"
+                  />
+                </div>
+              </Field>
+
+              <div className="flex flex-wrap items-center justify-between gap-3 rounded-2xl border border-border/70 bg-muted/20 p-3">
+                <div className="min-w-0">
+                  <div className="text-xs font-medium text-foreground">OpenAI Embeddings</div>
+                  <code className="mt-1 block break-all text-[11px] text-muted-foreground">
+                    {embeddingEndpoint(embeddingForm.base_url)}
+                  </code>
+                </div>
+                <Button
+                  type="button"
+                  variant="outline"
+                  disabled={!canTestEmbedding || testingEmbedding || saving}
+                  onClick={() => void testEmbeddingConnection()}
+                >
+                  {testingEmbedding ? (
+                    <LoaderCircle className="mr-2 size-4 animate-spin" />
+                  ) : (
+                    <PlugZap className="mr-2 size-4" />
+                  )}
+                  Test connection
+                </Button>
+              </div>
+
+              {embeddingTest ? (
+                <AdminAlert tone={embeddingTest.ok ? "success" : "error"}>
+                  <span className="flex items-center gap-2">
+                    {embeddingTest.ok ? <CircleCheck className="size-4" /> : null}
+                    {embeddingTest.ok
+                      ? `Connected · ${embeddingTest.dimension} dimensions · ${embeddingTest.latency_ms} ms`
+                      : embeddingTest.error || "Embedding connection failed"}
+                  </span>
+                </AdminAlert>
+              ) : null}
             </div>
-          </details>
+          ) : (
+            <>
+              <Field label="Provider">
+                <select
+                  className={inputClass}
+                  value={modelForm.provider_id}
+                  onChange={(event) => {
+                    setModelForm({
+                      ...modelForm,
+                      provider_id: event.target.value,
+                    });
+                  }}
+                >
+                  <option value="">Select provider</option>
+                  {providers
+                    .filter((provider) => {
+                      if (provider.type === "openai_embeddings") return false;
+                      if (!editingModel) return true;
+                      const original = models.find((model) => model.id === editingModel);
+                      return !original || protocolForType(provider.type) === original.protocol;
+                    })
+                    .map((provider) => (
+                      <option key={provider.id} value={provider.id}>
+                        {provider.name || provider.id} ·{" "}
+                        {providerTypeMeta(provider.type).shortLabel}
+                      </option>
+                    ))}
+                </select>
+              </Field>
+
+              {selectedProvider ? (
+                <div className="flex flex-wrap items-center gap-2 rounded-2xl border border-border/70 bg-muted/25 p-3">
+                  <ProviderProtocolBadge type={selectedProvider.type} />
+                  <span className="text-xs text-muted-foreground">
+                    Compatible with {runtimeCompatibilityForType(selectedProvider.type)}
+                  </span>
+                </div>
+              ) : null}
+
+              <div className="grid gap-4 sm:grid-cols-2">
+                <Field label="Display name">
+                  <input
+                    className={inputClass}
+                    value={modelForm.label}
+                    onChange={(event) => setModelForm({ ...modelForm, label: event.target.value })}
+                    placeholder="GPT-5"
+                  />
+                </Field>
+                <Field label="Alias" hint="Unique only inside the selected provider.">
+                  <input
+                    className={cn(inputClass, "font-mono text-xs")}
+                    value={modelForm.alias}
+                    disabled={Boolean(editingModel)}
+                    onChange={(event) => setModelForm({ ...modelForm, alias: event.target.value })}
+                    placeholder="gpt-5"
+                  />
+                </Field>
+              </div>
+
+              <Field label="Upstream model ID">
+                <input
+                  className={cn(inputClass, "font-mono text-xs")}
+                  value={modelForm.real_model}
+                  onChange={(event) =>
+                    setModelForm({ ...modelForm, real_model: event.target.value })
+                  }
+                  placeholder="gpt-5"
+                />
+              </Field>
+
+              <div className="grid gap-3 rounded-2xl border border-border/70 p-3 sm:grid-cols-3">
+                <Toggle
+                  checked={modelForm.enabled}
+                  onChange={(enabled) => setModelForm({ ...modelForm, enabled })}
+                  label="Enabled"
+                />
+                <Toggle
+                  checked={modelForm.visible}
+                  onChange={(visible) => setModelForm({ ...modelForm, visible })}
+                  label="Visible to users"
+                />
+                <Toggle
+                  checked={modelForm.is_default}
+                  onChange={(is_default) => setModelForm({ ...modelForm, is_default })}
+                  label="Protocol default"
+                />
+              </div>
+
+              <details className="group rounded-2xl border border-border/70 p-3">
+                <summary className="cursor-pointer list-none text-sm font-medium [&::-webkit-details-marker]:hidden">
+                  Appearance and order
+                </summary>
+                <div className="mt-4 grid gap-4 border-t border-border/70 pt-4 sm:grid-cols-2">
+                  <Field label="Icon source">
+                    <select
+                      className={inputClass}
+                      value={modelForm.icon_type}
+                      onChange={(event) =>
+                        setModelForm({
+                          ...modelForm,
+                          icon_type: event.target.value as ModelForm["icon_type"],
+                        })
+                      }
+                    >
+                      <option value="simple-icons">Brand icon</option>
+                      <option value="image">Image URL</option>
+                    </select>
+                  </Field>
+                  {modelForm.icon_type === "image" ? (
+                    <Field label="Image URL">
+                      <input
+                        className={inputClass}
+                        value={modelForm.icon_url}
+                        onChange={(event) =>
+                          setModelForm({ ...modelForm, icon_url: event.target.value })
+                        }
+                        placeholder="https://..."
+                      />
+                    </Field>
+                  ) : (
+                    <Field label="Brand">
+                      <select
+                        className={inputClass}
+                        value={modelForm.icon_slug}
+                        onChange={(event) =>
+                          setModelForm({ ...modelForm, icon_slug: event.target.value })
+                        }
+                      >
+                        {SIMPLE_ICON_SLUGS.map((slug) => (
+                          <option key={slug} value={slug}>
+                            {SIMPLE_ICON_LABELS[slug] ?? slug}
+                          </option>
+                        ))}
+                      </select>
+                    </Field>
+                  )}
+                  <Field label="Display priority" hint="Lower numbers appear first.">
+                    <input
+                      className={inputClass}
+                      value={modelForm.sort_order}
+                      onChange={(event) =>
+                        setModelForm({ ...modelForm, sort_order: event.target.value })
+                      }
+                      inputMode="numeric"
+                    />
+                  </Field>
+                </div>
+              </details>
+            </>
+          )}
         </div>
       </AdminDrawer>
 
@@ -1283,6 +1475,15 @@ function Td({ children }: { children: ReactNode }) {
 }
 
 function providerTypeMeta(type: ProviderType) {
+  if (type === "openai_embeddings") {
+    return {
+      value: type,
+      label: "OpenAI Embeddings API",
+      shortLabel: "Embeddings",
+      description: "OpenAI-compatible vector embeddings.",
+      defaultBaseURL: "https://api.openai.com/v1",
+    };
+  }
   return PROVIDER_TYPES.find((item) => item.value === type) ?? PROVIDER_TYPES[0]!;
 }
 
@@ -1293,13 +1494,13 @@ function protocolForType(type: ProviderType): ModelProtocol {
 }
 
 function runtimeForProtocol(protocol: ModelProtocol) {
-  if (protocol === "openai-embeddings") return "Memory only";
+  if (protocol === "openai-embeddings") return "Platform services";
   return protocol === "openai-responses" ? "Codex" : "Claude Code";
 }
 
 function runtimeCompatibilityForType(type: ProviderType) {
   if (type === "openai_responses") return "Codex";
-  if (type === "openai_embeddings") return "Memory only";
+  if (type === "openai_embeddings") return "Platform services";
   return "Claude Code";
 }
 
@@ -1308,6 +1509,14 @@ function providerEndpoint(baseURL: string, type: ProviderType) {
   if (type === "anthropic") return `${base}/v1/messages`;
   if (type === "openai_embeddings") return `${base}/embeddings`;
   return `${base}/responses`;
+}
+
+function embeddingEndpoint(baseURL: string) {
+  const base = baseURL
+    .trim()
+    .replace(/\/+$/, "")
+    .replace(/\/embeddings$/, "");
+  return base ? `${base}/embeddings` : "";
 }
 
 function providerIDFromName(name: string) {

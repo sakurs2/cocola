@@ -44,6 +44,20 @@ func newParityPostgres(t *testing.T) *Postgres {
 	if err != nil {
 		t.Fatalf("truncate: %v", err)
 	}
+	_, err = pg.pool.Exec(ctx, `INSERT INTO memory_config (singleton) VALUES (TRUE)
+		ON CONFLICT (singleton) DO NOTHING`)
+	if err != nil {
+		t.Fatalf("restore memory config singleton: %v", err)
+	}
+	_, err = pg.pool.Exec(ctx, `UPDATE memory_config SET enabled=FALSE,
+		extraction_model_route_id=NULL, embedding_model_route_id=NULL,
+		version=0, updated_by='' WHERE singleton=TRUE`)
+	if err != nil {
+		t.Fatalf("reset memory config: %v", err)
+	}
+	if _, err = pg.pool.Exec(ctx, `DELETE FROM memory_index_state`); err != nil {
+		t.Fatalf("reset memory index state: %v", err)
+	}
 	t.Cleanup(pg.Close)
 	return pg
 }
@@ -227,6 +241,7 @@ func runStoreContract(t *testing.T, st Store) {
 	providers := []LLMProvider{
 		{ID: "provider-chat", Name: "Chat", Type: "anthropic", Enabled: true, CreatedAt: now, UpdatedAt: now},
 		{ID: "provider-responses", Name: "Responses", Type: "openai_responses", Enabled: true, CreatedAt: now, UpdatedAt: now},
+		{ID: "provider-embedding", Name: "Embedding", Type: "openai_embeddings", Enabled: true, CreatedAt: now, UpdatedAt: now},
 	}
 	for _, provider := range providers {
 		if err := st.CreateLLMProvider(ctx, provider); err != nil {
@@ -236,6 +251,7 @@ func runStoreContract(t *testing.T, st Store) {
 	routes := []LLMModelRoute{
 		{ID: "route-chat", Alias: "shared", ProviderID: "provider-chat", Protocol: "anthropic-messages", RealModel: "chat-model", Enabled: true, Visible: true, IsDefault: true, CreatedAt: now, UpdatedAt: now},
 		{ID: "route-responses", Alias: "shared", ProviderID: "provider-responses", Protocol: "openai-responses", RealModel: "responses-model", Enabled: true, Visible: true, IsDefault: true, CreatedAt: now, UpdatedAt: now},
+		{ID: "route-embedding", Alias: "embedding", ProviderID: "provider-embedding", Protocol: "openai-embeddings", RealModel: "embedding-model", Enabled: true, Visible: false, EmbeddingDimension: 1024, CreatedAt: now, UpdatedAt: now},
 	}
 	for _, route := range routes {
 		if err := st.CreateLLMModelRoute(ctx, route); err != nil {
@@ -253,8 +269,26 @@ func runStoreContract(t *testing.T, st Store) {
 		t.Fatalf("GetLLMModelRoute by id: %+v %v", gotRoute, err)
 	}
 	gotRoutes, err := st.ListLLMModelRoutes(ctx)
-	if err != nil || len(gotRoutes) != 2 || !gotRoutes[0].IsDefault || !gotRoutes[1].IsDefault {
+	if err != nil || len(gotRoutes) != 3 {
 		t.Fatalf("provider-scoped routes and protocol defaults: %+v %v", gotRoutes, err)
+	}
+
+	// ----- memory model selections -----
+	memoryConfig := MemoryConfig{
+		ExtractionModelRouteID: "route-chat",
+		EmbeddingModelRouteID:  "route-embedding",
+		UpdatedAt:              now,
+		UpdatedBy:              "admin",
+	}
+	savedMemory, err := st.UpdateMemoryConfig(ctx, memoryConfig, 0)
+	if err != nil {
+		t.Fatalf("UpdateMemoryConfig: %v", err)
+	}
+	gotMemory, err := st.GetMemoryConfig(ctx)
+	if err != nil || gotMemory.Version != 1 ||
+		gotMemory.ExtractionModelRouteID != savedMemory.ExtractionModelRouteID ||
+		gotMemory.EmbeddingModelRouteID != savedMemory.EmbeddingModelRouteID {
+		t.Fatalf("memory model selections roundtrip: %+v %v", gotMemory, err)
 	}
 
 	// ----- scheduled task model route identity -----

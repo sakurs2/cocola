@@ -55,7 +55,7 @@ type ProgressPart = {
 
 type MemoryRecallPart = {
   type: "memory-recall";
-  status?: "running" | "hit" | "degraded" | "unavailable";
+  status?: "running" | "hit" | "miss" | "degraded" | "unavailable";
   count?: number;
 };
 
@@ -308,7 +308,7 @@ function MessagePartView({ part, role }: { part: MessagePart; role: "user" | "as
     return environment ? <RailEnvironment environment={environment} /> : null;
   }
   if (part.type === "memory-recall") {
-    if (!part.status) return null;
+    if (!part.status || part.status === "miss") return null;
     return <RailMemoryRecall status={part.status} count={part.count} />;
   }
   if (part.type === "tool-call") {

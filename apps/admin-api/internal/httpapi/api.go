@@ -197,6 +197,12 @@ func (a *API) Router() http.Handler {
 			r.Post("/{id}/default", a.setDefaultLLMModel)
 		})
 
+		r.Route("/embedding-models", func(r chi.Router) {
+			r.Post("/", a.createEmbeddingModel)
+			r.Post("/test", a.testEmbeddingModel)
+			r.Patch("/{id}", a.updateEmbeddingModel)
+		})
+
 		r.Route("/memory", func(r chi.Router) {
 			r.Get("/config", a.getMemoryConfig)
 			r.Patch("/config", a.updateMemoryConfig)

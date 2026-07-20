@@ -82,7 +82,7 @@ type UiProgressPart = {
   items: unknown[];
 };
 
-export type MemoryRecallStatus = "running" | "hit" | "degraded" | "unavailable";
+export type MemoryRecallStatus = "running" | "hit" | "miss" | "degraded" | "unavailable";
 
 export type UiMemoryRecallPart = {
   type: "memory-recall";
@@ -489,6 +489,7 @@ function normalizePersistedParts(parts: UiPart[] | undefined): UiPart[] {
 const MEMORY_RECALL_STATUSES = new Set<MemoryRecallStatus>([
   "running",
   "hit",
+  "miss",
   "degraded",
   "unavailable",
 ]);
@@ -679,9 +680,11 @@ function upsertProgress(parts: UiPart[], id: string, itemsJSON: string): UiPart[
 }
 
 function upsertMemoryRecall(parts: UiPart[], data: Record<string, string>): UiPart[] {
-  if (data.status === "skipped" || data.status === "miss") {
-    return parts.filter((part) => part.type !== "memory-recall");
-  }
+  // Recall emits a transient `running` part before the lookup completes. Keep
+  // a miss in that same slot (the renderer hides it) instead of removing the
+  // part: deleting it while assistant-ui switches to its completed renderer
+  // can leave PartByIndex observing a stale, now out-of-bounds index.
+  if (data.status === "skipped") return parts;
   const next = normalizeMemoryRecallPart({
     type: "memory-recall",
     status: data.status,

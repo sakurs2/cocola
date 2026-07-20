@@ -62,11 +62,10 @@ func (r *Reducer) Apply(kind string, data map[string]string) {
 
 func (r *Reducer) upsertMemoryRecall(data map[string]string) {
 	status := data["status"]
-	if status == "skipped" || status == "miss" {
-		r.removeMemoryRecall()
+	if status == "skipped" {
 		return
 	}
-	if status != "running" && status != "hit" &&
+	if status != "running" && status != "hit" && status != "miss" &&
 		status != "degraded" && status != "unavailable" {
 		return
 	}
@@ -84,6 +83,9 @@ func (r *Reducer) upsertMemoryRecall(data map[string]string) {
 			return
 		}
 	}
+	// A normal miss stays in the transient running part's slot and is hidden by
+	// clients. Keeping the part cardinality stable prevents completed-message
+	// PartByIndex renderers from observing a stale out-of-bounds index.
 	insertAt := 0
 	for insertAt < len(r.parts) &&
 		(r.parts[insertAt].Type == PartEnvironment || r.parts[insertAt].Type == PartSessionStatus) {
@@ -94,15 +96,6 @@ func (r *Reducer) upsertMemoryRecall(data map[string]string) {
 	next = append(next, part)
 	next = append(next, r.parts[insertAt:]...)
 	r.parts = next
-}
-
-func (r *Reducer) removeMemoryRecall() {
-	for i := range r.parts {
-		if r.parts[i].Type == PartMemoryRecall {
-			r.parts = append(r.parts[:i], r.parts[i+1:]...)
-			return
-		}
-	}
 }
 
 type sessionStatusEnvelope struct {

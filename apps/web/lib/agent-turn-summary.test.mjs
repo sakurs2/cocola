@@ -83,6 +83,19 @@ test("memory recall is a process step in persisted and assistant-ui data shapes"
   }
 });
 
+test("a memory miss remains index-stable without creating a visible process summary", () => {
+  for (const part of [
+    { type: "memory-recall", status: "miss", count: 0 },
+    { type: "data", name: "memory-recall", data: { status: "miss", count: 0 } },
+  ]) {
+    assert.deepEqual(splitAgentTurnParts([part, { type: "text", text: "Answer" }]), {
+      processIndices: [],
+      outputIndices: [0, 1],
+      hasProcess: false,
+    });
+  }
+});
+
 test("duration formatting uses seconds, minute-seconds, and hour-minutes", () => {
   assert.equal(formatAgentDuration(59_000), "59s");
   assert.equal(formatAgentDuration(60_000), "1m 0s");

@@ -1237,6 +1237,65 @@ func (a *API) updateMemoryConfig(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, config)
 }
 
+type embeddingModelReq struct {
+	RouteID string  `json:"route_id,omitempty"`
+	Model   string  `json:"model"`
+	BaseURL string  `json:"base_url"`
+	APIKey  *string `json:"api_key,omitempty"`
+}
+
+func (a *API) testEmbeddingModel(w http.ResponseWriter, r *http.Request) {
+	var req embeddingModelReq
+	if err := decode(r, &req); err != nil {
+		mapErr(w, err)
+		return
+	}
+	result, err := a.svc.TestEmbeddingModel(r.Context(), service.EmbeddingModelTestInput{
+		RouteID: req.RouteID, Model: req.Model, BaseURL: req.BaseURL, APIKey: req.APIKey,
+	})
+	if err != nil {
+		mapErr(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, result)
+}
+
+func (a *API) createEmbeddingModel(w http.ResponseWriter, r *http.Request) {
+	var req embeddingModelReq
+	if err := decode(r, &req); err != nil {
+		mapErr(w, err)
+		return
+	}
+	model, err := a.svc.CreateEmbeddingModel(r.Context(), service.EmbeddingModelInput{
+		Model: req.Model, BaseURL: req.BaseURL, APIKey: req.APIKey, Actor: actorOf(r),
+	})
+	if err != nil {
+		mapErr(w, err)
+		return
+	}
+	writeJSON(w, http.StatusCreated, model)
+}
+
+func (a *API) updateEmbeddingModel(w http.ResponseWriter, r *http.Request) {
+	var req embeddingModelReq
+	if err := decode(r, &req); err != nil {
+		mapErr(w, err)
+		return
+	}
+	model, err := a.svc.UpdateEmbeddingModel(
+		r.Context(),
+		chi.URLParam(r, "id"),
+		service.EmbeddingModelInput{
+			Model: req.Model, BaseURL: req.BaseURL, APIKey: req.APIKey, Actor: actorOf(r),
+		},
+	)
+	if err != nil {
+		mapErr(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, model)
+}
+
 // ---- scheduled tasks ----
 
 type scheduledTaskAttachmentReq struct {

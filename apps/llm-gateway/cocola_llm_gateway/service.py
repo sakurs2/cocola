@@ -254,19 +254,20 @@ class GatewayService:
                 chunks: list[str] = []
                 streamer = ResilientStreamer(provider, self._policy, self._limiter)
                 async for event in streamer.chat_stream(req):
-                    if event.type is StreamEventType.CONTENT_DELTA:
-                        chunks.append(event.text)
-                    elif event.usage is not None and event.type in {
-                        StreamEventType.MESSAGE_START,
-                        StreamEventType.MESSAGE_DELTA,
-                    }:
-                        usage.merge(event.usage)
-                    elif event.type is StreamEventType.ERROR:
+                    if event.type is StreamEventType.ERROR:
                         raise UpstreamError(
                             ErrorCode.UNAVAILABLE,
                             "memory extraction upstream failed",
                             retryable=False,
                         )
+                    text_delta = _memory_stream_text_delta(event)
+                    if text_delta:
+                        chunks.append(text_delta)
+                    if event.usage is not None and event.type in {
+                        StreamEventType.MESSAGE_START,
+                        StreamEventType.MESSAGE_DELTA,
+                    }:
+                        usage.merge(event.usage)
                 text = "".join(chunks)
 
             if not text:
@@ -319,8 +320,6 @@ class GatewayService:
                 "input": payload["input"],
                 "encoding_format": "float",
             }
-            if route.embedding_dimension > 0:
-                upstream_payload["dimensions"] = route.embedding_dimension
             response = await self._embeddings_create_with_retry(provider, upstream_payload)
             _validate_embedding_dimensions(response, route.embedding_dimension)
             raw_usage = response.get("usage") if isinstance(response.get("usage"), dict) else {}
@@ -723,6 +722,22 @@ def _structured_output_instruction(response_format: dict) -> str:
             + json.dumps(schema.get("schema") or {}, separators=(",", ":"))
         )
     return "Return only one valid JSON object. Do not include markdown fences or commentary."
+
+
+def _memory_stream_text_delta(event: StreamEvent) -> str:
+    """Extract text from normalized or lossless Anthropic stream events."""
+    if event.type is StreamEventType.CONTENT_DELTA:
+        return event.text
+    if event.type is not StreamEventType.PASSTHROUGH:
+        return ""
+    frame = event.extra.get("frame")
+    if not isinstance(frame, dict) or frame.get("type") != "content_block_delta":
+        return ""
+    delta = frame.get("delta")
+    if not isinstance(delta, dict) or delta.get("type") != "text_delta":
+        return ""
+    text = delta.get("text")
+    return text if isinstance(text, str) else ""
 
 
 def _memory_responses_payload(payload: dict, real_model: str) -> dict:

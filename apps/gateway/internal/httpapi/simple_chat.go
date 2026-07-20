@@ -362,11 +362,13 @@ func (a *API) executeLiveRun(live *liveRun) {
 	attachments := a.prepareRunAttachments(live.ctx, live.request)
 	memoryContext := ""
 	if a.memory != nil && chatTypeForConversation(live.request) != "scheduled_task" {
-		live.updateMemoryRecall(memory.RecallResult{Status: memory.RecallStatusRunning})
 		recall := a.memory.Recall(
 			live.ctx,
 			memory.Identity{TenantID: live.identity.TenantID, UserID: live.identity.UserID},
 			live.request.Prompt,
+			func() {
+				live.updateMemoryRecall(memory.RecallResult{Status: memory.RecallStatusRunning})
+			},
 		)
 		memoryContext = recall.Context
 		live.recalledMemoryURIs = recall.URIs

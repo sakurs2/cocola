@@ -1040,9 +1040,9 @@ func (p *Postgres) DeleteLLMModelRoute(ctx context.Context, id string) error {
 
 func (p *Postgres) GetMemoryConfig(ctx context.Context) (MemoryConfig, error) {
 	var config MemoryConfig
-	err := p.pool.QueryRow(ctx, `SELECT enabled,
-		COALESCE(extraction_model_route_id, ''), COALESCE(embedding_model_route_id, ''),
-		version, updated_at, updated_by FROM memory_config WHERE singleton=TRUE`).Scan(
+	err := p.pool.QueryRow(ctx, `SELECT enabled, COALESCE(extraction_model_route_id, ''),
+		COALESCE(embedding_model_route_id, ''), version, updated_at, updated_by
+		FROM memory_config WHERE singleton=TRUE`).Scan(
 		&config.Enabled, &config.ExtractionModelRouteID, &config.EmbeddingModelRouteID,
 		&config.Version, &config.UpdatedAt, &config.UpdatedBy,
 	)

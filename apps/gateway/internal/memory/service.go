@@ -252,6 +252,7 @@ func (s *Service) Recall(
 	ctx context.Context,
 	identity Identity,
 	query string,
+	onStart func(),
 ) RecallResult {
 	ctx, cancel := context.WithTimeout(ctx, s.cfg.RecallTimeout)
 	defer cancel()
@@ -262,7 +263,7 @@ func (s *Service) Recall(
 			Status: RecallStatusUnavailable, ErrorCode: recallErrorCode(err),
 		}
 	}
-	if !settings.GlobalEnabled || !settings.UseEnabled {
+	if !beginRecall(settings, onStart) {
 		s.metrics.recall("skipped")
 		return RecallResult{Status: RecallStatusSkipped}
 	}
@@ -292,6 +293,19 @@ func (s *Service) Recall(
 	result := buildRecallResult(profile.text, found.items, profile.err, found.err)
 	s.metrics.recall(result.Status)
 	return result
+}
+
+// beginRecall notifies the caller only after both the administrator and user
+// have allowed recall. This keeps disabled conversations free of transient UI
+// progress while avoiding a duplicate settings query in the chat orchestrator.
+func beginRecall(settings Settings, onStart func()) bool {
+	if !settings.GlobalEnabled || !settings.UseEnabled {
+		return false
+	}
+	if onStart != nil {
+		onStart()
+	}
+	return true
 }
 
 func buildRecallResult(

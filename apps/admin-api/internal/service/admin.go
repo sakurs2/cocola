@@ -10,6 +10,7 @@
 package service
 
 import (
+	"bytes"
 	"context"
 	"crypto/aes"
 	"crypto/cipher"
@@ -17,10 +18,14 @@ import (
 	"crypto/sha256"
 	"encoding/base64"
 	"encoding/hex"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
+	"math"
+	"net"
 	"net/http"
+	"net/url"
 	"strings"
 	"sync/atomic"
 	"time"
@@ -71,6 +76,7 @@ type Admin struct {
 	memoryEmbeddingDimension int
 	memoryOpenVikingURL      string
 	memoryHTTPClient         *http.Client
+	embeddingHTTPClient      *http.Client
 	configSecretKey          string
 	schedulerStarted         atomic.Bool
 }
@@ -81,7 +87,10 @@ func New(s store.Store, iss *token.Issuer, now Clock) *Admin {
 	if now == nil {
 		now = time.Now
 	}
-	return &Admin{store: s, issuer: iss, now: now}
+	return &Admin{
+		store: s, issuer: iss, now: now,
+		embeddingHTTPClient: &http.Client{Timeout: 10 * time.Second},
+	}
 }
 
 type SkillBundleStore interface {
@@ -1232,8 +1241,27 @@ func (a *Admin) UpdateLLMModel(ctx context.Context, id string, in LLMModelInput)
 
 func (a *Admin) DeleteLLMModel(ctx context.Context, id, actor string) error {
 	id = normalizeID(id)
+	route, err := a.store.GetLLMModelRoute(ctx, id)
+	if err != nil {
+		return err
+	}
 	if err := a.store.DeleteLLMModelRoute(ctx, id); err != nil {
 		return err
+	}
+	if route.Protocol == "openai-embeddings" {
+		routes, listErr := a.store.ListLLMModelRoutes(ctx)
+		if listErr == nil {
+			providerInUse := false
+			for _, candidate := range routes {
+				if candidate.ProviderID == route.ProviderID {
+					providerInUse = true
+					break
+				}
+			}
+			if !providerInUse {
+				_ = a.store.DeleteLLMProvider(ctx, route.ProviderID)
+			}
+		}
 	}
 	return nil
 }
@@ -1557,6 +1585,37 @@ type MemoryConfigInput struct {
 	Actor                  string
 }
 
+type EmbeddingModelTestInput struct {
+	RouteID string
+	Model   string
+	BaseURL string
+	APIKey  *string
+}
+
+type EmbeddingModelTestResult struct {
+	OK        bool   `json:"ok"`
+	LatencyMS int64  `json:"latency_ms"`
+	Dimension int    `json:"dimension,omitempty"`
+	ErrorCode string `json:"error_code,omitempty"`
+	Error     string `json:"error,omitempty"`
+}
+
+// EmbeddingModelInput is the intentionally small admin contract for a hidden
+// OpenAI Embeddings model. Provider and route details stay an implementation
+// detail so every future consumer can select the same route from the catalog.
+type EmbeddingModelInput struct {
+	Model   string
+	BaseURL string
+	APIKey  *string
+	Actor   string
+}
+
+type EmbeddingModelView struct {
+	store.LLMModelRoute
+	BaseURL    string `json:"base_url"`
+	APIKeyHint string `json:"api_key_hint"`
+}
+
 func (a *Admin) GetMemoryConfig(ctx context.Context) (MemoryConfigView, error) {
 	config, err := a.store.GetMemoryConfig(ctx)
 	if err != nil {
@@ -1653,6 +1712,261 @@ func (a *Admin) memoryConfigView(
 		view.Status = "degraded"
 	}
 	return view
+}
+
+func (a *Admin) TestEmbeddingModel(
+	ctx context.Context,
+	in EmbeddingModelTestInput,
+) (EmbeddingModelTestResult, error) {
+	provider := store.LLMProvider{Type: ProviderOpenAIEmbeddings, Enabled: true}
+	model := strings.TrimSpace(in.Model)
+	if strings.TrimSpace(in.RouteID) != "" {
+		route, err := a.store.GetLLMModelRoute(ctx, strings.TrimSpace(in.RouteID))
+		if err != nil {
+			return EmbeddingModelTestResult{}, err
+		}
+		if route.Protocol != "openai-embeddings" {
+			return EmbeddingModelTestResult{}, ErrInvalidArg
+		}
+		provider, err = a.store.GetLLMProvider(ctx, route.ProviderID)
+		if err != nil {
+			return EmbeddingModelTestResult{}, err
+		}
+		if model == "" {
+			model = route.RealModel
+		}
+	}
+	if strings.TrimSpace(in.BaseURL) != "" {
+		baseURL, err := normalizeEmbeddingBaseURL(in.BaseURL)
+		if err != nil {
+			return EmbeddingModelTestResult{}, err
+		}
+		provider.BaseURL = baseURL
+	}
+	if err := a.applyProviderAPIKey(&provider, in.APIKey); err != nil {
+		return EmbeddingModelTestResult{}, err
+	}
+	return a.probeEmbedding(ctx, model, provider)
+}
+
+func (a *Admin) CreateEmbeddingModel(
+	ctx context.Context,
+	in EmbeddingModelInput,
+) (EmbeddingModelView, error) {
+	model := strings.TrimSpace(in.Model)
+	baseURL, err := normalizeEmbeddingBaseURL(in.BaseURL)
+	if err != nil {
+		return EmbeddingModelView{}, err
+	}
+	now := a.now().UTC()
+	provider := store.LLMProvider{
+		ID: "embedding-" + newID(), Name: model, Type: ProviderOpenAIEmbeddings,
+		BaseURL: baseURL, Enabled: true, CreatedAt: now, UpdatedAt: now,
+	}
+	if err := a.applyProviderAPIKey(&provider, in.APIKey); err != nil {
+		return EmbeddingModelView{}, err
+	}
+	if model == "" || in.APIKey == nil || strings.TrimSpace(*in.APIKey) == "" {
+		return EmbeddingModelView{}, ErrInvalidArg
+	}
+	probe, err := a.probeEmbedding(ctx, model, provider)
+	if err != nil {
+		return EmbeddingModelView{}, err
+	}
+	if !probe.OK {
+		return EmbeddingModelView{}, fmt.Errorf("%w: embedding connection test failed: %s", ErrInvalidArg, probe.Error)
+	}
+	route := store.LLMModelRoute{
+		ID: "embedding-" + newID(), Alias: normalizeID(model), ProviderID: provider.ID,
+		Protocol: "openai-embeddings", RealModel: model, Label: model,
+		IconType: IconSimpleIcons, IconSlug: "openai", Enabled: true, Visible: false,
+		EmbeddingDimension: probe.Dimension, CreatedAt: now, UpdatedAt: now,
+	}
+	if route.Alias == "" {
+		route.Alias = "embedding"
+	}
+	if err := a.store.CreateLLMProvider(ctx, provider); err != nil {
+		return EmbeddingModelView{}, err
+	}
+	if err := a.store.CreateLLMModelRoute(ctx, route); err != nil {
+		_ = a.store.DeleteLLMProvider(ctx, provider.ID)
+		return EmbeddingModelView{}, err
+	}
+	return embeddingModelView(route, provider), nil
+}
+
+func (a *Admin) UpdateEmbeddingModel(
+	ctx context.Context,
+	id string,
+	in EmbeddingModelInput,
+) (EmbeddingModelView, error) {
+	route, err := a.store.GetLLMModelRoute(ctx, normalizeID(id))
+	if err != nil {
+		return EmbeddingModelView{}, err
+	}
+	if route.Protocol != "openai-embeddings" {
+		return EmbeddingModelView{}, ErrInvalidArg
+	}
+	provider, err := a.store.GetLLMProvider(ctx, route.ProviderID)
+	if err != nil {
+		return EmbeddingModelView{}, err
+	}
+	previousProvider := provider
+	model := strings.TrimSpace(in.Model)
+	if model == "" || strings.TrimSpace(in.BaseURL) == "" {
+		return EmbeddingModelView{}, ErrInvalidArg
+	}
+	provider.BaseURL, err = normalizeEmbeddingBaseURL(in.BaseURL)
+	if err != nil {
+		return EmbeddingModelView{}, err
+	}
+	if err := a.applyProviderAPIKey(&provider, in.APIKey); err != nil {
+		return EmbeddingModelView{}, err
+	}
+	provider.Name = model
+	provider.Enabled = true
+	provider.UpdatedAt = a.now().UTC()
+	probe, err := a.probeEmbedding(ctx, model, provider)
+	if err != nil {
+		return EmbeddingModelView{}, err
+	}
+	if !probe.OK {
+		return EmbeddingModelView{}, fmt.Errorf("%w: embedding connection test failed: %s", ErrInvalidArg, probe.Error)
+	}
+	route.RealModel = model
+	route.Label = model
+	route.Alias = normalizeID(model)
+	route.Enabled = true
+	route.Visible = false
+	route.IsDefault = false
+	route.EmbeddingDimension = probe.Dimension
+	route.UpdatedAt = a.now().UTC()
+	if err := a.store.UpdateLLMProvider(ctx, provider); err != nil {
+		return EmbeddingModelView{}, err
+	}
+	if err := a.store.UpdateLLMModelRoute(ctx, route); err != nil {
+		_ = a.store.UpdateLLMProvider(ctx, previousProvider)
+		return EmbeddingModelView{}, err
+	}
+	return embeddingModelView(route, provider), nil
+}
+
+func embeddingModelView(route store.LLMModelRoute, provider store.LLMProvider) EmbeddingModelView {
+	return EmbeddingModelView{
+		LLMModelRoute: route,
+		BaseURL:       provider.BaseURL,
+		APIKeyHint:    provider.APIKeyHint,
+	}
+}
+
+func normalizeEmbeddingBaseURL(raw string) (string, error) {
+	value := strings.TrimRight(strings.TrimSpace(raw), "/")
+	if value == "" {
+		return "", nil
+	}
+	parsed, err := url.Parse(value)
+	if err != nil || (parsed.Scheme != "http" && parsed.Scheme != "https") ||
+		parsed.Host == "" || parsed.User != nil || parsed.RawQuery != "" || parsed.Fragment != "" {
+		return "", fmt.Errorf("%w: embedding base URL must be an HTTP(S) URL without credentials, query, or fragment", ErrInvalidArg)
+	}
+	if strings.HasSuffix(parsed.Path, "/embeddings") {
+		parsed.Path = strings.TrimSuffix(parsed.Path, "/embeddings")
+	}
+	parsed.Path = strings.TrimRight(parsed.Path, "/")
+	return strings.TrimRight(parsed.String(), "/"), nil
+}
+
+func (a *Admin) probeEmbedding(
+	ctx context.Context,
+	model string,
+	provider store.LLMProvider,
+) (EmbeddingModelTestResult, error) {
+	model = strings.TrimSpace(model)
+	if model == "" || strings.TrimSpace(provider.BaseURL) == "" || provider.APIKeyCiphertext == "" {
+		return EmbeddingModelTestResult{}, fmt.Errorf("%w: embedding model, base URL, and API key are required", ErrInvalidArg)
+	}
+	apiKey, err := decryptModelSecret(a.modelSecretKey, provider.APIKeyCiphertext)
+	if err != nil {
+		return EmbeddingModelTestResult{}, fmt.Errorf("%w: embedding API key cannot be decrypted", ErrInvalidArg)
+	}
+	payload, err := json.Marshal(map[string]any{
+		"model":           model,
+		"input":           []string{"cocola embedding connectivity test"},
+		"encoding_format": "float",
+	})
+	if err != nil {
+		return EmbeddingModelTestResult{}, err
+	}
+	probeCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
+	defer cancel()
+	req, err := http.NewRequestWithContext(
+		probeCtx,
+		http.MethodPost,
+		strings.TrimRight(provider.BaseURL, "/")+"/embeddings",
+		bytes.NewReader(payload),
+	)
+	if err != nil {
+		return EmbeddingModelTestResult{}, fmt.Errorf("%w: invalid embedding endpoint", ErrInvalidArg)
+	}
+	req.Header.Set("authorization", "Bearer "+apiKey)
+	req.Header.Set("content-type", "application/json")
+	req.Header.Set("accept", "application/json")
+	started := time.Now()
+	client := a.embeddingHTTPClient
+	if client == nil {
+		client = &http.Client{Timeout: 10 * time.Second}
+	}
+	response, err := client.Do(req)
+	latency := time.Since(started).Milliseconds()
+	if err != nil {
+		var networkErr net.Error
+		if errors.Is(err, context.DeadlineExceeded) || (errors.As(err, &networkErr) && networkErr.Timeout()) {
+			return embeddingProbeFailure("timeout", "Request timed out", latency), nil
+		}
+		return embeddingProbeFailure("transport_error", "Could not reach the embedding endpoint", latency), nil
+	}
+	defer response.Body.Close()
+	if response.StatusCode < http.StatusOK || response.StatusCode >= http.StatusMultipleChoices {
+		code, message := embeddingHTTPError(response.StatusCode)
+		return embeddingProbeFailure(code, message, latency), nil
+	}
+	var body struct {
+		Data []struct {
+			Embedding []float64 `json:"embedding"`
+		} `json:"data"`
+	}
+	if err := json.NewDecoder(io.LimitReader(response.Body, 4<<20)).Decode(&body); err != nil || len(body.Data) == 0 {
+		return embeddingProbeFailure("invalid_response", "Provider returned an invalid OpenAI embedding response", latency), nil
+	}
+	dimension := len(body.Data[0].Embedding)
+	if dimension == 0 {
+		return embeddingProbeFailure("invalid_response", "Provider returned an empty embedding vector", latency), nil
+	}
+	for _, value := range body.Data[0].Embedding {
+		if math.IsNaN(value) || math.IsInf(value, 0) {
+			return embeddingProbeFailure("invalid_response", "Provider returned invalid vector values", latency), nil
+		}
+	}
+	return EmbeddingModelTestResult{
+		OK: true, LatencyMS: latency, Dimension: dimension,
+	}, nil
+}
+
+func embeddingProbeFailure(code, message string, latency int64) EmbeddingModelTestResult {
+	return EmbeddingModelTestResult{LatencyMS: latency, ErrorCode: code, Error: message}
+}
+
+func embeddingHTTPError(status int) (string, string) {
+	switch status {
+	case http.StatusUnauthorized, http.StatusForbidden:
+		return "authentication_failed", fmt.Sprintf("Authentication failed (HTTP %d)", status)
+	case http.StatusNotFound:
+		return "endpoint_not_found", "Endpoint not found (HTTP 404)"
+	case http.StatusTooManyRequests:
+		return "rate_limited", "Provider rate limit exceeded (HTTP 429)"
+	default:
+		return "provider_rejected", fmt.Sprintf("Provider rejected the request (HTTP %d)", status)
+	}
 }
 
 func (a *Admin) memoryOpenVikingReady(ctx context.Context) error {

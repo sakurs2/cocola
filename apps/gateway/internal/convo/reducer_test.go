@@ -165,7 +165,7 @@ func TestReducerUpsertsProgressByID(t *testing.T) {
 	}
 }
 
-func TestReducerUpsertsAndRemovesMemoryRecall(t *testing.T) {
+func TestReducerUpsertsMemoryRecallWithoutShrinkingOnMiss(t *testing.T) {
 	r := NewReducer()
 	r.Apply("memory_recall", map[string]string{"status": "running"})
 	r.Apply("memory_recall", map[string]string{
@@ -182,7 +182,8 @@ func TestReducerUpsertsAndRemovesMemoryRecall(t *testing.T) {
 	}
 
 	r.Apply("memory_recall", map[string]string{"status": "miss"})
-	if len(r.Parts()) != 0 {
-		t.Fatalf("a recall miss should not leave UI noise: %+v", r.Parts())
+	parts = r.Parts()
+	if len(parts) != 1 || parts[0].Type != PartMemoryRecall || parts[0].MemoryStatus != "miss" {
+		t.Fatalf("a recall miss should preserve its hidden UI slot: %+v", parts)
 	}
 }
