@@ -74,7 +74,7 @@ Profiles are operator-level policy injected by Sandbox Manager:
 
 | Profile   | Default resources  | Code Server | Browser   | Artifacts        |
 | --------- | ------------------ | ----------- | --------- | ---------------- |
-| `coding`  | `1000m` / `2048Mi` | enabled     | on-demand | workspace output |
+| `coding`  | `2000m` / `4096Mi` | enabled     | on-demand | workspace output |
 | `minimal` | `500m` / `512Mi`   | disabled    | disabled  | workspace output |
 
 Explicit Sandbox resources override the profile. Operators may override the

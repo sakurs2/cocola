@@ -12,8 +12,8 @@
   "profiles": {
     "coding": {
       "default_resources": {
-        "cpu": "1000m",
-        "memory": "2048Mi"
+        "cpu": "2000m",
+        "memory": "4096Mi"
       },
       "services": {
         "code-server": {

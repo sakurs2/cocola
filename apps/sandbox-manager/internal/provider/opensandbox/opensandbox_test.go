@@ -882,8 +882,8 @@ func TestMapResources(t *testing.T) {
 	// (binder -> Create, ADR-0015) sets no Resources. The provider supplies a
 	// default floor so /v1/chat never 422s. See mapResources / envOr.
 	def := mapResources(provider.Resources{}, profileCoding)
-	if def["cpu"] != defaultCodingCPU || def["memory"] != defaultCodingMemory {
-		t.Errorf("coding defaults = %v, want cpu=%s memory=%s", def, defaultCodingCPU, defaultCodingMemory)
+	if def["cpu"] != "2000m" || def["memory"] != "4096Mi" {
+		t.Errorf("coding defaults = %v, want cpu=2000m memory=4096Mi", def)
 	}
 	minimal := mapResources(provider.Resources{}, profileMinimal)
 	if minimal["cpu"] != defaultMinimalCPU || minimal["memory"] != defaultMinimalMemory {

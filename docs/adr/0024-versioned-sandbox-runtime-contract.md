@@ -33,7 +33,7 @@ desktop, per-Sandbox observe APIs, HTML publication, browser automation, or MCP.
   and `/cache` form the stable guest path contract. Browser state is reserved at
   `/session/runtime/browser`; `/cache` stays ephemeral.
 - `COCOLA_SANDBOX_PROFILE` is operator-owned and accepts `coding` or `minimal`.
-  The default `coding` profile enables Code Server and uses a `1000m/2048Mi`
+  The default `coding` profile enables Code Server and uses a `2000m/4096Mi`
   resource floor. `minimal` disables Code Server and uses `500m/512Mi`.
   Explicit Sandbox resources and documented operator overrides take precedence.
 - Sandbox Manager removes profile and service-policy keys supplied by Agent

@@ -129,8 +129,8 @@ const (
 	// Override either profile via
 	// COCOLA_OPENSANDBOX_DEFAULT_CPU / _DEFAULT_MEMORY (raw resourceLimits
 	// strings, e.g. "500m" / "512Mi").
-	defaultCodingCPU     = "1000m"
-	defaultCodingMemory  = "2048Mi"
+	defaultCodingCPU     = "2000m"
+	defaultCodingMemory  = "4096Mi"
 	defaultMinimalCPU    = "500m"
 	defaultMinimalMemory = "512Mi"
 	// sandboxExecUser is the non-root user every Exec runs as, matching the
