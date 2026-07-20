@@ -1,7 +1,13 @@
 "use client";
 
 import { useThread } from "@assistant-ui/react";
-import { ReadonlyFilePreview, type PreviewFile } from "@/components/assistant-ui/file-preview";
+import type { ArtifactPreview } from "@/app/runtime-provider";
+import {
+  ReadonlyFilePreview,
+  formatBytes,
+  isHtmlPreview,
+  type PreviewFile,
+} from "@/components/assistant-ui/file-preview";
 import { TooltipIconButton } from "@/components/assistant-ui/tooltip-icon-button";
 import {
   DropdownMenu,
@@ -10,6 +16,7 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { cn } from "@/lib/utils";
+import { artifactPreviewTabID } from "@/lib/artifact-preview-tab.mjs";
 import {
   buildCodeEditorURL,
   classifyCodeEditorProbe,
@@ -26,6 +33,8 @@ import {
   ArrowLeft,
   ChevronRight,
   Code2,
+  Download,
+  Eye,
   File,
   FileCode2,
   FileQuestion,
@@ -54,8 +63,8 @@ import {
 //
 // The right-hand dock is a tabbed container: a strip of open sub-pages plus a
 // "+" menu to add and switch to another sub-page. Workspace files and Preview
-// are registered base pages. Code pages are created dynamically from directory
-// actions, one stable tab per workspace path.
+// are registered base pages. Code and generated-file pages are created
+// dynamically from user actions, with one stable tab per resource.
 
 type DockPageContext = {
   sessionID: string;
@@ -71,6 +80,8 @@ type DockPage = {
   label: string;
   title?: string;
   icon: LucideIcon;
+  artifact?: ArtifactPreview;
+  unmountWhenInactive?: boolean;
   render: (context: DockPageContext) => ReactNode;
 };
 
@@ -118,7 +129,35 @@ function createCodePage(workspacePath: string): DockPage {
   };
 }
 
-export function WorkspaceDock({ sessionID, onClose }: { sessionID: string; onClose: () => void }) {
+function createArtifactPage(artifact: ArtifactPreview): DockPage {
+  return {
+    id: artifactPreviewTabID(artifact.sessionId, artifact.id),
+    label: artifact.filename,
+    title: artifact.filename,
+    icon: FileCode2,
+    artifact,
+    unmountWhenInactive: true,
+    render: ({ active, setHeaderActions }) => (
+      <ArtifactPreviewPage
+        artifact={artifact}
+        active={active}
+        setHeaderActions={setHeaderActions}
+      />
+    ),
+  };
+}
+
+export function WorkspaceDock({
+  sessionID,
+  artifact,
+  onArtifactClose,
+  onClose,
+}: {
+  sessionID: string;
+  artifact: ArtifactPreview | null;
+  onArtifactClose: () => void;
+  onClose: () => void;
+}) {
   // Opening the workspace dock must not contact code-server. Code tabs only
   // exist after a directory action explicitly creates one.
   const [openPages, setOpenPages] = useState<DockPage[]>([]);
@@ -149,6 +188,19 @@ export function WorkspaceDock({ sessionID, onClose }: { sessionID: string; onClo
     setActivePageId(page.id);
   }, []);
 
+  useEffect(() => {
+    if (!artifact || artifact.sessionId !== sessionID) return;
+    const page = createArtifactPage(artifact);
+    setOpenPages((current) => {
+      const index = current.findIndex((candidate) => candidate.id === page.id);
+      if (index === -1) return [...current, page];
+      const next = [...current];
+      next[index] = page;
+      return next;
+    });
+    setActivePageId(page.id);
+  }, [artifact, sessionID]);
+
   const publishHeaderActions = useCallback((pageID: string, node: ReactNode) => {
     setHeaderActions((current) => {
       if (node == null) {
@@ -163,6 +215,14 @@ export function WorkspaceDock({ sessionID, onClose }: { sessionID: string; onClo
 
   const closePage = useCallback(
     (id: string) => {
+      const closingPage = openPages.find((page) => page.id === id);
+      if (
+        closingPage?.artifact &&
+        artifact &&
+        artifactPreviewTabID(artifact.sessionId, artifact.id) === id
+      ) {
+        onArtifactClose();
+      }
       setOpenPages((current) => {
         const next = current.filter((page) => page.id !== id);
         // Closing the last tab returns to the launcher; the dock stays open (the
@@ -172,7 +232,7 @@ export function WorkspaceDock({ sessionID, onClose }: { sessionID: string; onClo
       });
       publishHeaderActions(id, null);
     },
-    [publishHeaderActions],
+    [artifact, onArtifactClose, openPages, publishHeaderActions],
   );
 
   const activePage = openPages.find((page) => page.id === activePageId) ?? openPages[0];
@@ -206,7 +266,7 @@ export function WorkspaceDock({ sessionID, onClose }: { sessionID: string; onClo
                   <Icon
                     className={cn("size-4 shrink-0", active ? "text-primary" : "text-primary/70")}
                   />
-                  <span className="whitespace-nowrap font-medium">{page.label}</span>
+                  <span className="max-w-32 truncate font-medium">{page.label}</span>
                 </button>
                 <button
                   type="button"
@@ -256,8 +316,8 @@ export function WorkspaceDock({ sessionID, onClose }: { sessionID: string; onClo
 
         <button
           type="button"
-          title="Close workspace"
-          aria-label="Close workspace"
+          title="Close side panel"
+          aria-label="Close side panel"
           onClick={onClose}
           className="inline-flex size-8 shrink-0 items-center justify-center rounded-full text-muted-foreground transition-colors hover:bg-muted hover:text-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
         >
@@ -269,6 +329,7 @@ export function WorkspaceDock({ sessionID, onClose }: { sessionID: string; onClo
         {hasOpenPages ? null : <WorkspaceLauncher onOpen={openPage} />}
         {openPages.map((page) => {
           const isActive = page.id === activePage?.id;
+          if (!isActive && page.unmountWhenInactive) return null;
           return (
             <DockPagePanel
               key={page.id}
@@ -314,6 +375,81 @@ function DockPagePanel({
         setHeaderActions,
         openCodeFolder,
       })}
+    </div>
+  );
+}
+
+function ArtifactPreviewPage({
+  artifact,
+  active,
+  setHeaderActions,
+}: {
+  artifact: ArtifactPreview;
+  active: boolean;
+  setHeaderActions: (node: ReactNode) => void;
+}) {
+  const [htmlSourceMode, setHtmlSourceMode] = useState(false);
+  const canHtml = isHtmlPreview(artifact.mimeType, artifact.filename);
+  const previewFile = useMemo<PreviewFile>(
+    () => ({
+      filename: artifact.filename,
+      size: artifact.size,
+      mimeType: artifact.mimeType,
+      url: artifact.downloadUrl,
+    }),
+    [artifact],
+  );
+
+  useEffect(() => {
+    setHtmlSourceMode(false);
+  }, [artifact.downloadUrl, artifact.id]);
+
+  useEffect(() => {
+    if (!active) return;
+    setHeaderActions(
+      <div className="flex items-center gap-1">
+        {canHtml ? (
+          <button
+            type="button"
+            aria-label={htmlSourceMode ? "Preview HTML" : "View HTML source"}
+            title={htmlSourceMode ? "Preview HTML" : "View source"}
+            onClick={() => setHtmlSourceMode((value) => !value)}
+            className="inline-flex size-8 shrink-0 items-center justify-center rounded-full text-muted-foreground transition-colors hover:bg-muted hover:text-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+          >
+            {htmlSourceMode ? <Eye className="size-4" /> : <Code2 className="size-4" />}
+          </button>
+        ) : null}
+        {artifact.downloadUrl ? (
+          <a
+            href={artifact.downloadUrl}
+            download={artifact.filename}
+            title="Download"
+            aria-label={`Download ${artifact.filename}`}
+            className="inline-flex size-8 shrink-0 items-center justify-center rounded-full text-muted-foreground transition-colors hover:bg-muted hover:text-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+          >
+            <Download className="size-4" />
+          </a>
+        ) : null}
+      </div>,
+    );
+    return () => setHeaderActions(null);
+  }, [active, artifact, canHtml, htmlSourceMode, setHeaderActions]);
+
+  return (
+    <div className="flex h-full min-h-0 flex-col bg-background">
+      <div className="flex min-h-9 items-center border-b border-border px-3 text-xs text-muted-foreground">
+        <span className="truncate">
+          {formatBytes(artifact.size)} · {artifact.mimeType}
+        </span>
+      </div>
+      <div className="min-h-0 flex-1 overflow-auto">
+        <ReadonlyFilePreview
+          file={previewFile}
+          renderHtml={canHtml && !htmlSourceMode}
+          fetchBinary
+          unsupportedMessage="Download the file to open it locally."
+        />
+      </div>
     </div>
   );
 }

@@ -14,17 +14,11 @@
 // concern). There is no token input — changing a token in the page would amount
 // to silently switching users, which is not a real auth flow.
 //
-// The main column is a flex row so a future Artifacts canvas can sit beside the
-// Thread without restructuring.
+// The main column is a flex row so the shared context dock can sit beside the
+// Thread without overlaying the conversation.
 
 import { useThread } from "@assistant-ui/react";
 import { useCocola, type EnvironmentStatus } from "@/app/runtime-provider";
-import {
-  ReadonlyFilePreview,
-  formatBytes,
-  isHtmlPreview,
-  type PreviewFile,
-} from "@/components/assistant-ui/file-preview";
 import {
   SessionStatusButton,
   SessionStatusPanel,
@@ -34,7 +28,7 @@ import { ConversationMinimap } from "@/components/assistant-ui/conversation-mini
 import { WorkspaceDock } from "@/components/assistant-ui/workspace-panel";
 import { cn } from "@/lib/utils";
 import { AnimatePresence, motion } from "framer-motion";
-import { Check, Code2, Download, Eye, PanelRight, Share2, X } from "lucide-react";
+import { Check, PanelRight, Share2 } from "lucide-react";
 import { useRouter } from "next/navigation";
 import {
   type Dispatch,
@@ -50,11 +44,11 @@ export default function Home() {
 }
 
 function Workspace() {
-  const { loadConversation, selectedArtifact, environmentStatus, activeSessionId } = useCocola();
+  const { loadConversation, selectedArtifact, closeArtifact, environmentStatus, activeSessionId } =
+    useCocola();
   const router = useRouter();
-  const [previewWidth, setPreviewWidth] = useState(448);
   const [workspaceWidth, setWorkspaceWidth] = useState(640);
-  const [dockView, setDockView] = useState<"status" | "artifact" | "workspace">("status");
+  const [dockView, setDockView] = useState<"status" | "workspace">("status");
   const [statusOpen, setStatusOpen] = useState(false);
   const [workspaceOpen, setWorkspaceOpen] = useState(false);
 
@@ -66,7 +60,9 @@ function Workspace() {
   }, [loadConversation, router]);
 
   useEffect(() => {
-    if (selectedArtifact) setDockView("artifact");
+    if (!selectedArtifact) return;
+    setDockView("workspace");
+    setWorkspaceOpen(true);
   }, [selectedArtifact]);
 
   useEffect(() => {
@@ -77,12 +73,6 @@ function Workspace() {
     }
   }, [environmentStatus, selectedArtifact]);
 
-  const startPreviewResize = useCallback(
-    (event: PointerEvent<HTMLDivElement>) => {
-      beginDockResize(event, previewWidth, 352, setPreviewWidth);
-    },
-    [previewWidth],
-  );
   const startWorkspaceResize = useCallback(
     (event: PointerEvent<HTMLDivElement>) => {
       beginDockResize(event, workspaceWidth, 480, setWorkspaceWidth);
@@ -114,38 +104,13 @@ function Workspace() {
           <ConversationMinimap />
         </div>
         <AnimatePresence initial={false}>
-          {selectedArtifact && dockView === "artifact" ? (
+          {activeSessionId && workspaceOpen && dockView === "workspace" ? (
             <>
               <div
                 role="separator"
-                aria-label="Resize file preview"
+                aria-label="Resize side panel"
                 aria-orientation="vertical"
-                title="Resize preview"
-                onPointerDown={startPreviewResize}
-                className="group relative z-10 w-3 shrink-0 cursor-col-resize touch-none"
-              >
-                <div className="absolute inset-y-0 left-1/2 w-px -translate-x-1/2 bg-border transition-colors group-hover:bg-primary/70" />
-                <div className="absolute inset-y-0 left-1/2 w-1 -translate-x-1/2 bg-transparent transition-colors group-hover:bg-primary/20" />
-              </div>
-              <motion.aside
-                key="artifact-preview"
-                initial={{ opacity: 0, x: 28 }}
-                animate={{ opacity: 1, x: 0 }}
-                exit={{ opacity: 0, x: 28 }}
-                transition={{ duration: 0.18, ease: "easeOut" }}
-                className="m-2 ml-0 shrink-0 overflow-hidden rounded-2xl border border-border bg-card shadow-xl"
-                style={{ width: `${previewWidth}px` }}
-              >
-                <ArtifactPreviewPanel />
-              </motion.aside>
-            </>
-          ) : activeSessionId && workspaceOpen && dockView === "workspace" ? (
-            <>
-              <div
-                role="separator"
-                aria-label="Resize workspace browser"
-                aria-orientation="vertical"
-                title="Resize workspace browser"
+                title="Resize side panel"
                 onPointerDown={startWorkspaceResize}
                 className="group relative z-10 hidden w-3 shrink-0 cursor-col-resize touch-none md:block"
               >
@@ -163,6 +128,8 @@ function Workspace() {
               >
                 <WorkspaceDock
                   sessionID={activeSessionId}
+                  artifact={selectedArtifact}
+                  onArtifactClose={closeArtifact}
                   onClose={() => setWorkspaceOpen(false)}
                 />
               </motion.aside>
@@ -179,10 +146,16 @@ function Workspace() {
               <SessionStatusPanel
                 status={environmentStatus}
                 artifactName={selectedArtifact?.filename}
-                onOpenArtifact={() => setDockView("artifact")}
+                onOpenArtifact={() => {
+                  setDockView("workspace");
+                  setWorkspaceOpen(true);
+                }}
                 onClose={() => {
                   setStatusOpen(false);
-                  if (selectedArtifact) setDockView("artifact");
+                  if (selectedArtifact) {
+                    setDockView("workspace");
+                    setWorkspaceOpen(true);
+                  }
                 }}
               />
             </motion.aside>
@@ -298,75 +271,6 @@ function TopBar({
             {copied ? <Check className="size-4 text-emerald-600" /> : <Share2 className="size-4" />}
           </button>
         </div>
-      </div>
-    </div>
-  );
-}
-
-function ArtifactPreviewPanel() {
-  const { selectedArtifact, closeArtifact } = useCocola();
-  const [htmlSourceMode, setHtmlSourceMode] = useState(false);
-
-  useEffect(() => {
-    setHtmlSourceMode(false);
-  }, [selectedArtifact]);
-
-  if (!selectedArtifact) return null;
-
-  const canHtml = isHtmlPreview(selectedArtifact.mimeType, selectedArtifact.filename);
-  const previewFile: PreviewFile = {
-    filename: selectedArtifact.filename,
-    size: selectedArtifact.size,
-    mimeType: selectedArtifact.mimeType,
-    url: selectedArtifact.downloadUrl,
-  };
-
-  return (
-    <div className="flex h-full flex-col">
-      <header className="flex min-h-14 items-center gap-3 border-b border-border bg-card px-4">
-        <div className="min-w-0 flex-1">
-          <div className="truncate text-sm font-medium">{selectedArtifact.filename}</div>
-          <div className="truncate text-xs text-muted-foreground">
-            {formatBytes(selectedArtifact.size)} · {selectedArtifact.mimeType}
-          </div>
-        </div>
-        {canHtml ? (
-          <button
-            type="button"
-            aria-label={htmlSourceMode ? "Preview HTML" : "View HTML source"}
-            title={htmlSourceMode ? "Preview HTML" : "View source"}
-            onClick={() => setHtmlSourceMode((value) => !value)}
-            className="inline-flex size-8 shrink-0 items-center justify-center rounded-full text-muted-foreground transition-colors hover:bg-muted hover:text-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
-          >
-            {htmlSourceMode ? <Eye className="size-4" /> : <Code2 className="size-4" />}
-          </button>
-        ) : null}
-        <a
-          href={selectedArtifact.downloadUrl}
-          download={selectedArtifact.filename}
-          title="Download"
-          aria-label="Download"
-          className="inline-flex size-8 shrink-0 items-center justify-center rounded-full text-muted-foreground transition-colors hover:bg-muted hover:text-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
-        >
-          <Download className="size-4" />
-        </a>
-        <button
-          type="button"
-          aria-label="Close preview"
-          title="Close"
-          onClick={closeArtifact}
-          className="inline-flex size-8 shrink-0 items-center justify-center rounded-full text-muted-foreground transition-colors hover:bg-muted hover:text-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
-        >
-          <X className="size-4" />
-        </button>
-      </header>
-      <div className="min-h-0 flex-1 overflow-auto bg-background">
-        <ReadonlyFilePreview
-          file={previewFile}
-          renderHtml={canHtml && !htmlSourceMode}
-          fetchBinary
-          unsupportedMessage="Download the file to open it locally."
-        />
       </div>
     </div>
   );
