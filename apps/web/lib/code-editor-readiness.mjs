@@ -1,3 +1,54 @@
+export const CODE_SERVER_PORT = 39378;
+export const CODE_EDITOR_WAIT_LIMIT_MS = 4 * 60 * 1000;
+
+/** @param {string} workspacePath */
+export function normalizeCodeEditorWorkspacePath(workspacePath = "") {
+  if (typeof workspacePath !== "string") {
+    throw new TypeError("workspace path must be a string");
+  }
+  const segments = workspacePath.split("/").filter((segment) => segment && segment !== ".");
+  if (segments.some((segment) => segment === "..")) {
+    throw new TypeError("workspace path must stay within /workspace");
+  }
+  return segments.join("/");
+}
+
+/** @param {string} workspacePath */
+export function codeEditorTabID(workspacePath = "") {
+  const normalized = normalizeCodeEditorWorkspacePath(workspacePath);
+  return `code:${encodeURIComponent(normalized || ".")}`;
+}
+
+/**
+ * Build the same-origin code-server URL while preserving the trailing slash
+ * required for its relative assets and WebSocket endpoints.
+ *
+ * @param {string} sessionID
+ * @param {string} workspacePath
+ */
+export function buildCodeEditorURL(sessionID, workspacePath = "") {
+  const normalized = normalizeCodeEditorWorkspacePath(workspacePath);
+  const folder = normalized ? `/workspace/${normalized}` : "/workspace";
+  const query = new URLSearchParams({ folder });
+  return `/api/preview/${encodeURIComponent(sessionID)}/${CODE_SERVER_PORT}/?${query}`;
+}
+
+/**
+ * @param {number} startedAt
+ * @param {number} [now]
+ * @param {number} [limit]
+ */
+export function codeEditorWaitExpired(
+  startedAt,
+  now = Date.now(),
+  limit = CODE_EDITOR_WAIT_LIMIT_MS,
+) {
+  if (!Number.isFinite(startedAt) || !Number.isFinite(now) || !Number.isFinite(limit)) {
+    return true;
+  }
+  return now - startedAt >= Math.max(0, limit);
+}
+
 /**
  * Classify the Code panel without letting a read-only preview request acquire a
  * sandbox. A 502 while a turn is preparing is transient; the same response for

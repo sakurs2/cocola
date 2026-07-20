@@ -2,6 +2,7 @@
 
 import { useThread } from "@assistant-ui/react";
 import { ReadonlyFilePreview, type PreviewFile } from "@/components/assistant-ui/file-preview";
+import { TooltipIconButton } from "@/components/assistant-ui/tooltip-icon-button";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -10,8 +11,12 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { cn } from "@/lib/utils";
 import {
+  buildCodeEditorURL,
   classifyCodeEditorProbe,
   codeEditorRetryDelay,
+  codeEditorTabID,
+  codeEditorWaitExpired,
+  normalizeCodeEditorWorkspacePath,
   probeCodeEditorStatus,
 } from "@/lib/code-editor-readiness.mjs";
 import { resolveFileType } from "@/lib/file-type";
@@ -48,10 +53,9 @@ import {
 // -- Extensible workspace dock ------------------------------------------------
 //
 // The right-hand dock is a tabbed container: a strip of open sub-pages plus a
-// "+" menu to add and switch to another sub-page. Every sub-page is registered
-// in DOCK_PAGES with an id/label/icon and a self-contained renderer, so growing
-// the dock is a one-entry change. Today the only sub-page is the workspace file
-// browser; future pages (terminal, todo, preview, ...) slot in beside it.
+// "+" menu to add and switch to another sub-page. Workspace files and Preview
+// are registered base pages. Code pages are created dynamically from directory
+// actions, one stable tab per workspace path.
 
 type DockPageContext = {
   sessionID: string;
@@ -59,25 +63,28 @@ type DockPageContext = {
   // Lets a page publish header controls (e.g. refresh) into the shared dock
   // header, so no sub-page needs its own toolbar row.
   setHeaderActions: (node: ReactNode) => void;
+  openCodeFolder: (workspacePath: string) => void;
 };
 
 type DockPage = {
   id: string;
   label: string;
+  title?: string;
   icon: LucideIcon;
   render: (context: DockPageContext) => ReactNode;
 };
 
-const DOCK_PAGES: DockPage[] = [
+const BASE_DOCK_PAGES: DockPage[] = [
   {
     id: "files",
     label: "Workspace files",
     icon: FolderOpen,
-    render: ({ sessionID, active, setHeaderActions }) => (
+    render: ({ sessionID, active, setHeaderActions, openCodeFolder }) => (
       <WorkspaceFilesPage
         sessionID={sessionID}
         active={active}
         setHeaderActions={setHeaderActions}
+        onOpenCode={openCodeFolder}
       />
     ),
   },
@@ -89,51 +96,84 @@ const DOCK_PAGES: DockPage[] = [
       <PreviewPage sessionID={sessionID} active={active} setHeaderActions={setHeaderActions} />
     ),
   },
-  {
-    id: "code",
-    label: "Code",
-    icon: Code2,
-    render: ({ sessionID, active, setHeaderActions }) => (
-      <CodePage sessionID={sessionID} active={active} setHeaderActions={setHeaderActions} />
-    ),
-  },
 ];
 
+function createCodePage(workspacePath: string): DockPage {
+  const normalizedPath = normalizeCodeEditorWorkspacePath(workspacePath);
+  const folder = normalizedPath ? `/workspace/${normalizedPath}` : "/workspace";
+  const label = normalizedPath.split("/").pop() || "Workspace";
+  return {
+    id: codeEditorTabID(normalizedPath),
+    label,
+    title: folder,
+    icon: Code2,
+    render: ({ sessionID, active, setHeaderActions }) => (
+      <CodePage
+        sessionID={sessionID}
+        workspacePath={normalizedPath}
+        active={active}
+        setHeaderActions={setHeaderActions}
+      />
+    ),
+  };
+}
+
 export function WorkspaceDock({ sessionID, onClose }: { sessionID: string; onClose: () => void }) {
-  // Opening the workspace dock must not contact code-server. Land on the
-  // launcher and load Code only after the user explicitly selects that panel.
-  const [openPageIds, setOpenPageIds] = useState<string[]>([]);
+  // Opening the workspace dock must not contact code-server. Code tabs only
+  // exist after a directory action explicitly creates one.
+  const [openPages, setOpenPages] = useState<DockPage[]>([]);
   const [activePageId, setActivePageId] = useState<string>("");
   // The active page publishes its header controls here; keyed by page id so a
   // backgrounded page can never leak its actions into the header.
   const [headerActions, setHeaderActions] = useState<Record<string, ReactNode>>({});
 
-  const openPages = useMemo(
-    () =>
-      openPageIds
-        .map((id) => DOCK_PAGES.find((page) => page.id === id))
-        .filter((page): page is DockPage => Boolean(page)),
-    [openPageIds],
-  );
   const addablePages = useMemo(
-    () => DOCK_PAGES.filter((page) => !openPageIds.includes(page.id)),
-    [openPageIds],
+    () => BASE_DOCK_PAGES.filter((page) => !openPages.some((open) => open.id === page.id)),
+    [openPages],
   );
 
   const openPage = useCallback((id: string) => {
-    setOpenPageIds((current) => (current.includes(id) ? current : [...current, id]));
+    const page = BASE_DOCK_PAGES.find((candidate) => candidate.id === id);
+    if (!page) return;
+    setOpenPages((current) =>
+      current.some((candidate) => candidate.id === id) ? current : [...current, page],
+    );
     setActivePageId(id);
   }, []);
 
-  const closePage = useCallback((id: string) => {
-    setOpenPageIds((current) => {
-      const next = current.filter((pageId) => pageId !== id);
-      // Closing the last tab returns to the launcher; the dock stays open (the
-      // header close button collapses the whole dock).
-      setActivePageId((active) => (active === id ? (next[next.length - 1] ?? "") : active));
-      return next;
+  const openCodeFolder = useCallback((workspacePath: string) => {
+    const page = createCodePage(workspacePath);
+    setOpenPages((current) =>
+      current.some((candidate) => candidate.id === page.id) ? current : [...current, page],
+    );
+    setActivePageId(page.id);
+  }, []);
+
+  const publishHeaderActions = useCallback((pageID: string, node: ReactNode) => {
+    setHeaderActions((current) => {
+      if (node == null) {
+        if (!(pageID in current)) return current;
+        const next = { ...current };
+        delete next[pageID];
+        return next;
+      }
+      return { ...current, [pageID]: node };
     });
   }, []);
+
+  const closePage = useCallback(
+    (id: string) => {
+      setOpenPages((current) => {
+        const next = current.filter((page) => page.id !== id);
+        // Closing the last tab returns to the launcher; the dock stays open (the
+        // header close button collapses the whole dock).
+        setActivePageId((active) => (active === id ? (next[next.length - 1]?.id ?? "") : active));
+        return next;
+      });
+      publishHeaderActions(id, null);
+    },
+    [publishHeaderActions],
+  );
 
   const activePage = openPages.find((page) => page.id === activePageId) ?? openPages[0];
   const hasOpenPages = openPages.length > 0;
@@ -148,6 +188,7 @@ export function WorkspaceDock({ sessionID, onClose }: { sessionID: string; onClo
             return (
               <div
                 key={page.id}
+                title={page.title}
                 className={cn(
                   "group flex h-8 shrink-0 items-center gap-1.5 rounded-md pl-2.5 pr-1.5 text-xs transition-colors",
                   active
@@ -229,22 +270,50 @@ export function WorkspaceDock({ sessionID, onClose }: { sessionID: string; onClo
         {openPages.map((page) => {
           const isActive = page.id === activePage?.id;
           return (
-            <div
+            <DockPagePanel
               key={page.id}
-              role="tabpanel"
-              hidden={!isActive}
-              className={cn("h-full min-h-0", isActive ? "flex flex-col" : "hidden")}
-            >
-              {page.render({
-                sessionID,
-                active: isActive,
-                setHeaderActions: (node) =>
-                  setHeaderActions((current) => ({ ...current, [page.id]: node })),
-              })}
-            </div>
+              page={page}
+              sessionID={sessionID}
+              active={isActive}
+              openCodeFolder={openCodeFolder}
+              publishHeaderActions={publishHeaderActions}
+            />
           );
         })}
       </div>
+    </div>
+  );
+}
+
+function DockPagePanel({
+  page,
+  sessionID,
+  active,
+  openCodeFolder,
+  publishHeaderActions,
+}: {
+  page: DockPage;
+  sessionID: string;
+  active: boolean;
+  openCodeFolder: (workspacePath: string) => void;
+  publishHeaderActions: (pageID: string, node: ReactNode) => void;
+}) {
+  const setHeaderActions = useCallback(
+    (node: ReactNode) => publishHeaderActions(page.id, node),
+    [page.id, publishHeaderActions],
+  );
+  return (
+    <div
+      role="tabpanel"
+      hidden={!active}
+      className={cn("h-full min-h-0", active ? "flex flex-col" : "hidden")}
+    >
+      {page.render({
+        sessionID,
+        active,
+        setHeaderActions,
+        openCodeFolder,
+      })}
     </div>
   );
 }
@@ -259,7 +328,7 @@ function WorkspaceLauncher({ onOpen }: { onOpen: (id: string) => void }) {
           Panels
         </p>
         <div className="flex flex-col">
-          {DOCK_PAGES.map((page) => {
+          {BASE_DOCK_PAGES.map((page) => {
             const Icon = page.icon;
             return (
               <button
@@ -332,10 +401,12 @@ function WorkspaceFilesPage({
   sessionID,
   active,
   setHeaderActions,
+  onOpenCode,
 }: {
   sessionID: string;
   active: boolean;
   setHeaderActions: (node: ReactNode) => void;
+  onOpenCode: (workspacePath: string) => void;
 }) {
   const [directories, setDirectories] = useState<Record<string, DirectoryState>>({});
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
@@ -498,25 +569,37 @@ function WorkspaceFilesPage({
   );
 
   const root = directories[""];
+  const rootReady = Boolean(root && !root.loading && !root.error);
 
-  // Publish this page's refresh control into the shared dock header while it is
-  // the active tab; clear it when the page is hidden or unmounts.
+  // Publish root-open and refresh controls into the shared dock header while
+  // this tab is active; clear them when the page is hidden or unmounts.
   useEffect(() => {
     if (!active) return;
     setHeaderActions(
-      <button
-        type="button"
-        title="Refresh workspace"
-        aria-label="Refresh workspace"
-        disabled={refreshing}
-        onClick={() => void refresh()}
-        className="inline-flex size-8 shrink-0 items-center justify-center rounded-full text-muted-foreground transition-colors hover:bg-muted hover:text-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring disabled:opacity-50"
-      >
-        <RefreshCw className={cn("size-4", refreshing && "animate-spin")} />
-      </button>,
+      <div className="flex items-center gap-1">
+        <TooltipIconButton
+          type="button"
+          tooltip="Open in Code Server"
+          disabled={!rootReady}
+          onClick={() => onOpenCode("")}
+          className="size-8 rounded-full text-muted-foreground"
+        >
+          <Code2 className="size-4" />
+        </TooltipIconButton>
+        <button
+          type="button"
+          title="Refresh workspace"
+          aria-label="Refresh workspace"
+          disabled={refreshing}
+          onClick={() => void refresh()}
+          className="inline-flex size-8 shrink-0 items-center justify-center rounded-full text-muted-foreground transition-colors hover:bg-muted hover:text-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring disabled:opacity-50"
+        >
+          <RefreshCw className={cn("size-4", refreshing && "animate-spin")} />
+        </button>
+      </div>,
     );
     return () => setHeaderActions(null);
-  }, [active, refreshing, refresh, setHeaderActions]);
+  }, [active, onOpenCode, refreshing, refresh, rootReady, setHeaderActions]);
 
   return (
     <div className="flex h-full min-h-0 flex-col bg-card">
@@ -555,6 +638,7 @@ function WorkspaceFilesPage({
                 selectedPath={selected?.path ?? ""}
                 onToggle={toggleDirectory}
                 onSelect={setSelected}
+                onOpenCode={onOpenCode}
                 onLoadMore={(path, cursor) => void loadDirectory(path, true, cursor)}
                 onReload={(path) => void loadDirectory(path)}
               />
@@ -627,6 +711,7 @@ function WorkspaceTree({
   selectedPath,
   onToggle,
   onSelect,
+  onOpenCode,
   onLoadMore,
   onReload,
 }: {
@@ -637,6 +722,7 @@ function WorkspaceTree({
   selectedPath: string;
   onToggle: (path: string) => void;
   onSelect: (entry: WorkspaceEntry) => void;
+  onOpenCode: (workspacePath: string) => void;
   onLoadMore: (path: string, cursor: string) => void;
   onReload: (path: string) => void;
 }) {
@@ -650,46 +736,59 @@ function WorkspaceTree({
         const child = directories[entry.path];
         return (
           <div key={entry.path}>
-            <button
-              type="button"
-              role="treeitem"
-              aria-expanded={isDirectory ? isExpanded : undefined}
-              aria-selected={selectedPath === entry.path}
-              onClick={() => (isDirectory ? onToggle(entry.path) : onSelect(entry))}
-              className={cn(
-                "group flex h-8 w-full items-center gap-1.5 border-l-2 pr-2 text-left text-xs transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-inset focus-visible:ring-ring",
-                selectedPath === entry.path
-                  ? "border-l-primary bg-primary/10 text-foreground"
-                  : "border-l-transparent text-muted-foreground hover:bg-muted/70 hover:text-foreground",
-              )}
-              style={{ paddingLeft: `${8 + depth * 14}px` }}
-            >
-              {isDirectory ? (
-                <ChevronRight
-                  className={cn(
-                    "size-3.5 shrink-0 transition-transform",
-                    isExpanded && "rotate-90",
-                  )}
-                />
-              ) : (
-                <span className="w-3.5 shrink-0" />
-              )}
-              {isDirectory ? (
-                isExpanded ? (
-                  <FolderOpen className="size-4 shrink-0 text-primary/80" />
+            <div className="group/tree-row relative">
+              <button
+                type="button"
+                role="treeitem"
+                aria-expanded={isDirectory ? isExpanded : undefined}
+                aria-selected={selectedPath === entry.path}
+                onClick={() => (isDirectory ? onToggle(entry.path) : onSelect(entry))}
+                className={cn(
+                  "group flex h-8 w-full items-center gap-1.5 border-l-2 text-left text-xs transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-inset focus-visible:ring-ring",
+                  isDirectory ? "pr-9" : "pr-2",
+                  selectedPath === entry.path
+                    ? "border-l-primary bg-primary/10 text-foreground"
+                    : "border-l-transparent text-muted-foreground hover:bg-muted/70 hover:text-foreground",
+                )}
+                style={{ paddingLeft: `${8 + depth * 14}px` }}
+              >
+                {isDirectory ? (
+                  <ChevronRight
+                    className={cn(
+                      "size-3.5 shrink-0 transition-transform",
+                      isExpanded && "rotate-90",
+                    )}
+                  />
                 ) : (
-                  <Folder className="size-4 shrink-0 text-primary/70" />
-                )
-              ) : entry.kind === "file" ? (
-                <MaterialFileIcon
-                  name={resolveFileType(entry.name).icon}
-                  className="flex size-4 shrink-0 items-center justify-center"
-                />
-              ) : (
-                <File className="size-4 shrink-0" />
-              )}
-              <span className="min-w-0 flex-1 truncate">{entry.name}</span>
-            </button>
+                  <span className="w-3.5 shrink-0" />
+                )}
+                {isDirectory ? (
+                  isExpanded ? (
+                    <FolderOpen className="size-4 shrink-0 text-primary/80" />
+                  ) : (
+                    <Folder className="size-4 shrink-0 text-primary/70" />
+                  )
+                ) : entry.kind === "file" ? (
+                  <MaterialFileIcon
+                    name={resolveFileType(entry.name).icon}
+                    className="flex size-4 shrink-0 items-center justify-center"
+                  />
+                ) : (
+                  <File className="size-4 shrink-0" />
+                )}
+                <span className="min-w-0 flex-1 truncate">{entry.name}</span>
+              </button>
+              {isDirectory ? (
+                <TooltipIconButton
+                  type="button"
+                  tooltip="Open in Code Server"
+                  onClick={() => onOpenCode(entry.path)}
+                  className="absolute right-1 top-1/2 size-6 -translate-y-1/2 text-muted-foreground opacity-100 transition-opacity hover:text-foreground focus-visible:opacity-100 [@media(hover:hover)]:opacity-0 [@media(hover:hover)]:group-hover/tree-row:opacity-100 [@media(hover:hover)]:focus-visible:opacity-100"
+                >
+                  <Code2 className="size-3.5" />
+                </TooltipIconButton>
+              ) : null}
+            </div>
             {isExpanded ? (
               child?.loading && child.entries.length === 0 ? (
                 <div
@@ -716,6 +815,7 @@ function WorkspaceTree({
                   selectedPath={selectedPath}
                   onToggle={onToggle}
                   onSelect={onSelect}
+                  onOpenCode={onOpenCode}
                   onLoadMore={onLoadMore}
                   onReload={onReload}
                 />
@@ -1034,15 +1134,11 @@ function PreviewPage({
 
 // -- Code (resident code-server editor) --------------------------------------
 //
-// Unlike PreviewPage (which previews an arbitrary user dev-server port), the
-// code-server editor is a resident service the sandbox image always starts on a
-// FIXED in-container port (COCOLA_CODE_SERVER_PORT, default 39378; see
-// deploy/sandbox-runtime/code-server-launch.sh). So there is no port to pick:
-// we point straight at that port through the same same-origin Preview Proxy
-// path. The editor is 100% WebSocket-driven; those upgrades are carried by the
-// custom web server (apps/web/server.mjs), not the /api/preview route handler.
+// Each dynamic Code tab points the resident editor at one /workspace directory
+// through code-server's `folder` query. The editor is WebSocket-driven; those
+// upgrades are carried by the custom web server (apps/web/server.mjs), not the
+// /api/preview route handler.
 
-const CODE_SERVER_PORT = 39378;
 const CODE_SERVER_PROBE_TIMEOUT_MS = 8000;
 
 type CodeEditorReadiness = "not-started" | "checking" | "waiting" | "ready" | "reclaimed" | "error";
@@ -1054,10 +1150,12 @@ type CodeEditorProbeResult = {
 
 function CodePage({
   sessionID,
+  workspacePath,
   active,
   setHeaderActions,
 }: {
   sessionID: string;
+  workspacePath: string;
   active: boolean;
   setHeaderActions: (node: ReactNode) => void;
 }) {
@@ -1072,10 +1170,30 @@ function CodePage({
   const [readiness, setReadiness] = useState<CodeEditorReadiness>(() =>
     hasMessages ? "checking" : "not-started",
   );
-  const src = previewBasePath(sessionID, CODE_SERVER_PORT);
+  // Hidden Code tabs keep their iframe mounted. Avoid probing again when the
+  // user returns to one, because replacing "ready" with "checking" would
+  // destroy that iframe and discard unsaved Workbench state.
+  const editorReadyRef = useRef(false);
+  const waitStartedAtRef = useRef<number | null>(null);
+  const src = useMemo(
+    () => buildCodeEditorURL(sessionID, workspacePath),
+    [sessionID, workspacePath],
+  );
+  const folder = workspacePath ? `/workspace/${workspacePath}` : "/workspace";
+
+  const retryProbe = useCallback(() => {
+    waitStartedAtRef.current = environmentPreparing ? Date.now() : null;
+    setProbeKey((key) => key + 1);
+  }, [environmentPreparing]);
 
   useEffect(() => {
     if (!active) return;
+    if (editorReadyRef.current) return;
+    if (environmentPreparing) {
+      waitStartedAtRef.current ??= Date.now();
+    } else {
+      waitStartedAtRef.current = null;
+    }
     const initial = classifyCodeEditorProbe({
       hasMessages,
       environmentPreparing,
@@ -1113,13 +1231,24 @@ function CodePage({
       }
 
       if (disposed) return;
-      setReadiness(result.kind);
       if (result.retry) {
+        editorReadyRef.current = false;
+        const startedAt = waitStartedAtRef.current ?? Date.now();
+        waitStartedAtRef.current = startedAt;
+        if (codeEditorWaitExpired(startedAt)) {
+          setReadiness("error");
+          return;
+        }
+        setReadiness(result.kind);
         retryTimer = window.setTimeout(
           () => void probe(attempt + 1),
           codeEditorRetryDelay(attempt),
         );
+        return;
       }
+      editorReadyRef.current = result.kind === "ready";
+      waitStartedAtRef.current = null;
+      setReadiness(result.kind);
     };
 
     void probe(0);
@@ -1169,14 +1298,14 @@ function CodePage({
           <iframe
             key={reloadKey}
             src={src}
-            title="Code editor"
+            title={`Code editor for ${folder}`}
             className="h-full w-full border-0 bg-white"
             sandbox="allow-scripts allow-forms allow-same-origin allow-popups allow-modals allow-downloads"
           />
         ) : (
           <CodeEditorPlaceholder
             readiness={readiness}
-            onRetry={readiness === "error" ? () => setProbeKey((key) => key + 1) : undefined}
+            onRetry={readiness === "error" ? retryProbe : undefined}
           />
         )}
       </div>

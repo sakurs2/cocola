@@ -2,10 +2,38 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import {
+  buildCodeEditorURL,
   classifyCodeEditorProbe,
   codeEditorRetryDelay,
+  codeEditorTabID,
+  codeEditorWaitExpired,
+  normalizeCodeEditorWorkspacePath,
   probeCodeEditorStatus,
 } from "./code-editor-readiness.mjs";
+
+test("code editor URLs target the selected workspace directory", () => {
+  assert.equal(
+    buildCodeEditorURL("session-1"),
+    "/api/preview/session-1/39378/?folder=%2Fworkspace",
+  );
+  assert.equal(
+    buildCodeEditorURL("session/with spaces", "src/web client/组件"),
+    "/api/preview/session%2Fwith%20spaces/39378/?folder=%2Fworkspace%2Fsrc%2Fweb+client%2F%E7%BB%84%E4%BB%B6",
+  );
+});
+
+test("code editor tab IDs are stable per normalized directory", () => {
+  assert.equal(normalizeCodeEditorWorkspacePath("/src/./components/"), "src/components");
+  assert.equal(codeEditorTabID("src/components"), codeEditorTabID("/src/./components/"));
+  assert.notEqual(codeEditorTabID("src/components"), codeEditorTabID("src/server"));
+  assert.throws(() => codeEditorTabID("../etc"), /stay within \/workspace/);
+});
+
+test("code editor preparation has a finite wait budget", () => {
+  assert.equal(codeEditorWaitExpired(1_000, 240_999), false);
+  assert.equal(codeEditorWaitExpired(1_000, 241_000), true);
+  assert.equal(codeEditorWaitExpired(Number.NaN, 1_000), true);
+});
 
 test("a blank conversation does not probe or load code-server", () => {
   assert.deepEqual(
