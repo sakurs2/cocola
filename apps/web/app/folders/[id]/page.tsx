@@ -1,14 +1,7 @@
 "use client";
 
 import * as DropdownMenu from "@radix-ui/react-dropdown-menu";
-import {
-  ChevronRight,
-  Folder,
-  MessagesSquare,
-  MoreHorizontal,
-  Pencil,
-  Trash2,
-} from "lucide-react";
+import { ChevronRight, Folder, MessagesSquare, MoreHorizontal, Pencil, Trash2 } from "lucide-react";
 import { useParams, useRouter } from "next/navigation";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useCocola, type ConversationSummary } from "@/app/runtime-provider";
@@ -241,7 +234,7 @@ export default function FolderPage() {
             </DropdownMenu.Root>
           </div>
 
-          <div className="mt-8 rounded-2xl border border-border bg-card p-2 shadow-card">
+          <div className="mt-8">
             <ConversationComposer placeholder={`Start a chat in ${folder.name}...`} />
           </div>
         </section>
