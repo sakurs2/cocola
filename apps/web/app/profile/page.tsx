@@ -3,14 +3,8 @@ import { CocolaRuntimeProvider } from "@/app/runtime-provider";
 import { AppSidebar } from "@/components/assistant-ui/app-sidebar";
 import { UsagePanel } from "@/components/profile/usage-panel";
 import { SignOutButton } from "@/components/profile/sign-out-button";
-import {
-  ArrowLeft,
-  BadgeCheck,
-  IdCard,
-  Mail,
-  ShieldCheck,
-  UserRound,
-} from "lucide-react";
+import { MemoryPanel } from "@/components/profile/memory-panel";
+import { ArrowLeft, BadgeCheck, IdCard, Mail, ShieldCheck, UserRound } from "lucide-react";
 import Link from "next/link";
 import { redirect } from "next/navigation";
 
@@ -86,14 +80,9 @@ export default async function ProfilePage() {
               </div>
               <div className="divide-y divide-border">
                 {rows.map((row) => (
-                  <div
-                    key={row.label}
-                    className="grid gap-1 px-4 py-3 sm:grid-cols-[180px_1fr]"
-                  >
+                  <div key={row.label} className="grid gap-1 px-4 py-3 sm:grid-cols-[180px_1fr]">
                     <div className="text-sm text-muted-foreground">{row.label}</div>
-                    <div className="min-w-0 break-words text-sm font-medium">
-                      {row.value}
-                    </div>
+                    <div className="min-w-0 break-words text-sm font-medium">{row.value}</div>
                   </div>
                 ))}
               </div>
@@ -119,6 +108,8 @@ export default async function ProfilePage() {
 
             {/* Usage & quota */}
             <UsagePanel />
+
+            <MemoryPanel />
 
             <div className="flex items-center justify-between">
               <SignOutButton />
@@ -162,11 +153,7 @@ function StatusTile({
   tone?: "ok" | "accent" | "muted";
 }) {
   const dot =
-    tone === "ok"
-      ? "bg-emerald-500"
-      : tone === "accent"
-        ? "bg-primary"
-        : "bg-muted-foreground/40";
+    tone === "ok" ? "bg-emerald-500" : tone === "accent" ? "bg-primary" : "bg-muted-foreground/40";
   return (
     <div className="rounded-xl border border-border bg-background px-3 py-2">
       <div className="text-xs text-muted-foreground">{label}</div>

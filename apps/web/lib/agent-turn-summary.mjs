@@ -1,6 +1,10 @@
 const PROCESS_PART_TYPES = new Set(["environment", "reasoning", "tool-call", "progress"]);
 
 const isFilePart = (part) => part?.type === "file";
+const isProcessPart = (part) =>
+  PROCESS_PART_TYPES.has(part?.type) ||
+  part?.type === "memory-recall" ||
+  (part?.type === "data" && part?.name === "memory-recall");
 
 /**
  * Splits one assistant turn into the collapsible process and the always-visible
@@ -12,7 +16,7 @@ export const splitAgentTurnParts = (parts, hasExternalEnvironment = false) => {
   let lastProcessIndex = -1;
 
   safeParts.forEach((part, index) => {
-    if (PROCESS_PART_TYPES.has(part?.type)) lastProcessIndex = index;
+    if (isProcessPart(part)) lastProcessIndex = index;
   });
 
   const processIndices = [];

@@ -31,6 +31,9 @@ message QueryRequest {
   string skill_id = 8;
   // Explicitly allows replacing an unavailable node-local workspace.
   bool allow_workspace_reset = 9;
+  // Optional, server-produced user memory. Agent Runtime treats this as
+  // low-priority, untrusted and potentially stale system context.
+  string memory_context = 10;
 }
 
 // Attachment is a single user-uploaded file delivered to the sandbox workspace

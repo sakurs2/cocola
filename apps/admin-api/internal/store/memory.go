@@ -12,27 +12,29 @@ import (
 // default backend for tests and dev. All slices returned are fresh copies so
 // callers cannot mutate internal state.
 type Memory struct {
-	mu                  sync.RWMutex
-	users               map[string]AuthUser
-	identifiers         map[string]string // normalized identifier -> user id
-	tokens              map[string]TokenRecord
-	quotas              map[string]QuotaOverride // key = scope + "/" + subject
-	settings            map[string]SystemSetting
-	skills              map[string]Skill
-	skillPrefs          map[string]UserSkillPreference
-	mcps                map[string]MCPServer
-	mcpPrefs            map[string]UserMCPPreference
-	agentPrompts        map[string]AgentPrompt
-	llmProviders        map[string]LLMProvider
-	llmModels           map[string]LLMModelRoute
-	tasks               map[string]ScheduledTask
-	attachments         map[string]ScheduledTaskAttachment
-	runs                map[string]ScheduledTaskRun
-	runEvents           map[string][]ScheduledTaskRunEvent
-	conversationRuns    map[string]ConversationRun
-	conversationSpans   map[string]map[string]ConversationTraceSpan
-	runEventSeq         int64
-	conversationSpanSeq int64
+	mu                   sync.RWMutex
+	users                map[string]AuthUser
+	identifiers          map[string]string // normalized identifier -> user id
+	tokens               map[string]TokenRecord
+	quotas               map[string]QuotaOverride // key = scope + "/" + subject
+	settings             map[string]SystemSetting
+	skills               map[string]Skill
+	skillPrefs           map[string]UserSkillPreference
+	mcps                 map[string]MCPServer
+	mcpPrefs             map[string]UserMCPPreference
+	agentPrompts         map[string]AgentPrompt
+	llmProviders         map[string]LLMProvider
+	llmModels            map[string]LLMModelRoute
+	memoryConfig         MemoryConfig
+	memoryIndexDimension int
+	tasks                map[string]ScheduledTask
+	attachments          map[string]ScheduledTaskAttachment
+	runs                 map[string]ScheduledTaskRun
+	runEvents            map[string][]ScheduledTaskRunEvent
+	conversationRuns     map[string]ConversationRun
+	conversationSpans    map[string]map[string]ConversationTraceSpan
+	runEventSeq          int64
+	conversationSpanSeq  int64
 }
 
 // NewMemory returns an empty in-memory store.
@@ -50,6 +52,7 @@ func NewMemory() *Memory {
 		agentPrompts:      map[string]AgentPrompt{},
 		llmProviders:      map[string]LLMProvider{},
 		llmModels:         map[string]LLMModelRoute{},
+		memoryConfig:      MemoryConfig{},
 		tasks:             map[string]ScheduledTask{},
 		attachments:       map[string]ScheduledTaskAttachment{},
 		runs:              map[string]ScheduledTaskRun{},
@@ -831,6 +834,36 @@ func (m *Memory) DeleteLLMModelRoute(ctx context.Context, id string) error {
 		return ErrNotFound
 	}
 	delete(m.llmModels, id)
+	return nil
+}
+
+func (m *Memory) GetMemoryConfig(context.Context) (MemoryConfig, error) {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	return m.memoryConfig, nil
+}
+
+func (m *Memory) UpdateMemoryConfig(_ context.Context, config MemoryConfig, expectedVersion int64) (MemoryConfig, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if m.memoryConfig.Version != expectedVersion {
+		return MemoryConfig{}, ErrConflict
+	}
+	config.Version = expectedVersion + 1
+	m.memoryConfig = config
+	return config, nil
+}
+
+func (m *Memory) LockMemoryIndex(_ context.Context, embeddingDimension int) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if embeddingDimension <= 0 {
+		return ErrConflict
+	}
+	if m.memoryIndexDimension != 0 && m.memoryIndexDimension != embeddingDimension {
+		return ErrConflict
+	}
+	m.memoryIndexDimension = embeddingDimension
 	return nil
 }
 

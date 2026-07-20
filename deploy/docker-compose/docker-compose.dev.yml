@@ -75,7 +75,34 @@ services:
       mc anonymous set download local/cocola/public || true
       "
 
+  openviking:
+    image: ghcr.io/volcengine/openviking:v0.4.10@sha256:0cf1c6fc75214a2b093b3a8e5df6c8dc2e6b1802c60dee25b5285ac28dbdc988
+    container_name: cocola-openviking
+    restart: unless-stopped
+    command: ["--without-bot"]
+    depends_on:
+      minio:
+        condition: service_healthy
+      minio-init:
+        condition: service_completed_successfully
+    environment:
+      OPENVIKING_WITH_BOT: "0"
+      OPENVIKING_CONF_CONTENT: >-
+        {"storage":{"workspace":"/app/.openviking/data","vectordb":{"name":"context","backend":"local","dimension":${COCOLA_MEMORY_EMBEDDING_DIMENSION:-1024}},"agfs":{"backend":"s3","s3":{"bucket":"cocola","prefix":"openviking/","endpoint":"http://minio:9000","region":"us-east-1","access_key":"cocola","secret_key":"cocola_dev_pw","use_ssl":false,"use_path_style":true}},"task_tracker":{"backend":"persistent"}},"embedding":{"dense":{"provider":"openai","api_base":"http://host.docker.internal:8081/internal/memory/v1","api_key":"${COCOLA_MEMORY_LLM_SERVICE_TOKEN:-cocola-local-memory-service-token}","model":"cocola-memory-embedding","dimension":${COCOLA_MEMORY_EMBEDDING_DIMENSION:-1024},"encoding_format":"float"}},"vlm":{"provider":"openai","api_base":"http://host.docker.internal:8081/internal/memory/v1","api_key":"${COCOLA_MEMORY_LLM_SERVICE_TOKEN:-cocola-local-memory-service-token}","model":"cocola-memory-extraction"},"server":{"host":"0.0.0.0","port":1933,"auth_mode":"trusted","root_api_key":"${COCOLA_OPENVIKING_ROOT_API_KEY:-cocola-local-openviking-root-key}","profile_enabled":false,"cors_origins":[]}}
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    ports:
+      - "1933:1933"
+    volumes:
+      - openvikingdata:/app/.openviking
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://localhost:1933/ready"]
+      interval: 10s
+      timeout: 5s
+      retries: 30
+
 volumes:
   pgdata:
   redisdata:
   miniodata:
+  openvikingdata:

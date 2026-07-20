@@ -6,6 +6,7 @@ import { MarkdownContent } from "@/components/assistant-ui/markdown-text";
 import {
   RailEnvironment,
   RailFile,
+  RailMemoryRecall,
   RailProcessSummary,
   RailReasoning,
   RailText,
@@ -52,13 +53,20 @@ type ProgressPart = {
   items?: unknown[];
 };
 
+type MemoryRecallPart = {
+  type: "memory-recall";
+  status?: "running" | "hit" | "degraded" | "unavailable";
+  count?: number;
+};
+
 type MessagePart =
   | { type: "text"; text?: string }
   | { type: "reasoning"; text?: string }
   | ToolPart
   | FilePart
   | EnvironmentPart
-  | ProgressPart;
+  | ProgressPart
+  | MemoryRecallPart;
 
 type WireMessage = {
   id: string;
@@ -298,6 +306,10 @@ function MessagePartView({ part, role }: { part: MessagePart; role: "user" | "as
   if (part.type === "environment") {
     const environment = parseEnvironmentPreparationSnapshot(part.environment);
     return environment ? <RailEnvironment environment={environment} /> : null;
+  }
+  if (part.type === "memory-recall") {
+    if (!part.status) return null;
+    return <RailMemoryRecall status={part.status} count={part.count} />;
   }
   if (part.type === "tool-call") {
     return (

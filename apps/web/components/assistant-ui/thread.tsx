@@ -5,6 +5,7 @@ import {
   AttachmentPrimitive,
   ComposerPrimitive,
   MessagePrimitive,
+  type DataMessagePartProps,
   type FileMessagePartProps,
   type ReasoningMessagePartProps,
   type TextMessagePartProps,
@@ -47,6 +48,7 @@ import { MarkdownText } from "@/components/assistant-ui/markdown-text";
 import {
   RailEnvironment,
   RailFile,
+  RailMemoryRecall,
   RailProcessSummary,
   RailReasoning,
   RailResponsePending,
@@ -882,11 +884,19 @@ const ToolFallback: FC<ToolCallMessagePartProps> = ({
   />
 );
 
+const MemoryRecallPart: FC<
+  DataMessagePartProps<{
+    status: "running" | "hit" | "degraded" | "unavailable";
+    count: number;
+  }>
+> = ({ data }) => <RailMemoryRecall status={data.status} count={data.count} />;
+
 const ASSISTANT_PART_COMPONENTS = {
   Text: TextPart,
   Reasoning: ReasoningPart,
   File: ArtifactFilePart,
   tools: { Fallback: ToolFallback },
+  data: { by_name: { "memory-recall": MemoryRecallPart } },
 };
 
 const AssistantActionBar: FC = () => {

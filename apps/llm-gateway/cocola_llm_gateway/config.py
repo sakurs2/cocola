@@ -27,7 +27,12 @@ from cocola_common import CocolaError, ErrorCode, get_logger
 from cocola_llm_gateway.registry import ModelRoute, Pricing, Registry
 from cocola_llm_gateway.upstream.anthropic import AnthropicConfig, AnthropicUpstream
 from cocola_llm_gateway.upstream.base import UpstreamProvider
+from cocola_llm_gateway.upstream.embeddings_base import EmbeddingsProvider
 from cocola_llm_gateway.upstream.fake import FakeUpstream
+from cocola_llm_gateway.upstream.openai_embeddings import (
+    OpenAIEmbeddingsConfig,
+    OpenAIEmbeddingsUpstream,
+)
 from cocola_llm_gateway.upstream.openai_responses import (
     OpenAIResponsesConfig,
     OpenAIResponsesUpstream,
@@ -91,10 +96,14 @@ def _build_from_dict(spec: dict) -> Registry:
     """
     providers: dict[str, UpstreamProvider] = {}
     responses_providers: dict[str, ResponsesProvider] = {}
+    embeddings_providers: dict[str, EmbeddingsProvider] = {}
     provider_protocols: dict[str, tuple[str, ...]] = {}
     for name, pcfg in (spec.get("providers") or {}).items():
         provider = _build_provider(name, pcfg)
-        if isinstance(provider, ResponsesProvider):
+        if isinstance(provider, EmbeddingsProvider):
+            embeddings_providers[name] = provider
+            provider_protocols[name] = ("openai-embeddings",)
+        elif isinstance(provider, ResponsesProvider):
             responses_providers[name] = provider
             provider_protocols[name] = ("openai-responses",)
         else:
@@ -120,12 +129,22 @@ def _build_from_dict(spec: dict) -> Registry:
             enabled=_cfg_bool(rcfg.get("enabled", True)),
             visible=_cfg_bool(rcfg.get("visible", True)),
             is_default=_cfg_bool(rcfg.get("is_default", False)),
+            embedding_dimension=int(rcfg.get("embedding_dimension", 0)),
         )
 
     default_alias = spec.get("default_alias", "")
     if not default_alias and routes:
         default_alias = sorted(routes.keys())[0]
-    return Registry(providers, routes, default_alias, responses_providers)
+    return Registry(
+        providers,
+        routes,
+        default_alias,
+        responses_providers,
+        embeddings_providers,
+        memory_enabled=_cfg_bool(spec.get("memory_enabled", False)),
+        memory_extraction_route_id=str(spec.get("memory_extraction_route_id") or ""),
+        memory_embedding_route_id=str(spec.get("memory_embedding_route_id") or ""),
+    )
 
 
 def _resolve_secret(cfg: dict, inline_key: str, env_key_field: str) -> str:
@@ -140,7 +159,9 @@ def _resolve_secret(cfg: dict, inline_key: str, env_key_field: str) -> str:
     return cfg.get(inline_key, "")
 
 
-def _build_provider(name: str, cfg: dict) -> UpstreamProvider | ResponsesProvider:
+def _build_provider(
+    name: str, cfg: dict
+) -> UpstreamProvider | ResponsesProvider | EmbeddingsProvider:
     ptype = cfg.get("type", name)
     if ptype == "fake":
         return FakeUpstream(reply=cfg.get("reply", ""), chunk_size=int(cfg.get("chunk_size", 4)))
@@ -160,6 +181,14 @@ def _build_provider(name: str, cfg: dict) -> UpstreamProvider | ResponsesProvide
                 base_url=cfg.get("base_url", OpenAIResponsesConfig.base_url),
                 api_key=_resolve_secret(cfg, "api_key", "api_key_env"),
                 timeout_s=float(cfg.get("timeout_s", OpenAIResponsesConfig.timeout_s)),
+            )
+        )
+    if ptype == "openai_embeddings":
+        return OpenAIEmbeddingsUpstream(
+            OpenAIEmbeddingsConfig(
+                base_url=cfg.get("base_url", OpenAIEmbeddingsConfig.base_url),
+                api_key=_resolve_secret(cfg, "api_key", "api_key_env"),
+                timeout_s=float(cfg.get("timeout_s", OpenAIEmbeddingsConfig.timeout_s)),
             )
         )
     raise CocolaError(ErrorCode.INVALID_ARGUMENT, f"unknown provider type '{ptype}'")

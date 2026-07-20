@@ -197,6 +197,11 @@ func (a *API) Router() http.Handler {
 			r.Post("/{id}/default", a.setDefaultLLMModel)
 		})
 
+		r.Route("/memory", func(r chi.Router) {
+			r.Get("/config", a.getMemoryConfig)
+			r.Patch("/config", a.updateMemoryConfig)
+		})
+
 		r.Route("/scheduled-tasks", func(r chi.Router) {
 			r.Get("/", a.listScheduledTasks)
 			r.Get("/{id}", a.getScheduledTask)

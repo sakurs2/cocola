@@ -53,6 +53,7 @@ const (
 	PartEnvironment   = "environment"
 	PartSessionStatus = "session-status"
 	PartProgress      = "progress"
+	PartMemoryRecall  = "memory-recall"
 )
 
 // Part mirrors the frontend UiPart union. A text/reasoning part uses Text; a
@@ -94,6 +95,12 @@ type Part struct {
 	// progress: one adapter-owned replaceable progress snapshot.
 	ProgressID    string          `json:"progressId,omitempty"`
 	ProgressItems json.RawMessage `json:"items,omitempty"`
+
+	// memory-recall: secret-free status only. Memory text and OpenViking URIs
+	// are intentionally excluded from persisted UI messages.
+	MemoryStatus    string `json:"status,omitempty"`
+	MemoryCount     int    `json:"count,omitempty"`
+	MemoryErrorCode string `json:"errorCode,omitempty"`
 }
 
 // Conversation is one row in the sidebar. ID reuses the frontend session_id.

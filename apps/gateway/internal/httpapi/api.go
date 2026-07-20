@@ -26,6 +26,7 @@ import (
 	"github.com/cocola-project/cocola/apps/gateway/internal/auth"
 	"github.com/cocola-project/cocola/apps/gateway/internal/chatrun"
 	"github.com/cocola-project/cocola/apps/gateway/internal/convo"
+	"github.com/cocola-project/cocola/apps/gateway/internal/memory"
 	"github.com/cocola-project/cocola/apps/gateway/internal/objstore"
 	"github.com/cocola-project/cocola/apps/gateway/internal/sandboxmgr"
 	traceevents "github.com/cocola-project/cocola/apps/gateway/internal/traceevent"
@@ -106,6 +107,7 @@ type API struct {
 	// port to a reachable URL via sandbox-manager. nil disables /v1/preview
 	// (the route returns 501), keeping the feature dark until wired in main.
 	sandboxResolver sandboxmgr.EndpointResolver
+	memory          *memory.Service
 }
 
 // New builds the BFF API.
@@ -166,6 +168,10 @@ func (a *API) WithConvoStore(store convo.Store) *API { a.convo = store; return a
 
 // WithTraceStore enables conversation audit summaries and detailed traces.
 func (a *API) WithTraceStore(store traceevents.Store) *API { a.trace = store; return a }
+
+// WithMemory installs the optional OpenViking integration. The rest of the
+// Gateway only depends on this high-level module and never calls OpenViking.
+func (a *API) WithMemory(service *memory.Service) *API { a.memory = service; return a }
 
 // WithChatRuns configures the single-Gateway background execution path. It is
 // required for chat; there is deliberately no feature flag or distributed
@@ -253,6 +259,18 @@ func (a *API) Handler() http.Handler {
 		a.verifier.Middleware(writeErr)(http.HandlerFunc(a.conversationMessages))))
 	mux.Handle("GET /v1/conversations/{id}/artifacts/{artifact_id}", a.instrument("GET /v1/conversations/{id}/artifacts/{artifact_id}",
 		a.verifier.Middleware(writeErr)(http.HandlerFunc(a.downloadArtifact))))
+	mux.Handle("GET /v1/memory/settings", a.instrument("GET /v1/memory/settings",
+		a.verifier.Middleware(writeErr)(http.HandlerFunc(a.memorySettings))))
+	mux.Handle("PATCH /v1/memory/settings", a.instrument("PATCH /v1/memory/settings",
+		a.verifier.Middleware(writeErr)(http.HandlerFunc(a.updateMemorySettings))))
+	mux.Handle("GET /v1/memory/items", a.instrument("GET /v1/memory/items",
+		a.verifier.Middleware(writeErr)(http.HandlerFunc(a.memoryItems))))
+	mux.Handle("GET /v1/memory/items/{id}", a.instrument("GET /v1/memory/items/{id}",
+		a.verifier.Middleware(writeErr)(http.HandlerFunc(a.memoryItem))))
+	mux.Handle("DELETE /v1/memory/items/{id}", a.instrument("DELETE /v1/memory/items/{id}",
+		a.verifier.Middleware(writeErr)(http.HandlerFunc(a.deleteMemoryItem))))
+	mux.Handle("DELETE /v1/memory/items", a.instrument("DELETE /v1/memory/items",
+		a.verifier.Middleware(writeErr)(http.HandlerFunc(a.clearMemory))))
 	// Preview Proxy: reverse-proxy a user-launched in-sandbox dev server. The
 	// trailing {rest...} wildcard captures the remaining path so nested asset
 	// requests are proxied too.

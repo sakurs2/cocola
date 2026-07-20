@@ -82,6 +82,15 @@ type UiProgressPart = {
   items: unknown[];
 };
 
+export type MemoryRecallStatus = "running" | "hit" | "degraded" | "unavailable";
+
+export type UiMemoryRecallPart = {
+  type: "memory-recall";
+  status: MemoryRecallStatus;
+  count: number;
+  errorCode?: string;
+};
+
 type UiPart =
   | { type: "text"; text: string }
   | { type: "reasoning"; text: string }
@@ -89,7 +98,8 @@ type UiPart =
   | UiFilePart
   | UiEnvironmentPart
   | UiSessionStatusPart
-  | UiProgressPart;
+  | UiProgressPart
+  | UiMemoryRecallPart;
 
 type UiMessage = {
   id: string;
@@ -466,11 +476,37 @@ function normalizePersistedParts(parts: UiPart[] | undefined): UiPart[] {
     } else if (part.type === "session-status") {
       const sessionStatus = parseEnvironmentStatusSnapshot(part.sessionStatus);
       if (sessionStatus) normalized.push({ type: "session-status", sessionStatus });
+    } else if (part.type === "memory-recall") {
+      const memoryRecall = normalizeMemoryRecallPart(part);
+      if (memoryRecall) normalized.push(memoryRecall);
     } else {
       normalized.push(part);
     }
   }
   return normalized;
+}
+
+const MEMORY_RECALL_STATUSES = new Set<MemoryRecallStatus>([
+  "running",
+  "hit",
+  "degraded",
+  "unavailable",
+]);
+
+function normalizeMemoryRecallPart(raw: unknown): UiMemoryRecallPart | null {
+  if (!raw || typeof raw !== "object") return null;
+  const part = raw as Record<string, unknown>;
+  const status = stringValue(part.status) as MemoryRecallStatus;
+  if (!MEMORY_RECALL_STATUSES.has(status)) return null;
+  const rawCount = Number(part.count);
+  const count = Number.isFinite(rawCount) ? Math.max(0, Math.min(100, Math.floor(rawCount))) : 0;
+  const errorCode = stringValue(part.errorCode).trim().slice(0, 80);
+  return {
+    type: "memory-recall",
+    status,
+    count,
+    ...(errorCode ? { errorCode } : {}),
+  };
 }
 
 function normalizeWireMessages(raw: unknown): UiMessage[] {
@@ -642,6 +678,22 @@ function upsertProgress(parts: UiPart[], id: string, itemsJSON: string): UiPart[
   return parts.map((part, partIndex) => (partIndex === index ? next : part));
 }
 
+function upsertMemoryRecall(parts: UiPart[], data: Record<string, string>): UiPart[] {
+  if (data.status === "skipped" || data.status === "miss") {
+    return parts.filter((part) => part.type !== "memory-recall");
+  }
+  const next = normalizeMemoryRecallPart({
+    type: "memory-recall",
+    status: data.status,
+    count: data.count,
+    errorCode: data.error_code,
+  });
+  if (!next) return parts;
+  const index = parts.findIndex((part) => part.type === "memory-recall");
+  if (index < 0) return [...parts, next];
+  return parts.map((part, partIndex) => (partIndex === index ? next : part));
+}
+
 // Reduce a single agent event into the assistant message's parts. Pure.
 function reducePart(parts: UiPart[], ev: AgentEvent): UiPart[] {
   const d = ev.data ?? {};
@@ -650,6 +702,8 @@ function reducePart(parts: UiPart[], ev: AgentEvent): UiPart[] {
       const environment = parseEnvironmentPreparationSnapshot(d.snapshot);
       return environment ? upsertEnvironmentPreparation(parts, environment) : parts;
     }
+    case "memory_recall":
+      return upsertMemoryRecall(parts, d);
     case "text":
       return appendTo(parts, "text", d.text ?? "");
     case "thinking":
@@ -695,6 +749,13 @@ function convertMessage(message: UiMessage): ThreadMessageLike {
   )?.environment;
   const content = message.parts.flatMap((p) => {
     if (p.type === "environment" || p.type === "session-status") return [];
+    if (p.type === "memory-recall") {
+      return {
+        type: "data" as const,
+        name: "memory-recall",
+        data: { status: p.status, count: p.count, errorCode: p.errorCode },
+      };
+    }
     if (p.type === "text") return { type: "text" as const, text: p.text };
     if (p.type === "reasoning") return { type: "reasoning" as const, text: p.text };
     if (p.type === "file") {

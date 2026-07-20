@@ -49,6 +49,10 @@ func TestWriteInstallationCreatesPrivateConfigAndStableState(t *testing.T) {
 		`COCOLA_AGENT_TOOL_STEP_TIMEOUT_SECS="600"`,
 		`COCOLA_LLM_TIMEOUT_SECS="600"`,
 		`COCOLA_SANDBOX_TOKEN_TTL_SECONDS="604800"`,
+		`COCOLA_OPENVIKING_URL="http://openviking:1933"`,
+		`COCOLA_OPENVIKING_ROOT_API_KEY="`,
+		`COCOLA_MEMORY_LLM_SERVICE_TOKEN="`,
+		`COCOLA_MEMORY_EMBEDDING_DIMENSION="1024"`,
 	} {
 		if !strings.Contains(text, expected) {
 			t.Fatalf("config missing %q", expected)

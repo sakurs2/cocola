@@ -1,9 +1,8 @@
 "use client";
 
+import { Cpu as ModelsPageIcon } from "lucide-react";
 import {
-  Cpu as ModelsPageIcon,
-} from "lucide-react";
-import {
+  Binary,
   Bot,
   Boxes,
   Check,
@@ -45,8 +44,8 @@ import {
 } from "@/lib/model-icons";
 import { cn } from "@/lib/utils";
 
-type ProviderType = "anthropic" | "openai_responses";
-type ModelProtocol = "anthropic-messages" | "openai-responses";
+type ProviderType = "anthropic" | "openai_responses" | "openai_embeddings";
+type ModelProtocol = "anthropic-messages" | "openai-responses" | "openai-embeddings";
 type View = "models" | "providers";
 
 type LLMProvider = {
@@ -74,6 +73,7 @@ type LLMModel = {
   visible: boolean;
   is_default: boolean;
   sort_order: number;
+  embedding_dimension: number;
   created_at: string;
   updated_at: string;
 };
@@ -99,6 +99,7 @@ type ModelForm = {
   visible: boolean;
   is_default: boolean;
   sort_order: string;
+  embedding_dimension: string;
 };
 
 type DeleteTarget =
@@ -126,6 +127,7 @@ const EMPTY_MODEL: ModelForm = {
   visible: true,
   is_default: false,
   sort_order: "0",
+  embedding_dimension: "1024",
 };
 
 const PROVIDER_TYPES: Array<{
@@ -147,6 +149,13 @@ const PROVIDER_TYPES: Array<{
     label: "OpenAI Responses API",
     shortLabel: "Responses API",
     description: "Structured /responses requests and events required by Codex.",
+    defaultBaseURL: "https://api.openai.com/v1",
+  },
+  {
+    value: "openai_embeddings",
+    label: "OpenAI Embeddings API",
+    shortLabel: "Embeddings API",
+    description: "Text embeddings only; never exposed to Agent Runtime or chat model lists.",
     defaultBaseURL: "https://api.openai.com/v1",
   },
 ];
@@ -275,6 +284,7 @@ export default function AdminModelsPage() {
       visible: model.visible,
       is_default: model.is_default,
       sort_order: String(model.sort_order),
+      embedding_dimension: String(model.embedding_dimension || 1024),
     });
     setFormError("");
     setModelDrawerOpen(true);
@@ -326,6 +336,10 @@ export default function AdminModelsPage() {
         visible: modelForm.visible,
         is_default: modelForm.is_default,
         sort_order: Number.parseInt(modelForm.sort_order || "0", 10) || 0,
+        embedding_dimension:
+          selectedProvider?.type === "openai_embeddings"
+            ? Number.parseInt(modelForm.embedding_dimension || "0", 10) || 0
+            : 0,
       };
       const url = editingModel
         ? `/api/admin/models/${encodeURIComponent(editingModel)}`
@@ -578,7 +592,9 @@ export default function AdminModelsPage() {
             <p className="mt-2 text-xs leading-5 text-muted-foreground">
               {providerForm.type === "openai_responses"
                 ? "The upstream must implement POST /responses with Codex-compatible tool events."
-                : "This route uses the native Anthropic Messages API."}
+                : providerForm.type === "openai_embeddings"
+                  ? "The upstream must implement POST /embeddings. It is isolated from chat and tools."
+                  : "This route uses the native Anthropic Messages API."}
             </p>
           </div>
 
@@ -644,7 +660,15 @@ export default function AdminModelsPage() {
             <select
               className={inputClass}
               value={modelForm.provider_id}
-              onChange={(event) => setModelForm({ ...modelForm, provider_id: event.target.value })}
+              onChange={(event) => {
+                const provider = providerByID.get(event.target.value);
+                setModelForm({
+                  ...modelForm,
+                  provider_id: event.target.value,
+                  visible: provider?.type === "openai_embeddings" ? false : modelForm.visible,
+                  is_default: provider?.type === "openai_embeddings" ? false : modelForm.is_default,
+                });
+              }}
             >
               <option value="">Select provider</option>
               {providers
@@ -699,6 +723,24 @@ export default function AdminModelsPage() {
             />
           </Field>
 
+          {selectedProvider?.type === "openai_embeddings" ? (
+            <Field
+              label="Embedding dimension"
+              hint="Must match the dimension locked by the Memory index (1024 by default)."
+            >
+              <input
+                className={inputClass}
+                value={modelForm.embedding_dimension}
+                onChange={(event) =>
+                  setModelForm({ ...modelForm, embedding_dimension: event.target.value })
+                }
+                inputMode="numeric"
+                min={1}
+                type="number"
+              />
+            </Field>
+          ) : null}
+
           <div className="grid gap-3 rounded-2xl border border-border/70 p-3 sm:grid-cols-3">
             <Toggle
               checked={modelForm.enabled}
@@ -708,12 +750,22 @@ export default function AdminModelsPage() {
             <Toggle
               checked={modelForm.visible}
               onChange={(visible) => setModelForm({ ...modelForm, visible })}
-              label="Visible to users"
+              label={
+                selectedProvider?.type === "openai_embeddings"
+                  ? "Always hidden"
+                  : "Visible to users"
+              }
+              disabled={selectedProvider?.type === "openai_embeddings"}
             />
             <Toggle
               checked={modelForm.is_default}
               onChange={(is_default) => setModelForm({ ...modelForm, is_default })}
-              label="Protocol default"
+              label={
+                selectedProvider?.type === "openai_embeddings"
+                  ? "Not a chat default"
+                  : "Protocol default"
+              }
+              disabled={selectedProvider?.type === "openai_embeddings"}
             />
           </div>
 
@@ -906,7 +958,11 @@ function ModelsTable({
                 <Td>
                   <ResourceMenu
                     onEdit={() => onEdit(model)}
-                    onDefault={model.is_default ? undefined : () => onDefault(model)}
+                    onDefault={
+                      model.is_default || model.protocol === "openai-embeddings"
+                        ? undefined
+                        : () => onDefault(model)
+                    }
                     onDelete={() => onDelete(model)}
                     disabled={saving}
                   />
@@ -1116,16 +1172,24 @@ function Toggle({
   checked,
   onChange,
   label,
+  disabled = false,
 }: {
   checked: boolean;
   onChange: (checked: boolean) => void;
   label: string;
+  disabled?: boolean;
 }) {
   return (
-    <label className="flex min-h-10 cursor-pointer items-center gap-2 rounded-xl border border-border/70 px-3 text-sm font-medium">
+    <label
+      className={cn(
+        "flex min-h-10 items-center gap-2 rounded-xl border border-border/70 px-3 text-sm font-medium",
+        disabled ? "cursor-not-allowed opacity-60" : "cursor-pointer",
+      )}
+    >
       <input
         type="checkbox"
         checked={checked}
+        disabled={disabled}
         onChange={(event) => onChange(event.target.checked)}
       />
       {label}
@@ -1158,17 +1222,26 @@ function DrawerFooter({
 
 function RuntimeProtocolBadge({ protocol }: { protocol: ModelProtocol }) {
   const responses = protocol === "openai-responses";
+  const embeddings = protocol === "openai-embeddings";
   return (
     <span
       className={cn(
         "inline-flex w-fit items-center gap-1.5 rounded-full border px-2.5 py-1 text-xs font-medium",
-        responses
-          ? "border-violet-500/25 bg-violet-500/10 text-violet-700"
-          : "border-blue-500/25 bg-blue-500/10 text-blue-700",
+        embeddings
+          ? "border-emerald-500/25 bg-emerald-500/10 text-emerald-700"
+          : responses
+            ? "border-violet-500/25 bg-violet-500/10 text-violet-700"
+            : "border-blue-500/25 bg-blue-500/10 text-blue-700",
       )}
     >
-      {responses ? <Bot className="size-3.5" /> : <Route className="size-3.5" />}
-      {responses ? "Responses" : "Messages"}
+      {embeddings ? (
+        <Binary className="size-3.5" />
+      ) : responses ? (
+        <Bot className="size-3.5" />
+      ) : (
+        <Route className="size-3.5" />
+      )}
+      {embeddings ? "Embeddings" : responses ? "Responses" : "Messages"}
     </span>
   );
 }
@@ -1176,17 +1249,26 @@ function RuntimeProtocolBadge({ protocol }: { protocol: ModelProtocol }) {
 function ProviderProtocolBadge({ type }: { type: ProviderType }) {
   const meta = providerTypeMeta(type);
   const responses = type === "openai_responses";
+  const embeddings = type === "openai_embeddings";
   return (
     <span
       className={cn(
         "inline-flex w-fit items-center gap-1.5 rounded-full border px-2.5 py-1 text-xs font-medium",
-        responses
-          ? "border-violet-500/25 bg-violet-500/10 text-violet-700"
-          : "border-blue-500/25 bg-blue-500/10 text-blue-700",
+        embeddings
+          ? "border-emerald-500/25 bg-emerald-500/10 text-emerald-700"
+          : responses
+            ? "border-violet-500/25 bg-violet-500/10 text-violet-700"
+            : "border-blue-500/25 bg-blue-500/10 text-blue-700",
       )}
       title={meta.label}
     >
-      {responses ? <Bot className="size-3.5" /> : <Route className="size-3.5" />}
+      {embeddings ? (
+        <Binary className="size-3.5" />
+      ) : responses ? (
+        <Bot className="size-3.5" />
+      ) : (
+        <Route className="size-3.5" />
+      )}
       {meta.shortLabel}
     </span>
   );
@@ -1205,21 +1287,26 @@ function providerTypeMeta(type: ProviderType) {
 }
 
 function protocolForType(type: ProviderType): ModelProtocol {
-  return type === "openai_responses" ? "openai-responses" : "anthropic-messages";
+  if (type === "openai_responses") return "openai-responses";
+  if (type === "openai_embeddings") return "openai-embeddings";
+  return "anthropic-messages";
 }
 
 function runtimeForProtocol(protocol: ModelProtocol) {
+  if (protocol === "openai-embeddings") return "Memory only";
   return protocol === "openai-responses" ? "Codex" : "Claude Code";
 }
 
 function runtimeCompatibilityForType(type: ProviderType) {
   if (type === "openai_responses") return "Codex";
+  if (type === "openai_embeddings") return "Memory only";
   return "Claude Code";
 }
 
 function providerEndpoint(baseURL: string, type: ProviderType) {
   const base = baseURL.trim().replace(/\/$/, "") || providerTypeMeta(type).defaultBaseURL;
   if (type === "anthropic") return `${base}/v1/messages`;
+  if (type === "openai_embeddings") return `${base}/embeddings`;
   return `${base}/responses`;
 }
 

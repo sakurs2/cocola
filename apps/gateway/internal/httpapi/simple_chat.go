@@ -19,6 +19,7 @@ import (
 	"github.com/cocola-project/cocola/apps/gateway/internal/auth"
 	"github.com/cocola-project/cocola/apps/gateway/internal/chatrun"
 	"github.com/cocola-project/cocola/apps/gateway/internal/convo"
+	"github.com/cocola-project/cocola/apps/gateway/internal/memory"
 	traceevents "github.com/cocola-project/cocola/apps/gateway/internal/traceevent"
 	"github.com/cocola-project/cocola/packages/go-common/tracing"
 )
@@ -63,23 +64,24 @@ type runController struct {
 }
 
 type liveRun struct {
-	run       chatrun.Run
-	identity  auth.Identity
-	request   chatRequest
-	query     agent.Query
-	policy    executionPolicy
-	traceCtx  context.Context
-	traceRun  traceevents.Run
-	ctx       context.Context
-	cancel    context.CancelFunc
-	done      chan struct{}
-	mu        sync.Mutex
-	reducer   *convo.Reducer
-	subs      map[chan agent.Event]struct{}
-	cancelled bool
-	interrupt bool
-	status    string
-	version   uint64
+	run                chatrun.Run
+	identity           auth.Identity
+	request            chatRequest
+	query              agent.Query
+	policy             executionPolicy
+	traceCtx           context.Context
+	traceRun           traceevents.Run
+	ctx                context.Context
+	cancel             context.CancelFunc
+	done               chan struct{}
+	mu                 sync.Mutex
+	reducer            *convo.Reducer
+	subs               map[chan agent.Event]struct{}
+	cancelled          bool
+	interrupt          bool
+	status             string
+	recalledMemoryURIs []string
+	version            uint64
 }
 
 func newRunController(store chatrun.Store, cfg RunConfig) *runController {
@@ -329,6 +331,19 @@ func (r *liveRun) apply(event agent.Event) {
 	r.mu.Unlock()
 }
 
+func (r *liveRun) updateMemoryRecall(result memory.RecallResult) {
+	data := map[string]string{"status": result.Status}
+	if result.Count > 0 {
+		data["count"] = strconv.Itoa(result.Count)
+	}
+	if result.ErrorCode != "" {
+		data["error_code"] = result.ErrorCode
+	}
+	event := agent.Event{Kind: "memory_recall", Data: data}
+	r.apply(event)
+	r.publish(event)
+}
+
 func (r *liveRun) outputVersion() uint64 {
 	r.mu.Lock()
 	defer r.mu.Unlock()
@@ -345,6 +360,18 @@ func (a *API) executeLiveRun(live *liveRun) {
 	defer live.cancel()
 	defer close(live.done)
 	attachments := a.prepareRunAttachments(live.ctx, live.request)
+	memoryContext := ""
+	if a.memory != nil && chatTypeForConversation(live.request) != "scheduled_task" {
+		live.updateMemoryRecall(memory.RecallResult{Status: memory.RecallStatusRunning})
+		recall := a.memory.Recall(
+			live.ctx,
+			memory.Identity{TenantID: live.identity.TenantID, UserID: live.identity.UserID},
+			live.request.Prompt,
+		)
+		memoryContext = recall.Context
+		live.recalledMemoryURIs = recall.URIs
+		live.updateMemoryRecall(recall)
+	}
 	live.query = agent.Query{
 		UserID: live.identity.UserID, SessionID: live.request.SessionID,
 		RuntimeID: live.request.RuntimeID, SkillID: live.request.SkillID,
@@ -352,6 +379,7 @@ func (a *API) executeLiveRun(live *liveRun) {
 		MaxTurns:            effectiveMaxTurns(live.request.MaxTurns, live.policy.agentMaxTurns),
 		ModelRouteID:        effectiveModelRouteID(live.request),
 		AllowWorkspaceReset: live.request.AllowWorkspaceReset,
+		MemoryContext:       memoryContext,
 		TraceID:             live.run.ID, ParentSpanID: conversationRootSpan(live.traceCtx),
 		SandboxAuthToken: a.mintSandboxToken(live.identity), Attachments: attachments,
 	}
@@ -468,6 +496,17 @@ func (a *API) executeLiveRun(live *liveRun) {
 		live.run = finalizedRun
 		live.mu.Unlock()
 		live.publish(agent.Event{Kind: "done", Data: terminalRunData(finalizedRun)})
+		if a.memory != nil {
+			captureCtx, cancelCapture := context.WithTimeout(context.Background(), 5*time.Second)
+			if err := a.memory.ScheduleCapture(captureCtx, memory.CaptureInput{
+				RunID: finalizedRun.ID, TenantID: live.identity.TenantID,
+				UserID: live.identity.UserID, ConversationID: finalizedRun.ConversationID,
+				Source: finalizedRun.Source, RecalledURIs: live.recalledMemoryURIs,
+			}); err != nil {
+				a.log.Warn("memory capture scheduling failed: " + err.Error())
+			}
+			cancelCapture()
+		}
 	}
 	a.runs.mu.Lock()
 	delete(a.runs.live, live.run.ID)

@@ -42,12 +42,12 @@ class PostgresRegistrySource:
                 await self._pool.open()
                 self._opened = True
 
-    async def acquire_registry(self) -> Registry:
+    async def acquire_registry(self, *, force_refresh: bool = False) -> Registry:
         close_after_swap: Registry | None = None
         now = time.monotonic()
         async with self._refresh_lock:
             now = time.monotonic()
-            if self._cached is None or now - self._cached_at >= self._ttl_s:
+            if force_refresh or self._cached is None or now - self._cached_at >= self._ttl_s:
                 close_after_swap = await self._refresh(now)
             registry = self._cached or self._fallback
             self._references[registry] = self._references.get(registry, 0) + 1
@@ -99,7 +99,7 @@ class PostgresRegistrySource:
             SELECT
                 p.id, p.type, p.base_url, p.api_key_ciphertext,
                 r.id, r.alias, r.protocol, r.real_model, r.label, r.icon_type, r.icon_slug,
-                r.icon_url, r.visible, r.is_default
+                r.icon_url, r.visible, r.is_default, r.embedding_dimension
             FROM llm_model_routes r
             JOIN llm_providers p ON p.id = r.provider_id
             WHERE p.enabled = TRUE AND r.enabled = TRUE
@@ -108,7 +108,15 @@ class PostgresRegistrySource:
         async with self._pool.connection() as conn:
             cur = await conn.execute(query)
             rows = await cur.fetchall()
-        fingerprint = hashlib.sha256(repr(rows).encode("utf-8")).hexdigest()
+            cur = await conn.execute(
+                """
+                SELECT enabled, extraction_model_route_id, embedding_model_route_id, version
+                FROM memory_config
+                WHERE singleton = TRUE
+                """
+            )
+            memory_row = await cur.fetchone()
+        fingerprint = hashlib.sha256(repr((rows, memory_row)).encode("utf-8")).hexdigest()
         if not rows:
             return fingerprint, None
 
@@ -131,6 +139,7 @@ class PostgresRegistrySource:
                 icon_url,
                 visible,
                 is_default,
+                embedding_dimension,
             ) = row
             if provider_type == "fake":
                 raise CocolaError(
@@ -159,13 +168,24 @@ class PostgresRegistrySource:
                 "enabled": True,
                 "visible": visible,
                 "is_default": is_default,
+                "embedding_dimension": embedding_dimension,
             }
             if is_default and not default_alias:
                 default_alias = route_id
+        memory_enabled = False
+        memory_extraction_route_id = ""
+        memory_embedding_route_id = ""
+        if memory_row:
+            memory_enabled = bool(memory_row[0])
+            memory_extraction_route_id = str(memory_row[1] or "")
+            memory_embedding_route_id = str(memory_row[2] or "")
         return fingerprint, {
             "default_alias": default_alias,
             "providers": providers,
             "routes": routes,
+            "memory_enabled": memory_enabled,
+            "memory_extraction_route_id": memory_extraction_route_id,
+            "memory_embedding_route_id": memory_embedding_route_id,
         }
 
     async def aclose(self) -> None:

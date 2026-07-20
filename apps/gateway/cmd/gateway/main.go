@@ -42,6 +42,7 @@ import (
 	"github.com/cocola-project/cocola/apps/gateway/internal/chatrun"
 	"github.com/cocola-project/cocola/apps/gateway/internal/convo"
 	"github.com/cocola-project/cocola/apps/gateway/internal/httpapi"
+	"github.com/cocola-project/cocola/apps/gateway/internal/memory"
 	"github.com/cocola-project/cocola/apps/gateway/internal/objstore"
 	"github.com/cocola-project/cocola/apps/gateway/internal/sandboxmgr"
 	traceevents "github.com/cocola-project/cocola/apps/gateway/internal/traceevent"
@@ -191,6 +192,18 @@ func main() {
 	} else {
 		api = api.WithConvoStore(cs)
 		defer cs.Close()
+		memoryService, memoryErr := memory.New(context.Background(), dsn, memory.Config{
+			OpenVikingURL:        env("COCOLA_OPENVIKING_URL", "http://127.0.0.1:1933"),
+			OpenVikingRootAPIKey: config.SecretFromEnv("COCOLA_OPENVIKING_ROOT_API_KEY"),
+			EmbeddingDimension:   mustBoundedEnvInt(log, "COCOLA_MEMORY_EMBEDDING_DIMENSION", 1024, 1, 100000),
+			Metrics:              reg.Registerer(),
+		}, logger.WithService(log, "gateway", "memory"))
+		if memoryErr != nil {
+			log.Fatal("memory service connect failed: " + memoryErr.Error())
+		}
+		defer memoryService.Close()
+		api = api.WithMemory(memoryService)
+		log.Info("OpenViking memory integration loaded (globally disabled until configured)")
 		runStore, runErr := chatrun.NewPostgres(context.Background(), dsn)
 		if runErr != nil {
 			log.Fatal("chat run store connect failed: " + runErr.Error())
@@ -252,4 +265,18 @@ func main() {
 	if metricsServer != nil {
 		_ = metricsServer.Shutdown(shutdownCtx)
 	}
+}
+
+func mustBoundedEnvInt(
+	log logger.Logger,
+	key string,
+	fallback int,
+	minValue int,
+	maxValue int,
+) int {
+	value, err := boundedEnvInt(key, fallback, minValue, maxValue)
+	if err != nil {
+		log.Fatal(err.Error())
+	}
+	return value
 }

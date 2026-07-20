@@ -54,6 +54,7 @@ type Query struct {
 	Prompt              string
 	SandboxID           string
 	AllowWorkspaceReset bool
+	MemoryContext       string
 	MaxTurns            int32
 	ModelRouteID        string
 	TraceID             string
@@ -209,6 +210,7 @@ func (c *Client) Stream(ctx context.Context, q Query, onEvent func(Event) error)
 		RuntimeId:           q.RuntimeID,
 		SkillId:             q.SkillID,
 		AllowWorkspaceReset: q.AllowWorkspaceReset,
+		MemoryContext:       q.MemoryContext,
 	})
 	if err != nil {
 		return fmt.Errorf("agent: query: %w", err)

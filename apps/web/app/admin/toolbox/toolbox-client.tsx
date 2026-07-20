@@ -1,14 +1,13 @@
 "use client";
 
-import {
-  Wrench as ToolboxIcon,
-} from "lucide-react";
+import { Wrench as ToolboxIcon } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { useState, type ComponentType } from "react";
 import { AdminPage, AdminPageHeader, AdminPanel } from "@/components/admin/admin-ui";
 import { SystemPromptTool } from "./system-prompt-tool";
+import { MemoryTool } from "./memory-tool";
 
-export type ToolboxToolId = "system-prompt";
+export type ToolboxToolId = "system-prompt" | "memory";
 
 type ToolboxToolProps = {
   open: boolean;
@@ -18,7 +17,10 @@ type ToolboxToolProps = {
 const TOOLBOX_ITEMS: readonly {
   id: ToolboxToolId;
   component: ComponentType<ToolboxToolProps>;
-}[] = [{ id: "system-prompt", component: SystemPromptTool }];
+}[] = [
+  { id: "system-prompt", component: SystemPromptTool },
+  { id: "memory", component: MemoryTool },
+];
 
 export function ToolboxClient({ initialTool }: { initialTool: ToolboxToolId | null }) {
   const router = useRouter();

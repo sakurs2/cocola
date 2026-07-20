@@ -11,9 +11,10 @@ import (
 // renders is what makes route A a zero-drift mirror: a stored message replays
 // straight through convertMessage.
 //
-// Event vocabulary (kind): environment_prepare | environment_status | text |
-// thinking | tool_use | tool_result | file | error; result / system / sandbox / done carry no
-// message-body content and are dropped (identical to the frontend).
+// Event vocabulary (kind): environment_prepare | environment_status |
+// memory_recall | text | thinking | tool_use | tool_result | file | error;
+// result / system / sandbox / done carry no message-body content and are dropped
+// (identical to the frontend).
 type Reducer struct {
 	parts []Part
 }
@@ -28,6 +29,8 @@ func (r *Reducer) Apply(kind string, data map[string]string) {
 		r.upsertEnvironment(data["snapshot"])
 	case "environment_status":
 		r.upsertSessionStatus(data)
+	case "memory_recall":
+		r.upsertMemoryRecall(data)
 	case "text":
 		r.appendText(PartText, data["text"])
 	case "thinking":
@@ -54,6 +57,51 @@ func (r *Reducer) Apply(kind string, data map[string]string) {
 		r.appendText(PartText, "\n\n⚠️ "+errText(data))
 	default:
 		// result / system / sandbox / done / unknown: no body content.
+	}
+}
+
+func (r *Reducer) upsertMemoryRecall(data map[string]string) {
+	status := data["status"]
+	if status == "skipped" || status == "miss" {
+		r.removeMemoryRecall()
+		return
+	}
+	if status != "running" && status != "hit" &&
+		status != "degraded" && status != "unavailable" {
+		return
+	}
+	count, _ := strconv.Atoi(data["count"])
+	if count < 0 || count > 100 {
+		count = 0
+	}
+	part := Part{
+		Type: PartMemoryRecall, MemoryStatus: status,
+		MemoryCount: count, MemoryErrorCode: data["error_code"],
+	}
+	for i := range r.parts {
+		if r.parts[i].Type == PartMemoryRecall {
+			r.parts[i] = part
+			return
+		}
+	}
+	insertAt := 0
+	for insertAt < len(r.parts) &&
+		(r.parts[insertAt].Type == PartEnvironment || r.parts[insertAt].Type == PartSessionStatus) {
+		insertAt++
+	}
+	next := make([]Part, 0, len(r.parts)+1)
+	next = append(next, r.parts[:insertAt]...)
+	next = append(next, part)
+	next = append(next, r.parts[insertAt:]...)
+	r.parts = next
+}
+
+func (r *Reducer) removeMemoryRecall() {
+	for i := range r.parts {
+		if r.parts[i].Type == PartMemoryRecall {
+			r.parts = append(r.parts[:i], r.parts[i+1:]...)
+			return
+		}
 	}
 }
 

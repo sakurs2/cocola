@@ -10,6 +10,8 @@ require (
 	github.com/jackc/pgx/v5 v5.7.2
 	github.com/minio/minio-go/v7 v7.0.80
 	github.com/pressly/goose/v3 v3.24.1
+	github.com/prometheus/client_golang v1.20.5
+	github.com/volcengine/OpenViking/sdk/go v0.0.0-20260716115340-ef4d97ebe302
 	google.golang.org/grpc v1.65.0
 )
 
@@ -32,7 +34,6 @@ require (
 	github.com/mfridman/interpolate v0.0.2 // indirect
 	github.com/minio/md5-simd v1.1.2 // indirect
 	github.com/munnerz/goautoneg v0.0.0-20191010083416-a7dc8b61c822 // indirect
-	github.com/prometheus/client_golang v1.20.5 // indirect
 	github.com/prometheus/client_model v0.6.2 // indirect
 	github.com/prometheus/common v0.55.0 // indirect
 	github.com/prometheus/procfs v0.16.1 // indirect

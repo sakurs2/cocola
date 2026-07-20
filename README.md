@@ -75,7 +75,7 @@ cocola down
 ### 源码开发
 
 ```bash
-# 一键拉起本地依赖：PostgreSQL + Redis + MinIO
+# 一键拉起本地依赖：PostgreSQL + Redis + MinIO + OpenViking
 make dev-up
 
 # 关闭

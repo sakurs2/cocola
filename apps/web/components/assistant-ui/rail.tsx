@@ -13,6 +13,7 @@
 
 import {
   Brain,
+  BrainCircuit,
   MessageCircle as ChatCircle,
   Box as Cube,
   FilePlus,
@@ -158,6 +159,42 @@ export const RailEnvironment: FC<{
 export const RailResponsePending: FC = () => (
   <RailRow icon={ChatCircle} label="Starting response" running color="text-indigo-500" />
 );
+
+export const RailMemoryRecall: FC<{
+  status: "running" | "hit" | "degraded" | "unavailable";
+  count?: number;
+}> = ({ status, count = 0 }) => {
+  const recalled = Math.max(0, Math.floor(count));
+  const usedLabel = `Used ${recalled} ${recalled === 1 ? "memory" : "memories"}`;
+  const unavailable = status === "unavailable";
+  const degraded = status === "degraded";
+  const label =
+    status === "running"
+      ? "Recalling memories"
+      : unavailable
+        ? "Memory unavailable"
+        : degraded
+          ? `${usedLabel} with limits`
+          : usedLabel;
+
+  return (
+    <RailRow
+      icon={BrainCircuit}
+      label={label}
+      running={status === "running"}
+      tone={unavailable ? "error" : "default"}
+      color={degraded ? "text-amber-500" : "text-emerald-500"}
+    >
+      {unavailable || degraded ? (
+        <p className="text-[13px] leading-5 text-muted-foreground">
+          {unavailable
+            ? "The answer continued without recalled memory."
+            : "Some memory sources were unavailable; the answer used the memories that were returned."}
+        </p>
+      ) : null}
+    </RailRow>
+  );
+};
 
 // Reasoning / chain-of-thought node with a collapsible body.
 export const RailReasoning: FC<{ text: string; running?: boolean }> = ({ text, running }) => (

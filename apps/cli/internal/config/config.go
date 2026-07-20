@@ -67,6 +67,7 @@ type Credentials struct {
 
 type secrets struct {
 	auth, authJS, admin, model, config, postgres, minio string
+	openVikingRoot, memoryLLMService                    string
 }
 
 func DefaultHome() string {
@@ -286,6 +287,10 @@ func renderEnvironment(paths Paths, o Options, s secrets, password string) strin
 		{"AUTH_SECRET", s.authJS}, {"COCOLA_ADMIN_KEY", s.admin},
 		{"COCOLA_MODEL_SECRET_KEY", s.model}, {"COCOLA_CONFIG_SECRET_KEY", s.config},
 		{"COCOLA_PG_PASSWORD", s.postgres}, {"COCOLA_MINIO_ROOT_PASSWORD", s.minio},
+		{"COCOLA_OPENVIKING_URL", "http://openviking:1933"},
+		{"COCOLA_OPENVIKING_ROOT_API_KEY", s.openVikingRoot},
+		{"COCOLA_MEMORY_LLM_SERVICE_TOKEN", s.memoryLLMService},
+		{"COCOLA_MEMORY_EMBEDDING_DIMENSION", "1024"},
 		{"COCOLA_SESSION_VOLUME_SIZE", o.SessionVolumeSize},
 		{"COCOLA_SANDBOX_PROFILE", "coding"},
 		{"COCOLA_AGENT_MAX_TURNS", defaultAgentMaxTurns},
@@ -312,7 +317,7 @@ func quoteEnv(value string) string {
 }
 
 func newSecrets() (secrets, error) {
-	values := make([]string, 7)
+	values := make([]string, 9)
 	for index := range values {
 		value, err := randomSecret(32)
 		if err != nil {
@@ -323,6 +328,7 @@ func newSecrets() (secrets, error) {
 	return secrets{
 		auth: values[0], authJS: values[1], admin: values[2], model: values[3],
 		config: values[4], postgres: values[5], minio: values[6],
+		openVikingRoot: values[7], memoryLLMService: values[8],
 	}, nil
 }
 

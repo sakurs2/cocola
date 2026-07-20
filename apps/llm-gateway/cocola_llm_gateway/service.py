@@ -30,7 +30,7 @@ from collections.abc import AsyncIterator
 from dataclasses import dataclass
 from typing import Protocol
 
-from cocola_common import ErrorCode, get_logger
+from cocola_common import CocolaError, ErrorCode, get_logger
 
 from cocola_llm_gateway.auth.jwt import Identity
 from cocola_llm_gateway.billing.ledger import Ledger, UsageRecord
@@ -38,7 +38,14 @@ from cocola_llm_gateway.conversation_trace import ConversationTraceStore, TraceC
 from cocola_llm_gateway.middleware import RateLimiter, ResiliencePolicy, ResilientStreamer
 from cocola_llm_gateway.quota import Enforcer, QuotaStatus
 from cocola_llm_gateway.registry import Registry
-from cocola_llm_gateway.types import ChatRequest, StreamEvent, StreamEventType, Usage
+from cocola_llm_gateway.types import (
+    ChatMessage,
+    ChatParams,
+    ChatRequest,
+    StreamEvent,
+    StreamEventType,
+    Usage,
+)
 from cocola_llm_gateway.upstream.errors import UpstreamError
 
 log = get_logger("cocola.llm-gateway.service")
@@ -109,7 +116,7 @@ class ResponsesSSEMeter:
 
 
 class RegistrySource(Protocol):
-    async def acquire_registry(self) -> Registry: ...
+    async def acquire_registry(self, *, force_refresh: bool = False) -> Registry: ...
 
     async def release_registry(self, registry: Registry) -> None: ...
 
@@ -120,7 +127,7 @@ class StaticRegistrySource:
     def __init__(self, registry: Registry):
         self._registry = registry
 
-    async def acquire_registry(self) -> Registry:
+    async def acquire_registry(self, *, force_refresh: bool = False) -> Registry:
         return self._registry
 
     async def release_registry(self, registry: Registry) -> None:
@@ -186,6 +193,148 @@ class GatewayService:
         registry = await self._registry_source.acquire_registry()
         try:
             return registry.default_alias, registry.aliases()
+        finally:
+            await self._registry_source.release_registry(registry)
+
+    async def memory_chat_completion(self, payload: dict) -> dict:
+        """Serve OpenViking's narrow text-only extraction contract.
+
+        This path deliberately bypasses user quota while still recording usage
+        under the platform ``memory-service`` identity.
+        """
+        registry = await self._registry_source.acquire_registry(force_refresh=True)
+        route = None
+        request_id = f"memory_{uuid.uuid4().hex[:16]}"
+        usage = Usage()
+        try:
+            self._registry = registry
+            route_id = registry.memory_extraction_route_id
+            if not route_id:
+                raise CocolaError(
+                    ErrorCode.UNAVAILABLE,
+                    "memory extraction model is not configured",
+                )
+
+            response_format = payload.get("response_format")
+            messages = [
+                ChatMessage(role=item["role"], content=item["content"])
+                for item in payload["messages"]
+            ]
+            if response_format:
+                messages.insert(
+                    0,
+                    ChatMessage(
+                        role="system",
+                        content=_structured_output_instruction(response_format),
+                    ),
+                )
+
+            try:
+                route, provider = registry.resolve_chat(route_id)
+            except CocolaError:
+                route, provider = registry.resolve_responses(route_id)
+                upstream_payload = _memory_responses_payload(payload, route.real_model)
+                response = await self._responses_create_with_retry(provider, upstream_payload)
+                text = _responses_output_text(response)
+                response_usage = responses_usage(response)
+                usage = response_usage.quota_usage()
+                request_id = str(response.get("id") or request_id)
+            else:
+                req = ChatRequest(
+                    model=route.real_model,
+                    messages=messages,
+                    params=ChatParams(
+                        max_tokens=int(payload.get("max_tokens") or 1024),
+                        temperature=payload.get("temperature"),
+                        stream=True,
+                    ),
+                    user_id="memory-service",
+                    session_id="memory-service",
+                )
+                chunks: list[str] = []
+                streamer = ResilientStreamer(provider, self._policy, self._limiter)
+                async for event in streamer.chat_stream(req):
+                    if event.type is StreamEventType.CONTENT_DELTA:
+                        chunks.append(event.text)
+                    elif event.usage is not None and event.type in {
+                        StreamEventType.MESSAGE_START,
+                        StreamEventType.MESSAGE_DELTA,
+                    }:
+                        usage.merge(event.usage)
+                    elif event.type is StreamEventType.ERROR:
+                        raise UpstreamError(
+                            ErrorCode.UNAVAILABLE,
+                            "memory extraction upstream failed",
+                            retryable=False,
+                        )
+                text = "".join(chunks)
+
+            if not text:
+                raise UpstreamError(
+                    ErrorCode.UNAVAILABLE,
+                    "memory extraction upstream returned no text",
+                    retryable=False,
+                )
+            await self._write_usage_record(
+                request_id=request_id,
+                user_id="memory-service",
+                session_id="memory-service",
+                route=route,
+                usage=usage,
+                status="ok",
+                error="",
+            )
+            return {
+                "id": request_id,
+                "object": "chat.completion",
+                "created": int(time.time()),
+                "model": "cocola-memory-extraction",
+                "choices": [
+                    {
+                        "index": 0,
+                        "message": {"role": "assistant", "content": text},
+                        "finish_reason": "stop",
+                    }
+                ],
+                "usage": {
+                    "prompt_tokens": usage.prompt_tokens,
+                    "completion_tokens": usage.completion_tokens,
+                    "total_tokens": usage.total_tokens,
+                },
+            }
+        finally:
+            await self._registry_source.release_registry(registry)
+
+    async def memory_embeddings(self, payload: dict) -> dict:
+        registry = await self._registry_source.acquire_registry(force_refresh=True)
+        route = None
+        try:
+            self._registry = registry
+            route_id = registry.memory_embedding_route_id
+            if not route_id:
+                raise CocolaError(ErrorCode.UNAVAILABLE, "memory embedding model is not configured")
+            route, provider = registry.resolve_embeddings(route_id)
+            upstream_payload = {
+                "model": route.real_model,
+                "input": payload["input"],
+                "encoding_format": "float",
+            }
+            if route.embedding_dimension > 0:
+                upstream_payload["dimensions"] = route.embedding_dimension
+            response = await self._embeddings_create_with_retry(provider, upstream_payload)
+            _validate_embedding_dimensions(response, route.embedding_dimension)
+            raw_usage = response.get("usage") if isinstance(response.get("usage"), dict) else {}
+            usage = Usage(prompt_tokens=int(raw_usage.get("prompt_tokens") or 0))
+            await self._write_usage_record(
+                request_id=f"memory_embedding_{uuid.uuid4().hex[:16]}",
+                user_id="memory-service",
+                session_id="memory-service",
+                route=route,
+                usage=usage,
+                status="ok",
+                error="",
+            )
+            return {**response, "model": "cocola-memory-embedding"}
         finally:
             await self._registry_source.release_registry(registry)
 
@@ -463,6 +612,24 @@ class GatewayService:
                 await asyncio.sleep(self._policy.backoff_base_s * (2**attempt))
         raise RuntimeError("unreachable")
 
+    async def _embeddings_create_with_retry(self, provider, payload: dict) -> dict:
+        for attempt in range(self._policy.max_retries + 1):
+            try:
+                async with asyncio.timeout(self._policy.timeout_s):
+                    return await provider.create_embeddings(payload)
+            except TimeoutError as exc:
+                if attempt >= self._policy.max_retries:
+                    raise UpstreamError(
+                        ErrorCode.UNAVAILABLE,
+                        "embedding upstream timeout",
+                        retryable=True,
+                    ) from exc
+            except UpstreamError as exc:
+                if not exc.retryable or attempt >= self._policy.max_retries:
+                    raise
+            await asyncio.sleep(self._policy.backoff_base_s * (2**attempt))
+        raise RuntimeError("unreachable")
+
     async def _responses_stream_with_retry(self, provider, payload: dict) -> AsyncIterator[bytes]:
         for attempt in range(self._policy.max_retries + 1):
             stream = provider.stream_response(payload)
@@ -546,3 +713,84 @@ class GatewayService:
             await self._enforcer.store.aclose()
         if self._trace_store is not None:
             await self._trace_store.aclose()
+
+
+def _structured_output_instruction(response_format: dict) -> str:
+    if response_format.get("type") == "json_schema":
+        schema = response_format.get("json_schema") or {}
+        return (
+            "Return only valid JSON matching this JSON Schema. Do not include markdown fences: "
+            + json.dumps(schema.get("schema") or {}, separators=(",", ":"))
+        )
+    return "Return only one valid JSON object. Do not include markdown fences or commentary."
+
+
+def _memory_responses_payload(payload: dict, real_model: str) -> dict:
+    instructions: list[str] = []
+    input_messages: list[dict] = []
+    for message in payload["messages"]:
+        if message["role"] == "system":
+            instructions.append(message["content"])
+        else:
+            input_messages.append({"role": message["role"], "content": message["content"]})
+    response_format = payload.get("response_format")
+    if response_format:
+        instructions.append(_structured_output_instruction(response_format))
+    out: dict = {
+        "model": real_model,
+        "input": input_messages,
+        "stream": False,
+        "max_output_tokens": int(payload.get("max_tokens") or 1024),
+    }
+    if instructions:
+        out["instructions"] = "\n\n".join(instructions)
+    if payload.get("temperature") is not None:
+        out["temperature"] = payload["temperature"]
+    if response_format:
+        if response_format["type"] == "json_object":
+            out["text"] = {"format": {"type": "json_object"}}
+        else:
+            schema = response_format["json_schema"]
+            out["text"] = {
+                "format": {
+                    "type": "json_schema",
+                    "name": schema.get("name") or "memory_extraction",
+                    "schema": schema.get("schema") or {},
+                    "strict": bool(schema.get("strict", True)),
+                }
+            }
+    return out
+
+
+def _responses_output_text(payload: dict) -> str:
+    direct = payload.get("output_text")
+    if isinstance(direct, str) and direct:
+        return direct
+    chunks: list[str] = []
+    for output in payload.get("output") or []:
+        if not isinstance(output, dict):
+            continue
+        for part in output.get("content") or []:
+            if isinstance(part, dict) and isinstance(part.get("text"), str):
+                chunks.append(part["text"])
+    return "".join(chunks)
+
+
+def _validate_embedding_dimensions(payload: dict, expected: int) -> None:
+    if expected <= 0:
+        raise CocolaError(ErrorCode.INVALID_ARGUMENT, "embedding dimension is not configured")
+    data = payload.get("data")
+    if not isinstance(data, list) or not data:
+        raise UpstreamError(
+            ErrorCode.UNAVAILABLE,
+            "embedding upstream returned no vectors",
+            retryable=False,
+        )
+    for item in data:
+        vector = item.get("embedding") if isinstance(item, dict) else None
+        if not isinstance(vector, list) or len(vector) != expected:
+            raise UpstreamError(
+                ErrorCode.UNAVAILABLE,
+                "embedding upstream returned an unexpected vector dimension",
+                retryable=False,
+            )

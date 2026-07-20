@@ -164,3 +164,25 @@ func TestReducerUpsertsProgressByID(t *testing.T) {
 		t.Fatalf("independent progress item was overwritten: %+v", parts[1])
 	}
 }
+
+func TestReducerUpsertsAndRemovesMemoryRecall(t *testing.T) {
+	r := NewReducer()
+	r.Apply("memory_recall", map[string]string{"status": "running"})
+	r.Apply("memory_recall", map[string]string{
+		"status": "degraded", "count": "2", "error_code": "MEMORY_RECALL_TIMEOUT",
+	})
+
+	parts := r.Parts()
+	if len(parts) != 1 || parts[0].Type != PartMemoryRecall {
+		t.Fatalf("memory recall should be one replaceable part: %+v", parts)
+	}
+	if parts[0].MemoryStatus != "degraded" || parts[0].MemoryCount != 2 ||
+		parts[0].MemoryErrorCode != "MEMORY_RECALL_TIMEOUT" {
+		t.Fatalf("memory recall outcome was not replaced: %+v", parts[0])
+	}
+
+	r.Apply("memory_recall", map[string]string{"status": "miss"})
+	if len(r.Parts()) != 0 {
+		t.Fatalf("a recall miss should not leave UI noise: %+v", r.Parts())
+	}
+}

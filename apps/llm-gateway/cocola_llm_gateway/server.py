@@ -23,6 +23,8 @@ ASGITransport — no real network, no bound port.
 
 from __future__ import annotations
 
+import hmac
+
 from cocola_common import (
     CocolaError,
     ErrorCode,
@@ -76,6 +78,7 @@ def create_app(
     revocation: RevocationStore | None = None,
     metrics: Registry | None = None,
     tracing: TracingConfig | None = None,
+    memory_service_token: str = "",
 ) -> FastAPI:
     app = FastAPI(title="cocola-llm-gateway", version="0.0.1")
     # Distributed tracing (ADR-0011): server spans for every request, OFF unless
@@ -97,6 +100,15 @@ def create_app(
     # left by stateless offline verification (see ADR-0006).
     deny = revocation
 
+    def _memory_authenticated(request: Request) -> bool:
+        if not memory_service_token:
+            return False
+        authorization = request.headers.get("authorization", "")
+        scheme, _, credential = authorization.partition(" ")
+        return scheme.lower() == "bearer" and hmac.compare_digest(
+            credential.strip(), memory_service_token
+        )
+
     async def _authenticate(request: Request) -> Identity:
         """Resolve identity and enforce the revocation denylist.
 
@@ -117,6 +129,50 @@ def create_app(
             "aliases": aliases,
             "auth_enabled": vrf.config.enabled,
         }
+
+    @app.post("/internal/memory/v1/chat/completions")
+    async def memory_chat_completions(request: Request):
+        if not _memory_authenticated(request):
+            return _responses_err(
+                401, "invalid memory service token", error_type="authentication_error"
+            )
+        try:
+            body = await request.json()
+            _validate_memory_chat_request(body)
+            payload = await service.memory_chat_completion(body)
+            return JSONResponse(payload)
+        except CocolaError as exc:
+            return _responses_err(_CODE_TO_HTTP.get(exc.code, 500), exc.message)
+        except UpstreamError as exc:
+            log.warning("memory extraction upstream failed", error_type=type(exc).__name__)
+            return _responses_err(503, "memory extraction upstream failed")
+        except (TypeError, ValueError) as exc:
+            return _responses_err(400, str(exc))
+        except Exception as exc:  # noqa: BLE001 - never expose provider details
+            log.warning("memory extraction failed", error_type=type(exc).__name__)
+            return _responses_err(503, "memory extraction unavailable")
+
+    @app.post("/internal/memory/v1/embeddings")
+    async def memory_embeddings(request: Request):
+        if not _memory_authenticated(request):
+            return _responses_err(
+                401, "invalid memory service token", error_type="authentication_error"
+            )
+        try:
+            body = await request.json()
+            _validate_memory_embedding_request(body)
+            payload = await service.memory_embeddings(body)
+            return JSONResponse(payload)
+        except CocolaError as exc:
+            return _responses_err(_CODE_TO_HTTP.get(exc.code, 500), exc.message)
+        except UpstreamError as exc:
+            log.warning("memory embedding upstream failed", error_type=type(exc).__name__)
+            return _responses_err(503, "memory embedding upstream failed")
+        except (TypeError, ValueError) as exc:
+            return _responses_err(400, str(exc))
+        except Exception as exc:  # noqa: BLE001 - never expose provider details
+            log.warning("memory embedding failed", error_type=type(exc).__name__)
+            return _responses_err(503, "memory embedding unavailable")
 
     @app.post("/v1/messages")
     async def messages(request: Request):
@@ -328,6 +384,67 @@ def _agg_dict(a) -> dict:
         "total_tokens": a.total_tokens,
         "cost_usd": a.cost_usd,
     }
+
+
+def _validate_memory_chat_request(body: object) -> None:
+    if not isinstance(body, dict):
+        raise ValueError("request body must be a JSON object")
+    allowed = {"model", "messages", "temperature", "max_tokens", "response_format", "stream"}
+    unknown = set(body) - allowed
+    if unknown:
+        raise ValueError(f"unsupported memory chat field: {sorted(unknown)[0]}")
+    if body.get("model") != "cocola-memory-extraction":
+        raise ValueError("model must be cocola-memory-extraction")
+    if body.get("stream") not in (None, False):
+        raise ValueError("streaming is not supported")
+    messages = body.get("messages")
+    if not isinstance(messages, list) or not messages:
+        raise ValueError("messages must be a non-empty array")
+    for message in messages:
+        if not isinstance(message, dict) or set(message) - {"role", "content"}:
+            raise ValueError("messages only support role and text content")
+        if message.get("role") not in {"system", "user", "assistant"}:
+            raise ValueError("unsupported message role")
+        if not isinstance(message.get("content"), str):
+            raise ValueError("multimodal message content is not supported")
+    if body.get("temperature") is not None:
+        temperature = body["temperature"]
+        if not isinstance(temperature, (int, float)) or isinstance(temperature, bool):
+            raise ValueError("temperature must be a number")
+        if temperature < 0 or temperature > 2:
+            raise ValueError("temperature must be between 0 and 2")
+    if body.get("max_tokens") is not None:
+        max_tokens = body["max_tokens"]
+        if not isinstance(max_tokens, int) or isinstance(max_tokens, bool) or max_tokens <= 0:
+            raise ValueError("max_tokens must be a positive integer")
+    response_format = body.get("response_format")
+    if response_format is not None:
+        if not isinstance(response_format, dict) or response_format.get("type") not in {
+            "json_object",
+            "json_schema",
+        }:
+            raise ValueError("response_format must be json_object or json_schema")
+        if response_format["type"] == "json_schema":
+            schema = response_format.get("json_schema")
+            if not isinstance(schema, dict) or not isinstance(schema.get("schema"), dict):
+                raise ValueError("json_schema.schema must be an object")
+
+
+def _validate_memory_embedding_request(body: object) -> None:
+    if not isinstance(body, dict):
+        raise ValueError("request body must be a JSON object")
+    unknown = set(body) - {"model", "input", "encoding_format"}
+    if unknown:
+        raise ValueError(f"unsupported memory embedding field: {sorted(unknown)[0]}")
+    if body.get("model") != "cocola-memory-embedding":
+        raise ValueError("model must be cocola-memory-embedding")
+    value = body.get("input")
+    if not isinstance(value, str) and not (
+        isinstance(value, list) and value and all(isinstance(item, str) for item in value)
+    ):
+        raise ValueError("input must be text or a non-empty array of text")
+    if body.get("encoding_format") not in (None, "float"):
+        raise ValueError("only float embeddings are supported")
 
 
 def _err(code: ErrorCode, message: str) -> JSONResponse:

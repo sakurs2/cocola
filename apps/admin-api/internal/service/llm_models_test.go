@@ -57,6 +57,43 @@ func TestLLMProviderRejectsRemovedOpenAICompatType(t *testing.T) {
 	}
 }
 
+func TestEmbeddingProviderIsDimensionedAndNeverPublic(t *testing.T) {
+	ctx := context.Background()
+	svc := New(store.NewMemory(), nil, authTestClock).WithModelSecretKey("secret")
+	key := "test-only-key"
+	if _, err := svc.CreateLLMProvider(ctx, LLMProviderInput{
+		ID: "embedding", Name: "Embedding", Type: ProviderOpenAIEmbeddings,
+		BaseURL: "https://example.invalid/v1", APIKey: &key,
+	}); err != nil {
+		t.Fatalf("create embedding provider: %v", err)
+	}
+	if _, err := svc.CreateLLMModel(ctx, LLMModelInput{
+		Alias: "invalid", ProviderID: "embedding", RealModel: "embed-real",
+		Label: "Invalid", IconType: IconSimpleIcons, IconSlug: "openai",
+	}); !errors.Is(err, ErrInvalidArg) {
+		t.Fatalf("embedding route without dimension want ErrInvalidArg, got %v", err)
+	}
+	route, err := svc.CreateLLMModel(ctx, LLMModelInput{
+		Alias: "embed", ProviderID: "embedding", RealModel: "embed-real",
+		Label: "Embedding", IconType: IconSimpleIcons, IconSlug: "openai",
+		EmbeddingDimension: 1024, Visible: boolPtr(true), IsDefault: true,
+	})
+	if err != nil {
+		t.Fatalf("create embedding route: %v", err)
+	}
+	if route.Protocol != "openai-embeddings" || route.Visible || route.IsDefault ||
+		route.EmbeddingDimension != 1024 {
+		t.Fatalf("embedding route invariants not enforced: %+v", route)
+	}
+	public, err := svc.ListPublicLLMModels(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(public) != 0 {
+		t.Fatalf("embedding route leaked into public models: %+v", public)
+	}
+}
+
 func TestLLMModelsDefaultAndPublicList(t *testing.T) {
 	ctx := context.Background()
 	st := store.NewMemory()

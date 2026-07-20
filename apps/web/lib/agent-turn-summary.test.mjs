@@ -70,6 +70,19 @@ test("environment preparation alone is a process step", () => {
   });
 });
 
+test("memory recall is a process step in persisted and assistant-ui data shapes", () => {
+  for (const part of [
+    { type: "memory-recall", status: "unavailable", count: 0 },
+    { type: "data", name: "memory-recall", data: { status: "hit", count: 2 } },
+  ]) {
+    assert.deepEqual(splitAgentTurnParts([part, { type: "text", text: "Answer" }]), {
+      processIndices: [0],
+      outputIndices: [1],
+      hasProcess: true,
+    });
+  }
+});
+
 test("duration formatting uses seconds, minute-seconds, and hour-minutes", () => {
   assert.equal(formatAgentDuration(59_000), "59s");
   assert.equal(formatAgentDuration(60_000), "1m 0s");

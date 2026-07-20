@@ -1106,17 +1106,18 @@ func (a *API) deleteLLMProvider(w http.ResponseWriter, r *http.Request) {
 }
 
 type llmModelReq struct {
-	Alias      string `json:"alias,omitempty"`
-	ProviderID string `json:"provider_id,omitempty"`
-	RealModel  string `json:"real_model,omitempty"`
-	Label      string `json:"label,omitempty"`
-	IconType   string `json:"icon_type,omitempty"`
-	IconSlug   string `json:"icon_slug,omitempty"`
-	IconURL    string `json:"icon_url,omitempty"`
-	Enabled    *bool  `json:"enabled,omitempty"`
-	Visible    *bool  `json:"visible,omitempty"`
-	IsDefault  bool   `json:"is_default,omitempty"`
-	SortOrder  int    `json:"sort_order,omitempty"`
+	Alias              string `json:"alias,omitempty"`
+	ProviderID         string `json:"provider_id,omitempty"`
+	RealModel          string `json:"real_model,omitempty"`
+	Label              string `json:"label,omitempty"`
+	IconType           string `json:"icon_type,omitempty"`
+	IconSlug           string `json:"icon_slug,omitempty"`
+	IconURL            string `json:"icon_url,omitempty"`
+	Enabled            *bool  `json:"enabled,omitempty"`
+	Visible            *bool  `json:"visible,omitempty"`
+	IsDefault          bool   `json:"is_default,omitempty"`
+	SortOrder          int    `json:"sort_order,omitempty"`
+	EmbeddingDimension int    `json:"embedding_dimension,omitempty"`
 }
 
 func (a *API) createLLMModel(w http.ResponseWriter, r *http.Request) {
@@ -1184,19 +1185,56 @@ func (a *API) listPublicLLMModels(w http.ResponseWriter, r *http.Request) {
 
 func llmModelInput(req llmModelReq, actor string) service.LLMModelInput {
 	return service.LLMModelInput{
-		Alias:      req.Alias,
-		ProviderID: req.ProviderID,
-		RealModel:  req.RealModel,
-		Label:      req.Label,
-		IconType:   req.IconType,
-		IconSlug:   req.IconSlug,
-		IconURL:    req.IconURL,
-		Enabled:    req.Enabled,
-		Visible:    req.Visible,
-		IsDefault:  req.IsDefault,
-		SortOrder:  req.SortOrder,
-		Actor:      actor,
+		Alias:              req.Alias,
+		ProviderID:         req.ProviderID,
+		RealModel:          req.RealModel,
+		Label:              req.Label,
+		IconType:           req.IconType,
+		IconSlug:           req.IconSlug,
+		IconURL:            req.IconURL,
+		Enabled:            req.Enabled,
+		Visible:            req.Visible,
+		IsDefault:          req.IsDefault,
+		SortOrder:          req.SortOrder,
+		EmbeddingDimension: req.EmbeddingDimension,
+		Actor:              actor,
 	}
+}
+
+type memoryConfigReq struct {
+	Enabled                bool   `json:"enabled"`
+	ExtractionModelRouteID string `json:"extraction_model_route_id"`
+	EmbeddingModelRouteID  string `json:"embedding_model_route_id"`
+	ExpectedVersion        int64  `json:"expected_version"`
+}
+
+func (a *API) getMemoryConfig(w http.ResponseWriter, r *http.Request) {
+	config, err := a.svc.GetMemoryConfig(r.Context())
+	if err != nil {
+		mapErr(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, config)
+}
+
+func (a *API) updateMemoryConfig(w http.ResponseWriter, r *http.Request) {
+	var req memoryConfigReq
+	if err := decode(r, &req); err != nil {
+		mapErr(w, err)
+		return
+	}
+	config, err := a.svc.UpdateMemoryConfig(r.Context(), service.MemoryConfigInput{
+		Enabled:                req.Enabled,
+		ExtractionModelRouteID: req.ExtractionModelRouteID,
+		EmbeddingModelRouteID:  req.EmbeddingModelRouteID,
+		ExpectedVersion:        req.ExpectedVersion,
+		Actor:                  actorOf(r),
+	})
+	if err != nil {
+		mapErr(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, config)
 }
 
 // ---- scheduled tasks ----

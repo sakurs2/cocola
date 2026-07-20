@@ -50,3 +50,36 @@ async def test_refresh_retires_registry_only_after_active_lease_releases(monkeyp
     await source.aclose()
     assert second.closed == 1
     assert fallback.closed == 1
+
+
+async def test_force_refresh_bypasses_ttl_for_memory_adapter(monkeypatch):
+    fallback = FakeRegistry("fallback")
+    source = PostgresRegistrySource(
+        "postgres://unused",
+        fallback,
+        secret="test-secret",
+        ttl_s=3600,
+    )
+    snapshots = iter(
+        [
+            ("first", {"name": "first"}),
+            ("second", {"name": "second"}),
+        ]
+    )
+
+    async def load_snapshot():
+        return next(snapshots)
+
+    monkeypatch.setattr(source, "_load_snapshot", load_snapshot)
+    monkeypatch.setattr(db_registry, "_build_from_dict", lambda spec: FakeRegistry(spec["name"]))
+
+    first = await source.acquire_registry()
+    cached = await source.acquire_registry()
+    refreshed = await source.acquire_registry(force_refresh=True)
+
+    assert first is cached
+    assert refreshed.name == "second"
+    await source.release_registry(cached)
+    await source.release_registry(first)
+    await source.release_registry(refreshed)
+    await source.aclose()

@@ -26,6 +26,7 @@ from dataclasses import dataclass, field
 from cocola_common import CocolaError, ErrorCode
 
 from cocola_llm_gateway.upstream.base import UpstreamProvider
+from cocola_llm_gateway.upstream.embeddings_base import EmbeddingsProvider
 from cocola_llm_gateway.upstream.responses_base import ResponsesProvider
 
 
@@ -57,6 +58,7 @@ class ModelRoute:
     enabled: bool = True
     visible: bool = True
     is_default: bool = False
+    embedding_dimension: int = 0
 
 
 class Registry:
@@ -66,6 +68,10 @@ class Registry:
         routes: dict[str, ModelRoute],
         default_alias: str,
         responses_providers: dict[str, ResponsesProvider] | None = None,
+        embeddings_providers: dict[str, EmbeddingsProvider] | None = None,
+        memory_enabled: bool = False,
+        memory_extraction_route_id: str = "",
+        memory_embedding_route_id: str = "",
     ):
         if (
             default_alias
@@ -77,9 +83,14 @@ class Registry:
                 f"default_alias '{default_alias}' has no route",
             )
         responses_providers = responses_providers or {}
+        embeddings_providers = embeddings_providers or {}
         # Validate every route points at a registered provider of its protocol.
         for r in routes.values():
-            known = r.provider_name in providers or r.provider_name in responses_providers
+            known = (
+                r.provider_name in providers
+                or r.provider_name in responses_providers
+                or r.provider_name in embeddings_providers
+            )
             if not known:
                 raise CocolaError(
                     ErrorCode.INVALID_ARGUMENT,
@@ -87,8 +98,12 @@ class Registry:
                 )
         self._providers = providers
         self._responses_providers = responses_providers
+        self._embeddings_providers = embeddings_providers
         self._routes = routes
         self._default_alias = default_alias
+        self.memory_enabled = memory_enabled
+        self.memory_extraction_route_id = memory_extraction_route_id
+        self.memory_embedding_route_id = memory_embedding_route_id
         self._default_route_ids: dict[str, str] = {}
         for route_id, route in routes.items():
             if route.is_default:
@@ -157,6 +172,17 @@ class Registry:
             )
         return route, provider
 
+    def resolve_embeddings(
+        self, requested_route_id: str | None
+    ) -> tuple[ModelRoute, EmbeddingsProvider]:
+        route = self._route(requested_route_id, "openai-embeddings")
+        provider = self._embeddings_providers.get(route.provider_name)
+        if provider is None or "openai-embeddings" not in route.protocols:
+            raise CocolaError(
+                ErrorCode.NOT_FOUND, f"model alias '{route.alias}' is not embedding compatible"
+            )
+        return route, provider
+
     # Existing normalized-chat callers keep the concise name.
     resolve = resolve_chat
 
@@ -164,4 +190,6 @@ class Registry:
         for p in self._providers.values():
             await p.aclose()
         for p in self._responses_providers.values():
+            await p.aclose()
+        for p in self._embeddings_providers.values():
             await p.aclose()

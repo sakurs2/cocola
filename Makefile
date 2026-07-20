@@ -16,7 +16,7 @@ help: ## Show this help
 
 # -------------------------------------------------------------------- dev infra
 .PHONY: dev-up dev-down dev-logs dev-ps
-dev-up: ## Start local infra (PostgreSQL + Redis + MinIO)
+dev-up: ## Start local infra (PostgreSQL + Redis + MinIO + OpenViking)
 	$(DOCKER_COMPOSE) -f deploy/docker-compose/docker-compose.dev.yml up -d
 
 dev-down: ## Stop local infra
@@ -155,7 +155,7 @@ sandbox-runtime-publish: ## Publish the sandbox runtime image to GHCR
 
 # -------------------------------------------------------------------- dev stack
 # Local app stack. `make dev` is the DEFAULT debug mode: OpenSandbox Kubernetes
-# runtime plus redis/postgres/minio run in containers; cocola-authored services
+# runtime plus redis/postgres/minio/OpenViking run in containers; cocola-authored services
 # run natively in the foreground for fast edit/restart loops. Formal deployment
 # is intentionally owned by the standalone `cocola` CLI.
 .PHONY: dev

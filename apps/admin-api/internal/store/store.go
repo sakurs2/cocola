@@ -145,7 +145,7 @@ type AgentPrompt struct {
 type LLMProvider struct {
 	ID               string    `json:"id"`
 	Name             string    `json:"name"`
-	Type             string    `json:"type"` // anthropic | openai_responses
+	Type             string    `json:"type"` // anthropic | openai_responses | openai_embeddings
 	BaseURL          string    `json:"base_url"`
 	APIKeyCiphertext string    `json:"-"`
 	APIKeyHint       string    `json:"api_key_hint"`
@@ -158,21 +158,34 @@ type LLMProvider struct {
 // provider's real model id. Callers route by ID; alias remains presentation and
 // audit metadata and may be reused by another provider.
 type LLMModelRoute struct {
-	ID         string    `json:"id"`
-	Alias      string    `json:"alias"`
-	ProviderID string    `json:"provider_id"`
-	Protocol   string    `json:"protocol"`
-	RealModel  string    `json:"real_model"`
-	Label      string    `json:"label"`
-	IconType   string    `json:"icon_type"`
-	IconSlug   string    `json:"icon_slug"`
-	IconURL    string    `json:"icon_url"`
-	Enabled    bool      `json:"enabled"`
-	Visible    bool      `json:"visible"`
-	IsDefault  bool      `json:"is_default"`
-	SortOrder  int       `json:"sort_order"`
-	CreatedAt  time.Time `json:"created_at"`
-	UpdatedAt  time.Time `json:"updated_at"`
+	ID                 string    `json:"id"`
+	Alias              string    `json:"alias"`
+	ProviderID         string    `json:"provider_id"`
+	Protocol           string    `json:"protocol"`
+	RealModel          string    `json:"real_model"`
+	Label              string    `json:"label"`
+	IconType           string    `json:"icon_type"`
+	IconSlug           string    `json:"icon_slug"`
+	IconURL            string    `json:"icon_url"`
+	Enabled            bool      `json:"enabled"`
+	Visible            bool      `json:"visible"`
+	IsDefault          bool      `json:"is_default"`
+	SortOrder          int       `json:"sort_order"`
+	EmbeddingDimension int       `json:"embedding_dimension,omitempty"`
+	CreatedAt          time.Time `json:"created_at"`
+	UpdatedAt          time.Time `json:"updated_at"`
+}
+
+// MemoryConfig is the singleton administrator-owned switch and model
+// selection for the OpenViking-backed memory capability. Memory content never
+// lands in PostgreSQL; this row only controls the integration.
+type MemoryConfig struct {
+	Enabled                bool      `json:"enabled"`
+	ExtractionModelRouteID string    `json:"extraction_model_route_id"`
+	EmbeddingModelRouteID  string    `json:"embedding_model_route_id"`
+	Version                int64     `json:"version"`
+	UpdatedAt              time.Time `json:"updated_at"`
+	UpdatedBy              string    `json:"updated_by"`
 }
 
 type LLMModelIcon struct {
@@ -517,6 +530,11 @@ type Store interface {
 	ListLLMModelRoutes(ctx context.Context) ([]LLMModelRoute, error)
 	UpdateLLMModelRoute(ctx context.Context, m LLMModelRoute) error
 	DeleteLLMModelRoute(ctx context.Context, id string) error
+
+	// User-memory integration configuration
+	GetMemoryConfig(ctx context.Context) (MemoryConfig, error)
+	UpdateMemoryConfig(ctx context.Context, config MemoryConfig, expectedVersion int64) (MemoryConfig, error)
+	LockMemoryIndex(ctx context.Context, embeddingDimension int) error
 
 	// Scheduled tasks
 	CreateScheduledTask(ctx context.Context, task ScheduledTask, attachments []ScheduledTaskAttachment) error

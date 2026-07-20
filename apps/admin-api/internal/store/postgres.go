@@ -924,13 +924,14 @@ func (p *Postgres) DeleteLLMProvider(ctx context.Context, id string) error {
 	return nil
 }
 
-const llmModelCols = `id, alias, provider_id, protocol, real_model, label, icon_type, icon_slug, icon_url, enabled, visible, is_default, sort_order, created_at, updated_at`
+const llmModelCols = `id, alias, provider_id, protocol, real_model, label, icon_type, icon_slug, icon_url, enabled, visible, is_default, sort_order, embedding_dimension, created_at, updated_at`
 
 func scanLLMModelRoute(row pgx.Row) (LLMModelRoute, error) {
 	var route LLMModelRoute
 	err := row.Scan(&route.ID, &route.Alias, &route.ProviderID, &route.Protocol, &route.RealModel, &route.Label,
 		&route.IconType, &route.IconSlug, &route.IconURL, &route.Enabled,
-		&route.Visible, &route.IsDefault, &route.SortOrder, &route.CreatedAt, &route.UpdatedAt)
+		&route.Visible, &route.IsDefault, &route.SortOrder, &route.EmbeddingDimension,
+		&route.CreatedAt, &route.UpdatedAt)
 	return route, err
 }
 
@@ -946,11 +947,11 @@ func (p *Postgres) CreateLLMModelRoute(ctx context.Context, route LLMModelRoute)
 		}
 	}
 	const q = `INSERT INTO llm_model_routes (` + llmModelCols + `)
-		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15)`
+		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16)`
 	_, err = tx.Exec(ctx, q,
 		route.ID, route.Alias, route.ProviderID, route.Protocol, route.RealModel, route.Label,
 		route.IconType, route.IconSlug, route.IconURL, route.Enabled, route.Visible,
-		route.IsDefault, route.SortOrder, route.CreatedAt, route.UpdatedAt)
+		route.IsDefault, route.SortOrder, route.EmbeddingDimension, route.CreatedAt, route.UpdatedAt)
 	if isUniqueViolation(err) {
 		return ErrConflict
 	}
@@ -1003,12 +1004,12 @@ func (p *Postgres) UpdateLLMModelRoute(ctx context.Context, route LLMModelRoute)
 	const q = `UPDATE llm_model_routes
 		SET alias=$2, provider_id=$3, protocol=$4, real_model=$5, label=$6, icon_type=$7,
 		    icon_slug=$8, icon_url=$9, enabled=$10, visible=$11, is_default=$12,
-		    sort_order=$13, created_at=$14, updated_at=$15
+		    sort_order=$13, embedding_dimension=$14, created_at=$15, updated_at=$16
 		WHERE id=$1`
 	ct, err := tx.Exec(ctx, q,
 		route.ID, route.Alias, route.ProviderID, route.Protocol, route.RealModel, route.Label,
 		route.IconType, route.IconSlug, route.IconURL, route.Enabled, route.Visible,
-		route.IsDefault, route.SortOrder, route.CreatedAt, route.UpdatedAt)
+		route.IsDefault, route.SortOrder, route.EmbeddingDimension, route.CreatedAt, route.UpdatedAt)
 	if isUniqueViolation(err) {
 		return ErrConflict
 	}
@@ -1031,6 +1032,57 @@ func (p *Postgres) DeleteLLMModelRoute(ctx context.Context, id string) error {
 	}
 	if ct.RowsAffected() == 0 {
 		return ErrNotFound
+	}
+	return nil
+}
+
+// ---- User-memory integration configuration ----
+
+func (p *Postgres) GetMemoryConfig(ctx context.Context) (MemoryConfig, error) {
+	var config MemoryConfig
+	err := p.pool.QueryRow(ctx, `SELECT enabled,
+		COALESCE(extraction_model_route_id, ''), COALESCE(embedding_model_route_id, ''),
+		version, updated_at, updated_by FROM memory_config WHERE singleton=TRUE`).Scan(
+		&config.Enabled, &config.ExtractionModelRouteID, &config.EmbeddingModelRouteID,
+		&config.Version, &config.UpdatedAt, &config.UpdatedBy,
+	)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return MemoryConfig{}, ErrNotFound
+	}
+	return config, err
+}
+
+func (p *Postgres) UpdateMemoryConfig(ctx context.Context, config MemoryConfig, expectedVersion int64) (MemoryConfig, error) {
+	row := p.pool.QueryRow(ctx, `UPDATE memory_config SET enabled=$1,
+		extraction_model_route_id=NULLIF($2,''), embedding_model_route_id=NULLIF($3,''),
+		version=version+1, updated_at=$4, updated_by=$5
+		WHERE singleton=TRUE AND version=$6
+		RETURNING enabled, COALESCE(extraction_model_route_id, ''),
+		COALESCE(embedding_model_route_id, ''), version, updated_at, updated_by`,
+		config.Enabled, config.ExtractionModelRouteID, config.EmbeddingModelRouteID,
+		config.UpdatedAt, config.UpdatedBy, expectedVersion)
+	var updated MemoryConfig
+	err := row.Scan(&updated.Enabled, &updated.ExtractionModelRouteID,
+		&updated.EmbeddingModelRouteID, &updated.Version, &updated.UpdatedAt, &updated.UpdatedBy)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return MemoryConfig{}, ErrConflict
+	}
+	return updated, err
+}
+
+func (p *Postgres) LockMemoryIndex(ctx context.Context, embeddingDimension int) error {
+	_, err := p.pool.Exec(ctx, `INSERT INTO memory_index_state (singleton, embedding_dimension)
+		VALUES (TRUE, $1) ON CONFLICT (singleton) DO NOTHING`, embeddingDimension)
+	if err != nil {
+		return err
+	}
+	var locked int
+	if err := p.pool.QueryRow(ctx, `SELECT embedding_dimension FROM memory_index_state
+		WHERE singleton=TRUE`).Scan(&locked); err != nil {
+		return err
+	}
+	if locked != embeddingDimension {
+		return ErrConflict
 	}
 	return nil
 }
