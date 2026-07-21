@@ -158,11 +158,12 @@ func (s *Server) Acquire(ctx context.Context, req *sandboxv1.AcquireRequest) (*s
 		return nil, status.Error(codes.InvalidArgument, "session_id is required")
 	}
 	res, err := s.b.AcquireWithOutcome(ctx, orchestrator.AcquireSpec{
-		SessionID:           req.GetSessionId(),
-		UserID:              req.GetUserId(),
-		Image:               req.GetImage(),
-		Env:                 req.GetEnv(),
-		AllowWorkspaceReset: req.GetAllowWorkspaceReset(),
+		SessionID:                 req.GetSessionId(),
+		UserID:                    req.GetUserId(),
+		Image:                     req.GetImage(),
+		Env:                       req.GetEnv(),
+		AllowWorkspaceReset:       req.GetAllowWorkspaceReset(),
+		AdditionalEgressAllowlist: req.GetAdditionalEgressAllowlist(),
 	})
 	if err != nil {
 		if errors.Is(err, orchestrator.ErrCapacityBusy) {

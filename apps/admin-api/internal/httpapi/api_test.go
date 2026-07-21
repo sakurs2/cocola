@@ -519,6 +519,74 @@ func TestAuthUsersLoginAndRuntimeToken(t *testing.T) {
 	}
 }
 
+func TestOwnAccountRoutesUseStableRuntimeIdentity(t *testing.T) {
+	api := newTestAPI("k").WithRuntimeAuth("test-secret", "cocola")
+	enabled := true
+	created, err := api.svc.CreateAuthUser(context.Background(), service.AuthUserInput{
+		Name: "Alice", Username: "alice", Email: "alice@example.com",
+		Role: service.RoleUser, Enabled: &enabled, Password: "old-password", Actor: "admin",
+	})
+	if err != nil {
+		t.Fatalf("create user: %v", err)
+	}
+	runtimeToken, _, err := token.NewIssuer("test-secret", "cocola", time.Hour).
+		Issue(created.ID, "", -1, time.Now().Unix())
+	if err != nil {
+		t.Fatalf("issue runtime token: %v", err)
+	}
+	r := api.Router()
+
+	if rec := do(t, r, http.MethodGet, "/me/account", "", nil); rec.Code != http.StatusUnauthorized {
+		t.Fatalf("unauthenticated account read: want 401, got %d", rec.Code)
+	}
+	rec := do(t, r, http.MethodGet, "/me/account", runtimeToken, nil)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("get own account: want 200, got %d (%s)", rec.Code, rec.Body.String())
+	}
+	var account store.AuthUser
+	if err := json.Unmarshal(rec.Body.Bytes(), &account); err != nil {
+		t.Fatalf("decode account: %v", err)
+	}
+	if account.ID != created.ID || account.Email != created.Email || account.PasswordHash != "" {
+		t.Fatalf("own account response mismatch: %+v", account)
+	}
+
+	rec = do(t, r, http.MethodPatch, "/me/account", runtimeToken, map[string]any{
+		"name": "Alice Cooper", "username": "alice-cooper", "email": created.Email,
+		"expected_version": account.Version,
+	})
+	if rec.Code != http.StatusOK {
+		t.Fatalf("update own account: want 200, got %d (%s)", rec.Code, rec.Body.String())
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &account); err != nil {
+		t.Fatalf("decode updated account: %v", err)
+	}
+	if account.Name != "Alice Cooper" || account.Username != "alice-cooper" || account.Version != 2 {
+		t.Fatalf("updated account response mismatch: %+v", account)
+	}
+
+	rec = do(t, r, http.MethodPost, "/me/account/password", runtimeToken, map[string]any{
+		"current_password": "wrong-password", "new_password": "new-password",
+		"expected_version": account.Version,
+	})
+	if rec.Code != http.StatusBadRequest || !strings.Contains(rec.Body.String(), "CURRENT_PASSWORD_INVALID") {
+		t.Fatalf("wrong current password: want 400 CURRENT_PASSWORD_INVALID, got %d (%s)", rec.Code, rec.Body.String())
+	}
+	rec = do(t, r, http.MethodPost, "/me/account/password", runtimeToken, map[string]any{
+		"current_password": "old-password", "new_password": "new-password",
+		"expected_version": account.Version,
+	})
+	if rec.Code != http.StatusOK {
+		t.Fatalf("change own password: want 200, got %d (%s)", rec.Code, rec.Body.String())
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &account); err != nil {
+		t.Fatalf("decode password account: %v", err)
+	}
+	if account.Version != 3 {
+		t.Fatalf("password account version = %d, want 3", account.Version)
+	}
+}
+
 func TestProtectedBootstrapAdminCannotBeDemotedDisabledOrDeleted(t *testing.T) {
 	api := newTestAPI("k")
 	if err := api.svc.BootstrapAdmin(context.Background(), service.BootstrapAdminInput{

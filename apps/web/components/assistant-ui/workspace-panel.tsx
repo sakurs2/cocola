@@ -41,6 +41,7 @@ import {
   Folder,
   FolderOpen,
   Globe,
+  GitBranch,
   LoaderCircle,
   Plus,
   RefreshCw,
@@ -109,6 +110,17 @@ const BASE_DOCK_PAGES: DockPage[] = [
   },
 ];
 
+function createGitPage(): DockPage {
+  return {
+    id: "git",
+    label: "Git",
+    icon: GitBranch,
+    render: ({ sessionID, active, setHeaderActions }) => (
+      <GitPage sessionID={sessionID} active={active} setHeaderActions={setHeaderActions} />
+    ),
+  };
+}
+
 function createCodePage(workspacePath: string): DockPage {
   const normalizedPath = normalizeCodeEditorWorkspacePath(workspacePath);
   const folder = normalizedPath ? `/workspace/${normalizedPath}` : "/workspace";
@@ -150,11 +162,13 @@ function createArtifactPage(artifact: ArtifactPreview): DockPage {
 export function WorkspaceDock({
   sessionID,
   artifact,
+  projectTask = false,
   onArtifactClose,
   onClose,
 }: {
   sessionID: string;
   artifact: ArtifactPreview | null;
+  projectTask?: boolean;
   onArtifactClose: () => void;
   onClose: () => void;
 }) {
@@ -166,19 +180,27 @@ export function WorkspaceDock({
   // backgrounded page can never leak its actions into the header.
   const [headerActions, setHeaderActions] = useState<Record<string, ReactNode>>({});
 
-  const addablePages = useMemo(
-    () => BASE_DOCK_PAGES.filter((page) => !openPages.some((open) => open.id === page.id)),
-    [openPages],
+  const basePages = useMemo(
+    () => (projectTask ? [...BASE_DOCK_PAGES, createGitPage()] : BASE_DOCK_PAGES),
+    [projectTask],
   );
 
-  const openPage = useCallback((id: string) => {
-    const page = BASE_DOCK_PAGES.find((candidate) => candidate.id === id);
-    if (!page) return;
-    setOpenPages((current) =>
-      current.some((candidate) => candidate.id === id) ? current : [...current, page],
-    );
-    setActivePageId(id);
-  }, []);
+  const addablePages = useMemo(
+    () => basePages.filter((page) => !openPages.some((open) => open.id === page.id)),
+    [basePages, openPages],
+  );
+
+  const openPage = useCallback(
+    (id: string) => {
+      const page = basePages.find((candidate) => candidate.id === id);
+      if (!page) return;
+      setOpenPages((current) =>
+        current.some((candidate) => candidate.id === id) ? current : [...current, page],
+      );
+      setActivePageId(id);
+    },
+    [basePages],
+  );
 
   const openCodeFolder = useCallback((workspacePath: string) => {
     const page = createCodePage(workspacePath);
@@ -212,6 +234,13 @@ export function WorkspaceDock({
       return { ...current, [pageID]: node };
     });
   }, []);
+
+  useEffect(() => {
+    if (projectTask) return;
+    setOpenPages((current) => current.filter((page) => page.id !== "git"));
+    setActivePageId((current) => (current === "git" ? "" : current));
+    publishHeaderActions("git", null);
+  }, [projectTask, publishHeaderActions]);
 
   const closePage = useCallback(
     (id: string) => {
@@ -326,7 +355,7 @@ export function WorkspaceDock({
       </header>
 
       <div className="min-h-0 flex-1">
-        {hasOpenPages ? null : <WorkspaceLauncher onOpen={openPage} />}
+        {hasOpenPages ? null : <WorkspaceLauncher pages={basePages} onOpen={openPage} />}
         {openPages.map((page) => {
           const isActive = page.id === activePage?.id;
           if (!isActive && page.unmountWhenInactive) return null;
@@ -375,6 +404,250 @@ function DockPagePanel({
         setHeaderActions,
         openCodeFolder,
       })}
+    </div>
+  );
+}
+
+type GitChange = {
+  path: string;
+  old_path?: string;
+  status: string;
+  area: "staged" | "working" | "both" | "untracked" | string;
+};
+
+type GitSnapshot = {
+  branch?: string;
+  base_ref?: string;
+  base_sha?: string;
+  head_sha?: string;
+  ahead?: number;
+  dirty?: boolean;
+  changes?: GitChange[];
+  truncated?: boolean;
+  captured_at?: string;
+};
+
+function GitPage({
+  sessionID,
+  active,
+  setHeaderActions,
+}: {
+  sessionID: string;
+  active: boolean;
+  setHeaderActions: (node: ReactNode) => void;
+}) {
+  const [snapshot, setSnapshot] = useState<GitSnapshot | null>(null);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [diff, setDiff] = useState<{
+    path: string;
+    text: string;
+    binary: boolean;
+    truncated: boolean;
+  } | null>(null);
+
+  const loadStored = useCallback(async () => {
+    setLoading(true);
+    setError(null);
+    try {
+      const response = await fetch(
+        `/api/conversations/${encodeURIComponent(sessionID)}/git/status`,
+        { cache: "no-store" },
+      );
+      if (!response.ok) throw new Error("Could not load the saved Git snapshot");
+      const body = (await response.json()) as {
+        workspace?: { git_snapshot?: GitSnapshot; branch_name?: string };
+      };
+      setSnapshot({
+        ...(body.workspace?.git_snapshot ?? {}),
+        branch: body.workspace?.git_snapshot?.branch || body.workspace?.branch_name,
+      });
+    } catch (loadError) {
+      setError(loadError instanceof Error ? loadError.message : "Could not load Git status");
+    } finally {
+      setLoading(false);
+    }
+  }, [sessionID]);
+
+  useEffect(() => {
+    if (active) void loadStored();
+  }, [active, loadStored]);
+
+  const inspect = useCallback(
+    async (operation: "status" | "diff", path = "", diffTarget = "working") => {
+      setLoading(true);
+      setError(null);
+      try {
+        const response = await fetch(
+          `/api/conversations/${encodeURIComponent(sessionID)}/git/inspect`,
+          {
+            method: "POST",
+            headers: { "content-type": "application/json" },
+            body: JSON.stringify({ operation, path, diff_target: diffTarget }),
+          },
+        );
+        const body = (await response.json().catch(() => ({}))) as {
+          snapshot?: GitSnapshot;
+          diff?: string;
+          binary?: boolean;
+          truncated?: boolean;
+          error?: { message?: string };
+        };
+        if (!response.ok) {
+          throw new Error(
+            response.status === 409
+              ? "The Agent is running. Git status will update when it finishes."
+              : body.error?.message || "Could not inspect Git workspace",
+          );
+        }
+        if (body.snapshot) setSnapshot(body.snapshot);
+        if (operation === "diff") {
+          setDiff({
+            path,
+            text: body.diff ?? "",
+            binary: Boolean(body.binary),
+            truncated: Boolean(body.truncated),
+          });
+        }
+      } catch (inspectError) {
+        setError(
+          inspectError instanceof Error ? inspectError.message : "Could not inspect Git workspace",
+        );
+      } finally {
+        setLoading(false);
+      }
+    },
+    [sessionID],
+  );
+
+  useEffect(() => {
+    if (!active) return;
+    setHeaderActions(
+      <TooltipIconButton
+        tooltip="Refresh Git status (may restore the sandbox)"
+        aria-label="Refresh Git status"
+        disabled={loading}
+        onClick={() => {
+          if (
+            window.confirm(
+              "Refresh Git status? This may restore the project sandbox if it has been reclaimed.",
+            )
+          ) {
+            void inspect("status");
+          }
+        }}
+      >
+        <RefreshCw className={cn("size-4", loading && "animate-spin")} />
+      </TooltipIconButton>,
+    );
+    return () => setHeaderActions(null);
+  }, [active, inspect, loading, setHeaderActions]);
+
+  if (diff) {
+    return (
+      <div className="flex h-full min-h-0 flex-col bg-background">
+        <div className="flex min-h-10 items-center gap-2 border-b border-border px-2">
+          <button
+            type="button"
+            onClick={() => setDiff(null)}
+            className="grid size-7 place-items-center rounded-md text-muted-foreground hover:bg-muted hover:text-foreground"
+          >
+            <ArrowLeft className="size-4" />
+          </button>
+          <span className="min-w-0 flex-1 truncate text-xs font-medium">{diff.path}</span>
+        </div>
+        {diff.binary ? (
+          <div className="grid flex-1 place-items-center px-6 text-center text-sm text-muted-foreground">
+            Binary diff cannot be displayed.
+          </div>
+        ) : (
+          <pre className="min-h-0 flex-1 overflow-auto p-4 font-mono text-xs leading-5 text-foreground">
+            {diff.text || "No diff for this target."}
+          </pre>
+        )}
+        {diff.truncated ? (
+          <div className="border-t border-border bg-amber-500/5 px-3 py-2 text-xs text-amber-700">
+            Diff truncated at 512 KiB.
+          </div>
+        ) : null}
+      </div>
+    );
+  }
+
+  const changes = snapshot?.changes ?? [];
+  return (
+    <div className="flex h-full min-h-0 flex-col bg-background">
+      <div className="border-b border-border px-4 py-3">
+        <div className="flex items-center gap-2">
+          <GitBranch className="size-4 text-primary" />
+          <span className="truncate text-sm font-medium">
+            {snapshot?.branch || "Project branch"}
+          </span>
+          {snapshot?.dirty ? (
+            <span className="ml-auto rounded-full bg-amber-500/10 px-2 py-0.5 text-[11px] font-medium text-amber-700">
+              Modified
+            </span>
+          ) : null}
+        </div>
+        <div className="mt-1 text-xs text-muted-foreground">
+          {snapshot?.captured_at
+            ? `Last captured ${new Date(snapshot.captured_at).toLocaleString()}`
+            : "No saved snapshot yet"}
+          {snapshot?.ahead ? ` · ${snapshot.ahead} ahead` : ""}
+        </div>
+        {snapshot?.base_sha || snapshot?.head_sha ? (
+          <div className="mt-1 truncate font-mono text-[11px] text-muted-foreground">
+            {snapshot.base_ref ? `${snapshot.base_ref} ` : "base "}
+            {snapshot.base_sha?.slice(0, 8) || "unknown"} →{" "}
+            {snapshot.head_sha?.slice(0, 8) || "unknown"}
+          </div>
+        ) : null}
+      </div>
+      {error ? (
+        <div className="m-3 rounded-xl border border-red-500/20 bg-red-500/10 px-3 py-2 text-sm text-red-600">
+          {error}
+        </div>
+      ) : null}
+      <div className="min-h-0 flex-1 overflow-y-auto">
+        {loading && !snapshot ? (
+          <div className="flex items-center gap-2 px-4 py-5 text-sm text-muted-foreground">
+            <LoaderCircle className="size-4 animate-spin" /> Loading saved status…
+          </div>
+        ) : changes.length === 0 ? (
+          <div className="px-4 py-10 text-center text-sm text-muted-foreground">
+            {snapshot ? "Working tree clean" : "Refresh to inspect this workspace."}
+          </div>
+        ) : (
+          <div className="divide-y divide-border/60">
+            {changes.map((change) => (
+              <button
+                type="button"
+                key={`${change.area}:${change.path}`}
+                onClick={() =>
+                  void inspect("diff", change.path, change.area === "staged" ? "staged" : "working")
+                }
+                className="flex w-full items-center gap-3 px-4 py-3 text-left hover:bg-muted"
+              >
+                <span className="grid size-7 place-items-center rounded-lg bg-muted font-mono text-[11px] font-semibold text-primary">
+                  {change.status.replaceAll(".", "").slice(0, 2) || "?"}
+                </span>
+                <span className="min-w-0 flex-1">
+                  <span className="block truncate text-xs font-medium">{change.path}</span>
+                  <span className="mt-0.5 block text-[11px] capitalize text-muted-foreground">
+                    {change.area}
+                  </span>
+                </span>
+                <ChevronRight className="size-4 text-muted-foreground" />
+              </button>
+            ))}
+          </div>
+        )}
+      </div>
+      {snapshot?.truncated ? (
+        <div className="border-t border-border px-3 py-2 text-xs text-amber-700">
+          Showing the first 500 changed paths.
+        </div>
+      ) : null}
     </div>
   );
 }
@@ -456,7 +729,7 @@ function ArtifactPreviewPage({
 
 // Empty-state launcher: lists the available panels centered in the dock so the
 // user can pick one to open (mirrors a command-menu style row list).
-function WorkspaceLauncher({ onOpen }: { onOpen: (id: string) => void }) {
+function WorkspaceLauncher({ pages, onOpen }: { pages: DockPage[]; onOpen: (id: string) => void }) {
   return (
     <div className="flex h-full min-h-0 flex-col items-center justify-center px-6">
       <div className="w-full max-w-sm">
@@ -464,7 +737,7 @@ function WorkspaceLauncher({ onOpen }: { onOpen: (id: string) => void }) {
           Panels
         </p>
         <div className="flex flex-col">
-          {BASE_DOCK_PAGES.map((page) => {
+          {pages.map((page) => {
             const Icon = page.icon;
             return (
               <button

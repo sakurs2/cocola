@@ -29,10 +29,27 @@ func NewIssuer(secret, issuer string, defaultTTL time.Duration) *Issuer {
 // pass a negative ttl to force a non-expiring token, or 0 to use the default.
 // now is unix seconds (0 = wall clock) to keep issuance testable.
 func (i *Issuer) Issue(userID, tenant string, ttl time.Duration, now int64) (string, Claims, error) {
+	return i.issue(Claims{Subject: userID, Tenant: tenant}, ttl, now)
+}
+
+// IssueUser mints a runtime token for a persisted Cocola account. Subject is
+// the immutable auth_users.id; profile claims are signed presentation data for
+// downstream services and may change independently of resource ownership.
+func (i *Issuer) IssueUser(userID, tenant, email, name, username string, ttl time.Duration, now int64) (string, Claims, error) {
+	return i.issue(Claims{
+		Subject:  userID,
+		Tenant:   tenant,
+		Email:    email,
+		Name:     name,
+		Username: username,
+	}, ttl, now)
+}
+
+func (i *Issuer) issue(claims Claims, ttl time.Duration, now int64) (string, Claims, error) {
 	if i.secret == "" {
 		return "", Claims{}, ErrInvalid
 	}
-	if userID == "" {
+	if claims.Subject == "" {
 		return "", Claims{}, ErrInvalid
 	}
 	iat := now
@@ -43,7 +60,10 @@ func (i *Issuer) Issue(userID, tenant string, ttl time.Duration, now int64) (str
 	if ttl == 0 {
 		effective = i.defaultTTL
 	}
-	c := Claims{Subject: userID, Tenant: tenant, IssuedAt: iat, Issuer: i.issuer, ID: newJTI()}
+	c := claims
+	c.IssuedAt = iat
+	c.Issuer = i.issuer
+	c.ID = newJTI()
 	if effective > 0 {
 		c.Expires = iat + int64(effective.Seconds())
 	}

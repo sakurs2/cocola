@@ -71,6 +71,9 @@ func quotaKey(scope, subject string) string { return scope + "/" + subject }
 func (m *Memory) CreateAuthUser(ctx context.Context, u AuthUser) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
+	if u.Version <= 0 {
+		u.Version = 1
+	}
 	if _, ok := m.users[u.ID]; ok {
 		return ErrConflict
 	}
@@ -136,10 +139,22 @@ func (m *Memory) ListAuthUsers(ctx context.Context) ([]AuthUser, error) {
 }
 
 func (m *Memory) UpdateAuthUser(ctx context.Context, u AuthUser) error {
+	return m.updateAuthUser(u, nil)
+}
+
+func (m *Memory) UpdateAuthUserVersion(ctx context.Context, u AuthUser, expectedVersion int64) error {
+	return m.updateAuthUser(u, &expectedVersion)
+}
+
+func (m *Memory) updateAuthUser(u AuthUser, expectedVersion *int64) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	if _, ok := m.users[u.ID]; !ok {
+	existing, ok := m.users[u.ID]
+	if !ok {
 		return ErrNotFound
+	}
+	if expectedVersion != nil && existing.Version != *expectedVersion {
+		return ErrVersionConflict
 	}
 	for _, ident := range authUserIdentifiersFor(u) {
 		if owner, ok := m.identifiers[ident.Value]; ok && owner != u.ID {
@@ -170,6 +185,7 @@ func (m *Memory) DeleteAuthUser(ctx context.Context, id, actor string, at time.T
 	u.DeletedBy = actor
 	u.UpdatedAt = at
 	u.UpdatedBy = actor
+	u.Version++
 	m.users[id] = u
 	return nil
 }

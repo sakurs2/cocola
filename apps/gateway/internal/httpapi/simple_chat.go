@@ -20,6 +20,7 @@ import (
 	"github.com/cocola-project/cocola/apps/gateway/internal/chatrun"
 	"github.com/cocola-project/cocola/apps/gateway/internal/convo"
 	"github.com/cocola-project/cocola/apps/gateway/internal/memory"
+	"github.com/cocola-project/cocola/apps/gateway/internal/project"
 	traceevents "github.com/cocola-project/cocola/apps/gateway/internal/traceevent"
 	"github.com/cocola-project/cocola/packages/go-common/tracing"
 )
@@ -139,6 +140,7 @@ func (a *API) chat(w http.ResponseWriter, r *http.Request) {
 	}
 	req.RuntimeID = strings.TrimSpace(req.RuntimeID)
 	req.FolderID = strings.TrimSpace(req.FolderID)
+	req.ProjectID = strings.TrimSpace(req.ProjectID)
 	req.SkillID = strings.TrimSpace(req.SkillID)
 	if req.SkillID != "" && !validSkillID(req.SkillID) {
 		writeErr(w, http.StatusBadRequest, "INVALID_SKILL_ID", "skill_id is invalid")
@@ -150,8 +152,49 @@ func (a *API) chat(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
+	if req.FolderID != "" && req.ProjectID != "" {
+		writeErr(w, http.StatusConflict, "FOLDER_PROJECT_CONFLICT", "a conversation cannot belong to both a folder and a project")
+		return
+	}
+	if req.ProjectID != "" {
+		if a.projects == nil {
+			writeErr(w, http.StatusNotFound, "PROJECT_NOT_FOUND", "project not found")
+			return
+		}
+		projectValue, projectErr := a.projects.ValidateReady(r.Context(), project.Identity{
+			TenantID: identity.TenantID, UserID: identity.UserID, Email: identity.Email,
+			Name: identity.Name, Username: identity.Username,
+		}, req.ProjectID)
+		if errors.Is(projectErr, project.ErrNotFound) {
+			writeErr(w, http.StatusNotFound, "PROJECT_NOT_FOUND", "project not found")
+			return
+		}
+		if errors.Is(projectErr, project.ErrInvalidArgument) {
+			writeErr(w, http.StatusBadRequest, "INVALID_PROJECT_ID", "project_id is invalid")
+			return
+		}
+		if errors.Is(projectErr, project.ErrProjectNotReady) {
+			writeErr(w, http.StatusConflict, "PROJECT_NOT_READY", "project is not ready")
+			return
+		}
+		if errors.Is(projectErr, project.ErrConnectionRequired) || errors.Is(projectErr, project.ErrInstallationRequired) {
+			writeErr(w, http.StatusConflict, "GITHUB_CONNECTION_REQUIRED", "connect GitHub and grant this repository access")
+			return
+		}
+		if errors.Is(projectErr, project.ErrDisabled) {
+			writeErr(w, http.StatusConflict, "GITHUB_DISABLED", "GitHub Projects are disabled")
+			return
+		}
+		if projectErr != nil {
+			writeErr(w, http.StatusServiceUnavailable, "PROJECT_UNAVAILABLE", "could not validate project")
+			return
+		}
+		if req.RuntimeID == "" {
+			req.RuntimeID = projectValue.RuntimeID
+		}
+	}
 	if chatTypeForConversation(req) == "scheduled_task" {
-		if req.FolderID != "" {
+		if req.FolderID != "" || req.ProjectID != "" {
 			writeErr(w, http.StatusConflict, "FOLDER_UNSUPPORTED_CONVERSATION_TYPE", "scheduled task conversations cannot be moved into folders")
 			return
 		}
@@ -190,7 +233,7 @@ func (a *API) chat(w http.ResponseWriter, r *http.Request) {
 		Conversation: convo.Conversation{
 			ID: req.SessionID, UserID: identity.UserID, TenantID: identity.TenantID,
 			Title: titleForConversation(req), ChatType: chatTypeForConversation(req),
-			FolderID: req.FolderID, Hidden: req.DeferConversationVisibilityUntilDone, RuntimeID: req.RuntimeID,
+			FolderID: req.FolderID, ProjectID: req.ProjectID, Hidden: req.DeferConversationVisibilityUntilDone, RuntimeID: req.RuntimeID,
 			CreatedAt: startedAt, UpdatedAt: startedAt,
 		},
 		UserMessage: convo.Message{
@@ -203,6 +246,8 @@ func (a *API) chat(w http.ResponseWriter, r *http.Request) {
 	if err == nil {
 		run = result.Run
 		req.RuntimeID = result.Conversation.RuntimeID
+		req.FolderID = result.Conversation.FolderID
+		req.ProjectID = result.Conversation.ProjectID
 		if result.Created {
 			live = a.newLiveRun(r, identity, req, run)
 			a.runs.mu.Lock()
@@ -236,6 +281,18 @@ func (a *API) chat(w http.ResponseWriter, r *http.Request) {
 	}
 	if errors.Is(err, chatrun.ErrFolderMismatch) {
 		writeErr(w, http.StatusConflict, "FOLDER_MISMATCH", "conversation folder cannot be changed by a chat request")
+		return
+	}
+	if errors.Is(err, chatrun.ErrProjectNotFound) {
+		writeErr(w, http.StatusNotFound, "PROJECT_NOT_FOUND", "project not found")
+		return
+	}
+	if errors.Is(err, chatrun.ErrProjectNotReady) {
+		writeErr(w, http.StatusConflict, "PROJECT_NOT_READY", "project is not ready")
+		return
+	}
+	if errors.Is(err, chatrun.ErrProjectMismatch) {
+		writeErr(w, http.StatusConflict, "PROJECT_MISMATCH", "conversation project cannot be changed")
 		return
 	}
 	if err != nil {
@@ -359,6 +416,30 @@ func (r *liveRun) parts() []convo.Part {
 func (a *API) executeLiveRun(live *liveRun) {
 	defer live.cancel()
 	defer close(live.done)
+	var projectContext *agent.ProjectContext
+	var scmToken string
+	var projectSetupErr error
+	if live.request.ProjectID != "" {
+		if a.projects == nil {
+			projectSetupErr = project.ErrDisabled
+		} else {
+			value, token, err := a.projects.ProjectContext(live.ctx, project.Identity{
+				TenantID: live.identity.TenantID, UserID: live.identity.UserID, Email: live.identity.Email,
+				Name: live.identity.Name, Username: live.identity.Username,
+			}, live.request.SessionID)
+			if err != nil {
+				projectSetupErr = err
+			} else {
+				projectContext = &agent.ProjectContext{
+					ProjectID: value.ProjectID, RepositoryID: value.RepositoryExternalID,
+					CloneURL: value.CloneURL, DefaultBranch: value.DefaultBranch,
+					BaseSHA: value.BaseSHA, TaskBranch: value.BranchName,
+					GitAuthorName: value.GitAuthorName, GitAuthorEmail: value.GitAuthorEmail,
+				}
+				scmToken = token
+			}
+		}
+	}
 	attachments := a.prepareRunAttachments(live.ctx, live.request)
 	memoryContext := ""
 	if a.memory != nil && chatTypeForConversation(live.request) != "scheduled_task" {
@@ -384,6 +465,7 @@ func (a *API) executeLiveRun(live *liveRun) {
 		MemoryContext:       memoryContext,
 		TraceID:             live.run.ID, ParentSpanID: conversationRootSpan(live.traceCtx),
 		SandboxAuthToken: a.mintSandboxToken(live.identity), Attachments: attachments,
+		SCMToken: scmToken, Project: projectContext,
 	}
 	coalescer := memoryEventCoalescer{run: live, window: a.runs.mergeWindow}
 	var sawError bool
@@ -394,36 +476,46 @@ func (a *API) executeLiveRun(live *liveRun) {
 	go func() { draftResult <- a.persistRunDrafts(draftContext, live) }()
 	streamStarted := time.Now()
 	watchdog := newToolStepWatchdog(live.policy.toolTimeout, live.cancel)
-	err := a.streamer.Stream(live.ctx, live.query, func(event agent.Event) error {
-		if event.Kind == "trace" {
-			a.recordAgentTrace(live.traceCtx, live.run.ID, event.Data)
+	err := projectSetupErr
+	if err == nil {
+		err = a.streamer.Stream(live.ctx, live.query, func(event agent.Event) error {
+			if event.Kind == "trace" {
+				a.recordAgentTrace(live.traceCtx, live.run.ID, event.Data)
+				return nil
+			}
+			if event.Kind == "done" {
+				return nil
+			}
+			if event.Kind == "git_snapshot" {
+				a.persistProjectSnapshot(live, event)
+				return nil
+			}
+			if event.Kind == "file" {
+				artifactCtx, cancelArtifact := context.WithTimeout(context.Background(), 5*time.Second)
+				event = a.registerArtifact(
+					artifactCtx, live.identity, live.request.SessionID, event,
+				)
+				cancelArtifact()
+			}
+			if event.Kind == "text" && ttftMS == 0 {
+				ttftMS = time.Since(streamStarted).Milliseconds()
+			}
+			if event.Kind == "tool_use" {
+				toolCalls++
+			}
+			watchdog.Observe(event)
+			if event.Kind == "error" {
+				sawError = true
+				if code := strings.TrimSpace(event.Data["code"]); strings.HasPrefix(code, "PROJECT_") {
+					a.persistProjectBootstrapFailure(live, code)
+				}
+			}
+			if err := coalescer.Push(event); err != nil {
+				return err
+			}
 			return nil
-		}
-		if event.Kind == "done" {
-			return nil
-		}
-		if event.Kind == "file" {
-			artifactCtx, cancelArtifact := context.WithTimeout(context.Background(), 5*time.Second)
-			event = a.registerArtifact(
-				artifactCtx, live.identity, live.request.SessionID, event,
-			)
-			cancelArtifact()
-		}
-		if event.Kind == "text" && ttftMS == 0 {
-			ttftMS = time.Since(streamStarted).Milliseconds()
-		}
-		if event.Kind == "tool_use" {
-			toolCalls++
-		}
-		watchdog.Observe(event)
-		if event.Kind == "error" {
-			sawError = true
-		}
-		if err := coalescer.Push(event); err != nil {
-			return err
-		}
-		return nil
-	})
+		})
+	}
 	watchdog.Close()
 	stepTimeout := watchdog.Failure()
 	coalescer.Flush()
@@ -443,7 +535,7 @@ func (a *API) executeLiveRun(live *liveRun) {
 	} else if interrupted || agent.IsRuntimeInterruption(err) {
 		status, errorCode = chatrun.StatusInterrupted, "RUNTIME_INTERRUPTED"
 	} else if err != nil || sawError {
-		status, errorCode = chatrun.StatusError, "AGENT_ERROR"
+		status, errorCode = chatrun.StatusError, projectRunErrorCode(err)
 	}
 	if status == chatrun.StatusCancelled || status == chatrun.StatusInterrupted {
 		notice := "Run was cancelled."
@@ -519,6 +611,44 @@ func (a *API) executeLiveRun(live *liveRun) {
 		delete(live.subs, subscriber)
 	}
 	live.mu.Unlock()
+}
+
+func (a *API) persistProjectSnapshot(live *liveRun, event agent.Event) {
+	if a.projects == nil || live.request.ProjectID == "" {
+		return
+	}
+	raw := strings.TrimSpace(event.Data["snapshot_json"])
+	if raw == "" {
+		return
+	}
+	var snapshot project.GitSnapshot
+	if err := json.Unmarshal([]byte(raw), &snapshot); err != nil {
+		a.log.Warn("invalid git snapshot event")
+		return
+	}
+	if snapshot.CapturedAt.IsZero() {
+		snapshot.CapturedAt = time.Now().UTC()
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	if err := a.projects.SaveSnapshot(ctx, project.Identity{
+		TenantID: live.identity.TenantID, UserID: live.identity.UserID,
+	}, live.request.SessionID, snapshot, snapshot.HeadSHA, "ready"); err != nil {
+		a.log.Warn("git snapshot persistence failed: " + err.Error())
+	}
+}
+
+func (a *API) persistProjectBootstrapFailure(live *liveRun, code string) {
+	if a.projects == nil || live.request.ProjectID == "" || !strings.HasPrefix(code, "PROJECT_") {
+		return
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	if err := a.projects.MarkBootstrapFailed(ctx, project.Identity{
+		TenantID: live.identity.TenantID, UserID: live.identity.UserID,
+	}, live.request.SessionID, code); err != nil {
+		a.log.Warn("project bootstrap failure persistence failed: " + err.Error())
+	}
 }
 
 func validSkillID(value string) bool {
@@ -725,6 +855,15 @@ func cloneStringMap(data map[string]string) map[string]string {
 }
 
 func safeBackgroundRunError(err error) string {
+	if errors.Is(err, project.ErrConnectionRequired) || errors.Is(err, project.ErrInstallationRequired) {
+		return "GitHub is disconnected or no longer grants access to this repository"
+	}
+	if errors.Is(err, project.ErrDisabled) {
+		return "GitHub Projects are disabled"
+	}
+	if errors.Is(err, project.ErrProjectNotReady) {
+		return "Project is not ready"
+	}
 	if errors.Is(err, context.DeadlineExceeded) {
 		return "agent request timed out"
 	}
@@ -732,6 +871,19 @@ func safeBackgroundRunError(err error) string {
 		return "agent run stopped"
 	}
 	return "agent run failed"
+}
+
+func projectRunErrorCode(err error) string {
+	switch {
+	case errors.Is(err, project.ErrConnectionRequired), errors.Is(err, project.ErrInstallationRequired):
+		return "GITHUB_CONNECTION_REQUIRED"
+	case errors.Is(err, project.ErrDisabled):
+		return "GITHUB_DISABLED"
+	case errors.Is(err, project.ErrProjectNotReady):
+		return "PROJECT_NOT_READY"
+	default:
+		return "AGENT_ERROR"
+	}
 }
 
 func (a *API) serveRunSubscription(

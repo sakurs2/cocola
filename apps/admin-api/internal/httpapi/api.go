@@ -77,6 +77,9 @@ func (a *API) Router() http.Handler {
 
 	r.Route("/me", func(r chi.Router) {
 		r.Use(a.requireRuntimeUser)
+		r.Get("/account", a.getOwnAccount)
+		r.Patch("/account", a.updateOwnAccount)
+		r.Post("/account/password", a.changeOwnPassword)
 		r.Get("/events", a.streamMyEvents)
 		r.Route("/skills", func(r chi.Router) {
 			r.Get("/", a.listMySkills)
@@ -118,6 +121,7 @@ func (a *API) Router() http.Handler {
 			r.Post("/", a.createAuthUser)
 			r.Get("/", a.listAuthUsers)
 			r.Get("/lookup", a.lookupAuthUser)
+			r.Get("/{id}", a.getAuthUser)
 			r.Patch("/{id}", a.updateAuthUser)
 			r.Post("/{id}/password", a.resetAuthUserPassword)
 			r.Delete("/{id}", a.deleteAuthUser)
@@ -358,6 +362,8 @@ func mapErr(w http.ResponseWriter, err error) {
 		writeErr(w, http.StatusForbidden, "PROTECTED_ADMIN", "bootstrap admin cannot be changed")
 	case errors.Is(err, service.ErrSelfPermission):
 		writeErr(w, http.StatusForbidden, "SELF_PERMISSION_CHANGE", "admin cannot change own permissions")
+	case errors.Is(err, service.ErrCurrentPassword):
+		writeErr(w, http.StatusBadRequest, "CURRENT_PASSWORD_INVALID", "current password is incorrect")
 	case errors.Is(err, service.ErrPermissionDenied):
 		writeErr(w, http.StatusForbidden, "PERMISSION_DENIED", "permission denied")
 	case errors.Is(err, service.ErrScheduleInPast):
@@ -382,6 +388,8 @@ func mapErr(w http.ResponseWriter, err error) {
 		writeErr(w, http.StatusNotFound, "NOT_FOUND", "resource not found")
 	case errors.Is(err, store.ErrConflict):
 		writeErr(w, http.StatusConflict, "CONFLICT", "resource already exists")
+	case errors.Is(err, store.ErrVersionConflict):
+		writeErr(w, http.StatusConflict, "VERSION_CONFLICT", "account changed; reload and try again")
 	case errors.Is(err, service.ErrNotConfigured):
 		writeErr(w, http.StatusNotImplemented, "NOT_CONFIGURED", err.Error())
 	case errors.Is(err, service.ErrStorageUnavailable):

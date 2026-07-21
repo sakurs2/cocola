@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"strings"
 	"time"
 
 	"github.com/jackc/pgx/v5"
@@ -69,16 +70,39 @@ func (p *Postgres) Start(ctx context.Context, in StartInput) (StartResult, error
 	}
 	defer func() { _ = tx.Rollback(ctx) }()
 	effective, err := scanConversation(tx.QueryRow(ctx, `SELECT id, user_id, tenant_id,
-		title, chat_type, COALESCE(folder_id, ''), hidden, runtime_id, created_at, updated_at
+		title, chat_type, COALESCE(folder_id, ''), COALESCE(project_id::text, ''), hidden, runtime_id, created_at, updated_at
 		FROM conversations WHERE id=$1 FOR UPDATE`, in.Conversation.ID))
 	createdConversation := false
 	if errors.Is(err, convo.ErrNotFound) {
 		effective = in.Conversation
-		if effective.RuntimeID == "" {
-			effective.RuntimeID = convo.DefaultRuntimeID
-		}
 		if effective.ChatType == "" {
 			effective.ChatType = "chat"
+		}
+		var projectBaseRef string
+		if effective.ProjectID != "" {
+			if effective.FolderID != "" || effective.ChatType != "chat" {
+				return StartResult{}, ErrProjectNotFound
+			}
+			var projectRuntime, projectStatus string
+			projectErr := tx.QueryRow(ctx, `SELECT default_branch, runtime_id, status FROM projects
+				WHERE id=$1::uuid AND tenant_id=$2 AND owner_user_id=$3 FOR SHARE`,
+				effective.ProjectID, effective.TenantID, effective.UserID).Scan(
+				&projectBaseRef, &projectRuntime, &projectStatus)
+			if projectErr == pgx.ErrNoRows {
+				return StartResult{}, ErrProjectNotFound
+			}
+			if projectErr != nil {
+				return StartResult{}, projectErr
+			}
+			if projectStatus != "ready" {
+				return StartResult{}, ErrProjectNotReady
+			}
+			if effective.RuntimeID == "" {
+				effective.RuntimeID = projectRuntime
+			}
+		}
+		if effective.RuntimeID == "" {
+			effective.RuntimeID = convo.DefaultRuntimeID
 		}
 		if effective.FolderID != "" {
 			var folderID string
@@ -92,19 +116,28 @@ func (p *Postgres) Start(ctx context.Context, in StartInput) (StartResult, error
 			}
 		}
 		tag, insertErr := tx.Exec(ctx, `INSERT INTO conversations
-			(id, user_id, tenant_id, title, chat_type, folder_id, hidden, runtime_id, created_at, updated_at)
-			VALUES ($1,$2,$3,$4,$5,NULLIF($6,''),$7,$8,$9,$10)
+			(id, user_id, tenant_id, title, chat_type, folder_id, project_id, hidden, runtime_id, created_at, updated_at)
+			VALUES ($1,$2,$3,$4,$5,NULLIF($6,''),NULLIF($7,'')::uuid,$8,$9,$10,$11)
 			ON CONFLICT (id) DO NOTHING`, effective.ID, effective.UserID,
-			effective.TenantID, effective.Title, effective.ChatType, effective.FolderID,
+			effective.TenantID, effective.Title, effective.ChatType, effective.FolderID, effective.ProjectID,
 			effective.Hidden, effective.RuntimeID, effective.CreatedAt, effective.UpdatedAt)
 		if insertErr != nil {
 			return StartResult{}, insertErr
 		}
 		if tag.RowsAffected() == 1 {
 			createdConversation = true
+			if effective.ProjectID != "" {
+				_, insertErr = tx.Exec(ctx, `INSERT INTO project_workspaces
+					(conversation_id, project_id, base_ref, branch_name, created_at, updated_at)
+					VALUES ($1,$2::uuid,$3,$4,$5,$5)`, effective.ID, effective.ProjectID,
+					projectBaseRef, taskBranch(effective.ID), effective.CreatedAt)
+				if insertErr != nil {
+					return StartResult{}, insertErr
+				}
+			}
 		} else {
 			effective, err = scanConversation(tx.QueryRow(ctx, `SELECT id, user_id, tenant_id,
-				title, chat_type, COALESCE(folder_id, ''), hidden, runtime_id, created_at, updated_at
+				title, chat_type, COALESCE(folder_id, ''), COALESCE(project_id::text, ''), hidden, runtime_id, created_at, updated_at
 				FROM conversations WHERE id=$1 FOR UPDATE`, in.Conversation.ID))
 			if err != nil {
 				return StartResult{}, err
@@ -133,6 +166,9 @@ func (p *Postgres) Start(ctx context.Context, in StartInput) (StartResult, error
 		}
 		if in.Conversation.FolderID != "" && in.Conversation.FolderID != effective.FolderID {
 			return StartResult{}, ErrFolderMismatch
+		}
+		if in.Conversation.ProjectID != "" && in.Conversation.ProjectID != effective.ProjectID {
+			return StartResult{}, ErrProjectMismatch
 		}
 		effective.UpdatedAt = in.Conversation.UpdatedAt
 		if _, err = tx.Exec(ctx, `UPDATE conversations SET updated_at=$2 WHERE id=$1`,
@@ -184,7 +220,7 @@ func (p *Postgres) Start(ctx context.Context, in StartInput) (StartResult, error
 func scanConversation(row pgx.Row) (convo.Conversation, error) {
 	var conversation convo.Conversation
 	if err := row.Scan(&conversation.ID, &conversation.UserID, &conversation.TenantID,
-		&conversation.Title, &conversation.ChatType, &conversation.FolderID, &conversation.Hidden, &conversation.RuntimeID,
+		&conversation.Title, &conversation.ChatType, &conversation.FolderID, &conversation.ProjectID, &conversation.Hidden, &conversation.RuntimeID,
 		&conversation.CreatedAt, &conversation.UpdatedAt); err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
 			return convo.Conversation{}, convo.ErrNotFound
@@ -192,6 +228,17 @@ func scanConversation(row pgx.Row) (convo.Conversation, error) {
 		return convo.Conversation{}, err
 	}
 	return conversation, nil
+}
+
+func taskBranch(conversationID string) string {
+	short := strings.ReplaceAll(strings.TrimSpace(conversationID), "-", "")
+	if len(short) > 12 {
+		short = short[:12]
+	}
+	if short == "" {
+		short = "workspace"
+	}
+	return "cocola/task-" + short
 }
 
 func (p *Postgres) GetOwned(ctx context.Context, runID, userID string) (Run, error) {

@@ -27,6 +27,7 @@ import (
 var (
 	ErrNotFound            = errors.New("convo: not found")
 	ErrRuntimeMismatch     = errors.New("convo: runtime mismatch")
+	ErrProjectMismatch     = errors.New("convo: project mismatch")
 	ErrFolderNameConflict  = errors.New("convo: folder name conflict")
 	ErrInvalidFolderName   = errors.New("convo: invalid folder name")
 	ErrUnsupportedChatType = errors.New("convo: unsupported chat type")
@@ -111,6 +112,7 @@ type Conversation struct {
 	Title     string    `json:"title"`
 	ChatType  string    `json:"chat_type"`
 	FolderID  string    `json:"folder_id,omitempty"`
+	ProjectID string    `json:"project_id,omitempty"`
 	Hidden    bool      `json:"hidden"`
 	RuntimeID string    `json:"runtime_id"`
 	CreatedAt time.Time `json:"created_at"`

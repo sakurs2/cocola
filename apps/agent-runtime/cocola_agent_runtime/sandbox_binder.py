@@ -81,6 +81,7 @@ class SandboxBinder(Protocol):
         image: str = "",
         env: dict | None = None,
         allow_workspace_reset: bool = False,
+        additional_egress_allowlist: list[str] | None = None,
     ) -> BoundSandbox:
         """Bind the session to a sandbox (create-or-reuse), renewing its lease."""
         ...
@@ -137,6 +138,7 @@ class SandboxManagerBinder:
         image: str = "",
         env: dict | None = None,
         allow_workspace_reset: bool = False,
+        additional_egress_allowlist: list[str] | None = None,
     ) -> BoundSandbox:
         eff_image = image or self._default_image
         eff_env = {**self._default_env, **(env or {})}
@@ -144,13 +146,16 @@ class SandboxManagerBinder:
         def _call() -> BoundSandbox:
             with SandboxClient(addr=self._addr) as sb:
                 try:
-                    res = sb.acquire(
-                        session_id=session_id,
-                        user_id=user_id,
-                        image=eff_image,
-                        env=eff_env,
-                        allow_workspace_reset=allow_workspace_reset,
-                    )
+                    options = {
+                        "session_id": session_id,
+                        "user_id": user_id,
+                        "image": eff_image,
+                        "env": eff_env,
+                        "allow_workspace_reset": allow_workspace_reset,
+                    }
+                    if additional_egress_allowlist is not None:
+                        options["additional_egress_allowlist"] = additional_egress_allowlist
+                    res = sb.acquire(**options)
                 except grpc.RpcError as exc:
                     if exc.code() == grpc.StatusCode.RESOURCE_EXHAUSTED:
                         raise RuntimeError(
@@ -233,6 +238,7 @@ class StaticSandboxBinder:
         image: str = "",
         env: dict | None = None,
         allow_workspace_reset: bool = False,
+        additional_egress_allowlist: list[str] | None = None,
     ) -> BoundSandbox:
         if self._fail is not None:
             raise self._fail
@@ -562,7 +568,7 @@ class StaticSandboxExecutor:
         keys = [(sandbox_id, path)]
         prefix = "/workspace/"
         if path.startswith(prefix):
-            keys.append((sandbox_id, path[len(prefix):]))
+            keys.append((sandbox_id, path[len(prefix) :]))
         return keys
 
     async def read_file(self, *, sandbox_id: str, path: str) -> str:

@@ -77,6 +77,29 @@ func TestIssuerIssue(t *testing.T) {
 	}
 }
 
+func TestIssuerIssueUserKeepsStableSubjectAndProfileClaims(t *testing.T) {
+	iss := NewIssuer("s", "cocola", time.Hour)
+	tok, claims, err := iss.IssueUser(
+		"user-uuid", "team-a", "alice@example.com", "Alice", "alice", 0, 1000,
+	)
+	if err != nil {
+		t.Fatalf("issue user: %v", err)
+	}
+	if claims.Subject != "user-uuid" || claims.Email != "alice@example.com" ||
+		claims.Name != "Alice" || claims.Username != "alice" {
+		t.Fatalf("issued user claims mismatch: %+v", claims)
+	}
+
+	back, err := Decode(tok, "s", 1001)
+	if err != nil {
+		t.Fatalf("decode issued user token: %v", err)
+	}
+	if back.Subject != "user-uuid" || back.Tenant != "team-a" ||
+		back.Email != "alice@example.com" || back.Name != "Alice" || back.Username != "alice" {
+		t.Fatalf("decoded user claims mismatch: %+v", back)
+	}
+}
+
 func TestIssuerStampsUniqueJTI(t *testing.T) {
 	iss := NewIssuer("s", "cocola", time.Hour)
 	tok1, c1, _ := iss.Issue("emp-7", "", 0, 1000)

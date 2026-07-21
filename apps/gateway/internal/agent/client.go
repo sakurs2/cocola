@@ -67,7 +67,46 @@ type Query struct {
 	// replacing static cluster-wide credentials. Empty is supported by tests
 	// with an unauthenticated fake runtime; production config always wires an issuer.
 	SandboxAuthToken string
+	SCMToken         string
+	Project          *ProjectContext
 	Attachments      []Attachment
+}
+
+type ProjectContext struct {
+	ProjectID      string
+	RepositoryID   int64
+	CloneURL       string
+	DefaultBranch  string
+	BaseSHA        string
+	TaskBranch     string
+	GitAuthorName  string
+	GitAuthorEmail string
+}
+
+type GitChange struct {
+	Path, OldPath, Status, Area string
+}
+
+type GitSnapshot struct {
+	Branch, BaseRef, BaseSHA, HeadSHA string
+	Ahead                             int
+	Dirty, Truncated                  bool
+	Changes                           []GitChange
+}
+
+type GitInspection struct {
+	Snapshot          GitSnapshot
+	Diff              string
+	Binary, Truncated bool
+}
+
+type InspectRequest struct {
+	UserID, SessionID, Operation, Path, DiffTarget, SCMToken string
+	Project                                                  ProjectContext
+}
+
+type GitInspector interface {
+	InspectWorkspaceGit(context.Context, InspectRequest) (GitInspection, error)
 }
 
 // Attachment is one user-uploaded file forwarded to agent-runtime. Content is
@@ -184,6 +223,9 @@ func (c *Client) Stream(ctx context.Context, q Query, onEvent func(Event) error)
 	if strings.TrimSpace(q.SandboxAuthToken) != "" {
 		ctx = metadata.AppendToOutgoingContext(ctx, "x-cocola-sandbox-token", strings.TrimSpace(q.SandboxAuthToken))
 	}
+	if strings.TrimSpace(q.SCMToken) != "" {
+		ctx = metadata.AppendToOutgoingContext(ctx, "x-cocola-scm-token", strings.TrimSpace(q.SCMToken))
+	}
 	if len(q.TraceID) == 32 && len(q.ParentSpanID) == 16 {
 		// otelgrpc owns the standard traceparent key and may replace it with its
 		// transport span. Keep the product parent explicit so model.generate is
@@ -200,7 +242,7 @@ func (c *Client) Stream(ctx context.Context, q Query, onEvent func(Event) error)
 			Size:     q.Attachments[i].Size,
 		})
 	}
-	stream, err := c.rpc.Query(ctx, &agentv1.QueryRequest{
+	request := &agentv1.QueryRequest{
 		UserId:              q.UserID,
 		SessionId:           q.SessionID,
 		Prompt:              q.Prompt,
@@ -211,7 +253,11 @@ func (c *Client) Stream(ctx context.Context, q Query, onEvent func(Event) error)
 		SkillId:             q.SkillID,
 		AllowWorkspaceReset: q.AllowWorkspaceReset,
 		MemoryContext:       q.MemoryContext,
-	})
+	}
+	if q.Project != nil {
+		request.ProjectContext = projectContextProto(*q.Project)
+	}
+	stream, err := c.rpc.Query(ctx, request)
 	if err != nil {
 		return fmt.Errorf("agent: query: %w", err)
 	}
@@ -228,6 +274,41 @@ func (c *Client) Stream(ctx context.Context, q Query, onEvent func(Event) error)
 		if err := onEvent(ev); err != nil {
 			return err
 		}
+	}
+}
+
+func (c *Client) InspectWorkspaceGit(ctx context.Context, request InspectRequest) (GitInspection, error) {
+	if strings.TrimSpace(request.SCMToken) != "" {
+		ctx = metadata.AppendToOutgoingContext(ctx, "x-cocola-scm-token", strings.TrimSpace(request.SCMToken))
+	}
+	response, err := c.rpc.InspectWorkspaceGit(ctx, &agentv1.InspectWorkspaceGitRequest{
+		UserId: request.UserID, SessionId: request.SessionID, Operation: request.Operation,
+		Path: request.Path, DiffTarget: request.DiffTarget,
+		ProjectContext: projectContextProto(request.Project),
+	})
+	if err != nil {
+		return GitInspection{}, fmt.Errorf("agent: inspect workspace git: %w", err)
+	}
+	result := GitInspection{Diff: response.GetDiff(), Binary: response.GetBinary(), Truncated: response.GetTruncated()}
+	if snapshot := response.GetSnapshot(); snapshot != nil {
+		result.Snapshot = GitSnapshot{
+			Branch: snapshot.GetBranch(), BaseRef: snapshot.GetBaseRef(), BaseSHA: snapshot.GetBaseSha(), HeadSHA: snapshot.GetHeadSha(),
+			Ahead: int(snapshot.GetAhead()), Dirty: snapshot.GetDirty(), Truncated: snapshot.GetTruncated(),
+		}
+		for _, change := range snapshot.GetChanges() {
+			result.Snapshot.Changes = append(result.Snapshot.Changes, GitChange{
+				Path: change.GetPath(), OldPath: change.GetOldPath(), Status: change.GetStatus(), Area: change.GetArea(),
+			})
+		}
+	}
+	return result, nil
+}
+
+func projectContextProto(value ProjectContext) *agentv1.ProjectContext {
+	return &agentv1.ProjectContext{
+		ProjectId: value.ProjectID, RepositoryId: value.RepositoryID, CloneUrl: value.CloneURL,
+		DefaultBranch: value.DefaultBranch, BaseSha: value.BaseSHA, TaskBranch: value.TaskBranch,
+		GitAuthorName: value.GitAuthorName, GitAuthorEmail: value.GitAuthorEmail,
 	}
 }
 

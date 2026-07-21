@@ -129,11 +129,12 @@ func (b *Binder) WithSessionStorage(storage SessionStorageManager) *Binder {
 
 // AcquireSpec is what a caller needs to bind a session to a sandbox.
 type AcquireSpec struct {
-	SessionID           string
-	UserID              string
-	Image               string
-	Env                 map[string]string
-	AllowWorkspaceReset bool
+	SessionID                 string
+	UserID                    string
+	Image                     string
+	Env                       map[string]string
+	AllowWorkspaceReset       bool
+	AdditionalEgressAllowlist []string
 }
 
 // Outcome reports the result of an Acquire: the bound sandbox and whether it
@@ -303,7 +304,7 @@ func (b *Binder) AcquireWithOutcome(ctx context.Context, spec AcquireSpec) (Outc
 		SessionID:      spec.SessionID,
 		Image:          spec.Image,
 		Env:            spec.Env,
-		Networking:     b.net,
+		Networking:     mergeSessionNetworking(b.net, spec.AdditionalEgressAllowlist),
 		TargetNodeName: targetNode,
 		SessionClaim:   claimName,
 	})

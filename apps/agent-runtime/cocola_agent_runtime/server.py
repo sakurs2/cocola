@@ -48,6 +48,13 @@ from cocola_common import get_logger
 from cocola_agent_runtime.agent_provider import AgentEvent, AgentOptions, AgentProvider
 from cocola_agent_runtime.mcp_loader import MCPCatalog
 from cocola_agent_runtime.objstore import Fetcher
+from cocola_agent_runtime.project_git import (
+    ProjectSpec,
+    ProjectWorkspaceError,
+    bootstrap_project,
+    inspect_project,
+    spec_from_proto,
+)
 from cocola_agent_runtime.prompt_loader import PromptCatalog, PromptConfig
 from cocola_agent_runtime.runtime_registry import RuntimeDescriptor, RuntimeEntry, RuntimeRegistry
 from cocola_agent_runtime.sandbox_binder import (
@@ -84,6 +91,7 @@ MODEL_ROUTE_ID_METADATA_KEY = "x-cocola-model-route-id"
 # proto change). Injected into the sandbox as ANTHROPIC_AUTH_TOKEN per turn so
 # the in-sandbox brain calls the llm-gateway as the real user. Never logged.
 SANDBOX_TOKEN_METADATA_KEY = "x-cocola-sandbox-token"
+SCM_TOKEN_METADATA_KEY = "x-cocola-scm-token"
 TRACEPARENT_METADATA_KEY = "traceparent"
 PRODUCT_TRACEPARENT_METADATA_KEY = "x-cocola-product-traceparent"
 ENVIRONMENT_PREPARATION_SCHEMA_VERSION = 1
@@ -170,6 +178,39 @@ def _uploads_preamble(landed: list[str]) -> str:
         "The user uploaded the following file(s) into your working directory. "
         "Read them from these paths when relevant:\n"
         f"{listing}"
+    )
+
+
+def _snapshot_event_json(snapshot: dict[str, Any]) -> str:
+    value = dict(snapshot)
+    value["captured_at"] = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
+    return json.dumps(value, ensure_ascii=False, separators=(",", ":"))
+
+
+def _git_inspection_proto(result: dict[str, Any]) -> pb.InspectWorkspaceGitResponse:
+    snapshot = result.get("snapshot") or {}
+    return pb.InspectWorkspaceGitResponse(
+        snapshot=pb.GitSnapshot(
+            branch=str(snapshot.get("branch") or ""),
+            base_ref=str(snapshot.get("base_ref") or ""),
+            base_sha=str(snapshot.get("base_sha") or ""),
+            head_sha=str(snapshot.get("head_sha") or ""),
+            ahead=int(snapshot.get("ahead") or 0),
+            dirty=bool(snapshot.get("dirty")),
+            truncated=bool(snapshot.get("truncated")),
+            changes=[
+                pb.GitChange(
+                    path=str(change.get("path") or ""),
+                    old_path=str(change.get("old_path") or ""),
+                    status=str(change.get("status") or ""),
+                    area=str(change.get("area") or ""),
+                )
+                for change in snapshot.get("changes") or []
+            ],
+        ),
+        diff=str(result.get("diff") or ""),
+        binary=bool(result.get("binary")),
+        truncated=bool(result.get("truncated")),
     )
 
 
@@ -443,6 +484,42 @@ class AgentRuntimeServicer(pb_grpc.AgentRuntimeServiceServicer):
                 log.warning("session map delete failed", session_id=session_id, error=str(exc))
         return pb.ReleaseSessionResponse()
 
+    async def InspectWorkspaceGit(self, request, context):  # noqa: N802
+        """Explicitly acquire and inspect one Project task workspace."""
+        if self._binder is None or self._executor is None:
+            await context.abort(grpc.StatusCode.UNIMPLEMENTED, "sandbox Git inspection unavailable")
+        try:
+            spec = spec_from_proto(request.project_context)
+            scm_token = _metadata_value(context, SCM_TOKEN_METADATA_KEY)
+            box = await self._binder.acquire(
+                session_id=request.session_id,
+                user_id=request.user_id,
+                additional_egress_allowlist=["github.com"],
+            )
+            heartbeat = asyncio.create_task(
+                self._heartbeat_sandbox(box.id, context, asyncio.current_task())
+            )
+            try:
+                await bootstrap_project(self._executor, box.id, spec, scm_token)
+                result = await inspect_project(
+                    self._executor,
+                    box.id,
+                    spec,
+                    str(request.operation or ""),
+                    path=str(request.path or ""),
+                    diff_target=str(request.diff_target or ""),
+                )
+            finally:
+                heartbeat.cancel()
+                with contextlib.suppress(asyncio.CancelledError):
+                    await heartbeat
+        except ProjectWorkspaceError as exc:
+            await context.abort(grpc.StatusCode.FAILED_PRECONDITION, f"{exc.code}: {exc}")
+        except Exception as exc:  # noqa: BLE001 - internal RPC boundary
+            log.warning("Git inspection failed", error_type=type(exc).__name__)
+            await context.abort(grpc.StatusCode.INTERNAL, "Git inspection failed")
+        return _git_inspection_proto(result)
+
     async def Query(self, request, context):  # noqa: N802 - gRPC-generated name
         """Server-streaming RPC: run one agent turn, stream events back.
 
@@ -542,11 +619,23 @@ class AgentRuntimeServicer(pb_grpc.AgentRuntimeServiceServicer):
         # and injected under the selected runtime's auth variable at acquire and
         # on every shim exec. Warm sandboxes stay credential-free until claimed.
         sandbox_token = _metadata_value(context, SANDBOX_TOKEN_METADATA_KEY)
+        scm_token = _metadata_value(context, SCM_TOKEN_METADATA_KEY)
+        project_spec: ProjectSpec | None = None
+        project_value = getattr(request, "project_context", None)
+        if project_value is not None and getattr(project_value, "project_id", ""):
+            try:
+                project_spec = spec_from_proto(project_value)
+            except ProjectWorkspaceError as exc:
+                await context.write(
+                    pb.AgentEvent(kind="error", data={"code": exc.code, "error": str(exc)})
+                )
+                return
         traceparent = _product_traceparent(context)
         preparing_environment = False
         environment_components: list[dict[str, Any]] = []
         environment_degraded = False
         heartbeat_task: asyncio.Task[None] | None = None
+        workspace: str | None = None
 
         # Bind the session to a real sandbox when a binder is wired and the
         # caller did not pin one. Acquire is create-or-reuse (M2): the same
@@ -556,12 +645,15 @@ class AgentRuntimeServicer(pb_grpc.AgentRuntimeServiceServicer):
         if self._binder is not None:
             acquire_start_ns = time.time_ns()
             try:
-                box = await self._binder.acquire(
-                    session_id=request.session_id,
-                    user_id=request.user_id,
-                    allow_workspace_reset=bool(getattr(request, "allow_workspace_reset", False)),
-                    env=_acquire_env(model_env, sandbox_token, runtime_id=runtime_id),
-                )
+                acquire_options: dict[str, Any] = {
+                    "session_id": request.session_id,
+                    "user_id": request.user_id,
+                    "allow_workspace_reset": bool(getattr(request, "allow_workspace_reset", False)),
+                    "env": _acquire_env(model_env, sandbox_token, runtime_id=runtime_id),
+                }
+                if project_spec is not None:
+                    acquire_options["additional_egress_allowlist"] = ["github.com"]
+                box = await self._binder.acquire(**acquire_options)
             except Exception as exc:  # noqa: BLE001 - bind failure -> clean terminal event
                 log.warning(
                     "sandbox acquire failed",
@@ -673,6 +765,76 @@ class AgentRuntimeServicer(pb_grpc.AgentRuntimeServiceServicer):
                     )
                 )
             )
+            if project_spec is not None:
+                if self._executor is None:
+                    await context.write(
+                        pb.AgentEvent(
+                            kind="error",
+                            data={
+                                "code": "PROJECT_BOOTSTRAP_UNAVAILABLE",
+                                "error": "Project workspace bootstrap is unavailable.",
+                            },
+                        )
+                    )
+                    if heartbeat_task is not None:
+                        heartbeat_task.cancel()
+                        with contextlib.suppress(asyncio.CancelledError):
+                            await heartbeat_task
+                    return
+                try:
+                    bootstrap = await bootstrap_project(
+                        self._executor, box.id, project_spec, scm_token
+                    )
+                except ProjectWorkspaceError as exc:
+                    log.warning(
+                        "project workspace bootstrap failed",
+                        session_id=request.session_id,
+                        error_code=exc.code,
+                    )
+                    await context.write(
+                        pb.AgentEvent(kind="error", data={"code": exc.code, "error": str(exc)})
+                    )
+                    if heartbeat_task is not None:
+                        heartbeat_task.cancel()
+                        with contextlib.suppress(asyncio.CancelledError):
+                            await heartbeat_task
+                    return
+                workspace = "/workspace"
+                environment_components.append(
+                    {
+                        "kind": "project",
+                        "status": "ready",
+                        "label": "Git repository",
+                        "summary": project_spec.task_branch,
+                    }
+                )
+                if box.workspace_state == "reset":
+                    environment_degraded = True
+                    environment_components.append(
+                        {
+                            "kind": "project-reset",
+                            "status": "failed",
+                            "label": "Uncommitted changes",
+                            "summary": "Previous uncommitted workspace content was lost",
+                        }
+                    )
+                await context.write(
+                    pb.AgentEvent(
+                        kind="git_snapshot",
+                        data={"snapshot_json": _snapshot_event_json(bootstrap["snapshot"])},
+                    )
+                )
+        if project_spec is not None and workspace is None:
+            await context.write(
+                pb.AgentEvent(
+                    kind="error",
+                    data={
+                        "code": "PROJECT_BOOTSTRAP_UNAVAILABLE",
+                        "error": "Project tasks require a managed Sandbox environment.",
+                    },
+                )
+            )
+            return
         # Pre-provision user-uploaded attachments into the bound sandbox before
         # the agent runs (push model, ADR-0017). We land them under ./uploads/
         # in the session workspace and prepend a short preamble so the model
@@ -680,7 +842,6 @@ class AgentRuntimeServicer(pb_grpc.AgentRuntimeServiceServicer):
         # surfaced as a terminal `error` event (like an acquire failure) rather
         # than silently running the agent against files that never arrived.
         prompt = request.prompt
-        workspace: str | None = None
         if request.attachments:
             provision_start_ns = time.time_ns()
             try:
@@ -997,6 +1158,27 @@ class AgentRuntimeServicer(pb_grpc.AgentRuntimeServiceServicer):
             runtime_id=runtime_id,
         )
         outputs_before = await self._snapshot_outputs(sandbox_id) if artifacts_enabled else {}
+
+        async def write_project_snapshot() -> None:
+            if project_spec is None or self._executor is None or not sandbox_id:
+                return
+            try:
+                inspection = await inspect_project(
+                    self._executor, sandbox_id, project_spec, "status"
+                )
+                await context.write(
+                    pb.AgentEvent(
+                        kind="git_snapshot",
+                        data={"snapshot_json": _snapshot_event_json(inspection["snapshot"])},
+                    )
+                )
+            except Exception as exc:  # noqa: BLE001 - terminal snapshot is best-effort
+                log.warning(
+                    "terminal Git snapshot failed",
+                    session_id=request.session_id,
+                    error_type=type(exc).__name__,
+                )
+
         try:
             terminal_done: AgentEvent | None = None
             async for event in runtime.provider.query(prompt, opts):
@@ -1012,11 +1194,13 @@ class AgentRuntimeServicer(pb_grpc.AgentRuntimeServiceServicer):
                     before=outputs_before,
                 ):
                     await context.write(event_to_proto(event))
+            await write_project_snapshot()
             if terminal_done is not None:
                 await context.write(event_to_proto(terminal_done))
         except Exception as exc:  # noqa: BLE001 - turn any provider fault into a clean terminal event
             log.warning("agent query failed", session_id=request.session_id, error=str(exc))
             await context.write(pb.AgentEvent(kind="error", data={"error": str(exc)}))
+            await write_project_snapshot()
         finally:
             if heartbeat_task is not None:
                 heartbeat_task.cancel()

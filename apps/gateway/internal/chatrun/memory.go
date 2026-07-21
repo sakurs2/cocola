@@ -28,6 +28,9 @@ func (m *Memory) Start(ctx context.Context, in StartInput) (StartResult, error) 
 			return StartResult{}, ErrRuntimeMismatch
 		}
 		effective = existing
+		if in.Conversation.ProjectID != "" && in.Conversation.ProjectID != existing.ProjectID {
+			return StartResult{}, ErrProjectMismatch
+		}
 		effective.UpdatedAt = in.Conversation.UpdatedAt
 	} else if err == convo.ErrNotFound {
 		if effective.RuntimeID == "" {
@@ -37,6 +40,9 @@ func (m *Memory) Start(ctx context.Context, in StartInput) (StartResult, error) 
 			if _, folderErr := m.convo.GetFolder(ctx, effective.FolderID, effective.UserID); folderErr != nil {
 				return StartResult{}, ErrFolderNotFound
 			}
+		}
+		if effective.FolderID != "" && effective.ProjectID != "" {
+			return StartResult{}, ErrProjectMismatch
 		}
 	} else {
 		return StartResult{}, err

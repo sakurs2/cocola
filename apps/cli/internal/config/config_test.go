@@ -53,6 +53,10 @@ func TestWriteInstallationCreatesPrivateConfigAndStableState(t *testing.T) {
 		`COCOLA_OPENVIKING_ROOT_API_KEY="`,
 		`COCOLA_MEMORY_LLM_SERVICE_TOKEN="`,
 		`COCOLA_MEMORY_EMBEDDING_DIMENSION="1024"`,
+		`COCOLA_GITHUB_CLIENT_SECRET_FILE=""`,
+		`COCOLA_GITHUB_PRIVATE_KEY_FILE=""`,
+		`COCOLA_SCM_SECRET_KEY_FILE=""`,
+		`COCOLA_PROJECT_MAX_REPOSITORY_MB="512"`,
 	} {
 		if !strings.Contains(text, expected) {
 			t.Fatalf("config missing %q", expected)

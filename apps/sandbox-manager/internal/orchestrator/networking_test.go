@@ -101,3 +101,19 @@ func TestBinderForwardsNetworking(t *testing.T) {
 			cp.last.Networking.EgressAllowlist, net.EgressAllowlist)
 	}
 }
+
+func TestMergeSessionNetworkingExpandsConfiguredPolicy(t *testing.T) {
+	base := provider.Networking{EgressAllowlist: []string{"llm.internal", "github.com"}}
+	got := mergeSessionNetworking(base, []string{" github.com ", "api.github.com"})
+	want := []string{"llm.internal", "github.com", "api.github.com"}
+	if !equalStrings(got.EgressAllowlist, want) {
+		t.Fatalf("allowlist = %v, want %v", got.EgressAllowlist, want)
+	}
+}
+
+func TestMergeSessionNetworkingPreservesUnrestrictedPolicy(t *testing.T) {
+	got := mergeSessionNetworking(provider.Networking{}, []string{"github.com"})
+	if got.EgressAllowlist != nil {
+		t.Fatalf("allowlist = %v, want nil public policy", got.EgressAllowlist)
+	}
+}

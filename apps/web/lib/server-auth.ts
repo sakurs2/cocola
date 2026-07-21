@@ -9,6 +9,7 @@ export type SessionUser = {
   email: string;
   name: string;
   role: "user" | "admin";
+  version: number;
 };
 
 type AuthOk = { user: SessionUser };
@@ -21,6 +22,7 @@ type AuthUserRecord = {
   name?: string;
   role: "user" | "admin";
   enabled: boolean;
+  version: number;
 };
 
 export function isAuthFail(v: AuthOk | AuthFail): v is AuthFail {
@@ -37,29 +39,27 @@ function accountDisabledResponse() {
 export async function requireUser(): Promise<AuthOk | AuthFail> {
   const session = await auth();
   const user = session?.user;
-  if (!user?.email || !user.id) {
+  if (!user?.id) {
     return { response: Response.json({ error: "unauthenticated" }, { status: 401 }) };
   }
 
   let record: AuthUserRecord;
   try {
-    const upstream = await fetch(
-      `${ADMIN_URL}/admin/users/lookup?email=${encodeURIComponent(user.email)}`,
-      {
-        method: "GET",
-        cache: "no-store",
-        headers: adminHeaders(
-          {
-            id: user.id,
-            username: user.username || "",
-            email: user.email,
-            name: user.name || user.email,
-            role: user.role === "admin" ? "admin" : "user",
-          },
-          undefined,
-        ),
-      },
-    );
+    const upstream = await fetch(`${ADMIN_URL}/admin/users/${encodeURIComponent(user.id)}`, {
+      method: "GET",
+      cache: "no-store",
+      headers: adminHeaders(
+        {
+          id: user.id,
+          username: user.username || "",
+          email: user.email,
+          name: user.name || user.email,
+          role: user.role === "admin" ? "admin" : "user",
+          version: user.version || 1,
+        },
+        undefined,
+      ),
+    });
     if (upstream.status === 403) {
       try {
         const body = (await upstream.clone().json()) as { error?: { code?: string } };
@@ -99,6 +99,7 @@ export async function requireUser(): Promise<AuthOk | AuthFail> {
       email: record.email,
       name: record.name || record.email,
       role: record.role === "admin" ? "admin" : "user",
+      version: record.version,
     },
   };
 }

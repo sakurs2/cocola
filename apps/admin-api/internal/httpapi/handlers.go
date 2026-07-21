@@ -150,6 +150,7 @@ func (a *API) login(w http.ResponseWriter, r *http.Request) {
 }
 
 type createAuthUserReq struct {
+	Name     string  `json:"name,omitempty"`
 	Username string  `json:"username"`
 	Email    string  `json:"email"`
 	Tenant   *string `json:"tenant_id,omitempty"`
@@ -159,6 +160,7 @@ type createAuthUserReq struct {
 }
 
 type updateAuthUserReq struct {
+	Name     string  `json:"name,omitempty"`
 	Username string  `json:"username,omitempty"`
 	Email    string  `json:"email,omitempty"`
 	Tenant   *string `json:"tenant_id,omitempty"`
@@ -170,6 +172,20 @@ type resetAuthUserPasswordReq struct {
 	Password string `json:"password"`
 }
 
+type updateOwnAccountReq struct {
+	Name            string `json:"name"`
+	Username        string `json:"username"`
+	Email           string `json:"email"`
+	CurrentPassword string `json:"current_password,omitempty"`
+	ExpectedVersion int64  `json:"expected_version"`
+}
+
+type changeOwnPasswordReq struct {
+	CurrentPassword string `json:"current_password"`
+	NewPassword     string `json:"new_password"`
+	ExpectedVersion int64  `json:"expected_version"`
+}
+
 func (a *API) createAuthUser(w http.ResponseWriter, r *http.Request) {
 	var req createAuthUserReq
 	if err := decode(r, &req); err != nil {
@@ -177,6 +193,7 @@ func (a *API) createAuthUser(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	u, err := a.svc.CreateAuthUser(r.Context(), service.AuthUserInput{
+		Name:     req.Name,
 		Username: req.Username,
 		Email:    req.Email,
 		Tenant:   req.Tenant,
@@ -214,6 +231,15 @@ func (a *API) lookupAuthUser(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, u)
 }
 
+func (a *API) getAuthUser(w http.ResponseWriter, r *http.Request) {
+	u, err := a.svc.GetAuthUser(r.Context(), chi.URLParam(r, "id"))
+	if err != nil {
+		mapErr(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, u)
+}
+
 func (a *API) updateAuthUser(w http.ResponseWriter, r *http.Request) {
 	var req updateAuthUserReq
 	if err := decode(r, &req); err != nil {
@@ -221,6 +247,7 @@ func (a *API) updateAuthUser(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	u, err := a.svc.SetAuthUser(r.Context(), chi.URLParam(r, "id"), service.AuthUserInput{
+		Name:     req.Name,
 		Username: req.Username,
 		Email:    req.Email,
 		Tenant:   req.Tenant,
@@ -233,6 +260,50 @@ func (a *API) updateAuthUser(w http.ResponseWriter, r *http.Request) {
 			writeErr(w, http.StatusConflict, "CONFLICT", "username or email already exists")
 			return
 		}
+		mapErr(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, u)
+}
+
+func (a *API) getOwnAccount(w http.ResponseWriter, r *http.Request) {
+	u, err := a.svc.GetOwnAccount(r.Context(), actorOf(r))
+	if err != nil {
+		mapErr(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, u)
+}
+
+func (a *API) updateOwnAccount(w http.ResponseWriter, r *http.Request) {
+	var req updateOwnAccountReq
+	if err := decode(r, &req); err != nil {
+		mapErr(w, err)
+		return
+	}
+	u, err := a.svc.UpdateOwnAccount(r.Context(), actorOf(r), service.OwnAccountInput{
+		Name: req.Name, Username: req.Username, Email: req.Email,
+		CurrentPassword: req.CurrentPassword, ExpectedVersion: req.ExpectedVersion,
+	})
+	if err != nil {
+		mapErr(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, u)
+}
+
+func (a *API) changeOwnPassword(w http.ResponseWriter, r *http.Request) {
+	var req changeOwnPasswordReq
+	if err := decode(r, &req); err != nil {
+		mapErr(w, err)
+		return
+	}
+	u, err := a.svc.ChangeOwnPassword(r.Context(), actorOf(r), service.OwnPasswordInput{
+		CurrentPassword: req.CurrentPassword,
+		NewPassword:     req.NewPassword,
+		ExpectedVersion: req.ExpectedVersion,
+	})
+	if err != nil {
 		mapErr(w, err)
 		return
 	}

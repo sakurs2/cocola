@@ -44,13 +44,20 @@ export default function Home() {
 }
 
 function Workspace() {
-  const { loadConversation, selectedArtifact, closeArtifact, environmentStatus, activeSessionId } =
-    useCocola();
+  const {
+    loadConversation,
+    selectedArtifact,
+    closeArtifact,
+    environmentStatus,
+    activeSessionId,
+    conversations,
+  } = useCocola();
   const router = useRouter();
   const [workspaceWidth, setWorkspaceWidth] = useState(640);
   const [dockView, setDockView] = useState<"status" | "workspace">("status");
   const [statusOpen, setStatusOpen] = useState(false);
   const [workspaceOpen, setWorkspaceOpen] = useState(false);
+  const activeConversation = conversations.find((item) => item.id === activeSessionId);
 
   useEffect(() => {
     const id = new URLSearchParams(window.location.search).get("conversation")?.trim();
@@ -128,6 +135,7 @@ function Workspace() {
               >
                 <WorkspaceDock
                   sessionID={activeSessionId}
+                  projectTask={Boolean(activeConversation?.project_id)}
                   artifact={selectedArtifact}
                   onArtifactClose={closeArtifact}
                   onClose={() => setWorkspaceOpen(false)}

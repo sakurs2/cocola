@@ -57,15 +57,15 @@ func (p *Postgres) UpsertConversation(ctx context.Context, c Conversation) error
 		c.RuntimeID = DefaultRuntimeID
 	}
 	// A caller-controlled conversation id may only refresh its original owner.
-	const q = `INSERT INTO conversations (id, user_id, tenant_id, title, chat_type, folder_id, hidden, runtime_id, created_at, updated_at)
-		VALUES ($1,$2,$3,$4,$5,NULLIF($6,''),$7,$8,$9,$10)
+	const q = `INSERT INTO conversations (id, user_id, tenant_id, title, chat_type, folder_id, project_id, hidden, runtime_id, created_at, updated_at)
+		VALUES ($1,$2,$3,$4,$5,NULLIF($6,''),NULLIF($7,'')::uuid,$8,$9,$10,$11)
 		ON CONFLICT (id) DO UPDATE SET updated_at = EXCLUDED.updated_at
 		WHERE conversations.user_id = EXCLUDED.user_id
 			AND conversations.runtime_id = EXCLUDED.runtime_id
 		RETURNING id`
 	var id string
 	err := p.pool.QueryRow(ctx, q,
-		c.ID, c.UserID, c.TenantID, c.Title, c.ChatType, c.FolderID, c.Hidden, c.RuntimeID,
+		c.ID, c.UserID, c.TenantID, c.Title, c.ChatType, c.FolderID, c.ProjectID, c.Hidden, c.RuntimeID,
 		c.CreatedAt, c.UpdatedAt).Scan(&id)
 	if err == pgx.ErrNoRows {
 		return ErrNotFound
@@ -140,7 +140,7 @@ func (p *Postgres) UpsertMessage(ctx context.Context, m Message) error {
 }
 
 func (p *Postgres) ListConversations(ctx context.Context, userID string) ([]Conversation, error) {
-	const q = `SELECT id, user_id, tenant_id, title, chat_type, COALESCE(folder_id, ''), hidden, runtime_id, created_at, updated_at
+	const q = `SELECT id, user_id, tenant_id, title, chat_type, COALESCE(folder_id, ''), COALESCE(project_id::text, ''), hidden, runtime_id, created_at, updated_at
 		FROM conversations WHERE user_id = $1 AND hidden = FALSE ORDER BY updated_at DESC, id DESC`
 	rows, err := p.pool.Query(ctx, q, userID)
 	if err != nil {
@@ -150,7 +150,7 @@ func (p *Postgres) ListConversations(ctx context.Context, userID string) ([]Conv
 	out := make([]Conversation, 0)
 	for rows.Next() {
 		var c Conversation
-		if err := rows.Scan(&c.ID, &c.UserID, &c.TenantID, &c.Title, &c.ChatType, &c.FolderID,
+		if err := rows.Scan(&c.ID, &c.UserID, &c.TenantID, &c.Title, &c.ChatType, &c.FolderID, &c.ProjectID,
 			&c.Hidden, &c.RuntimeID, &c.CreatedAt, &c.UpdatedAt); err != nil {
 			return nil, err
 		}
@@ -160,11 +160,11 @@ func (p *Postgres) ListConversations(ctx context.Context, userID string) ([]Conv
 }
 
 func (p *Postgres) GetConversation(ctx context.Context, convID, userID string) (Conversation, error) {
-	const q = `SELECT id, user_id, tenant_id, title, chat_type, COALESCE(folder_id, ''), hidden, runtime_id, created_at, updated_at
+	const q = `SELECT id, user_id, tenant_id, title, chat_type, COALESCE(folder_id, ''), COALESCE(project_id::text, ''), hidden, runtime_id, created_at, updated_at
 		FROM conversations WHERE id = $1 AND user_id = $2`
 	var c Conversation
 	if err := p.pool.QueryRow(ctx, q, convID, userID).Scan(
-		&c.ID, &c.UserID, &c.TenantID, &c.Title, &c.ChatType, &c.FolderID,
+		&c.ID, &c.UserID, &c.TenantID, &c.Title, &c.ChatType, &c.FolderID, &c.ProjectID,
 		&c.Hidden, &c.RuntimeID, &c.CreatedAt, &c.UpdatedAt,
 	); err != nil {
 		if err == pgx.ErrNoRows {
@@ -221,10 +221,10 @@ func (p *Postgres) GetMessages(ctx context.Context, convID, userID string) ([]Me
 func (p *Postgres) RenameConversation(ctx context.Context, convID, userID, title string) (Conversation, error) {
 	const q = `UPDATE conversations SET title = $3
 		WHERE id = $1 AND user_id = $2
-		RETURNING id, user_id, tenant_id, title, chat_type, COALESCE(folder_id, ''), hidden, runtime_id, created_at, updated_at`
+		RETURNING id, user_id, tenant_id, title, chat_type, COALESCE(folder_id, ''), COALESCE(project_id::text, ''), hidden, runtime_id, created_at, updated_at`
 	var c Conversation
 	if err := p.pool.QueryRow(ctx, q, convID, userID, title).Scan(
-		&c.ID, &c.UserID, &c.TenantID, &c.Title, &c.ChatType, &c.FolderID,
+		&c.ID, &c.UserID, &c.TenantID, &c.Title, &c.ChatType, &c.FolderID, &c.ProjectID,
 		&c.Hidden, &c.RuntimeID, &c.CreatedAt, &c.UpdatedAt,
 	); err != nil {
 		if err == pgx.ErrNoRows {
@@ -390,12 +390,12 @@ func (p *Postgres) MoveConversation(ctx context.Context, convID, userID, folderI
 	}
 	const q = `UPDATE conversations
 		SET folder_id=NULLIF($3,''), updated_at=$4
-		WHERE id=$1 AND user_id=$2 AND chat_type='chat'
-		RETURNING id, user_id, tenant_id, title, chat_type, COALESCE(folder_id, ''), hidden, runtime_id, created_at, updated_at`
+		WHERE id=$1 AND user_id=$2 AND chat_type='chat' AND project_id IS NULL
+		RETURNING id, user_id, tenant_id, title, chat_type, COALESCE(folder_id, ''), COALESCE(project_id::text, ''), hidden, runtime_id, created_at, updated_at`
 	var conversation Conversation
 	err = tx.QueryRow(ctx, q, convID, userID, folderID, updatedAt).Scan(
 		&conversation.ID, &conversation.UserID, &conversation.TenantID, &conversation.Title,
-		&conversation.ChatType, &conversation.FolderID, &conversation.Hidden, &conversation.RuntimeID,
+		&conversation.ChatType, &conversation.FolderID, &conversation.ProjectID, &conversation.Hidden, &conversation.RuntimeID,
 		&conversation.CreatedAt, &conversation.UpdatedAt,
 	)
 	if err == pgx.ErrNoRows {

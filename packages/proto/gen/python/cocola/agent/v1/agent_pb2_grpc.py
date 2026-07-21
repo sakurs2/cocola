@@ -54,6 +54,11 @@ class AgentRuntimeServiceStub(object):
                 request_serializer=cocola_dot_agent_dot_v1_dot_agent__pb2.ListRuntimesRequest.SerializeToString,
                 response_deserializer=cocola_dot_agent_dot_v1_dot_agent__pb2.ListRuntimesResponse.FromString,
                 _registered_method=True)
+        self.InspectWorkspaceGit = channel.unary_unary(
+                '/cocola.agent.v1.AgentRuntimeService/InspectWorkspaceGit',
+                request_serializer=cocola_dot_agent_dot_v1_dot_agent__pb2.InspectWorkspaceGitRequest.SerializeToString,
+                response_deserializer=cocola_dot_agent_dot_v1_dot_agent__pb2.InspectWorkspaceGitResponse.FromString,
+                _registered_method=True)
 
 
 class AgentRuntimeServiceServicer(object):
@@ -82,6 +87,14 @@ class AgentRuntimeServiceServicer(object):
         context.set_details('Method not implemented!')
         raise NotImplementedError('Method not implemented!')
 
+    def InspectWorkspaceGit(self, request, context):
+        """InspectWorkspaceGit is an explicit user-triggered read. It may acquire the
+        sandbox; merely opening the Git tab never invokes it.
+        """
+        context.set_code(grpc.StatusCode.UNIMPLEMENTED)
+        context.set_details('Method not implemented!')
+        raise NotImplementedError('Method not implemented!')
+
 
 def add_AgentRuntimeServiceServicer_to_server(servicer, server):
     rpc_method_handlers = {
@@ -99,6 +112,11 @@ def add_AgentRuntimeServiceServicer_to_server(servicer, server):
                     servicer.ListRuntimes,
                     request_deserializer=cocola_dot_agent_dot_v1_dot_agent__pb2.ListRuntimesRequest.FromString,
                     response_serializer=cocola_dot_agent_dot_v1_dot_agent__pb2.ListRuntimesResponse.SerializeToString,
+            ),
+            'InspectWorkspaceGit': grpc.unary_unary_rpc_method_handler(
+                    servicer.InspectWorkspaceGit,
+                    request_deserializer=cocola_dot_agent_dot_v1_dot_agent__pb2.InspectWorkspaceGitRequest.FromString,
+                    response_serializer=cocola_dot_agent_dot_v1_dot_agent__pb2.InspectWorkspaceGitResponse.SerializeToString,
             ),
     }
     generic_handler = grpc.method_handlers_generic_handler(
@@ -187,6 +205,33 @@ class AgentRuntimeService(object):
             '/cocola.agent.v1.AgentRuntimeService/ListRuntimes',
             cocola_dot_agent_dot_v1_dot_agent__pb2.ListRuntimesRequest.SerializeToString,
             cocola_dot_agent_dot_v1_dot_agent__pb2.ListRuntimesResponse.FromString,
+            options,
+            channel_credentials,
+            insecure,
+            call_credentials,
+            compression,
+            wait_for_ready,
+            timeout,
+            metadata,
+            _registered_method=True)
+
+    @staticmethod
+    def InspectWorkspaceGit(request,
+            target,
+            options=(),
+            channel_credentials=None,
+            call_credentials=None,
+            insecure=False,
+            compression=None,
+            wait_for_ready=None,
+            timeout=None,
+            metadata=None):
+        return grpc.experimental.unary_unary(
+            request,
+            target,
+            '/cocola.agent.v1.AgentRuntimeService/InspectWorkspaceGit',
+            cocola_dot_agent_dot_v1_dot_agent__pb2.InspectWorkspaceGitRequest.SerializeToString,
+            cocola_dot_agent_dot_v1_dot_agent__pb2.InspectWorkspaceGitResponse.FromString,
             options,
             channel_credentials,
             insecure,

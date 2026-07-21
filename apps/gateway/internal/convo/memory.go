@@ -40,6 +40,12 @@ func (m *Memory) UpsertConversation(_ context.Context, c Conversation) error {
 	if c.RuntimeID == "" {
 		c.RuntimeID = DefaultRuntimeID
 	}
+	if c.FolderID != "" && c.ProjectID != "" {
+		return ErrUnsupportedChatType
+	}
+	if c.ProjectID != "" && c.ChatType != "chat" {
+		return ErrUnsupportedChatType
+	}
 	if c.FolderID != "" {
 		if c.ChatType != "chat" {
 			return ErrUnsupportedChatType
@@ -54,6 +60,9 @@ func (m *Memory) UpsertConversation(_ context.Context, c Conversation) error {
 		}
 		if existing.RuntimeID != c.RuntimeID {
 			return ErrRuntimeMismatch
+		}
+		if c.ProjectID != "" && existing.ProjectID != c.ProjectID {
+			return ErrProjectMismatch
 		}
 		// Refresh updated_at only; keep the original title (MVP: never overwrite).
 		existing.UpdatedAt = c.UpdatedAt
@@ -186,6 +195,9 @@ func (m *Memory) MoveConversation(_ context.Context, convID, userID, folderID st
 		return Conversation{}, ErrNotFound
 	}
 	if conversation.ChatType != "chat" {
+		return Conversation{}, ErrUnsupportedChatType
+	}
+	if conversation.ProjectID != "" {
 		return Conversation{}, ErrUnsupportedChatType
 	}
 	if folderID != "" {

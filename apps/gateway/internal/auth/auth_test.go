@@ -45,13 +45,20 @@ func TestVerifyAllowAnonymous(t *testing.T) {
 
 func TestVerifyGoodToken(t *testing.T) {
 	v := NewVerifier(Config{Secret: "s", Issuer: "cocola"})
-	tok := mint(t, "s", "emp-1", "cocola", 0)
+	tok, err := token.Encode(token.Claims{
+		Subject: "emp-1", Issuer: "cocola", Email: "alice@example.com",
+		Name: "Alice", Username: "alice",
+	}, "s")
+	if err != nil {
+		t.Fatalf("encode: %v", err)
+	}
 	id, err := v.Verify("Bearer "+tok, 0)
 	if err != nil {
 		t.Fatalf("verify: %v", err)
 	}
-	if id.UserID != "emp-1" {
-		t.Fatalf("want emp-1, got %q", id.UserID)
+	if id.UserID != "emp-1" || id.Email != "alice@example.com" ||
+		id.Name != "Alice" || id.Username != "alice" {
+		t.Fatalf("verified identity mismatch: %+v", id)
 	}
 }
 

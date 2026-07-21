@@ -23,6 +23,9 @@ import (
 type Identity struct {
 	UserID   string
 	TenantID string
+	Email    string
+	Name     string
+	Username string
 	TokenID  string // jti; the admin-api denylist key
 	IssuedAt int64
 	Expires  int64
@@ -31,7 +34,10 @@ type Identity struct {
 // DevIdentity is the stable, obviously-fake identity used when auth is disabled
 // or AllowAnonymous accepts a blank token. It never leaks into production unless
 // the operator explicitly runs without a secret.
-var DevIdentity = Identity{UserID: "dev-user", TenantID: "dev-tenant"}
+var DevIdentity = Identity{
+	UserID: "dev-user", TenantID: "dev-tenant", Email: "dev-user@localhost",
+	Name: "Cocola User", Username: "dev-user",
+}
 
 // Config controls verification. Secret == "" disables auth entirely.
 type Config struct {
@@ -89,6 +95,9 @@ func (v *Verifier) Verify(raw string, now int64) (Identity, error) {
 	return Identity{
 		UserID:   claims.Subject,
 		TenantID: claims.Tenant,
+		Email:    claims.Email,
+		Name:     claims.Name,
+		Username: claims.Username,
 		TokenID:  claims.ID,
 		IssuedAt: claims.IssuedAt,
 		Expires:  claims.Expires,

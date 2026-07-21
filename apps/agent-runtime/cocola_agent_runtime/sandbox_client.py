@@ -156,6 +156,7 @@ class SandboxClient:
         image: str = "",
         env: dict[str, str] | None = None,
         allow_workspace_reset: bool = False,
+        additional_egress_allowlist: list[str] | None = None,
     ) -> AcquireResult:
         """Bind a session to a sandbox (create-or-reuse).
 
@@ -170,6 +171,7 @@ class SandboxClient:
                 image=image,
                 env=env or {},
                 allow_workspace_reset=allow_workspace_reset,
+                additional_egress_allowlist=additional_egress_allowlist or [],
             )
         )
         return AcquireResult(

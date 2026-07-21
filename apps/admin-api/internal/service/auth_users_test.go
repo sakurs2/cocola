@@ -149,7 +149,8 @@ func TestAuthUserLifecycleAndRuntimeToken(t *testing.T) {
 	if err != nil {
 		t.Fatalf("decode runtime token: %v", err)
 	}
-	if claims.Subject != "test@email" || claims.Tenant != "" {
+	if claims.Subject != created.ID || claims.Tenant != "" || claims.Email != created.Email ||
+		claims.Name != created.Name || claims.Username != created.Username {
 		t.Fatalf("runtime claims wrong: %+v", claims)
 	}
 
@@ -292,5 +293,129 @@ func TestRuntimeTokenTenantFromUserRecord(t *testing.T) {
 	}
 	if claims3.Tenant != "team-beta" {
 		t.Fatalf("runtime token tenant want team-beta, got %q", claims3.Tenant)
+	}
+}
+
+func TestOwnAccountProfileAndPasswordLifecycle(t *testing.T) {
+	ctx := context.Background()
+	st := store.NewMemory()
+	svc := New(st, token.NewIssuer("secret", "cocola", time.Hour), authTestClock)
+
+	created, err := svc.CreateAuthUser(ctx, AuthUserInput{
+		Name: "Alice", Username: "alice", Email: "alice@example.com",
+		Role: RoleUser, Enabled: boolPtr(true), Password: "old-password", Actor: "admin",
+	})
+	if err != nil {
+		t.Fatalf("create user: %v", err)
+	}
+	if created.Version != 1 {
+		t.Fatalf("created version = %d, want 1", created.Version)
+	}
+
+	profile, err := svc.UpdateOwnAccount(ctx, created.ID, OwnAccountInput{
+		Name: "Alice Cooper", Username: "alice-cooper", Email: created.Email,
+		ExpectedVersion: created.Version,
+	})
+	if err != nil {
+		t.Fatalf("update name and username: %v", err)
+	}
+	if profile.ID != created.ID || profile.Name != "Alice Cooper" ||
+		profile.Username != "alice-cooper" || profile.Version != 2 {
+		t.Fatalf("updated profile mismatch: %+v", profile)
+	}
+	if _, err := svc.Authenticate(ctx, "alice-cooper", "old-password"); err != nil {
+		t.Fatalf("authenticate with updated username: %v", err)
+	}
+	if _, err := svc.Authenticate(ctx, "alice", "old-password"); !errors.Is(err, ErrUnauthenticated) {
+		t.Fatalf("old username should stop authenticating, got %v", err)
+	}
+
+	if _, err := svc.UpdateOwnAccount(ctx, created.ID, OwnAccountInput{
+		Name: profile.Name, Username: profile.Username, Email: "alice@new.example",
+		CurrentPassword: "wrong-password", ExpectedVersion: profile.Version,
+	}); !errors.Is(err, ErrCurrentPassword) {
+		t.Fatalf("email change with wrong password want ErrCurrentPassword, got %v", err)
+	}
+	profile, err = svc.UpdateOwnAccount(ctx, created.ID, OwnAccountInput{
+		Name: profile.Name, Username: profile.Username, Email: "alice@new.example",
+		CurrentPassword: "old-password", ExpectedVersion: profile.Version,
+	})
+	if err != nil {
+		t.Fatalf("update email: %v", err)
+	}
+	if profile.Email != "alice@new.example" || profile.Version != 3 {
+		t.Fatalf("updated email mismatch: %+v", profile)
+	}
+	if _, err := svc.Authenticate(ctx, created.Email, "old-password"); !errors.Is(err, ErrUnauthenticated) {
+		t.Fatalf("old email should stop authenticating, got %v", err)
+	}
+
+	if _, err := svc.ChangeOwnPassword(ctx, created.ID, OwnPasswordInput{
+		CurrentPassword: "wrong-password", NewPassword: "new-password", ExpectedVersion: profile.Version,
+	}); !errors.Is(err, ErrCurrentPassword) {
+		t.Fatalf("wrong current password want ErrCurrentPassword, got %v", err)
+	}
+	changed, err := svc.ChangeOwnPassword(ctx, created.ID, OwnPasswordInput{
+		CurrentPassword: "old-password", NewPassword: "new-password", ExpectedVersion: profile.Version,
+	})
+	if err != nil {
+		t.Fatalf("change password: %v", err)
+	}
+	if changed.Version != 4 {
+		t.Fatalf("password change version = %d, want 4", changed.Version)
+	}
+	if _, err := svc.Authenticate(ctx, profile.Email, "old-password"); !errors.Is(err, ErrUnauthenticated) {
+		t.Fatalf("old password should stop authenticating, got %v", err)
+	}
+	if _, err := svc.Authenticate(ctx, profile.Email, "new-password"); err != nil {
+		t.Fatalf("authenticate with new password: %v", err)
+	}
+	if _, err := svc.UpdateOwnAccount(ctx, created.ID, OwnAccountInput{
+		Name: changed.Name, Username: changed.Username, Email: changed.Email, ExpectedVersion: profile.Version,
+	}); !errors.Is(err, store.ErrVersionConflict) {
+		t.Fatalf("stale profile update want ErrVersionConflict, got %v", err)
+	}
+}
+
+func TestUpdateOwnAccountRejectsInvalidEmailDefectProbing(t *testing.T) {
+	for _, invalidEmail := range []string{"@example.com", "alice@"} {
+		t.Run(invalidEmail, func(t *testing.T) {
+			ctx := context.Background()
+			st := store.NewMemory()
+			svc := New(st, token.NewIssuer("secret", "cocola", time.Hour), authTestClock)
+			created, err := svc.CreateAuthUser(ctx, AuthUserInput{
+				Name: "Alice", Username: "alice", Email: "alice@example.com",
+				Role: RoleUser, Enabled: boolPtr(true), Password: "old-password", Actor: "admin",
+			})
+			if err != nil {
+				t.Fatalf("create user: %v", err)
+			}
+			_, err = svc.UpdateOwnAccount(ctx, created.ID, OwnAccountInput{
+				Name: created.Name, Username: created.Username, Email: invalidEmail,
+				CurrentPassword: "old-password", ExpectedVersion: created.Version,
+			})
+			if !errors.Is(err, ErrInvalidArg) {
+				t.Fatalf("invalid email %q want ErrInvalidArg, got %v", invalidEmail, err)
+			}
+		})
+	}
+}
+
+func TestChangeOwnPasswordRejectsBcryptOversizeDefectProbing(t *testing.T) {
+	ctx := context.Background()
+	st := store.NewMemory()
+	svc := New(st, token.NewIssuer("secret", "cocola", time.Hour), authTestClock)
+	created, err := svc.CreateAuthUser(ctx, AuthUserInput{
+		Name: "Alice", Username: "alice", Email: "alice@example.com",
+		Role: RoleUser, Enabled: boolPtr(true), Password: "old-password", Actor: "admin",
+	})
+	if err != nil {
+		t.Fatalf("create user: %v", err)
+	}
+	_, err = svc.ChangeOwnPassword(ctx, created.ID, OwnPasswordInput{
+		CurrentPassword: "old-password", NewPassword: strings.Repeat("x", 73), ExpectedVersion: created.Version,
+	})
+	if !errors.Is(err, ErrInvalidArg) {
+		t.Fatalf("73-byte password want ErrInvalidArg, got %v", err)
 	}
 }

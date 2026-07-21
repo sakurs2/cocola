@@ -17,6 +17,9 @@ var (
 	ErrRuntimeMismatch = errors.New("chatrun: conversation runtime mismatch")
 	ErrFolderNotFound  = errors.New("chatrun: folder not found")
 	ErrFolderMismatch  = errors.New("chatrun: conversation folder mismatch")
+	ErrProjectNotFound = errors.New("chatrun: project not found")
+	ErrProjectNotReady = errors.New("chatrun: project not ready")
+	ErrProjectMismatch = errors.New("chatrun: conversation project mismatch")
 )
 
 const (

@@ -28,6 +28,7 @@ import (
 	"github.com/cocola-project/cocola/apps/gateway/internal/convo"
 	"github.com/cocola-project/cocola/apps/gateway/internal/memory"
 	"github.com/cocola-project/cocola/apps/gateway/internal/objstore"
+	"github.com/cocola-project/cocola/apps/gateway/internal/project"
 	"github.com/cocola-project/cocola/apps/gateway/internal/sandboxmgr"
 	traceevents "github.com/cocola-project/cocola/apps/gateway/internal/traceevent"
 	"github.com/cocola-project/cocola/packages/go-common/logger"
@@ -79,11 +80,12 @@ func safeTraceAttributes(attributes map[string]any) map[string]any {
 // API wires the BFF dependencies. The agent.Streamer is an interface so tests
 // can inject a fake without a real agent-runtime.
 type API struct {
-	streamer agent.Streamer
-	releaser agent.Releaser
-	verifier *auth.Verifier
-	log      logger.Logger
-	metrics  *metrics.Registry // optional; nil => no instrumentation (tests)
+	streamer     agent.Streamer
+	releaser     agent.Releaser
+	gitInspector agent.GitInspector
+	verifier     *auth.Verifier
+	log          logger.Logger
+	metrics      *metrics.Registry // optional; nil => no instrumentation (tests)
 	// store is the attachment source-of-truth object store. nil => P0 path:
 	// attachments are pushed inline only, no upload (feature stays dark until
 	// MinIO is configured). inlineMaxBytes is the small/large split threshold.
@@ -108,6 +110,7 @@ type API struct {
 	// (the route returns 501), keeping the feature dark until wired in main.
 	sandboxResolver sandboxmgr.EndpointResolver
 	memory          *memory.Service
+	projects        *project.Service
 }
 
 // New builds the BFF API.
@@ -115,6 +118,9 @@ func New(streamer agent.Streamer, verifier *auth.Verifier, log logger.Logger) *A
 	a := &API{streamer: streamer, verifier: verifier, log: log}
 	if releaser, ok := streamer.(agent.Releaser); ok {
 		a.releaser = releaser
+	}
+	if inspector, ok := streamer.(agent.GitInspector); ok {
+		a.gitInspector = inspector
 	}
 	return a.WithAgentRuntimes([]agent.Runtime{{
 		ID: "claude-code", Label: "Claude Code", ModelProtocol: "anthropic-messages", IsDefault: true,
@@ -172,6 +178,10 @@ func (a *API) WithTraceStore(store traceevents.Store) *API { a.trace = store; re
 // WithMemory installs the optional OpenViking integration. The rest of the
 // Gateway only depends on this high-level module and never calls OpenViking.
 func (a *API) WithMemory(service *memory.Service) *API { a.memory = service; return a }
+
+// WithProjects installs the high-level GitHub Project module. GitHub remains
+// unreachable from every other gateway package.
+func (a *API) WithProjects(service *project.Service) *API { a.projects = service; return a }
 
 // WithChatRuns configures the single-Gateway background execution path. It is
 // required for chat; there is deliberately no feature flag or distributed
@@ -271,6 +281,34 @@ func (a *API) Handler() http.Handler {
 		a.verifier.Middleware(writeErr)(http.HandlerFunc(a.deleteMemoryItem))))
 	mux.Handle("DELETE /v1/memory/items", a.instrument("DELETE /v1/memory/items",
 		a.verifier.Middleware(writeErr)(http.HandlerFunc(a.clearMemory))))
+	mux.Handle("GET /v1/scm/github/connection", a.instrument("GET /v1/scm/github/connection",
+		a.verifier.Middleware(writeErr)(http.HandlerFunc(a.githubConnection))))
+	mux.Handle("POST /v1/scm/github/oauth/start", a.instrument("POST /v1/scm/github/oauth/start",
+		a.verifier.Middleware(writeErr)(http.HandlerFunc(a.githubOAuthStart))))
+	mux.Handle("POST /v1/scm/github/oauth/callback", a.instrument("POST /v1/scm/github/oauth/callback",
+		a.verifier.Middleware(writeErr)(http.HandlerFunc(a.githubOAuthCallback))))
+	mux.Handle("DELETE /v1/scm/github/connection", a.instrument("DELETE /v1/scm/github/connection",
+		a.verifier.Middleware(writeErr)(http.HandlerFunc(a.githubDisconnect))))
+	mux.Handle("GET /v1/scm/github/repositories", a.instrument("GET /v1/scm/github/repositories",
+		a.verifier.Middleware(writeErr)(http.HandlerFunc(a.githubRepositories))))
+	mux.Handle("GET /v1/projects", a.instrument("GET /v1/projects",
+		a.verifier.Middleware(writeErr)(http.HandlerFunc(a.listProjects))))
+	mux.Handle("POST /v1/projects", a.instrument("POST /v1/projects",
+		a.verifier.Middleware(writeErr)(http.HandlerFunc(a.createProject))))
+	mux.Handle("GET /v1/projects/{id}", a.instrument("GET /v1/projects/{id}",
+		a.verifier.Middleware(writeErr)(http.HandlerFunc(a.getProject))))
+	mux.Handle("PATCH /v1/projects/{id}", a.instrument("PATCH /v1/projects/{id}",
+		a.verifier.Middleware(writeErr)(http.HandlerFunc(a.updateProject))))
+	mux.Handle("DELETE /v1/projects/{id}", a.instrument("DELETE /v1/projects/{id}",
+		a.verifier.Middleware(writeErr)(http.HandlerFunc(a.archiveProject))))
+	mux.Handle("POST /v1/projects/{id}/retry", a.instrument("POST /v1/projects/{id}/retry",
+		a.verifier.Middleware(writeErr)(http.HandlerFunc(a.retryProject))))
+	mux.Handle("GET /v1/projects/{id}/tasks", a.instrument("GET /v1/projects/{id}/tasks",
+		a.verifier.Middleware(writeErr)(http.HandlerFunc(a.projectTasks))))
+	mux.Handle("GET /v1/conversations/{id}/git/status", a.instrument("GET /v1/conversations/{id}/git/status",
+		a.verifier.Middleware(writeErr)(http.HandlerFunc(a.gitStatus))))
+	mux.Handle("POST /v1/conversations/{id}/git/inspect", a.instrument("POST /v1/conversations/{id}/git/inspect",
+		a.verifier.Middleware(writeErr)(http.HandlerFunc(a.inspectGit))))
 	// Preview Proxy: reverse-proxy a user-launched in-sandbox dev server. The
 	// trailing {rest...} wildcard captures the remaining path so nested asset
 	// requests are proxied too.
@@ -438,6 +476,7 @@ type chatRequest struct {
 	ClientRequestID                      string            `json:"client_request_id"`
 	RuntimeID                            string            `json:"runtime_id"`
 	FolderID                             string            `json:"folder_id"`
+	ProjectID                            string            `json:"project_id"`
 	SkillID                              string            `json:"skill_id"`
 	AllowWorkspaceReset                  bool              `json:"allow_workspace_reset"`
 }
@@ -464,7 +503,7 @@ func (a *API) startConversationRun(ctx context.Context, id auth.Identity, req ch
 		ConversationID:    strings.TrimSpace(req.SessionID),
 		ConversationTitle: titleForConversation(req),
 		UserID:            id.UserID,
-		UserEmail:         id.UserID,
+		UserEmail:         id.Email,
 		Source:            source,
 		ModelAlias:        strings.TrimSpace(req.ModelAlias),
 		Status:            "running",

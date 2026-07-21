@@ -77,8 +77,12 @@ message Sandbox {
   string endpoint = 4;
 }
 
-message CreateRequest { SandboxSpec spec = 1; }
-message CreateResponse { Sandbox sandbox = 1; }
+message CreateRequest {
+  SandboxSpec spec = 1;
+}
+message CreateResponse {
+  Sandbox sandbox = 1;
+}
 
 message ExecRequest {
   string sandbox_id = 1;
@@ -116,19 +120,32 @@ message ReadFileRequest {
   string sandbox_id = 1;
   string path = 2;
 }
-message ReadFileResponse { bytes data = 1; }
+message ReadFileResponse {
+  bytes data = 1;
+}
 
-message PauseRequest { string sandbox_id = 1; }
+message PauseRequest {
+  string sandbox_id = 1;
+}
 message PauseResponse {}
 
-message ResumeRequest { string sandbox_id = 1; }
+message ResumeRequest {
+  string sandbox_id = 1;
+}
 message ResumeResponse {}
 
-message DestroyRequest { string sandbox_id = 1; }
+message DestroyRequest {
+  string sandbox_id = 1;
+}
 message DestroyResponse {}
 
-message HealthRequest { string sandbox_id = 1; }
-message HealthResponse { bool healthy = 1; string detail = 2; }
+message HealthRequest {
+  string sandbox_id = 1;
+}
+message HealthResponse {
+  bool healthy = 1;
+  string detail = 2;
+}
 
 // --- M2 binding messages -------------------------------------------------
 
@@ -139,6 +156,9 @@ message AcquireRequest {
   map<string, string> env = 4;
   // Explicit user consent to discard an unavailable node-local workspace.
   bool allow_workspace_reset = 5;
+  // Trusted per-session additions to the platform egress policy. Only
+  // agent-runtime may set these; browser input never reaches this field.
+  repeated string additional_egress_allowlist = 6;
 }
 
 enum WorkspaceState {
@@ -158,7 +178,9 @@ message AcquireResponse {
   string previous_workspace_node = 5;
 }
 
-message HeartbeatRequest { string sandbox_id = 1; }
+message HeartbeatRequest {
+  string sandbox_id = 1;
+}
 message HeartbeatResponse {}
 
 message ReleaseRequest {

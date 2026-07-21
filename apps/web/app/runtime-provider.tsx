@@ -36,6 +36,7 @@ import {
   type EnvironmentPreparationSnapshot,
 } from "@/lib/environment";
 import { inferAgentDurationMs } from "@/lib/agent-turn-summary.mjs";
+import { canDiscardPendingProjectTask } from "@/lib/project-task-intent.mjs";
 
 // ---- Local message model (carries cocola semantics) ------------------------
 
@@ -187,8 +188,29 @@ export type ConversationSummary = {
   title: string;
   chat_type?: "chat" | "scheduled_task" | string;
   folder_id?: string;
+  project_id?: string;
   updated_at: string;
   runtime_id: string;
+};
+
+export type ProjectSummary = {
+  id: string;
+  name: string;
+  description: string;
+  runtime_id: string;
+  repository_mode: "create" | "import";
+  repository_owner: string;
+  repository_name: string;
+  repository_html_url: string;
+  default_branch: string;
+  visibility: "private" | "public";
+  repository_has_lfs?: boolean;
+  repository_has_submodules?: boolean;
+  status: "provisioning" | "ready" | "failed" | "archived";
+  provision_error_code?: string;
+  version: number;
+  created_at: string;
+  updated_at: string;
 };
 
 export type ConversationFolder = {
@@ -281,6 +303,8 @@ type CocolaContextValue = {
   // resume entry in the backend session_map, so Route A's claude CLI starts
   // from zero — this is the boundary that severs prior-turn history.
   newConversation: (folderId?: string) => string;
+  newProjectTask: (projectId: string, runtimeId: string) => string;
+  discardPendingProjectTask: (sessionId: string) => boolean;
   // Persisted conversation list (sidebar) + loaders. conversations is refreshed
   // after each turn and on mount; loadConversation replays a stored conversation
   // into the thread and points session_id at it so follow-ups continue it.
@@ -296,6 +320,9 @@ type CocolaContextValue = {
   renameFolder: (id: string, name: string) => Promise<ConversationFolder>;
   deleteFolder: (id: string) => Promise<void>;
   moveConversation: (id: string, folderId: string | null) => Promise<void>;
+  projects: ProjectSummary[];
+  projectsLoaded: boolean;
+  refreshProjects: () => void;
   activeSessionId: string;
   runningSessionIds: Set<string>;
   unreadCompletedSessionIds: Set<string>;
@@ -833,6 +860,8 @@ export function CocolaRuntimeProvider({ children }: { children: ReactNode }) {
   const [conversations, setConversations] = useState<ConversationSummary[]>([]);
   const [folders, setFolders] = useState<ConversationFolder[]>([]);
   const [foldersLoaded, setFoldersLoaded] = useState(false);
+  const [projects, setProjects] = useState<ProjectSummary[]>([]);
+  const [projectsLoaded, setProjectsLoaded] = useState(false);
   const [unreadCompletedIds, setUnreadCompletedIds] = useState<Set<string>>(() => new Set());
   const [selectedArtifact, setSelectedArtifact] = useState<ArtifactPreview | null>(null);
   const [models, setModels] = useState<ModelOption[]>([]);
@@ -849,6 +878,7 @@ export function CocolaRuntimeProvider({ children }: { children: ReactNode }) {
   const restoredRuns = useRef(false);
   const sessionIdRef = useRef(sessionId);
   const sessionFolderHintsRef = useRef<Map<string, string>>(new Map());
+  const sessionProjectHintsRef = useRef<Map<string, string>>(new Map());
   const preferredRuntimeIdRef = useRef("");
   const conversationsRef = useRef(conversations);
   const realtimeScheduledRunsRef = useRef<Set<string>>(new Set());
@@ -1073,6 +1103,25 @@ export function CocolaRuntimeProvider({ children }: { children: ReactNode }) {
         // A transient failure should not discard folders already on screen.
       } finally {
         setFoldersLoaded(true);
+      }
+    })();
+  }, []);
+
+  const refreshProjects = useCallback(() => {
+    void (async () => {
+      try {
+        const res = await fetch("/api/projects", { cache: "no-store" });
+        if (isAccountDisabledResponse(res)) {
+          redirectAccountDisabled();
+          return;
+        }
+        if (!res.ok) return;
+        const rows = (await res.json()) as ProjectSummary[];
+        if (Array.isArray(rows)) setProjects(rows);
+      } catch {
+        // Keep the last project list during a transient Gateway failure.
+      } finally {
+        setProjectsLoaded(true);
       }
     })();
   }, []);
@@ -1413,7 +1462,13 @@ export function CocolaRuntimeProvider({ children }: { children: ReactNode }) {
       );
 
       const turnSessionId = sessionId;
-      const folderHint = sessionFolderHintsRef.current.get(turnSessionId) ?? "";
+      const boundConversation = conversations.find(
+        (conversation) => conversation.id === turnSessionId,
+      );
+      const folderHint =
+        sessionFolderHintsRef.current.get(turnSessionId) ?? boundConversation?.folder_id ?? "";
+      const projectHint =
+        sessionProjectHintsRef.current.get(turnSessionId) ?? boundConversation?.project_id ?? "";
       const model = selectedModel;
       const agentRuntime = selectedRuntime;
       const turnSkill = selectedSkill;
@@ -1494,6 +1549,9 @@ export function CocolaRuntimeProvider({ children }: { children: ReactNode }) {
             ...(existing?.folder_id || folderHint
               ? { folder_id: existing?.folder_id || folderHint }
               : {}),
+            ...(existing?.project_id || projectHint
+              ? { project_id: existing?.project_id || projectHint }
+              : {}),
             updated_at: now,
             runtime_id: existing?.runtime_id || agentRuntime.id,
           },
@@ -1520,6 +1578,7 @@ export function CocolaRuntimeProvider({ children }: { children: ReactNode }) {
           ...(model.iconSlug ? { model_icon_slug: model.iconSlug } : {}),
           model_icon: model.icon,
           ...(folderHint ? { folder_id: folderHint } : {}),
+          ...(projectHint ? { project_id: projectHint } : {}),
           ...(attachments.length > 0 ? { attachments } : {}),
         });
         let res: Response | undefined;
@@ -1567,9 +1626,11 @@ export function CocolaRuntimeProvider({ children }: { children: ReactNode }) {
           };
           if (
             conflict.error?.code === "RUNTIME_MISMATCH" ||
-            conflict.error?.code === "FOLDER_MISMATCH"
+            conflict.error?.code === "FOLDER_MISMATCH" ||
+            conflict.error?.code === "PROJECT_MISMATCH"
           ) {
             sessionFolderHintsRef.current.delete(turnSessionId);
+            sessionProjectHintsRef.current.delete(turnSessionId);
             setConvMessages((prev) => ({
               ...prev,
               [turnSessionId]: (prev[turnSessionId] ?? []).filter(
@@ -1585,6 +1646,7 @@ export function CocolaRuntimeProvider({ children }: { children: ReactNode }) {
           const runId = conflict.run_id ?? "";
           if (!runId) throw new Error("conversation already has an active run");
           sessionFolderHintsRef.current.delete(turnSessionId);
+          sessionProjectHintsRef.current.delete(turnSessionId);
           const durableAssistantId = `${runId}-assistant`;
           setConvMessages((prev) => {
             const current = (prev[turnSessionId] ?? []).filter(
@@ -1638,6 +1700,7 @@ export function CocolaRuntimeProvider({ children }: { children: ReactNode }) {
         }
         if (!res.body) throw new Error("no response body");
         sessionFolderHintsRef.current.delete(turnSessionId);
+        sessionProjectHintsRef.current.delete(turnSessionId);
 
         const runId = res.headers.get("x-cocola-run-id") ?? "";
         const durableAssistantId = runId ? `${runId}-assistant` : assistantId;
@@ -1673,6 +1736,7 @@ export function CocolaRuntimeProvider({ children }: { children: ReactNode }) {
       selectedModel,
       selectedRuntime,
       selectedSkill,
+      conversations,
       messages.length,
       applyEvent,
       followRun,
@@ -1771,6 +1835,8 @@ export function CocolaRuntimeProvider({ children }: { children: ReactNode }) {
       setSandboxes((prev) => ({ ...prev, [id]: prev[id] ?? null }));
       sessionFolderHintsRef.current.delete(sessionIdRef.current);
       sessionFolderHintsRef.current.delete(id);
+      sessionProjectHintsRef.current.delete(sessionIdRef.current);
+      sessionProjectHintsRef.current.delete(id);
       sessionIdRef.current = id;
       setSessionId(id);
       setSelectedArtifact(null);
@@ -1853,6 +1919,7 @@ export function CocolaRuntimeProvider({ children }: { children: ReactNode }) {
       abortMap.current.delete(id);
       runCursors.current.delete(id);
       sessionFolderHintsRef.current.delete(id);
+      sessionProjectHintsRef.current.delete(id);
       realtimeScheduledRunsRef.current.delete(id);
       deletedScheduledConversationsRef.current.set(id, Date.now());
     }
@@ -2007,6 +2074,7 @@ export function CocolaRuntimeProvider({ children }: { children: ReactNode }) {
         runtimes.find((runtime) => runtime.id === preferredRuntimeIdRef.current) ??
         runtimes.find((runtime) => runtime.is_default);
       sessionFolderHintsRef.current.delete(sessionIdRef.current);
+      sessionProjectHintsRef.current.delete(sessionIdRef.current);
       sessionIdRef.current = fresh;
       if (folderId) sessionFolderHintsRef.current.set(fresh, folderId);
       else sessionFolderHintsRef.current.delete(fresh);
@@ -2020,12 +2088,63 @@ export function CocolaRuntimeProvider({ children }: { children: ReactNode }) {
     [runtimes],
   );
 
+  const newProjectTask = useCallback((projectId: string, runtimeId: string) => {
+    const fresh = genId();
+    sessionFolderHintsRef.current.delete(sessionIdRef.current);
+    sessionProjectHintsRef.current.delete(sessionIdRef.current);
+    sessionIdRef.current = fresh;
+    sessionProjectHintsRef.current.set(fresh, projectId);
+    setSessionId(fresh);
+    setSelectedRuntimeIdState(runtimeId);
+    setSelectedArtifact(null);
+    setConvMessages((prev) => ({ ...prev, [fresh]: [] }));
+    setSandboxes((prev) => ({ ...prev, [fresh]: null }));
+    return fresh;
+  }, []);
+
+  const discardPendingProjectTask = useCallback((pendingSessionId: string) => {
+    const canDiscard = canDiscardPendingProjectTask({
+      hasHint: sessionProjectHintsRef.current.has(pendingSessionId),
+      hasActiveRequest: abortMap.current.has(pendingSessionId),
+      hasRunCursor: runCursors.current.has(pendingSessionId),
+      isPersisted: conversationsRef.current.some(
+        (conversation) => conversation.id === pendingSessionId,
+      ),
+    });
+    if (!canDiscard) return false;
+
+    sessionProjectHintsRef.current.delete(pendingSessionId);
+    setConvMessages((prev) => {
+      if (!(pendingSessionId in prev)) return prev;
+      const next = { ...prev };
+      delete next[pendingSessionId];
+      return next;
+    });
+    setSandboxes((prev) => {
+      if (!(pendingSessionId in prev)) return prev;
+      const next = { ...prev };
+      delete next[pendingSessionId];
+      return next;
+    });
+    if (sessionIdRef.current === pendingSessionId) {
+      const fresh = genId();
+      sessionIdRef.current = fresh;
+      setSessionId(fresh);
+      setSelectedRuntimeIdState(preferredRuntimeIdRef.current);
+      setSelectedArtifact(null);
+      setConvMessages((prev) => ({ ...prev, [fresh]: [] }));
+      setSandboxes((prev) => ({ ...prev, [fresh]: null }));
+    }
+    return true;
+  }, []);
+
   // Initial load of the sidebar list.
   useEffect(() => {
     refreshConversations();
     refreshFolders();
+    refreshProjects();
     refreshSkills();
-  }, [refreshConversations, refreshFolders, refreshSkills]);
+  }, [refreshConversations, refreshFolders, refreshProjects, refreshSkills]);
 
   useEffect(() => {
     window.addEventListener("focus", refreshSkills);
@@ -2112,6 +2231,8 @@ export function CocolaRuntimeProvider({ children }: { children: ReactNode }) {
       setSessionId,
       sandbox,
       newConversation,
+      newProjectTask,
+      discardPendingProjectTask,
       conversations,
       refreshConversations,
       loadConversation,
@@ -2124,6 +2245,9 @@ export function CocolaRuntimeProvider({ children }: { children: ReactNode }) {
       renameFolder,
       deleteFolder,
       moveConversation,
+      projects,
+      projectsLoaded,
+      refreshProjects,
       activeSessionId: sessionId,
       runningSessionIds: runningIds,
       unreadCompletedSessionIds: unreadCompletedIds,
@@ -2149,6 +2273,8 @@ export function CocolaRuntimeProvider({ children }: { children: ReactNode }) {
       sessionId,
       sandbox,
       newConversation,
+      newProjectTask,
+      discardPendingProjectTask,
       conversations,
       refreshConversations,
       loadConversation,
@@ -2161,6 +2287,9 @@ export function CocolaRuntimeProvider({ children }: { children: ReactNode }) {
       renameFolder,
       deleteFolder,
       moveConversation,
+      projects,
+      projectsLoaded,
+      refreshProjects,
       runningIds,
       unreadCompletedIds,
       environmentStatus,

@@ -1,29 +1,24 @@
-import { auth } from "@/auth";
 import { CocolaRuntimeProvider } from "@/app/runtime-provider";
 import { AppSidebar } from "@/components/assistant-ui/app-sidebar";
 import { WorkspaceToastProvider } from "@/components/assistant-ui/workspace-toast";
 import { UsagePanel } from "@/components/profile/usage-panel";
 import { SignOutButton } from "@/components/profile/sign-out-button";
 import { MemoryPanel } from "@/components/profile/memory-panel";
-import { ArrowLeft, BadgeCheck, IdCard, Mail, ShieldCheck, UserRound } from "lucide-react";
+import { GitHubIntegrationPanel } from "@/components/profile/github-integration-panel";
+import { AccountSettingsPanel } from "@/components/profile/account-settings-panel";
+import { isAuthFail, requireUser } from "@/lib/server-auth";
+import { ArrowLeft, BadgeCheck, Mail, ShieldCheck, UserRound } from "lucide-react";
 import Link from "next/link";
 import { redirect } from "next/navigation";
 
 export default async function ProfilePage() {
-  const session = await auth();
-  const user = session?.user;
-  if (!user) redirect("/login");
+  const authResult = await requireUser();
+  if (isAuthFail(authResult)) redirect("/login");
+  const user = authResult.user;
 
   const displayName = user.name || user.email || "User";
   const initial = displayName.trim().slice(0, 1).toUpperCase() || "U";
   const isAdmin = user.role === "admin";
-
-  const rows: { label: string; value: string }[] = [
-    { label: "Username", value: user.username || "-" },
-    { label: "Email", value: user.email || "-" },
-    { label: "Role", value: user.role },
-    { label: "User ID", value: user.id || "-" },
-  ];
 
   return (
     <CocolaRuntimeProvider>
@@ -72,23 +67,7 @@ export default async function ProfilePage() {
                 </div>
               </section>
 
-              {/* Personal information */}
-              <section className="rounded-2xl border border-border bg-card shadow-card">
-                <div className="flex items-center gap-3 border-b border-border px-4 py-3">
-                  <div className="grid size-8 place-items-center rounded-xl bg-sky-500/10">
-                    <IdCard className="size-4 text-sky-600" />
-                  </div>
-                  <h2 className="text-sm font-semibold">Personal Information</h2>
-                </div>
-                <div className="divide-y divide-border">
-                  {rows.map((row) => (
-                    <div key={row.label} className="grid gap-1 px-4 py-3 sm:grid-cols-[180px_1fr]">
-                      <div className="text-sm text-muted-foreground">{row.label}</div>
-                      <div className="min-w-0 break-words text-sm font-medium">{row.value}</div>
-                    </div>
-                  ))}
-                </div>
-              </section>
+              <AccountSettingsPanel initialAccount={user} />
 
               {/* Account status */}
               <section className="rounded-2xl border border-border bg-card shadow-card">
@@ -112,6 +91,8 @@ export default async function ProfilePage() {
               <UsagePanel />
 
               <MemoryPanel />
+
+              <GitHubIntegrationPanel />
 
               <div className="flex items-center justify-between">
                 <SignOutButton />

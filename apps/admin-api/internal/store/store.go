@@ -19,6 +19,11 @@ var ErrNotFound = errors.New("store: not found")
 // ErrConflict is returned on a uniqueness violation (e.g. duplicate skill id).
 var ErrConflict = errors.New("store: conflict")
 
+// ErrVersionConflict is returned when an optimistic account update targets a
+// stale version. It is distinct from uniqueness conflicts so the UI can reload
+// instead of reporting that an identifier is already taken.
+var ErrVersionConflict = errors.New("store: version conflict")
+
 // TokenRecord is the metadata cocola keeps about a token it minted. The token
 // string itself is NOT stored (it is a bearer credential handed to the
 // employee); we keep only what is needed to list and revoke.
@@ -287,6 +292,7 @@ type AuthUser struct {
 	TenantID        string    `json:"tenant_id"` // ten: authoritative team/tenant for minted tokens
 	Role            string    `json:"role"`      // "user" | "admin"
 	Enabled         bool      `json:"enabled"`
+	Version         int64     `json:"version"`
 	PasswordHash    string    `json:"-"`
 	CreatedAt       time.Time `json:"created_at"`
 	UpdatedAt       time.Time `json:"updated_at"`
@@ -470,6 +476,7 @@ type Store interface {
 	GetAuthUserByIdentifier(ctx context.Context, identifier string) (AuthUser, error)
 	ListAuthUsers(ctx context.Context) ([]AuthUser, error)
 	UpdateAuthUser(ctx context.Context, u AuthUser) error
+	UpdateAuthUserVersion(ctx context.Context, u AuthUser, expectedVersion int64) error
 	DeleteAuthUser(ctx context.Context, id, actor string, at time.Time) error
 	TouchAuthUserLogin(ctx context.Context, id string, at time.Time) error
 

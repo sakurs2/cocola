@@ -10,6 +10,7 @@ type CocolaLoginUser = {
   name: string;
   role: "user" | "admin";
   enabled: boolean;
+  version: number;
 };
 
 async function authenticate(identifier: string, password: string): Promise<CocolaLoginUser | null> {
@@ -26,7 +27,7 @@ async function authenticate(identifier: string, password: string): Promise<Cocol
   return user;
 }
 
-export const { handlers, auth, signIn, signOut } = NextAuth({
+export const { handlers, auth, signIn, signOut, unstable_update } = NextAuth({
   session: { strategy: "jwt" },
   pages: { signIn: "/login" },
   providers: [
@@ -45,7 +46,7 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
   ],
   callbacks: {
     authorized: ({ auth }) => Boolean(auth?.user),
-    jwt({ token, user }) {
+    jwt({ token, user, trigger, session }) {
       if (user) {
         const u = user as CocolaLoginUser;
         token.id = u.id;
@@ -53,6 +54,15 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
         token.email = u.email;
         token.name = u.name;
         token.role = u.role;
+        token.version = u.version;
+      }
+      if (trigger === "update" && session?.user) {
+        token.id = session.user.id;
+        token.username = session.user.username;
+        token.email = session.user.email;
+        token.name = session.user.name;
+        token.role = session.user.role;
+        token.version = session.user.version;
       }
       return token;
     },
@@ -63,6 +73,7 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
         session.user.name = String(token.name ?? token.email ?? "");
         session.user.username = String(token.username ?? "");
         session.user.role = token.role === "admin" ? "admin" : "user";
+        session.user.version = Number(token.version ?? 1);
       }
       return session;
     },

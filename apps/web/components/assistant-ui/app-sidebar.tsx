@@ -8,6 +8,7 @@ import {
   CheckCircle2 as CheckCircle,
   MoreHorizontal as DotsThree,
   Folder,
+  FolderGit2,
   Settings as Gear,
   Search as MagnifyingGlass,
   Notebook,
@@ -39,19 +40,48 @@ import { useWorkspaceToast } from "@/components/assistant-ui/workspace-toast";
 // product shells until their backing features land.
 
 type NavItem = { icon: PhosphorIcon; label: string; href?: string; iconClassName?: string };
-type SidebarSection = "actions" | "navigation" | "folders" | "chats" | "account";
+type SidebarSection = "actions" | "navigation" | "projects" | "folders" | "chats" | "account";
 
 type PrimaryNavItem = NavItem & {
   section: SidebarSection;
 };
 
 const PRIMARY_NAV: PrimaryNavItem[] = [
-  { icon: CalendarDots, label: "Tasks", href: "/tasks", section: "navigation", iconClassName: "text-blue-600" },
-  { icon: MagnifyingGlass, label: "Search", section: "navigation", iconClassName: "text-green-600" },
+  {
+    icon: CalendarDots,
+    label: "Tasks",
+    href: "/tasks",
+    section: "navigation",
+    iconClassName: "text-blue-600",
+  },
+  {
+    icon: MagnifyingGlass,
+    label: "Search",
+    section: "navigation",
+    iconClassName: "text-green-600",
+  },
   { icon: Notebook, label: "Notes", section: "navigation", iconClassName: "text-cyan-600" },
-  { icon: Sparkle, label: "Skills", href: "/skills", section: "navigation", iconClassName: "text-violet-600" },
-  { icon: PlugsConnected, label: "MCP", href: "/mcps", section: "navigation", iconClassName: "text-orange-600" },
-  { icon: ShieldCheck, label: "Admin", href: "/admin", section: "navigation", iconClassName: "text-slate-500" },
+  {
+    icon: Sparkle,
+    label: "Skills",
+    href: "/skills",
+    section: "navigation",
+    iconClassName: "text-violet-600",
+  },
+  {
+    icon: PlugsConnected,
+    label: "MCP",
+    href: "/mcps",
+    section: "navigation",
+    iconClassName: "text-orange-600",
+  },
+  {
+    icon: ShieldCheck,
+    label: "Admin",
+    href: "/admin",
+    section: "navigation",
+    iconClassName: "text-slate-500",
+  },
 ];
 
 export function AppSidebar() {
@@ -62,6 +92,7 @@ export function AppSidebar() {
   const sectionRefs = useRef<Record<SidebarSection, HTMLDivElement | null>>({
     actions: null,
     navigation: null,
+    projects: null,
     folders: null,
     chats: null,
     account: null,
@@ -86,6 +117,7 @@ export function AppSidebar() {
     renameConversation,
     deleteConversation,
     folders,
+    projects,
     createFolder,
     renameFolder,
     deleteFolder,
@@ -101,6 +133,7 @@ export function AppSidebar() {
   const visiblePrimaryNav = PRIMARY_NAV.filter(
     (item) => !item.href?.startsWith("/admin") || isAdmin,
   );
+  const regularConversations = conversations.filter((conversation) => !conversation.project_id);
 
   const setSectionRef = (section: SidebarSection) => (node: HTMLDivElement | null) => {
     sectionRefs.current[section] = node;
@@ -223,7 +256,9 @@ export function AppSidebar() {
               <CocolaLogo mono className="size-5" />
             </div>
             <div className="min-w-0 flex-1">
-              <span className="block truncate text-[15px] font-bold text-sidebar-foreground">cocola</span>
+              <span className="block truncate text-[15px] font-bold text-sidebar-foreground">
+                cocola
+              </span>
               <span className="block truncate text-xs font-medium text-sidebar-foreground/70">
                 agent workspace
               </span>
@@ -232,163 +267,191 @@ export function AppSidebar() {
         </div>
 
         <nav className="flex-1 overflow-y-auto px-2 pb-2">
-              <SidebarSectionPanel refSetter={setSectionRef("actions")}>
-                <button
-                  type="button"
-                  title="New Chat"
-                  onClick={openNewChat}
-                  className="flex w-full items-center justify-center gap-2 rounded-xl px-3 py-2.5 text-[13.5px] font-semibold text-white transition-opacity hover:opacity-90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/45"
-                  style={{ background: "linear-gradient(135deg,#2563eb,#7c3aed)" }}
-                >
-                  <PlusCircle className="size-4 shrink-0" />
-                  New Chat
-                </button>
-              </SidebarSectionPanel>
-
-              <SidebarSectionPanel refSetter={setSectionRef("navigation")}>
-                {visiblePrimaryNav.map(({ icon: Icon, label, href, iconClassName }) => {
-                  const active = href
-                    ? href === "/"
-                      ? pathname === "/"
-                      : pathname === href || pathname?.startsWith(`${href}/`)
-                    : false;
-                  return (
-                    <SidebarExpandedRow
-                      key={label}
-                      title={label}
-                      active={active}
-                      onClick={href ? () => navigateTo(href) : undefined}
-                    >
-                      <Icon
-                        className={cn("size-4 shrink-0", iconClassName ?? "text-sidebar-accent-foreground")}
-                      />
-                      <span className="truncate">{label}</span>
-                    </SidebarExpandedRow>
-                  );
-                })}
-              </SidebarSectionPanel>
-
-              <SidebarSectionPanel refSetter={setSectionRef("folders")}>
-                <div className="flex items-center justify-between px-2.5 pb-1 pt-3 text-[13px] font-semibold text-sidebar-foreground/70">
-                  <span>Folders</span>
-                  <button
-                    type="button"
-                    aria-label="Create folder"
-                    title="Create folder"
-                    onClick={() => {
-                      setCreatingFolder(true);
-                      setEditingFolderId(null);
-                      setFolderDraft("");
-                      setSidebarError(null);
-                    }}
-                    className="grid size-6 place-items-center rounded-lg transition hover:bg-sidebar-accent hover:text-sidebar-accent-foreground focus:outline-none"
-                  >
-                    <PlusCircle className="size-4" />
-                  </button>
-                </div>
-                <div className="flex flex-col gap-0.5">
-                  {creatingFolder ? (
-                    <FolderNameInput
-                      value={folderDraft}
-                      placeholder="Folder name"
-                      onChange={setFolderDraft}
-                      onBlur={() => void commitCreateFolder()}
-                      onCancel={() => {
-                        setCreatingFolder(false);
-                        setFolderDraft("");
-                      }}
-                    />
-                  ) : null}
-                  {folders.map((folder) => (
-                    <FolderSidebarItem
-                      key={folder.id}
-                      folder={folder}
-                      active={pathname === `/folders/${folder.id}`}
-                      editing={editingFolderId === folder.id}
-                      draft={folderDraft}
-                      onOpen={() => router.push(`/folders/${encodeURIComponent(folder.id)}`)}
-                      onStartRename={() => {
-                        setCreatingFolder(false);
-                        setEditingFolderId(folder.id);
-                        setFolderDraft(folder.name);
-                        setSidebarError(null);
-                      }}
-                      onDelete={() => openDeleteDialog("folder", folder.id, folder.name)}
-                      onDraftChange={setFolderDraft}
-                      onCommitRename={() => void commitRenameFolder(folder.id)}
-                      onCancelRename={() => {
-                        setEditingFolderId(null);
-                        setFolderDraft("");
-                      }}
-                    />
-                  ))}
-                </div>
-                {sidebarError ? (
-                  <p className="px-2.5 pt-1.5 text-[11px] leading-4 text-red-600">{sidebarError}</p>
-                ) : null}
-              </SidebarSectionPanel>
-
-              <SidebarSectionPanel refSetter={setSectionRef("chats")}>
-                <SectionLabel>Chats</SectionLabel>
-                {conversations.length === 0 ? (
-                  <div className="px-2.5 py-1 text-xs text-sidebar-foreground/50">
-                    No conversations yet
-                  </div>
-                ) : (
-                  <div className="flex flex-col gap-0.5">
-                    {conversations.map((c) => (
-                      <ChatHistoryItem
-                        key={c.id}
-                        conversation={c}
-                        folders={folders}
-                        active={c.id === activeSessionId}
-                        running={runningSessionIds.has(c.id)}
-                        unread={unreadCompletedSessionIds.has(c.id)}
-                        editing={editingId === c.id}
-                        draftTitle={draftTitle}
-                        onOpen={() => {
-                          openConversation(c.id);
-                        }}
-                        onRename={() => startRename(c.id, c.title || "Untitled")}
-                        onDelete={() =>
-                          openDeleteDialog("conversation", c.id, c.title || "Untitled")
-                        }
-                        onMove={(folderId) => void moveChat(c.id, folderId)}
-                        onDraftChange={setDraftTitle}
-                        onCommitRename={() => void commitRename(c.id)}
-                        onCancelRename={() => setEditingId(null)}
-                      />
-                    ))}
-                  </div>
-                )}
-              </SidebarSectionPanel>
-            </nav>
-
-            <div
-              ref={setSectionRef("account")}
-              className="border-t border-sidebar-border p-2"
+          <SidebarSectionPanel refSetter={setSectionRef("actions")}>
+            <button
+              type="button"
+              title="New Chat"
+              onClick={openNewChat}
+              className="flex w-full items-center justify-center gap-2 rounded-xl px-3 py-2.5 text-[13.5px] font-semibold text-white transition-opacity hover:opacity-90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/45"
+              style={{ background: "linear-gradient(135deg,#2563eb,#7c3aed)" }}
             >
+              <PlusCircle className="size-4 shrink-0" />
+              New Chat
+            </button>
+          </SidebarSectionPanel>
+
+          <SidebarSectionPanel refSetter={setSectionRef("navigation")}>
+            {visiblePrimaryNav.map(({ icon: Icon, label, href, iconClassName }) => {
+              const active = href
+                ? href === "/"
+                  ? pathname === "/"
+                  : pathname === href || pathname?.startsWith(`${href}/`)
+                : false;
+              return (
+                <SidebarExpandedRow
+                  key={label}
+                  title={label}
+                  active={active}
+                  onClick={href ? () => navigateTo(href) : undefined}
+                >
+                  <Icon
+                    className={cn(
+                      "size-4 shrink-0",
+                      iconClassName ?? "text-sidebar-accent-foreground",
+                    )}
+                  />
+                  <span className="truncate">{label}</span>
+                </SidebarExpandedRow>
+              );
+            })}
+          </SidebarSectionPanel>
+
+          <SidebarSectionPanel refSetter={setSectionRef("projects")}>
+            <div className="flex items-center justify-between px-2.5 pb-1 pt-3 text-[13px] font-semibold text-sidebar-foreground/70">
+              <span>Projects</span>
               <Link
-                href="/profile"
-                title="Profile"
-                className="group flex min-w-0 items-center gap-2 rounded-2xl px-2 py-1.5 text-sidebar-foreground/90 transition-colors hover:bg-sidebar-accent hover:text-sidebar-accent-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/45"
+                href="/projects/new"
+                aria-label="Create or import project"
+                title="Create or import project"
+                className="grid size-6 place-items-center rounded-lg transition hover:bg-sidebar-accent hover:text-sidebar-accent-foreground focus:outline-none"
               >
-                <div className="grid size-8 shrink-0 place-items-center rounded-full bg-primary text-[11px] font-medium text-primary-foreground">
-                  {userInitial}
-                </div>
-                <div className="min-w-0 flex-1">
-                  <div className="truncate text-[15px] font-semibold text-sidebar-foreground">{userLabel}</div>
-                  {userSubtitle && (
-                    <div className="truncate text-xs font-medium text-sidebar-foreground/70">
-                      {userSubtitle}
-                    </div>
-                  )}
-                </div>
-                <Gear
-                  className="size-4 shrink-0 text-sidebar-foreground/45 transition-colors group-hover:text-sidebar-accent-foreground"
-                />
+                <PlusCircle className="size-4" />
               </Link>
             </div>
+            <div className="flex flex-col gap-0.5">
+              {projects.map((project) => (
+                <SidebarExpandedRow
+                  key={project.id}
+                  title={project.name}
+                  active={
+                    pathname === `/projects/${project.id}` ||
+                    pathname?.startsWith(`/projects/${project.id}/`)
+                  }
+                  onClick={() => router.push(`/projects/${encodeURIComponent(project.id)}`)}
+                >
+                  <FolderGit2 className="size-4 shrink-0 text-indigo-600" />
+                  <span className="truncate">{project.name}</span>
+                </SidebarExpandedRow>
+              ))}
+            </div>
+          </SidebarSectionPanel>
+
+          <SidebarSectionPanel refSetter={setSectionRef("folders")}>
+            <div className="flex items-center justify-between px-2.5 pb-1 pt-3 text-[13px] font-semibold text-sidebar-foreground/70">
+              <span>Folders</span>
+              <button
+                type="button"
+                aria-label="Create folder"
+                title="Create folder"
+                onClick={() => {
+                  setCreatingFolder(true);
+                  setEditingFolderId(null);
+                  setFolderDraft("");
+                  setSidebarError(null);
+                }}
+                className="grid size-6 place-items-center rounded-lg transition hover:bg-sidebar-accent hover:text-sidebar-accent-foreground focus:outline-none"
+              >
+                <PlusCircle className="size-4" />
+              </button>
+            </div>
+            <div className="flex flex-col gap-0.5">
+              {creatingFolder ? (
+                <FolderNameInput
+                  value={folderDraft}
+                  placeholder="Folder name"
+                  onChange={setFolderDraft}
+                  onBlur={() => void commitCreateFolder()}
+                  onCancel={() => {
+                    setCreatingFolder(false);
+                    setFolderDraft("");
+                  }}
+                />
+              ) : null}
+              {folders.map((folder) => (
+                <FolderSidebarItem
+                  key={folder.id}
+                  folder={folder}
+                  active={pathname === `/folders/${folder.id}`}
+                  editing={editingFolderId === folder.id}
+                  draft={folderDraft}
+                  onOpen={() => router.push(`/folders/${encodeURIComponent(folder.id)}`)}
+                  onStartRename={() => {
+                    setCreatingFolder(false);
+                    setEditingFolderId(folder.id);
+                    setFolderDraft(folder.name);
+                    setSidebarError(null);
+                  }}
+                  onDelete={() => openDeleteDialog("folder", folder.id, folder.name)}
+                  onDraftChange={setFolderDraft}
+                  onCommitRename={() => void commitRenameFolder(folder.id)}
+                  onCancelRename={() => {
+                    setEditingFolderId(null);
+                    setFolderDraft("");
+                  }}
+                />
+              ))}
+            </div>
+            {sidebarError ? (
+              <p className="px-2.5 pt-1.5 text-[11px] leading-4 text-red-600">{sidebarError}</p>
+            ) : null}
+          </SidebarSectionPanel>
+
+          <SidebarSectionPanel refSetter={setSectionRef("chats")}>
+            <SectionLabel>Chats</SectionLabel>
+            {regularConversations.length === 0 ? (
+              <div className="px-2.5 py-1 text-xs text-sidebar-foreground/50">
+                No conversations yet
+              </div>
+            ) : (
+              <div className="flex flex-col gap-0.5">
+                {regularConversations.map((c) => (
+                  <ChatHistoryItem
+                    key={c.id}
+                    conversation={c}
+                    folders={folders}
+                    active={c.id === activeSessionId}
+                    running={runningSessionIds.has(c.id)}
+                    unread={unreadCompletedSessionIds.has(c.id)}
+                    editing={editingId === c.id}
+                    draftTitle={draftTitle}
+                    onOpen={() => {
+                      openConversation(c.id);
+                    }}
+                    onRename={() => startRename(c.id, c.title || "Untitled")}
+                    onDelete={() => openDeleteDialog("conversation", c.id, c.title || "Untitled")}
+                    onMove={(folderId) => void moveChat(c.id, folderId)}
+                    onDraftChange={setDraftTitle}
+                    onCommitRename={() => void commitRename(c.id)}
+                    onCancelRename={() => setEditingId(null)}
+                  />
+                ))}
+              </div>
+            )}
+          </SidebarSectionPanel>
+        </nav>
+
+        <div ref={setSectionRef("account")} className="border-t border-sidebar-border p-2">
+          <Link
+            href="/profile"
+            title="Profile"
+            className="group flex min-w-0 items-center gap-2 rounded-2xl px-2 py-1.5 text-sidebar-foreground/90 transition-colors hover:bg-sidebar-accent hover:text-sidebar-accent-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/45"
+          >
+            <div className="grid size-8 shrink-0 place-items-center rounded-full bg-primary text-[11px] font-medium text-primary-foreground">
+              {userInitial}
+            </div>
+            <div className="min-w-0 flex-1">
+              <div className="truncate text-[15px] font-semibold text-sidebar-foreground">
+                {userLabel}
+              </div>
+              {userSubtitle && (
+                <div className="truncate text-xs font-medium text-sidebar-foreground/70">
+                  {userSubtitle}
+                </div>
+              )}
+            </div>
+            <Gear className="size-4 shrink-0 text-sidebar-foreground/45 transition-colors group-hover:text-sidebar-accent-foreground" />
+          </Link>
+        </div>
       </aside>
 
       <DeleteConfirmDialog
@@ -440,8 +503,7 @@ function SidebarExpandedRow({
       onClick={onClick}
       className={cn(
         "flex w-full items-center gap-2.5 rounded-2xl px-2.5 py-2 text-[13.5px] font-medium text-sidebar-foreground transition-all hover:bg-sidebar-accent hover:text-sidebar-accent-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/45",
-        active &&
-          "bg-sidebar-accent text-sidebar-accent-foreground",
+        active && "bg-sidebar-accent text-sidebar-accent-foreground",
       )}
     >
       {children}
@@ -682,13 +744,9 @@ function FolderNameInput({
 
 function ChatTypeIcon({ type }: { type: string }) {
   if (type === "scheduled_task") {
-    return (
-      <CalendarDots className="size-4 shrink-0 text-sidebar-accent-foreground" />
-    );
+    return <CalendarDots className="size-4 shrink-0 text-sidebar-accent-foreground" />;
   }
-  return (
-    <ChatsCircle className="size-4 shrink-0 text-sidebar-accent-foreground" />
-  );
+  return <ChatsCircle className="size-4 shrink-0 text-sidebar-accent-foreground" />;
 }
 
 function SectionLabel({ children }: { children: React.ReactNode }) {

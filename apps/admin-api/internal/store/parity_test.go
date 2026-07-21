@@ -120,6 +120,23 @@ func runStoreContract(t *testing.T, st Store) {
 	if updated.Role != "admin" || updated.Enabled || updated.TenantID != "team-b" {
 		t.Fatalf("auth user update not persisted: %+v", updated)
 	}
+	versioned := updated
+	versioned.Username = "alice-next"
+	versioned.Email = "alice-next@example.com"
+	versioned.Version = updated.Version + 1
+	if err := st.UpdateAuthUserVersion(ctx, versioned, updated.Version); err != nil {
+		t.Fatalf("UpdateAuthUserVersion: %v", err)
+	}
+	stale := versioned
+	stale.Name = "Stale Alice"
+	stale.Version++
+	if err := st.UpdateAuthUserVersion(ctx, stale, updated.Version); !errors.Is(err, ErrVersionConflict) {
+		t.Fatalf("stale UpdateAuthUserVersion want ErrVersionConflict, got %v", err)
+	}
+	updated, err = st.GetAuthUserByIdentifier(ctx, "alice-next@example.com")
+	if err != nil || updated.Username != "alice-next" || updated.Version != versioned.Version {
+		t.Fatalf("versioned identifiers not persisted: %+v %v", updated, err)
+	}
 	if err := st.TouchAuthUserLogin(ctx, "user-1", now.Add(2*time.Hour)); err != nil {
 		t.Fatalf("TouchAuthUserLogin: %v", err)
 	}
@@ -128,7 +145,7 @@ func runStoreContract(t *testing.T, st Store) {
 		t.Fatalf("last login not updated: %+v", touched)
 	}
 	users, _ := st.ListAuthUsers(ctx)
-	if len(users) != 1 || users[0].Email != "alice@example.com" {
+	if len(users) != 1 || users[0].Email != "alice-next@example.com" {
 		t.Fatalf("ListAuthUsers: %+v", users)
 	}
 	if err := st.DeleteAuthUser(ctx, "user-1", "admin", now.Add(3*time.Hour)); err != nil {
@@ -138,7 +155,7 @@ func runStoreContract(t *testing.T, st Store) {
 	if len(users) != 0 {
 		t.Fatalf("deleted auth user should be hidden from list: %+v", users)
 	}
-	deletedUser, err := st.GetAuthUserByIdentifier(ctx, "alice")
+	deletedUser, err := st.GetAuthUserByIdentifier(ctx, "alice-next")
 	if err != nil || deletedUser.ID != "user-1" || deletedUser.Enabled {
 		t.Fatalf("deleted auth user lookup should remain reserved and disabled: %+v %v", deletedUser, err)
 	}

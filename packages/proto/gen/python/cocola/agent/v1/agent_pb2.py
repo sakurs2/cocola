@@ -24,7 +24,7 @@ _sym_db = _symbol_database.Default()
 
 
 
-DESCRIPTOR = _descriptor_pool.Default().AddSerializedFile(b'\n\x1b\x63ocola/agent/v1/agent.proto\x12\x0f\x63ocola.agent.v1\"\xf9\x01\n\x0cQueryRequest\x12\x0f\n\x07user_id\x18\x01 \x01(\t\x12\x12\n\nsession_id\x18\x02 \x01(\t\x12\x0e\n\x06prompt\x18\x03 \x01(\t\x12\x12\n\nsandbox_id\x18\x04 \x01(\t\x12\x11\n\tmax_turns\x18\x05 \x01(\x05\x12\x30\n\x0b\x61ttachments\x18\x06 \x03(\x0b\x32\x1b.cocola.agent.v1.Attachment\x12\x12\n\nruntime_id\x18\x07 \x01(\t\x12\x10\n\x08skill_id\x18\x08 \x01(\t\x12\x1d\n\x15\x61llow_workspace_reset\x18\t \x01(\x08\x12\x16\n\x0ememory_context\x18\n \x01(\t\"\\\n\nAttachment\x12\x10\n\x08\x66ilename\x18\x01 \x01(\t\x12\x0f\n\x07\x63ontent\x18\x02 \x01(\x0c\x12\x0c\n\x04mime\x18\x03 \x01(\t\x12\x0f\n\x07oss_key\x18\x04 \x01(\t\x12\x0c\n\x04size\x18\x05 \x01(\x03\"|\n\nAgentEvent\x12\x0c\n\x04kind\x18\x01 \x01(\t\x12\x33\n\x04\x64\x61ta\x18\x02 \x03(\x0b\x32%.cocola.agent.v1.AgentEvent.DataEntry\x1a+\n\tDataEntry\x12\x0b\n\x03key\x18\x01 \x01(\t\x12\r\n\x05value\x18\x02 \x01(\t:\x02\x38\x01\"<\n\x15ReleaseSessionRequest\x12\x0f\n\x07user_id\x18\x01 \x01(\t\x12\x12\n\nsession_id\x18\x02 \x01(\t\"\x18\n\x16ReleaseSessionResponse\"\x15\n\x13ListRuntimesRequest\"P\n\x07Runtime\x12\n\n\x02id\x18\x01 \x01(\t\x12\r\n\x05label\x18\x02 \x01(\t\x12\x16\n\x0emodel_protocol\x18\x03 \x01(\t\x12\x12\n\nis_default\x18\x04 \x01(\x08\"B\n\x14ListRuntimesResponse\x12*\n\x08runtimes\x18\x01 \x03(\x0b\x32\x18.cocola.agent.v1.Runtime2\x9c\x02\n\x13\x41gentRuntimeService\x12\x45\n\x05Query\x12\x1d.cocola.agent.v1.QueryRequest\x1a\x1b.cocola.agent.v1.AgentEvent0\x01\x12\x61\n\x0eReleaseSession\x12&.cocola.agent.v1.ReleaseSessionRequest\x1a\'.cocola.agent.v1.ReleaseSessionResponse\x12[\n\x0cListRuntimes\x12$.cocola.agent.v1.ListRuntimesRequest\x1a%.cocola.agent.v1.ListRuntimesResponseBPZNgithub.com/cocola-project/cocola/packages/proto/gen/go/cocola/agent/v1;agentv1b\x06proto3')
+DESCRIPTOR = _descriptor_pool.Default().AddSerializedFile(b'\n\x1b\x63ocola/agent/v1/agent.proto\x12\x0f\x63ocola.agent.v1\"\xb3\x02\n\x0cQueryRequest\x12\x0f\n\x07user_id\x18\x01 \x01(\t\x12\x12\n\nsession_id\x18\x02 \x01(\t\x12\x0e\n\x06prompt\x18\x03 \x01(\t\x12\x12\n\nsandbox_id\x18\x04 \x01(\t\x12\x11\n\tmax_turns\x18\x05 \x01(\x05\x12\x30\n\x0b\x61ttachments\x18\x06 \x03(\x0b\x32\x1b.cocola.agent.v1.Attachment\x12\x12\n\nruntime_id\x18\x07 \x01(\t\x12\x10\n\x08skill_id\x18\x08 \x01(\t\x12\x1d\n\x15\x61llow_workspace_reset\x18\t \x01(\x08\x12\x16\n\x0ememory_context\x18\n \x01(\t\x12\x38\n\x0fproject_context\x18\x0b \x01(\x0b\x32\x1f.cocola.agent.v1.ProjectContext\"\xc0\x01\n\x0eProjectContext\x12\x12\n\nproject_id\x18\x01 \x01(\t\x12\x15\n\rrepository_id\x18\x02 \x01(\x03\x12\x11\n\tclone_url\x18\x03 \x01(\t\x12\x16\n\x0e\x64\x65\x66\x61ult_branch\x18\x04 \x01(\t\x12\x10\n\x08\x62\x61se_sha\x18\x05 \x01(\t\x12\x13\n\x0btask_branch\x18\x06 \x01(\t\x12\x17\n\x0fgit_author_name\x18\x07 \x01(\t\x12\x18\n\x10git_author_email\x18\x08 \x01(\t\"\\\n\nAttachment\x12\x10\n\x08\x66ilename\x18\x01 \x01(\t\x12\x0f\n\x07\x63ontent\x18\x02 \x01(\x0c\x12\x0c\n\x04mime\x18\x03 \x01(\t\x12\x0f\n\x07oss_key\x18\x04 \x01(\t\x12\x0c\n\x04size\x18\x05 \x01(\x03\"|\n\nAgentEvent\x12\x0c\n\x04kind\x18\x01 \x01(\t\x12\x33\n\x04\x64\x61ta\x18\x02 \x03(\x0b\x32%.cocola.agent.v1.AgentEvent.DataEntry\x1a+\n\tDataEntry\x12\x0b\n\x03key\x18\x01 \x01(\t\x12\r\n\x05value\x18\x02 \x01(\t:\x02\x38\x01\"<\n\x15ReleaseSessionRequest\x12\x0f\n\x07user_id\x18\x01 \x01(\t\x12\x12\n\nsession_id\x18\x02 \x01(\t\"\x18\n\x16ReleaseSessionResponse\"\x15\n\x13ListRuntimesRequest\"P\n\x07Runtime\x12\n\n\x02id\x18\x01 \x01(\t\x12\r\n\x05label\x18\x02 \x01(\t\x12\x16\n\x0emodel_protocol\x18\x03 \x01(\t\x12\x12\n\nis_default\x18\x04 \x01(\x08\"B\n\x14ListRuntimesResponse\x12*\n\x08runtimes\x18\x01 \x03(\x0b\x32\x18.cocola.agent.v1.Runtime\"\xb1\x01\n\x1aInspectWorkspaceGitRequest\x12\x0f\n\x07user_id\x18\x01 \x01(\t\x12\x12\n\nsession_id\x18\x02 \x01(\t\x12\x11\n\toperation\x18\x03 \x01(\t\x12\x0c\n\x04path\x18\x04 \x01(\t\x12\x13\n\x0b\x64iff_target\x18\x05 \x01(\t\x12\x38\n\x0fproject_context\x18\x06 \x01(\x0b\x32\x1f.cocola.agent.v1.ProjectContext\"I\n\tGitChange\x12\x0c\n\x04path\x18\x01 \x01(\t\x12\x10\n\x08old_path\x18\x02 \x01(\t\x12\x0e\n\x06status\x18\x03 \x01(\t\x12\x0c\n\x04\x61rea\x18\x04 \x01(\t\"\xb1\x01\n\x0bGitSnapshot\x12\x0e\n\x06\x62ranch\x18\x01 \x01(\t\x12\x10\n\x08\x62\x61se_sha\x18\x02 \x01(\t\x12\x10\n\x08head_sha\x18\x03 \x01(\t\x12\r\n\x05\x61head\x18\x04 \x01(\x05\x12\r\n\x05\x64irty\x18\x05 \x01(\x08\x12+\n\x07\x63hanges\x18\x06 \x03(\x0b\x32\x1a.cocola.agent.v1.GitChange\x12\x11\n\ttruncated\x18\x07 \x01(\x08\x12\x10\n\x08\x62\x61se_ref\x18\x08 \x01(\t\"~\n\x1bInspectWorkspaceGitResponse\x12.\n\x08snapshot\x18\x01 \x01(\x0b\x32\x1c.cocola.agent.v1.GitSnapshot\x12\x0c\n\x04\x64iff\x18\x02 \x01(\t\x12\x0e\n\x06\x62inary\x18\x03 \x01(\x08\x12\x11\n\ttruncated\x18\x04 \x01(\x08\x32\x8e\x03\n\x13\x41gentRuntimeService\x12\x45\n\x05Query\x12\x1d.cocola.agent.v1.QueryRequest\x1a\x1b.cocola.agent.v1.AgentEvent0\x01\x12\x61\n\x0eReleaseSession\x12&.cocola.agent.v1.ReleaseSessionRequest\x1a\'.cocola.agent.v1.ReleaseSessionResponse\x12[\n\x0cListRuntimes\x12$.cocola.agent.v1.ListRuntimesRequest\x1a%.cocola.agent.v1.ListRuntimesResponse\x12p\n\x13InspectWorkspaceGit\x12+.cocola.agent.v1.InspectWorkspaceGitRequest\x1a,.cocola.agent.v1.InspectWorkspaceGitResponseBPZNgithub.com/cocola-project/cocola/packages/proto/gen/go/cocola/agent/v1;agentv1b\x06proto3')
 
 _globals = globals()
 _builder.BuildMessageAndEnumDescriptors(DESCRIPTOR, _globals)
@@ -35,23 +35,33 @@ if not _descriptor._USE_C_DESCRIPTORS:
   _globals['_AGENTEVENT_DATAENTRY']._loaded_options = None
   _globals['_AGENTEVENT_DATAENTRY']._serialized_options = b'8\001'
   _globals['_QUERYREQUEST']._serialized_start=49
-  _globals['_QUERYREQUEST']._serialized_end=298
-  _globals['_ATTACHMENT']._serialized_start=300
-  _globals['_ATTACHMENT']._serialized_end=392
-  _globals['_AGENTEVENT']._serialized_start=394
-  _globals['_AGENTEVENT']._serialized_end=518
-  _globals['_AGENTEVENT_DATAENTRY']._serialized_start=475
-  _globals['_AGENTEVENT_DATAENTRY']._serialized_end=518
-  _globals['_RELEASESESSIONREQUEST']._serialized_start=520
-  _globals['_RELEASESESSIONREQUEST']._serialized_end=580
-  _globals['_RELEASESESSIONRESPONSE']._serialized_start=582
-  _globals['_RELEASESESSIONRESPONSE']._serialized_end=606
-  _globals['_LISTRUNTIMESREQUEST']._serialized_start=608
-  _globals['_LISTRUNTIMESREQUEST']._serialized_end=629
-  _globals['_RUNTIME']._serialized_start=631
-  _globals['_RUNTIME']._serialized_end=711
-  _globals['_LISTRUNTIMESRESPONSE']._serialized_start=713
-  _globals['_LISTRUNTIMESRESPONSE']._serialized_end=779
-  _globals['_AGENTRUNTIMESERVICE']._serialized_start=782
-  _globals['_AGENTRUNTIMESERVICE']._serialized_end=1066
+  _globals['_QUERYREQUEST']._serialized_end=356
+  _globals['_PROJECTCONTEXT']._serialized_start=359
+  _globals['_PROJECTCONTEXT']._serialized_end=551
+  _globals['_ATTACHMENT']._serialized_start=553
+  _globals['_ATTACHMENT']._serialized_end=645
+  _globals['_AGENTEVENT']._serialized_start=647
+  _globals['_AGENTEVENT']._serialized_end=771
+  _globals['_AGENTEVENT_DATAENTRY']._serialized_start=728
+  _globals['_AGENTEVENT_DATAENTRY']._serialized_end=771
+  _globals['_RELEASESESSIONREQUEST']._serialized_start=773
+  _globals['_RELEASESESSIONREQUEST']._serialized_end=833
+  _globals['_RELEASESESSIONRESPONSE']._serialized_start=835
+  _globals['_RELEASESESSIONRESPONSE']._serialized_end=859
+  _globals['_LISTRUNTIMESREQUEST']._serialized_start=861
+  _globals['_LISTRUNTIMESREQUEST']._serialized_end=882
+  _globals['_RUNTIME']._serialized_start=884
+  _globals['_RUNTIME']._serialized_end=964
+  _globals['_LISTRUNTIMESRESPONSE']._serialized_start=966
+  _globals['_LISTRUNTIMESRESPONSE']._serialized_end=1032
+  _globals['_INSPECTWORKSPACEGITREQUEST']._serialized_start=1035
+  _globals['_INSPECTWORKSPACEGITREQUEST']._serialized_end=1212
+  _globals['_GITCHANGE']._serialized_start=1214
+  _globals['_GITCHANGE']._serialized_end=1287
+  _globals['_GITSNAPSHOT']._serialized_start=1290
+  _globals['_GITSNAPSHOT']._serialized_end=1467
+  _globals['_INSPECTWORKSPACEGITRESPONSE']._serialized_start=1469
+  _globals['_INSPECTWORKSPACEGITRESPONSE']._serialized_end=1595
+  _globals['_AGENTRUNTIMESERVICE']._serialized_start=1598
+  _globals['_AGENTRUNTIMESERVICE']._serialized_end=1996
 # @@protoc_insertion_point(module_scope)

@@ -29,6 +29,7 @@ import (
 	"strings"
 	"sync/atomic"
 	"time"
+	"unicode/utf8"
 
 	"github.com/cocola-project/cocola/apps/admin-api/internal/store"
 	"github.com/cocola-project/cocola/packages/go-common/token"
@@ -42,6 +43,7 @@ var (
 	ErrAccountDisabled             = errors.New("service: account disabled")
 	ErrProtectedAdmin              = errors.New("service: protected admin")
 	ErrSelfPermission              = errors.New("service: self permission change")
+	ErrCurrentPassword             = errors.New("service: current password invalid")
 	ErrPermissionDenied            = errors.New("service: permission denied")
 	ErrScheduleInPast              = errors.New("service: schedule time is in the past")
 	ErrScheduleExpiration          = errors.New("service: task expiration does not allow a future run")
@@ -165,6 +167,7 @@ const (
 
 // AuthUserInput describes user creation/update over the admin surface.
 type AuthUserInput struct {
+	Name     string
 	Username string
 	Email    string
 	// Tenant is the team/tenant assignment. On update, a nil pointer leaves the
@@ -185,6 +188,21 @@ type LoginResult struct {
 	Name     string `json:"name"`
 	Role     string `json:"role"`
 	Enabled  bool   `json:"enabled"`
+	Version  int64  `json:"version"`
+}
+
+type OwnAccountInput struct {
+	Name            string
+	Username        string
+	Email           string
+	CurrentPassword string
+	ExpectedVersion int64
+}
+
+type OwnPasswordInput struct {
+	CurrentPassword string
+	NewPassword     string
+	ExpectedVersion int64
 }
 
 func isAuthUserUnavailable(u store.AuthUser) bool {
@@ -217,6 +235,8 @@ func normalizeUsername(username string) string {
 	return strings.ToLower(strings.TrimSpace(username))
 }
 
+func normalizeName(name string) string { return strings.TrimSpace(name) }
+
 func normalizeIdentifier(identifier string) string {
 	return strings.ToLower(strings.TrimSpace(identifier))
 }
@@ -237,6 +257,16 @@ func validRole(role string) bool {
 	return role == RoleUser || role == RoleAdmin
 }
 
+func validAccountProfile(name, username, email string) bool {
+	if name == "" || len(name) > 128 || strings.ContainsAny(name, "\x00\r\n") ||
+		username == "" || len(username) > 64 || strings.ContainsAny(username, "\x00\r\n\t ") ||
+		email == "" || len(email) > 254 || strings.ContainsAny(email, "\x00\r\n\t ") {
+		return false
+	}
+	at := strings.IndexByte(email, '@')
+	return at > 0 && at == strings.LastIndexByte(email, '@') && at < len(email)-1
+}
+
 func publicUser(u store.AuthUser) LoginResult {
 	name := u.Name
 	if name == "" {
@@ -252,6 +282,7 @@ func publicUser(u store.AuthUser) LoginResult {
 		Name:     name,
 		Role:     u.Role,
 		Enabled:  u.Enabled,
+		Version:  u.Version,
 	}
 }
 
@@ -282,7 +313,11 @@ func (a *Admin) CreateAuthUser(ctx context.Context, in AuthUserInput) (store.Aut
 	if role == "" {
 		role = RoleUser
 	}
-	if email == "" || username == "" || !validRole(role) || strings.TrimSpace(in.Password) == "" {
+	name := normalizeName(in.Name)
+	if name == "" {
+		name = username
+	}
+	if !validAccountProfile(name, username, email) || !validRole(role) || strings.TrimSpace(in.Password) == "" {
 		return store.AuthUser{}, ErrInvalidArg
 	}
 	pw, err := hashPassword(in.Password)
@@ -302,10 +337,11 @@ func (a *Admin) CreateAuthUser(ctx context.Context, in AuthUserInput) (store.Aut
 		ID:              newID(),
 		Username:        username,
 		Email:           email,
-		Name:            username,
+		Name:            name,
 		TenantID:        tenant,
 		Role:            role,
 		Enabled:         enabled,
+		Version:         1,
 		PasswordHash:    pw,
 		CreatedAt:       now,
 		UpdatedAt:       now,
@@ -329,6 +365,20 @@ func (a *Admin) GetAuthUserByEmail(ctx context.Context, email string) (store.Aut
 		return store.AuthUser{}, ErrInvalidArg
 	}
 	return a.store.GetAuthUserByEmail(ctx, normalized)
+}
+
+func (a *Admin) GetAuthUser(ctx context.Context, id string) (store.AuthUser, error) {
+	if strings.TrimSpace(id) == "" {
+		return store.AuthUser{}, ErrInvalidArg
+	}
+	u, err := a.store.GetAuthUser(ctx, strings.TrimSpace(id))
+	if err != nil {
+		return store.AuthUser{}, err
+	}
+	if !u.DeletedAt.IsZero() {
+		return store.AuthUser{}, ErrNotFound
+	}
+	return u, nil
 }
 
 func (a *Admin) GetAuthUserByIdentifier(ctx context.Context, identifier string) (store.AuthUser, error) {
@@ -356,7 +406,12 @@ func (a *Admin) SetAuthUser(ctx context.Context, id string, in AuthUserInput) (s
 	if username := normalizeUsername(in.Username); username != "" {
 		u.Username = username
 	}
-	u.Name = u.Username
+	if name := normalizeName(in.Name); name != "" {
+		u.Name = name
+	}
+	if !validAccountProfile(u.Name, u.Username, u.Email) {
+		return store.AuthUser{}, ErrInvalidArg
+	}
 	if in.Role != "" {
 		if isSelfActor(u, in.Actor) {
 			return store.AuthUser{}, ErrSelfPermission
@@ -383,6 +438,7 @@ func (a *Admin) SetAuthUser(ctx context.Context, id string, in AuthUserInput) (s
 	}
 	u.UpdatedAt = a.now().UTC()
 	u.UpdatedBy = in.Actor
+	u.Version++
 	if err := a.store.UpdateAuthUser(ctx, u); err != nil {
 		return store.AuthUser{}, err
 	}
@@ -414,7 +470,79 @@ func (a *Admin) ResetAuthUserPassword(ctx context.Context, id, password, actor s
 	u.PasswordUpdated = now
 	u.UpdatedAt = now
 	u.UpdatedBy = actor
+	u.Version++
 	if err := a.store.UpdateAuthUser(ctx, u); err != nil {
+		return store.AuthUser{}, err
+	}
+	return u, nil
+}
+
+func (a *Admin) GetOwnAccount(ctx context.Context, userID string) (store.AuthUser, error) {
+	u, err := a.GetAuthUser(ctx, userID)
+	if err != nil {
+		return store.AuthUser{}, err
+	}
+	if !u.Enabled {
+		return store.AuthUser{}, ErrAccountDisabled
+	}
+	return u, nil
+}
+
+func (a *Admin) UpdateOwnAccount(ctx context.Context, userID string, in OwnAccountInput) (store.AuthUser, error) {
+	u, err := a.GetOwnAccount(ctx, userID)
+	if err != nil {
+		return store.AuthUser{}, err
+	}
+	if in.ExpectedVersion <= 0 || u.Version != in.ExpectedVersion {
+		return store.AuthUser{}, store.ErrVersionConflict
+	}
+	name := normalizeName(in.Name)
+	username := normalizeUsername(in.Username)
+	email := normalizeEmail(in.Email)
+	if !validAccountProfile(name, username, email) {
+		return store.AuthUser{}, ErrInvalidArg
+	}
+	if email != u.Email && bcrypt.CompareHashAndPassword([]byte(u.PasswordHash), []byte(in.CurrentPassword)) != nil {
+		return store.AuthUser{}, ErrCurrentPassword
+	}
+	now := a.now().UTC()
+	u.Name = name
+	u.Username = username
+	u.Email = email
+	u.UpdatedAt = now
+	u.UpdatedBy = u.ID
+	u.Version = in.ExpectedVersion + 1
+	if err := a.store.UpdateAuthUserVersion(ctx, u, in.ExpectedVersion); err != nil {
+		return store.AuthUser{}, err
+	}
+	return u, nil
+}
+
+func (a *Admin) ChangeOwnPassword(ctx context.Context, userID string, in OwnPasswordInput) (store.AuthUser, error) {
+	u, err := a.GetOwnAccount(ctx, userID)
+	if err != nil {
+		return store.AuthUser{}, err
+	}
+	if in.ExpectedVersion <= 0 || u.Version != in.ExpectedVersion {
+		return store.AuthUser{}, store.ErrVersionConflict
+	}
+	if bcrypt.CompareHashAndPassword([]byte(u.PasswordHash), []byte(in.CurrentPassword)) != nil {
+		return store.AuthUser{}, ErrCurrentPassword
+	}
+	if utf8.RuneCountInString(in.NewPassword) < 8 || len(in.NewPassword) > 72 {
+		return store.AuthUser{}, ErrInvalidArg
+	}
+	pw, err := hashPassword(in.NewPassword)
+	if err != nil {
+		return store.AuthUser{}, err
+	}
+	now := a.now().UTC()
+	u.PasswordHash = pw
+	u.PasswordUpdated = now
+	u.UpdatedAt = now
+	u.UpdatedBy = u.ID
+	u.Version = in.ExpectedVersion + 1
+	if err := a.store.UpdateAuthUserVersion(ctx, u, in.ExpectedVersion); err != nil {
 		return store.AuthUser{}, err
 	}
 	return u, nil
@@ -527,6 +655,7 @@ func (a *Admin) BootstrapAdmin(ctx context.Context, in BootstrapAdminInput) erro
 			Name:            username,
 			Role:            RoleAdmin,
 			Enabled:         true,
+			Version:         1,
 			PasswordHash:    hash,
 			CreatedAt:       now,
 			UpdatedAt:       now,
@@ -555,6 +684,7 @@ func (a *Admin) BootstrapAdmin(ctx context.Context, in BootstrapAdminInput) erro
 	existing.PasswordUpdated = now
 	existing.UpdatedAt = now
 	existing.UpdatedBy = in.Actor
+	existing.Version++
 	if err := a.store.UpdateAuthUser(ctx, existing); err != nil {
 		return err
 	}
@@ -581,7 +711,13 @@ func (a *Admin) IssueRuntimeToken(ctx context.Context, email string, ttl time.Du
 	if ttl <= 0 {
 		ttl = 10 * time.Minute
 	}
-	tok, _, err := a.issuer.Issue(u.Email, strings.TrimSpace(u.TenantID), ttl, a.now().Unix())
+	name := normalizeName(u.Name)
+	if name == "" {
+		name = u.Username
+	}
+	tok, _, err := a.issuer.IssueUser(
+		u.ID, strings.TrimSpace(u.TenantID), u.Email, name, u.Username, ttl, a.now().Unix(),
+	)
 	return tok, err
 }
 

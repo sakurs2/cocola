@@ -13,6 +13,9 @@ service AgentRuntimeService {
   rpc Query(QueryRequest) returns (stream AgentEvent);
   rpc ReleaseSession(ReleaseSessionRequest) returns (ReleaseSessionResponse);
   rpc ListRuntimes(ListRuntimesRequest) returns (ListRuntimesResponse);
+  // InspectWorkspaceGit is an explicit user-triggered read. It may acquire the
+  // sandbox; merely opening the Git tab never invokes it.
+  rpc InspectWorkspaceGit(InspectWorkspaceGitRequest) returns (InspectWorkspaceGitResponse);
 }
 
 message QueryRequest {
@@ -34,6 +37,22 @@ message QueryRequest {
   // Optional, server-produced user memory. Agent Runtime treats this as
   // low-priority, untrusted and potentially stale system context.
   string memory_context = 10;
+  // Server-produced project metadata. Credentials are deliberately excluded
+  // and travel only through protected gRPC metadata.
+  ProjectContext project_context = 11;
+}
+
+message ProjectContext {
+  string project_id = 1;
+  int64 repository_id = 2;
+  string clone_url = 3;
+  string default_branch = 4;
+  string base_sha = 5;
+  string task_branch = 6;
+  // Repository-local author identity for commits created inside the task
+  // workspace. This is metadata only and never grants remote write access.
+  string git_author_name = 7;
+  string git_author_email = 8;
 }
 
 // Attachment is a single user-uploaded file delivered to the sandbox workspace
@@ -76,4 +95,41 @@ message Runtime {
 
 message ListRuntimesResponse {
   repeated Runtime runtimes = 1;
+}
+
+message InspectWorkspaceGitRequest {
+  string user_id = 1;
+  string session_id = 2;
+  // status | diff
+  string operation = 3;
+  // Workspace-relative path, required for diff.
+  string path = 4;
+  // working | staged
+  string diff_target = 5;
+  ProjectContext project_context = 6;
+}
+
+message GitChange {
+  string path = 1;
+  string old_path = 2;
+  string status = 3;
+  string area = 4;
+}
+
+message GitSnapshot {
+  string branch = 1;
+  string base_sha = 2;
+  string head_sha = 3;
+  int32 ahead = 4;
+  bool dirty = 5;
+  repeated GitChange changes = 6;
+  bool truncated = 7;
+  string base_ref = 8;
+}
+
+message InspectWorkspaceGitResponse {
+  GitSnapshot snapshot = 1;
+  string diff = 2;
+  bool binary = 3;
+  bool truncated = 4;
 }

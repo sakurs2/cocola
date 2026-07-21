@@ -19,9 +19,10 @@ import (
 const _ = grpc.SupportPackageIsVersion7
 
 const (
-	AgentRuntimeService_Query_FullMethodName          = "/cocola.agent.v1.AgentRuntimeService/Query"
-	AgentRuntimeService_ReleaseSession_FullMethodName = "/cocola.agent.v1.AgentRuntimeService/ReleaseSession"
-	AgentRuntimeService_ListRuntimes_FullMethodName   = "/cocola.agent.v1.AgentRuntimeService/ListRuntimes"
+	AgentRuntimeService_Query_FullMethodName               = "/cocola.agent.v1.AgentRuntimeService/Query"
+	AgentRuntimeService_ReleaseSession_FullMethodName      = "/cocola.agent.v1.AgentRuntimeService/ReleaseSession"
+	AgentRuntimeService_ListRuntimes_FullMethodName        = "/cocola.agent.v1.AgentRuntimeService/ListRuntimes"
+	AgentRuntimeService_InspectWorkspaceGit_FullMethodName = "/cocola.agent.v1.AgentRuntimeService/InspectWorkspaceGit"
 )
 
 // AgentRuntimeServiceClient is the client API for AgentRuntimeService service.
@@ -31,6 +32,9 @@ type AgentRuntimeServiceClient interface {
 	Query(ctx context.Context, in *QueryRequest, opts ...grpc.CallOption) (AgentRuntimeService_QueryClient, error)
 	ReleaseSession(ctx context.Context, in *ReleaseSessionRequest, opts ...grpc.CallOption) (*ReleaseSessionResponse, error)
 	ListRuntimes(ctx context.Context, in *ListRuntimesRequest, opts ...grpc.CallOption) (*ListRuntimesResponse, error)
+	// InspectWorkspaceGit is an explicit user-triggered read. It may acquire the
+	// sandbox; merely opening the Git tab never invokes it.
+	InspectWorkspaceGit(ctx context.Context, in *InspectWorkspaceGitRequest, opts ...grpc.CallOption) (*InspectWorkspaceGitResponse, error)
 }
 
 type agentRuntimeServiceClient struct {
@@ -91,6 +95,15 @@ func (c *agentRuntimeServiceClient) ListRuntimes(ctx context.Context, in *ListRu
 	return out, nil
 }
 
+func (c *agentRuntimeServiceClient) InspectWorkspaceGit(ctx context.Context, in *InspectWorkspaceGitRequest, opts ...grpc.CallOption) (*InspectWorkspaceGitResponse, error) {
+	out := new(InspectWorkspaceGitResponse)
+	err := c.cc.Invoke(ctx, AgentRuntimeService_InspectWorkspaceGit_FullMethodName, in, out, opts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 // AgentRuntimeServiceServer is the server API for AgentRuntimeService service.
 // All implementations must embed UnimplementedAgentRuntimeServiceServer
 // for forward compatibility
@@ -98,6 +111,9 @@ type AgentRuntimeServiceServer interface {
 	Query(*QueryRequest, AgentRuntimeService_QueryServer) error
 	ReleaseSession(context.Context, *ReleaseSessionRequest) (*ReleaseSessionResponse, error)
 	ListRuntimes(context.Context, *ListRuntimesRequest) (*ListRuntimesResponse, error)
+	// InspectWorkspaceGit is an explicit user-triggered read. It may acquire the
+	// sandbox; merely opening the Git tab never invokes it.
+	InspectWorkspaceGit(context.Context, *InspectWorkspaceGitRequest) (*InspectWorkspaceGitResponse, error)
 	mustEmbedUnimplementedAgentRuntimeServiceServer()
 }
 
@@ -113,6 +129,9 @@ func (UnimplementedAgentRuntimeServiceServer) ReleaseSession(context.Context, *R
 }
 func (UnimplementedAgentRuntimeServiceServer) ListRuntimes(context.Context, *ListRuntimesRequest) (*ListRuntimesResponse, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method ListRuntimes not implemented")
+}
+func (UnimplementedAgentRuntimeServiceServer) InspectWorkspaceGit(context.Context, *InspectWorkspaceGitRequest) (*InspectWorkspaceGitResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method InspectWorkspaceGit not implemented")
 }
 func (UnimplementedAgentRuntimeServiceServer) mustEmbedUnimplementedAgentRuntimeServiceServer() {}
 
@@ -184,6 +203,24 @@ func _AgentRuntimeService_ListRuntimes_Handler(srv interface{}, ctx context.Cont
 	return interceptor(ctx, in, info, handler)
 }
 
+func _AgentRuntimeService_InspectWorkspaceGit_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(InspectWorkspaceGitRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(AgentRuntimeServiceServer).InspectWorkspaceGit(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: AgentRuntimeService_InspectWorkspaceGit_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(AgentRuntimeServiceServer).InspectWorkspaceGit(ctx, req.(*InspectWorkspaceGitRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 // AgentRuntimeService_ServiceDesc is the grpc.ServiceDesc for AgentRuntimeService service.
 // It's only intended for direct use with grpc.RegisterService,
 // and not to be introspected or modified (even as a copy)
@@ -198,6 +235,10 @@ var AgentRuntimeService_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "ListRuntimes",
 			Handler:    _AgentRuntimeService_ListRuntimes_Handler,
+		},
+		{
+			MethodName: "InspectWorkspaceGit",
+			Handler:    _AgentRuntimeService_InspectWorkspaceGit_Handler,
 		},
 	},
 	Streams: []grpc.StreamDesc{

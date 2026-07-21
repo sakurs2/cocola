@@ -198,7 +198,7 @@ class HealthResponse(_message.Message):
     def __init__(self, healthy: bool = ..., detail: _Optional[str] = ...) -> None: ...
 
 class AcquireRequest(_message.Message):
-    __slots__ = ("session_id", "user_id", "image", "env", "allow_workspace_reset")
+    __slots__ = ("session_id", "user_id", "image", "env", "allow_workspace_reset", "additional_egress_allowlist")
     class EnvEntry(_message.Message):
         __slots__ = ("key", "value")
         KEY_FIELD_NUMBER: _ClassVar[int]
@@ -211,12 +211,14 @@ class AcquireRequest(_message.Message):
     IMAGE_FIELD_NUMBER: _ClassVar[int]
     ENV_FIELD_NUMBER: _ClassVar[int]
     ALLOW_WORKSPACE_RESET_FIELD_NUMBER: _ClassVar[int]
+    ADDITIONAL_EGRESS_ALLOWLIST_FIELD_NUMBER: _ClassVar[int]
     session_id: str
     user_id: str
     image: str
     env: _containers.ScalarMap[str, str]
     allow_workspace_reset: bool
-    def __init__(self, session_id: _Optional[str] = ..., user_id: _Optional[str] = ..., image: _Optional[str] = ..., env: _Optional[_Mapping[str, str]] = ..., allow_workspace_reset: bool = ...) -> None: ...
+    additional_egress_allowlist: _containers.RepeatedScalarFieldContainer[str]
+    def __init__(self, session_id: _Optional[str] = ..., user_id: _Optional[str] = ..., image: _Optional[str] = ..., env: _Optional[_Mapping[str, str]] = ..., allow_workspace_reset: bool = ..., additional_egress_allowlist: _Optional[_Iterable[str]] = ...) -> None: ...
 
 class AcquireResponse(_message.Message):
     __slots__ = ("sandbox", "reused", "workspace_state", "workspace_node", "previous_workspace_node")

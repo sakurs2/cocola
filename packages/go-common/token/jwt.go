@@ -35,6 +35,9 @@ var ErrInvalid = errors.New("token: invalid")
 type Claims struct {
 	Subject  string `json:"sub"`
 	Tenant   string `json:"ten,omitempty"`
+	Email    string `json:"eml,omitempty"`
+	Name     string `json:"nam,omitempty"`
+	Username string `json:"usr,omitempty"`
 	IssuedAt int64  `json:"iat,omitempty"`
 	Expires  int64  `json:"exp,omitempty"`
 	Issuer   string `json:"iss,omitempty"`

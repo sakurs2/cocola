@@ -44,6 +44,7 @@ import (
 	"github.com/cocola-project/cocola/apps/gateway/internal/httpapi"
 	"github.com/cocola-project/cocola/apps/gateway/internal/memory"
 	"github.com/cocola-project/cocola/apps/gateway/internal/objstore"
+	"github.com/cocola-project/cocola/apps/gateway/internal/project"
 	"github.com/cocola-project/cocola/apps/gateway/internal/sandboxmgr"
 	traceevents "github.com/cocola-project/cocola/apps/gateway/internal/traceevent"
 	"github.com/cocola-project/cocola/packages/go-common/config"
@@ -58,6 +59,15 @@ func env(key, def string) string {
 		return v
 	}
 	return def
+}
+
+func anyEnvConfigured(keys ...string) bool {
+	for _, key := range keys {
+		if strings.TrimSpace(os.Getenv(key)) != "" {
+			return true
+		}
+	}
+	return false
 }
 
 func boundedEnvInt(key string, fallback, minValue, maxValue int) (int, error) {
@@ -192,6 +202,36 @@ func main() {
 	} else {
 		api = api.WithConvoStore(cs)
 		defer cs.Close()
+		projectStore, projectStoreErr := project.NewPostgres(context.Background(), dsn)
+		if projectStoreErr != nil {
+			log.Fatal("project store connect failed: " + projectStoreErr.Error())
+		}
+		defer projectStore.Close()
+		projectService, projectErr := project.New(projectStore, project.Config{
+			ConfigurationPresent: anyEnvConfigured(
+				"COCOLA_GITHUB_APP_ID", "COCOLA_GITHUB_APP_SLUG", "COCOLA_GITHUB_CLIENT_ID",
+				"COCOLA_GITHUB_CLIENT_SECRET", "COCOLA_GITHUB_CLIENT_SECRET_FILE",
+				"COCOLA_GITHUB_PRIVATE_KEY", "COCOLA_GITHUB_PRIVATE_KEY_FILE",
+				"COCOLA_GITHUB_CALLBACK_URL", "COCOLA_SCM_SECRET_KEY", "COCOLA_SCM_SECRET_KEY_FILE",
+			),
+			AppID:           strings.TrimSpace(os.Getenv("COCOLA_GITHUB_APP_ID")),
+			AppSlug:         strings.TrimSpace(os.Getenv("COCOLA_GITHUB_APP_SLUG")),
+			ClientID:        strings.TrimSpace(os.Getenv("COCOLA_GITHUB_CLIENT_ID")),
+			ClientSecret:    config.SecretFromEnv("COCOLA_GITHUB_CLIENT_SECRET"),
+			PrivateKey:      config.SecretFromEnv("COCOLA_GITHUB_PRIVATE_KEY"),
+			CallbackURL:     strings.TrimSpace(os.Getenv("COCOLA_GITHUB_CALLBACK_URL")),
+			SecretKey:       config.SecretFromEnv("COCOLA_SCM_SECRET_KEY"),
+			MaxRepositoryMB: int64(mustBoundedEnvInt(log, "COCOLA_PROJECT_MAX_REPOSITORY_MB", 512, 1, 8192)),
+		})
+		if projectErr != nil {
+			log.Fatal("GitHub Project configuration failed: " + projectErr.Error())
+		}
+		api = api.WithProjects(projectService)
+		if projectService.Enabled() {
+			log.Info("GitHub Projects enabled")
+		} else {
+			log.Info("GitHub Projects disabled (GitHub App configuration unset)")
+		}
 		memoryService, memoryErr := memory.New(context.Background(), dsn, memory.Config{
 			OpenVikingURL:        env("COCOLA_OPENVIKING_URL", "http://127.0.0.1:1933"),
 			OpenVikingRootAPIKey: config.SecretFromEnv("COCOLA_OPENVIKING_ROOT_API_KEY"),

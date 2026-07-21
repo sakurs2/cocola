@@ -42,6 +42,29 @@ func NetworkingFromEnv() provider.Networking {
 	return provider.Networking{EgressAllowlist: allow}
 }
 
+// mergeSessionNetworking expands an operator-configured policy for a trusted
+// project session. A nil base means public egress is already allowed, so it
+// must remain nil rather than accidentally turning one added host into a
+// restrictive allowlist.
+func mergeSessionNetworking(base provider.Networking, additional []string) provider.Networking {
+	if base.EgressAllowlist == nil {
+		return base
+	}
+	out := append([]string(nil), base.EgressAllowlist...)
+	seen := make(map[string]bool, len(out))
+	for _, value := range out {
+		seen[value] = true
+	}
+	for _, value := range additional {
+		value = strings.TrimSpace(value)
+		if value != "" && !seen[value] {
+			seen[value] = true
+			out = append(out, value)
+		}
+	}
+	return provider.Networking{EgressAllowlist: out}
+}
+
 // gatewayHost extracts the bare hostname (no scheme/port) from a base URL.
 // Returns "" when the URL is empty or cannot be parsed into a host.
 func gatewayHost(raw string) string {
