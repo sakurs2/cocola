@@ -56,7 +56,11 @@ import {
   RailTool,
 } from "@/components/assistant-ui/rail";
 import { type EnvironmentPreparationSnapshot } from "@/lib/environment";
-import { finalAgentOutputText, splitAgentTurnParts } from "@/lib/agent-turn-summary.mjs";
+import {
+  buildAgentTurnRenderPlan,
+  finalAgentOutputText,
+  splitAgentTurnParts,
+} from "@/lib/agent-turn-summary.mjs";
 import {
   LOCAL_SIMPLE_ICON_PATHS,
   SIMPLE_ICON_FALLBACK_BADGES,
@@ -751,46 +755,54 @@ const AssistantMessageParts: FC = () => {
     custom.environmentOnly === true &&
     custom.environmentPreparation != null &&
     custom.environmentPreparation.state !== "preparing";
-  const split = splitAgentTurnParts(parts, custom.environmentPreparation != null);
-
-  if (!streaming) {
-    return (
-      <div>
-        {split.hasProcess ? (
-          <RailProcessSummary durationMs={custom.duration_ms}>
-            {custom.environmentPreparation ? (
-              <RailEnvironment environment={custom.environmentPreparation} />
-            ) : null}
-            {split.processIndices.map((index) => (
-              <MessagePrimitive.PartByIndex
-                key={index}
-                index={index}
-                components={ASSISTANT_PART_COMPONENTS}
-              />
-            ))}
-          </RailProcessSummary>
-        ) : null}
-        {!custom.environmentOnly
-          ? split.outputIndices.map((index) => (
-              <MessagePrimitive.PartByIndex
-                key={index}
-                index={index}
-                components={ASSISTANT_PART_COMPONENTS}
-              />
-            ))
-          : null}
-      </div>
-    );
-  }
+  const renderPlan = buildAgentTurnRenderPlan(
+    parts,
+    custom.environmentPreparation != null,
+    streaming,
+  );
 
   return (
     <div className={streaming ? "aui-rail-streaming" : undefined}>
-      {custom.environmentPreparation ? (
-        <RailEnvironment environment={custom.environmentPreparation} />
+      {streaming ? (
+        <Fragment key="process-live">
+          {custom.environmentPreparation ? (
+            <RailEnvironment environment={custom.environmentPreparation} />
+          ) : null}
+          {awaitingFirstResponsePart ? <RailResponsePending /> : null}
+          {!custom.environmentOnly
+            ? renderPlan.expandedProcessIndices.map((index) => (
+                <MessagePrimitive.PartByIndex
+                  key={`process-${index}`}
+                  index={index}
+                  components={ASSISTANT_PART_COMPONENTS}
+                />
+              ))
+            : null}
+        </Fragment>
+      ) : renderPlan.showProcessSummary ? (
+        <RailProcessSummary key="process-summary" durationMs={custom.duration_ms}>
+          {custom.environmentPreparation ? (
+            <RailEnvironment environment={custom.environmentPreparation} />
+          ) : null}
+          {renderPlan.summaryProcessIndices.map((index) => (
+            <MessagePrimitive.PartByIndex
+              key={`process-${index}`}
+              index={index}
+              components={ASSISTANT_PART_COMPONENTS}
+            />
+          ))}
+        </RailProcessSummary>
       ) : null}
-      {awaitingFirstResponsePart ? <RailResponsePending /> : null}
       {!custom.environmentOnly ? (
-        <MessagePrimitive.Parts components={ASSISTANT_PART_COMPONENTS} />
+        <div key="final-output" className="contents">
+          {renderPlan.outputIndices.map((index) => (
+            <MessagePrimitive.PartByIndex
+              key={`output-${index}`}
+              index={index}
+              components={ASSISTANT_PART_COMPONENTS}
+            />
+          ))}
+        </div>
       ) : null}
     </div>
   );

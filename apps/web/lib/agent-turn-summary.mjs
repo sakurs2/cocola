@@ -41,6 +41,27 @@ export const splitAgentTurnParts = (parts, hasExternalEnvironment = false) => {
   };
 };
 
+/**
+ * Keeps the final-output renderer stable while a turn moves from streaming to
+ * complete. Only process parts change presentation at completion: they move
+ * from the expanded timeline into the collapsed summary. Output indices remain
+ * in one dedicated render path in both states, so the final text is never
+ * mounted by both MessagePrimitive.Parts and PartByIndex during the hand-off.
+ */
+export const buildAgentTurnRenderPlan = (
+  parts,
+  hasExternalEnvironment = false,
+  streaming = false,
+) => {
+  const split = splitAgentTurnParts(parts, hasExternalEnvironment);
+  return {
+    ...split,
+    expandedProcessIndices: streaming ? split.processIndices : [],
+    summaryProcessIndices: !streaming && split.hasProcess ? split.processIndices : [],
+    showProcessSummary: !streaming && split.hasProcess,
+  };
+};
+
 const finiteNonNegativeNumber = (value) => {
   if (typeof value === "string" && value.trim() !== "") value = Number(value);
   return typeof value === "number" && Number.isFinite(value) && value >= 0 ? value : undefined;

@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import {
+  buildAgentTurnRenderPlan,
   finalAgentOutputText,
   formatAgentDuration,
   inferAgentDurationMs,
@@ -60,6 +61,31 @@ test("terminal error or interruption text remains visible after process steps co
     outputIndices: [1],
     hasProcess: true,
   });
+});
+
+test("final output keeps one stable render path when streaming completes", () => {
+  const parts = [
+    { type: "reasoning", text: "Inspecting the project." },
+    { type: "tool-call", toolName: "Bash" },
+    { type: "text", text: "The implementation is complete." },
+    { type: "file", filename: "result.html" },
+  ];
+
+  const streaming = buildAgentTurnRenderPlan(parts, false, true);
+  const completed = buildAgentTurnRenderPlan(parts, false, false);
+
+  assert.deepEqual(streaming.expandedProcessIndices, [0, 1]);
+  assert.deepEqual(streaming.summaryProcessIndices, []);
+  assert.equal(streaming.showProcessSummary, false);
+  assert.deepEqual(completed.expandedProcessIndices, []);
+  assert.deepEqual(completed.summaryProcessIndices, [0, 1]);
+  assert.equal(completed.showProcessSummary, true);
+  assert.deepEqual(streaming.outputIndices, [2, 3]);
+  assert.deepEqual(completed.outputIndices, streaming.outputIndices);
+  assert.deepEqual(
+    completed.summaryProcessIndices.filter((index) => completed.outputIndices.includes(index)),
+    [],
+  );
 });
 
 test("environment preparation alone is a process step", () => {
