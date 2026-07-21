@@ -69,21 +69,37 @@ func (b *secretBox) decrypt(value string, aad []byte) (string, error) {
 }
 
 type oauthState struct {
-	UserID   string `json:"u"`
-	TenantID string `json:"t"`
-	ReturnTo string `json:"r"`
-	Nonce    string `json:"n"`
-	Expires  int64  `json:"e"`
+	UserID         string `json:"u"`
+	TenantID       string `json:"t"`
+	ReturnTo       string `json:"r"`
+	PublicOrigin   string `json:"o,omitempty"`
+	RegistrationID string `json:"g,omitempty"`
+	FlowType       string `json:"f,omitempty"`
+	Nonce          string `json:"n"`
+	Expires        int64  `json:"e"`
 }
 
 func (b *secretBox) signState(identity Identity, returnTo string, now time.Time) (string, error) {
+	return b.signFlowState(identity, "oauth", returnTo, "", "", 10*time.Minute, now)
+}
+
+func (b *secretBox) signFlowState(
+	identity Identity,
+	flowType string,
+	returnTo string,
+	publicOrigin string,
+	registrationID string,
+	ttl time.Duration,
+	now time.Time,
+) (string, error) {
 	nonce := make([]byte, 18)
 	if _, err := io.ReadFull(rand.Reader, nonce); err != nil {
 		return "", err
 	}
 	payload, err := json.Marshal(oauthState{
 		UserID: identity.UserID, TenantID: identity.TenantID, ReturnTo: safeReturnTo(returnTo),
-		Nonce: base64.RawURLEncoding.EncodeToString(nonce), Expires: now.Add(10 * time.Minute).Unix(),
+		PublicOrigin: publicOrigin, RegistrationID: registrationID, FlowType: flowType,
+		Nonce: base64.RawURLEncoding.EncodeToString(nonce), Expires: now.Add(ttl).Unix(),
 	})
 	if err != nil {
 		return "", err
@@ -96,6 +112,10 @@ func (b *secretBox) signState(identity Identity, returnTo string, now time.Time)
 }
 
 func (b *secretBox) verifyState(value string, identity Identity, now time.Time) (oauthState, error) {
+	return b.verifyFlowState(value, identity, "", now)
+}
+
+func (b *secretBox) verifyFlowState(value string, identity Identity, flowType string, now time.Time) (oauthState, error) {
 	parts := strings.Split(value, ".")
 	if len(parts) != 2 {
 		return oauthState{}, ErrInvalidArgument
@@ -117,7 +137,8 @@ func (b *secretBox) verifyState(value string, identity Identity, now time.Time) 
 	}
 	var state oauthState
 	if json.Unmarshal(payload, &state) != nil || state.UserID != identity.UserID ||
-		state.TenantID != identity.TenantID || state.Expires < now.Unix() || state.Nonce == "" {
+		state.TenantID != identity.TenantID || state.Expires < now.Unix() || state.Nonce == "" ||
+		(flowType != "" && state.FlowType != flowType) {
 		return oauthState{}, ErrInvalidArgument
 	}
 	state.ReturnTo = safeReturnTo(state.ReturnTo)
@@ -128,9 +149,61 @@ func tokenAAD(identity Identity, field string) []byte {
 	return []byte(fmt.Sprintf("cocola:scm:github:%s:%s:%s", identity.TenantID, identity.UserID, field))
 }
 
+func registrationAAD(identity Identity, registrationID, field string) []byte {
+	return []byte(fmt.Sprintf("cocola:scm:github:%s:%s:registration:%s:%s",
+		identity.TenantID, identity.UserID, registrationID, field))
+}
+
+func (b *secretBox) signBrokerCredential(claims BrokerCredentialClaims) (string, error) {
+	payload, err := json.Marshal(claims)
+	if err != nil {
+		return "", err
+	}
+	mac := hmac.New(sha256.New, b.key[:])
+	_, _ = mac.Write([]byte("cocola.scm.broker.v1\x00"))
+	_, _ = mac.Write(payload)
+	return base64.RawURLEncoding.EncodeToString(payload) + "." +
+		base64.RawURLEncoding.EncodeToString(mac.Sum(nil)), nil
+}
+
+func (b *secretBox) verifyBrokerCredential(value string, now time.Time) (BrokerCredentialClaims, error) {
+	parts := strings.Split(value, ".")
+	if len(parts) != 2 {
+		return BrokerCredentialClaims{}, ErrInvalidArgument
+	}
+	payload, err := base64.RawURLEncoding.DecodeString(parts[0])
+	if err != nil {
+		return BrokerCredentialClaims{}, ErrInvalidArgument
+	}
+	signature, err := base64.RawURLEncoding.DecodeString(parts[1])
+	if err != nil {
+		return BrokerCredentialClaims{}, ErrInvalidArgument
+	}
+	mac := hmac.New(sha256.New, b.key[:])
+	_, _ = mac.Write([]byte("cocola.scm.broker.v1\x00"))
+	_, _ = mac.Write(payload)
+	want := mac.Sum(nil)
+	if len(signature) != len(want) || subtle.ConstantTimeCompare(signature, want) != 1 {
+		return BrokerCredentialClaims{}, ErrInvalidArgument
+	}
+	var claims BrokerCredentialClaims
+	if json.Unmarshal(payload, &claims) != nil || claims.UserID == "" ||
+		claims.ConversationID == "" || claims.RunID == "" || claims.ProjectID == "" ||
+		claims.RepositoryID <= 0 || claims.InstallationID <= 0 || claims.RegistrationID == "" ||
+		claims.ExpiresAt < now.Unix() {
+		return BrokerCredentialClaims{}, ErrInvalidArgument
+	}
+	return claims, nil
+}
+
+func tokenLeaseAAD(value TokenLease) []byte {
+	return []byte(fmt.Sprintf("cocola:scm:github:%s:%s:run:%s:lease:%s",
+		value.TenantID, value.UserID, value.RunID, value.ID))
+}
+
 func safeReturnTo(value string) string {
 	value = strings.TrimSpace(value)
-	if value == "/projects/new" || strings.HasPrefix(value, "/projects/") {
+	if value == "/connectors" || value == "/projects/new" || strings.HasPrefix(value, "/projects/") {
 		if !strings.Contains(value, "://") && !strings.HasPrefix(value, "//") && !strings.ContainsAny(value, "\r\n") {
 			return value
 		}

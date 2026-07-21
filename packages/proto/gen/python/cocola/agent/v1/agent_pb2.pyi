@@ -33,7 +33,7 @@ class QueryRequest(_message.Message):
     def __init__(self, user_id: _Optional[str] = ..., session_id: _Optional[str] = ..., prompt: _Optional[str] = ..., sandbox_id: _Optional[str] = ..., max_turns: _Optional[int] = ..., attachments: _Optional[_Iterable[_Union[Attachment, _Mapping]]] = ..., runtime_id: _Optional[str] = ..., skill_id: _Optional[str] = ..., allow_workspace_reset: bool = ..., memory_context: _Optional[str] = ..., project_context: _Optional[_Union[ProjectContext, _Mapping]] = ...) -> None: ...
 
 class ProjectContext(_message.Message):
-    __slots__ = ("project_id", "repository_id", "clone_url", "default_branch", "base_sha", "task_branch", "git_author_name", "git_author_email")
+    __slots__ = ("project_id", "repository_id", "clone_url", "default_branch", "base_sha", "task_branch", "git_author_name", "git_author_email", "repository_provider", "repository_full_name", "credential_mode")
     PROJECT_ID_FIELD_NUMBER: _ClassVar[int]
     REPOSITORY_ID_FIELD_NUMBER: _ClassVar[int]
     CLONE_URL_FIELD_NUMBER: _ClassVar[int]
@@ -42,6 +42,9 @@ class ProjectContext(_message.Message):
     TASK_BRANCH_FIELD_NUMBER: _ClassVar[int]
     GIT_AUTHOR_NAME_FIELD_NUMBER: _ClassVar[int]
     GIT_AUTHOR_EMAIL_FIELD_NUMBER: _ClassVar[int]
+    REPOSITORY_PROVIDER_FIELD_NUMBER: _ClassVar[int]
+    REPOSITORY_FULL_NAME_FIELD_NUMBER: _ClassVar[int]
+    CREDENTIAL_MODE_FIELD_NUMBER: _ClassVar[int]
     project_id: str
     repository_id: int
     clone_url: str
@@ -50,7 +53,10 @@ class ProjectContext(_message.Message):
     task_branch: str
     git_author_name: str
     git_author_email: str
-    def __init__(self, project_id: _Optional[str] = ..., repository_id: _Optional[int] = ..., clone_url: _Optional[str] = ..., default_branch: _Optional[str] = ..., base_sha: _Optional[str] = ..., task_branch: _Optional[str] = ..., git_author_name: _Optional[str] = ..., git_author_email: _Optional[str] = ...) -> None: ...
+    repository_provider: str
+    repository_full_name: str
+    credential_mode: str
+    def __init__(self, project_id: _Optional[str] = ..., repository_id: _Optional[int] = ..., clone_url: _Optional[str] = ..., default_branch: _Optional[str] = ..., base_sha: _Optional[str] = ..., task_branch: _Optional[str] = ..., git_author_name: _Optional[str] = ..., git_author_email: _Optional[str] = ..., repository_provider: _Optional[str] = ..., repository_full_name: _Optional[str] = ..., credential_mode: _Optional[str] = ...) -> None: ...
 
 class Attachment(_message.Message):
     __slots__ = ("filename", "content", "mime", "oss_key", "size")
@@ -130,6 +136,26 @@ class InspectWorkspaceGitRequest(_message.Message):
     diff_target: str
     project_context: ProjectContext
     def __init__(self, user_id: _Optional[str] = ..., session_id: _Optional[str] = ..., operation: _Optional[str] = ..., path: _Optional[str] = ..., diff_target: _Optional[str] = ..., project_context: _Optional[_Union[ProjectContext, _Mapping]] = ...) -> None: ...
+
+class PublishWorkspaceGitRequest(_message.Message):
+    __slots__ = ("user_id", "session_id", "project_context", "remote_clone_url", "expected_head_sha")
+    USER_ID_FIELD_NUMBER: _ClassVar[int]
+    SESSION_ID_FIELD_NUMBER: _ClassVar[int]
+    PROJECT_CONTEXT_FIELD_NUMBER: _ClassVar[int]
+    REMOTE_CLONE_URL_FIELD_NUMBER: _ClassVar[int]
+    EXPECTED_HEAD_SHA_FIELD_NUMBER: _ClassVar[int]
+    user_id: str
+    session_id: str
+    project_context: ProjectContext
+    remote_clone_url: str
+    expected_head_sha: str
+    def __init__(self, user_id: _Optional[str] = ..., session_id: _Optional[str] = ..., project_context: _Optional[_Union[ProjectContext, _Mapping]] = ..., remote_clone_url: _Optional[str] = ..., expected_head_sha: _Optional[str] = ...) -> None: ...
+
+class PublishWorkspaceGitResponse(_message.Message):
+    __slots__ = ("head_sha",)
+    HEAD_SHA_FIELD_NUMBER: _ClassVar[int]
+    head_sha: str
+    def __init__(self, head_sha: _Optional[str] = ...) -> None: ...
 
 class GitChange(_message.Message):
     __slots__ = ("path", "old_path", "status", "area")

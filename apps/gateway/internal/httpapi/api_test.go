@@ -82,7 +82,7 @@ func newConfiguredTestAPIWithConvo(fs agent.Streamer, v *auth.Verifier, log logg
 	return New(fs, v, log).
 		WithConvoStore(conversations).
 		WithChatRuns(chatrun.NewMemory(conversations), RunConfig{
-			PingEvery: time.Hour,
+			PingEvery:   time.Hour,
 			MergeWindow: time.Millisecond, DraftInterval: time.Millisecond,
 		})
 }

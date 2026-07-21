@@ -12,6 +12,12 @@
       "name": "Cocola Sandbox Artifacts",
       "version": "1.0.0",
       "path": "cocola-sandbox-artifacts"
+    },
+    {
+      "id": "cocola-github",
+      "name": "Cocola GitHub",
+      "version": "1.0.0",
+      "path": "cocola-github"
     }
   ]
 }

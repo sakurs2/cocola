@@ -4,7 +4,6 @@ import { WorkspaceToastProvider } from "@/components/assistant-ui/workspace-toas
 import { UsagePanel } from "@/components/profile/usage-panel";
 import { SignOutButton } from "@/components/profile/sign-out-button";
 import { MemoryPanel } from "@/components/profile/memory-panel";
-import { GitHubIntegrationPanel } from "@/components/profile/github-integration-panel";
 import { AccountSettingsPanel } from "@/components/profile/account-settings-panel";
 import { isAuthFail, requireUser } from "@/lib/server-auth";
 import { ArrowLeft, BadgeCheck, Mail, ShieldCheck, UserRound } from "lucide-react";
@@ -91,8 +90,6 @@ export default async function ProfilePage() {
               <UsagePanel />
 
               <MemoryPanel />
-
-              <GitHubIntegrationPanel />
 
               <div className="flex items-center justify-between">
                 <SignOutButton />

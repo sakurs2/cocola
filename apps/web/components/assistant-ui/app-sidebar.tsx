@@ -3,6 +3,7 @@
 import { useCallback, useRef, useState } from "react";
 import * as DropdownMenu from "@radix-ui/react-dropdown-menu";
 import {
+  Cable,
   CalendarCheck as CalendarDots,
   MessagesSquare as ChatsCircle,
   CheckCircle2 as CheckCircle,
@@ -10,8 +11,6 @@ import {
   Folder,
   FolderGit2,
   Settings as Gear,
-  Search as MagnifyingGlass,
-  Notebook,
   Pencil as PencilSimple,
   Plug as PlugsConnected,
   Plus as PlusCircle,
@@ -55,13 +54,6 @@ const PRIMARY_NAV: PrimaryNavItem[] = [
     iconClassName: "text-blue-600",
   },
   {
-    icon: MagnifyingGlass,
-    label: "Search",
-    section: "navigation",
-    iconClassName: "text-green-600",
-  },
-  { icon: Notebook, label: "Notes", section: "navigation", iconClassName: "text-cyan-600" },
-  {
     icon: Sparkle,
     label: "Skills",
     href: "/skills",
@@ -74,6 +66,13 @@ const PRIMARY_NAV: PrimaryNavItem[] = [
     href: "/mcps",
     section: "navigation",
     iconClassName: "text-orange-600",
+  },
+  {
+    icon: Cable,
+    label: "Connectors",
+    href: "/connectors",
+    section: "navigation",
+    iconClassName: "text-emerald-600",
   },
   {
     icon: ShieldCheck,

@@ -11,11 +11,15 @@ import shutil
 import stat
 import subprocess
 import sys
+import tempfile
 import time
 import uuid
+from contextlib import suppress
 from pathlib import Path
 from typing import Any
+from urllib.error import HTTPError, URLError
 from urllib.parse import urlsplit
+from urllib.request import Request, urlopen
 
 DEFAULT_MANIFEST = "/opt/cocola/runtime-manifest.json"
 DEFAULT_SUPERVISOR_CONFIG = "/opt/cocola/supervisord.conf"
@@ -66,6 +70,120 @@ def browser_enabled(manifest: dict[str, Any], profile: str) -> bool:
 def artifact_enabled(manifest: dict[str, Any], profile: str) -> bool:
     profile_capability = manifest["profiles"][profile].get("capabilities", {}).get("artifacts", {})
     return bool(profile_capability.get("enabled", False))
+
+
+def github_enabled(manifest: dict[str, Any], profile: str) -> bool:
+    profile_capability = manifest["profiles"][profile].get("capabilities", {}).get("github", {})
+    return bool(profile_capability.get("enabled", False))
+
+
+def _broker_request(
+    method: str, path: str, body: dict[str, Any] | None = None
+) -> tuple[int, dict[str, Any]]:
+    base_url = os.environ.get("COCOLA_PROJECT_BROKER_URL", "").strip().rstrip("/")
+    credential = os.environ.get("COCOLA_PROJECT_CREDENTIAL", "").strip()
+    if not base_url or not credential:
+        raise RuntimeError("GitHub broker is unavailable outside an authenticated Project run")
+    raw = None if body is None else json.dumps(body, separators=(",", ":")).encode()
+    request = Request(base_url + path, data=raw, method=method)
+    request.add_header("Authorization", "Bearer " + credential)
+    request.add_header("Accept", "application/json")
+    if raw is not None:
+        request.add_header("Content-Type", "application/json")
+    try:
+        with urlopen(request, timeout=35) as response:
+            payload = json.loads(response.read() or b"{}")
+            return int(response.status), payload
+    except HTTPError as error:
+        payload: dict[str, Any] = {}
+        with suppress(ValueError):
+            payload = json.loads(error.read() or b"{}")
+        if error.code == 202:
+            return error.code, payload
+        message = payload.get("error", {}).get("message") or f"broker request failed ({error.code})"
+        raise RuntimeError(message) from error
+    except URLError as error:
+        raise RuntimeError("GitHub broker could not be reached") from error
+
+
+def run_github_command(kind: str, arguments: list[str], permissions: list[str]) -> int:
+    argv = list(arguments)
+    if argv and argv[0] == "--":
+        argv = argv[1:]
+    if not argv:
+        raise ValueError("a GitHub command is required after --")
+    if kind == "git" and argv[0] != "push":
+        raise ValueError("the brokered Git command only supports push")
+
+    request_payload = {
+        "operation": kind,
+        "argv": argv,
+        "permissions": permissions,
+        "request_id": str(uuid.uuid4()),
+    }
+    status, lease = _broker_request("POST", "/internal/scm/github/token-leases", request_payload)
+    if status == 202 or lease.get("status") == "pending":
+        approval_id = str(lease.get("approval_id") or "")
+        if not approval_id:
+            raise RuntimeError("the broker returned an invalid approval request")
+        deadline = time.monotonic() + 300
+        while time.monotonic() < deadline:
+            _, decision = _broker_request("GET", f"/internal/scm/approvals/{approval_id}/wait")
+            decision_status = str(decision.get("status") or "")
+            if decision_status == "approved":
+                status, lease = _broker_request(
+                    "POST", "/internal/scm/github/token-leases", request_payload
+                )
+                break
+            if decision_status in {"denied", "expired"}:
+                raise RuntimeError(f"the user {decision_status} this GitHub command")
+        else:
+            raise RuntimeError("GitHub command approval timed out")
+    token = str(lease.get("token") or "")
+    lease_id = str(lease.get("lease_id") or "")
+    if not token or not lease_id:
+        raise RuntimeError("GitHub broker returned an incomplete lease")
+
+    command_result = "failed"
+    try:
+        with tempfile.TemporaryDirectory(prefix="cocola-github-") as temp_dir:
+            env = os.environ.copy()
+            env.update(
+                {
+                    "GH_TOKEN": token,
+                    "GH_HOST": "github.com",
+                    "GH_REPO": os.environ.get("COCOLA_PROJECT_REPOSITORY", ""),
+                    "GH_PROMPT_DISABLED": "true",
+                    "GH_CONFIG_DIR": temp_dir,
+                    "GIT_TERMINAL_PROMPT": "0",
+                }
+            )
+            if kind == "gh":
+                executable = os.environ.get("COCOLA_REAL_GH", "/opt/cocola/gh/current/bin/gh")
+                return_code = subprocess.run([executable, *argv], env=env, check=False).returncode
+                command_result = "success" if return_code == 0 else "failed"
+                return return_code
+
+            askpass = Path(temp_dir) / "askpass.sh"
+            askpass.write_text(
+                '#!/bin/sh\ncase "$1" in *Username*) printf "%s" "x-access-token" ;; '
+                '*) printf "%s" "$GH_TOKEN" ;; esac\n',
+                encoding="utf-8",
+            )
+            askpass.chmod(0o700)
+            env["GIT_ASKPASS"] = str(askpass)
+            return_code = subprocess.run(
+                ["git", *argv], cwd="/workspace", env=env, check=False
+            ).returncode
+            command_result = "success" if return_code == 0 else "failed"
+            return return_code
+    finally:
+        with suppress(RuntimeError):
+            _broker_request(
+                "DELETE",
+                f"/internal/scm/github/token-leases/{lease_id}",
+                {"result": command_result},
+            )
 
 
 def supervisor_status(program: str) -> tuple[str, str]:
@@ -484,6 +602,14 @@ def build_parser() -> argparse.ArgumentParser:
     )
     artifact_list_parser.add_argument("--limit", type=int, default=200)
     artifact_list_parser.add_argument("--json", action="store_true")
+
+    github = commands.add_parser("github", help="use run-scoped GitHub credentials")
+    github_commands = github.add_subparsers(dest="github_command")
+    for command_name in ("gh", "git"):
+        command = github_commands.add_parser(command_name)
+        command.add_argument("--permissions", action="append", default=[])
+        command.add_argument("arguments", nargs=argparse.REMAINDER)
+
     return parser
 
 
@@ -515,6 +641,10 @@ def main(argv: list[str] | None = None) -> int:
         elif args.command == "artifact" and args.artifact_command == "list":
             limit = bounded(args.limit, "limit", 1, 1000)
             emit(artifact_files(manifest, profile, limit), args.json)
+        elif args.command == "github" and args.github_command in {"gh", "git"}:
+            if not github_enabled(manifest, profile):
+                raise RuntimeError("GitHub commands are disabled by the active sandbox profile")
+            return run_github_command(args.github_command, args.arguments, args.permissions)
         else:
             parser.print_help()
             return 2

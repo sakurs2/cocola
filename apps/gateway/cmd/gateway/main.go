@@ -79,6 +79,18 @@ func boundedEnvInt(key string, fallback, minValue, maxValue int) (int, error) {
 	return parsed, nil
 }
 
+func mustEnvBool(log logger.Logger, key string, fallback bool) bool {
+	value := strings.TrimSpace(os.Getenv(key))
+	if value == "" {
+		return fallback
+	}
+	parsed, err := strconv.ParseBool(value)
+	if err != nil {
+		log.Fatal("invalid " + key + "=" + value)
+	}
+	return parsed
+}
+
 func main() {
 	log := logger.WithService(logger.Must(), "gateway", "gateway")
 	defer func() { _ = log.Sync() }()
@@ -208,30 +220,20 @@ func main() {
 		}
 		defer projectStore.Close()
 		projectService, projectErr := project.New(projectStore, project.Config{
-			ConfigurationPresent: anyEnvConfigured(
-				"COCOLA_GITHUB_APP_ID", "COCOLA_GITHUB_APP_SLUG", "COCOLA_GITHUB_CLIENT_ID",
-				"COCOLA_GITHUB_CLIENT_SECRET", "COCOLA_GITHUB_CLIENT_SECRET_FILE",
-				"COCOLA_GITHUB_PRIVATE_KEY", "COCOLA_GITHUB_PRIVATE_KEY_FILE",
-				"COCOLA_GITHUB_CALLBACK_URL", "COCOLA_SCM_SECRET_KEY", "COCOLA_SCM_SECRET_KEY_FILE",
-			),
-			AppID:           strings.TrimSpace(os.Getenv("COCOLA_GITHUB_APP_ID")),
-			AppSlug:         strings.TrimSpace(os.Getenv("COCOLA_GITHUB_APP_SLUG")),
-			ClientID:        strings.TrimSpace(os.Getenv("COCOLA_GITHUB_CLIENT_ID")),
-			ClientSecret:    config.SecretFromEnv("COCOLA_GITHUB_CLIENT_SECRET"),
-			PrivateKey:      config.SecretFromEnv("COCOLA_GITHUB_PRIVATE_KEY"),
-			CallbackURL:     strings.TrimSpace(os.Getenv("COCOLA_GITHUB_CALLBACK_URL")),
-			SecretKey:       config.SecretFromEnv("COCOLA_SCM_SECRET_KEY"),
-			MaxRepositoryMB: int64(mustBoundedEnvInt(log, "COCOLA_PROJECT_MAX_REPOSITORY_MB", 512, 1, 8192)),
+			SecretKey:               config.SecretFromEnv("COCOLA_SCM_SECRET_KEY"),
+			PublicOrigins:           strings.TrimSpace(os.Getenv("COCOLA_PUBLIC_ORIGINS")),
+			MaxRepositoryMB:         int64(mustBoundedEnvInt(log, "COCOLA_PROJECT_MAX_REPOSITORY_MB", 512, 1, 8192)),
+			DisableLocalProjects:    !mustEnvBool(log, "COCOLA_FEATURE_LOCAL_PROJECTS", true),
+			DisableGitHubConnector:  !mustEnvBool(log, "COCOLA_FEATURE_GITHUB_MANIFEST_CONNECTOR", true),
+			DisableGitHubAgentWrite: !mustEnvBool(log, "COCOLA_FEATURE_GITHUB_AGENT_WRITE", true),
 		})
 		if projectErr != nil {
-			log.Fatal("GitHub Project configuration failed: " + projectErr.Error())
+			log.Fatal("Project configuration failed: " + projectErr.Error())
 		}
 		api = api.WithProjects(projectService)
-		if projectService.Enabled() {
-			log.Info("GitHub Projects enabled")
-		} else {
-			log.Info("GitHub Projects disabled (GitHub App configuration unset)")
-		}
+		log.Info("Projects enabled (local projects=" + strconv.FormatBool(projectService.LocalProjectsEnabled()) +
+			", github connector=" + strconv.FormatBool(projectService.GitHubConnectorEnabled()) +
+			", github agent write=" + strconv.FormatBool(projectService.GitHubAgentWriteEnabled()) + ")")
 		memoryService, memoryErr := memory.New(context.Background(), dsn, memory.Config{
 			OpenVikingURL:        env("COCOLA_OPENVIKING_URL", "http://127.0.0.1:1933"),
 			OpenVikingRootAPIKey: config.SecretFromEnv("COCOLA_OPENVIKING_ROOT_API_KEY"),

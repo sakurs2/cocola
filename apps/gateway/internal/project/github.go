@@ -38,6 +38,15 @@ type githubUser struct {
 	Login string `json:"login"`
 }
 
+type githubManifestConversion struct {
+	ID           int64      `json:"id"`
+	Slug         string     `json:"slug"`
+	ClientID     string     `json:"client_id"`
+	ClientSecret string     `json:"client_secret"`
+	PEM          string     `json:"pem"`
+	Owner        githubUser `json:"owner"`
+}
+
 type githubInstallation struct {
 	ID      int64 `json:"id"`
 	Account struct {
@@ -69,10 +78,22 @@ type githubClient struct {
 	userAgent    string
 }
 
-func newGitHubClient(cfg Config) (*githubClient, error) {
+type githubClientConfig struct {
+	AppID        int64
+	AppSlug      string
+	ClientID     string
+	ClientSecret string
+	PrivateKey   string
+	CallbackURL  string
+	HTTPClient   *http.Client
+	APIBase      string
+	WebBase      string
+}
+
+func newGitHubClient(cfg githubClientConfig) (*githubClient, error) {
 	block, _ := pem.Decode([]byte(cfg.PrivateKey))
 	if block == nil {
-		return nil, errors.New("COCOLA_GITHUB_PRIVATE_KEY is not valid PEM")
+		return nil, errors.New("GitHub App private key is not valid PEM")
 	}
 	key, err := x509.ParsePKCS8PrivateKey(block.Bytes)
 	if err == nil {
@@ -82,22 +103,69 @@ func newGitHubClient(cfg Config) (*githubClient, error) {
 	}
 	rsaKey, rsaErr := x509.ParsePKCS1PrivateKey(block.Bytes)
 	if rsaErr != nil {
-		return nil, errors.New("COCOLA_GITHUB_PRIVATE_KEY is not an RSA private key")
+		return nil, errors.New("GitHub App private key is not an RSA private key")
 	}
 	return configuredGitHubClient(cfg, rsaKey), nil
 }
 
-func configuredGitHubClient(cfg Config, key *rsa.PrivateKey) *githubClient {
+func configuredGitHubClient(cfg githubClientConfig, key *rsa.PrivateKey) *githubClient {
 	client := cfg.HTTPClient
 	if client == nil {
 		client = &http.Client{Timeout: 30 * time.Second}
 	}
 	return &githubClient{
 		http: client, clientID: cfg.ClientID, clientSecret: cfg.ClientSecret,
-		appID: cfg.AppID, appSlug: cfg.AppSlug, callbackURL: cfg.CallbackURL,
-		privateKey: key, apiBase: githubAPIBase, webBase: githubWebBase,
+		appID: strconv.FormatInt(cfg.AppID, 10), appSlug: cfg.AppSlug, callbackURL: cfg.CallbackURL,
+		privateKey: key, apiBase: firstNonEmpty(cfg.APIBase, githubAPIBase),
+		webBase:   firstNonEmpty(cfg.WebBase, githubWebBase),
 		userAgent: "cocola-projects/1",
 	}
+}
+
+func firstNonEmpty(value, fallback string) string {
+	if strings.TrimSpace(value) != "" {
+		return strings.TrimRight(value, "/")
+	}
+	return fallback
+}
+
+func githubManifestRegistrationURL(state string) string {
+	return githubWebBase + "/settings/apps/new?state=" + url.QueryEscape(state)
+}
+
+func convertGitHubManifest(ctx context.Context, client *http.Client, code string) (githubManifestConversion, error) {
+	if client == nil {
+		client = &http.Client{Timeout: 30 * time.Second}
+	}
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost,
+		githubAPIBase+"/app-manifests/"+url.PathEscape(strings.TrimSpace(code))+"/conversions", nil)
+	if err != nil {
+		return githubManifestConversion{}, err
+	}
+	req.Header.Set("Accept", "application/vnd.github+json")
+	req.Header.Set("X-GitHub-Api-Version", "2022-11-28")
+	req.Header.Set("User-Agent", "cocola-projects/1")
+	response, err := client.Do(req)
+	if err != nil {
+		return githubManifestConversion{}, err
+	}
+	defer response.Body.Close()
+	body, err := io.ReadAll(io.LimitReader(response.Body, 2<<20))
+	if err != nil {
+		return githubManifestConversion{}, err
+	}
+	if response.StatusCode < 200 || response.StatusCode >= 300 {
+		return githubManifestConversion{}, &githubHTTPError{Status: response.StatusCode}
+	}
+	var conversion githubManifestConversion
+	if err := json.Unmarshal(body, &conversion); err != nil {
+		return githubManifestConversion{}, err
+	}
+	if conversion.ID <= 0 || conversion.Slug == "" || conversion.ClientID == "" ||
+		conversion.ClientSecret == "" || conversion.PEM == "" {
+		return githubManifestConversion{}, errors.New("github manifest conversion returned incomplete credentials")
+	}
+	return conversion, nil
 }
 
 func (g *githubClient) authorizeURL(state string) string {
@@ -207,6 +275,14 @@ func (g *githubClient) createRepository(ctx context.Context, token, name, descri
 	return payload.repository(), err
 }
 
+func (g *githubClient) createEmptyRepository(ctx context.Context, token, name, description string, private bool) (Repository, error) {
+	var payload githubRepository
+	err := g.api(ctx, http.MethodPost, "/user/repos", token, map[string]any{
+		"name": name, "description": description, "private": private, "auto_init": false,
+	}, &payload)
+	return payload.repository(), err
+}
+
 func (g *githubClient) repository(ctx context.Context, token string, repositoryID int64) (Repository, error) {
 	var payload githubRepository
 	err := g.api(ctx, http.MethodGet, "/repositories/"+strconv.FormatInt(repositoryID, 10), token, nil, &payload)
@@ -264,7 +340,12 @@ func (g *githubClient) repositoryFile(ctx context.Context, token string, repo Re
 	return content, true, err
 }
 
-func (g *githubClient) installationToken(ctx context.Context, installationID, repositoryID int64) (string, time.Time, error) {
+func (g *githubClient) installationToken(
+	ctx context.Context,
+	installationID int64,
+	repositoryID int64,
+	permissions map[string]string,
+) (string, time.Time, error) {
 	jwt, err := g.appJWT(time.Now().UTC())
 	if err != nil {
 		return "", time.Time{}, err
@@ -276,9 +357,13 @@ func (g *githubClient) installationToken(ctx context.Context, installationID, re
 	endpoint := fmt.Sprintf("/app/installations/%d/access_tokens", installationID)
 	err = g.api(ctx, http.MethodPost, endpoint, jwt, map[string]any{
 		"repository_ids": []int64{repositoryID},
-		"permissions":    map[string]string{"contents": "read"},
+		"permissions":    permissions,
 	}, &payload)
 	return payload.Token, payload.ExpiresAt, err
+}
+
+func (g *githubClient) revokeInstallationToken(ctx context.Context, token string) error {
+	return g.api(ctx, http.MethodDelete, "/installation/token", token, nil, nil)
 }
 
 func (g *githubClient) appJWT(now time.Time) (string, error) {

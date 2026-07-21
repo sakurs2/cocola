@@ -1,12 +1,14 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import Link from "next/link";
 import { useRouter } from "next/navigation";
 import {
   ArrowLeft,
   Check,
-  ExternalLink,
+  FolderGit2,
   GitFork,
+  GitFork as GitHubIcon,
   Loader2,
   Lock,
   Plus,
@@ -17,24 +19,18 @@ import { useCocola } from "@/app/runtime-provider";
 import { cn } from "@/lib/utils";
 import { nextProjectCreateIntent } from "@/lib/project-task-intent.mjs";
 
+type Mode = "empty" | "github_create" | "github_import";
+
 type Connection = {
   enabled: boolean;
-  status:
-    | "disabled"
-    | "disconnected"
-    | "installation_required"
-    | "ready"
-    | "reauthorization_required";
+  status: string;
   external_login?: string;
-  installation_url?: string;
 };
 
 type Repository = {
   id: number;
-  owner: string;
   name: string;
   full_name: string;
-  html_url: string;
   default_branch: string;
   private: boolean;
   size_kb: number;
@@ -44,7 +40,7 @@ export default function NewProjectPage() {
   const router = useRouter();
   const { runtimes, refreshProjects } = useCocola();
   const [connection, setConnection] = useState<Connection | null>(null);
-  const [mode, setMode] = useState<"create" | "import">("create");
+  const [mode, setMode] = useState<Mode>("empty");
   const [name, setName] = useState("");
   const [repositoryName, setRepositoryName] = useState("");
   const [description, setDescription] = useState("");
@@ -55,18 +51,16 @@ export default function NewProjectPage() {
   const [selectedRepositoryID, setSelectedRepositoryID] = useState<number | null>(null);
   const [filter, setFilter] = useState("");
   const [busy, setBusy] = useState(false);
-  const [error, setError] = useState<string | null>(null);
+  const [error, setError] = useState("");
   const createIntent = useRef<{ fingerprint: string; requestID: string } | null>(null);
 
   const loadConnection = useCallback(async () => {
     try {
-      const response = await fetch("/api/scm/github/connection", { cache: "no-store" });
+      const response = await fetch("/api/connectors/github", { cache: "no-store" });
       if (!response.ok) throw new Error("Could not check GitHub connection");
       setConnection((await response.json()) as Connection);
-    } catch (loadError) {
-      setError(
-        loadError instanceof Error ? loadError.message : "Could not check GitHub connection",
-      );
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : String(cause));
     }
   }, []);
 
@@ -79,103 +73,42 @@ export default function NewProjectPage() {
     setRuntimeID(runtimes.find((runtime) => runtime.is_default)?.id ?? runtimes[0]?.id ?? "");
   }, [runtimeID, runtimes]);
 
-  useEffect(() => {
-    const search = new URLSearchParams(window.location.search);
-    const oauthError = search.get("error");
-    const code = search.get("code");
-    const state = search.get("state");
-    if (oauthError) {
-      window.history.replaceState({}, "", "/projects/new");
-      setError("GitHub authorization was cancelled or denied.");
-      return;
-    }
-    if (!code || !state) return;
-    window.history.replaceState({}, "", "/projects/new");
+  const loadRepositories = useCallback(async (cursor = "") => {
     setBusy(true);
-    void fetch("/api/scm/github/oauth/callback", {
-      method: "POST",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify({ code, state }),
-    })
-      .then(async (response) => {
-        if (!response.ok) throw new Error("GitHub authorization could not be completed");
-        await loadConnection();
-      })
-      .catch((callbackError) =>
-        setError(
-          callbackError instanceof Error ? callbackError.message : "GitHub authorization failed",
-        ),
-      )
-      .finally(() => setBusy(false));
-  }, [loadConnection]);
-
-  useEffect(() => {
-    if (connection?.status !== "ready" || mode !== "import") return;
-    setBusy(true);
-    setRepositories([]);
-    setNextCursor("");
-    void fetch("/api/scm/github/repositories", { cache: "no-store" })
-      .then(async (response) => {
-        if (!response.ok) throw new Error("Could not list installed repositories");
-        const page = (await response.json()) as {
-          repositories?: Repository[];
-          next_cursor?: string;
-        };
-        setRepositories(page.repositories ?? []);
-        setNextCursor(page.next_cursor ?? "");
-      })
-      .catch((loadError) =>
-        setError(loadError instanceof Error ? loadError.message : "Could not load repositories"),
-      )
-      .finally(() => setBusy(false));
-  }, [connection?.status, mode]);
-
-  const loadMoreRepositories = async () => {
-    if (!nextCursor) return;
-    setBusy(true);
-    setError(null);
+    setError("");
     try {
-      const response = await fetch(
-        `/api/scm/github/repositories?cursor=${encodeURIComponent(nextCursor)}`,
-        { cache: "no-store" },
-      );
-      if (!response.ok) throw new Error("Could not load more repositories");
+      const query = cursor ? `?cursor=${encodeURIComponent(cursor)}` : "";
+      const response = await fetch(`/api/scm/github/repositories${query}`, {
+        cache: "no-store",
+      });
+      if (!response.ok) throw new Error("Could not list installed repositories");
       const page = (await response.json()) as {
         repositories?: Repository[];
         next_cursor?: string;
       };
-      setRepositories((current) => [
-        ...current,
-        ...(page.repositories ?? []).filter(
-          (repository) => !current.some((item) => item.id === repository.id),
-        ),
-      ]);
+      setRepositories((current) =>
+        cursor
+          ? [
+              ...current,
+              ...(page.repositories ?? []).filter(
+                (repository) => !current.some((item) => item.id === repository.id),
+              ),
+            ]
+          : (page.repositories ?? []),
+      );
       setNextCursor(page.next_cursor ?? "");
-    } catch (loadError) {
-      setError(loadError instanceof Error ? loadError.message : "Could not load repositories");
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : String(cause));
     } finally {
       setBusy(false);
     }
-  };
+  }, []);
 
-  const connect = async () => {
-    setBusy(true);
-    setError(null);
-    try {
-      const response = await fetch("/api/scm/github/oauth/start", {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({ return_to: "/projects/new" }),
-      });
-      if (!response.ok) throw new Error("Could not start GitHub authorization");
-      const body = (await response.json()) as { authorization_url?: string };
-      if (!body.authorization_url) throw new Error("GitHub authorization URL is missing");
-      window.location.assign(body.authorization_url);
-    } catch (connectError) {
-      setError(connectError instanceof Error ? connectError.message : "Could not connect GitHub");
-      setBusy(false);
+  useEffect(() => {
+    if (mode === "github_import" && connection?.status === "ready") {
+      void loadRepositories();
     }
-  };
+  }, [connection?.status, loadRepositories, mode]);
 
   const selectedRepository = repositories.find(
     (repository) => repository.id === selectedRepositoryID,
@@ -189,23 +122,41 @@ export default function NewProjectPage() {
 
   const submit = async () => {
     const projectName = name.trim() || selectedRepository?.name || "";
-    const repoName = mode === "create" ? repositoryName.trim() : selectedRepository?.name || "";
-    if (!projectName || !repoName || !runtimeID || (mode === "import" && !selectedRepository)) {
-      setError("Complete the required project and repository fields.");
+    if (!projectName || !runtimeID) {
+      setError("Project name and Agent Runtime are required.");
+      return;
+    }
+    if (mode === "github_create" && !repositoryName.trim()) {
+      setError("Repository name is required.");
+      return;
+    }
+    if (mode === "github_import" && !selectedRepository) {
+      setError("Choose a repository to import.");
       return;
     }
     setBusy(true);
-    setError(null);
+    setError("");
     try {
+      const source =
+        mode === "empty"
+          ? { type: "empty" as const }
+          : mode === "github_create"
+            ? {
+                type: "github_create" as const,
+                repository_name: repositoryName.trim(),
+                visibility,
+              }
+            : {
+                type: "github_import" as const,
+                repository_name: selectedRepository!.name,
+                repository_id: selectedRepository!.id,
+                visibility: selectedRepository!.private ? "private" : "public",
+              };
       const payload = {
         name: projectName,
         description: description.trim(),
         runtime_id: runtimeID,
-        mode,
-        repository_name: repoName,
-        repository_id: mode === "import" ? selectedRepository?.id : undefined,
-        visibility:
-          mode === "import" ? (selectedRepository?.private ? "private" : "public") : visibility,
+        source,
       };
       const intent = nextProjectCreateIntent(createIntent.current, payload, () =>
         crypto.randomUUID(),
@@ -214,26 +165,26 @@ export default function NewProjectPage() {
       const response = await fetch("/api/projects", {
         method: "POST",
         headers: { "content-type": "application/json" },
-        body: JSON.stringify({
-          client_request_id: intent.requestID,
-          ...payload,
-        }),
+        body: JSON.stringify({ client_request_id: intent.requestID, ...payload }),
       });
       const body = (await response.json().catch(() => ({}))) as {
         id?: string;
         error?: { message?: string };
       };
-      if (!response.ok || !body.id)
+      if (!response.ok || !body.id) {
         throw new Error(body.error?.message || "Could not create project");
+      }
       createIntent.current = null;
       refreshProjects();
       router.push(`/projects/${encodeURIComponent(body.id)}`);
-    } catch (submitError) {
-      setError(submitError instanceof Error ? submitError.message : "Could not create project");
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : String(cause));
     } finally {
       setBusy(false);
     }
   };
+
+  const githubReady = connection?.status === "ready";
 
   return (
     <div className="h-full overflow-y-auto px-5 py-8 sm:px-8">
@@ -252,94 +203,79 @@ export default function NewProjectPage() {
           <div>
             <h1 className="text-2xl font-semibold tracking-tight">Create a project</h1>
             <p className="mt-1 text-sm text-muted-foreground">
-              Start a private GitHub repository or import one installed for your personal account.
+              Start locally in Cocola or connect a personal GitHub repository.
             </p>
           </div>
         </div>
 
-        {!connection ? (
-          <div className="mt-10 flex items-center gap-2 text-sm text-muted-foreground">
-            <Loader2 className="size-4 animate-spin" /> Checking GitHub connection…
+        <section className="mt-9 space-y-6">
+          <div className="grid gap-3 sm:grid-cols-3">
+            <SourceCard
+              active={mode === "empty"}
+              icon={FolderGit2}
+              title="Empty Project"
+              detail="Local workspace on main"
+              onClick={() => setMode("empty")}
+            />
+            <SourceCard
+              active={mode === "github_create"}
+              icon={GitHubIcon}
+              title="Create on GitHub"
+              detail={
+                githubReady ? `Connected as ${connection.external_login}` : "Connector required"
+              }
+              onClick={() => setMode("github_create")}
+            />
+            <SourceCard
+              active={mode === "github_import"}
+              icon={GitFork}
+              title="Import GitHub"
+              detail={githubReady ? "Choose an installed repository" : "Connector required"}
+              onClick={() => setMode("github_import")}
+            />
           </div>
-        ) : null}
-        {connection?.status === "disabled" ? (
-          <Notice
-            title="GitHub Projects are disabled"
-            detail="Ask an administrator to configure the Cocola GitHub App."
-          />
-        ) : null}
-        {connection?.status === "disconnected" ||
-        connection?.status === "reauthorization_required" ? (
-          <section className="mt-10 rounded-2xl border border-border bg-card p-6">
-            <h2 className="font-semibold">Connect your GitHub account</h2>
-            <p className="mt-1 text-sm text-muted-foreground">
-              Cocola requests access through its GitHub App and only accepts a personal
-              installation.
-            </p>
-            <button
-              type="button"
-              disabled={busy}
-              onClick={() => void connect()}
-              className="mt-5 inline-flex items-center gap-2 rounded-xl bg-foreground px-4 py-2 text-sm font-medium text-background disabled:opacity-50"
-            >
-              <GitFork className="size-4" /> Connect GitHub
-            </button>
-          </section>
-        ) : null}
-        {connection?.status === "installation_required" ? (
-          <section className="mt-10 rounded-2xl border border-amber-500/25 bg-amber-500/5 p-6">
-            <h2 className="font-semibold">Install the GitHub App</h2>
-            <p className="mt-1 text-sm text-muted-foreground">
-              Authorize it on your personal account, then return here and refresh.
-            </p>
-            <div className="mt-5 flex gap-2">
-              <a
-                href={connection.installation_url}
-                target="_blank"
-                rel="noreferrer"
-                className="inline-flex items-center gap-2 rounded-xl bg-foreground px-4 py-2 text-sm font-medium text-background"
-              >
-                Install App <ExternalLink className="size-4" />
-              </a>
-              <button
-                type="button"
-                onClick={() => void loadConnection()}
-                className="inline-flex items-center gap-2 rounded-xl border border-border px-4 py-2 text-sm"
-              >
-                <RefreshCw className="size-4" /> Refresh
-              </button>
-            </div>
-          </section>
-        ) : null}
 
-        {connection?.status === "ready" ? (
-          <section className="mt-9 space-y-6">
-            <div className="inline-flex rounded-xl bg-muted p-1">
-              {(["create", "import"] as const).map((item) => (
-                <button
-                  key={item}
-                  type="button"
-                  onClick={() => {
-                    setMode(item);
-                    setError(null);
-                  }}
-                  className={cn(
-                    "rounded-lg px-4 py-2 text-sm font-medium",
-                    mode === item ? "bg-background shadow-sm" : "text-muted-foreground",
-                  )}
-                >
-                  {item === "create" ? "Create new" : "Import existing"}
-                </button>
-              ))}
+          {mode !== "empty" && !githubReady ? (
+            <div className="rounded-2xl border border-amber-500/25 bg-amber-500/5 p-5">
+              <h2 className="text-sm font-semibold">Connect your personal GitHub App first</h2>
+              <p className="mt-1 text-sm text-muted-foreground">
+                Empty Projects remain available without GitHub. GitHub create and import use your
+                own private App.
+              </p>
+              <Link
+                href="/connectors"
+                className="mt-4 inline-flex h-9 items-center rounded-xl bg-foreground px-4 text-sm font-medium text-background"
+              >
+                Open Connectors
+              </Link>
             </div>
-            {mode === "create" ? (
-              <div className="grid gap-4 sm:grid-cols-2">
-                <Field
-                  label="Project name"
-                  value={name}
-                  onChange={setName}
-                  placeholder="My project"
-                />
+          ) : null}
+
+          {mode === "github_import" && githubReady ? (
+            <RepositoryPicker
+              filter={filter}
+              onFilter={setFilter}
+              repositories={visibleRepositories}
+              selectedID={selectedRepositoryID}
+              onSelect={(repository) => {
+                setSelectedRepositoryID(repository.id);
+                if (!name) setName(repository.name);
+              }}
+              nextCursor={nextCursor}
+              busy={busy}
+              onLoadMore={() => void loadRepositories(nextCursor)}
+            />
+          ) : null}
+
+          {(mode === "empty" || githubReady) && mode !== "github_import" ? (
+            <div className="grid gap-4 sm:grid-cols-2">
+              <Field
+                label="Project name"
+                value={name}
+                onChange={setName}
+                placeholder="My project"
+              />
+              {mode === "github_create" ? (
                 <Field
                   label="Repository name"
                   value={repositoryName}
@@ -349,13 +285,15 @@ export default function NewProjectPage() {
                   }}
                   placeholder="my-project"
                 />
-                <Field
-                  label="Description"
-                  value={description}
-                  onChange={setDescription}
-                  placeholder="Optional"
-                  wide
-                />
+              ) : null}
+              <Field
+                label="Description"
+                value={description}
+                onChange={setDescription}
+                placeholder="Optional"
+                wide
+              />
+              {mode === "github_create" ? (
                 <label className="space-y-1.5">
                   <span className="text-sm font-medium">Visibility</span>
                   <select
@@ -367,98 +305,158 @@ export default function NewProjectPage() {
                     <option value="public">Public</option>
                   </select>
                 </label>
-              </div>
-            ) : (
-              <div>
-                <div className="relative">
-                  <Search className="absolute left-3 top-3 size-4 text-muted-foreground" />
-                  <input
-                    value={filter}
-                    onChange={(event) => setFilter(event.target.value)}
-                    placeholder="Search repositories"
-                    className="h-10 w-full rounded-xl border border-border bg-background pl-9 pr-3 text-sm"
-                  />
-                </div>
-                <div className="mt-3 max-h-72 overflow-y-auto rounded-xl border border-border">
-                  {visibleRepositories.map((repository) => (
-                    <button
-                      type="button"
-                      key={repository.id}
-                      onClick={() => {
-                        setSelectedRepositoryID(repository.id);
-                        if (!name) setName(repository.name);
-                      }}
-                      className="flex w-full items-center gap-3 border-b border-border/60 px-3 py-3 text-left last:border-0 hover:bg-muted"
-                    >
-                      <span className="grid size-8 place-items-center rounded-lg bg-muted">
-                        <Lock className="size-3.5" />
-                      </span>
-                      <span className="min-w-0 flex-1">
-                        <span className="block truncate text-sm font-medium">
-                          {repository.full_name}
-                        </span>
-                        <span className="text-xs text-muted-foreground">
-                          {repository.default_branch} · {Math.ceil(repository.size_kb / 1024)} MB
-                        </span>
-                      </span>
-                      {selectedRepositoryID === repository.id ? (
-                        <Check className="size-4 text-primary" />
-                      ) : null}
-                    </button>
+              ) : null}
+            </div>
+          ) : null}
+
+          {mode === "github_import" && githubReady ? (
+            <div className="grid gap-4 sm:grid-cols-2">
+              <Field
+                label="Project name"
+                value={name}
+                onChange={setName}
+                placeholder={selectedRepository?.name || "Project name"}
+              />
+              <Field
+                label="Description"
+                value={description}
+                onChange={setDescription}
+                placeholder="Optional"
+              />
+            </div>
+          ) : null}
+
+          {mode === "empty" || githubReady ? (
+            <>
+              <label className="block space-y-1.5">
+                <span className="text-sm font-medium">Default Agent Runtime</span>
+                <select
+                  value={runtimeID}
+                  onChange={(event) => setRuntimeID(event.target.value)}
+                  className="h-10 w-full rounded-xl border border-border bg-background px-3 text-sm"
+                >
+                  {runtimes.map((runtime) => (
+                    <option key={runtime.id} value={runtime.id}>
+                      {runtime.label}
+                    </option>
                   ))}
-                </div>
-                {nextCursor ? (
-                  <button
-                    type="button"
-                    disabled={busy}
-                    onClick={() => void loadMoreRepositories()}
-                    className="mt-3 inline-flex items-center gap-2 text-sm text-muted-foreground hover:text-foreground disabled:opacity-50"
-                  >
-                    <RefreshCw className="size-3.5" /> Load more repositories
-                  </button>
-                ) : null}
-                <div className="mt-4">
-                  <Field
-                    label="Project name"
-                    value={name}
-                    onChange={setName}
-                    placeholder={selectedRepository?.name || "Project name"}
-                  />
-                </div>
-              </div>
-            )}
-            <label className="block space-y-1.5">
-              <span className="text-sm font-medium">Default Agent Runtime</span>
-              <select
-                value={runtimeID}
-                onChange={(event) => setRuntimeID(event.target.value)}
-                className="h-10 w-full rounded-xl border border-border bg-background px-3 text-sm"
+                </select>
+              </label>
+              {error ? (
+                <p
+                  role="alert"
+                  className="rounded-xl bg-destructive/10 px-3 py-2 text-sm text-destructive"
+                >
+                  {error}
+                </p>
+              ) : null}
+              <button
+                type="button"
+                disabled={busy}
+                onClick={() => void submit()}
+                className="inline-flex items-center gap-2 rounded-xl bg-primary px-4 py-2.5 text-sm font-medium text-primary-foreground disabled:opacity-50"
               >
-                {runtimes.map((runtime) => (
-                  <option key={runtime.id} value={runtime.id}>
-                    {runtime.label}
-                  </option>
-                ))}
-              </select>
-            </label>
-            {error ? (
-              <p className="rounded-xl bg-red-500/10 px-3 py-2 text-sm text-red-600">{error}</p>
-            ) : null}
-            <button
-              type="button"
-              disabled={busy}
-              onClick={() => void submit()}
-              className="inline-flex items-center gap-2 rounded-xl bg-primary px-4 py-2.5 text-sm font-medium text-primary-foreground disabled:opacity-50"
-            >
-              {busy ? <Loader2 className="size-4 animate-spin" /> : <Plus className="size-4" />}{" "}
-              Create project
-            </button>
-          </section>
-        ) : null}
-        {error && connection?.status !== "ready" ? (
-          <p className="mt-5 rounded-xl bg-red-500/10 px-3 py-2 text-sm text-red-600">{error}</p>
-        ) : null}
+                {busy ? <Loader2 className="size-4 animate-spin" /> : <Plus className="size-4" />}
+                Create project
+              </button>
+            </>
+          ) : null}
+        </section>
       </main>
+    </div>
+  );
+}
+
+function SourceCard({
+  active,
+  icon: Icon,
+  title,
+  detail,
+  onClick,
+}: {
+  active: boolean;
+  icon: typeof GitFork;
+  title: string;
+  detail: string;
+  onClick: () => void;
+}) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      className={cn(
+        "rounded-2xl border p-4 text-left transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/45",
+        active ? "border-primary bg-primary/5" : "border-border bg-card hover:bg-muted/40",
+      )}
+    >
+      <Icon className={cn("size-5", active ? "text-primary" : "text-muted-foreground")} />
+      <span className="mt-3 block text-sm font-semibold">{title}</span>
+      <span className="mt-1 block text-xs text-muted-foreground">{detail}</span>
+    </button>
+  );
+}
+
+function RepositoryPicker({
+  filter,
+  onFilter,
+  repositories,
+  selectedID,
+  onSelect,
+  nextCursor,
+  busy,
+  onLoadMore,
+}: {
+  filter: string;
+  onFilter: (value: string) => void;
+  repositories: Repository[];
+  selectedID: number | null;
+  onSelect: (repository: Repository) => void;
+  nextCursor: string;
+  busy: boolean;
+  onLoadMore: () => void;
+}) {
+  return (
+    <div>
+      <div className="relative">
+        <Search className="absolute left-3 top-3 size-4 text-muted-foreground" />
+        <input
+          value={filter}
+          onChange={(event) => onFilter(event.target.value)}
+          placeholder="Search repositories"
+          className="h-10 w-full rounded-xl border border-border bg-background pl-9 pr-3 text-sm"
+        />
+      </div>
+      <div className="mt-3 max-h-72 overflow-y-auto rounded-xl border border-border">
+        {repositories.map((repository) => (
+          <button
+            type="button"
+            key={repository.id}
+            onClick={() => onSelect(repository)}
+            className="flex w-full items-center gap-3 border-b border-border/60 px-3 py-3 text-left last:border-0 hover:bg-muted"
+          >
+            <span className="grid size-8 place-items-center rounded-lg bg-muted">
+              <Lock className="size-3.5" />
+            </span>
+            <span className="min-w-0 flex-1">
+              <span className="block truncate text-sm font-medium">{repository.full_name}</span>
+              <span className="text-xs text-muted-foreground">
+                {repository.default_branch} · {Math.ceil(repository.size_kb / 1024)} MB
+              </span>
+            </span>
+            {selectedID === repository.id ? <Check className="size-4 text-primary" /> : null}
+          </button>
+        ))}
+      </div>
+      {nextCursor ? (
+        <button
+          type="button"
+          disabled={busy}
+          onClick={onLoadMore}
+          className="mt-3 inline-flex items-center gap-2 text-sm text-muted-foreground hover:text-foreground disabled:opacity-50"
+        >
+          <RefreshCw className="size-3.5" /> Load more repositories
+        </button>
+      ) : null}
     </div>
   );
 }
@@ -486,14 +484,5 @@ function Field({
         className="h-10 w-full rounded-xl border border-border bg-background px-3 text-sm"
       />
     </label>
-  );
-}
-
-function Notice({ title, detail }: { title: string; detail: string }) {
-  return (
-    <div className="mt-10 rounded-2xl border border-border bg-muted/40 p-6">
-      <h2 className="font-semibold">{title}</h2>
-      <p className="mt-1 text-sm text-muted-foreground">{detail}</p>
-    </div>
   );
 }

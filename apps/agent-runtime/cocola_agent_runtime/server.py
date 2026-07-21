@@ -53,6 +53,8 @@ from cocola_agent_runtime.project_git import (
     ProjectWorkspaceError,
     bootstrap_project,
     inspect_project,
+    project_egress_hosts,
+    publish_project,
     spec_from_proto,
 )
 from cocola_agent_runtime.prompt_loader import PromptCatalog, PromptConfig
@@ -92,6 +94,7 @@ MODEL_ROUTE_ID_METADATA_KEY = "x-cocola-model-route-id"
 # the in-sandbox brain calls the llm-gateway as the real user. Never logged.
 SANDBOX_TOKEN_METADATA_KEY = "x-cocola-sandbox-token"
 SCM_TOKEN_METADATA_KEY = "x-cocola-scm-token"
+PROJECT_BROKER_CREDENTIAL_METADATA_KEY = "x-cocola-project-broker-credential"
 TRACEPARENT_METADATA_KEY = "traceparent"
 PRODUCT_TRACEPARENT_METADATA_KEY = "x-cocola-product-traceparent"
 ENVIRONMENT_PREPARATION_SCHEMA_VERSION = 1
@@ -494,7 +497,7 @@ class AgentRuntimeServicer(pb_grpc.AgentRuntimeServiceServicer):
             box = await self._binder.acquire(
                 session_id=request.session_id,
                 user_id=request.user_id,
-                additional_egress_allowlist=["github.com"],
+                additional_egress_allowlist=project_egress_hosts(spec),
             )
             heartbeat = asyncio.create_task(
                 self._heartbeat_sandbox(box.id, context, asyncio.current_task())
@@ -519,6 +522,42 @@ class AgentRuntimeServicer(pb_grpc.AgentRuntimeServiceServicer):
             log.warning("Git inspection failed", error_type=type(exc).__name__)
             await context.abort(grpc.StatusCode.INTERNAL, "Git inspection failed")
         return _git_inspection_proto(result)
+
+    async def PublishWorkspaceGit(self, request, context):  # noqa: N802
+        """Push a clean local Project workspace to a new GitHub repository."""
+        if self._binder is None or self._executor is None:
+            await context.abort(grpc.StatusCode.UNIMPLEMENTED, "sandbox Git publishing unavailable")
+        try:
+            spec = spec_from_proto(request.project_context)
+            scm_token = _metadata_value(context, SCM_TOKEN_METADATA_KEY)
+            box = await self._binder.acquire(
+                session_id=request.session_id,
+                user_id=request.user_id,
+                additional_egress_allowlist=["github.com"],
+            )
+            heartbeat = asyncio.create_task(
+                self._heartbeat_sandbox(box.id, context, asyncio.current_task())
+            )
+            try:
+                await bootstrap_project(self._executor, box.id, spec, "")
+                result = await publish_project(
+                    self._executor,
+                    box.id,
+                    spec,
+                    scm_token,
+                    str(request.remote_clone_url or ""),
+                    str(request.expected_head_sha or ""),
+                )
+            finally:
+                heartbeat.cancel()
+                with contextlib.suppress(asyncio.CancelledError):
+                    await heartbeat
+        except ProjectWorkspaceError as exc:
+            await context.abort(grpc.StatusCode.FAILED_PRECONDITION, f"{exc.code}: {exc}")
+        except Exception as exc:  # noqa: BLE001 - internal RPC boundary
+            log.warning("Git publishing failed", error_type=type(exc).__name__)
+            await context.abort(grpc.StatusCode.INTERNAL, "Git publishing failed")
+        return pb.PublishWorkspaceGitResponse(head_sha=str(result.get("head_sha") or ""))
 
     async def Query(self, request, context):  # noqa: N802 - gRPC-generated name
         """Server-streaming RPC: run one agent turn, stream events back.
@@ -620,6 +659,7 @@ class AgentRuntimeServicer(pb_grpc.AgentRuntimeServiceServicer):
         # on every shim exec. Warm sandboxes stay credential-free until claimed.
         sandbox_token = _metadata_value(context, SANDBOX_TOKEN_METADATA_KEY)
         scm_token = _metadata_value(context, SCM_TOKEN_METADATA_KEY)
+        project_broker_credential = _metadata_value(context, PROJECT_BROKER_CREDENTIAL_METADATA_KEY)
         project_spec: ProjectSpec | None = None
         project_value = getattr(request, "project_context", None)
         if project_value is not None and getattr(project_value, "project_id", ""):
@@ -652,7 +692,10 @@ class AgentRuntimeServicer(pb_grpc.AgentRuntimeServiceServicer):
                     "env": _acquire_env(model_env, sandbox_token, runtime_id=runtime_id),
                 }
                 if project_spec is not None:
-                    acquire_options["additional_egress_allowlist"] = ["github.com"]
+                    acquire_options["additional_egress_allowlist"] = project_egress_hosts(
+                        project_spec,
+                        os.getenv("COCOLA_SANDBOX_PROJECT_BROKER_URL", "").strip(),
+                    )
                 box = await self._binder.acquire(**acquire_options)
             except Exception as exc:  # noqa: BLE001 - bind failure -> clean terminal event
                 log.warning(
@@ -1125,6 +1168,11 @@ class AgentRuntimeServicer(pb_grpc.AgentRuntimeServiceServicer):
             environment_skills=loaded_skills,
             auth_token=sandbox_token or None,
             traceparent=traceparent or None,
+            project_credential=project_broker_credential or None,
+            project_provider=project_spec.repository_provider if project_spec else None,
+            project_repository=project_spec.repository_full_name if project_spec else None,
+            project_broker_url=(os.getenv("COCOLA_SANDBOX_PROJECT_BROKER_URL", "").strip() or None),
+            project_task_branch=project_spec.task_branch if project_spec else None,
         )
         admin_prompt = active_prompt.system_prompt.strip()
         if admin_prompt:

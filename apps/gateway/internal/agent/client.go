@@ -66,21 +66,25 @@ type Query struct {
 	// llm-gateway as the real user (per-user quota / usage / revocation),
 	// replacing static cluster-wide credentials. Empty is supported by tests
 	// with an unauthenticated fake runtime; production config always wires an issuer.
-	SandboxAuthToken string
-	SCMToken         string
-	Project          *ProjectContext
-	Attachments      []Attachment
+	SandboxAuthToken        string
+	SCMToken                string
+	ProjectBrokerCredential string
+	Project                 *ProjectContext
+	Attachments             []Attachment
 }
 
 type ProjectContext struct {
-	ProjectID      string
-	RepositoryID   int64
-	CloneURL       string
-	DefaultBranch  string
-	BaseSHA        string
-	TaskBranch     string
-	GitAuthorName  string
-	GitAuthorEmail string
+	ProjectID          string
+	RepositoryID       int64
+	CloneURL           string
+	DefaultBranch      string
+	BaseSHA            string
+	TaskBranch         string
+	GitAuthorName      string
+	GitAuthorEmail     string
+	RepositoryProvider string
+	RepositoryFullName string
+	CredentialMode     string
 }
 
 type GitChange struct {
@@ -107,6 +111,15 @@ type InspectRequest struct {
 
 type GitInspector interface {
 	InspectWorkspaceGit(context.Context, InspectRequest) (GitInspection, error)
+}
+
+type PublishRequest struct {
+	UserID, SessionID, SCMToken, RemoteCloneURL, ExpectedHeadSHA string
+	Project                                                      ProjectContext
+}
+
+type GitPublisher interface {
+	PublishWorkspaceGit(context.Context, PublishRequest) (string, error)
 }
 
 // Attachment is one user-uploaded file forwarded to agent-runtime. Content is
@@ -226,6 +239,10 @@ func (c *Client) Stream(ctx context.Context, q Query, onEvent func(Event) error)
 	if strings.TrimSpace(q.SCMToken) != "" {
 		ctx = metadata.AppendToOutgoingContext(ctx, "x-cocola-scm-token", strings.TrimSpace(q.SCMToken))
 	}
+	if strings.TrimSpace(q.ProjectBrokerCredential) != "" {
+		ctx = metadata.AppendToOutgoingContext(ctx, "x-cocola-project-broker-credential",
+			strings.TrimSpace(q.ProjectBrokerCredential))
+	}
 	if len(q.TraceID) == 32 && len(q.ParentSpanID) == 16 {
 		// otelgrpc owns the standard traceparent key and may replace it with its
 		// transport span. Keep the product parent explicit so model.generate is
@@ -304,11 +321,31 @@ func (c *Client) InspectWorkspaceGit(ctx context.Context, request InspectRequest
 	return result, nil
 }
 
+func (c *Client) PublishWorkspaceGit(ctx context.Context, request PublishRequest) (string, error) {
+	if strings.TrimSpace(request.SCMToken) != "" {
+		ctx = metadata.AppendToOutgoingContext(ctx, "x-cocola-scm-token", strings.TrimSpace(request.SCMToken))
+	}
+	response, err := c.rpc.PublishWorkspaceGit(ctx, &agentv1.PublishWorkspaceGitRequest{
+		UserId: request.UserID, SessionId: request.SessionID,
+		ProjectContext: projectContextProto(request.Project),
+		RemoteCloneUrl: request.RemoteCloneURL, ExpectedHeadSha: request.ExpectedHeadSHA,
+	})
+	if err != nil {
+		return "", fmt.Errorf("agent: publish workspace git: %w", err)
+	}
+	if strings.TrimSpace(response.GetHeadSha()) == "" {
+		return "", errors.New("agent: publish workspace git returned an empty HEAD")
+	}
+	return response.GetHeadSha(), nil
+}
+
 func projectContextProto(value ProjectContext) *agentv1.ProjectContext {
 	return &agentv1.ProjectContext{
 		ProjectId: value.ProjectID, RepositoryId: value.RepositoryID, CloneUrl: value.CloneURL,
 		DefaultBranch: value.DefaultBranch, BaseSha: value.BaseSHA, TaskBranch: value.TaskBranch,
 		GitAuthorName: value.GitAuthorName, GitAuthorEmail: value.GitAuthorEmail,
+		RepositoryProvider: value.RepositoryProvider, RepositoryFullName: value.RepositoryFullName,
+		CredentialMode: value.CredentialMode,
 	}
 }
 

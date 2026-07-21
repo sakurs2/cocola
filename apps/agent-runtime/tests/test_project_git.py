@@ -10,6 +10,8 @@ from cocola_agent_runtime.project_git import (
     ProjectWorkspaceError,
     bootstrap_project,
     inspect_project,
+    project_egress_hosts,
+    publish_project,
     validate_relative_path,
     validate_spec,
 )
@@ -44,6 +46,51 @@ def test_project_spec_rejects_credential_in_clone_url():
     invalid = ProjectSpec(**{**spec.__dict__, "clone_url": "https://token@github.com/a/b.git"})
     with pytest.raises(ProjectWorkspaceError, match="context is invalid"):
         validate_spec(invalid)
+
+
+def test_project_egress_hosts_include_run_broker_only_for_github():
+    assert project_egress_hosts(valid_spec(), "http://host.docker.internal:8080") == [
+        "github.com",
+        "api.github.com",
+        "uploads.github.com",
+        "objects.githubusercontent.com",
+        "github-releases.githubusercontent.com",
+        "host.docker.internal",
+    ]
+    local = ProjectSpec(
+        **{
+            **valid_spec().__dict__,
+            "repository_id": 0,
+            "repository_provider": "local",
+            "clone_url": "",
+            "base_sha": "",
+            "default_branch": "main",
+            "task_branch": "main",
+            "credential_mode": "none",
+        }
+    )
+    assert project_egress_hosts(local, "http://host.docker.internal:8080") == []
+    published = ProjectSpec(
+        **{
+            **local.__dict__,
+            "repository_id": 456,
+            "repository_full_name": "octocat/published",
+            "credential_mode": "broker",
+        }
+    )
+    assert project_egress_hosts(published, "http://host.docker.internal:8080") == [
+        "github.com",
+        "api.github.com",
+        "uploads.github.com",
+        "objects.githubusercontent.com",
+        "github-releases.githubusercontent.com",
+        "host.docker.internal",
+    ]
+
+
+def test_project_egress_hosts_reject_invalid_broker_url():
+    with pytest.raises(ProjectWorkspaceError, match="broker URL is invalid"):
+        project_egress_hosts(valid_spec(), "not-a-url")
 
 
 @pytest.mark.parametrize(
@@ -98,6 +145,96 @@ def test_porcelain_v2_parser_marks_unmerged_record_dirty():
 
 def test_embedded_project_git_script_compiles():
     compile(_PROJECT_GIT_SCRIPT, "<project-git>", "exec")
+
+
+def test_fresh_local_project_initializes_main_and_reuses_workspace(tmp_path):
+    workspace = tmp_path / "workspace"
+    (workspace / "outputs" / "browser").mkdir(parents=True)
+    (workspace / "downloads").mkdir()
+    spec = {
+        "project_id": "project-local",
+        "repository_id": 0,
+        "clone_url": "",
+        "default_branch": "main",
+        "base_sha": "",
+        "task_branch": "main",
+        "git_author_name": "Local User",
+        "git_author_email": "local@example.com",
+        "repository_provider": "local",
+        "repository_full_name": "",
+        "credential_mode": "none",
+    }
+    script = _PROJECT_GIT_SCRIPT.replace(
+        'pathlib.Path("/workspace")', f"pathlib.Path({str(workspace)!r})", 1
+    )
+
+    first = subprocess.run(
+        [sys.executable, "-c", script],
+        input=json.dumps({"operation": "bootstrap", "spec": spec}),
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+    first_payload = json.loads(first.stdout)
+    assert first_payload["ok"] is True
+    assert first_payload["snapshot"]["branch"] == "main"
+    base_sha = first_payload["snapshot"]["base_sha"]
+    assert len(base_sha) == 40
+    branch = subprocess.run(
+        ["git", "rev-parse", "--abbrev-ref", "HEAD"],
+        cwd=workspace,
+        check=True,
+        capture_output=True,
+        text=True,
+    ).stdout.strip()
+    assert branch == "main"
+    assert (workspace / "outputs" / "browser").is_dir()
+    assert (workspace / "downloads").is_dir()
+
+    spec["base_sha"] = base_sha
+    (workspace / "kept.txt").write_text("persisted\n", encoding="utf-8")
+    second = subprocess.run(
+        [sys.executable, "-c", script],
+        input=json.dumps({"operation": "bootstrap", "spec": spec}),
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+    assert json.loads(second.stdout)["ok"] is True
+    assert (workspace / "kept.txt").read_text(encoding="utf-8") == "persisted\n"
+
+
+def test_local_project_does_not_silently_reinitialize_a_lost_volume(tmp_path):
+    workspace = tmp_path / "workspace"
+    spec = {
+        "project_id": "project-local",
+        "repository_id": 0,
+        "clone_url": "",
+        "default_branch": "main",
+        "base_sha": "a" * 40,
+        "task_branch": "main",
+        "git_author_name": "Local User",
+        "git_author_email": "local@example.com",
+        "repository_provider": "local",
+        "repository_full_name": "",
+        "credential_mode": "none",
+    }
+    script = _PROJECT_GIT_SCRIPT.replace(
+        'pathlib.Path("/workspace")', f"pathlib.Path({str(workspace)!r})", 1
+    )
+
+    result = subprocess.run(
+        [sys.executable, "-c", script],
+        input=json.dumps({"operation": "bootstrap", "spec": spec}),
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+
+    payload = json.loads(result.stdout)
+    assert payload["ok"] is False
+    assert payload["code"] == "LOCAL_PROJECT_WORKSPACE_LOST"
+    assert not (workspace / ".git").exists()
 
 
 def test_bootstrap_configures_repository_local_git_author(tmp_path):
@@ -287,6 +424,40 @@ async def test_bootstrap_passes_token_only_in_process_environment():
     assert "short-lived-token" not in " ".join(call["cmd"])
     assert "short-lived-token" not in call["stdin"]
     assert call["timeout_secs"] == 600
+
+
+@pytest.mark.asyncio
+async def test_publish_passes_short_lived_token_only_in_environment():
+    executor = RecordingExecutor({"head_sha": "b" * 40})
+    local = ProjectSpec(
+        project_id="project-local",
+        repository_id=0,
+        clone_url="",
+        default_branch="main",
+        base_sha="a" * 40,
+        task_branch="main",
+        git_author_name="Local User",
+        git_author_email="local@example.com",
+        repository_provider="local",
+        credential_mode="none",
+    )
+
+    result = await publish_project(
+        executor,
+        "sandbox-1",
+        local,
+        "publish-token",
+        "https://github.com/octocat/published.git",
+        "b" * 40,
+    )
+
+    assert result["head_sha"] == "b" * 40
+    call = executor.calls[0]
+    assert call["env"] == {"COCOLA_SCM_TOKEN": "publish-token"}
+    assert "publish-token" not in call["stdin"]
+    request = json.loads(call["stdin"])
+    assert request["operation"] == "publish"
+    assert request["expected_head_sha"] == "b" * 40
 
 
 @pytest.mark.asyncio

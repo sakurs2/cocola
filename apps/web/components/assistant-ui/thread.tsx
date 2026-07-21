@@ -52,6 +52,7 @@ import {
   RailProcessSummary,
   RailReasoning,
   RailResponsePending,
+  RailSCMApproval,
   RailText,
   RailTool,
 } from "@/components/assistant-ui/rail";
@@ -904,12 +905,63 @@ const MemoryRecallPart: FC<
 > = ({ data }) =>
   data.status === "miss" ? null : <RailMemoryRecall status={data.status} count={data.count} />;
 
+const SCMApprovalPart: FC<
+  DataMessagePartProps<{
+    approvalId: string;
+    status: "pending" | "approved" | "denied" | "expired";
+    category?: string;
+    label?: string;
+  }>
+> = ({ data }) => {
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState("");
+  const [resolvedStatus, setResolvedStatus] = useState(data.status);
+
+  useEffect(() => setResolvedStatus(data.status), [data.status]);
+
+  const decide = async (decision: "approved" | "denied") => {
+    setBusy(true);
+    setError("");
+    try {
+      const response = await fetch(
+        `/api/scm/approvals/${encodeURIComponent(data.approvalId)}/decision`,
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ decision }),
+        },
+      );
+      if (!response.ok) {
+        throw new Error("The approval could not be saved. It may have expired.");
+      }
+      setResolvedStatus(decision);
+    } catch (requestError) {
+      setError(requestError instanceof Error ? requestError.message : "Approval failed.");
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <RailSCMApproval
+      status={resolvedStatus}
+      category={data.category}
+      commandLabel={data.label}
+      busy={busy}
+      error={error}
+      onDecision={decide}
+    />
+  );
+};
+
 const ASSISTANT_PART_COMPONENTS = {
   Text: TextPart,
   Reasoning: ReasoningPart,
   File: ArtifactFilePart,
   tools: { Fallback: ToolFallback },
-  data: { by_name: { "memory-recall": MemoryRecallPart } },
+  data: {
+    by_name: { "memory-recall": MemoryRecallPart, "scm-approval": SCMApprovalPart },
+  },
 };
 
 const AssistantActionBar: FC = () => {

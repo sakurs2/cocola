@@ -31,6 +31,8 @@ func (r *Reducer) Apply(kind string, data map[string]string) {
 		r.upsertSessionStatus(data)
 	case "memory_recall":
 		r.upsertMemoryRecall(data)
+	case "scm_approval":
+		r.upsertSCMApproval(data)
 	case "text":
 		r.appendText(PartText, data["text"])
 	case "thinking":
@@ -58,6 +60,23 @@ func (r *Reducer) Apply(kind string, data map[string]string) {
 	default:
 		// result / system / sandbox / done / unknown: no body content.
 	}
+}
+
+func (r *Reducer) upsertSCMApproval(data map[string]string) {
+	id, status := data["id"], data["status"]
+	if id == "" || (status != "pending" && status != "approved" &&
+		status != "denied" && status != "expired") {
+		return
+	}
+	part := Part{Type: PartSCMApproval, ApprovalID: id, ApprovalStatus: status,
+		ApprovalCategory: data["category"], ApprovalLabel: data["label"]}
+	for index := range r.parts {
+		if r.parts[index].Type == PartSCMApproval && r.parts[index].ApprovalID == id {
+			r.parts[index] = part
+			return
+		}
+	}
+	r.parts = append(r.parts, part)
 }
 
 func (r *Reducer) upsertMemoryRecall(data map[string]string) {

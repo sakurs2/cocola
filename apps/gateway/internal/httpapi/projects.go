@@ -23,6 +23,11 @@ type oauthCallbackRequest struct {
 	Code  string `json:"code"`
 }
 
+type manifestCompleteRequest struct {
+	State string `json:"state"`
+	Code  string `json:"code"`
+}
+
 type archiveProjectRequest struct {
 	ExpectedVersion int64 `json:"expected_version"`
 }
@@ -52,6 +57,89 @@ func (a *API) githubConnection(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	result, err := a.projects.Connection(r.Context(), id)
+	if a.writeProjectError(w, err) {
+		return
+	}
+	writeJSON(w, http.StatusOK, result)
+}
+
+func (a *API) connectors(w http.ResponseWriter, r *http.Request) {
+	id, ok := projectIdentity(r)
+	if !ok {
+		writeErr(w, http.StatusUnauthorized, "UNAUTHENTICATED", "missing identity")
+		return
+	}
+	github := project.ConnectionView{Status: "disabled", Enabled: false}
+	if a.projects != nil {
+		value, err := a.projects.Connection(r.Context(), id)
+		if a.writeProjectError(w, err) {
+			return
+		}
+		github = value
+	}
+	writeJSON(w, http.StatusOK, []map[string]any{{
+		"id": "github", "name": "GitHub", "status": github.Status,
+		"enabled": github.Enabled, "connection": github,
+	}})
+}
+
+func (a *API) githubManifestStart(w http.ResponseWriter, r *http.Request) {
+	id, ok := projectIdentity(r)
+	if !ok {
+		writeErr(w, http.StatusUnauthorized, "UNAUTHENTICATED", "missing identity")
+		return
+	}
+	var input oauthStartRequest
+	if !decodeProjectJSON(w, r, &input) {
+		return
+	}
+	if a.projects == nil {
+		writeErr(w, http.StatusNotImplemented, "PROJECTS_DISABLED", "Projects are not configured")
+		return
+	}
+	result, err := a.projects.StartManifest(r.Context(), id, input.ReturnTo, r.Header.Get("Origin"))
+	if a.writeProjectError(w, err) {
+		return
+	}
+	writeJSON(w, http.StatusOK, result)
+}
+
+func (a *API) githubManifestComplete(w http.ResponseWriter, r *http.Request) {
+	id, ok := projectIdentity(r)
+	if !ok {
+		writeErr(w, http.StatusUnauthorized, "UNAUTHENTICATED", "missing identity")
+		return
+	}
+	var input manifestCompleteRequest
+	if !decodeProjectJSON(w, r, &input) {
+		return
+	}
+	if a.projects == nil {
+		writeErr(w, http.StatusNotImplemented, "PROJECTS_DISABLED", "Projects are not configured")
+		return
+	}
+	result, err := a.projects.CompleteManifest(r.Context(), id, input.State, input.Code)
+	if a.writeProjectError(w, err) {
+		return
+	}
+	writeJSON(w, http.StatusOK, result)
+}
+
+func (a *API) githubInstallationComplete(w http.ResponseWriter, r *http.Request) {
+	id, ok := projectIdentity(r)
+	if !ok {
+		writeErr(w, http.StatusUnauthorized, "UNAUTHENTICATED", "missing identity")
+		return
+	}
+	var input oauthStartRequest
+	if !decodeProjectJSON(w, r, &input) {
+		return
+	}
+	if a.projects == nil {
+		writeErr(w, http.StatusNotImplemented, "PROJECTS_DISABLED", "Projects are not configured")
+		return
+	}
+	result, err := a.projects.StartOAuth(r.Context(), id, input.ReturnTo)
 	if a.writeProjectError(w, err) {
 		return
 	}
@@ -346,6 +434,9 @@ func (a *API) inspectGit(w http.ResponseWriter, r *http.Request) {
 			CloneURL: contextValue.CloneURL, DefaultBranch: contextValue.DefaultBranch,
 			BaseSHA: contextValue.BaseSHA, TaskBranch: contextValue.BranchName,
 			GitAuthorName: contextValue.GitAuthorName, GitAuthorEmail: contextValue.GitAuthorEmail,
+			RepositoryProvider: contextValue.RepositoryProvider,
+			RepositoryFullName: contextValue.RepositoryFullName,
+			CredentialMode:     contextValue.CredentialMode,
 		},
 	})
 	if err != nil {
@@ -373,6 +464,91 @@ func (a *API) inspectGit(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
+func (a *API) publishLocalProject(w http.ResponseWriter, r *http.Request) {
+	id, ok := projectIdentity(r)
+	if !ok {
+		writeErr(w, http.StatusUnauthorized, "UNAUTHENTICATED", "missing identity")
+		return
+	}
+	if a.projects == nil || a.gitInspector == nil || a.gitPublisher == nil {
+		writeErr(w, http.StatusNotImplemented, "PROJECT_PUBLISH_UNAVAILABLE", "Project publishing is not configured")
+		return
+	}
+	var input project.PublishInput
+	if !decodeProjectJSON(w, r, &input) {
+		return
+	}
+	projectID := r.PathValue("id")
+	projectValue, err := a.projects.Get(r.Context(), id, projectID)
+	if a.writeProjectError(w, err) {
+		return
+	}
+	conversationID := projectValue.PrimaryConversationID
+	if conversationID == "" {
+		writeErr(w, http.StatusConflict, "PROJECT_WORKSPACE_REQUIRED", "start the Project workspace before publishing")
+		return
+	}
+	if a.runs != nil {
+		if active, activeErr := a.runs.store.Active(r.Context(), conversationID, id.UserID); activeErr == nil {
+			writeRunInProgress(w, active, conversationID, "Wait for the running answer before publishing")
+			return
+		} else if !errors.Is(activeErr, chatrun.ErrNotFound) {
+			writeErr(w, http.StatusServiceUnavailable, "RUN_STORE_UNAVAILABLE", "could not verify conversation run state")
+			return
+		}
+	}
+	contextValue, _, err := a.projects.ProjectContext(r.Context(), id, conversationID)
+	if a.writeProjectError(w, err) {
+		return
+	}
+	publishContext, cancel := context.WithTimeout(r.Context(), 10*time.Minute)
+	defer cancel()
+	gitContext := agent.ProjectContext{
+		ProjectID: contextValue.ProjectID, RepositoryID: contextValue.RepositoryExternalID,
+		CloneURL: contextValue.CloneURL, DefaultBranch: contextValue.DefaultBranch,
+		BaseSHA: contextValue.BaseSHA, TaskBranch: contextValue.BranchName,
+		GitAuthorName: contextValue.GitAuthorName, GitAuthorEmail: contextValue.GitAuthorEmail,
+		RepositoryProvider: contextValue.RepositoryProvider,
+		RepositoryFullName: contextValue.RepositoryFullName,
+		CredentialMode:     contextValue.CredentialMode,
+	}
+	inspection, err := a.gitInspector.InspectWorkspaceGit(publishContext, agent.InspectRequest{
+		UserID: id.UserID, SessionID: conversationID, Operation: "status", Project: gitContext,
+	})
+	if err != nil {
+		writeErr(w, http.StatusBadGateway, "GIT_INSPECT_FAILED", "could not inspect the local Project workspace")
+		return
+	}
+	if inspection.Snapshot.Dirty || inspection.Snapshot.HeadSHA == "" {
+		writeErr(w, http.StatusConflict, "PROJECT_WORKSPACE_DIRTY", "commit all local changes before publishing")
+		return
+	}
+	preparation, err := a.projects.PrepareLocalPublish(publishContext, id, projectID, input)
+	if a.writeProjectError(w, err) {
+		return
+	}
+	defer func() {
+		revokeContext, revokeCancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer revokeCancel()
+		a.projects.RevokeGitHubToken(revokeContext, id, preparation.Token)
+	}()
+	headSHA, err := a.gitPublisher.PublishWorkspaceGit(publishContext, agent.PublishRequest{
+		UserID: id.UserID, SessionID: conversationID, SCMToken: preparation.Token,
+		RemoteCloneURL: preparation.CloneURL, ExpectedHeadSHA: inspection.Snapshot.HeadSHA,
+		Project: gitContext,
+	})
+	if err != nil || !strings.EqualFold(headSHA, inspection.Snapshot.HeadSHA) {
+		a.log.Warn("local Project publish failed")
+		writeErr(w, http.StatusBadGateway, "PROJECT_PUBLISH_FAILED", "could not push the local Project to GitHub")
+		return
+	}
+	result, err := a.projects.CompleteLocalPublish(r.Context(), id, preparation)
+	if a.writeProjectError(w, err) {
+		return
+	}
+	writeJSON(w, http.StatusOK, result)
+}
+
 func decodeProjectJSON(w http.ResponseWriter, r *http.Request, target any) bool {
 	decoder := json.NewDecoder(r.Body)
 	decoder.DisallowUnknownFields()
@@ -390,6 +566,8 @@ func (a *API) writeProjectError(w http.ResponseWriter, err error) bool {
 	switch {
 	case errors.Is(err, project.ErrDisabled):
 		writeErr(w, http.StatusNotImplemented, "GITHUB_DISABLED", "GitHub Projects are not configured")
+	case errors.Is(err, project.ErrLocalProjectsDisabled):
+		writeErr(w, http.StatusNotImplemented, "LOCAL_PROJECTS_DISABLED", "Local Projects are disabled")
 	case errors.Is(err, project.ErrNotFound):
 		writeErr(w, http.StatusNotFound, "NOT_FOUND", "project resource not found")
 	case errors.Is(err, project.ErrInvalidArgument):

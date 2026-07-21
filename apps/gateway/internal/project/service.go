@@ -5,9 +5,8 @@ import (
 	"crypto/sha256"
 	"encoding/base64"
 	"errors"
-	"fmt"
 	"net/http"
-	"sort"
+	"net/url"
 	"strconv"
 	"strings"
 	"time"
@@ -16,48 +15,21 @@ import (
 )
 
 type Config struct {
-	ConfigurationPresent bool
-	AppID                string
-	AppSlug              string
-	ClientID             string
-	ClientSecret         string
-	PrivateKey           string
-	CallbackURL          string
-	SecretKey            string
-	MaxRepositoryMB      int64
-	HTTPClient           *http.Client
-}
-
-func (c Config) configured() bool {
-	return c.ConfigurationPresent || c.AppID != "" || c.AppSlug != "" || c.ClientID != "" || c.ClientSecret != "" ||
-		c.PrivateKey != "" || c.CallbackURL != "" || c.SecretKey != ""
+	SecretKey               string
+	PublicOrigins           string
+	MaxRepositoryMB         int64
+	HTTPClient              *http.Client
+	DisableLocalProjects    bool
+	DisableGitHubConnector  bool
+	DisableGitHubAgentWrite bool
 }
 
 func (c Config) validate() error {
-	if !c.configured() {
-		return nil
-	}
-	missing := make([]string, 0)
-	for key, value := range map[string]string{
-		"COCOLA_GITHUB_APP_ID": c.AppID, "COCOLA_GITHUB_APP_SLUG": c.AppSlug,
-		"COCOLA_GITHUB_CLIENT_ID": c.ClientID, "COCOLA_GITHUB_CLIENT_SECRET": c.ClientSecret,
-		"COCOLA_GITHUB_PRIVATE_KEY": c.PrivateKey, "COCOLA_GITHUB_CALLBACK_URL": c.CallbackURL,
-		"COCOLA_SCM_SECRET_KEY": c.SecretKey,
-	} {
-		if strings.TrimSpace(value) == "" {
-			missing = append(missing, key)
-		}
-	}
-	if len(missing) > 0 {
-		sort.Strings(missing)
-		return fmt.Errorf("incomplete GitHub Project configuration; missing %s", strings.Join(missing, ", "))
-	}
 	if c.MaxRepositoryMB <= 0 {
 		return errors.New("COCOLA_PROJECT_MAX_REPOSITORY_MB must be positive")
 	}
-	if callback, err := http.NewRequest(http.MethodGet, c.CallbackURL, nil); err != nil ||
-		(callback.URL.Scheme != "http" && callback.URL.Scheme != "https") || callback.URL.Host == "" {
-		return errors.New("COCOLA_GITHUB_CALLBACK_URL must be an absolute URL")
+	if strings.TrimSpace(c.SecretKey) == "" && (!c.DisableGitHubConnector || !c.DisableGitHubAgentWrite) {
+		return errors.New("COCOLA_SCM_SECRET_KEY is required")
 	}
 	return nil
 }
@@ -80,14 +52,22 @@ type OAuthResult struct {
 }
 
 type CreateInput struct {
-	ClientRequestID string `json:"client_request_id"`
-	Name            string `json:"name"`
-	Description     string `json:"description"`
-	RuntimeID       string `json:"runtime_id"`
-	Mode            string `json:"mode"`
-	RepositoryName  string `json:"repository_name"`
-	RepositoryID    int64  `json:"repository_id"`
-	Visibility      string `json:"visibility"`
+	ClientRequestID string             `json:"client_request_id"`
+	Name            string             `json:"name"`
+	Description     string             `json:"description"`
+	RuntimeID       string             `json:"runtime_id"`
+	Mode            string             `json:"mode"`
+	RepositoryName  string             `json:"repository_name"`
+	RepositoryID    int64              `json:"repository_id"`
+	Visibility      string             `json:"visibility"`
+	Source          ProjectSourceInput `json:"source"`
+}
+
+type ProjectSourceInput struct {
+	Type           string `json:"type"`
+	RepositoryName string `json:"repository_name,omitempty"`
+	RepositoryID   int64  `json:"repository_id,omitempty"`
+	Visibility     string `json:"visibility,omitempty"`
 }
 
 type UpdateInput struct {
@@ -97,50 +77,99 @@ type UpdateInput struct {
 	RuntimeID       string `json:"runtime_id"`
 }
 
+type PublishInput struct {
+	ExpectedVersion int64  `json:"expected_version"`
+	RepositoryName  string `json:"repository_name"`
+	Visibility      string `json:"visibility"`
+}
+
+type PublishPreparation struct {
+	Project        Project
+	Workspace      Workspace
+	Repository     Repository
+	CloneURL       string
+	Token          string
+	InstallationID int64
+}
+
 type Service struct {
-	store   Store
-	github  *githubClient
-	box     *secretBox
-	enabled bool
-	maxKB   int64
-	now     func() time.Time
+	store                   Store
+	box                     *secretBox
+	http                    *http.Client
+	publicOrigins           map[string]struct{}
+	maxKB                   int64
+	now                     func() time.Time
+	githubConnectorEnabled  bool
+	githubAgentWriteEnabled bool
+	localProjectsEnabled    bool
 }
 
 func New(store Store, cfg Config) (*Service, error) {
 	if err := cfg.validate(); err != nil {
 		return nil, err
 	}
-	s := &Service{store: store, maxKB: cfg.MaxRepositoryMB * 1024, now: func() time.Time { return time.Now().UTC() }}
-	if !cfg.configured() {
-		return s, nil
+	var box *secretBox
+	if strings.TrimSpace(cfg.SecretKey) != "" {
+		var err error
+		box, err = newSecretBox(cfg.SecretKey)
+		if err != nil {
+			return nil, err
+		}
 	}
-	box, err := newSecretBox(cfg.SecretKey)
-	if err != nil {
-		return nil, err
+	client := cfg.HTTPClient
+	if client == nil {
+		client = &http.Client{Timeout: 30 * time.Second}
 	}
-	client, err := newGitHubClient(cfg)
-	if err != nil {
-		return nil, err
+	s := &Service{
+		store: store, box: box, http: client, maxKB: cfg.MaxRepositoryMB * 1024,
+		publicOrigins:           parsePublicOrigins(cfg.PublicOrigins),
+		now:                     func() time.Time { return time.Now().UTC() },
+		githubConnectorEnabled:  !cfg.DisableGitHubConnector,
+		githubAgentWriteEnabled: !cfg.DisableGitHubAgentWrite,
+		localProjectsEnabled:    !cfg.DisableLocalProjects,
 	}
-	s.box, s.github, s.enabled = box, client, true
 	return s, nil
 }
 
-func (s *Service) Enabled() bool { return s != nil && s.enabled }
+func (s *Service) Enabled() bool { return s != nil }
+
+func (s *Service) LocalProjectsEnabled() bool { return s != nil && s.localProjectsEnabled }
+
+func (s *Service) GitHubConnectorEnabled() bool {
+	return s != nil && s.githubConnectorEnabled
+}
+
+func (s *Service) GitHubAgentWriteEnabled() bool {
+	return s != nil && s.githubAgentWriteEnabled
+}
 
 func (s *Service) Connection(ctx context.Context, id Identity) (ConnectionView, error) {
-	if !s.Enabled() {
+	if !s.GitHubConnectorEnabled() {
 		return ConnectionView{Status: "disabled", Enabled: false}, nil
 	}
-	c, err := s.store.GetConnection(ctx, id)
+	registration, err := s.store.GetAppRegistration(ctx, id)
 	if errors.Is(err, ErrNotFound) {
-		return ConnectionView{Status: "disconnected", Enabled: true}, nil
+		return ConnectionView{Status: "not_configured", Enabled: true}, nil
 	}
 	if err != nil {
 		return ConnectionView{}, err
 	}
+	github, err := s.githubForRegistration(id, registration)
+	if err != nil {
+		return ConnectionView{Status: RegistrationError, Enabled: true}, nil
+	}
+	c, err := s.store.GetConnection(ctx, id)
+	if errors.Is(err, ErrNotFound) {
+		return s.registrationView(github, registration), nil
+	}
+	if err != nil {
+		return ConnectionView{}, err
+	}
+	if c.RegistrationID != registration.ID {
+		return ConnectionView{Status: ConnectionReauthorization, Enabled: true}, nil
+	}
 	if c.Status != ConnectionReauthorization {
-		token, tokenErr := s.userToken(ctx, id)
+		token, tokenErr := s.userToken(ctx, id, github)
 		if tokenErr != nil {
 			c.Status = ConnectionReauthorization
 			c.UpdatedAt = s.now()
@@ -150,7 +179,7 @@ func (s *Service) Connection(ctx context.Context, id Identity) (ConnectionView, 
 			if err != nil {
 				return ConnectionView{}, err
 			}
-			installation, installErr := s.personalInstallation(ctx, token, c.ExternalUserID)
+			installation, installErr := s.personalInstallation(ctx, github, token, c.ExternalUserID)
 			if installErr == nil {
 				if installation.ID != c.InstallationID || c.Status != ConnectionReady {
 					c.InstallationID, c.Status, c.UpdatedAt = installation.ID, ConnectionReady, s.now()
@@ -170,50 +199,202 @@ func (s *Service) Connection(ctx context.Context, id Identity) (ConnectionView, 
 			}
 		}
 	}
-	return s.connectionView(c), nil
+	return s.connectionView(github, c), nil
+}
+
+func (s *Service) StartManifest(
+	ctx context.Context,
+	id Identity,
+	returnTo string,
+	requestOrigin string,
+) (ManifestStart, error) {
+	if !s.GitHubConnectorEnabled() {
+		return ManifestStart{}, ErrDisabled
+	}
+	origin, err := s.allowedOrigin(requestOrigin)
+	if err != nil {
+		return ManifestStart{}, err
+	}
+	now := s.now()
+	state, err := s.box.signFlowState(id, "manifest", returnTo, origin, "", time.Hour, now)
+	if err != nil {
+		return ManifestStart{}, err
+	}
+	decoded, err := s.box.verifyFlowState(state, id, "manifest", now)
+	if err != nil {
+		return ManifestStart{}, err
+	}
+	if err := s.store.SaveFlowState(ctx, FlowState{
+		NonceHash: nonceHash(decoded.Nonce), TenantID: id.TenantID, UserID: id.UserID,
+		Provider: ProviderGitHub, FlowType: "manifest", ReturnTo: decoded.ReturnTo,
+		PublicOrigin: origin, ExpiresAt: time.Unix(decoded.Expires, 0), CreatedAt: now,
+	}); err != nil {
+		return ManifestStart{}, err
+	}
+	appName := "Cocola " + strings.TrimSpace(id.Username)
+	if strings.TrimSpace(id.Username) == "" {
+		appName = "Cocola Personal Agent"
+	}
+	manifest := githubManifest(origin, appName)
+	return ManifestStart{
+		RegistrationURL: githubManifestRegistrationURL(state), State: state, Manifest: manifest,
+	}, nil
+}
+
+func githubManifest(origin, appName string) map[string]any {
+	return map[string]any{
+		"name":                     appName,
+		"url":                      origin,
+		"redirect_url":             origin + "/connectors/github/manifest/callback",
+		"callback_urls":            []string{origin + "/connectors/github/oauth/callback"},
+		"setup_url":                origin + "/connectors/github/installation/callback",
+		"setup_on_update":          true,
+		"request_oauth_on_install": false,
+		"public":                   false,
+		"hook_attributes": map[string]any{
+			"url": origin + "/connectors/github/webhooks/disabled", "active": false,
+		},
+		"default_permissions": map[string]string{
+			"actions": "write", "administration": "write", "checks": "write",
+			"contents": "write", "deployments": "write", "environments": "write",
+			"issues": "write", "metadata": "read", "packages": "write",
+			"pages": "write", "pull_requests": "write", "repository_hooks": "write",
+			"secret_scanning_alerts": "write", "secrets": "write",
+			"security_events": "write", "statuses": "write", "vulnerability_alerts": "write",
+			"variables": "write", "workflows": "write",
+		},
+	}
+}
+
+func (s *Service) CompleteManifest(
+	ctx context.Context,
+	id Identity,
+	state string,
+	code string,
+) (ConnectorResult, error) {
+	if !s.GitHubConnectorEnabled() {
+		return ConnectorResult{}, ErrDisabled
+	}
+	if strings.TrimSpace(code) == "" {
+		return ConnectorResult{}, ErrInvalidArgument
+	}
+	now := s.now()
+	decoded, err := s.box.verifyFlowState(state, id, "manifest", now)
+	if err != nil {
+		return ConnectorResult{}, err
+	}
+	flow, err := s.store.ConsumeFlowState(ctx, id, nonceHash(decoded.Nonce), "manifest", now)
+	if err != nil || flow.PublicOrigin != decoded.PublicOrigin {
+		return ConnectorResult{}, ErrInvalidArgument
+	}
+	conversion, err := convertGitHubManifest(ctx, s.http, code)
+	if err != nil {
+		return ConnectorResult{}, err
+	}
+	registrationID := uuid.NewString()
+	clientSecret, err := s.box.encrypt(conversion.ClientSecret,
+		registrationAAD(id, registrationID, "client_secret"))
+	if err != nil {
+		return ConnectorResult{}, err
+	}
+	privateKey, err := s.box.encrypt(conversion.PEM,
+		registrationAAD(id, registrationID, "private_key"))
+	if err != nil {
+		return ConnectorResult{}, err
+	}
+	if err := s.store.DeleteConnection(ctx, id); err != nil && !errors.Is(err, ErrNotFound) {
+		return ConnectorResult{}, err
+	}
+	if err := s.store.DeleteAppRegistration(ctx, id); err != nil && !errors.Is(err, ErrNotFound) {
+		return ConnectorResult{}, err
+	}
+	registration, err := s.store.UpsertAppRegistration(ctx, AppRegistration{
+		ID: registrationID, TenantID: id.TenantID, UserID: id.UserID, Provider: ProviderGitHub,
+		AppID: conversion.ID, AppSlug: conversion.Slug, ClientID: conversion.ClientID,
+		ClientSecretCiphertext: clientSecret, PrivateKeyCiphertext: privateKey,
+		OwnerExternalID: conversion.Owner.ID, OwnerLogin: conversion.Owner.Login,
+		PublicOrigin: flow.PublicOrigin, Status: RegistrationInstallRequired,
+		CreatedAt: now, UpdatedAt: now,
+	})
+	if err != nil {
+		return ConnectorResult{}, err
+	}
+	github, err := s.githubForRegistration(id, registration)
+	if err != nil {
+		return ConnectorResult{}, err
+	}
+	return ConnectorResult{
+		Connection: s.registrationView(github, registration), ReturnTo: flow.ReturnTo,
+	}, nil
 }
 
 func (s *Service) StartOAuth(ctx context.Context, id Identity, returnTo string) (OAuthStart, error) {
-	if !s.Enabled() {
+	if !s.GitHubConnectorEnabled() {
 		return OAuthStart{}, ErrDisabled
 	}
+	registration, err := s.store.GetAppRegistration(ctx, id)
+	if err != nil {
+		return OAuthStart{}, ErrConnectionRequired
+	}
+	github, err := s.githubForRegistration(id, registration)
+	if err != nil {
+		return OAuthStart{}, err
+	}
 	now := s.now()
-	state, err := s.box.signState(id, returnTo, now)
+	state, err := s.box.signFlowState(id, "oauth", returnTo, registration.PublicOrigin,
+		registration.ID, 10*time.Minute, now)
 	if err != nil {
 		return OAuthStart{}, err
 	}
-	decoded, err := s.box.verifyState(state, id, now)
+	decoded, err := s.box.verifyFlowState(state, id, "oauth", now)
 	if err != nil {
 		return OAuthStart{}, err
 	}
-	if err := s.store.SaveOAuthState(ctx, id, nonceHash(decoded.Nonce), time.Unix(decoded.Expires, 0), now); err != nil {
+	if err := s.store.SaveFlowState(ctx, FlowState{
+		NonceHash: nonceHash(decoded.Nonce), TenantID: id.TenantID, UserID: id.UserID,
+		Provider: ProviderGitHub, FlowType: "oauth", ReturnTo: decoded.ReturnTo,
+		PublicOrigin: registration.PublicOrigin, RegistrationID: registration.ID,
+		ExpiresAt: time.Unix(decoded.Expires, 0), CreatedAt: now,
+	}); err != nil {
 		return OAuthStart{}, err
 	}
-	return OAuthStart{AuthorizationURL: s.github.authorizeURL(state)}, nil
+	return OAuthStart{AuthorizationURL: github.authorizeURL(state)}, nil
 }
 
 func (s *Service) CompleteOAuth(ctx context.Context, id Identity, state, code string) (OAuthResult, error) {
-	if !s.Enabled() {
+	if !s.GitHubConnectorEnabled() {
 		return OAuthResult{}, ErrDisabled
 	}
 	if strings.TrimSpace(code) == "" {
 		return OAuthResult{}, ErrInvalidArgument
 	}
 	now := s.now()
-	decoded, err := s.box.verifyState(state, id, now)
+	decoded, err := s.box.verifyFlowState(state, id, "oauth", now)
 	if err != nil {
 		return OAuthResult{}, err
 	}
-	if err := s.store.ConsumeOAuthState(ctx, id, nonceHash(decoded.Nonce), now); err != nil {
-		return OAuthResult{}, err
+	flow, err := s.store.ConsumeFlowState(ctx, id, nonceHash(decoded.Nonce), "oauth", now)
+	if err != nil || flow.RegistrationID == "" || flow.RegistrationID != decoded.RegistrationID {
+		return OAuthResult{}, ErrInvalidArgument
 	}
-	token, err := s.github.exchange(ctx, code)
+	registration, err := s.store.GetAppRegistration(ctx, id)
+	if err != nil || registration.ID != flow.RegistrationID {
+		return OAuthResult{}, ErrConnectionRequired
+	}
+	github, err := s.githubForRegistration(id, registration)
 	if err != nil {
 		return OAuthResult{}, err
 	}
-	user, err := s.github.user(ctx, token.AccessToken)
+	token, err := github.exchange(ctx, code)
 	if err != nil {
 		return OAuthResult{}, err
+	}
+	user, err := github.user(ctx, token.AccessToken)
+	if err != nil {
+		return OAuthResult{}, err
+	}
+	if registration.OwnerExternalID > 0 && registration.OwnerExternalID != user.ID {
+		return OAuthResult{}, ErrInvalidArgument
 	}
 	access, err := s.box.encrypt(token.AccessToken, tokenAAD(id, "access_token"))
 	if err != nil {
@@ -227,7 +408,7 @@ func (s *Service) CompleteOAuth(ctx context.Context, id Identity, state, code st
 		}
 	}
 	status, installationID := ConnectionInstallationRequired, int64(0)
-	if installation, installErr := s.personalInstallation(ctx, token.AccessToken, user.ID); installErr == nil {
+	if installation, installErr := s.personalInstallation(ctx, github, token.AccessToken, user.ID); installErr == nil {
 		status, installationID = ConnectionReady, installation.ID
 	} else if !errors.Is(installErr, ErrInstallationRequired) {
 		return OAuthResult{}, installErr
@@ -237,30 +418,35 @@ func (s *Service) CompleteOAuth(ctx context.Context, id Identity, state, code st
 		ExternalUserID: user.ID, ExternalLogin: user.Login, InstallationID: installationID,
 		AccessTokenCiphertext: access, AccessTokenExpiresAt: token.ExpiresAt,
 		RefreshTokenCiphertext: refresh, RefreshTokenExpiresAt: token.RefreshAt,
-		Status: status, CreatedAt: now, UpdatedAt: now,
+		Status: status, CreatedAt: now, UpdatedAt: now, RegistrationID: registration.ID,
 	})
 	if err != nil {
 		return OAuthResult{}, err
 	}
-	return OAuthResult{Connection: s.connectionView(c), ReturnTo: decoded.ReturnTo}, nil
+	return OAuthResult{Connection: s.connectionView(github, c), ReturnTo: decoded.ReturnTo}, nil
 }
 
 func (s *Service) Disconnect(ctx context.Context, id Identity) error {
 	if !s.Enabled() {
 		return ErrDisabled
 	}
-	err := s.store.DeleteConnection(ctx, id)
-	if errors.Is(err, ErrNotFound) {
-		return nil
+	if err := s.revokeUserTokenLeases(ctx, id); err != nil && !errors.Is(err, ErrNotFound) {
+		return err
 	}
-	return err
+	if err := s.store.DeleteConnection(ctx, id); err != nil && !errors.Is(err, ErrNotFound) {
+		return err
+	}
+	if err := s.store.DeleteAppRegistration(ctx, id); err != nil && !errors.Is(err, ErrNotFound) {
+		return err
+	}
+	return nil
 }
 
 func (s *Service) Repositories(ctx context.Context, id Identity, cursor string) (RepositoryPage, error) {
-	if !s.Enabled() {
+	if !s.GitHubConnectorEnabled() {
 		return RepositoryPage{}, ErrDisabled
 	}
-	token, c, err := s.readyConnection(ctx, id)
+	token, c, github, err := s.readyConnection(ctx, id)
 	if err != nil {
 		return RepositoryPage{}, err
 	}
@@ -268,7 +454,7 @@ func (s *Service) Repositories(ctx context.Context, id Identity, cursor string) 
 	if err != nil {
 		return RepositoryPage{}, ErrInvalidArgument
 	}
-	repos, more, err := s.github.repositories(ctx, token, c.InstallationID, page)
+	repos, more, err := github.repositories(ctx, token, c.InstallationID, page)
 	if err != nil {
 		return RepositoryPage{}, err
 	}
@@ -286,9 +472,6 @@ func (s *Service) Repositories(ctx context.Context, id Identity, cursor string) 
 }
 
 func (s *Service) Create(ctx context.Context, id Identity, input CreateInput) (Project, error) {
-	if !s.Enabled() {
-		return Project{}, ErrDisabled
-	}
 	input = normalizeCreate(input)
 	if err := validateCreate(input); err != nil {
 		return Project{}, err
@@ -298,17 +481,28 @@ func (s *Service) Create(ctx context.Context, id Identity, input CreateInput) (P
 	} else if !errors.Is(err, ErrNotFound) {
 		return Project{}, err
 	}
-	token, connection, err := s.readyConnection(ctx, id)
-	if err != nil {
-		return Project{}, err
+	provider := ProviderGitHub
+	if input.Mode == "empty" {
+		provider = ProviderLocal
+		if !s.LocalProjectsEnabled() {
+			return Project{}, ErrLocalProjectsDisabled
+		}
+	} else if !s.GitHubConnectorEnabled() {
+		return Project{}, ErrDisabled
 	}
 	now := s.now()
+	repositoryName := input.RepositoryName
+	status, defaultBranch, visibility := ProjectProvisioning, "", input.Visibility
+	if provider == ProviderLocal {
+		status, defaultBranch, visibility = ProjectReady, "main", "private"
+	}
 	v, err := s.store.CreateProject(ctx, Project{
 		ID: uuid.NewString(), TenantID: id.TenantID, OwnerUserID: id.UserID,
 		Name: input.Name, Description: input.Description, RuntimeID: input.RuntimeID,
-		RepositoryMode: input.Mode, RepositoryProvider: ProviderGitHub,
-		RepositoryExternalID: input.RepositoryID, RepositoryName: input.RepositoryName, Visibility: input.Visibility,
-		Status: ProjectProvisioning, ProvisionRequestID: input.ClientRequestID,
+		RepositoryMode: input.Mode, RepositoryProvider: provider,
+		RepositoryExternalID: input.RepositoryID, RepositoryName: repositoryName,
+		Visibility: visibility, DefaultBranch: defaultBranch,
+		Status: status, ProvisionRequestID: input.ClientRequestID,
 		ProvisionStartedAt: now, CreatedAt: now, UpdatedAt: now,
 	})
 	if errors.Is(err, ErrConflict) {
@@ -319,14 +513,21 @@ func (s *Service) Create(ctx context.Context, id Identity, input CreateInput) (P
 	if err != nil {
 		return Project{}, err
 	}
+	if provider == ProviderLocal {
+		return v, nil
+	}
 	var repo Repository
-	if input.Mode == "create" {
-		repo, err = s.github.createRepository(ctx, token, input.RepositoryName, input.Description, input.Visibility == "private")
-	} else {
-		repo, err = s.github.repository(ctx, token, input.RepositoryID)
+	var connection Connection
+	var token string
+	var github *githubClient
+	token, connection, github, err = s.readyConnection(ctx, id)
+	if err == nil && input.Mode == "create" {
+		repo, err = github.createRepository(ctx, token, input.RepositoryName, input.Description, input.Visibility == "private")
+	} else if err == nil {
+		repo, err = github.repository(ctx, token, input.RepositoryID)
 	}
 	if err != nil {
-		if isDefinitiveGitHubError(err) {
+		if provider == ProviderGitHub && isDefinitiveGitHubError(err) {
 			failed, failErr := s.store.FailProject(ctx, id, v.ID, githubErrorCode(err), s.now())
 			if failErr == nil {
 				return failed, nil
@@ -342,7 +543,11 @@ func (s *Service) Create(ctx context.Context, id Identity, input CreateInput) (P
 		}
 		return failed, nil
 	}
-	if installErr := s.ensureInstalledRepository(ctx, token, connection, repo.ID); installErr != nil {
+	token, _, github, readyErr := s.readyConnection(ctx, id)
+	if readyErr != nil {
+		return v, nil
+	}
+	if installErr := s.ensureInstalledRepository(ctx, github, token, connection, repo.ID); installErr != nil {
 		if !errors.Is(installErr, ErrNotFound) {
 			return v, nil
 		}
@@ -352,14 +557,11 @@ func (s *Service) Create(ctx context.Context, id Identity, input CreateInput) (P
 		}
 		return failed, nil
 	}
-	repo = s.github.repositoryWarnings(ctx, token, repo)
+	repo = github.repositoryWarnings(ctx, token, repo)
 	return s.store.CompleteProject(ctx, id, v.ID, repo, connection.InstallationID, s.now())
 }
 
 func (s *Service) Retry(ctx context.Context, id Identity, projectID string) (Project, error) {
-	if !s.Enabled() {
-		return Project{}, ErrDisabled
-	}
 	if _, err := uuid.Parse(projectID); err != nil {
 		return Project{}, ErrInvalidArgument
 	}
@@ -367,25 +569,38 @@ func (s *Service) Retry(ctx context.Context, id Identity, projectID string) (Pro
 	if err != nil {
 		return Project{}, err
 	}
-	if v.Status == ProjectReady || v.Status == ProjectArchived {
+	if v.Status == ProjectArchived {
 		return v, nil
 	}
-	token, c, err := s.readyConnection(ctx, id)
+	if v.Status == ProjectReady {
+		if v.RepositoryProvider != ProviderGitHub {
+			return v, nil
+		}
+		v, _, _, _, err = s.currentProjectInstallation(ctx, id, v)
+		return v, err
+	}
+	if v.RepositoryProvider == ProviderLocal {
+		return v, nil
+	}
+	token, c, github, err := s.readyConnection(ctx, id)
 	if err != nil {
 		return Project{}, err
 	}
 	var repo Repository
+	createdInRetry := false
 	if v.RepositoryMode == "create" {
-		repo, err = s.github.repositoryByName(ctx, token, c.ExternalLogin, v.RepositoryName)
+		v, repo, createdInRetry, err = s.retryCreateRepository(
+			ctx, id, v, token, c.ExternalLogin, github,
+		)
 	} else if v.RepositoryMode == "import" && v.RepositoryExternalID > 0 {
-		repo, err = s.github.repository(ctx, token, v.RepositoryExternalID)
+		repo, err = github.repository(ctx, token, v.RepositoryExternalID)
 	} else {
 		return Project{}, ErrInvalidArgument
 	}
 	if err != nil {
 		return Project{}, err
 	}
-	if repo.OwnerID != c.ExternalUserID || (v.RepositoryMode == "create" &&
+	if repo.OwnerID != c.ExternalUserID || (v.RepositoryMode == "create" && !createdInRetry &&
 		(repo.CreatedAt.Before(v.ProvisionStartedAt.Add(-2*time.Minute)) ||
 			repo.CreatedAt.After(v.ProvisionStartedAt.Add(2*time.Minute)))) {
 		return Project{}, ErrConflict
@@ -393,14 +608,36 @@ func (s *Service) Retry(ctx context.Context, id Identity, projectID string) (Pro
 	if err := s.validateRepository(repo, c); err != nil {
 		return Project{}, err
 	}
-	if err := s.ensureInstalledRepository(ctx, token, c, repo.ID); err != nil {
+	if err := s.ensureInstalledRepository(ctx, github, token, c, repo.ID); err != nil {
 		if errors.Is(err, ErrNotFound) {
 			return Project{}, ErrRepositoryNotInstalled
 		}
 		return Project{}, err
 	}
-	repo = s.github.repositoryWarnings(ctx, token, repo)
+	repo = github.repositoryWarnings(ctx, token, repo)
 	return s.store.CompleteProject(ctx, id, v.ID, repo, c.InstallationID, s.now())
+}
+
+func (s *Service) retryCreateRepository(
+	ctx context.Context,
+	id Identity,
+	value Project,
+	token string,
+	owner string,
+	github *githubClient,
+) (Project, Repository, bool, error) {
+	repo, err := github.repositoryByName(ctx, token, owner, value.RepositoryName)
+	if !githubStatus(err, http.StatusNotFound) {
+		return value, repo, false, err
+	}
+	value, err = s.store.RefreshProjectProvisionAttempt(ctx, id, value.ID, s.now())
+	if err != nil {
+		return Project{}, Repository{}, false, err
+	}
+	repo, err = github.createRepository(
+		ctx, token, value.RepositoryName, value.Description, value.Visibility == "private",
+	)
+	return value, repo, err == nil, err
 }
 
 func (s *Service) List(ctx context.Context, id Identity) ([]Project, error) {
@@ -427,9 +664,164 @@ func (s *Service) Update(ctx context.Context, id Identity, projectID string, inp
 	return s.store.UpdateProject(ctx, id, projectID, input.ExpectedVersion, input.Name, input.Description, input.RuntimeID, s.now())
 }
 
+func (s *Service) PrepareLocalPublish(
+	ctx context.Context,
+	id Identity,
+	projectID string,
+	input PublishInput,
+) (PublishPreparation, error) {
+	if !s.GitHubConnectorEnabled() {
+		return PublishPreparation{}, ErrDisabled
+	}
+	if _, err := uuid.Parse(projectID); err != nil {
+		return PublishPreparation{}, ErrInvalidArgument
+	}
+	input.RepositoryName = strings.TrimSpace(input.RepositoryName)
+	input.Visibility = strings.TrimSpace(input.Visibility)
+	if input.ExpectedVersion <= 0 || (input.Visibility != "private" && input.Visibility != "public") ||
+		!validRepositoryName(input.RepositoryName) {
+		return PublishPreparation{}, ErrInvalidArgument
+	}
+	value, err := s.store.GetProject(ctx, id, projectID)
+	if err != nil {
+		return PublishPreparation{}, err
+	}
+	if value.Version != input.ExpectedVersion {
+		return PublishPreparation{}, ErrVersionConflict
+	}
+	if value.Status != ProjectReady || value.RepositoryProvider != ProviderLocal ||
+		value.RepositoryMode != "empty" || value.PrimaryConversationID == "" ||
+		value.GitHubPublishStatus == "published" {
+		return PublishPreparation{}, ErrConflict
+	}
+	userToken, connection, github, err := s.readyConnection(ctx, id)
+	if err != nil {
+		return PublishPreparation{}, err
+	}
+	var repo Repository
+	if value.RepositoryExternalID == 0 {
+		newIntent := value.GitHubPublishStatus == "unpublished"
+		createdInRequest := false
+		if !newIntent && (value.GitHubPublishStatus != "pending" ||
+			!strings.EqualFold(value.RepositoryName, input.RepositoryName) ||
+			value.Visibility != input.Visibility) {
+			return PublishPreparation{}, ErrConflict
+		}
+		if newIntent {
+			if _, lookupErr := github.repositoryByName(ctx, userToken, connection.ExternalLogin,
+				input.RepositoryName); lookupErr == nil {
+				return PublishPreparation{}, ErrConflict
+			} else if !githubStatus(lookupErr, http.StatusNotFound) {
+				return PublishPreparation{}, lookupErr
+			}
+			value, err = s.store.BeginLocalProjectPublishIntent(ctx, id, value.ID, value.Version,
+				input.RepositoryName, input.Visibility, s.now())
+			if err != nil {
+				return PublishPreparation{}, err
+			}
+		}
+		if newIntent {
+			repo, err = github.createEmptyRepository(ctx, userToken, value.RepositoryName,
+				value.Description, value.Visibility == "private")
+			createdInRequest = err == nil
+		} else {
+			repo, err = github.repositoryByName(ctx, userToken, connection.ExternalLogin,
+				value.RepositoryName)
+			if githubStatus(err, http.StatusNotFound) {
+				repo, err = github.createEmptyRepository(ctx, userToken, value.RepositoryName,
+					value.Description, value.Visibility == "private")
+				createdInRequest = err == nil
+			}
+		}
+		if err != nil {
+			if isDefinitiveGitHubError(err) {
+				_, _ = s.store.CancelLocalProjectPublishIntent(ctx, id, value.ID, value.Version, s.now())
+			}
+			return PublishPreparation{}, err
+		}
+		if !createdInRequest && !repositoryCreatedNear(repo, value.ProvisionStartedAt) {
+			_, _ = s.store.CancelLocalProjectPublishIntent(ctx, id, value.ID, value.Version, s.now())
+			return PublishPreparation{}, ErrConflict
+		}
+		if err := s.validatePublishRepository(repo, connection); err != nil {
+			return PublishPreparation{}, err
+		}
+		repo.DefaultBranch = "main"
+		value, err = s.store.BindLocalProjectPublishRepository(ctx, id, value.ID, value.Version,
+			repo, connection.InstallationID, s.now())
+		if err != nil {
+			return PublishPreparation{}, err
+		}
+	} else {
+		repo, err = github.repository(ctx, userToken, value.RepositoryExternalID)
+		if err != nil {
+			return PublishPreparation{}, err
+		}
+		if err := s.validatePublishRepository(repo, connection); err != nil {
+			return PublishPreparation{}, err
+		}
+	}
+	if err := s.ensureInstalledRepository(ctx, github, userToken, connection, repo.ID); err != nil {
+		if errors.Is(err, ErrNotFound) {
+			return PublishPreparation{}, ErrRepositoryNotInstalled
+		}
+		return PublishPreparation{}, err
+	}
+	token, _, err := github.installationToken(ctx, connection.InstallationID, repo.ID,
+		map[string]string{"contents": "write"})
+	if err != nil {
+		return PublishPreparation{}, err
+	}
+	workspace, _, err := s.store.GetWorkspace(ctx, id, value.PrimaryConversationID)
+	if err != nil {
+		_ = github.revokeInstallationToken(ctx, token)
+		return PublishPreparation{}, err
+	}
+	return PublishPreparation{
+		Project: value, Workspace: workspace, Repository: repo,
+		CloneURL: "https://github.com/" + repo.Owner + "/" + repo.Name + ".git",
+		Token:    token, InstallationID: connection.InstallationID,
+	}, nil
+}
+
+func (s *Service) CompleteLocalPublish(
+	ctx context.Context,
+	id Identity,
+	preparation PublishPreparation,
+) (Project, error) {
+	return s.store.CompleteLocalProjectPublish(ctx, id, preparation.Project.ID,
+		preparation.Project.Version, s.now())
+}
+
+func (s *Service) RevokeGitHubToken(ctx context.Context, id Identity, token string) {
+	if strings.TrimSpace(token) == "" {
+		return
+	}
+	registration, err := s.store.GetAppRegistration(ctx, id)
+	if err != nil {
+		return
+	}
+	github, err := s.githubForRegistration(id, registration)
+	if err == nil {
+		_ = github.revokeInstallationToken(ctx, token)
+	}
+}
+
 func (s *Service) Archive(ctx context.Context, id Identity, projectID string, expected int64) (Project, error) {
 	if _, err := uuid.Parse(projectID); err != nil || expected <= 0 {
 		return Project{}, ErrInvalidArgument
+	}
+	value, err := s.store.GetProject(ctx, id, projectID)
+	if err != nil {
+		return Project{}, err
+	}
+	if value.Version != expected {
+		return Project{}, ErrConflict
+	}
+	if value.RepositoryExternalID > 0 {
+		if err := s.revokeProjectTokenLeases(ctx, id, projectID); err != nil && !errors.Is(err, ErrNotFound) {
+			return Project{}, err
+		}
 	}
 	return s.store.ArchiveProject(ctx, id, projectID, expected, s.now())
 }
@@ -452,20 +844,14 @@ func (s *Service) ValidateReady(ctx context.Context, id Identity, projectID stri
 	if v.Status != ProjectReady {
 		return Project{}, ErrProjectNotReady
 	}
-	if !s.Enabled() {
-		return Project{}, ErrDisabled
+	if v.RepositoryProvider == ProviderLocal {
+		if !s.LocalProjectsEnabled() {
+			return Project{}, ErrLocalProjectsDisabled
+		}
+		return v, nil
 	}
-	c, err := s.store.GetConnection(ctx, id)
-	if errors.Is(err, ErrNotFound) || (err == nil && c.Status != ConnectionReady) {
-		return Project{}, ErrConnectionRequired
-	}
-	if err != nil {
-		return Project{}, err
-	}
-	if c.InstallationID != v.InstallationID {
-		return Project{}, ErrInstallationRequired
-	}
-	return v, nil
+	v, _, _, _, err = s.currentProjectInstallation(ctx, id, v)
+	return v, err
 }
 
 func (s *Service) Workspace(ctx context.Context, id Identity, conversationID string) (Workspace, Project, error) {
@@ -473,9 +859,6 @@ func (s *Service) Workspace(ctx context.Context, id Identity, conversationID str
 }
 
 func (s *Service) ProjectContext(ctx context.Context, id Identity, conversationID string) (ProjectContext, string, error) {
-	if !s.Enabled() {
-		return ProjectContext{}, "", ErrDisabled
-	}
 	w, v, err := s.store.GetWorkspace(ctx, id, conversationID)
 	if err != nil {
 		return ProjectContext{}, "", err
@@ -483,15 +866,40 @@ func (s *Service) ProjectContext(ctx context.Context, id Identity, conversationI
 	if v.Status != ProjectReady {
 		return ProjectContext{}, "", ErrProjectNotReady
 	}
-	token, c, err := s.readyConnection(ctx, id)
+	gitAuthorName, gitAuthorEmail := gitAuthorIdentity(id)
+	if v.RepositoryProvider == ProviderLocal {
+		if !s.LocalProjectsEnabled() {
+			return ProjectContext{}, "", ErrLocalProjectsDisabled
+		}
+		repositoryID := int64(0)
+		installationID := int64(0)
+		repositoryFullName := ""
+		credentialMode := "none"
+		if v.RepositoryExternalID > 0 && v.GitHubPublishStatus == "published" {
+			repositoryID = v.RepositoryExternalID
+			installationID = v.InstallationID
+			repositoryFullName = strings.Trim(v.RepositoryOwner+"/"+v.RepositoryName, "/")
+			credentialMode = "broker"
+		}
+		return ProjectContext{
+			ProjectID: v.ID, RepositoryExternalID: repositoryID,
+			DefaultBranch: "main", BaseSHA: w.BaseSHA, BranchName: "main",
+			GitAuthorName: gitAuthorName, GitAuthorEmail: gitAuthorEmail,
+			InstallationID: installationID, RepositoryProvider: ProviderLocal,
+			RepositoryFullName: repositoryFullName,
+			CredentialMode:     credentialMode,
+		}, "", nil
+	}
+	v, userToken, connection, github, err := s.currentProjectInstallation(ctx, id, v)
 	if err != nil {
 		return ProjectContext{}, "", err
 	}
-	if c.InstallationID != v.InstallationID {
-		return ProjectContext{}, "", ErrInstallationRequired
-	}
+	installationID := connection.InstallationID
+	cloneURL := "https://github.com/" + v.RepositoryOwner + "/" + v.RepositoryName + ".git"
 	if w.BaseSHA == "" {
-		sha, branchErr := s.github.branchSHA(ctx, token, v.RepositoryOwner, v.RepositoryName, v.DefaultBranch)
+		var sha string
+		var branchErr error
+		sha, branchErr = github.branchSHA(ctx, userToken, v.RepositoryOwner, v.RepositoryName, v.DefaultBranch)
 		if branchErr != nil {
 			return ProjectContext{}, "", branchErr
 		}
@@ -500,18 +908,23 @@ func (s *Service) ProjectContext(ctx context.Context, id Identity, conversationI
 			return ProjectContext{}, "", err
 		}
 	}
-	cloneToken, _, err := s.github.installationToken(ctx, v.InstallationID, v.RepositoryExternalID)
-	if err != nil {
-		return ProjectContext{}, "", err
+	var token string
+	if v.RepositoryProvider == ProviderGitHub {
+		token, _, err = github.installationToken(ctx, v.InstallationID, v.RepositoryExternalID,
+			map[string]string{"contents": "read"})
+		if err != nil {
+			return ProjectContext{}, "", err
+		}
 	}
-	gitAuthorName, gitAuthorEmail := gitAuthorIdentity(id)
 	return ProjectContext{
 		ProjectID: v.ID, RepositoryExternalID: v.RepositoryExternalID,
-		CloneURL:      "https://github.com/" + v.RepositoryOwner + "/" + v.RepositoryName + ".git",
+		CloneURL:      cloneURL,
 		DefaultBranch: v.DefaultBranch, BaseSHA: w.BaseSHA, BranchName: w.BranchName,
 		GitAuthorName: gitAuthorName, GitAuthorEmail: gitAuthorEmail,
-		InstallationID: v.InstallationID,
-	}, cloneToken, nil
+		InstallationID: installationID, RepositoryProvider: v.RepositoryProvider,
+		RepositoryFullName: v.RepositoryOwner + "/" + v.RepositoryName,
+		CredentialMode:     "ephemeral",
+	}, token, nil
 }
 
 func gitAuthorIdentity(id Identity) (string, string) {
@@ -549,40 +962,84 @@ func (s *Service) MarkBootstrapFailed(ctx context.Context, id Identity, conversa
 	return s.store.MarkBootstrapFailed(ctx, id, conversationID, code, s.now())
 }
 
-func (s *Service) readyConnection(ctx context.Context, id Identity) (string, Connection, error) {
+func (s *Service) readyConnection(ctx context.Context, id Identity) (string, Connection, *githubClient, error) {
+	registration, err := s.store.GetAppRegistration(ctx, id)
+	if errors.Is(err, ErrNotFound) {
+		return "", Connection{}, nil, ErrConnectionRequired
+	}
+	if err != nil {
+		return "", Connection{}, nil, err
+	}
+	github, err := s.githubForRegistration(id, registration)
+	if err != nil {
+		return "", Connection{}, nil, err
+	}
 	c, err := s.store.GetConnection(ctx, id)
 	if errors.Is(err, ErrNotFound) {
-		return "", Connection{}, ErrConnectionRequired
+		return "", Connection{}, nil, ErrConnectionRequired
 	}
 	if err != nil {
-		return "", Connection{}, err
+		return "", Connection{}, nil, err
 	}
-	if c.Status == ConnectionReauthorization {
-		return "", Connection{}, ErrConnectionRequired
+	if c.Status == ConnectionReauthorization || c.RegistrationID != registration.ID {
+		return "", Connection{}, nil, ErrConnectionRequired
 	}
-	token, err := s.userToken(ctx, id)
+	token, err := s.userToken(ctx, id, github)
 	if err != nil {
-		return "", Connection{}, ErrConnectionRequired
+		return "", Connection{}, nil, ErrConnectionRequired
 	}
 	c, err = s.store.GetConnection(ctx, id)
 	if err != nil {
-		return "", Connection{}, err
+		return "", Connection{}, nil, err
 	}
-	installation, err := s.personalInstallation(ctx, token, c.ExternalUserID)
+	installation, err := s.personalInstallation(ctx, github, token, c.ExternalUserID)
 	if err != nil {
-		return "", Connection{}, err
+		return "", Connection{}, nil, err
 	}
 	if installation.ID != c.InstallationID || c.Status != ConnectionReady {
 		c.InstallationID, c.Status, c.UpdatedAt = installation.ID, ConnectionReady, s.now()
 		c, err = s.store.UpsertConnection(ctx, c)
 		if err != nil {
-			return "", Connection{}, err
+			return "", Connection{}, nil, err
 		}
 	}
-	return token, c, nil
+	return token, c, github, nil
 }
 
-func (s *Service) userToken(ctx context.Context, id Identity) (string, error) {
+func (s *Service) currentProjectInstallation(
+	ctx context.Context,
+	id Identity,
+	value Project,
+) (Project, string, Connection, *githubClient, error) {
+	token, connection, github, err := s.readyConnection(ctx, id)
+	if err != nil {
+		return Project{}, "", Connection{}, nil, err
+	}
+	if value.InstallationID == connection.InstallationID {
+		return value, token, connection, github, nil
+	}
+	repo, err := github.repository(ctx, token, value.RepositoryExternalID)
+	if err != nil {
+		return Project{}, "", Connection{}, nil, err
+	}
+	if err := s.validatePublishRepository(repo, connection); err != nil {
+		return Project{}, "", Connection{}, nil, err
+	}
+	if err := s.ensureInstalledRepository(ctx, github, token, connection, repo.ID); err != nil {
+		if errors.Is(err, ErrNotFound) {
+			return Project{}, "", Connection{}, nil, ErrRepositoryNotInstalled
+		}
+		return Project{}, "", Connection{}, nil, err
+	}
+	value, err = s.store.RebindProjectInstallation(ctx, id, value.ID, repo.ID,
+		connection.InstallationID, s.now())
+	if err != nil {
+		return Project{}, "", Connection{}, nil, err
+	}
+	return value, token, connection, github, nil
+}
+
+func (s *Service) userToken(ctx context.Context, id Identity, github *githubClient) (string, error) {
 	c, err := s.store.RefreshConnection(ctx, id, func(c Connection) (Connection, bool, error) {
 		if c.AccessTokenExpiresAt == nil || c.AccessTokenExpiresAt.After(s.now().Add(2*time.Minute)) {
 			return c, false, nil
@@ -594,7 +1051,7 @@ func (s *Service) userToken(ctx context.Context, id Identity) (string, error) {
 		if err != nil {
 			return Connection{}, false, err
 		}
-		newToken, err := s.github.refresh(ctx, refreshToken)
+		newToken, err := github.refresh(ctx, refreshToken)
 		if err != nil {
 			return Connection{}, false, err
 		}
@@ -619,8 +1076,8 @@ func (s *Service) userToken(ctx context.Context, id Identity) (string, error) {
 	return s.box.decrypt(c.AccessTokenCiphertext, tokenAAD(id, "access_token"))
 }
 
-func (s *Service) personalInstallation(ctx context.Context, token string, userID int64) (githubInstallation, error) {
-	installations, err := s.github.installations(ctx, token)
+func (s *Service) personalInstallation(ctx context.Context, github *githubClient, token string, userID int64) (githubInstallation, error) {
+	installations, err := github.installations(ctx, token)
 	if err != nil {
 		return githubInstallation{}, err
 	}
@@ -632,15 +1089,70 @@ func (s *Service) personalInstallation(ctx context.Context, token string, userID
 	return githubInstallation{}, ErrInstallationRequired
 }
 
-func (s *Service) connectionView(c Connection) ConnectionView {
+func (s *Service) connectionView(github *githubClient, c Connection) ConnectionView {
 	view := ConnectionView{Status: c.Status, ExternalLogin: c.ExternalLogin, Enabled: true}
 	if c.Status == ConnectionInstallationRequired {
-		view.InstallationURL = s.github.installationURL()
+		view.InstallationURL = github.installationURL()
 	}
 	if c.Status == ConnectionReauthorization {
 		view.ReauthorizationURL = "/projects/new"
 	}
 	return view
+}
+
+func (s *Service) registrationView(github *githubClient, registration AppRegistration) ConnectionView {
+	view := ConnectionView{Status: registration.Status, Enabled: true}
+	if registration.Status == RegistrationAppCreated || registration.Status == RegistrationInstallRequired {
+		view.Status = RegistrationInstallRequired
+		view.InstallationURL = github.installationURL()
+	}
+	return view
+}
+
+func (s *Service) githubForRegistration(id Identity, registration AppRegistration) (*githubClient, error) {
+	if s == nil || s.box == nil {
+		return nil, ErrDisabled
+	}
+	clientSecret, err := s.box.decrypt(registration.ClientSecretCiphertext,
+		registrationAAD(id, registration.ID, "client_secret"))
+	if err != nil {
+		return nil, err
+	}
+	privateKey, err := s.box.decrypt(registration.PrivateKeyCiphertext,
+		registrationAAD(id, registration.ID, "private_key"))
+	if err != nil {
+		return nil, err
+	}
+	return newGitHubClient(githubClientConfig{
+		AppID: registration.AppID, AppSlug: registration.AppSlug, ClientID: registration.ClientID,
+		ClientSecret: clientSecret, PrivateKey: privateKey,
+		CallbackURL: strings.TrimRight(registration.PublicOrigin, "/") + "/connectors/github/oauth/callback",
+		HTTPClient:  s.http,
+	})
+}
+
+func parsePublicOrigins(value string) map[string]struct{} {
+	result := make(map[string]struct{})
+	for _, raw := range strings.FieldsFunc(value, func(r rune) bool { return r == ',' || r == ' ' || r == '\n' || r == '\t' }) {
+		parsed, err := url.Parse(strings.TrimSpace(raw))
+		if err != nil || parsed.Scheme == "" || parsed.Host == "" || parsed.User != nil || parsed.Path != "" {
+			continue
+		}
+		result[parsed.Scheme+"://"+parsed.Host] = struct{}{}
+	}
+	return result
+}
+
+func (s *Service) allowedOrigin(value string) (string, error) {
+	parsed, err := url.Parse(strings.TrimSpace(value))
+	if err != nil || parsed.Scheme == "" || parsed.Host == "" || parsed.User != nil {
+		return "", ErrInvalidArgument
+	}
+	origin := parsed.Scheme + "://" + parsed.Host
+	if _, ok := s.publicOrigins[origin]; !ok {
+		return "", ErrInvalidArgument
+	}
+	return origin, nil
 }
 
 func (s *Service) validateRepository(repo Repository, c Connection) error {
@@ -653,9 +1165,19 @@ func (s *Service) validateRepository(repo Repository, c Connection) error {
 	return nil
 }
 
-func (s *Service) ensureInstalledRepository(ctx context.Context, token string, c Connection, repositoryID int64) error {
+func (s *Service) validatePublishRepository(repo Repository, c Connection) error {
+	if repo.ID <= 0 || repo.OwnerID != c.ExternalUserID || !strings.EqualFold(repo.Owner, c.ExternalLogin) {
+		return ErrInvalidArgument
+	}
+	if repo.SizeKB > s.maxKB {
+		return ErrRepositoryTooLarge
+	}
+	return nil
+}
+
+func (s *Service) ensureInstalledRepository(ctx context.Context, github *githubClient, token string, c Connection, repositoryID int64) error {
 	for page := 1; page <= 100; page++ {
-		repositories, more, err := s.github.repositories(ctx, token, c.InstallationID, page)
+		repositories, more, err := github.repositories(ctx, token, c.InstallationID, page)
 		if err != nil {
 			return err
 		}
@@ -679,10 +1201,30 @@ func normalizeCreate(input CreateInput) CreateInput {
 	input.Mode = strings.TrimSpace(input.Mode)
 	input.RepositoryName = strings.TrimSpace(input.RepositoryName)
 	input.Visibility = strings.TrimSpace(input.Visibility)
+	input.Source.Type = strings.TrimSpace(input.Source.Type)
+	input.Source.RepositoryName = strings.TrimSpace(input.Source.RepositoryName)
+	input.Source.Visibility = strings.TrimSpace(input.Source.Visibility)
+	if input.Source.Type != "" {
+		switch input.Source.Type {
+		case "empty":
+			input.Mode, input.RepositoryName, input.RepositoryID, input.Visibility = "empty", "", 0, "private"
+		case "github_create":
+			input.Mode = "create"
+			input.RepositoryName, input.RepositoryID = input.Source.RepositoryName, 0
+			input.Visibility = input.Source.Visibility
+		case "github_import":
+			input.Mode = "import"
+			input.RepositoryName, input.RepositoryID = input.Source.RepositoryName, input.Source.RepositoryID
+			input.Visibility = input.Source.Visibility
+		}
+	}
 	if input.RuntimeID == "" {
 		input.RuntimeID = "claude-code"
 	}
-	if input.Visibility == "" {
+	if input.Visibility == "" && input.Mode != "empty" {
+		input.Visibility = "private"
+	}
+	if input.Mode == "empty" {
 		input.Visibility = "private"
 	}
 	return input
@@ -690,9 +1232,18 @@ func normalizeCreate(input CreateInput) CreateInput {
 
 func validateCreate(input CreateInput) error {
 	if input.ClientRequestID == "" || len(input.ClientRequestID) > 128 || input.Name == "" || len(input.Name) > 100 ||
-		len(input.Description) > 500 || input.RepositoryName == "" || len(input.RepositoryName) > 100 ||
-		(input.Mode != "create" && input.Mode != "import") ||
+		len(input.Description) > 500 || len(input.RepositoryName) > 100 ||
+		(input.Mode != "empty" && input.Mode != "create" && input.Mode != "import") ||
 		(input.Visibility != "private" && input.Visibility != "public") || input.RuntimeID == "" {
+		return ErrInvalidArgument
+	}
+	if input.Mode == "empty" {
+		if input.RepositoryName != "" || input.RepositoryID != 0 || input.Visibility != "private" {
+			return ErrInvalidArgument
+		}
+		return nil
+	}
+	if input.RepositoryName == "" {
 		return ErrInvalidArgument
 	}
 	if input.Mode == "import" && input.RepositoryID <= 0 {
@@ -701,12 +1252,23 @@ func validateCreate(input CreateInput) error {
 	if input.Mode == "create" && input.RepositoryID != 0 {
 		return ErrInvalidArgument
 	}
-	for _, r := range input.RepositoryName {
-		if !((r >= 'a' && r <= 'z') || (r >= 'A' && r <= 'Z') || (r >= '0' && r <= '9') || r == '-' || r == '_' || r == '.') {
-			return ErrInvalidArgument
-		}
+	if !validRepositoryName(input.RepositoryName) {
+		return ErrInvalidArgument
 	}
 	return nil
+}
+
+func validRepositoryName(value string) bool {
+	if value == "" || len(value) > 100 {
+		return false
+	}
+	for _, r := range value {
+		if !((r >= 'a' && r <= 'z') || (r >= 'A' && r <= 'Z') ||
+			(r >= '0' && r <= '9') || r == '-' || r == '_' || r == '.') {
+			return false
+		}
+	}
+	return true
 }
 
 func nonceHash(nonce string) string {
@@ -736,6 +1298,17 @@ func decodeCursor(value string) (int, error) {
 func isDefinitiveGitHubError(err error) bool {
 	var httpErr *githubHTTPError
 	return errors.As(err, &httpErr) && httpErr.Status >= 400 && httpErr.Status < 500 && httpErr.Status != http.StatusRequestTimeout && httpErr.Status != http.StatusTooManyRequests
+}
+
+func githubStatus(err error, status int) bool {
+	var httpErr *githubHTTPError
+	return errors.As(err, &httpErr) && httpErr.Status == status
+}
+
+func repositoryCreatedNear(repo Repository, startedAt time.Time) bool {
+	return !repo.CreatedAt.IsZero() && !startedAt.IsZero() &&
+		!repo.CreatedAt.Before(startedAt.Add(-2*time.Minute)) &&
+		!repo.CreatedAt.After(startedAt.Add(2*time.Minute))
 }
 
 func githubErrorCode(err error) string {

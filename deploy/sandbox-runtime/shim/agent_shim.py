@@ -621,6 +621,8 @@ def _selfcheck() -> int:
         "claude_agent_sdk": None,
         "codex_cli": cmd_version("codex", "--version"),
         "codex_sdk": None,
+        "gh": cmd_version("gh", "--version"),
+        "github_skill": Path("/opt/cocola/skills/cocola-github/SKILL.md").is_file(),
         "pnpm": cmd_version("pnpm", "--version"),
         "yarn": cmd_version("yarn", "--version"),
         "playwright": cmd_version("playwright", "--version"),
@@ -689,6 +691,7 @@ def _selfcheck() -> int:
         "shellcheck",
         "shfmt",
         "java",
+        "gh",
     ]
     ok = (
         info["node"]
@@ -698,6 +701,7 @@ def _selfcheck() -> int:
         and not str(info["claude_agent_sdk"]).startswith("missing")
         and not str(info["codex_cli"]).startswith(("missing", "error"))
         and not str(info["codex_sdk"]).startswith("missing")
+        and info["github_skill"] is True
         and all(not str(info[name]).startswith(("missing", "error")) for name in required_tools)
     )
     return 0 if ok else 1

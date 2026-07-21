@@ -12,14 +12,15 @@ import (
 )
 
 var (
-	ErrNotFound        = errors.New("chatrun: not found")
-	ErrConflict        = errors.New("chatrun: conversation already has an active run")
-	ErrRuntimeMismatch = errors.New("chatrun: conversation runtime mismatch")
-	ErrFolderNotFound  = errors.New("chatrun: folder not found")
-	ErrFolderMismatch  = errors.New("chatrun: conversation folder mismatch")
-	ErrProjectNotFound = errors.New("chatrun: project not found")
-	ErrProjectNotReady = errors.New("chatrun: project not ready")
-	ErrProjectMismatch = errors.New("chatrun: conversation project mismatch")
+	ErrNotFound          = errors.New("chatrun: not found")
+	ErrConflict          = errors.New("chatrun: conversation already has an active run")
+	ErrRuntimeMismatch   = errors.New("chatrun: conversation runtime mismatch")
+	ErrFolderNotFound    = errors.New("chatrun: folder not found")
+	ErrFolderMismatch    = errors.New("chatrun: conversation folder mismatch")
+	ErrProjectNotFound   = errors.New("chatrun: project not found")
+	ErrProjectNotReady   = errors.New("chatrun: project not ready")
+	ErrProjectMismatch   = errors.New("chatrun: conversation project mismatch")
+	ErrProjectSingleTask = errors.New("chatrun: local project already has a task")
 )
 
 const (

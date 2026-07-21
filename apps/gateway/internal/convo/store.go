@@ -55,6 +55,7 @@ const (
 	PartSessionStatus = "session-status"
 	PartProgress      = "progress"
 	PartMemoryRecall  = "memory-recall"
+	PartSCMApproval   = "scm-approval"
 )
 
 // Part mirrors the frontend UiPart union. A text/reasoning part uses Text; a
@@ -102,6 +103,13 @@ type Part struct {
 	MemoryStatus    string `json:"status,omitempty"`
 	MemoryCount     int    `json:"count,omitempty"`
 	MemoryErrorCode string `json:"errorCode,omitempty"`
+
+	// scm-approval: secret-free, exact-command approval state. Raw argv and
+	// request bodies are deliberately never persisted in conversation history.
+	ApprovalID       string `json:"approvalId,omitempty"`
+	ApprovalStatus   string `json:"approvalStatus,omitempty"`
+	ApprovalCategory string `json:"approvalCategory,omitempty"`
+	ApprovalLabel    string `json:"approvalLabel,omitempty"`
 }
 
 // Conversation is one row in the sidebar. ID reuses the frontend session_id.

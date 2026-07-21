@@ -50,6 +50,7 @@ ARG CLAUDE_AGENT_SDK_SPEC=claude-agent-sdk>=0.2.0
 # its own Node, so no native build). Offline builds can drop the matching
 # code-server-<ver>-linux-<arch>.tar.gz under ./offline/ (see the install step).
 ARG CODE_SERVER_VERSION=4.117.0
+ARG GH_VERSION=2.94.0
 
 FROM ${OPENSANDBOX_BASE}
 
@@ -57,6 +58,7 @@ ARG COCOLA_VENV_PYTHON
 ARG NPM_REGISTRY
 ARG CLAUDE_AGENT_SDK_SPEC
 ARG CODE_SERVER_VERSION
+ARG GH_VERSION
 
 ENV DEBIAN_FRONTEND=noninteractive \
     LANG=C.UTF-8 \
@@ -118,6 +120,30 @@ COPY package.json package-lock.json /opt/cocola/
 RUN npm ci --prefix /opt/cocola --omit=dev \
     && ln -sf /opt/cocola/node_modules/.bin/codex /usr/local/bin/codex \
     && codex --version
+
+# ---- GitHub CLI: pinned official binary behind Cocola's auth wrapper ------
+# The real binary is immutable and never performs persistent `gh auth login`.
+# /usr/local/bin/gh delegates authenticated commands to the run-scoped Cocola
+# broker; `gh --version` remains available outside GitHub Project runs.
+COPY gh-wrapper.sh /opt/cocola/gh-wrapper.sh
+RUN set -eux; \
+    arch="$(dpkg --print-architecture)"; \
+    case "$arch" in \
+        amd64) gh_arch=amd64; gh_sha=a757f1ba6db18f4de8cbadb244843a5f89bc75b5e7c6fc127d2bd77fbd12ed62 ;; \
+        arm64) gh_arch=arm64; gh_sha=705a23b70b0f1b7ba4c302fdcef392ce3edaacfa7ce8e85e4d93d72ea800a538 ;; \
+        *) echo "unsupported architecture for gh: $arch" >&2; exit 1 ;; \
+    esac; \
+    archive="/tmp/gh_${GH_VERSION}_linux_${gh_arch}.tar.gz"; \
+    curl -fSL -o "$archive" \
+        "https://github.com/cli/cli/releases/download/v${GH_VERSION}/gh_${GH_VERSION}_linux_${gh_arch}.tar.gz"; \
+    echo "$gh_sha  $archive" | sha256sum -c -; \
+    mkdir -p "/opt/cocola/gh/${GH_VERSION}"; \
+    tar -C "/opt/cocola/gh/${GH_VERSION}" --strip-components=1 -xzf "$archive"; \
+    ln -sfn "/opt/cocola/gh/${GH_VERSION}" /opt/cocola/gh/current; \
+    chmod 0755 /opt/cocola/gh-wrapper.sh; \
+    ln -sf /opt/cocola/gh-wrapper.sh /usr/local/bin/gh; \
+    rm -f "$archive"; \
+    /opt/cocola/gh/current/bin/gh --version
 
 # ---- resident code-server (in-sandbox VS Code) ---------------------------
 # The browser-facing editor for the Code dock tab. Reached ONLY via the

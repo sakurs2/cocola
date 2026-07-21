@@ -88,6 +88,7 @@ export COCOLA_OPENVIKING_ROOT_API_KEY="${COCOLA_OPENVIKING_ROOT_API_KEY:-cocola-
 export COCOLA_MEMORY_LLM_SERVICE_TOKEN="${COCOLA_MEMORY_LLM_SERVICE_TOKEN:-cocola-local-memory-service-token}"
 export COCOLA_MEMORY_EMBEDDING_DIMENSION="${COCOLA_MEMORY_EMBEDDING_DIMENSION:-1024}"
 export COCOLA_PROJECT_MAX_REPOSITORY_MB="${COCOLA_PROJECT_MAX_REPOSITORY_MB:-512}"
+export COCOLA_SCM_SECRET_KEY="${COCOLA_SCM_SECRET_KEY:-Y29jb2xhLWxvY2FsLXNjbS1zZWNyZXQta2V5LTAwMDE=}"
 
 AGENT_HOST="${COCOLA_AGENT_HOST:-127.0.0.1}"
 AGENT_PORT="${COCOLA_AGENT_PORT:-50061}"
@@ -447,7 +448,7 @@ dev_up() {
     fi
   fi
 
-  # (2) Infra only: redis / postgres / minio / OpenViking (third-party deps).
+  # (2) Infra only: redis / postgres / minio / OpenViking.
   docker_compose -f deploy/docker-compose/docker-compose.dev.yml up -d \
       redis postgres minio minio-init openviking \
       >"$(log_redirect dev-infra)" 2>&1 \
@@ -456,7 +457,6 @@ dev_up() {
   wait_port 127.0.0.1 5432 "postgres" 120
   wait_port 127.0.0.1 9000 "minio"    120
   wait_port 127.0.0.1 1933 "openviking" 240
-
   # Shared infra wiring for every native process launched below.
   export COCOLA_REDIS_ADDR="${COCOLA_REDIS_ADDR:-127.0.0.1:6379}"
   export COCOLA_PG_DSN="${COCOLA_PG_DSN:-postgres://cocola:cocola_dev_pw@127.0.0.1:5432/cocola?sslmode=disable}"
@@ -465,6 +465,7 @@ dev_up() {
   export COCOLA_MINIO_SECRET_KEY="${COCOLA_MINIO_SECRET_KEY:-cocola_dev_pw}"
   export COCOLA_MINIO_BUCKET="${COCOLA_MINIO_BUCKET:-cocola}"
   export COCOLA_ATTACHMENT_INLINE_MAX_BYTES="${COCOLA_ATTACHMENT_INLINE_MAX_BYTES:-16777216}"
+  export COCOLA_SANDBOX_PROJECT_BROKER_URL="${COCOLA_SANDBOX_PROJECT_BROKER_URL:-http://host.docker.internal:$GATEWAY_PORT}"
   # (3) NATIVE sandbox-manager. It is a standalone Go module kept OUT of go.work,
   # so it MUST build/run with GOWORK=off from its own module dir. Talk to the
   # OpenSandbox server over the HOST loopback (host.docker.internal is
@@ -553,6 +554,7 @@ free_port "$AGENT_PORT" agent-runtime
   cd apps/agent-runtime
   COCOLA_AGENT_HOST="$AGENT_HOST" COCOLA_AGENT_PORT="$AGENT_PORT" \
   COCOLA_SANDBOX_ADDR="${COCOLA_SANDBOX_ADDR:-}" \
+  COCOLA_SANDBOX_PROJECT_BROKER_URL="$COCOLA_SANDBOX_PROJECT_BROKER_URL" \
     $SETSID uv run python -m cocola_agent_runtime
 ) >"$(log_redirect agent-runtime)" 2>&1 &
 PIDS+=("$!")

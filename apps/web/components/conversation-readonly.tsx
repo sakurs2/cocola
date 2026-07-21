@@ -9,6 +9,7 @@ import {
   RailMemoryRecall,
   RailProcessSummary,
   RailReasoning,
+  RailSCMApproval,
   RailText,
   RailTool,
 } from "@/components/assistant-ui/rail";
@@ -59,6 +60,14 @@ type MemoryRecallPart = {
   count?: number;
 };
 
+type SCMApprovalPart = {
+  type: "scm-approval";
+  approvalId?: string;
+  approvalStatus?: "pending" | "approved" | "denied" | "expired";
+  approvalCategory?: string;
+  approvalLabel?: string;
+};
+
 type MessagePart =
   | { type: "text"; text?: string }
   | { type: "reasoning"; text?: string }
@@ -66,7 +75,8 @@ type MessagePart =
   | FilePart
   | EnvironmentPart
   | ProgressPart
-  | MemoryRecallPart;
+  | MemoryRecallPart
+  | SCMApprovalPart;
 
 type WireMessage = {
   id: string;
@@ -310,6 +320,16 @@ function MessagePartView({ part, role }: { part: MessagePart; role: "user" | "as
   if (part.type === "memory-recall") {
     if (!part.status || part.status === "miss") return null;
     return <RailMemoryRecall status={part.status} count={part.count} />;
+  }
+  if (part.type === "scm-approval") {
+    if (!part.approvalStatus) return null;
+    return (
+      <RailSCMApproval
+        status={part.approvalStatus}
+        category={part.approvalCategory}
+        commandLabel={part.approvalLabel}
+      />
+    );
   }
   if (part.type === "tool-call") {
     return (

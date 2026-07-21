@@ -59,6 +59,11 @@ class AgentRuntimeServiceStub(object):
                 request_serializer=cocola_dot_agent_dot_v1_dot_agent__pb2.InspectWorkspaceGitRequest.SerializeToString,
                 response_deserializer=cocola_dot_agent_dot_v1_dot_agent__pb2.InspectWorkspaceGitResponse.FromString,
                 _registered_method=True)
+        self.PublishWorkspaceGit = channel.unary_unary(
+                '/cocola.agent.v1.AgentRuntimeService/PublishWorkspaceGit',
+                request_serializer=cocola_dot_agent_dot_v1_dot_agent__pb2.PublishWorkspaceGitRequest.SerializeToString,
+                response_deserializer=cocola_dot_agent_dot_v1_dot_agent__pb2.PublishWorkspaceGitResponse.FromString,
+                _registered_method=True)
 
 
 class AgentRuntimeServiceServicer(object):
@@ -95,6 +100,14 @@ class AgentRuntimeServiceServicer(object):
         context.set_details('Method not implemented!')
         raise NotImplementedError('Method not implemented!')
 
+    def PublishWorkspaceGit(self, request, context):
+        """PublishWorkspaceGit pushes a verified local Project workspace to a newly
+        created GitHub repository. The short-lived token travels in gRPC metadata.
+        """
+        context.set_code(grpc.StatusCode.UNIMPLEMENTED)
+        context.set_details('Method not implemented!')
+        raise NotImplementedError('Method not implemented!')
+
 
 def add_AgentRuntimeServiceServicer_to_server(servicer, server):
     rpc_method_handlers = {
@@ -117,6 +130,11 @@ def add_AgentRuntimeServiceServicer_to_server(servicer, server):
                     servicer.InspectWorkspaceGit,
                     request_deserializer=cocola_dot_agent_dot_v1_dot_agent__pb2.InspectWorkspaceGitRequest.FromString,
                     response_serializer=cocola_dot_agent_dot_v1_dot_agent__pb2.InspectWorkspaceGitResponse.SerializeToString,
+            ),
+            'PublishWorkspaceGit': grpc.unary_unary_rpc_method_handler(
+                    servicer.PublishWorkspaceGit,
+                    request_deserializer=cocola_dot_agent_dot_v1_dot_agent__pb2.PublishWorkspaceGitRequest.FromString,
+                    response_serializer=cocola_dot_agent_dot_v1_dot_agent__pb2.PublishWorkspaceGitResponse.SerializeToString,
             ),
     }
     generic_handler = grpc.method_handlers_generic_handler(
@@ -232,6 +250,33 @@ class AgentRuntimeService(object):
             '/cocola.agent.v1.AgentRuntimeService/InspectWorkspaceGit',
             cocola_dot_agent_dot_v1_dot_agent__pb2.InspectWorkspaceGitRequest.SerializeToString,
             cocola_dot_agent_dot_v1_dot_agent__pb2.InspectWorkspaceGitResponse.FromString,
+            options,
+            channel_credentials,
+            insecure,
+            call_credentials,
+            compression,
+            wait_for_ready,
+            timeout,
+            metadata,
+            _registered_method=True)
+
+    @staticmethod
+    def PublishWorkspaceGit(request,
+            target,
+            options=(),
+            channel_credentials=None,
+            call_credentials=None,
+            insecure=False,
+            compression=None,
+            wait_for_ready=None,
+            timeout=None,
+            metadata=None):
+        return grpc.experimental.unary_unary(
+            request,
+            target,
+            '/cocola.agent.v1.AgentRuntimeService/PublishWorkspaceGit',
+            cocola_dot_agent_dot_v1_dot_agent__pb2.PublishWorkspaceGitRequest.SerializeToString,
+            cocola_dot_agent_dot_v1_dot_agent__pb2.PublishWorkspaceGitResponse.FromString,
             options,
             channel_credentials,
             insecure,

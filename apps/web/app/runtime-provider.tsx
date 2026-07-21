@@ -92,6 +92,14 @@ export type UiMemoryRecallPart = {
   errorCode?: string;
 };
 
+export type UiSCMApprovalPart = {
+  type: "scm-approval";
+  approvalId: string;
+  approvalStatus: "pending" | "approved" | "denied" | "expired";
+  approvalCategory?: string;
+  approvalLabel?: string;
+};
+
 type UiPart =
   | { type: "text"; text: string }
   | { type: "reasoning"; text: string }
@@ -100,7 +108,8 @@ type UiPart =
   | UiEnvironmentPart
   | UiSessionStatusPart
   | UiProgressPart
-  | UiMemoryRecallPart;
+  | UiMemoryRecallPart
+  | UiSCMApprovalPart;
 
 type UiMessage = {
   id: string;
@@ -198,7 +207,8 @@ export type ProjectSummary = {
   name: string;
   description: string;
   runtime_id: string;
-  repository_mode: "create" | "import";
+  repository_mode: "empty" | "create" | "import";
+  repository_provider: "local" | "github";
   repository_owner: string;
   repository_name: string;
   repository_html_url: string;
@@ -206,6 +216,8 @@ export type ProjectSummary = {
   visibility: "private" | "public";
   repository_has_lfs?: boolean;
   repository_has_submodules?: boolean;
+  primary_conversation_id?: string;
+  github_publish_status: "unpublished" | "pending" | "published";
   status: "provisioning" | "ready" | "failed" | "archived";
   provision_error_code?: string;
   version: number;
@@ -506,11 +518,33 @@ function normalizePersistedParts(parts: UiPart[] | undefined): UiPart[] {
     } else if (part.type === "memory-recall") {
       const memoryRecall = normalizeMemoryRecallPart(part);
       if (memoryRecall) normalized.push(memoryRecall);
+    } else if (part.type === "scm-approval") {
+      const approval = normalizeSCMApprovalPart(part);
+      if (approval) normalized.push(approval);
     } else {
       normalized.push(part);
     }
   }
   return normalized;
+}
+
+function normalizeSCMApprovalPart(raw: unknown): UiSCMApprovalPart | null {
+  if (!raw || typeof raw !== "object") return null;
+  const part = raw as Record<string, unknown>;
+  const approvalId = stringValue(part.approvalId).trim();
+  const approvalStatus = stringValue(part.approvalStatus).trim();
+  if (!approvalId || !["pending", "approved", "denied", "expired"].includes(approvalStatus)) {
+    return null;
+  }
+  const approvalCategory = stringValue(part.approvalCategory).trim().slice(0, 80);
+  const approvalLabel = stringValue(part.approvalLabel).trim().slice(0, 160);
+  return {
+    type: "scm-approval",
+    approvalId,
+    approvalStatus: approvalStatus as UiSCMApprovalPart["approvalStatus"],
+    ...(approvalCategory ? { approvalCategory } : {}),
+    ...(approvalLabel ? { approvalLabel } : {}),
+  };
 }
 
 const MEMORY_RECALL_STATUSES = new Set<MemoryRecallStatus>([
@@ -724,6 +758,21 @@ function upsertMemoryRecall(parts: UiPart[], data: Record<string, string>): UiPa
   return parts.map((part, partIndex) => (partIndex === index ? next : part));
 }
 
+function upsertSCMApproval(parts: UiPart[], data: Record<string, string>): UiPart[] {
+  const next = normalizeSCMApprovalPart({
+    approvalId: data.id,
+    approvalStatus: data.status,
+    approvalCategory: data.category,
+    approvalLabel: data.label,
+  });
+  if (!next) return parts;
+  const index = parts.findIndex(
+    (part) => part.type === "scm-approval" && part.approvalId === next.approvalId,
+  );
+  if (index < 0) return [...parts, next];
+  return parts.map((part, partIndex) => (partIndex === index ? next : part));
+}
+
 // Reduce a single agent event into the assistant message's parts. Pure.
 function reducePart(parts: UiPart[], ev: AgentEvent): UiPart[] {
   const d = ev.data ?? {};
@@ -734,6 +783,8 @@ function reducePart(parts: UiPart[], ev: AgentEvent): UiPart[] {
     }
     case "memory_recall":
       return upsertMemoryRecall(parts, d);
+    case "scm_approval":
+      return upsertSCMApproval(parts, d);
     case "text":
       return appendTo(parts, "text", d.text ?? "");
     case "thinking":
@@ -784,6 +835,18 @@ function convertMessage(message: UiMessage): ThreadMessageLike {
         type: "data" as const,
         name: "memory-recall",
         data: { status: p.status, count: p.count, errorCode: p.errorCode },
+      };
+    }
+    if (p.type === "scm-approval") {
+      return {
+        type: "data" as const,
+        name: "scm-approval",
+        data: {
+          approvalId: p.approvalId,
+          status: p.approvalStatus,
+          category: p.approvalCategory,
+          label: p.approvalLabel,
+        },
       };
     }
     if (p.type === "text") return { type: "text" as const, text: p.text };

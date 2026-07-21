@@ -1,15 +1,16 @@
 """Project workspace bootstrap and read-only Git inspection.
 
-All Git operations execute inside the bound sandbox. The only credential is a
-short-lived, single-repository installation token supplied for the bootstrap
-process through its environment; it is never written into the repository,
-remote URL, marker or runtime state.
+All Git operations execute inside the bound sandbox. Local Projects initialize
+Git directly in their persistent workspace. GitHub Projects receive a
+short-lived, single-repository installation token for bootstrap; it is never
+written into the repository, remote URL, marker or runtime state.
 """
 
 from __future__ import annotations
 
 import json
 import posixpath
+import urllib.parse
 from contextlib import suppress
 from dataclasses import dataclass
 from typing import Any
@@ -38,6 +39,9 @@ class ProjectSpec:
     task_branch: str
     git_author_name: str
     git_author_email: str
+    repository_provider: str = "github"
+    repository_full_name: str = ""
+    credential_mode: str = "ephemeral"
 
 
 def spec_from_proto(value: Any) -> ProjectSpec:
@@ -50,20 +54,48 @@ def spec_from_proto(value: Any) -> ProjectSpec:
         task_branch=str(value.task_branch or ""),
         git_author_name=str(value.git_author_name or ""),
         git_author_email=str(value.git_author_email or ""),
+        repository_provider=str(getattr(value, "repository_provider", "") or "github"),
+        repository_full_name=str(getattr(value, "repository_full_name", "") or ""),
+        credential_mode=str(getattr(value, "credential_mode", "") or "ephemeral"),
     )
 
 
 def validate_spec(spec: ProjectSpec) -> None:
+    clone = urllib.parse.urlsplit(spec.clone_url)
+    remote_clone_valid = (
+        clone.scheme in {"http", "https"}
+        and bool(clone.hostname)
+        and clone.username is None
+        and clone.password is None
+        and spec.clone_url.endswith(".git")
+    )
+    if spec.repository_provider == "github":
+        remote_clone_valid = (
+            remote_clone_valid and clone.scheme == "https" and clone.hostname == "github.com"
+        )
+    local = spec.repository_provider == "local"
+    local_remote_valid = (
+        spec.repository_id == 0 and spec.credential_mode == "none" and not spec.repository_full_name
+    ) or (
+        spec.repository_id > 0
+        and spec.credential_mode == "broker"
+        and bool(spec.repository_full_name)
+        and "/" in spec.repository_full_name
+    )
+    base_sha_valid = (local and not spec.base_sha) or (
+        len(spec.base_sha) == 40 and all(char in "0123456789abcdefABCDEF" for char in spec.base_sha)
+    )
     if (
         not spec.project_id
-        or spec.repository_id <= 0
-        or not spec.clone_url.startswith("https://github.com/")
-        or "@" in spec.clone_url.removeprefix("https://")
-        or not spec.clone_url.endswith(".git")
+        or spec.repository_provider not in {"local", "github"}
+        or (not local and spec.repository_id <= 0)
+        or (not local and not remote_clone_valid)
+        or (local and (spec.clone_url or not local_remote_valid))
+        or (not local and spec.credential_mode != "ephemeral")
         or not spec.default_branch
-        or len(spec.base_sha) != 40
-        or any(char not in "0123456789abcdefABCDEF" for char in spec.base_sha)
-        or not spec.task_branch.startswith("cocola/task-")
+        or not base_sha_valid
+        or (local and (spec.default_branch != "main" or spec.task_branch != "main"))
+        or (not local and not spec.task_branch.startswith("cocola/task-"))
         or not spec.git_author_name.strip()
         or len(spec.git_author_name) > 128
         or any(char in spec.git_author_name for char in "\x00\r\n")
@@ -73,6 +105,39 @@ def validate_spec(spec: ProjectSpec) -> None:
         or any(char in spec.git_author_email for char in "\x00\r\n")
     ):
         raise ProjectWorkspaceError("PROJECT_CONTEXT_INVALID", "Project context is invalid")
+
+
+def project_egress_host(spec: ProjectSpec) -> str:
+    validate_spec(spec)
+    if spec.repository_provider == "local":
+        return ""
+    return str(urllib.parse.urlsplit(spec.clone_url).hostname or "")
+
+
+def project_egress_hosts(spec: ProjectSpec, broker_url: str | None = None) -> list[str]:
+    host = project_egress_host(spec)
+    brokered_local = spec.repository_provider == "local" and spec.credential_mode == "broker"
+    if not host and not (brokered_local and broker_url):
+        return []
+    hosts = [host] if host else ["github.com"]
+    if (spec.repository_provider != "github" and not brokered_local) or not broker_url:
+        return hosts
+    for github_host in (
+        "api.github.com",
+        "uploads.github.com",
+        "objects.githubusercontent.com",
+        "github-releases.githubusercontent.com",
+    ):
+        if github_host not in hosts:
+            hosts.append(github_host)
+    broker = urllib.parse.urlsplit(broker_url)
+    if broker.scheme not in {"http", "https"} or not broker.hostname:
+        raise ProjectWorkspaceError(
+            "PROJECT_BROKER_CONFIG_INVALID", "Project broker URL is invalid"
+        )
+    if broker.hostname not in hosts:
+        hosts.append(broker.hostname)
+    return hosts
 
 
 def validate_relative_path(path: str) -> str:
@@ -93,7 +158,7 @@ async def bootstrap_project(
     timeout_secs: int = 600,
 ) -> dict[str, Any]:
     validate_spec(spec)
-    if not token:
+    if spec.repository_provider != "local" and not token:
         raise ProjectWorkspaceError(
             "PROJECT_CREDENTIAL_UNAVAILABLE", "Project credential is unavailable"
         )
@@ -139,6 +204,46 @@ async def inspect_project(
         timeout_secs=60,
     )
     return _decode_result(result, "GIT_INSPECT_FAILED")
+
+
+async def publish_project(
+    executor: SandboxExecutor,
+    sandbox_id: str,
+    spec: ProjectSpec,
+    token: str,
+    remote_clone_url: str,
+    expected_head_sha: str,
+) -> dict[str, Any]:
+    validate_spec(spec)
+    remote = urllib.parse.urlsplit(remote_clone_url)
+    if (
+        spec.repository_provider != "local"
+        or not token
+        or remote.scheme != "https"
+        or remote.hostname != "github.com"
+        or remote.username is not None
+        or remote.password is not None
+        or not remote_clone_url.endswith(".git")
+        or len(expected_head_sha) != 40
+        or any(char not in "0123456789abcdefABCDEF" for char in expected_head_sha)
+    ):
+        raise ProjectWorkspaceError("PROJECT_PUBLISH_INVALID", "Publish request is invalid")
+    result = await executor.exec(
+        sandbox_id=sandbox_id,
+        cmd=["python3", "-c", _PROJECT_GIT_SCRIPT],
+        cwd="/",
+        env={"COCOLA_SCM_TOKEN": token},
+        stdin=json.dumps(
+            {
+                "operation": "publish",
+                "spec": spec.__dict__,
+                "remote_clone_url": remote_clone_url,
+                "expected_head_sha": expected_head_sha,
+            }
+        ),
+        timeout_secs=600,
+    )
+    return _decode_result(result, "PROJECT_PUBLISH_FAILED")
 
 
 def _decode_result(result: Any, fallback_code: str) -> dict[str, Any]:
@@ -217,6 +322,7 @@ import shutil
 import subprocess
 import sys
 import tempfile
+import urllib.parse
 import uuid
 
 WORKSPACE = pathlib.Path("/workspace")
@@ -229,6 +335,7 @@ MAX_DIFF = 512 * 1024
 
 request = json.loads(sys.stdin.read())
 spec = request["spec"]
+repository_provider = spec.get("repository_provider", "github")
 
 def fail(code, message):
     print(json.dumps({"ok": False, "code": code, "error": message}))
@@ -276,9 +383,13 @@ def validate_workspace():
         marker = json.loads(path.read_text(encoding="utf-8"))
     except (OSError, ValueError):
         fail("PROJECT_WORKSPACE_MISMATCH", "Project workspace marker is invalid")
+    if repository_provider == "local" and not spec.get("base_sha"):
+        spec["base_sha"] = marker.get("base_sha", "")
+    workspace_repository_id = 0 if repository_provider == "local" else int(spec["repository_id"])
     if (
         marker.get("project_id") != spec["project_id"]
-        or int(marker.get("repository_id", 0)) != int(spec["repository_id"])
+        or int(marker.get("repository_id", 0)) != workspace_repository_id
+        or marker.get("repository_provider", "github") != repository_provider
         or marker.get("task_branch") != spec["task_branch"]
         or marker.get("base_sha", "").lower() != spec["base_sha"].lower()
     ):
@@ -302,9 +413,51 @@ def bootstrap():
         configure_author(WORKSPACE)
         return
     WORKSPACE.mkdir(parents=True, exist_ok=True)
-    existing = [entry for entry in WORKSPACE.iterdir() if entry.name not in {"lost+found"}]
+    platform_directories = {"outputs", "downloads"}
+    existing = []
+    for entry in WORKSPACE.iterdir():
+        if entry.name == "lost+found":
+            continue
+        if entry.name in platform_directories and entry.is_dir() and not entry.is_symlink():
+            unsafe_children = [
+                child for child in entry.rglob("*")
+                if child.is_symlink() or not child.is_dir()
+            ]
+            if not unsafe_children:
+                continue
+        existing.append(entry)
     if existing:
         fail("PROJECT_WORKSPACE_MISMATCH", "Workspace is not empty and is not a Cocola project")
+    if repository_provider == "local":
+        if spec.get("base_sha"):
+            fail(
+                "LOCAL_PROJECT_WORKSPACE_LOST",
+                "The local Project volume is unavailable and cannot be reinitialized safely",
+            )
+        initialized = git(["init", "-b", "main"], cwd=WORKSPACE)
+        if initialized.returncode != 0:
+            fail("PROJECT_GIT_INIT_FAILED", "Could not initialize the local project")
+        configure_author(WORKSPACE)
+        committed = git(
+            ["commit", "--allow-empty", "-m", "Initialize empty Cocola project"],
+            cwd=WORKSPACE,
+        )
+        if committed.returncode != 0:
+            fail("PROJECT_GIT_INIT_FAILED", "Could not create the initial project commit")
+        head = git(["rev-parse", "HEAD"], cwd=WORKSPACE)
+        if head.returncode != 0:
+            fail("PROJECT_GIT_INIT_FAILED", "Could not read the initial project revision")
+        spec["base_sha"] = head.stdout.strip()
+        marker = {
+            "schema_version": 1,
+            "project_id": spec["project_id"],
+            "repository_id": 0,
+            "repository_provider": "local",
+            "task_branch": "main",
+            "base_sha": spec["base_sha"],
+        }
+        marker_path().write_text(json.dumps(marker, sort_keys=True), encoding="utf-8")
+        return
     stage = WORKSPACE / (".cocola-clone-" + uuid.uuid4().hex)
     askpass_dir = pathlib.Path(tempfile.mkdtemp(prefix="cocola-askpass-"))
     askpass = askpass_dir / "askpass.sh"
@@ -336,6 +489,7 @@ def bootstrap():
             "schema_version": 1,
             "project_id": spec["project_id"],
             "repository_id": int(spec["repository_id"]),
+            "repository_provider": repository_provider,
             "task_branch": spec["task_branch"],
             "base_sha": spec["base_sha"],
         }
@@ -385,6 +539,51 @@ def status_snapshot():
         "truncated": truncated,
     }
 
+def publish():
+    if repository_provider != "local":
+        fail("PROJECT_PUBLISH_INVALID", "Only local Projects can be published")
+    validate_workspace()
+    snapshot = status_snapshot()
+    if snapshot["dirty"]:
+        fail("PROJECT_PUBLISH_DIRTY", "Commit local changes before publishing")
+    expected_head = request.get("expected_head_sha", "")
+    if snapshot["head_sha"].lower() != expected_head.lower():
+        fail("PROJECT_PUBLISH_HEAD_CHANGED", "Project HEAD changed before publishing")
+    remote_url = request.get("remote_clone_url", "")
+    remote = urllib.parse.urlsplit(remote_url)
+    if (
+        remote.scheme != "https" or remote.hostname != "github.com"
+        or remote.username is not None or remote.password is not None
+        or not remote_url.endswith(".git")
+    ):
+        fail("PROJECT_PUBLISH_INVALID", "GitHub clone URL is invalid")
+    existing = git(["remote", "get-url", "origin"])
+    if existing.returncode == 0 and existing.stdout.strip() != remote_url:
+        fail("PROJECT_REMOTE_MISMATCH", "Workspace already has a different origin")
+    askpass_dir = pathlib.Path(tempfile.mkdtemp(prefix="cocola-publish-"))
+    askpass = askpass_dir / "askpass.sh"
+    askpass.write_text(
+        '#!/bin/sh\ncase "$1" in *Username*) printf "%s" "x-access-token" ;; '
+        '*) printf "%s" "$COCOLA_SCM_TOKEN" ;; esac\n',
+        encoding="utf-8",
+    )
+    askpass.chmod(0o700)
+    try:
+        pushed = git(
+            ["push", remote_url, expected_head + ":refs/heads/main"],
+            env={"GIT_ASKPASS": str(askpass)}, timeout=600,
+        )
+        if pushed.returncode != 0:
+            fail("PROJECT_PUBLISH_PUSH_FAILED", "Could not push the Project to GitHub")
+        if existing.returncode != 0:
+            added = git(["remote", "add", "origin", remote_url])
+            if added.returncode != 0:
+                fail("PROJECT_REMOTE_CONFIG_FAILED", "Could not save the GitHub origin")
+    finally:
+        os.environ.pop("COCOLA_SCM_TOKEN", None)
+        shutil.rmtree(askpass_dir, ignore_errors=True)
+    return snapshot["head_sha"]
+
 operation = request["operation"]
 if operation == "bootstrap":
     bootstrap()
@@ -415,6 +614,8 @@ elif operation == "diff":
         "ok": True, "snapshot": status_snapshot(), "diff": text,
         "binary": binary, "truncated": truncated,
     }))
+elif operation == "publish":
+    print(json.dumps({"ok": True, "head_sha": publish()}))
 else:
     fail("GIT_OPERATION_INVALID", "Git operation is invalid")
 """

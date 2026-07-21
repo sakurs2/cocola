@@ -29,6 +29,10 @@
         "artifacts": {
           "enabled": true,
           "startup": "workspace-output"
+        },
+        "github": {
+          "enabled": true,
+          "startup": "run-scoped"
         }
       }
     },
@@ -51,6 +55,10 @@
         "artifacts": {
           "enabled": true,
           "startup": "workspace-output"
+        },
+        "github": {
+          "enabled": false,
+          "startup": "disabled"
         }
       }
     }
@@ -85,6 +93,14 @@
       "html_preview": "isolated-self-contained",
       "required": true,
       "commands": ["status", "list"]
+    },
+    "github": {
+      "kind": "run-scoped-broker",
+      "cli": "/usr/local/bin/gh",
+      "real_cli": "/opt/cocola/gh/current/bin/gh",
+      "persistent_auth": false,
+      "required": false,
+      "commands": ["gh", "git"]
     }
   }
 }

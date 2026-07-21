@@ -18,6 +18,7 @@ import (
 	"net/url"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/google/uuid"
@@ -83,6 +84,7 @@ type API struct {
 	streamer     agent.Streamer
 	releaser     agent.Releaser
 	gitInspector agent.GitInspector
+	gitPublisher agent.GitPublisher
 	verifier     *auth.Verifier
 	log          logger.Logger
 	metrics      *metrics.Registry // optional; nil => no instrumentation (tests)
@@ -111,6 +113,8 @@ type API struct {
 	sandboxResolver sandboxmgr.EndpointResolver
 	memory          *memory.Service
 	projects        *project.Service
+	brokerWaitMu    sync.Mutex
+	brokerWaiters   map[string]map[chan struct{}]struct{}
 }
 
 // New builds the BFF API.
@@ -121,6 +125,9 @@ func New(streamer agent.Streamer, verifier *auth.Verifier, log logger.Logger) *A
 	}
 	if inspector, ok := streamer.(agent.GitInspector); ok {
 		a.gitInspector = inspector
+	}
+	if publisher, ok := streamer.(agent.GitPublisher); ok {
+		a.gitPublisher = publisher
 	}
 	return a.WithAgentRuntimes([]agent.Runtime{{
 		ID: "claude-code", Label: "Claude Code", ModelProtocol: "anthropic-messages", IsDefault: true,
@@ -291,6 +298,20 @@ func (a *API) Handler() http.Handler {
 		a.verifier.Middleware(writeErr)(http.HandlerFunc(a.githubDisconnect))))
 	mux.Handle("GET /v1/scm/github/repositories", a.instrument("GET /v1/scm/github/repositories",
 		a.verifier.Middleware(writeErr)(http.HandlerFunc(a.githubRepositories))))
+	mux.Handle("GET /v1/connectors", a.instrument("GET /v1/connectors",
+		a.verifier.Middleware(writeErr)(http.HandlerFunc(a.connectors))))
+	mux.Handle("GET /v1/connectors/github", a.instrument("GET /v1/connectors/github",
+		a.verifier.Middleware(writeErr)(http.HandlerFunc(a.githubConnection))))
+	mux.Handle("POST /v1/connectors/github/manifest/start", a.instrument("POST /v1/connectors/github/manifest/start",
+		a.verifier.Middleware(writeErr)(http.HandlerFunc(a.githubManifestStart))))
+	mux.Handle("POST /v1/connectors/github/manifest/complete", a.instrument("POST /v1/connectors/github/manifest/complete",
+		a.verifier.Middleware(writeErr)(http.HandlerFunc(a.githubManifestComplete))))
+	mux.Handle("POST /v1/connectors/github/oauth/complete", a.instrument("POST /v1/connectors/github/oauth/complete",
+		a.verifier.Middleware(writeErr)(http.HandlerFunc(a.githubOAuthCallback))))
+	mux.Handle("POST /v1/connectors/github/installation/complete", a.instrument("POST /v1/connectors/github/installation/complete",
+		a.verifier.Middleware(writeErr)(http.HandlerFunc(a.githubInstallationComplete))))
+	mux.Handle("DELETE /v1/connectors/github", a.instrument("DELETE /v1/connectors/github",
+		a.verifier.Middleware(writeErr)(http.HandlerFunc(a.githubDisconnect))))
 	mux.Handle("GET /v1/projects", a.instrument("GET /v1/projects",
 		a.verifier.Middleware(writeErr)(http.HandlerFunc(a.listProjects))))
 	mux.Handle("POST /v1/projects", a.instrument("POST /v1/projects",
@@ -303,12 +324,22 @@ func (a *API) Handler() http.Handler {
 		a.verifier.Middleware(writeErr)(http.HandlerFunc(a.archiveProject))))
 	mux.Handle("POST /v1/projects/{id}/retry", a.instrument("POST /v1/projects/{id}/retry",
 		a.verifier.Middleware(writeErr)(http.HandlerFunc(a.retryProject))))
+	mux.Handle("POST /v1/projects/{id}/publish", a.instrument("POST /v1/projects/{id}/publish",
+		a.verifier.Middleware(writeErr)(http.HandlerFunc(a.publishLocalProject))))
 	mux.Handle("GET /v1/projects/{id}/tasks", a.instrument("GET /v1/projects/{id}/tasks",
 		a.verifier.Middleware(writeErr)(http.HandlerFunc(a.projectTasks))))
 	mux.Handle("GET /v1/conversations/{id}/git/status", a.instrument("GET /v1/conversations/{id}/git/status",
 		a.verifier.Middleware(writeErr)(http.HandlerFunc(a.gitStatus))))
 	mux.Handle("POST /v1/conversations/{id}/git/inspect", a.instrument("POST /v1/conversations/{id}/git/inspect",
 		a.verifier.Middleware(writeErr)(http.HandlerFunc(a.inspectGit))))
+	mux.Handle("POST /internal/scm/github/token-leases", a.instrument("POST /internal/scm/github/token-leases",
+		http.HandlerFunc(a.createGitHubTokenLease)))
+	mux.Handle("DELETE /internal/scm/github/token-leases/{id}", a.instrument("DELETE /internal/scm/github/token-leases/{id}",
+		http.HandlerFunc(a.revokeGitHubTokenLease)))
+	mux.Handle("GET /internal/scm/approvals/{id}/wait", a.instrument("GET /internal/scm/approvals/{id}/wait",
+		http.HandlerFunc(a.waitSCMApproval)))
+	mux.Handle("POST /internal/scm/approvals/{id}/decision", a.instrument("POST /internal/scm/approvals/{id}/decision",
+		a.verifier.Middleware(writeErr)(http.HandlerFunc(a.decideSCMApproval))))
 	// Preview Proxy: reverse-proxy a user-launched in-sandbox dev server. The
 	// trailing {rest...} wildcard captures the remaining path so nested asset
 	// requests are proxied too.

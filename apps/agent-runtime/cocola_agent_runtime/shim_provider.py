@@ -309,6 +309,18 @@ class InSandboxShimProvider:
             # Claude/Anthropic parses this variable as newline-separated
             # ``Header-Name: value`` entries, not as JSON.
             env["ANTHROPIC_CUSTOM_HEADERS"] = f"traceparent: {traceparent}"
+        project_credential = (options.project_credential or "").strip()
+        project_provider = (options.project_provider or "").strip()
+        project_repository = (options.project_repository or "").strip()
+        project_broker_url = (options.project_broker_url or "").strip()
+        project_task_branch = (options.project_task_branch or "").strip()
+        if project_credential and project_provider:
+            env["COCOLA_PROJECT_CREDENTIAL"] = project_credential
+            env["COCOLA_PROJECT_PROVIDER"] = project_provider
+            env["COCOLA_PROJECT_REPOSITORY"] = project_repository
+            env["COCOLA_PROJECT_TASK_BRANCH"] = project_task_branch
+            if project_broker_url:
+                env["COCOLA_PROJECT_BROKER_URL"] = project_broker_url
         return env
 
     async def query(

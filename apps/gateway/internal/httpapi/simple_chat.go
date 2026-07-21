@@ -295,6 +295,10 @@ func (a *API) chat(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusConflict, "PROJECT_MISMATCH", "conversation project cannot be changed")
 		return
 	}
+	if errors.Is(err, chatrun.ErrProjectSingleTask) {
+		writeErr(w, http.StatusConflict, "LOCAL_PROJECT_SINGLE_TASK", "local projects use one persistent task")
+		return
+	}
 	if err != nil {
 		a.runs.databaseUnavailable.Store(true)
 		a.log.Warn("chat run start failed: " + err.Error())
@@ -418,6 +422,7 @@ func (a *API) executeLiveRun(live *liveRun) {
 	defer close(live.done)
 	var projectContext *agent.ProjectContext
 	var scmToken string
+	var projectBrokerCredential string
 	var projectSetupErr error
 	if live.request.ProjectID != "" {
 		if a.projects == nil {
@@ -435,8 +440,19 @@ func (a *API) executeLiveRun(live *liveRun) {
 					CloneURL: value.CloneURL, DefaultBranch: value.DefaultBranch,
 					BaseSHA: value.BaseSHA, TaskBranch: value.BranchName,
 					GitAuthorName: value.GitAuthorName, GitAuthorEmail: value.GitAuthorEmail,
+					RepositoryProvider: value.RepositoryProvider,
+					RepositoryFullName: value.RepositoryFullName,
+					CredentialMode:     value.CredentialMode,
 				}
 				scmToken = token
+				if value.RepositoryExternalID > 0 && a.projects.GitHubAgentWriteEnabled() {
+					projectBrokerCredential, err = a.projects.IssueBrokerCredential(live.ctx,
+						project.Identity{TenantID: live.identity.TenantID, UserID: live.identity.UserID},
+						live.request.SessionID, live.run.ID)
+					if err != nil && value.RepositoryProvider == project.ProviderGitHub {
+						projectSetupErr = err
+					}
+				}
 			}
 		}
 	}
@@ -465,7 +481,8 @@ func (a *API) executeLiveRun(live *liveRun) {
 		MemoryContext:       memoryContext,
 		TraceID:             live.run.ID, ParentSpanID: conversationRootSpan(live.traceCtx),
 		SandboxAuthToken: a.mintSandboxToken(live.identity), Attachments: attachments,
-		SCMToken: scmToken, Project: projectContext,
+		SCMToken: scmToken, ProjectBrokerCredential: projectBrokerCredential,
+		Project: projectContext,
 	}
 	coalescer := memoryEventCoalescer{run: live, window: a.runs.mergeWindow}
 	var sawError bool
@@ -582,6 +599,25 @@ func (a *API) executeLiveRun(live *liveRun) {
 		AssistantMessage: message, Reveal: live.request.DeferConversationVisibilityUntilDone,
 		ConversationTitle: titleForConversation(live.request), CompletedAt: completedAt,
 	})
+	if a.projects != nil && live.request.ProjectID != "" {
+		revokeCtx, cancelRevoke := context.WithTimeout(context.Background(), 5*time.Second)
+		if err := a.projects.RevokeBrokerRun(revokeCtx, project.Identity{
+			TenantID: live.identity.TenantID, UserID: live.identity.UserID,
+		}, live.run.ID); err != nil && !errors.Is(err, project.ErrNotFound) {
+			a.log.Warn("project broker run revocation failed: " + err.Error())
+		}
+		if err := a.projects.RevokeRunTokenLeases(revokeCtx, project.Identity{
+			TenantID: live.identity.TenantID, UserID: live.identity.UserID,
+		}, live.run.ID); err != nil && !errors.Is(err, project.ErrNotFound) {
+			a.log.Warn("project token lease revocation failed: " + err.Error())
+		}
+		cancelRevoke()
+	}
+	// Broker validity is persisted separately from this process-local execution
+	// map, so other Gateway replicas observe revocation before local teardown.
+	a.runs.mu.Lock()
+	delete(a.runs.live, live.run.ID)
+	a.runs.mu.Unlock()
 	if finalized {
 		status, errorCode = finalizedRun.Status, finalizedRun.ErrorCode
 		a.finishConversationRun(live.traceCtx, live.traceRun, status, errorCode, ttftMS, toolCalls)
@@ -602,9 +638,6 @@ func (a *API) executeLiveRun(live *liveRun) {
 			cancelCapture()
 		}
 	}
-	a.runs.mu.Lock()
-	delete(a.runs.live, live.run.ID)
-	a.runs.mu.Unlock()
 	live.mu.Lock()
 	for subscriber := range live.subs {
 		close(subscriber)

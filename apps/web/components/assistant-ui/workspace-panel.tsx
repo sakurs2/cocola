@@ -457,6 +457,7 @@ function GitPage({
       if (!response.ok) throw new Error("Could not load the saved Git snapshot");
       const body = (await response.json()) as {
         workspace?: { git_snapshot?: GitSnapshot; branch_name?: string };
+        project?: { repository_provider?: string };
       };
       setSnapshot({
         ...(body.workspace?.git_snapshot ?? {}),

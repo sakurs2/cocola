@@ -22,6 +22,7 @@ import {
   Globe as PhGlobe,
   ListChecks,
   Search as MagnifyingGlass,
+  ShieldAlert,
   Pencil as PencilSimple,
   Sparkles as Sparkle,
   Loader2 as SpinnerGap,
@@ -192,6 +193,60 @@ export const RailMemoryRecall: FC<{
             : "Some memory sources were unavailable; the answer used the memories that were returned."}
         </p>
       ) : null}
+    </RailRow>
+  );
+};
+
+export const RailSCMApproval: FC<{
+  status: "pending" | "approved" | "denied" | "expired";
+  category?: string;
+  commandLabel?: string;
+  busy?: boolean;
+  error?: string;
+  onDecision?: (decision: "approved" | "denied") => void;
+}> = ({ status, category, commandLabel, busy, error, onDecision }) => {
+  const label =
+    status === "pending"
+      ? "GitHub action needs approval"
+      : status === "approved"
+        ? "GitHub action approved"
+        : status === "denied"
+          ? "GitHub action denied"
+          : "GitHub approval expired";
+  return (
+    <RailRow
+      icon={ShieldAlert}
+      label={label}
+      color={status === "pending" ? "text-amber-500" : "text-muted-foreground"}
+    >
+      <div className="space-y-2">
+        <p className="text-[13px] leading-5 text-muted-foreground">
+          {commandLabel ? `${commandLabel}. ` : ""}
+          {category ? `Category: ${category}. ` : ""}
+          Approval applies once to this exact command and expires after five minutes.
+        </p>
+        {status === "pending" && onDecision ? (
+          <div className="flex items-center gap-2">
+            <button
+              type="button"
+              disabled={busy}
+              onClick={() => onDecision("approved")}
+              className="rounded-lg bg-foreground px-3 py-1.5 text-xs font-medium text-background disabled:opacity-50"
+            >
+              Approve once
+            </button>
+            <button
+              type="button"
+              disabled={busy}
+              onClick={() => onDecision("denied")}
+              className="rounded-lg border border-border px-3 py-1.5 text-xs font-medium text-foreground disabled:opacity-50"
+            >
+              Deny
+            </button>
+          </div>
+        ) : null}
+        {error ? <p className="text-xs text-destructive">{error}</p> : null}
+      </div>
     </RailRow>
   );
 };

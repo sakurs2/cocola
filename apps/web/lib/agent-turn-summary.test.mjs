@@ -109,6 +109,23 @@ test("memory recall is a process step in persisted and assistant-ui data shapes"
   }
 });
 
+test("SCM approval is a process step and never enters copied final output", () => {
+  const parts = [
+    { type: "scm-approval", id: "approval-1", status: "approved", category: "gh_api" },
+    { type: "text", text: "The repository operation completed." },
+  ];
+  const split = splitAgentTurnParts(parts);
+  assert.deepEqual(split, {
+    processIndices: [0],
+    outputIndices: [1],
+    hasProcess: true,
+  });
+  assert.equal(
+    finalAgentOutputText(parts, split.outputIndices),
+    "The repository operation completed.",
+  );
+});
+
 test("a memory miss remains index-stable without creating a visible process summary", () => {
   for (const part of [
     { type: "memory-recall", status: "miss", count: 0 },

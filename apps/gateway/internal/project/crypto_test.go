@@ -59,16 +59,17 @@ func TestOAuthStateBindsUserExpiresAndSanitizesReturnPath(t *testing.T) {
 	}
 }
 
-func TestProjectConfigIsDisabledWhenEmptyAndRejectsPartialConfig(t *testing.T) {
-	if err := (Config{}).validate(); err != nil {
-		t.Fatalf("empty config: %v", err)
+func TestProjectConfigRequiresOnlyPlatformSecretAndRepositoryLimit(t *testing.T) {
+	secret := base64.StdEncoding.EncodeToString([]byte("0123456789abcdef0123456789abcdef"))
+	if err := (Config{SecretKey: secret, MaxRepositoryMB: 512}).validate(); err != nil {
+		t.Fatalf("valid config: %v", err)
 	}
-	err := (Config{AppID: "123", MaxRepositoryMB: 512}).validate()
-	if err == nil || !strings.Contains(err.Error(), "COCOLA_GITHUB_CLIENT_ID") || !strings.Contains(err.Error(), "COCOLA_SCM_SECRET_KEY") {
-		t.Fatalf("partial config error = %v", err)
+	err := (Config{MaxRepositoryMB: 512}).validate()
+	if err == nil || !strings.Contains(err.Error(), "COCOLA_SCM_SECRET_KEY") {
+		t.Fatalf("missing secret error = %v", err)
 	}
-	if err := (Config{ConfigurationPresent: true, MaxRepositoryMB: 512}).validate(); err == nil {
-		t.Fatal("an unreadable or empty _FILE-only configuration was treated as disabled")
+	if err := (Config{SecretKey: secret}).validate(); err == nil {
+		t.Fatal("zero repository limit was accepted")
 	}
 }
 
@@ -94,5 +95,34 @@ func TestCreateValidationSeparatesCreateAndImportRepositoryIDs(t *testing.T) {
 	importInput.RepositoryID = 42
 	if err := validateCreate(importInput); err != nil {
 		t.Fatalf("valid import: %v", err)
+	}
+}
+
+func TestBrokerCredentialBindsRunRepositoryAndExpiry(t *testing.T) {
+	box := testSecretBox(t)
+	now := time.Date(2026, 7, 21, 9, 0, 0, 0, time.UTC)
+	claims := BrokerCredentialClaims{
+		TenantID: "tenant-a", UserID: "user-a", ConversationID: "conversation-a",
+		RunID: "run-a", ProjectID: "project-a", RepositoryID: 42,
+		RepositoryFullName: "owner/repository", InstallationID: 7,
+		RegistrationID: "registration-a", TaskBranch: "cocola/task-abcd",
+		ExpiresAt: now.Add(time.Minute).Unix(),
+	}
+	credential, err := box.signBrokerCredential(claims)
+	if err != nil {
+		t.Fatalf("signBrokerCredential: %v", err)
+	}
+	decoded, err := box.verifyBrokerCredential(credential, now)
+	if err != nil || decoded.RunID != claims.RunID || decoded.RepositoryID != claims.RepositoryID ||
+		decoded.TaskBranch != claims.TaskBranch {
+		t.Fatalf("verifyBrokerCredential = %#v, %v", decoded, err)
+	}
+	if _, err := box.verifyBrokerCredential(credential, now.Add(2*time.Minute)); !errors.Is(err, ErrInvalidArgument) {
+		t.Fatalf("expired credential error = %v", err)
+	}
+	parts := strings.Split(credential, ".")
+	parts[0] = strings.Repeat("A", len(parts[0]))
+	if _, err := box.verifyBrokerCredential(strings.Join(parts, "."), now); !errors.Is(err, ErrInvalidArgument) {
+		t.Fatalf("tampered credential error = %v", err)
 	}
 }

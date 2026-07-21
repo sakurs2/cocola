@@ -16,6 +16,8 @@ function isWorkspacePath(pathname: string | null) {
     pathname?.startsWith("/mcps/") ||
     pathname === "/tasks" ||
     pathname?.startsWith("/tasks/") ||
+    pathname === "/connectors" ||
+    pathname?.startsWith("/connectors/") ||
     pathname === "/folders" ||
     pathname?.startsWith("/folders/") ||
     pathname === "/projects" ||

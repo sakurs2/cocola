@@ -16,6 +16,9 @@ service AgentRuntimeService {
   // InspectWorkspaceGit is an explicit user-triggered read. It may acquire the
   // sandbox; merely opening the Git tab never invokes it.
   rpc InspectWorkspaceGit(InspectWorkspaceGitRequest) returns (InspectWorkspaceGitResponse);
+  // PublishWorkspaceGit pushes a verified local Project workspace to a newly
+  // created GitHub repository. The short-lived token travels in gRPC metadata.
+  rpc PublishWorkspaceGit(PublishWorkspaceGitRequest) returns (PublishWorkspaceGitResponse);
 }
 
 message QueryRequest {
@@ -53,6 +56,12 @@ message ProjectContext {
   // workspace. This is metadata only and never grants remote write access.
   string git_author_name = 7;
   string git_author_email = 8;
+  // Repository implementation and identity. Runtime uses these fields to
+  // validate clone URLs without hard-coding GitHub as the only backend.
+  string repository_provider = 9;
+  string repository_full_name = 10;
+  // none | ephemeral clone token | run-scoped broker.
+  string credential_mode = 11;
 }
 
 // Attachment is a single user-uploaded file delivered to the sandbox workspace
@@ -107,6 +116,18 @@ message InspectWorkspaceGitRequest {
   // working | staged
   string diff_target = 5;
   ProjectContext project_context = 6;
+}
+
+message PublishWorkspaceGitRequest {
+  string user_id = 1;
+  string session_id = 2;
+  ProjectContext project_context = 3;
+  string remote_clone_url = 4;
+  string expected_head_sha = 5;
+}
+
+message PublishWorkspaceGitResponse {
+  string head_sha = 1;
 }
 
 message GitChange {

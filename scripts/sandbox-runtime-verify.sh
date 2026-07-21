@@ -155,12 +155,23 @@ BUILTIN_ARTIFACT_SKILL_OWNER="$(docker exec -i "$CTR" stat -c '%U:%G' \
 docker exec -i "$CTR" test -f /opt/cocola/skills/manifest.json \
   && docker exec -i "$CTR" test -s /opt/cocola/skills/cocola-sandbox-browser/SKILL.md \
   && docker exec -i "$CTR" test -s /opt/cocola/skills/cocola-sandbox-artifacts/SKILL.md \
-  && ok "built-in Browser and Artifact Skills are baked into the runtime" \
+  && docker exec -i "$CTR" test -s /opt/cocola/skills/cocola-github/SKILL.md \
+  && ok "built-in Browser, Artifact, and GitHub Skills are baked into the runtime" \
   || bad "one or more built-in Sandbox Skills are missing"
 [ "$BUILTIN_SKILL_OWNER" = "root:root" ] \
   && [ "$BUILTIN_ARTIFACT_SKILL_OWNER" = "root:root" ] \
   && ok "built-in Skills remain root-owned runtime assets" \
   || bad "built-in Skill owners are ${BUILTIN_SKILL_OWNER:-unknown}/${BUILTIN_ARTIFACT_SKILL_OWNER:-unknown} (must be root:root)"
+
+GH_VERSION_OUTPUT="$(docker exec -i "$CTR" gh --version 2>/dev/null | head -1 || true)"
+echo "$GH_VERSION_OUTPUT" | grep -q 'gh version 2.94.0' \
+  && ok "GitHub CLI 2.94.0 is pinned in the runtime" \
+  || bad "pinned GitHub CLI is unavailable: $GH_VERSION_OUTPUT"
+if docker exec -i "$CTR" gh repo view >/dev/null 2>&1; then
+  bad "gh authenticated without a Project Broker credential"
+else
+  ok "gh fails closed outside an authenticated GitHub Project run"
+fi
 
 WORKSPACE_INFO="$(docker exec -i "$CTR" cocola-sandbox workspace info --json || true)"
 echo "$WORKSPACE_INFO" | grep -q '"outputs".*"exists": true' \

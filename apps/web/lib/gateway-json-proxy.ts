@@ -22,6 +22,7 @@ export async function gatewayJSONProxy(
           ? { "content-type": req.headers.get("content-type") ?? "application/json" }
           : {}),
         ...authHeaders,
+        ...(req.headers.get("origin") ? { origin: req.headers.get("origin")! } : {}),
       },
       ...(hasBody ? { body: await req.text() } : {}),
       signal: req.signal,

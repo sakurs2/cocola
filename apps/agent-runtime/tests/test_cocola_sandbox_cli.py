@@ -88,6 +88,17 @@ def test_minimal_profile_disables_browser(cli, monkeypatch, capsys):
     assert payload["state"] == "disabled"
 
 
+def test_minimal_profile_disables_github_commands(cli, monkeypatch, capsys):
+    monkeypatch.setenv("COCOLA_SANDBOX_PROFILE", "minimal")
+    monkeypatch.setattr(
+        cli,
+        "run_github_command",
+        lambda *args: (_ for _ in ()).throw(AssertionError("GitHub command must not run")),
+    )
+    assert cli.main(["github", "gh", "--", "repo", "view"]) == 1
+    assert "disabled by the active sandbox profile" in capsys.readouterr().err
+
+
 def test_browser_inspect_runs_one_shot_runner(cli, monkeypatch, capsys):
     captured = {}
     monkeypatch.setattr(
@@ -258,6 +269,57 @@ def test_artifact_output_must_be_workspace_scoped(cli, tmp_path):
     assert payload["checks"]["workspace_scoped"] is False
 
 
+def test_github_command_reuses_one_request_across_approval(cli, monkeypatch):
+    requests = []
+    responses = iter(
+        [
+            (202, {"status": "pending", "approval_id": "approval-1"}),
+            (200, {"status": "approved"}),
+            (200, {"status": "ready", "lease_id": "lease-1", "token": "temporary"}),
+            (204, {}),
+        ]
+    )
+
+    def broker_request(method, path, body=None):
+        requests.append((method, path, body))
+        return next(responses)
+
+    def run(command, **kwargs):
+        assert kwargs["env"]["GH_TOKEN"] == "temporary"
+        assert kwargs["env"]["GH_CONFIG_DIR"]
+        return subprocess.CompletedProcess(command, 0)
+
+    monkeypatch.setattr(cli, "_broker_request", broker_request)
+    monkeypatch.setattr(cli.subprocess, "run", run)
+
+    assert cli.run_github_command("gh", ["pr", "view", "42"], []) == 0
+    first_payload = requests[0][2]
+    approved_payload = requests[2][2]
+    assert first_payload == approved_payload
+    assert first_payload["request_id"]
+    assert requests[-1][2] == {"result": "success"}
+
+
+def test_github_command_reports_failed_result_without_persisting_token(cli, monkeypatch):
+    requests = []
+
+    def broker_request(method, path, body=None):
+        requests.append((method, path, body))
+        if method == "POST":
+            return 200, {"status": "ready", "lease_id": "lease-2", "token": "temporary"}
+        return 204, {}
+
+    def run(command, **kwargs):
+        assert kwargs["env"]["GH_TOKEN"] == "temporary"
+        return subprocess.CompletedProcess(command, 1)
+
+    monkeypatch.setattr(cli, "_broker_request", broker_request)
+    monkeypatch.setattr(cli.subprocess, "run", run)
+
+    assert cli.run_github_command("gh", ["issue", "create", "--title", "Bug"], []) == 1
+    assert requests[-1][2] == {"result": "failed"}
+
+
 def test_manifest_resource_defaults_match_sandbox_manager():
     manifest = json.loads(MANIFEST_PATH.read_text(encoding="utf-8"))
     source = (
@@ -423,3 +485,40 @@ def test_builtin_artifact_skill_matches_the_guest_cli_contract():
     assert all(
         profile["capabilities"]["artifacts"]["enabled"] for profile in manifest["profiles"].values()
     )
+
+
+def test_builtin_github_skill_and_wrapper_match_the_broker_contract():
+    platform_manifest = json.loads(
+        (BUILTIN_SKILLS_PATH / "manifest.json").read_text(encoding="utf-8")
+    )
+    descriptors = {item["id"]: item for item in platform_manifest["skills"]}
+    descriptor = descriptors["cocola-github"]
+    skill_md = (BUILTIN_SKILLS_PATH / descriptor["path"] / "SKILL.md").read_text(encoding="utf-8")
+    runtime_manifest = json.loads(MANIFEST_PATH.read_text(encoding="utf-8"))
+    wrapper = (REPO_ROOT / "deploy" / "sandbox-runtime" / "gh-wrapper.sh").read_text(
+        encoding="utf-8"
+    )
+    dockerfile = (REPO_ROOT / "deploy" / "sandbox-runtime" / "Dockerfile").read_text(
+        encoding="utf-8"
+    )
+
+    assert descriptor == {
+        "id": "cocola-github",
+        "name": "Cocola GitHub",
+        "version": "1.0.0",
+        "path": "cocola-github",
+    }
+    assert "github/awesome-copilot" in skill_md
+    assert "cocola-sandbox github git" in skill_md
+    assert "--permissions actions=write" in skill_md
+    assert "auth)" in wrapper and "login|logout|refresh|setup-git|switch|token" in wrapper
+    assert "exec cocola-sandbox github gh --" in wrapper
+    assert "ARG GH_VERSION=2.94.0" in dockerfile
+    assert runtime_manifest["capabilities"]["github"] == {
+        "kind": "run-scoped-broker",
+        "cli": "/usr/local/bin/gh",
+        "real_cli": "/opt/cocola/gh/current/bin/gh",
+        "persistent_auth": False,
+        "required": False,
+        "commands": ["gh", "git"],
+    }

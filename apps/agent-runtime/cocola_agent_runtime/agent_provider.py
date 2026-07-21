@@ -41,6 +41,14 @@ class AgentOptions:
     # W3C context for Cocola-owned downstream services. It is injected only
     # into requests to the configured Cocola LLM gateway, never into MCP calls.
     traceparent: str | None = None
+    # Run-scoped, HMAC-signed capability used only by the Cocola SCM broker.
+    # It is distinct from the one-shot clone token and is injected only into
+    # the current Agent process.
+    project_credential: str | None = None
+    project_provider: str | None = None
+    project_repository: str | None = None
+    project_broker_url: str | None = None
+    project_task_branch: str | None = None
 
 
 @dataclass
