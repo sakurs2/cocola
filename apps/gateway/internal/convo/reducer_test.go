@@ -170,6 +170,7 @@ func TestReducerUpsertsMemoryRecallWithoutShrinkingOnMiss(t *testing.T) {
 	r.Apply("memory_recall", map[string]string{"status": "running"})
 	r.Apply("memory_recall", map[string]string{
 		"status": "degraded", "count": "2", "error_code": "MEMORY_RECALL_TIMEOUT",
+		"content": "User profile:\nPrefers concise answers",
 	})
 
 	parts := r.Parts()
@@ -177,7 +178,8 @@ func TestReducerUpsertsMemoryRecallWithoutShrinkingOnMiss(t *testing.T) {
 		t.Fatalf("memory recall should be one replaceable part: %+v", parts)
 	}
 	if parts[0].MemoryStatus != "degraded" || parts[0].MemoryCount != 2 ||
-		parts[0].MemoryErrorCode != "MEMORY_RECALL_TIMEOUT" {
+		parts[0].MemoryErrorCode != "MEMORY_RECALL_TIMEOUT" ||
+		parts[0].MemoryContent != "User profile:\nPrefers concise answers" {
 		t.Fatalf("memory recall outcome was not replaced: %+v", parts[0])
 	}
 

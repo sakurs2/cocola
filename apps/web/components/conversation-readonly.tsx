@@ -58,6 +58,7 @@ type MemoryRecallPart = {
   type: "memory-recall";
   status?: "running" | "hit" | "miss" | "degraded" | "unavailable";
   count?: number;
+  content?: string;
 };
 
 type SCMApprovalPart = {
@@ -319,7 +320,7 @@ function MessagePartView({ part, role }: { part: MessagePart; role: "user" | "as
   }
   if (part.type === "memory-recall") {
     if (!part.status || part.status === "miss") return null;
-    return <RailMemoryRecall status={part.status} count={part.count} />;
+    return <RailMemoryRecall status={part.status} count={part.count} content={part.content} />;
   }
   if (part.type === "scm-approval") {
     if (!part.approvalStatus) return null;

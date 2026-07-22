@@ -95,6 +95,7 @@ func (r *Reducer) upsertMemoryRecall(data map[string]string) {
 	part := Part{
 		Type: PartMemoryRecall, MemoryStatus: status,
 		MemoryCount: count, MemoryErrorCode: data["error_code"],
+		MemoryContent: data["content"],
 	}
 	for i := range r.parts {
 		if r.parts[i].Type == PartMemoryRecall {

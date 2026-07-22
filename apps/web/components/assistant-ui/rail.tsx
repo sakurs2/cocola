@@ -87,7 +87,7 @@ export const RailProcessSummary: FC<{
 // an action label + type-specific content sit to its right.
 export const RailRow: FC<{
   icon: RailIcon;
-  label: string;
+  label: ReactNode;
   running?: boolean;
   tone?: "default" | "error";
   color?: string;
@@ -173,7 +173,9 @@ export const RailResponsePending: FC = () => (
 export const RailMemoryRecall: FC<{
   status: "running" | "hit" | "degraded" | "unavailable";
   count?: number;
-}> = ({ status, count = 0 }) => {
+  content?: string;
+}> = ({ status, count = 0, content = "" }) => {
+  const [expanded, setExpanded] = useState(false);
   const recalled = Math.max(0, Math.floor(count));
   const usedLabel = `Used ${recalled} ${recalled === 1 ? "memory" : "memories"}`;
   const unavailable = status === "unavailable";
@@ -186,11 +188,31 @@ export const RailMemoryRecall: FC<{
         : degraded
           ? `${usedLabel} with limits`
           : usedLabel;
+  const expandable = content.length > 0;
+  const labelContent = expandable ? (
+    <button
+      type="button"
+      aria-expanded={expanded}
+      onClick={() => setExpanded((value) => !value)}
+      className="group flex min-h-7 w-full items-center justify-between gap-2 rounded-md text-left outline-none hover:text-primary focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
+    >
+      <span>{label}</span>
+      <ChevronRight
+        className={cn(
+          "mr-1 size-3.5 shrink-0 text-muted-foreground transition-transform group-hover:text-foreground",
+          expanded && "rotate-90",
+        )}
+        aria-hidden="true"
+      />
+    </button>
+  ) : (
+    label
+  );
 
   return (
     <RailRow
       icon={BrainCircuit}
-      label={label}
+      label={labelContent}
       running={status === "running"}
       tone={unavailable ? "error" : "default"}
       color={degraded ? "text-amber-500" : "text-emerald-500"}
@@ -201,6 +223,11 @@ export const RailMemoryRecall: FC<{
             ? "The answer continued without recalled memory."
             : "Some memory sources were unavailable; the answer used the memories that were returned."}
         </p>
+      ) : null}
+      {expanded && expandable ? (
+        <pre className="mt-1 max-h-72 overflow-auto whitespace-pre-wrap break-words border-l-2 border-emerald-500/30 bg-muted/25 py-2 pl-3 pr-2 font-mono text-[11px] leading-5 text-muted-foreground">
+          {content}
+        </pre>
       ) : null}
     </RailRow>
   );

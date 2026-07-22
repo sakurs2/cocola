@@ -90,6 +90,7 @@ export type UiMemoryRecallPart = {
   status: MemoryRecallStatus;
   count: number;
   errorCode?: string;
+  content?: string;
 };
 
 export type UiSCMApprovalPart = {
@@ -563,11 +564,13 @@ function normalizeMemoryRecallPart(raw: unknown): UiMemoryRecallPart | null {
   const rawCount = Number(part.count);
   const count = Number.isFinite(rawCount) ? Math.max(0, Math.min(100, Math.floor(rawCount))) : 0;
   const errorCode = stringValue(part.errorCode).trim().slice(0, 80);
+  const content = stringValue(part.content);
   return {
     type: "memory-recall",
     status,
     count,
     ...(errorCode ? { errorCode } : {}),
+    ...(content ? { content } : {}),
   };
 }
 
@@ -751,6 +754,7 @@ function upsertMemoryRecall(parts: UiPart[], data: Record<string, string>): UiPa
     status: data.status,
     count: data.count,
     errorCode: data.error_code,
+    content: data.content,
   });
   if (!next) return parts;
   const index = parts.findIndex((part) => part.type === "memory-recall");
@@ -834,7 +838,12 @@ function convertMessage(message: UiMessage): ThreadMessageLike {
       return {
         type: "data" as const,
         name: "memory-recall",
-        data: { status: p.status, count: p.count, errorCode: p.errorCode },
+        data: {
+          status: p.status,
+          count: p.count,
+          errorCode: p.errorCode,
+          content: p.content,
+        },
       };
     }
     if (p.type === "scm-approval") {

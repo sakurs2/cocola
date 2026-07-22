@@ -400,6 +400,9 @@ func (r *liveRun) updateMemoryRecall(result memory.RecallResult) {
 	if result.ErrorCode != "" {
 		data["error_code"] = result.ErrorCode
 	}
+	if result.Context != "" {
+		data["content"] = result.Context
+	}
 	event := agent.Event{Kind: "memory_recall", Data: data}
 	r.apply(event)
 	r.publish(event)

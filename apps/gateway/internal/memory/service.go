@@ -62,9 +62,9 @@ const (
 	RecallStatusUnavailable = "unavailable"
 )
 
-// RecallResult is the secret-free outcome exposed to the chat orchestrator.
-// Context is sent only to the Agent Runtime; the UI event uses Status, Count,
-// and ErrorCode and never receives memory text or OpenViking identifiers.
+// RecallResult contains the exact bounded context injected into the Agent.
+// The chat orchestrator also persists that context for user-visible recall
+// transparency; URIs are additionally retained as capture-job bookkeeping.
 type RecallResult struct {
 	Context   string
 	URIs      []string

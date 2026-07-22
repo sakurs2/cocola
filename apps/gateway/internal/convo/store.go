@@ -98,11 +98,12 @@ type Part struct {
 	ProgressID    string          `json:"progressId,omitempty"`
 	ProgressItems json.RawMessage `json:"items,omitempty"`
 
-	// memory-recall: secret-free status only. Memory text and OpenViking URIs
-	// are intentionally excluded from persisted UI messages.
+	// memory-recall: the status plus the exact context injected into the Agent,
+	// including any source labels written by the memory service.
 	MemoryStatus    string `json:"status,omitempty"`
 	MemoryCount     int    `json:"count,omitempty"`
 	MemoryErrorCode string `json:"errorCode,omitempty"`
+	MemoryContent   string `json:"content,omitempty"`
 
 	// scm-approval: secret-free, exact-command approval state. Raw argv and
 	// request bodies are deliberately never persisted in conversation history.

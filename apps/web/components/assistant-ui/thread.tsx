@@ -909,11 +909,12 @@ const MemoryRecallPart: FC<
   DataMessagePartProps<{
     status: "running" | "hit" | "miss" | "degraded" | "unavailable";
     count: number;
+    content?: string;
   }>
 > = ({ data }) =>
   data.status === "miss" ? null : (
     <AgentTurnPart kind="process">
-      <RailMemoryRecall status={data.status} count={data.count} />
+      <RailMemoryRecall status={data.status} count={data.count} content={data.content} />
     </AgentTurnPart>
   );
 

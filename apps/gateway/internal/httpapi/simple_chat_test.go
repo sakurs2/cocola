@@ -15,8 +15,31 @@ import (
 	"github.com/cocola-project/cocola/apps/gateway/internal/auth"
 	"github.com/cocola-project/cocola/apps/gateway/internal/chatrun"
 	"github.com/cocola-project/cocola/apps/gateway/internal/convo"
+	"github.com/cocola-project/cocola/apps/gateway/internal/memory"
 	"github.com/cocola-project/cocola/packages/go-common/logger"
 )
+
+func TestLiveRunMemoryRecallPublishesAndPersistsExactContext(t *testing.T) {
+	events := make(chan agent.Event, 1)
+	live := &liveRun{
+		reducer: convo.NewReducer(),
+		subs:    map[chan agent.Event]struct{}{events: {}},
+	}
+	contextText := "User profile:\nPrefers concise answers\n\nRelevant memory:\nUses Go"
+
+	live.updateMemoryRecall(memory.RecallResult{
+		Status: memory.RecallStatusHit, Count: 2, Context: contextText,
+	})
+
+	event := <-events
+	if event.Data["content"] != contextText {
+		t.Fatalf("published memory content = %q", event.Data["content"])
+	}
+	parts := live.parts()
+	if len(parts) != 1 || parts[0].MemoryContent != contextText {
+		t.Fatalf("persisted memory content = %+v", parts)
+	}
+}
 
 type blockingChatStreamer struct {
 	started  chan struct{}
