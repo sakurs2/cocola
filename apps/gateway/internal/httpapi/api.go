@@ -111,6 +111,7 @@ type API struct {
 	// port to a reachable URL via sandbox-manager. nil disables /v1/preview
 	// (the route returns 501), keeping the feature dark until wired in main.
 	sandboxResolver sandboxmgr.EndpointResolver
+	terminalLeases  *terminalLeaseRegistry
 	memory          *memory.Service
 	projects        *project.Service
 	brokerWaitMu    sync.Mutex
@@ -120,6 +121,7 @@ type API struct {
 // New builds the BFF API.
 func New(streamer agent.Streamer, verifier *auth.Verifier, log logger.Logger) *API {
 	a := &API{streamer: streamer, verifier: verifier, log: log}
+	a.terminalLeases = newTerminalLeaseRegistry(terminalDisconnectGrace, a.cleanupTerminalLease)
 	if releaser, ok := streamer.(agent.Releaser); ok {
 		a.releaser = releaser
 	}
@@ -332,6 +334,17 @@ func (a *API) Handler() http.Handler {
 		a.verifier.Middleware(writeErr)(http.HandlerFunc(a.gitStatus))))
 	mux.Handle("POST /v1/conversations/{id}/git/inspect", a.instrument("POST /v1/conversations/{id}/git/inspect",
 		a.verifier.Middleware(writeErr)(http.HandlerFunc(a.inspectGit))))
+	// Interactive terminal: the browser talks only to these owner-scoped routes;
+	// Gateway resolves the bound sandbox and keeps the execd endpoint/token on
+	// the trusted side of the connection.
+	mux.Handle("POST /v1/conversations/{id}/terminal", a.instrument("POST /v1/conversations/{id}/terminal",
+		a.verifier.Middleware(writeErr)(http.HandlerFunc(a.createTerminal))))
+	mux.Handle("GET /v1/conversations/{id}/terminal/{terminal_id}", a.instrument("GET /v1/conversations/{id}/terminal/{terminal_id}",
+		a.verifier.Middleware(writeErr)(http.HandlerFunc(a.terminalSessionProxy))))
+	mux.Handle("DELETE /v1/conversations/{id}/terminal/{terminal_id}", a.instrument("DELETE /v1/conversations/{id}/terminal/{terminal_id}",
+		a.verifier.Middleware(writeErr)(http.HandlerFunc(a.terminalSessionProxy))))
+	mux.Handle("GET /v1/conversations/{id}/terminal/{terminal_id}/ws", a.instrument("GET /v1/conversations/{id}/terminal/{terminal_id}/ws",
+		a.verifier.Middleware(writeErr)(http.HandlerFunc(a.terminalWebSocketProxy))))
 	mux.Handle("POST /internal/scm/github/token-leases", a.instrument("POST /internal/scm/github/token-leases",
 		http.HandlerFunc(a.createGitHubTokenLease)))
 	mux.Handle("DELETE /internal/scm/github/token-leases/{id}", a.instrument("DELETE /internal/scm/github/token-leases/{id}",

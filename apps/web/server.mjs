@@ -1,4 +1,4 @@
-// cocola web custom server (Route A, code-server + Preview Proxy WebSockets).
+// cocola web custom server (Route A, workspace WebSockets).
 //
 // Why this file exists
 // --------------------
@@ -17,7 +17,7 @@
 //
 // So we wrap Next in a thin Node HTTP server: normal requests still go straight
 // to Next's request handler, but we add an `upgrade` listener that, for
-// /api/preview/* only, authenticates server-side (decode the Auth.js session
+// workspace upgrades only, authenticates server-side (decode the Auth.js session
 // cookie -> mint a short-lived cocola runtime token from admin-api, exactly like
 // lib/server-auth.ts runtimeAuthHeaders) and raw-tunnels the socket to the
 // gateway with that token injected. Everything stays same-origin; the gateway
@@ -26,11 +26,13 @@
 
 import { createServer } from "node:http";
 import { request as httpRequest } from "node:http";
-import { parse as parseUrl } from "node:url";
 import next from "next";
 import { getToken } from "next-auth/jwt";
 
-import { maskPreviewUpgradeFromNext } from "./lib/preview-ws-routing.mjs";
+import {
+  buildGatewayWebSocketPath,
+  maskPreviewUpgradeFromNext,
+} from "./lib/preview-ws-routing.mjs";
 import { isAllowedWebSocketOrigin, parsePublicOrigins } from "./lib/public-origins.mjs";
 
 const GATEWAY_URL = process.env.COCOLA_GATEWAY_URL ?? "http://127.0.0.1:8080";
@@ -41,7 +43,7 @@ const PUBLIC_ORIGINS = parsePublicOrigins(process.env.COCOLA_PUBLIC_ORIGINS);
 
 if (PUBLIC_ORIGINS.size === 0) {
   console.warn(
-    "[web] COCOLA_PUBLIC_ORIGINS is empty; Preview Proxy WebSocket upgrades will fail closed",
+    "[web] COCOLA_PUBLIC_ORIGINS is empty; workspace WebSocket upgrades will fail closed",
   );
 }
 
@@ -123,21 +125,6 @@ async function mintRuntimeToken(email) {
   return String(body.token);
 }
 
-// --- /api/preview/{id}/{port}/{...rest} -> gateway /v1/preview/... -----------
-// Returns the upstream path (with query) or null if the URL is not a valid
-// preview target.
-function buildPreviewPath(reqUrl) {
-  const { pathname, search } = parseUrl(reqUrl);
-  const m = /^\/api\/preview\/([^/]+)\/([^/]+)(?:\/(.*))?$/.exec(pathname ?? "");
-  if (!m) return null;
-  const sessionID = decodeURIComponent(m[1]);
-  const portNum = Number(m[2]);
-  if (!Number.isInteger(portNum) || portNum <= 0 || portNum > 65535) return null;
-  const rest = m[3] ?? "";
-  // rest is already URL-encoded in the incoming path; forward verbatim.
-  return `/v1/preview/${encodeURIComponent(sessionID)}/${portNum}/${rest}${search ?? ""}`;
-}
-
 function writeUpgradeError(socket, status, message) {
   try {
     socket.write(`HTTP/1.1 ${status} ${message}\r\nConnection: close\r\nContent-Length: 0\r\n\r\n`);
@@ -189,7 +176,7 @@ function tunnelToGateway(req, clientSocket, head, upstreamPath, runtimeToken) {
 
   proxyReq.on("error", (err) => {
     settled = true;
-    console.error("[web] preview WS gateway error:", err.message);
+    console.error("[web] workspace WS gateway error:", err.message);
     clientSocket.destroy();
   });
 
@@ -197,7 +184,7 @@ function tunnelToGateway(req, clientSocket, head, upstreamPath, runtimeToken) {
     if (settled) return;
     settled = true;
     console.error(
-      "[web] preview WS tunnel closed before upgrade/response " +
+      "[web] workspace WS tunnel closed before upgrade/response " +
         `(silent FIN) path=${upstreamPath}`,
     );
     clientSocket.destroy();
@@ -252,7 +239,7 @@ app
 
     server.on("upgrade", (req, socket, head) => {
       trackSocket(socket);
-      const upstreamPath = buildPreviewPath(req.url ?? "");
+      const upstreamPath = buildGatewayWebSocketPath(req.url ?? "");
       if (!upstreamPath) {
         // Next lazily appends its own Upgrade listener after the first HTTP
         // request; it remains the sole owner of dev HMR and other upgrades.
@@ -286,13 +273,13 @@ app
         try {
           runtimeToken = await mintRuntimeToken(email);
         } catch (err) {
-          console.error("[web] preview WS auth failed:", err.message);
+          console.error("[web] workspace WS auth failed:", err.message);
           writeUpgradeError(socket, 502, "Bad Gateway");
           return;
         }
         tunnelToGateway(req, socket, head, upstreamPath, runtimeToken);
       })().catch((err) => {
-        console.error("[web] preview WS upgrade error:", err);
+        console.error("[web] workspace WS upgrade error:", err);
         socket.destroy();
       });
     });

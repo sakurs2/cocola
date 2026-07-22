@@ -9,6 +9,7 @@ import {
   type PreviewFile,
 } from "@/components/assistant-ui/file-preview";
 import { TooltipIconButton } from "@/components/assistant-ui/tooltip-icon-button";
+import { ShellPage } from "@/components/assistant-ui/shell-page";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -54,6 +55,7 @@ import {
   LoaderCircle,
   Plus,
   RefreshCw,
+  SquareTerminal,
   ExternalLink,
   X,
   type LucideIcon,
@@ -72,8 +74,8 @@ import {
 // -- Extensible workspace dock ------------------------------------------------
 //
 // The right-hand dock is a tabbed container: a strip of open sub-pages plus a
-// "+" menu to add and switch to another sub-page. Workspace files and Preview
-// are registered base pages. Code and generated-file pages are created
+// "+" menu to add and switch to another sub-page. Workspace files, Shell, and
+// Preview are registered base pages. Code and generated-file pages are created
 // dynamically from user actions, with one stable tab per resource.
 
 type DockPageContext = {
@@ -108,6 +110,19 @@ const BASE_DOCK_PAGES: DockPage[] = [
         setHeaderActions={setHeaderActions}
         onOpenCode={openCodeFolder}
         workspaceRoot={workspaceRoot}
+      />
+    ),
+  },
+  {
+    id: "shell",
+    label: "Shell",
+    icon: SquareTerminal,
+    render: ({ sessionID, active, setHeaderActions }) => (
+      <ShellPage
+        key={sessionID}
+        sessionID={sessionID}
+        active={active}
+        setHeaderActions={setHeaderActions}
       />
     ),
   },
