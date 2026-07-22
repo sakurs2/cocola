@@ -1440,18 +1440,44 @@ function PreviewPage({
   // Bumping this key forces the iframe to remount (a reload that also drops any
   // in-frame history), used by the refresh control.
   const [reloadKey, setReloadKey] = useState(0);
+  const [readiness, setReadiness] = useState<"idle" | "checking" | "ready" | "unavailable">("idle");
 
   const commit = useCallback(() => {
     const port = Number(draftPort.trim());
     if (!Number.isInteger(port) || port <= 0 || port > 65535) {
       setCommittedPort(null);
+      setReadiness("idle");
       return;
     }
+    setReadiness("checking");
     setCommittedPort(port);
     setReloadKey((k) => k + 1);
   }, [draftPort]);
 
   const src = committedPort != null ? previewBasePath(sessionID, committedPort) : "";
+
+  useEffect(() => {
+    if (!active || committedPort == null || !src) return;
+    const controller = new AbortController();
+    const timeout = window.setTimeout(() => {
+      setReadiness("unavailable");
+      controller.abort();
+    }, 8_000);
+    setReadiness("checking");
+    void fetch(src, { cache: "no-store", signal: controller.signal })
+      .then((response) => {
+        void response.body?.cancel();
+        setReadiness(response.status < 500 ? "ready" : "unavailable");
+      })
+      .catch(() => {
+        if (!controller.signal.aborted) setReadiness("unavailable");
+      })
+      .finally(() => window.clearTimeout(timeout));
+    return () => {
+      window.clearTimeout(timeout);
+      controller.abort();
+    };
+  }, [active, committedPort, reloadKey, src]);
 
   // Publish refresh + open-in-new-tab into the shared dock header while active.
   useEffect(() => {
@@ -1474,13 +1500,13 @@ function PreviewPage({
           rel="noreferrer"
           title="Open preview in a new tab"
           aria-label="Open preview in a new tab"
-          aria-disabled={committedPort == null}
+          aria-disabled={readiness !== "ready"}
           onClick={(event) => {
-            if (committedPort == null) event.preventDefault();
+            if (readiness !== "ready") event.preventDefault();
           }}
           className={cn(
             "inline-flex size-8 shrink-0 items-center justify-center rounded-full text-muted-foreground transition-colors hover:bg-muted hover:text-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring",
-            committedPort == null && "pointer-events-none opacity-50",
+            readiness !== "ready" && "pointer-events-none opacity-50",
           )}
         >
           <ExternalLink className="size-4" />
@@ -1488,7 +1514,7 @@ function PreviewPage({
       </div>,
     );
     return () => setHeaderActions(null);
-  }, [active, committedPort, src, setHeaderActions]);
+  }, [active, committedPort, readiness, src, setHeaderActions]);
 
   return (
     <div className="flex h-full min-h-0 flex-col bg-card">
@@ -1519,7 +1545,7 @@ function PreviewPage({
       </div>
 
       <div className="min-h-0 flex-1">
-        {committedPort != null ? (
+        {committedPort != null && readiness === "ready" ? (
           <iframe
             key={reloadKey}
             src={src}
@@ -1527,6 +1553,31 @@ function PreviewPage({
             className="h-full w-full border-0 bg-white"
             sandbox="allow-scripts allow-forms allow-same-origin allow-popups allow-modals"
           />
+        ) : committedPort != null && readiness === "checking" ? (
+          <div className="flex h-full min-h-0 flex-col items-center justify-center px-6 text-center">
+            <LoaderCircle className="mb-3 size-7 animate-spin text-primary/70" />
+            <p className="text-sm font-medium text-foreground">Connecting to preview</p>
+            <p className="mt-1 text-xs text-muted-foreground">
+              Checking port {committedPort} in the sandbox…
+            </p>
+          </div>
+        ) : committedPort != null && readiness === "unavailable" ? (
+          <div className="flex h-full min-h-0 flex-col items-center justify-center px-6 text-center">
+            <AlertTriangle className="mb-3 size-8 text-amber-500" />
+            <p className="text-sm font-medium text-foreground">Preview server unavailable</p>
+            <p className="mt-1 max-w-sm text-xs leading-5 text-muted-foreground">
+              No server is reachable on port {committedPort}. Ask the Agent to start a managed
+              preview server, then retry.
+            </p>
+            <button
+              type="button"
+              onClick={() => setReloadKey((key) => key + 1)}
+              className="mt-4 inline-flex h-8 items-center gap-1.5 rounded-md border border-border bg-background px-3 text-xs font-medium text-foreground transition-colors hover:bg-muted focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+            >
+              <RefreshCw className="size-3.5" />
+              Retry
+            </button>
+          </div>
         ) : (
           <div className="flex h-full min-h-0 flex-col items-center justify-center px-6 text-center">
             <Globe className="mb-3 size-8 text-muted-foreground/50" />

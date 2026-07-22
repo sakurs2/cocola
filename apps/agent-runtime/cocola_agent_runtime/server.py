@@ -87,6 +87,12 @@ ARTIFACT_SYSTEM_PROMPT = (
     "artifacts must be a single self-contained file "
     "because their isolated preview blocks network and relative asset loading."
 )
+PREVIEW_SYSTEM_PROMPT = (
+    "When a local HTTP server must remain available to the user through the Workspace Preview "
+    "tab after this turn, use `cocola-sandbox preview start`; do not use Bash background jobs, "
+    "`&`, or `nohup`. Bind the server to 0.0.0.0 and only report it ready after the preview "
+    "command returns `state: ready`."
+)
 ADMIN_SYSTEM_PROMPT_HEADER = "Administrator-configured system instructions:"
 MODEL_ROUTE_ID_METADATA_KEY = "x-cocola-model-route-id"
 # Per-user sandbox token forwarded by the gateway (gRPC metadata seam, no
@@ -1188,6 +1194,11 @@ class AgentRuntimeServicer(pb_grpc.AgentRuntimeServiceServicer):
             opts = dataclasses.replace(
                 opts,
                 system_prompt=_merge_system_prompt(opts.system_prompt, ARTIFACT_SYSTEM_PROMPT),
+            )
+        if any(skill.get("id") == "cocola-sandbox-preview" for skill in loaded_skills):
+            opts = dataclasses.replace(
+                opts,
+                system_prompt=_merge_system_prompt(opts.system_prompt, PREVIEW_SYSTEM_PROMPT),
             )
         memory_context = str(getattr(request, "memory_context", "") or "")
         if memory_context.strip():

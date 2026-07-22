@@ -33,6 +33,10 @@
         "github": {
           "enabled": true,
           "startup": "run-scoped"
+        },
+        "preview": {
+          "enabled": true,
+          "startup": "on-demand-managed"
         }
       }
     },
@@ -59,6 +63,10 @@
         "github": {
           "enabled": false,
           "startup": "disabled"
+        },
+        "preview": {
+          "enabled": true,
+          "startup": "on-demand-managed"
         }
       }
     }
@@ -101,6 +109,12 @@
       "persistent_auth": false,
       "required": false,
       "commands": ["gh", "git"]
+    },
+    "preview": {
+      "kind": "managed-user-process",
+      "state_dir": "/session/runtime/cocola/previews",
+      "required": false,
+      "commands": ["start", "status", "stop", "logs"]
     }
   }
 }

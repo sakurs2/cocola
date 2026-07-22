@@ -110,6 +110,7 @@ def test_browser_inspect_runs_one_shot_runner(cli, monkeypatch, capsys):
             "detail": "ready",
         },
     )
+    monkeypatch.setattr(cli, "browser_command", lambda _contract: ["node", "browser-runner.js"])
 
     def fake_run(command, **kwargs):
         captured["command"] = command
@@ -267,6 +268,132 @@ def test_artifact_output_must_be_workspace_scoped(cli, tmp_path):
 
     assert payload["state"] == "unavailable"
     assert payload["checks"]["workspace_scoped"] is False
+
+
+def test_preview_start_detaches_scrubs_run_credentials_and_waits_for_network(
+    cli, monkeypatch, tmp_path
+):
+    workspace = tmp_path / "workspace"
+    application = workspace / "app"
+    application.mkdir(parents=True)
+    state_dir = tmp_path / "runtime" / "previews"
+    manifest = {
+        "workspace": {"root": str(workspace)},
+        "capabilities": {"preview": {"state_dir": str(state_dir)}},
+    }
+    captured = {}
+
+    class FakeProcess:
+        pid = 4321
+
+        @staticmethod
+        def poll():
+            return None
+
+    def fake_popen(command, **kwargs):
+        captured["command"] = command
+        captured["kwargs"] = kwargs
+        return FakeProcess()
+
+    reachability = iter([False, False, True, True])
+    monkeypatch.setattr(cli.subprocess, "Popen", fake_popen)
+    monkeypatch.setattr(cli, "preview_process_identity", lambda _pid: ("S", "987"))
+    monkeypatch.setattr(cli, "preview_port_reachable", lambda _port: next(reachability))
+    monkeypatch.setattr(cli.time, "sleep", lambda _seconds: None)
+    monkeypatch.setenv("ANTHROPIC_AUTH_TOKEN", "run-secret")
+    monkeypatch.setenv("COCOLA_PROJECT_CREDENTIAL", "broker-secret")
+    monkeypatch.setenv("APP_MODE", "development")
+
+    payload = cli.preview_start(
+        manifest,
+        3000,
+        str(application),
+        ["--", "npm", "run", "dev", "--", "--hostname", "0.0.0.0"],
+        5000,
+    )
+
+    assert payload["state"] == "ready"
+    assert captured["command"][-7:] == [
+        str(state_dir / "3000.log"),
+        "npm",
+        "run",
+        "dev",
+        "--",
+        "--hostname",
+        "0.0.0.0",
+    ]
+    assert captured["kwargs"]["cwd"] == application
+    assert captured["kwargs"]["start_new_session"] is True
+    assert captured["kwargs"]["stdin"] is subprocess.DEVNULL
+    assert captured["kwargs"]["stdout"] is subprocess.DEVNULL
+    assert "ANTHROPIC_AUTH_TOKEN" not in captured["kwargs"]["env"]
+    assert "COCOLA_PROJECT_CREDENTIAL" not in captured["kwargs"]["env"]
+    assert captured["kwargs"]["env"]["APP_MODE"] == "development"
+    assert captured["kwargs"]["env"]["HOST"] == "0.0.0.0"
+    assert captured["kwargs"]["env"]["PORT"] == "3000"
+    state = json.loads((state_dir / "3000.json").read_text(encoding="utf-8"))
+    assert state["pid"] == 4321
+    assert state["start_ticks"] == "987"
+    assert "command" not in state
+
+
+def test_preview_runner_keeps_only_two_bounded_log_segments(cli, tmp_path):
+    log_path = tmp_path / "preview.log"
+    payload_bytes = cli.PREVIEW_LOG_MAX_BYTES * 3
+
+    assert (
+        cli.run_preview_process(
+            str(log_path),
+            [cli.sys.executable, "-c", f"import os; os.write(1, b'x' * {payload_bytes})"],
+        )
+        == 0
+    )
+
+    rotated = cli.preview_rotated_log_path(log_path)
+    assert log_path.stat().st_size <= cli.PREVIEW_LOG_MAX_BYTES
+    assert rotated.stat().st_size <= cli.PREVIEW_LOG_MAX_BYTES
+    assert log_path.stat().st_size + rotated.stat().st_size <= cli.PREVIEW_LOG_MAX_BYTES * 2
+
+
+def test_preview_stop_does_not_signal_a_reused_pid(cli, monkeypatch, tmp_path):
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    state_dir = tmp_path / "previews"
+    manifest = {
+        "workspace": {"root": str(workspace)},
+        "capabilities": {"preview": {"state_dir": str(state_dir)}},
+    }
+    cli.write_preview_state(
+        manifest,
+        {
+            "schema_version": 1,
+            "port": 3000,
+            "pid": 4321,
+            "start_ticks": "old-process",
+            "cwd": str(workspace),
+            "log_path": str(state_dir / "3000.log"),
+            "started_at": 1,
+        },
+    )
+    monkeypatch.setattr(cli, "preview_process_identity", lambda _pid: ("S", "new-process"))
+    monkeypatch.setattr(
+        cli.os,
+        "killpg",
+        lambda *_args: (_ for _ in ()).throw(AssertionError("must not signal a reused PID")),
+    )
+
+    assert cli.preview_stop(manifest, 3000)["state"] == "stopped"
+    assert not (state_dir / "3000.json").exists()
+
+
+def test_preview_cwd_must_remain_in_workspace(cli, tmp_path):
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    manifest = {"workspace": {"root": str(workspace)}}
+
+    assert cli.preview_workspace_cwd(manifest, str(workspace)) == workspace
+    with pytest.raises(ValueError, match="must stay under"):
+        cli.preview_workspace_cwd(manifest, str(tmp_path))
 
 
 def test_github_command_reuses_one_request_across_approval(cli, monkeypatch):
@@ -484,6 +611,35 @@ def test_builtin_artifact_skill_matches_the_guest_cli_contract():
     }
     assert all(
         profile["capabilities"]["artifacts"]["enabled"] for profile in manifest["profiles"].values()
+    )
+
+
+def test_builtin_preview_skill_matches_the_managed_process_contract():
+    platform_manifest = json.loads(
+        (BUILTIN_SKILLS_PATH / "manifest.json").read_text(encoding="utf-8")
+    )
+    descriptors = {item["id"]: item for item in platform_manifest["skills"]}
+    descriptor = descriptors["cocola-sandbox-preview"]
+    skill_md = (BUILTIN_SKILLS_PATH / descriptor["path"] / "SKILL.md").read_text(encoding="utf-8")
+    manifest = json.loads(MANIFEST_PATH.read_text(encoding="utf-8"))
+
+    assert descriptor == {
+        "id": "cocola-sandbox-preview",
+        "name": "Cocola Sandbox Preview",
+        "version": "1.0.0",
+        "path": "cocola-sandbox-preview",
+    }
+    assert "cocola-sandbox preview start" in skill_md
+    assert "state: ready" in skill_md
+    assert "run_in_background" in skill_md
+    assert manifest["capabilities"]["preview"] == {
+        "kind": "managed-user-process",
+        "state_dir": "/session/runtime/cocola/previews",
+        "required": False,
+        "commands": ["start", "status", "stop", "logs"],
+    }
+    assert all(
+        profile["capabilities"]["preview"]["enabled"] for profile in manifest["profiles"].values()
     )
 
 

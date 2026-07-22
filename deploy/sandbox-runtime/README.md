@@ -121,7 +121,25 @@ cocola-sandbox browser screenshot https://example.com --full-page --json
 cocola-sandbox browser pdf https://example.com --output page.pdf --json
 cocola-sandbox artifact status --json
 cocola-sandbox artifact list --json
+cocola-sandbox preview start --port 3000 --cwd /workspace/app --json -- npm run dev -- --hostname 0.0.0.0
+cocola-sandbox preview status --port 3000 --json
+cocola-sandbox preview logs --port 3000 --lines 100
+cocola-sandbox preview stop --port 3000 --json
 ```
+
+## Managed user-facing Preview servers
+
+`cocola-sandbox preview start` launches a development server in a separate
+process session so it remains available through the Workspace Preview proxy
+after the Agent turn completes. It requires a workspace-scoped cwd, removes
+run-scoped credentials from the child environment, records PID start identity
+to avoid signaling a reused PID, and only reports ready after the port is
+reachable on the container network. Startup waits are bounded; a failed or
+loopback-only server is stopped and its bounded log remains inspectable.
+
+The built-in `cocola-sandbox-preview` Skill instructs Agent Runtimes to use this
+contract instead of Bash background jobs. Managed processes survive an Agent
+turn but must be restarted after Sandbox compute loss.
 
 ## On-demand headless Browser
 

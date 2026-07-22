@@ -53,7 +53,9 @@ export default function ProjectTaskPage() {
           cocola/task-{params.conversationId.replaceAll("-", "").slice(0, 12)}
         </span>
       </div>
-      <Home />
+      <div className="min-h-0 flex-1">
+        <Home />
+      </div>
     </div>
   );
 }

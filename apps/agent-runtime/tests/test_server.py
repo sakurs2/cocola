@@ -258,18 +258,29 @@ def skill_bundle(**files: str) -> bytes:
     return out.getvalue()
 
 
-def platform_skill_snapshot(*, digest: str = "platform-v1") -> dict:
+def platform_skill_snapshot(*, digest: str = "platform-v1", include_preview: bool = False) -> dict:
+    skills = [
+        {
+            "id": "cocola-sandbox-browser",
+            "name": "Cocola Sandbox Browser",
+            "version": "1.0.0",
+            "path": "cocola-sandbox-browser",
+            "content_sha256": "a" * 64,
+        }
+    ]
+    if include_preview:
+        skills.append(
+            {
+                "id": "cocola-sandbox-preview",
+                "name": "Cocola Sandbox Preview",
+                "version": "1.0.0",
+                "path": "cocola-sandbox-preview",
+                "content_sha256": "b" * 64,
+            }
+        )
     return {
         "available_platform_digest": digest,
-        "available_platform_skills": [
-            {
-                "id": "cocola-sandbox-browser",
-                "name": "Cocola Sandbox Browser",
-                "version": "1.0.0",
-                "path": "cocola-sandbox-browser",
-                "content_sha256": "a" * 64,
-            }
-        ],
+        "available_platform_skills": skills,
     }
 
 
@@ -397,6 +408,26 @@ async def test_query_reports_image_baked_skill_when_market_is_empty():
         }
     ]
     assert executor.byte_writes == []
+
+
+async def test_query_instructs_agent_to_use_managed_preview_when_image_supports_it():
+    _, digest = _skill_descriptors([], "U1")
+    snapshot = platform_skill_snapshot(include_preview=True)
+    snapshot.update({"digest": digest, "platform_digest": "platform-v1"})
+    executor = StaticSandboxExecutor(
+        exec_handler=lambda _sandbox_id, _cmd: ExecOutcome(stdout=json.dumps(snapshot))
+    )
+    prov = ListProvider([AgentEvent(kind="done", data={})])
+
+    await AgentRuntimeServicer(
+        prov,
+        skills=StaticSkillCatalog([]),
+        executor=executor,
+    ).Query(FakeRequest(sandbox_id="box-1"), FakeContext())
+
+    assert prov.seen_options.system_prompt is not None
+    assert "cocola-sandbox preview start" in prov.seen_options.system_prompt
+    assert "Bind the server to 0.0.0.0" in prov.seen_options.system_prompt
 
 
 async def test_query_validates_and_forwards_selected_skill():
