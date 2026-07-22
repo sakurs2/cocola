@@ -79,6 +79,7 @@ import {
 type DockPageContext = {
   sessionID: string;
   active: boolean;
+  workspaceRoot: string;
   // Lets a page publish header controls (e.g. refresh) into the shared dock
   // header, so no sub-page needs its own toolbar row.
   setHeaderActions: (node: ReactNode) => void;
@@ -100,12 +101,13 @@ const BASE_DOCK_PAGES: DockPage[] = [
     id: "files",
     label: "Workspace files",
     icon: FolderOpen,
-    render: ({ sessionID, active, setHeaderActions, openCodeFolder }) => (
+    render: ({ sessionID, active, setHeaderActions, openCodeFolder, workspaceRoot }) => (
       <WorkspaceFilesPage
         sessionID={sessionID}
         active={active}
         setHeaderActions={setHeaderActions}
         onOpenCode={openCodeFolder}
+        workspaceRoot={workspaceRoot}
       />
     ),
   },
@@ -130,10 +132,16 @@ function createGitPage(): DockPage {
   };
 }
 
-function createCodePage(workspacePath: string): DockPage {
+function createCodePage(workspacePath: string, workspaceRoot = ""): DockPage {
   const normalizedPath = normalizeCodeEditorWorkspacePath(workspacePath);
+  const normalizedRoot = normalizeCodeEditorWorkspacePath(workspaceRoot);
   const folder = normalizedPath ? `/workspace/${normalizedPath}` : "/workspace";
-  const label = normalizedPath.split("/").pop() || "Workspace";
+  const label =
+    normalizedPath === normalizedRoot
+      ? normalizedRoot
+        ? "Project"
+        : "Workspace"
+      : normalizedPath.split("/").pop() || "Workspace";
   return {
     id: codeEditorTabID(normalizedPath),
     label,
@@ -189,6 +197,7 @@ export function WorkspaceDock({
   // backgrounded page can never leak its actions into the header.
   const [headerActions, setHeaderActions] = useState<Record<string, ReactNode>>({});
 
+  const workspaceRoot = projectTask ? "project" : "";
   const basePages = useMemo(
     () => (projectTask ? [...BASE_DOCK_PAGES, createGitPage()] : BASE_DOCK_PAGES),
     [projectTask],
@@ -211,13 +220,16 @@ export function WorkspaceDock({
     [basePages],
   );
 
-  const openCodeFolder = useCallback((workspacePath: string) => {
-    const page = createCodePage(workspacePath);
-    setOpenPages((current) =>
-      current.some((candidate) => candidate.id === page.id) ? current : [...current, page],
-    );
-    setActivePageId(page.id);
-  }, []);
+  const openCodeFolder = useCallback(
+    (workspacePath: string) => {
+      const page = createCodePage(workspacePath, workspaceRoot);
+      setOpenPages((current) =>
+        current.some((candidate) => candidate.id === page.id) ? current : [...current, page],
+      );
+      setActivePageId(page.id);
+    },
+    [workspaceRoot],
+  );
 
   useEffect(() => {
     if (!artifact || artifact.sessionId !== sessionID) return;
@@ -374,6 +386,7 @@ export function WorkspaceDock({
               page={page}
               sessionID={sessionID}
               active={isActive}
+              workspaceRoot={workspaceRoot}
               openCodeFolder={openCodeFolder}
               publishHeaderActions={publishHeaderActions}
             />
@@ -388,12 +401,14 @@ function DockPagePanel({
   page,
   sessionID,
   active,
+  workspaceRoot,
   openCodeFolder,
   publishHeaderActions,
 }: {
   page: DockPage;
   sessionID: string;
   active: boolean;
+  workspaceRoot: string;
   openCodeFolder: (workspacePath: string) => void;
   publishHeaderActions: (pageID: string, node: ReactNode) => void;
 }) {
@@ -410,6 +425,7 @@ function DockPagePanel({
       {page.render({
         sessionID,
         active,
+        workspaceRoot,
         setHeaderActions,
         openCodeFolder,
       })}
@@ -1305,11 +1321,13 @@ function WorkspaceFilesPage({
   active,
   setHeaderActions,
   onOpenCode,
+  workspaceRoot,
 }: {
   sessionID: string;
   active: boolean;
   setHeaderActions: (node: ReactNode) => void;
   onOpenCode: (workspacePath: string) => void;
+  workspaceRoot: string;
 }) {
   const [directories, setDirectories] = useState<Record<string, DirectoryState>>({});
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
@@ -1443,17 +1461,17 @@ function WorkspaceFilesPage({
     setDirectories({});
     setExpanded(new Set());
     setSelected(null);
-    void loadDirectory("");
-  }, [loadDirectory]);
+    void loadDirectory(workspaceRoot);
+  }, [loadDirectory, workspaceRoot]);
 
   const refresh = useCallback(async () => {
     setRefreshing(true);
     setDirectories({});
     setExpanded(new Set());
     setSelected(null);
-    await loadDirectory("");
+    await loadDirectory(workspaceRoot);
     setRefreshing(false);
-  }, [loadDirectory]);
+  }, [loadDirectory, workspaceRoot]);
 
   const toggleDirectory = useCallback(
     (path: string) => {
@@ -1471,7 +1489,7 @@ function WorkspaceFilesPage({
     [directories, loadDirectory],
   );
 
-  const root = directories[""];
+  const root = directories[workspaceRoot];
   const rootReady = Boolean(root && !root.loading && !root.error);
 
   // Publish root-open and refresh controls into the shared dock header while
@@ -1484,7 +1502,7 @@ function WorkspaceFilesPage({
           type="button"
           tooltip="Open in Code Server"
           disabled={!rootReady}
-          onClick={() => onOpenCode("")}
+          onClick={() => onOpenCode(workspaceRoot)}
           className="size-8 rounded-full text-muted-foreground"
         >
           <Code2 className="size-4" />
@@ -1502,7 +1520,7 @@ function WorkspaceFilesPage({
       </div>,
     );
     return () => setHeaderActions(null);
-  }, [active, onOpenCode, refreshing, refresh, rootReady, setHeaderActions]);
+  }, [active, onOpenCode, refreshing, refresh, rootReady, setHeaderActions, workspaceRoot]);
 
   return (
     <div className="flex h-full min-h-0 flex-col bg-card">
@@ -1522,19 +1540,21 @@ function WorkspaceFilesPage({
               <WorkspaceError
                 code={root.errorCode}
                 message={root.error}
-                onRetry={() => void loadDirectory("")}
+                onRetry={() => void loadDirectory(workspaceRoot)}
               />
             ) : root.entries.length === 0 ? (
               <div className="flex flex-col items-center gap-2 px-5 py-12 text-center">
                 <Folder className="size-7 text-muted-foreground/70" />
-                <div className="text-sm font-medium text-foreground">Workspace is empty</div>
+                <div className="text-sm font-medium text-foreground">
+                  {workspaceRoot ? "Project is empty" : "Workspace is empty"}
+                </div>
                 <div className="text-xs text-muted-foreground">
                   Files created by the agent will appear here after refresh.
                 </div>
               </div>
             ) : (
               <WorkspaceTree
-                path=""
+                path={workspaceRoot}
                 depth={0}
                 directories={directories}
                 expanded={expanded}

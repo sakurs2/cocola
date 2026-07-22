@@ -23,6 +23,9 @@ class AgentOptions:
     # Read/Bash tools resolve relative paths like ./uploads/. Unused by Route A
     # (the in-sandbox brain has its own cwd).
     workspace: str | None = None
+    # Working directory inside the bound Sandbox. Project runs use the isolated
+    # Git worktree while ordinary conversations retain the platform root.
+    working_directory: str = "/workspace"
     system_prompt: str | None = None
     max_turns: int = 30
     model_route_id: str | None = None

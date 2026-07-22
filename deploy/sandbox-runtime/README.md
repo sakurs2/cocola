@@ -121,7 +121,7 @@ cocola-sandbox browser screenshot https://example.com --full-page --json
 cocola-sandbox browser pdf https://example.com --output page.pdf --json
 cocola-sandbox artifact status --json
 cocola-sandbox artifact list --json
-cocola-sandbox preview start --port 3000 --cwd /workspace/app --json -- npm run dev -- --hostname 0.0.0.0
+cocola-sandbox preview start --port 3000 --json -- npm run dev -- --hostname 0.0.0.0
 cocola-sandbox preview status --port 3000 --json
 cocola-sandbox preview logs --port 3000 --lines 100
 cocola-sandbox preview stop --port 3000 --json
@@ -170,7 +170,7 @@ reports its actual inventory, a rolling rollout tolerates old images with no
 platform Skills and automatically rebuilds the snapshot when a new image or
 built-in Skill version appears.
 
-## Artifact publication and isolated HTML preview
+## Artifact publication and active HTML preview
 
 Changed regular files written beneath `/workspace/outputs` are uploaded by
 Agent Runtime after a successful turn and emitted as authenticated,
@@ -178,14 +178,10 @@ conversation-owned Artifacts. Symbolic links, linked directories, sockets and
 other non-regular entries are ignored. `cocola-sandbox artifact status/list`
 lets the Agent inspect the same output contract before it finishes.
 
-Downloads are served with `Content-Disposition: attachment`, `nosniff`, a
-deny-by-default CSP and no-store caching, so user-authored active content is
-never executed directly on Cocola's authenticated origin. The Web UI fetches
-preview bytes itself. HTML is parsed as an inert document, stripped of scripts,
-event handlers, external URLs and embedded browsing contexts, then rendered in
-an opaque-origin sandboxed iframe with a second deny-by-default CSP. Therefore
-HTML deliverables should be one self-contained file using inline CSS and
-`data:` media; JavaScript is visible in source mode but does not execute.
+Downloads retain attachment and no-store response headers. The Web UI fetches
+preview bytes and passes HTML through to a sandboxed iframe that permits scripts,
+forms, external resources, popups, modals and downloads. Agent-authored HTML can
+therefore load CDN dependencies and execute interactive JavaScript.
 
 Phase 3 intentionally does not add Jupyter, a visual desktop, per-Sandbox
 observe endpoints, automatic live-site tabs, or a Sandbox MCP server.
@@ -250,14 +246,14 @@ const browser = await chromium.launch({
 The provider mounts one per-session volume at `/session`. Startup creates the
 following layout and links the runtime paths into it:
 
-| Volume directory           | Runtime path           | Content                          |
-| -------------------------- | ---------------------- | -------------------------------- |
-| `/session/workspace`       | `/workspace`           | project, dependencies and output |
-| `/session/runtime/claude`  | `/home/cocola/.claude` | Claude session state             |
-| `/session/runtime/codex`   | `/home/cocola/.codex`  | Codex session state              |
-| `/session/runtime/cocola`  | `/home/cocola/.cocola` | Cocola Skills and runtime state  |
-| `/session/runtime/browser` | internal               | persistent Browser profile/state |
-| `/session/home/local`      | `/home/cocola/.local`  | user-installed tools             |
+| Volume directory           | Runtime path           | Content                             |
+| -------------------------- | ---------------------- | ----------------------------------- |
+| `/session/workspace`       | `/workspace`           | platform files and Project worktree |
+| `/session/runtime/claude`  | `/home/cocola/.claude` | Claude session state                |
+| `/session/runtime/codex`   | `/home/cocola/.codex`  | Codex session state                 |
+| `/session/runtime/cocola`  | `/home/cocola/.cocola` | Cocola Skills and runtime state     |
+| `/session/runtime/browser` | internal               | persistent Browser profile/state    |
+| `/session/home/local`      | `/home/cocola/.local`  | user-installed tools                |
 
 `/cache` remains ephemeral so package downloads do not consume the default
 `2Gi` local-path PVC request. Root-owned platform Skills plus Shared and Personal
@@ -267,9 +263,10 @@ links to immutable image assets. Secrets, other rootfs files and the rest of
 `$HOME` are never copied into the Session Volume.
 
 Every start also guarantees `/workspace/outputs`,
-`/workspace/outputs/browser`, and `/workspace/downloads`. These paths are part
-of the manifest contract and survive Sandbox compute reclamation with the
-workspace.
+`/workspace/outputs/browser`, `/workspace/uploads`, and `/workspace/downloads`.
+Project runs create their Git worktree separately at `/workspace/project`.
+These paths are part of the manifest contract and survive Sandbox compute
+reclamation with the workspace.
 
 Destroying a sandbox preserves the volume. A later run is scheduled back to
 the volume's node and mounts the same claim; no MinIO checkpoint is involved.

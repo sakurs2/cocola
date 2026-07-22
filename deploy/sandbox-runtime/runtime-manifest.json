@@ -3,7 +3,9 @@
   "runtime": "cocola-sandbox-runtime",
   "workspace": {
     "root": "/workspace",
+    "project": "/workspace/project",
     "outputs": "/workspace/outputs",
+    "uploads": "/workspace/uploads",
     "downloads": "/workspace/downloads",
     "session": "/session",
     "runtime_state": "/session/runtime",
@@ -98,7 +100,7 @@
     "artifacts": {
       "kind": "workspace-output",
       "output_dir": "/workspace/outputs",
-      "html_preview": "isolated-self-contained",
+      "html_preview": "active",
       "required": true,
       "commands": ["status", "list"]
     },

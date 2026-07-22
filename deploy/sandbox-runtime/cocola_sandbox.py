@@ -115,7 +115,12 @@ def _broker_request(
         raise RuntimeError("GitHub broker could not be reached") from error
 
 
-def run_github_command(kind: str, arguments: list[str], permissions: list[str]) -> int:
+def run_github_command(
+    kind: str,
+    arguments: list[str],
+    permissions: list[str],
+    working_directory: str = "/workspace",
+) -> int:
     argv = list(arguments)
     if argv and argv[0] == "--":
         argv = argv[1:]
@@ -182,7 +187,7 @@ def run_github_command(kind: str, arguments: list[str], permissions: list[str]) 
             askpass.chmod(0o700)
             env["GIT_ASKPASS"] = str(askpass)
             return_code = subprocess.run(
-                ["git", *argv], cwd="/workspace", env=env, check=False
+                ["git", *argv], cwd=working_directory, env=env, check=False
             ).returncode
             command_result = "success" if return_code == 0 else "failed"
             return return_code
@@ -954,7 +959,7 @@ def build_parser() -> argparse.ArgumentParser:
         "start", help="start a detached preview process"
     )
     preview_start_parser.add_argument("--port", required=True, type=int)
-    preview_start_parser.add_argument("--cwd", default="/workspace")
+    preview_start_parser.add_argument("--cwd")
     preview_start_parser.add_argument("--timeout-ms", type=int, default=20000)
     preview_start_parser.add_argument("--json", action="store_true")
     preview_start_parser.add_argument("arguments", nargs=argparse.REMAINDER)
@@ -1020,7 +1025,15 @@ def main(argv: list[str] | None = None) -> int:
             port = bounded(args.port, "port", 1024, 65535)
             if args.preview_command == "start":
                 timeout_ms = bounded(args.timeout_ms, "timeout-ms", 1000, 60000)
-                emit(preview_start(manifest, port, args.cwd, args.arguments, timeout_ms), args.json)
+                requested_cwd = (
+                    args.cwd
+                    or os.environ.get("COCOLA_AGENT_CWD", "").strip()
+                    or manifest["workspace"]["root"]
+                )
+                emit(
+                    preview_start(manifest, port, requested_cwd, args.arguments, timeout_ms),
+                    args.json,
+                )
             elif args.preview_command == "status":
                 emit(preview_status(manifest, port), args.json)
             elif args.preview_command == "stop":
@@ -1031,7 +1044,17 @@ def main(argv: list[str] | None = None) -> int:
         elif args.command == "github" and args.github_command in {"gh", "git"}:
             if not github_enabled(manifest, profile):
                 raise RuntimeError("GitHub commands are disabled by the active sandbox profile")
-            return run_github_command(args.github_command, args.arguments, args.permissions)
+            working_directory = preview_workspace_cwd(
+                manifest,
+                os.environ.get("COCOLA_AGENT_CWD", "").strip()
+                or manifest["workspace"]["root"],
+            )
+            return run_github_command(
+                args.github_command,
+                args.arguments,
+                args.permissions,
+                str(working_directory),
+            )
         else:
             parser.print_help()
             return 2

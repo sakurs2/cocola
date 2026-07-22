@@ -26,7 +26,7 @@ Request schema:
     "system_prompt": str | null,      # optional
     "max_turns":     int | null,      # optional, default 20
     "resume":        str | null,      # optional session_id to --resume
-    "cwd":           str | null,      # optional, default $COCOLA_WORKSPACE
+    "cwd":           str | null,      # optional, default $COCOLA_AGENT_CWD
     "permission_mode": str | null,    # optional, default "bypassPermissions"
     "mcp_servers":   object | null    # optional runtime MCP configuration
   }
@@ -87,7 +87,12 @@ def _build_options(req: dict[str, Any]):
     """
     import claude_agent_sdk
 
-    cwd = req.get("cwd") or os.environ.get("COCOLA_WORKSPACE") or os.getcwd()
+    cwd = (
+        req.get("cwd")
+        or os.environ.get("COCOLA_AGENT_CWD")
+        or os.environ.get("COCOLA_WORKSPACE")
+        or os.getcwd()
+    )
     permission_mode = req.get("permission_mode") or "bypassPermissions"
 
     kwargs: dict[str, Any] = dict(
@@ -108,7 +113,7 @@ def _build_options(req: dict[str, Any]):
     kwargs["skills"] = "all"
 
     # System prompt: default to Claude Code's preset (which injects the live
-    # <env> block, incl. the genuine /workspace cwd). A caller-supplied prompt
+    # <env> block, including the genuine current cwd). A caller-supplied prompt
     # is *appended* to the preset rather than replacing it, so callers can add
     # instructions without amputating the agent's environment awareness.
     caller_prompt = req.get("system_prompt")

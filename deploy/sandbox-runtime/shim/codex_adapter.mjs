@@ -126,7 +126,7 @@ const run = async (request) => {
   });
   const threadOptions = {
     model: request.model || process.env.CODEX_MODEL,
-    workingDirectory: "/workspace",
+    workingDirectory: request.cwd || process.env.COCOLA_AGENT_CWD || "/workspace",
     skipGitRepoCheck: true,
     sandboxMode: "danger-full-access",
     approvalPolicy: "never",

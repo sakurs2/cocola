@@ -3,10 +3,10 @@
 Hermetic: no gRPC server, no Docker. We drive AgentRuntimeServicer.Query with a
 StaticSandboxBinder + StaticSandboxExecutor and assert the push model:
 
-  - each uploaded file is written into ./uploads/ under the workspace cwd
-    (resolved via `pwd`), binary-safe, and a prompt preamble listing the paths
+  - each uploaded file is written into /workspace/uploads, binary-safe, and a
+    prompt preamble listing the absolute paths
     is prepended to the user's prompt the provider sees.
-  - `mkdir -p uploads` runs before any write (WriteFile does not create dirs).
+  - `mkdir -p /workspace/uploads` runs before any write (WriteFile does not create dirs).
   - filenames are sanitized: path traversal / separators cannot escape uploads.
   - a provisioning failure becomes a terminal `error` event; the provider never
     runs (we do not run the agent against files that never arrived).
@@ -90,12 +90,13 @@ async def test_attachments_are_written_and_preamble_prepended():
     )
     await AgentRuntimeServicer(prov, binder=binder, executor=ex).Query(req, ctx)
 
-    # mkdir ran before writes, in the workspace cwd (empty cwd == container WD).
+    # mkdir ran before writes in the platform-owned directory.
     assert ex.exec_calls and ex.exec_calls[0]["cmd"] == [
-        "sh",
-        "-c",
-        "mkdir -p uploads && pwd",
+        "mkdir",
+        "-p",
+        "/workspace/uploads",
     ]
+    assert ex.exec_calls[0]["cwd"] == "/"
     # Both files landed under the resolved absolute uploads dir, binary-safe.
     written_paths = {p for (_sid, p, _data) in ex.byte_writes}
     assert written_paths == {
@@ -105,10 +106,10 @@ async def test_attachments_are_written_and_preamble_prepended():
     png = next(d for (_s, p, d) in ex.byte_writes if p.endswith("pic.png"))
     assert png == b"\x89PNG\x00\x01"  # bytes preserved, not utf-8 mangled
 
-    # The provider saw a preamble listing relative paths, then the user prompt.
+    # The provider saw a preamble listing absolute paths, then the user prompt.
     assert prov.ran is True
-    assert "./uploads/notes.txt" in prov.seen_prompt
-    assert "./uploads/pic.png" in prov.seen_prompt
+    assert "/workspace/uploads/notes.txt" in prov.seen_prompt
+    assert "/workspace/uploads/pic.png" in prov.seen_prompt
     assert prov.seen_prompt.endswith("what do these say?")
 
 
@@ -150,7 +151,7 @@ async def test_provisioning_failure_is_terminal_and_skips_provider():
 async def test_no_executor_lands_on_host_and_sets_cwd(tmp_path, monkeypatch):
     # Local dev: no executor/sandbox, so the brain runs IN-PROCESS. Attachments
     # must land in a per-session HOST workspace under the configured root, and
-    # that dir must be handed to the provider as its cwd so ./uploads/ resolves.
+    # that dir must be handed to the provider as its cwd.
     monkeypatch.setenv("COCOLA_LOCAL_WORKSPACE_ROOT", str(tmp_path))
     prov = RecordingProvider()
     binder = StaticSandboxBinder()
@@ -170,7 +171,7 @@ async def test_no_executor_lands_on_host_and_sets_cwd(tmp_path, monkeypatch):
 
     assert prov.ran is True
     # Preamble prepended, then the user prompt; workspace threaded as cwd.
-    assert "./uploads/a.txt" in prov.seen_prompt
+    assert str(uploads / "a.txt") in prov.seen_prompt
     assert prov.seen_prompt.endswith("what does it say?")
     assert prov.seen_options.workspace == str(workspace)
     assert [e.kind for e in ctx.written][-1] == "done"

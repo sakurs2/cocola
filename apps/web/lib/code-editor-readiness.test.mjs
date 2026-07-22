@@ -20,6 +20,10 @@ test("code editor URLs target the selected workspace directory", () => {
     buildCodeEditorURL("session/with spaces", "src/web client/组件"),
     "/api/preview/session%2Fwith%20spaces/39378/?folder=%2Fworkspace%2Fsrc%2Fweb+client%2F%E7%BB%84%E4%BB%B6",
   );
+  assert.equal(
+    buildCodeEditorURL("project-session", "project"),
+    "/api/preview/project-session/39378/?folder=%2Fworkspace%2Fproject",
+  );
 });
 
 test("code editor tab IDs are stable per normalized directory", () => {

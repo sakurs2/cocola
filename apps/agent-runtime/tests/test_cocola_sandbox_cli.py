@@ -30,6 +30,7 @@ def cli(monkeypatch: pytest.MonkeyPatch):
     monkeypatch.delenv("COCOLA_SANDBOX_PROFILE", raising=False)
     monkeypatch.delenv("COCOLA_CODE_SERVER_ENABLED", raising=False)
     monkeypatch.delenv("COCOLA_BROWSER_ENABLED", raising=False)
+    monkeypatch.delenv("COCOLA_AGENT_CWD", raising=False)
     return module
 
 
@@ -47,6 +48,7 @@ def test_info_reports_coding_profile_and_ready_service(cli, monkeypatch, capsys)
     assert payload["schema_version"] == 1
     assert payload["profile"] == "coding"
     assert payload["workspace"]["root"] == "/workspace"
+    assert payload["workspace"]["paths"]["project"]["path"] == "/workspace/project"
     assert payload["editor"]["update_policy"] == "runtime-image-only"
     assert payload["services"][0]["state"] == "ready"
     assert payload["capabilities"][0]["name"] == "browser"
@@ -337,6 +339,28 @@ def test_preview_start_detaches_scrubs_run_credentials_and_waits_for_network(
     assert "command" not in state
 
 
+def test_preview_command_defaults_to_agent_working_directory(cli, monkeypatch, capsys):
+    captured = {}
+    monkeypatch.setenv("COCOLA_AGENT_CWD", "/workspace/project")
+
+    def preview_start(manifest, port, cwd, command, timeout_ms):
+        captured.update(cwd=cwd, command=command, port=port, timeout_ms=timeout_ms)
+        return {"state": "ready"}
+
+    monkeypatch.setattr(cli, "preview_start", preview_start)
+
+    assert (
+        cli.main(["preview", "start", "--port", "3000", "--json", "--", "npm", "run", "dev"]) == 0
+    )
+    assert captured == {
+        "cwd": "/workspace/project",
+        "command": ["--", "npm", "run", "dev"],
+        "port": 3000,
+        "timeout_ms": 20000,
+    }
+    assert json.loads(capsys.readouterr().out)["state"] == "ready"
+
+
 def test_preview_runner_keeps_only_two_bounded_log_segments(cli, tmp_path):
     log_path = tmp_path / "preview.log"
     payload_bytes = cli.PREVIEW_LOG_MAX_BYTES * 3
@@ -445,6 +469,29 @@ def test_github_command_reports_failed_result_without_persisting_token(cli, monk
 
     assert cli.run_github_command("gh", ["issue", "create", "--title", "Bug"], []) == 1
     assert requests[-1][2] == {"result": "failed"}
+
+
+def test_brokered_git_command_runs_from_project_worktree(cli, monkeypatch, tmp_path):
+    worktree = tmp_path / "project"
+    worktree.mkdir()
+    requests = []
+
+    def broker_request(method, path, body=None):
+        requests.append((method, path, body))
+        if method == "POST":
+            return 200, {"status": "ready", "lease_id": "lease-3", "token": "temporary"}
+        return 204, {}
+
+    def run(command, **kwargs):
+        assert command == ["git", "push", "origin", "main"]
+        assert kwargs["cwd"] == str(worktree)
+        return subprocess.CompletedProcess(command, 0)
+
+    monkeypatch.setattr(cli, "_broker_request", broker_request)
+    monkeypatch.setattr(cli.subprocess, "run", run)
+
+    assert cli.run_github_command("git", ["push", "origin", "main"], [], str(worktree)) == 0
+    assert requests[-1][2] == {"result": "success"}
 
 
 def test_manifest_resource_defaults_match_sandbox_manager():
@@ -595,17 +642,17 @@ def test_builtin_artifact_skill_matches_the_guest_cli_contract():
     assert descriptor == {
         "id": "cocola-sandbox-artifacts",
         "name": "Cocola Sandbox Artifacts",
-        "version": "1.0.0",
+        "version": "1.0.1",
         "path": "cocola-sandbox-artifacts",
     }
     assert skill_md.startswith("---\nname: cocola-sandbox-artifacts\n")
     assert "cocola-sandbox artifact status --json" in skill_md
     assert "cocola-sandbox artifact list --json" in skill_md
-    assert "self-contained `.html`" in skill_md
+    assert "external CDN resources" in skill_md
     assert manifest["capabilities"]["artifacts"] == {
         "kind": "workspace-output",
         "output_dir": "/workspace/outputs",
-        "html_preview": "isolated-self-contained",
+        "html_preview": "active",
         "required": True,
         "commands": ["status", "list"],
     }
@@ -626,7 +673,7 @@ def test_builtin_preview_skill_matches_the_managed_process_contract():
     assert descriptor == {
         "id": "cocola-sandbox-preview",
         "name": "Cocola Sandbox Preview",
-        "version": "1.0.0",
+        "version": "1.0.1",
         "path": "cocola-sandbox-preview",
     }
     assert "cocola-sandbox preview start" in skill_md

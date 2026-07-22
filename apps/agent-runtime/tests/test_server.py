@@ -64,6 +64,7 @@ class FakeRequest:
     allow_workspace_reset: bool = False
     attachments: list = field(default_factory=list)
     memory_context: str = ""
+    project_context: object | None = None
 
 
 def test_memory_context_is_appended_as_untrusted_low_priority_context():
@@ -1015,6 +1016,52 @@ async def test_query_maps_request_fields_to_options():
     assert o.sandbox_id == "box-1" and o.max_turns == 5
 
 
+async def test_project_query_uses_isolated_project_worktree():
+    project = SimpleNamespace(
+        project_id="project-1",
+        repository_id=0,
+        clone_url="",
+        default_branch="main",
+        base_sha="",
+        task_branch="main",
+        git_author_name="Project User",
+        git_author_email="project@example.com",
+        repository_provider="local",
+        repository_full_name="",
+        credential_mode="none",
+    )
+
+    def exec_handler(_sandbox_id, cmd, stdin):
+        assert cmd[:2] == ["python3", "-c"]
+        operation = json.loads(stdin)["operation"]
+        assert operation in {"bootstrap", "status"}
+        return ExecOutcome(
+            stdout=json.dumps(
+                {
+                    "ok": True,
+                    "snapshot": {
+                        "branch": "main",
+                        "base_sha": "a" * 40,
+                        "head_sha": "a" * 40,
+                        "changes": [],
+                        "commits": [],
+                    },
+                }
+            )
+        )
+
+    provider = ListProvider([AgentEvent(kind="done", data={})])
+    await AgentRuntimeServicer(
+        provider,
+        binder=StaticSandboxBinder(),
+        executor=StaticSandboxExecutor(exec_handler=exec_handler),
+    ).Query(FakeRequest(project_context=project), FakeContext())
+
+    assert provider.seen_options is not None
+    assert provider.seen_options.working_directory == "/workspace/project"
+    assert provider.seen_options.workspace == "/workspace/project"
+
+
 async def test_runtime_catalog_and_provider_dispatch():
     claude = ListProvider([AgentEvent(kind="done", data={})])
     codex = ListProvider([AgentEvent(kind="done", data={})])
@@ -1189,9 +1236,9 @@ async def test_query_publishes_outputs_artifacts():
     key = file_event.data["object_key"]
     assert key.startswith("artifacts/U1/S1/")
     assert store.puts[key] == (b"hello world", "text/plain")
-    assert "Only changed regular files in ./outputs/" in prov.seen_options.system_prompt
+    assert "Only changed regular files in /workspace/outputs/" in prov.seen_options.system_prompt
     assert "cocola-sandbox artifact list --json" in prov.seen_options.system_prompt
-    assert "self-contained file" in prov.seen_options.system_prompt
+    assert "self-contained file" not in prov.seen_options.system_prompt
 
 
 async def test_outputs_snapshot_runs_from_persistent_workspace():

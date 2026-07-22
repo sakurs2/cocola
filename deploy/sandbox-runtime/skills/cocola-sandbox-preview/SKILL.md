@@ -16,9 +16,13 @@ keeps bounded status and logs under the Sandbox runtime state directory.
    flags differ, so pass the explicit host flag supported by the project:
 
    ```bash
-   cocola-sandbox preview start --port 3000 --cwd /workspace/my-app --json -- \
+   cocola-sandbox preview start --port 3000 --json -- \
      npm run dev -- --hostname 0.0.0.0
    ```
+
+   The command defaults to the active Agent working directory: `/workspace/project`
+   for Project runs and `/workspace` for ordinary conversations. Pass `--cwd`
+   only when the application lives in a subdirectory.
 
    For Vite, use `npm run dev -- --host 0.0.0.0`. The CLI also exports `HOST`,
    `HOSTNAME`, and `PORT`, but an explicit framework flag is preferred.

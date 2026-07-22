@@ -5,6 +5,11 @@ Cocola 的 Project 支持两类工作区：
 - Empty Project：不依赖 GitHub 或内部 Git 服务，在一个持久化 Conversation Workspace 中直接使用本地 Git `main` 分支。每个 Project 只允许一个 Workspace。
 - GitHub Project：由用户从自己的 GitHub 个人账号创建或导入仓库；每个 Task 使用独立的 `cocola/task-*` 分支。
 
+两类 Project 的 Git 工作树都固定在 `/workspace/project`，Agent、Code Server、
+Git Inspect 和默认 Preview cwd 使用该目录。项目名称和 GitHub 仓库名称属于元数据，
+不参与本地目录命名。`/workspace/outputs`、`/workspace/uploads` 和
+`/workspace/downloads` 是平台目录，不进入 Git 工作树。
+
 Empty Project 可在 Workspace 中完成本地 commit。用户连接 GitHub 后，可从 Project 页面明确执行 `Publish to GitHub`，把干净且已提交的 `main` 推到新建的个人仓库。发布后的 Project 仍保持单 Workspace/`main` 模型，Agent 后续通过短期 Token Broker 使用 `gh` 或推送；默认分支写入需要逐次确认。
 
 ## 每用户 GitHub App

@@ -29,9 +29,11 @@ desktop, per-Sandbox observe APIs, HTML publication, browser automation, or MCP.
   may fail independently while the Sandbox remains available for Agent Exec.
   Supervisor configuration and launchers remain root-owned; Code Server always
   drops to the fixed non-root `cocola` identity before executing its binary.
-- `/workspace`, `/workspace/outputs`, `/workspace/downloads`, `/session/runtime`
-  and `/cache` form the stable guest path contract. Browser state is reserved at
-  `/session/runtime/browser`; `/cache` stays ephemeral.
+- `/workspace` is the platform volume root. `/workspace/project` is reserved for
+  a Project Git worktree; `/workspace/outputs`, `/workspace/uploads` and
+  `/workspace/downloads` remain platform-owned siblings. `/session/runtime` and
+  `/cache` complete the stable guest path contract. Browser state is reserved
+  at `/session/runtime/browser`; `/cache` stays ephemeral.
 - `COCOLA_SANDBOX_PROFILE` is operator-owned and accepts `coding` or `minimal`.
   The default `coding` profile enables Code Server and uses a `2000m/4096Mi`
   resource floor. `minimal` disables Code Server and uses `500m/512Mi`.

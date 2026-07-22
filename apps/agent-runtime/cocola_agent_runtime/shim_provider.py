@@ -267,6 +267,7 @@ class InSandboxShimProvider:
             "runtime_id": options.runtime_id,
             "conversation_id": options.session_id,
             "max_turns": options.max_turns or self._default_max_turns,
+            "cwd": options.working_directory,
         }
         if options.model_route_id:
             req["model"] = options.model_route_id
@@ -314,6 +315,8 @@ class InSandboxShimProvider:
         project_repository = (options.project_repository or "").strip()
         project_broker_url = (options.project_broker_url or "").strip()
         project_task_branch = (options.project_task_branch or "").strip()
+        working_directory = (options.working_directory or "/workspace").strip()
+        env["COCOLA_AGENT_CWD"] = working_directory
         if project_credential and project_provider:
             env["COCOLA_PROJECT_CREDENTIAL"] = project_credential
             env["COCOLA_PROJECT_PROVIDER"] = project_provider
@@ -483,7 +486,7 @@ class InSandboxShimProvider:
             async for chunk in self._executor.exec_stream(
                 sandbox_id=options.sandbox_id,
                 cmd=[SHIM_ENTRYPOINT],
-                cwd="/workspace",
+                cwd=options.working_directory or "/workspace",
                 env=self._model_env(options),
                 stdin=request_json,
                 # A full Agent run has no aggregate deadline. Gateway enforces

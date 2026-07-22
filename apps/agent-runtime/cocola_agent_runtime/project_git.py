@@ -17,7 +17,8 @@ from typing import Any
 
 from cocola_agent_runtime.sandbox_binder import SandboxExecutor
 
-WORKSPACE = "/workspace"
+PLATFORM_WORKSPACE = "/workspace"
+PROJECT_WORKTREE = "/workspace/project"
 MAX_DIFF_BYTES = 512 * 1024
 
 
@@ -334,7 +335,9 @@ import tempfile
 import urllib.parse
 import uuid
 
-WORKSPACE = pathlib.Path("/workspace")
+PLATFORM_WORKSPACE = pathlib.Path("/workspace")
+WORKSPACE = PLATFORM_WORKSPACE / "project"
+PLATFORM_DIRECTORIES = {"outputs", "uploads", "downloads"}
 MAX_PATHS = 500
 MAX_DIFF = 512 * 1024
 MAX_COMMITS = 50
@@ -355,7 +358,7 @@ def fail(code, message):
 def git(args, cwd=WORKSPACE, env=None, timeout=60, binary=False):
     command = [
         "git", "-c", "credential.helper=", "-c", "core.hooksPath=/dev/null",
-        "-c", "core.fsmonitor=false", "-c", "safe.directory=/workspace", *args,
+        "-c", "core.fsmonitor=false", "-c", "safe.directory=" + str(cwd), *args,
     ]
     process_env = {
         **os.environ,
@@ -386,8 +389,7 @@ def git(args, cwd=WORKSPACE, env=None, timeout=60, binary=False):
 def marker_path():
     return WORKSPACE / ".git" / "cocola-project.json"
 
-def validate_workspace():
-    path = marker_path()
+def validate_marker(path):
     if not path.is_file():
         fail("PROJECT_WORKSPACE_MISMATCH", "Project workspace marker is missing")
     try:
@@ -405,9 +407,122 @@ def validate_workspace():
         or marker.get("base_sha", "").lower() != spec["base_sha"].lower()
     ):
         fail("PROJECT_WORKSPACE_MISMATCH", "Workspace belongs to a different project")
+
+def validate_workspace():
+    validate_marker(marker_path())
     branch = git(["rev-parse", "--abbrev-ref", "HEAD"])
     if branch.returncode != 0 or branch.stdout.strip() != spec["task_branch"]:
         fail("PROJECT_WORKSPACE_MISMATCH", "Workspace is on an unexpected branch")
+
+def remove_entry(path):
+    if path.is_symlink() or path.is_file():
+        path.unlink()
+    elif path.is_dir():
+        shutil.rmtree(path)
+
+def link_or_copy(source, target):
+    source = pathlib.Path(source)
+    target = pathlib.Path(target)
+    target.parent.mkdir(parents=True, exist_ok=True)
+    try:
+        os.link(source, target)
+    except OSError:
+        shutil.copy2(source, target)
+
+def copy_entry(source, target):
+    if source.is_symlink():
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.symlink_to(os.readlink(source))
+    elif source.is_dir():
+        shutil.copytree(
+            source, target, symlinks=True, copy_function=link_or_copy,
+        )
+    else:
+        link_or_copy(source, target)
+
+def legacy_marker_path():
+    return PLATFORM_WORKSPACE / ".git" / "cocola-project.json"
+
+def legacy_tracked_platform_paths():
+    tracked = git(
+        ["ls-files", "-z", "--", *sorted(PLATFORM_DIRECTORIES)],
+        cwd=PLATFORM_WORKSPACE,
+        binary=True,
+    )
+    if tracked.returncode != 0:
+        fail("PROJECT_WORKSPACE_MIGRATION_FAILED", "Could not inspect the legacy workspace")
+    paths = []
+    for raw in tracked.stdout.split(b"\0"):
+        if not raw:
+            continue
+        value = raw.decode("utf-8", "surrogateescape")
+        parts = pathlib.PurePosixPath(value).parts
+        if not parts or parts[0] not in PLATFORM_DIRECTORIES or ".." in parts:
+            fail("PROJECT_WORKSPACE_MIGRATION_FAILED", "Legacy workspace path is invalid")
+        paths.append(value)
+    return paths
+
+def cleanup_legacy_workspace(tracked_platform_paths):
+    for entry in list(PLATFORM_WORKSPACE.iterdir()):
+        if (
+            entry.name in PLATFORM_DIRECTORIES
+            or entry.name in {"project", "lost+found"}
+            or entry.name.startswith(".cocola-project-migrate-")
+            or entry.name.startswith(".cocola-clone-")
+        ):
+            continue
+        remove_entry(entry)
+    for value in tracked_platform_paths:
+        source = PLATFORM_WORKSPACE / value
+        if source.is_symlink() or source.is_file():
+            source.unlink()
+        parent = source.parent
+        platform_root = PLATFORM_WORKSPACE / pathlib.PurePosixPath(value).parts[0]
+        while parent != platform_root:
+            try:
+                parent.rmdir()
+            except OSError:
+                break
+            parent = parent.parent
+
+def migrate_legacy_workspace():
+    legacy_marker = legacy_marker_path()
+    if not legacy_marker.is_file():
+        return
+    if WORKSPACE.exists():
+        if any(WORKSPACE.iterdir()):
+            fail(
+                "PROJECT_WORKSPACE_MIGRATION_CONFLICT",
+                "The legacy Project cannot be migrated because /workspace/project is not empty",
+            )
+        WORKSPACE.rmdir()
+
+    tracked_platform_paths = legacy_tracked_platform_paths()
+    stage = PLATFORM_WORKSPACE / (".cocola-project-migrate-" + uuid.uuid4().hex)
+    stage.mkdir()
+    try:
+        for entry in PLATFORM_WORKSPACE.iterdir():
+            if (
+                entry.name in PLATFORM_DIRECTORIES
+                or entry.name in {"project", "lost+found", stage.name}
+                or entry.name.startswith(".cocola-project-migrate-")
+                or entry.name.startswith(".cocola-clone-")
+            ):
+                continue
+            copy_entry(entry, stage / entry.name)
+        for value in tracked_platform_paths:
+            source = PLATFORM_WORKSPACE / value
+            if source.is_symlink() or source.is_file():
+                copy_entry(source, stage / value)
+        validate_marker(stage / ".git" / "cocola-project.json")
+        branch = git(["rev-parse", "--abbrev-ref", "HEAD"], cwd=stage)
+        if branch.returncode != 0 or branch.stdout.strip() != spec["task_branch"]:
+            fail("PROJECT_WORKSPACE_MIGRATION_FAILED", "Legacy workspace branch is invalid")
+        os.replace(stage, WORKSPACE)
+    finally:
+        if stage.exists():
+            shutil.rmtree(stage, ignore_errors=True)
+    cleanup_legacy_workspace(tracked_platform_paths)
 
 def configure_author(cwd):
     for key, value in (
@@ -423,28 +538,23 @@ def bootstrap():
         validate_workspace()
         configure_author(WORKSPACE)
         return
-    WORKSPACE.mkdir(parents=True, exist_ok=True)
-    platform_directories = {"outputs", "downloads"}
-    existing = []
-    for entry in WORKSPACE.iterdir():
-        if entry.name == "lost+found":
-            continue
-        if entry.name in platform_directories and entry.is_dir() and not entry.is_symlink():
-            unsafe_children = [
-                child for child in entry.rglob("*")
-                if child.is_symlink() or not child.is_dir()
-            ]
-            if not unsafe_children:
-                continue
-        existing.append(entry)
-    if existing:
-        fail("PROJECT_WORKSPACE_MISMATCH", "Workspace is not empty and is not a Cocola project")
+    if legacy_marker_path().is_file():
+        migrate_legacy_workspace()
+        validate_workspace()
+        configure_author(WORKSPACE)
+        return
+    PLATFORM_WORKSPACE.mkdir(parents=True, exist_ok=True)
+    if WORKSPACE.exists():
+        if any(WORKSPACE.iterdir()):
+            fail("PROJECT_WORKSPACE_MISMATCH", "Project worktree is not empty")
+        WORKSPACE.rmdir()
     if repository_provider == "local":
         if spec.get("base_sha"):
             fail(
                 "LOCAL_PROJECT_WORKSPACE_LOST",
                 "The local Project volume is unavailable and cannot be reinitialized safely",
             )
+        WORKSPACE.mkdir()
         initialized = git(["init", "-b", "main"], cwd=WORKSPACE)
         if initialized.returncode != 0:
             fail("PROJECT_GIT_INIT_FAILED", "Could not initialize the local project")
@@ -460,7 +570,7 @@ def bootstrap():
             fail("PROJECT_GIT_INIT_FAILED", "Could not read the initial project revision")
         spec["base_sha"] = head.stdout.strip()
         marker = {
-            "schema_version": 1,
+            "schema_version": 2,
             "project_id": spec["project_id"],
             "repository_id": 0,
             "repository_provider": "local",
@@ -469,7 +579,7 @@ def bootstrap():
         }
         marker_path().write_text(json.dumps(marker, sort_keys=True), encoding="utf-8")
         return
-    stage = WORKSPACE / (".cocola-clone-" + uuid.uuid4().hex)
+    stage = PLATFORM_WORKSPACE / (".cocola-clone-" + uuid.uuid4().hex)
     askpass_dir = pathlib.Path(tempfile.mkdtemp(prefix="cocola-askpass-"))
     askpass = askpass_dir / "askpass.sh"
     askpass.write_text(
@@ -497,7 +607,7 @@ def bootstrap():
             fail("PROJECT_BASE_SHA_MISMATCH", "Cloned repository revision does not match")
         configure_author(stage)
         marker = {
-            "schema_version": 1,
+            "schema_version": 2,
             "project_id": spec["project_id"],
             "repository_id": int(spec["repository_id"]),
             "repository_provider": repository_provider,
@@ -507,13 +617,9 @@ def bootstrap():
         (stage / ".git" / "cocola-project.json").write_text(
             json.dumps(marker, sort_keys=True), encoding="utf-8"
         )
-        # Publish repository metadata last. A process interruption can leave a
-        # visibly incomplete directory, but can never leave a valid marker on
-        # a partially moved checkout that a later resume would accept.
-        for entry in [entry for entry in stage.iterdir() if entry.name != ".git"]:
-            os.replace(entry, WORKSPACE / entry.name)
-        os.replace(stage / ".git", WORKSPACE / ".git")
-        stage.rmdir()
+        # Publish the complete checkout atomically so /workspace/project never
+        # exposes a partially initialized Git worktree.
+        os.replace(stage, WORKSPACE)
     finally:
         os.environ.pop("COCOLA_SCM_TOKEN", None)
         shutil.rmtree(askpass_dir, ignore_errors=True)

@@ -6,7 +6,7 @@ must materialize those by pulling their bytes from the object-store fetcher
 before provisioning, so both delivery routes see "filename + bytes in hand".
 
 Hermetic: a fake Fetcher stands in for MinIO; a StaticSandboxBinder +
-StaticSandboxExecutor capture what lands in ./uploads/.
+StaticSandboxExecutor capture what lands in /workspace/uploads/.
 """
 
 from dataclasses import dataclass
@@ -104,11 +104,11 @@ async def test_key_only_attachment_is_pulled_and_written():
 
     # Bytes were pulled from the store by key ...
     assert fetcher.gets == ["attachments/S9/uuid-big.bin"]
-    # ... and landed under ./uploads/ binary-safe.
+    # ... and landed under /workspace/uploads/ binary-safe.
     writes = {p: d for (_s, p, d) in ex.byte_writes}
     assert writes == {"/workspace/uploads/big.bin": b"\x89PNG\x00pulled"}
     assert prov.ran is True
-    assert "./uploads/big.bin" in prov.seen_prompt
+    assert "/workspace/uploads/big.bin" in prov.seen_prompt
 
 
 async def test_inline_attachment_is_not_pulled():

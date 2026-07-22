@@ -18,6 +18,12 @@ from cocola_agent_runtime.project_git import (
 from cocola_agent_runtime.sandbox_binder import ExecOutcome
 
 
+def project_script(workspace) -> str:
+    return _PROJECT_GIT_SCRIPT.replace(
+        'pathlib.Path("/workspace")', f"pathlib.Path({str(workspace)!r})", 1
+    )
+
+
 def valid_spec() -> ProjectSpec:
     return ProjectSpec(
         project_id="9ad7d767-2f20-4d67-b8ff-b604d10dd03e",
@@ -150,7 +156,9 @@ def test_embedded_project_git_script_compiles():
 def test_fresh_local_project_initializes_main_and_reuses_workspace(tmp_path):
     workspace = tmp_path / "workspace"
     (workspace / "outputs" / "browser").mkdir(parents=True)
+    (workspace / "outputs" / "browser" / "preview.png").write_bytes(b"png")
     (workspace / "downloads").mkdir()
+    worktree = workspace / "project"
     spec = {
         "project_id": "project-local",
         "repository_id": 0,
@@ -164,9 +172,7 @@ def test_fresh_local_project_initializes_main_and_reuses_workspace(tmp_path):
         "repository_full_name": "",
         "credential_mode": "none",
     }
-    script = _PROJECT_GIT_SCRIPT.replace(
-        'pathlib.Path("/workspace")', f"pathlib.Path({str(workspace)!r})", 1
-    )
+    script = project_script(workspace)
 
     first = subprocess.run(
         [sys.executable, "-c", script],
@@ -178,21 +184,24 @@ def test_fresh_local_project_initializes_main_and_reuses_workspace(tmp_path):
     first_payload = json.loads(first.stdout)
     assert first_payload["ok"] is True
     assert first_payload["snapshot"]["branch"] == "main"
+    assert first_payload["snapshot"]["dirty"] is False
     base_sha = first_payload["snapshot"]["base_sha"]
     assert len(base_sha) == 40
     branch = subprocess.run(
         ["git", "rev-parse", "--abbrev-ref", "HEAD"],
-        cwd=workspace,
+        cwd=worktree,
         check=True,
         capture_output=True,
         text=True,
     ).stdout.strip()
     assert branch == "main"
     assert (workspace / "outputs" / "browser").is_dir()
+    assert (workspace / "outputs" / "browser" / "preview.png").is_file()
     assert (workspace / "downloads").is_dir()
+    assert (worktree / ".git").is_dir()
 
     spec["base_sha"] = base_sha
-    (workspace / "kept.txt").write_text("persisted\n", encoding="utf-8")
+    (worktree / "kept.txt").write_text("persisted\n", encoding="utf-8")
     second = subprocess.run(
         [sys.executable, "-c", script],
         input=json.dumps({"operation": "bootstrap", "spec": spec}),
@@ -201,11 +210,12 @@ def test_fresh_local_project_initializes_main_and_reuses_workspace(tmp_path):
         text=True,
     )
     assert json.loads(second.stdout)["ok"] is True
-    assert (workspace / "kept.txt").read_text(encoding="utf-8") == "persisted\n"
+    assert (worktree / "kept.txt").read_text(encoding="utf-8") == "persisted\n"
 
 
 def test_git_history_and_commit_details_are_bounded_and_readable(tmp_path):
     workspace = tmp_path / "workspace"
+    worktree = workspace / "project"
     spec = {
         "project_id": "project-local",
         "repository_id": 0,
@@ -219,9 +229,7 @@ def test_git_history_and_commit_details_are_bounded_and_readable(tmp_path):
         "repository_full_name": "",
         "credential_mode": "none",
     }
-    script = _PROJECT_GIT_SCRIPT.replace(
-        'pathlib.Path("/workspace")', f"pathlib.Path({str(workspace)!r})", 1
-    )
+    script = project_script(workspace)
 
     bootstrap = subprocess.run(
         [sys.executable, "-c", script],
@@ -231,19 +239,19 @@ def test_git_history_and_commit_details_are_bounded_and_readable(tmp_path):
         text=True,
     )
     spec["base_sha"] = json.loads(bootstrap.stdout)["snapshot"]["base_sha"]
-    (workspace / "src").mkdir()
-    (workspace / "src" / "app.py").write_text('print("hello")\n', encoding="utf-8")
-    subprocess.run(["git", "add", "src/app.py"], cwd=workspace, check=True)
+    (worktree / "src").mkdir()
+    (worktree / "src" / "app.py").write_text('print("hello")\n', encoding="utf-8")
+    subprocess.run(["git", "add", "src/app.py"], cwd=worktree, check=True)
     subprocess.run(
         ["git", "commit", "-m", "Add application", "-m", "Explain the first feature."],
-        cwd=workspace,
+        cwd=worktree,
         check=True,
         capture_output=True,
         text=True,
     )
     head_sha = subprocess.run(
         ["git", "rev-parse", "HEAD"],
-        cwd=workspace,
+        cwd=worktree,
         check=True,
         capture_output=True,
         text=True,
@@ -304,8 +312,9 @@ def test_git_history_and_commit_details_are_bounded_and_readable(tmp_path):
 
 def test_git_history_is_limited_to_latest_fifty_commits(tmp_path):
     workspace = tmp_path / "workspace"
+    worktree = workspace / "project"
     subprocess.run(
-        ["git", "init", "-b", "main", str(workspace)],
+        ["git", "init", "-b", "main", str(worktree)],
         check=True,
         capture_output=True,
         text=True,
@@ -322,14 +331,14 @@ def test_git_history_is_limited_to_latest_fifty_commits(tmp_path):
             "-m",
             "commit 0",
         ],
-        cwd=workspace,
+        cwd=worktree,
         check=True,
         capture_output=True,
         text=True,
     )
     base_sha = subprocess.run(
         ["git", "rev-parse", "HEAD"],
-        cwd=workspace,
+        cwd=worktree,
         check=True,
         capture_output=True,
         text=True,
@@ -347,7 +356,7 @@ def test_git_history_is_limited_to_latest_fifty_commits(tmp_path):
                 "-m",
                 f"commit {index}",
             ],
-            cwd=workspace,
+            cwd=worktree,
             check=True,
             capture_output=True,
             text=True,
@@ -365,7 +374,7 @@ def test_git_history_is_limited_to_latest_fifty_commits(tmp_path):
         "repository_full_name": "",
         "credential_mode": "none",
     }
-    (workspace / ".git" / "cocola-project.json").write_text(
+    (worktree / ".git" / "cocola-project.json").write_text(
         json.dumps(
             {
                 "schema_version": 1,
@@ -378,9 +387,7 @@ def test_git_history_is_limited_to_latest_fifty_commits(tmp_path):
         ),
         encoding="utf-8",
     )
-    script = _PROJECT_GIT_SCRIPT.replace(
-        'pathlib.Path("/workspace")', f"pathlib.Path({str(workspace)!r})", 1
-    )
+    script = project_script(workspace)
 
     result = subprocess.run(
         [sys.executable, "-c", script],
@@ -410,9 +417,7 @@ def test_local_project_does_not_silently_reinitialize_a_lost_volume(tmp_path):
         "repository_full_name": "",
         "credential_mode": "none",
     }
-    script = _PROJECT_GIT_SCRIPT.replace(
-        'pathlib.Path("/workspace")', f"pathlib.Path({str(workspace)!r})", 1
-    )
+    script = project_script(workspace)
 
     result = subprocess.run(
         [sys.executable, "-c", script],
@@ -425,12 +430,13 @@ def test_local_project_does_not_silently_reinitialize_a_lost_volume(tmp_path):
     payload = json.loads(result.stdout)
     assert payload["ok"] is False
     assert payload["code"] == "LOCAL_PROJECT_WORKSPACE_LOST"
-    assert not (workspace / ".git").exists()
+    assert not (workspace / "project" / ".git").exists()
 
 
 def test_bootstrap_configures_repository_local_git_author(tmp_path):
     workspace = tmp_path / "workspace"
     workspace.mkdir()
+    worktree = workspace / "project"
     subprocess.run(
         ["git", "init", "-b", "cocola/task-test", str(workspace)],
         check=True,
@@ -484,9 +490,9 @@ def test_bootstrap_configures_repository_local_git_author(tmp_path):
         ),
         encoding="utf-8",
     )
-    script = _PROJECT_GIT_SCRIPT.replace(
-        'pathlib.Path("/workspace")', f"pathlib.Path({str(workspace)!r})", 1
-    )
+    (workspace / "outputs").mkdir()
+    (workspace / "outputs" / "artifact.txt").write_text("preview\n", encoding="utf-8")
+    script = project_script(workspace)
 
     result = subprocess.run(
         [sys.executable, "-c", script],
@@ -496,23 +502,28 @@ def test_bootstrap_configures_repository_local_git_author(tmp_path):
         text=True,
     )
 
-    assert json.loads(result.stdout)["ok"] is True
+    payload = json.loads(result.stdout)
+    assert payload["ok"] is True
+    assert payload["snapshot"]["dirty"] is False
     author_name = subprocess.run(
         ["git", "config", "--local", "--get", "user.name"],
-        cwd=workspace,
+        cwd=worktree,
         check=False,
         capture_output=True,
         text=True,
     ).stdout.strip()
     author_email = subprocess.run(
         ["git", "config", "--local", "--get", "user.email"],
-        cwd=workspace,
+        cwd=worktree,
         check=False,
         capture_output=True,
         text=True,
     ).stdout.strip()
     assert author_name == "Octo Cat"
     assert author_email == "octo@example.com"
+    assert not (workspace / ".git").exists()
+    assert (workspace / "outputs" / "artifact.txt").read_text(encoding="utf-8") == "preview\n"
+    assert not (worktree / "outputs").exists()
 
 
 def test_fresh_clone_configures_repository_local_git_author(tmp_path):
@@ -549,6 +560,7 @@ def test_fresh_clone_configures_repository_local_git_author(tmp_path):
         text=True,
     ).stdout.strip()
     workspace = tmp_path / "workspace"
+    worktree = workspace / "project"
     spec = {
         "project_id": "project-1",
         "repository_id": 123,
@@ -559,9 +571,7 @@ def test_fresh_clone_configures_repository_local_git_author(tmp_path):
         "git_author_name": "Octo Cat",
         "git_author_email": "octo@example.com",
     }
-    script = _PROJECT_GIT_SCRIPT.replace(
-        'pathlib.Path("/workspace")', f"pathlib.Path({str(workspace)!r})", 1
-    )
+    script = project_script(workspace)
 
     result = subprocess.run(
         [sys.executable, "-c", script],
@@ -575,7 +585,7 @@ def test_fresh_clone_configures_repository_local_git_author(tmp_path):
     assert (
         subprocess.run(
             ["git", "config", "--local", "--get", "user.name"],
-            cwd=workspace,
+            cwd=worktree,
             check=True,
             capture_output=True,
             text=True,
@@ -585,18 +595,18 @@ def test_fresh_clone_configures_repository_local_git_author(tmp_path):
     assert (
         subprocess.run(
             ["git", "config", "--local", "--get", "user.email"],
-            cwd=workspace,
+            cwd=worktree,
             check=True,
             capture_output=True,
             text=True,
         ).stdout.strip()
         == "octo@example.com"
     )
-    (workspace / "work.txt").write_text("local change\n", encoding="utf-8")
-    subprocess.run(["git", "add", "work.txt"], cwd=workspace, check=True)
+    (worktree / "work.txt").write_text("local change\n", encoding="utf-8")
+    subprocess.run(["git", "add", "work.txt"], cwd=worktree, check=True)
     commit = subprocess.run(
         ["git", "commit", "-m", "local change"],
-        cwd=workspace,
+        cwd=worktree,
         check=False,
         capture_output=True,
         text=True,

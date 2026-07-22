@@ -53,6 +53,7 @@ export COCOLA_BROWSER_ENABLED="$browser_enabled"
 mkdir -p \
   /workspace/outputs \
   /workspace/outputs/browser \
+  /workspace/uploads \
   /workspace/downloads \
   /session/runtime/cocola \
   /session/runtime/browser \
@@ -67,6 +68,7 @@ mkdir -p \
 chown cocola:cocola \
   /workspace/outputs \
   /workspace/outputs/browser \
+  /workspace/uploads \
   /workspace/downloads \
   /session/runtime/cocola \
   /session/runtime/browser \

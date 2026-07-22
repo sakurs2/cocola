@@ -85,6 +85,7 @@ async def test_maps_tool_use_turn_and_reassembles_split_line():
     assert execu.stream_calls[0]["timeout_secs"] == -1
     sent = json.loads(execu.stream_calls[0]["stdin"])
     assert sent["prompt"] == "weather?"
+    assert sent["cwd"] == "/workspace"
     assert sent["skill_id"] == "weather"
     assert "resume" not in sent  # first turn has nothing to resume
 
@@ -386,7 +387,33 @@ async def test_codex_credentials_stay_in_exec_env_and_out_of_request():
     assert env == {
         "CODEX_API_KEY": "short-lived-cocola-token",
         "CODEX_MODEL": "route-codex",
+        "COCOLA_AGENT_CWD": "/workspace",
     }
+
+
+async def test_project_worktree_is_used_for_exec_shim_and_guest_tools():
+    def stream_handler(sandbox_id, cmd, stdin):
+        request = json.loads(stdin)
+        assert request["cwd"] == "/workspace/project"
+        yield ExecChunk(
+            kind="stdout",
+            data=_ndjson({"type": "done", "session_id": "project-thread"}),
+        )
+        yield ExecChunk(kind="exit", exit_code=0)
+
+    executor = StaticSandboxExecutor(stream_handler=stream_handler)
+    provider = InSandboxShimProvider(executor)
+    options = AgentOptions(
+        user_id="U1",
+        session_id="S1",
+        sandbox_id="box-1",
+        working_directory="/workspace/project",
+    )
+
+    await _drain(provider, "work on the project", options)
+
+    assert executor.stream_calls[0]["cwd"] == "/workspace/project"
+    assert executor.stream_calls[0]["env"]["COCOLA_AGENT_CWD"] == "/workspace/project"
 
 
 async def test_thread_started_session_is_indexed_even_when_turn_fails():

@@ -49,6 +49,7 @@ from cocola_agent_runtime.agent_provider import AgentEvent, AgentOptions, AgentP
 from cocola_agent_runtime.mcp_loader import MCPCatalog
 from cocola_agent_runtime.objstore import Fetcher
 from cocola_agent_runtime.project_git import (
+    PROJECT_WORKTREE,
     ProjectSpec,
     ProjectWorkspaceError,
     bootstrap_project,
@@ -80,18 +81,16 @@ log = get_logger("cocola.agent-runtime.server")
 
 ARTIFACT_SYSTEM_PROMPT = (
     "When you create files that the user should download or preview, save them "
-    "under ./outputs/. Only changed regular files in ./outputs/ are published "
+    "under /workspace/outputs/. Only changed regular files in /workspace/outputs/ are published "
     "to the user after the turn; symbolic links are ignored. Use "
     "`cocola-sandbox artifact status --json` and "
-    "`cocola-sandbox artifact list --json` to inspect the contract. HTML "
-    "artifacts must be a single self-contained file "
-    "because their isolated preview blocks network and relative asset loading."
+    "`cocola-sandbox artifact list --json` to inspect the contract."
 )
 PREVIEW_SYSTEM_PROMPT = (
     "When a local HTTP server must remain available to the user through the Workspace Preview "
-    "tab after this turn, use `cocola-sandbox preview start`; do not use Bash background jobs, "
-    "`&`, or `nohup`. Bind the server to 0.0.0.0 and only report it ready after the preview "
-    "command returns `state: ready`."
+    "tab after this turn, use `cocola-sandbox preview start`; it defaults to the current Project "
+    "worktree when applicable. Do not use Bash background jobs, `&`, or `nohup`. Bind the server "
+    "to 0.0.0.0 and only report it ready after the preview command returns `state: ready`."
 )
 ADMIN_SYSTEM_PROMPT_HEADER = "Administrator-configured system instructions:"
 MODEL_ROUTE_ID_METADATA_KEY = "x-cocola-model-route-id"
@@ -170,7 +169,7 @@ def _sanitize_filename(name: str) -> str:
     Defends the landing directory against path traversal and separator tricks:
     take the basename only, strip any residual separators / parent refs / NULs,
     and fall back to a fixed name when nothing usable remains. The file always
-    lands directly under ./uploads/ -- never above it.
+    lands directly under the configured uploads directory -- never above it.
     """
     base = posixpath.basename((name or "").replace("\\", "/")).strip()
     base = base.replace("\x00", "").lstrip(".") or "file"
@@ -184,7 +183,7 @@ def _uploads_preamble(landed: list[str]) -> str:
         return ""
     listing = "\n".join(f"- {p}" for p in landed)
     return (
-        "The user uploaded the following file(s) into your working directory. "
+        "The user uploaded the following file(s) into the platform workspace. "
         "Read them from these paths when relevant:\n"
         f"{listing}"
     )
@@ -706,6 +705,7 @@ class AgentRuntimeServicer(pb_grpc.AgentRuntimeServiceServicer):
                     pb.AgentEvent(kind="error", data={"code": exc.code, "error": str(exc)})
                 )
                 return
+        working_directory = PROJECT_WORKTREE if project_spec is not None else "/workspace"
         traceparent = _product_traceparent(context)
         preparing_environment = False
         environment_components: list[dict[str, Any]] = []
@@ -878,7 +878,7 @@ class AgentRuntimeServicer(pb_grpc.AgentRuntimeServiceServicer):
                         with contextlib.suppress(asyncio.CancelledError):
                             await heartbeat_task
                     return
-                workspace = "/workspace"
+                workspace = PROJECT_WORKTREE
                 environment_components.append(
                     {
                         "kind": "project",
@@ -915,8 +915,8 @@ class AgentRuntimeServicer(pb_grpc.AgentRuntimeServiceServicer):
             )
             return
         # Pre-provision user-uploaded attachments into the bound sandbox before
-        # the agent runs (push model, ADR-0017). We land them under ./uploads/
-        # in the session workspace and prepend a short preamble so the model
+        # the agent runs (push model, ADR-0017). We land them under the platform
+        # uploads directory and prepend a short preamble so the model
         # knows the files exist and where to find them. A provisioning failure is
         # surfaced as a terminal `error` event (like an acquire failure) rather
         # than silently running the agent against files that never arrived.
@@ -1197,6 +1197,7 @@ class AgentRuntimeServicer(pb_grpc.AgentRuntimeServiceServicer):
             runtime_id=runtime_id,
             sandbox_id=sandbox_id,
             workspace=workspace,
+            working_directory=working_directory,
             max_turns=request.max_turns or 30,
             model_route_id=model_route_id,
             selected_skill_id=selected_skill_id,
@@ -1462,7 +1463,7 @@ class AgentRuntimeServicer(pb_grpc.AgentRuntimeServiceServicer):
         Returns ``(preamble, workspace)``:
 
         - ``preamble`` is a short natural-language note listing the landed
-          ``./uploads/<name>`` paths, or "" when there is nothing to provision.
+          ``/workspace/uploads/<name>`` paths, or "" when there is nothing to provision.
         - ``workspace`` is a HOST directory the in-process provider must adopt as
           its cwd, or ``None`` when landing happened inside a sandbox (Route A,
           the brain already runs with that cwd) or nothing was provisioned.
@@ -1470,10 +1471,9 @@ class AgentRuntimeServicer(pb_grpc.AgentRuntimeServiceServicer):
         The delivery target follows WHERE the brain runs (ADR-0017):
 
         - Route A (executor + sandbox bound): the brain runs INSIDE the sandbox,
-          so we write into its workspace over the executor. Files land under
-          ./uploads/ in the session cwd (/workspace, ADR-0008 T1b),
-          resolved via `pwd` (provider-agnostic) with `mkdir -p uploads` in the
-          same shell -- WriteFile (docker CopyToContainer) makes no parent dirs.
+          so we write into its platform workspace over the executor. Files land
+          under /workspace/uploads regardless of the Agent's current Project
+          directory -- WriteFile (docker CopyToContainer) makes no parent dirs.
         - Injected test providers without an executor use a per-session HOST dir.
           Production always provisions into a bound sandbox.
 
@@ -1519,19 +1519,18 @@ class AgentRuntimeServicer(pb_grpc.AgentRuntimeServiceServicer):
         return resolved
 
     async def _provision_into_sandbox(self, sandbox_id, attachments) -> str:
-        """Route A: write attachments into the bound sandbox's ./uploads/."""
-        # One shell: create ./uploads and print the absolute workspace cwd.
+        """Route A: write attachments into the bound sandbox's platform uploads dir."""
         res = await self._executor.exec(
             sandbox_id=sandbox_id,
-            cmd=["sh", "-c", "mkdir -p uploads && pwd"],
+            cmd=["mkdir", "-p", "/workspace/uploads"],
+            cwd="/",
         )
         if not res.ok:
             raise RuntimeError(
                 f"prepare uploads dir failed (exit={res.exit_code}): "
                 f"{res.error or res.stderr}".strip()
             )
-        cwd = res.stdout.strip() or "/workspace"
-        uploads_dir = posixpath.join(cwd, "uploads")
+        uploads_dir = "/workspace/uploads"
 
         landed: list[str] = []
         for att in attachments:
@@ -1540,7 +1539,7 @@ class AgentRuntimeServicer(pb_grpc.AgentRuntimeServiceServicer):
             await self._executor.write_bytes(
                 sandbox_id=sandbox_id, path=abs_path, data=bytes(att.content)
             )
-            landed.append(f"./uploads/{name}")
+            landed.append(f"/workspace/uploads/{name}")
         return _uploads_preamble(landed)
 
     def _provision_onto_host(self, session_id, attachments) -> tuple[str, str]:
@@ -1548,9 +1547,7 @@ class AgentRuntimeServicer(pb_grpc.AgentRuntimeServiceServicer):
 
         The workspace root is COCOLA_LOCAL_WORKSPACE_ROOT (default: a stable
         `cocola-workspaces/` under the OS temp dir). Each session gets its own
-        subdir so concurrent sessions never collide, and ./uploads/ lives under
-        it -- the same relative layout the sandbox path uses, so the preamble is
-        identical regardless of where the brain runs.
+        subdir so concurrent sessions never collide, with uploads/ beneath it.
         """
         root = os.getenv("COCOLA_LOCAL_WORKSPACE_ROOT", "").strip() or posixpath.join(
             tempfile.gettempdir(), "cocola-workspaces"
@@ -1564,7 +1561,7 @@ class AgentRuntimeServicer(pb_grpc.AgentRuntimeServiceServicer):
         for att in attachments:
             name = _sanitize_filename(att.filename)
             (uploads_dir / name).write_bytes(bytes(att.content))
-            landed.append(f"./uploads/{name}")
+            landed.append(str(uploads_dir / name))
 
         log.info(
             "attachments landed on host workspace (no sandbox)",

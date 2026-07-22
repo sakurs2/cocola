@@ -10,13 +10,13 @@
     {
       "id": "cocola-sandbox-artifacts",
       "name": "Cocola Sandbox Artifacts",
-      "version": "1.0.0",
+      "version": "1.0.1",
       "path": "cocola-sandbox-artifacts"
     },
     {
       "id": "cocola-sandbox-preview",
       "name": "Cocola Sandbox Preview",
-      "version": "1.0.0",
+      "version": "1.0.1",
       "path": "cocola-sandbox-preview"
     },
     {

@@ -1,6 +1,6 @@
 ---
 name: cocola-sandbox-artifacts
-description: Use Cocola's built-in Sandbox Artifacts contract when a task must deliver files for the user to download or preview, including images, PDFs, Markdown, code, data files, and self-contained HTML. Trigger when the final result should include a generated file; do not use outputs for temporary working files.
+description: Use Cocola's built-in Sandbox Artifacts contract when a task must deliver files for the user to download or preview, including images, PDFs, Markdown, code, data files, and interactive HTML. Trigger when the final result should include a generated file; do not use outputs for temporary working files.
 ---
 
 # Cocola Sandbox Artifacts
@@ -20,11 +20,9 @@ Workspace.
    allowed. Use clear filenames and avoid symbolic links; links and other
    non-regular files are not published.
 
-3. Make HTML Artifacts a single self-contained `.html` file. The preview runs
-   in an isolated opaque origin with scripts, event handlers, network, forms,
-   popups, embedded frames, and navigation blocked. Inline CSS is supported;
-   embed images and fonts with `data:` URLs instead of remote or relative asset
-   references. JavaScript remains visible in source mode but is not executed.
+3. HTML Artifacts may use inline JavaScript and external CDN resources. Keep
+   relative assets together under `/workspace/outputs` when the document needs
+   them, and prefer versioned dependency URLs for reproducible previews.
 
 4. For interactive behavior or rendered-page verification, serve the HTML
    temporarily over loopback HTTP and use the separate `cocola-sandbox browser`
