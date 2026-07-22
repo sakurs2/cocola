@@ -673,10 +673,6 @@ function eventTimeMs(primary: unknown, fallback?: unknown): number {
   return Number.isFinite(ms) ? ms : Date.now();
 }
 
-function hasAssistantResponse(messages: UiMessage[]): boolean {
-  return messages.some((m) => m.role === "assistant" && m.parts.length > 0);
-}
-
 function isTerminalAgentEvent(event: AgentEvent): boolean {
   return event.kind === "done";
 }
@@ -1917,7 +1913,6 @@ export function CocolaRuntimeProvider({ children }: { children: ReactNode }) {
       const cached = convMessages[id] ?? [];
       if (cached.length > 0) {
         setEnvironmentStatuses((prev) => withSessionStatus(prev, id, latestSessionStatus(cached)));
-        if (hasAssistantResponse(cached)) setRunning(id, false);
         void connectActiveRun(id);
         return;
       }
@@ -1934,14 +1929,13 @@ export function CocolaRuntimeProvider({ children }: { children: ReactNode }) {
         const loaded = normalizeWireMessages(await res.json());
         setConvMessages((prev) => ({ ...prev, [id]: loaded }));
         setEnvironmentStatuses((prev) => withSessionStatus(prev, id, latestSessionStatus(loaded)));
-        if (hasAssistantResponse(loaded)) setRunning(id, false);
         void connectActiveRun(id);
       } catch {
         // ignore — leave the current thread untouched on failure
         void connectActiveRun(id);
       }
     },
-    [connectActiveRun, conversations, convMessages, setRunning],
+    [connectActiveRun, conversations, convMessages],
   );
 
   const renameConversation = useCallback(
