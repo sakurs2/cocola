@@ -39,6 +39,7 @@ import { cn } from "@/lib/utils";
 import { type EnvironmentPreparationSnapshot } from "@/lib/environment";
 import { resolveFileType } from "@/lib/file-type";
 import { MaterialFileIcon } from "@/lib/material-file-icons";
+import { normalizeProgressItems } from "@/lib/progress-items.mjs";
 
 // All rail action icons come from Phosphor; reuse its component type so the
 // `weight` prop (duotone/bold/...) type-checks.
@@ -169,6 +170,59 @@ export const RailEnvironment: FC<{
 export const RailResponsePending: FC = () => (
   <RailRow icon={ChatCircle} label="Starting response" running color="text-indigo-500" />
 );
+
+export const RailProgress: FC<{ items?: unknown[] }> = ({ items }) => {
+  const normalized = normalizeProgressItems(items);
+  const completed = normalized.filter((item) => item.status === "completed").length;
+  const label = normalized.length ? (
+    <span className="flex items-baseline gap-1.5">
+      <span>Plan</span>
+      <span className="text-xs font-normal tabular-nums text-muted-foreground">
+        {completed}/{normalized.length}
+      </span>
+    </span>
+  ) : (
+    "Plan"
+  );
+
+  return (
+    <RailRow icon={ListChecks} label={label} color="text-violet-500">
+      {normalized.length ? (
+        <ol className="space-y-1.5 py-0.5">
+          {normalized.map((item) => {
+            const done = item.status === "completed";
+            const active = item.status === "in_progress";
+            return (
+              <li key={item.id} className="grid grid-cols-[1rem_minmax(0,1fr)] items-start gap-2">
+                <span className="flex h-5 items-center justify-center" aria-hidden="true">
+                  {done ? (
+                    <CheckCircle2 className="size-3.5 text-emerald-500" />
+                  ) : active ? (
+                    <SpinnerGap className="size-3.5 animate-spin text-violet-500 motion-reduce:animate-none" />
+                  ) : (
+                    <span className="size-3 rounded-full border border-muted-foreground/50" />
+                  )}
+                </span>
+                <span
+                  className={cn(
+                    "text-[13px] leading-5",
+                    done && "text-muted-foreground/70 line-through decoration-muted-foreground/50",
+                    active && "font-medium text-foreground",
+                    !done && !active && "text-muted-foreground",
+                  )}
+                >
+                  {item.text}
+                </span>
+              </li>
+            );
+          })}
+        </ol>
+      ) : (
+        <p className="text-[13px] leading-5 text-muted-foreground">No plan items.</p>
+      )}
+    </RailRow>
+  );
+};
 
 export const RailMemoryRecall: FC<{
   status: "running" | "hit" | "degraded" | "unavailable";

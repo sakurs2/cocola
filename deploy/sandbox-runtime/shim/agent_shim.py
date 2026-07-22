@@ -170,7 +170,14 @@ def _tool_result_content(content: Any) -> str:
     return text
 
 
-def _block_to_event(block: Any) -> dict[str, Any] | None:
+def _is_todo_tool(name: Any) -> bool:
+    return re.sub(r"[^a-z0-9]", "", str(name or "").lower()) == "todowrite"
+
+
+def _block_to_event(
+    block: Any,
+    todo_tool_ids: set[str] | None = None,
+) -> dict[str, Any] | None:
     """Map one SDK content block to a transport event, or None to skip.
 
     Handles both client-side tools (ToolUseBlock/ToolResultBlock) and the
@@ -187,23 +194,39 @@ def _block_to_event(block: Any) -> dict[str, Any] | None:
     if bcls == "ThinkingBlock":
         return {"type": "thinking", "text": getattr(block, "thinking", "")}
     if bcls in ("ToolUseBlock", "ServerToolUseBlock"):
+        name = getattr(block, "name", None)
+        tool_input = getattr(block, "input", None)
+        if _is_todo_tool(name) and isinstance(tool_input, dict):
+            items = tool_input.get("todos")
+            if isinstance(items, list):
+                tool_id = str(getattr(block, "id", None) or "")
+                if todo_tool_ids is not None and tool_id:
+                    todo_tool_ids.add(tool_id)
+                return {"type": "progress", "id": "todo-list", "items": items}
         return {
             "type": "tool_use",
-            "name": getattr(block, "name", None),
+            "name": name,
             "id": getattr(block, "id", None),
-            "input": getattr(block, "input", None),
+            "input": tool_input,
         }
     if bcls in ("ToolResultBlock", "ServerToolResultBlock"):
+        tool_use_id = str(getattr(block, "tool_use_id", None) or "")
+        if todo_tool_ids is not None and tool_use_id in todo_tool_ids:
+            todo_tool_ids.discard(tool_use_id)
+            return None
         return {
             "type": "tool_result",
-            "tool_use_id": getattr(block, "tool_use_id", None),
+            "tool_use_id": tool_use_id or None,
             "is_error": bool(getattr(block, "is_error", False)),
             "content": _tool_result_content(getattr(block, "content", None)),
         }
     return None
 
 
-def _message_to_events(message: Any) -> list[dict[str, Any]]:
+def _message_to_events(
+    message: Any,
+    todo_tool_ids: set[str] | None = None,
+) -> list[dict[str, Any]]:
     """Map an SDK message to transport-neutral NDJSON events.
 
     Mirrors the taxonomy agent-runtime already uses (shim_provider.py),
@@ -218,7 +241,7 @@ def _message_to_events(message: Any) -> list[dict[str, Any]]:
         content = getattr(message, "content", None)
         if isinstance(content, list):
             for block in content:
-                ev = _block_to_event(block)
+                ev = _block_to_event(block, todo_tool_ids)
                 if ev is not None:
                     events.append(ev)
     elif cls == "ResultMessage":
@@ -351,11 +374,12 @@ async def _run_claude(req: dict[str, Any]) -> int:
     _emit({"type": "start", "ts": time.time()})
 
     last_session_id: str | None = None
+    todo_tool_ids: set[str] = set()
 
     async def relay(messages: Any) -> None:
         nonlocal last_session_id
         async for message in messages:
-            for ev in _message_to_events(message):
+            for ev in _message_to_events(message, todo_tool_ids):
                 if ev.get("type") == "result" and ev.get("session_id"):
                     last_session_id = ev["session_id"]
                 _emit(ev)

@@ -14,7 +14,10 @@ const isProcessPart = (part) =>
   !isHiddenMemoryMiss(part) &&
   (PROCESS_PART_TYPES.has(part?.type) ||
     part?.type === "memory-recall" ||
-    (part?.type === "data" && (part?.name === "memory-recall" || part?.name === "scm-approval")));
+    (part?.type === "data" &&
+      (part?.name === "progress" ||
+        part?.name === "memory-recall" ||
+        part?.name === "scm-approval")));
 
 /**
  * Splits one assistant turn into the collapsible process and the always-visible

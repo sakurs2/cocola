@@ -158,7 +158,7 @@ const run = async (request) => {
           textByItem.set(item.id, current);
           if (delta) emit({ type: item.type === "reasoning" ? "thinking" : "text", text: delta });
         } else if (item?.type === "todo_list") {
-          emit({ type: "progress", id: item.id || "todo-list", items: item.items || [] });
+          emit({ type: "progress", id: "todo-list", items: item.items || [] });
         } else if (item && !startedTools.has(item.id)) {
           const mapped = toolEvent(item);
           if (mapped) {
@@ -176,7 +176,7 @@ const run = async (request) => {
           const delta = current.startsWith(previous) ? current.slice(previous.length) : current;
           if (delta) emit({ type: item.type === "reasoning" ? "thinking" : "text", text: delta });
         } else if (item?.type === "todo_list") {
-          emit({ type: "progress", id: item.id || "todo-list", items: item.items || [] });
+          emit({ type: "progress", id: "todo-list", items: item.items || [] });
         } else if (item?.type === "error") {
           process.stderr.write("non-fatal Codex item error\n");
         } else if (item) {

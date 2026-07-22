@@ -873,13 +873,10 @@ function convertMessage(message: UiMessage): ThreadMessageLike {
       };
     }
     if (p.type === "progress") {
-      const snapshot = JSON.stringify(p.items);
       return {
-        type: "tool-call" as const,
-        toolCallId: p.progressId,
-        toolName: "Progress",
-        argsText: snapshot,
-        result: snapshot,
+        type: "data" as const,
+        name: "progress",
+        data: { items: p.items },
       };
     }
     // tool-call. We pass only argsText (the raw JSON string from the wire) —

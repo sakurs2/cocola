@@ -23,7 +23,7 @@ test("reasoning, tools, progress, and intermediate text form the process section
     { type: "reasoning", text: "Finding the relevant files." },
     { type: "tool-call", toolName: "Read" },
     { type: "text", text: "I found the entry point." },
-    { type: "progress", items: [] },
+    { type: "data", name: "progress", data: { items: [] } },
     { type: "tool-call", toolName: "Edit" },
     { type: "text", text: "Implemented and verified." },
   ];

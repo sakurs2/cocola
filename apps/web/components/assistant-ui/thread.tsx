@@ -49,6 +49,7 @@ import {
   RailEnvironment,
   RailFile,
   RailMemoryRecall,
+  RailProgress,
   RailProcessSummary,
   RailReasoning,
   RailResponsePending,
@@ -918,6 +919,12 @@ const MemoryRecallPart: FC<
     </AgentTurnPart>
   );
 
+const ProgressPart: FC<DataMessagePartProps<{ items: unknown[] }>> = ({ data }) => (
+  <AgentTurnPart kind="process">
+    <RailProgress items={data.items} />
+  </AgentTurnPart>
+);
+
 const SCMApprovalPart: FC<
   DataMessagePartProps<{
     approvalId: string;
@@ -975,7 +982,11 @@ const ASSISTANT_PART_COMPONENTS = {
   File: ArtifactFilePart,
   tools: { Fallback: ToolFallback },
   data: {
-    by_name: { "memory-recall": MemoryRecallPart, "scm-approval": SCMApprovalPart },
+    by_name: {
+      progress: ProgressPart,
+      "memory-recall": MemoryRecallPart,
+      "scm-approval": SCMApprovalPart,
+    },
   },
 };
 

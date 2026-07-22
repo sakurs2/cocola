@@ -89,6 +89,32 @@ async def test_maps_tool_use_turn_and_reassembles_split_line():
     assert "resume" not in sent  # first turn has nothing to resume
 
 
+async def test_progress_event_preserves_todo_items():
+    items = [
+        {"content": "Inspect the project", "status": "completed"},
+        {"content": "Implement the change", "status": "in_progress"},
+    ]
+
+    def stream_handler(sandbox_id, cmd, stdin):
+        yield ExecChunk(
+            kind="stdout",
+            data=_ndjson(
+                {"type": "progress", "id": "todo-list", "items": items},
+                {"type": "done", "session_id": "sess-todo"},
+            ),
+        )
+        yield ExecChunk(kind="exit", exit_code=0)
+
+    provider = InSandboxShimProvider(StaticSandboxExecutor(stream_handler=stream_handler))
+    opts = AgentOptions(user_id="U1", session_id="S1", sandbox_id="box-1")
+
+    events = await _drain(provider, "complete the task", opts)
+
+    assert [event.kind for event in events] == ["progress", "done"]
+    assert events[0].data["id"] == "todo-list"
+    assert json.loads(events[0].data["items"]) == items
+
+
 async def test_result_message_error_marks_the_turn_as_failed():
     def stream_handler(sandbox_id, cmd, stdin):
         yield ExecChunk(

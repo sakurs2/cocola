@@ -9,6 +9,16 @@ import sys
 import types
 
 
+def _load_shim(name: str):
+    root = pathlib.Path(__file__).resolve().parents[3]
+    shim_path = root / "deploy" / "sandbox-runtime" / "shim" / "agent_shim.py"
+    spec = importlib.util.spec_from_file_location(name, shim_path)
+    assert spec and spec.loader
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
 def test_agent_shim_passes_mcp_servers_to_claude_options(monkeypatch):
     captured = {}
 
@@ -19,12 +29,7 @@ def test_agent_shim_passes_mcp_servers_to_claude_options(monkeypatch):
     fake_sdk = types.SimpleNamespace(ClaudeAgentOptions=FakeClaudeAgentOptions)
     monkeypatch.setitem(sys.modules, "claude_agent_sdk", fake_sdk)
 
-    root = pathlib.Path(__file__).resolve().parents[3]
-    shim_path = root / "deploy" / "sandbox-runtime" / "shim" / "agent_shim.py"
-    spec = importlib.util.spec_from_file_location("cocola_agent_shim_test", shim_path)
-    assert spec and spec.loader
-    module = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(module)
+    module = _load_shim("cocola_agent_shim_test")
 
     module._build_options(
         {
@@ -98,12 +103,7 @@ async def test_agent_shim_streams_mcp_status_without_blocking_query(monkeypatch)
     )
     monkeypatch.setitem(sys.modules, "claude_agent_sdk", fake_sdk)
 
-    root = pathlib.Path(__file__).resolve().parents[3]
-    shim_path = root / "deploy" / "sandbox-runtime" / "shim" / "agent_shim.py"
-    spec = importlib.util.spec_from_file_location("cocola_agent_shim_status_test", shim_path)
-    assert spec and spec.loader
-    module = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(module)
+    module = _load_shim("cocola_agent_shim_status_test")
     emitted: list[dict] = []
     monkeypatch.setattr(module, "_emit", emitted.append)
 
@@ -162,12 +162,7 @@ async def test_agent_shim_skips_mcp_status_on_resumed_turn(monkeypatch):
     )
     monkeypatch.setitem(sys.modules, "claude_agent_sdk", fake_sdk)
 
-    root = pathlib.Path(__file__).resolve().parents[3]
-    shim_path = root / "deploy" / "sandbox-runtime" / "shim" / "agent_shim.py"
-    spec = importlib.util.spec_from_file_location("cocola_agent_shim_resume_status_test", shim_path)
-    assert spec and spec.loader
-    module = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(module)
+    module = _load_shim("cocola_agent_shim_resume_status_test")
     emitted: list[dict] = []
     monkeypatch.setattr(module, "_emit", emitted.append)
 
@@ -184,3 +179,52 @@ async def test_agent_shim_skips_mcp_status_on_resumed_turn(monkeypatch):
     assert not [event for event in emitted if event.get("type") == "environment_status"]
     assert emitted[-1]["type"] == "done"
     assert emitted[-1]["session_id"] == "claude-session"
+
+
+def test_agent_shim_maps_todo_write_to_one_progress_node():
+    module = _load_shim("cocola_agent_shim_todo_test")
+    todo_ids: set[str] = set()
+
+    tool = type("ToolUseBlock", (), {})()
+    tool.id = "todo-call-1"
+    tool.name = "TodoWrite"
+    tool.input = {
+        "todos": [
+            {"content": "Inspect the project", "status": "completed"},
+            {"content": "Implement the change", "status": "in_progress"},
+        ]
+    }
+    assistant = type("AssistantMessage", (), {})()
+    assistant.content = [tool]
+
+    result = type("ToolResultBlock", (), {})()
+    result.tool_use_id = "todo-call-1"
+    result.is_error = False
+    result.content = "Todos have been modified successfully"
+    user = type("UserMessage", (), {})()
+    user.content = [result]
+
+    assert module._message_to_events(assistant, todo_ids) == [
+        {
+            "type": "progress",
+            "id": "todo-list",
+            "items": tool.input["todos"],
+        }
+    ]
+    assert module._message_to_events(user, todo_ids) == []
+    assert todo_ids == set()
+
+
+def test_agent_shim_preserves_invalid_todo_write_as_a_tool_call():
+    module = _load_shim("cocola_agent_shim_invalid_todo_test")
+    tool = type("ToolUseBlock", (), {})()
+    tool.id = "todo-call-2"
+    tool.name = "TodoWrite"
+    tool.input = {"todos": "not-a-list"}
+
+    assert module._block_to_event(tool, set()) == {
+        "type": "tool_use",
+        "id": "todo-call-2",
+        "name": "TodoWrite",
+        "input": {"todos": "not-a-list"},
+    }

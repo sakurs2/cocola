@@ -7,6 +7,7 @@ import {
   RailEnvironment,
   RailFile,
   RailMemoryRecall,
+  RailProgress,
   RailProcessSummary,
   RailReasoning,
   RailSCMApproval,
@@ -343,8 +344,7 @@ function MessagePartView({ part, role }: { part: MessagePart; role: "user" | "as
     );
   }
   if (part.type === "progress") {
-    const snapshot = JSON.stringify(part.items ?? []);
-    return <RailTool toolName="Progress" argsText={snapshot} result={snapshot} />;
+    return <RailProgress items={part.items} />;
   }
   if (part.type === "file") {
     // Read-only page has no Artifact side panel, so omit onPreview → download only.
