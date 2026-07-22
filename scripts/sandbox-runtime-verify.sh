@@ -96,6 +96,14 @@ IMAGE_WORKDIR="$(docker image inspect --format '{{.Config.WorkingDir}}' "$IMAGE"
   && ok "image uses stable / working directory for OpenSandbox execd" \
   || bad "image WorkingDir is $IMAGE_WORKDIR (must be /; /workspace is replaced at startup)"
 
+SYSTEM_SAFE_DIRECTORIES="$(docker run --rm --entrypoint git "$IMAGE" \
+  config --system --get-all safe.directory || true)"
+if [ "$SYSTEM_SAFE_DIRECTORIES" = "/session/workspace/project" ]; then
+  ok "root Git trusts only the fixed Project worktree"
+else
+  bad "root Git safe.directory must include /session/workspace/project without wildcard trust"
+fi
+
 # ---- 2. selfcheck (no network) ------------------------------------------
 note "selfcheck: runtime components baked into the image"
 start_ctr
@@ -162,16 +170,20 @@ BUILTIN_SKILL_OWNER="$(docker exec -i "$CTR" stat -c '%U:%G' \
   /opt/cocola/skills/cocola-sandbox-browser/SKILL.md 2>/dev/null || true)"
 BUILTIN_ARTIFACT_SKILL_OWNER="$(docker exec -i "$CTR" stat -c '%U:%G' \
   /opt/cocola/skills/cocola-sandbox-artifacts/SKILL.md 2>/dev/null || true)"
+BUILTIN_PROJECT_SKILL_OWNER="$(docker exec -i "$CTR" stat -c '%U:%G' \
+  /opt/cocola/skills/cocola-project-workspace/SKILL.md 2>/dev/null || true)"
 docker exec -i "$CTR" test -f /opt/cocola/skills/manifest.json \
   && docker exec -i "$CTR" test -s /opt/cocola/skills/cocola-sandbox-browser/SKILL.md \
   && docker exec -i "$CTR" test -s /opt/cocola/skills/cocola-sandbox-artifacts/SKILL.md \
+  && docker exec -i "$CTR" test -s /opt/cocola/skills/cocola-project-workspace/SKILL.md \
   && docker exec -i "$CTR" test -s /opt/cocola/skills/cocola-github/SKILL.md \
-  && ok "built-in Browser, Artifact, and GitHub Skills are baked into the runtime" \
+  && ok "built-in Browser, Artifact, Project, and GitHub Skills are baked into the runtime" \
   || bad "one or more built-in Sandbox Skills are missing"
 [ "$BUILTIN_SKILL_OWNER" = "root:root" ] \
   && [ "$BUILTIN_ARTIFACT_SKILL_OWNER" = "root:root" ] \
+  && [ "$BUILTIN_PROJECT_SKILL_OWNER" = "root:root" ] \
   && ok "built-in Skills remain root-owned runtime assets" \
-  || bad "built-in Skill owners are ${BUILTIN_SKILL_OWNER:-unknown}/${BUILTIN_ARTIFACT_SKILL_OWNER:-unknown} (must be root:root)"
+  || bad "built-in Skill owners are ${BUILTIN_SKILL_OWNER:-unknown}/${BUILTIN_ARTIFACT_SKILL_OWNER:-unknown}/${BUILTIN_PROJECT_SKILL_OWNER:-unknown} (must be root:root)"
 
 GH_VERSION_OUTPUT="$(docker exec -i "$CTR" gh --version 2>/dev/null | head -1 || true)"
 echo "$GH_VERSION_OUTPUT" | grep -q 'gh version 2.94.0' \

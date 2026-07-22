@@ -690,6 +690,27 @@ def test_builtin_preview_skill_matches_the_managed_process_contract():
     )
 
 
+def test_builtin_project_workspace_skill_matches_the_git_root_contract():
+    platform_manifest = json.loads(
+        (BUILTIN_SKILLS_PATH / "manifest.json").read_text(encoding="utf-8")
+    )
+    descriptors = {item["id"]: item for item in platform_manifest["skills"]}
+    descriptor = descriptors["cocola-project-workspace"]
+    skill_md = (BUILTIN_SKILLS_PATH / descriptor["path"] / "SKILL.md").read_text(encoding="utf-8")
+
+    assert descriptor == {
+        "id": "cocola-project-workspace",
+        "name": "Cocola Project Workspace",
+        "version": "1.0.0",
+        "path": "cocola-project-workspace",
+    }
+    assert skill_md.startswith("---\nname: cocola-project-workspace\n")
+    assert "/workspace/project` is the existing Git worktree" in skill_md
+    assert "npx create-next-app@latest ." in skill_md
+    assert "do not use an extra directory" in skill_md
+    assert "only when the user explicitly asks for a monorepo" in skill_md
+
+
 def test_builtin_github_skill_and_wrapper_match_the_broker_contract():
     platform_manifest = json.loads(
         (BUILTIN_SKILLS_PATH / "manifest.json").read_text(encoding="utf-8")

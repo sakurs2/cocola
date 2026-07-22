@@ -96,7 +96,11 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     && test -n "$chromium_path" \
     && printf '#!/usr/bin/env sh\nexec "%s" "$@"\n' "$chromium_path" > /usr/local/bin/chromium \
     && chmod +x /usr/local/bin/chromium \
-    && chmod -R a+rX /ms-playwright
+    && chmod -R a+rX /ms-playwright \
+    # Workspace Shell intentionally runs as root while the Agent owns the
+    # Project worktree as uid 10001. Trust only that fixed repository path so
+    # Git remains protected from arbitrary repositories owned by other users.
+    && git config --system --replace-all safe.directory /session/workspace/project
 
 # ---- Claude Code CLI: offline tgz first, registry fallback --------------
 # Anything matching offline/*claude-code*.tgz is installed without the network;

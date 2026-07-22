@@ -20,6 +20,12 @@
       "path": "cocola-sandbox-preview"
     },
     {
+      "id": "cocola-project-workspace",
+      "name": "Cocola Project Workspace",
+      "version": "1.0.0",
+      "path": "cocola-project-workspace"
+    },
+    {
       "id": "cocola-github",
       "name": "Cocola GitHub",
       "version": "1.0.0",
