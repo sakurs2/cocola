@@ -170,13 +170,294 @@ def _tool_result_content(content: Any) -> str:
     return text
 
 
-def _is_todo_tool(name: Any) -> bool:
-    return re.sub(r"[^a-z0-9]", "", str(name or "").lower()) == "todowrite"
+class _ClaudeTaskProgress:
+    """Collapse Claude Code's task tools into one bounded progress snapshot."""
+
+    _MAX_TASKS = 100
+    _MAX_PENDING_CALLS = 256
+    _TASK_TOOLS = {"taskcreate", "taskupdate", "tasklist", "taskget"}
+    _STATUSES = {"pending", "in_progress", "completed"}
+
+    def __init__(self) -> None:
+        self._tasks: list[dict[str, str]] = []
+        self._pending: dict[str, dict[str, Any]] = {}
+
+    @staticmethod
+    def _canonical_name(name: Any) -> str:
+        return re.sub(r"[^a-z0-9]", "", str(name or "").lower())
+
+    @staticmethod
+    def _text(value: Any) -> str:
+        return value.strip() if isinstance(value, str) else ""
+
+    def _snapshot(self) -> dict[str, Any]:
+        return {
+            "type": "progress",
+            "id": "todo-list",
+            "items": [dict(task) for task in self._tasks],
+        }
+
+    def _find(self, task_id: str) -> int:
+        return next(
+            (index for index, task in enumerate(self._tasks) if task["id"] == task_id),
+            -1,
+        )
+
+    def _remove(self, task_id: str) -> bool:
+        index = self._find(task_id)
+        if index < 0:
+            return False
+        self._tasks.pop(index)
+        return True
+
+    def _upsert(self, raw: dict[str, Any]) -> bool:
+        task_id = self._text(raw.get("id") or raw.get("taskId"))
+        subject = self._text(raw.get("subject") or raw.get("content"))
+        if not task_id:
+            return False
+        index = self._find(task_id)
+        if index < 0:
+            if not subject or len(self._tasks) >= self._MAX_TASKS:
+                return False
+            self._tasks.append(
+                {
+                    "id": task_id,
+                    "content": subject,
+                    "status": "pending",
+                    "activeForm": self._text(raw.get("activeForm")),
+                }
+            )
+            index = len(self._tasks) - 1
+
+        task = self._tasks[index]
+        if subject:
+            task["content"] = subject
+        active_form = self._text(raw.get("activeForm"))
+        if active_form:
+            task["activeForm"] = active_form
+        status = self._text(raw.get("status")).lower()
+        if status in self._STATUSES:
+            task["status"] = status
+        return True
+
+    def _promote_created_task(
+        self,
+        provisional_id: str,
+        task_id: str,
+        subject: str,
+    ) -> None:
+        provisional_index = self._find(provisional_id)
+        existing_index = self._find(task_id)
+        if existing_index >= 0 and existing_index != provisional_index:
+            if provisional_index >= 0:
+                provisional = self._tasks.pop(provisional_index)
+                existing_index = self._find(task_id)
+                if not self._tasks[existing_index].get("content"):
+                    self._tasks[existing_index]["content"] = provisional["content"]
+            if subject:
+                self._tasks[existing_index]["content"] = subject
+            return
+        if provisional_index >= 0:
+            self._tasks[provisional_index]["id"] = task_id
+            if subject:
+                self._tasks[provisional_index]["content"] = subject
+            return
+        self._upsert({"id": task_id, "subject": subject, "status": "pending"})
+
+    @classmethod
+    def _objects(cls, value: Any, depth: int = 0):
+        if depth > 4:
+            return
+        if isinstance(value, dict):
+            yield value
+            for child in value.values():
+                yield from cls._objects(child, depth + 1)
+        elif isinstance(value, list):
+            for child in value[: cls._MAX_TASKS]:
+                yield from cls._objects(child, depth + 1)
+        elif isinstance(value, str) and len(value) <= 100_000:
+            candidate = value.strip()
+            if candidate.startswith(("{", "[")):
+                try:
+                    parsed = json.loads(candidate)
+                except (TypeError, ValueError):
+                    return
+                yield from cls._objects(parsed, depth + 1)
+
+    @classmethod
+    def _result_text(cls, content: Any) -> str:
+        if isinstance(content, str):
+            return content
+        texts: list[str] = []
+        if isinstance(content, list):
+            for item in content[: cls._MAX_TASKS]:
+                if isinstance(item, str):
+                    texts.append(item)
+                elif isinstance(item, dict) and isinstance(item.get("text"), str):
+                    texts.append(item["text"])
+        return "\n".join(texts)
+
+    @classmethod
+    def _created_task(cls, content: Any) -> dict[str, Any] | None:
+        for obj in cls._objects(content):
+            task = obj.get("task")
+            if isinstance(task, dict) and cls._text(task.get("id")):
+                return task
+        match = re.search(
+            r"Task #([^\s]+) created successfully:\s*(.+)",
+            cls._result_text(content),
+        )
+        if match:
+            return {"id": match.group(1), "subject": match.group(2).strip()}
+        return None
+
+    @classmethod
+    def _listed_tasks(cls, content: Any) -> list[dict[str, Any]] | None:
+        for obj in cls._objects(content):
+            tasks = obj.get("tasks")
+            if isinstance(tasks, list):
+                return [task for task in tasks[: cls._MAX_TASKS] if isinstance(task, dict)]
+
+        text = cls._result_text(content).strip()
+        if text == "No tasks found":
+            return []
+        tasks: list[dict[str, Any]] = []
+        for line in text.splitlines()[: cls._MAX_TASKS]:
+            match = re.match(r"^#([^\s]+) \[(pending|in_progress|completed)\] (.+)$", line)
+            if not match:
+                continue
+            subject = re.sub(r"\s+\[blocked by .+\]$", "", match.group(3)).strip()
+            tasks.append({"id": match.group(1), "status": match.group(2), "subject": subject})
+        return tasks or None
+
+    @classmethod
+    def _fetched_task(cls, content: Any) -> dict[str, Any] | None:
+        for obj in cls._objects(content):
+            task = obj.get("task")
+            if isinstance(task, dict) and cls._text(task.get("id")):
+                return task
+        text = cls._result_text(content)
+        match = re.search(
+            r"^Task #([^:]+):\s*(.+?)\nStatus:\s*(pending|in_progress|completed)\b",
+            text,
+            re.MULTILINE,
+        )
+        if match:
+            return {"id": match.group(1), "subject": match.group(2), "status": match.group(3)}
+        return None
+
+    @classmethod
+    def _update_succeeded(cls, content: Any) -> bool:
+        for obj in cls._objects(content):
+            if obj.get("success") is False:
+                return False
+        return "task not found" not in cls._result_text(content).lower()
+
+    def handle_tool_use(
+        self,
+        name: Any,
+        tool_id: Any,
+        tool_input: Any,
+    ) -> tuple[bool, dict[str, Any] | None]:
+        canonical = self._canonical_name(name)
+        call_id = self._text(tool_id)
+        if canonical == "todowrite":
+            items = tool_input.get("todos") if isinstance(tool_input, dict) else None
+            if not call_id or not isinstance(items, list):
+                return False, None
+            if len(self._pending) >= self._MAX_PENDING_CALLS:
+                return False, None
+            self._pending[call_id] = {"kind": "todowrite"}
+            return True, {"type": "progress", "id": "todo-list", "items": items}
+
+        if canonical not in self._TASK_TOOLS or not call_id or not isinstance(tool_input, dict):
+            return False, None
+        if len(self._pending) >= self._MAX_PENDING_CALLS:
+            return False, None
+
+        if canonical == "taskcreate":
+            subject = self._text(tool_input.get("subject"))
+            if not subject or len(self._tasks) >= self._MAX_TASKS:
+                return False, None
+            provisional_id = f"pending:{call_id}"
+            self._upsert(
+                {
+                    "id": provisional_id,
+                    "subject": subject,
+                    "status": "pending",
+                    "activeForm": tool_input.get("activeForm"),
+                }
+            )
+            self._pending[call_id] = {
+                "kind": canonical,
+                "input": dict(tool_input),
+                "provisional_id": provisional_id,
+            }
+            return True, self._snapshot()
+
+        task_id = self._text(tool_input.get("taskId"))
+        if canonical in {"taskupdate", "taskget"} and not task_id:
+            return False, None
+        self._pending[call_id] = {"kind": canonical, "input": dict(tool_input)}
+        return True, None
+
+    def handle_tool_result(
+        self,
+        tool_use_id: Any,
+        is_error: bool,
+        content: Any,
+    ) -> tuple[bool, dict[str, Any] | None]:
+        call_id = self._text(tool_use_id)
+        call = self._pending.pop(call_id, None)
+        if call is None:
+            return False, None
+        kind = call["kind"]
+        if kind == "todowrite":
+            return True, None
+        if is_error:
+            changed = kind == "taskcreate" and self._remove(call["provisional_id"])
+            return True, self._snapshot() if changed else None
+
+        tool_input = call.get("input", {})
+        if kind == "taskcreate":
+            task = self._created_task(content)
+            if task is None:
+                return True, None
+            task_id = self._text(task.get("id") or task.get("taskId"))
+            if not task_id:
+                return True, None
+            subject = self._text(task.get("subject")) or self._text(tool_input.get("subject"))
+            self._promote_created_task(call["provisional_id"], task_id, subject)
+            return True, self._snapshot()
+
+        if kind == "taskupdate":
+            if not self._update_succeeded(content):
+                return True, None
+            task_id = self._text(tool_input.get("taskId"))
+            if self._text(tool_input.get("status")).lower() == "deleted":
+                changed = self._remove(task_id)
+            else:
+                changed = self._upsert({"id": task_id, **tool_input})
+            return True, self._snapshot() if changed else None
+
+        if kind == "tasklist":
+            tasks = self._listed_tasks(content)
+            if tasks is None:
+                return True, None
+            had_tasks = bool(self._tasks)
+            self._tasks = []
+            for task in tasks:
+                self._upsert(task)
+            return True, self._snapshot() if self._tasks or had_tasks else None
+
+        task = self._fetched_task(content)
+        changed = task is not None and self._upsert(task)
+        return True, self._snapshot() if changed else None
 
 
 def _block_to_event(
     block: Any,
-    todo_tool_ids: set[str] | None = None,
+    task_progress: _ClaudeTaskProgress | None = None,
 ) -> dict[str, Any] | None:
     """Map one SDK content block to a transport event, or None to skip.
 
@@ -196,13 +477,14 @@ def _block_to_event(
     if bcls in ("ToolUseBlock", "ServerToolUseBlock"):
         name = getattr(block, "name", None)
         tool_input = getattr(block, "input", None)
-        if _is_todo_tool(name) and isinstance(tool_input, dict):
-            items = tool_input.get("todos")
-            if isinstance(items, list):
-                tool_id = str(getattr(block, "id", None) or "")
-                if todo_tool_ids is not None and tool_id:
-                    todo_tool_ids.add(tool_id)
-                return {"type": "progress", "id": "todo-list", "items": items}
+        if task_progress is not None:
+            handled, event = task_progress.handle_tool_use(
+                name,
+                getattr(block, "id", None),
+                tool_input,
+            )
+            if handled:
+                return event
         return {
             "type": "tool_use",
             "name": name,
@@ -211,21 +493,24 @@ def _block_to_event(
         }
     if bcls in ("ToolResultBlock", "ServerToolResultBlock"):
         tool_use_id = str(getattr(block, "tool_use_id", None) or "")
-        if todo_tool_ids is not None and tool_use_id in todo_tool_ids:
-            todo_tool_ids.discard(tool_use_id)
-            return None
+        is_error = bool(getattr(block, "is_error", False))
+        content = getattr(block, "content", None)
+        if task_progress is not None:
+            handled, event = task_progress.handle_tool_result(tool_use_id, is_error, content)
+            if handled:
+                return event
         return {
             "type": "tool_result",
             "tool_use_id": tool_use_id or None,
-            "is_error": bool(getattr(block, "is_error", False)),
-            "content": _tool_result_content(getattr(block, "content", None)),
+            "is_error": is_error,
+            "content": _tool_result_content(content),
         }
     return None
 
 
 def _message_to_events(
     message: Any,
-    todo_tool_ids: set[str] | None = None,
+    task_progress: _ClaudeTaskProgress | None = None,
 ) -> list[dict[str, Any]]:
     """Map an SDK message to transport-neutral NDJSON events.
 
@@ -241,7 +526,7 @@ def _message_to_events(
         content = getattr(message, "content", None)
         if isinstance(content, list):
             for block in content:
-                ev = _block_to_event(block, todo_tool_ids)
+                ev = _block_to_event(block, task_progress)
                 if ev is not None:
                     events.append(ev)
     elif cls == "ResultMessage":
@@ -374,12 +659,12 @@ async def _run_claude(req: dict[str, Any]) -> int:
     _emit({"type": "start", "ts": time.time()})
 
     last_session_id: str | None = None
-    todo_tool_ids: set[str] = set()
+    task_progress = _ClaudeTaskProgress()
 
     async def relay(messages: Any) -> None:
         nonlocal last_session_id
         async for message in messages:
-            for ev in _message_to_events(message, todo_tool_ids):
+            for ev in _message_to_events(message, task_progress):
                 if ev.get("type") == "result" and ev.get("session_id"):
                     last_session_id = ev["session_id"]
                 _emit(ev)

@@ -183,7 +183,7 @@ async def test_agent_shim_skips_mcp_status_on_resumed_turn(monkeypatch):
 
 def test_agent_shim_maps_todo_write_to_one_progress_node():
     module = _load_shim("cocola_agent_shim_todo_test")
-    todo_ids: set[str] = set()
+    task_progress = module._ClaudeTaskProgress()
 
     tool = type("ToolUseBlock", (), {})()
     tool.id = "todo-call-1"
@@ -204,25 +204,162 @@ def test_agent_shim_maps_todo_write_to_one_progress_node():
     user = type("UserMessage", (), {})()
     user.content = [result]
 
-    assert module._message_to_events(assistant, todo_ids) == [
+    assert module._message_to_events(assistant, task_progress) == [
         {
             "type": "progress",
             "id": "todo-list",
             "items": tool.input["todos"],
         }
     ]
-    assert module._message_to_events(user, todo_ids) == []
-    assert todo_ids == set()
+    assert module._message_to_events(user, task_progress) == []
+
+
+def test_agent_shim_collapses_claude_task_tools_into_one_progress_node():
+    module = _load_shim("cocola_agent_shim_task_tools_test")
+    task_progress = module._ClaudeTaskProgress()
+
+    create_one = type("ToolUseBlock", (), {})()
+    create_one.id = "create-1"
+    create_one.name = "TaskCreate"
+    create_one.input = {
+        "subject": "Inspect the project",
+        "description": "Find the relevant files",
+        "activeForm": "Inspecting the project",
+    }
+    create_two = type("ToolUseBlock", (), {})()
+    create_two.id = "create-2"
+    create_two.name = "TaskCreate"
+    create_two.input = {
+        "subject": "Implement the change",
+        "description": "Update the code",
+        "activeForm": "Implementing the change",
+    }
+    assistant = type("AssistantMessage", (), {})()
+    assistant.content = [create_one, create_two]
+
+    create_events = module._message_to_events(assistant, task_progress)
+    assert [event["type"] for event in create_events] == ["progress", "progress"]
+    assert [item["content"] for item in create_events[-1]["items"]] == [
+        "Inspect the project",
+        "Implement the change",
+    ]
+
+    result_one = type("ToolResultBlock", (), {})()
+    result_one.tool_use_id = "create-1"
+    result_one.is_error = False
+    result_one.content = "Task #1 created successfully: Inspect the project"
+    result_two = type("ToolResultBlock", (), {})()
+    result_two.tool_use_id = "create-2"
+    result_two.is_error = False
+    result_two.content = "Task #2 created successfully: Implement the change"
+    user = type("UserMessage", (), {})()
+    user.content = [result_one, result_two]
+
+    result_events = module._message_to_events(user, task_progress)
+    assert [item["id"] for item in result_events[-1]["items"]] == ["1", "2"]
+
+    update = type("ToolUseBlock", (), {})()
+    update.id = "update-1"
+    update.name = "TaskUpdate"
+    update.input = {"taskId": "1", "status": "completed"}
+    assistant.content = [update]
+    assert module._message_to_events(assistant, task_progress) == []
+
+    update_result = type("ToolResultBlock", (), {})()
+    update_result.tool_use_id = "update-1"
+    update_result.is_error = False
+    update_result.content = "Updated task #1 status"
+    user.content = [update_result]
+    update_events = module._message_to_events(user, task_progress)
+    assert update_events == [
+        {
+            "type": "progress",
+            "id": "todo-list",
+            "items": [
+                {
+                    "id": "1",
+                    "content": "Inspect the project",
+                    "status": "completed",
+                    "activeForm": "Inspecting the project",
+                },
+                {
+                    "id": "2",
+                    "content": "Implement the change",
+                    "status": "pending",
+                    "activeForm": "Implementing the change",
+                },
+            ],
+        }
+    ]
+
+
+def test_agent_shim_restores_task_progress_from_task_list_and_get_results():
+    module = _load_shim("cocola_agent_shim_task_snapshot_test")
+    task_progress = module._ClaudeTaskProgress()
+    assistant = type("AssistantMessage", (), {})()
+    user = type("UserMessage", (), {})()
+
+    task_list = type("ToolUseBlock", (), {})()
+    task_list.id = "list-1"
+    task_list.name = "TaskList"
+    task_list.input = {}
+    assistant.content = [task_list]
+    assert module._message_to_events(assistant, task_progress) == []
+
+    list_result = type("ToolResultBlock", (), {})()
+    list_result.tool_use_id = "list-1"
+    list_result.is_error = False
+    list_result.content = (
+        "#1 [completed] Inspect the project\n#2 [in_progress] Implement the change"
+    )
+    user.content = [list_result]
+    events = module._message_to_events(user, task_progress)
+    assert [(item["id"], item["status"]) for item in events[0]["items"]] == [
+        ("1", "completed"),
+        ("2", "in_progress"),
+    ]
+
+    task_get = type("ToolUseBlock", (), {})()
+    task_get.id = "get-2"
+    task_get.name = "TaskGet"
+    task_get.input = {"taskId": "2"}
+    assistant.content = [task_get]
+    assert module._message_to_events(assistant, task_progress) == []
+
+    get_result = type("ToolResultBlock", (), {})()
+    get_result.tool_use_id = "get-2"
+    get_result.is_error = False
+    get_result.content = [
+        {
+            "type": "text",
+            "text": '{"task":{"id":"2","subject":"Implement and verify","status":"in_progress"}}',
+        }
+    ]
+    user.content = [get_result]
+    events = module._message_to_events(user, task_progress)
+    assert events[0]["items"][1]["content"] == "Implement and verify"
+
+    empty_list = type("ToolUseBlock", (), {})()
+    empty_list.id = "list-2"
+    empty_list.name = "TaskList"
+    empty_list.input = {}
+    assistant.content = [empty_list]
+    module._message_to_events(assistant, task_progress)
+    list_result.tool_use_id = "list-2"
+    list_result.content = "No tasks found"
+    user.content = [list_result]
+    assert module._message_to_events(user, task_progress)[0]["items"] == []
 
 
 def test_agent_shim_preserves_invalid_todo_write_as_a_tool_call():
     module = _load_shim("cocola_agent_shim_invalid_todo_test")
+    task_progress = module._ClaudeTaskProgress()
     tool = type("ToolUseBlock", (), {})()
     tool.id = "todo-call-2"
     tool.name = "TodoWrite"
     tool.input = {"todos": "not-a-list"}
 
-    assert module._block_to_event(tool, set()) == {
+    assert module._block_to_event(tool, task_progress) == {
         "type": "tool_use",
         "id": "todo-call-2",
         "name": "TodoWrite",
