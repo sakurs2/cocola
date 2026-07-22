@@ -966,9 +966,9 @@
   --diff-font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
   --diff-selection-background-color: hsl(var(--primary) / 0.18);
   --diff-selection-text-color: hsl(var(--foreground));
-  --diff-gutter-insert-background-color: rgb(16 185 129 / 0.1);
+  --diff-gutter-insert-background-color: transparent;
   --diff-gutter-insert-text-color: rgb(4 120 87);
-  --diff-gutter-delete-background-color: rgb(239 68 68 / 0.1);
+  --diff-gutter-delete-background-color: transparent;
   --diff-gutter-delete-text-color: rgb(185 28 28);
   --diff-code-insert-background-color: rgb(16 185 129 / 0.07);
   --diff-code-insert-text-color: hsl(var(--foreground));
@@ -987,12 +987,160 @@
 }
 
 .cocola-git-diff .diff-gutter {
-  border-right: 1px solid hsl(var(--border));
+  padding-right: 16px;
+}
+
+/* thin 1px colored change bar between the line-number gutter and the code */
+.cocola-git-diff .diff-code-insert {
+  border-left: 1px solid rgb(16 185 129 / 0.85);
+}
+
+.cocola-git-diff .diff-code-delete {
+  border-left: 1px solid rgb(239 68 68 / 0.85);
+}
+
+/* Reserve room for a +/- marker so all code lines stay aligned. */
+.cocola-git-diff .diff-code {
+  position: relative;
+  padding-left: 2ch;
+}
+
+.cocola-git-diff .diff-code-insert::before,
+.cocola-git-diff .diff-code-delete::before {
+  position: absolute;
+  left: 0.55ch;
+  top: 0;
+  font-weight: 600;
+  pointer-events: none;
+}
+
+.cocola-git-diff .diff-code-insert::before {
+  content: "+";
+  color: rgb(4 120 87);
+}
+
+.cocola-git-diff .diff-code-delete::before {
+  content: "-";
+  color: rgb(185 28 28);
+}
+
+/* --- refractor / Prism syntax colors (GitHub light palette) --- */
+.cocola-git-diff .token.comment,
+.cocola-git-diff .token.prolog,
+.cocola-git-diff .token.doctype,
+.cocola-git-diff .token.cdata {
+  color: rgb(106 115 125);
+  font-style: italic;
+}
+
+.cocola-git-diff .token.punctuation {
+  color: rgb(36 41 46);
+}
+
+.cocola-git-diff .token.property,
+.cocola-git-diff .token.tag,
+.cocola-git-diff .token.boolean,
+.cocola-git-diff .token.number,
+.cocola-git-diff .token.constant,
+.cocola-git-diff .token.symbol,
+.cocola-git-diff .token.deleted {
+  color: rgb(0 92 197);
+}
+
+.cocola-git-diff .token.selector,
+.cocola-git-diff .token.attr-name,
+.cocola-git-diff .token.string,
+.cocola-git-diff .token.char,
+.cocola-git-diff .token.builtin,
+.cocola-git-diff .token.inserted {
+  color: rgb(3 47 98);
+}
+
+.cocola-git-diff .token.operator,
+.cocola-git-diff .token.entity,
+.cocola-git-diff .token.url {
+  color: rgb(215 58 73);
+}
+
+.cocola-git-diff .token.atrule,
+.cocola-git-diff .token.attr-value,
+.cocola-git-diff .token.keyword {
+  color: rgb(215 58 73);
+}
+
+.cocola-git-diff .token.function,
+.cocola-git-diff .token.class-name {
+  color: rgb(111 66 193);
+}
+
+.cocola-git-diff .token.regex,
+.cocola-git-diff .token.important,
+.cocola-git-diff .token.variable {
+  color: rgb(227 98 9);
 }
 
 .dark .cocola-git-diff {
   --diff-gutter-insert-text-color: rgb(110 231 183);
   --diff-gutter-delete-text-color: rgb(252 165 165);
+}
+
+.dark .cocola-git-diff .diff-code-insert::before {
+  color: rgb(110 231 183);
+}
+
+.dark .cocola-git-diff .diff-code-delete::before {
+  color: rgb(252 165 165);
+}
+
+/* --- refractor / Prism syntax colors (dark palette) --- */
+.dark .cocola-git-diff .token.comment,
+.dark .cocola-git-diff .token.prolog,
+.dark .cocola-git-diff .token.doctype,
+.dark .cocola-git-diff .token.cdata {
+  color: rgb(139 148 158);
+}
+
+.dark .cocola-git-diff .token.punctuation {
+  color: rgb(201 209 217);
+}
+
+.dark .cocola-git-diff .token.property,
+.dark .cocola-git-diff .token.tag,
+.dark .cocola-git-diff .token.boolean,
+.dark .cocola-git-diff .token.number,
+.dark .cocola-git-diff .token.constant,
+.dark .cocola-git-diff .token.symbol,
+.dark .cocola-git-diff .token.deleted {
+  color: rgb(121 192 255);
+}
+
+.dark .cocola-git-diff .token.selector,
+.dark .cocola-git-diff .token.attr-name,
+.dark .cocola-git-diff .token.string,
+.dark .cocola-git-diff .token.char,
+.dark .cocola-git-diff .token.builtin,
+.dark .cocola-git-diff .token.inserted {
+  color: rgb(165 214 255);
+}
+
+.dark .cocola-git-diff .token.operator,
+.dark .cocola-git-diff .token.entity,
+.dark .cocola-git-diff .token.url,
+.dark .cocola-git-diff .token.atrule,
+.dark .cocola-git-diff .token.attr-value,
+.dark .cocola-git-diff .token.keyword {
+  color: rgb(255 123 114);
+}
+
+.dark .cocola-git-diff .token.function,
+.dark .cocola-git-diff .token.class-name {
+  color: rgb(210 168 255);
+}
+
+.dark .cocola-git-diff .token.regex,
+.dark .cocola-git-diff .token.important,
+.dark .cocola-git-diff .token.variable {
+  color: rgb(255 166 87);
 }
 
 @media (prefers-reduced-motion: reduce) {

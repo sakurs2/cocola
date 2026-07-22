@@ -35,7 +35,20 @@ import {
   gitCommitDescription,
 } from "@/lib/git-history.mjs";
 import { MaterialFileIcon } from "@/lib/material-file-icons";
-import { Diff as DiffView, Hunk, parseDiff } from "react-diff-view";
+import { Diff as DiffView, Hunk, parseDiff, tokenize } from "react-diff-view";
+import { refractor } from "refractor";
+import refractorMarkup from "refractor/lang/markup.js";
+import refractorCss from "refractor/lang/css.js";
+import refractorJavascript from "refractor/lang/javascript.js";
+import refractorTypescript from "refractor/lang/typescript.js";
+import refractorJsx from "refractor/lang/jsx.js";
+import refractorTsx from "refractor/lang/tsx.js";
+import refractorGo from "refractor/lang/go.js";
+import refractorJson from "refractor/lang/json.js";
+import refractorPython from "refractor/lang/python.js";
+import refractorBash from "refractor/lang/bash.js";
+import refractorYaml from "refractor/lang/yaml.js";
+import refractorMarkdown from "refractor/lang/markdown.js";
 import {
   AlertTriangle,
   ArrowLeft,
@@ -515,7 +528,7 @@ function GitPage({
   const [snapshot, setSnapshot] = useState<GitSnapshot | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [view, setView] = useState<"history" | "working" | "commit">("history");
+  const [view, setView] = useState<"history" | "commit">("history");
   const [commitDetail, setCommitDetail] = useState<GitCommitDetail | null>(null);
   const [diff, setDiff] = useState<GitDiff | null>(null);
   const requestSequence = useRef(0);
@@ -658,6 +671,9 @@ function GitPage({
 
   const changes = snapshot?.changes ?? [];
   const commits = snapshot?.commits ?? [];
+  const stagedChanges = changes.filter((change) => change.area === "staged");
+  const unstagedChanges = changes.filter((change) => change.area !== "staged");
+
   return (
     <div className="flex h-full min-h-0 flex-col bg-background">
       <GitSnapshotHeader snapshot={snapshot} />
@@ -672,18 +688,6 @@ function GitPage({
         </div>
       ) : diff ? (
         <GitDiffPanel diff={diff} onBack={() => setDiff(null)} />
-      ) : view === "working" ? (
-        <GitWorkingTree
-          changes={changes}
-          truncated={Boolean(snapshot?.truncated)}
-          onBack={() => setView("history")}
-          onOpenDiff={(change) =>
-            void inspect("diff", {
-              path: change.path,
-              diffTarget: change.area === "staged" ? "staged" : "working",
-            })
-          }
-        />
       ) : view === "commit" && commitDetail ? (
         <GitCommitPanel
           detail={commitDetail}
@@ -698,40 +702,55 @@ function GitPage({
         />
       ) : (
         <div className="min-h-0 flex-1 overflow-y-auto">
-          <GitHistoryRow
-            kind="working"
-            title="Working Tree"
-            subtitle={
-              !snapshot
-                ? "No saved status"
-                : snapshot.dirty
-                  ? `${changes.length}${snapshot?.truncated ? "+" : ""} uncommitted ${changes.length === 1 ? "change" : "changes"}`
-                  : "No uncommitted changes"
+          {changes.length === 0 && snapshot ? (
+            <div className="flex items-center gap-2 border-b border-border/60 px-4 py-3 text-[12px] text-muted-foreground">
+              <span className="grid size-4 place-items-center rounded bg-emerald-500/10 text-[9px] font-bold text-emerald-600 dark:text-emerald-400">
+                ✓
+              </span>
+              Working tree clean · no uncommitted changes
+            </div>
+          ) : null}
+          <GitChangeSection
+            title="Staged Changes"
+            changes={stagedChanges}
+            onOpenDiff={(change) =>
+              void inspect("diff", { path: change.path, diffTarget: "staged" })
             }
-            badge={snapshot ? (snapshot.dirty ? "MODIFIED" : "CLEAN") : undefined}
-            last={commits.length === 0}
-            onClick={() => setView("working")}
           />
+          <GitChangeSection
+            title="Changes"
+            changes={unstagedChanges}
+            onOpenDiff={(change) =>
+              void inspect("diff", {
+                path: change.path,
+                diffTarget: change.area === "staged" ? "staged" : "working",
+              })
+            }
+          />
+          {snapshot?.truncated ? (
+            <div className="px-4 py-1.5 text-[11px] text-amber-600 dark:text-amber-400">
+              Showing the first 500 changed paths.
+            </div>
+          ) : null}
+          <GitSectionHeader title="Commits" count={commits.length || undefined} />
           {commits.length ? (
-            commits.map((commit, index) => (
-              <GitHistoryRow
-                key={commit.sha}
-                kind="commit"
-                title={commit.subject || "Untitled commit"}
-                subtitle={`${commit.author_name || "Unknown author"} · ${formatGitRelativeTime(commit.authored_at)}`}
-                sha={commit.sha}
-                badges={gitCommitBadges(commit, snapshot)}
-                merge={(commit.parents?.length ?? 0) > 1}
-                last={index === commits.length - 1}
-                onClick={() => void inspect("commit", { commitSHA: commit.sha })}
-              />
-            ))
+            <div className="pb-2">
+              {commits.map((commit, index) => (
+                <GitCommitLogRow
+                  key={commit.sha}
+                  commit={commit}
+                  snapshot={snapshot}
+                  last={index === commits.length - 1}
+                  onClick={() => void inspect("commit", { commitSHA: commit.sha })}
+                />
+              ))}
+            </div>
           ) : snapshot ? (
-            <div className="border-t border-border/60 px-5 py-8 text-center text-sm text-muted-foreground">
+            <div className="px-5 py-8 text-center text-sm text-muted-foreground">
               No commit history was captured. Refresh Git status to load it.
             </div>
           ) : (
-            <div className="border-t border-border/60 px-5 py-8 text-center text-sm text-muted-foreground">
+            <div className="px-5 py-8 text-center text-sm text-muted-foreground">
               Refresh to inspect this workspace.
             </div>
           )}
@@ -749,20 +768,20 @@ function GitPage({
 function GitSnapshotHeader({ snapshot }: { snapshot: GitSnapshot | null }) {
   return (
     <div className="border-b border-border bg-muted/20 px-4 py-3">
-      <div className="flex items-center gap-2">
-        <span className="grid size-7 place-items-center rounded-lg border border-primary/15 bg-primary/5">
-          <GitBranch className="size-4 text-primary" />
+      <div className="flex items-center gap-2.5">
+        <span className="grid size-7 shrink-0 place-items-center rounded-lg bg-primary/10 text-primary">
+          <GitBranch className="size-4" />
         </span>
-        <span className="min-w-0 flex-1 truncate text-sm font-semibold">
+        <span className="min-w-0 flex-1 truncate text-[13.5px] font-semibold">
           {snapshot?.branch || "Project branch"}
         </span>
         {snapshot?.ahead ? (
-          <span className="rounded-full bg-primary/10 px-2 py-0.5 text-[10px] font-semibold text-primary">
-            {snapshot.ahead} ahead
+          <span className="shrink-0 rounded-full bg-emerald-500/10 px-2 py-0.5 text-[10.5px] font-bold text-emerald-600 dark:text-emerald-400">
+            ↑ {snapshot.ahead} ahead
           </span>
         ) : null}
       </div>
-      <div className="mt-1.5 flex items-center gap-2 pl-9 text-[11px] text-muted-foreground">
+      <div className="mt-2 flex items-center gap-2 pl-[38px] text-[11px] text-muted-foreground">
         <span>
           {snapshot?.captured_at
             ? `Captured ${formatGitRelativeTime(snapshot.captured_at)}`
@@ -770,7 +789,7 @@ function GitSnapshotHeader({ snapshot }: { snapshot: GitSnapshot | null }) {
         </span>
         {snapshot?.base_sha && snapshot?.head_sha ? (
           <>
-            <span aria-hidden="true">·</span>
+            <span className="size-[3px] rounded-full bg-current opacity-50" aria-hidden="true" />
             <span className="truncate font-mono">
               {snapshot.base_sha.slice(0, 7)} → {snapshot.head_sha.slice(0, 7)}
             </span>
@@ -781,129 +800,198 @@ function GitSnapshotHeader({ snapshot }: { snapshot: GitSnapshot | null }) {
   );
 }
 
-function GitHistoryRow({
-  kind,
-  title,
-  subtitle,
-  sha,
-  badge,
-  badges = [],
-  merge = false,
-  last,
-  onClick,
-}: {
-  kind: "working" | "commit";
-  title: string;
-  subtitle: string;
-  sha?: string;
-  badge?: string;
-  badges?: Array<{ label: string; tone: string }>;
-  merge?: boolean;
-  last: boolean;
-  onClick: () => void;
-}) {
+function GitSectionHeader({ title, count }: { title: string; count?: number }) {
+  return (
+    <div className="sticky top-0 z-10 flex items-center gap-2 border-b border-border/60 bg-background/95 px-3 py-1.5 text-[11px] font-bold uppercase tracking-wide text-muted-foreground backdrop-blur">
+      <span>{title}</span>
+      {count != null ? (
+        <span className="ml-auto rounded-full bg-muted px-2 py-0.5 text-[10px] font-semibold tracking-normal text-muted-foreground">
+          {count}
+        </span>
+      ) : null}
+    </div>
+  );
+}
+
+function GitStatusLetter({ status }: { status: string }) {
+  const code = gitChangeCode(status);
+  return (
+    <span
+      className={cn(
+        "w-[15px] shrink-0 text-center font-mono text-[11px] font-bold",
+        code === "A" && "text-emerald-600 dark:text-emerald-400",
+        code === "D" && "text-red-600 dark:text-red-400",
+        code === "R" && "text-violet-600 dark:text-violet-400",
+        code === "U" && "text-blue-600 dark:text-blue-400",
+        !["A", "D", "R", "U"].includes(code) && "text-amber-600 dark:text-amber-400",
+      )}
+    >
+      {code}
+    </span>
+  );
+}
+
+function GitChangeRow({ change, onClick }: { change: GitChange; onClick: () => void }) {
+  const slash = change.path.lastIndexOf("/");
+  const name = slash < 0 ? change.path : change.path.slice(slash + 1);
+  const dir = slash < 0 ? "" : change.path.slice(0, slash);
   return (
     <button
       type="button"
+      title={change.old_path ? `${change.old_path} → ${change.path}` : change.path}
       onClick={onClick}
-      className="group flex w-full min-w-0 text-left outline-none transition-colors hover:bg-muted/60 focus-visible:bg-muted focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring"
+      className="group flex w-full items-center gap-2 py-[5px] pl-4 pr-3 text-left outline-none hover:bg-muted/60 focus-visible:bg-muted focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring"
     >
-      <GitGraphRail kind={kind} merge={merge} last={last} />
-      <span className="min-w-0 flex-1 border-b border-border/60 py-3 pr-3 group-last:border-b-0">
-        <span className="flex min-w-0 items-start gap-2">
-          <span className="min-w-0 flex-1 truncate text-xs font-medium text-foreground">
-            {title}
-          </span>
-          {sha ? (
-            <span className="shrink-0 rounded bg-muted px-1.5 py-0.5 font-mono text-[10px] text-muted-foreground">
-              {sha.slice(0, 7)}
-            </span>
-          ) : null}
-        </span>
-        <span className="mt-1 flex min-w-0 items-center gap-1.5">
-          <span className="min-w-0 flex-1 truncate text-[11px] text-muted-foreground">
-            {subtitle}
-          </span>
-          {badge ? (
-            <span
-              className={cn(
-                "rounded-full px-1.5 py-0.5 text-[9px] font-bold tracking-wide",
-                badge === "CLEAN"
-                  ? "bg-emerald-500/10 text-emerald-700"
-                  : "bg-amber-500/10 text-amber-700",
-              )}
-            >
-              {badge}
-            </span>
-          ) : null}
-        </span>
-        {badges.length ? (
-          <span className="mt-1.5 flex flex-wrap gap-1">
-            {badges.map((item) => (
-              <span
-                key={`${item.tone}:${item.label}`}
-                className={cn(
-                  "max-w-36 truncate rounded px-1.5 py-0.5 text-[9px] font-semibold",
-                  item.tone === "head" && "bg-blue-500/10 text-blue-700",
-                  item.tone === "base" && "bg-violet-500/10 text-violet-700",
-                  item.tone === "tag" && "bg-amber-500/10 text-amber-700",
-                  item.tone === "ref" && "bg-muted text-muted-foreground",
-                )}
-              >
-                {item.label}
-              </span>
-            ))}
-          </span>
-        ) : null}
+      <MaterialFileIcon
+        name={resolveFileType(name).icon}
+        className="flex size-4 shrink-0 items-center justify-center"
+      />
+      <span className="min-w-0 flex-1 truncate">
+        <span className="text-[12px] text-foreground">{name}</span>
+        {dir ? <span className="ml-1.5 text-[11px] text-muted-foreground/70">{dir}</span> : null}
       </span>
-      <ChevronRight className="mr-3 mt-4 size-3.5 shrink-0 text-muted-foreground/60 transition-transform group-hover:translate-x-0.5 group-hover:text-foreground" />
+      <GitStatusLetter status={change.status} />
     </button>
   );
 }
 
-function GitGraphRail({
-  kind,
-  merge,
-  last,
+function GitChangeSection({
+  title,
+  changes,
+  onOpenDiff,
 }: {
-  kind: "working" | "commit";
-  merge: boolean;
-  last: boolean;
+  title: string;
+  changes: GitChange[];
+  onOpenDiff: (change: GitChange) => void;
 }) {
+  if (!changes.length) return null;
   return (
-    <span className="relative flex w-11 shrink-0 justify-center self-stretch" aria-hidden="true">
+    <>
+      <GitSectionHeader title={title} count={changes.length} />
+      {changes.map((change) => (
+        <GitChangeRow
+          key={`${change.area}:${change.path}`}
+          change={change}
+          onClick={() => onOpenDiff(change)}
+        />
+      ))}
+    </>
+  );
+}
+
+const GIT_AVATAR_COLORS = [
+  "bg-blue-500",
+  "bg-emerald-500",
+  "bg-violet-500",
+  "bg-amber-500",
+  "bg-pink-500",
+  "bg-cyan-500",
+];
+
+function gitAuthorInitials(name: string) {
+  const parts = String(name || "?")
+    .trim()
+    .split(/\s+/)
+    .filter(Boolean);
+  const initials = parts.map((word) => word[0]).slice(0, 2).join("");
+  return (initials || "?").toUpperCase();
+}
+
+function gitAuthorColor(name: string) {
+  let hash = 0;
+  for (let index = 0; index < name.length; index += 1) {
+    hash = (hash * 31 + name.charCodeAt(index)) >>> 0;
+  }
+  return GIT_AVATAR_COLORS[hash % GIT_AVATAR_COLORS.length];
+}
+
+function GitAuthorAvatar({ name, merge = false }: { name: string; merge?: boolean }) {
+  return (
+    <span
+      className={cn(
+        "grid size-[18px] shrink-0 place-items-center rounded-full text-[8.5px] font-bold text-white",
+        merge ? "bg-violet-500" : gitAuthorColor(name),
+      )}
+      title={name || "Unknown author"}
+    >
+      {merge ? <GitMerge className="size-2.5" /> : gitAuthorInitials(name)}
+    </span>
+  );
+}
+
+function GitRefBadges({
+  commit,
+  snapshot,
+}: {
+  commit: GitCommit;
+  snapshot: GitSnapshot | null;
+}) {
+  const badges = gitCommitBadges(commit, snapshot);
+  if (!badges.length) return null;
+  return (
+    <span className="flex shrink-0 items-center gap-1">
+      {badges.map((badge) => (
+        <span
+          key={`${badge.tone}:${badge.label}`}
+          className={cn(
+            "max-w-28 truncate rounded px-1.5 py-px text-[9px] font-bold",
+            badge.tone === "head" && "bg-blue-500/10 text-blue-600 dark:text-blue-400",
+            badge.tone === "base" && "bg-violet-500/10 text-violet-600 dark:text-violet-400",
+            badge.tone === "tag" && "bg-amber-500/10 text-amber-600 dark:text-amber-400",
+            badge.tone === "ref" && "bg-emerald-500/10 text-emerald-600 dark:text-emerald-400",
+          )}
+        >
+          {badge.label}
+        </span>
+      ))}
+    </span>
+  );
+}
+
+function GitCommitLogRow({
+  commit,
+  snapshot,
+  last,
+  onClick,
+}: {
+  commit: GitCommit;
+  snapshot: GitSnapshot | null;
+  last: boolean;
+  onClick: () => void;
+}) {
+  const merge = (commit.parents?.length ?? 0) > 1;
+  const isBase = commit.sha === snapshot?.base_sha;
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      className="group relative flex w-full items-center gap-2 py-1.5 pl-3.5 pr-3 text-left outline-none hover:bg-muted/60 focus-visible:bg-muted focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring"
+    >
+      {!last ? (
+        <span
+          aria-hidden="true"
+          className="pointer-events-none absolute bottom-0 left-[23px] top-0 w-0.5 bg-border"
+        />
+      ) : null}
       <span
+        aria-hidden="true"
         className={cn(
-          "absolute left-1/2 top-0 h-1/2 -translate-x-1/2 border-l-2",
-          kind === "working" ? "border-dashed border-amber-400" : "border-blue-500/70",
+          "relative z-[1] ml-[5px] size-[9px] shrink-0 rounded-full border-2 border-background",
+          isBase || merge ? "bg-violet-500" : "bg-blue-500",
         )}
       />
-      {!last ? (
-        <span className="absolute bottom-0 left-1/2 top-1/2 -translate-x-1/2 border-l-2 border-blue-500/70" />
-      ) : null}
-      {merge ? (
-        <svg className="absolute left-[20px] top-1/2 h-8 w-5 -translate-y-2" viewBox="0 0 20 32">
-          <path
-            d="M1 2 C16 8 16 20 1 30"
-            fill="none"
-            className="stroke-violet-500"
-            strokeWidth="2"
-          />
-        </svg>
-      ) : null}
-      <span
-        className={cn(
-          "relative z-10 mt-[17px] grid size-3.5 place-items-center rounded-full border-2 bg-background",
-          kind === "working"
-            ? "border-amber-500 ring-4 ring-amber-500/10"
-            : merge
-              ? "border-violet-500 ring-4 ring-violet-500/10"
-              : "border-blue-600 ring-4 ring-blue-500/10",
-        )}
-      >
-        {kind === "working" ? <span className="size-1 rounded-full bg-amber-500" /> : null}
+      <GitAuthorAvatar name={commit.author_name} merge={merge} />
+      <span className="min-w-0 flex-1 truncate text-[12px] text-foreground">
+        {commit.subject || "Untitled commit"}
       </span>
-    </span>
+      <GitRefBadges commit={commit} snapshot={snapshot} />
+      <span className="shrink-0 text-[10px] text-muted-foreground">
+        {formatGitRelativeTime(commit.authored_at)}
+      </span>
+      <span className="shrink-0 font-mono text-[9.5px] text-muted-foreground/80">
+        {commit.sha.slice(0, 7)}
+      </span>
+    </button>
   );
 }
 
@@ -919,47 +1007,6 @@ function GitPanelBackHeader({ title, onBack }: { title: string; onBack: () => vo
         <ArrowLeft className="size-4" />
       </button>
       <span className="min-w-0 flex-1 truncate text-xs font-semibold">{title}</span>
-    </div>
-  );
-}
-
-function GitWorkingTree({
-  changes,
-  truncated,
-  onBack,
-  onOpenDiff,
-}: {
-  changes: GitChange[];
-  truncated: boolean;
-  onBack: () => void;
-  onOpenDiff: (change: GitChange) => void;
-}) {
-  return (
-    <div className="flex min-h-0 flex-1 flex-col">
-      <GitPanelBackHeader title="Working Tree" onBack={onBack} />
-      <div className="min-h-0 flex-1 overflow-y-auto">
-        {changes.length ? (
-          changes.map((change) => (
-            <GitFileRow
-              key={`${change.area}:${change.path}`}
-              path={change.path}
-              oldPath={change.old_path}
-              status={change.status}
-              meta={change.area}
-              onClick={() => onOpenDiff(change)}
-            />
-          ))
-        ) : (
-          <div className="flex items-center gap-2 px-4 py-5 text-sm text-muted-foreground">
-            Working tree clean. There are no uncommitted changes.
-          </div>
-        )}
-      </div>
-      {truncated ? (
-        <div className="border-t border-border px-3 py-2 text-xs text-amber-700">
-          Showing the first 500 changed paths.
-        </div>
-      ) : null}
     </div>
   );
 }
@@ -1062,24 +1109,18 @@ function GitFileRow({
   meta?: string;
   onClick: () => void;
 }) {
-  const code = gitChangeCode(status);
+  const slash = path.lastIndexOf("/");
+  const name = slash < 0 ? path : path.slice(slash + 1);
   return (
     <button
       type="button"
       onClick={onClick}
-      className="group flex w-full items-center gap-3 border-b border-border/60 px-4 py-2.5 text-left outline-none hover:bg-muted/60 focus-visible:bg-muted focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring"
+      className="group flex w-full items-center gap-2.5 border-b border-border/60 px-4 py-2.5 text-left outline-none hover:bg-muted/60 focus-visible:bg-muted focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring"
     >
-      <span
-        className={cn(
-          "grid size-6 shrink-0 place-items-center rounded-md font-mono text-[10px] font-bold",
-          code === "A" && "bg-emerald-500/10 text-emerald-700",
-          code === "D" && "bg-red-500/10 text-red-600",
-          code === "R" && "bg-violet-500/10 text-violet-700",
-          !["A", "D", "R"].includes(code) && "bg-blue-500/10 text-blue-700",
-        )}
-      >
-        {code}
-      </span>
+      <MaterialFileIcon
+        name={resolveFileType(name).icon}
+        className="flex size-4 shrink-0 items-center justify-center"
+      />
       <span className="min-w-0 flex-1">
         <span className="block truncate text-xs font-medium">{path}</span>
         {oldPath || meta ? (
@@ -1088,9 +1129,87 @@ function GitFileRow({
           </span>
         ) : null}
       </span>
+      <GitStatusLetter status={status} />
       <ChevronRight className="size-3.5 text-muted-foreground/60 group-hover:text-foreground" />
     </button>
   );
+}
+
+let gitDiffLanguagesRegistered = false;
+function ensureGitDiffLanguages() {
+  if (gitDiffLanguagesRegistered) return;
+  gitDiffLanguagesRegistered = true;
+  for (const lang of [
+    refractorMarkup,
+    refractorCss,
+    refractorJavascript,
+    refractorTypescript,
+    refractorJsx,
+    refractorTsx,
+    refractorGo,
+    refractorJson,
+    refractorPython,
+    refractorBash,
+    refractorYaml,
+    refractorMarkdown,
+  ]) {
+    try {
+      refractor.register(lang);
+    } catch {
+      /* already registered */
+    }
+  }
+}
+
+// react-diff-view@3 expects refractor.highlight() to return a node array, but
+// refractor@4 returns a hast root object. Adapt by unwrapping .children.
+const gitDiffRefractor = {
+  highlight: (value: string, language: string) =>
+    refractor.highlight(value, language).children,
+} as unknown as typeof refractor;
+
+function gitDiffLanguage(path: string): string | null {
+  const ext = path.slice(path.lastIndexOf(".") + 1).toLowerCase();
+  switch (ext) {
+    case "ts":
+      return "typescript";
+    case "tsx":
+      return "tsx";
+    case "js":
+    case "cjs":
+    case "mjs":
+      return "javascript";
+    case "jsx":
+      return "jsx";
+    case "go":
+      return "go";
+    case "json":
+      return "json";
+    case "css":
+    case "scss":
+    case "less":
+      return "css";
+    case "html":
+    case "htm":
+    case "xml":
+    case "svg":
+      return "markup";
+    case "py":
+      return "python";
+    case "sh":
+    case "bash":
+    case "zsh":
+      return "bash";
+    case "yml":
+    case "yaml":
+      return "yaml";
+    case "md":
+    case "markdown":
+    case "mdx":
+      return "markdown";
+    default:
+      return null;
+  }
 }
 
 function GitDiffPanel({ diff, onBack }: { diff: GitDiff; onBack: () => void }) {
@@ -1103,6 +1222,23 @@ function GitDiffPanel({ diff, onBack }: { diff: GitDiff; onBack: () => void }) {
       return { files: [], error: "This patch could not be rendered." };
     }
   }, [diff.text]);
+
+  const tokensByFile = useMemo(() => {
+    ensureGitDiffLanguages();
+    return parsed.files.map((file) => {
+      const language = gitDiffLanguage(file.newPath || file.oldPath || diff.path);
+      if (!language) return undefined;
+      try {
+        return tokenize(file.hunks, {
+          highlight: true,
+          refractor: gitDiffRefractor,
+          language,
+        });
+      } catch {
+        return undefined;
+      }
+    });
+  }, [parsed.files, diff.path]);
 
   return (
     <div className="flex min-h-0 flex-1 flex-col">
@@ -1153,7 +1289,12 @@ function GitDiffPanel({ diff, onBack }: { diff: GitDiff; onBack: () => void }) {
               <div className="sticky top-0 z-10 border-b border-border bg-muted/95 px-3 py-2 font-mono text-[10px] text-muted-foreground backdrop-blur">
                 {file.oldPath === file.newPath ? file.newPath : `${file.oldPath} → ${file.newPath}`}
               </div>
-              <DiffView viewType={viewType} diffType={file.type} hunks={file.hunks}>
+              <DiffView
+                viewType={viewType}
+                diffType={file.type}
+                hunks={file.hunks}
+                tokens={tokensByFile[index]}
+              >
                 {(hunks) =>
                   hunks.map((hunk) => (
                     <Hunk key={`${hunk.oldStart}:${hunk.newStart}`} hunk={hunk} />
