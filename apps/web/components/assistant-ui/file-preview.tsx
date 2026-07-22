@@ -15,66 +15,6 @@ const COCOLA_CODE_THEME = "cocola-code-dark";
 let cocolaThemeRegistered = false;
 const MAX_RENDERED_HTML_BYTES = 2 * 1024 * 1024;
 
-const ISOLATED_HTML_CSP = [
-  "default-src 'none'",
-  "img-src data:",
-  "media-src data:",
-  "font-src data:",
-  "style-src 'unsafe-inline'",
-  "script-src 'none'",
-  "connect-src 'none'",
-  "frame-src 'none'",
-  "object-src 'none'",
-  "worker-src 'none'",
-  "base-uri 'none'",
-  "form-action 'none'",
-  "navigate-to 'none'",
-].join("; ");
-
-const HTML_BLOCKED_ELEMENTS = "script, iframe, frame, object, embed, link, base";
-const HTML_URL_ATTRIBUTES = new Set([
-  "action",
-  "formaction",
-  "href",
-  "poster",
-  "src",
-  "srcset",
-  "xlink:href",
-]);
-
-function isolatedHtmlPreviewDocument(source: string): string {
-  // DOMParser creates an inert document, so active content cannot run while we
-  // remove it. The iframe still receives a restrictive CSP and an opaque
-  // sandbox origin as independent browser-enforced backstops.
-  const document = new DOMParser().parseFromString(source, "text/html");
-  document.querySelectorAll(HTML_BLOCKED_ELEMENTS).forEach((element) => element.remove());
-  document.querySelectorAll('meta[http-equiv="refresh" i]').forEach((element) => element.remove());
-  document
-    .querySelectorAll('meta[http-equiv="content-security-policy" i]')
-    .forEach((element) => element.remove());
-  document.querySelectorAll("*").forEach((element) => {
-    for (const attribute of Array.from(element.attributes)) {
-      const name = attribute.name.toLowerCase();
-      const value = attribute.value.trim();
-      if (name.startsWith("on")) {
-        element.removeAttribute(attribute.name);
-        continue;
-      }
-      if (!HTML_URL_ATTRIBUTES.has(name)) continue;
-      const fragmentLink = (name === "href" || name === "xlink:href") && value.startsWith("#");
-      const embeddedMedia =
-        (name === "src" || name === "poster") && /^data:(?:image|audio|video)\//i.test(value);
-      if (!fragmentLink && !embeddedMedia) element.removeAttribute(attribute.name);
-    }
-  });
-
-  const policy = document.createElement("meta");
-  policy.httpEquiv = "Content-Security-Policy";
-  policy.content = ISOLATED_HTML_CSP;
-  document.head.prepend(policy);
-  return `<!doctype html>\n${document.documentElement.outerHTML}`;
-}
-
 const defineCocolaTheme: BeforeMount = (monaco) => {
   if (cocolaThemeRegistered) return;
   cocolaThemeRegistered = true;
@@ -260,8 +200,8 @@ export function ReadonlyFilePreview({
     return (
       <iframe
         title={file.filename}
-        srcDoc={isolatedHtmlPreviewDocument(text)}
-        sandbox=""
+        srcDoc={text}
+        sandbox="allow-scripts allow-forms allow-same-origin allow-popups allow-modals allow-downloads"
         referrerPolicy="no-referrer"
         className="h-full w-full bg-white"
       />
