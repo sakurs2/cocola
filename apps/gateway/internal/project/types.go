@@ -183,16 +183,38 @@ type Change struct {
 	Area    string `json:"area"`
 }
 
+type GitCommit struct {
+	SHA          string   `json:"sha"`
+	Parents      []string `json:"parents"`
+	Subject      string   `json:"subject"`
+	AuthorName   string   `json:"author_name"`
+	AuthoredAt   string   `json:"authored_at"`
+	Refs         []string `json:"refs,omitempty"`
+	FilesChanged int      `json:"files_changed,omitempty"`
+	Additions    int      `json:"additions,omitempty"`
+	Deletions    int      `json:"deletions,omitempty"`
+	Body         string   `json:"body,omitempty"`
+}
+
+type GitCommitFile struct {
+	Path    string `json:"path"`
+	OldPath string `json:"old_path,omitempty"`
+	Status  string `json:"status"`
+	Binary  bool   `json:"binary,omitempty"`
+}
+
 type GitSnapshot struct {
-	Branch     string    `json:"branch"`
-	BaseRef    string    `json:"base_ref"`
-	BaseSHA    string    `json:"base_sha"`
-	HeadSHA    string    `json:"head_sha"`
-	Ahead      int       `json:"ahead"`
-	Dirty      bool      `json:"dirty"`
-	Changes    []Change  `json:"changes"`
-	Truncated  bool      `json:"truncated"`
-	CapturedAt time.Time `json:"captured_at"`
+	Branch           string      `json:"branch"`
+	BaseRef          string      `json:"base_ref"`
+	BaseSHA          string      `json:"base_sha"`
+	HeadSHA          string      `json:"head_sha"`
+	Ahead            int         `json:"ahead"`
+	Dirty            bool        `json:"dirty"`
+	Changes          []Change    `json:"changes"`
+	Truncated        bool        `json:"truncated"`
+	Commits          []GitCommit `json:"commits,omitempty"`
+	HistoryTruncated bool        `json:"history_truncated,omitempty"`
+	CapturedAt       time.Time   `json:"captured_at"`
 }
 
 type Workspace struct {

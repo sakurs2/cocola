@@ -27,7 +27,14 @@ import {
   probeCodeEditorStatus,
 } from "@/lib/code-editor-readiness.mjs";
 import { resolveFileType } from "@/lib/file-type";
+import {
+  formatGitRelativeTime,
+  gitChangeCode,
+  gitCommitBadges,
+  gitCommitDescription,
+} from "@/lib/git-history.mjs";
 import { MaterialFileIcon } from "@/lib/material-file-icons";
+import { Diff as DiffView, Hunk, parseDiff } from "react-diff-view";
 import {
   AlertTriangle,
   ArrowLeft,
@@ -42,6 +49,8 @@ import {
   FolderOpen,
   Globe,
   GitBranch,
+  GitCommitHorizontal,
+  GitMerge,
   LoaderCircle,
   Plus,
   RefreshCw,
@@ -415,6 +424,26 @@ type GitChange = {
   area: "staged" | "working" | "both" | "untracked" | string;
 };
 
+type GitCommit = {
+  sha: string;
+  parents?: string[];
+  subject: string;
+  body?: string;
+  author_name: string;
+  authored_at: string;
+  refs?: string[];
+  files_changed?: number;
+  additions?: number;
+  deletions?: number;
+};
+
+type GitCommitFile = {
+  path: string;
+  old_path?: string;
+  status: string;
+  binary?: boolean;
+};
+
 type GitSnapshot = {
   branch?: string;
   base_ref?: string;
@@ -424,7 +453,23 @@ type GitSnapshot = {
   dirty?: boolean;
   changes?: GitChange[];
   truncated?: boolean;
+  commits?: GitCommit[];
+  history_truncated?: boolean;
   captured_at?: string;
+};
+
+type GitDiff = {
+  path: string;
+  text: string;
+  binary: boolean;
+  truncated: boolean;
+  commitSHA?: string;
+};
+
+type GitCommitDetail = {
+  commit: GitCommit;
+  files: GitCommitFile[];
+  truncated: boolean;
 };
 
 function GitPage({
@@ -439,14 +484,13 @@ function GitPage({
   const [snapshot, setSnapshot] = useState<GitSnapshot | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [diff, setDiff] = useState<{
-    path: string;
-    text: string;
-    binary: boolean;
-    truncated: boolean;
-  } | null>(null);
+  const [view, setView] = useState<"history" | "working" | "commit">("history");
+  const [commitDetail, setCommitDetail] = useState<GitCommitDetail | null>(null);
+  const [diff, setDiff] = useState<GitDiff | null>(null);
+  const requestSequence = useRef(0);
 
   const loadStored = useCallback(async () => {
+    const requestID = ++requestSequence.current;
     setLoading(true);
     setError(null);
     try {
@@ -459,14 +503,18 @@ function GitPage({
         workspace?: { git_snapshot?: GitSnapshot; branch_name?: string };
         project?: { repository_provider?: string };
       };
-      setSnapshot({
-        ...(body.workspace?.git_snapshot ?? {}),
-        branch: body.workspace?.git_snapshot?.branch || body.workspace?.branch_name,
-      });
+      if (requestID === requestSequence.current) {
+        setSnapshot({
+          ...(body.workspace?.git_snapshot ?? {}),
+          branch: body.workspace?.git_snapshot?.branch || body.workspace?.branch_name,
+        });
+      }
     } catch (loadError) {
-      setError(loadError instanceof Error ? loadError.message : "Could not load Git status");
+      if (requestID === requestSequence.current) {
+        setError(loadError instanceof Error ? loadError.message : "Could not load Git status");
+      }
     } finally {
-      setLoading(false);
+      if (requestID === requestSequence.current) setLoading(false);
     }
   }, [sessionID]);
 
@@ -475,7 +523,11 @@ function GitPage({
   }, [active, loadStored]);
 
   const inspect = useCallback(
-    async (operation: "status" | "diff", path = "", diffTarget = "working") => {
+    async (
+      operation: "status" | "diff" | "commit",
+      options: { path?: string; diffTarget?: string; commitSHA?: string } = {},
+    ) => {
+      const requestID = ++requestSequence.current;
       setLoading(true);
       setError(null);
       try {
@@ -484,7 +536,12 @@ function GitPage({
           {
             method: "POST",
             headers: { "content-type": "application/json" },
-            body: JSON.stringify({ operation, path, diff_target: diffTarget }),
+            body: JSON.stringify({
+              operation,
+              path: options.path ?? "",
+              diff_target: options.diffTarget ?? "working",
+              commit_sha: options.commitSHA ?? "",
+            }),
           },
         );
         const body = (await response.json().catch(() => ({}))) as {
@@ -492,6 +549,8 @@ function GitPage({
           diff?: string;
           binary?: boolean;
           truncated?: boolean;
+          commit?: GitCommit;
+          commit_files?: GitCommitFile[];
           error?: { message?: string };
         };
         if (!response.ok) {
@@ -501,21 +560,43 @@ function GitPage({
               : body.error?.message || "Could not inspect Git workspace",
           );
         }
+        if (requestID !== requestSequence.current) return;
         if (body.snapshot) setSnapshot(body.snapshot);
         if (operation === "diff") {
           setDiff({
-            path,
+            path: options.path ?? "",
             text: body.diff ?? "",
             binary: Boolean(body.binary),
             truncated: Boolean(body.truncated),
           });
+        } else if (operation === "commit" && body.commit) {
+          if (options.path) {
+            setDiff({
+              path: options.path,
+              text: body.diff ?? "",
+              binary: Boolean(body.binary),
+              truncated: Boolean(body.truncated),
+              commitSHA: body.commit.sha,
+            });
+          } else {
+            setCommitDetail({
+              commit: body.commit,
+              files: body.commit_files ?? [],
+              truncated: Boolean(body.truncated),
+            });
+            setView("commit");
+          }
         }
       } catch (inspectError) {
-        setError(
-          inspectError instanceof Error ? inspectError.message : "Could not inspect Git workspace",
-        );
+        if (requestID === requestSequence.current) {
+          setError(
+            inspectError instanceof Error
+              ? inspectError.message
+              : "Could not inspect Git workspace",
+          );
+        }
       } finally {
-        setLoading(false);
+        if (requestID === requestSequence.current) setLoading(false);
       }
     },
     [sessionID],
@@ -544,109 +625,521 @@ function GitPage({
     return () => setHeaderActions(null);
   }, [active, inspect, loading, setHeaderActions]);
 
-  if (diff) {
-    return (
-      <div className="flex h-full min-h-0 flex-col bg-background">
-        <div className="flex min-h-10 items-center gap-2 border-b border-border px-2">
-          <button
-            type="button"
-            onClick={() => setDiff(null)}
-            className="grid size-7 place-items-center rounded-md text-muted-foreground hover:bg-muted hover:text-foreground"
-          >
-            <ArrowLeft className="size-4" />
-          </button>
-          <span className="min-w-0 flex-1 truncate text-xs font-medium">{diff.path}</span>
-        </div>
-        {diff.binary ? (
-          <div className="grid flex-1 place-items-center px-6 text-center text-sm text-muted-foreground">
-            Binary diff cannot be displayed.
-          </div>
-        ) : (
-          <pre className="min-h-0 flex-1 overflow-auto p-4 font-mono text-xs leading-5 text-foreground">
-            {diff.text || "No diff for this target."}
-          </pre>
-        )}
-        {diff.truncated ? (
-          <div className="border-t border-border bg-amber-500/5 px-3 py-2 text-xs text-amber-700">
-            Diff truncated at 512 KiB.
-          </div>
-        ) : null}
-      </div>
-    );
-  }
-
   const changes = snapshot?.changes ?? [];
+  const commits = snapshot?.commits ?? [];
   return (
     <div className="flex h-full min-h-0 flex-col bg-background">
-      <div className="border-b border-border px-4 py-3">
-        <div className="flex items-center gap-2">
-          <GitBranch className="size-4 text-primary" />
-          <span className="truncate text-sm font-medium">
-            {snapshot?.branch || "Project branch"}
-          </span>
-          {snapshot?.dirty ? (
-            <span className="ml-auto rounded-full bg-amber-500/10 px-2 py-0.5 text-[11px] font-medium text-amber-700">
-              Modified
-            </span>
-          ) : null}
-        </div>
-        <div className="mt-1 text-xs text-muted-foreground">
-          {snapshot?.captured_at
-            ? `Last captured ${new Date(snapshot.captured_at).toLocaleString()}`
-            : "No saved snapshot yet"}
-          {snapshot?.ahead ? ` · ${snapshot.ahead} ahead` : ""}
-        </div>
-        {snapshot?.base_sha || snapshot?.head_sha ? (
-          <div className="mt-1 truncate font-mono text-[11px] text-muted-foreground">
-            {snapshot.base_ref ? `${snapshot.base_ref} ` : "base "}
-            {snapshot.base_sha?.slice(0, 8) || "unknown"} →{" "}
-            {snapshot.head_sha?.slice(0, 8) || "unknown"}
-          </div>
-        ) : null}
-      </div>
+      <GitSnapshotHeader snapshot={snapshot} />
       {error ? (
         <div className="m-3 rounded-xl border border-red-500/20 bg-red-500/10 px-3 py-2 text-sm text-red-600">
           {error}
         </div>
       ) : null}
-      <div className="min-h-0 flex-1 overflow-y-auto">
-        {loading && !snapshot ? (
-          <div className="flex items-center gap-2 px-4 py-5 text-sm text-muted-foreground">
-            <LoaderCircle className="size-4 animate-spin" /> Loading saved status…
-          </div>
-        ) : changes.length === 0 ? (
-          <div className="px-4 py-10 text-center text-sm text-muted-foreground">
-            {snapshot ? "Working tree clean" : "Refresh to inspect this workspace."}
-          </div>
-        ) : (
-          <div className="divide-y divide-border/60">
-            {changes.map((change) => (
-              <button
-                type="button"
-                key={`${change.area}:${change.path}`}
-                onClick={() =>
-                  void inspect("diff", change.path, change.area === "staged" ? "staged" : "working")
-                }
-                className="flex w-full items-center gap-3 px-4 py-3 text-left hover:bg-muted"
+      {loading && !snapshot ? (
+        <div className="flex items-center gap-2 px-4 py-5 text-sm text-muted-foreground">
+          <LoaderCircle className="size-4 animate-spin" /> Loading saved history…
+        </div>
+      ) : diff ? (
+        <GitDiffPanel diff={diff} onBack={() => setDiff(null)} />
+      ) : view === "working" ? (
+        <GitWorkingTree
+          changes={changes}
+          truncated={Boolean(snapshot?.truncated)}
+          onBack={() => setView("history")}
+          onOpenDiff={(change) =>
+            void inspect("diff", {
+              path: change.path,
+              diffTarget: change.area === "staged" ? "staged" : "working",
+            })
+          }
+        />
+      ) : view === "commit" && commitDetail ? (
+        <GitCommitPanel
+          detail={commitDetail}
+          snapshot={snapshot}
+          onBack={() => {
+            setCommitDetail(null);
+            setView("history");
+          }}
+          onOpenDiff={(file) =>
+            void inspect("commit", { path: file.path, commitSHA: commitDetail.commit.sha })
+          }
+        />
+      ) : (
+        <div className="min-h-0 flex-1 overflow-y-auto">
+          <GitHistoryRow
+            kind="working"
+            title="Working Tree"
+            subtitle={
+              !snapshot
+                ? "No saved status"
+                : snapshot.dirty
+                  ? `${changes.length}${snapshot?.truncated ? "+" : ""} uncommitted ${changes.length === 1 ? "change" : "changes"}`
+                  : "No uncommitted changes"
+            }
+            badge={snapshot ? (snapshot.dirty ? "MODIFIED" : "CLEAN") : undefined}
+            last={commits.length === 0}
+            onClick={() => setView("working")}
+          />
+          {commits.length ? (
+            commits.map((commit, index) => (
+              <GitHistoryRow
+                key={commit.sha}
+                kind="commit"
+                title={commit.subject || "Untitled commit"}
+                subtitle={`${commit.author_name || "Unknown author"} · ${formatGitRelativeTime(commit.authored_at)}`}
+                sha={commit.sha}
+                badges={gitCommitBadges(commit, snapshot)}
+                merge={(commit.parents?.length ?? 0) > 1}
+                last={index === commits.length - 1}
+                onClick={() => void inspect("commit", { commitSHA: commit.sha })}
+              />
+            ))
+          ) : snapshot ? (
+            <div className="border-t border-border/60 px-5 py-8 text-center text-sm text-muted-foreground">
+              No commit history was captured. Refresh Git status to load it.
+            </div>
+          ) : (
+            <div className="border-t border-border/60 px-5 py-8 text-center text-sm text-muted-foreground">
+              Refresh to inspect this workspace.
+            </div>
+          )}
+          {snapshot?.history_truncated ? (
+            <div className="border-t border-border px-4 py-2 text-center text-xs text-muted-foreground">
+              Showing the latest 50 commits.
+            </div>
+          ) : null}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function GitSnapshotHeader({ snapshot }: { snapshot: GitSnapshot | null }) {
+  return (
+    <div className="border-b border-border bg-muted/20 px-4 py-3">
+      <div className="flex items-center gap-2">
+        <span className="grid size-7 place-items-center rounded-lg border border-primary/15 bg-primary/5">
+          <GitBranch className="size-4 text-primary" />
+        </span>
+        <span className="min-w-0 flex-1 truncate text-sm font-semibold">
+          {snapshot?.branch || "Project branch"}
+        </span>
+        {snapshot?.ahead ? (
+          <span className="rounded-full bg-primary/10 px-2 py-0.5 text-[10px] font-semibold text-primary">
+            {snapshot.ahead} ahead
+          </span>
+        ) : null}
+      </div>
+      <div className="mt-1.5 flex items-center gap-2 pl-9 text-[11px] text-muted-foreground">
+        <span>
+          {snapshot?.captured_at
+            ? `Captured ${formatGitRelativeTime(snapshot.captured_at)}`
+            : "No saved snapshot yet"}
+        </span>
+        {snapshot?.base_sha && snapshot?.head_sha ? (
+          <>
+            <span aria-hidden="true">·</span>
+            <span className="truncate font-mono">
+              {snapshot.base_sha.slice(0, 7)} → {snapshot.head_sha.slice(0, 7)}
+            </span>
+          </>
+        ) : null}
+      </div>
+    </div>
+  );
+}
+
+function GitHistoryRow({
+  kind,
+  title,
+  subtitle,
+  sha,
+  badge,
+  badges = [],
+  merge = false,
+  last,
+  onClick,
+}: {
+  kind: "working" | "commit";
+  title: string;
+  subtitle: string;
+  sha?: string;
+  badge?: string;
+  badges?: Array<{ label: string; tone: string }>;
+  merge?: boolean;
+  last: boolean;
+  onClick: () => void;
+}) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      className="group flex w-full min-w-0 text-left outline-none transition-colors hover:bg-muted/60 focus-visible:bg-muted focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring"
+    >
+      <GitGraphRail kind={kind} merge={merge} last={last} />
+      <span className="min-w-0 flex-1 border-b border-border/60 py-3 pr-3 group-last:border-b-0">
+        <span className="flex min-w-0 items-start gap-2">
+          <span className="min-w-0 flex-1 truncate text-xs font-medium text-foreground">
+            {title}
+          </span>
+          {sha ? (
+            <span className="shrink-0 rounded bg-muted px-1.5 py-0.5 font-mono text-[10px] text-muted-foreground">
+              {sha.slice(0, 7)}
+            </span>
+          ) : null}
+        </span>
+        <span className="mt-1 flex min-w-0 items-center gap-1.5">
+          <span className="min-w-0 flex-1 truncate text-[11px] text-muted-foreground">
+            {subtitle}
+          </span>
+          {badge ? (
+            <span
+              className={cn(
+                "rounded-full px-1.5 py-0.5 text-[9px] font-bold tracking-wide",
+                badge === "CLEAN"
+                  ? "bg-emerald-500/10 text-emerald-700"
+                  : "bg-amber-500/10 text-amber-700",
+              )}
+            >
+              {badge}
+            </span>
+          ) : null}
+        </span>
+        {badges.length ? (
+          <span className="mt-1.5 flex flex-wrap gap-1">
+            {badges.map((item) => (
+              <span
+                key={`${item.tone}:${item.label}`}
+                className={cn(
+                  "max-w-36 truncate rounded px-1.5 py-0.5 text-[9px] font-semibold",
+                  item.tone === "head" && "bg-blue-500/10 text-blue-700",
+                  item.tone === "base" && "bg-violet-500/10 text-violet-700",
+                  item.tone === "tag" && "bg-amber-500/10 text-amber-700",
+                  item.tone === "ref" && "bg-muted text-muted-foreground",
+                )}
               >
-                <span className="grid size-7 place-items-center rounded-lg bg-muted font-mono text-[11px] font-semibold text-primary">
-                  {change.status.replaceAll(".", "").slice(0, 2) || "?"}
-                </span>
-                <span className="min-w-0 flex-1">
-                  <span className="block truncate text-xs font-medium">{change.path}</span>
-                  <span className="mt-0.5 block text-[11px] capitalize text-muted-foreground">
-                    {change.area}
-                  </span>
-                </span>
-                <ChevronRight className="size-4 text-muted-foreground" />
-              </button>
+                {item.label}
+              </span>
             ))}
+          </span>
+        ) : null}
+      </span>
+      <ChevronRight className="mr-3 mt-4 size-3.5 shrink-0 text-muted-foreground/60 transition-transform group-hover:translate-x-0.5 group-hover:text-foreground" />
+    </button>
+  );
+}
+
+function GitGraphRail({
+  kind,
+  merge,
+  last,
+}: {
+  kind: "working" | "commit";
+  merge: boolean;
+  last: boolean;
+}) {
+  return (
+    <span className="relative flex w-11 shrink-0 justify-center self-stretch" aria-hidden="true">
+      <span
+        className={cn(
+          "absolute left-1/2 top-0 h-1/2 -translate-x-1/2 border-l-2",
+          kind === "working" ? "border-dashed border-amber-400" : "border-blue-500/70",
+        )}
+      />
+      {!last ? (
+        <span className="absolute bottom-0 left-1/2 top-1/2 -translate-x-1/2 border-l-2 border-blue-500/70" />
+      ) : null}
+      {merge ? (
+        <svg className="absolute left-[20px] top-1/2 h-8 w-5 -translate-y-2" viewBox="0 0 20 32">
+          <path
+            d="M1 2 C16 8 16 20 1 30"
+            fill="none"
+            className="stroke-violet-500"
+            strokeWidth="2"
+          />
+        </svg>
+      ) : null}
+      <span
+        className={cn(
+          "relative z-10 mt-[17px] grid size-3.5 place-items-center rounded-full border-2 bg-background",
+          kind === "working"
+            ? "border-amber-500 ring-4 ring-amber-500/10"
+            : merge
+              ? "border-violet-500 ring-4 ring-violet-500/10"
+              : "border-blue-600 ring-4 ring-blue-500/10",
+        )}
+      >
+        {kind === "working" ? <span className="size-1 rounded-full bg-amber-500" /> : null}
+      </span>
+    </span>
+  );
+}
+
+function GitPanelBackHeader({ title, onBack }: { title: string; onBack: () => void }) {
+  return (
+    <div className="flex min-h-10 shrink-0 items-center gap-2 border-b border-border px-2">
+      <button
+        type="button"
+        aria-label="Back to Git history"
+        onClick={onBack}
+        className="grid size-7 place-items-center rounded-md text-muted-foreground outline-none hover:bg-muted hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring"
+      >
+        <ArrowLeft className="size-4" />
+      </button>
+      <span className="min-w-0 flex-1 truncate text-xs font-semibold">{title}</span>
+    </div>
+  );
+}
+
+function GitWorkingTree({
+  changes,
+  truncated,
+  onBack,
+  onOpenDiff,
+}: {
+  changes: GitChange[];
+  truncated: boolean;
+  onBack: () => void;
+  onOpenDiff: (change: GitChange) => void;
+}) {
+  return (
+    <div className="flex min-h-0 flex-1 flex-col">
+      <GitPanelBackHeader title="Working Tree" onBack={onBack} />
+      <div className="min-h-0 flex-1 overflow-y-auto">
+        {changes.length ? (
+          changes.map((change) => (
+            <GitFileRow
+              key={`${change.area}:${change.path}`}
+              path={change.path}
+              oldPath={change.old_path}
+              status={change.status}
+              meta={change.area}
+              onClick={() => onOpenDiff(change)}
+            />
+          ))
+        ) : (
+          <div className="flex items-center gap-2 px-4 py-5 text-sm text-muted-foreground">
+            Working tree clean. There are no uncommitted changes.
           </div>
         )}
       </div>
-      {snapshot?.truncated ? (
+      {truncated ? (
         <div className="border-t border-border px-3 py-2 text-xs text-amber-700">
           Showing the first 500 changed paths.
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
+function GitCommitPanel({
+  detail,
+  snapshot,
+  onBack,
+  onOpenDiff,
+}: {
+  detail: GitCommitDetail;
+  snapshot: GitSnapshot | null;
+  onBack: () => void;
+  onOpenDiff: (file: GitCommitFile) => void;
+}) {
+  const { commit, files } = detail;
+  const badges = gitCommitBadges(commit, snapshot);
+  const description = gitCommitDescription(commit);
+  return (
+    <div className="flex min-h-0 flex-1 flex-col">
+      <GitPanelBackHeader title={commit.subject || "Commit details"} onBack={onBack} />
+      <div className="min-h-0 flex-1 overflow-y-auto">
+        <div className="border-b border-border bg-muted/20 px-4 py-4">
+          <div className="flex items-start gap-3">
+            <span className="grid size-9 shrink-0 place-items-center rounded-xl border border-blue-500/20 bg-blue-500/10 text-blue-700">
+              {(commit.parents?.length ?? 0) > 1 ? (
+                <GitMerge className="size-4" />
+              ) : (
+                <GitCommitHorizontal className="size-4" />
+              )}
+            </span>
+            <div className="min-w-0 flex-1">
+              <h3 className="text-sm font-semibold leading-5 text-foreground">{commit.subject}</h3>
+              {description ? (
+                <p className="mt-1 whitespace-pre-wrap text-xs leading-5 text-muted-foreground">
+                  {description}
+                </p>
+              ) : null}
+            </div>
+          </div>
+          <div className="mt-3 flex flex-wrap items-center gap-1.5 pl-12">
+            {badges.map((badge) => (
+              <span
+                key={`${badge.tone}:${badge.label}`}
+                className="rounded bg-primary/10 px-1.5 py-0.5 text-[10px] font-semibold text-primary"
+              >
+                {badge.label}
+              </span>
+            ))}
+            <span className="rounded bg-muted px-1.5 py-0.5 font-mono text-[10px] text-muted-foreground">
+              {commit.sha.slice(0, 12)}
+            </span>
+          </div>
+          <div className="mt-3 grid grid-cols-[1fr_auto] gap-x-3 gap-y-1 pl-12 text-[11px] text-muted-foreground">
+            <span className="truncate">{commit.author_name || "Unknown author"}</span>
+            <span>{formatGitRelativeTime(commit.authored_at)}</span>
+            <span>{commit.files_changed ?? files.length} files changed</span>
+            <span className="font-mono">
+              <span className="text-emerald-700">+{commit.additions ?? 0}</span>{" "}
+              <span className="text-red-600">−{commit.deletions ?? 0}</span>
+            </span>
+          </div>
+        </div>
+        {files.length ? (
+          files.map((file) => (
+            <GitFileRow
+              key={`${file.status}:${file.path}`}
+              path={file.path}
+              oldPath={file.old_path}
+              status={file.status}
+              meta={file.binary ? "binary" : undefined}
+              onClick={() => onOpenDiff(file)}
+            />
+          ))
+        ) : (
+          <div className="px-4 py-8 text-center text-sm text-muted-foreground">
+            This commit has no file changes.
+          </div>
+        )}
+      </div>
+      {detail.truncated ? (
+        <div className="border-t border-border px-3 py-2 text-xs text-amber-700">
+          Showing the first 500 changed paths.
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
+function GitFileRow({
+  path,
+  oldPath,
+  status,
+  meta,
+  onClick,
+}: {
+  path: string;
+  oldPath?: string;
+  status: string;
+  meta?: string;
+  onClick: () => void;
+}) {
+  const code = gitChangeCode(status);
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      className="group flex w-full items-center gap-3 border-b border-border/60 px-4 py-2.5 text-left outline-none hover:bg-muted/60 focus-visible:bg-muted focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring"
+    >
+      <span
+        className={cn(
+          "grid size-6 shrink-0 place-items-center rounded-md font-mono text-[10px] font-bold",
+          code === "A" && "bg-emerald-500/10 text-emerald-700",
+          code === "D" && "bg-red-500/10 text-red-600",
+          code === "R" && "bg-violet-500/10 text-violet-700",
+          !["A", "D", "R"].includes(code) && "bg-blue-500/10 text-blue-700",
+        )}
+      >
+        {code}
+      </span>
+      <span className="min-w-0 flex-1">
+        <span className="block truncate text-xs font-medium">{path}</span>
+        {oldPath || meta ? (
+          <span className="mt-0.5 block truncate text-[10px] capitalize text-muted-foreground">
+            {oldPath ? `${oldPath} → ${path}` : meta}
+          </span>
+        ) : null}
+      </span>
+      <ChevronRight className="size-3.5 text-muted-foreground/60 group-hover:text-foreground" />
+    </button>
+  );
+}
+
+function GitDiffPanel({ diff, onBack }: { diff: GitDiff; onBack: () => void }) {
+  const [viewType, setViewType] = useState<"unified" | "split">("unified");
+  const parsed = useMemo(() => {
+    if (!diff.text) return { files: [], error: "" };
+    try {
+      return { files: parseDiff(diff.text), error: "" };
+    } catch {
+      return { files: [], error: "This patch could not be rendered." };
+    }
+  }, [diff.text]);
+
+  return (
+    <div className="flex min-h-0 flex-1 flex-col">
+      <div className="flex min-h-10 shrink-0 items-center gap-2 border-b border-border px-2">
+        <button
+          type="button"
+          aria-label="Back to changed files"
+          onClick={onBack}
+          className="grid size-7 place-items-center rounded-md text-muted-foreground outline-none hover:bg-muted hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring"
+        >
+          <ArrowLeft className="size-4" />
+        </button>
+        <span className="min-w-0 flex-1 truncate text-xs font-semibold">{diff.path}</span>
+        <div
+          className="flex rounded-md border border-border bg-muted/40 p-0.5 text-[10px]"
+          aria-label="Diff layout"
+        >
+          {(["unified", "split"] as const).map((type) => (
+            <button
+              key={type}
+              type="button"
+              onClick={() => setViewType(type)}
+              className={cn(
+                "rounded px-2 py-1 capitalize text-muted-foreground outline-none focus-visible:ring-2 focus-visible:ring-ring",
+                viewType === type && "bg-background font-medium text-foreground shadow-sm",
+              )}
+            >
+              {type}
+            </button>
+          ))}
+        </div>
+      </div>
+      {diff.binary ? (
+        <div className="grid flex-1 place-items-center px-6 text-center text-sm text-muted-foreground">
+          Binary diff cannot be displayed.
+        </div>
+      ) : parsed.error ? (
+        <div className="grid flex-1 place-items-center px-6 text-center text-sm text-red-600">
+          {parsed.error}
+        </div>
+      ) : parsed.files.length ? (
+        <div className="cocola-git-diff min-h-0 flex-1 overflow-auto bg-background text-xs">
+          {parsed.files.map((file, index) => (
+            <div
+              key={`${file.oldPath}:${file.newPath}:${index}`}
+              className="border-b border-border last:border-b-0"
+            >
+              <div className="sticky top-0 z-10 border-b border-border bg-muted/95 px-3 py-2 font-mono text-[10px] text-muted-foreground backdrop-blur">
+                {file.oldPath === file.newPath ? file.newPath : `${file.oldPath} → ${file.newPath}`}
+              </div>
+              <DiffView viewType={viewType} diffType={file.type} hunks={file.hunks}>
+                {(hunks) =>
+                  hunks.map((hunk) => (
+                    <Hunk key={`${hunk.oldStart}:${hunk.newStart}`} hunk={hunk} />
+                  ))
+                }
+              </DiffView>
+            </div>
+          ))}
+        </div>
+      ) : (
+        <div className="grid flex-1 place-items-center px-6 text-center text-sm text-muted-foreground">
+          No diff for this target.
+        </div>
+      )}
+      {diff.truncated ? (
+        <div className="border-t border-border bg-amber-500/5 px-3 py-2 text-xs text-amber-700">
+          Diff truncated at 512 KiB.
         </div>
       ) : null}
     </div>

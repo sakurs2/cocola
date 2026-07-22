@@ -122,20 +122,22 @@ class ListRuntimesResponse(_message.Message):
     def __init__(self, runtimes: _Optional[_Iterable[_Union[Runtime, _Mapping]]] = ...) -> None: ...
 
 class InspectWorkspaceGitRequest(_message.Message):
-    __slots__ = ("user_id", "session_id", "operation", "path", "diff_target", "project_context")
+    __slots__ = ("user_id", "session_id", "operation", "path", "diff_target", "project_context", "commit_sha")
     USER_ID_FIELD_NUMBER: _ClassVar[int]
     SESSION_ID_FIELD_NUMBER: _ClassVar[int]
     OPERATION_FIELD_NUMBER: _ClassVar[int]
     PATH_FIELD_NUMBER: _ClassVar[int]
     DIFF_TARGET_FIELD_NUMBER: _ClassVar[int]
     PROJECT_CONTEXT_FIELD_NUMBER: _ClassVar[int]
+    COMMIT_SHA_FIELD_NUMBER: _ClassVar[int]
     user_id: str
     session_id: str
     operation: str
     path: str
     diff_target: str
     project_context: ProjectContext
-    def __init__(self, user_id: _Optional[str] = ..., session_id: _Optional[str] = ..., operation: _Optional[str] = ..., path: _Optional[str] = ..., diff_target: _Optional[str] = ..., project_context: _Optional[_Union[ProjectContext, _Mapping]] = ...) -> None: ...
+    commit_sha: str
+    def __init__(self, user_id: _Optional[str] = ..., session_id: _Optional[str] = ..., operation: _Optional[str] = ..., path: _Optional[str] = ..., diff_target: _Optional[str] = ..., project_context: _Optional[_Union[ProjectContext, _Mapping]] = ..., commit_sha: _Optional[str] = ...) -> None: ...
 
 class PublishWorkspaceGitRequest(_message.Message):
     __slots__ = ("user_id", "session_id", "project_context", "remote_clone_url", "expected_head_sha")
@@ -170,7 +172,7 @@ class GitChange(_message.Message):
     def __init__(self, path: _Optional[str] = ..., old_path: _Optional[str] = ..., status: _Optional[str] = ..., area: _Optional[str] = ...) -> None: ...
 
 class GitSnapshot(_message.Message):
-    __slots__ = ("branch", "base_sha", "head_sha", "ahead", "dirty", "changes", "truncated", "base_ref")
+    __slots__ = ("branch", "base_sha", "head_sha", "ahead", "dirty", "changes", "truncated", "base_ref", "commits", "history_truncated")
     BRANCH_FIELD_NUMBER: _ClassVar[int]
     BASE_SHA_FIELD_NUMBER: _ClassVar[int]
     HEAD_SHA_FIELD_NUMBER: _ClassVar[int]
@@ -179,6 +181,8 @@ class GitSnapshot(_message.Message):
     CHANGES_FIELD_NUMBER: _ClassVar[int]
     TRUNCATED_FIELD_NUMBER: _ClassVar[int]
     BASE_REF_FIELD_NUMBER: _ClassVar[int]
+    COMMITS_FIELD_NUMBER: _ClassVar[int]
+    HISTORY_TRUNCATED_FIELD_NUMBER: _ClassVar[int]
     branch: str
     base_sha: str
     head_sha: str
@@ -187,16 +191,58 @@ class GitSnapshot(_message.Message):
     changes: _containers.RepeatedCompositeFieldContainer[GitChange]
     truncated: bool
     base_ref: str
-    def __init__(self, branch: _Optional[str] = ..., base_sha: _Optional[str] = ..., head_sha: _Optional[str] = ..., ahead: _Optional[int] = ..., dirty: bool = ..., changes: _Optional[_Iterable[_Union[GitChange, _Mapping]]] = ..., truncated: bool = ..., base_ref: _Optional[str] = ...) -> None: ...
+    commits: _containers.RepeatedCompositeFieldContainer[GitCommit]
+    history_truncated: bool
+    def __init__(self, branch: _Optional[str] = ..., base_sha: _Optional[str] = ..., head_sha: _Optional[str] = ..., ahead: _Optional[int] = ..., dirty: bool = ..., changes: _Optional[_Iterable[_Union[GitChange, _Mapping]]] = ..., truncated: bool = ..., base_ref: _Optional[str] = ..., commits: _Optional[_Iterable[_Union[GitCommit, _Mapping]]] = ..., history_truncated: bool = ...) -> None: ...
+
+class GitCommit(_message.Message):
+    __slots__ = ("sha", "parents", "subject", "author_name", "authored_at", "refs", "files_changed", "additions", "deletions", "body")
+    SHA_FIELD_NUMBER: _ClassVar[int]
+    PARENTS_FIELD_NUMBER: _ClassVar[int]
+    SUBJECT_FIELD_NUMBER: _ClassVar[int]
+    AUTHOR_NAME_FIELD_NUMBER: _ClassVar[int]
+    AUTHORED_AT_FIELD_NUMBER: _ClassVar[int]
+    REFS_FIELD_NUMBER: _ClassVar[int]
+    FILES_CHANGED_FIELD_NUMBER: _ClassVar[int]
+    ADDITIONS_FIELD_NUMBER: _ClassVar[int]
+    DELETIONS_FIELD_NUMBER: _ClassVar[int]
+    BODY_FIELD_NUMBER: _ClassVar[int]
+    sha: str
+    parents: _containers.RepeatedScalarFieldContainer[str]
+    subject: str
+    author_name: str
+    authored_at: str
+    refs: _containers.RepeatedScalarFieldContainer[str]
+    files_changed: int
+    additions: int
+    deletions: int
+    body: str
+    def __init__(self, sha: _Optional[str] = ..., parents: _Optional[_Iterable[str]] = ..., subject: _Optional[str] = ..., author_name: _Optional[str] = ..., authored_at: _Optional[str] = ..., refs: _Optional[_Iterable[str]] = ..., files_changed: _Optional[int] = ..., additions: _Optional[int] = ..., deletions: _Optional[int] = ..., body: _Optional[str] = ...) -> None: ...
+
+class GitCommitFile(_message.Message):
+    __slots__ = ("path", "old_path", "status", "binary")
+    PATH_FIELD_NUMBER: _ClassVar[int]
+    OLD_PATH_FIELD_NUMBER: _ClassVar[int]
+    STATUS_FIELD_NUMBER: _ClassVar[int]
+    BINARY_FIELD_NUMBER: _ClassVar[int]
+    path: str
+    old_path: str
+    status: str
+    binary: bool
+    def __init__(self, path: _Optional[str] = ..., old_path: _Optional[str] = ..., status: _Optional[str] = ..., binary: bool = ...) -> None: ...
 
 class InspectWorkspaceGitResponse(_message.Message):
-    __slots__ = ("snapshot", "diff", "binary", "truncated")
+    __slots__ = ("snapshot", "diff", "binary", "truncated", "commit", "commit_files")
     SNAPSHOT_FIELD_NUMBER: _ClassVar[int]
     DIFF_FIELD_NUMBER: _ClassVar[int]
     BINARY_FIELD_NUMBER: _ClassVar[int]
     TRUNCATED_FIELD_NUMBER: _ClassVar[int]
+    COMMIT_FIELD_NUMBER: _ClassVar[int]
+    COMMIT_FILES_FIELD_NUMBER: _ClassVar[int]
     snapshot: GitSnapshot
     diff: str
     binary: bool
     truncated: bool
-    def __init__(self, snapshot: _Optional[_Union[GitSnapshot, _Mapping]] = ..., diff: _Optional[str] = ..., binary: bool = ..., truncated: bool = ...) -> None: ...
+    commit: GitCommit
+    commit_files: _containers.RepeatedCompositeFieldContainer[GitCommitFile]
+    def __init__(self, snapshot: _Optional[_Union[GitSnapshot, _Mapping]] = ..., diff: _Optional[str] = ..., binary: bool = ..., truncated: bool = ..., commit: _Optional[_Union[GitCommit, _Mapping]] = ..., commit_files: _Optional[_Iterable[_Union[GitCommitFile, _Mapping]]] = ...) -> None: ...

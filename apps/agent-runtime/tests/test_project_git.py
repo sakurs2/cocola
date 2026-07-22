@@ -204,6 +204,197 @@ def test_fresh_local_project_initializes_main_and_reuses_workspace(tmp_path):
     assert (workspace / "kept.txt").read_text(encoding="utf-8") == "persisted\n"
 
 
+def test_git_history_and_commit_details_are_bounded_and_readable(tmp_path):
+    workspace = tmp_path / "workspace"
+    spec = {
+        "project_id": "project-local",
+        "repository_id": 0,
+        "clone_url": "",
+        "default_branch": "main",
+        "base_sha": "",
+        "task_branch": "main",
+        "git_author_name": "Local User",
+        "git_author_email": "local@example.com",
+        "repository_provider": "local",
+        "repository_full_name": "",
+        "credential_mode": "none",
+    }
+    script = _PROJECT_GIT_SCRIPT.replace(
+        'pathlib.Path("/workspace")', f"pathlib.Path({str(workspace)!r})", 1
+    )
+
+    bootstrap = subprocess.run(
+        [sys.executable, "-c", script],
+        input=json.dumps({"operation": "bootstrap", "spec": spec}),
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+    spec["base_sha"] = json.loads(bootstrap.stdout)["snapshot"]["base_sha"]
+    (workspace / "src").mkdir()
+    (workspace / "src" / "app.py").write_text('print("hello")\n', encoding="utf-8")
+    subprocess.run(["git", "add", "src/app.py"], cwd=workspace, check=True)
+    subprocess.run(
+        ["git", "commit", "-m", "Add application", "-m", "Explain the first feature."],
+        cwd=workspace,
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+    head_sha = subprocess.run(
+        ["git", "rev-parse", "HEAD"],
+        cwd=workspace,
+        check=True,
+        capture_output=True,
+        text=True,
+    ).stdout.strip()
+
+    status = subprocess.run(
+        [sys.executable, "-c", script],
+        input=json.dumps({"operation": "status", "spec": spec}),
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+    snapshot = json.loads(status.stdout)["snapshot"]
+    assert snapshot["commits"][0] == {
+        "sha": head_sha,
+        "parents": [spec["base_sha"]],
+        "subject": "Add application",
+        "author_name": "Local User",
+        "authored_at": snapshot["commits"][0]["authored_at"],
+        "refs": ["HEAD", "main"],
+    }
+    assert snapshot["history_truncated"] is False
+
+    detail = subprocess.run(
+        [sys.executable, "-c", script],
+        input=json.dumps({"operation": "commit", "spec": spec, "commit_sha": head_sha}),
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+    detail_payload = json.loads(detail.stdout)
+    assert detail_payload["commit"]["body"] == ("Add application\n\nExplain the first feature.")
+    assert detail_payload["commit"]["files_changed"] == 1
+    assert detail_payload["commit"]["additions"] == 1
+    assert detail_payload["commit"]["deletions"] == 0
+    assert detail_payload["commit_files"] == [
+        {"path": "src/app.py", "old_path": "", "status": "A", "binary": False}
+    ]
+
+    patch = subprocess.run(
+        [sys.executable, "-c", script],
+        input=json.dumps(
+            {
+                "operation": "commit",
+                "spec": spec,
+                "commit_sha": head_sha,
+                "path": "src/app.py",
+            }
+        ),
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+    patch_payload = json.loads(patch.stdout)
+    assert '+print("hello")' in patch_payload["diff"]
+    assert patch_payload["binary"] is False
+
+
+def test_git_history_is_limited_to_latest_fifty_commits(tmp_path):
+    workspace = tmp_path / "workspace"
+    subprocess.run(
+        ["git", "init", "-b", "main", str(workspace)],
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+    subprocess.run(
+        [
+            "git",
+            "-c",
+            "user.name=Local User",
+            "-c",
+            "user.email=local@example.com",
+            "commit",
+            "--allow-empty",
+            "-m",
+            "commit 0",
+        ],
+        cwd=workspace,
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+    base_sha = subprocess.run(
+        ["git", "rev-parse", "HEAD"],
+        cwd=workspace,
+        check=True,
+        capture_output=True,
+        text=True,
+    ).stdout.strip()
+    for index in range(1, 52):
+        subprocess.run(
+            [
+                "git",
+                "-c",
+                "user.name=Local User",
+                "-c",
+                "user.email=local@example.com",
+                "commit",
+                "--allow-empty",
+                "-m",
+                f"commit {index}",
+            ],
+            cwd=workspace,
+            check=True,
+            capture_output=True,
+            text=True,
+        )
+    spec = {
+        "project_id": "project-local",
+        "repository_id": 0,
+        "clone_url": "",
+        "default_branch": "main",
+        "base_sha": base_sha,
+        "task_branch": "main",
+        "git_author_name": "Local User",
+        "git_author_email": "local@example.com",
+        "repository_provider": "local",
+        "repository_full_name": "",
+        "credential_mode": "none",
+    }
+    (workspace / ".git" / "cocola-project.json").write_text(
+        json.dumps(
+            {
+                "schema_version": 1,
+                "project_id": spec["project_id"],
+                "repository_id": 0,
+                "repository_provider": "local",
+                "task_branch": "main",
+                "base_sha": base_sha,
+            }
+        ),
+        encoding="utf-8",
+    )
+    script = _PROJECT_GIT_SCRIPT.replace(
+        'pathlib.Path("/workspace")', f"pathlib.Path({str(workspace)!r})", 1
+    )
+
+    result = subprocess.run(
+        [sys.executable, "-c", script],
+        input=json.dumps({"operation": "status", "spec": spec}),
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+    snapshot = json.loads(result.stdout)["snapshot"]
+    assert len(snapshot["commits"]) == 50
+    assert snapshot["commits"][0]["subject"] == "commit 51"
+    assert snapshot["history_truncated"] is True
+
+
 def test_local_project_does_not_silently_reinitialize_a_lost_volume(tmp_path):
     workspace = tmp_path / "workspace"
     spec = {
@@ -478,3 +669,41 @@ async def test_inspect_diff_uses_bounded_read_only_operation():
     assert request["path"] == "src/a file.py"
     assert request["diff_target"] == "staged"
     assert "env" not in executor.calls[0]
+
+
+@pytest.mark.asyncio
+async def test_inspect_commit_forwards_valid_sha_and_path():
+    executor = RecordingExecutor(
+        {"snapshot": {"commits": []}, "commit": {"sha": "b" * 40}, "diff": "patch"}
+    )
+
+    result = await inspect_project(
+        executor,
+        "sandbox-1",
+        valid_spec(),
+        "commit",
+        path="src/app.py",
+        commit_sha="b" * 40,
+    )
+
+    assert result["diff"] == "patch"
+    request = json.loads(executor.calls[0]["stdin"])
+    assert request["operation"] == "commit"
+    assert request["commit_sha"] == "b" * 40
+    assert request["path"] == "src/app.py"
+
+
+@pytest.mark.asyncio
+async def test_inspect_commit_rejects_short_sha_before_exec():
+    executor = RecordingExecutor({})
+
+    with pytest.raises(ProjectWorkspaceError, match="Git commit is invalid"):
+        await inspect_project(
+            executor,
+            "sandbox-1",
+            valid_spec(),
+            "commit",
+            commit_sha="abc123",
+        )
+
+    assert executor.calls == []

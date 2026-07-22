@@ -99,6 +99,33 @@ func TestHealthz(t *testing.T) {
 	}
 }
 
+func TestValidGitCommitSHA(t *testing.T) {
+	for _, value := range []string{strings.Repeat("a", 40), strings.Repeat("F", 40)} {
+		if !validGitCommitSHA(value) {
+			t.Fatalf("validGitCommitSHA(%q) = false", value)
+		}
+	}
+	for _, value := range []string{"", "abc123", strings.Repeat("g", 40), strings.Repeat("a", 41)} {
+		if validGitCommitSHA(value) {
+			t.Fatalf("validGitCommitSHA(%q) = true", value)
+		}
+	}
+}
+
+func TestProjectGitCommitCopiesDetailFields(t *testing.T) {
+	value := projectGitCommit(agent.GitCommit{
+		SHA: "a", Parents: []string{"b"}, Subject: "subject", Body: "body",
+		AuthorName: "Ada", AuthoredAt: "2026-07-22T12:00:00Z", Refs: []string{"HEAD"},
+		FilesChanged: 2, Additions: 3, Deletions: 1,
+	})
+	if value.SHA != "a" || value.Body != "body" || value.AuthorName != "Ada" || value.FilesChanged != 2 || value.Additions != 3 || value.Deletions != 1 {
+		t.Fatalf("projectGitCommit() = %#v", value)
+	}
+	if len(value.Parents) != 1 || value.Parents[0] != "b" || len(value.Refs) != 1 || value.Refs[0] != "HEAD" {
+		t.Fatalf("projectGitCommit slices = %#v", value)
+	}
+}
+
 func TestAgentRuntimeCatalog(t *testing.T) {
 	api := newConfiguredTestAPI(&fakeStreamer{}, auth.NewVerifier(auth.Config{}), logger.Must()).
 		WithAgentRuntimes([]agent.Runtime{

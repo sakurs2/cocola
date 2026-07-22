@@ -91,22 +91,36 @@ type GitChange struct {
 	Path, OldPath, Status, Area string
 }
 
+type GitCommit struct {
+	SHA, Subject, AuthorName, AuthoredAt, Body string
+	Parents, Refs                              []string
+	FilesChanged, Additions, Deletions         int
+}
+
+type GitCommitFile struct {
+	Path, OldPath, Status string
+	Binary                bool
+}
+
 type GitSnapshot struct {
-	Branch, BaseRef, BaseSHA, HeadSHA string
-	Ahead                             int
-	Dirty, Truncated                  bool
-	Changes                           []GitChange
+	Branch, BaseRef, BaseSHA, HeadSHA  string
+	Ahead                              int
+	Dirty, Truncated, HistoryTruncated bool
+	Changes                            []GitChange
+	Commits                            []GitCommit
 }
 
 type GitInspection struct {
 	Snapshot          GitSnapshot
+	Commit            *GitCommit
+	CommitFiles       []GitCommitFile
 	Diff              string
 	Binary, Truncated bool
 }
 
 type InspectRequest struct {
-	UserID, SessionID, Operation, Path, DiffTarget, SCMToken string
-	Project                                                  ProjectContext
+	UserID, SessionID, Operation, Path, DiffTarget, CommitSHA, SCMToken string
+	Project                                                             ProjectContext
 }
 
 type GitInspector interface {
@@ -300,7 +314,7 @@ func (c *Client) InspectWorkspaceGit(ctx context.Context, request InspectRequest
 	}
 	response, err := c.rpc.InspectWorkspaceGit(ctx, &agentv1.InspectWorkspaceGitRequest{
 		UserId: request.UserID, SessionId: request.SessionID, Operation: request.Operation,
-		Path: request.Path, DiffTarget: request.DiffTarget,
+		Path: request.Path, DiffTarget: request.DiffTarget, CommitSha: request.CommitSHA,
 		ProjectContext: projectContextProto(request.Project),
 	})
 	if err != nil {
@@ -311,14 +325,36 @@ func (c *Client) InspectWorkspaceGit(ctx context.Context, request InspectRequest
 		result.Snapshot = GitSnapshot{
 			Branch: snapshot.GetBranch(), BaseRef: snapshot.GetBaseRef(), BaseSHA: snapshot.GetBaseSha(), HeadSHA: snapshot.GetHeadSha(),
 			Ahead: int(snapshot.GetAhead()), Dirty: snapshot.GetDirty(), Truncated: snapshot.GetTruncated(),
+			HistoryTruncated: snapshot.GetHistoryTruncated(),
 		}
 		for _, change := range snapshot.GetChanges() {
 			result.Snapshot.Changes = append(result.Snapshot.Changes, GitChange{
 				Path: change.GetPath(), OldPath: change.GetOldPath(), Status: change.GetStatus(), Area: change.GetArea(),
 			})
 		}
+		for _, commit := range snapshot.GetCommits() {
+			result.Snapshot.Commits = append(result.Snapshot.Commits, gitCommitFromProto(commit))
+		}
+	}
+	if commit := response.GetCommit(); commit != nil && commit.GetSha() != "" {
+		value := gitCommitFromProto(commit)
+		result.Commit = &value
+	}
+	for _, value := range response.GetCommitFiles() {
+		result.CommitFiles = append(result.CommitFiles, GitCommitFile{
+			Path: value.GetPath(), OldPath: value.GetOldPath(), Status: value.GetStatus(), Binary: value.GetBinary(),
+		})
 	}
 	return result, nil
+}
+
+func gitCommitFromProto(value *agentv1.GitCommit) GitCommit {
+	return GitCommit{
+		SHA: value.GetSha(), Parents: append([]string(nil), value.GetParents()...),
+		Subject: value.GetSubject(), AuthorName: value.GetAuthorName(), AuthoredAt: value.GetAuthoredAt(),
+		Refs: append([]string(nil), value.GetRefs()...), FilesChanged: int(value.GetFilesChanged()),
+		Additions: int(value.GetAdditions()), Deletions: int(value.GetDeletions()), Body: value.GetBody(),
+	}
 }
 
 func (c *Client) PublishWorkspaceGit(ctx context.Context, request PublishRequest) (string, error) {

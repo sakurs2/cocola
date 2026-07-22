@@ -109,13 +109,15 @@ message ListRuntimesResponse {
 message InspectWorkspaceGitRequest {
   string user_id = 1;
   string session_id = 2;
-  // status | diff
+  // status | diff | commit
   string operation = 3;
   // Workspace-relative path, required for diff.
   string path = 4;
   // working | staged
   string diff_target = 5;
   ProjectContext project_context = 6;
+  // Full commit SHA, required for commit details or a commit file diff.
+  string commit_sha = 7;
 }
 
 message PublishWorkspaceGitRequest {
@@ -146,6 +148,28 @@ message GitSnapshot {
   repeated GitChange changes = 6;
   bool truncated = 7;
   string base_ref = 8;
+  repeated GitCommit commits = 9;
+  bool history_truncated = 10;
+}
+
+message GitCommit {
+  string sha = 1;
+  repeated string parents = 2;
+  string subject = 3;
+  string author_name = 4;
+  string authored_at = 5;
+  repeated string refs = 6;
+  int32 files_changed = 7;
+  int32 additions = 8;
+  int32 deletions = 9;
+  string body = 10;
+}
+
+message GitCommitFile {
+  string path = 1;
+  string old_path = 2;
+  string status = 3;
+  bool binary = 4;
 }
 
 message InspectWorkspaceGitResponse {
@@ -153,4 +177,6 @@ message InspectWorkspaceGitResponse {
   string diff = 2;
   bool binary = 3;
   bool truncated = 4;
+  GitCommit commit = 5;
+  repeated GitCommitFile commit_files = 6;
 }

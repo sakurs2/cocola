@@ -952,6 +952,18 @@ func (s *Service) SaveSnapshot(ctx context.Context, id Identity, conversationID 
 	if len(snapshot.Changes) > 500 {
 		snapshot.Changes, snapshot.Truncated = snapshot.Changes[:500], true
 	}
+	if len(snapshot.Commits) > 50 {
+		snapshot.Commits, snapshot.HistoryTruncated = snapshot.Commits[:50], true
+	}
+	for index := range snapshot.Commits {
+		snapshot.Commits[index].Body = ""
+		if len(snapshot.Commits[index].Parents) > 16 {
+			snapshot.Commits[index].Parents = snapshot.Commits[index].Parents[:16]
+		}
+		if len(snapshot.Commits[index].Refs) > 20 {
+			snapshot.Commits[index].Refs = snapshot.Commits[index].Refs[:20]
+		}
+	}
 	if snapshot.CapturedAt.IsZero() {
 		snapshot.CapturedAt = s.now()
 	}

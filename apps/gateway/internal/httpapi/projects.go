@@ -36,6 +36,7 @@ type inspectGitRequest struct {
 	Operation  string `json:"operation"`
 	Path       string `json:"path"`
 	DiffTarget string `json:"diff_target"`
+	CommitSHA  string `json:"commit_sha"`
 }
 
 func projectIdentity(r *http.Request) (project.Identity, bool) {
@@ -402,12 +403,17 @@ func (a *API) inspectGit(w http.ResponseWriter, r *http.Request) {
 	input.Operation = strings.TrimSpace(input.Operation)
 	input.Path = strings.TrimSpace(input.Path)
 	input.DiffTarget = strings.TrimSpace(input.DiffTarget)
-	if input.Operation != "status" && input.Operation != "diff" {
-		writeErr(w, http.StatusBadRequest, "INVALID_ARGUMENT", "operation must be status or diff")
+	input.CommitSHA = strings.TrimSpace(input.CommitSHA)
+	if input.Operation != "status" && input.Operation != "diff" && input.Operation != "commit" {
+		writeErr(w, http.StatusBadRequest, "INVALID_ARGUMENT", "operation must be status, diff, or commit")
 		return
 	}
 	if input.Operation == "diff" && (input.Path == "" || (input.DiffTarget != "working" && input.DiffTarget != "staged")) {
 		writeErr(w, http.StatusBadRequest, "INVALID_ARGUMENT", "diff requires a path and working or staged target")
+		return
+	}
+	if input.Operation == "commit" && !validGitCommitSHA(input.CommitSHA) {
+		writeErr(w, http.StatusBadRequest, "INVALID_ARGUMENT", "commit requires a full commit SHA")
 		return
 	}
 	conversationID := r.PathValue("id")
@@ -428,7 +434,7 @@ func (a *API) inspectGit(w http.ResponseWriter, r *http.Request) {
 	defer cancel()
 	result, err := a.gitInspector.InspectWorkspaceGit(inspectCtx, agent.InspectRequest{
 		UserID: id.UserID, SessionID: conversationID, Operation: input.Operation,
-		Path: input.Path, DiffTarget: input.DiffTarget, SCMToken: scmToken,
+		Path: input.Path, DiffTarget: input.DiffTarget, CommitSHA: input.CommitSHA, SCMToken: scmToken,
 		Project: agent.ProjectContext{
 			ProjectID: contextValue.ProjectID, RepositoryID: contextValue.RepositoryExternalID,
 			CloneURL: contextValue.CloneURL, DefaultBranch: contextValue.DefaultBranch,
@@ -448,20 +454,56 @@ func (a *API) inspectGit(w http.ResponseWriter, r *http.Request) {
 		Branch: result.Snapshot.Branch, BaseRef: result.Snapshot.BaseRef, BaseSHA: result.Snapshot.BaseSHA,
 		HeadSHA: result.Snapshot.HeadSHA, Ahead: result.Snapshot.Ahead,
 		Dirty: result.Snapshot.Dirty, Truncated: result.Snapshot.Truncated,
-		CapturedAt: time.Now().UTC(),
+		HistoryTruncated: result.Snapshot.HistoryTruncated,
+		CapturedAt:       time.Now().UTC(),
 	}
 	for _, change := range result.Snapshot.Changes {
 		snapshot.Changes = append(snapshot.Changes, project.Change{
 			Path: change.Path, OldPath: change.OldPath, Status: change.Status, Area: change.Area,
 		})
 	}
+	for _, commit := range result.Snapshot.Commits {
+		snapshot.Commits = append(snapshot.Commits, projectGitCommit(commit))
+	}
 	if err := a.projects.SaveSnapshot(r.Context(), id, conversationID, snapshot, snapshot.HeadSHA, "ready"); err != nil {
 		a.log.Warn("git snapshot persistence failed: " + err.Error())
 	}
+	var commit *project.GitCommit
+	if result.Commit != nil {
+		value := projectGitCommit(*result.Commit)
+		commit = &value
+	}
+	commitFiles := make([]project.GitCommitFile, 0, len(result.CommitFiles))
+	for _, value := range result.CommitFiles {
+		commitFiles = append(commitFiles, project.GitCommitFile{
+			Path: value.Path, OldPath: value.OldPath, Status: value.Status, Binary: value.Binary,
+		})
+	}
 	writeJSON(w, http.StatusOK, map[string]any{
 		"snapshot": snapshot, "diff": result.Diff, "binary": result.Binary,
-		"truncated": result.Truncated,
+		"truncated": result.Truncated, "commit": commit, "commit_files": commitFiles,
 	})
+}
+
+func projectGitCommit(value agent.GitCommit) project.GitCommit {
+	return project.GitCommit{
+		SHA: value.SHA, Parents: append([]string(nil), value.Parents...), Subject: value.Subject,
+		AuthorName: value.AuthorName, AuthoredAt: value.AuthoredAt,
+		Refs: append([]string(nil), value.Refs...), FilesChanged: value.FilesChanged,
+		Additions: value.Additions, Deletions: value.Deletions, Body: value.Body,
+	}
+}
+
+func validGitCommitSHA(value string) bool {
+	if len(value) != 40 {
+		return false
+	}
+	for _, character := range value {
+		if !strings.ContainsRune("0123456789abcdefABCDEF", character) {
+			return false
+		}
+	}
+	return true
 }
 
 func (a *API) publishLocalProject(w http.ResponseWriter, r *http.Request) {

@@ -196,9 +196,24 @@ def _snapshot_event_json(snapshot: dict[str, Any]) -> str:
     return json.dumps(value, ensure_ascii=False, separators=(",", ":"))
 
 
+def _git_commit_proto(value: dict[str, Any]) -> pb.GitCommit:
+    return pb.GitCommit(
+        sha=str(value.get("sha") or ""),
+        parents=[str(parent) for parent in value.get("parents") or []],
+        subject=str(value.get("subject") or ""),
+        author_name=str(value.get("author_name") or ""),
+        authored_at=str(value.get("authored_at") or ""),
+        refs=[str(ref) for ref in value.get("refs") or []],
+        files_changed=int(value.get("files_changed") or 0),
+        additions=int(value.get("additions") or 0),
+        deletions=int(value.get("deletions") or 0),
+        body=str(value.get("body") or ""),
+    )
+
+
 def _git_inspection_proto(result: dict[str, Any]) -> pb.InspectWorkspaceGitResponse:
     snapshot = result.get("snapshot") or {}
-    return pb.InspectWorkspaceGitResponse(
+    response = pb.InspectWorkspaceGitResponse(
         snapshot=pb.GitSnapshot(
             branch=str(snapshot.get("branch") or ""),
             base_ref=str(snapshot.get("base_ref") or ""),
@@ -216,11 +231,25 @@ def _git_inspection_proto(result: dict[str, Any]) -> pb.InspectWorkspaceGitRespo
                 )
                 for change in snapshot.get("changes") or []
             ],
+            commits=[_git_commit_proto(commit) for commit in snapshot.get("commits") or []],
+            history_truncated=bool(snapshot.get("history_truncated")),
         ),
         diff=str(result.get("diff") or ""),
         binary=bool(result.get("binary")),
         truncated=bool(result.get("truncated")),
+        commit_files=[
+            pb.GitCommitFile(
+                path=str(value.get("path") or ""),
+                old_path=str(value.get("old_path") or ""),
+                status=str(value.get("status") or ""),
+                binary=bool(value.get("binary")),
+            )
+            for value in result.get("commit_files") or []
+        ],
     )
+    if commit := result.get("commit"):
+        response.commit.CopyFrom(_git_commit_proto(commit))
+    return response
 
 
 def _merge_system_prompt(base: str | None, extra: str) -> str:
@@ -517,6 +546,7 @@ class AgentRuntimeServicer(pb_grpc.AgentRuntimeServiceServicer):
                     str(request.operation or ""),
                     path=str(request.path or ""),
                     diff_target=str(request.diff_target or ""),
+                    commit_sha=str(request.commit_sha or ""),
                 )
             finally:
                 heartbeat.cancel()

@@ -181,14 +181,22 @@ async def inspect_project(
     *,
     path: str = "",
     diff_target: str = "",
+    commit_sha: str = "",
 ) -> dict[str, Any]:
     validate_spec(spec)
-    if operation not in {"status", "diff"}:
+    if operation not in {"status", "diff", "commit"}:
         raise ProjectWorkspaceError("GIT_OPERATION_INVALID", "Git operation is invalid")
     if operation == "diff":
         path = validate_relative_path(path)
         if diff_target not in {"working", "staged"}:
             raise ProjectWorkspaceError("GIT_OPERATION_INVALID", "Git diff target is invalid")
+    if operation == "commit":
+        if len(commit_sha) != 40 or any(
+            character not in "0123456789abcdefABCDEF" for character in commit_sha
+        ):
+            raise ProjectWorkspaceError("GIT_COMMIT_INVALID", "Git commit is invalid")
+        if path:
+            path = validate_relative_path(path)
     result = await executor.exec(
         sandbox_id=sandbox_id,
         cmd=["python3", "-c", _PROJECT_GIT_SCRIPT],
@@ -199,6 +207,7 @@ async def inspect_project(
                 "spec": spec.__dict__,
                 "path": path,
                 "diff_target": diff_target,
+                "commit_sha": commit_sha,
             }
         ),
         timeout_secs=60,
@@ -328,6 +337,8 @@ import uuid
 WORKSPACE = pathlib.Path("/workspace")
 MAX_PATHS = 500
 MAX_DIFF = 512 * 1024
+MAX_COMMITS = 50
+MAX_COMMIT_MESSAGE = 32 * 1024
 
 """
     + _PORCELAIN_V2_PARSER_SCRIPT
@@ -509,6 +520,175 @@ def bootstrap():
         if stage.exists():
             shutil.rmtree(stage, ignore_errors=True)
 
+def normalize_refs(value):
+    refs = []
+    for raw in value.split(", "):
+        ref = raw.strip()
+        if not ref:
+            continue
+        if ref.startswith("HEAD -> "):
+            refs.append("HEAD")
+            ref = ref[len("HEAD -> "):]
+        if ref.startswith("tag: "):
+            ref = ref[len("tag: "):]
+        for prefix in ("refs/heads/", "refs/remotes/", "refs/tags/"):
+            if ref.startswith(prefix):
+                ref = ref[len(prefix):]
+                break
+        if ref and ref not in refs:
+            refs.append(ref)
+    return refs
+
+def parse_commit_record(record):
+    fields = record.strip("\r\n").split("\x1f")
+    if len(fields) != 6 or len(fields[0]) != 40:
+        return None
+    return {
+        "sha": fields[0],
+        "parents": [value for value in fields[1].split() if value],
+        "subject": fields[2][:500],
+        "author_name": fields[3][:200],
+        "authored_at": fields[4],
+        "refs": normalize_refs(fields[5])[:20],
+    }
+
+def commit_history():
+    result = git([
+        "log", "HEAD", "--topo-order", "--decorate=full",
+        "--max-count=" + str(MAX_COMMITS + 1),
+        "--format=%H%x1f%P%x1f%s%x1f%an%x1f%aI%x1f%D%x1e",
+    ])
+    if result.returncode != 0:
+        fail("GIT_HISTORY_FAILED", "Could not read Git commit history")
+    commits = []
+    for record in result.stdout.split("\x1e"):
+        commit = parse_commit_record(record)
+        if commit is not None:
+            commits.append(commit)
+    return commits[:MAX_COMMITS], len(commits) > MAX_COMMITS
+
+def validate_commit(commit_sha):
+    ancestor = git(["merge-base", "--is-ancestor", commit_sha, "HEAD"])
+    if ancestor.returncode != 0:
+        fail("GIT_COMMIT_INVALID", "Commit is not reachable from the current HEAD")
+
+def commit_parent(commit_sha):
+    result = git(["rev-list", "--parents", "--max-count=1", commit_sha])
+    if result.returncode != 0:
+        fail("GIT_COMMIT_INVALID", "Could not read Git commit parents")
+    values = result.stdout.strip().split()
+    return values[1] if len(values) > 1 else ""
+
+def commit_metadata(commit_sha):
+    result = git([
+        "show", "-s", "--decorate=full",
+        "--format=%H%x1f%P%x1f%s%x1f%an%x1f%aI%x1f%D%x1e%B",
+        commit_sha,
+    ])
+    if result.returncode != 0:
+        fail("GIT_COMMIT_INVALID", "Could not read Git commit details")
+    metadata, separator, body = result.stdout.partition("\x1e")
+    commit = parse_commit_record(metadata)
+    if commit is None or not separator:
+        fail("GIT_COMMIT_INVALID", "Git commit details are invalid")
+    commit["body"] = body.strip()[:MAX_COMMIT_MESSAGE]
+    return commit
+
+def commit_name_status(commit_sha, parent):
+    if parent:
+        result = git(["diff", "--name-status", "-z", "-M", parent, commit_sha], binary=True)
+    else:
+        result = git([
+            "diff-tree", "--root", "--no-commit-id", "--name-status", "-r", "-z", "-M",
+            commit_sha,
+        ], binary=True)
+    if result.returncode != 0:
+        fail("GIT_COMMIT_FAILED", "Could not read files changed by the commit")
+    records = result.stdout.split(b"\0")
+    files = []
+    index = 0
+    while index < len(records):
+        status = records[index].decode("utf-8", "replace")
+        index += 1
+        if not status or index >= len(records):
+            continue
+        old_path = ""
+        if status[:1] in {"R", "C"}:
+            old_path = records[index].decode("utf-8", "surrogateescape")
+            index += 1
+            if index >= len(records):
+                break
+        path = records[index].decode("utf-8", "surrogateescape")
+        index += 1
+        files.append({
+            "path": path,
+            "old_path": old_path,
+            "status": status[:1] or "M",
+            "binary": False,
+        })
+    return files
+
+def commit_numstat(commit_sha, parent):
+    if parent:
+        result = git(["diff", "--numstat", "-z", "--no-renames", parent, commit_sha], binary=True)
+    else:
+        result = git([
+            "show", "--format=", "--numstat", "-z", "--no-renames", commit_sha,
+        ], binary=True)
+    if result.returncode != 0:
+        fail("GIT_COMMIT_FAILED", "Could not read commit statistics")
+    additions = 0
+    deletions = 0
+    binary_paths = set()
+    for raw in result.stdout.split(b"\0"):
+        if not raw:
+            continue
+        fields = raw.decode("utf-8", "surrogateescape").split("\t", 2)
+        if len(fields) != 3:
+            continue
+        if fields[0] == "-" or fields[1] == "-":
+            binary_paths.add(fields[2])
+            continue
+        try:
+            additions += int(fields[0])
+            deletions += int(fields[1])
+        except ValueError:
+            continue
+    return additions, deletions, binary_paths
+
+def commit_details(commit_sha):
+    validate_commit(commit_sha)
+    parent = commit_parent(commit_sha)
+    commit = commit_metadata(commit_sha)
+    files = commit_name_status(commit_sha, parent)
+    additions, deletions, binary_paths = commit_numstat(commit_sha, parent)
+    for value in files:
+        value["binary"] = value["path"] in binary_paths
+    commit.update({
+        "files_changed": len(files),
+        "additions": additions,
+        "deletions": deletions,
+    })
+    return commit, files[:MAX_PATHS], len(files) > MAX_PATHS, parent
+
+def commit_file_diff(commit_sha, parent, path):
+    if parent:
+        args = [
+            "diff", "--no-ext-diff", "--no-textconv", "--find-renames",
+            parent, commit_sha, "--", path,
+        ]
+    else:
+        args = [
+            "show", "--format=", "--no-ext-diff", "--no-textconv", "--find-renames",
+            commit_sha, "--", path,
+        ]
+    result = git(args, binary=True)
+    if result.returncode != 0:
+        fail("GIT_DIFF_FAILED", "Could not read Git commit diff")
+    binary = b"Binary files " in result.stdout or b"GIT binary patch" in result.stdout
+    truncated = len(result.stdout) > MAX_DIFF
+    return result.stdout[:MAX_DIFF].decode("utf-8", "replace"), binary, truncated
+
 def status_snapshot():
     validate_workspace()
     status = git(
@@ -528,6 +708,7 @@ def status_snapshot():
         ahead_count = int(ahead.stdout.strip()) if ahead.returncode == 0 else 0
     except ValueError:
         ahead_count = 0
+    commits, history_truncated = commit_history()
     return {
         "branch": branch,
         "base_ref": spec["default_branch"],
@@ -537,6 +718,8 @@ def status_snapshot():
         "dirty": bool(changes),
         "changes": changes,
         "truncated": truncated,
+        "commits": commits,
+        "history_truncated": history_truncated,
     }
 
 def publish():
@@ -613,6 +796,24 @@ elif operation == "diff":
     print(json.dumps({
         "ok": True, "snapshot": status_snapshot(), "diff": text,
         "binary": binary, "truncated": truncated,
+    }))
+elif operation == "commit":
+    commit_sha = request.get("commit_sha", "")
+    commit, commit_files, files_truncated, parent = commit_details(commit_sha)
+    path = request.get("path", "")
+    diff = ""
+    binary = False
+    diff_truncated = False
+    if path:
+        diff, binary, diff_truncated = commit_file_diff(commit_sha, parent, path)
+    print(json.dumps({
+        "ok": True,
+        "snapshot": status_snapshot(),
+        "commit": commit,
+        "commit_files": commit_files,
+        "diff": diff,
+        "binary": binary,
+        "truncated": diff_truncated if path else files_truncated,
     }))
 elif operation == "publish":
     print(json.dumps({"ok": True, "head_sha": publish()}))
