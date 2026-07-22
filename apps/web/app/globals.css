@@ -277,6 +277,24 @@
     animation: cocola-message-enter 180ms ease-out;
   }
 
+  /* Keep assistant-ui on one native Parts render path. Once a turn completes,
+     hide process nodes in place instead of remounting them through numeric
+     PartByIndex lookups. Text before the final process node is intermediate;
+     generated files remain output regardless of their position. */
+  .agent-turn-parts.agent-turn-collapsed > .agent-turn-process-part,
+  .agent-turn-parts.agent-turn-collapsed
+    > .agent-turn-part:not(.agent-turn-file-part):has(~ .agent-turn-process-part) {
+    display: none;
+  }
+
+  .aui-rail-streaming > .rail-row:last-child .rail-connector::after,
+  .aui-rail-streaming
+    > .agent-turn-parts:last-child
+    > .agent-turn-part:last-child
+    .rail-connector::after {
+    display: none;
+  }
+
   .cocola-user-ui .composer-lift {
     border-color: hsl(var(--border));
     background: hsl(var(--card));

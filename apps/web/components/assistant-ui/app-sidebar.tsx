@@ -1,23 +1,19 @@
 "use client";
 
 import { useCallback, useRef, useState } from "react";
-import * as DropdownMenu from "@radix-ui/react-dropdown-menu";
 import {
   Cable,
   CalendarCheck as CalendarDots,
   MessagesSquare as ChatsCircle,
   CheckCircle2 as CheckCircle,
-  MoreHorizontal as DotsThree,
   Folder,
   FolderGit2,
   Settings as Gear,
-  Pencil as PencilSimple,
   Plug as PlugsConnected,
   Plus as PlusCircle,
   ShieldCheck,
   Sparkles as Sparkle,
   Loader2 as SpinnerGap,
-  Trash2 as Trash,
   type LucideIcon as PhosphorIcon,
 } from "lucide-react";
 import { useSession } from "next-auth/react";
@@ -98,15 +94,7 @@ export function AppSidebar() {
   });
   const [editingId, setEditingId] = useState<string | null>(null);
   const [draftTitle, setDraftTitle] = useState("");
-  const [creatingFolder, setCreatingFolder] = useState(false);
-  const [editingFolderId, setEditingFolderId] = useState<string | null>(null);
-  const [folderDraft, setFolderDraft] = useState("");
-  const [sidebarError, setSidebarError] = useState<string | null>(null);
-  const [deleteTarget, setDeleteTarget] = useState<{
-    kind: "conversation" | "folder";
-    id: string;
-    title: string;
-  } | null>(null);
+  const [deleteTarget, setDeleteTarget] = useState<{ id: string; title: string } | null>(null);
   const [deleting, setDeleting] = useState(false);
   const [deleteError, setDeleteError] = useState<string | null>(null);
   const {
@@ -116,10 +104,6 @@ export function AppSidebar() {
     renameConversation,
     deleteConversation,
     folders,
-    projects,
-    createFolder,
-    renameFolder,
-    deleteFolder,
     moveConversation,
     activeSessionId,
     runningSessionIds,
@@ -175,9 +159,9 @@ export function AppSidebar() {
     }
   };
 
-  const openDeleteDialog = (kind: "conversation" | "folder", id: string, title: string) => {
+  const openDeleteDialog = (id: string, title: string) => {
     setDeleteError(null);
-    setDeleteTarget({ kind, id, title });
+    setDeleteTarget({ id, title });
   };
 
   const confirmDelete = async () => {
@@ -185,12 +169,7 @@ export function AppSidebar() {
     setDeleting(true);
     setDeleteError(null);
     try {
-      if (deleteTarget.kind === "folder") {
-        await deleteFolder(deleteTarget.id);
-        if (pathname === `/folders/${deleteTarget.id}`) router.push("/");
-      } else {
-        await deleteConversation(deleteTarget.id);
-      }
+      await deleteConversation(deleteTarget.id);
       setDeleteTarget(null);
     } catch (error) {
       setDeleteError(error instanceof Error ? error.message : "Delete failed. Please try again.");
@@ -199,50 +178,15 @@ export function AppSidebar() {
     }
   };
 
-  const commitCreateFolder = async () => {
-    const name = folderDraft.trim();
-    if (!name) {
-      setCreatingFolder(false);
-      setFolderDraft("");
-      return;
-    }
-    try {
-      await createFolder(name);
-      setCreatingFolder(false);
-      setFolderDraft("");
-      setSidebarError(null);
-    } catch (error) {
-      setSidebarError(error instanceof Error ? error.message : "Could not create folder");
-    }
-  };
-
-  const commitRenameFolder = async (id: string) => {
-    const name = folderDraft.trim();
-    if (!name) {
-      setEditingFolderId(null);
-      setFolderDraft("");
-      return;
-    }
-    try {
-      await renameFolder(id, name);
-      setEditingFolderId(null);
-      setFolderDraft("");
-      setSidebarError(null);
-    } catch (error) {
-      setSidebarError(error instanceof Error ? error.message : "Could not rename folder");
-    }
-  };
-
   const moveChat = async (conversationId: string, folderId: string | null) => {
     try {
       await moveConversation(conversationId, folderId);
-      setSidebarError(null);
       const destination = folderId
         ? folders.find((folder) => folder.id === folderId)?.name || "folder"
         : "Chats";
       showSuccess(`Moved to ${destination}`);
     } catch (error) {
-      setSidebarError(error instanceof Error ? error.message : "Could not move conversation");
+      window.alert(error instanceof Error ? error.message : "Could not move conversation");
     }
   };
 
@@ -306,93 +250,57 @@ export function AppSidebar() {
           </SidebarSectionPanel>
 
           <SidebarSectionPanel refSetter={setSectionRef("projects")}>
-            <div className="flex items-center justify-between px-2.5 pb-1 pt-3 text-[13px] font-semibold text-sidebar-foreground/70">
-              <span>Projects</span>
+            <div
+              className={cn(
+                "flex h-9 items-center rounded-2xl px-2.5 text-[13.5px] font-medium text-sidebar-foreground transition-colors hover:bg-sidebar-accent hover:text-sidebar-accent-foreground",
+                pathname === "/projects" || pathname?.startsWith("/projects/")
+                  ? "bg-sidebar-accent text-sidebar-accent-foreground"
+                  : "",
+              )}
+            >
+              <Link
+                href="/projects"
+                className="flex min-w-0 flex-1 items-center gap-2.5 self-stretch"
+              >
+                <FolderGit2 className="size-4 shrink-0 text-indigo-500" />
+                <span className="truncate">Projects</span>
+              </Link>
               <Link
                 href="/projects/new"
                 aria-label="Create or import project"
                 title="Create or import project"
-                className="grid size-6 place-items-center rounded-lg transition hover:bg-sidebar-accent hover:text-sidebar-accent-foreground focus:outline-none"
+                className="grid size-7 place-items-center rounded-lg text-sidebar-foreground/65 transition hover:bg-sidebar-accent hover:text-sidebar-accent-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/45"
               >
                 <PlusCircle className="size-4" />
               </Link>
             </div>
-            <div className="flex flex-col gap-0.5">
-              {projects.map((project) => (
-                <SidebarExpandedRow
-                  key={project.id}
-                  title={project.name}
-                  active={
-                    pathname === `/projects/${project.id}` ||
-                    pathname?.startsWith(`/projects/${project.id}/`)
-                  }
-                  onClick={() => router.push(`/projects/${encodeURIComponent(project.id)}`)}
-                >
-                  <FolderGit2 className="size-4 shrink-0 text-indigo-600" />
-                  <span className="truncate">{project.name}</span>
-                </SidebarExpandedRow>
-              ))}
-            </div>
           </SidebarSectionPanel>
 
           <SidebarSectionPanel refSetter={setSectionRef("folders")}>
-            <div className="flex items-center justify-between px-2.5 pb-1 pt-3 text-[13px] font-semibold text-sidebar-foreground/70">
-              <span>Folders</span>
-              <button
-                type="button"
+            <div
+              className={cn(
+                "flex h-9 items-center rounded-2xl px-2.5 text-[13.5px] font-medium text-sidebar-foreground transition-colors hover:bg-sidebar-accent hover:text-sidebar-accent-foreground",
+                pathname === "/folders" || pathname?.startsWith("/folders/")
+                  ? "bg-sidebar-accent text-sidebar-accent-foreground"
+                  : "",
+              )}
+            >
+              <Link
+                href="/folders"
+                className="flex min-w-0 flex-1 items-center gap-2.5 self-stretch"
+              >
+                <Folder className="size-4 shrink-0 text-amber-500" />
+                <span className="truncate">Folders</span>
+              </Link>
+              <Link
+                href="/folders/new"
                 aria-label="Create folder"
                 title="Create folder"
-                onClick={() => {
-                  setCreatingFolder(true);
-                  setEditingFolderId(null);
-                  setFolderDraft("");
-                  setSidebarError(null);
-                }}
-                className="grid size-6 place-items-center rounded-lg transition hover:bg-sidebar-accent hover:text-sidebar-accent-foreground focus:outline-none"
+                className="grid size-7 place-items-center rounded-lg text-sidebar-foreground/65 transition hover:bg-sidebar-accent hover:text-sidebar-accent-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/45"
               >
                 <PlusCircle className="size-4" />
-              </button>
+              </Link>
             </div>
-            <div className="flex flex-col gap-0.5">
-              {creatingFolder ? (
-                <FolderNameInput
-                  value={folderDraft}
-                  placeholder="Folder name"
-                  onChange={setFolderDraft}
-                  onBlur={() => void commitCreateFolder()}
-                  onCancel={() => {
-                    setCreatingFolder(false);
-                    setFolderDraft("");
-                  }}
-                />
-              ) : null}
-              {folders.map((folder) => (
-                <FolderSidebarItem
-                  key={folder.id}
-                  folder={folder}
-                  active={pathname === `/folders/${folder.id}`}
-                  editing={editingFolderId === folder.id}
-                  draft={folderDraft}
-                  onOpen={() => router.push(`/folders/${encodeURIComponent(folder.id)}`)}
-                  onStartRename={() => {
-                    setCreatingFolder(false);
-                    setEditingFolderId(folder.id);
-                    setFolderDraft(folder.name);
-                    setSidebarError(null);
-                  }}
-                  onDelete={() => openDeleteDialog("folder", folder.id, folder.name)}
-                  onDraftChange={setFolderDraft}
-                  onCommitRename={() => void commitRenameFolder(folder.id)}
-                  onCancelRename={() => {
-                    setEditingFolderId(null);
-                    setFolderDraft("");
-                  }}
-                />
-              ))}
-            </div>
-            {sidebarError ? (
-              <p className="px-2.5 pt-1.5 text-[11px] leading-4 text-red-600">{sidebarError}</p>
-            ) : null}
           </SidebarSectionPanel>
 
           <SidebarSectionPanel refSetter={setSectionRef("chats")}>
@@ -417,7 +325,7 @@ export function AppSidebar() {
                       openConversation(c.id);
                     }}
                     onRename={() => startRename(c.id, c.title || "Untitled")}
-                    onDelete={() => openDeleteDialog("conversation", c.id, c.title || "Untitled")}
+                    onDelete={() => openDeleteDialog(c.id, c.title || "Untitled")}
                     onMove={(folderId) => void moveChat(c.id, folderId)}
                     onDraftChange={setDraftTitle}
                     onCommitRename={() => void commitRename(c.id)}
@@ -455,21 +363,12 @@ export function AppSidebar() {
 
       <DeleteConfirmDialog
         open={deleteTarget !== null}
-        title={
-          deleteTarget?.kind === "folder" ? "Delete folder and chats?" : "Delete conversation?"
-        }
+        title="Delete conversation?"
         description={
-          deleteTarget?.kind === "folder" ? (
-            <>
-              <span className="font-medium text-foreground">{deleteTarget.title}</span> and every
-              conversation inside it will be permanently deleted. Stop any running answers first.
-            </>
-          ) : (
-            <>
-              <span className="font-medium text-foreground">{deleteTarget?.title}</span> will be
-              permanently deleted. Stop its running answer first.
-            </>
-          )
+          <>
+            <span className="font-medium text-foreground">{deleteTarget?.title}</span> will be
+            permanently deleted. Stop its running answer first.
+          </>
         }
         busy={deleting}
         error={deleteError}
@@ -619,124 +518,6 @@ function ChatHistoryItem({
           />
         </div>
       ) : null}
-    </div>
-  );
-}
-
-function FolderSidebarItem({
-  folder,
-  active,
-  editing,
-  draft,
-  onOpen,
-  onStartRename,
-  onDelete,
-  onDraftChange,
-  onCommitRename,
-  onCancelRename,
-}: {
-  folder: ConversationFolder;
-  active: boolean;
-  editing: boolean;
-  draft: string;
-  onOpen: () => void;
-  onStartRename: () => void;
-  onDelete: () => void;
-  onDraftChange: (value: string) => void;
-  onCommitRename: () => void;
-  onCancelRename: () => void;
-}) {
-  if (editing) {
-    return (
-      <FolderNameInput
-        value={draft}
-        onChange={onDraftChange}
-        onBlur={onCommitRename}
-        onCancel={onCancelRename}
-      />
-    );
-  }
-  return (
-    <div
-      className={cn(
-        "group flex h-9 items-center gap-1 rounded-2xl px-2.5 text-[15px] font-medium text-sidebar-foreground transition hover:bg-sidebar-accent hover:text-sidebar-accent-foreground",
-        active && "bg-sidebar-accent text-sidebar-accent-foreground",
-      )}
-    >
-      <button type="button" onClick={onOpen} className="flex min-w-0 flex-1 items-center gap-2">
-        <Folder className="size-4 shrink-0" />
-        <span className="truncate">{folder.name}</span>
-      </button>
-      <DropdownMenu.Root>
-        <DropdownMenu.Trigger asChild>
-          <button
-            type="button"
-            aria-label={`Actions for folder ${folder.name}`}
-            className="grid size-7 shrink-0 place-items-center rounded-lg opacity-0 transition hover:bg-sidebar-accent focus:opacity-100 focus:outline-none group-hover:opacity-100 data-[state=open]:opacity-100"
-          >
-            <DotsThree className="size-4" />
-          </button>
-        </DropdownMenu.Trigger>
-        <DropdownMenu.Portal>
-          <DropdownMenu.Content
-            align="end"
-            sideOffset={5}
-            className="cocola-user-ui z-50 min-w-36 rounded-xl border border-border bg-popover p-1 text-foreground shadow-xl outline-none"
-          >
-            <DropdownMenu.Item
-              onSelect={onStartRename}
-              className="flex cursor-default items-center gap-2 rounded-lg px-2 py-1.5 text-sm text-foreground outline-none focus:bg-accent focus:text-foreground data-[highlighted]:bg-accent data-[highlighted]:text-foreground"
-            >
-              <PencilSimple className="size-4" />
-              Rename
-            </DropdownMenu.Item>
-            <DropdownMenu.Item
-              onSelect={onDelete}
-              className="flex cursor-default items-center gap-2 rounded-lg px-2 py-1.5 text-sm text-red-500 outline-none focus:bg-red-500/10 focus:text-red-600"
-            >
-              <Trash className="size-4" />
-              Delete
-            </DropdownMenu.Item>
-          </DropdownMenu.Content>
-        </DropdownMenu.Portal>
-      </DropdownMenu.Root>
-    </div>
-  );
-}
-
-function FolderNameInput({
-  value,
-  placeholder,
-  onChange,
-  onBlur,
-  onCancel,
-}: {
-  value: string;
-  placeholder?: string;
-  onChange: (value: string) => void;
-  onBlur: () => void;
-  onCancel: () => void;
-}) {
-  return (
-    <div className="flex h-9 items-center gap-2 rounded-2xl bg-sidebar-accent px-2.5">
-      <Folder className="size-4 shrink-0 text-sidebar-accent-foreground" />
-      <input
-        autoFocus
-        value={value}
-        placeholder={placeholder}
-        onChange={(event) => onChange(event.target.value)}
-        onBlur={onBlur}
-        onKeyDown={(event) => {
-          if (event.key === "Enter") {
-            event.preventDefault();
-            event.currentTarget.blur();
-          } else if (event.key === "Escape") {
-            event.preventDefault();
-            onCancel();
-          }
-        }}
-        className="min-w-0 flex-1 bg-transparent text-sm outline-none placeholder:text-sidebar-foreground/45"
-      />
     </div>
   );
 }

@@ -2,6 +2,7 @@
 
 import * as DropdownMenu from "@radix-ui/react-dropdown-menu";
 import { ChevronRight, Folder, MessagesSquare, MoreHorizontal, Pencil, Trash2 } from "lucide-react";
+import Link from "next/link";
 import { useParams, useRouter } from "next/navigation";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useCocola, type ConversationSummary } from "@/app/runtime-provider";
@@ -122,7 +123,7 @@ export default function FolderPage() {
     try {
       if (deleteTarget.kind === "folder") {
         await deleteFolder(deleteTarget.id);
-        router.push("/");
+        router.push("/folders");
       } else {
         await deleteConversation(deleteTarget.id);
       }
@@ -145,10 +146,10 @@ export default function FolderPage() {
           </p>
           <button
             type="button"
-            onClick={() => router.push("/")}
+            onClick={() => router.push("/folders")}
             className="mt-4 rounded-xl bg-primary px-4 py-2 text-sm font-medium text-primary-foreground focus:outline-none"
           >
-            Back to chats
+            Back to folders
           </button>
         </div>
       </div>
@@ -161,7 +162,9 @@ export default function FolderPage() {
     <div className="h-full overflow-y-auto px-5 py-8 sm:px-8 lg:px-12">
       <div className="mx-auto w-full max-w-4xl pb-16">
         <div className="flex items-center gap-1.5 text-xs font-medium text-muted-foreground">
-          <span>Folders</span>
+          <Link href="/folders" className="hover:text-foreground">
+            Folders
+          </Link>
           <ChevronRight className="size-3.5" />
           <span className="truncate text-foreground/75">{folder.name}</span>
         </div>

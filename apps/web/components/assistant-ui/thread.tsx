@@ -38,7 +38,7 @@ import {
   Sparkles,
 } from "lucide-react";
 import Image from "next/image";
-import { Fragment, useEffect, useMemo, useRef, useState, type FC } from "react";
+import { Fragment, useEffect, useMemo, useRef, useState, type FC, type ReactNode } from "react";
 import { useCocola, type ModelIconConfig, type UiMessageMetadata } from "@/app/runtime-provider";
 import { CocolaWordmark } from "@/components/assistant-ui/cocola-wordmark";
 import { CocolaLogo } from "@/components/cocola-logo";
@@ -746,6 +746,7 @@ const AssistantMessageParts: FC = () => {
   const isLast = useMessage((m) => m.isLast);
   const isRunning = useThread((t) => t.isRunning);
   const parts = useMessage((m) => m.content);
+  const [processExpanded, setProcessExpanded] = useState(false);
   const custom = useMessage((m) => m.metadata.custom) as UiMessageMetadata & {
     environmentPreparation?: EnvironmentPreparationSnapshot;
     environmentOnly?: boolean;
@@ -764,45 +765,29 @@ const AssistantMessageParts: FC = () => {
 
   return (
     <div className={streaming ? "aui-rail-streaming" : undefined}>
-      {streaming ? (
-        <Fragment key="process-live">
-          {custom.environmentPreparation ? (
-            <RailEnvironment environment={custom.environmentPreparation} />
-          ) : null}
-          {awaitingFirstResponsePart ? <RailResponsePending /> : null}
-          {!custom.environmentOnly
-            ? renderPlan.expandedProcessIndices.map((index) => (
-                <MessagePrimitive.PartByIndex
-                  key={`process-${index}`}
-                  index={index}
-                  components={ASSISTANT_PART_COMPONENTS}
-                />
-              ))
-            : null}
-        </Fragment>
-      ) : renderPlan.showProcessSummary ? (
-        <RailProcessSummary key="process-summary" durationMs={custom.duration_ms}>
-          {custom.environmentPreparation ? (
-            <RailEnvironment environment={custom.environmentPreparation} />
-          ) : null}
-          {renderPlan.summaryProcessIndices.map((index) => (
-            <MessagePrimitive.PartByIndex
-              key={`process-${index}`}
-              index={index}
-              components={ASSISTANT_PART_COMPONENTS}
-            />
-          ))}
-        </RailProcessSummary>
+      {!streaming && renderPlan.showProcessSummary ? (
+        <RailProcessSummary
+          key="process-summary"
+          durationMs={custom.duration_ms}
+          expanded={processExpanded}
+          onExpandedChange={setProcessExpanded}
+        />
       ) : null}
+      {custom.environmentPreparation && (streaming || processExpanded) ? (
+        <RailEnvironment key="environment" environment={custom.environmentPreparation} />
+      ) : null}
+      {awaitingFirstResponsePart ? <RailResponsePending key="response-pending" /> : null}
       {!custom.environmentOnly ? (
-        <div key="final-output" className="contents">
-          {renderPlan.outputIndices.map((index) => (
-            <MessagePrimitive.PartByIndex
-              key={`output-${index}`}
-              index={index}
-              components={ASSISTANT_PART_COMPONENTS}
-            />
-          ))}
+        <div
+          key="message-parts"
+          className={cn(
+            "agent-turn-parts",
+            !streaming && renderPlan.showProcessSummary && !processExpanded
+              ? "agent-turn-collapsed"
+              : "",
+          )}
+        >
+          <MessagePrimitive.Parts components={ASSISTANT_PART_COMPONENTS} />
         </div>
       ) : null}
     </div>
@@ -833,22 +818,24 @@ const ArtifactFilePart: FC<FileMessagePartProps> = ({ filename, mimeType, data }
   const downloadUrl = meta.url || data;
 
   return (
-    <RailFile
-      filename={name}
-      mimeType={type}
-      size={meta.size}
-      downloadUrl={downloadUrl}
-      onPreview={() =>
-        openArtifact({
-          id: meta.id || name,
-          sessionId: activeSessionId,
-          filename: name,
-          mimeType: type,
-          size: meta.size,
-          downloadUrl,
-        })
-      }
-    />
+    <AgentTurnPart kind="file">
+      <RailFile
+        filename={name}
+        mimeType={type}
+        size={meta.size}
+        downloadUrl={downloadUrl}
+        onPreview={() =>
+          openArtifact({
+            id: meta.id || name,
+            sessionId: activeSessionId,
+            filename: name,
+            mimeType: type,
+            size: meta.size,
+            downloadUrl,
+          })
+        }
+      />
+    </AgentTurnPart>
   );
 };
 
@@ -868,14 +855,33 @@ const parseArtifactData = (data: string): { id?: string; url: string; size: numb
 // Plain assistant text answer, rendered as a rail node via the shared layer.
 // While the text part is still streaming (status "running") the node icon spins
 // in place — the single, localized "answering" affordance.
+const AgentTurnPart: FC<{
+  children: ReactNode;
+  kind?: "file" | "process";
+}> = ({ children, kind }) => (
+  <div
+    className={cn(
+      "agent-turn-part",
+      kind === "process" && "agent-turn-process-part",
+      kind === "file" && "agent-turn-file-part",
+    )}
+  >
+    {children}
+  </div>
+);
+
 const TextPart: FC<TextMessagePartProps> = ({ status }) => (
-  <RailText running={status.type === "running"}>
-    <MarkdownText />
-  </RailText>
+  <AgentTurnPart>
+    <RailText running={status.type === "running"}>
+      <MarkdownText />
+    </RailText>
+  </AgentTurnPart>
 );
 
 const ReasoningPart: FC<ReasoningMessagePartProps> = ({ text, status }) => (
-  <RailReasoning text={text} running={status.type === "running"} />
+  <AgentTurnPart kind="process">
+    <RailReasoning text={text} running={status.type === "running"} />
+  </AgentTurnPart>
 );
 
 // Tool call rendering delegates to the shared rail layer. The gateway streams
@@ -888,13 +894,15 @@ const ToolFallback: FC<ToolCallMessagePartProps> = ({
   isError,
   status,
 }) => (
-  <RailTool
-    toolName={toolName}
-    argsText={argsText}
-    result={result}
-    isError={isError}
-    running={status.type === "running" || status.type === "requires-action"}
-  />
+  <AgentTurnPart kind="process">
+    <RailTool
+      toolName={toolName}
+      argsText={argsText}
+      result={result}
+      isError={isError}
+      running={status.type === "running" || status.type === "requires-action"}
+    />
+  </AgentTurnPart>
 );
 
 const MemoryRecallPart: FC<
@@ -903,7 +911,11 @@ const MemoryRecallPart: FC<
     count: number;
   }>
 > = ({ data }) =>
-  data.status === "miss" ? null : <RailMemoryRecall status={data.status} count={data.count} />;
+  data.status === "miss" ? null : (
+    <AgentTurnPart kind="process">
+      <RailMemoryRecall status={data.status} count={data.count} />
+    </AgentTurnPart>
+  );
 
 const SCMApprovalPart: FC<
   DataMessagePartProps<{
@@ -943,14 +955,16 @@ const SCMApprovalPart: FC<
   };
 
   return (
-    <RailSCMApproval
-      status={resolvedStatus}
-      category={data.category}
-      commandLabel={data.label}
-      busy={busy}
-      error={error}
-      onDecision={decide}
-    />
+    <AgentTurnPart kind="process">
+      <RailSCMApproval
+        status={resolvedStatus}
+        category={data.category}
+        commandLabel={data.label}
+        busy={busy}
+        error={error}
+        onDecision={decide}
+      />
+    </AgentTurnPart>
   );
 };
 

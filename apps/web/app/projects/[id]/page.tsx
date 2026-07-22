@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
+import Link from "next/link";
 import { useParams, useRouter } from "next/navigation";
 import {
   Archive,
@@ -292,7 +293,9 @@ export default function ProjectPage() {
     <div className="h-full overflow-y-auto px-5 py-8 sm:px-8 lg:px-12">
       <main className="mx-auto w-full max-w-4xl pb-16">
         <div className="flex items-center gap-1.5 text-xs font-medium text-muted-foreground">
-          <span>Projects</span>
+          <Link href="/projects" className="hover:text-foreground">
+            Projects
+          </Link>
           <ChevronRight className="size-3.5" />
           <span className="truncate text-foreground/75">{project.name}</span>
         </div>

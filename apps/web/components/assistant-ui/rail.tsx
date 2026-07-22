@@ -46,17 +46,26 @@ export type RailIcon = PhosphorIcon;
 
 export const RailProcessSummary: FC<{
   durationMs?: number;
-  children: ReactNode;
-}> = ({ durationMs, children }) => {
-  const [expanded, setExpanded] = useState(false);
+  children?: ReactNode;
+  expanded?: boolean;
+  onExpandedChange?: (expanded: boolean) => void;
+}> = ({ durationMs, children, expanded: controlledExpanded, onExpandedChange }) => {
+  const [localExpanded, setLocalExpanded] = useState(false);
+  const expanded = controlledExpanded ?? localExpanded;
   const duration = formatAgentDuration(durationMs);
+
+  const toggle = () => {
+    const next = !expanded;
+    if (controlledExpanded === undefined) setLocalExpanded(next);
+    onExpandedChange?.(next);
+  };
 
   return (
     <div className="mb-2">
       <button
         type="button"
         aria-expanded={expanded}
-        onClick={() => setExpanded((value) => !value)}
+        onClick={toggle}
         className="group grid min-h-10 w-full grid-cols-[1.75rem_minmax(0,1fr)_auto] items-center gap-x-2.5 rounded-xl border border-border/60 bg-muted/35 py-2 pr-3.5 text-left text-sm font-medium text-muted-foreground transition-colors hover:bg-muted/60 hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
       >
         <span className="flex items-center justify-center">
@@ -68,7 +77,7 @@ export const RailProcessSummary: FC<{
           aria-hidden="true"
         />
       </button>
-      {expanded ? <div className="mt-2">{children}</div> : null}
+      {expanded && children ? <div className="mt-2">{children}</div> : null}
     </div>
   );
 };
@@ -88,7 +97,7 @@ export const RailRow: FC<{
   // The last node in a message must NOT trail a line below it, so when this
   // RailRow is the final sibling we hide its connector via :last-child (scoped
   // to the `.aui-rail-streaming` ancestor the caller toggles while streaming).
-  <div className="grid grid-cols-[1.75rem_1fr] gap-x-2.5 [.aui-rail-streaming_&:last-child_.rail-connector]:after:hidden">
+  <div className="rail-row grid grid-cols-[1.75rem_1fr] gap-x-2.5">
     <div className="rail-connector relative flex items-start justify-center after:absolute after:left-1/2 after:top-8 after:bottom-0 after:w-0.5 after:-translate-x-1/2 after:rounded-full after:bg-border/50">
       <span
         className={cn(
