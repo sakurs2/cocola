@@ -1052,6 +1052,12 @@ func sessionEntrypoint(execUser string) []string {
 		guestSession + "/runtime/cocola",
 		guestSession + "/runtime/browser",
 		guestSession + "/home/local",
+		guestSession + "/home/local/bin",
+		guestSession + "/home/local/lib",
+		guestSession + "/home/local/lib/node_modules",
+		guestSession + "/home/local/share",
+		guestSession + "/home/local/share/pnpm",
+		guestSession + "/home/local/share/man",
 	}
 	script := "mkdir -p " + shellJoin(dirs)
 	if execUser != "" {

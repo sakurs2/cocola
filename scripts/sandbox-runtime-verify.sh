@@ -106,6 +106,16 @@ echo "$SELF" | grep -q '"claude_cli":"[0-9]' && ok "claude CLI pre-baked" || bad
 echo "$SELF" | grep -qv '"claude_agent_sdk":"missing' && ok "claude-agent-sdk importable" || bad "claude-agent-sdk missing"
 echo "$SELF" | grep -q '"codex_cli":"codex-cli [0-9]' && ok "codex CLI pre-baked" || bad "codex CLI missing"
 echo "$SELF" | grep -q '"codex_sdk":"0.144.1"' && ok "codex SDK pinned" || bad "codex SDK missing / wrong version"
+if docker exec -i -u cocola "$CTR" sh -c \
+  'test "$GOBIN" = /home/cocola/.local/bin &&
+   test -w /home/cocola/.local/bin &&
+   test -w /home/cocola/.local/lib/node_modules &&
+   test -w /home/cocola/.local/share/pnpm &&
+   test -w /home/cocola/.local/share/man'; then
+  ok "guest package-manager prefix is initialized and writable"
+else
+  bad "guest package-manager prefix or GOBIN is not initialized"
+fi
 for tool in pnpm yarn playwright chromium fd jq yq tree file make imagemagick pdftotext rsvg_convert \
   gopls clangd shellcheck shfmt java; do
   if echo "$SELF" | grep -Eq "\"$tool\":\"(missing|error:)"; then

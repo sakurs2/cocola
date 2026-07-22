@@ -280,7 +280,11 @@ RUN chmod +x /opt/cocola/shim/entrypoint.sh
 #                         links the runtime paths below into its stable layout
 RUN useradd -m -u 10001 -s /bin/bash cocola \
     && mkdir -p /session /workspace /cache \
-        /home/cocola/.claude /home/cocola/.codex /home/cocola/.cocola /home/cocola/.local \
+        /home/cocola/.claude /home/cocola/.codex /home/cocola/.cocola \
+        /home/cocola/.local/bin \
+        /home/cocola/.local/lib/node_modules \
+        /home/cocola/.local/share/pnpm \
+        /home/cocola/.local/share/man \
         /data/plugins \
     # Keep /opt/cocola root-owned. Supervisor runs as root and may restart the
     # fixed launchers stored there; making those files guest-writable would turn
@@ -313,6 +317,7 @@ ENV CLAUDE_CONFIG_DIR=/home/cocola/.claude \
     npm_config_cache=/cache/npm \
     npm_config_prefix=/home/cocola/.local \
     PNPM_HOME=/home/cocola/.local/share/pnpm \
+    GOBIN=/home/cocola/.local/bin \
     GOCACHE=/cache/go-build \
     GOMODCACHE=/cache/go-mod \
     CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC=1 \

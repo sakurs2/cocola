@@ -1343,9 +1343,12 @@ func TestSessionEntrypoint(t *testing.T) {
 		t.Fatalf("entrypoint prefix = %v, want [/bin/sh -c ...]", got)
 	}
 	script := got[2]
+	localDirs := "'/session/home/local' '/session/home/local/bin' '/session/home/local/lib' " +
+		"'/session/home/local/lib/node_modules' '/session/home/local/share' " +
+		"'/session/home/local/share/pnpm' '/session/home/local/share/man'"
 	for _, want := range []string{
-		"mkdir -p '/session/workspace' '/session/runtime/claude' '/session/runtime/codex' '/session/runtime/cocola' '/session/runtime/browser' '/session/home/local'",
-		"chown 'cocola':'cocola'",
+		"mkdir -p '/session/workspace' '/session/runtime/claude' '/session/runtime/codex' '/session/runtime/cocola' '/session/runtime/browser' " + localDirs,
+		"chown 'cocola':'cocola' '/session/workspace' '/session/runtime/claude' '/session/runtime/codex' '/session/runtime/cocola' '/session/runtime/browser' " + localDirs,
 		"ln -s '/session/workspace' '/workspace'",
 		"ln -s '/session/runtime/claude' '/home/cocola/.claude'",
 		"ln -s '/session/runtime/codex' '/home/cocola/.codex'",
