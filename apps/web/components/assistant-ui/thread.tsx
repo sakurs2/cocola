@@ -63,6 +63,7 @@ import {
   finalAgentOutputText,
   splitAgentTurnParts,
 } from "@/lib/agent-turn-summary.mjs";
+import { findLatestProgressItems, normalizeProgressItems } from "@/lib/progress-items.mjs";
 import {
   LOCAL_SIMPLE_ICON_PATHS,
   SIMPLE_ICON_FALLBACK_BADGES,
@@ -87,6 +88,8 @@ export const Thread: FC = () => {
       <ThreadPrimitive.Viewport className="relative z-10 flex flex-1 flex-col items-center overflow-y-auto scroll-smooth px-5 pt-8 [scrollbar-gutter:stable_both-edges]">
         <ThreadWelcome />
 
+        <ActivePlanDock />
+
         <ThreadPrimitive.Messages
           components={{
             UserMessage,
@@ -108,6 +111,27 @@ export const Thread: FC = () => {
         </ThreadPrimitive.If>
       </ThreadPrimitive.Viewport>
     </ThreadPrimitive.Root>
+  );
+};
+
+const ActivePlanDock: FC = () => {
+  const messages = useThread((thread) => thread.messages);
+  const isRunning = useThread((thread) => thread.isRunning);
+  const items = useMemo(() => {
+    if (!isRunning) return undefined;
+    const message = messages[messages.length - 1];
+    if (message?.role !== "assistant") return undefined;
+    return findLatestProgressItems(message.content);
+  }, [isRunning, messages]);
+
+  if (normalizeProgressItems(items).length === 0) return null;
+
+  return (
+    <div className="pointer-events-none sticky top-0 z-30 flex w-full shrink-0 justify-center bg-gradient-to-b from-background via-background/95 to-transparent pb-3 pt-1">
+      <div className="pointer-events-auto w-full max-w-[var(--thread-max-width)]">
+        <RailProgress items={items} pinned />
+      </div>
+    </div>
   );
 };
 
@@ -763,6 +787,8 @@ const AssistantMessageParts: FC = () => {
     custom.environmentPreparation != null,
     streaming,
   );
+  const activePlanItems = streaming ? findLatestProgressItems(parts) : undefined;
+  const hasActivePlan = normalizeProgressItems(activePlanItems).length > 0;
 
   return (
     <div className={streaming ? "aui-rail-streaming" : undefined}>
@@ -783,6 +809,7 @@ const AssistantMessageParts: FC = () => {
           key="message-parts"
           className={cn(
             "agent-turn-parts",
+            hasActivePlan && "agent-turn-plan-pinned",
             !streaming && renderPlan.showProcessSummary && !processExpanded
               ? "agent-turn-collapsed"
               : "",
@@ -858,12 +885,13 @@ const parseArtifactData = (data: string): { id?: string; url: string; size: numb
 // in place — the single, localized "answering" affordance.
 const AgentTurnPart: FC<{
   children: ReactNode;
-  kind?: "file" | "process";
+  kind?: "file" | "process" | "progress";
 }> = ({ children, kind }) => (
   <div
     className={cn(
       "agent-turn-part",
-      kind === "process" && "agent-turn-process-part",
+      (kind === "process" || kind === "progress") && "agent-turn-process-part",
+      kind === "progress" && "agent-turn-progress-part",
       kind === "file" && "agent-turn-file-part",
     )}
   >
@@ -920,7 +948,7 @@ const MemoryRecallPart: FC<
   );
 
 const ProgressPart: FC<DataMessagePartProps<{ items: unknown[] }>> = ({ data }) => (
-  <AgentTurnPart kind="process">
+  <AgentTurnPart kind="progress">
     <RailProgress items={data.items} />
   </AgentTurnPart>
 );

@@ -289,6 +289,13 @@
     display: none;
   }
 
+  /* While the last turn runs, its latest plan is rendered once as a sticky
+     navigation card above the growing timeline. Keep the native progress part
+     mounted for assistant-ui index stability, but hide its duplicate surface. */
+  .agent-turn-parts.agent-turn-plan-pinned > .agent-turn-progress-part {
+    display: none;
+  }
+
   .aui-rail-streaming > .rail-row:last-child .rail-connector::after,
   .aui-rail-streaming
     > .agent-turn-parts:last-child

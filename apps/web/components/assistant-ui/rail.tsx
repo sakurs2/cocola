@@ -40,6 +40,7 @@ import { type EnvironmentPreparationSnapshot } from "@/lib/environment";
 import { resolveFileType } from "@/lib/file-type";
 import { MaterialFileIcon } from "@/lib/material-file-icons";
 import { normalizeProgressItems } from "@/lib/progress-items.mjs";
+import { isCommandTool } from "@/lib/tool-failure.mjs";
 
 // All rail action icons come from Phosphor; reuse its component type so the
 // `weight` prop (duotone/bold/...) type-checks.
@@ -171,7 +172,7 @@ export const RailResponsePending: FC = () => (
   <RailRow icon={ChatCircle} label="Starting response" running color="text-indigo-500" />
 );
 
-export const RailProgress: FC<{ items?: unknown[] }> = ({ items }) => {
+export const RailProgress: FC<{ items?: unknown[]; pinned?: boolean }> = ({ items, pinned }) => {
   const normalized = normalizeProgressItems(items);
   const completed = normalized.filter((item) => item.status === "completed").length;
   const label = normalized.length ? (
@@ -185,41 +186,68 @@ export const RailProgress: FC<{ items?: unknown[] }> = ({ items }) => {
     "Plan"
   );
 
+  const content = normalized.length ? (
+    <ol className="space-y-1.5 py-0.5">
+      {normalized.map((item) => {
+        const done = item.status === "completed";
+        const active = item.status === "in_progress";
+        return (
+          <li key={item.id} className="grid grid-cols-[1rem_minmax(0,1fr)] items-start gap-2">
+            <span className="flex h-5 items-center justify-center" aria-hidden="true">
+              {done ? (
+                <CheckCircle2 className="size-3.5 text-emerald-500" />
+              ) : active ? (
+                <SpinnerGap className="size-3.5 animate-spin text-violet-500 motion-reduce:animate-none" />
+              ) : (
+                <span className="size-3 rounded-full border border-muted-foreground/50" />
+              )}
+            </span>
+            <span
+              className={cn(
+                "text-[13px] leading-5",
+                done && "text-muted-foreground/70 line-through decoration-muted-foreground/50",
+                active && "font-medium text-foreground",
+                !done && !active && "text-muted-foreground",
+              )}
+            >
+              {item.text}
+            </span>
+          </li>
+        );
+      })}
+    </ol>
+  ) : (
+    <p className="text-[13px] leading-5 text-muted-foreground">No plan items.</p>
+  );
+
+  if (pinned) {
+    return (
+      <section
+        aria-label="Current plan"
+        aria-live="polite"
+        className="grid grid-cols-[1.75rem_minmax(0,1fr)] gap-x-2.5 rounded-xl border border-violet-200/70 bg-background/95 px-3 py-2.5 shadow-[0_8px_24px_-18px_rgba(76,29,149,0.55)] backdrop-blur-sm dark:border-violet-800/60"
+      >
+        <span
+          className="flex size-7 items-center justify-center text-violet-500"
+          aria-hidden="true"
+        >
+          <ListChecks className="size-5" />
+        </span>
+        <div className="min-w-0">
+          <div className="flex min-h-7 items-center text-[13px] font-medium leading-none text-foreground">
+            {label}
+          </div>
+          <div className="max-h-64 overflow-y-auto overscroll-contain pr-1 [scrollbar-gutter:stable]">
+            {content}
+          </div>
+        </div>
+      </section>
+    );
+  }
+
   return (
     <RailRow icon={ListChecks} label={label} color="text-violet-500">
-      {normalized.length ? (
-        <ol className="space-y-1.5 py-0.5">
-          {normalized.map((item) => {
-            const done = item.status === "completed";
-            const active = item.status === "in_progress";
-            return (
-              <li key={item.id} className="grid grid-cols-[1rem_minmax(0,1fr)] items-start gap-2">
-                <span className="flex h-5 items-center justify-center" aria-hidden="true">
-                  {done ? (
-                    <CheckCircle2 className="size-3.5 text-emerald-500" />
-                  ) : active ? (
-                    <SpinnerGap className="size-3.5 animate-spin text-violet-500 motion-reduce:animate-none" />
-                  ) : (
-                    <span className="size-3 rounded-full border border-muted-foreground/50" />
-                  )}
-                </span>
-                <span
-                  className={cn(
-                    "text-[13px] leading-5",
-                    done && "text-muted-foreground/70 line-through decoration-muted-foreground/50",
-                    active && "font-medium text-foreground",
-                    !done && !active && "text-muted-foreground",
-                  )}
-                >
-                  {item.text}
-                </span>
-              </li>
-            );
-          })}
-        </ol>
-      ) : (
-        <p className="text-[13px] leading-5 text-muted-foreground">No plan items.</p>
-      )}
+      {content}
     </RailRow>
   );
 };
@@ -400,7 +428,7 @@ const getToolMeta = (rawName: string): ToolMeta => {
       done: "Searched code",
       color: "text-cyan-600",
     };
-  if (name.startsWith("bash") || name.includes("shell") || name.includes("terminal"))
+  if (isCommandTool(rawName))
     return {
       icon: TerminalWindow,
       running: "Running command",
@@ -593,7 +621,15 @@ export const RailTool: FC<{
   const Icon = meta.icon;
   const chips = extractToolChips(argsText ?? "");
   const command = extractCommand(argsText ?? "");
-  const label = isError ? "Tool call failed" : running ? meta.running : meta.done;
+  const commandFailure = Boolean(isError && isCommandTool(toolName));
+  const failureOutput = isError ? formatPayload(result) : undefined;
+  const label = isError
+    ? commandFailure
+      ? "Command failed"
+      : "Tool call failed"
+    : running
+      ? meta.running
+      : meta.done;
   const hasArgs = Boolean((argsText ?? "").trim());
   // Rich result cards only for web-search/fetch tools once their result lands.
   const searchResults = !isError && isSearchTool(toolName) ? parseSearchResults(result) : [];
@@ -629,6 +665,19 @@ export const RailTool: FC<{
             <SearchResultCard key={item.url} item={item} />
           ))}
         </div>
+      ) : null}
+      {failureOutput ? (
+        <details className="aui-details group mt-1.5 text-sm">
+          <summary className="flex w-fit cursor-pointer select-none items-center gap-1 py-0.5 text-xs text-muted-foreground/70 transition-colors hover:text-foreground [&::-webkit-details-marker]:hidden">
+            <ChevronRight className="size-3 shrink-0 transition-transform group-open:rotate-90" />
+            <span>{commandFailure ? "View command output" : "View error details"}</span>
+          </summary>
+          <div className="aui-details-body mt-1 border-l-2 border-destructive/30 pl-3">
+            <pre className="max-h-72 overflow-auto whitespace-pre-wrap break-words py-1 font-mono text-[11px] leading-5 text-muted-foreground">
+              {failureOutput}
+            </pre>
+          </div>
+        </details>
       ) : null}
       {hasArgs ? (
         <details className="aui-details group mt-1.5 text-sm">

@@ -41,3 +41,22 @@ export const normalizeProgressItems = (value) => {
     ];
   });
 };
+
+/**
+ * Returns the latest plan snapshot from either Cocola's persisted progress
+ * shape or assistant-ui's converted data part. A turn may contain more than
+ * one progress id, but only the most recent snapshot represents the plan the
+ * Agent is currently following.
+ */
+export const findLatestProgressItems = (parts) => {
+  if (!Array.isArray(parts)) return undefined;
+
+  for (let index = parts.length - 1; index >= 0; index -= 1) {
+    const part = parts[index];
+    if (part?.type === "progress" && Array.isArray(part.items)) return part.items;
+    if (part?.type === "data" && part?.name === "progress" && Array.isArray(part?.data?.items)) {
+      return part.data.items;
+    }
+  }
+  return undefined;
+};
