@@ -1,6 +1,7 @@
 "use client";
 
-import { CalendarClock, Clock, MoreHorizontal, Plus, Sparkles } from "lucide-react";
+import { CalendarClock, Clock, LoaderCircle, MoreHorizontal, Plus, Sparkles } from "lucide-react";
+import { useSession } from "next-auth/react";
 import { useRouter } from "next/navigation";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { Button } from "@/components/ui/button";
@@ -22,54 +23,126 @@ import {
   type ScheduledTask,
   type TaskFormState,
 } from "@/lib/scheduled-tasks";
+import {
+  readScheduledTaskPageCache,
+  writeScheduledTaskPageCache,
+} from "@/lib/scheduled-task-page-cache.mjs";
 import { cn } from "@/lib/utils";
 
 type Tab = "today" | "all";
 
 export default function TasksPage() {
   const router = useRouter();
-  const [tasks, setTasks] = useState<ScheduledTask[]>([]);
-  const [models, setModels] = useState<ModelOption[]>([]);
+  const { data: session, status: sessionStatus } = useSession();
+  const ownerID = session?.user?.id ?? "";
+  const initialCache = readScheduledTaskPageCache(ownerID);
+  const [tasks, setTasks] = useState<ScheduledTask[]>(() => initialCache?.tasks ?? []);
+  const [models, setModels] = useState<ModelOption[]>(() => initialCache?.models ?? []);
   const [tab, setTab] = useState<Tab>("today");
-  const [loading, setLoading] = useState(true);
+  const [loading, setLoading] = useState(() => initialCache?.tasks == null);
+  const [modelsLoaded, setModelsLoaded] = useState(() => initialCache?.models != null);
+  const [showLoadingIndicator, setShowLoadingIndicator] = useState(false);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
+  const [modelError, setModelError] = useState("");
   const [drawerOpen, setDrawerOpen] = useState(false);
   const [selectedTask, setSelectedTask] = useState<ScheduledTask | null>(null);
   const [deleteTarget, setDeleteTarget] = useState<ScheduledTask | null>(null);
 
-  const load = useCallback(async () => {
-    setLoading(true);
-    setError("");
-    try {
-      const [tasksResponse, modelsResponse] = await Promise.all([
-        fetch("/api/scheduled-tasks", { cache: "no-store" }),
-        fetch("/api/models", { cache: "no-store" }),
-      ]);
-      if (!tasksResponse.ok) throw new Error(await responseError(tasksResponse));
-      const taskBody = (await tasksResponse.json()) as { tasks?: ScheduledTask[] };
-      const modelBody = (await modelsResponse.json()) as ModelOption[] | { models?: ModelOption[] };
-      setTasks(Array.isArray(taskBody.tasks) ? taskBody.tasks : []);
-      const availableModels = Array.isArray(modelBody)
-        ? modelBody
-        : Array.isArray(modelBody.models)
-          ? modelBody.models
-          : [];
-      setModels(
-        availableModels.filter(
+  const loadTasks = useCallback(
+    async (options?: { foreground?: boolean; signal?: AbortSignal }) => {
+      if (!ownerID) return;
+      const foreground = options?.foreground ?? false;
+      if (foreground) setLoading(true);
+      setError("");
+      try {
+        const tasksResponse = await fetch("/api/scheduled-tasks", {
+          cache: "no-store",
+          signal: options?.signal,
+        });
+        if (!tasksResponse.ok) throw new Error(await responseError(tasksResponse));
+        const taskBody = (await tasksResponse.json()) as { tasks?: ScheduledTask[] };
+        const nextTasks = Array.isArray(taskBody.tasks) ? taskBody.tasks : [];
+        if (options?.signal?.aborted) return;
+        setTasks(nextTasks);
+        writeScheduledTaskPageCache(ownerID, { tasks: nextTasks });
+      } catch (cause) {
+        if (options?.signal?.aborted) return;
+        setError(cause instanceof Error ? cause.message : String(cause));
+      } finally {
+        if (foreground && !options?.signal?.aborted) setLoading(false);
+      }
+    },
+    [ownerID],
+  );
+
+  const loadModels = useCallback(
+    async (signal?: AbortSignal) => {
+      if (!ownerID) return;
+      setModelError("");
+      try {
+        const response = await fetch("/api/models", { cache: "no-store", signal });
+        if (!response.ok) throw new Error(await responseError(response));
+        const body = (await response.json()) as ModelOption[] | { models?: ModelOption[] };
+        const availableModels = Array.isArray(body)
+          ? body
+          : Array.isArray(body.models)
+            ? body.models
+            : [];
+        const nextModels = availableModels.filter(
           (model) => !model.protocols || model.protocols.includes("anthropic-messages"),
-        ),
-      );
-    } catch (cause) {
-      setError(cause instanceof Error ? cause.message : String(cause));
-    } finally {
-      setLoading(false);
-    }
-  }, []);
+        );
+        if (signal?.aborted) return;
+        setModels(nextModels);
+        setModelsLoaded(true);
+        writeScheduledTaskPageCache(ownerID, { models: nextModels });
+      } catch (cause) {
+        if (signal?.aborted) return;
+        setModelsLoaded(readScheduledTaskPageCache(ownerID)?.models != null);
+        setModelError(cause instanceof Error ? cause.message : String(cause));
+      }
+    },
+    [ownerID],
+  );
 
   useEffect(() => {
-    void load();
-  }, [load]);
+    if (sessionStatus === "loading") return;
+    if (!ownerID) {
+      setTasks([]);
+      setModels([]);
+      setLoading(false);
+      setModelsLoaded(false);
+      return;
+    }
+    const cached = readScheduledTaskPageCache(ownerID);
+    if (cached?.tasks != null) {
+      setTasks(cached.tasks);
+      setLoading(false);
+    } else {
+      setTasks([]);
+      setLoading(true);
+    }
+    if (cached?.models != null) {
+      setModels(cached.models);
+      setModelsLoaded(true);
+    } else {
+      setModels([]);
+      setModelsLoaded(false);
+    }
+    const controller = new AbortController();
+    void loadTasks({ foreground: cached?.tasks == null, signal: controller.signal });
+    void loadModels(controller.signal);
+    return () => controller.abort();
+  }, [loadModels, loadTasks, ownerID, sessionStatus]);
+
+  useEffect(() => {
+    if (!loading) {
+      setShowLoadingIndicator(false);
+      return;
+    }
+    const timer = window.setTimeout(() => setShowLoadingIndicator(true), 180);
+    return () => window.clearTimeout(timer);
+  }, [loading]);
 
   const visibleTasks = useMemo(() => {
     const sorted = sortTasks(tasks);
@@ -77,6 +150,7 @@ export default function TasksPage() {
   }, [tab, tasks]);
 
   function openCreate() {
+    if (!modelsLoaded) return;
     setSelectedTask(null);
     setDrawerOpen(true);
   }
@@ -110,7 +184,7 @@ export default function TasksPage() {
       );
       if (!response.ok) throw new Error(await responseError(response));
       setDrawerOpen(false);
-      await load();
+      await loadTasks();
     } finally {
       setSaving(false);
     }
@@ -128,7 +202,7 @@ export default function TasksPage() {
       );
       if (!response.ok) throw new Error(await responseError(response));
       setDeleteTarget(null);
-      await load();
+      await loadTasks();
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : String(cause));
     } finally {
@@ -147,7 +221,7 @@ export default function TasksPage() {
             </p>
           </div>
           {!loading && tasks.length ? (
-            <Button onClick={openCreate} className="rounded-xl">
+            <Button onClick={openCreate} disabled={!modelsLoaded} className="rounded-xl">
               <Plus className="size-4" /> New task
             </Button>
           ) : null}
@@ -172,20 +246,20 @@ export default function TasksPage() {
           ))}
         </div>
 
-        {error ? (
+        {error || modelError ? (
           <div className="mt-5 rounded-2xl border border-destructive/25 bg-destructive/10 px-4 py-3 text-sm text-destructive">
-            {error}
+            {error || modelError}
           </div>
         ) : null}
 
         {loading ? (
-          <div className="grid gap-4 py-7 md:grid-cols-2 xl:grid-cols-3">
-            {[0, 1, 2].map((item) => (
-              <div
-                key={item}
-                className="h-44 animate-pulse rounded-2xl border border-border bg-muted"
-              />
-            ))}
+          <div
+            className="flex min-h-[13.75rem] items-center justify-center py-7 text-muted-foreground"
+            role="status"
+            aria-live="polite"
+          >
+            {showLoadingIndicator ? <LoaderCircle className="size-5 animate-spin" /> : null}
+            <span className="sr-only">Loading tasks</span>
           </div>
         ) : visibleTasks.length ? (
           <div className="grid gap-4 py-7 md:grid-cols-2 xl:grid-cols-3">
@@ -223,7 +297,12 @@ export default function TasksPage() {
                 View all tasks
               </Button>
             ) : (
-              <Button variant="outline" className="mt-4 rounded-xl" onClick={openCreate}>
+              <Button
+                variant="outline"
+                className="mt-4 rounded-xl"
+                disabled={!modelsLoaded}
+                onClick={openCreate}
+              >
                 <Plus className="size-4" /> New task
               </Button>
             )}
