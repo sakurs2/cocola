@@ -15,6 +15,8 @@
 //	COCOLA_PG_DSN           required Postgres DSN for conversations and chat runs
 //	COCOLA_AGENT_MAX_TURNS maximum model turns in one Agent run (default 200)
 //	COCOLA_AGENT_TOOL_STEP_TIMEOUT_SECS maximum wall time for one tool step (default 600)
+//	COCOLA_AGENT_RUNTIME_DEFAULT_ID default runtime for new work (default claude-code)
+//	COCOLA_AGENT_RUNTIME_PICKER_ENABLED expose experimental runtime choices (default false)
 //
 // Required attachment/session object storage (ADR-0017 P1a):
 //
@@ -91,6 +93,26 @@ func mustEnvBool(log logger.Logger, key string, fallback bool) bool {
 	return parsed
 }
 
+func productConfigFromEnv(runtimes []agent.Runtime) (httpapi.ProductConfig, error) {
+	config := httpapi.DefaultProductConfig()
+	if raw, ok := os.LookupEnv("COCOLA_AGENT_RUNTIME_DEFAULT_ID"); ok {
+		config.AgentRuntime.DefaultID = strings.TrimSpace(raw)
+	}
+	if raw, ok := os.LookupEnv("COCOLA_AGENT_RUNTIME_PICKER_ENABLED"); ok {
+		enabled, err := strconv.ParseBool(strings.TrimSpace(raw))
+		if err != nil {
+			return httpapi.ProductConfig{}, fmt.Errorf(
+				"invalid COCOLA_AGENT_RUNTIME_PICKER_ENABLED=%s", raw,
+			)
+		}
+		config.AgentRuntime.PickerEnabled = enabled
+	}
+	if err := config.Validate(runtimes); err != nil {
+		return httpapi.ProductConfig{}, fmt.Errorf("invalid agent runtime product config: %w", err)
+	}
+	return config, nil
+}
+
 func main() {
 	log := logger.WithService(logger.Must(), "gateway", "gateway")
 	defer func() { _ = log.Sync() }()
@@ -128,6 +150,10 @@ func main() {
 	if err != nil {
 		log.Fatal("cannot load agent runtime catalog: " + err.Error())
 	}
+	productConfig, err := productConfigFromEnv(runtimes)
+	if err != nil {
+		log.Fatal(err.Error())
+	}
 
 	secret := config.SecretFromEnv("COCOLA_AUTH_SECRET")
 	if secret == "" {
@@ -139,7 +165,10 @@ func main() {
 	// is also exposed on a dedicated port so a scrape never competes with user
 	// traffic. COCOLA_METRICS_ADDR="" disables both the port and instrumentation.
 	reg := metrics.New("gateway")
-	api := httpapi.New(client, verifier, log).WithMetrics(reg).WithAgentRuntimes(runtimes)
+	api := httpapi.New(client, verifier, log).
+		WithMetrics(reg).
+		WithAgentRuntimes(runtimes).
+		WithProductConfig(productConfig)
 
 	// Per-user sandbox token issuer (P0 identity fix). The gateway mints a fresh
 	// cocola token per chat turn from the VERIFIED identity (sub=user, ten=tenant)

@@ -37,10 +37,7 @@ type ProjectTask = {
 
 const BRAND_GRADIENT = "linear-gradient(135deg,#2563eb,#7c3aed)";
 
-const STATUS_META: Record<
-  ProjectSummary["status"],
-  { label: string; color: string }
-> = {
+const STATUS_META: Record<ProjectSummary["status"], { label: string; color: string }> = {
   ready: { label: "Ready", color: "#16a34a" },
   provisioning: { label: "Provisioning", color: "#d97706" },
   failed: { label: "Failed", color: "#dc2626" },
@@ -49,8 +46,7 @@ const STATUS_META: Record<
 
 function initials(name: string) {
   const parts = name.replace(/[_/-]/g, " ").split(/\s+/).filter(Boolean);
-  const raw =
-    parts.length > 1 ? `${parts[0]![0]}${parts[1]![0]}` : name.slice(0, 2);
+  const raw = parts.length > 1 ? `${parts[0]![0]}${parts[1]![0]}` : name.slice(0, 2);
   return raw.toUpperCase();
 }
 
@@ -68,6 +64,7 @@ export default function ProjectPage() {
     activeSessionId,
     serverAcceptedSessionIds,
     runtimes,
+    runtimePickerEnabled,
   } = useCocola();
   const [project, setProject] = useState<ProjectSummary | null>(
     projects.find((item) => item.id === projectID) ?? null,
@@ -281,7 +278,7 @@ export default function ProjectPage() {
           expected_version: project.version,
           name: draftName.trim(),
           description: draftDescription.trim(),
-          runtime_id: draftRuntime,
+          runtime_id: draftRuntime || project.runtime_id,
         }),
       });
       if (!response.ok) throw new Error("Could not save project settings");
@@ -338,8 +335,7 @@ export default function ProjectPage() {
     );
 
   const status = STATUS_META[project.status];
-  const isGithub =
-    project.repository_provider === "github" || Boolean(project.repository_html_url);
+  const isGithub = project.repository_provider === "github" || Boolean(project.repository_html_url);
 
   return (
     <div className="h-full overflow-y-auto px-3 py-8 sm:px-5">
@@ -376,8 +372,7 @@ export default function ProjectPage() {
               </div>
               <p
                 className={
-                  "mt-1 text-sm text-muted-foreground" +
-                  (project.description ? "" : " opacity-50")
+                  "mt-1 text-sm text-muted-foreground" + (project.description ? "" : " opacity-50")
                 }
               >
                 {project.description || "No description"}
@@ -405,14 +400,8 @@ export default function ProjectPage() {
                   <GitBranch className="size-3.5" />
                   {project.default_branch || "Preparing"}
                 </span>
-                <span
-                  className="inline-flex items-center gap-1.5"
-                  style={{ color: status.color }}
-                >
-                  <span
-                    className="size-[7px] rounded-full"
-                    style={{ background: status.color }}
-                  />
+                <span className="inline-flex items-center gap-1.5" style={{ color: status.color }}>
+                  <span className="size-[7px] rounded-full" style={{ background: status.color }} />
                   {status.label}
                 </span>
               </div>
@@ -628,20 +617,22 @@ export default function ProjectPage() {
                   className="h-10 w-full rounded-xl border border-border bg-background px-3 text-sm outline-none transition-colors focus:border-primary"
                 />
               </label>
-              <label className="space-y-1.5">
-                <span className="text-sm font-medium">Default runtime</span>
-                <select
-                  value={draftRuntime}
-                  onChange={(event) => setDraftRuntime(event.target.value)}
-                  className="h-10 w-full rounded-xl border border-border bg-background px-3 text-sm outline-none transition-colors focus:border-primary"
-                >
-                  {runtimes.map((runtime) => (
-                    <option key={runtime.id} value={runtime.id}>
-                      {runtime.label}
-                    </option>
-                  ))}
-                </select>
-              </label>
+              {runtimePickerEnabled ? (
+                <label className="space-y-1.5">
+                  <span className="text-sm font-medium">Default runtime</span>
+                  <select
+                    value={draftRuntime}
+                    onChange={(event) => setDraftRuntime(event.target.value)}
+                    className="h-10 w-full rounded-xl border border-border bg-background px-3 text-sm outline-none transition-colors focus:border-primary"
+                  >
+                    {runtimes.map((runtime) => (
+                      <option key={runtime.id} value={runtime.id}>
+                        {runtime.label}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+              ) : null}
               <label className="space-y-1.5 sm:col-span-2">
                 <span className="text-sm font-medium">Description</span>
                 <input

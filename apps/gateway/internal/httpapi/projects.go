@@ -254,12 +254,7 @@ func (a *API) createProject(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if strings.TrimSpace(input.RuntimeID) == "" {
-		for _, runtime := range a.runtimes {
-			if runtime.IsDefault {
-				input.RuntimeID = runtime.ID
-				break
-			}
-		}
+		input.RuntimeID = a.productConfig.AgentRuntime.DefaultID
 	}
 	if _, supported := a.runtimeByID[input.RuntimeID]; !supported {
 		writeErr(w, http.StatusBadRequest, "UNSUPPORTED_RUNTIME", "agent runtime is not supported")
@@ -302,6 +297,13 @@ func (a *API) updateProject(w http.ResponseWriter, r *http.Request) {
 	if a.projects == nil {
 		writeErr(w, http.StatusNotFound, "NOT_FOUND", "project not found")
 		return
+	}
+	if strings.TrimSpace(input.RuntimeID) == "" {
+		current, err := a.projects.Get(r.Context(), id, r.PathValue("id"))
+		if a.writeProjectError(w, err) {
+			return
+		}
+		input.RuntimeID = current.RuntimeID
 	}
 	if _, supported := a.runtimeByID[strings.TrimSpace(input.RuntimeID)]; !supported {
 		writeErr(w, http.StatusBadRequest, "UNSUPPORTED_RUNTIME", "agent runtime is not supported")

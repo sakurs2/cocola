@@ -222,9 +222,9 @@ func (a *API) chat(w http.ResponseWriter, r *http.Request) {
 			writeErr(w, http.StatusConflict, "FOLDER_UNSUPPORTED_CONVERSATION_TYPE", "scheduled task conversations cannot be moved into folders")
 			return
 		}
-		if req.RuntimeID == "" {
-			req.RuntimeID = convo.DefaultRuntimeID
-		}
+	}
+	if req.RuntimeID == "" {
+		req.RuntimeID = a.productConfig.AgentRuntime.DefaultID
 	}
 	if _, ok := w.(http.Flusher); !ok {
 		writeErr(w, http.StatusInternalServerError, "INTERNAL", "streaming unsupported")

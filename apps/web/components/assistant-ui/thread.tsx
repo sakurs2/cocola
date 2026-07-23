@@ -237,10 +237,17 @@ export const ConversationComposer: FC<{
   placeholder?: string;
   branchControl?: ReactNode;
 }> = ({ placeholder, branchControl }) => {
-  const { selectedModel, selectedRuntime, selectedSkill, modelsLoaded } = useCocola();
+  const {
+    selectedModel,
+    selectedRuntime,
+    selectedSkill,
+    modelsLoaded,
+    runtimePickerEnabled,
+    runtimeConfigError,
+  } = useCocola();
   const contextualBranchControl = useProjectComposerBranchControl();
   const [skillChipWidth, setSkillChipWidth] = useState(0);
-  const noModel = modelsLoaded && !selectedModel;
+  const noModel = !modelsLoaded || !selectedModel;
   const effectiveBranchControl = branchControl ?? contextualBranchControl;
 
   return (
@@ -264,13 +271,15 @@ export const ConversationComposer: FC<{
                   : undefined
               }
               placeholder={
-                noModel
-                  ? selectedRuntime?.model_protocol === "openai-responses"
-                    ? "Codex requires an OpenAI Responses model"
-                    : selectedRuntime
-                      ? `No ${selectedRuntime.label} compatible model configured`
-                      : "No Agent Runtime available"
-                  : placeholder || 'Ask anything, use "/" to select a skill'
+                runtimeConfigError
+                  ? runtimeConfigError
+                  : noModel
+                    ? selectedRuntime?.model_protocol === "openai-responses"
+                      ? "Codex requires an OpenAI Responses model"
+                      : selectedRuntime
+                        ? `No ${selectedRuntime.label} compatible model configured`
+                        : "No Agent Runtime available"
+                    : placeholder || 'Ask anything, use "/" to select a skill'
               }
               className="max-h-40 min-h-12 w-full resize-none border-none bg-transparent px-2 py-2.5 text-[15px] leading-6 outline-none placeholder:text-muted-foreground focus:ring-0 disabled:cursor-not-allowed"
             />
@@ -288,7 +297,7 @@ export const ConversationComposer: FC<{
                   <PaperclipIcon className="size-4" />
                 </TooltipIconButton>
               </ComposerPrimitive.AddAttachment>
-              <RuntimePicker />
+              {runtimePickerEnabled ? <RuntimePicker /> : null}
               <ModelPicker />
               {effectiveBranchControl}
             </div>
@@ -485,7 +494,7 @@ const RuntimePicker: FC = () => {
 const ModelPicker: FC = () => {
   const { models, selectedModel, selectedModelID, setSelectedModelID, modelsLoaded } = useCocola();
   const [open, setOpen] = useState(false);
-  const noModel = modelsLoaded && !selectedModel;
+  const noModel = !modelsLoaded || !selectedModel;
 
   return (
     <Popover.Root open={open} onOpenChange={setOpen}>
@@ -672,7 +681,7 @@ const ComposerAttachments: FC = () => (
 
 const ComposerAction: FC = () => {
   const { selectedModel, modelsLoaded } = useCocola();
-  const noModel = modelsLoaded && !selectedModel;
+  const noModel = !modelsLoaded || !selectedModel;
 
   return (
     <>

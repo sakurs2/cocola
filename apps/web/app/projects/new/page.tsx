@@ -38,7 +38,13 @@ type Repository = {
 
 export default function NewProjectPage() {
   const router = useRouter();
-  const { runtimes, refreshProjects } = useCocola();
+  const {
+    runtimes,
+    refreshProjects,
+    defaultAgentRuntimeID,
+    runtimePickerEnabled,
+    runtimeConfigError,
+  } = useCocola();
   const [connection, setConnection] = useState<Connection | null>(null);
   const [mode, setMode] = useState<Mode>("empty");
   const [name, setName] = useState("");
@@ -69,9 +75,9 @@ export default function NewProjectPage() {
   }, [loadConnection]);
 
   useEffect(() => {
-    if (runtimeID || runtimes.length === 0) return;
-    setRuntimeID(runtimes.find((runtime) => runtime.is_default)?.id ?? runtimes[0]?.id ?? "");
-  }, [runtimeID, runtimes]);
+    if (runtimeID || !defaultAgentRuntimeID) return;
+    setRuntimeID(defaultAgentRuntimeID);
+  }, [defaultAgentRuntimeID, runtimeID]);
 
   const loadRepositories = useCallback(async (cursor = "") => {
     setBusy(true);
@@ -123,7 +129,7 @@ export default function NewProjectPage() {
   const submit = async () => {
     const projectName = name.trim() || selectedRepository?.name || "";
     if (!projectName || !runtimeID) {
-      setError("Project name and Agent Runtime are required.");
+      setError(runtimeConfigError || "Project name and Agent Runtime are required.");
       return;
     }
     if (mode === "github_create" && !repositoryName.trim()) {
@@ -328,20 +334,22 @@ export default function NewProjectPage() {
 
           {mode === "empty" || githubReady ? (
             <>
-              <label className="block space-y-1.5">
-                <span className="text-sm font-medium">Default Agent Runtime</span>
-                <select
-                  value={runtimeID}
-                  onChange={(event) => setRuntimeID(event.target.value)}
-                  className="h-10 w-full rounded-xl border border-border bg-background px-3 text-sm"
-                >
-                  {runtimes.map((runtime) => (
-                    <option key={runtime.id} value={runtime.id}>
-                      {runtime.label}
-                    </option>
-                  ))}
-                </select>
-              </label>
+              {runtimePickerEnabled ? (
+                <label className="block space-y-1.5">
+                  <span className="text-sm font-medium">Default Agent Runtime</span>
+                  <select
+                    value={runtimeID}
+                    onChange={(event) => setRuntimeID(event.target.value)}
+                    className="h-10 w-full rounded-xl border border-border bg-background px-3 text-sm"
+                  >
+                    {runtimes.map((runtime) => (
+                      <option key={runtime.id} value={runtime.id}>
+                        {runtime.label}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+              ) : null}
               {error ? (
                 <p
                   role="alert"
@@ -352,7 +360,7 @@ export default function NewProjectPage() {
               ) : null}
               <button
                 type="button"
-                disabled={busy}
+                disabled={busy || !runtimeID}
                 onClick={() => void submit()}
                 className="inline-flex items-center gap-2 rounded-xl bg-primary px-4 py-2.5 text-sm font-medium text-primary-foreground disabled:opacity-50"
               >

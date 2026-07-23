@@ -41,6 +41,14 @@ func TestNonInteractiveInstallWritesEmbeddedRelease(t *testing.T) {
 	if !strings.Contains(string(compose), "cocola-gateway:${COCOLA_VERSION}") {
 		t.Fatal("embedded release compose does not use versioned images")
 	}
+	for _, expected := range []string{
+		`COCOLA_AGENT_RUNTIME_DEFAULT_ID: "${COCOLA_AGENT_RUNTIME_DEFAULT_ID:-claude-code}"`,
+		`COCOLA_AGENT_RUNTIME_PICKER_ENABLED: "${COCOLA_AGENT_RUNTIME_PICKER_ENABLED:-false}"`,
+	} {
+		if !strings.Contains(string(compose), expected) {
+			t.Fatalf("embedded release compose missing %q", expected)
+		}
+	}
 	environment, err := os.ReadFile(filepath.Join(home, "config.env"))
 	if err != nil {
 		t.Fatal(err)

@@ -3,6 +3,7 @@ package httpapi
 import (
 	"context"
 	"encoding/base64"
+	"encoding/json"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -14,6 +15,7 @@ import (
 	"github.com/cocola-project/cocola/apps/gateway/internal/auth"
 	"github.com/cocola-project/cocola/apps/gateway/internal/chatrun"
 	"github.com/cocola-project/cocola/apps/gateway/internal/convo"
+	"github.com/cocola-project/cocola/apps/gateway/internal/project"
 	traceevents "github.com/cocola-project/cocola/apps/gateway/internal/traceevent"
 	"github.com/cocola-project/cocola/packages/go-common/logger"
 	"github.com/cocola-project/cocola/packages/go-common/metrics"
@@ -31,6 +33,58 @@ type fakeStreamer struct {
 type fakeTraceStore struct {
 	runs  []traceevents.Run
 	spans []traceevents.Span
+}
+
+type fakeProjectStore struct {
+	project.Store
+	created        project.Project
+	current        project.Project
+	updatedRuntime string
+}
+
+func (f *fakeProjectStore) GetProjectByRequest(
+	_ context.Context,
+	_ project.Identity,
+	_ string,
+) (project.Project, error) {
+	return project.Project{}, project.ErrNotFound
+}
+
+func (f *fakeProjectStore) CreateProject(
+	_ context.Context,
+	value project.Project,
+) (project.Project, error) {
+	f.created = value
+	return value, nil
+}
+
+func (f *fakeProjectStore) GetProject(
+	_ context.Context,
+	_ project.Identity,
+	projectID string,
+) (project.Project, error) {
+	if f.current.ID != projectID {
+		return project.Project{}, project.ErrNotFound
+	}
+	return f.current, nil
+}
+
+func (f *fakeProjectStore) UpdateProject(
+	_ context.Context,
+	_ project.Identity,
+	_ string,
+	_ int64,
+	name string,
+	description string,
+	runtimeID string,
+	updatedAt time.Time,
+) (project.Project, error) {
+	f.updatedRuntime = runtimeID
+	f.current.Name = name
+	f.current.Description = description
+	f.current.RuntimeID = runtimeID
+	f.current.UpdatedAt = updatedAt
+	return f.current, nil
 }
 
 func (f *fakeTraceStore) UpsertConversationRun(_ context.Context, run traceevents.Run) error {
@@ -143,6 +197,158 @@ func TestAgentRuntimeCatalog(t *testing.T) {
 		if !strings.Contains(body, want) {
 			t.Fatalf("runtime catalog missing %s: %s", want, body)
 		}
+	}
+}
+
+func TestProductConfig(t *testing.T) {
+	api := newConfiguredTestAPI(&fakeStreamer{}, auth.NewVerifier(auth.Config{}), logger.Must()).
+		WithProductConfig(ProductConfig{AgentRuntime: AgentRuntimeProductConfig{
+			DefaultID: "claude-code", PickerEnabled: false,
+		}})
+	recorder := httptest.NewRecorder()
+	api.Handler().ServeHTTP(recorder, httptest.NewRequest(http.MethodGet, "/v1/product-config", nil))
+
+	if recorder.Code != http.StatusOK {
+		t.Fatalf("product config status = %d, body=%s", recorder.Code, recorder.Body.String())
+	}
+	var body ProductConfig
+	if err := json.Unmarshal(recorder.Body.Bytes(), &body); err != nil {
+		t.Fatal(err)
+	}
+	if body.AgentRuntime.DefaultID != "claude-code" || body.AgentRuntime.PickerEnabled {
+		t.Fatalf("product config = %+v", body)
+	}
+}
+
+func TestProductConfigRequiresAuthWhenEnabled(t *testing.T) {
+	api := newConfiguredTestAPI(
+		&fakeStreamer{},
+		auth.NewVerifier(auth.Config{Secret: "s", Issuer: "cocola"}),
+		logger.Must(),
+	)
+	recorder := httptest.NewRecorder()
+	api.Handler().ServeHTTP(recorder, httptest.NewRequest(http.MethodGet, "/v1/product-config", nil))
+	if recorder.Code != http.StatusUnauthorized {
+		t.Fatalf("want 401 without token, got %d", recorder.Code)
+	}
+}
+
+func TestChatUsesConfiguredDefaultRuntime(t *testing.T) {
+	streamer := &fakeStreamer{script: []agent.Event{{Kind: "done"}}}
+	api := newConfiguredTestAPI(streamer, auth.NewVerifier(auth.Config{}), logger.Must()).
+		WithAgentRuntimes([]agent.Runtime{
+			{ID: "claude-code", Label: "Claude Code", ModelProtocol: "anthropic-messages"},
+			{ID: "codex", Label: "Codex", ModelProtocol: "openai-responses"},
+		}).
+		WithProductConfig(ProductConfig{AgentRuntime: AgentRuntimeProductConfig{
+			DefaultID: "codex",
+		}})
+
+	recorder := httptest.NewRecorder()
+	api.Handler().ServeHTTP(recorder, httptest.NewRequest(
+		http.MethodPost,
+		"/v1/chat",
+		strings.NewReader(`{"prompt":"hello","session_id":"configured-default"}`),
+	))
+	if recorder.Code != http.StatusOK {
+		t.Fatalf("chat status = %d, body=%s", recorder.Code, recorder.Body.String())
+	}
+	if streamer.gotQuery.RuntimeID != "codex" {
+		t.Fatalf("forwarded runtime = %q, want codex", streamer.gotQuery.RuntimeID)
+	}
+}
+
+func TestScheduledChatUsesConfiguredDefaultRuntime(t *testing.T) {
+	streamer := &fakeStreamer{script: []agent.Event{{Kind: "done"}}}
+	api := newConfiguredTestAPI(streamer, auth.NewVerifier(auth.Config{}), logger.Must()).
+		WithAgentRuntimes([]agent.Runtime{
+			{ID: "claude-code", Label: "Claude Code", ModelProtocol: "anthropic-messages"},
+			{ID: "codex", Label: "Codex", ModelProtocol: "openai-responses"},
+		}).
+		WithProductConfig(ProductConfig{AgentRuntime: AgentRuntimeProductConfig{
+			DefaultID: "codex",
+		}})
+
+	recorder := httptest.NewRecorder()
+	api.Handler().ServeHTTP(recorder, httptest.NewRequest(
+		http.MethodPost,
+		"/v1/chat",
+		strings.NewReader(`{"prompt":"hello","session_id":"scheduled-default","conversation_type":"scheduled_task"}`),
+	))
+	if recorder.Code != http.StatusOK {
+		t.Fatalf("scheduled chat status = %d, body=%s", recorder.Code, recorder.Body.String())
+	}
+	if streamer.gotQuery.RuntimeID != "codex" {
+		t.Fatalf("scheduled runtime = %q, want codex", streamer.gotQuery.RuntimeID)
+	}
+}
+
+func TestCreateProjectUsesConfiguredDefaultRuntime(t *testing.T) {
+	store := &fakeProjectStore{}
+	service, err := project.New(store, project.Config{
+		MaxRepositoryMB:         512,
+		DisableGitHubConnector:  true,
+		DisableGitHubAgentWrite: true,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	api := newConfiguredTestAPI(&fakeStreamer{}, auth.NewVerifier(auth.Config{}), logger.Must()).
+		WithAgentRuntimes([]agent.Runtime{
+			{ID: "claude-code", Label: "Claude Code", ModelProtocol: "anthropic-messages"},
+			{ID: "codex", Label: "Codex", ModelProtocol: "openai-responses"},
+		}).
+		WithProductConfig(ProductConfig{AgentRuntime: AgentRuntimeProductConfig{
+			DefaultID: "codex",
+		}}).
+		WithProjects(service)
+
+	recorder := httptest.NewRecorder()
+	api.Handler().ServeHTTP(recorder, httptest.NewRequest(
+		http.MethodPost,
+		"/v1/projects",
+		strings.NewReader(`{"client_request_id":"request-1","name":"Project","mode":"empty"}`),
+	))
+	if recorder.Code != http.StatusCreated {
+		t.Fatalf("create project status = %d, body=%s", recorder.Code, recorder.Body.String())
+	}
+	if store.created.RuntimeID != "codex" {
+		t.Fatalf("project runtime = %q, want codex", store.created.RuntimeID)
+	}
+}
+
+func TestUpdateProjectWithoutRuntimePreservesBinding(t *testing.T) {
+	const projectID = "11111111-1111-1111-1111-111111111111"
+	store := &fakeProjectStore{current: project.Project{
+		ID: projectID, Name: "Project", RuntimeID: "codex", Version: 1,
+	}}
+	service, err := project.New(store, project.Config{
+		MaxRepositoryMB:         512,
+		DisableGitHubConnector:  true,
+		DisableGitHubAgentWrite: true,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	api := newConfiguredTestAPI(&fakeStreamer{}, auth.NewVerifier(auth.Config{}), logger.Must()).
+		WithAgentRuntimes([]agent.Runtime{
+			{ID: "claude-code", Label: "Claude Code", ModelProtocol: "anthropic-messages"},
+			{ID: "codex", Label: "Codex", ModelProtocol: "openai-responses"},
+		}).
+		WithProductConfig(DefaultProductConfig()).
+		WithProjects(service)
+
+	recorder := httptest.NewRecorder()
+	api.Handler().ServeHTTP(recorder, httptest.NewRequest(
+		http.MethodPatch,
+		"/v1/projects/"+projectID,
+		strings.NewReader(`{"expected_version":1,"name":"Project","description":"updated"}`),
+	))
+	if recorder.Code != http.StatusOK {
+		t.Fatalf("update project status = %d, body=%s", recorder.Code, recorder.Body.String())
+	}
+	if store.updatedRuntime != "codex" {
+		t.Fatalf("updated runtime = %q, want codex", store.updatedRuntime)
 	}
 }
 

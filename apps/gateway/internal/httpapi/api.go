@@ -107,6 +107,7 @@ type API struct {
 	runs               *runController
 	runtimes           []agent.Runtime
 	runtimeByID        map[string]agent.Runtime
+	productConfig      ProductConfig
 	// sandboxResolver powers the Preview Proxy: it maps a session + in-sandbox
 	// port to a reachable URL via sandbox-manager. nil disables /v1/preview
 	// (the route returns 501), keeping the feature dark until wired in main.
@@ -120,7 +121,10 @@ type API struct {
 
 // New builds the BFF API.
 func New(streamer agent.Streamer, verifier *auth.Verifier, log logger.Logger) *API {
-	a := &API{streamer: streamer, verifier: verifier, log: log}
+	a := &API{
+		streamer: streamer, verifier: verifier, log: log,
+		productConfig: DefaultProductConfig(),
+	}
 	a.terminalLeases = newTerminalLeaseRegistry(terminalDisconnectGrace, a.cleanupTerminalLease)
 	if releaser, ok := streamer.(agent.Releaser); ok {
 		a.releaser = releaser
@@ -250,6 +254,8 @@ func (a *API) Handler() http.Handler {
 		a.verifier.Middleware(writeErr)(http.HandlerFunc(a.chat))))
 	mux.Handle("GET /v1/agent-runtimes", a.instrument("GET /v1/agent-runtimes",
 		a.verifier.Middleware(writeErr)(http.HandlerFunc(a.listAgentRuntimes))))
+	mux.Handle("GET /v1/product-config", a.instrument("GET /v1/product-config",
+		a.verifier.Middleware(writeErr)(http.HandlerFunc(a.getProductConfig))))
 	mux.Handle("GET /v1/chat/runs/{run_id}", a.instrument("GET /v1/chat/runs/{run_id}",
 		a.verifier.Middleware(writeErr)(http.HandlerFunc(a.streamRun))))
 	mux.Handle("DELETE /v1/chat/runs/{run_id}", a.instrument("DELETE /v1/chat/runs/{run_id}",
