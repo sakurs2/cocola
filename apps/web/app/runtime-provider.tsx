@@ -203,6 +203,11 @@ export type ConversationSummary = {
   runtime_id: string;
 };
 
+type PendingProjectTaskHint = {
+  projectId: string;
+  baseRef: string;
+};
+
 export type ProjectSummary = {
   id: string;
   name: string;
@@ -316,7 +321,8 @@ type CocolaContextValue = {
   // resume entry in the backend session_map, so Route A's claude CLI starts
   // from zero — this is the boundary that severs prior-turn history.
   newConversation: (folderId?: string) => string;
-  newProjectTask: (projectId: string, runtimeId: string) => string;
+  newProjectTask: (projectId: string, runtimeId: string, baseRef: string) => string;
+  updatePendingProjectTaskBaseRef: (sessionId: string, baseRef: string) => boolean;
   discardPendingProjectTask: (sessionId: string) => boolean;
   // Persisted conversation list (sidebar) + loaders. conversations is refreshed
   // after each turn and on mount; loadConversation replays a stored conversation
@@ -338,6 +344,7 @@ type CocolaContextValue = {
   refreshProjects: () => void;
   activeSessionId: string;
   runningSessionIds: Set<string>;
+  serverAcceptedSessionIds: Set<string>;
   unreadCompletedSessionIds: Set<string>;
   environmentStatus: EnvironmentStatus | null;
   selectedArtifact: ArtifactPreview | null;
@@ -914,6 +921,7 @@ export function CocolaRuntimeProvider({ children }: { children: ReactNode }) {
   // background stream keeps writing into its own buffer even after navigation.
   const [convMessages, setConvMessages] = useState<Record<string, UiMessage[]>>({});
   const [runningIds, setRunningIds] = useState<Set<string>>(() => new Set());
+  const [serverAcceptedIds, setServerAcceptedIds] = useState<Set<string>>(() => new Set());
   // Lazy init: one random session_id per browser tab. NEVER a shared constant
   // ("s1" made every client resume the SAME claude conversation — cross-user
   // context bleed once the session_map is durable, and no way to start over).
@@ -943,7 +951,7 @@ export function CocolaRuntimeProvider({ children }: { children: ReactNode }) {
   const restoredRuns = useRef(false);
   const sessionIdRef = useRef(sessionId);
   const sessionFolderHintsRef = useRef<Map<string, string>>(new Map());
-  const sessionProjectHintsRef = useRef<Map<string, string>>(new Map());
+  const sessionProjectHintsRef = useRef<Map<string, PendingProjectTaskHint>>(new Map());
   const preferredRuntimeIdRef = useRef("");
   const conversationsRef = useRef(conversations);
   const realtimeScheduledRunsRef = useRef<Set<string>>(new Set());
@@ -1036,6 +1044,15 @@ export function CocolaRuntimeProvider({ children }: { children: ReactNode }) {
       const next = new Set(prev);
       if (on) next.add(targetSessionId);
       else next.delete(targetSessionId);
+      return next;
+    });
+  }, []);
+
+  const markServerAccepted = useCallback((targetSessionId: string) => {
+    setServerAcceptedIds((previous) => {
+      if (previous.has(targetSessionId)) return previous;
+      const next = new Set(previous);
+      next.add(targetSessionId);
       return next;
     });
   }, []);
@@ -1532,8 +1549,9 @@ export function CocolaRuntimeProvider({ children }: { children: ReactNode }) {
       );
       const folderHint =
         sessionFolderHintsRef.current.get(turnSessionId) ?? boundConversation?.folder_id ?? "";
-      const projectHint =
-        sessionProjectHintsRef.current.get(turnSessionId) ?? boundConversation?.project_id ?? "";
+      const pendingProjectHint = sessionProjectHintsRef.current.get(turnSessionId);
+      const projectHint = pendingProjectHint?.projectId ?? boundConversation?.project_id ?? "";
+      const projectBaseRef = pendingProjectHint?.baseRef ?? "";
       const model = selectedModel;
       const agentRuntime = selectedRuntime;
       const turnSkill = selectedSkill;
@@ -1644,6 +1662,7 @@ export function CocolaRuntimeProvider({ children }: { children: ReactNode }) {
           model_icon: model.icon,
           ...(folderHint ? { folder_id: folderHint } : {}),
           ...(projectHint ? { project_id: projectHint } : {}),
+          ...(projectBaseRef ? { project_base_ref: projectBaseRef } : {}),
           ...(attachments.length > 0 ? { attachments } : {}),
         });
         let res: Response | undefined;
@@ -1740,6 +1759,7 @@ export function CocolaRuntimeProvider({ children }: { children: ReactNode }) {
           };
           runCursors.current.set(turnSessionId, cursor);
           writeRunCursors(runCursors.current);
+          if (projectHint) markServerAccepted(turnSessionId);
           setRunning(turnSessionId, true);
           try {
             const history = await fetch(
@@ -1786,6 +1806,7 @@ export function CocolaRuntimeProvider({ children }: { children: ReactNode }) {
           runCursors.current.set(turnSessionId, cursor);
           writeRunCursors(runCursors.current);
         }
+        if (projectHint) markServerAccepted(turnSessionId);
         await followRun(cursor, ctrl, res);
       } catch (err) {
         if (!(err instanceof DOMException && err.name === "AbortError")) {
@@ -1806,6 +1827,7 @@ export function CocolaRuntimeProvider({ children }: { children: ReactNode }) {
       applyEvent,
       followRun,
       refreshConversations,
+      markServerAccepted,
       setRunning,
     ],
   );
@@ -1988,6 +2010,7 @@ export function CocolaRuntimeProvider({ children }: { children: ReactNode }) {
     }
     writeRunCursors(runCursors.current);
     setRunningIds((prev) => new Set([...prev].filter((id) => !removed.has(id))));
+    setServerAcceptedIds((prev) => new Set([...prev].filter((id) => !removed.has(id))));
     setConversations((prev) => prev.filter((conversation) => !removed.has(conversation.id)));
     setUnreadCompletedIds((prev) => new Set([...prev].filter((id) => !removed.has(id))));
     setConvMessages((prev) =>
@@ -2151,12 +2174,15 @@ export function CocolaRuntimeProvider({ children }: { children: ReactNode }) {
     [runtimes],
   );
 
-  const newProjectTask = useCallback((projectId: string, runtimeId: string) => {
+  const newProjectTask = useCallback((projectId: string, runtimeId: string, baseRef: string) => {
     const fresh = genId();
     sessionFolderHintsRef.current.delete(sessionIdRef.current);
     sessionProjectHintsRef.current.delete(sessionIdRef.current);
     sessionIdRef.current = fresh;
-    sessionProjectHintsRef.current.set(fresh, projectId);
+    sessionProjectHintsRef.current.set(fresh, {
+      projectId,
+      baseRef: baseRef.trim(),
+    });
     setSessionId(fresh);
     setSelectedRuntimeIdState(runtimeId);
     setSelectedArtifact(null);
@@ -2164,6 +2190,27 @@ export function CocolaRuntimeProvider({ children }: { children: ReactNode }) {
     setSandboxes((prev) => ({ ...prev, [fresh]: null }));
     return fresh;
   }, []);
+
+  const updatePendingProjectTaskBaseRef = useCallback(
+    (pendingSessionId: string, baseRef: string) => {
+      const current = sessionProjectHintsRef.current.get(pendingSessionId);
+      const nextBaseRef = baseRef.trim();
+      if (
+        !current ||
+        !nextBaseRef ||
+        abortMap.current.has(pendingSessionId) ||
+        runCursors.current.has(pendingSessionId)
+      ) {
+        return false;
+      }
+      sessionProjectHintsRef.current.set(pendingSessionId, {
+        ...current,
+        baseRef: nextBaseRef,
+      });
+      return true;
+    },
+    [],
+  );
 
   const discardPendingProjectTask = useCallback((pendingSessionId: string) => {
     const canDiscard = canDiscardPendingProjectTask({
@@ -2295,6 +2342,7 @@ export function CocolaRuntimeProvider({ children }: { children: ReactNode }) {
       sandbox,
       newConversation,
       newProjectTask,
+      updatePendingProjectTaskBaseRef,
       discardPendingProjectTask,
       conversations,
       refreshConversations,
@@ -2313,6 +2361,7 @@ export function CocolaRuntimeProvider({ children }: { children: ReactNode }) {
       refreshProjects,
       activeSessionId: sessionId,
       runningSessionIds: runningIds,
+      serverAcceptedSessionIds: serverAcceptedIds,
       unreadCompletedSessionIds: unreadCompletedIds,
       environmentStatus,
       selectedArtifact,
@@ -2337,6 +2386,7 @@ export function CocolaRuntimeProvider({ children }: { children: ReactNode }) {
       sandbox,
       newConversation,
       newProjectTask,
+      updatePendingProjectTaskBaseRef,
       discardPendingProjectTask,
       conversations,
       refreshConversations,
@@ -2354,6 +2404,7 @@ export function CocolaRuntimeProvider({ children }: { children: ReactNode }) {
       projectsLoaded,
       refreshProjects,
       runningIds,
+      serverAcceptedIds,
       unreadCompletedIds,
       environmentStatus,
       selectedArtifact,

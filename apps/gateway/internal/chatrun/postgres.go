@@ -78,7 +78,7 @@ func (p *Postgres) Start(ctx context.Context, in StartInput) (StartResult, error
 		if effective.ChatType == "" {
 			effective.ChatType = "chat"
 		}
-		var projectBaseRef string
+		var projectDefaultBranch string
 		var projectProvider string
 		var projectPrimaryConversationID string
 		if effective.ProjectID != "" {
@@ -90,7 +90,7 @@ func (p *Postgres) Start(ctx context.Context, in StartInput) (StartResult, error
 				repository_provider, COALESCE(primary_conversation_id, '') FROM projects
 				WHERE id=$1::uuid AND tenant_id=$2 AND owner_user_id=$3 FOR UPDATE`,
 				effective.ProjectID, effective.TenantID, effective.UserID).Scan(
-				&projectBaseRef, &projectRuntime, &projectStatus, &projectProvider,
+				&projectDefaultBranch, &projectRuntime, &projectStatus, &projectProvider,
 				&projectPrimaryConversationID)
 			if projectErr == pgx.ErrNoRows {
 				return StartResult{}, ErrProjectNotFound
@@ -135,6 +135,10 @@ func (p *Postgres) Start(ctx context.Context, in StartInput) (StartResult, error
 		if tag.RowsAffected() == 1 {
 			createdConversation = true
 			if effective.ProjectID != "" {
+				projectBaseRef := strings.TrimSpace(in.ProjectBaseRef)
+				if projectBaseRef == "" {
+					projectBaseRef = projectDefaultBranch
+				}
 				branchName := taskBranch(effective.ID)
 				if projectProvider == "local" {
 					branchName = "main"
@@ -149,9 +153,9 @@ func (p *Postgres) Start(ctx context.Context, in StartInput) (StartResult, error
 					}
 				}
 				_, insertErr = tx.Exec(ctx, `INSERT INTO project_workspaces
-					(conversation_id, project_id, base_ref, branch_name, created_at, updated_at)
-					VALUES ($1,$2::uuid,$3,$4,$5,$5)`, effective.ID, effective.ProjectID,
-					projectBaseRef, branchName, effective.CreatedAt)
+					(conversation_id, project_id, base_ref, base_sha, branch_name, created_at, updated_at)
+					VALUES ($1,$2::uuid,$3,$4,$5,$6,$6)`, effective.ID, effective.ProjectID,
+					projectBaseRef, strings.TrimSpace(in.ProjectBaseSHA), branchName, effective.CreatedAt)
 				if insertErr != nil {
 					return StartResult{}, insertErr
 				}

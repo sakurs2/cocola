@@ -15,7 +15,12 @@ import {
   RefreshCw,
 } from "lucide-react";
 import { useCocola, type ProjectSummary } from "@/app/runtime-provider";
+import {
+  ProjectBaseBranchPicker,
+  ProjectBranchBadge,
+} from "@/components/assistant-ui/project-branch-control";
 import { ConversationComposer } from "@/components/assistant-ui/thread";
+import { shouldOpenProjectTask } from "@/lib/project-task-intent.mjs";
 
 type ProjectTask = {
   id: string;
@@ -39,9 +44,10 @@ export default function ProjectPage() {
     projectsLoaded,
     refreshProjects,
     newProjectTask,
+    updatePendingProjectTaskBaseRef,
     discardPendingProjectTask,
     activeSessionId,
-    runningSessionIds,
+    serverAcceptedSessionIds,
     runtimes,
   } = useCocola();
   const [project, setProject] = useState<ProjectSummary | null>(
@@ -57,15 +63,23 @@ export default function ProjectPage() {
   const [draftDescription, setDraftDescription] = useState("");
   const [draftRuntime, setDraftRuntime] = useState("");
   const [showPublish, setShowPublish] = useState(false);
+  const [selectedBaseRef, setSelectedBaseRef] = useState("");
   const [publishRepository, setPublishRepository] = useState("");
   const [publishVisibility, setPublishVisibility] = useState<"private" | "public">("private");
   const preparedProject = useRef<string | null>(null);
   const preparedSession = useRef<string | null>(null);
+  const initializedBaseProject = useRef<string | null>(null);
 
   useEffect(() => {
     const cached = projects.find((item) => item.id === projectID);
     if (cached) setProject(cached);
   }, [projectID, projects]);
+
+  useEffect(() => {
+    if (!project || initializedBaseProject.current === project.id) return;
+    initializedBaseProject.current = project.id;
+    setSelectedBaseRef(project.default_branch || "main");
+  }, [project]);
 
   useEffect(() => {
     let cancelled = false;
@@ -106,14 +120,15 @@ export default function ProjectPage() {
       !project ||
       !tasksLoaded ||
       project.status !== "ready" ||
+      !selectedBaseRef ||
       preparedProject.current === project.id ||
       (project.repository_provider === "local" && tasks.length > 0)
     )
       return;
     preparedProject.current = project.id;
-    preparedSession.current = newProjectTask(project.id, project.runtime_id);
+    preparedSession.current = newProjectTask(project.id, project.runtime_id, selectedBaseRef);
     setComposerReady(true);
-  }, [newProjectTask, project, tasks.length, tasksLoaded]);
+  }, [newProjectTask, project, selectedBaseRef, tasks.length, tasksLoaded]);
 
   useEffect(
     () => () => {
@@ -126,17 +141,31 @@ export default function ProjectPage() {
     [discardPendingProjectTask, projectID],
   );
 
+  const selectBaseRef = (branch: string) => {
+    if (
+      preparedSession.current &&
+      !updatePendingProjectTaskBaseRef(preparedSession.current, branch)
+    ) {
+      return;
+    }
+    setSelectedBaseRef(branch);
+  };
+
   useEffect(() => {
     if (
-      preparedProject.current === projectID &&
-      preparedSession.current === activeSessionId &&
-      runningSessionIds.has(activeSessionId)
+      shouldOpenProjectTask({
+        projectId: projectID,
+        preparedProjectId: preparedProject.current,
+        activeSessionId,
+        preparedSessionId: preparedSession.current,
+        serverAccepted: serverAcceptedSessionIds.has(activeSessionId),
+      })
     ) {
       router.push(
         `/projects/${encodeURIComponent(projectID)}/tasks/${encodeURIComponent(activeSessionId)}`,
       );
     }
-  }, [activeSessionId, projectID, router, runningSessionIds]);
+  }, [activeSessionId, projectID, router, serverAcceptedSessionIds]);
 
   const retry = async () => {
     setBusy(true);
@@ -489,10 +518,23 @@ export default function ProjectPage() {
             <p className="mt-1 text-xs text-muted-foreground">
               {project.repository_provider === "local"
                 ? "The first message creates this Project’s single persistent workspace on main."
-                : "A task gets its own conversation workspace and branch from the current default revision."}
+                : "Choose a base branch. Cocola locks its current revision when you send the first message."}
             </p>
             <div className="mt-4">
-              <ConversationComposer placeholder={`Ask Cocola to work on ${project.name}…`} />
+              <ConversationComposer
+                placeholder={`Ask Cocola to work on ${project.name}…`}
+                branchControl={
+                  project.repository_provider === "github" ? (
+                    <ProjectBaseBranchPicker
+                      projectID={project.id}
+                      value={selectedBaseRef}
+                      onChange={selectBaseRef}
+                    />
+                  ) : (
+                    <ProjectBranchBadge branch="main" baseRef="main" />
+                  )
+                }
+              />
             </div>
           </section>
         )}

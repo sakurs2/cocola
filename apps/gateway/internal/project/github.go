@@ -267,6 +267,37 @@ func (g *githubClient) repositories(ctx context.Context, token string, installat
 	return out, len(payload.Repositories) == 100, nil
 }
 
+func (g *githubClient) branches(
+	ctx context.Context,
+	token string,
+	owner string,
+	repo string,
+	page int,
+) ([]Branch, bool, error) {
+	if page < 1 {
+		page = 1
+	}
+	var payload []struct {
+		Name      string `json:"name"`
+		Protected bool   `json:"protected"`
+		Commit    struct {
+			SHA string `json:"sha"`
+		} `json:"commit"`
+	}
+	endpoint := "/repos/" + url.PathEscape(owner) + "/" + url.PathEscape(repo) +
+		fmt.Sprintf("/branches?per_page=100&page=%d", page)
+	if err := g.api(ctx, http.MethodGet, endpoint, token, nil, &payload); err != nil {
+		return nil, false, err
+	}
+	out := make([]Branch, 0, len(payload))
+	for _, value := range payload {
+		out = append(out, Branch{
+			Name: value.Name, SHA: value.Commit.SHA, Protected: value.Protected,
+		})
+	}
+	return out, len(payload) == 100, nil
+}
+
 func (g *githubClient) createRepository(ctx context.Context, token, name, description string, private bool) (Repository, error) {
 	var payload githubRepository
 	err := g.api(ctx, http.MethodPost, "/user/repos", token, map[string]any{

@@ -141,6 +141,7 @@ func (a *API) chat(w http.ResponseWriter, r *http.Request) {
 	req.RuntimeID = strings.TrimSpace(req.RuntimeID)
 	req.FolderID = strings.TrimSpace(req.FolderID)
 	req.ProjectID = strings.TrimSpace(req.ProjectID)
+	req.ProjectBaseRef = strings.TrimSpace(req.ProjectBaseRef)
 	req.SkillID = strings.TrimSpace(req.SkillID)
 	if req.SkillID != "" && !validSkillID(req.SkillID) {
 		writeErr(w, http.StatusBadRequest, "INVALID_SKILL_ID", "skill_id is invalid")
@@ -156,15 +157,25 @@ func (a *API) chat(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusConflict, "FOLDER_PROJECT_CONFLICT", "a conversation cannot belong to both a folder and a project")
 		return
 	}
+	if req.ProjectBaseRef != "" && req.ProjectID == "" {
+		writeErr(w, http.StatusBadRequest, "INVALID_ARGUMENT", "project_base_ref requires project_id")
+		return
+	}
+	if len(req.ProjectBaseRef) > 1024 || strings.ContainsAny(req.ProjectBaseRef, "\x00\r\n") {
+		writeErr(w, http.StatusBadRequest, "INVALID_PROJECT_BASE_REF", "project_base_ref is invalid")
+		return
+	}
+	var projectBaseRef string
+	var projectBaseSHA string
 	if req.ProjectID != "" {
 		if a.projects == nil {
 			writeErr(w, http.StatusNotFound, "PROJECT_NOT_FOUND", "project not found")
 			return
 		}
-		projectValue, projectErr := a.projects.ValidateReady(r.Context(), project.Identity{
+		taskBase, projectErr := a.projects.PrepareTaskBase(r.Context(), project.Identity{
 			TenantID: identity.TenantID, UserID: identity.UserID, Email: identity.Email,
 			Name: identity.Name, Username: identity.Username,
-		}, req.ProjectID)
+		}, req.ProjectID, req.SessionID, req.ProjectBaseRef)
 		if errors.Is(projectErr, project.ErrNotFound) {
 			writeErr(w, http.StatusNotFound, "PROJECT_NOT_FOUND", "project not found")
 			return
@@ -185,12 +196,25 @@ func (a *API) chat(w http.ResponseWriter, r *http.Request) {
 			writeErr(w, http.StatusConflict, "GITHUB_DISABLED", "GitHub Projects are disabled")
 			return
 		}
+		if errors.Is(projectErr, project.ErrBaseRefNotFound) {
+			writeErr(w, http.StatusUnprocessableEntity, "PROJECT_BASE_REF_NOT_FOUND", "the selected branch no longer exists")
+			return
+		}
+		if errors.Is(projectErr, project.ErrBaseRefMismatch) {
+			writeErr(w, http.StatusConflict, "PROJECT_BASE_MISMATCH", "a project task base branch cannot be changed")
+			return
+		}
+		if errors.Is(projectErr, project.ErrConflict) {
+			writeErr(w, http.StatusConflict, "PROJECT_MISMATCH", "conversation project cannot be changed")
+			return
+		}
 		if projectErr != nil {
 			writeErr(w, http.StatusServiceUnavailable, "PROJECT_UNAVAILABLE", "could not validate project")
 			return
 		}
+		projectBaseRef, projectBaseSHA = taskBase.Ref, taskBase.SHA
 		if req.RuntimeID == "" {
-			req.RuntimeID = projectValue.RuntimeID
+			req.RuntimeID = taskBase.Project.RuntimeID
 		}
 	}
 	if chatTypeForConversation(req) == "scheduled_task" {
@@ -241,6 +265,8 @@ func (a *API) chat(w http.ResponseWriter, r *http.Request) {
 			Parts:    []convo.Part{{Type: convo.PartText, Text: req.Prompt}},
 			Metadata: userMetadata(req), CreatedAt: startedAt,
 		},
+		ProjectBaseRef: projectBaseRef,
+		ProjectBaseSHA: projectBaseSHA,
 	})
 	var live *liveRun
 	if err == nil {
@@ -441,7 +467,7 @@ func (a *API) executeLiveRun(live *liveRun) {
 				projectContext = &agent.ProjectContext{
 					ProjectID: value.ProjectID, RepositoryID: value.RepositoryExternalID,
 					CloneURL: value.CloneURL, DefaultBranch: value.DefaultBranch,
-					BaseSHA: value.BaseSHA, TaskBranch: value.BranchName,
+					BaseRef: value.BaseRef, BaseSHA: value.BaseSHA, TaskBranch: value.BranchName,
 					GitAuthorName: value.GitAuthorName, GitAuthorEmail: value.GitAuthorEmail,
 					RepositoryProvider: value.RepositoryProvider,
 					RepositoryFullName: value.RepositoryFullName,

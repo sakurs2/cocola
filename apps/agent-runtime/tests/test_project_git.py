@@ -30,6 +30,7 @@ def valid_spec() -> ProjectSpec:
         repository_id=123,
         clone_url="https://github.com/octocat/example.git",
         default_branch="main",
+        base_ref="main",
         base_sha="a" * 40,
         task_branch="cocola/task-9ad7d7672f20",
         git_author_name="Octo Cat",
@@ -52,6 +53,19 @@ def test_project_spec_rejects_credential_in_clone_url():
     invalid = ProjectSpec(**{**spec.__dict__, "clone_url": "https://token@github.com/a/b.git"})
     with pytest.raises(ProjectWorkspaceError, match="context is invalid"):
         validate_spec(invalid)
+
+
+def test_project_spec_tracks_base_ref_separately_from_default_branch():
+    spec = ProjectSpec(
+        **{
+            **valid_spec().__dict__,
+            "default_branch": "main",
+            "base_ref": "feature/login",
+        }
+    )
+    validate_spec(spec)
+    assert spec.default_branch == "main"
+    assert spec.base_ref == "feature/login"
 
 
 def test_project_egress_hosts_include_run_broker_only_for_github():
@@ -635,6 +649,7 @@ async def test_publish_passes_short_lived_token_only_in_environment():
         repository_id=0,
         clone_url="",
         default_branch="main",
+        base_ref="main",
         base_sha="a" * 40,
         task_branch="main",
         git_author_name="Local User",

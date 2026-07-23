@@ -330,6 +330,8 @@ func (a *API) Handler() http.Handler {
 		a.verifier.Middleware(writeErr)(http.HandlerFunc(a.publishLocalProject))))
 	mux.Handle("GET /v1/projects/{id}/tasks", a.instrument("GET /v1/projects/{id}/tasks",
 		a.verifier.Middleware(writeErr)(http.HandlerFunc(a.projectTasks))))
+	mux.Handle("GET /v1/projects/{id}/branches", a.instrument("GET /v1/projects/{id}/branches",
+		a.verifier.Middleware(writeErr)(http.HandlerFunc(a.projectBranches))))
 	mux.Handle("GET /v1/conversations/{id}/git/status", a.instrument("GET /v1/conversations/{id}/git/status",
 		a.verifier.Middleware(writeErr)(http.HandlerFunc(a.gitStatus))))
 	mux.Handle("POST /v1/conversations/{id}/git/inspect", a.instrument("POST /v1/conversations/{id}/git/inspect",
@@ -521,6 +523,7 @@ type chatRequest struct {
 	RuntimeID                            string            `json:"runtime_id"`
 	FolderID                             string            `json:"folder_id"`
 	ProjectID                            string            `json:"project_id"`
+	ProjectBaseRef                       string            `json:"project_base_ref"`
 	SkillID                              string            `json:"skill_id"`
 	AllowWorkspaceReset                  bool              `json:"allow_workspace_reset"`
 }

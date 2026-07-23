@@ -36,6 +36,7 @@ class ProjectSpec:
     repository_id: int
     clone_url: str
     default_branch: str
+    base_ref: str
     base_sha: str
     task_branch: str
     git_author_name: str
@@ -51,6 +52,7 @@ def spec_from_proto(value: Any) -> ProjectSpec:
         repository_id=int(value.repository_id or 0),
         clone_url=str(value.clone_url or ""),
         default_branch=str(value.default_branch or ""),
+        base_ref=str(getattr(value, "base_ref", "") or value.default_branch or ""),
         base_sha=str(value.base_sha or ""),
         task_branch=str(value.task_branch or ""),
         git_author_name=str(value.git_author_name or ""),
@@ -94,6 +96,7 @@ def validate_spec(spec: ProjectSpec) -> None:
         or (local and (spec.clone_url or not local_remote_valid))
         or (not local and spec.credential_mode != "ephemeral")
         or not spec.default_branch
+        or not spec.base_ref
         or not base_sha_valid
         or (local and (spec.default_branch != "main" or spec.task_branch != "main"))
         or (not local and not spec.task_branch.startswith("cocola/task-"))
@@ -349,6 +352,7 @@ MAX_COMMIT_MESSAGE = 32 * 1024
 
 request = json.loads(sys.stdin.read())
 spec = request["spec"]
+spec["base_ref"] = spec.get("base_ref") or spec.get("default_branch", "")
 repository_provider = spec.get("repository_provider", "github")
 
 def fail(code, message):
@@ -817,7 +821,7 @@ def status_snapshot():
     commits, history_truncated = commit_history()
     return {
         "branch": branch,
-        "base_ref": spec["default_branch"],
+        "base_ref": spec["base_ref"],
         "base_sha": spec["base_sha"],
         "head_sha": head.stdout.strip(),
         "ahead": ahead_count,

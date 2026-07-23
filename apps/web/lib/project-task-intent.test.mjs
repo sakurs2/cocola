@@ -1,7 +1,11 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { canDiscardPendingProjectTask, nextProjectCreateIntent } from "./project-task-intent.mjs";
+import {
+  canDiscardPendingProjectTask,
+  nextProjectCreateIntent,
+  shouldOpenProjectTask,
+} from "./project-task-intent.mjs";
 
 test("reuses the request id while retrying the same project payload", () => {
   let sequence = 0;
@@ -42,4 +46,21 @@ test("only discards a project task that has not started or persisted", () => {
   assert.equal(canDiscardPendingProjectTask({ ...pending, hasRunCursor: true }), false);
   assert.equal(canDiscardPendingProjectTask({ ...pending, isPersisted: true }), false);
   assert.equal(canDiscardPendingProjectTask({ ...pending, hasHint: false }), false);
+});
+
+test("opens a project task only after the server accepts the run", () => {
+  const task = {
+    projectId: "project-1",
+    preparedProjectId: "project-1",
+    activeSessionId: "session-1",
+    preparedSessionId: "session-1",
+    serverAccepted: false,
+  };
+
+  assert.equal(shouldOpenProjectTask(task), false);
+  assert.equal(shouldOpenProjectTask({ ...task, serverAccepted: true }), true);
+  assert.equal(
+    shouldOpenProjectTask({ ...task, serverAccepted: true, activeSessionId: "session-2" }),
+    false,
+  );
 });

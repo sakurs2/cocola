@@ -33,7 +33,7 @@ class QueryRequest(_message.Message):
     def __init__(self, user_id: _Optional[str] = ..., session_id: _Optional[str] = ..., prompt: _Optional[str] = ..., sandbox_id: _Optional[str] = ..., max_turns: _Optional[int] = ..., attachments: _Optional[_Iterable[_Union[Attachment, _Mapping]]] = ..., runtime_id: _Optional[str] = ..., skill_id: _Optional[str] = ..., allow_workspace_reset: bool = ..., memory_context: _Optional[str] = ..., project_context: _Optional[_Union[ProjectContext, _Mapping]] = ...) -> None: ...
 
 class ProjectContext(_message.Message):
-    __slots__ = ("project_id", "repository_id", "clone_url", "default_branch", "base_sha", "task_branch", "git_author_name", "git_author_email", "repository_provider", "repository_full_name", "credential_mode")
+    __slots__ = ("project_id", "repository_id", "clone_url", "default_branch", "base_sha", "task_branch", "git_author_name", "git_author_email", "repository_provider", "repository_full_name", "credential_mode", "base_ref")
     PROJECT_ID_FIELD_NUMBER: _ClassVar[int]
     REPOSITORY_ID_FIELD_NUMBER: _ClassVar[int]
     CLONE_URL_FIELD_NUMBER: _ClassVar[int]
@@ -45,6 +45,7 @@ class ProjectContext(_message.Message):
     REPOSITORY_PROVIDER_FIELD_NUMBER: _ClassVar[int]
     REPOSITORY_FULL_NAME_FIELD_NUMBER: _ClassVar[int]
     CREDENTIAL_MODE_FIELD_NUMBER: _ClassVar[int]
+    BASE_REF_FIELD_NUMBER: _ClassVar[int]
     project_id: str
     repository_id: int
     clone_url: str
@@ -56,7 +57,8 @@ class ProjectContext(_message.Message):
     repository_provider: str
     repository_full_name: str
     credential_mode: str
-    def __init__(self, project_id: _Optional[str] = ..., repository_id: _Optional[int] = ..., clone_url: _Optional[str] = ..., default_branch: _Optional[str] = ..., base_sha: _Optional[str] = ..., task_branch: _Optional[str] = ..., git_author_name: _Optional[str] = ..., git_author_email: _Optional[str] = ..., repository_provider: _Optional[str] = ..., repository_full_name: _Optional[str] = ..., credential_mode: _Optional[str] = ...) -> None: ...
+    base_ref: str
+    def __init__(self, project_id: _Optional[str] = ..., repository_id: _Optional[int] = ..., clone_url: _Optional[str] = ..., default_branch: _Optional[str] = ..., base_sha: _Optional[str] = ..., task_branch: _Optional[str] = ..., git_author_name: _Optional[str] = ..., git_author_email: _Optional[str] = ..., repository_provider: _Optional[str] = ..., repository_full_name: _Optional[str] = ..., credential_mode: _Optional[str] = ..., base_ref: _Optional[str] = ...) -> None: ...
 
 class Attachment(_message.Message):
     __slots__ = ("filename", "content", "mime", "oss_key", "size")

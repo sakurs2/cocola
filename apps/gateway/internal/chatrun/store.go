@@ -49,9 +49,11 @@ type Run struct {
 }
 
 type StartInput struct {
-	Run          Run
-	Conversation convo.Conversation
-	UserMessage  convo.Message
+	Run            Run
+	Conversation   convo.Conversation
+	UserMessage    convo.Message
+	ProjectBaseRef string
+	ProjectBaseSHA string
 }
 
 type StartResult struct {

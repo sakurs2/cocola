@@ -72,6 +72,7 @@ import {
 } from "@/lib/model-icons";
 import { cn } from "@/lib/utils";
 import { SkillIcon } from "@/components/ui/skill-icon";
+import { useProjectComposerBranchControl } from "@/components/assistant-ui/project-branch-control";
 
 // Product Thread for cocola, authored against the white workspace design tokens.
 // assistant-ui owns chat semantics; this file owns the composed product chrome.
@@ -232,10 +233,15 @@ const ThreadWelcome: FC = () => {
   );
 };
 
-export const ConversationComposer: FC<{ placeholder?: string }> = ({ placeholder }) => {
+export const ConversationComposer: FC<{
+  placeholder?: string;
+  branchControl?: ReactNode;
+}> = ({ placeholder, branchControl }) => {
   const { selectedModel, selectedRuntime, selectedSkill, modelsLoaded } = useCocola();
+  const contextualBranchControl = useProjectComposerBranchControl();
   const [skillChipWidth, setSkillChipWidth] = useState(0);
   const noModel = modelsLoaded && !selectedModel;
+  const effectiveBranchControl = branchControl ?? contextualBranchControl;
 
   return (
     <motion.div
@@ -284,6 +290,7 @@ export const ConversationComposer: FC<{ placeholder?: string }> = ({ placeholder
               </ComposerPrimitive.AddAttachment>
               <RuntimePicker />
               <ModelPicker />
+              {effectiveBranchControl}
             </div>
             <ComposerAction />
           </div>

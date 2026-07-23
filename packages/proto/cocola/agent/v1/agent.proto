@@ -62,6 +62,9 @@ message ProjectContext {
   string repository_full_name = 10;
   // none | ephemeral clone token | run-scoped broker.
   string credential_mode = 11;
+  // Branch whose exact commit was locked when the task was created. This can
+  // differ from the repository's default branch and never changes afterward.
+  string base_ref = 12;
 }
 
 // Attachment is a single user-uploaded file delivered to the sandbox workspace

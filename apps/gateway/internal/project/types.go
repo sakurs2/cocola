@@ -22,6 +22,8 @@ var (
 	ErrRepositoryNotInstalled = errors.New("project: repository is not available to the github installation")
 	ErrRepositoryTooLarge     = errors.New("project: repository too large")
 	ErrProjectNotReady        = errors.New("project: project not ready")
+	ErrBaseRefNotFound        = errors.New("project: base branch not found")
+	ErrBaseRefMismatch        = errors.New("project: task base branch cannot be changed")
 	ErrApprovalRequired       = errors.New("project: command approval required")
 	ErrApprovalDenied         = errors.New("project: command approval denied")
 	ErrRunInactive            = errors.New("project: run is no longer active")
@@ -174,6 +176,24 @@ type Repository struct {
 type RepositoryPage struct {
 	Repositories []Repository `json:"repositories"`
 	NextCursor   string       `json:"next_cursor,omitempty"`
+}
+
+type Branch struct {
+	Name      string `json:"name"`
+	SHA       string `json:"sha"`
+	Default   bool   `json:"is_default"`
+	Protected bool   `json:"protected"`
+}
+
+type BranchPage struct {
+	Branches   []Branch `json:"items"`
+	NextCursor string   `json:"next_cursor,omitempty"`
+}
+
+type TaskBase struct {
+	Project Project
+	Ref     string
+	SHA     string
 }
 
 type Change struct {
@@ -345,6 +365,7 @@ type ProjectContext struct {
 	RepositoryExternalID int64  `json:"repository_external_id"`
 	CloneURL             string `json:"clone_url"`
 	DefaultBranch        string `json:"default_branch"`
+	BaseRef              string `json:"base_ref"`
 	BaseSHA              string `json:"base_sha"`
 	BranchName           string `json:"branch_name"`
 	GitAuthorName        string `json:"git_author_name"`

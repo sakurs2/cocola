@@ -78,6 +78,7 @@ type ProjectContext struct {
 	RepositoryID       int64
 	CloneURL           string
 	DefaultBranch      string
+	BaseRef            string
 	BaseSHA            string
 	TaskBranch         string
 	GitAuthorName      string
@@ -381,7 +382,7 @@ func projectContextProto(value ProjectContext) *agentv1.ProjectContext {
 		DefaultBranch: value.DefaultBranch, BaseSha: value.BaseSHA, TaskBranch: value.TaskBranch,
 		GitAuthorName: value.GitAuthorName, GitAuthorEmail: value.GitAuthorEmail,
 		RepositoryProvider: value.RepositoryProvider, RepositoryFullName: value.RepositoryFullName,
-		CredentialMode: value.CredentialMode,
+		CredentialMode: value.CredentialMode, BaseRef: value.BaseRef,
 	}
 }
 

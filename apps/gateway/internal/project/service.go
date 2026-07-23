@@ -833,6 +833,141 @@ func (s *Service) Tasks(ctx context.Context, id Identity, projectID string) ([]T
 	return s.store.ListTasks(ctx, id, projectID)
 }
 
+func (s *Service) Branches(
+	ctx context.Context,
+	id Identity,
+	projectID string,
+	cursor string,
+) (BranchPage, error) {
+	if _, err := uuid.Parse(projectID); err != nil {
+		return BranchPage{}, ErrInvalidArgument
+	}
+	value, err := s.store.GetProject(ctx, id, projectID)
+	if err != nil {
+		return BranchPage{}, err
+	}
+	if value.Status != ProjectReady {
+		return BranchPage{}, ErrProjectNotReady
+	}
+	if value.RepositoryProvider == ProviderLocal {
+		if !s.LocalProjectsEnabled() {
+			return BranchPage{}, ErrLocalProjectsDisabled
+		}
+		return BranchPage{Branches: []Branch{{
+			Name: "main", Default: true,
+		}}}, nil
+	}
+	page, err := decodeCursor(cursor)
+	if err != nil {
+		return BranchPage{}, ErrInvalidArgument
+	}
+	value, _, connection, github, err := s.currentProjectInstallation(ctx, id, value)
+	if err != nil {
+		return BranchPage{}, err
+	}
+	token, _, err := github.installationToken(ctx, connection.InstallationID,
+		value.RepositoryExternalID, map[string]string{"contents": "read"})
+	if err != nil {
+		return BranchPage{}, err
+	}
+	defer func() { _ = github.revokeInstallationToken(context.WithoutCancel(ctx), token) }()
+	branches, more, err := github.branches(ctx, token, value.RepositoryOwner, value.RepositoryName, page)
+	if err != nil {
+		return BranchPage{}, err
+	}
+	for index := range branches {
+		branches[index].Default = branches[index].Name == value.DefaultBranch
+	}
+	result := BranchPage{Branches: branches}
+	if more {
+		result.NextCursor = encodeCursor(page + 1)
+	}
+	return result, nil
+}
+
+func (s *Service) PrepareTaskBase(
+	ctx context.Context,
+	id Identity,
+	projectID string,
+	conversationID string,
+	requestedRef string,
+) (TaskBase, error) {
+	if _, err := uuid.Parse(projectID); err != nil {
+		return TaskBase{}, ErrInvalidArgument
+	}
+	requestedRef = strings.TrimSpace(requestedRef)
+	if !validBaseRef(requestedRef) {
+		return TaskBase{}, ErrInvalidArgument
+	}
+	if workspace, value, err := s.store.GetWorkspace(ctx, id, conversationID); err == nil {
+		if value.ID != projectID {
+			return TaskBase{}, ErrConflict
+		}
+		baseRef := strings.TrimSpace(workspace.BaseRef)
+		if baseRef == "" {
+			baseRef = value.DefaultBranch
+		}
+		if requestedRef != "" && requestedRef != baseRef {
+			return TaskBase{}, ErrBaseRefMismatch
+		}
+		if value.Status != ProjectReady {
+			return TaskBase{}, ErrProjectNotReady
+		}
+		if value.RepositoryProvider == ProviderLocal {
+			if !s.LocalProjectsEnabled() {
+				return TaskBase{}, ErrLocalProjectsDisabled
+			}
+		} else {
+			var connectionErr error
+			value, _, _, _, connectionErr = s.currentProjectInstallation(ctx, id, value)
+			if connectionErr != nil {
+				return TaskBase{}, connectionErr
+			}
+		}
+		return TaskBase{Project: value, Ref: baseRef, SHA: workspace.BaseSHA}, nil
+	} else if !errors.Is(err, ErrNotFound) {
+		return TaskBase{}, err
+	}
+	value, err := s.store.GetProject(ctx, id, projectID)
+	if err != nil {
+		return TaskBase{}, err
+	}
+	if value.Status != ProjectReady {
+		return TaskBase{}, ErrProjectNotReady
+	}
+	baseRef := requestedRef
+	if baseRef == "" {
+		baseRef = value.DefaultBranch
+	}
+	if value.RepositoryProvider == ProviderLocal {
+		if !s.LocalProjectsEnabled() {
+			return TaskBase{}, ErrLocalProjectsDisabled
+		}
+		if baseRef != "main" {
+			return TaskBase{}, ErrBaseRefNotFound
+		}
+		return TaskBase{Project: value, Ref: "main"}, nil
+	}
+	value, _, connection, github, err := s.currentProjectInstallation(ctx, id, value)
+	if err != nil {
+		return TaskBase{}, err
+	}
+	token, _, err := github.installationToken(ctx, connection.InstallationID,
+		value.RepositoryExternalID, map[string]string{"contents": "read"})
+	if err != nil {
+		return TaskBase{}, err
+	}
+	defer func() { _ = github.revokeInstallationToken(context.WithoutCancel(ctx), token) }()
+	sha, err := github.branchSHA(ctx, token, value.RepositoryOwner, value.RepositoryName, baseRef)
+	if githubStatus(err, http.StatusNotFound) {
+		return TaskBase{}, ErrBaseRefNotFound
+	}
+	if err != nil {
+		return TaskBase{}, err
+	}
+	return TaskBase{Project: value, Ref: baseRef, SHA: sha}, nil
+}
+
 func (s *Service) ValidateReady(ctx context.Context, id Identity, projectID string) (Project, error) {
 	if _, err := uuid.Parse(projectID); err != nil {
 		return Project{}, ErrInvalidArgument
@@ -883,48 +1018,58 @@ func (s *Service) ProjectContext(ctx context.Context, id Identity, conversationI
 		}
 		return ProjectContext{
 			ProjectID: v.ID, RepositoryExternalID: repositoryID,
-			DefaultBranch: "main", BaseSHA: w.BaseSHA, BranchName: "main",
+			DefaultBranch: "main", BaseRef: "main", BaseSHA: w.BaseSHA, BranchName: "main",
 			GitAuthorName: gitAuthorName, GitAuthorEmail: gitAuthorEmail,
 			InstallationID: installationID, RepositoryProvider: ProviderLocal,
 			RepositoryFullName: repositoryFullName,
 			CredentialMode:     credentialMode,
 		}, "", nil
 	}
-	v, userToken, connection, github, err := s.currentProjectInstallation(ctx, id, v)
+	v, _, connection, github, err := s.currentProjectInstallation(ctx, id, v)
 	if err != nil {
 		return ProjectContext{}, "", err
 	}
 	installationID := connection.InstallationID
 	cloneURL := "https://github.com/" + v.RepositoryOwner + "/" + v.RepositoryName + ".git"
+	baseRef := strings.TrimSpace(w.BaseRef)
+	if baseRef == "" {
+		baseRef = v.DefaultBranch
+	}
+	token, _, err := github.installationToken(ctx, v.InstallationID, v.RepositoryExternalID,
+		map[string]string{"contents": "read"})
+	if err != nil {
+		return ProjectContext{}, "", err
+	}
 	if w.BaseSHA == "" {
 		var sha string
 		var branchErr error
-		sha, branchErr = github.branchSHA(ctx, userToken, v.RepositoryOwner, v.RepositoryName, v.DefaultBranch)
+		sha, branchErr = github.branchSHA(ctx, token, v.RepositoryOwner, v.RepositoryName, baseRef)
 		if branchErr != nil {
+			_ = github.revokeInstallationToken(ctx, token)
 			return ProjectContext{}, "", branchErr
 		}
 		w, err = s.store.LockBaseSHA(ctx, id, conversationID, sha, s.now())
 		if err != nil {
-			return ProjectContext{}, "", err
-		}
-	}
-	var token string
-	if v.RepositoryProvider == ProviderGitHub {
-		token, _, err = github.installationToken(ctx, v.InstallationID, v.RepositoryExternalID,
-			map[string]string{"contents": "read"})
-		if err != nil {
+			_ = github.revokeInstallationToken(ctx, token)
 			return ProjectContext{}, "", err
 		}
 	}
 	return ProjectContext{
 		ProjectID: v.ID, RepositoryExternalID: v.RepositoryExternalID,
 		CloneURL:      cloneURL,
-		DefaultBranch: v.DefaultBranch, BaseSHA: w.BaseSHA, BranchName: w.BranchName,
+		DefaultBranch: v.DefaultBranch, BaseRef: baseRef, BaseSHA: w.BaseSHA, BranchName: w.BranchName,
 		GitAuthorName: gitAuthorName, GitAuthorEmail: gitAuthorEmail,
 		InstallationID: installationID, RepositoryProvider: v.RepositoryProvider,
 		RepositoryFullName: v.RepositoryOwner + "/" + v.RepositoryName,
 		CredentialMode:     "ephemeral",
 	}, token, nil
+}
+
+func validBaseRef(value string) bool {
+	if value == "" {
+		return true
+	}
+	return len(value) <= 1024 && !strings.ContainsAny(value, "\x00\r\n")
 }
 
 func gitAuthorIdentity(id Identity) (string, string) {

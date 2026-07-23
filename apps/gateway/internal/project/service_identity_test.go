@@ -3,9 +3,11 @@ package project
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"reflect"
+	"strings"
 	"testing"
 	"time"
 )
@@ -13,6 +15,30 @@ import (
 type retryCreateStore struct {
 	Store
 	refreshedAt time.Time
+}
+
+type taskBaseStore struct {
+	Store
+	project   Project
+	workspace *Workspace
+}
+
+func (s *taskBaseStore) GetProject(_ context.Context, _ Identity, projectID string) (Project, error) {
+	if s.project.ID != projectID {
+		return Project{}, ErrNotFound
+	}
+	return s.project, nil
+}
+
+func (s *taskBaseStore) GetWorkspace(
+	_ context.Context,
+	_ Identity,
+	conversationID string,
+) (Workspace, Project, error) {
+	if s.workspace == nil || s.workspace.ConversationID != conversationID {
+		return Workspace{}, Project{}, ErrNotFound
+	}
+	return *s.workspace, s.project, nil
 }
 
 func (s *retryCreateStore) RefreshProjectProvisionAttempt(
@@ -41,6 +67,54 @@ func TestGitAuthorIdentityFallsBackToCocolaUsername(t *testing.T) {
 	name, email := gitAuthorIdentity(Identity{UserID: "user-1", Username: "alice"})
 	if name != "alice" || email != "alice@localhost" {
 		t.Fatalf("gitAuthorIdentity() = %q, %q", name, email)
+	}
+}
+
+func TestPrepareTaskBaseKeepsLocalProjectOnMain(t *testing.T) {
+	projectID := "11111111-1111-1111-1111-111111111111"
+	service := &Service{
+		store: &taskBaseStore{project: Project{
+			ID: projectID, Status: ProjectReady, RepositoryProvider: ProviderLocal,
+			DefaultBranch: "main",
+		}},
+		localProjectsEnabled: true,
+	}
+	result, err := service.PrepareTaskBase(
+		context.Background(), Identity{UserID: "user-a"}, projectID, "new-task", "main",
+	)
+	if err != nil || result.Ref != "main" || result.SHA != "" {
+		t.Fatalf("PrepareTaskBase() = %+v, %v", result, err)
+	}
+	if _, err := service.PrepareTaskBase(
+		context.Background(), Identity{UserID: "user-a"}, projectID, "new-task", "feature/login",
+	); !errors.Is(err, ErrBaseRefNotFound) {
+		t.Fatalf("non-main local base error = %v", err)
+	}
+}
+
+func TestPrepareTaskBaseReusesImmutableWorkspaceBase(t *testing.T) {
+	projectID := "11111111-1111-1111-1111-111111111111"
+	store := &taskBaseStore{
+		project: Project{
+			ID: projectID, Status: ProjectReady, RepositoryProvider: ProviderLocal,
+			DefaultBranch: "main",
+		},
+		workspace: &Workspace{
+			ConversationID: "task-1", ProjectID: projectID,
+			BaseRef: "main", BaseSHA: strings.Repeat("a", 40),
+		},
+	}
+	service := &Service{store: store, localProjectsEnabled: true}
+	result, err := service.PrepareTaskBase(
+		context.Background(), Identity{UserID: "user-a"}, projectID, "task-1", "",
+	)
+	if err != nil || result.Ref != "main" || result.SHA != strings.Repeat("a", 40) {
+		t.Fatalf("PrepareTaskBase() = %+v, %v", result, err)
+	}
+	if _, err := service.PrepareTaskBase(
+		context.Background(), Identity{UserID: "user-a"}, projectID, "task-1", "feature/login",
+	); !errors.Is(err, ErrBaseRefMismatch) {
+		t.Fatalf("changed task base error = %v", err)
 	}
 }
 

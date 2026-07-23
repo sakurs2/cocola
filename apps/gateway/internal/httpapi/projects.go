@@ -369,6 +369,28 @@ func (a *API) projectTasks(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, result)
 }
 
+func (a *API) projectBranches(w http.ResponseWriter, r *http.Request) {
+	id, ok := projectIdentity(r)
+	if !ok {
+		writeErr(w, http.StatusUnauthorized, "UNAUTHENTICATED", "missing identity")
+		return
+	}
+	if a.projects == nil {
+		writeErr(w, http.StatusNotFound, "NOT_FOUND", "project not found")
+		return
+	}
+	result, err := a.projects.Branches(
+		r.Context(),
+		id,
+		r.PathValue("id"),
+		r.URL.Query().Get("cursor"),
+	)
+	if a.writeProjectError(w, err) {
+		return
+	}
+	writeJSON(w, http.StatusOK, result)
+}
+
 func (a *API) gitStatus(w http.ResponseWriter, r *http.Request) {
 	id, ok := projectIdentity(r)
 	if !ok {
@@ -438,7 +460,7 @@ func (a *API) inspectGit(w http.ResponseWriter, r *http.Request) {
 		Project: agent.ProjectContext{
 			ProjectID: contextValue.ProjectID, RepositoryID: contextValue.RepositoryExternalID,
 			CloneURL: contextValue.CloneURL, DefaultBranch: contextValue.DefaultBranch,
-			BaseSHA: contextValue.BaseSHA, TaskBranch: contextValue.BranchName,
+			BaseRef: contextValue.BaseRef, BaseSHA: contextValue.BaseSHA, TaskBranch: contextValue.BranchName,
 			GitAuthorName: contextValue.GitAuthorName, GitAuthorEmail: contextValue.GitAuthorEmail,
 			RepositoryProvider: contextValue.RepositoryProvider,
 			RepositoryFullName: contextValue.RepositoryFullName,
@@ -548,7 +570,7 @@ func (a *API) publishLocalProject(w http.ResponseWriter, r *http.Request) {
 	gitContext := agent.ProjectContext{
 		ProjectID: contextValue.ProjectID, RepositoryID: contextValue.RepositoryExternalID,
 		CloneURL: contextValue.CloneURL, DefaultBranch: contextValue.DefaultBranch,
-		BaseSHA: contextValue.BaseSHA, TaskBranch: contextValue.BranchName,
+		BaseRef: contextValue.BaseRef, BaseSHA: contextValue.BaseSHA, TaskBranch: contextValue.BranchName,
 		GitAuthorName: contextValue.GitAuthorName, GitAuthorEmail: contextValue.GitAuthorEmail,
 		RepositoryProvider: contextValue.RepositoryProvider,
 		RepositoryFullName: contextValue.RepositoryFullName,
@@ -624,6 +646,10 @@ func (a *API) writeProjectError(w http.ResponseWriter, err error) bool {
 		writeErr(w, http.StatusUnprocessableEntity, "REPOSITORY_TOO_LARGE", "repository exceeds the configured project size limit")
 	case errors.Is(err, project.ErrProjectNotReady):
 		writeErr(w, http.StatusConflict, "PROJECT_NOT_READY", "project is not ready")
+	case errors.Is(err, project.ErrBaseRefNotFound):
+		writeErr(w, http.StatusUnprocessableEntity, "PROJECT_BASE_REF_NOT_FOUND", "the selected branch no longer exists")
+	case errors.Is(err, project.ErrBaseRefMismatch):
+		writeErr(w, http.StatusConflict, "PROJECT_BASE_MISMATCH", "a project task base branch cannot be changed")
 	case errors.Is(err, project.ErrVersionConflict):
 		writeErr(w, http.StatusConflict, "VERSION_CONFLICT", "project was changed by another request")
 	case errors.Is(err, project.ErrConflict):
