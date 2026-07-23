@@ -35,6 +35,23 @@ type ProjectTask = {
   };
 };
 
+const STATUS_META: Record<
+  ProjectSummary["status"],
+  { label: string; color: string }
+> = {
+  ready: { label: "Ready", color: "#16a34a" },
+  provisioning: { label: "Provisioning", color: "#d97706" },
+  failed: { label: "Failed", color: "#dc2626" },
+  archived: { label: "Archived", color: "#6b7280" },
+};
+
+function initials(name: string) {
+  const parts = name.replace(/[_/-]/g, " ").split(/\s+/).filter(Boolean);
+  const raw =
+    parts.length > 1 ? `${parts[0]![0]}${parts[1]![0]}` : name.slice(0, 2);
+  return raw.toUpperCase();
+}
+
 export default function ProjectPage() {
   const params = useParams<{ id: string }>();
   const projectID = params.id;
@@ -318,77 +335,112 @@ export default function ProjectPage() {
       </div>
     );
 
+  const status = STATUS_META[project.status];
+  const isGithub =
+    project.repository_provider === "github" || Boolean(project.repository_html_url);
+
   return (
-    <div className="h-full overflow-y-auto px-5 py-8 sm:px-8 lg:px-12">
-      <main className="mx-auto w-full max-w-4xl pb-16">
-        <div className="flex items-center gap-1.5 text-xs font-medium text-muted-foreground">
-          <Link href="/projects" className="hover:text-foreground">
+    <div className="h-full overflow-y-auto px-3 py-8 sm:px-5">
+      <main className="mx-auto w-full max-w-5xl pb-16">
+        {/* Breadcrumb */}
+        <div className="flex items-center gap-1.5 font-mono text-[11px] uppercase tracking-[0.16em] text-muted-foreground">
+          <Link href="/projects" className="transition-colors hover:text-foreground">
             Projects
           </Link>
-          <ChevronRight className="size-3.5" />
-          <span className="truncate text-foreground/75">{project.name}</span>
+          <ChevronRight className="size-3" />
+          <span className="truncate normal-case tracking-normal text-foreground">
+            {project.name}
+          </span>
         </div>
-        <section className="mt-7 rounded-2xl border border-border bg-card p-5 sm:p-6">
-          <div className="flex items-start gap-4">
-            <div className="grid size-11 shrink-0 place-items-center rounded-2xl bg-indigo-500/10 text-indigo-600">
-              <FolderGit2 className="size-5" />
+
+        {/* Editorial header with a strong baseline rule */}
+        <header className="mt-4 flex flex-wrap items-start justify-between gap-4 border-b-2 border-foreground pb-6">
+          <div className="flex min-w-0 items-start gap-4">
+            {/* monogram */}
+            <div className="grid size-14 shrink-0 place-items-center rounded-2xl bg-primary/10 text-2xl font-bold tracking-tight text-primary">
+              {initials(project.name)}
             </div>
-            <div className="min-w-0 flex-1">
-              <h1 className="truncate text-2xl font-semibold tracking-tight">{project.name}</h1>
-              <p className="mt-1 text-sm text-muted-foreground">
+            <div className="min-w-0">
+              <div className="flex items-center gap-2.5">
+                <h1 className="truncate text-3xl font-semibold tracking-tight">{project.name}</h1>
+                {isGithub ? (
+                  <span className="shrink-0 rounded-md border border-border px-1.5 py-px font-mono text-[10px] uppercase tracking-wide text-muted-foreground">
+                    {project.visibility}
+                  </span>
+                ) : null}
+              </div>
+              <p
+                className={
+                  "mt-1 text-sm text-muted-foreground" +
+                  (project.description ? "" : " opacity-50")
+                }
+              >
                 {project.description || "No description"}
               </p>
-              <div className="mt-3 flex flex-wrap items-center gap-3 text-xs text-muted-foreground">
-                {project.repository_provider === "github" || project.repository_html_url ? (
+              {/* meta row */}
+              <div className="mt-3 flex flex-wrap items-center gap-x-4 gap-y-1.5 text-xs text-muted-foreground">
+                {isGithub ? (
                   <a
                     href={project.repository_html_url}
                     target="_blank"
                     rel="noreferrer"
-                    className="inline-flex items-center gap-1 hover:text-foreground"
+                    className="inline-flex items-center gap-1.5 transition-colors hover:text-foreground"
                   >
+                    <GitFork className="size-3.5" />
                     {project.repository_owner}/{project.repository_name}
                     <ExternalLink className="size-3" />
                   </a>
                 ) : (
-                  <span>Local only</span>
+                  <span className="inline-flex items-center gap-1.5">
+                    <FolderGit2 className="size-3.5" />
+                    Local only
+                  </span>
                 )}
-                <span className="inline-flex items-center gap-1">
-                  <GitBranch className="size-3" />
+                <span className="inline-flex items-center gap-1.5">
+                  <GitBranch className="size-3.5" />
                   {project.default_branch || "Preparing"}
                 </span>
-                {project.repository_provider === "github" || project.repository_html_url ? (
-                  <span className="capitalize">{project.visibility}</span>
-                ) : null}
+                <span
+                  className="inline-flex items-center gap-1.5"
+                  style={{ color: status.color }}
+                >
+                  <span
+                    className="size-[7px] rounded-full"
+                    style={{ background: status.color }}
+                  />
+                  {status.label}
+                </span>
               </div>
             </div>
-            {project.status !== "archived" ? (
-              <div className="flex shrink-0 items-center gap-1">
-                {project.repository_provider === "local" &&
-                project.github_publish_status !== "published" &&
-                project.primary_conversation_id ? (
-                  <button
-                    type="button"
-                    onClick={startPublishing}
-                    className="inline-flex h-9 items-center gap-2 rounded-xl border border-border px-3 text-xs font-medium hover:bg-muted"
-                  >
-                    <GitFork className="size-4" />
-                    {project.github_publish_status === "pending" ? "Retry publish" : "Publish"}
-                  </button>
-                ) : null}
+          </div>
+          {project.status !== "archived" ? (
+            <div className="flex shrink-0 items-center gap-2">
+              {project.repository_provider === "local" &&
+              project.github_publish_status !== "published" &&
+              project.primary_conversation_id ? (
                 <button
                   type="button"
-                  onClick={startEditing}
-                  className="grid size-9 place-items-center rounded-xl text-muted-foreground hover:bg-muted hover:text-foreground"
+                  onClick={startPublishing}
+                  className="inline-flex h-9 items-center gap-2 rounded-full border border-border bg-background px-4 text-xs font-semibold text-foreground transition-colors hover:bg-muted"
                 >
-                  <Pencil className="size-4" />
+                  <GitFork className="size-4" />
+                  {project.github_publish_status === "pending" ? "Retry publish" : "Publish"}
                 </button>
-              </div>
-            ) : null}
-          </div>
-        </section>
+              ) : null}
+              <button
+                type="button"
+                onClick={startEditing}
+                aria-label="Edit project"
+                className="grid size-9 place-items-center rounded-full border border-border bg-background text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
+              >
+                <Pencil className="size-4" />
+              </button>
+            </div>
+          ) : null}
+        </header>
 
         {showPublish ? (
-          <section className="mt-5 rounded-2xl border border-border bg-card p-5">
+          <section className="mt-6 rounded-2xl border border-border bg-card p-5">
             <div className="flex items-start justify-between gap-4">
               <div>
                 <h2 className="text-sm font-semibold">Publish to GitHub</h2>
@@ -399,7 +451,7 @@ export default function ProjectPage() {
               <button
                 type="button"
                 onClick={() => setShowPublish(false)}
-                className="text-xs text-muted-foreground hover:text-foreground"
+                className="text-xs text-muted-foreground transition-colors hover:text-foreground"
               >
                 Cancel
               </button>
@@ -411,7 +463,7 @@ export default function ProjectPage() {
                   value={publishRepository}
                   disabled={project.github_publish_status === "pending"}
                   onChange={(event) => setPublishRepository(event.target.value)}
-                  className="h-10 w-full rounded-xl border border-border bg-background px-3 text-sm disabled:opacity-60"
+                  className="h-10 w-full rounded-xl border border-border bg-background px-3 text-sm outline-none transition-colors focus:border-primary disabled:opacity-60"
                 />
               </label>
               <label className="space-y-1.5">
@@ -422,7 +474,7 @@ export default function ProjectPage() {
                   onChange={(event) =>
                     setPublishVisibility(event.target.value === "public" ? "public" : "private")
                   }
-                  className="h-10 w-full rounded-xl border border-border bg-background px-3 text-sm disabled:opacity-60"
+                  className="h-10 w-full rounded-xl border border-border bg-background px-3 text-sm outline-none transition-colors focus:border-primary disabled:opacity-60"
                 >
                   <option value="private">Private</option>
                   <option value="public">Public</option>
@@ -437,7 +489,7 @@ export default function ProjectPage() {
                 type="button"
                 disabled={busy || !publishRepository.trim()}
                 onClick={() => void publish()}
-                className="inline-flex h-9 items-center gap-2 rounded-xl bg-primary px-4 text-sm font-medium text-primary-foreground disabled:opacity-50"
+                className="inline-flex h-9 items-center gap-2 rounded-full bg-primary px-4 text-sm font-semibold text-primary-foreground transition-transform hover:-translate-y-0.5 disabled:opacity-50 disabled:hover:translate-y-0"
               >
                 {busy ? (
                   <Loader2 className="size-4 animate-spin" />
@@ -451,28 +503,37 @@ export default function ProjectPage() {
         ) : null}
 
         {project.repository_has_lfs || project.repository_has_submodules ? (
-          <section className="mt-5 rounded-2xl border border-amber-500/25 bg-amber-500/5 px-5 py-4 text-sm">
-            <span className="font-medium">Repository notice</span>
-            <span className="ml-2 text-muted-foreground">
-              {project.repository_has_lfs && project.repository_has_submodules
-                ? "Git LFS objects and submodules are not downloaded in phase one."
-                : project.repository_has_lfs
-                  ? "Git LFS objects are kept as pointer files in phase one."
-                  : "Git submodules are not initialized in phase one."}
-            </span>
+          <section className="mt-6 flex items-start gap-3 rounded-2xl border border-amber-500/25 bg-amber-500/5 px-5 py-4 text-sm">
+            <span className="mt-1.5 size-[7px] shrink-0 rounded-full bg-amber-500" />
+            <p>
+              <span className="font-semibold">Repository notice</span>
+              <span className="ml-2 text-muted-foreground">
+                {project.repository_has_lfs && project.repository_has_submodules
+                  ? "Git LFS objects and submodules are not downloaded in phase one."
+                  : project.repository_has_lfs
+                    ? "Git LFS objects are kept as pointer files in phase one."
+                    : "Git submodules are not initialized in phase one."}
+              </span>
+            </p>
           </section>
         ) : null}
 
         {project.status === "archived" ? (
-          <section className="mt-5 rounded-2xl border border-border bg-muted/40 p-5">
+          <section className="mt-6 rounded-2xl border border-border bg-muted/40 p-5">
             <h2 className="font-semibold">Project archived</h2>
             <p className="mt-1 text-sm text-muted-foreground">
               New tasks are disabled. Existing tasks and saved Git snapshots remain available.
             </p>
           </section>
         ) : project.status !== "ready" ? (
-          <section className="mt-5 rounded-2xl border border-amber-500/25 bg-amber-500/5 p-5">
-            <h2 className="font-semibold">Project {project.status}</h2>
+          <section className="mt-6 rounded-2xl border border-amber-500/25 bg-amber-500/5 p-5">
+            <div className="flex items-center gap-2">
+              <span
+                className="size-[7px] shrink-0 rounded-full"
+                style={{ background: status.color }}
+              />
+              <h2 className="font-semibold capitalize">Project {project.status}</h2>
+            </div>
             <p className="mt-1 text-sm text-muted-foreground">
               {project.provision_error_code || "GitHub repository provisioning has not completed."}
             </p>
@@ -480,13 +541,13 @@ export default function ProjectPage() {
               type="button"
               disabled={busy}
               onClick={() => void retry()}
-              className="mt-4 inline-flex items-center gap-2 rounded-xl border border-border bg-background px-3 py-2 text-sm"
+              className="mt-4 inline-flex items-center gap-2 rounded-full border border-border bg-background px-4 py-2 text-sm font-semibold transition-colors hover:bg-muted disabled:opacity-50"
             >
               <RefreshCw className="size-4" /> Retry reconciliation
             </button>
           </section>
         ) : project.repository_provider === "local" && tasks.length > 0 ? (
-          <section className="mt-8 rounded-2xl border border-border bg-muted/30 p-5">
+          <section className="mt-8 rounded-2xl border border-border bg-muted/30 p-6">
             <h2 className="text-sm font-semibold">Project workspace</h2>
             <p className="mt-1 text-xs text-muted-foreground">
               Empty Projects keep one persistent conversation and develop directly on main.
@@ -498,13 +559,13 @@ export default function ProjectPage() {
                   `/projects/${encodeURIComponent(project.id)}/tasks/${encodeURIComponent(tasks[0]!.id)}`,
                 )
               }
-              className="mt-4 inline-flex h-9 items-center rounded-xl bg-primary px-4 text-sm font-medium text-primary-foreground"
+              className="mt-4 inline-flex h-10 items-center rounded-full bg-primary px-5 text-sm font-semibold text-primary-foreground transition-transform hover:-translate-y-0.5"
             >
               Continue workspace
             </button>
           </section>
         ) : !tasksLoaded || !composerReady ? (
-          <section className="mt-8 rounded-2xl border border-border bg-muted/30 p-5">
+          <section className="mt-8 rounded-2xl border border-border bg-muted/30 p-6">
             <h2 className="text-sm font-semibold">Preparing Project workspace</h2>
             <p className="mt-1 text-xs text-muted-foreground">
               Loading Project tasks and preparing a conversation workspace…
@@ -512,10 +573,10 @@ export default function ProjectPage() {
           </section>
         ) : (
           <section className="mt-8">
-            <h2 className="text-sm font-semibold">
+            <p className="font-mono text-[11px] uppercase tracking-[0.22em] text-muted-foreground">
               {project.repository_provider === "local" ? "Start workspace" : "New task"}
-            </h2>
-            <p className="mt-1 text-xs text-muted-foreground">
+            </p>
+            <p className="mt-1.5 text-xs text-muted-foreground">
               {project.repository_provider === "local"
                 ? "The first message creates this Project’s single persistent workspace on main."
                 : "Choose a base branch. Cocola locks its current revision when you send the first message."}
@@ -540,13 +601,13 @@ export default function ProjectPage() {
         )}
 
         {editing ? (
-          <section className="mt-8 rounded-2xl border border-border p-5">
+          <section className="mt-8 rounded-2xl border border-border bg-card p-5">
             <div className="flex items-center justify-between">
               <h2 className="font-semibold">Project settings</h2>
               <button
                 type="button"
                 onClick={() => setEditing(false)}
-                className="text-sm text-muted-foreground"
+                className="text-sm text-muted-foreground transition-colors hover:text-foreground"
               >
                 Cancel
               </button>
@@ -557,7 +618,7 @@ export default function ProjectPage() {
                 <input
                   value={draftName}
                   onChange={(event) => setDraftName(event.target.value)}
-                  className="h-10 w-full rounded-xl border border-border bg-background px-3 text-sm"
+                  className="h-10 w-full rounded-xl border border-border bg-background px-3 text-sm outline-none transition-colors focus:border-primary"
                 />
               </label>
               <label className="space-y-1.5">
@@ -565,7 +626,7 @@ export default function ProjectPage() {
                 <select
                   value={draftRuntime}
                   onChange={(event) => setDraftRuntime(event.target.value)}
-                  className="h-10 w-full rounded-xl border border-border bg-background px-3 text-sm"
+                  className="h-10 w-full rounded-xl border border-border bg-background px-3 text-sm outline-none transition-colors focus:border-primary"
                 >
                   {runtimes.map((runtime) => (
                     <option key={runtime.id} value={runtime.id}>
@@ -579,7 +640,7 @@ export default function ProjectPage() {
                 <input
                   value={draftDescription}
                   onChange={(event) => setDraftDescription(event.target.value)}
-                  className="h-10 w-full rounded-xl border border-border bg-background px-3 text-sm"
+                  className="h-10 w-full rounded-xl border border-border bg-background px-3 text-sm outline-none transition-colors focus:border-primary"
                 />
               </label>
             </div>
@@ -588,7 +649,7 @@ export default function ProjectPage() {
                 type="button"
                 disabled={busy}
                 onClick={() => void archive()}
-                className="inline-flex items-center gap-2 text-sm text-red-600"
+                className="inline-flex items-center gap-2 text-sm font-medium text-red-600 transition-opacity hover:opacity-80"
               >
                 <Archive className="size-4" /> Archive
               </button>
@@ -596,7 +657,7 @@ export default function ProjectPage() {
                 type="button"
                 disabled={busy}
                 onClick={() => void saveSettings()}
-                className="rounded-xl bg-primary px-4 py-2 text-sm font-medium text-primary-foreground"
+                className="rounded-full bg-primary px-5 py-2 text-sm font-semibold text-primary-foreground transition-transform hover:-translate-y-0.5 disabled:opacity-50 disabled:hover:translate-y-0"
               >
                 Save
               </button>
@@ -605,20 +666,22 @@ export default function ProjectPage() {
         ) : null}
 
         <section className="mt-12">
-          <div className="border-b border-border pb-3">
-            <h2 className="text-sm font-semibold">
-              {project.repository_provider === "local" ? "Workspace" : "Tasks"}
-            </h2>
-            <p className="mt-0.5 text-xs text-muted-foreground">
-              {tasks.length} {tasks.length === 1 ? "task" : "tasks"}
-            </p>
+          <div className="flex items-end justify-between border-b border-border pb-3">
+            <div>
+              <p className="font-mono text-[11px] uppercase tracking-[0.22em] text-muted-foreground">
+                {project.repository_provider === "local" ? "Workspace" : "Tasks"}
+              </p>
+              <p className="mt-1 text-xs text-muted-foreground">
+                {tasks.length} {tasks.length === 1 ? "task" : "tasks"}
+              </p>
+            </div>
           </div>
           {tasks.length === 0 ? (
-            <div className="py-10 text-center text-sm text-muted-foreground">
-              No project tasks yet.
+            <div className="rounded-2xl border border-dashed border-border px-6 py-12 text-center">
+              <p className="text-sm text-muted-foreground">No project tasks yet.</p>
             </div>
           ) : (
-            <div className="divide-y divide-border/70">
+            <div className="border-t border-border">
               {tasks.map((task) => (
                 <button
                   type="button"
@@ -628,30 +691,31 @@ export default function ProjectPage() {
                       `/projects/${encodeURIComponent(project.id)}/tasks/${encodeURIComponent(task.id)}`,
                     )
                   }
-                  className="flex w-full items-center gap-3 rounded-xl px-3 py-4 text-left hover:bg-muted"
+                  className="group flex w-full items-center gap-3 border-b border-border py-4 pl-0 text-left transition-[padding,background] hover:bg-muted hover:pl-3"
                 >
                   <div className="min-w-0 flex-1">
-                    <span className="block truncate text-sm font-medium">
+                    <span className="block truncate text-sm font-semibold group-hover:text-primary">
                       {task.title || "Untitled task"}
                     </span>
-                    <span className="mt-1 inline-flex items-center gap-1 text-xs text-muted-foreground">
-                      <GitBranch className="size-3" />
+                    <span className="mt-1 inline-flex items-center gap-1.5 text-xs text-muted-foreground">
+                      <GitBranch className="size-3.5" />
                       {task.workspace.branch_name}
                     </span>
                   </div>
                   {task.workspace.git_snapshot?.dirty ? (
-                    <span className="rounded-full bg-amber-500/10 px-2 py-1 text-[11px] font-medium text-amber-700">
+                    <span className="inline-flex items-center gap-1.5 rounded-full bg-amber-500/10 px-2.5 py-1 text-[11px] font-semibold text-amber-700">
+                      <span className="size-[6px] rounded-full bg-amber-500" />
                       Modified
                     </span>
                   ) : null}
-                  <ChevronRight className="size-4 text-muted-foreground" />
+                  <ChevronRight className="size-4 text-muted-foreground transition-transform group-hover:translate-x-0.5" />
                 </button>
               ))}
             </div>
           )}
         </section>
         {error ? (
-          <p className="mt-5 rounded-xl bg-red-500/10 px-3 py-2 text-sm text-red-600">{error}</p>
+          <p className="mt-6 rounded-xl bg-red-500/10 px-3 py-2 text-sm text-red-600">{error}</p>
         ) : null}
       </main>
     </div>
