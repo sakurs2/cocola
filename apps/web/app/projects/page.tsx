@@ -9,6 +9,8 @@ import { cn } from "@/lib/utils";
 
 type ProviderFilter = "all" | "github" | "local";
 
+const BRAND_GRADIENT = "linear-gradient(135deg,#2563eb,#7c3aed)";
+
 const STATUS_META: Record<
   ProjectSummary["status"],
   { label: string; color: string }
@@ -76,6 +78,10 @@ export default function ProjectsPage() {
     { key: "local", label: "Local" },
   ];
 
+  // Shared column template so the header and every row line up perfectly.
+  const gridCols =
+    "grid-cols-[44px_1fr] sm:grid-cols-[44px_1fr_160px_120px_110px_84px]";
+
   return (
     <div className="h-full overflow-y-auto px-3 py-8 sm:px-5">
       <main className="mx-auto w-full max-w-5xl pb-16">
@@ -89,7 +95,8 @@ export default function ProjectsPage() {
           </div>
           <Link
             href="/projects/new"
-            className="inline-flex h-10 items-center gap-2 self-end rounded-full bg-primary px-5 text-sm font-semibold text-primary-foreground transition-transform hover:-translate-y-0.5 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background"
+            className="inline-flex h-10 items-center gap-2 self-end rounded-full px-5 text-sm font-semibold text-white shadow-lg shadow-primary/20 transition-transform hover:-translate-y-0.5 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background"
+            style={{ background: BRAND_GRADIENT }}
           >
             <Plus className="size-4" />
             New project
@@ -143,90 +150,108 @@ export default function ProjectsPage() {
               </p>
             </div>
           ) : (
-            <div className="border-t border-border">
-              {filtered.map((project) => {
-                const status = STATUS_META[project.status];
-                return (
-                  <Link
-                    key={project.id}
-                    href={`/projects/${encodeURIComponent(project.id)}`}
-                    className="group relative grid grid-cols-[52px_1fr] items-center gap-4 border-b border-border py-4 pl-0 transition-[padding,background] hover:bg-muted hover:pl-3 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background sm:grid-cols-[52px_1fr_auto]"
-                  >
-                    {/* accent bar on hover */}
-                    <span className="pointer-events-none absolute inset-y-3 left-0 w-[3px] rounded-full bg-primary opacity-0 transition-opacity group-hover:opacity-100" />
-                    {/* monogram */}
-                    <div className="grid size-[52px] place-items-center rounded-2xl bg-primary/10 text-xl font-bold tracking-tight text-primary">
-                      {initials(project.name)}
-                    </div>
-                    {/* identity */}
-                    <div className="min-w-0">
-                      <div className="flex items-center gap-2.5">
-                        <span className="truncate text-lg font-semibold tracking-tight group-hover:text-primary">
-                          {project.name}
-                        </span>
-                        <span className="shrink-0 rounded-md border border-border px-1.5 py-px font-mono text-[10px] uppercase tracking-wide text-muted-foreground">
-                          {project.visibility}
-                        </span>
-                      </div>
-                      <p
-                        className={cn(
-                          "mt-0.5 truncate text-sm text-muted-foreground",
-                          project.description ? "" : "opacity-50",
-                        )}
+            <>
+              {/* Column header — labels live here once instead of on every row */}
+              <div
+                className={cn(
+                  "hidden gap-4 px-0 pb-2 pt-1 font-mono text-[11px] uppercase tracking-[0.09em] text-muted-foreground sm:grid",
+                  gridCols,
+                )}
+              >
+                <span />
+                <span>Project</span>
+                <span>Source</span>
+                <span>Branch</span>
+                <span>Status</span>
+                <span>Updated</span>
+              </div>
+
+              <div className="border-t border-border">
+                {filtered.map((project) => {
+                  const status = STATUS_META[project.status];
+                  return (
+                    <Link
+                      key={project.id}
+                      href={`/projects/${encodeURIComponent(project.id)}`}
+                      className={cn(
+                        "group relative grid items-center gap-4 border-b border-border py-3.5 pl-0 transition-[padding,background] hover:bg-muted hover:pl-3 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background",
+                        gridCols,
+                      )}
+                    >
+                      {/* gradient accent bar on hover */}
+                      <span
+                        className="pointer-events-none absolute inset-y-2.5 left-0 w-[3px] rounded-full opacity-0 transition-opacity group-hover:opacity-100"
+                        style={{ background: BRAND_GRADIENT }}
+                      />
+                      {/* gradient monogram */}
+                      <div
+                        className="grid size-11 place-items-center rounded-xl text-base font-bold tracking-tight text-white shadow-[inset_0_-9px_18px_-12px_rgba(0,0,0,0.4)]"
+                        style={{ background: BRAND_GRADIENT }}
                       >
-                        {project.description || "No description"}
-                      </p>
-                    </div>
-                    {/* meta — fixed-width columns so every row lines up vertically */}
-                    <div className="hidden justify-self-end sm:grid sm:grid-cols-[150px_104px_96px_84px] sm:items-center">
-                      <MetaCol label="SOURCE">
-                        <span className="inline-flex min-w-0 items-center gap-1.5">
-                          {project.repository_provider === "github" ? (
-                            <GitFork className="size-3.5 shrink-0 text-muted-foreground" />
-                          ) : (
-                            <HardDrive className="size-3.5 shrink-0 text-muted-foreground" />
+                        {initials(project.name)}
+                      </div>
+                      {/* identity */}
+                      <div className="min-w-0">
+                        <div className="flex items-center gap-2.5">
+                          <span className="truncate text-[15px] font-semibold tracking-tight group-hover:text-primary">
+                            {project.name}
+                          </span>
+                          <span className="shrink-0 rounded-md border border-border px-1.5 py-px font-mono text-[10px] uppercase tracking-wide text-muted-foreground">
+                            {project.visibility}
+                          </span>
+                        </div>
+                        <p
+                          className={cn(
+                            "mt-0.5 truncate text-[13px] text-muted-foreground",
+                            project.description ? "" : "opacity-50",
                           )}
-                          <span className="truncate">{sourceLabel(project)}</span>
-                        </span>
-                      </MetaCol>
-                      <MetaCol label="BRANCH">
-                        <span className="inline-flex min-w-0 items-center gap-1.5">
-                          <GitBranch className="size-3.5 shrink-0 text-muted-foreground" />
-                          <span className="truncate">{project.default_branch || "—"}</span>
-                        </span>
-                      </MetaCol>
-                      <MetaCol label="STATUS">
-                        <span
-                          className="inline-flex items-center gap-1.5"
-                          style={{ color: status.color }}
                         >
-                          <span
-                            className="size-[7px] shrink-0 rounded-full"
-                            style={{ background: status.color }}
-                          />
-                          {status.label}
-                        </span>
-                      </MetaCol>
-                      <MetaCol label="UPDATED">{relativeTime(project.updated_at)}</MetaCol>
-                    </div>
-                  </Link>
-                );
-              })}
-            </div>
+                          {project.description || "No description"}
+                        </p>
+                      </div>
+                      {/* source */}
+                      <div className="hidden min-w-0 items-center gap-1.5 text-[13px] sm:flex">
+                        {project.repository_provider === "github" ? (
+                          <GitFork className="size-3.5 shrink-0 text-muted-foreground" />
+                        ) : (
+                          <HardDrive className="size-3.5 shrink-0 text-muted-foreground" />
+                        )}
+                        <span className="truncate">{sourceLabel(project)}</span>
+                      </div>
+                      {/* branch */}
+                      <div className="hidden min-w-0 items-center gap-1.5 text-[13px] sm:flex">
+                        {project.default_branch ? (
+                          <>
+                            <GitBranch className="size-3.5 shrink-0 text-muted-foreground" />
+                            <span className="truncate">{project.default_branch}</span>
+                          </>
+                        ) : (
+                          <span className="text-muted-foreground">—</span>
+                        )}
+                      </div>
+                      {/* status */}
+                      <div
+                        className="hidden items-center gap-1.5 text-[13px] font-semibold sm:flex"
+                        style={{ color: status.color }}
+                      >
+                        <span
+                          className="size-[7px] shrink-0 rounded-full"
+                          style={{ background: status.color }}
+                        />
+                        {status.label}
+                      </div>
+                      {/* updated */}
+                      <div className="hidden text-[13px] text-muted-foreground sm:block">
+                        {relativeTime(project.updated_at)}
+                      </div>
+                    </Link>
+                  );
+                })}
+              </div>
+            </>
           )}
         </section>
       </main>
-    </div>
-  );
-}
-
-function MetaCol({ label, children }: { label: string; children: React.ReactNode }) {
-  return (
-    <div className="min-w-0">
-      <div className="font-mono text-[11px] tracking-wide text-muted-foreground">{label}</div>
-      <div className="mt-0.5 flex min-w-0 items-center gap-1.5 text-sm font-semibold">
-        {children}
-      </div>
     </div>
   );
 }

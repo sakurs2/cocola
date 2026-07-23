@@ -35,6 +35,8 @@ type ProjectTask = {
   };
 };
 
+const BRAND_GRADIENT = "linear-gradient(135deg,#2563eb,#7c3aed)";
+
 const STATUS_META: Record<
   ProjectSummary["status"],
   { label: string; color: string }
@@ -357,7 +359,10 @@ export default function ProjectPage() {
         <header className="mt-4 flex flex-wrap items-start justify-between gap-4 border-b-2 border-foreground pb-6">
           <div className="flex min-w-0 items-start gap-4">
             {/* monogram */}
-            <div className="grid size-14 shrink-0 place-items-center rounded-2xl bg-primary/10 text-2xl font-bold tracking-tight text-primary">
+            <div
+              className="grid size-14 shrink-0 place-items-center rounded-2xl text-2xl font-bold tracking-tight text-white shadow-[inset_0_-10px_20px_-12px_rgba(0,0,0,0.4)]"
+              style={{ background: BRAND_GRADIENT }}
+            >
               {initials(project.name)}
             </div>
             <div className="min-w-0">
@@ -489,7 +494,8 @@ export default function ProjectPage() {
                 type="button"
                 disabled={busy || !publishRepository.trim()}
                 onClick={() => void publish()}
-                className="inline-flex h-9 items-center gap-2 rounded-full bg-primary px-4 text-sm font-semibold text-primary-foreground transition-transform hover:-translate-y-0.5 disabled:opacity-50 disabled:hover:translate-y-0"
+                className="inline-flex h-9 items-center gap-2 rounded-full px-4 text-sm font-semibold text-white shadow-lg shadow-primary/20 transition-transform hover:-translate-y-0.5 disabled:opacity-50 disabled:hover:translate-y-0"
+                style={{ background: BRAND_GRADIENT }}
               >
                 {busy ? (
                   <Loader2 className="size-4 animate-spin" />
@@ -559,7 +565,8 @@ export default function ProjectPage() {
                   `/projects/${encodeURIComponent(project.id)}/tasks/${encodeURIComponent(tasks[0]!.id)}`,
                 )
               }
-              className="mt-4 inline-flex h-10 items-center rounded-full bg-primary px-5 text-sm font-semibold text-primary-foreground transition-transform hover:-translate-y-0.5"
+              className="mt-4 inline-flex h-10 items-center rounded-full px-5 text-sm font-semibold text-white shadow-lg shadow-primary/20 transition-transform hover:-translate-y-0.5"
+              style={{ background: BRAND_GRADIENT }}
             >
               Continue workspace
             </button>
@@ -657,7 +664,8 @@ export default function ProjectPage() {
                 type="button"
                 disabled={busy}
                 onClick={() => void saveSettings()}
-                className="rounded-full bg-primary px-5 py-2 text-sm font-semibold text-primary-foreground transition-transform hover:-translate-y-0.5 disabled:opacity-50 disabled:hover:translate-y-0"
+                className="rounded-full px-5 py-2 text-sm font-semibold text-white shadow-lg shadow-primary/20 transition-transform hover:-translate-y-0.5 disabled:opacity-50 disabled:hover:translate-y-0"
+                style={{ background: BRAND_GRADIENT }}
               >
                 Save
               </button>
