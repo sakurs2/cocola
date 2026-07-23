@@ -9,6 +9,7 @@ import {
   Folder,
   FolderGit2,
   Settings as Gear,
+  PanelLeftClose,
   Plug as PlugsConnected,
   Plus as PlusCircle,
   ShieldCheck,
@@ -79,7 +80,13 @@ const PRIMARY_NAV: PrimaryNavItem[] = [
   },
 ];
 
-export function AppSidebar() {
+export function AppSidebar({
+  immersive = false,
+  onToggleImmersive,
+}: {
+  immersive?: boolean;
+  onToggleImmersive?: () => void;
+} = {}) {
   const { data: session } = useSession();
   const pathname = usePathname();
   const router = useRouter();
@@ -193,8 +200,20 @@ export function AppSidebar() {
   return (
     <>
       <aside className="sky-glass-sidebar flex h-full w-[17rem] shrink-0 flex-col overflow-hidden border-r border-sidebar-border text-sidebar-foreground max-sm:absolute max-sm:left-0 max-sm:top-0 max-sm:z-40">
-        <div className="flex h-16 items-center justify-between gap-2 px-3">
-          <div className="flex min-w-0 items-center gap-2">
+        <div className="flex h-16 items-center gap-1.5 px-3">
+          {onToggleImmersive ? (
+            <button
+              type="button"
+              onClick={onToggleImmersive}
+              title={immersive ? "Exit immersive mode" : "Enter immersive mode"}
+              aria-label={immersive ? "Exit immersive mode" : "Enter immersive mode"}
+              aria-pressed={immersive}
+              className="grid size-8 shrink-0 place-items-center rounded-lg text-sidebar-foreground/65 transition hover:bg-sidebar-accent hover:text-sidebar-accent-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/45"
+            >
+              <PanelLeftClose className="size-[18px]" />
+            </button>
+          ) : null}
+          <div className="flex min-w-0 flex-1 items-center gap-2">
             <div className="flex size-9 shrink-0 items-center justify-center rounded-2xl bg-primary text-primary-foreground shadow-lg shadow-primary/20">
               <CocolaLogo mono className="size-5" />
             </div>
