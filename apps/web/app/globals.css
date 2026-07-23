@@ -960,55 +960,134 @@
   }
 }
 
+/* Match the HTML demo's typography across the whole git panel (branch header,
+   commit detail, file list, overview). The demo uses a system sans stack
+   (--font) for UI text and an SF Mono stack (--mono) for monospace bits, while
+   the app defaults to Geist everywhere. Scope the demo fonts to the git panel
+   only so the rest of the app keeps Geist. */
+.cocola-git-panel {
+  font-family:
+    -apple-system, BlinkMacSystemFont, "Segoe UI", "SF Pro Text", Roboto, Helvetica, Arial,
+    sans-serif;
+}
+
+.cocola-git-panel .font-mono,
+.cocola-git-panel code,
+.cocola-git-panel pre {
+  font-family:
+    "SF Mono", "JetBrains Mono", ui-monospace, "Cascadia Code", Menlo, Consolas, monospace;
+}
+
 .cocola-git-diff {
+  --cocola-diff-gutter-width: 4.5ch;
   --diff-background-color: hsl(var(--background));
   --diff-text-color: hsl(var(--foreground));
-  --diff-font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  --diff-font-family:
+    "SF Mono", "JetBrains Mono", ui-monospace, "Cascadia Code", Menlo, Consolas, monospace;
   --diff-selection-background-color: hsl(var(--primary) / 0.18);
   --diff-selection-text-color: hsl(var(--foreground));
   --diff-gutter-insert-background-color: transparent;
-  --diff-gutter-insert-text-color: rgb(4 120 87);
+  --diff-gutter-insert-text-color: rgb(26 127 55);
   --diff-gutter-delete-background-color: transparent;
-  --diff-gutter-delete-text-color: rgb(185 28 28);
-  --diff-code-insert-background-color: rgb(16 185 129 / 0.07);
+  --diff-gutter-delete-text-color: rgb(207 34 46);
+  --diff-code-insert-background-color: rgb(230 255 236);
   --diff-code-insert-text-color: hsl(var(--foreground));
-  --diff-code-delete-background-color: rgb(239 68 68 / 0.07);
+  --diff-code-delete-background-color: rgb(255 235 233);
   --diff-code-delete-text-color: hsl(var(--foreground));
-  --diff-code-insert-edit-background-color: rgb(16 185 129 / 0.22);
-  --diff-code-delete-edit-background-color: rgb(239 68 68 / 0.2);
+  --diff-code-insert-edit-background-color: rgb(171 242 188);
+  --diff-code-delete-edit-background-color: rgb(255 129 130);
   --diff-gutter-selected-background-color: hsl(var(--primary) / 0.1);
   --diff-code-selected-background-color: hsl(var(--primary) / 0.08);
   --diff-omit-gutter-line-color: hsl(var(--primary) / 0.5);
+  overscroll-behavior: contain;
+  scrollbar-color: hsl(var(--muted-foreground) / 0.28) transparent;
+  scrollbar-width: thin;
+}
+
+.cocola-git-diff::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+
+.cocola-git-diff::-webkit-scrollbar-track,
+.cocola-git-diff::-webkit-scrollbar-corner {
+  background: transparent;
+}
+
+.cocola-git-diff::-webkit-scrollbar-thumb {
+  min-width: 48px;
+  border: 3px solid transparent;
+  border-radius: 999px;
+  background: hsl(var(--muted-foreground) / 0.28);
+  background-clip: padding-box;
+}
+
+.cocola-git-diff::-webkit-scrollbar-thumb:hover {
+  background-color: hsl(var(--muted-foreground) / 0.42);
 }
 
 .cocola-git-diff .diff {
-  min-width: 38rem;
-  font-size: 11px;
+  min-width: 42rem;
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+}
+
+/* Split needs enough room for two code panes. Keep the gutter geometry stable
+   and let the surrounding diff viewport provide horizontal scrolling. */
+.cocola-git-diff .diff-split {
+  min-width: 68rem;
+}
+
+/* Force a compact, uniform row height (demo parity); the app shell otherwise
+   cascades a looser line-height into the diff table. */
+.cocola-git-diff .diff-line,
+.cocola-git-diff .diff-code,
+.cocola-git-diff .diff-gutter {
+  line-height: 1.55;
+}
+
+.cocola-git-diff .diff td {
+  padding-top: 0;
+  padding-bottom: 0;
+}
+
+/* react-diff-view renders two gutter columns in unified mode and one per pane
+   in split mode. Give every line-number column the same fixed width so long
+   code cannot collapse the numbers into each other or into the change rail. */
+.cocola-git-diff .diff-gutter-col {
+  width: var(--cocola-diff-gutter-width);
 }
 
 .cocola-git-diff .diff-gutter {
-  padding-right: 16px;
+  box-sizing: border-box;
+  width: var(--cocola-diff-gutter-width);
+  min-width: var(--cocola-diff-gutter-width);
+  max-width: var(--cocola-diff-gutter-width);
+  overflow: hidden;
+  padding: 0 0.5ch;
+  white-space: nowrap;
 }
 
-/* thin 1px colored change bar between the line-number gutter and the code */
+/* Draw the change rail inside the code cell so it never participates in the
+   table's column sizing. */
 .cocola-git-diff .diff-code-insert {
-  border-left: 1px solid rgb(16 185 129 / 0.85);
+  box-shadow: inset 2px 0 rgb(26 127 55);
 }
 
 .cocola-git-diff .diff-code-delete {
-  border-left: 1px solid rgb(239 68 68 / 0.85);
+  box-shadow: inset 2px 0 rgb(207 34 46);
 }
 
 /* Reserve room for a +/- marker so all code lines stay aligned. */
 .cocola-git-diff .diff-code {
   position: relative;
-  padding-left: 2ch;
+  padding-left: 2.5ch;
 }
 
 .cocola-git-diff .diff-code-insert::before,
 .cocola-git-diff .diff-code-delete::before {
   position: absolute;
-  left: 0.55ch;
+  left: 0.75ch;
   top: 0;
   font-weight: 600;
   pointer-events: none;
@@ -1016,12 +1095,12 @@
 
 .cocola-git-diff .diff-code-insert::before {
   content: "+";
-  color: rgb(4 120 87);
+  color: rgb(26 127 55);
 }
 
 .cocola-git-diff .diff-code-delete::before {
   content: "-";
-  color: rgb(185 28 28);
+  color: rgb(207 34 46);
 }
 
 /* --- refractor / Prism syntax colors (GitHub light palette) --- */
@@ -1044,7 +1123,7 @@
 .cocola-git-diff .token.constant,
 .cocola-git-diff .token.symbol,
 .cocola-git-diff .token.deleted {
-  color: rgb(0 92 197);
+  color: rgb(5 80 174);
 }
 
 .cocola-git-diff .token.selector,
@@ -1053,24 +1132,24 @@
 .cocola-git-diff .token.char,
 .cocola-git-diff .token.builtin,
 .cocola-git-diff .token.inserted {
-  color: rgb(3 47 98);
+  color: rgb(10 125 51);
 }
 
 .cocola-git-diff .token.operator,
 .cocola-git-diff .token.entity,
 .cocola-git-diff .token.url {
-  color: rgb(215 58 73);
+  color: rgb(207 34 46);
 }
 
 .cocola-git-diff .token.atrule,
 .cocola-git-diff .token.attr-value,
 .cocola-git-diff .token.keyword {
-  color: rgb(215 58 73);
+  color: rgb(207 34 46);
 }
 
 .cocola-git-diff .token.function,
 .cocola-git-diff .token.class-name {
-  color: rgb(111 66 193);
+  color: rgb(130 80 223);
 }
 
 .cocola-git-diff .token.regex,
@@ -1080,16 +1159,28 @@
 }
 
 .dark .cocola-git-diff {
-  --diff-gutter-insert-text-color: rgb(110 231 183);
-  --diff-gutter-delete-text-color: rgb(252 165 165);
+  --diff-gutter-insert-text-color: rgb(63 185 80);
+  --diff-gutter-delete-text-color: rgb(248 81 73);
+  --diff-code-insert-background-color: rgb(46 160 67 / 0.15);
+  --diff-code-delete-background-color: rgb(248 81 73 / 0.12);
+  --diff-code-insert-edit-background-color: rgb(46 160 67 / 0.4);
+  --diff-code-delete-edit-background-color: rgb(248 81 73 / 0.4);
 }
 
 .dark .cocola-git-diff .diff-code-insert::before {
-  color: rgb(110 231 183);
+  color: rgb(63 185 80);
+}
+
+.dark .cocola-git-diff .diff-code-insert {
+  box-shadow: inset 2px 0 rgb(63 185 80);
 }
 
 .dark .cocola-git-diff .diff-code-delete::before {
-  color: rgb(252 165 165);
+  color: rgb(248 81 73);
+}
+
+.dark .cocola-git-diff .diff-code-delete {
+  box-shadow: inset 2px 0 rgb(248 81 73);
 }
 
 /* --- refractor / Prism syntax colors (dark palette) --- */
@@ -1120,7 +1211,7 @@
 .dark .cocola-git-diff .token.char,
 .dark .cocola-git-diff .token.builtin,
 .dark .cocola-git-diff .token.inserted {
-  color: rgb(165 214 255);
+  color: rgb(126 231 135);
 }
 
 .dark .cocola-git-diff .token.operator,
@@ -1141,6 +1232,90 @@
 .dark .cocola-git-diff .token.important,
 .dark .cocola-git-diff .token.variable {
   color: rgb(255 166 87);
+}
+
+/* -------------------------------------------------------------------------
+   The app shell keeps class="dark" on <html> at all times, but the workspace
+   is wrapped in `.cocola-user-ui`, which resets the palette to LIGHT. The git
+   diff therefore renders on a light background, so it must use the LIGHT GitHub
+   palette here -- otherwise the `.dark` token rules above bleed through and put
+   bright green text on the pale-green insert lines (unreadable). These rules
+   match the HTML demo's light theme exactly.
+   ------------------------------------------------------------------------- */
+.cocola-user-ui .cocola-git-diff {
+  --diff-gutter-insert-text-color: rgb(26 127 55);
+  --diff-gutter-delete-text-color: rgb(207 34 46);
+  --diff-code-insert-background-color: rgb(230 255 236);
+  --diff-code-delete-background-color: rgb(255 235 233);
+  --diff-code-insert-edit-background-color: rgb(171 242 188);
+  --diff-code-delete-edit-background-color: rgb(255 129 130);
+}
+
+.cocola-user-ui .cocola-git-diff .diff-code-insert::before {
+  color: rgb(26 127 55);
+}
+
+.cocola-user-ui .cocola-git-diff .diff-code-insert {
+  box-shadow: inset 2px 0 rgb(26 127 55);
+}
+
+.cocola-user-ui .cocola-git-diff .diff-code-delete::before {
+  color: rgb(207 34 46);
+}
+
+.cocola-user-ui .cocola-git-diff .diff-code-delete {
+  box-shadow: inset 2px 0 rgb(207 34 46);
+}
+
+.cocola-user-ui .cocola-git-diff .token.comment,
+.cocola-user-ui .cocola-git-diff .token.prolog,
+.cocola-user-ui .cocola-git-diff .token.doctype,
+.cocola-user-ui .cocola-git-diff .token.cdata {
+  color: rgb(106 115 125);
+  font-style: italic;
+}
+
+.cocola-user-ui .cocola-git-diff .token.punctuation {
+  color: rgb(36 41 46);
+}
+
+.cocola-user-ui .cocola-git-diff .token.property,
+.cocola-user-ui .cocola-git-diff .token.tag,
+.cocola-user-ui .cocola-git-diff .token.boolean,
+.cocola-user-ui .cocola-git-diff .token.number,
+.cocola-user-ui .cocola-git-diff .token.constant,
+.cocola-user-ui .cocola-git-diff .token.symbol,
+.cocola-user-ui .cocola-git-diff .token.deleted {
+  color: rgb(5 80 174);
+}
+
+.cocola-user-ui .cocola-git-diff .token.selector,
+.cocola-user-ui .cocola-git-diff .token.attr-name,
+.cocola-user-ui .cocola-git-diff .token.string,
+.cocola-user-ui .cocola-git-diff .token.char,
+.cocola-user-ui .cocola-git-diff .token.builtin,
+.cocola-user-ui .cocola-git-diff .token.inserted {
+  color: rgb(10 125 51);
+}
+
+.cocola-user-ui .cocola-git-diff .token.operator,
+.cocola-user-ui .cocola-git-diff .token.entity,
+.cocola-user-ui .cocola-git-diff .token.url,
+.cocola-user-ui .cocola-git-diff .token.atrule,
+.cocola-user-ui .cocola-git-diff .token.attr-value,
+.cocola-user-ui .cocola-git-diff .token.keyword {
+  color: rgb(207 34 46);
+}
+
+.cocola-user-ui .cocola-git-diff .token.function,
+.cocola-user-ui .cocola-git-diff .token.class-name {
+  color: rgb(130 80 223);
+}
+
+.cocola-user-ui .cocola-git-diff .token.regex,
+.cocola-user-ui .cocola-git-diff .token.important,
+.cocola-user-ui .cocola-git-diff .token.variable {
+  color: rgb(227 98 9);
 }
 
 @media (prefers-reduced-motion: reduce) {

@@ -6,6 +6,7 @@ import {
   gitChangeCode,
   gitCommitBadges,
   gitCommitDescription,
+  gitDiffGutterWidth,
 } from "./git-history.mjs";
 
 test("formats recent and historical commit times", () => {
@@ -34,6 +35,14 @@ test("normalizes porcelain and name-status change codes", () => {
   assert.equal(gitChangeCode(".M"), "M");
   assert.equal(gitChangeCode("R100"), "R");
   assert.equal(gitChangeCode("?"), "A");
+});
+
+test("sizes diff gutters from the largest visible line number", () => {
+  assert.equal(gitDiffGutterWidth(0), "4.5ch");
+  assert.equal(gitDiffGutterWidth(999), "4.5ch");
+  assert.equal(gitDiffGutterWidth(1_000), "5.5ch");
+  assert.equal(gitDiffGutterWidth(100_000), "7.5ch");
+  assert.equal(gitDiffGutterWidth(Number.NaN), "4.5ch");
 });
 
 test("removes a repeated subject from the commit body", () => {

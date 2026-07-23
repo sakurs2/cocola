@@ -33,6 +33,7 @@ import {
   gitChangeCode,
   gitCommitBadges,
   gitCommitDescription,
+  gitDiffGutterWidth,
 } from "@/lib/git-history.mjs";
 import { MaterialFileIcon } from "@/lib/material-file-icons";
 import { Diff as DiffView, Hunk, parseDiff, tokenize } from "react-diff-view";
@@ -74,6 +75,7 @@ import {
   type LucideIcon,
 } from "lucide-react";
 import {
+  type CSSProperties,
   type KeyboardEvent,
   type PointerEvent,
   type ReactNode,
@@ -675,7 +677,7 @@ function GitPage({
   const unstagedChanges = changes.filter((change) => change.area !== "staged");
 
   return (
-    <div className="flex h-full min-h-0 flex-col bg-background">
+    <div className="cocola-git-panel flex h-full min-h-0 flex-col bg-background">
       <GitSnapshotHeader snapshot={snapshot} />
       {error ? (
         <div className="m-3 rounded-xl border border-red-500/20 bg-red-500/10 px-3 py-2 text-sm text-red-600">
@@ -766,36 +768,41 @@ function GitPage({
 }
 
 function GitSnapshotHeader({ snapshot }: { snapshot: GitSnapshot | null }) {
+  const capturedLabel = snapshot?.captured_at
+    ? `Captured ${formatGitRelativeTime(snapshot.captured_at)}`
+    : "No saved snapshot yet";
+  const revisionLabel =
+    snapshot?.base_sha && snapshot?.head_sha
+      ? `${snapshot.base_sha.slice(0, 7)} → ${snapshot.head_sha.slice(0, 7)}`
+      : "";
+
   return (
-    <div className="border-b border-border bg-muted/20 px-4 py-3">
-      <div className="flex items-center gap-2.5">
-        <span className="grid size-7 shrink-0 place-items-center rounded-lg bg-primary/10 text-primary">
-          <GitBranch className="size-4" />
-        </span>
-        <span className="min-w-0 flex-1 truncate text-[13.5px] font-semibold">
-          {snapshot?.branch || "Project branch"}
-        </span>
-        {snapshot?.ahead ? (
-          <span className="shrink-0 rounded-full bg-emerald-500/10 px-2 py-0.5 text-[10.5px] font-bold text-emerald-600 dark:text-emerald-400">
-            ↑ {snapshot.ahead} ahead
-          </span>
-        ) : null}
-      </div>
-      <div className="mt-2 flex items-center gap-2 pl-[38px] text-[11px] text-muted-foreground">
-        <span>
-          {snapshot?.captured_at
-            ? `Captured ${formatGitRelativeTime(snapshot.captured_at)}`
-            : "No saved snapshot yet"}
-        </span>
-        {snapshot?.base_sha && snapshot?.head_sha ? (
+    <div className="flex min-w-0 items-center gap-2 border-b border-border bg-muted/20 px-3 py-2">
+      <span className="grid size-6 shrink-0 place-items-center rounded-md bg-primary/10 text-primary">
+        <GitBranch className="size-3.5" />
+      </span>
+      <span className="shrink-0 truncate text-[13px] font-semibold">
+        {snapshot?.branch || "Project branch"}
+      </span>
+      <span
+        className="min-w-0 flex-1 truncate text-[10.5px] text-muted-foreground"
+        title={revisionLabel ? `${capturedLabel} · ${revisionLabel}` : capturedLabel}
+      >
+        {capturedLabel}
+        {revisionLabel ? (
           <>
-            <span className="size-[3px] rounded-full bg-current opacity-50" aria-hidden="true" />
-            <span className="truncate font-mono">
-              {snapshot.base_sha.slice(0, 7)} → {snapshot.head_sha.slice(0, 7)}
+            <span className="px-1.5 opacity-50" aria-hidden="true">
+              ·
             </span>
+            <span className="font-mono">{revisionLabel}</span>
           </>
         ) : null}
-      </div>
+      </span>
+      {snapshot?.ahead ? (
+        <span className="shrink-0 rounded-full bg-emerald-500/10 px-2 py-0.5 text-[10.5px] font-bold text-emerald-600 dark:text-emerald-400">
+          ↑ {snapshot.ahead} ahead
+        </span>
+      ) : null}
     </div>
   );
 }
@@ -847,7 +854,7 @@ function GitChangeRow({ change, onClick }: { change: GitChange; onClick: () => v
         className="flex size-4 shrink-0 items-center justify-center"
       />
       <span className="min-w-0 flex-1 truncate">
-        <span className="text-[12px] text-foreground">{name}</span>
+        <span className="text-[12.5px] text-foreground">{name}</span>
         {dir ? <span className="ml-1.5 text-[11px] text-muted-foreground/70">{dir}</span> : null}
       </span>
       <GitStatusLetter status={change.status} />
@@ -893,7 +900,10 @@ function gitAuthorInitials(name: string) {
     .trim()
     .split(/\s+/)
     .filter(Boolean);
-  const initials = parts.map((word) => word[0]).slice(0, 2).join("");
+  const initials = parts
+    .map((word) => word[0])
+    .slice(0, 2)
+    .join("");
   return (initials || "?").toUpperCase();
 }
 
@@ -919,13 +929,7 @@ function GitAuthorAvatar({ name, merge = false }: { name: string; merge?: boolea
   );
 }
 
-function GitRefBadges({
-  commit,
-  snapshot,
-}: {
-  commit: GitCommit;
-  snapshot: GitSnapshot | null;
-}) {
+function GitRefBadges({ commit, snapshot }: { commit: GitCommit; snapshot: GitSnapshot | null }) {
   const badges = gitCommitBadges(commit, snapshot);
   if (!badges.length) return null;
   return (
@@ -1164,8 +1168,7 @@ function ensureGitDiffLanguages() {
 // react-diff-view@3 expects refractor.highlight() to return a node array, but
 // refractor@4 returns a hast root object. Adapt by unwrapping .children.
 const gitDiffRefractor = {
-  highlight: (value: string, language: string) =>
-    refractor.highlight(value, language).children,
+  highlight: (value: string, language: string) => refractor.highlight(value, language).children,
 } as unknown as typeof refractor;
 
 function gitDiffLanguage(path: string): string | null {
@@ -1240,6 +1243,20 @@ function GitDiffPanel({ diff, onBack }: { diff: GitDiff; onBack: () => void }) {
     });
   }, [parsed.files, diff.path]);
 
+  const gutterWidth = useMemo(() => {
+    let maxLineNumber = 0;
+    for (const file of parsed.files) {
+      for (const hunk of file.hunks) {
+        maxLineNumber = Math.max(
+          maxLineNumber,
+          hunk.oldStart + Math.max(0, hunk.oldLines - 1),
+          hunk.newStart + Math.max(0, hunk.newLines - 1),
+        );
+      }
+    }
+    return gitDiffGutterWidth(maxLineNumber);
+  }, [parsed.files]);
+
   return (
     <div className="flex min-h-0 flex-1 flex-col">
       <div className="flex min-h-10 shrink-0 items-center gap-2 border-b border-border px-2">
@@ -1251,7 +1268,17 @@ function GitDiffPanel({ diff, onBack }: { diff: GitDiff; onBack: () => void }) {
         >
           <ArrowLeft className="size-4" />
         </button>
-        <span className="min-w-0 flex-1 truncate text-xs font-semibold">{diff.path}</span>
+        {(() => {
+          const s = diff.path.lastIndexOf("/");
+          const fileName = s < 0 ? diff.path : diff.path.slice(s + 1);
+          const fileDir = s < 0 ? "" : diff.path.slice(0, s + 1);
+          return (
+            <span className="min-w-0 flex-1 truncate font-mono text-[12px] text-muted-foreground">
+              {fileDir}
+              <span className="font-semibold text-foreground">{fileName}</span>
+            </span>
+          );
+        })()}
         <div
           className="flex rounded-md border border-border bg-muted/40 p-0.5 text-[10px]"
           aria-label="Diff layout"
@@ -1280,15 +1307,15 @@ function GitDiffPanel({ diff, onBack }: { diff: GitDiff; onBack: () => void }) {
           {parsed.error}
         </div>
       ) : parsed.files.length ? (
-        <div className="cocola-git-diff min-h-0 flex-1 overflow-auto bg-background text-xs">
+        <div
+          className="cocola-git-diff min-h-0 flex-1 overflow-auto bg-background text-xs"
+          style={{ "--cocola-diff-gutter-width": gutterWidth } as CSSProperties}
+        >
           {parsed.files.map((file, index) => (
             <div
               key={`${file.oldPath}:${file.newPath}:${index}`}
               className="border-b border-border last:border-b-0"
             >
-              <div className="sticky top-0 z-10 border-b border-border bg-muted/95 px-3 py-2 font-mono text-[10px] text-muted-foreground backdrop-blur">
-                {file.oldPath === file.newPath ? file.newPath : `${file.oldPath} → ${file.newPath}`}
-              </div>
               <DiffView
                 viewType={viewType}
                 diffType={file.type}

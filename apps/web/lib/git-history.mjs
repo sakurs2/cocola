@@ -47,6 +47,12 @@ export function gitChangeCode(status) {
   return normalized.slice(0, 1) || "M";
 }
 
+export function gitDiffGutterWidth(maxLineNumber) {
+  const normalized = Number.isFinite(maxLineNumber) ? Math.max(0, Math.floor(maxLineNumber)) : 0;
+  const digits = Math.max(1, String(normalized).length);
+  return `${Math.max(4.5, digits + 1.5)}ch`;
+}
+
 export function gitCommitDescription(commit) {
   const subject = String(commit?.subject ?? "").trim();
   const body = String(commit?.body ?? "").trim();
