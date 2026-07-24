@@ -51,171 +51,6 @@ def test_agent_shim_passes_mcp_servers_to_claude_options(monkeypatch):
     assert captured["skills"] == "all"
 
 
-def test_agent_shim_plan_options_disable_settings_and_mcp(monkeypatch):
-    captured = {}
-
-    class FakeClaudeAgentOptions:
-        def __init__(self, **kwargs):
-            captured.update(kwargs)
-
-    fake_sdk = types.SimpleNamespace(ClaudeAgentOptions=FakeClaudeAgentOptions)
-    monkeypatch.setitem(sys.modules, "claude_agent_sdk", fake_sdk)
-
-    module = _load_shim("cocola_agent_shim_plan_options")
-    module._build_options(
-        {
-            "prompt": "plan the change",
-            "permission_mode": "plan",
-            "mcp_servers": {
-                "github": {
-                    "type": "stdio",
-                    "command": "npx",
-                }
-            },
-        }
-    )
-
-    assert captured["setting_sources"] == []
-    assert captured["mcp_servers"] == {}
-    assert captured["strict_mcp_config"] is True
-    assert captured["skills"] == "all"
-
-
-def test_plan_capture_suppresses_exit_plan_mode_and_emits_one_plan():
-    module = _load_shim("cocola_agent_shim_plan_capture")
-    capture = module._ClaudePlanCapture()
-    progress = module._ClaudeTaskProgress()
-    assistant = type(
-        "AssistantMessage",
-        (),
-        {
-            "content": [
-                type("TextBlock", (), {"text": "<cocola_plan>## Plan\n\n- Inspect"})(),
-                type(
-                    "ToolUseBlock",
-                    (),
-                    {"id": "exit-1", "name": "ExitPlanMode", "input": {}},
-                )(),
-                type("TextBlock", (), {"text": "\n- Implement</cocola_plan>"})(),
-            ]
-        },
-    )()
-    tool_result = type(
-        "UserMessage",
-        (),
-        {
-            "content": [
-                type(
-                    "ToolResultBlock",
-                    (),
-                    {"tool_use_id": "exit-1", "is_error": False, "content": "Approved"},
-                )()
-            ]
-        },
-    )()
-
-    assert capture.message_events(assistant, progress) == []
-    assert capture.message_events(tool_result, progress) == []
-    assert capture.final_event() == {
-        "type": "plan_ready",
-        "content_markdown": "## Plan\n\n- Inspect\n- Implement",
-    }
-
-
-def test_plan_capture_uses_latest_native_exit_plan_mode_payload():
-    module = _load_shim("cocola_agent_shim_native_plan_capture")
-    capture = module._ClaudePlanCapture()
-    progress = module._ClaudeTaskProgress()
-    assistant = type(
-        "AssistantMessage",
-        (),
-        {
-            "content": [
-                type("TextBlock", (), {"text": "I inspected the project."})(),
-                type(
-                    "ToolUseBlock",
-                    (),
-                    {
-                        "id": "exit-1",
-                        "name": "ExitPlanMode",
-                        "input": {"plan": "## Initial plan"},
-                    },
-                )(),
-                type(
-                    "ToolUseBlock",
-                    (),
-                    {
-                        "id": "exit-2",
-                        "name": "ExitPlanMode",
-                        "input": {"plan": "## Revised plan\n\n- Implement safely"},
-                    },
-                )(),
-            ]
-        },
-    )()
-
-    assert capture.message_events(assistant, progress) == []
-    assert capture.final_event() == {
-        "type": "plan_ready",
-        "content_markdown": "## Revised plan\n\n- Implement safely",
-    }
-
-
-def test_plan_capture_returns_text_for_clarification_and_rejects_invalid_output():
-    module = _load_shim("cocola_agent_shim_plan_validation")
-    progress = module._ClaudeTaskProgress()
-
-    clarification = module._ClaudePlanCapture()
-    message = type(
-        "AssistantMessage",
-        (),
-        {"content": [type("TextBlock", (), {"text": "Which branch should I use?"})()]},
-    )()
-    clarification.message_events(message, progress)
-    assert clarification.final_event() == {
-        "type": "text",
-        "text": "Which branch should I use?",
-    }
-
-    invalid = module._ClaudePlanCapture()
-    message = type(
-        "AssistantMessage",
-        (),
-        {
-            "content": [
-                type(
-                    "TextBlock",
-                    (),
-                    {"text": "<cocola_plan>one</cocola_plan> trailing"},
-                )()
-            ]
-        },
-    )()
-    invalid.message_events(message, progress)
-    assert invalid.final_event()["code"] == "PLAN_OUTPUT_INVALID"
-
-    oversized = module._ClaudePlanCapture()
-    message = type(
-        "AssistantMessage",
-        (),
-        {
-            "content": [
-                type(
-                    "ToolUseBlock",
-                    (),
-                    {
-                        "id": "exit-large",
-                        "name": "ExitPlanMode",
-                        "input": {"plan": "x" * (128 * 1024 + 1)},
-                    },
-                )()
-            ]
-        },
-    )()
-    oversized.message_events(message, progress)
-    assert oversized.final_event()["code"] == "PLAN_OUTPUT_INVALID"
-
-
 async def test_agent_shim_streams_mcp_status_without_blocking_query(monkeypatch):
     captured: dict[str, object] = {}
     calls: list[str] = []
@@ -246,6 +81,9 @@ async def test_agent_shim_streams_mcp_status_without_blocking_query(monkeypatch)
                     }
                 ]
             }
+
+        async def set_permission_mode(self, mode):
+            calls.append(f"permission:{mode}")
 
         async def query(self, prompt):
             calls.append("query")
@@ -281,7 +119,7 @@ async def test_agent_shim_streams_mcp_status_without_blocking_query(monkeypatch)
     )
 
     assert captured["prompt"] == "/weather\n\nweather?"
-    assert calls[:2] == ["query", "status"]
+    assert calls[:3] == ["permission:bypassPermissions", "query", "status"]
     snapshots = [event for event in emitted if event.get("type") == "environment_status"]
     assert [snapshot["phase"] for snapshot in snapshots] == ["preparing", "ready"]
     assert snapshots[-1]["components"] == [
@@ -304,26 +142,35 @@ async def test_agent_shim_skips_mcp_status_on_resumed_turn(monkeypatch):
         def __init__(self, **kwargs):
             captured["options"] = kwargs
 
-    class UnexpectedClaudeSDKClient:
-        def __init__(self, **_kwargs):
-            raise AssertionError("resumed turns must use the one-shot SDK path")
+    class FakeClaudeSDKClient:
+        def __init__(self, *, options):
+            captured["client_options"] = options
 
-    async def fake_query(*, prompt, options):
-        captured["prompt"] = prompt
-        captured["client_options"] = options
-        result_type = type("ResultMessage", (), {})
-        result = result_type()
-        result.is_error = False
-        result.num_turns = 1
-        result.total_cost_usd = 0
-        result.session_id = "claude-session"
-        result.result = "done"
-        yield result
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *_args):
+            return None
+
+        async def set_permission_mode(self, mode):
+            captured["permission_mode"] = mode
+
+        async def query(self, prompt):
+            captured["prompt"] = prompt
+
+        async def receive_response(self):
+            result_type = type("ResultMessage", (), {})
+            result = result_type()
+            result.is_error = False
+            result.num_turns = 1
+            result.total_cost_usd = 0
+            result.session_id = "claude-session"
+            result.result = "done"
+            yield result
 
     fake_sdk = types.SimpleNamespace(
         ClaudeAgentOptions=FakeClaudeAgentOptions,
-        ClaudeSDKClient=UnexpectedClaudeSDKClient,
-        query=fake_query,
+        ClaudeSDKClient=FakeClaudeSDKClient,
     )
     monkeypatch.setitem(sys.modules, "claude_agent_sdk", fake_sdk)
 
@@ -341,6 +188,7 @@ async def test_agent_shim_skips_mcp_status_on_resumed_turn(monkeypatch):
 
     assert captured["prompt"] == "and tomorrow?"
     assert captured["options"]["resume"] == "claude-session"
+    assert captured["permission_mode"] == "bypassPermissions"
     assert not [event for event in emitted if event.get("type") == "environment_status"]
     assert emitted[-1]["type"] == "done"
     assert emitted[-1]["session_id"] == "claude-session"

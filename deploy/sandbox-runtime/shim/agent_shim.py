@@ -35,11 +35,12 @@ Auth/routing come from the exec environment injected by the provider. The shim
 does not read credentials from the JSON request, so they never transit the
 prompt channel or logs.
 
-The agent runs with the FULL native Claude Code toolset (no MCP forwarding, no
-disallowed_tools): native Bash/Read/Write/Edit are isolated to this container
-by construction. permission_mode defaults to "bypassPermissions" because there
-is no interactive human in the sandbox to approve a prompt -- the security
-boundary is the container + network egress allowlist, not a per-tool prompt.
+Execute runs use the full native Claude Code toolset inside the container.
+Plan runs keep Claude's native read-only permission mode, remove user MCP
+servers, disable write/subagent tools, and install one trusted in-process Cocola
+control server. permission_mode defaults to "bypassPermissions" because Execute
+runs have no interactive permission prompt; their security boundary is the
+container plus the network egress allowlist.
 """
 
 from __future__ import annotations
@@ -80,7 +81,11 @@ def _read_request() -> dict[str, Any]:
     return req
 
 
-def _build_options(req: dict[str, Any]):
+def _build_options(
+    req: dict[str, Any],
+    *,
+    plan_control: _ClaudePlanControl | None = None,
+):
     """Translate a Request into ClaudeAgentOptions.
 
     Imported lazily so `--selfcheck` can run without the SDK installed.
@@ -134,8 +139,14 @@ def _build_options(req: dict[str, Any]):
     if req.get("resume"):
         kwargs["resume"] = req["resume"]
     if plan_mode:
-        kwargs["mcp_servers"] = {}
+        control = plan_control or _ClaudePlanControl()
+        kwargs["mcp_servers"] = {
+            _PLAN_CONTROL_SERVER: control.sdk_server(claude_agent_sdk),
+        }
         kwargs["strict_mcp_config"] = True
+        kwargs["allowed_tools"] = list(_PLAN_CONTROL_TOOL_NAMES)
+        kwargs["disallowed_tools"] = list(_PLAN_DISALLOWED_TOOLS)
+        kwargs["can_use_tool"] = control.can_use_tool
     elif isinstance(req.get("mcp_servers"), dict) and req["mcp_servers"]:
         kwargs["mcp_servers"] = req["mcp_servers"]
         kwargs["strict_mcp_config"] = True
@@ -155,8 +166,26 @@ def _claude_prompt(req: dict[str, Any]) -> str:
 # the SSE stream and client memory bounded.
 _TOOL_RESULT_MAX_CHARS = 4000
 _PLAN_MAX_BYTES = 128 * 1024
-_PLAN_BLOCK = re.compile(r"<cocola_plan>(.*?)</cocola_plan>", re.DOTALL)
 _PLAN_INVALID_ERROR = "Claude did not return a reviewable plan. Refine the request and try again."
+_PLAN_CONTROL_SERVER = "cocola_control"
+_PLAN_CONTROL_TOOLS = (
+    "cocola_submit_plan",
+    "cocola_request_clarification",
+    "cocola_get_runtime_info",
+)
+_PLAN_CONTROL_TOOL_NAMES = tuple(
+    f"mcp__{_PLAN_CONTROL_SERVER}__{name}" for name in _PLAN_CONTROL_TOOLS
+)
+_PLAN_DISALLOWED_TOOLS = (
+    "ExitPlanMode",
+    "AskUserQuestion",
+    "Write",
+    "Edit",
+    "MultiEdit",
+    "NotebookEdit",
+    "Agent",
+    "Task",
+)
 _MCP_STATUS_TIMEOUT_SECONDS = 8.0
 _MCP_STATUS_POLL_SECONDS = (0.5, 1.0, 2.0)
 _MCP_TERMINAL_STATUSES = {"connected", "failed", "needs-auth", "disabled"}
@@ -472,6 +501,7 @@ class _ClaudeTaskProgress:
 def _block_to_event(
     block: Any,
     task_progress: _ClaudeTaskProgress | None = None,
+    tool_outcomes: _ClaudePlanControl | None = None,
 ) -> dict[str, Any] | None:
     """Map one SDK content block to a transport event, or None to skip.
 
@@ -491,6 +521,11 @@ def _block_to_event(
     if bcls in ("ToolUseBlock", "ServerToolUseBlock"):
         name = getattr(block, "name", None)
         tool_input = getattr(block, "input", None)
+        if tool_outcomes is not None:
+            tool_outcomes.observe_tool_use(
+                getattr(block, "id", None),
+                name,
+            )
         if task_progress is not None:
             handled, event = task_progress.handle_tool_use(
                 name,
@@ -517,6 +552,11 @@ def _block_to_event(
             "type": "tool_result",
             "tool_use_id": tool_use_id or None,
             "is_error": is_error,
+            "outcome": (
+                tool_outcomes.tool_outcome(tool_use_id, is_error)
+                if tool_outcomes is not None
+                else ("failed" if is_error else "success")
+            ),
             "content": _tool_result_content(content),
         }
     return None
@@ -560,18 +600,246 @@ def _message_to_events(
     return events
 
 
-class _ClaudePlanCapture:
-    """Hold plan text until it can be validated as one reviewable plan."""
+class _ClaudePlanControl:
+    """Own the trusted, structured terminal protocol for one Plan run."""
 
     def __init__(self) -> None:
-        self._text: list[str] = []
-        self._result_text = ""
-        self._exit_plan_tool_ids: set[str] = set()
-        self._native_plan_text = ""
+        self._terminal_event: dict[str, Any] | None = None
+        self._runtime_failed = False
+        self._internal_tool_ids: set[str] = set()
+        self._tool_outcomes: dict[str, str] = {}
 
     @staticmethod
-    def _canonical_tool_name(value: Any) -> str:
-        return re.sub(r"[^a-z0-9]", "", str(value or "").lower())
+    def _tool_result(message: str, *, is_error: bool = False) -> dict[str, Any]:
+        return {
+            "content": [{"type": "text", "text": message}],
+            "is_error": is_error,
+        }
+
+    def _set_terminal(self, event: dict[str, Any]) -> dict[str, Any]:
+        if self._terminal_event is not None:
+            return self._tool_result(
+                "A Plan run can submit only one plan or clarification request.",
+                is_error=True,
+            )
+        self._terminal_event = event
+        return self._tool_result("Cocola recorded the Plan run result.")
+
+    async def submit_plan(self, args: dict[str, Any]) -> dict[str, Any]:
+        content = args.get("content_markdown")
+        if not isinstance(content, str):
+            return self._tool_result(
+                "content_markdown must be a non-empty Markdown string.",
+                is_error=True,
+            )
+        content = content.strip()
+        if not content or len(content.encode("utf-8")) > _PLAN_MAX_BYTES:
+            return self._tool_result(_PLAN_INVALID_ERROR, is_error=True)
+        return self._set_terminal(
+            {
+                "type": "plan_ready",
+                "content_markdown": content,
+            }
+        )
+
+    async def request_clarification(self, args: dict[str, Any]) -> dict[str, Any]:
+        question = args.get("question")
+        if not isinstance(question, str) or not question.strip():
+            return self._tool_result(
+                "question must be a non-empty string.",
+                is_error=True,
+            )
+        question = question.strip()
+        if len(question.encode("utf-8")) > 16 * 1024:
+            return self._tool_result("question is too large.", is_error=True)
+
+        raw_options = args.get("options", [])
+        if raw_options is None:
+            raw_options = []
+        if not isinstance(raw_options, list) or len(raw_options) > 8:
+            return self._tool_result(
+                "options must be an array containing at most eight strings.",
+                is_error=True,
+            )
+        options: list[str] = []
+        for raw_option in raw_options:
+            if not isinstance(raw_option, str) or not raw_option.strip():
+                return self._tool_result(
+                    "each clarification option must be a non-empty string.",
+                    is_error=True,
+                )
+            option = raw_option.strip()
+            if len(option.encode("utf-8")) > 1024:
+                return self._tool_result(
+                    "each clarification option must not exceed 1 KiB.",
+                    is_error=True,
+                )
+            options.append(option)
+
+        text = question
+        if options:
+            text += "\n\n" + "\n".join(f"- {option}" for option in options)
+        return self._set_terminal(
+            {
+                "type": "clarification_required",
+                "question": question,
+                "options": options,
+                "text": text,
+            }
+        )
+
+    async def get_runtime_info(self, _args: dict[str, Any]) -> dict[str, Any]:
+        versions: dict[str, dict[str, str]] = {
+            "python": {"status": "available", "version": sys.version.split()[0]},
+        }
+        for name, argv in (
+            ("claude_code", ("claude", "--version")),
+            ("node", ("node", "--version")),
+            ("npm", ("npm", "--version")),
+        ):
+            versions[name] = await self._fixed_command_version(argv)
+        return self._tool_result(
+            json.dumps(
+                {
+                    "cwd": os.getcwd(),
+                    "versions": versions,
+                },
+                ensure_ascii=False,
+                separators=(",", ":"),
+            )
+        )
+
+    @staticmethod
+    async def _fixed_command_version(argv: tuple[str, ...]) -> dict[str, str]:
+        try:
+            process = await asyncio.create_subprocess_exec(
+                *argv,
+                stdin=asyncio.subprocess.DEVNULL,
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.PIPE,
+            )
+        except FileNotFoundError:
+            return {"status": "unavailable"}
+        try:
+            stdout, stderr = await asyncio.wait_for(process.communicate(), timeout=3.0)
+        except TimeoutError:
+            with contextlib.suppress(ProcessLookupError):
+                process.kill()
+            with contextlib.suppress(TimeoutError):
+                await asyncio.wait_for(process.communicate(), timeout=1.0)
+            return {"status": "timeout"}
+        output = (stdout if process.returncode == 0 else stderr).decode(errors="replace")
+        version = output.strip().splitlines()[0] if output.strip() else ""
+        if process.returncode != 0:
+            return {"status": "failed"}
+        return {"status": "available", "version": version[:200]}
+
+    def sdk_server(self, sdk: Any) -> Any:
+        annotations = sdk.ToolAnnotations(
+            readOnlyHint=True,
+            destructiveHint=False,
+            idempotentHint=True,
+            openWorldHint=False,
+        )
+
+        @sdk.tool(
+            "cocola_submit_plan",
+            "Submit one complete Markdown plan to Cocola for user review.",
+            {
+                "type": "object",
+                "properties": {"content_markdown": {"type": "string"}},
+                "required": ["content_markdown"],
+                "additionalProperties": False,
+            },
+            annotations=annotations,
+        )
+        async def submit_plan(args: dict[str, Any]) -> dict[str, Any]:
+            return await self.submit_plan(args)
+
+        @sdk.tool(
+            "cocola_request_clarification",
+            "Ask the user one concise question before completing the plan.",
+            {
+                "type": "object",
+                "properties": {
+                    "question": {"type": "string"},
+                    "options": {
+                        "type": "array",
+                        "items": {"type": "string"},
+                        "maxItems": 8,
+                    },
+                },
+                "required": ["question"],
+                "additionalProperties": False,
+            },
+            annotations=annotations,
+        )
+        async def request_clarification(args: dict[str, Any]) -> dict[str, Any]:
+            return await self.request_clarification(args)
+
+        @sdk.tool(
+            "cocola_get_runtime_info",
+            "Return trusted Cocola runtime versions without using shell tools.",
+            {
+                "type": "object",
+                "properties": {},
+                "additionalProperties": False,
+            },
+            annotations=annotations,
+        )
+        async def get_runtime_info(args: dict[str, Any]) -> dict[str, Any]:
+            return await self.get_runtime_info(args)
+
+        return sdk.create_sdk_mcp_server(
+            name=_PLAN_CONTROL_SERVER,
+            version="1.0.0",
+            tools=[submit_plan, request_clarification, get_runtime_info],
+        )
+
+    async def can_use_tool(
+        self,
+        tool_name: str,
+        tool_input: dict[str, Any],
+        context: Any,
+    ) -> Any:
+        import claude_agent_sdk
+
+        if tool_name in _PLAN_CONTROL_TOOL_NAMES:
+            return claude_agent_sdk.PermissionResultAllow(updated_input=tool_input)
+        tool_use_id = str(getattr(context, "tool_use_id", "") or "")
+        if tool_use_id:
+            self._tool_outcomes[tool_use_id] = "permission_denied"
+        return claude_agent_sdk.PermissionResultDeny(
+            message="This tool is not permitted in Cocola Plan Mode."
+        )
+
+    def observe_tool_use(self, tool_use_id: Any, tool_name: Any) -> None:
+        identifier = str(tool_use_id or "")
+        name = str(tool_name or "")
+        if not identifier:
+            return
+        if name in _PLAN_CONTROL_TOOL_NAMES:
+            self._internal_tool_ids.add(identifier)
+        elif name in _PLAN_DISALLOWED_TOOLS:
+            self._tool_outcomes[identifier] = "permission_denied"
+
+    def is_internal_tool_use(self, block: Any) -> bool:
+        name = str(getattr(block, "name", "") or "")
+        identifier = str(getattr(block, "id", "") or "")
+        if name not in _PLAN_CONTROL_TOOL_NAMES:
+            return False
+        if identifier:
+            self._internal_tool_ids.add(identifier)
+        return True
+
+    def is_internal_tool_result(self, block: Any) -> bool:
+        identifier = str(getattr(block, "tool_use_id", "") or "")
+        return bool(identifier and identifier in self._internal_tool_ids)
+
+    def tool_outcome(self, tool_use_id: str, is_error: bool) -> str:
+        if not is_error:
+            return "success"
+        return self._tool_outcomes.get(tool_use_id, "failed")
 
     def message_events(
         self,
@@ -587,41 +855,23 @@ class _ClaudePlanCapture:
             for block in content:
                 block_class = type(block).__name__
                 if message_class == "AssistantMessage" and block_class == "TextBlock":
-                    self._text.append(str(getattr(block, "text", "") or ""))
                     continue
-                if (
-                    block_class
-                    in (
-                        "ToolUseBlock",
-                        "ServerToolUseBlock",
-                    )
-                    and self._canonical_tool_name(getattr(block, "name", "")) == "exitplanmode"
+                if block_class in ("ToolUseBlock", "ServerToolUseBlock") and (
+                    self.is_internal_tool_use(block)
                 ):
-                    tool_id = str(getattr(block, "id", "") or "")
-                    if tool_id:
-                        self._exit_plan_tool_ids.add(tool_id)
-                    tool_input = getattr(block, "input", None)
-                    if isinstance(tool_input, dict):
-                        native_plan = tool_input.get("plan")
-                        if isinstance(native_plan, str) and native_plan.strip():
-                            # Claude Code's native Plan Mode returns the
-                            # reviewable plan in ExitPlanMode rather than as
-                            # assistant text. Keep the latest payload in case
-                            # Claude retries the tool with a revised plan.
-                            self._native_plan_text = native_plan
                     continue
-                if block_class in ("ToolResultBlock", "ServerToolResultBlock"):
-                    tool_use_id = str(getattr(block, "tool_use_id", "") or "")
-                    if tool_use_id in self._exit_plan_tool_ids:
-                        continue
-                event = _block_to_event(block, task_progress)
+                if block_class in (
+                    "ToolResultBlock",
+                    "ServerToolResultBlock",
+                ) and self.is_internal_tool_result(block):
+                    continue
+                event = _block_to_event(block, task_progress, self)
                 if event is not None:
                     events.append(event)
             return events
         if message_class == "ResultMessage":
             result = getattr(message, "result", None)
-            if isinstance(result, str):
-                self._result_text = result
+            self._runtime_failed = bool(getattr(message, "is_error", False))
             events.append(
                 {
                     "type": "result",
@@ -638,40 +888,16 @@ class _ClaudePlanCapture:
         return events
 
     def final_event(self) -> dict[str, Any] | None:
-        text = "".join(self._text)
-        if not text:
-            text = self._result_text
-        matches = list(_PLAN_BLOCK.finditer(text))
-        has_plan_markup = "<cocola_plan" in text or "</cocola_plan" in text
-        if not matches and not has_plan_markup:
-            native_plan = self._native_plan_text.strip()
-            if native_plan:
-                return self._plan_event(native_plan)
-            return {"type": "text", "text": text} if text else None
-        if (
-            len(matches) != 1
-            or text[: matches[0].start()].strip()
-            or text[matches[0].end() :].strip()
-        ):
-            return {
-                "type": "error",
-                "stage": "plan",
-                "code": "PLAN_OUTPUT_INVALID",
-                "error": _PLAN_INVALID_ERROR,
-            }
-        content = matches[0].group(1).strip()
-        return self._plan_event(content)
-
-    @staticmethod
-    def _plan_event(content: str) -> dict[str, Any]:
-        if not content or len(content.encode("utf-8")) > _PLAN_MAX_BYTES:
-            return {
-                "type": "error",
-                "stage": "plan",
-                "code": "PLAN_OUTPUT_INVALID",
-                "error": _PLAN_INVALID_ERROR,
-            }
-        return {"type": "plan_ready", "content_markdown": content}
+        if self._terminal_event is not None:
+            return dict(self._terminal_event)
+        if self._runtime_failed:
+            return None
+        return {
+            "type": "error",
+            "stage": "plan",
+            "code": "PLAN_OUTPUT_INVALID",
+            "error": _PLAN_INVALID_ERROR,
+        }
 
 
 def _mcp_configs(req: dict[str, Any]) -> dict[str, dict[str, Any]]:
@@ -782,20 +1008,21 @@ async def _watch_mcp_status(client: Any, req: dict[str, Any]) -> None:
 async def _run_claude(req: dict[str, Any]) -> int:
     import claude_agent_sdk
 
-    options = _build_options(req)
+    permission_mode = req.get("permission_mode") or "bypassPermissions"
+    plan_control = _ClaudePlanControl() if permission_mode == "plan" else None
+    options = _build_options(req, plan_control=plan_control)
     prompt = _claude_prompt(req)
     _emit({"type": "start", "ts": time.time()})
 
     last_session_id: str | None = None
     task_progress = _ClaudeTaskProgress()
-    plan_capture = _ClaudePlanCapture() if req.get("permission_mode") == "plan" else None
 
     async def relay(messages: Any) -> None:
         nonlocal last_session_id
         async for message in messages:
             events = (
-                plan_capture.message_events(message, task_progress)
-                if plan_capture is not None
+                plan_control.message_events(message, task_progress)
+                if plan_control is not None
                 else _message_to_events(message, task_progress)
             )
             for ev in events:
@@ -803,24 +1030,24 @@ async def _run_claude(req: dict[str, Any]) -> int:
                     last_session_id = ev["session_id"]
                 _emit(ev)
 
-    if req.get("resume"):
-        await relay(claude_agent_sdk.query(prompt=prompt, options=options))
-    else:
+    report_environment = not req.get("resume")
+    if report_environment:
         _emit(_environment_status_event(req))
-        status_task: asyncio.Task[None] | None = None
-        async with claude_agent_sdk.ClaudeSDKClient(options=options) as client:
-            if _mcp_configs(req):
-                status_task = asyncio.create_task(_watch_mcp_status(client, req))
-            try:
-                await client.query(prompt)
-                await relay(client.receive_response())
-            finally:
-                if status_task is not None:
-                    if not status_task.done():
-                        status_task.cancel()
-                    await asyncio.gather(status_task, return_exceptions=True)
+    status_task: asyncio.Task[None] | None = None
+    async with claude_agent_sdk.ClaudeSDKClient(options=options) as client:
+        await client.set_permission_mode(permission_mode)
+        if report_environment and plan_control is None and _mcp_configs(req):
+            status_task = asyncio.create_task(_watch_mcp_status(client, req))
+        try:
+            await client.query(prompt)
+            await relay(client.receive_response())
+        finally:
+            if status_task is not None:
+                if not status_task.done():
+                    status_task.cancel()
+                await asyncio.gather(status_task, return_exceptions=True)
 
-    if plan_capture is not None and (final_event := plan_capture.final_event()):
+    if plan_control is not None and (final_event := plan_control.final_event()):
         _emit(final_event)
 
     # The final done event carries the session_id so the caller can persist the

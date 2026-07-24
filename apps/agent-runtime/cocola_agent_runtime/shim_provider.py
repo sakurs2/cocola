@@ -78,12 +78,19 @@ def _shim_event_to_agent_events(ev: dict) -> list[AgentEvent]:
             )
         ]
     if t == "tool_result":
+        is_error = bool(ev.get("is_error", False))
+        outcome = str(ev.get("outcome") or "").strip()
+        if not is_error:
+            outcome = "success"
+        elif outcome not in {"permission_denied", "unavailable", "failed", "timeout"}:
+            outcome = "failed"
         return [
             AgentEvent(
                 kind="tool_result",
                 data={
                     "tool_use_id": ev.get("tool_use_id", ""),
-                    "is_error": bool(ev.get("is_error", False)),
+                    "is_error": is_error,
+                    "outcome": outcome,
                     "content": ev.get("content", ""),
                 },
             )
@@ -147,6 +154,18 @@ def _shim_event_to_agent_events(ev: dict) -> list[AgentEvent]:
                 kind="plan_ready",
                 data={
                     "content_markdown": str(ev.get("content_markdown") or ""),
+                },
+            )
+        ]
+    if t == "clarification_required":
+        options = ev.get("options") if isinstance(ev.get("options"), list) else []
+        return [
+            AgentEvent(
+                kind="clarification_required",
+                data={
+                    "question": str(ev.get("question") or ""),
+                    "options": options,
+                    "text": str(ev.get("text") or ""),
                 },
             )
         ]

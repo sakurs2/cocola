@@ -305,11 +305,12 @@ if [ -n "${ANTHROPIC_BASE_URL:-}" ] && [ -n "${ANTHROPIC_AUTH_TOKEN:-}" ]; then
 
   if [ -n "$PLAN_CONTENT" ] && [ -n "$PLAN_SESSION_ID" ]; then
     note "Plan approval: resume the same Claude session and execute the reviewed plan"
-    APPROVED_PROMPT="$(jq -nr \
-      --arg plan_id "runtime-verify-plan" \
-      --arg version "1" \
-      --arg content "$PLAN_CONTENT" \
-      '"The user approved Cocola Plan \($plan_id) version \($version). Execute the approved plan now in the same Claude session. Do not create or revise a plan unless execution is blocked.\n\n<approved_cocola_plan>\n\($content)\n</approved_cocola_plan>"')"
+	    APPROVED_PROMPT="$(jq -nr \
+	      --arg plan_id "runtime-verify-plan" \
+	      --arg version "1" \
+	      --arg content "$PLAN_CONTENT" \
+	      '{plan_id:$plan_id,version:($version | tonumber),content_markdown:$content} |
+	      "The user approved the Cocola plan in the JSON payload below. Execute it now in the same Claude session. Do not create or revise a plan unless execution is blocked.\n\n\(tojson)"')"
     EXECUTE_REQUEST="$(jq -nc \
       --arg prompt "$APPROVED_PROMPT" \
       --arg resume "$PLAN_SESSION_ID" \

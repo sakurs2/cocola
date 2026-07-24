@@ -12,7 +12,8 @@ import (
 // straight through convertMessage.
 //
 // Event vocabulary (kind): environment_prepare | environment_status |
-// memory_recall | text | thinking | tool_use | tool_result | file | plan_ready | error;
+// memory_recall | text | thinking | tool_use | tool_result | file | plan_ready |
+// clarification_required | error;
 // result / system / sandbox / done carry no message-body content and are dropped
 // (identical to the frontend).
 type Reducer struct {
@@ -50,13 +51,20 @@ func (r *Reducer) Apply(kind string, data map[string]string) {
 			ArgsText:   data["input"],
 		})
 	case "tool_result":
-		r.fillToolResult(data["tool_use_id"], data["content"], truthy(data["is_error"]))
+		r.fillToolResult(
+			data["tool_use_id"],
+			data["content"],
+			truthy(data["is_error"]),
+			toolOutcome(data["outcome"], truthy(data["is_error"])),
+		)
 	case "file":
 		r.appendFile(data)
 	case "progress":
 		r.upsertProgress(data["id"], data["items"])
 	case "plan_ready":
 		r.upsertPlan(data)
+	case "clarification_required":
+		r.appendText(PartText, data["text"])
 	case "error":
 		r.appendText(PartText, "\n\n⚠️ "+errText(data))
 	default:
@@ -266,12 +274,13 @@ func (r *Reducer) appendText(kind, chunk string) {
 
 // fillToolResult pairs a tool_result back onto its tool_use by id. If unmatched,
 // it surfaces the content as text so nothing is silently lost (frontend parity).
-func (r *Reducer) fillToolResult(toolUseID, content string, isErr bool) {
+func (r *Reducer) fillToolResult(toolUseID, content string, isErr bool, outcome string) {
 	for i := range r.parts {
 		if r.parts[i].Type == PartToolCall && r.parts[i].ToolCallID == toolUseID {
 			c := content
 			r.parts[i].Result = &c
 			r.parts[i].IsError = isErr
+			r.parts[i].ToolOutcome = outcome
 			return
 		}
 	}
@@ -279,6 +288,18 @@ func (r *Reducer) fillToolResult(toolUseID, content string, isErr bool) {
 		r.appendText(PartText, "\n[tool error] "+content+"\n")
 	} else {
 		r.appendText(PartText, "\n[tool result] "+content+"\n")
+	}
+}
+
+func toolOutcome(outcome string, isErr bool) string {
+	if !isErr {
+		return "success"
+	}
+	switch outcome {
+	case "permission_denied", "unavailable", "failed", "timeout":
+		return outcome
+	default:
+		return "failed"
 	}
 }
 

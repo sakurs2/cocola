@@ -57,6 +57,7 @@ type UiToolCall = {
   argsText: string;
   result?: string;
   isError?: boolean;
+  outcome?: "success" | "permission_denied" | "unavailable" | "failed" | "timeout";
 };
 
 export type ArtifactPreview = {
@@ -793,12 +794,21 @@ function fillToolResult(
   toolUseId: string,
   content: string,
   isError: boolean,
+  outcome?: string,
 ): UiPart[] {
+  const normalizedOutcome: UiToolCall["outcome"] = !isError
+    ? "success"
+    : outcome === "permission_denied" ||
+        outcome === "unavailable" ||
+        outcome === "failed" ||
+        outcome === "timeout"
+      ? outcome
+      : "failed";
   let matched = false;
   const next = parts.map((p) => {
     if (p.type === "tool-call" && p.toolCallId === toolUseId) {
       matched = true;
-      return { ...p, result: content, isError };
+      return { ...p, result: content, isError, outcome: normalizedOutcome };
     }
     return p;
   });
@@ -914,6 +924,8 @@ function reducePart(parts: UiPart[], ev: AgentEvent): UiPart[] {
       return upsertSCMApproval(parts, d);
     case "plan_ready":
       return upsertPlan(parts, d);
+    case "clarification_required":
+      return appendTo(parts, "text", d.text ?? "");
     case "text":
       return appendTo(parts, "text", d.text ?? "");
     case "thinking":
@@ -929,7 +941,13 @@ function reducePart(parts: UiPart[], ev: AgentEvent): UiPart[] {
         },
       ];
     case "tool_result":
-      return fillToolResult(parts, d.tool_use_id ?? "", d.content ?? "", isTruthy(d.is_error));
+      return fillToolResult(
+        parts,
+        d.tool_use_id ?? "",
+        d.content ?? "",
+        isTruthy(d.is_error),
+        d.outcome,
+      );
     case "file":
       return [
         ...parts,
@@ -1024,7 +1042,13 @@ function convertMessage(message: UiMessage): ThreadMessageLike {
       toolCallId: p.toolCallId,
       toolName: p.toolName,
       argsText: p.argsText,
-      ...(p.result !== undefined ? { result: p.result, isError: p.isError } : {}),
+      ...(p.result !== undefined
+        ? {
+            result: p.result,
+            isError: p.isError,
+            artifact: { cocolaToolOutcome: p.outcome },
+          }
+        : {}),
     };
   });
   return {

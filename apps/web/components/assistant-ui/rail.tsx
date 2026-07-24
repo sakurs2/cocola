@@ -40,7 +40,7 @@ import { type EnvironmentPreparationSnapshot } from "@/lib/environment";
 import { resolveFileType } from "@/lib/file-type";
 import { MaterialFileIcon } from "@/lib/material-file-icons";
 import { normalizeProgressItems } from "@/lib/progress-items.mjs";
-import { isCommandTool } from "@/lib/tool-failure.mjs";
+import { isCommandTool, toolOutcomeLabel } from "@/lib/tool-failure.mjs";
 
 // All rail action icons come from Phosphor; reuse its component type so the
 // `weight` prop (duotone/bold/...) type-checks.
@@ -615,20 +615,19 @@ export const RailTool: FC<{
   argsText?: string;
   result?: unknown;
   isError?: boolean;
+  outcome?: string;
   running?: boolean;
-}> = ({ toolName, argsText, result, isError, running }) => {
+}> = ({ toolName, argsText, result, isError, outcome, running }) => {
   const meta = getToolMeta(toolName);
   const Icon = meta.icon;
   const chips = extractToolChips(argsText ?? "");
   const command = extractCommand(argsText ?? "");
   const commandFailure = Boolean(isError && isCommandTool(toolName));
   const failureOutput = isError ? formatPayload(result) : undefined;
-  const label = isError
-    ? commandFailure
-      ? "Command failed"
-      : "Tool call failed"
-    : running
-      ? meta.running
+  const label = running
+    ? meta.running
+    : isError
+      ? toolOutcomeLabel(toolName, outcome, true)
       : meta.done;
   const hasArgs = Boolean((argsText ?? "").trim());
   // Rich result cards only for web-search/fetch tools once their result lands.

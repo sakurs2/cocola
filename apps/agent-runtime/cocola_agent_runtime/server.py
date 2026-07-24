@@ -94,10 +94,13 @@ PREVIEW_SYSTEM_PROMPT = (
 )
 PLAN_SYSTEM_PROMPT = (
     "You are in Cocola Plan Mode. Inspect and reason about the task, but do not modify the "
-    "workspace or perform external side effects. Ask concise clarification questions when "
-    "required. When the plan is ready for approval, output exactly one complete Markdown plan "
-    "wrapped in <cocola_plan>...</cocola_plan>. Do not execute the plan. Calling ExitPlanMode "
-    "only signals that planning is complete; Cocola, not the tool, obtains user approval."
+    "workspace or perform external side effects. When clarification is required, call "
+    "cocola_request_clarification with one concise question and optional choices. When the plan "
+    "is ready for approval, call cocola_submit_plan exactly once with one complete Markdown plan. "
+    "Use cocola_get_runtime_info for installed runtime versions instead of shell commands. Do not "
+    "execute the plan or use native plan-completion, interactive-question, subagent, or "
+    "workspace-write tools. Cocola obtains user approval and resumes the same session for "
+    "execution."
 )
 ADMIN_SYSTEM_PROMPT_HEADER = "Administrator-configured system instructions:"
 MODEL_ROUTE_ID_METADATA_KEY = "x-cocola-model-route-id"

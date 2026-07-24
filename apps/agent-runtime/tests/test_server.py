@@ -995,10 +995,9 @@ async def test_plan_query_is_claude_read_only_and_skips_side_effect_integrations
     assert provider.seen_options.mcp_servers == {}
     assert provider.seen_options.project_credential is None
     assert provider.seen_options.system_prompt is not None
-    assert provider.seen_options.system_prompt.endswith(
-        "Calling ExitPlanMode only signals that planning is complete; Cocola, not the tool, "
-        "obtains user approval."
-    )
+    assert "cocola_submit_plan" in provider.seen_options.system_prompt
+    assert "cocola_request_clarification" in provider.seen_options.system_prompt
+    assert "<cocola_plan>" not in provider.seen_options.system_prompt
     assert "Only changed regular files" not in provider.seen_options.system_prompt
     assert mcps.seen_user_id == ""
     assert objstore.puts == {}

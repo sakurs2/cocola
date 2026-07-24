@@ -31,6 +31,7 @@ type ToolPart = {
   argsText?: string;
   result?: string;
   isError?: boolean;
+  outcome?: string;
 };
 
 type FilePart = {
@@ -340,6 +341,7 @@ function MessagePartView({ part, role }: { part: MessagePart; role: "user" | "as
         argsText={part.argsText}
         result={part.result}
         isError={part.isError}
+        outcome={part.outcome}
       />
     );
   }

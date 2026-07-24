@@ -75,11 +75,12 @@ type Part struct {
 	Text string `json:"text,omitempty"`
 
 	// tool-call
-	ToolCallID string  `json:"toolCallId,omitempty"`
-	ToolName   string  `json:"toolName,omitempty"`
-	ArgsText   string  `json:"argsText,omitempty"`
-	Result     *string `json:"result,omitempty"`
-	IsError    bool    `json:"isError,omitempty"`
+	ToolCallID  string  `json:"toolCallId,omitempty"`
+	ToolName    string  `json:"toolName,omitempty"`
+	ArgsText    string  `json:"argsText,omitempty"`
+	Result      *string `json:"result,omitempty"`
+	IsError     bool    `json:"isError,omitempty"`
+	ToolOutcome string  `json:"outcome,omitempty"`
 
 	// file
 	ID          string `json:"id,omitempty"`

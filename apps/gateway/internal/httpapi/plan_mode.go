@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
-	"fmt"
 	"net/http"
 	"strconv"
 	"strings"
@@ -48,15 +47,22 @@ func decodePlanAction(w http.ResponseWriter, r *http.Request, requireRequestID b
 	return input, true
 }
 
-func approvedPlanPrompt(plan chatrun.Plan) string {
-	return fmt.Sprintf(
-		"The user approved Cocola Plan %s version %d. Execute the approved plan now in the same "+
-			"Claude session. Do not create or revise a plan unless execution is blocked.\n\n"+
-			"<approved_cocola_plan>\n%s\n</approved_cocola_plan>",
-		plan.ID,
-		plan.Version,
-		plan.ContentMarkdown,
-	)
+func approvedPlanPrompt(plan chatrun.Plan) (string, error) {
+	payload, err := json.Marshal(struct {
+		PlanID          string `json:"plan_id"`
+		Version         int    `json:"version"`
+		ContentMarkdown string `json:"content_markdown"`
+	}{
+		PlanID:          plan.ID,
+		Version:         plan.Version,
+		ContentMarkdown: plan.ContentMarkdown,
+	})
+	if err != nil {
+		return "", err
+	}
+	return "The user approved the Cocola plan in the JSON payload below. Execute it now in the " +
+		"same Claude session. Do not create or revise a plan unless execution is blocked.\n\n" +
+		string(payload), nil
 }
 
 func projectAgentContext(value project.ProjectContext) agent.ProjectContext {
@@ -266,6 +272,17 @@ func (a *API) executePlan(w http.ResponseWriter, r *http.Request) {
 		runID = strings.ReplaceAll(uuid.NewString(), "-", "")
 	}
 	rootSpanID := traceevents.NewSpanID()
+	executionPrompt, promptErr := approvedPlanPrompt(plan)
+	if promptErr != nil {
+		a.log.Warn("plan execution prompt encoding failed: " + promptErr.Error())
+		writeErr(
+			w,
+			http.StatusInternalServerError,
+			"PLAN_EXECUTION_START_FAILED",
+			"Could not start plan execution. Try again.",
+		)
+		return
+	}
 	run := chatrun.Run{
 		ID: runID, RootSpanID: rootSpanID, ConversationID: conversationID,
 		ConversationTitle: conversation.Title, UserID: identity.UserID, Source: "interactive",
@@ -275,7 +292,7 @@ func (a *API) executePlan(w http.ResponseWriter, r *http.Request) {
 		StartedAt: startedAt, LastActivityAt: startedAt,
 	}
 	req := chatRequest{
-		Prompt: approvedPlanPrompt(plan), SessionID: conversationID,
+		Prompt: executionPrompt, SessionID: conversationID,
 		RuntimeID: plan.RuntimeID, InteractionMode: chatrun.InteractionModeExecute,
 		ModelRouteID: plan.ModelRouteID, ModelAlias: plan.ModelAlias,
 		ConversationTitle: conversation.Title, ProjectID: conversation.ProjectID,

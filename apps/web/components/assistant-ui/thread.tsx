@@ -79,6 +79,7 @@ import {
   finalAgentOutputText,
   splitAgentTurnParts,
 } from "@/lib/agent-turn-summary.mjs";
+import { toolOutcomeFromArtifact } from "@/lib/tool-failure.mjs";
 import {
   COMPOSER_SLASH_COPY,
   PLAN_ACTION_LABELS,
@@ -1105,6 +1106,7 @@ const ToolFallback: FC<ToolCallMessagePartProps> = ({
   argsText,
   result,
   isError,
+  artifact,
   status,
 }) => (
   <AgentTurnPart kind="process">
@@ -1113,6 +1115,7 @@ const ToolFallback: FC<ToolCallMessagePartProps> = ({
       argsText={argsText}
       result={result}
       isError={isError}
+      outcome={toolOutcomeFromArtifact(artifact, isError)}
       running={status.type === "running" || status.type === "requires-action"}
     />
   </AgentTurnPart>

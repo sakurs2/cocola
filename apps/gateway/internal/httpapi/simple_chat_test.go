@@ -2,6 +2,7 @@ package httpapi
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"net/http"
@@ -530,11 +531,28 @@ func TestPlanModeCreatesAndExecutesDurablePlanWithoutUserMessage(t *testing.T) {
 		queries[1].InteractionMode != agent.InteractionModeExecute ||
 		queries[1].SessionID != queries[0].SessionID ||
 		queries[1].ModelRouteID != "route-1" ||
-		!strings.Contains(queries[1].Prompt, "<approved_cocola_plan>") {
+		!strings.Contains(queries[1].Prompt, `"content_markdown":"## Plan`) {
 		t.Fatalf("plan queries = %+v", queries)
 	}
 	if !queries[1].RequireSessionResume {
 		t.Fatal("approved Plan execution did not require resuming the planning Session")
+	}
+	promptParts := strings.SplitN(queries[1].Prompt, "\n\n", 2)
+	var approvedPayload struct {
+		PlanID          string `json:"plan_id"`
+		Version         int    `json:"version"`
+		ContentMarkdown string `json:"content_markdown"`
+	}
+	if len(promptParts) != 2 {
+		t.Fatalf("approved Plan prompt does not contain a JSON payload: %q", queries[1].Prompt)
+	}
+	if err := json.Unmarshal([]byte(promptParts[1]), &approvedPayload); err != nil {
+		t.Fatalf("decode approved Plan payload: %v", err)
+	}
+	if approvedPayload.PlanID != plan.PlanID ||
+		approvedPayload.Version != plan.PlanVersion ||
+		approvedPayload.ContentMarkdown != plan.PlanContentMarkdown {
+		t.Fatalf("approved Plan payload = %+v, want %+v", approvedPayload, plan)
 	}
 	messages, err = conversations.GetMessages(
 		context.Background(), "conversation-plan", auth.DevIdentity.UserID,

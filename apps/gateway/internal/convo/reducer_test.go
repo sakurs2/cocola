@@ -53,6 +53,33 @@ func TestReducerUnmatchedToolResult(t *testing.T) {
 	}
 }
 
+func TestReducerPersistsToolOutcomeAndClarificationText(t *testing.T) {
+	r := NewReducer()
+	r.Apply("tool_use", map[string]string{"id": "t1", "name": "Bash", "input": `{"command":"npm --version"}`})
+	r.Apply("tool_result", map[string]string{
+		"tool_use_id": "t1",
+		"content":     "Blocked",
+		"is_error":    "true",
+		"outcome":     "permission_denied",
+	})
+	r.Apply("clarification_required", map[string]string{
+		"question": "Which package?",
+		"options":  `["Gateway","Web"]`,
+		"text":     "Which package?\n\n- Gateway\n- Web",
+	})
+
+	parts := r.Parts()
+	if len(parts) != 2 {
+		t.Fatalf("want tool and clarification parts, got %+v", parts)
+	}
+	if parts[0].ToolOutcome != "permission_denied" {
+		t.Fatalf("tool outcome was not preserved: %+v", parts[0])
+	}
+	if parts[1].Type != PartText || parts[1].Text != "Which package?\n\n- Gateway\n- Web" {
+		t.Fatalf("clarification should be ordinary assistant text: %+v", parts[1])
+	}
+}
+
 func TestReducerUpsertsVersionedEnvironmentSnapshotAsFirstPart(t *testing.T) {
 	r := NewReducer()
 	r.Apply("text", map[string]string{"text": "hello"})

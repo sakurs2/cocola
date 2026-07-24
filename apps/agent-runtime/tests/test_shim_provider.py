@@ -136,6 +136,54 @@ async def test_plan_ready_event_is_forwarded_without_claude_specific_fields():
     assert events[0].data == {"content_markdown": "## Plan\n\n- Inspect"}
 
 
+async def test_clarification_and_tool_outcome_are_forwarded_as_structured_data():
+    def stream_handler(sandbox_id, cmd, stdin):
+        yield ExecChunk(
+            kind="stdout",
+            data=_ndjson(
+                {
+                    "type": "clarification_required",
+                    "question": "Which package?",
+                    "options": ["Gateway", "Web"],
+                    "text": "Which package?\n\n- Gateway\n- Web",
+                },
+                {
+                    "type": "tool_result",
+                    "tool_use_id": "tool-1",
+                    "is_error": True,
+                    "outcome": "permission_denied",
+                    "content": "Blocked",
+                },
+                {"type": "done", "session_id": "sess-plan"},
+            ),
+        )
+        yield ExecChunk(kind="exit", exit_code=0)
+
+    provider = InSandboxShimProvider(StaticSandboxExecutor(stream_handler=stream_handler))
+    events = await _drain(
+        provider,
+        "plan it",
+        AgentOptions(
+            user_id="U1",
+            session_id="S1",
+            sandbox_id="box-1",
+            interaction_mode="plan",
+        ),
+    )
+
+    assert [event.kind for event in events] == [
+        "clarification_required",
+        "tool_result",
+        "done",
+    ]
+    assert events[0].data == {
+        "question": "Which package?",
+        "options": ["Gateway", "Web"],
+        "text": "Which package?\n\n- Gateway\n- Web",
+    }
+    assert events[1].data["outcome"] == "permission_denied"
+
+
 async def test_progress_event_preserves_todo_items():
     items = [
         {"content": "Inspect the project", "status": "completed"},
