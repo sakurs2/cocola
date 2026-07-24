@@ -122,6 +122,45 @@ def test_plan_capture_suppresses_exit_plan_mode_and_emits_one_plan():
     }
 
 
+def test_plan_capture_uses_latest_native_exit_plan_mode_payload():
+    module = _load_shim("cocola_agent_shim_native_plan_capture")
+    capture = module._ClaudePlanCapture()
+    progress = module._ClaudeTaskProgress()
+    assistant = type(
+        "AssistantMessage",
+        (),
+        {
+            "content": [
+                type("TextBlock", (), {"text": "I inspected the project."})(),
+                type(
+                    "ToolUseBlock",
+                    (),
+                    {
+                        "id": "exit-1",
+                        "name": "ExitPlanMode",
+                        "input": {"plan": "## Initial plan"},
+                    },
+                )(),
+                type(
+                    "ToolUseBlock",
+                    (),
+                    {
+                        "id": "exit-2",
+                        "name": "ExitPlanMode",
+                        "input": {"plan": "## Revised plan\n\n- Implement safely"},
+                    },
+                )(),
+            ]
+        },
+    )()
+
+    assert capture.message_events(assistant, progress) == []
+    assert capture.final_event() == {
+        "type": "plan_ready",
+        "content_markdown": "## Revised plan\n\n- Implement safely",
+    }
+
+
 def test_plan_capture_returns_text_for_clarification_and_rejects_invalid_output():
     module = _load_shim("cocola_agent_shim_plan_validation")
     progress = module._ClaudeTaskProgress()
@@ -154,6 +193,27 @@ def test_plan_capture_returns_text_for_clarification_and_rejects_invalid_output(
     )()
     invalid.message_events(message, progress)
     assert invalid.final_event()["code"] == "PLAN_OUTPUT_INVALID"
+
+    oversized = module._ClaudePlanCapture()
+    message = type(
+        "AssistantMessage",
+        (),
+        {
+            "content": [
+                type(
+                    "ToolUseBlock",
+                    (),
+                    {
+                        "id": "exit-large",
+                        "name": "ExitPlanMode",
+                        "input": {"plan": "x" * (128 * 1024 + 1)},
+                    },
+                )()
+            ]
+        },
+    )()
+    oversized.message_events(message, progress)
+    assert oversized.final_event()["code"] == "PLAN_OUTPUT_INVALID"
 
 
 async def test_agent_shim_streams_mcp_status_without_blocking_query(monkeypatch):

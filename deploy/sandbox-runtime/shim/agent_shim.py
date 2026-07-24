@@ -567,6 +567,7 @@ class _ClaudePlanCapture:
         self._text: list[str] = []
         self._result_text = ""
         self._exit_plan_tool_ids: set[str] = set()
+        self._native_plan_text = ""
 
     @staticmethod
     def _canonical_tool_name(value: Any) -> str:
@@ -599,6 +600,15 @@ class _ClaudePlanCapture:
                     tool_id = str(getattr(block, "id", "") or "")
                     if tool_id:
                         self._exit_plan_tool_ids.add(tool_id)
+                    tool_input = getattr(block, "input", None)
+                    if isinstance(tool_input, dict):
+                        native_plan = tool_input.get("plan")
+                        if isinstance(native_plan, str) and native_plan.strip():
+                            # Claude Code's native Plan Mode returns the
+                            # reviewable plan in ExitPlanMode rather than as
+                            # assistant text. Keep the latest payload in case
+                            # Claude retries the tool with a revised plan.
+                            self._native_plan_text = native_plan
                     continue
                 if block_class in ("ToolResultBlock", "ServerToolResultBlock"):
                     tool_use_id = str(getattr(block, "tool_use_id", "") or "")
@@ -634,6 +644,9 @@ class _ClaudePlanCapture:
         matches = list(_PLAN_BLOCK.finditer(text))
         has_plan_markup = "<cocola_plan" in text or "</cocola_plan" in text
         if not matches and not has_plan_markup:
+            native_plan = self._native_plan_text.strip()
+            if native_plan:
+                return self._plan_event(native_plan)
             return {"type": "text", "text": text} if text else None
         if (
             len(matches) != 1
@@ -647,6 +660,10 @@ class _ClaudePlanCapture:
                 "error": _PLAN_INVALID_ERROR,
             }
         content = matches[0].group(1).strip()
+        return self._plan_event(content)
+
+    @staticmethod
+    def _plan_event(content: str) -> dict[str, Any]:
         if not content or len(content.encode("utf-8")) > _PLAN_MAX_BYTES:
             return {
                 "type": "error",
