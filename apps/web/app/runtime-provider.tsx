@@ -1139,6 +1139,14 @@ export function CocolaRuntimeProvider({ children }: { children: ReactNode }) {
         return;
       }
       setInteractionModes((previous) => ({ ...previous, [sessionId]: mode }));
+      if (mode === "execute") {
+        setRevisingPlanIds((previous) => {
+          if (!(sessionId in previous)) return previous;
+          const next = { ...previous };
+          delete next[sessionId];
+          return next;
+        });
+      }
     },
     [isRunning, selectedRuntime?.id, sessionId],
   );

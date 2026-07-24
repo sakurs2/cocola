@@ -2,13 +2,15 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import {
-  INTERACTION_MODE_OPTIONS,
+  COMPOSER_SLASH_COPY,
   PLAN_ACTION_LABELS,
   PLAN_ERRORS,
+  PLAN_MODE_COMMAND,
   PLAN_MODE_COPY,
   PLAN_STATUS_LABELS,
   getOrCreatePlanExecutionRequestId,
   interactionModeForRuntime,
+  isPlanModeCommandAvailable,
   isRetryablePlanExecutionStatus,
   latestInteractionMode,
   planExecutionRequestKey,
@@ -38,15 +40,32 @@ test("Plan Mode is available only for Claude Code", () => {
   assert.equal(interactionModeForRuntime("claude-code", "plan"), "plan");
   assert.equal(interactionModeForRuntime("claude-code", "execute"), "execute");
   assert.equal(interactionModeForRuntime("codex", "plan"), "execute");
+  assert.equal(isPlanModeCommandAvailable("claude-code", "execute", false), true);
+  assert.equal(isPlanModeCommandAvailable("claude-code", "plan", false), false);
+  assert.equal(isPlanModeCommandAvailable("claude-code", "execute", true), false);
+  assert.equal(isPlanModeCommandAvailable("codex", "execute", false), false);
 });
 
 test("Plan Mode product copy is stable and English", () => {
-  assert.deepEqual(INTERACTION_MODE_OPTIONS, [
-    { id: "execute", label: "Execute", description: "Make changes immediately" },
-    { id: "plan", label: "Plan", description: "Review a plan before changes" },
-  ]);
+  assert.deepEqual(PLAN_MODE_COMMAND, {
+    id: "command:plan-mode",
+    label: "Plan mode",
+    description: "Review a plan before changes",
+  });
+  assert.deepEqual(COMPOSER_SLASH_COPY, {
+    defaultPlaceholder: 'Ask anything, use "/" to select a skill or command',
+    menuAriaLabel: "Choose a skill or command",
+    commandsTab: "Commands",
+    skillsTab: "Skills",
+    noCommands: "No commands available.",
+    noSkills: "No skills found.",
+    loadingSkills: "Loading skills…",
+  });
   assert.deepEqual(PLAN_MODE_COPY, {
-    banner: "Plan mode · Claude will analyze the task without changing your workspace.",
+    activeLabel: "Plan mode",
+    responseLabel: "Plan mode · Read-only",
+    cancelLabel: "Exit Plan mode",
+    lockedLabel: "Plan mode is fixed while Claude is responding",
     initialPlaceholder: "Describe what you want Claude to plan…",
     revisionPlaceholder: "Describe how you want to revise this plan…",
   });

@@ -1,18 +1,24 @@
-export const INTERACTION_MODE_OPTIONS = Object.freeze([
-  Object.freeze({
-    id: "execute",
-    label: "Execute",
-    description: "Make changes immediately",
-  }),
-  Object.freeze({
-    id: "plan",
-    label: "Plan",
-    description: "Review a plan before changes",
-  }),
-]);
+export const PLAN_MODE_COMMAND = Object.freeze({
+  id: "command:plan-mode",
+  label: "Plan mode",
+  description: "Review a plan before changes",
+});
+
+export const COMPOSER_SLASH_COPY = Object.freeze({
+  defaultPlaceholder: 'Ask anything, use "/" to select a skill or command',
+  menuAriaLabel: "Choose a skill or command",
+  commandsTab: "Commands",
+  skillsTab: "Skills",
+  noCommands: "No commands available.",
+  noSkills: "No skills found.",
+  loadingSkills: "Loading skills…",
+});
 
 export const PLAN_MODE_COPY = Object.freeze({
-  banner: "Plan mode · Claude will analyze the task without changing your workspace.",
+  activeLabel: "Plan mode",
+  responseLabel: "Plan mode · Read-only",
+  cancelLabel: "Exit Plan mode",
+  lockedLabel: "Plan mode is fixed while Claude is responding",
   initialPlaceholder: "Describe what you want Claude to plan…",
   revisionPlaceholder: "Describe how you want to revise this plan…",
 });
@@ -56,6 +62,10 @@ export function latestInteractionMode(messages) {
 
 export function interactionModeForRuntime(runtimeId, requestedMode) {
   return runtimeId === "claude-code" && requestedMode === "plan" ? "plan" : "execute";
+}
+
+export function isPlanModeCommandAvailable(runtimeId, interactionMode, isRunning) {
+  return runtimeId === "claude-code" && interactionMode !== "plan" && !isRunning;
 }
 
 export function planExecutionRequestKey(conversationId, planId, version) {

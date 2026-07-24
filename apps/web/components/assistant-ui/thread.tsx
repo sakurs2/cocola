@@ -34,11 +34,21 @@ import {
   BarChart3,
   Code2,
   Lightbulb,
+  Map as PlanModeIcon,
   Pencil,
   Sparkles,
 } from "lucide-react";
 import Image from "next/image";
-import { Fragment, useEffect, useMemo, useRef, useState, type FC, type ReactNode } from "react";
+import {
+  Fragment,
+  useEffect,
+  useId,
+  useMemo,
+  useRef,
+  useState,
+  type FC,
+  type ReactNode,
+} from "react";
 import {
   useCocola,
   type ModelIconConfig,
@@ -70,10 +80,12 @@ import {
   splitAgentTurnParts,
 } from "@/lib/agent-turn-summary.mjs";
 import {
-  INTERACTION_MODE_OPTIONS,
+  COMPOSER_SLASH_COPY,
   PLAN_ACTION_LABELS,
+  PLAN_MODE_COMMAND,
   PLAN_MODE_COPY,
   PLAN_STATUS_LABELS,
+  isPlanModeCommandAvailable,
 } from "@/lib/plan-mode.mjs";
 import { findLatestProgressItems, normalizeProgressItems } from "@/lib/progress-items.mjs";
 import {
@@ -281,11 +293,8 @@ export const ConversationComposer: FC<{
       whileFocus={{ y: -1 }}
       transition={{ type: "spring", stiffness: 420, damping: 32 }}
     >
-      {interactionMode === "plan" ? (
-        <div className="mb-2 px-1 text-xs font-medium text-primary">{PLAN_MODE_COPY.banner}</div>
-      ) : null}
       <ComposerPrimitive.Unstable_TriggerPopoverRoot>
-        <SkillTriggerMenu />
+        <ComposerSlashMenu />
         <ComposerPrimitive.Root className="composer-lift relative z-10 flex w-full flex-col rounded-2xl border p-3">
           <div className="relative min-w-0">
             <SelectedSkillChip onWidthChange={setSkillChipWidth} />
@@ -311,7 +320,7 @@ export const ConversationComposer: FC<{
                       ? hasCurrentPlan
                         ? PLAN_MODE_COPY.revisionPlaceholder
                         : PLAN_MODE_COPY.initialPlaceholder
-                      : placeholder || 'Ask anything, use "/" to select a skill'
+                      : placeholder || COMPOSER_SLASH_COPY.defaultPlaceholder
               }
               className="max-h-40 min-h-12 w-full resize-none border-none bg-transparent px-2 py-2.5 text-[15px] leading-6 outline-none placeholder:text-muted-foreground focus:ring-0 disabled:cursor-not-allowed"
             />
@@ -330,8 +339,10 @@ export const ConversationComposer: FC<{
                 </TooltipIconButton>
               </ComposerPrimitive.AddAttachment>
               {runtimePickerEnabled ? <RuntimePicker /> : null}
-              {selectedRuntime?.id === "claude-code" ? <InteractionModePicker /> : null}
               <ModelPicker />
+              {selectedRuntime?.id === "claude-code" && interactionMode === "plan" ? (
+                <PlanModeIndicator />
+              ) : null}
               {effectiveBranchControl}
             </div>
             <ComposerAction />
@@ -342,23 +353,60 @@ export const ConversationComposer: FC<{
   );
 };
 
-const SkillTriggerMenu: FC = () => {
-  const { skills, skillsLoaded, selectedSkill, setSelectedSkillId } = useCocola();
+const ComposerSlashMenu: FC = () => {
+  const {
+    skills,
+    skillsLoaded,
+    selectedRuntime,
+    selectedSkill,
+    interactionMode,
+    setInteractionMode,
+    setSelectedSkillId,
+  } = useCocola();
   const { value } = unstable_useComposerInput();
+  const isRunning = useThread((thread) => thread.isRunning);
+  const [activeTab, setActiveTab] = useState<"commands" | "skills">("commands");
+  const tabsId = useId();
   const skillByID = useMemo(() => new Map(skills.map((skill) => [skill.id, skill])), [skills]);
-  const commands = useMemo(
-    () =>
-      value.startsWith("/") && !selectedSkill
-        ? skills.map((skill) => ({
-            id: skill.id,
-            label: skill.name,
-            description: skill.description,
-            execute: () => setSelectedSkillId(skill.id),
-          }))
-        : [],
-    [selectedSkill, setSelectedSkillId, skills, value],
+  const canSelectPlanMode = isPlanModeCommandAvailable(
+    selectedRuntime?.id,
+    interactionMode,
+    isRunning,
   );
-  const slash = unstable_useSlashCommandAdapter({ commands, removeOnExecute: true });
+  const planCommands = useMemo(
+    () =>
+      canSelectPlanMode
+        ? [
+            {
+              ...PLAN_MODE_COMMAND,
+              execute: () => setInteractionMode("plan"),
+            },
+          ]
+        : [],
+    [canSelectPlanMode, setInteractionMode],
+  );
+  const skillCommands = useMemo(
+    () =>
+      [
+        ...skills.filter((skill) => skill.scope === "user"),
+        ...skills.filter((skill) => skill.scope !== "user"),
+      ].map((skill) => ({
+        id: skill.id,
+        label: skill.name,
+        description: skill.description,
+        execute: () => setSelectedSkillId(skill.id),
+      })),
+    [setSelectedSkillId, skills],
+  );
+  const planSlash = unstable_useSlashCommandAdapter({
+    commands: planCommands,
+    removeOnExecute: true,
+  });
+  const skillSlash = unstable_useSlashCommandAdapter({
+    commands: skillCommands,
+    removeOnExecute: true,
+  });
+  const slash = activeTab === "commands" ? planSlash : skillSlash;
 
   if (!value.startsWith("/") || selectedSkill) return null;
 
@@ -366,32 +414,71 @@ const SkillTriggerMenu: FC = () => {
     <ComposerPrimitive.Unstable_TriggerPopover
       char="/"
       adapter={slash.adapter}
-      isLoading={!skillsLoaded}
-      aria-label="Choose a skill"
+      aria-label={COMPOSER_SLASH_COPY.menuAriaLabel}
       className="absolute bottom-[calc(100%+0.625rem)] left-0 z-50 w-full max-w-2xl overflow-hidden rounded-2xl border border-border bg-popover text-popover-foreground shadow-xl"
     >
       <ComposerPrimitive.Unstable_TriggerPopover.Action {...slash.action} />
-      <div className="flex items-center justify-between border-b border-border/70 px-4 py-3">
-        <span className="text-sm font-medium text-foreground">Skills</span>
-        <span className="text-xs text-muted-foreground">Select for this message</span>
+      <div
+        role="tablist"
+        aria-label={COMPOSER_SLASH_COPY.menuAriaLabel}
+        className="flex items-center gap-1 border-b border-border/70 px-2 pt-2"
+      >
+        {(
+          [
+            { id: "commands", label: COMPOSER_SLASH_COPY.commandsTab },
+            { id: "skills", label: COMPOSER_SLASH_COPY.skillsTab },
+          ] as const
+        ).map((tab) => (
+          <button
+            key={tab.id}
+            type="button"
+            role="tab"
+            id={`${tabsId}-${tab.id}-tab`}
+            aria-controls={`${tabsId}-${tab.id}-panel`}
+            aria-selected={activeTab === tab.id}
+            onClick={() => setActiveTab(tab.id)}
+            className={cn(
+              "relative px-3 py-2 text-sm font-medium text-muted-foreground outline-none transition-colors hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-1",
+              activeTab === tab.id &&
+                "text-foreground after:absolute after:inset-x-2 after:bottom-0 after:h-0.5 after:rounded-full after:bg-primary",
+            )}
+          >
+            {tab.label}
+          </button>
+        ))}
       </div>
       <ComposerPrimitive.Unstable_TriggerPopoverItems className="max-h-72 overflow-y-auto p-1.5">
         {(items) => {
-          const groups = [
-            {
-              label: "Personal",
-              items: items.filter((item) => skillByID.get(item.id)?.scope === "user"),
-            },
-            {
-              label: "Shared",
-              items: items.filter((item) => skillByID.get(item.id)?.scope !== "user"),
-            },
-          ].filter((group) => group.items.length > 0);
+          const groups =
+            activeTab === "commands"
+              ? [{ label: "", items }]
+              : [
+                  {
+                    label: "Personal",
+                    items: items.filter((item) => skillByID.get(item.id)?.scope === "user"),
+                  },
+                  {
+                    label: "Shared",
+                    items: items.filter((item) => skillByID.get(item.id)?.scope !== "user"),
+                  },
+                ].filter((group) => group.items.length > 0);
+          const visibleItemCount = groups.reduce((count, group) => count + group.items.length, 0);
 
-          if (groups.length === 0) {
+          if (visibleItemCount === 0) {
+            const emptyLabel =
+              activeTab === "commands"
+                ? COMPOSER_SLASH_COPY.noCommands
+                : skillsLoaded
+                  ? COMPOSER_SLASH_COPY.noSkills
+                  : COMPOSER_SLASH_COPY.loadingSkills;
             return (
-              <div className="px-3 py-6 text-center text-xs text-muted-foreground">
-                {skillsLoaded ? "No skills found." : "Loading skills…"}
+              <div
+                role="tabpanel"
+                id={`${tabsId}-${activeTab}-panel`}
+                aria-labelledby={`${tabsId}-${activeTab}-tab`}
+                className="px-3 py-8 text-center text-xs text-muted-foreground"
+              >
+                {emptyLabel}
               </div>
             );
           }
@@ -402,37 +489,56 @@ const SkillTriggerMenu: FC = () => {
               item,
             })),
           );
-          return rows.map(({ groupLabel, item }, index) => {
-            const skill = skillByID.get(item.id);
-            return (
-              <Fragment key={item.id}>
-                {groupLabel ? (
-                  <div className="px-2.5 pt-2 pb-1 text-xs font-medium text-muted-foreground">
-                    {groupLabel}
-                  </div>
-                ) : null}
-                <ComposerPrimitive.Unstable_TriggerPopoverItem
-                  item={item}
-                  index={index}
-                  className="flex w-full items-center gap-2.5 rounded-xl px-2.5 py-2 text-left outline-none transition-colors hover:bg-muted/80 data-[highlighted]:bg-muted"
-                >
-                  <SkillIcon name={skill?.name || item.label} size="sm" />
-                  <span
-                    className="max-w-[45%] shrink-0 truncate text-sm font-medium text-foreground"
-                    title={skill?.name || item.label}
-                  >
-                    {skill?.name || item.label}
-                  </span>
-                  <span
-                    className="min-w-0 flex-1 truncate text-sm text-muted-foreground"
-                    title={skill?.description || undefined}
-                  >
-                    {skill?.description || `/${item.id}`}
-                  </span>
-                </ComposerPrimitive.Unstable_TriggerPopoverItem>
-              </Fragment>
-            );
-          });
+          return (
+            <div
+              role="tabpanel"
+              id={`${tabsId}-${activeTab}-panel`}
+              aria-labelledby={`${tabsId}-${activeTab}-tab`}
+            >
+              {rows.map(({ groupLabel, item }, index) => {
+                const skill = skillByID.get(item.id);
+                const isPlanModeCommand = item.id === PLAN_MODE_COMMAND.id;
+                return (
+                  <Fragment key={item.id}>
+                    {groupLabel ? (
+                      <div className="px-2.5 pt-2 pb-1 text-xs font-medium text-muted-foreground">
+                        {groupLabel}
+                      </div>
+                    ) : null}
+                    <ComposerPrimitive.Unstable_TriggerPopoverItem
+                      item={item}
+                      index={index}
+                      className="flex w-full items-center gap-2.5 rounded-xl px-2.5 py-2 text-left outline-none transition-colors hover:bg-muted/80 data-[highlighted]:bg-muted"
+                    >
+                      {isPlanModeCommand ? (
+                        <span className="grid size-7 shrink-0 place-items-center rounded-lg bg-indigo-500/10 text-indigo-600">
+                          <PlanModeIcon className="size-4" />
+                        </span>
+                      ) : (
+                        <SkillIcon name={skill?.name || item.label} size="sm" />
+                      )}
+                      <span
+                        className="max-w-[45%] shrink-0 truncate text-sm font-medium text-foreground"
+                        title={skill?.name || item.label}
+                      >
+                        {skill?.name || item.label}
+                      </span>
+                      <span
+                        className="min-w-0 flex-1 truncate text-sm text-muted-foreground"
+                        title={
+                          isPlanModeCommand ? PLAN_MODE_COMMAND.description : skill?.description
+                        }
+                      >
+                        {isPlanModeCommand
+                          ? PLAN_MODE_COMMAND.description
+                          : skill?.description || `/${item.id}`}
+                      </span>
+                    </ComposerPrimitive.Unstable_TriggerPopoverItem>
+                  </Fragment>
+                );
+              })}
+            </div>
+          );
         }}
       </ComposerPrimitive.Unstable_TriggerPopoverItems>
     </ComposerPrimitive.Unstable_TriggerPopover>
@@ -524,51 +630,25 @@ const RuntimePicker: FC = () => {
   );
 };
 
-const InteractionModePicker: FC = () => {
-  const { interactionMode, setInteractionMode } = useCocola();
+const PlanModeIndicator: FC = () => {
+  const { setInteractionMode } = useCocola();
   const isRunning = useThread((thread) => thread.isRunning);
-  const [open, setOpen] = useState(false);
 
   return (
-    <Popover.Root open={open} onOpenChange={setOpen}>
-      <Popover.Trigger asChild>
-        <button
-          type="button"
-          disabled={isRunning}
-          className="flex min-w-0 items-center gap-1.5 rounded-full border border-border px-2.5 py-1.5 text-[12.5px] font-medium text-foreground transition-colors hover:bg-muted disabled:cursor-not-allowed disabled:opacity-60"
-          aria-label="Select interaction mode"
-        >
-          <span>{interactionMode === "plan" ? "Plan" : "Execute"}</span>
-          {isRunning ? null : <ChevronDown className="size-3.5 text-muted-foreground" />}
-        </button>
-      </Popover.Trigger>
-      <Popover.Portal>
-        <Popover.Content
-          side="top"
-          align="start"
-          sideOffset={10}
-          className="cocola-user-ui z-50 w-64 overflow-hidden rounded-2xl border border-border bg-popover p-1.5 text-popover-foreground shadow-xl"
-        >
-          {INTERACTION_MODE_OPTIONS.map((option) => (
-            <button
-              key={option.id}
-              type="button"
-              className="flex w-full items-start gap-2 rounded-xl px-2.5 py-2 text-left hover:bg-accent"
-              onClick={() => {
-                setInteractionMode(option.id);
-                setOpen(false);
-              }}
-            >
-              <span className="min-w-0 flex-1">
-                <span className="block text-sm font-medium">{option.label}</span>
-                <span className="block text-xs text-muted-foreground">{option.description}</span>
-              </span>
-              {option.id === interactionMode ? <Check className="mt-0.5 size-4" /> : null}
-            </button>
-          ))}
-        </Popover.Content>
-      </Popover.Portal>
-    </Popover.Root>
+    <span className="inline-flex min-w-0 items-center gap-1 rounded-full border border-indigo-500/20 bg-indigo-500/10 py-1 pr-1 pl-2.5 text-[12.5px] font-medium text-indigo-600">
+      <PlanModeIcon className="size-3.5 shrink-0" />
+      <span>{PLAN_MODE_COPY.activeLabel}</span>
+      <TooltipIconButton
+        tooltip={isRunning ? PLAN_MODE_COPY.lockedLabel : PLAN_MODE_COPY.cancelLabel}
+        variant="ghost"
+        disabled={isRunning}
+        onClick={() => setInteractionMode("execute")}
+        aria-label={PLAN_MODE_COPY.cancelLabel}
+        className="size-5 shrink-0 rounded-full p-0 text-indigo-600/70 hover:bg-indigo-500/10 hover:text-indigo-700 disabled:cursor-not-allowed disabled:opacity-50"
+      >
+        <XIcon className="size-3" />
+      </TooltipIconButton>
+    </span>
   );
 };
 
@@ -924,13 +1004,20 @@ const AssistantMessageHeader: FC = () => {
   const metadata = useMessage((m) => m.metadata.custom) as UiMessageMetadata | undefined;
   const label = metadata?.model_label || selectedModel?.label || "Model";
   const icon = metadata?.model_icon || selectedModel?.icon;
+  const isPlanMode = metadata?.interaction_mode === "plan";
 
   return (
-    <div className="mb-2 flex items-center gap-x-2.5">
+    <div className="mb-2 flex flex-wrap items-center gap-x-2.5 gap-y-1.5">
       <ModelIcon icon={icon} className="size-7 shrink-0" bare />
       <span className="min-w-0 truncate text-base font-bold leading-none text-foreground">
         {label}
       </span>
+      {isPlanMode ? (
+        <span className="inline-flex items-center gap-1.5 rounded-full border border-indigo-500/20 bg-indigo-500/10 px-2 py-1 text-[11px] font-medium leading-none text-indigo-600">
+          <PlanModeIcon className="size-3.5 shrink-0" aria-hidden="true" />
+          {PLAN_MODE_COPY.responseLabel}
+        </span>
+      ) : null}
     </div>
   );
 };
@@ -1146,10 +1233,15 @@ const PlanPart: FC<
   return (
     <div className="my-3 overflow-hidden rounded-2xl border border-border bg-card shadow-sm">
       <div className="flex items-center justify-between gap-3 border-b border-border/70 bg-muted/35 px-4 py-3">
-        <div>
-          <div className="text-sm font-semibold text-foreground">Plan v{data.version}</div>
-          <div className="text-xs text-muted-foreground">
-            {PLAN_STATUS_LABELS[data.status as PlanStatus] ?? data.status}
+        <div className="flex min-w-0 items-center gap-2.5">
+          <span className="grid size-8 shrink-0 place-items-center rounded-lg bg-indigo-500/10 text-indigo-600">
+            <PlanModeIcon className="size-4" aria-hidden="true" />
+          </span>
+          <div className="min-w-0">
+            <div className="text-sm font-semibold text-foreground">Plan v{data.version}</div>
+            <div className="text-xs text-muted-foreground">
+              {PLAN_STATUS_LABELS[data.status as PlanStatus] ?? data.status}
+            </div>
           </div>
         </div>
         <button
