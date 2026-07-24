@@ -11,7 +11,6 @@ import {
   type TextMessagePartProps,
   ThreadPrimitive,
   type ToolCallMessagePartProps,
-  unstable_useComposerInput,
   unstable_useSlashCommandAdapter,
   useMessage,
   useThread,
@@ -49,18 +48,13 @@ import {
   type FC,
   type ReactNode,
 } from "react";
-import {
-  useCocola,
-  type ModelIconConfig,
-  type PlanStatus,
-  type UiMessageMetadata,
-  type UiPlanPart,
-} from "@/app/runtime-provider";
+import { useCocola, type ModelIconConfig, type UiMessageMetadata } from "@/app/runtime-provider";
 import { CocolaWordmark } from "@/components/assistant-ui/cocola-wordmark";
 import { CocolaLogo } from "@/components/cocola-logo";
 import { CocolaTagline } from "@/components/assistant-ui/cocola-tagline";
+import { PlanCardPart } from "@/components/assistant-ui/plan-card";
 import { TooltipIconButton } from "@/components/assistant-ui/tooltip-icon-button";
-import { MarkdownContent, MarkdownText } from "@/components/assistant-ui/markdown-text";
+import { MarkdownText } from "@/components/assistant-ui/markdown-text";
 import {
   RailEnvironment,
   RailFile,
@@ -82,11 +76,10 @@ import {
 import { toolOutcomeFromArtifact } from "@/lib/tool-failure.mjs";
 import {
   COMPOSER_SLASH_COPY,
-  PLAN_ACTION_LABELS,
   PLAN_MODE_COMMAND,
   PLAN_MODE_COPY,
-  PLAN_STATUS_LABELS,
   isPlanModeCommandAvailable,
+  planComposerContext,
 } from "@/lib/plan-mode.mjs";
 import { findLatestProgressItems, normalizeProgressItems } from "@/lib/progress-items.mjs";
 import {
@@ -272,6 +265,7 @@ export const ConversationComposer: FC<{
     runtimePickerEnabled,
     runtimeConfigError,
     interactionMode,
+    revisingPlanId,
   } = useCocola();
   const hasCurrentPlan = useThread((thread) =>
     thread.messages.some((message) =>
@@ -284,6 +278,24 @@ export const ConversationComposer: FC<{
     ),
   );
   const contextualBranchControl = useProjectComposerBranchControl();
+  const revisingPlanVersion = useThread((thread) => {
+    if (!revisingPlanId) return null;
+    for (let messageIndex = thread.messages.length - 1; messageIndex >= 0; messageIndex -= 1) {
+      const content = thread.messages[messageIndex]?.content ?? [];
+      for (let partIndex = content.length - 1; partIndex >= 0; partIndex -= 1) {
+        const part = content[partIndex];
+        if (
+          part?.type === "data" &&
+          part.name === "plan" &&
+          String(part.data.planId) === revisingPlanId
+        ) {
+          const version = Number(part.data.version);
+          return Number.isInteger(version) && version > 0 ? version : null;
+        }
+      }
+    }
+    return null;
+  });
   const [skillChipWidth, setSkillChipWidth] = useState(0);
   const noModel = !modelsLoaded || !selectedModel;
   const effectiveBranchControl = branchControl ?? contextualBranchControl;
@@ -296,7 +308,16 @@ export const ConversationComposer: FC<{
     >
       <ComposerPrimitive.Unstable_TriggerPopoverRoot>
         <ComposerSlashMenu />
-        <ComposerPrimitive.Root className="composer-lift relative z-10 flex w-full flex-col rounded-2xl border p-3">
+        <ComposerPrimitive.Root
+          className={cn(
+            "composer-lift relative z-10 flex w-full flex-col rounded-2xl border p-3",
+            interactionMode === "plan" &&
+              "border-indigo-500/30 bg-indigo-500/[0.025] shadow-[0_12px_36px_-24px_rgba(79,70,229,0.65)]",
+          )}
+        >
+          {selectedRuntime?.id === "claude-code" && interactionMode === "plan" ? (
+            <PlanModeContextStrip revisingPlanVersion={revisingPlanVersion} />
+          ) : null}
           <div className="relative min-w-0">
             <SelectedSkillChip onWidthChange={setSkillChipWidth} />
             <ComposerPrimitive.Input
@@ -354,6 +375,25 @@ export const ConversationComposer: FC<{
   );
 };
 
+const PlanModeContextStrip: FC<{ revisingPlanVersion: number | null }> = ({
+  revisingPlanVersion,
+}) => {
+  const context = planComposerContext(revisingPlanVersion);
+  return (
+    <div className="-mx-3 -mt-3 mb-1 flex min-w-0 items-center gap-2.5 rounded-t-[15px] border-b border-indigo-500/15 bg-indigo-500/[0.065] px-3 py-2.5">
+      <span className="grid size-7 shrink-0 place-items-center rounded-lg bg-indigo-600 text-white shadow-sm">
+        <PlanModeIcon className="size-3.5" aria-hidden="true" />
+      </span>
+      <div className="min-w-0">
+        <div className="truncate text-xs font-semibold text-indigo-700">{context.label}</div>
+        <div className="truncate text-[11px] leading-4 text-indigo-700/70">
+          {context.description}
+        </div>
+      </div>
+    </div>
+  );
+};
+
 const ComposerSlashMenu: FC = () => {
   const {
     skills,
@@ -364,7 +404,6 @@ const ComposerSlashMenu: FC = () => {
     setInteractionMode,
     setSelectedSkillId,
   } = useCocola();
-  const { value } = unstable_useComposerInput();
   const isRunning = useThread((thread) => thread.isRunning);
   const [activeTab, setActiveTab] = useState<"commands" | "skills">("commands");
   const tabsId = useId();
@@ -409,7 +448,7 @@ const ComposerSlashMenu: FC = () => {
   });
   const slash = activeTab === "commands" ? planSlash : skillSlash;
 
-  if (!value.startsWith("/") || selectedSkill) return null;
+  if (selectedSkill) return null;
 
   return (
     <ComposerPrimitive.Unstable_TriggerPopover
@@ -419,36 +458,9 @@ const ComposerSlashMenu: FC = () => {
       className="absolute bottom-[calc(100%+0.625rem)] left-0 z-50 w-full max-w-2xl overflow-hidden rounded-2xl border border-border bg-popover text-popover-foreground shadow-xl"
     >
       <ComposerPrimitive.Unstable_TriggerPopover.Action {...slash.action} />
-      <div
-        role="tablist"
-        aria-label={COMPOSER_SLASH_COPY.menuAriaLabel}
-        className="flex items-center gap-1 border-b border-border/70 px-2 pt-2"
-      >
-        {(
-          [
-            { id: "commands", label: COMPOSER_SLASH_COPY.commandsTab },
-            { id: "skills", label: COMPOSER_SLASH_COPY.skillsTab },
-          ] as const
-        ).map((tab) => (
-          <button
-            key={tab.id}
-            type="button"
-            role="tab"
-            id={`${tabsId}-${tab.id}-tab`}
-            aria-controls={`${tabsId}-${tab.id}-panel`}
-            aria-selected={activeTab === tab.id}
-            onClick={() => setActiveTab(tab.id)}
-            className={cn(
-              "relative px-3 py-2 text-sm font-medium text-muted-foreground outline-none transition-colors hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-1",
-              activeTab === tab.id &&
-                "text-foreground after:absolute after:inset-x-2 after:bottom-0 after:h-0.5 after:rounded-full after:bg-primary",
-            )}
-          >
-            {tab.label}
-          </button>
-        ))}
-      </div>
-      <ComposerPrimitive.Unstable_TriggerPopoverItems className="max-h-72 overflow-y-auto p-1.5">
+      {/* Items stays unmounted while the trigger is closed, so the always-registered
+          popover never leaks menu chrome into the composer's document flow. */}
+      <ComposerPrimitive.Unstable_TriggerPopoverItems>
         {(items) => {
           const groups =
             activeTab === "commands"
@@ -465,25 +477,6 @@ const ComposerSlashMenu: FC = () => {
                 ].filter((group) => group.items.length > 0);
           const visibleItemCount = groups.reduce((count, group) => count + group.items.length, 0);
 
-          if (visibleItemCount === 0) {
-            const emptyLabel =
-              activeTab === "commands"
-                ? COMPOSER_SLASH_COPY.noCommands
-                : skillsLoaded
-                  ? COMPOSER_SLASH_COPY.noSkills
-                  : COMPOSER_SLASH_COPY.loadingSkills;
-            return (
-              <div
-                role="tabpanel"
-                id={`${tabsId}-${activeTab}-panel`}
-                aria-labelledby={`${tabsId}-${activeTab}-tab`}
-                className="px-3 py-8 text-center text-xs text-muted-foreground"
-              >
-                {emptyLabel}
-              </div>
-            );
-          }
-
           const rows = groups.flatMap((group) =>
             group.items.map((item, index) => ({
               groupLabel: index === 0 ? group.label : "",
@@ -491,54 +484,96 @@ const ComposerSlashMenu: FC = () => {
             })),
           );
           return (
-            <div
-              role="tabpanel"
-              id={`${tabsId}-${activeTab}-panel`}
-              aria-labelledby={`${tabsId}-${activeTab}-tab`}
-            >
-              {rows.map(({ groupLabel, item }, index) => {
-                const skill = skillByID.get(item.id);
-                const isPlanModeCommand = item.id === PLAN_MODE_COMMAND.id;
-                return (
-                  <Fragment key={item.id}>
-                    {groupLabel ? (
-                      <div className="px-2.5 pt-2 pb-1 text-xs font-medium text-muted-foreground">
-                        {groupLabel}
-                      </div>
-                    ) : null}
-                    <ComposerPrimitive.Unstable_TriggerPopoverItem
-                      item={item}
-                      index={index}
-                      className="flex w-full items-center gap-2.5 rounded-xl px-2.5 py-2 text-left outline-none transition-colors hover:bg-muted/80 data-[highlighted]:bg-muted"
-                    >
-                      {isPlanModeCommand ? (
-                        <span className="grid size-7 shrink-0 place-items-center rounded-lg bg-indigo-500/10 text-indigo-600">
-                          <PlanModeIcon className="size-4" />
-                        </span>
-                      ) : (
-                        <SkillIcon name={skill?.name || item.label} size="sm" />
-                      )}
-                      <span
-                        className="max-w-[45%] shrink-0 truncate text-sm font-medium text-foreground"
-                        title={skill?.name || item.label}
-                      >
-                        {skill?.name || item.label}
-                      </span>
-                      <span
-                        className="min-w-0 flex-1 truncate text-sm text-muted-foreground"
-                        title={
-                          isPlanModeCommand ? PLAN_MODE_COMMAND.description : skill?.description
-                        }
-                      >
-                        {isPlanModeCommand
-                          ? PLAN_MODE_COMMAND.description
-                          : skill?.description || `/${item.id}`}
-                      </span>
-                    </ComposerPrimitive.Unstable_TriggerPopoverItem>
-                  </Fragment>
-                );
-              })}
-            </div>
+            <>
+              <div
+                role="tablist"
+                aria-label={COMPOSER_SLASH_COPY.menuAriaLabel}
+                className="flex items-center gap-1 border-b border-border/70 px-2 pt-2"
+              >
+                {(
+                  [
+                    { id: "commands", label: COMPOSER_SLASH_COPY.commandsTab },
+                    { id: "skills", label: COMPOSER_SLASH_COPY.skillsTab },
+                  ] as const
+                ).map((tab) => (
+                  <button
+                    key={tab.id}
+                    type="button"
+                    role="tab"
+                    id={`${tabsId}-${tab.id}-tab`}
+                    aria-controls={`${tabsId}-${tab.id}-panel`}
+                    aria-selected={activeTab === tab.id}
+                    onClick={() => setActiveTab(tab.id)}
+                    className={cn(
+                      "relative px-3 py-2 text-sm font-medium text-muted-foreground outline-none transition-colors hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-1",
+                      activeTab === tab.id &&
+                        "text-foreground after:absolute after:inset-x-2 after:bottom-0 after:h-0.5 after:rounded-full after:bg-primary",
+                    )}
+                  >
+                    {tab.label}
+                  </button>
+                ))}
+              </div>
+              <div
+                role="tabpanel"
+                id={`${tabsId}-${activeTab}-panel`}
+                aria-labelledby={`${tabsId}-${activeTab}-tab`}
+                className="max-h-72 overflow-y-auto p-1.5"
+              >
+                {visibleItemCount === 0 ? (
+                  <div className="px-3 py-8 text-center text-xs text-muted-foreground">
+                    {activeTab === "commands"
+                      ? COMPOSER_SLASH_COPY.noCommands
+                      : skillsLoaded
+                        ? COMPOSER_SLASH_COPY.noSkills
+                        : COMPOSER_SLASH_COPY.loadingSkills}
+                  </div>
+                ) : (
+                  rows.map(({ groupLabel, item }, index) => {
+                    const skill = skillByID.get(item.id);
+                    const isPlanModeCommand = item.id === PLAN_MODE_COMMAND.id;
+                    return (
+                      <Fragment key={item.id}>
+                        {groupLabel ? (
+                          <div className="px-2.5 pt-2 pb-1 text-xs font-medium text-muted-foreground">
+                            {groupLabel}
+                          </div>
+                        ) : null}
+                        <ComposerPrimitive.Unstable_TriggerPopoverItem
+                          item={item}
+                          index={index}
+                          className="flex w-full items-center gap-2.5 rounded-xl px-2.5 py-2 text-left outline-none transition-colors hover:bg-muted/80 data-[highlighted]:bg-muted"
+                        >
+                          {isPlanModeCommand ? (
+                            <span className="grid size-7 shrink-0 place-items-center rounded-lg bg-indigo-500/10 text-indigo-600">
+                              <PlanModeIcon className="size-4" />
+                            </span>
+                          ) : (
+                            <SkillIcon name={skill?.name || item.label} size="sm" />
+                          )}
+                          <span
+                            className="max-w-[45%] shrink-0 truncate text-sm font-medium text-foreground"
+                            title={skill?.name || item.label}
+                          >
+                            {skill?.name || item.label}
+                          </span>
+                          <span
+                            className="min-w-0 flex-1 truncate text-sm text-muted-foreground"
+                            title={
+                              isPlanModeCommand ? PLAN_MODE_COMMAND.description : skill?.description
+                            }
+                          >
+                            {isPlanModeCommand
+                              ? PLAN_MODE_COMMAND.description
+                              : skill?.description || `/${item.id}`}
+                          </span>
+                        </ComposerPrimitive.Unstable_TriggerPopoverItem>
+                      </Fragment>
+                    );
+                  })
+                )}
+              </div>
+            </>
           );
         }}
       </ComposerPrimitive.Unstable_TriggerPopoverItems>
@@ -636,7 +671,7 @@ const PlanModeIndicator: FC = () => {
   const isRunning = useThread((thread) => thread.isRunning);
 
   return (
-    <span className="inline-flex min-w-0 items-center gap-1 rounded-full border border-indigo-500/20 bg-indigo-500/10 py-1 pr-1 pl-2.5 text-[12.5px] font-medium text-indigo-600">
+    <span className="inline-flex min-w-0 items-center gap-1 rounded-full border border-indigo-600 bg-indigo-600 py-1 pr-1 pl-2.5 text-[12.5px] font-semibold text-white shadow-sm">
       <PlanModeIcon className="size-3.5 shrink-0" />
       <span>{PLAN_MODE_COPY.activeLabel}</span>
       <TooltipIconButton
@@ -645,7 +680,7 @@ const PlanModeIndicator: FC = () => {
         disabled={isRunning}
         onClick={() => setInteractionMode("execute")}
         aria-label={PLAN_MODE_COPY.cancelLabel}
-        className="size-5 shrink-0 rounded-full p-0 text-indigo-600/70 hover:bg-indigo-500/10 hover:text-indigo-700 disabled:cursor-not-allowed disabled:opacity-50"
+        className="size-5 shrink-0 rounded-full p-0 text-white/75 hover:bg-white/15 hover:text-white disabled:cursor-not-allowed disabled:opacity-50"
       >
         <XIcon className="size-3" />
       </TooltipIconButton>
@@ -1014,7 +1049,7 @@ const AssistantMessageHeader: FC = () => {
         {label}
       </span>
       {isPlanMode ? (
-        <span className="inline-flex items-center gap-1.5 rounded-full border border-indigo-500/20 bg-indigo-500/10 px-2 py-1 text-[11px] font-medium leading-none text-indigo-600">
+        <span className="inline-flex items-center gap-1.5 rounded-full border border-indigo-600 bg-indigo-600 px-2.5 py-1.5 text-[11px] font-semibold leading-none text-white shadow-sm">
           <PlanModeIcon className="size-3.5 shrink-0" aria-hidden="true" />
           {PLAN_MODE_COPY.responseLabel}
         </span>
@@ -1191,120 +1226,6 @@ const SCMApprovalPart: FC<
   );
 };
 
-const PlanPart: FC<
-  DataMessagePartProps<{
-    planId: string;
-    version: number;
-    status: PlanStatus;
-    contentMarkdown: string;
-  }>
-> = ({ data }) => {
-  const { executePlan, cancelPlan, revisingPlanId, revisePlan } = useCocola();
-  const isRunning = useThread((thread) => thread.isRunning);
-  const [busy, setBusy] = useState(false);
-  const [copied, setCopied] = useState(false);
-  const [error, setError] = useState("");
-  const plan: UiPlanPart = {
-    type: "plan",
-    planId: data.planId,
-    version: data.version,
-    status: data.status,
-    contentMarkdown: data.contentMarkdown,
-  };
-  const approvalDisabled = busy || isRunning || revisingPlanId === data.planId;
-
-  const runAction = async (action: () => Promise<void>) => {
-    setBusy(true);
-    setError("");
-    try {
-      await action();
-    } catch (actionError) {
-      setError(actionError instanceof Error ? actionError.message : "The plan action failed.");
-    } finally {
-      setBusy(false);
-    }
-  };
-
-  const copy = async () => {
-    await navigator.clipboard.writeText(data.contentMarkdown);
-    setCopied(true);
-    window.setTimeout(() => setCopied(false), 1_400);
-  };
-
-  const revise = () => revisePlan(plan);
-
-  return (
-    <div className="my-3 overflow-hidden rounded-2xl border border-border bg-card shadow-sm">
-      <div className="flex items-center justify-between gap-3 border-b border-border/70 bg-muted/35 px-4 py-3">
-        <div className="flex min-w-0 items-center gap-2.5">
-          <span className="grid size-8 shrink-0 place-items-center rounded-lg bg-indigo-500/10 text-indigo-600">
-            <PlanModeIcon className="size-4" aria-hidden="true" />
-          </span>
-          <div className="min-w-0">
-            <div className="text-sm font-semibold text-foreground">Plan v{data.version}</div>
-            <div className="text-xs text-muted-foreground">
-              {PLAN_STATUS_LABELS[data.status as PlanStatus] ?? data.status}
-            </div>
-          </div>
-        </div>
-        <button
-          type="button"
-          onClick={() => void copy()}
-          className="rounded-lg px-2.5 py-1.5 text-xs font-medium text-muted-foreground hover:bg-muted hover:text-foreground"
-        >
-          {copied ? "Copied" : PLAN_ACTION_LABELS.copy}
-        </button>
-      </div>
-      <div className="max-h-[32rem] overflow-y-auto px-4 py-4">
-        <MarkdownContent value={data.contentMarkdown} />
-      </div>
-      {["ready", "stopped", "failed"].includes(data.status) ? (
-        <div className="flex flex-wrap items-center gap-2 border-t border-border/70 px-4 py-3">
-          {data.status === "ready" ? (
-            <button
-              type="button"
-              disabled={approvalDisabled}
-              onClick={() => void runAction(() => executePlan(plan))}
-              className="rounded-lg bg-primary px-3 py-1.5 text-xs font-semibold text-primary-foreground hover:bg-primary/90 disabled:cursor-not-allowed disabled:opacity-50"
-            >
-              {PLAN_ACTION_LABELS.approve}
-            </button>
-          ) : null}
-          {data.status === "stopped" ? (
-            <button
-              type="button"
-              disabled={busy || isRunning}
-              onClick={() => void runAction(() => executePlan(plan))}
-              className="rounded-lg bg-primary px-3 py-1.5 text-xs font-semibold text-primary-foreground hover:bg-primary/90 disabled:cursor-not-allowed disabled:opacity-50"
-            >
-              {PLAN_ACTION_LABELS.continue}
-            </button>
-          ) : null}
-          <button
-            type="button"
-            disabled={busy || isRunning}
-            onClick={revise}
-            className="rounded-lg border border-border px-3 py-1.5 text-xs font-medium text-foreground hover:bg-muted disabled:cursor-not-allowed disabled:opacity-50"
-          >
-            {data.status === "ready" ? PLAN_ACTION_LABELS.revise : PLAN_ACTION_LABELS.replan}
-          </button>
-          {data.status !== "failed" ? (
-            <button
-              type="button"
-              disabled={busy || isRunning}
-              onClick={() => void runAction(() => cancelPlan(plan))}
-              className="rounded-lg px-3 py-1.5 text-xs font-medium text-muted-foreground hover:bg-muted hover:text-foreground disabled:cursor-not-allowed disabled:opacity-50"
-            >
-              {PLAN_ACTION_LABELS.cancel}
-            </button>
-          ) : null}
-          {error ? <span className="w-full text-xs text-destructive">{error}</span> : null}
-        </div>
-      ) : null}
-    </div>
-  );
-};
-
 const ASSISTANT_PART_COMPONENTS = {
   Text: TextPart,
   Reasoning: ReasoningPart,
@@ -1315,7 +1236,7 @@ const ASSISTANT_PART_COMPONENTS = {
       progress: ProgressPart,
       "memory-recall": MemoryRecallPart,
       "scm-approval": SCMApprovalPart,
-      plan: PlanPart,
+      plan: PlanCardPart,
     },
   },
 };

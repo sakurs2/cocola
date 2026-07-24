@@ -5,6 +5,7 @@ import {
   COMPOSER_SLASH_COPY,
   PLAN_ACTION_LABELS,
   PLAN_ERRORS,
+  PLAN_GATE_COPY,
   PLAN_MODE_COMMAND,
   PLAN_MODE_COPY,
   PLAN_STATUS_LABELS,
@@ -13,6 +14,8 @@ import {
   isPlanModeCommandAvailable,
   isRetryablePlanExecutionStatus,
   latestInteractionMode,
+  normalizePlanStatus,
+  planComposerContext,
   planExecutionRequestKey,
   shouldAwaitPlanStop,
 } from "./plan-mode.mjs";
@@ -63,11 +66,34 @@ test("Plan Mode product copy is stable and English", () => {
   });
   assert.deepEqual(PLAN_MODE_COPY, {
     activeLabel: "Plan mode",
-    responseLabel: "Plan mode · Read-only",
+    responseLabel: "Planning · Workspace read-only",
     cancelLabel: "Exit Plan mode",
     lockedLabel: "Plan mode is fixed while Claude is responding",
     initialPlaceholder: "Describe what you want Claude to plan…",
     revisionPlaceholder: "Describe how you want to revise this plan…",
+  });
+  assert.deepEqual(PLAN_GATE_COPY, {
+    eyebrow: "Plan mode",
+    composerDescription: "Claude will analyze the task. Nothing runs until you approve.",
+    revisionDescription: "Describe what should change. Your workspace remains unchanged.",
+    noChanges: "No workspace changes have been made.",
+    approveNotice: "Approving this plan will let Claude make changes in your workspace.",
+    continueNotice: "Continue this approved plan or create a new one.",
+    replanNotice: "This plan cannot be resumed. Create a new plan to continue.",
+    executingNotice: "Claude is executing this approved plan.",
+    completedNotice: "Claude completed this approved plan.",
+    stoppedNotice: "Execution stopped before the plan was completed.",
+    failedNotice: "Execution failed. Create a new plan before trying again.",
+    supersededNotice: "A newer version of this plan is available.",
+    cancelledNotice: "This plan was cancelled without execution.",
+    revisionInProgress: "Revision in progress",
+    moreActions: "More plan actions",
+    showPlan: "Show plan",
+    hidePlan: "Hide plan",
+    startingExecution: "Starting execution…",
+    cancelling: "Cancelling plan…",
+    copied: "Plan copied",
+    copyFailed: "Could not copy this plan.",
   });
   assert.deepEqual(PLAN_STATUS_LABELS, {
     ready: "Ready for review",
@@ -95,6 +121,24 @@ test("Plan Mode product copy is stable and English", () => {
     modelUnavailable: "The model used for this plan is no longer available. Create a new plan.",
     executionFailed: "Could not start plan execution. Try again.",
   });
+});
+
+test("Plan Mode composer context distinguishes planning from revision", () => {
+  assert.deepEqual(planComposerContext(null), {
+    label: "Plan mode",
+    description: "Claude will analyze the task. Nothing runs until you approve.",
+  });
+  assert.deepEqual(planComposerContext(2), {
+    label: "Revising Plan v2",
+    description: "Describe what should change. Your workspace remains unchanged.",
+  });
+});
+
+test("Unknown Plan status fails closed without exposing approval", () => {
+  assert.equal(normalizePlanStatus("ready"), "ready");
+  assert.equal(normalizePlanStatus("completed"), "completed");
+  assert.equal(normalizePlanStatus("unexpected"), "failed");
+  assert.equal(normalizePlanStatus(null), "failed");
 });
 
 test("Plan execution retries reuse one idempotency key", () => {

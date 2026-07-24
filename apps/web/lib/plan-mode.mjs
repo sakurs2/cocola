@@ -16,11 +16,35 @@ export const COMPOSER_SLASH_COPY = Object.freeze({
 
 export const PLAN_MODE_COPY = Object.freeze({
   activeLabel: "Plan mode",
-  responseLabel: "Plan mode · Read-only",
+  responseLabel: "Planning · Workspace read-only",
   cancelLabel: "Exit Plan mode",
   lockedLabel: "Plan mode is fixed while Claude is responding",
   initialPlaceholder: "Describe what you want Claude to plan…",
   revisionPlaceholder: "Describe how you want to revise this plan…",
+});
+
+export const PLAN_GATE_COPY = Object.freeze({
+  eyebrow: "Plan mode",
+  composerDescription: "Claude will analyze the task. Nothing runs until you approve.",
+  revisionDescription: "Describe what should change. Your workspace remains unchanged.",
+  noChanges: "No workspace changes have been made.",
+  approveNotice: "Approving this plan will let Claude make changes in your workspace.",
+  continueNotice: "Continue this approved plan or create a new one.",
+  replanNotice: "This plan cannot be resumed. Create a new plan to continue.",
+  executingNotice: "Claude is executing this approved plan.",
+  completedNotice: "Claude completed this approved plan.",
+  stoppedNotice: "Execution stopped before the plan was completed.",
+  failedNotice: "Execution failed. Create a new plan before trying again.",
+  supersededNotice: "A newer version of this plan is available.",
+  cancelledNotice: "This plan was cancelled without execution.",
+  revisionInProgress: "Revision in progress",
+  moreActions: "More plan actions",
+  showPlan: "Show plan",
+  hidePlan: "Hide plan",
+  startingExecution: "Starting execution…",
+  cancelling: "Cancelling plan…",
+  copied: "Plan copied",
+  copyFailed: "Could not copy this plan.",
 });
 
 export const PLAN_STATUS_LABELS = Object.freeze({
@@ -32,6 +56,13 @@ export const PLAN_STATUS_LABELS = Object.freeze({
   superseded: "Superseded",
   cancelled: "Cancelled",
 });
+
+export function normalizePlanStatus(status) {
+  return typeof status === "string" &&
+    Object.prototype.hasOwnProperty.call(PLAN_STATUS_LABELS, status)
+    ? status
+    : "failed";
+}
 
 export const PLAN_ACTION_LABELS = Object.freeze({
   approve: "Approve and execute",
@@ -66,6 +97,19 @@ export function interactionModeForRuntime(runtimeId, requestedMode) {
 
 export function isPlanModeCommandAvailable(runtimeId, interactionMode, isRunning) {
   return runtimeId === "claude-code" && interactionMode !== "plan" && !isRunning;
+}
+
+export function planComposerContext(version) {
+  if (Number.isInteger(version) && version > 0) {
+    return {
+      label: `Revising Plan v${version}`,
+      description: PLAN_GATE_COPY.revisionDescription,
+    };
+  }
+  return {
+    label: PLAN_MODE_COPY.activeLabel,
+    description: PLAN_GATE_COPY.composerDescription,
+  };
 }
 
 export function planExecutionRequestKey(conversationId, planId, version) {
