@@ -31,6 +31,13 @@ type Event struct {
 	Data map[string]string `json:"data,omitempty"`
 }
 
+type InteractionMode string
+
+const (
+	InteractionModeExecute InteractionMode = "execute"
+	InteractionModePlan    InteractionMode = "plan"
+)
+
 func IsRuntimeInterruption(err error) bool {
 	if err == nil {
 		return false
@@ -47,18 +54,20 @@ func IsRuntimeInterruption(err error) bool {
 // caller (HTTP layer) fills UserID/SessionId from the verified identity, never
 // from client-supplied fields.
 type Query struct {
-	UserID              string
-	SessionID           string
-	RuntimeID           string
-	SkillID             string
-	Prompt              string
-	SandboxID           string
-	AllowWorkspaceReset bool
-	MemoryContext       string
-	MaxTurns            int32
-	ModelRouteID        string
-	TraceID             string
-	ParentSpanID        string
+	UserID               string
+	SessionID            string
+	RuntimeID            string
+	InteractionMode      InteractionMode
+	RequireSessionResume bool
+	SkillID              string
+	Prompt               string
+	SandboxID            string
+	AllowWorkspaceReset  bool
+	MemoryContext        string
+	MaxTurns             int32
+	ModelRouteID         string
+	TraceID              string
+	ParentSpanID         string
 	// SandboxAuthToken is a fresh per-user cocola token the gateway mints from
 	// the verified identity (sub=UserID, ten=TenantID) for THIS turn. It is
 	// forwarded to agent-runtime over gRPC metadata and injected into the
@@ -104,11 +113,11 @@ type GitCommitFile struct {
 }
 
 type GitSnapshot struct {
-	Branch, BaseRef, BaseSHA, HeadSHA  string
-	Ahead                              int
-	Dirty, Truncated, HistoryTruncated bool
-	Changes                            []GitChange
-	Commits                            []GitCommit
+	Branch, BaseRef, BaseSHA, HeadSHA, WorkspaceRevision string
+	Ahead                                                int
+	Dirty, Truncated, HistoryTruncated                   bool
+	Changes                                              []GitChange
+	Commits                                              []GitCommit
 }
 
 type GitInspection struct {
@@ -275,16 +284,18 @@ func (c *Client) Stream(ctx context.Context, q Query, onEvent func(Event) error)
 		})
 	}
 	request := &agentv1.QueryRequest{
-		UserId:              q.UserID,
-		SessionId:           q.SessionID,
-		Prompt:              q.Prompt,
-		SandboxId:           q.SandboxID,
-		MaxTurns:            q.MaxTurns,
-		Attachments:         atts,
-		RuntimeId:           q.RuntimeID,
-		SkillId:             q.SkillID,
-		AllowWorkspaceReset: q.AllowWorkspaceReset,
-		MemoryContext:       q.MemoryContext,
+		UserId:               q.UserID,
+		SessionId:            q.SessionID,
+		Prompt:               q.Prompt,
+		SandboxId:            q.SandboxID,
+		MaxTurns:             q.MaxTurns,
+		Attachments:          atts,
+		RuntimeId:            q.RuntimeID,
+		SkillId:              q.SkillID,
+		AllowWorkspaceReset:  q.AllowWorkspaceReset,
+		MemoryContext:        q.MemoryContext,
+		InteractionMode:      interactionModeProto(q.InteractionMode),
+		RequireSessionResume: q.RequireSessionResume,
 	}
 	if q.Project != nil {
 		request.ProjectContext = projectContextProto(*q.Project)
@@ -309,6 +320,13 @@ func (c *Client) Stream(ctx context.Context, q Query, onEvent func(Event) error)
 	}
 }
 
+func interactionModeProto(mode InteractionMode) agentv1.InteractionMode {
+	if mode == InteractionModePlan {
+		return agentv1.InteractionMode_INTERACTION_MODE_PLAN
+	}
+	return agentv1.InteractionMode_INTERACTION_MODE_EXECUTE
+}
+
 func (c *Client) InspectWorkspaceGit(ctx context.Context, request InspectRequest) (GitInspection, error) {
 	if strings.TrimSpace(request.SCMToken) != "" {
 		ctx = metadata.AppendToOutgoingContext(ctx, "x-cocola-scm-token", strings.TrimSpace(request.SCMToken))
@@ -325,7 +343,8 @@ func (c *Client) InspectWorkspaceGit(ctx context.Context, request InspectRequest
 	if snapshot := response.GetSnapshot(); snapshot != nil {
 		result.Snapshot = GitSnapshot{
 			Branch: snapshot.GetBranch(), BaseRef: snapshot.GetBaseRef(), BaseSHA: snapshot.GetBaseSha(), HeadSHA: snapshot.GetHeadSha(),
-			Ahead: int(snapshot.GetAhead()), Dirty: snapshot.GetDirty(), Truncated: snapshot.GetTruncated(),
+			WorkspaceRevision: snapshot.GetWorkspaceRevision(),
+			Ahead:             int(snapshot.GetAhead()), Dirty: snapshot.GetDirty(), Truncated: snapshot.GetTruncated(),
 			HistoryTruncated: snapshot.GetHistoryTruncated(),
 		}
 		for _, change := range snapshot.GetChanges() {

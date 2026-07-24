@@ -90,6 +90,52 @@ async def test_maps_tool_use_turn_and_reassembles_split_line():
     assert "resume" not in sent  # first turn has nothing to resume
 
 
+def test_plan_mode_maps_to_native_claude_permission_mode():
+    provider = InSandboxShimProvider(StaticSandboxExecutor())
+
+    request = json.loads(
+        provider._build_request(
+            "inspect this task",
+            AgentOptions(
+                user_id="U1",
+                session_id="S1",
+                sandbox_id="box-1",
+                interaction_mode="plan",
+            ),
+            None,
+        )
+    )
+
+    assert request["permission_mode"] == "plan"
+
+
+async def test_plan_ready_event_is_forwarded_without_claude_specific_fields():
+    def stream_handler(sandbox_id, cmd, stdin):
+        yield ExecChunk(
+            kind="stdout",
+            data=_ndjson(
+                {"type": "plan_ready", "content_markdown": "## Plan\n\n- Inspect"},
+                {"type": "done", "session_id": "sess-plan"},
+            ),
+        )
+        yield ExecChunk(kind="exit", exit_code=0)
+
+    provider = InSandboxShimProvider(StaticSandboxExecutor(stream_handler=stream_handler))
+    events = await _drain(
+        provider,
+        "plan it",
+        AgentOptions(
+            user_id="U1",
+            session_id="S1",
+            sandbox_id="box-1",
+            interaction_mode="plan",
+        ),
+    )
+
+    assert [event.kind for event in events] == ["plan_ready", "done"]
+    assert events[0].data == {"content_markdown": "## Plan\n\n- Inspect"}
+
+
 async def test_progress_event_preserves_todo_items():
     items = [
         {"content": "Inspect the project", "status": "completed"},
@@ -605,6 +651,56 @@ async def test_dangling_resume_retries_fresh_and_reindexes():
     assert calls["n"] == 2  # exactly one retry
     # The stale id was forgotten and replaced by the fresh one.
     assert await smap.get("S1", user_id="U1", runtime_id="claude-code") == "sess-new"
+
+
+async def test_required_resume_without_binding_fails_without_starting_fresh():
+    execu = StaticSandboxExecutor()
+    provider = InSandboxShimProvider(execu)
+    opts = AgentOptions(user_id="U1", session_id="S1", sandbox_id="box-1")
+    opts.require_session_resume = True
+
+    events = await _drain(provider, "execute the approved plan", opts)
+
+    assert execu.stream_calls == []
+    assert [event.kind for event in events] == ["error", "done"]
+    assert events[0].data["code"] == "SESSION_RESUME_REQUIRED"
+
+
+async def test_required_resume_does_not_retry_a_dangling_session():
+    calls = {"n": 0}
+
+    def stream_handler(sandbox_id, cmd, stdin):
+        calls["n"] += 1
+        request = json.loads(stdin)
+        assert request["resume"] == "sess-stale"
+        yield ExecChunk(
+            kind="stdout",
+            data=_ndjson(
+                {
+                    "type": "error",
+                    "stage": "run",
+                    "code": "SESSION_NOT_FOUND",
+                    "error": "No conversation found with session ID: sess-stale",
+                }
+            ),
+        )
+        yield ExecChunk(kind="exit", exit_code=1)
+
+    smap = MemorySessionMap()
+    await smap.put("S1", "sess-stale", user_id="U1", runtime_id="claude-code")
+    provider = InSandboxShimProvider(
+        StaticSandboxExecutor(stream_handler=stream_handler),
+        session_map=smap,
+    )
+    opts = AgentOptions(user_id="U1", session_id="S1", sandbox_id="box-1")
+    opts.require_session_resume = True
+
+    events = await _drain(provider, "execute the approved plan", opts)
+
+    assert calls["n"] == 1
+    assert [event.kind for event in events] == ["error", "done"]
+    assert events[0].data["code"] == "SESSION_RESUME_REQUIRED"
+    assert await smap.get("S1", user_id="U1", runtime_id="claude-code") == "sess-stale"
 
 
 async def test_unrelated_failure_is_not_retried():

@@ -329,6 +329,7 @@ def parse_porcelain_v2(raw, default_branch, max_paths):
 _PROJECT_GIT_SCRIPT = (
     r"""
 import json
+import hashlib
 import os
 import pathlib
 import shutil
@@ -799,6 +800,41 @@ def commit_file_diff(commit_sha, parent, path):
     truncated = len(result.stdout) > MAX_DIFF
     return result.stdout[:MAX_DIFF].decode("utf-8", "replace"), binary, truncated
 
+def workspace_revision():
+    head = git(["rev-parse", "HEAD"], binary=True)
+    if head.returncode != 0:
+        fail("GIT_STATUS_FAILED", "Could not read Git HEAD")
+    diff = git(["diff", "--binary", "--no-ext-diff", "HEAD", "--"], binary=True)
+    if diff.returncode != 0:
+        fail("GIT_STATUS_FAILED", "Could not read Git workspace diff")
+    untracked = git(["ls-files", "--others", "--exclude-standard", "-z"], binary=True)
+    if untracked.returncode != 0:
+        fail("GIT_STATUS_FAILED", "Could not inspect untracked files")
+
+    digest = hashlib.sha256()
+    digest.update(b"head\0" + head.stdout.strip() + b"\0")
+    digest.update(b"diff\0" + diff.stdout + b"\0")
+    for raw_path in sorted(path for path in untracked.stdout.split(b"\0") if path):
+        relative_path = raw_path.decode("utf-8", "surrogateescape")
+        file_path = WORKSPACE / relative_path
+        digest.update(b"path\0" + raw_path + b"\0")
+        try:
+            if file_path.is_symlink():
+                target = os.readlink(file_path).encode("utf-8", "surrogateescape")
+                digest.update(b"symlink\0" + hashlib.sha256(target).digest() + b"\0")
+                continue
+            file_digest = hashlib.sha256()
+            with file_path.open("rb") as source:
+                while True:
+                    chunk = source.read(1024 * 1024)
+                    if not chunk:
+                        break
+                    file_digest.update(chunk)
+            digest.update(b"file\0" + file_digest.digest() + b"\0")
+        except OSError:
+            fail("GIT_STATUS_FAILED", "Could not read an untracked workspace file")
+    return digest.hexdigest()
+
 def status_snapshot():
     validate_workspace()
     status = git(
@@ -830,6 +866,7 @@ def status_snapshot():
         "truncated": truncated,
         "commits": commits,
         "history_truncated": history_truncated,
+        "workspace_revision": workspace_revision(),
     }
 
 def publish():

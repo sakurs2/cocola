@@ -37,6 +37,15 @@ import {
 } from "@/lib/environment";
 import { inferAgentDurationMs } from "@/lib/agent-turn-summary.mjs";
 import { selectAgentRuntime } from "@/lib/agent-runtime-policy.mjs";
+import {
+  getOrCreatePlanExecutionRequestId,
+  interactionModeForRuntime,
+  isRetryablePlanExecutionStatus,
+  latestInteractionMode,
+  PLAN_ERRORS,
+  planExecutionRequestKey,
+  shouldAwaitPlanStop,
+} from "@/lib/plan-mode.mjs";
 import { canDiscardPendingProjectTask } from "@/lib/project-task-intent.mjs";
 
 // ---- Local message model (carries cocola semantics) ------------------------
@@ -102,6 +111,25 @@ export type UiSCMApprovalPart = {
   approvalLabel?: string;
 };
 
+export type InteractionMode = "execute" | "plan";
+
+export type PlanStatus =
+  | "ready"
+  | "executing"
+  | "completed"
+  | "stopped"
+  | "failed"
+  | "superseded"
+  | "cancelled";
+
+export type UiPlanPart = {
+  type: "plan";
+  planId: string;
+  version: number;
+  status: PlanStatus;
+  contentMarkdown: string;
+};
+
 type UiPart =
   | { type: "text"; text: string }
   | { type: "reasoning"; text: string }
@@ -111,7 +139,8 @@ type UiPart =
   | UiSessionStatusPart
   | UiProgressPart
   | UiMemoryRecallPart
-  | UiSCMApprovalPart;
+  | UiSCMApprovalPart
+  | UiPlanPart;
 
 type UiMessage = {
   id: string;
@@ -125,6 +154,7 @@ type RunCursor = {
   conversationId: string;
   runId: string;
   assistantId: string;
+  planId?: string;
 };
 
 const RUN_CURSOR_KEY = "cocola.chat-runs.v1";
@@ -139,11 +169,21 @@ function readRunCursors(): RunCursor[] {
     return raw.flatMap((item): RunCursor[] => {
       if (!item || typeof item !== "object") return [];
       const cursor = item as Record<string, unknown>;
-      return typeof cursor.conversationId === "string" &&
-        typeof cursor.runId === "string" &&
-        typeof cursor.assistantId === "string"
-        ? [cursor as RunCursor]
-        : [];
+      if (
+        typeof cursor.conversationId !== "string" ||
+        typeof cursor.runId !== "string" ||
+        typeof cursor.assistantId !== "string"
+      ) {
+        return [];
+      }
+      return [
+        {
+          conversationId: cursor.conversationId,
+          runId: cursor.runId,
+          assistantId: cursor.assistantId,
+          ...(typeof cursor.planId === "string" && cursor.planId ? { planId: cursor.planId } : {}),
+        },
+      ];
     });
   } catch {
     return [];
@@ -296,6 +336,7 @@ export type SkillOption = {
 };
 
 export type UiMessageMetadata = {
+  interaction_mode?: InteractionMode;
   skill_id?: string;
   model_route_id?: string;
   model_alias?: string;
@@ -370,6 +411,12 @@ type CocolaContextValue = {
   runtimeConfigError: string | null;
   runtimeLocked: boolean;
   setSelectedRuntimeId: (id: string) => void;
+  interactionMode: InteractionMode;
+  setInteractionMode: (mode: InteractionMode) => void;
+  revisingPlanId: string;
+  revisePlan: (plan: UiPlanPart) => void;
+  executePlan: (plan: UiPlanPart) => Promise<void>;
+  cancelPlan: (plan: UiPlanPart) => Promise<void>;
   skills: SkillOption[];
   skillsLoaded: boolean;
   selectedSkill: SkillOption | null;
@@ -513,6 +560,9 @@ function normalizeMetadata(raw: UiMessageMetadata | undefined): UiMessageMetadat
       ? raw.duration_ms
       : undefined;
   return {
+    ...(raw.interaction_mode === "plan" || raw.interaction_mode === "execute"
+      ? { interaction_mode: raw.interaction_mode }
+      : {}),
     ...(typeof raw.skill_id === "string" ? { skill_id: raw.skill_id } : {}),
     ...(typeof raw.model_route_id === "string" ? { model_route_id: raw.model_route_id } : {}),
     ...(typeof raw.model_alias === "string" ? { model_alias: raw.model_alias } : {}),
@@ -540,11 +590,43 @@ function normalizePersistedParts(parts: UiPart[] | undefined): UiPart[] {
     } else if (part.type === "scm-approval") {
       const approval = normalizeSCMApprovalPart(part);
       if (approval) normalized.push(approval);
+    } else if (part.type === "plan") {
+      const plan = normalizePlanPart(part);
+      if (plan) normalized.push(plan);
     } else {
       normalized.push(part);
     }
   }
   return normalized;
+}
+
+const PLAN_STATUSES = new Set<PlanStatus>([
+  "ready",
+  "executing",
+  "completed",
+  "stopped",
+  "failed",
+  "superseded",
+  "cancelled",
+]);
+
+function normalizePlanPart(raw: unknown): UiPlanPart | null {
+  if (!raw || typeof raw !== "object") return null;
+  const part = raw as Record<string, unknown>;
+  const planId = stringValue(part.planId).trim();
+  const status = stringValue(part.status) as PlanStatus;
+  const contentMarkdown = stringValue(part.contentMarkdown);
+  const version = Number(part.version);
+  if (
+    !planId ||
+    !PLAN_STATUSES.has(status) ||
+    !contentMarkdown ||
+    !Number.isInteger(version) ||
+    version <= 0
+  ) {
+    return null;
+  }
+  return { type: "plan", planId, version, status, contentMarkdown };
 }
 
 function normalizeSCMApprovalPart(raw: unknown): UiSCMApprovalPart | null {
@@ -791,6 +873,33 @@ function upsertSCMApproval(parts: UiPart[], data: Record<string, string>): UiPar
   return parts.map((part, partIndex) => (partIndex === index ? next : part));
 }
 
+function upsertPlan(parts: UiPart[], data: Record<string, string>): UiPart[] {
+  const next = normalizePlanPart({
+    planId: data.id,
+    version: Number(data.version),
+    status: data.status,
+    contentMarkdown: data.content_markdown,
+  });
+  if (!next) return parts;
+  const index = parts.findIndex((part) => part.type === "plan" && part.planId === next.planId);
+  if (index < 0) return [...parts, next];
+  return parts.map((part, partIndex) => (partIndex === index ? next : part));
+}
+
+function updatePlanStatus(messages: UiMessage[], planId: string, status: string): UiMessage[] {
+  if (!planId || !PLAN_STATUSES.has(status as PlanStatus)) return messages;
+  let changed = false;
+  const next = messages.map((message) => ({
+    ...message,
+    parts: message.parts.map((part) => {
+      if (part.type !== "plan" || part.planId !== planId || part.status === status) return part;
+      changed = true;
+      return { ...part, status: status as PlanStatus };
+    }),
+  }));
+  return changed ? next : messages;
+}
+
 // Reduce a single agent event into the assistant message's parts. Pure.
 function reducePart(parts: UiPart[], ev: AgentEvent): UiPart[] {
   const d = ev.data ?? {};
@@ -803,6 +912,8 @@ function reducePart(parts: UiPart[], ev: AgentEvent): UiPart[] {
       return upsertMemoryRecall(parts, d);
     case "scm_approval":
       return upsertSCMApproval(parts, d);
+    case "plan_ready":
+      return upsertPlan(parts, d);
     case "text":
       return appendTo(parts, "text", d.text ?? "");
     case "thinking":
@@ -869,6 +980,18 @@ function convertMessage(message: UiMessage): ThreadMessageLike {
           status: p.approvalStatus,
           category: p.approvalCategory,
           label: p.approvalLabel,
+        },
+      };
+    }
+    if (p.type === "plan") {
+      return {
+        type: "data" as const,
+        name: "plan",
+        data: {
+          planId: p.planId,
+          version: p.version,
+          status: p.status,
+          contentMarkdown: p.contentMarkdown,
         },
       };
     }
@@ -960,8 +1083,11 @@ export function CocolaRuntimeProvider({ children }: { children: ReactNode }) {
   const [skills, setSkills] = useState<SkillOption[]>([]);
   const [skillsLoaded, setSkillsLoaded] = useState(false);
   const [selectedSkillIds, setSelectedSkillIds] = useState<Record<string, string>>({});
+  const [interactionModes, setInteractionModes] = useState<Record<string, InteractionMode>>({});
+  const [revisingPlanIds, setRevisingPlanIds] = useState<Record<string, string>>({});
   const abortMap = useRef<Map<string, AbortController>>(new Map());
   const runCursors = useRef<Map<string, RunCursor>>(new Map());
+  const planExecutionRequestIds = useRef<Map<string, string>>(new Map());
   const restoredRuns = useRef(false);
   const sessionIdRef = useRef(sessionId);
   const sessionFolderHintsRef = useRef<Map<string, string>>(new Map());
@@ -999,7 +1125,32 @@ export function CocolaRuntimeProvider({ children }: { children: ReactNode }) {
     const selectedID = selectedSkillIds[sessionId] ?? "";
     return skills.find((skill) => skill.id === selectedID) ?? null;
   }, [selectedSkillIds, sessionId, skills]);
+  const interactionMode = interactionModes[sessionId] ?? "execute";
+  const revisingPlanId = revisingPlanIds[sessionId] ?? "";
   const runtimeLocked = messages.length > 0 || conversations.some((item) => item.id === sessionId);
+
+  const setInteractionMode = useCallback(
+    (mode: InteractionMode) => {
+      if (
+        isRunning ||
+        selectedRuntime?.id !== "claude-code" ||
+        (mode !== "execute" && mode !== "plan")
+      ) {
+        return;
+      }
+      setInteractionModes((previous) => ({ ...previous, [sessionId]: mode }));
+    },
+    [isRunning, selectedRuntime?.id, sessionId],
+  );
+
+  const revisePlan = useCallback(
+    (plan: UiPlanPart) => {
+      if (isRunning || selectedRuntime?.id !== "claude-code") return;
+      setInteractionModes((previous) => ({ ...previous, [sessionId]: "plan" }));
+      setRevisingPlanIds((previous) => ({ ...previous, [sessionId]: plan.planId }));
+    },
+    [isRunning, selectedRuntime?.id, sessionId],
+  );
 
   const setSelectedSkillId = useCallback(
     (id: string | null) => {
@@ -1039,6 +1190,12 @@ export function CocolaRuntimeProvider({ children }: { children: ReactNode }) {
     const conversation = conversations.find((item) => item.id === sessionId);
     if (conversation?.runtime_id) setSelectedRuntimeIdState(conversation.runtime_id);
   }, [conversations, runtimesLoaded, sessionId]);
+
+  useEffect(() => {
+    if (selectedRuntime && selectedRuntime.id !== "claude-code" && interactionMode !== "execute") {
+      setInteractionModes((previous) => ({ ...previous, [sessionId]: "execute" }));
+    }
+  }, [interactionMode, selectedRuntime, sessionId]);
 
   useEffect(() => {
     sessionIdRef.current = sessionId;
@@ -1147,6 +1304,24 @@ export function CocolaRuntimeProvider({ children }: { children: ReactNode }) {
         },
       }));
       return;
+    }
+    if (ev.kind === "plan_status") {
+      const planId = ev.data?.id ?? "";
+      const status = ev.data?.status ?? "";
+      setConvMessages((previous) => {
+        const current = previous[targetSessionId] ?? [];
+        const next = updatePlanStatus(current, planId, status);
+        return next === current ? previous : { ...previous, [targetSessionId]: next };
+      });
+      return;
+    }
+    if (ev.kind === "plan_ready") {
+      setRevisingPlanIds((previous) => {
+        if (!(targetSessionId in previous)) return previous;
+        const next = { ...previous };
+        delete next[targetSessionId];
+        return next;
+      });
     }
     setConvMessages((prev) => {
       const cur = prev[targetSessionId] ?? [];
@@ -1573,6 +1748,10 @@ export function CocolaRuntimeProvider({ children }: { children: ReactNode }) {
       const agentRuntime = selectedRuntime;
       const turnSkill = selectedSkill;
       if (!model || !agentRuntime) return;
+      const turnInteractionMode = interactionModeForRuntime(
+        agentRuntime.id,
+        interactionMode,
+      ) as InteractionMode;
       if (abortMap.current.has(turnSessionId) || runCursors.current.has(turnSessionId)) return;
       setSelectedSkillIds((prev) => {
         if (!(turnSessionId in prev)) return prev;
@@ -1582,6 +1761,7 @@ export function CocolaRuntimeProvider({ children }: { children: ReactNode }) {
       });
       const isInitialTurn = messages.length === 0;
       const assistantMetadata: UiMessageMetadata = {
+        interaction_mode: turnInteractionMode,
         model_route_id: model.id,
         model_alias: model.alias,
         model_label: model.label,
@@ -1604,7 +1784,10 @@ export function CocolaRuntimeProvider({ children }: { children: ReactNode }) {
               role: "user",
               parts: [{ type: "text", text }],
               createdAt: Date.now(),
-              ...(turnSkill ? { metadata: { skill_id: turnSkill.id } } : {}),
+              metadata: {
+                interaction_mode: turnInteractionMode,
+                ...(turnSkill ? { skill_id: turnSkill.id } : {}),
+              },
             },
             {
               id: assistantId,
@@ -1668,6 +1851,7 @@ export function CocolaRuntimeProvider({ children }: { children: ReactNode }) {
           session_id: turnSessionId,
           client_request_id: clientRequestId,
           runtime_id: agentRuntime.id,
+          interaction_mode: turnInteractionMode,
           ...(allowWorkspaceReset ? { allow_workspace_reset: true } : {}),
           ...(turnSkill ? { skill_id: turnSkill.id } : {}),
           model_route_id: model.id,
@@ -1839,6 +2023,7 @@ export function CocolaRuntimeProvider({ children }: { children: ReactNode }) {
       selectedModel,
       selectedRuntime,
       selectedSkill,
+      interactionMode,
       conversations,
       messages.length,
       applyEvent,
@@ -1847,6 +2032,164 @@ export function CocolaRuntimeProvider({ children }: { children: ReactNode }) {
       markServerAccepted,
       setRunning,
     ],
+  );
+
+  const executePlan = useCallback(
+    async (plan: UiPlanPart) => {
+      const turnSessionId = sessionId;
+      if (
+        !["ready", "stopped"].includes(plan.status) ||
+        abortMap.current.has(turnSessionId) ||
+        runCursors.current.has(turnSessionId)
+      ) {
+        return;
+      }
+      const assistantId = genId();
+      const controller = new AbortController();
+      abortMap.current.set(turnSessionId, controller);
+      setInteractionModes((previous) => ({ ...previous, [turnSessionId]: "execute" }));
+      setRevisingPlanIds((previous) => {
+        if (!(turnSessionId in previous)) return previous;
+        const next = { ...previous };
+        delete next[turnSessionId];
+        return next;
+      });
+      setConvMessages((previous) => ({
+        ...previous,
+        [turnSessionId]: [
+          ...(previous[turnSessionId] ?? []),
+          {
+            id: assistantId,
+            role: "assistant",
+            parts: [],
+            createdAt: Date.now(),
+            metadata: { interaction_mode: "execute" },
+          },
+        ],
+      }));
+      setRunning(turnSessionId, true);
+      const requestKey = planExecutionRequestKey(turnSessionId, plan.planId, plan.version);
+      const clientRequestId = getOrCreatePlanExecutionRequestId(
+        planExecutionRequestIds.current,
+        requestKey,
+        genId,
+      );
+      const requestBody = JSON.stringify({
+        expected_version: plan.version,
+        client_request_id: clientRequestId,
+      });
+      try {
+        let response: Response | undefined;
+        let retryDelay = 250;
+        let startAttempts = 0;
+        let lastError: unknown = new Error(PLAN_ERRORS.executionFailed);
+        while (!response && !controller.signal.aborted && startAttempts < CHAT_START_MAX_ATTEMPTS) {
+          startAttempts += 1;
+          let candidate: Response | undefined;
+          try {
+            candidate = await fetch(
+              `/api/conversations/${encodeURIComponent(turnSessionId)}/plans/${encodeURIComponent(plan.planId)}/execute`,
+              {
+                method: "POST",
+                headers: { "content-type": "application/json" },
+                body: requestBody,
+                signal: controller.signal,
+              },
+            );
+          } catch (error) {
+            if (controller.signal.aborted) throw error;
+            lastError = error;
+          }
+          if (candidate) {
+            if (isAccountDisabledResponse(candidate)) {
+              planExecutionRequestIds.current.delete(requestKey);
+              redirectAccountDisabled();
+              return;
+            }
+            if (candidate.ok && candidate.body) {
+              response = candidate;
+              break;
+            }
+            if (candidate.ok) {
+              lastError = new Error(PLAN_ERRORS.executionFailed);
+            } else {
+              lastError = await apiError(candidate, PLAN_ERRORS.executionFailed);
+              if (!isRetryablePlanExecutionStatus(candidate.status)) {
+                planExecutionRequestIds.current.delete(requestKey);
+                throw lastError;
+              }
+            }
+            await candidate.body?.cancel().catch(() => {});
+          }
+          if (startAttempts >= CHAT_START_MAX_ATTEMPTS) throw lastError;
+          await new Promise<void>((resolve) => window.setTimeout(resolve, retryDelay));
+          retryDelay = Math.min(retryDelay * 2, 5000);
+        }
+        if (!response) throw lastError;
+        const runId = response.headers.get("x-cocola-run-id") ?? "";
+        if (!runId) throw new Error(PLAN_ERRORS.executionFailed);
+        const durableAssistantId = `${runId}-assistant`;
+        setConvMessages((previous) => ({
+          ...previous,
+          [turnSessionId]: updatePlanStatus(
+            (previous[turnSessionId] ?? []).map((message) =>
+              message.id === assistantId ? { ...message, id: durableAssistantId } : message,
+            ),
+            plan.planId,
+            "executing",
+          ),
+        }));
+        const cursor = {
+          conversationId: turnSessionId,
+          runId,
+          assistantId: durableAssistantId,
+          planId: plan.planId,
+        };
+        runCursors.current.set(turnSessionId, cursor);
+        writeRunCursors(runCursors.current);
+        planExecutionRequestIds.current.delete(requestKey);
+        await followRun(cursor, controller, response);
+      } catch (error) {
+        if (!(error instanceof DOMException && error.name === "AbortError")) {
+          applyEvent(turnSessionId, assistantId, {
+            kind: "error",
+            data: {
+              error: error instanceof Error ? error.message : PLAN_ERRORS.executionFailed,
+            },
+          });
+          setRunning(turnSessionId, false);
+          abortMap.current.delete(turnSessionId);
+        }
+      }
+    },
+    [applyEvent, followRun, sessionId, setRunning],
+  );
+
+  const cancelPlan = useCallback(
+    async (plan: UiPlanPart) => {
+      if (!["ready", "stopped"].includes(plan.status)) return;
+      const response = await fetch(
+        `/api/conversations/${encodeURIComponent(sessionId)}/plans/${encodeURIComponent(plan.planId)}/cancel`,
+        {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({ expected_version: plan.version }),
+        },
+      );
+      if (isAccountDisabledResponse(response)) {
+        redirectAccountDisabled();
+        return;
+      }
+      if (!response.ok) throw await apiError(response, "Could not cancel plan. Try again.");
+      setConvMessages((previous) => {
+        const current = previous[sessionId] ?? [];
+        return {
+          ...previous,
+          [sessionId]: updatePlanStatus(current, plan.planId, "cancelled"),
+        };
+      });
+    },
+    [sessionId],
   );
 
   const onCancel = useCallback(async () => {
@@ -1867,6 +2210,9 @@ export function CocolaRuntimeProvider({ children }: { children: ReactNode }) {
           kind: "error",
           data: { error: error instanceof Error ? error.message : String(error) },
         });
+        return;
+      }
+      if (shouldAwaitPlanStop(cursor)) {
         return;
       }
       runCursors.current.delete(sessionId);
@@ -1896,12 +2242,13 @@ export function CocolaRuntimeProvider({ children }: { children: ReactNode }) {
         return;
       }
       if (response.status === 404 || !response.ok) return;
-      const run = (await response.json()) as { run_id?: string };
+      const run = (await response.json()) as { run_id?: string; plan_id?: string };
       if (!run.run_id) return;
       const cursor: RunCursor = {
         conversationId,
         runId: run.run_id,
         assistantId: `${run.run_id}-assistant`,
+        ...(run.plan_id ? { planId: run.plan_id } : {}),
       };
       runCursors.current.set(conversationId, cursor);
       writeRunCursors(runCursors.current);
@@ -1951,6 +2298,10 @@ export function CocolaRuntimeProvider({ children }: { children: ReactNode }) {
       });
       const cached = convMessages[id] ?? [];
       if (cached.length > 0) {
+        setInteractionModes((previous) => ({
+          ...previous,
+          [id]: latestInteractionMode(cached),
+        }));
         setEnvironmentStatuses((prev) => withSessionStatus(prev, id, latestSessionStatus(cached)));
         void connectActiveRun(id);
         return;
@@ -1967,6 +2318,10 @@ export function CocolaRuntimeProvider({ children }: { children: ReactNode }) {
         }
         const loaded = normalizeWireMessages(await res.json());
         setConvMessages((prev) => ({ ...prev, [id]: loaded }));
+        setInteractionModes((previous) => ({
+          ...previous,
+          [id]: latestInteractionMode(loaded),
+        }));
         setEnvironmentStatuses((prev) => withSessionStatus(prev, id, latestSessionStatus(loaded)));
         void connectActiveRun(id);
       } catch {
@@ -2039,11 +2394,18 @@ export function CocolaRuntimeProvider({ children }: { children: ReactNode }) {
     setEnvironmentStatuses((prev) =>
       Object.fromEntries(Object.entries(prev).filter(([id]) => !removed.has(id))),
     );
+    setInteractionModes((prev) =>
+      Object.fromEntries(Object.entries(prev).filter(([id]) => !removed.has(id))),
+    );
+    setRevisingPlanIds((prev) =>
+      Object.fromEntries(Object.entries(prev).filter(([id]) => !removed.has(id))),
+    );
     setSelectedArtifact((prev) => (prev && removed.has(prev.sessionId) ? null : prev));
     if (removed.has(sessionIdRef.current)) {
       const fresh = genId();
       sessionIdRef.current = fresh;
       setSessionId(fresh);
+      setInteractionModes((previous) => ({ ...previous, [fresh]: "execute" }));
       setConvMessages((prev) => ({ ...prev, [fresh]: [] }));
       setSandboxes((prev) => ({ ...prev, [fresh]: null }));
     }
@@ -2185,6 +2547,7 @@ export function CocolaRuntimeProvider({ children }: { children: ReactNode }) {
       if (folderId) sessionFolderHintsRef.current.set(fresh, folderId);
       else sessionFolderHintsRef.current.delete(fresh);
       setSessionId(fresh);
+      setInteractionModes((previous) => ({ ...previous, [fresh]: "execute" }));
       setSelectedRuntimeIdState(preferred?.id ?? "");
       setSelectedArtifact(null);
       setConvMessages((prev) => ({ ...prev, [fresh]: [] }));
@@ -2204,6 +2567,7 @@ export function CocolaRuntimeProvider({ children }: { children: ReactNode }) {
       baseRef: baseRef.trim(),
     });
     setSessionId(fresh);
+    setInteractionModes((previous) => ({ ...previous, [fresh]: "execute" }));
     setSelectedRuntimeIdState(runtimeId);
     setSelectedArtifact(null);
     setConvMessages((prev) => ({ ...prev, [fresh]: [] }));
@@ -2441,6 +2805,12 @@ export function CocolaRuntimeProvider({ children }: { children: ReactNode }) {
       runtimeConfigError,
       runtimeLocked,
       setSelectedRuntimeId,
+      interactionMode,
+      setInteractionMode,
+      revisingPlanId,
+      revisePlan,
+      executePlan,
+      cancelPlan,
       skills,
       skillsLoaded,
       selectedSkill,
@@ -2488,6 +2858,12 @@ export function CocolaRuntimeProvider({ children }: { children: ReactNode }) {
       runtimeConfigError,
       runtimeLocked,
       setSelectedRuntimeId,
+      interactionMode,
+      setInteractionMode,
+      revisingPlanId,
+      revisePlan,
+      executePlan,
+      cancelPlan,
       skills,
       skillsLoaded,
       selectedSkill,

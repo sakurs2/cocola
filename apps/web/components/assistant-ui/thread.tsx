@@ -39,12 +39,18 @@ import {
 } from "lucide-react";
 import Image from "next/image";
 import { Fragment, useEffect, useMemo, useRef, useState, type FC, type ReactNode } from "react";
-import { useCocola, type ModelIconConfig, type UiMessageMetadata } from "@/app/runtime-provider";
+import {
+  useCocola,
+  type ModelIconConfig,
+  type PlanStatus,
+  type UiMessageMetadata,
+  type UiPlanPart,
+} from "@/app/runtime-provider";
 import { CocolaWordmark } from "@/components/assistant-ui/cocola-wordmark";
 import { CocolaLogo } from "@/components/cocola-logo";
 import { CocolaTagline } from "@/components/assistant-ui/cocola-tagline";
 import { TooltipIconButton } from "@/components/assistant-ui/tooltip-icon-button";
-import { MarkdownText } from "@/components/assistant-ui/markdown-text";
+import { MarkdownContent, MarkdownText } from "@/components/assistant-ui/markdown-text";
 import {
   RailEnvironment,
   RailFile,
@@ -63,6 +69,12 @@ import {
   finalAgentOutputText,
   splitAgentTurnParts,
 } from "@/lib/agent-turn-summary.mjs";
+import {
+  INTERACTION_MODE_OPTIONS,
+  PLAN_ACTION_LABELS,
+  PLAN_MODE_COPY,
+  PLAN_STATUS_LABELS,
+} from "@/lib/plan-mode.mjs";
 import { findLatestProgressItems, normalizeProgressItems } from "@/lib/progress-items.mjs";
 import {
   LOCAL_SIMPLE_ICON_PATHS,
@@ -89,7 +101,7 @@ export const Thread: FC = () => {
       <ThreadPrimitive.Viewport className="relative z-10 flex flex-1 flex-col items-center overflow-y-auto scroll-smooth px-5 pt-8 [scrollbar-gutter:stable_both-edges]">
         <ThreadWelcome />
 
-        <ActivePlanDock />
+        <ActiveExecutionDock />
 
         <ThreadPrimitive.Messages
           components={{
@@ -115,13 +127,15 @@ export const Thread: FC = () => {
   );
 };
 
-const ActivePlanDock: FC = () => {
+const ActiveExecutionDock: FC = () => {
   const messages = useThread((thread) => thread.messages);
   const isRunning = useThread((thread) => thread.isRunning);
   const items = useMemo(() => {
     if (!isRunning) return undefined;
     const message = messages[messages.length - 1];
     if (message?.role !== "assistant") return undefined;
+    const metadata = message.metadata?.custom as UiMessageMetadata | undefined;
+    if (metadata?.interaction_mode === "plan") return undefined;
     return findLatestProgressItems(message.content);
   }, [isRunning, messages]);
 
@@ -244,7 +258,18 @@ export const ConversationComposer: FC<{
     modelsLoaded,
     runtimePickerEnabled,
     runtimeConfigError,
+    interactionMode,
   } = useCocola();
+  const hasCurrentPlan = useThread((thread) =>
+    thread.messages.some((message) =>
+      message.content.some(
+        (part) =>
+          part.type === "data" &&
+          part.name === "plan" &&
+          ["ready", "stopped"].includes(String(part.data.status)),
+      ),
+    ),
+  );
   const contextualBranchControl = useProjectComposerBranchControl();
   const [skillChipWidth, setSkillChipWidth] = useState(0);
   const noModel = !modelsLoaded || !selectedModel;
@@ -256,6 +281,9 @@ export const ConversationComposer: FC<{
       whileFocus={{ y: -1 }}
       transition={{ type: "spring", stiffness: 420, damping: 32 }}
     >
+      {interactionMode === "plan" ? (
+        <div className="mb-2 px-1 text-xs font-medium text-primary">{PLAN_MODE_COPY.banner}</div>
+      ) : null}
       <ComposerPrimitive.Unstable_TriggerPopoverRoot>
         <SkillTriggerMenu />
         <ComposerPrimitive.Root className="composer-lift relative z-10 flex w-full flex-col rounded-2xl border p-3">
@@ -279,7 +307,11 @@ export const ConversationComposer: FC<{
                       : selectedRuntime
                         ? `No ${selectedRuntime.label} compatible model configured`
                         : "No Agent Runtime available"
-                    : placeholder || 'Ask anything, use "/" to select a skill'
+                    : interactionMode === "plan"
+                      ? hasCurrentPlan
+                        ? PLAN_MODE_COPY.revisionPlaceholder
+                        : PLAN_MODE_COPY.initialPlaceholder
+                      : placeholder || 'Ask anything, use "/" to select a skill'
               }
               className="max-h-40 min-h-12 w-full resize-none border-none bg-transparent px-2 py-2.5 text-[15px] leading-6 outline-none placeholder:text-muted-foreground focus:ring-0 disabled:cursor-not-allowed"
             />
@@ -298,6 +330,7 @@ export const ConversationComposer: FC<{
                 </TooltipIconButton>
               </ComposerPrimitive.AddAttachment>
               {runtimePickerEnabled ? <RuntimePicker /> : null}
+              {selectedRuntime?.id === "claude-code" ? <InteractionModePicker /> : null}
               <ModelPicker />
               {effectiveBranchControl}
             </div>
@@ -483,6 +516,54 @@ const RuntimePicker: FC = () => {
               <ModelIcon icon={RUNTIME_ICONS[runtime.id]} className="size-6" />
               <span className="min-w-0 flex-1 truncate font-medium">{runtime.label}</span>
               {runtime.id === selectedRuntime?.id ? <Check className="size-4" /> : null}
+            </button>
+          ))}
+        </Popover.Content>
+      </Popover.Portal>
+    </Popover.Root>
+  );
+};
+
+const InteractionModePicker: FC = () => {
+  const { interactionMode, setInteractionMode } = useCocola();
+  const isRunning = useThread((thread) => thread.isRunning);
+  const [open, setOpen] = useState(false);
+
+  return (
+    <Popover.Root open={open} onOpenChange={setOpen}>
+      <Popover.Trigger asChild>
+        <button
+          type="button"
+          disabled={isRunning}
+          className="flex min-w-0 items-center gap-1.5 rounded-full border border-border px-2.5 py-1.5 text-[12.5px] font-medium text-foreground transition-colors hover:bg-muted disabled:cursor-not-allowed disabled:opacity-60"
+          aria-label="Select interaction mode"
+        >
+          <span>{interactionMode === "plan" ? "Plan" : "Execute"}</span>
+          {isRunning ? null : <ChevronDown className="size-3.5 text-muted-foreground" />}
+        </button>
+      </Popover.Trigger>
+      <Popover.Portal>
+        <Popover.Content
+          side="top"
+          align="start"
+          sideOffset={10}
+          className="cocola-user-ui z-50 w-64 overflow-hidden rounded-2xl border border-border bg-popover p-1.5 text-popover-foreground shadow-xl"
+        >
+          {INTERACTION_MODE_OPTIONS.map((option) => (
+            <button
+              key={option.id}
+              type="button"
+              className="flex w-full items-start gap-2 rounded-xl px-2.5 py-2 text-left hover:bg-accent"
+              onClick={() => {
+                setInteractionMode(option.id);
+                setOpen(false);
+              }}
+            >
+              <span className="min-w-0 flex-1">
+                <span className="block text-sm font-medium">{option.label}</span>
+                <span className="block text-xs text-muted-foreground">{option.description}</span>
+              </span>
+              {option.id === interactionMode ? <Check className="mt-0.5 size-4" /> : null}
             </button>
           ))}
         </Popover.Content>
@@ -1020,6 +1101,115 @@ const SCMApprovalPart: FC<
   );
 };
 
+const PlanPart: FC<
+  DataMessagePartProps<{
+    planId: string;
+    version: number;
+    status: PlanStatus;
+    contentMarkdown: string;
+  }>
+> = ({ data }) => {
+  const { executePlan, cancelPlan, revisingPlanId, revisePlan } = useCocola();
+  const isRunning = useThread((thread) => thread.isRunning);
+  const [busy, setBusy] = useState(false);
+  const [copied, setCopied] = useState(false);
+  const [error, setError] = useState("");
+  const plan: UiPlanPart = {
+    type: "plan",
+    planId: data.planId,
+    version: data.version,
+    status: data.status,
+    contentMarkdown: data.contentMarkdown,
+  };
+  const approvalDisabled = busy || isRunning || revisingPlanId === data.planId;
+
+  const runAction = async (action: () => Promise<void>) => {
+    setBusy(true);
+    setError("");
+    try {
+      await action();
+    } catch (actionError) {
+      setError(actionError instanceof Error ? actionError.message : "The plan action failed.");
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const copy = async () => {
+    await navigator.clipboard.writeText(data.contentMarkdown);
+    setCopied(true);
+    window.setTimeout(() => setCopied(false), 1_400);
+  };
+
+  const revise = () => revisePlan(plan);
+
+  return (
+    <div className="my-3 overflow-hidden rounded-2xl border border-border bg-card shadow-sm">
+      <div className="flex items-center justify-between gap-3 border-b border-border/70 bg-muted/35 px-4 py-3">
+        <div>
+          <div className="text-sm font-semibold text-foreground">Plan v{data.version}</div>
+          <div className="text-xs text-muted-foreground">
+            {PLAN_STATUS_LABELS[data.status as PlanStatus] ?? data.status}
+          </div>
+        </div>
+        <button
+          type="button"
+          onClick={() => void copy()}
+          className="rounded-lg px-2.5 py-1.5 text-xs font-medium text-muted-foreground hover:bg-muted hover:text-foreground"
+        >
+          {copied ? "Copied" : PLAN_ACTION_LABELS.copy}
+        </button>
+      </div>
+      <div className="max-h-[32rem] overflow-y-auto px-4 py-4">
+        <MarkdownContent value={data.contentMarkdown} />
+      </div>
+      {["ready", "stopped", "failed"].includes(data.status) ? (
+        <div className="flex flex-wrap items-center gap-2 border-t border-border/70 px-4 py-3">
+          {data.status === "ready" ? (
+            <button
+              type="button"
+              disabled={approvalDisabled}
+              onClick={() => void runAction(() => executePlan(plan))}
+              className="rounded-lg bg-primary px-3 py-1.5 text-xs font-semibold text-primary-foreground hover:bg-primary/90 disabled:cursor-not-allowed disabled:opacity-50"
+            >
+              {PLAN_ACTION_LABELS.approve}
+            </button>
+          ) : null}
+          {data.status === "stopped" ? (
+            <button
+              type="button"
+              disabled={busy || isRunning}
+              onClick={() => void runAction(() => executePlan(plan))}
+              className="rounded-lg bg-primary px-3 py-1.5 text-xs font-semibold text-primary-foreground hover:bg-primary/90 disabled:cursor-not-allowed disabled:opacity-50"
+            >
+              {PLAN_ACTION_LABELS.continue}
+            </button>
+          ) : null}
+          <button
+            type="button"
+            disabled={busy || isRunning}
+            onClick={revise}
+            className="rounded-lg border border-border px-3 py-1.5 text-xs font-medium text-foreground hover:bg-muted disabled:cursor-not-allowed disabled:opacity-50"
+          >
+            {data.status === "ready" ? PLAN_ACTION_LABELS.revise : PLAN_ACTION_LABELS.replan}
+          </button>
+          {data.status !== "failed" ? (
+            <button
+              type="button"
+              disabled={busy || isRunning}
+              onClick={() => void runAction(() => cancelPlan(plan))}
+              className="rounded-lg px-3 py-1.5 text-xs font-medium text-muted-foreground hover:bg-muted hover:text-foreground disabled:cursor-not-allowed disabled:opacity-50"
+            >
+              {PLAN_ACTION_LABELS.cancel}
+            </button>
+          ) : null}
+          {error ? <span className="w-full text-xs text-destructive">{error}</span> : null}
+        </div>
+      ) : null}
+    </div>
+  );
+};
+
 const ASSISTANT_PART_COMPONENTS = {
   Text: TextPart,
   Reasoning: ReasoningPart,
@@ -1030,6 +1220,7 @@ const ASSISTANT_PART_COMPONENTS = {
       progress: ProgressPart,
       "memory-recall": MemoryRecallPart,
       "scm-approval": SCMApprovalPart,
+      plan: PlanPart,
     },
   },
 };

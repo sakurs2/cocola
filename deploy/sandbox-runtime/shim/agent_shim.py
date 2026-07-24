@@ -94,6 +94,7 @@ def _build_options(req: dict[str, Any]):
         or os.getcwd()
     )
     permission_mode = req.get("permission_mode") or "bypassPermissions"
+    plan_mode = permission_mode == "plan"
 
     kwargs: dict[str, Any] = dict(
         max_turns=int(req.get("max_turns") or 20),
@@ -109,7 +110,9 @@ def _build_options(req: dict[str, Any]):
     # "I don't have a Bash tool available" reply and the hallucinated host cwd.
     # Opt back into the `claude_code` presets so the in-sandbox agent has hands.
     kwargs["tools"] = {"type": "preset", "preset": "claude_code"}
-    kwargs["setting_sources"] = ["user", "project"]
+    # Plan Mode must not load workspace-controlled settings because those
+    # settings can register hooks or MCP servers with external side effects.
+    kwargs["setting_sources"] = [] if plan_mode else ["user", "project"]
     kwargs["skills"] = "all"
 
     # System prompt: default to Claude Code's preset (which injects the live
@@ -130,7 +133,10 @@ def _build_options(req: dict[str, Any]):
     # without a RAM snapshot.
     if req.get("resume"):
         kwargs["resume"] = req["resume"]
-    if isinstance(req.get("mcp_servers"), dict) and req["mcp_servers"]:
+    if plan_mode:
+        kwargs["mcp_servers"] = {}
+        kwargs["strict_mcp_config"] = True
+    elif isinstance(req.get("mcp_servers"), dict) and req["mcp_servers"]:
         kwargs["mcp_servers"] = req["mcp_servers"]
         kwargs["strict_mcp_config"] = True
 
@@ -148,6 +154,9 @@ def _claude_prompt(req: dict[str, Any]) -> str:
 # render a status node or a search-result list, so we truncate hard here to keep
 # the SSE stream and client memory bounded.
 _TOOL_RESULT_MAX_CHARS = 4000
+_PLAN_MAX_BYTES = 128 * 1024
+_PLAN_BLOCK = re.compile(r"<cocola_plan>(.*?)</cocola_plan>", re.DOTALL)
+_PLAN_INVALID_ERROR = "Claude did not return a reviewable plan. Refine the request and try again."
 _MCP_STATUS_TIMEOUT_SECONDS = 8.0
 _MCP_STATUS_POLL_SECONDS = (0.5, 1.0, 2.0)
 _MCP_TERMINAL_STATUSES = {"connected", "failed", "needs-auth", "disabled"}
@@ -551,6 +560,103 @@ def _message_to_events(
     return events
 
 
+class _ClaudePlanCapture:
+    """Hold plan text until it can be validated as one reviewable plan."""
+
+    def __init__(self) -> None:
+        self._text: list[str] = []
+        self._result_text = ""
+        self._exit_plan_tool_ids: set[str] = set()
+
+    @staticmethod
+    def _canonical_tool_name(value: Any) -> str:
+        return re.sub(r"[^a-z0-9]", "", str(value or "").lower())
+
+    def message_events(
+        self,
+        message: Any,
+        task_progress: _ClaudeTaskProgress,
+    ) -> list[dict[str, Any]]:
+        events: list[dict[str, Any]] = []
+        message_class = type(message).__name__
+        if message_class in ("AssistantMessage", "UserMessage"):
+            content = getattr(message, "content", None)
+            if not isinstance(content, list):
+                return events
+            for block in content:
+                block_class = type(block).__name__
+                if message_class == "AssistantMessage" and block_class == "TextBlock":
+                    self._text.append(str(getattr(block, "text", "") or ""))
+                    continue
+                if (
+                    block_class
+                    in (
+                        "ToolUseBlock",
+                        "ServerToolUseBlock",
+                    )
+                    and self._canonical_tool_name(getattr(block, "name", "")) == "exitplanmode"
+                ):
+                    tool_id = str(getattr(block, "id", "") or "")
+                    if tool_id:
+                        self._exit_plan_tool_ids.add(tool_id)
+                    continue
+                if block_class in ("ToolResultBlock", "ServerToolResultBlock"):
+                    tool_use_id = str(getattr(block, "tool_use_id", "") or "")
+                    if tool_use_id in self._exit_plan_tool_ids:
+                        continue
+                event = _block_to_event(block, task_progress)
+                if event is not None:
+                    events.append(event)
+            return events
+        if message_class == "ResultMessage":
+            result = getattr(message, "result", None)
+            if isinstance(result, str):
+                self._result_text = result
+            events.append(
+                {
+                    "type": "result",
+                    "is_error": bool(getattr(message, "is_error", False)),
+                    "num_turns": getattr(message, "num_turns", None),
+                    "total_cost_usd": getattr(message, "total_cost_usd", None),
+                    "session_id": getattr(message, "session_id", None),
+                    "result": result,
+                }
+            )
+            return events
+        if message_class == "SystemMessage":
+            events.append({"type": "system", "subtype": getattr(message, "subtype", None)})
+        return events
+
+    def final_event(self) -> dict[str, Any] | None:
+        text = "".join(self._text)
+        if not text:
+            text = self._result_text
+        matches = list(_PLAN_BLOCK.finditer(text))
+        has_plan_markup = "<cocola_plan" in text or "</cocola_plan" in text
+        if not matches and not has_plan_markup:
+            return {"type": "text", "text": text} if text else None
+        if (
+            len(matches) != 1
+            or text[: matches[0].start()].strip()
+            or text[matches[0].end() :].strip()
+        ):
+            return {
+                "type": "error",
+                "stage": "plan",
+                "code": "PLAN_OUTPUT_INVALID",
+                "error": _PLAN_INVALID_ERROR,
+            }
+        content = matches[0].group(1).strip()
+        if not content or len(content.encode("utf-8")) > _PLAN_MAX_BYTES:
+            return {
+                "type": "error",
+                "stage": "plan",
+                "code": "PLAN_OUTPUT_INVALID",
+                "error": _PLAN_INVALID_ERROR,
+            }
+        return {"type": "plan_ready", "content_markdown": content}
+
+
 def _mcp_configs(req: dict[str, Any]) -> dict[str, dict[str, Any]]:
     servers = req.get("mcp_servers")
     if not isinstance(servers, dict):
@@ -665,11 +771,17 @@ async def _run_claude(req: dict[str, Any]) -> int:
 
     last_session_id: str | None = None
     task_progress = _ClaudeTaskProgress()
+    plan_capture = _ClaudePlanCapture() if req.get("permission_mode") == "plan" else None
 
     async def relay(messages: Any) -> None:
         nonlocal last_session_id
         async for message in messages:
-            for ev in _message_to_events(message, task_progress):
+            events = (
+                plan_capture.message_events(message, task_progress)
+                if plan_capture is not None
+                else _message_to_events(message, task_progress)
+            )
+            for ev in events:
                 if ev.get("type") == "result" and ev.get("session_id"):
                     last_session_id = ev["session_id"]
                 _emit(ev)
@@ -690,6 +802,9 @@ async def _run_claude(req: dict[str, Any]) -> int:
                     if not status_task.done():
                         status_task.cancel()
                     await asyncio.gather(status_task, return_exceptions=True)
+
+    if plan_capture is not None and (final_event := plan_capture.final_event()):
+        _emit(final_event)
 
     # The final done event carries the session_id so the caller can persist the
     # session<->sandbox binding and later --resume it.

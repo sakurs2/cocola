@@ -39,14 +39,16 @@ func (p *Postgres) RuntimeSetting(ctx context.Context, key string) (json.RawMess
 }
 
 const runColumns = `trace_id, root_span_id, conversation_id, conversation_title,
-	user_id, source, model_route_id, model_alias, client_request_id, status, started_at,
+	user_id, source, model_route_id, model_alias, client_request_id, interaction_mode,
+	COALESCE(plan_id::text, ''), status, started_at,
 	completed_at, last_activity_at, error_code`
 
 func scanRun(row pgx.Row) (Run, error) {
 	var run Run
 	if err := row.Scan(
 		&run.ID, &run.RootSpanID, &run.ConversationID, &run.ConversationTitle,
-		&run.UserID, &run.Source, &run.ModelRouteID, &run.ModelAlias, &run.ClientRequestID, &run.Status,
+		&run.UserID, &run.Source, &run.ModelRouteID, &run.ModelAlias, &run.ClientRequestID,
+		&run.InteractionMode, &run.PlanID, &run.Status,
 		&run.StartedAt, &run.CompletedAt, &run.LastActivityAt, &run.ErrorCode,
 	); err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
@@ -63,7 +65,15 @@ func (p *Postgres) findRequest(ctx context.Context, userID, conversationID, requ
 		userID, conversationID, requestID))
 }
 
+func (p *Postgres) GetRequest(
+	ctx context.Context,
+	conversationID, userID, clientRequestID string,
+) (Run, error) {
+	return p.findRequest(ctx, userID, conversationID, clientRequestID)
+}
+
 func (p *Postgres) Start(ctx context.Context, in StartInput) (StartResult, error) {
+	in.Run.InteractionMode = normalizeInteractionMode(in.Run.InteractionMode)
 	tx, err := p.pool.Begin(ctx)
 	if err != nil {
 		return StartResult{}, err
@@ -203,12 +213,13 @@ func (p *Postgres) Start(ctx context.Context, in StartInput) (StartResult, error
 	}
 	_, err = tx.Exec(ctx, `INSERT INTO conversation_runs (
 		trace_id, root_span_id, conversation_id, conversation_title, user_id,
-		user_email, source, model_route_id, model_alias, client_request_id, status, started_at,
+		user_email, source, model_route_id, model_alias, client_request_id, interaction_mode,
+		status, started_at,
 		last_activity_at, detail_status)
-		VALUES ($1,$2,$3,$4,$5,$5,$6,$7,$8,$9,'running',$10,$10,'available')`,
+		VALUES ($1,$2,$3,$4,$5,$5,$6,$7,$8,$9,$10,'running',$11,$11,'available')`,
 		in.Run.ID, in.Run.RootSpanID, in.Run.ConversationID, in.Run.ConversationTitle,
 		in.Run.UserID, in.Run.Source, in.Run.ModelRouteID, in.Run.ModelAlias, in.Run.ClientRequestID,
-		in.Run.StartedAt)
+		normalizeInteractionMode(in.Run.InteractionMode), in.Run.StartedAt)
 	if err != nil {
 		var pgErr *pgconn.PgError
 		if errors.As(err, &pgErr) && pgErr.Code == "23505" {
@@ -305,6 +316,245 @@ func upsertMessage(ctx context.Context, tx pgx.Tx, message convo.Message) error 
 	return err
 }
 
+const planColumns = `p.id::text, p.conversation_id, p.version, p.status,
+	p.source_run_id, p.runtime_id, p.model_route_id, p.model_alias,
+	p.content_markdown, p.workspace_revision, p.approved_by, p.approved_at,
+	p.created_at, p.updated_at`
+
+func scanPlan(row pgx.Row) (Plan, error) {
+	var plan Plan
+	if err := row.Scan(
+		&plan.ID, &plan.ConversationID, &plan.Version, &plan.Status,
+		&plan.SourceRunID, &plan.RuntimeID, &plan.ModelRouteID, &plan.ModelAlias,
+		&plan.ContentMarkdown, &plan.WorkspaceRevision, &plan.ApprovedBy, &plan.ApprovedAt,
+		&plan.CreatedAt, &plan.UpdatedAt,
+	); err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return Plan{}, ErrNotFound
+		}
+		return Plan{}, err
+	}
+	return plan, nil
+}
+
+func planPart(plan Plan) convo.Part {
+	return convo.Part{
+		Type: convo.PartPlan, PlanID: plan.ID, PlanVersion: plan.Version,
+		Status: plan.Status, PlanContentMarkdown: plan.ContentMarkdown,
+	}
+}
+
+func updatePlanMessageStatus(ctx context.Context, tx pgx.Tx, plan Plan) error {
+	messageID := plan.SourceRunID + "-assistant"
+	var raw []byte
+	if err := tx.QueryRow(ctx, `SELECT parts_json FROM messages WHERE id=$1 FOR UPDATE`,
+		messageID).Scan(&raw); err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return nil
+		}
+		return err
+	}
+	var parts []convo.Part
+	if err := json.Unmarshal(raw, &parts); err != nil {
+		return err
+	}
+	changed := false
+	for index := range parts {
+		if parts[index].Type == convo.PartPlan && parts[index].PlanID == plan.ID {
+			parts[index].Status = plan.Status
+			changed = true
+		}
+	}
+	if !changed {
+		return nil
+	}
+	encoded, err := json.Marshal(parts)
+	if err != nil {
+		return err
+	}
+	_, err = tx.Exec(ctx, `UPDATE messages SET parts_json=$2 WHERE id=$1`, messageID, encoded)
+	return err
+}
+
+func (p *Postgres) GetPlan(ctx context.Context, conversationID, planID, userID string) (Plan, error) {
+	return scanPlan(p.pool.QueryRow(ctx, `SELECT `+planColumns+`
+		FROM conversation_plans p JOIN conversations c ON c.id=p.conversation_id
+		WHERE p.conversation_id=$1 AND p.id=$2::uuid AND c.user_id=$3`,
+		conversationID, planID, userID))
+}
+
+func (p *Postgres) StartPlanExecution(
+	ctx context.Context,
+	in PlanExecutionInput,
+) (PlanExecutionResult, error) {
+	tx, err := p.pool.Begin(ctx)
+	if err != nil {
+		return PlanExecutionResult{}, err
+	}
+	defer func() { _ = tx.Rollback(ctx) }()
+
+	conversation, err := scanConversation(tx.QueryRow(ctx, `SELECT id, user_id, tenant_id,
+		title, chat_type, COALESCE(folder_id, ''), COALESCE(project_id::text, ''), hidden,
+		runtime_id, created_at, updated_at FROM conversations
+		WHERE id=$1 AND user_id=$2 FOR UPDATE`, in.ConversationID, in.UserID))
+	if err != nil {
+		return PlanExecutionResult{}, ErrNotFound
+	}
+	if in.Run.ClientRequestID != "" {
+		existing, requestErr := scanRun(tx.QueryRow(ctx, `SELECT `+runColumns+`
+			FROM conversation_runs WHERE user_id=$1 AND conversation_id=$2
+			AND client_request_id=$3`, in.UserID, in.ConversationID, in.Run.ClientRequestID))
+		if requestErr == nil {
+			plan, planErr := scanPlan(tx.QueryRow(ctx, `SELECT `+planColumns+`
+				FROM conversation_plans p WHERE p.id=$1::uuid`, in.PlanID))
+			if planErr != nil {
+				return PlanExecutionResult{}, planErr
+			}
+			if err := tx.Commit(ctx); err != nil {
+				return PlanExecutionResult{}, err
+			}
+			return PlanExecutionResult{
+				Run: existing, Conversation: conversation, Plan: plan,
+			}, nil
+		}
+		if !errors.Is(requestErr, ErrNotFound) {
+			return PlanExecutionResult{}, requestErr
+		}
+	}
+	plan, err := scanPlan(tx.QueryRow(ctx, `SELECT `+planColumns+`
+		FROM conversation_plans p WHERE p.id=$1::uuid AND p.conversation_id=$2 FOR UPDATE`,
+		in.PlanID, in.ConversationID))
+	if err != nil {
+		return PlanExecutionResult{}, err
+	}
+	if plan.Version != in.ExpectedVersion {
+		return PlanExecutionResult{}, ErrPlanNotCurrent
+	}
+	var latestVersion int
+	if err := tx.QueryRow(ctx, `SELECT COALESCE(MAX(version), 0)
+		FROM conversation_plans WHERE conversation_id=$1`, in.ConversationID).Scan(&latestVersion); err != nil {
+		return PlanExecutionResult{}, err
+	}
+	if latestVersion != plan.Version {
+		return PlanExecutionResult{}, ErrPlanNotCurrent
+	}
+	if plan.Status != PlanStatusReady && plan.Status != PlanStatusStopped {
+		return PlanExecutionResult{}, ErrPlanState
+	}
+	var modelAvailable bool
+	if err := tx.QueryRow(ctx, `SELECT EXISTS (
+		SELECT 1 FROM llm_model_routes r
+		JOIN llm_providers p ON p.id=r.provider_id
+		WHERE r.id=$1 AND r.protocol='anthropic-messages'
+			AND r.enabled=TRUE AND r.visible=TRUE AND p.enabled=TRUE
+	)`, plan.ModelRouteID).Scan(&modelAvailable); err != nil {
+		return PlanExecutionResult{}, err
+	}
+	if !modelAvailable {
+		return PlanExecutionResult{}, ErrPlanModelUnavailable
+	}
+	if _, activeErr := scanRun(tx.QueryRow(ctx, `SELECT `+runColumns+`
+		FROM conversation_runs WHERE conversation_id=$1 AND status='running'
+		ORDER BY started_at DESC LIMIT 1`, in.ConversationID)); activeErr == nil {
+		return PlanExecutionResult{}, ErrConflict
+	} else if !errors.Is(activeErr, ErrNotFound) {
+		return PlanExecutionResult{}, activeErr
+	}
+
+	run := in.Run
+	run.ConversationID = in.ConversationID
+	run.UserID = in.UserID
+	run.InteractionMode = InteractionModeExecute
+	run.PlanID = plan.ID
+	_, err = tx.Exec(ctx, `INSERT INTO conversation_runs (
+		trace_id, root_span_id, conversation_id, conversation_title, user_id,
+		user_email, source, model_route_id, model_alias, client_request_id,
+		interaction_mode, plan_id, status, started_at, last_activity_at, detail_status)
+		VALUES ($1,$2,$3,$4,$5,$5,$6,$7,$8,$9,'execute',$10::uuid,'running',$11,$11,'available')`,
+		run.ID, run.RootSpanID, run.ConversationID, run.ConversationTitle, run.UserID,
+		run.Source, run.ModelRouteID, run.ModelAlias, run.ClientRequestID, run.PlanID, run.StartedAt)
+	if err != nil {
+		var pgErr *pgconn.PgError
+		if errors.As(err, &pgErr) && pgErr.Code == "23505" {
+			return PlanExecutionResult{}, ErrConflict
+		}
+		return PlanExecutionResult{}, err
+	}
+	now := in.ApprovedAt
+	if now.IsZero() {
+		now = time.Now().UTC()
+	}
+	if plan.Status == PlanStatusReady {
+		plan.ApprovedBy = in.UserID
+		plan.ApprovedAt = &now
+	}
+	plan.Status = PlanStatusExecuting
+	plan.UpdatedAt = now
+	_, err = tx.Exec(ctx, `UPDATE conversation_plans SET status='executing',
+		approved_by=CASE WHEN approved_by='' THEN $2 ELSE approved_by END,
+		approved_at=COALESCE(approved_at, $3), updated_at=$3 WHERE id=$1::uuid`,
+		plan.ID, in.UserID, now)
+	if err != nil {
+		return PlanExecutionResult{}, err
+	}
+	if err := updatePlanMessageStatus(ctx, tx, plan); err != nil {
+		return PlanExecutionResult{}, err
+	}
+	_, err = tx.Exec(ctx, `UPDATE conversations SET updated_at=$3
+		WHERE id=$1 AND user_id=$2`, conversation.ID, in.UserID, now)
+	if err != nil {
+		return PlanExecutionResult{}, err
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return PlanExecutionResult{}, err
+	}
+	return PlanExecutionResult{
+		Run: run, Conversation: conversation, Plan: plan, Created: true,
+	}, nil
+}
+
+func (p *Postgres) CancelPlan(
+	ctx context.Context,
+	conversationID, planID, userID string,
+	expectedVersion int,
+	now time.Time,
+) (Plan, error) {
+	tx, err := p.pool.Begin(ctx)
+	if err != nil {
+		return Plan{}, err
+	}
+	defer func() { _ = tx.Rollback(ctx) }()
+	plan, err := scanPlan(tx.QueryRow(ctx, `SELECT `+planColumns+`
+		FROM conversation_plans p JOIN conversations c ON c.id=p.conversation_id
+		WHERE p.id=$1::uuid AND p.conversation_id=$2 AND c.user_id=$3 FOR UPDATE`,
+		planID, conversationID, userID))
+	if err != nil {
+		return Plan{}, err
+	}
+	if plan.Version != expectedVersion {
+		return Plan{}, ErrPlanNotCurrent
+	}
+	if plan.Status != PlanStatusReady && plan.Status != PlanStatusStopped {
+		return Plan{}, ErrPlanState
+	}
+	if now.IsZero() {
+		now = time.Now().UTC()
+	}
+	plan.Status = PlanStatusCancelled
+	plan.UpdatedAt = now
+	if _, err := tx.Exec(ctx, `UPDATE conversation_plans SET status='cancelled',
+		updated_at=$2 WHERE id=$1::uuid`, plan.ID, now); err != nil {
+		return Plan{}, err
+	}
+	if err := updatePlanMessageStatus(ctx, tx, plan); err != nil {
+		return Plan{}, err
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return Plan{}, err
+	}
+	return plan, nil
+}
+
 func (p *Postgres) SaveDraft(ctx context.Context, runID, userID string, message convo.Message) error {
 	tx, err := p.pool.Begin(ctx)
 	if err != nil {
@@ -334,35 +584,127 @@ func (p *Postgres) SaveDraft(ctx context.Context, runID, userID string, message 
 	return tx.Commit(ctx)
 }
 
-func (p *Postgres) Finalize(ctx context.Context, in FinalizeInput) (Run, error) {
+func (p *Postgres) Finalize(ctx context.Context, in FinalizeInput) (FinalizeResult, error) {
 	tx, err := p.pool.Begin(ctx)
 	if err != nil {
-		return Run{}, err
+		return FinalizeResult{}, err
 	}
 	defer func() { _ = tx.Rollback(ctx) }()
 	run, err := scanRun(tx.QueryRow(ctx, `SELECT `+runColumns+` FROM conversation_runs
 		WHERE trace_id=$1 AND user_id=$2 FOR UPDATE`, in.RunID, in.UserID))
 	if err != nil {
-		return Run{}, err
+		return FinalizeResult{}, err
 	}
 	if IsTerminal(run.Status) {
-		return run, tx.Commit(ctx)
-	}
-	if in.AssistantMessage != nil {
-		if err := upsertMessage(ctx, tx, *in.AssistantMessage); err != nil {
-			return Run{}, err
+		if err := tx.Commit(ctx); err != nil {
+			return FinalizeResult{}, err
 		}
+		return FinalizeResult{Run: run}, nil
 	}
 	now := in.CompletedAt
 	if now.IsZero() {
 		now = time.Now().UTC()
+	}
+	var createdPlan *Plan
+	var supersededPlanID string
+	if in.PlanCandidate != nil && run.InteractionMode == InteractionModePlan &&
+		in.Status == StatusSuccess {
+		candidate := in.PlanCandidate
+		if candidate.ID == "" || candidate.ContentMarkdown == "" ||
+			len(candidate.ContentMarkdown) > 128<<10 {
+			return FinalizeResult{}, ErrPlanState
+		}
+		err = tx.QueryRow(ctx, `UPDATE conversation_plans SET status='superseded',
+			updated_at=$2 WHERE conversation_id=$1
+			AND status IN ('ready','stopped') RETURNING id::text`,
+			run.ConversationID, now).Scan(&supersededPlanID)
+		if err != nil && !errors.Is(err, pgx.ErrNoRows) {
+			return FinalizeResult{}, err
+		}
+		if supersededPlanID != "" {
+			superseded, findErr := scanPlan(tx.QueryRow(ctx, `SELECT `+planColumns+`
+				FROM conversation_plans p WHERE p.id=$1::uuid`, supersededPlanID))
+			if findErr != nil {
+				return FinalizeResult{}, findErr
+			}
+			if err := updatePlanMessageStatus(ctx, tx, superseded); err != nil {
+				return FinalizeResult{}, err
+			}
+		}
+		var version int
+		if err := tx.QueryRow(ctx, `SELECT COALESCE(MAX(version), 0)+1
+			FROM conversation_plans WHERE conversation_id=$1`,
+			run.ConversationID).Scan(&version); err != nil {
+			return FinalizeResult{}, err
+		}
+		plan := Plan{
+			ID: candidate.ID, ConversationID: run.ConversationID, Version: version,
+			Status: PlanStatusReady, SourceRunID: run.ID, RuntimeID: candidate.RuntimeID,
+			ModelRouteID: candidate.ModelRouteID, ModelAlias: candidate.ModelAlias,
+			ContentMarkdown:   candidate.ContentMarkdown,
+			WorkspaceRevision: candidate.WorkspaceRevision, CreatedAt: now, UpdatedAt: now,
+		}
+		_, err = tx.Exec(ctx, `INSERT INTO conversation_plans (
+			id, conversation_id, version, status, source_run_id, runtime_id,
+			model_route_id, model_alias, content_markdown, workspace_revision,
+			created_at, updated_at)
+			VALUES ($1::uuid,$2,$3,'ready',$4,$5,$6,$7,$8,$9,$10,$10)`,
+			plan.ID, plan.ConversationID, plan.Version, plan.SourceRunID, plan.RuntimeID,
+			plan.ModelRouteID, plan.ModelAlias, plan.ContentMarkdown,
+			plan.WorkspaceRevision, now)
+		if err != nil {
+			return FinalizeResult{}, err
+		}
+		if _, err := tx.Exec(ctx, `UPDATE conversation_runs SET plan_id=$2::uuid
+			WHERE trace_id=$1`, run.ID, plan.ID); err != nil {
+			return FinalizeResult{}, err
+		}
+		run.PlanID = plan.ID
+		if in.AssistantMessage == nil {
+			in.AssistantMessage = &convo.Message{
+				ID: run.ID + "-assistant", ConversationID: run.ConversationID,
+				Role: "assistant", CreatedAt: now,
+			}
+		}
+		in.AssistantMessage.Parts = append(in.AssistantMessage.Parts, planPart(plan))
+		createdPlan = &plan
+	}
+	if in.AssistantMessage != nil {
+		if err := upsertMessage(ctx, tx, *in.AssistantMessage); err != nil {
+			return FinalizeResult{}, err
+		}
 	}
 	_, err = tx.Exec(ctx, `UPDATE conversation_runs SET status=$2, error_code=$3,
 		completed_at=$4, last_activity_at=$4, duration_ms=GREATEST(0, EXTRACT(EPOCH FROM ($4-started_at))*1000)::bigint,
 		updated_at=now() WHERE trace_id=$1 AND status='running'`,
 		in.RunID, in.Status, in.ErrorCode, now)
 	if err != nil {
-		return Run{}, err
+		return FinalizeResult{}, err
+	}
+	var executionPlan *Plan
+	if run.PlanID != "" && run.InteractionMode == InteractionModeExecute {
+		plan, planErr := scanPlan(tx.QueryRow(ctx, `SELECT `+planColumns+`
+			FROM conversation_plans p WHERE p.id=$1::uuid FOR UPDATE`, run.PlanID))
+		if planErr != nil {
+			return FinalizeResult{}, planErr
+		}
+		switch in.Status {
+		case StatusSuccess:
+			plan.Status = PlanStatusCompleted
+		case StatusCancelled, StatusInterrupted:
+			plan.Status = PlanStatusStopped
+		default:
+			plan.Status = PlanStatusFailed
+		}
+		plan.UpdatedAt = now
+		if _, err := tx.Exec(ctx, `UPDATE conversation_plans SET status=$2,
+			updated_at=$3 WHERE id=$1::uuid`, plan.ID, plan.Status, now); err != nil {
+			return FinalizeResult{}, err
+		}
+		if err := updatePlanMessageStatus(ctx, tx, plan); err != nil {
+			return FinalizeResult{}, err
+		}
+		executionPlan = &plan
 	}
 	if in.Reveal {
 		_, err = tx.Exec(ctx, `UPDATE conversations SET hidden=FALSE,
@@ -373,16 +715,21 @@ func (p *Postgres) Finalize(ctx context.Context, in FinalizeInput) (Run, error) 
 			run.ConversationID, run.UserID, now)
 	}
 	if err != nil {
-		return Run{}, err
+		return FinalizeResult{}, err
 	}
 	if err := tx.Commit(ctx); err != nil {
-		return Run{}, err
+		return FinalizeResult{}, err
 	}
 	run.Status = in.Status
 	run.ErrorCode = in.ErrorCode
 	run.CompletedAt = &now
 	run.LastActivityAt = now
-	return run, nil
+	if createdPlan == nil {
+		createdPlan = executionPlan
+	}
+	return FinalizeResult{
+		Run: run, Plan: createdPlan, SupersededPlanID: supersededPlanID,
+	}, nil
 }
 
 func (p *Postgres) InterruptRunning(ctx context.Context, now time.Time) (int64, error) {
@@ -397,6 +744,31 @@ func (p *Postgres) InterruptRunning(ctx context.Context, now time.Time) (int64, 
 		WHERE r.status='running' AND m.id=r.trace_id || '-assistant'`)
 	if err != nil {
 		return 0, err
+	}
+	rows, err := tx.Query(ctx, `UPDATE conversation_plans p SET status='stopped', updated_at=$1
+		FROM conversation_runs r WHERE r.status='running' AND r.plan_id=p.id
+		AND r.interaction_mode='execute' RETURNING `+planColumns, now)
+	if err != nil {
+		return 0, err
+	}
+	var stoppedPlans []Plan
+	for rows.Next() {
+		plan, scanErr := scanPlan(rows)
+		if scanErr != nil {
+			rows.Close()
+			return 0, scanErr
+		}
+		stoppedPlans = append(stoppedPlans, plan)
+	}
+	if err := rows.Err(); err != nil {
+		rows.Close()
+		return 0, err
+	}
+	rows.Close()
+	for _, plan := range stoppedPlans {
+		if err := updatePlanMessageStatus(ctx, tx, plan); err != nil {
+			return 0, err
+		}
 	}
 	tag, err := tx.Exec(ctx, `UPDATE conversation_runs SET status='interrupted',
 		error_code='GATEWAY_RESTARTED', completed_at=$1, last_activity_at=$1,

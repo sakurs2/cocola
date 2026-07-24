@@ -126,6 +126,34 @@ test("SCM approval is a process step and never enters copied final output", () =
   );
 });
 
+test("a reviewable plan stays in final output and is copied as Markdown", () => {
+  const parts = [
+    { type: "reasoning", text: "Inspecting the request." },
+    { type: "data", name: "progress", data: { items: [] } },
+    {
+      type: "data",
+      name: "plan",
+      data: {
+        planId: "plan-1",
+        version: 2,
+        status: "ready",
+        contentMarkdown: "## Plan\n\n- Implement\n- Verify",
+      },
+    },
+  ];
+  const split = splitAgentTurnParts(parts);
+
+  assert.deepEqual(split, {
+    processIndices: [0, 1],
+    outputIndices: [2],
+    hasProcess: true,
+  });
+  assert.equal(
+    finalAgentOutputText(parts, split.outputIndices),
+    "## Plan\n\n- Implement\n- Verify",
+  );
+});
+
 test("a memory miss remains index-stable without creating a visible process summary", () => {
   for (const part of [
     { type: "memory-recall", status: "miss", count: 0 },

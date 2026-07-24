@@ -19,6 +19,7 @@ from types import SimpleNamespace
 
 import grpc
 import pytest
+from cocola.agent.v1 import agent_pb2 as pb
 from cocola_agent_runtime.agent_provider import AgentEvent, AgentOptions
 from cocola_agent_runtime.prompt_loader import PromptMarker, StaticPromptCatalog
 from cocola_agent_runtime.runtime_registry import (
@@ -65,6 +66,8 @@ class FakeRequest:
     attachments: list = field(default_factory=list)
     memory_context: str = ""
     project_context: object | None = None
+    interaction_mode: int = pb.INTERACTION_MODE_UNSPECIFIED
+    require_session_resume: bool = False
 
 
 def test_memory_context_is_appended_as_untrusted_low_priority_context():
@@ -968,6 +971,117 @@ async def test_query_loads_mcp_servers_into_options_and_trace():
     assert mcp_trace.data["category"] == "agent_init"
 
 
+async def test_plan_query_is_claude_read_only_and_skips_side_effect_integrations():
+    provider = ListProvider(
+        [
+            AgentEvent(
+                kind="plan_ready",
+                data={"content_markdown": "## Plan\n\n- Inspect"},
+            ),
+            AgentEvent(kind="done", data={"session_id": "claude-session"}),
+        ]
+    )
+    mcps = StaticMCPCatalog({"amap": {"type": "http", "url": "https://mcp.example.com"}})
+    objstore = FakeObjectStore()
+    context = FakeContext()
+
+    await AgentRuntimeServicer(provider, mcps=mcps, objstore=objstore).Query(
+        FakeRequest(interaction_mode=pb.INTERACTION_MODE_PLAN),
+        context,
+    )
+
+    assert provider.seen_options is not None
+    assert provider.seen_options.interaction_mode == "plan"
+    assert provider.seen_options.mcp_servers == {}
+    assert provider.seen_options.project_credential is None
+    assert provider.seen_options.system_prompt is not None
+    assert provider.seen_options.system_prompt.endswith(
+        "Calling ExitPlanMode only signals that planning is complete; Cocola, not the tool, "
+        "obtains user approval."
+    )
+    assert "Only changed regular files" not in provider.seen_options.system_prompt
+    assert mcps.seen_user_id == ""
+    assert objstore.puts == {}
+    assert [event.kind for event in context.written] == ["plan_ready", "done"]
+
+
+async def test_query_propagates_required_session_resume():
+    provider = ListProvider([AgentEvent(kind="done", data={})])
+
+    await AgentRuntimeServicer(provider).Query(
+        FakeRequest(require_session_resume=True),
+        FakeContext(),
+    )
+
+    assert provider.seen_options is not None
+    assert provider.seen_options.require_session_resume is True
+
+
+async def test_project_plan_rejects_workspace_changes_during_planning():
+    project = SimpleNamespace(
+        project_id="project-1",
+        repository_id=0,
+        clone_url="",
+        default_branch="main",
+        base_sha="",
+        task_branch="main",
+        git_author_name="Project User",
+        git_author_email="project@example.com",
+        repository_provider="local",
+        repository_full_name="",
+        credential_mode="none",
+    )
+    revisions = iter(["revision-before", "revision-after"])
+
+    def exec_handler(_sandbox_id, cmd, stdin):
+        assert cmd[:2] == ["python3", "-c"]
+        operation = json.loads(stdin)["operation"]
+        assert operation in {"bootstrap", "status"}
+        return ExecOutcome(
+            stdout=json.dumps(
+                {
+                    "ok": True,
+                    "snapshot": {
+                        "branch": "main",
+                        "base_sha": "a" * 40,
+                        "head_sha": "a" * 40,
+                        "changes": [],
+                        "commits": [],
+                        "workspace_revision": next(revisions),
+                    },
+                }
+            )
+        )
+
+    provider = ListProvider(
+        [
+            AgentEvent(
+                kind="plan_ready",
+                data={"content_markdown": "## Plan\n\n- Change the project"},
+            ),
+            AgentEvent(kind="done", data={}),
+        ]
+    )
+    context = FakeContext()
+
+    await AgentRuntimeServicer(
+        provider,
+        binder=StaticSandboxBinder(),
+        executor=StaticSandboxExecutor(exec_handler=exec_handler),
+    ).Query(
+        FakeRequest(
+            project_context=project,
+            interaction_mode=pb.INTERACTION_MODE_PLAN,
+        ),
+        context,
+    )
+
+    assert "plan_ready" not in [event.kind for event in context.written]
+    errors = [event for event in context.written if event.kind == "error"]
+    assert len(errors) == 1
+    assert errors[0].data["code"] == "PLAN_WORKSPACE_CHANGED_DURING_PLANNING"
+
+
 async def test_query_loads_admin_prompt_into_options_and_trace():
     prov = ListProvider([AgentEvent(kind="done", data={})])
     prompts = StaticPromptCatalog(
@@ -1111,6 +1225,42 @@ async def test_query_rejects_unsupported_runtime_before_provider_call():
     assert len(context.written) == 1
     assert context.written[0].kind == "error"
     assert context.written[0].data["code"] == "UNSUPPORTED_RUNTIME"
+
+
+async def test_query_rejects_plan_for_non_claude_runtime():
+    claude = ListProvider([])
+    codex = ListProvider([])
+    runtimes = RuntimeRegistry(
+        [
+            RuntimeEntry(
+                RuntimeDescriptor(
+                    id="claude-code",
+                    label="Claude Code",
+                    model_protocol="anthropic-messages",
+                    is_default=True,
+                ),
+                claude,
+            ),
+            RuntimeEntry(
+                RuntimeDescriptor(
+                    id="codex",
+                    label="Codex",
+                    model_protocol="openai-responses",
+                ),
+                codex,
+            ),
+        ]
+    )
+    context = FakeContext()
+
+    await AgentRuntimeServicer(claude, runtimes=runtimes).Query(
+        FakeRequest(runtime_id="codex", interaction_mode=pb.INTERACTION_MODE_PLAN),
+        context,
+    )
+
+    assert codex.seen_options is None
+    assert context.written[-1].kind == "error"
+    assert context.written[-1].data["code"] == "PLAN_RUNTIME_UNSUPPORTED"
 
 
 async def test_release_session_calls_binder_and_session_map():

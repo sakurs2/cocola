@@ -56,12 +56,49 @@ type runController struct {
 	draftInterval       time.Duration
 	finalizeRetry       time.Duration
 	mutationMu          sync.Mutex
+	conversationGate    *conversationRunGate
 	mu                  sync.Mutex
 	live                map[string]*liveRun
 	shutting            atomic.Bool
 	databaseUnavailable atomic.Bool
 	stop                chan struct{}
 	stopOnce            sync.Once
+}
+
+type conversationRunGate struct {
+	mu      sync.Mutex
+	entries map[string]*conversationRunGateEntry
+}
+
+type conversationRunGateEntry struct {
+	mu   sync.Mutex
+	refs int
+}
+
+func newConversationRunGate() *conversationRunGate {
+	return &conversationRunGate{entries: make(map[string]*conversationRunGateEntry)}
+}
+
+func (g *conversationRunGate) lock(conversationID string) func() {
+	g.mu.Lock()
+	entry := g.entries[conversationID]
+	if entry == nil {
+		entry = &conversationRunGateEntry{}
+		g.entries[conversationID] = entry
+	}
+	entry.refs++
+	g.mu.Unlock()
+
+	entry.mu.Lock()
+	return func() {
+		entry.mu.Unlock()
+		g.mu.Lock()
+		entry.refs--
+		if entry.refs == 0 {
+			delete(g.entries, conversationID)
+		}
+		g.mu.Unlock()
+	}
 }
 
 type liveRun struct {
@@ -82,6 +119,8 @@ type liveRun struct {
 	interrupt          bool
 	status             string
 	recalledMemoryURIs []string
+	planContent        string
+	workspaceRevision  string
 	version            uint64
 }
 
@@ -108,8 +147,9 @@ func newRunController(store chatrun.Store, cfg RunConfig) *runController {
 		store: store, agentMaxTurns: cfg.AgentMaxTurns, toolTimeout: cfg.ToolTimeout,
 		pingEvery:   cfg.PingEvery,
 		mergeWindow: cfg.MergeWindow, draftInterval: cfg.DraftInterval,
-		finalizeRetry: cfg.FinalizeRetry,
-		live:          make(map[string]*liveRun), stop: make(chan struct{}),
+		finalizeRetry:    cfg.FinalizeRetry,
+		conversationGate: newConversationRunGate(),
+		live:             make(map[string]*liveRun), stop: make(chan struct{}),
 	}
 }
 
@@ -139,6 +179,15 @@ func (a *API) chat(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	req.RuntimeID = strings.TrimSpace(req.RuntimeID)
+	req.InteractionMode = strings.TrimSpace(req.InteractionMode)
+	if req.InteractionMode == "" {
+		req.InteractionMode = chatrun.InteractionModeExecute
+	}
+	if req.InteractionMode != chatrun.InteractionModeExecute &&
+		req.InteractionMode != chatrun.InteractionModePlan {
+		writeErr(w, http.StatusBadRequest, "UNSUPPORTED_INTERACTION_MODE", "interaction_mode must be execute or plan")
+		return
+	}
 	req.FolderID = strings.TrimSpace(req.FolderID)
 	req.ProjectID = strings.TrimSpace(req.ProjectID)
 	req.ProjectBaseRef = strings.TrimSpace(req.ProjectBaseRef)
@@ -218,6 +267,10 @@ func (a *API) chat(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	if chatTypeForConversation(req) == "scheduled_task" {
+		if req.InteractionMode == chatrun.InteractionModePlan {
+			writeErr(w, http.StatusConflict, "PLAN_MODE_UNSUPPORTED", "Plan mode is not supported for scheduled tasks.")
+			return
+		}
 		if req.FolderID != "" || req.ProjectID != "" {
 			writeErr(w, http.StatusConflict, "FOLDER_UNSUPPORTED_CONVERSATION_TYPE", "scheduled task conversations cannot be moved into folders")
 			return
@@ -225,6 +278,10 @@ func (a *API) chat(w http.ResponseWriter, r *http.Request) {
 	}
 	if req.RuntimeID == "" {
 		req.RuntimeID = a.productConfig.AgentRuntime.DefaultID
+	}
+	if req.InteractionMode == chatrun.InteractionModePlan && req.RuntimeID != "claude-code" {
+		writeErr(w, http.StatusConflict, "PLAN_MODE_UNSUPPORTED", "Plan mode is supported only for Claude Code conversations.")
+		return
 	}
 	if _, ok := w.(http.Flusher); !ok {
 		writeErr(w, http.StatusInternalServerError, "INTERNAL", "streaming unsupported")
@@ -248,9 +305,10 @@ func (a *API) chat(w http.ResponseWriter, r *http.Request) {
 		ID: runID, RootSpanID: rootSpanID, ConversationID: req.SessionID,
 		ConversationTitle: titleForConversation(req), UserID: identity.UserID,
 		Source: source, ModelRouteID: effectiveModelRouteID(req), ModelAlias: strings.TrimSpace(req.ModelAlias),
-		ClientRequestID: requestID, Status: chatrun.StatusRunning,
+		ClientRequestID: requestID, InteractionMode: req.InteractionMode, Status: chatrun.StatusRunning,
 		StartedAt: startedAt, LastActivityAt: startedAt,
 	}
+	unlockConversation := a.runs.conversationGate.lock(req.SessionID)
 	a.runs.mutationMu.Lock()
 	result, err := a.runs.store.Start(r.Context(), chatrun.StartInput{
 		Run: run,
@@ -284,6 +342,7 @@ func (a *API) chat(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	a.runs.mutationMu.Unlock()
+	unlockConversation()
 	if errors.Is(err, chatrun.ErrNotFound) {
 		writeErr(w, http.StatusNotFound, "NOT_FOUND", "conversation not found")
 		return
@@ -446,6 +505,19 @@ func (r *liveRun) parts() []convo.Part {
 	return append([]convo.Part(nil), r.reducer.Parts()...)
 }
 
+func (r *liveRun) setPlanCandidate(content, workspaceRevision string) {
+	r.mu.Lock()
+	r.planContent = content
+	r.workspaceRevision = workspaceRevision
+	r.mu.Unlock()
+}
+
+func (r *liveRun) planCandidate() (string, string) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return r.planContent, r.workspaceRevision
+}
+
 func (a *API) executeLiveRun(live *liveRun) {
 	defer live.cancel()
 	defer close(live.done)
@@ -474,7 +546,8 @@ func (a *API) executeLiveRun(live *liveRun) {
 					CredentialMode:     value.CredentialMode,
 				}
 				scmToken = token
-				if value.RepositoryExternalID > 0 && a.projects.GitHubAgentWriteEnabled() {
+				if live.request.InteractionMode != chatrun.InteractionModePlan &&
+					value.RepositoryExternalID > 0 && a.projects.GitHubAgentWriteEnabled() {
 					projectBrokerCredential, err = a.projects.IssueBrokerCredential(live.ctx,
 						project.Identity{TenantID: live.identity.TenantID, UserID: live.identity.UserID},
 						live.request.SessionID, live.run.ID)
@@ -503,7 +576,9 @@ func (a *API) executeLiveRun(live *liveRun) {
 	live.query = agent.Query{
 		UserID: live.identity.UserID, SessionID: live.request.SessionID,
 		RuntimeID: live.request.RuntimeID, SkillID: live.request.SkillID,
-		Prompt: live.request.Prompt, SandboxID: live.request.SandboxID,
+		InteractionMode:      agent.InteractionMode(effectiveInteractionMode(live.request)),
+		RequireSessionResume: live.request.RequireSessionResume,
+		Prompt:               live.request.Prompt, SandboxID: live.request.SandboxID,
 		MaxTurns:            effectiveMaxTurns(live.request.MaxTurns, live.policy.agentMaxTurns),
 		ModelRouteID:        effectiveModelRouteID(live.request),
 		AllowWorkspaceReset: live.request.AllowWorkspaceReset,
@@ -530,6 +605,10 @@ func (a *API) executeLiveRun(live *liveRun) {
 				return nil
 			}
 			if event.Kind == "done" {
+				return nil
+			}
+			if event.Kind == "plan_ready" {
+				live.setPlanCandidate(event.Data["content_markdown"], event.Data["workspace_revision"])
 				return nil
 			}
 			if event.Kind == "git_snapshot" {
@@ -620,13 +699,24 @@ func (a *API) executeLiveRun(live *liveRun) {
 		ID: live.run.ID + "-assistant", ConversationID: live.run.ConversationID,
 		Role: "assistant", Parts: live.parts(), Metadata: metadata, CreatedAt: completedAt,
 	}
-	if len(message.Parts) == 0 {
+	planContent, workspaceRevision := live.planCandidate()
+	if len(message.Parts) == 0 && planContent == "" {
 		message = nil
 	}
-	finalizedRun, finalized := a.finalizeRun(chatrun.FinalizeInput{
+	var planCandidate *chatrun.PlanCandidate
+	if planContent != "" && status == chatrun.StatusSuccess &&
+		live.request.InteractionMode == chatrun.InteractionModePlan {
+		planCandidate = &chatrun.PlanCandidate{
+			ID: uuid.NewString(), RuntimeID: live.request.RuntimeID,
+			ModelRouteID: effectiveModelRouteID(live.request), ModelAlias: live.request.ModelAlias,
+			ContentMarkdown: planContent, WorkspaceRevision: workspaceRevision,
+		}
+	}
+	finalizedResult, finalized := a.finalizeRun(chatrun.FinalizeInput{
 		RunID: live.run.ID, UserID: live.run.UserID, Status: status, ErrorCode: errorCode,
 		AssistantMessage: message, Reveal: live.request.DeferConversationVisibilityUntilDone,
 		ConversationTitle: titleForConversation(live.request), CompletedAt: completedAt,
+		PlanCandidate: planCandidate,
 	})
 	if a.projects != nil && live.request.ProjectID != "" {
 		revokeCtx, cancelRevoke := context.WithTimeout(context.Background(), 5*time.Second)
@@ -648,14 +738,38 @@ func (a *API) executeLiveRun(live *liveRun) {
 	delete(a.runs.live, live.run.ID)
 	a.runs.mu.Unlock()
 	if finalized {
+		finalizedRun := finalizedResult.Run
 		status, errorCode = finalizedRun.Status, finalizedRun.ErrorCode
-		a.finishConversationRun(live.traceCtx, live.traceRun, status, errorCode, ttftMS, toolCalls)
+		a.finishConversationRun(
+			live.traceCtx, live.traceRun, status, errorCode,
+			effectiveInteractionMode(live.request), ttftMS, toolCalls,
+		)
 		live.mu.Lock()
 		live.status = status
 		live.run = finalizedRun
 		live.mu.Unlock()
+		if finalizedResult.SupersededPlanID != "" {
+			live.publish(agent.Event{Kind: "plan_status", Data: map[string]string{
+				"id": finalizedResult.SupersededPlanID, "status": chatrun.PlanStatusSuperseded,
+			}})
+		}
+		if finalizedResult.Plan != nil {
+			plan := finalizedResult.Plan
+			if live.request.InteractionMode == chatrun.InteractionModePlan {
+				planEvent := agent.Event{Kind: "plan_ready", Data: map[string]string{
+					"id": plan.ID, "version": strconv.Itoa(plan.Version), "status": plan.Status,
+					"content_markdown": plan.ContentMarkdown,
+				}}
+				live.apply(planEvent)
+				live.publish(planEvent)
+			} else {
+				live.publish(agent.Event{Kind: "plan_status", Data: map[string]string{
+					"id": plan.ID, "status": plan.Status,
+				}})
+			}
+		}
 		live.publish(agent.Event{Kind: "done", Data: terminalRunData(finalizedRun)})
-		if a.memory != nil {
+		if a.memory != nil && live.request.InteractionMode != chatrun.InteractionModePlan {
 			captureCtx, cancelCapture := context.WithTimeout(context.Background(), 5*time.Second)
 			if err := a.memory.ScheduleCapture(captureCtx, memory.CaptureInput{
 				RunID: finalizedRun.ID, TenantID: live.identity.TenantID,
@@ -804,15 +918,15 @@ func (a *API) persistRunDrafts(ctx context.Context, live *liveRun) error {
 	}
 }
 
-func (a *API) finalizeRun(input chatrun.FinalizeInput) (chatrun.Run, bool) {
+func (a *API) finalizeRun(input chatrun.FinalizeInput) (chatrun.FinalizeResult, bool) {
 	var lastErr error
 	for attempt := 1; attempt <= finalizeMaxAttempts; attempt++ {
 		ctx, cancel := context.WithTimeout(context.Background(), finalizeAttemptLimit)
-		run, err := a.runs.store.Finalize(ctx, input)
+		result, err := a.runs.store.Finalize(ctx, input)
 		cancel()
 		if err == nil {
 			a.runs.databaseUnavailable.Store(false)
-			return run, true
+			return result, true
 		}
 		lastErr = err
 		a.runs.databaseUnavailable.Store(true)
@@ -825,7 +939,7 @@ func (a *API) finalizeRun(input chatrun.FinalizeInput) (chatrun.Run, bool) {
 		select {
 		case <-a.runs.stop:
 			timer.Stop()
-			return chatrun.Run{}, false
+			return chatrun.FinalizeResult{}, false
 		case <-timer.C:
 		}
 	}
@@ -838,18 +952,19 @@ func (a *API) finalizeRun(input chatrun.FinalizeInput) (chatrun.Run, bool) {
 	fallback.Status = chatrun.StatusInterrupted
 	fallback.ErrorCode = "FINALIZATION_FAILED"
 	fallback.AssistantMessage = nil
+	fallback.PlanCandidate = nil
 	fallback.Reveal = false
 	ctx, cancel := context.WithTimeout(context.Background(), finalizeAttemptLimit)
-	run, fallbackErr := a.runs.store.Finalize(ctx, fallback)
+	result, fallbackErr := a.runs.store.Finalize(ctx, fallback)
 	cancel()
 	if fallbackErr == nil {
 		a.runs.databaseUnavailable.Store(false)
 		a.log.Warn("chat run output could not be finalized; saved interrupted terminal state: " + lastErr.Error())
-		return run, true
+		return result, true
 	}
 	a.log.Warn(fmt.Sprintf("chat run finalization abandoned after %d attempts: %v; fallback: %v",
 		finalizeMaxAttempts, lastErr, fallbackErr))
-	return chatrun.Run{}, false
+	return chatrun.FinalizeResult{}, false
 }
 
 type memoryEventCoalescer struct {

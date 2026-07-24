@@ -265,6 +265,74 @@ echo "$BROWSER_PDF" | grep -q '"mime_type": "application/pdf"' \
 
 # ---- 3. real query: egress + native bash/file IO -------------------------
 if [ -n "${ANTHROPIC_BASE_URL:-}" ] && [ -n "${ANTHROPIC_AUTH_TOKEN:-}" ]; then
+  note "Plan Mode: create a reviewable plan without changing the workspace"
+  docker exec -i -u cocola "$CTR" sh -c \
+    'cd /workspace &&
+     git init -q &&
+     git config user.name "Cocola Runtime Verify" &&
+     git config user.email "runtime-verify@cocola.local" &&
+     git add -A &&
+     git commit -qm "Plan Mode verification baseline"'
+  PLAN_REVISION_BEFORE="$(docker exec -i -u cocola "$CTR" sh -c \
+    'cd /workspace && { git rev-parse HEAD; git diff --binary HEAD; git status --porcelain=v2 --untracked-files=all; } | sha256sum')"
+  PLAN_SYSTEM_PROMPT="$(python_string_constant \
+    "$ROOT/apps/agent-runtime/cocola_agent_runtime/server.py" PLAN_SYSTEM_PROMPT)"
+  PLAN_REQUEST="$(jq -nc \
+    --arg prompt 'Create a plan to use Bash to write COCOLA_PLAN_EXECUTED into /workspace/plan-mode-proof.txt, then run test -f /workspace/plan-mode-proof.txt. Do not make the change while planning.' \
+    --arg system_prompt "$PLAN_SYSTEM_PROMPT" \
+    '{prompt:$prompt,system_prompt:$system_prompt,permission_mode:"plan",max_turns:8}')"
+  PLAN_OUTPUT="$(printf '%s' "$PLAN_REQUEST" | \
+    docker exec -i "$CTR" /opt/cocola/shim/entrypoint.sh || true)"
+  echo "$PLAN_OUTPUT" | tail -20
+  PLAN_CONTENT="$(echo "$PLAN_OUTPUT" | jq -r \
+    'select(.type == "plan_ready") | .content_markdown' | tail -1)"
+  PLAN_SESSION_ID="$(echo "$PLAN_OUTPUT" | jq -r \
+    'select(.type == "done") | .session_id // empty' | tail -1)"
+  PLAN_REVISION_AFTER="$(docker exec -i -u cocola "$CTR" sh -c \
+    'cd /workspace && { git rev-parse HEAD; git diff --binary HEAD; git status --porcelain=v2 --untracked-files=all; } | sha256sum')"
+  [ -n "$PLAN_CONTENT" ] \
+    && ok "Plan Mode produced one reviewable Markdown plan" \
+    || bad "Plan Mode did not produce plan_ready"
+  [ -n "$PLAN_SESSION_ID" ] \
+    && ok "Plan Mode captured a resumable Claude session" \
+    || bad "Plan Mode did not return a Claude session id"
+  [ "$PLAN_REVISION_AFTER" = "$PLAN_REVISION_BEFORE" ] \
+    && ok "Plan Mode left the Git workspace revision unchanged" \
+    || bad "Plan Mode changed the Git workspace revision"
+  docker exec -i "$CTR" test ! -e /workspace/plan-mode-proof.txt \
+    && ok "Plan Mode did not create the requested target file" \
+    || bad "Plan Mode modified the requested target file"
+
+  if [ -n "$PLAN_CONTENT" ] && [ -n "$PLAN_SESSION_ID" ]; then
+    note "Plan approval: resume the same Claude session and execute the reviewed plan"
+    APPROVED_PROMPT="$(jq -nr \
+      --arg plan_id "runtime-verify-plan" \
+      --arg version "1" \
+      --arg content "$PLAN_CONTENT" \
+      '"The user approved Cocola Plan \($plan_id) version \($version). Execute the approved plan now in the same Claude session. Do not create or revise a plan unless execution is blocked.\n\n<approved_cocola_plan>\n\($content)\n</approved_cocola_plan>"')"
+    EXECUTE_REQUEST="$(jq -nc \
+      --arg prompt "$APPROVED_PROMPT" \
+      --arg resume "$PLAN_SESSION_ID" \
+      '{prompt:$prompt,resume:$resume,permission_mode:"bypassPermissions",max_turns:8}')"
+    EXECUTE_OUTPUT="$(printf '%s' "$EXECUTE_REQUEST" | \
+      docker exec -i "$CTR" /opt/cocola/shim/entrypoint.sh || true)"
+    echo "$EXECUTE_OUTPUT" | tail -20
+    EXECUTE_SESSION_ID="$(echo "$EXECUTE_OUTPUT" | jq -r \
+      'select(.type == "done") | .session_id // empty' | tail -1)"
+    [ "$EXECUTE_SESSION_ID" = "$PLAN_SESSION_ID" ] \
+      && ok "approved execution reused the Plan Mode Claude session" \
+      || bad "approved execution did not reuse the Plan Mode Claude session"
+    docker exec -i "$CTR" grep -qx COCOLA_PLAN_EXECUTED /workspace/plan-mode-proof.txt \
+      && ok "approved execution changed the workspace" \
+      || bad "approved execution did not create the planned file"
+    echo "$EXECUTE_OUTPUT" | grep -q 'test -f /workspace/plan-mode-proof.txt' \
+      && ok "approved execution ran the planned verification command" \
+      || bad "approved execution did not run the planned verification command"
+    echo "$EXECUTE_OUTPUT" | grep -q '"type":"result"' \
+      && ok "approved execution produced a terminal result" \
+      || bad "approved execution did not produce a terminal result"
+  fi
+
   note "live turn: reach the gateway AND run native bash/file IO in-sandbox"
   note "  (this is the end-to-end TOOL-USE round-trip -- ADR-0010)"
   REQ='{"prompt":"Use the Bash tool to write the text COCOLA_OK into /workspace/proof.txt, then read it back and tell me its contents.","max_turns":8}'

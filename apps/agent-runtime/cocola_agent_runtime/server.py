@@ -92,6 +92,13 @@ PREVIEW_SYSTEM_PROMPT = (
     "worktree when applicable. Do not use Bash background jobs, `&`, or `nohup`. Bind the server "
     "to 0.0.0.0 and only report it ready after the preview command returns `state: ready`."
 )
+PLAN_SYSTEM_PROMPT = (
+    "You are in Cocola Plan Mode. Inspect and reason about the task, but do not modify the "
+    "workspace or perform external side effects. Ask concise clarification questions when "
+    "required. When the plan is ready for approval, output exactly one complete Markdown plan "
+    "wrapped in <cocola_plan>...</cocola_plan>. Do not execute the plan. Calling ExitPlanMode "
+    "only signals that planning is complete; Cocola, not the tool, obtains user approval."
+)
 ADMIN_SYSTEM_PROMPT_HEADER = "Administrator-configured system instructions:"
 MODEL_ROUTE_ID_METADATA_KEY = "x-cocola-model-route-id"
 # Per-user sandbox token forwarded by the gateway (gRPC metadata seam, no
@@ -232,6 +239,7 @@ def _git_inspection_proto(result: dict[str, Any]) -> pb.InspectWorkspaceGitRespo
             ],
             commits=[_git_commit_proto(commit) for commit in snapshot.get("commits") or []],
             history_truncated=bool(snapshot.get("history_truncated")),
+            workspace_revision=str(snapshot.get("workspace_revision") or ""),
         ),
         diff=str(result.get("diff") or ""),
         binary=bool(result.get("binary")),
@@ -613,6 +621,38 @@ class AgentRuntimeServicer(pb_grpc.AgentRuntimeServiceServicer):
             )
             return
         runtime_id = runtime.descriptor.id
+        interaction_mode_value = int(
+            getattr(request, "interaction_mode", pb.INTERACTION_MODE_UNSPECIFIED)
+        )
+        if interaction_mode_value in (
+            pb.INTERACTION_MODE_UNSPECIFIED,
+            pb.INTERACTION_MODE_EXECUTE,
+        ):
+            interaction_mode = "execute"
+        elif interaction_mode_value == pb.INTERACTION_MODE_PLAN:
+            interaction_mode = "plan"
+        else:
+            await context.write(
+                pb.AgentEvent(
+                    kind="error",
+                    data={
+                        "code": "UNSUPPORTED_INTERACTION_MODE",
+                        "error": "interaction_mode must be execute or plan",
+                    },
+                )
+            )
+            return
+        if interaction_mode == "plan" and runtime_id != "claude-code":
+            await context.write(
+                pb.AgentEvent(
+                    kind="error",
+                    data={
+                        "code": "PLAN_RUNTIME_UNSUPPORTED",
+                        "error": "Plan mode is supported only for Claude Code conversations.",
+                    },
+                )
+            )
+            return
         requested_skill_id = str(getattr(request, "skill_id", "") or "").strip()
         active_skills: list[Skill] = []
         selected_skill_id: str | None = None
@@ -712,6 +752,7 @@ class AgentRuntimeServicer(pb_grpc.AgentRuntimeServiceServicer):
         environment_degraded = False
         heartbeat_task: asyncio.Task[None] | None = None
         workspace: str | None = None
+        planning_workspace_revision = ""
 
         # Bind the session to a real sandbox when a binder is wired and the
         # caller did not pin one. Acquire is create-or-reuse (M2): the same
@@ -879,6 +920,24 @@ class AgentRuntimeServicer(pb_grpc.AgentRuntimeServiceServicer):
                             await heartbeat_task
                     return
                 workspace = PROJECT_WORKTREE
+                planning_workspace_revision = str(
+                    bootstrap.get("snapshot", {}).get("workspace_revision") or ""
+                )
+                if interaction_mode == "plan" and not planning_workspace_revision:
+                    await context.write(
+                        pb.AgentEvent(
+                            kind="error",
+                            data={
+                                "code": "PLAN_WORKSPACE_REVISION_UNAVAILABLE",
+                                "error": "Project workspace revision is unavailable.",
+                            },
+                        )
+                    )
+                    if heartbeat_task is not None:
+                        heartbeat_task.cancel()
+                        with contextlib.suppress(asyncio.CancelledError):
+                            await heartbeat_task
+                    return
                 environment_components.append(
                     {
                         "kind": "project",
@@ -1109,7 +1168,7 @@ class AgentRuntimeServicer(pb_grpc.AgentRuntimeServiceServicer):
             )
 
         active_mcp_servers: dict[str, dict] = {}
-        if self._mcps is not None:
+        if interaction_mode != "plan" and self._mcps is not None:
             mcp_start_ns = time.time_ns()
             try:
                 active_mcp_servers = self._mcps.effective_mcp_servers(request.user_id)
@@ -1195,6 +1254,8 @@ class AgentRuntimeServicer(pb_grpc.AgentRuntimeServiceServicer):
             user_id=request.user_id,
             session_id=request.session_id,
             runtime_id=runtime_id,
+            interaction_mode=interaction_mode,
+            require_session_resume=bool(getattr(request, "require_session_resume", False)),
             sandbox_id=sandbox_id,
             workspace=workspace,
             working_directory=working_directory,
@@ -1205,7 +1266,9 @@ class AgentRuntimeServicer(pb_grpc.AgentRuntimeServiceServicer):
             environment_skills=loaded_skills,
             auth_token=sandbox_token or None,
             traceparent=traceparent or None,
-            project_credential=project_broker_credential or None,
+            project_credential=(
+                (project_broker_credential or None) if interaction_mode != "plan" else None
+            ),
             project_provider=project_spec.repository_provider if project_spec else None,
             project_repository=project_spec.repository_full_name if project_spec else None,
             project_broker_url=(os.getenv("COCOLA_SANDBOX_PROJECT_BROKER_URL", "").strip() or None),
@@ -1220,13 +1283,19 @@ class AgentRuntimeServicer(pb_grpc.AgentRuntimeServiceServicer):
                     f"{ADMIN_SYSTEM_PROMPT_HEADER}\n{admin_prompt}",
                 ),
             )
-        artifacts_enabled = bool(self._objstore is not None and hasattr(self._objstore, "put"))
+        artifacts_enabled = bool(
+            interaction_mode != "plan"
+            and self._objstore is not None
+            and hasattr(self._objstore, "put")
+        )
         if artifacts_enabled:
             opts = dataclasses.replace(
                 opts,
                 system_prompt=_merge_system_prompt(opts.system_prompt, ARTIFACT_SYSTEM_PROMPT),
             )
-        if any(skill.get("id") == "cocola-sandbox-preview" for skill in loaded_skills):
+        if interaction_mode != "plan" and any(
+            skill.get("id") == "cocola-sandbox-preview" for skill in loaded_skills
+        ):
             opts = dataclasses.replace(
                 opts,
                 system_prompt=_merge_system_prompt(opts.system_prompt, PREVIEW_SYSTEM_PROMPT),
@@ -1237,6 +1306,15 @@ class AgentRuntimeServicer(pb_grpc.AgentRuntimeServiceServicer):
                 opts,
                 system_prompt=_append_memory_context(opts.system_prompt, memory_context),
             )
+        if interaction_mode == "plan":
+            opts = dataclasses.replace(
+                opts,
+                system_prompt=(
+                    f"{opts.system_prompt}\n\n{PLAN_SYSTEM_PROMPT}"
+                    if opts.system_prompt
+                    else PLAN_SYSTEM_PROMPT
+                ),
+            )
 
         log.info(
             "agent query",
@@ -1246,12 +1324,13 @@ class AgentRuntimeServicer(pb_grpc.AgentRuntimeServiceServicer):
             attachments=len(request.attachments),
             model_route_id=model_route_id or "",
             runtime_id=runtime_id,
+            interaction_mode=interaction_mode,
         )
         outputs_before = await self._snapshot_outputs(sandbox_id) if artifacts_enabled else {}
 
-        async def write_project_snapshot() -> None:
+        async def write_project_snapshot(*, required: bool = False) -> dict[str, Any] | None:
             if project_spec is None or self._executor is None or not sandbox_id:
-                return
+                return None
             try:
                 inspection = await inspect_project(
                     self._executor, sandbox_id, project_spec, "status"
@@ -1262,19 +1341,30 @@ class AgentRuntimeServicer(pb_grpc.AgentRuntimeServiceServicer):
                         data={"snapshot_json": _snapshot_event_json(inspection["snapshot"])},
                     )
                 )
+                return inspection
             except Exception as exc:  # noqa: BLE001 - terminal snapshot is best-effort
                 log.warning(
                     "terminal Git snapshot failed",
                     session_id=request.session_id,
                     error_type=type(exc).__name__,
                 )
+                if required:
+                    raise
+                return None
 
         try:
             terminal_done: AgentEvent | None = None
+            pending_plan: AgentEvent | None = None
+            provider_failed = False
             async for event in runtime.provider.query(prompt, opts):
                 if event.kind == "done":
                     terminal_done = event
                     continue
+                if event.kind == "plan_ready" and interaction_mode == "plan":
+                    pending_plan = event
+                    continue
+                if event.kind == "error":
+                    provider_failed = True
                 await context.write(event_to_proto(event))
             if artifacts_enabled:
                 async for event in self._publish_output_artifacts(
@@ -1284,7 +1374,33 @@ class AgentRuntimeServicer(pb_grpc.AgentRuntimeServiceServicer):
                     before=outputs_before,
                 ):
                     await context.write(event_to_proto(event))
-            await write_project_snapshot()
+            if interaction_mode == "plan" and project_spec is not None and not provider_failed:
+                try:
+                    inspection = await write_project_snapshot(required=True)
+                except Exception:
+                    inspection = None
+                current_revision = str(
+                    (inspection or {}).get("snapshot", {}).get("workspace_revision") or ""
+                )
+                if not current_revision or current_revision != planning_workspace_revision:
+                    await context.write(
+                        pb.AgentEvent(
+                            kind="error",
+                            data={
+                                "code": "PLAN_WORKSPACE_CHANGED_DURING_PLANNING",
+                                "error": (
+                                    "The workspace changed while Claude was creating the plan."
+                                ),
+                            },
+                        )
+                    )
+                    pending_plan = None
+                elif pending_plan is not None:
+                    pending_plan.data["workspace_revision"] = current_revision
+            elif project_spec is not None:
+                await write_project_snapshot()
+            if pending_plan is not None and not provider_failed:
+                await context.write(event_to_proto(pending_plan))
             if terminal_done is not None:
                 await context.write(event_to_proto(terminal_done))
         except Exception as exc:  # noqa: BLE001 - turn any provider fault into a clean terminal event

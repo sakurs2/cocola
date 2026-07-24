@@ -176,18 +176,156 @@ func TestMemoryDraftAndTerminalStateAreStable(t *testing.T) {
 	run, err := store.Finalize(ctx, FinalizeInput{
 		RunID: "run-1", UserID: "user-1", Status: StatusSuccess, AssistantMessage: &final,
 	})
-	if err != nil || run.Status != StatusSuccess {
+	if err != nil || run.Run.Status != StatusSuccess {
 		t.Fatalf("finalize = %+v, %v", run, err)
 	}
 	run, err = store.Finalize(ctx, FinalizeInput{
 		RunID: "run-1", UserID: "user-1", Status: StatusError, ErrorCode: "LATE_ERROR",
 	})
-	if err != nil || run.Status != StatusSuccess || run.ErrorCode != "" {
+	if err != nil || run.Run.Status != StatusSuccess || run.Run.ErrorCode != "" {
 		t.Fatalf("late terminal overwrite = %+v, %v", run, err)
 	}
 	messages, err := conversations.GetMessages(ctx, "conversation-1", "user-1")
 	if err != nil || len(messages) != 2 || messages[1].Parts[0].Text != "complete" ||
 		!messages[1].CreatedAt.Equal(final.CreatedAt) {
 		t.Fatalf("final messages = %+v, %v", messages, err)
+	}
+}
+
+func TestMemoryPlanExecutionStopsAndContinuesWithoutUserMessage(t *testing.T) {
+	ctx := context.Background()
+	conversations := convo.NewMemory()
+	store := NewMemory(conversations)
+	planning := testStartInput("plan-run-1", "plan-request-1", "user-1", "conversation-1")
+	planning.Run.InteractionMode = InteractionModePlan
+	planning.Run.ModelRouteID = "route-1"
+	planning.Run.ModelAlias = "sonnet"
+	if _, err := store.Start(ctx, planning); err != nil {
+		t.Fatal(err)
+	}
+	created, err := store.Finalize(ctx, FinalizeInput{
+		RunID: "plan-run-1", UserID: "user-1", Status: StatusSuccess,
+		PlanCandidate: &PlanCandidate{
+			ID: "11111111-1111-4111-8111-111111111111", RuntimeID: "claude-code",
+			ModelRouteID: "route-1", ModelAlias: "sonnet",
+			ContentMarkdown: "## Plan\n\n- Implement",
+		},
+	})
+	if err != nil || created.Plan == nil || created.Plan.Version != 1 ||
+		created.Plan.Status != PlanStatusReady {
+		t.Fatalf("created plan = %+v, %v", created, err)
+	}
+
+	executionStartedAt := time.Now().UTC()
+	store.unavailableModels["route-1"] = true
+	if _, err := store.StartPlanExecution(ctx, PlanExecutionInput{
+		Run: Run{
+			ID: "unavailable-model-run", RootSpanID: "unavailable-model-span",
+			ClientRequestID: "unavailable-model-request", Status: StatusRunning,
+			StartedAt: executionStartedAt, LastActivityAt: executionStartedAt,
+		},
+		ConversationID: "conversation-1", UserID: "user-1",
+		ExpectedVersion: 1, PlanID: created.Plan.ID, ApprovedAt: executionStartedAt,
+	}); !errors.Is(err, ErrPlanModelUnavailable) {
+		t.Fatalf("unavailable model execution error = %v, want ErrPlanModelUnavailable", err)
+	}
+	delete(store.unavailableModels, "route-1")
+
+	started, err := store.StartPlanExecution(ctx, PlanExecutionInput{
+		Run: Run{
+			ID: "execute-run-1", RootSpanID: "span-1", ClientRequestID: "execute-request-1",
+			Status: StatusRunning, StartedAt: executionStartedAt, LastActivityAt: executionStartedAt,
+		},
+		ConversationID: "conversation-1", UserID: "user-1",
+		ExpectedVersion: 1, PlanID: created.Plan.ID, ApprovedAt: executionStartedAt,
+	})
+	if err != nil || !started.Created || started.Plan.Status != PlanStatusExecuting ||
+		started.Run.PlanID != created.Plan.ID {
+		t.Fatalf("execution start = %+v, %v", started, err)
+	}
+	stopped, err := store.Finalize(ctx, FinalizeInput{
+		RunID: "execute-run-1", UserID: "user-1", Status: StatusInterrupted,
+	})
+	if err != nil || stopped.Plan == nil || stopped.Plan.Status != PlanStatusStopped {
+		t.Fatalf("stopped execution = %+v, %v", stopped, err)
+	}
+
+	continuedAt := executionStartedAt.Add(time.Second)
+	continued, err := store.StartPlanExecution(ctx, PlanExecutionInput{
+		Run: Run{
+			ID: "execute-run-2", RootSpanID: "span-2", ClientRequestID: "execute-request-2",
+			Status: StatusRunning, StartedAt: continuedAt, LastActivityAt: continuedAt,
+		},
+		ConversationID: "conversation-1", UserID: "user-1",
+		ExpectedVersion: 1, PlanID: created.Plan.ID, ApprovedAt: continuedAt,
+	})
+	if err != nil || continued.Plan.Status != PlanStatusExecuting {
+		t.Fatalf("continued execution = %+v, %v", continued, err)
+	}
+	completed, err := store.Finalize(ctx, FinalizeInput{
+		RunID: "execute-run-2", UserID: "user-1", Status: StatusSuccess,
+	})
+	if err != nil || completed.Plan == nil || completed.Plan.Status != PlanStatusCompleted {
+		t.Fatalf("completed execution = %+v, %v", completed, err)
+	}
+
+	messages, err := conversations.GetMessages(ctx, "conversation-1", "user-1")
+	if err != nil || len(messages) != 2 || messages[1].Parts[0].Status != PlanStatusCompleted {
+		t.Fatalf("plan messages = %+v, %v", messages, err)
+	}
+}
+
+func TestMemoryNewPlanSupersedesOldVersion(t *testing.T) {
+	ctx := context.Background()
+	conversations := convo.NewMemory()
+	store := NewMemory(conversations)
+	createPlan := func(runID, requestID, planID string) FinalizeResult {
+		t.Helper()
+		input := testStartInput(runID, requestID, "user-1", "conversation-1")
+		input.Run.InteractionMode = InteractionModePlan
+		if _, err := store.Start(ctx, input); err != nil {
+			t.Fatal(err)
+		}
+		result, err := store.Finalize(ctx, FinalizeInput{
+			RunID: runID, UserID: "user-1", Status: StatusSuccess,
+			PlanCandidate: &PlanCandidate{
+				ID: planID, RuntimeID: "claude-code", ContentMarkdown: "## Plan\n\n- Review",
+			},
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		return result
+	}
+
+	first := createPlan(
+		"plan-run-1", "plan-request-1", "11111111-1111-4111-8111-111111111111",
+	)
+	second := createPlan(
+		"plan-run-2", "plan-request-2", "22222222-2222-4222-8222-222222222222",
+	)
+	if first.Plan == nil || second.Plan == nil || second.Plan.Version != 2 ||
+		second.SupersededPlanID != first.Plan.ID {
+		t.Fatalf("versioned plans = first %+v, second %+v", first, second)
+	}
+	old, err := store.GetPlan(ctx, "conversation-1", first.Plan.ID, "user-1")
+	if err != nil || old.Status != PlanStatusSuperseded {
+		t.Fatalf("old plan = %+v, %v", old, err)
+	}
+	if _, err := store.StartPlanExecution(ctx, PlanExecutionInput{
+		Run: Run{
+			ID: "execute-old", ClientRequestID: "execute-old-request", Status: StatusRunning,
+			StartedAt: time.Now().UTC(), LastActivityAt: time.Now().UTC(),
+		},
+		ConversationID: "conversation-1", UserID: "user-1",
+		ExpectedVersion: 1, PlanID: first.Plan.ID,
+	}); !errors.Is(err, ErrPlanNotCurrent) {
+		t.Fatalf("old plan execution error = %v, want ErrPlanNotCurrent", err)
+	}
+	cancelled, err := store.CancelPlan(
+		ctx, "conversation-1", second.Plan.ID, "user-1", 2, time.Now().UTC(),
+	)
+	if err != nil || cancelled.Status != PlanStatusCancelled {
+		t.Fatalf("cancelled plan = %+v, %v", cancelled, err)
 	}
 }

@@ -141,6 +141,15 @@ def _shim_event_to_agent_events(ev: dict) -> list[AgentEvent]:
                 },
             )
         ]
+    if t == "plan_ready":
+        return [
+            AgentEvent(
+                kind="plan_ready",
+                data={
+                    "content_markdown": str(ev.get("content_markdown") or ""),
+                },
+            )
+        ]
     if t == "error":
         data = {"stage": ev.get("stage", ""), "error": ev.get("error", "")}
         if ev.get("code"):
@@ -268,6 +277,9 @@ class InSandboxShimProvider:
             "conversation_id": options.session_id,
             "max_turns": options.max_turns or self._default_max_turns,
             "cwd": options.working_directory,
+            "permission_mode": (
+                "plan" if options.interaction_mode == "plan" else "bypassPermissions"
+            ),
         }
         if options.model_route_id:
             req["model"] = options.model_route_id
@@ -358,6 +370,19 @@ class InSandboxShimProvider:
             options.session_id, user_id=options.user_id, runtime_id=options.runtime_id
         )
         resume = binding.runtime_session_id if binding else None
+        if options.require_session_resume and not resume:
+            yield AgentEvent(
+                kind="error",
+                data={
+                    "code": "SESSION_RESUME_REQUIRED",
+                    "error": (
+                        "The Claude session that created this plan is unavailable. "
+                        "Create a new plan."
+                    ),
+                },
+            )
+            yield AgentEvent(kind="done", data={})
+            return
         if binding and binding.sandbox_id and binding.sandbox_id != options.sandbox_id:
             log.info(
                 "session sandbox changed; trying stored resume id",
@@ -379,6 +404,7 @@ class InSandboxShimProvider:
         # opaque exit code.
         if (
             resume
+            and not options.require_session_resume
             and state.saw_error
             and not state.saw_content
             and "SESSION_NOT_FOUND" in state.error_codes
@@ -413,6 +439,24 @@ class InSandboxShimProvider:
                 retry_started_ns,
                 status="error" if state.saw_error else "success",
             )
+
+        if options.require_session_resume and "SESSION_NOT_FOUND" in state.error_codes:
+            state.errors = [
+                AgentEvent(
+                    kind=event.kind,
+                    data={
+                        **event.data,
+                        "code": "SESSION_RESUME_REQUIRED",
+                        "error": (
+                            "The Claude session that created this plan is unavailable. "
+                            "Create a new plan."
+                        ),
+                    },
+                )
+                if event.data.get("code") == "SESSION_NOT_FOUND"
+                else event
+                for event in state.errors
+            ]
 
         # Surface any deferred error(s) from the FINAL attempt (deferred so the
         # retry decision above can inspect them before the user sees them).

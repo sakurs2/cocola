@@ -44,8 +44,10 @@ ARG OPENSANDBOX_BASE=opensandbox/code-interpreter:v1.1.0
 # COCOLA_VENV_PYTHON to stay deterministic regardless of the base default.
 ARG COCOLA_VENV_PYTHON=3.12
 ARG NPM_REGISTRY=https://registry.npmjs.org
-# Pin a known-good agent SDK range. >=0.2.x is not on PyPI yet; 0.1.x is.
-ARG CLAUDE_AGENT_SDK_SPEC=claude-agent-sdk>=0.2.0
+# Keep the exact SDK version verified in the current Sandbox image. Plan Mode
+# depends on its native permission_mode="plan" behavior and must not upgrade it
+# implicitly during an unrelated image rebuild.
+ARG CLAUDE_AGENT_SDK_SPEC=claude-agent-sdk==0.2.123
 # Resident in-sandbox editor. Pinned to a known-good standalone release (bundles
 # its own Node, so no native build). Offline builds can drop the matching
 # code-server-<ver>-linux-<arch>.tar.gz under ./offline/ (see the install step).

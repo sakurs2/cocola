@@ -135,6 +135,13 @@ export const finalAgentOutputText = (parts, outputIndices) => {
       const part = safeParts[index];
       if (part?.type === "text" && typeof part.text === "string") return part.text.trim();
       if (part?.type === "file") return fileReference(part);
+      if (
+        part?.type === "data" &&
+        part?.name === "plan" &&
+        typeof part.data?.contentMarkdown === "string"
+      ) {
+        return part.data.contentMarkdown.trim();
+      }
       return "";
     })
     .filter(Boolean)

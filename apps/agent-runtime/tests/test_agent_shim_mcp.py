@@ -51,6 +51,111 @@ def test_agent_shim_passes_mcp_servers_to_claude_options(monkeypatch):
     assert captured["skills"] == "all"
 
 
+def test_agent_shim_plan_options_disable_settings_and_mcp(monkeypatch):
+    captured = {}
+
+    class FakeClaudeAgentOptions:
+        def __init__(self, **kwargs):
+            captured.update(kwargs)
+
+    fake_sdk = types.SimpleNamespace(ClaudeAgentOptions=FakeClaudeAgentOptions)
+    monkeypatch.setitem(sys.modules, "claude_agent_sdk", fake_sdk)
+
+    module = _load_shim("cocola_agent_shim_plan_options")
+    module._build_options(
+        {
+            "prompt": "plan the change",
+            "permission_mode": "plan",
+            "mcp_servers": {
+                "github": {
+                    "type": "stdio",
+                    "command": "npx",
+                }
+            },
+        }
+    )
+
+    assert captured["setting_sources"] == []
+    assert captured["mcp_servers"] == {}
+    assert captured["strict_mcp_config"] is True
+    assert captured["skills"] == "all"
+
+
+def test_plan_capture_suppresses_exit_plan_mode_and_emits_one_plan():
+    module = _load_shim("cocola_agent_shim_plan_capture")
+    capture = module._ClaudePlanCapture()
+    progress = module._ClaudeTaskProgress()
+    assistant = type(
+        "AssistantMessage",
+        (),
+        {
+            "content": [
+                type("TextBlock", (), {"text": "<cocola_plan>## Plan\n\n- Inspect"})(),
+                type(
+                    "ToolUseBlock",
+                    (),
+                    {"id": "exit-1", "name": "ExitPlanMode", "input": {}},
+                )(),
+                type("TextBlock", (), {"text": "\n- Implement</cocola_plan>"})(),
+            ]
+        },
+    )()
+    tool_result = type(
+        "UserMessage",
+        (),
+        {
+            "content": [
+                type(
+                    "ToolResultBlock",
+                    (),
+                    {"tool_use_id": "exit-1", "is_error": False, "content": "Approved"},
+                )()
+            ]
+        },
+    )()
+
+    assert capture.message_events(assistant, progress) == []
+    assert capture.message_events(tool_result, progress) == []
+    assert capture.final_event() == {
+        "type": "plan_ready",
+        "content_markdown": "## Plan\n\n- Inspect\n- Implement",
+    }
+
+
+def test_plan_capture_returns_text_for_clarification_and_rejects_invalid_output():
+    module = _load_shim("cocola_agent_shim_plan_validation")
+    progress = module._ClaudeTaskProgress()
+
+    clarification = module._ClaudePlanCapture()
+    message = type(
+        "AssistantMessage",
+        (),
+        {"content": [type("TextBlock", (), {"text": "Which branch should I use?"})()]},
+    )()
+    clarification.message_events(message, progress)
+    assert clarification.final_event() == {
+        "type": "text",
+        "text": "Which branch should I use?",
+    }
+
+    invalid = module._ClaudePlanCapture()
+    message = type(
+        "AssistantMessage",
+        (),
+        {
+            "content": [
+                type(
+                    "TextBlock",
+                    (),
+                    {"text": "<cocola_plan>one</cocola_plan> trailing"},
+                )()
+            ]
+        },
+    )()
+    invalid.message_events(message, progress)
+    assert invalid.final_event()["code"] == "PLAN_OUTPUT_INVALID"
+
+
 async def test_agent_shim_streams_mcp_status_without_blocking_query(monkeypatch):
     captured: dict[str, object] = {}
     calls: list[str] = []

@@ -17,6 +17,8 @@ class AgentOptions:
     user_id: str
     session_id: str
     runtime_id: str = "claude-code"
+    interaction_mode: str = "execute"
+    require_session_resume: bool = False
     sandbox_id: str | None = None
     # Host working directory for an in-process provider (one whose brain runs
     # IN THIS PROCESS). When set, such a provider points its cwd here so native

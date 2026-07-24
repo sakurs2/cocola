@@ -43,6 +43,18 @@ message QueryRequest {
   // Server-produced project metadata. Credentials are deliberately excluded
   // and travel only through protected gRPC metadata.
   ProjectContext project_context = 11;
+  // Product-level behavior for this turn. The Agent Runtime maps PLAN to the
+  // selected runtime's native read-only planning mode.
+  InteractionMode interaction_mode = 12;
+  // Requires the runtime to resume an existing native session. The runtime
+  // must fail instead of silently starting a fresh session.
+  bool require_session_resume = 13;
+}
+
+enum InteractionMode {
+  INTERACTION_MODE_UNSPECIFIED = 0;
+  INTERACTION_MODE_EXECUTE = 1;
+  INTERACTION_MODE_PLAN = 2;
 }
 
 message ProjectContext {
@@ -153,6 +165,8 @@ message GitSnapshot {
   string base_ref = 8;
   repeated GitCommit commits = 9;
   bool history_truncated = 10;
+  // SHA-256 over HEAD, tracked changes, and untracked file contents.
+  string workspace_revision = 11;
 }
 
 message GitCommit {

@@ -478,8 +478,9 @@ func (a *API) inspectGit(w http.ResponseWriter, r *http.Request) {
 		Branch: result.Snapshot.Branch, BaseRef: result.Snapshot.BaseRef, BaseSHA: result.Snapshot.BaseSHA,
 		HeadSHA: result.Snapshot.HeadSHA, Ahead: result.Snapshot.Ahead,
 		Dirty: result.Snapshot.Dirty, Truncated: result.Snapshot.Truncated,
-		HistoryTruncated: result.Snapshot.HistoryTruncated,
-		CapturedAt:       time.Now().UTC(),
+		HistoryTruncated:  result.Snapshot.HistoryTruncated,
+		WorkspaceRevision: result.Snapshot.WorkspaceRevision,
+		CapturedAt:        time.Now().UTC(),
 	}
 	for _, change := range result.Snapshot.Changes {
 		snapshot.Changes = append(snapshot.Changes, project.Change{

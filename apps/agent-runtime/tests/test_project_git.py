@@ -227,6 +227,56 @@ def test_fresh_local_project_initializes_main_and_reuses_workspace(tmp_path):
     assert (worktree / "kept.txt").read_text(encoding="utf-8") == "persisted\n"
 
 
+def test_workspace_revision_covers_tracked_and_untracked_content(tmp_path):
+    workspace = tmp_path / "workspace"
+    worktree = workspace / "project"
+    spec = {
+        "project_id": "project-local",
+        "repository_id": 0,
+        "clone_url": "",
+        "default_branch": "main",
+        "base_sha": "",
+        "task_branch": "main",
+        "git_author_name": "Local User",
+        "git_author_email": "local@example.com",
+        "repository_provider": "local",
+        "repository_full_name": "",
+        "credential_mode": "none",
+    }
+    script = project_script(workspace)
+    bootstrap = subprocess.run(
+        [sys.executable, "-c", script],
+        input=json.dumps({"operation": "bootstrap", "spec": spec}),
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+    initial = json.loads(bootstrap.stdout)["snapshot"]["workspace_revision"]
+    assert len(initial) == 64
+    spec["base_sha"] = json.loads(bootstrap.stdout)["snapshot"]["base_sha"]
+
+    (worktree / "untracked.txt").write_text("first\n", encoding="utf-8")
+    first = subprocess.run(
+        [sys.executable, "-c", script],
+        input=json.dumps({"operation": "status", "spec": spec}),
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+    first_revision = json.loads(first.stdout)["snapshot"]["workspace_revision"]
+    assert first_revision != initial
+
+    (worktree / "untracked.txt").write_text("second\n", encoding="utf-8")
+    second = subprocess.run(
+        [sys.executable, "-c", script],
+        input=json.dumps({"operation": "status", "spec": spec}),
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+    assert json.loads(second.stdout)["snapshot"]["workspace_revision"] != first_revision
+
+
 def test_git_history_and_commit_details_are_bounded_and_readable(tmp_path):
     workspace = tmp_path / "workspace"
     worktree = workspace / "project"

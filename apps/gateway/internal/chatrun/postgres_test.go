@@ -66,13 +66,13 @@ func TestPostgresStartFinalizeParity(t *testing.T) {
 	run, err := store.Finalize(ctx, FinalizeInput{
 		RunID: runID, UserID: "user-1", Status: StatusSuccess, AssistantMessage: &final,
 	})
-	if err != nil || run.Status != StatusSuccess {
+	if err != nil || run.Run.Status != StatusSuccess {
 		t.Fatalf("finalize = %+v, %v", run, err)
 	}
 	run, err = store.Finalize(ctx, FinalizeInput{
 		RunID: runID, UserID: "user-1", Status: StatusError, ErrorCode: "LATE_ERROR",
 	})
-	if err != nil || run.Status != StatusSuccess || run.ErrorCode != "" {
+	if err != nil || run.Run.Status != StatusSuccess || run.Run.ErrorCode != "" {
 		t.Fatalf("late terminal overwrite = %+v, %v", run, err)
 	}
 	var assistantCreatedAt time.Time

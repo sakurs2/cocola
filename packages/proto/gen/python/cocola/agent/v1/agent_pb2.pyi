@@ -1,4 +1,5 @@
 from google.protobuf.internal import containers as _containers
+from google.protobuf.internal import enum_type_wrapper as _enum_type_wrapper
 from google.protobuf import descriptor as _descriptor
 from google.protobuf import message as _message
 from collections.abc import Iterable as _Iterable, Mapping as _Mapping
@@ -6,8 +7,17 @@ from typing import ClassVar as _ClassVar, Optional as _Optional, Union as _Union
 
 DESCRIPTOR: _descriptor.FileDescriptor
 
+class InteractionMode(int, metaclass=_enum_type_wrapper.EnumTypeWrapper):
+    __slots__ = ()
+    INTERACTION_MODE_UNSPECIFIED: _ClassVar[InteractionMode]
+    INTERACTION_MODE_EXECUTE: _ClassVar[InteractionMode]
+    INTERACTION_MODE_PLAN: _ClassVar[InteractionMode]
+INTERACTION_MODE_UNSPECIFIED: InteractionMode
+INTERACTION_MODE_EXECUTE: InteractionMode
+INTERACTION_MODE_PLAN: InteractionMode
+
 class QueryRequest(_message.Message):
-    __slots__ = ("user_id", "session_id", "prompt", "sandbox_id", "max_turns", "attachments", "runtime_id", "skill_id", "allow_workspace_reset", "memory_context", "project_context")
+    __slots__ = ("user_id", "session_id", "prompt", "sandbox_id", "max_turns", "attachments", "runtime_id", "skill_id", "allow_workspace_reset", "memory_context", "project_context", "interaction_mode", "require_session_resume")
     USER_ID_FIELD_NUMBER: _ClassVar[int]
     SESSION_ID_FIELD_NUMBER: _ClassVar[int]
     PROMPT_FIELD_NUMBER: _ClassVar[int]
@@ -19,6 +29,8 @@ class QueryRequest(_message.Message):
     ALLOW_WORKSPACE_RESET_FIELD_NUMBER: _ClassVar[int]
     MEMORY_CONTEXT_FIELD_NUMBER: _ClassVar[int]
     PROJECT_CONTEXT_FIELD_NUMBER: _ClassVar[int]
+    INTERACTION_MODE_FIELD_NUMBER: _ClassVar[int]
+    REQUIRE_SESSION_RESUME_FIELD_NUMBER: _ClassVar[int]
     user_id: str
     session_id: str
     prompt: str
@@ -30,7 +42,9 @@ class QueryRequest(_message.Message):
     allow_workspace_reset: bool
     memory_context: str
     project_context: ProjectContext
-    def __init__(self, user_id: _Optional[str] = ..., session_id: _Optional[str] = ..., prompt: _Optional[str] = ..., sandbox_id: _Optional[str] = ..., max_turns: _Optional[int] = ..., attachments: _Optional[_Iterable[_Union[Attachment, _Mapping]]] = ..., runtime_id: _Optional[str] = ..., skill_id: _Optional[str] = ..., allow_workspace_reset: bool = ..., memory_context: _Optional[str] = ..., project_context: _Optional[_Union[ProjectContext, _Mapping]] = ...) -> None: ...
+    interaction_mode: InteractionMode
+    require_session_resume: bool
+    def __init__(self, user_id: _Optional[str] = ..., session_id: _Optional[str] = ..., prompt: _Optional[str] = ..., sandbox_id: _Optional[str] = ..., max_turns: _Optional[int] = ..., attachments: _Optional[_Iterable[_Union[Attachment, _Mapping]]] = ..., runtime_id: _Optional[str] = ..., skill_id: _Optional[str] = ..., allow_workspace_reset: bool = ..., memory_context: _Optional[str] = ..., project_context: _Optional[_Union[ProjectContext, _Mapping]] = ..., interaction_mode: _Optional[_Union[InteractionMode, str]] = ..., require_session_resume: bool = ...) -> None: ...
 
 class ProjectContext(_message.Message):
     __slots__ = ("project_id", "repository_id", "clone_url", "default_branch", "base_sha", "task_branch", "git_author_name", "git_author_email", "repository_provider", "repository_full_name", "credential_mode", "base_ref")
@@ -174,7 +188,7 @@ class GitChange(_message.Message):
     def __init__(self, path: _Optional[str] = ..., old_path: _Optional[str] = ..., status: _Optional[str] = ..., area: _Optional[str] = ...) -> None: ...
 
 class GitSnapshot(_message.Message):
-    __slots__ = ("branch", "base_sha", "head_sha", "ahead", "dirty", "changes", "truncated", "base_ref", "commits", "history_truncated")
+    __slots__ = ("branch", "base_sha", "head_sha", "ahead", "dirty", "changes", "truncated", "base_ref", "commits", "history_truncated", "workspace_revision")
     BRANCH_FIELD_NUMBER: _ClassVar[int]
     BASE_SHA_FIELD_NUMBER: _ClassVar[int]
     HEAD_SHA_FIELD_NUMBER: _ClassVar[int]
@@ -185,6 +199,7 @@ class GitSnapshot(_message.Message):
     BASE_REF_FIELD_NUMBER: _ClassVar[int]
     COMMITS_FIELD_NUMBER: _ClassVar[int]
     HISTORY_TRUNCATED_FIELD_NUMBER: _ClassVar[int]
+    WORKSPACE_REVISION_FIELD_NUMBER: _ClassVar[int]
     branch: str
     base_sha: str
     head_sha: str
@@ -195,7 +210,8 @@ class GitSnapshot(_message.Message):
     base_ref: str
     commits: _containers.RepeatedCompositeFieldContainer[GitCommit]
     history_truncated: bool
-    def __init__(self, branch: _Optional[str] = ..., base_sha: _Optional[str] = ..., head_sha: _Optional[str] = ..., ahead: _Optional[int] = ..., dirty: bool = ..., changes: _Optional[_Iterable[_Union[GitChange, _Mapping]]] = ..., truncated: bool = ..., base_ref: _Optional[str] = ..., commits: _Optional[_Iterable[_Union[GitCommit, _Mapping]]] = ..., history_truncated: bool = ...) -> None: ...
+    workspace_revision: str
+    def __init__(self, branch: _Optional[str] = ..., base_sha: _Optional[str] = ..., head_sha: _Optional[str] = ..., ahead: _Optional[int] = ..., dirty: bool = ..., changes: _Optional[_Iterable[_Union[GitChange, _Mapping]]] = ..., truncated: bool = ..., base_ref: _Optional[str] = ..., commits: _Optional[_Iterable[_Union[GitCommit, _Mapping]]] = ..., history_truncated: bool = ..., workspace_revision: _Optional[str] = ...) -> None: ...
 
 class GitCommit(_message.Message):
     __slots__ = ("sha", "parents", "subject", "author_name", "authored_at", "refs", "files_changed", "additions", "deletions", "body")

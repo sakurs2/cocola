@@ -224,17 +224,18 @@ type GitCommitFile struct {
 }
 
 type GitSnapshot struct {
-	Branch           string      `json:"branch"`
-	BaseRef          string      `json:"base_ref"`
-	BaseSHA          string      `json:"base_sha"`
-	HeadSHA          string      `json:"head_sha"`
-	Ahead            int         `json:"ahead"`
-	Dirty            bool        `json:"dirty"`
-	Changes          []Change    `json:"changes"`
-	Truncated        bool        `json:"truncated"`
-	Commits          []GitCommit `json:"commits,omitempty"`
-	HistoryTruncated bool        `json:"history_truncated,omitempty"`
-	CapturedAt       time.Time   `json:"captured_at"`
+	Branch            string      `json:"branch"`
+	BaseRef           string      `json:"base_ref"`
+	BaseSHA           string      `json:"base_sha"`
+	HeadSHA           string      `json:"head_sha"`
+	Ahead             int         `json:"ahead"`
+	Dirty             bool        `json:"dirty"`
+	Changes           []Change    `json:"changes"`
+	Truncated         bool        `json:"truncated"`
+	Commits           []GitCommit `json:"commits,omitempty"`
+	HistoryTruncated  bool        `json:"history_truncated,omitempty"`
+	WorkspaceRevision string      `json:"workspace_revision,omitempty"`
+	CapturedAt        time.Time   `json:"captured_at"`
 }
 
 type Workspace struct {

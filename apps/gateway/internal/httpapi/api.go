@@ -282,6 +282,10 @@ func (a *API) Handler() http.Handler {
 		a.verifier.Middleware(writeErr)(http.HandlerFunc(a.deleteConversation))))
 	mux.Handle("GET /v1/conversations/{id}/messages", a.instrument("GET /v1/conversations/{id}/messages",
 		a.verifier.Middleware(writeErr)(http.HandlerFunc(a.conversationMessages))))
+	mux.Handle("POST /v1/conversations/{id}/plans/{plan_id}/execute", a.instrument("POST /v1/conversations/{id}/plans/{plan_id}/execute",
+		a.verifier.Middleware(writeErr)(http.HandlerFunc(a.executePlan))))
+	mux.Handle("POST /v1/conversations/{id}/plans/{plan_id}/cancel", a.instrument("POST /v1/conversations/{id}/plans/{plan_id}/cancel",
+		a.verifier.Middleware(writeErr)(http.HandlerFunc(a.cancelPlan))))
 	mux.Handle("GET /v1/conversations/{id}/artifacts/{artifact_id}", a.instrument("GET /v1/conversations/{id}/artifacts/{artifact_id}",
 		a.verifier.Middleware(writeErr)(http.HandlerFunc(a.downloadArtifact))))
 	mux.Handle("GET /v1/memory/settings", a.instrument("GET /v1/memory/settings",
@@ -527,6 +531,8 @@ type chatRequest struct {
 	Attachments                          []attachmentDTO   `json:"attachments"`
 	ClientRequestID                      string            `json:"client_request_id"`
 	RuntimeID                            string            `json:"runtime_id"`
+	InteractionMode                      string            `json:"interaction_mode"`
+	RequireSessionResume                 bool              `json:"-"`
 	FolderID                             string            `json:"folder_id"`
 	ProjectID                            string            `json:"project_id"`
 	ProjectBaseRef                       string            `json:"project_base_ref"`
@@ -578,15 +584,21 @@ func (a *API) startConversationRun(ctx context.Context, id auth.Identity, req ch
 		Service: "gateway", Name: "conversation.run", Category: "request",
 		StartedAt: startedAt.UTC(), Status: "running",
 		Attributes: map[string]any{
-			"conversation_id": run.ConversationID,
-			"chat_type":       source,
-			"model_alias":     run.ModelAlias,
+			"conversation_id":  run.ConversationID,
+			"chat_type":        source,
+			"model_alias":      run.ModelAlias,
+			"interaction_mode": effectiveInteractionMode(req),
 		},
 	})
 	return run
 }
 
-func (a *API) finishConversationRun(ctx context.Context, run traceevents.Run, status, errorCode string, ttftMS int64, toolCalls int64) {
+func (a *API) finishConversationRun(
+	ctx context.Context,
+	run traceevents.Run,
+	status, errorCode, interactionMode string,
+	ttftMS, toolCalls int64,
+) {
 	if a.trace == nil || run.TraceID == "" {
 		return
 	}
@@ -608,11 +620,12 @@ func (a *API) finishConversationRun(ctx context.Context, run traceevents.Run, st
 		Service: "gateway", Name: "conversation.run", Category: "request",
 		StartedAt: run.StartedAt, DurationUS: now.Sub(run.StartedAt).Microseconds(), Status: status,
 		Attributes: safeTraceAttributes(map[string]any{
-			"conversation_id": run.ConversationID,
-			"chat_type":       run.Source,
-			"model_alias":     run.ModelAlias,
-			"tool_use_count":  toolCalls,
-			"error_code":      errorCode,
+			"conversation_id":  run.ConversationID,
+			"chat_type":        run.Source,
+			"model_alias":      run.ModelAlias,
+			"interaction_mode": interactionMode,
+			"tool_use_count":   toolCalls,
+			"error_code":       errorCode,
 		}),
 	})
 }
@@ -632,6 +645,7 @@ func chatStartedAt(r *http.Request) time.Time {
 
 func assistantMetadata(req chatRequest) map[string]any {
 	out := make(map[string]any)
+	out["interaction_mode"] = effectiveInteractionMode(req)
 	if routeID := effectiveModelRouteID(req); routeID != "" {
 		out["model_route_id"] = routeID
 	}
@@ -668,11 +682,18 @@ func assistantMetadata(req chatRequest) map[string]any {
 }
 
 func userMetadata(req chatRequest) map[string]any {
-	out := make(map[string]any)
+	out := map[string]any{"interaction_mode": effectiveInteractionMode(req)}
 	if skillID := strings.TrimSpace(req.SkillID); skillID != "" {
 		out["skill_id"] = skillID
 	}
 	return out
+}
+
+func effectiveInteractionMode(req chatRequest) string {
+	if strings.TrimSpace(req.InteractionMode) == chatrun.InteractionModePlan {
+		return chatrun.InteractionModePlan
+	}
+	return chatrun.InteractionModeExecute
 }
 
 func effectiveModelRouteID(req chatRequest) string {
@@ -926,6 +947,32 @@ func (a *API) conversationMessages(w http.ResponseWriter, r *http.Request) {
 		a.log.Warn("get conversation messages failed: " + err.Error())
 		writeErr(w, http.StatusInternalServerError, "INTERNAL", "could not load conversation")
 		return
+	}
+	if a.runs != nil {
+		for messageIndex := range msgs {
+			for partIndex := range msgs[messageIndex].Parts {
+				part := &msgs[messageIndex].Parts[partIndex]
+				if part.Type != convo.PartPlan || part.PlanID == "" {
+					continue
+				}
+				plan, planErr := a.runs.store.GetPlan(
+					r.Context(), convID, part.PlanID, id.UserID,
+				)
+				if planErr != nil {
+					a.log.Warn("refresh conversation plan state failed: " + planErr.Error())
+					writeErr(
+						w,
+						http.StatusServiceUnavailable,
+						"PLAN_STATE_UNAVAILABLE",
+						"could not load current plan state",
+					)
+					return
+				}
+				part.PlanVersion = plan.Version
+				part.Status = plan.Status
+				part.PlanContentMarkdown = plan.ContentMarkdown
+			}
+		}
 	}
 	writeJSON(w, http.StatusOK, msgs)
 }

@@ -12,7 +12,7 @@ import (
 // straight through convertMessage.
 //
 // Event vocabulary (kind): environment_prepare | environment_status |
-// memory_recall | text | thinking | tool_use | tool_result | file | error;
+// memory_recall | text | thinking | tool_use | tool_result | file | plan_ready | error;
 // result / system / sandbox / done carry no message-body content and are dropped
 // (identical to the frontend).
 type Reducer struct {
@@ -55,11 +55,34 @@ func (r *Reducer) Apply(kind string, data map[string]string) {
 		r.appendFile(data)
 	case "progress":
 		r.upsertProgress(data["id"], data["items"])
+	case "plan_ready":
+		r.upsertPlan(data)
 	case "error":
 		r.appendText(PartText, "\n\n⚠️ "+errText(data))
 	default:
 		// result / system / sandbox / done / unknown: no body content.
 	}
+}
+
+func (r *Reducer) upsertPlan(data map[string]string) {
+	version, _ := strconv.Atoi(data["version"])
+	content := data["content_markdown"]
+	status := data["status"]
+	if data["id"] == "" || version < 1 || status == "" ||
+		content == "" || len(content) > 128<<10 {
+		return
+	}
+	part := Part{
+		Type: PartPlan, PlanID: data["id"], PlanVersion: version,
+		Status: status, PlanContentMarkdown: content,
+	}
+	for index := range r.parts {
+		if r.parts[index].Type == PartPlan && r.parts[index].PlanID == part.PlanID {
+			r.parts[index] = part
+			return
+		}
+	}
+	r.parts = append(r.parts, part)
 }
 
 func (r *Reducer) upsertSCMApproval(data map[string]string) {
@@ -93,7 +116,7 @@ func (r *Reducer) upsertMemoryRecall(data map[string]string) {
 		count = 0
 	}
 	part := Part{
-		Type: PartMemoryRecall, MemoryStatus: status,
+		Type: PartMemoryRecall, Status: status,
 		MemoryCount: count, MemoryErrorCode: data["error_code"],
 		MemoryContent: data["content"],
 	}
