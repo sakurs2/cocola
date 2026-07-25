@@ -47,6 +47,28 @@ import {
   shouldAwaitPlanStop,
 } from "@/lib/plan-mode.mjs";
 import { canDiscardPendingProjectTask } from "@/lib/project-task-intent.mjs";
+import {
+  normalizeQuestionAnswer,
+  normalizeQuestionPart,
+  normalizeRunSummaryPart,
+  normalizeStructuredResultPart,
+  type QuestionAnswer,
+  type QuestionStatus,
+  type UiQuestionPart,
+  type UiRunSummaryPart,
+  type UiStructuredResultPart,
+} from "@/lib/rich-message-normalization";
+
+export type {
+  QuestionAnswer,
+  QuestionOption,
+  QuestionStatus,
+  RunSummaryStatus,
+  StructuredResultRenderer,
+  UiQuestionPart,
+  UiRunSummaryPart,
+  UiStructuredResultPart,
+} from "@/lib/rich-message-normalization";
 
 // ---- Local message model (carries cocola semantics) ------------------------
 
@@ -141,7 +163,10 @@ type UiPart =
   | UiProgressPart
   | UiMemoryRecallPart
   | UiSCMApprovalPart
-  | UiPlanPart;
+  | UiPlanPart
+  | UiQuestionPart
+  | UiRunSummaryPart
+  | UiStructuredResultPart;
 
 type UiMessage = {
   id: string;
@@ -418,6 +443,10 @@ type CocolaContextValue = {
   revisePlan: (plan: UiPlanPart) => void;
   executePlan: (plan: UiPlanPart) => Promise<void>;
   cancelPlan: (plan: UiPlanPart) => Promise<void>;
+  pendingQuestion: UiQuestionPart | null;
+  questionInputLocked: boolean;
+  answerQuestion: (question: UiQuestionPart, answer: QuestionAnswer) => Promise<void>;
+  cancelQuestion: (question: UiQuestionPart) => Promise<void>;
   skills: SkillOption[];
   skillsLoaded: boolean;
   selectedSkill: SkillOption | null;
@@ -594,6 +623,15 @@ function normalizePersistedParts(parts: UiPart[] | undefined): UiPart[] {
     } else if (part.type === "plan") {
       const plan = normalizePlanPart(part);
       if (plan) normalized.push(plan);
+    } else if (part.type === "question") {
+      const question = normalizeQuestionPart(part);
+      if (question) normalized.push(question);
+    } else if (part.type === "run-summary") {
+      const summary = normalizeRunSummaryPart(part);
+      if (summary) normalized.push(summary);
+    } else if (part.type === "structured-result") {
+      const result = normalizeStructuredResultPart(part);
+      if (result) normalized.push(result);
     } else {
       normalized.push(part);
     }
@@ -629,6 +667,13 @@ function normalizePlanPart(raw: unknown): UiPlanPart | null {
   }
   return { type: "plan", planId, version, status, contentMarkdown };
 }
+
+const QUESTION_STATUSES = new Set<QuestionStatus>([
+  "pending",
+  "answering",
+  "answered",
+  "cancelled",
+]);
 
 function normalizeSCMApprovalPart(raw: unknown): UiSCMApprovalPart | null {
   if (!raw || typeof raw !== "object") return null;
@@ -910,6 +955,95 @@ function updatePlanStatus(messages: UiMessage[], planId: string, status: string)
   return changed ? next : messages;
 }
 
+function parseJSONValue(raw: string | undefined): unknown {
+  if (!raw) return undefined;
+  try {
+    return JSON.parse(raw) as unknown;
+  } catch {
+    return undefined;
+  }
+}
+
+function upsertQuestion(parts: UiPart[], data: Record<string, string>): UiPart[] {
+  const next = normalizeQuestionPart({
+    type: "question",
+    questionId: data.id,
+    version: Number(data.version),
+    status: data.status,
+    question: data.question,
+    options: parseJSONValue(data.options),
+    answer: parseJSONValue(data.answer),
+  });
+  if (!next) return parts;
+  const index = parts.findIndex(
+    (part) => part.type === "question" && part.questionId === next.questionId,
+  );
+  if (index < 0) return [...parts, next];
+  return parts.map((part, partIndex) => (partIndex === index ? next : part));
+}
+
+function updateQuestionStatus(
+  messages: UiMessage[],
+  questionId: string,
+  status: string,
+  rawAnswer?: string,
+): UiMessage[] {
+  if (!questionId || !QUESTION_STATUSES.has(status as QuestionStatus)) return messages;
+  const answer = parseJSONValue(rawAnswer);
+  let changed = false;
+  const next = messages.map((message) => ({
+    ...message,
+    parts: message.parts.map((part) => {
+      if (part.type !== "question" || part.questionId !== questionId) return part;
+      const normalizedAnswer =
+        rawAnswer === undefined ? part.answer : normalizeQuestionAnswer(answer);
+      if (part.status === status && normalizedAnswer === part.answer) return part;
+      changed = true;
+      return {
+        ...part,
+        status: status as QuestionStatus,
+        answer: normalizedAnswer,
+      };
+    }),
+  }));
+  return changed ? next : messages;
+}
+
+function upsertRunSummary(parts: UiPart[], data: Record<string, string>): UiPart[] {
+  const next = normalizeRunSummaryPart({
+    type: "run-summary",
+    runId: data.run_id,
+    status: data.status,
+    modelLabel: data.model_label,
+    durationMs: Number(data.duration_ms),
+    toolCallCount: Number(data.tool_call_count),
+    llmCallCount: Number(data.llm_call_count),
+    errorCode: data.error_code,
+  });
+  if (!next) return parts;
+  const index = parts.findIndex((part) => part.type === "run-summary" && part.runId === next.runId);
+  if (index < 0) return [...parts, next];
+  return parts.map((part, partIndex) => (partIndex === index ? next : part));
+}
+
+function upsertStructuredResult(parts: UiPart[], data: Record<string, string>): UiPart[] {
+  const next = normalizeStructuredResultPart({
+    type: "structured-result",
+    runId: data.run_id,
+    renderer: data.renderer,
+    rendererVersion: Number(data.renderer_version),
+    title: data.title,
+    contractHash: data.contract_hash,
+    data: parseJSONValue(data.data),
+  });
+  if (!next) return parts;
+  const index = parts.findIndex(
+    (part) => part.type === "structured-result" && part.runId === next.runId,
+  );
+  if (index < 0) return [...parts, next];
+  return parts.map((part, partIndex) => (partIndex === index ? next : part));
+}
+
 // Reduce a single agent event into the assistant message's parts. Pure.
 function reducePart(parts: UiPart[], ev: AgentEvent): UiPart[] {
   const d = ev.data ?? {};
@@ -924,6 +1058,12 @@ function reducePart(parts: UiPart[], ev: AgentEvent): UiPart[] {
       return upsertSCMApproval(parts, d);
     case "plan_ready":
       return upsertPlan(parts, d);
+    case "question_ready":
+      return upsertQuestion(parts, d);
+    case "run_summary":
+      return upsertRunSummary(parts, d);
+    case "structured_result_ready":
+      return upsertStructuredResult(parts, d);
     case "clarification_required":
       return appendTo(parts, "text", d.text ?? "");
     case "text":
@@ -1010,6 +1150,49 @@ function convertMessage(message: UiMessage): ThreadMessageLike {
           version: p.version,
           status: p.status,
           contentMarkdown: p.contentMarkdown,
+        },
+      };
+    }
+    if (p.type === "question") {
+      return {
+        type: "data" as const,
+        name: "question",
+        data: {
+          questionId: p.questionId,
+          version: p.version,
+          status: p.status,
+          question: p.question,
+          options: p.options,
+          answer: p.answer,
+        },
+      };
+    }
+    if (p.type === "run-summary") {
+      return {
+        type: "data" as const,
+        name: "run-summary",
+        data: {
+          runId: p.runId,
+          status: p.status,
+          modelLabel: p.modelLabel,
+          durationMs: p.durationMs,
+          toolCallCount: p.toolCallCount,
+          llmCallCount: p.llmCallCount,
+          errorCode: p.errorCode,
+        },
+      };
+    }
+    if (p.type === "structured-result") {
+      return {
+        type: "data" as const,
+        name: "structured-result",
+        data: {
+          runId: p.runId,
+          renderer: p.renderer,
+          rendererVersion: p.rendererVersion,
+          title: p.title,
+          contractHash: p.contractHash,
+          data: p.data,
         },
       };
     }
@@ -1112,6 +1295,7 @@ export function CocolaRuntimeProvider({ children }: { children: ReactNode }) {
   const abortMap = useRef<Map<string, AbortController>>(new Map());
   const runCursors = useRef<Map<string, RunCursor>>(new Map());
   const planExecutionRequestIds = useRef<Map<string, string>>(new Map());
+  const questionAnswerRequestIds = useRef<Map<string, string>>(new Map());
   const restoredRuns = useRef(false);
   const sessionIdRef = useRef(sessionId);
   const sessionFolderHintsRef = useRef<Map<string, string>>(new Map());
@@ -1152,11 +1336,29 @@ export function CocolaRuntimeProvider({ children }: { children: ReactNode }) {
   const interactionMode = interactionModes[sessionId] ?? "execute";
   const revisingPlanId = revisingPlanIds[sessionId] ?? "";
   const runtimeLocked = messages.length > 0 || conversations.some((item) => item.id === sessionId);
+  const currentQuestion = useMemo(() => {
+    for (let messageIndex = messages.length - 1; messageIndex >= 0; messageIndex -= 1) {
+      const parts = messages[messageIndex]?.parts ?? [];
+      for (let partIndex = parts.length - 1; partIndex >= 0; partIndex -= 1) {
+        const part = parts[partIndex];
+        if (
+          part?.type === "question" &&
+          (part.status === "pending" || part.status === "answering")
+        ) {
+          return part;
+        }
+      }
+    }
+    return null;
+  }, [messages]);
+  const pendingQuestion = currentQuestion?.status === "pending" ? currentQuestion : null;
+  const questionInputLocked = currentQuestion != null;
 
   const setInteractionMode = useCallback(
     (mode: InteractionMode) => {
       if (
         isRunning ||
+        questionInputLocked ||
         selectedRuntime?.id !== "claude-code" ||
         (mode !== "execute" && mode !== "plan")
       ) {
@@ -1172,20 +1374,21 @@ export function CocolaRuntimeProvider({ children }: { children: ReactNode }) {
         });
       }
     },
-    [isRunning, selectedRuntime?.id, sessionId],
+    [isRunning, questionInputLocked, selectedRuntime?.id, sessionId],
   );
 
   const revisePlan = useCallback(
     (plan: UiPlanPart) => {
-      if (isRunning || selectedRuntime?.id !== "claude-code") return;
+      if (isRunning || questionInputLocked || selectedRuntime?.id !== "claude-code") return;
       setInteractionModes((previous) => ({ ...previous, [sessionId]: "plan" }));
       setRevisingPlanIds((previous) => ({ ...previous, [sessionId]: plan.planId }));
     },
-    [isRunning, selectedRuntime?.id, sessionId],
+    [isRunning, questionInputLocked, selectedRuntime?.id, sessionId],
   );
 
   const setSelectedSkillId = useCallback(
     (id: string | null) => {
+      if (questionInputLocked) return;
       if (id && !skills.some((skill) => skill.id === id)) return;
       setSelectedSkillIds((prev) => {
         const next = { ...prev };
@@ -1194,7 +1397,14 @@ export function CocolaRuntimeProvider({ children }: { children: ReactNode }) {
         return next;
       });
     },
-    [sessionId, skills],
+    [questionInputLocked, sessionId, skills],
+  );
+
+  const selectModelID = useCallback(
+    (id: string) => {
+      if (!questionInputLocked) setSelectedModelID(id);
+    },
+    [questionInputLocked],
   );
 
   const setSelectedRuntimeId = useCallback(
@@ -1343,6 +1553,16 @@ export function CocolaRuntimeProvider({ children }: { children: ReactNode }) {
       setConvMessages((previous) => {
         const current = previous[targetSessionId] ?? [];
         const next = updatePlanStatus(current, planId, status);
+        return next === current ? previous : { ...previous, [targetSessionId]: next };
+      });
+      return;
+    }
+    if (ev.kind === "question_status") {
+      const questionId = ev.data?.id ?? "";
+      const status = ev.data?.status ?? "";
+      setConvMessages((previous) => {
+        const current = previous[targetSessionId] ?? [];
+        const next = updateQuestionStatus(current, questionId, status, ev.data?.answer);
         return next === current ? previous : { ...previous, [targetSessionId]: next };
       });
       return;
@@ -1589,6 +1809,55 @@ export function CocolaRuntimeProvider({ children }: { children: ReactNode }) {
     [applyEvent, finishRun, setRunning],
   );
 
+  const connectActiveRun = useCallback(
+    async (conversationId: string): Promise<boolean> => {
+      if (runCursors.current.has(conversationId)) return true;
+      if (abortMap.current.has(conversationId)) return false;
+      let response: Response;
+      try {
+        response = await fetch(
+          `/api/chat/runs/active?conversation_id=${encodeURIComponent(conversationId)}`,
+          { cache: "no-store" },
+        );
+      } catch {
+        return false;
+      }
+      if (response.status === 404 || !response.ok) return false;
+      const run = (await response.json()) as { run_id?: string; plan_id?: string };
+      if (!run.run_id) return false;
+      const cursor: RunCursor = {
+        conversationId,
+        runId: run.run_id,
+        assistantId: `${run.run_id}-assistant`,
+        ...(run.plan_id ? { planId: run.plan_id } : {}),
+      };
+      runCursors.current.set(conversationId, cursor);
+      writeRunCursors(runCursors.current);
+      setRunning(conversationId, true);
+      setConvMessages((prev) => {
+        const current = prev[conversationId] ?? [];
+        if (current.some((message) => message.id === cursor.assistantId)) return prev;
+        return {
+          ...prev,
+          [conversationId]: [
+            ...current,
+            {
+              id: cursor.assistantId,
+              role: "assistant",
+              parts: [],
+              createdAt: Date.now(),
+            },
+          ],
+        };
+      });
+      const controller = new AbortController();
+      abortMap.current.set(conversationId, controller);
+      void followRun(cursor, controller);
+      return true;
+    },
+    [followRun, setRunning],
+  );
+
   useEffect(() => {
     if (restoredRuns.current) return;
     restoredRuns.current = true;
@@ -1618,6 +1887,234 @@ export function CocolaRuntimeProvider({ children }: { children: ReactNode }) {
       })();
     }
   }, [followRun, setRunning]);
+
+  const answerQuestion = useCallback(
+    async (question: UiQuestionPart, answer: QuestionAnswer) => {
+      const turnSessionId = sessionId;
+      if (
+        question.status !== "pending" ||
+        abortMap.current.has(turnSessionId) ||
+        runCursors.current.has(turnSessionId)
+      ) {
+        return;
+      }
+      const optionId = answer.optionId?.trim() ?? "";
+      const customText = answer.text?.trim() ?? "";
+      const selectedOption = question.options.find((option) => option.id === optionId);
+      if ((optionId && !selectedOption) || (!selectedOption && !customText)) {
+        throw new Error("Choose an option or enter your own answer.");
+      }
+      const answerText = [selectedOption?.label, customText].filter(Boolean).join("\n\n");
+      const sourceMessage = messages.find((message) =>
+        message.parts.some(
+          (part) => part.type === "question" && part.questionId === question.questionId,
+        ),
+      );
+      const assistantId = genId();
+      const userMessageId = genId();
+      const controller = new AbortController();
+      const requestKey = `${turnSessionId}:${question.questionId}:${question.version}`;
+      const clientRequestId = questionAnswerRequestIds.current.get(requestKey) ?? genId();
+      questionAnswerRequestIds.current.set(requestKey, clientRequestId);
+      const normalizedAnswer: QuestionAnswer = {
+        ...(selectedOption ? { optionId: selectedOption.id } : {}),
+        ...(customText ? { text: customText } : {}),
+      };
+
+      abortMap.current.set(turnSessionId, controller);
+      setConvMessages((previous) => {
+        const current = updateQuestionStatus(
+          previous[turnSessionId] ?? [],
+          question.questionId,
+          "answering",
+          JSON.stringify(normalizedAnswer),
+        );
+        return {
+          ...previous,
+          [turnSessionId]: [
+            ...current,
+            {
+              id: userMessageId,
+              role: "user",
+              parts: [{ type: "text", text: answerText }],
+              createdAt: Date.now(),
+              metadata: sourceMessage?.metadata
+                ? {
+                    interaction_mode: sourceMessage.metadata.interaction_mode,
+                    skill_id: sourceMessage.metadata.skill_id,
+                  }
+                : undefined,
+            },
+            {
+              id: assistantId,
+              role: "assistant",
+              parts: [],
+              createdAt: Date.now(),
+              metadata: sourceMessage?.metadata,
+            },
+          ],
+        };
+      });
+
+      try {
+        const requestBody = JSON.stringify({
+          expected_version: question.version,
+          answer: {
+            ...(selectedOption ? { option_id: selectedOption.id } : {}),
+            ...(customText ? { text: customText } : {}),
+          },
+          client_request_id: clientRequestId,
+        });
+        let response: Response | undefined;
+        let retryDelay = 250;
+        let attempts = 0;
+        let lastError: unknown = new Error("Could not continue the conversation. Try again.");
+        while (!response && !controller.signal.aborted && attempts < CHAT_START_MAX_ATTEMPTS) {
+          attempts += 1;
+          let candidate: Response | undefined;
+          try {
+            candidate = await fetch(
+              `/api/conversations/${encodeURIComponent(turnSessionId)}/questions/${encodeURIComponent(question.questionId)}/answer`,
+              {
+                method: "POST",
+                headers: { "content-type": "application/json" },
+                body: requestBody,
+                signal: controller.signal,
+              },
+            );
+          } catch (error) {
+            if (controller.signal.aborted) throw error;
+            lastError = error;
+          }
+          if (candidate) {
+            if (isAccountDisabledResponse(candidate)) {
+              redirectAccountDisabled();
+              return;
+            }
+            if (candidate.ok && candidate.body) {
+              response = candidate;
+              break;
+            }
+            lastError = await apiError(
+              candidate,
+              "Could not continue the conversation. Try again.",
+            );
+            await candidate.body?.cancel().catch(() => {});
+            if (candidate.status < 500) throw lastError;
+          }
+          if (attempts >= CHAT_START_MAX_ATTEMPTS) throw lastError;
+          await new Promise<void>((resolve) => window.setTimeout(resolve, retryDelay));
+          retryDelay = Math.min(retryDelay * 2, 5000);
+        }
+        if (!response) throw lastError;
+        const runId = response.headers.get("x-cocola-run-id") ?? "";
+        if (!runId) throw new Error("Could not continue the conversation. Try again.");
+        const durableAssistantId = `${runId}-assistant`;
+        setConvMessages((previous) => ({
+          ...previous,
+          [turnSessionId]: (previous[turnSessionId] ?? []).map((message) =>
+            message.id === assistantId ? { ...message, id: durableAssistantId } : message,
+          ),
+        }));
+        const cursor = {
+          conversationId: turnSessionId,
+          runId,
+          assistantId: durableAssistantId,
+        };
+        runCursors.current.set(turnSessionId, cursor);
+        writeRunCursors(runCursors.current);
+        setRunning(turnSessionId, true);
+        questionAnswerRequestIds.current.delete(requestKey);
+        await followRun(cursor, controller, response);
+        try {
+          const history = await fetch(
+            `/api/conversations/${encodeURIComponent(turnSessionId)}/messages`,
+            { cache: "no-store" },
+          );
+          if (history.ok) {
+            const loaded = normalizeWireMessages(await history.json());
+            setConvMessages((previous) => ({ ...previous, [turnSessionId]: loaded }));
+          }
+        } catch {
+          // The SSE state is already complete; history reconciliation is best-effort.
+        }
+      } catch (error) {
+        if (abortMap.current.get(turnSessionId) === controller) {
+          abortMap.current.delete(turnSessionId);
+        }
+        if (!runCursors.current.has(turnSessionId)) {
+          setRunning(turnSessionId, false);
+        }
+        let historyLoaded = false;
+        try {
+          const history = await fetch(
+            `/api/conversations/${encodeURIComponent(turnSessionId)}/messages`,
+            { cache: "no-store" },
+          );
+          if (history.ok) {
+            const loaded = normalizeWireMessages(await history.json());
+            setConvMessages((previous) => ({ ...previous, [turnSessionId]: loaded }));
+            historyLoaded = true;
+          }
+        } catch {
+          // Active-run lookup below is the second authoritative recovery source.
+        }
+        const attached = await connectActiveRun(turnSessionId);
+        questionAnswerRequestIds.current.delete(requestKey);
+        if (!attached && !runCursors.current.has(turnSessionId)) {
+          runCursors.current.delete(turnSessionId);
+          writeRunCursors(runCursors.current);
+          setRunning(turnSessionId, false);
+          if (!historyLoaded) {
+            setConvMessages((previous) => ({
+              ...previous,
+              [turnSessionId]: updateQuestionStatus(
+                (previous[turnSessionId] ?? []).filter(
+                  (message) => message.id !== userMessageId && message.id !== assistantId,
+                ),
+                question.questionId,
+                "pending",
+                "null",
+              ),
+            }));
+          }
+        }
+        if (error instanceof DOMException && error.name === "AbortError") return;
+        if (attached) return;
+        throw error;
+      }
+    },
+    [connectActiveRun, followRun, messages, sessionId, setRunning],
+  );
+
+  const cancelQuestion = useCallback(
+    async (question: UiQuestionPart) => {
+      if (question.status !== "pending") return;
+      const response = await fetch(
+        `/api/conversations/${encodeURIComponent(sessionId)}/questions/${encodeURIComponent(question.questionId)}/cancel`,
+        {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({ expected_version: question.version }),
+        },
+      );
+      if (isAccountDisabledResponse(response)) {
+        redirectAccountDisabled();
+        return;
+      }
+      if (!response.ok) {
+        throw await apiError(response, "Could not cancel the question. Try again.");
+      }
+      setConvMessages((previous) => {
+        const current = previous[sessionId] ?? [];
+        return {
+          ...previous,
+          [sessionId]: updateQuestionStatus(current, question.questionId, "cancelled"),
+        };
+      });
+    },
+    [sessionId],
+  );
 
   const applyUserEvent = useCallback(
     (event: UserEvent, source: "realtime" | "snapshot" = "realtime") => {
@@ -1766,6 +2263,11 @@ export function CocolaRuntimeProvider({ children }: { children: ReactNode }) {
             mime: p.mimeType ?? "application/octet-stream",
           })),
       );
+
+      if (pendingQuestion) {
+        await answerQuestion(pendingQuestion, { text });
+        return;
+      }
 
       const turnSessionId = sessionId;
       const boundConversation = conversations.find(
@@ -1957,6 +2459,30 @@ export function CocolaRuntimeProvider({ children }: { children: ReactNode }) {
             refreshConversations();
             throw new Error(conflict.error.message || "conversation runtime cannot be changed");
           }
+          if (conflict.error?.code === "QUESTION_PENDING") {
+            setConvMessages((previous) => ({
+              ...previous,
+              [turnSessionId]: (previous[turnSessionId] ?? []).filter(
+                (message) => message.id !== userMessageId && message.id !== assistantId,
+              ),
+            }));
+            try {
+              const history = await fetch(
+                `/api/conversations/${encodeURIComponent(turnSessionId)}/messages`,
+                { cache: "no-store", signal: ctrl.signal },
+              );
+              if (history.ok) {
+                const loaded = normalizeWireMessages(await history.json());
+                setConvMessages((previous) => ({ ...previous, [turnSessionId]: loaded }));
+              }
+            } catch {
+              // The server error remains actionable even if history refresh fails.
+            }
+            throw new Error(
+              conflict.error.message ||
+                "Answer or cancel Claude's pending question before starting another run.",
+            );
+          }
           if (conflict.error?.code && conflict.error.code !== "RUN_IN_PROGRESS") {
             throw new Error(conflict.error.message || "chat start conflict");
           }
@@ -2052,6 +2578,8 @@ export function CocolaRuntimeProvider({ children }: { children: ReactNode }) {
     },
     [
       sessionId,
+      pendingQuestion,
+      answerQuestion,
       selectedModel,
       selectedRuntime,
       selectedSkill,
@@ -2260,53 +2788,6 @@ export function CocolaRuntimeProvider({ children }: { children: ReactNode }) {
       return next;
     });
   }, [applyEvent, sessionId, setRunning]);
-
-  const connectActiveRun = useCallback(
-    async (conversationId: string) => {
-      if (abortMap.current.has(conversationId) || runCursors.current.has(conversationId)) return;
-      let response: Response;
-      try {
-        response = await fetch(
-          `/api/chat/runs/active?conversation_id=${encodeURIComponent(conversationId)}`,
-          { cache: "no-store" },
-        );
-      } catch {
-        return;
-      }
-      if (response.status === 404 || !response.ok) return;
-      const run = (await response.json()) as { run_id?: string; plan_id?: string };
-      if (!run.run_id) return;
-      const cursor: RunCursor = {
-        conversationId,
-        runId: run.run_id,
-        assistantId: `${run.run_id}-assistant`,
-        ...(run.plan_id ? { planId: run.plan_id } : {}),
-      };
-      runCursors.current.set(conversationId, cursor);
-      writeRunCursors(runCursors.current);
-      setRunning(conversationId, true);
-      setConvMessages((prev) => {
-        const current = prev[conversationId] ?? [];
-        if (current.some((message) => message.id === cursor.assistantId)) return prev;
-        return {
-          ...prev,
-          [conversationId]: [
-            ...current,
-            {
-              id: cursor.assistantId,
-              role: "assistant",
-              parts: [],
-              createdAt: Date.now(),
-            },
-          ],
-        };
-      });
-      const controller = new AbortController();
-      abortMap.current.set(conversationId, controller);
-      await followRun(cursor, controller);
-    },
-    [followRun, setRunning],
-  );
 
   // Replay a stored conversation into the thread: fetch its messages, map them
   // back into local state, and point session_id at it so a follow-up turn
@@ -2829,7 +3310,7 @@ export function CocolaRuntimeProvider({ children }: { children: ReactNode }) {
       selectedModelID,
       selectedModel,
       modelsLoaded: modelsLoaded && runtimesLoaded && productConfigLoaded,
-      setSelectedModelID,
+      setSelectedModelID: selectModelID,
       runtimes,
       selectedRuntime,
       defaultAgentRuntimeID,
@@ -2843,6 +3324,10 @@ export function CocolaRuntimeProvider({ children }: { children: ReactNode }) {
       revisePlan,
       executePlan,
       cancelPlan,
+      pendingQuestion,
+      questionInputLocked,
+      answerQuestion,
+      cancelQuestion,
       skills,
       skillsLoaded,
       selectedSkill,
@@ -2880,6 +3365,7 @@ export function CocolaRuntimeProvider({ children }: { children: ReactNode }) {
       compatibleModels,
       selectedModelID,
       selectedModel,
+      selectModelID,
       modelsLoaded,
       runtimesLoaded,
       productConfigLoaded,
@@ -2896,6 +3382,10 @@ export function CocolaRuntimeProvider({ children }: { children: ReactNode }) {
       revisePlan,
       executePlan,
       cancelPlan,
+      pendingQuestion,
+      questionInputLocked,
+      answerQuestion,
+      cancelQuestion,
       skills,
       skillsLoaded,
       selectedSkill,

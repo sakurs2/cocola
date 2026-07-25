@@ -62,6 +62,8 @@ def _shim_event_to_agent_events(ev: dict) -> list[AgentEvent]:
     and carries nothing the caller needs, so it is dropped.
     """
     t = ev.get("type")
+    if t == "run_accepted":
+        return [AgentEvent(kind="run_accepted", data={})]
     if t == "text":
         return [AgentEvent(kind="text", data={"text": ev.get("text", "")})]
     if t == "thinking":
@@ -157,15 +159,31 @@ def _shim_event_to_agent_events(ev: dict) -> list[AgentEvent]:
                 },
             )
         ]
-    if t == "clarification_required":
+    if t in {"clarification_required", "question_required"}:
         options = ev.get("options") if isinstance(ev.get("options"), list) else []
         return [
             AgentEvent(
-                kind="clarification_required",
+                kind="question_required",
                 data={
                     "question": str(ev.get("question") or ""),
                     "options": options,
-                    "text": str(ev.get("text") or ""),
+                },
+            )
+        ]
+    if t == "structured_result_ready":
+        return [
+            AgentEvent(
+                kind="structured_result_ready",
+                data={
+                    "renderer": str(ev.get("renderer") or ""),
+                    "renderer_version": str(ev.get("renderer_version") or ""),
+                    "title": str(ev.get("title") or ""),
+                    "contract_hash": str(ev.get("contract_hash") or ""),
+                    "data": json.dumps(
+                        ev.get("data"),
+                        ensure_ascii=False,
+                        separators=(",", ":"),
+                    ),
                 },
             )
         ]
@@ -304,6 +322,9 @@ class InSandboxShimProvider:
             req["model"] = options.model_route_id
         if options.selected_skill_id:
             req["skill_id"] = options.selected_skill_id
+        if options.selected_skill_result_contract:
+            req["result_contract"] = options.selected_skill_result_contract
+        req["user_input_enabled"] = options.user_input_enabled
         if options.traceparent:
             req["traceparent"] = options.traceparent
         if options.system_prompt:
@@ -395,8 +416,8 @@ class InSandboxShimProvider:
                 data={
                     "code": "SESSION_RESUME_REQUIRED",
                     "error": (
-                        "The Claude session that created this plan is unavailable. "
-                        "Create a new plan."
+                        "Claude's previous session is no longer available. "
+                        "Start a new conversation."
                     ),
                 },
             )
@@ -467,8 +488,8 @@ class InSandboxShimProvider:
                         **event.data,
                         "code": "SESSION_RESUME_REQUIRED",
                         "error": (
-                            "The Claude session that created this plan is unavailable. "
-                            "Create a new plan."
+                            "Claude's previous session is no longer available. "
+                            "Start a new conversation."
                         ),
                     },
                 )
@@ -628,7 +649,7 @@ class InSandboxShimProvider:
                         if out.kind == "error":
                             _record_error(out, out.data.get("error", ""))
                         else:
-                            if out.kind != "environment_status":
+                            if out.kind not in {"environment_status", "run_accepted"}:
                                 state.saw_content = True
                             yield out
 
@@ -646,7 +667,7 @@ class InSandboxShimProvider:
                                 if out.kind == "error":
                                     _record_error(out, out.data.get("error", ""))
                                 else:
-                                    if out.kind != "environment_status":
+                                    if out.kind not in {"environment_status", "run_accepted"}:
                                         state.saw_content = True
                                     yield out
                 except json.JSONDecodeError:

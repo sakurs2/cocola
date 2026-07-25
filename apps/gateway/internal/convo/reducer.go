@@ -13,7 +13,7 @@ import (
 //
 // Event vocabulary (kind): environment_prepare | environment_status |
 // memory_recall | text | thinking | tool_use | tool_result | file | plan_ready |
-// clarification_required | error;
+// question_ready | run_summary | structured_result_ready | error;
 // result / system / sandbox / done carry no message-body content and are dropped
 // (identical to the frontend).
 type Reducer struct {
@@ -63,8 +63,16 @@ func (r *Reducer) Apply(kind string, data map[string]string) {
 		r.upsertProgress(data["id"], data["items"])
 	case "plan_ready":
 		r.upsertPlan(data)
+	case "question_ready":
+		r.upsertQuestion(data)
+	case "question_status":
+		r.updateQuestionStatus(data)
 	case "clarification_required":
 		r.appendText(PartText, data["text"])
+	case "run_summary":
+		r.upsertRunSummary(data)
+	case "structured_result_ready":
+		r.upsertStructuredResult(data)
 	case "error":
 		r.appendText(PartText, "\n\n⚠️ "+errText(data))
 	default:
@@ -81,12 +89,106 @@ func (r *Reducer) upsertPlan(data map[string]string) {
 		return
 	}
 	part := Part{
-		Type: PartPlan, PlanID: data["id"], PlanVersion: version,
+		Type: PartPlan, PlanID: data["id"], Version: version,
 		Status: status, PlanContentMarkdown: content,
 	}
 	for index := range r.parts {
 		if r.parts[index].Type == PartPlan && r.parts[index].PlanID == part.PlanID {
 			r.parts[index] = part
+			return
+		}
+	}
+	r.parts = append(r.parts, part)
+}
+
+func (r *Reducer) upsertQuestion(data map[string]string) {
+	version, _ := strconv.Atoi(data["version"])
+	id, status, question := data["id"], data["status"], data["question"]
+	if id == "" || version < 1 || status == "" || question == "" ||
+		len(question) > 16<<10 {
+		return
+	}
+	var options []QuestionOption
+	if raw := data["options"]; raw != "" {
+		if len(raw) > 16<<10 || json.Unmarshal([]byte(raw), &options) != nil || len(options) > 8 {
+			return
+		}
+	}
+	part := Part{
+		Type: PartQuestion, QuestionID: id, Version: version, Status: status,
+		Question: question, QuestionOptions: options,
+	}
+	for i := range r.parts {
+		if r.parts[i].Type == PartQuestion && r.parts[i].QuestionID == id {
+			r.parts[i] = part
+			return
+		}
+	}
+	r.parts = append(r.parts, part)
+}
+
+func (r *Reducer) updateQuestionStatus(data map[string]string) {
+	id, status := data["id"], data["status"]
+	if id == "" || (status != "pending" && status != "answering" &&
+		status != "answered" && status != "cancelled") {
+		return
+	}
+	var answer *QuestionAnswer
+	if raw := data["answer"]; raw != "" {
+		var parsed QuestionAnswer
+		if len(raw) > 16<<10 || json.Unmarshal([]byte(raw), &parsed) != nil {
+			return
+		}
+		answer = &parsed
+	}
+	for i := range r.parts {
+		if r.parts[i].Type == PartQuestion && r.parts[i].QuestionID == id {
+			r.parts[i].Status = status
+			if answer != nil {
+				r.parts[i].QuestionAnswer = answer
+			}
+		}
+	}
+}
+
+func (r *Reducer) upsertRunSummary(data map[string]string) {
+	runID, status := data["run_id"], data["status"]
+	if runID == "" || status == "" {
+		return
+	}
+	durationMS, _ := strconv.ParseInt(data["duration_ms"], 10, 64)
+	toolCalls, _ := strconv.ParseInt(data["tool_call_count"], 10, 64)
+	llmCalls, _ := strconv.ParseInt(data["llm_call_count"], 10, 64)
+	part := Part{
+		Type: PartRunSummary, RunID: runID, Status: status,
+		ModelLabel: data["model_label"], DurationMS: durationMS,
+		ToolCallCount: toolCalls, LLMCallCount: llmCalls, ErrorCode: data["error_code"],
+	}
+	for i := range r.parts {
+		if r.parts[i].Type == PartRunSummary && r.parts[i].RunID == runID {
+			r.parts[i] = part
+			return
+		}
+	}
+	r.parts = append(r.parts, part)
+}
+
+func (r *Reducer) upsertStructuredResult(data map[string]string) {
+	runID, renderer := data["run_id"], data["renderer"]
+	version, _ := strconv.Atoi(data["renderer_version"])
+	raw := data["data"]
+	if runID == "" || renderer == "" || version < 1 || len(raw) > 128<<10 ||
+		!json.Valid([]byte(raw)) {
+		return
+	}
+	part := Part{
+		Type: PartStructured, RunID: runID, Renderer: renderer,
+		RendererVersion: version, Title: data["title"],
+		ContractHash: data["contract_hash"], Data: append(json.RawMessage(nil), raw...),
+	}
+	for i := range r.parts {
+		if r.parts[i].Type == PartStructured && r.parts[i].RunID == runID {
+			r.parts[i] = part
 			return
 		}
 	}

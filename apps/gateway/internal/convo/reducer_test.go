@@ -80,6 +80,33 @@ func TestReducerPersistsToolOutcomeAndClarificationText(t *testing.T) {
 	}
 }
 
+func TestReducerPersistsRichTerminalParts(t *testing.T) {
+	r := NewReducer()
+	r.Apply("question_ready", map[string]string{
+		"id": "question-1", "version": "1", "status": "pending",
+		"question": "Which database?", "options": `[{"id":"option-1","label":"PostgreSQL"}]`,
+	})
+	r.Apply("structured_result_ready", map[string]string{
+		"run_id": "run-1", "renderer": "metrics", "renderer_version": "1",
+		"title": "Test results", "contract_hash": "sha256:abc",
+		"data": `{"metrics":[{"label":"Passed","value":8}]}`,
+	})
+	r.Apply("run_summary", map[string]string{
+		"run_id": "run-1", "status": "waiting_input", "model_label": "Claude Sonnet",
+		"duration_ms": "42000", "tool_call_count": "6", "llm_call_count": "3",
+	})
+
+	parts := r.Parts()
+	if len(parts) != 3 || parts[0].Type != PartQuestion ||
+		parts[1].Type != PartStructured || parts[2].Type != PartRunSummary {
+		t.Fatalf("rich parts = %+v", parts)
+	}
+	if parts[0].QuestionOptions[0].Label != "PostgreSQL" ||
+		parts[2].DurationMS != 42000 || parts[2].ToolCallCount != 6 {
+		t.Fatalf("rich part data = %+v", parts)
+	}
+}
+
 func TestReducerUpsertsVersionedEnvironmentSnapshotAsFirstPart(t *testing.T) {
 	r := NewReducer()
 	r.Apply("text", map[string]string{"text": "hello"})

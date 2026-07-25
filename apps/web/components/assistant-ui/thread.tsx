@@ -53,6 +53,11 @@ import { CocolaWordmark } from "@/components/assistant-ui/cocola-wordmark";
 import { CocolaLogo } from "@/components/cocola-logo";
 import { CocolaTagline } from "@/components/assistant-ui/cocola-tagline";
 import { PlanCardPart } from "@/components/assistant-ui/plan-card";
+import {
+  QuestionCardPart,
+  RunSummaryPart,
+  StructuredResultCardPart,
+} from "@/components/assistant-ui/rich-message-parts";
 import { TooltipIconButton } from "@/components/assistant-ui/tooltip-icon-button";
 import { MarkdownText } from "@/components/assistant-ui/markdown-text";
 import {
@@ -266,6 +271,8 @@ export const ConversationComposer: FC<{
     runtimeConfigError,
     interactionMode,
     revisingPlanId,
+    pendingQuestion,
+    questionInputLocked,
   } = useCocola();
   const hasCurrentPlan = useThread((thread) =>
     thread.messages.some((message) =>
@@ -338,11 +345,13 @@ export const ConversationComposer: FC<{
                       : selectedRuntime
                         ? `No ${selectedRuntime.label} compatible model configured`
                         : "No Agent Runtime available"
-                    : interactionMode === "plan"
-                      ? hasCurrentPlan
-                        ? PLAN_MODE_COPY.revisionPlaceholder
-                        : PLAN_MODE_COPY.initialPlaceholder
-                      : placeholder || COMPOSER_SLASH_COPY.defaultPlaceholder
+                    : pendingQuestion
+                      ? "Reply to Claude…"
+                      : interactionMode === "plan"
+                        ? hasCurrentPlan
+                          ? PLAN_MODE_COPY.revisionPlaceholder
+                          : PLAN_MODE_COPY.initialPlaceholder
+                        : placeholder || COMPOSER_SLASH_COPY.defaultPlaceholder
               }
               className="max-h-40 min-h-12 w-full resize-none border-none bg-transparent px-2 py-2.5 text-[15px] leading-6 outline-none placeholder:text-muted-foreground focus:ring-0 disabled:cursor-not-allowed"
             />
@@ -354,7 +363,7 @@ export const ConversationComposer: FC<{
                 <TooltipIconButton
                   tooltip={noModel ? "No model configured" : "Attach file"}
                   variant="ghost"
-                  disabled={noModel}
+                  disabled={noModel || questionInputLocked}
                   className="size-8 shrink-0 rounded-full p-2 text-muted-foreground"
                 >
                   <PaperclipIcon className="size-4" />
@@ -403,6 +412,7 @@ const ComposerSlashMenu: FC = () => {
     interactionMode,
     setInteractionMode,
     setSelectedSkillId,
+    questionInputLocked,
   } = useCocola();
   const isRunning = useThread((thread) => thread.isRunning);
   const [activeTab, setActiveTab] = useState<"commands" | "skills">("commands");
@@ -448,7 +458,7 @@ const ComposerSlashMenu: FC = () => {
   });
   const slash = activeTab === "commands" ? planSlash : skillSlash;
 
-  if (selectedSkill) return null;
+  if (selectedSkill || questionInputLocked) return null;
 
   return (
     <ComposerPrimitive.Unstable_TriggerPopover
@@ -582,7 +592,7 @@ const ComposerSlashMenu: FC = () => {
 };
 
 const SelectedSkillChip: FC<{ onWidthChange: (width: number) => void }> = ({ onWidthChange }) => {
-  const { selectedSkill, setSelectedSkillId } = useCocola();
+  const { selectedSkill, setSelectedSkillId, questionInputLocked } = useCocola();
   const ref = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -606,6 +616,7 @@ const SelectedSkillChip: FC<{ onWidthChange: (width: number) => void }> = ({ onW
         <span className="truncate">{selectedSkill.name}</span>
         <button
           type="button"
+          disabled={questionInputLocked}
           onClick={() => setSelectedSkillId(null)}
           aria-label={`Remove ${selectedSkill.name} skill`}
           className="grid size-4 shrink-0 place-items-center rounded-full text-primary/70 transition-colors hover:bg-primary/10 hover:text-primary"
@@ -667,7 +678,7 @@ const RuntimePicker: FC = () => {
 };
 
 const PlanModeIndicator: FC = () => {
-  const { setInteractionMode } = useCocola();
+  const { setInteractionMode, questionInputLocked } = useCocola();
   const isRunning = useThread((thread) => thread.isRunning);
 
   return (
@@ -677,7 +688,7 @@ const PlanModeIndicator: FC = () => {
       <TooltipIconButton
         tooltip={isRunning ? PLAN_MODE_COPY.lockedLabel : PLAN_MODE_COPY.cancelLabel}
         variant="ghost"
-        disabled={isRunning}
+        disabled={isRunning || questionInputLocked}
         onClick={() => setInteractionMode("execute")}
         aria-label={PLAN_MODE_COPY.cancelLabel}
         className="size-5 shrink-0 rounded-full p-0 text-white/75 hover:bg-white/15 hover:text-white disabled:cursor-not-allowed disabled:opacity-50"
@@ -689,7 +700,14 @@ const PlanModeIndicator: FC = () => {
 };
 
 const ModelPicker: FC = () => {
-  const { models, selectedModel, selectedModelID, setSelectedModelID, modelsLoaded } = useCocola();
+  const {
+    models,
+    selectedModel,
+    selectedModelID,
+    setSelectedModelID,
+    modelsLoaded,
+    questionInputLocked,
+  } = useCocola();
   const [open, setOpen] = useState(false);
   const noModel = !modelsLoaded || !selectedModel;
 
@@ -700,7 +718,7 @@ const ModelPicker: FC = () => {
           type="button"
           className="flex max-w-[14rem] min-w-0 items-center gap-1.5 rounded-full border border-border px-2.5 py-1.5 text-[12.5px] font-medium text-foreground transition-colors hover:bg-muted focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
           aria-label={noModel ? "No model configured" : "Select model"}
-          disabled={noModel}
+          disabled={noModel || questionInputLocked}
         >
           <ModelIcon icon={selectedModel?.icon} className="size-4" bare />
           <span className="truncate">{selectedModel?.label ?? "No model"}</span>
@@ -1237,6 +1255,9 @@ const ASSISTANT_PART_COMPONENTS = {
       "memory-recall": MemoryRecallPart,
       "scm-approval": SCMApprovalPart,
       plan: PlanCardPart,
+      question: QuestionCardPart,
+      "run-summary": RunSummaryPart,
+      "structured-result": StructuredResultCardPart,
     },
   },
 };

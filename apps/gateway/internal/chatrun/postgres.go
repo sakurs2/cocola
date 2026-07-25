@@ -41,7 +41,7 @@ func (p *Postgres) RuntimeSetting(ctx context.Context, key string) (json.RawMess
 const runColumns = `trace_id, root_span_id, conversation_id, conversation_title,
 	user_id, source, model_route_id, model_alias, client_request_id, interaction_mode,
 	COALESCE(plan_id::text, ''), status, started_at,
-	completed_at, last_activity_at, error_code`
+	completed_at, last_activity_at, error_code, duration_ms, tool_call_count, llm_call_count`
 
 func scanRun(row pgx.Row) (Run, error) {
 	var run Run
@@ -50,6 +50,7 @@ func scanRun(row pgx.Row) (Run, error) {
 		&run.UserID, &run.Source, &run.ModelRouteID, &run.ModelAlias, &run.ClientRequestID,
 		&run.InteractionMode, &run.PlanID, &run.Status,
 		&run.StartedAt, &run.CompletedAt, &run.LastActivityAt, &run.ErrorCode,
+		&run.DurationMS, &run.ToolCallCount, &run.LLMCallCount,
 	); err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
 			return Run{}, ErrNotFound
@@ -205,6 +206,16 @@ func (p *Postgres) Start(ctx context.Context, in StartInput) (StartResult, error
 		if in.Conversation.ProjectID != "" && in.Conversation.ProjectID != effective.ProjectID {
 			return StartResult{}, ErrProjectMismatch
 		}
+		var questionPending bool
+		if err := tx.QueryRow(ctx, `SELECT EXISTS (
+			SELECT 1 FROM conversation_questions
+			WHERE conversation_id=$1 AND status IN ('pending','answering')
+		)`, effective.ID).Scan(&questionPending); err != nil {
+			return StartResult{}, err
+		}
+		if questionPending {
+			return StartResult{}, ErrQuestionPending
+		}
 		effective.UpdatedAt = in.Conversation.UpdatedAt
 		if _, err = tx.Exec(ctx, `UPDATE conversations SET updated_at=$2 WHERE id=$1`,
 			effective.ID, effective.UpdatedAt); err != nil {
@@ -288,6 +299,27 @@ func (p *Postgres) Active(ctx context.Context, conversationID, userID string) (R
 		ORDER BY started_at DESC LIMIT 1`, conversationID, userID))
 }
 
+func (p *Postgres) ListRuns(ctx context.Context, conversationID, userID string) ([]Run, error) {
+	rows, err := p.pool.Query(ctx, `SELECT `+runColumns+` FROM conversation_runs
+		WHERE conversation_id=$1 AND user_id=$2 ORDER BY started_at ASC`, conversationID, userID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	runs := make([]Run, 0)
+	for rows.Next() {
+		run, scanErr := scanRun(rows)
+		if scanErr != nil {
+			return nil, scanErr
+		}
+		runs = append(runs, run)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return runs, nil
+}
+
 func marshalMessage(message convo.Message) ([]byte, []byte, error) {
 	parts, err := json.Marshal(message.Parts)
 	if err != nil {
@@ -339,7 +371,7 @@ func scanPlan(row pgx.Row) (Plan, error) {
 
 func planPart(plan Plan) convo.Part {
 	return convo.Part{
-		Type: convo.PartPlan, PlanID: plan.ID, PlanVersion: plan.Version,
+		Type: convo.PartPlan, PlanID: plan.ID, Version: plan.Version,
 		Status: plan.Status, PlanContentMarkdown: plan.ContentMarkdown,
 	}
 }
@@ -376,11 +408,135 @@ func updatePlanMessageStatus(ctx context.Context, tx pgx.Tx, plan Plan) error {
 	return err
 }
 
+const questionColumns = `q.id::text, q.conversation_id, q.version, q.status,
+	q.source_run_id, COALESCE(q.answer_run_id, ''), q.interaction_mode,
+	q.runtime_id, q.model_route_id, q.model_alias, q.skill_id, q.question_text,
+	q.options_json, q.answer_json, q.answered_by, q.answered_at,
+	q.created_at, q.updated_at`
+
+func scanQuestion(row pgx.Row) (Question, error) {
+	var question Question
+	var optionsJSON []byte
+	var answerJSON []byte
+	if err := row.Scan(
+		&question.ID, &question.ConversationID, &question.Version, &question.Status,
+		&question.SourceRunID, &question.AnswerRunID, &question.InteractionMode,
+		&question.RuntimeID, &question.ModelRouteID, &question.ModelAlias, &question.SkillID,
+		&question.Text, &optionsJSON, &answerJSON, &question.AnsweredBy,
+		&question.AnsweredAt, &question.CreatedAt, &question.UpdatedAt,
+	); err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return Question{}, ErrNotFound
+		}
+		return Question{}, err
+	}
+	if err := json.Unmarshal(optionsJSON, &question.Options); err != nil {
+		return Question{}, err
+	}
+	if len(answerJSON) > 0 && string(answerJSON) != "null" {
+		var answer convo.QuestionAnswer
+		if err := json.Unmarshal(answerJSON, &answer); err != nil {
+			return Question{}, err
+		}
+		question.Answer = &answer
+	}
+	return question, nil
+}
+
+func (p *Postgres) GetQuestion(
+	ctx context.Context,
+	conversationID, questionID, userID string,
+) (Question, error) {
+	return scanQuestion(p.pool.QueryRow(ctx, `SELECT `+questionColumns+`
+		FROM conversation_questions q JOIN conversations c ON c.id=q.conversation_id
+		WHERE q.conversation_id=$1 AND q.id=$2::uuid AND c.user_id=$3`,
+		conversationID, questionID, userID))
+}
+
+func (p *Postgres) ListQuestions(
+	ctx context.Context,
+	conversationID, userID string,
+) ([]Question, error) {
+	rows, err := p.pool.Query(ctx, `SELECT `+questionColumns+`
+		FROM conversation_questions q JOIN conversations c ON c.id=q.conversation_id
+		WHERE q.conversation_id=$1 AND c.user_id=$2 ORDER BY q.version ASC`,
+		conversationID, userID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	questions := make([]Question, 0)
+	for rows.Next() {
+		question, scanErr := scanQuestion(rows)
+		if scanErr != nil {
+			return nil, scanErr
+		}
+		questions = append(questions, question)
+	}
+	return questions, rows.Err()
+}
+
+func updateQuestionMessageStatus(ctx context.Context, tx pgx.Tx, question Question) error {
+	messageID := question.SourceRunID + "-assistant"
+	var raw []byte
+	if err := tx.QueryRow(ctx, `SELECT parts_json FROM messages WHERE id=$1 FOR UPDATE`,
+		messageID).Scan(&raw); err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return nil
+		}
+		return err
+	}
+	var parts []convo.Part
+	if err := json.Unmarshal(raw, &parts); err != nil {
+		return err
+	}
+	changed := false
+	for i := range parts {
+		if parts[i].Type == convo.PartQuestion && parts[i].QuestionID == question.ID {
+			parts[i].Status = question.Status
+			parts[i].QuestionAnswer = question.Answer
+			changed = true
+		}
+	}
+	if !changed {
+		return nil
+	}
+	encoded, err := json.Marshal(parts)
+	if err != nil {
+		return err
+	}
+	_, err = tx.Exec(ctx, `UPDATE messages SET parts_json=$2 WHERE id=$1`, messageID, encoded)
+	return err
+}
+
 func (p *Postgres) GetPlan(ctx context.Context, conversationID, planID, userID string) (Plan, error) {
 	return scanPlan(p.pool.QueryRow(ctx, `SELECT `+planColumns+`
 		FROM conversation_plans p JOIN conversations c ON c.id=p.conversation_id
 		WHERE p.conversation_id=$1 AND p.id=$2::uuid AND c.user_id=$3`,
 		conversationID, planID, userID))
+}
+
+func (p *Postgres) ListPlans(
+	ctx context.Context,
+	conversationID, userID string,
+) ([]Plan, error) {
+	rows, err := p.pool.Query(ctx, `SELECT `+planColumns+`
+		FROM conversation_plans p JOIN conversations c ON c.id=p.conversation_id
+		WHERE p.conversation_id=$1 AND c.user_id=$2 ORDER BY p.version ASC`,
+		conversationID, userID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	plans := make([]Plan, 0)
+	for rows.Next() {
+		plan, scanErr := scanPlan(rows)
+		if scanErr != nil {
+			return nil, scanErr
+		}
+		plans = append(plans, plan)
+	}
+	return plans, rows.Err()
 }
 
 func (p *Postgres) StartPlanExecution(
@@ -440,6 +596,16 @@ func (p *Postgres) StartPlanExecution(
 	}
 	if plan.Status != PlanStatusReady && plan.Status != PlanStatusStopped {
 		return PlanExecutionResult{}, ErrPlanState
+	}
+	var questionPending bool
+	if err := tx.QueryRow(ctx, `SELECT EXISTS (
+		SELECT 1 FROM conversation_questions
+		WHERE conversation_id=$1 AND status IN ('pending','answering')
+	)`, in.ConversationID).Scan(&questionPending); err != nil {
+		return PlanExecutionResult{}, err
+	}
+	if questionPending {
+		return PlanExecutionResult{}, ErrQuestionPending
 	}
 	var modelAvailable bool
 	if err := tx.QueryRow(ctx, `SELECT EXISTS (
@@ -555,6 +721,236 @@ func (p *Postgres) CancelPlan(
 	return plan, nil
 }
 
+func (p *Postgres) StartQuestionAnswer(
+	ctx context.Context,
+	in QuestionAnswerInput,
+) (QuestionAnswerResult, error) {
+	tx, err := p.pool.Begin(ctx)
+	if err != nil {
+		return QuestionAnswerResult{}, err
+	}
+	defer func() { _ = tx.Rollback(ctx) }()
+
+	conversation, err := scanConversation(tx.QueryRow(ctx, `SELECT id, user_id, tenant_id,
+		title, chat_type, COALESCE(folder_id, ''), COALESCE(project_id::text, ''), hidden,
+		runtime_id, created_at, updated_at FROM conversations
+		WHERE id=$1 AND user_id=$2 FOR UPDATE`, in.ConversationID, in.UserID))
+	if err != nil {
+		return QuestionAnswerResult{}, ErrNotFound
+	}
+	if in.Run.ClientRequestID != "" {
+		existing, requestErr := scanRun(tx.QueryRow(ctx, `SELECT `+runColumns+`
+			FROM conversation_runs WHERE user_id=$1 AND conversation_id=$2
+			AND client_request_id=$3`, in.UserID, in.ConversationID, in.Run.ClientRequestID))
+		if requestErr == nil {
+			question, questionErr := scanQuestion(tx.QueryRow(ctx, `SELECT `+questionColumns+`
+				FROM conversation_questions q WHERE q.id=$1::uuid`, in.QuestionID))
+			if questionErr != nil {
+				return QuestionAnswerResult{}, questionErr
+			}
+			if question.AnswerRunID != existing.ID {
+				return QuestionAnswerResult{}, ErrQuestionNotCurrent
+			}
+			if err := tx.Commit(ctx); err != nil {
+				return QuestionAnswerResult{}, err
+			}
+			return QuestionAnswerResult{
+				Run: existing, Conversation: conversation, Question: question,
+			}, nil
+		}
+		if !errors.Is(requestErr, ErrNotFound) {
+			return QuestionAnswerResult{}, requestErr
+		}
+	}
+	question, err := scanQuestion(tx.QueryRow(ctx, `SELECT `+questionColumns+`
+		FROM conversation_questions q
+		WHERE q.id=$1::uuid AND q.conversation_id=$2 FOR UPDATE`,
+		in.QuestionID, in.ConversationID))
+	if err != nil {
+		return QuestionAnswerResult{}, err
+	}
+	if question.Version != in.ExpectedVersion {
+		return QuestionAnswerResult{}, ErrQuestionNotCurrent
+	}
+	if question.Status != QuestionStatusPending {
+		return QuestionAnswerResult{}, ErrQuestionState
+	}
+	var modelAvailable bool
+	if err := tx.QueryRow(ctx, `SELECT EXISTS (
+		SELECT 1 FROM llm_model_routes r
+		JOIN llm_providers p ON p.id=r.provider_id
+		WHERE r.id=$1 AND r.protocol='anthropic-messages'
+			AND r.enabled=TRUE AND r.visible=TRUE AND p.enabled=TRUE
+	)`, question.ModelRouteID).Scan(&modelAvailable); err != nil {
+		return QuestionAnswerResult{}, err
+	}
+	if !modelAvailable {
+		return QuestionAnswerResult{}, ErrQuestionModelUnavailable
+	}
+	if active, activeErr := scanRun(tx.QueryRow(ctx, `SELECT `+runColumns+`
+		FROM conversation_runs WHERE conversation_id=$1 AND status='running'
+		ORDER BY started_at DESC LIMIT 1`, in.ConversationID)); activeErr == nil {
+		return QuestionAnswerResult{Run: active, Conversation: conversation}, ErrConflict
+	} else if !errors.Is(activeErr, ErrNotFound) {
+		return QuestionAnswerResult{}, activeErr
+	}
+
+	run := in.Run
+	run.ConversationID = in.ConversationID
+	run.UserID = in.UserID
+	run.InteractionMode = normalizeInteractionMode(question.InteractionMode)
+	_, err = tx.Exec(ctx, `INSERT INTO conversation_runs (
+		trace_id, root_span_id, conversation_id, conversation_title, user_id,
+		user_email, source, model_route_id, model_alias, client_request_id,
+		interaction_mode, status, started_at, last_activity_at, detail_status)
+		VALUES ($1,$2,$3,$4,$5,$5,$6,$7,$8,$9,$10,'running',$11,$11,'available')`,
+		run.ID, run.RootSpanID, run.ConversationID, run.ConversationTitle, run.UserID,
+		run.Source, run.ModelRouteID, run.ModelAlias, run.ClientRequestID,
+		run.InteractionMode, run.StartedAt)
+	if err != nil {
+		var pgErr *pgconn.PgError
+		if errors.As(err, &pgErr) && pgErr.Code == "23505" {
+			return QuestionAnswerResult{}, ErrConflict
+		}
+		return QuestionAnswerResult{}, err
+	}
+	if err := upsertMessage(ctx, tx, in.UserMessage); err != nil {
+		return QuestionAnswerResult{}, err
+	}
+	now := in.AnsweredAt
+	if now.IsZero() {
+		now = time.Now().UTC()
+	}
+	answerJSON, err := json.Marshal(in.Answer)
+	if err != nil {
+		return QuestionAnswerResult{}, err
+	}
+	question.Status = QuestionStatusAnswering
+	question.AnswerRunID = run.ID
+	question.Answer = &in.Answer
+	question.AnsweredBy = in.UserID
+	question.AnsweredAt = &now
+	question.UpdatedAt = now
+	_, err = tx.Exec(ctx, `UPDATE conversation_questions SET status='answering',
+		answer_run_id=$2, answer_json=$3, answered_by=$4, answered_at=$5, updated_at=$5
+		WHERE id=$1::uuid`, question.ID, run.ID, answerJSON, in.UserID, now)
+	if err != nil {
+		return QuestionAnswerResult{}, err
+	}
+	if err := updateQuestionMessageStatus(ctx, tx, question); err != nil {
+		return QuestionAnswerResult{}, err
+	}
+	if _, err := tx.Exec(ctx, `UPDATE conversations SET updated_at=$3
+		WHERE id=$1 AND user_id=$2`, conversation.ID, in.UserID, now); err != nil {
+		return QuestionAnswerResult{}, err
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return QuestionAnswerResult{}, err
+	}
+	return QuestionAnswerResult{
+		Run: run, Conversation: conversation, Question: question, Created: true,
+	}, nil
+}
+
+func (p *Postgres) AcceptQuestionAnswer(
+	ctx context.Context,
+	runID, questionID, userID string,
+	now time.Time,
+) (Question, error) {
+	tx, err := p.pool.Begin(ctx)
+	if err != nil {
+		return Question{}, err
+	}
+	defer func() { _ = tx.Rollback(ctx) }()
+	run, err := scanRun(tx.QueryRow(ctx, `SELECT `+runColumns+`
+		FROM conversation_runs WHERE trace_id=$1 AND user_id=$2 FOR UPDATE`,
+		runID, userID))
+	if err != nil {
+		return Question{}, err
+	}
+	if run.Status != StatusRunning {
+		return Question{}, ErrNotFound
+	}
+	question, err := scanQuestion(tx.QueryRow(ctx, `SELECT `+questionColumns+`
+		FROM conversation_questions q
+		WHERE q.id=$1::uuid AND q.conversation_id=$2 FOR UPDATE`,
+		questionID, run.ConversationID))
+	if err != nil {
+		return Question{}, err
+	}
+	if question.AnswerRunID != run.ID {
+		return Question{}, ErrNotFound
+	}
+	if question.Status == QuestionStatusAnswered {
+		if err := tx.Commit(ctx); err != nil {
+			return Question{}, err
+		}
+		return question, nil
+	}
+	if question.Status != QuestionStatusAnswering {
+		return Question{}, ErrQuestionState
+	}
+	if now.IsZero() {
+		now = time.Now().UTC()
+	}
+	question.Status = QuestionStatusAnswered
+	question.UpdatedAt = now
+	if _, err := tx.Exec(ctx, `UPDATE conversation_questions
+		SET status='answered', updated_at=$2 WHERE id=$1::uuid`,
+		question.ID, now); err != nil {
+		return Question{}, err
+	}
+	if err := updateQuestionMessageStatus(ctx, tx, question); err != nil {
+		return Question{}, err
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return Question{}, err
+	}
+	return question, nil
+}
+
+func (p *Postgres) CancelQuestion(
+	ctx context.Context,
+	conversationID, questionID, userID string,
+	expectedVersion int,
+	now time.Time,
+) (Question, error) {
+	tx, err := p.pool.Begin(ctx)
+	if err != nil {
+		return Question{}, err
+	}
+	defer func() { _ = tx.Rollback(ctx) }()
+	question, err := scanQuestion(tx.QueryRow(ctx, `SELECT `+questionColumns+`
+		FROM conversation_questions q JOIN conversations c ON c.id=q.conversation_id
+		WHERE q.id=$1::uuid AND q.conversation_id=$2 AND c.user_id=$3 FOR UPDATE`,
+		questionID, conversationID, userID))
+	if err != nil {
+		return Question{}, err
+	}
+	if question.Version != expectedVersion {
+		return Question{}, ErrQuestionNotCurrent
+	}
+	if question.Status != QuestionStatusPending {
+		return Question{}, ErrQuestionState
+	}
+	if now.IsZero() {
+		now = time.Now().UTC()
+	}
+	question.Status = QuestionStatusCancelled
+	question.UpdatedAt = now
+	if _, err := tx.Exec(ctx, `UPDATE conversation_questions
+		SET status='cancelled', updated_at=$2 WHERE id=$1::uuid`, question.ID, now); err != nil {
+		return Question{}, err
+	}
+	if err := updateQuestionMessageStatus(ctx, tx, question); err != nil {
+		return Question{}, err
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return Question{}, err
+	}
+	return question, nil
+}
+
 func (p *Postgres) SaveDraft(ctx context.Context, runID, userID string, message convo.Message) error {
 	tx, err := p.pool.Begin(ctx)
 	if err != nil {
@@ -606,7 +1002,45 @@ func (p *Postgres) Finalize(ctx context.Context, in FinalizeInput) (FinalizeResu
 		now = time.Now().UTC()
 	}
 	var createdPlan *Plan
+	var createdQuestion *Question
+	var answeredQuestion *Question
+	var restoredQuestion *Question
 	var supersededPlanID string
+	answerQuestion, questionErr := scanQuestion(tx.QueryRow(ctx, `SELECT `+questionColumns+`
+		FROM conversation_questions q WHERE q.answer_run_id=$1 FOR UPDATE`, run.ID))
+	if questionErr == nil && answerQuestion.Status == QuestionStatusAnswering {
+		if in.RuntimeAccepted {
+			answerQuestion.Status = QuestionStatusAnswered
+			answeredQuestion = &answerQuestion
+		} else {
+			answerQuestion.Status = QuestionStatusPending
+			answerQuestion.AnswerRunID = ""
+			answerQuestion.Answer = nil
+			answerQuestion.AnsweredBy = ""
+			answerQuestion.AnsweredAt = nil
+			restoredQuestion = &answerQuestion
+		}
+		answerQuestion.UpdatedAt = now
+		if in.RuntimeAccepted {
+			if _, err := tx.Exec(ctx, `UPDATE conversation_questions
+				SET status='answered', updated_at=$2 WHERE id=$1::uuid`,
+				answerQuestion.ID, now); err != nil {
+				return FinalizeResult{}, err
+			}
+		} else {
+			if _, err := tx.Exec(ctx, `UPDATE conversation_questions
+				SET status='pending', answer_run_id=NULL, answer_json=NULL,
+					answered_by='', answered_at=NULL, updated_at=$2
+				WHERE id=$1::uuid`, answerQuestion.ID, now); err != nil {
+				return FinalizeResult{}, err
+			}
+		}
+		if err := updateQuestionMessageStatus(ctx, tx, answerQuestion); err != nil {
+			return FinalizeResult{}, err
+		}
+	} else if questionErr != nil && !errors.Is(questionErr, ErrNotFound) {
+		return FinalizeResult{}, questionErr
+	}
 	if in.PlanCandidate != nil && run.InteractionMode == InteractionModePlan &&
 		in.Status == StatusSuccess {
 		candidate := in.PlanCandidate
@@ -669,6 +1103,54 @@ func (p *Postgres) Finalize(ctx context.Context, in FinalizeInput) (FinalizeResu
 		in.AssistantMessage.Parts = append(in.AssistantMessage.Parts, planPart(plan))
 		createdPlan = &plan
 	}
+	if in.QuestionCandidate != nil && in.Status == StatusWaitingInput {
+		candidate := in.QuestionCandidate
+		if !validQuestionCandidate(candidate) {
+			return FinalizeResult{}, ErrQuestionState
+		}
+		var version int
+		if err := tx.QueryRow(ctx, `SELECT COALESCE(MAX(version), 0) + 1
+			FROM conversation_questions WHERE conversation_id=$1`,
+			run.ConversationID).Scan(&version); err != nil {
+			return FinalizeResult{}, err
+		}
+		optionsJSON, err := json.Marshal(candidate.Options)
+		if err != nil {
+			return FinalizeResult{}, err
+		}
+		question := Question{
+			ID: candidate.ID, ConversationID: run.ConversationID, Version: version,
+			Status: QuestionStatusPending, SourceRunID: run.ID,
+			InteractionMode: normalizeInteractionMode(candidate.InteractionMode),
+			RuntimeID:       candidate.RuntimeID, ModelRouteID: candidate.ModelRouteID,
+			ModelAlias: candidate.ModelAlias, SkillID: candidate.SkillID,
+			Text: candidate.Text, Options: append([]convo.QuestionOption(nil), candidate.Options...),
+			CreatedAt: now, UpdatedAt: now,
+		}
+		_, err = tx.Exec(ctx, `INSERT INTO conversation_questions (
+			id, conversation_id, version, status, source_run_id, interaction_mode,
+			runtime_id, model_route_id, model_alias, skill_id, question_text,
+			options_json, created_at, updated_at)
+			VALUES ($1::uuid,$2,$3,'pending',$4,$5,$6,$7,$8,$9,$10,$11,$12,$12)`,
+			question.ID, question.ConversationID, question.Version, question.SourceRunID,
+			question.InteractionMode, question.RuntimeID, question.ModelRouteID,
+			question.ModelAlias, question.SkillID, question.Text, optionsJSON, now)
+		if err != nil {
+			var pgErr *pgconn.PgError
+			if errors.As(err, &pgErr) && pgErr.Code == "23505" {
+				return FinalizeResult{}, ErrQuestionPending
+			}
+			return FinalizeResult{}, err
+		}
+		if in.AssistantMessage == nil {
+			in.AssistantMessage = &convo.Message{
+				ID: run.ID + "-assistant", ConversationID: run.ConversationID,
+				Role: "assistant", CreatedAt: now,
+			}
+		}
+		in.AssistantMessage.Parts = append(in.AssistantMessage.Parts, questionPart(question))
+		createdQuestion = &question
+	}
 	if in.AssistantMessage != nil {
 		if err := upsertMessage(ctx, tx, *in.AssistantMessage); err != nil {
 			return FinalizeResult{}, err
@@ -676,8 +1158,9 @@ func (p *Postgres) Finalize(ctx context.Context, in FinalizeInput) (FinalizeResu
 	}
 	_, err = tx.Exec(ctx, `UPDATE conversation_runs SET status=$2, error_code=$3,
 		completed_at=$4, last_activity_at=$4, duration_ms=GREATEST(0, EXTRACT(EPOCH FROM ($4-started_at))*1000)::bigint,
+		tool_call_count=$5, llm_call_count=$6,
 		updated_at=now() WHERE trace_id=$1 AND status='running'`,
-		in.RunID, in.Status, in.ErrorCode, now)
+		in.RunID, in.Status, in.ErrorCode, now, in.ToolCallCount, in.LLMCallCount)
 	if err != nil {
 		return FinalizeResult{}, err
 	}
@@ -722,13 +1205,18 @@ func (p *Postgres) Finalize(ctx context.Context, in FinalizeInput) (FinalizeResu
 	}
 	run.Status = in.Status
 	run.ErrorCode = in.ErrorCode
+	run.ToolCallCount = in.ToolCallCount
+	run.LLMCallCount = in.LLMCallCount
+	run.DurationMS = now.Sub(run.StartedAt).Milliseconds()
 	run.CompletedAt = &now
 	run.LastActivityAt = now
 	if createdPlan == nil {
 		createdPlan = executionPlan
 	}
 	return FinalizeResult{
-		Run: run, Plan: createdPlan, SupersededPlanID: supersededPlanID,
+		Run: run, Plan: createdPlan, Question: createdQuestion,
+		AnsweredQuestion: answeredQuestion, RestoredQuestion: restoredQuestion,
+		SupersededPlanID: supersededPlanID,
 	}, nil
 }
 
@@ -767,6 +1255,34 @@ func (p *Postgres) InterruptRunning(ctx context.Context, now time.Time) (int64, 
 	rows.Close()
 	for _, plan := range stoppedPlans {
 		if err := updatePlanMessageStatus(ctx, tx, plan); err != nil {
+			return 0, err
+		}
+	}
+	rows, err = tx.Query(ctx, `UPDATE conversation_questions q
+		SET status='answered', updated_at=$1
+		FROM conversation_runs r
+		WHERE r.status='running' AND q.answer_run_id=r.trace_id
+			AND q.status='answering'
+		RETURNING `+questionColumns, now)
+	if err != nil {
+		return 0, err
+	}
+	var answeredQuestions []Question
+	for rows.Next() {
+		question, scanErr := scanQuestion(rows)
+		if scanErr != nil {
+			rows.Close()
+			return 0, scanErr
+		}
+		answeredQuestions = append(answeredQuestions, question)
+	}
+	if err := rows.Err(); err != nil {
+		rows.Close()
+		return 0, err
+	}
+	rows.Close()
+	for _, question := range answeredQuestions {
+		if err := updateQuestionMessageStatus(ctx, tx, question); err != nil {
 			return 0, err
 		}
 	}

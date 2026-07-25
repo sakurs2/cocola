@@ -106,7 +106,7 @@ func TestChatPersistsTurn(t *testing.T) {
 		t.Fatalf("bad messages: %+v", msgs)
 	}
 	ap := msgs[1].Parts
-	if len(ap) != 4 || ap[0].Type != convo.PartEnvironment || ap[1].Type != convo.PartSessionStatus {
+	if len(ap) != 5 || ap[0].Type != convo.PartEnvironment || ap[1].Type != convo.PartSessionStatus {
 		t.Fatalf("assistant environment not persisted first: %+v", ap)
 	}
 	var environment map[string]any
@@ -122,6 +122,10 @@ func TestChatPersistsTurn(t *testing.T) {
 	}
 	if ap[3].Type != convo.PartToolCall || ap[3].Result == nil || *ap[3].Result != "done" {
 		t.Fatalf("assistant tool-call not paired: %+v", ap)
+	}
+	if ap[4].Type != convo.PartRunSummary || ap[4].Status != chatrun.StatusSuccess ||
+		ap[4].ToolCallCount != 1 {
+		t.Fatalf("assistant run summary missing: %+v", ap)
 	}
 }
 
@@ -201,7 +205,8 @@ func TestChatPersistsArtifactAndDownloads(t *testing.T) {
 	var msgs []convo.Message
 	mustJSON(t, rec.Body.Bytes(), &msgs)
 	ap := msgs[1].Parts
-	if len(ap) != 1 || ap[0].Type != convo.PartFile || ap[0].ID != "art-1" {
+	if len(ap) != 2 || ap[0].Type != convo.PartFile || ap[0].ID != "art-1" ||
+		ap[1].Type != convo.PartRunSummary {
 		t.Fatalf("assistant file part not persisted: %+v", ap)
 	}
 	if ap[0].DownloadURL != "/api/conversations/conv-1/artifacts/art-1" {

@@ -55,6 +55,12 @@ type planModeStreamer struct {
 	queries []agent.Query
 }
 
+type questionModeStreamer struct {
+	mu               sync.Mutex
+	queries          []agent.Query
+	answerStartError error
+}
+
 type planWorkspaceStore struct {
 	project.Store
 	project   project.Project
@@ -172,6 +178,78 @@ func (s *planModeStreamer) Stream(_ context.Context, query agent.Query, onEvent 
 		}
 	}
 	return onEvent(agent.Event{Kind: "done"})
+}
+
+func (s *questionModeStreamer) Stream(
+	_ context.Context,
+	query agent.Query,
+	onEvent func(agent.Event) error,
+) error {
+	s.mu.Lock()
+	s.queries = append(s.queries, query)
+	call := len(s.queries)
+	s.mu.Unlock()
+	if call == 1 {
+		if err := onEvent(agent.Event{Kind: "question_required", Data: map[string]string{
+			"question": "Which database?", "options": `["PostgreSQL","SQLite"]`,
+		}}); err != nil {
+			return err
+		}
+	} else {
+		if s.answerStartError != nil {
+			return s.answerStartError
+		}
+		if err := onEvent(agent.Event{Kind: "run_accepted"}); err != nil {
+			return err
+		}
+		if err := onEvent(agent.Event{Kind: "text", Data: map[string]string{
+			"text": "Continuing with PostgreSQL.",
+		}}); err != nil {
+			return err
+		}
+	}
+	return onEvent(agent.Event{Kind: "done"})
+}
+
+func TestQuestionAnswerRestoresPendingWhenRuntimeRejectsStartup(t *testing.T) {
+	streamer := &questionModeStreamer{answerStartError: errors.New("resume failed")}
+	api, _, conversations := durableTestAPI(streamer)
+	handler := api.Handler()
+
+	first := httptest.NewRecorder()
+	handler.ServeHTTP(first, httptest.NewRequest(http.MethodPost, "/v1/chat", strings.NewReader(
+		`{"prompt":"create a service","session_id":"conversation-question-retry","client_request_id":"question-request","runtime_id":"claude-code","model_route_id":"route-1"}`,
+	)))
+	if first.Code != http.StatusOK {
+		t.Fatalf("question response = %d %s", first.Code, first.Body.String())
+	}
+	messages, err := conversations.GetMessages(
+		context.Background(), "conversation-question-retry", auth.DevIdentity.UserID,
+	)
+	if err != nil || len(messages) != 2 || len(messages[1].Parts) != 1 {
+		t.Fatalf("question history = %+v, %v", messages, err)
+	}
+	question := messages[1].Parts[0]
+
+	answer := httptest.NewRecorder()
+	handler.ServeHTTP(answer, httptest.NewRequest(
+		http.MethodPost,
+		"/v1/conversations/conversation-question-retry/questions/"+question.QuestionID+"/answer",
+		strings.NewReader(
+			`{"expected_version":1,"answer":{"option_id":"option-1"},"client_request_id":"11111111-1111-4111-8111-111111111111"}`,
+		),
+	))
+	if answer.Code != http.StatusOK ||
+		!strings.Contains(answer.Body.String(), `"status":"pending"`) {
+		t.Fatalf("rejected answer = %d %s", answer.Code, answer.Body.String())
+	}
+	messages, err = conversations.GetMessages(
+		context.Background(), "conversation-question-retry", auth.DevIdentity.UserID,
+	)
+	if err != nil || messages[1].Parts[0].Status != chatrun.QuestionStatusPending ||
+		messages[1].Parts[0].QuestionAnswer != nil {
+		t.Fatalf("restored question history = %+v, %v", messages, err)
+	}
 }
 
 type controlledFinalizeStore struct {
@@ -490,7 +568,7 @@ func TestPlanModeCreatesAndExecutesDurablePlanWithoutUserMessage(t *testing.T) {
 		t.Fatalf("planned messages = %+v, %v", messages, err)
 	}
 	plan := messages[1].Parts[0]
-	if plan.Status != chatrun.PlanStatusReady || plan.PlanVersion != 1 {
+	if plan.Status != chatrun.PlanStatusReady || plan.Version != 1 {
 		t.Fatalf("created plan part = %+v", plan)
 	}
 
@@ -550,7 +628,7 @@ func TestPlanModeCreatesAndExecutesDurablePlanWithoutUserMessage(t *testing.T) {
 		t.Fatalf("decode approved Plan payload: %v", err)
 	}
 	if approvedPayload.PlanID != plan.PlanID ||
-		approvedPayload.Version != plan.PlanVersion ||
+		approvedPayload.Version != plan.Version ||
 		approvedPayload.ContentMarkdown != plan.PlanContentMarkdown {
 		t.Fatalf("approved Plan payload = %+v, want %+v", approvedPayload, plan)
 	}
@@ -579,6 +657,121 @@ func TestPlanModeCreatesAndExecutesDurablePlanWithoutUserMessage(t *testing.T) {
 	if history.Code != http.StatusOK ||
 		!strings.Contains(history.Body.String(), `"status":"completed"`) {
 		t.Fatalf("authoritative plan history = %d %s", history.Code, history.Body.String())
+	}
+}
+
+func TestQuestionModePersistsAnswerAndResumesTheSameSession(t *testing.T) {
+	streamer := &questionModeStreamer{}
+	api, _, conversations := durableTestAPI(streamer)
+	handler := api.Handler()
+
+	first := httptest.NewRecorder()
+	handler.ServeHTTP(first, httptest.NewRequest(http.MethodPost, "/v1/chat", strings.NewReader(
+		`{"prompt":"create a service","session_id":"conversation-question","client_request_id":"question-request","runtime_id":"claude-code","model_route_id":"route-1","model_alias":"sonnet","skill_id":"backend","interaction_mode":"execute"}`,
+	)))
+	if first.Code != http.StatusOK ||
+		!strings.Contains(first.Body.String(), `"kind":"question_ready"`) ||
+		!strings.Contains(first.Body.String(), `"status":"waiting_input"`) {
+		t.Fatalf("question response = %d %s", first.Code, first.Body.String())
+	}
+	messages, err := conversations.GetMessages(
+		context.Background(), "conversation-question", auth.DevIdentity.UserID,
+	)
+	if err != nil || len(messages) != 2 || len(messages[1].Parts) != 1 ||
+		messages[1].Parts[0].Type != convo.PartQuestion {
+		t.Fatalf("question history = %+v, %v", messages, err)
+	}
+	question := messages[1].Parts[0]
+
+	blocked := httptest.NewRecorder()
+	handler.ServeHTTP(blocked, httptest.NewRequest(http.MethodPost, "/v1/chat", strings.NewReader(
+		`{"prompt":"another run","session_id":"conversation-question","client_request_id":"blocked-request"}`,
+	)))
+	if blocked.Code != http.StatusConflict ||
+		!strings.Contains(blocked.Body.String(), `"code":"QUESTION_PENDING"`) {
+		t.Fatalf("pending question did not block chat = %d %s", blocked.Code, blocked.Body.String())
+	}
+
+	answer := httptest.NewRecorder()
+	answerPath := "/v1/conversations/conversation-question/questions/" + question.QuestionID + "/answer"
+	answerBody := `{"expected_version":1,"answer":{"option_id":"option-1"},"client_request_id":"11111111-1111-4111-8111-111111111111"}`
+	handler.ServeHTTP(answer, httptest.NewRequest(
+		http.MethodPost, answerPath, strings.NewReader(answerBody),
+	))
+	if answer.Code != http.StatusOK ||
+		!strings.Contains(answer.Body.String(), `"status":"answered"`) {
+		t.Fatalf("question answer = %d %s", answer.Code, answer.Body.String())
+	}
+	answerRunID := answer.Header().Get("x-cocola-run-id")
+	retry := httptest.NewRecorder()
+	handler.ServeHTTP(retry, httptest.NewRequest(
+		http.MethodPost, answerPath, strings.NewReader(answerBody),
+	))
+	if retry.Code != http.StatusOK ||
+		retry.Header().Get("x-cocola-run-id") != answerRunID {
+		t.Fatalf("idempotent answer = %d run %q, want %q",
+			retry.Code, retry.Header().Get("x-cocola-run-id"), answerRunID)
+	}
+
+	streamer.mu.Lock()
+	queries := append([]agent.Query(nil), streamer.queries...)
+	streamer.mu.Unlock()
+	if len(queries) != 2 || !queries[1].RequireSessionResume ||
+		queries[1].SessionID != queries[0].SessionID ||
+		queries[1].RuntimeID != queries[0].RuntimeID ||
+		queries[1].ModelRouteID != queries[0].ModelRouteID ||
+		queries[1].SkillID != "backend" ||
+		queries[1].InteractionMode != queries[0].InteractionMode {
+		t.Fatalf("question continuation queries = %+v", queries)
+	}
+	messages, err = conversations.GetMessages(
+		context.Background(), "conversation-question", auth.DevIdentity.UserID,
+	)
+	if err != nil || len(messages) != 4 || messages[2].Role != "user" ||
+		messages[2].Parts[0].Text != "PostgreSQL" ||
+		messages[1].Parts[0].Status != chatrun.QuestionStatusAnswered {
+		t.Fatalf("answered question history = %+v, %v", messages, err)
+	}
+}
+
+func TestQuestionAnswerRejectsUnavailableRuntimeBeforeStartingRun(t *testing.T) {
+	streamer := &questionModeStreamer{}
+	api, _, conversations := durableTestAPI(streamer)
+	handler := api.Handler()
+
+	first := httptest.NewRecorder()
+	handler.ServeHTTP(first, httptest.NewRequest(http.MethodPost, "/v1/chat", strings.NewReader(
+		`{"prompt":"create a service","session_id":"conversation-question-runtime","client_request_id":"question-runtime-request","runtime_id":"claude-code","model_route_id":"route-1"}`,
+	)))
+	if first.Code != http.StatusOK {
+		t.Fatalf("question response = %d %s", first.Code, first.Body.String())
+	}
+	messages, err := conversations.GetMessages(
+		context.Background(), "conversation-question-runtime", auth.DevIdentity.UserID,
+	)
+	if err != nil || len(messages) != 2 || len(messages[1].Parts) != 1 {
+		t.Fatalf("question history = %+v, %v", messages, err)
+	}
+	question := messages[1].Parts[0]
+	api.WithAgentRuntimes(nil)
+
+	answer := httptest.NewRecorder()
+	handler.ServeHTTP(answer, httptest.NewRequest(
+		http.MethodPost,
+		"/v1/conversations/conversation-question-runtime/questions/"+question.QuestionID+"/answer",
+		strings.NewReader(
+			`{"expected_version":1,"answer":{"option_id":"option-1"},"client_request_id":"11111111-1111-4111-8111-111111111111"}`,
+		),
+	))
+	if answer.Code != http.StatusConflict ||
+		!strings.Contains(answer.Body.String(), `"code":"QUESTION_RUNTIME_UNAVAILABLE"`) {
+		t.Fatalf("unavailable runtime answer = %d %s", answer.Code, answer.Body.String())
+	}
+	streamer.mu.Lock()
+	queryCount := len(streamer.queries)
+	streamer.mu.Unlock()
+	if queryCount != 1 {
+		t.Fatalf("runtime query count = %d, want 1", queryCount)
 	}
 }
 
@@ -661,14 +854,19 @@ func TestPlanApprovalSerializesWorkspaceValidationWithNormalRunStart(t *testing.
 		startedBeforeValidation = true
 	case <-time.After(100 * time.Millisecond):
 	}
-	close(streamer.releaseInspect)
-	close(streamer.releaseExecute)
-	approval := <-approvalDone
-	ordinary := <-ordinaryDone
-
 	if startedBeforeValidation {
 		t.Fatal("normal run started while approved Plan workspace validation was still in progress")
 	}
+	close(streamer.releaseInspect)
+	var ordinary *httptest.ResponseRecorder
+	select {
+	case ordinary = <-ordinaryDone:
+	case <-time.After(time.Second):
+		close(streamer.releaseExecute)
+		t.Fatal("normal run did not resolve while approved Plan execution was active")
+	}
+	close(streamer.releaseExecute)
+	approval := <-approvalDone
 	if approval.Code != http.StatusOK {
 		t.Fatalf("approval response = %d %s", approval.Code, approval.Body.String())
 	}

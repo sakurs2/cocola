@@ -286,6 +286,10 @@ func (a *API) Handler() http.Handler {
 		a.verifier.Middleware(writeErr)(http.HandlerFunc(a.executePlan))))
 	mux.Handle("POST /v1/conversations/{id}/plans/{plan_id}/cancel", a.instrument("POST /v1/conversations/{id}/plans/{plan_id}/cancel",
 		a.verifier.Middleware(writeErr)(http.HandlerFunc(a.cancelPlan))))
+	mux.Handle("POST /v1/conversations/{id}/questions/{question_id}/answer", a.instrument("POST /v1/conversations/{id}/questions/{question_id}/answer",
+		a.verifier.Middleware(writeErr)(http.HandlerFunc(a.answerQuestion))))
+	mux.Handle("POST /v1/conversations/{id}/questions/{question_id}/cancel", a.instrument("POST /v1/conversations/{id}/questions/{question_id}/cancel",
+		a.verifier.Middleware(writeErr)(http.HandlerFunc(a.cancelQuestion))))
 	mux.Handle("GET /v1/conversations/{id}/artifacts/{artifact_id}", a.instrument("GET /v1/conversations/{id}/artifacts/{artifact_id}",
 		a.verifier.Middleware(writeErr)(http.HandlerFunc(a.downloadArtifact))))
 	mux.Handle("GET /v1/memory/settings", a.instrument("GET /v1/memory/settings",
@@ -533,6 +537,7 @@ type chatRequest struct {
 	RuntimeID                            string            `json:"runtime_id"`
 	InteractionMode                      string            `json:"interaction_mode"`
 	RequireSessionResume                 bool              `json:"-"`
+	QuestionID                           string            `json:"-"`
 	FolderID                             string            `json:"folder_id"`
 	ProjectID                            string            `json:"project_id"`
 	ProjectBaseRef                       string            `json:"project_base_ref"`
@@ -949,32 +954,87 @@ func (a *API) conversationMessages(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if a.runs != nil {
+		plans, planErr := a.runs.store.ListPlans(r.Context(), convID, id.UserID)
+		questions, questionErr := a.runs.store.ListQuestions(r.Context(), convID, id.UserID)
+		runs, runErr := a.runs.store.ListRuns(r.Context(), convID, id.UserID)
+		if planErr != nil || questionErr != nil || runErr != nil {
+			err := planErr
+			code, message := "PLAN_STATE_UNAVAILABLE", "could not load current plan state"
+			if questionErr != nil {
+				err = questionErr
+				code, message = "QUESTION_STATE_UNAVAILABLE", "could not load current question state"
+			} else if runErr != nil {
+				err = runErr
+				code, message = "RUN_STORE_UNAVAILABLE", "could not load run summaries"
+			}
+			a.log.Warn("refresh conversation state failed: " + err.Error())
+			writeErr(w, http.StatusServiceUnavailable, code, message)
+			return
+		}
+		plansByID := make(map[string]chatrun.Plan, len(plans))
+		for _, plan := range plans {
+			plansByID[plan.ID] = plan
+		}
+		questionsByID := make(map[string]chatrun.Question, len(questions))
+		for _, question := range questions {
+			questionsByID[question.ID] = question
+		}
+		runsByID := make(map[string]chatrun.Run, len(runs))
+		for _, run := range runs {
+			runsByID[run.ID] = run
+		}
 		for messageIndex := range msgs {
 			for partIndex := range msgs[messageIndex].Parts {
 				part := &msgs[messageIndex].Parts[partIndex]
-				if part.Type != convo.PartPlan || part.PlanID == "" {
-					continue
+				switch part.Type {
+				case convo.PartPlan:
+					if plan, ok := plansByID[part.PlanID]; ok {
+						part.Version = plan.Version
+						part.Status = plan.Status
+						part.PlanContentMarkdown = plan.ContentMarkdown
+					}
+				case convo.PartQuestion:
+					if question, ok := questionsByID[part.QuestionID]; ok {
+						part.Version = question.Version
+						part.Status = question.Status
+						part.Question = question.Text
+						part.QuestionOptions = question.Options
+						part.QuestionAnswer = question.Answer
+					}
 				}
-				plan, planErr := a.runs.store.GetPlan(
-					r.Context(), convID, part.PlanID, id.UserID,
-				)
-				if planErr != nil {
-					a.log.Warn("refresh conversation plan state failed: " + planErr.Error())
-					writeErr(
-						w,
-						http.StatusServiceUnavailable,
-						"PLAN_STATE_UNAVAILABLE",
-						"could not load current plan state",
-					)
-					return
-				}
-				part.PlanVersion = plan.Version
-				part.Status = plan.Status
-				part.PlanContentMarkdown = plan.ContentMarkdown
+			}
+			runID, _ := msgs[messageIndex].Metadata["run_id"].(string)
+			if runID == "" && msgs[messageIndex].Role == "assistant" &&
+				strings.HasSuffix(msgs[messageIndex].ID, "-assistant") {
+				runID = strings.TrimSuffix(msgs[messageIndex].ID, "-assistant")
+			}
+			if run, ok := runsByID[runID]; ok && chatrun.IsTerminal(run.Status) {
+				upsertRunSummaryPart(&msgs[messageIndex], run)
 			}
 		}
 	}
 	writeJSON(w, http.StatusOK, msgs)
+}
+
+func upsertRunSummaryPart(message *convo.Message, run chatrun.Run) {
+	modelLabel := run.ModelAlias
+	if label, ok := message.Metadata["model_label"].(string); ok && strings.TrimSpace(label) != "" {
+		modelLabel = strings.TrimSpace(label)
+	}
+	part := convo.Part{
+		Type: convo.PartRunSummary, RunID: run.ID, Status: run.Status,
+		ModelLabel: modelLabel, DurationMS: run.DurationMS,
+		ToolCallCount: run.ToolCallCount, LLMCallCount: run.LLMCallCount,
+		ErrorCode: run.ErrorCode,
+	}
+	for i := range message.Parts {
+		if message.Parts[i].Type == convo.PartRunSummary &&
+			message.Parts[i].RunID == run.ID {
+			message.Parts[i] = part
+			return
+		}
+	}
+	message.Parts = append(message.Parts, part)
 }
 
 func (a *API) downloadArtifact(w http.ResponseWriter, r *http.Request) {

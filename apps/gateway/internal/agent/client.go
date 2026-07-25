@@ -68,6 +68,7 @@ type Query struct {
 	ModelRouteID         string
 	TraceID              string
 	ParentSpanID         string
+	Source               string
 	// SandboxAuthToken is a fresh per-user cocola token the gateway mints from
 	// the verified identity (sub=UserID, ten=TenantID) for THIS turn. It is
 	// forwarded to agent-runtime over gRPC metadata and injected into the
@@ -266,6 +267,9 @@ func (c *Client) Stream(ctx context.Context, q Query, onEvent func(Event) error)
 	if strings.TrimSpace(q.ProjectBrokerCredential) != "" {
 		ctx = metadata.AppendToOutgoingContext(ctx, "x-cocola-project-broker-credential",
 			strings.TrimSpace(q.ProjectBrokerCredential))
+	}
+	if strings.TrimSpace(q.Source) != "" {
+		ctx = metadata.AppendToOutgoingContext(ctx, "x-cocola-run-source", strings.TrimSpace(q.Source))
 	}
 	if len(q.TraceID) == 32 && len(q.ParentSpanID) == 16 {
 		// otelgrpc owns the standard traceparent key and may replace it with its

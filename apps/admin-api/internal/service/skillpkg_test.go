@@ -4,6 +4,7 @@ import (
 	"archive/zip"
 	"bytes"
 	"context"
+	"encoding/json"
 	"errors"
 	"testing"
 	"time"
@@ -135,6 +136,76 @@ func TestEnabledSkillRequiresMaterializablePayload(t *testing.T) {
 	}
 	if _, err := svc.SetSkillEnabled(ctx, "disabled", true, "admin"); !errors.Is(err, ErrInvalidArg) {
 		t.Fatalf("SetSkillEnabled error = %v, want ErrInvalidArg", err)
+	}
+}
+
+func TestSkillResultContractIsValidatedAndNormalized(t *testing.T) {
+	ctx := context.Background()
+	svc := New(store.NewMemory(), nil, time.Now)
+	archive := skillArchive(t, map[string]string{
+		"skills/test-results/SKILL.md": `---
+name: Test Results
+description: Run tests and return structured results.
+cocola:
+  result:
+    version: 1
+    renderer: table
+    schema:
+      type: object
+      properties:
+        columns:
+          type: array
+        rows:
+          type: array
+      required:
+        - columns
+        - rows
+---
+Run the requested tests.
+`,
+	})
+
+	candidates, err := svc.ScanSkillArchive(ctx, archive)
+	if err != nil || len(candidates) != 1 || !candidates[0].Valid {
+		t.Fatalf("scan candidates = %#v, %v", candidates, err)
+	}
+	var contract skillResultContract
+	if err := json.Unmarshal(candidates[0].ResultContract, &contract); err != nil {
+		t.Fatalf("decode result contract: %v", err)
+	}
+	if contract.Version != 1 || contract.Renderer != "table" ||
+		len(contract.ContractHash) != len("sha256:")+64 {
+		t.Fatalf("normalized result contract = %#v", contract)
+	}
+}
+
+func TestSkillResultContractRejectsRemoteSchemaReference(t *testing.T) {
+	ctx := context.Background()
+	svc := New(store.NewMemory(), nil, time.Now)
+	archive := skillArchive(t, map[string]string{
+		"skills/unsafe/SKILL.md": `---
+name: Unsafe
+description: Invalid remote schema.
+cocola:
+  result:
+    version: 1
+    renderer: summary
+    schema:
+      type: object
+      properties:
+        value:
+          $ref: https://example.invalid/value.json
+---
+Return a result.
+`,
+	})
+
+	candidates, err := svc.ScanSkillArchive(ctx, archive)
+	if err != nil || len(candidates) != 1 {
+		t.Fatalf("scan candidates = %#v, %v", candidates, err)
+	}
+	if candidates[0].Valid || len(candidates[0].Errors) == 0 {
+		t.Fatalf("remote schema reference was accepted: %#v", candidates[0])
 	}
 }
 

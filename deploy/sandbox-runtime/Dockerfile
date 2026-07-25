@@ -48,6 +48,7 @@ ARG NPM_REGISTRY=https://registry.npmjs.org
 # depends on its native permission_mode="plan" behavior and must not upgrade it
 # implicitly during an unrelated image rebuild.
 ARG CLAUDE_AGENT_SDK_SPEC=claude-agent-sdk==0.2.123
+ARG JSONSCHEMA_SPEC=jsonschema==4.26.0
 # Resident in-sandbox editor. Pinned to a known-good standalone release (bundles
 # its own Node, so no native build). Offline builds can drop the matching
 # code-server-<ver>-linux-<arch>.tar.gz under ./offline/ (see the install step).
@@ -59,6 +60,7 @@ FROM ${OPENSANDBOX_BASE}
 ARG COCOLA_VENV_PYTHON
 ARG NPM_REGISTRY
 ARG CLAUDE_AGENT_SDK_SPEC
+ARG JSONSCHEMA_SPEC
 ARG CODE_SERVER_VERSION
 ARG GH_VERSION
 
@@ -241,7 +243,8 @@ RUN chmod 0755 /opt/cocola/install-code-server-extensions.sh \
 # venv's python directly, so its version is independent of the base image's.
 RUN uv venv --python "${COCOLA_VENV_PYTHON}" /opt/cocola/venv \
     && uv pip install --python /opt/cocola/venv/bin/python --no-cache \
-        "${CLAUDE_AGENT_SDK_SPEC}"
+        "${CLAUDE_AGENT_SDK_SPEC}" \
+        "${JSONSCHEMA_SPEC}"
 
 # The upstream base installs global npm packages under its versioned Node root
 # (/opt/node/<version>/lib/node_modules), while Cocola deliberately exposes the

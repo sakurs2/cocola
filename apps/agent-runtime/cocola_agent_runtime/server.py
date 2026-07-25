@@ -95,7 +95,8 @@ PREVIEW_SYSTEM_PROMPT = (
 PLAN_SYSTEM_PROMPT = (
     "You are in Cocola Plan Mode. Inspect and reason about the task, but do not modify the "
     "workspace or perform external side effects. When clarification is required, call "
-    "cocola_request_clarification with one concise question and optional choices. When the plan "
+    "cocola_request_user_input with one concise question and optional choices as the only tool "
+    "call in that response. When the plan "
     "is ready for approval, call cocola_submit_plan exactly once with one complete Markdown plan. "
     "Use cocola_get_runtime_info for installed runtime versions instead of shell commands. Do not "
     "execute the plan or use native plan-completion, interactive-question, subagent, or "
@@ -112,6 +113,7 @@ SCM_TOKEN_METADATA_KEY = "x-cocola-scm-token"
 PROJECT_BROKER_CREDENTIAL_METADATA_KEY = "x-cocola-project-broker-credential"
 TRACEPARENT_METADATA_KEY = "traceparent"
 PRODUCT_TRACEPARENT_METADATA_KEY = "x-cocola-product-traceparent"
+RUN_SOURCE_METADATA_KEY = "x-cocola-run-source"
 ENVIRONMENT_PREPARATION_SCHEMA_VERSION = 1
 ENVIRONMENT_PREPARATION_PART_ID = "environment"
 DEFAULT_SANDBOX_HEARTBEAT_SECS = 20
@@ -659,6 +661,7 @@ class AgentRuntimeServicer(pb_grpc.AgentRuntimeServiceServicer):
         requested_skill_id = str(getattr(request, "skill_id", "") or "").strip()
         active_skills: list[Skill] = []
         selected_skill_id: str | None = None
+        selected_skill: Skill | None = None
         skills_load_start_ns = time.time_ns()
         if self._skills is not None:
             try:
@@ -707,6 +710,7 @@ class AgentRuntimeServicer(pb_grpc.AgentRuntimeServiceServicer):
                 )
                 return
             selected_skill_id = selected.native_id
+            selected_skill = selected
         sandbox_id = request.sandbox_id or None
         if self._binder is not None and sandbox_id is not None:
             log.warning(
@@ -1265,6 +1269,15 @@ class AgentRuntimeServicer(pb_grpc.AgentRuntimeServiceServicer):
             max_turns=request.max_turns or 30,
             model_route_id=model_route_id,
             selected_skill_id=selected_skill_id,
+            selected_skill_result_contract=(
+                selected_skill.result_contract
+                if selected_skill is not None and interaction_mode == "execute"
+                else None
+            ),
+            user_input_enabled=(
+                runtime_id == "claude-code"
+                and _metadata_value(context, RUN_SOURCE_METADATA_KEY) != "scheduled_task"
+            ),
             mcp_servers=active_mcp_servers,
             environment_skills=loaded_skills,
             auth_token=sandbox_token or None,

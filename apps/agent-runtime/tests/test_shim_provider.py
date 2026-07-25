@@ -172,16 +172,40 @@ async def test_clarification_and_tool_outcome_are_forwarded_as_structured_data()
     )
 
     assert [event.kind for event in events] == [
-        "clarification_required",
+        "question_required",
         "tool_result",
         "done",
     ]
     assert events[0].data == {
         "question": "Which package?",
         "options": ["Gateway", "Web"],
-        "text": "Which package?\n\n- Gateway\n- Web",
     }
     assert events[1].data["outcome"] == "permission_denied"
+
+
+async def test_runtime_acceptance_is_forwarded():
+    def stream_handler(sandbox_id, cmd, stdin):
+        yield ExecChunk(
+            kind="stdout",
+            data=_ndjson(
+                {"type": "run_accepted"},
+                {"type": "done", "session_id": "sess-accepted"},
+            ),
+        )
+        yield ExecChunk(kind="exit", exit_code=0)
+
+    provider = InSandboxShimProvider(StaticSandboxExecutor(stream_handler=stream_handler))
+    events = await _drain(
+        provider,
+        "continue",
+        AgentOptions(
+            user_id="U1",
+            session_id="S1",
+            sandbox_id="box-1",
+        ),
+    )
+
+    assert [event.kind for event in events] == ["run_accepted", "done"]
 
 
 async def test_progress_event_preserves_todo_items():

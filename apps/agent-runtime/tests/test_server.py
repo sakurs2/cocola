@@ -426,6 +426,17 @@ async def test_query_materializes_enabled_skills_without_prompt_injection():
     ]
 
 
+async def test_scheduled_task_does_not_enable_interactive_questions():
+    provider = ListProvider([AgentEvent(kind="done", data={})])
+    context = FakeContext((SimpleNamespace(key="x-cocola-run-source", value="scheduled_task"),))
+
+    await AgentRuntimeServicer(provider).Query(FakeRequest(), context)
+
+    assert provider.seen_options is not None
+    assert provider.seen_options.user_input_enabled is False
+    assert provider.seen_options.system_prompt is None
+
+
 async def test_query_reports_image_baked_skill_when_market_is_empty():
     _, digest = _skill_descriptors([], "U1")
     snapshot = platform_skill_snapshot()
@@ -473,7 +484,15 @@ async def test_query_instructs_agent_to_use_managed_preview_when_image_supports_
 
 async def test_query_validates_and_forwards_selected_skill():
     prov = ListProvider([AgentEvent(kind="done", data={})])
-    cat = StaticSkillCatalog([Skill(id="pdf", name="PDF", skill_md="# PDF")])
+    contract = {
+        "version": 1,
+        "renderer": "summary",
+        "schema": {"type": "object"},
+        "contract_hash": "sha256:" + "a" * 64,
+    }
+    cat = StaticSkillCatalog(
+        [Skill(id="pdf", name="PDF", skill_md="# PDF", result_contract=contract)]
+    )
 
     await AgentRuntimeServicer(
         prov,
@@ -482,6 +501,8 @@ async def test_query_validates_and_forwards_selected_skill():
     ).Query(FakeRequest(sandbox_id="box-1", skill_id="pdf"), FakeContext())
 
     assert prov.seen_options.selected_skill_id == "pdf"
+    assert prov.seen_options.selected_skill_result_contract == contract
+    assert prov.seen_options.system_prompt is None
 
 
 async def test_query_keeps_personal_catalog_id_out_of_runtime():
@@ -996,7 +1017,7 @@ async def test_plan_query_is_claude_read_only_and_skips_side_effect_integrations
     assert provider.seen_options.project_credential is None
     assert provider.seen_options.system_prompt is not None
     assert "cocola_submit_plan" in provider.seen_options.system_prompt
-    assert "cocola_request_clarification" in provider.seen_options.system_prompt
+    assert "cocola_request_user_input" in provider.seen_options.system_prompt
     assert "<cocola_plan>" not in provider.seen_options.system_prompt
     assert "Only changed regular files" not in provider.seen_options.system_prompt
     assert mcps.seen_user_id == ""

@@ -330,6 +330,9 @@ func (a *API) executePlan(w http.ResponseWriter, r *http.Request) {
 	case errors.Is(startErr, chatrun.ErrPlanState):
 		writeErr(w, http.StatusConflict, "PLAN_NOT_EXECUTABLE", "This plan cannot be executed in its current state.")
 		return
+	case errors.Is(startErr, chatrun.ErrQuestionPending):
+		writeErr(w, http.StatusConflict, "QUESTION_PENDING", "Answer or cancel Claude's pending question before starting another run.")
+		return
 	case errors.Is(startErr, chatrun.ErrPlanModelUnavailable):
 		writeErr(
 			w,

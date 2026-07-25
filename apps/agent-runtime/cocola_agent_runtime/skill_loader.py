@@ -48,6 +48,7 @@ class Skill:
     content_sha256: str = ""
     bundle_object_key: str = ""
     skill_md: str = ""
+    result_contract: dict | None = None
 
     @property
     def native_id(self) -> str:
@@ -68,6 +69,9 @@ class Skill:
             content_sha256=str(d.get("content_sha256", "")),
             bundle_object_key=str(d.get("bundle_object_key", "")),
             skill_md=str(d.get("skill_md", "")),
+            result_contract=(
+                dict(d["result_contract"]) if isinstance(d.get("result_contract"), dict) else None
+            ),
         )
 
 

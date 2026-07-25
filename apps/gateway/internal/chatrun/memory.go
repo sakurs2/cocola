@@ -13,6 +13,8 @@ type Memory struct {
 	runs              map[string]Run
 	plans             map[string]Plan
 	versions          map[string]int
+	questions         map[string]Question
+	questionVersions  map[string]int
 	unavailableModels map[string]bool
 	convo             convo.Store
 }
@@ -20,7 +22,8 @@ type Memory struct {
 func NewMemory(conversations convo.Store) *Memory {
 	return &Memory{
 		runs: make(map[string]Run), plans: make(map[string]Plan),
-		versions: make(map[string]int), unavailableModels: make(map[string]bool),
+		versions: make(map[string]int), questions: make(map[string]Question),
+		questionVersions: make(map[string]int), unavailableModels: make(map[string]bool),
 		convo: conversations,
 	}
 }
@@ -63,6 +66,12 @@ func (m *Memory) Start(ctx context.Context, in StartInput) (StartResult, error) 
 	}
 	if err == nil && in.Conversation.FolderID != "" && in.Conversation.FolderID != effective.FolderID {
 		return StartResult{}, ErrFolderMismatch
+	}
+	for _, question := range m.questions {
+		if question.ConversationID == in.Run.ConversationID &&
+			(question.Status == QuestionStatusPending || question.Status == QuestionStatusAnswering) {
+			return StartResult{}, ErrQuestionPending
+		}
 	}
 	if err := m.convo.UpsertConversation(ctx, effective); err != nil {
 		if err == convo.ErrNotFound {
@@ -151,10 +160,36 @@ func (m *Memory) Finalize(ctx context.Context, in FinalizeInput) (FinalizeResult
 	}
 	run.Status = in.Status
 	run.ErrorCode = in.ErrorCode
+	run.ToolCallCount = in.ToolCallCount
+	run.LLMCallCount = in.LLMCallCount
 	run.CompletedAt = &now
+	if !run.StartedAt.IsZero() && !now.Before(run.StartedAt) {
+		run.DurationMS = now.Sub(run.StartedAt).Milliseconds()
+	}
 	run.LastActivityAt = now
 	var plan *Plan
+	var question *Question
+	var answeredQuestion *Question
+	var restoredQuestion *Question
 	var supersededPlanID string
+	for id, existing := range m.questions {
+		if existing.AnswerRunID == run.ID && existing.Status == QuestionStatusAnswering {
+			if in.RuntimeAccepted {
+				existing.Status = QuestionStatusAnswered
+				answeredQuestion = &existing
+			} else {
+				existing.Status = QuestionStatusPending
+				existing.AnswerRunID = ""
+				existing.Answer = nil
+				existing.AnsweredBy = ""
+				existing.AnsweredAt = nil
+				restoredQuestion = &existing
+			}
+			existing.UpdatedAt = now
+			m.questions[id] = existing
+			_ = m.updateQuestionMessageStatus(ctx, existing)
+		}
+	}
 	if in.PlanCandidate != nil && run.InteractionMode == InteractionModePlan &&
 		in.Status == StatusSuccess {
 		candidate := in.PlanCandidate
@@ -193,6 +228,41 @@ func (m *Memory) Finalize(ctx context.Context, in FinalizeInput) (FinalizeResult
 		in.AssistantMessage.Parts = append(in.AssistantMessage.Parts, planPart(value))
 		plan = &value
 	}
+	if in.QuestionCandidate != nil && in.Status == StatusWaitingInput {
+		candidate := in.QuestionCandidate
+		if !validQuestionCandidate(candidate) {
+			m.mu.Unlock()
+			return FinalizeResult{}, ErrQuestionState
+		}
+		for _, existing := range m.questions {
+			if existing.ConversationID == run.ConversationID &&
+				(existing.Status == QuestionStatusPending ||
+					existing.Status == QuestionStatusAnswering) {
+				m.mu.Unlock()
+				return FinalizeResult{}, ErrQuestionPending
+			}
+		}
+		version := m.questionVersions[run.ConversationID] + 1
+		m.questionVersions[run.ConversationID] = version
+		value := Question{
+			ID: candidate.ID, ConversationID: run.ConversationID, Version: version,
+			Status: QuestionStatusPending, SourceRunID: run.ID,
+			InteractionMode: normalizeInteractionMode(candidate.InteractionMode),
+			RuntimeID:       candidate.RuntimeID, ModelRouteID: candidate.ModelRouteID,
+			ModelAlias: candidate.ModelAlias, SkillID: candidate.SkillID,
+			Text: candidate.Text, Options: append([]convo.QuestionOption(nil), candidate.Options...),
+			CreatedAt: now, UpdatedAt: now,
+		}
+		m.questions[value.ID] = value
+		if in.AssistantMessage == nil {
+			in.AssistantMessage = &convo.Message{
+				ID: run.ID + "-assistant", ConversationID: run.ConversationID,
+				Role: "assistant", CreatedAt: now,
+			}
+		}
+		in.AssistantMessage.Parts = append(in.AssistantMessage.Parts, questionPart(value))
+		question = &value
+	}
 	if run.PlanID != "" && run.InteractionMode == InteractionModeExecute {
 		value, exists := m.plans[run.PlanID]
 		if !exists {
@@ -222,7 +292,222 @@ func (m *Memory) Finalize(ctx context.Context, in FinalizeInput) (FinalizeResult
 	if in.Reveal {
 		_ = m.convo.RevealConversation(ctx, run.ConversationID, run.UserID, in.ConversationTitle, now)
 	}
-	return FinalizeResult{Run: run, Plan: plan, SupersededPlanID: supersededPlanID}, nil
+	return FinalizeResult{
+		Run: run, Plan: plan, Question: question, AnsweredQuestion: answeredQuestion,
+		RestoredQuestion: restoredQuestion, SupersededPlanID: supersededPlanID,
+	}, nil
+}
+
+func (m *Memory) GetQuestion(
+	ctx context.Context,
+	conversationID, questionID, userID string,
+) (Question, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if _, err := m.convo.GetConversation(ctx, conversationID, userID); err != nil {
+		return Question{}, ErrNotFound
+	}
+	question, ok := m.questions[questionID]
+	if !ok || question.ConversationID != conversationID {
+		return Question{}, ErrNotFound
+	}
+	return question, nil
+}
+
+func (m *Memory) ListQuestions(
+	ctx context.Context,
+	conversationID, userID string,
+) ([]Question, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if _, err := m.convo.GetConversation(ctx, conversationID, userID); err != nil {
+		return nil, ErrNotFound
+	}
+	out := make([]Question, 0)
+	for _, question := range m.questions {
+		if question.ConversationID == conversationID {
+			out = append(out, question)
+		}
+	}
+	return out, nil
+}
+
+func (m *Memory) ListRuns(
+	ctx context.Context,
+	conversationID, userID string,
+) ([]Run, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if _, err := m.convo.GetConversation(ctx, conversationID, userID); err != nil {
+		return nil, ErrNotFound
+	}
+	out := make([]Run, 0)
+	for _, run := range m.runs {
+		if run.ConversationID == conversationID && run.UserID == userID {
+			out = append(out, run)
+		}
+	}
+	return out, nil
+}
+
+func (m *Memory) StartQuestionAnswer(
+	ctx context.Context,
+	in QuestionAnswerInput,
+) (QuestionAnswerResult, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	conversation, err := m.convo.GetConversation(ctx, in.ConversationID, in.UserID)
+	if err != nil {
+		return QuestionAnswerResult{}, ErrNotFound
+	}
+	for _, existing := range m.runs {
+		if existing.ConversationID == in.ConversationID && existing.UserID == in.UserID &&
+			existing.ClientRequestID != "" &&
+			existing.ClientRequestID == in.Run.ClientRequestID {
+			question, exists := m.questions[in.QuestionID]
+			if !exists || question.AnswerRunID != existing.ID {
+				return QuestionAnswerResult{}, ErrQuestionNotCurrent
+			}
+			return QuestionAnswerResult{
+				Run: existing, Conversation: conversation, Question: question,
+			}, nil
+		}
+	}
+	question, ok := m.questions[in.QuestionID]
+	if !ok || question.ConversationID != in.ConversationID {
+		return QuestionAnswerResult{}, ErrNotFound
+	}
+	if question.Version != in.ExpectedVersion {
+		return QuestionAnswerResult{}, ErrQuestionNotCurrent
+	}
+	if question.Status != QuestionStatusPending {
+		return QuestionAnswerResult{}, ErrQuestionState
+	}
+	if question.ModelRouteID == "" || m.unavailableModels[question.ModelRouteID] {
+		return QuestionAnswerResult{}, ErrQuestionModelUnavailable
+	}
+	for _, existing := range m.runs {
+		if existing.ConversationID == in.ConversationID && existing.Status == StatusRunning {
+			return QuestionAnswerResult{Run: existing, Conversation: conversation}, ErrConflict
+		}
+	}
+	run := in.Run
+	run.ConversationID = in.ConversationID
+	run.UserID = in.UserID
+	run.InteractionMode = normalizeInteractionMode(question.InteractionMode)
+	m.runs[run.ID] = run
+	if err := m.convo.InsertMessage(ctx, in.UserMessage); err != nil {
+		delete(m.runs, run.ID)
+		return QuestionAnswerResult{}, err
+	}
+	now := in.AnsweredAt
+	if now.IsZero() {
+		now = time.Now().UTC()
+	}
+	question.Status = QuestionStatusAnswering
+	question.AnswerRunID = run.ID
+	question.Answer = &in.Answer
+	question.AnsweredBy = in.UserID
+	question.AnsweredAt = &now
+	question.UpdatedAt = now
+	m.questions[question.ID] = question
+	if err := m.updateQuestionMessageStatus(ctx, question); err != nil {
+		return QuestionAnswerResult{}, err
+	}
+	return QuestionAnswerResult{
+		Run: run, Conversation: conversation, Question: question, Created: true,
+	}, nil
+}
+
+func (m *Memory) AcceptQuestionAnswer(
+	ctx context.Context,
+	runID, questionID, userID string,
+	now time.Time,
+) (Question, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	run, ok := m.runs[runID]
+	if !ok || run.UserID != userID || run.Status != StatusRunning {
+		return Question{}, ErrNotFound
+	}
+	question, ok := m.questions[questionID]
+	if !ok || question.ConversationID != run.ConversationID ||
+		question.AnswerRunID != runID {
+		return Question{}, ErrNotFound
+	}
+	if question.Status == QuestionStatusAnswered {
+		return question, nil
+	}
+	if question.Status != QuestionStatusAnswering {
+		return Question{}, ErrQuestionState
+	}
+	if now.IsZero() {
+		now = time.Now().UTC()
+	}
+	question.Status = QuestionStatusAnswered
+	question.UpdatedAt = now
+	previous := m.questions[question.ID]
+	m.questions[question.ID] = question
+	if err := m.updateQuestionMessageStatus(ctx, question); err != nil {
+		m.questions[question.ID] = previous
+		return Question{}, err
+	}
+	return question, nil
+}
+
+func (m *Memory) CancelQuestion(
+	ctx context.Context,
+	conversationID, questionID, userID string,
+	expectedVersion int,
+	now time.Time,
+) (Question, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if _, err := m.convo.GetConversation(ctx, conversationID, userID); err != nil {
+		return Question{}, ErrNotFound
+	}
+	question, ok := m.questions[questionID]
+	if !ok || question.ConversationID != conversationID {
+		return Question{}, ErrNotFound
+	}
+	if question.Version != expectedVersion {
+		return Question{}, ErrQuestionNotCurrent
+	}
+	if question.Status != QuestionStatusPending {
+		return Question{}, ErrQuestionState
+	}
+	if now.IsZero() {
+		now = time.Now().UTC()
+	}
+	question.Status = QuestionStatusCancelled
+	question.UpdatedAt = now
+	m.questions[question.ID] = question
+	if err := m.updateQuestionMessageStatus(ctx, question); err != nil {
+		return Question{}, err
+	}
+	return question, nil
+}
+
+func (m *Memory) updateQuestionMessageStatus(ctx context.Context, question Question) error {
+	sourceRun := m.runs[question.SourceRunID]
+	messages, err := m.convo.GetMessages(ctx, question.ConversationID, sourceRun.UserID)
+	if err != nil {
+		return err
+	}
+	for _, message := range messages {
+		if message.ID != question.SourceRunID+"-assistant" {
+			continue
+		}
+		for i := range message.Parts {
+			if message.Parts[i].Type == convo.PartQuestion &&
+				message.Parts[i].QuestionID == question.ID {
+				message.Parts[i].Status = question.Status
+				message.Parts[i].QuestionAnswer = question.Answer
+			}
+		}
+		return m.convo.UpsertMessage(ctx, message)
+	}
+	return nil
 }
 
 func (m *Memory) GetPlan(
@@ -240,6 +525,24 @@ func (m *Memory) GetPlan(
 		return Plan{}, ErrNotFound
 	}
 	return plan, nil
+}
+
+func (m *Memory) ListPlans(
+	ctx context.Context,
+	conversationID, userID string,
+) ([]Plan, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if _, err := m.convo.GetConversation(ctx, conversationID, userID); err != nil {
+		return nil, ErrNotFound
+	}
+	plans := make([]Plan, 0)
+	for _, plan := range m.plans {
+		if plan.ConversationID == conversationID {
+			plans = append(plans, plan)
+		}
+	}
+	return plans, nil
 }
 
 func (m *Memory) StartPlanExecution(
@@ -270,6 +573,13 @@ func (m *Memory) StartPlanExecution(
 	}
 	if plan.Status != PlanStatusReady && plan.Status != PlanStatusStopped {
 		return PlanExecutionResult{}, ErrPlanState
+	}
+	for _, question := range m.questions {
+		if question.ConversationID == in.ConversationID &&
+			(question.Status == QuestionStatusPending ||
+				question.Status == QuestionStatusAnswering) {
+			return PlanExecutionResult{}, ErrQuestionPending
+		}
 	}
 	if plan.ModelRouteID == "" || m.unavailableModels[plan.ModelRouteID] {
 		return PlanExecutionResult{}, ErrPlanModelUnavailable
@@ -378,6 +688,15 @@ func (m *Memory) InterruptRunning(_ context.Context, now time.Time) (int64, erro
 			plan.UpdatedAt = now
 			m.plans[plan.ID] = plan
 			_ = m.updatePlanMessageStatus(context.Background(), plan)
+		}
+		for questionID, question := range m.questions {
+			if question.AnswerRunID != run.ID || question.Status != QuestionStatusAnswering {
+				continue
+			}
+			question.Status = QuestionStatusAnswered
+			question.UpdatedAt = now
+			m.questions[questionID] = question
+			_ = m.updateQuestionMessageStatus(context.Background(), question)
 		}
 		count++
 	}

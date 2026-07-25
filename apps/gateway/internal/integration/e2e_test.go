@@ -96,7 +96,7 @@ func buildHandler(t *testing.T, conn *grpc.ClientConn) http.Handler {
 	return httpapi.New(client, verifier, logger.Must()).
 		WithConvoStore(conversations).
 		WithChatRuns(runs, httpapi.RunConfig{
-			PingEvery: time.Hour,
+			PingEvery:   time.Hour,
 			MergeWindow: time.Millisecond, DraftInterval: time.Millisecond,
 		}).Handler()
 }
@@ -130,15 +130,18 @@ func TestEndToEndChatStreamsThroughRealGRPC(t *testing.T) {
 	// deltas, and owns the terminal status event.
 	for _, want := range []string{
 		"event: snapshot\n", "event: text\n", `"text":"hello pingworld"`,
-		"event: done\n", `"status":"success"`,
+		"event: run_summary\n", "event: done\n", `"status":"success"`,
 	} {
 		if !strings.Contains(body, want) {
 			t.Fatalf("SSE body missing %q\n---\n%s", want, body)
 		}
 	}
-	// snapshot + merged text + terminal status => three SSE records.
-	if got := strings.Count(body, "\n\n"); got != 3 {
-		t.Fatalf("want 3 SSE records, got %d\n---\n%s", got, body)
+	// snapshot + merged text + durable summary + terminal status.
+	if got := strings.Count(body, "\n\n"); got != 4 {
+		t.Fatalf("want 4 SSE records, got %d\n---\n%s", got, body)
+	}
+	if strings.Index(body, "event: run_summary\n") > strings.Index(body, "event: done\n") {
+		t.Fatalf("run summary must precede done\n---\n%s", body)
 	}
 
 	// The forwarded user_id MUST come from the verified token; prompt/session

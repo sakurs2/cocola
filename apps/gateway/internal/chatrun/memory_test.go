@@ -329,3 +329,177 @@ func TestMemoryNewPlanSupersedesOldVersion(t *testing.T) {
 		t.Fatalf("cancelled plan = %+v, %v", cancelled, err)
 	}
 }
+
+func TestMemoryQuestionAnswerCanContinueIntoAnotherQuestion(t *testing.T) {
+	ctx := context.Background()
+	conversations := convo.NewMemory()
+	store := NewMemory(conversations)
+	initial := testStartInput("run-1", "request-1", "user-1", "conversation-1")
+	initial.Run.ModelRouteID = "route-1"
+	initial.Run.ModelAlias = "sonnet"
+	if _, err := store.Start(ctx, initial); err != nil {
+		t.Fatal(err)
+	}
+	first, err := store.Finalize(ctx, FinalizeInput{
+		RunID: "run-1", UserID: "user-1", Status: StatusWaitingInput,
+		QuestionCandidate: &QuestionCandidate{
+			ID: "11111111-1111-4111-8111-111111111111", RuntimeID: "claude-code",
+			ModelRouteID: "route-1", ModelAlias: "sonnet", InteractionMode: InteractionModeExecute,
+			Text: "Which database?", Options: []convo.QuestionOption{
+				{ID: "option-1", Label: "PostgreSQL"},
+				{ID: "option-2", Label: "SQLite"},
+			},
+		},
+	})
+	if err != nil || first.Question == nil || first.Question.Version != 1 ||
+		first.Run.Status != StatusWaitingInput {
+		t.Fatalf("first question = %+v, %v", first, err)
+	}
+	if _, err := store.Start(
+		ctx,
+		testStartInput("blocked-run", "blocked-request", "user-1", "conversation-1"),
+	); !errors.Is(err, ErrQuestionPending) {
+		t.Fatalf("chat with pending question error = %v, want ErrQuestionPending", err)
+	}
+
+	now := time.Now().UTC()
+	answerInput := QuestionAnswerInput{
+		Run: Run{
+			ID: "run-2", RootSpanID: "span-2", ConversationID: "conversation-1",
+			UserID: "user-1", Source: "interactive", ModelRouteID: "route-1",
+			ModelAlias: "sonnet", ClientRequestID: "answer-request",
+			InteractionMode: InteractionModeExecute, Status: StatusRunning,
+			StartedAt: now, LastActivityAt: now,
+		},
+		ConversationID: "conversation-1", UserID: "user-1",
+		QuestionID: first.Question.ID, ExpectedVersion: 1,
+		Answer: convo.QuestionAnswer{OptionID: "option-1"},
+		UserMessage: convo.Message{
+			ID: "run-2-user", ConversationID: "conversation-1", Role: "user",
+			Parts: []convo.Part{{Type: convo.PartText, Text: "PostgreSQL"}}, CreatedAt: now,
+		},
+		AnsweredAt: now,
+	}
+	started, err := store.StartQuestionAnswer(ctx, answerInput)
+	if err != nil || !started.Created || started.Question.Status != QuestionStatusAnswering {
+		t.Fatalf("answer start = %+v, %v", started, err)
+	}
+	retry, err := store.StartQuestionAnswer(ctx, answerInput)
+	if err != nil || retry.Created || retry.Run.ID != started.Run.ID {
+		t.Fatalf("answer retry = %+v, %v", retry, err)
+	}
+	accepted, err := store.AcceptQuestionAnswer(
+		ctx, started.Run.ID, started.Question.ID, "user-1", now.Add(time.Second),
+	)
+	if err != nil || accepted.Status != QuestionStatusAnswered {
+		t.Fatalf("accepted answer = %+v, %v", accepted, err)
+	}
+
+	second, err := store.Finalize(ctx, FinalizeInput{
+		RunID: "run-2", UserID: "user-1", Status: StatusWaitingInput, RuntimeAccepted: true,
+		QuestionCandidate: &QuestionCandidate{
+			ID: "22222222-2222-4222-8222-222222222222", RuntimeID: "claude-code",
+			ModelRouteID: "route-1", ModelAlias: "sonnet", InteractionMode: InteractionModeExecute,
+			Text: "Which migration strategy?",
+		},
+	})
+	if err != nil || second.Question == nil || second.Question.Version != 2 ||
+		second.Question.Status != QuestionStatusPending {
+		t.Fatalf("second question = %+v, %v", second, err)
+	}
+	current, err := store.ListQuestions(ctx, "conversation-1", "user-1")
+	if err != nil || len(current) != 2 {
+		t.Fatalf("questions = %+v, %v", current, err)
+	}
+}
+
+func TestMemoryQuestionAnswerRestoresPendingWhenRuntimeDoesNotAccept(t *testing.T) {
+	ctx := context.Background()
+	conversations := convo.NewMemory()
+	store := NewMemory(conversations)
+	initial := testStartInput("run-1", "request-1", "user-1", "conversation-1")
+	initial.Run.ModelRouteID = "route-1"
+	if _, err := store.Start(ctx, initial); err != nil {
+		t.Fatal(err)
+	}
+	created, err := store.Finalize(ctx, FinalizeInput{
+		RunID: "run-1", UserID: "user-1", Status: StatusWaitingInput,
+		QuestionCandidate: &QuestionCandidate{
+			ID: "11111111-1111-4111-8111-111111111111", RuntimeID: "claude-code",
+			ModelRouteID: "route-1", InteractionMode: InteractionModeExecute,
+			Text: "Which database?",
+		},
+	})
+	if err != nil || created.Question == nil {
+		t.Fatalf("question = %+v, %v", created, err)
+	}
+	now := time.Now().UTC()
+	started, err := store.StartQuestionAnswer(ctx, QuestionAnswerInput{
+		Run: Run{
+			ID: "run-2", RootSpanID: "span-2", ConversationID: "conversation-1",
+			UserID: "user-1", Source: "interactive", ModelRouteID: "route-1",
+			ClientRequestID: "answer-request", InteractionMode: InteractionModeExecute,
+			Status: StatusRunning, StartedAt: now, LastActivityAt: now,
+		},
+		ConversationID: "conversation-1", UserID: "user-1",
+		QuestionID: created.Question.ID, ExpectedVersion: created.Question.Version,
+		Answer: convo.QuestionAnswer{Text: "PostgreSQL"},
+		UserMessage: convo.Message{
+			ID: "run-2-user", ConversationID: "conversation-1", Role: "user",
+			Parts: []convo.Part{{Type: convo.PartText, Text: "PostgreSQL"}}, CreatedAt: now,
+		},
+		AnsweredAt: now,
+	})
+	if err != nil || !started.Created {
+		t.Fatalf("answer start = %+v, %v", started, err)
+	}
+	finalized, err := store.Finalize(ctx, FinalizeInput{
+		RunID: "run-2", UserID: "user-1", Status: StatusError,
+		ErrorCode: "SESSION_RESUME_REQUIRED", CompletedAt: now.Add(time.Second),
+	})
+	if err != nil || finalized.RestoredQuestion == nil {
+		t.Fatalf("finalized = %+v, %v", finalized, err)
+	}
+	restored, err := store.GetQuestion(
+		ctx, "conversation-1", created.Question.ID, "user-1",
+	)
+	if err != nil || restored.Status != QuestionStatusPending ||
+		restored.AnswerRunID != "" || restored.Answer != nil ||
+		restored.AnsweredBy != "" || restored.AnsweredAt != nil {
+		t.Fatalf("restored question = %+v, %v", restored, err)
+	}
+}
+
+func TestMemoryQuestionCancelRestoresNormalChat(t *testing.T) {
+	ctx := context.Background()
+	conversations := convo.NewMemory()
+	store := NewMemory(conversations)
+	initial := testStartInput("run-1", "request-1", "user-1", "conversation-1")
+	initial.Run.ModelRouteID = "route-1"
+	if _, err := store.Start(ctx, initial); err != nil {
+		t.Fatal(err)
+	}
+	created, err := store.Finalize(ctx, FinalizeInput{
+		RunID: "run-1", UserID: "user-1", Status: StatusWaitingInput,
+		QuestionCandidate: &QuestionCandidate{
+			ID: "11111111-1111-4111-8111-111111111111", RuntimeID: "claude-code",
+			ModelRouteID: "route-1", InteractionMode: InteractionModeExecute,
+			Text: "Continue?",
+		},
+	})
+	if err != nil || created.Question == nil {
+		t.Fatalf("question = %+v, %v", created, err)
+	}
+	cancelled, err := store.CancelQuestion(
+		ctx, "conversation-1", created.Question.ID, "user-1", 1, time.Now().UTC(),
+	)
+	if err != nil || cancelled.Status != QuestionStatusCancelled {
+		t.Fatalf("cancelled = %+v, %v", cancelled, err)
+	}
+	if _, err := store.Start(
+		ctx,
+		testStartInput("run-2", "request-2", "user-1", "conversation-1"),
+	); err != nil {
+		t.Fatalf("chat after cancellation = %v", err)
+	}
+}

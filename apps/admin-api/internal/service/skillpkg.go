@@ -17,6 +17,8 @@ import (
 	"sort"
 	"strings"
 	"time"
+
+	"gopkg.in/yaml.v3"
 )
 
 const (
@@ -47,7 +49,8 @@ type SkillImportCandidate struct {
 	ContentSHA256   string              `json:"content_sha256,omitempty"`
 	Bundle          []byte              `json:"-"`
 	Manifest        []SkillFileManifest `json:"manifest,omitempty"`
-	Frontmatter     map[string]string   `json:"frontmatter,omitempty"`
+	Frontmatter     map[string]any      `json:"frontmatter,omitempty"`
+	ResultContract  json.RawMessage     `json:"result_contract,omitempty"`
 	SkillMD         string              `json:"skill_md,omitempty"`
 	BundleObjectKey string              `json:"bundle_object_key,omitempty"`
 }
@@ -67,7 +70,7 @@ func sanitizeSkillID(value string) string {
 	return value
 }
 
-func parseSkillFrontmatter(data string) (map[string]string, string, error) {
+func parseSkillFrontmatter(data string) (map[string]any, string, error) {
 	text := strings.ReplaceAll(data, "\r\n", "\n")
 	if !strings.HasPrefix(text, "---\n") {
 		return nil, "", fmt.Errorf("SKILL.md must start with YAML frontmatter")
@@ -80,24 +83,16 @@ func parseSkillFrontmatter(data string) (map[string]string, string, error) {
 	raw := rest[:idx]
 	body := rest[idx+len("\n---"):]
 	body = strings.TrimPrefix(body, "\n")
-	fm := map[string]string{}
-	for _, line := range strings.Split(raw, "\n") {
-		line = strings.TrimSpace(line)
-		if line == "" || strings.HasPrefix(line, "#") {
-			continue
-		}
-		k, v, ok := strings.Cut(line, ":")
-		if !ok {
-			continue
-		}
-		key := strings.TrimSpace(k)
-		val := strings.TrimSpace(v)
-		val = strings.Trim(val, `"'`)
-		if key != "" {
-			fm[key] = val
-		}
+	fm := map[string]any{}
+	if err := yaml.Unmarshal([]byte(raw), &fm); err != nil {
+		return nil, "", fmt.Errorf("SKILL.md frontmatter is invalid YAML")
 	}
 	return fm, body, nil
+}
+
+func frontmatterString(frontmatter map[string]any, key string) string {
+	value, _ := frontmatter[key].(string)
+	return strings.TrimSpace(value)
 }
 
 func safeArchivePath(name string) (string, bool) {
@@ -276,12 +271,12 @@ func buildSkillCandidate(root string, all map[string][]byte) SkillImportCandidat
 		c.Errors = append(c.Errors, err.Error())
 	} else {
 		c.Frontmatter = fm
-		if name := strings.TrimSpace(fm["name"]); name != "" {
+		if name := frontmatterString(fm, "name"); name != "" {
 			c.Name = name
 			c.ID = sanitizeSkillID(name)
 		}
-		c.Description = strings.TrimSpace(fm["description"])
-		c.Version = strings.TrimSpace(fm["version"])
+		c.Description = frontmatterString(fm, "description")
+		c.Version = frontmatterString(fm, "version")
 		if c.Description == "" {
 			c.Valid = false
 			c.Errors = append(c.Errors, "frontmatter.description is required")
@@ -289,6 +284,13 @@ func buildSkillCandidate(root string, all map[string][]byte) SkillImportCandidat
 		if strings.TrimSpace(body) == "" {
 			c.Valid = false
 			c.Errors = append(c.Errors, "SKILL.md body is required")
+		}
+		contract, contractErr := normalizedSkillResultContractJSON(skillFrontmatterJSON(c))
+		if contractErr != nil {
+			c.Valid = false
+			c.Errors = append(c.Errors, contractErr.Error())
+		} else {
+			c.ResultContract = contract
 		}
 	}
 	if c.Name == "" {

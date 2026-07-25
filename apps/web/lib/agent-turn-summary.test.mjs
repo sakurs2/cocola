@@ -154,6 +154,34 @@ test("a reviewable plan stays in final output and is copied as Markdown", () => 
   );
 });
 
+test("durable rich result nodes remain outside the collapsible process section", () => {
+  const parts = [
+    { type: "reasoning", text: "Preparing the response." },
+    { type: "tool-call", toolName: "Read" },
+    {
+      type: "data",
+      name: "question",
+      data: { questionId: "question-1", status: "pending", question: "Choose one." },
+    },
+    {
+      type: "data",
+      name: "structured-result",
+      data: { runId: "run-1", renderer: "metrics", rendererVersion: 1, data: {} },
+    },
+    {
+      type: "data",
+      name: "run-summary",
+      data: { runId: "run-1", status: "waiting_input" },
+    },
+  ];
+
+  assert.deepEqual(splitAgentTurnParts(parts), {
+    processIndices: [0, 1],
+    outputIndices: [2, 3, 4],
+    hasProcess: true,
+  });
+});
+
 test("a memory miss remains index-stable without creating a visible process summary", () => {
   for (const part of [
     { type: "memory-recall", status: "miss", count: 0 },

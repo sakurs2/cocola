@@ -57,6 +57,9 @@ from pathlib import Path
 from typing import Any
 from urllib.parse import urlsplit, urlunsplit
 
+from jsonschema import Draft202012Validator
+from jsonschema.exceptions import SchemaError, ValidationError
+
 
 def _emit(obj: dict[str, Any]) -> None:
     """Write one compact NDJSON event line and flush immediately."""
@@ -84,7 +87,7 @@ def _read_request() -> dict[str, Any]:
 def _build_options(
     req: dict[str, Any],
     *,
-    plan_control: _ClaudePlanControl | None = None,
+    run_control: _CocolaRunControl | None = None,
 ):
     """Translate a Request into ClaudeAgentOptions.
 
@@ -105,6 +108,7 @@ def _build_options(
         max_turns=int(req.get("max_turns") or 20),
         cwd=cwd,
         permission_mode=permission_mode,
+        disallowed_tools=["AskUserQuestion"],
     )
 
     # The renamed Claude *Agent* SDK (>=0.2) no longer enables Claude Code's
@@ -138,15 +142,23 @@ def _build_options(
     # without a RAM snapshot.
     if req.get("resume"):
         kwargs["resume"] = req["resume"]
-    if plan_mode:
-        control = plan_control or _ClaudePlanControl()
-        kwargs["mcp_servers"] = {
-            _PLAN_CONTROL_SERVER: control.sdk_server(claude_agent_sdk),
-        }
+    control = run_control
+    if control is not None:
+        mcp_servers = (
+            {}
+            if plan_mode
+            else dict(req["mcp_servers"])
+            if isinstance(req.get("mcp_servers"), dict)
+            else {}
+        )
+        mcp_servers[_PLAN_CONTROL_SERVER] = control.sdk_server(claude_agent_sdk)
+        kwargs["mcp_servers"] = mcp_servers
         kwargs["strict_mcp_config"] = True
-        kwargs["allowed_tools"] = list(_PLAN_CONTROL_TOOL_NAMES)
-        kwargs["disallowed_tools"] = list(_PLAN_DISALLOWED_TOOLS)
-        kwargs["can_use_tool"] = control.can_use_tool
+        kwargs["hooks"] = control.sdk_hooks(claude_agent_sdk)
+        if plan_mode:
+            kwargs["allowed_tools"] = sorted(control.tool_names)
+            kwargs["disallowed_tools"] = list(_PLAN_DISALLOWED_TOOLS)
+            kwargs["can_use_tool"] = control.can_use_tool
     elif isinstance(req.get("mcp_servers"), dict) and req["mcp_servers"]:
         kwargs["mcp_servers"] = req["mcp_servers"]
         kwargs["strict_mcp_config"] = True
@@ -170,11 +182,19 @@ _PLAN_INVALID_ERROR = "Claude did not return a reviewable plan. Refine the reque
 _PLAN_CONTROL_SERVER = "cocola_control"
 _PLAN_CONTROL_TOOLS = (
     "cocola_submit_plan",
-    "cocola_request_clarification",
+    "cocola_request_user_input",
     "cocola_get_runtime_info",
 )
+_RESULT_CONTROL_TOOL = "cocola_submit_result"
 _PLAN_CONTROL_TOOL_NAMES = tuple(
     f"mcp__{_PLAN_CONTROL_SERVER}__{name}" for name in _PLAN_CONTROL_TOOLS
+)
+_TERMINAL_CONTROL_TOOL_NAMES = frozenset(
+    {
+        f"mcp__{_PLAN_CONTROL_SERVER}__cocola_submit_plan",
+        f"mcp__{_PLAN_CONTROL_SERVER}__cocola_request_user_input",
+        f"mcp__{_PLAN_CONTROL_SERVER}__{_RESULT_CONTROL_TOOL}",
+    }
 )
 _PLAN_DISALLOWED_TOOLS = (
     "ExitPlanMode",
@@ -501,7 +521,7 @@ class _ClaudeTaskProgress:
 def _block_to_event(
     block: Any,
     task_progress: _ClaudeTaskProgress | None = None,
-    tool_outcomes: _ClaudePlanControl | None = None,
+    tool_outcomes: _CocolaRunControl | None = None,
 ) -> dict[str, Any] | None:
     """Map one SDK content block to a transport event, or None to skip.
 
@@ -600,14 +620,128 @@ def _message_to_events(
     return events
 
 
-class _ClaudePlanControl:
-    """Own the trusted, structured terminal protocol for one Plan run."""
+def _valid_structured_result(value: Any, depth: int = 0) -> bool:
+    if depth > 12:
+        return False
+    if value is None or isinstance(value, (bool, int, float)):
+        return True
+    if isinstance(value, str):
+        return len(value.encode("utf-8")) <= 4 * 1024
+    if isinstance(value, list):
+        return len(value) <= 200 and all(
+            _valid_structured_result(item, depth + 1) for item in value
+        )
+    if isinstance(value, dict):
+        return len(value) <= 200 and all(
+            isinstance(key, str) and len(key) <= 256 and _valid_structured_result(item, depth + 1)
+            for key, item in value.items()
+        )
+    return False
 
-    def __init__(self) -> None:
+
+def _valid_structured_renderer_shape(renderer: str, value: Any) -> bool:
+    if not isinstance(value, dict):
+        return False
+    if renderer == "table":
+        columns = value.get("columns")
+        rows = value.get("rows")
+        return (
+            isinstance(columns, list)
+            and isinstance(rows, list)
+            and len(columns) <= 20
+            and len(rows) <= 200
+        )
+    if renderer == "list":
+        items = value.get("items")
+        return isinstance(items, list) and len(items) <= 200
+    if renderer == "metrics":
+        metrics = value.get("metrics")
+        if isinstance(metrics, (dict, list)):
+            return len(metrics) <= 20
+        return len(value) <= 21
+    return True
+
+
+def _has_remote_schema_ref(value: Any) -> bool:
+    if isinstance(value, dict):
+        for key, item in value.items():
+            if key == "$ref" and isinstance(item, str) and item and not item.startswith("#"):
+                return True
+            if _has_remote_schema_ref(item):
+                return True
+    elif isinstance(value, list):
+        return any(_has_remote_schema_ref(item) for item in value)
+    return False
+
+
+def _normalized_result_contract(value: Any) -> dict[str, Any] | None:
+    if value is None:
+        return None
+    if not isinstance(value, dict):
+        raise ValueError("result_contract must be an object")
+    renderer = str(value.get("renderer") or "").strip()
+    version = value.get("version")
+    schema = value.get("schema")
+    contract_hash = str(value.get("contract_hash") or "").strip()
+    if renderer not in {"summary", "table", "list", "metrics"} or version != 1:
+        raise ValueError("result_contract renderer or version is invalid")
+    if (
+        not isinstance(schema, dict)
+        or schema.get("type") != "object"
+        or re.fullmatch(r"sha256:[0-9a-f]{64}", contract_hash) is None
+        or _has_remote_schema_ref(schema)
+    ):
+        raise ValueError("result_contract schema or hash is invalid")
+    encoded = json.dumps(schema, ensure_ascii=False, separators=(",", ":"))
+    if len(encoded.encode("utf-8")) > 64 * 1024:
+        raise ValueError("result_contract schema exceeds 64 KiB")
+    try:
+        Draft202012Validator.check_schema(schema)
+    except SchemaError as error:
+        raise ValueError("result_contract schema is invalid") from error
+    return {
+        "renderer": renderer,
+        "version": 1,
+        "schema": schema,
+        "contract_hash": contract_hash,
+    }
+
+
+class _CocolaRunControl:
+    """Own the trusted, structured terminal protocol for one Claude run."""
+
+    def __init__(
+        self,
+        *,
+        plan_mode: bool = True,
+        user_input_enabled: bool = True,
+        result_contract: dict[str, Any] | None = None,
+    ) -> None:
+        self._plan_mode = plan_mode
+        self._user_input_enabled = user_input_enabled
+        self._result_contract = result_contract
         self._terminal_event: dict[str, Any] | None = None
+        self._protocol_error: dict[str, Any] | None = None
+        self._terminal_reserved_name = ""
+        self._ordinary_tool_ids: set[str] = set()
+        self._tool_gate_lock = asyncio.Lock()
+        self._interrupt_requested = False
         self._runtime_failed = False
         self._internal_tool_ids: set[str] = set()
         self._tool_outcomes: dict[str, str] = {}
+        names: set[str] = set()
+        if plan_mode:
+            names.update(_PLAN_CONTROL_TOOL_NAMES)
+        elif user_input_enabled:
+            names.add(f"mcp__{_PLAN_CONTROL_SERVER}__cocola_request_user_input")
+        if result_contract is not None:
+            names.add(f"mcp__{_PLAN_CONTROL_SERVER}__{_RESULT_CONTROL_TOOL}")
+        self._tool_names = names
+        self._terminal_tool_names = names & _TERMINAL_CONTROL_TOOL_NAMES
+
+    @property
+    def tool_names(self) -> frozenset[str]:
+        return frozenset(self._tool_names)
 
     @staticmethod
     def _tool_result(message: str, *, is_error: bool = False) -> dict[str, Any]:
@@ -617,24 +751,134 @@ class _ClaudePlanControl:
         }
 
     def _set_terminal(self, event: dict[str, Any]) -> dict[str, Any]:
-        if self._terminal_event is not None:
+        if not self._terminal_reserved_name:
+            event_type = str(event.get("type") or "")
+            if event_type == "structured_result_ready":
+                suffix = _RESULT_CONTROL_TOOL
+            elif event_type == "question_required":
+                suffix = "cocola_request_user_input"
+            else:
+                suffix = "cocola_submit_plan"
+            self._terminal_reserved_name = f"mcp__{_PLAN_CONTROL_SERVER}__{suffix}"
+        if self._terminal_event is not None or self._protocol_error is not None:
+            self._record_protocol_error(self._terminal_reserved_name)
             return self._tool_result(
-                "A Plan run can submit only one plan or clarification request.",
+                "A run can submit only one terminal control result.",
                 is_error=True,
             )
         self._terminal_event = event
-        return self._tool_result("Cocola recorded the Plan run result.")
+        return self._tool_result("Cocola recorded the run result.")
+
+    @staticmethod
+    def _protocol_error_for(tool_name: str) -> dict[str, Any]:
+        if tool_name.endswith("cocola_submit_result"):
+            return {
+                "type": "error",
+                "stage": "result",
+                "code": "STRUCTURED_RESULT_INVALID",
+                "error": "Claude returned an invalid structured result.",
+            }
+        if tool_name.endswith("cocola_request_user_input"):
+            return {
+                "type": "error",
+                "stage": "question",
+                "code": "QUESTION_OUTPUT_INVALID",
+                "error": "Claude returned an invalid question.",
+            }
+        return {
+            "type": "error",
+            "stage": "plan",
+            "code": "PLAN_OUTPUT_INVALID",
+            "error": _PLAN_INVALID_ERROR,
+        }
+
+    def _record_protocol_error(self, tool_name: str) -> None:
+        if self._protocol_error is None:
+            self._protocol_error = self._protocol_error_for(tool_name)
+
+    def _reject_terminal(self, tool_name: str, message: str) -> dict[str, Any]:
+        self._record_protocol_error(tool_name)
+        return self._tool_result(message, is_error=True)
+
+    @staticmethod
+    def _pre_tool_decision(allow: bool, reason: str = "") -> dict[str, Any]:
+        output: dict[str, Any] = {
+            "hookEventName": "PreToolUse",
+            "permissionDecision": "allow" if allow else "deny",
+        }
+        if reason:
+            output["permissionDecisionReason"] = reason
+        return {"hookSpecificOutput": output}
+
+    async def pre_tool_use(
+        self,
+        hook_input: dict[str, Any],
+        tool_use_id: str | None,
+        _context: Any,
+    ) -> dict[str, Any]:
+        tool_name = str(hook_input.get("tool_name") or "")
+        identifier = str(hook_input.get("tool_use_id") or tool_use_id or "")
+        async with self._tool_gate_lock:
+            if tool_name in self._terminal_tool_names:
+                if (
+                    self._ordinary_tool_ids
+                    or self._terminal_reserved_name
+                    or self._terminal_event is not None
+                    or self._protocol_error is not None
+                ):
+                    self._record_protocol_error(tool_name)
+                    return self._pre_tool_decision(
+                        False,
+                        "A terminal Cocola control tool must be the run's only active tool.",
+                    )
+                self._terminal_reserved_name = tool_name
+                return self._pre_tool_decision(True)
+            if (
+                self._terminal_reserved_name
+                or self._terminal_event is not None
+                or self._protocol_error is not None
+            ):
+                self._record_protocol_error(self._terminal_reserved_name)
+                return self._pre_tool_decision(
+                    False,
+                    "No tools may run after a terminal Cocola control tool.",
+                )
+            if identifier:
+                self._ordinary_tool_ids.add(identifier)
+            return self._pre_tool_decision(True)
+
+    async def post_tool_use(
+        self,
+        hook_input: dict[str, Any],
+        tool_use_id: str | None,
+        _context: Any,
+    ) -> dict[str, Any]:
+        identifier = str(hook_input.get("tool_use_id") or tool_use_id or "")
+        if identifier:
+            async with self._tool_gate_lock:
+                self._ordinary_tool_ids.discard(identifier)
+        return {}
+
+    def sdk_hooks(self, sdk: Any) -> dict[str, list[Any]]:
+        return {
+            "PreToolUse": [sdk.HookMatcher(matcher=None, hooks=[self.pre_tool_use])],
+            "PostToolUse": [sdk.HookMatcher(matcher=None, hooks=[self.post_tool_use])],
+            "PostToolUseFailure": [sdk.HookMatcher(matcher=None, hooks=[self.post_tool_use])],
+        }
 
     async def submit_plan(self, args: dict[str, Any]) -> dict[str, Any]:
         content = args.get("content_markdown")
         if not isinstance(content, str):
-            return self._tool_result(
+            return self._reject_terminal(
+                f"mcp__{_PLAN_CONTROL_SERVER}__cocola_submit_plan",
                 "content_markdown must be a non-empty Markdown string.",
-                is_error=True,
             )
         content = content.strip()
         if not content or len(content.encode("utf-8")) > _PLAN_MAX_BYTES:
-            return self._tool_result(_PLAN_INVALID_ERROR, is_error=True)
+            return self._reject_terminal(
+                f"mcp__{_PLAN_CONTROL_SERVER}__cocola_submit_plan",
+                _PLAN_INVALID_ERROR,
+            )
         return self._set_terminal(
             {
                 "type": "plan_ready",
@@ -642,49 +886,92 @@ class _ClaudePlanControl:
             }
         )
 
-    async def request_clarification(self, args: dict[str, Any]) -> dict[str, Any]:
+    async def request_user_input(self, args: dict[str, Any]) -> dict[str, Any]:
+        tool_name = f"mcp__{_PLAN_CONTROL_SERVER}__cocola_request_user_input"
         question = args.get("question")
         if not isinstance(question, str) or not question.strip():
-            return self._tool_result(
+            return self._reject_terminal(
+                tool_name,
                 "question must be a non-empty string.",
-                is_error=True,
             )
         question = question.strip()
         if len(question.encode("utf-8")) > 16 * 1024:
-            return self._tool_result("question is too large.", is_error=True)
+            return self._reject_terminal(tool_name, "question is too large.")
 
         raw_options = args.get("options", [])
         if raw_options is None:
             raw_options = []
         if not isinstance(raw_options, list) or len(raw_options) > 8:
-            return self._tool_result(
+            return self._reject_terminal(
+                tool_name,
                 "options must be an array containing at most eight strings.",
-                is_error=True,
             )
         options: list[str] = []
+        seen_options: set[str] = set()
         for raw_option in raw_options:
             if not isinstance(raw_option, str) or not raw_option.strip():
-                return self._tool_result(
-                    "each clarification option must be a non-empty string.",
-                    is_error=True,
+                return self._reject_terminal(
+                    tool_name,
+                    "each question option must be a non-empty string.",
                 )
             option = raw_option.strip()
             if len(option.encode("utf-8")) > 1024:
-                return self._tool_result(
-                    "each clarification option must not exceed 1 KiB.",
-                    is_error=True,
+                return self._reject_terminal(
+                    tool_name,
+                    "each question option must not exceed 1 KiB.",
                 )
+            if option in seen_options:
+                return self._reject_terminal(
+                    tool_name,
+                    "question options must be unique.",
+                )
+            seen_options.add(option)
             options.append(option)
 
-        text = question
-        if options:
-            text += "\n\n" + "\n".join(f"- {option}" for option in options)
         return self._set_terminal(
             {
-                "type": "clarification_required",
+                "type": "question_required",
                 "question": question,
                 "options": options,
-                "text": text,
+            }
+        )
+
+    async def submit_result(self, args: dict[str, Any]) -> dict[str, Any]:
+        tool_name = f"mcp__{_PLAN_CONTROL_SERVER}__{_RESULT_CONTROL_TOOL}"
+        contract = self._result_contract
+        if contract is None:
+            return self._reject_terminal(
+                tool_name,
+                "This run does not accept a structured result.",
+            )
+        try:
+            encoded = json.dumps(args, ensure_ascii=False, separators=(",", ":"))
+        except (TypeError, ValueError):
+            return self._reject_terminal(tool_name, "Structured result must be valid JSON.")
+        if (
+            len(encoded.encode("utf-8")) > 128 * 1024
+            or not _valid_structured_result(args)
+            or not _valid_structured_renderer_shape(contract["renderer"], args)
+        ):
+            return self._reject_terminal(tool_name, "Structured result exceeds Cocola limits.")
+        try:
+            Draft202012Validator(contract["schema"]).validate(args)
+        except ValidationError:
+            return self._reject_terminal(
+                tool_name,
+                "Structured result does not match the Skill result schema.",
+            )
+        title = args.get("title")
+        if not isinstance(title, str):
+            title = ""
+        return self._set_terminal(
+            {
+                "type": "structured_result_ready",
+                "renderer": contract["renderer"],
+                "renderer_version": contract["version"],
+                "contract_hash": contract["contract_hash"],
+                "title": title.strip()[: 4 * 1024],
+                "data": args,
             }
         )
 
@@ -742,58 +1029,84 @@ class _ClaudePlanControl:
             openWorldHint=False,
         )
 
-        @sdk.tool(
-            "cocola_submit_plan",
-            "Submit one complete Markdown plan to Cocola for user review.",
-            {
-                "type": "object",
-                "properties": {"content_markdown": {"type": "string"}},
-                "required": ["content_markdown"],
-                "additionalProperties": False,
-            },
-            annotations=annotations,
-        )
-        async def submit_plan(args: dict[str, Any]) -> dict[str, Any]:
-            return await self.submit_plan(args)
+        tools: list[Any] = []
+        if self._plan_mode:
 
-        @sdk.tool(
-            "cocola_request_clarification",
-            "Ask the user one concise question before completing the plan.",
-            {
-                "type": "object",
-                "properties": {
-                    "question": {"type": "string"},
-                    "options": {
-                        "type": "array",
-                        "items": {"type": "string"},
-                        "maxItems": 8,
-                    },
+            @sdk.tool(
+                "cocola_submit_plan",
+                "Submit one complete Markdown plan to Cocola for user review.",
+                {
+                    "type": "object",
+                    "properties": {"content_markdown": {"type": "string"}},
+                    "required": ["content_markdown"],
+                    "additionalProperties": False,
                 },
-                "required": ["question"],
-                "additionalProperties": False,
-            },
-            annotations=annotations,
-        )
-        async def request_clarification(args: dict[str, Any]) -> dict[str, Any]:
-            return await self.request_clarification(args)
+                annotations=annotations,
+            )
+            async def submit_plan(args: dict[str, Any]) -> dict[str, Any]:
+                return await self.submit_plan(args)
 
-        @sdk.tool(
-            "cocola_get_runtime_info",
-            "Return trusted Cocola runtime versions without using shell tools.",
-            {
-                "type": "object",
-                "properties": {},
-                "additionalProperties": False,
-            },
-            annotations=annotations,
-        )
-        async def get_runtime_info(args: dict[str, Any]) -> dict[str, Any]:
-            return await self.get_runtime_info(args)
+            tools.append(submit_plan)
+
+        if self._user_input_enabled:
+
+            @sdk.tool(
+                "cocola_request_user_input",
+                "Ask the user one concise question, then stop this run.",
+                {
+                    "type": "object",
+                    "properties": {
+                        "question": {"type": "string"},
+                        "options": {
+                            "type": "array",
+                            "items": {"type": "string"},
+                            "maxItems": 8,
+                        },
+                    },
+                    "required": ["question"],
+                    "additionalProperties": False,
+                },
+                annotations=annotations,
+            )
+            async def request_user_input(args: dict[str, Any]) -> dict[str, Any]:
+                return await self.request_user_input(args)
+
+            tools.append(request_user_input)
+
+        if self._plan_mode:
+
+            @sdk.tool(
+                "cocola_get_runtime_info",
+                "Return trusted Cocola runtime versions without using shell tools.",
+                {
+                    "type": "object",
+                    "properties": {},
+                    "additionalProperties": False,
+                },
+                annotations=annotations,
+            )
+            async def get_runtime_info(args: dict[str, Any]) -> dict[str, Any]:
+                return await self.get_runtime_info(args)
+
+            tools.append(get_runtime_info)
+
+        if self._result_contract is not None:
+
+            @sdk.tool(
+                _RESULT_CONTROL_TOOL,
+                "Submit the final structured Skill result to Cocola, then stop this run.",
+                self._result_contract["schema"],
+                annotations=annotations,
+            )
+            async def submit_result(args: dict[str, Any]) -> dict[str, Any]:
+                return await self.submit_result(args)
+
+            tools.append(submit_result)
 
         return sdk.create_sdk_mcp_server(
             name=_PLAN_CONTROL_SERVER,
             version="1.0.0",
-            tools=[submit_plan, request_clarification, get_runtime_info],
+            tools=tools,
         )
 
     async def can_use_tool(
@@ -804,7 +1117,7 @@ class _ClaudePlanControl:
     ) -> Any:
         import claude_agent_sdk
 
-        if tool_name in _PLAN_CONTROL_TOOL_NAMES:
+        if tool_name in self._tool_names:
             return claude_agent_sdk.PermissionResultAllow(updated_input=tool_input)
         tool_use_id = str(getattr(context, "tool_use_id", "") or "")
         if tool_use_id:
@@ -818,7 +1131,7 @@ class _ClaudePlanControl:
         name = str(tool_name or "")
         if not identifier:
             return
-        if name in _PLAN_CONTROL_TOOL_NAMES:
+        if name in self._tool_names:
             self._internal_tool_ids.add(identifier)
         elif name in _PLAN_DISALLOWED_TOOLS:
             self._tool_outcomes[identifier] = "permission_denied"
@@ -826,7 +1139,7 @@ class _ClaudePlanControl:
     def is_internal_tool_use(self, block: Any) -> bool:
         name = str(getattr(block, "name", "") or "")
         identifier = str(getattr(block, "id", "") or "")
-        if name not in _PLAN_CONTROL_TOOL_NAMES:
+        if name not in self._tool_names:
             return False
         if identifier:
             self._internal_tool_ids.add(identifier)
@@ -854,7 +1167,11 @@ class _ClaudePlanControl:
                 return events
             for block in content:
                 block_class = type(block).__name__
-                if message_class == "AssistantMessage" and block_class == "TextBlock":
+                if (
+                    self._plan_mode
+                    and message_class == "AssistantMessage"
+                    and block_class == "TextBlock"
+                ):
                     continue
                 if block_class in ("ToolUseBlock", "ServerToolUseBlock") and (
                     self.is_internal_tool_use(block)
@@ -871,11 +1188,16 @@ class _ClaudePlanControl:
             return events
         if message_class == "ResultMessage":
             result = getattr(message, "result", None)
-            self._runtime_failed = bool(getattr(message, "is_error", False))
+            # Cocola deliberately interrupts the SDK query after a terminal
+            # control tool succeeds. Some SDK transports describe that clean
+            # stop as an error ResultMessage; the durable terminal event is the
+            # authoritative outcome in that case.
+            is_error = bool(getattr(message, "is_error", False)) and self._terminal_event is None
+            self._runtime_failed = is_error
             events.append(
                 {
                     "type": "result",
-                    "is_error": bool(getattr(message, "is_error", False)),
+                    "is_error": is_error,
                     "num_turns": getattr(message, "num_turns", None),
                     "total_cost_usd": getattr(message, "total_cost_usd", None),
                     "session_id": getattr(message, "session_id", None),
@@ -888,16 +1210,37 @@ class _ClaudePlanControl:
         return events
 
     def final_event(self) -> dict[str, Any] | None:
+        if self._protocol_error is not None:
+            return dict(self._protocol_error)
         if self._terminal_event is not None:
             return dict(self._terminal_event)
+        if self._terminal_reserved_name:
+            return self._protocol_error_for(self._terminal_reserved_name)
         if self._runtime_failed:
             return None
+        if not self._plan_mode and self._result_contract is None:
+            return None
+        if self._result_contract is not None and not self._plan_mode:
+            return {
+                "type": "error",
+                "stage": "result",
+                "code": "STRUCTURED_RESULT_INVALID",
+                "error": "Claude returned an invalid structured result.",
+            }
         return {
             "type": "error",
             "stage": "plan",
             "code": "PLAN_OUTPUT_INVALID",
             "error": _PLAN_INVALID_ERROR,
         }
+
+    def should_interrupt(self) -> bool:
+        if (
+            self._terminal_event is None and self._protocol_error is None
+        ) or self._interrupt_requested:
+            return False
+        self._interrupt_requested = True
+        return True
 
 
 def _mcp_configs(req: dict[str, Any]) -> dict[str, dict[str, Any]]:
@@ -1009,26 +1352,58 @@ async def _run_claude(req: dict[str, Any]) -> int:
     import claude_agent_sdk
 
     permission_mode = req.get("permission_mode") or "bypassPermissions"
-    plan_control = _ClaudePlanControl() if permission_mode == "plan" else None
-    options = _build_options(req, plan_control=plan_control)
+    plan_mode = permission_mode == "plan"
+    try:
+        result_contract = _normalized_result_contract(req.get("result_contract"))
+    except ValueError as error:
+        _emit(
+            {
+                "type": "error",
+                "stage": "result",
+                "code": "STRUCTURED_RESULT_INVALID",
+                "error": str(error),
+            }
+        )
+        return 1
+    user_input_enabled = bool(req.get("user_input_enabled", plan_mode))
+    run_control = (
+        _CocolaRunControl(
+            plan_mode=plan_mode,
+            user_input_enabled=user_input_enabled,
+            result_contract=result_contract,
+        )
+        if plan_mode or user_input_enabled or result_contract is not None
+        else None
+    )
+    options = _build_options(req, run_control=run_control)
     prompt = _claude_prompt(req)
     _emit({"type": "start", "ts": time.time()})
 
     last_session_id: str | None = None
     task_progress = _ClaudeTaskProgress()
 
-    async def relay(messages: Any) -> None:
+    async def relay(client: Any, messages: Any) -> None:
         nonlocal last_session_id
+        runtime_accepted = False
         async for message in messages:
+            if (
+                not runtime_accepted
+                and isinstance(message, claude_agent_sdk.SystemMessage)
+                and message.subtype == "init"
+            ):
+                runtime_accepted = True
+                _emit({"type": "run_accepted"})
             events = (
-                plan_control.message_events(message, task_progress)
-                if plan_control is not None
+                run_control.message_events(message, task_progress)
+                if run_control is not None
                 else _message_to_events(message, task_progress)
             )
             for ev in events:
                 if ev.get("type") == "result" and ev.get("session_id"):
                     last_session_id = ev["session_id"]
                 _emit(ev)
+            if run_control is not None and run_control.should_interrupt():
+                await client.interrupt()
 
     report_environment = not req.get("resume")
     if report_environment:
@@ -1036,18 +1411,18 @@ async def _run_claude(req: dict[str, Any]) -> int:
     status_task: asyncio.Task[None] | None = None
     async with claude_agent_sdk.ClaudeSDKClient(options=options) as client:
         await client.set_permission_mode(permission_mode)
-        if report_environment and plan_control is None and _mcp_configs(req):
+        if report_environment and not plan_mode and _mcp_configs(req):
             status_task = asyncio.create_task(_watch_mcp_status(client, req))
         try:
             await client.query(prompt)
-            await relay(client.receive_response())
+            await relay(client, client.receive_response())
         finally:
             if status_task is not None:
                 if not status_task.done():
                     status_task.cancel()
                 await asyncio.gather(status_task, return_exceptions=True)
 
-    if plan_control is not None and (final_event := plan_control.final_event()):
+    if run_control is not None and (final_event := run_control.final_event()):
         _emit(final_event)
 
     # The final done event carries the session_id so the caller can persist the

@@ -125,7 +125,7 @@ export const PlanCardPart: FC<
     contentMarkdown: string;
   }>
 > = ({ data }) => {
-  const { executePlan, cancelPlan, revisingPlanId, revisePlan } = useCocola();
+  const { executePlan, cancelPlan, revisingPlanId, revisePlan, questionInputLocked } = useCocola();
   const isRunning = useThread((thread) => thread.isRunning);
   const status = normalizePlanStatus(data.status) as PlanStatus;
   const isInitiallyCollapsed = ["completed", "superseded", "cancelled"].includes(status);
@@ -144,7 +144,7 @@ export const PlanCardPart: FC<
   };
   const busy = pendingAction != null;
   const isRevising = revisingPlanId === data.planId;
-  const approvalDisabled = busy || isRunning || isRevising;
+  const approvalDisabled = busy || isRunning || isRevising || questionInputLocked;
   const statusView = PLAN_STATUS_VIEW[status];
   const StatusIcon = statusView.icon;
   const canCollapse = ["completed", "superseded", "cancelled"].includes(status);
@@ -339,7 +339,7 @@ export const PlanCardPart: FC<
             {status !== "failed" ? (
               <button
                 type="button"
-                disabled={busy || isRunning || isRevising}
+                disabled={busy || isRunning || isRevising || questionInputLocked}
                 onClick={revise}
                 className="inline-flex h-10 w-full items-center justify-center gap-2 rounded-xl border border-border bg-background px-4 text-sm font-semibold text-foreground transition-colors hover:bg-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:cursor-not-allowed disabled:opacity-50 sm:w-auto"
               >
@@ -350,7 +350,7 @@ export const PlanCardPart: FC<
             {status === "failed" ? (
               <button
                 type="button"
-                disabled={busy || isRunning || isRevising}
+                disabled={busy || isRunning || isRevising || questionInputLocked}
                 onClick={revise}
                 className="inline-flex h-10 w-full items-center justify-center gap-2 rounded-xl bg-indigo-600 px-4 text-sm font-semibold text-white shadow-sm transition-colors hover:bg-indigo-700 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500 focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50 sm:w-auto"
               >

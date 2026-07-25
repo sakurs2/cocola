@@ -121,6 +121,10 @@ type liveRun struct {
 	recalledMemoryURIs []string
 	planContent        string
 	workspaceRevision  string
+	questionText       string
+	questionOptions    []convo.QuestionOption
+	runtimeAccepted    bool
+	runtimeErrorCode   string
 	version            uint64
 }
 
@@ -384,6 +388,15 @@ func (a *API) chat(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusConflict, "LOCAL_PROJECT_SINGLE_TASK", "local projects use one persistent task")
 		return
 	}
+	if errors.Is(err, chatrun.ErrQuestionPending) {
+		writeErr(
+			w,
+			http.StatusConflict,
+			"QUESTION_PENDING",
+			"Answer or cancel Claude's pending question before starting another run.",
+		)
+		return
+	}
 	if err != nil {
 		a.runs.databaseUnavailable.Store(true)
 		a.log.Warn("chat run start failed: " + err.Error())
@@ -457,6 +470,172 @@ func terminalRunData(run chatrun.Run) map[string]string {
 	return data
 }
 
+func runSummaryData(run chatrun.Run, modelLabel string) map[string]string {
+	modelLabel = strings.TrimSpace(modelLabel)
+	if modelLabel == "" {
+		modelLabel = run.ModelAlias
+	}
+	data := map[string]string{
+		"run_id": run.ID, "status": run.Status, "model_label": modelLabel,
+		"tool_call_count": strconv.FormatInt(run.ToolCallCount, 10),
+		"llm_call_count":  strconv.FormatInt(run.LLMCallCount, 10),
+	}
+	if run.DurationMS > 0 {
+		data["duration_ms"] = strconv.FormatInt(run.DurationMS, 10)
+	} else if durationMS, ok := runDurationMS(run); ok {
+		data["duration_ms"] = strconv.FormatInt(durationMS, 10)
+	}
+	if run.ErrorCode != "" {
+		data["error_code"] = run.ErrorCode
+	}
+	return data
+}
+
+func questionOptions(raw string) ([]convo.QuestionOption, error) {
+	if strings.TrimSpace(raw) == "" {
+		return nil, nil
+	}
+	var values []any
+	if err := json.Unmarshal([]byte(raw), &values); err != nil || len(values) > 8 {
+		return nil, errors.New("invalid question options")
+	}
+	seen := make(map[string]struct{}, len(values))
+	options := make([]convo.QuestionOption, 0, len(values))
+	for i, value := range values {
+		var label string
+		switch typed := value.(type) {
+		case string:
+			label = strings.TrimSpace(typed)
+		case map[string]any:
+			label, _ = typed["label"].(string)
+			label = strings.TrimSpace(label)
+		default:
+			return nil, errors.New("invalid question option")
+		}
+		if label == "" || len(label) > 1<<10 {
+			return nil, errors.New("invalid question option")
+		}
+		if _, exists := seen[label]; exists {
+			return nil, errors.New("duplicate question option")
+		}
+		seen[label] = struct{}{}
+		options = append(options, convo.QuestionOption{
+			ID: "option-" + strconv.Itoa(i+1), Label: label,
+		})
+	}
+	return options, nil
+}
+
+func normalizeStructuredResultEvent(event agent.Event) (agent.Event, bool) {
+	renderer := strings.TrimSpace(event.Data["renderer"])
+	switch renderer {
+	case "summary", "table", "list", "metrics":
+	default:
+		return agent.Event{}, false
+	}
+	version, err := strconv.Atoi(event.Data["renderer_version"])
+	if err != nil || version != 1 {
+		return agent.Event{}, false
+	}
+	contractHash := strings.TrimSpace(event.Data["contract_hash"])
+	if !validSHA256Identifier(contractHash) {
+		return agent.Event{}, false
+	}
+	raw := strings.TrimSpace(event.Data["data"])
+	if raw == "" || len(raw) > 128<<10 {
+		return agent.Event{}, false
+	}
+	var value any
+	if json.Unmarshal([]byte(raw), &value) != nil ||
+		!validStructuredValue(value, 0) ||
+		!validStructuredRendererShape(renderer, value) {
+		return agent.Event{}, false
+	}
+	data := cloneStringMap(event.Data)
+	data["renderer"] = renderer
+	data["renderer_version"] = "1"
+	data["contract_hash"] = contractHash
+	data["data"] = raw
+	data["title"] = strings.TrimSpace(data["title"])
+	if len(data["title"]) > 4<<10 {
+		return agent.Event{}, false
+	}
+	return agent.Event{Kind: "structured_result_ready", Data: data}, true
+}
+
+func validSHA256Identifier(value string) bool {
+	if len(value) != len("sha256:")+64 || !strings.HasPrefix(value, "sha256:") {
+		return false
+	}
+	for _, char := range value[len("sha256:"):] {
+		if (char < '0' || char > '9') && (char < 'a' || char > 'f') {
+			return false
+		}
+	}
+	return true
+}
+
+func validStructuredRendererShape(renderer string, value any) bool {
+	root, ok := value.(map[string]any)
+	if !ok {
+		return false
+	}
+	switch renderer {
+	case "table":
+		columns, columnsOK := root["columns"].([]any)
+		rows, rowsOK := root["rows"].([]any)
+		return columnsOK && rowsOK && len(columns) <= 20 && len(rows) <= 200
+	case "list":
+		items, itemsOK := root["items"].([]any)
+		return itemsOK && len(items) <= 200
+	case "metrics":
+		metrics := root["metrics"]
+		if values, ok := metrics.([]any); ok {
+			return len(values) <= 20
+		}
+		if values, ok := metrics.(map[string]any); ok {
+			return len(values) <= 20
+		}
+		return len(root) <= 21
+	default:
+		return true
+	}
+}
+
+func validStructuredValue(value any, depth int) bool {
+	if depth > 12 {
+		return false
+	}
+	switch typed := value.(type) {
+	case nil, bool, float64:
+		return true
+	case string:
+		return len(typed) <= 4<<10
+	case []any:
+		if len(typed) > 200 {
+			return false
+		}
+		for _, item := range typed {
+			if !validStructuredValue(item, depth+1) {
+				return false
+			}
+		}
+		return true
+	case map[string]any:
+		if len(typed) > 200 {
+			return false
+		}
+		for key, item := range typed {
+			if len(key) > 256 || !validStructuredValue(item, depth+1) {
+				return false
+			}
+		}
+		return true
+	default:
+		return false
+	}
+}
+
 func (r *liveRun) publish(event agent.Event) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
@@ -516,6 +695,59 @@ func (r *liveRun) planCandidate() (string, string) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	return r.planContent, r.workspaceRevision
+}
+
+func (r *liveRun) setQuestionCandidate(question string, options []convo.QuestionOption) {
+	r.mu.Lock()
+	r.questionText = question
+	r.questionOptions = append([]convo.QuestionOption(nil), options...)
+	r.mu.Unlock()
+}
+
+func (r *liveRun) questionCandidate() (string, []convo.QuestionOption) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return r.questionText, append([]convo.QuestionOption(nil), r.questionOptions...)
+}
+
+func (r *liveRun) markRuntimeAccepted() {
+	r.mu.Lock()
+	r.runtimeAccepted = true
+	r.mu.Unlock()
+}
+
+func (r *liveRun) wasRuntimeAccepted() bool {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return r.runtimeAccepted
+}
+
+func (r *liveRun) setRuntimeErrorCode(code string) {
+	if !validRunErrorCode(code) {
+		return
+	}
+	r.mu.Lock()
+	r.runtimeErrorCode = code
+	r.mu.Unlock()
+}
+
+func (r *liveRun) getRuntimeErrorCode() string {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return r.runtimeErrorCode
+}
+
+func validRunErrorCode(code string) bool {
+	if code == "" || len(code) > 80 {
+		return false
+	}
+	for _, char := range code {
+		if (char >= 'A' && char <= 'Z') || (char >= '0' && char <= '9') || char == '_' {
+			continue
+		}
+		return false
+	}
+	return true
 }
 
 func (a *API) executeLiveRun(live *liveRun) {
@@ -584,6 +816,7 @@ func (a *API) executeLiveRun(live *liveRun) {
 		AllowWorkspaceReset: live.request.AllowWorkspaceReset,
 		MemoryContext:       memoryContext,
 		TraceID:             live.run.ID, ParentSpanID: conversationRootSpan(live.traceCtx),
+		Source:           live.run.Source,
 		SandboxAuthToken: a.mintSandboxToken(live.identity), Attachments: attachments,
 		SCMToken: scmToken, ProjectBrokerCredential: projectBrokerCredential,
 		Project: projectContext,
@@ -592,6 +825,7 @@ func (a *API) executeLiveRun(live *liveRun) {
 	var sawError bool
 	var ttftMS int64
 	var toolCalls int64
+	var llmCalls int64
 	draftContext, stopDrafts := context.WithCancel(context.Background())
 	draftResult := make(chan error, 1)
 	go func() { draftResult <- a.persistRunDrafts(draftContext, live) }()
@@ -607,9 +841,66 @@ func (a *API) executeLiveRun(live *liveRun) {
 			if event.Kind == "done" {
 				return nil
 			}
+			if event.Kind == "result" {
+				if count, parseErr := strconv.ParseInt(event.Data["num_turns"], 10, 64); parseErr == nil &&
+					count > llmCalls {
+					llmCalls = count
+				}
+			}
+			if event.Kind == "run_accepted" {
+				if live.request.QuestionID == "" {
+					return nil
+				}
+				// Once the runtime has accepted the resumed user turn, retrying the
+				// same answer could repeat side effects. Record that boundary before
+				// the database call so finalization remains conservative if storage
+				// becomes unavailable after the SDK accepts the turn.
+				live.markRuntimeAccepted()
+				question, acceptErr := a.runs.store.AcceptQuestionAnswer(
+					live.ctx,
+					live.run.ID,
+					live.request.QuestionID,
+					live.identity.UserID,
+					time.Now().UTC(),
+				)
+				if acceptErr != nil {
+					return fmt.Errorf("persist accepted question answer: %w", acceptErr)
+				}
+				answerJSON, _ := json.Marshal(question.Answer)
+				live.publish(agent.Event{Kind: "question_status", Data: map[string]string{
+					"id": question.ID, "status": question.Status, "answer": string(answerJSON),
+				}})
+				return nil
+			}
 			if event.Kind == "plan_ready" {
 				live.setPlanCandidate(event.Data["content_markdown"], event.Data["workspace_revision"])
 				return nil
+			}
+			if event.Kind == "question_required" {
+				options, parseErr := questionOptions(event.Data["options"])
+				if parseErr != nil || strings.TrimSpace(event.Data["question"]) == "" {
+					sawError = true
+					errorEvent := agent.Event{Kind: "error", Data: map[string]string{
+						"code":  "QUESTION_OUTPUT_INVALID",
+						"error": "Claude returned an invalid question.",
+					}}
+					_ = coalescer.Push(errorEvent)
+					return nil
+				}
+				live.setQuestionCandidate(strings.TrimSpace(event.Data["question"]), options)
+				return nil
+			}
+			if event.Kind == "structured_result_ready" {
+				event.Data["run_id"] = live.run.ID
+				if normalized, valid := normalizeStructuredResultEvent(event); valid {
+					event = normalized
+				} else {
+					sawError = true
+					event = agent.Event{Kind: "error", Data: map[string]string{
+						"code":  "STRUCTURED_RESULT_INVALID",
+						"error": "Claude returned an invalid structured result.",
+					}}
+				}
 			}
 			if event.Kind == "git_snapshot" {
 				a.persistProjectSnapshot(live, event)
@@ -631,8 +922,11 @@ func (a *API) executeLiveRun(live *liveRun) {
 			watchdog.Observe(event)
 			if event.Kind == "error" {
 				sawError = true
-				if code := strings.TrimSpace(event.Data["code"]); strings.HasPrefix(code, "PROJECT_") {
-					a.persistProjectBootstrapFailure(live, code)
+				if code := strings.TrimSpace(event.Data["code"]); code != "" {
+					live.setRuntimeErrorCode(code)
+					if strings.HasPrefix(code, "PROJECT_") {
+						a.persistProjectBootstrapFailure(live, code)
+					}
 				}
 			}
 			if err := coalescer.Push(event); err != nil {
@@ -661,6 +955,13 @@ func (a *API) executeLiveRun(live *liveRun) {
 		status, errorCode = chatrun.StatusInterrupted, "RUNTIME_INTERRUPTED"
 	} else if err != nil || sawError {
 		status, errorCode = chatrun.StatusError, projectRunErrorCode(err)
+		if runtimeCode := live.getRuntimeErrorCode(); runtimeCode != "" {
+			errorCode = runtimeCode
+		}
+	}
+	questionText, questionOptions := live.questionCandidate()
+	if status == chatrun.StatusSuccess && questionText != "" {
+		status = chatrun.StatusWaitingInput
 	}
 	if status == chatrun.StatusCancelled || status == chatrun.StatusInterrupted {
 		notice := "Run was cancelled."
@@ -688,6 +989,7 @@ func (a *API) executeLiveRun(live *liveRun) {
 		StartedAt: live.run.StartedAt, CompletedAt: &completedAt,
 	})
 	metadata := assistantMetadata(live.request)
+	metadata["run_id"] = live.run.ID
 	metadata["partial"] = false
 	if hasDuration {
 		metadata["duration_ms"] = durationMS
@@ -700,9 +1002,6 @@ func (a *API) executeLiveRun(live *liveRun) {
 		Role: "assistant", Parts: live.parts(), Metadata: metadata, CreatedAt: completedAt,
 	}
 	planContent, workspaceRevision := live.planCandidate()
-	if len(message.Parts) == 0 && planContent == "" {
-		message = nil
-	}
 	var planCandidate *chatrun.PlanCandidate
 	if planContent != "" && status == chatrun.StatusSuccess &&
 		live.request.InteractionMode == chatrun.InteractionModePlan {
@@ -712,11 +1011,21 @@ func (a *API) executeLiveRun(live *liveRun) {
 			ContentMarkdown: planContent, WorkspaceRevision: workspaceRevision,
 		}
 	}
+	var questionCandidate *chatrun.QuestionCandidate
+	if questionText != "" && status == chatrun.StatusWaitingInput {
+		questionCandidate = &chatrun.QuestionCandidate{
+			ID: uuid.NewString(), RuntimeID: live.request.RuntimeID,
+			ModelRouteID: effectiveModelRouteID(live.request), ModelAlias: live.request.ModelAlias,
+			SkillID: live.request.SkillID, InteractionMode: effectiveInteractionMode(live.request),
+			Text: questionText, Options: questionOptions,
+		}
+	}
 	finalizedResult, finalized := a.finalizeRun(chatrun.FinalizeInput{
 		RunID: live.run.ID, UserID: live.run.UserID, Status: status, ErrorCode: errorCode,
 		AssistantMessage: message, Reveal: live.request.DeferConversationVisibilityUntilDone,
 		ConversationTitle: titleForConversation(live.request), CompletedAt: completedAt,
-		PlanCandidate: planCandidate,
+		ToolCallCount: toolCalls, LLMCallCount: llmCalls, PlanCandidate: planCandidate,
+		QuestionCandidate: questionCandidate, RuntimeAccepted: live.wasRuntimeAccepted(),
 	})
 	if a.projects != nil && live.request.ProjectID != "" {
 		revokeCtx, cancelRevoke := context.WithTimeout(context.Background(), 5*time.Second)
@@ -745,6 +1054,8 @@ func (a *API) executeLiveRun(live *liveRun) {
 			effectiveInteractionMode(live.request), ttftMS, toolCalls,
 		)
 		live.mu.Lock()
+		finalizedRun.DurationMS = durationMS
+		finalizedRun.ToolCallCount = toolCalls
 		live.status = status
 		live.run = finalizedRun
 		live.mu.Unlock()
@@ -768,8 +1079,38 @@ func (a *API) executeLiveRun(live *liveRun) {
 				}})
 			}
 		}
+		if finalizedResult.AnsweredQuestion != nil {
+			question := finalizedResult.AnsweredQuestion
+			answerJSON, _ := json.Marshal(question.Answer)
+			live.publish(agent.Event{Kind: "question_status", Data: map[string]string{
+				"id": question.ID, "status": question.Status, "answer": string(answerJSON),
+			}})
+		}
+		if finalizedResult.RestoredQuestion != nil {
+			question := finalizedResult.RestoredQuestion
+			live.publish(agent.Event{Kind: "question_status", Data: map[string]string{
+				"id": question.ID, "status": question.Status, "answer": "null",
+			}})
+		}
+		if finalizedResult.Question != nil {
+			question := finalizedResult.Question
+			optionsJSON, _ := json.Marshal(question.Options)
+			questionEvent := agent.Event{Kind: "question_ready", Data: map[string]string{
+				"id": question.ID, "version": strconv.Itoa(question.Version),
+				"status": question.Status, "question": question.Text,
+				"options": string(optionsJSON),
+			}}
+			live.apply(questionEvent)
+			live.publish(questionEvent)
+		}
+		summaryEvent := agent.Event{
+			Kind: "run_summary", Data: runSummaryData(finalizedRun, live.request.ModelLabel),
+		}
+		live.apply(summaryEvent)
+		live.publish(summaryEvent)
 		live.publish(agent.Event{Kind: "done", Data: terminalRunData(finalizedRun)})
-		if a.memory != nil && live.request.InteractionMode != chatrun.InteractionModePlan {
+		if a.memory != nil && status == chatrun.StatusSuccess &&
+			live.request.InteractionMode != chatrun.InteractionModePlan {
 			captureCtx, cancelCapture := context.WithTimeout(context.Background(), 5*time.Second)
 			if err := a.memory.ScheduleCapture(captureCtx, memory.CaptureInput{
 				RunID: finalizedRun.ID, TenantID: live.identity.TenantID,
@@ -876,6 +1217,7 @@ func (a *API) saveRunDraft(live *liveRun) error {
 		return nil
 	}
 	metadata := assistantMetadata(live.request)
+	metadata["run_id"] = live.run.ID
 	metadata["partial"] = true
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
@@ -953,6 +1295,7 @@ func (a *API) finalizeRun(input chatrun.FinalizeInput) (chatrun.FinalizeResult, 
 	fallback.ErrorCode = "FINALIZATION_FAILED"
 	fallback.AssistantMessage = nil
 	fallback.PlanCandidate = nil
+	fallback.QuestionCandidate = nil
 	fallback.Reveal = false
 	ctx, cancel := context.WithTimeout(context.Background(), finalizeAttemptLimit)
 	result, fallbackErr := a.runs.store.Finalize(ctx, fallback)
@@ -1124,6 +1467,11 @@ func (a *API) streamStoredRun(w http.ResponseWriter, r *http.Request, run chatru
 				break
 			}
 		}
+	}
+	if chatrun.IsTerminal(run.Status) {
+		message := convo.Message{Parts: parts}
+		upsertRunSummaryPart(&message, run)
+		parts = message.Parts
 	}
 	encodedParts, err := json.Marshal(parts)
 	if err != nil {

@@ -47,6 +47,17 @@ def test_skill_separates_catalog_and_runtime_identity():
     assert s.native_id == "frontend-design"
 
 
+def test_skill_maps_normalized_result_contract():
+    contract = {
+        "version": 1,
+        "renderer": "table",
+        "schema": {"type": "object"},
+        "contract_hash": "sha256:" + "a" * 64,
+    }
+    skill = Skill.from_json({"id": "report", "name": "Report", "result_contract": contract})
+    assert skill.result_contract == contract
+
+
 def test_admin_catalog_maps_and_filters():
     payload = {
         "skills": [

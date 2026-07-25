@@ -839,6 +839,10 @@ func (a *Admin) CreateSkill(ctx context.Context, s store.Skill, actor string) (s
 	if err := validateEnabledSkill(s); err != nil {
 		return store.Skill{}, err
 	}
+	s, err := attachSkillResultContract(s)
+	if err != nil {
+		return store.Skill{}, ErrInvalidArg
+	}
 	if s.RuntimeID == "" {
 		s.RuntimeID = s.ID
 	}
@@ -861,7 +865,11 @@ func (a *Admin) CreateSkill(ctx context.Context, s store.Skill, actor string) (s
 
 // ListSkills returns the catalog; onlyEnabled filters to enabled entries.
 func (a *Admin) ListSkills(ctx context.Context, onlyEnabled bool) ([]store.Skill, error) {
-	return a.store.ListSkills(ctx, onlyEnabled)
+	skills, err := a.store.ListSkills(ctx, onlyEnabled)
+	if err != nil {
+		return nil, err
+	}
+	return attachSkillResultContracts(skills)
 }
 
 func (a *Admin) ListEffectiveSkills(ctx context.Context, userID string) ([]store.Skill, error) {
@@ -893,6 +901,10 @@ func (a *Admin) ListEffectiveSkills(ctx context.Context, userID string) ([]store
 		out = append(out, s)
 	}
 	for _, s := range adminSkills {
+		s, err = attachSkillResultContract(s)
+		if err != nil {
+			return nil, err
+		}
 		if s.Scope != "" && s.Scope != "admin" {
 			continue
 		}
@@ -906,6 +918,10 @@ func (a *Admin) ListEffectiveSkills(ctx context.Context, userID string) ([]store
 		return nil, err
 	}
 	for _, s := range userSkills {
+		s, err = attachSkillResultContract(s)
+		if err != nil {
+			return nil, err
+		}
 		if s.Enabled {
 			// A personal Skill with the same Runtime-native ID intentionally
 			// overrides the shared Skill for this user. The internal catalog IDs
@@ -931,6 +947,10 @@ func (a *Admin) ListUserSkillCatalog(ctx context.Context, userID string) ([]stor
 	}
 	out := make([]store.Skill, 0)
 	for _, s := range adminSkills {
+		s, err = attachSkillResultContract(s)
+		if err != nil {
+			return nil, err
+		}
 		if s.Scope != "" && s.Scope != "admin" {
 			continue
 		}
@@ -943,13 +963,21 @@ func (a *Admin) ListUserSkillCatalog(ctx context.Context, userID string) ([]stor
 	if err != nil {
 		return nil, err
 	}
+	userSkills, err = attachSkillResultContracts(userSkills)
+	if err != nil {
+		return nil, err
+	}
 	out = append(out, userSkills...)
 	return out, nil
 }
 
 // GetSkill fetches one entry.
 func (a *Admin) GetSkill(ctx context.Context, id string) (store.Skill, error) {
-	return a.store.GetSkill(ctx, id)
+	s, err := a.store.GetSkill(ctx, id)
+	if err != nil {
+		return store.Skill{}, err
+	}
+	return attachSkillResultContract(s)
 }
 
 // SetSkillEnabled flips a skill on/off without touching other fields.
@@ -1048,6 +1076,10 @@ func (a *Admin) ImportSkillArchive(ctx context.Context, scope, ownerUserID, acto
 			UpdatedAt:       now,
 			CreatedBy:       actor,
 			UpdatedBy:       actor,
+		}
+		s, err = attachSkillResultContract(s)
+		if err != nil {
+			return nil, candidates, ErrInvalidArg
 		}
 		existing, err := a.store.GetSkill(ctx, skillID)
 		switch {
@@ -1155,7 +1187,31 @@ func validateEnabledSkill(s store.Skill) error {
 	if s.Enabled && strings.TrimSpace(s.BundleObjectKey) == "" && strings.TrimSpace(s.SkillMD) == "" {
 		return ErrInvalidArg
 	}
+	if _, err := normalizedSkillResultContractJSON(s.FrontmatterJSON); err != nil {
+		return ErrInvalidArg
+	}
 	return nil
+}
+
+func attachSkillResultContract(s store.Skill) (store.Skill, error) {
+	contract, err := normalizedSkillResultContractJSON(s.FrontmatterJSON)
+	if err != nil {
+		return store.Skill{}, err
+	}
+	s.ResultContract = contract
+	return s, nil
+}
+
+func attachSkillResultContracts(skills []store.Skill) ([]store.Skill, error) {
+	out := make([]store.Skill, 0, len(skills))
+	for _, skill := range skills {
+		normalized, err := attachSkillResultContract(skill)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, normalized)
+	}
+	return out, nil
 }
 
 func (a *Admin) DeleteUserSkill(ctx context.Context, userID, skillID string) error {

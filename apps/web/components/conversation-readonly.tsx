@@ -16,8 +16,19 @@ import {
 } from "@/components/assistant-ui/rail";
 import { parseEnvironmentPreparationSnapshot } from "@/lib/environment";
 import { ModelIcon } from "@/components/assistant-ui/thread";
+import {
+  QuestionCard,
+  RunSummary,
+  StructuredResultCard,
+} from "@/components/assistant-ui/rich-message-parts";
 import { cn } from "@/lib/utils";
 import { type ModelIconConfig } from "@/app/runtime-provider";
+import {
+  normalizeRichMessagePart,
+  type UiQuestionPart,
+  type UiRunSummaryPart,
+  type UiStructuredResultPart,
+} from "@/lib/rich-message-normalization";
 import {
   finalAgentOutputText,
   inferAgentDurationMs,
@@ -71,6 +82,14 @@ type SCMApprovalPart = {
   approvalLabel?: string;
 };
 
+type PlanPart = {
+  type: "plan";
+  planId: string;
+  version: number;
+  status: string;
+  contentMarkdown: string;
+};
+
 type MessagePart =
   | { type: "text"; text?: string }
   | { type: "reasoning"; text?: string }
@@ -79,7 +98,11 @@ type MessagePart =
   | EnvironmentPart
   | ProgressPart
   | MemoryRecallPart
-  | SCMApprovalPart;
+  | SCMApprovalPart
+  | PlanPart
+  | UiQuestionPart
+  | UiRunSummaryPart
+  | UiStructuredResultPart;
 
 type WireMessage = {
   id: string;
@@ -98,6 +121,38 @@ type LoadState =
   | { status: "loading"; messages: WireMessage[]; error: "" }
   | { status: "ready"; messages: WireMessage[]; error: "" }
   | { status: "error"; messages: WireMessage[]; error: string };
+
+function normalizeReadonlyMessages(raw: unknown): WireMessage[] {
+  if (!Array.isArray(raw)) return [];
+  return raw.flatMap((rawMessage): WireMessage[] => {
+    if (!rawMessage || typeof rawMessage !== "object") return [];
+    const message = rawMessage as Record<string, unknown>;
+    const id = typeof message.id === "string" ? message.id : "";
+    const role = message.role === "user" || message.role === "assistant" ? message.role : null;
+    if (!id || role === null) return [];
+    const parts = (Array.isArray(message.parts) ? message.parts : []).flatMap(
+      (rawPart): MessagePart[] => {
+        const richPart = normalizeRichMessagePart(rawPart);
+        if (richPart !== undefined) return richPart === null ? [] : [richPart];
+        if (!rawPart || typeof rawPart !== "object") return [];
+        return typeof (rawPart as Record<string, unknown>).type === "string"
+          ? [rawPart as MessagePart]
+          : [];
+      },
+    );
+    return [
+      {
+        id,
+        role,
+        parts,
+        ...(message.metadata && typeof message.metadata === "object"
+          ? { metadata: message.metadata as WireMessage["metadata"] }
+          : {}),
+        ...(typeof message.created_at === "string" ? { created_at: message.created_at } : {}),
+      },
+    ];
+  });
+}
 
 export function ConversationReadOnly({ conversationId }: { conversationId: string }) {
   const [state, setState] = useState<LoadState>({
@@ -118,8 +173,8 @@ export function ConversationReadOnly({ conversationId }: { conversationId: strin
         cache: "no-store",
       });
       if (!res.ok) throw new Error(await errorText(res));
-      const rows = (await res.json()) as WireMessage[];
-      setState({ status: "ready", messages: Array.isArray(rows) ? rows : [], error: "" });
+      const rows = normalizeReadonlyMessages(await res.json());
+      setState({ status: "ready", messages: rows, error: "" });
     } catch (err) {
       setState({
         status: "error",
@@ -333,6 +388,33 @@ function MessagePartView({ part, role }: { part: MessagePart; role: "user" | "as
         commandLabel={part.approvalLabel}
       />
     );
+  }
+  if (part.type === "plan") {
+    return (
+      <section className="my-4 overflow-hidden rounded-2xl border border-indigo-500/25 bg-card">
+        <div className="border-b border-indigo-500/15 bg-indigo-500/[0.045] px-5 py-3.5">
+          <div className="text-[10px] font-bold tracking-[0.16em] text-indigo-700 uppercase">
+            Execution plan
+          </div>
+          <h3 className="mt-0.5 text-base font-semibold">Plan v{part.version}</h3>
+          <p className="mt-1 text-xs capitalize text-muted-foreground">
+            {part.status.replaceAll("_", " ")}
+          </p>
+        </div>
+        <div className="px-5 py-5">
+          <MarkdownContent value={part.contentMarkdown} />
+        </div>
+      </section>
+    );
+  }
+  if (part.type === "question") {
+    return <QuestionCard question={part} readonly />;
+  }
+  if (part.type === "run-summary") {
+    return <RunSummary summary={part} />;
+  }
+  if (part.type === "structured-result") {
+    return <StructuredResultCard result={part} />;
   }
   if (part.type === "tool-call") {
     return (

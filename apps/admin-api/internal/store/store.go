@@ -78,6 +78,7 @@ type Skill struct {
 	ContentSHA256   string          `json:"content_sha256,omitempty"`
 	ManifestJSON    json.RawMessage `json:"manifest_json,omitempty"`
 	FrontmatterJSON json.RawMessage `json:"frontmatter_json,omitempty"`
+	ResultContract  json.RawMessage `json:"result_contract,omitempty"`
 	SkillMD         string          `json:"skill_md,omitempty"`
 	FileCount       int             `json:"file_count"`
 	SizeBytes       int64           `json:"size_bytes"`

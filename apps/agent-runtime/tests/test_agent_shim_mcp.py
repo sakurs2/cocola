@@ -59,6 +59,10 @@ async def test_agent_shim_streams_mcp_status_without_blocking_query(monkeypatch)
         def __init__(self, **kwargs):
             captured["options"] = kwargs
 
+    class SystemMessage:
+        def __init__(self, subtype):
+            self.subtype = subtype
+
     class FakeClaudeSDKClient:
         def __init__(self, *, options):
             captured["client_options"] = options
@@ -91,6 +95,7 @@ async def test_agent_shim_streams_mcp_status_without_blocking_query(monkeypatch)
             await asyncio.sleep(0)
 
         async def receive_response(self):
+            yield SystemMessage("init")
             result_type = type("ResultMessage", (), {})
             result = result_type()
             result.is_error = False
@@ -103,6 +108,7 @@ async def test_agent_shim_streams_mcp_status_without_blocking_query(monkeypatch)
     fake_sdk = types.SimpleNamespace(
         ClaudeAgentOptions=FakeClaudeAgentOptions,
         ClaudeSDKClient=FakeClaudeSDKClient,
+        SystemMessage=SystemMessage,
     )
     monkeypatch.setitem(sys.modules, "claude_agent_sdk", fake_sdk)
 
@@ -142,6 +148,10 @@ async def test_agent_shim_skips_mcp_status_on_resumed_turn(monkeypatch):
         def __init__(self, **kwargs):
             captured["options"] = kwargs
 
+    class SystemMessage:
+        def __init__(self, subtype):
+            self.subtype = subtype
+
     class FakeClaudeSDKClient:
         def __init__(self, *, options):
             captured["client_options"] = options
@@ -159,6 +169,7 @@ async def test_agent_shim_skips_mcp_status_on_resumed_turn(monkeypatch):
             captured["prompt"] = prompt
 
         async def receive_response(self):
+            yield SystemMessage("init")
             result_type = type("ResultMessage", (), {})
             result = result_type()
             result.is_error = False
@@ -171,6 +182,7 @@ async def test_agent_shim_skips_mcp_status_on_resumed_turn(monkeypatch):
     fake_sdk = types.SimpleNamespace(
         ClaudeAgentOptions=FakeClaudeAgentOptions,
         ClaudeSDKClient=FakeClaudeSDKClient,
+        SystemMessage=SystemMessage,
     )
     monkeypatch.setitem(sys.modules, "claude_agent_sdk", fake_sdk)
 

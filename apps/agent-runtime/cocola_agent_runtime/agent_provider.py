@@ -34,6 +34,8 @@ class AgentOptions:
     # Effective skill explicitly selected for this turn. The in-sandbox
     # adapter converts it to the selected runtime's native invocation syntax.
     selected_skill_id: str | None = None
+    selected_skill_result_contract: dict | None = None
+    user_input_enabled: bool = True
     mcp_servers: dict[str, dict] | None = None
     # Secret-free metadata for skills that were successfully materialized in
     # this sandbox. The Route-A provider folds these into the same environment
