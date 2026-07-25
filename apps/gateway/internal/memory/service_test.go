@@ -113,6 +113,52 @@ func TestOpenVikingAccountFallsBackForDefaultTenant(t *testing.T) {
 	}
 }
 
+func TestOpenVikingFindAppliesMinimumRecallScore(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/api/v1/search/find" {
+			t.Fatalf("path = %q", r.URL.Path)
+		}
+		var body map[string]any
+		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+			t.Fatal(err)
+		}
+		if got, ok := body["score_threshold"].(float64); !ok || got != minRecallScore {
+			t.Fatalf("score_threshold = %#v, want %v", body["score_threshold"], minRecallScore)
+		}
+		writeOpenVikingTestJSON(t, w, http.StatusOK, map[string]any{
+			"status": "ok",
+			"result": map[string]any{
+				"memories": []any{
+					map[string]any{
+						"uri": "viking://user/memories/preferences/below.md", "score": 0.149,
+					},
+					map[string]any{
+						"uri": "viking://user/memories/preferences/boundary.md", "score": 0.15,
+					},
+					map[string]any{
+						"uri": "viking://user/memories/preferences/above.md", "score": 0.8,
+					},
+				},
+			},
+		})
+	}))
+	defer server.Close()
+
+	client := newOpenVikingClient(server.URL, "root-key")
+	items, err := client.find(
+		context.Background(), Identity{TenantID: "tenant", UserID: "user"}, "editor", 6,
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(items) != 2 {
+		t.Fatalf("items = %#v, want boundary and above-threshold results", items)
+	}
+	if items[0].Score != minRecallScore || items[1].Score != 0.8 {
+		t.Fatalf("unexpected scores: %#v", items)
+	}
+}
+
 func TestFormatRecallFallsBackToAbstract(t *testing.T) {
 	context, uris := formatRecall("", []memoryResult{{
 		URI: "viking://user/memories/entities/cocola.md", Abstract: "Cocola project",

@@ -17,6 +17,9 @@ import (
 
 var ErrNotFound = errors.New("memory: not found")
 
+// Align with OpenViking's default automatic-recall threshold.
+const minRecallScore = 0.15
+
 type Identity struct {
 	TenantID string
 	UserID   string
@@ -112,13 +115,15 @@ func (c *openVikingClient) find(
 	if err != nil {
 		return nil, err
 	}
+	scoreThreshold := minRecallScore
 	result, err := client.Find(ctx, query, &openviking.FindOptions{
 		TargetURI: []string{
 			"viking://user/memories/preferences/",
 			"viking://user/memories/entities/",
 			"viking://user/memories/events/",
 		},
-		Limit: limit,
+		Limit:          limit,
+		ScoreThreshold: &scoreThreshold,
 	})
 	if err != nil {
 		return nil, normalizeOpenVikingError(err)
@@ -127,6 +132,9 @@ func (c *openVikingClient) find(
 	for _, item := range result.Memories {
 		if len(items) >= limit {
 			break
+		}
+		if item.Score < minRecallScore {
+			continue
 		}
 		items = append(items, memoryResult{
 			URI: item.URI, Abstract: item.Abstract, Content: item.Overview, Score: item.Score,
