@@ -3,11 +3,14 @@
 import { type DataMessagePartProps } from "@assistant-ui/react";
 import {
   Activity,
+  BarChart3,
+  Braces,
   Check,
   CheckCircle2,
   ChevronDown,
   CircleHelp,
   ClipboardCopy,
+  FileText,
   List,
   LoaderCircle,
   Table2,
@@ -25,6 +28,14 @@ import {
   useCocola,
 } from "@/app/runtime-provider";
 import { formatAgentDuration } from "@/lib/agent-turn-summary.mjs";
+import {
+  buildListItems,
+  buildMetrics,
+  buildSummaryView,
+  buildTableView,
+  formatResultValue,
+  resultRecord,
+} from "@/lib/structured-result-view";
 import { cn } from "@/lib/utils";
 
 const QUESTION_STATUS_LABELS: Record<QuestionStatus, string> = {
@@ -278,38 +289,32 @@ export const StructuredResultCardPart: FC<
   DataMessagePartProps<Omit<UiStructuredResultPart, "type">>
 > = ({ data }) => <StructuredResultCard result={{ ...data, type: "structured-result" }} />;
 
-function displayValue(value: unknown): string {
-  if (value == null) return "—";
-  if (typeof value === "string") return value;
-  if (typeof value === "number" || typeof value === "boolean") return String(value);
-  try {
-    return JSON.stringify(value);
-  } catch {
-    return "Unsupported value";
-  }
-}
-
-function objectValue(value: unknown): Record<string, unknown> | null {
-  return value && typeof value === "object" && !Array.isArray(value)
-    ? (value as Record<string, unknown>)
-    : null;
-}
-
 function GenericJSON({ data }: { data: unknown }) {
   return (
-    <pre className="max-h-96 overflow-auto whitespace-pre-wrap break-words rounded-xl bg-muted/60 p-3 text-xs leading-5">
+    <pre className="max-h-96 overflow-auto whitespace-pre-wrap break-words rounded-xl border border-border/60 bg-muted/35 p-3 font-mono text-xs leading-5 text-foreground">
       {JSON.stringify(data, null, 2)}
     </pre>
   );
 }
+
+const RESULT_META = {
+  summary: { label: "Summary result", icon: FileText },
+  table: { label: "Table result", icon: Table2 },
+  list: { label: "List result", icon: List },
+  metrics: { label: "Metrics result", icon: BarChart3 },
+} as const;
 
 export function StructuredResultCard({ result }: { result: UiStructuredResultPart }) {
   const [copied, setCopied] = useState(false);
   const supported =
     result.rendererVersion === 1 &&
     ["summary", "table", "list", "metrics"].includes(result.renderer);
-  const root = objectValue(result.data);
+  const root = resultRecord(result.data);
   const title = result.title || (typeof root?.title === "string" ? root.title : "Result");
+  const meta = Object.prototype.hasOwnProperty.call(RESULT_META, result.renderer)
+    ? RESULT_META[result.renderer as keyof typeof RESULT_META]
+    : { label: "Structured result", icon: Braces };
+  const ResultIcon = meta.icon;
 
   const copy = async () => {
     await navigator.clipboard.writeText(JSON.stringify(result.data, null, 2));
@@ -318,33 +323,37 @@ export function StructuredResultCard({ result }: { result: UiStructuredResultPar
   };
 
   return (
-    <section className="my-4 overflow-hidden rounded-2xl border border-border bg-card">
-      <div className="flex items-center gap-3 border-b border-border/70 bg-muted/25 px-5 py-3.5">
-        <span className="grid size-8 place-items-center rounded-lg bg-foreground text-background">
-          {result.renderer === "table" ? (
-            <Table2 className="size-4" />
-          ) : (
-            <List className="size-4" />
-          )}
+    <section className="my-4 overflow-hidden rounded-2xl border border-border/80 bg-card shadow-sm">
+      <header className="flex items-center gap-3 border-b border-border/70 bg-muted/20 px-4 py-3.5 sm:px-5">
+        <span className="grid size-8 shrink-0 place-items-center rounded-lg border border-primary/15 bg-primary/[0.08] text-primary">
+          <ResultIcon className="size-4" />
         </span>
-        <h3 className="min-w-0 flex-1 truncate text-sm font-semibold">{title}</h3>
+        <div className="min-w-0 flex-1">
+          <p className="text-[10px] font-semibold uppercase tracking-[0.12em] text-muted-foreground">
+            {meta.label}
+          </p>
+          <h3 className="mt-0.5 truncate text-sm font-semibold leading-5 text-foreground">
+            {title}
+          </h3>
+        </div>
         <button
           type="button"
+          aria-label={copied ? "JSON copied" : "Copy result JSON"}
           onClick={() => void copy()}
-          className="inline-flex h-8 items-center gap-1.5 rounded-lg px-2.5 text-xs font-medium text-muted-foreground hover:bg-muted hover:text-foreground"
+          className="inline-flex h-8 shrink-0 items-center gap-1.5 rounded-lg px-2.5 text-xs font-medium text-muted-foreground transition-colors hover:bg-muted hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/30"
         >
           {copied ? <Check className="size-3.5" /> : <ClipboardCopy className="size-3.5" />}
-          {copied ? "Copied" : "Copy JSON"}
+          <span className="hidden sm:inline">{copied ? "Copied" : "Copy JSON"}</span>
         </button>
-      </div>
-      <div className="p-5">
+      </header>
+      <div className={cn(supported && result.renderer === "table" ? "p-0" : "p-4 sm:p-5")}>
         {!supported ? (
           <div className="space-y-3">
             <p className="text-sm font-medium text-muted-foreground">Unsupported result format</p>
             <GenericJSON data={result.data} />
           </div>
         ) : result.renderer === "table" ? (
-          <TableResult data={result.data} />
+          <TableResult data={result.data} title={title} />
         ) : result.renderer === "list" ? (
           <ListResult data={result.data} />
         ) : result.renderer === "metrics" ? (
@@ -358,64 +367,114 @@ export function StructuredResultCard({ result }: { result: UiStructuredResultPar
 }
 
 function SummaryResult({ data }: { data: unknown }) {
-  const root = objectValue(data);
-  if (!root) return <GenericJSON data={data} />;
-  const entries = Object.entries(root).filter(([key]) => key !== "title");
+  const summary = buildSummaryView(data);
+  if (!summary) return <GenericJSON data={data} />;
   return (
-    <dl className="grid gap-3 sm:grid-cols-2">
-      {entries.map(([key, value]) => (
-        <div key={key} className="rounded-xl border border-border bg-background px-3.5 py-3">
-          <dt className="text-xs font-medium text-muted-foreground">{key}</dt>
-          <dd className="mt-1 break-words text-sm text-foreground">{displayValue(value)}</dd>
+    <div>
+      {(summary.lead || summary.status) && (
+        <div className="flex flex-col items-start justify-between gap-3 sm:flex-row">
+          {summary.lead ? (
+            <p className="max-w-3xl text-sm leading-6 text-foreground">{summary.lead}</p>
+          ) : null}
+          {summary.status ? (
+            <span className="shrink-0 rounded-full border border-primary/15 bg-primary/[0.07] px-2.5 py-1 text-xs font-medium text-primary sm:ml-auto">
+              {summary.status}
+            </span>
+          ) : null}
         </div>
-      ))}
-    </dl>
+      )}
+      {summary.fields.length > 0 ? (
+        <dl
+          className={cn(
+            "divide-y divide-border/70 border-y border-border/70",
+            (summary.lead || summary.status) && "mt-5",
+          )}
+        >
+          {summary.fields.map((field) => (
+            <div
+              key={field.key}
+              className="grid gap-1 py-3 sm:grid-cols-[minmax(8rem,0.35fr)_minmax(0,1fr)] sm:gap-5"
+            >
+              <dt className="text-xs font-medium text-muted-foreground">{field.label}</dt>
+              <dd className="break-words text-sm leading-5 text-foreground">
+                {formatResultValue(field.value)}
+              </dd>
+            </div>
+          ))}
+        </dl>
+      ) : null}
+    </div>
   );
 }
 
-function TableResult({ data }: { data: unknown }) {
-  const root = objectValue(data);
-  const rawColumns = Array.isArray(root?.columns) ? root.columns : [];
-  const rows = Array.isArray(root?.rows) ? root.rows : [];
-  const columns = rawColumns.map((column, index) => {
-    if (typeof column === "string") {
-      return { key: `${column}:${index}`, dataKey: column, label: column };
-    }
-    const value = objectValue(column);
-    const dataKey = String(value?.key ?? value?.id ?? index);
-    return {
-      key: `${dataKey}:${index}`,
-      dataKey,
-      label: String(value?.label ?? value?.title ?? dataKey),
-    };
-  });
-  if (columns.length === 0) return <GenericJSON data={data} />;
+function TableResult({ data, title }: { data: unknown; title: string }) {
+  const { columns, rows } = buildTableView(data);
+  if (columns.length === 0) {
+    return (
+      <div className="p-4 sm:p-5">
+        <GenericJSON data={data} />
+      </div>
+    );
+  }
   return (
-    <div className="overflow-x-auto rounded-xl border border-border">
-      <table className="w-full min-w-max border-collapse text-left text-sm">
-        <thead className="bg-muted/50 text-xs text-muted-foreground">
+    <div
+      className="overflow-x-auto focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring/30"
+      role="region"
+      aria-label={`${title} table`}
+      tabIndex={0}
+    >
+      <table className="w-max min-w-full border-collapse text-left text-sm">
+        <caption className="sr-only">{title}</caption>
+        <thead className="bg-muted/40 text-xs text-muted-foreground">
           <tr>
-            {columns.map((column) => (
-              <th key={column.key} className="border-b border-border px-3 py-2 font-medium">
+            {columns.map((column, columnIndex) => (
+              <th
+                key={column.key}
+                className={cn(
+                  "border-b border-border px-4 py-3 font-semibold sm:px-5",
+                  columnIndex === 0 && "sticky left-0 z-20 border-r bg-muted/70",
+                )}
+              >
                 {column.label}
               </th>
             ))}
           </tr>
         </thead>
         <tbody>
-          {rows.map((row, rowIndex) => {
-            const record = objectValue(row);
-            const values = Array.isArray(row) ? row : null;
-            return (
-              <tr key={rowIndex} className="border-b border-border/60 last:border-0">
-                {columns.map((column, columnIndex) => (
-                  <td key={column.key} className="max-w-md px-3 py-2 align-top">
-                    {displayValue(values ? values[columnIndex] : record?.[column.dataKey])}
-                  </td>
-                ))}
-              </tr>
-            );
-          })}
+          {rows.length === 0 ? (
+            <tr>
+              <td
+                colSpan={columns.length}
+                className="px-5 py-8 text-center text-sm text-muted-foreground"
+              >
+                No rows
+              </td>
+            </tr>
+          ) : (
+            rows.map((row, rowIndex) => {
+              const record = resultRecord(row);
+              const values = Array.isArray(row) ? row : null;
+              return (
+                <tr
+                  key={rowIndex}
+                  className="group border-b border-border/60 transition-colors last:border-0 hover:bg-muted/20"
+                >
+                  {columns.map((column, columnIndex) => (
+                    <td
+                      key={column.key}
+                      className={cn(
+                        "max-w-md px-4 py-3 align-top leading-5 sm:px-5",
+                        columnIndex === 0 &&
+                          "sticky left-0 z-10 border-r bg-card font-medium group-hover:bg-muted/20",
+                      )}
+                    >
+                      {formatResultValue(values ? values[columnIndex] : record?.[column.dataKey])}
+                    </td>
+                  ))}
+                </tr>
+              );
+            })
+          )}
         </tbody>
       </table>
     </div>
@@ -423,57 +482,57 @@ function TableResult({ data }: { data: unknown }) {
 }
 
 function ListResult({ data }: { data: unknown }) {
-  const root = objectValue(data);
-  const items = Array.isArray(root?.items) ? root.items : Array.isArray(data) ? data : [];
+  const items = buildListItems(data);
   if (items.length === 0) return <GenericJSON data={data} />;
   return (
-    <ul className="divide-y divide-border rounded-xl border border-border">
+    <ol className="divide-y divide-border/70 border-y border-border/70">
       {items.map((item, index) => (
-        <li key={index} className="px-3.5 py-3 text-sm">
-          {displayValue(item)}
+        <li key={item.key} className="grid grid-cols-[2rem_minmax(0,1fr)] gap-3 py-3.5 sm:gap-4">
+          <span className="pt-0.5 font-mono text-xs tabular-nums text-muted-foreground">
+            {String(index + 1).padStart(2, "0")}
+          </span>
+          <div className="min-w-0">
+            <p className="break-words text-sm font-medium leading-5 text-foreground">
+              {item.title}
+            </p>
+            {item.fields.length > 0 ? (
+              <dl className="mt-2 grid gap-x-6 gap-y-1.5 sm:grid-cols-2">
+                {item.fields.map((field) => (
+                  <div key={field.key} className="min-w-0 text-xs leading-5">
+                    <dt className="inline font-medium text-muted-foreground">{field.label}: </dt>
+                    <dd className="inline break-words text-foreground">
+                      {formatResultValue(field.value)}
+                    </dd>
+                  </div>
+                ))}
+              </dl>
+            ) : null}
+          </div>
         </li>
       ))}
-    </ul>
+    </ol>
   );
 }
 
 function MetricsResult({ data }: { data: unknown }) {
-  const root = objectValue(data);
-  const metricItems = Array.isArray(root?.metrics) ? root.metrics : null;
-  if (metricItems) {
-    return (
-      <dl className="grid grid-cols-2 gap-3 sm:grid-cols-3">
-        {metricItems.map((item, index) => {
-          const metric = objectValue(item);
-          const label = displayValue(metric?.label ?? metric?.name ?? `Metric ${index + 1}`);
-          const value = displayValue(metric?.value ?? metric?.amount ?? item);
-          const unit = typeof metric?.unit === "string" ? metric.unit : "";
-          return (
-            <div key={index} className="rounded-xl border border-border bg-background px-3.5 py-3">
-              <dt className="truncate text-xs font-medium text-muted-foreground">{label}</dt>
-              <dd className="mt-1 break-words text-lg font-semibold text-foreground">
-                {value}
-                {unit ? (
-                  <span className="ml-1 text-xs font-medium text-muted-foreground">{unit}</span>
-                ) : null}
-              </dd>
-            </div>
-          );
-        })}
-      </dl>
-    );
-  }
-  const metricsRoot = objectValue(root?.metrics) ?? root;
-  if (!metricsRoot) return <GenericJSON data={data} />;
-  const entries = Object.entries(metricsRoot).filter(([key]) => key !== "title");
+  const metrics = buildMetrics(data);
+  if (metrics.length === 0) return <GenericJSON data={data} />;
   return (
-    <dl className="grid grid-cols-2 gap-3 sm:grid-cols-3">
-      {entries.map(([key, value]) => (
-        <div key={key} className="rounded-xl border border-border bg-background px-3.5 py-3">
-          <dt className="truncate text-xs font-medium text-muted-foreground">{key}</dt>
-          <dd className="mt-1 break-words text-lg font-semibold text-foreground">
-            {displayValue(value)}
+    <dl className="grid grid-cols-2 gap-x-5 gap-y-5 sm:grid-cols-3">
+      {metrics.map((metric) => (
+        <div key={metric.key} className="min-w-0 border-t border-border/80 pt-3">
+          <dt className="truncate text-xs font-medium text-muted-foreground">{metric.label}</dt>
+          <dd className="mt-1.5 break-words text-2xl font-semibold tracking-tight text-foreground">
+            {formatResultValue(metric.value)}
+            {metric.unit ? (
+              <span className="ml-1.5 text-xs font-medium tracking-normal text-muted-foreground">
+                {metric.unit}
+              </span>
+            ) : null}
           </dd>
+          {metric.trend ? (
+            <p className="mt-1 text-xs font-medium text-primary">{metric.trend}</p>
+          ) : null}
         </div>
       ))}
     </dl>
