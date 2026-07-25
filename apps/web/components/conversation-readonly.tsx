@@ -2,7 +2,7 @@
 
 import { AlertTriangle, Bot, Check, CopyIcon, Loader2, RefreshCw } from "lucide-react";
 import { useCallback, useEffect, useRef, useState } from "react";
-import { MarkdownContent } from "@/components/assistant-ui/markdown-text";
+import { AnswerMarkdownContent, MarkdownContent } from "@/components/assistant-ui/markdown-text";
 import {
   RailEnvironment,
   RailFile,
@@ -364,7 +364,7 @@ function MessagePartView({ part, role }: { part: MessagePart; role: "user" | "as
     }
     return (
       <RailText>
-        <MarkdownContent value={part.text ?? ""} />
+        <AnswerMarkdownContent value={part.text ?? ""} />
       </RailText>
     );
   }

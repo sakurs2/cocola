@@ -6,29 +6,76 @@ import {
   type SyntaxHighlighterProps,
 } from "@assistant-ui/react-markdown";
 import { CheckIcon, CopyIcon } from "lucide-react";
-import { type FC, type ReactNode, useState } from "react";
+import { Children, type FC, isValidElement, type ReactNode, useState } from "react";
+import ReactMarkdown, { type Components } from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { cn } from "@/lib/utils";
 
-// Renders assistant text as GitHub-flavored Markdown, styled with the shadcn
-// design tokens (app/globals.css). Dependency-light: code blocks get chrome
-// and copy affordances without adding a syntax highlighter dependency.
+const answerMarkdownComponents = {
+  a: ({ node: _node, href, ...props }) => {
+    const external = /^https?:\/\//i.test(href ?? "");
+    return (
+      <a
+        {...props}
+        href={href}
+        target={external ? "_blank" : undefined}
+        rel={external ? "noreferrer" : undefined}
+      />
+    );
+  },
+  table: ({ node: _node, ...props }) => (
+    <div
+      className="my-5 max-w-full overflow-x-auto rounded-xl border border-border/70 bg-card shadow-[0_1px_2px_hsl(var(--foreground)/0.03)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-inset"
+      role="region"
+      aria-label="Scrollable table"
+      tabIndex={0}
+    >
+      <table
+        {...props}
+        className="w-full min-w-[32rem] border-separate border-spacing-0 text-left text-[13px] leading-5"
+      />
+    </div>
+  ),
+} satisfies Components;
+
+// Live assistant answers use the streaming primitive, while persisted answers
+// use AnswerMarkdownContent below. Both share the same GFM and presentation
+// contract; Plan and file-preview Markdown intentionally remain separate.
 export function MarkdownText() {
   return (
     <MarkdownTextPrimitive
       remarkPlugins={[remarkGfm]}
       defer
       components={{
+        ...answerMarkdownComponents,
         CodeHeader,
         SyntaxHighlighter,
       }}
-      className={markdownClassName}
+      className={answerMarkdownClassName}
     />
   );
 }
 
+export function AnswerMarkdownContent({ value, className }: { value: string; className?: string }) {
+  return (
+    <div className={cn(answerMarkdownClassName, className)}>
+      <ReactMarkdown
+        remarkPlugins={[remarkGfm]}
+        components={{
+          ...answerMarkdownComponents,
+          pre: PersistedCodeBlock,
+        }}
+      >
+        {value}
+      </ReactMarkdown>
+    </div>
+  );
+}
+
 export function MarkdownContent({ value, className }: { value: string; className?: string }) {
-  return <div className={cn(markdownClassName, className)}>{renderMarkdownBlocks(value)}</div>;
+  return (
+    <div className={cn(contentMarkdownClassName, className)}>{renderMarkdownBlocks(value)}</div>
+  );
 }
 
 export function CodeBlock({
@@ -61,7 +108,38 @@ export function CodeBlock({
   );
 }
 
-const markdownClassName = cn(
+const answerMarkdownClassName = cn(
+  "aui-answer-markdown aui-stream-in min-w-0 text-[15px] leading-7 text-foreground antialiased",
+  "[&>*:first-child]:mt-0 [&>*:last-child]:mb-0",
+  "[&_p]:my-3 [&_p]:max-w-[76ch] [&_p]:break-words [&_p]:text-pretty",
+  "[&_strong]:font-semibold [&_strong]:text-foreground",
+  "[&_em]:text-foreground/90",
+  "[&_h1]:mt-7 [&_h1]:mb-3 [&_h1]:max-w-[76ch] [&_h1]:text-[1.35rem] [&_h1]:leading-7 [&_h1]:font-semibold [&_h1]:tracking-[-0.018em]",
+  "[&_h2]:mt-7 [&_h2]:mb-2.5 [&_h2]:max-w-[76ch] [&_h2]:border-b [&_h2]:border-border/60 [&_h2]:pb-2 [&_h2]:text-[1.125rem] [&_h2]:leading-7 [&_h2]:font-semibold [&_h2]:tracking-[-0.012em]",
+  "[&_h3]:mt-5 [&_h3]:mb-2 [&_h3]:max-w-[76ch] [&_h3]:text-[0.975rem] [&_h3]:leading-6 [&_h3]:font-semibold",
+  "[&_ul]:my-3.5 [&_ul]:max-w-[76ch] [&_ul]:list-disc [&_ul]:pl-5",
+  "[&_ol]:my-3.5 [&_ol]:max-w-[76ch] [&_ol]:list-decimal [&_ol]:pl-5",
+  "[&_li]:my-1.5 [&_li]:pl-1 [&_li>p]:my-1.5",
+  "[&_li::marker]:font-medium [&_li::marker]:text-muted-foreground/75",
+  "[&_ul_ul]:my-1.5 [&_ul_ol]:my-1.5 [&_ol_ul]:my-1.5 [&_ol_ol]:my-1.5",
+  "[&_.task-list-item]:list-none [&_.task-list-item]:pl-0",
+  "[&_.task-list-item>input]:mr-2 [&_.task-list-item>input]:size-3.5 [&_.task-list-item>input]:accent-primary",
+  "[&_blockquote]:my-4 [&_blockquote]:max-w-[76ch] [&_blockquote]:rounded-r-xl [&_blockquote]:border-l-[3px] [&_blockquote]:border-indigo-500/55 [&_blockquote]:bg-indigo-500/[0.045] [&_blockquote]:px-4 [&_blockquote]:py-2.5 [&_blockquote]:text-foreground/80",
+  "[&_blockquote_p]:my-1.5",
+  "[&_a]:font-medium [&_a]:text-primary [&_a]:underline [&_a]:decoration-primary/30 [&_a]:decoration-1 [&_a]:underline-offset-4 [&_a]:transition-colors [&_a]:[overflow-wrap:anywhere] [&_a:hover]:decoration-primary [&_a:focus-visible]:rounded-sm [&_a:focus-visible]:outline-none [&_a:focus-visible]:ring-2 [&_a:focus-visible]:ring-ring [&_a:focus-visible]:ring-offset-2",
+  "[&_code]:rounded-md [&_code]:border [&_code]:border-border/70 [&_code]:bg-muted/75 [&_code]:px-1.5 [&_code]:py-0.5 [&_code]:font-mono [&_code]:text-[0.86em] [&_code]:font-medium",
+  "[&_pre_code]:border-0 [&_pre_code]:bg-transparent [&_pre_code]:p-0 [&_pre_code]:text-inherit",
+  "[&_thead]:bg-muted/45",
+  "[&_th]:whitespace-nowrap [&_th]:border-b [&_th]:border-border/70 [&_th]:px-3.5 [&_th]:py-2.5 [&_th]:font-semibold [&_th]:text-foreground",
+  "[&_td]:border-b [&_td]:border-border/55 [&_td]:px-3.5 [&_td]:py-2.5 [&_td]:align-top",
+  "[&_tbody_tr:last-child_td]:border-b-0",
+  "[&_tbody_tr]:transition-colors [&_tbody_tr:hover]:bg-muted/25",
+  "[&_hr]:my-7 [&_hr]:border-border/70",
+  "[&_del]:text-muted-foreground [&_del]:decoration-muted-foreground/60",
+  "[&_img]:my-5 [&_img]:max-h-[32rem] [&_img]:max-w-full [&_img]:rounded-xl [&_img]:border [&_img]:border-border/70 [&_img]:bg-muted/20 [&_img]:object-contain",
+);
+
+const contentMarkdownClassName = cn(
   "aui-stream-in text-[15px] leading-7 text-foreground",
   "[&_p]:my-2.5 [&_p:first-child]:mt-0 [&_p:last-child]:mb-0",
   "[&_ul]:my-2.5 [&_ol]:my-2.5 [&_li]:my-1 [&_li>p]:my-1",
@@ -78,6 +156,19 @@ const markdownClassName = cn(
   "[&_td]:border [&_td]:border-border [&_td]:px-2.5 [&_td]:py-1.5",
   "[&_hr]:my-5 [&_hr]:border-border",
 );
+
+const PersistedCodeBlock: Components["pre"] = ({ node: _node, children, ...props }) => {
+  const child = Children.toArray(children)[0];
+  if (
+    Children.count(children) === 1 &&
+    isValidElement<{ className?: string; children?: ReactNode }>(child) &&
+    typeof child.props.children === "string"
+  ) {
+    const language = /language-([\w+-]+)/.exec(child.props.className ?? "")?.[1] ?? "text";
+    return <CodeBlock language={language} code={child.props.children} />;
+  }
+  return <pre {...props}>{children}</pre>;
+};
 
 const renderMarkdownBlocks = (value: string): ReactNode[] => {
   const lines = value.replace(/\r\n/g, "\n").split("\n");
