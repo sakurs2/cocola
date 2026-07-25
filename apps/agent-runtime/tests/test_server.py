@@ -421,6 +421,7 @@ async def test_query_materializes_enabled_skills_without_prompt_injection():
         executor=StaticSandboxExecutor(),
     ).Query(FakeRequest(sandbox_id="box-1"), FakeContext())
     assert prov.seen_options.system_prompt is None
+    assert prov.seen_options.structured_result_policy == "optional"
     assert prov.seen_options.environment_skills == [
         {"id": "web", "name": "Web Search", "version": "1.2"}
     ]
@@ -434,6 +435,7 @@ async def test_scheduled_task_does_not_enable_interactive_questions():
 
     assert provider.seen_options is not None
     assert provider.seen_options.user_input_enabled is False
+    assert provider.seen_options.structured_result_policy == "optional"
     assert provider.seen_options.system_prompt is None
 
 
@@ -502,6 +504,7 @@ async def test_query_validates_and_forwards_selected_skill():
 
     assert prov.seen_options.selected_skill_id == "pdf"
     assert prov.seen_options.selected_skill_result_contract == contract
+    assert prov.seen_options.structured_result_policy == "required"
     assert prov.seen_options.system_prompt is None
 
 
@@ -525,6 +528,7 @@ async def test_query_keeps_personal_catalog_id_out_of_runtime():
     ).Query(FakeRequest(sandbox_id="box-1", skill_id="frontend-design"), FakeContext())
 
     assert prov.seen_options.selected_skill_id == "frontend-design"
+    assert prov.seen_options.structured_result_policy == "optional"
     assert prov.seen_options.environment_skills == [
         {"id": "frontend-design", "name": "Frontend Design", "version": ""}
     ]
@@ -1013,6 +1017,7 @@ async def test_plan_query_is_claude_read_only_and_skips_side_effect_integrations
 
     assert provider.seen_options is not None
     assert provider.seen_options.interaction_mode == "plan"
+    assert provider.seen_options.structured_result_policy == "none"
     assert provider.seen_options.mcp_servers == {}
     assert provider.seen_options.project_credential is None
     assert provider.seen_options.system_prompt is not None
@@ -1199,6 +1204,12 @@ async def test_project_query_uses_isolated_project_worktree():
 async def test_runtime_catalog_and_provider_dispatch():
     claude = ListProvider([AgentEvent(kind="done", data={})])
     codex = ListProvider([AgentEvent(kind="done", data={})])
+    contract = {
+        "version": 1,
+        "renderer": "summary",
+        "schema": {"type": "object"},
+        "contract_hash": "sha256:" + "a" * 64,
+    }
     runtimes = RuntimeRegistry(
         [
             RuntimeEntry(
@@ -1220,7 +1231,14 @@ async def test_runtime_catalog_and_provider_dispatch():
             ),
         ]
     )
-    servicer = AgentRuntimeServicer(claude, runtimes=runtimes)
+    servicer = AgentRuntimeServicer(
+        claude,
+        runtimes=runtimes,
+        skills=StaticSkillCatalog(
+            [Skill(id="report", name="Report", skill_md="# Report", result_contract=contract)]
+        ),
+        executor=StaticSandboxExecutor(),
+    )
 
     catalog = await servicer.ListRuntimes(None, FakeContext())
     assert [(item.id, item.model_protocol, item.is_default) for item in catalog.runtimes] == [
@@ -1228,11 +1246,16 @@ async def test_runtime_catalog_and_provider_dispatch():
         ("codex", "openai-responses", False),
     ]
 
-    await servicer.Query(FakeRequest(runtime_id="codex"), FakeContext())
+    await servicer.Query(
+        FakeRequest(runtime_id="codex", skill_id="report", sandbox_id="box-1"),
+        FakeContext(),
+    )
 
     assert claude.seen_options is None
     assert codex.seen_options is not None
     assert codex.seen_options.runtime_id == "codex"
+    assert codex.seen_options.selected_skill_result_contract == contract
+    assert codex.seen_options.structured_result_policy == "none"
 
 
 async def test_query_rejects_unsupported_runtime_before_provider_call():

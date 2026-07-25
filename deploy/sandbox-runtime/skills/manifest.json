@@ -30,6 +30,12 @@
       "name": "Cocola GitHub",
       "version": "1.0.0",
       "path": "cocola-github"
+    },
+    {
+      "id": "cocola-structured-output",
+      "name": "Cocola Structured Output",
+      "version": "1.0.0",
+      "path": "cocola-structured-output"
     }
   ]
 }

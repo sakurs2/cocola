@@ -429,6 +429,7 @@ async def test_execute_control_validates_and_emits_structured_result():
         plan_mode=False,
         user_input_enabled=True,
         result_contract=contract,
+        result_policy="required",
     )
 
     await control.submit_result(
@@ -489,6 +490,7 @@ async def test_structured_result_enforces_renderer_limits():
         plan_mode=False,
         user_input_enabled=False,
         result_contract=contract,
+        result_policy="required",
     )
 
     response = await control.submit_result(
@@ -519,6 +521,7 @@ async def test_structured_result_is_revalidated_against_the_contract_schema():
         plan_mode=False,
         user_input_enabled=False,
         result_contract=contract,
+        result_policy="required",
     )
 
     response = await control.submit_result({"title": "Missing metrics"})
@@ -548,6 +551,114 @@ def test_result_contract_rejects_remote_schema_references():
         assert str(error) == "result_contract schema or hash is invalid"
     else:
         raise AssertionError("remote schema reference must be rejected")
+
+
+def test_builtin_structured_output_is_optional_and_registers_typed_tools():
+    captured: dict[str, object] = {}
+    sdk = _fake_sdk(captured)
+    module = _load_shim("cocola_agent_shim_builtin_structured_output")
+    control = module._CocolaRunControl(
+        plan_mode=False,
+        user_input_enabled=False,
+        result_policy="optional",
+    )
+
+    server = control.sdk_server(sdk)
+    tools = {tool.name: tool for tool in server["tools"]}
+
+    assert set(tools) == {
+        "cocola_present_summary",
+        "cocola_present_table",
+        "cocola_present_list",
+        "cocola_present_metrics",
+    }
+    assert tools["cocola_present_table"].input_schema["required"] == ["columns", "rows"]
+    assert control.final_event() is None
+
+
+async def test_builtin_table_submission_emits_structured_result():
+    module = _load_shim("cocola_agent_shim_builtin_table_result")
+    control = module._CocolaRunControl(
+        plan_mode=False,
+        user_input_enabled=False,
+        result_policy="optional",
+    )
+
+    await control.submit_result(
+        {
+            "title": "Options",
+            "columns": ["Name", "Status"],
+            "rows": [
+                {"Name": "Alpha", "Status": "Ready"},
+                {"Name": "Beta", "Status": "Blocked"},
+            ],
+        },
+        "cocola_present_table",
+    )
+
+    event = control.final_event()
+    assert event["type"] == "structured_result_ready"
+    assert event["renderer"] == "table"
+    assert event["renderer_version"] == 1
+    assert event["title"] == "Options"
+    assert event["contract_hash"].startswith("sha256:")
+    assert event["data"]["rows"][1]["Status"] == "Blocked"
+
+
+async def test_invalid_builtin_result_fails_without_markdown_fallback():
+    module = _load_shim("cocola_agent_shim_builtin_result_invalid")
+    control = module._CocolaRunControl(
+        plan_mode=False,
+        user_input_enabled=False,
+        result_policy="optional",
+    )
+
+    response = await control.submit_result(
+        {"title": "Missing rows", "columns": ["Name"]},
+        "cocola_present_table",
+    )
+
+    assert response["is_error"] is True
+    assert control.final_event()["code"] == "STRUCTURED_RESULT_INVALID"
+
+
+async def test_builtin_result_rejects_non_json_numbers():
+    module = _load_shim("cocola_agent_shim_builtin_non_json_number")
+    control = module._CocolaRunControl(
+        plan_mode=False,
+        user_input_enabled=False,
+        result_policy="optional",
+    )
+
+    response = await control.submit_result(
+        {"metrics": [{"label": "Latency", "value": float("nan")}]},
+        "cocola_present_metrics",
+    )
+
+    assert response["is_error"] is True
+    assert response["content"][0]["text"] == "Structured result must be valid JSON."
+    assert control.final_event()["code"] == "STRUCTURED_RESULT_INVALID"
+
+
+def test_required_skill_result_and_builtin_results_are_mutually_exclusive():
+    module = _load_shim("cocola_agent_shim_result_policy_conflict")
+    contract = {
+        "version": 1,
+        "renderer": "summary",
+        "contract_hash": "sha256:" + "a" * 64,
+        "schema": {"type": "object"},
+    }
+
+    try:
+        module._CocolaRunControl(
+            plan_mode=False,
+            result_contract=contract,
+            result_policy="optional",
+        )
+    except ValueError as error:
+        assert "valid only with required" in str(error)
+    else:
+        raise AssertionError("conflicting structured result policies must fail closed")
 
 
 def test_execute_options_merge_control_with_user_mcps(monkeypatch):

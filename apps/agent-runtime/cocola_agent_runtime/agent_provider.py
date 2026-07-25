@@ -9,7 +9,9 @@ from __future__ import annotations
 
 from collections.abc import AsyncIterator
 from dataclasses import dataclass
-from typing import Protocol
+from typing import Literal, Protocol
+
+StructuredResultPolicy = Literal["none", "required", "optional"]
 
 
 @dataclass
@@ -35,6 +37,9 @@ class AgentOptions:
     # adapter converts it to the selected runtime's native invocation syntax.
     selected_skill_id: str | None = None
     selected_skill_result_contract: dict | None = None
+    # Required means a selected Skill must submit its contract result. Optional
+    # enables Cocola's built-in presentation tools while allowing normal Markdown.
+    structured_result_policy: StructuredResultPolicy = "none"
     user_input_enabled: bool = True
     mcp_servers: dict[str, dict] | None = None
     # Secret-free metadata for skills that were successfully materialized in

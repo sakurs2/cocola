@@ -28,7 +28,9 @@ Request schema:
     "resume":        str | null,      # optional session_id to --resume
     "cwd":           str | null,      # optional, default $COCOLA_AGENT_CWD
     "permission_mode": str | null,    # optional, default "bypassPermissions"
-    "mcp_servers":   object | null    # optional runtime MCP configuration
+    "mcp_servers":   object | null,   # optional runtime MCP configuration
+    "result_contract": object | null, # selected Skill result contract
+    "result_policy": str | null       # none | required | optional
   }
 
 Auth/routing come from the exec environment injected by the provider. The shim
@@ -47,6 +49,7 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+import hashlib
 import json
 import os
 import re
@@ -186,6 +189,34 @@ _PLAN_CONTROL_TOOLS = (
     "cocola_get_runtime_info",
 )
 _RESULT_CONTROL_TOOL = "cocola_submit_result"
+_BUILTIN_RESULT_TOOL_RENDERERS = {
+    "cocola_present_summary": "summary",
+    "cocola_present_table": "table",
+    "cocola_present_list": "list",
+    "cocola_present_metrics": "metrics",
+}
+_BUILTIN_RESULT_TOOL_DESCRIPTIONS = {
+    "cocola_present_summary": (
+        "Present a compact set of labeled facts when a card is clearer than prose, "
+        "then stop this run."
+    ),
+    "cocola_present_table": (
+        "Present comparable records as rows and columns when a table is clearer than prose, "
+        "then stop this run."
+    ),
+    "cocola_present_list": (
+        "Present a homogeneous collection of items when a list card is clearer than prose, "
+        "then stop this run."
+    ),
+    "cocola_present_metrics": (
+        "Present labeled measurements when a metrics card is clearer than prose, "
+        "then stop this run."
+    ),
+}
+_RESULT_CONTROL_TOOLS = (
+    _RESULT_CONTROL_TOOL,
+    *_BUILTIN_RESULT_TOOL_RENDERERS,
+)
 _PLAN_CONTROL_TOOL_NAMES = tuple(
     f"mcp__{_PLAN_CONTROL_SERVER}__{name}" for name in _PLAN_CONTROL_TOOLS
 )
@@ -193,7 +224,7 @@ _TERMINAL_CONTROL_TOOL_NAMES = frozenset(
     {
         f"mcp__{_PLAN_CONTROL_SERVER}__cocola_submit_plan",
         f"mcp__{_PLAN_CONTROL_SERVER}__cocola_request_user_input",
-        f"mcp__{_PLAN_CONTROL_SERVER}__{_RESULT_CONTROL_TOOL}",
+        *(f"mcp__{_PLAN_CONTROL_SERVER}__{tool_name}" for tool_name in _RESULT_CONTROL_TOOLS),
     }
 )
 _PLAN_DISALLOWED_TOOLS = (
@@ -707,6 +738,135 @@ def _normalized_result_contract(value: Any) -> dict[str, Any] | None:
     }
 
 
+def _builtin_result_contract(renderer: str, schema: dict[str, Any]) -> dict[str, Any]:
+    hash_input = json.dumps(
+        {"version": 1, "renderer": renderer, "schema": schema},
+        ensure_ascii=False,
+        sort_keys=True,
+        separators=(",", ":"),
+    ).encode()
+    return {
+        "renderer": renderer,
+        "version": 1,
+        "schema": schema,
+        "contract_hash": "sha256:" + hashlib.sha256(hash_input).hexdigest(),
+    }
+
+
+_BUILTIN_RESULT_CONTRACTS = {
+    "cocola_present_summary": _builtin_result_contract(
+        "summary",
+        {
+            "type": "object",
+            "properties": {
+                "title": {"type": "string", "maxLength": 4096},
+                "summary": {"type": "string", "maxLength": 4096},
+                "status": {"type": "string", "maxLength": 4096},
+                "details": {
+                    "type": "array",
+                    "maxItems": 20,
+                    "items": {
+                        "type": "object",
+                        "properties": {
+                            "label": {"type": "string", "maxLength": 4096},
+                            "value": {},
+                        },
+                        "required": ["label", "value"],
+                        "additionalProperties": False,
+                    },
+                },
+            },
+            "required": ["summary"],
+            "additionalProperties": False,
+        },
+    ),
+    "cocola_present_table": _builtin_result_contract(
+        "table",
+        {
+            "type": "object",
+            "properties": {
+                "title": {"type": "string", "maxLength": 4096},
+                "columns": {
+                    "type": "array",
+                    "minItems": 1,
+                    "maxItems": 20,
+                    "items": {
+                        "oneOf": [
+                            {"type": "string", "maxLength": 4096},
+                            {
+                                "type": "object",
+                                "properties": {
+                                    "key": {"type": "string", "maxLength": 256},
+                                    "label": {"type": "string", "maxLength": 4096},
+                                },
+                                "required": ["key", "label"],
+                                "additionalProperties": False,
+                            },
+                        ]
+                    },
+                },
+                "rows": {
+                    "type": "array",
+                    "maxItems": 200,
+                    "items": {
+                        "oneOf": [
+                            {"type": "array", "maxItems": 20},
+                            {"type": "object"},
+                        ]
+                    },
+                },
+            },
+            "required": ["columns", "rows"],
+            "additionalProperties": False,
+        },
+    ),
+    "cocola_present_list": _builtin_result_contract(
+        "list",
+        {
+            "type": "object",
+            "properties": {
+                "title": {"type": "string", "maxLength": 4096},
+                "items": {
+                    "type": "array",
+                    "minItems": 1,
+                    "maxItems": 200,
+                    "items": {},
+                },
+            },
+            "required": ["items"],
+            "additionalProperties": False,
+        },
+    ),
+    "cocola_present_metrics": _builtin_result_contract(
+        "metrics",
+        {
+            "type": "object",
+            "properties": {
+                "title": {"type": "string", "maxLength": 4096},
+                "metrics": {
+                    "type": "array",
+                    "minItems": 1,
+                    "maxItems": 20,
+                    "items": {
+                        "type": "object",
+                        "properties": {
+                            "label": {"type": "string", "maxLength": 4096},
+                            "value": {},
+                            "unit": {"type": "string", "maxLength": 4096},
+                            "trend": {"type": "string", "maxLength": 4096},
+                        },
+                        "required": ["label", "value"],
+                        "additionalProperties": False,
+                    },
+                },
+            },
+            "required": ["metrics"],
+            "additionalProperties": False,
+        },
+    ),
+}
+
+
 class _CocolaRunControl:
     """Own the trusted, structured terminal protocol for one Claude run."""
 
@@ -716,10 +876,25 @@ class _CocolaRunControl:
         plan_mode: bool = True,
         user_input_enabled: bool = True,
         result_contract: dict[str, Any] | None = None,
+        result_policy: str = "none",
     ) -> None:
+        if result_policy not in {"none", "required", "optional"}:
+            raise ValueError("result_policy must be none, required, or optional")
+        if plan_mode and result_policy != "none":
+            raise ValueError("structured results are available only in Execute mode")
+        if result_policy == "required":
+            if result_contract is None:
+                raise ValueError("required result_policy needs a Skill result contract")
+        elif result_contract is not None:
+            raise ValueError("a Skill result contract is valid only with required result_policy")
         self._plan_mode = plan_mode
         self._user_input_enabled = user_input_enabled
-        self._result_contract = result_contract
+        self._result_policy = result_policy
+        self._result_contracts: dict[str, dict[str, Any]] = {}
+        if result_policy == "required":
+            self._result_contracts[_RESULT_CONTROL_TOOL] = result_contract
+        elif result_policy == "optional":
+            self._result_contracts.update(_BUILTIN_RESULT_CONTRACTS)
         self._terminal_event: dict[str, Any] | None = None
         self._protocol_error: dict[str, Any] | None = None
         self._terminal_reserved_name = ""
@@ -734,8 +909,9 @@ class _CocolaRunControl:
             names.update(_PLAN_CONTROL_TOOL_NAMES)
         elif user_input_enabled:
             names.add(f"mcp__{_PLAN_CONTROL_SERVER}__cocola_request_user_input")
-        if result_contract is not None:
-            names.add(f"mcp__{_PLAN_CONTROL_SERVER}__{_RESULT_CONTROL_TOOL}")
+        names.update(
+            f"mcp__{_PLAN_CONTROL_SERVER}__{tool_name}" for tool_name in self._result_contracts
+        )
         self._tool_names = names
         self._terminal_tool_names = names & _TERMINAL_CONTROL_TOOL_NAMES
 
@@ -750,15 +926,22 @@ class _CocolaRunControl:
             "is_error": is_error,
         }
 
-    def _set_terminal(self, event: dict[str, Any]) -> dict[str, Any]:
+    def _set_terminal(
+        self,
+        event: dict[str, Any],
+        terminal_tool_name: str = "",
+    ) -> dict[str, Any]:
         if not self._terminal_reserved_name:
-            event_type = str(event.get("type") or "")
-            if event_type == "structured_result_ready":
-                suffix = _RESULT_CONTROL_TOOL
-            elif event_type == "question_required":
-                suffix = "cocola_request_user_input"
+            if terminal_tool_name:
+                suffix = terminal_tool_name
             else:
-                suffix = "cocola_submit_plan"
+                event_type = str(event.get("type") or "")
+                if event_type == "structured_result_ready":
+                    suffix = _RESULT_CONTROL_TOOL
+                elif event_type == "question_required":
+                    suffix = "cocola_request_user_input"
+                else:
+                    suffix = "cocola_submit_plan"
             self._terminal_reserved_name = f"mcp__{_PLAN_CONTROL_SERVER}__{suffix}"
         if self._terminal_event is not None or self._protocol_error is not None:
             self._record_protocol_error(self._terminal_reserved_name)
@@ -771,7 +954,7 @@ class _CocolaRunControl:
 
     @staticmethod
     def _protocol_error_for(tool_name: str) -> dict[str, Any]:
-        if tool_name.endswith("cocola_submit_result"):
+        if any(tool_name.endswith(result_tool) for result_tool in _RESULT_CONTROL_TOOLS):
             return {
                 "type": "error",
                 "stage": "result",
@@ -936,16 +1119,25 @@ class _CocolaRunControl:
             }
         )
 
-    async def submit_result(self, args: dict[str, Any]) -> dict[str, Any]:
-        tool_name = f"mcp__{_PLAN_CONTROL_SERVER}__{_RESULT_CONTROL_TOOL}"
-        contract = self._result_contract
+    async def submit_result(
+        self,
+        args: dict[str, Any],
+        result_tool_name: str = _RESULT_CONTROL_TOOL,
+    ) -> dict[str, Any]:
+        tool_name = f"mcp__{_PLAN_CONTROL_SERVER}__{result_tool_name}"
+        contract = self._result_contracts.get(result_tool_name)
         if contract is None:
             return self._reject_terminal(
                 tool_name,
                 "This run does not accept a structured result.",
             )
         try:
-            encoded = json.dumps(args, ensure_ascii=False, separators=(",", ":"))
+            encoded = json.dumps(
+                args,
+                ensure_ascii=False,
+                allow_nan=False,
+                separators=(",", ":"),
+            )
         except (TypeError, ValueError):
             return self._reject_terminal(tool_name, "Structured result must be valid JSON.")
         if (
@@ -957,9 +1149,12 @@ class _CocolaRunControl:
         try:
             Draft202012Validator(contract["schema"]).validate(args)
         except ValidationError:
+            schema_owner = (
+                "Skill" if result_tool_name == _RESULT_CONTROL_TOOL else "Cocola presentation"
+            )
             return self._reject_terminal(
                 tool_name,
-                "Structured result does not match the Skill result schema.",
+                f"Structured result does not match the {schema_owner} result schema.",
             )
         title = args.get("title")
         if not isinstance(title, str):
@@ -972,7 +1167,8 @@ class _CocolaRunControl:
                 "contract_hash": contract["contract_hash"],
                 "title": title.strip()[: 4 * 1024],
                 "data": args,
-            }
+            },
+            result_tool_name,
         )
 
     async def get_runtime_info(self, _args: dict[str, Any]) -> dict[str, Any]:
@@ -1090,18 +1286,27 @@ class _CocolaRunControl:
 
             tools.append(get_runtime_info)
 
-        if self._result_contract is not None:
+        def result_tool(result_tool_name: str, contract: dict[str, Any]) -> Any:
+            description = _BUILTIN_RESULT_TOOL_DESCRIPTIONS.get(
+                result_tool_name,
+                "Submit the final structured Skill result to Cocola, then stop this run.",
+            )
 
             @sdk.tool(
-                _RESULT_CONTROL_TOOL,
-                "Submit the final structured Skill result to Cocola, then stop this run.",
-                self._result_contract["schema"],
+                result_tool_name,
+                description,
+                contract["schema"],
                 annotations=annotations,
             )
             async def submit_result(args: dict[str, Any]) -> dict[str, Any]:
-                return await self.submit_result(args)
+                return await self.submit_result(args, result_tool_name)
 
-            tools.append(submit_result)
+            return submit_result
+
+        tools.extend(
+            result_tool(result_tool_name, contract)
+            for result_tool_name, contract in self._result_contracts.items()
+        )
 
         return sdk.create_sdk_mcp_server(
             name=_PLAN_CONTROL_SERVER,
@@ -1218,9 +1423,9 @@ class _CocolaRunControl:
             return self._protocol_error_for(self._terminal_reserved_name)
         if self._runtime_failed:
             return None
-        if not self._plan_mode and self._result_contract is None:
-            return None
-        if self._result_contract is not None and not self._plan_mode:
+        if not self._plan_mode:
+            if self._result_policy != "required":
+                return None
             return {
                 "type": "error",
                 "stage": "result",
@@ -1365,16 +1570,45 @@ async def _run_claude(req: dict[str, Any]) -> int:
             }
         )
         return 1
-    user_input_enabled = bool(req.get("user_input_enabled", plan_mode))
-    run_control = (
-        _CocolaRunControl(
-            plan_mode=plan_mode,
-            user_input_enabled=user_input_enabled,
-            result_contract=result_contract,
+    raw_result_policy = req.get("result_policy")
+    if raw_result_policy is None:
+        # Accept requests from an older control-plane process during a rolling
+        # deployment. New providers always send the policy explicitly.
+        result_policy = "required" if result_contract is not None else "none"
+    elif isinstance(raw_result_policy, str):
+        result_policy = raw_result_policy
+    else:
+        _emit(
+            {
+                "type": "error",
+                "stage": "result",
+                "code": "STRUCTURED_RESULT_INVALID",
+                "error": "result_policy must be none, required, or optional",
+            }
         )
-        if plan_mode or user_input_enabled or result_contract is not None
-        else None
-    )
+        return 1
+    user_input_enabled = bool(req.get("user_input_enabled", plan_mode))
+    try:
+        run_control = (
+            _CocolaRunControl(
+                plan_mode=plan_mode,
+                user_input_enabled=user_input_enabled,
+                result_contract=result_contract,
+                result_policy=result_policy,
+            )
+            if plan_mode or user_input_enabled or result_policy != "none"
+            else None
+        )
+    except ValueError as error:
+        _emit(
+            {
+                "type": "error",
+                "stage": "result",
+                "code": "STRUCTURED_RESULT_INVALID",
+                "error": str(error),
+            }
+        )
+        return 1
     options = _build_options(req, run_control=run_control)
     prompt = _claude_prompt(req)
     _emit({"type": "start", "ts": time.time()})

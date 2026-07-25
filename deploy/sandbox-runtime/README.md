@@ -156,10 +156,12 @@ serve local HTML on a temporary loopback HTTP port for interactive inspection.
 
 ### Built-in Agent Skill
 
-The image ships versioned, root-owned `cocola-sandbox-browser` and
-`cocola-sandbox-artifacts` Skills under `/opt/cocola/skills`. They teach the
-Agent when and how to use the stable guest CLI; neither Skill adds a second
-execution implementation.
+The image ships versioned, root-owned platform Skills under
+`/opt/cocola/skills`. Browser, Artifact, Preview, Project Workspace, and GitHub
+Skills teach the Agent when and how to use stable Cocola capabilities without
+adding a second execution implementation. `cocola-structured-output` describes
+the four optional presentation tools that Cocola exposes to Claude Code Execute
+runs when no selected Skill requires its own result contract.
 
 At the beginning of a Run, Agent Runtime inspects the image's platform Skill
 manifest and atomically reconciles platform Skills with the effective Admin and

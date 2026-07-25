@@ -45,7 +45,12 @@ from cocola.agent.v1 import agent_pb2 as pb
 from cocola.agent.v1 import agent_pb2_grpc as pb_grpc
 from cocola_common import get_logger
 
-from cocola_agent_runtime.agent_provider import AgentEvent, AgentOptions, AgentProvider
+from cocola_agent_runtime.agent_provider import (
+    AgentEvent,
+    AgentOptions,
+    AgentProvider,
+    StructuredResultPolicy,
+)
 from cocola_agent_runtime.mcp_loader import MCPCatalog
 from cocola_agent_runtime.objstore import Fetcher
 from cocola_agent_runtime.project_git import (
@@ -1257,6 +1262,19 @@ class AgentRuntimeServicer(pb_grpc.AgentRuntimeServiceServicer):
                         await heartbeat_task
                 return
 
+        selected_skill_result_contract = (
+            selected_skill.result_contract
+            if selected_skill is not None and interaction_mode == "execute"
+            else None
+        )
+        structured_result_policy: StructuredResultPolicy
+        if runtime_id == "claude-code" and interaction_mode == "execute":
+            structured_result_policy = (
+                "required" if selected_skill_result_contract is not None else "optional"
+            )
+        else:
+            structured_result_policy = "none"
+
         opts = AgentOptions(
             user_id=request.user_id,
             session_id=request.session_id,
@@ -1269,11 +1287,8 @@ class AgentRuntimeServicer(pb_grpc.AgentRuntimeServiceServicer):
             max_turns=request.max_turns or 30,
             model_route_id=model_route_id,
             selected_skill_id=selected_skill_id,
-            selected_skill_result_contract=(
-                selected_skill.result_contract
-                if selected_skill is not None and interaction_mode == "execute"
-                else None
-            ),
+            selected_skill_result_contract=selected_skill_result_contract,
+            structured_result_policy=structured_result_policy,
             user_input_enabled=(
                 runtime_id == "claude-code"
                 and _metadata_value(context, RUN_SOURCE_METADATA_KEY) != "scheduled_task"

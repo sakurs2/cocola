@@ -746,3 +746,29 @@ def test_builtin_github_skill_and_wrapper_match_the_broker_contract():
         "required": False,
         "commands": ["gh", "git"],
     }
+
+
+def test_builtin_structured_output_skill_matches_the_optional_control_tools():
+    platform_manifest = json.loads(
+        (BUILTIN_SKILLS_PATH / "manifest.json").read_text(encoding="utf-8")
+    )
+    descriptors = {item["id"]: item for item in platform_manifest["skills"]}
+    descriptor = descriptors["cocola-structured-output"]
+    skill_md = (BUILTIN_SKILLS_PATH / descriptor["path"] / "SKILL.md").read_text(encoding="utf-8")
+
+    assert descriptor == {
+        "id": "cocola-structured-output",
+        "name": "Cocola Structured Output",
+        "version": "1.0.0",
+        "path": "cocola-structured-output",
+    }
+    assert skill_md.startswith("---\nname: cocola-structured-output\n")
+    for tool_name in (
+        "cocola_present_summary",
+        "cocola_present_table",
+        "cocola_present_list",
+        "cocola_present_metrics",
+    ):
+        assert tool_name in skill_md
+    assert "Use at most one" in " ".join(skill_md.split())
+    assert "answer normally" in skill_md

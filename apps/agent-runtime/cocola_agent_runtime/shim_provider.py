@@ -324,6 +324,7 @@ class InSandboxShimProvider:
             req["skill_id"] = options.selected_skill_id
         if options.selected_skill_result_contract:
             req["result_contract"] = options.selected_skill_result_contract
+        req["result_policy"] = options.structured_result_policy
         req["user_input_enabled"] = options.user_input_enabled
         if options.traceparent:
             req["traceparent"] = options.traceparent
