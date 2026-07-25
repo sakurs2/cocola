@@ -3,6 +3,7 @@
 import { useCallback, useRef, useState } from "react";
 import {
   Cable,
+  BookOpenText,
   CalendarCheck as CalendarDots,
   MessagesSquare as ChatsCircle,
   CheckCircle2 as CheckCircle,
@@ -43,6 +44,13 @@ type PrimaryNavItem = NavItem & {
 };
 
 const PRIMARY_NAV: PrimaryNavItem[] = [
+  {
+    icon: BookOpenText,
+    label: "Wiki",
+    href: "/wiki",
+    section: "navigation",
+    iconClassName: "text-blue-600",
+  },
   {
     icon: CalendarDots,
     label: "Tasks",

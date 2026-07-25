@@ -22,6 +22,7 @@ import (
 	"github.com/cocola-project/cocola/apps/gateway/internal/memory"
 	"github.com/cocola-project/cocola/apps/gateway/internal/project"
 	traceevents "github.com/cocola-project/cocola/apps/gateway/internal/traceevent"
+	"github.com/cocola-project/cocola/apps/gateway/internal/wiki"
 	"github.com/cocola-project/cocola/packages/go-common/tracing"
 )
 
@@ -200,6 +201,49 @@ func (a *API) chat(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusBadRequest, "INVALID_SKILL_ID", "skill_id is invalid")
 		return
 	}
+	if len(req.WikiRefs) > 0 {
+		if a.wiki == nil || a.store == nil {
+			writeErr(w, http.StatusServiceUnavailable, "WIKI_UNAVAILABLE", "Wiki is not configured")
+			return
+		}
+		nodeIDs := make([]string, 0, len(req.WikiRefs))
+		seen := make(map[string]struct{}, len(req.WikiRefs))
+		for _, reference := range req.WikiRefs {
+			nodeID := strings.TrimSpace(reference.NodeID)
+			parsedNodeID, err := uuid.Parse(nodeID)
+			if err != nil || len(nodeID) != 36 {
+				writeErr(w, http.StatusBadRequest, "INVALID_WIKI_REFERENCE", "Wiki reference id must be a UUID")
+				return
+			}
+			nodeID = parsedNodeID.String()
+			if _, duplicate := seen[nodeID]; duplicate {
+				continue
+			}
+			seen[nodeID] = struct{}{}
+			nodeIDs = append(nodeIDs, nodeID)
+		}
+		nodes, versions, resolveErr := a.wiki.ResolveCurrent(r.Context(), wiki.Identity{
+			TenantID: identity.TenantID, UserID: identity.UserID,
+		}, nodeIDs)
+		if errors.Is(resolveErr, wiki.ErrNotFound) {
+			writeErr(w, http.StatusNotFound, "WIKI_REFERENCE_NOT_FOUND", "a referenced Wiki file no longer exists")
+			return
+		}
+		if resolveErr != nil {
+			writeErr(w, http.StatusServiceUnavailable, "WIKI_UNAVAILABLE", "could not resolve Wiki references")
+			return
+		}
+		req.WikiReferences = make([]agent.WikiReference, 0, len(nodes))
+		for index := range nodes {
+			req.WikiReferences = append(req.WikiReferences, agent.WikiReference{
+				NodeID: nodes[index].ID, VersionID: versions[index].ID,
+				Revision:    versions[index].Revision,
+				LogicalPath: nodes[index].LogicalPath, Filename: nodes[index].Name,
+				Mime: versions[index].MimeType, ObjectKey: versions[index].ObjectKey,
+				Size: versions[index].SizeBytes, SHA256: versions[index].SHA256,
+			})
+		}
+	}
 	if req.RuntimeID != "" {
 		if _, supported := a.runtimeByID[req.RuntimeID]; !supported {
 			writeErr(w, http.StatusBadRequest, "UNSUPPORTED_RUNTIME", "agent runtime is not supported")
@@ -324,7 +368,7 @@ func (a *API) chat(w http.ResponseWriter, r *http.Request) {
 		},
 		UserMessage: convo.Message{
 			ID: runID + "-user", ConversationID: req.SessionID, Role: "user",
-			Parts:    []convo.Part{{Type: convo.PartText, Text: req.Prompt}},
+			Parts:    userMessageParts(req),
 			Metadata: userMetadata(req), CreatedAt: startedAt,
 		},
 		ProjectBaseRef: projectBaseRef,
@@ -414,6 +458,20 @@ func (a *API) chat(w http.ResponseWriter, r *http.Request) {
 		go a.executeLiveRun(live)
 	}
 	a.serveRunSubscription(w, r, run.ID, snapshot, updates, unsubscribe)
+}
+
+func userMessageParts(req chatRequest) []convo.Part {
+	parts := []convo.Part{{Type: convo.PartText, Text: req.Prompt}}
+	for _, reference := range req.WikiReferences {
+		parts = append(parts, convo.Part{
+			Type: convo.PartWikiFile, ID: reference.VersionID,
+			Filename: reference.Filename, MimeType: reference.Mime, Size: reference.Size,
+			DownloadURL: "/api/wiki/versions/" + reference.VersionID + "/download",
+			WikiNodeID:  reference.NodeID, WikiVersionID: reference.VersionID,
+			LogicalPath: reference.LogicalPath, Revision: reference.Revision,
+		})
+	}
+	return parts
 }
 
 func (a *API) newLiveRun(r *http.Request, identity auth.Identity, req chatRequest, run chatrun.Run) *liveRun {
@@ -818,7 +876,8 @@ func (a *API) executeLiveRun(live *liveRun) {
 		TraceID:             live.run.ID, ParentSpanID: conversationRootSpan(live.traceCtx),
 		Source:           live.run.Source,
 		SandboxAuthToken: a.mintSandboxToken(live.identity), Attachments: attachments,
-		SCMToken: scmToken, ProjectBrokerCredential: projectBrokerCredential,
+		WikiReferences: live.request.WikiReferences,
+		SCMToken:       scmToken, ProjectBrokerCredential: projectBrokerCredential,
 		Project: projectContext,
 	}
 	coalescer := memoryEventCoalescer{run: live, window: a.runs.mergeWindow}

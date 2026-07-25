@@ -15,17 +15,35 @@ type AgentRuntimeProductConfig struct {
 	PickerEnabled bool   `json:"picker_enabled"`
 }
 
+type WikiProductConfig struct {
+	Enabled           bool     `json:"enabled"`
+	MaxFileBytes      int64    `json:"max_file_bytes"`
+	AllowedExtensions []string `json:"allowed_extensions"`
+}
+
 type ProductConfig struct {
 	AgentRuntime AgentRuntimeProductConfig `json:"agent_runtime"`
+	Wiki         WikiProductConfig         `json:"wiki"`
 }
 
 func DefaultProductConfig() ProductConfig {
-	return ProductConfig{AgentRuntime: AgentRuntimeProductConfig{
-		DefaultID: DefaultAgentRuntimeID,
-	}}
+	return ProductConfig{
+		AgentRuntime: AgentRuntimeProductConfig{DefaultID: DefaultAgentRuntimeID},
+		Wiki: WikiProductConfig{
+			Enabled:      true,
+			MaxFileBytes: DefaultWikiMaxFileBytes,
+			AllowedExtensions: []string{
+				".csv", ".docx", ".json", ".md", ".pdf", ".pptx",
+				".txt", ".xlsx", ".yaml", ".yml",
+			},
+		},
+	}
 }
 
 func (c ProductConfig) Validate(runtimes []agent.Runtime) error {
+	if c.Wiki.Enabled && c.Wiki.MaxFileBytes <= 0 {
+		return fmt.Errorf("Wiki max file bytes must be positive")
+	}
 	defaultID := strings.TrimSpace(c.AgentRuntime.DefaultID)
 	if defaultID == "" {
 		return fmt.Errorf("default agent runtime id is required")

@@ -49,6 +49,9 @@ ARG NPM_REGISTRY=https://registry.npmjs.org
 # implicitly during an unrelated image rebuild.
 ARG CLAUDE_AGENT_SDK_SPEC=claude-agent-sdk==0.2.123
 ARG JSONSCHEMA_SPEC=jsonschema==4.26.0
+ARG PYTHON_DOCX_SPEC=python-docx==1.2.0
+ARG OPENPYXL_SPEC=openpyxl==3.1.5
+ARG PYTHON_PPTX_SPEC=python-pptx==1.0.2
 # Resident in-sandbox editor. Pinned to a known-good standalone release (bundles
 # its own Node, so no native build). Offline builds can drop the matching
 # code-server-<ver>-linux-<arch>.tar.gz under ./offline/ (see the install step).
@@ -61,6 +64,9 @@ ARG COCOLA_VENV_PYTHON
 ARG NPM_REGISTRY
 ARG CLAUDE_AGENT_SDK_SPEC
 ARG JSONSCHEMA_SPEC
+ARG PYTHON_DOCX_SPEC
+ARG OPENPYXL_SPEC
+ARG PYTHON_PPTX_SPEC
 ARG CODE_SERVER_VERSION
 ARG GH_VERSION
 
@@ -244,7 +250,10 @@ RUN chmod 0755 /opt/cocola/install-code-server-extensions.sh \
 RUN uv venv --python "${COCOLA_VENV_PYTHON}" /opt/cocola/venv \
     && uv pip install --python /opt/cocola/venv/bin/python --no-cache \
         "${CLAUDE_AGENT_SDK_SPEC}" \
-        "${JSONSCHEMA_SPEC}"
+        "${JSONSCHEMA_SPEC}" \
+        "${PYTHON_DOCX_SPEC}" \
+        "${OPENPYXL_SPEC}" \
+        "${PYTHON_PPTX_SPEC}"
 
 # The upstream base installs global npm packages under its versioned Node root
 # (/opt/node/<version>/lib/node_modules), while Cocola deliberately exposes the
@@ -270,6 +279,7 @@ COPY runtime-entrypoint.sh /opt/cocola/runtime-entrypoint.sh
 COPY supervisord.conf /opt/cocola/supervisord.conf
 COPY runtime-manifest.json /opt/cocola/runtime-manifest.json
 COPY cocola_sandbox.py /opt/cocola/cocola_sandbox.py
+COPY wiki_reader.py /opt/cocola/wiki_reader.py
 COPY browser-runner.js /opt/cocola/browser-runner.js
 COPY skills/ /opt/cocola/skills/
 RUN chmod +x \
@@ -278,7 +288,9 @@ RUN chmod +x \
         /opt/cocola/code-server-launch.sh \
         /opt/cocola/runtime-entrypoint.sh \
         /opt/cocola/cocola_sandbox.py \
-    && ln -sf /opt/cocola/cocola_sandbox.py /usr/local/bin/cocola-sandbox
+        /opt/cocola/wiki_reader.py \
+    && ln -sf /opt/cocola/cocola_sandbox.py /usr/local/bin/cocola-sandbox \
+    && ln -sf /opt/cocola/wiki_reader.py /usr/local/bin/cocola-wiki-read
 
 # ---- the stdio shim ------------------------------------------------------
 COPY shim/ /opt/cocola/shim/

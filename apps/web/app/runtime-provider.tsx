@@ -100,6 +100,17 @@ type UiFilePart = {
   downloadUrl: string;
 };
 
+type UiWikiFilePart = {
+  type: "wiki-file";
+  wikiNodeId: string;
+  wikiVersionId?: string;
+  filename: string;
+  logicalPath: string;
+  mimeType?: string;
+  size?: number;
+  downloadUrl: string;
+};
+
 type UiEnvironmentPart = {
   type: "environment";
   environment: EnvironmentPreparationSnapshot;
@@ -158,6 +169,7 @@ type UiPart =
   | { type: "reasoning"; text: string }
   | UiToolCall
   | UiFilePart
+  | UiWikiFilePart
   | UiEnvironmentPart
   | UiSessionStatusPart
   | UiProgressPart
@@ -351,6 +363,11 @@ export type ProductConfig = {
     default_id: string;
     picker_enabled: boolean;
   };
+  wiki?: {
+    enabled: boolean;
+    max_file_bytes: number;
+    allowed_extensions: string[];
+  };
 };
 
 export type SkillOption = {
@@ -466,6 +483,25 @@ export function useCocola(): CocolaContextValue {
 function genId(): string {
   if (typeof crypto !== "undefined" && "randomUUID" in crypto) return crypto.randomUUID();
   return `id-${Date.now()}-${Math.random().toString(36).slice(2)}`;
+}
+
+function parseWikiDirectives(text: string): {
+  text: string;
+  references: { nodeId: string; label: string }[];
+} {
+  const references: { nodeId: string; label: string }[] = [];
+  const seen = new Set<string>();
+  const visibleText = text.replace(
+    /:wiki-file\[([^\]\n]{1,1024})\]\{name=([0-9a-fA-F-]{36})\}/g,
+    (_match, label: string, nodeId: string) => {
+      if (!seen.has(nodeId)) {
+        seen.add(nodeId);
+        references.push({ nodeId, label });
+      }
+      return `@${label}`;
+    },
+  );
+  return { text: visibleText, references };
 }
 
 async function apiError(response: Response, fallback: string): Promise<Error> {
@@ -632,6 +668,23 @@ function normalizePersistedParts(parts: UiPart[] | undefined): UiPart[] {
     } else if (part.type === "structured-result") {
       const result = normalizeStructuredResultPart(part);
       if (result) normalized.push(result);
+    } else if (part.type === "wiki-file") {
+      const wikiNodeId = stringValue(part.wikiNodeId).trim();
+      const filename = stringValue(part.filename).trim();
+      if (wikiNodeId && filename) {
+        normalized.push({
+          type: "wiki-file",
+          wikiNodeId,
+          wikiVersionId: stringValue(part.wikiVersionId).trim() || undefined,
+          filename,
+          logicalPath: stringValue(part.logicalPath).trim() || filename,
+          mimeType: stringValue(part.mimeType).trim() || undefined,
+          size: typeof part.size === "number" ? part.size : undefined,
+          downloadUrl:
+            stringValue(part.downloadUrl).trim() ||
+            `/api/wiki/files/${encodeURIComponent(wikiNodeId)}/download`,
+        });
+      }
     } else {
       normalized.push(part);
     }
@@ -1208,6 +1261,21 @@ function convertMessage(message: UiMessage): ThreadMessageLike {
           url: p.downloadUrl,
           size: p.size,
         }),
+      };
+    }
+    if (p.type === "wiki-file") {
+      return {
+        type: "data" as const,
+        name: "wiki-file",
+        data: {
+          wikiNodeId: p.wikiNodeId,
+          wikiVersionId: p.wikiVersionId,
+          filename: p.filename,
+          logicalPath: p.logicalPath,
+          mimeType: p.mimeType,
+          size: p.size,
+          downloadUrl: p.downloadUrl,
+        },
       };
     }
     if (p.type === "progress") {
@@ -2240,13 +2308,15 @@ export function CocolaRuntimeProvider({ children }: { children: ReactNode }) {
         content?: readonly { type: string; filename?: string; data?: string; mimeType?: string }[];
       }[];
     }) => {
-      const text = message.content
+      const rawText = message.content
         .filter(
           (p): p is { type: "text"; text: string } =>
             p.type === "text" && typeof p.text === "string",
         )
         .map((p) => p.text)
         .join("\n");
+      const parsedWiki = parseWikiDirectives(rawText);
+      const text = parsedWiki.text;
 
       // Collect inline file attachments. Our Base64AttachmentAdapter emits a
       // single FileMessagePart per attachment carrying RAW base64 in `data`;
@@ -2316,7 +2386,18 @@ export function CocolaRuntimeProvider({ children }: { children: ReactNode }) {
             {
               id: userMessageId,
               role: "user",
-              parts: [{ type: "text", text }],
+              parts: [
+                { type: "text", text },
+                ...parsedWiki.references.map(
+                  (reference): UiWikiFilePart => ({
+                    type: "wiki-file",
+                    wikiNodeId: reference.nodeId,
+                    filename: reference.label,
+                    logicalPath: reference.label,
+                    downloadUrl: `/api/wiki/files/${encodeURIComponent(reference.nodeId)}/download`,
+                  }),
+                ),
+              ],
               createdAt: Date.now(),
               metadata: {
                 interaction_mode: turnInteractionMode,
@@ -2399,6 +2480,13 @@ export function CocolaRuntimeProvider({ children }: { children: ReactNode }) {
           ...(projectHint ? { project_id: projectHint } : {}),
           ...(projectBaseRef ? { project_base_ref: projectBaseRef } : {}),
           ...(attachments.length > 0 ? { attachments } : {}),
+          ...(parsedWiki.references.length > 0
+            ? {
+                wiki_refs: parsedWiki.references.map((reference) => ({
+                  node_id: reference.nodeId,
+                })),
+              }
+            : {}),
         });
         let res: Response | undefined;
         let retryDelay = 250;
@@ -3245,6 +3333,7 @@ export function CocolaRuntimeProvider({ children }: { children: ReactNode }) {
             default_id: defaultID,
             picker_enabled: pickerEnabled,
           },
+          wiki: config.wiki,
         });
         setRuntimeConfigError(null);
         preferredRuntimeIdRef.current = selected.id;

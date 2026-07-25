@@ -32,6 +32,7 @@ import (
 	"github.com/cocola-project/cocola/apps/gateway/internal/project"
 	"github.com/cocola-project/cocola/apps/gateway/internal/sandboxmgr"
 	traceevents "github.com/cocola-project/cocola/apps/gateway/internal/traceevent"
+	"github.com/cocola-project/cocola/apps/gateway/internal/wiki"
 	"github.com/cocola-project/cocola/packages/go-common/logger"
 	"github.com/cocola-project/cocola/packages/go-common/metrics"
 	"github.com/cocola-project/cocola/packages/go-common/token"
@@ -111,12 +112,14 @@ type API struct {
 	// sandboxResolver powers the Preview Proxy: it maps a session + in-sandbox
 	// port to a reachable URL via sandbox-manager. nil disables /v1/preview
 	// (the route returns 501), keeping the feature dark until wired in main.
-	sandboxResolver sandboxmgr.EndpointResolver
-	terminalLeases  *terminalLeaseRegistry
-	memory          *memory.Service
-	projects        *project.Service
-	brokerWaitMu    sync.Mutex
-	brokerWaiters   map[string]map[chan struct{}]struct{}
+	sandboxResolver  sandboxmgr.EndpointResolver
+	terminalLeases   *terminalLeaseRegistry
+	memory           *memory.Service
+	projects         *project.Service
+	wiki             wiki.Store
+	wikiMaxFileBytes int64
+	brokerWaitMu     sync.Mutex
+	brokerWaiters    map[string]map[chan struct{}]struct{}
 }
 
 // New builds the BFF API.
@@ -256,6 +259,30 @@ func (a *API) Handler() http.Handler {
 		a.verifier.Middleware(writeErr)(http.HandlerFunc(a.listAgentRuntimes))))
 	mux.Handle("GET /v1/product-config", a.instrument("GET /v1/product-config",
 		a.verifier.Middleware(writeErr)(http.HandlerFunc(a.getProductConfig))))
+	mux.Handle("GET /v1/wiki/tree", a.instrument("GET /v1/wiki/tree",
+		a.verifier.Middleware(writeErr)(http.HandlerFunc(a.listWikiTree))))
+	mux.Handle("GET /v1/wiki/search", a.instrument("GET /v1/wiki/search",
+		a.verifier.Middleware(writeErr)(http.HandlerFunc(a.searchWiki))))
+	mux.Handle("POST /v1/wiki/folders", a.instrument("POST /v1/wiki/folders",
+		a.verifier.Middleware(writeErr)(http.HandlerFunc(a.createWikiFolder))))
+	mux.Handle("POST /v1/wiki/markdown", a.instrument("POST /v1/wiki/markdown",
+		a.verifier.Middleware(writeErr)(http.HandlerFunc(a.createWikiMarkdown))))
+	mux.Handle("POST /v1/wiki/uploads", a.instrument("POST /v1/wiki/uploads",
+		a.verifier.Middleware(writeErr)(http.HandlerFunc(a.uploadWikiFile))))
+	mux.Handle("PATCH /v1/wiki/nodes/{id}", a.instrument("PATCH /v1/wiki/nodes/{id}",
+		a.verifier.Middleware(writeErr)(http.HandlerFunc(a.updateWikiNode))))
+	mux.Handle("POST /v1/wiki/nodes/{id}/move", a.instrument("POST /v1/wiki/nodes/{id}/move",
+		a.verifier.Middleware(writeErr)(http.HandlerFunc(a.moveWikiNode))))
+	mux.Handle("DELETE /v1/wiki/nodes/{id}", a.instrument("DELETE /v1/wiki/nodes/{id}",
+		a.verifier.Middleware(writeErr)(http.HandlerFunc(a.deleteWikiNode))))
+	mux.Handle("GET /v1/wiki/files/{id}/content", a.instrument("GET /v1/wiki/files/{id}/content",
+		a.verifier.Middleware(writeErr)(http.HandlerFunc(a.wikiFileContent))))
+	mux.Handle("PUT /v1/wiki/files/{id}/content", a.instrument("PUT /v1/wiki/files/{id}/content",
+		a.verifier.Middleware(writeErr)(http.HandlerFunc(a.wikiFileContent))))
+	mux.Handle("GET /v1/wiki/files/{id}/download", a.instrument("GET /v1/wiki/files/{id}/download",
+		a.verifier.Middleware(writeErr)(http.HandlerFunc(a.downloadWikiFile))))
+	mux.Handle("GET /v1/wiki/versions/{id}/download", a.instrument("GET /v1/wiki/versions/{id}/download",
+		a.verifier.Middleware(writeErr)(http.HandlerFunc(a.downloadWikiVersion))))
 	mux.Handle("GET /v1/chat/runs/{run_id}", a.instrument("GET /v1/chat/runs/{run_id}",
 		a.verifier.Middleware(writeErr)(http.HandlerFunc(a.streamRun))))
 	mux.Handle("DELETE /v1/chat/runs/{run_id}", a.instrument("DELETE /v1/chat/runs/{run_id}",
@@ -518,31 +545,33 @@ func (a *API) recordAgentTrace(ctx context.Context, traceID string, data map[str
 // the verified identity, NOT from the body, so a caller cannot impersonate
 // another user. session_id and sandbox_id are caller-chosen routing hints.
 type chatRequest struct {
-	Prompt                               string            `json:"prompt"`
-	SessionID                            string            `json:"session_id"`
-	SandboxID                            string            `json:"sandbox_id"`
-	MaxTurns                             int32             `json:"max_turns"`
-	ModelRouteID                         string            `json:"model_route_id"`
-	ModelAlias                           string            `json:"model_alias"`
-	ModelLabel                           string            `json:"model_label"`
-	ModelProvider                        string            `json:"model_provider"`
-	ModelFamily                          string            `json:"model_family"`
-	ModelIconSlug                        string            `json:"model_icon_slug"`
-	ModelIcon                            map[string]string `json:"model_icon"`
-	ConversationTitle                    string            `json:"conversation_title"`
-	ConversationType                     string            `json:"conversation_type"`
-	DeferConversationVisibilityUntilDone bool              `json:"defer_conversation_visibility_until_done"`
-	Attachments                          []attachmentDTO   `json:"attachments"`
-	ClientRequestID                      string            `json:"client_request_id"`
-	RuntimeID                            string            `json:"runtime_id"`
-	InteractionMode                      string            `json:"interaction_mode"`
-	RequireSessionResume                 bool              `json:"-"`
-	QuestionID                           string            `json:"-"`
-	FolderID                             string            `json:"folder_id"`
-	ProjectID                            string            `json:"project_id"`
-	ProjectBaseRef                       string            `json:"project_base_ref"`
-	SkillID                              string            `json:"skill_id"`
-	AllowWorkspaceReset                  bool              `json:"allow_workspace_reset"`
+	Prompt                               string                `json:"prompt"`
+	SessionID                            string                `json:"session_id"`
+	SandboxID                            string                `json:"sandbox_id"`
+	MaxTurns                             int32                 `json:"max_turns"`
+	ModelRouteID                         string                `json:"model_route_id"`
+	ModelAlias                           string                `json:"model_alias"`
+	ModelLabel                           string                `json:"model_label"`
+	ModelProvider                        string                `json:"model_provider"`
+	ModelFamily                          string                `json:"model_family"`
+	ModelIconSlug                        string                `json:"model_icon_slug"`
+	ModelIcon                            map[string]string     `json:"model_icon"`
+	ConversationTitle                    string                `json:"conversation_title"`
+	ConversationType                     string                `json:"conversation_type"`
+	DeferConversationVisibilityUntilDone bool                  `json:"defer_conversation_visibility_until_done"`
+	Attachments                          []attachmentDTO       `json:"attachments"`
+	WikiRefs                             []wikiRefDTO          `json:"wiki_refs"`
+	WikiReferences                       []agent.WikiReference `json:"-"`
+	ClientRequestID                      string                `json:"client_request_id"`
+	RuntimeID                            string                `json:"runtime_id"`
+	InteractionMode                      string                `json:"interaction_mode"`
+	RequireSessionResume                 bool                  `json:"-"`
+	QuestionID                           string                `json:"-"`
+	FolderID                             string                `json:"folder_id"`
+	ProjectID                            string                `json:"project_id"`
+	ProjectBaseRef                       string                `json:"project_base_ref"`
+	SkillID                              string                `json:"skill_id"`
+	AllowWorkspaceReset                  bool                  `json:"allow_workspace_reset"`
 }
 
 // attachmentDTO is one user-uploaded file carried inline in the chat body.
@@ -554,6 +583,10 @@ type attachmentDTO struct {
 	Filename   string `json:"filename"`
 	ContentB64 string `json:"content_b64"`
 	Mime       string `json:"mime"`
+}
+
+type wikiRefDTO struct {
+	NodeID string `json:"node_id"`
 }
 
 func (a *API) startConversationRun(ctx context.Context, id auth.Identity, req chatRequest, traceID, rootSpanID string, startedAt time.Time) traceevents.Run {

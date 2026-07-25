@@ -81,6 +81,7 @@ type Query struct {
 	ProjectBrokerCredential string
 	Project                 *ProjectContext
 	Attachments             []Attachment
+	WikiReferences          []WikiReference
 }
 
 type ProjectContext struct {
@@ -160,6 +161,21 @@ type Attachment struct {
 	// (ADR-0017 P1a); for small files both Content and OssKey are populated.
 	OssKey string
 	Size   int64
+}
+
+// WikiReference is an immutable Wiki version selected for one turn. ObjectKey
+// is resolved by Gateway under the verified owner identity; Agent Runtime only
+// receives the already-authorized object key and materialization metadata.
+type WikiReference struct {
+	NodeID      string
+	VersionID   string
+	Revision    int64
+	LogicalPath string
+	Filename    string
+	Mime        string
+	ObjectKey   string
+	Size        int64
+	SHA256      string
 }
 
 // Streamer runs one agent query and pushes each event to onEvent in order. It
@@ -287,6 +303,19 @@ func (c *Client) Stream(ctx context.Context, q Query, onEvent func(Event) error)
 			Size:     q.Attachments[i].Size,
 		})
 	}
+	wikiReferences := make([]*agentv1.WikiReference, 0, len(q.WikiReferences))
+	for i := range q.WikiReferences {
+		wikiReferences = append(wikiReferences, &agentv1.WikiReference{
+			NodeId:      q.WikiReferences[i].NodeID,
+			VersionId:   q.WikiReferences[i].VersionID,
+			LogicalPath: q.WikiReferences[i].LogicalPath,
+			Filename:    q.WikiReferences[i].Filename,
+			Mime:        q.WikiReferences[i].Mime,
+			OssKey:      q.WikiReferences[i].ObjectKey,
+			Size:        q.WikiReferences[i].Size,
+			Sha256:      q.WikiReferences[i].SHA256,
+		})
+	}
 	request := &agentv1.QueryRequest{
 		UserId:               q.UserID,
 		SessionId:            q.SessionID,
@@ -300,6 +329,7 @@ func (c *Client) Stream(ctx context.Context, q Query, onEvent func(Event) error)
 		MemoryContext:        q.MemoryContext,
 		InteractionMode:      interactionModeProto(q.InteractionMode),
 		RequireSessionResume: q.RequireSessionResume,
+		WikiReferences:       wikiReferences,
 	}
 	if q.Project != nil {
 		request.ProjectContext = projectContextProto(*q.Project)

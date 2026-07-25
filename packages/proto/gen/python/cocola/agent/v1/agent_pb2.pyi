@@ -17,7 +17,7 @@ INTERACTION_MODE_EXECUTE: InteractionMode
 INTERACTION_MODE_PLAN: InteractionMode
 
 class QueryRequest(_message.Message):
-    __slots__ = ("user_id", "session_id", "prompt", "sandbox_id", "max_turns", "attachments", "runtime_id", "skill_id", "allow_workspace_reset", "memory_context", "project_context", "interaction_mode", "require_session_resume")
+    __slots__ = ("user_id", "session_id", "prompt", "sandbox_id", "max_turns", "attachments", "runtime_id", "skill_id", "allow_workspace_reset", "memory_context", "project_context", "interaction_mode", "require_session_resume", "wiki_references")
     USER_ID_FIELD_NUMBER: _ClassVar[int]
     SESSION_ID_FIELD_NUMBER: _ClassVar[int]
     PROMPT_FIELD_NUMBER: _ClassVar[int]
@@ -31,6 +31,7 @@ class QueryRequest(_message.Message):
     PROJECT_CONTEXT_FIELD_NUMBER: _ClassVar[int]
     INTERACTION_MODE_FIELD_NUMBER: _ClassVar[int]
     REQUIRE_SESSION_RESUME_FIELD_NUMBER: _ClassVar[int]
+    WIKI_REFERENCES_FIELD_NUMBER: _ClassVar[int]
     user_id: str
     session_id: str
     prompt: str
@@ -44,7 +45,8 @@ class QueryRequest(_message.Message):
     project_context: ProjectContext
     interaction_mode: InteractionMode
     require_session_resume: bool
-    def __init__(self, user_id: _Optional[str] = ..., session_id: _Optional[str] = ..., prompt: _Optional[str] = ..., sandbox_id: _Optional[str] = ..., max_turns: _Optional[int] = ..., attachments: _Optional[_Iterable[_Union[Attachment, _Mapping]]] = ..., runtime_id: _Optional[str] = ..., skill_id: _Optional[str] = ..., allow_workspace_reset: bool = ..., memory_context: _Optional[str] = ..., project_context: _Optional[_Union[ProjectContext, _Mapping]] = ..., interaction_mode: _Optional[_Union[InteractionMode, str]] = ..., require_session_resume: bool = ...) -> None: ...
+    wiki_references: _containers.RepeatedCompositeFieldContainer[WikiReference]
+    def __init__(self, user_id: _Optional[str] = ..., session_id: _Optional[str] = ..., prompt: _Optional[str] = ..., sandbox_id: _Optional[str] = ..., max_turns: _Optional[int] = ..., attachments: _Optional[_Iterable[_Union[Attachment, _Mapping]]] = ..., runtime_id: _Optional[str] = ..., skill_id: _Optional[str] = ..., allow_workspace_reset: bool = ..., memory_context: _Optional[str] = ..., project_context: _Optional[_Union[ProjectContext, _Mapping]] = ..., interaction_mode: _Optional[_Union[InteractionMode, str]] = ..., require_session_resume: bool = ..., wiki_references: _Optional[_Iterable[_Union[WikiReference, _Mapping]]] = ...) -> None: ...
 
 class ProjectContext(_message.Message):
     __slots__ = ("project_id", "repository_id", "clone_url", "default_branch", "base_sha", "task_branch", "git_author_name", "git_author_email", "repository_provider", "repository_full_name", "credential_mode", "base_ref")
@@ -87,6 +89,26 @@ class Attachment(_message.Message):
     oss_key: str
     size: int
     def __init__(self, filename: _Optional[str] = ..., content: _Optional[bytes] = ..., mime: _Optional[str] = ..., oss_key: _Optional[str] = ..., size: _Optional[int] = ...) -> None: ...
+
+class WikiReference(_message.Message):
+    __slots__ = ("node_id", "version_id", "logical_path", "filename", "mime", "oss_key", "size", "sha256")
+    NODE_ID_FIELD_NUMBER: _ClassVar[int]
+    VERSION_ID_FIELD_NUMBER: _ClassVar[int]
+    LOGICAL_PATH_FIELD_NUMBER: _ClassVar[int]
+    FILENAME_FIELD_NUMBER: _ClassVar[int]
+    MIME_FIELD_NUMBER: _ClassVar[int]
+    OSS_KEY_FIELD_NUMBER: _ClassVar[int]
+    SIZE_FIELD_NUMBER: _ClassVar[int]
+    SHA256_FIELD_NUMBER: _ClassVar[int]
+    node_id: str
+    version_id: str
+    logical_path: str
+    filename: str
+    mime: str
+    oss_key: str
+    size: int
+    sha256: str
+    def __init__(self, node_id: _Optional[str] = ..., version_id: _Optional[str] = ..., logical_path: _Optional[str] = ..., filename: _Optional[str] = ..., mime: _Optional[str] = ..., oss_key: _Optional[str] = ..., size: _Optional[int] = ..., sha256: _Optional[str] = ...) -> None: ...
 
 class AgentEvent(_message.Message):
     __slots__ = ("kind", "data")

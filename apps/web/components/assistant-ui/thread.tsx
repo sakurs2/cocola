@@ -11,6 +11,9 @@ import {
   type TextMessagePartProps,
   ThreadPrimitive,
   type ToolCallMessagePartProps,
+  type Unstable_DirectiveFormatter,
+  unstable_defaultDirectiveFormatter,
+  unstable_useMentionAdapter,
   unstable_useSlashCommandAdapter,
   useMessage,
   useThread,
@@ -31,7 +34,9 @@ import {
   XIcon,
   ArrowUp as ArrowUpIcon,
   BarChart3,
+  BookOpenText,
   Code2,
+  FileText,
   Lightbulb,
   Map as PlanModeIcon,
   Pencil,
@@ -315,6 +320,7 @@ export const ConversationComposer: FC<{
     >
       <ComposerPrimitive.Unstable_TriggerPopoverRoot>
         <ComposerSlashMenu />
+        <ComposerWikiMentionMenu />
         <ComposerPrimitive.Root
           className={cn(
             "composer-lift relative z-10 flex w-full flex-col rounded-2xl border p-3",
@@ -381,6 +387,114 @@ export const ConversationComposer: FC<{
         </ComposerPrimitive.Root>
       </ComposerPrimitive.Unstable_TriggerPopoverRoot>
     </motion.div>
+  );
+};
+
+type WikiMentionNode = {
+  id: string;
+  kind: "folder" | "file";
+  name: string;
+  logical_path?: string;
+  extension?: string;
+};
+
+const WIKI_DIRECTIVE_FORMATTER: Unstable_DirectiveFormatter = {
+  ...unstable_defaultDirectiveFormatter,
+  serialize(item: { id: string; type: string; label: string }) {
+    return `:${item.type}[${item.label}]{name=${item.id}}`;
+  },
+};
+
+const ComposerWikiMentionMenu: FC = () => {
+  const { questionInputLocked } = useCocola();
+  const [nodes, setNodes] = useState<WikiMentionNode[]>([]);
+
+  useEffect(() => {
+    let cancelled = false;
+    const load = () => {
+      void fetch("/api/wiki/tree", { cache: "no-store" })
+        .then(async (response) => {
+          if (!response.ok) return;
+          const body = (await response.json()) as { nodes?: WikiMentionNode[] };
+          if (!cancelled) setNodes(Array.isArray(body.nodes) ? body.nodes : []);
+        })
+        .catch(() => {});
+    };
+    load();
+    window.addEventListener("cocola:wiki-changed", load);
+    return () => {
+      cancelled = true;
+      window.removeEventListener("cocola:wiki-changed", load);
+    };
+  }, []);
+
+  const items = useMemo(
+    () =>
+      nodes
+        .filter((node) => node.kind === "file")
+        .map((node) => ({
+          id: node.id,
+          type: "wiki-file",
+          label: node.name.replace(/[\]\n]/g, ""),
+          description: node.logical_path || node.name,
+          metadata: { extension: node.extension || "" },
+        })),
+    [nodes],
+  );
+  const mention = unstable_useMentionAdapter({
+    items,
+    includeModelContextTools: false,
+    formatter: WIKI_DIRECTIVE_FORMATTER,
+  });
+
+  if (questionInputLocked) return null;
+  return (
+    <ComposerPrimitive.Unstable_TriggerPopover
+      char="@"
+      adapter={mention.adapter}
+      aria-label="Reference a Wiki file"
+      className="absolute bottom-[calc(100%+0.625rem)] left-0 z-50 w-full max-w-2xl overflow-hidden rounded-2xl border border-border bg-popover text-popover-foreground shadow-xl"
+    >
+      <ComposerPrimitive.Unstable_TriggerPopover.Directive {...mention.directive} />
+      <ComposerPrimitive.Unstable_TriggerPopoverItems>
+        {(results) => (
+          <div className="p-1.5">
+            <div className="flex items-center gap-2 border-b border-border px-2.5 pb-2 pt-1 text-xs font-medium text-muted-foreground">
+              <BookOpenText className="size-3.5 text-blue-600" />
+              Wiki files
+            </div>
+            <div className="max-h-72 overflow-y-auto pt-1">
+              {results.length === 0 ? (
+                <div className="px-3 py-8 text-center text-xs text-muted-foreground">
+                  No Wiki files found. Create or upload one from the Wiki tab.
+                </div>
+              ) : (
+                results.map((item, index) => (
+                  <ComposerPrimitive.Unstable_TriggerPopoverItem
+                    key={item.id}
+                    item={item}
+                    index={index}
+                    className="flex w-full items-center gap-2.5 rounded-xl px-2.5 py-2 text-left outline-none transition-colors hover:bg-muted/80 data-[highlighted]:bg-muted"
+                  >
+                    <span className="grid size-8 shrink-0 place-items-center rounded-lg bg-blue-50 text-blue-600">
+                      <FileText className="size-4" />
+                    </span>
+                    <span className="min-w-0 flex-1">
+                      <span className="block truncate text-sm font-medium text-foreground">
+                        {item.label}
+                      </span>
+                      <span className="block truncate text-xs text-muted-foreground">
+                        {item.description}
+                      </span>
+                    </span>
+                  </ComposerPrimitive.Unstable_TriggerPopoverItem>
+                ))
+              )}
+            </div>
+          </div>
+        )}
+      </ComposerPrimitive.Unstable_TriggerPopoverItems>
+    </ComposerPrimitive.Unstable_TriggerPopover>
   );
 };
 
@@ -952,12 +1066,45 @@ const UserMessage: FC = () => {
         </div>
         <MessagePrimitive.If hasContent>
           <div className="max-w-[calc(var(--thread-max-width)*0.8)] whitespace-pre-wrap break-words rounded-2xl bg-muted px-4 py-2.5 text-[15px] leading-6 text-foreground">
-            <MessagePrimitive.Parts />
+            <MessagePrimitive.Parts components={USER_PART_COMPONENTS} />
           </div>
         </MessagePrimitive.If>
       </div>
     </MessagePrimitive.Root>
   );
+};
+
+const WikiFilePart: FC<
+  DataMessagePartProps<{
+    wikiNodeId: string;
+    wikiVersionId?: string;
+    filename: string;
+    logicalPath: string;
+    mimeType?: string;
+    size?: number;
+    downloadUrl: string;
+  }>
+> = ({ data }) => (
+  <a
+    href={data.downloadUrl}
+    className="my-1 flex max-w-sm items-center gap-2 rounded-xl border border-blue-200 bg-white/75 px-3 py-2 text-left shadow-sm transition hover:border-blue-300"
+  >
+    <span className="grid size-8 shrink-0 place-items-center rounded-lg bg-blue-50 text-blue-600">
+      <BookOpenText className="size-4" />
+    </span>
+    <span className="min-w-0">
+      <span className="block truncate text-xs font-semibold">{data.filename}</span>
+      <span className="block truncate text-[10px] text-muted-foreground">{data.logicalPath}</span>
+    </span>
+  </a>
+);
+
+const USER_PART_COMPONENTS = {
+  data: {
+    by_name: {
+      "wiki-file": WikiFilePart,
+    },
+  },
 };
 
 const UserSkillBadge: FC = () => {

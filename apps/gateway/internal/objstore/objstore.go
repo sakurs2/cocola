@@ -132,6 +132,17 @@ func (c *Client) Get(ctx context.Context, key string) ([]byte, error) {
 	return buf.Bytes(), nil
 }
 
+// Delete removes an object written by a multi-step operation that failed
+// before its metadata commit. It is intentionally not part of Store because
+// most consumers only need Put/Get; Wiki detects this optional capability for
+// best-effort orphan cleanup.
+func (c *Client) Delete(ctx context.Context, key string) error {
+	if err := c.mc.RemoveObject(ctx, c.bucket, key, minio.RemoveObjectOptions{}); err != nil {
+		return fmt.Errorf("objstore: delete %q: %w", key, err)
+	}
+	return nil
+}
+
 // Health verifies the configured bucket exists and is reachable. Used by
 // startup wiring and liveness probes.
 func (c *Client) Health(ctx context.Context) error {

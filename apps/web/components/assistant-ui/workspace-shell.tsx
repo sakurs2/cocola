@@ -14,6 +14,8 @@ const IMMERSIVE_KEY = "cocola:immersive";
 function isWorkspacePath(pathname: string | null) {
   return (
     pathname === "/" ||
+    pathname === "/wiki" ||
+    pathname?.startsWith("/wiki/") ||
     pathname === "/skills" ||
     pathname?.startsWith("/skills/") ||
     pathname === "/mcps" ||

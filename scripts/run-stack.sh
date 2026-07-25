@@ -467,6 +467,7 @@ dev_up() {
   export COCOLA_MINIO_SECRET_KEY="${COCOLA_MINIO_SECRET_KEY:-cocola_dev_pw}"
   export COCOLA_MINIO_BUCKET="${COCOLA_MINIO_BUCKET:-cocola}"
   export COCOLA_ATTACHMENT_INLINE_MAX_BYTES="${COCOLA_ATTACHMENT_INLINE_MAX_BYTES:-16777216}"
+  export COCOLA_WIKI_MAX_FILE_BYTES="${COCOLA_WIKI_MAX_FILE_BYTES:-20971520}"
   export COCOLA_SANDBOX_PROJECT_BROKER_URL="${COCOLA_SANDBOX_PROJECT_BROKER_URL:-http://host.docker.internal:$GATEWAY_PORT}"
   # (3) NATIVE sandbox-manager. It is a standalone Go module kept OUT of go.work,
   # so it MUST build/run with GOWORK=off from its own module dir. Talk to the

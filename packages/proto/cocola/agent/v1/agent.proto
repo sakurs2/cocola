@@ -49,6 +49,8 @@ message QueryRequest {
   // Requires the runtime to resume an existing native session. The runtime
   // must fail instead of silently starting a fresh session.
   bool require_session_resume = 13;
+  // Immutable, owner-authorized Wiki versions materialized under ./wiki/.
+  repeated WikiReference wiki_references = 14;
 }
 
 enum InteractionMode {
@@ -94,6 +96,17 @@ message Attachment {
   string mime = 3; // best-effort MIME type from the browser
   string oss_key = 4; // object-storage key (source of truth); set for every upload
   int64 size = 5; // original byte length; drives threshold + logging
+}
+
+message WikiReference {
+  string node_id = 1;
+  string version_id = 2;
+  string logical_path = 3;
+  string filename = 4;
+  string mime = 5;
+  string oss_key = 6;
+  int64 size = 7;
+  string sha256 = 8;
 }
 
 message AgentEvent {

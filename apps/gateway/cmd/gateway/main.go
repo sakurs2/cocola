@@ -17,6 +17,7 @@
 //	COCOLA_AGENT_TOOL_STEP_TIMEOUT_SECS maximum wall time for one tool step (default 600)
 //	COCOLA_AGENT_RUNTIME_DEFAULT_ID default runtime for new work (default claude-code)
 //	COCOLA_AGENT_RUNTIME_PICKER_ENABLED expose experimental runtime choices (default false)
+//	COCOLA_WIKI_MAX_FILE_BYTES maximum bytes accepted for one Wiki file (default 20MiB)
 //
 // Required attachment/session object storage (ADR-0017 P1a):
 //
@@ -49,6 +50,7 @@ import (
 	"github.com/cocola-project/cocola/apps/gateway/internal/project"
 	"github.com/cocola-project/cocola/apps/gateway/internal/sandboxmgr"
 	traceevents "github.com/cocola-project/cocola/apps/gateway/internal/traceevent"
+	"github.com/cocola-project/cocola/apps/gateway/internal/wiki"
 	"github.com/cocola-project/cocola/packages/go-common/config"
 	"github.com/cocola-project/cocola/packages/go-common/logger"
 	"github.com/cocola-project/cocola/packages/go-common/metrics"
@@ -106,6 +108,15 @@ func productConfigFromEnv(runtimes []agent.Runtime) (httpapi.ProductConfig, erro
 			)
 		}
 		config.AgentRuntime.PickerEnabled = enabled
+	}
+	if raw, ok := os.LookupEnv("COCOLA_WIKI_MAX_FILE_BYTES"); ok {
+		maxFileBytes, err := strconv.ParseInt(strings.TrimSpace(raw), 10, 64)
+		if err != nil || maxFileBytes <= 0 {
+			return httpapi.ProductConfig{}, fmt.Errorf(
+				"invalid COCOLA_WIKI_MAX_FILE_BYTES=%s", raw,
+			)
+		}
+		config.Wiki.MaxFileBytes = maxFileBytes
 	}
 	if err := config.Validate(runtimes); err != nil {
 		return httpapi.ProductConfig{}, fmt.Errorf("invalid agent runtime product config: %w", err)
@@ -243,6 +254,14 @@ func main() {
 	} else {
 		api = api.WithConvoStore(cs)
 		defer cs.Close()
+		wikiStore, wikiErr := wiki.NewPostgres(context.Background(), dsn)
+		if wikiErr != nil {
+			log.Fatal("Wiki store connect failed: " + wikiErr.Error())
+		}
+		defer wikiStore.Close()
+		api = api.WithWikiStore(wikiStore, productConfig.Wiki.MaxFileBytes)
+		log.Info("Wiki enabled (max file size " +
+			strconv.FormatInt(productConfig.Wiki.MaxFileBytes, 10) + "B)")
 		projectStore, projectStoreErr := project.NewPostgres(context.Background(), dsn)
 		if projectStoreErr != nil {
 			log.Fatal("project store connect failed: " + projectStoreErr.Error())

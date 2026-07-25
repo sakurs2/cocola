@@ -60,6 +60,7 @@ const (
 	PartQuestion      = "question"
 	PartRunSummary    = "run-summary"
 	PartStructured    = "structured-result"
+	PartWikiFile      = "wiki-file"
 )
 
 type QuestionOption struct {
@@ -101,6 +102,12 @@ type Part struct {
 	MimeType    string `json:"mimeType,omitempty"`
 	Size        int64  `json:"size,omitempty"`
 	DownloadURL string `json:"downloadUrl,omitempty"`
+
+	// wiki-file: an immutable version snapshot selected from the user's Wiki.
+	WikiNodeID    string `json:"wikiNodeId,omitempty"`
+	WikiVersionID string `json:"wikiVersionId,omitempty"`
+	LogicalPath   string `json:"logicalPath,omitempty"`
+	Revision      int64  `json:"revision,omitempty"`
 
 	// environment: an opaque, versioned snapshot. Keeping the raw JSON intact
 	// lets newer component kinds/fields survive an older gateway unchanged.

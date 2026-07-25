@@ -48,6 +48,7 @@ Execution、Scheduler、Session 默认容量和 Trace 的同名环境变量只�
 | Postgres/Redis   | `COCOLA_PG_DSN`、`COCOLA_REDIS_ADDR`、`COCOLA_REDIS_PASSWORD`、`COCOLA_REDIS_DB`、`COCOLA_REDIS_POOL_SIZE`                                 |
 | MinIO            | `COCOLA_MINIO_ENDPOINT`、access/secret key、bucket、TLS、附件阈值                                                                          |
 | Agent/Run        | `COCOLA_AGENT_RUNTIME_DEFAULT_ID`、`COCOLA_AGENT_RUNTIME_PICKER_ENABLED`、max turns、tool timeout、token TTL、gRPC/message/artifact limits |
+| Wiki             | `COCOLA_WIKI_MAX_FILE_BYTES`（单文件大小；默认 20 MiB，不设累计容量或文件数配额）                                                          |
 | Sandbox          | `COCOLA_SANDBOX_ADDR`、image、Profile、Code Server、lease/reaper/heartbeat、LLM URL/model、egress                                          |
 | Session Storage  | `COCOLA_CLUSTER_MANAGER_MODE`、`COCOLA_SESSION_STORAGE_CLASS`、`COCOLA_SESSION_VOLUME_SIZE`、`COCOLA_SESSION_STORAGE_ROOT`                 |
 | OpenSandbox      | `COCOLA_OPENSANDBOX_*`（URL、API key、HTTP/Exec timeout、resources、K8s 部署参数）                                                         |
