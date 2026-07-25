@@ -104,9 +104,82 @@ async def test_wiki_reference_preserves_tree_and_pins_verified_bytes():
     assert executor.byte_writes == [
         ("box-S1", "/workspace/wiki/Product/Research/brief.md", content)
     ]
+    assert [call["cmd"] for call in executor.exec_calls] == [
+        ["rm", "-rf", "--", "/workspace/wiki"],
+        [
+            "mkdir",
+            "-p",
+            "/workspace/wiki",
+            "/workspace/wiki/Product/Research",
+        ],
+    ]
     assert "/workspace/wiki/Product/Research/brief.md" in provider.prompt
     assert "cocola-wiki-read xlsx-range" in provider.prompt
     assert provider.prompt.endswith("use the referenced context")
+
+
+async def test_empty_turn_clears_previous_wiki_snapshot():
+    executor = _executor()
+    provider = RecordingProvider()
+
+    await AgentRuntimeServicer(
+        provider,
+        binder=StaticSandboxBinder(),
+        executor=executor,
+    ).Query(FakeRequest(), FakeContext())
+
+    assert provider.ran is True
+    assert executor.exec_calls == [
+        {
+            "sandbox_id": "box-S1",
+            "cmd": ["rm", "-rf", "--", "/workspace/wiki"],
+            "cwd": "/",
+            "env": {},
+            "stdin": "",
+            "timeout_secs": 0,
+        }
+    ]
+
+
+async def test_wiki_snapshot_reset_failure_is_terminal():
+    executor = StaticSandboxExecutor(
+        exec_handler=lambda _sandbox_id, _cmd: ExecOutcome(
+            exit_code=1, stderr="read-only filesystem"
+        )
+    )
+    provider = RecordingProvider()
+    context = FakeContext()
+
+    await AgentRuntimeServicer(
+        provider,
+        binder=StaticSandboxBinder(),
+        executor=executor,
+    ).Query(FakeRequest(), context)
+
+    assert provider.ran is False
+    assert context.written[-1].kind == "error"
+    assert context.written[-1].data["code"] == "WIKI_PROVISION_FAILED"
+
+
+async def test_host_snapshot_replaces_conflicting_directory_with_file(tmp_path, monkeypatch):
+    monkeypatch.setenv("COCOLA_LOCAL_WORKSPACE_ROOT", str(tmp_path))
+    stale_dir = tmp_path / "S1" / "wiki" / "brief.md"
+    stale_dir.mkdir(parents=True)
+    (stale_dir / "old.txt").write_text("stale")
+    content = b"# Current\n"
+    provider = RecordingProvider()
+
+    await AgentRuntimeServicer(
+        provider,
+        binder=StaticSandboxBinder(),
+        objstore=FakeFetcher({"wiki/current": content}),
+    ).Query(
+        FakeRequest(wiki_references=[_reference("brief.md", "wiki/current", content)]),
+        FakeContext(),
+    )
+
+    assert provider.ran is True
+    assert (tmp_path / "S1" / "wiki" / "brief.md").read_bytes() == content
 
 
 async def test_wiki_reference_rejects_path_traversal():

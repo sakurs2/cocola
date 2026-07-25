@@ -47,6 +47,7 @@ import {
   shouldAwaitPlanStop,
 } from "@/lib/plan-mode.mjs";
 import { canDiscardPendingProjectTask } from "@/lib/project-task-intent.mjs";
+import { reconcileWikiUserMessage } from "@/lib/wiki-message-reconciliation";
 import {
   normalizeQuestionAnswer,
   normalizeQuestionPart,
@@ -2652,6 +2653,29 @@ export function CocolaRuntimeProvider({ children }: { children: ReactNode }) {
         if (runId) {
           runCursors.current.set(turnSessionId, cursor);
           writeRunCursors(runCursors.current);
+          if (parsedWiki.references.length > 0) {
+            void (async () => {
+              try {
+                const history = await fetch(
+                  `/api/conversations/${encodeURIComponent(turnSessionId)}/messages`,
+                  { cache: "no-store", signal: ctrl.signal },
+                );
+                if (!history.ok) return;
+                const loaded = normalizeWireMessages(await history.json());
+                setConvMessages((previous) => ({
+                  ...previous,
+                  [turnSessionId]: reconcileWikiUserMessage(
+                    previous[turnSessionId] ?? [],
+                    loaded,
+                    userMessageId,
+                    `${runId}-user`,
+                  ),
+                }));
+              } catch {
+                // A later conversation reload still restores the immutable Wiki version.
+              }
+            })();
+          }
         }
         if (projectHint) markServerAccepted(turnSessionId);
         await followRun(cursor, ctrl, res);

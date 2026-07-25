@@ -200,7 +200,7 @@ async def test_no_attachments_is_a_noop():
     await AgentRuntimeServicer(prov, binder=binder, executor=ex).Query(
         FakeRequest(prompt="plain"), ctx
     )
-    # No exec/write happened; prompt untouched.
-    assert ex.exec_calls == []
+    # The per-turn Wiki snapshot is cleared even when the turn has no references.
+    assert [call["cmd"] for call in ex.exec_calls] == [["rm", "-rf", "--", "/workspace/wiki"]]
     assert ex.byte_writes == []
     assert prov.seen_prompt == "plain"

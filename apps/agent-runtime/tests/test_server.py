@@ -569,9 +569,12 @@ async def test_query_rejects_unavailable_skill_catalog_before_sandbox():
 
 
 async def test_query_stops_when_skill_sync_fails():
-    executor = StaticSandboxExecutor(
-        exec_handler=lambda _sandbox_id, _cmd: ExecOutcome(exit_code=1, stderr="write failed")
-    )
+    def exec_handler(_sandbox_id, cmd):
+        if cmd == ["rm", "-rf", "--", "/workspace/wiki"]:
+            return ExecOutcome()
+        return ExecOutcome(exit_code=1, stderr="write failed")
+
+    executor = StaticSandboxExecutor(exec_handler=exec_handler)
     prov = ListProvider([AgentEvent(kind="done", data={})])
     ctx = FakeContext()
 
@@ -1059,6 +1062,8 @@ async def test_project_plan_rejects_workspace_changes_during_planning():
     revisions = iter(["revision-before", "revision-after"])
 
     def exec_handler(_sandbox_id, cmd, stdin):
+        if cmd == ["rm", "-rf", "--", "/workspace/wiki"]:
+            return ExecOutcome()
         assert cmd[:2] == ["python3", "-c"]
         operation = json.loads(stdin)["operation"]
         assert operation in {"bootstrap", "status"}
@@ -1171,6 +1176,8 @@ async def test_project_query_uses_isolated_project_worktree():
     )
 
     def exec_handler(_sandbox_id, cmd, stdin):
+        if cmd == ["rm", "-rf", "--", "/workspace/wiki"]:
+            return ExecOutcome()
         assert cmd[:2] == ["python3", "-c"]
         operation = json.loads(stdin)["operation"]
         assert operation in {"bootstrap", "status"}

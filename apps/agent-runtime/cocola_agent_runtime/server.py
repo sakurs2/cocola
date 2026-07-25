@@ -36,6 +36,7 @@ import os
 import pathlib
 import posixpath
 import re
+import shutil
 import tempfile
 import time
 import uuid
@@ -1108,47 +1109,47 @@ class AgentRuntimeServicer(pb_grpc.AgentRuntimeServiceServicer):
                     }
                 )
         wiki_references = list(getattr(request, "wiki_references", ()))
+        provision_start_ns = time.time_ns()
+        try:
+            preamble, wiki_workspace = await self._provision_wiki_references(
+                sandbox_id, request.session_id, wiki_references
+            )
+            if workspace is None:
+                workspace = wiki_workspace
+        except Exception as exc:  # noqa: BLE001 - clean terminal event, no bare crash
+            log.warning(
+                "Wiki provisioning failed",
+                session_id=request.session_id,
+                error_type=type(exc).__name__,
+            )
+            await context.write(
+                event_to_proto(
+                    trace_event(
+                        "sandbox.wiki_provision",
+                        "sandbox",
+                        provision_start_ns,
+                        status="error",
+                        sandbox_id=sandbox_id or "",
+                        object_count=len(wiki_references),
+                        error_type=type(exc).__name__,
+                    )
+                )
+            )
+            await context.write(
+                pb.AgentEvent(
+                    kind="error",
+                    data={
+                        "code": "WIKI_PROVISION_FAILED",
+                        "error": "Referenced Wiki files could not be prepared.",
+                    },
+                )
+            )
+            if heartbeat_task is not None:
+                heartbeat_task.cancel()
+                with contextlib.suppress(asyncio.CancelledError):
+                    await heartbeat_task
+            return
         if wiki_references:
-            provision_start_ns = time.time_ns()
-            try:
-                preamble, wiki_workspace = await self._provision_wiki_references(
-                    sandbox_id, request.session_id, wiki_references
-                )
-                if workspace is None:
-                    workspace = wiki_workspace
-            except Exception as exc:  # noqa: BLE001 - clean terminal event, no bare crash
-                log.warning(
-                    "Wiki provisioning failed",
-                    session_id=request.session_id,
-                    error_type=type(exc).__name__,
-                )
-                await context.write(
-                    event_to_proto(
-                        trace_event(
-                            "sandbox.wiki_provision",
-                            "sandbox",
-                            provision_start_ns,
-                            status="error",
-                            sandbox_id=sandbox_id or "",
-                            object_count=len(wiki_references),
-                            error_type=type(exc).__name__,
-                        )
-                    )
-                )
-                await context.write(
-                    pb.AgentEvent(
-                        kind="error",
-                        data={
-                            "code": "WIKI_PROVISION_FAILED",
-                            "error": "Referenced Wiki files could not be prepared.",
-                        },
-                    )
-                )
-                if heartbeat_task is not None:
-                    heartbeat_task.cancel()
-                    with contextlib.suppress(asyncio.CancelledError):
-                        await heartbeat_task
-                return
             await context.write(
                 event_to_proto(
                     trace_event(
@@ -1161,18 +1162,18 @@ class AgentRuntimeServicer(pb_grpc.AgentRuntimeServiceServicer):
                     )
                 )
             )
-            if preamble:
-                prompt = f"{preamble}\n\n{prompt}"
-            if preparing_environment:
-                environment_components.append(
-                    {
-                        "kind": "wiki",
-                        "status": "ready",
-                        "label": "Wiki references",
-                        "summary": f"{len(wiki_references)} prepared",
-                        "count": len(wiki_references),
-                    }
-                )
+        if preamble:
+            prompt = f"{preamble}\n\n{prompt}"
+        if wiki_references and preparing_environment:
+            environment_components.append(
+                {
+                    "kind": "wiki",
+                    "status": "ready",
+                    "label": "Wiki references",
+                    "summary": f"{len(wiki_references)} prepared",
+                    "count": len(wiki_references),
+                }
+            )
 
         loaded_skills: list[dict[str, str]] = []
         if self._skills is not None and sandbox_id and self._executor is not None:
@@ -1749,6 +1750,7 @@ class AgentRuntimeServicer(pb_grpc.AgentRuntimeServiceServicer):
         self, sandbox_id, session_id, references
     ) -> tuple[str, str | None]:
         if not references:
+            await self._reset_wiki_workspace(sandbox_id, session_id)
             return "", None
         if self._objstore is None:
             raise RuntimeError("Wiki object store is not configured")
@@ -1794,12 +1796,47 @@ class AgentRuntimeServicer(pb_grpc.AgentRuntimeServiceServicer):
                 )
             )
 
+        await self._reset_wiki_workspace(sandbox_id, session_id)
         if self._executor is not None and sandbox_id:
             landed = await self._provision_wiki_into_sandbox(sandbox_id, resolved)
             return _wiki_preamble(landed), None
 
         landed, workspace = self._provision_wiki_onto_host(session_id, resolved)
         return _wiki_preamble(landed), workspace
+
+    async def _reset_wiki_workspace(self, sandbox_id: str, session_id: str) -> None:
+        if self._executor is not None and sandbox_id:
+            result = await self._executor.exec(
+                sandbox_id=sandbox_id,
+                cmd=["rm", "-rf", "--", "/workspace/wiki"],
+                cwd="/",
+            )
+            if not result.ok:
+                raise RuntimeError(
+                    f"reset Wiki dir failed (exit={result.exit_code}): "
+                    f"{result.error or result.stderr}".strip()
+                )
+            return
+
+        wiki_dir = self._wiki_host_workspace(session_id) / "wiki"
+
+        def remove() -> None:
+            try:
+                if wiki_dir.is_symlink() or wiki_dir.is_file():
+                    wiki_dir.unlink()
+                    return
+                shutil.rmtree(wiki_dir)
+            except FileNotFoundError:
+                return
+
+        await asyncio.to_thread(remove)
+
+    @staticmethod
+    def _wiki_host_workspace(session_id: str) -> pathlib.Path:
+        root = os.getenv("COCOLA_LOCAL_WORKSPACE_ROOT", "").strip() or posixpath.join(
+            tempfile.gettempdir(), "cocola-workspaces"
+        )
+        return pathlib.Path(root) / _sanitize_filename(session_id or "session")
 
     async def _provision_wiki_into_sandbox(
         self, sandbox_id: str, references: list[_ResolvedWikiReference]
@@ -1831,10 +1868,7 @@ class AgentRuntimeServicer(pb_grpc.AgentRuntimeServiceServicer):
     def _provision_wiki_onto_host(
         self, session_id: str, references: list[_ResolvedWikiReference]
     ) -> tuple[list[str], str]:
-        root = os.getenv("COCOLA_LOCAL_WORKSPACE_ROOT", "").strip() or posixpath.join(
-            tempfile.gettempdir(), "cocola-workspaces"
-        )
-        workspace = pathlib.Path(root) / _sanitize_filename(session_id or "session")
+        workspace = self._wiki_host_workspace(session_id)
         wiki_dir = workspace / "wiki"
         landed: list[str] = []
         for reference in references:
