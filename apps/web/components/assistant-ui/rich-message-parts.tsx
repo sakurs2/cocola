@@ -2,12 +2,12 @@
 
 import { type DataMessagePartProps } from "@assistant-ui/react";
 import {
+  Activity,
   Check,
   CheckCircle2,
   ChevronDown,
   CircleHelp,
   ClipboardCopy,
-  Clock3,
   List,
   LoaderCircle,
   Table2,
@@ -249,20 +249,26 @@ export function RunSummary({ summary }: { summary: UiRunSummaryPart }) {
   const actions = summary.toolCallCount;
   return (
     <details className="group my-2 text-xs text-muted-foreground">
-      <summary className="flex cursor-pointer list-none items-center gap-2 rounded-lg py-1.5 outline-none focus-visible:ring-2 focus-visible:ring-ring">
-        <Clock3 className="size-3.5 shrink-0" />
-        <span className="font-medium text-foreground">{RUN_STATUS_LABELS[summary.status]}</span>
-        {summary.modelLabel ? <span>· {summary.modelLabel}</span> : null}
-        {summary.durationMs > 0 ? <span>· {formatAgentDuration(summary.durationMs)}</span> : null}
-        <span>
-          · {actions} {actions === 1 ? "action" : "actions"}
+      <summary className="grid cursor-pointer list-none grid-cols-[1.75rem_minmax(0,1fr)] items-center gap-x-2.5 rounded-lg py-1.5 outline-none focus-visible:ring-2 focus-visible:ring-ring">
+        <span className="flex items-center justify-center text-muted-foreground">
+          <Activity className="size-4 shrink-0" aria-hidden="true" />
         </span>
-        <ChevronDown className="ml-0.5 size-3.5 transition-transform group-open:rotate-180" />
+        <span className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1">
+          <span className="font-medium text-foreground">{RUN_STATUS_LABELS[summary.status]}</span>
+          {summary.modelLabel ? <span>· {summary.modelLabel}</span> : null}
+          {summary.durationMs > 0 ? <span>· {formatAgentDuration(summary.durationMs)}</span> : null}
+          <span>
+            · {actions} {actions === 1 ? "action" : "actions"}
+          </span>
+          <ChevronDown className="size-3.5 transition-transform group-open:rotate-180" />
+        </span>
       </summary>
-      <div className="ml-5 flex flex-wrap gap-x-4 gap-y-1 pb-1.5">
-        <span>{summary.llmCallCount} LLM calls</span>
-        <span>{summary.toolCallCount} tool calls</span>
-        {summary.errorCode ? <span>Error code: {summary.errorCode}</span> : null}
+      <div className="grid grid-cols-[1.75rem_minmax(0,1fr)] gap-x-2.5">
+        <div className="col-start-2 flex flex-wrap gap-x-4 gap-y-1 pb-1.5">
+          <span>{summary.llmCallCount} LLM calls</span>
+          <span>{summary.toolCallCount} tool calls</span>
+          {summary.errorCode ? <span>Error code: {summary.errorCode}</span> : null}
+        </div>
       </div>
     </details>
   );
