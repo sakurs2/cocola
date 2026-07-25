@@ -45,6 +45,31 @@ func scanNode(row pgx.Row) (Node, error) {
 	return node, err
 }
 
+func scanVersion(row pgx.Row) (Version, error) {
+	var version Version
+	err := row.Scan(
+		&version.ID,
+		&version.NodeID,
+		&version.Revision,
+		&version.ObjectKey,
+		&version.SizeBytes,
+		&version.SHA256,
+		&version.MimeType,
+		&version.CreatedAt,
+	)
+	return version, err
+}
+
+func lockOwnerTree(ctx context.Context, tx pgx.Tx, identity Identity) error {
+	_, err := tx.Exec(
+		ctx,
+		`SELECT pg_advisory_xact_lock(hashtext($1), hashtext($2))`,
+		identity.TenantID,
+		identity.UserID,
+	)
+	return err
+}
+
 func (p *Postgres) List(ctx context.Context, identity Identity) ([]Node, error) {
 	query := `SELECT ` + nodeColumns + `
 		FROM wiki_nodes n
@@ -75,6 +100,14 @@ func (p *Postgres) CreateFolder(
 	identity Identity,
 	node Node,
 ) (Node, error) {
+	tx, err := p.pool.BeginTx(ctx, pgx.TxOptions{})
+	if err != nil {
+		return Node{}, err
+	}
+	defer func() { _ = tx.Rollback(ctx) }()
+	if err := lockOwnerTree(ctx, tx, identity); err != nil {
+		return Node{}, err
+	}
 	query := `INSERT INTO wiki_nodes
 		(id, tenant_id, user_id, parent_id, kind, name, sort_order, created_at, updated_at)
 		SELECT $1::uuid,$2,$3,NULLIF($4,'')::uuid,'folder',$5,$6,$7,$7
@@ -85,14 +118,20 @@ func (p *Postgres) CreateFolder(
 		)
 		RETURNING id::text, COALESCE(parent_id::text, ''), kind, name, extension,
 			mime_type, '', 0::bigint, 0::bigint, '', sort_order, created_at, updated_at`
-	created, err := scanNode(p.pool.QueryRow(
+	created, err := scanNode(tx.QueryRow(
 		ctx, query, node.ID, identity.TenantID, identity.UserID, node.ParentID,
 		node.Name, node.SortOrder, node.CreatedAt,
 	))
 	if err == pgx.ErrNoRows {
 		return Node{}, ErrInvalidParent
 	}
-	return created, mapPostgresError(err)
+	if err != nil {
+		return Node{}, mapPostgresError(err)
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return Node{}, err
+	}
+	return created, nil
 }
 
 func (p *Postgres) CreateFile(
@@ -105,6 +144,9 @@ func (p *Postgres) CreateFile(
 		return Node{}, err
 	}
 	defer func() { _ = tx.Rollback(ctx) }()
+	if err := lockOwnerTree(ctx, tx, identity); err != nil {
+		return Node{}, err
+	}
 	node := input.Node
 	version := input.Version
 	tag, err := tx.Exec(ctx, `INSERT INTO wiki_nodes
@@ -321,12 +363,7 @@ func (p *Postgres) Move(
 		return Node{}, err
 	}
 	defer func() { _ = tx.Rollback(ctx) }()
-	if _, err := tx.Exec(
-		ctx,
-		`SELECT pg_advisory_xact_lock(hashtext($1), hashtext($2))`,
-		identity.TenantID,
-		identity.UserID,
-	); err != nil {
+	if err := lockOwnerTree(ctx, tx, identity); err != nil {
 		return Node{}, err
 	}
 	if parentID != "" {
@@ -372,10 +409,20 @@ func (p *Postgres) Move(
 	if tag.RowsAffected() == 0 {
 		return Node{}, ErrNotFound
 	}
+	updated, err := scanNode(tx.QueryRow(ctx, `SELECT `+nodeColumns+`
+		FROM wiki_nodes n
+		LEFT JOIN wiki_versions v ON v.id=n.current_version_id
+		WHERE n.id=$3::uuid AND n.tenant_id=$1 AND n.user_id=$2
+			AND n.deleted_at IS NULL`,
+		identity.TenantID, identity.UserID, nodeID,
+	))
+	if err != nil {
+		return Node{}, err
+	}
 	if err := tx.Commit(ctx); err != nil {
 		return Node{}, err
 	}
-	return p.currentNode(ctx, identity, nodeID)
+	return updated, nil
 }
 
 func (p *Postgres) Delete(
@@ -384,7 +431,15 @@ func (p *Postgres) Delete(
 	nodeID string,
 	deletedAt time.Time,
 ) error {
-	tag, err := p.pool.Exec(ctx, `WITH RECURSIVE subtree AS (
+	tx, err := p.pool.BeginTx(ctx, pgx.TxOptions{})
+	if err != nil {
+		return err
+	}
+	defer func() { _ = tx.Rollback(ctx) }()
+	if err := lockOwnerTree(ctx, tx, identity); err != nil {
+		return err
+	}
+	tag, err := tx.Exec(ctx, `WITH RECURSIVE subtree AS (
 		SELECT id FROM wiki_nodes
 		WHERE id=$3::uuid AND tenant_id=$1 AND user_id=$2 AND deleted_at IS NULL
 		UNION
@@ -402,7 +457,7 @@ func (p *Postgres) Delete(
 	if tag.RowsAffected() == 0 {
 		return ErrNotFound
 	}
-	return nil
+	return tx.Commit(ctx)
 }
 
 func (p *Postgres) ResolveCurrent(
@@ -410,13 +465,41 @@ func (p *Postgres) ResolveCurrent(
 	identity Identity,
 	nodeIDs []string,
 ) ([]Node, []Version, error) {
+	if len(nodeIDs) == 0 {
+		return []Node{}, []Version{}, nil
+	}
+	tree, err := p.List(ctx, identity)
+	if err != nil {
+		return nil, nil, err
+	}
+	byID := make(map[string]Node, len(tree))
+	for _, node := range tree {
+		byID[node.ID] = node
+	}
 	nodes := make([]Node, 0, len(nodeIDs))
 	versions := make([]Version, 0, len(nodeIDs))
 	for _, nodeID := range nodeIDs {
-		node, version, err := p.GetCurrent(ctx, identity, nodeID)
+		node, ok := byID[nodeID]
+		if !ok || node.Kind != "file" || node.CurrentVersionID == "" {
+			return nil, nil, ErrNotFound
+		}
+		version, err := scanVersion(p.pool.QueryRow(ctx, `SELECT
+			id::text, node_id::text, revision, object_key, size_bytes, sha256,
+			mime_type, created_at
+			FROM wiki_versions
+			WHERE id=$1::uuid AND node_id=$2::uuid`,
+			node.CurrentVersionID,
+			node.ID,
+		))
+		if err == pgx.ErrNoRows {
+			return nil, nil, ErrNotFound
+		}
 		if err != nil {
 			return nil, nil, err
 		}
+		version.NodeName = node.Name
+		version.Extension = node.Extension
+		version.LogicalPath = node.LogicalPath
 		nodes = append(nodes, node)
 		versions = append(versions, version)
 	}

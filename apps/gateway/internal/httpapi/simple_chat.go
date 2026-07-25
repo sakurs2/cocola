@@ -37,6 +37,8 @@ const (
 	finalizeAttemptLimit = 3 * time.Second
 	finalizeMaxAttempts  = 4
 	subscriberBuffer     = 64
+	maxWikiRefsPerTurn   = 20
+	maxWikiBytesPerTurn  = int64(100 << 20)
 )
 
 type RunConfig struct {
@@ -202,6 +204,15 @@ func (a *API) chat(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if len(req.WikiRefs) > 0 {
+		if len(req.WikiRefs) > maxWikiRefsPerTurn {
+			writeErr(
+				w,
+				http.StatusRequestEntityTooLarge,
+				"WIKI_REFERENCE_LIMIT_EXCEEDED",
+				"too many Wiki files were referenced in one turn",
+			)
+			return
+		}
 		if a.wiki == nil || a.store == nil {
 			writeErr(w, http.StatusServiceUnavailable, "WIKI_UNAVAILABLE", "Wiki is not configured")
 			return
@@ -232,6 +243,24 @@ func (a *API) chat(w http.ResponseWriter, r *http.Request) {
 		if resolveErr != nil {
 			writeErr(w, http.StatusServiceUnavailable, "WIKI_UNAVAILABLE", "could not resolve Wiki references")
 			return
+		}
+		if len(nodes) != len(versions) {
+			writeErr(w, http.StatusServiceUnavailable, "WIKI_UNAVAILABLE", "could not resolve Wiki references")
+			return
+		}
+		var totalBytes int64
+		for _, version := range versions {
+			if version.SizeBytes < 0 ||
+				version.SizeBytes > maxWikiBytesPerTurn-totalBytes {
+				writeErr(
+					w,
+					http.StatusRequestEntityTooLarge,
+					"WIKI_REFERENCE_LIMIT_EXCEEDED",
+					"referenced Wiki files exceed the per-turn size limit",
+				)
+				return
+			}
+			totalBytes += version.SizeBytes
 		}
 		req.WikiReferences = make([]agent.WikiReference, 0, len(nodes))
 		for index := range nodes {

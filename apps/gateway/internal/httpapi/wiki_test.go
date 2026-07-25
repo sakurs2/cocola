@@ -29,6 +29,7 @@ type wikiStoreStub struct {
 	resolvedNodes []wiki.Node
 	resolved      []wiki.Version
 	resolveErr    error
+	resolveCalls  int
 }
 
 func (s *wikiStoreStub) CreateFile(
@@ -67,6 +68,7 @@ func (s *wikiStoreStub) ResolveCurrent(
 	_ wiki.Identity,
 	_ []string,
 ) ([]wiki.Node, []wiki.Version, error) {
+	s.resolveCalls++
 	return s.resolvedNodes, s.resolved, s.resolveErr
 }
 
@@ -339,6 +341,72 @@ func TestChatResolvesWikiReferenceIntoRunQuery(t *testing.T) {
 		got.LogicalPath != "Product/Research/brief.docx" ||
 		got.ObjectKey != "wiki/node/version" {
 		t.Fatalf("WikiReference = %#v", got)
+	}
+}
+
+func TestChatRejectsTooManyWikiReferencesBeforeResolving(t *testing.T) {
+	t.Parallel()
+	refs := make([]wikiRefDTO, maxWikiRefsPerTurn+1)
+	for index := range refs {
+		refs[index] = wikiRefDTO{NodeID: uuid.NewString()}
+	}
+	body, err := json.Marshal(chatRequest{
+		Prompt: "summarize these files", SessionID: "wiki-chat", WikiRefs: refs,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	wikiStore := &wikiStoreStub{}
+	api := newConfiguredTestAPI(
+		&fakeStreamer{},
+		auth.NewVerifier(auth.Config{}),
+		logger.Must(),
+	).WithObjStore(&cleanupObjectStore{}, DefaultInlineMaxBytes).
+		WithWikiStore(wikiStore, 1024)
+	recorder := httptest.NewRecorder()
+
+	api.Handler().ServeHTTP(
+		recorder,
+		httptest.NewRequest(http.MethodPost, "/v1/chat", bytes.NewReader(body)),
+	)
+
+	if recorder.Code != http.StatusRequestEntityTooLarge {
+		t.Fatalf("status = %d, body=%s", recorder.Code, recorder.Body.String())
+	}
+	if wikiStore.resolveCalls != 0 {
+		t.Fatalf("ResolveCurrent calls = %d, want 0", wikiStore.resolveCalls)
+	}
+}
+
+func TestChatRejectsWikiReferenceBytesOverPerTurnLimit(t *testing.T) {
+	t.Parallel()
+	nodeID := uuid.NewString()
+	wikiStore := &wikiStoreStub{
+		resolvedNodes: []wiki.Node{{ID: nodeID, Kind: "file", Name: "large.pdf"}},
+		resolved: []wiki.Version{{
+			ID: uuid.NewString(), NodeID: nodeID, SizeBytes: maxWikiBytesPerTurn + 1,
+		}},
+	}
+	api := newConfiguredTestAPI(
+		&fakeStreamer{},
+		auth.NewVerifier(auth.Config{}),
+		logger.Must(),
+	).WithObjStore(&cleanupObjectStore{}, DefaultInlineMaxBytes).
+		WithWikiStore(wikiStore, 1024)
+	body := `{"prompt":"summarize it","session_id":"wiki-chat","wiki_refs":[{"node_id":"` +
+		nodeID + `"}]}`
+	recorder := httptest.NewRecorder()
+
+	api.Handler().ServeHTTP(
+		recorder,
+		httptest.NewRequest(http.MethodPost, "/v1/chat", strings.NewReader(body)),
+	)
+
+	if recorder.Code != http.StatusRequestEntityTooLarge {
+		t.Fatalf("status = %d, body=%s", recorder.Code, recorder.Body.String())
+	}
+	if wikiStore.resolveCalls != 1 {
+		t.Fatalf("ResolveCurrent calls = %d, want 1", wikiStore.resolveCalls)
 	}
 }
 

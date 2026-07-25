@@ -123,6 +123,8 @@ RUN_SOURCE_METADATA_KEY = "x-cocola-run-source"
 ENVIRONMENT_PREPARATION_SCHEMA_VERSION = 1
 ENVIRONMENT_PREPARATION_PART_ID = "environment"
 DEFAULT_SANDBOX_HEARTBEAT_SECS = 20
+MAX_WIKI_REFERENCES_PER_TURN = 20
+MAX_WIKI_REFERENCE_BYTES_PER_TURN = 100 * 1024 * 1024
 
 
 def _positive_env_int(name: str, default: int) -> int:
@@ -1750,15 +1752,25 @@ class AgentRuntimeServicer(pb_grpc.AgentRuntimeServiceServicer):
             return "", None
         if self._objstore is None:
             raise RuntimeError("Wiki object store is not configured")
+        if len(references) > MAX_WIKI_REFERENCES_PER_TURN:
+            raise RuntimeError("Too many Wiki references in one turn")
+
+        expected_sizes: list[int] = []
+        total_size = 0
+        for reference in references:
+            expected_size = int(getattr(reference, "size", 0) or 0)
+            if expected_size < 0 or expected_size > MAX_WIKI_REFERENCE_BYTES_PER_TURN - total_size:
+                raise RuntimeError("Wiki references exceed the per-turn size limit")
+            expected_sizes.append(expected_size)
+            total_size += expected_size
 
         resolved: list[_ResolvedWikiReference] = []
         targets: dict[str, str] = {}
-        for reference in references:
+        for reference, expected_size in zip(references, expected_sizes, strict=True):
             key = str(getattr(reference, "oss_key", "") or "")
             if not key:
                 raise RuntimeError("Wiki reference has no object key")
             content = await asyncio.to_thread(self._objstore.get, key)
-            expected_size = int(getattr(reference, "size", 0) or 0)
             if expected_size != len(content):
                 raise RuntimeError("Wiki reference size check failed")
             expected_sha = str(getattr(reference, "sha256", "") or "").lower()

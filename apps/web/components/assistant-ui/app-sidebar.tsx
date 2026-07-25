@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useRef, useState } from "react";
+import { useCallback, useRef, useState, type MouseEvent as ReactMouseEvent } from "react";
 import {
   Cable,
   BookOpenText,
@@ -30,6 +30,7 @@ import {
 } from "@/app/runtime-provider";
 import { ConversationActionsMenu } from "@/components/assistant-ui/conversation-actions-menu";
 import { DeleteConfirmDialog } from "@/components/assistant-ui/delete-confirm-dialog";
+import { useWorkspaceUnsavedChanges } from "@/components/assistant-ui/workspace-unsaved-changes";
 import { useWorkspaceToast } from "@/components/assistant-ui/workspace-toast";
 
 // User workspace sidebar. New Chat + the Chats list are wired to the backend
@@ -99,6 +100,7 @@ export function AppSidebar({
   const pathname = usePathname();
   const router = useRouter();
   const { showSuccess } = useWorkspaceToast();
+  const { confirmNavigation } = useWorkspaceUnsavedChanges();
   const sectionRefs = useRef<Record<SidebarSection, HTMLDivElement | null>>({
     actions: null,
     navigation: null,
@@ -140,23 +142,43 @@ export function AppSidebar({
   const navigateTo = useCallback(
     (href: string) => {
       if (pathname === href || pathname?.startsWith(`${href}/`)) return;
+      if (!confirmNavigation()) return;
       router.push(href);
     },
-    [pathname, router],
+    [confirmNavigation, pathname, router],
   );
 
   const openNewChat = () => {
+    if (!confirmNavigation()) return;
     newConversation();
     if (pathname !== "/") router.push("/");
   };
 
   const openConversation = (id: string) => {
+    if (!confirmNavigation()) return;
     if (pathname !== "/") {
       router.push(`/?conversation=${encodeURIComponent(id)}`);
       return;
     }
     void loadConversation(id);
   };
+
+  const guardLinkNavigation = useCallback(
+    (event: ReactMouseEvent<HTMLAnchorElement>) => {
+      if (
+        event.defaultPrevented ||
+        event.button !== 0 ||
+        event.metaKey ||
+        event.ctrlKey ||
+        event.shiftKey ||
+        event.altKey
+      ) {
+        return;
+      }
+      if (!confirmNavigation()) event.preventDefault();
+    },
+    [confirmNavigation],
+  );
 
   const startRename = (id: string, title: string) => {
     setEditingId(id);
@@ -287,6 +309,7 @@ export function AppSidebar({
             >
               <Link
                 href="/projects"
+                onClick={guardLinkNavigation}
                 className="flex min-w-0 flex-1 items-center gap-2.5 self-stretch"
               >
                 <FolderGit2 className="size-4 shrink-0 text-indigo-500" />
@@ -294,6 +317,7 @@ export function AppSidebar({
               </Link>
               <Link
                 href="/projects/new"
+                onClick={guardLinkNavigation}
                 aria-label="Create or import project"
                 title="Create or import project"
                 className="grid size-7 place-items-center rounded-lg text-sidebar-foreground/65 transition hover:bg-sidebar-accent hover:text-sidebar-accent-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/45"
@@ -314,6 +338,7 @@ export function AppSidebar({
             >
               <Link
                 href="/folders"
+                onClick={guardLinkNavigation}
                 className="flex min-w-0 flex-1 items-center gap-2.5 self-stretch"
               >
                 <Folder className="size-4 shrink-0 text-amber-500" />
@@ -321,6 +346,7 @@ export function AppSidebar({
               </Link>
               <Link
                 href="/folders/new"
+                onClick={guardLinkNavigation}
                 aria-label="Create folder"
                 title="Create folder"
                 className="grid size-7 place-items-center rounded-lg text-sidebar-foreground/65 transition hover:bg-sidebar-accent hover:text-sidebar-accent-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/45"
@@ -367,6 +393,7 @@ export function AppSidebar({
         <div ref={setSectionRef("account")} className="border-t border-sidebar-border p-2">
           <Link
             href="/profile"
+            onClick={guardLinkNavigation}
             title="Profile"
             className="group flex min-w-0 items-center gap-2 rounded-2xl px-2 py-1.5 text-sidebar-foreground/90 transition-colors hover:bg-sidebar-accent hover:text-sidebar-accent-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/45"
           >

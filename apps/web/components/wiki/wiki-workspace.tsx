@@ -31,6 +31,7 @@ import {
 } from "react";
 import { MarkdownContent } from "@/components/assistant-ui/markdown-text";
 import { ReadonlyFilePreview } from "@/components/assistant-ui/file-preview";
+import { useWorkspaceUnsavedChanges } from "@/components/assistant-ui/workspace-unsaved-changes";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 
@@ -118,6 +119,7 @@ export function WikiWorkspace() {
   const [maxFileBytes, setMaxFileBytes] = useState(DEFAULT_MAX_FILE_BYTES);
   const [unsavedFileID, setUnsavedFileID] = useState("");
   const uploadRef = useRef<HTMLInputElement>(null);
+  const { setDirty } = useWorkspaceUnsavedChanges();
 
   const tree = useMemo(() => buildTree(nodes), [nodes]);
   const selected = nodes.find((node) => node.id === selectedID) ?? null;
@@ -194,6 +196,12 @@ export function WikiWorkspace() {
     window.addEventListener("beforeunload", warnBeforeUnload);
     return () => window.removeEventListener("beforeunload", warnBeforeUnload);
   }, [unsavedFileID]);
+
+  useEffect(() => {
+    setDirty(Boolean(unsavedFileID));
+  }, [setDirty, unsavedFileID]);
+
+  useEffect(() => () => setDirty(false), [setDirty]);
 
   const createFolder = async () => {
     if (!confirmDiscardChanges()) return;

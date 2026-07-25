@@ -9,7 +9,11 @@ from cocola_agent_runtime.sandbox_binder import (
     StaticSandboxBinder,
     StaticSandboxExecutor,
 )
-from cocola_agent_runtime.server import AgentRuntimeServicer
+from cocola_agent_runtime.server import (
+    MAX_WIKI_REFERENCE_BYTES_PER_TURN,
+    MAX_WIKI_REFERENCES_PER_TURN,
+    AgentRuntimeServicer,
+)
 
 
 @dataclass
@@ -192,5 +196,56 @@ async def test_wiki_integrity_failure_is_terminal_and_skips_agent():
 
     assert provider.ran is False
     assert executor.byte_writes == []
+    assert context.written[-1].kind == "error"
+    assert context.written[-1].data["code"] == "WIKI_PROVISION_FAILED"
+
+
+async def test_wiki_reference_count_limit_fails_before_object_fetch():
+    references = [
+        _reference(f"{index}.md", f"wiki/{index}", b"x")
+        for index in range(MAX_WIKI_REFERENCES_PER_TURN + 1)
+    ]
+    fetcher = FakeFetcher({})
+    provider = RecordingProvider()
+    context = FakeContext()
+
+    await AgentRuntimeServicer(
+        provider,
+        binder=StaticSandboxBinder(),
+        executor=_executor(),
+        objstore=fetcher,
+    ).Query(FakeRequest(wiki_references=references), context)
+
+    assert provider.ran is False
+    assert fetcher.gets == []
+    assert context.written[-1].kind == "error"
+    assert context.written[-1].data["code"] == "WIKI_PROVISION_FAILED"
+
+
+async def test_wiki_reference_byte_limit_fails_before_object_fetch():
+    references = [
+        _reference("small.md", "wiki/small", b"x"),
+        FakeWikiReference(
+            logical_path="large.pdf",
+            filename="large.pdf",
+            oss_key="wiki/large",
+            size=MAX_WIKI_REFERENCE_BYTES_PER_TURN,
+            sha256="",
+            mime="application/pdf",
+        ),
+    ]
+    fetcher = FakeFetcher({"wiki/small": b"x"})
+    provider = RecordingProvider()
+    context = FakeContext()
+
+    await AgentRuntimeServicer(
+        provider,
+        binder=StaticSandboxBinder(),
+        executor=_executor(),
+        objstore=fetcher,
+    ).Query(FakeRequest(wiki_references=references), context)
+
+    assert provider.ran is False
+    assert fetcher.gets == []
     assert context.written[-1].kind == "error"
     assert context.written[-1].data["code"] == "WIKI_PROVISION_FAILED"

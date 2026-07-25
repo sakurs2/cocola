@@ -15,8 +15,9 @@ import {
 } from "lucide-react";
 import { useSession } from "next-auth/react";
 import { usePathname, useRouter } from "next/navigation";
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { useCocola } from "@/app/runtime-provider";
+import { useWorkspaceUnsavedChanges } from "@/components/assistant-ui/workspace-unsaved-changes";
 import { cn } from "@/lib/utils";
 
 export function CommandPalette() {
@@ -24,8 +25,15 @@ export function CommandPalette() {
   const pathname = usePathname();
   const { data: session } = useSession();
   const { conversations, loadConversation, newConversation } = useCocola();
+  const { confirmNavigation } = useWorkspaceUnsavedChanges();
   const [open, setOpen] = useState(false);
   const isAdmin = session?.user?.role === "admin";
+  const navigateTo = useCallback(
+    (href: string) => {
+      if (confirmNavigation()) router.push(href);
+    },
+    [confirmNavigation, router],
+  );
 
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
@@ -46,6 +54,7 @@ export function CommandPalette() {
         hint: "Start a fresh workspace session",
         icon: Plus,
         run: () => {
+          if (!confirmNavigation()) return;
           if (pathname !== "/") router.push("/");
           newConversation();
         },
@@ -55,28 +64,28 @@ export function CommandPalette() {
         label: "Tasks",
         hint: "Manage scheduled work",
         icon: CalendarClock,
-        run: () => router.push("/tasks"),
+        run: () => navigateTo("/tasks"),
       },
       {
         id: "skills",
         label: "Skills",
         hint: "Browse installed agent skills",
         icon: Sparkles,
-        run: () => router.push("/skills"),
+        run: () => navigateTo("/skills"),
       },
       {
         id: "mcp",
         label: "MCP",
         hint: "Inspect configured tool servers",
         icon: PlugZap,
-        run: () => router.push("/mcps"),
+        run: () => navigateTo("/mcps"),
       },
       {
         id: "profile",
         label: "Profile",
         hint: "View account details",
         icon: UserRound,
-        run: () => router.push("/profile"),
+        run: () => navigateTo("/profile"),
       },
       ...(isAdmin
         ? [
@@ -85,12 +94,12 @@ export function CommandPalette() {
               label: "Admin",
               hint: "Open admin monitoring",
               icon: ShieldCheck,
-              run: () => router.push("/admin"),
+              run: () => navigateTo("/admin"),
             },
           ]
         : []),
     ],
-    [isAdmin, newConversation, pathname, router],
+    [confirmNavigation, isAdmin, navigateTo, newConversation, pathname, router],
   );
 
   const runAndClose = (run: () => void | Promise<void>) => {
@@ -140,6 +149,7 @@ export function CommandPalette() {
                     hint={new Date(conversation.updated_at).toLocaleString()}
                     onSelect={() =>
                       runAndClose(async () => {
+                        if (!confirmNavigation()) return;
                         if (pathname !== "/") {
                           router.push(`/?conversation=${encodeURIComponent(conversation.id)}`);
                           return;
