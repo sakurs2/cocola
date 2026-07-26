@@ -7,6 +7,7 @@ import (
 
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials/insecure"
+	"google.golang.org/grpc/metadata"
 	"google.golang.org/grpc/test/bufconn"
 
 	agentv1 "github.com/cocola-project/cocola/packages/proto/gen/go/cocola/agent/v1"
@@ -15,6 +16,7 @@ import (
 type recordingAgentServer struct {
 	agentv1.UnimplementedAgentRuntimeServiceServer
 	requests chan *agentv1.QueryRequest
+	metadata chan metadata.MD
 }
 
 func (s *recordingAgentServer) Query(
@@ -22,6 +24,10 @@ func (s *recordingAgentServer) Query(
 	stream agentv1.AgentRuntimeService_QueryServer,
 ) error {
 	s.requests <- request
+	if s.metadata != nil {
+		value, _ := metadata.FromIncomingContext(stream.Context())
+		s.metadata <- value
+	}
 	return stream.Send(&agentv1.AgentEvent{Kind: "done"})
 }
 
@@ -29,7 +35,10 @@ func TestClientStreamMapsWikiReferences(t *testing.T) {
 	t.Parallel()
 	listener := bufconn.Listen(1 << 20)
 	server := grpc.NewServer()
-	recording := &recordingAgentServer{requests: make(chan *agentv1.QueryRequest, 1)}
+	recording := &recordingAgentServer{
+		requests: make(chan *agentv1.QueryRequest, 1),
+		metadata: make(chan metadata.MD, 1),
+	}
 	agentv1.RegisterAgentRuntimeServiceServer(server, recording)
 	go func() { _ = server.Serve(listener) }()
 	t.Cleanup(server.Stop)
@@ -50,6 +59,7 @@ func TestClientStreamMapsWikiReferences(t *testing.T) {
 
 	err = client.Stream(context.Background(), Query{
 		UserID: "user", SessionID: "session", Prompt: "read it",
+		SkillBrokerCredential: "skill-run-credential",
 		WikiReferences: []WikiReference{{
 			NodeID: "node", VersionID: "version", LogicalPath: "Team/brief.docx",
 			Filename: "brief.docx", Mime: "application/docx",
@@ -69,5 +79,9 @@ func TestClientStreamMapsWikiReferences(t *testing.T) {
 		got.OssKey != "wiki/node/version" ||
 		got.Size != 123 || got.Sha256 != "abc" {
 		t.Fatalf("WikiReference = %#v", got)
+	}
+	if got := (<-recording.metadata).Get("x-cocola-skill-broker-credential"); len(got) != 1 ||
+		got[0] != "skill-run-credential" {
+		t.Fatalf("Skill broker metadata = %#v", got)
 	}
 }

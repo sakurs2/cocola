@@ -2,8 +2,11 @@ from __future__ import annotations
 
 import importlib.util
 import json
+import os
 import re
 import subprocess
+import zipfile
+from io import BytesIO
 from pathlib import Path
 
 import pytest
@@ -80,6 +83,100 @@ def test_operator_override_takes_precedence_over_profile(cli, monkeypatch):
     assert cli.browser_enabled(manifest, "minimal") is True
     monkeypatch.setenv("COCOLA_BROWSER_ENABLED", "false")
     assert cli.browser_enabled(manifest, "coding") is False
+
+
+def test_skill_archive_is_normalized_and_rejects_nested_skill(cli, tmp_path):
+    workspace = tmp_path / "skills"
+    source = workspace / "demo"
+    source.mkdir(parents=True)
+    (source / "SKILL.md").write_text(
+        "---\nname: demo\ndescription: Demo skill.\n---\n\n# Demo\n", encoding="utf-8"
+    )
+    (source / "references").mkdir()
+    (source / "references" / "guide.md").write_text("guide\n", encoding="utf-8")
+    (source / ".DS_Store").write_text("ignored", encoding="utf-8")
+    manifest = {"capabilities": {"skills": {"workspace_root": str(workspace)}}}
+
+    payload = cli._normalized_skill_archive(manifest, str(source))
+
+    with zipfile.ZipFile(BytesIO(payload)) as archive:
+        assert archive.namelist() == ["SKILL.md", "references/guide.md"]
+        assert all(info.date_time == (1980, 1, 1, 0, 0, 0) for info in archive.infolist())
+
+    (source / "nested").mkdir()
+    (source / "nested" / "SKILL.md").write_text("# nested", encoding="utf-8")
+    with pytest.raises(cli.SkillCommandError, match="Nested SKILL.md") as error:
+        cli._normalized_skill_archive(manifest, str(source))
+    assert error.value.code == "SKILL_INVALID"
+
+
+def test_skill_archive_rejects_paths_outside_workspace_and_symlinks(cli, tmp_path):
+    workspace = tmp_path / "skills"
+    source = workspace / "demo"
+    source.mkdir(parents=True)
+    (source / "SKILL.md").write_text("# demo", encoding="utf-8")
+    manifest = {"capabilities": {"skills": {"workspace_root": str(workspace)}}}
+
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    (outside / "SKILL.md").write_text("# outside", encoding="utf-8")
+    with pytest.raises(cli.SkillCommandError) as outside_error:
+        cli._normalized_skill_archive(manifest, str(outside))
+    assert outside_error.value.code == "INVALID_SKILL_PATH"
+
+    os.symlink(outside / "SKILL.md", source / "linked.md")
+    with pytest.raises(cli.SkillCommandError, match="Symbolic links") as symlink_error:
+        cli._normalized_skill_archive(manifest, str(source))
+    assert symlink_error.value.code == "SKILL_INVALID"
+
+
+def test_skill_archive_rejects_special_files_and_all_size_limits(cli, tmp_path, monkeypatch):
+    workspace = tmp_path / "skills"
+    source = workspace / "demo"
+    source.mkdir(parents=True)
+    (source / "SKILL.md").write_text("# demo", encoding="utf-8")
+    manifest = {"capabilities": {"skills": {"workspace_root": str(workspace)}}}
+
+    fifo = source / "pipe"
+    os.mkfifo(fifo)
+    with pytest.raises(cli.SkillCommandError, match="Special files"):
+        cli._normalized_skill_archive(manifest, str(source))
+    fifo.unlink()
+
+    (source / "extra.txt").write_text("extra", encoding="utf-8")
+    monkeypatch.setattr(cli, "SKILL_MAX_FILES", 1)
+    with pytest.raises(cli.SkillCommandError, match="file limit"):
+        cli._normalized_skill_archive(manifest, str(source))
+    monkeypatch.setattr(cli, "SKILL_MAX_FILES", 1000)
+
+    monkeypatch.setattr(cli, "SKILL_MAX_SOURCE_BYTES", 1)
+    with pytest.raises(cli.SkillCommandError, match="source exceeds"):
+        cli._normalized_skill_archive(manifest, str(source))
+    monkeypatch.setattr(cli, "SKILL_MAX_SOURCE_BYTES", 128 * 1024 * 1024)
+
+    monkeypatch.setattr(cli, "SKILL_MAX_ARCHIVE_BYTES", 1)
+    with pytest.raises(cli.SkillCommandError, match="ZIP exceeds"):
+        cli._normalized_skill_archive(manifest, str(source))
+
+
+def test_skill_command_returns_stable_success_shape(cli, monkeypatch):
+    manifest = cli.load_manifest()
+    monkeypatch.setenv("COCOLA_SKILL_PUBLISH_ENABLED", "true")
+    monkeypatch.setattr(cli, "_normalized_skill_archive", lambda *_: b"zip")
+    monkeypatch.setattr(
+        cli,
+        "_skill_broker_request",
+        lambda action, archive: {"skills": [{"id": action, "valid": True}]},
+    )
+
+    assert cli.run_skill_command(manifest, "coding", "scan", "/workspace/skills/demo") == {
+        "ok": True,
+        "candidate": {"id": "scan", "valid": True},
+    }
+    assert cli.run_skill_command(manifest, "coding", "import", "/workspace/skills/demo") == {
+        "ok": True,
+        "skill": {"id": "import", "valid": True},
+    }
 
 
 def test_minimal_profile_disables_browser(cli, monkeypatch, capsys):
@@ -304,6 +401,7 @@ def test_preview_start_detaches_scrubs_run_credentials_and_waits_for_network(
     monkeypatch.setattr(cli.time, "sleep", lambda _seconds: None)
     monkeypatch.setenv("ANTHROPIC_AUTH_TOKEN", "run-secret")
     monkeypatch.setenv("COCOLA_PROJECT_CREDENTIAL", "broker-secret")
+    monkeypatch.setenv("COCOLA_SKILL_CREDENTIAL", "skill-secret")
     monkeypatch.setenv("APP_MODE", "development")
 
     payload = cli.preview_start(
@@ -330,6 +428,7 @@ def test_preview_start_detaches_scrubs_run_credentials_and_waits_for_network(
     assert captured["kwargs"]["stdout"] is subprocess.DEVNULL
     assert "ANTHROPIC_AUTH_TOKEN" not in captured["kwargs"]["env"]
     assert "COCOLA_PROJECT_CREDENTIAL" not in captured["kwargs"]["env"]
+    assert "COCOLA_SKILL_CREDENTIAL" not in captured["kwargs"]["env"]
     assert captured["kwargs"]["env"]["APP_MODE"] == "development"
     assert captured["kwargs"]["env"]["HOST"] == "0.0.0.0"
     assert captured["kwargs"]["env"]["PORT"] == "3000"
@@ -628,6 +727,36 @@ def test_builtin_browser_skill_matches_the_guest_cli_contract():
     for command in ("inspect", "screenshot", "pdf"):
         assert f"cocola-sandbox browser {command}" in skill_md
     assert "COPY skills/ /opt/cocola/skills/" in dockerfile
+
+
+def test_builtin_skill_creator_and_lark_cli_match_the_image_contract():
+    platform_manifest = json.loads(
+        (BUILTIN_SKILLS_PATH / "manifest.json").read_text(encoding="utf-8")
+    )
+    descriptors = {item["id"]: item for item in platform_manifest["skills"]}
+    descriptor = descriptors["skill-creator"]
+    skill_root = BUILTIN_SKILLS_PATH / descriptor["path"]
+    skill_md = (skill_root / "SKILL.md").read_text(encoding="utf-8")
+    dockerfile = (REPO_ROOT / "deploy" / "sandbox-runtime" / "Dockerfile").read_text(
+        encoding="utf-8"
+    )
+
+    assert descriptor == {
+        "id": "skill-creator",
+        "name": "Skill Creator",
+        "version": "1.0.0",
+        "path": "skill-creator",
+    }
+    assert (skill_root / "LICENSE.txt").is_file()
+    for directory in ("agents", "assets", "eval-viewer", "references", "scripts"):
+        assert (skill_root / directory).is_dir()
+    assert "/workspace/skills/<skill-id>" in skill_md
+    assert "cocola-sandbox skill validate" in skill_md
+    assert "cocola-sandbox skill publish" in skill_md
+    assert "/workspace/outputs" in skill_md
+    assert "ARG LARK_CLI_VERSION=1.0.77" in dockerfile
+    assert '"@larksuite/cli@${LARK_CLI_VERSION}"' in dockerfile
+    assert "lark-cli --version" in dockerfile
 
 
 def test_builtin_artifact_skill_matches_the_guest_cli_contract():

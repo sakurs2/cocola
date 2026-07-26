@@ -32,6 +32,7 @@ import (
 	"github.com/cocola-project/cocola/apps/gateway/internal/objstore"
 	"github.com/cocola-project/cocola/apps/gateway/internal/project"
 	"github.com/cocola-project/cocola/apps/gateway/internal/sandboxmgr"
+	"github.com/cocola-project/cocola/apps/gateway/internal/skillbroker"
 	traceevents "github.com/cocola-project/cocola/apps/gateway/internal/traceevent"
 	"github.com/cocola-project/cocola/apps/gateway/internal/wiki"
 	"github.com/cocola-project/cocola/packages/go-common/logger"
@@ -117,6 +118,9 @@ type API struct {
 	terminalLeases   *terminalLeaseRegistry
 	memory           *memory.Service
 	projects         *project.Service
+	skillBroker      *skillbroker.Broker
+	skillAdminURL    string
+	skillHTTPClient  *http.Client
 	feishu           *feishuconnector.Service
 	wiki             wiki.Store
 	wikiMaxFileBytes int64
@@ -200,6 +204,19 @@ func (a *API) WithMemory(service *memory.Service) *API { a.memory = service; ret
 // WithProjects installs the high-level GitHub Project module. GitHub remains
 // unreachable from every other gateway package.
 func (a *API) WithProjects(service *project.Service) *API { a.projects = service; return a }
+
+// WithSkillBroker enables run-scoped Personal Skill validation and publishing.
+// The Gateway never exposes the Admin API address or a user/admin token to the
+// Sandbox; it exchanges the run capability for a five-minute user token.
+func (a *API) WithSkillBroker(broker *skillbroker.Broker, adminURL string, client *http.Client) *API {
+	a.skillBroker = broker
+	a.skillAdminURL = strings.TrimRight(strings.TrimSpace(adminURL), "/")
+	if client == nil {
+		client = &http.Client{Timeout: 90 * time.Second}
+	}
+	a.skillHTTPClient = client
+	return a
+}
 
 // WithFeishu installs the user-scoped Feishu connector API.
 func (a *API) WithFeishu(service *feishuconnector.Service) *API {
@@ -420,6 +437,10 @@ func (a *API) Handler() http.Handler {
 		http.HandlerFunc(a.revokeGitHubTokenLease)))
 	mux.Handle("GET /internal/scm/approvals/{id}/wait", a.instrument("GET /internal/scm/approvals/{id}/wait",
 		http.HandlerFunc(a.waitSCMApproval)))
+	mux.Handle("POST /internal/skills/scan", a.instrument("POST /internal/skills/scan",
+		http.HandlerFunc(a.scanRunSkill)))
+	mux.Handle("POST /internal/skills/import", a.instrument("POST /internal/skills/import",
+		http.HandlerFunc(a.importRunSkill)))
 	mux.Handle("POST /internal/scm/approvals/{id}/decision", a.instrument("POST /internal/scm/approvals/{id}/decision",
 		a.verifier.Middleware(writeErr)(http.HandlerFunc(a.decideSCMApproval))))
 	// Preview Proxy: reverse-proxy a user-launched in-sandbox dev server. The

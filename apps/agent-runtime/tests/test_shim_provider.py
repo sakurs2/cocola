@@ -41,6 +41,22 @@ def test_model_env_formats_traceparent_as_an_http_header():
     assert not env["ANTHROPIC_CUSTOM_HEADERS"].startswith("{")
 
 
+def test_model_env_injects_skill_broker_only_for_current_agent_process():
+    provider = InSandboxShimProvider(StaticSandboxExecutor())
+    env = provider._model_env(
+        AgentOptions(
+            user_id="U1",
+            session_id="S1",
+            skill_credential="run-skill-credential",
+            skill_broker_url="http://gateway:8080",
+        )
+    )
+
+    assert env["COCOLA_SKILL_CREDENTIAL"] == "run-skill-credential"
+    assert env["COCOLA_SKILL_BROKER_URL"] == "http://gateway:8080"
+    assert env["COCOLA_SKILL_PUBLISH_ENABLED"] == "true"
+
+
 async def test_maps_tool_use_turn_and_reassembles_split_line():
     # A realistic shim turn: start (dropped), a text block, a tool_use, a
     # tool_result, then a done carrying the session_id. We deliberately chop the

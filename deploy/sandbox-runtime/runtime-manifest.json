@@ -39,6 +39,10 @@
         "preview": {
           "enabled": true,
           "startup": "on-demand-managed"
+        },
+        "skills": {
+          "enabled": false,
+          "startup": "run-scoped"
         }
       }
     },
@@ -69,6 +73,10 @@
         "preview": {
           "enabled": true,
           "startup": "on-demand-managed"
+        },
+        "skills": {
+          "enabled": false,
+          "startup": "run-scoped"
         }
       }
     }
@@ -117,6 +125,18 @@
       "state_dir": "/session/runtime/cocola/previews",
       "required": false,
       "commands": ["start", "status", "stop", "logs"]
+    },
+    "skills": {
+      "kind": "run-scoped-broker",
+      "workspace_root": "/workspace/skills",
+      "persistent_credential": false,
+      "required": false,
+      "commands": ["validate", "publish"],
+      "limits": {
+        "max_files": 1000,
+        "max_source_bytes": 134217728,
+        "max_archive_bytes": 67108864
+      }
     }
   }
 }

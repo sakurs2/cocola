@@ -469,6 +469,7 @@ dev_up() {
   export COCOLA_ATTACHMENT_INLINE_MAX_BYTES="${COCOLA_ATTACHMENT_INLINE_MAX_BYTES:-16777216}"
   export COCOLA_WIKI_MAX_FILE_BYTES="${COCOLA_WIKI_MAX_FILE_BYTES:-20971520}"
   export COCOLA_SANDBOX_PROJECT_BROKER_URL="${COCOLA_SANDBOX_PROJECT_BROKER_URL:-http://host.docker.internal:$GATEWAY_PORT}"
+  export COCOLA_SANDBOX_SKILL_BROKER_URL="${COCOLA_SANDBOX_SKILL_BROKER_URL:-http://host.docker.internal:$GATEWAY_PORT}"
   # (3) NATIVE sandbox-manager. It is a standalone Go module kept OUT of go.work,
   # so it MUST build/run with GOWORK=off from its own module dir. Talk to the
   # OpenSandbox server over the HOST loopback (host.docker.internal is
@@ -558,6 +559,7 @@ free_port "$AGENT_PORT" agent-runtime
   COCOLA_AGENT_HOST="$AGENT_HOST" COCOLA_AGENT_PORT="$AGENT_PORT" \
   COCOLA_SANDBOX_ADDR="${COCOLA_SANDBOX_ADDR:-}" \
   COCOLA_SANDBOX_PROJECT_BROKER_URL="$COCOLA_SANDBOX_PROJECT_BROKER_URL" \
+  COCOLA_SANDBOX_SKILL_BROKER_URL="$COCOLA_SANDBOX_SKILL_BROKER_URL" \
     $SETSID uv run python -m cocola_agent_runtime
 ) >"$(log_redirect agent-runtime)" 2>&1 &
 PIDS+=("$!")

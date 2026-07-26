@@ -19,6 +19,7 @@
 //	COCOLA_AGENT_RUNTIME_DEFAULT_ID default runtime for new work (default claude-code)
 //	COCOLA_AGENT_RUNTIME_PICKER_ENABLED expose experimental runtime choices (default false)
 //	COCOLA_WIKI_MAX_FILE_BYTES maximum bytes accepted for one Wiki file (default 20MiB)
+//	COCOLA_SKILL_PUBLISH_ENABLED enable run-scoped Personal Skill publishing (default false)
 //
 // Required attachment/session object storage (ADR-0017 P1a):
 //
@@ -51,6 +52,7 @@ import (
 	"github.com/cocola-project/cocola/apps/gateway/internal/objstore"
 	"github.com/cocola-project/cocola/apps/gateway/internal/project"
 	"github.com/cocola-project/cocola/apps/gateway/internal/sandboxmgr"
+	"github.com/cocola-project/cocola/apps/gateway/internal/skillbroker"
 	traceevents "github.com/cocola-project/cocola/apps/gateway/internal/traceevent"
 	"github.com/cocola-project/cocola/apps/gateway/internal/wiki"
 	"github.com/cocola-project/cocola/packages/go-common/config"
@@ -208,6 +210,20 @@ func main() {
 	issuer := token.NewIssuer(secret, issuerName, ttl)
 	api = api.WithSandboxTokenIssuer(issuer, ttl)
 	log.Info("per-user sandbox token issuer enabled (ttl " + ttl.String() + ")")
+	if mustEnvBool(log, "COCOLA_SKILL_PUBLISH_ENABLED", false) {
+		adminURL := strings.TrimSpace(os.Getenv("COCOLA_ADMIN_URL"))
+		if adminURL == "" {
+			log.Fatal("COCOLA_ADMIN_URL is required when COCOLA_SKILL_PUBLISH_ENABLED=true")
+		}
+		broker, brokerErr := skillbroker.New(secret)
+		if brokerErr != nil {
+			log.Fatal("Skill broker configuration failed: " + brokerErr.Error())
+		}
+		api = api.WithSkillBroker(broker, adminURL, nil)
+		log.Info("run-scoped Personal Skill broker enabled")
+	} else {
+		log.Info("run-scoped Personal Skill broker disabled")
+	}
 
 	// Preview Proxy: optionally dial sandbox-manager so the gateway can resolve
 	// a session's in-sandbox dev-server port to a reachable URL and reverse-proxy

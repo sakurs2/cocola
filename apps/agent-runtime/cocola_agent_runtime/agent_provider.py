@@ -61,6 +61,10 @@ class AgentOptions:
     project_repository: str | None = None
     project_broker_url: str | None = None
     project_task_branch: str | None = None
+    # Run-scoped Personal Skill publishing capability. It is passed only to
+    # the current Agent process and never persisted in the Sandbox.
+    skill_credential: str | None = None
+    skill_broker_url: str | None = None
 
 
 @dataclass

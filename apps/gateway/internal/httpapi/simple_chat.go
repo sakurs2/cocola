@@ -895,6 +895,7 @@ func (a *API) executeLiveRun(live *liveRun) {
 	var projectContext *agent.ProjectContext
 	var scmToken string
 	var projectBrokerCredential string
+	var skillBrokerCredential string
 	var projectSetupErr error
 	if live.request.ProjectID != "" {
 		if a.projects == nil {
@@ -929,6 +930,15 @@ func (a *API) executeLiveRun(live *liveRun) {
 			}
 		}
 	}
+	if a.skillBroker != nil && live.request.InteractionMode != chatrun.InteractionModePlan {
+		var err error
+		skillBrokerCredential, err = a.skillBroker.Issue(
+			live.identity.TenantID, live.identity.UserID, live.request.SessionID, live.run.ID,
+		)
+		if err != nil {
+			projectSetupErr = err
+		}
+	}
 	attachments := a.prepareRunAttachments(live.ctx, live.request)
 	memoryContext := ""
 	if a.memory != nil && chatTypeForConversation(live.request) != "scheduled_task" {
@@ -959,7 +969,8 @@ func (a *API) executeLiveRun(live *liveRun) {
 		SandboxAuthToken: a.mintSandboxToken(live.identity), Attachments: attachments,
 		WikiReferences: live.request.WikiReferences,
 		SCMToken:       scmToken, ProjectBrokerCredential: projectBrokerCredential,
-		Project: projectContext,
+		SkillBrokerCredential: skillBrokerCredential,
+		Project:               projectContext,
 	}
 	coalescer := memoryEventCoalescer{run: live, window: a.runs.mergeWindow}
 	var sawError bool

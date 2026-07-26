@@ -79,6 +79,7 @@ type Query struct {
 	SandboxAuthToken        string
 	SCMToken                string
 	ProjectBrokerCredential string
+	SkillBrokerCredential   string
 	Project                 *ProjectContext
 	Attachments             []Attachment
 	WikiReferences          []WikiReference
@@ -283,6 +284,10 @@ func (c *Client) Stream(ctx context.Context, q Query, onEvent func(Event) error)
 	if strings.TrimSpace(q.ProjectBrokerCredential) != "" {
 		ctx = metadata.AppendToOutgoingContext(ctx, "x-cocola-project-broker-credential",
 			strings.TrimSpace(q.ProjectBrokerCredential))
+	}
+	if strings.TrimSpace(q.SkillBrokerCredential) != "" {
+		ctx = metadata.AppendToOutgoingContext(ctx, "x-cocola-skill-broker-credential",
+			strings.TrimSpace(q.SkillBrokerCredential))
 	}
 	if strings.TrimSpace(q.Source) != "" {
 		ctx = metadata.AppendToOutgoingContext(ctx, "x-cocola-run-source", strings.TrimSpace(q.Source))

@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import argparse
+import io
 import json
 import mimetypes
 import os
@@ -16,6 +17,7 @@ import sys
 import tempfile
 import time
 import uuid
+import zipfile
 from contextlib import suppress
 from pathlib import Path
 from typing import Any
@@ -30,6 +32,16 @@ TRUE_VALUES = {"1", "true", "yes", "on"}
 FALSE_VALUES = {"0", "false", "no", "off"}
 PREVIEW_SECRET_ENV_MARKERS = ("TOKEN", "API_KEY", "SECRET", "PASSWORD", "CREDENTIAL")
 PREVIEW_LOG_MAX_BYTES = 1024 * 1024
+SKILL_IGNORED_NAMES = {".git", "node_modules", "__pycache__", ".DS_Store"}
+SKILL_MAX_FILES = 1000
+SKILL_MAX_SOURCE_BYTES = 128 * 1024 * 1024
+SKILL_MAX_ARCHIVE_BYTES = 64 * 1024 * 1024
+
+
+class SkillCommandError(RuntimeError):
+    def __init__(self, code: str, message: str):
+        super().__init__(message)
+        self.code = code
 
 
 def load_manifest() -> dict[str, Any]:
@@ -84,6 +96,169 @@ def github_enabled(manifest: dict[str, Any], profile: str) -> bool:
 def preview_enabled(manifest: dict[str, Any], profile: str) -> bool:
     profile_capability = manifest["profiles"][profile].get("capabilities", {}).get("preview", {})
     return bool(profile_capability.get("enabled", False))
+
+
+def skill_publish_enabled(manifest: dict[str, Any], profile: str) -> bool:
+    if os.environ.get("COCOLA_SKILL_PUBLISH_ENABLED", ""):
+        return parse_bool(os.environ["COCOLA_SKILL_PUBLISH_ENABLED"])
+    profile_capability = manifest["profiles"][profile].get("capabilities", {}).get("skills", {})
+    return bool(profile_capability.get("enabled", False))
+
+
+def _skill_workspace(manifest: dict[str, Any]) -> Path:
+    value = str(manifest.get("capabilities", {}).get("skills", {}).get("workspace_root", ""))
+    if not value:
+        raise SkillCommandError("INVALID_SKILL_PATH", "Skill workspace is not configured")
+    return Path(value).resolve()
+
+
+def _normalized_skill_archive(manifest: dict[str, Any], source_value: str) -> bytes:
+    workspace = _skill_workspace(manifest)
+    source = Path(source_value)
+    try:
+        if source.is_symlink():
+            raise SkillCommandError("INVALID_SKILL_PATH", "Skill path cannot be a symbolic link")
+        resolved = source.resolve(strict=True)
+        relative = resolved.relative_to(workspace)
+    except SkillCommandError:
+        raise
+    except (OSError, ValueError) as error:
+        raise SkillCommandError(
+            "INVALID_SKILL_PATH", "Skill path must exist under /workspace/skills"
+        ) from error
+    if not resolved.is_dir() or len(relative.parts) != 1:
+        raise SkillCommandError(
+            "INVALID_SKILL_PATH", "Skill path must be /workspace/skills/<skill-id>"
+        )
+
+    files: list[tuple[Path, str, int]] = []
+    source_bytes = 0
+
+    def visit(directory: Path, prefix: Path) -> None:
+        nonlocal source_bytes
+        try:
+            entries = sorted(directory.iterdir(), key=lambda item: item.name)
+        except OSError as error:
+            raise SkillCommandError("SKILL_INVALID", "Skill directory cannot be read") from error
+        for entry in entries:
+            if entry.name in SKILL_IGNORED_NAMES:
+                continue
+            relative_path = prefix / entry.name
+            try:
+                mode = entry.lstat().st_mode
+            except OSError as error:
+                raise SkillCommandError(
+                    "SKILL_INVALID", f"Cannot inspect {relative_path}"
+                ) from error
+            if stat.S_ISLNK(mode):
+                raise SkillCommandError(
+                    "SKILL_INVALID", f"Symbolic links are not allowed: {relative_path}"
+                )
+            if stat.S_ISDIR(mode):
+                visit(entry, relative_path)
+                continue
+            if not stat.S_ISREG(mode):
+                raise SkillCommandError(
+                    "SKILL_INVALID", f"Special files are not allowed: {relative_path}"
+                )
+            if relative_path.as_posix() != "SKILL.md" and entry.name == "SKILL.md":
+                raise SkillCommandError(
+                    "SKILL_INVALID", f"Nested SKILL.md is not allowed: {relative_path}"
+                )
+            size = entry.stat().st_size
+            files.append((entry, relative_path.as_posix(), size))
+            source_bytes += size
+            if len(files) > SKILL_MAX_FILES:
+                raise SkillCommandError(
+                    "SKILL_INVALID", f"Skill exceeds the {SKILL_MAX_FILES} file limit"
+                )
+            if source_bytes > SKILL_MAX_SOURCE_BYTES:
+                raise SkillCommandError(
+                    "SKILL_INVALID", "Skill source exceeds the 128 MiB limit"
+                )
+
+    visit(resolved, Path())
+    if not any(relative_path == "SKILL.md" for _, relative_path, _ in files):
+        raise SkillCommandError("SKILL_INVALID", "Skill root must contain SKILL.md")
+
+    output = io.BytesIO()
+    actual_source_bytes = 0
+    with zipfile.ZipFile(output, "w", compression=zipfile.ZIP_DEFLATED) as archive:
+        for path, relative_path, _ in files:
+            info = zipfile.ZipInfo(relative_path, date_time=(1980, 1, 1, 0, 0, 0))
+            info.compress_type = zipfile.ZIP_DEFLATED
+            info.external_attr = 0o100644 << 16
+            try:
+                with path.open("rb") as handle:
+                    data = handle.read(SKILL_MAX_SOURCE_BYTES + 1)
+            except OSError as error:
+                raise SkillCommandError(
+                    "SKILL_INVALID", f"Cannot read {relative_path}"
+                ) from error
+            actual_source_bytes += len(data)
+            if actual_source_bytes > SKILL_MAX_SOURCE_BYTES:
+                raise SkillCommandError(
+                    "SKILL_INVALID", "Skill source exceeds the 128 MiB limit"
+                )
+            archive.writestr(info, data)
+    payload = output.getvalue()
+    if len(payload) > SKILL_MAX_ARCHIVE_BYTES:
+        raise SkillCommandError("SKILL_INVALID", "Skill ZIP exceeds the 64 MiB limit")
+    return payload
+
+
+def _skill_broker_request(action: str, archive: bytes) -> dict[str, Any]:
+    base_url = os.environ.get("COCOLA_SKILL_BROKER_URL", "").strip().rstrip("/")
+    credential = os.environ.get("COCOLA_SKILL_CREDENTIAL", "").strip()
+    if not base_url or not credential:
+        raise SkillCommandError(
+            "SKILL_BROKER_UNAVAILABLE",
+            "Skill Broker is unavailable outside an authenticated Agent run",
+        )
+    boundary = "----cocola-skill-" + uuid.uuid4().hex
+    body = (
+        f"--{boundary}\r\n"
+        'Content-Disposition: form-data; name="file"; filename="skill.zip"\r\n'
+        "Content-Type: application/zip\r\n\r\n"
+    ).encode() + archive + f"\r\n--{boundary}--\r\n".encode()
+    request = Request(base_url + f"/internal/skills/{action}", data=body, method="POST")
+    request.add_header("Authorization", "Bearer " + credential)
+    request.add_header("Accept", "application/json")
+    request.add_header("Content-Type", f"multipart/form-data; boundary={boundary}")
+    try:
+        with urlopen(request, timeout=90) as response:
+            return json.loads(response.read() or b"{}")
+    except HTTPError as error:
+        payload: dict[str, Any] = {}
+        with suppress(ValueError):
+            payload = json.loads(error.read() or b"{}")
+        message = payload.get("error", {}).get("message") or f"Skill Broker failed ({error.code})"
+        code = "SKILL_INVALID" if action == "scan" and error.code < 500 else "SKILL_PUBLISH_FAILED"
+        if error.code >= 500:
+            code = "SKILL_BROKER_UNAVAILABLE"
+        raise SkillCommandError(code, message) from error
+    except (URLError, TimeoutError) as error:
+        raise SkillCommandError(
+            "SKILL_BROKER_UNAVAILABLE", "Skill Broker could not be reached"
+        ) from error
+
+
+def run_skill_command(
+    manifest: dict[str, Any], profile: str, action: str, source: str
+) -> dict[str, Any]:
+    if not skill_publish_enabled(manifest, profile):
+        raise SkillCommandError("SKILL_BROKER_UNAVAILABLE", "Skill publishing is disabled")
+    payload = _skill_broker_request(action, _normalized_skill_archive(manifest, source))
+    skills = payload.get("skills")
+    if not isinstance(skills, list) or len(skills) != 1 or not isinstance(skills[0], dict):
+        code = "SKILL_INVALID" if action == "scan" else "SKILL_PUBLISH_FAILED"
+        raise SkillCommandError(code, "Skill Broker returned an invalid catalog response")
+    if action == "scan" and skills[0].get("valid") is not True:
+        errors = skills[0].get("errors")
+        detail = "; ".join(str(item) for item in errors) if isinstance(errors, list) else ""
+        raise SkillCommandError("SKILL_INVALID", detail or "Skill failed catalog validation")
+    key = "candidate" if action == "scan" else "skill"
+    return {"ok": True, key: skills[0]}
 
 
 def _broker_request(
@@ -983,6 +1158,13 @@ def build_parser() -> argparse.ArgumentParser:
         command.add_argument("--permissions", action="append", default=[])
         command.add_argument("arguments", nargs=argparse.REMAINDER)
 
+    skill = commands.add_parser("skill", help="validate or publish a Personal Skill")
+    skill_commands = skill.add_subparsers(dest="skill_command")
+    for command_name in ("validate", "publish"):
+        command = skill_commands.add_parser(command_name)
+        command.add_argument("path")
+        command.add_argument("--json", action="store_true")
+
     return parser
 
 
@@ -1055,9 +1237,25 @@ def main(argv: list[str] | None = None) -> int:
                 args.permissions,
                 str(working_directory),
             )
+        elif args.command == "skill" and args.skill_command in {"validate", "publish"}:
+            action = "scan" if args.skill_command == "validate" else "import"
+            emit(run_skill_command(manifest, profile, action, args.path), args.json)
         else:
             parser.print_help()
             return 2
+    except SkillCommandError as error:
+        if getattr(args, "json", False):
+            print(
+                json.dumps(
+                    {"ok": False, "error": {"code": error.code, "message": str(error)}},
+                    ensure_ascii=False,
+                    sort_keys=True,
+                ),
+                file=sys.stderr,
+            )
+        else:
+            print(f"cocola-sandbox: {error.code}: {error}", file=sys.stderr)
+        return 1
     except (OSError, RuntimeError, ValueError, KeyError, json.JSONDecodeError) as error:
         print(f"cocola-sandbox: {error}", file=sys.stderr)
         return 1

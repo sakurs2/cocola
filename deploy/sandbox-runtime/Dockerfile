@@ -57,6 +57,7 @@ ARG PYTHON_PPTX_SPEC=python-pptx==1.0.2
 # code-server-<ver>-linux-<arch>.tar.gz under ./offline/ (see the install step).
 ARG CODE_SERVER_VERSION=4.117.0
 ARG GH_VERSION=2.94.0
+ARG LARK_CLI_VERSION=1.0.77
 
 FROM ${OPENSANDBOX_BASE}
 
@@ -69,6 +70,7 @@ ARG OPENPYXL_SPEC
 ARG PYTHON_PPTX_SPEC
 ARG CODE_SERVER_VERSION
 ARG GH_VERSION
+ARG LARK_CLI_VERSION
 
 ENV DEBIAN_FRONTEND=noninteractive \
     LANG=C.UTF-8 \
@@ -100,7 +102,8 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     && test -n "$py3" \
     && ln -sf "$py3" /usr/local/bin/python \
     && npm config set registry "${NPM_REGISTRY}" \
-    && npm install -g pnpm@10 yarn playwright \
+    && npm install -g pnpm@10 yarn playwright "@larksuite/cli@${LARK_CLI_VERSION}" \
+    && lark-cli --version \
     && PLAYWRIGHT_BROWSERS_PATH=/ms-playwright playwright install --with-deps chromium \
     && chromium_path="$(find /ms-playwright -type f \( -path '*/chrome-linux/chrome' -o -path '*/chrome-linux64/chrome' \) | head -n1)" \
     && test -n "$chromium_path" \

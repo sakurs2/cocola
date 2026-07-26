@@ -60,6 +60,8 @@ func TestWriteInstallationCreatesPrivateConfigAndStableState(t *testing.T) {
 		`COCOLA_SCM_SECRET_KEY_FILE=""`,
 		`COCOLA_FEATURE_LOCAL_PROJECTS="true"`,
 		`COCOLA_SANDBOX_PROJECT_BROKER_URL="http://host.docker.internal:8080"`,
+		`COCOLA_SANDBOX_SKILL_BROKER_URL="http://host.docker.internal:8080"`,
+		`COCOLA_SKILL_PUBLISH_ENABLED="false"`,
 		`COCOLA_PROJECT_MAX_REPOSITORY_MB="512"`,
 	} {
 		if !strings.Contains(text, expected) {

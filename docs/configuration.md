@@ -47,7 +47,7 @@ Execution、Scheduler、Session 默认容量和 Trace 的同名环境变量只�
 | 初始管理员       | `COCOLA_BOOTSTRAP_ADMIN_USERNAME`、email、password/password hash、reset                                                                    |
 | Postgres/Redis   | `COCOLA_PG_DSN`、`COCOLA_REDIS_ADDR`、`COCOLA_REDIS_PASSWORD`、`COCOLA_REDIS_DB`、`COCOLA_REDIS_POOL_SIZE`                                 |
 | MinIO            | `COCOLA_MINIO_ENDPOINT`、access/secret key、bucket、TLS、附件阈值                                                                          |
-| Agent/Run        | `COCOLA_AGENT_RUNTIME_DEFAULT_ID`、`COCOLA_AGENT_RUNTIME_PICKER_ENABLED`、max turns、tool timeout、token TTL、gRPC/message/artifact limits |
+| Agent/Run        | `COCOLA_AGENT_RUNTIME_DEFAULT_ID`、`COCOLA_AGENT_RUNTIME_PICKER_ENABLED`、`COCOLA_SKILL_PUBLISH_ENABLED`、max turns、tool timeout、token TTL、gRPC/message/artifact limits |
 | Wiki             | `COCOLA_WIKI_MAX_FILE_BYTES`（单文件大小；默认 20 MiB，不设累计容量或文件数配额）                                                          |
 | Sandbox          | `COCOLA_SANDBOX_ADDR`、image、Profile、Code Server、lease/reaper/heartbeat、LLM URL/model、egress                                          |
 | Session Storage  | `COCOLA_CLUSTER_MANAGER_MODE`、`COCOLA_SESSION_STORAGE_CLASS`、`COCOLA_SESSION_VOLUME_SIZE`、`COCOLA_SESSION_STORAGE_ROOT`                 |
@@ -112,6 +112,12 @@ Agent 调用受 `COCOLA_BROWSER_ENABLED` 控制的 guest CLI，不会绕过 Prof
 Artifact Skill 说明 `/workspace/outputs` 发布契约和隔离 HTML 预览边界。Structured
 Output Skill 说明 Claude Code Execute Run 可选的 Summary、Table、List 和 Metrics
 展示工具；显式选择且声明 Result Contract 的业务 Skill 仍优先，并保持结果必交语义。
+
+`COCOLA_SKILL_PUBLISH_ENABLED` 默认 `false`。开启时 Gateway 还要求
+`COCOLA_ADMIN_URL`，Agent Runtime 要求配置 Sandbox 可访问的
+`COCOLA_SANDBOX_SKILL_BROKER_URL`。Gateway 只向正在运行的 Execute Run 签发 Personal
+Skill capability；Sandbox 不获得 Admin Key、Admin URL 或用户 Web Token。新发布 Skill
+从下一轮 Run 开始通过现有 effective catalog 与原子 reconcile 生效。
 
 ### 热加载边界复核
 

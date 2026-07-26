@@ -224,7 +224,7 @@ document/media outputs without installing dependencies at sandbox start:
   `procps`, `psmisc`, `unzip`, `zip`, `tar`, `gzip`, `zstd`.
 - Build helpers: `make`, `build-essential`, `pkg-config`, `sqlite3`.
 - Node/web: `pnpm`, `yarn`, global `playwright`, Playwright-managed
-  `chromium`.
+  `chromium`, and `lark-cli` from exact package version `@larksuite/cli@1.0.77`.
 - Documents/media: `poppler-utils`, `imagemagick`, `librsvg2-bin`.
 - Fonts: Noto core, CJK, and color emoji fonts.
 
@@ -265,10 +265,18 @@ links to immutable image assets. Secrets, other rootfs files and the rest of
 `$HOME` are never copied into the Session Volume.
 
 Every start also guarantees `/workspace/outputs`,
-`/workspace/outputs/browser`, `/workspace/uploads`, and `/workspace/downloads`.
+`/workspace/outputs/browser`, `/workspace/uploads`, `/workspace/downloads`, and
+`/workspace/skills`.
 Project runs create their Git worktree separately at `/workspace/project`.
 These paths are part of the manifest contract and survive Sandbox compute
 reclamation with the workspace.
+
+The image includes the complete `skill-creator@1.0.0` package. During an
+authorized Execute Run, Agent-created Skills stay under
+`/workspace/skills/<skill-id>` and use `cocola-sandbox skill validate/publish`.
+The CLI normalizes and bounds the archive locally, while the Gateway Skill
+Broker delegates authoritative validation and Personal Skill import to Admin.
+The image does not contain Lark credentials or official Lark Agent Skills.
 
 Destroying a sandbox preserves the volume. A later run is scheduled back to
 the volume's node and mounts the same claim; no MinIO checkpoint is involved.

@@ -402,6 +402,38 @@ async def test_query_streams_mapped_events():
     assert ctx.written[0].data["text"] == "hello"
 
 
+async def test_query_forwards_skill_capability_and_allows_only_broker_host(monkeypatch):
+    class RecordingBinder(StaticSandboxBinder):
+        def __init__(self):
+            super().__init__()
+            self.egress = None
+            self.env = None
+
+        async def acquire(self, **kwargs):
+            self.egress = kwargs.get("additional_egress_allowlist")
+            self.env = kwargs.get("env")
+            return await super().acquire(**kwargs)
+
+    monkeypatch.setenv("COCOLA_SANDBOX_SKILL_BROKER_URL", "http://skill-gateway:8080")
+    provider = ListProvider([AgentEvent(kind="done", data={})])
+    binder = RecordingBinder()
+    context = FakeContext(
+        (
+            SimpleNamespace(
+                key="x-cocola-skill-broker-credential",
+                value="run-skill-credential",
+            ),
+        )
+    )
+
+    await AgentRuntimeServicer(provider, binder=binder).Query(FakeRequest(), context)
+
+    assert binder.egress == ["skill-gateway"]
+    assert "COCOLA_SKILL_CREDENTIAL" not in binder.env
+    assert provider.seen_options.skill_credential == "run-skill-credential"
+    assert provider.seen_options.skill_broker_url == "http://skill-gateway:8080"
+
+
 async def test_query_error_becomes_terminal_event():
     ctx = FakeContext()
     await AgentRuntimeServicer(BoomProvider()).Query(FakeRequest(), ctx)

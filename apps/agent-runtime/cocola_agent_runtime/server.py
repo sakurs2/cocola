@@ -39,6 +39,7 @@ import re
 import shutil
 import tempfile
 import time
+import urllib.parse
 import uuid
 from typing import Any, NamedTuple
 
@@ -118,6 +119,7 @@ MODEL_ROUTE_ID_METADATA_KEY = "x-cocola-model-route-id"
 SANDBOX_TOKEN_METADATA_KEY = "x-cocola-sandbox-token"
 SCM_TOKEN_METADATA_KEY = "x-cocola-scm-token"
 PROJECT_BROKER_CREDENTIAL_METADATA_KEY = "x-cocola-project-broker-credential"
+SKILL_BROKER_CREDENTIAL_METADATA_KEY = "x-cocola-skill-broker-credential"
 TRACEPARENT_METADATA_KEY = "traceparent"
 PRODUCT_TRACEPARENT_METADATA_KEY = "x-cocola-product-traceparent"
 RUN_SOURCE_METADATA_KEY = "x-cocola-run-source"
@@ -786,6 +788,8 @@ class AgentRuntimeServicer(pb_grpc.AgentRuntimeServiceServicer):
         sandbox_token = _metadata_value(context, SANDBOX_TOKEN_METADATA_KEY)
         scm_token = _metadata_value(context, SCM_TOKEN_METADATA_KEY)
         project_broker_credential = _metadata_value(context, PROJECT_BROKER_CREDENTIAL_METADATA_KEY)
+        skill_broker_credential = _metadata_value(context, SKILL_BROKER_CREDENTIAL_METADATA_KEY)
+        skill_broker_url = os.getenv("COCOLA_SANDBOX_SKILL_BROKER_URL", "").strip()
         project_spec: ProjectSpec | None = None
         project_value = getattr(request, "project_context", None)
         if project_value is not None and getattr(project_value, "project_id", ""):
@@ -819,10 +823,21 @@ class AgentRuntimeServicer(pb_grpc.AgentRuntimeServiceServicer):
                     "allow_workspace_reset": bool(getattr(request, "allow_workspace_reset", False)),
                     "env": _acquire_env(model_env, sandbox_token, runtime_id=runtime_id),
                 }
+                additional_egress_allowlist: list[str] = []
                 if project_spec is not None:
-                    acquire_options["additional_egress_allowlist"] = project_egress_hosts(
-                        project_spec,
-                        os.getenv("COCOLA_SANDBOX_PROJECT_BROKER_URL", "").strip(),
+                    additional_egress_allowlist.extend(
+                        project_egress_hosts(
+                            project_spec,
+                            os.getenv("COCOLA_SANDBOX_PROJECT_BROKER_URL", "").strip(),
+                        )
+                    )
+                if interaction_mode != "plan" and skill_broker_credential and skill_broker_url:
+                    skill_broker_host = urllib.parse.urlsplit(skill_broker_url).hostname or ""
+                    if skill_broker_host:
+                        additional_egress_allowlist.append(skill_broker_host)
+                if additional_egress_allowlist:
+                    acquire_options["additional_egress_allowlist"] = list(
+                        dict.fromkeys(additional_egress_allowlist)
                     )
                 box = await self._binder.acquire(**acquire_options)
             except Exception as exc:  # noqa: BLE001 - bind failure -> clean terminal event
@@ -1409,6 +1424,10 @@ class AgentRuntimeServicer(pb_grpc.AgentRuntimeServiceServicer):
             project_repository=project_spec.repository_full_name if project_spec else None,
             project_broker_url=(os.getenv("COCOLA_SANDBOX_PROJECT_BROKER_URL", "").strip() or None),
             project_task_branch=project_spec.task_branch if project_spec else None,
+            skill_credential=(
+                (skill_broker_credential or None) if interaction_mode != "plan" else None
+            ),
+            skill_broker_url=skill_broker_url or None,
         )
         admin_prompt = active_prompt.system_prompt.strip()
         if admin_prompt:

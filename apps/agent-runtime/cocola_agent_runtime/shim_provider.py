@@ -368,6 +368,8 @@ class InSandboxShimProvider:
         project_repository = (options.project_repository or "").strip()
         project_broker_url = (options.project_broker_url or "").strip()
         project_task_branch = (options.project_task_branch or "").strip()
+        skill_credential = (options.skill_credential or "").strip()
+        skill_broker_url = (options.skill_broker_url or "").strip()
         working_directory = (options.working_directory or "/workspace").strip()
         env["COCOLA_AGENT_CWD"] = working_directory
         if project_credential and project_provider:
@@ -377,6 +379,10 @@ class InSandboxShimProvider:
             env["COCOLA_PROJECT_TASK_BRANCH"] = project_task_branch
             if project_broker_url:
                 env["COCOLA_PROJECT_BROKER_URL"] = project_broker_url
+        if skill_credential and skill_broker_url:
+            env["COCOLA_SKILL_CREDENTIAL"] = skill_credential
+            env["COCOLA_SKILL_BROKER_URL"] = skill_broker_url
+            env["COCOLA_SKILL_PUBLISH_ENABLED"] = "true"
         return env
 
     async def query(

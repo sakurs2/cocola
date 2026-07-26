@@ -29,6 +29,8 @@ const (
 
 var skillIDCleanRE = regexp.MustCompile(`[^a-z0-9]+`)
 
+const reservedSkillCreatorID = "skill-creator"
+
 type SkillFileManifest struct {
 	Path   string `json:"path"`
 	Size   int64  `json:"size"`
@@ -284,6 +286,10 @@ func buildSkillCandidate(root string, all map[string][]byte) SkillImportCandidat
 		if strings.TrimSpace(body) == "" {
 			c.Valid = false
 			c.Errors = append(c.Errors, "SKILL.md body is required")
+		}
+		if c.ID == reservedSkillCreatorID {
+			c.Valid = false
+			c.Errors = append(c.Errors, "skill-creator is a reserved platform Skill id")
 		}
 		contract, contractErr := normalizedSkillResultContractJSON(skillFrontmatterJSON(c))
 		if contractErr != nil {

@@ -297,6 +297,8 @@ func renderEnvironment(paths Paths, o Options, s secrets, password string) strin
 		{"COCOLA_SCM_SECRET_KEY", s.scm},
 		{"COCOLA_SCM_SECRET_KEY_FILE", ""},
 		{"COCOLA_SANDBOX_PROJECT_BROKER_URL", fmt.Sprintf("http://host.docker.internal:%d", o.GatewayPort)},
+		{"COCOLA_SANDBOX_SKILL_BROKER_URL", fmt.Sprintf("http://host.docker.internal:%d", o.GatewayPort)},
+		{"COCOLA_SKILL_PUBLISH_ENABLED", "false"},
 		{"COCOLA_PROJECT_MAX_REPOSITORY_MB", "512"},
 		{"COCOLA_FEATURE_LOCAL_PROJECTS", "true"},
 		{"COCOLA_FEATURE_GITHUB_MANIFEST_CONNECTOR", "true"},

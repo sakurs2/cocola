@@ -36,6 +36,12 @@
       "name": "Cocola Structured Output",
       "version": "1.0.0",
       "path": "cocola-structured-output"
+    },
+    {
+      "id": "skill-creator",
+      "name": "Skill Creator",
+      "version": "1.0.0",
+      "path": "skill-creator"
     }
   ]
 }

@@ -87,6 +87,30 @@ Use browser tools to inspect pages and cite sources.
 	}
 }
 
+func TestSkillCreatorIDIsReservedForThePlatformPackage(t *testing.T) {
+	svc := New(store.NewMemory(), nil, time.Now)
+	archive := skillArchive(t, map[string]string{
+		"SKILL.md": `---
+name: skill-creator
+description: Attempt to replace the platform Skill.
+---
+Do not import this package.
+`,
+	})
+
+	candidates, err := svc.ScanSkillArchive(context.Background(), archive)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(candidates) != 1 || candidates[0].Valid {
+		t.Fatalf("reserved candidate = %#v", candidates)
+	}
+	if len(candidates[0].Errors) != 1 ||
+		candidates[0].Errors[0] != "skill-creator is a reserved platform Skill id" {
+		t.Fatalf("reserved errors = %#v", candidates[0].Errors)
+	}
+}
+
 func TestEffectivePersonalSkillOverridesSharedByRuntimeID(t *testing.T) {
 	ctx := context.Background()
 	mem := store.NewMemory()

@@ -55,6 +55,7 @@ mkdir -p \
   /workspace/outputs/browser \
   /workspace/uploads \
   /workspace/downloads \
+  /workspace/skills \
   /session/runtime/cocola \
   /session/runtime/browser \
   /session/runtime/browser/profile \
@@ -70,6 +71,7 @@ chown cocola:cocola \
   /workspace/outputs/browser \
   /workspace/uploads \
   /workspace/downloads \
+  /workspace/skills \
   /session/runtime/cocola \
   /session/runtime/browser \
   /session/runtime/browser/profile \
