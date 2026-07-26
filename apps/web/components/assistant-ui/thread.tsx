@@ -53,6 +53,7 @@ import {
   useContext,
   useEffect,
   useId,
+  useImperativeHandle,
   useMemo,
   useRef,
   useState,
@@ -104,6 +105,17 @@ import {
   isPlanModeCommandAvailable,
   planComposerContext,
 } from "@/lib/plan-mode.mjs";
+import {
+  fileMatchesPromptStarterSlot,
+  firstMissingPromptStarterSlot,
+  layoutPromptStarterSlots,
+  promptStarterSlotMarker,
+  replacePromptStarterSlotValue,
+  restorePromptStarterSlotValue,
+  type PromptStarterFileSlot,
+  type PromptStarterSlotBinding,
+  type PromptStarterSlotBindings,
+} from "@/lib/prompt-starter";
 import { findLatestProgressItems, normalizeProgressItems } from "@/lib/progress-items.mjs";
 import {
   LOCAL_SIMPLE_ICON_PATHS,
@@ -193,19 +205,30 @@ const ScrollToBottom: FC = () => (
   </ThreadPrimitive.ScrollToBottom>
 );
 
-type SuggestionTile = {
+type PromptStarter = {
   icon: typeof BarChart3;
   label: string;
   color: string;
   prompt: string;
+  fileSlots?: readonly PromptStarterFileSlot[];
 };
 
-const SUGGESTIONS: SuggestionTile[] = [
+const SPREADSHEET_FILE_SLOT: PromptStarterFileSlot = {
+  key: "spreadsheet",
+  label: "Choose spreadsheet",
+  accept: [".xlsx", ".csv"],
+  required: true,
+};
+
+const PROMPT_STARTERS: PromptStarter[] = [
   {
     icon: BarChart3,
-    label: "Analyze data",
+    label: "Excel analysis",
     color: "text-green-600",
-    prompt: "Analyze this data and create insights",
+    prompt: `Analyze ${promptStarterSlotMarker(
+      SPREADSHEET_FILE_SLOT,
+    )} and summarize key trends, anomalies, and actionable insights.`,
+    fileSlots: [SPREADSHEET_FILE_SLOT],
   },
   {
     icon: Pencil,
@@ -227,6 +250,14 @@ const SUGGESTIONS: SuggestionTile[] = [
   },
 ];
 
+const EMPTY_PROMPT_SLOT_BINDINGS: PromptStarterSlotBindings = {};
+const EMPTY_PROMPT_FILE_SLOTS: readonly PromptStarterFileSlot[] = [];
+
+type ComposerWikiInputHandle = {
+  focus: () => void;
+  openFileSlot: (slotKey: string) => void;
+};
+
 const RUNTIME_ICONS: Record<string, ModelIconConfig> = {
   "claude-code": { type: "lobe-icons", slug: "claudecode" },
   codex: { type: "lobe-icons", slug: "codex" },
@@ -235,9 +266,51 @@ const RUNTIME_ICONS: Record<string, ModelIconConfig> = {
 const ThreadWelcome: FC = () => {
   // Time-aware greeting resolved after mount so SSR/client markup agree.
   const [greeting, setGreeting] = useState("Welcome back");
+  const composer = useComposerRuntime();
+  const composerIsEmpty = useComposer((state) => state.isEmpty);
+  const [activePromptStarter, setActivePromptStarter] = useState<PromptStarter | null>(null);
+  const [promptSlotBindings, setPromptSlotBindings] = useState<
+    Record<string, PromptStarterSlotBinding | undefined>
+  >({});
+
   useEffect(() => {
     const h = new Date().getHours();
     setGreeting(h < 12 ? "Good morning" : h < 18 ? "Good afternoon" : "Good evening");
+  }, []);
+
+  useEffect(() => {
+    if (!composerIsEmpty) return;
+    setActivePromptStarter(null);
+    setPromptSlotBindings({});
+  }, [composerIsEmpty]);
+
+  const handlePromptStarterClick = useCallback(
+    (starter: PromptStarter) => {
+      setPromptSlotBindings({});
+      composer.setText(starter.prompt);
+      setActivePromptStarter(starter);
+    },
+    [composer],
+  );
+
+  const handlePromptSlotBindingChange = useCallback((binding: PromptStarterSlotBinding) => {
+    setPromptSlotBindings((current) => ({
+      ...current,
+      [binding.slotKey]: binding,
+    }));
+  }, []);
+
+  const handlePromptSlotBindingRemove = useCallback((slotKey: string) => {
+    setPromptSlotBindings((current) => {
+      const next = { ...current };
+      delete next[slotKey];
+      return next;
+    });
+  }, []);
+
+  const handlePromptStarterDetach = useCallback(() => {
+    setActivePromptStarter(null);
+    setPromptSlotBindings({});
   }, []);
 
   return (
@@ -257,21 +330,36 @@ const ThreadWelcome: FC = () => {
           </div>
         </div>
         <div className="mt-7 w-full">
-          <ConversationComposer />
+          <ConversationComposer
+            promptStarter={activePromptStarter}
+            promptSlotBindings={promptSlotBindings}
+            onPromptSlotBindingChange={handlePromptSlotBindingChange}
+            onPromptSlotBindingRemove={handlePromptSlotBindingRemove}
+            onPromptStarterDetach={handlePromptStarterDetach}
+          />
         </div>
 
-        <div className="mt-5 flex w-full flex-wrap justify-center gap-2.5">
-          {SUGGESTIONS.map(({ icon: Icon, label, color, prompt }) => (
-            <ThreadPrimitive.Suggestion
-              key={label}
-              prompt={prompt}
-              send
-              className="cocola-prompt-chip flex items-center gap-2 rounded-full border border-border bg-card px-3.5 py-2 text-[13px] font-medium text-foreground transition-colors hover:bg-accent"
-            >
-              <Icon className={cn("size-4", color)} />
-              {label}
-            </ThreadPrimitive.Suggestion>
-          ))}
+        <div
+          aria-hidden={!composerIsEmpty}
+          className={cn(
+            "mt-5 flex w-full flex-wrap justify-center gap-2.5",
+            !composerIsEmpty && "invisible pointer-events-none",
+          )}
+        >
+          {PROMPT_STARTERS.map((starter) => {
+            const { icon: Icon, label, color } = starter;
+            return (
+              <button
+                key={label}
+                type="button"
+                onClick={() => handlePromptStarterClick(starter)}
+                className="cocola-prompt-chip flex items-center gap-2 rounded-full border border-border bg-card px-3.5 py-2 text-[13px] font-medium text-foreground transition-colors hover:bg-accent"
+              >
+                <Icon className={cn("size-4", color)} />
+                {label}
+              </button>
+            );
+          })}
         </div>
       </motion.div>
     </ThreadPrimitive.Empty>
@@ -281,7 +369,20 @@ const ThreadWelcome: FC = () => {
 export const ConversationComposer: FC<{
   placeholder?: string;
   branchControl?: ReactNode;
-}> = ({ placeholder, branchControl }) => {
+  promptStarter?: PromptStarter | null;
+  promptSlotBindings?: PromptStarterSlotBindings;
+  onPromptSlotBindingChange?: (binding: PromptStarterSlotBinding) => void;
+  onPromptSlotBindingRemove?: (slotKey: string) => void;
+  onPromptStarterDetach?: () => void;
+}> = ({
+  placeholder,
+  branchControl,
+  promptStarter = null,
+  promptSlotBindings = EMPTY_PROMPT_SLOT_BINDINGS,
+  onPromptSlotBindingChange,
+  onPromptSlotBindingRemove,
+  onPromptStarterDetach,
+}) => {
   const {
     selectedModel,
     selectedRuntime,
@@ -326,6 +427,19 @@ export const ConversationComposer: FC<{
   const [skillChipWidth, setSkillChipWidth] = useState(0);
   const noModel = !modelsLoaded || !selectedModel;
   const effectiveBranchControl = branchControl ?? contextualBranchControl;
+  const promptInputRef = useRef<ComposerWikiInputHandle>(null);
+  const composerAttachments = useComposer((state) => state.attachments);
+  const promptFileSlots = promptStarter?.fileSlots ?? EMPTY_PROMPT_FILE_SLOTS;
+  const missingPromptFileSlot = firstMissingPromptStarterSlot(
+    promptFileSlots,
+    promptSlotBindings,
+    (attachmentId) => composerAttachments.some((attachment) => attachment.id === attachmentId),
+  );
+
+  useEffect(() => {
+    if (!promptStarter) return;
+    requestAnimationFrame(() => promptInputRef.current?.focus());
+  }, [promptStarter]);
 
   return (
     <motion.div
@@ -349,6 +463,7 @@ export const ConversationComposer: FC<{
           <div className="relative min-w-0">
             <SelectedSkillChip onWidthChange={setSkillChipWidth} />
             <ComposerWikiInput
+              ref={promptInputRef}
               autoFocus={!noModel}
               disabled={noModel}
               textIndent={
@@ -371,6 +486,11 @@ export const ConversationComposer: FC<{
                           : PLAN_MODE_COPY.initialPlaceholder
                         : placeholder || COMPOSER_SLASH_COPY.defaultPlaceholder
               }
+              promptStarter={promptStarter}
+              promptSlotBindings={promptSlotBindings}
+              onPromptSlotBindingChange={onPromptSlotBindingChange}
+              onPromptSlotBindingRemove={onPromptSlotBindingRemove}
+              onPromptStarterDetach={onPromptStarterDetach}
             />
           </div>
           <ComposerAttachments />
@@ -393,7 +513,14 @@ export const ConversationComposer: FC<{
               ) : null}
               {effectiveBranchControl}
             </div>
-            <ComposerAction />
+            <ComposerAction
+              missingPromptFileSlot={missingPromptFileSlot}
+              onResolveMissingPromptFileSlot={() =>
+                missingPromptFileSlot
+                  ? promptInputRef.current?.openFileSlot(missingPromptFileSlot.key)
+                  : undefined
+              }
+            />
           </div>
         </ComposerPrimitive.Root>
       </ComposerPrimitive.Unstable_TriggerPopoverRoot>
@@ -591,104 +718,352 @@ const ComposerWikiMentionMenu: FC = () => {
   );
 };
 
-const ComposerWikiInput: FC<{
-  autoFocus: boolean;
-  disabled: boolean;
-  placeholder: string;
-  textIndent?: string;
-}> = ({ autoFocus, disabled, placeholder, textIndent }) => {
-  const composer = useComposerRuntime();
-  const text = useComposer((state) => state.text);
-  const attachments = useComposer((state) => state.attachments);
-  const overlayRef = useRef<HTMLDivElement>(null);
-
-  const wikiAttachments = useMemo(
-    () =>
-      attachments.flatMap((attachment, attachmentIndex) => {
-        const reference = wikiReferencesFromAttachments([attachment])[0];
-        return reference ? [{ attachmentIndex, reference }] : [];
-      }),
-    [attachments],
-  );
-  const mentionLayout = useMemo(
-    () =>
-      layoutWikiComposerMentions(
-        text,
-        wikiAttachments.map(({ reference }) => reference),
-      ),
-    [text, wikiAttachments],
-  );
-  const unmatchedAttachmentIndexes = useMemo(() => {
-    const matched = new Set(mentionLayout.matchedReferenceIndexes);
-    return wikiAttachments
-      .filter((_, referenceIndex) => !matched.has(referenceIndex))
-      .map(({ attachmentIndex }) => attachmentIndex);
-  }, [mentionLayout.matchedReferenceIndexes, wikiAttachments]);
-  const hasInlineMentions = mentionLayout.matchedReferenceIndexes.length > 0;
-
-  useEffect(() => {
-    if (unmatchedAttachmentIndexes.length === 0) return;
-    const staleAttachments = unmatchedAttachmentIndexes.map((index) =>
-      composer.getAttachmentByIndex(index),
-    );
-    void Promise.allSettled(staleAttachments.map((attachment) => attachment.remove()));
-  }, [composer, unmatchedAttachmentIndexes]);
-
-  return (
-    <>
-      {hasInlineMentions ? (
-        <ComposerWikiMentionOverlay
-          ref={overlayRef}
-          segments={mentionLayout.segments}
-          textIndent={textIndent}
-        />
-      ) : null}
-      <ComposerPrimitive.Input
-        rows={1}
-        autoFocus={autoFocus}
-        disabled={disabled}
-        style={textIndent ? { textIndent } : undefined}
-        placeholder={placeholder}
-        onScroll={(event) => {
-          if (!overlayRef.current) return;
-          overlayRef.current.scrollTop = event.currentTarget.scrollTop;
-          overlayRef.current.scrollLeft = event.currentTarget.scrollLeft;
-        }}
-        className={cn(
-          "relative z-[1] max-h-40 min-h-12 w-full resize-none border-none bg-transparent px-2 py-2.5 text-[15px] leading-6 outline-none placeholder:text-muted-foreground focus:ring-0 disabled:cursor-not-allowed",
-          hasInlineMentions &&
-            "text-transparent caret-foreground selection:bg-blue-200/60 selection:text-transparent",
-        )}
-      />
-    </>
-  );
+type ComposerInlineTextSegment = ReturnType<
+  typeof layoutWikiComposerMentions
+>["segments"][number] & {
+  promptSlot?: PromptStarterFileSlot;
+  promptSlotBinding?: PromptStarterSlotBinding;
 };
+
+const ComposerWikiInput = forwardRef<
+  ComposerWikiInputHandle,
+  {
+    autoFocus: boolean;
+    disabled: boolean;
+    placeholder: string;
+    textIndent?: string;
+    promptStarter?: PromptStarter | null;
+    promptSlotBindings?: PromptStarterSlotBindings;
+    onPromptSlotBindingChange?: (binding: PromptStarterSlotBinding) => void;
+    onPromptSlotBindingRemove?: (slotKey: string) => void;
+    onPromptStarterDetach?: () => void;
+  }
+>(
+  (
+    {
+      autoFocus,
+      disabled,
+      placeholder,
+      textIndent,
+      promptStarter = null,
+      promptSlotBindings = EMPTY_PROMPT_SLOT_BINDINGS,
+      onPromptSlotBindingChange,
+      onPromptSlotBindingRemove,
+      onPromptStarterDetach,
+    },
+    forwardedRef,
+  ) => {
+    const composer = useComposerRuntime();
+    const text = useComposer((state) => state.text);
+    const attachments = useComposer((state) => state.attachments);
+    const overlayRef = useRef<HTMLDivElement>(null);
+    const inputRef = useRef<HTMLTextAreaElement>(null);
+    const fileInputRef = useRef<HTMLInputElement>(null);
+    const pickerSlotKeyRef = useRef("");
+    const [slotError, setSlotError] = useState("");
+    const promptFileSlots = promptStarter?.fileSlots ?? EMPTY_PROMPT_FILE_SLOTS;
+    const missingPromptFileSlot = firstMissingPromptStarterSlot(
+      promptFileSlots,
+      promptSlotBindings,
+      (attachmentId) => attachments.some((attachment) => attachment.id === attachmentId),
+    );
+
+    const wikiAttachments = useMemo(
+      () =>
+        attachments.flatMap((attachment, attachmentIndex) => {
+          const reference = wikiReferencesFromAttachments([attachment])[0];
+          return reference ? [{ attachmentIndex, reference }] : [];
+        }),
+      [attachments],
+    );
+    const mentionLayout = useMemo(
+      () =>
+        layoutWikiComposerMentions(
+          text,
+          wikiAttachments.map(({ reference }) => reference),
+        ),
+      [text, wikiAttachments],
+    );
+    const unmatchedAttachmentIndexes = useMemo(() => {
+      const matched = new Set(mentionLayout.matchedReferenceIndexes);
+      return wikiAttachments
+        .filter((_, referenceIndex) => !matched.has(referenceIndex))
+        .map(({ attachmentIndex }) => attachmentIndex);
+    }, [mentionLayout.matchedReferenceIndexes, wikiAttachments]);
+    const inlineLayout = useMemo(() => {
+      const matchedSlotKeys = new Set<string>();
+      const segments = mentionLayout.segments.flatMap((segment): ComposerInlineTextSegment[] => {
+        if (segment.reference || promptFileSlots.length === 0) return [segment];
+        const slotLayout = layoutPromptStarterSlots(
+          segment.text,
+          promptFileSlots,
+          promptSlotBindings,
+        );
+        slotLayout.matchedSlotKeys.forEach((key) => matchedSlotKeys.add(key));
+        return slotLayout.segments.map((slotSegment) => ({
+          text: slotSegment.text,
+          promptSlot: slotSegment.slot,
+          promptSlotBinding: slotSegment.binding,
+        }));
+      });
+      return { segments, matchedSlotKeys };
+    }, [mentionLayout.segments, promptFileSlots, promptSlotBindings]);
+    const hasInlineMentions =
+      mentionLayout.matchedReferenceIndexes.length > 0 || inlineLayout.matchedSlotKeys.size > 0;
+
+    const removeAttachmentByID = useCallback(
+      async (attachmentID: string) => {
+        const index = composer
+          .getState()
+          .attachments.findIndex((attachment) => attachment.id === attachmentID);
+        if (index < 0) return;
+        await composer.getAttachmentByIndex(index).remove();
+      },
+      [composer],
+    );
+
+    const openFileSlot = useCallback(
+      (slotKey: string) => {
+        const slot = promptFileSlots.find((candidate) => candidate.key === slotKey);
+        if (!slot || disabled || !fileInputRef.current) return;
+        pickerSlotKeyRef.current = slot.key;
+        fileInputRef.current.accept = slot.accept.join(",");
+        fileInputRef.current.click();
+      },
+      [disabled, promptFileSlots],
+    );
+
+    useImperativeHandle(
+      forwardedRef,
+      () => ({
+        focus: () => inputRef.current?.focus(),
+        openFileSlot,
+      }),
+      [openFileSlot],
+    );
+
+    useEffect(() => {
+      if (unmatchedAttachmentIndexes.length === 0) return;
+      const staleAttachments = unmatchedAttachmentIndexes.map((index) =>
+        composer.getAttachmentByIndex(index),
+      );
+      void Promise.allSettled(staleAttachments.map((attachment) => attachment.remove()));
+    }, [composer, unmatchedAttachmentIndexes]);
+
+    useEffect(() => {
+      if (!promptStarter) return;
+      const attachmentIDs = new Set(attachments.map((attachment) => attachment.id));
+      let restoredText = composer.getState().text;
+      let textChanged = false;
+
+      for (const slot of promptFileSlots) {
+        const binding = promptSlotBindings[slot.key];
+        if (!binding || attachmentIDs.has(binding.attachmentId)) continue;
+        const nextText = restorePromptStarterSlotValue(restoredText, slot, binding);
+        if (nextText === null) {
+          onPromptStarterDetach?.();
+          return;
+        }
+        restoredText = nextText;
+        textChanged = true;
+        onPromptSlotBindingRemove?.(slot.key);
+      }
+
+      if (textChanged) composer.setText(restoredText);
+    }, [
+      attachments,
+      composer,
+      onPromptSlotBindingRemove,
+      onPromptStarterDetach,
+      promptFileSlots,
+      promptSlotBindings,
+      promptStarter,
+    ]);
+
+    useEffect(() => {
+      setSlotError("");
+    }, [promptStarter]);
+
+    const handleFileChange = useCallback(
+      async (event: React.ChangeEvent<HTMLInputElement>) => {
+        const file = event.currentTarget.files?.[0];
+        event.currentTarget.value = "";
+        const slot = promptFileSlots.find(
+          (candidate) => candidate.key === pickerSlotKeyRef.current,
+        );
+        if (!file || !slot) return;
+        if (!fileMatchesPromptStarterSlot(file, slot)) {
+          setSlotError(`Choose a ${slot.accept.join(" or ")} file.`);
+          return;
+        }
+
+        setSlotError("");
+        const previousAttachmentIDs = new Set(
+          composer.getState().attachments.map((attachment) => attachment.id),
+        );
+        try {
+          await composer.addAttachment(file);
+        } catch (error) {
+          setSlotError(error instanceof Error ? error.message : "The file could not be attached.");
+          return;
+        }
+
+        const addedAttachment = [...composer.getState().attachments]
+          .reverse()
+          .find((attachment) => !previousAttachmentIDs.has(attachment.id));
+        if (!addedAttachment) {
+          setSlotError("The file could not be attached.");
+          return;
+        }
+
+        const previousBinding = promptSlotBindings[slot.key];
+        const nextText = replacePromptStarterSlotValue(
+          composer.getState().text,
+          slot,
+          previousBinding,
+          file.name,
+        );
+        if (nextText === null) {
+          await removeAttachmentByID(addedAttachment.id);
+          onPromptStarterDetach?.();
+          return;
+        }
+
+        const binding: PromptStarterSlotBinding = {
+          slotKey: slot.key,
+          attachmentId: addedAttachment.id,
+          filename: file.name.trim().replace(/[\r\n]+/g, " "),
+        };
+        onPromptSlotBindingChange?.(binding);
+        composer.setText(nextText);
+        if (previousBinding?.attachmentId && previousBinding.attachmentId !== addedAttachment.id) {
+          await removeAttachmentByID(previousBinding.attachmentId);
+        }
+        requestAnimationFrame(() => {
+          inputRef.current?.focus();
+        });
+      },
+      [
+        composer,
+        onPromptSlotBindingChange,
+        onPromptStarterDetach,
+        promptFileSlots,
+        promptSlotBindings,
+        removeAttachmentByID,
+      ],
+    );
+
+    return (
+      <>
+        {hasInlineMentions ? (
+          <ComposerWikiMentionOverlay
+            ref={overlayRef}
+            segments={inlineLayout.segments}
+            textIndent={textIndent}
+            onPromptSlotClick={(slot) => openFileSlot(slot.key)}
+          />
+        ) : null}
+        <ComposerPrimitive.Input
+          ref={inputRef}
+          rows={1}
+          autoFocus={autoFocus}
+          disabled={disabled}
+          style={textIndent ? { textIndent } : undefined}
+          placeholder={placeholder}
+          onKeyDown={(event) => {
+            if (
+              event.key === "Enter" &&
+              !event.shiftKey &&
+              !event.nativeEvent.isComposing &&
+              missingPromptFileSlot
+            ) {
+              event.preventDefault();
+              event.stopPropagation();
+              openFileSlot(missingPromptFileSlot.key);
+            }
+          }}
+          onScroll={(event) => {
+            if (!overlayRef.current) return;
+            overlayRef.current.scrollTop = event.currentTarget.scrollTop;
+            overlayRef.current.scrollLeft = event.currentTarget.scrollLeft;
+          }}
+          className={cn(
+            "relative z-[1] max-h-40 min-h-12 w-full resize-none border-none bg-transparent px-2 py-2.5 text-[15px] leading-6 outline-none placeholder:text-muted-foreground focus:ring-0 disabled:cursor-not-allowed",
+            hasInlineMentions &&
+              "text-transparent caret-foreground selection:bg-blue-200/60 selection:text-transparent",
+          )}
+        />
+        <input
+          ref={fileInputRef}
+          type="file"
+          tabIndex={-1}
+          aria-hidden="true"
+          className="hidden"
+          onChange={handleFileChange}
+        />
+        {slotError ? (
+          <p className="px-2 pb-1 text-xs text-destructive" role="alert">
+            {slotError}
+          </p>
+        ) : null}
+      </>
+    );
+  },
+);
+
+ComposerWikiInput.displayName = "ComposerWikiInput";
 
 const ComposerWikiMentionOverlay = forwardRef<
   HTMLDivElement,
   {
-    segments: ReturnType<typeof layoutWikiComposerMentions>["segments"];
+    segments: ComposerInlineTextSegment[];
     textIndent?: string;
+    onPromptSlotClick: (slot: PromptStarterFileSlot) => void;
   }
->(({ segments, textIndent }, ref) => (
+>(({ segments, textIndent, onPromptSlotClick }, ref) => (
   <div
     ref={ref}
-    aria-hidden="true"
     style={textIndent ? { textIndent } : undefined}
-    className="pointer-events-none absolute inset-0 z-0 max-h-40 min-h-12 overflow-hidden whitespace-pre-wrap break-words px-2 py-2.5 text-[15px] leading-6 text-foreground"
+    className="pointer-events-none absolute inset-0 z-[2] max-h-40 min-h-12 overflow-hidden whitespace-pre-wrap break-words px-2 py-2.5 text-[15px] leading-6 text-foreground"
   >
-    {segments.map((segment, index) =>
-      segment.reference ? (
+    {segments.map((segment, index) => {
+      if (segment.promptSlot) {
+        return (
+          <button
+            key={`prompt-slot-${segment.promptSlot.key}-${index}`}
+            type="button"
+            tabIndex={-1}
+            aria-label={
+              segment.promptSlotBinding
+                ? `Replace ${segment.promptSlotBinding.filename}`
+                : segment.promptSlot.label
+            }
+            className={cn(
+              "pointer-events-auto cursor-pointer rounded-[4px] shadow-[0_0_0_1px_rgba(37,99,235,0.2)] [box-decoration-break:clone]",
+              segment.promptSlotBinding
+                ? "bg-emerald-100 text-emerald-700"
+                : "bg-blue-100 text-blue-700",
+            )}
+            onClick={() => onPromptSlotClick(segment.promptSlot!)}
+          >
+            {segment.text}
+          </button>
+        );
+      }
+      return segment.reference ? (
         <span
           key={`${segment.reference.nodeId}-${index}`}
+          aria-hidden="true"
           className="rounded-[4px] bg-blue-100 text-blue-700 shadow-[0_0_0_1px_rgba(37,99,235,0.18)] [box-decoration-break:clone]"
         >
           {segment.text}
         </span>
       ) : (
-        <Fragment key={index}>{segment.text}</Fragment>
-      ),
-    )}
+        <span key={index} aria-hidden="true">
+          {segment.text}
+        </span>
+      );
+    })}
   </div>
 ));
 
@@ -1212,23 +1587,41 @@ const ComposerAttachmentChip: FC = () => {
   );
 };
 
-const ComposerAction: FC = () => {
+const ComposerAction: FC<{
+  missingPromptFileSlot?: PromptStarterFileSlot;
+  onResolveMissingPromptFileSlot?: () => void;
+}> = ({ missingPromptFileSlot, onResolveMissingPromptFileSlot }) => {
   const { selectedModel, modelsLoaded } = useCocola();
   const noModel = !modelsLoaded || !selectedModel;
 
   return (
     <>
       <ThreadPrimitive.If running={false}>
-        <ComposerPrimitive.Send asChild>
+        {missingPromptFileSlot ? (
           <TooltipIconButton
-            tooltip={noModel ? "No model configured" : "Send"}
+            tooltip={
+              noModel ? "No model configured" : `${missingPromptFileSlot.label} before sending`
+            }
             variant="default"
+            type="button"
             disabled={noModel}
+            onClick={onResolveMissingPromptFileSlot}
             className="cocola-send-btn my-1 size-9 rounded-full p-2"
           >
             <ArrowUpIcon className="h-4 w-4" />
           </TooltipIconButton>
-        </ComposerPrimitive.Send>
+        ) : (
+          <ComposerPrimitive.Send asChild>
+            <TooltipIconButton
+              tooltip={noModel ? "No model configured" : "Send"}
+              variant="default"
+              disabled={noModel}
+              className="cocola-send-btn my-1 size-9 rounded-full p-2"
+            >
+              <ArrowUpIcon className="h-4 w-4" />
+            </TooltipIconButton>
+          </ComposerPrimitive.Send>
+        )}
       </ThreadPrimitive.If>
       <ThreadPrimitive.If running>
         <ComposerPrimitive.Cancel asChild>

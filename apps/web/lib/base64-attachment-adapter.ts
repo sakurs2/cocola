@@ -32,8 +32,8 @@ function resolveMaxBytes(): number {
 }
 const MAX_BYTES = resolveMaxBytes();
 
-// Text / code / common images. Kept permissive but explicit; binary blobs are
-// rejected at add() time in P0.
+// Text / code / common images, plus the spreadsheet format used by the Excel
+// analysis Prompt Starter. Kept permissive but explicit.
 const ACCEPT = [
   "text/*",
   "image/*",
@@ -47,6 +47,7 @@ const ACCEPT = [
   ".json",
   ".csv",
   ".tsv",
+  ".xlsx",
   ".yaml",
   ".yml",
   ".toml",
@@ -92,7 +93,7 @@ export class Base64AttachmentAdapter implements AttachmentAdapter {
       );
     }
     return {
-      id: file.name,
+      id: crypto.randomUUID(),
       type: file.type.startsWith("image/") ? "image" : "file",
       name: file.name,
       contentType: file.type,
