@@ -2,6 +2,8 @@
 
 import { ExternalLink, Loader2, RefreshCw, ShieldCheck, Trash2 } from "lucide-react";
 import { useCallback, useEffect, useState, type ReactNode } from "react";
+import { FeishuConnectorCard } from "@/components/connectors/feishu-connector-card";
+import { connectorResponseError } from "@/lib/connector-response-error.mjs";
 
 type GitHubConnection = {
   enabled: boolean;
@@ -10,19 +12,26 @@ type GitHubConnection = {
   installation_url?: string;
 };
 
+type ConnectionLoadState = "checking" | "ready" | "failed";
+
 export default function ConnectorsPage() {
   const [connection, setConnection] = useState<GitHubConnection | null>(null);
+  const [loadState, setLoadState] = useState<ConnectionLoadState>("checking");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
+  const displayState = githubConnectionState(connection, loadState);
 
   const load = useCallback(async () => {
+    setLoadState("checking");
     setError("");
     try {
       const response = await fetch("/api/connectors/github", { cache: "no-store" });
-      if (!response.ok) throw new Error(await responseError(response));
+      if (!response.ok) throw new Error(await connectorResponseError(response));
       setConnection((await response.json()) as GitHubConnection);
+      setLoadState("ready");
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : String(cause));
+      setLoadState("failed");
     }
   }, []);
 
@@ -39,7 +48,7 @@ export default function ConnectorsPage() {
         headers: { "content-type": "application/json" },
         body: JSON.stringify({ return_to: "/connectors" }),
       });
-      if (!response.ok) throw new Error(await responseError(response));
+      if (!response.ok) throw new Error(await connectorResponseError(response));
       const result = (await response.json()) as {
         registration_url?: string;
         state?: string;
@@ -73,7 +82,7 @@ export default function ConnectorsPage() {
     setError("");
     try {
       const response = await fetch("/api/connectors/github", { method: "DELETE" });
-      if (!response.ok) throw new Error(await responseError(response));
+      if (!response.ok) throw new Error(await connectorResponseError(response));
       await load();
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : String(cause));
@@ -106,10 +115,24 @@ export default function ConnectorsPage() {
               </div>
             </div>
 
+            <div className="mt-4 flex items-center gap-2 text-xs">
+              <span className={`size-2 rounded-full ${displayState.dot}`} />
+              <span className="font-medium text-foreground">{displayState.label}</span>
+            </div>
+
             <div className="mt-5">
-              {!connection ? (
+              {!connection && loadState === "checking" ? (
                 <ConnectorButton disabled icon={<Loader2 className="size-4 animate-spin" />}>
                   Checking…
+                </ConnectorButton>
+              ) : null}
+              {!connection && loadState === "failed" ? (
+                <ConnectorButton
+                  onClick={() => void load()}
+                  variant="outline"
+                  icon={<RefreshCw className="size-4" />}
+                >
+                  Retry
                 </ConnectorButton>
               ) : null}
               {connection?.status === "disabled" ? (
@@ -193,19 +216,49 @@ export default function ConnectorsPage() {
               ) : null}
             </div>
           </article>
+          <FeishuConnectorCard />
         </section>
 
         {error ? (
-          <p
+          <div
             role="alert"
-            className="mt-5 rounded-xl bg-destructive/10 px-4 py-3 text-sm text-destructive"
+            className="mt-5 flex items-center justify-between gap-3 rounded-xl bg-destructive/10 px-4 py-3 text-sm text-destructive"
           >
-            {error}
-          </p>
+            <span>{error}</span>
+            {connection && loadState === "failed" ? (
+              <button
+                type="button"
+                onClick={() => void load()}
+                className="shrink-0 rounded-lg px-2 py-1 font-medium hover:bg-destructive/10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+              >
+                Retry
+              </button>
+            ) : null}
+          </div>
         ) : null}
       </main>
     </div>
   );
+}
+
+function githubConnectionState(
+  connection: GitHubConnection | null,
+  loadState: ConnectionLoadState,
+) {
+  if (!connection) {
+    return loadState === "failed"
+      ? { label: "Connection check failed", dot: "bg-red-500" }
+      : { label: "Checking", dot: "bg-muted-foreground" };
+  }
+  const states: Record<string, { label: string; dot: string }> = {
+    disabled: { label: "Unavailable", dot: "bg-slate-400" },
+    not_configured: { label: "Not connected", dot: "bg-muted-foreground" },
+    error: { label: "Connection error", dot: "bg-red-500" },
+    installation_required: { label: "Setup required", dot: "bg-amber-500" },
+    ready: { label: "Connected", dot: "bg-emerald-500" },
+    reauthorization_required: { label: "Reconnect required", dot: "bg-amber-500" },
+  };
+  return states[connection.status] ?? { label: "Status unavailable", dot: "bg-muted-foreground" };
 }
 
 function ConnectorButton({
@@ -250,11 +303,4 @@ function GitHubIcon({ className }: { className?: string }) {
       <path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82A7.68 7.68 0 0 1 8 3.75c.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.013 8.013 0 0 0 16 8c0-4.42-3.58-8-8-8Z" />
     </svg>
   );
-}
-
-async function responseError(response: Response) {
-  const payload = (await response.json().catch(() => null)) as {
-    error?: { message?: string };
-  } | null;
-  return payload?.error?.message || `Request failed (${response.status})`;
 }

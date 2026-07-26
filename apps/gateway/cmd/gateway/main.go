@@ -10,6 +10,7 @@
 //	COCOLA_AGENT_ADDR       agent-runtime gRPC addr  (default 127.0.0.1:50061)
 //	COCOLA_AUTH_SECRET      required HS256 secret
 //	COCOLA_AUTH_ISSUER      expected token issuer    (default cocola)
+//	COCOLA_ADMIN_URL        internal admin-api URL   (default http://127.0.0.1:8092)
 //	COCOLA_METRICS_ADDR     observability listen address; empty => disabled
 //	                        (default :9091, serving /metrics and /healthz)
 //	COCOLA_PG_DSN           required Postgres DSN for conversations and chat runs
@@ -42,6 +43,7 @@ import (
 
 	"github.com/cocola-project/cocola/apps/gateway/internal/agent"
 	"github.com/cocola-project/cocola/apps/gateway/internal/auth"
+	feishuconnector "github.com/cocola-project/cocola/apps/gateway/internal/channel/feishu"
 	"github.com/cocola-project/cocola/apps/gateway/internal/chatrun"
 	"github.com/cocola-project/cocola/apps/gateway/internal/convo"
 	"github.com/cocola-project/cocola/apps/gateway/internal/httpapi"
@@ -127,6 +129,12 @@ func productConfigFromEnv(runtimes []agent.Runtime) (httpapi.ProductConfig, erro
 func main() {
 	log := logger.WithService(logger.Must(), "gateway", "gateway")
 	defer func() { _ = log.Sync() }()
+	rootCtx, stopSignals := signal.NotifyContext(
+		context.Background(),
+		syscall.SIGINT,
+		syscall.SIGTERM,
+	)
+	defer stopSignals()
 
 	// Tracing: OFF unless COCOLA_OTEL_ENABLED. When off, only the W3C propagator
 	// is installed (inbound traceparent still honoured for log correlation) and
@@ -247,6 +255,7 @@ func main() {
 	if dsn == "" {
 		log.Fatal("COCOLA_PG_DSN is required")
 	}
+	var feishuManager *feishuconnector.Manager
 	if err := convo.Migrate(context.Background(), dsn); err != nil {
 		log.Fatal("conversation migration failed: " + err.Error())
 	} else if cs, cerr := convo.NewPostgres(context.Background(), dsn); cerr != nil {
@@ -267,8 +276,9 @@ func main() {
 			log.Fatal("project store connect failed: " + projectStoreErr.Error())
 		}
 		defer projectStore.Close()
+		connectorSecretKey := config.SecretFromEnv("COCOLA_SCM_SECRET_KEY")
 		projectService, projectErr := project.New(projectStore, project.Config{
-			SecretKey:               config.SecretFromEnv("COCOLA_SCM_SECRET_KEY"),
+			SecretKey:               connectorSecretKey,
 			PublicOrigins:           strings.TrimSpace(os.Getenv("COCOLA_PUBLIC_ORIGINS")),
 			MaxRepositoryMB:         int64(mustBoundedEnvInt(log, "COCOLA_PROJECT_MAX_REPOSITORY_MB", 512, 1, 8192)),
 			DisableLocalProjects:    !mustEnvBool(log, "COCOLA_FEATURE_LOCAL_PROJECTS", true),
@@ -317,6 +327,52 @@ func main() {
 		defer asyncTraceStore.Close()
 		api = api.WithTraceStore(asyncTraceStore)
 		log.Info("conversation audit and traces enabled (postgres)")
+
+		feishuStore, feishuStoreErr := feishuconnector.NewPostgres(context.Background(), dsn)
+		if feishuStoreErr != nil {
+			log.Fatal("Feishu connector store connect failed: " + feishuStoreErr.Error())
+		}
+		defer feishuStore.Close()
+		feishuService, feishuServiceErr := feishuconnector.NewService(
+			rootCtx,
+			feishuStore,
+			connectorSecretKey,
+			feishuconnector.SDKRegistrar{},
+		)
+		if feishuServiceErr != nil {
+			log.Fatal("Feishu connector configuration failed: " + feishuServiceErr.Error())
+		}
+		feishuService.WithRegistrationAvatarURL(
+			feishuconnector.RegistrationAvatarURL(os.Getenv("COCOLA_PUBLIC_ORIGINS")),
+		)
+		accountAuthorizer, accountAuthorizerErr := feishuconnector.NewAccountAuthorizer(
+			env("COCOLA_ADMIN_URL", "http://127.0.0.1:8092"),
+			issuer,
+			nil,
+		)
+		if accountAuthorizerErr != nil {
+			log.Fatal("Feishu account authorization configuration failed: " + accountAuthorizerErr.Error())
+		}
+		loopbackURL, loopbackErr := feishuconnector.GatewayLoopbackURL(addr)
+		if loopbackErr != nil {
+			log.Fatal("Feishu Gateway loopback configuration failed: " + loopbackErr.Error())
+		}
+		feishuChatClient, feishuChatErr := feishuconnector.NewChatClient(loopbackURL, nil)
+		if feishuChatErr != nil {
+			log.Fatal("Feishu chat client configuration failed: " + feishuChatErr.Error())
+		}
+		feishuManager, err = feishuconnector.NewManager(feishuconnector.ManagerConfig{
+			Store: feishuStore, Service: feishuService,
+			Factory:           feishuconnector.SDKChannelFactory{},
+			AccountAuthorizer: accountAuthorizer, ChatClient: feishuChatClient,
+			Logger:        logger.WithService(log, "gateway", "feishu-connector"),
+			PublicOrigins: strings.TrimSpace(os.Getenv("COCOLA_PUBLIC_ORIGINS")),
+		})
+		if err != nil {
+			log.Fatal("Feishu connector manager configuration failed: " + err.Error())
+		}
+		api = api.WithFeishu(feishuService)
+		log.Info("user-scoped Feishu connector enabled")
 	}
 
 	var metricsServer *http.Server
@@ -332,12 +388,21 @@ func main() {
 
 	log.Info("cocola gateway listening on " + addr + " (agent-runtime: " + agentAddr + ")")
 	srv := &http.Server{Addr: addr, Handler: api.Handler()}
-	rootCtx, stopSignals := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
-	defer stopSignals()
 	serveErr := make(chan error, 1)
 	go func() { serveErr <- srv.ListenAndServe() }()
+	managerDone := make(chan struct{})
+	if feishuManager != nil {
+		go func() {
+			defer close(managerDone)
+			feishuManager.Run(rootCtx)
+		}()
+	} else {
+		close(managerDone)
+	}
 	select {
 	case err := <-serveErr:
+		stopSignals()
+		<-managerDone
 		if err != nil && err != http.ErrServerClosed {
 			log.Fatal("gateway server error: " + err.Error())
 		}
@@ -355,6 +420,7 @@ func main() {
 	if metricsServer != nil {
 		_ = metricsServer.Shutdown(shutdownCtx)
 	}
+	<-managerDone
 }
 
 func mustBoundedEnvInt(

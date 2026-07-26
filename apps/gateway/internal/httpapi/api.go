@@ -25,6 +25,7 @@ import (
 
 	"github.com/cocola-project/cocola/apps/gateway/internal/agent"
 	"github.com/cocola-project/cocola/apps/gateway/internal/auth"
+	feishuconnector "github.com/cocola-project/cocola/apps/gateway/internal/channel/feishu"
 	"github.com/cocola-project/cocola/apps/gateway/internal/chatrun"
 	"github.com/cocola-project/cocola/apps/gateway/internal/convo"
 	"github.com/cocola-project/cocola/apps/gateway/internal/memory"
@@ -116,6 +117,7 @@ type API struct {
 	terminalLeases   *terminalLeaseRegistry
 	memory           *memory.Service
 	projects         *project.Service
+	feishu           *feishuconnector.Service
 	wiki             wiki.Store
 	wikiMaxFileBytes int64
 	brokerWaitMu     sync.Mutex
@@ -198,6 +200,12 @@ func (a *API) WithMemory(service *memory.Service) *API { a.memory = service; ret
 // WithProjects installs the high-level GitHub Project module. GitHub remains
 // unreachable from every other gateway package.
 func (a *API) WithProjects(service *project.Service) *API { a.projects = service; return a }
+
+// WithFeishu installs the user-scoped Feishu connector API.
+func (a *API) WithFeishu(service *feishuconnector.Service) *API {
+	a.feishu = service
+	return a
+}
 
 // WithChatRuns configures the single-Gateway background execution path. It is
 // required for chat; there is deliberately no feature flag or distributed
@@ -355,6 +363,24 @@ func (a *API) Handler() http.Handler {
 		a.verifier.Middleware(writeErr)(http.HandlerFunc(a.githubInstallationComplete))))
 	mux.Handle("DELETE /v1/connectors/github", a.instrument("DELETE /v1/connectors/github",
 		a.verifier.Middleware(writeErr)(http.HandlerFunc(a.githubDisconnect))))
+	mux.Handle("GET /v1/connectors/feishu", a.instrument("GET /v1/connectors/feishu",
+		a.verifier.Middleware(writeErr)(http.HandlerFunc(a.feishuConnection))))
+	mux.Handle("PATCH /v1/connectors/feishu", a.instrument("PATCH /v1/connectors/feishu",
+		a.verifier.Middleware(writeErr)(http.HandlerFunc(a.feishuSettings))))
+	mux.Handle("POST /v1/connectors/feishu/registrations", a.instrument("POST /v1/connectors/feishu/registrations",
+		a.verifier.Middleware(writeErr)(http.HandlerFunc(a.feishuRegistrationStart))))
+	mux.Handle("GET /v1/connectors/feishu/registrations/{id}", a.instrument("GET /v1/connectors/feishu/registrations/{id}",
+		a.verifier.Middleware(writeErr)(http.HandlerFunc(a.feishuRegistration))))
+	mux.Handle("DELETE /v1/connectors/feishu/registrations/{id}", a.instrument("DELETE /v1/connectors/feishu/registrations/{id}",
+		a.verifier.Middleware(writeErr)(http.HandlerFunc(a.feishuRegistrationCancel))))
+	mux.Handle("POST /v1/connectors/feishu/manual", a.instrument("POST /v1/connectors/feishu/manual",
+		a.verifier.Middleware(writeErr)(http.HandlerFunc(a.feishuManual))))
+	mux.Handle("POST /v1/connectors/feishu/enable", a.instrument("POST /v1/connectors/feishu/enable",
+		a.verifier.Middleware(writeErr)(http.HandlerFunc(a.feishuEnable))))
+	mux.Handle("POST /v1/connectors/feishu/disable", a.instrument("POST /v1/connectors/feishu/disable",
+		a.verifier.Middleware(writeErr)(http.HandlerFunc(a.feishuDisable))))
+	mux.Handle("DELETE /v1/connectors/feishu", a.instrument("DELETE /v1/connectors/feishu",
+		a.verifier.Middleware(writeErr)(http.HandlerFunc(a.feishuDisconnect))))
 	mux.Handle("GET /v1/projects", a.instrument("GET /v1/projects",
 		a.verifier.Middleware(writeErr)(http.HandlerFunc(a.listProjects))))
 	mux.Handle("POST /v1/projects", a.instrument("POST /v1/projects",

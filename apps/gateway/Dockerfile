@@ -1,7 +1,7 @@
 # Multi-stage build for cocola gateway (public-facing BFF).
 #
-# Build context MUST be the repo root: go.mod replaces both go-common and the
-# generated proto module with relative paths under packages/.
+# Build context MUST be the repo root: go.mod replaces the db, go-common, and
+# generated proto modules with relative paths outside apps/gateway.
 #
 #   docker build -f apps/gateway/Dockerfile -t cocola/gateway:dev .
 
@@ -9,6 +9,7 @@
 FROM golang:1.25-alpine AS build
 WORKDIR /src
 COPY apps/gateway        ./apps/gateway
+COPY db                  ./db
 COPY packages/go-common  ./packages/go-common
 COPY packages/proto      ./packages/proto
 WORKDIR /src/apps/gateway

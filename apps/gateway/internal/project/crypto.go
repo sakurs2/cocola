@@ -1,71 +1,33 @@
 package project
 
 import (
-	"crypto/aes"
-	"crypto/cipher"
-	"crypto/hmac"
 	"crypto/rand"
-	"crypto/sha256"
-	"crypto/subtle"
 	"encoding/base64"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"io"
 	"strings"
 	"time"
+
+	"github.com/cocola-project/cocola/apps/gateway/internal/secretbox"
 )
 
-type secretBox struct{ key [32]byte }
+type secretBox struct{ core *secretbox.Box }
 
 func newSecretBox(encoded string) (*secretBox, error) {
-	raw, err := base64.StdEncoding.DecodeString(strings.TrimSpace(encoded))
-	if err != nil || len(raw) != 32 {
-		return nil, errors.New("COCOLA_SCM_SECRET_KEY must be base64-encoded 32 bytes")
+	box, err := secretbox.New(encoded)
+	if err != nil {
+		return nil, err
 	}
-	box := &secretBox{}
-	copy(box.key[:], raw)
-	return box, nil
+	return &secretBox{core: box}, nil
 }
 
 func (b *secretBox) encrypt(plain string, aad []byte) (string, error) {
-	block, err := aes.NewCipher(b.key[:])
-	if err != nil {
-		return "", err
-	}
-	gcm, err := cipher.NewGCM(block)
-	if err != nil {
-		return "", err
-	}
-	nonce := make([]byte, gcm.NonceSize())
-	if _, err := io.ReadFull(rand.Reader, nonce); err != nil {
-		return "", err
-	}
-	sealed := gcm.Seal(nil, nonce, []byte(plain), aad)
-	return "v1:" + base64.RawURLEncoding.EncodeToString(append(nonce, sealed...)), nil
+	return b.core.Encrypt(plain, aad)
 }
 
 func (b *secretBox) decrypt(value string, aad []byte) (string, error) {
-	if !strings.HasPrefix(value, "v1:") {
-		return "", errors.New("unsupported scm ciphertext")
-	}
-	raw, err := base64.RawURLEncoding.DecodeString(strings.TrimPrefix(value, "v1:"))
-	if err != nil {
-		return "", errors.New("invalid scm ciphertext")
-	}
-	block, err := aes.NewCipher(b.key[:])
-	if err != nil {
-		return "", err
-	}
-	gcm, err := cipher.NewGCM(block)
-	if err != nil || len(raw) < gcm.NonceSize() {
-		return "", errors.New("invalid scm ciphertext")
-	}
-	plain, err := gcm.Open(nil, raw[:gcm.NonceSize()], raw[gcm.NonceSize():], aad)
-	if err != nil {
-		return "", errors.New("invalid scm ciphertext")
-	}
-	return string(plain), nil
+	return b.core.Decrypt(value, aad)
 }
 
 type oauthState struct {
@@ -104,10 +66,7 @@ func (b *secretBox) signFlowState(
 	if err != nil {
 		return "", err
 	}
-	mac := hmac.New(sha256.New, b.key[:])
-	_, _ = mac.Write([]byte("cocola.github.oauth-state.v1\x00"))
-	_, _ = mac.Write(payload)
-	signature := mac.Sum(nil)
+	signature := b.core.SignMAC("cocola.github.oauth-state.v1\x00", payload)
 	return base64.RawURLEncoding.EncodeToString(payload) + "." + base64.RawURLEncoding.EncodeToString(signature), nil
 }
 
@@ -128,11 +87,7 @@ func (b *secretBox) verifyFlowState(value string, identity Identity, flowType st
 	if err != nil {
 		return oauthState{}, ErrInvalidArgument
 	}
-	mac := hmac.New(sha256.New, b.key[:])
-	_, _ = mac.Write([]byte("cocola.github.oauth-state.v1\x00"))
-	_, _ = mac.Write(payload)
-	want := mac.Sum(nil)
-	if len(signature) != len(want) || subtle.ConstantTimeCompare(signature, want) != 1 {
+	if !b.core.VerifyMAC("cocola.github.oauth-state.v1\x00", payload, signature) {
 		return oauthState{}, ErrInvalidArgument
 	}
 	var state oauthState
@@ -159,11 +114,10 @@ func (b *secretBox) signBrokerCredential(claims BrokerCredentialClaims) (string,
 	if err != nil {
 		return "", err
 	}
-	mac := hmac.New(sha256.New, b.key[:])
-	_, _ = mac.Write([]byte("cocola.scm.broker.v1\x00"))
-	_, _ = mac.Write(payload)
 	return base64.RawURLEncoding.EncodeToString(payload) + "." +
-		base64.RawURLEncoding.EncodeToString(mac.Sum(nil)), nil
+		base64.RawURLEncoding.EncodeToString(
+			b.core.SignMAC("cocola.scm.broker.v1\x00", payload),
+		), nil
 }
 
 func (b *secretBox) verifyBrokerCredential(value string, now time.Time) (BrokerCredentialClaims, error) {
@@ -179,11 +133,7 @@ func (b *secretBox) verifyBrokerCredential(value string, now time.Time) (BrokerC
 	if err != nil {
 		return BrokerCredentialClaims{}, ErrInvalidArgument
 	}
-	mac := hmac.New(sha256.New, b.key[:])
-	_, _ = mac.Write([]byte("cocola.scm.broker.v1\x00"))
-	_, _ = mac.Write(payload)
-	want := mac.Sum(nil)
-	if len(signature) != len(want) || subtle.ConstantTimeCompare(signature, want) != 1 {
+	if !b.core.VerifyMAC("cocola.scm.broker.v1\x00", payload, signature) {
 		return BrokerCredentialClaims{}, ErrInvalidArgument
 	}
 	var claims BrokerCredentialClaims
