@@ -1,0 +1,22 @@
+diff --git a/dist/primitives/composer/trigger/detectTrigger.js b/dist/primitives/composer/trigger/detectTrigger.js
+index 1a8f521e8b26f37bca1447ae78125d0b71600e2c..888153dd3b2c475088977424610560ea7910c3ef 100644
+--- a/dist/primitives/composer/trigger/detectTrigger.js
++++ b/dist/primitives/composer/trigger/detectTrigger.js
+@@ -14 +14 @@ function detectTrigger(text, triggerChar, cursorPosition) {
+-			if (i > 0 && !WHITESPACE_RE.test(textUpToCursor[i - 1])) continue;
++			if (triggerChar !== "@" && i > 0 && !WHITESPACE_RE.test(textUpToCursor[i - 1])) continue;
+diff --git a/src/primitives/composer/trigger/detectTrigger.ts b/src/primitives/composer/trigger/detectTrigger.ts
+index 38beb45772a400cc38af7a9192db1a67b75c5ed1..2fd2655eaa06ddd59c0a5fd15a95bb535d2357a7 100644
+--- a/src/primitives/composer/trigger/detectTrigger.ts
++++ b/src/primitives/composer/trigger/detectTrigger.ts
+@@ -27,2 +27,8 @@ export function detectTrigger(
+-      // Trigger must be preceded by whitespace or be at start of text
+-      if (i > 0 && !WHITESPACE_RE.test(textUpToCursor[i - 1]!)) continue;
++      // Wiki mentions may be embedded in a sentence. Keep the original
++      // whitespace boundary for slash commands and any other trigger.
++      if (
++        triggerChar !== "@" &&
++        i > 0 &&
++        !WHITESPACE_RE.test(textUpToCursor[i - 1]!)
++      )
++        continue;

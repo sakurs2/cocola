@@ -218,6 +218,42 @@ func (p *Postgres) GetMessages(ctx context.Context, convID, userID string) ([]Me
 	return out, rows.Err()
 }
 
+func (p *Postgres) GetMessage(
+	ctx context.Context,
+	convID, messageID, userID string,
+) (Message, error) {
+	const q = `SELECT m.id, m.conversation_id, m.role, m.parts_json, m.metadata_json, m.created_at
+		FROM messages m
+		JOIN conversations c ON c.id=m.conversation_id
+		WHERE m.conversation_id=$1 AND m.id=$2 AND c.user_id=$3`
+	var message Message
+	var partsJSON []byte
+	var metadataJSON []byte
+	err := p.pool.QueryRow(ctx, q, convID, messageID, userID).Scan(
+		&message.ID,
+		&message.ConversationID,
+		&message.Role,
+		&partsJSON,
+		&metadataJSON,
+		&message.CreatedAt,
+	)
+	if err == pgx.ErrNoRows {
+		return Message{}, ErrNotFound
+	}
+	if err != nil {
+		return Message{}, err
+	}
+	if err := json.Unmarshal(partsJSON, &message.Parts); err != nil {
+		return Message{}, err
+	}
+	if len(metadataJSON) > 0 {
+		if err := json.Unmarshal(metadataJSON, &message.Metadata); err != nil {
+			return Message{}, err
+		}
+	}
+	return message, nil
+}
+
 func (p *Postgres) RenameConversation(ctx context.Context, convID, userID, title string) (Conversation, error) {
 	const q = `UPDATE conversations SET title = $3
 		WHERE id = $1 AND user_id = $2

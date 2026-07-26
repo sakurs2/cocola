@@ -1,9 +1,8 @@
 "use client";
 
-import dynamic from "next/dynamic";
 import {
+  ArrowLeft,
   BookOpenText,
-  ChevronDown,
   ChevronRight,
   Download,
   File,
@@ -21,21 +20,24 @@ import {
   Upload,
 } from "lucide-react";
 import {
+  Fragment,
   useCallback,
   useEffect,
   useMemo,
   useRef,
   useState,
   type ChangeEvent,
+  type KeyboardEvent,
+  type PointerEvent,
   type ReactNode,
 } from "react";
-import { MarkdownContent } from "@/components/assistant-ui/markdown-text";
 import { ReadonlyFilePreview } from "@/components/assistant-ui/file-preview";
+import { DeleteConfirmDialog } from "@/components/assistant-ui/delete-confirm-dialog";
 import { useWorkspaceUnsavedChanges } from "@/components/assistant-ui/workspace-unsaved-changes";
+import { ActionConfirmDialog, TextInputDialog } from "@/components/ui/action-dialog";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
-
-const MonacoEditor = dynamic(() => import("@monaco-editor/react"), { ssr: false });
+import { WikiMarkdownEditor } from "@/components/wiki/wiki-markdown-editor";
 
 type WikiNode = {
   id: string;
@@ -52,10 +54,16 @@ type WikiNode = {
   updated_at: string;
 };
 
-type WikiTreeNode = WikiNode & { children: WikiTreeNode[] };
-type SaveState = "loading" | "saved" | "dirty" | "saving" | "conflict" | "error";
+type SaveState = "loading" | "load-error" | "saved" | "dirty" | "saving" | "conflict" | "error";
+type WikiNameDialogState = {
+  kind: "folder" | "markdown" | "rename";
+  node?: WikiNode;
+};
 
 const DEFAULT_MAX_FILE_BYTES = 20 * 1024 * 1024;
+const DEFAULT_SIDEBAR_WIDTH = 304;
+const MIN_SIDEBAR_WIDTH = 240;
+const MAX_SIDEBAR_WIDTH = 520;
 const OFFICE_EXTENSIONS = new Set([".docx", ".xlsx", ".pptx"]);
 const ACCEPTED_FILES = ".md,.txt,.csv,.json,.yaml,.yml,.pdf,.docx,.xlsx,.pptx,application/pdf";
 
@@ -66,25 +74,20 @@ async function responseError(response: Response) {
   return body?.error?.message || `Request failed (${response.status})`;
 }
 
-function buildTree(nodes: WikiNode[]): WikiTreeNode[] {
-  const byID = new Map<string, WikiTreeNode>();
-  for (const node of nodes) byID.set(node.id, { ...node, children: [] });
-  const roots: WikiTreeNode[] = [];
-  for (const node of byID.values()) {
-    const parent = node.parent_id ? byID.get(node.parent_id) : undefined;
-    if (parent?.kind === "folder") parent.children.push(node);
-    else roots.push(node);
-  }
-  const sort = (items: WikiTreeNode[]) => {
-    items.sort(
-      (a, b) =>
-        Number(b.kind === "folder") - Number(a.kind === "folder") ||
-        a.name.localeCompare(b.name, undefined, { sensitivity: "base" }),
-    );
-    for (const item of items) sort(item.children);
-  };
-  sort(roots);
-  return roots;
+function sortWikiNodes(nodes: WikiNode[]): WikiNode[] {
+  return [...nodes].sort(
+    (a, b) =>
+      Number(b.kind === "folder") - Number(a.kind === "folder") ||
+      a.name.localeCompare(b.name, undefined, { sensitivity: "base" }),
+  );
+}
+
+function clampSidebarWidth(width: number, viewportWidth?: number): number {
+  const responsiveMax =
+    typeof viewportWidth === "number"
+      ? Math.max(MIN_SIDEBAR_WIDTH, Math.min(MAX_SIDEBAR_WIDTH, viewportWidth - 360))
+      : MAX_SIDEBAR_WIDTH;
+  return Math.min(responsiveMax, Math.max(MIN_SIDEBAR_WIDTH, width));
 }
 
 function formatBytes(bytes = 0) {
@@ -111,19 +114,52 @@ function previewKind(node: WikiNode): "markdown" | "code" | "pdf" | undefined {
 export function WikiWorkspace() {
   const [nodes, setNodes] = useState<WikiNode[]>([]);
   const [selectedID, setSelectedID] = useState("");
-  const [expanded, setExpanded] = useState<Set<string>>(() => new Set());
+  const [currentFolderID, setCurrentFolderID] = useState("");
   const [query, setQuery] = useState("");
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
+  const [sidebarWidth, setSidebarWidth] = useState(DEFAULT_SIDEBAR_WIDTH);
+  const [resizingSidebar, setResizingSidebar] = useState(false);
   const [maxFileBytes, setMaxFileBytes] = useState(DEFAULT_MAX_FILE_BYTES);
   const [unsavedFileID, setUnsavedFileID] = useState("");
+  const [nameDialog, setNameDialog] = useState<WikiNameDialogState | null>(null);
+  const [nameDialogError, setNameDialogError] = useState("");
+  const [deleteTarget, setDeleteTarget] = useState<WikiNode | null>(null);
+  const [deleteError, setDeleteError] = useState<string | null>(null);
+  const [discardDialogOpen, setDiscardDialogOpen] = useState(false);
+  const pendingDiscardAction = useRef<(() => void) | null>(null);
   const uploadRef = useRef<HTMLInputElement>(null);
+  const sidebarResize = useRef<{
+    pointerID: number;
+    startX: number;
+    startWidth: number;
+  } | null>(null);
+  const previousBodyStyle = useRef<{ cursor: string; userSelect: string } | null>(null);
   const { setDirty } = useWorkspaceUnsavedChanges();
 
-  const tree = useMemo(() => buildTree(nodes), [nodes]);
   const selected = nodes.find((node) => node.id === selectedID) ?? null;
-  const activeFolderID = selected?.kind === "folder" ? selected.id : (selected?.parent_id ?? "");
+  const currentFolder =
+    nodes.find((node) => node.id === currentFolderID && node.kind === "folder") ?? null;
+  const activeFolderID = currentFolderID;
+  const visibleNodes = useMemo(
+    () => sortWikiNodes(nodes.filter((node) => (node.parent_id ?? "") === currentFolderID)),
+    [currentFolderID, nodes],
+  );
+  const folderTrail = useMemo(() => {
+    const byID = new Map(nodes.map((node) => [node.id, node]));
+    const trail: WikiNode[] = [];
+    const visited = new Set<string>();
+    let folderID = currentFolderID;
+    while (folderID && !visited.has(folderID)) {
+      visited.add(folderID);
+      const folder = byID.get(folderID);
+      if (!folder || folder.kind !== "folder") break;
+      trail.push(folder);
+      folderID = folder.parent_id ?? "";
+    }
+    return trail.reverse();
+  }, [currentFolderID, nodes]);
   const filteredNodes = useMemo(() => {
     const value = query.trim().toLowerCase();
     if (!value) return [];
@@ -144,6 +180,9 @@ export function WikiWorkspace() {
       const body = (await response.json()) as { nodes?: WikiNode[] };
       const next = Array.isArray(body.nodes) ? body.nodes : [];
       setNodes(next);
+      setCurrentFolderID((current) =>
+        next.some((node) => node.id === current && node.kind === "folder") ? current : "",
+      );
       setSelectedID((current) => {
         const target = preferredID ?? current;
         return next.some((node) => node.id === target) ? target : "";
@@ -172,11 +211,15 @@ export function WikiWorkspace() {
     window.dispatchEvent(new Event("cocola:wiki-changed"));
   }, []);
 
-  const confirmDiscardChanges = useCallback(
-    (nextNodeID = "") =>
-      !unsavedFileID ||
-      unsavedFileID === nextNodeID ||
-      window.confirm("This page has unsaved changes. Discard them and continue?"),
+  const runAfterDiscardCheck = useCallback(
+    (action: () => void, nextNodeID = "") => {
+      if (!unsavedFileID || unsavedFileID === nextNodeID) {
+        action();
+        return;
+      }
+      pendingDiscardAction.current = action;
+      setDiscardDialogOpen(true);
+    },
     [unsavedFileID],
   );
 
@@ -203,50 +246,65 @@ export function WikiWorkspace() {
 
   useEffect(() => () => setDirty(false), [setDirty]);
 
-  const createFolder = async () => {
-    if (!confirmDiscardChanges()) return;
-    const name = window.prompt("Folder name");
-    if (!name?.trim()) return;
-    setBusy(true);
-    try {
-      const response = await fetch("/api/wiki/folders", {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({ parent_id: activeFolderID, name: name.trim() }),
-      });
-      if (!response.ok) throw new Error(await responseError(response));
-      const node = (await response.json()) as WikiNode;
-      setExpanded((current) => new Set(current).add(activeFolderID));
-      await loadTree(node.id);
-      changed();
-    } catch (cause) {
-      setError(cause instanceof Error ? cause.message : String(cause));
-    } finally {
-      setBusy(false);
-    }
+  const createFolder = () => {
+    runAfterDiscardCheck(() => {
+      setNameDialogError("");
+      setNameDialog({ kind: "folder" });
+    });
   };
 
-  const createMarkdown = async () => {
-    if (!confirmDiscardChanges()) return;
-    const raw = window.prompt("Markdown filename", "Untitled.md");
-    if (!raw?.trim()) return;
+  const createMarkdown = () => {
+    runAfterDiscardCheck(() => {
+      setNameDialogError("");
+      setNameDialog({ kind: "markdown" });
+    });
+  };
+
+  const submitNameDialog = async (name: string) => {
+    if (!nameDialog) return;
     setBusy(true);
+    setNameDialogError("");
     try {
-      const response = await fetch("/api/wiki/markdown", {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({
-          parent_id: activeFolderID,
-          name: raw.trim(),
-          content: `# ${raw.trim().replace(/\.md$/i, "")}\n\n`,
-        }),
-      });
+      let response: Response;
+      let preferredID = nameDialog.node?.id ?? "";
+      if (nameDialog.kind === "folder") {
+        response = await fetch("/api/wiki/folders", {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({ parent_id: activeFolderID, name }),
+        });
+      } else if (nameDialog.kind === "markdown") {
+        response = await fetch("/api/wiki/markdown", {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({
+            parent_id: activeFolderID,
+            name,
+            content: `# ${name.replace(/\.md$/i, "")}\n\n`,
+          }),
+        });
+      } else {
+        if (!nameDialog.node || name === nameDialog.node.name) {
+          setNameDialog(null);
+          return;
+        }
+        response = await fetch(`/api/wiki/nodes/${encodeURIComponent(nameDialog.node.id)}`, {
+          method: "PATCH",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({ name }),
+        });
+      }
       if (!response.ok) throw new Error(await responseError(response));
-      const node = (await response.json()) as WikiNode;
-      await loadTree(node.id);
+      const updated = (await response.json()) as WikiNode;
+      preferredID = updated.id || preferredID;
+      if (nameDialog.kind === "folder") {
+        setCurrentFolderID(updated.id);
+      }
+      await loadTree(preferredID);
       changed();
+      setNameDialog(null);
     } catch (cause) {
-      setError(cause instanceof Error ? cause.message : String(cause));
+      setNameDialogError(cause instanceof Error ? cause.message : String(cause));
     } finally {
       setBusy(false);
     }
@@ -256,7 +314,6 @@ export function WikiWorkspace() {
     const files = Array.from(event.target.files ?? []);
     event.target.value = "";
     if (files.length === 0) return;
-    if (!confirmDiscardChanges()) return;
     const oversized = files.find((file) => file.size > maxFileBytes);
     if (oversized) {
       setError(`${oversized.name} exceeds the ${formatBytes(maxFileBytes)} file limit.`);
@@ -283,50 +340,43 @@ export function WikiWorkspace() {
     }
   };
 
-  const rename = async (node: WikiNode) => {
-    const name = window.prompt("Rename", node.name);
-    if (!name?.trim() || name.trim() === node.name) return;
-    setBusy(true);
-    try {
-      const response = await fetch(`/api/wiki/nodes/${encodeURIComponent(node.id)}`, {
-        method: "PATCH",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({ name: name.trim() }),
-      });
-      if (!response.ok) throw new Error(await responseError(response));
-      await loadTree(node.id);
-      changed();
-    } catch (cause) {
-      setError(cause instanceof Error ? cause.message : String(cause));
-    } finally {
-      setBusy(false);
-    }
+  const requestUpload = () => {
+    runAfterDiscardCheck(() => uploadRef.current?.click());
   };
 
-  const remove = async (node: WikiNode) => {
-    const detail =
-      node.kind === "folder"
-        ? `Delete “${node.name}” and everything inside it?`
-        : `Delete “${node.name}”?`;
-    if (!window.confirm(detail)) return;
+  const rename = (node: WikiNode) => {
+    setNameDialogError("");
+    setNameDialog({ kind: "rename", node });
+  };
+
+  const remove = (node: WikiNode) => {
+    setDeleteError(null);
+    setDeleteTarget(node);
+  };
+
+  const confirmDelete = async () => {
+    if (!deleteTarget) return;
     setBusy(true);
+    setDeleteError(null);
     try {
-      const response = await fetch(`/api/wiki/nodes/${encodeURIComponent(node.id)}`, {
+      const response = await fetch(`/api/wiki/nodes/${encodeURIComponent(deleteTarget.id)}`, {
         method: "DELETE",
       });
       if (!response.ok) throw new Error(await responseError(response));
+      if (deleteTarget.id === currentFolderID) {
+        setCurrentFolderID(deleteTarget.parent_id ?? "");
+      }
       await loadTree();
       changed();
+      setDeleteTarget(null);
     } catch (cause) {
-      setError(cause instanceof Error ? cause.message : String(cause));
+      setDeleteError(cause instanceof Error ? cause.message : String(cause));
     } finally {
       setBusy(false);
     }
   };
 
-  const move = async (nodeID: string, parentID: string) => {
-    if (!nodeID || nodeID === parentID) return;
-    if (!confirmDiscardChanges(nodeID)) return;
+  const performMove = async (nodeID: string, parentID: string) => {
     setBusy(true);
     try {
       const response = await fetch(`/api/wiki/nodes/${encodeURIComponent(nodeID)}/move`, {
@@ -344,22 +394,95 @@ export function WikiWorkspace() {
     }
   };
 
-  const selectNode = (node: WikiNode) => {
-    if (!confirmDiscardChanges(node.id)) return;
-    setSelectedID(node.id);
-    setQuery("");
-    if (node.kind === "folder") {
-      setExpanded((current) => new Set(current).add(node.id));
-    }
+  const move = async (nodeID: string, parentID: string) => {
+    if (!nodeID || nodeID === parentID) return;
+    runAfterDiscardCheck(() => void performMove(nodeID, parentID), nodeID);
   };
 
+  const navigateToFolder = (folderID: string) => {
+    const folder = folderID
+      ? nodes.find((node) => node.id === folderID && node.kind === "folder")
+      : null;
+    if (folderID && !folder) return;
+    runAfterDiscardCheck(() => {
+      setCurrentFolderID(folderID);
+      setSelectedID(folderID);
+      setQuery("");
+    }, folderID);
+  };
+
+  const selectNode = (node: WikiNode) => {
+    runAfterDiscardCheck(() => {
+      setSelectedID(node.id);
+      setQuery("");
+      if (node.kind === "folder") {
+        setCurrentFolderID(node.id);
+      } else {
+        setCurrentFolderID(node.parent_id ?? "");
+      }
+    }, node.id);
+  };
+
+  const finishSidebarResize = useCallback(() => {
+    sidebarResize.current = null;
+    setResizingSidebar(false);
+    if (previousBodyStyle.current) {
+      document.body.style.cursor = previousBodyStyle.current.cursor;
+      document.body.style.userSelect = previousBodyStyle.current.userSelect;
+      previousBodyStyle.current = null;
+    }
+  }, []);
+
+  const startSidebarResize = (event: PointerEvent<HTMLDivElement>) => {
+    if (event.button !== 0) return;
+    event.preventDefault();
+    event.currentTarget.setPointerCapture(event.pointerId);
+    sidebarResize.current = {
+      pointerID: event.pointerId,
+      startX: event.clientX,
+      startWidth: sidebarWidth,
+    };
+    previousBodyStyle.current = {
+      cursor: document.body.style.cursor,
+      userSelect: document.body.style.userSelect,
+    };
+    document.body.style.cursor = "col-resize";
+    document.body.style.userSelect = "none";
+    setResizingSidebar(true);
+  };
+
+  const resizeSidebar = (event: PointerEvent<HTMLDivElement>) => {
+    const resize = sidebarResize.current;
+    if (!resize || resize.pointerID !== event.pointerId) return;
+    setSidebarWidth(
+      clampSidebarWidth(resize.startWidth + event.clientX - resize.startX, window.innerWidth),
+    );
+  };
+
+  const resizeSidebarWithKeyboard = (event: KeyboardEvent<HTMLDivElement>) => {
+    if (event.key !== "ArrowLeft" && event.key !== "ArrowRight") return;
+    event.preventDefault();
+    const delta = event.key === "ArrowLeft" ? -16 : 16;
+    setSidebarWidth((width) => clampSidebarWidth(width + delta, window.innerWidth));
+  };
+
+  useEffect(() => finishSidebarResize, [finishSidebarResize]);
+
   return (
-    <div className="relative flex h-full min-h-0 bg-[#fff] text-[#142033]">
+    <div
+      className={cn(
+        "relative flex h-full min-h-0 bg-[#fff] text-[#142033]",
+        resizingSidebar && "cursor-col-resize select-none",
+      )}
+    >
       <div
         className="pointer-events-none absolute inset-y-0 left-0 w-1 bg-gradient-to-b from-[#2563EB] via-[#7C3AED] to-[#10B981]"
         aria-hidden="true"
       />
-      <aside className="flex w-[19rem] shrink-0 flex-col border-r border-slate-200 bg-[#F8FAFD]">
+      <aside
+        className="flex shrink-0 flex-col border-r border-slate-200 bg-[#F8FAFD]"
+        style={{ width: sidebarWidth }}
+      >
         <header className="border-b border-slate-200 px-4 pb-3 pt-5">
           <div className="flex items-center justify-between gap-3">
             <div>
@@ -391,13 +514,60 @@ export function WikiWorkspace() {
               className="h-9 w-full rounded-xl border border-slate-200 bg-white pl-9 pr-3 text-sm outline-none transition focus:border-blue-400 focus:ring-2 focus:ring-blue-100"
             />
           </div>
+          <div className="mt-3 flex min-w-0 items-center gap-1.5">
+            <button
+              type="button"
+              disabled={!currentFolder}
+              onClick={() => navigateToFolder(currentFolder?.parent_id ?? "")}
+              aria-label="Go to parent folder"
+              className="grid size-7 shrink-0 place-items-center rounded-lg text-slate-500 transition hover:bg-white hover:text-slate-900 disabled:cursor-default disabled:opacity-35"
+            >
+              <ArrowLeft className="size-3.5" />
+            </button>
+            <nav
+              aria-label="Wiki folder path"
+              className="flex min-w-0 flex-1 items-center overflow-hidden text-xs"
+            >
+              <button
+                type="button"
+                onClick={() => navigateToFolder("")}
+                className={cn(
+                  "shrink-0 rounded-md px-1.5 py-1 font-medium transition hover:bg-white hover:text-slate-950",
+                  currentFolderID ? "text-slate-500" : "text-slate-950",
+                )}
+              >
+                All files
+              </button>
+              {folderTrail.map((folder, index) => (
+                <Fragment key={folder.id}>
+                  <ChevronRight className="size-3 shrink-0 text-slate-300" />
+                  <button
+                    type="button"
+                    onClick={() => navigateToFolder(folder.id)}
+                    title={folder.logical_path || folder.name}
+                    className={cn(
+                      "min-w-0 truncate rounded-md px-1.5 py-1 transition hover:bg-white hover:text-slate-950",
+                      index === folderTrail.length - 1
+                        ? "font-semibold text-slate-950"
+                        : "text-slate-500",
+                    )}
+                  >
+                    {folder.name}
+                  </button>
+                </Fragment>
+              ))}
+            </nav>
+          </div>
         </header>
         <div
           className="flex-1 overflow-y-auto px-2 py-3"
           onDragOver={(event) => event.preventDefault()}
           onDrop={(event) => {
             event.preventDefault();
-            void move(event.dataTransfer.getData("application/x-cocola-wiki-node"), "");
+            void move(
+              event.dataTransfer.getData("application/x-cocola-wiki-node"),
+              currentFolderID,
+            );
           }}
         >
           {query ? (
@@ -408,22 +578,12 @@ export function WikiWorkspace() {
             ) : (
               <EmptyTree label="No matching pages" />
             )
-          ) : tree.length ? (
-            tree.map((node) => (
-              <WikiTreeRow
+          ) : visibleNodes.length ? (
+            visibleNodes.map((node) => (
+              <WikiNavigationRow
                 key={node.id}
                 node={node}
-                depth={0}
                 selectedID={selectedID}
-                expanded={expanded}
-                onToggle={(id) =>
-                  setExpanded((current) => {
-                    const next = new Set(current);
-                    if (next.has(id)) next.delete(id);
-                    else next.add(id);
-                    return next;
-                  })
-                }
                 onSelect={selectNode}
                 onMove={move}
               />
@@ -438,12 +598,7 @@ export function WikiWorkspace() {
           <div className="grid grid-cols-3 gap-1.5">
             <QuickAction icon={Folder} label="Folder" disabled={busy} onClick={createFolder} />
             <QuickAction icon={Plus} label="Page" disabled={busy} onClick={createMarkdown} />
-            <QuickAction
-              icon={Upload}
-              label="Upload"
-              disabled={busy}
-              onClick={() => uploadRef.current?.click()}
-            />
+            <QuickAction icon={Upload} label="Upload" disabled={busy} onClick={requestUpload} />
           </div>
           <input
             ref={uploadRef}
@@ -458,6 +613,36 @@ export function WikiWorkspace() {
           </p>
         </footer>
       </aside>
+      <div
+        role="separator"
+        aria-label="Resize Wiki sidebar"
+        aria-orientation="vertical"
+        aria-valuemin={MIN_SIDEBAR_WIDTH}
+        aria-valuemax={MAX_SIDEBAR_WIDTH}
+        aria-valuenow={Math.round(sidebarWidth)}
+        tabIndex={0}
+        onPointerDown={startSidebarResize}
+        onPointerMove={resizeSidebar}
+        onPointerUp={(event) => {
+          if (event.currentTarget.hasPointerCapture(event.pointerId)) {
+            event.currentTarget.releasePointerCapture(event.pointerId);
+          }
+          finishSidebarResize();
+        }}
+        onPointerCancel={finishSidebarResize}
+        onLostPointerCapture={finishSidebarResize}
+        onKeyDown={resizeSidebarWithKeyboard}
+        className="group relative z-20 w-0 shrink-0 cursor-col-resize touch-none outline-none"
+      >
+        <span className="absolute inset-y-0 -left-1.5 w-3">
+          <span
+            className={cn(
+              "absolute inset-y-0 left-1/2 w-px -translate-x-1/2 bg-transparent transition-colors group-hover:bg-blue-400 group-focus-visible:bg-blue-500",
+              resizingSidebar && "bg-blue-500",
+            )}
+          />
+        </span>
+      </div>
 
       <main className="min-w-0 flex-1">
         {error ? (
@@ -497,102 +682,159 @@ export function WikiWorkspace() {
             />
           )
         ) : (
-          <WikiWelcome onCreate={createMarkdown} onUpload={() => uploadRef.current?.click()} />
+          <WikiWelcome onCreate={createMarkdown} onUpload={requestUpload} />
         )}
       </main>
+
+      <TextInputDialog
+        open={nameDialog !== null}
+        title={
+          nameDialog?.kind === "folder"
+            ? "Create folder"
+            : nameDialog?.kind === "markdown"
+              ? "Create Markdown page"
+              : "Rename item"
+        }
+        description={
+          nameDialog?.kind === "folder"
+            ? "Add a folder to the current Wiki location."
+            : nameDialog?.kind === "markdown"
+              ? "Create an editable Markdown page in the current Wiki location."
+              : "Choose a new name. The file type must stay supported by Wiki."
+        }
+        label={
+          nameDialog?.kind === "folder"
+            ? "Folder name"
+            : nameDialog?.kind === "markdown"
+              ? "Filename"
+              : "New name"
+        }
+        initialValue={
+          nameDialog?.kind === "markdown"
+            ? "Untitled.md"
+            : nameDialog?.kind === "rename"
+              ? (nameDialog.node?.name ?? "")
+              : ""
+        }
+        placeholder={nameDialog?.kind === "markdown" ? "Notes.md" : "Name"}
+        submitLabel={nameDialog?.kind === "rename" ? "Rename" : "Create"}
+        busy={busy}
+        error={nameDialogError}
+        icon={
+          nameDialog?.kind === "folder"
+            ? Folder
+            : nameDialog?.kind === "markdown"
+              ? FileText
+              : Pencil
+        }
+        onOpenChange={(open) => {
+          if (open) return;
+          setNameDialog(null);
+          setNameDialogError("");
+        }}
+        onSubmit={(name) => void submitNameDialog(name)}
+      />
+
+      <DeleteConfirmDialog
+        open={deleteTarget !== null}
+        title={deleteTarget?.kind === "folder" ? "Delete folder?" : "Delete file?"}
+        description={
+          deleteTarget?.kind === "folder" ? (
+            <>
+              <span className="font-medium text-foreground">{deleteTarget.name}</span> and
+              everything inside it will be permanently deleted.
+            </>
+          ) : (
+            <>
+              <span className="font-medium text-foreground">{deleteTarget?.name}</span> will be
+              permanently deleted.
+            </>
+          )
+        }
+        busy={busy}
+        error={deleteError}
+        onOpenChange={(open) => {
+          if (open) return;
+          setDeleteTarget(null);
+          setDeleteError(null);
+        }}
+        onConfirm={() => void confirmDelete()}
+      />
+
+      <ActionConfirmDialog
+        open={discardDialogOpen}
+        title="Discard unsaved changes?"
+        description="This page has changes that have not been saved. Continue only if you do not need them."
+        confirmLabel="Discard and continue"
+        cancelLabel="Keep editing"
+        tone="warning"
+        onOpenChange={(open) => {
+          setDiscardDialogOpen(open);
+          if (!open) pendingDiscardAction.current = null;
+        }}
+        onConfirm={() => {
+          const action = pendingDiscardAction.current;
+          pendingDiscardAction.current = null;
+          setDiscardDialogOpen(false);
+          action?.();
+        }}
+      />
     </div>
   );
 }
 
-function WikiTreeRow({
+function WikiNavigationRow({
   node,
-  depth,
   selectedID,
-  expanded,
-  onToggle,
   onSelect,
   onMove,
 }: {
-  node: WikiTreeNode;
-  depth: number;
+  node: WikiNode;
   selectedID: string;
-  expanded: Set<string>;
-  onToggle: (id: string) => void;
   onSelect: (node: WikiNode) => void;
   onMove: (nodeID: string, parentID: string) => Promise<void>;
 }) {
   const Icon = fileIcon(node);
-  const open = node.kind === "folder" && expanded.has(node.id);
   return (
-    <div>
-      <div
-        draggable
-        onDragStart={(event) => {
-          event.dataTransfer.effectAllowed = "move";
-          event.dataTransfer.setData("application/x-cocola-wiki-node", node.id);
-        }}
-        onDragOver={(event) => {
-          if (node.kind === "folder") event.preventDefault();
-        }}
-        onDrop={(event) => {
-          if (node.kind !== "folder") return;
-          event.preventDefault();
-          event.stopPropagation();
-          void onMove(event.dataTransfer.getData("application/x-cocola-wiki-node"), node.id);
-        }}
+    <button
+      type="button"
+      draggable
+      onDragStart={(event) => {
+        event.dataTransfer.effectAllowed = "move";
+        event.dataTransfer.setData("application/x-cocola-wiki-node", node.id);
+      }}
+      onDragOver={(event) => {
+        if (node.kind === "folder") event.preventDefault();
+      }}
+      onDrop={(event) => {
+        if (node.kind !== "folder") return;
+        event.preventDefault();
+        event.stopPropagation();
+        void onMove(event.dataTransfer.getData("application/x-cocola-wiki-node"), node.id);
+      }}
+      onClick={() => onSelect(node)}
+      className={cn(
+        "group mb-0.5 flex h-9 w-full items-center rounded-lg px-2 text-left text-[13px] transition",
+        selectedID === node.id
+          ? "bg-white text-slate-950 shadow-sm ring-1 ring-slate-200"
+          : "text-slate-600 hover:bg-white/80 hover:text-slate-950",
+      )}
+    >
+      <Icon
         className={cn(
-          "group flex h-8 cursor-default items-center rounded-lg pr-2 text-[13px] transition",
-          selectedID === node.id
-            ? "bg-white text-slate-950 shadow-sm ring-1 ring-slate-200"
-            : "text-slate-600 hover:bg-white/80 hover:text-slate-950",
+          "mr-2 size-4 shrink-0",
+          node.kind === "folder"
+            ? "fill-blue-100 text-blue-600"
+            : node.extension === ".md"
+              ? "text-violet-600"
+              : "text-slate-400",
         )}
-        style={{ paddingLeft: `${6 + depth * 14}px` }}
-        onClick={() => onSelect(node)}
-      >
-        <button
-          type="button"
-          className="grid size-5 shrink-0 place-items-center rounded"
-          onClick={(event) => {
-            event.stopPropagation();
-            if (node.kind === "folder") onToggle(node.id);
-          }}
-          aria-label={open ? "Collapse folder" : "Expand folder"}
-        >
-          {node.kind === "folder" ? (
-            open ? (
-              <ChevronDown className="size-3.5" />
-            ) : (
-              <ChevronRight className="size-3.5" />
-            )
-          ) : null}
-        </button>
-        <Icon
-          className={cn(
-            "mr-2 size-4 shrink-0",
-            node.kind === "folder"
-              ? "fill-blue-100 text-blue-600"
-              : node.extension === ".md"
-                ? "text-violet-600"
-                : "text-slate-400",
-          )}
-        />
-        <span className="min-w-0 flex-1 truncate">{node.name}</span>
-      </div>
-      {open
-        ? node.children.map((child) => (
-            <WikiTreeRow
-              key={child.id}
-              node={child}
-              depth={depth + 1}
-              selectedID={selectedID}
-              expanded={expanded}
-              onToggle={onToggle}
-              onSelect={onSelect}
-              onMove={onMove}
-            />
-          ))
-        : null}
-    </div>
+      />
+      <span className="min-w-0 flex-1 truncate">{node.name}</span>
+      {node.kind === "folder" ? (
+        <ChevronRight className="size-3.5 shrink-0 text-slate-300 transition group-hover:translate-x-0.5 group-hover:text-slate-500" />
+      ) : null}
+    </button>
   );
 }
 
@@ -759,15 +1001,19 @@ function FileView({
   const [content, setContent] = useState("");
   const [revision, setRevision] = useState(node.revision ?? 1);
   const [state, setState] = useState<SaveState>(markdown ? "loading" : "saved");
-  const [tab, setTab] = useState<"source" | "preview">("source");
+  const [contentLoaded, setContentLoaded] = useState(!markdown);
+  const [loadError, setLoadError] = useState("");
   const loadedContent = useRef("");
-  const loaded = useRef(false);
+  const loadAbort = useRef<AbortController | null>(null);
   const initialRevision = useRef(node.revision ?? 1);
 
-  useEffect(() => {
+  const loadMarkdown = useCallback(() => {
     if (!markdown) return;
+    loadAbort.current?.abort();
     const controller = new AbortController();
-    loaded.current = false;
+    loadAbort.current = controller;
+    setContentLoaded(false);
+    setLoadError("");
     setState("loading");
     void fetch(`/api/wiki/files/${encodeURIComponent(node.id)}/content`, {
       cache: "no-store",
@@ -780,28 +1026,37 @@ function FileView({
         const match = etag.match(/wiki-rev-(\d+)/);
         setRevision(match ? Number(match[1]) : initialRevision.current);
         loadedContent.current = text;
-        loaded.current = true;
         setContent(text);
+        setContentLoaded(true);
         setState("saved");
       })
       .catch((cause) => {
         if (cause instanceof DOMException && cause.name === "AbortError") return;
-        setState("error");
+        setLoadError(cause instanceof Error ? cause.message : String(cause));
+        setContentLoaded(false);
+        setState("load-error");
+      })
+      .finally(() => {
+        if (loadAbort.current === controller) loadAbort.current = null;
       });
-    return () => controller.abort();
   }, [markdown, node.id]);
+
+  useEffect(() => {
+    loadMarkdown();
+    return () => loadAbort.current?.abort();
+  }, [loadMarkdown]);
 
   useEffect(() => {
     const unsaved =
       markdown &&
-      loaded.current &&
+      contentLoaded &&
       (state === "dirty" || state === "saving" || state === "conflict" || state === "error");
     onUnsavedChange(node.id, unsaved);
     return () => onUnsavedChange(node.id, false);
-  }, [markdown, node.id, onUnsavedChange, state]);
+  }, [contentLoaded, markdown, node.id, onUnsavedChange, state]);
 
   const save = async () => {
-    if (!markdown || !loaded.current || (state !== "dirty" && state !== "error")) return;
+    if (!markdown || !contentLoaded || (state !== "dirty" && state !== "error")) return;
     setState("saving");
     try {
       const response = await fetch(`/api/wiki/files/${encodeURIComponent(node.id)}/content`, {
@@ -880,26 +1135,12 @@ function FileView({
   return (
     <div className="flex h-full min-h-0 flex-col">
       <FileHeader node={node} state={state} onRename={onRename} onDelete={onDelete}>
-        <div className="flex rounded-xl bg-slate-100 p-1">
-          {(["source", "preview"] as const).map((value) => (
-            <button
-              key={value}
-              type="button"
-              onClick={() => setTab(value)}
-              className={cn(
-                "rounded-lg px-3 py-1.5 text-xs font-medium capitalize transition",
-                tab === value ? "bg-white text-slate-950 shadow-sm" : "text-slate-500",
-              )}
-            >
-              {value}
-            </button>
-          ))}
-        </div>
         <Button
           size="sm"
           disabled={
-            !loaded.current ||
+            !contentLoaded ||
             state === "loading" ||
+            state === "load-error" ||
             state === "saved" ||
             state === "saving" ||
             state === "conflict"
@@ -909,38 +1150,42 @@ function FileView({
           {state === "saving" ? "Saving…" : "Save"}
         </Button>
       </FileHeader>
-      <div className="min-h-0 flex-1">
-        {tab === "source" ? (
-          <MonacoEditor
-            language="markdown"
+      <div className="min-h-0 flex-1 overflow-y-auto bg-slate-50/80 p-4 sm:p-5">
+        {state === "loading" && !contentLoaded ? (
+          <div className="grid h-full min-h-72 place-items-center rounded-3xl border border-slate-200 bg-white">
+            <div className="text-center text-sm text-slate-500">
+              <RefreshCw className="mx-auto mb-3 size-5 animate-spin text-blue-600" />
+              Loading page…
+            </div>
+          </div>
+        ) : loadError ? (
+          <div
+            role="alert"
+            className="grid h-full min-h-72 place-items-center rounded-3xl border border-red-200 bg-white"
+          >
+            <div className="max-w-md px-8 text-center">
+              <span className="mx-auto grid size-11 place-items-center rounded-2xl bg-red-50 text-red-600">
+                <FileText className="size-5" />
+              </span>
+              <h3 className="mt-4 text-base font-semibold text-slate-950">
+                Couldn&apos;t open this page
+              </h3>
+              <p className="mt-2 text-sm leading-6 text-slate-500">{loadError}</p>
+              <Button size="sm" variant="outline" className="mt-5" onClick={loadMarkdown}>
+                <RefreshCw className="mr-2 size-3.5" />
+                Try again
+              </Button>
+            </div>
+          </div>
+        ) : (
+          <WikiMarkdownEditor
             value={content}
-            onChange={(value) => {
-              const next = value ?? "";
+            readOnly={state === "saving" || state === "conflict"}
+            onChange={(next) => {
               setContent(next);
               setState(next === loadedContent.current ? "saved" : "dirty");
             }}
-            theme="vs"
-            options={{
-              minimap: { enabled: false },
-              wordWrap: "on",
-              fontSize: 14,
-              lineHeight: 23,
-              padding: { top: 28, bottom: 28 },
-              scrollBeyondLastLine: false,
-              automaticLayout: true,
-              lineNumbersMinChars: 3,
-              renderLineHighlight: "none",
-              readOnly:
-                !loaded.current ||
-                state === "loading" ||
-                state === "saving" ||
-                state === "conflict",
-            }}
           />
-        ) : (
-          <div className="h-full overflow-y-auto">
-            <MarkdownContent value={content} className="mx-auto max-w-3xl px-10 py-10" />
-          </div>
         )}
       </div>
       {state === "conflict" ? (
@@ -972,6 +1217,7 @@ function FileHeader({
 }) {
   const status = {
     loading: "Loading…",
+    "load-error": "Load failed",
     saved: "Saved",
     dirty: "Unsaved",
     saving: "Saving…",
@@ -987,7 +1233,9 @@ function FileHeader({
           <span
             className={cn(
               "text-[11px]",
-              state === "error" || state === "conflict" ? "text-red-600" : "text-slate-400",
+              state === "load-error" || state === "error" || state === "conflict"
+                ? "text-red-600"
+                : "text-slate-400",
             )}
           >
             {status}

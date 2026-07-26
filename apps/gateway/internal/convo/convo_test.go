@@ -73,6 +73,32 @@ func TestMemoryOwnershipGate(t *testing.T) {
 	}
 }
 
+func TestMemoryGetMessageIsOwnerScoped(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	store := NewMemory()
+	now := time.Now()
+	must(t, store.UpsertConversation(ctx, Conversation{
+		ID: "a", UserID: "u1", Title: "one", CreatedAt: now, UpdatedAt: now,
+	}))
+	message := Message{
+		ID: "run-user", ConversationID: "a", Role: "user",
+		Parts: []Part{{Type: PartText, Text: "hello"}}, CreatedAt: now,
+	}
+	must(t, store.InsertMessage(ctx, message))
+
+	got, err := store.GetMessage(ctx, "a", "run-user", "u1")
+	if err != nil || got.ID != message.ID || got.Parts[0].Text != "hello" {
+		t.Fatalf("GetMessage() = %#v, %v", got, err)
+	}
+	if _, err := store.GetMessage(ctx, "a", "run-user", "u2"); err != ErrNotFound {
+		t.Fatalf("cross-owner GetMessage() error = %v, want ErrNotFound", err)
+	}
+	if _, err := store.GetMessage(ctx, "a", "missing", "u1"); err != ErrNotFound {
+		t.Fatalf("missing GetMessage() error = %v, want ErrNotFound", err)
+	}
+}
+
 func TestMemoryMessagesPutUserBeforeAssistantWhenTimestampsTie(t *testing.T) {
 	ctx := context.Background()
 	m := NewMemory()

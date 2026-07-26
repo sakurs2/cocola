@@ -14,20 +14,23 @@ export const dynamic = "force-dynamic";
 
 const GATEWAY_URL = process.env.COCOLA_GATEWAY_URL ?? "http://127.0.0.1:8080";
 
-export async function GET(
-  req: NextRequest,
-  { params }: { params: Promise<{ id: string }> },
-) {
+export async function GET(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
   const authResult = await requireUser();
   if (isAuthFail(authResult)) return authResult.response;
   const authHeaders = await runtimeAuthHeaders(authResult.user);
   if (authHeaders instanceof Response) return authHeaders;
   try {
-    const upstream = await fetch(
+    const upstreamURL = new URL(
       `${GATEWAY_URL}/v1/conversations/${encodeURIComponent(id)}/messages`,
-      { method: "GET", cache: "no-store", headers: authHeaders },
     );
+    const messageID = req.nextUrl.searchParams.get("message_id");
+    if (messageID) upstreamURL.searchParams.set("message_id", messageID);
+    const upstream = await fetch(upstreamURL, {
+      method: "GET",
+      cache: "no-store",
+      headers: authHeaders,
+    });
     const body = await upstream.text();
     return new Response(body, {
       status: upstream.status,

@@ -5,7 +5,8 @@ export const PLAN_MODE_COMMAND = Object.freeze({
 });
 
 export const COMPOSER_SLASH_COPY = Object.freeze({
-  defaultPlaceholder: 'Ask anything, use "/" to select a skill or command',
+  defaultPlaceholder:
+    'Ask anything, use "/" to select a skill or command; use @ to select files from Wiki',
   menuAriaLabel: "Choose a skill or command",
   commandsTab: "Commands",
   skillsTab: "Skills",

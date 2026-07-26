@@ -8,6 +8,11 @@
     "build": "pnpm -r build",
     "lint": "pnpm -r lint"
   },
+  "pnpm": {
+    "patchedDependencies": {
+      "@assistant-ui/react@0.14.24": "patches/@assistant-ui__react@0.14.24.patch"
+    }
+  },
   "devDependencies": {
     "prettier": "^3.8.4",
     "typescript": "^5.4.5"

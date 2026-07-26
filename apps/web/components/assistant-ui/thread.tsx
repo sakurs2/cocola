@@ -11,12 +11,14 @@ import {
   type TextMessagePartProps,
   ThreadPrimitive,
   type ToolCallMessagePartProps,
-  type Unstable_DirectiveFormatter,
-  unstable_defaultDirectiveFormatter,
   unstable_useMentionAdapter,
   unstable_useSlashCommandAdapter,
+  unstable_useTriggerPopoverScopeContext,
+  useComposer,
+  useComposerRuntime,
   useMessage,
   useThread,
+  useThreadComposerAttachment,
 } from "@assistant-ui/react";
 import * as Popover from "@radix-ui/react-popover";
 import { Command } from "cmdk";
@@ -44,7 +46,11 @@ import {
 } from "lucide-react";
 import Image from "next/image";
 import {
+  createContext,
+  forwardRef,
   Fragment,
+  useCallback,
+  useContext,
   useEffect,
   useId,
   useMemo,
@@ -85,6 +91,13 @@ import {
 } from "@/lib/agent-turn-summary.mjs";
 import { toolOutcomeFromArtifact } from "@/lib/tool-failure.mjs";
 import {
+  createWikiComposerAttachment,
+  isWikiComposerAttachment,
+  layoutWikiComposerMentions,
+  wikiComposerMentionText,
+  wikiReferencesFromAttachments,
+} from "@/lib/wiki-composer-reference";
+import {
   COMPOSER_SLASH_COPY,
   PLAN_MODE_COMMAND,
   PLAN_MODE_COPY,
@@ -107,39 +120,41 @@ import { useProjectComposerBranchControl } from "@/components/assistant-ui/proje
 
 export const Thread: FC = () => {
   return (
-    <ThreadPrimitive.Root
-      className="relative flex h-full flex-col overflow-hidden bg-transparent"
-      style={{ ["--thread-max-width" as string]: "52rem" }}
-    >
-      <ThreadPrimitive.If empty>
-        <div className="cocola-cloud-field" aria-hidden="true" />
-      </ThreadPrimitive.If>
-      <ThreadPrimitive.Viewport className="relative z-10 flex flex-1 flex-col items-center overflow-y-auto scroll-smooth px-5 pt-8 [scrollbar-gutter:stable_both-edges]">
-        <ThreadWelcome />
-
-        <ActiveExecutionDock />
-
-        <ThreadPrimitive.Messages
-          components={{
-            UserMessage,
-            AssistantMessage,
-          }}
-        />
-
-        <ThreadPrimitive.If empty={false}>
-          <div className="min-h-8 flex-grow" />
+    <WikiMentionCatalogProvider>
+      <ThreadPrimitive.Root
+        className="relative flex h-full flex-col overflow-hidden bg-transparent"
+        style={{ ["--thread-max-width" as string]: "52rem" }}
+      >
+        <ThreadPrimitive.If empty>
+          <div className="cocola-cloud-field" aria-hidden="true" />
         </ThreadPrimitive.If>
+        <ThreadPrimitive.Viewport className="relative z-10 flex flex-1 flex-col items-center overflow-y-auto scroll-smooth px-5 pt-8 [scrollbar-gutter:stable_both-edges]">
+          <ThreadWelcome />
 
-        {/* Docked composer, only while a conversation is in progress. On the
+          <ActiveExecutionDock />
+
+          <ThreadPrimitive.Messages
+            components={{
+              UserMessage,
+              AssistantMessage,
+            }}
+          />
+
+          <ThreadPrimitive.If empty={false}>
+            <div className="min-h-8 flex-grow" />
+          </ThreadPrimitive.If>
+
+          {/* Docked composer, only while a conversation is in progress. On the
             empty state the composer lives centered inside ThreadWelcome. */}
-        <ThreadPrimitive.If empty={false}>
-          <div className="sticky bottom-0 z-30 mt-3 flex w-full max-w-[var(--thread-max-width)] flex-col items-center justify-end bg-gradient-to-t from-background via-background to-background/0 pt-4 pb-5">
-            <ScrollToBottom />
-            <ConversationComposer />
-          </div>
-        </ThreadPrimitive.If>
-      </ThreadPrimitive.Viewport>
-    </ThreadPrimitive.Root>
+          <ThreadPrimitive.If empty={false}>
+            <div className="sticky bottom-0 z-30 mt-3 flex w-full max-w-[var(--thread-max-width)] flex-col items-center justify-end bg-gradient-to-t from-background via-background to-background/0 pt-4 pb-5">
+              <ScrollToBottom />
+              <ConversationComposer />
+            </div>
+          </ThreadPrimitive.If>
+        </ThreadPrimitive.Viewport>
+      </ThreadPrimitive.Root>
+    </WikiMentionCatalogProvider>
   );
 };
 
@@ -333,14 +348,11 @@ export const ConversationComposer: FC<{
           ) : null}
           <div className="relative min-w-0">
             <SelectedSkillChip onWidthChange={setSkillChipWidth} />
-            <ComposerPrimitive.Input
-              rows={1}
+            <ComposerWikiInput
               autoFocus={!noModel}
               disabled={noModel}
-              style={
-                selectedSkill && skillChipWidth > 0
-                  ? { textIndent: `${skillChipWidth + 8}px` }
-                  : undefined
+              textIndent={
+                selectedSkill && skillChipWidth > 0 ? `${skillChipWidth + 8}px` : undefined
               }
               placeholder={
                 runtimeConfigError
@@ -359,7 +371,6 @@ export const ConversationComposer: FC<{
                           : PLAN_MODE_COPY.initialPlaceholder
                         : placeholder || COMPOSER_SLASH_COPY.defaultPlaceholder
               }
-              className="max-h-40 min-h-12 w-full resize-none border-none bg-transparent px-2 py-2.5 text-[15px] leading-6 outline-none placeholder:text-muted-foreground focus:ring-0 disabled:cursor-not-allowed"
             />
           </div>
           <ComposerAttachments />
@@ -398,35 +409,102 @@ type WikiMentionNode = {
   extension?: string;
 };
 
-const WIKI_DIRECTIVE_FORMATTER: Unstable_DirectiveFormatter = {
-  ...unstable_defaultDirectiveFormatter,
-  serialize(item: { id: string; type: string; label: string }) {
-    return `:${item.type}[${item.label}]{name=${item.id}}`;
-  },
+type WikiMentionCatalog = {
+  nodes: WikiMentionNode[];
+  loading: boolean;
+  revision: number;
+  ensureLoaded: () => Promise<void>;
+};
+
+const WikiMentionCatalogContext = createContext<WikiMentionCatalog | null>(null);
+
+const WikiMentionCatalogProvider: FC<{ children: ReactNode }> = ({ children }) => {
+  const [nodes, setNodes] = useState<WikiMentionNode[]>([]);
+  const [loading, setLoading] = useState(false);
+  const [revision, setRevision] = useState(0);
+  const staleRef = useRef(true);
+  const requestRef = useRef<Promise<void> | null>(null);
+  const abortRef = useRef<AbortController | null>(null);
+
+  const ensureLoaded = useCallback(() => {
+    if (!staleRef.current) return Promise.resolve();
+    if (requestRef.current) return requestRef.current;
+    const controller = new AbortController();
+    abortRef.current = controller;
+    setLoading(true);
+    const request = fetch("/api/wiki/tree", {
+      cache: "no-store",
+      signal: controller.signal,
+    })
+      .then(async (response) => {
+        if (!response.ok) return;
+        const body = (await response.json()) as { nodes?: WikiMentionNode[] };
+        if (controller.signal.aborted) return;
+        setNodes(Array.isArray(body.nodes) ? body.nodes : []);
+        staleRef.current = false;
+      })
+      .catch(() => {})
+      .finally(() => {
+        if (requestRef.current !== request) return;
+        requestRef.current = null;
+        abortRef.current = null;
+        setLoading(false);
+      });
+    requestRef.current = request;
+    return request;
+  }, []);
+
+  useEffect(() => {
+    const invalidate = () => {
+      staleRef.current = true;
+      abortRef.current?.abort();
+      abortRef.current = null;
+      requestRef.current = null;
+      setLoading(false);
+      setRevision((value) => value + 1);
+    };
+    window.addEventListener("cocola:wiki-changed", invalidate);
+    return () => {
+      window.removeEventListener("cocola:wiki-changed", invalidate);
+      abortRef.current?.abort();
+    };
+  }, []);
+
+  const value = useMemo(
+    () => ({ nodes, loading, revision, ensureLoaded }),
+    [ensureLoaded, loading, nodes, revision],
+  );
+  return (
+    <WikiMentionCatalogContext.Provider value={value}>
+      {children}
+    </WikiMentionCatalogContext.Provider>
+  );
+};
+
+function useWikiMentionCatalog(): WikiMentionCatalog {
+  const catalog = useContext(WikiMentionCatalogContext);
+  if (!catalog) throw new Error("Wiki mention catalog provider is missing");
+  return catalog;
+}
+
+const WIKI_MENTION_FORMATTER = {
+  serialize: (item: { label: string }) => wikiComposerMentionText(item.label),
+  parse: (text: string) => [{ kind: "text" as const, text }],
+};
+
+const WikiMentionLoadOnOpen: FC = () => {
+  const popover = unstable_useTriggerPopoverScopeContext();
+  const { ensureLoaded, revision } = useWikiMentionCatalog();
+  useEffect(() => {
+    if (popover.open) void ensureLoaded();
+  }, [ensureLoaded, popover.open, revision]);
+  return null;
 };
 
 const ComposerWikiMentionMenu: FC = () => {
   const { questionInputLocked } = useCocola();
-  const [nodes, setNodes] = useState<WikiMentionNode[]>([]);
-
-  useEffect(() => {
-    let cancelled = false;
-    const load = () => {
-      void fetch("/api/wiki/tree", { cache: "no-store" })
-        .then(async (response) => {
-          if (!response.ok) return;
-          const body = (await response.json()) as { nodes?: WikiMentionNode[] };
-          if (!cancelled) setNodes(Array.isArray(body.nodes) ? body.nodes : []);
-        })
-        .catch(() => {});
-    };
-    load();
-    window.addEventListener("cocola:wiki-changed", load);
-    return () => {
-      cancelled = true;
-      window.removeEventListener("cocola:wiki-changed", load);
-    };
-  }, []);
+  const { loading, nodes } = useWikiMentionCatalog();
+  const composer = useComposerRuntime();
 
   const items = useMemo(
     () =>
@@ -444,7 +522,6 @@ const ComposerWikiMentionMenu: FC = () => {
   const mention = unstable_useMentionAdapter({
     items,
     includeModelContextTools: false,
-    formatter: WIKI_DIRECTIVE_FORMATTER,
   });
 
   if (questionInputLocked) return null;
@@ -452,10 +529,26 @@ const ComposerWikiMentionMenu: FC = () => {
     <ComposerPrimitive.Unstable_TriggerPopover
       char="@"
       adapter={mention.adapter}
+      isLoading={loading}
       aria-label="Reference a Wiki file"
       className="absolute bottom-[calc(100%+0.625rem)] left-0 z-50 w-full max-w-2xl overflow-hidden rounded-2xl border border-border bg-popover text-popover-foreground shadow-xl"
     >
-      <ComposerPrimitive.Unstable_TriggerPopover.Directive {...mention.directive} />
+      <WikiMentionLoadOnOpen />
+      <ComposerPrimitive.Unstable_TriggerPopover.Action
+        formatter={WIKI_MENTION_FORMATTER}
+        onExecute={(item) => {
+          void composer.addAttachment(
+            createWikiComposerAttachment(
+              {
+                nodeId: item.id,
+                filename: item.label,
+                logicalPath: item.description || item.label,
+              },
+              crypto.randomUUID(),
+            ),
+          );
+        }}
+      />
       <ComposerPrimitive.Unstable_TriggerPopoverItems>
         {(results) => (
           <div className="p-1.5">
@@ -497,6 +590,109 @@ const ComposerWikiMentionMenu: FC = () => {
     </ComposerPrimitive.Unstable_TriggerPopover>
   );
 };
+
+const ComposerWikiInput: FC<{
+  autoFocus: boolean;
+  disabled: boolean;
+  placeholder: string;
+  textIndent?: string;
+}> = ({ autoFocus, disabled, placeholder, textIndent }) => {
+  const composer = useComposerRuntime();
+  const text = useComposer((state) => state.text);
+  const attachments = useComposer((state) => state.attachments);
+  const overlayRef = useRef<HTMLDivElement>(null);
+
+  const wikiAttachments = useMemo(
+    () =>
+      attachments.flatMap((attachment, attachmentIndex) => {
+        const reference = wikiReferencesFromAttachments([attachment])[0];
+        return reference ? [{ attachmentIndex, reference }] : [];
+      }),
+    [attachments],
+  );
+  const mentionLayout = useMemo(
+    () =>
+      layoutWikiComposerMentions(
+        text,
+        wikiAttachments.map(({ reference }) => reference),
+      ),
+    [text, wikiAttachments],
+  );
+  const unmatchedAttachmentIndexes = useMemo(() => {
+    const matched = new Set(mentionLayout.matchedReferenceIndexes);
+    return wikiAttachments
+      .filter((_, referenceIndex) => !matched.has(referenceIndex))
+      .map(({ attachmentIndex }) => attachmentIndex);
+  }, [mentionLayout.matchedReferenceIndexes, wikiAttachments]);
+  const hasInlineMentions = mentionLayout.matchedReferenceIndexes.length > 0;
+
+  useEffect(() => {
+    if (unmatchedAttachmentIndexes.length === 0) return;
+    const staleAttachments = unmatchedAttachmentIndexes.map((index) =>
+      composer.getAttachmentByIndex(index),
+    );
+    void Promise.allSettled(staleAttachments.map((attachment) => attachment.remove()));
+  }, [composer, unmatchedAttachmentIndexes]);
+
+  return (
+    <>
+      {hasInlineMentions ? (
+        <ComposerWikiMentionOverlay
+          ref={overlayRef}
+          segments={mentionLayout.segments}
+          textIndent={textIndent}
+        />
+      ) : null}
+      <ComposerPrimitive.Input
+        rows={1}
+        autoFocus={autoFocus}
+        disabled={disabled}
+        style={textIndent ? { textIndent } : undefined}
+        placeholder={placeholder}
+        onScroll={(event) => {
+          if (!overlayRef.current) return;
+          overlayRef.current.scrollTop = event.currentTarget.scrollTop;
+          overlayRef.current.scrollLeft = event.currentTarget.scrollLeft;
+        }}
+        className={cn(
+          "relative z-[1] max-h-40 min-h-12 w-full resize-none border-none bg-transparent px-2 py-2.5 text-[15px] leading-6 outline-none placeholder:text-muted-foreground focus:ring-0 disabled:cursor-not-allowed",
+          hasInlineMentions &&
+            "text-transparent caret-foreground selection:bg-blue-200/60 selection:text-transparent",
+        )}
+      />
+    </>
+  );
+};
+
+const ComposerWikiMentionOverlay = forwardRef<
+  HTMLDivElement,
+  {
+    segments: ReturnType<typeof layoutWikiComposerMentions>["segments"];
+    textIndent?: string;
+  }
+>(({ segments, textIndent }, ref) => (
+  <div
+    ref={ref}
+    aria-hidden="true"
+    style={textIndent ? { textIndent } : undefined}
+    className="pointer-events-none absolute inset-0 z-0 max-h-40 min-h-12 overflow-hidden whitespace-pre-wrap break-words px-2 py-2.5 text-[15px] leading-6 text-foreground"
+  >
+    {segments.map((segment, index) =>
+      segment.reference ? (
+        <span
+          key={`${segment.reference.nodeId}-${index}`}
+          className="rounded-[4px] bg-blue-100 text-blue-700 shadow-[0_0_0_1px_rgba(37,99,235,0.18)] [box-decoration-break:clone]"
+        >
+          {segment.text}
+        </span>
+      ) : (
+        <Fragment key={index}>{segment.text}</Fragment>
+      ),
+    )}
+  </div>
+));
+
+ComposerWikiMentionOverlay.displayName = "ComposerWikiMentionOverlay";
 
 const PlanModeContextStrip: FC<{ revisingPlanVersion: number | null }> = ({
   revisingPlanVersion,
@@ -979,34 +1175,42 @@ export const ModelIcon: FC<{ icon?: ModelIconConfig; className?: string; bare?: 
   );
 };
 
-// Pending attachment chips shown inside the composer before send. Each chip
-// carries the file name plus a remove control; the runtime holds the File until
-// send(), when Base64AttachmentAdapter turns it into a base64 FileMessagePart.
+// Regular pending files stay below the text input. Wiki references are rendered
+// in place by ComposerWikiInput and therefore have no second attachment chip.
 const ComposerAttachments: FC = () => (
   <div className="flex flex-wrap gap-1.5 empty:hidden [&:not(:empty)]:pb-1.5">
     <ComposerPrimitive.Attachments
       components={{
-        Attachment: () => (
-          <AttachmentPrimitive.Root className="relative flex w-fit max-w-full self-start items-center gap-2 rounded-lg border border-border bg-muted px-3 py-1.5 text-xs text-foreground">
-            <PaperclipIcon className="size-3.5 shrink-0 text-muted-foreground" />
-            <span className="max-w-[16rem] truncate">
-              <AttachmentPrimitive.Name />
-            </span>
-            <AttachmentPrimitive.Remove asChild>
-              <button
-                type="button"
-                aria-label="Remove attachment"
-                className="ml-1 rounded-full p-0.5 text-muted-foreground transition-colors hover:bg-background hover:text-foreground"
-              >
-                <XIcon className="size-3.5" />
-              </button>
-            </AttachmentPrimitive.Remove>
-          </AttachmentPrimitive.Root>
-        ),
+        Attachment: ComposerAttachmentChip,
       }}
     />
   </div>
 );
+
+const ComposerAttachmentChip: FC = () => {
+  const isWiki = useThreadComposerAttachment((attachment) => isWikiComposerAttachment(attachment));
+  const name = useThreadComposerAttachment((attachment) => attachment.name);
+
+  if (isWiki) return null;
+
+  return (
+    <AttachmentPrimitive.Root className="relative flex w-fit max-w-full self-start items-center gap-2 rounded-lg border border-border bg-muted px-3 py-1.5 text-xs text-foreground">
+      <PaperclipIcon className="size-3.5 shrink-0 text-muted-foreground" />
+      <span className="max-w-[16rem] truncate">
+        <AttachmentPrimitive.Name />
+      </span>
+      <AttachmentPrimitive.Remove asChild>
+        <button
+          type="button"
+          aria-label={`Remove attachment ${name}`}
+          className="ml-1 rounded-full p-0.5 text-muted-foreground transition-colors hover:bg-background hover:text-foreground"
+        >
+          <XIcon className="size-3.5" />
+        </button>
+      </AttachmentPrimitive.Remove>
+    </AttachmentPrimitive.Root>
+  );
+};
 
 const ComposerAction: FC = () => {
   const { selectedModel, modelsLoaded } = useCocola();

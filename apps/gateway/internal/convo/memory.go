@@ -307,6 +307,24 @@ func (m *Memory) GetMessages(_ context.Context, convID, userID string) ([]Messag
 	return out, nil
 }
 
+func (m *Memory) GetMessage(
+	_ context.Context,
+	convID, messageID, userID string,
+) (Message, error) {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	conversation, ok := m.convs[convID]
+	if !ok || conversation.UserID != userID {
+		return Message{}, ErrNotFound
+	}
+	for _, message := range m.msgs[convID] {
+		if message.ID == messageID {
+			return message, nil
+		}
+	}
+	return Message{}, ErrNotFound
+}
+
 func messageRoleOrder(role string) int {
 	switch role {
 	case "user":

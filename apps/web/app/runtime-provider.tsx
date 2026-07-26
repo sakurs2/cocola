@@ -47,6 +47,11 @@ import {
   shouldAwaitPlanStop,
 } from "@/lib/plan-mode.mjs";
 import { canDiscardPendingProjectTask } from "@/lib/project-task-intent.mjs";
+import {
+  mergeWikiComposerReferences,
+  wikiPromptText,
+  wikiReferencesFromAttachments,
+} from "@/lib/wiki-composer-reference";
 import { reconcileWikiUserMessage } from "@/lib/wiki-message-reconciliation";
 import {
   normalizeQuestionAnswer,
@@ -2306,7 +2311,16 @@ export function CocolaRuntimeProvider({ children }: { children: ReactNode }) {
     async (message: {
       content: readonly { type: string; text?: string }[];
       attachments?: readonly {
-        content?: readonly { type: string; filename?: string; data?: string; mimeType?: string }[];
+        id?: string;
+        name?: string;
+        contentType?: string;
+        content?: readonly {
+          type: string;
+          text?: string;
+          filename?: string;
+          data?: string;
+          mimeType?: string;
+        }[];
       }[];
     }) => {
       const rawText = message.content
@@ -2317,7 +2331,15 @@ export function CocolaRuntimeProvider({ children }: { children: ReactNode }) {
         .map((p) => p.text)
         .join("\n");
       const parsedWiki = parseWikiDirectives(rawText);
-      const text = parsedWiki.text;
+      const wikiReferences = mergeWikiComposerReferences(
+        wikiReferencesFromAttachments(message.attachments ?? []),
+        parsedWiki.references.map((reference) => ({
+          nodeId: reference.nodeId,
+          filename: reference.label,
+          logicalPath: reference.label,
+        })),
+      );
+      const text = wikiPromptText(parsedWiki.text, wikiReferences);
 
       // Collect inline file attachments. Our Base64AttachmentAdapter emits a
       // single FileMessagePart per attachment carrying RAW base64 in `data`;
@@ -2389,12 +2411,12 @@ export function CocolaRuntimeProvider({ children }: { children: ReactNode }) {
               role: "user",
               parts: [
                 { type: "text", text },
-                ...parsedWiki.references.map(
+                ...wikiReferences.map(
                   (reference): UiWikiFilePart => ({
                     type: "wiki-file",
                     wikiNodeId: reference.nodeId,
-                    filename: reference.label,
-                    logicalPath: reference.label,
+                    filename: reference.filename,
+                    logicalPath: reference.logicalPath,
                     downloadUrl: `/api/wiki/files/${encodeURIComponent(reference.nodeId)}/download`,
                   }),
                 ),
@@ -2481,9 +2503,9 @@ export function CocolaRuntimeProvider({ children }: { children: ReactNode }) {
           ...(projectHint ? { project_id: projectHint } : {}),
           ...(projectBaseRef ? { project_base_ref: projectBaseRef } : {}),
           ...(attachments.length > 0 ? { attachments } : {}),
-          ...(parsedWiki.references.length > 0
+          ...(wikiReferences.length > 0
             ? {
-                wiki_refs: parsedWiki.references.map((reference) => ({
+                wiki_refs: wikiReferences.map((reference) => ({
                   node_id: reference.nodeId,
                 })),
               }
@@ -2653,15 +2675,15 @@ export function CocolaRuntimeProvider({ children }: { children: ReactNode }) {
         if (runId) {
           runCursors.current.set(turnSessionId, cursor);
           writeRunCursors(runCursors.current);
-          if (parsedWiki.references.length > 0) {
+          if (wikiReferences.length > 0) {
             void (async () => {
               try {
-                const history = await fetch(
-                  `/api/conversations/${encodeURIComponent(turnSessionId)}/messages`,
+                const message = await fetch(
+                  `/api/conversations/${encodeURIComponent(turnSessionId)}/messages?message_id=${encodeURIComponent(`${runId}-user`)}`,
                   { cache: "no-store", signal: ctrl.signal },
                 );
-                if (!history.ok) return;
-                const loaded = normalizeWireMessages(await history.json());
+                if (!message.ok) return;
+                const loaded = normalizeWireMessages(await message.json());
                 setConvMessages((previous) => ({
                   ...previous,
                   [turnSessionId]: reconcileWikiUserMessage(

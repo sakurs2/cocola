@@ -129,6 +129,52 @@ func TestChatPersistsTurn(t *testing.T) {
 	}
 }
 
+func TestConversationMessagesFiltersByMessageID(t *testing.T) {
+	t.Parallel()
+	cs := convo.NewMemory()
+	now := time.Now().UTC()
+	if err := cs.UpsertConversation(context.Background(), convo.Conversation{
+		ID: "conv-filter", UserID: auth.DevIdentity.UserID, TenantID: auth.DevIdentity.TenantID,
+		Title: "filter", CreatedAt: now, UpdatedAt: now,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	for _, message := range []convo.Message{
+		{
+			ID: "run-1-user", ConversationID: "conv-filter", Role: "user",
+			Parts: []convo.Part{{Type: convo.PartText, Text: "first"}}, CreatedAt: now,
+		},
+		{
+			ID: "run-2-user", ConversationID: "conv-filter", Role: "user",
+			Parts: []convo.Part{{Type: convo.PartText, Text: "second"}}, CreatedAt: now.Add(time.Second),
+		},
+	} {
+		if err := cs.InsertMessage(context.Background(), message); err != nil {
+			t.Fatal(err)
+		}
+	}
+	h := newAPIWithConvo(t, &fakeStreamer{}, cs)
+	recorder := httptest.NewRecorder()
+
+	h.ServeHTTP(
+		recorder,
+		httptest.NewRequest(
+			http.MethodGet,
+			"/v1/conversations/conv-filter/messages?message_id=run-2-user",
+			nil,
+		),
+	)
+
+	if recorder.Code != http.StatusOK {
+		t.Fatalf("status = %d, body=%s", recorder.Code, recorder.Body.String())
+	}
+	var messages []convo.Message
+	mustJSON(t, recorder.Body.Bytes(), &messages)
+	if len(messages) != 1 || messages[0].ID != "run-2-user" {
+		t.Fatalf("filtered messages = %#v", messages)
+	}
+}
+
 func TestChatCanRevealDeferredConversationWithExplicitTitle(t *testing.T) {
 	fs := &fakeStreamer{script: []agent.Event{
 		{Kind: "text", Data: map[string]string{"text": "done"}},

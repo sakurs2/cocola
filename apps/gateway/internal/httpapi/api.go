@@ -958,9 +958,8 @@ func (a *API) deleteConversation(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusNoContent)
 }
 
-// conversationMessages serves one conversation's history, but only if the
-// verified caller owns it (ownership miss => 404, no cross-user existence
-// oracle). Empty list when persistence is disabled.
+// conversationMessages serves one conversation's history, or a targeted
+// message when message_id is present. Both paths are ownership-scoped.
 func (a *API) conversationMessages(w http.ResponseWriter, r *http.Request) {
 	id, ok := auth.IdentityOf(r)
 	if !ok {
@@ -974,6 +973,25 @@ func (a *API) conversationMessages(w http.ResponseWriter, r *http.Request) {
 	}
 	if a.convo == nil {
 		writeJSON(w, http.StatusOK, []convo.Message{})
+		return
+	}
+	messageID := strings.TrimSpace(r.URL.Query().Get("message_id"))
+	if len(messageID) > 256 {
+		writeErr(w, http.StatusBadRequest, "INVALID_ARGUMENT", "message id is invalid")
+		return
+	}
+	if messageID != "" {
+		message, err := a.convo.GetMessage(r.Context(), convID, messageID, id.UserID)
+		if err != nil {
+			if errors.Is(err, convo.ErrNotFound) {
+				writeErr(w, http.StatusNotFound, "NOT_FOUND", "message not found")
+				return
+			}
+			a.log.Warn("get conversation message failed: " + err.Error())
+			writeErr(w, http.StatusInternalServerError, "INTERNAL", "could not load message")
+			return
+		}
+		writeJSON(w, http.StatusOK, []convo.Message{message})
 		return
 	}
 	msgs, err := a.convo.GetMessages(r.Context(), convID, id.UserID)

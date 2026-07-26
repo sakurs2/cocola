@@ -88,6 +88,71 @@ cluster_exists() {
   k3d cluster list "$CLUSTER" >/dev/null 2>&1
 }
 
+sandbox_image_repository() {
+  local image="$1"
+  image="${image%%@*}"
+  local last_segment="${image##*/}"
+  if [[ "$last_segment" == *:* ]]; then
+    image="${image%:*}"
+  fi
+  printf '%s\n' "$image"
+}
+
+cleanup_stale_sandbox_images() {
+  local node="$1"
+  local current_image_id
+  if ! current_image_id="$(
+    docker exec "$node" crictl inspecti \
+      -o go-template \
+      --template '{{.status.id}}' \
+      "$SANDBOX_IMAGE_REMOTE"
+  )"; then
+    err "could not resolve the current sandbox runtime image on k3d node $node; continuing without cleanup"
+    return 0
+  fi
+
+  local repository
+  repository="$(sandbox_image_repository "$SANDBOX_IMAGE_REMOTE")"
+
+  # crictl's reference filter is a regular expression. Match the repository
+  # exactly so cleanup never reaches similarly named or unrelated images.
+  local escaped_repository
+  escaped_repository="$(printf '%s\n' "$repository" | sed 's#[][\\.^$*+?(){}|]#\\&#g')"
+
+  local stale_image_ids
+  if ! stale_image_ids="$(
+    docker exec "$node" crictl images -q \
+      -f dangling=true \
+      -f "reference=^${escaped_repository}$"
+  )"; then
+    err "could not inspect stale sandbox runtime images on k3d node $node; continuing without cleanup"
+    return 0
+  fi
+
+  local image_id
+  while IFS= read -r image_id; do
+    [[ -n "$image_id" ]] || continue
+    if [[ "$image_id" == "$current_image_id" ]]; then
+      continue
+    fi
+
+    local container_ids
+    if ! container_ids="$(docker exec "$node" crictl ps -a -q --image "$image_id")"; then
+      log "keeping stale sandbox runtime image $image_id because its usage could not be verified"
+      continue
+    fi
+    if [[ -n "$container_ids" ]]; then
+      log "keeping stale sandbox runtime image $image_id because it is still used by a container"
+      continue
+    fi
+
+    log "removing stale sandbox runtime image from k3d node $node: $image_id"
+    if ! docker exec "$node" crictl rmi "$image_id"; then
+      log "keeping stale sandbox runtime image $image_id because removal failed"
+    fi
+  done <<<"$stale_image_ids"
+}
+
 ensure_chart() {
   if [[ ! -f "$CHART_DIR/Chart.yaml" ]]; then
     err "OpenSandbox chart not found: $CHART_DIR"
@@ -123,6 +188,7 @@ prepull_sandbox_image() {
     err "check GHCR package visibility/network access, or set COCOLA_K8S_PREPULL_SANDBOX_IMAGE=0 to skip"
     return 1
   fi
+  cleanup_stale_sandbox_images "$node"
 
   local image_fs_usage_output
   if ! image_fs_usage_output="$(docker exec "$node" df -P "$SANDBOX_IMAGE_FS_PATH")"; then
@@ -143,7 +209,14 @@ prepull_sandbox_image() {
   if (( image_fs_usage_percent > SANDBOX_IMAGE_FS_MAX_USAGE_PERCENT )); then
     err "sandbox image filesystem usage is ${image_fs_usage_percent}% after pre-pull; expected at most ${SANDBOX_IMAGE_FS_MAX_USAGE_PERCENT}%"
     err "kubelet may garbage-collect the runtime image and make sandbox startup time out"
-    err "free Docker build cache with 'docker builder prune -f' or increase Docker Desktop disk capacity, then rerun make dev"
+    local docker_context
+    docker_context="$(docker context show 2>/dev/null || true)"
+    if [[ "$docker_context" == "orbstack" ]]; then
+      err "current Docker context is OrbStack; free host disk space or unused OrbStack Docker data, then rerun make dev"
+    else
+      err "free unused data in the current Docker engine or increase its disk capacity, then rerun make dev"
+    fi
+    err "inspect Docker usage: docker system df -v"
     err "inspect usage: docker exec $node df -h $SANDBOX_IMAGE_FS_PATH"
     return 1
   fi

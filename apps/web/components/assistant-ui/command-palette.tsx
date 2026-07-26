@@ -25,14 +25,14 @@ export function CommandPalette() {
   const pathname = usePathname();
   const { data: session } = useSession();
   const { conversations, loadConversation, newConversation } = useCocola();
-  const { confirmNavigation } = useWorkspaceUnsavedChanges();
+  const { runWithNavigationGuard } = useWorkspaceUnsavedChanges();
   const [open, setOpen] = useState(false);
   const isAdmin = session?.user?.role === "admin";
   const navigateTo = useCallback(
     (href: string) => {
-      if (confirmNavigation()) router.push(href);
+      runWithNavigationGuard(() => router.push(href));
     },
-    [confirmNavigation, router],
+    [router, runWithNavigationGuard],
   );
 
   useEffect(() => {
@@ -54,9 +54,10 @@ export function CommandPalette() {
         hint: "Start a fresh workspace session",
         icon: Plus,
         run: () => {
-          if (!confirmNavigation()) return;
-          if (pathname !== "/") router.push("/");
-          newConversation();
+          runWithNavigationGuard(() => {
+            if (pathname !== "/") router.push("/");
+            newConversation();
+          });
         },
       },
       {
@@ -99,7 +100,7 @@ export function CommandPalette() {
           ]
         : []),
     ],
-    [confirmNavigation, isAdmin, navigateTo, newConversation, pathname, router],
+    [isAdmin, navigateTo, newConversation, pathname, router, runWithNavigationGuard],
   );
 
   const runAndClose = (run: () => void | Promise<void>) => {
@@ -148,13 +149,14 @@ export function CommandPalette() {
                     label={conversation.title || "Untitled"}
                     hint={new Date(conversation.updated_at).toLocaleString()}
                     onSelect={() =>
-                      runAndClose(async () => {
-                        if (!confirmNavigation()) return;
-                        if (pathname !== "/") {
-                          router.push(`/?conversation=${encodeURIComponent(conversation.id)}`);
-                          return;
-                        }
-                        await loadConversation(conversation.id);
+                      runAndClose(() => {
+                        runWithNavigationGuard(async () => {
+                          if (pathname !== "/") {
+                            router.push(`/?conversation=${encodeURIComponent(conversation.id)}`);
+                            return;
+                          }
+                          await loadConversation(conversation.id);
+                        });
                       })
                     }
                   />

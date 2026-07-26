@@ -46,13 +46,6 @@ type PrimaryNavItem = NavItem & {
 
 const PRIMARY_NAV: PrimaryNavItem[] = [
   {
-    icon: BookOpenText,
-    label: "Wiki",
-    href: "/wiki",
-    section: "navigation",
-    iconClassName: "text-blue-600",
-  },
-  {
     icon: CalendarDots,
     label: "Tasks",
     href: "/tasks",
@@ -72,6 +65,13 @@ const PRIMARY_NAV: PrimaryNavItem[] = [
     href: "/mcps",
     section: "navigation",
     iconClassName: "text-orange-600",
+  },
+  {
+    icon: BookOpenText,
+    label: "Wiki",
+    href: "/wiki",
+    section: "navigation",
+    iconClassName: "text-blue-600",
   },
   {
     icon: Cable,
@@ -99,8 +99,8 @@ export function AppSidebar({
   const { data: session } = useSession();
   const pathname = usePathname();
   const router = useRouter();
-  const { showSuccess } = useWorkspaceToast();
-  const { confirmNavigation } = useWorkspaceUnsavedChanges();
+  const { showError, showSuccess } = useWorkspaceToast();
+  const { dirty, runWithNavigationGuard } = useWorkspaceUnsavedChanges();
   const sectionRefs = useRef<Record<SidebarSection, HTMLDivElement | null>>({
     actions: null,
     navigation: null,
@@ -142,25 +142,26 @@ export function AppSidebar({
   const navigateTo = useCallback(
     (href: string) => {
       if (pathname === href || pathname?.startsWith(`${href}/`)) return;
-      if (!confirmNavigation()) return;
-      router.push(href);
+      runWithNavigationGuard(() => router.push(href));
     },
-    [confirmNavigation, pathname, router],
+    [pathname, router, runWithNavigationGuard],
   );
 
   const openNewChat = () => {
-    if (!confirmNavigation()) return;
-    newConversation();
-    if (pathname !== "/") router.push("/");
+    runWithNavigationGuard(() => {
+      newConversation();
+      if (pathname !== "/") router.push("/");
+    });
   };
 
   const openConversation = (id: string) => {
-    if (!confirmNavigation()) return;
-    if (pathname !== "/") {
-      router.push(`/?conversation=${encodeURIComponent(id)}`);
-      return;
-    }
-    void loadConversation(id);
+    runWithNavigationGuard(async () => {
+      if (pathname !== "/") {
+        router.push(`/?conversation=${encodeURIComponent(id)}`);
+        return;
+      }
+      await loadConversation(id);
+    });
   };
 
   const guardLinkNavigation = useCallback(
@@ -175,9 +176,12 @@ export function AppSidebar({
       ) {
         return;
       }
-      if (!confirmNavigation()) event.preventDefault();
+      if (!dirty) return;
+      event.preventDefault();
+      const href = event.currentTarget.getAttribute("href");
+      if (href) runWithNavigationGuard(() => router.push(href));
     },
-    [confirmNavigation],
+    [dirty, router, runWithNavigationGuard],
   );
 
   const startRename = (id: string, title: string) => {
@@ -191,8 +195,8 @@ export function AppSidebar({
     if (!title) return;
     try {
       await renameConversation(id, title);
-    } catch {
-      window.alert("Rename failed. Please try again.");
+    } catch (error) {
+      showError(error instanceof Error ? error.message : "Rename failed. Please try again.");
     }
   };
 
@@ -223,7 +227,7 @@ export function AppSidebar({
         : "Chats";
       showSuccess(`Moved to ${destination}`);
     } catch (error) {
-      window.alert(error instanceof Error ? error.message : "Could not move conversation");
+      showError(error instanceof Error ? error.message : "Could not move conversation");
     }
   };
 

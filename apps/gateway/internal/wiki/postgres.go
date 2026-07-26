@@ -45,9 +45,14 @@ func scanNode(row pgx.Row) (Node, error) {
 	return node, err
 }
 
-func scanVersion(row pgx.Row) (Version, error) {
+func scanNodeVersionPath(row pgx.Row) (Node, Version, error) {
+	var node Node
 	var version Version
+	var logicalPath string
 	err := row.Scan(
+		&node.ID, &node.ParentID, &node.Kind, &node.Name, &node.Extension,
+		&node.MimeType, &node.CurrentVersionID, &node.Revision, &node.SizeBytes,
+		&node.SHA256, &node.SortOrder, &node.CreatedAt, &node.UpdatedAt,
 		&version.ID,
 		&version.NodeID,
 		&version.Revision,
@@ -56,8 +61,19 @@ func scanVersion(row pgx.Row) (Version, error) {
 		&version.SHA256,
 		&version.MimeType,
 		&version.CreatedAt,
+		&logicalPath,
 	)
-	return version, err
+	if err != nil {
+		return Node{}, Version{}, err
+	}
+	if logicalPath == "" {
+		logicalPath = node.Name
+	}
+	node.LogicalPath = logicalPath
+	version.NodeName = node.Name
+	version.Extension = node.Extension
+	version.LogicalPath = logicalPath
+	return node, version, nil
 }
 
 func lockOwnerTree(ctx context.Context, tx pgx.Tx, identity Identity) error {
@@ -208,15 +224,43 @@ func (p *Postgres) GetCurrent(
 	identity Identity,
 	nodeID string,
 ) (Node, Version, error) {
-	node, err := p.currentNode(ctx, identity, nodeID)
-	if err != nil {
-		return Node{}, Version{}, err
-	}
-	if node.Kind != "file" || node.CurrentVersionID == "" {
+	query := `WITH RECURSIVE target AS (
+			SELECT n.id
+			FROM wiki_nodes n
+			JOIN wiki_versions v
+				ON v.id=n.current_version_id AND v.node_id=n.id
+			WHERE n.id=$3::uuid AND n.tenant_id=$1 AND n.user_id=$2
+				AND n.deleted_at IS NULL AND n.kind='file'
+		), ancestors AS (
+			SELECT n.id, n.parent_id, n.name, 1 AS depth, ARRAY[n.id] AS visited
+			FROM wiki_nodes n
+			JOIN target t ON t.id=n.id
+			UNION ALL
+			SELECT parent.id, parent.parent_id, parent.name, child.depth+1,
+				child.visited || parent.id
+			FROM wiki_nodes parent
+			JOIN ancestors child ON child.parent_id=parent.id
+			WHERE parent.tenant_id=$1 AND parent.user_id=$2
+				AND NOT parent.id=ANY(child.visited)
+		), logical_path AS (
+			SELECT COALESCE(string_agg(name, '/' ORDER BY depth DESC), '') AS value
+			FROM ancestors
+		)
+		SELECT ` + nodeColumns + `,
+			v.id::text, v.node_id::text, v.revision, v.object_key, v.size_bytes,
+			v.sha256, v.mime_type, v.created_at, logical_path.value
+		FROM target t
+		JOIN wiki_nodes n ON n.id=t.id
+		JOIN wiki_versions v
+			ON v.id=n.current_version_id AND v.node_id=n.id
+		CROSS JOIN logical_path`
+	node, version, err := scanNodeVersionPath(
+		p.pool.QueryRow(ctx, query, identity.TenantID, identity.UserID, nodeID),
+	)
+	if err == pgx.ErrNoRows {
 		return Node{}, Version{}, ErrNotFound
 	}
-	resolvedNode, version, err := p.GetVersion(ctx, identity, node.CurrentVersionID)
-	return resolvedNode, version, err
+	return node, version, err
 }
 
 func (p *Postgres) GetVersion(
@@ -224,53 +268,40 @@ func (p *Postgres) GetVersion(
 	identity Identity,
 	versionID string,
 ) (Node, Version, error) {
-	query := `SELECT ` + nodeColumns + `,
-		v.id::text, v.node_id::text, v.revision, v.object_key, v.size_bytes,
-		v.sha256, v.mime_type, v.created_at
-		FROM wiki_versions v
-		JOIN wiki_nodes n ON n.id=v.node_id
-		WHERE v.id=$3::uuid AND n.tenant_id=$1 AND n.user_id=$2`
-	row := p.pool.QueryRow(ctx, query, identity.TenantID, identity.UserID, versionID)
-	var node Node
-	var version Version
-	err := row.Scan(
-		&node.ID, &node.ParentID, &node.Kind, &node.Name, &node.Extension,
-		&node.MimeType, &node.CurrentVersionID, &node.Revision, &node.SizeBytes,
-		&node.SHA256, &node.SortOrder, &node.CreatedAt, &node.UpdatedAt,
-		&version.ID, &version.NodeID, &version.Revision, &version.ObjectKey,
-		&version.SizeBytes, &version.SHA256, &version.MimeType, &version.CreatedAt,
+	query := `WITH RECURSIVE target AS (
+			SELECT n.id, v.id AS version_id
+			FROM wiki_versions v
+			JOIN wiki_nodes n ON n.id=v.node_id
+			WHERE v.id=$3::uuid AND n.tenant_id=$1 AND n.user_id=$2
+		), ancestors AS (
+			SELECT n.id, n.parent_id, n.name, 1 AS depth, ARRAY[n.id] AS visited
+			FROM wiki_nodes n
+			JOIN target t ON t.id=n.id
+			UNION ALL
+			SELECT parent.id, parent.parent_id, parent.name, child.depth+1,
+				child.visited || parent.id
+			FROM wiki_nodes parent
+			JOIN ancestors child ON child.parent_id=parent.id
+			WHERE parent.tenant_id=$1 AND parent.user_id=$2
+				AND NOT parent.id=ANY(child.visited)
+		), logical_path AS (
+			SELECT COALESCE(string_agg(name, '/' ORDER BY depth DESC), '') AS value
+			FROM ancestors
+		)
+		SELECT ` + nodeColumns + `,
+			v.id::text, v.node_id::text, v.revision, v.object_key, v.size_bytes,
+			v.sha256, v.mime_type, v.created_at, logical_path.value
+		FROM target t
+		JOIN wiki_nodes n ON n.id=t.id
+		JOIN wiki_versions v ON v.id=t.version_id
+		CROSS JOIN logical_path`
+	node, version, err := scanNodeVersionPath(
+		p.pool.QueryRow(ctx, query, identity.TenantID, identity.UserID, versionID),
 	)
 	if err == pgx.ErrNoRows {
 		return Node{}, Version{}, ErrNotFound
 	}
-	if err != nil {
-		return Node{}, Version{}, err
-	}
-	node = PopulateLogicalPathsForNode(ctx, p, identity, node)
-	version.NodeName = node.Name
-	version.Extension = node.Extension
-	version.LogicalPath = node.LogicalPath
-	return node, version, nil
-}
-
-func PopulateLogicalPathsForNode(
-	ctx context.Context,
-	store *Postgres,
-	identity Identity,
-	node Node,
-) Node {
-	nodes, err := store.List(ctx, identity)
-	if err != nil {
-		node.LogicalPath = node.Name
-		return node
-	}
-	for _, item := range nodes {
-		if item.ID == node.ID {
-			return item
-		}
-	}
-	node.LogicalPath = node.Name
-	return node
+	return node, version, err
 }
 
 func (p *Postgres) SaveVersion(
@@ -468,40 +499,71 @@ func (p *Postgres) ResolveCurrent(
 	if len(nodeIDs) == 0 {
 		return []Node{}, []Version{}, nil
 	}
-	tree, err := p.List(ctx, identity)
+	query := `WITH RECURSIVE refs(node_id, ord) AS (
+			SELECT value::uuid, ordinality
+			FROM unnest($3::text[]) WITH ORDINALITY AS input(value, ordinality)
+		), targets AS (
+			SELECT refs.node_id, refs.ord
+			FROM refs
+			JOIN wiki_nodes n ON n.id=refs.node_id
+			JOIN wiki_versions v
+				ON v.id=n.current_version_id AND v.node_id=n.id
+			WHERE n.tenant_id=$1 AND n.user_id=$2
+				AND n.deleted_at IS NULL AND n.kind='file'
+		), ancestors AS (
+			SELECT targets.ord AS target_ord, targets.node_id AS target_id,
+				n.id, n.parent_id, n.name, 1 AS depth, ARRAY[n.id] AS visited
+			FROM targets
+			JOIN wiki_nodes n ON n.id=targets.node_id
+			UNION ALL
+			SELECT child.target_ord, child.target_id,
+				parent.id, parent.parent_id, parent.name, child.depth+1,
+				child.visited || parent.id
+			FROM wiki_nodes parent
+			JOIN ancestors child ON child.parent_id=parent.id
+			WHERE parent.tenant_id=$1 AND parent.user_id=$2
+				AND NOT parent.id=ANY(child.visited)
+		), paths AS (
+			SELECT target_ord, target_id,
+				COALESCE(string_agg(name, '/' ORDER BY depth DESC), '') AS value
+			FROM ancestors
+			GROUP BY target_ord, target_id
+		)
+		SELECT ` + nodeColumns + `,
+			v.id::text, v.node_id::text, v.revision, v.object_key, v.size_bytes,
+			v.sha256, v.mime_type, v.created_at, paths.value
+		FROM targets
+		JOIN wiki_nodes n ON n.id=targets.node_id
+		JOIN wiki_versions v
+			ON v.id=n.current_version_id AND v.node_id=n.id
+		JOIN paths
+			ON paths.target_ord=targets.ord AND paths.target_id=targets.node_id
+		ORDER BY targets.ord`
+	rows, err := p.pool.Query(ctx, query, identity.TenantID, identity.UserID, nodeIDs)
 	if err != nil {
 		return nil, nil, err
 	}
-	byID := make(map[string]Node, len(tree))
-	for _, node := range tree {
-		byID[node.ID] = node
-	}
+	defer rows.Close()
 	nodes := make([]Node, 0, len(nodeIDs))
 	versions := make([]Version, 0, len(nodeIDs))
-	for _, nodeID := range nodeIDs {
-		node, ok := byID[nodeID]
-		if !ok || node.Kind != "file" || node.CurrentVersionID == "" {
-			return nil, nil, ErrNotFound
+	for rows.Next() {
+		node, version, scanErr := scanNodeVersionPath(rows)
+		if scanErr != nil {
+			return nil, nil, scanErr
 		}
-		version, err := scanVersion(p.pool.QueryRow(ctx, `SELECT
-			id::text, node_id::text, revision, object_key, size_bytes, sha256,
-			mime_type, created_at
-			FROM wiki_versions
-			WHERE id=$1::uuid AND node_id=$2::uuid`,
-			node.CurrentVersionID,
-			node.ID,
-		))
-		if err == pgx.ErrNoRows {
-			return nil, nil, ErrNotFound
-		}
-		if err != nil {
-			return nil, nil, err
-		}
-		version.NodeName = node.Name
-		version.Extension = node.Extension
-		version.LogicalPath = node.LogicalPath
 		nodes = append(nodes, node)
 		versions = append(versions, version)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, nil, err
+	}
+	if len(nodes) != len(nodeIDs) {
+		return nil, nil, ErrNotFound
+	}
+	for index := range nodes {
+		if nodes[index].ID != nodeIDs[index] {
+			return nil, nil, ErrNotFound
+		}
 	}
 	return nodes, versions, nil
 }

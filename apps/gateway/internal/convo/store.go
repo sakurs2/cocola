@@ -235,6 +235,9 @@ type Store interface {
 	// GetMessages returns a conversation's messages in chronological order, but
 	// ONLY if userID owns it; otherwise ErrNotFound (no cross-user leak).
 	GetMessages(ctx context.Context, convID, userID string) ([]Message, error)
+	// GetMessage returns one message only when it belongs to a conversation
+	// owned by userID. Missing messages and ownership misses are indistinguishable.
+	GetMessage(ctx context.Context, convID, messageID, userID string) (Message, error)
 	// RenameConversation updates a conversation title only when userID owns it.
 	RenameConversation(ctx context.Context, convID, userID, title string) (Conversation, error)
 	// DeleteConversation deletes a conversation only when userID owns it.
