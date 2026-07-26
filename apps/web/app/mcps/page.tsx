@@ -163,7 +163,10 @@ export default function MCPPage() {
             {mcps.map((mcp) => {
               const working = workingId === mcp.id;
               return (
-                <Card key={mcp.id} className="flex flex-col p-5 shadow-card transition hover:-translate-y-0.5 hover:shadow-lg">
+                <Card
+                  key={mcp.id}
+                  className="flex flex-col p-5 shadow-card transition hover:-translate-y-0.5 hover:shadow-lg"
+                >
                   <div className="flex items-start gap-3">
                     <div className="grid size-10 shrink-0 place-items-center rounded-xl bg-orange-50 text-orange-600 ring-1 ring-orange-100">
                       <Plug className="size-5" />

@@ -8,8 +8,7 @@ export const dynamic = "force-dynamic";
 // exposed to the browser. GET /v1/quota returns the caller's own standings
 // (daily user scope + monthly tenant scope), keyed to the verified runtime
 // token.
-const LLM_GATEWAY_URL =
-  process.env.COCOLA_LLM_GATEWAY_URL ?? "http://127.0.0.1:8081";
+const LLM_GATEWAY_URL = process.env.COCOLA_LLM_GATEWAY_URL ?? "http://127.0.0.1:8081";
 
 export async function GET(_req: NextRequest) {
   const authResult = await requireUser();

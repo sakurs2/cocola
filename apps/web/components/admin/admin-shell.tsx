@@ -57,16 +57,42 @@ const NAV_GROUPS: { label: string; items: AdminNavItem[] }[] = [
       { href: "/admin/users", label: "Users", icon: UsersThree, iconClassName: "text-blue-600" },
       { href: "/admin/models", label: "Models", icon: Cpu, iconClassName: "text-violet-600" },
       { href: "/admin/skills", label: "Skills", icon: Sparkle, iconClassName: "text-amber-500" },
-      { href: "/admin/mcps", label: "MCP Servers", icon: PlugsConnected, iconClassName: "text-orange-600" },
-      { href: "/admin/toolbox", label: "Toolbox", icon: ToolboxIcon, iconClassName: "text-cyan-600" },
+      {
+        href: "/admin/mcps",
+        label: "MCP Servers",
+        icon: PlugsConnected,
+        iconClassName: "text-orange-600",
+      },
+      {
+        href: "/admin/toolbox",
+        label: "Toolbox",
+        icon: ToolboxIcon,
+        iconClassName: "text-cyan-600",
+      },
     ],
   },
   {
     label: "Operations",
     items: [
-      { href: "/admin/scheduled-tasks", label: "Tasks", icon: ClockCountdown, iconClassName: "text-green-600" },
-      { href: "/admin/audit", label: "Agent Runs", icon: FileText, match: ["/admin/traces"], iconClassName: "text-indigo-600" },
-      { href: "/admin/token-usage", label: "Token Usage", icon: ChartLineUp, iconClassName: "text-rose-600" },
+      {
+        href: "/admin/scheduled-tasks",
+        label: "Tasks",
+        icon: ClockCountdown,
+        iconClassName: "text-green-600",
+      },
+      {
+        href: "/admin/audit",
+        label: "Agent Runs",
+        icon: FileText,
+        match: ["/admin/traces"],
+        iconClassName: "text-indigo-600",
+      },
+      {
+        href: "/admin/token-usage",
+        label: "Token Usage",
+        icon: ChartLineUp,
+        iconClassName: "text-rose-600",
+      },
     ],
   },
   {
@@ -74,9 +100,24 @@ const NAV_GROUPS: { label: string; items: AdminNavItem[] }[] = [
     items: [
       { href: "/admin/sandboxes", label: "Sandboxes", icon: Stack, iconClassName: "text-teal-600" },
       { href: "/admin/sandbox-nodes", label: "Nodes", icon: Cpu, iconClassName: "text-sky-600" },
-      { href: "/admin/storage", label: "Storage", icon: HardDrives, iconClassName: "text-purple-600" },
-      { href: "/admin/architecture", label: "Architecture", icon: Graph, iconClassName: "text-fuchsia-600" },
-      { href: "/admin/component-logs", label: "Service Logs", icon: TerminalWindow, iconClassName: "text-slate-600" },
+      {
+        href: "/admin/storage",
+        label: "Storage",
+        icon: HardDrives,
+        iconClassName: "text-purple-600",
+      },
+      {
+        href: "/admin/architecture",
+        label: "Architecture",
+        icon: Graph,
+        iconClassName: "text-fuchsia-600",
+      },
+      {
+        href: "/admin/component-logs",
+        label: "Service Logs",
+        icon: TerminalWindow,
+        iconClassName: "text-slate-600",
+      },
     ],
   },
   {
@@ -196,13 +237,7 @@ function AdminBrand() {
   );
 }
 
-function AdminNavigation({
-  pathname,
-  mobile = false,
-}: {
-  pathname: string;
-  mobile?: boolean;
-}) {
+function AdminNavigation({ pathname, mobile = false }: { pathname: string; mobile?: boolean }) {
   return (
     <nav className={cn("min-h-0 flex-1 overflow-y-auto px-2 pb-3", mobile && "px-3 pt-3")}>
       <div className="mb-4">
@@ -246,7 +281,9 @@ function AdminNavLink({
           : "text-sidebar-foreground hover:bg-sidebar-accent hover:text-sidebar-accent-foreground",
       )}
     >
-      <Icon className={cn("size-4 shrink-0", item.iconClassName ?? "text-sidebar-accent-foreground")} />
+      <Icon
+        className={cn("size-4 shrink-0", item.iconClassName ?? "text-sidebar-accent-foreground")}
+      />
       <span className="truncate">{item.label}</span>
     </Link>
   );

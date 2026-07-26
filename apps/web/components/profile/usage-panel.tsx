@@ -300,9 +300,7 @@ function QuotaTile({ scope }: { scope: QuotaScope }) {
         ) : scope.exceeded ? (
           <span className="font-medium text-destructive">Limit reached</span>
         ) : (
-          <span className="text-muted-foreground">
-            {fmtInt(scope.remaining)} tokens remaining
-          </span>
+          <span className="text-muted-foreground">{fmtInt(scope.remaining)} tokens remaining</span>
         )}
       </div>
     </div>

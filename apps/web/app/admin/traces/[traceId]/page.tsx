@@ -1,8 +1,6 @@
 "use client";
 
-import {
-  Workflow as TracePageIcon,
-} from "lucide-react";
+import { Workflow as TracePageIcon } from "lucide-react";
 import {
   AlertTriangle,
   ArrowLeft,

@@ -1,8 +1,6 @@
 "use client";
 
-import {
-  Layers as SandboxesPageIcon,
-} from "lucide-react";
+import { Layers as SandboxesPageIcon } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { AdminRefreshButton } from "@/components/admin/admin-ui";
 import { cn } from "@/lib/utils";

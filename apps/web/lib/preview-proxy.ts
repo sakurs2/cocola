@@ -55,8 +55,7 @@ export async function proxyPreview(
   if (authHeaders instanceof Response) return authHeaders;
 
   const suffix = rest.map((seg) => encodeURIComponent(seg)).join("/");
-  const upstreamPath =
-    `/v1/preview/${encodeURIComponent(sessionID)}/${portNum}/${suffix}${req.nextUrl.search}`;
+  const upstreamPath = `/v1/preview/${encodeURIComponent(sessionID)}/${portNum}/${suffix}${req.nextUrl.search}`;
 
   const headers = new Headers();
   req.headers.forEach((value, name) => {

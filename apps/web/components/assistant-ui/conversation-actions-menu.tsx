@@ -77,9 +77,7 @@ export function ConversationActionsMenu({
                     <MenuItem key={folder.id} onSelect={() => onMove(folder.id)}>
                       <Folder className="size-4" />
                       <span className="max-w-40 flex-1 truncate">{folder.name}</span>
-                      {conversation.folder_id === folder.id ? (
-                        <Check className="size-4" />
-                      ) : null}
+                      {conversation.folder_id === folder.id ? <Check className="size-4" /> : null}
                     </MenuItem>
                   ))}
                 </DropdownMenu.SubContent>

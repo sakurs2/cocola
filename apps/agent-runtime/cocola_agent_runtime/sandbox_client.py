@@ -97,7 +97,6 @@ class SandboxClient:
         stdin: bytes = b"",
         timeout_secs: int = 0,
     ) -> Iterator[pb.ExecEvent]:
-
         yield from self.open_exec_stream(
             sandbox_id,
             cmd,

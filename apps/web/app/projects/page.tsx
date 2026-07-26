@@ -11,10 +11,7 @@ type ProviderFilter = "all" | "github" | "local";
 
 const BRAND_GRADIENT = "linear-gradient(135deg,#2563eb,#7c3aed)";
 
-const STATUS_META: Record<
-  ProjectSummary["status"],
-  { label: string; color: string }
-> = {
+const STATUS_META: Record<ProjectSummary["status"], { label: string; color: string }> = {
   ready: { label: "Ready", color: "#16a34a" },
   provisioning: { label: "Provisioning", color: "#d97706" },
   failed: { label: "Failed", color: "#dc2626" },
@@ -23,8 +20,7 @@ const STATUS_META: Record<
 
 function initials(name: string) {
   const parts = name.replace(/[_/-]/g, " ").split(/\s+/).filter(Boolean);
-  const raw =
-    parts.length > 1 ? `${parts[0]![0]}${parts[1]![0]}` : name.slice(0, 2);
+  const raw = parts.length > 1 ? `${parts[0]![0]}${parts[1]![0]}` : name.slice(0, 2);
   return raw.toUpperCase();
 }
 
@@ -79,8 +75,7 @@ export default function ProjectsPage() {
   ];
 
   // Shared column template so the header and every row line up perfectly.
-  const gridCols =
-    "grid-cols-[44px_1fr] sm:grid-cols-[44px_1fr_160px_120px_110px_84px]";
+  const gridCols = "grid-cols-[44px_1fr] sm:grid-cols-[44px_1fr_160px_120px_110px_84px]";
 
   return (
     <div className="h-full overflow-y-auto px-3 py-8 sm:px-5">

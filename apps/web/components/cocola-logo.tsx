@@ -15,8 +15,7 @@ export function CocolaLogo({
   ...props
 }: SVGProps<SVGSVGElement> & { mono?: boolean }) {
   const paint = mono ? "currentColor" : "url(#cocola-brand)";
-  const sparkle =
-    "M128 24 L150 106 L232 128 L150 150 L128 232 L106 150 L24 128 L106 106 Z";
+  const sparkle = "M128 24 L150 106 L232 128 L150 150 L128 232 L106 150 L24 128 L106 106 Z";
   return (
     <svg
       viewBox="0 0 256 256"

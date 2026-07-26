@@ -1,8 +1,6 @@
 "use client";
 
-import {
-  Users as UsersPageIcon,
-} from "lucide-react";
+import { Users as UsersPageIcon } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import {
   AdminAlert,

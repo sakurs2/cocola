@@ -1,8 +1,6 @@
 "use client";
 
-import {
-  Timer as ClockCountdown,
-} from "lucide-react";
+import { Timer as ClockCountdown } from "lucide-react";
 import { MoreHorizontal, Trash2 } from "lucide-react";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import {

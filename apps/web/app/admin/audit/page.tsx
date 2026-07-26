@@ -1,8 +1,6 @@
 "use client";
 
-import {
-  MessageCircle as ChatCircleDots,
-} from "lucide-react";
+import { MessageCircle as ChatCircleDots } from "lucide-react";
 import * as Popover from "@radix-ui/react-popover";
 import {
   AlertTriangle,

@@ -1,8 +1,6 @@
 "use client";
 
-import {
-  SquareTerminal as ComponentLogsPageIcon,
-} from "lucide-react";
+import { SquareTerminal as ComponentLogsPageIcon } from "lucide-react";
 import { AlertTriangle, CheckCircle2, Loader2, ScrollText } from "lucide-react";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { AdminRefreshButton } from "@/components/admin/admin-ui";

@@ -8,8 +8,7 @@ export const dynamic = "force-dynamic";
 // exposed to the browser. GET /v1/usage is keyed to the verified runtime token,
 // so a caller can only ever read their OWN usage; any client-supplied user_id is
 // ignored by the gateway when auth is enabled.
-const LLM_GATEWAY_URL =
-  process.env.COCOLA_LLM_GATEWAY_URL ?? "http://127.0.0.1:8081";
+const LLM_GATEWAY_URL = process.env.COCOLA_LLM_GATEWAY_URL ?? "http://127.0.0.1:8081";
 
 export async function GET(req: NextRequest) {
   const authResult = await requireUser();
@@ -23,10 +22,11 @@ export async function GET(req: NextRequest) {
   if (limit) params.set("limit", limit);
   const qs = params.toString();
   try {
-    const upstream = await fetch(
-      `${LLM_GATEWAY_URL}/v1/usage${qs ? `?${qs}` : ""}`,
-      { method: "GET", cache: "no-store", headers: { ...authHeaders } },
-    );
+    const upstream = await fetch(`${LLM_GATEWAY_URL}/v1/usage${qs ? `?${qs}` : ""}`, {
+      method: "GET",
+      cache: "no-store",
+      headers: { ...authHeaders },
+    });
     const text = await upstream.text();
     return new Response(text || null, {
       status: upstream.status,

@@ -5,8 +5,10 @@ import { cn } from "@/lib/utils";
 // Implemented as a plain button (role=switch) to avoid adding a new Radix
 // dependency. Authored against the design tokens in app/globals.css.
 
-export interface SwitchProps
-  extends Omit<React.ButtonHTMLAttributes<HTMLButtonElement>, "onChange"> {
+export interface SwitchProps extends Omit<
+  React.ButtonHTMLAttributes<HTMLButtonElement>,
+  "onChange"
+> {
   checked?: boolean;
   onCheckedChange?: (checked: boolean) => void;
 }

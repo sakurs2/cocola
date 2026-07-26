@@ -1,8 +1,6 @@
 "use client";
 
-import {
-  Workflow as ArchitecturePageIcon,
-} from "lucide-react";
+import { Workflow as ArchitecturePageIcon } from "lucide-react";
 import { ExternalLink, LoaderCircle } from "lucide-react";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { AdminPageHeader, AdminRefreshButton } from "@/components/admin/admin-ui";
@@ -43,10 +41,7 @@ const LAYER_ORDER = [
   "Infrastructure",
 ];
 
-const STATUS_STYLES: Record<
-  string,
-  { dot: string; ring: string; badge: string; label: string }
-> = {
+const STATUS_STYLES: Record<string, { dot: string; ring: string; badge: string; label: string }> = {
   healthy: {
     dot: "bg-emerald-400",
     ring: "ring-emerald-400/40",
@@ -269,9 +264,7 @@ function NodeCard({
       onClick={onSelect}
       style={style}
       className={`group flex w-full items-center gap-3 rounded-xl border bg-background px-3.5 py-3 text-left transition-colors ${
-        selected
-          ? "border-primary ring-1 ring-primary/40"
-          : "border-border hover:border-primary/50"
+        selected ? "border-primary ring-1 ring-primary/40" : "border-border hover:border-primary/50"
       } ${className ?? ""}`}
     >
       <span className={`grid size-4.5 shrink-0 place-items-center rounded-full ring-4 ${s.ring}`}>

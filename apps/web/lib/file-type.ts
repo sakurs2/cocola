@@ -104,18 +104,78 @@ const extIcon: Record<string, string> = {
 };
 
 const textExts = new Set([
-  "py","js","mjs","cjs","ts","tsx","jsx","go","rs","java","cs","php","rb",
-  "c","h","cpp","cc","cxx","hpp","sh","bash","zsh","ps1","vue","css","scss",
-  "less","html","htm","xml","json","yaml","yml","toml","sql","lock","ini",
-  "conf","cfg","env","md","markdown","txt","rtf","csv","tsv","svg",
+  "py",
+  "js",
+  "mjs",
+  "cjs",
+  "ts",
+  "tsx",
+  "jsx",
+  "go",
+  "rs",
+  "java",
+  "cs",
+  "php",
+  "rb",
+  "c",
+  "h",
+  "cpp",
+  "cc",
+  "cxx",
+  "hpp",
+  "sh",
+  "bash",
+  "zsh",
+  "ps1",
+  "vue",
+  "css",
+  "scss",
+  "less",
+  "html",
+  "htm",
+  "xml",
+  "json",
+  "yaml",
+  "yml",
+  "toml",
+  "sql",
+  "lock",
+  "ini",
+  "conf",
+  "cfg",
+  "env",
+  "md",
+  "markdown",
+  "txt",
+  "rtf",
+  "csv",
+  "tsv",
+  "svg",
 ]);
 
-const imageExts = new Set(["png","jpg","jpeg","gif","webp","bmp","ico","svg"]);
+const imageExts = new Set(["png", "jpg", "jpeg", "gif", "webp", "bmp", "ico", "svg"]);
 
 // Extensions that have a first-class in-app preview surface.
 const previewExts = new Set([
-  "png","jpg","jpeg","gif","webp","bmp","ico","svg","pdf","md","markdown",
-  "txt","csv","tsv","json","yaml","yml","html","htm",
+  "png",
+  "jpg",
+  "jpeg",
+  "gif",
+  "webp",
+  "bmp",
+  "ico",
+  "svg",
+  "pdf",
+  "md",
+  "markdown",
+  "txt",
+  "csv",
+  "tsv",
+  "json",
+  "yaml",
+  "yml",
+  "html",
+  "htm",
 ]);
 
 const getExt = (filename: string): string => {
@@ -135,10 +195,7 @@ const badgeFor = (ext: string, mimeType: string): string => {
  * Resolve a file's display type from its name (preferred) and MIME type.
  * Never throws; unknown types fall back to a generic document with download-only.
  */
-export const resolveFileType = (
-  filename: string,
-  mimeType = "",
-): ResolvedFileType => {
+export const resolveFileType = (filename: string, mimeType = ""): ResolvedFileType => {
   const ext = getExt(filename);
   const mime = mimeType.toLowerCase();
   const isImage = imageExts.has(ext) || mime.startsWith("image/");
@@ -156,11 +213,13 @@ export const resolveFileType = (
   }
 
   const copyable =
-    textExts.has(ext) ||
-    (!ext && (mime.startsWith("text/") || mime.includes("json")));
+    textExts.has(ext) || (!ext && (mime.startsWith("text/") || mime.includes("json")));
   const previewable =
-    isImage || previewExts.has(ext) || mime.startsWith("text/") ||
-    mime.startsWith("image/") || mime.includes("pdf");
+    isImage ||
+    previewExts.has(ext) ||
+    mime.startsWith("text/") ||
+    mime.startsWith("image/") ||
+    mime.includes("pdf");
 
   return {
     icon,

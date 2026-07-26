@@ -145,10 +145,7 @@ export function AdminMetric({
 export function AdminToolbar({ children, className }: { children: ReactNode; className?: string }) {
   return (
     <Card
-      className={cn(
-        "flex flex-col gap-3 p-3 sm:flex-row sm:flex-wrap sm:items-end",
-        className,
-      )}
+      className={cn("flex flex-col gap-3 p-3 sm:flex-row sm:flex-wrap sm:items-end", className)}
     >
       {children}
     </Card>

@@ -18,11 +18,7 @@
 // upload may carry over the client->gateway JSON hop. Client-side presigned
 // direct-to-OSS upload (which would lift this ceiling) is P1b/TODO.
 
-import type {
-  AttachmentAdapter,
-  CompleteAttachment,
-  PendingAttachment,
-} from "@assistant-ui/react";
+import type { AttachmentAdapter, CompleteAttachment, PendingAttachment } from "@assistant-ui/react";
 
 // Hard upload ceiling, configurable so it is not baked in (mirrors the
 // gateway's own configurable threshold, ADR-0017). NEXT_PUBLIC_ so it reaches

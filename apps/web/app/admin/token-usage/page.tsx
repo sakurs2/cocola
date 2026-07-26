@@ -1,8 +1,6 @@
 "use client";
 
-import {
-  BarChart3 as TokenUsagePageIcon,
-} from "lucide-react";
+import { BarChart3 as TokenUsagePageIcon } from "lucide-react";
 import {
   BarElement,
   CategoryScale,

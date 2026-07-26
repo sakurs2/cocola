@@ -1,8 +1,6 @@
 "use client";
 
-import {
-  HardDrive as StoragePageIcon,
-} from "lucide-react";
+import { HardDrive as StoragePageIcon } from "lucide-react";
 import { AlertTriangle, Database, Gauge, HardDrive, LoaderCircle, Trash2 } from "lucide-react";
 import { signOut } from "next-auth/react";
 import { useCallback, useEffect, useMemo, useState } from "react";

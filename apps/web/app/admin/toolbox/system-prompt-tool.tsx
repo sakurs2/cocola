@@ -1,8 +1,6 @@
 "use client";
 
-import {
-  FileText,
-} from "lucide-react";
+import { FileText } from "lucide-react";
 import { ArrowRight, CircleAlert, LoaderCircle, Save, ToggleLeft, ToggleRight } from "lucide-react";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { AdminAlert, AdminDrawer, AdminStatusBadge } from "@/components/admin/admin-ui";

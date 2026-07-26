@@ -95,9 +95,7 @@ export function ConversationMinimap() {
     );
     observerRef.current = io;
     for (const entry of entries) {
-      const el = document.querySelector<HTMLElement>(
-        `[data-message-id="${CSS.escape(entry.id)}"]`,
-      );
+      const el = document.querySelector<HTMLElement>(`[data-message-id="${CSS.escape(entry.id)}"]`);
       if (el) io.observe(el);
     }
     return () => io.disconnect();
@@ -125,9 +123,7 @@ export function ConversationMinimap() {
                   <span
                     className={cn(
                       "h-1.5 rounded-full bg-muted-foreground/40 transition-all duration-150 group-hover/minimap:w-4",
-                      active
-                        ? "w-4 bg-primary"
-                        : "w-2.5 hover:w-4 hover:bg-muted-foreground/70",
+                      active ? "w-4 bg-primary" : "w-2.5 hover:w-4 hover:bg-muted-foreground/70",
                     )}
                   />
                 </button>
@@ -140,9 +136,7 @@ export function ConversationMinimap() {
                   collisionPadding={12}
                   className="z-50 max-w-xs rounded-md border border-neutral-200 bg-white px-3 py-2 text-xs text-neutral-900 shadow-lg"
                 >
-                  <div className="whitespace-pre-wrap break-words leading-5">
-                    {entry.text}
-                  </div>
+                  <div className="whitespace-pre-wrap break-words leading-5">{entry.text}</div>
                   {entry.time !== null && (
                     <div className="mt-1 font-medium text-neutral-400">
                       {formatTime(entry.time)}

@@ -1,8 +1,6 @@
 "use client";
 
-import {
-  Sparkles as SkillsPageIcon,
-} from "lucide-react";
+import { Sparkles as SkillsPageIcon } from "lucide-react";
 import { ChangeEvent, useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import {

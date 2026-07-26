@@ -1,8 +1,6 @@
 "use client";
 
-import {
-  Plug as McpPageIcon,
-} from "lucide-react";
+import { Plug as McpPageIcon } from "lucide-react";
 import { useCallback, useEffect, useState, type ReactNode } from "react";
 import {
   ChevronDown,

@@ -1,8 +1,6 @@
 "use client";
 
-import {
-  Settings as SettingsPageIcon,
-} from "lucide-react";
+import { Settings as SettingsPageIcon } from "lucide-react";
 import { AlertTriangle, Check, Loader2, RotateCcw, Save, SlidersHorizontal } from "lucide-react";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { AdminRefreshButton } from "@/components/admin/admin-ui";

@@ -30,7 +30,9 @@ export default function AdminSkillDetailPage({ params }: { params: { id: string 
     let cancelled = false;
     void (async () => {
       try {
-        const res = await fetch(`/api/admin/skills/${encodeURIComponent(id)}`, { cache: "no-store" });
+        const res = await fetch(`/api/admin/skills/${encodeURIComponent(id)}`, {
+          cache: "no-store",
+        });
         if (!res.ok) throw new Error(await readError(res));
         const data = await res.json();
         if (!cancelled) setSkill(data);

@@ -1,8 +1,6 @@
 "use client";
 
-import {
-  Cpu as SandboxNodesPageIcon,
-} from "lucide-react";
+import { Cpu as SandboxNodesPageIcon } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { AdminRefreshButton } from "@/components/admin/admin-ui";
 import { cn } from "@/lib/utils";

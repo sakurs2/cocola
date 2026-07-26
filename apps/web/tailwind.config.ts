@@ -29,16 +29,13 @@ const config: Config = {
         system: [
           "-apple-system",
           "BlinkMacSystemFont",
-          "\"SF Pro Text\"",
-          "\"PingFang SC\"",
-          "\"Segoe UI\"",
-          "\"Microsoft YaHei\"",
+          '"SF Pro Text"',
+          '"PingFang SC"',
+          '"Segoe UI"',
+          '"Microsoft YaHei"',
           ...defaultTheme.fontFamily.sans,
         ],
-        mono: [
-          "var(--font-geist-mono)",
-          ...defaultTheme.fontFamily.mono,
-        ],
+        mono: ["var(--font-geist-mono)", ...defaultTheme.fontFamily.mono],
       },
       colors: {
         border: "hsl(var(--border))",
