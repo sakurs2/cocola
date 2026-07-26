@@ -1179,6 +1179,7 @@ function FileView({
           </div>
         ) : (
           <WikiMarkdownEditor
+            key={node.id}
             value={content}
             readOnly={state === "saving" || state === "conflict"}
             onChange={(next) => {

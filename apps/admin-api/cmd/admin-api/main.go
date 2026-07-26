@@ -43,6 +43,7 @@ package main
 import (
 	"context"
 	"errors"
+	"fmt"
 	"net/http"
 	"os"
 	"strconv"
@@ -160,6 +161,13 @@ func main() {
 		WithMemoryEmbeddingDimension(getenvInt("COCOLA_MEMORY_EMBEDDING_DIMENSION", 1024)).
 		WithMemoryOpenVikingURL(getenv("COCOLA_OPENVIKING_URL", "http://127.0.0.1:1933")).
 		WithConfigSecretKey(configSecret)
+	replayCtx, replayCancel := context.WithTimeout(context.Background(), 30*time.Second)
+	replayed, err := replayRevokedTokens(replayCtx, svc, pub)
+	replayCancel()
+	if err != nil {
+		log.Sugar().Fatalf("replay revoked tokens to shared Redis: %v", err)
+	}
+	log.Sugar().Infow("revoked token denylist replayed", "count", replayed)
 	migrationCtx, migrationCancel := context.WithTimeout(context.Background(), 30*time.Second)
 	if err := svc.MigrateLegacyMCPSecrets(migrationCtx); err != nil {
 		migrationCancel()
@@ -269,6 +277,31 @@ func main() {
 	if err := srv.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
 		log.Sugar().Fatalf("serve: %v", err)
 	}
+}
+
+type revokedTokenSource interface {
+	RevokedIDs(context.Context) ([]string, error)
+}
+
+type revocationPublisher interface {
+	Revoke(context.Context, string) error
+}
+
+func replayRevokedTokens(
+	ctx context.Context,
+	source revokedTokenSource,
+	publisher revocationPublisher,
+) (int, error) {
+	ids, err := source.RevokedIDs(ctx)
+	if err != nil {
+		return 0, fmt.Errorf("list revoked tokens: %w", err)
+	}
+	for index, id := range ids {
+		if err := publisher.Revoke(ctx, id); err != nil {
+			return index, fmt.Errorf("publish token %q: %w", id, err)
+		}
+	}
+	return len(ids), nil
 }
 
 func getenv(k, def string) string {

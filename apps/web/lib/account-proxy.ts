@@ -44,15 +44,6 @@ export async function mutateAccount(
     });
   }
   const account = JSON.parse(raw) as AccountRecord;
-  await unstable_update({
-    user: {
-      id: account.id,
-      username: account.username,
-      email: account.email,
-      name: account.name,
-      role: account.role,
-      version: account.version,
-    },
-  });
+  await unstable_update({});
   return Response.json(account);
 }

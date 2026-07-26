@@ -30,7 +30,6 @@ export async function POST(req: NextRequest) {
   const authHeaders = await runtimeAuthHeaders(authResult.user);
   if (authHeaders instanceof Response) return authHeaders;
   const tokenDuration = Date.now() - tokenStartedAt;
-  const body = await req.text();
   const traceparent = `00-${randomBytes(16).toString("hex")}-${randomBytes(8).toString("hex")}-01`;
 
   let upstream: Response;
@@ -45,7 +44,7 @@ export async function POST(req: NextRequest) {
         "x-cocola-runtime-token-ms": String(tokenDuration),
         ...authHeaders,
       },
-      body,
+      body: req.body,
       signal: req.signal,
       // Stream the response instead of buffering it.
       // @ts-expect-error - duplex is required by Node fetch for streaming bodies

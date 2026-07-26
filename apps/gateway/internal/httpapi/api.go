@@ -583,6 +583,7 @@ type attachmentDTO struct {
 	Filename   string `json:"filename"`
 	ContentB64 string `json:"content_b64"`
 	Mime       string `json:"mime"`
+	Content    []byte `json:"-"`
 }
 
 type wikiRefDTO struct {

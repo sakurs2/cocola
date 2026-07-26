@@ -26,5 +26,6 @@ declare module "next-auth/jwt" {
     username?: string;
     role?: "user" | "admin";
     version?: number;
+    authVersion?: number;
   }
 }

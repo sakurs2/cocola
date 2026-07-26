@@ -4,6 +4,8 @@ import (
 	"context"
 	"encoding/base64"
 	"encoding/json"
+	"errors"
+	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -776,9 +778,9 @@ func TestChatDecodesAndForwardsAttachments(t *testing.T) {
 	}
 }
 
-// TestChatDropsAttachmentWithInvalidBase64 proves a malformed content_b64 is
-// skipped (dropped) rather than aborting the whole request.
-func TestChatDropsAttachmentWithInvalidBase64(t *testing.T) {
+// TestChatRejectsAttachmentWithInvalidBase64 proves malformed content is
+// rejected before a Run is created.
+func TestChatRejectsAttachmentWithInvalidBase64(t *testing.T) {
 	fs := &fakeStreamer{script: []agent.Event{{Kind: "done"}}}
 	h := newAPI(t, fs)
 
@@ -787,11 +789,78 @@ func TestChatDropsAttachmentWithInvalidBase64(t *testing.T) {
 	rec := httptest.NewRecorder()
 	h.ServeHTTP(rec, req)
 
-	if rec.Code != http.StatusOK {
-		t.Fatalf("want 200, got %d", rec.Code)
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("want 400, got %d: %s", rec.Code, rec.Body.String())
 	}
 	if len(fs.gotQuery.Attachments) != 0 {
-		t.Fatalf("invalid-base64 attachment should be dropped, got %d", len(fs.gotQuery.Attachments))
+		t.Fatalf("invalid-base64 request reached the agent with %d attachments", len(fs.gotQuery.Attachments))
+	}
+}
+
+func TestChatRejectsMoreThanEightAttachments(t *testing.T) {
+	fs := &fakeStreamer{script: []agent.Event{{Kind: "done"}}}
+	h := newAPI(t, fs)
+	attachments := make([]map[string]string, maxChatAttachments+1)
+	for index := range attachments {
+		attachments[index] = map[string]string{
+			"filename":    fmt.Sprintf("%d.txt", index),
+			"mime":        "text/plain",
+			"content_b64": "eA==",
+		}
+	}
+	body, err := json.Marshal(map[string]any{
+		"prompt": "hi", "session_id": "s1", "attachments": attachments,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	rec := httptest.NewRecorder()
+	h.ServeHTTP(rec, httptest.NewRequest(http.MethodPost, "/v1/chat", strings.NewReader(string(body))))
+	if rec.Code != http.StatusRequestEntityTooLarge {
+		t.Fatalf("want 413, got %d: %s", rec.Code, rec.Body.String())
+	}
+}
+
+type repeatedByteReader struct {
+	value byte
+	left  int64
+}
+
+func (r *repeatedByteReader) Read(dst []byte) (int, error) {
+	if r.left <= 0 {
+		return 0, io.EOF
+	}
+	size := int64(len(dst))
+	if size > r.left {
+		size = r.left
+	}
+	for index := int64(0); index < size; index++ {
+		dst[index] = r.value
+	}
+	r.left -= size
+	return int(size), nil
+}
+
+func TestChatRejectsBodyAboveFortyEightMiB(t *testing.T) {
+	h := newAPI(t, &fakeStreamer{})
+	body := io.MultiReader(
+		strings.NewReader(`{"prompt":"hi","session_id":"s1"}`),
+		&repeatedByteReader{value: ' ', left: maxChatRequestBytes},
+	)
+	rec := httptest.NewRecorder()
+	h.ServeHTTP(rec, httptest.NewRequest(http.MethodPost, "/v1/chat", body))
+	if rec.Code != http.StatusRequestEntityTooLarge {
+		t.Fatalf("want 413, got %d: %s", rec.Code, rec.Body.String())
+	}
+}
+
+func TestDecodeChatAttachmentsEnforcesDecodedTotal(t *testing.T) {
+	attachments := []attachmentDTO{
+		{Filename: "one.txt", ContentB64: b64("12345")},
+		{Filename: "two.txt", ContentB64: b64("67890")},
+	}
+	if err := decodeChatAttachments(attachments, 8, 9); !errors.Is(err, errChatAttachmentLimit) {
+		t.Fatalf("want decoded total limit error, got %v", err)
 	}
 }
 

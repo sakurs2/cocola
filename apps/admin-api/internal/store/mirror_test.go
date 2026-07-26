@@ -116,7 +116,7 @@ func TestMirrorPublishesQuotaSetAndDelete(t *testing.T) {
 	}
 }
 
-func TestMirrorPublishErrorIsBestEffort(t *testing.T) {
+func TestMirrorRevokePublishErrorIsRetriable(t *testing.T) {
 	ctx := context.Background()
 	inner := NewMemory()
 	if err := inner.CreateToken(ctx, TokenRecord{ID: "jti-2", UserID: "u"}); err != nil {
@@ -128,9 +128,10 @@ func TestMirrorPublishErrorIsBestEffort(t *testing.T) {
 	mirror := NewMirror(inner, pub)
 	mirror.(*Mirror).OnPublishError = func(op string, err error) { gotOp, gotErr = op, err }
 
-	// The publish fails, but the admin op must still succeed (write already landed).
-	if err := mirror.RevokeToken(ctx, "jti-2", time.Now()); err != nil {
-		t.Fatalf("revoke must not fail on publish error: %v", err)
+	// PostgreSQL has already recorded the revoke, but the operation is not
+	// confirmed until the shared denylist is updated.
+	if err := mirror.RevokeToken(ctx, "jti-2", time.Now()); err == nil {
+		t.Fatal("revoke must report the publish error")
 	}
 	rev, _ := inner.IsRevoked(ctx, "jti-2")
 	if !rev {
@@ -138,5 +139,11 @@ func TestMirrorPublishErrorIsBestEffort(t *testing.T) {
 	}
 	if gotOp != "revoke" || gotErr == nil {
 		t.Fatalf("expected OnPublishError(revoke, err), got (%q, %v)", gotOp, gotErr)
+	}
+	if err := mirror.RevokeToken(ctx, "jti-2", time.Now()); err != nil {
+		t.Fatalf("retry revoke: %v", err)
+	}
+	if len(pub.revoked) != 1 || pub.revoked[0] != "jti-2" {
+		t.Fatalf("retry did not repair the shared denylist: %v", pub.revoked)
 	}
 }

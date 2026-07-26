@@ -1,5 +1,6 @@
 import NextAuth from "next-auth";
 import Credentials from "next-auth/providers/credentials";
+import { AUTH_SESSION_VERSION, authTokenUserID } from "@/lib/auth-session-policy.mjs";
 
 const ADMIN_URL = process.env.COCOLA_ADMIN_URL ?? "http://127.0.0.1:8092";
 
@@ -27,6 +28,35 @@ async function authenticate(identifier: string, password: string): Promise<Cocol
   return user;
 }
 
+function applyTrustedUser(token: Record<string, unknown>, user: CocolaLoginUser) {
+  token.id = user.id;
+  token.username = user.username;
+  token.email = user.email;
+  token.name = user.name;
+  token.role = user.role;
+  token.version = user.version;
+  token.authVersion = AUTH_SESSION_VERSION;
+}
+
+async function refreshAuthenticatedUser(userID: string): Promise<CocolaLoginUser | null> {
+  const headers: Record<string, string> = { "x-cocola-admin": "auth-session-refresh" };
+  const adminKey = process.env.COCOLA_ADMIN_KEY;
+  if (adminKey) headers.authorization = `Bearer ${adminKey}`;
+  try {
+    const res = await fetch(`${ADMIN_URL}/admin/users/${encodeURIComponent(userID)}`, {
+      method: "GET",
+      cache: "no-store",
+      headers,
+    });
+    if (!res.ok) return null;
+    const user = (await res.json()) as CocolaLoginUser;
+    if (!user.enabled || user.id !== userID || !user.email) return null;
+    return user;
+  } catch {
+    return null;
+  }
+}
+
 export const { handlers, auth, signIn, signOut, unstable_update } = NextAuth({
   session: { strategy: "jwt" },
   pages: { signIn: "/login" },
@@ -46,23 +76,18 @@ export const { handlers, auth, signIn, signOut, unstable_update } = NextAuth({
   ],
   callbacks: {
     authorized: ({ auth }) => Boolean(auth?.user),
-    jwt({ token, user, trigger, session }) {
+    async jwt({ token, user, trigger }) {
       if (user) {
-        const u = user as CocolaLoginUser;
-        token.id = u.id;
-        token.username = u.username;
-        token.email = u.email;
-        token.name = u.name;
-        token.role = u.role;
-        token.version = u.version;
+        applyTrustedUser(token, user as CocolaLoginUser);
+        return token;
       }
-      if (trigger === "update" && session?.user) {
-        token.id = session.user.id;
-        token.username = session.user.username;
-        token.email = session.user.email;
-        token.name = session.user.name;
-        token.role = session.user.role;
-        token.version = session.user.version;
+
+      const userID = authTokenUserID(token);
+      if (!userID) return null;
+      if (trigger === "update") {
+        const refreshed = await refreshAuthenticatedUser(userID);
+        if (!refreshed) return null;
+        applyTrustedUser(token, refreshed);
       }
       return token;
     },

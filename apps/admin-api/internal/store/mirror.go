@@ -30,11 +30,9 @@ type Publisher interface {
 // Mirror wraps a Store and mirrors the two gateway-read resources (revocations,
 // quota overrides) to a Publisher after the authoritative write succeeds.
 //
-// Publish is best-effort: the authoritative write already landed in the inner
-// Store, so a Publisher failure must not fail the admin operation. Instead it is
-// reported via OnPublishError (nil = ignore) so the caller can log it. This
-// mirrors the codebase convention that propagation side-effects (like the audit
-// log) never fail the underlying operation.
+// Revocation publishing is synchronous because the admin operation is only
+// complete once every gateway can observe the denylist entry. Quota publishing
+// remains best-effort and is reported through OnPublishError.
 type Mirror struct {
 	Store
 	pub Publisher
@@ -66,7 +64,10 @@ func (m *Mirror) RevokeToken(ctx context.Context, id string, at time.Time) error
 	if err := m.Store.RevokeToken(ctx, id, at); err != nil {
 		return err
 	}
-	m.onErr("revoke", m.pub.Revoke(ctx, id))
+	if err := m.pub.Revoke(ctx, id); err != nil {
+		m.onErr("revoke", err)
+		return err
+	}
 	return nil
 }
 

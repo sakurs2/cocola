@@ -35,6 +35,7 @@ import { useEffect, useRef, useState, type MouseEvent, type ReactNode } from "re
 import type { Editor } from "@tiptap/core";
 import { TextInputDialog } from "@/components/ui/action-dialog";
 import { cn } from "@/lib/utils";
+import { isLosslessMarkdownRoundTrip } from "@/lib/wiki-markdown-compat.mjs";
 import styles from "./wiki-markdown-editor.module.css";
 
 const editorExtensions = [
@@ -71,6 +72,7 @@ export function WikiMarkdownEditor({
 }) {
   const appliedValue = useRef<string | null>(null);
   const onChangeRef = useRef(onChange);
+  const [mode, setMode] = useState<"checking" | "rich" | "source">("checking");
   onChangeRef.current = onChange;
 
   const editor = useEditor({
@@ -95,21 +97,53 @@ export function WikiMarkdownEditor({
 
   useEffect(() => {
     if (!editor || appliedValue.current === value) return;
+    if (mode === "source") {
+      appliedValue.current = value;
+      return;
+    }
     editor.commands.setContent(value, {
       contentType: "markdown",
       emitUpdate: false,
     });
     appliedValue.current = value;
-  }, [editor, value]);
+    if (mode === "checking") {
+      setMode(isLosslessMarkdownRoundTrip(value, editor.getMarkdown()) ? "rich" : "source");
+    }
+  }, [editor, mode, value]);
 
   useEffect(() => {
     editor?.setEditable(!readOnly, false);
   }, [editor, readOnly]);
 
+  if (mode === "source") {
+    return (
+      <div className={styles.editorShell}>
+        <div className={styles.sourceWarning} role="status">
+          This page uses Markdown syntax that the rich-text editor cannot safely preserve. Edit the
+          source directly to keep all content intact.
+        </div>
+        <textarea
+          aria-label="Markdown source editor"
+          className={styles.sourceEditor}
+          value={value}
+          readOnly={readOnly}
+          spellCheck
+          onChange={(event) => onChangeRef.current(event.target.value)}
+        />
+      </div>
+    );
+  }
+
   return (
     <div className={styles.editorShell}>
-      {editor ? <EditorToolbar editor={editor} readOnly={readOnly} /> : null}
-      <EditorContent editor={editor} className={styles.editorContent} />
+      {mode === "rich" && editor ? (
+        <>
+          <EditorToolbar editor={editor} readOnly={readOnly} />
+          <EditorContent editor={editor} className={styles.editorContent} />
+        </>
+      ) : (
+        <div className={styles.editorChecking}>Checking Markdown compatibility…</div>
+      )}
     </div>
   );
 }

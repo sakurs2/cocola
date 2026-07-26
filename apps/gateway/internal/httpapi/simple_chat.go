@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"net/http"
 	"strconv"
 	"strings"
@@ -39,6 +40,10 @@ const (
 	subscriberBuffer     = 64
 	maxWikiRefsPerTurn   = 20
 	maxWikiBytesPerTurn  = int64(100 << 20)
+	maxChatRequestBytes  = int64(48 << 20)
+	maxChatAttachments   = 8
+	maxChatAttachment    = int64(32 << 20)
+	maxChatAttachmentSum = int64(32 << 20)
 )
 
 type RunConfig struct {
@@ -175,14 +180,61 @@ func (a *API) chat(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var req chatRequest
+	r.Body = http.MaxBytesReader(w, r.Body, maxChatRequestBytes)
 	decoder := json.NewDecoder(r.Body)
 	decoder.DisallowUnknownFields()
 	if err := decoder.Decode(&req); err != nil {
+		var maxBytesErr *http.MaxBytesError
+		if errors.As(err, &maxBytesErr) {
+			writeErr(
+				w,
+				http.StatusRequestEntityTooLarge,
+				"CHAT_REQUEST_TOO_LARGE",
+				"chat request body exceeds the 48 MiB limit",
+			)
+			return
+		}
+		writeErr(w, http.StatusBadRequest, "INVALID_ARGUMENT", "malformed JSON body")
+		return
+	}
+	if err := decoder.Decode(&struct{}{}); !errors.Is(err, io.EOF) {
+		var maxBytesErr *http.MaxBytesError
+		if errors.As(err, &maxBytesErr) {
+			writeErr(
+				w,
+				http.StatusRequestEntityTooLarge,
+				"CHAT_REQUEST_TOO_LARGE",
+				"chat request body exceeds the 48 MiB limit",
+			)
+			return
+		}
 		writeErr(w, http.StatusBadRequest, "INVALID_ARGUMENT", "malformed JSON body")
 		return
 	}
 	if strings.TrimSpace(req.Prompt) == "" || strings.TrimSpace(req.SessionID) == "" {
 		writeErr(w, http.StatusBadRequest, "INVALID_ARGUMENT", "prompt and session_id are required")
+		return
+	}
+	if len(req.Attachments) > maxChatAttachments {
+		writeErr(
+			w,
+			http.StatusRequestEntityTooLarge,
+			"ATTACHMENT_LIMIT_EXCEEDED",
+			"too many attachments in one chat turn",
+		)
+		return
+	}
+	if err := decodeChatAttachments(req.Attachments, maxChatAttachment, maxChatAttachmentSum); err != nil {
+		if errors.Is(err, errChatAttachmentLimit) {
+			writeErr(
+				w,
+				http.StatusRequestEntityTooLarge,
+				"ATTACHMENT_LIMIT_EXCEEDED",
+				"attachments exceed the 32 MiB per-turn limit",
+			)
+			return
+		}
+		writeErr(w, http.StatusBadRequest, "INVALID_ATTACHMENT", "attachment content is not valid base64")
 		return
 	}
 	req.RuntimeID = strings.TrimSpace(req.RuntimeID)
@@ -1272,20 +1324,38 @@ func validSkillID(value string) bool {
 	return true
 }
 
+var (
+	errInvalidChatAttachment = errors.New("invalid chat attachment")
+	errChatAttachmentLimit   = errors.New("chat attachment limit exceeded")
+)
+
+func decodeChatAttachments(attachments []attachmentDTO, maxFileBytes, maxTotalBytes int64) error {
+	var totalBytes int64
+	for i := range attachments {
+		content, err := base64.StdEncoding.DecodeString(attachments[i].ContentB64)
+		if err != nil {
+			return fmt.Errorf("%w: %v", errInvalidChatAttachment, err)
+		}
+		size := int64(len(content))
+		if size > maxFileBytes || size > maxTotalBytes-totalBytes {
+			return errChatAttachmentLimit
+		}
+		totalBytes += size
+		attachments[i].Content = content
+		attachments[i].ContentB64 = ""
+	}
+	return nil
+}
+
 func (a *API) prepareRunAttachments(ctx context.Context, req chatRequest) []agent.Attachment {
 	attachments := make([]agent.Attachment, 0, len(req.Attachments))
 	for _, dto := range req.Attachments {
-		content, err := base64.StdEncoding.DecodeString(dto.ContentB64)
-		if err != nil {
-			a.log.Warn("dropping attachment with invalid base64 content")
-			continue
-		}
 		attachment := agent.Attachment{
-			Filename: dto.Filename, Content: content, Mime: dto.Mime, Size: int64(len(content)),
+			Filename: dto.Filename, Content: dto.Content, Mime: dto.Mime, Size: int64(len(dto.Content)),
 		}
 		if a.store != nil {
 			key := objectKey(req.SessionID, attachment.Filename)
-			if err := a.store.Put(ctx, key, content, attachment.Mime); err != nil {
+			if err := a.store.Put(ctx, key, dto.Content, attachment.Mime); err != nil {
 				a.log.Warn("attachment object-store upload failed, delivering inline: " + err.Error())
 			} else {
 				attachment.OssKey = key

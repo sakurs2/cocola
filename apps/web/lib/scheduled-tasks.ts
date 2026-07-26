@@ -1,3 +1,5 @@
+import { validateChatAttachments } from "@/lib/chat-attachment-limits.mjs";
+
 export type TaskStatus = "active" | "paused" | "completed" | "expired";
 export type TaskScheduleKind = "once" | "hourly" | "daily" | "weekly" | "monthly";
 
@@ -330,8 +332,15 @@ function isUsableDate(value?: string): value is string {
 
 export async function filesToAttachments(files: FileList | null): Promise<TaskAttachment[]> {
   if (!files) return [];
+  const selected = Array.from(files);
+  validateChatAttachments(
+    selected.map((file) => ({
+      filename: file.name,
+      size_bytes: file.size,
+    })),
+  );
   return Promise.all(
-    Array.from(files).map(async (file) => ({
+    selected.map(async (file) => ({
       filename: file.name,
       mime: file.type || "application/octet-stream",
       size_bytes: file.size,

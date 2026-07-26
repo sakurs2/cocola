@@ -37,6 +37,7 @@ import {
 } from "@/lib/environment";
 import { inferAgentDurationMs } from "@/lib/agent-turn-summary.mjs";
 import { selectAgentRuntime } from "@/lib/agent-runtime-policy.mjs";
+import { validateChatAttachments } from "@/lib/chat-attachment-limits.mjs";
 import {
   getOrCreatePlanExecutionRequestId,
   interactionModeForRuntime,
@@ -2356,6 +2357,7 @@ export function CocolaRuntimeProvider({ children }: { children: ReactNode }) {
             mime: p.mimeType ?? "application/octet-stream",
           })),
       );
+      validateChatAttachments(attachments);
 
       if (pendingQuestion) {
         await answerQuestion(pendingQuestion, { text });

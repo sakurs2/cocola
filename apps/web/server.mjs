@@ -29,6 +29,7 @@ import { request as httpRequest } from "node:http";
 import next from "next";
 import { getToken } from "next-auth/jwt";
 
+import { authTokenUserID } from "./lib/auth-session-policy.mjs";
 import {
   buildGatewayWebSocketPath,
   maskPreviewUpgradeFromNext,
@@ -81,12 +82,12 @@ function trackSocket(socket) {
   socket.once("close", () => activeSockets.delete(socket));
 }
 
-// --- session cookie -> user email ----------------------------------------
+// --- session cookie -> trusted user id ----------------------------------
 // The Auth.js JWT is encrypted (A256CBC-HS512) with AUTH_SECRET; getToken
 // decrypts it. The cookie name (and thus the derived salt) differs between
 // http (authjs.session-token) and https (__Secure-authjs.session-token), so we
 // try both forms.
-async function resolveUserEmail(req) {
+async function resolveUserID(req) {
   if (!AUTH_SECRET) return null;
   const cookieHeader = req.headers.cookie ?? "";
   const hasSecure = cookieHeader.includes("__Secure-authjs.session-token");
@@ -98,12 +99,28 @@ async function resolveUserEmail(req) {
         secret: AUTH_SECRET,
         secureCookie,
       });
-      if (token?.email) return String(token.email);
+      const userID = authTokenUserID(token);
+      if (userID) return userID;
     } catch {
       // try the other cookie form
     }
   }
   return null;
+}
+
+async function resolveCurrentAccount(userID) {
+  const headers = { "x-cocola-admin": "workspace-websocket" };
+  const adminKey = process.env.COCOLA_ADMIN_KEY;
+  if (adminKey) headers.authorization = `Bearer ${adminKey}`;
+  const res = await fetch(`${ADMIN_URL}/admin/users/${encodeURIComponent(userID)}`, {
+    method: "GET",
+    cache: "no-store",
+    headers,
+  });
+  if (!res.ok) return null;
+  const account = await res.json();
+  if (!account?.enabled || account.id !== userID || !account.email) return null;
+  return account;
 }
 
 // --- mint a short-lived runtime token (mirrors server-auth.runtimeAuthHeaders)
@@ -264,14 +281,19 @@ app
           writeUpgradeError(socket, 403, "Forbidden");
           return;
         }
-        const email = await resolveUserEmail(req);
-        if (!email) {
+        const userID = await resolveUserID(req);
+        if (!userID) {
           writeUpgradeError(socket, 401, "Unauthorized");
           return;
         }
         let runtimeToken;
         try {
-          runtimeToken = await mintRuntimeToken(email);
+          const account = await resolveCurrentAccount(userID);
+          if (!account) {
+            writeUpgradeError(socket, 401, "Unauthorized");
+            return;
+          }
+          runtimeToken = await mintRuntimeToken(account.email);
         } catch (err) {
           console.error("[web] workspace WS auth failed:", err.message);
           writeUpgradeError(socket, 502, "Bad Gateway");

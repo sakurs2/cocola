@@ -9,6 +9,7 @@ import TaskItem from "@tiptap/extension-task-item";
 import TaskList from "@tiptap/extension-task-list";
 import { Markdown } from "@tiptap/markdown";
 import StarterKit from "@tiptap/starter-kit";
+import { isLosslessMarkdownRoundTrip } from "./wiki-markdown-compat.mjs";
 
 const editorSource = await readFile(
   new URL("../components/wiki/wiki-markdown-editor.tsx", import.meta.url),
@@ -89,4 +90,37 @@ test("changing editability does not emit a content update", () => {
 
 test("wiki editor suppresses updates when applying its editability state", () => {
   assert.match(editorSource, /setEditable\(!readOnly,\s*false\)/);
+});
+
+test("ordinary Markdown remains in rich-text mode after a lossless round trip", () => {
+  const source = "# Page\n\nA simple paragraph.\n";
+  const editor = createEditor(source);
+  try {
+    assert.equal(isLosslessMarkdownRoundTrip(source, editor.getMarkdown()), true);
+  } finally {
+    editor.destroy();
+  }
+});
+
+test("unsupported Markdown syntax falls back to source mode", () => {
+  const documents = [
+    "---\ntitle: Page\n---\n\nBody\n",
+    '# Page\n\n<section data-kind="custom">raw html</section>\n',
+    "A statement with a footnote.[^1]\n\n[^1]: Footnote text.\n",
+  ];
+  for (const source of documents) {
+    const editor = createEditor(source);
+    try {
+      assert.equal(
+        isLosslessMarkdownRoundTrip(source, editor.getMarkdown()),
+        false,
+        `expected source fallback for ${source}`,
+      );
+    } finally {
+      editor.destroy();
+    }
+  }
+  assert.match(editorSource, /mode === "source"/);
+  assert.match(editorSource, /<textarea/);
+  assert.match(editorSource, /cannot safely preserve/);
 });
