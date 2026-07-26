@@ -2,12 +2,12 @@
 
 from __future__ import annotations
 
-from enum import Enum
+from enum import StrEnum
 
 from pydantic import BaseModel, Field
 
 
-class Env(str, Enum):
+class Env(StrEnum):
     DEV = "dev"
     STAGING = "staging"
     PROD = "prod"
