@@ -22,7 +22,7 @@
     }
   },
   "devDependencies": {
-    "prettier": "^3.8.4",
+    "prettier": "^3.9.6",
     "typescript": "^5.4.5"
   }
 }
