@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react";
 import Link from "next/link";
+import { useParams } from "next/navigation";
 import { ArrowLeft, FileText, LoaderCircle } from "lucide-react";
 
 import { Badge } from "@/components/ui/badge";
@@ -22,8 +23,9 @@ type Skill = {
   skill_md?: string;
 };
 
-export default function SkillDetailPage({ params }: { params: { id: string } }) {
-  return <SkillDetail id={params.id} />;
+export default function SkillDetailPage() {
+  const { id } = useParams<{ id: string }>();
+  return <SkillDetail id={id} />;
 }
 
 function SkillDetail({ id }: { id: string }) {

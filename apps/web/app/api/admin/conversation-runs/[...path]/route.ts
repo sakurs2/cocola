@@ -4,9 +4,9 @@ import { proxyAdmin } from "@/lib/admin-proxy";
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
-export function GET(req: NextRequest, { params }: { params: { path: string[] } }) {
+export async function GET(req: NextRequest, { params }: { params: Promise<{ path: string[] }> }) {
   return proxyAdmin(
     req,
-    `/admin/conversation-runs/${params.path.map(encodeURIComponent).join("/")}`,
+    `/admin/conversation-runs/${(await params).path.map(encodeURIComponent).join("/")}`,
   );
 }

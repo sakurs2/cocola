@@ -1,11 +1,14 @@
 import { ToolboxClient, type ToolboxToolId } from "./toolbox-client";
 
-export default function AdminToolboxPage({
+export default async function AdminToolboxPage({
   searchParams,
 }: {
-  searchParams?: { tool?: string | string[] };
+  searchParams?: Promise<{ tool?: string | string[] }>;
 }) {
-  const requested = Array.isArray(searchParams?.tool) ? searchParams?.tool[0] : searchParams?.tool;
+  const resolvedSearchParams = await searchParams;
+  const requested = Array.isArray(resolvedSearchParams?.tool)
+    ? resolvedSearchParams.tool[0]
+    : resolvedSearchParams?.tool;
   const initialTool: ToolboxToolId | null =
     requested === "system-prompt" || requested === "memory" ? requested : null;
   return <ToolboxClient initialTool={initialTool} />;

@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react";
 import Link from "next/link";
+import { useParams } from "next/navigation";
 import { ArrowLeft, FileText, LoaderCircle, Sparkles } from "lucide-react";
 
 type Skill = {
@@ -21,8 +22,8 @@ type Skill = {
   manifest_json?: unknown;
 };
 
-export default function AdminSkillDetailPage({ params }: { params: { id: string } }) {
-  const id = params.id;
+export default function AdminSkillDetailPage() {
+  const { id } = useParams<{ id: string }>();
   const [skill, setSkill] = useState<Skill | null>(null);
   const [error, setError] = useState<string | null>(null);
 

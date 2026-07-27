@@ -9,10 +9,11 @@ import { type NextRequest } from "next/server";
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
-type Params = { params: { id: string; port: string; rest?: string[] } };
+type Params = { params: Promise<{ id: string; port: string; rest?: string[] }> };
 
-function handle(req: NextRequest, { params }: Params) {
-  return proxyPreview(req, params.id, params.port, params.rest ?? []);
+async function handle(req: NextRequest, { params }: Params) {
+  const { id, port, rest } = await params;
+  return proxyPreview(req, id, port, rest ?? []);
 }
 
 export const GET = handle;

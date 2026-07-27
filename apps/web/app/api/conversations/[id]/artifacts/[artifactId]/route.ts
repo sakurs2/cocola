@@ -8,14 +8,15 @@ const GATEWAY_URL = process.env.COCOLA_GATEWAY_URL ?? "http://127.0.0.1:8080";
 
 export async function GET(
   req: NextRequest,
-  { params }: { params: { id: string; artifactId: string } },
+  { params }: { params: Promise<{ id: string; artifactId: string }> },
 ) {
   const authResult = await requireUser();
   if (isAuthFail(authResult)) return authResult.response;
   const authHeaders = await runtimeAuthHeaders(authResult.user);
   if (authHeaders instanceof Response) return authHeaders;
-  const id = encodeURIComponent(params.id);
-  const artifactId = encodeURIComponent(params.artifactId);
+  const { id: rawId, artifactId: rawArtifactId } = await params;
+  const id = encodeURIComponent(rawId);
+  const artifactId = encodeURIComponent(rawArtifactId);
   try {
     const upstream = await fetch(`${GATEWAY_URL}/v1/conversations/${id}/artifacts/${artifactId}`, {
       method: "GET",

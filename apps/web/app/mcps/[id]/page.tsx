@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react";
 import Link from "next/link";
+import { useParams } from "next/navigation";
 import { ArrowLeft, LoaderCircle, Plug } from "lucide-react";
 
 import { Badge } from "@/components/ui/badge";
@@ -18,7 +19,8 @@ type MCPServer = {
   effective_enabled: boolean;
 };
 
-export default function MCPDetailPage({ params }: { params: { id: string } }) {
+export default function MCPDetailPage() {
+  const { id } = useParams<{ id: string }>();
   const [mcp, setMcp] = useState<MCPServer | null>(null);
   const [error, setError] = useState("");
 
@@ -29,7 +31,7 @@ export default function MCPDetailPage({ params }: { params: { id: string } }) {
         const res = await fetch("/api/mcps", { cache: "no-store" });
         if (!res.ok) throw new Error(await readError(res));
         const data = (await res.json()) as { mcps?: MCPServer[] };
-        const found = (data.mcps || []).find((item) => item.id === params.id);
+        const found = (data.mcps || []).find((item) => item.id === id);
         if (!found) throw new Error("MCP not found");
         if (!cancelled) setMcp(found);
       } catch (err) {
@@ -39,7 +41,7 @@ export default function MCPDetailPage({ params }: { params: { id: string } }) {
     return () => {
       cancelled = true;
     };
-  }, [params.id]);
+  }, [id]);
 
   return (
     <main className="h-full min-w-0 flex-1 overflow-y-auto bg-background">
@@ -53,8 +55,8 @@ export default function MCPDetailPage({ params }: { params: { id: string } }) {
             <ArrowLeft className="size-4" />
           </Link>
           <div className="min-w-0 flex-1">
-            <h1 className="truncate text-2xl font-bold tracking-tight">{mcp?.name || params.id}</h1>
-            <p className="truncate text-sm text-muted-foreground">{mcp?.id || params.id}</p>
+            <h1 className="truncate text-2xl font-bold tracking-tight">{mcp?.name || id}</h1>
+            <p className="truncate text-sm text-muted-foreground">{mcp?.id || id}</p>
           </div>
         </header>
 

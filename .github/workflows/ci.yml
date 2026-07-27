@@ -32,10 +32,16 @@ jobs:
       - name: buf lint
         working-directory: packages/proto
         run: buf lint
+      - name: checkout base schema
+        if: github.event_name == 'pull_request'
+        uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+        with:
+          ref: ${{ github.event.pull_request.base.sha }}
+          path: .buf-base
       - name: buf breaking
         if: github.event_name == 'pull_request'
         working-directory: packages/proto
-        run: buf breaking --against "../../.git#branch=master,subdir=packages/proto"
+        run: buf breaking --against "../../.buf-base/packages/proto"
 
   # ------------------------------------------------------------------ go
   go:

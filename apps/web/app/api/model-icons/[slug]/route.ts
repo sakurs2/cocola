@@ -18,8 +18,8 @@ function candidates(slug: string): string[] {
   ];
 }
 
-export async function GET(_: Request, { params }: { params: { slug: string } }) {
-  const slug = normalizeLobeIconSlug(params.slug);
+export async function GET(_: Request, { params }: { params: Promise<{ slug: string }> }) {
+  const slug = normalizeLobeIconSlug((await params).slug);
   if (!slug) return new Response("not found", { status: 404 });
 
   for (const filename of candidates(slug)) {

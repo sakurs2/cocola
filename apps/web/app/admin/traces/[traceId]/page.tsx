@@ -16,6 +16,7 @@ import {
   TimerReset,
 } from "lucide-react";
 import Link from "next/link";
+import { useParams } from "next/navigation";
 import { useCallback, useEffect, useMemo, useState, type ReactNode } from "react";
 import {
   AdminAlert,
@@ -67,8 +68,8 @@ type TraceSpan = {
   attributes_json?: Record<string, unknown>;
 };
 
-export default function AdminTracePage({ params }: { params: { traceId: string } }) {
-  const traceId = params.traceId;
+export default function AdminTracePage() {
+  const { traceId } = useParams<{ traceId: string }>();
   const [run, setRun] = useState<ConversationRun | null>(null);
   const [spans, setSpans] = useState<TraceSpan[]>([]);
   const [selected, setSelected] = useState<TraceSpan | null>(null);

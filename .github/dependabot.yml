@@ -26,6 +26,9 @@ updates:
         update-types:
           - minor
           - patch
+    # This dependency is locally patched; upgrades must rebase the patch manually.
+    ignore:
+      - dependency-name: "@assistant-ui/react"
 
   - package-ecosystem: npm
     directory: /deploy/sandbox-runtime

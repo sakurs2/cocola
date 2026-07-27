@@ -9,6 +9,7 @@ import {
   AlertCircle as WarningCircle,
 } from "lucide-react";
 import { Activity, ChevronRight, FileText, X } from "lucide-react";
+import Link from "next/link";
 import { useState, type ReactNode } from "react";
 
 export function SessionStatusButton({
@@ -163,12 +164,12 @@ export function SessionStatusPanel({
 
       {unavailable > 0 ? (
         <div className="px-4 py-3">
-          <a
+          <Link
             href="/mcps"
             className="text-xs font-medium text-primary transition-colors hover:text-primary/80 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
           >
             Open MCP settings
-          </a>
+          </Link>
         </div>
       ) : null}
     </div>
