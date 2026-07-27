@@ -787,6 +787,58 @@ func (p *Postgres) DeleteUserMCPPreference(ctx context.Context, userID, mcpID st
 	return err
 }
 
+// ---- User agent instructions ----
+
+func scanUserAgentInstructions(row pgx.Row) (UserAgentInstructions, error) {
+	var instructions UserAgentInstructions
+	err := row.Scan(
+		&instructions.UserID,
+		&instructions.Content,
+		&instructions.Version,
+		&instructions.UpdatedAt,
+		&instructions.UpdatedBy,
+	)
+	return instructions, err
+}
+
+func (p *Postgres) GetUserAgentInstructions(
+	ctx context.Context,
+	userID string,
+) (UserAgentInstructions, error) {
+	row := p.pool.QueryRow(ctx, `SELECT user_id, content, version, updated_at, updated_by
+		FROM user_agent_instructions WHERE user_id=$1`, userID)
+	instructions, err := scanUserAgentInstructions(row)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return UserAgentInstructions{}, ErrNotFound
+	}
+	return instructions, err
+}
+
+func (p *Postgres) SetUserAgentInstructions(
+	ctx context.Context,
+	instructions UserAgentInstructions,
+) (UserAgentInstructions, error) {
+	row := p.pool.QueryRow(ctx, `INSERT INTO user_agent_instructions
+			(user_id, content, version, updated_at, updated_by)
+		VALUES ($1,$2,1,$3,$4)
+		ON CONFLICT (user_id) DO UPDATE SET
+			content=EXCLUDED.content,
+			version=user_agent_instructions.version+1,
+			updated_at=EXCLUDED.updated_at,
+			updated_by=EXCLUDED.updated_by
+		RETURNING user_id, content, version, updated_at, updated_by`,
+		instructions.UserID,
+		instructions.Content,
+		instructions.UpdatedAt,
+		instructions.UpdatedBy,
+	)
+	result, err := scanUserAgentInstructions(row)
+	if isForeignKeyViolation(err) {
+		return UserAgentInstructions{}, ErrNotFound
+	}
+	return result, err
+}
+
 // ---- Agent prompts ----
 
 const agentPromptCols = `id, name, content, enabled, scope, priority, version, created_at, updated_at, created_by, updated_by`

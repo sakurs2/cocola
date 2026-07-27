@@ -10,6 +10,8 @@ import (
 
 const GlobalAgentPromptID = "global"
 
+const MaxUserAgentInstructionsBytes = 32 * 1024
+
 type AgentPromptInput struct {
 	Name    string
 	Content string
@@ -18,14 +20,49 @@ type AgentPromptInput struct {
 }
 
 type AgentPromptRuntimeConfig struct {
-	SystemPrompt string              `json:"system_prompt"`
-	Prompts      []AgentPromptMarker `json:"prompts"`
+	SystemPrompt        string              `json:"system_prompt"`
+	UserAgentsMD        string              `json:"user_agents_md"`
+	UserAgentsMDVersion int64               `json:"user_agents_md_version"`
+	Prompts             []AgentPromptMarker `json:"prompts"`
 }
 
 type AgentPromptMarker struct {
 	ID            string `json:"id"`
 	Version       int64  `json:"version"`
 	ContentLength int    `json:"content_length"`
+}
+
+func (a *Admin) UserAgentInstructions(
+	ctx context.Context,
+	userID string,
+) (store.UserAgentInstructions, error) {
+	userID = strings.TrimSpace(userID)
+	if userID == "" {
+		return store.UserAgentInstructions{}, ErrInvalidArg
+	}
+	instructions, err := a.store.GetUserAgentInstructions(ctx, userID)
+	if errors.Is(err, store.ErrNotFound) {
+		return store.UserAgentInstructions{UserID: userID}, nil
+	}
+	return instructions, err
+}
+
+func (a *Admin) UpdateUserAgentInstructions(
+	ctx context.Context,
+	userID string,
+	content string,
+) (store.UserAgentInstructions, error) {
+	userID = strings.TrimSpace(userID)
+	if userID == "" || len(content) > MaxUserAgentInstructionsBytes ||
+		strings.ContainsRune(content, '\x00') {
+		return store.UserAgentInstructions{}, ErrInvalidArg
+	}
+	return a.store.SetUserAgentInstructions(ctx, store.UserAgentInstructions{
+		UserID:    userID,
+		Content:   content,
+		UpdatedAt: a.now().UTC(),
+		UpdatedBy: userID,
+	})
 }
 
 func (a *Admin) DefaultAgentPrompt(ctx context.Context) (store.AgentPrompt, error) {
@@ -134,8 +171,14 @@ func (a *Admin) EffectiveAgentPromptRuntimeConfig(ctx context.Context, userID st
 			ContentLength: len(content),
 		})
 	}
+	userInstructions, err := a.UserAgentInstructions(ctx, userID)
+	if err != nil {
+		return AgentPromptRuntimeConfig{}, err
+	}
 	return AgentPromptRuntimeConfig{
-		SystemPrompt: strings.Join(parts, "\n\n"),
-		Prompts:      markers,
+		SystemPrompt:        strings.Join(parts, "\n\n"),
+		UserAgentsMD:        userInstructions.Content,
+		UserAgentsMDVersion: userInstructions.Version,
+		Prompts:             markers,
 	}, nil
 }

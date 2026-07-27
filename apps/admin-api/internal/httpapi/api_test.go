@@ -551,6 +551,51 @@ func TestOwnAccountRoutesUseStableRuntimeIdentity(t *testing.T) {
 		t.Fatalf("own account response mismatch: %+v", account)
 	}
 
+	rec = do(t, r, http.MethodGet, "/me/agent-instructions", runtimeToken, nil)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("get empty agent instructions: want 200, got %d (%s)", rec.Code, rec.Body.String())
+	}
+	var instructions store.UserAgentInstructions
+	if err := json.Unmarshal(rec.Body.Bytes(), &instructions); err != nil {
+		t.Fatalf("decode empty agent instructions: %v", err)
+	}
+	if instructions.UserID != created.ID || instructions.Content != "" || instructions.Version != 0 {
+		t.Fatalf("unexpected empty agent instructions: %+v", instructions)
+	}
+
+	rec = do(t, r, http.MethodPut, "/me/agent-instructions", runtimeToken, map[string]any{
+		"content": "# Preferences\n- Answer in Chinese.",
+	})
+	if rec.Code != http.StatusOK {
+		t.Fatalf("save agent instructions: want 200, got %d (%s)", rec.Code, rec.Body.String())
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &instructions); err != nil {
+		t.Fatalf("decode saved agent instructions: %v", err)
+	}
+	if instructions.UserID != created.ID || instructions.Version != 1 ||
+		instructions.Content != "# Preferences\n- Answer in Chinese." {
+		t.Fatalf("saved agent instructions mismatch: %+v", instructions)
+	}
+
+	rec = do(t, r, http.MethodPut, "/me/agent-instructions", runtimeToken, map[string]any{
+		"content": strings.Repeat("a", service.MaxUserAgentInstructionsBytes+1),
+	})
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("oversized agent instructions: want 400, got %d (%s)", rec.Code, rec.Body.String())
+	}
+
+	rec = do(t, r, http.MethodGet, "/admin/agent-prompts/effective?user_id="+created.ID, "k", nil)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("effective user instructions: want 200, got %d (%s)", rec.Code, rec.Body.String())
+	}
+	var effective service.AgentPromptRuntimeConfig
+	if err := json.Unmarshal(rec.Body.Bytes(), &effective); err != nil {
+		t.Fatalf("decode effective user instructions: %v", err)
+	}
+	if effective.UserAgentsMD != instructions.Content || effective.UserAgentsMDVersion != 1 {
+		t.Fatalf("effective user instructions mismatch: %+v", effective)
+	}
+
 	rec = do(t, r, http.MethodPatch, "/me/account", runtimeToken, map[string]any{
 		"name": "Alice Cooper", "username": "alice-cooper", "email": created.Email,
 		"expected_version": account.Version,

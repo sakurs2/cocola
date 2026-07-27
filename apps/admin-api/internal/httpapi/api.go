@@ -80,6 +80,8 @@ func (a *API) Router() http.Handler {
 		r.Get("/account", a.getOwnAccount)
 		r.Patch("/account", a.updateOwnAccount)
 		r.Post("/account/password", a.changeOwnPassword)
+		r.Get("/agent-instructions", a.getMyAgentInstructions)
+		r.Put("/agent-instructions", a.updateMyAgentInstructions)
 		r.Get("/events", a.streamMyEvents)
 		r.Route("/skills", func(r chi.Router) {
 			r.Get("/", a.listMySkills)

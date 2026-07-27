@@ -6,6 +6,7 @@ import json
 
 import pytest
 from cocola_agent_runtime.prompt_loader import (
+    MAX_CACHED_USERS,
     AdminPromptCatalog,
     PromptMarker,
     StaticPromptCatalog,
@@ -29,6 +30,8 @@ def test_admin_prompt_catalog_fetches_effective_prompt_for_user():
         fetcher=_fetcher(
             {
                 "system_prompt": "Prefer short answers.",
+                "user_agents_md": "# Preferences\n- Use Chinese.",
+                "user_agents_md_version": 2,
                 "prompts": [{"id": "global", "version": 3, "content_length": 21}],
             },
             calls=calls,
@@ -38,6 +41,8 @@ def test_admin_prompt_catalog_fetches_effective_prompt_for_user():
     config = catalog.effective_prompt("alice@example.com")
 
     assert config.system_prompt == "Prefer short answers."
+    assert config.user_agents_md == "# Preferences\n- Use Chinese."
+    assert config.user_agents_md_version == 2
     assert config.prompts == [PromptMarker(id="global", version=3, content_length=21)]
     assert calls[0][0] == "http://admin/admin/agent-prompts/effective?user_id=alice%40example.com"
     assert calls[0][1]["Authorization"] == "Bearer k"
@@ -68,8 +73,25 @@ def test_admin_prompt_catalog_uses_last_good_policy_on_refresh_failure():
 
 def test_static_prompt_catalog_returns_copy():
     marker = PromptMarker(id="global", version=1, content_length=4)
-    catalog = StaticPromptCatalog("test", [marker])
+    catalog = StaticPromptCatalog(
+        "test",
+        [marker],
+        user_agents_md="- Be concise.",
+        user_agents_md_version=3,
+    )
 
     assert catalog.effective_prompt("u").system_prompt == "test"
+    assert catalog.effective_prompt("u").user_agents_md == "- Be concise."
+    assert catalog.effective_prompt("u").user_agents_md_version == 3
     assert catalog.effective_prompt("u").prompts == [marker]
     assert catalog.effective_prompt("u").prompts is not catalog.effective_prompt("u").prompts
+
+
+def test_admin_prompt_catalog_bounds_last_good_user_cache():
+    catalog = AdminPromptCatalog("http://admin", fetcher=_fetcher({}))
+
+    for index in range(MAX_CACHED_USERS + 1):
+        catalog.effective_prompt(f"user-{index}")
+
+    assert len(catalog._last_good) == MAX_CACHED_USERS
+    assert "user-0" not in catalog._last_good

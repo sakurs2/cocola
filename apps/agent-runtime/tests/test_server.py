@@ -1168,6 +1168,32 @@ async def test_query_loads_admin_prompt_into_options_and_trace():
     assert "Prefer concise answers." not in json.dumps(dict(prompt_trace.data))
 
 
+async def test_query_injects_user_agents_md_below_admin_prompt():
+    provider = ListProvider([AgentEvent(kind="done", data={})])
+    prompts = StaticPromptCatalog(
+        "Always protect credentials.",
+        [PromptMarker(id="global", version=4, content_length=27)],
+        user_agents_md="# Preferences\n- Answer in Chinese.",
+        user_agents_md_version=7,
+    )
+    context = FakeContext()
+
+    await AgentRuntimeServicer(provider, prompts=prompts).Query(
+        FakeRequest(user_id="alice"),
+        context,
+    )
+
+    assert provider.seen_options is not None
+    assert provider.seen_options.system_prompt is not None
+    system_prompt = provider.seen_options.system_prompt
+    admin_index = system_prompt.index("Administrator-configured system instructions:")
+    user_index = system_prompt.index("User-authored persistent instructions (AGENTS.md):")
+    assert admin_index < user_index
+    assert "Always protect credentials." in system_prompt
+    assert "# Preferences\n- Answer in Chinese." in system_prompt
+    assert "ignore only the conflicting part" in system_prompt
+
+
 async def test_query_stops_when_admin_prompt_policy_is_unavailable():
     class BrokenPrompts:
         def effective_prompt(self, user_id):
@@ -1462,7 +1488,7 @@ async def test_query_publishes_outputs_artifacts():
         "done",
     ]
     assert ctx.written[0].data["name"] == "sandbox.create"
-    file_event = ctx.written[5]
+    file_event = next(event for event in ctx.written if event.kind == "file")
     assert file_event.data["filename"] == "report.txt"
     assert file_event.data["mime"] == "text/plain"
     key = file_event.data["object_key"]

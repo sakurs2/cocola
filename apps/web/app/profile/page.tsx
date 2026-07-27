@@ -5,6 +5,7 @@ import { UsagePanel } from "@/components/profile/usage-panel";
 import { SignOutButton } from "@/components/profile/sign-out-button";
 import { MemoryPanel } from "@/components/profile/memory-panel";
 import { AccountSettingsPanel } from "@/components/profile/account-settings-panel";
+import { AgentInstructionsPanel } from "@/components/profile/agent-instructions-panel";
 import { isAuthFail, requireUser } from "@/lib/server-auth";
 import { ArrowLeft, BadgeCheck, Mail, ShieldCheck, UserRound } from "lucide-react";
 import Link from "next/link";
@@ -40,7 +41,7 @@ export default async function ProfilePage() {
                 <div className="min-w-0 flex-1">
                   <h1 className="truncate text-base font-semibold">Profile</h1>
                   <p className="truncate text-xs text-muted-foreground">
-                    Personal account information and token usage
+                    Personal settings, agent instructions, and usage
                   </p>
                 </div>
               </div>
@@ -90,6 +91,8 @@ export default async function ProfilePage() {
               <UsagePanel />
 
               <MemoryPanel />
+
+              <AgentInstructionsPanel />
 
               <div className="flex items-center justify-between">
                 <SignOutButton />

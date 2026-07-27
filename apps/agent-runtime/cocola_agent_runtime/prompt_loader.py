@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import urllib.parse
 import urllib.request
+from collections import OrderedDict
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from typing import Protocol
@@ -14,6 +15,7 @@ from cocola_common import get_logger
 log = get_logger("cocola.agent-runtime.prompts")
 
 Fetcher = Callable[[str, dict[str, str], float], bytes]
+MAX_CACHED_USERS = 1024
 
 
 @dataclass(frozen=True)
@@ -26,6 +28,8 @@ class PromptMarker:
 @dataclass(frozen=True)
 class PromptConfig:
     system_prompt: str = ""
+    user_agents_md: str = ""
+    user_agents_md_version: int = 0
     prompts: list[PromptMarker] = field(default_factory=list)
 
 
@@ -54,7 +58,7 @@ class AdminPromptCatalog:
         self._admin_key = admin_key
         self._timeout = timeout_s
         self._fetch = fetcher or _urllib_fetch
-        self._last_good: dict[str, PromptConfig] = {}
+        self._last_good: OrderedDict[str, PromptConfig] = OrderedDict()
 
     def effective_prompt(self, user_id: str = "") -> PromptConfig:
         user_id = (user_id or "").strip()
@@ -70,15 +74,20 @@ class AdminPromptCatalog:
         except Exception as exc:  # noqa: BLE001 - prompt policy should degrade safely
             cached = self._last_good.get(user_id)
             if cached is not None:
+                self._last_good.move_to_end(user_id)
                 log.warning(
                     "agent prompt fetch failed; using last-known-good policy", error=str(exc)
                 )
                 return PromptConfig(
                     system_prompt=cached.system_prompt,
+                    user_agents_md=cached.user_agents_md,
+                    user_agents_md_version=cached.user_agents_md_version,
                     prompts=list(cached.prompts),
                 )
             raise RuntimeError("administrator prompt policy is unavailable") from exc
         system_prompt = str(payload.get("system_prompt") or "").strip()
+        user_agents_md = str(payload.get("user_agents_md") or "")
+        user_agents_md_version = int(payload.get("user_agents_md_version") or 0)
         prompts = []
         for item in payload.get("prompts") or []:
             if not isinstance(item, dict):
@@ -90,17 +99,44 @@ class AdminPromptCatalog:
                     content_length=int(item.get("content_length") or 0),
                 )
             )
-        config = PromptConfig(system_prompt=system_prompt, prompts=[p for p in prompts if p.id])
+        config = PromptConfig(
+            system_prompt=system_prompt,
+            user_agents_md=user_agents_md,
+            user_agents_md_version=user_agents_md_version,
+            prompts=[p for p in prompts if p.id],
+        )
         self._last_good[user_id] = config
-        return PromptConfig(system_prompt=config.system_prompt, prompts=list(config.prompts))
+        self._last_good.move_to_end(user_id)
+        while len(self._last_good) > MAX_CACHED_USERS:
+            self._last_good.popitem(last=False)
+        return PromptConfig(
+            system_prompt=config.system_prompt,
+            user_agents_md=config.user_agents_md,
+            user_agents_md_version=config.user_agents_md_version,
+            prompts=list(config.prompts),
+        )
 
 
 class StaticPromptCatalog:
-    def __init__(self, prompt: str = "", prompts: list[PromptMarker] | None = None) -> None:
-        self._config = PromptConfig(system_prompt=prompt, prompts=list(prompts or []))
+    def __init__(
+        self,
+        prompt: str = "",
+        prompts: list[PromptMarker] | None = None,
+        *,
+        user_agents_md: str = "",
+        user_agents_md_version: int = 0,
+    ) -> None:
+        self._config = PromptConfig(
+            system_prompt=prompt,
+            user_agents_md=user_agents_md,
+            user_agents_md_version=user_agents_md_version,
+            prompts=list(prompts or []),
+        )
 
     def effective_prompt(self, user_id: str = "") -> PromptConfig:
         return PromptConfig(
             system_prompt=self._config.system_prompt,
+            user_agents_md=self._config.user_agents_md,
+            user_agents_md_version=self._config.user_agents_md_version,
             prompts=list(self._config.prompts),
         )

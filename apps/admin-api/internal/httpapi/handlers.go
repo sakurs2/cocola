@@ -310,6 +310,45 @@ func (a *API) changeOwnPassword(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, u)
 }
 
+type updateAgentInstructionsReq struct {
+	Content string `json:"content"`
+}
+
+func (a *API) getMyAgentInstructions(w http.ResponseWriter, r *http.Request) {
+	instructions, err := a.svc.UserAgentInstructions(r.Context(), actorOf(r))
+	if err != nil {
+		mapErr(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, instructions)
+}
+
+func (a *API) updateMyAgentInstructions(w http.ResponseWriter, r *http.Request) {
+	// JSON escaping can expand a valid Markdown payload (for example quotes or
+	// control characters), so bound the envelope by the worst-case expansion
+	// and enforce the exact content byte limit in the service.
+	r.Body = http.MaxBytesReader(
+		w,
+		r.Body,
+		int64(service.MaxUserAgentInstructionsBytes*6+1024),
+	)
+	var req updateAgentInstructionsReq
+	if err := decode(r, &req); err != nil {
+		mapErr(w, err)
+		return
+	}
+	instructions, err := a.svc.UpdateUserAgentInstructions(
+		r.Context(),
+		actorOf(r),
+		req.Content,
+	)
+	if err != nil {
+		mapErr(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, instructions)
+}
+
 func (a *API) resetAuthUserPassword(w http.ResponseWriter, r *http.Request) {
 	var req resetAuthUserPasswordReq
 	if err := decode(r, &req); err != nil {

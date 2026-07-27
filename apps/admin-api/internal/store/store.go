@@ -129,6 +129,17 @@ type UserMCPPreference struct {
 	UpdatedAt time.Time `json:"updated_at"`
 }
 
+// UserAgentInstructions is the user-authored AGENTS.md applied to every agent
+// turn owned by that user. Content is plain Markdown and never contains
+// platform-owned policy.
+type UserAgentInstructions struct {
+	UserID    string    `json:"user_id"`
+	Content   string    `json:"content"`
+	Version   int64     `json:"version"`
+	UpdatedAt time.Time `json:"updated_at,omitempty"`
+	UpdatedBy string    `json:"updated_by,omitempty"`
+}
+
 // AgentPrompt is an administrator-managed system-prompt policy injected into
 // new agent sessions. v1 exposes only the global prompt, while scope/priority
 // leave room for future team/model/session-specific policy layers.
@@ -520,6 +531,10 @@ type Store interface {
 	SetUserMCPPreference(ctx context.Context, pref UserMCPPreference) error
 	ListUserMCPPreferences(ctx context.Context, userID string) ([]UserMCPPreference, error)
 	DeleteUserMCPPreference(ctx context.Context, userID, mcpID string) error
+
+	// User agent instructions
+	GetUserAgentInstructions(ctx context.Context, userID string) (UserAgentInstructions, error)
+	SetUserAgentInstructions(ctx context.Context, instructions UserAgentInstructions) (UserAgentInstructions, error)
 
 	// Agent prompts
 	CreateAgentPrompt(ctx context.Context, p AgentPrompt) error

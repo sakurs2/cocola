@@ -148,6 +148,21 @@ func runStoreContract(t *testing.T, st Store) {
 	if len(users) != 1 || users[0].Email != "alice-next@example.com" {
 		t.Fatalf("ListAuthUsers: %+v", users)
 	}
+	instructions, err := st.SetUserAgentInstructions(ctx, UserAgentInstructions{
+		UserID: "user-1", Content: "# Preferences\n- Be concise.", UpdatedAt: now, UpdatedBy: "user-1",
+	})
+	if err != nil || instructions.Version != 1 {
+		t.Fatalf("SetUserAgentInstructions create: %+v %v", instructions, err)
+	}
+	instructions.Content = "# Preferences\n- Explain tradeoffs."
+	instructions, err = st.SetUserAgentInstructions(ctx, instructions)
+	if err != nil || instructions.Version != 2 {
+		t.Fatalf("SetUserAgentInstructions update: %+v %v", instructions, err)
+	}
+	gotInstructions, err := st.GetUserAgentInstructions(ctx, "user-1")
+	if err != nil || gotInstructions.Content != instructions.Content || gotInstructions.Version != 2 {
+		t.Fatalf("GetUserAgentInstructions roundtrip: %+v %v", gotInstructions, err)
+	}
 	if err := st.DeleteAuthUser(ctx, "user-1", "admin", now.Add(3*time.Hour)); err != nil {
 		t.Fatalf("DeleteAuthUser: %v", err)
 	}

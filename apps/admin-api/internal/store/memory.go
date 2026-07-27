@@ -22,6 +22,7 @@ type Memory struct {
 	skillPrefs           map[string]UserSkillPreference
 	mcps                 map[string]MCPServer
 	mcpPrefs             map[string]UserMCPPreference
+	userInstructions     map[string]UserAgentInstructions
 	agentPrompts         map[string]AgentPrompt
 	llmProviders         map[string]LLMProvider
 	llmModels            map[string]LLMModelRoute
@@ -49,6 +50,7 @@ func NewMemory() *Memory {
 		skillPrefs:        map[string]UserSkillPreference{},
 		mcps:              map[string]MCPServer{},
 		mcpPrefs:          map[string]UserMCPPreference{},
+		userInstructions:  map[string]UserAgentInstructions{},
 		agentPrompts:      map[string]AgentPrompt{},
 		llmProviders:      map[string]LLMProvider{},
 		llmModels:         map[string]LLMModelRoute{},
@@ -633,6 +635,39 @@ func (m *Memory) DeleteUserMCPPreference(ctx context.Context, userID, mcpID stri
 	defer m.mu.Unlock()
 	delete(m.mcpPrefs, mcpPrefKey(userID, mcpID))
 	return nil
+}
+
+// ---- User agent instructions ----
+
+func (m *Memory) GetUserAgentInstructions(
+	ctx context.Context,
+	userID string,
+) (UserAgentInstructions, error) {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	instructions, ok := m.userInstructions[userID]
+	if !ok {
+		return UserAgentInstructions{}, ErrNotFound
+	}
+	return instructions, nil
+}
+
+func (m *Memory) SetUserAgentInstructions(
+	ctx context.Context,
+	instructions UserAgentInstructions,
+) (UserAgentInstructions, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if _, ok := m.users[instructions.UserID]; !ok {
+		return UserAgentInstructions{}, ErrNotFound
+	}
+	if current, ok := m.userInstructions[instructions.UserID]; ok {
+		instructions.Version = current.Version + 1
+	} else {
+		instructions.Version = 1
+	}
+	m.userInstructions[instructions.UserID] = instructions
+	return instructions, nil
 }
 
 // ---- Agent prompts ----
