@@ -232,7 +232,7 @@ func TestReducerUpsertsMemoryRecallWithoutShrinkingOnMiss(t *testing.T) {
 		t.Fatalf("memory recall should be one replaceable part: %+v", parts)
 	}
 	if parts[0].Status != "degraded" || parts[0].MemoryCount != 2 ||
-		parts[0].MemoryErrorCode != "MEMORY_RECALL_TIMEOUT" ||
+		parts[0].ErrorCode != "MEMORY_RECALL_TIMEOUT" ||
 		parts[0].MemoryContent != "User profile:\nPrefers concise answers" {
 		t.Fatalf("memory recall outcome was not replaced: %+v", parts[0])
 	}
@@ -241,5 +241,52 @@ func TestReducerUpsertsMemoryRecallWithoutShrinkingOnMiss(t *testing.T) {
 	parts = r.Parts()
 	if len(parts) != 1 || parts[0].Type != PartMemoryRecall || parts[0].Status != "miss" {
 		t.Fatalf("a recall miss should preserve its hidden UI slot: %+v", parts)
+	}
+}
+
+func TestReducerSerializesPartErrorCodes(t *testing.T) {
+	tests := []struct {
+		name      string
+		eventType string
+		data      map[string]string
+	}{
+		{
+			name:      "memory recall",
+			eventType: "memory_recall",
+			data: map[string]string{
+				"status": "degraded", "error_code": "MEMORY_RECALL_TIMEOUT",
+			},
+		},
+		{
+			name:      "run summary",
+			eventType: "run_summary",
+			data: map[string]string{
+				"run_id": "run-1", "status": "failed", "error_code": "MODEL_UNAVAILABLE",
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			r := NewReducer()
+			r.Apply(tt.eventType, tt.data)
+
+			parts := r.Parts()
+			if len(parts) != 1 {
+				t.Fatalf("parts = %d, want 1: %+v", len(parts), parts)
+			}
+			raw, err := json.Marshal(parts[0])
+			if err != nil {
+				t.Fatalf("marshal part: %v", err)
+			}
+
+			var payload map[string]any
+			if err := json.Unmarshal(raw, &payload); err != nil {
+				t.Fatalf("unmarshal part: %v", err)
+			}
+			if got := payload["errorCode"]; got != tt.data["error_code"] {
+				t.Fatalf("errorCode = %v, want %q; json = %s", got, tt.data["error_code"], raw)
+			}
+		})
 	}
 }

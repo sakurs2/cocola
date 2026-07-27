@@ -159,7 +159,10 @@ func TestDisablingOwnerPausesActiveTasks(t *testing.T) {
 	ctx := context.Background()
 	now := time.Date(2026, 7, 5, 8, 0, 0, 0, time.UTC)
 	memory := store.NewMemory()
-	user := store.AuthUser{ID: "alice", Username: "alice", Email: "alice@example.com", Role: RoleUser, Enabled: true}
+	user := store.AuthUser{
+		ID: "alice", Name: "Alice", Username: "alice", Email: "alice@example.com",
+		Role: RoleUser, Enabled: true,
+	}
 	if err := memory.CreateAuthUser(ctx, user); err != nil {
 		t.Fatal(err)
 	}

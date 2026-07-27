@@ -83,7 +83,8 @@ type QuestionAnswer struct {
 // pointer so we can distinguish "no result yet" (nil) from an empty-string
 // result, matching the frontend's optional `result`.
 type Part struct {
-	Type string `json:"type"`
+	Type      string `json:"type"`
+	ErrorCode string `json:"errorCode,omitempty"`
 
 	// text | reasoning
 	Text string `json:"text,omitempty"`
@@ -122,10 +123,9 @@ type Part struct {
 
 	// memory-recall: the status plus the exact context injected into the Agent,
 	// including any source labels written by the memory service.
-	Status          string `json:"status,omitempty"`
-	MemoryCount     int    `json:"count,omitempty"`
-	MemoryErrorCode string `json:"errorCode,omitempty"`
-	MemoryContent   string `json:"content,omitempty"`
+	Status        string `json:"status,omitempty"`
+	MemoryCount   int    `json:"count,omitempty"`
+	MemoryContent string `json:"content,omitempty"`
 
 	// scm-approval: secret-free, exact-command approval state. Raw argv and
 	// request bodies are deliberately never persisted in conversation history.
@@ -154,7 +154,6 @@ type Part struct {
 	DurationMS    int64  `json:"durationMs,omitempty"`
 	ToolCallCount int64  `json:"toolCallCount,omitempty"`
 	LLMCallCount  int64  `json:"llmCallCount,omitempty"`
-	ErrorCode     string `json:"errorCode,omitempty"`
 
 	// structured-result: immutable, schema-validated Skill output.
 	Renderer        string          `json:"renderer,omitempty"`
