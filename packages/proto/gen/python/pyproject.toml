@@ -5,7 +5,7 @@ description = "Generated gRPC/protobuf Python stubs for cocola (buf output). Do 
 requires-python = ">=3.11"
 dependencies = [
     "grpcio>=1.73.1",
-    "protobuf>=6.30",
+    "protobuf>=7.35.1",
 ]
 
 [build-system]
