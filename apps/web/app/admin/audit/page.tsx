@@ -22,6 +22,7 @@ import {
   AdminTable,
   AdminToolbar,
 } from "@/components/admin/admin-ui";
+import { SelectControl } from "@/components/ui/select-control";
 import { cn } from "@/lib/utils";
 
 type ConversationRun = {
@@ -114,35 +115,39 @@ export default function AdminAuditPage() {
             />
           </span>
         </label>
-        <select
-          aria-label="Result"
+        <SelectControl
+          ariaLabel="Result"
           className={`${control} sm:w-40`}
           value={status}
-          onChange={(event) => {
+          onValueChange={(value) => {
             setPage(0);
-            setStatus(event.target.value);
+            setStatus(value);
           }}
-        >
-          <option value="">All results</option>
-          <option value="running">Running</option>
-          <option value="success">Success</option>
-          <option value="error">Error</option>
-          <option value="cancelled">Cancelled</option>
-          <option value="interrupted">Interrupted</option>
-        </select>
-        <select
-          aria-label="Source"
+          options={[
+            { value: "", label: "All results" },
+            { value: "running", label: "Running" },
+            { value: "success", label: "Success" },
+            { value: "error", label: "Error" },
+            { value: "cancelled", label: "Cancelled" },
+            { value: "interrupted", label: "Interrupted" },
+          ]}
+          contentClassName="cocola-admin-ui"
+        />
+        <SelectControl
+          ariaLabel="Source"
           className={`${control} sm:w-44`}
           value={source}
-          onChange={(event) => {
+          onValueChange={(value) => {
             setPage(0);
-            setSource(event.target.value);
+            setSource(value);
           }}
-        >
-          <option value="">All sources</option>
-          <option value="interactive">Interactive</option>
-          <option value="scheduled_task">Scheduled task</option>
-        </select>
+          options={[
+            { value: "", label: "All sources" },
+            { value: "interactive", label: "Interactive" },
+            { value: "scheduled_task", label: "Scheduled task" },
+          ]}
+          contentClassName="cocola-admin-ui"
+        />
         <DateRangeFilter
           from={from}
           until={until}

@@ -18,6 +18,7 @@ import {
   Save,
   Trash2,
 } from "lucide-react";
+import { SelectControl } from "@/components/ui/select-control";
 import {
   AdminAlert,
   AdminConfirmDialog,
@@ -337,17 +338,19 @@ export default function AdminMCPPage() {
               />
             </Field>
             <Field label="Transport">
-              <select
+              <SelectControl
                 className={controlClass}
                 value={form.transport}
-                onChange={(event) =>
-                  setForm({ ...form, transport: event.target.value as FormState["transport"] })
+                onValueChange={(value) =>
+                  setForm({ ...form, transport: value as FormState["transport"] })
                 }
-              >
-                <option value="stdio">stdio · Command</option>
-                <option value="http">HTTP · URL</option>
-                <option value="sse">SSE · URL</option>
-              </select>
+                options={[
+                  { value: "stdio", label: "stdio · Command" },
+                  { value: "http", label: "HTTP · URL" },
+                  { value: "sse", label: "SSE · URL" },
+                ]}
+                contentClassName="cocola-admin-ui"
+              />
             </Field>
           </div>
 

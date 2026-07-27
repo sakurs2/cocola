@@ -8,6 +8,8 @@ import { useEffect, useMemo, useState, type FormEvent } from "react";
 import { AgentAvatar } from "@/components/agents/agent-avatar";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { ModelIcon } from "@/components/ui/model-icon";
+import { SelectControl } from "@/components/ui/select-control";
 import {
   DEFAULT_AGENT_AVATAR_COLOR,
   DEFAULT_AGENT_AVATAR_KEY,
@@ -97,6 +99,7 @@ export default function AgentsPage() {
     () => models.find((model) => model.id === modelID) ?? null,
     [modelID, models],
   );
+  const modelsByID = useMemo(() => new Map(models.map((model) => [model.id, model])), [models]);
 
   const createAgent = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
@@ -131,7 +134,7 @@ export default function AgentsPage() {
 
   return (
     <main className="h-full min-w-0 flex-1 overflow-y-auto bg-background">
-      <div className="mx-auto max-w-5xl px-8 py-10">
+      <div className="mx-auto max-w-7xl px-6 py-10 sm:px-8">
         <header className="flex flex-wrap items-start justify-between gap-4">
           <div className="space-y-1">
             <h1 className="text-2xl font-bold tracking-tight">Agents</h1>
@@ -177,31 +180,46 @@ export default function AgentsPage() {
             </div>
           </section>
         ) : (
-          <section className="mt-8 grid gap-4 sm:grid-cols-2">
-            {agents.map((agent) => (
-              <Link
-                key={agent.id}
-                href={`/agents/${encodeURIComponent(agent.id)}`}
-                className="group flex min-h-36 items-start gap-4 rounded-2xl border border-border bg-card p-5 shadow-sm transition hover:-translate-y-0.5 hover:border-foreground/15 hover:shadow-md"
-              >
-                <AgentAvatar
-                  avatarKey={agent.avatar_key}
-                  avatarColor={agent.avatar_color}
-                  className="size-11 rounded-2xl"
-                  iconClassName="size-5"
-                />
-                <span className="min-w-0 flex-1">
-                  <span className="block truncate font-semibold">{agent.name}</span>
-                  <span className="mt-1 line-clamp-2 block text-sm leading-5 text-muted-foreground">
-                    {agent.description || "No description"}
-                  </span>
-                  <span className="mt-4 block truncate text-xs text-muted-foreground">
-                    {agent.model_alias}
-                  </span>
-                </span>
-                <ArrowRight className="mt-1 size-4 shrink-0 text-muted-foreground transition group-hover:translate-x-0.5 group-hover:text-foreground" />
-              </Link>
-            ))}
+          <section
+            aria-label="Your Agents"
+            className="mt-8 rounded-[1.75rem] border border-border/60 bg-muted/35 p-2.5 shadow-[inset_0_1px_0_rgba(255,255,255,0.9),0_18px_46px_-40px_rgba(15,23,42,0.45)] sm:p-3"
+          >
+            <div className="grid gap-2.5 sm:grid-cols-2 lg:grid-cols-3">
+              {agents.map((agent) => {
+                const model = modelsByID.get(agent.model_route_id);
+                return (
+                  <Link
+                    key={agent.id}
+                    href={`/agents/${encodeURIComponent(agent.id)}`}
+                    className="group flex min-h-[15.75rem] min-w-0 flex-col rounded-[1.35rem] border border-transparent bg-card p-5 text-left shadow-[0_1px_0_rgba(15,23,42,0.025),0_12px_32px_-30px_rgba(15,23,42,0.32)] transition-[background-color,border-color,box-shadow] duration-200 hover:border-border hover:bg-muted/75 hover:shadow-[inset_0_1px_0_rgba(255,255,255,0.75),0_1px_2px_rgba(15,23,42,0.04),0_16px_36px_-32px_rgba(15,23,42,0.38)] focus-visible:border-foreground/30 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/25 focus-visible:ring-offset-2"
+                  >
+                    <span className="flex min-w-0 items-center gap-3">
+                      <AgentAvatar
+                        avatarKey={agent.avatar_key}
+                        avatarColor={agent.avatar_color}
+                        className="size-12 rounded-full shadow-[0_2px_5px_-4px_rgba(15,23,42,0.45)]"
+                        iconClassName="size-[1.35rem]"
+                      />
+                      <span className="min-w-0 flex-1 truncate text-[17px] font-semibold tracking-[-0.02em]">
+                        {agent.name}
+                      </span>
+                      <span className="grid size-10 shrink-0 place-items-center rounded-xl bg-foreground text-background opacity-0 transition-[opacity] duration-200 group-hover:opacity-100 group-focus-visible:opacity-100">
+                        <ArrowRight className="size-[18px]" />
+                      </span>
+                    </span>
+
+                    <span className="mt-7 line-clamp-2 min-h-12 text-sm leading-6 text-muted-foreground">
+                      {agent.description || "No description"}
+                    </span>
+
+                    <span className="mt-auto inline-flex max-w-full items-center self-start rounded-lg border border-transparent bg-muted/80 px-2.5 py-1.5 text-xs font-medium text-muted-foreground transition-[background-color,border-color,color] duration-200 group-hover:border-border group-hover:bg-background/55 group-hover:text-foreground">
+                      <ModelIcon icon={model?.icon} className="mr-1.5 size-4" bare />
+                      <span className="truncate">{agent.model_alias}</span>
+                    </span>
+                  </Link>
+                );
+              })}
+            </div>
           </section>
         )}
       </div>
@@ -259,19 +277,17 @@ export default function AgentsPage() {
                 </div>
                 <div className="space-y-1.5">
                   <Label htmlFor="agent-model">Model</Label>
-                  <select
+                  <SelectControl
                     id="agent-model"
                     value={modelID}
-                    onChange={(event) => setModelID(event.target.value)}
-                    className="h-9 w-full rounded-xl border border-input bg-background px-3 text-sm outline-none focus:border-foreground/30 focus:ring-2 focus:ring-blue-500/20"
-                  >
-                    {models.map((model) => (
-                      <option key={model.id} value={model.id}>
-                        {model.label}
-                        {model.provider ? ` · ${model.provider}` : ""}
-                      </option>
-                    ))}
-                  </select>
+                    onValueChange={setModelID}
+                    options={models.map((model) => ({
+                      value: model.id,
+                      label: `${model.label}${model.provider ? ` · ${model.provider}` : ""}`,
+                    }))}
+                    className="h-9 shadow-none focus-visible:border-foreground/30 focus-visible:ring-blue-500/20"
+                    contentClassName="cocola-user-ui"
+                  />
                 </div>
               </div>
 

@@ -66,6 +66,7 @@ import {
   type UiRunSummaryPart,
   type UiStructuredResultPart,
 } from "@/lib/rich-message-normalization";
+import { normalizeModelIconConfig, type ModelIconConfig } from "@/lib/model-icons";
 
 export type {
   QuestionAnswer,
@@ -344,12 +345,6 @@ type UserEventSnapshot = {
   events?: UserEvent[];
 };
 
-export type ModelIconConfig = {
-  type: "lobe-icons" | "simple-icons" | "image";
-  slug?: string;
-  src?: string;
-};
-
 export type ModelOption = {
   id: string;
   alias: string;
@@ -614,30 +609,9 @@ function parseEnvironmentStatusSnapshot(raw: unknown): EnvironmentStatus | null 
   };
 }
 
-function normalizeIcon(raw: ModelIconConfig | undefined): ModelIconConfig | undefined {
-  if (!raw) return undefined;
-  return raw.type === "lobe-icons" && typeof raw.slug === "string"
-    ? {
-        type: raw.type,
-        slug: raw.slug,
-      }
-    : raw.type === "simple-icons" && typeof raw.slug === "string"
-      ? {
-          type: raw.type,
-          slug: raw.slug,
-          ...(typeof raw.src === "string" ? { src: raw.src } : {}),
-        }
-      : raw.type === "image" && typeof raw.src === "string"
-        ? {
-            type: raw.type,
-            src: raw.src,
-          }
-        : undefined;
-}
-
 function normalizeMetadata(raw: UiMessageMetadata | undefined): UiMessageMetadata | undefined {
   if (!raw) return undefined;
-  const icon = normalizeIcon(raw.model_icon);
+  const icon = normalizeModelIconConfig(raw.model_icon);
   const duration =
     typeof raw.duration_ms === "number" && Number.isFinite(raw.duration_ms) && raw.duration_ms >= 0
       ? raw.duration_ms
@@ -848,7 +822,7 @@ function normalizeModelOption(raw: unknown): ModelOption | null {
   const provider = typeof row.provider === "string" ? row.provider : "";
   const family = typeof row.family === "string" ? row.family : "";
   const iconSlug = typeof row.icon_slug === "string" ? row.icon_slug : "";
-  const icon = normalizeIcon(row.icon as ModelIconConfig | undefined);
+  const icon = normalizeModelIconConfig(row.icon);
   const normalizedIcon =
     icon?.type === "image" && icon.src
       ? icon

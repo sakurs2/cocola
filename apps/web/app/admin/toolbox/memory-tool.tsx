@@ -16,6 +16,7 @@ import Link from "next/link";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { AdminAlert, AdminDrawer, AdminStatusBadge } from "@/components/admin/admin-ui";
 import { Button, buttonVariants } from "@/components/ui/button";
+import { SelectControl } from "@/components/ui/select-control";
 
 type MemoryStatus = "disabled" | "incomplete" | "ready" | "degraded";
 
@@ -246,38 +247,42 @@ export function MemoryTool({
               <span className="flex items-center gap-2">
                 <Sparkles className="size-4 text-muted-foreground" /> Extraction model
               </span>
-              <select
+              <SelectControl
                 className={selectClass}
                 value={extractionRouteID}
                 disabled={saving || config.enabled}
-                onChange={(event) => setExtractionRouteID(event.target.value)}
-              >
-                <option value="">Select extraction model</option>
-                {extractionModels.map((model) => (
-                  <option key={model.id} value={model.id}>
-                    {model.label || model.alias} · {model.protocol}
-                  </option>
-                ))}
-              </select>
+                onValueChange={setExtractionRouteID}
+                options={[
+                  { value: "", label: "Select extraction model" },
+                  ...extractionModels.map((model) => ({
+                    value: model.id,
+                    label: `${model.label || model.alias} · ${model.protocol}`,
+                  })),
+                ]}
+                contentClassName="cocola-admin-ui"
+              />
             </label>
 
             <label className="grid gap-1.5 text-sm font-medium">
               <span className="flex items-center gap-2">
                 <Database className="size-4 text-muted-foreground" /> Embedding model
               </span>
-              <select
+              <SelectControl
                 className={selectClass}
                 value={embeddingRouteID}
                 disabled={saving || config.enabled}
-                onChange={(event) => setEmbeddingRouteID(event.target.value)}
-              >
-                <option value="">Select embedding model</option>
-                {embeddingModels.map((model) => (
-                  <option key={model.id} value={model.id}>
-                    {model.label || model.alias} · {model.embedding_dimension ?? "?"} dimensions
-                  </option>
-                ))}
-              </select>
+                onValueChange={setEmbeddingRouteID}
+                options={[
+                  { value: "", label: "Select embedding model" },
+                  ...embeddingModels.map((model) => ({
+                    value: model.id,
+                    label: `${model.label || model.alias} · ${
+                      model.embedding_dimension ?? "?"
+                    } dimensions`,
+                  })),
+                ]}
+                contentClassName="cocola-admin-ui"
+              />
               <span className="text-xs font-normal text-muted-foreground">
                 Memory index dimension is locked to {config.embedding_dimension}.
               </span>

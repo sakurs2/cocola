@@ -17,6 +17,7 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
+import { SelectControl } from "@/components/ui/select-control";
 import { cn } from "@/lib/utils";
 import {
   CheckCircle2,
@@ -390,24 +391,28 @@ export default function AdminUsersPage() {
               className="h-10 w-full rounded-md border border-input bg-background pl-9 pr-3 text-sm outline-none focus:border-ring"
             />
           </div>
-          <select
+          <SelectControl
             value={roleFilter}
-            onChange={(e) => setRoleFilter(e.target.value as RoleFilter)}
-            className="h-10 rounded-md border border-input bg-background px-3 text-sm outline-none focus:border-ring"
-          >
-            <option value="all">All roles</option>
-            <option value="user">user</option>
-            <option value="admin">admin</option>
-          </select>
-          <select
+            onValueChange={(value) => setRoleFilter(value as RoleFilter)}
+            className="h-10 w-auto min-w-32 rounded-md border border-input bg-background px-3 text-sm outline-none focus:border-ring"
+            options={[
+              { value: "all", label: "All roles" },
+              { value: "user", label: "user" },
+              { value: "admin", label: "admin" },
+            ]}
+            contentClassName="cocola-admin-ui"
+          />
+          <SelectControl
             value={statusFilter}
-            onChange={(e) => setStatusFilter(e.target.value as StatusFilter)}
-            className="h-10 rounded-md border border-input bg-background px-3 text-sm outline-none focus:border-ring"
-          >
-            <option value="all">All statuses</option>
-            <option value="enabled">Enabled</option>
-            <option value="disabled">Disabled</option>
-          </select>
+            onValueChange={(value) => setStatusFilter(value as StatusFilter)}
+            className="h-10 w-auto min-w-36 rounded-md border border-input bg-background px-3 text-sm outline-none focus:border-ring"
+            options={[
+              { value: "all", label: "All statuses" },
+              { value: "enabled", label: "Enabled" },
+              { value: "disabled", label: "Disabled" },
+            ]}
+            contentClassName="cocola-admin-ui"
+          />
           <Button onClick={openCreate}>
             <UserPlus className="mr-2 size-4" />
             New user
@@ -583,27 +588,24 @@ export default function AdminUsersPage() {
 
           <label className="grid gap-1 text-xs text-muted-foreground">
             Team
-            <select
+            <SelectControl
               value={teamChoice === "" && form.tenant ? form.tenant : teamChoice}
-              onChange={(e) => {
-                const v = e.target.value;
-                setTeamChoice(v);
-                if (v === NEW_TEAM) {
+              onValueChange={(value) => {
+                setTeamChoice(value);
+                if (value === NEW_TEAM) {
                   setForm((p) => ({ ...p, tenant: "" }));
                 } else {
-                  setForm((p) => ({ ...p, tenant: v }));
+                  setForm((p) => ({ ...p, tenant: value }));
                 }
               }}
               className="h-10 rounded-md border border-input bg-background px-3 text-sm text-foreground outline-none focus:border-ring"
-            >
-              <option value="">No team</option>
-              {teams.map((t) => (
-                <option key={t} value={t}>
-                  {t}
-                </option>
-              ))}
-              <option value={NEW_TEAM}>+ New team…</option>
-            </select>
+              options={[
+                { value: "", label: "No team" },
+                ...teams.map((team) => ({ value: team, label: team })),
+                { value: NEW_TEAM, label: "+ New team…" },
+              ]}
+              contentClassName="cocola-admin-ui"
+            />
           </label>
           {teamChoice === NEW_TEAM ? (
             <FieldInput
@@ -615,14 +617,16 @@ export default function AdminUsersPage() {
 
           <label className="grid gap-1 text-xs text-muted-foreground">
             Role
-            <select
+            <SelectControl
               value={form.role}
-              onChange={(e) => setForm((p) => ({ ...p, role: e.target.value as Role }))}
+              onValueChange={(value) => setForm((p) => ({ ...p, role: value as Role }))}
               className="h-10 rounded-md border border-input bg-background px-3 text-sm text-foreground outline-none focus:border-ring"
-            >
-              <option value="user">user</option>
-              <option value="admin">admin</option>
-            </select>
+              options={[
+                { value: "user", label: "user" },
+                { value: "admin", label: "admin" },
+              ]}
+              contentClassName="cocola-admin-ui"
+            />
           </label>
 
           {drawerMode === "create" ? (

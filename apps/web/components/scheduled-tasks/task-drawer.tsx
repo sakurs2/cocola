@@ -3,6 +3,7 @@
 import * as Dialog from "@radix-ui/react-dialog";
 import { CalendarClock, ChevronRight, Paperclip, UserCircle, X } from "lucide-react";
 import { useEffect, useState } from "react";
+import { SelectControl } from "@/components/ui/select-control";
 import {
   emptyTaskForm,
   filesToAttachments,
@@ -45,6 +46,7 @@ export function TaskDrawer({
   const [form, setForm] = useState<TaskFormState>(() => emptyTaskForm());
   const [ownerUserID, setOwnerUserID] = useState("");
   const [error, setError] = useState("");
+  const selectContentClassName = admin ? "cocola-admin-ui admin-drawer" : "cocola-user-ui";
 
   useEffect(() => {
     if (!open) return;
@@ -122,18 +124,19 @@ export function TaskDrawer({
                       ) : null}
                     </div>
                   ) : (
-                    <select
+                    <SelectControl
                       className={inputClass}
                       value={ownerUserID}
-                      onChange={(event) => setOwnerUserID(event.target.value)}
-                    >
-                      <option value="">Choose an owner</option>
-                      {ownerOptions.map((owner) => (
-                        <option key={owner.id} value={owner.id}>
-                          {owner.name || owner.email || owner.id}
-                        </option>
-                      ))}
-                    </select>
+                      onValueChange={setOwnerUserID}
+                      options={[
+                        { value: "", label: "Choose an owner" },
+                        ...ownerOptions.map((owner) => ({
+                          value: owner.id,
+                          label: owner.name || owner.email || owner.id,
+                        })),
+                      ]}
+                      contentClassName={selectContentClassName}
+                    />
                   )}
                 </div>
               ) : null}
@@ -164,24 +167,30 @@ export function TaskDrawer({
               </Field>
 
               <Field label="Repeat">
-                <select
+                <SelectControl
                   className={inputClass}
                   value={form.scheduleKind}
-                  onChange={(event) =>
+                  onValueChange={(value) =>
                     setForm({
                       ...form,
-                      scheduleKind: event.target.value as TaskFormState["scheduleKind"],
+                      scheduleKind: value as TaskFormState["scheduleKind"],
                     })
                   }
-                >
-                  <option value="once">Does not repeat</option>
-                  <option value="hourly">Every hour</option>
-                  <option value="daily">Every day</option>
-                  <option value="weekly">Every week</option>
-                  <option value="monthly">Every month</option>
-                </select>
+                  options={[
+                    { value: "once", label: "Does not repeat" },
+                    { value: "hourly", label: "Every hour" },
+                    { value: "daily", label: "Every day" },
+                    { value: "weekly", label: "Every week" },
+                    { value: "monthly", label: "Every month" },
+                  ]}
+                  contentClassName={selectContentClassName}
+                />
               </Field>
-              <ScheduleFields form={form} setForm={setForm} />
+              <ScheduleFields
+                form={form}
+                setForm={setForm}
+                selectContentClassName={selectContentClassName}
+              />
 
               <div className="rounded-2xl border border-border/70 bg-muted/25 px-3 py-2 text-xs text-muted-foreground">
                 Times use <span className="font-medium text-foreground">{form.timezone}</span>.
@@ -194,23 +203,20 @@ export function TaskDrawer({
                 </summary>
                 <div className="mt-4 grid gap-4 border-t border-border/70 pt-4">
                   <Field label="Model">
-                    <select
+                    <SelectControl
                       className={inputClass}
                       value={form.modelRouteID}
-                      onChange={(event) => {
-                        const model = models.find(
-                          (candidate) => candidate.id === event.target.value,
-                        );
+                      onValueChange={(value) => {
+                        const model = models.find((candidate) => candidate.id === value);
                         if (model)
                           setForm({ ...form, modelRouteID: model.id, modelAlias: model.alias });
                       }}
-                    >
-                      {models.map((model) => (
-                        <option key={model.id} value={model.id}>
-                          {model.label || model.alias}
-                        </option>
-                      ))}
-                    </select>
+                      options={models.map((model) => ({
+                        value: model.id,
+                        label: model.label || model.alias,
+                      }))}
+                      contentClassName={selectContentClassName}
+                    />
                   </Field>
                   <Field label="Attachments">
                     <label className="flex min-h-12 cursor-pointer items-center gap-2 rounded-xl border border-dashed border-border px-3 text-sm text-muted-foreground hover:bg-muted/40">
@@ -293,9 +299,11 @@ export function TaskDrawer({
 function ScheduleFields({
   form,
   setForm,
+  selectContentClassName,
 }: {
   form: TaskFormState;
   setForm: (form: TaskFormState) => void;
+  selectContentClassName: string;
 }) {
   const minDateTime = toLocalInput(new Date().toISOString(), form.timezone);
   if (form.scheduleKind === "once") {
@@ -320,19 +328,24 @@ function ScheduleFields({
     <div className="grid gap-4 sm:grid-cols-2">
       {form.scheduleKind === "weekly" ? (
         <Field label="Day">
-          <select
+          <SelectControl
             className={inputClass}
             value={form.weekday}
-            onChange={(event) => setForm({ ...form, weekday: event.target.value })}
-          >
-            {["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"].map(
-              (label, index) => (
-                <option key={label} value={index + 1}>
-                  {label}
-                </option>
-              ),
-            )}
-          </select>
+            onValueChange={(value) => setForm({ ...form, weekday: value })}
+            options={[
+              "Monday",
+              "Tuesday",
+              "Wednesday",
+              "Thursday",
+              "Friday",
+              "Saturday",
+              "Sunday",
+            ].map((label, index) => ({
+              value: String(index + 1),
+              label,
+            }))}
+            contentClassName={selectContentClassName}
+          />
         </Field>
       ) : null}
       {form.scheduleKind === "monthly" ? (
@@ -377,14 +390,16 @@ function ScheduleFields({
         </Field>
       )}
       <Field label="Ends">
-        <select
+        <SelectControl
           className={inputClass}
           value={form.ends}
-          onChange={(event) => setForm({ ...form, ends: event.target.value as "never" | "on" })}
-        >
-          <option value="never">Never</option>
-          <option value="on">On a date</option>
-        </select>
+          onValueChange={(value) => setForm({ ...form, ends: value as "never" | "on" })}
+          options={[
+            { value: "never", label: "Never" },
+            { value: "on", label: "On a date" },
+          ]}
+          contentClassName={selectContentClassName}
+        />
       </Field>
       {form.ends === "on" ? (
         <Field label="End time">

@@ -1,3 +1,5 @@
+import { normalizeModelIconConfig, type ModelIconConfig } from "@/lib/model-icons";
+
 export type AgentStatus = "active" | "archived";
 
 export type AgentProfile = {
@@ -38,6 +40,7 @@ export type AgentModelOption = {
   alias: string;
   label: string;
   provider?: string;
+  icon: ModelIconConfig;
   protocols: string[];
   isDefault: boolean;
 };
@@ -83,14 +86,23 @@ export function normalizeAgentModels(value: unknown): AgentModelOption[] {
     const alias = typeof row.alias === "string" ? row.alias.trim() : "";
     const label = typeof row.label === "string" ? row.label.trim() : "";
     if (!id || !alias || !label) return [];
+    const provider = typeof row.provider === "string" ? row.provider.trim() : "";
+    const family = typeof row.family === "string" ? row.family.trim() : "";
+    const iconSlug = typeof row.icon_slug === "string" ? row.icon_slug.trim() : "";
+    const icon = normalizeModelIconConfig(row.icon);
+    const normalizedIcon =
+      icon?.type === "image" && icon.src
+        ? icon
+        : iconSlug
+          ? { type: "lobe-icons" as const, slug: iconSlug }
+          : (icon ?? { type: "lobe-icons" as const, slug: family || provider || alias });
     return [
       {
         id,
         alias,
         label,
-        ...(typeof row.provider === "string" && row.provider.trim()
-          ? { provider: row.provider.trim() }
-          : {}),
+        ...(provider ? { provider } : {}),
+        icon: normalizedIcon,
         protocols: Array.isArray(row.protocols)
           ? row.protocols.filter((item): item is string => typeof item === "string")
           : [],

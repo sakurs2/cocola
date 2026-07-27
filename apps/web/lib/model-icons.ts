@@ -1,3 +1,9 @@
+export type ModelIconConfig = {
+  type: "lobe-icons" | "simple-icons" | "image";
+  slug?: string;
+  src?: string;
+};
+
 export const LOCAL_SIMPLE_ICON_PATHS: Record<string, string> = {
   anthropic: "/brands/anthropic.svg",
   claude: "/brands/claude.svg",
@@ -163,4 +169,19 @@ export function normalizeLobeIconSlug(slug: string | undefined): string {
 export function lobeIconPath(slug: string | undefined): string {
   const normalized = normalizeLobeIconSlug(slug);
   return normalized ? `/api/model-icons/${normalized}` : "";
+}
+
+export function normalizeModelIconConfig(value: unknown): ModelIconConfig | undefined {
+  if (!value || typeof value !== "object") return undefined;
+  const icon = value as Record<string, unknown>;
+  const type = icon.type;
+  const slug = typeof icon.slug === "string" ? icon.slug.trim() : "";
+  const src = typeof icon.src === "string" ? icon.src.trim() : "";
+
+  if (type === "lobe-icons" && slug) return { type, slug };
+  if (type === "simple-icons" && slug) {
+    return { type, slug, ...(src ? { src } : {}) };
+  }
+  if (type === "image" && src) return { type, src };
+  return undefined;
 }

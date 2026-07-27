@@ -4,6 +4,7 @@ import { SquareTerminal as ComponentLogsPageIcon } from "lucide-react";
 import { AlertTriangle, CheckCircle2, Loader2, ScrollText } from "lucide-react";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { AdminRefreshButton } from "@/components/admin/admin-ui";
+import { SelectControl } from "@/components/ui/select-control";
 
 type LogFile = {
   name: string;
@@ -104,22 +105,20 @@ export default function ComponentLogsPage() {
             <h2 className="text-sm font-semibold">Source</h2>
           </div>
           <div className="grid gap-3 p-4 md:grid-cols-[minmax(240px,1fr)_160px_120px]">
-            <select
+            <SelectControl
               className={input}
               value={selected}
-              onChange={(event) => {
-                const value = event.target.value;
+              onValueChange={(value) => {
                 setSelected(value);
                 void load(value);
               }}
-            >
-              {files.map((file) => (
-                <option key={file.name} value={file.name}>
-                  {file.label}
-                </option>
-              ))}
-              {files.length === 0 ? <option value="">No component logs</option> : null}
-            </select>
+              options={
+                files.length
+                  ? files.map((file) => ({ value: file.name, label: file.label }))
+                  : [{ value: "", label: "No component logs", disabled: true }]
+              }
+              contentClassName="cocola-admin-ui"
+            />
             <input
               className={input}
               type="number"

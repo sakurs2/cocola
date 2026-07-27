@@ -39,6 +39,7 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
+import { SelectControl } from "@/components/ui/select-control";
 import {
   LOCAL_SIMPLE_ICON_PATHS,
   SIMPLE_ICON_FALLBACK_BADGES,
@@ -874,31 +875,33 @@ export default function AdminModelsPage() {
           ) : (
             <>
               <Field label="Provider">
-                <select
+                <SelectControl
                   className={inputClass}
                   value={modelForm.provider_id}
-                  onChange={(event) => {
+                  onValueChange={(value) => {
                     setModelForm({
                       ...modelForm,
-                      provider_id: event.target.value,
+                      provider_id: value,
                     });
                   }}
-                >
-                  <option value="">Select provider</option>
-                  {providers
-                    .filter((provider) => {
-                      if (provider.type === "openai_embeddings") return false;
-                      if (!editingModel) return true;
-                      const original = models.find((model) => model.id === editingModel);
-                      return !original || protocolForType(provider.type) === original.protocol;
-                    })
-                    .map((provider) => (
-                      <option key={provider.id} value={provider.id}>
-                        {provider.name || provider.id} ·{" "}
-                        {providerTypeMeta(provider.type).shortLabel}
-                      </option>
-                    ))}
-                </select>
+                  options={[
+                    { value: "", label: "Select provider" },
+                    ...providers
+                      .filter((provider) => {
+                        if (provider.type === "openai_embeddings") return false;
+                        if (!editingModel) return true;
+                        const original = models.find((model) => model.id === editingModel);
+                        return !original || protocolForType(provider.type) === original.protocol;
+                      })
+                      .map((provider) => ({
+                        value: provider.id,
+                        label: `${provider.name || provider.id} · ${
+                          providerTypeMeta(provider.type).shortLabel
+                        }`,
+                      })),
+                  ]}
+                  contentClassName="cocola-admin-ui"
+                />
               </Field>
 
               {selectedProvider ? (
@@ -965,19 +968,21 @@ export default function AdminModelsPage() {
                 </summary>
                 <div className="mt-4 grid gap-4 border-t border-border/70 pt-4 sm:grid-cols-2">
                   <Field label="Icon source">
-                    <select
+                    <SelectControl
                       className={inputClass}
                       value={modelForm.icon_type}
-                      onChange={(event) =>
+                      onValueChange={(value) =>
                         setModelForm({
                           ...modelForm,
-                          icon_type: event.target.value as ModelForm["icon_type"],
+                          icon_type: value as ModelForm["icon_type"],
                         })
                       }
-                    >
-                      <option value="simple-icons">Brand icon</option>
-                      <option value="image">Image URL</option>
-                    </select>
+                      options={[
+                        { value: "simple-icons", label: "Brand icon" },
+                        { value: "image", label: "Image URL" },
+                      ]}
+                      contentClassName="cocola-admin-ui"
+                    />
                   </Field>
                   {modelForm.icon_type === "image" ? (
                     <Field label="Image URL">
@@ -992,19 +997,16 @@ export default function AdminModelsPage() {
                     </Field>
                   ) : (
                     <Field label="Brand">
-                      <select
+                      <SelectControl
                         className={inputClass}
                         value={modelForm.icon_slug}
-                        onChange={(event) =>
-                          setModelForm({ ...modelForm, icon_slug: event.target.value })
-                        }
-                      >
-                        {SIMPLE_ICON_SLUGS.map((slug) => (
-                          <option key={slug} value={slug}>
-                            {SIMPLE_ICON_LABELS[slug] ?? slug}
-                          </option>
-                        ))}
-                      </select>
+                        onValueChange={(value) => setModelForm({ ...modelForm, icon_slug: value })}
+                        options={SIMPLE_ICON_SLUGS.map((slug) => ({
+                          value: slug,
+                          label: SIMPLE_ICON_LABELS[slug] ?? slug,
+                        }))}
+                        contentClassName="cocola-admin-ui"
+                      />
                     </Field>
                   )}
                   <Field label="Display priority" hint="Lower numbers appear first.">

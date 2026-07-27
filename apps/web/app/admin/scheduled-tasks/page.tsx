@@ -23,6 +23,7 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
+import { SelectControl } from "@/components/ui/select-control";
 import {
   formatDateTime,
   scheduleLabel,
@@ -149,18 +150,20 @@ export default function ScheduledTasksPage() {
         </label>
         <label>
           <span className="sr-only">Filter by status</span>
-          <select
+          <SelectControl
             value={status}
-            onChange={(event) => setStatus(event.target.value as StatusFilter)}
-            className="h-10 min-w-44 rounded-xl border border-input bg-background px-3 text-sm text-foreground outline-none"
-          >
-            <option value="all">All statuses</option>
-            <option value="active">Active</option>
-            <option value="paused">Paused</option>
-            <option value="completed">Completed</option>
-            <option value="expired">Expired</option>
-            <option value="owner-required">Owner required</option>
-          </select>
+            onValueChange={(value) => setStatus(value as StatusFilter)}
+            className="h-10 w-auto min-w-44 rounded-xl border border-input bg-background px-3 text-sm text-foreground outline-none"
+            options={[
+              { value: "all", label: "All statuses" },
+              { value: "active", label: "Active" },
+              { value: "paused", label: "Paused" },
+              { value: "completed", label: "Completed" },
+              { value: "expired", label: "Expired" },
+              { value: "owner-required", label: "Owner required" },
+            ]}
+            contentClassName="cocola-admin-ui"
+          />
         </label>
       </AdminToolbar>
 

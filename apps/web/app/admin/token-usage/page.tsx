@@ -17,6 +17,7 @@ import { Download, Loader2, Search, UserRound } from "lucide-react";
 import { Line } from "react-chartjs-2";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { AdminRefreshButton } from "@/components/admin/admin-ui";
+import { SelectControl } from "@/components/ui/select-control";
 
 ChartJS.register(
   CategoryScale,
@@ -287,17 +288,19 @@ export default function AdminTokenUsagePage() {
         <section className="flex flex-wrap items-end gap-3 rounded-lg border border-border bg-card p-4">
           <label className="space-y-1">
             <span className="text-xs text-muted-foreground">Range</span>
-            <select
-              className={input}
+            <SelectControl
+              className={`${input} w-36`}
               value={preset}
-              onChange={(event) => setPreset(event.target.value as RangePreset)}
-            >
-              <option value="24h">Last 24 hours</option>
-              <option value="7d">Last 7 days</option>
-              <option value="30d">Last 30 days</option>
-              <option value="90d">Last 90 days</option>
-              <option value="custom">Custom</option>
-            </select>
+              onValueChange={(value) => setPreset(value as RangePreset)}
+              options={[
+                { value: "24h", label: "Last 24 hours" },
+                { value: "7d", label: "Last 7 days" },
+                { value: "30d", label: "Last 30 days" },
+                { value: "90d", label: "Last 90 days" },
+                { value: "custom", label: "Custom" },
+              ]}
+              contentClassName="cocola-admin-ui"
+            />
           </label>
           {preset === "custom" ? (
             <>

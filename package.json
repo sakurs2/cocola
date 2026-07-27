@@ -15,7 +15,8 @@
       "brace-expansion@5.0.6": "5.0.8",
       "dompurify@3.2.7": "3.4.12",
       "glob@10.3.10": "10.5.0",
-      "js-yaml@4.2.0": "4.3.0"
+      "js-yaml@4.2.0": "4.3.0",
+      "@radix-ui/react-dismissable-layer": "1.1.15"
     },
     "patchedDependencies": {
       "@assistant-ui/react@0.14.24": "patches/@assistant-ui__react@0.14.24.patch"

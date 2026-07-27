@@ -20,6 +20,7 @@ import {
   ProjectBranchBadge,
 } from "@/components/assistant-ui/project-branch-control";
 import { ConversationComposer } from "@/components/assistant-ui/thread";
+import { SelectControl } from "@/components/ui/select-control";
 import { shouldOpenProjectTask } from "@/lib/project-task-intent.mjs";
 
 type ProjectTask = {
@@ -462,17 +463,19 @@ export default function ProjectPage() {
               </label>
               <label className="space-y-1.5">
                 <span className="text-xs font-medium">Visibility</span>
-                <select
+                <SelectControl
                   value={publishVisibility}
                   disabled={project.github_publish_status === "pending"}
-                  onChange={(event) =>
-                    setPublishVisibility(event.target.value === "public" ? "public" : "private")
+                  onValueChange={(value) =>
+                    setPublishVisibility(value === "public" ? "public" : "private")
                   }
-                  className="h-10 w-full rounded-xl border border-border bg-background px-3 text-sm outline-none transition-colors focus:border-primary disabled:opacity-60"
-                >
-                  <option value="private">Private</option>
-                  <option value="public">Public</option>
-                </select>
+                  options={[
+                    { value: "private", label: "Private" },
+                    { value: "public", label: "Public" },
+                  ]}
+                  className="focus-visible:border-primary disabled:opacity-60"
+                  contentClassName="cocola-user-ui"
+                />
               </label>
             </div>
             <div className="mt-4 flex items-center justify-between gap-3">
@@ -620,17 +623,16 @@ export default function ProjectPage() {
               {runtimePickerEnabled ? (
                 <label className="space-y-1.5">
                   <span className="text-sm font-medium">Default runtime</span>
-                  <select
+                  <SelectControl
                     value={draftRuntime}
-                    onChange={(event) => setDraftRuntime(event.target.value)}
-                    className="h-10 w-full rounded-xl border border-border bg-background px-3 text-sm outline-none transition-colors focus:border-primary"
-                  >
-                    {runtimes.map((runtime) => (
-                      <option key={runtime.id} value={runtime.id}>
-                        {runtime.label}
-                      </option>
-                    ))}
-                  </select>
+                    onValueChange={setDraftRuntime}
+                    options={runtimes.map((runtime) => ({
+                      value: runtime.id,
+                      label: runtime.label,
+                    }))}
+                    className="focus-visible:border-primary"
+                    contentClassName="cocola-user-ui"
+                  />
                 </label>
               ) : null}
               <label className="space-y-1.5 sm:col-span-2">

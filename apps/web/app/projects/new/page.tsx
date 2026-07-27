@@ -16,6 +16,7 @@ import {
   Search,
 } from "lucide-react";
 import { useCocola } from "@/app/runtime-provider";
+import { SelectControl } from "@/components/ui/select-control";
 import { cn } from "@/lib/utils";
 import { nextProjectCreateIntent } from "@/lib/project-task-intent.mjs";
 
@@ -302,14 +303,15 @@ export default function NewProjectPage() {
               {mode === "github_create" ? (
                 <label className="space-y-1.5">
                   <span className="text-sm font-medium">Visibility</span>
-                  <select
+                  <SelectControl
                     value={visibility}
-                    onChange={(event) => setVisibility(event.target.value as "private" | "public")}
-                    className="h-10 w-full rounded-xl border border-border bg-background px-3 text-sm"
-                  >
-                    <option value="private">Private (recommended)</option>
-                    <option value="public">Public</option>
-                  </select>
+                    onValueChange={(value) => setVisibility(value as "private" | "public")}
+                    options={[
+                      { value: "private", label: "Private (recommended)" },
+                      { value: "public", label: "Public" },
+                    ]}
+                    contentClassName="cocola-user-ui"
+                  />
                 </label>
               ) : null}
             </div>
@@ -337,17 +339,15 @@ export default function NewProjectPage() {
               {runtimePickerEnabled ? (
                 <label className="block space-y-1.5">
                   <span className="text-sm font-medium">Default Agent Runtime</span>
-                  <select
+                  <SelectControl
                     value={runtimeID}
-                    onChange={(event) => setRuntimeID(event.target.value)}
-                    className="h-10 w-full rounded-xl border border-border bg-background px-3 text-sm"
-                  >
-                    {runtimes.map((runtime) => (
-                      <option key={runtime.id} value={runtime.id}>
-                        {runtime.label}
-                      </option>
-                    ))}
-                  </select>
+                    onValueChange={setRuntimeID}
+                    options={runtimes.map((runtime) => ({
+                      value: runtime.id,
+                      label: runtime.label,
+                    }))}
+                    contentClassName="cocola-user-ui"
+                  />
                 </label>
               ) : null}
               {error ? (

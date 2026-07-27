@@ -10,6 +10,7 @@ import { FeishuConnectorCard } from "@/components/connectors/feishu-connector-ca
 import { ActionConfirmDialog } from "@/components/ui/action-dialog";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { SelectControl } from "@/components/ui/select-control";
 import {
   AGENT_AVATAR_COLORS,
   AGENT_AVATAR_KEYS,
@@ -360,22 +361,22 @@ export default function AgentPage() {
             </p>
             <div className="mt-4 space-y-1.5">
               <Label htmlFor="agent-model">Fixed model</Label>
-              <select
+              <SelectControl
                 id="agent-model"
                 value={modelID}
-                onChange={(event) => setModelID(event.target.value)}
-                className="h-9 w-full rounded-xl border border-input bg-background px-3 text-sm outline-none focus:border-foreground/30 focus:ring-2 focus:ring-blue-500/20"
-              >
-                {!models.some((model) => model.id === modelID) ? (
-                  <option value={modelID}>{agent.model_alias} · unavailable</option>
-                ) : null}
-                {models.map((model) => (
-                  <option key={model.id} value={model.id}>
-                    {model.label}
-                    {model.provider ? ` · ${model.provider}` : ""}
-                  </option>
-                ))}
-              </select>
+                onValueChange={setModelID}
+                options={[
+                  ...(!models.some((model) => model.id === modelID)
+                    ? [{ value: modelID, label: `${agent.model_alias} · unavailable` }]
+                    : []),
+                  ...models.map((model) => ({
+                    value: model.id,
+                    label: `${model.label}${model.provider ? ` · ${model.provider}` : ""}`,
+                  })),
+                ]}
+                className="h-9 shadow-none focus-visible:border-foreground/30 focus-visible:ring-blue-500/20"
+                contentClassName="cocola-user-ui"
+              />
             </div>
           </section>
 

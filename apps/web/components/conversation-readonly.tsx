@@ -15,14 +15,14 @@ import {
   RailTool,
 } from "@/components/assistant-ui/rail";
 import { parseEnvironmentPreparationSnapshot } from "@/lib/environment";
-import { ModelIcon } from "@/components/assistant-ui/thread";
+import { ModelIcon } from "@/components/ui/model-icon";
 import {
   QuestionCard,
   RunSummary,
   StructuredResultCard,
 } from "@/components/assistant-ui/rich-message-parts";
 import { cn } from "@/lib/utils";
-import { type ModelIconConfig } from "@/app/runtime-provider";
+import { type ModelIconConfig } from "@/lib/model-icons";
 import {
   normalizeRichMessagePart,
   type UiQuestionPart,
