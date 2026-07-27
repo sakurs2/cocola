@@ -19,6 +19,7 @@ from __future__ import annotations
 
 import asyncio
 import time
+from collections import OrderedDict
 from typing import Protocol, runtime_checkable
 
 
@@ -104,10 +105,16 @@ class TTLCachedRevocation:
     window is seconds. Both positive and negative results are cached.
     """
 
-    def __init__(self, inner: RevocationStore, ttl_s: float = 5.0) -> None:
+    def __init__(
+        self,
+        inner: RevocationStore,
+        ttl_s: float = 5.0,
+        max_entries: int = 10_000,
+    ) -> None:
         self._inner = inner
         self._ttl = max(0.0, ttl_s)
-        self._cache: dict[str, tuple[bool, float]] = {}
+        self._max_entries = max(1, int(max_entries))
+        self._cache: OrderedDict[str, tuple[bool, float]] = OrderedDict()
         self._lock = asyncio.Lock()
 
     async def is_revoked(self, token_id: str, *, now: float | None = None) -> bool:
@@ -117,10 +124,18 @@ class TTLCachedRevocation:
         async with self._lock:
             hit = self._cache.get(token_id)
             if hit is not None and hit[1] > t:
+                self._cache.move_to_end(token_id)
                 return hit[0]
+            if hit is not None:
+                self._cache.pop(token_id, None)
         revoked = await self._inner.is_revoked(token_id)
+        if self._ttl <= 0:
+            return revoked
         async with self._lock:
             self._cache[token_id] = (revoked, t + self._ttl)
+            self._cache.move_to_end(token_id)
+            while len(self._cache) > self._max_entries:
+                self._cache.popitem(last=False)
         return revoked
 
     async def revoke(self, token_id: str) -> None:

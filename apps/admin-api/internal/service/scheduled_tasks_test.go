@@ -198,7 +198,10 @@ func TestGatewayTaskRunnerUsesOwnerIdentityAndStableConversation(t *testing.T) {
 			t.Errorf("decode request: %v", err)
 		}
 		w.Header().Set("content-type", "text/event-stream")
-		_, _ = w.Write([]byte("event: text\ndata: {\"kind\":\"text\",\"data\":{\"text\":\"done\"}}\n\n"))
+		_, _ = w.Write([]byte(
+			"event: text\ndata: {\"kind\":\"text\",\"data\":{\"text\":\"done\"}}\n\n" +
+				"event: done\ndata: {\"kind\":\"done\",\"data\":{\"status\":\"success\"}}\n\n",
+		))
 	}))
 	defer server.Close()
 
@@ -212,6 +215,64 @@ func TestGatewayTaskRunnerUsesOwnerIdentityAndStableConversation(t *testing.T) {
 	}
 	if sessionID != "sched-task" || requestBody["session_id"] != "sched-task" || requestBody["conversation_type"] != "scheduled_task" {
 		t.Fatalf("unexpected gateway payload: session=%q body=%+v", sessionID, requestBody)
+	}
+}
+
+func TestGatewayTaskRunnerRequiresSuccessfulTerminalEvent(t *testing.T) {
+	ctx := context.Background()
+	memory := store.NewMemory()
+	owner := store.AuthUser{ID: "user-alice", Username: "alice", Email: "alice@example.com", Enabled: true}
+	if err := memory.CreateAuthUser(ctx, owner); err != nil {
+		t.Fatal(err)
+	}
+	svc := New(memory, token.NewIssuer("secret", "cocola", time.Hour), time.Now)
+
+	tests := []struct {
+		name string
+		body string
+	}{
+		{
+			name: "error terminal",
+			body: "event: done\ndata: {\"kind\":\"done\",\"data\":{\"status\":\"error\"}}\n\n",
+		},
+		{
+			name: "cancelled terminal",
+			body: "event: done\ndata: {\"kind\":\"done\",\"data\":{\"status\":\"cancelled\"}}\n\n",
+		},
+		{
+			name: "interrupted terminal",
+			body: "event: done\ndata: {\"kind\":\"done\",\"data\":{\"status\":\"interrupted\"}}\n\n",
+		},
+		{
+			name: "waiting input terminal",
+			body: "event: done\ndata: {\"kind\":\"done\",\"data\":{\"status\":\"waiting_input\"}}\n\n",
+		},
+		{
+			name: "missing terminal",
+			body: "event: text\ndata: {\"kind\":\"text\",\"data\":{\"text\":\"partial\"}}\n\n",
+		},
+		{
+			name: "missing terminal status",
+			body: "event: done\ndata: {\"kind\":\"done\",\"data\":{}}\n\n",
+		},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+				w.Header().Set("content-type", "text/event-stream")
+				_, _ = w.Write([]byte(test.body))
+			}))
+			defer server.Close()
+
+			runner := gatewayTaskRunner{admin: svc, gatewayURL: server.URL, httpClient: server.Client()}
+			_, err := runner.Run(ctx, store.ScheduledTask{
+				ID: "task", OwnerUserID: owner.ID, ConversationID: "sched-task",
+				Name: "Daily report", Prompt: "summarize", ModelAlias: "model", MaxTurns: 30,
+			}, nil, func(string, map[string]string) {})
+			if err == nil {
+				t.Fatal("non-successful Gateway stream unexpectedly succeeded")
+			}
+		})
 	}
 }
 

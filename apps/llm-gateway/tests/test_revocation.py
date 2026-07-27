@@ -60,6 +60,22 @@ async def test_ttl_cache_revoke_invalidates_entry():
     assert await cache.is_revoked("k", now=1.0) is True
 
 
+async def test_ttl_cache_enforces_capacity_and_reloads_evicted_entries():
+    inner = MemoryRevocationStore()
+    cache = TTLCachedRevocation(inner, ttl_s=10.0, max_entries=2)
+
+    assert await cache.is_revoked("oldest", now=0.0) is False
+    assert await cache.is_revoked("newer", now=0.0) is False
+    assert await cache.is_revoked("oldest", now=1.0) is False
+    assert await cache.is_revoked("newest", now=1.0) is False
+    assert len(cache._cache) == 2
+
+    # "newer" was the least recently used entry and must have been evicted.
+    await inner.revoke("newer")
+    assert await cache.is_revoked("newer", now=2.0) is True
+    assert len(cache._cache) == 2
+
+
 # ---- gateway gate ----
 
 

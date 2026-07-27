@@ -254,16 +254,19 @@ func TestQuestionAnswerRestoresPendingWhenRuntimeRejectsStartup(t *testing.T) {
 
 type controlledFinalizeStore struct {
 	chatrun.Store
-	mu      sync.Mutex
-	calls   int
-	failAll bool
+	mu          sync.Mutex
+	calls       int
+	failAll     bool
+	failMessage bool
 }
 
 func (s *controlledFinalizeStore) Finalize(ctx context.Context, in chatrun.FinalizeInput) (chatrun.FinalizeResult, error) {
 	s.mu.Lock()
 	s.calls++
+	failAll := s.failAll
+	failMessage := s.failMessage
 	s.mu.Unlock()
-	if s.failAll || in.AssistantMessage != nil {
+	if failAll || (failMessage && in.AssistantMessage != nil) {
 		return chatrun.FinalizeResult{}, errors.New("injected finalization failure")
 	}
 	return s.Store.Finalize(ctx, in)
@@ -273,6 +276,12 @@ func (s *controlledFinalizeStore) callCount() int {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	return s.calls
+}
+
+func (s *controlledFinalizeStore) setFailAll(fail bool) {
+	s.mu.Lock()
+	s.failAll = fail
+	s.mu.Unlock()
 }
 
 func newBlockingChatStreamer() *blockingChatStreamer {
@@ -474,7 +483,7 @@ func TestFinalizeRunRetriesAreBoundedAndFallbackToInterrupted(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	store := &controlledFinalizeStore{Store: base}
+	store := &controlledFinalizeStore{Store: base, failMessage: true}
 	api := New(&fakeStreamer{}, auth.NewVerifier(auth.Config{}), logger.Must()).
 		WithChatRuns(store, RunConfig{FinalizeRetry: time.Microsecond})
 
@@ -490,17 +499,67 @@ func TestFinalizeRunRetriesAreBoundedAndFallbackToInterrupted(t *testing.T) {
 	if got, want := store.callCount(), finalizeMaxAttempts+1; got != want {
 		t.Fatalf("finalize calls = %d, want %d", got, want)
 	}
+}
 
-	alwaysFail := &controlledFinalizeStore{Store: base, failAll: true}
-	api = New(&fakeStreamer{}, auth.NewVerifier(auth.Config{}), logger.Must()).
-		WithChatRuns(alwaysFail, RunConfig{FinalizeRetry: time.Microsecond})
-	if _, ok := api.finalizeRun(chatrun.FinalizeInput{
-		RunID: "run-2", UserID: auth.DevIdentity.UserID, Status: chatrun.StatusSuccess,
-	}); ok {
-		t.Fatal("permanent failure unexpectedly finalized")
+func TestExecuteLiveRunRetainsStateUntilFinalizationRecovers(t *testing.T) {
+	conversations := convo.NewMemory()
+	base := chatrun.NewMemory(conversations)
+	store := &controlledFinalizeStore{Store: base, failAll: true}
+	api := New(
+		&fakeStreamer{script: []agent.Event{{Kind: "done"}}},
+		auth.NewVerifier(auth.Config{}),
+		logger.Must(),
+	).WithConvoStore(conversations).
+		WithChatRuns(store, RunConfig{
+			PingEvery: time.Hour, MergeWindow: time.Millisecond,
+			DraftInterval: time.Millisecond, FinalizeRetry: time.Millisecond,
+		})
+
+	recorder := httptest.NewRecorder()
+	request := httptest.NewRequest(http.MethodPost, "/v1/chat", strings.NewReader(
+		`{"prompt":"hello","session_id":"conversation-finalize-recovery","client_request_id":"request-finalize-recovery"}`,
+	))
+	requestDone := make(chan struct{})
+	go func() {
+		api.Handler().ServeHTTP(recorder, request)
+		close(requestDone)
+	}()
+
+	deadline := time.Now().Add(time.Second)
+	for store.callCount() < finalizeMaxAttempts+2 && time.Now().Before(deadline) {
+		time.Sleep(time.Millisecond)
 	}
-	if got, want := alwaysFail.callCount(), finalizeMaxAttempts+1; got != want {
-		t.Fatalf("permanent failure calls = %d, want %d", got, want)
+	if got := store.callCount(); got < finalizeMaxAttempts+2 {
+		t.Fatalf("fallback finalization did not enter recovery: calls=%d", got)
+	}
+
+	api.runs.mu.Lock()
+	liveCount := len(api.runs.live)
+	api.runs.mu.Unlock()
+	if liveCount != 1 {
+		t.Fatalf("live run count during finalization recovery = %d, want 1", liveCount)
+	}
+
+	store.setFailAll(false)
+	select {
+	case <-requestDone:
+	case <-time.After(time.Second):
+		t.Fatal("chat request did not finish after finalization storage recovered")
+	}
+
+	api.runs.mu.Lock()
+	liveCount = len(api.runs.live)
+	api.runs.mu.Unlock()
+	if liveCount != 0 {
+		t.Fatalf("live run count after durable finalization = %d, want 0", liveCount)
+	}
+	runID := recorder.Header().Get("x-cocola-run-id")
+	run, err := base.GetOwned(context.Background(), runID, auth.DevIdentity.UserID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if run.Status != chatrun.StatusSuccess || run.ErrorCode != "" {
+		t.Fatalf("recovered run = %+v, want successful original finalization", run)
 	}
 }
 

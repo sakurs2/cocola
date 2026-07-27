@@ -133,6 +133,8 @@ func (r *gatewayTaskRunner) Run(ctx context.Context, task store.ScheduledTask, a
 	scanner := bufio.NewScanner(resp.Body)
 	scanner.Buffer(make([]byte, 0, 64*1024), 4*1024*1024)
 	var eventName string
+	terminalSeen := false
+	terminalStatus := ""
 	for scanner.Scan() {
 		line := scanner.Text()
 		if strings.HasPrefix(line, "event:") {
@@ -153,9 +155,23 @@ func (r *gatewayTaskRunner) Run(ctx context.Context, task store.ScheduledTask, a
 			ev.Kind = eventName
 		}
 		onEvent(ev.Kind, ev.Data)
+		if ev.Kind == "done" {
+			terminalSeen = true
+			terminalStatus = strings.TrimSpace(ev.Data["status"])
+			break
+		}
 	}
 	if err := scanner.Err(); err != nil {
 		return sessionID, err
+	}
+	if !terminalSeen {
+		return sessionID, fmt.Errorf("gateway chat stream ended before terminal event")
+	}
+	if terminalStatus != "success" {
+		if terminalStatus == "" {
+			terminalStatus = "unknown"
+		}
+		return sessionID, fmt.Errorf("gateway chat ended with status %q", terminalStatus)
 	}
 	return sessionID, nil
 }

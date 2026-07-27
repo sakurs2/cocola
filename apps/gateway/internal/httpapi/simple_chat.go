@@ -37,6 +37,7 @@ const (
 	draftFailureBudget   = 30 * time.Second
 	finalizeAttemptLimit = 3 * time.Second
 	finalizeMaxAttempts  = 4
+	finalizeRecoveryMax  = 30 * time.Second
 	subscriberBuffer     = 64
 	maxWikiRefsPerTurn   = 20
 	maxWikiBytesPerTurn  = int64(100 << 20)
@@ -1171,13 +1172,14 @@ func (a *API) executeLiveRun(live *liveRun) {
 			Text: questionText, Options: questionOptions,
 		}
 	}
-	finalizedResult, finalized := a.finalizeRun(chatrun.FinalizeInput{
+	finalizeInput := chatrun.FinalizeInput{
 		RunID: live.run.ID, UserID: live.run.UserID, Status: status, ErrorCode: errorCode,
 		AssistantMessage: message, Reveal: live.request.DeferConversationVisibilityUntilDone,
 		ConversationTitle: titleForConversation(live.request), CompletedAt: completedAt,
 		ToolCallCount: toolCalls, LLMCallCount: llmCalls, PlanCandidate: planCandidate,
 		QuestionCandidate: questionCandidate, RuntimeAccepted: live.wasRuntimeAccepted(),
-	})
+	}
+	finalizedResult, finalized := a.finalizeRun(finalizeInput)
 	if a.projects != nil && live.request.ProjectID != "" {
 		revokeCtx, cancelRevoke := context.WithTimeout(context.Background(), 5*time.Second)
 		if err := a.projects.RevokeBrokerRun(revokeCtx, project.Identity{
@@ -1192,12 +1194,17 @@ func (a *API) executeLiveRun(live *liveRun) {
 		}
 		cancelRevoke()
 	}
-	// Broker validity is persisted separately from this process-local execution
-	// map, so other Gateway replicas observe revocation before local teardown.
-	a.runs.mu.Lock()
-	delete(a.runs.live, live.run.ID)
-	a.runs.mu.Unlock()
+	if !finalized {
+		finalizedResult, finalized = a.recoverRunFinalization(finalizeInput)
+	}
 	if finalized {
+		// Broker validity is persisted separately from this process-local execution
+		// map, so other Gateway replicas observe revocation before local teardown.
+		// Keep the live entry until the durable terminal state is confirmed.
+		a.runs.mu.Lock()
+		delete(a.runs.live, live.run.ID)
+		a.runs.mu.Unlock()
+
 		finalizedRun := finalizedResult.Run
 		status, errorCode = finalizedRun.Status, finalizedRun.ErrorCode
 		a.finishConversationRun(
@@ -1429,6 +1436,17 @@ func (a *API) persistRunDrafts(ctx context.Context, live *liveRun) error {
 	}
 }
 
+func interruptedFinalization(input chatrun.FinalizeInput) chatrun.FinalizeInput {
+	fallback := input
+	fallback.Status = chatrun.StatusInterrupted
+	fallback.ErrorCode = "FINALIZATION_FAILED"
+	fallback.AssistantMessage = nil
+	fallback.PlanCandidate = nil
+	fallback.QuestionCandidate = nil
+	fallback.Reveal = false
+	return fallback
+}
+
 func (a *API) finalizeRun(input chatrun.FinalizeInput) (chatrun.FinalizeResult, bool) {
 	var lastErr error
 	for attempt := 1; attempt <= finalizeMaxAttempts; attempt++ {
@@ -1458,14 +1476,9 @@ func (a *API) finalizeRun(input chatrun.FinalizeInput) (chatrun.FinalizeResult, 
 	// A malformed assistant payload or a concurrently removed conversation must
 	// not leave an immortal running row. Make one final, message-free transition
 	// to interrupted. A total database outage may still reject this write; in
-	// that case readiness stays failed and startup recovery closes the stale row.
-	fallback := input
-	fallback.Status = chatrun.StatusInterrupted
-	fallback.ErrorCode = "FINALIZATION_FAILED"
-	fallback.AssistantMessage = nil
-	fallback.PlanCandidate = nil
-	fallback.QuestionCandidate = nil
-	fallback.Reveal = false
+	// that case readiness stays failed and executeLiveRun keeps the local run
+	// until recoverRunFinalization confirms the durable terminal state.
+	fallback := interruptedFinalization(input)
 	ctx, cancel := context.WithTimeout(context.Background(), finalizeAttemptLimit)
 	result, fallbackErr := a.runs.store.Finalize(ctx, fallback)
 	cancel()
@@ -1477,6 +1490,53 @@ func (a *API) finalizeRun(input chatrun.FinalizeInput) (chatrun.FinalizeResult, 
 	a.log.Warn(fmt.Sprintf("chat run finalization abandoned after %d attempts: %v; fallback: %v",
 		finalizeMaxAttempts, lastErr, fallbackErr))
 	return chatrun.FinalizeResult{}, false
+}
+
+func (a *API) recoverRunFinalization(input chatrun.FinalizeInput) (chatrun.FinalizeResult, bool) {
+	fallback := interruptedFinalization(input)
+	delay := a.runs.finalizeRetry
+	if delay <= 0 {
+		delay = defaultFinalizeRetry
+	}
+	if delay > finalizeRecoveryMax {
+		delay = finalizeRecoveryMax
+	}
+	for {
+		timer := time.NewTimer(delay)
+		select {
+		case <-a.runs.stop:
+			timer.Stop()
+			return chatrun.FinalizeResult{}, false
+		case <-timer.C:
+		}
+
+		ctx, cancel := context.WithTimeout(context.Background(), finalizeAttemptLimit)
+		result, err := a.runs.store.Finalize(ctx, input)
+		cancel()
+		if err == nil {
+			a.runs.databaseUnavailable.Store(false)
+			a.log.Warn("chat run finalization recovered")
+			return result, true
+		}
+
+		ctx, cancel = context.WithTimeout(context.Background(), finalizeAttemptLimit)
+		result, fallbackErr := a.runs.store.Finalize(ctx, fallback)
+		cancel()
+		if fallbackErr == nil {
+			a.runs.databaseUnavailable.Store(false)
+			a.log.Warn("chat run finalization recovered with interrupted terminal state: " + err.Error())
+			return result, true
+		}
+		a.runs.databaseUnavailable.Store(true)
+		a.log.Warn(fmt.Sprintf("chat run finalization recovery failed; retrying: %v; fallback: %v",
+			err, fallbackErr))
+		if delay < finalizeRecoveryMax {
+			delay *= 2
+			if delay > finalizeRecoveryMax {
+				delay = finalizeRecoveryMax
+			}
+		}
+	}
 }
 
 type memoryEventCoalescer struct {
