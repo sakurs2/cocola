@@ -17,6 +17,8 @@ function isWorkspacePath(pathname: string | null) {
     pathname === "/" ||
     pathname === "/wiki" ||
     pathname?.startsWith("/wiki/") ||
+    pathname === "/agents" ||
+    pathname?.startsWith("/agents/") ||
     pathname === "/skills" ||
     pathname?.startsWith("/skills/") ||
     pathname === "/mcps" ||

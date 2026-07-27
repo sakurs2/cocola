@@ -154,6 +154,12 @@ func (a *API) answerQuestion(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusServiceUnavailable, "CHAT_HISTORY_UNAVAILABLE", "conversation state is unavailable")
 		return
 	}
+	if a.writeConversationAgentError(
+		w,
+		a.ensureConversationAgentActive(r.Context(), identity, conversation),
+	) {
+		return
+	}
 
 	startedAt := chatStartedAt(r).UTC()
 	runID := tracing.TraceID(r.Context())
@@ -173,7 +179,10 @@ func (a *API) answerQuestion(w http.ResponseWriter, r *http.Request) {
 		ModelAlias: question.ModelAlias, ConversationTitle: conversation.Title,
 		ProjectID: conversation.ProjectID, SkillID: question.SkillID,
 		ClientRequestID: input.ClientRequestID, RequireSessionResume: true,
-		QuestionID: question.ID,
+		QuestionID:         question.ID,
+		AgentID:            conversation.AgentID,
+		AgentSnapshot:      conversation.AgentSnapshot,
+		ChannelConnectorID: conversation.ChannelConnectorID,
 	}
 	userReq := req
 	userReq.Prompt = answerText
@@ -215,6 +224,9 @@ func (a *API) answerQuestion(w http.ResponseWriter, r *http.Request) {
 		return
 	case errors.Is(startErr, chatrun.ErrQuestionModelUnavailable):
 		writeErr(w, http.StatusConflict, "QUESTION_MODEL_UNAVAILABLE", "The model used for this question is no longer available.")
+		return
+	case errors.Is(startErr, chatrun.ErrAgentArchived):
+		writeErr(w, http.StatusConflict, "AGENT_ARCHIVED", "Agent is archived")
 		return
 	case errors.Is(startErr, chatrun.ErrConflict):
 		writeJSON(w, http.StatusConflict, map[string]any{

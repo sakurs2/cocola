@@ -10,6 +10,7 @@ import (
 
 	"github.com/google/uuid"
 
+	"github.com/cocola-project/cocola/apps/gateway/internal/agentprofile"
 	"github.com/cocola-project/cocola/apps/gateway/internal/convo"
 )
 
@@ -141,5 +142,62 @@ func TestPostgresConcurrentIdempotentStart(t *testing.T) {
 	}
 	if created != 1 {
 		t.Fatalf("created count = %d, want 1", created)
+	}
+}
+
+func TestPostgresStartRejectsArchivedAgent(t *testing.T) {
+	dsn := os.Getenv("COCOLA_TEST_PG_DSN")
+	if dsn == "" {
+		t.Skip("COCOLA_TEST_PG_DSN not set")
+	}
+	ctx := context.Background()
+	store, err := NewPostgres(ctx, dsn)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer store.Close()
+
+	agentID := uuid.NewString()
+	conversationID := "archived-agent-" + uuid.NewString()
+	userID := "archived-agent-user-" + uuid.NewString()
+	tenantID := "archived-agent-tenant-" + uuid.NewString()
+	now := time.Now().UTC()
+	defer func() {
+		_, _ = store.pool.Exec(ctx, `DELETE FROM conversation_runs WHERE conversation_id=$1`, conversationID)
+		_, _ = store.pool.Exec(ctx, `DELETE FROM conversations WHERE id=$1`, conversationID)
+		_, _ = store.pool.Exec(ctx, `DELETE FROM agents WHERE id=$1::uuid`, agentID)
+	}()
+	_, err = store.pool.Exec(ctx, `INSERT INTO agents (
+		id, tenant_id, owner_user_id, name, description, instructions,
+		avatar_key, avatar_color, runtime_id, model_route_id, model_alias,
+		status, version, created_at, updated_at, archived_at
+	) VALUES (
+		$1::uuid,$2,$3,$4,'','',
+		'sparkle','blue','claude-code','default','default',
+		'archived',1,$5,$5,$5
+	)`, agentID, tenantID, userID, "Archived "+agentID, now)
+	if err != nil {
+		t.Fatalf("insert archived Agent: %v", err)
+	}
+	input := testStartInput(uuid.NewString(), "archived-request", userID, conversationID)
+	input.Conversation.TenantID = tenantID
+	input.Conversation.AgentID = agentID
+	input.Conversation.AgentVersion = 1
+	input.Conversation.AgentSnapshot = &agentprofile.Snapshot{
+		ID: agentID, Version: 1, Name: "Archived " + agentID,
+		RuntimeID: "claude-code", ModelRouteID: "default", ModelAlias: "default",
+	}
+	if _, err := store.Start(ctx, input); !errors.Is(err, ErrAgentArchived) {
+		t.Fatalf("Start with archived Agent = %v, want ErrAgentArchived", err)
+	}
+	var exists bool
+	if err := store.pool.QueryRow(ctx,
+		`SELECT EXISTS(SELECT 1 FROM conversations WHERE id=$1)`,
+		conversationID,
+	).Scan(&exists); err != nil {
+		t.Fatalf("check conversation: %v", err)
+	}
+	if exists {
+		t.Fatal("archived Agent conversation was persisted")
 	}
 }

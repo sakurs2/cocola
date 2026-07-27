@@ -16,6 +16,7 @@ var (
 	ErrUnsupportedMedia   = errors.New("feishu connector: unsupported media")
 	ErrLeaseLost          = errors.New("feishu connector: lease lost")
 	ErrFlowTerminated     = errors.New("feishu connector: registration flow terminated")
+	ErrAgentArchived      = errors.New("feishu connector: agent archived")
 )
 
 const (
@@ -66,6 +67,7 @@ type Connector struct {
 	ID                  string
 	TenantID            string
 	UserID              string
+	AgentID             string
 	Provider            string
 	Domain              string
 	AppID               string
@@ -73,8 +75,6 @@ type Connector struct {
 	OwnerOpenID         string
 	BotOpenID           string
 	BotName             string
-	ModelRouteID        string
-	ModelAlias          string
 	DesiredEnabled      bool
 	Status              string
 	BindCodeHash        string
@@ -89,13 +89,12 @@ type Connector struct {
 }
 
 type ConnectorView struct {
+	AgentID         string            `json:"agent_id,omitempty"`
 	Connected       bool              `json:"connected"`
 	Enabled         bool              `json:"enabled"`
 	Status          string            `json:"status"`
 	Domain          string            `json:"domain,omitempty"`
 	BotName         string            `json:"bot_name,omitempty"`
-	ModelRouteID    string            `json:"model_route_id,omitempty"`
-	ModelAlias      string            `json:"model_alias,omitempty"`
 	LastConnectedAt *time.Time        `json:"last_connected_at,omitempty"`
 	LastErrorCode   string            `json:"last_error_code,omitempty"`
 	Registration    *RegistrationFlow `json:"registration,omitempty"`
@@ -115,6 +114,7 @@ type RegistrationFlow struct {
 	ID              string    `json:"id"`
 	TenantID        string    `json:"-"`
 	UserID          string    `json:"-"`
+	AgentID         string    `json:"-"`
 	Provider        string    `json:"provider"`
 	Status          string    `json:"status"`
 	VerificationURL string    `json:"verification_url,omitempty"`
@@ -134,6 +134,12 @@ type RegistrationInput struct {
 	AppName   string
 	AppDesc   string
 	AvatarURL string
+}
+
+type AgentRegistration struct {
+	ID          string
+	Name        string
+	Description string
 }
 
 type RegistrationResult struct {
@@ -226,12 +232,11 @@ type QuestionOption struct {
 type Store interface {
 	Close()
 
-	GetConnector(context.Context, Identity) (Connector, error)
+	GetConnector(context.Context, Identity, string) (Connector, error)
 	GetConnectorByID(context.Context, string) (Connector, error)
 	UpsertConnector(context.Context, Connector) (Connector, error)
-	DeleteConnector(context.Context, Identity) error
-	SetConnectorEnabled(context.Context, Identity, bool, time.Time) (Connector, error)
-	SetConnectorModel(context.Context, Identity, string, string, time.Time) (Connector, error)
+	DeleteConnector(context.Context, Identity, string) error
+	SetConnectorEnabled(context.Context, Identity, string, bool, time.Time) (Connector, error)
 	UpdateConnectorState(
 		context.Context,
 		string,
@@ -250,10 +255,10 @@ type Store interface {
 	ReleaseConnectorLease(context.Context, string, string, time.Time) error
 
 	CreateRegistrationFlow(context.Context, RegistrationFlow) error
-	GetRegistrationFlow(context.Context, Identity, string) (RegistrationFlow, error)
-	GetActiveRegistrationFlow(context.Context, Identity) (RegistrationFlow, error)
+	GetRegistrationFlow(context.Context, Identity, string, string) (RegistrationFlow, error)
+	GetActiveRegistrationFlow(context.Context, Identity, string) (RegistrationFlow, error)
 	UpdateRegistrationFlow(context.Context, string, string, string, string, time.Time, time.Time) error
-	CancelRegistrationFlow(context.Context, Identity, string, time.Time) error
+	CancelRegistrationFlow(context.Context, Identity, string, string, time.Time) error
 	CompleteRegistration(context.Context, Identity, string, Connector, time.Time) error
 	InterruptRegistrationFlows(context.Context, time.Time, time.Time) error
 

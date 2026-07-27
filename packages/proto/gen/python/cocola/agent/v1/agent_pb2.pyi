@@ -17,7 +17,7 @@ INTERACTION_MODE_EXECUTE: InteractionMode
 INTERACTION_MODE_PLAN: InteractionMode
 
 class QueryRequest(_message.Message):
-    __slots__ = ("user_id", "session_id", "prompt", "sandbox_id", "max_turns", "attachments", "runtime_id", "skill_id", "allow_workspace_reset", "memory_context", "project_context", "interaction_mode", "require_session_resume", "wiki_references")
+    __slots__ = ("user_id", "session_id", "prompt", "sandbox_id", "max_turns", "attachments", "runtime_id", "skill_id", "allow_workspace_reset", "memory_context", "project_context", "interaction_mode", "require_session_resume", "wiki_references", "agent_context")
     USER_ID_FIELD_NUMBER: _ClassVar[int]
     SESSION_ID_FIELD_NUMBER: _ClassVar[int]
     PROMPT_FIELD_NUMBER: _ClassVar[int]
@@ -32,6 +32,7 @@ class QueryRequest(_message.Message):
     INTERACTION_MODE_FIELD_NUMBER: _ClassVar[int]
     REQUIRE_SESSION_RESUME_FIELD_NUMBER: _ClassVar[int]
     WIKI_REFERENCES_FIELD_NUMBER: _ClassVar[int]
+    AGENT_CONTEXT_FIELD_NUMBER: _ClassVar[int]
     user_id: str
     session_id: str
     prompt: str
@@ -46,7 +47,8 @@ class QueryRequest(_message.Message):
     interaction_mode: InteractionMode
     require_session_resume: bool
     wiki_references: _containers.RepeatedCompositeFieldContainer[WikiReference]
-    def __init__(self, user_id: _Optional[str] = ..., session_id: _Optional[str] = ..., prompt: _Optional[str] = ..., sandbox_id: _Optional[str] = ..., max_turns: _Optional[int] = ..., attachments: _Optional[_Iterable[_Union[Attachment, _Mapping]]] = ..., runtime_id: _Optional[str] = ..., skill_id: _Optional[str] = ..., allow_workspace_reset: bool = ..., memory_context: _Optional[str] = ..., project_context: _Optional[_Union[ProjectContext, _Mapping]] = ..., interaction_mode: _Optional[_Union[InteractionMode, str]] = ..., require_session_resume: bool = ..., wiki_references: _Optional[_Iterable[_Union[WikiReference, _Mapping]]] = ...) -> None: ...
+    agent_context: AgentContext
+    def __init__(self, user_id: _Optional[str] = ..., session_id: _Optional[str] = ..., prompt: _Optional[str] = ..., sandbox_id: _Optional[str] = ..., max_turns: _Optional[int] = ..., attachments: _Optional[_Iterable[_Union[Attachment, _Mapping]]] = ..., runtime_id: _Optional[str] = ..., skill_id: _Optional[str] = ..., allow_workspace_reset: _Optional[bool] = ..., memory_context: _Optional[str] = ..., project_context: _Optional[_Union[ProjectContext, _Mapping]] = ..., interaction_mode: _Optional[_Union[InteractionMode, str]] = ..., require_session_resume: _Optional[bool] = ..., wiki_references: _Optional[_Iterable[_Union[WikiReference, _Mapping]]] = ..., agent_context: _Optional[_Union[AgentContext, _Mapping]] = ...) -> None: ...
 
 class ProjectContext(_message.Message):
     __slots__ = ("project_id", "repository_id", "clone_url", "default_branch", "base_sha", "task_branch", "git_author_name", "git_author_email", "repository_provider", "repository_full_name", "credential_mode", "base_ref")
@@ -75,6 +77,18 @@ class ProjectContext(_message.Message):
     credential_mode: str
     base_ref: str
     def __init__(self, project_id: _Optional[str] = ..., repository_id: _Optional[int] = ..., clone_url: _Optional[str] = ..., default_branch: _Optional[str] = ..., base_sha: _Optional[str] = ..., task_branch: _Optional[str] = ..., git_author_name: _Optional[str] = ..., git_author_email: _Optional[str] = ..., repository_provider: _Optional[str] = ..., repository_full_name: _Optional[str] = ..., credential_mode: _Optional[str] = ..., base_ref: _Optional[str] = ...) -> None: ...
+
+class AgentContext(_message.Message):
+    __slots__ = ("id", "version", "name", "instructions")
+    ID_FIELD_NUMBER: _ClassVar[int]
+    VERSION_FIELD_NUMBER: _ClassVar[int]
+    NAME_FIELD_NUMBER: _ClassVar[int]
+    INSTRUCTIONS_FIELD_NUMBER: _ClassVar[int]
+    id: str
+    version: int
+    name: str
+    instructions: str
+    def __init__(self, id: _Optional[str] = ..., version: _Optional[int] = ..., name: _Optional[str] = ..., instructions: _Optional[str] = ...) -> None: ...
 
 class Attachment(_message.Message):
     __slots__ = ("filename", "content", "mime", "oss_key", "size")
@@ -151,7 +165,7 @@ class Runtime(_message.Message):
     label: str
     model_protocol: str
     is_default: bool
-    def __init__(self, id: _Optional[str] = ..., label: _Optional[str] = ..., model_protocol: _Optional[str] = ..., is_default: bool = ...) -> None: ...
+    def __init__(self, id: _Optional[str] = ..., label: _Optional[str] = ..., model_protocol: _Optional[str] = ..., is_default: _Optional[bool] = ...) -> None: ...
 
 class ListRuntimesResponse(_message.Message):
     __slots__ = ("runtimes",)
@@ -233,7 +247,7 @@ class GitSnapshot(_message.Message):
     commits: _containers.RepeatedCompositeFieldContainer[GitCommit]
     history_truncated: bool
     workspace_revision: str
-    def __init__(self, branch: _Optional[str] = ..., base_sha: _Optional[str] = ..., head_sha: _Optional[str] = ..., ahead: _Optional[int] = ..., dirty: bool = ..., changes: _Optional[_Iterable[_Union[GitChange, _Mapping]]] = ..., truncated: bool = ..., base_ref: _Optional[str] = ..., commits: _Optional[_Iterable[_Union[GitCommit, _Mapping]]] = ..., history_truncated: bool = ..., workspace_revision: _Optional[str] = ...) -> None: ...
+    def __init__(self, branch: _Optional[str] = ..., base_sha: _Optional[str] = ..., head_sha: _Optional[str] = ..., ahead: _Optional[int] = ..., dirty: _Optional[bool] = ..., changes: _Optional[_Iterable[_Union[GitChange, _Mapping]]] = ..., truncated: _Optional[bool] = ..., base_ref: _Optional[str] = ..., commits: _Optional[_Iterable[_Union[GitCommit, _Mapping]]] = ..., history_truncated: _Optional[bool] = ..., workspace_revision: _Optional[str] = ...) -> None: ...
 
 class GitCommit(_message.Message):
     __slots__ = ("sha", "parents", "subject", "author_name", "authored_at", "refs", "files_changed", "additions", "deletions", "body")
@@ -269,7 +283,7 @@ class GitCommitFile(_message.Message):
     old_path: str
     status: str
     binary: bool
-    def __init__(self, path: _Optional[str] = ..., old_path: _Optional[str] = ..., status: _Optional[str] = ..., binary: bool = ...) -> None: ...
+    def __init__(self, path: _Optional[str] = ..., old_path: _Optional[str] = ..., status: _Optional[str] = ..., binary: _Optional[bool] = ...) -> None: ...
 
 class InspectWorkspaceGitResponse(_message.Message):
     __slots__ = ("snapshot", "diff", "binary", "truncated", "commit", "commit_files")
@@ -285,4 +299,4 @@ class InspectWorkspaceGitResponse(_message.Message):
     truncated: bool
     commit: GitCommit
     commit_files: _containers.RepeatedCompositeFieldContainer[GitCommitFile]
-    def __init__(self, snapshot: _Optional[_Union[GitSnapshot, _Mapping]] = ..., diff: _Optional[str] = ..., binary: bool = ..., truncated: bool = ..., commit: _Optional[_Union[GitCommit, _Mapping]] = ..., commit_files: _Optional[_Iterable[_Union[GitCommitFile, _Mapping]]] = ...) -> None: ...
+    def __init__(self, snapshot: _Optional[_Union[GitSnapshot, _Mapping]] = ..., diff: _Optional[str] = ..., binary: _Optional[bool] = ..., truncated: _Optional[bool] = ..., commit: _Optional[_Union[GitCommit, _Mapping]] = ..., commit_files: _Optional[_Iterable[_Union[GitCommitFile, _Mapping]]] = ...) -> None: ...

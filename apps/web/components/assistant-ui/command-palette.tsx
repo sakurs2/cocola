@@ -68,6 +68,13 @@ export function CommandPalette() {
         run: () => navigateTo("/tasks"),
       },
       {
+        id: "agents",
+        label: "Agents",
+        hint: "Manage custom assistants and Feishu bots",
+        icon: Bot,
+        run: () => navigateTo("/agents"),
+      },
+      {
         id: "skills",
         label: "Skills",
         hint: "Browse installed agent skills",

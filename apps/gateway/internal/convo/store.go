@@ -19,6 +19,8 @@ import (
 	"strings"
 	"time"
 	"unicode/utf8"
+
+	"github.com/cocola-project/cocola/apps/gateway/internal/agentprofile"
 )
 
 // ErrNotFound is returned when a conversation lookup misses (or the caller does
@@ -27,6 +29,7 @@ import (
 var (
 	ErrNotFound            = errors.New("convo: not found")
 	ErrRuntimeMismatch     = errors.New("convo: runtime mismatch")
+	ErrAgentMismatch       = errors.New("convo: agent mismatch")
 	ErrProjectMismatch     = errors.New("convo: project mismatch")
 	ErrFolderNameConflict  = errors.New("convo: folder name conflict")
 	ErrInvalidFolderName   = errors.New("convo: invalid folder name")
@@ -165,17 +168,21 @@ type Part struct {
 
 // Conversation is one row in the sidebar. ID reuses the frontend session_id.
 type Conversation struct {
-	ID        string    `json:"id"`
-	UserID    string    `json:"user_id"`
-	TenantID  string    `json:"tenant_id"`
-	Title     string    `json:"title"`
-	ChatType  string    `json:"chat_type"`
-	FolderID  string    `json:"folder_id,omitempty"`
-	ProjectID string    `json:"project_id,omitempty"`
-	Hidden    bool      `json:"hidden"`
-	RuntimeID string    `json:"runtime_id"`
-	CreatedAt time.Time `json:"created_at"`
-	UpdatedAt time.Time `json:"updated_at"`
+	ID                 string                 `json:"id"`
+	UserID             string                 `json:"user_id"`
+	TenantID           string                 `json:"tenant_id"`
+	Title              string                 `json:"title"`
+	ChatType           string                 `json:"chat_type"`
+	FolderID           string                 `json:"folder_id,omitempty"`
+	ProjectID          string                 `json:"project_id,omitempty"`
+	Hidden             bool                   `json:"hidden"`
+	RuntimeID          string                 `json:"runtime_id"`
+	AgentID            string                 `json:"agent_id,omitempty"`
+	AgentVersion       int64                  `json:"agent_version,omitempty"`
+	AgentSnapshot      *agentprofile.Snapshot `json:"agent,omitempty"`
+	ChannelConnectorID string                 `json:"-"`
+	CreatedAt          time.Time              `json:"created_at"`
+	UpdatedAt          time.Time              `json:"updated_at"`
 }
 
 // Folder is one user-owned, flat container for ordinary conversations.

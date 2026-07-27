@@ -26,9 +26,9 @@ type blockingFeishuCredentialStore struct {
 	feishuconnector.Store
 }
 
-func (*blockingFeishuCredentialStore) GetConnector(
+func (*blockingFeishuCredentialStore) GetConnectorByID(
 	ctx context.Context,
-	_ feishuconnector.Identity,
+	_ string,
 ) (feishuconnector.Connector, error) {
 	<-ctx.Done()
 	return feishuconnector.Connector{}, ctx.Err()
@@ -50,6 +50,7 @@ func TestResolveLarkRuntimeCredentialTimesOutWithoutBlockingChat(t *testing.T) {
 	credential := api.resolveLarkRuntimeCredential(
 		context.Background(),
 		auth.Identity{TenantID: "tenant", UserID: "user"},
+		"connector-1",
 		20*time.Millisecond,
 	)
 	if credential.Status != feishuconnector.RuntimeCredentialUnavailable {

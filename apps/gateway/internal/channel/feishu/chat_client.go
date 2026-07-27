@@ -34,8 +34,7 @@ type ChatTurn struct {
 	ConversationID    string
 	ConversationTitle string
 	ClientRequestID   string
-	ModelRouteID      string
-	ModelAlias        string
+	AgentID           string
 	Attachments       []ChatAttachment
 }
 
@@ -131,8 +130,7 @@ func (c *ChatClient) Chat(
 		"conversation_type":  "interactive",
 		"interaction_mode":   "execute",
 		"client_request_id":  turn.ClientRequestID,
-		"model_route_id":     turn.ModelRouteID,
-		"model_alias":        turn.ModelAlias,
+		"agent_id":           turn.AgentID,
 		"attachments":        attachments,
 	}
 	return c.stream(

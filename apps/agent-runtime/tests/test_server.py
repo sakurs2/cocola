@@ -68,6 +68,7 @@ class FakeRequest:
     project_context: object | None = None
     interaction_mode: int = pb.INTERACTION_MODE_UNSPECIFIED
     require_session_resume: bool = False
+    agent_context: object | None = None
 
 
 def test_memory_context_is_appended_as_untrusted_low_priority_context():
@@ -506,7 +507,7 @@ async def test_query_forwards_lark_credential_without_skill_name_gate():
     assert binder.egress == ["open.feishu.cn", "open.larksuite.com"]
 
 
-async def test_plan_mode_discards_lark_executable_credential():
+async def test_plan_mode_forwards_lark_executable_credential():
     provider = ListProvider([AgentEvent(kind="done", data={})])
     context = FakeContext(
         (
@@ -527,9 +528,9 @@ async def test_plan_mode_discards_lark_executable_credential():
 
     options = provider.seen_options
     assert options is not None
-    assert options.lark_app_id is None
-    assert options.lark_brand is None
-    assert options.lark_tenant_access_token is None
+    assert options.lark_app_id == "cli_app_id"
+    assert options.lark_brand == "feishu"
+    assert options.lark_tenant_access_token == "tenant-token"
 
 
 async def test_scheduled_task_does_not_enable_interactive_questions():
@@ -1265,6 +1266,60 @@ async def test_query_injects_user_agents_md_below_admin_prompt():
     assert "Always protect credentials." in system_prompt
     assert "# Preferences\n- Answer in Chinese." in system_prompt
     assert "ignore only the conflicting part" in system_prompt
+
+
+async def test_query_injects_agent_between_admin_and_user_instructions():
+    provider = ListProvider([AgentEvent(kind="done", data={})])
+    prompts = StaticPromptCatalog(
+        "Always protect credentials.",
+        [PromptMarker(id="global", version=4, content_length=27)],
+        user_agents_md="# Preferences\n- Answer in Chinese.",
+        user_agents_md_version=7,
+    )
+    context = FakeContext()
+
+    await AgentRuntimeServicer(provider, prompts=prompts).Query(
+        FakeRequest(
+            user_id="alice",
+            agent_context=SimpleNamespace(
+                id="agent-1",
+                version=3,
+                name="Research",
+                instructions="Cite primary sources.",
+            ),
+        ),
+        context,
+    )
+
+    assert provider.seen_options is not None
+    system_prompt = provider.seen_options.system_prompt
+    admin_index = system_prompt.index("Administrator-configured system instructions:")
+    agent_index = system_prompt.index("Selected Agent instructions:")
+    user_index = system_prompt.index("User-authored persistent instructions (AGENTS.md):")
+    assert admin_index < agent_index < user_index
+    assert "<agent-instructions>\nCite primary sources.\n</agent-instructions>" in system_prompt
+
+
+async def test_query_rejects_oversized_agent_instructions_without_running_provider():
+    provider = ListProvider([AgentEvent(kind="done", data={})])
+    context = FakeContext()
+
+    await AgentRuntimeServicer(provider).Query(
+        FakeRequest(
+            agent_context=SimpleNamespace(
+                id="agent-1",
+                version=1,
+                name="Research",
+                instructions="中" * (32 * 1024),
+            ),
+        ),
+        context,
+    )
+
+    assert provider.seen_options is None
+    errors = [event for event in context.written if event.kind == "error"]
+    assert len(errors) == 1
+    assert errors[0].data["code"] == "INVALID_AGENT_CONTEXT"
 
 
 async def test_query_stops_when_admin_prompt_policy_is_unavailable():

@@ -10,7 +10,6 @@ import (
 
 	"github.com/cocola-project/cocola/apps/gateway/internal/agent"
 	"github.com/cocola-project/cocola/apps/gateway/internal/auth"
-	feishuconnector "github.com/cocola-project/cocola/apps/gateway/internal/channel/feishu"
 	"github.com/cocola-project/cocola/apps/gateway/internal/chatrun"
 	"github.com/cocola-project/cocola/apps/gateway/internal/project"
 )
@@ -79,25 +78,10 @@ func (a *API) connectors(w http.ResponseWriter, r *http.Request) {
 		}
 		github = value
 	}
-	feishu := feishuconnector.ConnectorView{Status: "disabled", Enabled: false}
-	if a.feishu != nil {
-		value, err := a.feishu.Connection(r.Context(), feishuconnector.Identity{
-			TenantID: id.TenantID, UserID: id.UserID, Email: id.Email,
-			Name: id.Name, Username: id.Username,
-		})
-		if a.writeFeishuError(w, err) {
-			return
-		}
-		feishu = value
-	}
 	writeJSON(w, http.StatusOK, []map[string]any{
 		{
 			"id": "github", "name": "GitHub", "status": github.Status,
 			"enabled": github.Enabled, "connection": github,
-		},
-		{
-			"id": "feishu", "name": "Feishu", "status": feishu.Status,
-			"enabled": feishu.Enabled, "connection": feishu,
 		},
 	})
 }

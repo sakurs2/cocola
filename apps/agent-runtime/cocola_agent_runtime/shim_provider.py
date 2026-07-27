@@ -388,8 +388,7 @@ class InSandboxShimProvider:
         lark_brand = (options.lark_brand or "").strip()
         lark_token = (options.lark_tenant_access_token or "").strip()
         if (
-            options.interaction_mode != "plan"
-            and lark_status == "ready"
+            lark_status == "ready"
             and lark_app_id
             and lark_brand in {"feishu", "lark"}
             and lark_token

@@ -56,10 +56,17 @@ func TestPostgresConnectorClaimAndInboxFIFO(t *testing.T) {
 		t.Fatalf("NewPostgres: %v", err)
 	}
 	ddls := []string{
+		`CREATE TABLE agents (
+			id UUID PRIMARY KEY,
+			tenant_id TEXT NOT NULL,
+			owner_user_id TEXT NOT NULL,
+			status TEXT NOT NULL
+		)`,
 		`CREATE TABLE channel_connectors (
 			id UUID PRIMARY KEY,
 			tenant_id TEXT NOT NULL,
 			user_id TEXT NOT NULL,
+			agent_id UUID NOT NULL,
 			provider TEXT NOT NULL,
 			domain TEXT NOT NULL,
 			app_id TEXT NOT NULL,
@@ -67,8 +74,6 @@ func TestPostgresConnectorClaimAndInboxFIFO(t *testing.T) {
 			owner_open_id TEXT NOT NULL DEFAULT '',
 			bot_open_id TEXT NOT NULL DEFAULT '',
 			bot_name TEXT NOT NULL DEFAULT '',
-			model_route_id TEXT NOT NULL DEFAULT '',
-			model_alias TEXT NOT NULL DEFAULT '',
 			desired_enabled BOOLEAN NOT NULL,
 			status TEXT NOT NULL,
 			bind_code_hash TEXT NOT NULL DEFAULT '',
@@ -80,8 +85,21 @@ func TestPostgresConnectorClaimAndInboxFIFO(t *testing.T) {
 			version BIGINT NOT NULL DEFAULT 1,
 			created_at TIMESTAMPTZ NOT NULL,
 			updated_at TIMESTAMPTZ NOT NULL,
-			UNIQUE (tenant_id, user_id, provider),
+			UNIQUE (agent_id),
 			UNIQUE (provider, domain, app_id)
+		)`,
+		`CREATE TABLE channel_registration_flows (
+			id UUID PRIMARY KEY,
+			tenant_id TEXT NOT NULL,
+			user_id TEXT NOT NULL,
+			agent_id UUID NOT NULL,
+			provider TEXT NOT NULL,
+			status TEXT NOT NULL,
+			verification_url TEXT NOT NULL DEFAULT '',
+			expires_at TIMESTAMPTZ NOT NULL,
+			error_code TEXT NOT NULL DEFAULT '',
+			created_at TIMESTAMPTZ NOT NULL,
+			updated_at TIMESTAMPTZ NOT NULL
 		)`,
 		`CREATE TABLE channel_inbox (
 			id UUID PRIMARY KEY,
@@ -109,9 +127,18 @@ func TestPostgresConnectorClaimAndInboxFIFO(t *testing.T) {
 	}
 
 	now := time.Now().UTC().Truncate(time.Microsecond)
+	tenantID := uuid.NewString()
+	userID := uuid.NewString()
+	agentID := uuid.NewString()
+	if _, err := store.pool.Exec(ctx, `INSERT INTO agents
+		(id, tenant_id, owner_user_id, status) VALUES ($1,$2,$3,'active')`,
+		agentID, tenantID, userID); err != nil {
+		t.Fatalf("insert Agent: %v", err)
+	}
 	connector, err := store.UpsertConnector(ctx, Connector{
-		ID: uuid.NewString(), TenantID: uuid.NewString(), UserID: uuid.NewString(),
-		Domain: DomainFeishu, AppID: uuid.NewString(),
+		ID: uuid.NewString(), TenantID: tenantID, UserID: userID,
+		AgentID: agentID,
+		Domain:  DomainFeishu, AppID: uuid.NewString(),
 		AppSecretCiphertext: "test-only", OwnerOpenID: "owner-open-id",
 		DesiredEnabled: false,
 		Status:         StatusDisabled, CreatedAt: now, UpdatedAt: now,
@@ -123,7 +150,7 @@ func TestPostgresConnectorClaimAndInboxFIFO(t *testing.T) {
 		if err := store.DeleteConnector(ctx, Identity{
 			TenantID: connector.TenantID,
 			UserID:   connector.UserID,
-		}); err != nil {
+		}, connector.AgentID); err != nil && !errors.Is(err, ErrNotFound) {
 			t.Errorf("DeleteConnector: %v", err)
 		}
 	}()
@@ -131,32 +158,19 @@ func TestPostgresConnectorClaimAndInboxFIFO(t *testing.T) {
 	connector, err = store.SetConnectorEnabled(
 		ctx,
 		Identity{TenantID: connector.TenantID, UserID: connector.UserID},
+		connector.AgentID,
 		true,
 		now.Add(time.Second),
 	)
 	if err != nil {
 		t.Fatalf("SetConnectorEnabled: %v", err)
 	}
-	connector, err = store.SetConnectorModel(
-		ctx,
-		Identity{TenantID: connector.TenantID, UserID: connector.UserID},
-		"route-1",
-		"claude-test",
-		now.Add(1500*time.Millisecond),
-	)
-	if err != nil {
-		t.Fatalf("SetConnectorModel: %v", err)
-	}
-	if connector.ModelRouteID != "route-1" || connector.ModelAlias != "claude-test" {
-		t.Fatalf("SetConnectorModel returned %+v", connector)
-	}
 	storedConnector, err := store.GetConnectorByID(ctx, connector.ID)
 	if err != nil {
 		t.Fatalf("GetConnectorByID: %v", err)
 	}
-	if storedConnector.ModelRouteID != "route-1" ||
-		storedConnector.ModelAlias != "claude-test" {
-		t.Fatalf("stored model = %q / %q", storedConnector.ModelRouteID, storedConnector.ModelAlias)
+	if storedConnector.AgentID != connector.AgentID {
+		t.Fatalf("stored Agent = %q, want %q", storedConnector.AgentID, connector.AgentID)
 	}
 	leaseOwner := "gateway-1"
 	claimed, err := store.ClaimConnectors(
@@ -264,5 +278,52 @@ func TestPostgresConnectorClaimAndInboxFIFO(t *testing.T) {
 	)
 	if err != nil || newer.EventID != "newer-ready" {
 		t.Fatalf("newer claim = %+v, %v", newer, err)
+	}
+	if err := store.FinishInbox(ctx, newer.ID, "owner-1", InboxDone, future); err != nil {
+		t.Fatalf("FinishInbox(newer): %v", err)
+	}
+	if err := store.DeleteConnector(
+		ctx,
+		Identity{TenantID: tenantID, UserID: userID},
+		agentID,
+	); err != nil {
+		t.Fatalf("DeleteConnector before archive: %v", err)
+	}
+	if _, err := store.pool.Exec(
+		ctx,
+		`UPDATE agents SET status='archived' WHERE id=$1`,
+		agentID,
+	); err != nil {
+		t.Fatalf("archive Agent: %v", err)
+	}
+	connector.ID = uuid.NewString()
+	connector.AppID = uuid.NewString()
+	if _, err := store.UpsertConnector(ctx, connector); !errors.Is(err, ErrAgentArchived) {
+		t.Fatalf("UpsertConnector for archived Agent = %v, want ErrAgentArchived", err)
+	}
+	if err := store.CreateRegistrationFlow(ctx, RegistrationFlow{
+		ID: uuid.NewString(), TenantID: tenantID, UserID: userID, AgentID: agentID,
+		Provider: ProviderFeishu, Status: FlowStarting,
+		ExpiresAt: now.Add(time.Minute), CreatedAt: now, UpdatedAt: now,
+	}); !errors.Is(err, ErrAgentArchived) {
+		t.Fatalf("CreateRegistrationFlow for archived Agent = %v, want ErrAgentArchived", err)
+	}
+	flowID := uuid.NewString()
+	if _, err := store.pool.Exec(ctx, `INSERT INTO channel_registration_flows (
+		id, tenant_id, user_id, agent_id, provider, status,
+		verification_url, expires_at, error_code, created_at, updated_at
+	) VALUES ($1,$2,$3,$4,'feishu','authorizing','',$5,'',$6,$6)`,
+		flowID, tenantID, userID, agentID, now.Add(time.Minute), now); err != nil {
+		t.Fatalf("insert registration for completion guard: %v", err)
+	}
+	connector.OwnerOpenID = "owner-open-id"
+	if err := store.CompleteRegistration(
+		ctx,
+		Identity{TenantID: tenantID, UserID: userID},
+		flowID,
+		connector,
+		now,
+	); !errors.Is(err, ErrAgentArchived) {
+		t.Fatalf("CompleteRegistration for archived Agent = %v, want ErrAgentArchived", err)
 	}
 }

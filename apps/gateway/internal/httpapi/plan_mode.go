@@ -205,6 +205,12 @@ func (a *API) executePlan(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusServiceUnavailable, "CHAT_HISTORY_UNAVAILABLE", "conversation state is unavailable")
 		return
 	}
+	if a.writeConversationAgentError(
+		w,
+		a.ensureConversationAgentActive(r.Context(), identity, conversation),
+	) {
+		return
+	}
 
 	unlockConversation := a.runs.conversationGate.lock(conversationID)
 	conversationLocked := true
@@ -297,6 +303,9 @@ func (a *API) executePlan(w http.ResponseWriter, r *http.Request) {
 		ModelRouteID: plan.ModelRouteID, ModelAlias: plan.ModelAlias,
 		ConversationTitle: conversation.Title, ProjectID: conversation.ProjectID,
 		ClientRequestID: input.ClientRequestID, RequireSessionResume: true,
+		AgentID:            conversation.AgentID,
+		AgentSnapshot:      conversation.AgentSnapshot,
+		ChannelConnectorID: conversation.ChannelConnectorID,
 	}
 
 	a.runs.mutationMu.Lock()
@@ -340,6 +349,9 @@ func (a *API) executePlan(w http.ResponseWriter, r *http.Request) {
 			"PLAN_MODEL_UNAVAILABLE",
 			"The model used for this plan is no longer available. Create a new plan.",
 		)
+		return
+	case errors.Is(startErr, chatrun.ErrAgentArchived):
+		writeErr(w, http.StatusConflict, "AGENT_ARCHIVED", "Agent is archived")
 		return
 	case errors.Is(startErr, chatrun.ErrConflict):
 		writeJSON(w, http.StatusConflict, map[string]any{

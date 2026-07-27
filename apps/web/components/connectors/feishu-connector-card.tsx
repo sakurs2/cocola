@@ -3,7 +3,6 @@
 import * as Dialog from "@radix-ui/react-dialog";
 import {
   AlertTriangle,
-  ChevronDown,
   Clock3,
   Copy,
   ExternalLink,
@@ -26,7 +25,6 @@ import {
   type FormEvent,
   type ReactNode,
 } from "react";
-import Image from "next/image";
 import { useWorkspaceToast } from "@/components/assistant-ui/workspace-toast";
 import { ActionConfirmDialog } from "@/components/ui/action-dialog";
 import { Input } from "@/components/ui/input";
@@ -34,37 +32,15 @@ import { Label } from "@/components/ui/label";
 import { connectorResponseError } from "@/lib/connector-response-error.mjs";
 
 type FeishuConnection = {
+  agent_id?: string;
   connected: boolean;
   enabled: boolean;
   status: string;
   domain?: "feishu" | "lark";
   bot_name?: string;
-  model_route_id?: string;
-  model_alias?: string;
   last_connected_at?: string;
   last_error_code?: string;
   registration?: RegistrationFlow;
-};
-
-type ConnectorModel = {
-  id: string;
-  alias: string;
-  label: string;
-  provider?: string;
-  protocols?: string[];
-  is_default?: boolean;
-};
-
-type AgentRuntime = {
-  id: string;
-  model_protocol: string;
-  is_default?: boolean;
-};
-
-type ProductConfig = {
-  agent_runtime?: {
-    default_id?: string;
-  };
 };
 
 type RegistrationFlow = {
@@ -94,8 +70,12 @@ const TERMINAL_FLOW_STATES = new Set([
   "cancelled",
 ]);
 
-export function FeishuConnectorCard() {
+export function FeishuConnectorCard({ agentId }: { agentId: string }) {
   const { showError, showSuccess } = useWorkspaceToast();
+  const endpoint = useMemo(
+    () => `/api/agents/${encodeURIComponent(agentId)}/channels/feishu`,
+    [agentId],
+  );
   const [connection, setConnection] = useState<FeishuConnection | null>(null);
   const [loadState, setLoadState] = useState<ConnectionLoadState>("checking");
   const [flow, setFlow] = useState<RegistrationFlow | null>(null);
@@ -103,10 +83,6 @@ export function FeishuConnectorCard() {
   const [busy, setBusy] = useState("");
   const [error, setError] = useState("");
   const [manualOpen, setManualOpen] = useState(false);
-  const [settingsOpen, setSettingsOpen] = useState(false);
-  const [models, setModels] = useState<ConnectorModel[]>([]);
-  const [modelsLoading, setModelsLoading] = useState(false);
-  const [modelsError, setModelsError] = useState("");
   const [disconnectOpen, setDisconnectOpen] = useState(false);
   const [clock, setClock] = useState(() => Date.now());
   const activeFlowID = flow && ACTIVE_FLOW_STATES.has(flow.status) ? flow.id : "";
@@ -115,17 +91,17 @@ export function FeishuConnectorCard() {
     setLoadState("checking");
     setError("");
     try {
-      const response = await fetch("/api/connectors/feishu", { cache: "no-store" });
+      const response = await fetch(endpoint, { cache: "no-store" });
       if (!response.ok) throw new Error(await connectorResponseError(response));
       const next = (await response.json()) as FeishuConnection;
       setConnection(next);
-      if (next.registration) setFlow(next.registration);
+      setFlow(next.registration ?? null);
       setLoadState("ready");
     } catch (cause) {
       setError(errorMessage(cause));
       setLoadState("failed");
     }
-  }, []);
+  }, [endpoint]);
 
   useEffect(() => {
     void load();
@@ -141,7 +117,7 @@ export function FeishuConnectorCard() {
     const pollConnection = async () => {
       attempts += 1;
       try {
-        const response = await fetch("/api/connectors/feishu", {
+        const response = await fetch(endpoint, {
           cache: "no-store",
           signal: controller.signal,
         });
@@ -149,11 +125,11 @@ export function FeishuConnectorCard() {
         const next = (await response.json()) as FeishuConnection;
         if (stopped) return;
         setConnection(next);
-        if (next.registration) setFlow(next.registration);
+        setFlow(next.registration ?? null);
         if (next.status !== "connecting" || attempts >= 60) return;
         timer = setTimeout(() => void pollConnection(), 2000);
       } catch (cause) {
-        if (stopped) return;
+        if (stopped || controller.signal.aborted) return;
         const message = errorMessage(cause);
         setError(message);
         showError(message);
@@ -165,7 +141,7 @@ export function FeishuConnectorCard() {
       controller.abort();
       if (timer) clearTimeout(timer);
     };
-  }, [connecting, showError]);
+  }, [connecting, endpoint, showError]);
 
   useEffect(() => {
     if (!activeFlowID) return;
@@ -175,7 +151,7 @@ export function FeishuConnectorCard() {
     const poll = async () => {
       try {
         const response = await fetch(
-          `/api/connectors/feishu/registrations/${encodeURIComponent(activeFlowID)}`,
+          `${endpoint}/registrations/${encodeURIComponent(activeFlowID)}`,
           { cache: "no-store", signal: controller.signal },
         );
         if (!response.ok) throw new Error(await connectorResponseError(response));
@@ -190,7 +166,7 @@ export function FeishuConnectorCard() {
         if (TERMINAL_FLOW_STATES.has(next.status)) return;
         timer = setTimeout(() => void poll(), 2000);
       } catch (cause) {
-        if (stopped) return;
+        if (stopped || controller.signal.aborted) return;
         const message = errorMessage(cause);
         setError(message);
         showError(message);
@@ -202,7 +178,7 @@ export function FeishuConnectorCard() {
       controller.abort();
       if (timer) clearTimeout(timer);
     };
-  }, [activeFlowID, load, showError, showSuccess]);
+  }, [activeFlowID, endpoint, load, showError, showSuccess]);
 
   useEffect(() => {
     if (!activeFlowID) return;
@@ -210,56 +186,6 @@ export function FeishuConnectorCard() {
     const timer = window.setInterval(() => setClock(Date.now()), 1000);
     return () => window.clearInterval(timer);
   }, [activeFlowID]);
-
-  useEffect(() => {
-    if (!settingsOpen) return;
-    const controller = new AbortController();
-    setModelsLoading(true);
-    setModelsError("");
-    void (async () => {
-      try {
-        const [modelsResponse, runtimesResponse, configResponse] = await Promise.all([
-          fetch("/api/models", { cache: "no-store", signal: controller.signal }),
-          fetch("/api/agent-runtimes", { cache: "no-store", signal: controller.signal }),
-          fetch("/api/product-config", { cache: "no-store", signal: controller.signal }),
-        ]);
-        if (!modelsResponse.ok || !runtimesResponse.ok || !configResponse.ok) {
-          throw new Error("Model configuration is temporarily unavailable.");
-        }
-        const modelRows = (await modelsResponse.json()) as ConnectorModel[];
-        const runtimeRows = (await runtimesResponse.json()) as AgentRuntime[];
-        const config = (await configResponse.json()) as ProductConfig;
-        const defaultRuntimeID = config.agent_runtime?.default_id?.trim() ?? "";
-        const runtime =
-          runtimeRows.find((item) => item.id === defaultRuntimeID) ??
-          runtimeRows.find((item) => item.is_default);
-        if (!runtime?.model_protocol) {
-          throw new Error("The default Agent runtime is not configured.");
-        }
-        const compatible = Array.isArray(modelRows)
-          ? modelRows.filter(
-              (model) =>
-                typeof model.id === "string" &&
-                typeof model.alias === "string" &&
-                typeof model.label === "string" &&
-                Array.isArray(model.protocols) &&
-                model.protocols.includes(runtime.model_protocol),
-            )
-          : [];
-        setModels(compatible);
-        if (compatible.length === 0) {
-          setModelsError("No model is available for the default Agent runtime.");
-        }
-      } catch (cause) {
-        if (controller.signal.aborted) return;
-        setModels([]);
-        setModelsError(errorMessage(cause));
-      } finally {
-        if (!controller.signal.aborted) setModelsLoading(false);
-      }
-    })();
-    return () => controller.abort();
-  }, [settingsOpen]);
 
   const run = async (action: string, request: () => Promise<Response>, successMessage: string) => {
     setBusy(action);
@@ -269,11 +195,12 @@ export function FeishuConnectorCard() {
       if (!response.ok) throw new Error(await connectorResponseError(response));
       showSuccess(successMessage);
       await load();
+      return true;
     } catch (cause) {
       const message = errorMessage(cause);
       setError(message);
       showError(message);
-      throw cause;
+      return false;
     } finally {
       setBusy("");
     }
@@ -284,7 +211,7 @@ export function FeishuConnectorCard() {
     setError("");
     setBind(null);
     try {
-      const response = await fetch("/api/connectors/feishu/registrations", {
+      const response = await fetch(`${endpoint}/registrations`, {
         method: "POST",
         headers: { "content-type": "application/json" },
         body: "{}",
@@ -306,10 +233,9 @@ export function FeishuConnectorCard() {
     if (!flow) return;
     setBusy("cancel");
     try {
-      const response = await fetch(
-        `/api/connectors/feishu/registrations/${encodeURIComponent(flow.id)}`,
-        { method: "DELETE" },
-      );
+      const response = await fetch(`${endpoint}/registrations/${encodeURIComponent(flow.id)}`, {
+        method: "DELETE",
+      });
       if (!response.ok) throw new Error(await connectorResponseError(response));
       setFlow(null);
       showSuccess("Feishu authorization cancelled");
@@ -322,118 +248,69 @@ export function FeishuConnectorCard() {
     }
   };
 
-  const toggle = async (enabled: boolean) => {
-    try {
-      await run(
-        enabled ? "enable" : "disable",
-        () =>
-          fetch(`/api/connectors/feishu/${enabled ? "enable" : "disable"}`, {
-            method: "POST",
-            headers: { "content-type": "application/json" },
-            body: "{}",
-          }),
-        enabled ? "Feishu connector enabled" : "Feishu connector paused",
-      );
-    } catch {
-      // run already presents the error.
-    }
-  };
+  const toggle = (enabled: boolean) =>
+    run(
+      enabled ? "enable" : "disable",
+      () =>
+        fetch(`${endpoint}/${enabled ? "enable" : "disable"}`, {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: "{}",
+        }),
+      enabled ? "Feishu bot enabled" : "Feishu bot paused",
+    );
 
   const disconnect = async () => {
-    try {
-      await run(
-        "disconnect",
-        () =>
-          fetch("/api/connectors/feishu", {
-            method: "DELETE",
-            headers: { "content-type": "application/json" },
-            body: "{}",
-          }),
-        "Feishu connector disconnected",
-      );
-      setFlow(null);
-      setBind(null);
-      setDisconnectOpen(false);
-    } catch {
-      // Keep the confirmation dialog open so the user can retry.
-    }
-  };
-
-  const copy = async (value: string, message: string) => {
-    try {
-      await navigator.clipboard.writeText(value);
-      showSuccess(message);
-    } catch {
-      showError("Copy failed. Please select and copy the value manually.");
-    }
+    const disconnected = await run(
+      "disconnect",
+      () => fetch(endpoint, { method: "DELETE" }),
+      "Feishu bot disconnected",
+    );
+    if (!disconnected) return;
+    setDisconnectOpen(false);
+    setBind(null);
+    setFlow(null);
   };
 
   const remainingSeconds = flow
-    ? Math.max(0, Math.ceil((new Date(flow.expires_at).getTime() - clock) / 1000))
+    ? Math.max(0, Math.floor((new Date(flow.expires_at).getTime() - clock) / 1000))
     : 0;
-  const displayState = useMemo(
-    () => connectionState(connection, flow, loadState),
-    [connection, flow, loadState],
-  );
+  const state = connectionState(connection, loadState);
+  const copyValue = async (value: string, successMessage: string) => {
+    try {
+      await navigator.clipboard.writeText(value);
+      showSuccess(successMessage);
+    } catch {
+      showError("Could not copy to clipboard");
+    }
+  };
 
   return (
     <>
-      <article className="w-full rounded-3xl border border-border bg-card p-5 shadow-card">
-        <div className="flex items-center gap-3.5">
-          <div className="grid size-12 shrink-0 place-items-center rounded-2xl border border-blue-100 bg-white">
-            <Image src="/feishu-logo.svg" alt="" width={32} height={32} className="size-8" />
-          </div>
-          <div className="min-w-0 flex-1">
-            <h2 className="text-base font-semibold tracking-tight">Feishu</h2>
-            <p className="mt-0.5 text-xs leading-4 text-muted-foreground">
-              Private chat with your Agent
-            </p>
-          </div>
-          {connection?.connected ? (
-            <button
-              type="button"
-              aria-label="Configure Feishu"
-              title="Configure Feishu"
-              onClick={() => setSettingsOpen(true)}
-              className="relative grid size-9 shrink-0 place-items-center rounded-xl text-muted-foreground transition-colors hover:bg-muted hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-            >
-              <Settings2 className="size-4" />
-              {!connection.model_route_id ? (
-                <span
-                  aria-hidden="true"
-                  className="absolute right-1.5 top-1.5 size-2 rounded-full border-2 border-card bg-amber-500"
-                />
-              ) : null}
-            </button>
-          ) : null}
-        </div>
-
-        <div className="mt-4 flex items-center gap-2 text-xs">
-          <span className={`size-2 rounded-full ${displayState.dot}`} />
-          <span className="font-medium text-foreground">{displayState.label}</span>
-          {connection?.domain ? (
-            <span className="ml-auto rounded-full bg-muted px-2 py-1 text-[11px] text-muted-foreground">
-              {connection.domain === "lark" ? "Lark" : "Feishu"}
+      <section className="rounded-2xl border border-border bg-card p-5 shadow-sm">
+        <div className="flex flex-wrap items-start justify-between gap-4">
+          <div className="flex min-w-0 items-start gap-3">
+            <span className="grid size-10 shrink-0 place-items-center rounded-xl bg-blue-50 text-blue-600 ring-1 ring-inset ring-blue-100">
+              <MessageCircleMore className="size-5" />
             </span>
-          ) : null}
+            <div className="min-w-0">
+              <h2 className="text-sm font-semibold">Feishu bot</h2>
+              <p className="mt-1 text-sm leading-6 text-muted-foreground">
+                Give this Agent its own Feishu entry point. One Agent can have one bot.
+              </p>
+            </div>
+          </div>
+          <span
+            className={`inline-flex items-center rounded-full px-2.5 py-1 text-xs font-medium ${state.className}`}
+          >
+            {state.label}
+          </span>
         </div>
 
         {connection?.bot_name ? (
-          <p className="mt-3 truncate text-sm text-muted-foreground">
-            Bot: <span className="text-foreground">{connection.bot_name}</span>
-          </p>
-        ) : null}
-
-        {connection?.connected ? (
-          <div className="mt-3 flex items-center justify-between gap-3 rounded-xl bg-muted/60 px-3 py-2 text-xs">
-            <span className="text-muted-foreground">Model</span>
-            <span
-              className={`truncate font-medium ${
-                connection.model_alias ? "text-foreground" : "text-amber-700"
-              }`}
-            >
-              {connection.model_alias || "Choose a model"}
-            </span>
+          <div className="mt-4 flex items-center justify-between gap-3 rounded-xl bg-muted/60 px-3 py-2 text-sm">
+            <span className="text-muted-foreground">Bot</span>
+            <span className="truncate font-medium">{connection.bot_name}</span>
           </div>
         ) : null}
 
@@ -451,13 +328,15 @@ export function FeishuConnectorCard() {
                   href={flow.verification_url}
                   target="_blank"
                   rel="noopener noreferrer"
-                  className="inline-flex h-9 w-full items-center justify-center gap-2 rounded-xl bg-blue-600 px-3 text-sm font-medium text-white transition hover:bg-blue-700 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500/30"
+                  className="inline-flex h-9 w-full items-center justify-center gap-2 rounded-xl bg-blue-600 px-3 text-sm font-medium text-white transition hover:bg-blue-700"
                 >
                   Continue in Feishu <ExternalLink className="size-4" />
                 </a>
                 <button
                   type="button"
-                  onClick={() => void copy(flow.verification_url!, "Authorization link copied")}
+                  onClick={() =>
+                    void copyValue(flow.verification_url!, "Authorization link copied")
+                  }
                   className="inline-flex h-8 w-full items-center justify-center gap-2 rounded-xl text-xs text-muted-foreground transition hover:bg-muted hover:text-foreground"
                 >
                   <Copy className="size-3.5" /> Copy link
@@ -476,7 +355,9 @@ export function FeishuConnectorCard() {
         ) : null}
 
         {flow && ["denied", "expired", "failed", "interrupted"].includes(flow.status) ? (
-          <StatusNotice icon={AlertTriangle} tone="danger" text={registrationFailureText(flow)} />
+          <StatusNotice icon={AlertTriangle} tone="danger">
+            {registrationFailureText(flow)}
+          </StatusNotice>
         ) : null}
 
         {bind ? (
@@ -486,7 +367,7 @@ export function FeishuConnectorCard() {
             </p>
             <button
               type="button"
-              onClick={() => void copy(`/bind ${bind.code}`, "Binding command copied")}
+              onClick={() => void copyValue(`/bind ${bind.code}`, "Binding command copied")}
               className="mt-2 flex w-full items-center justify-between rounded-xl bg-background px-3 py-2 font-mono text-sm shadow-sm"
             >
               <span>/bind {bind.code}</span>
@@ -497,11 +378,10 @@ export function FeishuConnectorCard() {
         ) : null}
 
         {connection?.status === "awaiting_bind" && !bind ? (
-          <StatusNotice
-            icon={AlertTriangle}
-            tone="warning"
-            text="This app is waiting for its owner. Re-enter the existing app credentials to generate a new one-time binding code."
-          />
+          <StatusNotice icon={AlertTriangle} tone="warning">
+            This app is waiting for its owner. Re-enter its credentials to create a new binding
+            code.
+          </StatusNotice>
         ) : null}
 
         {connection?.status === "action_required" ? (
@@ -511,7 +391,7 @@ export function FeishuConnectorCard() {
               href={developerConsoleURL(connection.domain)}
               target="_blank"
               rel="noopener noreferrer"
-              className="mt-2 inline-flex items-center gap-1 font-medium underline underline-offset-2"
+              className="mt-2 flex items-center gap-1 font-medium underline underline-offset-2"
             >
               Open developer console <ExternalLink className="size-3.5" />
             </a>
@@ -519,38 +399,27 @@ export function FeishuConnectorCard() {
         ) : null}
 
         {connection?.status === "error" ? (
-          <StatusNotice
-            icon={AlertTriangle}
-            tone="danger"
-            text={connectorErrorText(connection.last_error_code)}
-          />
+          <StatusNotice icon={AlertTriangle} tone="danger">
+            {connectorErrorText(connection.last_error_code)}
+          </StatusNotice>
         ) : null}
 
         {error ? (
           <div
             role="alert"
-            className="mt-4 flex items-center justify-between gap-3 rounded-xl bg-destructive/10 px-3 py-2 text-xs leading-5 text-destructive"
+            className="mt-4 rounded-xl bg-destructive/10 px-3 py-2 text-xs text-destructive"
           >
-            <span>{error}</span>
-            {connection && loadState === "failed" ? (
-              <button
-                type="button"
-                onClick={() => void load()}
-                className="shrink-0 rounded-lg px-2 py-1 font-medium hover:bg-destructive/10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-              >
-                Retry
-              </button>
-            ) : null}
+            {error}
           </div>
         ) : null}
 
-        <div className="mt-5 space-y-2">
-          {!connection && loadState === "checking" ? (
+        <div className="mt-5 flex flex-wrap gap-2">
+          {loadState === "checking" && !connection ? (
             <ConnectorButton disabled icon={<Loader2 className="size-4 animate-spin" />}>
               Checking…
             </ConnectorButton>
           ) : null}
-          {!connection && loadState === "failed" ? (
+          {loadState === "failed" ? (
             <ConnectorButton
               onClick={() => void load()}
               variant="outline"
@@ -560,21 +429,41 @@ export function FeishuConnectorCard() {
             </ConnectorButton>
           ) : null}
           {connection?.status === "not_configured" && !flow ? (
+            <>
+              <ConnectorButton
+                onClick={() => void startRegistration()}
+                disabled={busy !== ""}
+                icon={
+                  busy === "register" ? (
+                    <Loader2 className="size-4 animate-spin" />
+                  ) : (
+                    <MessageCircleMore className="size-4" />
+                  )
+                }
+              >
+                Connect Feishu
+              </ConnectorButton>
+              <ConnectorButton
+                onClick={() => setManualOpen(true)}
+                disabled={busy !== ""}
+                variant="outline"
+                icon={<Settings2 className="size-4" />}
+              >
+                Use existing app
+              </ConnectorButton>
+            </>
+          ) : null}
+          {connection?.status === "awaiting_bind" && !bind ? (
             <ConnectorButton
-              onClick={() => void startRegistration()}
+              onClick={() => setManualOpen(true)}
               disabled={busy !== ""}
-              icon={
-                busy === "register" ? (
-                  <Loader2 className="size-4 animate-spin" />
-                ) : (
-                  <MessageCircleMore className="size-4" />
-                )
-              }
+              variant="outline"
+              icon={<Settings2 className="size-4" />}
             >
-              Connect Feishu
+              Use existing app
             </ConnectorButton>
           ) : null}
-          {connection?.status === "disabled" && connection.connected ? (
+          {connection?.connected && !connection.enabled ? (
             <ConnectorButton
               onClick={() => void toggle(true)}
               disabled={busy !== ""}
@@ -589,26 +478,7 @@ export function FeishuConnectorCard() {
               Enable
             </ConnectorButton>
           ) : null}
-          {connection?.status === "error" ? (
-            <ConnectorButton
-              onClick={() => void toggle(true)}
-              disabled={busy !== ""}
-              icon={
-                busy === "enable" ? (
-                  <Loader2 className="size-4 animate-spin" />
-                ) : (
-                  <RefreshCw className="size-4" />
-                )
-              }
-            >
-              Reconnect
-            </ConnectorButton>
-          ) : null}
-          {connection?.connected &&
-          connection.enabled &&
-          ["connecting", "ready", "action_required", "awaiting_bind"].includes(
-            connection.status,
-          ) ? (
+          {connection?.connected && connection.enabled ? (
             <ConnectorButton
               onClick={() => void toggle(false)}
               disabled={busy !== ""}
@@ -634,15 +504,6 @@ export function FeishuConnectorCard() {
               Disconnect
             </ConnectorButton>
           ) : null}
-          {connection?.status === "not_configured" && !flow ? (
-            <button
-              type="button"
-              onClick={() => setManualOpen(true)}
-              className="inline-flex h-8 w-full items-center justify-center gap-1.5 rounded-xl text-xs text-muted-foreground transition hover:bg-muted hover:text-foreground"
-            >
-              <Settings2 className="size-3.5" /> Use an existing Feishu app
-            </button>
-          ) : null}
           {flow && TERMINAL_FLOW_STATES.has(flow.status) && flow.status !== "ready" ? (
             <ConnectorButton
               onClick={() => {
@@ -662,42 +523,7 @@ export function FeishuConnectorCard() {
             Last connected {formatDate(connection.last_connected_at)}
           </p>
         ) : null}
-      </article>
-
-      <FeishuSettingsDialog
-        open={settingsOpen}
-        busy={busy === "settings"}
-        loading={modelsLoading}
-        loadError={modelsError}
-        models={models}
-        currentModelID={connection?.model_route_id ?? ""}
-        onOpenChange={setSettingsOpen}
-        onSubmit={async (model) => {
-          setBusy("settings");
-          setError("");
-          try {
-            const response = await fetch("/api/connectors/feishu", {
-              method: "PATCH",
-              headers: { "content-type": "application/json" },
-              body: JSON.stringify({
-                model_route_id: model.id,
-                model_alias: model.alias,
-              }),
-            });
-            if (!response.ok) throw new Error(await connectorResponseError(response));
-            setConnection((await response.json()) as FeishuConnection);
-            setSettingsOpen(false);
-            showSuccess("Feishu model updated");
-          } catch (cause) {
-            const message = errorMessage(cause);
-            setError(message);
-            showError(message);
-            throw cause;
-          } finally {
-            setBusy("");
-          }
-        }}
-      />
+      </section>
 
       <ManualAppDialog
         open={manualOpen}
@@ -707,7 +533,7 @@ export function FeishuConnectorCard() {
           setBusy("manual");
           setError("");
           try {
-            const response = await fetch("/api/connectors/feishu/manual", {
+            const response = await fetch(`${endpoint}/manual`, {
               method: "POST",
               headers: { "content-type": "application/json" },
               body: JSON.stringify({
@@ -736,13 +562,7 @@ export function FeishuConnectorCard() {
       <ActionConfirmDialog
         open={disconnectOpen}
         title="Disconnect Feishu?"
-        description={
-          <>
-            Cocola will delete the encrypted app credential, owner binding, and channel session
-            mapping. Conversation history remains. The Feishu app itself is not deleted; remove it
-            separately in Feishu if needed.
-          </>
-        }
+        description="Cocola will delete the encrypted app credential and owner binding. Conversation history remains."
         confirmLabel="Disconnect"
         busy={busy === "disconnect"}
         error={busy === "disconnect" ? null : error || null}
@@ -752,155 +572,6 @@ export function FeishuConnectorCard() {
         onConfirm={() => void disconnect()}
       />
     </>
-  );
-}
-
-function FeishuSettingsDialog({
-  open,
-  busy,
-  loading,
-  loadError,
-  models,
-  currentModelID,
-  onOpenChange,
-  onSubmit,
-}: {
-  open: boolean;
-  busy: boolean;
-  loading: boolean;
-  loadError: string;
-  models: ConnectorModel[];
-  currentModelID: string;
-  onOpenChange: (open: boolean) => void;
-  onSubmit: (model: ConnectorModel) => Promise<void>;
-}) {
-  const modelInput = useId();
-  const [selectedID, setSelectedID] = useState("");
-  const [error, setError] = useState("");
-
-  useEffect(() => {
-    if (!open) {
-      setSelectedID("");
-      setError("");
-      return;
-    }
-    const nextID =
-      (models.some((model) => model.id === currentModelID) ? currentModelID : "") ||
-      models.find((model) => model.is_default)?.id ||
-      models[0]?.id ||
-      "";
-    setSelectedID(nextID);
-  }, [currentModelID, models, open]);
-
-  const selected = models.find((model) => model.id === selectedID);
-  const submit = async (event: FormEvent<HTMLFormElement>) => {
-    event.preventDefault();
-    if (!selected) return;
-    setError("");
-    try {
-      await onSubmit(selected);
-    } catch (cause) {
-      setError(errorMessage(cause));
-    }
-  };
-
-  return (
-    <Dialog.Root open={open} onOpenChange={(next) => !busy && onOpenChange(next)}>
-      <Dialog.Portal>
-        <Dialog.Overlay className="fixed inset-0 z-[70] bg-slate-950/30 backdrop-blur-[2px] data-[state=open]:animate-in data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=open]:fade-in-0" />
-        <Dialog.Content className="cocola-user-ui fixed left-1/2 top-1/2 z-[71] w-[calc(100%-2rem)] max-w-md -translate-x-1/2 -translate-y-1/2 rounded-2xl border border-border bg-background p-5 text-foreground shadow-2xl outline-none">
-          <form onSubmit={(event) => void submit(event)}>
-            <div className="flex items-start gap-3">
-              <div className="grid size-10 shrink-0 place-items-center rounded-xl bg-blue-500/10 text-blue-600">
-                <Settings2 className="size-5" />
-              </div>
-              <div className="min-w-0 flex-1">
-                <Dialog.Title className="text-base font-semibold">Feishu settings</Dialog.Title>
-                <Dialog.Description className="mt-1.5 text-sm leading-6 text-muted-foreground">
-                  Choose the model used for new messages from this bot.
-                </Dialog.Description>
-              </div>
-              <Dialog.Close asChild>
-                <button
-                  type="button"
-                  disabled={busy}
-                  aria-label="Close"
-                  className="grid size-8 shrink-0 place-items-center rounded-lg text-muted-foreground transition hover:bg-muted hover:text-foreground disabled:opacity-50"
-                >
-                  <X className="size-4" />
-                </button>
-              </Dialog.Close>
-            </div>
-
-            <div className="mt-5 space-y-2">
-              <Label htmlFor={modelInput}>Model</Label>
-              <div className="relative">
-                <select
-                  id={modelInput}
-                  value={selectedID}
-                  disabled={busy || loading || models.length === 0}
-                  onChange={(event) => setSelectedID(event.target.value)}
-                  className="h-10 w-full appearance-none rounded-xl border border-input bg-background px-3 pr-10 text-sm shadow-sm outline-none transition focus:border-ring focus:ring-2 focus:ring-ring/20 disabled:cursor-not-allowed disabled:opacity-50"
-                >
-                  {loading ? <option value="">Loading models…</option> : null}
-                  {!loading && models.length === 0 ? (
-                    <option value="">No compatible models</option>
-                  ) : null}
-                  {models.map((model) => (
-                    <option key={model.id} value={model.id}>
-                      {model.label}
-                      {model.provider ? ` · ${model.provider}` : ""}
-                    </option>
-                  ))}
-                </select>
-                <ChevronDown
-                  aria-hidden="true"
-                  className="pointer-events-none absolute right-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground"
-                />
-              </div>
-              {selected ? (
-                <p className="text-xs text-muted-foreground">
-                  Route alias: <span className="font-mono text-foreground">{selected.alias}</span>
-                </p>
-              ) : null}
-              <p className="text-xs leading-5 text-muted-foreground">
-                The change applies to the next new message. An Agent already waiting for an answer
-                keeps its original model.
-              </p>
-            </div>
-
-            {loadError || error ? (
-              <div
-                role="alert"
-                className="mt-3 rounded-xl border border-red-500/20 bg-red-500/10 px-3 py-2 text-sm text-red-600"
-              >
-                {error || loadError}
-              </div>
-            ) : null}
-
-            <div className="mt-5 flex justify-end gap-2">
-              <Dialog.Close asChild>
-                <button
-                  type="button"
-                  disabled={busy}
-                  className="h-9 rounded-xl px-3 text-sm text-muted-foreground transition hover:bg-muted hover:text-foreground disabled:opacity-50"
-                >
-                  Cancel
-                </button>
-              </Dialog.Close>
-              <button
-                type="submit"
-                disabled={busy || loading || !selected}
-                className="inline-flex h-9 items-center gap-2 rounded-xl bg-blue-600 px-4 text-sm font-medium text-white transition hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-50"
-              >
-                {busy ? <Loader2 className="size-4 animate-spin" /> : null}
-                {busy ? "Saving…" : "Save"}
-              </button>
-            </div>
-          </form>
-        </Dialog.Content>
-      </Dialog.Portal>
-    </Dialog.Root>
   );
 }
 
@@ -923,19 +594,19 @@ function ManualAppDialog({
   const [error, setError] = useState("");
 
   useEffect(() => {
-    if (!open) {
-      setAppID("");
-      setAppSecret("");
-      setError("");
-    }
+    if (open) return;
+    setDomain("feishu");
+    setAppID("");
+    setAppSecret("");
+    setError("");
   }, [open]);
 
   const submit = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
+    if (!appID.trim() || !appSecret.trim()) return;
     setError("");
     try {
       await onSubmit(domain, appID.trim(), appSecret.trim());
-      setAppSecret("");
     } catch (cause) {
       setError(errorMessage(cause));
     }
@@ -944,20 +615,18 @@ function ManualAppDialog({
   return (
     <Dialog.Root open={open} onOpenChange={(next) => !busy && onOpenChange(next)}>
       <Dialog.Portal>
-        <Dialog.Overlay className="fixed inset-0 z-[70] bg-slate-950/30 backdrop-blur-[2px] data-[state=open]:animate-in data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=open]:fade-in-0" />
+        <Dialog.Overlay className="fixed inset-0 z-[70] bg-slate-950/30 backdrop-blur-[2px]" />
         <Dialog.Content className="cocola-user-ui fixed left-1/2 top-1/2 z-[71] w-[calc(100%-2rem)] max-w-md -translate-x-1/2 -translate-y-1/2 rounded-2xl border border-border bg-background p-5 text-foreground shadow-2xl outline-none">
           <form onSubmit={(event) => void submit(event)}>
             <div className="flex items-start gap-3">
-              <div className="grid size-10 shrink-0 place-items-center rounded-xl bg-blue-500/10 text-blue-600">
+              <span className="grid size-10 shrink-0 place-items-center rounded-xl bg-blue-500/10 text-blue-600">
                 <Settings2 className="size-5" />
-              </div>
+              </span>
               <div className="min-w-0 flex-1">
-                <Dialog.Title className="text-base font-semibold">
-                  Use an existing Feishu app
-                </Dialog.Title>
+                <Dialog.Title className="text-base font-semibold">Use an existing app</Dialog.Title>
                 <Dialog.Description className="mt-1.5 text-sm leading-6 text-muted-foreground">
-                  Advanced fallback only. Cocola encrypts the secret and never returns it through
-                  the API.
+                  Cocola encrypts the app secret and returns a one-time command to bind the bot
+                  owner.
                 </Dialog.Description>
               </div>
               <Dialog.Close asChild>
@@ -965,24 +634,23 @@ function ManualAppDialog({
                   type="button"
                   disabled={busy}
                   aria-label="Close"
-                  className="grid size-8 shrink-0 place-items-center rounded-lg text-muted-foreground transition hover:bg-muted hover:text-foreground disabled:opacity-50"
+                  className="grid size-8 place-items-center rounded-lg text-muted-foreground hover:bg-muted"
                 >
                   <X className="size-4" />
                 </button>
               </Dialog.Close>
             </div>
 
-            <fieldset disabled={busy} className="mt-5 space-y-4">
-              <div className="space-y-2">
-                <Label>App region</Label>
+            <div className="mt-5 space-y-4">
+              <div className="space-y-1.5">
+                <Label>Platform</Label>
                 <div className="grid grid-cols-2 gap-2">
                   {(["feishu", "lark"] as const).map((value) => (
                     <button
                       key={value}
                       type="button"
-                      aria-pressed={domain === value}
                       onClick={() => setDomain(value)}
-                      className={`h-9 rounded-xl border text-sm transition ${
+                      className={`h-9 rounded-xl border text-sm font-medium ${
                         domain === value
                           ? "border-blue-500 bg-blue-500/10 text-blue-700"
                           : "border-border text-muted-foreground hover:bg-muted"
@@ -993,7 +661,7 @@ function ManualAppDialog({
                   ))}
                 </div>
               </div>
-              <div className="space-y-2">
+              <div className="space-y-1.5">
                 <Label htmlFor={appIDInput}>App ID</Label>
                 <Input
                   id={appIDInput}
@@ -1001,24 +669,22 @@ function ManualAppDialog({
                   value={appID}
                   onChange={(event) => setAppID(event.target.value)}
                   placeholder="cli_..."
-                  required
                 />
               </div>
-              <div className="space-y-2">
-                <Label htmlFor={secretInput}>App Secret</Label>
+              <div className="space-y-1.5">
+                <Label htmlFor={secretInput}>App secret</Label>
                 <Input
                   id={secretInput}
                   type="password"
-                  autoComplete="off"
+                  autoComplete="new-password"
                   value={appSecret}
                   onChange={(event) => setAppSecret(event.target.value)}
-                  required
                 />
               </div>
-            </fieldset>
+            </div>
 
             {error ? (
-              <div className="mt-3 rounded-xl border border-red-500/20 bg-red-500/10 px-3 py-2 text-sm text-red-600">
+              <div className="mt-4 rounded-xl bg-destructive/10 px-3 py-2 text-sm text-destructive">
                 {error}
               </div>
             ) : null}
@@ -1028,7 +694,7 @@ function ManualAppDialog({
                 <button
                   type="button"
                   disabled={busy}
-                  className="h-9 rounded-xl px-3 text-sm text-muted-foreground transition hover:bg-muted hover:text-foreground disabled:opacity-50"
+                  className="h-9 rounded-xl px-3 text-sm text-muted-foreground hover:bg-muted"
                 >
                   Cancel
                 </button>
@@ -1036,9 +702,9 @@ function ManualAppDialog({
               <button
                 type="submit"
                 disabled={busy || !appID.trim() || !appSecret.trim()}
-                className="h-9 rounded-xl bg-blue-600 px-4 text-sm font-medium text-white transition hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-50"
+                className="h-9 rounded-xl bg-blue-600 px-4 text-sm font-medium text-white hover:bg-blue-700 disabled:opacity-50"
               >
-                {busy ? "Connecting…" : "Connect app"}
+                {busy ? "Connecting…" : "Connect"}
               </button>
             </div>
           </form>
@@ -1050,103 +716,94 @@ function ManualAppDialog({
 
 function StatusNotice({
   icon: Icon,
-  text,
   tone,
+  children,
 }: {
   icon: LucideIcon;
-  text: string;
   tone: "warning" | "danger";
+  children: ReactNode;
 }) {
-  const classes =
-    tone === "danger"
-      ? "border-red-500/20 bg-red-500/5 text-red-700"
-      : "border-amber-500/20 bg-amber-500/5 text-amber-800";
   return (
-    <div className={`mt-4 flex gap-2 rounded-2xl border p-3 text-xs leading-5 ${classes}`}>
+    <div
+      className={`mt-4 flex items-start gap-2 rounded-xl border px-3 py-2 text-xs leading-5 ${
+        tone === "danger"
+          ? "border-red-500/20 bg-red-500/5 text-red-700"
+          : "border-amber-500/20 bg-amber-500/5 text-amber-800"
+      }`}
+    >
       <Icon className="mt-0.5 size-3.5 shrink-0" />
-      <p>{text}</p>
+      <span>{children}</span>
     </div>
   );
 }
 
 function ConnectorButton({
   children,
-  disabled = false,
   icon,
-  onClick,
-  variant = "solid",
+  variant = "primary",
+  ...props
 }: {
   children: ReactNode;
-  disabled?: boolean;
-  icon?: ReactNode;
-  onClick?: () => void;
-  variant?: "solid" | "outline" | "ghost";
-}) {
-  const styles = {
-    solid: "bg-foreground text-background hover:bg-foreground/90",
-    outline: "border border-border text-foreground hover:bg-muted",
-    ghost: "text-muted-foreground hover:bg-muted hover:text-foreground",
-  };
+  icon: ReactNode;
+  variant?: "primary" | "outline" | "ghost";
+} & React.ButtonHTMLAttributes<HTMLButtonElement>) {
   return (
     <button
       type="button"
-      onClick={onClick}
-      disabled={disabled}
-      className={`inline-flex h-10 w-full items-center justify-center gap-2 rounded-xl px-4 text-sm font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50 ${styles[variant]}`}
+      className={`inline-flex h-9 items-center justify-center gap-2 rounded-xl px-3 text-sm font-medium transition disabled:cursor-not-allowed disabled:opacity-50 ${
+        variant === "primary"
+          ? "bg-blue-600 text-white hover:bg-blue-700"
+          : variant === "outline"
+            ? "border border-border bg-background text-foreground hover:bg-muted"
+            : "text-muted-foreground hover:bg-muted hover:text-foreground"
+      }`}
+      {...props}
     >
       {icon}
-      <span className="truncate">{children}</span>
+      {children}
     </button>
   );
 }
 
 function connectionState(
   connection: FeishuConnection | null,
-  flow: RegistrationFlow | null,
   loadState: ConnectionLoadState,
-) {
-  if (!connection) {
-    return loadState === "failed"
-      ? { label: "Connection check failed", dot: "bg-red-500" }
-      : { label: "Checking", dot: "bg-muted-foreground" };
+): { label: string; className: string } {
+  if (loadState === "checking") {
+    return { label: "Checking", className: "bg-muted text-muted-foreground" };
   }
-  if (flow && ACTIVE_FLOW_STATES.has(flow.status)) {
-    return { label: "Authorizing", dot: "animate-pulse bg-blue-500" };
+  if (loadState === "failed") {
+    return { label: "Unavailable", className: "bg-red-500/10 text-red-700" };
   }
-  const states: Record<string, { label: string; dot: string }> = {
-    not_configured: { label: "Not connected", dot: "bg-muted-foreground" },
-    awaiting_bind: { label: "Waiting for owner", dot: "bg-amber-500" },
-    connecting: { label: "Connecting", dot: "animate-pulse bg-blue-500" },
-    ready: { label: "Connected", dot: "bg-emerald-500" },
-    action_required: { label: "Action required", dot: "bg-amber-500" },
-    disabled: { label: connection.connected ? "Paused" : "Unavailable", dot: "bg-slate-400" },
-    error: { label: "Connection error", dot: "bg-red-500" },
-  };
-  return states[connection.status] ?? { label: connection.status, dot: "bg-muted-foreground" };
+  if (!connection || connection.status === "not_configured") {
+    return { label: "Not connected", className: "bg-muted text-muted-foreground" };
+  }
+  if (connection.status === "ready") {
+    return { label: "Ready", className: "bg-emerald-500/10 text-emerald-700" };
+  }
+  if (connection.status === "disabled") {
+    return { label: "Paused", className: "bg-slate-500/10 text-slate-700" };
+  }
+  if (connection.status === "error") {
+    return { label: "Needs attention", className: "bg-red-500/10 text-red-700" };
+  }
+  return { label: "Connecting", className: "bg-amber-500/10 text-amber-700" };
 }
 
 function registrationFailureText(flow: RegistrationFlow) {
-  switch (flow.status) {
-    case "denied":
-      return "Authorization was denied in Feishu. You can start a new authorization.";
-    case "expired":
-      return "The authorization link expired. Start again to receive a new link.";
-    case "interrupted":
-      return "Gateway restarted before authorization completed. Start again to continue.";
-    default:
-      return `Feishu authorization failed${flow.error_code ? ` (${flow.error_code})` : ""}.`;
-  }
+  if (flow.status === "denied") return "Feishu authorization was denied.";
+  if (flow.status === "expired") return "Feishu authorization expired.";
+  if (flow.status === "interrupted") return "Feishu authorization was interrupted.";
+  return flow.error_code
+    ? `Feishu authorization failed (${flow.error_code}).`
+    : "Feishu authorization failed.";
 }
 
 function connectorErrorText(code?: string) {
-  const messages: Record<string, string> = {
-    bot_not_active: "The bot has not been published or approved in Feishu.",
-    credential_decrypt_failed: "The saved credential cannot be opened. Disconnect and reconnect.",
-    channel_configuration_failed: "The Feishu app configuration is incomplete or invalid.",
-    connection_failed: "The long connection could not be established. Check the app status.",
-    connection_error: "The Feishu long connection was interrupted.",
-  };
-  return (code && messages[code]) || "The Feishu connector could not establish a connection.";
+  if (code === "app_not_published") return "Publish the app in Feishu, then reconnect.";
+  if (code === "tenant_approval_required") return "The app is waiting for tenant approval.";
+  if (code === "credentials_invalid") return "The app credentials are no longer valid.";
+  return "The Feishu bot could not connect. Retry or check the app configuration.";
 }
 
 function developerConsoleURL(domain?: string) {
@@ -1156,7 +813,7 @@ function developerConsoleURL(domain?: string) {
 function formatDuration(totalSeconds: number) {
   const minutes = Math.floor(totalSeconds / 60);
   const seconds = totalSeconds % 60;
-  return `${minutes}:${String(seconds).padStart(2, "0")}`;
+  return `${minutes}:${seconds.toString().padStart(2, "0")}`;
 }
 
 function formatDate(value: string) {

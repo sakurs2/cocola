@@ -16,6 +16,8 @@ var (
 	ErrNotFound                 = errors.New("chatrun: not found")
 	ErrConflict                 = errors.New("chatrun: conversation already has an active run")
 	ErrRuntimeMismatch          = errors.New("chatrun: conversation runtime mismatch")
+	ErrAgentMismatch            = errors.New("chatrun: conversation agent mismatch")
+	ErrAgentArchived            = errors.New("chatrun: agent archived")
 	ErrFolderNotFound           = errors.New("chatrun: folder not found")
 	ErrFolderMismatch           = errors.New("chatrun: conversation folder mismatch")
 	ErrProjectNotFound          = errors.New("chatrun: project not found")

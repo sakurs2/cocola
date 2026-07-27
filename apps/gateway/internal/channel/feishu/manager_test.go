@@ -213,7 +213,7 @@ func TestReactionPermissionBackoffAndNotice(t *testing.T) {
 	runner := &connectorRunner{
 		manager: &Manager{
 			now:         func() time.Time { return now },
-			settingsURL: "https://cocola.example.com/connectors",
+			settingsURL: "https://cocola.example.com/agents",
 		},
 		connector: Connector{Domain: DomainFeishu},
 		channel:   channel,
@@ -342,7 +342,7 @@ func TestParseChatSnapshotRestoresPendingQuestion(t *testing.T) {
 	}
 }
 
-func TestProcessInboxRejectsUnconfiguredModel(t *testing.T) {
+func TestProcessInboxUsesAgentModelThroughAgentID(t *testing.T) {
 	const signingSecret = "test-secret"
 	issuer := token.NewIssuer(signingSecret, "cocola", time.Hour)
 	accountServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -358,6 +358,28 @@ func TestProcessInboxRejectsUnconfiguredModel(t *testing.T) {
 	}
 	connector := Connector{
 		ID: "connector-1", UserID: "user-1", TenantID: "tenant-1",
+		AgentID: "agent-1",
+	}
+	requestBody := make(chan map[string]any, 1)
+	chatServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var body map[string]any
+		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+			t.Errorf("decode chat request: %v", err)
+		}
+		requestBody <- body
+		w.Header().Set("content-type", "text/event-stream")
+		w.Header().Set("x-cocola-run-id", "run-1")
+		_, _ = w.Write([]byte(
+			"event: text\n" +
+				"data: {\"kind\":\"text\",\"data\":{\"text\":\"done\"}}\n\n" +
+				"event: done\n" +
+				"data: {\"kind\":\"done\",\"data\":{\"status\":\"success\"}}\n\n",
+		))
+	}))
+	defer chatServer.Close()
+	chat, err := NewChatClient(chatServer.URL, chatServer.Client())
+	if err != nil {
+		t.Fatalf("NewChatClient: %v", err)
 	}
 	channel := &managerTestChannel{
 		addReactionErr: &PermissionError{Code: 99991672},
@@ -372,7 +394,8 @@ func TestProcessInboxRejectsUnconfiguredModel(t *testing.T) {
 				connector: connector,
 			},
 			accounts:    accounts,
-			settingsURL: "https://cocola.example.com/connectors",
+			chat:        chat,
+			settingsURL: "https://cocola.example.com/agents",
 			now:         func() time.Time { return time.Now().UTC() },
 		},
 		connector: connector,
@@ -384,15 +407,23 @@ func TestProcessInboxRejectsUnconfiguredModel(t *testing.T) {
 		ExternalMessageID: "message-1",
 		Payload:           InboxPayload{Text: "hello"},
 	}, nil)
-	if result.Status != InboxRejected || result.ErrorCode != "model_not_configured" {
-		t.Fatalf("result = %+v, want model_not_configured rejection", result)
+	if result.Status != InboxDone {
+		t.Fatalf("result = %+v, want completed Agent run", result)
+	}
+	select {
+	case body := <-requestBody:
+		if body["agent_id"] != "agent-1" {
+			t.Fatalf("chat request = %#v, want agent_id", body)
+		}
+		if _, exists := body["model_route_id"]; exists {
+			t.Fatalf("chat request must not carry Connector model: %#v", body)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("chat request was not received")
 	}
 	waitForMessages(t, channel, 2)
 	messages := strings.Join(channel.sentMessages(), "\n")
-	if !strings.Contains(messages, "选择模型") {
-		t.Fatalf("configuration guidance was not sent: %q", messages)
-	}
-	if !strings.Contains(messages, "https://cocola.example.com/connectors") {
+	if !strings.Contains(messages, "https://cocola.example.com/agents") {
 		t.Fatalf("reaction permission guidance was not sent: %q", messages)
 	}
 }
@@ -523,23 +554,31 @@ func TestProcessInboxHistoryAndSwitch(t *testing.T) {
 		rows := []map[string]any{
 			{
 				"id": "conversation-current", "title": "Current chat",
-				"chat_type": "chat", "runtime_id": "claude-code",
+				"chat_type": "chat", "runtime_id": "claude-code", "agent_id": "agent-1",
 			},
 			{
 				"id": "conversation-old", "title": "Older chat",
+				"chat_type": "chat", "runtime_id": "claude-code", "agent_id": "agent-1",
+			},
+			{
+				"id": "base-chat", "title": "Base chat",
 				"chat_type": "chat", "runtime_id": "claude-code",
 			},
 			{
+				"id": "other-agent", "title": "Other Agent chat",
+				"chat_type": "chat", "runtime_id": "claude-code", "agent_id": "agent-2",
+			},
+			{
 				"id": "codex", "title": "Codex chat",
-				"chat_type": "chat", "runtime_id": "codex",
+				"chat_type": "chat", "runtime_id": "codex", "agent_id": "agent-1",
 			},
 			{
 				"id": "scheduled", "title": "Scheduled task",
-				"chat_type": "scheduled_task", "runtime_id": "claude-code",
+				"chat_type": "scheduled_task", "runtime_id": "claude-code", "agent_id": "agent-1",
 			},
 			{
 				"id": "project", "title": "Project chat", "chat_type": "chat",
-				"project_id": "project-1", "runtime_id": "claude-code",
+				"project_id": "project-1", "runtime_id": "claude-code", "agent_id": "agent-1",
 			},
 		}
 		if listCalls > 1 {
@@ -564,7 +603,7 @@ func TestProcessInboxHistoryAndSwitch(t *testing.T) {
 			now: func() time.Time { return time.Date(2026, 7, 26, 20, 0, 0, 0, time.UTC) },
 		},
 		connector: Connector{
-			ID: "connector-1", UserID: "user-1", TenantID: "tenant-1",
+			ID: "connector-1", UserID: "user-1", TenantID: "tenant-1", AgentID: "agent-1",
 		},
 		channel: channel,
 		ctx:     context.Background(),
@@ -580,6 +619,8 @@ func TestProcessInboxHistoryAndSwitch(t *testing.T) {
 	history := strings.Join(channel.sentMessages(), "\n")
 	if !strings.Contains(history, "1. Current chat · 当前") ||
 		!strings.Contains(history, "2. Older chat") ||
+		strings.Contains(history, "Base chat") ||
+		strings.Contains(history, "Other Agent chat") ||
 		strings.Contains(history, "Codex chat") ||
 		strings.Contains(history, "Scheduled task") ||
 		strings.Contains(history, "Project chat") {
@@ -618,6 +659,43 @@ func TestProcessInboxHistoryAndSwitch(t *testing.T) {
 	messages := strings.Join(channel.sentMessages(), "\n")
 	if !strings.Contains(messages, "已切换到对话：Older chat") {
 		t.Fatalf("switch response = %q", messages)
+	}
+}
+
+func TestConsumeAgentStreamRejectsAgentMismatchWithoutRetry(t *testing.T) {
+	channel := &managerTestChannel{}
+	runner := &connectorRunner{
+		manager: &Manager{store: &managerTestStore{}},
+		connector: Connector{
+			ID: "connector-1", AgentID: "agent-1",
+		},
+		channel: channel,
+		ctx:     context.Background(),
+	}
+	session := Session{
+		ConnectorID:    "connector-1",
+		ExternalChatID: "chat-1",
+		ConversationID: "conversation-1",
+	}
+	result := runner.consumeAgentStream(
+		InboxItem{
+			ExternalChatID:    "chat-1",
+			ExternalMessageID: "message-1",
+		},
+		"runtime-token",
+		&session,
+		func(context.Context, func(string), func(ChatEvent) error) error {
+			return &ChatHTTPError{Status: http.StatusConflict, Code: "AGENT_MISMATCH"}
+		},
+	)
+	if result.Status != InboxRejected ||
+		result.ErrorCode != "agent_mismatch" ||
+		result.RetryError != nil {
+		t.Fatalf("result = %+v, want a non-retryable Agent rejection", result)
+	}
+	messages := strings.Join(channel.sentMessages(), "\n")
+	if !strings.Contains(messages, "/history") {
+		t.Fatalf("Agent mismatch guidance = %q", messages)
 	}
 }
 

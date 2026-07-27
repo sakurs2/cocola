@@ -20,9 +20,10 @@ type staticRuntimeCredentialResolver struct {
 	err        error
 }
 
-func (resolver staticRuntimeCredentialResolver) RuntimeCredential(
+func (resolver staticRuntimeCredentialResolver) RuntimeCredentialByID(
 	context.Context,
 	Identity,
+	string,
 ) (RuntimeCredential, error) {
 	return resolver.credential, resolver.err
 }
@@ -88,7 +89,8 @@ func TestBoundedDownloaderStopsAtLimitPlusOne(t *testing.T) {
 
 func testDownloader(client *http.Client) *BoundedDownloader {
 	return &BoundedDownloader{
-		identity: Identity{TenantID: "tenant", UserID: "user"},
+		identity:    Identity{TenantID: "tenant", UserID: "user"},
+		connectorID: "connector-1",
 		credentials: staticRuntimeCredentialResolver{credential: RuntimeCredential{
 			Status: RuntimeCredentialReady, Brand: DomainFeishu, TenantAccessToken: "token",
 		}},

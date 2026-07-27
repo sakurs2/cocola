@@ -61,6 +61,9 @@ func (m *Memory) UpsertConversation(_ context.Context, c Conversation) error {
 		if existing.RuntimeID != c.RuntimeID {
 			return ErrRuntimeMismatch
 		}
+		if existing.AgentID != c.AgentID {
+			return ErrAgentMismatch
+		}
 		if c.ProjectID != "" && existing.ProjectID != c.ProjectID {
 			return ErrProjectMismatch
 		}
@@ -71,6 +74,12 @@ func (m *Memory) UpsertConversation(_ context.Context, c Conversation) error {
 	}
 	if c.UserID == "" {
 		return ErrNotFound
+	}
+	if (c.AgentID == "") != (c.AgentSnapshot == nil) ||
+		(c.AgentSnapshot != nil &&
+			(c.AgentVersion <= 0 || c.AgentSnapshot.ID != c.AgentID ||
+				c.AgentSnapshot.Version != c.AgentVersion)) {
+		return ErrAgentMismatch
 	}
 	m.convs[c.ID] = c
 	return nil

@@ -13,6 +13,7 @@ import {
   PanelLeftClose,
   Plug as PlugsConnected,
   Plus as PlusCircle,
+  Bot,
   ShieldCheck,
   Sparkles as Sparkle,
   Loader2 as SpinnerGap,
@@ -51,6 +52,13 @@ const PRIMARY_NAV: PrimaryNavItem[] = [
     href: "/tasks",
     section: "navigation",
     iconClassName: "text-blue-600",
+  },
+  {
+    icon: Bot,
+    label: "Agents",
+    href: "/agents",
+    section: "navigation",
+    iconClassName: "text-cyan-600",
   },
   {
     icon: Sparkle,

@@ -39,6 +39,35 @@ func NewPostgres(ctx context.Context, dsn string) (*Postgres, error) {
 // Close releases the connection pool.
 func (p *Postgres) Close() { p.pool.Close() }
 
+const conversationColumns = `id, user_id, tenant_id, title, chat_type,
+	COALESCE(folder_id, ''), COALESCE(project_id::text, ''), hidden, runtime_id,
+	COALESCE(agent_id::text, ''), COALESCE(agent_version, 0), agent_snapshot_json,
+	COALESCE(channel_connector_id::text, ''), created_at, updated_at`
+
+func scanConversationRow(row pgx.Row) (Conversation, error) {
+	var conversation Conversation
+	var snapshotJSON []byte
+	err := row.Scan(
+		&conversation.ID, &conversation.UserID, &conversation.TenantID,
+		&conversation.Title, &conversation.ChatType, &conversation.FolderID,
+		&conversation.ProjectID, &conversation.Hidden, &conversation.RuntimeID,
+		&conversation.AgentID, &conversation.AgentVersion, &snapshotJSON,
+		&conversation.ChannelConnectorID, &conversation.CreatedAt, &conversation.UpdatedAt,
+	)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return Conversation{}, ErrNotFound
+	}
+	if err != nil {
+		return Conversation{}, err
+	}
+	if len(snapshotJSON) > 0 {
+		if err := json.Unmarshal(snapshotJSON, &conversation.AgentSnapshot); err != nil {
+			return Conversation{}, err
+		}
+	}
+	return conversation, nil
+}
+
 func (p *Postgres) UpsertConversation(ctx context.Context, c Conversation) error {
 	if c.UserID == "" {
 		tag, err := p.pool.Exec(ctx, `UPDATE conversations SET updated_at=$2 WHERE id=$1`, c.ID, c.UpdatedAt)
@@ -56,16 +85,33 @@ func (p *Postgres) UpsertConversation(ctx context.Context, c Conversation) error
 	if c.RuntimeID == "" {
 		c.RuntimeID = DefaultRuntimeID
 	}
+	var snapshotJSON []byte
+	var err error
+	if c.AgentSnapshot != nil {
+		snapshotJSON, err = json.Marshal(c.AgentSnapshot)
+		if err != nil {
+			return err
+		}
+	}
 	// A caller-controlled conversation id may only refresh its original owner.
-	const q = `INSERT INTO conversations (id, user_id, tenant_id, title, chat_type, folder_id, project_id, hidden, runtime_id, created_at, updated_at)
-		VALUES ($1,$2,$3,$4,$5,NULLIF($6,''),NULLIF($7,'')::uuid,$8,$9,$10,$11)
+	const q = `INSERT INTO conversations (
+			id, user_id, tenant_id, title, chat_type, folder_id, project_id, hidden,
+			runtime_id, agent_id, agent_version, agent_snapshot_json,
+			channel_connector_id, created_at, updated_at
+		)
+		VALUES (
+			$1,$2,$3,$4,$5,NULLIF($6,''),NULLIF($7,'')::uuid,$8,$9,
+			NULLIF($10,'')::uuid,NULLIF($11,0),$12::jsonb,NULLIF($13,'')::uuid,$14,$15
+		)
 		ON CONFLICT (id) DO UPDATE SET updated_at = EXCLUDED.updated_at
 		WHERE conversations.user_id = EXCLUDED.user_id
 			AND conversations.runtime_id = EXCLUDED.runtime_id
+			AND conversations.agent_id IS NOT DISTINCT FROM EXCLUDED.agent_id
 		RETURNING id`
 	var id string
-	err := p.pool.QueryRow(ctx, q,
+	err = p.pool.QueryRow(ctx, q,
 		c.ID, c.UserID, c.TenantID, c.Title, c.ChatType, c.FolderID, c.ProjectID, c.Hidden, c.RuntimeID,
+		c.AgentID, c.AgentVersion, snapshotJSON, c.ChannelConnectorID,
 		c.CreatedAt, c.UpdatedAt).Scan(&id)
 	if err == pgx.ErrNoRows {
 		return ErrNotFound
@@ -140,7 +186,7 @@ func (p *Postgres) UpsertMessage(ctx context.Context, m Message) error {
 }
 
 func (p *Postgres) ListConversations(ctx context.Context, userID string) ([]Conversation, error) {
-	const q = `SELECT id, user_id, tenant_id, title, chat_type, COALESCE(folder_id, ''), COALESCE(project_id::text, ''), hidden, runtime_id, created_at, updated_at
+	const q = `SELECT ` + conversationColumns + `
 		FROM conversations WHERE user_id = $1 AND hidden = FALSE ORDER BY updated_at DESC, id DESC`
 	rows, err := p.pool.Query(ctx, q, userID)
 	if err != nil {
@@ -149,10 +195,9 @@ func (p *Postgres) ListConversations(ctx context.Context, userID string) ([]Conv
 	defer rows.Close()
 	out := make([]Conversation, 0)
 	for rows.Next() {
-		var c Conversation
-		if err := rows.Scan(&c.ID, &c.UserID, &c.TenantID, &c.Title, &c.ChatType, &c.FolderID, &c.ProjectID,
-			&c.Hidden, &c.RuntimeID, &c.CreatedAt, &c.UpdatedAt); err != nil {
-			return nil, err
+		c, scanErr := scanConversationRow(rows)
+		if scanErr != nil {
+			return nil, scanErr
 		}
 		out = append(out, c)
 	}
@@ -160,19 +205,9 @@ func (p *Postgres) ListConversations(ctx context.Context, userID string) ([]Conv
 }
 
 func (p *Postgres) GetConversation(ctx context.Context, convID, userID string) (Conversation, error) {
-	const q = `SELECT id, user_id, tenant_id, title, chat_type, COALESCE(folder_id, ''), COALESCE(project_id::text, ''), hidden, runtime_id, created_at, updated_at
+	const q = `SELECT ` + conversationColumns + `
 		FROM conversations WHERE id = $1 AND user_id = $2`
-	var c Conversation
-	if err := p.pool.QueryRow(ctx, q, convID, userID).Scan(
-		&c.ID, &c.UserID, &c.TenantID, &c.Title, &c.ChatType, &c.FolderID, &c.ProjectID,
-		&c.Hidden, &c.RuntimeID, &c.CreatedAt, &c.UpdatedAt,
-	); err != nil {
-		if err == pgx.ErrNoRows {
-			return Conversation{}, ErrNotFound
-		}
-		return Conversation{}, err
-	}
-	return c, nil
+	return scanConversationRow(p.pool.QueryRow(ctx, q, convID, userID))
 }
 
 func (p *Postgres) GetMessages(ctx context.Context, convID, userID string) ([]Message, error) {
@@ -427,14 +462,9 @@ func (p *Postgres) MoveConversation(ctx context.Context, convID, userID, folderI
 	const q = `UPDATE conversations
 		SET folder_id=NULLIF($3,''), updated_at=$4
 		WHERE id=$1 AND user_id=$2 AND chat_type='chat' AND project_id IS NULL
-		RETURNING id, user_id, tenant_id, title, chat_type, COALESCE(folder_id, ''), COALESCE(project_id::text, ''), hidden, runtime_id, created_at, updated_at`
-	var conversation Conversation
-	err = tx.QueryRow(ctx, q, convID, userID, folderID, updatedAt).Scan(
-		&conversation.ID, &conversation.UserID, &conversation.TenantID, &conversation.Title,
-		&conversation.ChatType, &conversation.FolderID, &conversation.ProjectID, &conversation.Hidden, &conversation.RuntimeID,
-		&conversation.CreatedAt, &conversation.UpdatedAt,
-	)
-	if err == pgx.ErrNoRows {
+		RETURNING ` + conversationColumns
+	conversation, err := scanConversationRow(tx.QueryRow(ctx, q, convID, userID, folderID, updatedAt))
+	if errors.Is(err, ErrNotFound) {
 		var chatType string
 		if lookupErr := tx.QueryRow(ctx, `SELECT chat_type FROM conversations
 			WHERE id=$1 AND user_id=$2`, convID, userID).Scan(&chatType); lookupErr == nil {

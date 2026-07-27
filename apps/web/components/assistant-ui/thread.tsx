@@ -37,6 +37,7 @@ import {
   ArrowUp as ArrowUpIcon,
   BarChart3,
   BookOpenText,
+  Bot,
   Code2,
   FileText,
   Lightbulb,
@@ -63,6 +64,7 @@ import {
 import { useCocola, type ModelIconConfig, type UiMessageMetadata } from "@/app/runtime-provider";
 import { CocolaWordmark } from "@/components/assistant-ui/cocola-wordmark";
 import { CocolaLogo } from "@/components/cocola-logo";
+import { AgentAvatar } from "@/components/agents/agent-avatar";
 import { CocolaTagline } from "@/components/assistant-ui/cocola-tagline";
 import { PlanCardPart } from "@/components/assistant-ui/plan-card";
 import {
@@ -508,6 +510,7 @@ export const ConversationComposer: FC<{
               </ComposerPrimitive.AddAttachment>
               {runtimePickerEnabled ? <RuntimePicker /> : null}
               <ModelPicker />
+              <AgentPicker />
               {selectedRuntime?.id === "claude-code" && interactionMode === "plan" ? (
                 <PlanModeIndicator />
               ) : null}
@@ -1392,24 +1395,42 @@ const ModelPicker: FC = () => {
     setSelectedModelID,
     modelsLoaded,
     questionInputLocked,
+    selectedAgent,
   } = useCocola();
   const [open, setOpen] = useState(false);
   const noModel = !modelsLoaded || !selectedModel;
 
   return (
     <Popover.Root open={open} onOpenChange={setOpen}>
-      <Popover.Trigger asChild>
-        <button
-          type="button"
-          className="flex max-w-[14rem] min-w-0 items-center gap-1.5 rounded-full border border-border px-2.5 py-1.5 text-[12.5px] font-medium text-foreground transition-colors hover:bg-muted focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
-          aria-label={noModel ? "No model configured" : "Select model"}
-          disabled={noModel || questionInputLocked}
+      {selectedAgent ? (
+        <span
+          className="inline-flex"
+          title="This model is configured by the selected agent and can't be changed here."
         >
-          <ModelIcon icon={selectedModel?.icon} className="size-4" bare />
-          <span className="truncate">{selectedModel?.label ?? "No model"}</span>
-          {noModel ? null : <ChevronDown className="size-3.5 shrink-0 text-muted-foreground" />}
-        </button>
-      </Popover.Trigger>
+          <button
+            type="button"
+            className="flex max-w-[14rem] min-w-0 items-center gap-1.5 rounded-full border border-border px-2.5 py-1.5 text-[12.5px] font-medium text-foreground opacity-70"
+            aria-label="Agent model"
+            disabled
+          >
+            <ModelIcon icon={selectedModel?.icon} className="size-4" bare />
+            <span className="truncate">{selectedModel?.label ?? "Model unavailable"}</span>
+          </button>
+        </span>
+      ) : (
+        <Popover.Trigger asChild>
+          <button
+            type="button"
+            className="flex max-w-[14rem] min-w-0 items-center gap-1.5 rounded-full border border-border px-2.5 py-1.5 text-[12.5px] font-medium text-foreground transition-colors hover:bg-muted focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+            aria-label={noModel ? "No model configured" : "Select model"}
+            disabled={noModel || questionInputLocked}
+          >
+            <ModelIcon icon={selectedModel?.icon} className="size-4" bare />
+            <span className="truncate">{selectedModel?.label ?? "No model"}</span>
+            {noModel ? null : <ChevronDown className="size-3.5 shrink-0 text-muted-foreground" />}
+          </button>
+        </Popover.Trigger>
+      )}
       <Popover.Portal>
         <Popover.Content
           side="top"
@@ -1456,6 +1477,94 @@ const ModelPicker: FC = () => {
               ))}
             </Command.List>
           </Command>
+        </Popover.Content>
+      </Popover.Portal>
+    </Popover.Root>
+  );
+};
+
+const AgentPicker: FC = () => {
+  const { agents, agentsLoaded, selectedAgent, selectedAgentID, agentLocked, setSelectedAgentID } =
+    useCocola();
+  const [open, setOpen] = useState(false);
+
+  return (
+    <Popover.Root open={open} onOpenChange={setOpen}>
+      <Popover.Trigger asChild>
+        <button
+          type="button"
+          className="flex max-w-[12rem] min-w-0 items-center gap-1.5 rounded-full border border-border px-2.5 py-1.5 text-[12.5px] font-medium text-foreground transition-colors hover:bg-muted focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring disabled:cursor-not-allowed disabled:opacity-70"
+          aria-label="Select agent"
+          disabled={!agentsLoaded || agentLocked}
+          title={agentLocked ? "Agent is fixed for this conversation" : "Select agent"}
+        >
+          {selectedAgent ? (
+            <AgentAvatar
+              avatarKey={selectedAgent.avatar_key}
+              avatarColor={selectedAgent.avatar_color}
+              className="size-4 rounded-md ring-0"
+              iconClassName="size-2.5"
+            />
+          ) : (
+            <Bot className="size-4 text-muted-foreground" />
+          )}
+          <span className="truncate">{selectedAgent?.name ?? "None"}</span>
+          {!agentsLoaded || agentLocked ? null : (
+            <ChevronDown className="size-3.5 shrink-0 text-muted-foreground" />
+          )}
+        </button>
+      </Popover.Trigger>
+      <Popover.Portal>
+        <Popover.Content
+          side="top"
+          align="start"
+          sideOffset={10}
+          className="cocola-user-ui z-50 w-64 overflow-hidden rounded-2xl border border-border bg-popover p-1.5 text-popover-foreground shadow-xl"
+        >
+          <button
+            type="button"
+            className="flex w-full items-center gap-2 rounded-xl px-2 py-2 text-left text-sm hover:bg-accent"
+            onClick={() => {
+              setSelectedAgentID(null);
+              setOpen(false);
+            }}
+          >
+            <span className="grid size-7 shrink-0 place-items-center rounded-lg bg-muted text-muted-foreground">
+              <Bot className="size-4" />
+            </span>
+            <span className="min-w-0 flex-1">
+              <span className="block font-medium">None</span>
+              <span className="block text-xs text-muted-foreground">Use the standard chat</span>
+            </span>
+            {!selectedAgentID ? <Check className="size-4" /> : null}
+          </button>
+          {agents.length > 0 ? <div className="my-1 h-px bg-border" /> : null}
+          <div className="max-h-64 overflow-auto">
+            {agents.map((agent) => (
+              <button
+                key={agent.id}
+                type="button"
+                className="flex w-full items-center gap-2 rounded-xl px-2 py-2 text-left text-sm hover:bg-accent"
+                onClick={() => {
+                  setSelectedAgentID(agent.id);
+                  setOpen(false);
+                }}
+              >
+                <AgentAvatar
+                  avatarKey={agent.avatar_key}
+                  avatarColor={agent.avatar_color}
+                  className="size-7 rounded-lg"
+                />
+                <span className="min-w-0 flex-1">
+                  <span className="block truncate font-medium">{agent.name}</span>
+                  <span className="block truncate text-xs text-muted-foreground">
+                    {agent.description || agent.model_alias}
+                  </span>
+                </span>
+                {agent.id === selectedAgentID ? <Check className="size-4" /> : null}
+              </button>
+            ))}
+          </div>
         </Popover.Content>
       </Popover.Portal>
     </Popover.Root>

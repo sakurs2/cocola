@@ -24,6 +24,7 @@ import (
 	"github.com/google/uuid"
 
 	"github.com/cocola-project/cocola/apps/gateway/internal/agent"
+	"github.com/cocola-project/cocola/apps/gateway/internal/agentprofile"
 	"github.com/cocola-project/cocola/apps/gateway/internal/auth"
 	feishuconnector "github.com/cocola-project/cocola/apps/gateway/internal/channel/feishu"
 	"github.com/cocola-project/cocola/apps/gateway/internal/chatrun"
@@ -49,7 +50,7 @@ const DefaultInlineMaxBytes int64 = 16 * 1024 * 1024
 type conversationRootSpanKey struct{}
 
 var traceAttributeAllowlist = map[string]bool{
-	"accepted_count": true, "action": true, "artifact_count": true,
+	"accepted_count": true, "action": true, "agent_id": true, "agent_version": true, "artifact_count": true,
 	"attachment_count": true, "chat_type": true, "content_length": true,
 	"conversation_id": true, "error_code": true, "error_type": true,
 	"event_count": true, "event_kind": true, "inline_count": true,
@@ -117,6 +118,7 @@ type API struct {
 	sandboxResolver  sandboxmgr.EndpointResolver
 	terminalLeases   *terminalLeaseRegistry
 	memory           *memory.Service
+	agents           *agentprofile.Service
 	projects         *project.Service
 	skillBroker      *skillbroker.Broker
 	skillAdminURL    string
@@ -200,6 +202,9 @@ func (a *API) WithTraceStore(store traceevents.Store) *API { a.trace = store; re
 // WithMemory installs the optional OpenViking integration. The rest of the
 // Gateway only depends on this high-level module and never calls OpenViking.
 func (a *API) WithMemory(service *memory.Service) *API { a.memory = service; return a }
+
+// WithAgents installs personal Agent definition management and resolution.
+func (a *API) WithAgents(service *agentprofile.Service) *API { a.agents = service; return a }
 
 // WithProjects installs the high-level GitHub Project module. GitHub remains
 // unreachable from every other gateway package.
@@ -356,6 +361,16 @@ func (a *API) Handler() http.Handler {
 		a.verifier.Middleware(writeErr)(http.HandlerFunc(a.deleteMemoryItem))))
 	mux.Handle("DELETE /v1/memory/items", a.instrument("DELETE /v1/memory/items",
 		a.verifier.Middleware(writeErr)(http.HandlerFunc(a.clearMemory))))
+	mux.Handle("GET /v1/agents", a.instrument("GET /v1/agents",
+		a.verifier.Middleware(writeErr)(http.HandlerFunc(a.listAgents))))
+	mux.Handle("POST /v1/agents", a.instrument("POST /v1/agents",
+		a.verifier.Middleware(writeErr)(http.HandlerFunc(a.createAgent))))
+	mux.Handle("GET /v1/agents/{id}", a.instrument("GET /v1/agents/{id}",
+		a.verifier.Middleware(writeErr)(http.HandlerFunc(a.getAgent))))
+	mux.Handle("PATCH /v1/agents/{id}", a.instrument("PATCH /v1/agents/{id}",
+		a.verifier.Middleware(writeErr)(http.HandlerFunc(a.updateAgent))))
+	mux.Handle("DELETE /v1/agents/{id}", a.instrument("DELETE /v1/agents/{id}",
+		a.verifier.Middleware(writeErr)(http.HandlerFunc(a.archiveAgent))))
 	mux.Handle("GET /v1/scm/github/connection", a.instrument("GET /v1/scm/github/connection",
 		a.verifier.Middleware(writeErr)(http.HandlerFunc(a.githubConnection))))
 	mux.Handle("POST /v1/scm/github/oauth/start", a.instrument("POST /v1/scm/github/oauth/start",
@@ -380,23 +395,21 @@ func (a *API) Handler() http.Handler {
 		a.verifier.Middleware(writeErr)(http.HandlerFunc(a.githubInstallationComplete))))
 	mux.Handle("DELETE /v1/connectors/github", a.instrument("DELETE /v1/connectors/github",
 		a.verifier.Middleware(writeErr)(http.HandlerFunc(a.githubDisconnect))))
-	mux.Handle("GET /v1/connectors/feishu", a.instrument("GET /v1/connectors/feishu",
+	mux.Handle("GET /v1/agents/{id}/channels/feishu", a.instrument("GET /v1/agents/{id}/channels/feishu",
 		a.verifier.Middleware(writeErr)(http.HandlerFunc(a.feishuConnection))))
-	mux.Handle("PATCH /v1/connectors/feishu", a.instrument("PATCH /v1/connectors/feishu",
-		a.verifier.Middleware(writeErr)(http.HandlerFunc(a.feishuSettings))))
-	mux.Handle("POST /v1/connectors/feishu/registrations", a.instrument("POST /v1/connectors/feishu/registrations",
+	mux.Handle("POST /v1/agents/{id}/channels/feishu/registrations", a.instrument("POST /v1/agents/{id}/channels/feishu/registrations",
 		a.verifier.Middleware(writeErr)(http.HandlerFunc(a.feishuRegistrationStart))))
-	mux.Handle("GET /v1/connectors/feishu/registrations/{id}", a.instrument("GET /v1/connectors/feishu/registrations/{id}",
+	mux.Handle("GET /v1/agents/{id}/channels/feishu/registrations/{flow_id}", a.instrument("GET /v1/agents/{id}/channels/feishu/registrations/{flow_id}",
 		a.verifier.Middleware(writeErr)(http.HandlerFunc(a.feishuRegistration))))
-	mux.Handle("DELETE /v1/connectors/feishu/registrations/{id}", a.instrument("DELETE /v1/connectors/feishu/registrations/{id}",
+	mux.Handle("DELETE /v1/agents/{id}/channels/feishu/registrations/{flow_id}", a.instrument("DELETE /v1/agents/{id}/channels/feishu/registrations/{flow_id}",
 		a.verifier.Middleware(writeErr)(http.HandlerFunc(a.feishuRegistrationCancel))))
-	mux.Handle("POST /v1/connectors/feishu/manual", a.instrument("POST /v1/connectors/feishu/manual",
+	mux.Handle("POST /v1/agents/{id}/channels/feishu/manual", a.instrument("POST /v1/agents/{id}/channels/feishu/manual",
 		a.verifier.Middleware(writeErr)(http.HandlerFunc(a.feishuManual))))
-	mux.Handle("POST /v1/connectors/feishu/enable", a.instrument("POST /v1/connectors/feishu/enable",
+	mux.Handle("POST /v1/agents/{id}/channels/feishu/enable", a.instrument("POST /v1/agents/{id}/channels/feishu/enable",
 		a.verifier.Middleware(writeErr)(http.HandlerFunc(a.feishuEnable))))
-	mux.Handle("POST /v1/connectors/feishu/disable", a.instrument("POST /v1/connectors/feishu/disable",
+	mux.Handle("POST /v1/agents/{id}/channels/feishu/disable", a.instrument("POST /v1/agents/{id}/channels/feishu/disable",
 		a.verifier.Middleware(writeErr)(http.HandlerFunc(a.feishuDisable))))
-	mux.Handle("DELETE /v1/connectors/feishu", a.instrument("DELETE /v1/connectors/feishu",
+	mux.Handle("DELETE /v1/agents/{id}/channels/feishu", a.instrument("DELETE /v1/agents/{id}/channels/feishu",
 		a.verifier.Middleware(writeErr)(http.HandlerFunc(a.feishuDisconnect))))
 	mux.Handle("GET /v1/projects", a.instrument("GET /v1/projects",
 		a.verifier.Middleware(writeErr)(http.HandlerFunc(a.listProjects))))
@@ -592,33 +605,36 @@ func (a *API) recordAgentTrace(ctx context.Context, traceID string, data map[str
 // the verified identity, NOT from the body, so a caller cannot impersonate
 // another user. session_id and sandbox_id are caller-chosen routing hints.
 type chatRequest struct {
-	Prompt                               string                `json:"prompt"`
-	SessionID                            string                `json:"session_id"`
-	SandboxID                            string                `json:"sandbox_id"`
-	MaxTurns                             int32                 `json:"max_turns"`
-	ModelRouteID                         string                `json:"model_route_id"`
-	ModelAlias                           string                `json:"model_alias"`
-	ModelLabel                           string                `json:"model_label"`
-	ModelProvider                        string                `json:"model_provider"`
-	ModelFamily                          string                `json:"model_family"`
-	ModelIconSlug                        string                `json:"model_icon_slug"`
-	ModelIcon                            map[string]string     `json:"model_icon"`
-	ConversationTitle                    string                `json:"conversation_title"`
-	ConversationType                     string                `json:"conversation_type"`
-	DeferConversationVisibilityUntilDone bool                  `json:"defer_conversation_visibility_until_done"`
-	Attachments                          []attachmentDTO       `json:"attachments"`
-	WikiRefs                             []wikiRefDTO          `json:"wiki_refs"`
-	WikiReferences                       []agent.WikiReference `json:"-"`
-	ClientRequestID                      string                `json:"client_request_id"`
-	RuntimeID                            string                `json:"runtime_id"`
-	InteractionMode                      string                `json:"interaction_mode"`
-	RequireSessionResume                 bool                  `json:"-"`
-	QuestionID                           string                `json:"-"`
-	FolderID                             string                `json:"folder_id"`
-	ProjectID                            string                `json:"project_id"`
-	ProjectBaseRef                       string                `json:"project_base_ref"`
-	SkillID                              string                `json:"skill_id"`
-	AllowWorkspaceReset                  bool                  `json:"allow_workspace_reset"`
+	Prompt                               string                 `json:"prompt"`
+	SessionID                            string                 `json:"session_id"`
+	SandboxID                            string                 `json:"sandbox_id"`
+	MaxTurns                             int32                  `json:"max_turns"`
+	ModelRouteID                         string                 `json:"model_route_id"`
+	ModelAlias                           string                 `json:"model_alias"`
+	ModelLabel                           string                 `json:"model_label"`
+	ModelProvider                        string                 `json:"model_provider"`
+	ModelFamily                          string                 `json:"model_family"`
+	ModelIconSlug                        string                 `json:"model_icon_slug"`
+	ModelIcon                            map[string]string      `json:"model_icon"`
+	ConversationTitle                    string                 `json:"conversation_title"`
+	ConversationType                     string                 `json:"conversation_type"`
+	DeferConversationVisibilityUntilDone bool                   `json:"defer_conversation_visibility_until_done"`
+	Attachments                          []attachmentDTO        `json:"attachments"`
+	WikiRefs                             []wikiRefDTO           `json:"wiki_refs"`
+	WikiReferences                       []agent.WikiReference  `json:"-"`
+	ClientRequestID                      string                 `json:"client_request_id"`
+	RuntimeID                            string                 `json:"runtime_id"`
+	InteractionMode                      string                 `json:"interaction_mode"`
+	RequireSessionResume                 bool                   `json:"-"`
+	QuestionID                           string                 `json:"-"`
+	FolderID                             string                 `json:"folder_id"`
+	ProjectID                            string                 `json:"project_id"`
+	ProjectBaseRef                       string                 `json:"project_base_ref"`
+	SkillID                              string                 `json:"skill_id"`
+	AllowWorkspaceReset                  bool                   `json:"allow_workspace_reset"`
+	AgentID                              string                 `json:"agent_id"`
+	AgentSnapshot                        *agentprofile.Snapshot `json:"-"`
+	ChannelConnectorID                   string                 `json:"-"`
 }
 
 // attachmentDTO is one user-uploaded file carried inline in the chat body.
@@ -673,6 +689,9 @@ func (a *API) startConversationRun(ctx context.Context, id auth.Identity, req ch
 			"conversation_id":  run.ConversationID,
 			"chat_type":        source,
 			"model_alias":      run.ModelAlias,
+			"agent_id":         req.AgentID,
+			"agent_version":    agentSnapshotVersion(req.AgentSnapshot),
+			"content_length":   agentInstructionsLength(req.AgentSnapshot),
 			"interaction_mode": effectiveInteractionMode(req),
 		},
 	})
@@ -866,6 +885,51 @@ func artifactDownloadURL(sessionID, artifactID string) string {
 	return "/api/conversations/" + url.PathEscape(sessionID) + "/artifacts/" + url.PathEscape(artifactID)
 }
 
+type conversationAgentSummary struct {
+	ID           string `json:"id"`
+	Version      int64  `json:"version"`
+	Name         string `json:"name"`
+	Description  string `json:"description"`
+	AvatarKey    string `json:"avatar_key"`
+	AvatarColor  string `json:"avatar_color"`
+	RuntimeID    string `json:"runtime_id"`
+	ModelRouteID string `json:"model_route_id"`
+	ModelAlias   string `json:"model_alias"`
+}
+
+type conversationSummaryResponse struct {
+	ID           string                    `json:"id"`
+	Title        string                    `json:"title"`
+	ChatType     string                    `json:"chat_type"`
+	FolderID     string                    `json:"folder_id,omitempty"`
+	ProjectID    string                    `json:"project_id,omitempty"`
+	RuntimeID    string                    `json:"runtime_id"`
+	AgentID      string                    `json:"agent_id,omitempty"`
+	AgentVersion int64                     `json:"agent_version,omitempty"`
+	Agent        *conversationAgentSummary `json:"agent,omitempty"`
+	CreatedAt    time.Time                 `json:"created_at"`
+	UpdatedAt    time.Time                 `json:"updated_at"`
+}
+
+func conversationSummary(value convo.Conversation) conversationSummaryResponse {
+	response := conversationSummaryResponse{
+		ID: value.ID, Title: value.Title, ChatType: value.ChatType,
+		FolderID: value.FolderID, ProjectID: value.ProjectID, RuntimeID: value.RuntimeID,
+		AgentID: value.AgentID, AgentVersion: value.AgentVersion,
+		CreatedAt: value.CreatedAt, UpdatedAt: value.UpdatedAt,
+	}
+	if value.AgentSnapshot != nil {
+		snapshot := value.AgentSnapshot
+		response.Agent = &conversationAgentSummary{
+			ID: snapshot.ID, Version: snapshot.Version, Name: snapshot.Name,
+			Description: snapshot.Description, AvatarKey: snapshot.AvatarKey,
+			AvatarColor: snapshot.AvatarColor, RuntimeID: snapshot.RuntimeID,
+			ModelRouteID: snapshot.ModelRouteID, ModelAlias: snapshot.ModelAlias,
+		}
+	}
+	return response
+}
+
 // listConversations serves the sidebar: the caller's conversations, newest
 // first. When persistence is disabled it returns an empty list (never 500).
 func (a *API) listConversations(w http.ResponseWriter, r *http.Request) {
@@ -875,7 +939,7 @@ func (a *API) listConversations(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if a.convo == nil {
-		writeJSON(w, http.StatusOK, []convo.Conversation{})
+		writeJSON(w, http.StatusOK, []conversationSummaryResponse{})
 		return
 	}
 	convs, err := a.convo.ListConversations(r.Context(), id.UserID)
@@ -884,7 +948,11 @@ func (a *API) listConversations(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusInternalServerError, "INTERNAL", "could not list conversations")
 		return
 	}
-	writeJSON(w, http.StatusOK, convs)
+	result := make([]conversationSummaryResponse, 0, len(convs))
+	for _, conversation := range convs {
+		result = append(result, conversationSummary(conversation))
+	}
+	writeJSON(w, http.StatusOK, result)
 }
 
 type renameConversationRequest struct {

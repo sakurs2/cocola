@@ -19,7 +19,7 @@ func TestConnectorSettingsURLUsesFirstValidPublicOrigin(t *testing.T) {
 	got := ConnectorSettingsURL(
 		"javascript:alert(1), https://cocola.example.com, https://ignored.example.com",
 	)
-	if got != "https://cocola.example.com/connectors" {
+	if got != "https://cocola.example.com/agents" {
 		t.Fatalf("connector settings URL = %q", got)
 	}
 }

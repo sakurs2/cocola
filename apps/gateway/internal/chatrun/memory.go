@@ -35,6 +35,9 @@ func (m *Memory) Start(ctx context.Context, in StartInput) (StartResult, error) 
 	effective := in.Conversation
 	existing, err := m.convo.GetConversation(ctx, in.Conversation.ID, in.Conversation.UserID)
 	if err == nil {
+		if in.Conversation.AgentID != existing.AgentID {
+			return StartResult{}, ErrAgentMismatch
+		}
 		if effective.RuntimeID != "" && effective.RuntimeID != existing.RuntimeID {
 			return StartResult{}, ErrRuntimeMismatch
 		}
@@ -58,6 +61,10 @@ func (m *Memory) Start(ctx context.Context, in StartInput) (StartResult, error) 
 	} else {
 		return StartResult{}, err
 	}
+	if effective.AgentSnapshot != nil {
+		in.Run.ModelRouteID = effective.AgentSnapshot.ModelRouteID
+		in.Run.ModelAlias = effective.AgentSnapshot.ModelAlias
+	}
 	for _, run := range m.runs {
 		if run.UserID == in.Run.UserID && run.ConversationID == in.Run.ConversationID &&
 			run.ClientRequestID != "" && run.ClientRequestID == in.Run.ClientRequestID {
@@ -79,6 +86,9 @@ func (m *Memory) Start(ctx context.Context, in StartInput) (StartResult, error) 
 		}
 		if err == convo.ErrRuntimeMismatch {
 			return StartResult{}, ErrRuntimeMismatch
+		}
+		if err == convo.ErrAgentMismatch {
+			return StartResult{}, ErrAgentMismatch
 		}
 		return StartResult{}, err
 	}

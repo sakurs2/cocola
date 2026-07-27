@@ -9,6 +9,7 @@ import (
 
 	"github.com/google/uuid"
 
+	"github.com/cocola-project/cocola/apps/gateway/internal/agentprofile"
 	"github.com/cocola-project/cocola/apps/gateway/internal/auth"
 	feishuconnector "github.com/cocola-project/cocola/apps/gateway/internal/channel/feishu"
 )
@@ -21,11 +22,6 @@ type feishuManualRequest struct {
 	AppSecret string `json:"app_secret"`
 }
 
-type feishuSettingsRequest struct {
-	ModelRouteID string `json:"model_route_id"`
-	ModelAlias   string `json:"model_alias"`
-}
-
 func feishuIdentity(r *http.Request) (feishuconnector.Identity, bool) {
 	id, ok := auth.IdentityOf(r)
 	return feishuconnector.Identity{
@@ -34,45 +30,45 @@ func feishuIdentity(r *http.Request) (feishuconnector.Identity, bool) {
 	}, ok
 }
 
-func (a *API) feishuConnection(w http.ResponseWriter, r *http.Request) {
+func (a *API) feishuAgentRequest(
+	w http.ResponseWriter,
+	r *http.Request,
+	requireService bool,
+) (feishuconnector.Identity, agentprofile.Agent, bool) {
 	id, ok := feishuIdentity(r)
 	if !ok {
 		writeErr(w, http.StatusUnauthorized, "UNAUTHENTICATED", "missing identity")
+		return feishuconnector.Identity{}, agentprofile.Agent{}, false
+	}
+	if a.agents == nil {
+		writeErr(w, http.StatusServiceUnavailable, "AGENTS_UNAVAILABLE", "Agent service unavailable")
+		return feishuconnector.Identity{}, agentprofile.Agent{}, false
+	}
+	agent, err := a.agents.GetActive(r.Context(), agentprofile.Identity{
+		TenantID: id.TenantID, UserID: id.UserID,
+	}, strings.TrimSpace(r.PathValue("id")))
+	if a.writeAgentError(w, err) {
+		return feishuconnector.Identity{}, agentprofile.Agent{}, false
+	}
+	if requireService && a.feishu == nil {
+		writeErr(w, http.StatusServiceUnavailable, "FEISHU_UNAVAILABLE", "Feishu connector is unavailable")
+		return feishuconnector.Identity{}, agentprofile.Agent{}, false
+	}
+	return id, agent, true
+}
+
+func (a *API) feishuConnection(w http.ResponseWriter, r *http.Request) {
+	id, agent, ok := a.feishuAgentRequest(w, r, false)
+	if !ok {
 		return
 	}
 	if a.feishu == nil {
 		writeJSON(w, http.StatusOK, feishuconnector.ConnectorView{
-			Status: "disabled", Enabled: false,
+			AgentID: agent.ID, Status: "disabled", Enabled: false,
 		})
 		return
 	}
-	view, err := a.feishu.Connection(r.Context(), id)
-	if a.writeFeishuError(w, err) {
-		return
-	}
-	writeJSON(w, http.StatusOK, view)
-}
-
-func (a *API) feishuSettings(w http.ResponseWriter, r *http.Request) {
-	id, ok := feishuIdentity(r)
-	if !ok {
-		writeErr(w, http.StatusUnauthorized, "UNAUTHENTICATED", "missing identity")
-		return
-	}
-	if a.feishu == nil {
-		writeErr(w, http.StatusServiceUnavailable, "FEISHU_UNAVAILABLE", "Feishu connector is unavailable")
-		return
-	}
-	var input feishuSettingsRequest
-	if !decodeFeishuJSON(w, r, &input) {
-		return
-	}
-	view, err := a.feishu.ConfigureModel(
-		r.Context(),
-		id,
-		input.ModelRouteID,
-		input.ModelAlias,
-	)
+	view, err := a.feishu.Connection(r.Context(), id, agent.ID)
 	if a.writeFeishuError(w, err) {
 		return
 	}
@@ -80,19 +76,16 @@ func (a *API) feishuSettings(w http.ResponseWriter, r *http.Request) {
 }
 
 func (a *API) feishuRegistrationStart(w http.ResponseWriter, r *http.Request) {
-	id, ok := feishuIdentity(r)
+	id, agent, ok := a.feishuAgentRequest(w, r, true)
 	if !ok {
-		writeErr(w, http.StatusUnauthorized, "UNAUTHENTICATED", "missing identity")
-		return
-	}
-	if a.feishu == nil {
-		writeErr(w, http.StatusServiceUnavailable, "FEISHU_UNAVAILABLE", "Feishu connector is unavailable")
 		return
 	}
 	if !decodeOptionalEmptyObject(w, r) {
 		return
 	}
-	flow, err := a.feishu.StartRegistration(r.Context(), id)
+	flow, err := a.feishu.StartRegistration(r.Context(), id, feishuconnector.AgentRegistration{
+		ID: agent.ID, Name: agent.Name, Description: agent.Description,
+	})
 	if a.writeFeishuError(w, err) {
 		return
 	}
@@ -100,21 +93,16 @@ func (a *API) feishuRegistrationStart(w http.ResponseWriter, r *http.Request) {
 }
 
 func (a *API) feishuRegistration(w http.ResponseWriter, r *http.Request) {
-	id, ok := feishuIdentity(r)
+	id, agent, ok := a.feishuAgentRequest(w, r, true)
 	if !ok {
-		writeErr(w, http.StatusUnauthorized, "UNAUTHENTICATED", "missing identity")
 		return
 	}
-	if a.feishu == nil {
-		writeErr(w, http.StatusServiceUnavailable, "FEISHU_UNAVAILABLE", "Feishu connector is unavailable")
-		return
-	}
-	flowID := strings.TrimSpace(r.PathValue("id"))
+	flowID := strings.TrimSpace(r.PathValue("flow_id"))
 	if _, err := uuid.Parse(flowID); err != nil {
 		writeErr(w, http.StatusBadRequest, "INVALID_ARGUMENT", "registration id must be a UUID")
 		return
 	}
-	flow, err := a.feishu.Registration(r.Context(), id, flowID)
+	flow, err := a.feishu.Registration(r.Context(), id, agent.ID, flowID)
 	if a.writeFeishuError(w, err) {
 		return
 	}
@@ -122,34 +110,24 @@ func (a *API) feishuRegistration(w http.ResponseWriter, r *http.Request) {
 }
 
 func (a *API) feishuRegistrationCancel(w http.ResponseWriter, r *http.Request) {
-	id, ok := feishuIdentity(r)
+	id, agent, ok := a.feishuAgentRequest(w, r, true)
 	if !ok {
-		writeErr(w, http.StatusUnauthorized, "UNAUTHENTICATED", "missing identity")
 		return
 	}
-	if a.feishu == nil {
-		writeErr(w, http.StatusServiceUnavailable, "FEISHU_UNAVAILABLE", "Feishu connector is unavailable")
-		return
-	}
-	flowID := strings.TrimSpace(r.PathValue("id"))
+	flowID := strings.TrimSpace(r.PathValue("flow_id"))
 	if _, err := uuid.Parse(flowID); err != nil {
 		writeErr(w, http.StatusBadRequest, "INVALID_ARGUMENT", "registration id must be a UUID")
 		return
 	}
-	if err := a.feishu.CancelRegistration(r.Context(), id, flowID); a.writeFeishuError(w, err) {
+	if err := a.feishu.CancelRegistration(r.Context(), id, agent.ID, flowID); a.writeFeishuError(w, err) {
 		return
 	}
 	w.WriteHeader(http.StatusNoContent)
 }
 
 func (a *API) feishuManual(w http.ResponseWriter, r *http.Request) {
-	id, ok := feishuIdentity(r)
+	id, agent, ok := a.feishuAgentRequest(w, r, true)
 	if !ok {
-		writeErr(w, http.StatusUnauthorized, "UNAUTHENTICATED", "missing identity")
-		return
-	}
-	if a.feishu == nil {
-		writeErr(w, http.StatusServiceUnavailable, "FEISHU_UNAVAILABLE", "Feishu connector is unavailable")
 		return
 	}
 	var input feishuManualRequest
@@ -159,6 +137,7 @@ func (a *API) feishuManual(w http.ResponseWriter, r *http.Request) {
 	result, err := a.feishu.ConfigureManual(
 		r.Context(),
 		id,
+		agent.ID,
 		input.Domain,
 		input.AppID,
 		input.AppSecret,
@@ -178,13 +157,8 @@ func (a *API) feishuDisable(w http.ResponseWriter, r *http.Request) {
 }
 
 func (a *API) feishuToggle(w http.ResponseWriter, r *http.Request, enabled bool) {
-	id, ok := feishuIdentity(r)
+	id, agent, ok := a.feishuAgentRequest(w, r, true)
 	if !ok {
-		writeErr(w, http.StatusUnauthorized, "UNAUTHENTICATED", "missing identity")
-		return
-	}
-	if a.feishu == nil {
-		writeErr(w, http.StatusServiceUnavailable, "FEISHU_UNAVAILABLE", "Feishu connector is unavailable")
 		return
 	}
 	if !decodeOptionalEmptyObject(w, r) {
@@ -195,9 +169,9 @@ func (a *API) feishuToggle(w http.ResponseWriter, r *http.Request, enabled bool)
 		err  error
 	)
 	if enabled {
-		view, err = a.feishu.Enable(r.Context(), id)
+		view, err = a.feishu.Enable(r.Context(), id, agent.ID)
 	} else {
-		view, err = a.feishu.Disable(r.Context(), id)
+		view, err = a.feishu.Disable(r.Context(), id, agent.ID)
 	}
 	if a.writeFeishuError(w, err) {
 		return
@@ -206,19 +180,14 @@ func (a *API) feishuToggle(w http.ResponseWriter, r *http.Request, enabled bool)
 }
 
 func (a *API) feishuDisconnect(w http.ResponseWriter, r *http.Request) {
-	id, ok := feishuIdentity(r)
+	id, agent, ok := a.feishuAgentRequest(w, r, true)
 	if !ok {
-		writeErr(w, http.StatusUnauthorized, "UNAUTHENTICATED", "missing identity")
-		return
-	}
-	if a.feishu == nil {
-		writeErr(w, http.StatusServiceUnavailable, "FEISHU_UNAVAILABLE", "Feishu connector is unavailable")
 		return
 	}
 	if !decodeOptionalEmptyObject(w, r) {
 		return
 	}
-	if err := a.feishu.Disconnect(r.Context(), id); a.writeFeishuError(w, err) {
+	if err := a.feishu.Disconnect(r.Context(), id, agent.ID); a.writeFeishuError(w, err) {
 		return
 	}
 	w.WriteHeader(http.StatusNoContent)
@@ -277,6 +246,8 @@ func (a *API) writeFeishuError(w http.ResponseWriter, err error) bool {
 		writeErr(w, http.StatusConflict, "CONFLICT", "a Feishu connection or registration is already active")
 	case errors.Is(err, feishuconnector.ErrFlowTerminated):
 		writeErr(w, http.StatusConflict, "REGISTRATION_FINISHED", "registration is no longer active")
+	case errors.Is(err, feishuconnector.ErrAgentArchived):
+		writeErr(w, http.StatusConflict, "AGENT_ARCHIVED", "Agent is archived")
 	default:
 		a.log.Warn("Feishu connector request failed: " + err.Error())
 		writeErr(w, http.StatusServiceUnavailable, "FEISHU_UNAVAILABLE", "Feishu connector is temporarily unavailable")

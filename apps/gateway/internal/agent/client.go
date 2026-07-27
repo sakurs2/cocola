@@ -82,6 +82,7 @@ type Query struct {
 	SkillBrokerCredential   string
 	LarkCredential          LarkRuntimeCredential
 	Project                 *ProjectContext
+	Agent                   *AgentContext
 	Attachments             []Attachment
 	WikiReferences          []WikiReference
 }
@@ -108,6 +109,13 @@ type ProjectContext struct {
 	RepositoryProvider string
 	RepositoryFullName string
 	CredentialMode     string
+}
+
+type AgentContext struct {
+	ID           string
+	Version      int64
+	Name         string
+	Instructions string
 }
 
 type GitChange struct {
@@ -364,6 +372,12 @@ func (c *Client) Stream(ctx context.Context, q Query, onEvent func(Event) error)
 	}
 	if q.Project != nil {
 		request.ProjectContext = projectContextProto(*q.Project)
+	}
+	if q.Agent != nil {
+		request.AgentContext = &agentv1.AgentContext{
+			Id: q.Agent.ID, Version: q.Agent.Version,
+			Name: q.Agent.Name, Instructions: q.Agent.Instructions,
+		}
 	}
 	stream, err := c.rpc.Query(ctx, request)
 	if err != nil {

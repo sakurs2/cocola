@@ -43,6 +43,7 @@ import (
 	"time"
 
 	"github.com/cocola-project/cocola/apps/gateway/internal/agent"
+	"github.com/cocola-project/cocola/apps/gateway/internal/agentprofile"
 	"github.com/cocola-project/cocola/apps/gateway/internal/auth"
 	feishuconnector "github.com/cocola-project/cocola/apps/gateway/internal/channel/feishu"
 	"github.com/cocola-project/cocola/apps/gateway/internal/chatrun"
@@ -279,6 +280,13 @@ func main() {
 	} else {
 		api = api.WithConvoStore(cs)
 		defer cs.Close()
+		agentStore, agentStoreErr := agentprofile.NewPostgres(context.Background(), dsn)
+		if agentStoreErr != nil {
+			log.Fatal("Agent store connect failed: " + agentStoreErr.Error())
+		}
+		defer agentStore.Close()
+		api = api.WithAgents(agentprofile.NewService(agentStore))
+		log.Info("personal Agents enabled")
 		wikiStore, wikiErr := wiki.NewPostgres(context.Background(), dsn)
 		if wikiErr != nil {
 			log.Fatal("Wiki store connect failed: " + wikiErr.Error())

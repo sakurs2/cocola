@@ -17,6 +17,7 @@ import (
 	"github.com/google/uuid"
 
 	"github.com/cocola-project/cocola/apps/gateway/internal/agent"
+	"github.com/cocola-project/cocola/apps/gateway/internal/agentprofile"
 	"github.com/cocola-project/cocola/apps/gateway/internal/auth"
 	feishuconnector "github.com/cocola-project/cocola/apps/gateway/internal/channel/feishu"
 	"github.com/cocola-project/cocola/apps/gateway/internal/chatrun"
@@ -254,6 +255,7 @@ func (a *API) chat(w http.ResponseWriter, r *http.Request) {
 	req.ProjectID = strings.TrimSpace(req.ProjectID)
 	req.ProjectBaseRef = strings.TrimSpace(req.ProjectBaseRef)
 	req.SkillID = strings.TrimSpace(req.SkillID)
+	req.AgentID = strings.TrimSpace(req.AgentID)
 	if req.SkillID != "" && !validSkillID(req.SkillID) {
 		writeErr(w, http.StatusBadRequest, "INVALID_SKILL_ID", "skill_id is invalid")
 		return
@@ -327,6 +329,22 @@ func (a *API) chat(w http.ResponseWriter, r *http.Request) {
 				Size: versions[index].SizeBytes, SHA256: versions[index].SHA256,
 			})
 		}
+	}
+	if err := a.resolveChatAgent(r.Context(), identity, &req); err != nil {
+		switch {
+		case errors.Is(err, agentprofile.ErrInvalidArgument):
+			writeErr(w, http.StatusBadRequest, "INVALID_AGENT_ID", "agent_id is invalid")
+		case errors.Is(err, agentprofile.ErrNotFound):
+			writeErr(w, http.StatusNotFound, "AGENT_NOT_FOUND", "Agent not found")
+		case errors.Is(err, agentprofile.ErrArchived):
+			writeErr(w, http.StatusConflict, "AGENT_ARCHIVED", "Agent is archived")
+		case errors.Is(err, convo.ErrAgentMismatch):
+			writeErr(w, http.StatusConflict, "AGENT_MISMATCH", "conversation Agent cannot be changed")
+		default:
+			a.log.Warn("chat Agent resolution failed: " + strings.ReplaceAll(err.Error(), "\n", " "))
+			writeErr(w, http.StatusServiceUnavailable, "AGENTS_UNAVAILABLE", "could not resolve Agent")
+		}
+		return
 	}
 	if req.RuntimeID != "" {
 		if _, supported := a.runtimeByID[req.RuntimeID]; !supported {
@@ -448,6 +466,8 @@ func (a *API) chat(w http.ResponseWriter, r *http.Request) {
 			ID: req.SessionID, UserID: identity.UserID, TenantID: identity.TenantID,
 			Title: titleForConversation(req), ChatType: chatTypeForConversation(req),
 			FolderID: req.FolderID, ProjectID: req.ProjectID, Hidden: req.DeferConversationVisibilityUntilDone, RuntimeID: req.RuntimeID,
+			AgentID: req.AgentID, AgentVersion: agentSnapshotVersion(req.AgentSnapshot),
+			AgentSnapshot: req.AgentSnapshot, ChannelConnectorID: req.ChannelConnectorID,
 			CreatedAt: startedAt, UpdatedAt: startedAt,
 		},
 		UserMessage: convo.Message{
@@ -464,6 +484,14 @@ func (a *API) chat(w http.ResponseWriter, r *http.Request) {
 		req.RuntimeID = result.Conversation.RuntimeID
 		req.FolderID = result.Conversation.FolderID
 		req.ProjectID = result.Conversation.ProjectID
+		req.AgentID = result.Conversation.AgentID
+		req.AgentSnapshot = result.Conversation.AgentSnapshot
+		req.ChannelConnectorID = result.Conversation.ChannelConnectorID
+		if req.AgentSnapshot != nil {
+			req.RuntimeID = req.AgentSnapshot.RuntimeID
+			req.ModelRouteID = req.AgentSnapshot.ModelRouteID
+			req.ModelAlias = req.AgentSnapshot.ModelAlias
+		}
 		if result.Created {
 			live = a.newLiveRun(r, identity, req, run)
 			a.runs.mu.Lock()
@@ -490,6 +518,14 @@ func (a *API) chat(w http.ResponseWriter, r *http.Request) {
 	}
 	if errors.Is(err, chatrun.ErrRuntimeMismatch) {
 		writeErr(w, http.StatusConflict, "RUNTIME_MISMATCH", "conversation runtime cannot be changed")
+		return
+	}
+	if errors.Is(err, chatrun.ErrAgentMismatch) {
+		writeErr(w, http.StatusConflict, "AGENT_MISMATCH", "conversation Agent cannot be changed")
+		return
+	}
+	if errors.Is(err, chatrun.ErrAgentArchived) {
+		writeErr(w, http.StatusConflict, "AGENT_ARCHIVED", "Agent is archived")
 		return
 	}
 	if errors.Is(err, chatrun.ErrFolderNotFound) {
@@ -542,6 +578,132 @@ func (a *API) chat(w http.ResponseWriter, r *http.Request) {
 		go a.executeLiveRun(live)
 	}
 	a.serveRunSubscription(w, r, run.ID, snapshot, updates, unsubscribe)
+}
+
+func (a *API) resolveChatAgent(
+	ctx context.Context,
+	identity auth.Identity,
+	req *chatRequest,
+) error {
+	var existing convo.Conversation
+	existingFound := false
+	if a.convo != nil {
+		value, err := a.convo.GetConversation(ctx, req.SessionID, identity.UserID)
+		switch {
+		case err == nil:
+			existing = value
+			existingFound = true
+		case errors.Is(err, convo.ErrNotFound):
+		default:
+			return err
+		}
+	}
+	if existingFound {
+		if existing.AgentID != req.AgentID {
+			return convo.ErrAgentMismatch
+		}
+		if existing.AgentID == "" {
+			req.AgentSnapshot = nil
+			return nil
+		}
+		if existing.AgentSnapshot == nil ||
+			existing.AgentSnapshot.ID != existing.AgentID ||
+			existing.AgentSnapshot.Version != existing.AgentVersion {
+			return errors.New("conversation Agent snapshot is invalid")
+		}
+		if err := a.ensureConversationAgentActive(ctx, identity, existing); err != nil {
+			return err
+		}
+		snapshot := *existing.AgentSnapshot
+		applyAgentSnapshot(req, &snapshot)
+		req.ChannelConnectorID = existing.ChannelConnectorID
+		return nil
+	}
+	if req.AgentID == "" {
+		req.AgentSnapshot = nil
+		return nil
+	}
+	if a.agents == nil {
+		return errors.New("Agent service is unavailable")
+	}
+	value, err := a.agents.GetActive(ctx, agentprofile.Identity{
+		TenantID: identity.TenantID, UserID: identity.UserID,
+	}, req.AgentID)
+	if err != nil {
+		return err
+	}
+	snapshot := value.Snapshot()
+	applyAgentSnapshot(req, &snapshot)
+	if a.feishu != nil {
+		connectorID, connectorErr := a.feishu.ConnectorID(ctx, feishuconnector.Identity{
+			TenantID: identity.TenantID, UserID: identity.UserID,
+		}, req.AgentID)
+		if connectorErr != nil {
+			return connectorErr
+		}
+		req.ChannelConnectorID = connectorID
+	}
+	return nil
+}
+
+func (a *API) ensureConversationAgentActive(
+	ctx context.Context,
+	identity auth.Identity,
+	conversation convo.Conversation,
+) error {
+	if conversation.AgentID == "" {
+		return nil
+	}
+	if a.agents == nil {
+		return errors.New("Agent service is unavailable")
+	}
+	_, err := a.agents.GetActive(ctx, agentprofile.Identity{
+		TenantID: identity.TenantID, UserID: identity.UserID,
+	}, conversation.AgentID)
+	return err
+}
+
+func (a *API) writeConversationAgentError(w http.ResponseWriter, err error) bool {
+	if err == nil {
+		return false
+	}
+	switch {
+	case errors.Is(err, agentprofile.ErrArchived):
+		writeErr(w, http.StatusConflict, "AGENT_ARCHIVED", "Agent is archived")
+	case errors.Is(err, agentprofile.ErrNotFound):
+		writeErr(w, http.StatusNotFound, "AGENT_NOT_FOUND", "Agent not found")
+	default:
+		a.log.Warn("conversation Agent validation failed: " + strings.ReplaceAll(err.Error(), "\n", " "))
+		writeErr(w, http.StatusServiceUnavailable, "AGENTS_UNAVAILABLE", "could not resolve Agent")
+	}
+	return true
+}
+
+func applyAgentSnapshot(req *chatRequest, snapshot *agentprofile.Snapshot) {
+	req.AgentID = snapshot.ID
+	req.AgentSnapshot = snapshot
+	req.RuntimeID = snapshot.RuntimeID
+	req.ModelRouteID = snapshot.ModelRouteID
+	req.ModelAlias = snapshot.ModelAlias
+	req.ModelLabel = snapshot.ModelAlias
+	req.ModelProvider = ""
+	req.ModelFamily = ""
+	req.ModelIconSlug = ""
+	req.ModelIcon = nil
+}
+
+func agentSnapshotVersion(snapshot *agentprofile.Snapshot) int64 {
+	if snapshot == nil {
+		return 0
+	}
+	return snapshot.Version
+}
+
+func agentInstructionsLength(snapshot *agentprofile.Snapshot) int {
+	if snapshot == nil {
+		return 0
+	}
+	return len(snapshot.Instructions)
 }
 
 func userMessageParts(req chatRequest) []convo.Part {
@@ -947,6 +1109,7 @@ func (a *API) executeLiveRun(live *liveRun) {
 		larkCredential = a.resolveLarkRuntimeCredential(
 			live.ctx,
 			live.identity,
+			live.request.ChannelConnectorID,
 			feishuCredentialWait,
 		)
 	}
@@ -983,6 +1146,7 @@ func (a *API) executeLiveRun(live *liveRun) {
 		SkillBrokerCredential: skillBrokerCredential,
 		LarkCredential:        larkCredential,
 		Project:               projectContext,
+		Agent:                 runtimeAgentContext(live.request.AgentSnapshot),
 	}
 	coalescer := memoryEventCoalescer{run: live, window: a.runs.mergeWindow}
 	var sawError bool
@@ -1299,9 +1463,20 @@ func (a *API) executeLiveRun(live *liveRun) {
 	live.mu.Unlock()
 }
 
+func runtimeAgentContext(snapshot *agentprofile.Snapshot) *agent.AgentContext {
+	if snapshot == nil {
+		return nil
+	}
+	return &agent.AgentContext{
+		ID: snapshot.ID, Version: snapshot.Version, Name: snapshot.Name,
+		Instructions: snapshot.Instructions,
+	}
+}
+
 func (a *API) resolveLarkRuntimeCredential(
 	ctx context.Context,
 	identity auth.Identity,
+	connectorID string,
 	timeout time.Duration,
 ) agent.LarkRuntimeCredential {
 	credential := agent.LarkRuntimeCredential{
@@ -1310,14 +1485,18 @@ func (a *API) resolveLarkRuntimeCredential(
 	if a.feishu == nil {
 		return credential
 	}
+	if strings.TrimSpace(connectorID) == "" {
+		return credential
+	}
 	resolveCtx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
-	resolved, err := a.feishu.RuntimeCredential(
+	resolved, err := a.feishu.RuntimeCredentialByID(
 		resolveCtx,
 		feishuconnector.Identity{
 			TenantID: identity.TenantID,
 			UserID:   identity.UserID,
 		},
+		connectorID,
 	)
 	if err != nil {
 		credential.Status = feishuconnector.RuntimeCredentialUnavailable

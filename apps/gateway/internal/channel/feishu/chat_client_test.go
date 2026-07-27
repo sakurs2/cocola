@@ -24,8 +24,7 @@ func TestChatClientStreamsOnlyStructuredEvents(t *testing.T) {
 		if body["conversation_type"] != "interactive" ||
 			body["interaction_mode"] != "execute" ||
 			body["client_request_id"] != "request-1" ||
-			body["model_route_id"] != "route-1" ||
-			body["model_alias"] != "claude-test" {
+			body["agent_id"] != "agent-1" {
 			t.Errorf("request body = %#v", body)
 		}
 		w.Header().Set("content-type", "text/event-stream")
@@ -51,7 +50,7 @@ func TestChatClientStreamsOnlyStructuredEvents(t *testing.T) {
 		ChatTurn{
 			Prompt: "hi", ConversationID: "conversation-1",
 			ConversationTitle: "Feishu · hi", ClientRequestID: "request-1",
-			ModelRouteID: "route-1", ModelAlias: "claude-test",
+			AgentID: "agent-1",
 		},
 		func(value string) { runID = value },
 		func(event ChatEvent) error {

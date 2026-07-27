@@ -285,7 +285,7 @@ func TestServiceRuntimeCredentialStates(t *testing.T) {
 	connector.AppSecretCiphertext = ciphertext
 	store.connector = connector
 
-	credential, err := service.RuntimeCredential(context.Background(), identity)
+	credential, err := service.RuntimeCredentialByID(context.Background(), identity, connector.ID)
 	if err != nil {
 		t.Fatalf("RuntimeCredential ready: %v", err)
 	}
@@ -296,19 +296,19 @@ func TestServiceRuntimeCredentialStates(t *testing.T) {
 	}
 
 	store.connector.DesiredEnabled = false
-	credential, err = service.RuntimeCredential(context.Background(), identity)
+	credential, err = service.RuntimeCredentialByID(context.Background(), identity, connector.ID)
 	if err != nil || credential.Status != RuntimeCredentialDisabled {
 		t.Fatalf("RuntimeCredential disabled = %#v, %v", credential, err)
 	}
 
 	store.err = ErrNotFound
-	credential, err = service.RuntimeCredential(context.Background(), identity)
+	credential, err = service.RuntimeCredentialByID(context.Background(), identity, connector.ID)
 	if err != nil || credential.Status != RuntimeCredentialMissing {
 		t.Fatalf("RuntimeCredential missing = %#v, %v", credential, err)
 	}
 
 	store.err = errors.New("database unavailable")
-	credential, err = service.RuntimeCredential(context.Background(), identity)
+	credential, err = service.RuntimeCredentialByID(context.Background(), identity, connector.ID)
 	if err == nil || credential.Status != RuntimeCredentialUnavailable {
 		t.Fatalf("RuntimeCredential unavailable = %#v, %v", credential, err)
 	}
@@ -328,9 +328,9 @@ type runtimeCredentialStore struct {
 	err       error
 }
 
-func (store *runtimeCredentialStore) GetConnector(
+func (store *runtimeCredentialStore) GetConnectorByID(
 	context.Context,
-	Identity,
+	string,
 ) (Connector, error) {
 	return store.connector, store.err
 }

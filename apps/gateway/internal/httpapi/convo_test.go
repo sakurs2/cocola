@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/cocola-project/cocola/apps/gateway/internal/agent"
+	"github.com/cocola-project/cocola/apps/gateway/internal/agentprofile"
 	"github.com/cocola-project/cocola/apps/gateway/internal/auth"
 	"github.com/cocola-project/cocola/apps/gateway/internal/chatrun"
 	"github.com/cocola-project/cocola/apps/gateway/internal/convo"
@@ -24,6 +25,49 @@ func newAPIWithConvo(t *testing.T, fs *fakeStreamer, cs convo.Store) http.Handle
 	t.Helper()
 	v := auth.NewVerifier(auth.Config{})
 	return newConfiguredTestAPIWithConvo(fs, v, logger.Must(), cs).Handler()
+}
+
+func TestListConversationsReturnsSlimAgentSnapshot(t *testing.T) {
+	cs := convo.NewMemory()
+	snapshot := &agentprofile.Snapshot{
+		ID: "11111111-1111-1111-1111-111111111111", Version: 2,
+		Name: "Analyst", Description: "Explains data", Instructions: "private working rules",
+		AvatarKey: "chart", AvatarColor: "cyan", RuntimeID: "claude-code",
+		ModelRouteID: "route-1", ModelAlias: "sonnet",
+	}
+	err := cs.UpsertConversation(context.Background(), convo.Conversation{
+		ID: "agent-chat", UserID: auth.DevIdentity.UserID, TenantID: auth.DevIdentity.TenantID,
+		Title: "Agent chat", RuntimeID: snapshot.RuntimeID,
+		AgentID: snapshot.ID, AgentVersion: snapshot.Version, AgentSnapshot: snapshot,
+		CreatedAt: time.Now().UTC(), UpdatedAt: time.Now().UTC(),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	h := newAPIWithConvo(t, &fakeStreamer{}, cs)
+	rec := httptest.NewRecorder()
+	h.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/v1/conversations", nil))
+	if rec.Code != http.StatusOK {
+		t.Fatalf("list status = %d body=%s", rec.Code, rec.Body.String())
+	}
+	var payload []map[string]any
+	mustJSON(t, rec.Body.Bytes(), &payload)
+	if len(payload) != 1 {
+		t.Fatalf("conversations = %#v", payload)
+	}
+	agentValue, ok := payload[0]["agent"].(map[string]any)
+	if !ok {
+		t.Fatalf("agent summary = %#v", payload[0]["agent"])
+	}
+	if _, exists := agentValue["instructions"]; exists {
+		t.Fatalf("conversation list leaked Agent instructions: %#v", agentValue)
+	}
+	if agentValue["name"] != snapshot.Name || agentValue["model_route_id"] != snapshot.ModelRouteID {
+		t.Fatalf("agent summary = %#v", agentValue)
+	}
+	if _, exists := payload[0]["user_id"]; exists {
+		t.Fatalf("conversation summary leaked internal owner fields: %#v", payload[0])
+	}
 }
 
 type fakeReleaser struct {

@@ -26,8 +26,9 @@ type DownloadedResource struct {
 
 type BoundedDownloader struct {
 	identity    Identity
+	connectorID string
 	credentials interface {
-		RuntimeCredential(context.Context, Identity) (RuntimeCredential, error)
+		RuntimeCredentialByID(context.Context, Identity, string) (RuntimeCredential, error)
 	}
 	baseURL string
 	http    *http.Client
@@ -36,7 +37,7 @@ type BoundedDownloader struct {
 func NewBoundedDownloader(
 	connector Connector,
 	credentials interface {
-		RuntimeCredential(context.Context, Identity) (RuntimeCredential, error)
+		RuntimeCredentialByID(context.Context, Identity, string) (RuntimeCredential, error)
 	},
 	httpClient *http.Client,
 ) *BoundedDownloader {
@@ -50,6 +51,7 @@ func NewBoundedDownloader(
 	}
 	return &BoundedDownloader{
 		identity:    Identity{TenantID: connector.TenantID, UserID: connector.UserID},
+		connectorID: connector.ID,
 		credentials: credentials, http: httpClient,
 	}
 }
@@ -70,7 +72,7 @@ func (d *BoundedDownloader) Download(
 	if d.credentials == nil {
 		return DownloadedResource{}, errors.New("Feishu runtime credential resolver is unavailable")
 	}
-	credential, err := d.credentials.RuntimeCredential(ctx, d.identity)
+	credential, err := d.credentials.RuntimeCredentialByID(ctx, d.identity, d.connectorID)
 	if err != nil {
 		return DownloadedResource{}, err
 	}

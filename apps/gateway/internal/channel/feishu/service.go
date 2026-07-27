@@ -18,14 +18,12 @@ import (
 )
 
 const (
-	registrationTTL     = 10 * time.Minute
-	registrationWait    = 10 * time.Second
-	staleRegistration   = 15 * time.Second
-	manualBindTTL       = 10 * time.Minute
-	maxAppIDLength      = 256
-	maxAppSecretLength  = 4 << 10
-	maxModelIDLength    = 256
-	maxModelAliasLength = 256
+	registrationTTL    = 10 * time.Minute
+	registrationWait   = 10 * time.Second
+	staleRegistration  = 15 * time.Second
+	manualBindTTL      = 10 * time.Minute
+	maxAppIDLength     = 256
+	maxAppSecretLength = 4 << 10
 )
 
 type Service struct {
@@ -91,20 +89,31 @@ func (s *Service) notify() {
 // app-identity token. Missing/disabled Connectors are normal capability states;
 // transient storage, decryption and upstream failures return an unavailable
 // state plus an error so chat can continue without Feishu.
-func (s *Service) RuntimeCredential(
+func (s *Service) RuntimeCredentialByID(
 	ctx context.Context,
 	id Identity,
+	connectorID string,
 ) (RuntimeCredential, error) {
-	if strings.TrimSpace(id.TenantID) == "" || strings.TrimSpace(id.UserID) == "" {
+	if strings.TrimSpace(id.UserID) == "" || strings.TrimSpace(connectorID) == "" {
 		return RuntimeCredential{Status: RuntimeCredentialUnavailable}, ErrInvalid
 	}
-	connector, err := s.store.GetConnector(ctx, id)
+	connector, err := s.store.GetConnectorByID(ctx, connectorID)
 	if errors.Is(err, ErrNotFound) {
 		return RuntimeCredential{Status: RuntimeCredentialMissing}, nil
 	}
 	if err != nil {
 		return RuntimeCredential{Status: RuntimeCredentialUnavailable}, err
 	}
+	if connector.TenantID != id.TenantID || connector.UserID != id.UserID {
+		return RuntimeCredential{Status: RuntimeCredentialMissing}, nil
+	}
+	return s.runtimeCredential(ctx, connector)
+}
+
+func (s *Service) runtimeCredential(
+	ctx context.Context,
+	connector Connector,
+) (RuntimeCredential, error) {
 	if !connector.DesiredEnabled {
 		return RuntimeCredential{Status: RuntimeCredentialDisabled}, nil
 	}
@@ -122,15 +131,34 @@ func (s *Service) RuntimeCredential(
 	return credential, nil
 }
 
-func (s *Service) Connection(ctx context.Context, id Identity) (ConnectorView, error) {
+func (s *Service) ConnectorID(
+	ctx context.Context,
+	id Identity,
+	agentID string,
+) (string, error) {
+	connector, err := s.store.GetConnector(ctx, id, agentID)
+	if errors.Is(err, ErrNotFound) {
+		return "", nil
+	}
+	if err != nil {
+		return "", err
+	}
+	return connector.ID, nil
+}
+
+func (s *Service) Connection(
+	ctx context.Context,
+	id Identity,
+	agentID string,
+) (ConnectorView, error) {
 	view := ConnectorView{Status: "not_configured"}
-	connector, err := s.store.GetConnector(ctx, id)
+	connector, err := s.store.GetConnector(ctx, id, agentID)
 	if err == nil {
 		view = connectorView(connector)
 	} else if !errors.Is(err, ErrNotFound) {
 		return ConnectorView{}, err
 	}
-	flow, flowErr := s.store.GetActiveRegistrationFlow(ctx, id)
+	flow, flowErr := s.store.GetActiveRegistrationFlow(ctx, id, agentID)
 	if flowErr == nil {
 		view.Registration = &flow
 	} else if !errors.Is(flowErr, ErrNotFound) {
@@ -141,13 +169,12 @@ func (s *Service) Connection(ctx context.Context, id Identity) (ConnectorView, e
 
 func connectorView(connector Connector) ConnectorView {
 	return ConnectorView{
+		AgentID:         connector.AgentID,
 		Connected:       true,
 		Enabled:         connector.DesiredEnabled,
 		Status:          connector.Status,
 		Domain:          connector.Domain,
 		BotName:         connector.BotName,
-		ModelRouteID:    connector.ModelRouteID,
-		ModelAlias:      connector.ModelAlias,
 		LastConnectedAt: connector.LastConnectedAt,
 		LastErrorCode:   connector.LastErrorCode,
 	}
@@ -156,14 +183,19 @@ func connectorView(connector Connector) ConnectorView {
 func (s *Service) StartRegistration(
 	ctx context.Context,
 	id Identity,
+	agent AgentRegistration,
 ) (RegistrationFlow, error) {
 	if s.registrar == nil {
 		return RegistrationFlow{}, errors.New("feishu application registration is unavailable")
+	}
+	if strings.TrimSpace(agent.ID) == "" || strings.TrimSpace(agent.Name) == "" {
+		return RegistrationFlow{}, ErrInvalid
 	}
 	now := s.now()
 	_ = s.store.InterruptRegistrationFlows(ctx, now.Add(-staleRegistration), now)
 	flow := RegistrationFlow{
 		ID: uuid.NewString(), TenantID: id.TenantID, UserID: id.UserID,
+		AgentID:  agent.ID,
 		Provider: ProviderFeishu, Status: FlowStarting,
 		ExpiresAt: now.Add(registrationTTL), CreatedAt: now, UpdatedAt: now,
 	}
@@ -172,7 +204,7 @@ func (s *Service) StartRegistration(
 	}
 
 	connectorID := uuid.NewString()
-	if existing, err := s.store.GetConnector(ctx, id); err == nil {
+	if existing, err := s.store.GetConnector(ctx, id, agent.ID); err == nil {
 		connectorID = existing.ID
 	} else if !errors.Is(err, ErrNotFound) {
 		return RegistrationFlow{}, err
@@ -183,7 +215,7 @@ func (s *Service) StartRegistration(
 	s.cancels[flow.ID] = cancel
 	s.mu.Unlock()
 	updated := make(chan struct{}, 1)
-	go s.runRegistration(runCtx, flow, id, connectorID, updated)
+	go s.runRegistration(runCtx, flow, id, agent, connectorID, updated)
 
 	timer := time.NewTimer(registrationWait)
 	defer timer.Stop()
@@ -193,13 +225,14 @@ func (s *Service) StartRegistration(
 	case <-ctx.Done():
 		return RegistrationFlow{}, ctx.Err()
 	}
-	return s.store.GetRegistrationFlow(ctx, id, flow.ID)
+	return s.store.GetRegistrationFlow(ctx, id, agent.ID, flow.ID)
 }
 
 func (s *Service) runRegistration(
 	ctx context.Context,
 	flow RegistrationFlow,
 	id Identity,
+	agent AgentRegistration,
 	connectorID string,
 	updated chan<- struct{},
 ) {
@@ -216,8 +249,8 @@ func (s *Service) runRegistration(
 		}
 	}
 	result, err := s.registrar.Register(ctx, RegistrationInput{
-		AppName:   registrationAppName(id),
-		AppDesc:   "通过飞书与 Cocola Agent 对话",
+		AppName:   registrationAppName(agent.Name),
+		AppDesc:   registrationAppDescription(agent),
 		AvatarURL: s.avatarURL,
 	}, func(update RegistrationUpdate) {
 		now := s.now()
@@ -276,6 +309,7 @@ func (s *Service) runRegistration(
 	now := s.now()
 	completeErr := s.store.CompleteRegistration(context.Background(), id, flow.ID, Connector{
 		ID: connectorID, TenantID: id.TenantID, UserID: id.UserID,
+		AgentID:  agent.ID,
 		Provider: ProviderFeishu, Domain: domain, AppID: result.AppID,
 		AppSecretCiphertext: ciphertext, OwnerOpenID: result.OwnerOpenID,
 		DesiredEnabled: true, Status: StatusConnecting,
@@ -322,38 +356,47 @@ func (s *Service) finishRegistrationError(
 	)
 }
 
-func registrationAppName(id Identity) string {
-	name := strings.TrimSpace(id.Name)
+func registrationAppName(value string) string {
+	name := strings.TrimSpace(value)
 	if name == "" {
-		name = strings.TrimSpace(id.Username)
-	}
-	if name == "" {
-		name = "我的"
-		return name + " Cocola"
+		return "Cocola Agent"
 	}
 	runes := []rune(name)
-	if len(runes) > 32 {
-		name = string(runes[:32])
+	if len(runes) > 40 {
+		name = string(runes[:40])
 	}
-	return name + " 的 Cocola"
+	return name
+}
+
+func registrationAppDescription(agent AgentRegistration) string {
+	if description := strings.TrimSpace(agent.Description); description != "" {
+		runes := []rune(description)
+		if len(runes) > 200 {
+			description = string(runes[:200])
+		}
+		return description
+	}
+	return "通过飞书与 " + registrationAppName(agent.Name) + " 对话"
 }
 
 func (s *Service) Registration(
 	ctx context.Context,
 	id Identity,
+	agentID string,
 	flowID string,
 ) (RegistrationFlow, error) {
 	now := s.now()
 	_ = s.store.InterruptRegistrationFlows(ctx, now.Add(-staleRegistration), now)
-	return s.store.GetRegistrationFlow(ctx, id, flowID)
+	return s.store.GetRegistrationFlow(ctx, id, agentID, flowID)
 }
 
 func (s *Service) CancelRegistration(
 	ctx context.Context,
 	id Identity,
+	agentID string,
 	flowID string,
 ) error {
-	if err := s.store.CancelRegistrationFlow(ctx, id, flowID, s.now()); err != nil {
+	if err := s.store.CancelRegistrationFlow(ctx, id, agentID, flowID, s.now()); err != nil {
 		return err
 	}
 	s.mu.Lock()
@@ -368,6 +411,7 @@ func (s *Service) CancelRegistration(
 func (s *Service) ConfigureManual(
 	ctx context.Context,
 	id Identity,
+	agentID string,
 	domain string,
 	appID string,
 	appSecret string,
@@ -382,7 +426,7 @@ func (s *Service) ConfigureManual(
 	}
 	connectorID := uuid.NewString()
 	createdAt := s.now()
-	if existing, err := s.store.GetConnector(ctx, id); err == nil {
+	if existing, err := s.store.GetConnector(ctx, id, agentID); err == nil {
 		connectorID = existing.ID
 		createdAt = existing.CreatedAt
 	} else if !errors.Is(err, ErrNotFound) {
@@ -403,6 +447,7 @@ func (s *Service) ConfigureManual(
 	expiresAt := now.Add(manualBindTTL)
 	connector, err := s.store.UpsertConnector(ctx, Connector{
 		ID: connectorID, TenantID: id.TenantID, UserID: id.UserID,
+		AgentID:  agentID,
 		Provider: ProviderFeishu, Domain: domain, AppID: appID,
 		AppSecretCiphertext: ciphertext, DesiredEnabled: true,
 		Status: StatusAwaitingBind, BindCodeHash: bindCodeHash(connectorID, code),
@@ -438,8 +483,8 @@ func (s *Service) BindOwner(
 	return connector, err
 }
 
-func (s *Service) Enable(ctx context.Context, id Identity) (ConnectorView, error) {
-	connector, err := s.store.SetConnectorEnabled(ctx, id, true, s.now())
+func (s *Service) Enable(ctx context.Context, id Identity, agentID string) (ConnectorView, error) {
+	connector, err := s.store.SetConnectorEnabled(ctx, id, agentID, true, s.now())
 	if err != nil {
 		return ConnectorView{}, err
 	}
@@ -447,8 +492,8 @@ func (s *Service) Enable(ctx context.Context, id Identity) (ConnectorView, error
 	return connectorView(connector), nil
 }
 
-func (s *Service) Disable(ctx context.Context, id Identity) (ConnectorView, error) {
-	connector, err := s.store.SetConnectorEnabled(ctx, id, false, s.now())
+func (s *Service) Disable(ctx context.Context, id Identity, agentID string) (ConnectorView, error) {
+	connector, err := s.store.SetConnectorEnabled(ctx, id, agentID, false, s.now())
 	if err != nil {
 		return ConnectorView{}, err
 	}
@@ -456,36 +501,8 @@ func (s *Service) Disable(ctx context.Context, id Identity) (ConnectorView, erro
 	return connectorView(connector), nil
 }
 
-func (s *Service) ConfigureModel(
-	ctx context.Context,
-	id Identity,
-	modelRouteID string,
-	modelAlias string,
-) (ConnectorView, error) {
-	modelRouteID = strings.TrimSpace(modelRouteID)
-	modelAlias = strings.TrimSpace(modelAlias)
-	if modelRouteID == "" ||
-		len(modelRouteID) > maxModelIDLength ||
-		modelAlias == "" ||
-		len(modelAlias) > maxModelAliasLength ||
-		strings.ContainsAny(modelRouteID+modelAlias, "\x00\r\n") {
-		return ConnectorView{}, ErrInvalid
-	}
-	connector, err := s.store.SetConnectorModel(
-		ctx,
-		id,
-		modelRouteID,
-		modelAlias,
-		s.now(),
-	)
-	if err != nil {
-		return ConnectorView{}, err
-	}
-	return connectorView(connector), nil
-}
-
-func (s *Service) Disconnect(ctx context.Context, id Identity) error {
-	if err := s.store.DeleteConnector(ctx, id); err != nil {
+func (s *Service) Disconnect(ctx context.Context, id Identity, agentID string) error {
+	if err := s.store.DeleteConnector(ctx, id, agentID); err != nil {
 		return err
 	}
 	s.notify()

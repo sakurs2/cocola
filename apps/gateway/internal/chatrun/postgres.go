@@ -43,6 +43,11 @@ const runColumns = `trace_id, root_span_id, conversation_id, conversation_title,
 	COALESCE(plan_id::text, ''), status, started_at,
 	completed_at, last_activity_at, error_code, duration_ms, tool_call_count, llm_call_count`
 
+const conversationColumns = `id, user_id, tenant_id, title, chat_type,
+	COALESCE(folder_id, ''), COALESCE(project_id::text, ''), hidden, runtime_id,
+	COALESCE(agent_id::text, ''), COALESCE(agent_version, 0), agent_snapshot_json,
+	COALESCE(channel_connector_id::text, ''), created_at, updated_at`
+
 func scanRun(row pgx.Row) (Run, error) {
 	var run Run
 	if err := row.Scan(
@@ -80,8 +85,7 @@ func (p *Postgres) Start(ctx context.Context, in StartInput) (StartResult, error
 		return StartResult{}, err
 	}
 	defer func() { _ = tx.Rollback(ctx) }()
-	effective, err := scanConversation(tx.QueryRow(ctx, `SELECT id, user_id, tenant_id,
-		title, chat_type, COALESCE(folder_id, ''), COALESCE(project_id::text, ''), hidden, runtime_id, created_at, updated_at
+	effective, err := scanConversation(tx.QueryRow(ctx, `SELECT `+conversationColumns+`
 		FROM conversations WHERE id=$1 FOR UPDATE`, in.Conversation.ID))
 	createdConversation := false
 	if errors.Is(err, convo.ErrNotFound) {
@@ -134,12 +138,26 @@ func (p *Postgres) Start(ctx context.Context, in StartInput) (StartResult, error
 				return StartResult{}, folderErr
 			}
 		}
-		tag, insertErr := tx.Exec(ctx, `INSERT INTO conversations
-			(id, user_id, tenant_id, title, chat_type, folder_id, project_id, hidden, runtime_id, created_at, updated_at)
-			VALUES ($1,$2,$3,$4,$5,NULLIF($6,''),NULLIF($7,'')::uuid,$8,$9,$10,$11)
+		var snapshotJSON []byte
+		if effective.AgentSnapshot != nil {
+			snapshotJSON, err = json.Marshal(effective.AgentSnapshot)
+			if err != nil {
+				return StartResult{}, err
+			}
+		}
+		tag, insertErr := tx.Exec(ctx, `INSERT INTO conversations (
+				id, user_id, tenant_id, title, chat_type, folder_id, project_id, hidden,
+				runtime_id, agent_id, agent_version, agent_snapshot_json,
+				channel_connector_id, created_at, updated_at
+			)
+			VALUES (
+				$1,$2,$3,$4,$5,NULLIF($6,''),NULLIF($7,'')::uuid,$8,$9,
+				NULLIF($10,'')::uuid,NULLIF($11,0),$12::jsonb,NULLIF($13,'')::uuid,$14,$15
+			)
 			ON CONFLICT (id) DO NOTHING`, effective.ID, effective.UserID,
 			effective.TenantID, effective.Title, effective.ChatType, effective.FolderID, effective.ProjectID,
-			effective.Hidden, effective.RuntimeID, effective.CreatedAt, effective.UpdatedAt)
+			effective.Hidden, effective.RuntimeID, effective.AgentID, effective.AgentVersion,
+			snapshotJSON, effective.ChannelConnectorID, effective.CreatedAt, effective.UpdatedAt)
 		if insertErr != nil {
 			return StartResult{}, insertErr
 		}
@@ -172,8 +190,7 @@ func (p *Postgres) Start(ctx context.Context, in StartInput) (StartResult, error
 				}
 			}
 		} else {
-			effective, err = scanConversation(tx.QueryRow(ctx, `SELECT id, user_id, tenant_id,
-				title, chat_type, COALESCE(folder_id, ''), COALESCE(project_id::text, ''), hidden, runtime_id, created_at, updated_at
+			effective, err = scanConversation(tx.QueryRow(ctx, `SELECT `+conversationColumns+`
 				FROM conversations WHERE id=$1 FOR UPDATE`, in.Conversation.ID))
 			if err != nil {
 				return StartResult{}, err
@@ -188,6 +205,9 @@ func (p *Postgres) Start(ctx context.Context, in StartInput) (StartResult, error
 		}
 		if in.Conversation.RuntimeID != "" && in.Conversation.RuntimeID != effective.RuntimeID {
 			return StartResult{}, ErrRuntimeMismatch
+		}
+		if in.Conversation.AgentID != effective.AgentID {
+			return StartResult{}, ErrAgentMismatch
 		}
 		if in.Run.ClientRequestID != "" {
 			run, requestErr := scanRun(tx.QueryRow(ctx, `SELECT `+runColumns+` FROM conversation_runs
@@ -221,6 +241,31 @@ func (p *Postgres) Start(ctx context.Context, in StartInput) (StartResult, error
 			effective.ID, effective.UpdatedAt); err != nil {
 			return StartResult{}, err
 		}
+	}
+	if effective.AgentID != "" {
+		if effective.AgentSnapshot == nil ||
+			effective.AgentVersion <= 0 ||
+			effective.AgentSnapshot.ID != effective.AgentID ||
+			effective.AgentSnapshot.Version != effective.AgentVersion {
+			return StartResult{}, ErrAgentMismatch
+		}
+		var status string
+		agentErr := tx.QueryRow(ctx, `SELECT status FROM agents
+			WHERE id=$1::uuid AND tenant_id=$2 AND owner_user_id=$3
+			FOR SHARE`, effective.AgentID, effective.TenantID, effective.UserID).Scan(&status)
+		if errors.Is(agentErr, pgx.ErrNoRows) {
+			return StartResult{}, ErrAgentMismatch
+		}
+		if agentErr != nil {
+			return StartResult{}, agentErr
+		}
+		if status != "active" {
+			return StartResult{}, ErrAgentArchived
+		}
+	}
+	if effective.AgentSnapshot != nil {
+		in.Run.ModelRouteID = effective.AgentSnapshot.ModelRouteID
+		in.Run.ModelAlias = effective.AgentSnapshot.ModelAlias
 	}
 	_, err = tx.Exec(ctx, `INSERT INTO conversation_runs (
 		trace_id, root_span_id, conversation_id, conversation_title, user_id,
@@ -266,13 +311,23 @@ func (p *Postgres) Start(ctx context.Context, in StartInput) (StartResult, error
 
 func scanConversation(row pgx.Row) (convo.Conversation, error) {
 	var conversation convo.Conversation
-	if err := row.Scan(&conversation.ID, &conversation.UserID, &conversation.TenantID,
-		&conversation.Title, &conversation.ChatType, &conversation.FolderID, &conversation.ProjectID, &conversation.Hidden, &conversation.RuntimeID,
-		&conversation.CreatedAt, &conversation.UpdatedAt); err != nil {
+	var snapshotJSON []byte
+	if err := row.Scan(
+		&conversation.ID, &conversation.UserID, &conversation.TenantID,
+		&conversation.Title, &conversation.ChatType, &conversation.FolderID,
+		&conversation.ProjectID, &conversation.Hidden, &conversation.RuntimeID,
+		&conversation.AgentID, &conversation.AgentVersion, &snapshotJSON,
+		&conversation.ChannelConnectorID, &conversation.CreatedAt, &conversation.UpdatedAt,
+	); err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
 			return convo.Conversation{}, convo.ErrNotFound
 		}
 		return convo.Conversation{}, err
+	}
+	if len(snapshotJSON) > 0 {
+		if err := json.Unmarshal(snapshotJSON, &conversation.AgentSnapshot); err != nil {
+			return convo.Conversation{}, err
+		}
 	}
 	return conversation, nil
 }
@@ -549,9 +604,7 @@ func (p *Postgres) StartPlanExecution(
 	}
 	defer func() { _ = tx.Rollback(ctx) }()
 
-	conversation, err := scanConversation(tx.QueryRow(ctx, `SELECT id, user_id, tenant_id,
-		title, chat_type, COALESCE(folder_id, ''), COALESCE(project_id::text, ''), hidden,
-		runtime_id, created_at, updated_at FROM conversations
+	conversation, err := scanConversation(tx.QueryRow(ctx, `SELECT `+conversationColumns+` FROM conversations
 		WHERE id=$1 AND user_id=$2 FOR UPDATE`, in.ConversationID, in.UserID))
 	if err != nil {
 		return PlanExecutionResult{}, ErrNotFound
@@ -731,9 +784,7 @@ func (p *Postgres) StartQuestionAnswer(
 	}
 	defer func() { _ = tx.Rollback(ctx) }()
 
-	conversation, err := scanConversation(tx.QueryRow(ctx, `SELECT id, user_id, tenant_id,
-		title, chat_type, COALESCE(folder_id, ''), COALESCE(project_id::text, ''), hidden,
-		runtime_id, created_at, updated_at FROM conversations
+	conversation, err := scanConversation(tx.QueryRow(ctx, `SELECT `+conversationColumns+` FROM conversations
 		WHERE id=$1 AND user_id=$2 FOR UPDATE`, in.ConversationID, in.UserID))
 	if err != nil {
 		return QuestionAnswerResult{}, ErrNotFound

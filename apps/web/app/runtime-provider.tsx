@@ -38,6 +38,7 @@ import {
 import { inferAgentDurationMs } from "@/lib/agent-turn-summary.mjs";
 import { selectAgentRuntime } from "@/lib/agent-runtime-policy.mjs";
 import { validateChatAttachments } from "@/lib/chat-attachment-limits.mjs";
+import type { AgentConversationSnapshot, AgentProfile } from "@/lib/agents";
 import {
   getOrCreatePlanExecutionRequestId,
   interactionModeForRuntime,
@@ -287,6 +288,9 @@ export type ConversationSummary = {
   project_id?: string;
   updated_at: string;
   runtime_id: string;
+  agent_id?: string;
+  agent_version?: number;
+  agent?: AgentConversationSnapshot;
 };
 
 type PendingProjectTaskHint = {
@@ -454,6 +458,12 @@ type CocolaContextValue = {
   selectedModel: ModelOption | null;
   modelsLoaded: boolean;
   setSelectedModelID: (id: string) => void;
+  agents: AgentProfile[];
+  agentsLoaded: boolean;
+  selectedAgent: AgentProfile | AgentConversationSnapshot | null;
+  selectedAgentID: string;
+  agentLocked: boolean;
+  setSelectedAgentID: (id: string | null) => void;
   runtimes: AgentRuntimeOption[];
   selectedRuntime: AgentRuntimeOption | null;
   defaultAgentRuntimeID: string;
@@ -1356,6 +1366,9 @@ export function CocolaRuntimeProvider({ children }: { children: ReactNode }) {
   const [models, setModels] = useState<ModelOption[]>([]);
   const [selectedModelID, setSelectedModelID] = useState("");
   const [modelsLoaded, setModelsLoaded] = useState(false);
+  const [agents, setAgents] = useState<AgentProfile[]>([]);
+  const [agentsLoaded, setAgentsLoaded] = useState(false);
+  const [selectedAgentIds, setSelectedAgentIds] = useState<Record<string, string>>({});
   const [runtimes, setRuntimes] = useState<AgentRuntimeOption[]>([]);
   const [selectedRuntimeId, setSelectedRuntimeIdState] = useState("");
   const [runtimesLoaded, setRuntimesLoaded] = useState(false);
@@ -1376,6 +1389,7 @@ export function CocolaRuntimeProvider({ children }: { children: ReactNode }) {
   const sessionFolderHintsRef = useRef<Map<string, string>>(new Map());
   const sessionProjectHintsRef = useRef<Map<string, PendingProjectTaskHint>>(new Map());
   const preferredRuntimeIdRef = useRef("");
+  const preferredModelIdRef = useRef("");
   const conversationsRef = useRef(conversations);
   const realtimeScheduledRunsRef = useRef<Set<string>>(new Set());
   const deletedScheduledConversationsRef = useRef<Map<string, number>>(new Map());
@@ -1399,11 +1413,21 @@ export function CocolaRuntimeProvider({ children }: { children: ReactNode }) {
         : [],
     [models, selectedRuntime],
   );
-  const selectedModel = useMemo(
-    () =>
-      compatibleModels.find((model) => model.id === selectedModelID) ?? compatibleModels[0] ?? null,
-    [compatibleModels, selectedModelID],
-  );
+  const selectedAgent = useMemo<AgentProfile | AgentConversationSnapshot | null>(() => {
+    const conversation = conversations.find((item) => item.id === sessionId);
+    if (conversation?.agent?.id) return conversation.agent;
+    const selectedID = selectedAgentIds[sessionId] ?? "";
+    return agents.find((agent) => agent.id === selectedID) ?? null;
+  }, [agents, conversations, selectedAgentIds, sessionId]);
+  const selectedAgentID = selectedAgent?.id ?? "";
+  const selectedModel = useMemo(() => {
+    if (selectedAgent) {
+      return compatibleModels.find((model) => model.id === selectedAgent.model_route_id) ?? null;
+    }
+    return (
+      compatibleModels.find((model) => model.id === selectedModelID) ?? compatibleModels[0] ?? null
+    );
+  }, [compatibleModels, selectedAgent, selectedModelID]);
   const selectedSkill = useMemo(() => {
     const selectedID = selectedSkillIds[sessionId] ?? "";
     return skills.find((skill) => skill.id === selectedID) ?? null;
@@ -1411,6 +1435,7 @@ export function CocolaRuntimeProvider({ children }: { children: ReactNode }) {
   const interactionMode = interactionModes[sessionId] ?? "execute";
   const revisingPlanId = revisingPlanIds[sessionId] ?? "";
   const runtimeLocked = messages.length > 0 || conversations.some((item) => item.id === sessionId);
+  const agentLocked = runtimeLocked;
   const currentQuestion = useMemo(() => {
     for (let messageIndex = messages.length - 1; messageIndex >= 0; messageIndex -= 1) {
       const parts = messages[messageIndex]?.parts ?? [];
@@ -1477,14 +1502,57 @@ export function CocolaRuntimeProvider({ children }: { children: ReactNode }) {
 
   const selectModelID = useCallback(
     (id: string) => {
-      if (!questionInputLocked) setSelectedModelID(id);
+      if (questionInputLocked || selectedAgent) return;
+      setSelectedModelID(id);
+      preferredModelIdRef.current = id;
     },
-    [questionInputLocked],
+    [questionInputLocked, selectedAgent],
+  );
+
+  const setSelectedAgentID = useCallback(
+    (id: string | null) => {
+      if (agentLocked || questionInputLocked) return;
+      const nextAgent = id ? agents.find((agent) => agent.id === id) : null;
+      if (id && !nextAgent) return;
+      setSelectedAgentIds((previous) => {
+        const next = { ...previous };
+        if (nextAgent) next[sessionId] = nextAgent.id;
+        else delete next[sessionId];
+        return next;
+      });
+      if (nextAgent) {
+        setSelectedRuntimeIdState(nextAgent.runtime_id);
+        setSelectedModelID(nextAgent.model_route_id);
+        return;
+      }
+      const preferred = selectAgentRuntime({
+        runtimes,
+        defaultRuntimeId: defaultAgentRuntimeID,
+        pickerEnabled: runtimePickerEnabled,
+        preferredRuntimeId: preferredRuntimeIdRef.current,
+      });
+      setSelectedRuntimeIdState(preferred?.id ?? "");
+      if (preferredModelIdRef.current) setSelectedModelID(preferredModelIdRef.current);
+    },
+    [
+      agentLocked,
+      agents,
+      defaultAgentRuntimeID,
+      questionInputLocked,
+      runtimePickerEnabled,
+      runtimes,
+      sessionId,
+    ],
   );
 
   const setSelectedRuntimeId = useCallback(
     (id: string) => {
-      if (!runtimePickerEnabled || runtimeLocked || !runtimes.some((runtime) => runtime.id === id))
+      if (
+        selectedAgent ||
+        !runtimePickerEnabled ||
+        runtimeLocked ||
+        !runtimes.some((runtime) => runtime.id === id)
+      )
         return;
       setSelectedRuntimeIdState(id);
       preferredRuntimeIdRef.current = id;
@@ -1494,18 +1562,35 @@ export function CocolaRuntimeProvider({ children }: { children: ReactNode }) {
         // Browser storage is an optional preference only.
       }
     },
-    [runtimeLocked, runtimePickerEnabled, runtimes],
+    [runtimeLocked, runtimePickerEnabled, runtimes, selectedAgent],
   );
 
   useEffect(() => {
-    if (selectedModel && selectedModel.id !== selectedModelID) {
+    if (!selectedAgent && selectedModel && selectedModel.id !== selectedModelID) {
       setSelectedModelID(selectedModel.id);
+      preferredModelIdRef.current = selectedModel.id;
     }
-  }, [selectedModel, selectedModelID]);
+  }, [selectedAgent, selectedModel, selectedModelID]);
 
   useEffect(() => {
     const conversation = conversations.find((item) => item.id === sessionId);
-    if (conversation?.runtime_id) setSelectedRuntimeIdState(conversation.runtime_id);
+    if (!conversation) return;
+    if (conversation.agent) {
+      setSelectedAgentIds((previous) => ({
+        ...previous,
+        [sessionId]: conversation.agent!.id,
+      }));
+      setSelectedRuntimeIdState(conversation.agent.runtime_id);
+      setSelectedModelID(conversation.agent.model_route_id);
+      return;
+    }
+    setSelectedAgentIds((previous) => {
+      if (!(sessionId in previous)) return previous;
+      const next = { ...previous };
+      delete next[sessionId];
+      return next;
+    });
+    if (conversation.runtime_id) setSelectedRuntimeIdState(conversation.runtime_id);
   }, [conversations, runtimesLoaded, sessionId]);
 
   useEffect(() => {
@@ -1723,6 +1808,34 @@ export function CocolaRuntimeProvider({ children }: { children: ReactNode }) {
         // Keep the last project list during a transient Gateway failure.
       } finally {
         setProjectsLoaded(true);
+      }
+    })();
+  }, []);
+
+  const refreshAgents = useCallback(() => {
+    void (async () => {
+      try {
+        const res = await fetch("/api/agents", { cache: "no-store" });
+        if (isAccountDisabledResponse(res)) {
+          redirectAccountDisabled();
+          return;
+        }
+        if (!res.ok) return;
+        const rows = (await res.json()) as AgentProfile[];
+        if (Array.isArray(rows)) {
+          const next = rows.filter((agent) => agent.status === "active");
+          const available = new Set(next.map((agent) => agent.id));
+          setAgents(next);
+          setSelectedAgentIds((previous) =>
+            Object.fromEntries(
+              Object.entries(previous).filter(([, agentID]) => available.has(agentID)),
+            ),
+          );
+        }
+      } catch {
+        // Keep the last Agent list during a transient Gateway failure.
+      } finally {
+        setAgentsLoaded(true);
       }
     })();
   }, []);
@@ -2375,6 +2488,7 @@ export function CocolaRuntimeProvider({ children }: { children: ReactNode }) {
       const projectBaseRef = pendingProjectHint?.baseRef ?? "";
       const model = selectedModel;
       const agentRuntime = selectedRuntime;
+      const turnAgent = selectedAgent;
       const turnSkill = selectedSkill;
       if (!model || !agentRuntime) return;
       const turnInteractionMode = interactionModeForRuntime(
@@ -2477,6 +2591,13 @@ export function CocolaRuntimeProvider({ children }: { children: ReactNode }) {
               : {}),
             updated_at: now,
             runtime_id: existing?.runtime_id || agentRuntime.id,
+            ...(turnAgent
+              ? {
+                  agent_id: turnAgent.id,
+                  agent_version: turnAgent.version,
+                  agent: turnAgent,
+                }
+              : {}),
           },
           ...rest,
         ];
@@ -2491,6 +2612,7 @@ export function CocolaRuntimeProvider({ children }: { children: ReactNode }) {
           session_id: turnSessionId,
           client_request_id: clientRequestId,
           runtime_id: agentRuntime.id,
+          ...(turnAgent ? { agent_id: turnAgent.id } : {}),
           interaction_mode: turnInteractionMode,
           ...(allowWorkspaceReset ? { allow_workspace_reset: true } : {}),
           ...(turnSkill ? { skill_id: turnSkill.id } : {}),
@@ -2718,6 +2840,7 @@ export function CocolaRuntimeProvider({ children }: { children: ReactNode }) {
       answerQuestion,
       selectedModel,
       selectedRuntime,
+      selectedAgent,
       selectedSkill,
       interactionMode,
       conversations,
@@ -2931,7 +3054,26 @@ export function CocolaRuntimeProvider({ children }: { children: ReactNode }) {
   const loadConversation = useCallback(
     async (id: string) => {
       const conversation = conversations.find((item) => item.id === id);
-      if (conversation?.runtime_id) setSelectedRuntimeIdState(conversation.runtime_id);
+      const previousSessionID = sessionIdRef.current;
+      if (conversation?.agent) {
+        setSelectedAgentIds((previous) => ({
+          ...Object.fromEntries(
+            Object.entries(previous).filter(([session]) => session !== previousSessionID),
+          ),
+          [id]: conversation.agent!.id,
+        }));
+        setSelectedRuntimeIdState(conversation.agent.runtime_id);
+        setSelectedModelID(conversation.agent.model_route_id);
+      } else {
+        setSelectedAgentIds((previous) => {
+          const next = { ...previous };
+          delete next[previousSessionID];
+          delete next[id];
+          return next;
+        });
+        if (conversation?.runtime_id) setSelectedRuntimeIdState(conversation.runtime_id);
+        if (preferredModelIdRef.current) setSelectedModelID(preferredModelIdRef.current);
+      }
       setSandboxes((prev) => ({ ...prev, [id]: prev[id] ?? null }));
       sessionFolderHintsRef.current.delete(sessionIdRef.current);
       sessionFolderHintsRef.current.delete(id);
@@ -3047,6 +3189,9 @@ export function CocolaRuntimeProvider({ children }: { children: ReactNode }) {
       Object.fromEntries(Object.entries(prev).filter(([id]) => !removed.has(id))),
     );
     setRevisingPlanIds((prev) =>
+      Object.fromEntries(Object.entries(prev).filter(([id]) => !removed.has(id))),
+    );
+    setSelectedAgentIds((prev) =>
       Object.fromEntries(Object.entries(prev).filter(([id]) => !removed.has(id))),
     );
     setSelectedArtifact((prev) => (prev && removed.has(prev.sessionId) ? null : prev));
@@ -3184,6 +3329,7 @@ export function CocolaRuntimeProvider({ children }: { children: ReactNode }) {
   const newConversation = useCallback(
     (folderId?: string) => {
       const fresh = genId();
+      const previousSessionID = sessionIdRef.current;
       const preferred = selectAgentRuntime({
         runtimes,
         defaultRuntimeId: defaultAgentRuntimeID,
@@ -3192,12 +3338,19 @@ export function CocolaRuntimeProvider({ children }: { children: ReactNode }) {
       });
       sessionFolderHintsRef.current.delete(sessionIdRef.current);
       sessionProjectHintsRef.current.delete(sessionIdRef.current);
+      setSelectedAgentIds((previous) => {
+        if (!(previousSessionID in previous)) return previous;
+        const next = { ...previous };
+        delete next[previousSessionID];
+        return next;
+      });
       sessionIdRef.current = fresh;
       if (folderId) sessionFolderHintsRef.current.set(fresh, folderId);
       else sessionFolderHintsRef.current.delete(fresh);
       setSessionId(fresh);
       setInteractionModes((previous) => ({ ...previous, [fresh]: "execute" }));
       setSelectedRuntimeIdState(preferred?.id ?? "");
+      if (preferredModelIdRef.current) setSelectedModelID(preferredModelIdRef.current);
       setSelectedArtifact(null);
       setConvMessages((prev) => ({ ...prev, [fresh]: [] }));
       setSandboxes((prev) => ({ ...prev, [fresh]: null }));
@@ -3208,8 +3361,15 @@ export function CocolaRuntimeProvider({ children }: { children: ReactNode }) {
 
   const newProjectTask = useCallback((projectId: string, runtimeId: string, baseRef: string) => {
     const fresh = genId();
+    const previousSessionID = sessionIdRef.current;
     sessionFolderHintsRef.current.delete(sessionIdRef.current);
     sessionProjectHintsRef.current.delete(sessionIdRef.current);
+    setSelectedAgentIds((previous) => {
+      if (!(previousSessionID in previous)) return previous;
+      const next = { ...previous };
+      delete next[previousSessionID];
+      return next;
+    });
     sessionIdRef.current = fresh;
     sessionProjectHintsRef.current.set(fresh, {
       projectId,
@@ -3218,6 +3378,7 @@ export function CocolaRuntimeProvider({ children }: { children: ReactNode }) {
     setSessionId(fresh);
     setInteractionModes((previous) => ({ ...previous, [fresh]: "execute" }));
     setSelectedRuntimeIdState(runtimeId);
+    if (preferredModelIdRef.current) setSelectedModelID(preferredModelIdRef.current);
     setSelectedArtifact(null);
     setConvMessages((prev) => ({ ...prev, [fresh]: [] }));
     setSandboxes((prev) => ({ ...prev, [fresh]: null }));
@@ -3295,13 +3456,18 @@ export function CocolaRuntimeProvider({ children }: { children: ReactNode }) {
     refreshConversations();
     refreshFolders();
     refreshProjects();
+    refreshAgents();
     refreshSkills();
-  }, [refreshConversations, refreshFolders, refreshProjects, refreshSkills]);
+  }, [refreshAgents, refreshConversations, refreshFolders, refreshProjects, refreshSkills]);
 
   useEffect(() => {
     window.addEventListener("focus", refreshSkills);
-    return () => window.removeEventListener("focus", refreshSkills);
-  }, [refreshSkills]);
+    window.addEventListener("focus", refreshAgents);
+    return () => {
+      window.removeEventListener("focus", refreshSkills);
+      window.removeEventListener("focus", refreshAgents);
+    };
+  }, [refreshAgents, refreshSkills]);
 
   useEffect(() => {
     void (async () => {
@@ -3321,10 +3487,15 @@ export function CocolaRuntimeProvider({ children }: { children: ReactNode }) {
           : [];
         const fallbackID = next.find((model) => model.isDefault)?.id ?? next[0]?.id ?? "";
         setModels(next);
-        setSelectedModelID((prev) => (next.some((m) => m.id === prev) ? prev : fallbackID));
+        setSelectedModelID((prev) => {
+          const selected = next.some((model) => model.id === prev) ? prev : fallbackID;
+          preferredModelIdRef.current = selected;
+          return selected;
+        });
       } catch {
         setModels([]);
         setSelectedModelID("");
+        preferredModelIdRef.current = "";
       } finally {
         setModelsLoaded(true);
       }
@@ -3448,6 +3619,12 @@ export function CocolaRuntimeProvider({ children }: { children: ReactNode }) {
       selectedModel,
       modelsLoaded: modelsLoaded && runtimesLoaded && productConfigLoaded,
       setSelectedModelID: selectModelID,
+      agents,
+      agentsLoaded,
+      selectedAgent,
+      selectedAgentID,
+      agentLocked,
+      setSelectedAgentID,
       runtimes,
       selectedRuntime,
       defaultAgentRuntimeID,
@@ -3503,6 +3680,12 @@ export function CocolaRuntimeProvider({ children }: { children: ReactNode }) {
       selectedModelID,
       selectedModel,
       selectModelID,
+      agents,
+      agentsLoaded,
+      selectedAgent,
+      selectedAgentID,
+      agentLocked,
+      setSelectedAgentID,
       modelsLoaded,
       runtimesLoaded,
       productConfigLoaded,

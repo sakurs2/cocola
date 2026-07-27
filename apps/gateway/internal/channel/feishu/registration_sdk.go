@@ -98,7 +98,7 @@ func ConnectorSettingsURL(publicOrigins string) string {
 	if origin == "" {
 		return ""
 	}
-	return origin + "/connectors"
+	return origin + "/agents"
 }
 
 func firstPublicOrigin(publicOrigins string) string {

@@ -2,7 +2,6 @@
 
 import { ExternalLink, Loader2, RefreshCw, ShieldCheck, Trash2 } from "lucide-react";
 import { useCallback, useEffect, useState, type ReactNode } from "react";
-import { FeishuConnectorCard } from "@/components/connectors/feishu-connector-card";
 import { connectorResponseError } from "@/lib/connector-response-error.mjs";
 
 type GitHubConnection = {
@@ -216,7 +215,6 @@ export default function ConnectorsPage() {
               ) : null}
             </div>
           </article>
-          <FeishuConnectorCard />
         </section>
 
         {error ? (

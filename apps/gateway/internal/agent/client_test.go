@@ -70,6 +70,10 @@ func TestClientStreamMapsWikiReferences(t *testing.T) {
 			Filename: "brief.docx", Mime: "application/docx",
 			ObjectKey: "wiki/node/version", Size: 123, SHA256: "abc",
 		}},
+		Agent: &AgentContext{
+			ID: "agent-1", Version: 3, Name: "Research",
+			Instructions: "Cite primary sources.",
+		},
 	}, func(Event) error { return nil })
 	if err != nil {
 		t.Fatal(err)
@@ -84,6 +88,13 @@ func TestClientStreamMapsWikiReferences(t *testing.T) {
 		got.OssKey != "wiki/node/version" ||
 		got.Size != 123 || got.Sha256 != "abc" {
 		t.Fatalf("WikiReference = %#v", got)
+	}
+	if request.AgentContext == nil ||
+		request.AgentContext.Id != "agent-1" ||
+		request.AgentContext.Version != 3 ||
+		request.AgentContext.Name != "Research" ||
+		request.AgentContext.Instructions != "Cite primary sources." {
+		t.Fatalf("AgentContext = %#v", request.AgentContext)
 	}
 	incomingMetadata := <-recording.metadata
 	if got := incomingMetadata.Get("x-cocola-skill-broker-credential"); len(got) != 1 ||

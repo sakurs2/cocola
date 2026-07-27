@@ -739,15 +739,6 @@ func (r *connectorRunner) processInbox(
 	if err != nil {
 		return retryResult("connector_unavailable", err)
 	}
-	if strings.TrimSpace(connector.ModelRouteID) == "" ||
-		strings.TrimSpace(connector.ModelAlias) == "" {
-		return r.sendRejected(
-			item,
-			"model_not_configured",
-			"请先在 Cocola 的 Feishu Connector 设置中选择模型，然后重试。",
-		)
-	}
-
 	attachments, attachmentErr := r.downloadAttachments(item, downloader)
 	switch {
 	case errors.Is(attachmentErr, ErrUnsupportedMedia):
@@ -937,8 +928,7 @@ func (r *connectorRunner) startChat(
 	turn := ChatTurn{
 		Prompt: item.Payload.Text, ConversationID: session.ConversationID,
 		ConversationTitle: conversationTitle(item.Payload.Text),
-		ModelRouteID:      connector.ModelRouteID,
-		ModelAlias:        connector.ModelAlias,
+		AgentID:           connector.AgentID,
 		ClientRequestID: DeterministicRequestID(
 			r.connector.ID,
 			item.EventID,
@@ -988,7 +978,11 @@ func (r *connectorRunner) showHistory(
 	if err != nil {
 		return retryResult("history_unavailable", err)
 	}
-	available := switchableConversations(conversations, defaultRuntimeID)
+	available := switchableConversations(
+		conversations,
+		defaultRuntimeID,
+		r.connector.AgentID,
+	)
 	r.saveHistorySelection(item.ExternalChatID, available)
 	return r.sendDone(item, historyMessage(available, session.ConversationID))
 }
@@ -1015,7 +1009,11 @@ func (r *connectorRunner) switchConversation(
 	}
 	targetID := selection[index-1]
 	var target convo.Conversation
-	for _, conversation := range switchableConversations(conversations, defaultRuntimeID) {
+	for _, conversation := range switchableConversations(
+		conversations,
+		defaultRuntimeID,
+		r.connector.AgentID,
+	) {
 		if conversation.ID == targetID {
 			target = conversation
 			break
@@ -1075,12 +1073,14 @@ func (r *connectorRunner) historySelection(chatID string) ([]string, bool) {
 func switchableConversations(
 	conversations []convo.Conversation,
 	defaultRuntimeID string,
+	agentID string,
 ) []convo.Conversation {
 	available := make([]convo.Conversation, 0, min(len(conversations), maxHistoryConversations))
 	for _, conversation := range conversations {
 		if (conversation.ChatType != "" && conversation.ChatType != "chat") ||
 			conversation.ProjectID != "" ||
-			conversation.RuntimeID != defaultRuntimeID {
+			conversation.RuntimeID != defaultRuntimeID ||
+			conversation.AgentID != agentID {
 			continue
 		}
 		available = append(available, conversation)
@@ -1250,6 +1250,13 @@ func (r *connectorRunner) consumeAgentStream(
 		if stopped {
 			return inboxResult{Status: InboxRejected, ErrorCode: "stopped"}
 		}
+		if chatAgentMismatch(callErr) {
+			return r.sendRejected(
+				item,
+				"agent_mismatch",
+				"这个对话属于其他 Agent，请发送 `/history` 选择当前 Agent 的对话。",
+			)
+		}
 		return retryResult("agent_request_failed", callErr)
 	}
 	if pendingQuestion != "" {
@@ -1391,6 +1398,13 @@ func parseChatSnapshot(raw string) (chatSnapshot, error) {
 func chatNotFound(err error) bool {
 	var httpErr *ChatHTTPError
 	return errors.As(err, &httpErr) && httpErr.Status == http.StatusNotFound
+}
+
+func chatAgentMismatch(err error) bool {
+	var httpErr *ChatHTTPError
+	return errors.As(err, &httpErr) &&
+		httpErr.Status == http.StatusConflict &&
+		httpErr.Code == "AGENT_MISMATCH"
 }
 
 func clearPendingQuestion(session *Session) {
