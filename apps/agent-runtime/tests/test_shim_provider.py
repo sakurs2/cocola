@@ -57,6 +57,47 @@ def test_model_env_injects_skill_broker_only_for_current_agent_process():
     assert env["COCOLA_SKILL_PUBLISH_ENABLED"] == "true"
 
 
+def test_model_env_injects_lark_app_identity_only_for_execute_process():
+    provider = InSandboxShimProvider(StaticSandboxExecutor())
+    options = AgentOptions(
+        user_id="U1",
+        session_id="S1",
+        lark_status="ready",
+        lark_app_id="cli_app_id",
+        lark_brand="feishu",
+        lark_tenant_access_token="tenant-token",
+    )
+
+    env = provider._model_env(options)
+
+    assert env["LARKSUITE_CLI_APP_ID"] == "cli_app_id"
+    assert env["LARKSUITE_CLI_TENANT_ACCESS_TOKEN"] == "tenant-token"
+    assert env["LARKSUITE_CLI_BRAND"] == "feishu"
+    assert env["LARKSUITE_CLI_DEFAULT_AS"] == "bot"
+    assert env["LARKSUITE_CLI_STRICT_MODE"] == "bot"
+    request = provider._build_request("read a document", options, None)
+    assert "tenant-token" not in request
+    assert "cli_app_id" not in request
+
+
+def test_model_env_never_injects_lark_credential_in_plan_mode():
+    provider = InSandboxShimProvider(StaticSandboxExecutor())
+
+    env = provider._model_env(
+        AgentOptions(
+            user_id="U1",
+            session_id="S1",
+            interaction_mode="plan",
+            lark_status="ready",
+            lark_app_id="cli_app_id",
+            lark_brand="feishu",
+            lark_tenant_access_token="tenant-token",
+        )
+    )
+
+    assert all(not name.startswith("LARKSUITE_CLI_") for name in env)
+
+
 async def test_maps_tool_use_turn_and_reassembles_split_line():
     # A realistic shim turn: start (dropped), a text block, a tool_use, a
     # tool_result, then a done carrying the session_id. We deliberately chop the

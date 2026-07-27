@@ -94,6 +94,7 @@ func NewManager(config ManagerConfig) (*Manager, error) {
 	if config.LeaseRenew <= 0 {
 		config.LeaseRenew = defaultLeaseRenew
 	}
+	config.Service.WithTokenHTTPClient(config.MediaHTTPClient)
 	return &Manager{
 		store: config.Store, service: config.Service, factory: config.Factory,
 		accounts: config.AccountAuthorizer, chat: config.ChatClient,
@@ -263,7 +264,10 @@ func (r *connectorRunner) run() {
 	var readyOnce sync.Once
 	r.channel.OnMessage(r.onMessage)
 	r.channel.OnReady(func(identity BotIdentity) {
-		r.onReady(identity)
+		if !r.onReady(identity) {
+			r.cancel()
+			return
+		}
 		readyOnce.Do(func() { close(ready) })
 	})
 	r.channel.OnError(func(channelErr error) {
@@ -331,7 +335,7 @@ channelReady:
 	workerDone := make(chan struct{})
 	go func() {
 		defer close(workerDone)
-		r.workerLoop(appSecret)
+		r.workerLoop()
 	}()
 	for {
 		select {
@@ -375,9 +379,9 @@ func (r *connectorRunner) renewLease() bool {
 	return true
 }
 
-func (r *connectorRunner) onReady(identity BotIdentity) {
+func (r *connectorRunner) onReady(identity BotIdentity) bool {
 	if r.ctx.Err() != nil {
-		return
+		return false
 	}
 	r.failureMu.Lock()
 	r.failures = 0
@@ -392,8 +396,10 @@ func (r *connectorRunner) onReady(identity BotIdentity) {
 	}
 	now := r.manager.now()
 	connectedAt := &now
+	stateCtx, cancel := context.WithTimeout(r.ctx, 5*time.Second)
+	defer cancel()
 	if err := r.manager.store.UpdateConnectorState(
-		context.Background(),
+		stateCtx,
 		r.connector.ID,
 		r.manager.ownerID,
 		status,
@@ -402,9 +408,13 @@ func (r *connectorRunner) onReady(identity BotIdentity) {
 		errorCode,
 		connectedAt,
 		now,
-	); err != nil && !errors.Is(err, ErrLeaseLost) {
-		r.manager.log.Warn("Feishu ready state update failed: " + err.Error())
+	); err != nil {
+		if !errors.Is(err, ErrLeaseLost) {
+			r.manager.log.Warn("Feishu ready state update failed: " + err.Error())
+		}
+		return false
 	}
+	return true
 }
 
 func (r *connectorRunner) markError(code string) {
@@ -531,8 +541,8 @@ func (r *connectorRunner) sendAsync(chatID, replyMessageID, text string) {
 	}()
 }
 
-func (r *connectorRunner) workerLoop(appSecret string) {
-	downloader := NewBoundedDownloader(r.connector, appSecret, r.manager.mediaHTTP)
+func (r *connectorRunner) workerLoop() {
+	downloader := NewBoundedDownloader(r.connector, r.manager.service, r.manager.mediaHTTP)
 	for {
 		r.drainInbox(downloader)
 		nextAttempt, err := r.manager.store.NextInboxAttempt(r.ctx, r.connector.ID)

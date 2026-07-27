@@ -14,12 +14,51 @@ import (
 
 	"github.com/cocola-project/cocola/apps/gateway/internal/agent"
 	"github.com/cocola-project/cocola/apps/gateway/internal/auth"
+	feishuconnector "github.com/cocola-project/cocola/apps/gateway/internal/channel/feishu"
 	"github.com/cocola-project/cocola/apps/gateway/internal/chatrun"
 	"github.com/cocola-project/cocola/apps/gateway/internal/convo"
 	"github.com/cocola-project/cocola/apps/gateway/internal/memory"
 	"github.com/cocola-project/cocola/apps/gateway/internal/project"
 	"github.com/cocola-project/cocola/packages/go-common/logger"
 )
+
+type blockingFeishuCredentialStore struct {
+	feishuconnector.Store
+}
+
+func (*blockingFeishuCredentialStore) GetConnector(
+	ctx context.Context,
+	_ feishuconnector.Identity,
+) (feishuconnector.Connector, error) {
+	<-ctx.Done()
+	return feishuconnector.Connector{}, ctx.Err()
+}
+
+func TestResolveLarkRuntimeCredentialTimesOutWithoutBlockingChat(t *testing.T) {
+	service, err := feishuconnector.NewService(
+		context.Background(),
+		&blockingFeishuCredentialStore{},
+		"AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=",
+		nil,
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	api := &API{feishu: service, log: logger.Must()}
+
+	started := time.Now()
+	credential := api.resolveLarkRuntimeCredential(
+		context.Background(),
+		auth.Identity{TenantID: "tenant", UserID: "user"},
+		20*time.Millisecond,
+	)
+	if credential.Status != feishuconnector.RuntimeCredentialUnavailable {
+		t.Fatalf("credential = %#v", credential)
+	}
+	if elapsed := time.Since(started); elapsed > time.Second {
+		t.Fatalf("credential resolution blocked for %s", elapsed)
+	}
+}
 
 func TestLiveRunMemoryRecallPublishesAndPersistsExactContext(t *testing.T) {
 	events := make(chan agent.Event, 1)

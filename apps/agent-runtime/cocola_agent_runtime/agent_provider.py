@@ -65,6 +65,13 @@ class AgentOptions:
     # the current Agent process and never persisted in the Sandbox.
     skill_credential: str | None = None
     skill_broker_url: str | None = None
+    # Short-lived app-identity capability for the official lark-cli Skills.
+    # App Secret is never transported to Agent Runtime. These values are used
+    # only to build the current shim process environment.
+    lark_status: str | None = None
+    lark_app_id: str | None = None
+    lark_brand: str | None = None
+    lark_tenant_access_token: str | None = None
 
 
 @dataclass

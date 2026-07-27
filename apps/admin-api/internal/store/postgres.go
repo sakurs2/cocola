@@ -605,6 +605,58 @@ func (p *Postgres) UpdateSkill(ctx context.Context, s Skill) error {
 	return nil
 }
 
+func (p *Postgres) SetSkillEnabled(
+	ctx context.Context,
+	id string,
+	enabled bool,
+	updatedAt time.Time,
+	updatedBy string,
+) error {
+	ct, err := p.pool.Exec(ctx, `UPDATE skill_entries
+		SET enabled=$2, updated_at=$3, updated_by=$4
+		WHERE id=$1`,
+		id, enabled, updatedAt, updatedBy)
+	if err != nil {
+		return err
+	}
+	if ct.RowsAffected() == 0 {
+		return ErrNotFound
+	}
+	return nil
+}
+
+func (p *Postgres) UpdateBundledSkill(ctx context.Context, s Skill) error {
+	s = normalizeSkill(s)
+	const q = `UPDATE skill_entries
+		SET runtime_id=$2, name=$3, description=$4, version=$5, entrypoint=$6,
+		    scope=$7, source_url=$8, source_ref=$9, source_path=$10,
+		    bundle_object_key=$11, content_sha256=$12, manifest_json=$13,
+		    frontmatter_json=$14, skill_md=$15, file_count=$16, size_bytes=$17,
+		    updated_at=$18, updated_by=$19
+		WHERE id=$1 AND source_type='bundled'`
+	ct, err := p.pool.Exec(ctx, q,
+		s.ID, s.RuntimeID, s.Name, s.Description, s.Version, s.Entrypoint,
+		s.Scope, s.SourceURL, s.SourceRef, s.SourcePath,
+		s.BundleObjectKey, s.ContentSHA256, s.ManifestJSON, s.FrontmatterJSON,
+		s.SkillMD, s.FileCount, s.SizeBytes, s.UpdatedAt, s.UpdatedBy)
+	if err != nil {
+		return err
+	}
+	if ct.RowsAffected() > 0 {
+		return nil
+	}
+	var sourceType string
+	if err := p.pool.QueryRow(ctx,
+		`SELECT source_type FROM skill_entries WHERE id=$1`,
+		s.ID,
+	).Scan(&sourceType); errors.Is(err, pgx.ErrNoRows) {
+		return ErrNotFound
+	} else if err != nil {
+		return err
+	}
+	return ErrConflict
+}
+
 func (p *Postgres) DeleteSkill(ctx context.Context, id string) error {
 	ct, err := p.pool.Exec(ctx, `DELETE FROM skill_entries WHERE id=$1`, id)
 	if err != nil {

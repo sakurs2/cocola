@@ -35,6 +35,8 @@
 //	COCOLA_CONFIG_SECRET_KEY    required independent key for runtime config secrets.
 //	COCOLA_SANDBOX_ADDR         sandbox-manager gRPC address used for MCP checks.
 //	COCOLA_SANDBOX_IMAGE        runtime image used by temporary MCP checks.
+//	COCOLA_DEFAULT_SKILLS_ENABLED
+//	                           reconcile release-bundled Admin Skills (default true).
 //
 // Production requires PostgreSQL. In-memory stores remain test doubles only;
 // Redis propagates revocations, quota overrides and user events.
@@ -50,6 +52,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/cocola-project/cocola/apps/admin-api/internal/defaultskills"
 	"github.com/cocola-project/cocola/apps/admin-api/internal/httpapi"
 	"github.com/cocola-project/cocola/apps/admin-api/internal/objstore"
 	"github.com/cocola-project/cocola/apps/admin-api/internal/redispub"
@@ -188,6 +191,43 @@ func main() {
 	}
 	svc.WithSkillBundleStore(skillStore)
 	log.Sugar().Infow("skill bundle store enabled", "endpoint", oc.Endpoint, "bucket", oc.Bucket)
+	if getenvBool("COCOLA_DEFAULT_SKILLS_ENABLED", true) {
+		defaultSet, err := defaultskills.LarkCLI()
+		if err != nil {
+			log.Sugar().Fatalf("load release-bundled lark-cli Skills: %v", err)
+		}
+		reconcileCtx, reconcileCancel := context.WithTimeout(context.Background(), 2*time.Minute)
+		result, err := svc.ReconcileDefaultSkills(reconcileCtx, service.DefaultSkillSet{
+			Name:          defaultSet.Name,
+			Version:       defaultSet.Version,
+			UpstreamURL:   defaultSet.UpstreamURL,
+			UpstreamRef:   defaultSet.UpstreamRef,
+			Archive:       defaultSet.Archive,
+			ArchiveSHA256: defaultSet.ArchiveSHA256,
+			SkillIDs:      defaultSet.SkillIDs,
+		})
+		reconcileCancel()
+		if err != nil {
+			log.Sugar().Fatalf("reconcile release-bundled lark-cli Skills: %v", err)
+		}
+		log.Sugar().Infow(
+			"release-bundled lark-cli Skills reconciled",
+			"version", defaultSet.Version,
+			"created", result.Created,
+			"updated", result.Updated,
+			"unchanged", result.Unchanged,
+			"skipped", result.Skipped,
+		)
+		if result.Skipped > 0 {
+			log.Sugar().Warnw(
+				"release-bundled Skills are administrator-managed and were not overwritten",
+				"count",
+				result.Skipped,
+			)
+		}
+	} else {
+		log.Info("release-bundled default Skill reconciliation disabled")
+	}
 	runtimeMgr, err := service.NewSandboxRuntimeManagerFromEnv(runtimeKV)
 	if err != nil {
 		log.Sugar().Warnw("sandbox runtime monitor disabled", "err", err)

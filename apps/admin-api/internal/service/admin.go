@@ -990,12 +990,15 @@ func (a *Admin) SetSkillEnabled(ctx context.Context, id string, enabled bool, ac
 	if err := validateEnabledSkill(s); err != nil {
 		return store.Skill{}, err
 	}
-	s.UpdatedAt = a.now().UTC()
-	s.UpdatedBy = actor
-	if err := a.store.UpdateSkill(ctx, s); err != nil {
+	now := a.now().UTC()
+	if err := a.store.SetSkillEnabled(ctx, id, enabled, now, actor); err != nil {
 		return store.Skill{}, err
 	}
-	return s, nil
+	updated, err := a.store.GetSkill(ctx, id)
+	if err != nil {
+		return store.Skill{}, err
+	}
+	return updated, nil
 }
 
 // DeleteSkill removes a skill from the catalog.

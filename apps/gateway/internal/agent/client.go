@@ -80,9 +80,19 @@ type Query struct {
 	SCMToken                string
 	ProjectBrokerCredential string
 	SkillBrokerCredential   string
+	LarkCredential          LarkRuntimeCredential
 	Project                 *ProjectContext
 	Attachments             []Attachment
 	WikiReferences          []WikiReference
+}
+
+// LarkRuntimeCredential is an in-memory, per-run capability. It is transported
+// only as internal gRPC metadata and deliberately has no protobuf representation.
+type LarkRuntimeCredential struct {
+	Status            string
+	AppID             string
+	Brand             string
+	TenantAccessToken string
 }
 
 type ProjectContext struct {
@@ -288,6 +298,22 @@ func (c *Client) Stream(ctx context.Context, q Query, onEvent func(Event) error)
 	if strings.TrimSpace(q.SkillBrokerCredential) != "" {
 		ctx = metadata.AppendToOutgoingContext(ctx, "x-cocola-skill-broker-credential",
 			strings.TrimSpace(q.SkillBrokerCredential))
+	}
+	if status := strings.TrimSpace(q.LarkCredential.Status); status != "" {
+		ctx = metadata.AppendToOutgoingContext(ctx, "x-cocola-lark-status", status)
+	}
+	if appID := strings.TrimSpace(q.LarkCredential.AppID); appID != "" {
+		ctx = metadata.AppendToOutgoingContext(ctx, "x-cocola-lark-app-id", appID)
+	}
+	if brand := strings.TrimSpace(q.LarkCredential.Brand); brand != "" {
+		ctx = metadata.AppendToOutgoingContext(ctx, "x-cocola-lark-brand", brand)
+	}
+	if token := strings.TrimSpace(q.LarkCredential.TenantAccessToken); token != "" {
+		ctx = metadata.AppendToOutgoingContext(
+			ctx,
+			"x-cocola-lark-tenant-access-token",
+			token,
+		)
 	}
 	if strings.TrimSpace(q.Source) != "" {
 		ctx = metadata.AppendToOutgoingContext(ctx, "x-cocola-run-source", strings.TrimSpace(q.Source))

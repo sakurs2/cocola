@@ -13,6 +13,7 @@ require (
 	github.com/pressly/goose/v3 v3.24.1
 	github.com/prometheus/client_golang v1.20.5
 	github.com/volcengine/OpenViking/sdk/go v0.0.0-20260716115340-ef4d97ebe302
+	golang.org/x/sync v0.13.0
 	google.golang.org/grpc v1.65.0
 )
 
@@ -55,7 +56,6 @@ require (
 	go.uber.org/zap v1.27.0 // indirect
 	golang.org/x/crypto v0.31.0 // indirect
 	golang.org/x/net v0.33.0 // indirect
-	golang.org/x/sync v0.13.0 // indirect
 	golang.org/x/sys v0.32.0 // indirect
 	golang.org/x/text v0.21.0 // indirect
 	google.golang.org/genproto/googleapis/api v0.0.0-20240701130421-f6361c86f094 // indirect

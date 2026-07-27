@@ -383,6 +383,22 @@ class InSandboxShimProvider:
             env["COCOLA_SKILL_CREDENTIAL"] = skill_credential
             env["COCOLA_SKILL_BROKER_URL"] = skill_broker_url
             env["COCOLA_SKILL_PUBLISH_ENABLED"] = "true"
+        lark_status = (options.lark_status or "").strip()
+        lark_app_id = (options.lark_app_id or "").strip()
+        lark_brand = (options.lark_brand or "").strip()
+        lark_token = (options.lark_tenant_access_token or "").strip()
+        if (
+            options.interaction_mode != "plan"
+            and lark_status == "ready"
+            and lark_app_id
+            and lark_brand in {"feishu", "lark"}
+            and lark_token
+        ):
+            env["LARKSUITE_CLI_APP_ID"] = lark_app_id
+            env["LARKSUITE_CLI_TENANT_ACCESS_TOKEN"] = lark_token
+            env["LARKSUITE_CLI_BRAND"] = lark_brand
+            env["LARKSUITE_CLI_DEFAULT_AS"] = "bot"
+            env["LARKSUITE_CLI_STRICT_MODE"] = "bot"
         return env
 
     async def query(

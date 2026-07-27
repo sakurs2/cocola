@@ -428,7 +428,11 @@ async def test_query_forwards_skill_capability_and_allows_only_broker_host(monke
 
     await AgentRuntimeServicer(provider, binder=binder).Query(FakeRequest(), context)
 
-    assert binder.egress == ["skill-gateway"]
+    assert binder.egress == [
+        "skill-gateway",
+        "open.feishu.cn",
+        "open.larksuite.com",
+    ]
     assert "COCOLA_SKILL_CREDENTIAL" not in binder.env
     assert provider.seen_options.skill_credential == "run-skill-credential"
     assert provider.seen_options.skill_broker_url == "http://skill-gateway:8080"
@@ -453,10 +457,79 @@ async def test_query_materializes_enabled_skills_without_prompt_injection():
         executor=StaticSandboxExecutor(),
     ).Query(FakeRequest(sandbox_id="box-1"), FakeContext())
     assert prov.seen_options.system_prompt is None
+    assert prov.seen_options.lark_tenant_access_token is None
     assert prov.seen_options.structured_result_policy == "optional"
     assert prov.seen_options.environment_skills == [
         {"id": "web", "name": "Web Search", "version": "1.2"}
     ]
+
+
+async def test_query_forwards_lark_credential_without_skill_name_gate():
+    class RecordingBinder(StaticSandboxBinder):
+        def __init__(self):
+            super().__init__()
+            self.egress = None
+
+        async def acquire(self, **kwargs):
+            self.egress = kwargs.get("additional_egress_allowlist")
+            return await super().acquire(**kwargs)
+
+    provider = ListProvider([AgentEvent(kind="done", data={})])
+    binder = RecordingBinder()
+    context = FakeContext(
+        (
+            SimpleNamespace(key="x-cocola-lark-status", value="ready"),
+            SimpleNamespace(key="x-cocola-lark-app-id", value="cli_app_id"),
+            SimpleNamespace(key="x-cocola-lark-brand", value="feishu"),
+            SimpleNamespace(
+                key="x-cocola-lark-tenant-access-token",
+                value="tenant-token",
+            ),
+        )
+    )
+
+    await AgentRuntimeServicer(
+        provider,
+        skills=StaticSkillCatalog([Skill(id="web", runtime_id="web", name="Web Search")]),
+        binder=binder,
+    ).Query(FakeRequest(), context)
+
+    options = provider.seen_options
+    assert options is not None
+    assert options.lark_status == "ready"
+    assert options.lark_app_id == "cli_app_id"
+    assert options.lark_brand == "feishu"
+    assert options.lark_tenant_access_token == "tenant-token"
+    assert "Cocola-managed Feishu capability policy" in options.system_prompt
+    assert "tenant-token" not in options.system_prompt
+    assert "cli_app_id" not in options.system_prompt
+    assert binder.egress == ["open.feishu.cn", "open.larksuite.com"]
+
+
+async def test_plan_mode_discards_lark_executable_credential():
+    provider = ListProvider([AgentEvent(kind="done", data={})])
+    context = FakeContext(
+        (
+            SimpleNamespace(key="x-cocola-lark-status", value="ready"),
+            SimpleNamespace(key="x-cocola-lark-app-id", value="cli_app_id"),
+            SimpleNamespace(key="x-cocola-lark-brand", value="feishu"),
+            SimpleNamespace(
+                key="x-cocola-lark-tenant-access-token",
+                value="tenant-token",
+            ),
+        )
+    )
+
+    await AgentRuntimeServicer(provider).Query(
+        FakeRequest(interaction_mode=pb.INTERACTION_MODE_PLAN),
+        context,
+    )
+
+    options = provider.seen_options
+    assert options is not None
+    assert options.lark_app_id is None
+    assert options.lark_brand is None
+    assert options.lark_tenant_access_token is None
 
 
 async def test_scheduled_task_does_not_enable_interactive_questions():

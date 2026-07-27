@@ -15,6 +15,18 @@ func (fn roundTripFunc) RoundTrip(request *http.Request) (*http.Response, error)
 	return fn(request)
 }
 
+type staticRuntimeCredentialResolver struct {
+	credential RuntimeCredential
+	err        error
+}
+
+func (resolver staticRuntimeCredentialResolver) RuntimeCredential(
+	context.Context,
+	Identity,
+) (RuntimeCredential, error) {
+	return resolver.credential, resolver.err
+}
+
 type countedBody struct {
 	reader io.Reader
 	read   int
@@ -31,9 +43,6 @@ func (*countedBody) Close() error { return nil }
 func TestBoundedDownloaderRejectsContentLengthBeforeReading(t *testing.T) {
 	resourceBody := &countedBody{reader: strings.NewReader("oversized")}
 	client := &http.Client{Transport: roundTripFunc(func(request *http.Request) (*http.Response, error) {
-		if strings.Contains(request.URL.Path, "tenant_access_token") {
-			return jsonResponse(`{"code":0,"tenant_access_token":"token","expire":3600}`), nil
-		}
 		return &http.Response{
 			StatusCode: http.StatusOK, Body: resourceBody,
 			ContentLength: 9, Header: make(http.Header),
@@ -57,9 +66,6 @@ func TestBoundedDownloaderRejectsContentLengthBeforeReading(t *testing.T) {
 func TestBoundedDownloaderStopsAtLimitPlusOne(t *testing.T) {
 	resourceBody := &countedBody{reader: bytes.NewReader(bytes.Repeat([]byte("x"), 1024))}
 	client := &http.Client{Transport: roundTripFunc(func(request *http.Request) (*http.Response, error) {
-		if strings.Contains(request.URL.Path, "tenant_access_token") {
-			return jsonResponse(`{"code":0,"tenant_access_token":"token","expire":3600}`), nil
-		}
 		return &http.Response{
 			StatusCode: http.StatusOK, Body: resourceBody,
 			ContentLength: -1, Header: make(http.Header),
@@ -82,7 +88,10 @@ func TestBoundedDownloaderStopsAtLimitPlusOne(t *testing.T) {
 
 func testDownloader(client *http.Client) *BoundedDownloader {
 	return &BoundedDownloader{
-		appID: "app-id", appSecret: "app-secret",
+		identity: Identity{TenantID: "tenant", UserID: "user"},
+		credentials: staticRuntimeCredentialResolver{credential: RuntimeCredential{
+			Status: RuntimeCredentialReady, Brand: DomainFeishu, TenantAccessToken: "token",
+		}},
 		baseURL: "https://example.test", http: client,
 	}
 }

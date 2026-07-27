@@ -18,6 +18,7 @@ import (
 
 	"github.com/cocola-project/cocola/apps/gateway/internal/agent"
 	"github.com/cocola-project/cocola/apps/gateway/internal/auth"
+	feishuconnector "github.com/cocola-project/cocola/apps/gateway/internal/channel/feishu"
 	"github.com/cocola-project/cocola/apps/gateway/internal/chatrun"
 	"github.com/cocola-project/cocola/apps/gateway/internal/convo"
 	"github.com/cocola-project/cocola/apps/gateway/internal/memory"
@@ -34,6 +35,7 @@ const (
 	defaultMergeWindow   = 100 * time.Millisecond
 	defaultDraftInterval = time.Second
 	defaultFinalizeRetry = time.Second
+	feishuCredentialWait = 5 * time.Second
 	draftFailureBudget   = 30 * time.Second
 	finalizeAttemptLimit = 3 * time.Second
 	finalizeMaxAttempts  = 4
@@ -940,6 +942,14 @@ func (a *API) executeLiveRun(live *liveRun) {
 			projectSetupErr = err
 		}
 	}
+	larkCredential := agent.LarkRuntimeCredential{}
+	if effectiveInteractionMode(live.request) != chatrun.InteractionModePlan {
+		larkCredential = a.resolveLarkRuntimeCredential(
+			live.ctx,
+			live.identity,
+			feishuCredentialWait,
+		)
+	}
 	attachments := a.prepareRunAttachments(live.ctx, live.request)
 	memoryContext := ""
 	if a.memory != nil && chatTypeForConversation(live.request) != "scheduled_task" {
@@ -971,6 +981,7 @@ func (a *API) executeLiveRun(live *liveRun) {
 		WikiReferences: live.request.WikiReferences,
 		SCMToken:       scmToken, ProjectBrokerCredential: projectBrokerCredential,
 		SkillBrokerCredential: skillBrokerCredential,
+		LarkCredential:        larkCredential,
 		Project:               projectContext,
 	}
 	coalescer := memoryEventCoalescer{run: live, window: a.runs.mergeWindow}
@@ -1286,6 +1297,40 @@ func (a *API) executeLiveRun(live *liveRun) {
 		delete(live.subs, subscriber)
 	}
 	live.mu.Unlock()
+}
+
+func (a *API) resolveLarkRuntimeCredential(
+	ctx context.Context,
+	identity auth.Identity,
+	timeout time.Duration,
+) agent.LarkRuntimeCredential {
+	credential := agent.LarkRuntimeCredential{
+		Status: feishuconnector.RuntimeCredentialMissing,
+	}
+	if a.feishu == nil {
+		return credential
+	}
+	resolveCtx, cancel := context.WithTimeout(ctx, timeout)
+	defer cancel()
+	resolved, err := a.feishu.RuntimeCredential(
+		resolveCtx,
+		feishuconnector.Identity{
+			TenantID: identity.TenantID,
+			UserID:   identity.UserID,
+		},
+	)
+	if err != nil {
+		credential.Status = feishuconnector.RuntimeCredentialUnavailable
+		a.log.Warn("Feishu runtime credential is temporarily unavailable")
+		return credential
+	}
+	credential.Status = resolved.Status
+	if resolved.Status == feishuconnector.RuntimeCredentialReady {
+		credential.AppID = resolved.AppID
+		credential.Brand = resolved.Brand
+		credential.TenantAccessToken = resolved.TenantAccessToken
+	}
+	return credential
 }
 
 func (a *API) persistProjectSnapshot(live *liveRun, event agent.Event) {

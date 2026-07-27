@@ -40,21 +40,21 @@ Execution、Scheduler、Session 默认容量和 Trace 的同名环境变量只�
 
 启动配置按 owner 分组。除明确注明外，修改后需要重启对应进程。
 
-| 分组             | 主要变量                                                                                                                                   |
-| ---------------- | ------------------------------------------------------------------------------------------------------------------------------------------ |
-| 服务地址         | `COCOLA_*_ADDR`、`COCOLA_*_HOST`、`COCOLA_*_PORT`、`COCOLA_ADMIN_URL`、`COCOLA_GATEWAY_URL`、`COCOLA_LLM_GATEWAY_URL`                      |
-| Auth/Secret      | `AUTH_SECRET`、`COCOLA_AUTH_SECRET`、`COCOLA_AUTH_ISSUER`、`COCOLA_ADMIN_KEY`、`COCOLA_MODEL_SECRET_KEY`、`COCOLA_CONFIG_SECRET_KEY`       |
-| 初始管理员       | `COCOLA_BOOTSTRAP_ADMIN_USERNAME`、email、password/password hash、reset                                                                    |
-| Postgres/Redis   | `COCOLA_PG_DSN`、`COCOLA_REDIS_ADDR`、`COCOLA_REDIS_PASSWORD`、`COCOLA_REDIS_DB`、`COCOLA_REDIS_POOL_SIZE`                                 |
-| MinIO            | `COCOLA_MINIO_ENDPOINT`、access/secret key、bucket、TLS、附件阈值                                                                          |
-| Agent/Run        | `COCOLA_AGENT_RUNTIME_DEFAULT_ID`、`COCOLA_AGENT_RUNTIME_PICKER_ENABLED`、`COCOLA_SKILL_PUBLISH_ENABLED`、max turns、tool timeout、token TTL、gRPC/message/artifact limits |
-| Wiki             | `COCOLA_WIKI_MAX_FILE_BYTES`（单文件大小；默认 20 MiB，不设累计容量或文件数配额）                                                          |
-| Sandbox          | `COCOLA_SANDBOX_ADDR`、image、Profile、Code Server、lease/reaper/heartbeat、LLM URL/model、egress                                          |
-| Session Storage  | `COCOLA_CLUSTER_MANAGER_MODE`、`COCOLA_SESSION_STORAGE_CLASS`、`COCOLA_SESSION_VOLUME_SIZE`、`COCOLA_SESSION_STORAGE_ROOT`                 |
-| OpenSandbox      | `COCOLA_OPENSANDBOX_*`（URL、API key、HTTP/Exec timeout、resources、K8s 部署参数）                                                         |
-| LLM 可靠性       | `COCOLA_LLM_TIMEOUT_SECS`、`COCOLA_LLM_MAX_RETRIES`、`COCOLA_LLM_RATE_LIMIT_RPS`、registry cache TTL                                       |
-| Quota/Auth cache | quota 默认限额、override/revocation cache TTL、token TTL                                                                                   |
-| Observability    | `COCOLA_METRICS_*`、`COCOLA_OTEL_*`                                                                                                        |
+| 分组             | 主要变量                                                                                                                                                                                                    |
+| ---------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 服务地址         | `COCOLA_*_ADDR`、`COCOLA_*_HOST`、`COCOLA_*_PORT`、`COCOLA_ADMIN_URL`、`COCOLA_GATEWAY_URL`、`COCOLA_LLM_GATEWAY_URL`                                                                                       |
+| Auth/Secret      | `AUTH_SECRET`、`COCOLA_AUTH_SECRET`、`COCOLA_AUTH_ISSUER`、`COCOLA_ADMIN_KEY`、`COCOLA_MODEL_SECRET_KEY`、`COCOLA_CONFIG_SECRET_KEY`                                                                        |
+| 初始管理员       | `COCOLA_BOOTSTRAP_ADMIN_USERNAME`、email、password/password hash、reset                                                                                                                                     |
+| Postgres/Redis   | `COCOLA_PG_DSN`、`COCOLA_REDIS_ADDR`、`COCOLA_REDIS_PASSWORD`、`COCOLA_REDIS_DB`、`COCOLA_REDIS_POOL_SIZE`                                                                                                  |
+| MinIO            | `COCOLA_MINIO_ENDPOINT`、access/secret key、bucket、TLS、附件阈值                                                                                                                                           |
+| Agent/Run        | `COCOLA_AGENT_RUNTIME_DEFAULT_ID`、`COCOLA_AGENT_RUNTIME_PICKER_ENABLED`、`COCOLA_SKILL_PUBLISH_ENABLED`、`COCOLA_DEFAULT_SKILLS_ENABLED`、max turns、tool timeout、token TTL、gRPC/message/artifact limits |
+| Wiki             | `COCOLA_WIKI_MAX_FILE_BYTES`（单文件大小；默认 20 MiB，不设累计容量或文件数配额）                                                                                                                           |
+| Sandbox          | `COCOLA_SANDBOX_ADDR`、image、Profile、Code Server、lease/reaper/heartbeat、LLM URL/model、egress                                                                                                           |
+| Session Storage  | `COCOLA_CLUSTER_MANAGER_MODE`、`COCOLA_SESSION_STORAGE_CLASS`、`COCOLA_SESSION_VOLUME_SIZE`、`COCOLA_SESSION_STORAGE_ROOT`                                                                                  |
+| OpenSandbox      | `COCOLA_OPENSANDBOX_*`（URL、API key、HTTP/Exec timeout、resources、K8s 部署参数）                                                                                                                          |
+| LLM 可靠性       | `COCOLA_LLM_TIMEOUT_SECS`、`COCOLA_LLM_MAX_RETRIES`、`COCOLA_LLM_RATE_LIMIT_RPS`、registry cache TTL                                                                                                        |
+| Quota/Auth cache | quota 默认限额、override/revocation cache TTL、token TTL                                                                                                                                                    |
+| Observability    | `COCOLA_METRICS_*`、`COCOLA_OTEL_*`                                                                                                                                                                         |
 
 Secret 支持统一的 `<NAME>_FILE` 约定：未设置时读取同名环境变量；显式设置后文件
 不可读会导致启动失败，不会回退到可能过期的环境值。生产环境应通过 Secret/Vault
@@ -118,6 +118,13 @@ Output Skill 说明 Claude Code Execute Run 可选的 Summary、Table、List 和
 `COCOLA_SANDBOX_SKILL_BROKER_URL`。Gateway 只向正在运行的 Execute Run 签发 Personal
 Skill capability；Sandbox 不获得 Admin Key、Admin URL 或用户 Web Token。新发布 Skill
 从下一轮 Run 开始通过现有 effective catalog 与原子 reconcile 生效。
+
+`COCOLA_DEFAULT_SKILLS_ENABLED` 默认 `true`。Admin API 启动时会把发布包内与 Sandbox
+`lark-cli` 版本锁定的官方 Skills 幂等对账到 Admin Skill Catalog；不会在启动时访问
+GitHub，也不会把 Skills 烘焙进 Sandbox。管理员禁用状态会跨重启保留；同 ID 被管理员
+手工导入接管后不再由系统覆盖。设为 `false` 只跳过启动对账，不会删除或禁用 Catalog
+里已经存在的 Skills；全局停用应在 Admin Skills 中禁用 `lark-*`。修改后需重启
+Admin API。
 
 ### 热加载边界复核
 

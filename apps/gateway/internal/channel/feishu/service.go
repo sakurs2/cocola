@@ -7,6 +7,7 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"net/http"
 	"strings"
 	"sync"
 	"time"
@@ -35,6 +36,7 @@ type Service struct {
 	now       func() time.Time
 	changes   chan struct{}
 	avatarURL string
+	tokens    *TenantTokenProvider
 
 	mu      sync.Mutex
 	cancels map[string]context.CancelFunc
@@ -56,11 +58,13 @@ func NewService(
 	if err != nil {
 		return nil, err
 	}
-	return &Service{
+	service := &Service{
 		store: store, box: box, registrar: registrar, root: root,
 		now:     func() time.Time { return time.Now().UTC() },
 		changes: make(chan struct{}, 1), cancels: make(map[string]context.CancelFunc),
-	}, nil
+	}
+	service.tokens = NewTenantTokenProvider(nil)
+	return service, nil
 }
 
 func (s *Service) Changes() <-chan struct{} { return s.changes }
@@ -70,11 +74,52 @@ func (s *Service) WithRegistrationAvatarURL(value string) *Service {
 	return s
 }
 
+func (s *Service) WithTokenHTTPClient(client *http.Client) *Service {
+	s.tokens.SetHTTPClient(client)
+	return s
+}
+
 func (s *Service) notify() {
+	s.tokens.InvalidateAll()
 	select {
 	case s.changes <- struct{}{}:
 	default:
 	}
+}
+
+// RuntimeCredential resolves the current user's Connector to one short-lived
+// app-identity token. Missing/disabled Connectors are normal capability states;
+// transient storage, decryption and upstream failures return an unavailable
+// state plus an error so chat can continue without Feishu.
+func (s *Service) RuntimeCredential(
+	ctx context.Context,
+	id Identity,
+) (RuntimeCredential, error) {
+	if strings.TrimSpace(id.TenantID) == "" || strings.TrimSpace(id.UserID) == "" {
+		return RuntimeCredential{Status: RuntimeCredentialUnavailable}, ErrInvalid
+	}
+	connector, err := s.store.GetConnector(ctx, id)
+	if errors.Is(err, ErrNotFound) {
+		return RuntimeCredential{Status: RuntimeCredentialMissing}, nil
+	}
+	if err != nil {
+		return RuntimeCredential{Status: RuntimeCredentialUnavailable}, err
+	}
+	if !connector.DesiredEnabled {
+		return RuntimeCredential{Status: RuntimeCredentialDisabled}, nil
+	}
+	if connector.Status != StatusReady {
+		return RuntimeCredential{Status: RuntimeCredentialUnavailable}, nil
+	}
+	appSecret, err := s.AppSecret(connector)
+	if err != nil {
+		return RuntimeCredential{Status: RuntimeCredentialUnavailable}, err
+	}
+	credential, err := s.tokens.Resolve(ctx, connector, appSecret)
+	if err != nil {
+		return RuntimeCredential{Status: RuntimeCredentialUnavailable}, err
+	}
+	return credential, nil
 }
 
 func (s *Service) Connection(ctx context.Context, id Identity) (ConnectorView, error) {

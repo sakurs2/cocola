@@ -3,6 +3,7 @@ package feishu
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -10,6 +11,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/cocola-project/cocola/packages/go-common/logger"
 	"github.com/cocola-project/cocola/packages/go-common/token"
 )
 
@@ -19,6 +21,9 @@ type managerTestStore struct {
 	session          Session
 	upsertedSessions []Session
 	connector        Connector
+
+	updateConnectorStateErr   error
+	updateConnectorStateCalls int
 }
 
 func (s *managerTestStore) GetSession(
@@ -39,6 +44,21 @@ func (s *managerTestStore) GetConnectorByID(context.Context, string) (Connector,
 		return Connector{}, ErrNotFound
 	}
 	return s.connector, nil
+}
+
+func (s *managerTestStore) UpdateConnectorState(
+	context.Context,
+	string,
+	string,
+	string,
+	string,
+	string,
+	string,
+	*time.Time,
+	time.Time,
+) error {
+	s.updateConnectorStateCalls++
+	return s.updateConnectorStateErr
 }
 
 type managerTestChannel struct {
@@ -142,6 +162,39 @@ func TestProcessingReactionLifecycle(t *testing.T) {
 	adds, deletes := channel.reactionCounts()
 	if adds != 1 || deletes != 1 {
 		t.Fatalf("reaction calls = add:%d delete:%d", adds, deletes)
+	}
+}
+
+func TestRunnerOnReadyRequiresPersistedState(t *testing.T) {
+	now := time.Date(2026, 7, 27, 20, 0, 0, 0, time.UTC)
+	store := &managerTestStore{updateConnectorStateErr: errors.New("database unavailable")}
+	runner := &connectorRunner{
+		manager: &Manager{
+			store:   store,
+			ownerID: "gateway-1",
+			now:     func() time.Time { return now },
+			log:     logger.Must(),
+		},
+		connector: Connector{
+			ID: "connector-1", OwnerOpenID: "owner-1",
+		},
+		ctx: context.Background(),
+	}
+
+	if runner.onReady(BotIdentity{
+		OpenID: "bot-1", Name: "Cocola", ActivateStatus: 2,
+	}) {
+		t.Fatal("onReady succeeded despite state persistence failure")
+	}
+	if store.updateConnectorStateCalls != 1 {
+		t.Fatalf("UpdateConnectorState calls = %d, want 1", store.updateConnectorStateCalls)
+	}
+
+	store.updateConnectorStateErr = nil
+	if !runner.onReady(BotIdentity{
+		OpenID: "bot-1", Name: "Cocola", ActivateStatus: 2,
+	}) {
+		t.Fatal("onReady failed after state persistence recovered")
 	}
 }
 

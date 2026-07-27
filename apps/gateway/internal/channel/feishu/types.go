@@ -31,6 +31,11 @@ const (
 	StatusDisabled       = "disabled"
 	StatusError          = "error"
 
+	RuntimeCredentialReady       = "ready"
+	RuntimeCredentialMissing     = "not_configured"
+	RuntimeCredentialDisabled    = "disabled"
+	RuntimeCredentialUnavailable = "temporarily_unavailable"
+
 	FlowStarting     = "starting"
 	FlowAwaitingUser = "awaiting_user"
 	FlowAuthorizing  = "authorizing"
@@ -94,6 +99,16 @@ type ConnectorView struct {
 	LastConnectedAt *time.Time        `json:"last_connected_at,omitempty"`
 	LastErrorCode   string            `json:"last_error_code,omitempty"`
 	Registration    *RegistrationFlow `json:"registration,omitempty"`
+}
+
+// RuntimeCredential is the short-lived, app-identity-only credential exposed
+// to one Agent Run. App Secret deliberately does not exist on this type.
+type RuntimeCredential struct {
+	Status            string
+	AppID             string
+	Brand             string
+	TenantAccessToken string
+	ExpiresAt         time.Time
 }
 
 type RegistrationFlow struct {

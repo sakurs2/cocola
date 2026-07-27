@@ -255,8 +255,47 @@ func runStoreContract(t *testing.T, st Store) {
 	if err := st.UpdateSkill(ctx, sk); err != nil {
 		t.Fatalf("UpdateSkill: %v", err)
 	}
+	if err := st.SetSkillEnabled(ctx, sk.ID, false, now.Add(2*time.Hour), "admin2"); err != nil {
+		t.Fatalf("SetSkillEnabled: %v", err)
+	}
+	sk, err = st.GetSkill(ctx, sk.ID)
+	if err != nil || sk.Enabled || sk.UpdatedBy != "admin2" {
+		t.Fatalf("SetSkillEnabled result: %+v %v", sk, err)
+	}
+	if err := st.SetSkillEnabled(ctx, sk.ID, true, now.Add(3*time.Hour), "admin3"); err != nil {
+		t.Fatalf("re-enable skill: %v", err)
+	}
+	sk.Enabled = true
 	if err := st.UpdateSkill(ctx, Skill{ID: "ghost"}); !errors.Is(err, ErrNotFound) {
 		t.Fatalf("update missing skill want ErrNotFound, got %v", err)
+	}
+	if err := st.SetSkillEnabled(ctx, "ghost", true, now, "admin"); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("enable missing skill want ErrNotFound, got %v", err)
+	}
+	sk.SourceType = "bundled"
+	sk.Description = "Bundled v1"
+	if err := st.UpdateSkill(ctx, sk); err != nil {
+		t.Fatalf("mark bundled skill: %v", err)
+	}
+	bundledUpdate := sk
+	bundledUpdate.Enabled = false
+	bundledUpdate.Description = "Bundled v2"
+	if err := st.UpdateBundledSkill(ctx, bundledUpdate); err != nil {
+		t.Fatalf("UpdateBundledSkill: %v", err)
+	}
+	sk, err = st.GetSkill(ctx, sk.ID)
+	if err != nil || !sk.Enabled || sk.Description != "Bundled v2" {
+		t.Fatalf("bundled update did not preserve enabled: %+v %v", sk, err)
+	}
+	sk.SourceType = "archive"
+	if err := st.UpdateSkill(ctx, sk); err != nil {
+		t.Fatalf("take over bundled skill: %v", err)
+	}
+	if err := st.UpdateBundledSkill(ctx, bundledUpdate); !errors.Is(err, ErrConflict) {
+		t.Fatalf("bundled takeover want ErrConflict, got %v", err)
+	}
+	if err := st.UpdateBundledSkill(ctx, Skill{ID: "ghost"}); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("missing bundled skill want ErrNotFound, got %v", err)
 	}
 	enabled, _ := st.ListSkills(ctx, true)
 	if len(enabled) != 1 || !enabled[0].Enabled {

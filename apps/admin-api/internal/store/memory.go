@@ -456,6 +456,46 @@ func (m *Memory) UpdateSkill(ctx context.Context, s Skill) error {
 	return nil
 }
 
+func (m *Memory) SetSkillEnabled(
+	ctx context.Context,
+	id string,
+	enabled bool,
+	updatedAt time.Time,
+	updatedBy string,
+) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	s, ok := m.skills[id]
+	if !ok {
+		return ErrNotFound
+	}
+	s.Enabled = enabled
+	s.UpdatedAt = updatedAt
+	s.UpdatedBy = updatedBy
+	m.skills[id] = s
+	return nil
+}
+
+func (m *Memory) UpdateBundledSkill(ctx context.Context, s Skill) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	existing, ok := m.skills[s.ID]
+	if !ok {
+		return ErrNotFound
+	}
+	existing = normalizeSkill(existing)
+	if existing.SourceType != "bundled" {
+		return ErrConflict
+	}
+	s = cloneSkill(s)
+	s.Enabled = existing.Enabled
+	s.SourceType = existing.SourceType
+	s.CreatedAt = existing.CreatedAt
+	s.CreatedBy = existing.CreatedBy
+	m.skills[s.ID] = s
+	return nil
+}
+
 func (m *Memory) DeleteSkill(ctx context.Context, id string) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()

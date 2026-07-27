@@ -3,6 +3,7 @@ package agent
 import (
 	"context"
 	"net"
+	"strings"
 	"testing"
 
 	"google.golang.org/grpc"
@@ -60,6 +61,10 @@ func TestClientStreamMapsWikiReferences(t *testing.T) {
 	err = client.Stream(context.Background(), Query{
 		UserID: "user", SessionID: "session", Prompt: "read it",
 		SkillBrokerCredential: "skill-run-credential",
+		LarkCredential: LarkRuntimeCredential{
+			Status: RuntimeCredentialReadyForTest, AppID: "app-id", Brand: "feishu",
+			TenantAccessToken: "tenant-token",
+		},
 		WikiReferences: []WikiReference{{
 			NodeID: "node", VersionID: "version", LogicalPath: "Team/brief.docx",
 			Filename: "brief.docx", Mime: "application/docx",
@@ -80,8 +85,24 @@ func TestClientStreamMapsWikiReferences(t *testing.T) {
 		got.Size != 123 || got.Sha256 != "abc" {
 		t.Fatalf("WikiReference = %#v", got)
 	}
-	if got := (<-recording.metadata).Get("x-cocola-skill-broker-credential"); len(got) != 1 ||
+	incomingMetadata := <-recording.metadata
+	if got := incomingMetadata.Get("x-cocola-skill-broker-credential"); len(got) != 1 ||
 		got[0] != "skill-run-credential" {
 		t.Fatalf("Skill broker metadata = %#v", got)
 	}
+	for key, want := range map[string]string{
+		"x-cocola-lark-status":              RuntimeCredentialReadyForTest,
+		"x-cocola-lark-app-id":              "app-id",
+		"x-cocola-lark-brand":               "feishu",
+		"x-cocola-lark-tenant-access-token": "tenant-token",
+	} {
+		if got := incomingMetadata.Get(key); len(got) != 1 || got[0] != want {
+			t.Fatalf("%s metadata = %#v", key, got)
+		}
+	}
+	if strings.Contains(request.String(), "tenant-token") {
+		t.Fatal("tenant access token leaked into QueryRequest protobuf")
+	}
 }
+
+const RuntimeCredentialReadyForTest = "ready"

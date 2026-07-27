@@ -70,7 +70,7 @@ type Skill struct {
 	Enabled         bool            `json:"enabled"`
 	Scope           string          `json:"scope"` // "admin" | "user"
 	OwnerUserID     string          `json:"owner_user_id,omitempty"`
-	SourceType      string          `json:"source_type,omitempty"` // "manual" | "archive" | "git"
+	SourceType      string          `json:"source_type,omitempty"` // "manual" | "archive" | "git" | "bundled"
 	SourceURL       string          `json:"source_url,omitempty"`
 	SourceRef       string          `json:"source_ref,omitempty"`
 	SourcePath      string          `json:"source_path,omitempty"`
@@ -517,6 +517,11 @@ type Store interface {
 	ListSkills(ctx context.Context, onlyEnabled bool) ([]Skill, error)
 	ListSkillsForUser(ctx context.Context, userID string) ([]Skill, error)
 	UpdateSkill(ctx context.Context, s Skill) error
+	SetSkillEnabled(ctx context.Context, id string, enabled bool, updatedAt time.Time, updatedBy string) error
+	// UpdateBundledSkill updates release-owned content only when the current
+	// row is still bundled. It preserves administrator-controlled fields such
+	// as enabled and returns ErrConflict after an administrator takeover.
+	UpdateBundledSkill(ctx context.Context, s Skill) error
 	DeleteSkill(ctx context.Context, id string) error
 	SetUserSkillPreference(ctx context.Context, pref UserSkillPreference) error
 	ListUserSkillPreferences(ctx context.Context, userID string) ([]UserSkillPreference, error)
