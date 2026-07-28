@@ -731,6 +731,39 @@ async def test_agent_knowledge_is_injected_as_untrusted_remote_reference_without
     assert "Do not download or mirror" in prompt
 
 
+async def test_agent_knowledge_accepts_larkoffice_tenant_links():
+    provider = ListProvider([AgentEvent(kind="done", data={})])
+    agent_context = SimpleNamespace(
+        id="agent-1",
+        version=1,
+        name="Research",
+        instructions="",
+        skill_catalog_ids=[],
+        knowledge_sources=[
+            SimpleNamespace(
+                type="feishu_wiki",
+                label="Team Wiki",
+                url="https://bytedance.larkoffice.com/wiki/NeRdwd9vWiiETEM",
+            )
+        ],
+    )
+
+    await AgentRuntimeServicer(
+        provider,
+        skills=StaticSkillCatalog(
+            [
+                Skill(id="catalog-lark-doc", runtime_id="lark-doc", name="Lark Doc"),
+                Skill(id="catalog-lark-wiki", runtime_id="lark-wiki", name="Lark Wiki"),
+            ]
+        ),
+    ).Query(FakeRequest(agent_context=agent_context), FakeContext())
+
+    assert provider.seen_options is not None
+    prompt = provider.seen_options.system_prompt or ""
+    assert "<agent-knowledge>" in prompt
+    assert "https://bytedance.larkoffice.com/wiki/NeRdwd9vWiiETEM" in prompt
+
+
 async def test_cocola_wiki_agent_source_is_not_injected_as_remote_lark_reference():
     provider = ListProvider([AgentEvent(kind="done", data={})])
     agent_context = SimpleNamespace(

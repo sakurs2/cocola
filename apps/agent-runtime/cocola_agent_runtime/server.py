@@ -405,7 +405,7 @@ def _agent_knowledge_sources(agent_context: Any) -> list[dict[str, str]]:
         parts = [value for value in parsed.path.split("/") if value]
         host_allowed = any(
             host == suffix or host.endswith("." + suffix)
-            for suffix in ("feishu.cn", "larksuite.com")
+            for suffix in ("feishu.cn", "larkoffice.com", "larksuite.com")
         )
         if (
             source_type not in allowed_types
