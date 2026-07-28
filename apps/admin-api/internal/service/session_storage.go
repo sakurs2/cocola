@@ -103,6 +103,12 @@ type SessionStorageView struct {
 	UpdatedAt          time.Time  `json:"updated_at"`
 }
 
+type SessionStorageBulkDeleteResult struct {
+	Matched int `json:"matched"`
+	Deleted int `json:"deleted"`
+	Failed  int `json:"failed"`
+}
+
 type postgresSessionStorageMonitor struct {
 	pool           *pgxpool.Pool
 	kube           *kubeClient
@@ -646,6 +652,32 @@ func (a *Admin) DeleteOrphanSessionStorage(ctx context.Context, storageID, pvcNa
 		return ErrInvalidArg
 	}
 	return a.sessionStorage.DeleteOrphan(ctx, storageID, pvcName)
+}
+
+func (a *Admin) DeleteAllOrphanSessionStorage(ctx context.Context) (SessionStorageBulkDeleteResult, error) {
+	if a.sessionStorage == nil {
+		return SessionStorageBulkDeleteResult{}, ErrNotConfigured
+	}
+	items, err := a.sessionStorage.List(ctx)
+	if err != nil {
+		return SessionStorageBulkDeleteResult{}, err
+	}
+	result := SessionStorageBulkDeleteResult{}
+	for _, item := range items {
+		if !item.DeleteAllowed {
+			continue
+		}
+		if err := ctx.Err(); err != nil {
+			return result, err
+		}
+		result.Matched++
+		if err := a.sessionStorage.DeleteOrphan(ctx, item.StorageID, item.PVCName); err != nil {
+			result.Failed++
+			continue
+		}
+		result.Deleted++
+	}
+	return result, nil
 }
 
 func (a *Admin) ListWorkspaceEntries(

@@ -236,6 +236,7 @@ func (a *API) Router() http.Handler {
 			r.Post("/{name}/offline", a.offlineSandboxNode)
 		})
 		r.Get("/session-storage", a.listSessionStorage)
+		r.Delete("/session-storage/orphans", a.deleteAllOrphanSessionStorage)
 		r.Post("/session-storage/{storage_id}/measure", a.measureSessionStorage)
 		r.Delete("/session-storage/{storage_id}", a.deleteOrphanSessionStorage)
 		r.Get("/storage/nodes", a.listNodeStorageFilesystems)

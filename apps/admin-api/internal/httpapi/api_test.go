@@ -9,6 +9,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -95,10 +96,14 @@ func (f fakeRuntimeManager) ListSandboxes(context.Context) (service.SandboxRunti
 	}}}, nil
 }
 
-type fakeStorageMonitor struct{}
+type fakeStorageMonitor struct {
+	items      []service.SessionStorageView
+	deletedPVC *[]string
+	deleteErr  map[string]error
+}
 
-func (fakeStorageMonitor) List(context.Context) ([]service.SessionStorageView, error) {
-	return nil, nil
+func (f fakeStorageMonitor) List(context.Context) ([]service.SessionStorageView, error) {
+	return append([]service.SessionStorageView(nil), f.items...), nil
 }
 func (fakeStorageMonitor) NodeUsage(context.Context) (map[string]service.NodeStorageUsage, error) {
 	return map[string]service.NodeStorageUsage{}, nil
@@ -109,8 +114,13 @@ func (fakeStorageMonitor) NodeFilesystems(context.Context) ([]service.NodeStorag
 func (fakeStorageMonitor) Measure(_ context.Context, storageID, pvcName string) (service.SessionStorageMeasurement, error) {
 	return service.SessionStorageMeasurement{StorageID: storageID, PVCName: pvcName, AllocatedBytes: 42}, nil
 }
-func (fakeStorageMonitor) DeleteOrphan(context.Context, string, string) error { return nil }
-func (fakeStorageMonitor) Close()                                             {}
+func (f fakeStorageMonitor) DeleteOrphan(_ context.Context, _ string, pvcName string) error {
+	if f.deletedPVC != nil {
+		*f.deletedPVC = append(*f.deletedPVC, pvcName)
+	}
+	return f.deleteErr[pvcName]
+}
+func (fakeStorageMonitor) Close() {}
 
 type fakeWorkspaceBrowser struct {
 	userID     string
@@ -898,6 +908,49 @@ func TestSkillCRUD(t *testing.T) {
 	}
 }
 
+func TestSkillListPagination(t *testing.T) {
+	api := newTestAPI("k")
+	router := api.Router()
+	for _, id := range []string{"skill-a", "skill-b", "skill-c"} {
+		rec := do(t, router, http.MethodPost, "/admin/skills", "k", map[string]any{
+			"id": id, "name": id,
+		})
+		if rec.Code != http.StatusCreated {
+			t.Fatalf("create %s: want 201, got %d (%s)", id, rec.Code, rec.Body.String())
+		}
+	}
+
+	rec := do(t, router, http.MethodGet, "/admin/skills?limit=1&offset=1", "k", nil)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("list paged skills: want 200, got %d (%s)", rec.Code, rec.Body.String())
+	}
+	var page struct {
+		Skills []store.Skill `json:"skills"`
+		Total  int           `json:"total"`
+		Limit  int           `json:"limit"`
+		Offset int           `json:"offset"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &page); err != nil {
+		t.Fatalf("decode paged skills: %v", err)
+	}
+	if page.Total != 3 || page.Limit != 1 || page.Offset != 1 ||
+		len(page.Skills) != 1 || page.Skills[0].ID != "skill-b" {
+		t.Fatalf("unexpected paged skills: %+v", page)
+	}
+
+	rec = do(t, router, http.MethodGet, "/admin/skills", "k", nil)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("list all skills: want 200, got %d (%s)", rec.Code, rec.Body.String())
+	}
+	page.Skills = nil
+	if err := json.Unmarshal(rec.Body.Bytes(), &page); err != nil {
+		t.Fatalf("decode all skills: %v", err)
+	}
+	if len(page.Skills) != 3 {
+		t.Fatalf("legacy unpaged list should return all skills, got %+v", page.Skills)
+	}
+}
+
 func TestMyEffectiveSkillsReturnsSummaryOnly(t *testing.T) {
 	mem := store.NewMemory()
 	issuer := token.NewIssuer("runtime-secret", "cocola", time.Hour)
@@ -1506,6 +1559,88 @@ func TestStorageRoutes(t *testing.T) {
 	rec = do(t, router, http.MethodPost, "/admin/session-storage/storage-a/measure?pvc_name=pvc-a", "k", nil)
 	if rec.Code != http.StatusOK || !strings.Contains(rec.Body.String(), `"allocated_bytes":42`) {
 		t.Fatalf("storage measurement: got %d %s", rec.Code, rec.Body.String())
+	}
+}
+
+func TestSessionStorageListPagination(t *testing.T) {
+	mem := store.NewMemory()
+	issuer := token.NewIssuer("test-secret", "cocola", 24*time.Hour)
+	monitor := fakeStorageMonitor{items: []service.SessionStorageView{
+		{StorageID: "storage-a", PVCName: "pvc-a", RequestedBytes: 10},
+		{StorageID: "storage-b", PVCName: "pvc-b", RequestedBytes: 20},
+		{StorageID: "storage-c", PVCName: "pvc-c", RequestedBytes: 30},
+	}}
+	api := New(
+		service.New(mem, issuer, fixedClock).WithSessionStorageMonitor(monitor),
+		"k",
+	)
+
+	rec := do(
+		t,
+		api.Router(),
+		http.MethodGet,
+		"/admin/session-storage?limit=1&offset=1",
+		"k",
+		nil,
+	)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("list paged storage: want 200, got %d (%s)", rec.Code, rec.Body.String())
+	}
+	var page struct {
+		Volumes        []service.SessionStorageView `json:"volumes"`
+		Total          int                          `json:"total"`
+		RequestedBytes int64                        `json:"requested_bytes"`
+		Limit          int                          `json:"limit"`
+		Offset         int                          `json:"offset"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &page); err != nil {
+		t.Fatalf("decode paged storage: %v", err)
+	}
+	if page.Total != 3 || page.RequestedBytes != 60 || page.Limit != 1 || page.Offset != 1 ||
+		len(page.Volumes) != 1 || page.Volumes[0].StorageID != "storage-b" {
+		t.Fatalf("unexpected paged storage: %+v", page)
+	}
+}
+
+func TestDeleteAllOrphanSessionStorage(t *testing.T) {
+	mem := store.NewMemory()
+	issuer := token.NewIssuer("test-secret", "cocola", 24*time.Hour)
+	deletedPVCs := []string{}
+	monitor := fakeStorageMonitor{
+		items: []service.SessionStorageView{
+			{StorageID: "storage-a", PVCName: "pvc-a", DeleteAllowed: true},
+			{StorageID: "storage-b", PVCName: "pvc-b", DeleteAllowed: true},
+			{StorageID: "storage-c", PVCName: "pvc-c", DeleteAllowed: true},
+			{StorageID: "storage-active", PVCName: "pvc-active", DeleteAllowed: false},
+		},
+		deletedPVC: &deletedPVCs,
+		deleteErr:  map[string]error{"pvc-b": errors.New("delete failed")},
+	}
+	api := New(
+		service.New(mem, issuer, fixedClock).WithSessionStorageMonitor(monitor),
+		"k",
+	)
+
+	rec := do(
+		t,
+		api.Router(),
+		http.MethodDelete,
+		"/admin/session-storage/orphans",
+		"k",
+		nil,
+	)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("delete all orphans: want 200, got %d (%s)", rec.Code, rec.Body.String())
+	}
+	var result service.SessionStorageBulkDeleteResult
+	if err := json.Unmarshal(rec.Body.Bytes(), &result); err != nil {
+		t.Fatalf("decode bulk delete result: %v", err)
+	}
+	if result.Matched != 3 || result.Deleted != 2 || result.Failed != 1 {
+		t.Fatalf("unexpected bulk delete result: %+v", result)
+	}
+	if got := strings.Join(deletedPVCs, ","); got != "pvc-a,pvc-b,pvc-c" {
+		t.Fatalf("unexpected delete attempts: %s", got)
 	}
 }
 

@@ -1,7 +1,7 @@
 "use client";
 
 import { Sparkles as SkillsPageIcon } from "lucide-react";
-import { ChangeEvent, useEffect, useMemo, useState } from "react";
+import { ChangeEvent, useCallback, useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import {
   CheckCircle2,
@@ -14,7 +14,7 @@ import {
   Upload,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
-import { AdminPageHeader } from "@/components/admin/admin-ui";
+import { AdminPageHeader, AdminPagination } from "@/components/admin/admin-ui";
 
 type Skill = {
   id: string;
@@ -37,8 +37,12 @@ type Candidate = Skill & {
   content_sha256?: string;
 };
 
+const SKILLS_PAGE_SIZE = 24;
+
 export default function AdminSkillsPage() {
   const [skills, setSkills] = useState<Skill[]>([]);
+  const [page, setPage] = useState(0);
+  const [total, setTotal] = useState(0);
   const [candidates, setCandidates] = useState<Candidate[]>([]);
   const [selected, setSelected] = useState<Record<string, boolean>>({});
   const [file, setFile] = useState<File | null>(null);
@@ -56,24 +60,37 @@ export default function AdminSkillsPage() {
   const allValidSelected =
     validCandidates.length > 0 && validCandidates.every((candidate) => selected[candidate.id]);
 
-  const load = async (showLoading = true) => {
-    if (showLoading) setLoading(true);
-    setError(null);
-    try {
-      const res = await fetch("/api/admin/skills", { cache: "no-store" });
-      if (!res.ok) throw new Error(await readError(res));
-      const data = await res.json();
-      setSkills(data.skills ?? []);
-    } catch (err) {
-      setError(err instanceof Error ? err.message : String(err));
-    } finally {
-      if (showLoading) setLoading(false);
-    }
-  };
+  const load = useCallback(
+    async (showLoading = true) => {
+      if (showLoading) setLoading(true);
+      setError(null);
+      const query = new URLSearchParams({
+        limit: String(SKILLS_PAGE_SIZE),
+        offset: String(page * SKILLS_PAGE_SIZE),
+      });
+      try {
+        const res = await fetch(`/api/admin/skills?${query}`, { cache: "no-store" });
+        if (!res.ok) throw new Error(await readError(res));
+        const data = (await res.json()) as { skills?: Skill[]; total?: number };
+        setSkills(Array.isArray(data.skills) ? data.skills : []);
+        setTotal(typeof data.total === "number" ? data.total : 0);
+      } catch (err) {
+        setError(err instanceof Error ? err.message : String(err));
+      } finally {
+        if (showLoading) setLoading(false);
+      }
+    },
+    [page],
+  );
 
   useEffect(() => {
     void load();
-  }, []);
+  }, [load]);
+
+  useEffect(() => {
+    const lastPage = Math.max(0, Math.ceil(total / SKILLS_PAGE_SIZE) - 1);
+    if (page > lastPage) setPage(lastPage);
+  }, [page, total]);
 
   const chooseFile = async (event: ChangeEvent<HTMLInputElement>) => {
     const next = event.target.files?.[0] ?? null;
@@ -194,6 +211,7 @@ export default function AdminSkillsPage() {
         method: "DELETE",
       });
       if (!res.ok) throw new Error(await readError(res));
+      await load(false);
     } catch (err) {
       setSkills(previous);
       setError(err instanceof Error ? err.message : String(err));
@@ -352,6 +370,15 @@ export default function AdminSkillsPage() {
           </div>
         )}
       </section>
+      <AdminPagination
+        page={page}
+        pageSize={SKILLS_PAGE_SIZE}
+        count={skills.length}
+        total={total}
+        loading={loading}
+        label="skills"
+        onPageChange={setPage}
+      />
     </main>
   );
 }

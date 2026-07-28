@@ -2,7 +2,7 @@
 
 import { Layers as SandboxesPageIcon } from "lucide-react";
 import { Button } from "@/components/ui/button";
-import { AdminRefreshButton } from "@/components/admin/admin-ui";
+import { AdminConfirmDialog, AdminRefreshButton } from "@/components/admin/admin-ui";
 import { cn } from "@/lib/utils";
 import { CheckCircle2, Clock3, LoaderCircle, Server, Trash2 } from "lucide-react";
 import { signOut } from "next-auth/react";
@@ -52,6 +52,7 @@ export default function SandboxesPage() {
   const [error, setError] = useState("");
   const [notice, setNotice] = useState("");
   const [deletingId, setDeletingId] = useState("");
+  const [pendingDeleteId, setPendingDeleteId] = useState("");
 
   const refresh = useCallback(async () => {
     setError("");
@@ -78,9 +79,6 @@ export default function SandboxesPage() {
 
   const handleDelete = useCallback(async (sandboxID: string) => {
     if (!sandboxID) return;
-    if (!window.confirm(`Delete sandbox ${sandboxID}? This removes the pod and its metadata.`)) {
-      return;
-    }
     setError("");
     setDeletingId(sandboxID);
     try {
@@ -91,6 +89,7 @@ export default function SandboxesPage() {
       if (isAccountDisabledResponse(res)) return redirectAccountDisabled();
       if (!res.ok && res.status !== 204) throw new Error(await responseError(res));
       setSandboxes((prev) => prev.filter((s) => s.sandbox_id !== sandboxID));
+      setPendingDeleteId("");
       setNotice(`Sandbox ${sandboxID} deleted`);
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
@@ -261,8 +260,8 @@ export default function SandboxesPage() {
                                 variant="outline"
                                 size="sm"
                                 className="text-destructive hover:text-destructive"
-                                disabled={deletingId === sandbox.sandbox_id}
-                                onClick={() => void handleDelete(sandbox.sandbox_id)}
+                                disabled={Boolean(deletingId)}
+                                onClick={() => setPendingDeleteId(sandbox.sandbox_id)}
                               >
                                 {deletingId === sandbox.sandbox_id ? (
                                   <LoaderCircle className="mr-1 size-3.5 animate-spin" />
@@ -285,6 +284,18 @@ export default function SandboxesPage() {
           </>
         )}
       </div>
+      <AdminConfirmDialog
+        open={Boolean(pendingDeleteId)}
+        onOpenChange={(open) => {
+          if (!open) setPendingDeleteId("");
+        }}
+        title="Delete sandbox?"
+        description={`This removes ${pendingDeleteId || "this sandbox"} and its runtime metadata. This action cannot be undone.`}
+        confirmLabel="Delete sandbox"
+        busy={Boolean(deletingId)}
+        destructive
+        onConfirm={() => void handleDelete(pendingDeleteId)}
+      />
     </main>
   );
 }

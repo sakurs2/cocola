@@ -6,9 +6,11 @@ import { signOut } from "next-auth/react";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import {
   AdminAlert,
+  AdminConfirmDialog,
   AdminMetric,
   AdminPage,
   AdminPageHeader,
+  AdminPagination,
   AdminPanel,
   AdminRefreshButton,
   AdminStatusBadge,
@@ -52,13 +54,22 @@ type StorageMeasurement = {
   measured_at: string;
 };
 
+const SESSION_STORAGE_PAGE_SIZE = 25;
+
 export default function StoragePage() {
   const [nodes, setNodes] = useState<NodeFilesystem[]>([]);
   const [volumes, setVolumes] = useState<SessionVolume[]>([]);
+  const [volumePage, setVolumePage] = useState(0);
+  const [volumeTotal, setVolumeTotal] = useState(0);
+  const [orphanCount, setOrphanCount] = useState(0);
+  const [requestedBytes, setRequestedBytes] = useState(0);
   const [measurements, setMeasurements] = useState<Record<string, StorageMeasurement>>({});
   const [loading, setLoading] = useState(true);
   const [measuring, setMeasuring] = useState<string | null>(null);
   const [deleting, setDeleting] = useState<string | null>(null);
+  const [pendingDelete, setPendingDelete] = useState<SessionVolume | null>(null);
+  const [bulkDeleteOpen, setBulkDeleteOpen] = useState(false);
+  const [bulkDeleting, setBulkDeleting] = useState(false);
   const [error, setError] = useState("");
   const [notice, setNotice] = useState("");
   const [unsupported, setUnsupported] = useState(false);
@@ -66,10 +77,14 @@ export default function StoragePage() {
   const refresh = useCallback(async () => {
     setError("");
     setLoading(true);
+    const volumeQuery = new URLSearchParams({
+      limit: String(SESSION_STORAGE_PAGE_SIZE),
+      offset: String(volumePage * SESSION_STORAGE_PAGE_SIZE),
+    });
     try {
       const [nodesRes, volumesRes] = await Promise.all([
         fetch("/api/admin/storage/nodes", { cache: "no-store" }),
-        fetch("/api/admin/session-storage", { cache: "no-store" }),
+        fetch(`/api/admin/session-storage?${volumeQuery}`, { cache: "no-store" }),
       ]);
       if (isAccountDisabledResponse(nodesRes) || isAccountDisabledResponse(volumesRes)) {
         await signOut({ callbackUrl: "/login?error=account_disabled" });
@@ -79,25 +94,43 @@ export default function StoragePage() {
         setUnsupported(true);
         setNodes([]);
         setVolumes([]);
+        setVolumeTotal(0);
+        setOrphanCount(0);
+        setRequestedBytes(0);
         return;
       }
       if (!nodesRes.ok) throw new Error(await responseError(nodesRes));
       if (!volumesRes.ok) throw new Error(await responseError(volumesRes));
       const nodeBody = (await nodesRes.json()) as { nodes?: NodeFilesystem[] };
-      const volumeBody = (await volumesRes.json()) as { volumes?: SessionVolume[] };
+      const volumeBody = (await volumesRes.json()) as {
+        volumes?: SessionVolume[];
+        total?: number;
+        requested_bytes?: number;
+        orphan_count?: number;
+      };
       setUnsupported(false);
       setNodes(Array.isArray(nodeBody.nodes) ? nodeBody.nodes : []);
       setVolumes(Array.isArray(volumeBody.volumes) ? volumeBody.volumes : []);
+      setVolumeTotal(typeof volumeBody.total === "number" ? volumeBody.total : 0);
+      setOrphanCount(typeof volumeBody.orphan_count === "number" ? volumeBody.orphan_count : 0);
+      setRequestedBytes(
+        typeof volumeBody.requested_bytes === "number" ? volumeBody.requested_bytes : 0,
+      );
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [volumePage]);
 
   useEffect(() => {
     void refresh();
   }, [refresh]);
+
+  useEffect(() => {
+    const lastPage = Math.max(0, Math.ceil(volumeTotal / SESSION_STORAGE_PAGE_SIZE) - 1);
+    if (volumePage > lastPage) setVolumePage(lastPage);
+  }, [volumePage, volumeTotal]);
 
   const totals = useMemo(() => {
     const measured = nodes.filter((node) => node.available);
@@ -106,9 +139,9 @@ export default function StoragePage() {
       measuredCount: measured.length,
       totalBytes: measured.reduce((sum, node) => sum + node.total_bytes, 0),
       availableBytes: measured.reduce((sum, node) => sum + node.available_bytes, 0),
-      requestedBytes: volumes.reduce((sum, volume) => sum + volume.requested_bytes, 0),
+      requestedBytes,
     };
-  }, [nodes, volumes]);
+  }, [nodes, requestedBytes]);
 
   const measureVolume = async (volume: SessionVolume) => {
     const key = volumeKey(volume);
@@ -134,9 +167,10 @@ export default function StoragePage() {
     }
   };
 
-  const deleteOrphanVolume = async (volume: SessionVolume) => {
+  const deleteOrphanVolume = async () => {
+    const volume = pendingDelete;
+    if (!volume) return;
     if (!volume.delete_allowed) return;
-    if (!window.confirm(`Delete orphan Workspace ${volume.pvc_name}?`)) return;
     const key = volumeKey(volume);
     setError("");
     setNotice("");
@@ -147,13 +181,49 @@ export default function StoragePage() {
         `/api/admin/session-storage/${encodeURIComponent(volume.storage_id)}?${query}`,
         { method: "DELETE" },
       );
+      if (isAccountDisabledResponse(res)) {
+        await signOut({ callbackUrl: "/login?error=account_disabled" });
+        return;
+      }
       if (!res.ok) throw new Error(await responseError(res));
-      setNotice("Orphan Workspace deletion submitted");
+      setPendingDelete(null);
+      setNotice(`Orphan Session Volume ${volume.pvc_name} deletion submitted`);
       await refresh();
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
     } finally {
       setDeleting(null);
+    }
+  };
+
+  const deleteAllOrphanVolumes = async () => {
+    setError("");
+    setNotice("");
+    setBulkDeleting(true);
+    try {
+      const res = await fetch("/api/admin/session-storage/orphans", {
+        method: "DELETE",
+        cache: "no-store",
+      });
+      if (isAccountDisabledResponse(res)) {
+        await signOut({ callbackUrl: "/login?error=account_disabled" });
+        return;
+      }
+      if (!res.ok) throw new Error(await responseError(res));
+      const result = (await res.json()) as { matched?: number; deleted?: number; failed?: number };
+      const deleted = typeof result.deleted === "number" ? result.deleted : 0;
+      const failed = typeof result.failed === "number" ? result.failed : 0;
+      setBulkDeleteOpen(false);
+      setNotice(
+        failed > 0
+          ? `Deleted ${deleted} orphan Session Volumes; ${failed} could not be deleted.`
+          : `Deleted ${deleted} orphan Session Volumes.`,
+      );
+      await refresh();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setBulkDeleting(false);
     }
   };
 
@@ -218,7 +288,7 @@ export default function StoragePage() {
             <AdminMetric
               label="Session requests"
               value={formatBytes(totals.requestedBytes)}
-              detail={`${volumes.length} PVCs · soft requests`}
+              detail={`${volumeTotal} PVCs · soft requests`}
               icon={<Database className="size-4" />}
               tone="violet"
             />
@@ -247,6 +317,20 @@ export default function StoragePage() {
             title="Session Storage"
             description="PVC requests are soft limits. Actual disk usage is measured only when you request it."
             contentClassName="p-0 sm:p-0"
+            actions={
+              orphanCount > 0 ? (
+                <Button
+                  variant="outline"
+                  size="sm"
+                  className="text-destructive hover:text-destructive"
+                  disabled={loading || bulkDeleting || Boolean(deleting)}
+                  onClick={() => setBulkDeleteOpen(true)}
+                >
+                  <Trash2 className="mr-2 size-4" />
+                  Delete all orphans ({orphanCount})
+                </Button>
+              ) : null
+            }
           >
             <AdminTable className="rounded-none border-0">
               <table className="w-full min-w-[1180px] text-sm">
@@ -337,7 +421,7 @@ export default function StoragePage() {
                                   variant="destructive"
                                   size="sm"
                                   disabled={deleting === key}
-                                  onClick={() => void deleteOrphanVolume(volume)}
+                                  onClick={() => setPendingDelete(volume)}
                                 >
                                   <Trash2 className="mr-2 size-4" />
                                   Delete orphan
@@ -352,9 +436,45 @@ export default function StoragePage() {
                 </tbody>
               </table>
             </AdminTable>
+            <AdminPagination
+              page={volumePage}
+              pageSize={SESSION_STORAGE_PAGE_SIZE}
+              count={volumes.length}
+              total={volumeTotal}
+              loading={loading}
+              label="volumes"
+              onPageChange={setVolumePage}
+              variant="embedded"
+            />
           </AdminPanel>
         </>
       )}
+      <AdminConfirmDialog
+        open={pendingDelete !== null}
+        onOpenChange={(open) => {
+          if (!open) setPendingDelete(null);
+        }}
+        title="Delete orphan Session Volume?"
+        description={
+          pendingDelete
+            ? `This permanently deletes ${pendingDelete.pvc_name}. Active Session Volumes are not affected.`
+            : ""
+        }
+        confirmLabel="Delete orphan"
+        busy={deleting !== null}
+        destructive
+        onConfirm={() => void deleteOrphanVolume()}
+      />
+      <AdminConfirmDialog
+        open={bulkDeleteOpen}
+        onOpenChange={setBulkDeleteOpen}
+        title={`Delete all ${orphanCount} orphan Session Volumes?`}
+        description="This permanently deletes every Session Volume currently marked as an orphan. Active Session Volumes are not affected."
+        confirmLabel="Delete all orphans"
+        busy={bulkDeleting}
+        destructive
+        onConfirm={() => void deleteAllOrphanVolumes()}
+      />
     </AdminPage>
   );
 }

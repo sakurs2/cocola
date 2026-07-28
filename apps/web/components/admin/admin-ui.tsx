@@ -2,7 +2,7 @@
 
 import * as Dialog from "@radix-ui/react-dialog";
 import { motion } from "framer-motion";
-import { RefreshCw, X } from "lucide-react";
+import { ChevronLeft, ChevronRight, RefreshCw, X } from "lucide-react";
 import { type ComponentPropsWithoutRef, type ReactNode, useState } from "react";
 import { Badge } from "@/components/ui/badge";
 import { Button, type ButtonProps } from "@/components/ui/button";
@@ -154,6 +154,75 @@ export function AdminToolbar({ children, className }: { children: ReactNode; cla
 
 export function AdminTable({ children, className }: { children: ReactNode; className?: string }) {
   return <Card className={cn("overflow-x-auto", className)}>{children}</Card>;
+}
+
+export function AdminPagination({
+  page,
+  pageSize,
+  count,
+  total,
+  hasNext,
+  loading = false,
+  label,
+  onPageChange,
+  variant = "card",
+}: {
+  page: number;
+  pageSize: number;
+  count: number;
+  total?: number;
+  hasNext?: boolean;
+  loading?: boolean;
+  label: string;
+  onPageChange: (page: number) => void;
+  variant?: "card" | "embedded";
+}) {
+  const start = count > 0 ? page * pageSize + 1 : 0;
+  const end = count > 0 ? page * pageSize + count : 0;
+  const pageCount = total === undefined ? undefined : Math.max(1, Math.ceil(total / pageSize));
+  const canGoNext =
+    total === undefined ? Boolean(hasNext) : (page + 1) * pageSize < Math.max(total, 0);
+
+  return (
+    <div
+      className={cn(
+        "flex min-h-14 flex-col gap-3 px-4 py-3 sm:flex-row sm:items-center sm:justify-between",
+        variant === "card"
+          ? "rounded-xl border border-border/70 bg-card/80"
+          : "border-t border-border/70 bg-muted/15",
+      )}
+    >
+      <div className="text-xs tabular-nums text-muted-foreground">
+        {total === undefined ? `${start}–${end} ${label}` : `${start}–${end} of ${total} ${label}`}
+      </div>
+      <div className="flex items-center gap-2">
+        <span className="min-w-20 text-center text-xs tabular-nums text-muted-foreground">
+          Page {page + 1}
+          {pageCount === undefined ? "" : ` of ${pageCount}`}
+        </span>
+        <button
+          type="button"
+          className="inline-flex h-9 items-center gap-1.5 rounded-xl border border-border/80 bg-background px-3 text-xs font-medium text-foreground transition-colors hover:bg-muted disabled:pointer-events-none disabled:opacity-40"
+          aria-label={`Previous page of ${label}`}
+          disabled={page === 0 || loading}
+          onClick={() => onPageChange(Math.max(0, page - 1))}
+        >
+          <ChevronLeft className="size-4" />
+          Previous
+        </button>
+        <button
+          type="button"
+          className="inline-flex h-9 items-center gap-1.5 rounded-xl border border-border/80 bg-background px-3 text-xs font-medium text-foreground transition-colors hover:bg-muted disabled:pointer-events-none disabled:opacity-40"
+          aria-label={`Next page of ${label}`}
+          disabled={!canGoNext || loading}
+          onClick={() => onPageChange(page + 1)}
+        >
+          Next
+          <ChevronRight className="size-4" />
+        </button>
+      </div>
+    </div>
+  );
 }
 
 const statusTone = {

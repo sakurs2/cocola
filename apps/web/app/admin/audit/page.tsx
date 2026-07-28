@@ -17,6 +17,7 @@ import {
   AdminEmptyState,
   AdminPage,
   AdminPageHeader,
+  AdminPagination,
   AdminRefreshButton,
   AdminStatusBadge,
   AdminTable,
@@ -52,6 +53,7 @@ export default function AdminAuditPage() {
   const [from, setFrom] = useState("");
   const [until, setUntil] = useState("");
   const [page, setPage] = useState(0);
+  const [hasNext, setHasNext] = useState(false);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
 
@@ -59,7 +61,7 @@ export default function AdminAuditPage() {
     setLoading(true);
     setError("");
     const params = new URLSearchParams({
-      limit: String(PAGE_SIZE),
+      limit: String(PAGE_SIZE + 1),
       offset: String(page * PAGE_SIZE),
     });
     if (search.trim()) params.set("search", search.trim());
@@ -73,8 +75,11 @@ export default function AdminAuditPage() {
       });
       if (!response.ok) throw new Error(await errorText(response));
       const body = (await response.json()) as { runs?: ConversationRun[] };
-      setRuns(body.runs ?? []);
+      const loadedRuns = Array.isArray(body.runs) ? body.runs : [];
+      setHasNext(loadedRuns.length > PAGE_SIZE);
+      setRuns(loadedRuns.slice(0, PAGE_SIZE));
     } catch (loadError) {
+      setHasNext(false);
       setError(loadError instanceof Error ? loadError.message : String(loadError));
     } finally {
       setLoading(false);
@@ -166,29 +171,8 @@ export default function AdminAuditPage() {
       ) : null}
 
       <AdminTable>
-        <div className="flex min-h-12 items-center justify-between border-b border-border/70 px-4">
+        <div className="flex min-h-12 items-center border-b border-border/70 px-4">
           <div className="text-sm font-semibold">Agent runs</div>
-          <div className="flex items-center gap-1">
-            <button
-              className="inline-flex size-9 items-center justify-center rounded-xl text-muted-foreground hover:bg-muted disabled:opacity-35"
-              aria-label="Previous page"
-              disabled={page === 0 || loading}
-              onClick={() => setPage((value) => Math.max(0, value - 1))}
-            >
-              <ChevronLeft className="size-4" />
-            </button>
-            <span className="min-w-10 text-center font-mono text-xs text-muted-foreground">
-              {page + 1}
-            </span>
-            <button
-              className="inline-flex size-9 items-center justify-center rounded-xl text-muted-foreground hover:bg-muted disabled:opacity-35"
-              aria-label="Next page"
-              disabled={runs.length < PAGE_SIZE || loading}
-              onClick={() => setPage((value) => value + 1)}
-            >
-              <ChevronRight className="size-4" />
-            </button>
-          </div>
         </div>
         <table className="w-full min-w-[1120px] text-left text-sm">
           <thead className="sticky top-0 border-b border-border/70 bg-muted/45 text-xs text-muted-foreground">
@@ -274,6 +258,15 @@ export default function AdminAuditPage() {
           />
         ) : null}
       </AdminTable>
+      <AdminPagination
+        page={page}
+        pageSize={PAGE_SIZE}
+        count={runs.length}
+        hasNext={hasNext}
+        loading={loading}
+        label="runs"
+        onPageChange={setPage}
+      />
     </AdminPage>
   );
 }

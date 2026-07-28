@@ -591,7 +591,17 @@ func (a *API) listSkills(w http.ResponseWriter, r *http.Request) {
 		mapErr(w, err)
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"skills": skills})
+	limit, offset := len(skills), 0
+	if r.URL.Query().Has("limit") || r.URL.Query().Has("offset") {
+		limit, offset = paginationParams(r, 24, 100)
+	}
+	start, end := pageBounds(len(skills), limit, offset)
+	writeJSON(w, http.StatusOK, map[string]any{
+		"skills": skills[start:end],
+		"total":  len(skills),
+		"limit":  limit,
+		"offset": offset,
+	})
 }
 
 func (a *API) getSkill(w http.ResponseWriter, r *http.Request) {
@@ -1770,7 +1780,27 @@ func (a *API) listSessionStorage(w http.ResponseWriter, r *http.Request) {
 		mapErr(w, err)
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"volumes": items})
+	var requestedBytes int64
+	orphanCount := 0
+	for _, item := range items {
+		requestedBytes += item.RequestedBytes
+		if item.DeleteAllowed {
+			orphanCount++
+		}
+	}
+	limit, offset := len(items), 0
+	if r.URL.Query().Has("limit") || r.URL.Query().Has("offset") {
+		limit, offset = paginationParams(r, 25, 100)
+	}
+	start, end := pageBounds(len(items), limit, offset)
+	writeJSON(w, http.StatusOK, map[string]any{
+		"volumes":         items[start:end],
+		"total":           len(items),
+		"requested_bytes": requestedBytes,
+		"orphan_count":    orphanCount,
+		"limit":           limit,
+		"offset":          offset,
+	})
 }
 
 func (a *API) listNodeStorageFilesystems(w http.ResponseWriter, r *http.Request) {
@@ -1801,6 +1831,15 @@ func (a *API) deleteOrphanSessionStorage(w http.ResponseWriter, r *http.Request)
 		return
 	}
 	w.WriteHeader(http.StatusNoContent)
+}
+
+func (a *API) deleteAllOrphanSessionStorage(w http.ResponseWriter, r *http.Request) {
+	result, err := a.svc.DeleteAllOrphanSessionStorage(r.Context())
+	if err != nil {
+		mapErr(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, result)
 }
 
 // ---- sandbox runtimes ----
@@ -1942,6 +1981,24 @@ func (a *API) getConversationRun(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"run": run})
+}
+
+func paginationParams(r *http.Request, defaultLimit, maxLimit int) (limit, offset int) {
+	limit = qInt(r, "limit", defaultLimit)
+	if limit <= 0 || limit > maxLimit {
+		limit = defaultLimit
+	}
+	offset = qInt(r, "offset", 0)
+	if offset < 0 {
+		offset = 0
+	}
+	return limit, offset
+}
+
+func pageBounds(total, limit, offset int) (start, end int) {
+	start = min(offset, total)
+	end = min(start+limit, total)
+	return start, end
 }
 
 func (a *API) listConversationTraceSpans(w http.ResponseWriter, r *http.Request) {
