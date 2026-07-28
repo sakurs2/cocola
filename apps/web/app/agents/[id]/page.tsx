@@ -5,10 +5,7 @@ import Link from "next/link";
 import { useParams, useRouter } from "next/navigation";
 import { useEffect, useMemo, useState } from "react";
 import { AgentAvatar } from "@/components/agents/agent-avatar";
-import {
-  AgentCapabilitiesEditor,
-  type KnowledgeCheckStatus,
-} from "@/components/agents/agent-capabilities-editor";
+import { AgentCapabilitiesEditor } from "@/components/agents/agent-capabilities-editor";
 import { useWorkspaceToast } from "@/components/assistant-ui/workspace-toast";
 import { FeishuConnectorCard } from "@/components/connectors/feishu-connector-card";
 import { ActionConfirmDialog } from "@/components/ui/action-dialog";
@@ -18,7 +15,6 @@ import { SelectControl } from "@/components/ui/select-control";
 import {
   AGENT_AVATAR_COLORS,
   AGENT_AVATAR_KEYS,
-  agentKnowledgeSourceKey,
   agentResponseError,
   normalizeAgentSkillCatalog,
   normalizeAgentModels,
@@ -60,10 +56,6 @@ export default function AgentPage() {
   const [modelID, setModelID] = useState("");
   const [skillIDs, setSkillIDs] = useState<string[]>([]);
   const [knowledgeSources, setKnowledgeSources] = useState<AgentKnowledgeSource[]>([]);
-  const [knowledgeStatuses, setKnowledgeStatuses] = useState<Record<string, KnowledgeCheckStatus>>(
-    {},
-  );
-  const [checkingKnowledge, setCheckingKnowledge] = useState(false);
   const [suggestedPrompts, setSuggestedPrompts] = useState<AgentSuggestedPrompt[]>([]);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
@@ -117,24 +109,6 @@ export default function AgentPage() {
           setSkillIDs(loaded.skill_ids ?? []);
           setKnowledgeSources(loaded.knowledge_sources ?? []);
           setSuggestedPrompts(loaded.suggested_prompts ?? []);
-          if ((loaded.knowledge_sources ?? []).length > 0) {
-            void checkKnowledgeAccess(loaded.id, loaded.knowledge_sources, controller.signal)
-              .then((statuses) => {
-                if (!controller.signal.aborted) setKnowledgeStatuses(statuses);
-              })
-              .catch(() => {
-                if (!controller.signal.aborted) {
-                  setKnowledgeStatuses(
-                    Object.fromEntries(
-                      loaded.knowledge_sources.map((source) => [
-                        agentKnowledgeSourceKey(source),
-                        "temporarily_unavailable" as const,
-                      ]),
-                    ),
-                  );
-                }
-              });
-          }
         }
       } catch (cause) {
         if (!controller.signal.aborted) {
@@ -227,43 +201,12 @@ export default function AgentPage() {
       setKnowledgeSources(updated.knowledge_sources);
       setSuggestedPrompts(updated.suggested_prompts);
       showSuccess("Agent saved");
-      if (updated.knowledge_sources.length > 0) {
-        setCheckingKnowledge(true);
-        try {
-          setKnowledgeStatuses(await checkKnowledgeAccess(updated.id, updated.knowledge_sources));
-        } catch {
-          setKnowledgeStatuses(
-            Object.fromEntries(
-              updated.knowledge_sources.map((source) => [
-                agentKnowledgeSourceKey(source),
-                "temporarily_unavailable" as const,
-              ]),
-            ),
-          );
-        } finally {
-          setCheckingKnowledge(false);
-        }
-      } else {
-        setKnowledgeStatuses({});
-      }
     } catch (cause) {
       const message = cause instanceof Error ? cause.message : "Could not save Agent";
       setError(message);
       showError(message);
     } finally {
       setSaving(false);
-    }
-  };
-
-  const checkKnowledge = async () => {
-    if (!agent || dirty || knowledgeSources.length === 0) return;
-    setCheckingKnowledge(true);
-    try {
-      setKnowledgeStatuses(await checkKnowledgeAccess(agent.id, knowledgeSources));
-    } catch (cause) {
-      showError(cause instanceof Error ? cause.message : "Could not check Knowledge access");
-    } finally {
-      setCheckingKnowledge(false);
     }
   };
 
@@ -517,19 +460,9 @@ export default function AgentPage() {
           <AgentCapabilitiesEditor
             skills={skillCatalog}
             skillIDs={skillIDs}
-            onSkillIDsChange={(value) => {
-              setSkillIDs(value);
-              setKnowledgeStatuses({});
-            }}
+            onSkillIDsChange={setSkillIDs}
             knowledgeSources={knowledgeSources}
-            onKnowledgeSourcesChange={(value) => {
-              setKnowledgeSources(value);
-              setKnowledgeStatuses({});
-            }}
-            knowledgeStatuses={knowledgeStatuses}
-            checkingKnowledge={checkingKnowledge}
-            knowledgeCheckDisabled={dirty}
-            onCheckKnowledge={() => void checkKnowledge()}
+            onKnowledgeSourcesChange={setKnowledgeSources}
             suggestedPrompts={suggestedPrompts}
             onSuggestedPromptsChange={setSuggestedPrompts}
           />
@@ -574,29 +507,4 @@ export default function AgentPage() {
       />
     </main>
   );
-}
-
-async function checkKnowledgeAccess(
-  agentID: string,
-  sources: AgentKnowledgeSource[],
-  signal?: AbortSignal,
-): Promise<Record<string, KnowledgeCheckStatus>> {
-  const response = await fetch(`/api/agents/${encodeURIComponent(agentID)}/knowledge/check`, {
-    method: "POST",
-    cache: "no-store",
-    signal,
-    headers: { "content-type": "application/json" },
-    body: JSON.stringify({ sources }),
-  });
-  if (!response.ok) throw new Error(await agentResponseError(response));
-  const payload = (await response.json()) as {
-    results?: Array<{ source?: AgentKnowledgeSource; status?: KnowledgeCheckStatus }>;
-  };
-  const statuses: Record<string, KnowledgeCheckStatus> = {};
-  for (const result of payload.results ?? []) {
-    if (result.source && result.status) {
-      statuses[agentKnowledgeSourceKey(result.source)] = result.status;
-    }
-  }
-  return statuses;
 }

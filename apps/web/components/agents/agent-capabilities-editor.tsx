@@ -2,8 +2,10 @@
 
 import { AlertTriangle, BookOpenText, Check, Loader2, Plus, Search, Trash2 } from "lucide-react";
 import { useMemo, useState } from "react";
+import { Badge } from "@/components/ui/badge";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { SkillIcon } from "@/components/ui/skill-icon";
 import type {
   AgentKnowledgeSource,
   AgentSkillCatalogItem,
@@ -12,24 +14,12 @@ import type {
 import { agentKnowledgeSourceKey } from "@/lib/agents";
 import { cn } from "@/lib/utils";
 
-export type KnowledgeCheckStatus =
-  | "ready"
-  | "connector_required"
-  | "permission_required"
-  | "not_found"
-  | "temporarily_unavailable"
-  | "unsupported";
-
 type Props = {
   skills: AgentSkillCatalogItem[];
   skillIDs: string[];
   onSkillIDsChange: (value: string[]) => void;
   knowledgeSources: AgentKnowledgeSource[];
   onKnowledgeSourcesChange: (value: AgentKnowledgeSource[]) => void;
-  knowledgeStatuses: Record<string, KnowledgeCheckStatus>;
-  checkingKnowledge: boolean;
-  knowledgeCheckDisabled: boolean;
-  onCheckKnowledge: () => void;
   suggestedPrompts: AgentSuggestedPrompt[];
   onSuggestedPromptsChange: (value: AgentSuggestedPrompt[]) => void;
 };
@@ -42,20 +32,16 @@ const REQUIRED_KNOWLEDGE_SKILLS: Record<AgentKnowledgeSource["type"], string[]> 
   cocola_wiki: [],
 };
 
-const KNOWLEDGE_STATUS_LABELS: Record<KnowledgeCheckStatus, string> = {
-  ready: "Ready",
-  connector_required: "Connector required",
-  permission_required: "Permission required",
-  not_found: "Not found",
-  temporarily_unavailable: "Temporarily unavailable",
-  unsupported: "Unavailable",
-};
-
 type AgentWikiNode = {
   id: string;
   kind: "folder" | "file";
   name: string;
   logical_path?: string;
+};
+
+type KnowledgeNotice = {
+  tone: "error" | "success";
+  text: string;
 };
 
 export function AgentCapabilitiesEditor({
@@ -64,10 +50,6 @@ export function AgentCapabilitiesEditor({
   onSkillIDsChange,
   knowledgeSources,
   onKnowledgeSourcesChange,
-  knowledgeStatuses,
-  checkingKnowledge,
-  knowledgeCheckDisabled,
-  onCheckKnowledge,
   suggestedPrompts,
   onSuggestedPromptsChange,
 }: Props) {
@@ -78,7 +60,8 @@ export function AgentCapabilitiesEditor({
   const [wikiQuery, setWikiQuery] = useState("");
   const [wikiLoading, setWikiLoading] = useState(false);
   const [wikiError, setWikiError] = useState("");
-  const [capabilityMessage, setCapabilityMessage] = useState("");
+  const [skillMessage, setSkillMessage] = useState("");
+  const [knowledgeNotice, setKnowledgeNotice] = useState<KnowledgeNotice | null>(null);
   const selectedIDs = useMemo(() => new Set(skillIDs), [skillIDs]);
   const catalogByID = useMemo(() => new Map(skills.map((skill) => [skill.id, skill])), [skills]);
   const displayedSkills = useMemo(() => {
@@ -110,27 +93,32 @@ export function AgentCapabilitiesEditor({
   }, [wikiNodes, wikiQuery]);
 
   const toggleSkill = (skill: AgentSkillCatalogItem) => {
-    setCapabilityMessage("");
+    setSkillMessage("");
     if (selectedIDs.has(skill.id)) {
       onSkillIDsChange(skillIDs.filter((id) => id !== skill.id));
       return;
     }
-    if (!skill.available || skillIDs.length >= 32) return;
+    if (!skill.available) return;
+    if (skillIDs.length >= 32) {
+      setSkillMessage("An Agent can select up to 32 Skills.");
+      return;
+    }
     const duplicate = skillIDs.some((id) => catalogByID.get(id)?.runtime_id === skill.runtime_id);
     if (duplicate) {
-      setCapabilityMessage(
-        `Only one Skill with the runtime ID “${skill.runtime_id}” can be selected.`,
-      );
+      setSkillMessage(`Only one Skill with the runtime ID “${skill.runtime_id}” can be selected.`);
       return;
     }
     onSkillIDsChange([...skillIDs, skill.id]);
   };
 
   const addKnowledge = () => {
-    setCapabilityMessage("");
+    setKnowledgeNotice(null);
     const source = normalizeKnowledgeSource(knowledgeURL, knowledgeLabel);
     if (!source) {
-      setCapabilityMessage("Enter a supported HTTPS Feishu or Lark document URL.");
+      setKnowledgeNotice({
+        tone: "error",
+        text: "Use an HTTPS Feishu or Lark Doc, Wiki, Sheet, or Base link from feishu.cn, larkoffice.com, or larksuite.com.",
+      });
       return;
     }
     const sourceKey = agentKnowledgeSourceKey(source);
@@ -138,11 +126,13 @@ export function AgentCapabilitiesEditor({
       knowledgeSources.length >= 10 ||
       knowledgeSources.some((item) => agentKnowledgeSourceKey(item) === sourceKey)
     ) {
-      setCapabilityMessage(
-        knowledgeSources.length >= 10
-          ? "An Agent can have up to 10 Knowledge sources."
-          : "This Knowledge source is already configured.",
-      );
+      setKnowledgeNotice({
+        tone: "error",
+        text:
+          knowledgeSources.length >= 10
+            ? "An Agent can have up to 10 Knowledge sources."
+            : "This Knowledge source is already configured.",
+      });
       return;
     }
 
@@ -155,9 +145,10 @@ export function AgentCapabilitiesEditor({
           ),
       );
       if (missing.length > 0) {
-        setCapabilityMessage(
-          `This source requires ${missing.join(", ")}, but it is not available in your default skills.`,
-        );
+        setKnowledgeNotice({
+          tone: "error",
+          text: `This source requires ${missing.join(", ")}, but it is not available in your default skills.`,
+        });
         return;
       }
     } else {
@@ -172,9 +163,10 @@ export function AgentCapabilitiesEditor({
       for (const runtimeID of requiredRuntimeIDs) {
         if (selectedRuntimeIDs.has(runtimeID)) continue;
         if (selectedSkills.some((skill) => skill.runtime_id === runtimeID && !skill.available)) {
-          setCapabilityMessage(
-            `This source requires ${runtimeID}, but the selected Skill is unavailable. Remove it before choosing a replacement.`,
-          );
+          setKnowledgeNotice({
+            tone: "error",
+            text: `This source requires ${runtimeID}, but the selected Skill is unavailable. Remove it before choosing a replacement.`,
+          });
           return;
         }
         const candidate =
@@ -183,16 +175,20 @@ export function AgentCapabilitiesEditor({
               skill.runtime_id === runtimeID && skill.available && skill.source === "personal",
           ) ?? skills.find((skill) => skill.runtime_id === runtimeID && skill.available);
         if (!candidate) {
-          setCapabilityMessage(
-            `This source requires ${runtimeID}, but an administrator has made it unavailable.`,
-          );
+          setKnowledgeNotice({
+            tone: "error",
+            text: `This source requires ${runtimeID}, but an administrator has made it unavailable.`,
+          });
           return;
         }
         nextIDs.push(candidate.id);
         selectedRuntimeIDs.add(runtimeID);
       }
       if (nextIDs.length > 32) {
-        setCapabilityMessage("An Agent can select up to 32 Skills.");
+        setKnowledgeNotice({
+          tone: "error",
+          text: "An Agent can select up to 32 Skills.",
+        });
         return;
       }
       onSkillIDsChange(nextIDs);
@@ -201,11 +197,13 @@ export function AgentCapabilitiesEditor({
     onKnowledgeSourcesChange([...knowledgeSources, source]);
     setKnowledgeURL("");
     setKnowledgeLabel("");
-    setCapabilityMessage(
-      skillIDs.length > 0
-        ? "Required Skills were added to this Agent’s custom skill set. Save to check access."
-        : "Knowledge added. Save to check access.",
-    );
+    setKnowledgeNotice({
+      tone: "success",
+      text:
+        skillIDs.length > 0
+          ? "Required Skills were added to this Agent’s custom skill set. Save the Agent to apply them."
+          : "Knowledge added. Save the Agent to apply it.",
+    });
   };
 
   const openWikiPicker = async () => {
@@ -230,7 +228,7 @@ export function AgentCapabilitiesEditor({
   };
 
   const addCocolaWikiKnowledge = (node: AgentWikiNode) => {
-    setCapabilityMessage("");
+    setKnowledgeNotice(null);
     const source: AgentKnowledgeSource = {
       type: "cocola_wiki",
       label: node.name,
@@ -241,17 +239,22 @@ export function AgentCapabilitiesEditor({
       knowledgeSources.length >= 10 ||
       knowledgeSources.some((item) => agentKnowledgeSourceKey(item) === key)
     ) {
-      setCapabilityMessage(
-        knowledgeSources.length >= 10
-          ? "An Agent can have up to 10 Knowledge sources."
-          : "This Knowledge source is already configured.",
-      );
+      setKnowledgeNotice({
+        tone: "error",
+        text:
+          knowledgeSources.length >= 10
+            ? "An Agent can have up to 10 Knowledge sources."
+            : "This Knowledge source is already configured.",
+      });
       return;
     }
     onKnowledgeSourcesChange([...knowledgeSources, source]);
     setWikiPickerOpen(false);
     setWikiQuery("");
-    setCapabilityMessage("Cocola Wiki file added. Save to check access.");
+    setKnowledgeNotice({
+      tone: "success",
+      text: "Cocola Wiki file added. Save the Agent to apply it.",
+    });
   };
 
   return (
@@ -272,7 +275,7 @@ export function AgentCapabilitiesEditor({
               : `Only the ${skillIDs.length} selected skills will be available to this Agent.`}
           </p>
         </div>
-        <div className="mt-4 grid gap-2 sm:grid-cols-2">
+        <div className="mt-4 grid gap-4 md:grid-cols-2 xl:grid-cols-3">
           {displayedSkills.map((skill) => {
             const selected = selectedIDs.has(skill.id);
             return (
@@ -280,89 +283,124 @@ export function AgentCapabilitiesEditor({
                 key={skill.id}
                 type="button"
                 aria-pressed={selected}
+                disabled={!skill.available && !selected}
                 onClick={() => toggleSkill(skill)}
                 className={cn(
-                  "flex min-w-0 items-start gap-3 rounded-xl border p-3 text-left transition-colors",
+                  "group flex min-h-[148px] min-w-0 flex-col rounded-2xl border bg-card p-5 text-left shadow-card transition duration-200 hover:-translate-y-0.5 hover:shadow-lg focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/40",
                   selected
-                    ? "border-blue-500/35 bg-blue-500/[0.06]"
-                    : "border-border hover:bg-muted/40",
-                  !skill.available && !selected && "cursor-not-allowed opacity-65",
+                    ? "border-primary/35 bg-primary/[0.025] ring-1 ring-primary/10"
+                    : "border-border",
+                  !skill.available && !selected && "cursor-not-allowed opacity-60",
                 )}
               >
-                <span
-                  className={cn(
-                    "mt-0.5 grid size-4 shrink-0 place-items-center rounded border",
-                    selected
-                      ? "border-blue-600 bg-blue-600 text-white"
-                      : "border-input bg-background",
-                  )}
-                >
-                  {selected ? <Check className="size-3" /> : null}
+                <span className="flex min-w-0 items-start gap-3">
+                  <SkillIcon name={skill.name || skill.runtime_id} />
+                  <span className="min-w-0 flex-1">
+                    <span className="block truncate text-sm font-bold">{skill.name}</span>
+                    <span className="mt-1 line-clamp-2 block min-h-10 text-sm text-muted-foreground">
+                      {!skill.available
+                        ? "This skill was disabled by an administrator and will not be available to the Agent."
+                        : skill.description ||
+                          `${skill.source === "personal" ? "Personal" : "Shared"} Skill`}
+                    </span>
+                  </span>
+                  <span
+                    aria-hidden="true"
+                    className={cn(
+                      "grid size-5 shrink-0 place-items-center rounded-md border transition-colors",
+                      selected
+                        ? "border-primary bg-primary text-primary-foreground"
+                        : "border-input bg-background text-transparent",
+                    )}
+                  >
+                    <Check className="size-3.5" />
+                  </span>
                 </span>
-                <span className="min-w-0">
-                  <span className="flex flex-wrap items-center gap-2 text-sm font-medium">
-                    <span className="truncate">{skill.name}</span>
-                    {!skill.available ? (
-                      <span className="rounded-md bg-amber-500/10 px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-amber-700">
-                        Unavailable
-                      </span>
-                    ) : null}
-                  </span>
-                  <span className="mt-0.5 line-clamp-2 block text-xs leading-5 text-muted-foreground">
-                    {!skill.available
-                      ? "This skill was disabled by an administrator and will not be available to the Agent."
-                      : skill.description ||
-                        `${skill.source === "personal" ? "Personal" : "Shared"} Skill`}
-                  </span>
+                <span className="mt-4 flex flex-wrap items-center gap-2">
+                  <Badge>{skill.source === "personal" ? "personal" : "shared"}</Badge>
+                  {selected ? (
+                    <Badge variant="brand">
+                      <Check className="size-3" /> selected
+                    </Badge>
+                  ) : null}
+                  {!skill.available ? (
+                    <Badge className="bg-amber-500/10 text-amber-700">unavailable</Badge>
+                  ) : null}
                 </span>
               </button>
             );
           })}
         </div>
+        {skillMessage ? (
+          <div className="mt-4 flex items-start gap-2 rounded-xl border border-amber-500/20 bg-amber-500/[0.06] px-3.5 py-2.5 text-sm text-amber-800">
+            <AlertTriangle className="mt-0.5 size-4 shrink-0" />
+            <span>{skillMessage}</span>
+          </div>
+        ) : null}
       </section>
 
       <section className="rounded-2xl border border-border bg-card p-5 shadow-sm">
-        <div className="flex flex-wrap items-start justify-between gap-3">
-          <div>
-            <h2 className="text-sm font-semibold">Knowledge (Optional)</h2>
-            <p className="mt-1 text-sm leading-6 text-muted-foreground">
-              Add Cocola Wiki files or remote Feishu references. The Agent reads them only when
-              relevant.
-            </p>
-          </div>
-          <button
-            type="button"
-            onClick={onCheckKnowledge}
-            disabled={checkingKnowledge || knowledgeCheckDisabled || knowledgeSources.length === 0}
-            title={
-              knowledgeCheckDisabled ? "Save changes before checking Knowledge access." : undefined
-            }
-            className="inline-flex h-8 items-center gap-1.5 rounded-lg border border-border px-2.5 text-xs font-medium hover:bg-muted disabled:opacity-50"
-          >
-            {checkingKnowledge ? <Loader2 className="size-3.5 animate-spin" /> : null}
-            Check access
-          </button>
-        </div>
-        <div className="mt-4 grid gap-3 sm:grid-cols-[1fr_11rem_auto]">
+        <h2 className="text-sm font-semibold">Knowledge (Optional)</h2>
+        <p className="mt-1 text-sm leading-6 text-muted-foreground">
+          Add Cocola Wiki files or remote Feishu references. The Agent reads them only when
+          relevant.
+        </p>
+        <form
+          className="mt-4 grid gap-3 sm:grid-cols-[1fr_11rem_auto]"
+          onSubmit={(event) => {
+            event.preventDefault();
+            addKnowledge();
+          }}
+        >
           <Input
             value={knowledgeURL}
-            onChange={(event) => setKnowledgeURL(event.target.value)}
+            onChange={(event) => {
+              setKnowledgeURL(event.target.value);
+              setKnowledgeNotice(null);
+            }}
             placeholder="https://example.feishu.cn/docx/..."
+            aria-invalid={knowledgeNotice?.tone === "error"}
+            aria-describedby={knowledgeNotice ? "knowledge-input-feedback" : undefined}
+            className={cn(
+              knowledgeNotice?.tone === "error" &&
+                "border-red-500/50 focus-visible:ring-red-500/20",
+            )}
           />
           <Input
             value={knowledgeLabel}
-            onChange={(event) => setKnowledgeLabel(event.target.value)}
+            onChange={(event) => {
+              setKnowledgeLabel(event.target.value);
+              setKnowledgeNotice(null);
+            }}
             maxLength={100}
             placeholder="Label (optional)"
           />
           <button
-            type="button"
-            onClick={addKnowledge}
-            className="inline-flex h-9 items-center justify-center gap-1.5 rounded-xl bg-foreground px-3 text-sm font-medium text-background hover:opacity-90"
+            type="submit"
+            className="inline-flex h-9 items-center justify-center gap-1.5 rounded-xl bg-foreground px-3 text-sm font-medium text-background transition-[transform,opacity] hover:opacity-90 active:scale-[0.97]"
           >
             <Plus className="size-4" /> Add
           </button>
-        </div>
+        </form>
+        {knowledgeNotice ? (
+          <div
+            id="knowledge-input-feedback"
+            role={knowledgeNotice.tone === "error" ? "alert" : "status"}
+            className={cn(
+              "mt-3 flex animate-in items-start gap-2 rounded-xl border px-3.5 py-2.5 text-sm fade-in slide-in-from-top-1 duration-200",
+              knowledgeNotice.tone === "error"
+                ? "border-red-500/20 bg-red-500/[0.06] text-red-700"
+                : "border-emerald-500/20 bg-emerald-500/[0.06] text-emerald-700",
+            )}
+          >
+            {knowledgeNotice.tone === "error" ? (
+              <AlertTriangle className="mt-0.5 size-4 shrink-0" />
+            ) : (
+              <Check className="mt-0.5 size-4 shrink-0" />
+            )}
+            <span>{knowledgeNotice.text}</span>
+          </div>
+        ) : null}
         <div className="mt-3">
           <button
             type="button"
@@ -418,7 +456,6 @@ export function AgentCapabilitiesEditor({
           <div className="mt-4 divide-y divide-border rounded-xl border border-border">
             {knowledgeSources.map((source) => {
               const sourceKey = agentKnowledgeSourceKey(source);
-              const status = knowledgeStatuses[sourceKey];
               return (
                 <div key={sourceKey} className="flex min-w-0 items-center gap-3 p-3">
                   <span className="min-w-0 flex-1">
@@ -426,14 +463,6 @@ export function AgentCapabilitiesEditor({
                     <span className="block truncate text-xs text-muted-foreground">
                       {source.type === "cocola_wiki" ? "Cocola Wiki" : source.url}
                     </span>
-                  </span>
-                  <span
-                    className={cn(
-                      "shrink-0 text-xs font-medium",
-                      status === "ready" ? "text-emerald-600" : "text-muted-foreground",
-                    )}
-                  >
-                    {status ? KNOWLEDGE_STATUS_LABELS[status] : "Not checked"}
                   </span>
                   <button
                     type="button"
@@ -522,13 +551,6 @@ export function AgentCapabilitiesEditor({
           ) : null}
         </div>
       </section>
-
-      {capabilityMessage ? (
-        <div className="flex items-start gap-2 rounded-xl border border-amber-500/20 bg-amber-500/[0.06] px-3.5 py-2.5 text-sm text-amber-800">
-          <AlertTriangle className="mt-0.5 size-4 shrink-0" />
-          <span>{capabilityMessage}</span>
-        </div>
-      ) : null}
     </>
   );
 }
@@ -538,7 +560,7 @@ function normalizeKnowledgeSource(rawURL: string, rawLabel: string): AgentKnowle
   try {
     const parsed = new URL(rawURL.trim());
     const host = parsed.hostname.toLowerCase();
-    const hostAllowed = ["feishu.cn", "larksuite.com"].some(
+    const hostAllowed = ["feishu.cn", "larkoffice.com", "larksuite.com"].some(
       (suffix) => host === suffix || host.endsWith(`.${suffix}`),
     );
     const parts = parsed.pathname.split("/").filter(Boolean);

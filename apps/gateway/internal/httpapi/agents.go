@@ -335,3 +335,38 @@ func (a *API) validateNewAgentKnowledge(
 	}
 	return nil
 }
+
+func agentKnowledgeSkillsAvailable(
+	agent agentprofile.Agent,
+	source agentprofile.KnowledgeSource,
+	catalog []agentSkillCatalogItem,
+) bool {
+	required := agentprofile.RequiredKnowledgeSkillIDs(source.Type)
+	if len(required) == 0 {
+		return source.Type == agentprofile.KnowledgeTypeCocolaWiki
+	}
+	availableRuntimeIDs := make(map[string]struct{})
+	if len(agent.SkillIDs) == 0 {
+		for _, skill := range catalog {
+			if skill.Available && skill.DefaultEnabled {
+				availableRuntimeIDs[skill.RuntimeID] = struct{}{}
+			}
+		}
+	} else {
+		selected := make(map[string]struct{}, len(agent.SkillIDs))
+		for _, catalogID := range agent.SkillIDs {
+			selected[catalogID] = struct{}{}
+		}
+		for _, skill := range catalog {
+			if _, ok := selected[skill.ID]; ok && skill.Available {
+				availableRuntimeIDs[skill.RuntimeID] = struct{}{}
+			}
+		}
+	}
+	for _, runtimeID := range required {
+		if _, ok := availableRuntimeIDs[runtimeID]; !ok {
+			return false
+		}
+	}
+	return true
+}

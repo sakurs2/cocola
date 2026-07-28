@@ -86,18 +86,6 @@ func KnowledgeSourceKey(source KnowledgeSource) string {
 	}
 }
 
-func KnowledgeToken(source KnowledgeSource) string {
-	parsed, err := url.Parse(source.URL)
-	if err != nil {
-		return ""
-	}
-	segments := strings.Split(strings.Trim(parsed.Path, "/"), "/")
-	if len(segments) < 2 {
-		return ""
-	}
-	return segments[1]
-}
-
 func RequiredKnowledgeSkillIDs(sourceType string) []string {
 	switch sourceType {
 	case KnowledgeTypeFeishuDoc:
@@ -117,7 +105,7 @@ func RequiredKnowledgeSkillIDs(sourceType string) []string {
 
 func allowedKnowledgeHost(host string) bool {
 	host = strings.ToLower(strings.TrimSpace(host))
-	for _, suffix := range []string{"feishu.cn", "larksuite.com"} {
+	for _, suffix := range []string{"feishu.cn", "larkoffice.com", "larksuite.com"} {
 		if host == suffix || strings.HasSuffix(host, "."+suffix) {
 			return true
 		}

@@ -135,6 +135,22 @@ func TestAgentConfigSnapshotIsNormalizedAndImmutable(t *testing.T) {
 	}
 }
 
+func TestNormalizeKnowledgeSourceAcceptsLarkOfficeURL(t *testing.T) {
+	t.Parallel()
+	normalized, ok := NormalizeKnowledgeSource(KnowledgeSource{
+		Label: " Team handbook ",
+		URL:   "https://bytedance.larkoffice.com/wiki/NeRdwd9vWiiETEM?from=copylink",
+	})
+	if !ok {
+		t.Fatal("NormalizeKnowledgeSource rejected a supported larkoffice.com Wiki URL")
+	}
+	if normalized.Type != KnowledgeTypeFeishuWiki ||
+		normalized.Label != "Team handbook" ||
+		normalized.URL != "https://bytedance.larkoffice.com/wiki/NeRdwd9vWiiETEM" {
+		t.Fatalf("NormalizeKnowledgeSource() = %+v", normalized)
+	}
+}
+
 func TestCocolaWikiKnowledgeNormalizationAndDeduplication(t *testing.T) {
 	t.Parallel()
 	nodeID := "8EEA8A2B-9491-49B7-84C5-A37D1D0EDE90"

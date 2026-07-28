@@ -115,22 +115,21 @@ type API struct {
 	// sandboxResolver powers the Preview Proxy: it maps a session + in-sandbox
 	// port to a reachable URL via sandbox-manager. nil disables /v1/preview
 	// (the route returns 501), keeping the feature dark until wired in main.
-	sandboxResolver          sandboxmgr.EndpointResolver
-	terminalLeases           *terminalLeaseRegistry
-	memory                   *memory.Service
-	agents                   *agentprofile.Service
-	projects                 *project.Service
-	skillBroker              *skillbroker.Broker
-	skillAdminURL            string
-	skillHTTPClient          *http.Client
-	agentSkillAdminURL       string
-	agentSkillHTTPClient     *http.Client
-	agentKnowledgeHTTPClient *http.Client
-	feishu                   *feishuconnector.Service
-	wiki                     wiki.Store
-	wikiMaxFileBytes         int64
-	brokerWaitMu             sync.Mutex
-	brokerWaiters            map[string]map[chan struct{}]struct{}
+	sandboxResolver      sandboxmgr.EndpointResolver
+	terminalLeases       *terminalLeaseRegistry
+	memory               *memory.Service
+	agents               *agentprofile.Service
+	projects             *project.Service
+	skillBroker          *skillbroker.Broker
+	skillAdminURL        string
+	skillHTTPClient      *http.Client
+	agentSkillAdminURL   string
+	agentSkillHTTPClient *http.Client
+	feishu               *feishuconnector.Service
+	wiki                 wiki.Store
+	wikiMaxFileBytes     int64
+	brokerWaitMu         sync.Mutex
+	brokerWaiters        map[string]map[chan struct{}]struct{}
 }
 
 // New builds the BFF API.
@@ -138,12 +137,6 @@ func New(streamer agent.Streamer, verifier *auth.Verifier, log logger.Logger) *A
 	a := &API{
 		streamer: streamer, verifier: verifier, log: log,
 		productConfig: DefaultProductConfig(),
-		agentKnowledgeHTTPClient: &http.Client{
-			Timeout: 5 * time.Second,
-			CheckRedirect: func(_ *http.Request, _ []*http.Request) error {
-				return http.ErrUseLastResponse
-			},
-		},
 	}
 	a.terminalLeases = newTerminalLeaseRegistry(terminalDisconnectGrace, a.cleanupTerminalLease)
 	if releaser, ok := streamer.(agent.Releaser); ok {
@@ -224,13 +217,6 @@ func (a *API) WithAgentSkillCatalog(adminURL string, client *http.Client) *API {
 		client = &http.Client{Timeout: 5 * time.Second}
 	}
 	a.agentSkillHTTPClient = client
-	return a
-}
-
-func (a *API) WithAgentKnowledgeHTTPClient(client *http.Client) *API {
-	if client != nil {
-		a.agentKnowledgeHTTPClient = client
-	}
 	return a
 }
 
@@ -397,8 +383,6 @@ func (a *API) Handler() http.Handler {
 		a.verifier.Middleware(writeErr)(http.HandlerFunc(a.getAgent))))
 	mux.Handle("PATCH /v1/agents/{id}", a.instrument("PATCH /v1/agents/{id}",
 		a.verifier.Middleware(writeErr)(http.HandlerFunc(a.updateAgent))))
-	mux.Handle("POST /v1/agents/{id}/knowledge/check", a.instrument("POST /v1/agents/{id}/knowledge/check",
-		a.verifier.Middleware(writeErr)(http.HandlerFunc(a.checkAgentKnowledge))))
 	mux.Handle("DELETE /v1/agents/{id}", a.instrument("DELETE /v1/agents/{id}",
 		a.verifier.Middleware(writeErr)(http.HandlerFunc(a.archiveAgent))))
 	mux.Handle("GET /v1/scm/github/connection", a.instrument("GET /v1/scm/github/connection",

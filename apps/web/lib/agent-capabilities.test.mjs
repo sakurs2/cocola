@@ -21,7 +21,10 @@ test("Agent Skills explain default and custom modes and preserve unavailable sel
   assert.match(capabilitiesSource, /Skills \(Optional\)/);
   assert.match(capabilitiesSource, /Using default skills/);
   assert.match(capabilitiesSource, /Using a custom skill set/);
-  assert.match(capabilitiesSource, /Unavailable/);
+  assert.match(capabilitiesSource, />unavailable<\/Badge>/);
+  assert.match(capabilitiesSource, /<SkillIcon name=/);
+  assert.match(capabilitiesSource, /<Badge>.*personal.*shared/s);
+  assert.match(capabilitiesSource, /md:grid-cols-2 xl:grid-cols-3/);
   assert.match(agentListSource, /Default skills/);
   assert.match(agentListSource, /selectedSkills\.slice\(0, 2\)/);
   assert.match(agentListSource, /\+\{selectedSkills\.length - 2\}/);
@@ -33,6 +36,15 @@ test("Agent Knowledge can select Cocola Wiki files without requiring a Skill", (
   assert.match(capabilitiesSource, /type: \"cocola_wiki\"/);
   assert.match(capabilitiesSource, /node_id: node\.id/);
   assert.match(capabilitiesSource, /cocola_wiki: \[\]/);
+});
+
+test("Agent Knowledge accepts Lark Office links and keeps feedback inside its section", () => {
+  assert.match(capabilitiesSource, /"feishu\.cn", "larkoffice\.com", "larksuite\.com"/);
+  assert.match(capabilitiesSource, /active:scale-\[0\.97\]/);
+  assert.match(capabilitiesSource, /id="knowledge-input-feedback"/);
+  assert.doesNotMatch(capabilitiesSource, /capabilityMessage/);
+  assert.doesNotMatch(capabilitiesSource, /Check access|Not checked/);
+  assert.doesNotMatch(agentPageSource, /knowledge\/check|checkKnowledgeAccess/);
 });
 
 test("Agent Suggested Prompts replace global starters and only fill the composer", () => {
