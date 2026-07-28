@@ -38,6 +38,12 @@
       "path": "cocola-structured-output"
     },
     {
+      "id": "cocola-knowledge",
+      "name": "Cocola Knowledge",
+      "version": "1.0.0",
+      "path": "cocola-knowledge"
+    },
+    {
       "id": "cocola-spreadsheet",
       "name": "Cocola Spreadsheet",
       "version": "1.0.0",

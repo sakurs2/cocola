@@ -71,8 +71,9 @@ func (s *Service) Create(ctx context.Context, id Identity, input CreateInput) (A
 		AvatarKey: input.AvatarKey, AvatarColor: input.AvatarColor,
 		RuntimeID: input.RuntimeID, ModelRouteID: input.ModelRouteID, ModelAlias: input.ModelAlias,
 		SkillIDs: input.SkillIDs, KnowledgeSources: input.KnowledgeSources,
-		SuggestedPrompts: input.SuggestedPrompts,
-		Status:           StatusActive, Version: 1, CreatedAt: now, UpdatedAt: now,
+		SuggestedPrompts:  input.SuggestedPrompts,
+		KnowledgeRevision: 1,
+		Status:            StatusActive, Version: 1, CreatedAt: now, UpdatedAt: now,
 	})
 }
 

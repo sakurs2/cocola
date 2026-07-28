@@ -1,6 +1,8 @@
 package agentprofile
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
 	"net/url"
 	"path"
 	"regexp"
@@ -84,6 +86,11 @@ func KnowledgeSourceKey(source KnowledgeSource) string {
 	default:
 		return source.Type + ":" + source.URL
 	}
+}
+
+func KnowledgeSourceID(source KnowledgeSource) string {
+	sum := sha256.Sum256([]byte(KnowledgeSourceKey(source)))
+	return hex.EncodeToString(sum[:])
 }
 
 func RequiredKnowledgeSkillIDs(sourceType string) []string {

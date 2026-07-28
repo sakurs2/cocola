@@ -303,20 +303,13 @@ func (a *API) chat(w http.ResponseWriter, r *http.Request) {
 		}
 		return
 	}
-	agentWikiNodeIDs := make([]string, 0)
-	if req.AgentSnapshot != nil {
-		for _, source := range req.AgentSnapshot.KnowledgeSources {
-			if source.Type != agentprofile.KnowledgeTypeCocolaWiki {
-				continue
-			}
-			if _, duplicate := seenWikiNodeIDs[source.NodeID]; duplicate {
-				continue
-			}
-			seenWikiNodeIDs[source.NodeID] = struct{}{}
-			agentWikiNodeIDs = append(agentWikiNodeIDs, source.NodeID)
+	agentWikiCount := 0
+	for _, source := range req.AgentKnowledgeSources {
+		if source.Type == agentprofile.KnowledgeTypeCocolaWiki {
+			agentWikiCount++
 		}
 	}
-	if len(wikiNodeIDs)+len(agentWikiNodeIDs) > maxWikiRefsPerTurn {
+	if len(wikiNodeIDs)+agentWikiCount > maxWikiRefsPerTurn {
 		writeErr(
 			w,
 			http.StatusRequestEntityTooLarge,
@@ -325,10 +318,12 @@ func (a *API) chat(w http.ResponseWriter, r *http.Request) {
 		)
 		return
 	}
-	if len(wikiNodeIDs)+len(agentWikiNodeIDs) > 0 {
+	if len(wikiNodeIDs)+len(req.AgentKnowledgeSources) > 0 {
 		if a.wiki == nil || a.store == nil {
-			writeErr(w, http.StatusServiceUnavailable, "WIKI_UNAVAILABLE", "Wiki is not configured")
-			return
+			if len(wikiNodeIDs) > 0 {
+				writeErr(w, http.StatusServiceUnavailable, "WIKI_UNAVAILABLE", "Wiki is not configured")
+				return
+			}
 		}
 		wikiIdentity := wiki.Identity{
 			TenantID: identity.TenantID,
@@ -360,27 +355,39 @@ func (a *API) chat(w http.ResponseWriter, r *http.Request) {
 				req.WikiReferences = append(req.WikiReferences, reference)
 			}
 		}
-		for _, nodeID := range agentWikiNodeIDs {
-			node, version, resolveErr := a.wiki.GetCurrent(r.Context(), wikiIdentity, nodeID)
-			if errors.Is(resolveErr, wiki.ErrNotFound) {
+		for _, source := range req.AgentKnowledgeSources {
+			entry := agent.AgentKnowledgeEntry{
+				SourceID: agentprofile.KnowledgeSourceID(source),
+				Source: agent.AgentKnowledgeSource{
+					Type: source.Type, Label: source.Label, URL: source.URL, NodeID: source.NodeID,
+				},
+				State: agent.KnowledgeSourceReady,
+			}
+			if source.Type != agentprofile.KnowledgeTypeCocolaWiki {
+				req.AgentKnowledgeEntries = append(req.AgentKnowledgeEntries, entry)
 				continue
 			}
-			if resolveErr != nil {
-				writeErr(w, http.StatusServiceUnavailable, "WIKI_UNAVAILABLE", "could not resolve Agent Wiki Knowledge")
-				return
+			if a.wiki == nil || a.store == nil {
+				entry.State = agent.KnowledgeSourceTemporarilyUnavailable
+				req.AgentKnowledgeEntries = append(req.AgentKnowledgeEntries, entry)
+				continue
 			}
-			reference, nextTotal, ok := resolvedWikiReference(node, version, totalBytes)
-			if !ok {
-				writeErr(
-					w,
-					http.StatusRequestEntityTooLarge,
-					"WIKI_REFERENCE_LIMIT_EXCEEDED",
-					"referenced Wiki files exceed the per-turn size limit",
-				)
-				return
+			node, version, resolveErr := a.wiki.GetCurrent(r.Context(), wikiIdentity, source.NodeID)
+			switch {
+			case errors.Is(resolveErr, wiki.ErrNotFound):
+				entry.State = agent.KnowledgeSourceUnavailable
+			case resolveErr != nil:
+				entry.State = agent.KnowledgeSourceTemporarilyUnavailable
+			default:
+				reference, nextTotal, ok := resolvedWikiReference(node, version, totalBytes)
+				if !ok {
+					entry.State = agent.KnowledgeSourceUnavailable
+					break
+				}
+				totalBytes = nextTotal
+				entry.WikiReference = &reference
 			}
-			totalBytes = nextTotal
-			req.AgentWikiReferences = append(req.AgentWikiReferences, reference)
+			req.AgentKnowledgeEntries = append(req.AgentKnowledgeEntries, entry)
 		}
 	}
 	if req.RuntimeID != "" {
@@ -664,11 +671,27 @@ func (a *API) resolveChatAgent(
 			existing.AgentSnapshot.Version != existing.AgentVersion {
 			return errors.New("conversation Agent snapshot is invalid")
 		}
-		if err := a.ensureConversationAgentActive(ctx, identity, existing); err != nil {
-			return err
+		if a.agents == nil {
+			return errors.New("Agent service is unavailable")
+		}
+		current, err := a.agents.GetActive(ctx, agentprofile.Identity{
+			TenantID: identity.TenantID, UserID: identity.UserID,
+		}, existing.AgentID)
+		if err != nil {
+			if errors.Is(err, agentprofile.ErrNotFound) ||
+				errors.Is(err, agentprofile.ErrArchived) ||
+				errors.Is(err, agentprofile.ErrInvalidArgument) {
+				return err
+			}
+			snapshot := *existing.AgentSnapshot
+			applyAgentSnapshot(req, &snapshot)
+			applySnapshotAgentKnowledge(req, snapshot)
+			req.ChannelConnectorID = existing.ChannelConnectorID
+			return nil
 		}
 		snapshot := *existing.AgentSnapshot
 		applyAgentSnapshot(req, &snapshot)
+		applyLiveAgentKnowledge(req, current)
 		req.ChannelConnectorID = existing.ChannelConnectorID
 		return nil
 	}
@@ -687,6 +710,7 @@ func (a *API) resolveChatAgent(
 	}
 	snapshot := value.Snapshot()
 	applyAgentSnapshot(req, &snapshot)
+	applyLiveAgentKnowledge(req, value)
 	if a.feishu != nil {
 		connectorID, connectorErr := a.feishu.ConnectorID(ctx, feishuconnector.Identity{
 			TenantID: identity.TenantID, UserID: identity.UserID,
@@ -697,23 +721,6 @@ func (a *API) resolveChatAgent(
 		req.ChannelConnectorID = connectorID
 	}
 	return nil
-}
-
-func (a *API) ensureConversationAgentActive(
-	ctx context.Context,
-	identity auth.Identity,
-	conversation convo.Conversation,
-) error {
-	if conversation.AgentID == "" {
-		return nil
-	}
-	if a.agents == nil {
-		return errors.New("Agent service is unavailable")
-	}
-	_, err := a.agents.GetActive(ctx, agentprofile.Identity{
-		TenantID: identity.TenantID, UserID: identity.UserID,
-	}, conversation.AgentID)
-	return err
 }
 
 func (a *API) writeConversationAgentError(w http.ResponseWriter, err error) bool {
@@ -743,6 +750,39 @@ func applyAgentSnapshot(req *chatRequest, snapshot *agentprofile.Snapshot) {
 	req.ModelFamily = ""
 	req.ModelIconSlug = ""
 	req.ModelIcon = nil
+}
+
+func applyLiveAgentKnowledge(req *chatRequest, value agentprofile.Agent) {
+	req.AgentKnowledgeRevision = value.KnowledgeRevision
+	req.AgentKnowledgeSources = append(
+		[]agentprofile.KnowledgeSource(nil),
+		value.KnowledgeSources...,
+	)
+}
+
+func applySnapshotAgentKnowledge(req *chatRequest, snapshot agentprofile.Snapshot) {
+	req.AgentKnowledgeRevision = snapshot.KnowledgeRevision
+	req.AgentKnowledgeSources = append(
+		[]agentprofile.KnowledgeSource(nil),
+		snapshot.KnowledgeSources...,
+	)
+}
+
+func (a *API) ensureConversationAgentActive(
+	ctx context.Context,
+	identity auth.Identity,
+	conversation convo.Conversation,
+) error {
+	if conversation.AgentID == "" {
+		return nil
+	}
+	if a.agents == nil {
+		return errors.New("Agent service is unavailable")
+	}
+	_, err := a.agents.GetActive(ctx, agentprofile.Identity{
+		TenantID: identity.TenantID, UserID: identity.UserID,
+	}, conversation.AgentID)
+	return err
 }
 
 func agentSnapshotVersion(snapshot *agentprofile.Snapshot) int64 {
@@ -1181,13 +1221,6 @@ func (a *API) executeLiveRun(live *liveRun) {
 		live.recalledMemoryURIs = recall.URIs
 		live.updateMemoryRecall(recall)
 	}
-	wikiReferences := make(
-		[]agent.WikiReference,
-		0,
-		len(live.request.WikiReferences)+len(live.request.AgentWikiReferences),
-	)
-	wikiReferences = append(wikiReferences, live.request.WikiReferences...)
-	wikiReferences = append(wikiReferences, live.request.AgentWikiReferences...)
 	live.query = agent.Query{
 		UserID: live.identity.UserID, SessionID: live.request.SessionID,
 		RuntimeID: live.request.RuntimeID, SkillID: live.request.SkillID,
@@ -1201,12 +1234,13 @@ func (a *API) executeLiveRun(live *liveRun) {
 		TraceID:             live.run.ID, ParentSpanID: conversationRootSpan(live.traceCtx),
 		Source:           live.run.Source,
 		SandboxAuthToken: a.mintSandboxToken(live.identity), Attachments: attachments,
-		WikiReferences: wikiReferences,
+		WikiReferences: live.request.WikiReferences,
 		SCMToken:       scmToken, ProjectBrokerCredential: projectBrokerCredential,
 		SkillBrokerCredential: skillBrokerCredential,
 		LarkCredential:        larkCredential,
 		Project:               projectContext,
 		Agent:                 runtimeAgentContext(live.request.AgentSnapshot),
+		AgentKnowledge:        runtimeAgentKnowledgeContext(live.request),
 	}
 	coalescer := memoryEventCoalescer{run: live, window: a.runs.mergeWindow}
 	var sawError bool
@@ -1527,19 +1561,21 @@ func runtimeAgentContext(snapshot *agentprofile.Snapshot) *agent.AgentContext {
 	if snapshot == nil {
 		return nil
 	}
-	knowledgeSources := make(
-		[]agent.AgentKnowledgeSource, 0, len(snapshot.KnowledgeSources),
-	)
-	for _, source := range snapshot.KnowledgeSources {
-		knowledgeSources = append(knowledgeSources, agent.AgentKnowledgeSource{
-			Type: source.Type, Label: source.Label, URL: source.URL, NodeID: source.NodeID,
-		})
-	}
 	return &agent.AgentContext{
 		ID: snapshot.ID, Version: snapshot.Version, Name: snapshot.Name,
-		Instructions:     snapshot.Instructions,
-		SkillCatalogIDs:  append([]string(nil), snapshot.SkillIDs...),
-		KnowledgeSources: knowledgeSources,
+		Instructions:    snapshot.Instructions,
+		SkillCatalogIDs: append([]string(nil), snapshot.SkillIDs...),
+	}
+}
+
+func runtimeAgentKnowledgeContext(req chatRequest) *agent.AgentKnowledgeContext {
+	if req.AgentSnapshot == nil {
+		return nil
+	}
+	return &agent.AgentKnowledgeContext{
+		AgentID:  req.AgentSnapshot.ID,
+		Revision: req.AgentKnowledgeRevision,
+		Entries:  append([]agent.AgentKnowledgeEntry(nil), req.AgentKnowledgeEntries...),
 	}
 }
 

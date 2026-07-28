@@ -83,6 +83,7 @@ type Query struct {
 	LarkCredential          LarkRuntimeCredential
 	Project                 *ProjectContext
 	Agent                   *AgentContext
+	AgentKnowledge          *AgentKnowledgeContext
 	Attachments             []Attachment
 	WikiReferences          []WikiReference
 }
@@ -112,12 +113,11 @@ type ProjectContext struct {
 }
 
 type AgentContext struct {
-	ID               string
-	Version          int64
-	Name             string
-	Instructions     string
-	SkillCatalogIDs  []string
-	KnowledgeSources []AgentKnowledgeSource
+	ID              string
+	Version         int64
+	Name            string
+	Instructions    string
+	SkillCatalogIDs []string
 }
 
 type AgentKnowledgeSource struct {
@@ -125,6 +125,25 @@ type AgentKnowledgeSource struct {
 	Label  string
 	URL    string
 	NodeID string
+}
+
+const (
+	KnowledgeSourceReady                  = "ready"
+	KnowledgeSourceTemporarilyUnavailable = "temporarily_unavailable"
+	KnowledgeSourceUnavailable            = "unavailable"
+)
+
+type AgentKnowledgeEntry struct {
+	SourceID      string
+	Source        AgentKnowledgeSource
+	State         string
+	WikiReference *WikiReference
+}
+
+type AgentKnowledgeContext struct {
+	AgentID  string
+	Revision int64
+	Entries  []AgentKnowledgeEntry
 }
 
 type GitChange struct {
@@ -383,17 +402,32 @@ func (c *Client) Stream(ctx context.Context, q Query, onEvent func(Event) error)
 		request.ProjectContext = projectContextProto(*q.Project)
 	}
 	if q.Agent != nil {
-		knowledgeSources := make([]*agentv1.AgentKnowledgeSource, 0, len(q.Agent.KnowledgeSources))
-		for _, source := range q.Agent.KnowledgeSources {
-			knowledgeSources = append(knowledgeSources, &agentv1.AgentKnowledgeSource{
-				Type: source.Type, Label: source.Label, Url: source.URL, NodeId: source.NodeID,
-			})
-		}
 		request.AgentContext = &agentv1.AgentContext{
 			Id: q.Agent.ID, Version: q.Agent.Version,
 			Name: q.Agent.Name, Instructions: q.Agent.Instructions,
-			SkillCatalogIds:  append([]string(nil), q.Agent.SkillCatalogIDs...),
-			KnowledgeSources: knowledgeSources,
+			SkillCatalogIds: append([]string(nil), q.Agent.SkillCatalogIDs...),
+		}
+	}
+	if q.AgentKnowledge != nil {
+		entries := make([]*agentv1.AgentKnowledgeEntry, 0, len(q.AgentKnowledge.Entries))
+		for _, entry := range q.AgentKnowledge.Entries {
+			value := &agentv1.AgentKnowledgeEntry{
+				SourceId: entry.SourceID,
+				Source: &agentv1.AgentKnowledgeSource{
+					Type: entry.Source.Type, Label: entry.Source.Label,
+					Url: entry.Source.URL, NodeId: entry.Source.NodeID,
+				},
+				State: knowledgeSourceStateProto(entry.State),
+			}
+			if entry.WikiReference != nil {
+				value.WikiReference = wikiReferenceProto(*entry.WikiReference)
+			}
+			entries = append(entries, value)
+		}
+		request.AgentKnowledgeContext = &agentv1.AgentKnowledgeContext{
+			AgentId:  q.AgentKnowledge.AgentID,
+			Revision: q.AgentKnowledge.Revision,
+			Entries:  entries,
 		}
 	}
 	stream, err := c.rpc.Query(ctx, request)
@@ -413,6 +447,28 @@ func (c *Client) Stream(ctx context.Context, q Query, onEvent func(Event) error)
 		if err := onEvent(ev); err != nil {
 			return err
 		}
+	}
+}
+
+func wikiReferenceProto(value WikiReference) *agentv1.WikiReference {
+	return &agentv1.WikiReference{
+		NodeId: value.NodeID, VersionId: value.VersionID,
+		LogicalPath: value.LogicalPath, Filename: value.Filename,
+		Mime: value.Mime, OssKey: value.ObjectKey,
+		Size: value.Size, Sha256: value.SHA256,
+	}
+}
+
+func knowledgeSourceStateProto(value string) agentv1.AgentKnowledgeSourceState {
+	switch value {
+	case KnowledgeSourceReady:
+		return agentv1.AgentKnowledgeSourceState_AGENT_KNOWLEDGE_SOURCE_STATE_READY
+	case KnowledgeSourceTemporarilyUnavailable:
+		return agentv1.AgentKnowledgeSourceState_AGENT_KNOWLEDGE_SOURCE_STATE_TEMPORARILY_UNAVAILABLE
+	case KnowledgeSourceUnavailable:
+		return agentv1.AgentKnowledgeSourceState_AGENT_KNOWLEDGE_SOURCE_STATE_UNAVAILABLE
+	default:
+		return agentv1.AgentKnowledgeSourceState_AGENT_KNOWLEDGE_SOURCE_STATE_UNSPECIFIED
 	}
 }
 

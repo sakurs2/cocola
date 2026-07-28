@@ -54,6 +54,9 @@ message QueryRequest {
   // Immutable custom Agent definition captured when the conversation starts.
   // It contains behavior only; credentials remain in protected gRPC metadata.
   AgentContext agent_context = 15;
+  // Owner-authorized Knowledge resolved from the Agent's current configuration
+  // at the beginning of this turn. Unlike AgentContext it is intentionally live.
+  AgentKnowledgeContext agent_knowledge_context = 16;
 }
 
 enum InteractionMode {
@@ -91,13 +94,33 @@ message AgentKnowledgeSource {
   string node_id = 4;
 }
 
+enum AgentKnowledgeSourceState {
+  AGENT_KNOWLEDGE_SOURCE_STATE_UNSPECIFIED = 0;
+  AGENT_KNOWLEDGE_SOURCE_STATE_READY = 1;
+  AGENT_KNOWLEDGE_SOURCE_STATE_TEMPORARILY_UNAVAILABLE = 2;
+  AGENT_KNOWLEDGE_SOURCE_STATE_UNAVAILABLE = 3;
+}
+
+message AgentKnowledgeEntry {
+  string source_id = 1;
+  AgentKnowledgeSource source = 2;
+  AgentKnowledgeSourceState state = 3;
+  WikiReference wiki_reference = 4;
+}
+
+message AgentKnowledgeContext {
+  string agent_id = 1;
+  int64 revision = 2;
+  repeated AgentKnowledgeEntry entries = 3;
+}
+
 message AgentContext {
   string id = 1;
   int64 version = 2;
   string name = 3;
   string instructions = 4;
   repeated string skill_catalog_ids = 5;
-  repeated AgentKnowledgeSource knowledge_sources = 6;
+  repeated AgentKnowledgeSource knowledge_sources = 6 [deprecated = true];
 }
 
 // Attachment is a single user-uploaded file delivered to the sandbox workspace

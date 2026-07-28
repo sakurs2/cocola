@@ -115,10 +115,18 @@ jobs:
         run: uv sync --all-extras --locked
       - name: ruff format
         working-directory: apps/${{ matrix.app }}
-        run: uv run ruff format --check . ../../packages/py-common
+        run: |
+          uv run ruff format --check . ../../packages/py-common
+          if [[ "${{ matrix.app }}" == "agent-runtime" ]]; then
+            uv run ruff format --check ../../deploy/sandbox-runtime/cocola_knowledge.py
+          fi
       - name: ruff check
         working-directory: apps/${{ matrix.app }}
-        run: uv run ruff check . ../../packages/py-common
+        run: |
+          uv run ruff check . ../../packages/py-common
+          if [[ "${{ matrix.app }}" == "agent-runtime" ]]; then
+            uv run ruff check ../../deploy/sandbox-runtime/cocola_knowledge.py
+          fi
       - name: ruff scripts
         if: matrix.app == 'agent-runtime'
         working-directory: apps/${{ matrix.app }}

@@ -406,15 +406,14 @@ func TestChatResolvesAgentWikiKnowledgeWithoutAddingUserAttachmentPart(t *testin
 	if recorder.Code != http.StatusOK {
 		t.Fatalf("status = %d, body=%s", recorder.Code, recorder.Body.String())
 	}
-	if len(streamer.gotQuery.WikiReferences) != 1 ||
-		streamer.gotQuery.WikiReferences[0].VersionID != versionID {
-		t.Fatalf("WikiReferences = %#v", streamer.gotQuery.WikiReferences)
+	if streamer.gotQuery.AgentKnowledge == nil ||
+		len(streamer.gotQuery.AgentKnowledge.Entries) != 1 ||
+		streamer.gotQuery.AgentKnowledge.Entries[0].WikiReference == nil ||
+		streamer.gotQuery.AgentKnowledge.Entries[0].WikiReference.VersionID != versionID {
+		t.Fatalf("AgentKnowledge = %#v", streamer.gotQuery.AgentKnowledge)
 	}
 	parts := userMessageParts(chatRequest{
 		Prompt: "use the handbook",
-		AgentWikiReferences: []agent.WikiReference{{
-			NodeID: nodeID, VersionID: versionID,
-		}},
 	})
 	if len(parts) != 1 || parts[0].Type != convo.PartText {
 		t.Fatalf("Agent Wiki leaked into user message parts: %#v", parts)

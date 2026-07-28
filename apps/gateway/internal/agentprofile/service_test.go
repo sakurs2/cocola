@@ -135,6 +135,49 @@ func TestAgentConfigSnapshotIsNormalizedAndImmutable(t *testing.T) {
 	}
 }
 
+func TestKnowledgeRevisionChangesOnlyWithKnowledgeSources(t *testing.T) {
+	t.Parallel()
+	service := NewService(NewMemory())
+	identity := Identity{UserID: "user-a"}
+	value, err := service.Create(context.Background(), identity, CreateInput{
+		Name: "Research", RuntimeID: "claude-code", ModelRouteID: "a", ModelAlias: "a",
+		KnowledgeSources: []KnowledgeSource{{
+			Label: "Plan", URL: "https://docs.feishu.cn/docx/Abc_123",
+		}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if value.KnowledgeRevision != 1 {
+		t.Fatalf("created knowledge revision = %d, want 1", value.KnowledgeRevision)
+	}
+	renamed, err := service.Update(context.Background(), identity, value.ID, UpdateInput{
+		Name: "Research v2", RuntimeID: value.RuntimeID,
+		ModelRouteID: value.ModelRouteID, ModelAlias: value.ModelAlias,
+		KnowledgeSources: value.KnowledgeSources, Version: value.Version,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if renamed.KnowledgeRevision != 1 {
+		t.Fatalf("rename knowledge revision = %d, want 1", renamed.KnowledgeRevision)
+	}
+	changed, err := service.Update(context.Background(), identity, value.ID, UpdateInput{
+		Name: renamed.Name, RuntimeID: renamed.RuntimeID,
+		ModelRouteID: renamed.ModelRouteID, ModelAlias: renamed.ModelAlias,
+		KnowledgeSources: []KnowledgeSource{{
+			Label: "Handbook", URL: "https://docs.feishu.cn/docx/Def_456",
+		}},
+		Version: renamed.Version,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if changed.KnowledgeRevision != 2 {
+		t.Fatalf("changed knowledge revision = %d, want 2", changed.KnowledgeRevision)
+	}
+}
+
 func TestNormalizeKnowledgeSourceAcceptsLarkOfficeURL(t *testing.T) {
 	t.Parallel()
 	normalized, ok := NormalizeKnowledgeSource(KnowledgeSource{

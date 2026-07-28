@@ -58,6 +58,7 @@ ARG PYTHON_PPTX_SPEC=python-pptx==1.0.2
 ARG CODE_SERVER_VERSION=4.117.0
 ARG GH_VERSION=2.94.0
 ARG LARK_CLI_VERSION=1.0.77
+ARG RGA_VERSION=0.10.10
 
 FROM ${OPENSANDBOX_BASE}
 
@@ -71,6 +72,7 @@ ARG PYTHON_PPTX_SPEC
 ARG CODE_SERVER_VERSION
 ARG GH_VERSION
 ARG LARK_CLI_VERSION
+ARG RGA_VERSION
 
 ENV DEBIAN_FRONTEND=noninteractive \
     LANG=C.UTF-8 \
@@ -88,7 +90,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
         iptables ipset \
         ripgrep fd-find jq yq tree file less procps psmisc \
         wget unzip zip tar gzip zstd make build-essential pkg-config sqlite3 \
-        poppler-utils imagemagick librsvg2-bin \
+        pandoc poppler-utils imagemagick librsvg2-bin \
         fonts-noto fonts-noto-cjk fonts-noto-color-emoji \
     && rm -rf /var/lib/apt/lists/* \
     && ln -sf /usr/bin/fdfind /usr/local/bin/fd \
@@ -161,6 +163,36 @@ RUN set -eux; \
     ln -sf /opt/cocola/gh-wrapper.sh /usr/local/bin/gh; \
     rm -f "$archive"; \
     /opt/cocola/gh/current/bin/gh --version
+
+# ---- Knowledge search: pinned ripgrep-all binary -------------------------
+# rga wraps the already-installed ripgrep and document converters. It is baked
+# into the image so Agent Knowledge never installs tools or contacts a package
+# registry at runtime. Every search uses --rga-no-cache; Cocola owns cache
+# lifecycle through the revisioned /workspace/knowledge tree instead.
+RUN set -eux; \
+    arch="$(dpkg --print-architecture)"; \
+    case "$arch" in \
+        amd64) \
+            rga_target=x86_64-unknown-linux-musl; \
+            rga_sha=a969c25b182ac84aa672518313b5f741091decf7d93d03a020bcfe517b9ff4e8 \
+            ;; \
+        arm64) \
+            rga_target=aarch64-unknown-linux-gnu; \
+            rga_sha=2cd875ab6c78b27e4830b5bca92c570a8a8dcfb368bc71b189b65ac01fbc3020 \
+            ;; \
+        *) echo "unsupported architecture for ripgrep-all: $arch" >&2; exit 1 ;; \
+    esac; \
+    archive="/tmp/ripgrep_all-v${RGA_VERSION}-${rga_target}.tar.gz"; \
+    curl -fSL -o "$archive" \
+        "https://github.com/phiresky/ripgrep-all/releases/download/v${RGA_VERSION}/ripgrep_all-v${RGA_VERSION}-${rga_target}.tar.gz"; \
+    echo "$rga_sha  $archive" | sha256sum -c -; \
+    mkdir -p "/opt/cocola/ripgrep-all/${RGA_VERSION}"; \
+    tar -C "/opt/cocola/ripgrep-all/${RGA_VERSION}" --strip-components=1 -xzf "$archive"; \
+    ln -sfn "/opt/cocola/ripgrep-all/${RGA_VERSION}" /opt/cocola/ripgrep-all/current; \
+    ln -sf /opt/cocola/ripgrep-all/current/rga /usr/local/bin/rga; \
+    ln -sf /opt/cocola/ripgrep-all/current/rga-preproc /usr/local/bin/rga-preproc; \
+    rm -f "$archive"; \
+    rga --version
 
 # ---- resident code-server (in-sandbox VS Code) ---------------------------
 # The browser-facing editor for the Code dock tab. Reached ONLY via the
@@ -282,6 +314,7 @@ COPY runtime-entrypoint.sh /opt/cocola/runtime-entrypoint.sh
 COPY supervisord.conf /opt/cocola/supervisord.conf
 COPY runtime-manifest.json /opt/cocola/runtime-manifest.json
 COPY cocola_sandbox.py /opt/cocola/cocola_sandbox.py
+COPY cocola_knowledge.py /opt/cocola/cocola_knowledge.py
 COPY wiki_reader.py /opt/cocola/wiki_reader.py
 COPY browser-runner.js /opt/cocola/browser-runner.js
 COPY skills/ /opt/cocola/skills/
@@ -291,8 +324,10 @@ RUN chmod +x \
         /opt/cocola/code-server-launch.sh \
         /opt/cocola/runtime-entrypoint.sh \
         /opt/cocola/cocola_sandbox.py \
+        /opt/cocola/cocola_knowledge.py \
         /opt/cocola/wiki_reader.py \
     && ln -sf /opt/cocola/cocola_sandbox.py /usr/local/bin/cocola-sandbox \
+    && ln -sf /opt/cocola/cocola_knowledge.py /usr/local/bin/cocola-knowledge \
     && ln -sf /opt/cocola/wiki_reader.py /usr/local/bin/cocola-wiki-read
 
 # ---- the stdio shim ------------------------------------------------------

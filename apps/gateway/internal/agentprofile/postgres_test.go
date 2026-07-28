@@ -70,6 +70,7 @@ func TestPostgresArchiveRejectsActiveRegistration(t *testing.T) {
 			model_alias TEXT NOT NULL,
 			skill_ids JSONB NOT NULL DEFAULT '[]'::jsonb,
 			knowledge_sources JSONB NOT NULL DEFAULT '[]'::jsonb,
+			knowledge_revision BIGINT NOT NULL DEFAULT 1,
 			suggested_prompts JSONB NOT NULL DEFAULT '[]'::jsonb,
 			status TEXT NOT NULL,
 			version BIGINT NOT NULL,

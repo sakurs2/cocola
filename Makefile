@@ -7,6 +7,7 @@ GO_APPS := gateway admin-api
 SANDBOX_APP := sandbox-manager
 CLI_APP := cli
 PY_APPS := agent-runtime llm-gateway
+SANDBOX_PY := deploy/sandbox-runtime/cocola_knowledge.py
 DOCKER_COMPOSE := docker compose
 
 # -------------------------------------------------------------------- meta
@@ -81,10 +82,10 @@ py-test: ## Run Python tests
 	@for a in $(PY_APPS); do (cd apps/$$a && uv run pytest); done
 
 py-lint: ## Lint Python code (ruff)
-	ruff check apps/agent-runtime apps/llm-gateway packages/py-common scripts
+	ruff check apps/agent-runtime apps/llm-gateway packages/py-common scripts $(SANDBOX_PY)
 
 py-format: ## Format Python code (ruff format)
-	ruff format apps/agent-runtime apps/llm-gateway packages/py-common scripts
+	ruff format apps/agent-runtime apps/llm-gateway packages/py-common scripts $(SANDBOX_PY)
 
 # -------------------------------------------------------------------- frontend
 .PHONY: web-install web-dev web-build web-lint
@@ -176,8 +177,8 @@ lint: go-lint py-lint web-lint proto-lint ## Run all linters
 format: go-format py-format web-format ## Auto-format all languages (Go/Python/web)
 
 format-check: go-format-check web-format-check ## Verify formatting without writing (CI)
-	ruff format --check apps/agent-runtime apps/llm-gateway packages/py-common scripts
-	ruff check apps/agent-runtime apps/llm-gateway packages/py-common scripts
+	ruff format --check apps/agent-runtime apps/llm-gateway packages/py-common scripts $(SANDBOX_PY)
+	ruff check apps/agent-runtime apps/llm-gateway packages/py-common scripts $(SANDBOX_PY)
 
 precommit-install: ## Install the git pre-commit hook (pip/uv install pre-commit first)
 	pre-commit install

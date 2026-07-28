@@ -57,6 +57,10 @@ test("Agent Knowledge can select Cocola Wiki files without requiring a Skill", (
   assert.match(capabilitiesSource, /type: \"cocola_wiki\"/);
   assert.match(capabilitiesSource, /node_id: node\.id/);
   assert.match(capabilitiesSource, /cocola_wiki: \[\]/);
+  assert.match(
+    capabilitiesSource,
+    /Saved Knowledge changes apply from the next message, including in existing/,
+  );
 });
 
 test("Agent Knowledge accepts Lark Office links and keeps feedback inside its section", () => {

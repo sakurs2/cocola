@@ -31,7 +31,7 @@ func (p *Postgres) Close() { p.pool.Close() }
 
 const columns = `id::text, tenant_id, owner_user_id, name, description, instructions,
 	avatar_key, avatar_color, runtime_id, model_route_id, model_alias,
-	skill_ids, knowledge_sources, suggested_prompts, status,
+	skill_ids, knowledge_sources, knowledge_revision, suggested_prompts, status,
 	version, created_at, updated_at, archived_at`
 
 func scanAgent(row pgx.Row) (Agent, error) {
@@ -41,7 +41,7 @@ func scanAgent(row pgx.Row) (Agent, error) {
 		&value.ID, &value.TenantID, &value.OwnerUserID, &value.Name,
 		&value.Description, &value.Instructions, &value.AvatarKey, &value.AvatarColor,
 		&value.RuntimeID, &value.ModelRouteID, &value.ModelAlias,
-		&skillIDsJSON, &knowledgeJSON, &promptsJSON, &value.Status,
+		&skillIDsJSON, &knowledgeJSON, &value.KnowledgeRevision, &promptsJSON, &value.Status,
 		&value.Version, &value.CreatedAt, &value.UpdatedAt, &value.ArchivedAt,
 	)
 	if errors.Is(err, pgx.ErrNoRows) {
@@ -95,8 +95,9 @@ func (p *Postgres) Create(ctx context.Context, value Agent) (Agent, error) {
 	const query = `INSERT INTO agents (
 		id, tenant_id, owner_user_id, name, description, instructions, avatar_key,
 		avatar_color, runtime_id, model_route_id, model_alias, skill_ids,
-		knowledge_sources, suggested_prompts, status, version, created_at, updated_at
-	) VALUES ($1::uuid,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,'active',1,$15,$16)
+		knowledge_sources, knowledge_revision, suggested_prompts, status, version,
+		created_at, updated_at
+	) VALUES ($1::uuid,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,1,$14,'active',1,$15,$16)
 	RETURNING ` + columns
 	result, err := scanAgent(p.pool.QueryRow(ctx, query,
 		value.ID, value.TenantID, value.OwnerUserID, value.Name, value.Description,
@@ -123,6 +124,8 @@ func (p *Postgres) Update(
 	const query = `UPDATE agents SET
 		name=$5, description=$6, instructions=$7, avatar_key=$8, avatar_color=$9,
 		runtime_id=$10, model_route_id=$11, model_alias=$12, skill_ids=$13,
+		knowledge_revision=knowledge_revision+
+			CASE WHEN knowledge_sources IS DISTINCT FROM $14::jsonb THEN 1 ELSE 0 END,
 		knowledge_sources=$14, suggested_prompts=$15,
 		version=version+1, updated_at=$16
 	WHERE id=$1::uuid AND tenant_id=$2 AND owner_user_id=$3

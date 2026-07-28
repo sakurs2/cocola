@@ -74,12 +74,29 @@ func TestClientStreamMapsWikiReferences(t *testing.T) {
 			ID: "agent-1", Version: 3, Name: "Research",
 			Instructions:    "Cite primary sources.",
 			SkillCatalogIDs: []string{"catalog-search"},
-			KnowledgeSources: []AgentKnowledgeSource{{
-				Type: "feishu_doc", Label: "Plan",
-				URL: "https://docs.feishu.cn/docx/Abc_123",
+		},
+		AgentKnowledge: &AgentKnowledgeContext{
+			AgentID: "agent-1", Revision: 4,
+			Entries: []AgentKnowledgeEntry{{
+				SourceID: "source-feishu",
+				State:    KnowledgeSourceReady,
+				Source: AgentKnowledgeSource{
+					Type: "feishu_doc", Label: "Plan",
+					URL: "https://docs.feishu.cn/docx/Abc_123",
+				},
 			}, {
-				Type: "cocola_wiki", Label: "Handbook",
-				NodeID: "8eea8a2b-9491-49b7-84c5-a37d1d0ede90",
+				SourceID: "source-wiki",
+				State:    KnowledgeSourceReady,
+				Source: AgentKnowledgeSource{
+					Type: "cocola_wiki", Label: "Handbook",
+					NodeID: "8eea8a2b-9491-49b7-84c5-a37d1d0ede90",
+				},
+				WikiReference: &WikiReference{
+					NodeID: "wiki-node", VersionID: "wiki-version",
+					LogicalPath: "Handbook/guide.md", Filename: "guide.md",
+					Mime: "text/markdown", ObjectKey: "wiki/node/version",
+					Size: 42, SHA256: "def",
+				},
 			}},
 		},
 	}, func(Event) error { return nil })
@@ -103,13 +120,18 @@ func TestClientStreamMapsWikiReferences(t *testing.T) {
 		request.AgentContext.Name != "Research" ||
 		request.AgentContext.Instructions != "Cite primary sources." ||
 		len(request.AgentContext.SkillCatalogIds) != 1 ||
-		request.AgentContext.SkillCatalogIds[0] != "catalog-search" ||
-		len(request.AgentContext.KnowledgeSources) != 2 ||
-		request.AgentContext.KnowledgeSources[0].Url !=
-			"https://docs.feishu.cn/docx/Abc_123" ||
-		request.AgentContext.KnowledgeSources[1].NodeId !=
-			"8eea8a2b-9491-49b7-84c5-a37d1d0ede90" {
+		request.AgentContext.SkillCatalogIds[0] != "catalog-search" {
 		t.Fatalf("AgentContext = %#v", request.AgentContext)
+	}
+	if request.AgentKnowledgeContext == nil ||
+		request.AgentKnowledgeContext.AgentId != "agent-1" ||
+		request.AgentKnowledgeContext.Revision != 4 ||
+		len(request.AgentKnowledgeContext.Entries) != 2 ||
+		request.AgentKnowledgeContext.Entries[0].SourceId != "source-feishu" ||
+		request.AgentKnowledgeContext.Entries[0].Source.Url !=
+			"https://docs.feishu.cn/docx/Abc_123" ||
+		request.AgentKnowledgeContext.Entries[1].WikiReference.VersionId != "wiki-version" {
+		t.Fatalf("AgentKnowledgeContext = %#v", request.AgentKnowledgeContext)
 	}
 	incomingMetadata := <-recording.metadata
 	if got := incomingMetadata.Get("x-cocola-skill-broker-credential"); len(got) != 1 ||

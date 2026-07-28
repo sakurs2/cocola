@@ -44,6 +44,7 @@ export type AgentProfile = {
   model_alias: string;
   skill_ids: string[];
   knowledge_sources: AgentKnowledgeSource[];
+  knowledge_revision: number;
   suggested_prompts: AgentSuggestedPrompt[];
   status: AgentStatus;
   version: number;

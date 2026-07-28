@@ -12,12 +12,23 @@ class InteractionMode(int, metaclass=_enum_type_wrapper.EnumTypeWrapper):
     INTERACTION_MODE_UNSPECIFIED: _ClassVar[InteractionMode]
     INTERACTION_MODE_EXECUTE: _ClassVar[InteractionMode]
     INTERACTION_MODE_PLAN: _ClassVar[InteractionMode]
+
+class AgentKnowledgeSourceState(int, metaclass=_enum_type_wrapper.EnumTypeWrapper):
+    __slots__ = ()
+    AGENT_KNOWLEDGE_SOURCE_STATE_UNSPECIFIED: _ClassVar[AgentKnowledgeSourceState]
+    AGENT_KNOWLEDGE_SOURCE_STATE_READY: _ClassVar[AgentKnowledgeSourceState]
+    AGENT_KNOWLEDGE_SOURCE_STATE_TEMPORARILY_UNAVAILABLE: _ClassVar[AgentKnowledgeSourceState]
+    AGENT_KNOWLEDGE_SOURCE_STATE_UNAVAILABLE: _ClassVar[AgentKnowledgeSourceState]
 INTERACTION_MODE_UNSPECIFIED: InteractionMode
 INTERACTION_MODE_EXECUTE: InteractionMode
 INTERACTION_MODE_PLAN: InteractionMode
+AGENT_KNOWLEDGE_SOURCE_STATE_UNSPECIFIED: AgentKnowledgeSourceState
+AGENT_KNOWLEDGE_SOURCE_STATE_READY: AgentKnowledgeSourceState
+AGENT_KNOWLEDGE_SOURCE_STATE_TEMPORARILY_UNAVAILABLE: AgentKnowledgeSourceState
+AGENT_KNOWLEDGE_SOURCE_STATE_UNAVAILABLE: AgentKnowledgeSourceState
 
 class QueryRequest(_message.Message):
-    __slots__ = ("user_id", "session_id", "prompt", "sandbox_id", "max_turns", "attachments", "runtime_id", "skill_id", "allow_workspace_reset", "memory_context", "project_context", "interaction_mode", "require_session_resume", "wiki_references", "agent_context")
+    __slots__ = ("user_id", "session_id", "prompt", "sandbox_id", "max_turns", "attachments", "runtime_id", "skill_id", "allow_workspace_reset", "memory_context", "project_context", "interaction_mode", "require_session_resume", "wiki_references", "agent_context", "agent_knowledge_context")
     USER_ID_FIELD_NUMBER: _ClassVar[int]
     SESSION_ID_FIELD_NUMBER: _ClassVar[int]
     PROMPT_FIELD_NUMBER: _ClassVar[int]
@@ -33,6 +44,7 @@ class QueryRequest(_message.Message):
     REQUIRE_SESSION_RESUME_FIELD_NUMBER: _ClassVar[int]
     WIKI_REFERENCES_FIELD_NUMBER: _ClassVar[int]
     AGENT_CONTEXT_FIELD_NUMBER: _ClassVar[int]
+    AGENT_KNOWLEDGE_CONTEXT_FIELD_NUMBER: _ClassVar[int]
     user_id: str
     session_id: str
     prompt: str
@@ -48,7 +60,8 @@ class QueryRequest(_message.Message):
     require_session_resume: bool
     wiki_references: _containers.RepeatedCompositeFieldContainer[WikiReference]
     agent_context: AgentContext
-    def __init__(self, user_id: _Optional[str] = ..., session_id: _Optional[str] = ..., prompt: _Optional[str] = ..., sandbox_id: _Optional[str] = ..., max_turns: _Optional[int] = ..., attachments: _Optional[_Iterable[_Union[Attachment, _Mapping]]] = ..., runtime_id: _Optional[str] = ..., skill_id: _Optional[str] = ..., allow_workspace_reset: bool = ..., memory_context: _Optional[str] = ..., project_context: _Optional[_Union[ProjectContext, _Mapping]] = ..., interaction_mode: _Optional[_Union[InteractionMode, str]] = ..., require_session_resume: bool = ..., wiki_references: _Optional[_Iterable[_Union[WikiReference, _Mapping]]] = ..., agent_context: _Optional[_Union[AgentContext, _Mapping]] = ...) -> None: ...
+    agent_knowledge_context: AgentKnowledgeContext
+    def __init__(self, user_id: _Optional[str] = ..., session_id: _Optional[str] = ..., prompt: _Optional[str] = ..., sandbox_id: _Optional[str] = ..., max_turns: _Optional[int] = ..., attachments: _Optional[_Iterable[_Union[Attachment, _Mapping]]] = ..., runtime_id: _Optional[str] = ..., skill_id: _Optional[str] = ..., allow_workspace_reset: bool = ..., memory_context: _Optional[str] = ..., project_context: _Optional[_Union[ProjectContext, _Mapping]] = ..., interaction_mode: _Optional[_Union[InteractionMode, str]] = ..., require_session_resume: bool = ..., wiki_references: _Optional[_Iterable[_Union[WikiReference, _Mapping]]] = ..., agent_context: _Optional[_Union[AgentContext, _Mapping]] = ..., agent_knowledge_context: _Optional[_Union[AgentKnowledgeContext, _Mapping]] = ...) -> None: ...
 
 class ProjectContext(_message.Message):
     __slots__ = ("project_id", "repository_id", "clone_url", "default_branch", "base_sha", "task_branch", "git_author_name", "git_author_email", "repository_provider", "repository_full_name", "credential_mode", "base_ref")
@@ -79,14 +92,38 @@ class ProjectContext(_message.Message):
     def __init__(self, project_id: _Optional[str] = ..., repository_id: _Optional[int] = ..., clone_url: _Optional[str] = ..., default_branch: _Optional[str] = ..., base_sha: _Optional[str] = ..., task_branch: _Optional[str] = ..., git_author_name: _Optional[str] = ..., git_author_email: _Optional[str] = ..., repository_provider: _Optional[str] = ..., repository_full_name: _Optional[str] = ..., credential_mode: _Optional[str] = ..., base_ref: _Optional[str] = ...) -> None: ...
 
 class AgentKnowledgeSource(_message.Message):
-    __slots__ = ("type", "label", "url")
+    __slots__ = ("type", "label", "url", "node_id")
     TYPE_FIELD_NUMBER: _ClassVar[int]
     LABEL_FIELD_NUMBER: _ClassVar[int]
     URL_FIELD_NUMBER: _ClassVar[int]
+    NODE_ID_FIELD_NUMBER: _ClassVar[int]
     type: str
     label: str
     url: str
-    def __init__(self, type: _Optional[str] = ..., label: _Optional[str] = ..., url: _Optional[str] = ...) -> None: ...
+    node_id: str
+    def __init__(self, type: _Optional[str] = ..., label: _Optional[str] = ..., url: _Optional[str] = ..., node_id: _Optional[str] = ...) -> None: ...
+
+class AgentKnowledgeEntry(_message.Message):
+    __slots__ = ("source_id", "source", "state", "wiki_reference")
+    SOURCE_ID_FIELD_NUMBER: _ClassVar[int]
+    SOURCE_FIELD_NUMBER: _ClassVar[int]
+    STATE_FIELD_NUMBER: _ClassVar[int]
+    WIKI_REFERENCE_FIELD_NUMBER: _ClassVar[int]
+    source_id: str
+    source: AgentKnowledgeSource
+    state: AgentKnowledgeSourceState
+    wiki_reference: WikiReference
+    def __init__(self, source_id: _Optional[str] = ..., source: _Optional[_Union[AgentKnowledgeSource, _Mapping]] = ..., state: _Optional[_Union[AgentKnowledgeSourceState, str]] = ..., wiki_reference: _Optional[_Union[WikiReference, _Mapping]] = ...) -> None: ...
+
+class AgentKnowledgeContext(_message.Message):
+    __slots__ = ("agent_id", "revision", "entries")
+    AGENT_ID_FIELD_NUMBER: _ClassVar[int]
+    REVISION_FIELD_NUMBER: _ClassVar[int]
+    ENTRIES_FIELD_NUMBER: _ClassVar[int]
+    agent_id: str
+    revision: int
+    entries: _containers.RepeatedCompositeFieldContainer[AgentKnowledgeEntry]
+    def __init__(self, agent_id: _Optional[str] = ..., revision: _Optional[int] = ..., entries: _Optional[_Iterable[_Union[AgentKnowledgeEntry, _Mapping]]] = ...) -> None: ...
 
 class AgentContext(_message.Message):
     __slots__ = ("id", "version", "name", "instructions", "skill_catalog_ids", "knowledge_sources")

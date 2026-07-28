@@ -8,6 +8,7 @@ becomes a terminal proto `error` event instead of propagating, and (c) enabled
 skills are validated and synchronized before the provider runs.
 """
 
+import hashlib
 import io
 import json
 import subprocess
@@ -69,6 +70,7 @@ class FakeRequest:
     interaction_mode: int = pb.INTERACTION_MODE_UNSPECIFIED
     require_session_resume: bool = False
     agent_context: object | None = None
+    agent_knowledge_context: object | None = None
 
 
 def test_memory_context_is_appended_as_untrusted_low_priority_context():
@@ -700,7 +702,10 @@ async def test_custom_agent_resolves_catalog_ids_and_excludes_non_cocola_platfor
     assert manifest["platform_skill_ids"] == ["cocola-sandbox-browser"]
 
 
-async def test_agent_knowledge_is_injected_as_untrusted_remote_reference_without_download():
+async def test_agent_knowledge_is_materialized_as_manifest_without_prompt_injection(
+    tmp_path, monkeypatch
+):
+    monkeypatch.setenv("COCOLA_LOCAL_WORKSPACE_ROOT", str(tmp_path))
     provider = ListProvider([AgentEvent(kind="done", data={})])
     agent_context = SimpleNamespace(
         id="agent-1",
@@ -708,11 +713,21 @@ async def test_agent_knowledge_is_injected_as_untrusted_remote_reference_without
         name="Research",
         instructions="",
         skill_catalog_ids=[],
-        knowledge_sources=[
+    )
+    knowledge_context = SimpleNamespace(
+        agent_id="agent-1",
+        revision=2,
+        entries=[
             SimpleNamespace(
-                type="feishu_doc",
-                label="Quarterly plan",
-                url="https://example.feishu.cn/docx/Abc_123",
+                source_id="a" * 64,
+                state=pb.AGENT_KNOWLEDGE_SOURCE_STATE_READY,
+                source=SimpleNamespace(
+                    type="feishu_doc",
+                    label="Quarterly plan",
+                    url="https://example.feishu.cn/docx/Abc_123",
+                    node_id="",
+                ),
+                wiki_reference=None,
             )
         ],
     )
@@ -722,16 +737,26 @@ async def test_agent_knowledge_is_injected_as_untrusted_remote_reference_without
         skills=StaticSkillCatalog(
             [Skill(id="catalog-lark-doc", runtime_id="lark-doc", name="Lark Doc")]
         ),
-    ).Query(FakeRequest(agent_context=agent_context), FakeContext())
+    ).Query(
+        FakeRequest(
+            agent_context=agent_context,
+            agent_knowledge_context=knowledge_context,
+        ),
+        FakeContext(),
+    )
 
     assert provider.seen_options is not None
     prompt = provider.seen_options.system_prompt or ""
-    assert "<agent-knowledge>" in prompt
-    assert "https://example.feishu.cn/docx/Abc_123" in prompt
-    assert "Do not download or mirror" in prompt
+    assert "<agent-knowledge>" not in prompt
+    manifest = json.loads(
+        (tmp_path / "S1" / "knowledge" / "current" / ".manifest.json").read_text()
+    )
+    assert manifest["revision"] == 2
+    assert manifest["sources"][0]["url"] == "https://example.feishu.cn/docx/Abc_123"
 
 
-async def test_agent_knowledge_accepts_larkoffice_tenant_links():
+async def test_agent_knowledge_accepts_larkoffice_tenant_links(tmp_path, monkeypatch):
+    monkeypatch.setenv("COCOLA_LOCAL_WORKSPACE_ROOT", str(tmp_path))
     provider = ListProvider([AgentEvent(kind="done", data={})])
     agent_context = SimpleNamespace(
         id="agent-1",
@@ -739,11 +764,21 @@ async def test_agent_knowledge_accepts_larkoffice_tenant_links():
         name="Research",
         instructions="",
         skill_catalog_ids=[],
-        knowledge_sources=[
+    )
+    knowledge_context = SimpleNamespace(
+        agent_id="agent-1",
+        revision=1,
+        entries=[
             SimpleNamespace(
-                type="feishu_wiki",
-                label="Team Wiki",
-                url="https://bytedance.larkoffice.com/wiki/NeRdwd9vWiiETEM",
+                source_id="b" * 64,
+                state=pb.AGENT_KNOWLEDGE_SOURCE_STATE_READY,
+                source=SimpleNamespace(
+                    type="feishu_wiki",
+                    label="Team Wiki",
+                    url="https://bytedance.larkoffice.com/wiki/NeRdwd9vWiiETEM",
+                    node_id="",
+                ),
+                wiki_reference=None,
             )
         ],
     )
@@ -756,12 +791,220 @@ async def test_agent_knowledge_accepts_larkoffice_tenant_links():
                 Skill(id="catalog-lark-wiki", runtime_id="lark-wiki", name="Lark Wiki"),
             ]
         ),
-    ).Query(FakeRequest(agent_context=agent_context), FakeContext())
+    ).Query(
+        FakeRequest(
+            agent_context=agent_context,
+            agent_knowledge_context=knowledge_context,
+        ),
+        FakeContext(),
+    )
 
     assert provider.seen_options is not None
     prompt = provider.seen_options.system_prompt or ""
-    assert "<agent-knowledge>" in prompt
-    assert "https://bytedance.larkoffice.com/wiki/NeRdwd9vWiiETEM" in prompt
+    assert "<agent-knowledge>" not in prompt
+    manifest = json.loads(
+        (tmp_path / "S1" / "knowledge" / "current" / ".manifest.json").read_text()
+    )
+    assert manifest["sources"][0]["url"].startswith("https://bytedance.larkoffice.com/")
+
+
+def test_agent_knowledge_revision_carries_forward_lazy_remote_cache(tmp_path, monkeypatch):
+    monkeypatch.setenv("COCOLA_LOCAL_WORKSPACE_ROOT", str(tmp_path))
+    servicer = AgentRuntimeServicer(ListProvider([]))
+    source_id = "c" * 64
+
+    def context(revision: int, entries: list[dict]) -> dict:
+        return {"agent_id": "agent-1", "revision": revision, "entries": entries}
+
+    remote_entry = {
+        "source_id": source_id,
+        "state": pb.AGENT_KNOWLEDGE_SOURCE_STATE_READY,
+        "source": {
+            "type": "feishu_doc",
+            "label": "Quarterly plan",
+            "url": "https://example.feishu.cn/docx/Abc_123",
+            "node_id": "",
+        },
+        "wiki_reference": None,
+    }
+    assert servicer._provision_agent_knowledge_onto_host("S1", context(1, [remote_entry])) == {
+        "cache_status": "updated",
+        "stale": False,
+    }
+    current = tmp_path / "S1" / "knowledge" / "current"
+    cached = current / "feishu" / f"{source_id}.md"
+    cached.parent.mkdir(parents=True, exist_ok=True)
+    cached.write_text("cached remote content", encoding="utf-8")
+
+    assert servicer._provision_agent_knowledge_onto_host("S1", context(2, [remote_entry])) == {
+        "cache_status": "updated",
+        "stale": False,
+    }
+    assert cached.read_text(encoding="utf-8") == "cached remote content"
+
+    assert servicer._provision_agent_knowledge_onto_host("S1", context(3, [])) == {
+        "cache_status": "updated",
+        "stale": False,
+    }
+    assert not cached.exists()
+    manifest = json.loads((current / ".manifest.json").read_text())
+    assert manifest["revision"] == 3
+    assert manifest["sources"] == []
+
+
+def test_agent_knowledge_refresh_failure_keeps_last_known_good_revision(tmp_path, monkeypatch):
+    monkeypatch.setenv("COCOLA_LOCAL_WORKSPACE_ROOT", str(tmp_path))
+    content = b"# Handbook\n"
+    store = FakeObjectStore()
+    store.puts["wiki/v1"] = content
+    servicer = AgentRuntimeServicer(ListProvider([]), objstore=store)
+    source_id = "d" * 64
+
+    def context(revision: int, key: str, version: str) -> dict:
+        return {
+            "agent_id": "agent-1",
+            "revision": revision,
+            "entries": [
+                {
+                    "source_id": source_id,
+                    "state": pb.AGENT_KNOWLEDGE_SOURCE_STATE_READY,
+                    "source": {
+                        "type": "cocola_wiki",
+                        "label": "Handbook",
+                        "url": "",
+                        "node_id": "8eea8a2b-9491-49b7-84c5-a37d1d0ede90",
+                    },
+                    "wiki_reference": SimpleNamespace(
+                        oss_key=key,
+                        version_id=version,
+                        size=len(content),
+                        sha256=hashlib.sha256(content).hexdigest(),
+                        filename="handbook.md",
+                        logical_path="handbook.md",
+                        mime="text/markdown",
+                    ),
+                }
+            ],
+        }
+
+    assert servicer._provision_agent_knowledge_onto_host(
+        "S1", context(1, "wiki/v1", "version-1")
+    ) == {"cache_status": "updated", "stale": False}
+    current = tmp_path / "S1" / "knowledge" / "current"
+    original_manifest = json.loads((current / ".manifest.json").read_text())
+
+    result = servicer._provision_agent_knowledge_onto_host(
+        "S1", context(2, "wiki/missing", "version-2")
+    )
+
+    assert result == {"cache_status": "last_known_good", "stale": True}
+    assert json.loads((current / ".manifest.json").read_text()) == original_manifest
+    state = json.loads((tmp_path / "S1" / "knowledge" / ".state.json").read_text())
+    assert state["revision"] == 1
+    assert state["stale"] is True
+
+
+async def test_sandbox_knowledge_switch_failure_removes_completed_revision():
+    source_id = "e" * 64
+    current_manifest = {
+        "agent_id": "agent-1",
+        "revision": 1,
+        "sources": [
+            {
+                "id": source_id,
+                "type": "feishu_doc",
+                "label": "Quarterly plan",
+                "url": "https://example.feishu.cn/docx/Abc_123",
+                "node_id": "",
+                "status": "ready",
+                "path": f"feishu/{source_id}.md",
+            }
+        ],
+    }
+
+    def fail_current_switch(_sandbox_id, cmd):
+        if cmd[:3] == ["mv", "-Tf", "--"]:
+            return ExecOutcome(exit_code=1, stderr="switch failed")
+        return ExecOutcome()
+
+    executor = StaticSandboxExecutor(exec_handler=fail_current_switch)
+    executor.byte_files[("box-1", "/workspace/knowledge/current/.manifest.json")] = json.dumps(
+        current_manifest
+    ).encode()
+    servicer = AgentRuntimeServicer(ListProvider([]), executor=executor)
+    context = {
+        "agent_id": "agent-1",
+        "revision": 2,
+        "entries": [
+            {
+                "source_id": source_id,
+                "state": pb.AGENT_KNOWLEDGE_SOURCE_STATE_READY,
+                "source": {
+                    "type": "feishu_doc",
+                    "label": "Updated quarterly plan",
+                    "url": "https://example.feishu.cn/docx/Abc_123",
+                    "node_id": "",
+                },
+                "wiki_reference": None,
+            }
+        ],
+    }
+
+    result = await servicer._provision_agent_knowledge_into_sandbox("box-1", context)
+
+    assert result == {"cache_status": "last_known_good", "stale": True}
+    commands = [call["cmd"] for call in executor.exec_calls]
+    completed_revision = next(
+        command[3]
+        for command in commands
+        if command[:2] == ["mv", "--"] and command[2].endswith(".tmp")
+    )
+    assert ["rm", "-rf", "--", completed_revision] in commands
+    assert ["rm", "-f", "--", "/workspace/knowledge/.current.next"] in commands
+
+
+async def test_sandbox_knowledge_cleanup_failure_keeps_new_active_revision():
+    source_id = "f" * 64
+    current_manifest = {
+        "agent_id": "agent-1",
+        "revision": 1,
+        "sources": [],
+    }
+
+    def fail_old_revision_cleanup(_sandbox_id, cmd):
+        if cmd and cmd[0] == "find":
+            return ExecOutcome(exit_code=1, stderr="cleanup failed")
+        return ExecOutcome()
+
+    executor = StaticSandboxExecutor(exec_handler=fail_old_revision_cleanup)
+    executor.byte_files[("box-1", "/workspace/knowledge/current/.manifest.json")] = json.dumps(
+        current_manifest
+    ).encode()
+    servicer = AgentRuntimeServicer(ListProvider([]), executor=executor)
+    context = {
+        "agent_id": "agent-1",
+        "revision": 2,
+        "entries": [
+            {
+                "source_id": source_id,
+                "state": pb.AGENT_KNOWLEDGE_SOURCE_STATE_READY,
+                "source": {
+                    "type": "feishu_doc",
+                    "label": "Quarterly plan",
+                    "url": "https://example.feishu.cn/docx/Abc_123",
+                    "node_id": "",
+                },
+                "wiki_reference": None,
+            }
+        ],
+    }
+
+    result = await servicer._provision_agent_knowledge_into_sandbox("box-1", context)
+
+    assert result == {"cache_status": "updated", "stale": False}
+    state = json.loads(executor.byte_files[("box-1", "/workspace/knowledge/.state.json")])
+    assert state["revision"] == 2
+    assert state["stale"] is False
 
 
 async def test_cocola_wiki_agent_source_is_not_injected_as_remote_lark_reference():

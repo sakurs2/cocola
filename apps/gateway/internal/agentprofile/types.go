@@ -41,25 +41,26 @@ type Identity struct {
 }
 
 type Agent struct {
-	ID               string            `json:"id"`
-	TenantID         string            `json:"-"`
-	OwnerUserID      string            `json:"-"`
-	Name             string            `json:"name"`
-	Description      string            `json:"description"`
-	Instructions     string            `json:"instructions"`
-	AvatarKey        string            `json:"avatar_key"`
-	AvatarColor      string            `json:"avatar_color"`
-	RuntimeID        string            `json:"runtime_id"`
-	ModelRouteID     string            `json:"model_route_id"`
-	ModelAlias       string            `json:"model_alias"`
-	SkillIDs         []string          `json:"skill_ids"`
-	KnowledgeSources []KnowledgeSource `json:"knowledge_sources"`
-	SuggestedPrompts []SuggestedPrompt `json:"suggested_prompts"`
-	Status           string            `json:"status"`
-	Version          int64             `json:"version"`
-	CreatedAt        time.Time         `json:"created_at"`
-	UpdatedAt        time.Time         `json:"updated_at"`
-	ArchivedAt       *time.Time        `json:"archived_at,omitempty"`
+	ID                string            `json:"id"`
+	TenantID          string            `json:"-"`
+	OwnerUserID       string            `json:"-"`
+	Name              string            `json:"name"`
+	Description       string            `json:"description"`
+	Instructions      string            `json:"instructions"`
+	AvatarKey         string            `json:"avatar_key"`
+	AvatarColor       string            `json:"avatar_color"`
+	RuntimeID         string            `json:"runtime_id"`
+	ModelRouteID      string            `json:"model_route_id"`
+	ModelAlias        string            `json:"model_alias"`
+	SkillIDs          []string          `json:"skill_ids"`
+	KnowledgeSources  []KnowledgeSource `json:"knowledge_sources"`
+	KnowledgeRevision int64             `json:"knowledge_revision"`
+	SuggestedPrompts  []SuggestedPrompt `json:"suggested_prompts"`
+	Status            string            `json:"status"`
+	Version           int64             `json:"version"`
+	CreatedAt         time.Time         `json:"created_at"`
+	UpdatedAt         time.Time         `json:"updated_at"`
+	ArchivedAt        *time.Time        `json:"archived_at,omitempty"`
 }
 
 type KnowledgeSource struct {
@@ -74,22 +75,25 @@ type SuggestedPrompt struct {
 	Prompt string `json:"prompt"`
 }
 
-// Snapshot is copied into a conversation on its first turn. Later edits to an
-// Agent therefore affect only new conversations.
+// Snapshot is copied into a conversation on its first turn. Behavior fields
+// remain immutable for that conversation. KnowledgeSources and
+// KnowledgeRevision are retained only as a last-known-good fallback when the
+// live Agent configuration cannot be read at the beginning of a later turn.
 type Snapshot struct {
-	ID               string            `json:"id"`
-	Version          int64             `json:"version"`
-	Name             string            `json:"name"`
-	Description      string            `json:"description"`
-	Instructions     string            `json:"instructions"`
-	AvatarKey        string            `json:"avatar_key"`
-	AvatarColor      string            `json:"avatar_color"`
-	RuntimeID        string            `json:"runtime_id"`
-	ModelRouteID     string            `json:"model_route_id"`
-	ModelAlias       string            `json:"model_alias"`
-	SkillIDs         []string          `json:"skill_ids"`
-	KnowledgeSources []KnowledgeSource `json:"knowledge_sources"`
-	SuggestedPrompts []SuggestedPrompt `json:"suggested_prompts"`
+	ID                string            `json:"id"`
+	Version           int64             `json:"version"`
+	Name              string            `json:"name"`
+	Description       string            `json:"description"`
+	Instructions      string            `json:"instructions"`
+	AvatarKey         string            `json:"avatar_key"`
+	AvatarColor       string            `json:"avatar_color"`
+	RuntimeID         string            `json:"runtime_id"`
+	ModelRouteID      string            `json:"model_route_id"`
+	ModelAlias        string            `json:"model_alias"`
+	SkillIDs          []string          `json:"skill_ids"`
+	KnowledgeSources  []KnowledgeSource `json:"knowledge_sources"`
+	KnowledgeRevision int64             `json:"knowledge_revision"`
+	SuggestedPrompts  []SuggestedPrompt `json:"suggested_prompts"`
 }
 
 func (a Agent) Snapshot() Snapshot {
@@ -97,9 +101,10 @@ func (a Agent) Snapshot() Snapshot {
 		ID: a.ID, Version: a.Version, Name: a.Name, Description: a.Description,
 		Instructions: a.Instructions, AvatarKey: a.AvatarKey, AvatarColor: a.AvatarColor,
 		RuntimeID: a.RuntimeID, ModelRouteID: a.ModelRouteID, ModelAlias: a.ModelAlias,
-		SkillIDs:         append([]string(nil), a.SkillIDs...),
-		KnowledgeSources: append([]KnowledgeSource(nil), a.KnowledgeSources...),
-		SuggestedPrompts: append([]SuggestedPrompt(nil), a.SuggestedPrompts...),
+		SkillIDs:          append([]string(nil), a.SkillIDs...),
+		KnowledgeSources:  append([]KnowledgeSource(nil), a.KnowledgeSources...),
+		KnowledgeRevision: a.KnowledgeRevision,
+		SuggestedPrompts:  append([]SuggestedPrompt(nil), a.SuggestedPrompts...),
 	}
 }
 

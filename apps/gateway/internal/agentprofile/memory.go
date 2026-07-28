@@ -82,6 +82,10 @@ func (m *Memory) Update(_ context.Context, id Identity, value Agent, expected in
 	candidate.OwnerUserID = current.OwnerUserID
 	candidate.Status = current.Status
 	candidate.Version = current.Version + 1
+	candidate.KnowledgeRevision = current.KnowledgeRevision
+	if !knowledgeSourcesEqual(current.KnowledgeSources, candidate.KnowledgeSources) {
+		candidate.KnowledgeRevision++
+	}
 	candidate.CreatedAt = current.CreatedAt
 	if m.nameExists(candidate, candidate.ID) {
 		return Agent{}, ErrConflict
@@ -89,6 +93,18 @@ func (m *Memory) Update(_ context.Context, id Identity, value Agent, expected in
 	candidate = cloneAgent(candidate)
 	m.agents[value.ID] = candidate
 	return cloneAgent(candidate), nil
+}
+
+func knowledgeSourcesEqual(left, right []KnowledgeSource) bool {
+	if len(left) != len(right) {
+		return false
+	}
+	for index := range left {
+		if left[index] != right[index] {
+			return false
+		}
+	}
+	return true
 }
 
 func (m *Memory) Archive(

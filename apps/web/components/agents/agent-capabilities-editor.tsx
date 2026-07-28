@@ -430,6 +430,9 @@ export function AgentCapabilitiesEditor({
           Add Cocola Wiki files or remote Feishu references. The Agent reads them only when
           relevant.
         </p>
+        <p className="mt-1 text-xs leading-5 text-muted-foreground">
+          Saved Knowledge changes apply from the next message, including in existing conversations.
+        </p>
         <form
           className="mt-4 grid gap-3 sm:grid-cols-[1fr_11rem_auto]"
           onSubmit={(event) => {

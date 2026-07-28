@@ -92,6 +92,9 @@ func TestExistingConversationKeepsAgentSkillSnapshotAfterAgentUpdate(t *testing.
 		Name: "Specialist", RuntimeID: "claude-code",
 		ModelRouteID: "route-1", ModelAlias: "sonnet",
 		SkillIDs: []string{"catalog-old"},
+		KnowledgeSources: []agentprofile.KnowledgeSource{{
+			Label: "Old plan", URL: "https://docs.feishu.cn/docx/Old_123",
+		}},
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -113,6 +116,9 @@ func TestExistingConversationKeepsAgentSkillSnapshotAfterAgentUpdate(t *testing.
 		AvatarKey: created.AvatarKey, AvatarColor: created.AvatarColor,
 		RuntimeID: created.RuntimeID, ModelRouteID: created.ModelRouteID,
 		ModelAlias: created.ModelAlias, SkillIDs: []string{"catalog-new"},
+		KnowledgeSources: []agentprofile.KnowledgeSource{{
+			Label: "Current plan", URL: "https://docs.feishu.cn/docx/New_456",
+		}},
 		Version: created.Version,
 	}); err != nil {
 		t.Fatal(err)
@@ -126,6 +132,74 @@ func TestExistingConversationKeepsAgentSkillSnapshotAfterAgentUpdate(t *testing.
 	if request.AgentSnapshot == nil || len(request.AgentSnapshot.SkillIDs) != 1 ||
 		request.AgentSnapshot.SkillIDs[0] != "catalog-old" {
 		t.Fatalf("existing conversation Agent snapshot = %+v", request.AgentSnapshot)
+	}
+	if len(request.AgentSnapshot.KnowledgeSources) != 1 ||
+		request.AgentSnapshot.KnowledgeSources[0].Label != "Old plan" {
+		t.Fatalf("existing conversation Knowledge snapshot = %+v", request.AgentSnapshot)
+	}
+	if request.AgentKnowledgeRevision != 2 ||
+		len(request.AgentKnowledgeSources) != 1 ||
+		request.AgentKnowledgeSources[0].Label != "Current plan" {
+		t.Fatalf(
+			"live Agent Knowledge revision=%d sources=%+v",
+			request.AgentKnowledgeRevision,
+			request.AgentKnowledgeSources,
+		)
+	}
+}
+
+type failingAgentGetStore struct {
+	agentprofile.Store
+	err error
+}
+
+func (s failingAgentGetStore) Get(
+	context.Context,
+	agentprofile.Identity,
+	string,
+) (agentprofile.Agent, error) {
+	return agentprofile.Agent{}, s.err
+}
+
+func TestExistingConversationFallsBackToKnowledgeSnapshotOnTransientLookupFailure(t *testing.T) {
+	ctx := context.Background()
+	identity := auth.DevIdentity
+	snapshot := agentprofile.Snapshot{
+		ID: "11111111-1111-1111-1111-111111111111", Version: 3,
+		Name: "Research", RuntimeID: "claude-code",
+		ModelRouteID: "route-1", ModelAlias: "sonnet",
+		KnowledgeRevision: 4,
+		KnowledgeSources: []agentprofile.KnowledgeSource{{
+			Label: "Last known plan", URL: "https://docs.feishu.cn/docx/Old_123",
+		}},
+	}
+	conversations := convo.NewMemory()
+	if err := conversations.UpsertConversation(ctx, convo.Conversation{
+		ID: "agent-fallback-chat", UserID: identity.UserID, TenantID: identity.TenantID,
+		Title: "Agent fallback", RuntimeID: snapshot.RuntimeID,
+		AgentID: snapshot.ID, AgentVersion: snapshot.Version, AgentSnapshot: &snapshot,
+		CreatedAt: time.Now().UTC(), UpdatedAt: time.Now().UTC(),
+	}); err != nil {
+		t.Fatal(err)
+	}
+	agents := agentprofile.NewService(failingAgentGetStore{
+		Store: agentprofile.NewMemory(),
+		err:   errors.New("database temporarily unavailable"),
+	})
+	api := &API{convo: conversations, agents: agents}
+	request := &chatRequest{SessionID: "agent-fallback-chat", AgentID: snapshot.ID}
+
+	if err := api.resolveChatAgent(ctx, identity, request); err != nil {
+		t.Fatal(err)
+	}
+	if request.AgentKnowledgeRevision != snapshot.KnowledgeRevision ||
+		len(request.AgentKnowledgeSources) != 1 ||
+		request.AgentKnowledgeSources[0].Label != "Last known plan" {
+		t.Fatalf(
+			"fallback Knowledge revision=%d sources=%+v",
+			request.AgentKnowledgeRevision,
+			request.AgentKnowledgeSources,
+		)
 	}
 }
 
