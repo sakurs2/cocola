@@ -260,22 +260,18 @@ func (a *API) chat(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusBadRequest, "INVALID_SKILL_ID", "skill_id is invalid")
 		return
 	}
+	if len(req.WikiRefs) > maxWikiRefsPerTurn {
+		writeErr(
+			w,
+			http.StatusRequestEntityTooLarge,
+			"WIKI_REFERENCE_LIMIT_EXCEEDED",
+			"too many Wiki files were referenced in one turn",
+		)
+		return
+	}
+	wikiNodeIDs := make([]string, 0, len(req.WikiRefs))
+	seenWikiNodeIDs := make(map[string]struct{}, len(req.WikiRefs))
 	if len(req.WikiRefs) > 0 {
-		if len(req.WikiRefs) > maxWikiRefsPerTurn {
-			writeErr(
-				w,
-				http.StatusRequestEntityTooLarge,
-				"WIKI_REFERENCE_LIMIT_EXCEEDED",
-				"too many Wiki files were referenced in one turn",
-			)
-			return
-		}
-		if a.wiki == nil || a.store == nil {
-			writeErr(w, http.StatusServiceUnavailable, "WIKI_UNAVAILABLE", "Wiki is not configured")
-			return
-		}
-		nodeIDs := make([]string, 0, len(req.WikiRefs))
-		seen := make(map[string]struct{}, len(req.WikiRefs))
 		for _, reference := range req.WikiRefs {
 			nodeID := strings.TrimSpace(reference.NodeID)
 			parsedNodeID, err := uuid.Parse(nodeID)
@@ -284,50 +280,11 @@ func (a *API) chat(w http.ResponseWriter, r *http.Request) {
 				return
 			}
 			nodeID = parsedNodeID.String()
-			if _, duplicate := seen[nodeID]; duplicate {
+			if _, duplicate := seenWikiNodeIDs[nodeID]; duplicate {
 				continue
 			}
-			seen[nodeID] = struct{}{}
-			nodeIDs = append(nodeIDs, nodeID)
-		}
-		nodes, versions, resolveErr := a.wiki.ResolveCurrent(r.Context(), wiki.Identity{
-			TenantID: identity.TenantID, UserID: identity.UserID,
-		}, nodeIDs)
-		if errors.Is(resolveErr, wiki.ErrNotFound) {
-			writeErr(w, http.StatusNotFound, "WIKI_REFERENCE_NOT_FOUND", "a referenced Wiki file no longer exists")
-			return
-		}
-		if resolveErr != nil {
-			writeErr(w, http.StatusServiceUnavailable, "WIKI_UNAVAILABLE", "could not resolve Wiki references")
-			return
-		}
-		if len(nodes) != len(versions) {
-			writeErr(w, http.StatusServiceUnavailable, "WIKI_UNAVAILABLE", "could not resolve Wiki references")
-			return
-		}
-		var totalBytes int64
-		for _, version := range versions {
-			if version.SizeBytes < 0 ||
-				version.SizeBytes > maxWikiBytesPerTurn-totalBytes {
-				writeErr(
-					w,
-					http.StatusRequestEntityTooLarge,
-					"WIKI_REFERENCE_LIMIT_EXCEEDED",
-					"referenced Wiki files exceed the per-turn size limit",
-				)
-				return
-			}
-			totalBytes += version.SizeBytes
-		}
-		req.WikiReferences = make([]agent.WikiReference, 0, len(nodes))
-		for index := range nodes {
-			req.WikiReferences = append(req.WikiReferences, agent.WikiReference{
-				NodeID: nodes[index].ID, VersionID: versions[index].ID,
-				Revision:    versions[index].Revision,
-				LogicalPath: nodes[index].LogicalPath, Filename: nodes[index].Name,
-				Mime: versions[index].MimeType, ObjectKey: versions[index].ObjectKey,
-				Size: versions[index].SizeBytes, SHA256: versions[index].SHA256,
-			})
+			seenWikiNodeIDs[nodeID] = struct{}{}
+			wikiNodeIDs = append(wikiNodeIDs, nodeID)
 		}
 	}
 	if err := a.resolveChatAgent(r.Context(), identity, &req); err != nil {
@@ -345,6 +302,86 @@ func (a *API) chat(w http.ResponseWriter, r *http.Request) {
 			writeErr(w, http.StatusServiceUnavailable, "AGENTS_UNAVAILABLE", "could not resolve Agent")
 		}
 		return
+	}
+	agentWikiNodeIDs := make([]string, 0)
+	if req.AgentSnapshot != nil {
+		for _, source := range req.AgentSnapshot.KnowledgeSources {
+			if source.Type != agentprofile.KnowledgeTypeCocolaWiki {
+				continue
+			}
+			if _, duplicate := seenWikiNodeIDs[source.NodeID]; duplicate {
+				continue
+			}
+			seenWikiNodeIDs[source.NodeID] = struct{}{}
+			agentWikiNodeIDs = append(agentWikiNodeIDs, source.NodeID)
+		}
+	}
+	if len(wikiNodeIDs)+len(agentWikiNodeIDs) > maxWikiRefsPerTurn {
+		writeErr(
+			w,
+			http.StatusRequestEntityTooLarge,
+			"WIKI_REFERENCE_LIMIT_EXCEEDED",
+			"Wiki references exceed the per-turn file limit",
+		)
+		return
+	}
+	if len(wikiNodeIDs)+len(agentWikiNodeIDs) > 0 {
+		if a.wiki == nil || a.store == nil {
+			writeErr(w, http.StatusServiceUnavailable, "WIKI_UNAVAILABLE", "Wiki is not configured")
+			return
+		}
+		wikiIdentity := wiki.Identity{
+			TenantID: identity.TenantID,
+			UserID:   identity.UserID,
+		}
+		var totalBytes int64
+		if len(wikiNodeIDs) > 0 {
+			nodes, versions, resolveErr := a.wiki.ResolveCurrent(r.Context(), wikiIdentity, wikiNodeIDs)
+			if errors.Is(resolveErr, wiki.ErrNotFound) {
+				writeErr(w, http.StatusNotFound, "WIKI_REFERENCE_NOT_FOUND", "a referenced Wiki file no longer exists")
+				return
+			}
+			if resolveErr != nil || len(nodes) != len(versions) {
+				writeErr(w, http.StatusServiceUnavailable, "WIKI_UNAVAILABLE", "could not resolve Wiki references")
+				return
+			}
+			for index := range nodes {
+				reference, nextTotal, ok := resolvedWikiReference(nodes[index], versions[index], totalBytes)
+				if !ok {
+					writeErr(
+						w,
+						http.StatusRequestEntityTooLarge,
+						"WIKI_REFERENCE_LIMIT_EXCEEDED",
+						"referenced Wiki files exceed the per-turn size limit",
+					)
+					return
+				}
+				totalBytes = nextTotal
+				req.WikiReferences = append(req.WikiReferences, reference)
+			}
+		}
+		for _, nodeID := range agentWikiNodeIDs {
+			node, version, resolveErr := a.wiki.GetCurrent(r.Context(), wikiIdentity, nodeID)
+			if errors.Is(resolveErr, wiki.ErrNotFound) {
+				continue
+			}
+			if resolveErr != nil {
+				writeErr(w, http.StatusServiceUnavailable, "WIKI_UNAVAILABLE", "could not resolve Agent Wiki Knowledge")
+				return
+			}
+			reference, nextTotal, ok := resolvedWikiReference(node, version, totalBytes)
+			if !ok {
+				writeErr(
+					w,
+					http.StatusRequestEntityTooLarge,
+					"WIKI_REFERENCE_LIMIT_EXCEEDED",
+					"referenced Wiki files exceed the per-turn size limit",
+				)
+				return
+			}
+			totalBytes = nextTotal
+			req.AgentWikiReferences = append(req.AgentWikiReferences, reference)
+		}
 	}
 	if req.RuntimeID != "" {
 		if _, supported := a.runtimeByID[req.RuntimeID]; !supported {
@@ -578,6 +615,22 @@ func (a *API) chat(w http.ResponseWriter, r *http.Request) {
 		go a.executeLiveRun(live)
 	}
 	a.serveRunSubscription(w, r, run.ID, snapshot, updates, unsubscribe)
+}
+
+func resolvedWikiReference(
+	node wiki.Node,
+	version wiki.Version,
+	totalBytes int64,
+) (agent.WikiReference, int64, bool) {
+	if version.SizeBytes < 0 || version.SizeBytes > maxWikiBytesPerTurn-totalBytes {
+		return agent.WikiReference{}, totalBytes, false
+	}
+	return agent.WikiReference{
+		NodeID: node.ID, VersionID: version.ID, Revision: version.Revision,
+		LogicalPath: node.LogicalPath, Filename: node.Name,
+		Mime: version.MimeType, ObjectKey: version.ObjectKey,
+		Size: version.SizeBytes, SHA256: version.SHA256,
+	}, totalBytes + version.SizeBytes, true
 }
 
 func (a *API) resolveChatAgent(
@@ -1128,6 +1181,13 @@ func (a *API) executeLiveRun(live *liveRun) {
 		live.recalledMemoryURIs = recall.URIs
 		live.updateMemoryRecall(recall)
 	}
+	wikiReferences := make(
+		[]agent.WikiReference,
+		0,
+		len(live.request.WikiReferences)+len(live.request.AgentWikiReferences),
+	)
+	wikiReferences = append(wikiReferences, live.request.WikiReferences...)
+	wikiReferences = append(wikiReferences, live.request.AgentWikiReferences...)
 	live.query = agent.Query{
 		UserID: live.identity.UserID, SessionID: live.request.SessionID,
 		RuntimeID: live.request.RuntimeID, SkillID: live.request.SkillID,
@@ -1141,7 +1201,7 @@ func (a *API) executeLiveRun(live *liveRun) {
 		TraceID:             live.run.ID, ParentSpanID: conversationRootSpan(live.traceCtx),
 		Source:           live.run.Source,
 		SandboxAuthToken: a.mintSandboxToken(live.identity), Attachments: attachments,
-		WikiReferences: live.request.WikiReferences,
+		WikiReferences: wikiReferences,
 		SCMToken:       scmToken, ProjectBrokerCredential: projectBrokerCredential,
 		SkillBrokerCredential: skillBrokerCredential,
 		LarkCredential:        larkCredential,
@@ -1467,9 +1527,19 @@ func runtimeAgentContext(snapshot *agentprofile.Snapshot) *agent.AgentContext {
 	if snapshot == nil {
 		return nil
 	}
+	knowledgeSources := make(
+		[]agent.AgentKnowledgeSource, 0, len(snapshot.KnowledgeSources),
+	)
+	for _, source := range snapshot.KnowledgeSources {
+		knowledgeSources = append(knowledgeSources, agent.AgentKnowledgeSource{
+			Type: source.Type, Label: source.Label, URL: source.URL, NodeID: source.NodeID,
+		})
+	}
 	return &agent.AgentContext{
 		ID: snapshot.ID, Version: snapshot.Version, Name: snapshot.Name,
-		Instructions: snapshot.Instructions,
+		Instructions:     snapshot.Instructions,
+		SkillCatalogIDs:  append([]string(nil), snapshot.SkillIDs...),
+		KnowledgeSources: knowledgeSources,
 	}
 }
 

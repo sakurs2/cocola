@@ -125,7 +125,12 @@ def _build_options(
     # Plan Mode must not load workspace-controlled settings because those
     # settings can register hooks or MCP servers with external side effects.
     kwargs["setting_sources"] = [] if plan_mode else ["user", "project"]
-    kwargs["skills"] = "all"
+    requested_skills = req.get("skills")
+    kwargs["skills"] = (
+        [str(value) for value in requested_skills if str(value).strip()]
+        if isinstance(requested_skills, list)
+        else []
+    )
 
     # System prompt: default to Claude Code's preset (which injects the live
     # <env> block, including the genuine current cwd). A caller-supplied prompt

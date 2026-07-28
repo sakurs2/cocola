@@ -971,6 +971,165 @@ func (a *Admin) ListUserSkillCatalog(ctx context.Context, userID string) ([]stor
 	return out, nil
 }
 
+type AgentSkillCatalogItem struct {
+	ID                string `json:"id"`
+	RuntimeID         string `json:"runtime_id"`
+	Name              string `json:"name"`
+	Description       string `json:"description"`
+	Source            string `json:"source"`
+	Available         bool   `json:"available"`
+	DefaultEnabled    bool   `json:"default_enabled"`
+	UnavailableReason string `json:"unavailable_reason,omitempty"`
+}
+
+type AgentSkillResolution struct {
+	Skills         []store.Skill `json:"skills"`
+	UnavailableIDs []string      `json:"unavailable_ids"`
+}
+
+// ListAgentSkillCatalog returns the safe metadata an end user needs while
+// configuring an Agent. Package contents and object-store locations never cross
+// this API boundary.
+func (a *Admin) ListAgentSkillCatalog(
+	ctx context.Context,
+	userID string,
+) ([]AgentSkillCatalogItem, error) {
+	if strings.TrimSpace(userID) == "" {
+		return nil, ErrInvalidArg
+	}
+	adminSkills, err := a.store.ListSkills(ctx, false)
+	if err != nil {
+		return nil, err
+	}
+	userSkills, err := a.store.ListSkillsForUser(ctx, userID)
+	if err != nil {
+		return nil, err
+	}
+	prefs, err := a.store.ListUserSkillPreferences(ctx, userID)
+	if err != nil {
+		return nil, err
+	}
+	prefMap := make(map[string]bool, len(prefs))
+	for _, pref := range prefs {
+		prefMap[pref.SkillID] = pref.Enabled
+	}
+
+	out := make([]AgentSkillCatalogItem, 0, len(adminSkills)+len(userSkills))
+	for _, skill := range adminSkills {
+		if skill.Scope != "" && skill.Scope != "admin" {
+			continue
+		}
+		available, reason := agentSkillAvailability(skill, true)
+		defaultEnabled := available && skill.Enabled
+		if enabled, ok := prefMap[skill.ID]; ok {
+			defaultEnabled = defaultEnabled && enabled
+		}
+		out = append(out, agentSkillCatalogItem(
+			skill, "system", available, defaultEnabled, reason,
+		))
+	}
+	for _, skill := range userSkills {
+		available, reason := agentSkillAvailability(skill, false)
+		out = append(out, agentSkillCatalogItem(
+			skill, "personal", available, available && skill.Enabled, reason,
+		))
+	}
+	return out, nil
+}
+
+// ResolveAgentSkills materializes a custom Agent skill set. User enable/disable
+// preferences are intentionally ignored, while administrator disablement and
+// ownership remain hard gates.
+func (a *Admin) ResolveAgentSkills(
+	ctx context.Context,
+	userID string,
+	catalogIDs []string,
+) (AgentSkillResolution, error) {
+	if strings.TrimSpace(userID) == "" || len(catalogIDs) > 32 {
+		return AgentSkillResolution{}, ErrInvalidArg
+	}
+	result := AgentSkillResolution{
+		Skills:         make([]store.Skill, 0, len(catalogIDs)),
+		UnavailableIDs: make([]string, 0),
+	}
+	seenIDs := make(map[string]struct{}, len(catalogIDs))
+	seenRuntimeIDs := make(map[string]struct{}, len(catalogIDs))
+	for _, rawID := range catalogIDs {
+		id := strings.TrimSpace(rawID)
+		if id == "" {
+			return AgentSkillResolution{}, ErrInvalidArg
+		}
+		if _, exists := seenIDs[id]; exists {
+			return AgentSkillResolution{}, ErrInvalidArg
+		}
+		seenIDs[id] = struct{}{}
+
+		skill, err := a.store.GetSkill(ctx, id)
+		if err != nil {
+			if errors.Is(err, store.ErrNotFound) {
+				result.UnavailableIDs = append(result.UnavailableIDs, id)
+				continue
+			}
+			return AgentSkillResolution{}, err
+		}
+		isAdmin := skill.Scope == "" || skill.Scope == "admin"
+		if !isAdmin && (skill.Scope != "user" || skill.OwnerUserID != userID) {
+			result.UnavailableIDs = append(result.UnavailableIDs, id)
+			continue
+		}
+		available, _ := agentSkillAvailability(skill, isAdmin)
+		if !available {
+			result.UnavailableIDs = append(result.UnavailableIDs, id)
+			continue
+		}
+		if skill.RuntimeID == "" {
+			skill.RuntimeID = skill.ID
+		}
+		if _, exists := seenRuntimeIDs[skill.RuntimeID]; exists {
+			result.UnavailableIDs = append(result.UnavailableIDs, id)
+			continue
+		}
+		skill, err = attachSkillResultContract(skill)
+		if err != nil {
+			result.UnavailableIDs = append(result.UnavailableIDs, id)
+			continue
+		}
+		seenRuntimeIDs[skill.RuntimeID] = struct{}{}
+		result.Skills = append(result.Skills, skill)
+	}
+	return result, nil
+}
+
+func agentSkillCatalogItem(
+	skill store.Skill,
+	source string,
+	available bool,
+	defaultEnabled bool,
+	reason string,
+) AgentSkillCatalogItem {
+	runtimeID := strings.TrimSpace(skill.RuntimeID)
+	if runtimeID == "" {
+		runtimeID = skill.ID
+	}
+	return AgentSkillCatalogItem{
+		ID: skill.ID, RuntimeID: runtimeID, Name: skill.Name,
+		Description: skill.Description, Source: source, Available: available,
+		DefaultEnabled: defaultEnabled, UnavailableReason: reason,
+	}
+}
+
+func agentSkillAvailability(skill store.Skill, requireAdminEnabled bool) (bool, string) {
+	if requireAdminEnabled && !skill.Enabled {
+		return false, "disabled_by_administrator"
+	}
+	candidate := skill
+	candidate.Enabled = true
+	if validateEnabledSkill(candidate) != nil {
+		return false, "invalid_package"
+	}
+	return true, ""
+}
+
 // GetSkill fetches one entry.
 func (a *Admin) GetSkill(ctx context.Context, id string) (store.Skill, error) {
 	s, err := a.store.GetSkill(ctx, id)

@@ -1,10 +1,14 @@
 "use client";
 
-import { Archive, ArrowLeft, Check, Loader2, Save } from "lucide-react";
+import { Archive, ArrowLeft, Check, ExternalLink, Loader2, Save } from "lucide-react";
 import Link from "next/link";
 import { useParams, useRouter } from "next/navigation";
 import { useEffect, useMemo, useState } from "react";
 import { AgentAvatar } from "@/components/agents/agent-avatar";
+import {
+  AgentCapabilitiesEditor,
+  type KnowledgeCheckStatus,
+} from "@/components/agents/agent-capabilities-editor";
 import { useWorkspaceToast } from "@/components/assistant-ui/workspace-toast";
 import { FeishuConnectorCard } from "@/components/connectors/feishu-connector-card";
 import { ActionConfirmDialog } from "@/components/ui/action-dialog";
@@ -14,11 +18,16 @@ import { SelectControl } from "@/components/ui/select-control";
 import {
   AGENT_AVATAR_COLORS,
   AGENT_AVATAR_KEYS,
+  agentKnowledgeSourceKey,
   agentResponseError,
+  normalizeAgentSkillCatalog,
   normalizeAgentModels,
   normalizeAgentRuntimes,
+  type AgentKnowledgeSource,
   type AgentModelOption,
   type AgentProfile,
+  type AgentSkillCatalogItem,
+  type AgentSuggestedPrompt,
 } from "@/lib/agents";
 import { cn } from "@/lib/utils";
 
@@ -42,12 +51,20 @@ export default function AgentPage() {
   const { showError, showSuccess } = useWorkspaceToast();
   const [agent, setAgent] = useState<AgentProfile | null>(null);
   const [models, setModels] = useState<AgentModelOption[]>([]);
+  const [skillCatalog, setSkillCatalog] = useState<AgentSkillCatalogItem[]>([]);
   const [name, setName] = useState("");
   const [description, setDescription] = useState("");
   const [instructions, setInstructions] = useState("");
   const [avatarKey, setAvatarKey] = useState("");
   const [avatarColor, setAvatarColor] = useState("");
   const [modelID, setModelID] = useState("");
+  const [skillIDs, setSkillIDs] = useState<string[]>([]);
+  const [knowledgeSources, setKnowledgeSources] = useState<AgentKnowledgeSource[]>([]);
+  const [knowledgeStatuses, setKnowledgeStatuses] = useState<Record<string, KnowledgeCheckStatus>>(
+    {},
+  );
+  const [checkingKnowledge, setCheckingKnowledge] = useState(false);
+  const [suggestedPrompts, setSuggestedPrompts] = useState<AgentSuggestedPrompt[]>([]);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [archiveOpen, setArchiveOpen] = useState(false);
@@ -60,21 +77,28 @@ export default function AgentPage() {
     setError("");
     void (async () => {
       try {
-        const [agentResponse, modelsResponse, runtimesResponse] = await Promise.all([
-          fetch(`/api/agents/${encodeURIComponent(agentID)}`, {
-            cache: "no-store",
-            signal: controller.signal,
-          }),
-          fetch("/api/models", { cache: "no-store", signal: controller.signal }),
-          fetch("/api/agent-runtimes", { cache: "no-store", signal: controller.signal }),
-        ]);
+        const [agentResponse, modelsResponse, runtimesResponse, skillsResponse] = await Promise.all(
+          [
+            fetch(`/api/agents/${encodeURIComponent(agentID)}`, {
+              cache: "no-store",
+              signal: controller.signal,
+            }),
+            fetch("/api/models", { cache: "no-store", signal: controller.signal }),
+            fetch("/api/agent-runtimes", { cache: "no-store", signal: controller.signal }),
+            fetch("/api/skills/agent-catalog", {
+              cache: "no-store",
+              signal: controller.signal,
+            }),
+          ],
+        );
         if (!agentResponse.ok) throw new Error(await agentResponseError(agentResponse));
-        if (!modelsResponse.ok || !runtimesResponse.ok) {
-          throw new Error("Model configuration is temporarily unavailable.");
+        if (!modelsResponse.ok || !runtimesResponse.ok || !skillsResponse.ok) {
+          throw new Error("Agent capability configuration is temporarily unavailable.");
         }
         const loaded = (await agentResponse.json()) as AgentProfile;
         const modelRows = normalizeAgentModels(await modelsResponse.json());
         const runtimes = normalizeAgentRuntimes(await runtimesResponse.json());
+        const loadedSkillCatalog = normalizeAgentSkillCatalog(await skillsResponse.json());
         const runtime = runtimes.find((item) => item.id === loaded.runtime_id);
         if (!runtime) throw new Error("This Agent's runtime is no longer available.");
         const compatible = modelRows.filter((model) =>
@@ -89,6 +113,28 @@ export default function AgentPage() {
           setAvatarColor(loaded.avatar_color);
           setModelID(loaded.model_route_id);
           setModels(compatible);
+          setSkillCatalog(loadedSkillCatalog);
+          setSkillIDs(loaded.skill_ids ?? []);
+          setKnowledgeSources(loaded.knowledge_sources ?? []);
+          setSuggestedPrompts(loaded.suggested_prompts ?? []);
+          if ((loaded.knowledge_sources ?? []).length > 0) {
+            void checkKnowledgeAccess(loaded.id, loaded.knowledge_sources, controller.signal)
+              .then((statuses) => {
+                if (!controller.signal.aborted) setKnowledgeStatuses(statuses);
+              })
+              .catch(() => {
+                if (!controller.signal.aborted) {
+                  setKnowledgeStatuses(
+                    Object.fromEntries(
+                      loaded.knowledge_sources.map((source) => [
+                        agentKnowledgeSourceKey(source),
+                        "temporarily_unavailable" as const,
+                      ]),
+                    ),
+                  );
+                }
+              });
+          }
         }
       } catch (cause) {
         if (!controller.signal.aborted) {
@@ -112,9 +158,38 @@ export default function AgentPage() {
     [instructions],
   );
   const instructionsTooLarge = instructionsBytes > MAX_INSTRUCTIONS_BYTES;
+  const suggestedPromptsValid = suggestedPrompts.every(
+    (suggestion) => suggestion.title.trim() && suggestion.prompt.trim(),
+  );
+  const dirty = useMemo(() => {
+    if (!agent) return false;
+    return (
+      name !== agent.name ||
+      description !== agent.description ||
+      instructions !== agent.instructions ||
+      avatarKey !== agent.avatar_key ||
+      avatarColor !== agent.avatar_color ||
+      modelID !== agent.model_route_id ||
+      JSON.stringify(skillIDs) !== JSON.stringify(agent.skill_ids ?? []) ||
+      JSON.stringify(knowledgeSources) !== JSON.stringify(agent.knowledge_sources ?? []) ||
+      JSON.stringify(suggestedPrompts) !== JSON.stringify(agent.suggested_prompts ?? [])
+    );
+  }, [
+    agent,
+    avatarColor,
+    avatarKey,
+    description,
+    instructions,
+    knowledgeSources,
+    modelID,
+    name,
+    skillIDs,
+    suggestedPrompts,
+  ]);
 
   const save = async () => {
-    if (!agent || !name.trim() || !selectedModel || instructionsTooLarge) return;
+    if (!agent || !name.trim() || !selectedModel || instructionsTooLarge || !suggestedPromptsValid)
+      return;
     setSaving(true);
     setError("");
     try {
@@ -130,6 +205,12 @@ export default function AgentPage() {
           runtime_id: agent.runtime_id,
           model_route_id: selectedModel.id,
           model_alias: selectedModel.alias,
+          skill_ids: skillIDs,
+          knowledge_sources: knowledgeSources,
+          suggested_prompts: suggestedPrompts.map((suggestion) => ({
+            title: suggestion.title.trim(),
+            prompt: suggestion.prompt.trim(),
+          })),
           version: agent.version,
         }),
       });
@@ -142,7 +223,29 @@ export default function AgentPage() {
       setAvatarKey(updated.avatar_key);
       setAvatarColor(updated.avatar_color);
       setModelID(updated.model_route_id);
+      setSkillIDs(updated.skill_ids);
+      setKnowledgeSources(updated.knowledge_sources);
+      setSuggestedPrompts(updated.suggested_prompts);
       showSuccess("Agent saved");
+      if (updated.knowledge_sources.length > 0) {
+        setCheckingKnowledge(true);
+        try {
+          setKnowledgeStatuses(await checkKnowledgeAccess(updated.id, updated.knowledge_sources));
+        } catch {
+          setKnowledgeStatuses(
+            Object.fromEntries(
+              updated.knowledge_sources.map((source) => [
+                agentKnowledgeSourceKey(source),
+                "temporarily_unavailable" as const,
+              ]),
+            ),
+          );
+        } finally {
+          setCheckingKnowledge(false);
+        }
+      } else {
+        setKnowledgeStatuses({});
+      }
     } catch (cause) {
       const message = cause instanceof Error ? cause.message : "Could not save Agent";
       setError(message);
@@ -150,6 +253,23 @@ export default function AgentPage() {
     } finally {
       setSaving(false);
     }
+  };
+
+  const checkKnowledge = async () => {
+    if (!agent || dirty || knowledgeSources.length === 0) return;
+    setCheckingKnowledge(true);
+    try {
+      setKnowledgeStatuses(await checkKnowledgeAccess(agent.id, knowledgeSources));
+    } catch (cause) {
+      showError(cause instanceof Error ? cause.message : "Could not check Knowledge access");
+    } finally {
+      setCheckingKnowledge(false);
+    }
+  };
+
+  const testAgent = () => {
+    if (!agent || dirty) return;
+    window.open(`/?agent=${encodeURIComponent(agent.id)}`, "_blank", "noopener,noreferrer");
   };
 
   const archive = async () => {
@@ -227,21 +347,35 @@ export default function AgentPage() {
               </div>
             </div>
           </div>
-          <button
-            type="button"
-            onClick={() => void save()}
-            disabled={
-              saving ||
-              !name.trim() ||
-              !selectedModel ||
-              instructionsTooLarge ||
-              models.length === 0
-            }
-            className="inline-flex h-9 items-center gap-2 rounded-xl bg-blue-600 px-4 text-sm font-semibold text-white hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-50"
-          >
-            {saving ? <Loader2 className="size-4 animate-spin" /> : <Save className="size-4" />}
-            {saving ? "Saving…" : "Save"}
-          </button>
+          <div className="flex items-center gap-2">
+            <button
+              type="button"
+              onClick={testAgent}
+              disabled={dirty}
+              title={dirty ? "Save changes before testing this Agent." : "Open a new chat"}
+              className="inline-flex h-9 items-center gap-2 rounded-xl border border-border px-3 text-sm font-medium hover:bg-muted disabled:cursor-not-allowed disabled:opacity-50"
+            >
+              <ExternalLink className="size-4" />
+              Test Agent
+            </button>
+            <button
+              type="button"
+              onClick={() => void save()}
+              disabled={
+                saving ||
+                !dirty ||
+                !name.trim() ||
+                !selectedModel ||
+                instructionsTooLarge ||
+                !suggestedPromptsValid ||
+                models.length === 0
+              }
+              className="inline-flex h-9 items-center gap-2 rounded-xl bg-blue-600 px-4 text-sm font-semibold text-white hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-50"
+            >
+              {saving ? <Loader2 className="size-4 animate-spin" /> : <Save className="size-4" />}
+              {saving ? "Saving…" : "Save"}
+            </button>
+          </div>
         </header>
 
         {error ? (
@@ -380,6 +514,26 @@ export default function AgentPage() {
             </div>
           </section>
 
+          <AgentCapabilitiesEditor
+            skills={skillCatalog}
+            skillIDs={skillIDs}
+            onSkillIDsChange={(value) => {
+              setSkillIDs(value);
+              setKnowledgeStatuses({});
+            }}
+            knowledgeSources={knowledgeSources}
+            onKnowledgeSourcesChange={(value) => {
+              setKnowledgeSources(value);
+              setKnowledgeStatuses({});
+            }}
+            knowledgeStatuses={knowledgeStatuses}
+            checkingKnowledge={checkingKnowledge}
+            knowledgeCheckDisabled={dirty}
+            onCheckKnowledge={() => void checkKnowledge()}
+            suggestedPrompts={suggestedPrompts}
+            onSuggestedPromptsChange={setSuggestedPrompts}
+          />
+
           <FeishuConnectorCard agentId={agent.id} />
 
           <section className="rounded-2xl border border-red-500/20 bg-red-500/[0.025] p-5">
@@ -420,4 +574,29 @@ export default function AgentPage() {
       />
     </main>
   );
+}
+
+async function checkKnowledgeAccess(
+  agentID: string,
+  sources: AgentKnowledgeSource[],
+  signal?: AbortSignal,
+): Promise<Record<string, KnowledgeCheckStatus>> {
+  const response = await fetch(`/api/agents/${encodeURIComponent(agentID)}/knowledge/check`, {
+    method: "POST",
+    cache: "no-store",
+    signal,
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ sources }),
+  });
+  if (!response.ok) throw new Error(await agentResponseError(response));
+  const payload = (await response.json()) as {
+    results?: Array<{ source?: AgentKnowledgeSource; status?: KnowledgeCheckStatus }>;
+  };
+  const statuses: Record<string, KnowledgeCheckStatus> = {};
+  for (const result of payload.results ?? []) {
+    if (result.source && result.status) {
+      statuses[agentKnowledgeSourceKey(result.source)] = result.status;
+    }
+  }
+  return statuses;
 }

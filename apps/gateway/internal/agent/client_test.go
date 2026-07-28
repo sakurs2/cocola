@@ -72,7 +72,15 @@ func TestClientStreamMapsWikiReferences(t *testing.T) {
 		}},
 		Agent: &AgentContext{
 			ID: "agent-1", Version: 3, Name: "Research",
-			Instructions: "Cite primary sources.",
+			Instructions:    "Cite primary sources.",
+			SkillCatalogIDs: []string{"catalog-search"},
+			KnowledgeSources: []AgentKnowledgeSource{{
+				Type: "feishu_doc", Label: "Plan",
+				URL: "https://docs.feishu.cn/docx/Abc_123",
+			}, {
+				Type: "cocola_wiki", Label: "Handbook",
+				NodeID: "8eea8a2b-9491-49b7-84c5-a37d1d0ede90",
+			}},
 		},
 	}, func(Event) error { return nil })
 	if err != nil {
@@ -93,7 +101,14 @@ func TestClientStreamMapsWikiReferences(t *testing.T) {
 		request.AgentContext.Id != "agent-1" ||
 		request.AgentContext.Version != 3 ||
 		request.AgentContext.Name != "Research" ||
-		request.AgentContext.Instructions != "Cite primary sources." {
+		request.AgentContext.Instructions != "Cite primary sources." ||
+		len(request.AgentContext.SkillCatalogIds) != 1 ||
+		request.AgentContext.SkillCatalogIds[0] != "catalog-search" ||
+		len(request.AgentContext.KnowledgeSources) != 2 ||
+		request.AgentContext.KnowledgeSources[0].Url !=
+			"https://docs.feishu.cn/docx/Abc_123" ||
+		request.AgentContext.KnowledgeSources[1].NodeId !=
+			"8eea8a2b-9491-49b7-84c5-a37d1d0ede90" {
 		t.Fatalf("AgentContext = %#v", request.AgentContext)
 	}
 	incomingMetadata := <-recording.metadata

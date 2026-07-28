@@ -6,10 +6,15 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"testing"
+	"time"
+
+	"github.com/google/uuid"
 
 	"github.com/cocola-project/cocola/apps/gateway/internal/agentprofile"
 	"github.com/cocola-project/cocola/apps/gateway/internal/auth"
+	"github.com/cocola-project/cocola/apps/gateway/internal/wiki"
 	"github.com/cocola-project/cocola/packages/go-common/logger"
+	"github.com/cocola-project/cocola/packages/go-common/token"
 )
 
 func newAgentHandler() http.Handler {
@@ -106,5 +111,167 @@ func TestAgentHTTPRejectsInvalidID(t *testing.T) {
 	response := agentRequest(t, newAgentHandler(), http.MethodGet, "/v1/agents/not-a-uuid", nil)
 	if response.Code != http.StatusBadRequest {
 		t.Fatalf("status=%d body=%s", response.Code, response.Body.String())
+	}
+}
+
+func TestAgentHTTPSkillSelectionValidationAndPreservation(t *testing.T) {
+	catalogUnavailable := false
+	adminDisabled := false
+	admin := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/me/skills/agent-catalog" {
+			http.NotFound(w, r)
+			return
+		}
+		if r.Header.Get("Authorization") == "" {
+			t.Error("Agent catalog request is missing its runtime user credential")
+		}
+		if catalogUnavailable {
+			http.Error(w, "temporarily unavailable", http.StatusServiceUnavailable)
+			return
+		}
+		available := !adminDisabled
+		_ = json.NewEncoder(w).Encode(map[string]any{"skills": []map[string]any{
+			{
+				"id": "personal-disabled-by-default", "runtime_id": "private",
+				"available": true, "default_enabled": false,
+			},
+			{
+				"id": "shared-a", "runtime_id": "duplicate",
+				"available": available, "default_enabled": available,
+			},
+			{
+				"id": "shared-b", "runtime_id": "duplicate",
+				"available": true, "default_enabled": true,
+			},
+		}})
+	}))
+	defer admin.Close()
+
+	api := newConfiguredTestAPI(&fakeStreamer{}, auth.NewVerifier(auth.Config{}), logger.Must())
+	api.WithAgents(agentprofile.NewService(agentprofile.NewMemory()))
+	api.WithSandboxTokenIssuer(token.NewIssuer("agent-catalog-secret", "cocola", time.Hour), time.Hour)
+	api.WithAgentSkillCatalog(admin.URL, admin.Client())
+	handler := api.Handler()
+
+	create := map[string]any{
+		"name": "Specialist", "runtime_id": "claude-code",
+		"model_route_id": "route-1", "model_alias": "sonnet",
+		"skill_ids": []string{"personal-disabled-by-default", "shared-a"},
+	}
+	response := agentRequest(t, handler, http.MethodPost, "/v1/agents", create)
+	if response.Code != http.StatusCreated {
+		t.Fatalf("create status=%d body=%s", response.Code, response.Body.String())
+	}
+	var created agentprofile.Agent
+	if err := json.Unmarshal(response.Body.Bytes(), &created); err != nil {
+		t.Fatal(err)
+	}
+	if len(created.SkillIDs) != 2 {
+		t.Fatalf("created Skill IDs = %#v", created.SkillIDs)
+	}
+
+	create["name"] = "Duplicate"
+	create["skill_ids"] = []string{"shared-a", "shared-b"}
+	response = agentRequest(t, handler, http.MethodPost, "/v1/agents", create)
+	if response.Code != http.StatusBadRequest {
+		t.Fatalf("duplicate runtime status=%d body=%s", response.Code, response.Body.String())
+	}
+
+	adminDisabled = true
+	update := map[string]any{
+		"name": "Renamed Specialist", "runtime_id": created.RuntimeID,
+		"model_route_id": created.ModelRouteID, "model_alias": created.ModelAlias,
+		"avatar_key": created.AvatarKey, "avatar_color": created.AvatarColor,
+		"skill_ids": created.SkillIDs, "version": created.Version,
+	}
+	response = agentRequest(t, handler, http.MethodPatch, "/v1/agents/"+created.ID, update)
+	if response.Code != http.StatusOK {
+		t.Fatalf("preserve disabled selection status=%d body=%s", response.Code, response.Body.String())
+	}
+	var preserved agentprofile.Agent
+	if err := json.Unmarshal(response.Body.Bytes(), &preserved); err != nil {
+		t.Fatal(err)
+	}
+	update["skill_ids"] = []string{"shared-a", "shared-b"}
+	update["version"] = preserved.Version
+	response = agentRequest(t, handler, http.MethodPatch, "/v1/agents/"+created.ID, update)
+	if response.Code != http.StatusBadRequest {
+		t.Fatalf("duplicate with preserved disabled selection status=%d body=%s",
+			response.Code, response.Body.String())
+	}
+
+	create["name"] = "Unavailable"
+	create["skill_ids"] = []string{"shared-a"}
+	response = agentRequest(t, handler, http.MethodPost, "/v1/agents", create)
+	if response.Code != http.StatusBadRequest {
+		t.Fatalf("new disabled selection status=%d body=%s", response.Code, response.Body.String())
+	}
+
+	catalogUnavailable = true
+	create["name"] = "Catalog Outage"
+	create["skill_ids"] = []string{"shared-b"}
+	response = agentRequest(t, handler, http.MethodPost, "/v1/agents", create)
+	if response.Code != http.StatusServiceUnavailable {
+		t.Fatalf("catalog outage status=%d body=%s", response.Code, response.Body.String())
+	}
+	var envelope struct {
+		Error struct {
+			Code string `json:"code"`
+		} `json:"error"`
+	}
+	if err := json.Unmarshal(response.Body.Bytes(), &envelope); err != nil {
+		t.Fatal(err)
+	}
+	if envelope.Error.Code != "SKILL_CATALOG_UNAVAILABLE" {
+		t.Fatalf("catalog outage error = %q", envelope.Error.Code)
+	}
+}
+
+func TestAgentHTTPCocolaWikiKnowledgeUsesOwnerIdentityAndPreservesDeletedSource(t *testing.T) {
+	nodeID := uuid.NewString()
+	wikiStore := &wikiStoreStub{
+		currentNode: wiki.Node{ID: nodeID, Kind: "file", Name: "handbook.md"},
+		current:     wiki.Version{ID: uuid.NewString(), NodeID: nodeID},
+	}
+	api := newConfiguredTestAPI(&fakeStreamer{}, auth.NewVerifier(auth.Config{}), logger.Must()).
+		WithObjStore(&cleanupObjectStore{}, DefaultInlineMaxBytes).
+		WithWikiStore(wikiStore, 1024).
+		WithAgents(agentprofile.NewService(agentprofile.NewMemory()))
+	handler := api.Handler()
+
+	response := agentRequest(t, handler, http.MethodPost, "/v1/agents", map[string]any{
+		"name": "Wiki specialist", "runtime_id": "claude-code",
+		"model_route_id": "route-1", "model_alias": "sonnet",
+		"knowledge_sources": []map[string]any{{
+			"type": "cocola_wiki", "label": "Handbook", "node_id": nodeID,
+		}},
+	})
+	if response.Code != http.StatusCreated {
+		t.Fatalf("create status=%d body=%s", response.Code, response.Body.String())
+	}
+	if wikiStore.currentID != (wiki.Identity{
+		TenantID: auth.DevIdentity.TenantID,
+		UserID:   auth.DevIdentity.UserID,
+	}) {
+		t.Fatalf("Wiki validation identity = %+v", wikiStore.currentID)
+	}
+	var created agentprofile.Agent
+	if err := json.Unmarshal(response.Body.Bytes(), &created); err != nil {
+		t.Fatal(err)
+	}
+
+	wikiStore.currentErr = wiki.ErrNotFound
+	wikiStore.currentNodeID = ""
+	response = agentRequest(t, handler, http.MethodPatch, "/v1/agents/"+created.ID, map[string]any{
+		"name": "Renamed specialist", "runtime_id": created.RuntimeID,
+		"model_route_id": created.ModelRouteID, "model_alias": created.ModelAlias,
+		"avatar_key": created.AvatarKey, "avatar_color": created.AvatarColor,
+		"knowledge_sources": created.KnowledgeSources, "version": created.Version,
+	})
+	if response.Code != http.StatusOK {
+		t.Fatalf("preserve deleted Wiki status=%d body=%s", response.Code, response.Body.String())
+	}
+	if wikiStore.currentNodeID != "" {
+		t.Fatalf("preserved Wiki source was unexpectedly revalidated: %q", wikiStore.currentNodeID)
 	}
 }

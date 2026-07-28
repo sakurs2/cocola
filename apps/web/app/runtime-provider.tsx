@@ -38,7 +38,12 @@ import {
 import { inferAgentDurationMs } from "@/lib/agent-turn-summary.mjs";
 import { selectAgentRuntime } from "@/lib/agent-runtime-policy.mjs";
 import { validateChatAttachments } from "@/lib/chat-attachment-limits.mjs";
-import type { AgentConversationSnapshot, AgentProfile } from "@/lib/agents";
+import {
+  normalizeAgentSkillCatalog,
+  type AgentConversationSnapshot,
+  type AgentProfile,
+  type AgentSkillCatalogItem,
+} from "@/lib/agents";
 import {
   getOrCreatePlanExecutionRequestId,
   interactionModeForRuntime,
@@ -1349,7 +1354,8 @@ export function CocolaRuntimeProvider({ children }: { children: ReactNode }) {
   const [productConfig, setProductConfig] = useState<ProductConfig | null>(null);
   const [productConfigLoaded, setProductConfigLoaded] = useState(false);
   const [runtimeConfigError, setRuntimeConfigError] = useState<string | null>(null);
-  const [skills, setSkills] = useState<SkillOption[]>([]);
+  const [defaultSkills, setDefaultSkills] = useState<SkillOption[]>([]);
+  const [agentSkillCatalog, setAgentSkillCatalog] = useState<AgentSkillCatalogItem[]>([]);
   const [skillsLoaded, setSkillsLoaded] = useState(false);
   const [selectedSkillIds, setSelectedSkillIds] = useState<Record<string, string>>({});
   const [interactionModes, setInteractionModes] = useState<Record<string, InteractionMode>>({});
@@ -1394,6 +1400,22 @@ export function CocolaRuntimeProvider({ children }: { children: ReactNode }) {
     return agents.find((agent) => agent.id === selectedID) ?? null;
   }, [agents, conversations, selectedAgentIds, sessionId]);
   const selectedAgentID = selectedAgent?.id ?? "";
+  const skills = useMemo<SkillOption[]>(() => {
+    if (!selectedAgent) return defaultSkills;
+    if (!("skill_ids" in selectedAgent)) return [];
+    if (selectedAgent.skill_ids.length === 0) return defaultSkills;
+    const selected = new Set(selectedAgent.skill_ids);
+    return agentSkillCatalog
+      .filter((skill) => selected.has(skill.id) && skill.available)
+      .map((skill) => ({
+        id: skill.runtime_id,
+        name: skill.name,
+        description: skill.description,
+        version: "",
+        scope: skill.source === "personal" ? "user" : "system",
+      }))
+      .sort((left, right) => left.name.localeCompare(right.name));
+  }, [agentSkillCatalog, defaultSkills, selectedAgent]);
   const selectedModel = useMemo(() => {
     if (selectedAgent) {
       return compatibleModels.find((model) => model.id === selectedAgent.model_route_id) ?? null;
@@ -1492,6 +1514,12 @@ export function CocolaRuntimeProvider({ children }: { children: ReactNode }) {
         const next = { ...previous };
         if (nextAgent) next[sessionId] = nextAgent.id;
         else delete next[sessionId];
+        return next;
+      });
+      setSelectedSkillIds((previous) => {
+        if (!(sessionId in previous)) return previous;
+        const next = { ...previous };
+        delete next[sessionId];
         return next;
       });
       if (nextAgent) {
@@ -1817,12 +1845,15 @@ export function CocolaRuntimeProvider({ children }: { children: ReactNode }) {
   const refreshSkills = useCallback(() => {
     void (async () => {
       try {
-        const res = await fetch("/api/skills/effective", { cache: "no-store" });
-        if (isAccountDisabledResponse(res)) {
+        const [res, catalogResponse] = await Promise.all([
+          fetch("/api/skills/effective", { cache: "no-store" }),
+          fetch("/api/skills/agent-catalog", { cache: "no-store" }),
+        ]);
+        if (isAccountDisabledResponse(res) || isAccountDisabledResponse(catalogResponse)) {
           redirectAccountDisabled();
           return;
         }
-        if (!res.ok) return;
+        if (!res.ok || !catalogResponse.ok) return;
         const body = (await res.json()) as { skills?: unknown[] };
         const next = (Array.isArray(body.skills) ? body.skills : [])
           .flatMap((raw): SkillOption[] => {
@@ -1843,7 +1874,8 @@ export function CocolaRuntimeProvider({ children }: { children: ReactNode }) {
           })
           .sort((left, right) => left.name.localeCompare(right.name));
         const available = new Set(next.map((skill) => skill.id));
-        setSkills(next);
+        setDefaultSkills(next);
+        setAgentSkillCatalog(normalizeAgentSkillCatalog(await catalogResponse.json()));
         setSelectedSkillIds((prev) =>
           Object.fromEntries(Object.entries(prev).filter(([, id]) => available.has(id))),
         );

@@ -127,6 +127,7 @@ async def test_maps_tool_use_turn_and_reassembles_split_line():
         user_id="U1",
         session_id="S1",
         sandbox_id="box-1",
+        allowed_skill_ids=["weather", "cocola-sandbox-browser"],
         selected_skill_id="weather",
     )
 
@@ -148,6 +149,7 @@ async def test_maps_tool_use_turn_and_reassembles_split_line():
     assert sent["prompt"] == "weather?"
     assert sent["cwd"] == "/workspace"
     assert sent["skill_id"] == "weather"
+    assert sent["skills"] == ["weather", "cocola-sandbox-browser"]
     assert "resume" not in sent  # first turn has nothing to resume
 
 

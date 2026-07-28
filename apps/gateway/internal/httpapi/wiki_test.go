@@ -15,7 +15,9 @@ import (
 	"github.com/google/uuid"
 
 	"github.com/cocola-project/cocola/apps/gateway/internal/agent"
+	"github.com/cocola-project/cocola/apps/gateway/internal/agentprofile"
 	"github.com/cocola-project/cocola/apps/gateway/internal/auth"
+	"github.com/cocola-project/cocola/apps/gateway/internal/convo"
 	"github.com/cocola-project/cocola/apps/gateway/internal/wiki"
 	"github.com/cocola-project/cocola/packages/go-common/logger"
 )
@@ -30,6 +32,11 @@ type wikiStoreStub struct {
 	resolved      []wiki.Version
 	resolveErr    error
 	resolveCalls  int
+	currentNode   wiki.Node
+	current       wiki.Version
+	currentErr    error
+	currentID     wiki.Identity
+	currentNodeID string
 }
 
 func (s *wikiStoreStub) CreateFile(
@@ -70,6 +77,16 @@ func (s *wikiStoreStub) ResolveCurrent(
 ) ([]wiki.Node, []wiki.Version, error) {
 	s.resolveCalls++
 	return s.resolvedNodes, s.resolved, s.resolveErr
+}
+
+func (s *wikiStoreStub) GetCurrent(
+	_ context.Context,
+	identity wiki.Identity,
+	nodeID string,
+) (wiki.Node, wiki.Version, error) {
+	s.currentID = identity
+	s.currentNodeID = nodeID
+	return s.currentNode, s.current, s.currentErr
 }
 
 type cleanupObjectStore struct {
@@ -344,6 +361,106 @@ func TestChatResolvesWikiReferenceIntoRunQuery(t *testing.T) {
 	}
 }
 
+func TestChatResolvesAgentWikiKnowledgeWithoutAddingUserAttachmentPart(t *testing.T) {
+	t.Parallel()
+	nodeID := uuid.NewString()
+	versionID := uuid.NewString()
+	wikiStore := &wikiStoreStub{
+		currentNode: wiki.Node{
+			ID: nodeID, Kind: "file", Name: "handbook.md",
+			LogicalPath: "Team/handbook.md",
+		},
+		current: wiki.Version{
+			ID: versionID, NodeID: nodeID, ObjectKey: "wiki/node/version",
+			MimeType: "text/markdown", SizeBytes: 42, SHA256: strings.Repeat("a", 64),
+		},
+	}
+	agents := agentprofile.NewService(agentprofile.NewMemory())
+	created, err := agents.Create(context.Background(), agentprofile.Identity{
+		TenantID: auth.DevIdentity.TenantID,
+		UserID:   auth.DevIdentity.UserID,
+	}, agentprofile.CreateInput{
+		Name: "Wiki specialist", RuntimeID: "claude-code",
+		ModelRouteID: "route-1", ModelAlias: "sonnet",
+		KnowledgeSources: []agentprofile.KnowledgeSource{{
+			Type: agentprofile.KnowledgeTypeCocolaWiki, Label: "Handbook", NodeID: nodeID,
+		}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	streamer := &fakeStreamer{script: []agent.Event{{Kind: "done"}}}
+	api := newConfiguredTestAPI(streamer, auth.NewVerifier(auth.Config{}), logger.Must()).
+		WithObjStore(&cleanupObjectStore{}, DefaultInlineMaxBytes).
+		WithWikiStore(wikiStore, 1024).
+		WithAgents(agents)
+	body := `{"prompt":"use the handbook","session_id":"agent-wiki-chat","agent_id":"` +
+		created.ID + `"}`
+	recorder := httptest.NewRecorder()
+
+	api.Handler().ServeHTTP(
+		recorder,
+		httptest.NewRequest(http.MethodPost, "/v1/chat", strings.NewReader(body)),
+	)
+
+	if recorder.Code != http.StatusOK {
+		t.Fatalf("status = %d, body=%s", recorder.Code, recorder.Body.String())
+	}
+	if len(streamer.gotQuery.WikiReferences) != 1 ||
+		streamer.gotQuery.WikiReferences[0].VersionID != versionID {
+		t.Fatalf("WikiReferences = %#v", streamer.gotQuery.WikiReferences)
+	}
+	parts := userMessageParts(chatRequest{
+		Prompt: "use the handbook",
+		AgentWikiReferences: []agent.WikiReference{{
+			NodeID: nodeID, VersionID: versionID,
+		}},
+	})
+	if len(parts) != 1 || parts[0].Type != convo.PartText {
+		t.Fatalf("Agent Wiki leaked into user message parts: %#v", parts)
+	}
+}
+
+func TestChatIgnoresDeletedAgentWikiKnowledge(t *testing.T) {
+	t.Parallel()
+	nodeID := uuid.NewString()
+	wikiStore := &wikiStoreStub{currentErr: wiki.ErrNotFound}
+	agents := agentprofile.NewService(agentprofile.NewMemory())
+	created, err := agents.Create(context.Background(), agentprofile.Identity{
+		TenantID: auth.DevIdentity.TenantID,
+		UserID:   auth.DevIdentity.UserID,
+	}, agentprofile.CreateInput{
+		Name: "Wiki specialist", RuntimeID: "claude-code",
+		ModelRouteID: "route-1", ModelAlias: "sonnet",
+		KnowledgeSources: []agentprofile.KnowledgeSource{{
+			Type: agentprofile.KnowledgeTypeCocolaWiki, Label: "Deleted", NodeID: nodeID,
+		}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	streamer := &fakeStreamer{script: []agent.Event{{Kind: "done"}}}
+	api := newConfiguredTestAPI(streamer, auth.NewVerifier(auth.Config{}), logger.Must()).
+		WithObjStore(&cleanupObjectStore{}, DefaultInlineMaxBytes).
+		WithWikiStore(wikiStore, 1024).
+		WithAgents(agents)
+	body := `{"prompt":"hello","session_id":"deleted-agent-wiki","agent_id":"` +
+		created.ID + `"}`
+	recorder := httptest.NewRecorder()
+
+	api.Handler().ServeHTTP(
+		recorder,
+		httptest.NewRequest(http.MethodPost, "/v1/chat", strings.NewReader(body)),
+	)
+
+	if recorder.Code != http.StatusOK {
+		t.Fatalf("status = %d, body=%s", recorder.Code, recorder.Body.String())
+	}
+	if len(streamer.gotQuery.WikiReferences) != 0 {
+		t.Fatalf("deleted Wiki references = %#v", streamer.gotQuery.WikiReferences)
+	}
+}
+
 func TestChatRejectsTooManyWikiReferencesBeforeResolving(t *testing.T) {
 	t.Parallel()
 	refs := make([]wikiRefDTO, maxWikiRefsPerTurn+1)
@@ -375,6 +492,66 @@ func TestChatRejectsTooManyWikiReferencesBeforeResolving(t *testing.T) {
 	}
 	if wikiStore.resolveCalls != 0 {
 		t.Fatalf("ResolveCurrent calls = %d, want 0", wikiStore.resolveCalls)
+	}
+}
+
+func TestChatAppliesWikiReferenceLimitAcrossUserAndAgentKnowledge(t *testing.T) {
+	t.Parallel()
+	agentSources := make([]agentprofile.KnowledgeSource, 10)
+	for index := range agentSources {
+		agentSources[index] = agentprofile.KnowledgeSource{
+			Type:   agentprofile.KnowledgeTypeCocolaWiki,
+			Label:  "Knowledge",
+			NodeID: uuid.NewString(),
+		}
+	}
+	agents := agentprofile.NewService(agentprofile.NewMemory())
+	created, err := agents.Create(context.Background(), agentprofile.Identity{
+		TenantID: auth.DevIdentity.TenantID,
+		UserID:   auth.DevIdentity.UserID,
+	}, agentprofile.CreateInput{
+		Name: "Wiki specialist", RuntimeID: "claude-code",
+		ModelRouteID: "route-1", ModelAlias: "sonnet",
+		KnowledgeSources: agentSources,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	refs := make([]wikiRefDTO, 11)
+	for index := range refs {
+		refs[index] = wikiRefDTO{NodeID: uuid.NewString()}
+	}
+	body, err := json.Marshal(chatRequest{
+		Prompt: "summarize", SessionID: "combined-wiki-limit",
+		AgentID: created.ID, WikiRefs: refs,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	wikiStore := &wikiStoreStub{}
+	api := newConfiguredTestAPI(
+		&fakeStreamer{},
+		auth.NewVerifier(auth.Config{}),
+		logger.Must(),
+	).WithObjStore(&cleanupObjectStore{}, DefaultInlineMaxBytes).
+		WithWikiStore(wikiStore, 1024).
+		WithAgents(agents)
+	recorder := httptest.NewRecorder()
+
+	api.Handler().ServeHTTP(
+		recorder,
+		httptest.NewRequest(http.MethodPost, "/v1/chat", bytes.NewReader(body)),
+	)
+
+	if recorder.Code != http.StatusRequestEntityTooLarge {
+		t.Fatalf("status = %d, body=%s", recorder.Code, recorder.Body.String())
+	}
+	if wikiStore.resolveCalls != 0 || wikiStore.currentNodeID != "" {
+		t.Fatalf(
+			"Wiki store was accessed before combined limit rejection: resolve=%d current=%q",
+			wikiStore.resolveCalls,
+			wikiStore.currentNodeID,
+		)
 	}
 }
 

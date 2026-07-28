@@ -320,6 +320,7 @@ class InSandboxShimProvider:
         }
         if options.model_route_id:
             req["model"] = options.model_route_id
+        req["skills"] = list(options.allowed_skill_ids or ())
         if options.selected_skill_id:
             req["skill_id"] = options.selected_skill_id
         if options.selected_skill_result_contract:

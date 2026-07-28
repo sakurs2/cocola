@@ -937,6 +937,75 @@ func TestMyEffectiveSkillsReturnsSummaryOnly(t *testing.T) {
 	}
 }
 
+func TestMyAgentSkillCatalogReturnsSafeUserScopedSummary(t *testing.T) {
+	mem := store.NewMemory()
+	issuer := token.NewIssuer("runtime-secret", "cocola", time.Hour)
+	svc := service.New(mem, issuer, fixedClock)
+	api := New(svc, "k").WithRuntimeAuth("runtime-secret", "cocola")
+	for _, skill := range []store.Skill{
+		{
+			ID: "shared", RuntimeID: "shared", Name: "Shared", Scope: "admin",
+			Enabled: true, SkillMD: "sensitive shared instructions",
+			BundleObjectKey: "skills/shared.zip",
+		},
+		{
+			ID: "alice-private", RuntimeID: "private", Name: "Private",
+			Scope: "user", OwnerUserID: "alice", SkillMD: "sensitive personal instructions",
+		},
+		{
+			ID: "bob-private", RuntimeID: "bob-private", Name: "Bob",
+			Scope: "user", OwnerUserID: "bob", Enabled: true, SkillMD: "not alice's skill",
+		},
+	} {
+		if _, err := svc.CreateSkill(context.Background(), skill, "admin"); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := svc.SetUserSkillEnabled(context.Background(), "alice", "shared", false); err != nil {
+		t.Fatal(err)
+	}
+	runtimeToken, _, err := issuer.Issue("alice", "", -1, time.Now().Unix())
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	rec := do(t, api.Router(), http.MethodGet, "/me/skills/agent-catalog", runtimeToken, nil)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("Agent Skill catalog: want 200, got %d (%s)", rec.Code, rec.Body.String())
+	}
+	var body struct {
+		Skills []service.AgentSkillCatalogItem `json:"skills"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
+		t.Fatal(err)
+	}
+	if len(body.Skills) != 2 {
+		t.Fatalf("Agent Skill catalog = %+v", body.Skills)
+	}
+	byID := make(map[string]service.AgentSkillCatalogItem, len(body.Skills))
+	for _, skill := range body.Skills {
+		byID[skill.ID] = skill
+	}
+	if skill := byID["alice-private"]; !skill.Available || skill.DefaultEnabled {
+		t.Fatalf("personal default-off Skill = %+v", skill)
+	}
+	if skill := byID["shared"]; !skill.Available || skill.DefaultEnabled {
+		t.Fatalf("user-disabled shared Skill = %+v", skill)
+	}
+	for _, forbidden := range []string{
+		"sensitive shared instructions",
+		"sensitive personal instructions",
+		"not alice's skill",
+		"skills/shared.zip",
+		"skill_md",
+		"bundle_object_key",
+	} {
+		if strings.Contains(rec.Body.String(), forbidden) {
+			t.Fatalf("Agent Skill catalog leaked %q: %s", forbidden, rec.Body.String())
+		}
+	}
+}
+
 func TestMyEffectiveSkillsReturnsRuntimeIDForPersonalSkill(t *testing.T) {
 	mem := store.NewMemory()
 	issuer := token.NewIssuer("runtime-secret", "cocola", time.Hour)

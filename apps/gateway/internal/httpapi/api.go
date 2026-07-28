@@ -115,19 +115,22 @@ type API struct {
 	// sandboxResolver powers the Preview Proxy: it maps a session + in-sandbox
 	// port to a reachable URL via sandbox-manager. nil disables /v1/preview
 	// (the route returns 501), keeping the feature dark until wired in main.
-	sandboxResolver  sandboxmgr.EndpointResolver
-	terminalLeases   *terminalLeaseRegistry
-	memory           *memory.Service
-	agents           *agentprofile.Service
-	projects         *project.Service
-	skillBroker      *skillbroker.Broker
-	skillAdminURL    string
-	skillHTTPClient  *http.Client
-	feishu           *feishuconnector.Service
-	wiki             wiki.Store
-	wikiMaxFileBytes int64
-	brokerWaitMu     sync.Mutex
-	brokerWaiters    map[string]map[chan struct{}]struct{}
+	sandboxResolver          sandboxmgr.EndpointResolver
+	terminalLeases           *terminalLeaseRegistry
+	memory                   *memory.Service
+	agents                   *agentprofile.Service
+	projects                 *project.Service
+	skillBroker              *skillbroker.Broker
+	skillAdminURL            string
+	skillHTTPClient          *http.Client
+	agentSkillAdminURL       string
+	agentSkillHTTPClient     *http.Client
+	agentKnowledgeHTTPClient *http.Client
+	feishu                   *feishuconnector.Service
+	wiki                     wiki.Store
+	wikiMaxFileBytes         int64
+	brokerWaitMu             sync.Mutex
+	brokerWaiters            map[string]map[chan struct{}]struct{}
 }
 
 // New builds the BFF API.
@@ -135,6 +138,12 @@ func New(streamer agent.Streamer, verifier *auth.Verifier, log logger.Logger) *A
 	a := &API{
 		streamer: streamer, verifier: verifier, log: log,
 		productConfig: DefaultProductConfig(),
+		agentKnowledgeHTTPClient: &http.Client{
+			Timeout: 5 * time.Second,
+			CheckRedirect: func(_ *http.Request, _ []*http.Request) error {
+				return http.ErrUseLastResponse
+			},
+		},
 	}
 	a.terminalLeases = newTerminalLeaseRegistry(terminalDisconnectGrace, a.cleanupTerminalLease)
 	if releaser, ok := streamer.(agent.Releaser); ok {
@@ -205,6 +214,25 @@ func (a *API) WithMemory(service *memory.Service) *API { a.memory = service; ret
 
 // WithAgents installs personal Agent definition management and resolution.
 func (a *API) WithAgents(service *agentprofile.Service) *API { a.agents = service; return a }
+
+// WithAgentSkillCatalog configures the user-safe Admin API catalog used to
+// validate newly selected Agent Skills. Existing selections are preserved when
+// an administrator later disables or deletes their catalog entry.
+func (a *API) WithAgentSkillCatalog(adminURL string, client *http.Client) *API {
+	a.agentSkillAdminURL = strings.TrimRight(strings.TrimSpace(adminURL), "/")
+	if client == nil {
+		client = &http.Client{Timeout: 5 * time.Second}
+	}
+	a.agentSkillHTTPClient = client
+	return a
+}
+
+func (a *API) WithAgentKnowledgeHTTPClient(client *http.Client) *API {
+	if client != nil {
+		a.agentKnowledgeHTTPClient = client
+	}
+	return a
+}
 
 // WithProjects installs the high-level GitHub Project module. GitHub remains
 // unreachable from every other gateway package.
@@ -369,6 +397,8 @@ func (a *API) Handler() http.Handler {
 		a.verifier.Middleware(writeErr)(http.HandlerFunc(a.getAgent))))
 	mux.Handle("PATCH /v1/agents/{id}", a.instrument("PATCH /v1/agents/{id}",
 		a.verifier.Middleware(writeErr)(http.HandlerFunc(a.updateAgent))))
+	mux.Handle("POST /v1/agents/{id}/knowledge/check", a.instrument("POST /v1/agents/{id}/knowledge/check",
+		a.verifier.Middleware(writeErr)(http.HandlerFunc(a.checkAgentKnowledge))))
 	mux.Handle("DELETE /v1/agents/{id}", a.instrument("DELETE /v1/agents/{id}",
 		a.verifier.Middleware(writeErr)(http.HandlerFunc(a.archiveAgent))))
 	mux.Handle("GET /v1/scm/github/connection", a.instrument("GET /v1/scm/github/connection",
@@ -622,6 +652,7 @@ type chatRequest struct {
 	Attachments                          []attachmentDTO        `json:"attachments"`
 	WikiRefs                             []wikiRefDTO           `json:"wiki_refs"`
 	WikiReferences                       []agent.WikiReference  `json:"-"`
+	AgentWikiReferences                  []agent.WikiReference  `json:"-"`
 	ClientRequestID                      string                 `json:"client_request_id"`
 	RuntimeID                            string                 `json:"runtime_id"`
 	InteractionMode                      string                 `json:"interaction_mode"`
@@ -886,15 +917,16 @@ func artifactDownloadURL(sessionID, artifactID string) string {
 }
 
 type conversationAgentSummary struct {
-	ID           string `json:"id"`
-	Version      int64  `json:"version"`
-	Name         string `json:"name"`
-	Description  string `json:"description"`
-	AvatarKey    string `json:"avatar_key"`
-	AvatarColor  string `json:"avatar_color"`
-	RuntimeID    string `json:"runtime_id"`
-	ModelRouteID string `json:"model_route_id"`
-	ModelAlias   string `json:"model_alias"`
+	ID           string   `json:"id"`
+	Version      int64    `json:"version"`
+	Name         string   `json:"name"`
+	Description  string   `json:"description"`
+	AvatarKey    string   `json:"avatar_key"`
+	AvatarColor  string   `json:"avatar_color"`
+	RuntimeID    string   `json:"runtime_id"`
+	ModelRouteID string   `json:"model_route_id"`
+	ModelAlias   string   `json:"model_alias"`
+	SkillIDs     []string `json:"skill_ids"`
 }
 
 type conversationSummaryResponse struct {
@@ -925,6 +957,7 @@ func conversationSummary(value convo.Conversation) conversationSummaryResponse {
 			Description: snapshot.Description, AvatarKey: snapshot.AvatarKey,
 			AvatarColor: snapshot.AvatarColor, RuntimeID: snapshot.RuntimeID,
 			ModelRouteID: snapshot.ModelRouteID, ModelAlias: snapshot.ModelAlias,
+			SkillIDs: append([]string{}, snapshot.SkillIDs...),
 		}
 	}
 	return response

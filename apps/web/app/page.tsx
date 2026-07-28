@@ -26,6 +26,7 @@ import {
 import { Thread } from "@/components/assistant-ui/thread";
 import { ConversationMinimap } from "@/components/assistant-ui/conversation-minimap";
 import { WorkspaceDock } from "@/components/assistant-ui/workspace-panel";
+import { useWorkspaceToast } from "@/components/assistant-ui/workspace-toast";
 import { cn } from "@/lib/utils";
 import { AnimatePresence, motion } from "framer-motion";
 import { Check, PanelRight, Share2 } from "lucide-react";
@@ -51,7 +52,11 @@ function Workspace() {
     environmentStatus,
     activeSessionId,
     conversations,
+    agents,
+    agentsLoaded,
+    setSelectedAgentID,
   } = useCocola();
+  const { showError } = useWorkspaceToast();
   const router = useRouter();
   const [workspaceWidth, setWorkspaceWidth] = useState(640);
   const [dockView, setDockView] = useState<"status" | "workspace">("status");
@@ -65,6 +70,18 @@ function Workspace() {
     void loadConversation(id);
     router.replace("/");
   }, [loadConversation, router]);
+
+  useEffect(() => {
+    const id = new URLSearchParams(window.location.search).get("agent")?.trim();
+    if (!id || !agentsLoaded) return;
+    if (agents.some((agent) => agent.id === id)) {
+      setSelectedAgentID(id);
+    } else {
+      setSelectedAgentID(null);
+      showError("This Agent is unavailable. Standard chat is ready instead.");
+    }
+    router.replace("/");
+  }, [agents, agentsLoaded, router, setSelectedAgentID, showError]);
 
   useEffect(() => {
     if (!selectedArtifact) return;

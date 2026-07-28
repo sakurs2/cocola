@@ -112,10 +112,19 @@ type ProjectContext struct {
 }
 
 type AgentContext struct {
-	ID           string
-	Version      int64
-	Name         string
-	Instructions string
+	ID               string
+	Version          int64
+	Name             string
+	Instructions     string
+	SkillCatalogIDs  []string
+	KnowledgeSources []AgentKnowledgeSource
+}
+
+type AgentKnowledgeSource struct {
+	Type   string
+	Label  string
+	URL    string
+	NodeID string
 }
 
 type GitChange struct {
@@ -374,9 +383,17 @@ func (c *Client) Stream(ctx context.Context, q Query, onEvent func(Event) error)
 		request.ProjectContext = projectContextProto(*q.Project)
 	}
 	if q.Agent != nil {
+		knowledgeSources := make([]*agentv1.AgentKnowledgeSource, 0, len(q.Agent.KnowledgeSources))
+		for _, source := range q.Agent.KnowledgeSources {
+			knowledgeSources = append(knowledgeSources, &agentv1.AgentKnowledgeSource{
+				Type: source.Type, Label: source.Label, Url: source.URL, NodeId: source.NodeID,
+			})
+		}
 		request.AgentContext = &agentv1.AgentContext{
 			Id: q.Agent.ID, Version: q.Agent.Version,
 			Name: q.Agent.Name, Instructions: q.Agent.Instructions,
+			SkillCatalogIds:  append([]string(nil), q.Agent.SkillCatalogIDs...),
+			KnowledgeSources: knowledgeSources,
 		}
 	}
 	stream, err := c.rpc.Query(ctx, request)

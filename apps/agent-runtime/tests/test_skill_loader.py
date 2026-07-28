@@ -2,9 +2,9 @@
 
 Hermetic: no socket, no admin-api. AdminSkillCatalog gets an injected fake
 Fetcher returning canned JSON bytes; StaticSkillCatalog needs nothing. We
-assert (a) the wire JSON maps to Skill, (b) only enabled-with-id entries
-survive the defensive re-filter, and (c) transport/parse errors remain visible
-to the runtime so it cannot expose stale sandbox skills.
+assert (a) the wire JSON maps to Skill, (b) invalid entries are filtered or
+rejected, and (c) transport/parse errors remain visible to the runtime so it
+cannot expose stale sandbox skills.
 """
 
 import json
@@ -26,6 +26,17 @@ def _fetcher(payload, calls=None):
         return raw
 
     return fetch
+
+
+def _poster(payload, calls=None):
+    raw = json.dumps(payload).encode()
+
+    def post(url, headers, body, timeout):
+        if calls is not None:
+            calls.append((url, headers, json.loads(body), timeout))
+        return raw
+
+    return post
 
 
 def test_skill_from_json_defaults():
@@ -92,6 +103,51 @@ def test_admin_catalog_no_key_omits_auth_header():
     assert "Authorization" not in headers
 
 
+def test_admin_catalog_resolves_custom_agent_skill_ids():
+    calls = []
+    cat = AdminSkillCatalog(
+        "http://admin",
+        admin_key="SECRET",
+        poster=_poster(
+            {
+                "skills": [{"id": "catalog-a", "runtime_id": "runtime-a", "name": "A"}],
+                "unavailable_ids": ["deleted"],
+            },
+            calls=calls,
+        ),
+    )
+    result = cat.resolve_skills("alice", ["catalog-a", "deleted"])
+    assert [skill.native_id for skill in result.skills] == ["runtime-a"]
+    assert result.unavailable_ids == ["deleted"]
+    url, headers, body, _timeout = calls[0]
+    assert url == "http://admin/admin/skills/resolve"
+    assert headers["Authorization"] == "Bearer SECRET"
+    assert body == {"user_id": "alice", "catalog_ids": ["catalog-a", "deleted"]}
+
+
+@pytest.mark.parametrize(
+    "payload",
+    [
+        {"skills": [{"id": "extra", "runtime_id": "extra"}], "unavailable_ids": []},
+        {"skills": [], "unavailable_ids": []},
+        {
+            "skills": [{"id": "selected", "runtime_id": "selected"}],
+            "unavailable_ids": ["selected"],
+        },
+        {"skills": "invalid", "unavailable_ids": []},
+    ],
+)
+def test_admin_catalog_rejects_malformed_custom_resolution(payload):
+    cat = AdminSkillCatalog(
+        "http://admin",
+        poster=_poster(payload),
+        fetcher=_fetcher({"skills": []}),
+    )
+
+    with pytest.raises(ValueError, match="invalid Agent Skill resolution response"):
+        cat.resolve_skills("alice", ["selected"])
+
+
 def test_admin_catalog_propagates_fetch_error():
     def boom(url, headers, timeout):
         raise RuntimeError("connection refused")
@@ -115,3 +171,6 @@ def test_static_catalog_roundtrip():
     cat = StaticSkillCatalog([s])
     assert cat.enabled_skills() == [s]
     assert cat.enabled_skills() is not cat.enabled_skills()
+    resolution = cat.resolve_skills("alice", ["a", "missing"])
+    assert resolution.skills == [s]
+    assert resolution.unavailable_ids == ["missing"]

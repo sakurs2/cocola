@@ -86,10 +86,82 @@ func TestServiceValidationAndNameConflict(t *testing.T) {
 		{Name: "A", Instructions: strings.Repeat("a", MaxInstructionsBytes+1), RuntimeID: "claude-code", ModelRouteID: "a", ModelAlias: "a"},
 		{Name: "A", AvatarKey: "custom", RuntimeID: "claude-code", ModelRouteID: "a", ModelAlias: "a"},
 		{Name: "A", RuntimeID: "bad\nruntime", ModelRouteID: "a", ModelAlias: "a"},
+		{Name: "A", RuntimeID: "claude-code", ModelRouteID: "a", ModelAlias: "a", SkillIDs: []string{"same", "same"}},
+		{Name: "A", RuntimeID: "claude-code", ModelRouteID: "a", ModelAlias: "a", KnowledgeSources: []KnowledgeSource{{
+			Type: KnowledgeTypeFeishuDoc, Label: "Unsafe", URL: "https://example.com/docx/token",
+		}}},
+		{Name: "A", RuntimeID: "claude-code", ModelRouteID: "a", ModelAlias: "a", SuggestedPrompts: []SuggestedPrompt{{
+			Title: "", Prompt: "Analyze this",
+		}}},
 	}
 	for index, input := range invalid {
 		if _, err := service.Create(context.Background(), id, input); !errors.Is(err, ErrInvalidArgument) {
 			t.Errorf("invalid[%d] error = %v, want ErrInvalidArgument", index, err)
 		}
+	}
+}
+
+func TestAgentConfigSnapshotIsNormalizedAndImmutable(t *testing.T) {
+	t.Parallel()
+	service := NewService(NewMemory())
+	value, err := service.Create(context.Background(), Identity{UserID: "user-a"}, CreateInput{
+		Name: "Research", RuntimeID: "claude-code", ModelRouteID: "a", ModelAlias: "a",
+		SkillIDs: []string{" catalog-skill "},
+		KnowledgeSources: []KnowledgeSource{{
+			Label: " Plan ",
+			URL:   "https://docs.feishu.cn/docx/Abc_123?ignored=true#section",
+		}},
+		SuggestedPrompts: []SuggestedPrompt{{
+			Title: " Summarize ", Prompt: " Summarize the plan. ",
+		}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	snapshot := value.Snapshot()
+	if snapshot.SkillIDs[0] != "catalog-skill" ||
+		snapshot.KnowledgeSources[0].Type != KnowledgeTypeFeishuDoc ||
+		snapshot.KnowledgeSources[0].URL != "https://docs.feishu.cn/docx/Abc_123" ||
+		snapshot.SuggestedPrompts[0].Title != "Summarize" {
+		t.Fatalf("normalized snapshot = %+v", snapshot)
+	}
+	value.SkillIDs[0] = "changed"
+	value.KnowledgeSources[0].Label = "Changed"
+	value.SuggestedPrompts[0].Prompt = "Changed"
+	if snapshot.SkillIDs[0] != "catalog-skill" ||
+		snapshot.KnowledgeSources[0].Label != "Plan" ||
+		snapshot.SuggestedPrompts[0].Prompt != "Summarize the plan." {
+		t.Fatalf("snapshot was mutated through Agent slices: %+v", snapshot)
+	}
+}
+
+func TestCocolaWikiKnowledgeNormalizationAndDeduplication(t *testing.T) {
+	t.Parallel()
+	nodeID := "8EEA8A2B-9491-49B7-84C5-A37D1D0EDE90"
+	normalized, ok := NormalizeKnowledgeSource(KnowledgeSource{
+		Type: KnowledgeTypeCocolaWiki, Label: " Handbook ", NodeID: nodeID,
+	})
+	if !ok || normalized.Label != "Handbook" ||
+		normalized.NodeID != strings.ToLower(nodeID) || normalized.URL != "" {
+		t.Fatalf("NormalizeKnowledgeSource() = %+v, %v", normalized, ok)
+	}
+	if _, ok := NormalizeKnowledgeSource(KnowledgeSource{
+		Type: KnowledgeTypeCocolaWiki, Label: "Mixed", NodeID: nodeID,
+		URL: "https://docs.feishu.cn/docx/token",
+	}); ok {
+		t.Fatal("NormalizeKnowledgeSource accepted a mixed Cocola Wiki and URL source")
+	}
+
+	service := NewService(NewMemory())
+	_, err := service.Create(context.Background(), Identity{UserID: "user-a"}, CreateInput{
+		Name: "Duplicate Wiki", RuntimeID: "claude-code",
+		ModelRouteID: "sonnet", ModelAlias: "sonnet",
+		KnowledgeSources: []KnowledgeSource{
+			{Type: KnowledgeTypeCocolaWiki, Label: "One", NodeID: nodeID},
+			{Type: KnowledgeTypeCocolaWiki, Label: "Two", NodeID: strings.ToLower(nodeID)},
+		},
+	})
+	if !errors.Is(err, ErrInvalidArgument) {
+		t.Fatalf("duplicate Cocola Wiki error = %v, want ErrInvalidArgument", err)
 	}
 }

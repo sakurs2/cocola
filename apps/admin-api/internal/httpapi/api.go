@@ -85,6 +85,7 @@ func (a *API) Router() http.Handler {
 		r.Get("/events", a.streamMyEvents)
 		r.Route("/skills", func(r chi.Router) {
 			r.Get("/", a.listMySkills)
+			r.Get("/agent-catalog", a.listMyAgentSkillCatalog)
 			r.Get("/effective", a.listMyEffectiveSkills)
 			r.Post("/scan/archive", a.scanMySkillArchive)
 			r.Post("/scan/git", a.scanMySkillGit)
@@ -156,6 +157,7 @@ func (a *API) Router() http.Handler {
 			r.Post("/", a.createSkill)
 			r.Get("/", a.listSkills)
 			r.Get("/effective", a.listEffectiveSkills)
+			r.Post("/resolve", a.resolveAgentSkills)
 			r.Post("/scan/archive", a.scanSkillArchive)
 			r.Post("/scan/git", a.scanSkillGit)
 			r.Post("/import/archive", a.importSkillArchive)

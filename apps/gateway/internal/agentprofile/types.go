@@ -26,6 +26,13 @@ const (
 	MaxInstructionsBytes     = 32 * 1024
 	MaxRuntimeIDCharacters   = 256
 	MaxModelIDCharacters     = 256
+	MaxSkillIDs              = 32
+	MaxKnowledgeSources      = 10
+	MaxKnowledgeLabelChars   = 100
+	MaxKnowledgeURLChars     = 2048
+	MaxSuggestedPrompts      = 4
+	MaxSuggestedTitleChars   = 80
+	MaxSuggestedPromptBytes  = 4 * 1024
 )
 
 type Identity struct {
@@ -34,37 +41,55 @@ type Identity struct {
 }
 
 type Agent struct {
-	ID           string     `json:"id"`
-	TenantID     string     `json:"-"`
-	OwnerUserID  string     `json:"-"`
-	Name         string     `json:"name"`
-	Description  string     `json:"description"`
-	Instructions string     `json:"instructions"`
-	AvatarKey    string     `json:"avatar_key"`
-	AvatarColor  string     `json:"avatar_color"`
-	RuntimeID    string     `json:"runtime_id"`
-	ModelRouteID string     `json:"model_route_id"`
-	ModelAlias   string     `json:"model_alias"`
-	Status       string     `json:"status"`
-	Version      int64      `json:"version"`
-	CreatedAt    time.Time  `json:"created_at"`
-	UpdatedAt    time.Time  `json:"updated_at"`
-	ArchivedAt   *time.Time `json:"archived_at,omitempty"`
+	ID               string            `json:"id"`
+	TenantID         string            `json:"-"`
+	OwnerUserID      string            `json:"-"`
+	Name             string            `json:"name"`
+	Description      string            `json:"description"`
+	Instructions     string            `json:"instructions"`
+	AvatarKey        string            `json:"avatar_key"`
+	AvatarColor      string            `json:"avatar_color"`
+	RuntimeID        string            `json:"runtime_id"`
+	ModelRouteID     string            `json:"model_route_id"`
+	ModelAlias       string            `json:"model_alias"`
+	SkillIDs         []string          `json:"skill_ids"`
+	KnowledgeSources []KnowledgeSource `json:"knowledge_sources"`
+	SuggestedPrompts []SuggestedPrompt `json:"suggested_prompts"`
+	Status           string            `json:"status"`
+	Version          int64             `json:"version"`
+	CreatedAt        time.Time         `json:"created_at"`
+	UpdatedAt        time.Time         `json:"updated_at"`
+	ArchivedAt       *time.Time        `json:"archived_at,omitempty"`
+}
+
+type KnowledgeSource struct {
+	Type   string `json:"type"`
+	Label  string `json:"label"`
+	URL    string `json:"url,omitempty"`
+	NodeID string `json:"node_id,omitempty"`
+}
+
+type SuggestedPrompt struct {
+	Title  string `json:"title"`
+	Prompt string `json:"prompt"`
 }
 
 // Snapshot is copied into a conversation on its first turn. Later edits to an
 // Agent therefore affect only new conversations.
 type Snapshot struct {
-	ID           string `json:"id"`
-	Version      int64  `json:"version"`
-	Name         string `json:"name"`
-	Description  string `json:"description"`
-	Instructions string `json:"instructions"`
-	AvatarKey    string `json:"avatar_key"`
-	AvatarColor  string `json:"avatar_color"`
-	RuntimeID    string `json:"runtime_id"`
-	ModelRouteID string `json:"model_route_id"`
-	ModelAlias   string `json:"model_alias"`
+	ID               string            `json:"id"`
+	Version          int64             `json:"version"`
+	Name             string            `json:"name"`
+	Description      string            `json:"description"`
+	Instructions     string            `json:"instructions"`
+	AvatarKey        string            `json:"avatar_key"`
+	AvatarColor      string            `json:"avatar_color"`
+	RuntimeID        string            `json:"runtime_id"`
+	ModelRouteID     string            `json:"model_route_id"`
+	ModelAlias       string            `json:"model_alias"`
+	SkillIDs         []string          `json:"skill_ids"`
+	KnowledgeSources []KnowledgeSource `json:"knowledge_sources"`
+	SuggestedPrompts []SuggestedPrompt `json:"suggested_prompts"`
 }
 
 func (a Agent) Snapshot() Snapshot {
@@ -72,30 +97,39 @@ func (a Agent) Snapshot() Snapshot {
 		ID: a.ID, Version: a.Version, Name: a.Name, Description: a.Description,
 		Instructions: a.Instructions, AvatarKey: a.AvatarKey, AvatarColor: a.AvatarColor,
 		RuntimeID: a.RuntimeID, ModelRouteID: a.ModelRouteID, ModelAlias: a.ModelAlias,
+		SkillIDs:         append([]string(nil), a.SkillIDs...),
+		KnowledgeSources: append([]KnowledgeSource(nil), a.KnowledgeSources...),
+		SuggestedPrompts: append([]SuggestedPrompt(nil), a.SuggestedPrompts...),
 	}
 }
 
 type CreateInput struct {
-	Name         string `json:"name"`
-	Description  string `json:"description"`
-	Instructions string `json:"instructions"`
-	AvatarKey    string `json:"avatar_key"`
-	AvatarColor  string `json:"avatar_color"`
-	RuntimeID    string `json:"runtime_id"`
-	ModelRouteID string `json:"model_route_id"`
-	ModelAlias   string `json:"model_alias"`
+	Name             string            `json:"name"`
+	Description      string            `json:"description"`
+	Instructions     string            `json:"instructions"`
+	AvatarKey        string            `json:"avatar_key"`
+	AvatarColor      string            `json:"avatar_color"`
+	RuntimeID        string            `json:"runtime_id"`
+	ModelRouteID     string            `json:"model_route_id"`
+	ModelAlias       string            `json:"model_alias"`
+	SkillIDs         []string          `json:"skill_ids"`
+	KnowledgeSources []KnowledgeSource `json:"knowledge_sources"`
+	SuggestedPrompts []SuggestedPrompt `json:"suggested_prompts"`
 }
 
 type UpdateInput struct {
-	Name         string `json:"name"`
-	Description  string `json:"description"`
-	Instructions string `json:"instructions"`
-	AvatarKey    string `json:"avatar_key"`
-	AvatarColor  string `json:"avatar_color"`
-	RuntimeID    string `json:"runtime_id"`
-	ModelRouteID string `json:"model_route_id"`
-	ModelAlias   string `json:"model_alias"`
-	Version      int64  `json:"version"`
+	Name             string            `json:"name"`
+	Description      string            `json:"description"`
+	Instructions     string            `json:"instructions"`
+	AvatarKey        string            `json:"avatar_key"`
+	AvatarColor      string            `json:"avatar_color"`
+	RuntimeID        string            `json:"runtime_id"`
+	ModelRouteID     string            `json:"model_route_id"`
+	ModelAlias       string            `json:"model_alias"`
+	SkillIDs         []string          `json:"skill_ids"`
+	KnowledgeSources []KnowledgeSource `json:"knowledge_sources"`
+	SuggestedPrompts []SuggestedPrompt `json:"suggested_prompts"`
+	Version          int64             `json:"version"`
 }
 
 type Store interface {

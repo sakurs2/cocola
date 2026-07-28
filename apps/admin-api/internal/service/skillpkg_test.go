@@ -6,6 +6,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"slices"
 	"testing"
 	"time"
 
@@ -140,6 +141,68 @@ func TestEffectivePersonalSkillOverridesSharedByRuntimeID(t *testing.T) {
 	}
 	if effective[0].ID != "user-32970b55-frontend-design" || effective[0].RuntimeID != "frontend-design" {
 		t.Fatalf("unexpected effective personal skill: %#v", effective[0])
+	}
+}
+
+func TestAgentSkillCatalogAndResolutionSemantics(t *testing.T) {
+	ctx := context.Background()
+	svc := New(store.NewMemory(), nil, time.Now)
+	for _, skill := range []store.Skill{
+		{ID: "shared", RuntimeID: "shared", Name: "Shared", Scope: "admin", Enabled: true, SkillMD: "# Shared"},
+		{ID: "admin-disabled", RuntimeID: "admin-disabled", Name: "Disabled", Scope: "admin", SkillMD: "# Disabled"},
+		{ID: "alice-private", RuntimeID: "private", Name: "Private", Scope: "user", OwnerUserID: "alice", SkillMD: "# Private"},
+		{ID: "bob-private", RuntimeID: "bob-private", Name: "Bob", Scope: "user", OwnerUserID: "bob", Enabled: true, SkillMD: "# Bob"},
+		{ID: "duplicate-a", RuntimeID: "duplicate", Name: "Duplicate A", Scope: "admin", Enabled: true, SkillMD: "# A"},
+		{ID: "duplicate-b", RuntimeID: "duplicate", Name: "Duplicate B", Scope: "admin", Enabled: true, SkillMD: "# B"},
+	} {
+		if _, err := svc.CreateSkill(ctx, skill, "admin"); err != nil {
+			t.Fatalf("CreateSkill(%s): %v", skill.ID, err)
+		}
+	}
+	if err := svc.SetUserSkillEnabled(ctx, "alice", "shared", false); err != nil {
+		t.Fatal(err)
+	}
+
+	catalog, err := svc.ListAgentSkillCatalog(ctx, "alice")
+	if err != nil {
+		t.Fatal(err)
+	}
+	byID := make(map[string]AgentSkillCatalogItem, len(catalog))
+	for _, item := range catalog {
+		byID[item.ID] = item
+	}
+	if !byID["shared"].Available || byID["shared"].DefaultEnabled {
+		t.Fatalf("user-disabled shared skill = %+v", byID["shared"])
+	}
+	if !byID["alice-private"].Available || byID["alice-private"].DefaultEnabled {
+		t.Fatalf("default-off personal skill = %+v", byID["alice-private"])
+	}
+	if byID["admin-disabled"].Available ||
+		byID["admin-disabled"].UnavailableReason != "disabled_by_administrator" {
+		t.Fatalf("admin-disabled skill = %+v", byID["admin-disabled"])
+	}
+	if _, exists := byID["bob-private"]; exists {
+		t.Fatalf("cross-user personal skill leaked into catalog")
+	}
+
+	resolved, err := svc.ResolveAgentSkills(ctx, "alice", []string{
+		"shared", "alice-private", "admin-disabled", "bob-private",
+		"duplicate-a", "duplicate-b", "deleted",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(resolved.Skills) != 3 {
+		t.Fatalf("resolved skills = %+v", resolved.Skills)
+	}
+	if got := []string{
+		resolved.Skills[0].ID, resolved.Skills[1].ID, resolved.Skills[2].ID,
+	}; got[0] != "shared" || got[1] != "alice-private" || got[2] != "duplicate-a" {
+		t.Fatalf("resolved skills = %+v", resolved.Skills)
+	}
+	wantUnavailable := []string{"admin-disabled", "bob-private", "duplicate-b", "deleted"}
+	if !slices.Equal(resolved.UnavailableIDs, wantUnavailable) {
+		t.Fatalf("unavailable IDs = %#v, want %#v", resolved.UnavailableIDs, wantUnavailable)
 	}
 }
 

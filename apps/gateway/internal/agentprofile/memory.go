@@ -37,6 +37,9 @@ func (m *Memory) List(_ context.Context, id Identity) ([]Agent, error) {
 		}
 		return result[i].UpdatedAt.After(result[j].UpdatedAt)
 	})
+	for index := range result {
+		result[index] = cloneAgent(result[index])
+	}
 	return result, nil
 }
 
@@ -47,7 +50,7 @@ func (m *Memory) Get(_ context.Context, id Identity, agentID string) (Agent, err
 	if !ok || value.TenantID != id.TenantID || value.OwnerUserID != id.UserID {
 		return Agent{}, ErrNotFound
 	}
-	return value, nil
+	return cloneAgent(value), nil
 }
 
 func (m *Memory) Create(_ context.Context, value Agent) (Agent, error) {
@@ -56,8 +59,9 @@ func (m *Memory) Create(_ context.Context, value Agent) (Agent, error) {
 	if _, ok := m.agents[value.ID]; ok || m.nameExists(value, "") {
 		return Agent{}, ErrConflict
 	}
+	value = cloneAgent(value)
 	m.agents[value.ID] = value
-	return value, nil
+	return cloneAgent(value), nil
 }
 
 func (m *Memory) Update(_ context.Context, id Identity, value Agent, expected int64) (Agent, error) {
@@ -82,8 +86,9 @@ func (m *Memory) Update(_ context.Context, id Identity, value Agent, expected in
 	if m.nameExists(candidate, candidate.ID) {
 		return Agent{}, ErrConflict
 	}
+	candidate = cloneAgent(candidate)
 	m.agents[value.ID] = candidate
-	return candidate, nil
+	return cloneAgent(candidate), nil
 }
 
 func (m *Memory) Archive(
@@ -103,14 +108,21 @@ func (m *Memory) Archive(
 		return Agent{}, ErrVersionConflict
 	}
 	if current.Status == StatusArchived {
-		return current, nil
+		return cloneAgent(current), nil
 	}
 	current.Status = StatusArchived
 	current.Version++
 	current.UpdatedAt = now
 	current.ArchivedAt = &now
 	m.agents[agentID] = current
-	return current, nil
+	return cloneAgent(current), nil
+}
+
+func cloneAgent(value Agent) Agent {
+	value.SkillIDs = append([]string(nil), value.SkillIDs...)
+	value.KnowledgeSources = append([]KnowledgeSource(nil), value.KnowledgeSources...)
+	value.SuggestedPrompts = append([]SuggestedPrompt(nil), value.SuggestedPrompts...)
+	return value
 }
 
 func (m *Memory) nameExists(candidate Agent, excludeID string) bool {

@@ -300,7 +300,12 @@ def skill_bundle(**files: str) -> bytes:
     return out.getvalue()
 
 
-def platform_skill_snapshot(*, digest: str = "platform-v1", include_preview: bool = False) -> dict:
+def platform_skill_snapshot(
+    *,
+    digest: str = "platform-v1",
+    include_preview: bool = False,
+    include_creator: bool = False,
+) -> dict:
     skills = [
         {
             "id": "cocola-sandbox-browser",
@@ -318,6 +323,16 @@ def platform_skill_snapshot(*, digest: str = "platform-v1", include_preview: boo
                 "version": "1.0.0",
                 "path": "cocola-sandbox-preview",
                 "content_sha256": "b" * 64,
+            }
+        )
+    if include_creator:
+        skills.append(
+            {
+                "id": "skill-creator",
+                "name": "Skill Creator",
+                "version": "1.0.0",
+                "path": "skill-creator",
+                "content_sha256": "c" * 64,
             }
         )
     return {
@@ -638,6 +653,135 @@ async def test_query_keeps_personal_catalog_id_out_of_runtime():
     assert prov.seen_options.environment_skills == [
         {"id": "frontend-design", "name": "Frontend Design", "version": ""}
     ]
+    assert prov.seen_options.allowed_skill_ids == ["frontend-design"]
+
+
+async def test_custom_agent_resolves_catalog_ids_and_excludes_non_cocola_platform_skills():
+    executor = StaticSandboxExecutor(
+        exec_handler=lambda _sandbox_id, cmd: (
+            ExecOutcome(stdout=json.dumps(platform_skill_snapshot(include_creator=True)))
+            if cmd[2] == _SKILLS_INSPECT_SCRIPT
+            else ExecOutcome()
+        )
+    )
+    provider = ListProvider([AgentEvent(kind="done", data={})])
+    catalog = StaticSkillCatalog(
+        [
+            Skill(id="catalog-pdf", runtime_id="pdf", name="PDF", skill_md="# PDF"),
+            Skill(id="catalog-other", runtime_id="other", name="Other", skill_md="# Other"),
+        ]
+    )
+    agent_context = SimpleNamespace(
+        id="agent-1",
+        version=2,
+        name="Research",
+        instructions="Be precise.",
+        skill_catalog_ids=["catalog-pdf", "deleted"],
+        knowledge_sources=[],
+    )
+
+    await AgentRuntimeServicer(
+        provider,
+        skills=catalog,
+        executor=executor,
+    ).Query(
+        FakeRequest(sandbox_id="box-1", agent_context=agent_context),
+        FakeContext(),
+    )
+
+    assert provider.seen_options is not None
+    assert provider.seen_options.allowed_skill_ids == ["cocola-sandbox-browser", "pdf"]
+    assert {item["id"] for item in provider.seen_options.environment_skills or []} == {
+        "cocola-sandbox-browser",
+        "pdf",
+    }
+    with zipfile.ZipFile(io.BytesIO(executor.byte_writes[0][2])) as batch:
+        manifest = json.loads(batch.read("manifest.json"))
+    assert manifest["platform_skill_ids"] == ["cocola-sandbox-browser"]
+
+
+async def test_agent_knowledge_is_injected_as_untrusted_remote_reference_without_download():
+    provider = ListProvider([AgentEvent(kind="done", data={})])
+    agent_context = SimpleNamespace(
+        id="agent-1",
+        version=1,
+        name="Research",
+        instructions="",
+        skill_catalog_ids=[],
+        knowledge_sources=[
+            SimpleNamespace(
+                type="feishu_doc",
+                label="Quarterly plan",
+                url="https://example.feishu.cn/docx/Abc_123",
+            )
+        ],
+    )
+
+    await AgentRuntimeServicer(
+        provider,
+        skills=StaticSkillCatalog(
+            [Skill(id="catalog-lark-doc", runtime_id="lark-doc", name="Lark Doc")]
+        ),
+    ).Query(FakeRequest(agent_context=agent_context), FakeContext())
+
+    assert provider.seen_options is not None
+    prompt = provider.seen_options.system_prompt or ""
+    assert "<agent-knowledge>" in prompt
+    assert "https://example.feishu.cn/docx/Abc_123" in prompt
+    assert "Do not download or mirror" in prompt
+
+
+async def test_cocola_wiki_agent_source_is_not_injected_as_remote_lark_reference():
+    provider = ListProvider([AgentEvent(kind="done", data={})])
+    agent_context = SimpleNamespace(
+        id="agent-1",
+        version=1,
+        name="Research",
+        instructions="",
+        skill_catalog_ids=[],
+        knowledge_sources=[
+            SimpleNamespace(
+                type="cocola_wiki",
+                label="Team handbook",
+                url="",
+                node_id="8eea8a2b-9491-49b7-84c5-a37d1d0ede90",
+            )
+        ],
+    )
+
+    await AgentRuntimeServicer(provider).Query(
+        FakeRequest(agent_context=agent_context),
+        FakeContext(),
+    )
+
+    assert provider.seen_options is not None
+    assert "<agent-knowledge>" not in (provider.seen_options.system_prompt or "")
+
+
+async def test_agent_knowledge_is_omitted_when_required_skill_is_unavailable():
+    provider = ListProvider([AgentEvent(kind="done", data={})])
+    agent_context = SimpleNamespace(
+        id="agent-1",
+        version=1,
+        name="Research",
+        instructions="",
+        skill_catalog_ids=[],
+        knowledge_sources=[
+            SimpleNamespace(
+                type="feishu_doc",
+                label="Quarterly plan",
+                url="https://example.feishu.cn/docx/Abc_123",
+            )
+        ],
+    )
+
+    await AgentRuntimeServicer(
+        provider,
+        skills=StaticSkillCatalog([]),
+    ).Query(FakeRequest(agent_context=agent_context), FakeContext())
+
+    assert provider.seen_options is not None
+    assert "<agent-knowledge>" not in (provider.seen_options.system_prompt or "")
 
 
 async def test_query_rejects_unavailable_selected_skill_before_provider():
@@ -978,24 +1122,11 @@ async def test_skill_batch_installer_persists_shared_and_local_payloads(tmp_path
 
 
 async def test_platform_and_configured_skills_share_claude_and_codex_set(tmp_path):
-    executor = StaticSandboxExecutor(
-        exec_handler=lambda _sandbox_id, cmd: (
-            ExecOutcome(stdout="{}") if cmd[2] == _SKILLS_INSPECT_SCRIPT else ExecOutcome()
-        )
-    )
-    servicer = AgentRuntimeServicer(ListProvider([]), executor=executor)
-    await servicer._sync_skills_into_sandbox(
-        "box-1", [Skill(id="review", name="Review", skill_md="# Review")]
-    )
-
-    archive = tmp_path / "skills.zip"
-    archive.write_bytes(executor.byte_writes[0][2])
     home = tmp_path / "home" / "cocola"
     platform_root = tmp_path / "platform-skills"
     write_platform_browser_skill(platform_root)
     inspect_script = local_skill_script(_SKILLS_INSPECT_SCRIPT, home, platform_root)
     reconcile_script = local_skill_script(_SKILLS_RECONCILE_SCRIPT, home, platform_root)
-
     inspected_before = subprocess.run(
         [sys.executable, "-c", inspect_script],
         check=False,
@@ -1007,6 +1138,20 @@ async def test_platform_and_configured_skills_share_claude_and_codex_set(tmp_pat
     assert [item["id"] for item in available["available_platform_skills"]] == [
         "cocola-sandbox-browser"
     ]
+    executor = StaticSandboxExecutor(
+        exec_handler=lambda _sandbox_id, cmd: (
+            ExecOutcome(stdout=json.dumps(available))
+            if cmd[2] == _SKILLS_INSPECT_SCRIPT
+            else ExecOutcome()
+        )
+    )
+    servicer = AgentRuntimeServicer(ListProvider([]), executor=executor)
+    await servicer._sync_skills_into_sandbox(
+        "box-1", [Skill(id="review", name="Review", skill_md="# Review")]
+    )
+
+    archive = tmp_path / "skills.zip"
+    archive.write_bytes(executor.byte_writes[0][2])
 
     digest = json.loads(zipfile.ZipFile(io.BytesIO(archive.read_bytes())).read("manifest.json"))[
         "digest"

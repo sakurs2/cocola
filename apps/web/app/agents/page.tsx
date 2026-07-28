@@ -15,16 +15,19 @@ import {
   DEFAULT_AGENT_AVATAR_KEY,
   agentResponseError,
   configuredAgentRuntimeID,
+  normalizeAgentSkillCatalog,
   normalizeAgentModels,
   normalizeAgentRuntimes,
   type AgentModelOption,
   type AgentProfile,
+  type AgentSkillCatalogItem,
 } from "@/lib/agents";
 
 export default function AgentsPage() {
   const router = useRouter();
   const [agents, setAgents] = useState<AgentProfile[]>([]);
   const [models, setModels] = useState<AgentModelOption[]>([]);
+  const [skillCatalog, setSkillCatalog] = useState<AgentSkillCatalogItem[]>([]);
   const [runtimeID, setRuntimeID] = useState("");
   const [loading, setLoading] = useState(true);
   const [catalogLoading, setCatalogLoading] = useState(true);
@@ -61,17 +64,28 @@ export default function AgentsPage() {
     const controller = new AbortController();
     void (async () => {
       try {
-        const [modelsResponse, runtimesResponse, configResponse] = await Promise.all([
-          fetch("/api/models", { cache: "no-store", signal: controller.signal }),
-          fetch("/api/agent-runtimes", { cache: "no-store", signal: controller.signal }),
-          fetch("/api/product-config", { cache: "no-store", signal: controller.signal }),
-        ]);
-        if (!modelsResponse.ok || !runtimesResponse.ok || !configResponse.ok) {
-          throw new Error("Model configuration is temporarily unavailable.");
+        const [modelsResponse, runtimesResponse, configResponse, skillsResponse] =
+          await Promise.all([
+            fetch("/api/models", { cache: "no-store", signal: controller.signal }),
+            fetch("/api/agent-runtimes", { cache: "no-store", signal: controller.signal }),
+            fetch("/api/product-config", { cache: "no-store", signal: controller.signal }),
+            fetch("/api/skills/agent-catalog", {
+              cache: "no-store",
+              signal: controller.signal,
+            }),
+          ]);
+        if (
+          !modelsResponse.ok ||
+          !runtimesResponse.ok ||
+          !configResponse.ok ||
+          !skillsResponse.ok
+        ) {
+          throw new Error("Agent capability configuration is temporarily unavailable.");
         }
         const modelRows = normalizeAgentModels(await modelsResponse.json());
         const runtimes = normalizeAgentRuntimes(await runtimesResponse.json());
         const configuredRuntimeID = configuredAgentRuntimeID(await configResponse.json());
+        const loadedSkillCatalog = normalizeAgentSkillCatalog(await skillsResponse.json());
         const runtime =
           runtimes.find((item) => item.id === configuredRuntimeID) ??
           runtimes.find((item) => item.isDefault);
@@ -82,6 +96,7 @@ export default function AgentsPage() {
         if (!controller.signal.aborted) {
           setRuntimeID(runtime.id);
           setModels(compatible);
+          setSkillCatalog(loadedSkillCatalog);
           setModelID(compatible.find((model) => model.isDefault)?.id ?? compatible[0]?.id ?? "");
         }
       } catch (cause) {
@@ -119,6 +134,9 @@ export default function AgentsPage() {
           runtime_id: runtimeID,
           model_route_id: selectedModel.id,
           model_alias: selectedModel.alias,
+          skill_ids: [],
+          knowledge_sources: [],
+          suggested_prompts: [],
         }),
       });
       if (!response.ok) throw new Error(await agentResponseError(response));
@@ -187,6 +205,9 @@ export default function AgentsPage() {
             <div className="grid gap-2.5 sm:grid-cols-2 lg:grid-cols-3">
               {agents.map((agent) => {
                 const model = modelsByID.get(agent.model_route_id);
+                const selectedSkills = (agent.skill_ids ?? [])
+                  .map((id) => skillCatalog.find((skill) => skill.id === id))
+                  .filter((skill): skill is AgentSkillCatalogItem => Boolean(skill?.available));
                 return (
                   <Link
                     key={agent.id}
@@ -210,6 +231,34 @@ export default function AgentsPage() {
 
                     <span className="mt-7 line-clamp-2 min-h-12 text-sm leading-6 text-muted-foreground">
                       {agent.description || "No description"}
+                    </span>
+
+                    <span className="mt-4 flex min-h-7 flex-wrap items-start gap-1.5">
+                      {(agent.skill_ids ?? []).length === 0 ? (
+                        <span className="rounded-md bg-muted px-2 py-1 text-[11px] font-medium text-muted-foreground">
+                          Default skills
+                        </span>
+                      ) : selectedSkills.length === 0 ? (
+                        <span className="rounded-md bg-amber-500/10 px-2 py-1 text-[11px] font-medium text-amber-700">
+                          Custom skills unavailable
+                        </span>
+                      ) : (
+                        <>
+                          {selectedSkills.slice(0, 2).map((skill) => (
+                            <span
+                              key={skill.id}
+                              className="max-w-28 truncate rounded-md bg-muted px-2 py-1 text-[11px] font-medium text-muted-foreground"
+                            >
+                              {skill.name}
+                            </span>
+                          ))}
+                          {selectedSkills.length > 2 ? (
+                            <span className="rounded-md bg-muted px-2 py-1 text-[11px] font-medium text-muted-foreground">
+                              +{selectedSkills.length - 2}
+                            </span>
+                          ) : null}
+                        </>
+                      )}
                     </span>
 
                     <span className="mt-auto inline-flex max-w-full items-center self-start rounded-lg border border-transparent bg-muted/80 px-2.5 py-1.5 text-xs font-medium text-muted-foreground transition-[background-color,border-color,color] duration-200 group-hover:border-border group-hover:bg-background/55 group-hover:text-foreground">

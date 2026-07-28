@@ -211,8 +211,9 @@ func main() {
 	issuer := token.NewIssuer(secret, issuerName, ttl)
 	api = api.WithSandboxTokenIssuer(issuer, ttl)
 	log.Info("per-user sandbox token issuer enabled (ttl " + ttl.String() + ")")
+	adminURL := strings.TrimSpace(os.Getenv("COCOLA_ADMIN_URL"))
+	api = api.WithAgentSkillCatalog(adminURL, nil)
 	if mustEnvBool(log, "COCOLA_SKILL_PUBLISH_ENABLED", false) {
-		adminURL := strings.TrimSpace(os.Getenv("COCOLA_ADMIN_URL"))
 		if adminURL == "" {
 			log.Fatal("COCOLA_ADMIN_URL is required when COCOLA_SKILL_PUBLISH_ENABLED=true")
 		}

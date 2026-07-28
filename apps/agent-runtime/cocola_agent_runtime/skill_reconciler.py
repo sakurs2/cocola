@@ -220,6 +220,26 @@ with open(lock_path, "a+") as lock:
                 if not os.path.isfile(os.path.join(target, "SKILL.md")):
                     raise SystemExit(f"skill archive missing SKILL.md: {skill_id}")
             platform_items, platform_digest, platform_sources = platform_skills()
+            requested_platform_ids = manifest.get("platform_skill_ids")
+            if requested_platform_ids is not None:
+                if not isinstance(requested_platform_ids, list) or any(
+                    not isinstance(value, str) for value in requested_platform_ids
+                ):
+                    raise SystemExit("invalid requested platform Skill ids")
+                requested = set(requested_platform_ids)
+                available = {item["id"] for item in platform_items}
+                if not requested.issubset(available):
+                    raise SystemExit("requested platform Skill is unavailable")
+                if requested != available:
+                    platform_items = [
+                        item for item in platform_items if item["id"] in requested
+                    ]
+                    encoded = json.dumps(
+                        platform_items, sort_keys=True, separators=(",", ":")
+                    ).encode()
+                    platform_digest = hashlib.sha256(encoded).hexdigest()
+            if manifest.get("platform_digest") not in (None, platform_digest):
+                raise SystemExit("platform Skill inventory changed during reconciliation")
             for item in platform_items:
                 skill_id = item["id"]
                 if skill_id in configured_ids:
@@ -256,7 +276,9 @@ _NATIVE_SKILL_ID_RE = re.compile(r"^[a-zA-Z0-9][a-zA-Z0-9_.-]{0,127}$")
 _SKILL_SET_FORMAT = "session-bundle-v2"
 
 
-def platform_skill_descriptors(snapshot: dict[str, Any]) -> tuple[list[dict[str, str]], str]:
+def platform_skill_descriptors(
+    snapshot: dict[str, Any], allowed_ids: set[str] | None = None
+) -> tuple[list[dict[str, str]], str]:
     """Return validated root-owned Skill metadata reported by the Runtime image."""
 
     raw_items = snapshot.get("available_platform_skills")
@@ -265,6 +287,7 @@ def platform_skill_descriptors(snapshot: dict[str, Any]) -> tuple[list[dict[str,
     if not isinstance(raw_items, list):
         raise RuntimeError("invalid platform Skill inventory")
     descriptors: list[dict[str, str]] = []
+    selected_items: list[dict[str, str]] = []
     seen_ids: set[str] = set()
     for raw in raw_items:
         if not isinstance(raw, dict):
@@ -275,6 +298,9 @@ def platform_skill_descriptors(snapshot: dict[str, Any]) -> tuple[list[dict[str,
         if skill_id in seen_ids:
             raise RuntimeError(f"duplicate platform Skill id: {skill_id}")
         seen_ids.add(skill_id)
+        if allowed_ids is not None and skill_id not in allowed_ids:
+            continue
+        selected_items.append(dict(raw))
         descriptors.append(
             {
                 "id": skill_id,
@@ -283,7 +309,15 @@ def platform_skill_descriptors(snapshot: dict[str, Any]) -> tuple[list[dict[str,
             }
         )
     descriptors.sort(key=lambda item: item["id"])
-    return descriptors, str(snapshot.get("available_platform_digest") or "")
+    selected_items.sort(key=lambda item: str(item.get("id") or ""))
+    if allowed_ids is None or (
+        not selected_items and not str(snapshot.get("available_platform_digest") or "")
+    ):
+        digest = str(snapshot.get("available_platform_digest") or "")
+    else:
+        encoded = json.dumps(selected_items, sort_keys=True, separators=(",", ":")).encode()
+        digest = hashlib.sha256(encoded).hexdigest()
+    return descriptors, digest
 
 
 def loaded_skill_metadata(
@@ -344,6 +378,9 @@ async def build_skill_batch_archive(
     descriptors: list[dict[str, str]],
     digest: str,
     previous: dict[str, Any],
+    *,
+    platform_skills: list[dict[str, str]] | None = None,
+    platform_digest: str = "",
 ) -> bytes:
     """Build the desired manifest while downloading only changed payloads."""
 
@@ -402,10 +439,18 @@ async def build_skill_batch_archive(
                 )
                 entry["member"] = member
             manifest.append(entry)
+        manifest_payload: dict[str, Any] = {
+            "format": _SKILL_SET_FORMAT,
+            "digest": digest,
+            "skills": manifest,
+        }
+        if platform_skills is not None:
+            manifest_payload["platform_skill_ids"] = [item["id"] for item in platform_skills]
+            manifest_payload["platform_digest"] = platform_digest
         batch.writestr(
             "manifest.json",
             json.dumps(
-                {"format": _SKILL_SET_FORMAT, "digest": digest, "skills": manifest},
+                manifest_payload,
                 ensure_ascii=False,
                 sort_keys=True,
                 separators=(",", ":"),

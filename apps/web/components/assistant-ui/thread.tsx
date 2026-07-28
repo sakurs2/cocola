@@ -264,10 +264,21 @@ const ThreadWelcome: FC = () => {
   const [greeting, setGreeting] = useState("Welcome back");
   const composer = useComposerRuntime();
   const composerIsEmpty = useComposer((state) => state.isEmpty);
+  const { selectedAgent } = useCocola();
   const [activePromptStarter, setActivePromptStarter] = useState<PromptStarter | null>(null);
   const [promptSlotBindings, setPromptSlotBindings] = useState<
     Record<string, PromptStarterSlotBinding | undefined>
   >({});
+  const visiblePromptStarters = useMemo<PromptStarter[]>(() => {
+    if (!selectedAgent) return PROMPT_STARTERS;
+    if (!("suggested_prompts" in selectedAgent)) return [];
+    return selectedAgent.suggested_prompts.map((suggestion) => ({
+      icon: Sparkles,
+      label: suggestion.title,
+      color: "text-blue-600",
+      prompt: suggestion.prompt,
+    }));
+  }, [selectedAgent]);
 
   useEffect(() => {
     const h = new Date().getHours();
@@ -342,7 +353,7 @@ const ThreadWelcome: FC = () => {
             !composerIsEmpty && "invisible pointer-events-none",
           )}
         >
-          {PROMPT_STARTERS.map((starter) => {
+          {visiblePromptStarters.map((starter) => {
             const { icon: Icon, label, color } = starter;
             return (
               <button

@@ -13,9 +13,10 @@ static implementation for hermetic tests. The HTTP transport is an injectable
 callable (default: stdlib urllib) so unit tests never open a socket and the
 package imports cleanly without httpx.
 
-Only `Enabled` entries are ever returned — the admin-api already filters via
-`?enabled=true`, and we filter again defensively so a catalog change cannot leak
-a disabled skill into a session.
+Default sessions consume the user's effective enabled set. Custom Agent sessions
+resolve only their snapshotted catalog IDs: user enable preferences are ignored,
+while administrator disablement, deletion, package validity, and ownership stay
+hard gates.
 """
 
 from __future__ import annotations
@@ -82,14 +83,31 @@ class SkillCatalog(Protocol):
         """Return the currently-enabled skills (may be empty; never None)."""
         ...
 
+    def resolve_skills(self, user_id: str, catalog_ids: Sequence[str]) -> SkillResolution:
+        """Resolve an Agent's explicit catalog IDs, failing closed per item."""
+        ...
+
+
+@dataclass(frozen=True)
+class SkillResolution:
+    skills: list[Skill]
+    unavailable_ids: list[str]
+
 
 # Injectable HTTP transport: (url, headers, timeout) -> response body bytes.
 # Production uses _urllib_fetch; tests inject a fake returning canned JSON.
 Fetcher = Callable[[str, dict[str, str], float], bytes]
+Poster = Callable[[str, dict[str, str], bytes, float], bytes]
 
 
 def _urllib_fetch(url: str, headers: dict[str, str], timeout: float) -> bytes:
     req = urllib.request.Request(url, headers=headers, method="GET")
+    with urllib.request.urlopen(req, timeout=timeout) as resp:  # noqa: S310 - trusted internal URL
+        return resp.read()
+
+
+def _urllib_post(url: str, headers: dict[str, str], body: bytes, timeout: float) -> bytes:
+    req = urllib.request.Request(url, headers=headers, data=body, method="POST")
     with urllib.request.urlopen(req, timeout=timeout) as resp:  # noqa: S310 - trusted internal URL
         return resp.read()
 
@@ -110,26 +128,68 @@ class AdminSkillCatalog:
         admin_key: str = "",
         timeout_s: float = 3.0,
         fetcher: Fetcher | None = None,
+        poster: Poster | None = None,
     ) -> None:
         self._base = base_url.rstrip("/")
         self._admin_key = admin_key
         self._timeout = timeout_s
         self._fetch = fetcher or _urllib_fetch
+        self._post = poster or _urllib_post
+
+    def _headers(self) -> dict[str, str]:
+        headers = {"Accept": "application/json"}
+        if self._admin_key:
+            headers["Authorization"] = "Bearer " + self._admin_key
+        return headers
 
     def enabled_skills(self, user_id: str = "") -> list[Skill]:
         if user_id:
             url = self._base + "/admin/skills/effective?user_id=" + urllib.parse.quote(user_id)
         else:
             url = self._base + "/admin/skills?enabled=true"
-        headers = {"Accept": "application/json"}
-        if self._admin_key:
-            headers["Authorization"] = "Bearer " + self._admin_key
-        raw = self._fetch(url, headers, self._timeout)
+        raw = self._fetch(url, self._headers(), self._timeout)
         payload = json.loads(raw)
         items = payload.get("skills") or []
         skills = [Skill.from_json(d) for d in items if isinstance(d, dict)]
         # Defensive re-filter: only enabled entries, only ones with an id.
         return [s for s in skills if s.id]
+
+    def resolve_skills(self, user_id: str, catalog_ids: Sequence[str]) -> SkillResolution:
+        requested = [str(value).strip() for value in catalog_ids]
+        requested_ids = set(requested)
+        if len(requested_ids) != len(requested) or any(not value for value in requested):
+            raise ValueError("invalid requested Agent Skill catalog IDs")
+        body = json.dumps(
+            {"user_id": user_id, "catalog_ids": requested},
+            separators=(",", ":"),
+        ).encode()
+        headers = self._headers()
+        headers["Content-Type"] = "application/json"
+        raw = self._post(self._base + "/admin/skills/resolve", headers, body, self._timeout)
+        payload = json.loads(raw)
+        if not isinstance(payload, dict):
+            raise ValueError("invalid Agent Skill resolution response")
+        items = payload.get("skills") or []
+        unavailable = payload.get("unavailable_ids") or []
+        if not isinstance(items, list) or not isinstance(unavailable, list):
+            raise ValueError("invalid Agent Skill resolution response")
+        skills = [Skill.from_json(d) for d in items if isinstance(d, dict)]
+        resolved_ids = [skill.id for skill in skills]
+        unavailable_ids = [
+            value.strip() for value in unavailable if isinstance(value, str) and value.strip()
+        ]
+        if (
+            len(skills) != len(items)
+            or len(set(resolved_ids)) != len(resolved_ids)
+            or len(set(unavailable_ids)) != len(unavailable_ids)
+            or not set(resolved_ids).isdisjoint(unavailable_ids)
+            or set(resolved_ids) | set(unavailable_ids) != requested_ids
+        ):
+            raise ValueError("invalid Agent Skill resolution response")
+        return SkillResolution(
+            skills=skills,
+            unavailable_ids=unavailable_ids,
+        )
 
 
 class StaticSkillCatalog:
@@ -140,3 +200,10 @@ class StaticSkillCatalog:
 
     def enabled_skills(self, user_id: str = "") -> list[Skill]:
         return list(self._skills)
+
+    def resolve_skills(self, user_id: str, catalog_ids: Sequence[str]) -> SkillResolution:
+        del user_id
+        by_id = {skill.id: skill for skill in self._skills}
+        skills = [by_id[value] for value in catalog_ids if value in by_id]
+        unavailable = [value for value in catalog_ids if value not in by_id]
+        return SkillResolution(skills=skills, unavailable_ids=unavailable)

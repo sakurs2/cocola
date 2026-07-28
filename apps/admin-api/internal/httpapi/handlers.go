@@ -743,6 +743,26 @@ func (a *API) listEffectiveSkills(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]any{"skills": skills})
 }
 
+type resolveAgentSkillsReq struct {
+	UserID     string   `json:"user_id"`
+	CatalogIDs []string `json:"catalog_ids"`
+}
+
+func (a *API) resolveAgentSkills(w http.ResponseWriter, r *http.Request) {
+	var req resolveAgentSkillsReq
+	r.Body = http.MaxBytesReader(w, r.Body, 64<<10)
+	if err := decode(r, &req); err != nil {
+		mapErr(w, err)
+		return
+	}
+	result, err := a.svc.ResolveAgentSkills(r.Context(), req.UserID, req.CatalogIDs)
+	if err != nil {
+		mapErr(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, result)
+}
+
 func (a *API) getSkillBundle(w http.ResponseWriter, r *http.Request) {
 	data, contentType, err := a.svc.GetSkillBundle(r.Context(), chi.URLParam(r, "id"))
 	if err != nil {
@@ -759,6 +779,15 @@ func (a *API) getSkillBundle(w http.ResponseWriter, r *http.Request) {
 
 func (a *API) listMySkills(w http.ResponseWriter, r *http.Request) {
 	skills, err := a.svc.ListUserSkillCatalog(r.Context(), actorOf(r))
+	if err != nil {
+		mapErr(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"skills": skills})
+}
+
+func (a *API) listMyAgentSkillCatalog(w http.ResponseWriter, r *http.Request) {
+	skills, err := a.svc.ListAgentSkillCatalog(r.Context(), actorOf(r))
 	if err != nil {
 		mapErr(w, err)
 		return

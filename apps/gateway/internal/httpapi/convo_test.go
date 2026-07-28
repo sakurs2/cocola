@@ -34,6 +34,11 @@ func TestListConversationsReturnsSlimAgentSnapshot(t *testing.T) {
 		Name: "Analyst", Description: "Explains data", Instructions: "private working rules",
 		AvatarKey: "chart", AvatarColor: "cyan", RuntimeID: "claude-code",
 		ModelRouteID: "route-1", ModelAlias: "sonnet",
+		SkillIDs: []string{"catalog-private"},
+		KnowledgeSources: []agentprofile.KnowledgeSource{{
+			Type: agentprofile.KnowledgeTypeFeishuDoc,
+			URL:  "https://docs.feishu.cn/docx/Abc_123",
+		}},
 	}
 	err := cs.UpsertConversation(context.Background(), convo.Conversation{
 		ID: "agent-chat", UserID: auth.DevIdentity.UserID, TenantID: auth.DevIdentity.TenantID,
@@ -62,11 +67,65 @@ func TestListConversationsReturnsSlimAgentSnapshot(t *testing.T) {
 	if _, exists := agentValue["instructions"]; exists {
 		t.Fatalf("conversation list leaked Agent instructions: %#v", agentValue)
 	}
+	skillIDs, ok := agentValue["skill_ids"].([]any)
+	if !ok || len(skillIDs) != 1 || skillIDs[0] != "catalog-private" {
+		t.Fatalf("conversation list Agent Skill snapshot = %#v", agentValue)
+	}
+	if _, exists := agentValue["knowledge_sources"]; exists {
+		t.Fatalf("conversation list leaked Agent Knowledge URLs: %#v", agentValue)
+	}
 	if agentValue["name"] != snapshot.Name || agentValue["model_route_id"] != snapshot.ModelRouteID {
 		t.Fatalf("agent summary = %#v", agentValue)
 	}
 	if _, exists := payload[0]["user_id"]; exists {
 		t.Fatalf("conversation summary leaked internal owner fields: %#v", payload[0])
+	}
+}
+
+func TestExistingConversationKeepsAgentSkillSnapshotAfterAgentUpdate(t *testing.T) {
+	ctx := context.Background()
+	identity := auth.DevIdentity
+	agents := agentprofile.NewService(agentprofile.NewMemory())
+	created, err := agents.Create(ctx, agentprofile.Identity{
+		TenantID: identity.TenantID, UserID: identity.UserID,
+	}, agentprofile.CreateInput{
+		Name: "Specialist", RuntimeID: "claude-code",
+		ModelRouteID: "route-1", ModelAlias: "sonnet",
+		SkillIDs: []string{"catalog-old"},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	snapshot := created.Snapshot()
+	conversations := convo.NewMemory()
+	if err := conversations.UpsertConversation(ctx, convo.Conversation{
+		ID: "agent-snapshot-chat", UserID: identity.UserID, TenantID: identity.TenantID,
+		Title: "Agent snapshot", RuntimeID: snapshot.RuntimeID,
+		AgentID: snapshot.ID, AgentVersion: snapshot.Version, AgentSnapshot: &snapshot,
+		CreatedAt: time.Now().UTC(), UpdatedAt: time.Now().UTC(),
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := agents.Update(ctx, agentprofile.Identity{
+		TenantID: identity.TenantID, UserID: identity.UserID,
+	}, created.ID, agentprofile.UpdateInput{
+		Name: created.Name, Description: created.Description, Instructions: created.Instructions,
+		AvatarKey: created.AvatarKey, AvatarColor: created.AvatarColor,
+		RuntimeID: created.RuntimeID, ModelRouteID: created.ModelRouteID,
+		ModelAlias: created.ModelAlias, SkillIDs: []string{"catalog-new"},
+		Version: created.Version,
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	api := &API{convo: conversations, agents: agents}
+	request := &chatRequest{SessionID: "agent-snapshot-chat", AgentID: created.ID}
+	if err := api.resolveChatAgent(ctx, identity, request); err != nil {
+		t.Fatal(err)
+	}
+	if request.AgentSnapshot == nil || len(request.AgentSnapshot.SkillIDs) != 1 ||
+		request.AgentSnapshot.SkillIDs[0] != "catalog-old" {
+		t.Fatalf("existing conversation Agent snapshot = %+v", request.AgentSnapshot)
 	}
 }
 

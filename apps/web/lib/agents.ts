@@ -2,6 +2,36 @@ import { normalizeModelIconConfig, type ModelIconConfig } from "@/lib/model-icon
 
 export type AgentStatus = "active" | "archived";
 
+export type AgentKnowledgeSource =
+  | {
+      type: "feishu_doc" | "feishu_wiki" | "feishu_sheet" | "feishu_base";
+      label: string;
+      url: string;
+      node_id?: never;
+    }
+  | {
+      type: "cocola_wiki";
+      label: string;
+      node_id: string;
+      url?: never;
+    };
+
+export type AgentSuggestedPrompt = {
+  title: string;
+  prompt: string;
+};
+
+export type AgentSkillCatalogItem = {
+  id: string;
+  runtime_id: string;
+  name: string;
+  description: string;
+  source: "system" | "personal";
+  available: boolean;
+  default_enabled: boolean;
+  unavailable_reason?: string;
+};
+
 export type AgentProfile = {
   id: string;
   name: string;
@@ -12,6 +42,9 @@ export type AgentProfile = {
   runtime_id: string;
   model_route_id: string;
   model_alias: string;
+  skill_ids: string[];
+  knowledge_sources: AgentKnowledgeSource[];
+  suggested_prompts: AgentSuggestedPrompt[];
   status: AgentStatus;
   version: number;
   created_at: string;
@@ -30,6 +63,7 @@ export type AgentSnapshot = Pick<
   | "runtime_id"
   | "model_route_id"
   | "model_alias"
+  | "skill_ids"
   | "version"
 >;
 
@@ -76,6 +110,12 @@ export const AGENT_AVATAR_COLORS = [
 
 export const DEFAULT_AGENT_AVATAR_KEY = "sparkle";
 export const DEFAULT_AGENT_AVATAR_COLOR = "blue";
+
+export function agentKnowledgeSourceKey(source: AgentKnowledgeSource): string {
+  return source.type === "cocola_wiki"
+    ? `${source.type}:${source.node_id}`
+    : `${source.type}:${source.url}`;
+}
 
 export function normalizeAgentModels(value: unknown): AgentModelOption[] {
   if (!Array.isArray(value)) return [];
@@ -127,6 +167,35 @@ export function normalizeAgentRuntimes(value: unknown): AgentRuntimeCatalogItem[
         label: label || id,
         modelProtocol,
         isDefault: row.is_default === true,
+      },
+    ];
+  });
+}
+
+export function normalizeAgentSkillCatalog(value: unknown): AgentSkillCatalogItem[] {
+  const rawSkills =
+    value && typeof value === "object" && Array.isArray((value as { skills?: unknown }).skills)
+      ? (value as { skills: unknown[] }).skills
+      : [];
+  return rawSkills.flatMap((raw): AgentSkillCatalogItem[] => {
+    if (!raw || typeof raw !== "object") return [];
+    const row = raw as Record<string, unknown>;
+    const id = typeof row.id === "string" ? row.id.trim() : "";
+    const runtimeID = typeof row.runtime_id === "string" ? row.runtime_id.trim() : "";
+    const name = typeof row.name === "string" ? row.name.trim() : "";
+    if (!id || !runtimeID || !name) return [];
+    return [
+      {
+        id,
+        runtime_id: runtimeID,
+        name,
+        description: typeof row.description === "string" ? row.description.trim() : "",
+        source: row.source === "personal" ? "personal" : "system",
+        available: row.available === true,
+        default_enabled: row.default_enabled === true,
+        ...(typeof row.unavailable_reason === "string" && row.unavailable_reason
+          ? { unavailable_reason: row.unavailable_reason }
+          : {}),
       },
     ];
   });
