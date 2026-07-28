@@ -55,9 +55,16 @@ function SkillsWorkspace() {
   const [gitScanning, setGitScanning] = useState(false);
   const [actionSkillId, setActionSkillId] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [skillQuery, setSkillQuery] = useState("");
 
-  const shared = skills.filter((skill) => skill.scope !== "user");
-  const mine = skills.filter((skill) => skill.scope === "user");
+  const filteredSkills = useMemo(() => {
+    const query = skillQuery.trim().toLowerCase();
+    if (!query) return skills;
+    return skills.filter((skill) => displaySkillName(skill).toLowerCase().includes(query));
+  }, [skillQuery, skills]);
+  const shared = filteredSkills.filter((skill) => skill.scope !== "user");
+  const mine = filteredSkills.filter((skill) => skill.scope === "user");
+  const searching = skillQuery.trim().length > 0;
   const validCandidates = useMemo(() => candidates.filter((c) => c.valid), [candidates]);
   const allValidSelected =
     validCandidates.length > 0 && validCandidates.every((candidate) => selected[candidate.id]);
@@ -217,16 +224,29 @@ function SkillsWorkspace() {
               Choose shared skills and manage your personal skill packages.
             </p>
           </div>
-          <label className="inline-flex h-9 cursor-pointer items-center gap-2 rounded-xl px-3.5 text-sm font-semibold text-white shadow-xs transition-opacity brand-gradient hover:opacity-90">
-            <Upload className="size-4" />
-            Upload zip
-            <input
-              type="file"
-              accept=".zip,application/zip"
-              className="hidden"
-              onChange={chooseFile}
-            />
-          </label>
+          <div className="flex w-full flex-wrap items-center gap-2 sm:w-auto">
+            <label className="relative min-w-0 flex-1 sm:w-64 sm:flex-none">
+              <span className="sr-only">Search Skills by name</span>
+              <Search className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
+              <Input
+                type="search"
+                value={skillQuery}
+                onChange={(event) => setSkillQuery(event.target.value)}
+                placeholder="input skill name"
+                className="pl-9"
+              />
+            </label>
+            <label className="inline-flex h-9 cursor-pointer items-center gap-2 rounded-xl px-3.5 text-sm font-semibold text-white shadow-xs transition-opacity brand-gradient hover:opacity-90">
+              <Upload className="size-4" />
+              Upload zip
+              <input
+                type="file"
+                accept=".zip,application/zip"
+                className="hidden"
+                onChange={chooseFile}
+              />
+            </label>
+          </div>
         </header>
 
         {error ? (
@@ -360,6 +380,7 @@ function SkillsWorkspace() {
               count={shared.length}
               empty="No shared skills published by administrators."
               skills={shared}
+              searching={searching}
               working={working}
               actionSkillId={actionSkillId}
               onToggle={(skill) => setSkillEnabled(skill)}
@@ -369,6 +390,7 @@ function SkillsWorkspace() {
               count={mine.length}
               empty="Upload a zip package to add your own skills."
               skills={mine}
+              searching={searching}
               working={working}
               actionSkillId={actionSkillId}
               onToggle={(skill) => setSkillEnabled(skill)}
@@ -386,6 +408,7 @@ function SkillSection({
   count,
   empty,
   skills,
+  searching,
   working,
   actionSkillId,
   onToggle,
@@ -395,6 +418,7 @@ function SkillSection({
   count: number;
   empty: string;
   skills: Skill[];
+  searching: boolean;
   working: boolean;
   actionSkillId: string | null;
   onToggle: (skill: Skill) => void;
@@ -418,12 +442,18 @@ function SkillSection({
             />
           ))
         ) : (
-          <label className="col-span-full flex min-h-[140px] cursor-pointer flex-col items-center justify-center gap-2 rounded-2xl border border-dashed border-border p-6 text-center transition-colors hover:border-foreground/25 hover:bg-muted/50">
+          <div className="col-span-full flex min-h-[140px] flex-col items-center justify-center gap-2 rounded-2xl border border-dashed border-border p-6 text-center">
             <div className="grid size-10 place-items-center rounded-xl bg-muted">
-              <Upload className="size-4 text-muted-foreground" />
+              {searching ? (
+                <Search className="size-4 text-muted-foreground" />
+              ) : (
+                <Upload className="size-4 text-muted-foreground" />
+              )}
             </div>
-            <p className="text-sm text-muted-foreground">{empty}</p>
-          </label>
+            <p className="text-sm text-muted-foreground">
+              {searching ? "No skills match this name." : empty}
+            </p>
+          </div>
         )}
       </div>
     </section>

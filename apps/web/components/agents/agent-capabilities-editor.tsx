@@ -1,6 +1,16 @@
 "use client";
 
-import { AlertTriangle, BookOpenText, Check, Loader2, Plus, Search, Trash2 } from "lucide-react";
+import {
+  AlertTriangle,
+  BookOpenText,
+  Check,
+  ChevronLeft,
+  ChevronRight,
+  Loader2,
+  Plus,
+  Search,
+  Trash2,
+} from "lucide-react";
 import { useMemo, useState } from "react";
 import { Badge } from "@/components/ui/badge";
 import { Input } from "@/components/ui/input";
@@ -32,6 +42,8 @@ const REQUIRED_KNOWLEDGE_SKILLS: Record<AgentKnowledgeSource["type"], string[]> 
   cocola_wiki: [],
 };
 
+const SKILLS_PER_PAGE = 6;
+
 type AgentWikiNode = {
   id: string;
   kind: "folder" | "file";
@@ -61,6 +73,8 @@ export function AgentCapabilitiesEditor({
   const [wikiLoading, setWikiLoading] = useState(false);
   const [wikiError, setWikiError] = useState("");
   const [skillMessage, setSkillMessage] = useState("");
+  const [skillQuery, setSkillQuery] = useState("");
+  const [skillPage, setSkillPage] = useState(1);
   const [knowledgeNotice, setKnowledgeNotice] = useState<KnowledgeNotice | null>(null);
   const selectedIDs = useMemo(() => new Set(skillIDs), [skillIDs]);
   const catalogByID = useMemo(() => new Map(skills.map((skill) => [skill.id, skill])), [skills]);
@@ -79,6 +93,15 @@ export function AgentCapabilitiesEditor({
       }));
     return [...skills, ...missing];
   }, [catalogByID, skillIDs, skills]);
+  const filteredSkills = useMemo(() => {
+    const query = skillQuery.trim().toLowerCase();
+    if (!query) return displayedSkills;
+    return displayedSkills.filter((skill) => skill.name.toLowerCase().includes(query));
+  }, [displayedSkills, skillQuery]);
+  const skillPageCount = Math.max(1, Math.ceil(filteredSkills.length / SKILLS_PER_PAGE));
+  const currentSkillPage = Math.min(skillPage, skillPageCount);
+  const skillPageStart = (currentSkillPage - 1) * SKILLS_PER_PAGE;
+  const paginatedSkills = filteredSkills.slice(skillPageStart, skillPageStart + SKILLS_PER_PAGE);
   const filteredWikiFiles = useMemo(() => {
     const query = wikiQuery.trim().toLowerCase();
     return wikiNodes
@@ -275,62 +298,124 @@ export function AgentCapabilitiesEditor({
               : `Only the ${skillIDs.length} selected skills will be available to this Agent.`}
           </p>
         </div>
+        <div className="relative mt-4">
+          <Label htmlFor="agent-skill-search" className="sr-only">
+            Search Skills by name
+          </Label>
+          <Search className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
+          <Input
+            type="search"
+            id="agent-skill-search"
+            value={skillQuery}
+            onChange={(event) => {
+              setSkillQuery(event.target.value);
+              setSkillPage(1);
+            }}
+            placeholder="input skill name"
+            className="pl-9"
+          />
+        </div>
         <div className="mt-4 grid gap-4 md:grid-cols-2 xl:grid-cols-3">
-          {displayedSkills.map((skill) => {
-            const selected = selectedIDs.has(skill.id);
-            return (
-              <button
-                key={skill.id}
-                type="button"
-                aria-pressed={selected}
-                disabled={!skill.available && !selected}
-                onClick={() => toggleSkill(skill)}
-                className={cn(
-                  "group flex min-h-[148px] min-w-0 flex-col rounded-2xl border bg-card p-5 text-left shadow-card transition duration-200 hover:-translate-y-0.5 hover:shadow-lg focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/40",
-                  selected
-                    ? "border-primary/35 bg-primary/[0.025] ring-1 ring-primary/10"
-                    : "border-border",
-                  !skill.available && !selected && "cursor-not-allowed opacity-60",
-                )}
-              >
-                <span className="flex min-w-0 items-start gap-3">
-                  <SkillIcon name={skill.name || skill.runtime_id} />
-                  <span className="min-w-0 flex-1">
-                    <span className="block truncate text-sm font-bold">{skill.name}</span>
-                    <span className="mt-1 line-clamp-2 block min-h-10 text-sm text-muted-foreground">
-                      {!skill.available
-                        ? "This skill was disabled by an administrator and will not be available to the Agent."
-                        : skill.description ||
-                          `${skill.source === "personal" ? "Personal" : "Shared"} Skill`}
+          {paginatedSkills.length > 0 ? (
+            paginatedSkills.map((skill) => {
+              const selected = selectedIDs.has(skill.id);
+              const description = !skill.available
+                ? "This skill was disabled by an administrator and will not be available to the Agent."
+                : skill.description ||
+                  `${skill.source === "personal" ? "Personal" : "Shared"} Skill`;
+              return (
+                <button
+                  key={skill.id}
+                  type="button"
+                  aria-pressed={selected}
+                  disabled={!skill.available && !selected}
+                  onClick={() => toggleSkill(skill)}
+                  className={cn(
+                    "group flex h-40 min-w-0 flex-col overflow-hidden rounded-2xl border bg-card p-5 text-left shadow-card transition duration-200 hover:-translate-y-0.5 hover:shadow-lg focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/40",
+                    selected
+                      ? "border-primary/35 bg-primary/[0.025] ring-1 ring-primary/10"
+                      : "border-border",
+                    !skill.available && !selected && "cursor-not-allowed opacity-60",
+                  )}
+                >
+                  <span className="flex min-w-0 items-start gap-3">
+                    <SkillIcon name={skill.name || skill.runtime_id} />
+                    <span className="min-w-0 flex-1">
+                      <span className="block truncate text-sm font-bold">{skill.name}</span>
+                      <span
+                        title={description}
+                        className="mt-1 line-clamp-2 min-h-10 text-sm leading-5 text-muted-foreground"
+                      >
+                        {description}
+                      </span>
+                    </span>
+                    <span
+                      aria-hidden="true"
+                      className={cn(
+                        "grid size-5 shrink-0 place-items-center rounded-md border transition-colors",
+                        selected
+                          ? "border-primary bg-primary text-primary-foreground"
+                          : "border-input bg-background text-transparent",
+                      )}
+                    >
+                      <Check className="size-3.5" />
                     </span>
                   </span>
-                  <span
-                    aria-hidden="true"
-                    className={cn(
-                      "grid size-5 shrink-0 place-items-center rounded-md border transition-colors",
-                      selected
-                        ? "border-primary bg-primary text-primary-foreground"
-                        : "border-input bg-background text-transparent",
-                    )}
-                  >
-                    <Check className="size-3.5" />
+                  <span className="mt-auto flex flex-wrap items-center gap-2 pt-4">
+                    <Badge>{skill.source === "personal" ? "personal" : "shared"}</Badge>
+                    {selected ? (
+                      <Badge variant="brand">
+                        <Check className="size-3" /> selected
+                      </Badge>
+                    ) : null}
+                    {!skill.available ? (
+                      <Badge className="bg-amber-500/10 text-amber-700">unavailable</Badge>
+                    ) : null}
                   </span>
-                </span>
-                <span className="mt-4 flex flex-wrap items-center gap-2">
-                  <Badge>{skill.source === "personal" ? "personal" : "shared"}</Badge>
-                  {selected ? (
-                    <Badge variant="brand">
-                      <Check className="size-3" /> selected
-                    </Badge>
-                  ) : null}
-                  {!skill.available ? (
-                    <Badge className="bg-amber-500/10 text-amber-700">unavailable</Badge>
-                  ) : null}
-                </span>
-              </button>
-            );
-          })}
+                </button>
+              );
+            })
+          ) : (
+            <div className="col-span-full flex h-40 flex-col items-center justify-center gap-2 rounded-2xl border border-dashed border-border text-center">
+              <Search className="size-5 text-muted-foreground" />
+              <p className="text-sm text-muted-foreground">
+                {skillQuery.trim() ? "No skills match this name." : "No skills available."}
+              </p>
+            </div>
+          )}
         </div>
+        {skillPageCount > 1 ? (
+          <div className="mt-4 flex flex-wrap items-center justify-between gap-3 border-t border-border pt-4">
+            <span className="text-xs text-muted-foreground">
+              Showing {skillPageStart + 1}–
+              {Math.min(skillPageStart + SKILLS_PER_PAGE, filteredSkills.length)} of{" "}
+              {filteredSkills.length} skills
+            </span>
+            <div className="flex items-center gap-2">
+              <button
+                type="button"
+                aria-label="Previous skills page"
+                disabled={currentSkillPage === 1}
+                onClick={() => setSkillPage(Math.max(1, currentSkillPage - 1))}
+                className="grid size-8 place-items-center rounded-lg border border-border text-muted-foreground transition-colors hover:bg-muted hover:text-foreground disabled:cursor-not-allowed disabled:opacity-40"
+              >
+                <ChevronLeft className="size-4" />
+              </button>
+              <span className="min-w-14 text-center text-xs font-medium text-muted-foreground">
+                {currentSkillPage} / {skillPageCount}
+              </span>
+              <button
+                type="button"
+                aria-label="Next skills page"
+                disabled={currentSkillPage === skillPageCount}
+                onClick={() => setSkillPage(Math.min(skillPageCount, currentSkillPage + 1))}
+                className="grid size-8 place-items-center rounded-lg border border-border text-muted-foreground transition-colors hover:bg-muted hover:text-foreground disabled:cursor-not-allowed disabled:opacity-40"
+              >
+                <ChevronRight className="size-4" />
+              </button>
+            </div>
+          </div>
+        ) : null}
         {skillMessage ? (
           <div className="mt-4 flex items-start gap-2 rounded-xl border border-amber-500/20 bg-amber-500/[0.06] px-3.5 py-2.5 text-sm text-amber-800">
             <AlertTriangle className="mt-0.5 size-4 shrink-0" />
