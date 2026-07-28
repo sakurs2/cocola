@@ -1162,28 +1162,13 @@ func (r *connectorRunner) consumeAgentStream(
 		r.activeMu.Unlock()
 	}()
 
-	var stream MessageStream
 	var pendingQuestion string
 	var pendingOptions []QuestionOption
 	sawError := false
-	sendText := func(text string) error {
-		if text == "" {
-			return nil
-		}
-		if stream == nil {
-			created, err := r.channel.StreamMarkdown(
-				runCtx,
-				item.ExternalChatID,
-				item.ExternalMessageID,
-				text,
-			)
-			if err != nil {
-				return err
-			}
-			stream = created
-			return nil
-		}
-		return stream.Append(runCtx, text)
+	var finalReply strings.Builder
+	resetFinalReply := func(text string) {
+		finalReply.Reset()
+		finalReply.WriteString(text)
 	}
 	callErr := call(runCtx, func(runID string) {
 		r.activeMu.Lock()
@@ -1198,8 +1183,9 @@ func (r *connectorRunner) consumeAgentStream(
 			if err != nil {
 				return err
 			}
-			if err := sendText(snapshot.Text); err != nil {
-				return err
+			resetFinalReply(snapshot.Text)
+			if externalRunFailed(event.Data["status"]) {
+				sawError = true
 			}
 			if snapshot.QuestionID != "" {
 				session.PendingQuestionID = snapshot.QuestionID
@@ -1213,7 +1199,17 @@ func (r *connectorRunner) consumeAgentStream(
 				pendingOptions = snapshot.Options
 			}
 		case "text":
-			return sendText(event.Data["text"])
+			finalReply.WriteString(event.Data["text"])
+		case "tool_use", "tool_result":
+			// Text before or during a tool call is execution narration, not the
+			// final answer. Keep only the response produced after the last tool.
+			finalReply.Reset()
+		case "result":
+			// Claude's terminal result is authoritative when present. Some
+			// runtimes omit it, so the post-tool text above remains the fallback.
+			if result := event.Data["result"]; strings.TrimSpace(result) != "" {
+				resetFinalReply(result)
+			}
 		case "question_ready":
 			options, err := parseQuestionOptions(event.Data["options"])
 			if err != nil {
@@ -1234,15 +1230,13 @@ func (r *connectorRunner) consumeAgentStream(
 			pendingOptions = options
 		case "error":
 			sawError = true
+		case "done":
+			if externalRunFailed(event.Data["status"]) {
+				sawError = true
+			}
 		}
 		return nil
 	})
-	if stream != nil {
-		closeErr := stream.Close(runCtx)
-		if callErr == nil {
-			callErr = closeErr
-		}
-	}
 	if callErr != nil {
 		r.activeMu.Lock()
 		stopped := active.stopped
@@ -1286,16 +1280,19 @@ func (r *connectorRunner) consumeAgentStream(
 		); err != nil {
 			return retryResult("send_failed", err)
 		}
+		return inboxResult{Status: InboxDone}
 	}
-	if stream == nil && !sawError {
-		if err := r.channel.SendMarkdown(
-			runCtx,
-			item.ExternalChatID,
-			item.ExternalMessageID,
-			"任务已完成。",
-		); err != nil {
-			return retryResult("send_failed", err)
-		}
+	reply := strings.TrimSpace(finalReply.String())
+	if reply == "" {
+		reply = "任务已完成。"
+	}
+	if err := r.channel.SendMarkdown(
+		runCtx,
+		item.ExternalChatID,
+		item.ExternalMessageID,
+		reply,
+	); err != nil {
+		return retryResult("send_failed", err)
 	}
 	return inboxResult{Status: InboxDone}
 }
@@ -1376,6 +1373,10 @@ func parseChatSnapshot(raw string) (chatSnapshot, error) {
 		switch part.Type {
 		case convo.PartText:
 			text.WriteString(part.Text)
+		case convo.PartToolCall:
+			// A restored snapshot may include assistant narration before a tool
+			// call. Only the text after the final tool is an external reply.
+			text.Reset()
 		case convo.PartQuestion:
 			if part.Status != "pending" {
 				continue
@@ -1393,6 +1394,15 @@ func parseChatSnapshot(raw string) (chatSnapshot, error) {
 	}
 	snapshot.Text = text.String()
 	return snapshot, nil
+}
+
+func externalRunFailed(status string) bool {
+	switch strings.TrimSpace(status) {
+	case "error", "cancelled", "interrupted":
+		return true
+	default:
+		return false
+	}
 }
 
 func chatNotFound(err error) bool {

@@ -69,6 +69,7 @@ type managerTestChannel struct {
 	deleteReactionErr error
 	addReactionCalls  int
 	deleteCalls       int
+	streamCalls       int
 }
 
 type managerTestStream struct {
@@ -116,6 +117,7 @@ func (c *managerTestChannel) StreamMarkdown(
 	text string,
 ) (MessageStream, error) {
 	c.mu.Lock()
+	c.streamCalls++
 	c.messages = append(c.messages, text)
 	c.mu.Unlock()
 	return &managerTestStream{channel: c}, nil
@@ -134,6 +136,12 @@ func (c *managerTestChannel) sentMessages() []string {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	return append([]string(nil), c.messages...)
+}
+
+func (c *managerTestChannel) streamCallCount() int {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.streamCalls
 }
 
 func (c *managerTestChannel) reactionCounts() (int, int) {
@@ -279,10 +287,11 @@ func TestConsumeAgentStreamRestoresSnapshotText(t *testing.T) {
 		channel: channel,
 		ctx:     context.Background(),
 	}
-	parts, err := json.Marshal([]map[string]string{{
-		"type": "text",
-		"text": "already generated",
-	}})
+	parts, err := json.Marshal([]map[string]string{
+		{"type": "text", "text": "I will inspect the workspace."},
+		{"type": "tool-call", "toolCallId": "tool-1"},
+		{"type": "text", "text": "already generated"},
+	})
 	if err != nil {
 		t.Fatalf("marshal snapshot: %v", err)
 	}
@@ -314,6 +323,157 @@ func TestConsumeAgentStreamRestoresSnapshotText(t *testing.T) {
 	}
 	if strings.Contains(messages, "任务已完成") {
 		t.Fatalf("snapshot replay fell back to generic completion: %q", messages)
+	}
+	if strings.Contains(messages, "I will inspect") {
+		t.Fatalf("snapshot replay exposed execution narration: %q", messages)
+	}
+	if got := channel.streamCallCount(); got != 0 {
+		t.Fatalf("StreamMarkdown calls = %d, want 0", got)
+	}
+}
+
+func TestConsumeAgentStreamSendsOnlyTerminalResult(t *testing.T) {
+	channel := &managerTestChannel{}
+	runner := &connectorRunner{
+		manager:   &Manager{store: &managerTestStore{}},
+		connector: Connector{ID: "connector-1"},
+		channel:   channel,
+		ctx:       context.Background(),
+	}
+	session := Session{
+		ConnectorID:    "connector-1",
+		ExternalChatID: "chat-1",
+		ConversationID: "conversation-1",
+	}
+	result := runner.consumeAgentStream(
+		InboxItem{
+			ExternalChatID:    "chat-1",
+			ExternalMessageID: "message-1",
+		},
+		"runtime-token",
+		&session,
+		func(_ context.Context, _ func(string), onEvent func(ChatEvent) error) error {
+			events := []ChatEvent{
+				{Kind: "thinking", Data: map[string]string{"thinking": "private reasoning"}},
+				{Kind: "text", Data: map[string]string{"text": "I will inspect the workspace."}},
+				{Kind: "tool_use", Data: map[string]string{"name": "bash"}},
+				{Kind: "tool_result", Data: map[string]string{"content": "internal output"}},
+				{Kind: "text", Data: map[string]string{"text": "streamed final draft"}},
+				{Kind: "result", Data: map[string]string{"result": "Final answer"}},
+				{Kind: "done", Data: map[string]string{"status": "success"}},
+			}
+			for _, event := range events {
+				if err := onEvent(event); err != nil {
+					return err
+				}
+			}
+			return nil
+		},
+	)
+	if result.Status != InboxDone {
+		t.Fatalf("result = %+v, want done", result)
+	}
+	messages := channel.sentMessages()
+	if len(messages) != 1 || messages[0] != "Final answer" {
+		t.Fatalf("sent messages = %#v, want only the terminal result", messages)
+	}
+	if got := channel.streamCallCount(); got != 0 {
+		t.Fatalf("StreamMarkdown calls = %d, want 0", got)
+	}
+}
+
+func TestConsumeAgentStreamFallsBackToTextAfterLastTool(t *testing.T) {
+	channel := &managerTestChannel{}
+	runner := &connectorRunner{
+		manager:   &Manager{store: &managerTestStore{}},
+		connector: Connector{ID: "connector-1"},
+		channel:   channel,
+		ctx:       context.Background(),
+	}
+	session := Session{
+		ConnectorID:    "connector-1",
+		ExternalChatID: "chat-1",
+		ConversationID: "conversation-1",
+	}
+	result := runner.consumeAgentStream(
+		InboxItem{
+			ExternalChatID:    "chat-1",
+			ExternalMessageID: "message-1",
+		},
+		"runtime-token",
+		&session,
+		func(_ context.Context, _ func(string), onEvent func(ChatEvent) error) error {
+			events := []ChatEvent{
+				{Kind: "text", Data: map[string]string{"text": "Let me check."}},
+				{Kind: "tool_use", Data: map[string]string{"name": "bash"}},
+				{Kind: "tool_result", Data: map[string]string{"content": "internal output"}},
+				{Kind: "text", Data: map[string]string{"text": "Final answer without result data"}},
+				{Kind: "result", Data: map[string]string{}},
+				{Kind: "done", Data: map[string]string{"status": "success"}},
+			}
+			for _, event := range events {
+				if err := onEvent(event); err != nil {
+					return err
+				}
+			}
+			return nil
+		},
+	)
+	if result.Status != InboxDone {
+		t.Fatalf("result = %+v, want done", result)
+	}
+	messages := channel.sentMessages()
+	if len(messages) != 1 || messages[0] != "Final answer without result data" {
+		t.Fatalf("sent messages = %#v, want only post-tool text", messages)
+	}
+}
+
+func TestConsumeAgentStreamDoesNotExposeFailedSnapshot(t *testing.T) {
+	channel := &managerTestChannel{}
+	runner := &connectorRunner{
+		manager:   &Manager{store: &managerTestStore{}},
+		connector: Connector{ID: "connector-1"},
+		channel:   channel,
+		ctx:       context.Background(),
+	}
+	parts, err := json.Marshal([]map[string]string{{
+		"type": "text",
+		"text": "internal database error details",
+	}})
+	if err != nil {
+		t.Fatalf("marshal snapshot: %v", err)
+	}
+	session := Session{
+		ConnectorID:    "connector-1",
+		ExternalChatID: "chat-1",
+		ConversationID: "conversation-1",
+	}
+	result := runner.consumeAgentStream(
+		InboxItem{
+			ExternalChatID:    "chat-1",
+			ExternalMessageID: "message-1",
+		},
+		"runtime-token",
+		&session,
+		func(_ context.Context, _ func(string), onEvent func(ChatEvent) error) error {
+			if err := onEvent(ChatEvent{
+				Kind: "snapshot",
+				Data: map[string]string{"parts": string(parts), "status": "error"},
+			}); err != nil {
+				return err
+			}
+			return onEvent(ChatEvent{
+				Kind: "done",
+				Data: map[string]string{"status": "error"},
+			})
+		},
+	)
+	if result.Status != InboxDone {
+		t.Fatalf("result = %+v, want done", result)
+	}
+	messages := channel.sentMessages()
+	if len(messages) != 1 || messages[0] != "Agent 未能完成本次请求，请稍后重试。" {
+		t.Fatalf("sent messages = %#v, want only the public failure message", messages)
 	}
 }
 
