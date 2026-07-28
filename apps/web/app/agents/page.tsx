@@ -9,7 +9,7 @@ import { AgentAvatar } from "@/components/agents/agent-avatar";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { ModelIcon } from "@/components/ui/model-icon";
-import { SelectControl } from "@/components/ui/select-control";
+import { ModelSelectControl } from "@/components/ui/model-select-control";
 import {
   DEFAULT_AGENT_AVATAR_COLOR,
   DEFAULT_AGENT_AVATAR_KEY,
@@ -325,14 +325,11 @@ export default function AgentsPage() {
                 </div>
                 <div className="space-y-1.5">
                   <Label htmlFor="agent-model">Model</Label>
-                  <SelectControl
+                  <ModelSelectControl
                     id="agent-model"
                     value={modelID}
                     onValueChange={setModelID}
-                    options={models.map((model) => ({
-                      value: model.id,
-                      label: `${model.label}${model.provider ? ` · ${model.provider}` : ""}`,
-                    }))}
+                    models={models}
                     className="h-9 shadow-none focus-visible:border-foreground/30 focus-visible:ring-blue-500/20"
                     contentClassName="cocola-user-ui"
                   />

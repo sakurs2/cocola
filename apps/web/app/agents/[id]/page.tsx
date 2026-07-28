@@ -11,7 +11,7 @@ import { FeishuConnectorCard } from "@/components/connectors/feishu-connector-ca
 import { ActionConfirmDialog } from "@/components/ui/action-dialog";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { SelectControl } from "@/components/ui/select-control";
+import { ModelSelectControl } from "@/components/ui/model-select-control";
 import {
   AGENT_AVATAR_COLORS,
   AGENT_AVATAR_KEYS,
@@ -423,19 +423,12 @@ export default function AgentPage() {
             </p>
             <div className="mt-4 space-y-1.5">
               <Label htmlFor="agent-model">Fixed model</Label>
-              <SelectControl
+              <ModelSelectControl
                 id="agent-model"
                 value={modelID}
                 onValueChange={setModelID}
-                options={[
-                  ...(!models.some((model) => model.id === modelID)
-                    ? [{ value: modelID, label: `${agent.model_alias} · unavailable` }]
-                    : []),
-                  ...models.map((model) => ({
-                    value: model.id,
-                    label: `${model.label}${model.provider ? ` · ${model.provider}` : ""}`,
-                  })),
-                ]}
+                models={models}
+                fallback={{ id: modelID, label: agent.model_alias, suffix: "unavailable" }}
                 className="h-9 shadow-none focus-visible:border-foreground/30 focus-visible:ring-blue-500/20"
                 contentClassName="cocola-user-ui"
               />
