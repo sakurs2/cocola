@@ -43,7 +43,6 @@ type AuthUser = {
   username: string;
   email: string;
   name?: string;
-  tenant_id?: string;
   role: Role;
   enabled: boolean;
   created_by?: string;
@@ -60,7 +59,6 @@ type DrawerMode = "create" | "edit";
 type UserForm = {
   username: string;
   email: string;
-  tenant: string;
   role: Role;
   autoPassword: boolean;
   password: string;
@@ -69,13 +67,10 @@ type UserForm = {
 const EMPTY_FORM: UserForm = {
   username: "",
   email: "",
-  tenant: "",
   role: "user",
   autoPassword: true,
   password: "",
 };
-
-const NEW_TEAM = "__new__";
 
 export default function AdminUsersPage() {
   const { data: session } = useSession();
@@ -97,7 +92,6 @@ export default function AdminUsersPage() {
   const [drawerMode, setDrawerMode] = useState<DrawerMode>("create");
   const [editTarget, setEditTarget] = useState<AuthUser | null>(null);
   const [form, setForm] = useState<UserForm>(EMPTY_FORM);
-  const [teamChoice, setTeamChoice] = useState<string>("");
   const [saving, setSaving] = useState(false);
 
   // Reset-password drawer
@@ -138,15 +132,6 @@ export default function AdminUsersPage() {
     [users],
   );
 
-  const teams = useMemo(() => {
-    const set = new Set<string>();
-    for (const u of users) {
-      const t = (u.tenant_id ?? "").trim();
-      if (t) set.add(t);
-    }
-    return Array.from(set).sort((a, b) => a.localeCompare(b));
-  }, [users]);
-
   const filtered = useMemo(() => {
     const q = query.trim().toLowerCase();
     return users.filter((u) => {
@@ -154,11 +139,7 @@ export default function AdminUsersPage() {
       if (statusFilter === "enabled" && !u.enabled) return false;
       if (statusFilter === "disabled" && u.enabled) return false;
       if (!q) return true;
-      return (
-        u.username.toLowerCase().includes(q) ||
-        u.email.toLowerCase().includes(q) ||
-        (u.tenant_id ?? "").toLowerCase().includes(q)
-      );
+      return u.username.toLowerCase().includes(q) || u.email.toLowerCase().includes(q);
     });
   }, [users, query, roleFilter, statusFilter]);
 
@@ -168,7 +149,6 @@ export default function AdminUsersPage() {
     setDrawerMode("create");
     setEditTarget(null);
     setForm(EMPTY_FORM);
-    setTeamChoice("");
     setError("");
     setDrawerOpen(true);
   };
@@ -179,12 +159,10 @@ export default function AdminUsersPage() {
     setForm({
       username: user.username,
       email: user.email,
-      tenant: user.tenant_id ?? "",
       role: user.role,
       autoPassword: true,
       password: "",
     });
-    setTeamChoice(user.tenant_id ? user.tenant_id : "");
     setError("");
     setDrawerOpen(true);
   };
@@ -199,7 +177,6 @@ export default function AdminUsersPage() {
     setNotice("");
     setSaving(true);
     try {
-      const tenant = form.tenant.trim();
       if (drawerMode === "create") {
         const password = form.autoPassword ? generatePassword() : form.password;
         if (!password) {
@@ -213,7 +190,6 @@ export default function AdminUsersPage() {
           body: JSON.stringify({
             username: form.username.trim(),
             email: form.email.trim(),
-            tenant_id: tenant,
             role: form.role,
             password,
             enabled: true,
@@ -232,7 +208,6 @@ export default function AdminUsersPage() {
           body: JSON.stringify({
             username: form.username.trim(),
             email: form.email.trim(),
-            tenant_id: tenant,
             role: form.role,
           }),
         });
@@ -387,7 +362,7 @@ export default function AdminUsersPage() {
             <input
               value={query}
               onChange={(e) => setQuery(e.target.value)}
-              placeholder="Search username, email, or team"
+              placeholder="Search username or email"
               className="h-10 w-full rounded-md border border-input bg-background pl-9 pr-3 text-sm outline-none focus:border-ring"
             />
           </div>
@@ -420,12 +395,11 @@ export default function AdminUsersPage() {
         </AdminToolbar>
 
         <AdminTable>
-          <table className="w-full min-w-[720px] text-sm">
+          <table className="w-full min-w-[640px] text-sm">
             <thead className="border-b border-border bg-muted/50 text-xs text-muted-foreground">
               <tr>
                 <th className="px-4 py-3 text-left font-medium">User</th>
                 <th className="px-4 py-3 text-left font-medium">Role</th>
-                <th className="px-4 py-3 text-left font-medium">Team</th>
                 <th className="px-4 py-3 text-left font-medium">Status</th>
                 <th className="px-4 py-3 text-left font-medium">Last login</th>
                 <th className="px-4 py-3 text-right font-medium">Actions</th>
@@ -434,13 +408,13 @@ export default function AdminUsersPage() {
             <tbody>
               {loading && users.length === 0 ? (
                 <tr>
-                  <td colSpan={6} className="px-4 py-10 text-center text-muted-foreground">
+                  <td colSpan={5} className="px-4 py-10 text-center text-muted-foreground">
                     Loading users...
                   </td>
                 </tr>
               ) : filtered.length === 0 ? (
                 <tr>
-                  <td colSpan={6} className="px-4 py-10 text-center text-muted-foreground">
+                  <td colSpan={5} className="px-4 py-10 text-center text-muted-foreground">
                     {users.length === 0 ? "No users found" : "No users match your filters"}
                   </td>
                 </tr>
@@ -462,13 +436,6 @@ export default function AdminUsersPage() {
                       </td>
                       <td className="px-4 py-3">
                         <RolePill role={user.role} />
-                      </td>
-                      <td className="px-4 py-3">
-                        {user.tenant_id ? (
-                          <span className="text-sm">{user.tenant_id}</span>
-                        ) : (
-                          <span className="text-muted-foreground">—</span>
-                        )}
                       </td>
                       <td className="px-4 py-3">
                         <StatusPill enabled={user.enabled} />
@@ -585,35 +552,6 @@ export default function AdminUsersPage() {
             value={form.email}
             onChange={(email) => setForm((p) => ({ ...p, email }))}
           />
-
-          <label className="grid gap-1 text-xs text-muted-foreground">
-            Team
-            <SelectControl
-              value={teamChoice === "" && form.tenant ? form.tenant : teamChoice}
-              onValueChange={(value) => {
-                setTeamChoice(value);
-                if (value === NEW_TEAM) {
-                  setForm((p) => ({ ...p, tenant: "" }));
-                } else {
-                  setForm((p) => ({ ...p, tenant: value }));
-                }
-              }}
-              className="h-10 rounded-md border border-input bg-background px-3 text-sm text-foreground outline-none focus:border-ring"
-              options={[
-                { value: "", label: "No team" },
-                ...teams.map((team) => ({ value: team, label: team })),
-                { value: NEW_TEAM, label: "+ New team…" },
-              ]}
-              contentClassName="cocola-admin-ui"
-            />
-          </label>
-          {teamChoice === NEW_TEAM ? (
-            <FieldInput
-              label="New team name"
-              value={form.tenant}
-              onChange={(tenant) => setForm((p) => ({ ...p, tenant }))}
-            />
-          ) : null}
 
           <label className="grid gap-1 text-xs text-muted-foreground">
             Role
