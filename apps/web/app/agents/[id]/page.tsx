@@ -23,7 +23,6 @@ import {
   type AgentModelOption,
   type AgentProfile,
   type AgentSkillCatalogItem,
-  type AgentSuggestedPrompt,
 } from "@/lib/agents";
 import { cn } from "@/lib/utils";
 
@@ -56,7 +55,6 @@ export default function AgentPage() {
   const [modelID, setModelID] = useState("");
   const [skillIDs, setSkillIDs] = useState<string[]>([]);
   const [knowledgeSources, setKnowledgeSources] = useState<AgentKnowledgeSource[]>([]);
-  const [suggestedPrompts, setSuggestedPrompts] = useState<AgentSuggestedPrompt[]>([]);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [archiveOpen, setArchiveOpen] = useState(false);
@@ -108,7 +106,6 @@ export default function AgentPage() {
           setSkillCatalog(loadedSkillCatalog);
           setSkillIDs(loaded.skill_ids ?? []);
           setKnowledgeSources(loaded.knowledge_sources ?? []);
-          setSuggestedPrompts(loaded.suggested_prompts ?? []);
         }
       } catch (cause) {
         if (!controller.signal.aborted) {
@@ -132,9 +129,6 @@ export default function AgentPage() {
     [instructions],
   );
   const instructionsTooLarge = instructionsBytes > MAX_INSTRUCTIONS_BYTES;
-  const suggestedPromptsValid = suggestedPrompts.every(
-    (suggestion) => suggestion.title.trim() && suggestion.prompt.trim(),
-  );
   const dirty = useMemo(() => {
     if (!agent) return false;
     return (
@@ -145,8 +139,7 @@ export default function AgentPage() {
       avatarColor !== agent.avatar_color ||
       modelID !== agent.model_route_id ||
       JSON.stringify(skillIDs) !== JSON.stringify(agent.skill_ids ?? []) ||
-      JSON.stringify(knowledgeSources) !== JSON.stringify(agent.knowledge_sources ?? []) ||
-      JSON.stringify(suggestedPrompts) !== JSON.stringify(agent.suggested_prompts ?? [])
+      JSON.stringify(knowledgeSources) !== JSON.stringify(agent.knowledge_sources ?? [])
     );
   }, [
     agent,
@@ -158,12 +151,10 @@ export default function AgentPage() {
     modelID,
     name,
     skillIDs,
-    suggestedPrompts,
   ]);
 
   const save = async () => {
-    if (!agent || !name.trim() || !selectedModel || instructionsTooLarge || !suggestedPromptsValid)
-      return;
+    if (!agent || !name.trim() || !selectedModel || instructionsTooLarge) return;
     setSaving(true);
     setError("");
     try {
@@ -181,10 +172,6 @@ export default function AgentPage() {
           model_alias: selectedModel.alias,
           skill_ids: skillIDs,
           knowledge_sources: knowledgeSources,
-          suggested_prompts: suggestedPrompts.map((suggestion) => ({
-            title: suggestion.title.trim(),
-            prompt: suggestion.prompt.trim(),
-          })),
           version: agent.version,
         }),
       });
@@ -199,7 +186,6 @@ export default function AgentPage() {
       setModelID(updated.model_route_id);
       setSkillIDs(updated.skill_ids);
       setKnowledgeSources(updated.knowledge_sources);
-      setSuggestedPrompts(updated.suggested_prompts);
       showSuccess("Agent saved");
     } catch (cause) {
       const message = cause instanceof Error ? cause.message : "Could not save Agent";
@@ -310,7 +296,6 @@ export default function AgentPage() {
                 !name.trim() ||
                 !selectedModel ||
                 instructionsTooLarge ||
-                !suggestedPromptsValid ||
                 models.length === 0
               }
               className="inline-flex h-9 items-center gap-2 rounded-xl bg-blue-600 px-4 text-sm font-semibold text-white hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-50"
@@ -463,8 +448,6 @@ export default function AgentPage() {
             onSkillIDsChange={setSkillIDs}
             knowledgeSources={knowledgeSources}
             onKnowledgeSourcesChange={setKnowledgeSources}
-            suggestedPrompts={suggestedPrompts}
-            onSuggestedPromptsChange={setSuggestedPrompts}
           />
 
           <FeishuConnectorCard agentId={agent.id} />

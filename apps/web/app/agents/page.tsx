@@ -136,7 +136,6 @@ export default function AgentsPage() {
           model_alias: selectedModel.alias,
           skill_ids: [],
           knowledge_sources: [],
-          suggested_prompts: [],
         }),
       });
       if (!response.ok) throw new Error(await agentResponseError(response));

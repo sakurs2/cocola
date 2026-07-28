@@ -90,9 +90,6 @@ func TestServiceValidationAndNameConflict(t *testing.T) {
 		{Name: "A", RuntimeID: "claude-code", ModelRouteID: "a", ModelAlias: "a", KnowledgeSources: []KnowledgeSource{{
 			Type: KnowledgeTypeFeishuDoc, Label: "Unsafe", URL: "https://example.com/docx/token",
 		}}},
-		{Name: "A", RuntimeID: "claude-code", ModelRouteID: "a", ModelAlias: "a", SuggestedPrompts: []SuggestedPrompt{{
-			Title: "", Prompt: "Analyze this",
-		}}},
 	}
 	for index, input := range invalid {
 		if _, err := service.Create(context.Background(), id, input); !errors.Is(err, ErrInvalidArgument) {
@@ -111,9 +108,6 @@ func TestAgentConfigSnapshotIsNormalizedAndImmutable(t *testing.T) {
 			Label: " Plan ",
 			URL:   "https://docs.feishu.cn/docx/Abc_123?ignored=true#section",
 		}},
-		SuggestedPrompts: []SuggestedPrompt{{
-			Title: " Summarize ", Prompt: " Summarize the plan. ",
-		}},
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -121,16 +115,13 @@ func TestAgentConfigSnapshotIsNormalizedAndImmutable(t *testing.T) {
 	snapshot := value.Snapshot()
 	if snapshot.SkillIDs[0] != "catalog-skill" ||
 		snapshot.KnowledgeSources[0].Type != KnowledgeTypeFeishuDoc ||
-		snapshot.KnowledgeSources[0].URL != "https://docs.feishu.cn/docx/Abc_123" ||
-		snapshot.SuggestedPrompts[0].Title != "Summarize" {
+		snapshot.KnowledgeSources[0].URL != "https://docs.feishu.cn/docx/Abc_123" {
 		t.Fatalf("normalized snapshot = %+v", snapshot)
 	}
 	value.SkillIDs[0] = "changed"
 	value.KnowledgeSources[0].Label = "Changed"
-	value.SuggestedPrompts[0].Prompt = "Changed"
 	if snapshot.SkillIDs[0] != "catalog-skill" ||
-		snapshot.KnowledgeSources[0].Label != "Plan" ||
-		snapshot.SuggestedPrompts[0].Prompt != "Summarize the plan." {
+		snapshot.KnowledgeSources[0].Label != "Plan" {
 		t.Fatalf("snapshot was mutated through Agent slices: %+v", snapshot)
 	}
 }

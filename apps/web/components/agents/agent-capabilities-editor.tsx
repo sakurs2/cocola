@@ -16,11 +16,7 @@ import { Badge } from "@/components/ui/badge";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { SkillIcon } from "@/components/ui/skill-icon";
-import type {
-  AgentKnowledgeSource,
-  AgentSkillCatalogItem,
-  AgentSuggestedPrompt,
-} from "@/lib/agents";
+import type { AgentKnowledgeSource, AgentSkillCatalogItem } from "@/lib/agents";
 import { agentKnowledgeSourceKey } from "@/lib/agents";
 import { cn } from "@/lib/utils";
 
@@ -30,8 +26,6 @@ type Props = {
   onSkillIDsChange: (value: string[]) => void;
   knowledgeSources: AgentKnowledgeSource[];
   onKnowledgeSourcesChange: (value: AgentKnowledgeSource[]) => void;
-  suggestedPrompts: AgentSuggestedPrompt[];
-  onSuggestedPromptsChange: (value: AgentSuggestedPrompt[]) => void;
 };
 
 const REQUIRED_KNOWLEDGE_SKILLS: Record<AgentKnowledgeSource["type"], string[]> = {
@@ -62,8 +56,6 @@ export function AgentCapabilitiesEditor({
   onSkillIDsChange,
   knowledgeSources,
   onKnowledgeSourcesChange,
-  suggestedPrompts,
-  onSuggestedPromptsChange,
 }: Props) {
   const [knowledgeURL, setKnowledgeURL] = useState("");
   const [knowledgeLabel, setKnowledgeLabel] = useState("");
@@ -571,73 +563,6 @@ export function AgentCapabilitiesEditor({
             })}
           </div>
         ) : null}
-      </section>
-
-      <section className="rounded-2xl border border-border bg-card p-5 shadow-sm">
-        <h2 className="text-sm font-semibold">Suggested prompts (Optional)</h2>
-        <p className="mt-1 text-sm leading-6 text-muted-foreground">
-          These starters fill the chat input. The user always decides whether to send them.
-        </p>
-        <div className="mt-4 space-y-3">
-          {suggestedPrompts.map((suggestion, index) => (
-            <div key={index} className="rounded-xl border border-border p-3">
-              <div className="flex items-center gap-2">
-                <Label htmlFor={`suggested-title-${index}`} className="sr-only">
-                  Prompt title
-                </Label>
-                <Input
-                  id={`suggested-title-${index}`}
-                  value={suggestion.title}
-                  maxLength={80}
-                  onChange={(event) =>
-                    onSuggestedPromptsChange(
-                      suggestedPrompts.map((item, itemIndex) =>
-                        itemIndex === index ? { ...item, title: event.target.value } : item,
-                      ),
-                    )
-                  }
-                  placeholder="Analyze a report"
-                />
-                <button
-                  type="button"
-                  aria-label="Remove suggested prompt"
-                  onClick={() =>
-                    onSuggestedPromptsChange(
-                      suggestedPrompts.filter((_, itemIndex) => itemIndex !== index),
-                    )
-                  }
-                  className="grid size-9 shrink-0 place-items-center rounded-lg text-muted-foreground hover:bg-muted hover:text-foreground"
-                >
-                  <Trash2 className="size-4" />
-                </button>
-              </div>
-              <textarea
-                value={suggestion.prompt}
-                onChange={(event) =>
-                  onSuggestedPromptsChange(
-                    suggestedPrompts.map((item, itemIndex) =>
-                      itemIndex === index ? { ...item, prompt: event.target.value } : item,
-                    ),
-                  )
-                }
-                maxLength={4096}
-                placeholder="Analyze this report and summarize the most important findings."
-                className="mt-2 min-h-20 w-full resize-y rounded-lg border border-input bg-background px-3 py-2 text-sm outline-none focus:border-foreground/30 focus:ring-2 focus:ring-blue-500/20"
-              />
-            </div>
-          ))}
-          {suggestedPrompts.length < 4 ? (
-            <button
-              type="button"
-              onClick={() =>
-                onSuggestedPromptsChange([...suggestedPrompts, { title: "", prompt: "" }])
-              }
-              className="inline-flex h-9 items-center gap-1.5 rounded-xl border border-border px-3 text-sm font-medium hover:bg-muted"
-            >
-              <Plus className="size-4" /> Add suggested prompt
-            </button>
-          ) : null}
-        </div>
       </section>
     </>
   );

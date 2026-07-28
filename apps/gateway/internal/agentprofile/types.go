@@ -30,9 +30,6 @@ const (
 	MaxKnowledgeSources      = 10
 	MaxKnowledgeLabelChars   = 100
 	MaxKnowledgeURLChars     = 2048
-	MaxSuggestedPrompts      = 4
-	MaxSuggestedTitleChars   = 80
-	MaxSuggestedPromptBytes  = 4 * 1024
 )
 
 type Identity struct {
@@ -55,7 +52,6 @@ type Agent struct {
 	SkillIDs          []string          `json:"skill_ids"`
 	KnowledgeSources  []KnowledgeSource `json:"knowledge_sources"`
 	KnowledgeRevision int64             `json:"knowledge_revision"`
-	SuggestedPrompts  []SuggestedPrompt `json:"suggested_prompts"`
 	Status            string            `json:"status"`
 	Version           int64             `json:"version"`
 	CreatedAt         time.Time         `json:"created_at"`
@@ -68,11 +64,6 @@ type KnowledgeSource struct {
 	Label  string `json:"label"`
 	URL    string `json:"url,omitempty"`
 	NodeID string `json:"node_id,omitempty"`
-}
-
-type SuggestedPrompt struct {
-	Title  string `json:"title"`
-	Prompt string `json:"prompt"`
 }
 
 // Snapshot is copied into a conversation on its first turn. Behavior fields
@@ -93,7 +84,6 @@ type Snapshot struct {
 	SkillIDs          []string          `json:"skill_ids"`
 	KnowledgeSources  []KnowledgeSource `json:"knowledge_sources"`
 	KnowledgeRevision int64             `json:"knowledge_revision"`
-	SuggestedPrompts  []SuggestedPrompt `json:"suggested_prompts"`
 }
 
 func (a Agent) Snapshot() Snapshot {
@@ -104,7 +94,6 @@ func (a Agent) Snapshot() Snapshot {
 		SkillIDs:          append([]string(nil), a.SkillIDs...),
 		KnowledgeSources:  append([]KnowledgeSource(nil), a.KnowledgeSources...),
 		KnowledgeRevision: a.KnowledgeRevision,
-		SuggestedPrompts:  append([]SuggestedPrompt(nil), a.SuggestedPrompts...),
 	}
 }
 
@@ -119,7 +108,6 @@ type CreateInput struct {
 	ModelAlias       string            `json:"model_alias"`
 	SkillIDs         []string          `json:"skill_ids"`
 	KnowledgeSources []KnowledgeSource `json:"knowledge_sources"`
-	SuggestedPrompts []SuggestedPrompt `json:"suggested_prompts"`
 }
 
 type UpdateInput struct {
@@ -133,7 +121,6 @@ type UpdateInput struct {
 	ModelAlias       string            `json:"model_alias"`
 	SkillIDs         []string          `json:"skill_ids"`
 	KnowledgeSources []KnowledgeSource `json:"knowledge_sources"`
-	SuggestedPrompts []SuggestedPrompt `json:"suggested_prompts"`
 	Version          int64             `json:"version"`
 }
 

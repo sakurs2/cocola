@@ -269,16 +269,7 @@ const ThreadWelcome: FC = () => {
   const [promptSlotBindings, setPromptSlotBindings] = useState<
     Record<string, PromptStarterSlotBinding | undefined>
   >({});
-  const visiblePromptStarters = useMemo<PromptStarter[]>(() => {
-    if (!selectedAgent) return PROMPT_STARTERS;
-    if (!("suggested_prompts" in selectedAgent)) return [];
-    return selectedAgent.suggested_prompts.map((suggestion) => ({
-      icon: Sparkles,
-      label: suggestion.title,
-      color: "text-blue-600",
-      prompt: suggestion.prompt,
-    }));
-  }, [selectedAgent]);
+  const visiblePromptStarters = selectedAgent ? [] : PROMPT_STARTERS;
 
   useEffect(() => {
     const h = new Date().getHours();

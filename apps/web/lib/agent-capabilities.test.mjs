@@ -72,9 +72,9 @@ test("Agent Knowledge accepts Lark Office links and keeps feedback inside its se
   assert.doesNotMatch(agentPageSource, /knowledge\/check|checkKnowledgeAccess/);
 });
 
-test("Agent Suggested Prompts replace global starters and only fill the composer", () => {
-  assert.match(threadSource, /if \(!selectedAgent\) return PROMPT_STARTERS/);
-  assert.match(threadSource, /selectedAgent\.suggested_prompts\.map/);
+test("Agent selection hides global starters while global starters only fill the composer", () => {
+  assert.match(threadSource, /visiblePromptStarters = selectedAgent \? \[\] : PROMPT_STARTERS/);
+  assert.doesNotMatch(threadSource, /suggested_prompts/);
   assert.match(threadSource, /composer\.setText\(starter\.prompt\)/);
   assert.doesNotMatch(threadSource, /<ThreadPrimitive\.Suggestion/);
 });

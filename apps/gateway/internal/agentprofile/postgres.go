@@ -31,17 +31,17 @@ func (p *Postgres) Close() { p.pool.Close() }
 
 const columns = `id::text, tenant_id, owner_user_id, name, description, instructions,
 	avatar_key, avatar_color, runtime_id, model_route_id, model_alias,
-	skill_ids, knowledge_sources, knowledge_revision, suggested_prompts, status,
+	skill_ids, knowledge_sources, knowledge_revision, status,
 	version, created_at, updated_at, archived_at`
 
 func scanAgent(row pgx.Row) (Agent, error) {
 	var value Agent
-	var skillIDsJSON, knowledgeJSON, promptsJSON []byte
+	var skillIDsJSON, knowledgeJSON []byte
 	err := row.Scan(
 		&value.ID, &value.TenantID, &value.OwnerUserID, &value.Name,
 		&value.Description, &value.Instructions, &value.AvatarKey, &value.AvatarColor,
 		&value.RuntimeID, &value.ModelRouteID, &value.ModelAlias,
-		&skillIDsJSON, &knowledgeJSON, &value.KnowledgeRevision, &promptsJSON, &value.Status,
+		&skillIDsJSON, &knowledgeJSON, &value.KnowledgeRevision, &value.Status,
 		&value.Version, &value.CreatedAt, &value.UpdatedAt, &value.ArchivedAt,
 	)
 	if errors.Is(err, pgx.ErrNoRows) {
@@ -54,9 +54,6 @@ func scanAgent(row pgx.Row) (Agent, error) {
 		return Agent{}, err
 	}
 	if err := json.Unmarshal(knowledgeJSON, &value.KnowledgeSources); err != nil {
-		return Agent{}, err
-	}
-	if err := json.Unmarshal(promptsJSON, &value.SuggestedPrompts); err != nil {
 		return Agent{}, err
 	}
 	return value, nil
@@ -88,21 +85,21 @@ func (p *Postgres) Get(ctx context.Context, id Identity, agentID string) (Agent,
 }
 
 func (p *Postgres) Create(ctx context.Context, value Agent) (Agent, error) {
-	skillIDsJSON, knowledgeJSON, promptsJSON, err := marshalAgentConfig(value)
+	skillIDsJSON, knowledgeJSON, err := marshalAgentConfig(value)
 	if err != nil {
 		return Agent{}, err
 	}
 	const query = `INSERT INTO agents (
 		id, tenant_id, owner_user_id, name, description, instructions, avatar_key,
 		avatar_color, runtime_id, model_route_id, model_alias, skill_ids,
-		knowledge_sources, knowledge_revision, suggested_prompts, status, version,
+		knowledge_sources, knowledge_revision, status, version,
 		created_at, updated_at
-	) VALUES ($1::uuid,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,1,$14,'active',1,$15,$16)
+	) VALUES ($1::uuid,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,1,'active',1,$14,$15)
 	RETURNING ` + columns
 	result, err := scanAgent(p.pool.QueryRow(ctx, query,
 		value.ID, value.TenantID, value.OwnerUserID, value.Name, value.Description,
 		value.Instructions, value.AvatarKey, value.AvatarColor, value.RuntimeID,
-		value.ModelRouteID, value.ModelAlias, skillIDsJSON, knowledgeJSON, promptsJSON,
+		value.ModelRouteID, value.ModelAlias, skillIDsJSON, knowledgeJSON,
 		value.CreatedAt, value.UpdatedAt,
 	))
 	if postgresCode(err, "23505") {
@@ -117,7 +114,7 @@ func (p *Postgres) Update(
 	value Agent,
 	expected int64,
 ) (Agent, error) {
-	skillIDsJSON, knowledgeJSON, promptsJSON, err := marshalAgentConfig(value)
+	skillIDsJSON, knowledgeJSON, err := marshalAgentConfig(value)
 	if err != nil {
 		return Agent{}, err
 	}
@@ -126,15 +123,15 @@ func (p *Postgres) Update(
 		runtime_id=$10, model_route_id=$11, model_alias=$12, skill_ids=$13,
 		knowledge_revision=knowledge_revision+
 			CASE WHEN knowledge_sources IS DISTINCT FROM $14::jsonb THEN 1 ELSE 0 END,
-		knowledge_sources=$14, suggested_prompts=$15,
-		version=version+1, updated_at=$16
+		knowledge_sources=$14,
+		version=version+1, updated_at=$15
 	WHERE id=$1::uuid AND tenant_id=$2 AND owner_user_id=$3
 		AND version=$4 AND status='active'
 	RETURNING ` + columns
 	result, err := scanAgent(p.pool.QueryRow(ctx, query,
 		value.ID, id.TenantID, id.UserID, expected, value.Name, value.Description,
 		value.Instructions, value.AvatarKey, value.AvatarColor, value.RuntimeID,
-		value.ModelRouteID, value.ModelAlias, skillIDsJSON, knowledgeJSON, promptsJSON,
+		value.ModelRouteID, value.ModelAlias, skillIDsJSON, knowledgeJSON,
 		value.UpdatedAt,
 	))
 	if postgresCode(err, "23505") {
@@ -156,20 +153,16 @@ func (p *Postgres) Update(
 	return result, err
 }
 
-func marshalAgentConfig(value Agent) ([]byte, []byte, []byte, error) {
+func marshalAgentConfig(value Agent) ([]byte, []byte, error) {
 	skillIDsJSON, err := json.Marshal(nonNilStrings(value.SkillIDs))
 	if err != nil {
-		return nil, nil, nil, err
+		return nil, nil, err
 	}
 	knowledgeJSON, err := json.Marshal(nonNilKnowledge(value.KnowledgeSources))
 	if err != nil {
-		return nil, nil, nil, err
+		return nil, nil, err
 	}
-	promptsJSON, err := json.Marshal(nonNilPrompts(value.SuggestedPrompts))
-	if err != nil {
-		return nil, nil, nil, err
-	}
-	return skillIDsJSON, knowledgeJSON, promptsJSON, nil
+	return skillIDsJSON, knowledgeJSON, nil
 }
 
 func nonNilStrings(values []string) []string {
@@ -182,13 +175,6 @@ func nonNilStrings(values []string) []string {
 func nonNilKnowledge(values []KnowledgeSource) []KnowledgeSource {
 	if values == nil {
 		return []KnowledgeSource{}
-	}
-	return values
-}
-
-func nonNilPrompts(values []SuggestedPrompt) []SuggestedPrompt {
-	if values == nil {
-		return []SuggestedPrompt{}
 	}
 	return values
 }

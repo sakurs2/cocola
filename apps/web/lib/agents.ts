@@ -16,11 +16,6 @@ export type AgentKnowledgeSource =
       url?: never;
     };
 
-export type AgentSuggestedPrompt = {
-  title: string;
-  prompt: string;
-};
-
 export type AgentSkillCatalogItem = {
   id: string;
   runtime_id: string;
@@ -45,7 +40,6 @@ export type AgentProfile = {
   skill_ids: string[];
   knowledge_sources: AgentKnowledgeSource[];
   knowledge_revision: number;
-  suggested_prompts: AgentSuggestedPrompt[];
   status: AgentStatus;
   version: number;
   created_at: string;

@@ -58,6 +58,9 @@ func TestAgentHTTPLifecycleAndVersionConflict(t *testing.T) {
 	if created.ID == "" || created.Version != 1 {
 		t.Fatalf("created Agent = %+v", created)
 	}
+	if bytes.Contains(response.Body.Bytes(), []byte("suggested_prompts")) {
+		t.Fatalf("create response still exposes removed Suggested Prompts: %s", response.Body.String())
+	}
 
 	response = agentRequest(t, handler, http.MethodGet, "/v1/agents", nil)
 	if response.Code != http.StatusOK {
@@ -104,6 +107,19 @@ func TestAgentHTTPLifecycleAndVersionConflict(t *testing.T) {
 	response = agentRequest(t, handler, http.MethodGet, "/v1/agents", nil)
 	if response.Code != http.StatusOK || response.Body.String() != "[]\n" {
 		t.Fatalf("list after archive status=%d body=%s", response.Code, response.Body.String())
+	}
+}
+
+func TestAgentHTTPRejectsRemovedSuggestedPrompts(t *testing.T) {
+	response := agentRequest(t, newAgentHandler(), http.MethodPost, "/v1/agents", map[string]any{
+		"name": "Analyst", "runtime_id": "claude-code",
+		"model_route_id": "route-1", "model_alias": "sonnet",
+		"suggested_prompts": []map[string]string{{
+			"title": "Analyze", "prompt": "Analyze this report.",
+		}},
+	})
+	if response.Code != http.StatusBadRequest {
+		t.Fatalf("create with removed field status=%d body=%s", response.Code, response.Body.String())
 	}
 }
 

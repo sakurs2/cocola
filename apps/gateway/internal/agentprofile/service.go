@@ -61,7 +61,7 @@ func (s *Service) Create(ctx context.Context, id Identity, input CreateInput) (A
 	if !validInput(
 		input.Name, input.Description, input.Instructions, input.AvatarKey,
 		input.AvatarColor, input.RuntimeID, input.ModelRouteID, input.ModelAlias,
-	) || !validAgentConfig(input.SkillIDs, input.KnowledgeSources, input.SuggestedPrompts) {
+	) || !validAgentConfig(input.SkillIDs, input.KnowledgeSources) {
 		return Agent{}, ErrInvalidArgument
 	}
 	now := s.now()
@@ -71,7 +71,6 @@ func (s *Service) Create(ctx context.Context, id Identity, input CreateInput) (A
 		AvatarKey: input.AvatarKey, AvatarColor: input.AvatarColor,
 		RuntimeID: input.RuntimeID, ModelRouteID: input.ModelRouteID, ModelAlias: input.ModelAlias,
 		SkillIDs: input.SkillIDs, KnowledgeSources: input.KnowledgeSources,
-		SuggestedPrompts:  input.SuggestedPrompts,
 		KnowledgeRevision: 1,
 		Status:            StatusActive, Version: 1, CreatedAt: now, UpdatedAt: now,
 	})
@@ -90,7 +89,7 @@ func (s *Service) Update(
 	if !validInput(
 		input.Name, input.Description, input.Instructions, input.AvatarKey,
 		input.AvatarColor, input.RuntimeID, input.ModelRouteID, input.ModelAlias,
-	) || !validAgentConfig(input.SkillIDs, input.KnowledgeSources, input.SuggestedPrompts) {
+	) || !validAgentConfig(input.SkillIDs, input.KnowledgeSources) {
 		return Agent{}, ErrInvalidArgument
 	}
 	return s.store.Update(ctx, id, Agent{
@@ -99,8 +98,7 @@ func (s *Service) Update(
 		AvatarColor: input.AvatarColor, RuntimeID: input.RuntimeID,
 		ModelRouteID: input.ModelRouteID, ModelAlias: input.ModelAlias,
 		SkillIDs: input.SkillIDs, KnowledgeSources: input.KnowledgeSources,
-		SuggestedPrompts: input.SuggestedPrompts,
-		UpdatedAt:        s.now(),
+		UpdatedAt: s.now(),
 	}, input.Version)
 }
 
@@ -126,7 +124,6 @@ func normalizeCreate(input CreateInput) CreateInput {
 	input.ModelAlias = strings.TrimSpace(input.ModelAlias)
 	input.SkillIDs = normalizeSkillIDs(input.SkillIDs)
 	input.KnowledgeSources = normalizeKnowledgeSources(input.KnowledgeSources)
-	input.SuggestedPrompts = normalizeSuggestedPrompts(input.SuggestedPrompts)
 	if input.AvatarKey == "" {
 		input.AvatarKey = "sparkle"
 	}
@@ -142,7 +139,6 @@ func normalizeUpdate(input UpdateInput) UpdateInput {
 		AvatarKey: input.AvatarKey, AvatarColor: input.AvatarColor, RuntimeID: input.RuntimeID,
 		ModelRouteID: input.ModelRouteID, ModelAlias: input.ModelAlias,
 		SkillIDs: input.SkillIDs, KnowledgeSources: input.KnowledgeSources,
-		SuggestedPrompts: input.SuggestedPrompts,
 	})
 	input.Name = normalized.Name
 	input.Description = normalized.Description
@@ -153,7 +149,6 @@ func normalizeUpdate(input UpdateInput) UpdateInput {
 	input.ModelAlias = normalized.ModelAlias
 	input.SkillIDs = normalized.SkillIDs
 	input.KnowledgeSources = normalized.KnowledgeSources
-	input.SuggestedPrompts = normalized.SuggestedPrompts
 	return input
 }
 
@@ -201,26 +196,11 @@ func normalizeKnowledgeSources(values []KnowledgeSource) []KnowledgeSource {
 	return out
 }
 
-func normalizeSuggestedPrompts(values []SuggestedPrompt) []SuggestedPrompt {
-	if values == nil {
-		return []SuggestedPrompt{}
-	}
-	out := make([]SuggestedPrompt, 0, len(values))
-	for _, value := range values {
-		out = append(out, SuggestedPrompt{
-			Title: strings.TrimSpace(value.Title), Prompt: strings.TrimSpace(value.Prompt),
-		})
-	}
-	return out
-}
-
 func validAgentConfig(
 	skillIDs []string,
 	knowledge []KnowledgeSource,
-	prompts []SuggestedPrompt,
 ) bool {
-	if len(skillIDs) > MaxSkillIDs || len(knowledge) > MaxKnowledgeSources ||
-		len(prompts) > MaxSuggestedPrompts {
+	if len(skillIDs) > MaxSkillIDs || len(knowledge) > MaxKnowledgeSources {
 		return false
 	}
 	seenSkills := make(map[string]struct{}, len(skillIDs))
@@ -244,15 +224,6 @@ func validAgentConfig(
 			return false
 		}
 		seenKnowledge[key] = struct{}{}
-	}
-	for _, value := range prompts {
-		if value.Title == "" || value.Prompt == "" ||
-			utf8.RuneCountInString(value.Title) > MaxSuggestedTitleChars ||
-			len(value.Prompt) > MaxSuggestedPromptBytes ||
-			strings.ContainsAny(value.Title, "\x00\r\n") ||
-			strings.ContainsRune(value.Prompt, '\x00') {
-			return false
-		}
 	}
 	return true
 }

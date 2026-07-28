@@ -137,7 +137,6 @@ func (m *Memory) Archive(
 func cloneAgent(value Agent) Agent {
 	value.SkillIDs = append([]string(nil), value.SkillIDs...)
 	value.KnowledgeSources = append([]KnowledgeSource(nil), value.KnowledgeSources...)
-	value.SuggestedPrompts = append([]SuggestedPrompt(nil), value.SuggestedPrompts...)
 	return value
 }
 
