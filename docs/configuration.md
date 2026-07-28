@@ -104,14 +104,16 @@ LLM Gateway。`COCOLA_SANDBOX_TOKEN_TTL_SECONDS` 默认 `604800` 秒（7 天）�
 请求里的同名值再注入运维配置；修改后只影响新建 Sandbox，需要重启 Sandbox Manager。
 Profile 不是对话级设置，不进入 Admin/Postgres。
 
-`cocola-sandbox-browser`、`cocola-sandbox-artifacts` 和
+`cocola-sandbox-browser`、`cocola-sandbox-artifacts`、`cocola-spreadsheet` 和
 `cocola-structured-output` 等 Platform Skill 随 Sandbox Runtime 镜像发布，没有独立环境
 变量或 Admin 开关。Agent Runtime 会读取当前镜像的 platform Skill manifest，和
 Admin/Personal Skill 合并后同时暴露到 Claude、Codex 的标准目录。Browser Skill 只指导
 Agent 调用受 `COCOLA_BROWSER_ENABLED` 控制的 guest CLI，不会绕过 Profile 或网络策略；
-Artifact Skill 说明 `/workspace/outputs` 发布契约和隔离 HTML 预览边界。Structured
-Output Skill 说明 Claude Code Execute Run 可选的 Summary、Table、List 和 Metrics
-展示工具；显式选择且声明 Result Contract 的业务 Skill 仍优先，并保持结果必交语义。
+Artifact Skill 说明 `/workspace/outputs` 发布契约和隔离 HTML 预览边界；Spreadsheet
+Skill 使用镜像中固定的 `openpyxl` 处理本地 CSV/XLSX，并通过 Artifact 交付结果。
+Structured Output Skill 说明 Claude Code Execute Run 可选的 Summary、Table、List 和
+Metrics 展示工具；显式选择且声明 Result Contract 的业务 Skill 仍优先，并保持结果必交
+语义。
 
 `COCOLA_SKILL_PUBLISH_ENABLED` 默认 `false`。开启时 Gateway 还要求
 `COCOLA_ADMIN_URL`，Agent Runtime 要求配置 Sandbox 可访问的
@@ -120,10 +122,11 @@ Skill capability；Sandbox 不获得 Admin Key、Admin URL 或用户 Web Token�
 从下一轮 Run 开始通过现有 effective catalog 与原子 reconcile 生效。
 
 `COCOLA_DEFAULT_SKILLS_ENABLED` 默认 `true`。Admin API 启动时会把发布包内与 Sandbox
-`lark-cli` 版本锁定的官方 Skills 幂等对账到 Admin Skill Catalog；不会在启动时访问
-GitHub，也不会把 Skills 烘焙进 Sandbox。管理员禁用状态会跨重启保留；同 ID 被管理员
-手工导入接管后不再由系统覆盖。设为 `false` 只跳过启动对账，不会删除或禁用 Catalog
-里已经存在的 Skills；全局停用应在 Admin Skills 中禁用 `lark-*`。修改后需重启
+`lark-cli` 版本锁定的官方 Skills，以及固定到明确上游 commit 的
+`community-core/frontend-design`，幂等对账到 Admin Skill Catalog；不会在启动时访问
+GitHub，也不会把这些第三方 Skills 烘焙进 Sandbox。管理员禁用状态会跨重启保留；同 ID
+被管理员手工导入接管后不再由系统覆盖。设为 `false` 只跳过启动对账，不会删除或禁用
+Catalog 里已经存在的 Skills；全局停用应在 Admin Skills 中逐项禁用。修改后需重启
 Admin API。
 
 ### 热加载边界复核

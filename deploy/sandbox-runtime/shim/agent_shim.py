@@ -1903,6 +1903,7 @@ def _selfcheck() -> int:
         "claude_agent_sdk": None,
         "codex_cli": cmd_version("codex", "--version"),
         "codex_sdk": None,
+        "openpyxl": None,
         "gh": cmd_version("gh", "--version"),
         "github_skill": Path("/opt/cocola/skills/cocola-github/SKILL.md").is_file(),
         "pnpm": cmd_version("pnpm", "--version"),
@@ -1948,6 +1949,12 @@ def _selfcheck() -> int:
     except Exception as e:  # noqa: BLE001
         info["claude_agent_sdk"] = f"missing: {e}"
     try:
+        import openpyxl
+
+        info["openpyxl"] = openpyxl.__version__
+    except Exception as e:  # noqa: BLE001
+        info["openpyxl"] = f"missing: {e}"
+    try:
         package = Path("/opt/cocola/node_modules/@openai/codex-sdk/package.json")
         info["codex_sdk"] = str(json.loads(package.read_text())["version"])
     except Exception as e:  # noqa: BLE001
@@ -1983,6 +1990,7 @@ def _selfcheck() -> int:
         and not str(info["claude_agent_sdk"]).startswith("missing")
         and not str(info["codex_cli"]).startswith(("missing", "error"))
         and not str(info["codex_sdk"]).startswith("missing")
+        and not str(info["openpyxl"]).startswith("missing")
         and info["github_skill"] is True
         and all(not str(info[name]).startswith(("missing", "error")) for name in required_tools)
     )

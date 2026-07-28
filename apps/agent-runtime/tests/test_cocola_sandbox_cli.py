@@ -790,6 +790,34 @@ def test_builtin_artifact_skill_matches_the_guest_cli_contract():
     )
 
 
+def test_builtin_spreadsheet_skill_matches_the_image_contract():
+    platform_manifest = json.loads(
+        (BUILTIN_SKILLS_PATH / "manifest.json").read_text(encoding="utf-8")
+    )
+    descriptors = {item["id"]: item for item in platform_manifest["skills"]}
+    descriptor = descriptors["cocola-spreadsheet"]
+    skill_md = (BUILTIN_SKILLS_PATH / descriptor["path"] / "SKILL.md").read_text(encoding="utf-8")
+    dockerfile = (REPO_ROOT / "deploy" / "sandbox-runtime" / "Dockerfile").read_text(
+        encoding="utf-8"
+    )
+
+    assert descriptor == {
+        "id": "cocola-spreadsheet",
+        "name": "Cocola Spreadsheet",
+        "version": "1.0.0",
+        "path": "cocola-spreadsheet",
+    }
+    assert skill_md.startswith("---\nname: cocola-spreadsheet\n")
+    assert "/opt/cocola/venv/bin/python" in skill_md
+    assert "openpyxl" in skill_md
+    assert "/workspace/outputs" in skill_md
+    assert "cocola-sandbox artifact list --json" in skill_md
+    assert "does not calculate" in skill_md
+    assert "ARG OPENPYXL_SPEC=openpyxl==3.1.5" in dockerfile
+    assert '"${OPENPYXL_SPEC}"' in dockerfile
+    assert "COPY skills/ /opt/cocola/skills/" in dockerfile
+
+
 def test_builtin_preview_skill_matches_the_managed_process_contract():
     platform_manifest = json.loads(
         (BUILTIN_SKILLS_PATH / "manifest.json").read_text(encoding="utf-8")

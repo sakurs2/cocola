@@ -114,6 +114,7 @@ echo "$SELF" | grep -q '"claude_cli":"[0-9]' && ok "claude CLI pre-baked" || bad
 echo "$SELF" | grep -qv '"claude_agent_sdk":"missing' && ok "claude-agent-sdk importable" || bad "claude-agent-sdk missing"
 echo "$SELF" | grep -q '"codex_cli":"codex-cli [0-9]' && ok "codex CLI pre-baked" || bad "codex CLI missing"
 echo "$SELF" | grep -q '"codex_sdk":"0.144.1"' && ok "codex SDK pinned" || bad "codex SDK missing / wrong version"
+echo "$SELF" | grep -q '"openpyxl":"3.1.5"' && ok "openpyxl pinned in runtime venv" || bad "openpyxl missing / wrong version"
 if docker exec -i -u cocola "$CTR" sh -c \
   'test "$GOBIN" = /home/cocola/.local/bin &&
    test -w /home/cocola/.local/bin &&
@@ -172,18 +173,22 @@ BUILTIN_ARTIFACT_SKILL_OWNER="$(docker exec -i "$CTR" stat -c '%U:%G' \
   /opt/cocola/skills/cocola-sandbox-artifacts/SKILL.md 2>/dev/null || true)"
 BUILTIN_PROJECT_SKILL_OWNER="$(docker exec -i "$CTR" stat -c '%U:%G' \
   /opt/cocola/skills/cocola-project-workspace/SKILL.md 2>/dev/null || true)"
+BUILTIN_SPREADSHEET_SKILL_OWNER="$(docker exec -i "$CTR" stat -c '%U:%G' \
+  /opt/cocola/skills/cocola-spreadsheet/SKILL.md 2>/dev/null || true)"
 docker exec -i "$CTR" test -f /opt/cocola/skills/manifest.json \
   && docker exec -i "$CTR" test -s /opt/cocola/skills/cocola-sandbox-browser/SKILL.md \
   && docker exec -i "$CTR" test -s /opt/cocola/skills/cocola-sandbox-artifacts/SKILL.md \
   && docker exec -i "$CTR" test -s /opt/cocola/skills/cocola-project-workspace/SKILL.md \
   && docker exec -i "$CTR" test -s /opt/cocola/skills/cocola-github/SKILL.md \
-  && ok "built-in Browser, Artifact, Project, and GitHub Skills are baked into the runtime" \
+  && docker exec -i "$CTR" test -s /opt/cocola/skills/cocola-spreadsheet/SKILL.md \
+  && ok "built-in Browser, Artifact, Project, GitHub, and Spreadsheet Skills are baked into the runtime" \
   || bad "one or more built-in Sandbox Skills are missing"
 [ "$BUILTIN_SKILL_OWNER" = "root:root" ] \
   && [ "$BUILTIN_ARTIFACT_SKILL_OWNER" = "root:root" ] \
   && [ "$BUILTIN_PROJECT_SKILL_OWNER" = "root:root" ] \
+  && [ "$BUILTIN_SPREADSHEET_SKILL_OWNER" = "root:root" ] \
   && ok "built-in Skills remain root-owned runtime assets" \
-  || bad "built-in Skill owners are ${BUILTIN_SKILL_OWNER:-unknown}/${BUILTIN_ARTIFACT_SKILL_OWNER:-unknown}/${BUILTIN_PROJECT_SKILL_OWNER:-unknown} (must be root:root)"
+  || bad "built-in Skill owners are ${BUILTIN_SKILL_OWNER:-unknown}/${BUILTIN_ARTIFACT_SKILL_OWNER:-unknown}/${BUILTIN_PROJECT_SKILL_OWNER:-unknown}/${BUILTIN_SPREADSHEET_SKILL_OWNER:-unknown} (must be root:root)"
 
 GH_VERSION_OUTPUT="$(docker exec -i "$CTR" gh --version 2>/dev/null | head -1 || true)"
 echo "$GH_VERSION_OUTPUT" | grep -q 'gh version 2.94.0' \

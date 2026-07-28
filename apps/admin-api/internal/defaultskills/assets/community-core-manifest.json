@@ -1,0 +1,9 @@
+{
+  "name": "community-core",
+  "version": "1.0.0",
+  "upstream_url": "https://github.com/anthropics/skills",
+  "upstream_ref": "b29e7cf65e5cb78a5ac33d582270551bc74a14eb",
+  "archive": "community-core-skills-v1.0.0.zip",
+  "archive_sha256": "a5d216f107e6be0c9ad7a206b0c487681e3d9020416319fa2f835e04be1a4ba6",
+  "skill_ids": ["frontend-design"]
+}

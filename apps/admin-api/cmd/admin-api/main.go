@@ -192,38 +192,45 @@ func main() {
 	svc.WithSkillBundleStore(skillStore)
 	log.Sugar().Infow("skill bundle store enabled", "endpoint", oc.Endpoint, "bucket", oc.Bucket)
 	if getenvBool("COCOLA_DEFAULT_SKILLS_ENABLED", true) {
-		defaultSet, err := defaultskills.LarkCLI()
+		defaultSets, err := defaultskills.All()
 		if err != nil {
-			log.Sugar().Fatalf("load release-bundled lark-cli Skills: %v", err)
+			log.Sugar().Fatalf("load release-bundled default Skills: %v", err)
 		}
-		reconcileCtx, reconcileCancel := context.WithTimeout(context.Background(), 2*time.Minute)
-		result, err := svc.ReconcileDefaultSkills(reconcileCtx, service.DefaultSkillSet{
-			Name:          defaultSet.Name,
-			Version:       defaultSet.Version,
-			UpstreamURL:   defaultSet.UpstreamURL,
-			UpstreamRef:   defaultSet.UpstreamRef,
-			Archive:       defaultSet.Archive,
-			ArchiveSHA256: defaultSet.ArchiveSHA256,
-			SkillIDs:      defaultSet.SkillIDs,
-		})
-		reconcileCancel()
-		if err != nil {
-			log.Sugar().Fatalf("reconcile release-bundled lark-cli Skills: %v", err)
-		}
-		log.Sugar().Infow(
-			"release-bundled lark-cli Skills reconciled",
-			"version", defaultSet.Version,
-			"created", result.Created,
-			"updated", result.Updated,
-			"unchanged", result.Unchanged,
-			"skipped", result.Skipped,
-		)
-		if result.Skipped > 0 {
-			log.Sugar().Warnw(
-				"release-bundled Skills are administrator-managed and were not overwritten",
-				"count",
-				result.Skipped,
+		for _, defaultSet := range defaultSets {
+			reconcileCtx, reconcileCancel := context.WithTimeout(context.Background(), 2*time.Minute)
+			result, err := svc.ReconcileDefaultSkills(reconcileCtx, service.DefaultSkillSet{
+				Name:          defaultSet.Name,
+				Version:       defaultSet.Version,
+				UpstreamURL:   defaultSet.UpstreamURL,
+				UpstreamRef:   defaultSet.UpstreamRef,
+				Archive:       defaultSet.Archive,
+				ArchiveSHA256: defaultSet.ArchiveSHA256,
+				SkillIDs:      defaultSet.SkillIDs,
+			})
+			reconcileCancel()
+			if err != nil {
+				log.Sugar().Fatalf(
+					"reconcile release-bundled %s Skills: %v",
+					defaultSet.Name,
+					err,
+				)
+			}
+			log.Sugar().Infow(
+				"release-bundled default Skills reconciled",
+				"set", defaultSet.Name,
+				"version", defaultSet.Version,
+				"created", result.Created,
+				"updated", result.Updated,
+				"unchanged", result.Unchanged,
+				"skipped", result.Skipped,
 			)
+			if result.Skipped > 0 {
+				log.Sugar().Warnw(
+					"release-bundled Skills are administrator-managed and were not overwritten",
+					"set", defaultSet.Name,
+					"count", result.Skipped,
+				)
+			}
 		}
 	} else {
 		log.Info("release-bundled default Skill reconciliation disabled")

@@ -38,6 +38,12 @@
       "path": "cocola-structured-output"
     },
     {
+      "id": "cocola-spreadsheet",
+      "name": "Cocola Spreadsheet",
+      "version": "1.0.0",
+      "path": "cocola-spreadsheet"
+    },
+    {
       "id": "skill-creator",
       "name": "Skill Creator",
       "version": "1.0.0",

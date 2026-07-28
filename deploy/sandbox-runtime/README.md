@@ -159,9 +159,11 @@ serve local HTML on a temporary loopback HTTP port for interactive inspection.
 The image ships versioned, root-owned platform Skills under
 `/opt/cocola/skills`. Browser, Artifact, Preview, Project Workspace, and GitHub
 Skills teach the Agent when and how to use stable Cocola capabilities without
-adding a second execution implementation. `cocola-structured-output` describes
-the four optional presentation tools that Cocola exposes to Claude Code Execute
-runs when no selected Skill requires its own result contract.
+adding a second execution implementation. `cocola-spreadsheet` directs local
+CSV/XLSX work through the pinned Python environment and Artifact contract.
+`cocola-structured-output` describes the four optional presentation tools that
+Cocola exposes to Claude Code Execute runs when no selected Skill requires its
+own result contract.
 
 At the beginning of a Run, Agent Runtime inspects the image's platform Skill
 manifest and atomically reconciles platform Skills with the effective Admin and
@@ -225,7 +227,8 @@ document/media outputs without installing dependencies at sandbox start:
 - Build helpers: `make`, `build-essential`, `pkg-config`, `sqlite3`.
 - Node/web: `pnpm`, `yarn`, global `playwright`, Playwright-managed
   `chromium`, and `lark-cli` from exact package version `@larksuite/cli@1.0.77`.
-- Documents/media: `poppler-utils`, `imagemagick`, `librsvg2-bin`.
+- Documents/media: `poppler-utils`, `imagemagick`, `librsvg2-bin`; the pinned
+  `/opt/cocola/venv` includes `openpyxl`, `python-docx`, and `python-pptx`.
 - Fonts: Noto core, CJK, and color emoji fonts.
 
 Playwright uses a build-time downloaded Chromium under `/ms-playwright`, exposed
