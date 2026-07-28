@@ -85,3 +85,4 @@ deploy/llm-config.json
 
 # local scratch / temp files
 temp/
+/.tmp/
