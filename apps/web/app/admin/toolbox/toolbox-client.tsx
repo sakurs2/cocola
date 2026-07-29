@@ -38,7 +38,7 @@ export function ToolboxClient({ initialTool }: { initialTool: ToolboxToolId | nu
   };
 
   return (
-    <AdminPage width="standard" className="admin-theme-cyan">
+    <AdminPage className="admin-theme-cyan">
       <AdminPageHeader
         icon={<ToolboxIcon className="size-[18px]" />}
         title="Toolbox"

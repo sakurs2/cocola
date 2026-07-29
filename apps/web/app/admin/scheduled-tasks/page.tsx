@@ -335,7 +335,7 @@ function TaskStatus({ status }: { status: ScheduledTask["status"] }) {
       : status === "paused"
         ? "amber"
         : status === "completed"
-          ? "sky"
+          ? "green"
           : status === "expired"
             ? "red"
             : "neutral";

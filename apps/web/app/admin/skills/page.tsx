@@ -319,7 +319,7 @@ export default function AdminSkillsPage() {
 
   return (
     <main className="admin-theme-amber min-h-screen bg-background text-foreground">
-      <div className="mx-auto max-w-6xl space-y-6 px-6 py-6">
+      <div className="mx-auto w-full max-w-[100rem] space-y-6 px-4 py-5 sm:px-6 sm:py-6">
         {/* Header */}
         <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
           <div className="flex items-center gap-3">

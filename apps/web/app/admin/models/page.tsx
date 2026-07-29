@@ -477,7 +477,7 @@ export default function AdminModelsPage() {
 
   return (
     <main className="admin-theme-violet min-h-screen bg-background text-foreground">
-      <div className="mx-auto max-w-7xl space-y-6 px-6 py-6">
+      <div className="mx-auto w-full max-w-[100rem] space-y-6 px-4 py-5 sm:px-6 sm:py-6">
         <div className="admin-models-head">
           <span className="admin-models-icon">
             <ModelsPageIcon className="size-[22px]" />

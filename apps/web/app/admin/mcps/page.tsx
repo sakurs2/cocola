@@ -294,7 +294,7 @@ export default function AdminMCPPage() {
   };
 
   return (
-    <AdminPage width="standard" className="admin-theme-orange">
+    <AdminPage className="admin-theme-orange">
       <AdminPageHeader
         icon={<McpPageIcon className="size-[18px]" />}
         title="MCP Servers"

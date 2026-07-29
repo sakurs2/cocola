@@ -126,7 +126,7 @@ export default function AdminSettingsPage() {
   return (
     <main className="min-h-screen bg-background text-foreground">
       <header className="border-b border-border">
-        <div className="mx-auto flex h-16 max-w-7xl items-center gap-3 px-6">
+        <div className="mx-auto flex h-16 w-full max-w-[100rem] items-center gap-3 px-4 sm:px-6">
           <div className="admin-page-icon">
             <SettingsPageIcon className="size-[18px]" />
           </div>
@@ -149,7 +149,7 @@ export default function AdminSettingsPage() {
         </div>
       </header>
 
-      <div className="mx-auto max-w-7xl space-y-5 px-6 py-6">
+      <div className="mx-auto w-full max-w-[100rem] space-y-5 px-4 py-5 sm:px-6 sm:py-6">
         <section className="grid gap-3 md:grid-cols-3">
           <Metric label="Settings" value={String(stats.total)} />
           <Metric label="DB Overrides" value={String(stats.overrides)} />
