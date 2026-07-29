@@ -8,7 +8,6 @@ import {
   Workflow as Graph,
   HardDrive as HardDrives,
   Plug as PlugsConnected,
-  ShieldCheck,
   Sparkles as Sparkle,
   Layers as Stack,
   SquareTerminal as TerminalWindow,
@@ -20,10 +19,7 @@ import { motion } from "framer-motion";
 import { ArrowRight } from "lucide-react";
 import Link from "next/link";
 import type { CSSProperties } from "react";
-import {
-  AdminPage as AdminPageLayout,
-  AdminPageHeader,
-} from "@/components/admin/admin-ui";
+import { AdminPage as AdminPageLayout } from "@/components/admin/admin-ui";
 
 type AdminModule = {
   title: string;
@@ -159,13 +155,6 @@ const MODULE_GROUPS: { label: string; modules: AdminModule[] }[] = [
 export default function AdminPage() {
   return (
     <AdminPageLayout>
-      <section className="admin-overview-hero overflow-hidden rounded-3xl border px-5 py-6 sm:px-7 sm:py-7">
-        <AdminPageHeader
-          title="Operate cocola with context"
-          icon={<ShieldCheck className="size-5" />}
-        />
-      </section>
-
       <div className="grid gap-4 xl:grid-cols-2">
         {MODULE_GROUPS.map((group, groupIndex) => (
           <motion.section

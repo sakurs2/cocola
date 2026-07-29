@@ -582,9 +582,9 @@
     place-items: center;
     border: none;
     border-radius: 1rem;
-    color: #fff;
-    background: linear-gradient(140deg, hsl(258 90% 62%) 0%, hsl(286 84% 58%) 100%);
-    box-shadow: 0 10px 22px -8px hsl(272 80% 50% / 0.55);
+    color: hsl(258 90% 62%);
+    background: none;
+    box-shadow: none;
   }
 
   .cocola-admin-ui .admin-domain-panel {
@@ -635,7 +635,7 @@
     font-size: 13px;
     font-weight: 600;
     color: #fff;
-    background: linear-gradient(135deg, var(--card-from, hsl(258 90% 62%)) 0%, var(--card-to, hsl(286 84% 58%)) 100%);
+    background: var(--card-to, hsl(258 90% 62%));
     box-shadow: 0 8px 18px -8px hsl(272 80% 50% / 0.45);
     transition: opacity 200ms ease, box-shadow 200ms ease;
   }

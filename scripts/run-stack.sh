@@ -578,12 +578,17 @@ wait_port "$GATEWAY_HOST" "$GATEWAY_PORT" "gateway"
 free_port "$WEB_PORT" web
   (
     cd apps/web
-    COCOLA_GATEWAY_URL="http://$GATEWAY_ADDR" \
-    COCOLA_ADMIN_URL="${COCOLA_ADMIN_URL:-http://127.0.0.1:8092}" \
-    COCOLA_ADMIN_KEY="$COCOLA_ADMIN_KEY" \
-    AUTH_SECRET="$AUTH_SECRET" \
-    COCOLA_PUBLIC_ORIGINS="$COCOLA_PUBLIC_ORIGINS" \
+    export COCOLA_GATEWAY_URL="http://$GATEWAY_ADDR"
+    export COCOLA_ADMIN_URL="${COCOLA_ADMIN_URL:-http://127.0.0.1:8092}"
+    export COCOLA_ADMIN_KEY="$COCOLA_ADMIN_KEY"
+    export AUTH_SECRET="$AUTH_SECRET"
+    export COCOLA_PUBLIC_ORIGINS="$COCOLA_PUBLIC_ORIGINS"
+    if [ "${COCOLA_WEB_DEV:-0}" = "1" ]; then
+      echo "==> [dev] web running in HOT-RELOAD mode (next dev); frontend edits reflect on refresh, no rebuild/restart" >&2
+      $SETSID pnpm dev --port "$WEB_PORT"
+    else
       $SETSID node server.mjs --port "$WEB_PORT"
+    fi
   ) >"$(log_redirect web)" 2>&1 &
   PIDS+=("$!")
 wait_port "127.0.0.1" "$WEB_PORT" "web" 240
