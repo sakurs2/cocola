@@ -3,14 +3,9 @@
 import * as Dialog from "@radix-ui/react-dialog";
 import { motion } from "framer-motion";
 import { ChevronLeft, ChevronRight, RefreshCw, X } from "lucide-react";
-import { type ComponentPropsWithoutRef, type ReactNode, useState } from "react";
+import { type ReactNode, useState } from "react";
 import { Button, type ButtonProps } from "@/components/ui/button";
-import {
-  Card as HeroCard,
-  CardBody as HeroCardBody,
-  CardHeader as HeroCardHeader,
-  Chip as HeroChip,
-} from "@heroui/react";
+import { Chip as HeroChip } from "@heroui/react";
 import { Card } from "@/components/ui/card";
 import { cn } from "@/lib/utils";
 
@@ -85,48 +80,6 @@ export function AdminPageHeader({
   );
 }
 
-export function AdminPanel({
-  title,
-  description,
-  actions,
-  children,
-  className,
-  contentClassName,
-}: {
-  title?: string;
-  description?: string;
-  actions?: ReactNode;
-  children: ReactNode;
-  className?: string;
-  contentClassName?: string;
-}) {
-  const hasHeader = Boolean(title || description || actions);
-  return (
-    <HeroCard
-      shadow="sm"
-      radius="lg"
-      className={cn("overflow-hidden border border-border/70 bg-card", className)}
-    >
-      {hasHeader ? (
-        <HeroCardHeader className="min-h-14 flex-row items-center justify-between gap-4 border-b border-border/70 px-4 py-3 sm:px-5">
-          <div className="min-w-0">
-            {title ? (
-              <div className="text-sm font-semibold leading-none tracking-tight text-foreground">
-                {title}
-              </div>
-            ) : null}
-            {description ? (
-              <div className="mt-0.5 text-xs text-muted-foreground">{description}</div>
-            ) : null}
-          </div>
-          {actions ? <div className="flex shrink-0 items-center gap-2">{actions}</div> : null}
-        </HeroCardHeader>
-      ) : null}
-      <HeroCardBody className={cn("p-4 sm:p-5", contentClassName)}>{children}</HeroCardBody>
-    </HeroCard>
-  );
-}
-
 export function AdminMetric({
   label,
   value,
@@ -154,20 +107,6 @@ export function AdminMetric({
       {detail ? <div className="mt-1 text-xs text-muted-foreground">{detail}</div> : null}
     </Card>
   );
-}
-
-export function AdminToolbar({ children, className }: { children: ReactNode; className?: string }) {
-  return (
-    <Card
-      className={cn("flex flex-col gap-3 p-3 sm:flex-row sm:flex-wrap sm:items-end", className)}
-    >
-      {children}
-    </Card>
-  );
-}
-
-export function AdminTable({ children, className }: { children: ReactNode; className?: string }) {
-  return <Card className={cn("overflow-x-auto", className)}>{children}</Card>;
 }
 
 export function AdminPagination({
@@ -437,18 +376,6 @@ export function AdminConfirmDialog({
         </Dialog.Content>
       </Dialog.Portal>
     </Dialog.Root>
-  );
-}
-
-export function AdminIconButton({ className, ...props }: ComponentPropsWithoutRef<"button">) {
-  return (
-    <button
-      className={cn(
-        "inline-flex size-9 items-center justify-center rounded-xl text-muted-foreground transition-colors hover:bg-secondary hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/40 disabled:pointer-events-none disabled:opacity-45",
-        className,
-      )}
-      {...props}
-    />
   );
 }
 
