@@ -310,7 +310,7 @@ export default function AdminUsersPage() {
     (drawerMode === "edit" || form.autoPassword || Boolean(form.password));
 
   return (
-    <main className="min-h-screen bg-background text-foreground">
+    <main className="admin-theme-blue min-h-screen bg-background text-foreground">
 
       <div className="mx-auto max-w-7xl space-y-6 px-6 py-6">
         {error && <AdminAlert tone="error">{error}</AdminAlert>}
@@ -509,7 +509,7 @@ export default function AdminUsersPage() {
           drawerMode === "create" ? "Passwords are stored as bcrypt hashes." : editTarget?.email
         }
         footer={
-          <div className="flex justify-end gap-2">
+          <div className="admin-theme-blue flex justify-end gap-2">
             <Button variant="outline" disabled={saving} onClick={closeDrawer}>
               Cancel
             </Button>
@@ -524,7 +524,7 @@ export default function AdminUsersPage() {
           </div>
         }
       >
-        <div className="admin-drawer-form space-y-4">
+        <div className="admin-theme-blue admin-drawer-form space-y-4">
           <FieldInput
             label="Username"
             value={form.username}
