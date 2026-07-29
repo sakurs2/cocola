@@ -1313,6 +1313,16 @@
     font-size: 14px;
   }
 
+  /* Nodes list: center every column except the first (Node) + prevent overlap */
+  .cocola-admin-ui .admin-nodes-center > div {
+    min-width: 0;
+  }
+  .cocola-admin-ui .admin-nodes-center > div:nth-child(n + 2) {
+    text-align: center;
+    justify-content: center;
+    align-items: center;
+  }
+
   /* ===== generic surface card (Token Usage panels) ===== */
   .cocola-admin-ui .admin-surface {
     background: #fff;

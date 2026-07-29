@@ -74,7 +74,7 @@ const STATUS_TONES: Record<string, BadgeTone> = {
   unhealthy: "red",
 };
 
-const LIST_COLS = "1.4fr 0.9fr 1fr 1fr 0.8fr 1.1fr 0.7fr 1fr 1.1fr 0.9fr";
+const LIST_COLS = "1.6fr 0.9fr 0.8fr 1.5fr 0.7fr 1.4fr 0.9fr 1.4fr 1.1fr 1.7fr";
 
 export default function SandboxNodesPage() {
   const [nodes, setNodes] = useState<SandboxNode[]>([]);
@@ -333,8 +333,8 @@ export default function SandboxNodesPage() {
               />
             ) : (
               <div className="admin-list-scroll">
-                <div className="min-w-[1320px]">
-                  <div className="admin-list-cols" style={{ gridTemplateColumns: LIST_COLS }}>
+                <div className="min-w-[1600px]">
+                  <div className="admin-list-cols admin-nodes-center" style={{ gridTemplateColumns: LIST_COLS }}>
                     <div>Node</div>
                     <div>Status</div>
                     <div>CPU</div>
@@ -344,7 +344,7 @@ export default function SandboxNodesPage() {
                     <div>Disk</div>
                     <div>Max Sandbox Pods</div>
                     <div>Reason</div>
-                    <div className="text-right">Actions</div>
+                    <div>Actions</div>
                   </div>
                   {nodes.map((node) => {
                     const offlining = actingNode === `${node.name}:offline`;
@@ -352,7 +352,7 @@ export default function SandboxNodesPage() {
                     return (
                       <div
                         key={node.name}
-                        className="admin-list-row"
+                        className="admin-list-row admin-nodes-center"
                         style={{ gridTemplateColumns: LIST_COLS }}
                       >
                         <div className="min-w-0">
@@ -400,7 +400,7 @@ export default function SandboxNodesPage() {
                           </AdminStatusBadge>
                         </div>
                         <div className="admin-list-cell">
-                          <div className="flex items-center gap-2">
+                          <div className="flex items-center justify-center gap-2">
                             <span
                               className={cn(
                                 "admin-list-mono",
@@ -428,7 +428,7 @@ export default function SandboxNodesPage() {
                         >
                           {node.reason || "—"}
                         </div>
-                        <div className="flex items-center justify-end gap-2">
+                        <div className="flex items-center justify-center gap-2">
                           {node.schedulable ? (
                             <button
                               type="button"
