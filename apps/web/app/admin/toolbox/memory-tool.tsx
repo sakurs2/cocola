@@ -163,25 +163,29 @@ export function MemoryTool({
         className="admin-module-card group w-full text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/40"
         onClick={() => setOpen(true)}
       >
-        <span className="admin-module-icon bg-emerald-500/10 text-emerald-700">
-          <BrainCircuit className="size-[18px]" />
-        </span>
-        <span className="min-w-0 flex-1">
-          <span className="block text-sm font-semibold text-foreground">Memory</span>
-          <span className="mt-1 block text-xs leading-5 text-muted-foreground">
-            Configure OpenViking-backed user memory and its platform models.
+        <span className="admin-module-head">
+          <span className="admin-module-icon">
+            <BrainCircuit className="size-6" strokeWidth={2} />
           </span>
-          <span className="mt-4 flex items-center gap-2">
-            <MemoryStatusBadge loading={loading} status={config.status} error={Boolean(error)} />
-            {!loading && !error ? (
-              <span className="font-mono text-[10px] text-muted-foreground">v{config.version}</span>
-            ) : null}
-          </span>
+          <span className="admin-module-title">Memory</span>
         </span>
-        <ArrowRight className="mt-1 size-4 shrink-0 -translate-x-1 text-muted-foreground opacity-0 transition-all duration-200 group-hover:translate-x-0 group-hover:text-primary group-hover:opacity-100" />
+        <span className="admin-module-summary">
+          Configure OpenViking-backed user memory and its platform models.
+        </span>
+        <span className="flex items-center gap-2">
+          <MemoryStatusBadge loading={loading} status={config.status} error={Boolean(error)} />
+          {!loading && !error ? (
+            <span className="font-mono text-[10px] text-muted-foreground">v{config.version}</span>
+          ) : null}
+        </span>
+        <span className="admin-module-cta">
+          Open
+          <ArrowRight className="size-3.5 transition-transform duration-200 group-hover:translate-x-0.5" />
+        </span>
       </button>
 
       <AdminDrawer
+        className="admin-theme-cyan"
         open={open}
         onOpenChange={setOpen}
         title="Memory"

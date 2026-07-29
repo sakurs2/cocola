@@ -3,7 +3,7 @@
 import { Wrench as ToolboxIcon } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { useState, type ComponentType } from "react";
-import { AdminPage, AdminPageHeader, AdminPanel } from "@/components/admin/admin-ui";
+import { AdminPage, AdminPageHeader } from "@/components/admin/admin-ui";
 import { SystemPromptTool } from "./system-prompt-tool";
 import { MemoryTool } from "./memory-tool";
 
@@ -38,19 +38,14 @@ export function ToolboxClient({ initialTool }: { initialTool: ToolboxToolId | nu
   };
 
   return (
-    <AdminPage width="standard">
+    <AdminPage width="standard" className="admin-theme-cyan">
       <AdminPageHeader
-        eyebrow="Configuration"
         icon={<ToolboxIcon className="size-[18px]" />}
         title="Toolbox"
         description="Open lightweight controls that shape how Cocola operates."
       />
 
-      <AdminPanel
-        title="Available tools"
-        description="Small, independent controls for administrators."
-        contentClassName="grid gap-3 sm:grid-cols-2 xl:grid-cols-3"
-      >
+      <section className="admin-entity-grid md:grid-cols-2 xl:grid-cols-3">
         {TOOLBOX_ITEMS.map((item) => {
           const Tool = item.component;
           return (
@@ -61,7 +56,7 @@ export function ToolboxClient({ initialTool }: { initialTool: ToolboxToolId | nu
             />
           );
         })}
-      </AdminPanel>
+      </section>
     </AdminPage>
   );
 }

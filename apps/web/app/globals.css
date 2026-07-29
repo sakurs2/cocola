@@ -652,8 +652,8 @@
     font-size: 13px;
     font-weight: 600;
     color: #fff;
-    background: var(--card-to, hsl(258 90% 62%));
-    box-shadow: 0 8px 18px -8px hsl(272 80% 50% / 0.45);
+    background: var(--card-to, var(--page-accent));
+    box-shadow: 0 8px 18px -8px var(--page-accent-shadow);
     transition: opacity 200ms ease, box-shadow 200ms ease;
   }
 
@@ -663,7 +663,7 @@
 
   .cocola-admin-ui .admin-module-card:hover {
     transform: translateY(-3px) scale(1.005);
-    box-shadow: 0 18px 40px -18px rgba(120, 40, 200, 0.35);
+    box-shadow: 0 18px 40px -18px var(--page-accent-shadow-soft);
   }
 
   .cocola-admin-ui .admin-empty-icon {
@@ -686,7 +686,7 @@
     display: grid;
     flex: 0 0 auto;
     place-items: center;
-    color: var(--card-to, hsl(258 90% 62%));
+    color: var(--card-to, var(--page-accent));
     background: none;
     transition: transform 200ms ease;
   }
@@ -768,6 +768,24 @@
     --page-accent-focus-ring: rgba(251, 146, 60, 0.2);
     --page-accent-shadow: rgba(234, 88, 12, 0.5);
     --page-accent-shadow-soft: rgba(234, 88, 12, 0.3);
+  }
+  .cocola-admin-ui .admin-theme-cyan,
+  .cocola-admin-ui.admin-theme-cyan {
+    --primary: 192 91% 36%;
+    --primary-foreground: 0 0% 100%;
+    --ring: 192 91% 42%;
+    --accent: 185 96% 90%;
+    --accent-foreground: 192 91% 27%;
+    --page-accent: #0891b2;
+    --page-accent-2: #22d3ee;
+    --page-accent-grad: linear-gradient(135deg, #0891b2, #22d3ee);
+    --page-accent-soft: #ecfeff;
+    --page-accent-ink: #0e7490;
+    --page-accent-border: #67e8f9;
+    --page-accent-focus: #22d3ee;
+    --page-accent-focus-ring: rgba(34, 211, 238, 0.2);
+    --page-accent-shadow: rgba(8, 145, 178, 0.5);
+    --page-accent-shadow-soft: rgba(8, 145, 178, 0.3);
   }
 
   /* ===== shared entity cards (skills / mcps grids), page-accent driven ===== */

@@ -1,6 +1,6 @@
 "use client";
 
-import { FileText } from "lucide-react";
+import { ScrollText } from "lucide-react";
 import { ArrowRight, CircleAlert, LoaderCircle, Save, ToggleLeft, ToggleRight } from "lucide-react";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { AdminAlert, AdminDrawer, AdminStatusBadge } from "@/components/admin/admin-ui";
@@ -100,27 +100,31 @@ export function SystemPromptTool({
         className="admin-module-card group w-full text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/40"
         onClick={() => setOpen(true)}
       >
-        <span className="admin-module-icon bg-sky-500/10 text-sky-700">
-          <FileText className="size-[18px]" />
-        </span>
-        <span className="min-w-0 flex-1">
-          <span className="block text-sm font-semibold text-foreground">System Prompt</span>
-          <span className="mt-1 block text-xs leading-5 text-muted-foreground">
-            Set the global behavior policy applied to new agent turns.
+        <span className="admin-module-head">
+          <span className="admin-module-icon">
+            <ScrollText className="size-6" strokeWidth={2} />
           </span>
-          <span className="mt-4 flex flex-wrap items-center gap-2">
-            <PromptStatus loading={loading} error={Boolean(loadError)} enabled={prompt.enabled} />
-            {!loading && !loadError ? (
-              <span className="font-mono text-[10px] text-muted-foreground">
-                v{prompt.version || 0}
-              </span>
-            ) : null}
-          </span>
+          <span className="admin-module-title">System Prompt</span>
         </span>
-        <ArrowRight className="mt-1 size-4 shrink-0 -translate-x-1 text-muted-foreground opacity-0 transition-all duration-200 group-hover:translate-x-0 group-hover:text-primary group-hover:opacity-100" />
+        <span className="admin-module-summary">
+          Set the global behavior policy applied to new agent turns.
+        </span>
+        <span className="flex flex-wrap items-center gap-2">
+          <PromptStatus loading={loading} error={Boolean(loadError)} enabled={prompt.enabled} />
+          {!loading && !loadError ? (
+            <span className="font-mono text-[10px] text-muted-foreground">
+              v{prompt.version || 0}
+            </span>
+          ) : null}
+        </span>
+        <span className="admin-module-cta">
+          Open
+          <ArrowRight className="size-3.5 transition-transform duration-200 group-hover:translate-x-0.5" />
+        </span>
       </button>
 
       <AdminDrawer
+        className="admin-theme-cyan"
         open={open}
         onOpenChange={setOpen}
         title="System Prompt"
