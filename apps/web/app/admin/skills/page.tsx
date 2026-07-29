@@ -1,18 +1,37 @@
 "use client";
 
 import { Sparkles as SkillsPageIcon } from "lucide-react";
-import { ChangeEvent, useCallback, useEffect, useMemo, useState, type ReactNode } from "react";
+import {
+  ChangeEvent,
+  useCallback,
+  useEffect,
+  useMemo,
+  useState,
+  type CSSProperties,
+  type ComponentType,
+  type ReactNode,
+} from "react";
 import Link from "next/link";
 import {
+  Blocks,
+  Bot,
+  Boxes,
+  Braces,
   CheckCircle2,
+  Compass,
   FileArchive,
+  Gem,
   LoaderCircle,
   Power,
+  Puzzle,
+  Rocket,
   Sparkles,
   ToggleLeft,
   ToggleRight,
   Trash2,
   Upload,
+  Wand2,
+  Zap,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { AdminPagination } from "@/components/admin/admin-ui";
@@ -39,6 +58,57 @@ type Candidate = Skill & {
 };
 
 const SKILLS_PAGE_SIZE = 24;
+
+// A small curated palette + icon set so each skill tile reads as distinct
+// while still living inside the amber page theme.
+const GLYPH_ICONS: ComponentType<{ className?: string }>[] = [
+  Sparkles,
+  Puzzle,
+  Blocks,
+  Wand2,
+  Zap,
+  Boxes,
+  Rocket,
+  Gem,
+  Compass,
+  Braces,
+  Bot,
+];
+
+const GLYPH_TONES: { ink: string; soft: string; ring: string }[] = [
+  { ink: "#d97706", soft: "#fef3c7", ring: "#fcd34d" }, // amber
+  { ink: "#ea580c", soft: "#ffedd5", ring: "#fdba74" }, // orange
+  { ink: "#7c3aed", soft: "#ede9fe", ring: "#c4b5fd" }, // violet
+  { ink: "#2563eb", soft: "#dbeafe", ring: "#93c5fd" }, // blue
+  { ink: "#0d9488", soft: "#ccfbf1", ring: "#5eead4" }, // teal
+  { ink: "#16a34a", soft: "#dcfce7", ring: "#86efac" }, // green
+  { ink: "#db2777", soft: "#fce7f3", ring: "#f9a8d4" }, // pink
+  { ink: "#0891b2", soft: "#cffafe", ring: "#67e8f9" }, // cyan
+  { ink: "#c026d3", soft: "#fae8ff", ring: "#f0abfc" }, // fuchsia
+  { ink: "#4f46e5", soft: "#e0e7ff", ring: "#a5b4fc" }, // indigo
+];
+
+function hashString(value: string): number {
+  let hash = 0;
+  for (let i = 0; i < value.length; i += 1) {
+    hash = (hash * 31 + value.charCodeAt(i)) | 0;
+  }
+  return Math.abs(hash);
+}
+
+function glyphFor(id: string) {
+  const h = hashString(id || "skill");
+  const Icon = GLYPH_ICONS[h % GLYPH_ICONS.length] ?? Sparkles;
+  const tone =
+    GLYPH_TONES[h % GLYPH_TONES.length] ??
+    ({ ink: "#d97706", soft: "#fef3c7", ring: "#fcd34d" } as const);
+  const style = {
+    "--glyph-ink": tone.ink,
+    "--glyph-soft": tone.soft,
+    "--glyph-ring": tone.ring,
+  } as CSSProperties;
+  return { Icon, style };
+}
 
 export default function AdminSkillsPage() {
   const [skills, setSkills] = useState<Skill[]>([]);
@@ -324,7 +394,7 @@ export default function AdminSkillsPage() {
 
         {candidates.length ? (
           <section className="admin-entity-card p-0">
-            <div className="flex flex-wrap items-center justify-between gap-3 border-b border-border px-4 py-3">
+            <div className="flex flex-wrap items-center justify-between gap-3 border-b border-border/60 px-4 py-3">
               <div className="flex items-center gap-2">
                 <FileArchive className="size-4 text-muted-foreground" />
                 <div className="text-sm font-semibold">Archive candidates</div>
@@ -332,7 +402,7 @@ export default function AdminSkillsPage() {
               </div>
               <div className="flex gap-2">
                 <button
-                  className="rounded-lg border border-border px-3 py-1.5 text-sm hover:bg-accent"
+                  className="admin-card-btn"
                   onClick={() =>
                     setSelected(
                       allValidSelected
@@ -344,7 +414,7 @@ export default function AdminSkillsPage() {
                   {allValidSelected ? "Clear all" : "Select all"}
                 </button>
                 <button
-                  className="admin-primary-btn rounded-lg px-3 py-1.5 text-sm font-medium disabled:opacity-50"
+                  className="admin-primary-btn rounded-full px-4 py-1.5 text-sm font-medium disabled:opacity-50"
                   disabled={working || !Object.values(selected).some(Boolean)}
                   onClick={importSelected}
                 >
@@ -353,24 +423,30 @@ export default function AdminSkillsPage() {
               </div>
             </div>
             <div className="grid gap-3 p-4 md:grid-cols-2">
-              {candidates.map((candidate) => (
-                <label
-                  key={`${candidate.path}:${candidate.id}`}
-                  className={cn(
-                    "rounded-xl border p-4",
-                    candidate.valid ? "border-border" : "border-red-500/30 bg-red-500/5",
-                  )}
-                >
-                  <div className="flex gap-3">
+              {candidates.map((candidate) => {
+                const { Icon, style } = glyphFor(candidate.id);
+                return (
+                  <label
+                    key={`${candidate.path}:${candidate.id}`}
+                    className={cn(
+                      "flex cursor-pointer gap-3 rounded-2xl p-4 transition-shadow",
+                      candidate.valid
+                        ? "bg-white shadow-[0_1px_0_0_rgba(0,0,0,0.02),0_8px_24px_-14px_rgba(0,0,0,0.16)] hover:shadow-[0_12px_30px_-16px_rgba(0,0,0,0.22)]"
+                        : "border border-red-500/30 bg-red-500/5",
+                    )}
+                  >
                     <input
                       type="checkbox"
-                      className="mt-1 accent-primary"
+                      className="mt-1 size-4 accent-primary"
                       checked={!!selected[candidate.id]}
                       disabled={!candidate.valid}
                       onChange={(event) =>
                         setSelected((prev) => ({ ...prev, [candidate.id]: event.target.checked }))
                       }
                     />
+                    <div className="admin-entity-glyph" style={style}>
+                      <Icon className="size-[18px]" />
+                    </div>
                     <div className="min-w-0 flex-1">
                       <div className="truncate text-sm font-semibold">
                         {displaySkillName(candidate)}
@@ -383,9 +459,9 @@ export default function AdminSkillsPage() {
                         <span>{candidate.file_count ?? 0} files</span>
                       </div>
                     </div>
-                  </div>
-                </label>
-              ))}
+                  </label>
+                );
+              })}
             </div>
           </section>
         ) : null}
@@ -408,7 +484,7 @@ export default function AdminSkillsPage() {
               />
             ))
           ) : (
-            <div className="col-span-full rounded-xl border border-dashed border-border p-8 text-center text-sm text-muted-foreground">
+            <div className="col-span-full rounded-2xl border border-dashed border-border p-8 text-center text-sm text-muted-foreground">
               No skills imported yet.
             </div>
           )}
@@ -462,12 +538,13 @@ function SkillCard({
   onDelete: () => void;
   working: boolean;
 }) {
+  const { Icon, style } = glyphFor(skill.id);
   return (
-    <div className="admin-entity-card">
+    <div className="admin-entity-card admin-entity-card--hover">
       <Link href={href} className="block">
         <div className="flex items-start gap-3">
-          <div className="admin-entity-glyph">
-            <Sparkles className="size-[18px]" />
+          <div className="admin-entity-glyph" style={style}>
+            <Icon className="size-[18px]" />
           </div>
           <div className="min-w-0 flex-1">
             <div className="truncate text-sm font-semibold">{displaySkillName(skill)}</div>
@@ -493,16 +570,18 @@ function SkillCard({
         </div>
       </Link>
       <div className="mt-auto flex gap-2 pt-4">
-        <button
-          className="inline-flex h-8 items-center gap-2 rounded-lg border border-border px-2.5 text-sm hover:bg-accent disabled:opacity-50"
-          disabled={working}
-          onClick={onToggle}
-        >
-          {skill.enabled ? <ToggleRight className="size-4" /> : <ToggleLeft className="size-4" />}
+        <button className="admin-card-btn" disabled={working} onClick={onToggle}>
+          {working ? (
+            <LoaderCircle className="size-4 animate-spin" />
+          ) : skill.enabled ? (
+            <ToggleRight className="size-4" />
+          ) : (
+            <ToggleLeft className="size-4" />
+          )}
           {skill.enabled ? "Disable" : "Enable"}
         </button>
         <button
-          className="inline-flex h-8 items-center gap-2 rounded-lg border border-border px-2.5 text-sm text-red-600 hover:bg-red-500/10 disabled:opacity-50"
+          className="admin-card-btn admin-card-btn--danger"
           disabled={working}
           onClick={onDelete}
         >
