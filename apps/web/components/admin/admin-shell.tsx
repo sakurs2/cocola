@@ -201,7 +201,7 @@ export function AdminShell({ children }: { children: ReactNode }) {
                 Control plane
               </div>
               <div className="truncate text-sm font-medium text-foreground">
-                {currentItem?.group}
+                {currentItem?.label}
               </div>
             </div>
 

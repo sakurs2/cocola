@@ -2,14 +2,7 @@
 
 import { Users as UsersPageIcon } from "lucide-react";
 import { Button } from "@/components/ui/button";
-import {
-  AdminAlert,
-  AdminDrawer,
-  AdminMetric,
-  AdminRefreshButton,
-  AdminTable,
-  AdminToolbar,
-} from "@/components/admin/admin-ui";
+import { AdminAlert, AdminDrawer } from "@/components/admin/admin-ui";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -34,7 +27,7 @@ import {
   UserPlus,
 } from "lucide-react";
 import { signOut, useSession } from "next-auth/react";
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState, type ReactNode } from "react";
 
 type Role = "user" | "admin";
 
@@ -318,28 +311,6 @@ export default function AdminUsersPage() {
 
   return (
     <main className="min-h-screen bg-background text-foreground">
-      <header className="border-b border-border">
-        <div className="mx-auto flex h-16 max-w-7xl items-center gap-3 px-6">
-          <div className="admin-page-icon">
-            <UsersPageIcon className="size-[18px]" />
-          </div>
-          <div className="min-w-0 flex-1">
-            <h1 className="truncate text-base font-semibold">Users</h1>
-            <p className="truncate text-xs text-muted-foreground">
-              Whitelist accounts and admin access
-            </p>
-          </div>
-          <AdminRefreshButton
-            variant="outline"
-            size="sm"
-            onClick={() => void refresh()}
-            disabled={loading}
-            refreshing={loading}
-          >
-            Refresh
-          </AdminRefreshButton>
-        </div>
-      </header>
 
       <div className="mx-auto max-w-7xl space-y-6 px-6 py-6">
         {error && <AdminAlert tone="error">{error}</AdminAlert>}
@@ -349,14 +320,29 @@ export default function AdminUsersPage() {
           </AdminAlert>
         )}
 
-        <section className="grid gap-3 md:grid-cols-3">
-          <AdminMetric label="Users" value={String(stats.total)} tone="sky" />
-          <AdminMetric label="Enabled" value={String(stats.enabled)} tone="green" />
-          <AdminMetric label="Admins" value={String(stats.admins)} tone="violet" />
+        <section className="grid gap-4 md:grid-cols-3">
+          <MetricCard
+            tone="blue"
+            label="Users"
+            value={stats.total}
+            icon={<UsersPageIcon className="size-[22px]" />}
+          />
+          <MetricCard
+            tone="green"
+            label="Enabled"
+            value={stats.enabled}
+            icon={<CheckCircle2 className="size-[22px]" />}
+          />
+          <MetricCard
+            tone="violet"
+            label="Admins"
+            value={stats.admins}
+            icon={<ShieldCheck className="size-[22px]" />}
+          />
         </section>
 
         {/* Toolbar: search + filters + create */}
-        <AdminToolbar>
+        <div className="admin-user-toolbar">
           <div className="relative min-w-[240px] flex-1">
             <Search className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
             <input
@@ -388,134 +374,128 @@ export default function AdminUsersPage() {
             ]}
             contentClassName="cocola-admin-ui"
           />
-          <Button onClick={openCreate}>
+          <Button onClick={openCreate} className="admin-primary-btn">
             <UserPlus className="mr-2 size-4" />
             New user
           </Button>
-        </AdminToolbar>
+        </div>
 
-        <AdminTable>
-          <table className="w-full min-w-[640px] text-sm">
-            <thead className="border-b border-border bg-muted/50 text-xs text-muted-foreground">
-              <tr>
-                <th className="px-4 py-3 text-left font-medium">User</th>
-                <th className="px-4 py-3 text-left font-medium">Role</th>
-                <th className="px-4 py-3 text-left font-medium">Status</th>
-                <th className="px-4 py-3 text-left font-medium">Last login</th>
-                <th className="px-4 py-3 text-right font-medium">Actions</th>
-              </tr>
-            </thead>
-            <tbody>
-              {loading && users.length === 0 ? (
-                <tr>
-                  <td colSpan={5} className="px-4 py-10 text-center text-muted-foreground">
-                    Loading users...
-                  </td>
-                </tr>
-              ) : filtered.length === 0 ? (
-                <tr>
-                  <td colSpan={5} className="px-4 py-10 text-center text-muted-foreground">
-                    {users.length === 0 ? "No users found" : "No users match your filters"}
-                  </td>
-                </tr>
-              ) : (
-                filtered.map((user) => {
-                  const busy = actingId === user.id;
-                  const protectedAdmin = isProtectedAdmin(user);
-                  const selfUser = isCurrentUser(user, currentUserEmail);
-                  const roleLocked = selfUser || (protectedAdmin && user.role === "admin");
-                  const disableLocked = selfUser || (protectedAdmin && user.enabled);
-                  const deleteLocked = selfUser || protectedAdmin;
-                  return (
-                    <tr key={user.id} className="border-b border-border/70 last:border-0">
-                      <td className="px-4 py-3">
-                        <div className="font-medium">{user.username || user.email}</div>
-                        <div className="max-w-[260px] truncate text-xs text-muted-foreground">
-                          {user.username} / {user.email}
-                        </div>
-                      </td>
-                      <td className="px-4 py-3">
-                        <RolePill role={user.role} />
-                      </td>
-                      <td className="px-4 py-3">
-                        <StatusPill enabled={user.enabled} />
-                      </td>
-                      <td className="px-4 py-3 text-muted-foreground">
-                        {formatTime(user.last_login_at)}
-                      </td>
-                      <td className="px-4 py-3">
-                        <div className="flex justify-end">
-                          <DropdownMenu>
-                            <DropdownMenuTrigger asChild>
-                              <Button
-                                variant="ghost"
-                                size="icon"
-                                className="size-9"
-                                disabled={busy}
-                                aria-label="Actions"
-                              >
-                                {busy ? (
-                                  <LoaderCircle className="size-4 animate-spin" />
-                                ) : (
-                                  <MoreHorizontal className="size-4" />
-                                )}
-                              </Button>
-                            </DropdownMenuTrigger>
-                            <DropdownMenuContent align="end">
-                              <DropdownMenuItem onSelect={() => openEdit(user)}>
-                                <UserCog className="size-4" />
-                                Edit
-                              </DropdownMenuItem>
-                              <DropdownMenuItem onSelect={() => openReset(user)}>
-                                <KeyRound className="size-4" />
-                                Reset password
-                              </DropdownMenuItem>
-                              <DropdownMenuItem
-                                disabled={roleLocked}
-                                onSelect={() =>
-                                  void patchUser(
-                                    user,
-                                    { role: user.role === "admin" ? "user" : "admin" },
-                                    "User updated",
-                                  )
-                                }
-                              >
-                                <ShieldCheck className="size-4" />
-                                {user.role === "admin" ? "Make user" : "Make admin"}
-                              </DropdownMenuItem>
-                              <DropdownMenuItem
-                                disabled={disableLocked}
-                                onSelect={() =>
-                                  void patchUser(
-                                    user,
-                                    { enabled: !user.enabled },
-                                    user.enabled ? "User disabled" : "User enabled",
-                                  )
-                                }
-                              >
-                                <Power className="size-4" />
-                                {user.enabled ? "Disable" : "Enable"}
-                              </DropdownMenuItem>
-                              <DropdownMenuSeparator />
-                              <DropdownMenuItem
-                                variant="destructive"
-                                disabled={deleteLocked}
-                                onSelect={() => setDeleteTarget(user)}
-                              >
-                                <Trash2 className="size-4" />
-                                Delete
-                              </DropdownMenuItem>
-                            </DropdownMenuContent>
-                          </DropdownMenu>
-                        </div>
-                      </td>
-                    </tr>
-                  );
-                })
-              )}
-            </tbody>
-          </table>
-        </AdminTable>
+        <div className="admin-user-list">
+          <div className="admin-user-cols">
+            <div>User</div>
+            <div>Role</div>
+            <div>Status</div>
+            <div>Last login</div>
+            <div className="admin-user-actions">Actions</div>
+          </div>
+          {loading && users.length === 0 ? (
+            <div className="admin-user-state">Loading users...</div>
+          ) : filtered.length === 0 ? (
+            <div className="admin-user-state">
+              {users.length === 0 ? "No users found" : "No users match your filters"}
+            </div>
+          ) : (
+            filtered.map((user) => {
+              const busy = actingId === user.id;
+              const protectedAdmin = isProtectedAdmin(user);
+              const selfUser = isCurrentUser(user, currentUserEmail);
+              const roleLocked = selfUser || (protectedAdmin && user.role === "admin");
+              const disableLocked = selfUser || (protectedAdmin && user.enabled);
+              const deleteLocked = selfUser || protectedAdmin;
+              return (
+                <div key={user.id} className="admin-user-row">
+                  <div className="admin-user-cell">
+                    <span className={cn("admin-user-avatar", avatarTone(user))}>
+                      {avatarInitials(user)}
+                    </span>
+                    <div className="min-w-0">
+                      <div className="admin-user-name">{user.username || user.email}</div>
+                      <div className="admin-user-sub">
+                        {user.username} / {user.email}
+                      </div>
+                    </div>
+                  </div>
+                  <div>
+                    <RolePill role={user.role} />
+                  </div>
+                  <div>
+                    <StatusPill enabled={user.enabled} />
+                  </div>
+                  <div className="admin-user-last">{formatTime(user.last_login_at)}</div>
+                  <div className="admin-user-actions">
+                    <div className="flex justify-center">
+                      <DropdownMenu>
+                        <DropdownMenuTrigger asChild>
+                          <Button
+                            variant="ghost"
+                            size="icon"
+                            className="size-9"
+                            disabled={busy}
+                            aria-label="Actions"
+                          >
+                            {busy ? (
+                              <LoaderCircle className="size-4 animate-spin" />
+                            ) : (
+                              <MoreHorizontal className="size-4" />
+                            )}
+                          </Button>
+                        </DropdownMenuTrigger>
+                        <DropdownMenuContent
+                          align="end"
+                          className="cocola-admin-ui admin-actions-menu"
+                        >
+                          <DropdownMenuItem onSelect={() => openEdit(user)}>
+                            <UserCog className="size-4" />
+                            Edit
+                          </DropdownMenuItem>
+                          <DropdownMenuItem onSelect={() => openReset(user)}>
+                            <KeyRound className="size-4" />
+                            Reset password
+                          </DropdownMenuItem>
+                          <DropdownMenuItem
+                            disabled={roleLocked}
+                            onSelect={() =>
+                              void patchUser(
+                                user,
+                                { role: user.role === "admin" ? "user" : "admin" },
+                                "User updated",
+                              )
+                            }
+                          >
+                            <ShieldCheck className="size-4" />
+                            {user.role === "admin" ? "Make user" : "Make admin"}
+                          </DropdownMenuItem>
+                          <DropdownMenuItem
+                            disabled={disableLocked}
+                            onSelect={() =>
+                              void patchUser(
+                                user,
+                                { enabled: !user.enabled },
+                                user.enabled ? "User disabled" : "User enabled",
+                              )
+                            }
+                          >
+                            <Power className="size-4" />
+                            {user.enabled ? "Disable" : "Enable"}
+                          </DropdownMenuItem>
+                          <DropdownMenuSeparator />
+                          <DropdownMenuItem
+                            variant="destructive"
+                            disabled={deleteLocked}
+                            onSelect={() => setDeleteTarget(user)}
+                          >
+                            <Trash2 className="size-4" />
+                            Delete
+                          </DropdownMenuItem>
+                        </DropdownMenuContent>
+                      </DropdownMenu>
+                    </div>
+                  </div>
+                </div>
+              );
+            })
+          )}
+        </div>
       </div>
 
       {/* Create / edit drawer */}
@@ -533,14 +513,18 @@ export default function AdminUsersPage() {
             <Button variant="outline" disabled={saving} onClick={closeDrawer}>
               Cancel
             </Button>
-            <Button disabled={saving || !canSubmitDrawer} onClick={() => void submitDrawer()}>
+            <Button
+              disabled={saving || !canSubmitDrawer}
+              onClick={() => void submitDrawer()}
+              className="admin-primary-btn"
+            >
               {saving ? <LoaderCircle className="mr-2 size-4 animate-spin" /> : null}
               {drawerMode === "create" ? "Create" : "Save"}
             </Button>
           </div>
         }
       >
-        <div className="space-y-4">
+        <div className="admin-drawer-form space-y-4">
           <FieldInput
             label="Username"
             value={form.username}
@@ -752,18 +736,53 @@ function CredentialRow({
   );
 }
 
+function MetricCard({
+  tone,
+  label,
+  value,
+  icon,
+}: {
+  tone: "blue" | "green" | "violet";
+  label: string;
+  value: number;
+  icon: ReactNode;
+}) {
+  return (
+    <div className="admin-metric-card" data-tone={tone}>
+      <div className="admin-metric-head">
+        <span className="admin-metric-glyph">{icon}</span>
+        <span className="admin-metric-key">{label}</span>
+      </div>
+      <div className="admin-metric-val">{value}</div>
+    </div>
+  );
+}
+
+const AVATAR_TONES = ["is-purple", "is-blue", "is-pink", "is-green"] as const;
+
+function avatarTone(user: AuthUser) {
+  if (user.role === "admin") return "is-purple";
+  const key = user.id || user.email || user.username || "";
+  let h = 0;
+  for (let i = 0; i < key.length; i++) h = (h * 31 + key.charCodeAt(i)) >>> 0;
+  return AVATAR_TONES[(h % 3) + 1] ?? "is-blue";
+}
+
+function avatarInitials(user: AuthUser) {
+  const source = (user.name || user.username || user.email || "?").trim();
+  if (!source) return "?";
+  const parts = source.split(/[\s._-]+/).filter(Boolean);
+  if (parts.length >= 2 && parts[0] && parts[1]) {
+    return (parts[0].charAt(0) + parts[1].charAt(0)).toUpperCase();
+  }
+  return source.slice(0, 2).toUpperCase();
+}
+
 function RolePill({ role }: { role: Role }) {
   const Icon = role === "admin" ? ShieldCheck : Shield;
   return (
-    <span
-      className={cn(
-        "inline-flex items-center gap-1 rounded-full px-2 py-1 text-xs font-medium",
-        role === "admin"
-          ? "bg-amber-500/15 text-amber-700 dark:text-amber-300"
-          : "bg-muted text-muted-foreground",
-      )}
-    >
-      <Icon className="size-3.5" />
+    <span className={cn("admin-chip", role === "admin" ? "admin-chip--admin" : "admin-chip--member")}>
+      <Icon />
       {role}
     </span>
   );
@@ -771,14 +790,8 @@ function RolePill({ role }: { role: Role }) {
 
 function StatusPill({ enabled }: { enabled: boolean }) {
   return (
-    <span
-      className={cn(
-        "inline-flex rounded-full px-2 py-1 text-xs font-medium",
-        enabled
-          ? "bg-emerald-500/15 text-emerald-700 dark:text-emerald-300"
-          : "bg-destructive/10 text-destructive",
-      )}
-    >
+    <span className={cn("admin-chip", enabled ? "admin-chip--ok" : "admin-chip--off")}>
+      <span className="admin-chip-dot" />
       {enabled ? "Enabled" : "Disabled"}
     </span>
   );

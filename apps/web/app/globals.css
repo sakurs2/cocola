@@ -678,6 +678,274 @@
     transform: scale(1.04);
   }
 
+  /* ===== users page: metric cards (overview language) ===== */
+  .cocola-admin-ui .admin-metric-card {
+    --card-to: hsl(258 90% 62%);
+    display: flex;
+    flex-direction: column;
+    gap: 0.65rem;
+    align-items: flex-start;
+    border: none;
+    border-radius: 16px;
+    background: #fff;
+    padding: 20px 22px;
+    box-shadow:
+      0 1px 0 0 rgba(0, 0, 0, 0.02),
+      0 8px 24px -12px rgba(0, 0, 0, 0.18);
+    transition:
+      transform 200ms ease,
+      box-shadow 200ms ease;
+  }
+  .cocola-admin-ui .admin-metric-card:hover {
+    transform: translateY(-3px) scale(1.005);
+    box-shadow: 0 18px 40px -18px rgba(120, 40, 200, 0.35);
+  }
+  .cocola-admin-ui .admin-metric-card[data-tone="blue"] { --card-to: #2563eb; }
+  .cocola-admin-ui .admin-metric-card[data-tone="green"] { --card-to: #16a34a; }
+  .cocola-admin-ui .admin-metric-card[data-tone="violet"] { --card-to: #7c3aed; }
+  .cocola-admin-ui .admin-metric-head {
+    display: flex;
+    align-items: center;
+    gap: 0.6rem;
+    width: 100%;
+  }
+  .cocola-admin-ui .admin-metric-glyph {
+    display: grid;
+    flex: 0 0 auto;
+    place-items: center;
+    color: var(--card-to);
+    background: none;
+  }
+  .cocola-admin-ui .admin-metric-key {
+    font-size: 13.5px;
+    font-weight: 600;
+    color: #71717a;
+  }
+  .cocola-admin-ui .admin-metric-val {
+    font-size: 34px;
+    font-weight: 800;
+    letter-spacing: -0.02em;
+    line-height: 1;
+    color: #18181b;
+    font-variant-numeric: tabular-nums;
+  }
+
+  /* ===== users page: HeroUI list ===== */
+  .cocola-admin-ui .admin-user-list {
+    overflow-x: auto;
+    background: #fff;
+    border-radius: 18px;
+    padding: 8px;
+    box-shadow:
+      0 1px 0 0 rgba(0, 0, 0, 0.02),
+      0 8px 30px -14px rgba(0, 0, 0, 0.16);
+  }
+  .cocola-admin-ui .admin-user-cols,
+  .cocola-admin-ui .admin-user-row {
+    display: grid;
+    grid-template-columns: 2.6fr 1fr 1fr 1.2fr 64px;
+    gap: 12px;
+    align-items: center;
+    min-width: 620px;
+  }
+  .cocola-admin-ui .admin-user-cols {
+    padding: 8px 14px 10px;
+    font-size: 11px;
+    font-weight: 700;
+    letter-spacing: 0.07em;
+    text-transform: uppercase;
+    color: #a1a1aa;
+  }
+  .cocola-admin-ui .admin-user-row {
+    padding: 12px 14px;
+    border-radius: 14px;
+    transition: background 180ms ease, transform 180ms ease;
+  }
+  .cocola-admin-ui .admin-user-row:hover {
+    background: #faf5ff;
+    transform: scale(1.006);
+  }
+  .cocola-admin-ui .admin-user-cell {
+    display: flex;
+    align-items: center;
+    gap: 14px;
+    min-width: 0;
+  }
+  .cocola-admin-ui .admin-user-avatar {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    flex: 0 0 auto;
+    width: 44px;
+    height: 44px;
+    border-radius: 14px;
+    font-size: 15px;
+    font-weight: 700;
+    color: #fff;
+    background: linear-gradient(135deg, #7828c8, #9353d3);
+  }
+  .cocola-admin-ui .admin-user-avatar.is-purple { background: linear-gradient(135deg, #7828c8, #9353d3); }
+  .cocola-admin-ui .admin-user-avatar.is-blue { background: linear-gradient(135deg, #0072f5, #00b7fa); }
+  .cocola-admin-ui .admin-user-avatar.is-pink { background: linear-gradient(135deg, #f31260, #ff4ecd); }
+  .cocola-admin-ui .admin-user-avatar.is-green { background: linear-gradient(135deg, #17c964, #0bd48a); }
+  .cocola-admin-ui .admin-user-name {
+    font-size: 14.5px;
+    font-weight: 700;
+    color: #11181c;
+  }
+  .cocola-admin-ui .admin-user-sub {
+    font-size: 12.5px;
+    color: #71717a;
+    margin-top: 1px;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+  .cocola-admin-ui .admin-user-last {
+    font-size: 13.5px;
+    color: #0f172a;
+    font-variant-numeric: tabular-nums;
+  }
+  .cocola-admin-ui .admin-user-actions {
+    text-align: center;
+  }
+  .cocola-admin-ui .admin-user-state {
+    padding: 40px 14px;
+    text-align: center;
+    color: #71717a;
+    font-size: 14px;
+  }
+
+  /* center-align non-user columns (Role / Status / Last login / Actions) */
+  .cocola-admin-ui .admin-user-cols > div:nth-child(n + 2),
+  .cocola-admin-ui .admin-user-row > div:nth-child(n + 2) {
+    text-align: center;
+    justify-content: center;
+  }
+
+  /* guaranteed one-shot spin feedback on every refresh click */
+  .cocola-admin-ui .admin-user-refresh .admin-refresh-icon {
+    animation: cocola-admin-refresh-spin 600ms cubic-bezier(0.4, 0, 0.2, 1);
+  }
+
+  /* capsule chips */
+  .cocola-admin-ui .admin-chip {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    font-size: 12px;
+    font-weight: 700;
+    padding: 4px 11px;
+    border-radius: 999px;
+  }
+  .cocola-admin-ui .admin-chip svg { width: 13px; height: 13px; }
+  .cocola-admin-ui .admin-chip .admin-chip-dot {
+    width: 7px;
+    height: 7px;
+    border-radius: 50%;
+    background: currentColor;
+  }
+  .cocola-admin-ui .admin-chip--admin { background: #f4e6ff; color: #7828c8; }
+  .cocola-admin-ui .admin-chip--member { background: #e6f0ff; color: #0369a1; }
+  .cocola-admin-ui .admin-chip--ok { background: #e8faf0; color: #12a150; }
+  .cocola-admin-ui .admin-chip--off { background: #f1f1f4; color: #71717a; }
+
+  /* ===== users page fixes (toolbar / refresh / dropdown / drawer) ===== */
+  .cocola-admin-ui .admin-user-toolbar {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 12px;
+    background: transparent;
+    border: none;
+    box-shadow: none;
+    padding: 0;
+  }
+  .cocola-admin-ui .admin-user-toolbar input {
+    border-radius: 14px;
+  }
+
+  .cocola-admin-ui .admin-user-refresh {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    height: 40px;
+    padding: 0 16px;
+    border-radius: 12px;
+    border: 1px solid hsl(var(--border));
+    background: #fff;
+    font-size: 13.5px;
+    font-weight: 600;
+    color: #3f3f46;
+    transition: background 160ms ease, border-color 160ms ease, transform 160ms ease;
+  }
+  .cocola-admin-ui .admin-user-refresh:hover {
+    background: #faf5ff;
+    border-color: #d8b4fe;
+    color: #6b21a8;
+  }
+  .cocola-admin-ui .admin-user-refresh:active { transform: scale(0.98); }
+  .cocola-admin-ui .admin-user-refresh:disabled { opacity: 0.55; pointer-events: none; }
+
+  /* purple primary buttons (page-local, does not touch shared Button) */
+  .cocola-admin-ui .admin-primary-btn {
+    background: linear-gradient(135deg, #7828c8, #9353d3) !important;
+    color: #fff !important;
+    border: none !important;
+    box-shadow: 0 8px 20px -10px rgba(120, 40, 200, 0.6);
+    transition: transform 160ms ease, box-shadow 160ms ease, filter 160ms ease;
+  }
+  .cocola-admin-ui .admin-primary-btn:hover {
+    filter: brightness(1.05);
+    transform: translateY(-1px);
+    box-shadow: 0 14px 28px -12px rgba(120, 40, 200, 0.7);
+  }
+  .cocola-admin-ui .admin-primary-btn:disabled {
+    filter: grayscale(0.2);
+    opacity: 0.6;
+    box-shadow: none;
+    transform: none;
+  }
+
+  /* actions dropdown -> force light popover (portaled outside scope) */
+  .admin-actions-menu {
+    background: #fff !important;
+    color: #0f172a !important;
+    border: 1px solid #ececf1 !important;
+    border-radius: 14px !important;
+    padding: 6px !important;
+    box-shadow: 0 12px 30px -12px rgba(0, 0, 0, 0.25) !important;
+  }
+  .admin-actions-menu [role="menuitem"] {
+    border-radius: 10px;
+    font-size: 13px;
+    color: #27272a;
+  }
+  .admin-actions-menu [role="menuitem"]:hover,
+  .admin-actions-menu [role="menuitem"][data-highlighted] {
+    background: #faf5ff;
+    color: #6b21a8;
+  }
+  .admin-actions-menu [role="menuitem"][data-variant="destructive"],
+  .admin-actions-menu [role="menuitem"].text-destructive {
+    color: #dc2626;
+  }
+  .admin-actions-menu [role="menuitem"][data-variant="destructive"]:hover,
+  .admin-actions-menu [role="menuitem"][data-variant="destructive"][data-highlighted] {
+    background: #fef2f2;
+    color: #b91c1c;
+  }
+
+  /* new-user drawer form polish */
+  .cocola-admin-ui .admin-drawer-form input {
+    border-radius: 12px;
+  }
+  .cocola-admin-ui .admin-drawer-form input:focus {
+    border-color: #a855f7;
+    box-shadow: 0 0 0 3px rgba(168, 85, 247, 0.18);
+    outline: none;
+  }
+
   .cocola-admin-ui .admin-empty-icon {
     color: hsl(var(--primary));
     background: hsl(var(--accent));
