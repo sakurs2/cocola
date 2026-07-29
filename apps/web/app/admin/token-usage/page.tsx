@@ -328,10 +328,26 @@ export default function AdminTokenUsagePage() {
         ) : null}
 
         <section className="grid gap-3 md:grid-cols-5">
-          <Metric label="Total Tokens" value={formatNumber(summary.total_tokens)} />
-          <Metric label="Input Tokens" value={formatNumber(summary.prompt_tokens)} />
-          <Metric label="Output Tokens" value={formatNumber(summary.completion_tokens)} />
-          <Metric label="Calls" value={formatNumber(summary.calls)} />
+          <Metric
+            label="Total Tokens"
+            value={compactNumber(summary.total_tokens)}
+            title={formatNumber(summary.total_tokens)}
+          />
+          <Metric
+            label="Input Tokens"
+            value={compactNumber(summary.prompt_tokens)}
+            title={formatNumber(summary.prompt_tokens)}
+          />
+          <Metric
+            label="Output Tokens"
+            value={compactNumber(summary.completion_tokens)}
+            title={formatNumber(summary.completion_tokens)}
+          />
+          <Metric
+            label="Calls"
+            value={compactNumber(summary.calls)}
+            title={formatNumber(summary.calls)}
+          />
           <Metric label="Users" value={formatNumber(summary.user_count)} />
         </section>
 
@@ -395,17 +411,29 @@ export default function AdminTokenUsagePage() {
                           <div className="font-medium">{displayUser(user)}</div>
                           <div className="text-xs text-muted-foreground">{user.user_id}</div>
                         </td>
-                        <td className="px-4 py-3 text-right tabular-nums">
-                          {formatNumber(user.total_tokens)}
+                        <td
+                          className="px-4 py-3 text-right tabular-nums"
+                          title={formatNumber(user.total_tokens)}
+                        >
+                          {compactNumber(user.total_tokens)}
                         </td>
-                        <td className="px-4 py-3 text-right tabular-nums">
-                          {formatNumber(user.prompt_tokens)}
+                        <td
+                          className="px-4 py-3 text-right tabular-nums"
+                          title={formatNumber(user.prompt_tokens)}
+                        >
+                          {compactNumber(user.prompt_tokens)}
                         </td>
-                        <td className="px-4 py-3 text-right tabular-nums">
-                          {formatNumber(user.completion_tokens)}
+                        <td
+                          className="px-4 py-3 text-right tabular-nums"
+                          title={formatNumber(user.completion_tokens)}
+                        >
+                          {compactNumber(user.completion_tokens)}
                         </td>
-                        <td className="px-4 py-3 text-right tabular-nums">
-                          {formatNumber(user.calls)}
+                        <td
+                          className="px-4 py-3 text-right tabular-nums"
+                          title={formatNumber(user.calls)}
+                        >
+                          {compactNumber(user.calls)}
                         </td>
                         <td className="px-4 py-3 text-xs text-muted-foreground">
                           {user.last_used_at ? formatDateTime(user.last_used_at) : "-"}
@@ -451,9 +479,14 @@ export default function AdminTokenUsagePage() {
               <div className="grid grid-cols-2 gap-3">
                 <Metric
                   label="User Tokens"
-                  value={formatNumber(userReport?.summary.total_tokens ?? 0)}
+                  value={compactNumber(userReport?.summary.total_tokens ?? 0)}
+                  title={formatNumber(userReport?.summary.total_tokens ?? 0)}
                 />
-                <Metric label="User Calls" value={formatNumber(userReport?.summary.calls ?? 0)} />
+                <Metric
+                  label="User Calls"
+                  value={compactNumber(userReport?.summary.calls ?? 0)}
+                  title={formatNumber(userReport?.summary.calls ?? 0)}
+                />
               </div>
               <div className="h-[260px]">
                 {userReport && userReport.trend.length > 0 ? (
@@ -472,11 +505,13 @@ export default function AdminTokenUsagePage() {
   );
 }
 
-function Metric({ label, value }: { label: string; value: string }) {
+function Metric({ label, value, title }: { label: string; value: string; title?: string }) {
   return (
     <div className="admin-metric-card" data-tone="rose">
       <div className="admin-metric-key">{label}</div>
-      <div className="admin-metric-val truncate">{value}</div>
+      <div className="admin-metric-val truncate" title={title}>
+        {value}
+      </div>
     </div>
   );
 }
