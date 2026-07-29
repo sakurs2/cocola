@@ -7,11 +7,13 @@ import {
   Boxes,
   Check,
   CircleCheck,
+  CircleCheckBig,
   KeyRound,
   LoaderCircle,
   MoreHorizontal,
   PlugZap,
   Plus,
+  RefreshCw,
   Route,
   Search,
   Star,
@@ -19,18 +21,7 @@ import {
 } from "lucide-react";
 import Image from "next/image";
 import { useCallback, useEffect, useMemo, useState, type ReactNode } from "react";
-import {
-  AdminAlert,
-  AdminConfirmDialog,
-  AdminDrawer,
-  AdminEmptyState,
-  AdminPage,
-  AdminPageHeader,
-  AdminRefreshButton,
-  AdminStatusBadge,
-  AdminTable,
-  AdminToolbar,
-} from "@/components/admin/admin-ui";
+import { AdminAlert, AdminConfirmDialog, AdminDrawer } from "@/components/admin/admin-ui";
 import { Button } from "@/components/ui/button";
 import {
   DropdownMenu,
@@ -42,6 +33,8 @@ import {
 import { SelectControl } from "@/components/ui/select-control";
 import {
   LOCAL_SIMPLE_ICON_PATHS,
+  lobeIconPath,
+  normalizeLobeIconSlug,
   SIMPLE_ICON_FALLBACK_BADGES,
   SIMPLE_ICON_LABELS,
   SIMPLE_ICON_SLUGS,
@@ -200,6 +193,7 @@ export default function AdminModelsPage() {
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
   const [formError, setFormError] = useState("");
+  const [refreshTick, setRefreshTick] = useState(0);
 
   const providerByID = useMemo(
     () => new Map(providers.map((provider) => [provider.id, provider])),
@@ -482,94 +476,140 @@ export default function AdminModelsPage() {
     : false;
 
   return (
-    <AdminPage>
-      <AdminPageHeader
-        eyebrow="Intelligence"
-        title="Models"
-        description="Connect model providers and decide which routes are available to each Agent Runtime."
-        icon={<ModelsPageIcon className="size-5" />}
-        actions={
-          <AdminRefreshButton
-            variant="outline"
-            refreshing={loading}
+    <main className="min-h-screen bg-background text-foreground">
+      <div className="mx-auto max-w-7xl space-y-6 px-6 py-6">
+        <div className="admin-models-head">
+          <span className="admin-models-icon">
+            <ModelsPageIcon className="size-[22px]" />
+          </span>
+          <div>
+            <div className="admin-models-title">Models</div>
+            <div className="admin-models-sub">
+              Connect model providers and decide which routes are available to each Agent Runtime.
+            </div>
+          </div>
+          <div className="flex-1" />
+          <button
+            type="button"
+            className="admin-user-refresh"
             disabled={loading}
-            onClick={() => void load()}
+            onClick={() => {
+              setRefreshTick((tick) => tick + 1);
+              void load();
+            }}
           >
+            <RefreshCw key={refreshTick} className="admin-refresh-icon size-4" />
             Refresh
-          </AdminRefreshButton>
-        }
-      />
-
-      {error ? <AdminAlert tone="error">{error}</AdminAlert> : null}
-
-      <div className="flex flex-wrap items-center justify-between gap-3 border-b border-border/70">
-        <div className="flex items-center gap-1" role="tablist" aria-label="Model configuration">
-          <ViewTab
-            active={view === "models"}
-            onClick={() => {
-              setView("models");
-              setQuery("");
-            }}
-          >
-            Model routes <Count>{models.length}</Count>
-          </ViewTab>
-          <ViewTab
-            active={view === "providers"}
-            onClick={() => {
-              setView("providers");
-              setQuery("");
-            }}
-          >
-            Providers <Count>{visibleProviders.length}</Count>
-          </ViewTab>
+          </button>
         </div>
-        <Button className="mb-2 gap-2" onClick={view === "models" ? createModel : createProvider}>
-          <Plus className="size-4" />
-          {view === "models" ? "Add model" : "Add provider"}
-        </Button>
-      </div>
 
-      <AdminToolbar>
-        <label className="flex min-w-0 flex-1 items-center gap-2 rounded-xl border border-input bg-background px-3 sm:max-w-md">
-          <Search className="size-4 shrink-0 text-muted-foreground" />
-          <input
-            value={query}
-            onChange={(event) => setQuery(event.target.value)}
-            placeholder={view === "models" ? "Find a model route" : "Find a provider"}
-            className="h-10 min-w-0 flex-1 bg-transparent text-sm outline-none placeholder:text-muted-foreground"
+        {error ? <AdminAlert tone="error">{error}</AdminAlert> : null}
+
+        <section className="grid gap-4 md:grid-cols-4">
+          <MetricCard
+            tone="violet"
+            label="Model routes"
+            value={models.length}
+            icon={<Route className="size-[22px]" />}
           />
-        </label>
-      </AdminToolbar>
+          <MetricCard
+            tone="blue"
+            label="Providers"
+            value={providers.filter((provider) => provider.type !== "openai_embeddings").length}
+            icon={<Boxes className="ic-boxes size-[22px]" />}
+          />
+          <MetricCard
+            tone="green"
+            label="Enabled"
+            value={models.filter((model) => model.enabled).length}
+            icon={<CircleCheckBig className="size-[22px]" />}
+          />
+          <MetricCard
+            tone="amber"
+            label="Default set"
+            value={models.filter((model) => model.is_default).length}
+            icon={<Star className="size-[22px]" />}
+          />
+        </section>
 
-      {view === "models" ? (
-        <ModelsTable
-          models={visibleModels}
-          providerByID={providerByID}
-          loading={loading}
-          saving={saving}
-          onAdd={createModel}
-          onEdit={editModel}
-          onDefault={(model) => void setDefault(model)}
-          onDelete={(model) =>
-            setDeleteTarget({ kind: "model", id: model.id, name: model.label || model.alias })
-          }
-        />
-      ) : (
-        <ProvidersTable
-          providers={visibleProviders}
-          routeCountByProvider={routeCountByProvider}
-          loading={loading}
-          onAdd={createProvider}
-          onEdit={editProvider}
-          onDelete={(provider) =>
-            setDeleteTarget({
-              kind: "provider",
-              id: provider.id,
-              name: provider.name || provider.id,
-            })
-          }
-        />
-      )}
+        <div className="admin-models-tabbar">
+          <div className="admin-models-tabs" role="tablist" aria-label="Model configuration">
+            <button
+              type="button"
+              role="tab"
+              aria-selected={view === "models"}
+              className={cn("admin-models-tab", view === "models" && "is-active")}
+              onClick={() => {
+                setView("models");
+                setQuery("");
+              }}
+            >
+              <Route className="size-[15px]" />
+              <span>Model routes</span>
+              <span className="admin-models-count">{models.length}</span>
+            </button>
+            <button
+              type="button"
+              role="tab"
+              aria-selected={view === "providers"}
+              className={cn("admin-models-tab", view === "providers" && "is-active")}
+              onClick={() => {
+                setView("providers");
+                setQuery("");
+              }}
+            >
+              <Boxes className="ic-boxes size-[15px]" />
+              <span>Providers</span>
+              <span className="admin-models-count">{visibleProviders.length}</span>
+            </button>
+          </div>
+          <Button
+            className="admin-primary-btn gap-2"
+            onClick={view === "models" ? createModel : createProvider}
+          >
+            <Plus className="size-4" />
+            {view === "models" ? "Add model" : "Add provider"}
+          </Button>
+        </div>
+
+        <div className="admin-user-toolbar">
+          <label className="admin-models-search">
+            <Search className="size-4" />
+            <input
+              value={query}
+              onChange={(event) => setQuery(event.target.value)}
+              placeholder={view === "models" ? "Find a model route" : "Find a provider"}
+            />
+          </label>
+        </div>
+
+        {view === "models" ? (
+          <ModelsList
+            models={visibleModels}
+            providerByID={providerByID}
+            loading={loading}
+            saving={saving}
+            onEdit={editModel}
+            onDefault={(model) => void setDefault(model)}
+            onDelete={(model) =>
+              setDeleteTarget({ kind: "model", id: model.id, name: model.label || model.alias })
+            }
+          />
+        ) : (
+          <ProvidersList
+            providers={visibleProviders}
+            routeCountByProvider={routeCountByProvider}
+            loading={loading}
+            onEdit={editProvider}
+            onDelete={(provider) =>
+              setDeleteTarget({
+                kind: "provider",
+                id: provider.id,
+                name: provider.name || provider.id,
+              })
+            }
+          />
+        )}
 
       <AdminDrawer
         open={providerDrawerOpen}
@@ -663,8 +703,8 @@ export default function AdminModelsPage() {
             />
           </Field>
 
-          <div className="rounded-2xl border border-blue-500/20 bg-blue-500/[0.06] p-3">
-            <div className="text-[11px] font-semibold uppercase tracking-[0.12em] text-blue-700/75">
+          <div className="rounded-2xl border border-[#7828c8]/20 bg-[#7828c8]/[0.06] p-3">
+            <div className="text-[11px] font-semibold uppercase tracking-[0.12em] text-[#7828c8]/80">
               Request path
             </div>
             <code className="mt-1 block break-all text-xs text-foreground">
@@ -1004,6 +1044,7 @@ export default function AdminModelsPage() {
                         options={SIMPLE_ICON_SLUGS.map((slug) => ({
                           value: slug,
                           label: SIMPLE_ICON_LABELS[slug] ?? slug,
+                          icon: <BrandGlyph slug={slug} />,
                         }))}
                         contentClassName="cocola-admin-ui"
                       />
@@ -1040,16 +1081,144 @@ export default function AdminModelsPage() {
         busy={saving}
         onConfirm={() => void deleteResource()}
       />
-    </AdminPage>
+      </div>
+    </main>
   );
 }
 
-function ModelsTable({
+function MetricCard({
+  tone,
+  label,
+  value,
+  icon,
+}: {
+  tone: "blue" | "green" | "violet" | "amber";
+  label: string;
+  value: number;
+  icon: ReactNode;
+}) {
+  return (
+    <div className="admin-metric-card" data-tone={tone}>
+      <div className="admin-metric-head">
+        <span className="admin-metric-glyph">{icon}</span>
+        <span className="admin-metric-key">{label}</span>
+      </div>
+      <div className="admin-metric-val">{value}</div>
+    </div>
+  );
+}
+
+function BrandIcon({
+  slug,
+  fallbackText,
+  imageSrc,
+}: {
+  slug?: string;
+  fallbackText: string;
+  imageSrc?: string;
+}) {
+  const [lobeFailed, setLobeFailed] = useState(false);
+  const [localFailed, setLocalFailed] = useState(false);
+
+  if (imageSrc) {
+    return (
+      <span className="admin-brand-icon">
+        <Image src={imageSrc} alt="" width={24} height={24} className="admin-brand-img" unoptimized />
+      </span>
+    );
+  }
+
+  const normalized = normalizeLobeIconSlug(slug);
+  const lobe = normalized && !lobeFailed ? lobeIconPath(normalized) : "";
+  const local = slug ? LOCAL_SIMPLE_ICON_PATHS[slug.toLowerCase()] : "";
+
+  if (lobe) {
+    return (
+      <span className="admin-brand-icon">
+        <Image
+          src={lobe}
+          alt=""
+          width={24}
+          height={24}
+          className="admin-brand-img"
+          unoptimized
+          onError={() => setLobeFailed(true)}
+        />
+      </span>
+    );
+  }
+  if (local && !localFailed) {
+    return (
+      <span className="admin-brand-icon">
+        <Image
+          src={local}
+          alt=""
+          width={24}
+          height={24}
+          className="admin-brand-img"
+          unoptimized
+          onError={() => setLocalFailed(true)}
+        />
+      </span>
+    );
+  }
+  return <span className="admin-brand-fallback">{fallbackText}</span>;
+}
+
+function BrandGlyph({ slug }: { slug: string }) {
+  const [lobeFailed, setLobeFailed] = useState(false);
+  const [localFailed, setLocalFailed] = useState(false);
+
+  const normalized = normalizeLobeIconSlug(slug);
+  const lobe = normalized && !lobeFailed ? lobeIconPath(normalized) : "";
+  const local = slug ? LOCAL_SIMPLE_ICON_PATHS[slug.toLowerCase()] : "";
+  const fallbackText =
+    SIMPLE_ICON_FALLBACK_BADGES[slug.toLowerCase()] || slug.slice(0, 2).toUpperCase() || "AI";
+
+  if (lobe) {
+    return (
+      <span className="admin-brand-glyph">
+        <Image
+          src={lobe}
+          alt=""
+          width={18}
+          height={18}
+          className="admin-brand-glyph-img"
+          unoptimized
+          onError={() => setLobeFailed(true)}
+        />
+      </span>
+    );
+  }
+  if (local && !localFailed) {
+    return (
+      <span className="admin-brand-glyph">
+        <Image
+          src={local}
+          alt=""
+          width={18}
+          height={18}
+          className="admin-brand-glyph-img"
+          unoptimized
+          onError={() => setLocalFailed(true)}
+        />
+      </span>
+    );
+  }
+  return <span className="admin-brand-glyph admin-brand-glyph-fallback">{fallbackText}</span>;
+}
+
+function protoChipLabel(type: ProviderType | undefined, protocol: ModelProtocol) {
+  if (type) return providerTypeMeta(type).shortLabel;
+  if (protocol === "openai-embeddings") return "Embeddings";
+  return protocol === "openai-responses" ? "Responses API" : "Anthropic Messages";
+}
+
+function ModelsList({
   models,
   providerByID,
   loading,
   saving,
-  onAdd,
   onEdit,
   onDefault,
   onDelete,
@@ -1058,209 +1227,164 @@ function ModelsTable({
   providerByID: Map<string, LLMProvider>;
   loading: boolean;
   saving: boolean;
-  onAdd: () => void;
   onEdit: (model: LLMModel) => void;
   onDefault: (model: LLMModel) => void;
   onDelete: (model: LLMModel) => void;
 }) {
   if (!loading && models.length === 0) {
     return (
-      <AdminTable>
-        <AdminEmptyState
-          icon={<Route className="size-5" />}
-          title="No model routes"
-          description="Add a model route after connecting at least one provider."
-          action={<Button onClick={onAdd}>Add model</Button>}
-        />
-      </AdminTable>
+      <div className="admin-user-list">
+        <div className="admin-user-state">
+          No model routes — add one after connecting at least one provider.
+        </div>
+      </div>
     );
   }
   return (
-    <AdminTable>
-      <table className="w-full min-w-[880px] text-sm">
-        <thead className="border-b border-border/70 bg-muted/35 text-left text-xs text-muted-foreground">
-          <tr>
-            <Th>Model</Th>
-            <Th>Upstream API</Th>
-            <Th>Provider</Th>
-            <Th>Upstream model</Th>
-            <Th>Availability</Th>
-            <Th>
-              <span className="sr-only">Actions</span>
-            </Th>
-          </tr>
-        </thead>
-        <tbody>
-          {models.map((model) => {
-            const provider = providerByID.get(model.provider_id);
-            return (
-              <tr
-                key={model.id}
-                className="border-b border-border/60 last:border-0 hover:bg-muted/20"
+    <div className="admin-user-list">
+      <div className="admin-model-cols">
+        <div>Model</div>
+        <div>Upstream API</div>
+        <div>Provider</div>
+        <div>Availability</div>
+        <div>Actions</div>
+      </div>
+      {models.map((model) => {
+        const provider = providerByID.get(model.provider_id);
+        return (
+          <div className="admin-model-row" key={model.id}>
+            <button
+              type="button"
+              onClick={() => onEdit(model)}
+              className="admin-user-cell admin-model-namebtn"
+            >
+              <ModelIcon model={model} />
+              <span className="min-w-0">
+                <span className="admin-user-name flex items-center gap-1.5">
+                  <span className="admin-model-cell-text" title={model.label || model.alias}>
+                    {model.label || model.alias}
+                  </span>
+                  {model.is_default ? (
+                    <Star className="size-3.5 shrink-0 fill-[#f5a623] text-[#f5a623]" />
+                  ) : null}
+                </span>
+              </span>
+            </button>
+            <div className="admin-model-apicell">
+              <span
+                className="admin-chip admin-chip--proto admin-model-cell-text"
+                title={protoChipLabel(provider?.type, model.protocol)}
               >
-                <Td>
-                  <button
-                    type="button"
-                    onClick={() => onEdit(model)}
-                    className="flex max-w-xs items-center gap-3 text-left"
-                  >
-                    <ModelIcon model={model} />
-                    <span className="min-w-0">
-                      <span className="flex items-center gap-1.5 font-medium text-foreground">
-                        <span className="truncate">{model.label || model.alias}</span>
-                        {model.is_default ? (
-                          <Star className="size-3.5 fill-primary text-primary" />
-                        ) : null}
-                      </span>
-                      <code className="block truncate text-[11px] text-muted-foreground">
-                        {model.alias}
-                      </code>
-                    </span>
-                  </button>
-                </Td>
-                <Td>
-                  <div className="grid gap-1">
-                    {provider ? (
-                      <ProviderProtocolBadge type={provider.type} />
-                    ) : (
-                      <RuntimeProtocolBadge protocol={model.protocol} />
-                    )}
-                    <span className="text-[11px] text-muted-foreground">
-                      {provider
-                        ? runtimeCompatibilityForType(provider.type)
-                        : runtimeForProtocol(model.protocol)}
-                    </span>
-                  </div>
-                </Td>
-                <Td>
-                  <div className="font-medium">{provider?.name || model.provider_id}</div>
-                  <code className="text-[11px] text-muted-foreground">{model.provider_id}</code>
-                </Td>
-                <Td>
-                  <code className="text-xs text-muted-foreground">{model.real_model}</code>
-                </Td>
-                <Td>
-                  <div className="flex flex-wrap gap-1.5">
-                    <AdminStatusBadge tone={model.enabled ? "green" : "neutral"} dot>
-                      {model.enabled ? "Enabled" : "Disabled"}
-                    </AdminStatusBadge>
-                    <AdminStatusBadge tone={model.visible ? "sky" : "neutral"}>
-                      {model.visible ? "Visible" : "Hidden"}
-                    </AdminStatusBadge>
-                  </div>
-                </Td>
-                <Td>
-                  <ResourceMenu
-                    onEdit={() => onEdit(model)}
-                    onDefault={
-                      model.is_default || model.protocol === "openai-embeddings"
-                        ? undefined
-                        : () => onDefault(model)
-                    }
-                    onDelete={() => onDelete(model)}
-                    disabled={saving}
-                  />
-                </Td>
-              </tr>
-            );
-          })}
-        </tbody>
-      </table>
-    </AdminTable>
+                {protoChipLabel(provider?.type, model.protocol)}
+              </span>
+            </div>
+            <div>
+              <div
+                className="admin-model-provname admin-model-cell-text"
+                title={provider?.name || model.provider_id}
+              >
+                {provider?.name || model.provider_id}
+              </div>
+            </div>
+            <div className="admin-model-chipstack">
+              <span className={cn("admin-chip", model.enabled ? "admin-chip--ok" : "admin-chip--off")}>
+                {model.enabled ? <span className="admin-chip-dot" /> : null}
+                {model.enabled ? "Enabled" : "Disabled"}
+              </span>
+              <span
+                className={cn("admin-chip", model.visible ? "admin-chip--visible" : "admin-chip--off")}
+              >
+                {model.visible ? "Visible" : "Hidden"}
+              </span>
+            </div>
+            <div className="admin-user-actions">
+              <ResourceMenu
+                onEdit={() => onEdit(model)}
+                onDefault={
+                  model.is_default || model.protocol === "openai-embeddings"
+                    ? undefined
+                    : () => onDefault(model)
+                }
+                onDelete={() => onDelete(model)}
+                disabled={saving}
+              />
+            </div>
+          </div>
+        );
+      })}
+    </div>
   );
 }
 
-function ProvidersTable({
+function ProviderIcon({ provider }: { provider: LLMProvider }) {
+  const guess = (provider.id || provider.name || "").toLowerCase().replace(/[^a-z0-9]/g, "");
+  const fallback =
+    (provider.name || provider.id || "AI").replace(/[^A-Za-z0-9一-龥]/g, "").slice(0, 2) ||
+    "AI";
+  return <BrandIcon slug={guess} fallbackText={fallback.toUpperCase()} />;
+}
+
+function ProvidersList({
   providers,
   routeCountByProvider,
   loading,
-  onAdd,
   onEdit,
   onDelete,
 }: {
   providers: LLMProvider[];
   routeCountByProvider: Map<string, number>;
   loading: boolean;
-  onAdd: () => void;
   onEdit: (provider: LLMProvider) => void;
   onDelete: (provider: LLMProvider) => void;
 }) {
   if (!loading && providers.length === 0) {
     return (
-      <AdminTable>
-        <AdminEmptyState
-          icon={<Boxes className="size-5" />}
-          title="No providers connected"
-          description="Connect the API endpoint that will serve your first model."
-          action={<Button onClick={onAdd}>Add provider</Button>}
-        />
-      </AdminTable>
+      <div className="admin-user-list">
+        <div className="admin-user-state">
+          No providers connected — connect the API endpoint that will serve your first model.
+        </div>
+      </div>
     );
   }
   return (
-    <AdminTable>
-      <table className="w-full min-w-[820px] text-sm">
-        <thead className="border-b border-border/70 bg-muted/35 text-left text-xs text-muted-foreground">
-          <tr>
-            <Th>Provider</Th>
-            <Th>Upstream API</Th>
-            <Th>Endpoint</Th>
-            <Th>Credential</Th>
-            <Th>Models</Th>
-            <Th>Status</Th>
-            <Th>
-              <span className="sr-only">Actions</span>
-            </Th>
-          </tr>
-        </thead>
-        <tbody>
-          {providers.map((provider) => (
-            <tr
-              key={provider.id}
-              className="border-b border-border/60 last:border-0 hover:bg-muted/20"
-            >
-              <Td>
-                <button type="button" onClick={() => onEdit(provider)} className="text-left">
-                  <span className="block font-medium text-foreground">
-                    {provider.name || provider.id}
-                  </span>
-                  <code className="text-[11px] text-muted-foreground">{provider.id}</code>
-                </button>
-              </Td>
-              <Td>
-                <ProviderProtocolBadge type={provider.type} />
-              </Td>
-              <Td>
-                <code
-                  className="block max-w-xs truncate text-xs text-muted-foreground"
-                  title={provider.base_url}
-                >
-                  {provider.base_url || "—"}
-                </code>
-              </Td>
-              <Td>
-                {provider.api_key_hint ? (
-                  <span className="font-mono text-xs">{provider.api_key_hint}</span>
-                ) : (
-                  "—"
-                )}
-              </Td>
-              <Td>
-                <span className="tabular-nums">{routeCountByProvider.get(provider.id) ?? 0}</span>
-              </Td>
-              <Td>
-                <AdminStatusBadge tone={provider.enabled ? "green" : "neutral"} dot>
-                  {provider.enabled ? "Enabled" : "Disabled"}
-                </AdminStatusBadge>
-              </Td>
-              <Td>
-                <ResourceMenu onEdit={() => onEdit(provider)} onDelete={() => onDelete(provider)} />
-              </Td>
-            </tr>
-          ))}
-        </tbody>
-      </table>
-    </AdminTable>
+    <div className="admin-user-list">
+      <div className="admin-prov-cols">
+        <div>Provider</div>
+        <div>Upstream API</div>
+        <div>Endpoint</div>
+        <div>Credential</div>
+        <div>Models</div>
+        <div>Actions</div>
+      </div>
+      {providers.map((provider) => (
+        <div className="admin-prov-row" key={provider.id}>
+          <button
+            type="button"
+            onClick={() => onEdit(provider)}
+            className="admin-user-cell admin-model-namebtn"
+          >
+            <ProviderIcon provider={provider} />
+            <span className="min-w-0">
+              <span className="admin-user-name block truncate">{provider.name || provider.id}</span>
+              <span className="admin-user-sub block font-mono">{provider.id}</span>
+            </span>
+          </button>
+          <div>
+            <span className="admin-chip admin-chip--proto">
+              {providerTypeMeta(provider.type).shortLabel}
+            </span>
+          </div>
+          <div className="admin-model-endpoint font-mono" title={provider.base_url}>
+            {provider.base_url || "—"}
+          </div>
+          <div className="admin-model-cred font-mono">{provider.api_key_hint || "—"}</div>
+          <div className="admin-model-num">{routeCountByProvider.get(provider.id) ?? 0}</div>
+          <div className="admin-user-actions">
+            <ResourceMenu onEdit={() => onEdit(provider)} onDelete={() => onDelete(provider)} />
+          </div>
+        </div>
+      ))}
+    </div>
   );
 }
 
@@ -1282,7 +1406,7 @@ function ResourceMenu({
           <MoreHorizontal className="size-4" />
         </Button>
       </DropdownMenuTrigger>
-      <DropdownMenuContent align="end">
+      <DropdownMenuContent align="end" className="cocola-admin-ui admin-actions-menu">
         <DropdownMenuItem onSelect={onEdit}>Edit</DropdownMenuItem>
         {onDefault ? (
           <DropdownMenuItem onSelect={onDefault}>
@@ -1295,38 +1419,6 @@ function ResourceMenu({
         </DropdownMenuItem>
       </DropdownMenuContent>
     </DropdownMenu>
-  );
-}
-
-function ViewTab({
-  active,
-  onClick,
-  children,
-}: {
-  active: boolean;
-  onClick: () => void;
-  children: ReactNode;
-}) {
-  return (
-    <button
-      type="button"
-      role="tab"
-      aria-selected={active}
-      onClick={onClick}
-      className={cn(
-        "relative flex h-11 items-center gap-2 px-3 text-sm font-medium text-muted-foreground transition hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/30",
-        active &&
-          "text-foreground after:absolute after:inset-x-2 after:bottom-0 after:h-0.5 after:rounded-full after:bg-primary",
-      )}
-    >
-      {children}
-    </button>
-  );
-}
-
-function Count({ children }: { children: ReactNode }) {
-  return (
-    <span className="rounded-full bg-muted px-1.5 py-0.5 text-[11px] tabular-nums">{children}</span>
   );
 }
 
@@ -1414,32 +1506,6 @@ function DrawerFooter({
   );
 }
 
-function RuntimeProtocolBadge({ protocol }: { protocol: ModelProtocol }) {
-  const responses = protocol === "openai-responses";
-  const embeddings = protocol === "openai-embeddings";
-  return (
-    <span
-      className={cn(
-        "inline-flex w-fit items-center gap-1.5 rounded-full border px-2.5 py-1 text-xs font-medium",
-        embeddings
-          ? "border-emerald-500/25 bg-emerald-500/10 text-emerald-700"
-          : responses
-            ? "border-violet-500/25 bg-violet-500/10 text-violet-700"
-            : "border-blue-500/25 bg-blue-500/10 text-blue-700",
-      )}
-    >
-      {embeddings ? (
-        <Binary className="size-3.5" />
-      ) : responses ? (
-        <Bot className="size-3.5" />
-      ) : (
-        <Route className="size-3.5" />
-      )}
-      {embeddings ? "Embeddings" : responses ? "Responses" : "Messages"}
-    </span>
-  );
-}
-
 function ProviderProtocolBadge({ type }: { type: ProviderType }) {
   const meta = providerTypeMeta(type);
   const responses = type === "openai_responses";
@@ -1466,14 +1532,6 @@ function ProviderProtocolBadge({ type }: { type: ProviderType }) {
       {meta.shortLabel}
     </span>
   );
-}
-
-function Th({ children }: { children: ReactNode }) {
-  return <th className="px-4 py-3 font-medium">{children}</th>;
-}
-
-function Td({ children }: { children: ReactNode }) {
-  return <td className="px-4 py-3 align-middle">{children}</td>;
 }
 
 function providerTypeMeta(type: ProviderType) {
@@ -1532,31 +1590,21 @@ function providerIDFromName(name: string) {
 function ModelIcon({ model }: { model: LLMModel }) {
   if (model.icon_type === "image" && model.icon_url) {
     return (
-      <span className="relative size-9 shrink-0 overflow-hidden rounded-xl border border-border bg-background">
-        <Image src={model.icon_url} alt="" fill sizes="36px" className="object-cover" unoptimized />
-      </span>
-    );
-  }
-  const slug = model.icon_slug.toLowerCase();
-  const localPath = LOCAL_SIMPLE_ICON_PATHS[slug];
-  if (localPath) {
-    return (
-      <span className="relative size-9 shrink-0 overflow-hidden rounded-xl border border-border bg-background p-2">
-        <Image
-          src={localPath}
-          alt=""
-          fill
-          sizes="36px"
-          className="object-contain p-2"
-          unoptimized
-        />
-      </span>
+      <BrandIcon
+        imageSrc={model.icon_url}
+        fallbackText={(model.label || model.alias).slice(0, 2).toUpperCase() || "AI"}
+      />
     );
   }
   return (
-    <span className="grid size-9 shrink-0 place-items-center rounded-xl border border-border bg-muted text-xs font-semibold">
-      {SIMPLE_ICON_FALLBACK_BADGES[slug] || model.label.slice(0, 2).toUpperCase() || "AI"}
-    </span>
+    <BrandIcon
+      slug={model.icon_slug}
+      fallbackText={
+        SIMPLE_ICON_FALLBACK_BADGES[model.icon_slug.toLowerCase()] ||
+        (model.label || model.alias).slice(0, 2).toUpperCase() ||
+        "AI"
+      }
+    />
   );
 }
 

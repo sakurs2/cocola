@@ -1,5 +1,6 @@
 "use client";
 
+import type { ReactNode } from "react";
 import * as SelectPrimitive from "@radix-ui/react-select";
 import { Check, ChevronDown, ChevronUp } from "lucide-react";
 import { cn } from "@/lib/utils";
@@ -8,6 +9,7 @@ export type SelectOption = {
   value: string;
   label: string;
   disabled?: boolean;
+  icon?: ReactNode;
 };
 
 type SelectControlProps = {
@@ -43,6 +45,7 @@ export function SelectControl({
   className,
   contentClassName,
 }: SelectControlProps) {
+  const selectedOption = options.find((option) => option.value === value);
   return (
     <SelectPrimitive.Root
       value={toPrimitiveValue(value)}
@@ -59,10 +62,12 @@ export function SelectControl({
           className,
         )}
       >
-        <SelectPrimitive.Value
-          placeholder={placeholder}
-          className="min-w-0 flex-1 truncate text-left"
-        />
+        <span className="flex min-w-0 flex-1 items-center gap-2 text-left">
+          {selectedOption?.icon ? (
+            <span className="flex shrink-0 items-center">{selectedOption.icon}</span>
+          ) : null}
+          <SelectPrimitive.Value placeholder={placeholder} className="min-w-0 flex-1 truncate" />
+        </span>
         <SelectPrimitive.Icon asChild>
           <ChevronDown aria-hidden="true" className="size-4 shrink-0 text-muted-foreground" />
         </SelectPrimitive.Icon>
@@ -93,6 +98,9 @@ export function SelectControl({
                   "data-[disabled]:pointer-events-none data-[disabled]:opacity-50",
                 )}
               >
+                {option.icon ? (
+                  <span className="mr-2 flex shrink-0 items-center">{option.icon}</span>
+                ) : null}
                 <SelectPrimitive.ItemText className="block min-w-0 flex-1 truncate">
                   {option.label}
                 </SelectPrimitive.ItemText>

@@ -946,6 +946,34 @@
     outline: none;
   }
 
+  /* ---- Add/Edit model & provider drawer: purple theme (token-scoped, no JSX changes) ---- */
+  .cocola-admin-ui.admin-drawer,
+  .cocola-admin-ui .admin-drawer {
+    --primary: 273 66% 47%;
+    --primary-foreground: 0 0% 100%;
+    --ring: 273 66% 55%;
+    --accent: 270 60% 96%;
+    --accent-foreground: 273 66% 40%;
+  }
+  /* gradient primary buttons (Save / Add) to match the list-page Add button */
+  .cocola-admin-ui.admin-drawer button.bg-primary,
+  .cocola-admin-ui .admin-drawer button.bg-primary {
+    background-image: linear-gradient(135deg, #7828c8, #9353d3);
+    border: none;
+    box-shadow: 0 6px 16px rgba(120, 40, 200, 0.22);
+  }
+  .cocola-admin-ui.admin-drawer button.bg-primary:hover,
+  .cocola-admin-ui .admin-drawer button.bg-primary:hover {
+    filter: brightness(1.04);
+  }
+  /* purple focus ring on every text input inside the drawer */
+  .cocola-admin-ui.admin-drawer input:focus,
+  .cocola-admin-ui .admin-drawer input:focus {
+    border-color: #9353d3;
+    box-shadow: 0 0 0 3px rgba(120, 40, 200, 0.15);
+    outline: none;
+  }
+
   .cocola-admin-ui .admin-empty-icon {
     color: hsl(var(--primary));
     background: hsl(var(--accent));
@@ -1207,6 +1235,320 @@
 
   .cocola-user-ui .cocola-login-signin:active:not(:disabled) {
     transform: translateY(0);
+  }
+
+
+  /* ===== models page: header / tabs / list (mirrors users page language) ===== */
+  .cocola-admin-ui .admin-models-head {
+    display: flex;
+    align-items: center;
+    gap: 14px;
+  }
+  .cocola-admin-ui .admin-models-icon {
+    display: grid;
+    place-items: center;
+    width: 44px;
+    height: 44px;
+    flex: 0 0 auto;
+    border-radius: 14px;
+    color: #7c3aed;
+    background: #f3e8ff;
+  }
+  .cocola-admin-ui .admin-models-title {
+    font-size: 22px;
+    font-weight: 800;
+    letter-spacing: -0.02em;
+    color: #18181b;
+  }
+  .cocola-admin-ui .admin-models-sub {
+    font-size: 13px;
+    color: #71717a;
+    margin-top: 2px;
+  }
+
+  /* the lucide "boxes" glyph is bottom-heavy in its viewBox -> optical nudge */
+  .cocola-admin-ui .ic-boxes {
+    transform: translateY(-1.5px);
+  }
+
+  /* tab bar */
+  .cocola-admin-ui .admin-models-tabbar {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+  }
+  .cocola-admin-ui .admin-models-tabs {
+    display: inline-flex;
+    gap: 4px;
+    background: #fff;
+    padding: 5px;
+    border-radius: 14px;
+    box-shadow:
+      0 1px 0 0 rgba(0, 0, 0, 0.02),
+      0 6px 18px -12px rgba(0, 0, 0, 0.16);
+  }
+  .cocola-admin-ui .admin-models-tab {
+    display: inline-flex;
+    align-items: center;
+    gap: 7px;
+    padding: 8px 16px;
+    border-radius: 10px;
+    border: none;
+    background: transparent;
+    font-size: 13.5px;
+    font-weight: 600;
+    color: #71717a;
+    line-height: 1;
+    cursor: pointer;
+    transition: all 160ms ease;
+  }
+  .cocola-admin-ui .admin-models-tab svg {
+    display: block;
+    flex: 0 0 auto;
+  }
+  .cocola-admin-ui .admin-models-tab:hover {
+    color: #6b21a8;
+  }
+  .cocola-admin-ui .admin-models-tab.is-active {
+    background: linear-gradient(135deg, #7828c8, #9353d3);
+    color: #fff;
+    box-shadow: 0 6px 16px -8px rgba(120, 40, 200, 0.6);
+  }
+  .cocola-admin-ui .admin-models-count {
+    font-size: 11px;
+    font-weight: 700;
+    padding: 1px 7px;
+    border-radius: 999px;
+    background: rgba(0, 0, 0, 0.06);
+    line-height: 1.4;
+  }
+  .cocola-admin-ui .admin-models-tab.is-active .admin-models-count {
+    background: rgba(255, 255, 255, 0.25);
+  }
+
+  /* search (page-local, matches demo) */
+  .cocola-admin-ui .admin-models-search {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    flex: 1;
+    min-width: 0;
+    max-width: 420px;
+    height: 42px;
+    padding: 0 14px;
+    background: #fff;
+    border: 1px solid #ececf1;
+    border-radius: 14px;
+    transition: all 160ms ease;
+  }
+  .cocola-admin-ui .admin-models-search:focus-within {
+    border-color: #a855f7;
+    box-shadow: 0 0 0 3px rgba(168, 85, 247, 0.18);
+  }
+  .cocola-admin-ui .admin-models-search svg {
+    color: #a1a1aa;
+    flex: 0 0 auto;
+  }
+  .cocola-admin-ui .admin-models-search input {
+    border: none;
+    outline: none;
+    background: transparent;
+    font-size: 14px;
+    flex: 1;
+    min-width: 0;
+    color: #18181b;
+    border-radius: 0;
+  }
+  .cocola-admin-ui .admin-models-search input:focus {
+    box-shadow: none;
+    border: none;
+  }
+
+  /* list grids (reuse .admin-user-list container) */
+  .cocola-admin-ui .admin-model-cols,
+  .cocola-admin-ui .admin-model-row {
+    display: grid;
+    grid-template-columns: 2.4fr 1.3fr 1.3fr 1.2fr 64px;
+    gap: 12px;
+    align-items: center;
+    min-width: 760px;
+  }
+  .cocola-admin-ui .admin-prov-cols,
+  .cocola-admin-ui .admin-prov-row {
+    display: grid;
+    grid-template-columns: 2fr 1.2fr 2fr 1.1fr 0.8fr 64px;
+    gap: 12px;
+    align-items: center;
+    min-width: 760px;
+  }
+  .cocola-admin-ui .admin-model-cols,
+  .cocola-admin-ui .admin-prov-cols {
+    padding: 8px 16px 10px;
+    font-size: 11px;
+    font-weight: 700;
+    letter-spacing: 0.07em;
+    text-transform: uppercase;
+    color: #a1a1aa;
+  }
+  .cocola-admin-ui .admin-model-row,
+  .cocola-admin-ui .admin-prov-row {
+    padding: 12px 16px;
+    border-radius: 14px;
+    transition: background 180ms ease, transform 180ms ease;
+  }
+  .cocola-admin-ui .admin-model-row:hover,
+  .cocola-admin-ui .admin-prov-row:hover {
+    background: #faf5ff;
+    transform: scale(1.006);
+  }
+  /* center non-first columns */
+  .cocola-admin-ui .admin-model-cols > div:nth-child(n + 2),
+  .cocola-admin-ui .admin-model-row > div:nth-child(n + 2),
+  .cocola-admin-ui .admin-prov-cols > div:nth-child(n + 2),
+  .cocola-admin-ui .admin-prov-row > div:nth-child(n + 2) {
+    text-align: center;
+    justify-content: center;
+  }
+  .cocola-admin-ui .admin-model-namebtn {
+    text-align: left;
+    background: none;
+    border: none;
+    padding: 0;
+    cursor: pointer;
+  }
+
+  /* brand icon frame (mirrors ModelIcon: rounded border bg + padded logo) */
+  .cocola-admin-ui .admin-brand-icon {
+    position: relative;
+    display: grid;
+    place-items: center;
+    flex: 0 0 auto;
+    width: 42px;
+    height: 42px;
+    border-radius: 13px;
+    border: 1px solid #ececf1;
+    background: #fff;
+    padding: 9px;
+  }
+  .cocola-admin-ui .admin-brand-icon .admin-brand-img {
+    width: 100%;
+    height: 100%;
+    object-fit: contain;
+  }
+  .cocola-admin-ui .admin-brand-fallback {
+    display: grid;
+    place-items: center;
+    flex: 0 0 auto;
+    width: 42px;
+    height: 42px;
+    border-radius: 13px;
+    border: 1px solid #ececf1;
+    background: #f4f4f5;
+    font-size: 12.5px;
+    font-weight: 800;
+    color: #3f3f46;
+    letter-spacing: 0.02em;
+  }
+
+  /* compact colored brand glyph for the Brand-icon <select> options + trigger */
+  .cocola-admin-ui .admin-brand-glyph {
+    display: grid;
+    place-items: center;
+    flex: 0 0 auto;
+    width: 24px;
+    height: 24px;
+    border-radius: 7px;
+    border: 1px solid #ececf1;
+    background: #fff;
+    padding: 4px;
+    overflow: hidden;
+  }
+  .cocola-admin-ui .admin-brand-glyph .admin-brand-glyph-img {
+    width: 100%;
+    height: 100%;
+    object-fit: contain;
+  }
+  .cocola-admin-ui .admin-brand-glyph.admin-brand-glyph-fallback {
+    padding: 0;
+    background: #f4f4f5;
+    font-size: 9px;
+    font-weight: 800;
+    color: #3f3f46;
+    letter-spacing: 0.01em;
+  }
+
+  /* row text */
+  .cocola-admin-ui .admin-model-provname {
+    font-size: 13.5px;
+    font-weight: 600;
+    color: #27272a;
+  }
+  .cocola-admin-ui .admin-model-protosub {
+    font-size: 11px;
+    color: #a1a1aa;
+    margin-top: 3px;
+  }
+  .cocola-admin-ui .admin-model-chipstack {
+    display: inline-flex;
+    gap: 6px;
+    flex-wrap: wrap;
+    justify-content: center;
+  }
+  .cocola-admin-ui .admin-model-endpoint {
+    max-width: 100%;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    font-size: 12px;
+    color: #52525b;
+  }
+  .cocola-admin-ui .admin-model-cred {
+    font-size: 12px;
+    color: #52525b;
+  }
+  .cocola-admin-ui .admin-model-num {
+    font-variant-numeric: tabular-nums;
+    font-weight: 700;
+    color: #3f3f46;
+  }
+  .cocola-admin-ui .admin-chip--proto {
+    background: #f4e6ff;
+    color: #7828c8;
+  }
+  .cocola-admin-ui .admin-chip--visible {
+    background: #e6f4ff;
+    color: #0369a1;
+  }
+
+  /* allow grid children to shrink so ellipsis works, keeps columns aligned */
+  .cocola-admin-ui .admin-model-row > *,
+  .cocola-admin-ui .admin-prov-row > * {
+    min-width: 0;
+  }
+  /* per-column single-line truncation + ellipsis (full text on hover via title) */
+  .cocola-admin-ui .admin-model-cell-text {
+    display: block;
+    max-width: 100%;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  .cocola-admin-ui .admin-user-name .admin-model-cell-text {
+    min-width: 0;
+  }
+  /* Upstream API cell: keep chip on one line, truncate long protocol labels */
+  .cocola-admin-ui .admin-model-apicell {
+    display: flex;
+    justify-content: center;
+    min-width: 0;
+  }
+  .cocola-admin-ui .admin-chip.admin-model-cell-text {
+    display: inline-block;
+    max-width: 100%;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
   }
 
   @media (max-width: 860px) {
