@@ -1,12 +1,13 @@
 "use client";
 
 import { Sparkles as SkillsPageIcon } from "lucide-react";
-import { ChangeEvent, useCallback, useEffect, useMemo, useState } from "react";
+import { ChangeEvent, useCallback, useEffect, useMemo, useState, type ReactNode } from "react";
 import Link from "next/link";
 import {
   CheckCircle2,
   FileArchive,
   LoaderCircle,
+  Power,
   Sparkles,
   ToggleLeft,
   ToggleRight,
@@ -14,7 +15,7 @@ import {
   Upload,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
-import { AdminPageHeader, AdminPagination } from "@/components/admin/admin-ui";
+import { AdminPagination } from "@/components/admin/admin-ui";
 
 type Skill = {
   id: string;
@@ -59,6 +60,15 @@ export default function AdminSkillsPage() {
   const validCandidates = useMemo(() => candidates.filter((c) => c.valid), [candidates]);
   const allValidSelected =
     validCandidates.length > 0 && validCandidates.every((candidate) => selected[candidate.id]);
+
+  const stats = useMemo(
+    () => ({
+      total,
+      enabled: skills.filter((s) => s.enabled).length,
+      disabled: skills.filter((s) => !s.enabled).length,
+    }),
+    [skills, total],
+  );
 
   const load = useCallback(
     async (showLoading = true) => {
@@ -222,13 +232,24 @@ export default function AdminSkillsPage() {
   };
 
   return (
-    <main className="mx-auto max-w-6xl space-y-6 px-6 py-6">
-      <AdminPageHeader
-        icon={<SkillsPageIcon className="size-[18px]" />}
-        title="Skills"
-        description="Publish shared skills for every user sandbox."
-        actions={
-          <label className="inline-flex h-9 cursor-pointer items-center gap-2 rounded-xl bg-primary px-3 text-sm font-medium text-primary-foreground transition-colors hover:bg-primary/90 focus-within:ring-2 focus-within:ring-ring/40">
+    <main className="admin-theme-amber min-h-screen bg-background text-foreground">
+      <div className="mx-auto max-w-6xl space-y-6 px-6 py-6">
+        {/* Header */}
+        <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
+          <div className="flex items-center gap-3">
+            <span className="admin-entity-glyph">
+              <SkillsPageIcon className="size-[20px]" />
+            </span>
+            <div>
+              <h1 className="text-xl font-semibold tracking-[-0.02em] text-foreground sm:text-2xl">
+                Skills
+              </h1>
+              <p className="mt-0.5 text-sm text-muted-foreground">
+                Publish shared skills for every user sandbox.
+              </p>
+            </div>
+          </div>
+          <label className="admin-primary-btn inline-flex h-10 cursor-pointer items-center gap-2 rounded-xl px-4 text-sm font-medium">
             <Upload className="size-4" />
             Upload zip
             <input
@@ -238,148 +259,193 @@ export default function AdminSkillsPage() {
               onChange={chooseFile}
             />
           </label>
-        }
-      />
-
-      {error ? (
-        <div className="rounded-md border border-red-500/30 bg-red-500/10 px-3 py-2 text-sm text-red-600">
-          {error}
         </div>
-      ) : null}
 
-      <section className="rounded-lg border border-border bg-card p-4">
-        <div className="mb-3 text-sm font-semibold">Import from Git</div>
-        <div className="grid gap-3 md:grid-cols-[1fr_160px_160px_auto]">
-          <input
-            className="h-9 rounded-md border border-border bg-background px-3 text-sm outline-none focus:border-foreground/30"
-            placeholder="https://github.com/org/repo.git"
-            value={gitRepo}
-            onChange={(event) => setGitRepo(event.target.value)}
-          />
-          <input
-            className="h-9 rounded-md border border-border bg-background px-3 text-sm outline-none focus:border-foreground/30"
-            placeholder="branch/tag"
-            value={gitRef}
-            onChange={(event) => setGitRef(event.target.value)}
-          />
-          <input
-            className="h-9 rounded-md border border-border bg-background px-3 text-sm outline-none focus:border-foreground/30"
-            placeholder="skills"
-            value={gitPath}
-            onChange={(event) => setGitPath(event.target.value)}
-          />
-          <button
-            className="inline-flex h-9 items-center justify-center gap-2 rounded-md border border-border px-3 text-sm hover:bg-accent disabled:opacity-50"
-            disabled={gitScanning || working || !gitRepo.trim()}
-            onClick={scanGit}
-          >
-            {gitScanning ? <LoaderCircle className="size-4 animate-spin" /> : null}
-            {gitScanning ? "Scanning" : "Scan"}
-          </button>
-        </div>
-      </section>
-
-      {candidates.length ? (
-        <section className="rounded-lg border border-border bg-card">
-          <div className="flex flex-wrap items-center justify-between gap-3 border-b border-border px-4 py-3">
-            <div className="flex items-center gap-2">
-              <FileArchive className="size-4 text-muted-foreground" />
-              <div className="text-sm font-semibold">Archive candidates</div>
-              <div className="text-xs text-muted-foreground">{validCandidates.length} valid</div>
-            </div>
-            <div className="flex gap-2">
-              <button
-                className="rounded-md border border-border px-3 py-1.5 text-sm hover:bg-accent"
-                onClick={() =>
-                  setSelected(
-                    allValidSelected
-                      ? {}
-                      : Object.fromEntries(validCandidates.map((c) => [c.id, true])),
-                  )
-                }
-              >
-                {allValidSelected ? "Clear all" : "Select all"}
-              </button>
-              <button
-                className="rounded-md bg-primary px-3 py-1.5 text-sm font-medium text-primary-foreground disabled:opacity-50"
-                disabled={working || !Object.values(selected).some(Boolean)}
-                onClick={importSelected}
-              >
-                Import selected
-              </button>
-            </div>
+        {error ? (
+          <div className="rounded-md border border-red-500/30 bg-red-500/10 px-3 py-2 text-sm text-red-600">
+            {error}
           </div>
-          <div className="grid gap-3 p-4 md:grid-cols-2">
-            {candidates.map((candidate) => (
-              <label
-                key={`${candidate.path}:${candidate.id}`}
-                className={cn(
-                  "rounded-lg border p-4",
-                  candidate.valid ? "border-border" : "border-red-500/30 bg-red-500/5",
-                )}
-              >
-                <div className="flex gap-3">
-                  <input
-                    type="checkbox"
-                    className="mt-1"
-                    checked={!!selected[candidate.id]}
-                    disabled={!candidate.valid}
-                    onChange={(event) =>
-                      setSelected((prev) => ({ ...prev, [candidate.id]: event.target.checked }))
-                    }
-                  />
-                  <div className="min-w-0 flex-1">
-                    <div className="truncate text-sm font-semibold">
-                      {displaySkillName(candidate)}
-                    </div>
-                    <div className="mt-1 line-clamp-2 text-sm text-muted-foreground">
-                      {candidate.description || candidate.errors?.join("; ")}
-                    </div>
-                    <div className="mt-3 flex flex-wrap gap-2 text-xs text-muted-foreground">
-                      <span>{candidate.path || "."}</span>
-                      <span>{candidate.file_count ?? 0} files</span>
-                    </div>
-                  </div>
-                </div>
-              </label>
-            ))}
+        ) : null}
+
+        {/* Metric cards */}
+        <section className="grid gap-4 md:grid-cols-3">
+          <MetricCard
+            tone="amber"
+            label="Skills"
+            value={stats.total}
+            icon={<Sparkles className="size-[22px]" />}
+          />
+          <MetricCard
+            tone="green"
+            label="Enabled"
+            value={stats.enabled}
+            icon={<CheckCircle2 className="size-[22px]" />}
+          />
+          <MetricCard
+            tone="slate"
+            label="Disabled"
+            value={stats.disabled}
+            icon={<Power className="size-[22px]" />}
+          />
+        </section>
+
+        {/* Import from Git */}
+        <section className="admin-entity-card">
+          <div className="mb-3 text-sm font-semibold">Import from Git</div>
+          <div className="grid gap-3 md:grid-cols-[1fr_160px_160px_auto]">
+            <input
+              className="admin-drawer-form h-10 rounded-xl border border-input bg-background px-3 text-sm outline-none focus:border-ring"
+              placeholder="https://github.com/org/repo.git"
+              value={gitRepo}
+              onChange={(event) => setGitRepo(event.target.value)}
+            />
+            <input
+              className="admin-drawer-form h-10 rounded-xl border border-input bg-background px-3 text-sm outline-none focus:border-ring"
+              placeholder="branch/tag"
+              value={gitRef}
+              onChange={(event) => setGitRef(event.target.value)}
+            />
+            <input
+              className="admin-drawer-form h-10 rounded-xl border border-input bg-background px-3 text-sm outline-none focus:border-ring"
+              placeholder="skills"
+              value={gitPath}
+              onChange={(event) => setGitPath(event.target.value)}
+            />
+            <button
+              className="admin-primary-btn inline-flex h-10 items-center justify-center gap-2 rounded-xl px-4 text-sm font-medium disabled:opacity-50"
+              disabled={gitScanning || working || !gitRepo.trim()}
+              onClick={scanGit}
+            >
+              {gitScanning ? <LoaderCircle className="size-4 animate-spin" /> : null}
+              {gitScanning ? "Scanning" : "Scan"}
+            </button>
           </div>
         </section>
-      ) : null}
 
-      <section className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
-        {loading ? (
-          <div className="col-span-full flex h-28 items-center justify-center text-muted-foreground">
-            <LoaderCircle className="mr-2 size-4 animate-spin" />
-            Loading skills
-          </div>
-        ) : skills.length ? (
-          skills.map((skill) => (
-            <SkillCard
-              key={skill.id}
-              skill={skill}
-              href={`/admin/skills/${encodeURIComponent(skill.id)}`}
-              onToggle={() => setSkillEnabled(skill)}
-              onDelete={() => deleteSkill(skill)}
-              working={working && actionSkillId === skill.id}
-            />
-          ))
-        ) : (
-          <div className="col-span-full rounded-lg border border-dashed border-border p-8 text-center text-sm text-muted-foreground">
-            No skills imported yet.
-          </div>
-        )}
-      </section>
-      <AdminPagination
-        page={page}
-        pageSize={SKILLS_PAGE_SIZE}
-        count={skills.length}
-        total={total}
-        loading={loading}
-        label="skills"
-        onPageChange={setPage}
-      />
+        {candidates.length ? (
+          <section className="admin-entity-card p-0">
+            <div className="flex flex-wrap items-center justify-between gap-3 border-b border-border px-4 py-3">
+              <div className="flex items-center gap-2">
+                <FileArchive className="size-4 text-muted-foreground" />
+                <div className="text-sm font-semibold">Archive candidates</div>
+                <div className="text-xs text-muted-foreground">{validCandidates.length} valid</div>
+              </div>
+              <div className="flex gap-2">
+                <button
+                  className="rounded-lg border border-border px-3 py-1.5 text-sm hover:bg-accent"
+                  onClick={() =>
+                    setSelected(
+                      allValidSelected
+                        ? {}
+                        : Object.fromEntries(validCandidates.map((c) => [c.id, true])),
+                    )
+                  }
+                >
+                  {allValidSelected ? "Clear all" : "Select all"}
+                </button>
+                <button
+                  className="admin-primary-btn rounded-lg px-3 py-1.5 text-sm font-medium disabled:opacity-50"
+                  disabled={working || !Object.values(selected).some(Boolean)}
+                  onClick={importSelected}
+                >
+                  Import selected
+                </button>
+              </div>
+            </div>
+            <div className="grid gap-3 p-4 md:grid-cols-2">
+              {candidates.map((candidate) => (
+                <label
+                  key={`${candidate.path}:${candidate.id}`}
+                  className={cn(
+                    "rounded-xl border p-4",
+                    candidate.valid ? "border-border" : "border-red-500/30 bg-red-500/5",
+                  )}
+                >
+                  <div className="flex gap-3">
+                    <input
+                      type="checkbox"
+                      className="mt-1 accent-primary"
+                      checked={!!selected[candidate.id]}
+                      disabled={!candidate.valid}
+                      onChange={(event) =>
+                        setSelected((prev) => ({ ...prev, [candidate.id]: event.target.checked }))
+                      }
+                    />
+                    <div className="min-w-0 flex-1">
+                      <div className="truncate text-sm font-semibold">
+                        {displaySkillName(candidate)}
+                      </div>
+                      <div className="mt-1 line-clamp-2 text-sm text-muted-foreground">
+                        {candidate.description || candidate.errors?.join("; ")}
+                      </div>
+                      <div className="mt-3 flex flex-wrap gap-2 text-xs text-muted-foreground">
+                        <span>{candidate.path || "."}</span>
+                        <span>{candidate.file_count ?? 0} files</span>
+                      </div>
+                    </div>
+                  </div>
+                </label>
+              ))}
+            </div>
+          </section>
+        ) : null}
+
+        <section className="admin-entity-grid md:grid-cols-2 xl:grid-cols-3">
+          {loading ? (
+            <div className="col-span-full flex h-28 items-center justify-center text-muted-foreground">
+              <LoaderCircle className="mr-2 size-4 animate-spin" />
+              Loading skills
+            </div>
+          ) : skills.length ? (
+            skills.map((skill) => (
+              <SkillCard
+                key={skill.id}
+                skill={skill}
+                href={`/admin/skills/${encodeURIComponent(skill.id)}`}
+                onToggle={() => setSkillEnabled(skill)}
+                onDelete={() => deleteSkill(skill)}
+                working={working && actionSkillId === skill.id}
+              />
+            ))
+          ) : (
+            <div className="col-span-full rounded-xl border border-dashed border-border p-8 text-center text-sm text-muted-foreground">
+              No skills imported yet.
+            </div>
+          )}
+        </section>
+        <AdminPagination
+          page={page}
+          pageSize={SKILLS_PAGE_SIZE}
+          count={skills.length}
+          total={total}
+          loading={loading}
+          label="skills"
+          onPageChange={setPage}
+        />
+      </div>
     </main>
+  );
+}
+
+function MetricCard({
+  tone,
+  label,
+  value,
+  icon,
+}: {
+  tone: "amber" | "green" | "slate";
+  label: string;
+  value: number;
+  icon: ReactNode;
+}) {
+  return (
+    <div className="admin-metric-card" data-tone={tone}>
+      <div className="admin-metric-head">
+        <span className="admin-metric-glyph">{icon}</span>
+        <span className="admin-metric-key">{label}</span>
+      </div>
+      <div className="admin-metric-val">{value}</div>
+    </div>
   );
 }
 
@@ -397,11 +463,11 @@ function SkillCard({
   working: boolean;
 }) {
   return (
-    <div className="rounded-lg border border-border bg-card p-4 transition hover:border-foreground/20">
+    <div className="admin-entity-card">
       <Link href={href} className="block">
         <div className="flex items-start gap-3">
-          <div className="grid size-9 shrink-0 place-items-center rounded-md bg-muted">
-            <Sparkles className="size-4 text-muted-foreground" />
+          <div className="admin-entity-glyph">
+            <Sparkles className="size-[18px]" />
           </div>
           <div className="min-w-0 flex-1">
             <div className="truncate text-sm font-semibold">{displaySkillName(skill)}</div>
@@ -410,22 +476,25 @@ function SkillCard({
             </p>
           </div>
         </div>
-        <div className="mt-4 flex flex-wrap gap-2 text-xs text-muted-foreground">
-          <span className="rounded-md border border-border px-2 py-0.5">{skill.id}</span>
-          <span className="rounded-md border border-border px-2 py-0.5">
-            {skill.source_type || "manual"}
-          </span>
+        <div className="mt-4 flex flex-wrap gap-2">
+          <span className="admin-entity-tag">{skill.id}</span>
+          <span className="admin-entity-tag">{skill.source_type || "manual"}</span>
           {skill.enabled ? (
-            <span className="inline-flex items-center gap-1 rounded-md border border-emerald-500/30 px-2 py-0.5 text-emerald-600">
-              <CheckCircle2 className="size-3" />
+            <span className="admin-chip admin-chip--ok">
+              <CheckCircle2 />
               enabled
             </span>
-          ) : null}
+          ) : (
+            <span className="admin-chip admin-chip--off">
+              <span className="admin-chip-dot" />
+              disabled
+            </span>
+          )}
         </div>
       </Link>
-      <div className="mt-4 flex gap-2">
+      <div className="mt-auto flex gap-2 pt-4">
         <button
-          className="inline-flex h-8 items-center gap-2 rounded-md border border-border px-2.5 text-sm hover:bg-accent disabled:opacity-50"
+          className="inline-flex h-8 items-center gap-2 rounded-lg border border-border px-2.5 text-sm hover:bg-accent disabled:opacity-50"
           disabled={working}
           onClick={onToggle}
         >
@@ -433,7 +502,7 @@ function SkillCard({
           {skill.enabled ? "Disable" : "Enable"}
         </button>
         <button
-          className="inline-flex h-8 items-center gap-2 rounded-md border border-border px-2.5 text-sm text-red-600 hover:bg-red-500/10 disabled:opacity-50"
+          className="inline-flex h-8 items-center gap-2 rounded-lg border border-border px-2.5 text-sm text-red-600 hover:bg-red-500/10 disabled:opacity-50"
           disabled={working}
           onClick={onDelete}
         >

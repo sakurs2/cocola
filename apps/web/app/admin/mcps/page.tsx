@@ -235,7 +235,7 @@ export default function AdminMCPPage() {
   };
 
   return (
-    <AdminPage width="standard">
+    <AdminPage width="standard" className="admin-theme-orange">
       <AdminPageHeader
         icon={<McpPageIcon className="size-[18px]" />}
         title="MCP Servers"
@@ -531,7 +531,7 @@ function MCPCard({
     : mcp.url_hint;
   const TransportIcon = remote ? Globe2 : FileTerminal;
   return (
-    <article className="group flex min-h-56 flex-col rounded-2xl border border-border/75 bg-white/45 p-4 shadow-[0_12px_35px_-28px_rgba(30,64,175,0.65)] transition-[border-color,background-color,transform,box-shadow] hover:-translate-y-0.5 hover:border-blue-400/35 hover:bg-white/60 hover:shadow-[0_18px_42px_-28px_rgba(30,64,175,0.7)] motion-reduce:transform-none">
+    <article className="group flex min-h-56 flex-col rounded-2xl border border-border/75 bg-white/45 p-4 shadow-[0_12px_35px_-28px_rgba(234,88,12,0.55)] transition-[border-color,background-color,transform,box-shadow] hover:-translate-y-0.5 hover:border-orange-400/40 hover:bg-white/60 hover:shadow-[0_18px_42px_-28px_rgba(234,88,12,0.6)] motion-reduce:transform-none">
       <div className="flex items-start gap-3">
         <div className="grid size-10 shrink-0 place-items-center rounded-xl border border-border/70 bg-white/70 text-muted-foreground shadow-sm">
           <TransportIcon className="size-[18px]" />
@@ -560,7 +560,7 @@ function MCPCard({
       </div>
 
       <div className="mt-auto flex flex-wrap items-center gap-2 pt-4">
-        <span className="inline-flex items-center gap-1.5 text-xs text-blue-700">
+        <span className="inline-flex items-center gap-1.5 text-xs text-orange-700">
           <CircleCheck className="size-3.5" />
           Configured
         </span>

@@ -728,6 +728,91 @@
     --page-accent-shadow: rgba(120, 40, 200, 0.6);
     --page-accent-shadow-soft: rgba(120, 40, 200, 0.35);
   }
+  .cocola-admin-ui .admin-theme-amber {
+    --primary: 38 92% 45%;
+    --primary-foreground: 0 0% 100%;
+    --ring: 38 92% 50%;
+    --accent: 48 96% 92%;
+    --accent-foreground: 32 81% 33%;
+    --page-accent: #f59e0b;
+    --page-accent-2: #fbbf24;
+    --page-accent-grad: linear-gradient(135deg, #d97706, #f59e0b);
+    --page-accent-soft: #fffbeb;
+    --page-accent-ink: #b45309;
+    --page-accent-border: #fcd34d;
+    --page-accent-focus: #f59e0b;
+    --page-accent-focus-ring: rgba(245, 158, 11, 0.2);
+    --page-accent-shadow: rgba(217, 119, 6, 0.5);
+    --page-accent-shadow-soft: rgba(217, 119, 6, 0.3);
+  }
+  .cocola-admin-ui .admin-theme-orange {
+    --primary: 21 90% 48%;
+    --primary-foreground: 0 0% 100%;
+    --ring: 21 90% 52%;
+    --accent: 34 100% 92%;
+    --accent-foreground: 15 79% 34%;
+    --page-accent: #ea580c;
+    --page-accent-2: #fb923c;
+    --page-accent-grad: linear-gradient(135deg, #ea580c, #fb923c);
+    --page-accent-soft: #fff7ed;
+    --page-accent-ink: #c2410c;
+    --page-accent-border: #fdba74;
+    --page-accent-focus: #fb923c;
+    --page-accent-focus-ring: rgba(251, 146, 60, 0.2);
+    --page-accent-shadow: rgba(234, 88, 12, 0.5);
+    --page-accent-shadow-soft: rgba(234, 88, 12, 0.3);
+  }
+
+  /* ===== shared entity cards (skills / mcps grids), page-accent driven ===== */
+  .cocola-admin-ui .admin-entity-grid {
+    display: grid;
+    gap: 16px;
+  }
+  .cocola-admin-ui .admin-entity-card {
+    display: flex;
+    flex-direction: column;
+    border: 1px solid rgba(0, 0, 0, 0.06);
+    border-radius: 16px;
+    background: #fff;
+    padding: 18px;
+    box-shadow:
+      0 1px 0 0 rgba(0, 0, 0, 0.02),
+      0 10px 30px -18px rgba(0, 0, 0, 0.22);
+    transition: transform 180ms ease, box-shadow 180ms ease, border-color 180ms ease;
+  }
+  .cocola-admin-ui .admin-entity-card:hover {
+    transform: translateY(-2px);
+    border-color: var(--page-accent-border);
+    box-shadow: 0 18px 42px -22px var(--page-accent-shadow-soft);
+  }
+  .cocola-admin-ui .admin-entity-glyph {
+    display: grid;
+    place-items: center;
+    flex: 0 0 auto;
+    width: 40px;
+    height: 40px;
+    border-radius: 12px;
+    color: var(--page-accent);
+    background: var(--page-accent-soft);
+  }
+  .cocola-admin-ui .admin-entity-tag {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    font-size: 11.5px;
+    font-weight: 600;
+    padding: 3px 9px;
+    border-radius: 999px;
+    border: 1px solid hsl(var(--border));
+    color: #52525b;
+    background: #fff;
+  }
+  .cocola-admin-ui .admin-entity-mono {
+    border-radius: 12px;
+    border: 1px solid rgba(0, 0, 0, 0.06);
+    background: var(--page-accent-soft);
+    padding: 10px 12px;
+  }
 
   /* ===== users page: metric cards (overview language) ===== */
   .cocola-admin-ui .admin-metric-card {
@@ -754,6 +839,8 @@
   .cocola-admin-ui .admin-metric-card[data-tone="blue"] { --card-to: #2563eb; }
   .cocola-admin-ui .admin-metric-card[data-tone="green"] { --card-to: #16a34a; }
   .cocola-admin-ui .admin-metric-card[data-tone="violet"] { --card-to: #7c3aed; }
+  .cocola-admin-ui .admin-metric-card[data-tone="amber"] { --card-to: var(--page-accent); }
+  .cocola-admin-ui .admin-metric-card[data-tone="slate"] { --card-to: #64748b; }
   .cocola-admin-ui .admin-metric-head {
     display: flex;
     align-items: center;
