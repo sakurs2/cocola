@@ -2,13 +2,22 @@
 
 import { Cpu as SandboxNodesPageIcon } from "lucide-react";
 import { Button } from "@/components/ui/button";
-import { AdminRefreshButton } from "@/components/admin/admin-ui";
+import {
+  AdminEmptyState,
+  AdminPage,
+  AdminPageHeader,
+  AdminRefreshButton,
+  AdminStatusBadge,
+} from "@/components/admin/admin-ui";
 import { cn } from "@/lib/utils";
 import {
   AlertTriangle,
   Ban,
+  Boxes,
   CheckCircle2,
+  CircleDot,
   Copy,
+  FolderTree,
   LoaderCircle,
   Plus,
   Power,
@@ -46,6 +55,9 @@ type OfflineNodeResult = {
   message: string;
 };
 type OfflineTarget = { node: SandboxNode; pendingPods: string[]; affectedSessions: number };
+
+type BadgeTone = "neutral" | "sky" | "green" | "amber" | "red";
+
 const STATUS_LABELS: Record<string, string> = {
   active: "Active",
   disabled: "Disabled",
@@ -53,6 +65,16 @@ const STATUS_LABELS: Record<string, string> = {
   offline: "Offline",
   unhealthy: "Unhealthy",
 };
+
+const STATUS_TONES: Record<string, BadgeTone> = {
+  active: "green",
+  disabled: "amber",
+  offline_pending: "sky",
+  offline: "neutral",
+  unhealthy: "red",
+};
+
+const LIST_COLS = "1.4fr 0.9fr 1fr 1fr 0.8fr 1.1fr 0.7fr 1fr 1.1fr 0.9fr";
 
 export default function SandboxNodesPage() {
   const [nodes, setNodes] = useState<SandboxNode[]>([]);
@@ -215,239 +237,243 @@ export default function SandboxNodesPage() {
   };
 
   return (
-    <main className="min-h-screen bg-background text-foreground">
-      <header className="border-b border-border">
-        <div className="mx-auto flex h-16 max-w-7xl items-center gap-3 px-6">
-          <div className="admin-page-icon">
-            <SandboxNodesPageIcon className="size-[18px]" />
-          </div>
-          <div className="min-w-0 flex-1">
-            <h1 className="truncate text-base font-semibold">Nodes</h1>
-            <p className="truncate text-xs text-muted-foreground">
-              k3s node operations for OpenSandbox Kubernetes runtime
-            </p>
-          </div>
+    <AdminPage className="admin-theme-sky">
+      <AdminPageHeader
+        icon={<SandboxNodesPageIcon className="size-5" />}
+        title="Nodes"
+        description="k3s node operations for OpenSandbox Kubernetes runtime"
+        actions={
           <AdminRefreshButton
             variant="outline"
-            size="sm"
-            onClick={() => void refresh()}
-            disabled={loading}
             refreshing={loading}
+            disabled={loading}
+            onClick={() => void refresh()}
           >
             Refresh
           </AdminRefreshButton>
+        }
+      />
+
+      {error ? (
+        <div className="rounded-xl border border-destructive/30 bg-destructive/10 px-4 py-3 text-sm text-destructive">
+          {error}
         </div>
-      </header>
+      ) : null}
+      {notice && !error ? (
+        <div className="flex items-center gap-2 rounded-xl border border-emerald-500/30 bg-emerald-500/10 px-4 py-3 text-sm text-emerald-700">
+          <CheckCircle2 className="size-4 shrink-0" />
+          <span>{notice}</span>
+        </div>
+      ) : null}
 
-      <div className="mx-auto max-w-7xl space-y-6 px-6 py-6">
-        {error && (
-          <div className="rounded-md border border-destructive/30 bg-destructive/10 px-4 py-3 text-sm text-destructive">
-            {error}
+      {unsupported ? (
+        <UnsupportedState />
+      ) : (
+        <>
+          <section className="grid gap-4 md:grid-cols-2 xl:grid-cols-6">
+            <Metric label="Nodes" value={String(totals.nodes)} tone="sky" icon={<Server />} />
+            <Metric
+              label="Active"
+              value={String(totals.active)}
+              tone="green"
+              icon={<CheckCircle2 />}
+            />
+            <Metric
+              label="Disabled/Offline"
+              value={String(totals.unavailable)}
+              tone="amber"
+              icon={<Power />}
+            />
+            <Metric
+              label="Unhealthy"
+              value={String(totals.unhealthy)}
+              tone="rose"
+              icon={<AlertTriangle />}
+            />
+            <Metric
+              label="Sandbox Pods"
+              value={String(totals.sandboxPods)}
+              tone="violet"
+              icon={<Boxes />}
+            />
+            <Metric
+              label="Session Workspaces"
+              value={String(totals.sessions)}
+              tone="slate"
+              icon={<FolderTree />}
+            />
+          </section>
+
+          <div className="admin-entity-card flex flex-row items-center gap-4">
+            <span className="admin-entity-glyph">
+              <Plus className="size-5" />
+            </span>
+            <div className="min-w-0 flex-1">
+              <div className="admin-list-primary">Add node</div>
+              <div className="admin-list-sub">Join an existing machine to this k3s cluster.</div>
+            </div>
+            <button
+              type="button"
+              className="admin-card-btn"
+              onClick={() => setShowAddNode(true)}
+            >
+              <Plus className="size-3.5" />
+              Add node
+            </button>
           </div>
-        )}
-        {notice && (
-          <div className="flex items-center gap-2 rounded-md border border-emerald-500/30 bg-emerald-500/10 px-4 py-3 text-sm text-emerald-700 dark:text-emerald-300">
-            <CheckCircle2 className="size-4 shrink-0" />
-            <span>{notice}</span>
-          </div>
-        )}
 
-        {unsupported ? (
-          <UnsupportedState />
-        ) : (
-          <>
-            <section className="grid gap-3 md:grid-cols-2 xl:grid-cols-6">
-              <Metric label="Nodes" value={String(totals.nodes)} />
-              <Metric label="Active" value={String(totals.active)} />
-              <Metric label="Disabled/Offline" value={String(totals.unavailable)} />
-              <Metric label="Unhealthy" value={String(totals.unhealthy)} />
-              <Metric label="Sandbox Pods" value={String(totals.sandboxPods)} />
-              <Metric label="Session Workspaces" value={String(totals.sessions)} />
-            </section>
-
-            <section className="rounded-lg border border-border bg-card px-4 py-3">
-              <div className="flex flex-col gap-3 sm:flex-row sm:items-center">
-                <div className="grid size-8 place-items-center rounded-md bg-muted">
-                  <Plus className="size-4 text-muted-foreground" />
-                </div>
-                <div className="min-w-0 flex-1">
-                  <div className="text-sm font-medium">Add node</div>
-                  <div className="text-xs text-muted-foreground">
-                    Join an existing machine to this k3s cluster.
+          <div className="admin-list">
+            {loading && nodes.length === 0 ? (
+              <div className="admin-list-empty">Loading nodes…</div>
+            ) : nodes.length === 0 ? (
+              <AdminEmptyState
+                icon={<SandboxNodesPageIcon className="size-6" />}
+                title="No nodes found"
+                description="Nodes will appear here once they join the k3s cluster."
+              />
+            ) : (
+              <div className="admin-list-scroll">
+                <div className="min-w-[1320px]">
+                  <div className="admin-list-cols" style={{ gridTemplateColumns: LIST_COLS }}>
+                    <div>Node</div>
+                    <div>Status</div>
+                    <div>CPU</div>
+                    <div>Memory</div>
+                    <div>Sandbox Pods</div>
+                    <div>Local Workspaces</div>
+                    <div>Disk</div>
+                    <div>Max Sandbox Pods</div>
+                    <div>Reason</div>
+                    <div className="text-right">Actions</div>
                   </div>
-                </div>
-                <Button variant="outline" size="sm" onClick={() => setShowAddNode(true)}>
-                  <Plus className="mr-2 size-4" />
-                  Add node
-                </Button>
-              </div>
-            </section>
-
-            <section className="overflow-hidden rounded-lg border border-border bg-card">
-              <table className="w-full min-w-[1320px] text-sm">
-                <thead className="border-b border-border bg-muted/50 text-xs text-muted-foreground">
-                  <tr>
-                    <th className="px-4 py-3 text-left font-medium">Node</th>
-                    <th className="px-4 py-3 text-left font-medium">Status</th>
-                    <th className="px-4 py-3 text-left font-medium">CPU</th>
-                    <th className="px-4 py-3 text-left font-medium">Memory</th>
-                    <th className="px-4 py-3 text-left font-medium">Sandbox Pods</th>
-                    <th className="px-4 py-3 text-left font-medium">Local Workspaces</th>
-                    <th className="px-4 py-3 text-left font-medium">Disk</th>
-                    <th className="px-4 py-3 text-left font-medium">Max Sandbox Pods</th>
-                    <th className="px-4 py-3 text-left font-medium">Reason</th>
-                    <th className="px-4 py-3 text-right font-medium">Actions</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {loading && nodes.length === 0 ? (
-                    <tr>
-                      <td colSpan={10} className="px-4 py-10 text-center text-muted-foreground">
-                        Loading nodes...
-                      </td>
-                    </tr>
-                  ) : nodes.length === 0 ? (
-                    <tr>
-                      <td colSpan={10} className="px-4 py-10 text-center text-muted-foreground">
-                        No nodes found
-                      </td>
-                    </tr>
-                  ) : (
-                    nodes.map((node) => {
-                      const offlining = actingNode === `${node.name}:offline`;
-                      const alreadyOffline = ["offline", "offline_pending"].includes(node.status);
-                      return (
-                        <tr key={node.name} className="border-b border-border/70 last:border-0">
-                          <td className="px-4 py-3">
-                            <div className="font-medium">{node.name}</div>
-                            <div className="mt-1 flex flex-wrap gap-1">
-                              {Object.entries(node.labels ?? {})
-                                .filter(
-                                  ([key]) =>
-                                    key.startsWith("node-role.kubernetes.io/") ||
-                                    key === "kubernetes.io/arch",
-                                )
-                                .slice(0, 3)
-                                .map(([key, value]) => (
-                                  <span
-                                    key={key}
-                                    className="rounded bg-muted px-1.5 py-0.5 text-[10px] text-muted-foreground"
-                                  >
-                                    {labelName(key, value)}
-                                  </span>
-                                ))}
-                            </div>
-                          </td>
-                          <td className="px-4 py-3">
-                            <StatusPill node={node} />
-                          </td>
-                          <td className="px-4 py-3 font-mono text-xs">
-                            {node.cpu_allocatable || "-"} / {node.cpu_capacity || "-"}
-                          </td>
-                          <td className="px-4 py-3 font-mono text-xs">
-                            {node.memory_allocatable || "-"} / {node.memory_capacity || "-"}
-                          </td>
-                          <td className="px-4 py-3">{node.sandbox_pods}</td>
-                          <td className="px-4 py-3">
-                            <div>{node.session_count}</div>
-                            <div className="text-xs text-muted-foreground">
-                              {formatBytes(node.session_requested_bytes)} requested ·{" "}
-                              {node.workspace_reset_count} resets
-                            </div>
-                          </td>
-                          <td className="px-4 py-3">
+                  {nodes.map((node) => {
+                    const offlining = actingNode === `${node.name}:offline`;
+                    const alreadyOffline = ["offline", "offline_pending"].includes(node.status);
+                    return (
+                      <div
+                        key={node.name}
+                        className="admin-list-row"
+                        style={{ gridTemplateColumns: LIST_COLS }}
+                      >
+                        <div className="min-w-0">
+                          <div className="admin-list-primary admin-list-mono">{node.name}</div>
+                          <div className="mt-1 flex flex-wrap gap-1">
+                            {Object.entries(node.labels ?? {})
+                              .filter(
+                                ([key]) =>
+                                  key.startsWith("node-role.kubernetes.io/") ||
+                                  key === "kubernetes.io/arch",
+                              )
+                              .slice(0, 3)
+                              .map(([key, value]) => (
+                                <span
+                                  key={key}
+                                  className="rounded bg-muted px-1.5 py-0.5 text-[10px] text-muted-foreground"
+                                >
+                                  {labelName(key, value)}
+                                </span>
+                              ))}
+                          </div>
+                        </div>
+                        <div className="admin-list-cell">
+                          <AdminStatusBadge tone={STATUS_TONES[node.status] ?? "neutral"} dot>
+                            {STATUS_LABELS[node.status] ?? node.status}
+                          </AdminStatusBadge>
+                        </div>
+                        <div className="admin-list-cell admin-list-mono">
+                          {node.cpu_allocatable || "—"} / {node.cpu_capacity || "—"}
+                        </div>
+                        <div className="admin-list-cell admin-list-mono">
+                          {node.memory_allocatable || "—"} / {node.memory_capacity || "—"}
+                        </div>
+                        <div className="admin-list-cell">{node.sandbox_pods}</div>
+                        <div className="admin-list-cell">
+                          <div>{node.session_count}</div>
+                          <div className="admin-list-sub">
+                            {formatBytes(node.session_requested_bytes)} requested ·{" "}
+                            {node.workspace_reset_count} resets
+                          </div>
+                        </div>
+                        <div className="admin-list-cell">
+                          <AdminStatusBadge tone={node.disk_pressure ? "red" : "green"} dot>
+                            {node.disk_pressure ? "Pressure" : "Normal"}
+                          </AdminStatusBadge>
+                        </div>
+                        <div className="admin-list-cell">
+                          <div className="flex items-center gap-2">
                             <span
-                              className={
-                                node.disk_pressure ? "text-destructive" : "text-emerald-500"
-                              }
-                            >
-                              {node.disk_pressure ? "Pressure" : "Normal"}
-                            </span>
-                          </td>
-                          <td className="px-4 py-3">
-                            <div className="flex items-center gap-2">
-                              <span
-                                className={cn(
-                                  "min-w-20 font-mono text-xs",
-                                  node.max_sandbox_pods == null
-                                    ? "text-muted-foreground"
-                                    : "text-foreground",
-                                )}
-                              >
-                                {node.max_sandbox_pods == null
-                                  ? "Unlimited"
-                                  : node.max_sandbox_pods}
-                              </span>
-                              <Button
-                                variant="outline"
-                                size="sm"
-                                disabled={Boolean(savingCapacity)}
-                                onClick={() => openCapacityDialog(node)}
-                              >
-                                <SlidersHorizontal className="mr-2 size-4" />
-                                Edit
-                              </Button>
-                            </div>
-                          </td>
-                          <td
-                            className="max-w-[220px] truncate px-4 py-3 text-muted-foreground"
-                            title={node.reason}
-                          >
-                            {node.reason || "-"}
-                          </td>
-                          <td className="px-4 py-3">
-                            <div className="flex justify-end gap-2">
-                              {node.schedulable ? (
-                                <Button
-                                  variant="outline"
-                                  size="sm"
-                                  disabled={Boolean(actingNode)}
-                                  onClick={() => void runNodeAction(node, "disable")}
-                                >
-                                  <Ban className="mr-2 size-4" />
-                                  Disable
-                                </Button>
-                              ) : (
-                                <Button
-                                  variant="outline"
-                                  size="sm"
-                                  disabled={Boolean(actingNode)}
-                                  onClick={() => void runNodeAction(node, "restore")}
-                                >
-                                  <CheckCircle2 className="mr-2 size-4" />
-                                  Restore
-                                </Button>
+                              className={cn(
+                                "admin-list-mono",
+                                node.max_sandbox_pods == null
+                                  ? "text-muted-foreground"
+                                  : "text-foreground",
                               )}
-                              <Button
-                                variant="destructive"
-                                size="sm"
-                                disabled={Boolean(actingNode) || alreadyOffline}
-                                title={alreadyOffline ? "Node is already offline" : undefined}
-                                onClick={() => void runNodeAction(node, "offline", false)}
-                              >
-                                {offlining ? (
-                                  <LoaderCircle className="mr-2 size-4 animate-spin" />
-                                ) : (
-                                  <Power className="mr-2 size-4" />
-                                )}
-                                {alreadyOffline
-                                  ? "Offline"
-                                  : offlining
-                                    ? "Offlining..."
-                                    : "Offline"}
-                              </Button>
-                            </div>
-                          </td>
-                        </tr>
-                      );
-                    })
-                  )}
-                </tbody>
-              </table>
-            </section>
-          </>
-        )}
-      </div>
+                            >
+                              {node.max_sandbox_pods == null ? "Unlimited" : node.max_sandbox_pods}
+                            </span>
+                            <button
+                              type="button"
+                              className="admin-card-btn"
+                              disabled={Boolean(savingCapacity)}
+                              onClick={() => openCapacityDialog(node)}
+                            >
+                              <SlidersHorizontal className="size-3.5" />
+                              Edit
+                            </button>
+                          </div>
+                        </div>
+                        <div
+                          className="admin-list-cell admin-list-muted truncate"
+                          title={node.reason}
+                        >
+                          {node.reason || "—"}
+                        </div>
+                        <div className="flex items-center justify-end gap-2">
+                          {node.schedulable ? (
+                            <button
+                              type="button"
+                              className="admin-card-btn"
+                              disabled={Boolean(actingNode)}
+                              onClick={() => void runNodeAction(node, "disable")}
+                            >
+                              <Ban className="size-3.5" />
+                              Disable
+                            </button>
+                          ) : (
+                            <button
+                              type="button"
+                              className="admin-card-btn"
+                              disabled={Boolean(actingNode)}
+                              onClick={() => void runNodeAction(node, "restore")}
+                            >
+                              <CheckCircle2 className="size-3.5" />
+                              Restore
+                            </button>
+                          )}
+                          <button
+                            type="button"
+                            className="admin-card-btn admin-card-btn--danger"
+                            disabled={Boolean(actingNode) || alreadyOffline}
+                            title={alreadyOffline ? "Node is already offline" : undefined}
+                            onClick={() => void runNodeAction(node, "offline", false)}
+                          >
+                            {offlining ? (
+                              <LoaderCircle className="size-3.5 animate-spin" />
+                            ) : (
+                              <Power className="size-3.5" />
+                            )}
+                            {alreadyOffline ? "Offline" : offlining ? "Offlining…" : "Offline"}
+                          </button>
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+            )}
+          </div>
+        </>
+      )}
 
       {offlineTarget && (
         <OfflineDialog
@@ -478,22 +504,35 @@ export default function SandboxNodesPage() {
           }}
         />
       )}
-    </main>
+    </AdminPage>
   );
 }
 
-function Metric({ label, value }: { label: string; value: string }) {
+function Metric({
+  label,
+  value,
+  tone,
+  icon,
+}: {
+  label: string;
+  value: string;
+  tone: string;
+  icon: React.ReactNode;
+}) {
   return (
-    <div className="rounded-lg border border-border bg-card px-4 py-3">
-      <div className="text-xs text-muted-foreground">{label}</div>
-      <div className="mt-1 text-2xl font-semibold">{value}</div>
+    <div className="admin-metric-card" data-tone={tone}>
+      <div className="admin-metric-head">
+        <span className="admin-metric-glyph">{icon}</span>
+        <span className="admin-metric-key">{label}</span>
+      </div>
+      <div className="admin-metric-val truncate">{value}</div>
     </div>
   );
 }
 
 function UnsupportedState() {
   return (
-    <section className="rounded-lg border border-border bg-card px-4 py-10 text-center">
+    <section className="admin-surface px-4 py-10 text-center">
       <div className="mx-auto grid size-10 place-items-center rounded-md bg-muted">
         <Server className="size-5 text-muted-foreground" />
       </div>
@@ -504,23 +543,6 @@ function UnsupportedState() {
         Start cocola with the k3s runtime profile to enable node operations.
       </p>
     </section>
-  );
-}
-
-function StatusPill({ node }: { node: SandboxNode }) {
-  return (
-    <span
-      className={cn(
-        "inline-flex items-center rounded-full px-2 py-0.5 text-xs font-medium",
-        node.status === "active" && "bg-emerald-500/15 text-emerald-400",
-        node.status === "disabled" && "bg-amber-500/15 text-amber-400",
-        node.status === "offline_pending" && "bg-sky-500/15 text-sky-400",
-        node.status === "offline" && "bg-muted text-muted-foreground",
-        node.status === "unhealthy" && "bg-destructive/15 text-destructive",
-      )}
-    >
-      {STATUS_LABELS[node.status] ?? node.status}
-    </span>
   );
 }
 

@@ -7,14 +7,11 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import {
   AdminAlert,
   AdminConfirmDialog,
-  AdminMetric,
   AdminPage,
   AdminPageHeader,
   AdminPagination,
-  AdminPanel,
   AdminRefreshButton,
   AdminStatusBadge,
-  AdminTable,
 } from "@/components/admin/admin-ui";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
@@ -55,6 +52,7 @@ type StorageMeasurement = {
 };
 
 const SESSION_STORAGE_PAGE_SIZE = 25;
+const LIST_COLS = "1.6fr 1fr 1.4fr 0.8fr 0.9fr 1fr 1fr 0.8fr";
 
 export default function StoragePage() {
   const [nodes, setNodes] = useState<NodeFilesystem[]>([]);
@@ -228,14 +226,14 @@ export default function StoragePage() {
   };
 
   return (
-    <AdminPage>
+    <AdminPage className="admin-theme-purple">
       <AdminPageHeader
-        eyebrow="Node-local persistence"
         title="Storage"
         description="Inspect physical node headroom and measure individual Session Volumes without starting their Sandboxes."
         icon={<StoragePageIcon className="size-5" />}
         actions={
           <AdminRefreshButton
+            variant="outline"
             onClick={() => void refresh()}
             disabled={loading}
             refreshing={loading}
@@ -253,200 +251,204 @@ export default function StoragePage() {
       {notice ? <AdminAlert tone="success">{notice}</AdminAlert> : null}
 
       {unsupported ? (
-        <AdminPanel>
-          <div className="py-8 text-center">
-            <HardDrive className="mx-auto size-8 text-muted-foreground" />
-            <h2 className="mt-3 text-sm font-semibold">Node-local storage is not configured</h2>
-            <p className="mt-1 text-sm text-muted-foreground">
-              Start Cocola with the k3s runtime profile to enable storage visibility.
-            </p>
+        <section className="admin-surface px-4 py-10 text-center">
+          <div className="mx-auto grid size-10 place-items-center rounded-md bg-muted">
+            <HardDrive className="size-5 text-muted-foreground" />
           </div>
-        </AdminPanel>
+          <h2 className="mt-4 text-sm font-semibold">Node-local storage is not configured</h2>
+          <p className="mx-auto mt-2 max-w-xl text-sm text-muted-foreground">
+            Start Cocola with the k3s runtime profile to enable storage visibility.
+          </p>
+        </section>
       ) : (
         <>
-          <section className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
-            <AdminMetric
+          <section className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
+            <Metric
               label="Storage nodes"
-              value={totals.nodeCount}
+              value={String(totals.nodeCount)}
               detail={`${totals.measuredCount} reporting`}
-              icon={<HardDrive className="size-4" />}
+              tone="purple"
+              icon={<HardDrive />}
             />
-            <AdminMetric
+            <Metric
               label="Physical capacity"
               value={formatBytes(totals.totalBytes)}
               detail="Across reporting node filesystems"
-              icon={<Gauge className="size-4" />}
               tone="sky"
+              icon={<Gauge />}
             />
-            <AdminMetric
+            <Metric
               label="Physical available"
               value={formatBytes(totals.availableBytes)}
               detail="Available to local-path storage"
-              icon={<HardDrive className="size-4" />}
-              tone={capacityTone(totals.availableBytes, totals.totalBytes)}
+              tone={metricTone(capacityTone(totals.availableBytes, totals.totalBytes))}
+              icon={<HardDrive />}
             />
-            <AdminMetric
+            <Metric
               label="Session requests"
               value={formatBytes(totals.requestedBytes)}
               detail={`${volumeTotal} PVCs · soft requests`}
-              icon={<Database className="size-4" />}
               tone="violet"
+              icon={<Database />}
             />
           </section>
 
-          <AdminPanel
-            title="Node filesystems"
-            description="Physical usage is read from the filesystem backing /var/lib/cocola/storage. It can include non-Session data on the same filesystem."
-          >
+          <section className="space-y-3">
+            <div>
+              <h2 className="text-sm font-semibold">Node filesystems</h2>
+              <p className="mt-0.5 text-xs text-muted-foreground">
+                Physical usage is read from the filesystem backing /var/lib/cocola/storage. It can
+                include non-Session data on the same filesystem.
+              </p>
+            </div>
             {loading && nodes.length === 0 ? (
-              <div className="py-8 text-center text-sm text-muted-foreground">Loading storage…</div>
+              <div className="admin-list-empty">Loading storage…</div>
             ) : nodes.length === 0 ? (
-              <div className="py-8 text-center text-sm text-muted-foreground">
-                No Kubernetes nodes found
-              </div>
+              <div className="admin-list-empty">No Kubernetes nodes found</div>
             ) : (
-              <div className="grid gap-3 lg:grid-cols-2">
+              <div className="grid gap-4 lg:grid-cols-2">
                 {nodes.map((node) => (
                   <NodeStorageCard key={node.node_name} node={node} />
                 ))}
               </div>
             )}
-          </AdminPanel>
+          </section>
 
-          <AdminPanel
-            title="Session Storage"
-            description="PVC requests are soft limits. Actual disk usage is measured only when you request it."
-            contentClassName="p-0 sm:p-0"
-            actions={
-              orphanCount > 0 ? (
-                <Button
-                  variant="outline"
-                  size="sm"
-                  className="text-destructive hover:text-destructive"
+          <section className="space-y-3">
+            <div className="flex items-center justify-between gap-3">
+              <div>
+                <h2 className="text-sm font-semibold">Session Storage</h2>
+                <p className="mt-0.5 text-xs text-muted-foreground">
+                  PVC requests are soft limits. Actual disk usage is measured only when you request
+                  it.
+                </p>
+              </div>
+              {orphanCount > 0 ? (
+                <button
+                  type="button"
+                  className="admin-card-btn admin-card-btn--danger"
                   disabled={loading || bulkDeleting || Boolean(deleting)}
                   onClick={() => setBulkDeleteOpen(true)}
                 >
-                  <Trash2 className="mr-2 size-4" />
+                  <Trash2 className="size-3.5" />
                   Delete all orphans ({orphanCount})
-                </Button>
-              ) : null
-            }
-          >
-            <AdminTable className="rounded-none border-0">
-              <table className="w-full min-w-[1180px] text-sm">
-                <thead className="border-b border-border/70 bg-muted/45 text-xs text-muted-foreground">
-                  <tr>
-                    <th className="px-4 py-3 text-left font-medium">Session / User</th>
-                    <th className="px-4 py-3 text-left font-medium">Node</th>
-                    <th className="px-4 py-3 text-left font-medium">PVC</th>
-                    <th className="px-4 py-3 text-left font-medium">Generation</th>
-                    <th className="px-4 py-3 text-left font-medium">Requested (soft)</th>
-                    <th className="px-4 py-3 text-left font-medium">Actual usage</th>
-                    <th className="px-4 py-3 text-left font-medium">Last reset</th>
-                    <th className="px-4 py-3 text-right font-medium">Actions</th>
-                  </tr>
-                </thead>
-                <tbody>
+                </button>
+              ) : null}
+            </div>
+
+            <div className="admin-list">
+              <div className="admin-list-scroll">
+                <div className="min-w-[1180px]">
+                  <div className="admin-list-cols" style={{ gridTemplateColumns: LIST_COLS }}>
+                    <div>Session / User</div>
+                    <div>Node</div>
+                    <div>PVC</div>
+                    <div>Generation</div>
+                    <div>Requested (soft)</div>
+                    <div>Actual usage</div>
+                    <div>Last reset</div>
+                    <div className="text-right">Actions</div>
+                  </div>
                   {volumes.length === 0 ? (
-                    <tr>
-                      <td colSpan={8} className="px-4 py-10 text-center text-muted-foreground">
-                        No Session Volumes
-                      </td>
-                    </tr>
+                    <div className="admin-list-empty">No Session Volumes</div>
                   ) : (
                     volumes.map((volume) => {
                       const key = volumeKey(volume);
                       const measurement = measurements[key];
                       return (
-                        <tr key={key} className="border-b border-border/60 last:border-0">
-                          <td className="px-4 py-3">
-                            <div className="font-mono text-xs">
+                        <div
+                          key={key}
+                          className="admin-list-row"
+                          style={{ gridTemplateColumns: LIST_COLS }}
+                        >
+                          <div className="min-w-0">
+                            <div className="admin-list-primary admin-list-mono">
                               {volume.session_id || "Detached PVC"}
                             </div>
-                            <div className="mt-1 text-xs text-muted-foreground">
+                            <div className="admin-list-sub">
                               {volume.user_id || "No database binding"}
                             </div>
-                          </td>
-                          <td className="px-4 py-3">{volume.node_name || "-"}</td>
-                          <td className="px-4 py-3">
-                            <div className="font-mono text-xs">{volume.pvc_name}</div>
+                          </div>
+                          <div className="admin-list-cell admin-list-mono">
+                            {volume.node_name || "—"}
+                          </div>
+                          <div className="admin-list-cell">
+                            <div className="admin-list-mono">{volume.pvc_name}</div>
                             <AdminStatusBadge
                               className="mt-1"
                               tone={volume.pvc_phase === "Bound" ? "green" : "amber"}
+                              dot
                             >
                               {volume.pvc_phase}
                             </AdminStatusBadge>
-                          </td>
-                          <td className="px-4 py-3 tabular-nums">{volume.generation}</td>
-                          <td className="px-4 py-3 tabular-nums">
+                          </div>
+                          <div className="admin-list-cell tabular-nums">{volume.generation}</div>
+                          <div className="admin-list-cell admin-list-mono tabular-nums">
                             {formatBytes(volume.requested_bytes)}
-                          </td>
-                          <td className="px-4 py-3">
+                          </div>
+                          <div className="admin-list-cell">
                             {measurement ? (
                               <div>
-                                <div className="font-medium tabular-nums">
+                                <div className="admin-list-mono font-medium tabular-nums">
                                   {formatBytes(measurement.allocated_bytes)}
                                 </div>
-                                <div className="mt-1 text-xs text-muted-foreground">
-                                  {measurement.file_count} files · {measurement.directory_count}{" "}
-                                  dirs
+                                <div className="admin-list-sub">
+                                  {measurement.file_count} files · {measurement.directory_count} dirs
                                 </div>
                               </div>
                             ) : (
-                              <span className="text-xs text-muted-foreground">Not measured</span>
+                              <span className="admin-list-muted">Not measured</span>
                             )}
-                          </td>
-                          <td className="max-w-[220px] px-4 py-3 text-xs text-muted-foreground">
+                          </div>
+                          <div className="admin-list-cell admin-list-muted">
                             {volume.last_reset_at
                               ? `${new Date(volume.last_reset_at).toLocaleString()} · ${volume.last_reset_reason || "reset"}`
-                              : "-"}
-                          </td>
-                          <td className="px-4 py-3">
-                            <div className="flex justify-end gap-2">
-                              <Button
-                                variant="outline"
-                                size="sm"
-                                disabled={measuring === key || volume.pvc_phase !== "Bound"}
-                                onClick={() => void measureVolume(volume)}
+                              : "—"}
+                          </div>
+                          <div className="flex items-center justify-end gap-2">
+                            <button
+                              type="button"
+                              className="admin-card-btn"
+                              disabled={measuring === key || volume.pvc_phase !== "Bound"}
+                              onClick={() => void measureVolume(volume)}
+                            >
+                              {measuring === key ? (
+                                <LoaderCircle className="size-3.5 animate-spin" />
+                              ) : (
+                                <Gauge className="size-3.5" />
+                              )}
+                              Measure
+                            </button>
+                            {volume.delete_allowed ? (
+                              <button
+                                type="button"
+                                className="admin-card-btn admin-card-btn--danger"
+                                disabled={deleting === key}
+                                onClick={() => setPendingDelete(volume)}
                               >
-                                {measuring === key ? (
-                                  <LoaderCircle className="mr-2 size-4 animate-spin" />
-                                ) : (
-                                  <Gauge className="mr-2 size-4" />
-                                )}
-                                Measure
-                              </Button>
-                              {volume.delete_allowed ? (
-                                <Button
-                                  variant="destructive"
-                                  size="sm"
-                                  disabled={deleting === key}
-                                  onClick={() => setPendingDelete(volume)}
-                                >
-                                  <Trash2 className="mr-2 size-4" />
-                                  Delete orphan
-                                </Button>
-                              ) : null}
-                            </div>
-                          </td>
-                        </tr>
+                                <Trash2 className="size-3.5" />
+                                Delete orphan
+                              </button>
+                            ) : null}
+                          </div>
+                        </div>
                       );
                     })
                   )}
-                </tbody>
-              </table>
-            </AdminTable>
-            <AdminPagination
-              page={volumePage}
-              pageSize={SESSION_STORAGE_PAGE_SIZE}
-              count={volumes.length}
-              total={volumeTotal}
-              loading={loading}
-              label="volumes"
-              onPageChange={setVolumePage}
-              variant="embedded"
-            />
-          </AdminPanel>
+                </div>
+              </div>
+              <AdminPagination
+                page={volumePage}
+                pageSize={SESSION_STORAGE_PAGE_SIZE}
+                count={volumes.length}
+                total={volumeTotal}
+                loading={loading}
+                label="volumes"
+                onPageChange={setVolumePage}
+                variant="embedded"
+              />
+            </div>
+          </section>
         </>
       )}
       <AdminConfirmDialog
@@ -479,13 +481,40 @@ export default function StoragePage() {
   );
 }
 
+function Metric({
+  label,
+  value,
+  detail,
+  tone,
+  icon,
+}: {
+  label: string;
+  value: string;
+  detail?: string;
+  tone: string;
+  icon: React.ReactNode;
+}) {
+  return (
+    <div className="admin-metric-card" data-tone={tone}>
+      <div className="admin-metric-head">
+        <span className="admin-metric-glyph">{icon}</span>
+        <span className="admin-metric-key">{label}</span>
+      </div>
+      <div className="admin-metric-val truncate">{value}</div>
+      {detail ? <div className="admin-metric-detail">{detail}</div> : null}
+    </div>
+  );
+}
+
 function NodeStorageCard({ node }: { node: NodeFilesystem }) {
   if (!node.available) {
     return (
-      <div className="rounded-xl border border-amber-500/25 bg-amber-500/5 p-4">
+      <div className="admin-entity-card">
         <div className="flex items-center justify-between gap-3">
-          <div className="font-mono text-sm font-medium">{node.node_name}</div>
-          <AdminStatusBadge tone="amber">Probe unavailable</AdminStatusBadge>
+          <div className="admin-list-primary admin-list-mono">{node.node_name}</div>
+          <AdminStatusBadge tone="amber" dot>
+            Probe unavailable
+          </AdminStatusBadge>
         </div>
         <p className="mt-3 text-xs text-muted-foreground">
           {node.error || "Storage probe is not reporting from this node."}
@@ -497,15 +526,15 @@ function NodeStorageCard({ node }: { node: NodeFilesystem }) {
   const occupiedRatio = 1 - availableRatio;
   const tone = capacityTone(node.available_bytes, node.total_bytes);
   return (
-    <div className="rounded-xl border border-border/70 bg-background/55 p-4">
+    <div className="admin-entity-card admin-entity-card--hover">
       <div className="flex items-start justify-between gap-3">
         <div>
-          <div className="font-mono text-sm font-medium">{node.node_name}</div>
-          <div className="mt-1 text-xs text-muted-foreground">
+          <div className="admin-list-primary admin-list-mono">{node.node_name}</div>
+          <div className="admin-list-sub mt-1">
             {formatBytes(node.available_bytes)} available of {formatBytes(node.total_bytes)}
           </div>
         </div>
-        <AdminStatusBadge tone={tone === "red" ? "red" : tone === "amber" ? "amber" : "green"}>
+        <AdminStatusBadge tone={tone === "red" ? "red" : tone === "amber" ? "amber" : "green"} dot>
           {formatPercent(availableRatio)} available
         </AdminStatusBadge>
       </div>
@@ -537,6 +566,12 @@ function capacityTone(available: number, total: number): "green" | "amber" | "re
   const ratio = available / total;
   if (ratio < 0.1) return "red";
   if (ratio < 0.2) return "amber";
+  return "green";
+}
+
+function metricTone(tone: "green" | "amber" | "red"): string {
+  if (tone === "red") return "rose";
+  if (tone === "amber") return "amber";
   return "green";
 }
 

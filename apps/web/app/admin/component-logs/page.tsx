@@ -1,9 +1,13 @@
 "use client";
 
 import { SquareTerminal as ComponentLogsPageIcon } from "lucide-react";
-import { AlertTriangle, CheckCircle2, Loader2, ScrollText } from "lucide-react";
+import { AlertTriangle, AlignLeft, CheckCircle2, HardDrive, Loader2 } from "lucide-react";
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { AdminRefreshButton } from "@/components/admin/admin-ui";
+import {
+  AdminPage,
+  AdminPageHeader,
+  AdminRefreshButton,
+} from "@/components/admin/admin-ui";
 import { SelectControl } from "@/components/ui/select-control";
 
 type LogFile = {
@@ -20,8 +24,6 @@ type LogResponse = {
 
 const input =
   "h-9 min-w-0 rounded-md border border-input bg-background px-3 text-sm text-foreground outline-none transition-colors placeholder:text-muted-foreground focus:border-ring focus:ring-1 focus:ring-ring";
-const iconBtn =
-  "inline-flex size-8 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-accent hover:text-accent-foreground disabled:pointer-events-none disabled:opacity-40";
 
 export default function ComponentLogsPage() {
   const [files, setFiles] = useState<LogFile[]>([]);
@@ -67,114 +69,137 @@ export default function ComponentLogsPage() {
   );
 
   return (
-    <main className="min-h-screen bg-background text-foreground">
-      <header className="border-b border-border">
-        <div className="mx-auto flex h-16 max-w-7xl items-center gap-3 px-6">
-          <div className="admin-page-icon">
-            <ComponentLogsPageIcon className="size-[18px]" />
-          </div>
-          <div className="min-w-0 flex-1">
-            <h1 className="truncate text-base font-semibold">Service Logs</h1>
-            <p className="truncate text-xs text-muted-foreground">
-              Recent output from Cocola&apos;s core runtime services
-            </p>
-          </div>
+    <AdminPage className="admin-theme-slate">
+      <AdminPageHeader
+        icon={<ComponentLogsPageIcon className="size-5" />}
+        title="Service Logs"
+        description="Recent output from Cocola's core runtime services"
+        actions={
           <AdminRefreshButton
-            className={iconBtn}
+            variant="outline"
             title="Refresh component logs"
             aria-label="Refresh component logs"
             onClick={() => void load()}
             disabled={loading}
             refreshing={loading}
-            variant="ghost"
-            size="icon"
-          />
+          >
+            Refresh
+          </AdminRefreshButton>
+        }
+      />
+
+      <section className="grid gap-4 md:grid-cols-3">
+        <Metric
+          label="Components"
+          value={String(files.length)}
+          tone="slate"
+          icon={<ComponentLogsPageIcon />}
+        />
+        <Metric
+          label="Loaded Lines"
+          value={String(lines.length)}
+          tone="sky"
+          icon={<AlignLeft />}
+        />
+        <Metric
+          label="Selected Size"
+          value={formatBytes(selectedFile?.size ?? 0)}
+          tone="violet"
+          icon={<HardDrive />}
+        />
+      </section>
+
+      <section className="admin-surface">
+        <div className="admin-surface-head">
+          <div>
+            <div className="admin-surface-title">Source</div>
+            <div className="admin-surface-sub">
+              Pick a component and how many recent lines to load
+            </div>
+          </div>
         </div>
-      </header>
+        <div className="grid gap-3 p-4 md:grid-cols-[minmax(240px,1fr)_160px_120px]">
+          <SelectControl
+            className={input}
+            value={selected}
+            onValueChange={(value) => {
+              setSelected(value);
+              void load(value);
+            }}
+            options={
+              files.length
+                ? files.map((file) => ({ value: file.name, label: file.label }))
+                : [{ value: "", label: "No component logs", disabled: true }]
+            }
+            contentClassName="cocola-admin-ui"
+          />
+          <input
+            className={input}
+            type="number"
+            min={1}
+            max={2000}
+            value={lineCount}
+            onChange={(event) => setLineCount(Number(event.target.value))}
+          />
+          <button
+            type="button"
+            className="admin-card-btn admin-card-btn--accent justify-center"
+            disabled={loading}
+            onClick={() => void load()}
+          >
+            Load
+          </button>
+        </div>
+      </section>
 
-      <div className="mx-auto max-w-7xl space-y-5 px-6 py-6">
-        <section className="grid gap-3 md:grid-cols-3">
-          <Metric label="Components" value={String(files.length)} />
-          <Metric label="Loaded Lines" value={String(lines.length)} />
-          <Metric label="Selected Size" value={formatBytes(selectedFile?.size ?? 0)} />
-        </section>
+      {error ? (
+        <div className="flex items-center gap-2 rounded-xl border border-destructive/30 bg-destructive/10 px-4 py-3 text-sm text-destructive">
+          <AlertTriangle className="size-4 shrink-0" />
+          <span className="min-w-0">{error}</span>
+        </div>
+      ) : null}
 
-        <section className="rounded-lg border border-border bg-card">
-          <div className="flex items-center gap-2 border-b border-border px-4 py-3">
-            <ScrollText className="size-4 text-muted-foreground" />
-            <h2 className="text-sm font-semibold">Source</h2>
-          </div>
-          <div className="grid gap-3 p-4 md:grid-cols-[minmax(240px,1fr)_160px_120px]">
-            <SelectControl
-              className={input}
-              value={selected}
-              onValueChange={(value) => {
-                setSelected(value);
-                void load(value);
-              }}
-              options={
-                files.length
-                  ? files.map((file) => ({ value: file.name, label: file.label }))
-                  : [{ value: "", label: "No component logs", disabled: true }]
-              }
-              contentClassName="cocola-admin-ui"
-            />
-            <input
-              className={input}
-              type="number"
-              min={1}
-              max={2000}
-              value={lineCount}
-              onChange={(event) => setLineCount(Number(event.target.value))}
-            />
-            <AdminRefreshButton
-              className="inline-flex h-9 items-center justify-center gap-2 rounded-md bg-primary px-3 text-sm font-medium text-primary-foreground transition-colors hover:bg-primary/90 disabled:opacity-50"
-              disabled={loading}
-              onClick={() => void load()}
-              refreshing={loading}
-              size="sm"
-            >
-              Load
-            </AdminRefreshButton>
-          </div>
-        </section>
-
-        {error ? (
-          <div className="flex items-center gap-2 rounded-md border border-destructive/30 bg-destructive/10 px-3 py-2 text-sm text-destructive">
-            <AlertTriangle className="size-4 shrink-0" />
-            <span className="min-w-0">{error}</span>
-          </div>
-        ) : null}
-
-        <section className="overflow-hidden rounded-lg border border-border bg-card">
-          <div className="flex items-center justify-between border-b border-border px-4 py-3">
-            <h2 className="text-sm font-semibold">{selectedFile?.label ?? "Logs"}</h2>
-            {loading ? (
-              <span className="inline-flex items-center text-xs text-muted-foreground">
-                <Loader2 className="mr-2 size-3 animate-spin" />
-                Loading
-              </span>
-            ) : (
-              <span className="inline-flex items-center text-xs text-muted-foreground">
-                <CheckCircle2 className="mr-2 size-3" />
-                Updated
-              </span>
-            )}
-          </div>
-          <pre className="h-[560px] overflow-auto bg-zinc-950 p-4 font-mono text-xs leading-5 text-zinc-100">
-            {lines.length > 0 ? lines.join("\n") : "No component log lines"}
-          </pre>
-        </section>
-      </div>
-    </main>
+      <section className="admin-surface overflow-hidden">
+        <div className="admin-surface-head">
+          <div className="admin-surface-title">{selectedFile?.label ?? "Logs"}</div>
+          {loading ? (
+            <span className="inline-flex items-center text-xs text-muted-foreground">
+              <Loader2 className="mr-2 size-3 animate-spin" />
+              Loading
+            </span>
+          ) : (
+            <span className="inline-flex items-center text-xs text-muted-foreground">
+              <CheckCircle2 className="mr-2 size-3" />
+              Updated
+            </span>
+          )}
+        </div>
+        <pre className="h-[560px] overflow-auto bg-zinc-950 p-4 font-mono text-xs leading-5 text-zinc-100">
+          {lines.length > 0 ? lines.join("\n") : "No component log lines"}
+        </pre>
+      </section>
+    </AdminPage>
   );
 }
 
-function Metric({ label, value }: { label: string; value: string }) {
+function Metric({
+  label,
+  value,
+  tone,
+  icon,
+}: {
+  label: string;
+  value: string;
+  tone: string;
+  icon: React.ReactNode;
+}) {
   return (
-    <div className="rounded-lg border border-border bg-card px-4 py-3">
-      <div className="text-xs text-muted-foreground">{label}</div>
-      <div className="mt-1 text-2xl font-semibold">{value}</div>
+    <div className="admin-metric-card" data-tone={tone}>
+      <div className="admin-metric-head">
+        <span className="admin-metric-glyph">{icon}</span>
+        <span className="admin-metric-key">{label}</span>
+      </div>
+      <div className="admin-metric-val truncate">{value}</div>
     </div>
   );
 }

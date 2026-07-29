@@ -842,6 +842,97 @@
     --page-accent-shadow-soft: rgba(225, 29, 72, 0.32);
   }
 
+  .cocola-admin-ui .admin-theme-teal,
+  .cocola-admin-ui.admin-theme-teal {
+    --primary: 174 80% 32%;
+    --primary-foreground: 0 0% 100%;
+    --ring: 174 62% 42%;
+    --accent: 168 76% 90%;
+    --accent-foreground: 175 84% 22%;
+    --page-accent: #0d9488;
+    --page-accent-2: #2dd4bf;
+    --page-accent-grad: linear-gradient(135deg, #0d9488, #2dd4bf);
+    --page-accent-soft: #f0fdfa;
+    --page-accent-ink: #0f766e;
+    --page-accent-border: #5eead4;
+    --page-accent-focus: #14b8a6;
+    --page-accent-focus-ring: rgba(20, 184, 166, 0.18);
+    --page-accent-shadow: rgba(13, 148, 136, 0.5);
+    --page-accent-shadow-soft: rgba(13, 148, 136, 0.32);
+  }
+  .cocola-admin-ui .admin-theme-sky,
+  .cocola-admin-ui.admin-theme-sky {
+    --primary: 200 98% 39%;
+    --primary-foreground: 0 0% 100%;
+    --ring: 199 89% 48%;
+    --accent: 204 94% 92%;
+    --accent-foreground: 202 80% 24%;
+    --page-accent: #0284c7;
+    --page-accent-2: #38bdf8;
+    --page-accent-grad: linear-gradient(135deg, #0284c7, #38bdf8);
+    --page-accent-soft: #f0f9ff;
+    --page-accent-ink: #0369a1;
+    --page-accent-border: #7dd3fc;
+    --page-accent-focus: #0ea5e9;
+    --page-accent-focus-ring: rgba(14, 165, 233, 0.18);
+    --page-accent-shadow: rgba(2, 132, 199, 0.5);
+    --page-accent-shadow-soft: rgba(2, 132, 199, 0.32);
+  }
+  .cocola-admin-ui .admin-theme-purple,
+  .cocola-admin-ui.admin-theme-purple {
+    --primary: 271 81% 56%;
+    --primary-foreground: 0 0% 100%;
+    --ring: 272 79% 63%;
+    --accent: 269 100% 95%;
+    --accent-foreground: 273 72% 40%;
+    --page-accent: #9333ea;
+    --page-accent-2: #c084fc;
+    --page-accent-grad: linear-gradient(135deg, #9333ea, #c084fc);
+    --page-accent-soft: #faf5ff;
+    --page-accent-ink: #7e22ce;
+    --page-accent-border: #e9d5ff;
+    --page-accent-focus: #a855f7;
+    --page-accent-focus-ring: rgba(168, 85, 247, 0.18);
+    --page-accent-shadow: rgba(147, 51, 234, 0.5);
+    --page-accent-shadow-soft: rgba(147, 51, 234, 0.32);
+  }
+  .cocola-admin-ui .admin-theme-fuchsia,
+  .cocola-admin-ui.admin-theme-fuchsia {
+    --primary: 294 72% 49%;
+    --primary-foreground: 0 0% 100%;
+    --ring: 293 69% 58%;
+    --accent: 289 100% 95%;
+    --accent-foreground: 295 70% 37%;
+    --page-accent: #c026d3;
+    --page-accent-2: #e879f9;
+    --page-accent-grad: linear-gradient(135deg, #c026d3, #e879f9);
+    --page-accent-soft: #fdf4ff;
+    --page-accent-ink: #a21caf;
+    --page-accent-border: #f5d0fe;
+    --page-accent-focus: #d946ef;
+    --page-accent-focus-ring: rgba(217, 70, 239, 0.18);
+    --page-accent-shadow: rgba(192, 38, 211, 0.5);
+    --page-accent-shadow-soft: rgba(192, 38, 211, 0.32);
+  }
+  .cocola-admin-ui .admin-theme-slate,
+  .cocola-admin-ui.admin-theme-slate {
+    --primary: 215 25% 34%;
+    --primary-foreground: 0 0% 100%;
+    --ring: 215 20% 47%;
+    --accent: 210 40% 96%;
+    --accent-foreground: 215 25% 27%;
+    --page-accent: #475569;
+    --page-accent-2: #94a3b8;
+    --page-accent-grad: linear-gradient(135deg, #475569, #94a3b8);
+    --page-accent-soft: #f8fafc;
+    --page-accent-ink: #334155;
+    --page-accent-border: #cbd5e1;
+    --page-accent-focus: #64748b;
+    --page-accent-focus-ring: rgba(100, 116, 139, 0.18);
+    --page-accent-shadow: rgba(71, 85, 105, 0.5);
+    --page-accent-shadow-soft: rgba(71, 85, 105, 0.32);
+  }
+
   /* ===== shared entity cards (skills / mcps grids), page-accent driven ===== */
   .cocola-admin-ui .admin-entity-grid {
     display: grid;
@@ -945,6 +1036,16 @@
     background: #dc2626;
     box-shadow: 0 8px 18px -10px rgba(220, 38, 38, 0.45);
   }
+  .cocola-admin-ui .admin-card-btn--accent {
+    color: #fff;
+    border-color: var(--page-accent);
+    background: var(--page-accent);
+  }
+  .cocola-admin-ui .admin-card-btn--accent:hover {
+    border-color: var(--page-accent-focus);
+    background: var(--page-accent-focus);
+    box-shadow: 0 8px 18px -10px var(--page-accent-shadow);
+  }
   .cocola-admin-ui .admin-entity-glyph {
     display: grid;
     place-items: center;
@@ -1012,6 +1113,9 @@
   .cocola-admin-ui .admin-metric-card[data-tone="slate"] { --card-to: #64748b; }
   .cocola-admin-ui .admin-metric-card[data-tone="rose"] { --card-to: #e11d48; }
   .cocola-admin-ui .admin-metric-card[data-tone="indigo"] { --card-to: #4f46e5; }
+  .cocola-admin-ui .admin-metric-card[data-tone="teal"] { --card-to: #0d9488; }
+  .cocola-admin-ui .admin-metric-card[data-tone="purple"] { --card-to: #9333ea; }
+  .cocola-admin-ui .admin-metric-card[data-tone="fuchsia"] { --card-to: #c026d3; }
   .cocola-admin-ui .admin-metric-head {
     display: flex;
     align-items: center;
@@ -1037,6 +1141,11 @@
     line-height: 1;
     color: #18181b;
     font-variant-numeric: tabular-nums;
+  }
+  .cocola-admin-ui .admin-metric-detail {
+    font-size: 12.5px;
+    color: #a1a1aa;
+    margin-top: 4px;
   }
 
   /* ===== users page: HeroUI list ===== */
