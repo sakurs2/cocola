@@ -13,6 +13,7 @@
     "@assistant-ui/react": "0.14.24",
     "@assistant-ui/react-markdown": "^0.14.5",
     "@cocola/ts-common": "workspace:*",
+    "@heroui/react": "^2.8.0",
     "@lobehub/icons-static-svg": "^1.91.0",
     "@monaco-editor/react": "^4.7.0",
     "@phosphor-icons/react": "^2.1.10",
@@ -21,6 +22,7 @@
     "@radix-ui/react-popover": "^1.1.19",
     "@radix-ui/react-select": "^2.3.1",
     "@radix-ui/react-tooltip": "^1.2.12",
+    "@react-aria/i18n": "^3.13.1",
     "@tiptap/core": "^3.23.6",
     "@tiptap/extension-highlight": "^3.23.6",
     "@tiptap/extension-image": "^3.23.6",
@@ -53,6 +55,7 @@
     "tailwind-merge": "^3.6.0"
   },
   "devDependencies": {
+    "@tailwindcss/postcss": "4",
     "@types/node": "^20.12.0",
     "@types/react": "^18.3.0",
     "@types/react-dom": "^18.3.0",
@@ -60,7 +63,7 @@
     "eslint": "^8.57.0",
     "eslint-config-next": "^15.5.21",
     "postcss": "^8.4.38",
-    "tailwindcss": "^3.4.4",
+    "tailwindcss": "^4.3.3",
     "tailwindcss-animate": "^1.0.7",
     "typescript": "^5.4.5"
   }

@@ -4,9 +4,14 @@ import * as Dialog from "@radix-ui/react-dialog";
 import { motion } from "framer-motion";
 import { ChevronLeft, ChevronRight, RefreshCw, X } from "lucide-react";
 import { type ComponentPropsWithoutRef, type ReactNode, useState } from "react";
-import { Badge } from "@/components/ui/badge";
 import { Button, type ButtonProps } from "@/components/ui/button";
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import {
+  Card as HeroCard,
+  CardBody as HeroCardBody,
+  CardHeader as HeroCardHeader,
+  Chip as HeroChip,
+} from "@heroui/react";
+import { Card } from "@/components/ui/card";
 import { cn } from "@/lib/utils";
 
 export function AdminPage({
@@ -95,21 +100,30 @@ export function AdminPanel({
   className?: string;
   contentClassName?: string;
 }) {
+  const hasHeader = Boolean(title || description || actions);
   return (
-    <Card className={cn("overflow-hidden", className)}>
-      {title || description || actions ? (
-        <CardHeader className="min-h-14 flex-row items-center justify-between gap-4 border-b border-border/70 px-4 py-3 sm:px-5">
+    <HeroCard
+      shadow="sm"
+      radius="lg"
+      className={cn("overflow-hidden border border-border/70 bg-card", className)}
+    >
+      {hasHeader ? (
+        <HeroCardHeader className="min-h-14 flex-row items-center justify-between gap-4 border-b border-border/70 px-4 py-3 sm:px-5">
           <div className="min-w-0">
-            {title ? <CardTitle className="text-sm">{title}</CardTitle> : null}
+            {title ? (
+              <div className="text-sm font-semibold leading-none tracking-tight text-foreground">
+                {title}
+              </div>
+            ) : null}
             {description ? (
-              <CardDescription className="mt-0.5 text-xs">{description}</CardDescription>
+              <div className="mt-0.5 text-xs text-muted-foreground">{description}</div>
             ) : null}
           </div>
           {actions ? <div className="flex shrink-0 items-center gap-2">{actions}</div> : null}
-        </CardHeader>
+        </HeroCardHeader>
       ) : null}
-      <CardContent className={cn("p-4 sm:p-5", contentClassName)}>{children}</CardContent>
-    </Card>
+      <HeroCardBody className={cn("p-4 sm:p-5", contentClassName)}>{children}</HeroCardBody>
+    </HeroCard>
   );
 }
 
@@ -226,11 +240,11 @@ export function AdminPagination({
 }
 
 const statusTone = {
-  neutral: "border-border bg-muted/60 text-muted-foreground",
-  sky: "border-blue-500/25 bg-blue-500/10 text-blue-700",
-  green: "border-emerald-500/25 bg-emerald-500/10 text-emerald-700",
-  amber: "border-amber-500/25 bg-amber-500/10 text-amber-700",
-  red: "border-destructive/25 bg-destructive/10 text-destructive",
+  neutral: "default",
+  sky: "primary",
+  green: "success",
+  amber: "warning",
+  red: "danger",
 } as const;
 
 export function AdminStatusBadge({
@@ -245,10 +259,21 @@ export function AdminStatusBadge({
   className?: string;
 }) {
   return (
-    <Badge className={cn("min-h-6 gap-1.5 border px-2.5 py-0.5", statusTone[tone], className)}>
-      {dot ? <span className="size-1.5 rounded-full bg-current" /> : null}
+    <HeroChip
+      size="sm"
+      radius="full"
+      variant="flat"
+      color={statusTone[tone]}
+      classNames={{
+        base: cn("min-h-6 border border-current/20 px-2.5", className),
+        content: "flex items-center gap-1.5 px-0 text-xs font-medium",
+      }}
+      startContent={
+        dot ? <span className="ml-1 size-1.5 rounded-full bg-current" /> : undefined
+      }
+    >
       {children}
-    </Badge>
+    </HeroChip>
   );
 }
 

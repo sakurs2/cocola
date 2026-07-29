@@ -1,5 +1,6 @@
 import type { Config } from "tailwindcss";
 import animate from "tailwindcss-animate";
+import { heroui } from "@heroui/react";
 import defaultTheme from "tailwindcss/defaultTheme";
 
 // Tailwind v3 config wired to the shadcn CSS variables defined in
@@ -7,8 +8,13 @@ import defaultTheme from "tailwindcss/defaultTheme";
 // names (bg-background, text-muted-foreground, border-border, bg-sidebar, …)
 // plus the radius scale; without this mapping those classes resolve to nothing.
 const config: Config = {
-  darkMode: ["class"],
-  content: ["./app/**/*.{ts,tsx}", "./components/**/*.{ts,tsx}", "./lib/**/*.{ts,tsx}"],
+  darkMode: "class",
+  content: [
+    "./app/**/*.{ts,tsx}",
+    "./components/**/*.{ts,tsx}",
+    "./lib/**/*.{ts,tsx}",
+    "../../node_modules/@heroui/theme/dist/**/*.{js,ts,jsx,tsx}",
+  ],
   theme: {
     extend: {
       fontFamily: {
@@ -86,6 +92,6 @@ const config: Config = {
       },
     },
   },
-  plugins: [animate],
+  plugins: [animate, heroui()],
 };
 export default config;

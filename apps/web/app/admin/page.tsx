@@ -188,23 +188,22 @@ export default function AdminPage() {
               </div>
               <p className="mt-1 text-xs leading-5 text-muted-foreground">{group.description}</p>
             </div>
-            <div className="grid gap-2 sm:grid-cols-2">
+            <div className="grid gap-3 sm:grid-cols-2">
               {group.modules.map((module) => {
                 const Icon = module.icon;
                 return (
                   <Link key={module.href} href={module.href} className="admin-module-card group">
-                    <span className={`admin-module-icon ${module.accent}`}>
-                      <Icon className="size-[18px]" />
-                    </span>
-                    <span className="min-w-0 flex-1">
-                      <span className="block text-sm font-semibold text-foreground">
-                        {module.title}
+                    <span className="admin-module-head">
+                      <span className="admin-module-icon">
+                        <Icon className="size-[18px]" />
                       </span>
-                      <span className="mt-1 block text-xs leading-5 text-muted-foreground">
-                        {module.summary}
-                      </span>
+                      <span className="admin-module-title">{module.title}</span>
                     </span>
-                    <ArrowRight className="mt-1 size-4 shrink-0 -translate-x-1 text-muted-foreground opacity-0 transition-all duration-200 group-hover:translate-x-0 group-hover:text-primary group-hover:opacity-100" />
+                    <span className="admin-module-summary">{module.summary}</span>
+                    <span className="admin-module-cta">
+                      Open
+                      <ArrowRight className="size-3.5 transition-transform duration-200 group-hover:translate-x-0.5" />
+                    </span>
                   </Link>
                 );
               })}

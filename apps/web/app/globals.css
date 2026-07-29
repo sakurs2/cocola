@@ -1,9 +1,8 @@
 @import "react-diff-view/style/index.css";
 @import "@xterm/xterm/css/xterm.css";
 
-@tailwind base;
-@tailwind components;
-@tailwind utilities;
+@import "tailwindcss";
+@config "../tailwind.config.ts";
 
 /*
  * shadcn-style design tokens. User and admin surfaces opt into scoped cocola
@@ -403,6 +402,8 @@
   }
 
   .cocola-user-ui .cocola-send-btn svg {
+    stroke: hsl(258 80% 52%);
+    color: hsl(258 80% 52%);
     transition: transform 250ms cubic-bezier(0.34, 1.56, 0.64, 1);
   }
 
@@ -432,6 +433,8 @@
   }
 
   .cocola-user-ui .cocola-send-btn:disabled svg {
+    stroke: hsl(220 12% 68%);
+    color: hsl(220 12% 68%);
     transform: none;
   }
 
@@ -509,13 +512,14 @@
     min-height: 1.75rem;
     align-items: center;
     gap: 0.4rem;
-    border: 1px solid hsl(var(--border));
+    border: 1px solid hsl(266 45% 94%);
     border-radius: 9999px;
-    background: hsl(var(--secondary));
-    padding: 0.25rem 0.65rem;
-    color: hsl(var(--muted-foreground));
+    background: hsl(0 0% 100%);
+    padding: 0.25rem 0.7rem;
+    color: hsl(266 22% 40%);
     font-size: 0.6875rem;
     line-height: 1rem;
+    box-shadow: 0 1px 2px hsl(266 40% 40% / 0.06);
   }
 
   .cocola-admin-ui .admin-rail-button {
@@ -563,58 +567,118 @@
   .cocola-admin-ui .admin-overview-hero {
     position: relative;
     isolation: isolate;
-    border-color: hsl(var(--border));
-    background: hsl(var(--card));
-    box-shadow: 0 1px 2px hsl(222 47% 11% / 0.04);
+    border-color: hsl(266 55% 94%);
+    background:
+      radial-gradient(130% 130% at 0% 0%, hsl(266 100% 97%) 0%, hsl(0 0% 100% / 0) 46%),
+      linear-gradient(135deg, hsl(258 100% 98%) 0%, hsl(300 100% 98%) 100%);
+    box-shadow: 0 18px 48px -20px hsl(266 70% 45% / 0.28);
   }
 
   .cocola-admin-ui .admin-page-icon {
     display: grid;
-    width: 2.5rem;
-    height: 2.5rem;
+    width: 2.75rem;
+    height: 2.75rem;
     flex: 0 0 auto;
     place-items: center;
-    border: 1px solid hsl(var(--border));
-    border-radius: 0.875rem;
-    color: hsl(var(--primary));
-    background: hsl(var(--accent));
+    border: none;
+    border-radius: 1rem;
+    color: #fff;
+    background: linear-gradient(140deg, hsl(258 90% 62%) 0%, hsl(286 84% 58%) 100%);
+    box-shadow: 0 10px 22px -8px hsl(272 80% 50% / 0.55);
   }
 
   .cocola-admin-ui .admin-domain-panel {
-    border-color: hsl(var(--border));
-    background: hsl(var(--secondary) / 0.5);
+    border-color: hsl(266 45% 96%);
+    background: hsl(280 60% 99% / 0.7);
+    box-shadow: 0 1px 2px hsl(266 40% 40% / 0.03);
   }
 
   .cocola-admin-ui .admin-module-card {
     display: flex;
-    min-height: 7.25rem;
+    flex-direction: column;
     align-items: flex-start;
     gap: 0.75rem;
-    border: 1px solid hsl(var(--border));
-    border-radius: 1rem;
-    background: hsl(var(--card));
-    padding: 0.875rem;
-    box-shadow: 0 1px 2px hsl(222 47% 11% / 0.04);
+    border: none;
+    border-radius: 16px;
+    background: #fff;
+    padding: 22px;
+    box-shadow:
+      0 1px 0 0 rgba(0, 0, 0, 0.02),
+      0 8px 24px -12px rgba(0, 0, 0, 0.18);
     transition:
-      transform 200ms cubic-bezier(0.22, 1, 0.36, 1),
-      border-color 200ms ease,
+      transform 200ms ease,
       box-shadow 200ms ease;
   }
 
-  .cocola-admin-ui .admin-module-card:hover {
-    transform: translateY(-2px);
-    border-color: hsl(221 83% 60% / 0.4);
-    box-shadow: 0 10px 26px hsl(221 62% 45% / 0.12);
+  .cocola-admin-ui .admin-module-title {
+    display: block;
+    font-size: 16px;
+    font-weight: 700;
+    color: #18181b;
   }
 
-  .cocola-admin-ui .admin-module-icon,
+  .cocola-admin-ui .admin-module-summary {
+    display: block;
+    flex: 1 1 auto;
+    font-size: 13.5px;
+    line-height: 1.6;
+    color: #71717a;
+  }
+
+  .cocola-admin-ui .admin-module-cta {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.375rem;
+    margin-top: 0.25rem;
+    border-radius: 999px;
+    padding: 9px 18px;
+    font-size: 13px;
+    font-weight: 600;
+    color: #fff;
+    background: linear-gradient(135deg, hsl(258 90% 62%) 0%, hsl(286 84% 58%) 100%);
+    box-shadow: 0 8px 18px -8px hsl(272 80% 50% / 0.45);
+    transition: opacity 200ms ease, box-shadow 200ms ease;
+  }
+
+  .cocola-admin-ui .admin-module-card:hover .admin-module-cta {
+    opacity: 0.9;
+  }
+
+  .cocola-admin-ui .admin-module-card:hover {
+    transform: translateY(-3px) scale(1.005);
+    box-shadow: 0 18px 40px -18px rgba(120, 40, 200, 0.35);
+  }
+
   .cocola-admin-ui .admin-empty-icon {
     display: grid;
-    width: 2.5rem;
-    height: 2.5rem;
+    width: 2.75rem;
+    height: 2.75rem;
     flex: 0 0 auto;
     place-items: center;
-    border-radius: 0.875rem;
+    border-radius: 1rem;
+    box-shadow: 0 6px 16px -8px hsl(266 50% 40% / 0.22);
+  }
+
+  .cocola-admin-ui .admin-module-head {
+    display: flex;
+    align-items: center;
+    gap: 0.75rem;
+  }
+
+  .cocola-admin-ui .admin-module-icon {
+    display: grid;
+    width: 46px;
+    height: 46px;
+    flex: 0 0 auto;
+    place-items: center;
+    border-radius: 14px;
+    color: #fff;
+    background: linear-gradient(140deg, hsl(258 90% 62%) 0%, hsl(286 84% 58%) 100%);
+    transition: transform 200ms ease;
+  }
+
+  .cocola-admin-ui .admin-module-card:hover .admin-module-icon {
+    transform: scale(1.04);
   }
 
   .cocola-admin-ui .admin-empty-icon {
