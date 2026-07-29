@@ -594,11 +594,14 @@
     height: 2.75rem;
     flex: 0 0 auto;
     place-items: center;
-    border: none;
     border-radius: 1rem;
-    color: hsl(258 90% 62%);
-    background: none;
-    box-shadow: none;
+    color: var(--glyph-ink, var(--page-accent));
+    background: linear-gradient(
+      135deg,
+      var(--glyph-soft, var(--page-accent-soft)),
+      #ffffff
+    );
+    box-shadow: inset 0 0 0 1px var(--glyph-ring, var(--page-accent-border));
   }
 
   .cocola-admin-ui .admin-domain-panel {
@@ -694,7 +697,8 @@
 
   /* ---- per-page theme classes: override --page-accent* on the page root so
      each admin sub-page tints to its sidebar nav-icon color ---- */
-  .cocola-admin-ui .admin-theme-blue {
+  .cocola-admin-ui .admin-theme-blue,
+  .cocola-admin-ui.admin-theme-blue {
     --primary: 221 83% 45%;
     --primary-foreground: 0 0% 100%;
     --ring: 221 83% 53%;
@@ -711,7 +715,8 @@
     --page-accent-shadow: rgba(37, 99, 235, 0.5);
     --page-accent-shadow-soft: rgba(37, 99, 235, 0.32);
   }
-  .cocola-admin-ui .admin-theme-violet {
+  .cocola-admin-ui .admin-theme-violet,
+  .cocola-admin-ui.admin-theme-violet {
     --primary: 273 66% 47%;
     --primary-foreground: 0 0% 100%;
     --ring: 273 66% 55%;
@@ -728,7 +733,8 @@
     --page-accent-shadow: rgba(120, 40, 200, 0.6);
     --page-accent-shadow-soft: rgba(120, 40, 200, 0.35);
   }
-  .cocola-admin-ui .admin-theme-amber {
+  .cocola-admin-ui .admin-theme-amber,
+  .cocola-admin-ui.admin-theme-amber {
     --primary: 38 92% 45%;
     --primary-foreground: 0 0% 100%;
     --ring: 38 92% 50%;
@@ -745,7 +751,8 @@
     --page-accent-shadow: rgba(217, 119, 6, 0.5);
     --page-accent-shadow-soft: rgba(217, 119, 6, 0.3);
   }
-  .cocola-admin-ui .admin-theme-orange {
+  .cocola-admin-ui .admin-theme-orange,
+  .cocola-admin-ui.admin-theme-orange {
     --primary: 21 90% 48%;
     --primary-foreground: 0 0% 100%;
     --ring: 21 90% 52%;
@@ -1135,9 +1142,10 @@
     outline: none;
   }
 
-  /* ---- Add/Edit model & provider drawer: purple theme (token-scoped, no JSX changes) ---- */
-  .cocola-admin-ui.admin-drawer,
-  .cocola-admin-ui .admin-drawer {
+  /* ---- Add/Edit model & provider drawer: purple theme (token-scoped, no JSX changes).
+     Themed drawers (carrying an .admin-theme-* class) opt out so their own accent wins. ---- */
+  .cocola-admin-ui.admin-drawer:not([class*="admin-theme-"]),
+  .cocola-admin-ui .admin-drawer:not([class*="admin-theme-"]) {
     --primary: 273 66% 47%;
     --primary-foreground: 0 0% 100%;
     --ring: 273 66% 55%;

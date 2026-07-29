@@ -630,38 +630,32 @@ function MCPCard({
         </code>
       </div>
 
-      <div className="mt-4 flex flex-wrap items-center gap-2">
-        <span className="inline-flex items-center gap-1.5 text-xs" style={{ color: "var(--page-accent-ink)" }}>
-          <CircleCheck className="size-3.5" />
-          Configured
-        </span>
-        {mcp.default_enabled ? (
-          <span className="text-xs text-muted-foreground">· Default on</span>
-        ) : null}
-        <div className="ml-auto flex items-center gap-2">
-          <button className="admin-card-btn" disabled={busy} onClick={onEdit}>
-            <Pencil className="size-4" />
-            Edit
-          </button>
-          <button className="admin-card-btn" disabled={busy} onClick={onToggle}>
-            {busy ? (
-              <LoaderCircle className="size-4 animate-spin" />
-            ) : mcp.enabled ? (
-              <PowerOff className="size-4" />
-            ) : (
-              <Power className="size-4" />
-            )}
-            {mcp.enabled ? "Disable" : "Enable"}
-          </button>
-          <button
-            className="admin-card-btn admin-card-btn--danger"
-            disabled={busy}
-            onClick={onDelete}
-          >
-            <Trash2 className="size-4" />
-            Remove
-          </button>
-        </div>
+      {mcp.default_enabled ? (
+        <div className="mt-3 text-xs text-muted-foreground">Default on</div>
+      ) : null}
+      <div className="mt-auto flex items-center gap-2 pt-4">
+        <button className="admin-card-btn flex-1 justify-center" disabled={busy} onClick={onEdit}>
+          <Pencil className="size-4" />
+          Edit
+        </button>
+        <button className="admin-card-btn flex-1 justify-center" disabled={busy} onClick={onToggle}>
+          {busy ? (
+            <LoaderCircle className="size-4 animate-spin" />
+          ) : mcp.enabled ? (
+            <PowerOff className="size-4" />
+          ) : (
+            <Power className="size-4" />
+          )}
+          {mcp.enabled ? "Disable" : "Enable"}
+        </button>
+        <button
+          className="admin-card-btn admin-card-btn--danger flex-1 justify-center"
+          disabled={busy}
+          onClick={onDelete}
+        >
+          <Trash2 className="size-4" />
+          Remove
+        </button>
       </div>
     </div>
   );
