@@ -1,22 +1,37 @@
 "use client";
 
 import { Plug as McpPageIcon } from "lucide-react";
-import { useCallback, useEffect, useState, type ReactNode } from "react";
 import {
+  useCallback,
+  useEffect,
+  useState,
+  type CSSProperties,
+  type ComponentType,
+  type ReactNode,
+} from "react";
+import {
+  Blocks,
+  Boxes,
   ChevronDown,
   CircleAlert,
   CircleCheck,
+  Cloud,
+  Cpu,
   Eye,
   EyeOff,
-  FileTerminal,
-  Globe2,
   LoaderCircle,
+  Network,
   Pencil,
+  Plug2,
   Plus,
   Power,
   PowerOff,
+  Radio,
   Save,
+  Server,
+  Terminal,
   Trash2,
+  Waypoints,
 } from "lucide-react";
 import { SelectControl } from "@/components/ui/select-control";
 import {
@@ -24,12 +39,9 @@ import {
   AdminConfirmDialog,
   AdminDrawer,
   AdminEmptyState,
-  AdminIconButton,
   AdminPage,
   AdminPageHeader,
-  AdminPanel,
   AdminRefreshButton,
-  AdminStatusBadge,
 } from "@/components/admin/admin-ui";
 import { Button } from "@/components/ui/button";
 
@@ -82,6 +94,53 @@ const controlClass =
   "h-10 min-w-0 rounded-xl border border-input bg-background/85 px-3 text-sm text-foreground outline-none transition-[border-color,box-shadow] placeholder:text-muted-foreground focus:border-ring focus:ring-2 focus:ring-ring/20";
 const textAreaClass =
   "min-h-24 min-w-0 resize-y rounded-xl border border-input bg-background/85 px-3 py-2.5 font-mono text-sm text-foreground outline-none transition-[border-color,box-shadow] placeholder:text-muted-foreground focus:border-ring focus:ring-2 focus:ring-ring/20";
+
+const GLYPH_ICONS: ComponentType<{ className?: string }>[] = [
+  Server,
+  Network,
+  Cloud,
+  Cpu,
+  Boxes,
+  Blocks,
+  Radio,
+  Waypoints,
+  Plug2,
+  Terminal,
+];
+const GLYPH_TONES: { ink: string; soft: string; ring: string }[] = [
+  { ink: "#ea580c", soft: "#ffedd5", ring: "#fdba74" }, // orange
+  { ink: "#d97706", soft: "#fef3c7", ring: "#fcd34d" }, // amber
+  { ink: "#0d9488", soft: "#ccfbf1", ring: "#5eead4" }, // teal
+  { ink: "#2563eb", soft: "#dbeafe", ring: "#93c5fd" }, // blue
+  { ink: "#7c3aed", soft: "#ede9fe", ring: "#c4b5fd" }, // violet
+  { ink: "#db2777", soft: "#fce7f3", ring: "#f9a8d4" }, // pink
+  { ink: "#0891b2", soft: "#cffafe", ring: "#67e8f9" }, // cyan
+  { ink: "#16a34a", soft: "#dcfce7", ring: "#86efac" }, // green
+  { ink: "#c026d3", soft: "#fae8ff", ring: "#f0abfc" }, // fuchsia
+  { ink: "#4f46e5", soft: "#e0e7ff", ring: "#a5b4fc" }, // indigo
+];
+
+function hashString(value: string): number {
+  let hash = 0;
+  for (let i = 0; i < value.length; i += 1) {
+    hash = (hash * 31 + value.charCodeAt(i)) | 0;
+  }
+  return Math.abs(hash);
+}
+
+function glyphFor(id: string) {
+  const h = hashString(id || "mcp");
+  const Icon = GLYPH_ICONS[h % GLYPH_ICONS.length] ?? Server;
+  const tone =
+    GLYPH_TONES[h % GLYPH_TONES.length] ??
+    ({ ink: "#ea580c", soft: "#ffedd5", ring: "#fdba74" } as const);
+  const style = {
+    "--glyph-ink": tone.ink,
+    "--glyph-soft": tone.soft,
+    "--glyph-ring": tone.ring,
+  } as CSSProperties;
+  return { Icon, style };
+}
 
 export default function AdminMCPPage() {
   const [mcps, setMcps] = useState<MCPServer[]>([]);
@@ -263,26 +322,26 @@ export default function AdminMCPPage() {
         </AdminAlert>
       ) : null}
 
-      <AdminPanel contentClassName="p-4 sm:p-5">
-        {loading && !mcps.length ? (
-          <div className="flex min-h-48 items-center justify-center text-sm text-muted-foreground">
-            <LoaderCircle className="mr-2 size-4 animate-spin" />
-            Loading MCP servers
-          </div>
-        ) : mcps.length ? (
-          <div className="grid gap-4 md:grid-cols-2">
-            {mcps.map((mcp) => (
-              <MCPCard
-                key={mcp.id}
-                mcp={mcp}
-                busy={busyID === mcp.id}
-                onEdit={() => openEdit(mcp)}
-                onToggle={() => void mutate(mcp, mcp.enabled ? "disable" : "enable")}
-                onDelete={() => setDeleteTarget(mcp)}
-              />
-            ))}
-          </div>
-        ) : (
+      {loading && !mcps.length ? (
+        <div className="flex min-h-48 items-center justify-center text-sm text-muted-foreground">
+          <LoaderCircle className="mr-2 size-4 animate-spin" />
+          Loading MCP servers
+        </div>
+      ) : mcps.length ? (
+        <div className="admin-entity-grid md:grid-cols-2 xl:grid-cols-3">
+          {mcps.map((mcp) => (
+            <MCPCard
+              key={mcp.id}
+              mcp={mcp}
+              busy={busyID === mcp.id}
+              onEdit={() => openEdit(mcp)}
+              onToggle={() => void mutate(mcp, mcp.enabled ? "disable" : "enable")}
+              onDelete={() => setDeleteTarget(mcp)}
+            />
+          ))}
+        </div>
+      ) : (
+        <div className="admin-entity-card items-center py-12 text-center">
           <AdminEmptyState
             icon={<McpPageIcon className="size-6" />}
             title="No MCP servers configured"
@@ -294,14 +353,15 @@ export default function AdminMCPPage() {
               </Button>
             }
           />
-        )}
-      </AdminPanel>
+        </div>
+      )}
 
       <AdminDrawer
         open={drawerOpen}
         onOpenChange={(open) => {
           if (!saving) setDrawerOpen(open);
         }}
+        className="admin-theme-orange"
         title={editing ? `Edit ${editing.name}` : "Add MCP server"}
         description="Save the configuration now. Its connection is checked in the first agent session that uses it."
         size="lg"
@@ -498,6 +558,7 @@ export default function AdminMCPPage() {
         onOpenChange={(open) => {
           if (!open) setDeleteTarget(null);
         }}
+        className="admin-theme-orange"
         title="Delete MCP server?"
         description={`This permanently removes ${deleteTarget?.name || deleteTarget?.id || "this server"} from future agent sessions.`}
         confirmLabel="Delete server"
@@ -529,28 +590,38 @@ function MCPCard({
   const endpoint = !remote
     ? [mcp.command, ...(mcp.args ?? [])].filter(Boolean).join(" ")
     : mcp.url_hint;
-  const TransportIcon = remote ? Globe2 : FileTerminal;
+  const { Icon, style } = glyphFor(mcp.id);
   return (
-    <article className="group flex min-h-56 flex-col rounded-2xl border border-border/75 bg-white/45 p-4 shadow-[0_12px_35px_-28px_rgba(234,88,12,0.55)] transition-[border-color,background-color,transform,box-shadow] hover:-translate-y-0.5 hover:border-orange-400/40 hover:bg-white/60 hover:shadow-[0_18px_42px_-28px_rgba(234,88,12,0.6)] motion-reduce:transform-none">
+    <div className="admin-entity-card admin-entity-card--hover">
       <div className="flex items-start gap-3">
-        <div className="grid size-10 shrink-0 place-items-center rounded-xl border border-border/70 bg-white/70 text-muted-foreground shadow-sm">
-          <TransportIcon className="size-[18px]" />
+        <div className="admin-entity-glyph" style={style}>
+          <Icon className="size-[18px]" />
         </div>
         <div className="min-w-0 flex-1">
           <div className="flex flex-wrap items-center gap-2">
-            <h2 className="truncate text-sm font-semibold text-foreground">{mcp.name || mcp.id}</h2>
-            <AdminStatusBadge>{transport === "http" ? "HTTP" : transport}</AdminStatusBadge>
+            <h2 className="truncate text-sm font-semibold text-foreground">
+              {mcp.name || mcp.id}
+            </h2>
+            <span className="admin-entity-tag">{transport === "http" ? "HTTP" : transport}</span>
           </div>
-          <p className="mt-1 line-clamp-2 text-sm leading-5 text-muted-foreground">
+          <p className="mt-1 line-clamp-2 min-h-10 text-sm leading-5 text-muted-foreground">
             {mcp.description || "No description"}
           </p>
         </div>
-        <AdminStatusBadge tone={mcp.enabled ? "green" : "neutral"} dot>
-          {mcp.enabled ? "Enabled" : "Disabled"}
-        </AdminStatusBadge>
+        {mcp.enabled ? (
+          <span className="admin-chip admin-chip--ok">
+            <CircleCheck className="size-3.5" />
+            Enabled
+          </span>
+        ) : (
+          <span className="admin-chip admin-chip--off">
+            <span className="admin-chip-dot" />
+            Disabled
+          </span>
+        )}
       </div>
 
-      <div className="mt-4 rounded-xl border border-border/60 bg-slate-50/65 px-3 py-2.5">
+      <div className="admin-entity-mono mt-4">
         <div className="text-[10px] font-semibold uppercase tracking-[0.12em] text-muted-foreground">
           {remote ? "URL" : "Command"}
         </div>
@@ -559,31 +630,20 @@ function MCPCard({
         </code>
       </div>
 
-      <div className="mt-auto flex flex-wrap items-center gap-2 pt-4">
-        <span className="inline-flex items-center gap-1.5 text-xs text-orange-700">
+      <div className="mt-4 flex flex-wrap items-center gap-2">
+        <span className="inline-flex items-center gap-1.5 text-xs" style={{ color: "var(--page-accent-ink)" }}>
           <CircleCheck className="size-3.5" />
           Configured
         </span>
         {mcp.default_enabled ? (
           <span className="text-xs text-muted-foreground">· Default on</span>
         ) : null}
-        <div className="ml-auto flex items-center gap-1">
-          <Button
-            variant="outline"
-            size="sm"
-            className="h-8 gap-1.5"
-            disabled={busy}
-            onClick={onEdit}
-          >
+        <div className="ml-auto flex items-center gap-2">
+          <button className="admin-card-btn" disabled={busy} onClick={onEdit}>
             <Pencil className="size-4" />
             Edit
-          </Button>
-          <AdminIconButton
-            disabled={busy}
-            aria-label={mcp.enabled ? `Disable ${mcp.name}` : `Enable ${mcp.name}`}
-            title={mcp.enabled ? "Disable" : "Enable"}
-            onClick={onToggle}
-          >
+          </button>
+          <button className="admin-card-btn" disabled={busy} onClick={onToggle}>
             {busy ? (
               <LoaderCircle className="size-4 animate-spin" />
             ) : mcp.enabled ? (
@@ -591,19 +651,19 @@ function MCPCard({
             ) : (
               <Power className="size-4" />
             )}
-          </AdminIconButton>
-          <AdminIconButton
+            {mcp.enabled ? "Disable" : "Enable"}
+          </button>
+          <button
+            className="admin-card-btn admin-card-btn--danger"
             disabled={busy}
-            aria-label={`Delete ${mcp.name}`}
-            title="Delete"
-            className="hover:bg-destructive/10 hover:text-destructive"
             onClick={onDelete}
           >
             <Trash2 className="size-4" />
-          </AdminIconButton>
+            Remove
+          </button>
         </div>
       </div>
-    </article>
+    </div>
   );
 }
 

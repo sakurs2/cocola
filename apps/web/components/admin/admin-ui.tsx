@@ -339,6 +339,7 @@ export function AdminDrawer({
   children,
   footer,
   size = "md",
+  className,
 }: {
   open: boolean;
   onOpenChange: (open: boolean) => void;
@@ -347,6 +348,7 @@ export function AdminDrawer({
   children: ReactNode;
   footer?: ReactNode;
   size?: "md" | "lg";
+  className?: string;
 }) {
   return (
     <Dialog.Root open={open} onOpenChange={onOpenChange}>
@@ -356,6 +358,7 @@ export function AdminDrawer({
           className={cn(
             "cocola-admin-ui admin-drawer fixed inset-y-2 right-2 z-50 flex flex-col overflow-hidden rounded-3xl border text-foreground outline-none data-[state=closed]:animate-out data-[state=open]:animate-in data-[state=closed]:slide-out-to-right data-[state=open]:slide-in-from-right",
             size === "lg" ? "w-[min(42rem,calc(100vw-1rem))]" : "w-[min(30rem,calc(100vw-1rem))]",
+            className,
           )}
         >
           <div className="flex min-h-16 items-center gap-3 border-b border-border/70 px-5">
@@ -391,6 +394,7 @@ export function AdminConfirmDialog({
   busy = false,
   destructive = false,
   onConfirm,
+  className,
 }: {
   open: boolean;
   onOpenChange: (open: boolean) => void;
@@ -400,12 +404,18 @@ export function AdminConfirmDialog({
   busy?: boolean;
   destructive?: boolean;
   onConfirm: () => void;
+  className?: string;
 }) {
   return (
     <Dialog.Root open={open} onOpenChange={(nextOpen) => !busy && onOpenChange(nextOpen)}>
       <Dialog.Portal>
         <Dialog.Overlay className="fixed inset-0 z-50 bg-slate-950/20 data-[state=closed]:animate-out data-[state=open]:animate-in data-[state=closed]:fade-out data-[state=open]:fade-in" />
-        <Dialog.Content className="cocola-admin-ui admin-drawer fixed left-1/2 top-1/2 z-50 w-[min(28rem,calc(100vw-2rem))] -translate-x-1/2 -translate-y-1/2 rounded-3xl border p-5 text-foreground outline-none data-[state=closed]:animate-out data-[state=open]:animate-in data-[state=closed]:fade-out data-[state=open]:fade-in data-[state=closed]:zoom-out-95 data-[state=open]:zoom-in-95">
+        <Dialog.Content
+          className={cn(
+            "cocola-admin-ui admin-drawer fixed left-1/2 top-1/2 z-50 w-[min(28rem,calc(100vw-2rem))] -translate-x-1/2 -translate-y-1/2 rounded-3xl border p-5 text-foreground outline-none data-[state=closed]:animate-out data-[state=open]:animate-in data-[state=closed]:fade-out data-[state=open]:fade-in data-[state=closed]:zoom-out-95 data-[state=open]:zoom-in-95",
+            className,
+          )}
+        >
           <Dialog.Title className="text-base font-semibold tracking-[-0.01em]">
             {title}
           </Dialog.Title>

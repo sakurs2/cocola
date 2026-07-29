@@ -797,18 +797,20 @@
     border-radius: 999px;
     font-size: 13px;
     font-weight: 600;
-    color: #52525b;
-    border: 1px solid hsl(var(--border));
-    background: #fff;
+    color: var(--page-accent-ink);
+    border: 1px solid var(--page-accent-border);
+    background: var(--page-accent-soft);
     transition:
       border-color 160ms ease,
       color 160ms ease,
-      background-color 160ms ease;
+      background-color 160ms ease,
+      box-shadow 160ms ease;
   }
   .cocola-admin-ui .admin-card-btn:hover {
-    border-color: var(--page-accent-border);
-    color: var(--page-accent-ink);
-    background: var(--page-accent-soft);
+    border-color: var(--page-accent);
+    color: #fff;
+    background: var(--page-accent);
+    box-shadow: 0 8px 18px -10px var(--page-accent-shadow);
   }
   .cocola-admin-ui .admin-card-btn:disabled {
     opacity: 0.5;
@@ -816,11 +818,14 @@
   }
   .cocola-admin-ui .admin-card-btn--danger {
     color: #dc2626;
+    border-color: #fecaca;
+    background: #fef2f2;
   }
   .cocola-admin-ui .admin-card-btn--danger:hover {
-    border-color: #fecaca;
-    color: #dc2626;
-    background: #fef2f2;
+    border-color: #dc2626;
+    color: #fff;
+    background: #dc2626;
+    box-shadow: 0 8px 18px -10px rgba(220, 38, 38, 0.45);
   }
   .cocola-admin-ui .admin-entity-glyph {
     display: grid;
