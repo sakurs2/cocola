@@ -107,12 +107,12 @@ const chartOptions = {
   },
   scales: {
     x: {
-      grid: { color: "rgba(37, 99, 235, 0.08)" },
+      grid: { color: "rgba(225, 29, 72, 0.08)" },
       ticks: { color: "#64748b", maxRotation: 0 },
     },
     y: {
       beginAtZero: true,
-      grid: { color: "rgba(37, 99, 235, 0.09)" },
+      grid: { color: "rgba(225, 29, 72, 0.09)" },
       ticks: {
         color: "#64748b",
         callback(value) {
@@ -245,7 +245,7 @@ export default function AdminTokenUsagePage() {
   const activeUser = selectedUser ?? users[0] ?? null;
 
   return (
-    <main className="min-h-screen bg-background text-foreground">
+    <main className="admin-theme-rose min-h-screen bg-background text-foreground">
       <header className="border-b border-border">
         <div className="mx-auto flex h-16 max-w-7xl items-center gap-3 px-6">
           <div className="admin-page-icon">
@@ -484,9 +484,9 @@ export default function AdminTokenUsagePage() {
 
 function Metric({ label, value }: { label: string; value: string }) {
   return (
-    <div className="rounded-lg border border-border bg-card px-4 py-3">
-      <div className="text-xs text-muted-foreground">{label}</div>
-      <div className="mt-1 truncate text-2xl font-semibold tabular-nums">{value}</div>
+    <div className="admin-metric-card" data-tone="rose">
+      <div className="admin-metric-key">{label}</div>
+      <div className="admin-metric-val truncate">{value}</div>
     </div>
   );
 }
@@ -506,8 +506,8 @@ function chartData(points: TokenUsagePoint[], bucket: "hour" | "day") {
       {
         label: "Total",
         data: points.map((point) => point.total_tokens),
-        borderColor: "#2563eb",
-        backgroundColor: "rgba(37, 99, 235, 0.12)",
+        borderColor: "#e11d48",
+        backgroundColor: "rgba(225, 29, 72, 0.12)",
         fill: true,
         tension: 0.35,
         pointRadius: 2,

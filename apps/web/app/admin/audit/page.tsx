@@ -91,7 +91,7 @@ export default function AdminAuditPage() {
   }, [load]);
 
   return (
-    <AdminPage>
+    <AdminPage className="admin-theme-indigo">
       <AdminPageHeader
         icon={<ChatCircleDots className="size-5" />}
         eyebrow="Operations"
@@ -331,7 +331,7 @@ function DateRangeFilter({
         <Popover.Content
           align="end"
           sideOffset={8}
-          className="cocola-admin-ui z-50 w-[20rem] rounded-2xl border border-border/80 bg-popover p-3 text-popover-foreground shadow-[0_24px_70px_-28px_rgba(20,32,51,0.45)] outline-none"
+          className="cocola-admin-ui admin-theme-indigo z-50 w-[20rem] rounded-2xl border border-border/80 bg-popover p-3 text-popover-foreground shadow-[0_24px_70px_-28px_rgba(20,32,51,0.45)] outline-none"
         >
           <div className="flex items-center justify-between px-1 pb-3">
             <button

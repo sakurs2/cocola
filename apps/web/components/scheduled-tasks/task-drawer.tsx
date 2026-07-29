@@ -453,6 +453,7 @@ export function TaskConfirmDialog({
   destructive = false,
   admin = false,
   onConfirm,
+  className,
 }: {
   open: boolean;
   onOpenChange: (open: boolean) => void;
@@ -463,6 +464,7 @@ export function TaskConfirmDialog({
   destructive?: boolean;
   admin?: boolean;
   onConfirm: () => void;
+  className?: string;
 }) {
   return (
     <Dialog.Root open={open} onOpenChange={(next) => !busy && onOpenChange(next)}>
@@ -472,6 +474,7 @@ export function TaskConfirmDialog({
           className={cn(
             "fixed left-1/2 top-1/2 z-[60] w-[min(28rem,calc(100vw-2rem))] -translate-x-1/2 -translate-y-1/2 rounded-2xl border border-border bg-background p-5 text-foreground shadow-2xl outline-none",
             admin ? "cocola-admin-ui admin-drawer" : "cocola-user-ui",
+            className,
           )}
         >
           <Dialog.Title className="text-base font-semibold">{title}</Dialog.Title>

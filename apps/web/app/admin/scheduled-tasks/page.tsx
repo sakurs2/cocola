@@ -1,7 +1,7 @@
 "use client";
 
 import { Timer as ClockCountdown } from "lucide-react";
-import { MoreHorizontal, Trash2 } from "lucide-react";
+import { MoreHorizontal, Search, Trash2 } from "lucide-react";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import {
   AdminAlert,
@@ -118,7 +118,7 @@ export default function ScheduledTasksPage() {
   }
 
   return (
-    <AdminPage>
+    <AdminPage className="admin-theme-green">
       <AdminPageHeader
         eyebrow="Operations"
         title="Tasks"
@@ -139,13 +139,13 @@ export default function ScheduledTasksPage() {
       {error ? <AdminAlert tone="error">{error}</AdminAlert> : null}
 
       <AdminToolbar>
-        <label className="min-w-64 flex-1">
+        <label className="admin-entity-search">
           <span className="sr-only">Search scheduled tasks</span>
+          <Search className="size-4" />
           <input
             value={query}
             onChange={(event) => setQuery(event.target.value)}
             placeholder="Search task, prompt, or owner"
-            className="h-10 w-full rounded-xl border border-input bg-background px-3 text-sm outline-none focus:border-ring focus:ring-2 focus:ring-ring/20"
           />
         </label>
         <label>
@@ -153,7 +153,7 @@ export default function ScheduledTasksPage() {
           <SelectControl
             value={status}
             onValueChange={(value) => setStatus(value as StatusFilter)}
-            className="h-10 w-auto min-w-44 rounded-xl border border-input bg-background px-3 text-sm text-foreground outline-none"
+            className="h-10 w-auto min-w-44 rounded-xl border border-input bg-background px-3 text-sm text-foreground outline-none focus:border-ring focus:ring-2 focus:ring-ring/20"
             options={[
               { value: "all", label: "All statuses" },
               { value: "active", label: "Active" },
@@ -284,6 +284,7 @@ export default function ScheduledTasksPage() {
       <AdminDrawer
         open={drawerOpen}
         onOpenChange={setDrawerOpen}
+        className="admin-theme-green"
         title={selectedTask?.name || "Task details"}
         description="Read-only scheduled task details"
         footer={
@@ -315,6 +316,7 @@ export default function ScheduledTasksPage() {
         busy={saving}
         destructive
         admin
+        className="admin-theme-green"
         onConfirm={() => deleteTarget && void deleteTask(deleteTarget)}
       />
     </AdminPage>

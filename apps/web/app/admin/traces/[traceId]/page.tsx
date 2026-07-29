@@ -117,7 +117,7 @@ export default function AdminTracePage() {
   const traceTree = useMemo(() => buildSpanTree(spans), [spans]);
 
   return (
-    <AdminPage>
+    <AdminPage className="admin-theme-indigo">
       <AdminPageHeader
         icon={<TracePageIcon className="size-5" />}
         eyebrow="Conversation trace"
@@ -249,6 +249,7 @@ export default function AdminTracePage() {
       <AdminDrawer
         open={inspectorOpen}
         onOpenChange={setInspectorOpen}
+        className="admin-theme-indigo"
         title={selected?.name || "Span details"}
         description="Safe execution metadata"
       >

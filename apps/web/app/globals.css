@@ -787,6 +787,60 @@
     --page-accent-shadow: rgba(8, 145, 178, 0.5);
     --page-accent-shadow-soft: rgba(8, 145, 178, 0.3);
   }
+  .cocola-admin-ui .admin-theme-green,
+  .cocola-admin-ui.admin-theme-green {
+    --primary: 142 71% 36%;
+    --primary-foreground: 0 0% 100%;
+    --ring: 142 71% 42%;
+    --accent: 141 79% 91%;
+    --accent-foreground: 143 64% 24%;
+    --page-accent: #16a34a;
+    --page-accent-2: #4ade80;
+    --page-accent-grad: linear-gradient(135deg, #16a34a, #4ade80);
+    --page-accent-soft: #f0fdf4;
+    --page-accent-ink: #15803d;
+    --page-accent-border: #86efac;
+    --page-accent-focus: #22c55e;
+    --page-accent-focus-ring: rgba(34, 197, 94, 0.18);
+    --page-accent-shadow: rgba(22, 163, 74, 0.5);
+    --page-accent-shadow-soft: rgba(22, 163, 74, 0.32);
+  }
+  .cocola-admin-ui .admin-theme-indigo,
+  .cocola-admin-ui.admin-theme-indigo {
+    --primary: 243 75% 59%;
+    --primary-foreground: 0 0% 100%;
+    --ring: 243 75% 63%;
+    --accent: 226 100% 94%;
+    --accent-foreground: 244 55% 41%;
+    --page-accent: #4f46e5;
+    --page-accent-2: #818cf8;
+    --page-accent-grad: linear-gradient(135deg, #4f46e5, #818cf8);
+    --page-accent-soft: #eef2ff;
+    --page-accent-ink: #4338ca;
+    --page-accent-border: #c7d2fe;
+    --page-accent-focus: #6366f1;
+    --page-accent-focus-ring: rgba(99, 102, 241, 0.18);
+    --page-accent-shadow: rgba(79, 70, 229, 0.5);
+    --page-accent-shadow-soft: rgba(79, 70, 229, 0.32);
+  }
+  .cocola-admin-ui .admin-theme-rose,
+  .cocola-admin-ui.admin-theme-rose {
+    --primary: 347 77% 46%;
+    --primary-foreground: 0 0% 100%;
+    --ring: 347 77% 52%;
+    --accent: 356 100% 94%;
+    --accent-foreground: 344 73% 33%;
+    --page-accent: #e11d48;
+    --page-accent-2: #fb7185;
+    --page-accent-grad: linear-gradient(135deg, #e11d48, #fb7185);
+    --page-accent-soft: #fff1f2;
+    --page-accent-ink: #be123c;
+    --page-accent-border: #fda4af;
+    --page-accent-focus: #f43f5e;
+    --page-accent-focus-ring: rgba(244, 63, 94, 0.18);
+    --page-accent-shadow: rgba(225, 29, 72, 0.5);
+    --page-accent-shadow-soft: rgba(225, 29, 72, 0.32);
+  }
 
   /* ===== shared entity cards (skills / mcps grids), page-accent driven ===== */
   .cocola-admin-ui .admin-entity-grid {
@@ -956,6 +1010,8 @@
   .cocola-admin-ui .admin-metric-card[data-tone="violet"] { --card-to: #7c3aed; }
   .cocola-admin-ui .admin-metric-card[data-tone="amber"] { --card-to: var(--page-accent); }
   .cocola-admin-ui .admin-metric-card[data-tone="slate"] { --card-to: #64748b; }
+  .cocola-admin-ui .admin-metric-card[data-tone="rose"] { --card-to: #e11d48; }
+  .cocola-admin-ui .admin-metric-card[data-tone="indigo"] { --card-to: #4f46e5; }
   .cocola-admin-ui .admin-metric-head {
     display: flex;
     align-items: center;
