@@ -503,7 +503,7 @@
 
   .cocola-admin-ui .admin-glass-shell {
     border-color: hsl(var(--border));
-    background: hsl(var(--background));
+    background: #f8fafc;
     box-shadow: none;
   }
 
