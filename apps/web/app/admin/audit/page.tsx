@@ -20,8 +20,6 @@ import {
   AdminPagination,
   AdminRefreshButton,
   AdminStatusBadge,
-  AdminTable,
-  AdminToolbar,
 } from "@/components/admin/admin-ui";
 import { SelectControl } from "@/components/ui/select-control";
 import { cn } from "@/lib/utils";
@@ -94,7 +92,6 @@ export default function AdminAuditPage() {
     <AdminPage className="admin-theme-indigo">
       <AdminPageHeader
         icon={<ChatCircleDots className="size-5" />}
-        eyebrow="Operations"
         title="Agent Runs"
         description="One safe metadata record for every user–agent run. Chat content stays in its conversation."
         actions={
@@ -104,7 +101,7 @@ export default function AdminAuditPage() {
         }
       />
 
-      <AdminToolbar>
+      <div className="flex flex-col gap-3 sm:flex-row sm:flex-wrap sm:items-center">
         <label className="min-w-[16rem] flex-1">
           <span className="sr-only">Search conversation runs</span>
           <span className="relative block">
@@ -162,7 +159,7 @@ export default function AdminAuditPage() {
             setUntil(nextUntil);
           }}
         />
-      </AdminToolbar>
+      </div>
 
       {error ? (
         <AdminAlert tone="error" icon={<AlertTriangle className="size-4" />}>
@@ -170,73 +167,77 @@ export default function AdminAuditPage() {
         </AdminAlert>
       ) : null}
 
-      <AdminTable>
-        <div className="flex min-h-12 items-center border-b border-border/70 px-4">
-          <div className="text-sm font-semibold">Agent runs</div>
-        </div>
-        <table className="w-full min-w-[1120px] text-left text-sm">
-          <thead className="sticky top-0 border-b border-border/70 bg-muted/45 text-xs text-muted-foreground">
-            <tr>
-              <th className="px-4 py-3 font-medium">Started</th>
-              <th className="px-4 py-3 font-medium">User</th>
-              <th className="px-4 py-3 font-medium">Conversation</th>
-              <th className="px-4 py-3 font-medium">Source</th>
-              <th className="px-4 py-3 font-medium">Model</th>
-              <th className="px-4 py-3 text-right font-medium">Total</th>
-              <th className="px-4 py-3 text-right font-medium">TTFT</th>
-              <th className="px-4 py-3 font-medium">Result</th>
-              <th className="px-4 py-3 font-medium">Trace ID</th>
-            </tr>
-          </thead>
-          <tbody className="divide-y divide-border/60">
+      <div className="admin-list">
+        <div className="admin-list-scroll">
+          <div className="min-w-[1120px]">
+            <div className="admin-list-cols" style={{ gridTemplateColumns: "1.4fr 1.5fr 2fr 1.1fr 1.2fr 0.9fr 0.9fr 1.1fr 1.6fr" }}>
+              <div>Started</div>
+              <div>User</div>
+              <div>Conversation</div>
+              <div>Source</div>
+              <div>Model</div>
+              <div className="text-right">Total</div>
+              <div className="text-right">TTFT</div>
+              <div>Result</div>
+              <div>Trace ID</div>
+            </div>
             {runs.map((run) => {
               const traceID = run.trace_id;
               return (
-                <tr
+                <div
                   key={traceID}
-                  className="cursor-pointer transition-colors hover:bg-primary/[0.035] focus-within:bg-primary/[0.035]"
+                  role="button"
+                  tabIndex={0}
+                  className="admin-list-row"
+                  style={{ gridTemplateColumns: "1.4fr 1.5fr 2fr 1.1fr 1.2fr 0.9fr 0.9fr 1.1fr 1.6fr" }}
                   onClick={() =>
                     traceID &&
                     (window.location.href = `/admin/traces/${encodeURIComponent(traceID)}`)
                   }
+                  onKeyDown={(event) =>
+                    event.target === event.currentTarget &&
+                    event.key === "Enter" &&
+                    traceID &&
+                    (window.location.href = `/admin/traces/${encodeURIComponent(traceID)}`)
+                  }
                 >
-                  <td className="whitespace-nowrap px-4 py-3 text-xs text-muted-foreground">
+                  <div className="admin-list-cell admin-list-muted" style={{ fontSize: "12px" }}>
                     {formatDate(run.started_at)}
-                  </td>
-                  <td className="px-4 py-3 font-medium">{run.user_email || run.user_id || "—"}</td>
-                  <td className="max-w-[220px] px-4 py-3">
-                    <div className="truncate font-medium">
+                  </div>
+                  <div className="admin-list-cell admin-list-primary" style={{ fontSize: "13.5px" }}>
+                    {run.user_email || run.user_id || "—"}
+                  </div>
+                  <div className="min-w-0">
+                    <div className="admin-list-primary" style={{ fontSize: "13.5px" }}>
                       {run.conversation_title || "Untitled conversation"}
                     </div>
                     {run.conversation_id ? (
                       <Link
                         href={`/conversations/${encodeURIComponent(run.conversation_id)}`}
                         onClick={(clickEvent) => clickEvent.stopPropagation()}
-                        className="mt-0.5 block truncate font-mono text-xs text-primary hover:underline"
+                        className="admin-list-sub block font-mono text-primary hover:underline"
                       >
                         {run.conversation_id}
                       </Link>
                     ) : null}
-                  </td>
-                  <td className="px-4 py-3 text-muted-foreground">
+                  </div>
+                  <div className="admin-list-cell admin-list-muted">
                     {run.source === "scheduled_task" ? "Scheduled task" : "Interactive"}
-                  </td>
-                  <td className="px-4 py-3">{run.model_alias || "Default"}</td>
-                  <td className="px-4 py-3 text-right font-mono tabular-nums">
+                  </div>
+                  <div className="admin-list-cell">{run.model_alias || "Default"}</div>
+                  <div className="admin-list-cell admin-list-mono text-right">
                     {formatDuration(run.duration_ms)}
-                  </td>
-                  <td className="px-4 py-3 text-right font-mono tabular-nums">
+                  </div>
+                  <div className="admin-list-cell admin-list-mono text-right">
                     {formatDuration(run.ttft_ms)}
-                  </td>
-                  <td className="px-4 py-3">
+                  </div>
+                  <div className="admin-list-cell">
                     <RunStatus status={run.status} />
                     {run.error_code ? (
-                      <div className="mt-1 font-mono text-[11px] text-muted-foreground">
-                        {run.error_code}
-                      </div>
+                      <div className="admin-list-sub font-mono">{run.error_code}</div>
                     ) : null}
-                  </td>
-                  <td className="max-w-[190px] px-4 py-3">
+                  </div>
+                  <div className="min-w-0">
                     <Link
                       href={`/admin/traces/${encodeURIComponent(traceID)}`}
                       onClick={(clickEvent) => clickEvent.stopPropagation()}
@@ -244,12 +245,12 @@ export default function AdminAuditPage() {
                     >
                       {traceID || "—"}
                     </Link>
-                  </td>
-                </tr>
+                  </div>
+                </div>
               );
             })}
-          </tbody>
-        </table>
+          </div>
+        </div>
         {!loading && runs.length === 0 ? (
           <AdminEmptyState
             icon={<Clock3 className="size-5" />}
@@ -257,7 +258,7 @@ export default function AdminAuditPage() {
             description="Conversation runs will appear here after a user sends a message or a scheduled task executes."
           />
         ) : null}
-      </AdminTable>
+      </div>
       <AdminPagination
         page={page}
         pageSize={PAGE_SIZE}

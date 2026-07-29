@@ -1125,6 +1125,85 @@
     font-size: 14px;
   }
 
+  /* ===== generic admin list (Tasks / Agent Runs), mirrors models list ===== */
+  .cocola-admin-ui .admin-list {
+    background: #fff;
+    border-radius: 18px;
+    padding: 8px;
+    box-shadow:
+      0 1px 0 0 rgba(0, 0, 0, 0.02),
+      0 8px 30px -14px rgba(0, 0, 0, 0.16);
+  }
+  .cocola-admin-ui .admin-list-scroll {
+    overflow-x: auto;
+  }
+  .cocola-admin-ui .admin-list-cols,
+  .cocola-admin-ui .admin-list-row {
+    display: grid;
+    gap: 12px;
+    align-items: center;
+  }
+  .cocola-admin-ui .admin-list-cols {
+    padding: 8px 16px 10px;
+    font-size: 11px;
+    font-weight: 700;
+    letter-spacing: 0.07em;
+    text-transform: uppercase;
+    color: #a1a1aa;
+  }
+  .cocola-admin-ui .admin-list-row {
+    padding: 13px 16px;
+    border-radius: 14px;
+    cursor: pointer;
+    transition: background 180ms ease, transform 180ms ease, box-shadow 180ms ease;
+  }
+  .cocola-admin-ui .admin-list-row:hover {
+    background: var(--page-accent-soft);
+    transform: scale(1.006);
+    box-shadow: 0 10px 26px -18px var(--page-accent-shadow-soft);
+  }
+  .cocola-admin-ui .admin-list-row:focus-visible {
+    outline: none;
+    background: var(--page-accent-soft);
+    box-shadow: inset 0 0 0 2px var(--page-accent-border);
+  }
+  .cocola-admin-ui .admin-list-primary {
+    font-size: 14.5px;
+    font-weight: 700;
+    color: #11181c;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+  .cocola-admin-ui .admin-list-sub {
+    font-size: 12.5px;
+    color: #71717a;
+    margin-top: 2px;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+  .cocola-admin-ui .admin-list-cell {
+    min-width: 0;
+    font-size: 13.5px;
+    color: #0f172a;
+  }
+  .cocola-admin-ui .admin-list-muted {
+    color: #71717a;
+    font-size: 13px;
+  }
+  .cocola-admin-ui .admin-list-mono {
+    font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+    font-size: 12px;
+    font-variant-numeric: tabular-nums;
+  }
+  .cocola-admin-ui .admin-list-empty {
+    padding: 48px 16px;
+    text-align: center;
+    color: #71717a;
+    font-size: 14px;
+  }
+
   /* center-align non-user columns (Role / Status / Last login / Actions) */
   .cocola-admin-ui .admin-user-cols > div:nth-child(n + 2),
   .cocola-admin-ui .admin-user-row > div:nth-child(n + 2) {

@@ -11,8 +11,6 @@ import {
   AdminPageHeader,
   AdminRefreshButton,
   AdminStatusBadge,
-  AdminTable,
-  AdminToolbar,
 } from "@/components/admin/admin-ui";
 import { TaskConfirmDialog } from "@/components/scheduled-tasks/task-drawer";
 import { Button } from "@/components/ui/button";
@@ -120,7 +118,6 @@ export default function ScheduledTasksPage() {
   return (
     <AdminPage className="admin-theme-green">
       <AdminPageHeader
-        eyebrow="Operations"
         title="Tasks"
         description="Review scheduled work across all users. Tasks can only be changed by their owners."
         icon={<ClockCountdown className="size-5" />}
@@ -138,7 +135,7 @@ export default function ScheduledTasksPage() {
 
       {error ? <AdminAlert tone="error">{error}</AdminAlert> : null}
 
-      <AdminToolbar>
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-center">
         <label className="admin-entity-search">
           <span className="sr-only">Search scheduled tasks</span>
           <Search className="size-4" />
@@ -165,11 +162,11 @@ export default function ScheduledTasksPage() {
             contentClassName="cocola-admin-ui"
           />
         </label>
-      </AdminToolbar>
+      </div>
 
-      <AdminTable>
+      <div className="admin-list">
         {loading ? (
-          <div className="p-10 text-center text-sm text-muted-foreground">Loading tasks…</div>
+          <div className="admin-list-empty">Loading tasks…</div>
         ) : visibleTasks.length === 0 ? (
           <AdminEmptyState
             icon={<ClockCountdown className="size-6" />}
@@ -181,73 +178,81 @@ export default function ScheduledTasksPage() {
             }
           />
         ) : (
-          <table className="w-full min-w-[960px] text-left text-sm">
-            <thead className="sticky top-0 z-10 bg-background/90 text-xs text-muted-foreground backdrop-blur-xl">
-              <tr className="border-b border-border/70">
-                <th className="px-4 py-3 font-medium">Task</th>
-                <th className="px-4 py-3 font-medium">Owner</th>
-                <th className="px-4 py-3 font-medium">Schedule</th>
-                <th className="px-4 py-3 font-medium">Next run</th>
-                <th className="px-4 py-3 font-medium">Last result</th>
-                <th className="px-4 py-3 font-medium">Status</th>
-                <th className="w-14 px-4 py-3">
+          <div className="admin-list-scroll">
+            <div className="min-w-[960px]">
+              <div
+                className="admin-list-cols"
+                style={{
+                  gridTemplateColumns: "2.4fr 1.4fr 1.2fr 1.3fr 1.3fr 0.9fr 56px",
+                }}
+              >
+                <div>Task</div>
+                <div>Owner</div>
+                <div>Schedule</div>
+                <div>Next run</div>
+                <div>Last result</div>
+                <div>Status</div>
+                <div className="text-right">
                   <span className="sr-only">Actions</span>
-                </th>
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-border/60">
+                </div>
+              </div>
               {visibleTasks.map((task) => {
                 const run = latestRun.get(task.id);
                 return (
-                  <tr
+                  <div
                     key={task.id}
+                    role="button"
                     tabIndex={0}
                     onClick={() => view(task)}
                     onKeyDown={(event) =>
                       event.target === event.currentTarget && event.key === "Enter" && view(task)
                     }
-                    className="cursor-pointer hover:bg-muted/35 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring/40"
+                    className="admin-list-row"
+                    style={{
+                      gridTemplateColumns: "2.4fr 1.4fr 1.2fr 1.3fr 1.3fr 0.9fr 56px",
+                    }}
                   >
-                    <td className="max-w-xs px-4 py-3">
-                      <div className="truncate font-medium">{task.name}</div>
-                      <div className="mt-0.5 truncate text-xs text-muted-foreground">
-                        {task.prompt}
-                      </div>
-                    </td>
-                    <td className="px-4 py-3">
+                    <div className="min-w-0">
+                      <div className="admin-list-primary">{task.name}</div>
+                      <div className="admin-list-sub">{task.prompt}</div>
+                    </div>
+                    <div className="admin-list-cell">
                       {task.owner_user_id ? (
                         <>
-                          <div className="font-medium">
+                          <div className="admin-list-primary" style={{ fontSize: "13.5px" }}>
                             {task.owner?.name || task.owner?.email || task.owner_user_id}
                           </div>
                           {task.owner?.name && task.owner.email ? (
-                            <div className="text-xs text-muted-foreground">{task.owner.email}</div>
+                            <div className="admin-list-sub">{task.owner.email}</div>
                           ) : null}
                         </>
                       ) : (
                         <AdminStatusBadge tone="amber">Owner required</AdminStatusBadge>
                       )}
-                    </td>
-                    <td className="px-4 py-3 text-xs">{scheduleLabel(task)}</td>
-                    <td className="px-4 py-3 font-mono text-xs tabular-nums">
+                    </div>
+                    <div className="admin-list-cell admin-list-muted">{scheduleLabel(task)}</div>
+                    <div className="admin-list-cell admin-list-mono">
                       {formatDateTime(task.next_run_at)}
-                    </td>
-                    <td className="px-4 py-3">
+                    </div>
+                    <div className="admin-list-cell">
                       {run ? (
                         <div>
                           <span className="capitalize">{run.status}</span>
-                          <div className="text-xs text-muted-foreground">
+                          <div className="admin-list-sub">
                             {formatDateTime(run.finished_at || run.created_at)}
                           </div>
                         </div>
                       ) : (
-                        <span className="text-muted-foreground">—</span>
+                        <span className="admin-list-muted">—</span>
                       )}
-                    </td>
-                    <td className="px-4 py-3">
+                    </div>
+                    <div className="admin-list-cell">
                       <TaskStatus status={task.status} />
-                    </td>
-                    <td className="px-4 py-3" onClick={(event) => event.stopPropagation()}>
+                    </div>
+                    <div
+                      className="flex justify-end"
+                      onClick={(event) => event.stopPropagation()}
+                    >
                       <DropdownMenu>
                         <DropdownMenuTrigger asChild>
                           <Button
@@ -272,14 +277,14 @@ export default function ScheduledTasksPage() {
                           </DropdownMenuItem>
                         </DropdownMenuContent>
                       </DropdownMenu>
-                    </td>
-                  </tr>
+                    </div>
+                  </div>
                 );
               })}
-            </tbody>
-          </table>
+            </div>
+          </div>
         )}
-      </AdminTable>
+      </div>
 
       <AdminDrawer
         open={drawerOpen}
