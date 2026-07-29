@@ -194,7 +194,7 @@ export default function AdminPage() {
                   >
                     <span className="admin-module-head">
                       <span className="admin-module-icon">
-                        <Icon className="size-[18px]" />
+                        <Icon className="size-6" strokeWidth={2} />
                       </span>
                       <span className="admin-module-title">{module.title}</span>
                     </span>

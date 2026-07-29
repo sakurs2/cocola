@@ -667,13 +667,10 @@
 
   .cocola-admin-ui .admin-module-icon {
     display: grid;
-    width: 46px;
-    height: 46px;
     flex: 0 0 auto;
     place-items: center;
-    border-radius: 14px;
-    color: #fff;
-    background: linear-gradient(140deg, var(--card-from, hsl(258 90% 62%)) 0%, var(--card-to, hsl(286 84% 58%)) 100%);
+    color: var(--card-to, hsl(258 90% 62%));
+    background: none;
     transition: transform 200ms ease;
   }
 
