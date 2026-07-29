@@ -775,6 +775,45 @@
     display: grid;
     gap: 16px;
   }
+  .cocola-admin-ui .admin-entity-search {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    flex: 1;
+    min-width: 0;
+    max-width: 420px;
+    height: 42px;
+    padding: 0 14px;
+    background: #fff;
+    border: 1px solid #ececf1;
+    border-radius: 14px;
+    transition: all 160ms ease;
+  }
+  .cocola-admin-ui .admin-entity-search:focus-within {
+    border-color: var(--page-accent);
+    box-shadow: 0 0 0 3px var(--page-accent-soft);
+  }
+  .cocola-admin-ui .admin-entity-search svg {
+    color: #a1a1aa;
+    flex: 0 0 auto;
+  }
+  .cocola-admin-ui .admin-entity-search:focus-within svg {
+    color: var(--page-accent);
+  }
+  .cocola-admin-ui .admin-entity-search input {
+    border: none;
+    outline: none;
+    background: transparent;
+    font-size: 14px;
+    flex: 1;
+    min-width: 0;
+    color: #18181b;
+    border-radius: 0;
+  }
+  .cocola-admin-ui .admin-entity-search input:focus {
+    box-shadow: none;
+    border: none;
+  }
   .cocola-admin-ui .admin-entity-card {
     display: flex;
     flex-direction: column;

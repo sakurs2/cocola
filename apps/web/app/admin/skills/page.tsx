@@ -23,6 +23,7 @@ import {
   Gem,
   LoaderCircle,
   Power,
+  Search,
   Puzzle,
   Rocket,
   Sparkles,
@@ -125,9 +126,19 @@ export default function AdminSkillsPage() {
   const [working, setWorking] = useState(false);
   const [gitScanning, setGitScanning] = useState(false);
   const [actionSkillId, setActionSkillId] = useState<string | null>(null);
+  const [search, setSearch] = useState("");
   const [error, setError] = useState<string | null>(null);
 
   const validCandidates = useMemo(() => candidates.filter((c) => c.valid), [candidates]);
+
+  const searching = search.trim().length > 0;
+  const visibleSkills = useMemo(() => {
+    const needle = search.trim().toLowerCase();
+    if (!needle) return skills;
+    return skills.filter((skill) =>
+      [displaySkillName(skill), skill.id].join(" ").toLowerCase().includes(needle),
+    );
+  }, [skills, search]);
   const allValidSelected =
     validCandidates.length > 0 && validCandidates.every((candidate) => selected[candidate.id]);
 
@@ -144,10 +155,15 @@ export default function AdminSkillsPage() {
     async (showLoading = true) => {
       if (showLoading) setLoading(true);
       setError(null);
-      const query = new URLSearchParams({
-        limit: String(SKILLS_PAGE_SIZE),
-        offset: String(page * SKILLS_PAGE_SIZE),
-      });
+      const searchingNow = search.trim().length > 0;
+      const query = new URLSearchParams(
+        searchingNow
+          ? { limit: "1000", offset: "0" }
+          : {
+              limit: String(SKILLS_PAGE_SIZE),
+              offset: String(page * SKILLS_PAGE_SIZE),
+            },
+      );
       try {
         const res = await fetch(`/api/admin/skills?${query}`, { cache: "no-store" });
         if (!res.ok) throw new Error(await readError(res));
@@ -160,7 +176,7 @@ export default function AdminSkillsPage() {
         if (showLoading) setLoading(false);
       }
     },
-    [page],
+    [page, search],
   );
 
   useEffect(() => {
@@ -466,14 +482,33 @@ export default function AdminSkillsPage() {
           </section>
         ) : null}
 
+        <div className="flex items-center justify-between gap-3">
+          <label className="admin-entity-search">
+            <Search className="size-4" />
+            <input
+              value={search}
+              onChange={(event) => {
+                setSearch(event.target.value);
+                setPage(0);
+              }}
+              placeholder="Search skills by name"
+            />
+          </label>
+          {searching ? (
+            <span className="text-xs text-muted-foreground">
+              {visibleSkills.length} match{visibleSkills.length === 1 ? "" : "es"}
+            </span>
+          ) : null}
+        </div>
+
         <section className="admin-entity-grid md:grid-cols-2 xl:grid-cols-3">
           {loading ? (
             <div className="col-span-full flex h-28 items-center justify-center text-muted-foreground">
               <LoaderCircle className="mr-2 size-4 animate-spin" />
               Loading skills
             </div>
-          ) : skills.length ? (
-            skills.map((skill) => (
+          ) : visibleSkills.length ? (
+            visibleSkills.map((skill) => (
               <SkillCard
                 key={skill.id}
                 skill={skill}
@@ -485,19 +520,21 @@ export default function AdminSkillsPage() {
             ))
           ) : (
             <div className="col-span-full rounded-2xl border border-dashed border-border p-8 text-center text-sm text-muted-foreground">
-              No skills imported yet.
+              {searching ? `No skills match "${search.trim()}".` : "No skills imported yet."}
             </div>
           )}
         </section>
-        <AdminPagination
-          page={page}
-          pageSize={SKILLS_PAGE_SIZE}
-          count={skills.length}
-          total={total}
-          loading={loading}
-          label="skills"
-          onPageChange={setPage}
-        />
+        {searching ? null : (
+          <AdminPagination
+            page={page}
+            pageSize={SKILLS_PAGE_SIZE}
+            count={skills.length}
+            total={total}
+            loading={loading}
+            label="skills"
+            onPageChange={setPage}
+          />
+        )}
       </div>
     </main>
   );
