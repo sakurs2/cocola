@@ -19,10 +19,10 @@ import {
 import { motion } from "framer-motion";
 import { ArrowRight } from "lucide-react";
 import Link from "next/link";
+import type { CSSProperties } from "react";
 import {
   AdminPage as AdminPageLayout,
   AdminPageHeader,
-  AdminStatusBadge,
 } from "@/components/admin/admin-ui";
 
 type AdminModule = {
@@ -30,116 +30,127 @@ type AdminModule = {
   href: string;
   icon: PhosphorIcon;
   summary: string;
-  accent: string;
+  from: string;
+  to: string;
 };
 
-const MODULE_GROUPS: { label: string; description: string; modules: AdminModule[] }[] = [
+const MODULE_GROUPS: { label: string; modules: AdminModule[] }[] = [
   {
     label: "Configuration",
-    description: "Manage access and the capabilities available to every agent.",
     modules: [
       {
         title: "Users",
         href: "/admin/users",
         icon: UsersThree,
         summary: "Manage whitelist accounts, roles, teams, and account status.",
-        accent: "text-cyan-700 bg-cyan-500/10",
+        from: "#60a5fa",
+        to: "#2563eb",
       },
       {
         title: "Models",
         href: "/admin/models",
         icon: Cpu,
         summary: "Configure providers, aliases, credentials, and the default route.",
-        accent: "text-indigo-600 bg-indigo-500/10",
+        from: "#a78bfa",
+        to: "#7c3aed",
       },
       {
         title: "Skills",
         href: "/admin/skills",
         icon: Sparkle,
         summary: "Review installed skills and the capabilities exposed to agents.",
-        accent: "text-fuchsia-600 bg-fuchsia-500/10",
+        from: "#fbbf24",
+        to: "#f59e0b",
       },
       {
         title: "MCP Servers",
         href: "/admin/mcps",
         icon: PlugsConnected,
         summary: "Manage MCP servers, transport settings, and availability.",
-        accent: "text-emerald-700 bg-emerald-500/10",
+        from: "#fb923c",
+        to: "#ea580c",
       },
       {
         title: "Toolbox",
         href: "/admin/toolbox",
         icon: ToolboxIcon,
         summary: "Open lightweight admin controls such as the global system prompt.",
-        accent: "text-sky-700 bg-sky-500/10",
+        from: "#22d3ee",
+        to: "#0891b2",
       },
     ],
   },
   {
     label: "Operations",
-    description: "Review scheduled work, agent execution, and model consumption.",
     modules: [
       {
         title: "Tasks",
         href: "/admin/scheduled-tasks",
         icon: ClockCountdown,
         summary: "Review user-owned schedules, task status, and recent results.",
-        accent: "text-amber-700 bg-amber-500/10",
+        from: "#4ade80",
+        to: "#16a34a",
       },
       {
         title: "Agent Runs",
         href: "/admin/audit",
         icon: FileText,
         summary: "Inspect conversation runs, traces, timing, and failures.",
-        accent: "text-rose-700 bg-rose-500/10",
+        from: "#818cf8",
+        to: "#4f46e5",
       },
       {
         title: "Token Usage",
         href: "/admin/token-usage",
         icon: ChartLineUp,
         summary: "Review token totals, usage trends, ranked users, and exports.",
-        accent: "text-blue-600 bg-blue-500/10",
+        from: "#fb7185",
+        to: "#e11d48",
       },
     ],
   },
   {
     label: "Infrastructure",
-    description: "Operate the isolated compute capacity behind every conversation.",
     modules: [
       {
         title: "Sandboxes",
         href: "/admin/sandboxes",
         icon: Stack,
         summary: "Inspect active sandboxes, owners, bindings, and lifecycle state.",
-        accent: "text-orange-700 bg-orange-500/10",
+        from: "#2dd4bf",
+        to: "#0d9488",
       },
       {
         title: "Nodes",
         href: "/admin/sandbox-nodes",
         icon: Cpu,
         summary: "Track node health, pod capacity, placement, and node operations.",
-        accent: "text-teal-700 bg-teal-500/10",
+        from: "#38bdf8",
+        to: "#0284c7",
       },
       {
         title: "Storage",
         href: "/admin/storage",
         icon: HardDrives,
         summary: "Inspect node disk headroom, Session Volumes, and on-demand usage.",
-        accent: "text-emerald-700 bg-emerald-500/10",
+        from: "#c084fc",
+        to: "#9333ea",
       },
       {
         title: "Architecture",
         href: "/admin/architecture",
         icon: Graph,
         summary: "Inspect the system DAG, dependencies, and component health.",
-        accent: "text-violet-600 bg-violet-500/10",
+        from: "#e879f9",
+        to: "#c026d3",
       },
       {
         title: "Service Logs",
         href: "/admin/component-logs",
         icon: TerminalWindow,
         summary: "Read recent output from Cocola's core runtime services.",
-        accent: "text-slate-700 bg-slate-500/10",
+        from: "#94a3b8",
+        to: "#475569",
       },
     ],
   },
@@ -150,24 +161,9 @@ export default function AdminPage() {
     <AdminPageLayout>
       <section className="admin-overview-hero overflow-hidden rounded-3xl border px-5 py-6 sm:px-7 sm:py-7">
         <AdminPageHeader
-          eyebrow="Sky Glass Control Plane"
           title="Operate cocola with context"
-          description="Configure access and agent capabilities, observe usage, and inspect the infrastructure that keeps every conversation isolated."
           icon={<ShieldCheck className="size-5" />}
-          actions={
-            <AdminStatusBadge tone="green" dot>
-              Self-hosted
-            </AdminStatusBadge>
-          }
         />
-        <div className="mt-6 flex flex-wrap gap-2 border-t border-white/55 pt-4 text-xs text-muted-foreground">
-          {MODULE_GROUPS.map((group) => (
-            <span key={group.label} className="admin-context-pill">
-              {group.label}
-              <span className="font-mono text-[10px] text-primary/70">{group.modules.length}</span>
-            </span>
-          ))}
-        </div>
       </section>
 
       <div className="grid gap-4 xl:grid-cols-2">
@@ -180,19 +176,22 @@ export default function AdminPage() {
             className="admin-domain-panel rounded-3xl border p-3 sm:p-4"
           >
             <div className="mb-3 px-1">
-              <div className="flex items-center gap-2">
-                <h2 className="text-sm font-semibold text-foreground">{group.label}</h2>
-                <span className="font-mono text-[10px] text-muted-foreground">
-                  {group.modules.length}
-                </span>
-              </div>
-              <p className="mt-1 text-xs leading-5 text-muted-foreground">{group.description}</p>
+              <h2 className="text-sm font-semibold text-foreground">{group.label}</h2>
             </div>
             <div className="grid gap-3 sm:grid-cols-2">
               {group.modules.map((module) => {
                 const Icon = module.icon;
+                const cardStyle = {
+                  "--card-from": module.from,
+                  "--card-to": module.to,
+                } as CSSProperties;
                 return (
-                  <Link key={module.href} href={module.href} className="admin-module-card group">
+                  <Link
+                    key={module.href}
+                    href={module.href}
+                    className="admin-module-card group"
+                    style={cardStyle}
+                  >
                     <span className="admin-module-head">
                       <span className="admin-module-icon">
                         <Icon className="size-[18px]" />
