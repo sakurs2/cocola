@@ -16,7 +16,7 @@ import {
 import { Download, Loader2, Search, UserRound } from "lucide-react";
 import { Line } from "react-chartjs-2";
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { AdminRefreshButton } from "@/components/admin/admin-ui";
+import { AdminPage, AdminPageHeader, AdminRefreshButton } from "@/components/admin/admin-ui";
 import { SelectControl } from "@/components/ui/select-control";
 
 ChartJS.register(
@@ -245,47 +245,39 @@ export default function AdminTokenUsagePage() {
   const activeUser = selectedUser ?? users[0] ?? null;
 
   return (
-    <main className="admin-theme-rose min-h-screen bg-background text-foreground">
-      <header className="border-b border-border">
-        <div className="mx-auto flex h-16 max-w-7xl items-center gap-3 px-6">
-          <div className="admin-page-icon">
-            <TokenUsagePageIcon className="size-[18px]" />
-          </div>
-          <div className="min-w-0 flex-1">
-            <h1 className="truncate text-base font-semibold">Token Usage</h1>
-            <p className="truncate text-xs text-muted-foreground">
-              User token consumption from the LLM usage ledger
-            </p>
-          </div>
-          <AdminRefreshButton
-            className={iconBtn}
-            title="Refresh"
-            onClick={() => void load()}
-            disabled={loading}
-            refreshing={loading}
-            variant="outline"
-            size="sm"
-          >
-            Refresh
-          </AdminRefreshButton>
-          <button
-            className={iconBtn}
-            title="Export Excel"
-            onClick={() => void exportExcel()}
-            disabled={exporting || !report}
-          >
-            {exporting ? (
-              <Loader2 className="size-4 animate-spin" />
-            ) : (
-              <Download className="size-4" />
-            )}
-            Export
-          </button>
-        </div>
-      </header>
+    <AdminPage className="admin-theme-rose">
+      <AdminPageHeader
+        icon={<TokenUsagePageIcon className="size-5" />}
+        title="Token Usage"
+        description="User token consumption from the LLM usage ledger"
+        actions={
+          <>
+            <AdminRefreshButton
+              variant="outline"
+              refreshing={loading}
+              disabled={loading}
+              onClick={() => void load()}
+            >
+              Refresh
+            </AdminRefreshButton>
+            <button
+              className={iconBtn}
+              title="Export Excel"
+              onClick={() => void exportExcel()}
+              disabled={exporting || !report}
+            >
+              {exporting ? (
+                <Loader2 className="size-4 animate-spin" />
+              ) : (
+                <Download className="size-4" />
+              )}
+              Export
+            </button>
+          </>
+        }
+      />
 
-      <div className="mx-auto max-w-7xl space-y-5 px-6 py-6">
-        <section className="flex flex-wrap items-end gap-3 rounded-lg border border-border bg-card p-4">
+        <section className="admin-surface flex flex-wrap items-end gap-3 p-4">
           <label className="space-y-1">
             <span className="text-xs text-muted-foreground">Range</span>
             <SelectControl
@@ -343,11 +335,11 @@ export default function AdminTokenUsagePage() {
           <Metric label="Users" value={formatNumber(summary.user_count)} />
         </section>
 
-        <section className="rounded-lg border border-border bg-card">
-          <div className="flex items-center justify-between border-b border-border px-4 py-3">
+        <section className="admin-surface">
+          <div className="admin-surface-head">
             <div>
-              <h2 className="text-sm font-semibold">Usage Trend</h2>
-              <p className="text-xs text-muted-foreground">Bucket: {report?.bucket ?? "auto"}</p>
+              <div className="admin-surface-title">Usage Trend</div>
+              <div className="admin-surface-sub">Bucket: {report?.bucket ?? "auto"}</div>
             </div>
             {loading ? <Loader2 className="size-4 animate-spin text-muted-foreground" /> : null}
           </div>
@@ -361,11 +353,11 @@ export default function AdminTokenUsagePage() {
         </section>
 
         <section className="grid gap-5 xl:grid-cols-[minmax(0,1.15fr)_minmax(360px,0.85fr)]">
-          <div className="rounded-lg border border-border bg-card">
-            <div className="flex flex-col gap-3 border-b border-border px-4 py-3 md:flex-row md:items-center">
+          <div className="admin-surface">
+            <div className="admin-surface-head flex-col gap-3 md:flex-row md:items-center">
               <div className="min-w-0 flex-1">
-                <h2 className="text-sm font-semibold">Users</h2>
-                <p className="text-xs text-muted-foreground">Sorted by total token usage</p>
+                <div className="admin-surface-title">Users</div>
+                <div className="admin-surface-sub">Sorted by total token usage</div>
               </div>
               <label className="relative block w-full md:w-72">
                 <Search className="pointer-events-none absolute left-2 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
@@ -379,14 +371,14 @@ export default function AdminTokenUsagePage() {
             </div>
             <div className="overflow-x-auto">
               <table className="w-full min-w-[760px] text-left text-sm">
-                <thead className="border-b border-border text-xs text-muted-foreground">
+                <thead className="border-b border-border/60">
                   <tr>
-                    <th className="px-4 py-3 font-medium">User</th>
-                    <th className="px-4 py-3 text-right font-medium">Total</th>
-                    <th className="px-4 py-3 text-right font-medium">Input</th>
-                    <th className="px-4 py-3 text-right font-medium">Output</th>
-                    <th className="px-4 py-3 text-right font-medium">Calls</th>
-                    <th className="px-4 py-3 font-medium">Last Used</th>
+                    <th className="admin-surface-th">User</th>
+                    <th className="admin-surface-th text-right">Total</th>
+                    <th className="admin-surface-th text-right">Input</th>
+                    <th className="admin-surface-th text-right">Output</th>
+                    <th className="admin-surface-th text-right">Calls</th>
+                    <th className="admin-surface-th">Last Used</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -396,11 +388,8 @@ export default function AdminTokenUsagePage() {
                       <tr
                         key={user.user_id}
                         onClick={() => setSelectedUser(user)}
-                        className={
-                          active
-                            ? "cursor-pointer border-b border-border bg-accent/70"
-                            : "cursor-pointer border-b border-border transition-colors hover:bg-accent/50"
-                        }
+                        className="admin-surface-row border-b border-border/50"
+                        data-active={active}
                       >
                         <td className="px-4 py-3">
                           <div className="font-medium">{displayUser(user)}</div>
@@ -439,21 +428,23 @@ export default function AdminTokenUsagePage() {
             </div>
           </div>
 
-          <aside className="rounded-lg border border-border bg-card">
-            <div className="flex items-center gap-3 border-b border-border px-4 py-3">
-              <div className="grid size-9 place-items-center rounded-md bg-muted">
-                <UserRound className="size-4 text-muted-foreground" />
-              </div>
-              <div className="min-w-0">
-                <h2 className="truncate text-sm font-semibold">
-                  {activeUser ? displayUser(activeUser) : "No user selected"}
-                </h2>
-                <p className="truncate text-xs text-muted-foreground">
-                  {activeUser?.email || activeUser?.user_id || "Select a user"}
-                </p>
+          <aside className="admin-surface">
+            <div className="admin-surface-head">
+              <div className="flex min-w-0 items-center gap-3">
+                <div className="admin-page-icon">
+                  <UserRound className="size-4" />
+                </div>
+                <div className="min-w-0">
+                  <h2 className="admin-surface-title truncate">
+                    {activeUser ? displayUser(activeUser) : "No user selected"}
+                  </h2>
+                  <p className="admin-surface-sub truncate">
+                    {activeUser?.email || activeUser?.user_id || "Select a user"}
+                  </p>
+                </div>
               </div>
               {userLoading ? (
-                <Loader2 className="ml-auto size-4 animate-spin text-muted-foreground" />
+                <Loader2 className="size-4 animate-spin text-muted-foreground" />
               ) : null}
             </div>
             <div className="space-y-4 p-4">
@@ -477,8 +468,7 @@ export default function AdminTokenUsagePage() {
             </div>
           </aside>
         </section>
-      </div>
-    </main>
+    </AdminPage>
   );
 }
 

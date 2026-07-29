@@ -1146,10 +1146,10 @@
   .cocola-admin-ui .admin-list-cols {
     padding: 8px 16px 10px;
     font-size: 11px;
-    font-weight: 700;
+    font-weight: 800;
     letter-spacing: 0.07em;
     text-transform: uppercase;
-    color: #a1a1aa;
+    color: #18181b;
   }
   .cocola-admin-ui .admin-list-row {
     padding: 13px 16px;
@@ -1202,6 +1202,51 @@
     text-align: center;
     color: #71717a;
     font-size: 14px;
+  }
+
+  /* ===== generic surface card (Token Usage panels) ===== */
+  .cocola-admin-ui .admin-surface {
+    background: #fff;
+    border-radius: 18px;
+    box-shadow:
+      0 1px 0 0 rgba(0, 0, 0, 0.02),
+      0 8px 30px -14px rgba(0, 0, 0, 0.16);
+  }
+  .cocola-admin-ui .admin-surface-head {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 16px;
+    padding: 14px 18px;
+    border-bottom: 1px solid rgba(0, 0, 0, 0.06);
+  }
+  .cocola-admin-ui .admin-surface-title {
+    font-size: 14px;
+    font-weight: 700;
+    color: #11181c;
+  }
+  .cocola-admin-ui .admin-surface-sub {
+    font-size: 12px;
+    color: #71717a;
+    margin-top: 2px;
+  }
+  .cocola-admin-ui .admin-surface-th {
+    padding: 10px 16px;
+    font-size: 11px;
+    font-weight: 800;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+    color: #18181b;
+  }
+  .cocola-admin-ui .admin-surface-row {
+    cursor: pointer;
+    transition: background 160ms ease;
+  }
+  .cocola-admin-ui .admin-surface-row:hover {
+    background: var(--page-accent-soft);
+  }
+  .cocola-admin-ui .admin-surface-row[data-active="true"] {
+    background: var(--page-accent-soft);
   }
 
   /* center-align non-user columns (Role / Status / Last login / Actions) */

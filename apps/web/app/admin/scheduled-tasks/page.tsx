@@ -179,7 +179,7 @@ export default function ScheduledTasksPage() {
           />
         ) : (
           <div className="admin-list-scroll">
-            <div className="min-w-[960px]">
+            <div className="min-w-[960px] lg:min-w-0">
               <div
                 className="admin-list-cols"
                 style={{
@@ -219,7 +219,7 @@ export default function ScheduledTasksPage() {
                     <div className="admin-list-cell">
                       {task.owner_user_id ? (
                         <>
-                          <div className="admin-list-primary" style={{ fontSize: "13.5px" }}>
+                          <div className="admin-list-primary">
                             {task.owner?.name || task.owner?.email || task.owner_user_id}
                           </div>
                           {task.owner?.name && task.owner.email ? (
@@ -329,7 +329,16 @@ export default function ScheduledTasksPage() {
 }
 
 function TaskStatus({ status }: { status: ScheduledTask["status"] }) {
-  const tone = status === "active" ? "green" : status === "paused" ? "amber" : "neutral";
+  const tone =
+    status === "active"
+      ? "green"
+      : status === "paused"
+        ? "amber"
+        : status === "completed"
+          ? "sky"
+          : status === "expired"
+            ? "red"
+            : "neutral";
   return (
     <AdminStatusBadge tone={tone} dot>
       {status}

@@ -1,6 +1,6 @@
 "use client";
 
-import { MessageCircle as ChatCircleDots } from "lucide-react";
+import { FileText } from "lucide-react";
 import * as Popover from "@radix-ui/react-popover";
 import {
   AlertTriangle,
@@ -91,7 +91,7 @@ export default function AdminAuditPage() {
   return (
     <AdminPage className="admin-theme-indigo">
       <AdminPageHeader
-        icon={<ChatCircleDots className="size-5" />}
+        icon={<FileText className="size-5" />}
         title="Agent Runs"
         description="One safe metadata record for every user–agent run. Chat content stays in its conversation."
         actions={
@@ -169,7 +169,7 @@ export default function AdminAuditPage() {
 
       <div className="admin-list">
         <div className="admin-list-scroll">
-          <div className="min-w-[1120px]">
+          <div className="min-w-[1120px] 2xl:min-w-0">
             <div className="admin-list-cols" style={{ gridTemplateColumns: "1.4fr 1.5fr 2fr 1.1fr 1.2fr 0.9fr 0.9fr 1.1fr 1.6fr" }}>
               <div>Started</div>
               <div>User</div>
@@ -201,14 +201,14 @@ export default function AdminAuditPage() {
                     (window.location.href = `/admin/traces/${encodeURIComponent(traceID)}`)
                   }
                 >
-                  <div className="admin-list-cell admin-list-muted" style={{ fontSize: "12px" }}>
+                  <div className="admin-list-cell admin-list-muted">
                     {formatDate(run.started_at)}
                   </div>
-                  <div className="admin-list-cell admin-list-primary" style={{ fontSize: "13.5px" }}>
+                  <div className="admin-list-cell admin-list-primary">
                     {run.user_email || run.user_id || "—"}
                   </div>
                   <div className="min-w-0">
-                    <div className="admin-list-primary" style={{ fontSize: "13.5px" }}>
+                    <div className="admin-list-primary">
                       {run.conversation_title || "Untitled conversation"}
                     </div>
                     {run.conversation_id ? (
