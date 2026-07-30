@@ -3,7 +3,6 @@
 import * as SelectPrimitive from "@radix-ui/react-select";
 import { Check, ChevronDown, ChevronUp } from "lucide-react";
 import { ModelIcon } from "@/components/ui/model-icon";
-import type { AgentModelOption } from "@/lib/agents";
 import type { ModelIconConfig } from "@/lib/model-icons";
 import { cn } from "@/lib/utils";
 
@@ -16,10 +15,18 @@ export type ModelSelectItem = {
   suffix?: string;
 };
 
+export type ModelSelectModel = {
+  id: string;
+  label: string;
+  alias?: string;
+  provider?: string;
+  icon?: ModelIconConfig;
+};
+
 type ModelSelectControlProps = {
   value: string;
   onValueChange: (value: string) => void;
-  models: readonly AgentModelOption[];
+  models: readonly ModelSelectModel[];
   /**
    * Extra option prepended to the list when the currently selected model is
    * missing from `models` (e.g. removed by an admin). Purely presentational —
@@ -39,12 +46,12 @@ const VALUE_PREFIX = "cocola-model-select:";
 const toPrimitive = (value: string) => `${VALUE_PREFIX}${value}`;
 const fromPrimitive = (value: string) => value.slice(VALUE_PREFIX.length);
 
-function toItem(model: AgentModelOption): ModelSelectItem {
+function toItem(model: ModelSelectModel): ModelSelectItem {
   return {
     id: model.id,
-    label: model.label,
+    label: model.label || model.alias || model.id,
     ...(model.provider ? { provider: model.provider } : {}),
-    icon: model.icon,
+    ...(model.icon ? { icon: model.icon } : {}),
   };
 }
 

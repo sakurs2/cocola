@@ -1,4 +1,5 @@
 import { validateChatAttachments } from "@/lib/chat-attachment-limits.mjs";
+import { normalizeModelIconConfig, type ModelIconConfig } from "@/lib/model-icons";
 
 export type TaskStatus = "active" | "paused" | "completed" | "expired";
 export type TaskScheduleKind = "once" | "hourly" | "daily" | "weekly" | "monthly";
@@ -75,9 +76,50 @@ export type ModelOption = {
   id: string;
   alias: string;
   label: string;
+  provider?: string;
+  icon?: ModelIconConfig;
   protocols?: string[];
   is_default?: boolean;
 };
+
+export function normalizeModelOptions(value: unknown): ModelOption[] {
+  const rows = Array.isArray(value)
+    ? value
+    : value && typeof value === "object" && Array.isArray((value as { models?: unknown }).models)
+      ? (value as { models: unknown[] }).models
+      : [];
+  return rows.flatMap((raw): ModelOption[] => {
+    if (!raw || typeof raw !== "object") return [];
+    const row = raw as Record<string, unknown>;
+    const id = typeof row.id === "string" ? row.id.trim() : "";
+    const alias = typeof row.alias === "string" ? row.alias.trim() : "";
+    const label = typeof row.label === "string" ? row.label.trim() : "";
+    if (!id || !alias) return [];
+    const provider = typeof row.provider === "string" ? row.provider.trim() : "";
+    const family = typeof row.family === "string" ? row.family.trim() : "";
+    const iconSlug = typeof row.icon_slug === "string" ? row.icon_slug.trim() : "";
+    const icon = normalizeModelIconConfig(row.icon);
+    const normalizedIcon: ModelIconConfig =
+      icon?.type === "image" && icon.src
+        ? icon
+        : iconSlug
+          ? { type: "lobe-icons", slug: iconSlug }
+          : (icon ?? { type: "lobe-icons", slug: family || provider || alias });
+    return [
+      {
+        id,
+        alias,
+        label: label || alias,
+        ...(provider ? { provider } : {}),
+        icon: normalizedIcon,
+        protocols: Array.isArray(row.protocols)
+          ? row.protocols.filter((item): item is string => typeof item === "string")
+          : [],
+        is_default: row.is_default === true,
+      },
+    ];
+  });
+}
 
 export function detectedTimezone(): string {
   return Intl.DateTimeFormat().resolvedOptions().timeZone || "Asia/Shanghai";

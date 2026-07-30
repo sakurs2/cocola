@@ -23,14 +23,14 @@ const ICONS: Record<string, LucideIcon> = {
 };
 
 const COLORS: Record<string, string> = {
-  slate: "bg-slate-100 text-slate-700 ring-slate-200",
-  blue: "bg-blue-100 text-blue-700 ring-blue-200",
-  cyan: "bg-cyan-100 text-cyan-700 ring-cyan-200",
-  emerald: "bg-emerald-100 text-emerald-700 ring-emerald-200",
-  amber: "bg-amber-100 text-amber-700 ring-amber-200",
-  orange: "bg-orange-100 text-orange-700 ring-orange-200",
-  rose: "bg-rose-100 text-rose-700 ring-rose-200",
-  violet: "bg-violet-100 text-violet-700 ring-violet-200",
+  slate: "bg-white text-slate-600 ring-slate-200",
+  blue: "bg-white text-blue-600 ring-blue-200",
+  cyan: "bg-white text-cyan-600 ring-cyan-200",
+  emerald: "bg-white text-emerald-600 ring-emerald-200",
+  amber: "bg-white text-amber-600 ring-amber-200",
+  orange: "bg-white text-orange-600 ring-orange-200",
+  rose: "bg-white text-rose-600 ring-rose-200",
+  violet: "bg-white text-violet-600 ring-violet-200",
 };
 
 export function AgentAvatar({

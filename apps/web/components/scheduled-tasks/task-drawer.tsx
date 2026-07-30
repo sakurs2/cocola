@@ -3,6 +3,7 @@
 import * as Dialog from "@radix-ui/react-dialog";
 import { CalendarClock, ChevronRight, Paperclip, UserCircle, X } from "lucide-react";
 import { useEffect, useState } from "react";
+import { ModelSelectControl } from "@/components/ui/model-select-control";
 import { SelectControl } from "@/components/ui/select-control";
 import {
   emptyTaskForm,
@@ -203,18 +204,20 @@ export function TaskDrawer({
                 </summary>
                 <div className="mt-4 grid gap-4 border-t border-border/70 pt-4">
                   <Field label="Model">
-                    <SelectControl
-                      className={inputClass}
+                    <ModelSelectControl
+                      id="task-model"
                       value={form.modelRouteID}
                       onValueChange={(value) => {
                         const model = models.find((candidate) => candidate.id === value);
                         if (model)
                           setForm({ ...form, modelRouteID: model.id, modelAlias: model.alias });
                       }}
-                      options={models.map((model) => ({
-                        value: model.id,
-                        label: model.label || model.alias,
-                      }))}
+                      models={models}
+                      fallback={{
+                        id: form.modelRouteID,
+                        label: form.modelAlias || "Model",
+                        suffix: "unavailable",
+                      }}
                       contentClassName={selectContentClassName}
                     />
                   </Field>

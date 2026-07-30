@@ -15,6 +15,7 @@ import {
 import { TaskConfirmDialog, TaskDrawer } from "@/components/scheduled-tasks/task-drawer";
 import {
   formatDateTime,
+  normalizeModelOptions,
   scheduleLabel,
   sortTasks,
   taskIsToday,
@@ -83,12 +84,8 @@ export default function TasksPage() {
       try {
         const response = await fetch("/api/models", { cache: "no-store", signal });
         if (!response.ok) throw new Error(await responseError(response));
-        const body = (await response.json()) as ModelOption[] | { models?: ModelOption[] };
-        const availableModels = Array.isArray(body)
-          ? body
-          : Array.isArray(body.models)
-            ? body.models
-            : [];
+        const body = (await response.json()) as unknown;
+        const availableModels = normalizeModelOptions(body);
         const nextModels = availableModels.filter(
           (model) => !model.protocols || model.protocols.includes("anthropic-messages"),
         );
