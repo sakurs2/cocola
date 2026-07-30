@@ -1,9 +1,14 @@
 "use client";
 
 import { Settings as SettingsPageIcon } from "lucide-react";
-import { AlertTriangle, Check, Loader2, RotateCcw, Save, SlidersHorizontal } from "lucide-react";
+import { Database, Layers, Loader2, RotateCcw, Save, SlidersHorizontal } from "lucide-react";
+import { AlertTriangle, Check } from "lucide-react";
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { AdminRefreshButton } from "@/components/admin/admin-ui";
+import {
+  AdminPage,
+  AdminPageHeader,
+  AdminRefreshButton,
+} from "@/components/admin/admin-ui";
 
 type SettingValue = boolean | number | string | null;
 
@@ -27,11 +32,6 @@ type SystemSetting = {
 };
 
 type Drafts = Record<string, SettingValue>;
-
-const iconBtn =
-  "inline-flex size-8 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-accent hover:text-accent-foreground disabled:pointer-events-none disabled:opacity-40";
-const input =
-  "h-9 min-w-0 rounded-md border border-input bg-background px-3 text-sm text-foreground outline-none transition-colors placeholder:text-muted-foreground focus:border-ring focus:ring-1 focus:ring-ring disabled:cursor-not-allowed disabled:opacity-60";
 
 export default function AdminSettingsPage() {
   const [settings, setSettings] = useState<SystemSetting[]>([]);
@@ -124,146 +124,160 @@ export default function AdminSettingsPage() {
   }
 
   return (
-    <main className="min-h-screen bg-background text-foreground">
-      <header className="border-b border-border">
-        <div className="mx-auto flex h-16 w-full max-w-[100rem] items-center gap-3 px-4 sm:px-6">
-          <div className="admin-page-icon">
-            <SettingsPageIcon className="size-[18px]" />
-          </div>
-          <div className="min-w-0 flex-1">
-            <h1 className="truncate text-base font-semibold">Settings</h1>
-            <p className="truncate text-xs text-muted-foreground">
-              Runtime settings with environment defaults and database overrides
-            </p>
-          </div>
+    <AdminPage className="admin-theme-slate">
+      <AdminPageHeader
+        icon={<SettingsPageIcon className="size-5" />}
+        title="Settings"
+        description="Runtime settings with environment defaults and database overrides"
+        actions={
           <AdminRefreshButton
-            className={iconBtn}
+            variant="outline"
             title="Refresh settings"
             aria-label="Refresh settings"
             onClick={() => void load()}
             disabled={loading}
             refreshing={loading}
-            variant="ghost"
-            size="icon"
-          />
+          >
+            Refresh
+          </AdminRefreshButton>
+        }
+      />
+
+      <section className="grid gap-4 md:grid-cols-3">
+        <Metric
+          label="Settings"
+          value={String(stats.total)}
+          detail="Across all runtime groups"
+          tone="slate"
+          icon={<SlidersHorizontal />}
+        />
+        <Metric
+          label="DB Overrides"
+          value={String(stats.overrides)}
+          detail="Persisted to database"
+          tone="green"
+          icon={<Database />}
+        />
+        <Metric
+          label="Groups"
+          value={String(stats.groups)}
+          detail="Logical config sections"
+          tone="indigo"
+          icon={<Layers />}
+        />
+      </section>
+
+      {error ? (
+        <div className="flex items-center gap-2 rounded-xl border border-destructive/30 bg-destructive/10 px-4 py-3 text-sm text-destructive">
+          <AlertTriangle className="size-4 shrink-0" />
+          <span className="min-w-0">{error}</span>
         </div>
-      </header>
+      ) : null}
+      {notice ? (
+        <div className="flex items-center gap-2 rounded-xl border border-emerald-500/30 bg-emerald-500/10 px-4 py-3 text-sm text-emerald-700 dark:text-emerald-300">
+          <Check className="size-4 shrink-0" />
+          <span className="min-w-0">{notice}</span>
+        </div>
+      ) : null}
 
-      <div className="mx-auto w-full max-w-[100rem] space-y-5 px-4 py-5 sm:px-6 sm:py-6">
-        <section className="grid gap-3 md:grid-cols-3">
-          <Metric label="Settings" value={String(stats.total)} />
-          <Metric label="DB Overrides" value={String(stats.overrides)} />
-          <Metric label="Groups" value={String(stats.groups)} />
-        </section>
-
-        {error ? (
-          <div className="flex items-center gap-2 rounded-md border border-destructive/30 bg-destructive/10 px-3 py-2 text-sm text-destructive">
-            <AlertTriangle className="size-4 shrink-0" />
-            <span className="min-w-0">{error}</span>
-          </div>
-        ) : null}
-        {notice ? (
-          <div className="flex items-center gap-2 rounded-md border border-emerald-500/30 bg-emerald-500/10 px-3 py-2 text-sm text-emerald-700 dark:text-emerald-300">
-            <Check className="size-4 shrink-0" />
-            <span className="min-w-0">{notice}</span>
-          </div>
-        ) : null}
-
-        {loading ? (
-          <div className="flex h-40 items-center justify-center text-sm text-muted-foreground">
-            <Loader2 className="mr-2 size-4 animate-spin" />
-            Loading settings
-          </div>
-        ) : (
-          <section className="space-y-4">
-            {grouped.map(([group, rows]) => (
-              <div key={group} className="rounded-lg border border-border bg-card">
-                <div className="flex items-center gap-2 border-b border-border px-4 py-3">
-                  <SlidersHorizontal className="size-4 text-muted-foreground" />
-                  <h2 className="text-sm font-semibold">{group}</h2>
-                </div>
-                <div className="divide-y divide-border">
-                  {rows.map((setting) => {
-                    const draftValue = drafts[setting.key] ?? valueForDraft(setting);
-                    const dirty = !sameValue(valueForDraft(setting), draftValue);
-                    return (
-                      <div
-                        key={setting.key}
-                        className="grid gap-3 px-4 py-4 xl:grid-cols-[minmax(260px,1fr)_minmax(280px,420px)_220px]"
-                      >
-                        <div className="min-w-0">
-                          <div className="flex flex-wrap items-center gap-2">
-                            <h3 className="text-sm font-medium">{setting.label}</h3>
-                            <Badge tone={sourceTone(setting.source)}>{setting.source}</Badge>
-                          </div>
-                          <p className="mt-1 text-sm text-muted-foreground">
-                            {setting.description}
-                          </p>
-                          <div className="mt-2 flex flex-wrap gap-2 text-xs text-muted-foreground">
-                            <span className="rounded-md bg-muted px-2 py-1 font-mono">
-                              {setting.key}
-                            </span>
-                            {setting.env ? (
-                              <span className="rounded-md bg-muted px-2 py-1 font-mono">
-                                {setting.env}
-                              </span>
-                            ) : null}
-                          </div>
-                        </div>
-
-                        <div className="min-w-0">
-                          <SettingControl
-                            setting={setting}
-                            value={draftValue}
-                            onChange={(value) =>
-                              setDrafts((prev) => ({ ...prev, [setting.key]: value }))
-                            }
-                          />
-                          <div className="mt-2 text-xs text-muted-foreground">
-                            {`Default: ${formatValue(setting.default)}`}
-                          </div>
-                        </div>
-
-                        <div className="flex items-start justify-end gap-2">
-                          {setting.editable ? (
-                            <>
-                              <button
-                                className={iconBtn}
-                                title="Save override"
-                                disabled={!dirty || savingKey === setting.key}
-                                onClick={() => void save(setting)}
-                              >
-                                {savingKey === setting.key ? (
-                                  <Loader2 className="size-4 animate-spin" />
-                                ) : (
-                                  <Save className="size-4" />
-                                )}
-                              </button>
-                              <button
-                                className={iconBtn}
-                                title="Reset override"
-                                disabled={setting.source !== "db" || savingKey === setting.key}
-                                onClick={() => void reset(setting)}
-                              >
-                                <RotateCcw className="size-4" />
-                              </button>
-                            </>
-                          ) : (
-                            <span className="rounded-md border border-border bg-muted px-2 py-1 text-xs text-muted-foreground">
-                              read only
-                            </span>
-                          )}
-                        </div>
-                      </div>
-                    );
-                  })}
-                </div>
+      {loading ? (
+        <div className="flex h-40 items-center justify-center text-sm text-muted-foreground">
+          <Loader2 className="mr-2 size-4 animate-spin" />
+          Loading settings
+        </div>
+      ) : (
+        <section className="space-y-5">
+          {grouped.map(([group, rows]) => (
+            <div key={group} className="admin-set-group">
+              <div className="admin-set-group-head">
+                <span className="admin-set-glyph">
+                  <SlidersHorizontal className="size-[19px]" />
+                </span>
+                <span className="admin-set-title">{group}</span>
+                <span className="admin-set-count">
+                  {rows.length} {rows.length === 1 ? "setting" : "settings"}
+                </span>
               </div>
-            ))}
-          </section>
-        )}
-      </div>
-    </main>
+              <div className="admin-set-cols">
+                <div>Setting</div>
+                <div>Value</div>
+                <div className="r">Actions</div>
+              </div>
+
+              {rows.map((setting) => {
+                const draftValue = drafts[setting.key] ?? valueForDraft(setting);
+                const dirty = !sameValue(valueForDraft(setting), draftValue);
+                const busy = savingKey === setting.key;
+                return (
+                  <div key={setting.key} className="admin-set-row">
+                    <div className="admin-set-meta">
+                      <div className="admin-set-name">
+                        <span className="admin-set-label">{setting.label}</span>
+                        <span className="admin-set-src" data-src={setting.source}>
+                          <span className="admin-set-sdot" />
+                          {setting.source}
+                        </span>
+                      </div>
+                      <div className="admin-set-desc">{setting.description}</div>
+                      <div className="admin-set-keys">
+                        <span className="admin-set-keychip">{setting.key}</span>
+                        {setting.env ? (
+                          <span className="admin-set-keychip">{setting.env}</span>
+                        ) : null}
+                      </div>
+                    </div>
+
+                    <div className="min-w-0">
+                      <SettingControl
+                        setting={setting}
+                        value={draftValue}
+                        onChange={(value) =>
+                          setDrafts((prev) => ({ ...prev, [setting.key]: value }))
+                        }
+                      />
+                      <div className="admin-set-ctrl-def">{`Default: ${formatValue(setting.default)}`}</div>
+                    </div>
+
+                    <div className="admin-set-actions">
+                      {setting.editable ? (
+                        <>
+                          <button
+                            type="button"
+                            className="admin-set-iconbtn admin-set-iconbtn--primary"
+                            title="Save override"
+                            aria-label="Save override"
+                            disabled={!dirty || busy}
+                            onClick={() => void save(setting)}
+                          >
+                            {busy ? (
+                              <Loader2 className="size-4 animate-spin" />
+                            ) : (
+                              <Save className="size-4" />
+                            )}
+                          </button>
+                          <button
+                            type="button"
+                            className="admin-set-iconbtn"
+                            title="Reset override"
+                            aria-label="Reset override"
+                            disabled={setting.source !== "db" || busy}
+                            onClick={() => void reset(setting)}
+                          >
+                            <RotateCcw className="size-4" />
+                          </button>
+                        </>
+                      ) : (
+                        <span className="admin-set-ro">read only</span>
+                      )}
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          ))}
+        </section>
+      )}
+    </AdminPage>
   );
 }
 
@@ -277,17 +291,18 @@ function SettingControl({
   onChange: (value: SettingValue) => void;
 }) {
   if (setting.kind === "bool") {
+    const checked = value === true;
     return (
-      <label className="flex h-9 items-center gap-3 text-sm">
+      <label className="admin-set-toggle">
         <input
           aria-label={setting.label}
-          className="size-4 rounded border-border accent-primary"
           type="checkbox"
-          checked={value === true}
+          checked={checked}
           disabled={!setting.editable}
           onChange={(event) => onChange(event.target.checked)}
         />
-        <span>{value === true ? "Enabled" : "Disabled"}</span>
+        <span className="admin-set-track" />
+        <span className="admin-set-toggle-text">{checked ? "Enabled" : "Disabled"}</span>
       </label>
     );
   }
@@ -296,7 +311,7 @@ function SettingControl({
     return (
       <input
         aria-label={setting.label}
-        className={input}
+        className="admin-set-ctrl-input"
         type="number"
         min={setting.min}
         max={setting.max}
@@ -312,7 +327,7 @@ function SettingControl({
   return (
     <input
       aria-label={setting.label}
-      className={input}
+      className="admin-set-ctrl-input"
       value={typeof value === "string" ? value : ""}
       disabled={!setting.editable}
       onChange={(event) => onChange(event.target.value)}
@@ -320,23 +335,29 @@ function SettingControl({
   );
 }
 
-function Metric({ label, value }: { label: string; value: string }) {
+function Metric({
+  label,
+  value,
+  detail,
+  tone,
+  icon,
+}: {
+  label: string;
+  value: string;
+  detail: string;
+  tone: string;
+  icon: React.ReactNode;
+}) {
   return (
-    <div className="rounded-lg border border-border bg-card px-4 py-3">
-      <div className="text-xs text-muted-foreground">{label}</div>
-      <div className="mt-1 text-2xl font-semibold">{value}</div>
+    <div className="admin-metric-card" data-tone={tone}>
+      <div className="admin-metric-head">
+        <span className="admin-metric-glyph">{icon}</span>
+        <span className="admin-metric-key">{label}</span>
+      </div>
+      <div className="admin-metric-val truncate">{value}</div>
+      <div className="admin-metric-detail">{detail}</div>
     </div>
   );
-}
-
-function Badge({ children, tone }: { children: string; tone: "default" | "green" | "amber" }) {
-  const cls =
-    tone === "green"
-      ? "border-emerald-500/30 bg-emerald-500/10 text-emerald-700 dark:text-emerald-300"
-      : tone === "amber"
-        ? "border-amber-500/30 bg-amber-500/10 text-amber-700 dark:text-amber-300"
-        : "border-border bg-muted text-muted-foreground";
-  return <span className={`rounded-md border px-2 py-0.5 text-xs ${cls}`}>{children}</span>;
 }
 
 function valueForDraft(setting: SystemSetting): SettingValue {
@@ -351,10 +372,6 @@ function serializeDraft(setting: SystemSetting, value: SettingValue) {
 
 function sameValue(a: SettingValue, b: SettingValue) {
   return String(a ?? "") === String(b ?? "");
-}
-
-function sourceTone(source: SystemSetting["source"]) {
-  return source === "db" ? "green" : source === "env" ? "amber" : "default";
 }
 
 function formatValue(value: SettingValue | undefined) {

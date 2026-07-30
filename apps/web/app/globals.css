@@ -1148,6 +1148,255 @@
     margin-top: 4px;
   }
 
+  /* ===== settings page: grouped config cards (HeroUI list language) ===== */
+  .cocola-admin-ui .admin-set-group {
+    background: #fff;
+    border-radius: 18px;
+    padding: 8px;
+    box-shadow:
+      0 1px 0 0 rgba(0, 0, 0, 0.02),
+      0 8px 30px -14px rgba(0, 0, 0, 0.16);
+  }
+  .cocola-admin-ui .admin-set-group-head {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 12px 14px 10px;
+  }
+  .cocola-admin-ui .admin-set-glyph {
+    display: grid;
+    place-items: center;
+    flex: 0 0 auto;
+    color: var(--page-accent);
+  }
+  .cocola-admin-ui .admin-set-glyph svg { width: 19px; height: 19px; }
+  .cocola-admin-ui .admin-set-title {
+    font-size: 14px;
+    font-weight: 700;
+    letter-spacing: -0.01em;
+    color: #11181c;
+  }
+  .cocola-admin-ui .admin-set-count {
+    margin-left: auto;
+    font-size: 11px;
+    font-weight: 700;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+    color: #a1a1aa;
+  }
+  .cocola-admin-ui .admin-set-cols,
+  .cocola-admin-ui .admin-set-row {
+    display: grid;
+    grid-template-columns: 2.6fr 1.4fr 120px;
+    gap: 14px;
+    align-items: start;
+  }
+  .cocola-admin-ui .admin-set-cols {
+    padding: 6px 14px 8px;
+    font-size: 11px;
+    font-weight: 700;
+    letter-spacing: 0.07em;
+    text-transform: uppercase;
+    color: #a1a1aa;
+  }
+  .cocola-admin-ui .admin-set-cols .r { text-align: right; }
+  .cocola-admin-ui .admin-set-row {
+    padding: 14px;
+    border-radius: 14px;
+    transition:
+      background 180ms ease,
+      transform 180ms ease;
+  }
+  .cocola-admin-ui .admin-set-row:hover {
+    background: var(--page-accent-soft);
+    transform: scale(1.004);
+  }
+  .cocola-admin-ui .admin-set-meta { min-width: 0; }
+  .cocola-admin-ui .admin-set-name {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    flex-wrap: wrap;
+  }
+  .cocola-admin-ui .admin-set-label {
+    font-size: 14.5px;
+    font-weight: 700;
+    color: #11181c;
+  }
+  .cocola-admin-ui .admin-set-desc {
+    font-size: 12.5px;
+    color: #71717a;
+    margin-top: 4px;
+    line-height: 1.5;
+  }
+  .cocola-admin-ui .admin-set-keys {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+    margin-top: 8px;
+  }
+  .cocola-admin-ui .admin-set-keychip {
+    font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+    font-size: 11px;
+    color: #475569;
+    background: #f1f5f9;
+    border: 1px solid #e7ebf1;
+    padding: 2px 8px;
+    border-radius: 7px;
+  }
+  .cocola-admin-ui .admin-set-src {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    font-size: 11px;
+    font-weight: 700;
+    padding: 3px 10px;
+    border-radius: 999px;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+  }
+  .cocola-admin-ui .admin-set-src .admin-set-sdot {
+    width: 6px;
+    height: 6px;
+    border-radius: 50%;
+    background: currentColor;
+  }
+  .cocola-admin-ui .admin-set-src[data-src="db"] { background: #d1fae5; color: #059669; }
+  .cocola-admin-ui .admin-set-src[data-src="env"] { background: #fef3c7; color: #d97706; }
+  .cocola-admin-ui .admin-set-src[data-src="default"] { background: #f1f5f9; color: #64748b; }
+  .cocola-admin-ui .admin-set-ctrl-input {
+    width: 100%;
+    height: 42px;
+    border: 1px solid #e7e9f0;
+    border-radius: 12px;
+    padding: 0 13px;
+    font-size: 13.5px;
+    color: #0f172a;
+    background: #fff;
+    outline: none;
+    transition:
+      border-color 150ms ease,
+      box-shadow 150ms ease;
+  }
+  .cocola-admin-ui .admin-set-ctrl-input:focus {
+    border-color: var(--page-accent-focus);
+    box-shadow: 0 0 0 4px var(--page-accent-focus-ring);
+  }
+  .cocola-admin-ui .admin-set-ctrl-input:disabled {
+    background: #f8fafc;
+    color: #94a3b8;
+    cursor: not-allowed;
+  }
+  .cocola-admin-ui .admin-set-ctrl-def {
+    font-size: 11.5px;
+    color: #71717a;
+    margin-top: 6px;
+  }
+  .cocola-admin-ui .admin-set-toggle {
+    position: relative;
+    display: inline-flex;
+    align-items: center;
+    gap: 10px;
+    height: 42px;
+    cursor: pointer;
+  }
+  .cocola-admin-ui .admin-set-toggle input { display: none; }
+  .cocola-admin-ui .admin-set-track {
+    width: 42px;
+    height: 24px;
+    border-radius: 999px;
+    background: #cbd5e1;
+    position: relative;
+    transition: background 160ms ease;
+    flex: 0 0 auto;
+  }
+  .cocola-admin-ui .admin-set-track::after {
+    content: "";
+    position: absolute;
+    top: 2px;
+    left: 2px;
+    width: 20px;
+    height: 20px;
+    border-radius: 50%;
+    background: #fff;
+    box-shadow: 0 1px 3px rgba(0, 0, 0, 0.25);
+    transition: transform 160ms ease;
+  }
+  .cocola-admin-ui .admin-set-toggle input:checked + .admin-set-track {
+    background: var(--page-accent);
+  }
+  .cocola-admin-ui .admin-set-toggle input:checked + .admin-set-track::after {
+    transform: translateX(18px);
+  }
+  .cocola-admin-ui .admin-set-toggle input:disabled + .admin-set-track {
+    opacity: 0.5;
+    cursor: not-allowed;
+  }
+  .cocola-admin-ui .admin-set-toggle-text {
+    font-size: 13.5px;
+    color: #475569;
+    font-weight: 600;
+  }
+  .cocola-admin-ui .admin-set-actions {
+    display: flex;
+    justify-content: flex-end;
+    align-items: center;
+    gap: 8px;
+    height: 42px;
+  }
+  .cocola-admin-ui .admin-set-iconbtn {
+    display: inline-grid;
+    place-items: center;
+    width: 36px;
+    height: 36px;
+    border-radius: 10px;
+    border: 1px solid #e7e9f0;
+    background: #fff;
+    color: #71717a;
+    cursor: pointer;
+    transition:
+      color 150ms ease,
+      border-color 150ms ease,
+      background-color 150ms ease,
+      opacity 150ms ease;
+  }
+  .cocola-admin-ui .admin-set-iconbtn svg { width: 16px; height: 16px; }
+  .cocola-admin-ui .admin-set-iconbtn:hover {
+    color: var(--page-accent);
+    border-color: var(--page-accent-border);
+    background: var(--page-accent-soft);
+  }
+  .cocola-admin-ui .admin-set-iconbtn--primary {
+    color: #fff;
+    border: 0;
+    background: var(--page-accent-grad);
+    box-shadow: 0 10px 20px -12px var(--page-accent-shadow);
+  }
+  .cocola-admin-ui .admin-set-iconbtn--primary:hover {
+    color: #fff;
+    opacity: 0.9;
+    background: var(--page-accent-grad);
+  }
+  .cocola-admin-ui .admin-set-iconbtn:disabled {
+    opacity: 0.4;
+    pointer-events: none;
+  }
+  .cocola-admin-ui .admin-set-ro {
+    font-size: 11.5px;
+    font-weight: 600;
+    color: #71717a;
+    background: #f1f5f9;
+    border: 1px solid #e7ebf1;
+    padding: 6px 11px;
+    border-radius: 9px;
+    white-space: nowrap;
+  }
+  @media (max-width: 820px) {
+    .cocola-admin-ui .admin-set-cols { display: none; }
+    .cocola-admin-ui .admin-set-row { grid-template-columns: 1fr; }
+    .cocola-admin-ui .admin-set-actions { justify-content: flex-start; }
+  }
+
   /* ===== users page: HeroUI list ===== */
   .cocola-admin-ui .admin-user-list {
     overflow-x: auto;
