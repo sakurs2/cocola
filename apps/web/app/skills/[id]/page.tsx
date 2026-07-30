@@ -5,8 +5,6 @@ import Link from "next/link";
 import { useParams } from "next/navigation";
 import { ArrowLeft, FileText, LoaderCircle } from "lucide-react";
 
-import { Badge } from "@/components/ui/badge";
-import { Card } from "@/components/ui/card";
 import { SkillIcon } from "@/components/ui/skill-icon";
 
 type Skill = {
@@ -50,21 +48,18 @@ function SkillDetail({ id }: { id: string }) {
   }, [id]);
 
   return (
-    <main className="h-full min-w-0 flex-1 overflow-y-auto bg-background">
+    <main className="user-canvas user-page user-theme-violet h-full min-w-0 flex-1 overflow-y-auto">
       <div className="mx-auto max-w-5xl space-y-6 px-8 py-10">
-        <header className="flex items-center gap-3">
-          <Link
-            href="/skills"
-            className="grid size-9 shrink-0 place-items-center rounded-xl border border-border bg-background text-muted-foreground shadow-xs transition-colors hover:bg-muted hover:text-foreground"
-            title="Back"
-          >
-            <ArrowLeft className="size-4" />
+        <header className="flex items-center gap-3.5">
+          <Link href="/skills" className="user-back-btn" title="Back">
+            <ArrowLeft className="size-[17px]" />
           </Link>
           <div className="min-w-0 flex-1">
+            <div className="user-eyebrow">Extensions</div>
             <h1 className="truncate text-2xl font-bold tracking-tight">
               {skill ? displaySkillName(skill) : "Skill"}
             </h1>
-            <p className="truncate text-sm text-muted-foreground">{skill?.id || id}</p>
+            <p className="user-card-mono truncate">{skill?.id || id}</p>
           </div>
         </header>
 
@@ -83,43 +78,47 @@ function SkillDetail({ id }: { id: string }) {
 
         {skill ? (
           <>
-            <Card className="p-5 shadow-card">
+            <div className="user-card">
               <div className="flex items-start gap-4">
-                <SkillIcon name={displaySkillName(skill) || skill.id} />
+                <div className="user-card-glyph lg">
+                  <SkillIcon name={displaySkillName(skill) || skill.id} />
+                </div>
                 <div className="min-w-0 flex-1">
                   <div className="flex flex-wrap items-center gap-2">
-                    <h2 className="text-lg font-bold">{displaySkillName(skill)}</h2>
+                    <h2 className="text-lg font-bold text-foreground">{displaySkillName(skill)}</h2>
                     {skill.enabled ? (
-                      <Badge variant="success">
-                        <span className="size-1.5 rounded-full bg-emerald-500" /> enabled
-                      </Badge>
+                      <span className="user-tag user-tag--ok">
+                        <span className="user-tag-dot" /> enabled
+                      </span>
                     ) : (
-                      <Badge>disabled</Badge>
+                      <span className="user-tag">disabled</span>
                     )}
-                    <Badge>{skill.scope === "user" ? "personal" : "shared"}</Badge>
+                    <span className={`user-tag${skill.scope === "user" ? " user-tag--accent" : ""}`}>
+                      {skill.scope === "user" ? "personal" : "shared"}
+                    </span>
                   </div>
                   <p className="mt-2 text-sm text-muted-foreground">{skill.description}</p>
                 </div>
               </div>
-            </Card>
+            </div>
 
             <section className="grid gap-3 md:grid-cols-2">
               <Info label="Source" value={skill.source_type || "manual"} />
               <Info label="Source Path" value={skill.source_path || "-"} />
               <Info label="Files" value={String(skill.file_count ?? 0)} />
               <Info label="Size" value={`${skill.size_bytes ?? 0} bytes`} />
-              <Info label="SHA256" value={skill.content_sha256 || "-"} />
+              <Info label="SHA256" value={skill.content_sha256 || "-"} full />
             </section>
 
-            <Card className="shadow-card">
-              <div className="flex items-center gap-2 border-b border-border px-5 py-4">
+            <div className="user-doc-card">
+              <div className="flex items-center gap-2 border-b border-border/60 px-5 py-4">
                 <FileText className="size-4 text-muted-foreground" />
-                <h2 className="text-sm font-semibold">SKILL.md</h2>
+                <h2 className="text-sm font-bold text-foreground">SKILL.md</h2>
               </div>
-              <pre className="max-h-[520px] overflow-auto whitespace-pre-wrap p-5 text-xs leading-5">
+              <pre className="max-h-[520px] overflow-auto whitespace-pre-wrap p-5 text-xs leading-6 text-slate-600">
                 {skill.skill_md || "No SKILL.md captured."}
               </pre>
-            </Card>
+            </div>
           </>
         ) : null}
       </div>
@@ -127,12 +126,14 @@ function SkillDetail({ id }: { id: string }) {
   );
 }
 
-function Info({ label, value }: { label: string; value: string }) {
+function Info({ label, value, full }: { label: string; value: string; full?: boolean }) {
   return (
-    <Card className="p-4 shadow-card">
-      <div className="text-xs text-muted-foreground">{label}</div>
-      <div className="mt-1 break-words text-sm font-medium">{value}</div>
-    </Card>
+    <div className={`user-info-card${full ? " md:col-span-2" : ""}`}>
+      <div className="text-[11px] font-bold uppercase tracking-wide text-muted-foreground">
+        {label}
+      </div>
+      <div className="mt-1.5 break-all text-sm font-semibold text-foreground">{value}</div>
+    </div>
   );
 }
 

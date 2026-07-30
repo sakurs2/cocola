@@ -2845,3 +2845,397 @@
     transition: none;
   }
 }
+
+/* ===================================================================
+   User-facing skills / mcps sub-pages — HeroUI card visual language.
+   Mirrors the admin sub-page look (cool-gray canvas + borderless cards +
+   overview metric cards + flat icons + list language) but scoped to
+   .cocola-user-ui so it never leaks into chat / sidebar / other pages.
+   =================================================================== */
+
+/* per-page accent (default violet) — overridden by .user-theme-* on <main> */
+.cocola-user-ui .user-page {
+  --page-accent: #7828c8;
+  --page-accent-2: #9353d3;
+  --page-accent-grad: linear-gradient(135deg, #7828c8, #9353d3);
+  --page-accent-soft: #faf5ff;
+  --page-accent-ink: #6b21a8;
+  --page-accent-border: #d8b4fe;
+  --page-accent-focus: #a855f7;
+  --page-accent-focus-ring: rgba(168, 85, 247, 0.18);
+  --page-accent-shadow: rgba(120, 40, 200, 0.6);
+  --page-accent-shadow-soft: rgba(120, 40, 200, 0.35);
+}
+.cocola-user-ui .user-theme-violet {
+  --page-accent: #7c3aed;
+  --page-accent-2: #a855f7;
+  --page-accent-grad: linear-gradient(135deg, #7c3aed, #a855f7);
+  --page-accent-soft: #f5f3ff;
+  --page-accent-ink: #6b21a8;
+  --page-accent-border: #ddd6fe;
+  --page-accent-focus: #a855f7;
+  --page-accent-focus-ring: rgba(124, 58, 237, 0.18);
+  --page-accent-shadow: rgba(124, 58, 237, 0.55);
+  --page-accent-shadow-soft: rgba(124, 58, 237, 0.32);
+}
+.cocola-user-ui .user-theme-orange {
+  --page-accent: #ea580c;
+  --page-accent-2: #fb923c;
+  --page-accent-grad: linear-gradient(135deg, #ea580c, #fb923c);
+  --page-accent-soft: #fff7ed;
+  --page-accent-ink: #c2410c;
+  --page-accent-border: #fed7aa;
+  --page-accent-focus: #fb923c;
+  --page-accent-focus-ring: rgba(234, 88, 12, 0.2);
+  --page-accent-shadow: rgba(234, 88, 12, 0.5);
+  --page-accent-shadow-soft: rgba(234, 88, 12, 0.3);
+}
+
+/* cool-gray canvas — matches admin sub-page (.admin-glass-shell #f8fafc) */
+.cocola-user-ui .user-canvas {
+  background: #f8fafc;
+}
+
+/* ---- page header ---- */
+.cocola-user-ui .user-page-icon {
+  display: grid;
+  width: 2.75rem;
+  height: 2.75rem;
+  flex: 0 0 auto;
+  place-items: center;
+  border-radius: 1rem;
+  color: var(--page-accent);
+  background: linear-gradient(135deg, var(--page-accent-soft), #ffffff);
+  box-shadow: inset 0 0 0 1px var(--page-accent-border);
+}
+.cocola-user-ui .user-eyebrow {
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--page-accent);
+}
+
+/* ---- search box ---- */
+.cocola-user-ui .user-search-input:focus {
+  border-color: var(--page-accent-focus);
+  box-shadow: 0 0 0 4px var(--page-accent-focus-ring);
+}
+
+/* ---- primary gradient button / pill ---- */
+.cocola-user-ui .user-accent-btn {
+  color: #fff;
+  background: var(--page-accent-grad);
+  box-shadow: 0 10px 20px -12px var(--page-accent-shadow);
+  transition: opacity 160ms ease;
+}
+.cocola-user-ui .user-accent-btn:hover {
+  opacity: 0.92;
+}
+
+/* ---- metric cards (overview language) ---- */
+.cocola-user-ui .user-metric-card {
+  --card-to: var(--page-accent);
+  display: flex;
+  flex-direction: column;
+  gap: 0.65rem;
+  align-items: flex-start;
+  border: none;
+  border-radius: 16px;
+  background: #fff;
+  padding: 20px 22px;
+  box-shadow:
+    0 1px 0 0 rgba(0, 0, 0, 0.02),
+    0 8px 24px -12px rgba(0, 0, 0, 0.18);
+  transition:
+    transform 200ms ease,
+    box-shadow 200ms ease;
+}
+.cocola-user-ui .user-metric-card:hover {
+  transform: translateY(-3px) scale(1.005);
+  box-shadow: 0 18px 40px -18px var(--page-accent-shadow-soft);
+}
+.cocola-user-ui .user-metric-card[data-tone="violet"] { --card-to: #7c3aed; }
+.cocola-user-ui .user-metric-card[data-tone="emerald"] { --card-to: #059669; }
+.cocola-user-ui .user-metric-card[data-tone="indigo"] { --card-to: #4f46e5; }
+.cocola-user-ui .user-metric-card[data-tone="orange"] { --card-to: #ea580c; }
+.cocola-user-ui .user-metric-card[data-tone="amber"] { --card-to: #d97706; }
+.cocola-user-ui .user-metric-head {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  width: 100%;
+}
+.cocola-user-ui .user-metric-glyph {
+  display: grid;
+  flex: 0 0 auto;
+  place-items: center;
+  color: var(--card-to);
+  background: none;
+}
+.cocola-user-ui .user-metric-key {
+  font-size: 13.5px;
+  font-weight: 600;
+  color: #71717a;
+}
+.cocola-user-ui .user-metric-val {
+  font-size: 34px;
+  font-weight: 800;
+  letter-spacing: -0.02em;
+  line-height: 1;
+  color: #18181b;
+  font-variant-numeric: tabular-nums;
+}
+.cocola-user-ui .user-metric-detail {
+  font-size: 12.5px;
+  color: #a1a1aa;
+  margin-top: 4px;
+}
+.cocola-user-ui .user-metric-chip {
+  font-size: 11px;
+  font-weight: 700;
+  color: #475569;
+  background: #f1f5f9;
+  border: 1px solid #e7ebf1;
+  padding: 3px 9px;
+  border-radius: 999px;
+}
+
+/* ---- section heading ---- */
+.cocola-user-ui .user-section-title {
+  font-size: 15px;
+  font-weight: 700;
+  letter-spacing: -0.01em;
+  color: #11181c;
+}
+.cocola-user-ui .user-count-badge {
+  font-size: 11px;
+  font-weight: 700;
+  color: var(--page-accent-ink);
+  background: var(--page-accent-soft);
+  border: 1px solid var(--page-accent-border);
+  padding: 2px 9px;
+  border-radius: 999px;
+}
+
+/* ---- panels (git import / candidates) ---- */
+.cocola-user-ui .user-panel {
+  background: #fff;
+  border-radius: 18px;
+  padding: 18px 20px;
+  box-shadow:
+    0 1px 0 0 rgba(0, 0, 0, 0.02),
+    0 8px 30px -14px rgba(0, 0, 0, 0.16);
+}
+.cocola-user-ui .user-panel-glyph {
+  display: grid;
+  place-items: center;
+  width: 36px;
+  height: 36px;
+  border-radius: 11px;
+  color: var(--page-accent);
+  background: var(--page-accent-soft);
+}
+.cocola-user-ui .user-field-input:focus {
+  border-color: var(--page-accent-focus);
+  box-shadow: 0 0 0 4px var(--page-accent-focus-ring);
+}
+
+/* ---- entity card (skill / mcp) ---- */
+.cocola-user-ui .user-card {
+  display: flex;
+  flex-direction: column;
+  border: none;
+  border-radius: 16px;
+  background: #fff;
+  padding: 18px;
+  box-shadow:
+    0 1px 0 0 rgba(0, 0, 0, 0.02),
+    0 8px 24px -14px rgba(0, 0, 0, 0.16);
+  transition:
+    transform 180ms ease,
+    box-shadow 180ms ease;
+}
+.cocola-user-ui .user-card--hover:hover {
+  transform: translateY(-3px);
+  box-shadow: 0 20px 40px -18px rgba(30, 41, 59, 0.3);
+}
+.cocola-user-ui .user-card-glyph {
+  display: grid;
+  place-items: center;
+  flex: 0 0 auto;
+  width: 2.5rem;
+  height: 2.5rem;
+  border-radius: 0.85rem;
+  color: var(--page-accent);
+  background: linear-gradient(135deg, var(--page-accent-soft), #ffffff);
+  box-shadow: inset 0 0 0 1px var(--page-accent-border);
+}
+.cocola-user-ui .user-card-glyph.lg {
+  width: 3.25rem;
+  height: 3.25rem;
+  border-radius: 1rem;
+}
+.cocola-user-ui .user-card-name {
+  font-size: 14.5px;
+  font-weight: 700;
+  color: #11181c;
+}
+.cocola-user-ui .user-card-desc {
+  font-size: 12.5px;
+  color: #71717a;
+  line-height: 1.5;
+}
+.cocola-user-ui .user-card-mono {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 11.5px;
+  color: #64748b;
+}
+
+/* ---- tags / badges ---- */
+.cocola-user-ui .user-tag {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 11.5px;
+  font-weight: 600;
+  padding: 3px 10px;
+  border-radius: 999px;
+  border: 1px solid hsl(var(--border));
+  color: #52525b;
+  background: #fafafa;
+}
+.cocola-user-ui .user-tag--accent {
+  color: var(--page-accent-ink);
+  background: var(--page-accent-soft);
+  border-color: var(--page-accent-border);
+}
+.cocola-user-ui .user-tag--ok {
+  color: #059669;
+  background: #d1fae5;
+  border-color: #bbf7d0;
+}
+.cocola-user-ui .user-tag--ok .user-tag-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: #10b981;
+}
+
+/* ---- toggle / action buttons in card footer ---- */
+.cocola-user-ui .user-tbtn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 7px;
+  height: 34px;
+  border-radius: 10px;
+  font-size: 12.5px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 150ms ease;
+}
+.cocola-user-ui .user-tbtn--ghost {
+  border: 1px solid hsl(var(--border));
+  background: #fff;
+  color: hsl(var(--foreground));
+}
+.cocola-user-ui .user-tbtn--ghost:hover {
+  background: #f8fafc;
+  border-color: #cbd5e1;
+}
+.cocola-user-ui .user-tbtn--fill {
+  border: 0;
+  color: #fff;
+  background: var(--page-accent-grad);
+  box-shadow: 0 8px 18px -10px var(--page-accent-shadow);
+}
+.cocola-user-ui .user-tbtn--fill:hover {
+  opacity: 0.92;
+}
+.cocola-user-ui .user-tbtn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+.cocola-user-ui .user-iconbtn {
+  display: inline-grid;
+  place-items: center;
+  width: 34px;
+  height: 34px;
+  border-radius: 10px;
+  border: 1px solid hsl(var(--border));
+  background: #fff;
+  color: #94a3b8;
+  cursor: pointer;
+  flex: 0 0 auto;
+  transition: all 150ms ease;
+}
+.cocola-user-ui .user-iconbtn:hover {
+  color: #ef4444;
+  border-color: #fecaca;
+  background: #fef2f2;
+}
+
+/* ---- back button (detail) ---- */
+.cocola-user-ui .user-back-btn {
+  display: grid;
+  place-items: center;
+  width: 40px;
+  height: 40px;
+  border-radius: 12px;
+  border: 1px solid hsl(var(--border));
+  background: #fff;
+  color: hsl(var(--muted-foreground));
+  cursor: pointer;
+  flex: 0 0 auto;
+  transition: all 150ms ease;
+}
+.cocola-user-ui .user-back-btn:hover {
+  background: #f8fafc;
+  color: hsl(var(--foreground));
+}
+
+/* ---- detail info cards + doc block ---- */
+.cocola-user-ui .user-info-card {
+  border: none;
+  border-radius: 14px;
+  background: #fff;
+  padding: 14px 16px;
+  box-shadow:
+    0 1px 0 0 rgba(0, 0, 0, 0.02),
+    0 6px 18px -14px rgba(0, 0, 0, 0.18);
+}
+.cocola-user-ui .user-doc-card {
+  border: none;
+  border-radius: 18px;
+  background: #fff;
+  overflow: hidden;
+  box-shadow:
+    0 1px 0 0 rgba(0, 0, 0, 0.02),
+    0 8px 30px -14px rgba(0, 0, 0, 0.16);
+}
+.cocola-user-ui .user-mono-box {
+  border: 1px solid hsl(var(--border));
+  background: #f8fafc;
+  border-radius: 12px;
+  padding: 14px 16px;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 13px;
+  color: #334155;
+  word-break: break-all;
+}
+
+/* ---- empty state ---- */
+.cocola-user-ui .user-empty {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  min-height: 150px;
+  border: 1px dashed hsl(var(--border));
+  border-radius: 16px;
+  padding: 28px;
+  text-align: center;
+  background: #fff;
+}

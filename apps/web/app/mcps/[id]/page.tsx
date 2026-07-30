@@ -5,9 +5,6 @@ import Link from "next/link";
 import { useParams } from "next/navigation";
 import { ArrowLeft, LoaderCircle, Plug } from "lucide-react";
 
-import { Badge } from "@/components/ui/badge";
-import { Card } from "@/components/ui/card";
-
 type MCPServer = {
   id: string;
   name: string;
@@ -44,19 +41,16 @@ export default function MCPDetailPage() {
   }, [id]);
 
   return (
-    <main className="h-full min-w-0 flex-1 overflow-y-auto bg-background">
+    <main className="user-canvas user-page user-theme-orange h-full min-w-0 flex-1 overflow-y-auto">
       <div className="mx-auto max-w-5xl space-y-6 px-8 py-10">
-        <header className="flex items-center gap-3">
-          <Link
-            href="/mcps"
-            className="grid size-9 shrink-0 place-items-center rounded-xl border border-border bg-background text-muted-foreground shadow-xs transition-colors hover:bg-muted hover:text-foreground"
-            title="Back"
-          >
-            <ArrowLeft className="size-4" />
+        <header className="flex items-center gap-3.5">
+          <Link href="/mcps" className="user-back-btn" title="Back">
+            <ArrowLeft className="size-[17px]" />
           </Link>
           <div className="min-w-0 flex-1">
+            <div className="user-eyebrow">Connectors</div>
             <h1 className="truncate text-2xl font-bold tracking-tight">{mcp?.name || id}</h1>
-            <p className="truncate text-sm text-muted-foreground">{mcp?.id || id}</p>
+            <p className="user-card-mono truncate">{mcp?.id || id}</p>
           </div>
         </header>
 
@@ -74,33 +68,35 @@ export default function MCPDetailPage() {
         ) : null}
 
         {mcp ? (
-          <Card className="p-5 shadow-card">
+          <div className="user-card">
             <div className="flex items-start gap-4">
-              <div className="grid size-11 shrink-0 place-items-center rounded-xl bg-orange-50 text-orange-600 ring-1 ring-orange-100">
-                <Plug className="size-5" />
-              </div>
+              <span className="user-card-glyph lg">
+                <Plug className="size-6" />
+              </span>
               <div className="min-w-0 flex-1">
                 <div className="flex flex-wrap items-center gap-2">
-                  <h2 className="text-lg font-bold">{mcp.name || mcp.id}</h2>
-                  <Badge variant="outline">{mcp.transport}</Badge>
+                  <h2 className="text-lg font-bold text-foreground">{mcp.name || mcp.id}</h2>
+                  <span className="user-tag user-tag--accent">{mcp.transport}</span>
                   {mcp.effective_enabled ? (
-                    <Badge variant="success">
-                      <span className="size-1.5 rounded-full bg-emerald-500" /> enabled
-                    </Badge>
+                    <span className="user-tag user-tag--ok">
+                      <span className="user-tag-dot" /> enabled
+                    </span>
                   ) : (
-                    <Badge>disabled</Badge>
+                    <span className="user-tag">disabled</span>
                   )}
-                  <Badge>{mcp.default_enabled ? "default on" : "default off"}</Badge>
+                  <span className="user-tag">
+                    {mcp.default_enabled ? "default on" : "default off"}
+                  </span>
                 </div>
                 <p className="mt-2 text-sm text-muted-foreground">
                   {mcp.description || "No description"}
                 </p>
-                <div className="mt-4 rounded-xl border border-border bg-muted/40 p-3 font-mono text-sm break-all">
+                <div className="user-mono-box mt-4">
                   {mcp.transport === "stdio" ? mcp.command || "-" : mcp.url_hint || "-"}
                 </div>
               </div>
             </div>
-          </Card>
+          </div>
         ) : null}
       </div>
     </main>

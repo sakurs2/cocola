@@ -11,13 +11,12 @@ import {
   Search,
   Trash2,
   Upload,
+  Wand2,
+  Zap,
+  Users,
 } from "lucide-react";
 
 import { cn } from "@/lib/utils";
-import { Badge } from "@/components/ui/badge";
-import { Card } from "@/components/ui/card";
-import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
 import { SkillIcon } from "@/components/ui/skill-icon";
 
 type Skill = {
@@ -68,6 +67,10 @@ function SkillsWorkspace() {
   const validCandidates = useMemo(() => candidates.filter((c) => c.valid), [candidates]);
   const allValidSelected =
     validCandidates.length > 0 && validCandidates.every((candidate) => selected[candidate.id]);
+
+  const totalCount = skills.length;
+  const enabledCount = skills.filter((skill) => skill.enabled).length;
+  const mineCount = skills.filter((skill) => skill.scope === "user").length;
 
   const load = async (showLoading = true) => {
     if (showLoading) setLoading(true);
@@ -215,28 +218,34 @@ function SkillsWorkspace() {
   };
 
   return (
-    <main className="h-full min-w-0 flex-1 overflow-y-auto bg-background">
-      <div className="mx-auto max-w-5xl space-y-8 px-8 py-10">
-        <header className="flex flex-wrap items-start justify-between gap-4">
-          <div className="space-y-1">
-            <h1 className="text-2xl font-bold tracking-tight">Skills</h1>
-            <p className="text-sm text-muted-foreground">
-              Choose shared skills and manage your personal skill packages.
-            </p>
+    <main className="user-canvas user-page user-theme-violet h-full min-w-0 flex-1 overflow-y-auto">
+      <div className="mx-auto max-w-5xl space-y-6 px-8 py-10">
+        <header className="flex flex-wrap items-center justify-between gap-4">
+          <div className="flex items-center gap-3.5">
+            <span className="user-page-icon">
+              <Wand2 className="size-6" />
+            </span>
+            <div className="space-y-1">
+              <div className="user-eyebrow">Extensions</div>
+              <h1 className="text-2xl font-bold tracking-tight">Skills</h1>
+              <p className="text-sm text-muted-foreground">
+                Choose shared skills and manage your personal skill packages.
+              </p>
+            </div>
           </div>
           <div className="flex w-full flex-wrap items-center gap-2 sm:w-auto">
             <label className="relative min-w-0 flex-1 sm:w-64 sm:flex-none">
               <span className="sr-only">Search Skills by name</span>
               <Search className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
-              <Input
+              <input
                 type="search"
                 value={skillQuery}
                 onChange={(event) => setSkillQuery(event.target.value)}
                 placeholder="input skill name"
-                className="pl-9"
+                className="user-search-input h-11 w-full rounded-xl border border-border bg-white pl-9 pr-3.5 text-sm outline-none transition-[border-color,box-shadow]"
               />
             </label>
-            <label className="inline-flex h-9 cursor-pointer items-center gap-2 rounded-xl px-3.5 text-sm font-semibold text-white shadow-xs transition-opacity brand-gradient hover:opacity-90">
+            <label className="user-accent-btn inline-flex h-11 cursor-pointer items-center gap-2 rounded-xl px-4 text-sm font-semibold">
               <Upload className="size-4" />
               Upload zip
               <input
@@ -255,69 +264,134 @@ function SkillsWorkspace() {
           </div>
         ) : null}
 
-        {/* Import from Git */}
-        <Card className="shadow-card">
-          <div className="flex items-center gap-2 border-b border-border px-5 py-4">
-            <GitBranch className="size-4 text-orange-500" />
-            <h2 className="text-sm font-semibold">Import from Git</h2>
+        {/* overview metrics */}
+        <section className="grid gap-4 sm:grid-cols-3">
+          <div className="user-metric-card" data-tone="violet">
+            <div className="user-metric-head">
+              <span className="user-metric-glyph">
+                <Wand2 className="size-[22px]" />
+              </span>
+              <span className="user-metric-key">Total Skills</span>
+            </div>
+            <div className="user-metric-val">{totalCount}</div>
+            <div className="user-metric-detail">Shared &amp; personal packages</div>
           </div>
-          <div className="grid gap-4 p-5 md:grid-cols-[1fr_150px_150px_auto]">
+          <div className="user-metric-card" data-tone="emerald">
+            <div className="user-metric-head">
+              <span className="user-metric-glyph">
+                <Zap className="size-[22px]" />
+              </span>
+              <span className="user-metric-key">Enabled</span>
+            </div>
+            <div className="user-metric-val">{enabledCount}</div>
+            <div className="user-metric-detail">Active in your sessions</div>
+          </div>
+          <div className="user-metric-card" data-tone="indigo">
+            <div className="user-metric-head">
+              <span className="user-metric-glyph">
+                <Users className="size-[22px]" />
+              </span>
+              <span className="user-metric-key">My Skills</span>
+            </div>
+            <div className="user-metric-val">{mineCount}</div>
+            <div className="user-metric-detail">Uploaded or imported by you</div>
+          </div>
+        </section>
+
+        {/* Import from Git */}
+        <div className="user-panel">
+          <div className="mb-4 flex items-center gap-2.5">
+            <span className="user-panel-glyph">
+              <GitBranch className="size-[19px]" />
+            </span>
+            <div>
+              <div className="text-sm font-bold text-foreground">Import from Git</div>
+              <div className="mt-0.5 text-xs text-muted-foreground">
+                Scan a repository for SKILL.md packages.
+              </div>
+            </div>
+          </div>
+          <div className="grid gap-3 md:grid-cols-[2fr_1fr_1fr_auto] md:items-end">
             <div className="space-y-1.5">
-              <Label htmlFor="git-repo">Repository</Label>
-              <Input
+              <label
+                htmlFor="git-repo"
+                className="block text-[11px] font-bold uppercase tracking-wide text-muted-foreground"
+              >
+                Repository
+              </label>
+              <input
                 id="git-repo"
                 placeholder="https://github.com/org/repo.git"
                 value={gitRepo}
                 onChange={(event) => setGitRepo(event.target.value)}
+                className="user-field-input h-[42px] w-full rounded-xl border border-border bg-white px-3 text-sm outline-none transition-[border-color,box-shadow]"
               />
             </div>
             <div className="space-y-1.5">
-              <Label htmlFor="git-ref">Ref</Label>
-              <Input
+              <label
+                htmlFor="git-ref"
+                className="block text-[11px] font-bold uppercase tracking-wide text-muted-foreground"
+              >
+                Ref
+              </label>
+              <input
                 id="git-ref"
                 placeholder="branch / tag"
                 value={gitRef}
                 onChange={(event) => setGitRef(event.target.value)}
+                className="user-field-input h-[42px] w-full rounded-xl border border-border bg-white px-3 text-sm outline-none transition-[border-color,box-shadow]"
               />
             </div>
             <div className="space-y-1.5">
-              <Label htmlFor="git-path">Path</Label>
-              <Input
+              <label
+                htmlFor="git-path"
+                className="block text-[11px] font-bold uppercase tracking-wide text-muted-foreground"
+              >
+                Path
+              </label>
+              <input
                 id="git-path"
                 placeholder="skills"
                 value={gitPath}
                 onChange={(event) => setGitPath(event.target.value)}
+                className="user-field-input h-[42px] w-full rounded-xl border border-border bg-white px-3 text-sm outline-none transition-[border-color,box-shadow]"
               />
             </div>
-            <div className="flex items-end">
-              <button
-                className="inline-flex h-9 w-full items-center justify-center gap-2 rounded-xl border border-border bg-background px-4 text-sm font-medium shadow-xs transition-colors hover:bg-muted disabled:opacity-50"
-                disabled={gitScanning || working || !gitRepo.trim()}
-                onClick={scanGit}
-              >
-                {gitScanning ? (
-                  <LoaderCircle className="size-4 animate-spin" />
-                ) : (
-                  <Search className="size-4" />
-                )}
-                {gitScanning ? "Scanning" : "Scan"}
-              </button>
-            </div>
+            <button
+              className="user-tbtn user-tbtn--fill h-[42px] px-5"
+              disabled={gitScanning || working || !gitRepo.trim()}
+              onClick={scanGit}
+            >
+              {gitScanning ? (
+                <LoaderCircle className="size-4 animate-spin" />
+              ) : (
+                <Search className="size-4" />
+              )}
+              {gitScanning ? "Scanning" : "Scan"}
+            </button>
           </div>
-        </Card>
+        </div>
 
         {/* Archive / Git candidates */}
         {candidates.length ? (
-          <Card className="shadow-card">
-            <div className="flex flex-wrap items-center justify-between gap-3 border-b border-border px-5 py-4">
-              <div className="flex items-center gap-2">
-                <FileArchive className="size-4 text-muted-foreground" />
-                <h2 className="text-sm font-semibold">Candidates</h2>
-                <Badge>{validCandidates.length} valid</Badge>
+          <div className="user-panel">
+            <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
+              <div className="flex items-center gap-2.5">
+                <span className="user-panel-glyph">
+                  <FileArchive className="size-[19px]" />
+                </span>
+                <div>
+                  <div className="text-sm font-bold text-foreground">
+                    Candidates · {validCandidates.length} valid
+                  </div>
+                  <div className="mt-0.5 text-xs text-muted-foreground">
+                    Select packages to import.
+                  </div>
+                </div>
               </div>
               <div className="flex gap-2">
                 <button
-                  className="inline-flex h-8 items-center rounded-xl border border-border bg-background px-3 text-sm font-medium shadow-xs transition-colors hover:bg-muted"
+                  className="user-tbtn user-tbtn--ghost px-3.5"
                   onClick={() =>
                     setSelected(
                       allValidSelected
@@ -329,7 +403,7 @@ function SkillsWorkspace() {
                   {allValidSelected ? "Clear all" : "Select all"}
                 </button>
                 <button
-                  className="inline-flex h-8 items-center rounded-xl px-3 text-sm font-semibold text-white shadow-xs transition-opacity brand-gradient hover:opacity-90 disabled:opacity-50"
+                  className="user-tbtn user-tbtn--fill px-3.5"
                   disabled={working || !Object.values(selected).some(Boolean)}
                   onClick={importSelected}
                 >
@@ -337,35 +411,43 @@ function SkillsWorkspace() {
                 </button>
               </div>
             </div>
-            <div className="grid gap-3 p-5 md:grid-cols-2">
+            <div className="grid gap-3 md:grid-cols-2">
               {candidates.map((candidate) => (
                 <label
                   key={`${candidate.path}:${candidate.id}`}
                   className={cn(
-                    "flex cursor-pointer gap-3 rounded-2xl border border-border p-4 transition-colors hover:bg-muted/50",
+                    "user-card user-card--hover cursor-pointer",
                     !candidate.valid && "cursor-not-allowed opacity-60",
                   )}
                 >
-                  <input
-                    type="checkbox"
-                    className="mt-1 size-4 shrink-0 accent-blue-600"
-                    checked={!!selected[candidate.id]}
-                    disabled={!candidate.valid}
-                    onChange={(event) =>
-                      setSelected((prev) => ({ ...prev, [candidate.id]: event.target.checked }))
-                    }
-                  />
-                  <SkillIcon name={displaySkillName(candidate) || candidate.id} size="sm" />
-                  <div className="min-w-0 flex-1">
-                    <div className="truncate text-sm font-bold">{displaySkillName(candidate)}</div>
-                    <div className="mt-1 line-clamp-2 text-sm text-muted-foreground">
-                      {candidate.description || candidate.errors?.join("; ")}
+                  <div className="flex items-start gap-3">
+                    <input
+                      type="checkbox"
+                      className="mt-1 size-4 shrink-0 accent-[var(--page-accent)]"
+                      checked={!!selected[candidate.id]}
+                      disabled={!candidate.valid}
+                      onChange={(event) =>
+                        setSelected((prev) => ({ ...prev, [candidate.id]: event.target.checked }))
+                      }
+                    />
+                    <SkillIcon name={displaySkillName(candidate) || candidate.id} size="sm" />
+                    <div className="min-w-0 flex-1">
+                      <div className="user-card-name truncate">{displaySkillName(candidate)}</div>
+                      <div className="user-card-desc mt-1 line-clamp-2">
+                        {candidate.description || candidate.errors?.join("; ")}
+                      </div>
                     </div>
+                  </div>
+                  <div className="mt-3 flex flex-wrap gap-1.5">
+                    <span className="user-tag user-tag--accent">
+                      {candidate.valid ? "valid" : "invalid"}
+                    </span>
+                    <span className="user-tag">{candidate.path}</span>
                   </div>
                 </label>
               ))}
             </div>
-          </Card>
+          </div>
         ) : null}
 
         {loading ? (
@@ -426,9 +508,9 @@ function SkillSection({
 }) {
   return (
     <section className="space-y-4">
-      <div className="flex items-center gap-2">
-        <h2 className="text-sm font-semibold">{title}</h2>
-        <Badge>{count}</Badge>
+      <div className="flex items-center gap-2.5">
+        <h2 className="user-section-title">{title}</h2>
+        <span className="user-count-badge">{count}</span>
       </div>
       <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
         {skills.length ? (
@@ -442,7 +524,7 @@ function SkillSection({
             />
           ))
         ) : (
-          <div className="col-span-full flex min-h-[140px] flex-col items-center justify-center gap-2 rounded-2xl border border-dashed border-border p-6 text-center">
+          <div className="user-empty col-span-full">
             <div className="grid size-10 place-items-center rounded-xl bg-muted">
               {searching ? (
                 <Search className="size-4 text-muted-foreground" />
@@ -472,30 +554,32 @@ function SkillCard({
   onDelete?: () => void;
 }) {
   return (
-    <Card className="group flex flex-col p-5 shadow-card transition hover:-translate-y-0.5 hover:shadow-lg">
+    <div className="user-card user-card--hover group">
       <Link href={`/skills/${encodeURIComponent(skill.id)}`} className="block">
         <div className="flex items-start gap-3">
           <SkillIcon name={displaySkillName(skill) || skill.id} />
           <div className="min-w-0 flex-1">
-            <h3 className="truncate text-sm font-bold">{displaySkillName(skill)}</h3>
-            <p className="mt-1 line-clamp-2 min-h-10 text-sm text-muted-foreground">
+            <h3 className="user-card-name truncate">{displaySkillName(skill)}</h3>
+            <p className="user-card-desc mt-1 line-clamp-2 min-h-10">
               {skill.description || "No description"}
             </p>
           </div>
         </div>
-        <div className="mt-4 flex flex-wrap items-center gap-2">
-          <Badge>{skill.scope === "user" ? "personal" : "shared"}</Badge>
+        <div className="mt-3 flex flex-wrap items-center gap-1.5">
+          <span className={cn("user-tag", skill.scope === "user" && "user-tag--accent")}>
+            {skill.scope === "user" ? "personal" : "shared"}
+          </span>
           {skill.enabled ? (
-            <Badge variant="success">
-              <span className="size-1.5 rounded-full bg-emerald-500" /> enabled
-            </Badge>
+            <span className="user-tag user-tag--ok">
+              <span className="user-tag-dot" /> enabled
+            </span>
           ) : null}
         </div>
       </Link>
-      <div className="mt-5 flex items-center gap-2 border-t border-border pt-4">
+      <div className="mt-4 flex items-center gap-2 border-t border-border/60 pt-4">
         {skill.enabled ? (
           <button
-            className="inline-flex h-8 flex-1 items-center justify-center gap-2 rounded-lg border border-border bg-background px-3 text-xs font-medium shadow-xs transition-colors hover:bg-muted disabled:opacity-50"
+            className="user-tbtn user-tbtn--ghost flex-1"
             disabled={working}
             onClick={onToggle}
           >
@@ -508,7 +592,7 @@ function SkillCard({
           </button>
         ) : (
           <button
-            className="inline-flex h-8 flex-1 items-center justify-center gap-2 rounded-lg px-3 text-xs font-semibold text-white shadow-xs transition-opacity brand-gradient hover:opacity-90 disabled:opacity-50"
+            className="user-tbtn user-tbtn--fill flex-1"
             disabled={working}
             onClick={onToggle}
           >
@@ -522,7 +606,7 @@ function SkillCard({
         )}
         {onDelete ? (
           <button
-            className="inline-flex size-8 items-center justify-center rounded-lg border border-border bg-background text-muted-foreground shadow-xs transition-colors hover:border-red-200 hover:bg-red-50 hover:text-red-600 disabled:opacity-50"
+            className="user-iconbtn"
             disabled={working}
             onClick={onDelete}
             title="Remove"
@@ -531,7 +615,7 @@ function SkillCard({
           </button>
         ) : null}
       </div>
-    </Card>
+    </div>
   );
 }
 
