@@ -1,6 +1,15 @@
 "use client";
 
-import { CalendarClock, Clock, LoaderCircle, MoreHorizontal, Plus, Sparkles } from "lucide-react";
+import {
+  CalendarClock,
+  CalendarDays,
+  CircleCheck,
+  Clock,
+  LoaderCircle,
+  MoreHorizontal,
+  Plus,
+  Sparkles,
+} from "lucide-react";
 import { useSession } from "next-auth/react";
 import { useRouter } from "next/navigation";
 import { useCallback, useEffect, useMemo, useState } from "react";
@@ -141,10 +150,20 @@ export default function TasksPage() {
     return () => window.clearTimeout(timer);
   }, [loading]);
 
-  const visibleTasks = useMemo(() => {
-    const sorted = sortTasks(tasks);
-    return tab === "today" ? sorted.filter(taskIsToday) : sorted;
-  }, [tab, tasks]);
+  const sortedTasks = useMemo(() => sortTasks(tasks), [tasks]);
+  const visibleTasks = useMemo(
+    () => (tab === "today" ? sortedTasks.filter(taskIsToday) : sortedTasks),
+    [tab, sortedTasks],
+  );
+
+  const metrics = useMemo(() => {
+    const total = tasks.length;
+    const active = tasks.filter((task) => task.status === "active").length;
+    const dueToday = sortedTasks.filter(taskIsToday).length;
+    return { total, active, dueToday };
+  }, [tasks, sortedTasks]);
+
+  const todayCount = useMemo(() => sortedTasks.filter(taskIsToday).length, [sortedTasks]);
 
   function openCreate() {
     if (!modelsLoaded) return;
@@ -207,45 +226,95 @@ export default function TasksPage() {
     }
   }
 
+  const hasTasks = !loading && tasks.length > 0;
+
   return (
-    <div className="h-full overflow-y-auto px-4 py-5 sm:px-7 sm:py-7 lg:px-10">
+    <div className="user-canvas user-page user-theme-cyan h-full overflow-y-auto px-4 py-5 sm:px-7 sm:py-7 lg:px-10">
       <div className="mx-auto max-w-7xl">
-        <header className="flex items-start justify-between gap-4">
-          <div>
-            <h1 className="text-2xl font-semibold tracking-[-0.03em]">Tasks</h1>
-            <p className="mt-1 text-sm text-muted-foreground">
-              Schedule Cocola to work for you, even when you are away.
-            </p>
+        <header className="flex flex-wrap items-start justify-between gap-4">
+          <div className="flex items-center gap-3.5">
+            <span className="user-page-icon">
+              <CalendarClock className="size-6" />
+            </span>
+            <div className="space-y-1">
+              <div className="user-eyebrow">Automation</div>
+              <h1 className="text-2xl font-bold tracking-tight">Tasks</h1>
+              <p className="text-sm text-muted-foreground">
+                Schedule Cocola to work for you, even when you are away.
+              </p>
+            </div>
           </div>
-          {!loading && tasks.length ? (
-            <Button onClick={openCreate} disabled={!modelsLoaded} className="rounded-xl">
+          {hasTasks ? (
+            <button
+              type="button"
+              onClick={openCreate}
+              disabled={!modelsLoaded}
+              className="user-accent-btn inline-flex h-11 items-center gap-2 rounded-xl px-4 text-sm font-semibold disabled:cursor-not-allowed disabled:opacity-50"
+            >
               <Plus className="size-4" /> New task
-            </Button>
+            </button>
           ) : null}
         </header>
-
-        <div className="mt-7 flex gap-6 border-b border-border/60">
-          {(["today", "all"] as const).map((value) => (
-            <button
-              key={value}
-              type="button"
-              onClick={() => setTab(value)}
-              className={cn(
-                "relative pb-3 text-sm capitalize text-muted-foreground transition-colors hover:text-foreground",
-                tab === value && "font-medium text-foreground",
-              )}
-            >
-              {value}
-              {tab === value ? (
-                <span className="absolute inset-x-0 bottom-0 h-0.5 rounded-full bg-primary" />
-              ) : null}
-            </button>
-          ))}
-        </div>
 
         {error || modelError ? (
           <div className="mt-5 rounded-2xl border border-destructive/25 bg-destructive/10 px-4 py-3 text-sm text-destructive">
             {error || modelError}
+          </div>
+        ) : null}
+
+        {hasTasks ? (
+          <div className="mt-7 grid gap-4 sm:grid-cols-3">
+            <MetricCard
+              tone="cyan"
+              icon={<CalendarDays className="size-[22px]" />}
+              label="Total tasks"
+              value={metrics.total}
+              detail="Across all schedules"
+            />
+            <MetricCard
+              tone="emerald"
+              icon={<CircleCheck className="size-[22px]" />}
+              label="Active"
+              value={metrics.active}
+              detail="Running on schedule"
+            />
+            <MetricCard
+              tone="sky"
+              icon={<Clock className="size-[22px]" />}
+              label="Due today"
+              value={metrics.dueToday}
+              detail="Next run within 24h"
+            />
+          </div>
+        ) : null}
+
+        {hasTasks ? (
+          <div className="mt-7 flex gap-6 border-b border-border/60">
+            {([
+              ["today", todayCount],
+              ["all", tasks.length],
+            ] as const).map(([value, count]) => (
+              <button
+                key={value}
+                type="button"
+                onClick={() => setTab(value)}
+                className={cn(
+                  "relative flex items-center gap-2 pb-3 text-sm capitalize text-muted-foreground transition-colors hover:text-foreground",
+                  tab === value && "font-medium text-foreground",
+                )}
+              >
+                {value}
+                <span className="rounded-full border border-border bg-muted/60 px-1.5 py-px text-[11px] font-semibold tabular-nums text-muted-foreground">
+                  {count}
+                </span>
+                {tab === value ? (
+                  <span
+                    className="absolute inset-x-0 bottom-0 h-0.5 rounded-full"
+                    style={{ background: "var(--page-accent-grad)" }}
+                  />
+                ) : null}
+              </button>
+            ))}
           </div>
         ) : null}
 
@@ -276,7 +345,7 @@ export default function TasksPage() {
           </div>
         ) : (
           <div className="flex min-h-[55vh] flex-col items-center justify-center text-center">
-            <span className="grid size-14 place-items-center rounded-2xl bg-sky-500/10 text-sky-600">
+            <span className="user-page-icon size-14 rounded-2xl">
               <Clock className="size-7" />
             </span>
             <h2 className="mt-4 text-base font-semibold">
@@ -294,14 +363,14 @@ export default function TasksPage() {
                 View all tasks
               </Button>
             ) : (
-              <Button
-                variant="outline"
-                className="mt-4 rounded-xl"
+              <button
+                type="button"
                 disabled={!modelsLoaded}
                 onClick={openCreate}
+                className="user-accent-btn mt-4 inline-flex h-11 items-center gap-2 rounded-xl px-4 text-sm font-semibold disabled:cursor-not-allowed disabled:opacity-50"
               >
                 <Plus className="size-4" /> New task
-              </Button>
+              </button>
             )}
           </div>
         )}
@@ -330,6 +399,31 @@ export default function TasksPage() {
   );
 }
 
+function MetricCard({
+  tone,
+  icon,
+  label,
+  value,
+  detail,
+}: {
+  tone: "cyan" | "emerald" | "sky";
+  icon: React.ReactNode;
+  label: string;
+  value: number;
+  detail: string;
+}) {
+  return (
+    <div className="user-metric-card" data-tone={tone}>
+      <div className="user-metric-head">
+        <span className="user-metric-glyph">{icon}</span>
+        <span className="user-metric-key">{label}</span>
+      </div>
+      <div className="user-metric-val">{value}</div>
+      <div className="user-metric-detail">{detail}</div>
+    </div>
+  );
+}
+
 function TaskCard({
   task,
   onEdit,
@@ -351,20 +445,18 @@ function TaskCard({
       onKeyDown={(event) =>
         event.target === event.currentTarget && event.key === "Enter" && onEdit()
       }
-      className="group relative min-h-44 cursor-pointer rounded-2xl border border-border bg-card p-5 shadow-card transition duration-200 hover:-translate-y-0.5 hover:shadow-lg focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/40"
+      className="user-card user-card--hover group relative min-h-44 cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/40"
     >
       <div className="flex items-start gap-3">
-        <span className="mt-0.5 grid size-9 shrink-0 place-items-center rounded-2xl bg-sky-500/10 text-sky-600">
+        <span className="user-card-glyph mt-0.5">
           <Sparkles className="size-[18px]" />
         </span>
-        <div className="min-w-0 flex-1">
+        <div className="min-w-0 flex-1 pr-7">
           <div className="flex items-center gap-2">
-            <h2 className="truncate text-sm font-semibold">{task.name}</h2>
+            <h2 className="user-card-name truncate">{task.name}</h2>
             <StatusBadge status={task.status} />
           </div>
-          <p className="mt-1 line-clamp-2 min-h-10 text-sm leading-5 text-muted-foreground">
-            {task.prompt}
-          </p>
+          <p className="user-card-desc mt-1 line-clamp-2 min-h-10">{task.prompt}</p>
         </div>
         <DropdownMenu>
           <DropdownMenuTrigger asChild>
@@ -372,7 +464,7 @@ function TaskCard({
               type="button"
               aria-label={`Actions for ${task.name}`}
               onClick={(event) => event.stopPropagation()}
-              className="grid size-8 shrink-0 place-items-center rounded-xl text-muted-foreground hover:bg-muted hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/40"
+              className="absolute right-3.5 top-3.5 grid size-8 shrink-0 place-items-center rounded-xl text-muted-foreground hover:bg-muted hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/40"
             >
               <MoreHorizontal className="size-5" />
             </button>
@@ -406,7 +498,7 @@ function TaskCard({
       </div>
       <div className="mt-4 border-t border-border/45 pt-3 text-xs text-muted-foreground">
         <div className="flex items-center gap-2 text-foreground/80">
-          <CalendarClock className="size-4 text-sky-600" />
+          <CalendarClock className="size-4" style={{ color: "var(--page-accent)" }} />
           <span className="truncate">{scheduleLabel(task)}</span>
         </div>
         <div className="mt-1.5 pl-6 tabular-nums">Next: {formatDateTime(task.next_run_at)}</div>
@@ -416,18 +508,24 @@ function TaskCard({
 }
 
 function StatusBadge({ status }: { status: ScheduledTask["status"] }) {
+  if (status === "active") {
+    return (
+      <span className="user-tag user-tag--ok shrink-0 text-[10px]">
+        <span className="user-tag-dot" />
+        active
+      </span>
+    );
+  }
+  if (status === "paused") {
+    return (
+      <span className="user-tag user-tag--warn shrink-0 text-[10px]">
+        <span className="user-tag-dot" />
+        paused
+      </span>
+    );
+  }
   return (
-    <span
-      className={cn(
-        "shrink-0 rounded-full border px-2 py-0.5 text-[10px] font-medium capitalize",
-        status === "active" && "border-emerald-500/20 bg-emerald-500/10 text-emerald-700",
-        status === "paused" && "border-amber-500/20 bg-amber-500/10 text-amber-700",
-        (status === "completed" || status === "expired") &&
-          "border-border bg-muted/60 text-muted-foreground",
-      )}
-    >
-      {status}
-    </span>
+    <span className="user-tag user-tag--muted shrink-0 capitalize text-[10px]">{status}</span>
   );
 }
 

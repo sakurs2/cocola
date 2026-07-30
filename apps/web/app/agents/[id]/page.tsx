@@ -226,7 +226,7 @@ export default function AgentPage() {
 
   if (loading) {
     return (
-      <main className="grid h-full min-w-0 flex-1 place-items-center bg-background text-muted-foreground">
+      <main className="user-canvas user-page user-theme-indigo grid h-full min-w-0 flex-1 place-items-center text-muted-foreground">
         <Loader2 className="size-5 animate-spin" />
       </main>
     );
@@ -234,15 +234,12 @@ export default function AgentPage() {
 
   if (!agent) {
     return (
-      <main className="h-full min-w-0 flex-1 overflow-y-auto bg-background">
-        <div className="mx-auto max-w-3xl px-8 py-10">
-          <Link
-            href="/agents"
-            className="inline-flex items-center gap-1.5 text-sm text-muted-foreground hover:text-foreground"
-          >
-            <ArrowLeft className="size-4" /> Agents
+      <main className="user-canvas user-page user-theme-indigo h-full min-w-0 flex-1 overflow-y-auto">
+        <div className="mx-auto max-w-3xl px-4 py-8 sm:px-8 sm:py-10">
+          <Link href="/agents" className="user-back-btn inline-grid">
+            <ArrowLeft className="size-4" />
           </Link>
-          <div className="mt-8 rounded-2xl border border-red-500/20 bg-red-500/10 p-5 text-sm text-red-700">
+          <div className="mt-8 rounded-2xl border border-destructive/25 bg-destructive/10 p-5 text-sm text-destructive">
             {error || "Agent not found"}
           </div>
         </div>
@@ -251,17 +248,14 @@ export default function AgentPage() {
   }
 
   return (
-    <main className="h-full min-w-0 flex-1 overflow-y-auto bg-background">
-      <div className="mx-auto max-w-3xl px-8 py-10">
+    <main className="user-canvas user-page user-theme-indigo h-full min-w-0 flex-1 overflow-y-auto px-4 py-5 sm:px-7 sm:py-7 lg:px-10">
+      <div className="mx-auto max-w-3xl">
         <header className="flex flex-wrap items-start justify-between gap-4">
-          <div>
-            <Link
-              href="/agents"
-              className="inline-flex items-center gap-1.5 text-sm text-muted-foreground hover:text-foreground"
-            >
-              <ArrowLeft className="size-4" /> Agents
+          <div className="flex items-start gap-3.5">
+            <Link href="/agents" aria-label="Back to Agents" className="user-back-btn mt-0.5">
+              <ArrowLeft className="size-4" />
             </Link>
-            <div className="mt-4 flex items-center gap-3">
+            <div className="flex items-center gap-3">
               <AgentAvatar
                 avatarKey={avatarKey}
                 avatarColor={avatarColor}
@@ -269,6 +263,7 @@ export default function AgentPage() {
                 iconClassName="size-5"
               />
               <div className="min-w-0">
+                <div className="user-eyebrow">Assistants</div>
                 <h1 className="truncate text-2xl font-bold tracking-tight">{agent.name}</h1>
                 <p className="mt-0.5 text-sm text-muted-foreground">
                   Changes apply to new conversations.
@@ -282,7 +277,7 @@ export default function AgentPage() {
               onClick={testAgent}
               disabled={dirty}
               title={dirty ? "Save changes before testing this Agent." : "Open a new chat"}
-              className="inline-flex h-9 items-center gap-2 rounded-xl border border-border px-3 text-sm font-medium hover:bg-muted disabled:cursor-not-allowed disabled:opacity-50"
+              className="inline-flex h-11 items-center gap-2 rounded-xl border border-border bg-white px-3.5 text-sm font-medium hover:bg-muted disabled:cursor-not-allowed disabled:opacity-50"
             >
               <ExternalLink className="size-4" />
               Test Agent
@@ -298,7 +293,7 @@ export default function AgentPage() {
                 instructionsTooLarge ||
                 models.length === 0
               }
-              className="inline-flex h-9 items-center gap-2 rounded-xl bg-blue-600 px-4 text-sm font-semibold text-white hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-50"
+              className="user-accent-btn inline-flex h-11 items-center gap-2 rounded-xl px-4 text-sm font-semibold disabled:cursor-not-allowed disabled:opacity-50"
             >
               {saving ? <Loader2 className="size-4 animate-spin" /> : <Save className="size-4" />}
               {saving ? "Saving…" : "Save"}
@@ -307,13 +302,13 @@ export default function AgentPage() {
         </header>
 
         {error ? (
-          <div className="mt-6 rounded-xl border border-red-500/20 bg-red-500/10 px-3.5 py-2.5 text-sm text-red-700">
+          <div className="mt-6 rounded-2xl border border-destructive/25 bg-destructive/10 px-4 py-3 text-sm text-destructive">
             {error}
           </div>
         ) : null}
 
         <div className="mt-8 space-y-5">
-          <section className="rounded-2xl border border-border bg-card p-5 shadow-sm">
+          <section className="user-panel">
             <div>
               <h2 className="text-sm font-semibold">Identity</h2>
               <p className="mt-1 text-sm text-muted-foreground">
@@ -350,10 +345,12 @@ export default function AgentPage() {
                       aria-label={`Use ${key} icon`}
                       aria-pressed={avatarKey === key}
                       onClick={() => setAvatarKey(key)}
-                      className={cn(
-                        "rounded-xl p-1.5 ring-2 ring-transparent transition hover:bg-muted",
-                        avatarKey === key && "ring-blue-500/40",
-                      )}
+                      style={
+                        avatarKey === key
+                          ? { boxShadow: "0 0 0 2px var(--page-accent-focus)" }
+                          : undefined
+                      }
+                      className="rounded-xl p-1.5 transition hover:bg-muted"
                     >
                       <AgentAvatar
                         avatarKey={key}
@@ -394,7 +391,7 @@ export default function AgentPage() {
             </div>
           </section>
 
-          <section className="rounded-2xl border border-border bg-card p-5 shadow-sm">
+          <section className="user-panel">
             <h2 className="text-sm font-semibold">Instructions</h2>
             <p className="mt-1 text-sm leading-6 text-muted-foreground">
               Define the Agent&apos;s role and working rules. Platform and admin policies still take
@@ -404,19 +401,19 @@ export default function AgentPage() {
               value={instructions}
               onChange={(event) => setInstructions(event.target.value)}
               placeholder="You are a data analyst. Be concise, verify assumptions, and explain calculations..."
-              className="mt-4 min-h-64 w-full resize-y rounded-xl border border-input bg-background px-3 py-2.5 font-mono text-sm leading-6 outline-none placeholder:text-muted-foreground focus:border-foreground/30 focus:ring-2 focus:ring-blue-500/20"
+              className="user-field-input mt-4 min-h-64 w-full resize-y rounded-xl border border-input bg-background px-3 py-2.5 font-mono text-sm leading-6 outline-none placeholder:text-muted-foreground"
             />
             <div
               className={cn(
                 "mt-2 text-right text-xs text-muted-foreground",
-                instructionsTooLarge && "text-red-600",
+                instructionsTooLarge && "text-destructive",
               )}
             >
               {instructionsBytes.toLocaleString()} / {MAX_INSTRUCTIONS_BYTES.toLocaleString()} bytes
             </div>
           </section>
 
-          <section className="rounded-2xl border border-border bg-card p-5 shadow-sm">
+          <section className="user-panel">
             <h2 className="text-sm font-semibold">Model</h2>
             <p className="mt-1 text-sm leading-6 text-muted-foreground">
               Conversations using this Agent always use this model.
@@ -445,7 +442,7 @@ export default function AgentPage() {
 
           <FeishuConnectorCard agentId={agent.id} />
 
-          <section className="rounded-2xl border border-red-500/20 bg-red-500/[0.025] p-5">
+          <section className="user-panel border border-destructive/20 !bg-destructive/[0.025]">
             <div className="flex flex-wrap items-center justify-between gap-4">
               <div>
                 <h2 className="text-sm font-semibold">Archive Agent</h2>
@@ -459,7 +456,7 @@ export default function AgentPage() {
                   setError("");
                   setArchiveOpen(true);
                 }}
-                className="inline-flex h-9 items-center gap-2 rounded-xl border border-red-500/25 px-3 text-sm font-medium text-red-600 hover:bg-red-500/10"
+                className="inline-flex h-9 items-center gap-2 rounded-xl border border-destructive/25 px-3 text-sm font-medium text-destructive hover:bg-destructive/10"
               >
                 <Archive className="size-4" />
                 Archive

@@ -87,11 +87,11 @@ export function TaskDrawer({
           className={cn(
             "fixed inset-y-2 right-2 z-50 flex w-[min(32rem,calc(100vw-1rem))] flex-col overflow-hidden rounded-2xl border border-border bg-background text-foreground shadow-2xl outline-none",
             "data-[state=closed]:animate-out data-[state=open]:animate-in data-[state=closed]:slide-out-to-right data-[state=open]:slide-in-from-right",
-            admin ? "cocola-admin-ui admin-drawer" : "cocola-user-ui",
+            admin ? "cocola-admin-ui admin-drawer" : "cocola-user-ui user-theme-cyan",
           )}
         >
           <header className="flex min-h-16 items-center gap-3 border-b border-border/70 px-5">
-            <span className="grid size-9 place-items-center rounded-2xl bg-sky-500/10 text-sky-600">
+            <span className="user-card-glyph">
               <CalendarClock className="size-[18px]" />
             </span>
             <div className="min-w-0 flex-1">
@@ -282,7 +282,7 @@ export function TaskDrawer({
               type="button"
               disabled={saving}
               onClick={() => void submit()}
-              className="h-10 rounded-xl bg-primary px-4 text-sm font-medium text-primary-foreground shadow-sm transition hover:bg-primary/90 disabled:opacity-60"
+              className="user-accent-btn h-10 rounded-xl px-4 text-sm font-semibold disabled:opacity-60"
             >
               {saving
                 ? "Saving…"
@@ -476,7 +476,7 @@ export function TaskConfirmDialog({
         <Dialog.Content
           className={cn(
             "fixed left-1/2 top-1/2 z-[60] w-[min(28rem,calc(100vw-2rem))] -translate-x-1/2 -translate-y-1/2 rounded-2xl border border-border bg-background p-5 text-foreground shadow-2xl outline-none",
-            admin ? "cocola-admin-ui admin-drawer" : "cocola-user-ui",
+            admin ? "cocola-admin-ui admin-drawer" : "cocola-user-ui user-theme-cyan",
             className,
           )}
         >

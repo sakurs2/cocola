@@ -1,7 +1,7 @@
 "use client";
 
 import * as Dialog from "@radix-ui/react-dialog";
-import { ArrowRight, Bot, Loader2, Plus, X } from "lucide-react";
+import { ArrowRight, Blocks, Bot, CircleCheck, Loader2, Plus, X } from "lucide-react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useEffect, useMemo, useState, type FormEvent } from "react";
@@ -116,6 +116,13 @@ export default function AgentsPage() {
   );
   const modelsByID = useMemo(() => new Map(models.map((model) => [model.id, model])), [models]);
 
+  const metrics = useMemo(() => {
+    const total = agents.length;
+    const active = agents.filter((agent) => agent.status === "active").length;
+    const skillsWired = agents.reduce((sum, agent) => sum + (agent.skill_ids?.length ?? 0), 0);
+    return { total, active, skillsWired };
+  }, [agents]);
+
   const createAgent = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
     if (!name.trim() || !runtimeID || !selectedModel) return;
@@ -149,15 +156,23 @@ export default function AgentsPage() {
     }
   };
 
+  const hasAgents = !loading && agents.length > 0;
+
   return (
-    <main className="h-full min-w-0 flex-1 overflow-y-auto bg-background">
-      <div className="mx-auto max-w-7xl px-6 py-10 sm:px-8">
+    <main className="user-canvas user-page user-theme-indigo h-full min-w-0 flex-1 overflow-y-auto px-4 py-5 sm:px-7 sm:py-7 lg:px-10">
+      <div className="mx-auto max-w-7xl">
         <header className="flex flex-wrap items-start justify-between gap-4">
-          <div className="space-y-1">
-            <h1 className="text-2xl font-bold tracking-tight">Agents</h1>
-            <p className="text-sm text-muted-foreground">
-              Create focused assistants with their own instructions, model, and Feishu bot.
-            </p>
+          <div className="flex items-center gap-3.5">
+            <span className="user-page-icon">
+              <Bot className="size-6" />
+            </span>
+            <div className="space-y-1">
+              <div className="user-eyebrow">Assistants</div>
+              <h1 className="text-2xl font-bold tracking-tight">Agents</h1>
+              <p className="text-sm text-muted-foreground">
+                Create focused assistants with their own instructions, model, and Feishu bot.
+              </p>
+            </div>
           </div>
           <button
             type="button"
@@ -166,7 +181,7 @@ export default function AgentsPage() {
               setCreateOpen(true);
             }}
             disabled={catalogLoading || !runtimeID || models.length === 0}
-            className="inline-flex h-9 items-center gap-2 rounded-xl px-3.5 text-sm font-semibold text-white shadow-xs transition-opacity brand-gradient hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-50"
+            className="user-accent-btn inline-flex h-11 items-center gap-2 rounded-xl px-4 text-sm font-semibold disabled:cursor-not-allowed disabled:opacity-50"
           >
             <Plus className="size-4" />
             New Agent
@@ -174,8 +189,34 @@ export default function AgentsPage() {
         </header>
 
         {error && !createOpen ? (
-          <div className="mt-6 rounded-xl border border-red-500/20 bg-red-500/10 px-3.5 py-2.5 text-sm text-red-600">
+          <div className="mt-5 rounded-2xl border border-destructive/25 bg-destructive/10 px-4 py-3 text-sm text-destructive">
             {error}
+          </div>
+        ) : null}
+
+        {hasAgents ? (
+          <div className="mt-7 grid gap-4 sm:grid-cols-3">
+            <MetricCard
+              tone="indigo"
+              icon={<Bot className="size-[22px]" />}
+              label="Total Agents"
+              value={metrics.total}
+              detail="Configured assistants"
+            />
+            <MetricCard
+              tone="emerald"
+              icon={<CircleCheck className="size-[22px]" />}
+              label="Active"
+              value={metrics.active}
+              detail="Ready to run"
+            />
+            <MetricCard
+              tone="amber"
+              icon={<Blocks className="size-[22px]" />}
+              label="Skills wired"
+              value={metrics.skillsWired}
+              detail="Across all Agents"
+            />
           </div>
         ) : null}
 
@@ -184,24 +225,34 @@ export default function AgentsPage() {
             <Loader2 className="size-5 animate-spin" />
           </div>
         ) : agents.length === 0 ? (
-          <section className="mt-8 grid min-h-72 place-items-center rounded-2xl border border-dashed border-border bg-muted/20 px-6 text-center">
-            <div className="max-w-sm">
-              <span className="mx-auto grid size-12 place-items-center rounded-2xl bg-blue-500/10 text-blue-600">
-                <Bot className="size-6" />
-              </span>
-              <h2 className="mt-4 text-base font-semibold">No Agents yet</h2>
-              <p className="mt-1 text-sm leading-6 text-muted-foreground">
-                Start with one clear role. You can still use standard chat without selecting an
-                Agent.
-              </p>
-            </div>
-          </section>
+          <div className="mt-8 flex min-h-[55vh] flex-col items-center justify-center text-center">
+            <span className="user-page-icon size-14 rounded-2xl">
+              <Bot className="size-7" />
+            </span>
+            <h2 className="mt-4 text-base font-semibold">No Agents yet</h2>
+            <p className="mt-1 max-w-sm text-sm leading-6 text-muted-foreground">
+              Start with one clear role. You can still use standard chat without selecting an Agent.
+            </p>
+            <button
+              type="button"
+              onClick={() => {
+                setError("");
+                setCreateOpen(true);
+              }}
+              disabled={catalogLoading || !runtimeID || models.length === 0}
+              className="user-accent-btn mt-4 inline-flex h-11 items-center gap-2 rounded-xl px-4 text-sm font-semibold disabled:cursor-not-allowed disabled:opacity-50"
+            >
+              <Plus className="size-4" /> New Agent
+            </button>
+          </div>
         ) : (
-          <section
-            aria-label="Your Agents"
-            className="mt-8 rounded-[1.75rem] border border-border/60 bg-muted/35 p-2.5 shadow-[inset_0_1px_0_rgba(255,255,255,0.9),0_18px_46px_-40px_rgba(15,23,42,0.45)] sm:p-3"
-          >
-            <div className="grid gap-2.5 sm:grid-cols-2 lg:grid-cols-3">
+          <>
+            <div className="mt-8 flex items-center gap-2.5">
+              <span className="user-section-title">Your Agents</span>
+              <span className="user-count-badge">{agents.length}</span>
+            </div>
+
+            <div className="mt-4 grid gap-4 md:grid-cols-2 xl:grid-cols-3">
               {agents.map((agent) => {
                 const model = modelsByID.get(agent.model_route_id);
                 const selectedSkills = (agent.skill_ids ?? [])
@@ -211,34 +262,31 @@ export default function AgentsPage() {
                   <Link
                     key={agent.id}
                     href={`/agents/${encodeURIComponent(agent.id)}`}
-                    className="group flex min-h-[15.75rem] min-w-0 flex-col rounded-[1.35rem] border border-transparent bg-card p-5 text-left shadow-[0_1px_0_rgba(15,23,42,0.025),0_12px_32px_-30px_rgba(15,23,42,0.32)] transition-[background-color,border-color,box-shadow] duration-200 hover:border-border hover:bg-muted/75 hover:shadow-[inset_0_1px_0_rgba(255,255,255,0.75),0_1px_2px_rgba(15,23,42,0.04),0_16px_36px_-32px_rgba(15,23,42,0.38)] focus-visible:border-foreground/30 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/25 focus-visible:ring-offset-2"
+                    className="user-card user-card--hover group relative min-h-[15.5rem] cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/40"
                   >
-                    <span className="flex min-w-0 items-center gap-3">
+                    <span className="absolute right-4 top-4 grid size-9 place-items-center rounded-xl bg-foreground text-background opacity-0 transition-opacity duration-200 group-hover:opacity-100 group-focus-visible:opacity-100">
+                      <ArrowRight className="size-[18px]" />
+                    </span>
+                    <div className="flex items-start gap-3">
                       <AgentAvatar
                         avatarKey={agent.avatar_key}
                         avatarColor={agent.avatar_color}
-                        className="size-12 rounded-full shadow-[0_2px_5px_-4px_rgba(15,23,42,0.45)]"
-                        iconClassName="size-[1.35rem]"
+                        className="size-11 rounded-xl"
+                        iconClassName="size-[1.2rem]"
                       />
-                      <span className="min-w-0 flex-1 truncate text-[17px] font-semibold tracking-[-0.02em]">
-                        {agent.name}
-                      </span>
-                      <span className="grid size-10 shrink-0 place-items-center rounded-xl bg-foreground text-background opacity-0 transition-[opacity] duration-200 group-hover:opacity-100 group-focus-visible:opacity-100">
-                        <ArrowRight className="size-[18px]" />
-                      </span>
-                    </span>
+                      <div className="min-w-0 flex-1 pr-8">
+                        <h2 className="user-card-name truncate">{agent.name}</h2>
+                        <p className="user-card-desc mt-1 line-clamp-2 min-h-9">
+                          {agent.description || "No description"}
+                        </p>
+                      </div>
+                    </div>
 
-                    <span className="mt-7 line-clamp-2 min-h-12 text-sm leading-6 text-muted-foreground">
-                      {agent.description || "No description"}
-                    </span>
-
-                    <span className="mt-4 flex min-h-7 flex-wrap items-start gap-1.5">
+                    <div className="mt-4 flex min-h-7 flex-wrap items-start gap-1.5">
                       {(agent.skill_ids ?? []).length === 0 ? (
-                        <span className="rounded-md bg-muted px-2 py-1 text-[11px] font-medium text-muted-foreground">
-                          Default skills
-                        </span>
+                        <span className="user-tag user-tag--muted text-[10px]">Default skills</span>
                       ) : selectedSkills.length === 0 ? (
-                        <span className="rounded-md bg-amber-500/10 px-2 py-1 text-[11px] font-medium text-amber-700">
+                        <span className="user-tag user-tag--warn text-[10px]">
                           Custom skills unavailable
                         </span>
                       ) : (
@@ -246,36 +294,38 @@ export default function AgentsPage() {
                           {selectedSkills.slice(0, 2).map((skill) => (
                             <span
                               key={skill.id}
-                              className="max-w-28 truncate rounded-md bg-muted px-2 py-1 text-[11px] font-medium text-muted-foreground"
+                              className="user-tag user-tag--accent max-w-28 truncate text-[10px]"
                             >
                               {skill.name}
                             </span>
                           ))}
                           {selectedSkills.length > 2 ? (
-                            <span className="rounded-md bg-muted px-2 py-1 text-[11px] font-medium text-muted-foreground">
+                            <span className="user-tag user-tag--muted text-[10px]">
                               +{selectedSkills.length - 2}
                             </span>
                           ) : null}
                         </>
                       )}
-                    </span>
+                    </div>
 
-                    <span className="mt-auto inline-flex max-w-full items-center self-start rounded-lg border border-transparent bg-muted/80 px-2.5 py-1.5 text-xs font-medium text-muted-foreground transition-[background-color,border-color,color] duration-200 group-hover:border-border group-hover:bg-background/55 group-hover:text-foreground">
-                      <ModelIcon icon={model?.icon} className="mr-1.5 size-4" bare />
-                      <span className="truncate">{agent.model_alias}</span>
-                    </span>
+                    <div className="mt-auto border-t border-border/45 pt-3">
+                      <span className="inline-flex max-w-full items-center rounded-lg bg-muted/70 px-2.5 py-1.5 text-xs font-medium text-muted-foreground">
+                        <ModelIcon icon={model?.icon} className="mr-1.5 size-4" bare />
+                        <span className="truncate">{agent.model_alias}</span>
+                      </span>
+                    </div>
                   </Link>
                 );
               })}
             </div>
-          </section>
+          </>
         )}
       </div>
 
       <Dialog.Root open={createOpen} onOpenChange={(next) => !creating && setCreateOpen(next)}>
         <Dialog.Portal>
           <Dialog.Overlay className="fixed inset-0 z-[70] bg-slate-950/30 backdrop-blur-[2px]" />
-          <Dialog.Content className="cocola-user-ui fixed left-1/2 top-1/2 z-[71] w-[calc(100%-2rem)] max-w-lg -translate-x-1/2 -translate-y-1/2 rounded-2xl border border-border bg-background p-5 text-foreground shadow-2xl outline-none">
+          <Dialog.Content className="cocola-user-ui user-theme-indigo fixed left-1/2 top-1/2 z-[71] w-[calc(100%-2rem)] max-w-lg -translate-x-1/2 -translate-y-1/2 rounded-2xl border border-border bg-background p-5 text-foreground shadow-2xl outline-none">
             <form onSubmit={(event) => void createAgent(event)}>
               <div className="flex items-start gap-3">
                 <AgentAvatar
@@ -284,6 +334,7 @@ export default function AgentsPage() {
                   className="size-10"
                 />
                 <div className="min-w-0 flex-1">
+                  <div className="user-eyebrow">New</div>
                   <Dialog.Title className="text-base font-semibold">Create an Agent</Dialog.Title>
                   <Dialog.Description className="mt-1.5 text-sm leading-6 text-muted-foreground">
                     Give it a focused role. Instructions and Feishu can be configured next.
@@ -355,7 +406,7 @@ export default function AgentsPage() {
                 <button
                   type="submit"
                   disabled={creating || !name.trim() || !selectedModel}
-                  className="inline-flex h-9 items-center gap-2 rounded-xl bg-blue-600 px-4 text-sm font-medium text-white hover:bg-blue-700 disabled:opacity-50"
+                  className="user-accent-btn inline-flex h-9 items-center gap-2 rounded-xl px-4 text-sm font-semibold disabled:cursor-not-allowed disabled:opacity-50"
                 >
                   {creating ? <Loader2 className="size-4 animate-spin" /> : null}
                   {creating ? "Creating…" : "Create Agent"}
@@ -366,5 +417,30 @@ export default function AgentsPage() {
         </Dialog.Portal>
       </Dialog.Root>
     </main>
+  );
+}
+
+function MetricCard({
+  tone,
+  icon,
+  label,
+  value,
+  detail,
+}: {
+  tone: "indigo" | "emerald" | "amber";
+  icon: React.ReactNode;
+  label: string;
+  value: number;
+  detail: string;
+}) {
+  return (
+    <div className="user-metric-card" data-tone={tone}>
+      <div className="user-metric-head">
+        <span className="user-metric-glyph">{icon}</span>
+        <span className="user-metric-key">{label}</span>
+      </div>
+      <div className="user-metric-val">{value}</div>
+      <div className="user-metric-detail">{detail}</div>
+    </div>
   );
 }
