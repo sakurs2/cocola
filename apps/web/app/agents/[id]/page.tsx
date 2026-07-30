@@ -221,7 +221,7 @@ export default function AgentPage() {
 
   if (loading) {
     return (
-      <main className="user-canvas user-page user-theme-indigo grid h-full min-w-0 flex-1 place-items-center text-muted-foreground">
+      <main className="user-canvas user-page user-theme-cyan grid h-full min-w-0 flex-1 place-items-center text-muted-foreground">
         <Loader2 className="size-5 animate-spin" />
       </main>
     );
@@ -229,7 +229,7 @@ export default function AgentPage() {
 
   if (!agent) {
     return (
-      <main className="user-canvas user-page user-theme-indigo h-full min-w-0 flex-1 overflow-y-auto">
+      <main className="user-canvas user-page user-theme-cyan h-full min-w-0 flex-1 overflow-y-auto">
         <div className="mx-auto max-w-3xl px-4 py-8 sm:px-8 sm:py-10">
           <Link href="/agents" className="user-back-btn inline-grid">
             <ArrowLeft className="size-4" />
@@ -243,7 +243,7 @@ export default function AgentPage() {
   }
 
   return (
-    <main className="user-canvas user-page user-theme-indigo h-full min-w-0 flex-1 overflow-y-auto px-4 py-5 sm:px-7 sm:py-7 lg:px-10">
+    <main className="user-canvas user-page user-theme-cyan h-full min-w-0 flex-1 overflow-y-auto px-4 py-5 sm:px-7 sm:py-7 lg:px-10">
       <div className="mx-auto max-w-3xl">
         <header className="flex flex-wrap items-start justify-between gap-4">
           <div className="flex items-start gap-3.5">

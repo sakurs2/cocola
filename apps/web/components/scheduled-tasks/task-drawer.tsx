@@ -87,7 +87,7 @@ export function TaskDrawer({
           className={cn(
             "fixed inset-y-2 right-2 z-50 flex w-[min(32rem,calc(100vw-1rem))] flex-col overflow-hidden rounded-2xl border border-border bg-background text-foreground shadow-2xl outline-none",
             "data-[state=closed]:animate-out data-[state=open]:animate-in data-[state=closed]:slide-out-to-right data-[state=open]:slide-in-from-right",
-            admin ? "cocola-admin-ui admin-drawer" : "cocola-user-ui user-theme-cyan",
+            admin ? "cocola-admin-ui admin-drawer" : "cocola-user-ui user-theme-blue",
           )}
         >
           <header className="flex min-h-16 items-center gap-3 border-b border-border/70 px-5">
@@ -476,7 +476,7 @@ export function TaskConfirmDialog({
         <Dialog.Content
           className={cn(
             "fixed left-1/2 top-1/2 z-[60] w-[min(28rem,calc(100vw-2rem))] -translate-x-1/2 -translate-y-1/2 rounded-2xl border border-border bg-background p-5 text-foreground shadow-2xl outline-none",
-            admin ? "cocola-admin-ui admin-drawer" : "cocola-user-ui user-theme-cyan",
+            admin ? "cocola-admin-ui admin-drawer" : "cocola-user-ui user-theme-blue",
             className,
           )}
         >

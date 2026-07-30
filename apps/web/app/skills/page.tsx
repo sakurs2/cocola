@@ -11,7 +11,7 @@ import {
   Search,
   Trash2,
   Upload,
-  Wand2,
+  Sparkles,
   Zap,
   Users,
 } from "lucide-react";
@@ -223,7 +223,7 @@ function SkillsWorkspace() {
         <header className="flex flex-wrap items-center justify-between gap-4">
           <div className="flex items-center gap-3.5">
             <span className="user-page-icon">
-              <Wand2 className="size-6" />
+              <Sparkles className="size-6" />
             </span>
             <div className="space-y-1">
               <div className="user-eyebrow">Extensions</div>
@@ -269,7 +269,7 @@ function SkillsWorkspace() {
           <div className="user-metric-card" data-tone="violet">
             <div className="user-metric-head">
               <span className="user-metric-glyph">
-                <Wand2 className="size-[22px]" />
+                <Sparkles className="size-[22px]" />
               </span>
               <span className="user-metric-key">Total Skills</span>
             </div>
