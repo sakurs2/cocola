@@ -91,136 +91,142 @@ export default function ConnectorsPage() {
   };
 
   return (
-    <div className="h-full overflow-y-auto px-5 py-8 sm:px-8">
-      <main className="mx-auto w-full max-w-4xl pb-16">
-        <div className="flex items-center gap-4">
-          <div className="grid size-11 shrink-0 place-items-center rounded-2xl bg-emerald-500/10 text-emerald-600">
-            <ShieldCheck className="size-5" />
+    <main className="user-canvas user-page user-theme-emerald h-full min-w-0 flex-1 overflow-y-auto">
+      <div className="mx-auto w-full max-w-5xl space-y-8 px-8 py-10 pb-16">
+        <header className="flex items-center gap-4">
+          <span className="user-page-icon">
+            <ShieldCheck className="size-6" />
+          </span>
+          <div>
+            <div className="user-eyebrow">Integrations</div>
+            <h1 className="mt-0.5 text-2xl font-extrabold tracking-tight">Connectors</h1>
+            <p className="mt-1 text-sm text-muted-foreground">
+              Connect external services to power your Agents.
+            </p>
           </div>
-          <h1 className="text-2xl font-semibold tracking-tight">Connectors</h1>
-        </div>
+        </header>
 
-        <section className="mt-9 grid grid-cols-[repeat(auto-fill,minmax(min(100%,17.5rem),17.5rem))] gap-4">
-          <article className="w-full rounded-3xl border border-border bg-card p-5 shadow-card">
-            <div className="flex items-center gap-3.5">
-              <div className="grid size-12 shrink-0 place-items-center rounded-2xl bg-foreground text-background">
-                <GitHubIcon className="size-6" />
+        <section>
+          <div className="grid grid-cols-[repeat(auto-fill,minmax(min(100%,18.75rem),18.75rem))] gap-4">
+            <article className="user-card user-card--hover group">
+              <div className="flex items-center gap-3.5">
+                <div className="user-connector-logo grid size-12 shrink-0 place-items-center rounded-2xl bg-foreground text-background">
+                  <GitHubIcon className="size-6" />
+                </div>
+                <div className="min-w-0">
+                  <h2 className="user-card-name">GitHub</h2>
+                  <p className="user-card-desc mt-0.5">Repositories and Agent tools</p>
+                </div>
               </div>
-              <div className="min-w-0">
-                <h2 className="text-base font-semibold tracking-tight">GitHub</h2>
-                <p className="mt-0.5 text-xs leading-4 text-muted-foreground">
-                  Repositories and Agent tools
-                </p>
+
+              <div className="mt-4 flex items-center gap-2 text-xs">
+                <span className={`size-2 rounded-full ${displayState.dot}`} />
+                <span className="font-medium text-foreground">{displayState.label}</span>
               </div>
-            </div>
 
-            <div className="mt-4 flex items-center gap-2 text-xs">
-              <span className={`size-2 rounded-full ${displayState.dot}`} />
-              <span className="font-medium text-foreground">{displayState.label}</span>
-            </div>
-
-            <div className="mt-5">
-              {!connection && loadState === "checking" ? (
-                <ConnectorButton disabled icon={<Loader2 className="size-4 animate-spin" />}>
-                  Checking…
-                </ConnectorButton>
-              ) : null}
-              {!connection && loadState === "failed" ? (
-                <ConnectorButton
-                  onClick={() => void load()}
-                  variant="outline"
-                  icon={<RefreshCw className="size-4" />}
-                >
-                  Retry
-                </ConnectorButton>
-              ) : null}
-              {connection?.status === "disabled" ? (
-                <ConnectorButton disabled>Unavailable</ConnectorButton>
-              ) : null}
-              {connection?.status === "not_configured" || connection?.status === "error" ? (
-                <ConnectorButton
-                  onClick={() => void register()}
-                  disabled={busy}
-                  icon={
-                    busy ? (
-                      <Loader2 className="size-4 animate-spin" />
-                    ) : (
-                      <GitHubIcon className="size-4" />
-                    )
-                  }
-                >
-                  Register on GitHub
-                </ConnectorButton>
-              ) : null}
-              {connection?.status === "installation_required" ? (
-                connection.installation_url ? (
-                  <a
-                    href={connection.installation_url}
-                    className="inline-flex h-10 w-full items-center justify-center gap-2 rounded-xl bg-foreground px-4 text-sm font-medium text-background transition-colors hover:bg-foreground/90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
+              <div className="mt-5">
+                {!connection && loadState === "checking" ? (
+                  <ConnectorButton disabled icon={<Loader2 className="size-4 animate-spin" />}>
+                    Checking…
+                  </ConnectorButton>
+                ) : null}
+                {!connection && loadState === "failed" ? (
+                  <ConnectorButton
+                    onClick={() => void load()}
+                    variant="outline"
+                    icon={<RefreshCw className="size-4" />}
                   >
-                    Continue on GitHub <ExternalLink className="size-4" />
-                  </a>
-                ) : (
-                  <ConnectorButton disabled>Installation unavailable</ConnectorButton>
-                )
-              ) : null}
-              {connection?.status === "ready" ? (
-                <ConnectorButton
-                  onClick={() => void disconnect()}
-                  disabled={busy}
-                  variant="outline"
-                  icon={
-                    busy ? (
-                      <Loader2 className="size-4 animate-spin" />
-                    ) : (
-                      <Trash2 className="size-4" />
-                    )
-                  }
-                >
-                  Disconnect{connection.external_login ? ` @${connection.external_login}` : ""}
-                </ConnectorButton>
-              ) : null}
-              {connection?.status === "reauthorization_required" ? (
-                <ConnectorButton
-                  onClick={() => void register()}
-                  disabled={busy}
-                  icon={
-                    busy ? (
-                      <Loader2 className="size-4 animate-spin" />
-                    ) : (
-                      <GitHubIcon className="size-4" />
-                    )
-                  }
-                >
-                  Reconnect
-                </ConnectorButton>
-              ) : null}
-              {connection &&
-              ![
-                "disabled",
-                "not_configured",
-                "error",
-                "installation_required",
-                "ready",
-                "reauthorization_required",
-              ].includes(connection.status) ? (
-                <ConnectorButton
-                  onClick={() => void load()}
-                  disabled={busy}
-                  variant="outline"
-                  icon={<RefreshCw className="size-4" />}
-                >
-                  Refresh
-                </ConnectorButton>
-              ) : null}
-            </div>
-          </article>
+                    Retry
+                  </ConnectorButton>
+                ) : null}
+                {connection?.status === "disabled" ? (
+                  <ConnectorButton disabled>Unavailable</ConnectorButton>
+                ) : null}
+                {connection?.status === "not_configured" || connection?.status === "error" ? (
+                  <ConnectorButton
+                    onClick={() => void register()}
+                    disabled={busy}
+                    icon={
+                      busy ? (
+                        <Loader2 className="size-4 animate-spin" />
+                      ) : (
+                        <GitHubIcon className="size-4" />
+                      )
+                    }
+                  >
+                    Register on GitHub
+                  </ConnectorButton>
+                ) : null}
+                {connection?.status === "installation_required" ? (
+                  connection.installation_url ? (
+                    <a
+                      href={connection.installation_url}
+                      className="user-connector-btn inline-flex h-10 w-full items-center justify-center gap-2 rounded-xl bg-foreground px-4 text-sm font-medium text-background hover:bg-foreground/90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
+                    >
+                      Continue on GitHub <ExternalLink className="size-4" />
+                    </a>
+                  ) : (
+                    <ConnectorButton disabled>Installation unavailable</ConnectorButton>
+                  )
+                ) : null}
+                {connection?.status === "ready" ? (
+                  <ConnectorButton
+                    onClick={() => void disconnect()}
+                    disabled={busy}
+                    variant="outline"
+                    icon={
+                      busy ? (
+                        <Loader2 className="size-4 animate-spin" />
+                      ) : (
+                        <Trash2 className="size-4" />
+                      )
+                    }
+                  >
+                    Disconnect{connection.external_login ? ` @${connection.external_login}` : ""}
+                  </ConnectorButton>
+                ) : null}
+                {connection?.status === "reauthorization_required" ? (
+                  <ConnectorButton
+                    onClick={() => void register()}
+                    disabled={busy}
+                    icon={
+                      busy ? (
+                        <Loader2 className="size-4 animate-spin" />
+                      ) : (
+                        <GitHubIcon className="size-4" />
+                      )
+                    }
+                  >
+                    Reconnect
+                  </ConnectorButton>
+                ) : null}
+                {connection &&
+                ![
+                  "disabled",
+                  "not_configured",
+                  "error",
+                  "installation_required",
+                  "ready",
+                  "reauthorization_required",
+                ].includes(connection.status) ? (
+                  <ConnectorButton
+                    onClick={() => void load()}
+                    disabled={busy}
+                    variant="outline"
+                    icon={<RefreshCw className="size-4" />}
+                  >
+                    Refresh
+                  </ConnectorButton>
+                ) : null}
+              </div>
+            </article>
+          </div>
         </section>
 
         {error ? (
           <div
             role="alert"
-            className="mt-5 flex items-center justify-between gap-3 rounded-xl bg-destructive/10 px-4 py-3 text-sm text-destructive"
+            className="flex items-center justify-between gap-3 rounded-xl bg-destructive/10 px-4 py-3 text-sm text-destructive"
           >
             <span>{error}</span>
             {connection && loadState === "failed" ? (
@@ -234,8 +240,8 @@ export default function ConnectorsPage() {
             ) : null}
           </div>
         ) : null}
-      </main>
-    </div>
+      </div>
+    </main>
   );
 }
 
@@ -277,10 +283,10 @@ function ConnectorButton({
       type="button"
       onClick={onClick}
       disabled={disabled}
-      className={`inline-flex h-10 w-full items-center justify-center gap-2 rounded-xl px-4 text-sm font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50 ${
+      className={`inline-flex h-10 w-full items-center justify-center gap-2 rounded-xl px-4 text-sm font-medium focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50 ${
         variant === "solid"
-          ? "bg-foreground text-background hover:bg-foreground/90"
-          : "border border-border text-foreground hover:bg-muted"
+          ? "user-connector-btn bg-foreground text-background hover:bg-foreground/90"
+          : "border border-border text-foreground transition-colors hover:bg-muted"
       }`}
     >
       {icon}

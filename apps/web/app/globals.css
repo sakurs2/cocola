@@ -157,6 +157,18 @@
     background-color: hsl(var(--background));
     color: hsl(var(--foreground));
   }
+  /*
+   * Tailwind v4 Preflight no longer sets cursor:pointer on buttons/links the
+   * way v3 did. Restore the pointer cursor for interactive controls so hover
+   * feedback matches user expectations across the app (sidebar, connectors…).
+   */
+  button:not(:disabled),
+  [role="button"]:not([aria-disabled="true"]),
+  label[for],
+  summary,
+  a[href] {
+    cursor: pointer;
+  }
 
   /*
    * Global slim scrollbar. Applies to every scroll area (chat thread, admin
@@ -2933,6 +2945,20 @@
   --page-accent-shadow-soft: rgba(37, 99, 235, 0.35);
 }
 
+.cocola-user-ui .user-theme-emerald,
+.cocola-user-ui.user-theme-emerald {
+  --page-accent: #059669;
+  --page-accent-2: #10b981;
+  --page-accent-grad: linear-gradient(135deg, #059669, #10b981);
+  --page-accent-soft: #ecfdf5;
+  --page-accent-ink: #047857;
+  --page-accent-border: #a7f3d0;
+  --page-accent-focus: #10b981;
+  --page-accent-focus-ring: rgba(16, 185, 129, 0.18);
+  --page-accent-shadow: rgba(5, 150, 105, 0.6);
+  --page-accent-shadow-soft: rgba(5, 150, 105, 0.35);
+}
+
 /* cool-gray canvas — matches admin sub-page (.admin-glass-shell #f8fafc) */
 .cocola-user-ui .user-canvas {
   background: #f8fafc;
@@ -3114,6 +3140,30 @@
 .cocola-user-ui .user-card--hover:hover {
   transform: translateY(-3px);
   box-shadow: 0 20px 40px -18px rgba(30, 41, 59, 0.3);
+}
+/* ---- connector (github) black logo + button, smooth CSS transitions ---- */
+.cocola-user-ui .user-connector-logo {
+  transition:
+    transform 220ms ease,
+    box-shadow 220ms ease;
+}
+.cocola-user-ui .group:hover .user-connector-logo {
+  transform: scale(1.06) rotate(-3deg);
+  box-shadow: 0 10px 20px -8px rgba(15, 23, 42, 0.5);
+}
+.cocola-user-ui .user-connector-btn {
+  box-shadow: 0 8px 18px -10px rgba(15, 23, 42, 0.6);
+  transition:
+    background-color 160ms ease,
+    transform 160ms ease,
+    box-shadow 160ms ease;
+}
+.cocola-user-ui .user-connector-btn:hover:not(:disabled) {
+  transform: translateY(-1px);
+  box-shadow: 0 14px 26px -12px rgba(15, 23, 42, 0.65);
+}
+.cocola-user-ui .user-connector-btn:disabled {
+  box-shadow: none;
 }
 .cocola-user-ui .user-card-glyph {
   display: grid;
