@@ -11,7 +11,6 @@ import {
   FileText,
   Folder,
   FolderOpen,
-  MoreHorizontal,
   Pencil,
   Plus,
   RefreshCw,
@@ -492,9 +491,6 @@ export function WikiWorkspace() {
                 </span>
                 <h1 className="text-lg font-semibold tracking-tight">Wiki</h1>
               </div>
-              <p className="mt-2 text-xs text-slate-500">
-                Your working knowledge, ready for Agents.
-              </p>
             </div>
             <button
               type="button"
@@ -962,11 +958,10 @@ function FolderView({
                   onClick={() => onSelect(node)}
                   className="group rounded-2xl border border-slate-200 bg-white p-4 text-left shadow-sm transition hover:-translate-y-0.5 hover:border-blue-200 hover:shadow-md"
                 >
-                  <div className="flex items-start justify-between">
+                  <div className="flex items-start">
                     <span className="grid size-10 place-items-center rounded-xl bg-slate-50 text-blue-600 group-hover:bg-blue-50">
                       <Icon className="size-5" />
                     </span>
-                    <MoreHorizontal className="size-4 text-slate-300" />
                   </div>
                   <p className="mt-4 truncate text-sm font-semibold">{node.name}</p>
                   <p className="mt-1 text-xs text-slate-400">
