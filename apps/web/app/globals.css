@@ -2854,7 +2854,8 @@
    =================================================================== */
 
 /* per-page accent (default violet) — overridden by .user-theme-* on <main> */
-.cocola-user-ui .user-page {
+.cocola-user-ui .user-page,
+.cocola-user-ui.user-page {
   --page-accent: #7828c8;
   --page-accent-2: #9353d3;
   --page-accent-grad: linear-gradient(135deg, #7828c8, #9353d3);
@@ -2866,7 +2867,8 @@
   --page-accent-shadow: rgba(120, 40, 200, 0.6);
   --page-accent-shadow-soft: rgba(120, 40, 200, 0.35);
 }
-.cocola-user-ui .user-theme-violet {
+.cocola-user-ui .user-theme-violet,
+.cocola-user-ui.user-theme-violet {
   --page-accent: #7c3aed;
   --page-accent-2: #a855f7;
   --page-accent-grad: linear-gradient(135deg, #7c3aed, #a855f7);
@@ -2878,7 +2880,8 @@
   --page-accent-shadow: rgba(124, 58, 237, 0.55);
   --page-accent-shadow-soft: rgba(124, 58, 237, 0.32);
 }
-.cocola-user-ui .user-theme-orange {
+.cocola-user-ui .user-theme-orange,
+.cocola-user-ui.user-theme-orange {
   --page-accent: #ea580c;
   --page-accent-2: #fb923c;
   --page-accent-grad: linear-gradient(135deg, #ea580c, #fb923c);
@@ -2890,7 +2893,8 @@
   --page-accent-shadow: rgba(234, 88, 12, 0.5);
   --page-accent-shadow-soft: rgba(234, 88, 12, 0.3);
 }
-.cocola-user-ui .user-theme-cyan {
+.cocola-user-ui .user-theme-cyan,
+.cocola-user-ui.user-theme-cyan {
   --page-accent: #0891b2;
   --page-accent-2: #22d3ee;
   --page-accent-grad: linear-gradient(135deg, #0891b2, #22d3ee);
@@ -2902,7 +2906,8 @@
   --page-accent-shadow: rgba(8, 145, 178, 0.6);
   --page-accent-shadow-soft: rgba(8, 145, 178, 0.35);
 }
-.cocola-user-ui .user-theme-indigo {
+.cocola-user-ui .user-theme-indigo,
+.cocola-user-ui.user-theme-indigo {
   --page-accent: #4f46e5;
   --page-accent-2: #818cf8;
   --page-accent-grad: linear-gradient(135deg, #4f46e5, #818cf8);

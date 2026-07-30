@@ -269,7 +269,7 @@ const ThreadWelcome: FC = () => {
   const [promptSlotBindings, setPromptSlotBindings] = useState<
     Record<string, PromptStarterSlotBinding | undefined>
   >({});
-  const visiblePromptStarters = selectedAgent ? [] : PROMPT_STARTERS;
+  const visiblePromptStarters = PROMPT_STARTERS;
 
   useEffect(() => {
     const h = new Date().getHours();

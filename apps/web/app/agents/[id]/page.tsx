@@ -1,6 +1,6 @@
 "use client";
 
-import { Archive, ArrowLeft, Check, ExternalLink, Loader2, Save } from "lucide-react";
+import { Archive, ArrowLeft, Check, Loader2, Save } from "lucide-react";
 import Link from "next/link";
 import { useParams, useRouter } from "next/navigation";
 import { useEffect, useMemo, useState } from "react";
@@ -196,11 +196,6 @@ export default function AgentPage() {
     }
   };
 
-  const testAgent = () => {
-    if (!agent || dirty) return;
-    window.open(`/?agent=${encodeURIComponent(agent.id)}`, "_blank", "noopener,noreferrer");
-  };
-
   const archive = async () => {
     if (!agent) return;
     setArchiving(true);
@@ -272,16 +267,6 @@ export default function AgentPage() {
             </div>
           </div>
           <div className="flex items-center gap-2">
-            <button
-              type="button"
-              onClick={testAgent}
-              disabled={dirty}
-              title={dirty ? "Save changes before testing this Agent." : "Open a new chat"}
-              className="inline-flex h-11 items-center gap-2 rounded-xl border border-border bg-white px-3.5 text-sm font-medium hover:bg-muted disabled:cursor-not-allowed disabled:opacity-50"
-            >
-              <ExternalLink className="size-4" />
-              Test Agent
-            </button>
             <button
               type="button"
               onClick={() => void save()}
