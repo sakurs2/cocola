@@ -218,8 +218,8 @@ function SkillsWorkspace() {
   };
 
   return (
-    <main className="user-canvas user-page user-theme-violet h-full min-w-0 flex-1 overflow-y-auto">
-      <div className="mx-auto max-w-5xl space-y-6 px-8 py-10">
+    <main className="user-canvas user-page user-theme-violet h-full min-w-0 flex-1 overflow-y-auto px-4 sm:px-6">
+      <div className="mx-auto w-full max-w-5xl space-y-6 py-10">
         <header className="flex flex-wrap items-center justify-between gap-4">
           <div className="flex items-center gap-3.5">
             <span className="user-page-icon">

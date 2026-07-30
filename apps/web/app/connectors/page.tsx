@@ -91,8 +91,8 @@ export default function ConnectorsPage() {
   };
 
   return (
-    <main className="user-canvas user-page user-theme-emerald h-full min-w-0 flex-1 overflow-y-auto">
-      <div className="mx-auto w-full max-w-5xl space-y-8 px-8 py-10 pb-16">
+    <main className="user-canvas user-page user-theme-emerald h-full min-w-0 flex-1 overflow-y-auto px-4 sm:px-6">
+      <div className="mx-auto w-full max-w-5xl space-y-8 py-10 pb-16">
         <header className="flex items-center gap-4">
           <span className="user-page-icon">
             <ShieldCheck className="size-6" />

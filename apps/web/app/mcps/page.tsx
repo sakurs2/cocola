@@ -93,8 +93,8 @@ export default function MCPPage() {
   };
 
   return (
-    <main className="user-canvas user-page user-theme-orange h-full min-w-0 flex-1 overflow-y-auto">
-      <div className="mx-auto max-w-6xl space-y-6 px-8 py-10">
+    <main className="user-canvas user-page user-theme-orange h-full min-w-0 flex-1 overflow-y-auto px-4 sm:px-6">
+      <div className="mx-auto w-full max-w-6xl space-y-6 py-10">
         <header className="flex items-center gap-3.5">
           <span className="user-page-icon">
             <Plug className="size-6" />
