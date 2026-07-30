@@ -9,7 +9,7 @@ import {
   LoaderCircle,
   MoreHorizontal,
   Plus,
-  Sparkles,
+  AlarmClock,
 } from "lucide-react";
 import { useSession } from "next-auth/react";
 import { useRouter } from "next/navigation";
@@ -450,7 +450,7 @@ function TaskCard({
     >
       <div className="flex items-start gap-3">
         <span className="user-card-glyph mt-0.5">
-          <Sparkles className="size-[18px]" />
+          <AlarmClock className="size-[18px]" />
         </span>
         <div className="min-w-0 flex-1 pr-7">
           <div className="flex items-center gap-2">
