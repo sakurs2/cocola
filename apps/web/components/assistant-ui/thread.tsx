@@ -56,6 +56,7 @@ import {
   useMemo,
   useRef,
   useState,
+  type ComponentProps,
   type FC,
   type ReactNode,
 } from "react";
@@ -364,7 +365,7 @@ const ThreadWelcome: FC = () => {
   );
 };
 
-export const ConversationComposer: FC<{
+const ConversationComposerInner: FC<{
   placeholder?: string;
   branchControl?: ReactNode;
   promptStarter?: PromptStarter | null;
@@ -527,6 +528,17 @@ export const ConversationComposer: FC<{
   );
 };
 
+// Public entry: guarantees a Wiki mention catalog context is present so the
+// composer can be mounted standalone (project/folder pages) as well as inside
+// <Thread/>. The provider is idempotent, so nesting is safe.
+export const ConversationComposer: FC<
+  ComponentProps<typeof ConversationComposerInner>
+> = (props) => (
+  <WikiMentionCatalogProvider>
+    <ConversationComposerInner {...props} />
+  </WikiMentionCatalogProvider>
+);
+
 type WikiMentionNode = {
   id: string;
   kind: "folder" | "file";
@@ -545,6 +557,15 @@ type WikiMentionCatalog = {
 const WikiMentionCatalogContext = createContext<WikiMentionCatalog | null>(null);
 
 const WikiMentionCatalogProvider: FC<{ children: ReactNode }> = ({ children }) => {
+  // Idempotent: if a catalog provider already exists above (e.g. inside
+  // <Thread/>), reuse it so standalone <ConversationComposer/> mounts don't
+  // create a second catalog with duplicate fetches/listeners.
+  const parent = useContext(WikiMentionCatalogContext);
+  if (parent) return <>{children}</>;
+  return <WikiMentionCatalogProviderInner>{children}</WikiMentionCatalogProviderInner>;
+};
+
+const WikiMentionCatalogProviderInner: FC<{ children: ReactNode }> = ({ children }) => {
   const [nodes, setNodes] = useState<WikiMentionNode[]>([]);
   const [loading, setLoading] = useState(false);
   const [revision, setRevision] = useState(0);

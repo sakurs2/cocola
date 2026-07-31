@@ -2922,7 +2922,7 @@
 .cocola-user-ui.user-theme-indigo {
   --page-accent: #4f46e5;
   --page-accent-2: #818cf8;
-  --page-accent-grad: linear-gradient(135deg, #4f46e5, #818cf8);
+  --page-accent-grad: #4f46e5;
   --page-accent-soft: #eef2ff;
   --page-accent-ink: #4338ca;
   --page-accent-border: #c7d2fe;
@@ -3120,6 +3120,21 @@
 .cocola-user-ui .user-field-input:focus {
   border-color: var(--page-accent-focus);
   box-shadow: 0 0 0 4px var(--page-accent-focus-ring);
+}
+
+/* projects (indigo) — HeroUI-style focus: kill default outline, soft 3px glow ring */
+.cocola-user-ui .user-theme-indigo .user-search-input,
+.cocola-user-ui .user-theme-indigo .user-field-input {
+  outline: none;
+}
+.cocola-user-ui .user-theme-indigo .user-search-input:focus,
+.cocola-user-ui .user-theme-indigo .user-search-input:focus-visible,
+.cocola-user-ui .user-theme-indigo .user-search-input:focus-within,
+.cocola-user-ui .user-theme-indigo .user-field-input:focus,
+.cocola-user-ui .user-theme-indigo .user-field-input:focus-visible {
+  outline: none;
+  border-color: var(--page-accent-focus);
+  box-shadow: 0 0 0 3px var(--page-accent-focus-ring);
 }
 
 /* ---- entity card (skill / mcp) ---- */
@@ -3359,4 +3374,189 @@
   padding: 28px;
   text-align: center;
   background: #fff;
+}
+
+/* ==================================================================
+   Projects page visual scheme (indigo, solid) — landed from approved demo
+   Scoped under .user-theme-indigo so other landed pages are unaffected.
+   ===================================================================== */
+
+/* solid icon backgrounds (demo replaced gradients with flat soft fill) */
+.cocola-user-ui .user-theme-indigo .user-page-icon,
+.cocola-user-ui .user-theme-indigo .user-card-glyph {
+  background: var(--page-accent-soft);
+}
+
+/* primary accent button — solid fill + springy hover/press + icon pop */
+.cocola-user-ui .user-theme-indigo .user-accent-btn {
+  transition:
+    transform 180ms cubic-bezier(0.34, 1.56, 0.64, 1),
+    box-shadow 180ms ease,
+    opacity 160ms ease;
+}
+.cocola-user-ui .user-theme-indigo .user-accent-btn:hover {
+  opacity: 0.97;
+  transform: translateY(-2px);
+  box-shadow: 0 16px 28px -12px var(--page-accent-shadow);
+}
+.cocola-user-ui .user-theme-indigo .user-accent-btn:active {
+  transform: translateY(0) scale(0.96);
+  box-shadow: 0 6px 14px -10px var(--page-accent-shadow);
+}
+.cocola-user-ui .user-theme-indigo .user-accent-btn svg {
+  transition: transform 240ms cubic-bezier(0.34, 1.56, 0.64, 1);
+}
+.cocola-user-ui .user-theme-indigo .user-accent-btn:hover svg {
+  transform: scale(1.18);
+}
+
+/* footer toggle buttons — lift + press micro-interaction */
+.cocola-user-ui .user-theme-indigo .user-tbtn {
+  transition:
+    transform 150ms ease,
+    background 150ms ease,
+    border-color 150ms ease,
+    box-shadow 150ms ease;
+}
+.cocola-user-ui .user-theme-indigo .user-tbtn--ghost:hover {
+  transform: translateY(-1px);
+  box-shadow: 0 6px 14px -10px rgba(15, 23, 42, 0.4);
+}
+.cocola-user-ui .user-theme-indigo .user-tbtn--ghost:active {
+  transform: translateY(0) scale(0.97);
+}
+.cocola-user-ui .user-theme-indigo .user-tbtn--fill:hover {
+  opacity: 0.94;
+  transform: translateY(-1px);
+  box-shadow: 0 12px 22px -10px var(--page-accent-shadow);
+}
+.cocola-user-ui .user-theme-indigo .user-tbtn--fill:active {
+  transform: translateY(0) scale(0.97);
+}
+
+/* keyboard-only focus ring (no black default outline) */
+.cocola-user-ui .user-theme-indigo button:focus-visible,
+.cocola-user-ui .user-theme-indigo [role="button"]:focus-visible,
+.cocola-user-ui .user-theme-indigo a[href]:focus-visible {
+  outline: 2px solid var(--page-accent-focus);
+  outline-offset: 2px;
+}
+/* text inputs get their focus feedback from the field/search glow ring,
+   not a squared keyboard outline */
+.cocola-user-ui .user-theme-indigo input:focus-visible,
+.cocola-user-ui .user-theme-indigo textarea:focus-visible {
+  outline: none;
+}
+
+/* horizontal card variant (list rows) */
+.cocola-user-ui .user-card.row {
+  flex-direction: row;
+  align-items: center;
+}
+
+/* project monogram — connector-style, springy hover */
+.cocola-user-ui .proj-mono {
+  display: grid;
+  place-items: center;
+  border-radius: 14px;
+  color: #fff;
+  font-weight: 800;
+  letter-spacing: -0.02em;
+  background: var(--page-accent-grad);
+  box-shadow: 0 8px 18px -10px var(--page-accent-shadow);
+  transition:
+    transform 220ms ease,
+    box-shadow 220ms ease;
+}
+.cocola-user-ui .group:hover .proj-mono {
+  transform: scale(1.06) rotate(-3deg);
+  box-shadow: 0 12px 24px -8px var(--page-accent-shadow);
+}
+
+/* task cards — mirror admin overview .admin-module-card */
+.cocola-user-ui .task-card {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 0.75rem;
+  border: none;
+  border-radius: 16px;
+  background: #fff;
+  padding: 20px;
+  box-shadow:
+    0 1px 0 0 rgba(0, 0, 0, 0.02),
+    0 8px 24px -12px rgba(0, 0, 0, 0.18);
+  transition:
+    transform 200ms ease,
+    box-shadow 200ms ease;
+  text-decoration: none;
+}
+.cocola-user-ui .task-card:hover {
+  transform: translateY(-3px) scale(1.005);
+  box-shadow: 0 18px 40px -18px var(--page-accent-shadow-soft);
+}
+.cocola-user-ui .task-card-head {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  width: 100%;
+}
+.cocola-user-ui .task-card-icon {
+  display: grid;
+  flex: 0 0 auto;
+  place-items: center;
+  width: 2.25rem;
+  height: 2.25rem;
+  border-radius: 0.75rem;
+  color: #fff;
+  background: var(--page-accent-grad);
+  box-shadow: 0 8px 18px -10px var(--page-accent-shadow);
+  transition: transform 200ms ease;
+}
+.cocola-user-ui .task-card:hover .task-card-icon {
+  transform: scale(1.06) rotate(-3deg);
+}
+.cocola-user-ui .task-card-title {
+  flex: 1;
+  min-width: 0;
+  font-size: 15px;
+  font-weight: 700;
+  color: #18181b;
+}
+.cocola-user-ui .task-card-summary {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.375rem;
+  font-size: 12.5px;
+  line-height: 1.55;
+  color: #71717a;
+}
+.cocola-user-ui .task-card-foot {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  width: 100%;
+  margin-top: 0.15rem;
+}
+.cocola-user-ui .task-card-cta {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.375rem;
+  border-radius: 999px;
+  padding: 7px 15px;
+  font-size: 12px;
+  font-weight: 600;
+  color: #fff;
+  background: var(--page-accent-grad);
+  box-shadow: 0 8px 18px -8px var(--page-accent-shadow);
+  transition: opacity 200ms ease;
+}
+.cocola-user-ui .task-card:hover .task-card-cta {
+  opacity: 0.9;
+}
+.cocola-user-ui .task-card-cta svg {
+  transition: transform 200ms ease;
+}
+.cocola-user-ui .task-card:hover .task-card-cta svg {
+  transform: translateX(2px);
 }

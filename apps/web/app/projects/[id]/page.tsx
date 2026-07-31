@@ -1,18 +1,22 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import Link from "next/link";
 import { useParams, useRouter } from "next/navigation";
+import * as Dialog from "@radix-ui/react-dialog";
 import {
+  AlertTriangle,
   Archive,
-  ChevronRight,
+  ArrowLeft,
+  ArrowRight,
   ExternalLink,
   FolderGit2,
   GitBranch,
   GitFork,
   Loader2,
   Pencil,
+  Plus,
   RefreshCw,
+  X,
 } from "lucide-react";
 import { useCocola, type ProjectSummary } from "@/app/runtime-provider";
 import {
@@ -35,8 +39,6 @@ type ProjectTask = {
     git_snapshot?: { dirty?: boolean; captured_at?: string };
   };
 };
-
-const BRAND_GRADIENT = "linear-gradient(135deg,#2563eb,#7c3aed)";
 
 const STATUS_META: Record<ProjectSummary["status"], { label: string; color: string }> = {
   ready: { label: "Ready", color: "#16a34a" },
@@ -339,73 +341,60 @@ export default function ProjectPage() {
   const isGithub = project.repository_provider === "github" || Boolean(project.repository_html_url);
 
   return (
-    <div className="h-full overflow-y-auto px-3 py-8 sm:px-5">
-      <main className="mx-auto w-full max-w-5xl pb-16">
-        {/* Breadcrumb */}
-        <div className="flex items-center gap-1.5 font-mono text-[11px] uppercase tracking-[0.16em] text-muted-foreground">
-          <Link href="/projects" className="transition-colors hover:text-foreground">
-            Projects
-          </Link>
-          <ChevronRight className="size-3" />
-          <span className="truncate normal-case tracking-normal text-foreground">
-            {project.name}
-          </span>
-        </div>
+    <main className="user-canvas user-page user-theme-indigo h-full min-w-0 flex-1 overflow-y-auto px-4 py-5 sm:px-6 sm:py-7">
+      <div className="mx-auto w-full max-w-5xl pb-16">
+        {/* Back */}
+        <button
+          type="button"
+          onClick={() => router.push("/projects")}
+          className="group inline-flex items-center gap-1.5 rounded-full border border-black/[0.06] bg-white px-4 py-2 text-[13px] font-medium text-muted-foreground shadow-[0_1px_2px_0_rgb(15_23_42/0.06),0_6px_16px_-10px_rgb(15_23_42/0.25)] transition-all duration-200 hover:-translate-y-0.5 hover:text-foreground hover:shadow-[0_2px_4px_0_rgb(15_23_42/0.08),0_12px_24px_-12px_rgb(15_23_42/0.35)] active:translate-y-0 active:shadow-[0_1px_2px_0_rgb(15_23_42/0.06)]"
+        >
+          <ArrowLeft className="size-4 transition-transform duration-200 group-hover:-translate-x-0.5" />
+          Back
+        </button>
 
-        {/* Editorial header with a strong baseline rule */}
-        <header className="mt-4 flex flex-wrap items-start justify-between gap-4 border-b-2 border-foreground pb-6">
-          <div className="flex min-w-0 items-start gap-4">
-            {/* monogram */}
-            <div
-              className="grid size-14 shrink-0 place-items-center rounded-2xl text-2xl font-bold tracking-tight text-white shadow-[inset_0_-10px_20px_-12px_rgba(0,0,0,0.4)]"
-              style={{ background: BRAND_GRADIENT }}
-            >
-              {initials(project.name)}
+        {/* Header */}
+        <header className="mt-4 flex flex-wrap items-start gap-4">
+          <div className="proj-mono group size-[58px] text-2xl">{initials(project.name)}</div>
+          <div className="min-w-0 flex-1">
+            <div className="flex items-center gap-2.5">
+              <h1 className="truncate text-[26px] font-semibold tracking-tight">{project.name}</h1>
+              {isGithub ? (
+                <span className="user-tag user-tag--muted shrink-0 font-mono text-[10px] uppercase">
+                  {project.visibility}
+                </span>
+              ) : null}
             </div>
-            <div className="min-w-0">
-              <div className="flex items-center gap-2.5">
-                <h1 className="truncate text-3xl font-semibold tracking-tight">{project.name}</h1>
-                {isGithub ? (
-                  <span className="shrink-0 rounded-md border border-border px-1.5 py-px font-mono text-[10px] uppercase tracking-wide text-muted-foreground">
-                    {project.visibility}
-                  </span>
-                ) : null}
-              </div>
-              <p
-                className={
-                  "mt-1 text-sm text-muted-foreground" + (project.description ? "" : " opacity-50")
-                }
-              >
-                {project.description || "No description"}
-              </p>
-              {/* meta row */}
-              <div className="mt-3 flex flex-wrap items-center gap-x-4 gap-y-1.5 text-xs text-muted-foreground">
-                {isGithub ? (
-                  <a
-                    href={project.repository_html_url}
-                    target="_blank"
-                    rel="noreferrer"
-                    className="inline-flex items-center gap-1.5 transition-colors hover:text-foreground"
-                  >
-                    <GitFork className="size-3.5" />
-                    {project.repository_owner}/{project.repository_name}
-                    <ExternalLink className="size-3" />
-                  </a>
-                ) : (
-                  <span className="inline-flex items-center gap-1.5">
-                    <FolderGit2 className="size-3.5" />
-                    Local only
-                  </span>
-                )}
+            <p className={"user-card-desc mt-1.5" + (project.description ? "" : " opacity-50")}>
+              {project.description || "No description"}
+            </p>
+            {/* meta row */}
+            <div className="mt-3 flex flex-wrap items-center gap-x-4 gap-y-1.5 text-[12.5px] text-muted-foreground">
+              {isGithub ? (
+                <a
+                  href={project.repository_html_url}
+                  target="_blank"
+                  rel="noreferrer"
+                  className="inline-flex items-center gap-1.5 transition-colors hover:text-[color:var(--page-accent)]"
+                >
+                  <GitFork className="size-3.5" />
+                  {project.repository_owner}/{project.repository_name}
+                  <ExternalLink className="size-3" />
+                </a>
+              ) : (
                 <span className="inline-flex items-center gap-1.5">
-                  <GitBranch className="size-3.5" />
-                  {project.default_branch || "Preparing"}
+                  <FolderGit2 className="size-3.5" />
+                  Local only
                 </span>
-                <span className="inline-flex items-center gap-1.5" style={{ color: status.color }}>
-                  <span className="size-[7px] rounded-full" style={{ background: status.color }} />
-                  {status.label}
-                </span>
-              </div>
+              )}
+              <span className="inline-flex items-center gap-1.5">
+                <GitBranch className="size-3.5" />
+                {project.default_branch || "Preparing"}
+              </span>
+              <span className="inline-flex items-center gap-1.5" style={{ color: status.color }}>
+                <span className="size-[7px] rounded-full" style={{ background: status.color }} />
+                {status.label}
+              </span>
             </div>
           </div>
           {project.status !== "archived" ? (
@@ -416,7 +405,7 @@ export default function ProjectPage() {
                 <button
                   type="button"
                   onClick={startPublishing}
-                  className="inline-flex h-9 items-center gap-2 rounded-full border border-border bg-background px-4 text-xs font-semibold text-foreground transition-colors hover:bg-muted"
+                  className="user-tbtn user-tbtn--ghost px-3.5"
                 >
                   <GitFork className="size-4" />
                   {project.github_publish_status === "pending" ? "Retry publish" : "Publish"}
@@ -426,7 +415,7 @@ export default function ProjectPage() {
                 type="button"
                 onClick={startEditing}
                 aria-label="Edit project"
-                className="grid size-9 place-items-center rounded-full border border-border bg-background text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
+                className="user-iconbtn"
               >
                 <Pencil className="size-4" />
               </button>
@@ -435,11 +424,11 @@ export default function ProjectPage() {
         </header>
 
         {showPublish ? (
-          <section className="mt-6 rounded-2xl border border-border bg-card p-5">
+          <section className="user-panel mt-6">
             <div className="flex items-start justify-between gap-4">
               <div>
-                <h2 className="text-sm font-semibold">Publish to GitHub</h2>
-                <p className="mt-1 text-xs text-muted-foreground">
+                <h2 className="user-section-title">Publish to GitHub</h2>
+                <p className="user-card-desc mt-1">
                   Cocola will push the committed main branch using a short-lived repository token.
                 </p>
               </div>
@@ -458,7 +447,7 @@ export default function ProjectPage() {
                   value={publishRepository}
                   disabled={project.github_publish_status === "pending"}
                   onChange={(event) => setPublishRepository(event.target.value)}
-                  className="h-10 w-full rounded-xl border border-border bg-background px-3 text-sm outline-none transition-colors focus:border-primary disabled:opacity-60"
+                  className="user-search-input user-field-input h-10 w-full rounded-xl px-3 text-sm disabled:opacity-60"
                 />
               </label>
               <label className="space-y-1.5">
@@ -486,8 +475,7 @@ export default function ProjectPage() {
                 type="button"
                 disabled={busy || !publishRepository.trim()}
                 onClick={() => void publish()}
-                className="inline-flex h-9 items-center gap-2 rounded-full px-4 text-sm font-semibold text-white shadow-lg shadow-primary/20 transition-transform hover:-translate-y-0.5 disabled:opacity-50 disabled:hover:translate-y-0"
-                style={{ background: BRAND_GRADIENT }}
+                className="user-accent-btn inline-flex h-9 items-center gap-2 rounded-xl px-4 text-sm font-semibold disabled:opacity-50"
               >
                 {busy ? (
                   <Loader2 className="size-4 animate-spin" />
@@ -517,9 +505,9 @@ export default function ProjectPage() {
         ) : null}
 
         {project.status === "archived" ? (
-          <section className="mt-6 rounded-2xl border border-border bg-muted/40 p-5">
-            <h2 className="font-semibold">Project archived</h2>
-            <p className="mt-1 text-sm text-muted-foreground">
+          <section className="user-panel mt-6">
+            <h2 className="user-section-title">Project archived</h2>
+            <p className="user-card-desc mt-1">
               New tasks are disabled. Existing tasks and saved Git snapshots remain available.
             </p>
           </section>
@@ -539,47 +527,43 @@ export default function ProjectPage() {
               type="button"
               disabled={busy}
               onClick={() => void retry()}
-              className="mt-4 inline-flex items-center gap-2 rounded-full border border-border bg-background px-4 py-2 text-sm font-semibold transition-colors hover:bg-muted disabled:opacity-50"
+              className="user-tbtn user-tbtn--ghost mt-4 px-4"
             >
               <RefreshCw className="size-4" /> Retry reconciliation
             </button>
           </section>
         ) : project.repository_provider === "local" && tasks.length > 0 ? (
-          <section className="mt-8 rounded-2xl border border-border bg-muted/30 p-6">
-            <h2 className="text-sm font-semibold">Project workspace</h2>
-            <p className="mt-1 text-xs text-muted-foreground">
-              Empty Projects keep one persistent conversation and develop directly on main.
+          <section className="mt-8 flex items-center gap-3 rounded-2xl border border-amber-500/25 bg-amber-500/5 px-5 py-4 text-sm">
+            <AlertTriangle className="size-4 shrink-0 text-amber-500" />
+            <p className="text-muted-foreground">
+              Non-GitHub projects support only a single workspace.
             </p>
-            <button
-              type="button"
-              onClick={() =>
-                router.push(
-                  `/projects/${encodeURIComponent(project.id)}/tasks/${encodeURIComponent(tasks[0]!.id)}`,
-                )
-              }
-              className="mt-4 inline-flex h-10 items-center rounded-full px-5 text-sm font-semibold text-white shadow-lg shadow-primary/20 transition-transform hover:-translate-y-0.5"
-              style={{ background: BRAND_GRADIENT }}
-            >
-              Continue workspace
-            </button>
           </section>
         ) : !tasksLoaded || !composerReady ? (
-          <section className="mt-8 rounded-2xl border border-border bg-muted/30 p-6">
-            <h2 className="text-sm font-semibold">Preparing Project workspace</h2>
-            <p className="mt-1 text-xs text-muted-foreground">
+          <section className="user-panel mt-8">
+            <h2 className="user-section-title">Preparing Project workspace</h2>
+            <p className="user-card-desc mt-1">
               Loading Project tasks and preparing a conversation workspace…
             </p>
           </section>
         ) : (
-          <section className="mt-8">
-            <p className="font-mono text-[11px] uppercase tracking-[0.22em] text-muted-foreground">
-              {project.repository_provider === "local" ? "Start workspace" : "New task"}
-            </p>
-            <p className="mt-1.5 text-xs text-muted-foreground">
-              {project.repository_provider === "local"
-                ? "The first message creates this Project’s single persistent workspace on main."
-                : "Choose a base branch. Cocola locks its current revision when you send the first message."}
-            </p>
+          <section className="user-panel mt-8">
+            <div className="flex items-center gap-3">
+              <div className="user-panel-glyph">
+                <Plus className="size-[18px]" />
+              </div>
+              <div className="min-w-0 flex-1">
+                <div className="user-section-title">
+                  {project.repository_provider === "local" ? "Start new workspace" : "New task"}
+                </div>
+                {project.repository_provider === "local" ? null : (
+                  <p className="user-card-desc mt-0.5">
+                    Choose a base branch. Cocola locks its current revision when you send the first
+                    message.
+                  </p>
+                )}
+              </div>
+            </div>
             <div className="mt-4">
               <ConversationComposer
                 placeholder={`Ask Cocola to work on ${project.name}…`}
@@ -599,90 +583,100 @@ export default function ProjectPage() {
           </section>
         )}
 
-        {editing ? (
-          <section className="mt-8 rounded-2xl border border-border bg-card p-5">
-            <div className="flex items-center justify-between">
-              <h2 className="font-semibold">Project settings</h2>
-              <button
-                type="button"
-                onClick={() => setEditing(false)}
-                className="text-sm text-muted-foreground transition-colors hover:text-foreground"
-              >
-                Cancel
-              </button>
-            </div>
-            <div className="mt-4 grid gap-4 sm:grid-cols-2">
-              <label className="space-y-1.5">
-                <span className="text-sm font-medium">Name</span>
-                <input
-                  value={draftName}
-                  onChange={(event) => setDraftName(event.target.value)}
-                  className="h-10 w-full rounded-xl border border-border bg-background px-3 text-sm outline-none transition-colors focus:border-primary"
-                />
-              </label>
-              {runtimePickerEnabled ? (
-                <label className="space-y-1.5">
-                  <span className="text-sm font-medium">Default runtime</span>
-                  <SelectControl
-                    value={draftRuntime}
-                    onValueChange={setDraftRuntime}
-                    options={runtimes.map((runtime) => ({
-                      value: runtime.id,
-                      label: runtime.label,
-                    }))}
-                    className="focus-visible:border-primary"
-                    contentClassName="cocola-user-ui"
-                  />
-                </label>
-              ) : null}
-              <label className="space-y-1.5 sm:col-span-2">
-                <span className="text-sm font-medium">Description</span>
-                <input
-                  value={draftDescription}
-                  onChange={(event) => setDraftDescription(event.target.value)}
-                  className="h-10 w-full rounded-xl border border-border bg-background px-3 text-sm outline-none transition-colors focus:border-primary"
-                />
-              </label>
-            </div>
-            <div className="mt-5 flex items-center justify-between">
-              <button
-                type="button"
-                disabled={busy}
-                onClick={() => void archive()}
-                className="inline-flex items-center gap-2 text-sm font-medium text-red-600 transition-opacity hover:opacity-80"
-              >
-                <Archive className="size-4" /> Archive
-              </button>
-              <button
-                type="button"
-                disabled={busy}
-                onClick={() => void saveSettings()}
-                className="rounded-full px-5 py-2 text-sm font-semibold text-white shadow-lg shadow-primary/20 transition-transform hover:-translate-y-0.5 disabled:opacity-50 disabled:hover:translate-y-0"
-                style={{ background: BRAND_GRADIENT }}
-              >
-                Save
-              </button>
-            </div>
-          </section>
-        ) : null}
+        <Dialog.Root open={editing} onOpenChange={(next) => !busy && setEditing(next)}>
+          <Dialog.Portal>
+            <Dialog.Overlay className="fixed inset-0 z-50 bg-slate-950/20 backdrop-blur-sm data-[state=closed]:animate-out data-[state=open]:animate-in data-[state=closed]:fade-out data-[state=open]:fade-in" />
+            <Dialog.Content className="cocola-user-ui user-theme-indigo fixed inset-y-2 right-2 z-50 flex w-[min(30rem,calc(100vw-1rem))] flex-col overflow-hidden rounded-2xl border border-border bg-background text-foreground shadow-2xl outline-none data-[state=closed]:animate-out data-[state=open]:animate-in data-[state=closed]:slide-out-to-right data-[state=open]:slide-in-from-right">
+              <header className="flex min-h-16 items-center gap-3 border-b border-border/70 px-5">
+                <span className="user-panel-glyph">
+                  <Pencil className="size-[18px]" />
+                </span>
+                <div className="min-w-0 flex-1">
+                  <Dialog.Title className="truncate text-base font-semibold">
+                    Project settings
+                  </Dialog.Title>
+                  <Dialog.Description className="truncate text-xs text-muted-foreground">
+                    Update this Project’s name, runtime, and description.
+                  </Dialog.Description>
+                </div>
+                <Dialog.Close
+                  aria-label="Close"
+                  className="grid size-9 place-items-center rounded-xl text-muted-foreground transition-colors hover:bg-muted hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/40"
+                >
+                  <X className="size-4" />
+                </Dialog.Close>
+              </header>
+              <div className="min-h-0 flex-1 overflow-y-auto p-5">
+                <div className="grid gap-4">
+                  <label className="space-y-1.5">
+                    <span className="text-sm font-medium">Name</span>
+                    <input
+                      value={draftName}
+                      onChange={(event) => setDraftName(event.target.value)}
+                      className="user-search-input user-field-input h-10 w-full rounded-xl px-3 text-sm"
+                    />
+                  </label>
+                  {runtimePickerEnabled ? (
+                    <label className="space-y-1.5">
+                      <span className="text-sm font-medium">Default runtime</span>
+                      <SelectControl
+                        value={draftRuntime}
+                        onValueChange={setDraftRuntime}
+                        options={runtimes.map((runtime) => ({
+                          value: runtime.id,
+                          label: runtime.label,
+                        }))}
+                        className="focus-visible:border-primary"
+                        contentClassName="cocola-user-ui"
+                      />
+                    </label>
+                  ) : null}
+                  <label className="space-y-1.5">
+                    <span className="text-sm font-medium">Description</span>
+                    <input
+                      value={draftDescription}
+                      onChange={(event) => setDraftDescription(event.target.value)}
+                      className="user-search-input user-field-input h-10 w-full rounded-xl px-3 text-sm"
+                    />
+                  </label>
+                </div>
+              </div>
+              <div className="flex items-center justify-between border-t border-border/70 p-4">
+                <button
+                  type="button"
+                  disabled={busy}
+                  onClick={() => void archive()}
+                  className="inline-flex items-center gap-2 text-sm font-medium text-red-600 transition-opacity hover:opacity-80"
+                >
+                  <Archive className="size-4" /> Archive
+                </button>
+                <button
+                  type="button"
+                  disabled={busy}
+                  onClick={() => void saveSettings()}
+                  className="user-accent-btn inline-flex h-9 items-center rounded-xl px-5 text-sm font-semibold disabled:opacity-50"
+                >
+                  Save
+                </button>
+              </div>
+            </Dialog.Content>
+          </Dialog.Portal>
+        </Dialog.Root>
 
+        {/* Tasks */}
         <section className="mt-12">
-          <div className="flex items-end justify-between border-b border-border pb-3">
-            <div>
-              <p className="font-mono text-[11px] uppercase tracking-[0.22em] text-muted-foreground">
-                {project.repository_provider === "local" ? "Workspace" : "Tasks"}
-              </p>
-              <p className="mt-1 text-xs text-muted-foreground">
-                {tasks.length} {tasks.length === 1 ? "task" : "tasks"}
-              </p>
-            </div>
+          <div className="mb-3 flex items-center gap-2">
+            <span className="user-section-title">
+              {project.repository_provider === "local" ? "Workspace" : "Tasks"}
+            </span>
+            <span className="user-count-badge">{tasks.length}</span>
           </div>
           {tasks.length === 0 ? (
-            <div className="rounded-2xl border border-dashed border-border px-6 py-12 text-center">
+            <div className="user-empty">
               <p className="text-sm text-muted-foreground">No project tasks yet.</p>
             </div>
           ) : (
-            <div className="border-t border-border">
+            <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
               {tasks.map((task) => (
                 <button
                   type="button"
@@ -692,24 +686,32 @@ export default function ProjectPage() {
                       `/projects/${encodeURIComponent(project.id)}/tasks/${encodeURIComponent(task.id)}`,
                     )
                   }
-                  className="group flex w-full items-center gap-3 border-b border-border py-4 pl-0 text-left transition-[padding,background] hover:bg-muted hover:pl-3"
+                  className="task-card w-full text-left"
                 >
-                  <div className="min-w-0 flex-1">
-                    <span className="block truncate text-sm font-semibold group-hover:text-primary">
+                  <div className="task-card-head">
+                    <span className="task-card-icon">
+                      <GitFork className="size-[18px]" />
+                    </span>
+                    <span className="task-card-title truncate">
                       {task.title || "Untitled task"}
                     </span>
-                    <span className="mt-1 inline-flex items-center gap-1.5 text-xs text-muted-foreground">
-                      <GitBranch className="size-3.5" />
-                      {task.workspace.branch_name}
+                    {task.workspace.git_snapshot?.dirty ? (
+                      <span className="user-tag user-tag--warn shrink-0">
+                        <span className="user-tag-dot" />
+                        Modified
+                      </span>
+                    ) : null}
+                  </div>
+                  <span className="task-card-summary inline-flex items-center gap-1.5">
+                    <GitBranch className="size-3.5 shrink-0" />
+                    {task.workspace.branch_name}
+                  </span>
+                  <div className="mt-auto flex w-full justify-end">
+                    <span className="task-card-cta">
+                      Open
+                      <ArrowRight className="size-3.5" />
                     </span>
                   </div>
-                  {task.workspace.git_snapshot?.dirty ? (
-                    <span className="inline-flex items-center gap-1.5 rounded-full bg-amber-500/10 px-2.5 py-1 text-[11px] font-semibold text-amber-700">
-                      <span className="size-[6px] rounded-full bg-amber-500" />
-                      Modified
-                    </span>
-                  ) : null}
-                  <ChevronRight className="size-4 text-muted-foreground transition-transform group-hover:translate-x-0.5" />
                 </button>
               ))}
             </div>
@@ -718,7 +720,7 @@ export default function ProjectPage() {
         {error ? (
           <p className="mt-6 rounded-xl bg-red-500/10 px-3 py-2 text-sm text-red-600">{error}</p>
         ) : null}
-      </main>
-    </div>
+      </div>
+    </main>
   );
 }

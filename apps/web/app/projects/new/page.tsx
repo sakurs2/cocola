@@ -194,28 +194,18 @@ export default function NewProjectPage() {
   const githubReady = connection?.status === "ready";
 
   return (
-    <div className="h-full overflow-y-auto px-5 py-8 sm:px-8">
-      <main className="mx-auto w-full max-w-3xl pb-16">
+    <main className="user-canvas user-page user-theme-indigo h-full min-w-0 flex-1 overflow-y-auto px-4 py-5 sm:px-6 sm:py-7">
+      <div className="mx-auto w-full max-w-3xl pb-16">
         <button
           type="button"
           onClick={() => router.back()}
-          className="inline-flex items-center gap-1.5 text-sm text-muted-foreground hover:text-foreground"
+          className="group inline-flex items-center gap-1.5 rounded-full border border-black/[0.06] bg-white px-4 py-2 text-[13px] font-medium text-muted-foreground shadow-[0_1px_2px_0_rgb(15_23_42/0.06),0_6px_16px_-10px_rgb(15_23_42/0.25)] transition-all duration-200 hover:-translate-y-0.5 hover:text-foreground hover:shadow-[0_2px_4px_0_rgb(15_23_42/0.08),0_12px_24px_-12px_rgb(15_23_42/0.35)] active:translate-y-0 active:shadow-[0_1px_2px_0_rgb(15_23_42/0.06)]"
         >
-          <ArrowLeft className="size-4" /> Back
+          <ArrowLeft className="size-4 transition-transform duration-200 group-hover:-translate-x-0.5" />
+          Back
         </button>
-        <div className="mt-7 flex items-start gap-4">
-          <div className="grid size-11 shrink-0 place-items-center rounded-2xl bg-foreground text-background">
-            <GitFork className="size-5" />
-          </div>
-          <div>
-            <h1 className="text-2xl font-semibold tracking-tight">Create a project</h1>
-            <p className="mt-1 text-sm text-muted-foreground">
-              Start locally in Cocola or connect a personal GitHub repository.
-            </p>
-          </div>
-        </div>
 
-        <section className="mt-9 space-y-6">
+        <section className="mt-8 space-y-6">
           <div className="grid gap-3 sm:grid-cols-3">
             <SourceCard
               active={mode === "empty"}
@@ -243,7 +233,7 @@ export default function NewProjectPage() {
           </div>
 
           {mode !== "empty" && !githubReady ? (
-            <div className="rounded-2xl border border-amber-500/25 bg-amber-500/5 p-5">
+            <div className="group rounded-2xl border border-amber-500/25 bg-amber-500/5 p-5 transition-all duration-300 hover:border-amber-500/40 hover:bg-amber-500/10 hover:shadow-[0_10px_30px_-18px_rgba(217,119,6,0.6)]">
               <h2 className="text-sm font-semibold">Connect your personal GitHub App first</h2>
               <p className="mt-1 text-sm text-muted-foreground">
                 Empty Projects remain available without GitHub. GitHub create and import use your
@@ -251,7 +241,7 @@ export default function NewProjectPage() {
               </p>
               <Link
                 href="/connectors"
-                className="mt-4 inline-flex h-9 items-center rounded-xl bg-foreground px-4 text-sm font-medium text-background"
+                className="mt-4 inline-flex h-9 items-center rounded-xl bg-foreground px-4 text-sm font-medium text-background transition-transform duration-200 hover:-translate-y-0.5 active:translate-y-0"
               >
                 Open Connectors
               </Link>
@@ -275,7 +265,7 @@ export default function NewProjectPage() {
           ) : null}
 
           {(mode === "empty" || githubReady) && mode !== "github_import" ? (
-            <div className="grid gap-4 sm:grid-cols-2">
+            <div className="user-panel grid gap-4 p-5 sm:grid-cols-2">
               <Field
                 label="Project name"
                 value={name}
@@ -302,7 +292,7 @@ export default function NewProjectPage() {
               />
               {mode === "github_create" ? (
                 <label className="space-y-1.5">
-                  <span className="text-sm font-medium">Visibility</span>
+                  <span className="user-section-title text-sm font-medium">Visibility</span>
                   <SelectControl
                     value={visibility}
                     onValueChange={(value) => setVisibility(value as "private" | "public")}
@@ -318,7 +308,7 @@ export default function NewProjectPage() {
           ) : null}
 
           {mode === "github_import" && githubReady ? (
-            <div className="grid gap-4 sm:grid-cols-2">
+            <div className="user-panel grid gap-4 p-5 sm:grid-cols-2">
               <Field
                 label="Project name"
                 value={name}
@@ -338,7 +328,9 @@ export default function NewProjectPage() {
             <>
               {runtimePickerEnabled ? (
                 <label className="block space-y-1.5">
-                  <span className="text-sm font-medium">Default Agent Runtime</span>
+                  <span className="user-section-title text-sm font-medium">
+                    Default Agent Runtime
+                  </span>
                   <SelectControl
                     value={runtimeID}
                     onValueChange={setRuntimeID}
@@ -362,7 +354,7 @@ export default function NewProjectPage() {
                 type="button"
                 disabled={busy || !runtimeID}
                 onClick={() => void submit()}
-                className="inline-flex items-center gap-2 rounded-xl bg-primary px-4 py-2.5 text-sm font-medium text-primary-foreground disabled:opacity-50"
+                className="user-accent-btn inline-flex h-10 items-center gap-2 rounded-xl px-4 text-sm font-semibold disabled:opacity-50"
               >
                 {busy ? <Loader2 className="size-4 animate-spin" /> : <Plus className="size-4" />}
                 Create project
@@ -370,8 +362,8 @@ export default function NewProjectPage() {
             </>
           ) : null}
         </section>
-      </main>
-    </div>
+      </div>
+    </main>
   );
 }
 
@@ -392,14 +384,27 @@ function SourceCard({
     <button
       type="button"
       onClick={onClick}
-      className={cn(
-        "rounded-2xl border p-4 text-left transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/45",
-        active ? "border-primary bg-primary/5" : "border-border bg-card hover:bg-muted/40",
-      )}
+      aria-pressed={active}
+      className="user-card user-card--hover group relative text-left"
+      style={
+        active
+          ? {
+              borderWidth: 2,
+              borderStyle: "solid",
+              borderColor: "var(--page-accent)",
+              background: "var(--page-accent-soft)",
+            }
+          : undefined
+      }
     >
-      <Icon className={cn("size-5", active ? "text-primary" : "text-muted-foreground")} />
-      <span className="mt-3 block text-sm font-semibold">{title}</span>
-      <span className="mt-1 block text-xs text-muted-foreground">{detail}</span>
+      <span className="user-card-glyph size-[38px]">
+        <Icon className="size-[18px] transition-transform duration-300 group-hover:scale-110" />
+      </span>
+      <span className="user-card-name mt-2.5 block text-sm font-semibold">{title}</span>
+      <span className="user-card-desc mt-1 block text-xs">{detail}</span>
+      {active ? (
+        <Check className="absolute right-3.5 top-3.5 size-4 text-[color:var(--page-accent)]" />
+      ) : null}
     </button>
   );
 }
@@ -424,34 +429,42 @@ function RepositoryPicker({
   onLoadMore: () => void;
 }) {
   return (
-    <div>
+    <div className="user-panel p-4">
       <div className="relative">
-        <Search className="absolute left-3 top-3 size-4 text-muted-foreground" />
+        <Search className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
         <input
           value={filter}
           onChange={(event) => onFilter(event.target.value)}
           placeholder="Search repositories"
-          className="h-10 w-full rounded-xl border border-border bg-background pl-9 pr-3 text-sm"
+          className="user-search-input user-field-input h-10 w-full rounded-xl pl-9 pr-3 text-sm"
         />
       </div>
-      <div className="mt-3 max-h-72 overflow-y-auto rounded-xl border border-border">
+      <div className="mt-3 max-h-72 space-y-1.5 overflow-y-auto">
         {repositories.map((repository) => (
           <button
             type="button"
             key={repository.id}
             onClick={() => onSelect(repository)}
-            className="flex w-full items-center gap-3 border-b border-border/60 px-3 py-3 text-left last:border-0 hover:bg-muted"
+            aria-pressed={selectedID === repository.id}
+            className={cn(
+              "user-card row group w-full text-left",
+              selectedID === repository.id && "is-active",
+            )}
           >
-            <span className="grid size-8 place-items-center rounded-lg bg-muted">
-              <Lock className="size-3.5" />
+            <span className="user-card-glyph">
+              <Lock className="size-3.5 transition-transform duration-300 group-hover:scale-110" />
             </span>
             <span className="min-w-0 flex-1">
-              <span className="block truncate text-sm font-medium">{repository.full_name}</span>
-              <span className="text-xs text-muted-foreground">
+              <span className="user-card-name block truncate text-sm font-medium">
+                {repository.full_name}
+              </span>
+              <span className="user-card-desc text-xs">
                 {repository.default_branch} · {Math.ceil(repository.size_kb / 1024)} MB
               </span>
             </span>
-            {selectedID === repository.id ? <Check className="size-4 text-primary" /> : null}
+            {selectedID === repository.id ? (
+              <Check className="size-4 text-[color:var(--page-accent)]" />
+            ) : null}
           </button>
         ))}
       </div>
@@ -460,9 +473,9 @@ function RepositoryPicker({
           type="button"
           disabled={busy}
           onClick={onLoadMore}
-          className="mt-3 inline-flex items-center gap-2 text-sm text-muted-foreground hover:text-foreground disabled:opacity-50"
+          className="user-tbtn user-tbtn--ghost mt-3 disabled:opacity-50"
         >
-          <RefreshCw className="size-3.5" /> Load more repositories
+          <RefreshCw className={cn("size-3.5", busy && "animate-spin")} /> Load more repositories
         </button>
       ) : null}
     </div>
@@ -484,12 +497,12 @@ function Field({
 }) {
   return (
     <label className={cn("space-y-1.5", wide && "sm:col-span-2")}>
-      <span className="text-sm font-medium">{label}</span>
+      <span className="user-section-title text-sm font-medium">{label}</span>
       <input
         value={value}
         onChange={(event) => onChange(event.target.value)}
         placeholder={placeholder}
-        className="h-10 w-full rounded-xl border border-border bg-background px-3 text-sm"
+        className="user-search-input user-field-input h-10 w-full rounded-xl px-3 text-sm"
       />
     </label>
   );

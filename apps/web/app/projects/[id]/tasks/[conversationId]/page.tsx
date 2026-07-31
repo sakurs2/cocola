@@ -68,21 +68,21 @@ export default function ProjectTaskPage() {
   const branchName = workspace?.branch_name || fallbackBranch;
 
   return (
-    <div className="flex h-full min-h-0 flex-1 flex-col">
+    <div className="user-theme-indigo flex h-full min-h-0 flex-1 flex-col">
       <div className="flex h-10 shrink-0 items-center gap-2 border-b border-border px-3 text-xs text-muted-foreground">
         <button
           type="button"
           onClick={() => router.push(`/projects/${encodeURIComponent(params.id)}`)}
-          className="inline-flex items-center gap-1 rounded-md px-1.5 py-1 hover:bg-muted hover:text-foreground"
+          className="inline-flex items-center gap-1 rounded-md px-1.5 py-1 transition-colors duration-200 hover:bg-[color:var(--page-accent)]/10 hover:text-[color:var(--page-accent)]"
         >
           <ChevronLeft className="size-3.5" />
           {project?.name || projectName || "Project"}
         </button>
-        <span>/</span>
+        <span className="text-muted-foreground/50">/</span>
         <span className="max-w-64 truncate text-foreground/80">
           {conversation?.title || "Task"}
         </span>
-        <span className="ml-auto inline-flex items-center gap-1">
+        <span className="ml-auto inline-flex items-center gap-1 rounded-md border border-[color:var(--page-accent)]/20 bg-[color:var(--page-accent)]/5 px-2 py-1 font-medium text-[color:var(--page-accent)]">
           <GitBranch className="size-3.5" />
           {branchName}
         </span>
