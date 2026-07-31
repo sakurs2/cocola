@@ -2959,6 +2959,20 @@
   --page-accent-shadow-soft: rgba(5, 150, 105, 0.35);
 }
 
+.cocola-user-ui .user-theme-amber,
+.cocola-user-ui.user-theme-amber {
+  --page-accent: #d97706;
+  --page-accent-2: #f59e0b;
+  --page-accent-grad: #d97706;
+  --page-accent-soft: #fffbeb;
+  --page-accent-ink: #b45309;
+  --page-accent-border: #fcd34d;
+  --page-accent-focus: #f59e0b;
+  --page-accent-focus-ring: rgba(217, 119, 6, 0.2);
+  --page-accent-shadow: rgba(217, 119, 6, 0.6);
+  --page-accent-shadow-soft: rgba(217, 119, 6, 0.35);
+}
+
 /* cool-gray canvas — matches admin sub-page (.admin-glass-shell #f8fafc) */
 .cocola-user-ui .user-canvas {
   background: #f8fafc;
@@ -3132,6 +3146,23 @@
 .cocola-user-ui .user-theme-indigo .user-search-input:focus-within,
 .cocola-user-ui .user-theme-indigo .user-field-input:focus,
 .cocola-user-ui .user-theme-indigo .user-field-input:focus-visible {
+  outline: none;
+  border-color: var(--page-accent-focus);
+  box-shadow: 0 0 0 3px var(--page-accent-focus-ring);
+}
+/* folders (amber) — HeroUI-style focus: kill default outline, soft 3px glow ring.
+   Scoped to .user-theme-amber only (not ".cocola-user-ui .user-theme-amber"),
+   because the create-folder drawer is portaled to <body> with BOTH classes on the
+   SAME element, so a descendant combinator would never match. */
+.user-theme-amber .user-search-input,
+.user-theme-amber .user-field-input {
+  outline: none;
+}
+.user-theme-amber .user-search-input:focus,
+.user-theme-amber .user-search-input:focus-visible,
+.user-theme-amber .user-search-input:focus-within,
+.user-theme-amber .user-field-input:focus,
+.user-theme-amber .user-field-input:focus-visible {
   outline: none;
   border-color: var(--page-accent-focus);
   box-shadow: 0 0 0 3px var(--page-accent-focus-ring);
@@ -3471,6 +3502,78 @@
 .cocola-user-ui .group:hover .proj-mono {
   transform: scale(1.06) rotate(-3deg);
   box-shadow: 0 12px 24px -8px var(--page-accent-shadow);
+}
+
+/* ==================================================================
+   Folders page visual scheme (amber, solid) — mirrors indigo scheme.
+   Scoped under .user-theme-amber so other landed pages are unaffected.
+   ===================================================================== */
+
+/* solid icon backgrounds */
+.cocola-user-ui .user-theme-amber .user-page-icon,
+.cocola-user-ui .user-theme-amber .user-card-glyph {
+  background: var(--page-accent-soft);
+}
+
+/* primary accent button — solid fill + springy hover/press + icon pop */
+.cocola-user-ui .user-theme-amber .user-accent-btn {
+  transition:
+    transform 180ms cubic-bezier(0.34, 1.56, 0.64, 1),
+    box-shadow 180ms ease,
+    opacity 160ms ease;
+}
+.cocola-user-ui .user-theme-amber .user-accent-btn:hover {
+  opacity: 0.97;
+  transform: translateY(-2px);
+  box-shadow: 0 16px 28px -12px var(--page-accent-shadow);
+}
+.cocola-user-ui .user-theme-amber .user-accent-btn:active {
+  transform: translateY(0) scale(0.96);
+  box-shadow: 0 6px 14px -10px var(--page-accent-shadow);
+}
+.cocola-user-ui .user-theme-amber .user-accent-btn svg {
+  transition: transform 240ms cubic-bezier(0.34, 1.56, 0.64, 1);
+}
+.cocola-user-ui .user-theme-amber .user-accent-btn:hover svg {
+  transform: scale(1.18);
+}
+
+/* footer toggle buttons — lift + press micro-interaction */
+.cocola-user-ui .user-theme-amber .user-tbtn {
+  transition:
+    transform 150ms ease,
+    background 150ms ease,
+    border-color 150ms ease,
+    box-shadow 150ms ease;
+}
+.cocola-user-ui .user-theme-amber .user-tbtn--ghost:hover {
+  transform: translateY(-1px);
+  box-shadow: 0 6px 14px -10px rgba(15, 23, 42, 0.4);
+}
+.cocola-user-ui .user-theme-amber .user-tbtn--ghost:active {
+  transform: translateY(0) scale(0.97);
+}
+.cocola-user-ui .user-theme-amber .user-tbtn--fill:hover {
+  opacity: 0.94;
+  transform: translateY(-1px);
+  box-shadow: 0 12px 22px -10px var(--page-accent-shadow);
+}
+.cocola-user-ui .user-theme-amber .user-tbtn--fill:active {
+  transform: translateY(0) scale(0.97);
+}
+
+/* keyboard-only focus ring (no black default outline) */
+.cocola-user-ui .user-theme-amber button:focus-visible,
+.cocola-user-ui .user-theme-amber [role="button"]:focus-visible,
+.cocola-user-ui .user-theme-amber a[href]:focus-visible {
+  outline: 2px solid var(--page-accent-focus);
+  outline-offset: 2px;
+}
+/* text inputs get their focus feedback from the field/search glow ring,
+   not a squared keyboard outline */
+.cocola-user-ui .user-theme-amber input:focus-visible,
+.cocola-user-ui .user-theme-amber textarea:focus-visible {
+  outline: none;
 }
 
 /* task cards — mirror admin overview .admin-module-card */

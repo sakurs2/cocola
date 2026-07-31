@@ -1,7 +1,7 @@
 "use client";
 
 import * as DropdownMenu from "@radix-ui/react-dropdown-menu";
-import { ChevronRight, Folder, MessagesSquare, MoreHorizontal, Pencil, Trash2 } from "lucide-react";
+import { ArrowLeft, Folder, MessagesSquare, MoreHorizontal, Pencil, Trash2 } from "lucide-react";
 import Link from "next/link";
 import { useParams, useRouter } from "next/navigation";
 import { useEffect, useMemo, useRef, useState } from "react";
@@ -35,6 +35,7 @@ export default function FolderPage() {
   } = useCocola();
   const preparedFolder = useRef<string | null>(null);
   const preparedSession = useRef<string | null>(null);
+  const folderInputRef = useRef<HTMLInputElement>(null);
   const folder = folders.find((item) => item.id === folderID);
   const folderConversations = useMemo(
     () =>
@@ -69,6 +70,21 @@ export default function FolderPage() {
       router.push("/");
     }
   }, [activeSessionId, folderID, router, runningSessionIds]);
+
+  // Reliably place the cursor in the rename field once it mounts. Radix returns
+  // focus to its trigger after the menu closes, which defeats `autoFocus`, so we
+  // focus + select on the next frame instead.
+  useEffect(() => {
+    if (!editingFolder) return;
+    const frame = requestAnimationFrame(() => {
+      const input = folderInputRef.current;
+      if (input) {
+        input.focus();
+        input.select();
+      }
+    });
+    return () => cancelAnimationFrame(frame);
+  }, [editingFolder]);
 
   const openConversation = async (id: string) => {
     await loadConversation(id);
@@ -159,26 +175,27 @@ export default function FolderPage() {
   if (!folder) return <div className="h-full" />;
 
   return (
-    <div className="h-full overflow-y-auto px-5 py-8 sm:px-8 lg:px-12">
+    <div className="user-page user-theme-amber h-full overflow-y-auto px-5 py-8 sm:px-8 lg:px-12">
       <div className="mx-auto w-full max-w-4xl pb-16">
-        <div className="flex items-center gap-1.5 text-xs font-medium text-muted-foreground">
-          <Link href="/folders" className="hover:text-foreground">
-            Folders
-          </Link>
-          <ChevronRight className="size-3.5" />
-          <span className="truncate text-foreground/75">{folder.name}</span>
-        </div>
+        <button
+          type="button"
+          onClick={() => router.push("/folders")}
+          className="group inline-flex items-center gap-1.5 rounded-full border border-black/[0.06] bg-white px-4 py-2 text-[13px] font-medium text-muted-foreground shadow-[0_1px_2px_0_rgb(15_23_42/0.06),0_6px_16px_-10px_rgb(15_23_42/0.25)] transition-all duration-200 hover:-translate-y-0.5 hover:text-foreground hover:shadow-[0_2px_4px_0_rgb(15_23_42/0.08),0_12px_24px_-12px_rgb(15_23_42/0.35)] active:translate-y-0 active:shadow-[0_1px_2px_0_rgb(15_23_42/0.06)]"
+        >
+          <ArrowLeft className="size-4 transition-transform duration-200 group-hover:-translate-x-0.5" />
+          Back
+        </button>
 
         <section className="relative mt-8 pl-8 sm:pl-11">
-          <div className="absolute bottom-[-2.5rem] left-[0.9rem] top-10 w-px bg-gradient-to-b from-primary/55 via-primary/20 to-transparent sm:left-[1.15rem]" />
-          <div className="absolute left-0 top-0 grid size-8 place-items-center rounded-xl border border-primary/15 bg-primary/10 text-primary shadow-sm sm:size-9">
+          <div className="absolute bottom-[-2.5rem] left-[0.9rem] top-10 w-px bg-gradient-to-b from-amber-500/55 via-amber-500/20 to-transparent sm:left-[1.15rem]" />
+          <div className="absolute left-0 top-0 grid size-8 place-items-center rounded-xl border border-amber-500/20 bg-amber-500/10 text-amber-600 shadow-sm sm:size-9">
             <Folder className="size-4 sm:size-[18px]" />
           </div>
           <div className="flex min-w-0 items-start justify-between gap-3">
             <div className="min-w-0 flex-1">
               {editingFolder ? (
                 <input
-                  autoFocus
+                  ref={folderInputRef}
                   value={folderDraft}
                   onChange={(event) => setFolderDraft(event.target.value)}
                   onBlur={() => void commitFolderRename()}
@@ -211,6 +228,9 @@ export default function FolderPage() {
                 <DropdownMenu.Content
                   align="end"
                   sideOffset={5}
+                  onCloseAutoFocus={(event) => {
+                    if (editingFolder) event.preventDefault();
+                  }}
                   className="cocola-user-ui z-50 min-w-40 rounded-xl border border-border bg-popover p-1 text-foreground shadow-xl outline-none"
                 >
                   <DropdownMenu.Item

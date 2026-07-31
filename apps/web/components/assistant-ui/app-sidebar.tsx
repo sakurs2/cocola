@@ -357,7 +357,7 @@ export function AppSidebar({
                 <span className="truncate">Folders</span>
               </Link>
               <Link
-                href="/folders/new"
+                href="/folders?new=1"
                 onClick={guardLinkNavigation}
                 aria-label="Create folder"
                 title="Create folder"
