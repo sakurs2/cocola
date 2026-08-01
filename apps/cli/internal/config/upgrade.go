@@ -47,8 +47,7 @@ func PrepareUpgrade(paths Paths, targetVersion string, compose []byte) (UpgradeR
 	if err != nil {
 		return UpgradeResult{}, err
 	}
-	openSandboxConfig := renderOpenSandboxConfig(paths)
-	targetRevision := deploymentRevision(compose, openSandboxConfig)
+	targetRevision := deploymentRevision(compose)
 	if state.PendingUpgrade != nil {
 		pending := state.PendingUpgrade
 		if pending.ToVersion == targetVersion && pending.ToRevision == targetRevision {
@@ -88,15 +87,13 @@ func PrepareUpgrade(paths Paths, targetVersion string, compose []byte) (UpgradeR
 	if fromRevision == "" {
 		currentCompose, readErr := os.ReadFile(paths.Compose)
 		if readErr == nil {
-			currentOpenSandbox, _ := os.ReadFile(paths.OpenSandboxConfig)
-			fromRevision = deploymentRevision(currentCompose, currentOpenSandbox)
+			fromRevision = deploymentRevision(currentCompose)
 		}
 	}
 
 	needsUpdate := state.ConfigSchemaVersion != CurrentSchemaVersion ||
 		state.Version != targetVersion || state.DeploymentRevision != targetRevision ||
-		!bytes.Equal(environment, migratedEnvironment) || !fileEquals(paths.Compose, compose) ||
-		!fileEquals(paths.OpenSandboxConfig, openSandboxConfig)
+		!bytes.Equal(environment, migratedEnvironment) || !fileEquals(paths.Compose, compose)
 	if !needsUpdate {
 		return UpgradeResult{FromVersion: fromVersion, ToVersion: targetVersion}, nil
 	}
@@ -122,7 +119,7 @@ func PrepareUpgrade(paths Paths, targetVersion string, compose []byte) (UpgradeR
 		BackupDir: backupDir, PreparedAt: time.Now().UTC().Format(time.RFC3339),
 	}
 
-	writeErr := writeUpgradeFiles(paths, compose, openSandboxConfig, migratedEnvironment, state)
+	writeErr := writeUpgradeFiles(paths, compose, migratedEnvironment, state)
 	if writeErr != nil {
 		if restoreErr := restoreBackup(paths, backupDir); restoreErr != nil {
 			return UpgradeResult{}, errors.Join(writeErr, fmt.Errorf("restore deployment backup: %w", restoreErr))
@@ -180,12 +177,11 @@ func BackupPaths(paths Paths, backupDir string) (Paths, error) {
 		return Paths{}, err
 	}
 	return Paths{
-		Home:              paths.Home,
-		Environment:       filepath.Join(backupDir, filepath.Base(paths.Environment)),
-		Compose:           filepath.Join(backupDir, filepath.Base(paths.Compose)),
-		OpenSandboxConfig: filepath.Join(backupDir, filepath.Base(paths.OpenSandboxConfig)),
-		State:             filepath.Join(backupDir, filepath.Base(paths.State)),
-		SandboxRoot:       paths.SandboxRoot,
+		Home:        paths.Home,
+		Environment: filepath.Join(backupDir, filepath.Base(paths.Environment)),
+		Compose:     filepath.Join(backupDir, filepath.Base(paths.Compose)),
+		State:       filepath.Join(backupDir, filepath.Base(paths.State)),
+		SandboxRoot: paths.SandboxRoot,
 	}, nil
 }
 
@@ -193,11 +189,8 @@ func DatabaseBackupPath(backupDir string) string {
 	return filepath.Join(backupDir, "postgres.dump")
 }
 
-func writeUpgradeFiles(paths Paths, compose, openSandboxConfig, environment []byte, state State) error {
+func writeUpgradeFiles(paths Paths, compose, environment []byte, state State) error {
 	if err := atomicWrite(paths.Compose, compose, 0o644); err != nil {
-		return err
-	}
-	if err := atomicWrite(paths.OpenSandboxConfig, openSandboxConfig, 0o644); err != nil {
 		return err
 	}
 	if err := atomicWrite(paths.Environment, environment, 0o600); err != nil {
@@ -233,7 +226,7 @@ func createBackup(paths Paths, fromVersion, toVersion string) (string, error) {
 		}
 		manifest.Existing[name] = true
 		mode := os.FileMode(0o600)
-		if name == filepath.Base(paths.Compose) || name == filepath.Base(paths.OpenSandboxConfig) {
+		if name == filepath.Base(paths.Compose) {
 			mode = 0o644
 		}
 		if err := atomicWrite(filepath.Join(backupDir, name), data, mode); err != nil {
@@ -275,7 +268,7 @@ func restoreBackup(paths Paths, backupDir string) error {
 			return fmt.Errorf("read backed up %s: %w", name, err)
 		}
 		mode := os.FileMode(0o600)
-		if name == filepath.Base(paths.Compose) || name == filepath.Base(paths.OpenSandboxConfig) {
+		if name == filepath.Base(paths.Compose) {
 			mode = 0o644
 		}
 		if err := atomicWrite(target, data, mode); err != nil {
@@ -295,7 +288,7 @@ func validateBackupDirectory(paths Paths, backupDir string) error {
 }
 
 func managedFiles(paths Paths) []string {
-	return []string{paths.Environment, paths.Compose, paths.OpenSandboxConfig, paths.State}
+	return []string{paths.Environment, paths.Compose, paths.State}
 }
 
 func fileEquals(path string, expected []byte) bool {

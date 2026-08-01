@@ -34,21 +34,12 @@ func TestWriteInstallationCreatesPrivateConfigAndStableState(t *testing.T) {
 			t.Fatalf("%s mode = %o", path, info.Mode().Perm())
 		}
 	}
-	for _, path := range []string{paths.Compose, paths.OpenSandboxConfig} {
-		info, err := os.Stat(path)
-		if err != nil {
-			t.Fatal(err)
-		}
-		if info.Mode().Perm() != 0o644 {
-			t.Fatalf("%s mode = %o", path, info.Mode().Perm())
-		}
-	}
-	openSandboxConfig, err := os.ReadFile(paths.OpenSandboxConfig)
+	info, err := os.Stat(paths.Compose)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(string(openSandboxConfig), `allowed_host_paths = ["`+paths.SandboxRoot+`"]`) {
-		t.Fatalf("OpenSandbox config does not allow the generated sandbox root: %s", openSandboxConfig)
+	if info.Mode().Perm() != 0o644 {
+		t.Fatalf("%s mode = %o", paths.Compose, info.Mode().Perm())
 	}
 	contents, err := os.ReadFile(paths.Environment)
 	if err != nil {
@@ -256,13 +247,6 @@ func TestLoadRejectsNewerConfigSchema(t *testing.T) {
 	}
 	if _, err := Load(paths); err == nil || !strings.Contains(err.Error(), "newer than this CLI") {
 		t.Fatalf("Load() error = %v", err)
-	}
-}
-
-func TestRenderOpenSandboxConfigEscapesSandboxRoot(t *testing.T) {
-	config := string(renderOpenSandboxConfig(Paths{SandboxRoot: `/tmp/cocola"root\sandboxes`}))
-	if !strings.Contains(config, `allowed_host_paths = ["/tmp/cocola\"root\\sandboxes"]`) {
-		t.Fatalf("OpenSandbox config does not safely quote the sandbox root: %s", config)
 	}
 }
 

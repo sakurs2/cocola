@@ -6,7 +6,7 @@
 
 ## 安装
 
-前置条件：Linux 或 macOS、Docker daemon、Docker Compose 2.1.1 或更高版本。支持
+前置条件：Linux 或 macOS、Docker daemon、Docker Compose 2.23.1 或更高版本。支持
 amd64 和 arm64。
 
 ```bash
@@ -57,8 +57,7 @@ OpenSandbox 时，必须同时提供一个从远端 sandbox 可达的 LLM Gatewa
 
 ```text
 ~/.cocola/
-├── compose.yaml    CLI 内嵌的正式 Compose，不依赖源码目录
-├── opensandbox.toml  内置 OpenSandbox 的运行配置
+├── compose.yaml    CLI 内嵌的正式 Compose（含 OpenSandbox 配置），不依赖源码目录
 ├── config.env      0600，镜像、端口和生成的 Secret
 ├── state.json      0600，CLI 管理状态
 ├── backups/        升级前的部署文件与 PostgreSQL 备份
@@ -86,8 +85,8 @@ cocola start
 ```
 
 检测到已有 `config.env` 后，`install` 会跳过首次向导，根据独立的配置 Schema 执行迁移。
-管理员账号、端口、Secret、已知配置值和额外环境变量都会保留；CLI 管理的 Compose、
-OpenSandbox 配置和目标镜像版本会更新。修改前的文件保存在
+管理员账号、端口、Secret、已知配置值和额外环境变量都会保留；CLI 管理的 Compose 和
+目标镜像版本会更新。修改前的文件保存在
 `~/.cocola/backups/upgrade-<time>-<from>-to-<to>/`。
 
 应用升级时，如果当前安装已有 PostgreSQL 数据卷，`start` 会先生成 owner-only 的

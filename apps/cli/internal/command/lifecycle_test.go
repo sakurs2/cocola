@@ -14,6 +14,39 @@ import (
 	"github.com/cocola-project/cocola/apps/cli/internal/config"
 )
 
+func TestStartPrintsActionableComposeUpgradeError(t *testing.T) {
+	home := filepath.Join(t.TempDir(), "cocola")
+	var output, errors bytes.Buffer
+	if err := Execute(context.Background(), []string{
+		"install", "--home", home, "--yes", "--admin-password", "test-password",
+	}, IO{In: &bytes.Buffer{}, Out: &output, Err: &errors}); err != nil {
+		t.Fatal(err)
+	}
+
+	directory := t.TempDir()
+	dockerPath := filepath.Join(directory, "docker")
+	script := strings.Join([]string{
+		"#!/bin/sh",
+		"if [ \"$1\" = \"info\" ]; then exit 0; fi",
+		"if [ \"$1 $2 $3\" = \"compose version --short\" ]; then printf '2.22.0\n'; exit 0; fi",
+		"exit 1",
+		"",
+	}, "\n")
+	if err := os.WriteFile(dockerPath, []byte(script), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("COCOLA_DOCKER_BIN", dockerPath)
+	output.Reset()
+	errors.Reset()
+	err := Execute(context.Background(), []string{"start", "--home", home}, IO{
+		In: &bytes.Buffer{}, Out: &output, Err: &errors,
+	})
+	if err == nil || !strings.Contains(errors.String(), "Docker Compose 2.22.0 is too old") ||
+		!strings.Contains(errors.String(), "Upgrade Docker Compose") {
+		t.Fatalf("start error = %v, stderr = %q", err, errors.String())
+	}
+}
+
 func TestStartUsesCachedImagesWhenRegistryIsUnavailableAndSkipsPullOnResume(t *testing.T) {
 	home := filepath.Join(t.TempDir(), "cocola")
 	webPort, gatewayPort, llmPort := 33001, 33002, 33003
@@ -34,7 +67,7 @@ func TestStartUsesCachedImagesWhenRegistryIsUnavailableAndSkipsPullOnResume(t *t
 	script := strings.Join([]string{
 		"#!/bin/sh",
 		"printf '%s\n' \"$*\" >> \"$DOCKER_ARGS_LOG\"",
-		"if [ \"$1 $2 $3\" = \"compose version --short\" ]; then printf '2.1.1\n'; exit 0; fi",
+		"if [ \"$1 $2 $3\" = \"compose version --short\" ]; then printf '2.23.1\n'; exit 0; fi",
 		"if [ \"$1\" = \"info\" ]; then exit 0; fi",
 		"if [ \"$1\" = \"image\" ]; then exit 0; fi",
 		"if [ \"$1\" = \"ps\" ]; then printf 'container-id\n'; exit 0; fi",
@@ -133,7 +166,7 @@ func TestFailedUpgradeRestoresPreviousDeploymentWithoutRestartingIt(t *testing.T
 	script := strings.Join([]string{
 		"#!/bin/sh",
 		"printf '%s\n' \"$*\" >> \"$DOCKER_ARGS_LOG\"",
-		"if [ \"$1 $2 $3\" = \"compose version --short\" ]; then printf '2.1.1\n'; exit 0; fi",
+		"if [ \"$1 $2 $3\" = \"compose version --short\" ]; then printf '2.23.1\n'; exit 0; fi",
 		"if [ \"$1\" = \"info\" ]; then exit 0; fi",
 		"if [ \"$1\" = \"ps\" ]; then printf 'container-id\n'; exit 0; fi",
 		"if [ \"$1\" = \"volume\" ]; then printf 'Error: No such volume\n' >&2; exit 1; fi",

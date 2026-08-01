@@ -108,10 +108,9 @@ func TestComposeVersionRequiresMinimumVersion(t *testing.T) {
 		version string
 		wantErr bool
 	}{
-		{"minimum", "2.1.1", false},
-		{"earlier v2", "2.12.2", false},
+		{"minimum", "2.23.1", false},
 		{"newer", "2.30.0", false},
-		{"older", "2.1.0", true},
+		{"older", "2.23.0", true},
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			directory := t.TempDir()
@@ -128,7 +127,25 @@ func TestComposeVersionRequiresMinimumVersion(t *testing.T) {
 			if got != test.version {
 				t.Fatalf("ComposeVersion() version = %q, want %q", got, test.version)
 			}
+			if test.wantErr && (!strings.Contains(err.Error(), "too old") ||
+				!strings.Contains(err.Error(), "Upgrade Docker Compose")) {
+				t.Fatalf("ComposeVersion() error is not actionable: %v", err)
+			}
 		})
+	}
+}
+
+func TestComposeVersionReportsUnavailableDiagnostic(t *testing.T) {
+	directory := t.TempDir()
+	dockerPath := filepath.Join(directory, "docker")
+	script := "#!/bin/sh\nprintf '%s\\n' \"docker: 'compose' is not a docker command.\" >&2\nexit 1\n"
+	if err := os.WriteFile(dockerPath, []byte(script), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	_, err := ComposeVersion(context.Background(), dockerPath)
+	if err == nil || !strings.Contains(err.Error(), "docker: 'compose' is not a docker command") ||
+		!strings.Contains(err.Error(), "Install Docker Compose 2.23.1 or newer") {
+		t.Fatalf("ComposeVersion() error = %v", err)
 	}
 }
 

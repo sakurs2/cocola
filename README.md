@@ -21,7 +21,7 @@
 
   <p>
     <a href="./docs/cli.md"><img src="https://img.shields.io/badge/deployment-self--hosted-5b5bd6?style=flat-square" alt="Self-hosted" /></a>
-    <a href="./docs/cli.md"><img src="https://img.shields.io/badge/Docker%20Compose-2.1.1%2B-2496ED?style=flat-square&logo=docker&logoColor=white" alt="Docker Compose 2.1.1 or newer" /></a>
+    <a href="./docs/cli.md"><img src="https://img.shields.io/badge/Docker%20Compose-2.23.1%2B-2496ED?style=flat-square&logo=docker&logoColor=white" alt="Docker Compose 2.23.1 or newer" /></a>
     <a href="https://github.com/opensandbox-group/OpenSandbox"><img src="https://img.shields.io/badge/sandbox-OpenSandbox-0ea5e9?style=flat-square" alt="OpenSandbox" /></a>
     <a href="./docs/cli.md"><img src="https://img.shields.io/badge/platform-amd64%20%7C%20arm64-64748b?style=flat-square" alt="amd64 and arm64" /></a>
   </p>
@@ -57,7 +57,7 @@ Cocola 不只是一个模型聊天界面。每个会话都会获得独立、可�
 
 - Linux 或 macOS，`amd64` 或 `arm64`；
 - Docker Engine 或 Docker Desktop；
-- Docker Compose 2.1.1 或更高版本。
+- Docker Compose 2.23.1 或更高版本。
 
 **1. 安装**
 

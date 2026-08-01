@@ -17,10 +17,9 @@ import (
 	"github.com/cocola-project/cocola/apps/cli/internal/config"
 )
 
-// Compose 2.1.1 introduced `docker compose up --wait`, the newest Compose
-// capability used by the generated deployment. Keep this floor tied to an
-// actual runtime requirement rather than newer convenience syntax.
-const MinimumComposeVersion = "2.1.1"
+// Compose 2.23.1 introduced configs.content, which keeps the generated
+// OpenSandbox configuration inside the Compose file.
+const MinimumComposeVersion = "2.23.1"
 
 var composeVersionPattern = regexp.MustCompile(`(?i)(?:^|\s)v?(\d+)\.(\d+)\.(\d+)(?:\D|$)`)
 
@@ -54,9 +53,17 @@ func CheckDocker(ctx context.Context) error {
 func ComposeVersion(ctx context.Context, docker string) (string, error) {
 	checkContext, cancel := context.WithTimeout(ctx, 10*time.Second)
 	defer cancel()
-	output, err := exec.CommandContext(checkContext, docker, "compose", "version", "--short").Output()
+	output, err := exec.CommandContext(checkContext, docker, "compose", "version", "--short").CombinedOutput()
 	if err != nil {
-		return "", errors.New("Docker Compose v2 is unavailable")
+		detail := firstDiagnostic(output)
+		if detail == "" {
+			detail = err.Error()
+		}
+		return "", fmt.Errorf(
+			"Docker Compose is unavailable: %s. Install Docker Compose %s or newer and rerun the command",
+			detail,
+			MinimumComposeVersion,
+		)
 	}
 	version, parts, err := parseComposeVersion(string(output))
 	if err != nil {
@@ -65,7 +72,7 @@ func ComposeVersion(ctx context.Context, docker string) (string, error) {
 	minimum, minimumParts, _ := parseComposeVersion(MinimumComposeVersion)
 	if compareVersion(parts, minimumParts) < 0 {
 		return version, fmt.Errorf(
-			"Docker Compose %s is unsupported; version %s or newer is required",
+			"Docker Compose %s is too old; Cocola requires version %s or newer because its deployment uses inline configs. Upgrade Docker Compose and rerun the command",
 			version,
 			minimum,
 		)

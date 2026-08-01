@@ -63,11 +63,11 @@ func TestNonInteractiveInstallWritesEmbeddedRelease(t *testing.T) {
 	if !strings.Contains(string(compose), "cocola-gateway:${COCOLA_VERSION}") {
 		t.Fatal("embedded release compose does not use versioned images")
 	}
-	if strings.Contains(string(compose), "content: |") || strings.Contains(string(compose), "\nconfigs:") {
-		t.Fatal("embedded release compose must not require configs.content")
+	if !strings.Contains(string(compose), "content: |") || !strings.Contains(string(compose), "\nconfigs:") {
+		t.Fatal("embedded release compose must include the OpenSandbox config inline")
 	}
-	if !strings.Contains(string(compose), `./opensandbox.toml:/etc/opensandbox/config.toml:ro`) {
-		t.Fatal("embedded release compose does not mount the generated OpenSandbox config")
+	if !strings.Contains(string(compose), `allowed_host_paths = ["${COCOLA_SANDBOX_ROOT}"]`) {
+		t.Fatal("embedded release compose does not configure the sandbox root")
 	}
 	for _, floating := range []string{
 		"redis:7-alpine", "postgres:16-alpine", "minio/minio:latest",
@@ -77,12 +77,8 @@ func TestNonInteractiveInstallWritesEmbeddedRelease(t *testing.T) {
 			t.Fatalf("embedded release compose uses floating image %q", floating)
 		}
 	}
-	openSandboxConfig, err := os.ReadFile(filepath.Join(home, "opensandbox.toml"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	if !strings.Contains(string(openSandboxConfig), `allowed_host_paths = ["`+filepath.Join(home, "sandboxes")+`"]`) {
-		t.Fatalf("generated OpenSandbox config has the wrong sandbox root: %s", openSandboxConfig)
+	if _, err := os.Stat(filepath.Join(home, "opensandbox.toml")); !os.IsNotExist(err) {
+		t.Fatalf("install generated an unnecessary OpenSandbox config file: %v", err)
 	}
 	for _, expected := range []string{
 		`COCOLA_AGENT_RUNTIME_DEFAULT_ID: "${COCOLA_AGENT_RUNTIME_DEFAULT_ID:-claude-code}"`,

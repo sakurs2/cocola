@@ -37,12 +37,11 @@ const (
 var ErrAlreadyInstalled = errors.New("cocola is already installed in this directory")
 
 type Paths struct {
-	Home              string
-	Environment       string
-	Compose           string
-	OpenSandboxConfig string
-	State             string
-	SandboxRoot       string
+	Home        string
+	Environment string
+	Compose     string
+	State       string
+	SandboxRoot string
 }
 
 type Options struct {
@@ -136,10 +135,9 @@ func ResolvePaths(home string) (Paths, error) {
 	}
 	return Paths{
 		Home: absolute, Environment: filepath.Join(absolute, "config.env"),
-		Compose:           filepath.Join(absolute, "compose.yaml"),
-		OpenSandboxConfig: filepath.Join(absolute, "opensandbox.toml"),
-		State:             filepath.Join(absolute, "state.json"),
-		SandboxRoot:       filepath.Join(absolute, "sandboxes"),
+		Compose:     filepath.Join(absolute, "compose.yaml"),
+		State:       filepath.Join(absolute, "state.json"),
+		SandboxRoot: filepath.Join(absolute, "sandboxes"),
 	}, nil
 }
 
@@ -286,14 +284,13 @@ func WriteInstallation(paths Paths, options Options, compose []byte) (Credential
 		return Credentials{}, fmt.Errorf("create sandbox directory: %w", err)
 	}
 
-	openSandboxConfig := renderOpenSandboxConfig(paths)
 	state := State{
 		ConfigSchemaVersion: CurrentSchemaVersion,
 		Version:             options.Version, ManagedOpenSandbox: options.ManagedOpenSandbox,
 		SandboxImage: strings.TrimSuffix(options.Registry, "/") + "/cocola-sandbox-runtime:" + options.Version,
 		PublicURL:    publicURLOrDefault(options),
 		WebPort:      options.WebPort, GatewayPort: options.GatewayPort, LLMPort: options.LLMPort,
-		DeploymentRevision: deploymentRevision(compose, openSandboxConfig),
+		DeploymentRevision: deploymentRevision(compose),
 	}
 	stateJSON, err := json.MarshalIndent(state, "", "  ")
 	if err != nil {
@@ -301,9 +298,6 @@ func WriteInstallation(paths Paths, options Options, compose []byte) (Credential
 	}
 	stateJSON = append(stateJSON, '\n')
 	if err := atomicWrite(paths.Compose, compose, 0o644); err != nil {
-		return Credentials{}, err
-	}
-	if err := atomicWrite(paths.OpenSandboxConfig, openSandboxConfig, 0o644); err != nil {
 		return Credentials{}, err
 	}
 	if err := atomicWrite(paths.State, stateJSON, 0o600); err != nil {
@@ -318,40 +312,6 @@ func WriteInstallation(paths Paths, options Options, compose []byte) (Credential
 		AdminEmail:    options.AdminEmail,
 		AdminPassword: password,
 	}, nil
-}
-
-func renderOpenSandboxConfig(paths Paths) []byte {
-	// JSON string quoting is also valid for a TOML basic string and safely
-	// preserves spaces, quotes and backslashes in an absolute host path. A Go
-	// string is always JSON-encodable, so this conversion cannot fail.
-	root, _ := json.Marshal(paths.SandboxRoot)
-	return fmt.Appendf(nil, `[server]
-host = "0.0.0.0"
-port = 8090
-
-[log]
-level = "INFO"
-
-[runtime]
-type = "docker"
-execd_image = "sandbox-registry.cn-zhangjiakou.cr.aliyuncs.com/opensandbox/execd:v1.0.19"
-
-[egress]
-image = "opensandbox/egress:v1.1.2"
-
-[storage]
-allowed_host_paths = [%s]
-
-[docker]
-network_mode = "bridge"
-host_ip = "host.docker.internal"
-drop_capabilities = ["AUDIT_WRITE", "MKNOD", "NET_ADMIN", "NET_RAW", "SYS_ADMIN", "SYS_MODULE", "SYS_PTRACE", "SYS_TIME", "SYS_TTY_CONFIG"]
-no_new_privileges = true
-pids_limit = 4096
-
-[ingress]
-mode = "direct"
-`, root)
 }
 
 func Load(paths Paths) (State, error) {
@@ -384,12 +344,9 @@ func publicURLOrDefault(options Options) string {
 	return publicURL
 }
 
-func deploymentRevision(compose, openSandboxConfig []byte) string {
-	digest := sha256.New()
-	_, _ = digest.Write(compose)
-	_, _ = digest.Write([]byte{0})
-	_, _ = digest.Write(openSandboxConfig)
-	return fmt.Sprintf("sha256:%x", digest.Sum(nil))
+func deploymentRevision(compose []byte) string {
+	digest := sha256.Sum256(compose)
+	return fmt.Sprintf("sha256:%x", digest)
 }
 
 func writeState(paths Paths, state State) error {
