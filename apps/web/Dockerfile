@@ -13,6 +13,7 @@ WORKDIR /repo
 
 # Workspace manifests first for better layer caching.
 COPY package.json pnpm-lock.yaml pnpm-workspace.yaml tsconfig.base.json ./
+COPY patches ./patches
 COPY apps/web/package.json          ./apps/web/package.json
 COPY packages/ts-common/package.json ./packages/ts-common/package.json
 RUN pnpm install --frozen-lockfile
