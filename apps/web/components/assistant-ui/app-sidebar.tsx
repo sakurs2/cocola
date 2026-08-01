@@ -556,7 +556,10 @@ function ChatHistoryItem({
           aria-label={title}
           onClick={onOpen}
         >
-          <ChatTypeIcon type={conversation.chat_type || "chat"} />
+          <ChatTypeIcon
+            type={conversation.chat_type || "chat"}
+            isAgent={Boolean(conversation.agent_id || conversation.agent)}
+          />
           <span className="min-w-0 flex-1 truncate">{title}</span>
         </button>
       )}
@@ -588,7 +591,10 @@ function ChatHistoryItem({
   );
 }
 
-function ChatTypeIcon({ type }: { type: string }) {
+function ChatTypeIcon({ type, isAgent }: { type: string; isAgent?: boolean }) {
+  if (isAgent) {
+    return <Bot className="size-4 shrink-0 text-sidebar-accent-foreground" />;
+  }
   if (type === "scheduled_task") {
     return <CalendarDots className="size-4 shrink-0 text-sidebar-accent-foreground" />;
   }

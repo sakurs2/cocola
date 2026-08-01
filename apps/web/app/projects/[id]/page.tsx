@@ -342,7 +342,7 @@ export default function ProjectPage() {
 
   return (
     <main className="user-canvas user-page user-theme-indigo h-full min-w-0 flex-1 overflow-y-auto px-4 py-5 sm:px-6 sm:py-7">
-      <div className="mx-auto w-full max-w-5xl pb-16">
+      <div className="mx-auto w-full max-w-7xl pb-16">
         {/* Back */}
         <button
           type="button"
