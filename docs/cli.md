@@ -6,15 +6,16 @@
 
 ## 安装
 
-前置条件：Linux 或 macOS、Docker daemon、Docker Compose 2.23.1 或更高版本。支持
+前置条件：Linux 或 macOS、Docker daemon、Docker Compose 2.1.1 或更高版本。支持
 amd64 和 arm64。
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/sakurs2/cocola/master/scripts/install.sh | sh
 ```
 
-脚本只负责引导安装：识别系统架构，从 GitHub Release 下载对应 CLI，校验
-`checksums.txt`，原子写入 `~/.local/bin/cocola`，再启动默认的交互式配置向导。向导会
+脚本负责安装或更新 CLI：识别系统架构，从 GitHub Release 下载对应版本，校验
+`checksums.txt`，再原子写入 `~/.local/bin/cocola`。首次安装会启动默认的交互式配置向导；
+已有部署则跳过向导并准备配置迁移。首次向导会
 展示 Cocola 艺术字 Logo，并依次配置管理员账号和服务端口；安全密钥
 会自动生成。所有项目都有默认值，标准安装可以直接逐步确认。首次使用前请确保
 `~/.local/bin` 在 `PATH` 中。
@@ -29,8 +30,8 @@ curl -fsSL https://raw.githubusercontent.com/sakurs2/cocola/master/scripts/insta
 ## 常用命令
 
 ```text
-cocola install                 交互生成并校验部署配置
-cocola start                   拉取镜像并创建、更新或启动服务
+cocola install                 首次交互配置；已有安装则准备升级
+cocola start                   校验环境并创建、更新或恢复服务
 cocola stop                    停止服务但保留容器和网络
 cocola status                  查看容器状态
 cocola logs [-f] [service]     查看全部或单个服务日志
@@ -57,18 +58,43 @@ OpenSandbox 时，必须同时提供一个从远端 sandbox 可达的 LLM Gatewa
 ```text
 ~/.cocola/
 ├── compose.yaml    CLI 内嵌的正式 Compose，不依赖源码目录
+├── opensandbox.toml  内置 OpenSandbox 的运行配置
 ├── config.env      0600，镜像、端口和生成的 Secret
 ├── state.json      0600，CLI 管理状态
+├── backups/        升级前的部署文件与 PostgreSQL 备份
 └── sandboxes/      OpenSandbox Docker runtime 的宿主目录
 ```
 
-重复执行 `install` 不会覆盖现有配置或 Secret。安装完成页会明确显示生成的
+首次安装完成页会明确显示生成的
 `config.env` 绝对路径、管理员登录信息和 `cocola start` 下一步命令。`install` 不会拉取
 镜像或启动服务；用户检查配置后显式执行 `cocola start`。自定义安装目录后，后续命令需
 继续使用同一个 `--home`，或设置 `COCOLA_HOME`。
 
-`cocola start` 是唯一启动入口：它会拉取当前版本镜像，并通过 Compose `up --wait` 创建缺失
-容器、重建配置或镜像发生变化的服务、恢复已停止容器，最后等待健康检查通过。
+`cocola start` 是唯一启动入口：它会检查 Docker、Compose、部署配置、首次启动端口和基本
+磁盘空间。首次启动或待应用升级时会拉取目标镜像；Registry 不可用但所有目标镜像已缓存时
+继续启动。普通 `stop` 后恢复不会强制访问 Registry。随后通过 Compose `up --wait` 创建缺失
+容器、重建配置或镜像发生变化的服务、恢复已停止容器，并等待包含 Web HTTP 探针在内的健康
+检查通过。成功页会显示 Web、Admin 和模型配置入口；失败页会展示当前容器状态及诊断命令。
+
+## 升级
+
+升级不增加新的用户命令。重新执行安装命令即可下载新版 CLI：
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/sakurs2/cocola/master/scripts/install.sh | sh
+cocola start
+```
+
+检测到已有 `config.env` 后，`install` 会跳过首次向导，根据独立的配置 Schema 执行迁移。
+管理员账号、端口、Secret、已知配置值和额外环境变量都会保留；CLI 管理的 Compose、
+OpenSandbox 配置和目标镜像版本会更新。修改前的文件保存在
+`~/.cocola/backups/upgrade-<time>-<from>-to-<to>/`。
+
+应用升级时，如果当前安装已有 PostgreSQL 数据卷，`start` 会先生成 owner-only 的
+`postgres.dump`，再拉取和启动目标版本。目标版本拉取或健康检查失败时，CLI 会恢复旧部署
+文件，但不会在失败处理过程中继续编排容器；检查报错后运行 `cocola start` 即可显式恢复上
+一版本。数据库 dump 不会被自动还原，数据库备份和部署备份始终保留，供人工恢复。第三方
+基础镜像使用固定版本，避免一次普通重启隐式升级 Redis、PostgreSQL、MinIO 或 OpenSandbox。
 
 `cocola stop` 会先停止 Web、Gateway 和 Agent Runtime，避免产生新任务；Sandbox Manager
 随后在 30 秒预算内通过 Provider API 销毁 Redis 已登记的运行中 sandbox，最后执行 Compose

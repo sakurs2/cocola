@@ -1,9 +1,15 @@
 package command
 
 import (
+	"context"
 	"errors"
+	"fmt"
+	"os"
+	"strings"
 
 	"github.com/cocola-project/cocola/apps/cli/internal/compose"
+	"github.com/cocola-project/cocola/apps/cli/internal/config"
+	"github.com/cocola-project/cocola/apps/cli/internal/ui"
 	"github.com/spf13/cobra"
 )
 
@@ -28,12 +34,7 @@ func (a *application) lifecycleCommand(action string) *cobra.Command {
 			printer := a.printer()
 			switch action {
 			case "start":
-				printer.Info("Pulling Cocola images")
-				if err := runner.Pull(command.Context()); err != nil {
-					return err
-				}
-				printer.Info("Starting Cocola")
-				err = runner.Start(command.Context())
+				return a.start(command.Context(), runner)
 			case "stop":
 				printer.Info("Stopping Cocola and preserving its containers")
 				err = runner.Stop(command.Context())
@@ -50,6 +51,183 @@ func (a *application) lifecycleCommand(action string) *cobra.Command {
 			return nil
 		},
 	}
+}
+
+type lifecycleResult struct {
+	Status        string `json:"status"`
+	Version       string `json:"version"`
+	WebURL        string `json:"web_url"`
+	AdminURL      string `json:"admin_url"`
+	ModelSetupURL string `json:"model_setup_url"`
+	BackupDir     string `json:"backup_dir,omitempty"`
+}
+
+func (a *application) start(ctx context.Context, runner *compose.Runner) error {
+	printer := a.printer()
+	printer.Info("Checking the Cocola host and deployment configuration")
+	warnings, err := runStartPreflight(ctx, runner)
+	if err != nil {
+		return err
+	}
+	for _, warning := range warnings {
+		printer.Warn(warning)
+	}
+
+	pending := runner.State.PendingUpgrade
+	backupDir := ""
+	if pending != nil {
+		backupDir = pending.BackupDir
+		printer.Info("Backing up the existing Cocola database")
+		if err := a.backupUpgradeDatabase(ctx, runner.Paths, pending); err != nil {
+			return err
+		}
+	}
+
+	needsPull := pending != nil || runner.State.LastSuccessfulVersion == ""
+	if needsPull {
+		printer.Info("Pulling the required Cocola images")
+		if pullErr := runner.Pull(ctx); pullErr != nil {
+			cached, inspectErr := runner.ImagesPresent(ctx)
+			if inspectErr != nil {
+				pullErr = errors.Join(pullErr, inspectErr)
+			}
+			if !cached {
+				if pending != nil {
+					return a.restoreFailedUpgrade(ctx, runner.Paths, pending, pullErr)
+				}
+				a.printStartFailure(ctx, runner)
+				return fmt.Errorf("pull required images: %w", pullErr)
+			}
+			printer.Warn("The image registry is unavailable; all required images are cached locally, so startup will continue.")
+		}
+	} else {
+		printer.Info("Using the installed Cocola images")
+	}
+
+	printer.Info("Starting Cocola and waiting for service health checks")
+	if err := runner.Start(ctx); err != nil {
+		if pending != nil {
+			return a.restoreFailedUpgrade(ctx, runner.Paths, pending, err)
+		}
+		a.printStartFailure(ctx, runner)
+		return err
+	}
+	state, err := config.MarkStarted(runner.Paths)
+	if err != nil {
+		return fmt.Errorf("services are healthy but the deployment state could not be committed: %w", err)
+	}
+	webURL := stateWebURL(state)
+	result := lifecycleResult{
+		Status: "ready", Version: state.Version, WebURL: webURL,
+		AdminURL:      strings.TrimRight(webURL, "/") + "/admin",
+		ModelSetupURL: strings.TrimRight(webURL, "/") + "/admin/models",
+		BackupDir:     backupDir,
+	}
+	if a.json {
+		return printer.Encode(result)
+	}
+	printStartSummary(printer, state, backupDir)
+	return nil
+}
+
+func (a *application) backupUpgradeDatabase(
+	ctx context.Context,
+	paths config.Paths,
+	pending *config.PendingUpgrade,
+) error {
+	backupPaths, err := config.BackupPaths(paths, pending.BackupDir)
+	if err != nil {
+		return err
+	}
+	backupRunner, err := compose.New(backupPaths, a.io.In, a.io.Out, a.io.Err)
+	if err != nil {
+		return fmt.Errorf("open previous Cocola deployment: %w", err)
+	}
+	hasDatabase, err := backupRunner.VolumePresent(ctx, "pgdata")
+	if err != nil {
+		return err
+	}
+	if !hasDatabase {
+		return nil
+	}
+	destination := config.DatabaseBackupPath(pending.BackupDir)
+	if _, err := os.Stat(destination); err == nil {
+		return nil
+	} else if !errors.Is(err, os.ErrNotExist) {
+		return fmt.Errorf("inspect PostgreSQL backup: %w", err)
+	}
+	if err := backupRunner.StartService(ctx, "postgres"); err != nil {
+		return fmt.Errorf("start PostgreSQL for backup: %w", err)
+	}
+	if err := backupRunner.BackupDatabase(ctx, destination); err != nil {
+		return err
+	}
+	return nil
+}
+
+func (a *application) restoreFailedUpgrade(
+	ctx context.Context,
+	paths config.Paths,
+	pending *config.PendingUpgrade,
+	cause error,
+) error {
+	printer := a.printer()
+	printer.Warn("The Cocola upgrade failed. Restoring the previous deployment configuration.")
+	backupDir, rollbackErr := config.RollbackUpgrade(paths)
+	if rollbackErr != nil {
+		printer.Warn("Automatic rollback failed. The deployment backup is still available at:")
+		printer.Path(pending.BackupDir)
+		return errors.Join(cause, fmt.Errorf("restore previous deployment: %w", rollbackErr))
+	}
+	printer.Warn("The previous deployment configuration was restored. Cocola was not restarted automatically.")
+	printer.Info("Review the upgrade error, then recover the previous version with:")
+	printer.Command("cocola start")
+	printer.Info("Deployment and PostgreSQL backups are retained for manual recovery. The database dump is never restored automatically.")
+	printer.Path(backupDir)
+	restoredRunner, runnerErr := compose.New(paths, a.io.In, a.io.Out, a.io.Err)
+	if runnerErr != nil {
+		return errors.Join(cause, fmt.Errorf("load restored deployment: %w", runnerErr))
+	}
+	a.printStartFailure(ctx, restoredRunner)
+	return cause
+}
+
+func (a *application) printStartFailure(ctx context.Context, runner *compose.Runner) {
+	if a.json {
+		return
+	}
+	printer := a.printer()
+	printer.Section("Current service status")
+	_ = runner.Status(ctx, false)
+	printer.Info("Inspect the failure with:")
+	printer.Command("cocola logs --tail 200")
+	printer.Command("cocola doctor")
+}
+
+func printStartSummary(printer ui.Printer, state config.State, backupDir string) {
+	webURL := stateWebURL(state)
+	printer.Success("Cocola is ready.")
+	printer.Section("Access Cocola")
+	printer.KeyValues([][2]string{
+		{"Web app", webURL},
+		{"Admin console", strings.TrimRight(webURL, "/") + "/admin"},
+		{"Model setup", strings.TrimRight(webURL, "/") + "/admin/models"},
+	})
+	if strings.Contains(webURL, "localhost") || strings.Contains(webURL, "127.0.0.1") {
+		printer.Info(fmt.Sprintf("From another device, open http://<server-ip>:%d", state.WebPort))
+	}
+	printer.Info("Before starting your first conversation, configure a Provider and default model in Admin → Models.")
+	if backupDir != "" {
+		printer.Info("The pre-upgrade deployment backup is available at:")
+		printer.Path(backupDir)
+	}
+}
+
+func stateWebURL(state config.State) string {
+	if state.PublicURL != "" {
+		return state.PublicURL
+	}
+	return fmt.Sprintf("http://localhost:%d", state.WebPort)
 }
 
 func (a *application) statusCommand() *cobra.Command {

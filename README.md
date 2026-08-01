@@ -21,7 +21,7 @@
 
   <p>
     <a href="./docs/cli.md"><img src="https://img.shields.io/badge/deployment-self--hosted-5b5bd6?style=flat-square" alt="Self-hosted" /></a>
-    <a href="./docs/cli.md"><img src="https://img.shields.io/badge/Docker%20Compose-2.23.1%2B-2496ED?style=flat-square&logo=docker&logoColor=white" alt="Docker Compose 2.23.1 or newer" /></a>
+    <a href="./docs/cli.md"><img src="https://img.shields.io/badge/Docker%20Compose-2.1.1%2B-2496ED?style=flat-square&logo=docker&logoColor=white" alt="Docker Compose 2.1.1 or newer" /></a>
     <a href="https://github.com/opensandbox-group/OpenSandbox"><img src="https://img.shields.io/badge/sandbox-OpenSandbox-0ea5e9?style=flat-square" alt="OpenSandbox" /></a>
     <a href="./docs/cli.md"><img src="https://img.shields.io/badge/platform-amd64%20%7C%20arm64-64748b?style=flat-square" alt="amd64 and arm64" /></a>
   </p>
@@ -57,7 +57,7 @@ Cocola 不只是一个模型聊天界面。每个会话都会获得独立、可�
 
 - Linux 或 macOS，`amd64` 或 `arm64`；
 - Docker Engine 或 Docker Desktop；
-- Docker Compose 2.23.1 或更高版本。
+- Docker Compose 2.1.1 或更高版本。
 
 **1. 安装**
 
@@ -76,6 +76,9 @@ curl -fsSL https://raw.githubusercontent.com/sakurs2/cocola/master/scripts/insta
 ```bash
 cocola start
 ```
+
+首次启动会检查 Docker、Compose、端口和磁盘空间，拉取固定版本镜像并等待服务健康。正常的
+停止后恢复会直接复用本地镜像，不依赖 Registry 在线。
 
 **3. 配置模型**
 
@@ -99,6 +102,8 @@ cocola stop
 </details>
 
 安装指定版本、使用外部 OpenSandbox 或进行非交互部署，请查看 [Cocola CLI 文档](./docs/cli.md)。
+升级时重新执行同一条安装命令即可：CLI 会保留现有账号、端口、Secret 和自定义配置，生成
+升级备份并迁移部署文件；随后运行 `cocola start` 应用新版本，失败时自动恢复上一版配置。
 
 ## 系统架构
 

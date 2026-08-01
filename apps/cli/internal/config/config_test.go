@@ -1,6 +1,7 @@
 package config
 
 import (
+	"encoding/json"
 	"errors"
 	"os"
 	"path/filepath"
@@ -32,6 +33,22 @@ func TestWriteInstallationCreatesPrivateConfigAndStableState(t *testing.T) {
 		if info.Mode().Perm() != 0o600 {
 			t.Fatalf("%s mode = %o", path, info.Mode().Perm())
 		}
+	}
+	for _, path := range []string{paths.Compose, paths.OpenSandboxConfig} {
+		info, err := os.Stat(path)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if info.Mode().Perm() != 0o644 {
+			t.Fatalf("%s mode = %o", path, info.Mode().Perm())
+		}
+	}
+	openSandboxConfig, err := os.ReadFile(paths.OpenSandboxConfig)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(openSandboxConfig), `allowed_host_paths = ["`+paths.SandboxRoot+`"]`) {
+		t.Fatalf("OpenSandbox config does not allow the generated sandbox root: %s", openSandboxConfig)
 	}
 	contents, err := os.ReadFile(paths.Environment)
 	if err != nil {
@@ -75,11 +92,177 @@ func TestWriteInstallationCreatesPrivateConfigAndStableState(t *testing.T) {
 		t.Fatal(err)
 	}
 	if state.Version != "v0.1.0" || !state.ManagedOpenSandbox ||
-		state.SandboxImage != "ghcr.io/sakurs2/cocola-sandbox-runtime:v0.1.0" {
+		state.SandboxImage != "ghcr.io/sakurs2/cocola-sandbox-runtime:v0.1.0" ||
+		state.ConfigSchemaVersion != CurrentSchemaVersion || state.DeploymentRevision == "" ||
+		state.LLMPort != 18091 {
 		t.Fatalf("state = %+v", state)
 	}
 	if _, err := WriteInstallation(paths, options, []byte("different")); !errors.Is(err, ErrAlreadyInstalled) {
 		t.Fatalf("second install error = %v", err)
+	}
+}
+
+func TestPrepareUpgradePreservesConfigurationAndRollsBack(t *testing.T) {
+	home := filepath.Join(t.TempDir(), "cocola")
+	paths, err := ResolvePaths(home)
+	if err != nil {
+		t.Fatal(err)
+	}
+	options := Defaults("v0.1.0")
+	options.Home = home
+	options.AdminPassword = "strong-password"
+	if _, err := WriteInstallation(paths, options, []byte("services:\n  old: {}\n")); err != nil {
+		t.Fatal(err)
+	}
+	originalEnvironment, err := os.ReadFile(paths.Environment)
+	if err != nil {
+		t.Fatal(err)
+	}
+	originalEnvironment = append(originalEnvironment,
+		[]byte("CUSTOM_OPERATOR_SETTING=keep-me\nCOCOLA_WEB_HOST_PORT=3200\n")...,
+	)
+	if err := os.WriteFile(paths.Environment, originalEnvironment, 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	result, err := PrepareUpgrade(paths, "v0.2.0", []byte("services:\n  new: {}\n"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !result.Updated || result.FromVersion != "v0.1.0" || result.ToVersion != "v0.2.0" || result.BackupDir == "" {
+		t.Fatalf("upgrade result = %+v", result)
+	}
+	migrated, err := os.ReadFile(paths.Environment)
+	if err != nil {
+		t.Fatal(err)
+	}
+	text := string(migrated)
+	for _, expected := range []string{
+		`COCOLA_VERSION="v0.2.0"`,
+		`COCOLA_WEB_HOST_PORT=3200`,
+		`CUSTOM_OPERATOR_SETTING=keep-me`,
+		`COCOLA_BOOTSTRAP_ADMIN_PASSWORD="strong-password"`,
+	} {
+		if !strings.Contains(text, expected) {
+			t.Fatalf("migrated environment missing %q: %s", expected, text)
+		}
+	}
+	state, err := Load(paths)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if state.PendingUpgrade == nil || state.Version != "v0.2.0" || state.WebPort != 3200 ||
+		state.LastSuccessfulVersion != "v0.1.0" {
+		t.Fatalf("pending state = %+v", state)
+	}
+	if _, err := os.Stat(filepath.Join(result.BackupDir, "manifest.json")); err != nil {
+		t.Fatalf("backup manifest: %v", err)
+	}
+
+	backupDir, err := RollbackUpgrade(paths)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if backupDir != result.BackupDir {
+		t.Fatalf("rollback backup = %q, want %q", backupDir, result.BackupDir)
+	}
+	restoredEnvironment, err := os.ReadFile(paths.Environment)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(restoredEnvironment) != string(originalEnvironment) {
+		t.Fatalf("environment was not restored exactly\n got: %s\nwant: %s", restoredEnvironment, originalEnvironment)
+	}
+	restoredCompose, err := os.ReadFile(paths.Compose)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(restoredCompose) != "services:\n  old: {}\n" {
+		t.Fatalf("compose was not restored: %s", restoredCompose)
+	}
+}
+
+func TestPrepareUpgradeMigratesLegacyStateAndCommitsAfterStart(t *testing.T) {
+	home := filepath.Join(t.TempDir(), "cocola")
+	paths, err := ResolvePaths(home)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(home, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	legacyState := State{
+		Version: "v0.1.0", ManagedOpenSandbox: true,
+		SandboxImage: "registry.example/cocola-sandbox-runtime:v0.1.0",
+		WebPort:      3000, GatewayPort: 8080,
+	}
+	stateData, err := json.Marshal(legacyState)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(paths.State, stateData, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	legacyEnvironment := strings.Join([]string{
+		`COCOLA_VERSION="v0.1.0"`,
+		`COCOLA_IMAGE_REGISTRY="registry.example"`,
+		`COCOLA_WEB_HOST_PORT="3000"`,
+		`COCOLA_GATEWAY_HOST_PORT="8080"`,
+		`COCOLA_LLM_HOST_PORT="18091"`,
+		`COCOLA_PG_PASSWORD="database-secret"`,
+		`COCOLA_BOOTSTRAP_ADMIN_PASSWORD="admin-secret"`,
+		"",
+	}, "\n")
+	if err := os.WriteFile(paths.Environment, []byte(legacyEnvironment), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(paths.Compose, []byte("legacy compose\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	result, err := PrepareUpgrade(paths, "v0.2.0", []byte("current compose\n"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !result.Updated {
+		t.Fatal("legacy installation was not migrated")
+	}
+	migrated, err := os.ReadFile(paths.Environment)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(migrated), `COCOLA_PG_PASSWORD="database-secret"`) ||
+		!strings.Contains(string(migrated), `COCOLA_BOOTSTRAP_ADMIN_PASSWORD="admin-secret"`) {
+		t.Fatalf("legacy secrets changed: %s", migrated)
+	}
+	state, err := MarkStarted(paths)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if state.PendingUpgrade != nil || state.LastSuccessfulVersion != "v0.2.0" ||
+		state.ConfigSchemaVersion != CurrentSchemaVersion {
+		t.Fatalf("committed state = %+v", state)
+	}
+}
+
+func TestLoadRejectsNewerConfigSchema(t *testing.T) {
+	paths, err := ResolvePaths(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	data := []byte(`{"config_schema_version":999,"version":"v9"}`)
+	if err := os.WriteFile(paths.State, data, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := Load(paths); err == nil || !strings.Contains(err.Error(), "newer than this CLI") {
+		t.Fatalf("Load() error = %v", err)
+	}
+}
+
+func TestRenderOpenSandboxConfigEscapesSandboxRoot(t *testing.T) {
+	config := string(renderOpenSandboxConfig(Paths{SandboxRoot: `/tmp/cocola"root\sandboxes`}))
+	if !strings.Contains(config, `allowed_host_paths = ["/tmp/cocola\"root\\sandboxes"]`) {
+		t.Fatalf("OpenSandbox config does not safely quote the sandbox root: %s", config)
 	}
 }
 
@@ -147,5 +330,32 @@ func TestPublicOriginDefaultsAndProductionConfiguration(t *testing.T) {
 func TestQuoteEnvEscapesComposeInterpolation(t *testing.T) {
 	if got := quoteEnv(`pa$HOME\\"word`); got != `"pa$$HOME\\\\\"word"` {
 		t.Fatalf("quoteEnv() = %q", got)
+	}
+}
+
+func TestParseEnvironmentAcceptsComposeQuotesAndComments(t *testing.T) {
+	document, err := parseEnvironment([]byte(strings.Join([]string{
+		"DOUBLE=\"value with spaces\" # operator note",
+		"SINGLE='literal $value # retained' # another note",
+		"PLAIN=value # trailing note",
+		"HASH=value#part",
+		"",
+	}, "\n")))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for key, expected := range map[string]string{
+		"DOUBLE": "value with spaces",
+		"SINGLE": "literal $value # retained",
+		"PLAIN":  "value",
+		"HASH":   "value#part",
+	} {
+		if got := document.values[key]; got != expected {
+			t.Fatalf("%s = %q, want %q", key, got, expected)
+		}
+	}
+	if rendered := string(document.render()); !strings.Contains(rendered, "# operator note") ||
+		!strings.Contains(rendered, "# another note") {
+		t.Fatalf("comments were not preserved: %s", rendered)
 	}
 }

@@ -8,6 +8,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/cocola-project/cocola/apps/cli/internal/config"
 	"github.com/cocola-project/cocola/apps/cli/internal/ui"
 )
 
@@ -62,6 +63,27 @@ func TestNonInteractiveInstallWritesEmbeddedRelease(t *testing.T) {
 	if !strings.Contains(string(compose), "cocola-gateway:${COCOLA_VERSION}") {
 		t.Fatal("embedded release compose does not use versioned images")
 	}
+	if strings.Contains(string(compose), "content: |") || strings.Contains(string(compose), "\nconfigs:") {
+		t.Fatal("embedded release compose must not require configs.content")
+	}
+	if !strings.Contains(string(compose), `./opensandbox.toml:/etc/opensandbox/config.toml:ro`) {
+		t.Fatal("embedded release compose does not mount the generated OpenSandbox config")
+	}
+	for _, floating := range []string{
+		"redis:7-alpine", "postgres:16-alpine", "minio/minio:latest",
+		"minio/mc:latest", "opensandbox/server:latest",
+	} {
+		if strings.Contains(string(compose), floating) {
+			t.Fatalf("embedded release compose uses floating image %q", floating)
+		}
+	}
+	openSandboxConfig, err := os.ReadFile(filepath.Join(home, "opensandbox.toml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(openSandboxConfig), `allowed_host_paths = ["`+filepath.Join(home, "sandboxes")+`"]`) {
+		t.Fatalf("generated OpenSandbox config has the wrong sandbox root: %s", openSandboxConfig)
+	}
 	for _, expected := range []string{
 		`COCOLA_AGENT_RUNTIME_DEFAULT_ID: "${COCOLA_AGENT_RUNTIME_DEFAULT_ID:-claude-code}"`,
 		`COCOLA_AGENT_RUNTIME_PICKER_ENABLED: "${COCOLA_AGENT_RUNTIME_PICKER_ENABLED:-false}"`,
@@ -107,6 +129,58 @@ func TestInstallPersistsPublicURLAndReportsIt(t *testing.T) {
 	}
 	if !strings.Contains(output.String(), "https://cocola.example.com") {
 		t.Fatalf("install output missing public URL: %q", output.String())
+	}
+}
+
+func TestRepeatedInstallPreparesUpgradeWithoutPromptingOrReplacingSecrets(t *testing.T) {
+	home := filepath.Join(t.TempDir(), "cocola")
+	var firstOutput, firstErrors bytes.Buffer
+	if err := Execute(context.Background(), []string{
+		"install", "--home", home, "--yes", "--version", "v0.1.0",
+		"--admin-password", "test-password",
+	}, IO{In: &bytes.Buffer{}, Out: &firstOutput, Err: &firstErrors}); err != nil {
+		t.Fatalf("first install: %v, stderr=%s", err, firstErrors.String())
+	}
+	before, err := os.ReadFile(filepath.Join(home, "config.env"))
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	var output, errors bytes.Buffer
+	if err := Execute(context.Background(), []string{
+		"install", "--home", home, "--version", "v0.2.0",
+	}, IO{In: &bytes.Buffer{}, Out: &output, Err: &errors}); err != nil {
+		t.Fatalf("repeat install: %v, stderr=%s", err, errors.String())
+	}
+	after, err := os.ReadFile(filepath.Join(home, "config.env"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, secretLine := range strings.Split(string(before), "\n") {
+		if !strings.Contains(secretLine, "SECRET") && !strings.Contains(secretLine, "PASSWORD") &&
+			!strings.Contains(secretLine, "ADMIN_KEY") && !strings.Contains(secretLine, "AUTH_SECRET") {
+			continue
+		}
+		if !strings.Contains(string(after), secretLine) {
+			t.Fatalf("repeat install changed or removed %q", secretLine)
+		}
+	}
+	paths, err := config.ResolvePaths(home)
+	if err != nil {
+		t.Fatal(err)
+	}
+	state, err := config.Load(paths)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if state.PendingUpgrade == nil || state.PendingUpgrade.FromVersion != "v0.1.0" ||
+		state.PendingUpgrade.ToVersion != "v0.2.0" {
+		t.Fatalf("upgrade state = %+v", state)
+	}
+	for _, expected := range []string{"Cocola upgrade is ready", "Deployment backup", "$ cocola start"} {
+		if !strings.Contains(output.String(), expected) {
+			t.Fatalf("upgrade output missing %q: %q", expected, output.String())
+		}
 	}
 }
 

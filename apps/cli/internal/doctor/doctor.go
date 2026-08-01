@@ -2,6 +2,7 @@ package doctor
 
 import (
 	"context"
+	"fmt"
 	"io"
 	"os"
 	"os/exec"
@@ -54,6 +55,22 @@ func Run(ctx context.Context, paths config.Paths) Report {
 	if _, err := os.Stat(paths.Environment); err != nil {
 		add(Check{Name: "installation", Message: "not installed in " + paths.Home})
 		return report
+	}
+	state, err := config.Load(paths)
+	if err != nil {
+		add(Check{Name: "configuration schema", Message: err.Error()})
+		return report
+	}
+	if state.ConfigSchemaVersion != config.CurrentSchemaVersion {
+		add(Check{
+			Name:    "configuration schema",
+			Message: "outdated; run cocola install to migrate the deployment configuration",
+		})
+	} else {
+		add(Check{
+			Name: "configuration schema", OK: true,
+			Message: fmt.Sprintf("version %d", config.CurrentSchemaVersion),
+		})
 	}
 	runner, err := compose.New(paths, nil, io.Discard, io.Discard)
 	if err != nil {

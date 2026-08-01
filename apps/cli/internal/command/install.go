@@ -3,6 +3,7 @@ package command
 import (
 	"errors"
 	"fmt"
+	"os"
 	"strconv"
 	"strings"
 
@@ -30,9 +31,30 @@ func (a *application) installCommand() *cobra.Command {
 	var yes bool
 	command := &cobra.Command{
 		Use:   "install",
-		Short: "Create the Cocola deployment configuration",
+		Short: "Create or upgrade the Cocola deployment configuration",
 		RunE: func(_ *cobra.Command, _ []string) error {
 			options.Home = a.home
+			paths, err := config.ResolvePaths(options.Home)
+			if err != nil {
+				return err
+			}
+			if _, err := os.Stat(paths.Environment); err == nil {
+				result, err := config.PrepareUpgrade(paths, options.Version, assets.Compose)
+				if err != nil {
+					return err
+				}
+				if a.json {
+					status := "up_to_date"
+					if result.Updated {
+						status = "upgrade_prepared"
+					}
+					return a.printer().Encode(map[string]any{"status": status, "upgrade": result})
+				}
+				printUpgradeSummary(a.printer(), result)
+				return nil
+			} else if !errors.Is(err, os.ErrNotExist) {
+				return fmt.Errorf("inspect existing installation: %w", err)
+			}
 			if options.ExternalOpenSandboxURL != "" {
 				options.ManagedOpenSandbox = false
 			}
@@ -49,7 +71,7 @@ func (a *application) installCommand() *cobra.Command {
 			if err := options.Validate(); err != nil {
 				return err
 			}
-			paths, err := config.ResolvePaths(options.Home)
+			paths, err = config.ResolvePaths(options.Home)
 			if err != nil {
 				return err
 			}
@@ -100,6 +122,25 @@ func (a *application) installCommand() *cobra.Command {
 		flag.Hidden = true
 	}
 	return command
+}
+
+func printUpgradeSummary(printer ui.Printer, result config.UpgradeResult) {
+	if !result.Updated {
+		printer.Success("Cocola deployment configuration is already up to date.")
+		printer.Info("Start or resume Cocola with:")
+		printer.Command("cocola start")
+		return
+	}
+	printer.Success("Cocola upgrade is ready.")
+	printer.Section("Upgrade summary")
+	printer.KeyValues([][2]string{
+		{"Current version", result.FromVersion},
+		{"Target version", result.ToVersion},
+		{"Deployment backup", result.BackupDir},
+	})
+	printer.Info("Your ports, administrator account, secrets, and custom settings were preserved.")
+	printer.Info("Apply the upgrade and run health checks with:")
+	printer.Command("cocola start")
 }
 
 func (a *application) runInstallForm(options *config.Options) error {

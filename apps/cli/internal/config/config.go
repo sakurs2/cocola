@@ -2,6 +2,7 @@ package config
 
 import (
 	"crypto/rand"
+	"crypto/sha256"
 	"encoding/base64"
 	"encoding/json"
 	"errors"
@@ -19,6 +20,11 @@ import (
 
 const DefaultRegistry = "ghcr.io/sakurs2"
 
+// CurrentSchemaVersion versions the CLI-owned deployment files independently
+// from the Cocola release. Every incompatible config change must add an
+// explicit migration before this value is incremented.
+const CurrentSchemaVersion = 1
+
 const (
 	defaultAgentRuntimeID       = "claude-code"
 	defaultRuntimePickerEnabled = "false"
@@ -31,11 +37,12 @@ const (
 var ErrAlreadyInstalled = errors.New("cocola is already installed in this directory")
 
 type Paths struct {
-	Home        string
-	Environment string
-	Compose     string
-	State       string
-	SandboxRoot string
+	Home              string
+	Environment       string
+	Compose           string
+	OpenSandboxConfig string
+	State             string
+	SandboxRoot       string
 }
 
 type Options struct {
@@ -56,11 +63,27 @@ type Options struct {
 }
 
 type State struct {
-	Version            string `json:"version"`
-	ManagedOpenSandbox bool   `json:"managed_opensandbox"`
-	SandboxImage       string `json:"sandbox_image"`
-	WebPort            int    `json:"web_port"`
-	GatewayPort        int    `json:"gateway_port"`
+	ConfigSchemaVersion    int             `json:"config_schema_version"`
+	Version                string          `json:"version"`
+	LastSuccessfulVersion  string          `json:"last_successful_version,omitempty"`
+	DeploymentRevision     string          `json:"deployment_revision"`
+	LastSuccessfulRevision string          `json:"last_successful_revision,omitempty"`
+	ManagedOpenSandbox     bool            `json:"managed_opensandbox"`
+	SandboxImage           string          `json:"sandbox_image"`
+	PublicURL              string          `json:"public_url"`
+	WebPort                int             `json:"web_port"`
+	GatewayPort            int             `json:"gateway_port"`
+	LLMPort                int             `json:"llm_port"`
+	PendingUpgrade         *PendingUpgrade `json:"pending_upgrade,omitempty"`
+}
+
+type PendingUpgrade struct {
+	FromVersion  string `json:"from_version"`
+	ToVersion    string `json:"to_version"`
+	FromRevision string `json:"from_revision,omitempty"`
+	ToRevision   string `json:"to_revision"`
+	BackupDir    string `json:"backup_dir"`
+	PreparedAt   string `json:"prepared_at"`
 }
 
 type Credentials struct {
@@ -113,9 +136,10 @@ func ResolvePaths(home string) (Paths, error) {
 	}
 	return Paths{
 		Home: absolute, Environment: filepath.Join(absolute, "config.env"),
-		Compose:     filepath.Join(absolute, "compose.yaml"),
-		State:       filepath.Join(absolute, "state.json"),
-		SandboxRoot: filepath.Join(absolute, "sandboxes"),
+		Compose:           filepath.Join(absolute, "compose.yaml"),
+		OpenSandboxConfig: filepath.Join(absolute, "opensandbox.toml"),
+		State:             filepath.Join(absolute, "state.json"),
+		SandboxRoot:       filepath.Join(absolute, "sandboxes"),
 	}, nil
 }
 
@@ -262,10 +286,14 @@ func WriteInstallation(paths Paths, options Options, compose []byte) (Credential
 		return Credentials{}, fmt.Errorf("create sandbox directory: %w", err)
 	}
 
+	openSandboxConfig := renderOpenSandboxConfig(paths)
 	state := State{
-		Version: options.Version, ManagedOpenSandbox: options.ManagedOpenSandbox,
+		ConfigSchemaVersion: CurrentSchemaVersion,
+		Version:             options.Version, ManagedOpenSandbox: options.ManagedOpenSandbox,
 		SandboxImage: strings.TrimSuffix(options.Registry, "/") + "/cocola-sandbox-runtime:" + options.Version,
-		WebPort:      options.WebPort, GatewayPort: options.GatewayPort,
+		PublicURL:    publicURLOrDefault(options),
+		WebPort:      options.WebPort, GatewayPort: options.GatewayPort, LLMPort: options.LLMPort,
+		DeploymentRevision: deploymentRevision(compose, openSandboxConfig),
 	}
 	stateJSON, err := json.MarshalIndent(state, "", "  ")
 	if err != nil {
@@ -273,6 +301,9 @@ func WriteInstallation(paths Paths, options Options, compose []byte) (Credential
 	}
 	stateJSON = append(stateJSON, '\n')
 	if err := atomicWrite(paths.Compose, compose, 0o644); err != nil {
+		return Credentials{}, err
+	}
+	if err := atomicWrite(paths.OpenSandboxConfig, openSandboxConfig, 0o644); err != nil {
 		return Credentials{}, err
 	}
 	if err := atomicWrite(paths.State, stateJSON, 0o600); err != nil {
@@ -289,6 +320,40 @@ func WriteInstallation(paths Paths, options Options, compose []byte) (Credential
 	}, nil
 }
 
+func renderOpenSandboxConfig(paths Paths) []byte {
+	// JSON string quoting is also valid for a TOML basic string and safely
+	// preserves spaces, quotes and backslashes in an absolute host path. A Go
+	// string is always JSON-encodable, so this conversion cannot fail.
+	root, _ := json.Marshal(paths.SandboxRoot)
+	return fmt.Appendf(nil, `[server]
+host = "0.0.0.0"
+port = 8090
+
+[log]
+level = "INFO"
+
+[runtime]
+type = "docker"
+execd_image = "sandbox-registry.cn-zhangjiakou.cr.aliyuncs.com/opensandbox/execd:v1.0.19"
+
+[egress]
+image = "opensandbox/egress:v1.1.2"
+
+[storage]
+allowed_host_paths = [%s]
+
+[docker]
+network_mode = "bridge"
+host_ip = "host.docker.internal"
+drop_capabilities = ["AUDIT_WRITE", "MKNOD", "NET_ADMIN", "NET_RAW", "SYS_ADMIN", "SYS_MODULE", "SYS_PTRACE", "SYS_TIME", "SYS_TTY_CONFIG"]
+no_new_privileges = true
+pids_limit = 4096
+
+[ingress]
+mode = "direct"
+`, root)
+}
+
 func Load(paths Paths) (State, error) {
 	data, err := os.ReadFile(paths.State)
 	if err != nil {
@@ -301,7 +366,38 @@ func Load(paths Paths) (State, error) {
 	if err := json.Unmarshal(data, &state); err != nil {
 		return State{}, fmt.Errorf("decode installation state: %w", err)
 	}
+	if state.ConfigSchemaVersion > CurrentSchemaVersion {
+		return State{}, fmt.Errorf(
+			"installation config schema %d is newer than this CLI supports (%d); update the Cocola CLI",
+			state.ConfigSchemaVersion,
+			CurrentSchemaVersion,
+		)
+	}
 	return state, nil
+}
+
+func publicURLOrDefault(options Options) string {
+	publicURL, err := options.PublicOrigin()
+	if err != nil {
+		return fmt.Sprintf("http://localhost:%d", options.WebPort)
+	}
+	return publicURL
+}
+
+func deploymentRevision(compose, openSandboxConfig []byte) string {
+	digest := sha256.New()
+	_, _ = digest.Write(compose)
+	_, _ = digest.Write([]byte{0})
+	_, _ = digest.Write(openSandboxConfig)
+	return fmt.Sprintf("sha256:%x", digest.Sum(nil))
+}
+
+func writeState(paths Paths, state State) error {
+	data, err := json.MarshalIndent(state, "", "  ")
+	if err != nil {
+		return fmt.Errorf("encode installation state: %w", err)
+	}
+	return atomicWrite(paths.State, append(data, '\n'), 0o600)
 }
 
 func renderEnvironment(paths Paths, o Options, s secrets, password string) string {

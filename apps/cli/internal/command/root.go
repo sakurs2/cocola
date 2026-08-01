@@ -62,7 +62,7 @@ func (a *application) rootCommand() *cobra.Command {
 			printer.Banner()
 			printer.Section("Common commands")
 			printer.KeyValues([][2]string{
-				{"cocola install", "Create the deployment configuration"},
+				{"cocola install", "Create or upgrade the deployment configuration"},
 				{"cocola start", "Create, update, or start Cocola"},
 				{"cocola stop", "Stop Cocola and preserve its containers"},
 				{"cocola status", "Show service status"},
