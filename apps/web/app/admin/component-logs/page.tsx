@@ -3,11 +3,7 @@
 import { SquareTerminal as ComponentLogsPageIcon } from "lucide-react";
 import { AlertTriangle, AlignLeft, CheckCircle2, HardDrive, Loader2 } from "lucide-react";
 import { useCallback, useEffect, useMemo, useState } from "react";
-import {
-  AdminPage,
-  AdminPageHeader,
-  AdminRefreshButton,
-} from "@/components/admin/admin-ui";
+import { AdminPage, AdminPageHeader, AdminRefreshButton } from "@/components/admin/admin-ui";
 import { SelectControl } from "@/components/ui/select-control";
 
 type LogFile = {
@@ -95,12 +91,7 @@ export default function ComponentLogsPage() {
           tone="slate"
           icon={<ComponentLogsPageIcon />}
         />
-        <Metric
-          label="Loaded Lines"
-          value={String(lines.length)}
-          tone="sky"
-          icon={<AlignLeft />}
-        />
+        <Metric label="Loaded Lines" value={String(lines.length)} tone="sky" icon={<AlignLeft />} />
         <Metric
           label="Selected Size"
           value={formatBytes(selectedFile?.size ?? 0)}

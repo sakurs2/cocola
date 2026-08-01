@@ -45,6 +45,42 @@ func TestLLMProviderRequiresSecretForAPIKeyAndMasks(t *testing.T) {
 	}
 }
 
+func TestLLMProviderIconLifecycle(t *testing.T) {
+	ctx := context.Background()
+	svc := New(store.NewMemory(), nil, authTestClock).WithModelSecretKey("secret")
+	key := "test-only-key"
+	provider, err := svc.CreateLLMProvider(ctx, LLMProviderInput{
+		ID: "custom", Name: "Custom", Type: ProviderOpenAIResponses,
+		BaseURL: "https://example.invalid/v1", APIKey: &key,
+		IconType: IconImage, IconURL: "https://example.invalid/icon.svg",
+	})
+	if err != nil {
+		t.Fatalf("create provider with image icon: %v", err)
+	}
+	if provider.IconType != IconImage || provider.IconURL != "https://example.invalid/icon.svg" {
+		t.Fatalf("image icon not persisted: %+v", provider)
+	}
+
+	provider, err = svc.UpdateLLMProvider(ctx, provider.ID, LLMProviderInput{
+		IconType: IconSimpleIcons,
+		IconSlug: "openai",
+	})
+	if err != nil {
+		t.Fatalf("update provider brand icon: %v", err)
+	}
+	if provider.IconType != IconSimpleIcons || provider.IconSlug != "openai" || provider.IconURL != "" {
+		t.Fatalf("brand icon not persisted cleanly: %+v", provider)
+	}
+
+	if _, err := svc.CreateLLMProvider(ctx, LLMProviderInput{
+		ID: "invalid-icon", Name: "Invalid", Type: ProviderAnthropic,
+		BaseURL: "https://example.invalid", APIKey: &key,
+		IconType: IconImage, IconURL: "http://example.invalid/icon.svg",
+	}); !errors.Is(err, ErrInvalidArg) {
+		t.Fatalf("insecure image icon want ErrInvalidArg, got %v", err)
+	}
+}
+
 func TestLLMProviderRejectsRemovedOpenAICompatType(t *testing.T) {
 	ctx := context.Background()
 	svc := New(store.NewMemory(), nil, authTestClock).WithModelSecretKey("secret")

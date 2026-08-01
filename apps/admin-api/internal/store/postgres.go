@@ -968,22 +968,24 @@ func (p *Postgres) UpdateAgentPrompt(ctx context.Context, prompt AgentPrompt) er
 
 // ---- LLM model configuration ----
 
-const llmProviderCols = `id, name, type, base_url, api_key_ciphertext, api_key_hint, enabled, created_at, updated_at`
+const llmProviderCols = `id, name, type, base_url, api_key_ciphertext, api_key_hint, icon_type, icon_slug, icon_url, enabled, created_at, updated_at`
 
 func scanLLMProvider(row pgx.Row) (LLMProvider, error) {
 	var p LLMProvider
 	err := row.Scan(&p.ID, &p.Name, &p.Type, &p.BaseURL, &p.APIKeyCiphertext,
-		&p.APIKeyHint, &p.Enabled, &p.CreatedAt, &p.UpdatedAt)
+		&p.APIKeyHint, &p.IconType, &p.IconSlug, &p.IconURL, &p.Enabled,
+		&p.CreatedAt, &p.UpdatedAt)
 	return p, err
 }
 
 func (p *Postgres) CreateLLMProvider(ctx context.Context, provider LLMProvider) error {
 	const q = `INSERT INTO llm_providers (` + llmProviderCols + `)
-		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)`
+		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12)`
 	_, err := p.pool.Exec(ctx, q,
 		provider.ID, provider.Name, provider.Type, provider.BaseURL,
-		provider.APIKeyCiphertext, provider.APIKeyHint, provider.Enabled,
-		provider.CreatedAt, provider.UpdatedAt)
+		provider.APIKeyCiphertext, provider.APIKeyHint, provider.IconType,
+		provider.IconSlug, provider.IconURL, provider.Enabled, provider.CreatedAt,
+		provider.UpdatedAt)
 	if isUniqueViolation(err) {
 		return ErrConflict
 	}
@@ -1019,12 +1021,14 @@ func (p *Postgres) ListLLMProviders(ctx context.Context) ([]LLMProvider, error) 
 func (p *Postgres) UpdateLLMProvider(ctx context.Context, provider LLMProvider) error {
 	const q = `UPDATE llm_providers
 		SET name=$2, type=$3, base_url=$4, api_key_ciphertext=$5, api_key_hint=$6,
-		    enabled=$7, created_at=$8, updated_at=$9
+		    icon_type=$7, icon_slug=$8, icon_url=$9, enabled=$10, created_at=$11,
+		    updated_at=$12
 		WHERE id=$1`
 	ct, err := p.pool.Exec(ctx, q,
 		provider.ID, provider.Name, provider.Type, provider.BaseURL,
-		provider.APIKeyCiphertext, provider.APIKeyHint, provider.Enabled,
-		provider.CreatedAt, provider.UpdatedAt)
+		provider.APIKeyCiphertext, provider.APIKeyHint, provider.IconType,
+		provider.IconSlug, provider.IconURL, provider.Enabled, provider.CreatedAt,
+		provider.UpdatedAt)
 	if err != nil {
 		return err
 	}

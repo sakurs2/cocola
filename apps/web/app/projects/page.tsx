@@ -78,7 +78,14 @@ export default function ProjectsPage() {
         {/* Header */}
         <header className="flex flex-wrap items-center gap-3.5">
           <div className="user-page-icon">
-            <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+            <svg
+              width="22"
+              height="22"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="2"
+            >
               <path d="M4 20V6a2 2 0 0 1 2-2h5l2 2h5a2 2 0 0 1 2 2v3" />
               <circle cx="12" cy="15" r="3" />
               <path d="M12 18v3M9.5 15H6M18 15h-3.5" />

@@ -608,11 +608,7 @@
     place-items: center;
     border-radius: 1rem;
     color: var(--glyph-ink, var(--page-accent));
-    background: linear-gradient(
-      135deg,
-      var(--glyph-soft, var(--page-accent-soft)),
-      #ffffff
-    );
+    background: linear-gradient(135deg, var(--glyph-soft, var(--page-accent-soft)), #ffffff);
     box-shadow: inset 0 0 0 1px var(--glyph-ring, var(--page-accent-border));
   }
 
@@ -666,7 +662,9 @@
     color: #fff;
     background: var(--card-to, var(--page-accent));
     box-shadow: 0 8px 18px -8px var(--page-accent-shadow);
-    transition: opacity 200ms ease, box-shadow 200ms ease;
+    transition:
+      opacity 200ms ease,
+      box-shadow 200ms ease;
   }
 
   .cocola-admin-ui .admin-module-card:hover .admin-module-cta {
@@ -1066,11 +1064,7 @@
     height: 40px;
     border-radius: 12px;
     color: var(--glyph-ink, var(--page-accent));
-    background: linear-gradient(
-      135deg,
-      var(--glyph-soft, var(--page-accent-soft)),
-      #ffffff
-    );
+    background: linear-gradient(135deg, var(--glyph-soft, var(--page-accent-soft)), #ffffff);
     box-shadow: inset 0 0 0 1px var(--glyph-ring, var(--page-accent-border));
     transition: transform 200ms ease;
   }
@@ -1118,16 +1112,36 @@
     transform: translateY(-3px) scale(1.005);
     box-shadow: 0 18px 40px -18px var(--page-accent-shadow-soft);
   }
-  .cocola-admin-ui .admin-metric-card[data-tone="blue"] { --card-to: #2563eb; }
-  .cocola-admin-ui .admin-metric-card[data-tone="green"] { --card-to: #16a34a; }
-  .cocola-admin-ui .admin-metric-card[data-tone="violet"] { --card-to: #7c3aed; }
-  .cocola-admin-ui .admin-metric-card[data-tone="amber"] { --card-to: var(--page-accent); }
-  .cocola-admin-ui .admin-metric-card[data-tone="slate"] { --card-to: #64748b; }
-  .cocola-admin-ui .admin-metric-card[data-tone="rose"] { --card-to: #e11d48; }
-  .cocola-admin-ui .admin-metric-card[data-tone="indigo"] { --card-to: #4f46e5; }
-  .cocola-admin-ui .admin-metric-card[data-tone="teal"] { --card-to: #0d9488; }
-  .cocola-admin-ui .admin-metric-card[data-tone="purple"] { --card-to: #9333ea; }
-  .cocola-admin-ui .admin-metric-card[data-tone="fuchsia"] { --card-to: #c026d3; }
+  .cocola-admin-ui .admin-metric-card[data-tone="blue"] {
+    --card-to: #2563eb;
+  }
+  .cocola-admin-ui .admin-metric-card[data-tone="green"] {
+    --card-to: #16a34a;
+  }
+  .cocola-admin-ui .admin-metric-card[data-tone="violet"] {
+    --card-to: #7c3aed;
+  }
+  .cocola-admin-ui .admin-metric-card[data-tone="amber"] {
+    --card-to: var(--page-accent);
+  }
+  .cocola-admin-ui .admin-metric-card[data-tone="slate"] {
+    --card-to: #64748b;
+  }
+  .cocola-admin-ui .admin-metric-card[data-tone="rose"] {
+    --card-to: #e11d48;
+  }
+  .cocola-admin-ui .admin-metric-card[data-tone="indigo"] {
+    --card-to: #4f46e5;
+  }
+  .cocola-admin-ui .admin-metric-card[data-tone="teal"] {
+    --card-to: #0d9488;
+  }
+  .cocola-admin-ui .admin-metric-card[data-tone="purple"] {
+    --card-to: #9333ea;
+  }
+  .cocola-admin-ui .admin-metric-card[data-tone="fuchsia"] {
+    --card-to: #c026d3;
+  }
   .cocola-admin-ui .admin-metric-head {
     display: flex;
     align-items: center;
@@ -1181,7 +1195,10 @@
     flex: 0 0 auto;
     color: var(--page-accent);
   }
-  .cocola-admin-ui .admin-set-glyph svg { width: 19px; height: 19px; }
+  .cocola-admin-ui .admin-set-glyph svg {
+    width: 19px;
+    height: 19px;
+  }
   .cocola-admin-ui .admin-set-title {
     font-size: 14px;
     font-weight: 700;
@@ -1211,7 +1228,9 @@
     text-transform: uppercase;
     color: #a1a1aa;
   }
-  .cocola-admin-ui .admin-set-cols .r { text-align: right; }
+  .cocola-admin-ui .admin-set-cols .r {
+    text-align: right;
+  }
   .cocola-admin-ui .admin-set-row {
     padding: 14px;
     border-radius: 14px;
@@ -1223,7 +1242,9 @@
     background: var(--page-accent-soft);
     transform: scale(1.004);
   }
-  .cocola-admin-ui .admin-set-meta { min-width: 0; }
+  .cocola-admin-ui .admin-set-meta {
+    min-width: 0;
+  }
   .cocola-admin-ui .admin-set-name {
     display: flex;
     align-items: center;
@@ -1273,9 +1294,18 @@
     border-radius: 50%;
     background: currentColor;
   }
-  .cocola-admin-ui .admin-set-src[data-src="db"] { background: #d1fae5; color: #059669; }
-  .cocola-admin-ui .admin-set-src[data-src="env"] { background: #fef3c7; color: #d97706; }
-  .cocola-admin-ui .admin-set-src[data-src="default"] { background: #f1f5f9; color: #64748b; }
+  .cocola-admin-ui .admin-set-src[data-src="db"] {
+    background: #d1fae5;
+    color: #059669;
+  }
+  .cocola-admin-ui .admin-set-src[data-src="env"] {
+    background: #fef3c7;
+    color: #d97706;
+  }
+  .cocola-admin-ui .admin-set-src[data-src="default"] {
+    background: #f1f5f9;
+    color: #64748b;
+  }
   .cocola-admin-ui .admin-set-ctrl-input {
     width: 100%;
     height: 42px;
@@ -1312,7 +1342,9 @@
     height: 42px;
     cursor: pointer;
   }
-  .cocola-admin-ui .admin-set-toggle input { display: none; }
+  .cocola-admin-ui .admin-set-toggle input {
+    display: none;
+  }
   .cocola-admin-ui .admin-set-track {
     width: 42px;
     height: 24px;
@@ -1372,7 +1404,10 @@
       background-color 150ms ease,
       opacity 150ms ease;
   }
-  .cocola-admin-ui .admin-set-iconbtn svg { width: 16px; height: 16px; }
+  .cocola-admin-ui .admin-set-iconbtn svg {
+    width: 16px;
+    height: 16px;
+  }
   .cocola-admin-ui .admin-set-iconbtn:hover {
     color: var(--page-accent);
     border-color: var(--page-accent-border);
@@ -1404,9 +1439,15 @@
     white-space: nowrap;
   }
   @media (max-width: 820px) {
-    .cocola-admin-ui .admin-set-cols { display: none; }
-    .cocola-admin-ui .admin-set-row { grid-template-columns: 1fr; }
-    .cocola-admin-ui .admin-set-actions { justify-content: flex-start; }
+    .cocola-admin-ui .admin-set-cols {
+      display: none;
+    }
+    .cocola-admin-ui .admin-set-row {
+      grid-template-columns: 1fr;
+    }
+    .cocola-admin-ui .admin-set-actions {
+      justify-content: flex-start;
+    }
   }
 
   /* ===== users page: HeroUI list ===== */
@@ -1438,7 +1479,9 @@
   .cocola-admin-ui .admin-user-row {
     padding: 12px 14px;
     border-radius: 14px;
-    transition: background 180ms ease, transform 180ms ease;
+    transition:
+      background 180ms ease,
+      transform 180ms ease;
   }
   .cocola-admin-ui .admin-user-row:hover {
     background: var(--page-accent-soft);
@@ -1463,10 +1506,18 @@
     color: #fff;
     background: var(--page-accent-grad);
   }
-  .cocola-admin-ui .admin-user-avatar.is-purple { background: var(--page-accent-grad); }
-  .cocola-admin-ui .admin-user-avatar.is-blue { background: linear-gradient(135deg, #0072f5, #00b7fa); }
-  .cocola-admin-ui .admin-user-avatar.is-pink { background: linear-gradient(135deg, #f31260, #ff4ecd); }
-  .cocola-admin-ui .admin-user-avatar.is-green { background: linear-gradient(135deg, #17c964, #0bd48a); }
+  .cocola-admin-ui .admin-user-avatar.is-purple {
+    background: var(--page-accent-grad);
+  }
+  .cocola-admin-ui .admin-user-avatar.is-blue {
+    background: linear-gradient(135deg, #0072f5, #00b7fa);
+  }
+  .cocola-admin-ui .admin-user-avatar.is-pink {
+    background: linear-gradient(135deg, #f31260, #ff4ecd);
+  }
+  .cocola-admin-ui .admin-user-avatar.is-green {
+    background: linear-gradient(135deg, #17c964, #0bd48a);
+  }
   .cocola-admin-ui .admin-user-name {
     font-size: 14.5px;
     font-weight: 700;
@@ -1525,7 +1576,10 @@
     padding: 13px 16px;
     border-radius: 14px;
     cursor: pointer;
-    transition: background 180ms ease, transform 180ms ease, box-shadow 180ms ease;
+    transition:
+      background 180ms ease,
+      transform 180ms ease,
+      box-shadow 180ms ease;
   }
   .cocola-admin-ui .admin-list-row:hover {
     background: var(--page-accent-soft);
@@ -1651,17 +1705,32 @@
     padding: 4px 11px;
     border-radius: 999px;
   }
-  .cocola-admin-ui .admin-chip svg { width: 13px; height: 13px; }
+  .cocola-admin-ui .admin-chip svg {
+    width: 13px;
+    height: 13px;
+  }
   .cocola-admin-ui .admin-chip .admin-chip-dot {
     width: 7px;
     height: 7px;
     border-radius: 50%;
     background: currentColor;
   }
-  .cocola-admin-ui .admin-chip--admin { background: var(--page-accent-soft); color: var(--page-accent-ink); }
-  .cocola-admin-ui .admin-chip--member { background: #e6f0ff; color: #0369a1; }
-  .cocola-admin-ui .admin-chip--ok { background: #e8faf0; color: #12a150; }
-  .cocola-admin-ui .admin-chip--off { background: #f1f1f4; color: #71717a; }
+  .cocola-admin-ui .admin-chip--admin {
+    background: var(--page-accent-soft);
+    color: var(--page-accent-ink);
+  }
+  .cocola-admin-ui .admin-chip--member {
+    background: #e6f0ff;
+    color: #0369a1;
+  }
+  .cocola-admin-ui .admin-chip--ok {
+    background: #e8faf0;
+    color: #12a150;
+  }
+  .cocola-admin-ui .admin-chip--off {
+    background: #f1f1f4;
+    color: #71717a;
+  }
 
   /* ===== users page fixes (toolbar / refresh / dropdown / drawer) ===== */
   .cocola-admin-ui .admin-user-toolbar {
@@ -1690,15 +1759,23 @@
     font-size: 13.5px;
     font-weight: 600;
     color: #3f3f46;
-    transition: background 160ms ease, border-color 160ms ease, transform 160ms ease;
+    transition:
+      background 160ms ease,
+      border-color 160ms ease,
+      transform 160ms ease;
   }
   .cocola-admin-ui .admin-user-refresh:hover {
     background: var(--page-accent-soft);
     border-color: var(--page-accent-border);
     color: var(--page-accent-ink);
   }
-  .cocola-admin-ui .admin-user-refresh:active { transform: scale(0.98); }
-  .cocola-admin-ui .admin-user-refresh:disabled { opacity: 0.55; pointer-events: none; }
+  .cocola-admin-ui .admin-user-refresh:active {
+    transform: scale(0.98);
+  }
+  .cocola-admin-ui .admin-user-refresh:disabled {
+    opacity: 0.55;
+    pointer-events: none;
+  }
 
   /* purple primary buttons (page-local, does not touch shared Button) */
   .cocola-admin-ui .admin-primary-btn {
@@ -1706,7 +1783,10 @@
     color: #fff !important;
     border: none !important;
     box-shadow: 0 8px 20px -10px var(--page-accent-shadow);
-    transition: transform 160ms ease, box-shadow 160ms ease, filter 160ms ease;
+    transition:
+      transform 160ms ease,
+      box-shadow 160ms ease,
+      filter 160ms ease;
   }
   .cocola-admin-ui .admin-primary-btn:hover {
     filter: brightness(1.05);
@@ -2051,7 +2131,6 @@
     transform: translateY(0);
   }
 
-
   /* ===== models page: header / tabs / list (mirrors users page language) ===== */
   .cocola-admin-ui .admin-models-head {
     display: flex;
@@ -2209,7 +2288,9 @@
   .cocola-admin-ui .admin-prov-row {
     padding: 12px 16px;
     border-radius: 14px;
-    transition: background 180ms ease, transform 180ms ease;
+    transition:
+      background 180ms ease,
+      transform 180ms ease;
   }
   .cocola-admin-ui .admin-model-row:hover,
   .cocola-admin-ui .admin-prov-row:hover {
@@ -3046,15 +3127,33 @@
   transform: translateY(-3px) scale(1.005);
   box-shadow: 0 18px 40px -18px var(--page-accent-shadow-soft);
 }
-.cocola-user-ui .user-metric-card[data-tone="violet"] { --card-to: #7c3aed; }
-.cocola-user-ui .user-metric-card[data-tone="emerald"] { --card-to: #059669; }
-.cocola-user-ui .user-metric-card[data-tone="indigo"] { --card-to: #4f46e5; }
-.cocola-user-ui .user-metric-card[data-tone="orange"] { --card-to: #ea580c; }
-.cocola-user-ui .user-metric-card[data-tone="amber"] { --card-to: #d97706; }
-.cocola-user-ui .user-metric-card[data-tone="cyan"] { --card-to: #0891b2; }
-.cocola-user-ui .user-metric-card[data-tone="blue"] { --card-to: #2563eb; }
-.cocola-user-ui .user-metric-card[data-tone="sky"] { --card-to: #0284c7; }
-.cocola-user-ui .user-metric-card[data-tone="rose"] { --card-to: #e11d48; }
+.cocola-user-ui .user-metric-card[data-tone="violet"] {
+  --card-to: #7c3aed;
+}
+.cocola-user-ui .user-metric-card[data-tone="emerald"] {
+  --card-to: #059669;
+}
+.cocola-user-ui .user-metric-card[data-tone="indigo"] {
+  --card-to: #4f46e5;
+}
+.cocola-user-ui .user-metric-card[data-tone="orange"] {
+  --card-to: #ea580c;
+}
+.cocola-user-ui .user-metric-card[data-tone="amber"] {
+  --card-to: #d97706;
+}
+.cocola-user-ui .user-metric-card[data-tone="cyan"] {
+  --card-to: #0891b2;
+}
+.cocola-user-ui .user-metric-card[data-tone="blue"] {
+  --card-to: #2563eb;
+}
+.cocola-user-ui .user-metric-card[data-tone="sky"] {
+  --card-to: #0284c7;
+}
+.cocola-user-ui .user-metric-card[data-tone="rose"] {
+  --card-to: #e11d48;
+}
 .cocola-user-ui .user-metric-head {
   display: flex;
   align-items: center;

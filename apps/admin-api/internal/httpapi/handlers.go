@@ -1177,12 +1177,15 @@ func (a *API) effectiveAgentPrompt(w http.ResponseWriter, r *http.Request) {
 // ---- LLM model configuration ----
 
 type llmProviderReq struct {
-	ID      string  `json:"id,omitempty"`
-	Name    string  `json:"name,omitempty"`
-	Type    string  `json:"type,omitempty"`
-	BaseURL string  `json:"base_url,omitempty"`
-	APIKey  *string `json:"api_key,omitempty"`
-	Enabled *bool   `json:"enabled,omitempty"`
+	ID       string  `json:"id,omitempty"`
+	Name     string  `json:"name,omitempty"`
+	Type     string  `json:"type,omitempty"`
+	BaseURL  string  `json:"base_url,omitempty"`
+	APIKey   *string `json:"api_key,omitempty"`
+	IconType string  `json:"icon_type,omitempty"`
+	IconSlug string  `json:"icon_slug,omitempty"`
+	IconURL  string  `json:"icon_url,omitempty"`
+	Enabled  *bool   `json:"enabled,omitempty"`
 }
 
 func (a *API) createLLMProvider(w http.ResponseWriter, r *http.Request) {
@@ -1192,13 +1195,16 @@ func (a *API) createLLMProvider(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	provider, err := a.svc.CreateLLMProvider(r.Context(), service.LLMProviderInput{
-		ID:      req.ID,
-		Name:    req.Name,
-		Type:    req.Type,
-		BaseURL: req.BaseURL,
-		APIKey:  req.APIKey,
-		Enabled: req.Enabled,
-		Actor:   actorOf(r),
+		ID:       req.ID,
+		Name:     req.Name,
+		Type:     req.Type,
+		BaseURL:  req.BaseURL,
+		APIKey:   req.APIKey,
+		IconType: req.IconType,
+		IconSlug: req.IconSlug,
+		IconURL:  req.IconURL,
+		Enabled:  req.Enabled,
+		Actor:    actorOf(r),
 	})
 	if err != nil {
 		mapErr(w, err)
@@ -1223,12 +1229,15 @@ func (a *API) updateLLMProvider(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	provider, err := a.svc.UpdateLLMProvider(r.Context(), chi.URLParam(r, "id"), service.LLMProviderInput{
-		Name:    req.Name,
-		Type:    req.Type,
-		BaseURL: req.BaseURL,
-		APIKey:  req.APIKey,
-		Enabled: req.Enabled,
-		Actor:   actorOf(r),
+		Name:     req.Name,
+		Type:     req.Type,
+		BaseURL:  req.BaseURL,
+		APIKey:   req.APIKey,
+		IconType: req.IconType,
+		IconSlug: req.IconSlug,
+		IconURL:  req.IconURL,
+		Enabled:  req.Enabled,
+		Actor:    actorOf(r),
 	})
 	if err != nil {
 		mapErr(w, err)

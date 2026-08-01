@@ -10,15 +10,7 @@ import {
   AdminStatusBadge,
 } from "@/components/admin/admin-ui";
 import { cn } from "@/lib/utils";
-import {
-  AlertTriangle,
-  CircleDot,
-  Flame,
-  LoaderCircle,
-  Play,
-  Server,
-  Trash2,
-} from "lucide-react";
+import { AlertTriangle, CircleDot, Flame, LoaderCircle, Play, Server, Trash2 } from "lucide-react";
 import { signOut } from "next-auth/react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
@@ -179,9 +171,24 @@ export default function SandboxesPage() {
           <section className="grid gap-4 md:grid-cols-2 xl:grid-cols-5">
             <Metric label="Sandboxes" value={String(totals.total)} tone="teal" icon={<Server />} />
             <Metric label="Running" value={String(totals.running)} tone="green" icon={<Play />} />
-            <Metric label="Ready (warm)" value={String(totals.ready)} tone="sky" icon={<CircleDot />} />
-            <Metric label="Orphan" value={String(totals.orphan)} tone="amber" icon={<AlertTriangle />} />
-            <Metric label="To Reclaim" value={String(totals.reclaiming)} tone="rose" icon={<Flame />} />
+            <Metric
+              label="Ready (warm)"
+              value={String(totals.ready)}
+              tone="sky"
+              icon={<CircleDot />}
+            />
+            <Metric
+              label="Orphan"
+              value={String(totals.orphan)}
+              tone="amber"
+              icon={<AlertTriangle />}
+            />
+            <Metric
+              label="To Reclaim"
+              value={String(totals.reclaiming)}
+              tone="rose"
+              icon={<Flame />}
+            />
           </section>
 
           <div className="admin-list">
@@ -258,7 +265,10 @@ export default function SandboxesPage() {
                         {formatDate(sandbox.created_at)}
                       </div>
                       <div className="admin-list-cell">
-                        <TruncatedValue value={sandbox.node_name || "—"} tooltip={sandbox.node_name} />
+                        <TruncatedValue
+                          value={sandbox.node_name || "—"}
+                          tooltip={sandbox.node_name}
+                        />
                         <TruncatedValue
                           value={`${sandbox.pod_name || "—"}${
                             sandbox.pod_phase ? ` / ${sandbox.pod_phase}` : ""

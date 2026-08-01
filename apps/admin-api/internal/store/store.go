@@ -166,6 +166,9 @@ type LLMProvider struct {
 	BaseURL          string    `json:"base_url"`
 	APIKeyCiphertext string    `json:"-"`
 	APIKeyHint       string    `json:"api_key_hint"`
+	IconType         string    `json:"icon_type"`
+	IconSlug         string    `json:"icon_slug"`
+	IconURL          string    `json:"icon_url"`
 	Enabled          bool      `json:"enabled"`
 	CreatedAt        time.Time `json:"created_at"`
 	UpdatedAt        time.Time `json:"updated_at"`

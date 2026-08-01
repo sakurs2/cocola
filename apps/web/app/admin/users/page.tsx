@@ -311,7 +311,6 @@ export default function AdminUsersPage() {
 
   return (
     <main className="admin-theme-blue min-h-screen bg-background text-foreground">
-
       <div className="mx-auto w-full max-w-[100rem] space-y-6 px-4 py-5 sm:px-6 sm:py-6">
         {error && <AdminAlert tone="error">{error}</AdminAlert>}
         {notice && (
@@ -781,7 +780,9 @@ function avatarInitials(user: AuthUser) {
 function RolePill({ role }: { role: Role }) {
   const Icon = role === "admin" ? ShieldCheck : Shield;
   return (
-    <span className={cn("admin-chip", role === "admin" ? "admin-chip--admin" : "admin-chip--member")}>
+    <span
+      className={cn("admin-chip", role === "admin" ? "admin-chip--admin" : "admin-chip--member")}
+    >
       <Icon />
       {role}
     </span>

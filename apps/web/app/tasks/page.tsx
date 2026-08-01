@@ -291,10 +291,12 @@ export default function TasksPage() {
 
         {hasTasks ? (
           <div className="mt-7 flex gap-6 border-b border-border/60">
-            {([
-              ["today", todayCount],
-              ["all", tasks.length],
-            ] as const).map(([value, count]) => (
+            {(
+              [
+                ["today", todayCount],
+                ["all", tasks.length],
+              ] as const
+            ).map(([value, count]) => (
               <button
                 key={value}
                 type="button"
@@ -525,9 +527,7 @@ function StatusBadge({ status }: { status: ScheduledTask["status"] }) {
       </span>
     );
   }
-  return (
-    <span className="user-tag user-tag--muted shrink-0 capitalize text-[10px]">{status}</span>
-  );
+  return <span className="user-tag user-tag--muted shrink-0 capitalize text-[10px]">{status}</span>;
 }
 
 async function responseError(response: Response): Promise<string> {

@@ -170,7 +170,10 @@ export default function AdminAuditPage() {
       <div className="admin-list">
         <div className="admin-list-scroll">
           <div className="min-w-[1120px] 2xl:min-w-0">
-            <div className="admin-list-cols" style={{ gridTemplateColumns: "1.4fr 1.5fr 2fr 1.1fr 1.2fr 0.9fr 0.9fr 1.1fr 1.6fr" }}>
+            <div
+              className="admin-list-cols"
+              style={{ gridTemplateColumns: "1.4fr 1.5fr 2fr 1.1fr 1.2fr 0.9fr 0.9fr 1.1fr 1.6fr" }}
+            >
               <div>Started</div>
               <div>User</div>
               <div>Conversation</div>
@@ -189,7 +192,9 @@ export default function AdminAuditPage() {
                   role="button"
                   tabIndex={0}
                   className="admin-list-row"
-                  style={{ gridTemplateColumns: "1.4fr 1.5fr 2fr 1.1fr 1.2fr 0.9fr 0.9fr 1.1fr 1.6fr" }}
+                  style={{
+                    gridTemplateColumns: "1.4fr 1.5fr 2fr 1.1fr 1.2fr 0.9fr 0.9fr 1.1fr 1.6fr",
+                  }}
                   onClick={() =>
                     traceID &&
                     (window.location.href = `/admin/traces/${encodeURIComponent(traceID)}`)

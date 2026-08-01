@@ -93,7 +93,9 @@ function SkillDetail({ id }: { id: string }) {
                     ) : (
                       <span className="user-tag">disabled</span>
                     )}
-                    <span className={`user-tag${skill.scope === "user" ? " user-tag--accent" : ""}`}>
+                    <span
+                      className={`user-tag${skill.scope === "user" ? " user-tag--accent" : ""}`}
+                    >
                       {skill.scope === "user" ? "personal" : "shared"}
                     </span>
                   </div>

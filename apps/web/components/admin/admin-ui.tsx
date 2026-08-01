@@ -207,9 +207,7 @@ export function AdminStatusBadge({
         base: cn("min-h-6 border border-current/20 px-2.5", className),
         content: "flex items-center gap-1.5 px-0 text-xs font-medium",
       }}
-      startContent={
-        dot ? <span className="ml-1 size-1.5 rounded-full bg-current" /> : undefined
-      }
+      startContent={dot ? <span className="ml-1 size-1.5 rounded-full bg-current" /> : undefined}
     >
       {children}
     </HeroChip>

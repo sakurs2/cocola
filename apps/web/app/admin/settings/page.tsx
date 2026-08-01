@@ -4,11 +4,7 @@ import { Settings as SettingsPageIcon } from "lucide-react";
 import { Database, Layers, Loader2, RotateCcw, Save, SlidersHorizontal } from "lucide-react";
 import { AlertTriangle, Check } from "lucide-react";
 import { useCallback, useEffect, useMemo, useState } from "react";
-import {
-  AdminPage,
-  AdminPageHeader,
-  AdminRefreshButton,
-} from "@/components/admin/admin-ui";
+import { AdminPage, AdminPageHeader, AdminRefreshButton } from "@/components/admin/admin-ui";
 
 type SettingValue = boolean | number | string | null;
 

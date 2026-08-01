@@ -393,7 +393,8 @@ export default function StoragePage() {
                                   {formatBytes(measurement.allocated_bytes)}
                                 </div>
                                 <div className="admin-list-sub">
-                                  {measurement.file_count} files · {measurement.directory_count} dirs
+                                  {measurement.file_count} files · {measurement.directory_count}{" "}
+                                  dirs
                                 </div>
                               </div>
                             ) : (

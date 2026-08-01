@@ -270,7 +270,7 @@ const ThreadWelcome: FC = () => {
   const [promptSlotBindings, setPromptSlotBindings] = useState<
     Record<string, PromptStarterSlotBinding | undefined>
   >({});
-  const visiblePromptStarters = PROMPT_STARTERS;
+  const visiblePromptStarters = selectedAgent ? [] : PROMPT_STARTERS;
 
   useEffect(() => {
     const h = new Date().getHours();
@@ -531,9 +531,9 @@ const ConversationComposerInner: FC<{
 // Public entry: guarantees a Wiki mention catalog context is present so the
 // composer can be mounted standalone (project/folder pages) as well as inside
 // <Thread/>. The provider is idempotent, so nesting is safe.
-export const ConversationComposer: FC<
-  ComponentProps<typeof ConversationComposerInner>
-> = (props) => (
+export const ConversationComposer: FC<ComponentProps<typeof ConversationComposerInner>> = (
+  props,
+) => (
   <WikiMentionCatalogProvider>
     <ConversationComposerInner {...props} />
   </WikiMentionCatalogProvider>

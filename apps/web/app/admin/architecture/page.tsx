@@ -55,35 +55,33 @@ const LAYER_ORDER = [
 
 type BadgeTone = "neutral" | "sky" | "green" | "amber" | "red";
 
-const STATUS_STYLES: Record<
-  string,
-  { dot: string; ring: string; tone: BadgeTone; label: string }
-> = {
-  healthy: {
-    dot: "bg-emerald-400",
-    ring: "ring-emerald-400/40",
-    tone: "green",
-    label: "Healthy",
-  },
-  degraded: {
-    dot: "bg-amber-400",
-    ring: "ring-amber-400/40",
-    tone: "amber",
-    label: "Degraded",
-  },
-  unhealthy: {
-    dot: "bg-red-400",
-    ring: "ring-red-400/40",
-    tone: "red",
-    label: "Unhealthy",
-  },
-  unknown: {
-    dot: "bg-slate-400",
-    ring: "ring-slate-400/30",
-    tone: "neutral",
-    label: "Unknown",
-  },
-};
+const STATUS_STYLES: Record<string, { dot: string; ring: string; tone: BadgeTone; label: string }> =
+  {
+    healthy: {
+      dot: "bg-emerald-400",
+      ring: "ring-emerald-400/40",
+      tone: "green",
+      label: "Healthy",
+    },
+    degraded: {
+      dot: "bg-amber-400",
+      ring: "ring-amber-400/40",
+      tone: "amber",
+      label: "Degraded",
+    },
+    unhealthy: {
+      dot: "bg-red-400",
+      ring: "ring-red-400/40",
+      tone: "red",
+      label: "Unhealthy",
+    },
+    unknown: {
+      dot: "bg-slate-400",
+      ring: "ring-slate-400/30",
+      tone: "neutral",
+      label: "Unknown",
+    },
+  };
 
 function statusStyle(status: Status) {
   return STATUS_STYLES[status] ?? STATUS_STYLES.unknown!;

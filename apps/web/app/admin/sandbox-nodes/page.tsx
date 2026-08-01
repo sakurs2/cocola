@@ -312,11 +312,7 @@ export default function SandboxNodesPage() {
               <div className="admin-list-primary">Add node</div>
               <div className="admin-list-sub">Join an existing machine to this k3s cluster.</div>
             </div>
-            <button
-              type="button"
-              className="admin-card-btn"
-              onClick={() => setShowAddNode(true)}
-            >
+            <button type="button" className="admin-card-btn" onClick={() => setShowAddNode(true)}>
               <Plus className="size-3.5" />
               Add node
             </button>
@@ -334,7 +330,10 @@ export default function SandboxNodesPage() {
             ) : (
               <div className="admin-list-scroll">
                 <div className="min-w-[1600px]">
-                  <div className="admin-list-cols admin-nodes-center" style={{ gridTemplateColumns: LIST_COLS }}>
+                  <div
+                    className="admin-list-cols admin-nodes-center"
+                    style={{ gridTemplateColumns: LIST_COLS }}
+                  >
                     <div>Node</div>
                     <div>Status</div>
                     <div>CPU</div>

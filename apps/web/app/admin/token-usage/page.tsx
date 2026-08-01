@@ -277,230 +277,225 @@ export default function AdminTokenUsagePage() {
         }
       />
 
-        <section className="admin-surface flex flex-wrap items-end gap-3 p-4">
-          <label className="space-y-1">
-            <span className="text-xs text-muted-foreground">Range</span>
-            <SelectControl
-              className={`${input} w-36`}
-              value={preset}
-              onValueChange={(value) => setPreset(value as RangePreset)}
-              options={[
-                { value: "24h", label: "Last 24 hours" },
-                { value: "7d", label: "Last 7 days" },
-                { value: "30d", label: "Last 30 days" },
-                { value: "90d", label: "Last 90 days" },
-                { value: "custom", label: "Custom" },
-              ]}
-              contentClassName="cocola-admin-ui"
-            />
-          </label>
-          {preset === "custom" ? (
-            <>
-              <label className="space-y-1">
-                <span className="text-xs text-muted-foreground">From</span>
-                <input
-                  className={input}
-                  type="date"
-                  value={customFrom}
-                  onChange={(event) => setCustomFrom(event.target.value)}
-                />
-              </label>
-              <label className="space-y-1">
-                <span className="text-xs text-muted-foreground">To</span>
-                <input
-                  className={input}
-                  type="date"
-                  value={customTo}
-                  onChange={(event) => setCustomTo(event.target.value)}
-                />
-              </label>
-            </>
-          ) : null}
-          <div className="ml-auto text-xs text-muted-foreground">
-            {report ? `${formatDateTime(report.from)} - ${formatDateTime(report.to)}` : ""}
-          </div>
-        </section>
-
-        {error ? (
-          <div className="rounded-md border border-destructive/30 bg-destructive/10 px-3 py-2 text-sm text-destructive">
-            {error}
-          </div>
+      <section className="admin-surface flex flex-wrap items-end gap-3 p-4">
+        <label className="space-y-1">
+          <span className="text-xs text-muted-foreground">Range</span>
+          <SelectControl
+            className={`${input} w-36`}
+            value={preset}
+            onValueChange={(value) => setPreset(value as RangePreset)}
+            options={[
+              { value: "24h", label: "Last 24 hours" },
+              { value: "7d", label: "Last 7 days" },
+              { value: "30d", label: "Last 30 days" },
+              { value: "90d", label: "Last 90 days" },
+              { value: "custom", label: "Custom" },
+            ]}
+            contentClassName="cocola-admin-ui"
+          />
+        </label>
+        {preset === "custom" ? (
+          <>
+            <label className="space-y-1">
+              <span className="text-xs text-muted-foreground">From</span>
+              <input
+                className={input}
+                type="date"
+                value={customFrom}
+                onChange={(event) => setCustomFrom(event.target.value)}
+              />
+            </label>
+            <label className="space-y-1">
+              <span className="text-xs text-muted-foreground">To</span>
+              <input
+                className={input}
+                type="date"
+                value={customTo}
+                onChange={(event) => setCustomTo(event.target.value)}
+              />
+            </label>
+          </>
         ) : null}
+        <div className="ml-auto text-xs text-muted-foreground">
+          {report ? `${formatDateTime(report.from)} - ${formatDateTime(report.to)}` : ""}
+        </div>
+      </section>
 
-        <section className="grid gap-3 md:grid-cols-5">
-          <Metric
-            label="Total Tokens"
-            value={compactNumber(summary.total_tokens)}
-            title={formatNumber(summary.total_tokens)}
-          />
-          <Metric
-            label="Input Tokens"
-            value={compactNumber(summary.prompt_tokens)}
-            title={formatNumber(summary.prompt_tokens)}
-          />
-          <Metric
-            label="Output Tokens"
-            value={compactNumber(summary.completion_tokens)}
-            title={formatNumber(summary.completion_tokens)}
-          />
-          <Metric
-            label="Calls"
-            value={compactNumber(summary.calls)}
-            title={formatNumber(summary.calls)}
-          />
-          <Metric label="Users" value={formatNumber(summary.user_count)} />
-        </section>
+      {error ? (
+        <div className="rounded-md border border-destructive/30 bg-destructive/10 px-3 py-2 text-sm text-destructive">
+          {error}
+        </div>
+      ) : null}
 
-        <section className="admin-surface">
-          <div className="admin-surface-head">
-            <div>
-              <div className="admin-surface-title">Usage Trend</div>
-              <div className="admin-surface-sub">Bucket: {report?.bucket ?? "auto"}</div>
-            </div>
-            {loading ? <Loader2 className="size-4 animate-spin text-muted-foreground" /> : null}
+      <section className="grid gap-3 md:grid-cols-5">
+        <Metric
+          label="Total Tokens"
+          value={compactNumber(summary.total_tokens)}
+          title={formatNumber(summary.total_tokens)}
+        />
+        <Metric
+          label="Input Tokens"
+          value={compactNumber(summary.prompt_tokens)}
+          title={formatNumber(summary.prompt_tokens)}
+        />
+        <Metric
+          label="Output Tokens"
+          value={compactNumber(summary.completion_tokens)}
+          title={formatNumber(summary.completion_tokens)}
+        />
+        <Metric
+          label="Calls"
+          value={compactNumber(summary.calls)}
+          title={formatNumber(summary.calls)}
+        />
+        <Metric label="Users" value={formatNumber(summary.user_count)} />
+      </section>
+
+      <section className="admin-surface">
+        <div className="admin-surface-head">
+          <div>
+            <div className="admin-surface-title">Usage Trend</div>
+            <div className="admin-surface-sub">Bucket: {report?.bucket ?? "auto"}</div>
           </div>
-          <div className="h-[340px] p-4">
-            {report && report.trend.length > 0 ? (
-              <Line data={chartData(report.trend, report.bucket)} options={chartOptions} />
-            ) : (
-              <EmptyState label={loading ? "Loading usage trend" : "No usage in this range"} />
-            )}
-          </div>
-        </section>
+          {loading ? <Loader2 className="size-4 animate-spin text-muted-foreground" /> : null}
+        </div>
+        <div className="h-[340px] p-4">
+          {report && report.trend.length > 0 ? (
+            <Line data={chartData(report.trend, report.bucket)} options={chartOptions} />
+          ) : (
+            <EmptyState label={loading ? "Loading usage trend" : "No usage in this range"} />
+          )}
+        </div>
+      </section>
 
-        <section className="grid gap-5 xl:grid-cols-[minmax(0,1.15fr)_minmax(360px,0.85fr)]">
-          <div className="admin-surface">
-            <div className="admin-surface-head flex-col gap-3 md:flex-row md:items-center">
-              <div className="min-w-0 flex-1">
-                <div className="admin-surface-title">Users</div>
-                <div className="admin-surface-sub">Sorted by total token usage</div>
-              </div>
-              <label className="relative block w-full md:w-72">
-                <Search className="pointer-events-none absolute left-2 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
-                <input
-                  className={`${input} w-full pl-8`}
-                  placeholder="Filter users"
-                  value={filter}
-                  onChange={(event) => setFilter(event.target.value)}
-                />
-              </label>
+      <section className="grid gap-5 xl:grid-cols-[minmax(0,1.15fr)_minmax(360px,0.85fr)]">
+        <div className="admin-surface">
+          <div className="admin-surface-head flex-col gap-3 md:flex-row md:items-center">
+            <div className="min-w-0 flex-1">
+              <div className="admin-surface-title">Users</div>
+              <div className="admin-surface-sub">Sorted by total token usage</div>
             </div>
-            <div className="overflow-x-auto">
-              <table className="w-full min-w-[760px] text-left text-sm">
-                <thead className="border-b border-border/60">
-                  <tr>
-                    <th className="admin-surface-th">User</th>
-                    <th className="admin-surface-th text-right">Total</th>
-                    <th className="admin-surface-th text-right">Input</th>
-                    <th className="admin-surface-th text-right">Output</th>
-                    <th className="admin-surface-th text-right">Calls</th>
-                    <th className="admin-surface-th">Last Used</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {users.map((user) => {
-                    const active = activeUser?.user_id === user.user_id;
-                    return (
-                      <tr
-                        key={user.user_id}
-                        onClick={() => setSelectedUser(user)}
-                        className="admin-surface-row border-b border-border/50"
-                        data-active={active}
-                      >
-                        <td className="px-4 py-3">
-                          <div className="font-medium">{displayUser(user)}</div>
-                          <div className="text-xs text-muted-foreground">{user.user_id}</div>
-                        </td>
-                        <td
-                          className="px-4 py-3 text-right tabular-nums"
-                          title={formatNumber(user.total_tokens)}
-                        >
-                          {compactNumber(user.total_tokens)}
-                        </td>
-                        <td
-                          className="px-4 py-3 text-right tabular-nums"
-                          title={formatNumber(user.prompt_tokens)}
-                        >
-                          {compactNumber(user.prompt_tokens)}
-                        </td>
-                        <td
-                          className="px-4 py-3 text-right tabular-nums"
-                          title={formatNumber(user.completion_tokens)}
-                        >
-                          {compactNumber(user.completion_tokens)}
-                        </td>
-                        <td
-                          className="px-4 py-3 text-right tabular-nums"
-                          title={formatNumber(user.calls)}
-                        >
-                          {compactNumber(user.calls)}
-                        </td>
-                        <td className="px-4 py-3 text-xs text-muted-foreground">
-                          {user.last_used_at ? formatDateTime(user.last_used_at) : "-"}
-                        </td>
-                      </tr>
-                    );
-                  })}
-                  {users.length === 0 ? (
-                    <tr>
+            <label className="relative block w-full md:w-72">
+              <Search className="pointer-events-none absolute left-2 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
+              <input
+                className={`${input} w-full pl-8`}
+                placeholder="Filter users"
+                value={filter}
+                onChange={(event) => setFilter(event.target.value)}
+              />
+            </label>
+          </div>
+          <div className="overflow-x-auto">
+            <table className="w-full min-w-[760px] text-left text-sm">
+              <thead className="border-b border-border/60">
+                <tr>
+                  <th className="admin-surface-th">User</th>
+                  <th className="admin-surface-th text-right">Total</th>
+                  <th className="admin-surface-th text-right">Input</th>
+                  <th className="admin-surface-th text-right">Output</th>
+                  <th className="admin-surface-th text-right">Calls</th>
+                  <th className="admin-surface-th">Last Used</th>
+                </tr>
+              </thead>
+              <tbody>
+                {users.map((user) => {
+                  const active = activeUser?.user_id === user.user_id;
+                  return (
+                    <tr
+                      key={user.user_id}
+                      onClick={() => setSelectedUser(user)}
+                      className="admin-surface-row border-b border-border/50"
+                      data-active={active}
+                    >
+                      <td className="px-4 py-3">
+                        <div className="font-medium">{displayUser(user)}</div>
+                        <div className="text-xs text-muted-foreground">{user.user_id}</div>
+                      </td>
                       <td
-                        className="px-4 py-8 text-center text-sm text-muted-foreground"
-                        colSpan={6}
+                        className="px-4 py-3 text-right tabular-nums"
+                        title={formatNumber(user.total_tokens)}
                       >
-                        {loading ? "Loading users" : "No users in this range"}
+                        {compactNumber(user.total_tokens)}
+                      </td>
+                      <td
+                        className="px-4 py-3 text-right tabular-nums"
+                        title={formatNumber(user.prompt_tokens)}
+                      >
+                        {compactNumber(user.prompt_tokens)}
+                      </td>
+                      <td
+                        className="px-4 py-3 text-right tabular-nums"
+                        title={formatNumber(user.completion_tokens)}
+                      >
+                        {compactNumber(user.completion_tokens)}
+                      </td>
+                      <td
+                        className="px-4 py-3 text-right tabular-nums"
+                        title={formatNumber(user.calls)}
+                      >
+                        {compactNumber(user.calls)}
+                      </td>
+                      <td className="px-4 py-3 text-xs text-muted-foreground">
+                        {user.last_used_at ? formatDateTime(user.last_used_at) : "-"}
                       </td>
                     </tr>
-                  ) : null}
-                </tbody>
-              </table>
+                  );
+                })}
+                {users.length === 0 ? (
+                  <tr>
+                    <td className="px-4 py-8 text-center text-sm text-muted-foreground" colSpan={6}>
+                      {loading ? "Loading users" : "No users in this range"}
+                    </td>
+                  </tr>
+                ) : null}
+              </tbody>
+            </table>
+          </div>
+        </div>
+
+        <aside className="admin-surface">
+          <div className="admin-surface-head">
+            <div className="flex min-w-0 items-center gap-3">
+              <div className="admin-page-icon">
+                <UserRound className="size-4" />
+              </div>
+              <div className="min-w-0">
+                <h2 className="admin-surface-title truncate">
+                  {activeUser ? displayUser(activeUser) : "No user selected"}
+                </h2>
+                <p className="admin-surface-sub truncate">
+                  {activeUser?.email || activeUser?.user_id || "Select a user"}
+                </p>
+              </div>
+            </div>
+            {userLoading ? <Loader2 className="size-4 animate-spin text-muted-foreground" /> : null}
+          </div>
+          <div className="space-y-4 p-4">
+            <div className="grid grid-cols-2 gap-3">
+              <Metric
+                label="User Tokens"
+                value={compactNumber(userReport?.summary.total_tokens ?? 0)}
+                title={formatNumber(userReport?.summary.total_tokens ?? 0)}
+              />
+              <Metric
+                label="User Calls"
+                value={compactNumber(userReport?.summary.calls ?? 0)}
+                title={formatNumber(userReport?.summary.calls ?? 0)}
+              />
+            </div>
+            <div className="h-[260px]">
+              {userReport && userReport.trend.length > 0 ? (
+                <Line
+                  data={chartData(userReport.trend, userReport.bucket)}
+                  options={chartOptions}
+                />
+              ) : (
+                <EmptyState label={activeUser ? "No user trend data" : "Select a user"} />
+              )}
             </div>
           </div>
-
-          <aside className="admin-surface">
-            <div className="admin-surface-head">
-              <div className="flex min-w-0 items-center gap-3">
-                <div className="admin-page-icon">
-                  <UserRound className="size-4" />
-                </div>
-                <div className="min-w-0">
-                  <h2 className="admin-surface-title truncate">
-                    {activeUser ? displayUser(activeUser) : "No user selected"}
-                  </h2>
-                  <p className="admin-surface-sub truncate">
-                    {activeUser?.email || activeUser?.user_id || "Select a user"}
-                  </p>
-                </div>
-              </div>
-              {userLoading ? (
-                <Loader2 className="size-4 animate-spin text-muted-foreground" />
-              ) : null}
-            </div>
-            <div className="space-y-4 p-4">
-              <div className="grid grid-cols-2 gap-3">
-                <Metric
-                  label="User Tokens"
-                  value={compactNumber(userReport?.summary.total_tokens ?? 0)}
-                  title={formatNumber(userReport?.summary.total_tokens ?? 0)}
-                />
-                <Metric
-                  label="User Calls"
-                  value={compactNumber(userReport?.summary.calls ?? 0)}
-                  title={formatNumber(userReport?.summary.calls ?? 0)}
-                />
-              </div>
-              <div className="h-[260px]">
-                {userReport && userReport.trend.length > 0 ? (
-                  <Line
-                    data={chartData(userReport.trend, userReport.bucket)}
-                    options={chartOptions}
-                  />
-                ) : (
-                  <EmptyState label={activeUser ? "No user trend data" : "Select a user"} />
-                )}
-              </div>
-            </div>
-          </aside>
-        </section>
+        </aside>
+      </section>
     </AdminPage>
   );
 }

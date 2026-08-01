@@ -1,281 +1,154 @@
-# cocola
+<div align="center">
+  <h1>
+    <img src="./docs/assets/cocola-readme-brand.png" width="640" alt="Cocola — Your trusty &amp; powerful agent platform" />
+  </h1>
+  <p><strong>开源、自部署的团队 AI Agent 工作平台</strong></p>
 
-> Open-source enterprise AI Agent platform — self-host your own agents, bring your own tokens, let your team chat for free.
+  <p>
+    <a href="#快速开始">快速开始</a> ·
+    <a href="./docs">文档</a> ·
+    <a href="./CONTRIBUTING.md">参与贡献</a> ·
+    <a href="https://github.com/sakurs2/cocola/releases">Releases</a>
+  </p>
 
-`cocola` 是一个面向企业内部部署的 Agent 平台。核心定位：
+  <p>
+    <a href="https://github.com/sakurs2/cocola/actions/workflows/ci.yml"><img src="https://github.com/sakurs2/cocola/actions/workflows/ci.yml/badge.svg" alt="CI" /></a>
+    <a href="https://github.com/sakurs2/cocola/releases"><img src="https://img.shields.io/github/v/release/sakurs2/cocola?display_name=tag&sort=semver" alt="GitHub release" /></a>
+    <a href="./LICENSE"><img src="https://img.shields.io/github/license/sakurs2/cocola" alt="License" /></a>
+    <a href="./SECURITY.md"><img src="https://img.shields.io/badge/security-policy-2563eb?logo=github" alt="Security policy" /></a>
+    <a href="./CONTRIBUTING.md"><img src="https://img.shields.io/badge/contributions-welcome-22c55e" alt="Contributions welcome" /></a>
+  </p>
 
-- **企业自部署**：完全私有化部署，数据不出企业
-- **统一计费**：企业统一采购 LLM Token，员工使用零成本
-- **可定制业务逻辑**：登录鉴权、敏感词、Skill Market 等可插拔
-- **沙箱执行**：基于云沙箱安全执行 Agent 产生的代码与命令
+  <p>
+    <a href="./docs/cli.md"><img src="https://img.shields.io/badge/deployment-self--hosted-5b5bd6" alt="Self-hosted" /></a>
+    <a href="./docs/cli.md"><img src="https://img.shields.io/badge/Docker%20Compose-v2-2496ED?logo=docker&logoColor=white" alt="Docker Compose v2" /></a>
+    <a href="https://github.com/opensandbox-group/OpenSandbox"><img src="https://img.shields.io/badge/sandbox-OpenSandbox-0ea5e9" alt="OpenSandbox" /></a>
+    <a href="./docs/cli.md"><img src="https://img.shields.io/badge/platform-amd64%20%7C%20arm64-64748b" alt="amd64 and arm64" /></a>
+  </p>
 
-## 技术栈
+  <p>
+    <a href="./apps/web/package.json"><img src="https://img.shields.io/badge/Next.js-15-000000?logo=nextdotjs&logoColor=white" alt="Next.js 15" /></a>
+    <a href="./go.work"><img src="https://img.shields.io/badge/Go-1.24-00ADD8?logo=go&logoColor=white" alt="Go 1.24" /></a>
+    <a href="./apps/agent-runtime/pyproject.toml"><img src="https://img.shields.io/badge/Python-3.11%2B-3776AB?logo=python&logoColor=white" alt="Python 3.11 or newer" /></a>
+    <a href="./package.json"><img src="https://img.shields.io/badge/pnpm-9-F69220?logo=pnpm&logoColor=white" alt="pnpm 9" /></a>
+  </p>
+</div>
 
-- **Agent 核心**：Claude Code Agent SDK + OpenAI Codex SDK（对话创建时选择）
-- **沙箱**：K8s（默认 runc + 用户命名空间，零节点安装;gVisor 为可选增强;可通过 `SandboxProvider` 抽象切换至 Docker / E2B / CubeSandbox）
-- **后端**：Go（Gateway / Sandbox Manager / Admin API）+ Python（Agent Runtime / LLM Gateway）
-- **前端**：Next.js (App Router) + Tailwind CSS 3 + TypeScript
-- **存储**：PostgreSQL + Redis + k3s local-path Session PVC + S3-compatible（MinIO）+ HashiCorp Vault
-- **通信**：服务间 gRPC，对前端 SSE/WebSocket
+<!--
+产品图占位。建议使用一张 16:9 图片，同时展示对话执行过程与右侧 Workspace。
 
-## 仓库结构
+![Cocola product overview](./docs/assets/cocola-product-overview.png)
+-->
 
-```
-cocola/
-├── apps/                     # 业务应用
-│   ├── web/                  # Next.js 前端
-│   ├── gateway/              # Go: API 网关 (BFF + Auth)
-│   ├── sandbox-manager/      # Go: 沙箱编排
-│   ├── agent-runtime/        # Python: Agent 运行时
-│   ├── llm-gateway/          # Python: LLM 网关与计费
-│   ├── admin-api/            # Go: 管理后台后端
-│   └── cli/                  # Go: 安装、部署与运维 CLI
-├── packages/                 # 共享库
-│   ├── proto/                # gRPC IDL
-│   ├── go-common/            # Go 公共库
-│   ├── py-common/            # Python 公共库
-│   └── ts-common/            # TS 公共库
-├── deploy/                   # 部署清单
-│   ├── docker-compose/       # dev 依赖与正式 Docker 栈
-│   ├── opensandbox-k8s/      # 本地 OpenSandbox Kubernetes runtime
-│   └── sandbox-runtime/      # 沙箱运行时镜像
-├── docs/
-│   ├── adr/                  # 架构决策记录
-│   ├── api/                  # API 文档
-│   └── plugin-dev/           # 二次开发指南
-├── scripts/                  # 构建/运维脚本
-├── Makefile
-└── README.md
-```
+Cocola 不只是一个模型聊天界面。每个会话都会获得独立、可持续使用的工作空间，Agent 可以读取文件、编写代码、运行命令、浏览网页，并将执行过程实时呈现在浏览器中。管理员则可以集中管理模型、用户、Skills、MCP、用量与审计。
 
-## 安装与启动
+## 核心能力
 
-### 无需下载源码
+| Agent 工作流                                                                                         | 平台基础设施                                                                                            |
+| ---------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------- |
+| 🧠 **原生 Agent Runtime**<br>支持 Claude Code 与 Codex，不把 Agent 简化成几组自定义工具。            | 🔒 **会话级隔离沙箱**<br>推理循环和原生工具运行在独立 OpenSandbox 环境中，工作区随会话持续保存。        |
+| 🧰 **完整工作区**<br>在侧边栏直接使用 Files、Code、Shell、Git 和 Preview，实时查看执行状态与产物。   | 🔀 **统一模型入口**<br>集中管理模型 Provider 与路由，支持 Anthropic Messages 和 OpenAI Responses 协议。 |
+| 🧩 **可复用能力**<br>通过自定义 Agent、Skills、MCP 和 Knowledge 组装团队的专属 Agent。               | 🛡️ **团队治理**<br>覆盖用户、用量、定时任务、运行追踪、审计日志和沙箱运维。                             |
+| 🌿 **项目工作流**<br>支持本地与 GitHub Project；GitHub Task 使用独立工作分支，高风险写操作按次确认。 | 🏠 **完全自部署**<br>应用、模型密钥、对话数据和工作区都保留在自己的基础设施中。                         |
 
-主机安装好 Docker 与 Docker Compose v2 后，可以直接安装 CLI 并进入交互式部署：
+## 快速开始
+
+正式部署使用 Cocola CLI。开始前需要：
+
+- Linux 或 macOS，`amd64` 或 `arm64`；
+- Docker Engine 或 Docker Desktop；
+- Docker Compose v2。
+
+**1. 安装**
+
+下载最新版本并完成交互式配置：
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/sakurs2/cocola/master/scripts/install.sh | sh
 ```
 
-安装器会校验 Release 归档的 SHA-256，默认把 `cocola` 安装到
-`~/.local/bin`，并把部署配置写到 `~/.cocola`。检查配置后执行 `cocola up` 拉取
-带版本号的正式镜像并启动服务。后续运维统一使用：
+安装器会下载对应平台的 CLI、校验 SHA-256，并把部署配置写入 `~/.cocola`。请保存安装器仅展示一次的管理员密码。
+
+**2. 启动**
 
 ```bash
 cocola up
+```
+
+**3. 配置模型**
+
+打开 [http://localhost:3000](http://localhost:3000) 并登录。
+
+> [!IMPORTANT]
+> 首次启动后，请前往 `Admin → Models` 配置模型 Provider 和默认模型，然后再开始第一段对话。
+
+<details>
+<summary><strong>常用运维命令</strong></summary>
+
+<br>
+
+```bash
 cocola status
 cocola logs -f
 cocola doctor
 cocola down
 ```
 
-完整命令、非交互安装和目录说明见 [`docs/cli.md`](./docs/cli.md)。
+</details>
 
-### 源码开发
+安装指定版本、使用外部 OpenSandbox 或进行非交互部署，请查看 [Cocola CLI 文档](./docs/cli.md)。
+
+## 系统架构
+
+<p align="center">
+  <img src="./docs/assets/cocola-architecture.svg" width="100%" alt="Cocola architecture: browser experience, control plane, isolated execution, and shared infrastructure" />
+</p>
+
+Cocola 将控制面和执行面分开：
+
+1. Web 与 Gateway 负责登录鉴权、会话、SSE/WebSocket 流以及面向浏览器的统一入口。
+2. Agent Runtime 是控制面路由器，负责准备环境并把一次 Run 转发到当前会话的 Sandbox。
+3. Claude Code 或 Codex 连同原生工具运行在 Sandbox 内；文件通过 Session Volume 持久化。
+4. LLM Gateway 统一连接模型 Provider，执行路由、凭证保护、配额和用量记账。
+5. Admin API 管理用户、模型、Skills、MCP、调度、审计与平台配置。
+
+核心基础设施包括 PostgreSQL、Redis、S3-compatible Object Storage 和 OpenSandbox。`v0.1.0` 的官方安装方式是由 Cocola CLI 管理的单机 Docker Compose；Sandbox 平面可以使用内置 OpenSandbox，也可以连接外部 OpenSandbox 服务。
+
+主要技术栈：Next.js、TypeScript、Go、Python、gRPC、PostgreSQL、Redis、OpenSandbox。
+
+## 本地开发
+
+本地调试使用原生服务进程和容器化基础设施：
 
 ```bash
-# 一键拉起本地依赖：PostgreSQL + Redis + MinIO + OpenViking
-make dev-up
-
-# 关闭
-make dev-down
-```
-
-### 一键拉起本地调试栈
-
-`make dev` 是默认 dev 调试入口：OpenSandbox Kubernetes runtime、PostgreSQL、
-Redis、MinIO 等依赖由 Docker/k3d/Helm 准备，cocola 自己的服务
-（sandbox-manager、llm-gateway、admin-api、agent-runtime、gateway、web）在本机
-原生前台运行，方便改代码后 Ctrl-C 重启。各服务日志落在 `.run-logs/<服务名>.log`。
-
-```bash
+git clone https://github.com/sakurs2/cocola.git
+cd cocola
 cp .env.example .env
-make dev   # dev 调试栈：OpenSandbox runtime + 本机原生 cocola 服务
+make dev
 ```
 
-`.env.example` 可直接作为本地配置使用，默认管理员为 `admin` / `cocola-admin`。
-其中的 Secret 和密码均为公开的本地开发值；真实部署前必须替换。已有 `.env` 不应
-直接覆盖，应保留原 `COCOLA_MODEL_SECRET_KEY`，否则历史加密模型 API key 无法解密。
+完整工具链、依赖安装和提交检查见 [CONTRIBUTING.md](./CONTRIBUTING.md)。
 
-> 端口约定：gateway BFF 与 llm-gateway 默认都监听 `8080`，编排脚本把
-> llm-gateway 改钉到 `8081`（`COCOLA_LLM_PORT`）规避端口冲突；沙箱内大脑经
-> `COCOLA_SANDBOX_LLM_BASE_URL` 回连它。`make dev` 会自动把 agent-runtime 指向本机
-> sandbox-manager，并把 sandbox-manager 指向准备好的 OpenSandbox server。
+## 文档
 
-#### 接入模型
+完整文档站将随 `v0.1.0` 发布。在此之前，可以从以下仓库文档开始：
 
-启动后在 `Admin -> Models` 中先配置 Provider，再添加模型路由。Claude Code 使用
-Anthropic Messages，Codex 使用 OpenAI Responses；只实现 Chat Completions 的上游不具备
-完整 Agent 工具协议，因此不作为可配置 Provider。同一 alias 可由不同 Provider 复用，
-执行链路使用不可变 route ID，默认模型按协议分别设置。模型目录以 Postgres 为唯一
-事实源，LLM Gateway 自动加载变更；API key 加密保存，不写入仓库文件。
+| 文档                                                      | 内容                             |
+| --------------------------------------------------------- | -------------------------------- |
+| [CLI 安装与运维](./docs/cli.md)                           | 安装、部署、诊断与日常运维       |
+| [配置规范](./docs/configuration.md)                       | 环境变量与部署配置               |
+| [Projects 与 GitHub Connector](./docs/github-projects.md) | 项目、任务和 GitHub 集成         |
+| [对话可靠性](./docs/core-chat-reliability.md)             | Run 生命周期、断线重连与错误处理 |
+| [架构决策记录](./docs/adr/README.md)                      | 关键架构选择及其背景             |
 
-> 鉴权闭环：Gateway 根据已验证的 Web/Scheduler 用户为每个 Run 签发短期 token，
-> Agent Runtime 在每次 shim exec 时把它作为 `ANTHROPIC_AUTH_TOKEN` 注入 sandbox。
-> Sandbox 按 Session 创建且不保存静态共享凭据；LLM Gateway 按真实用户执行配额和计费。
+<!-- GitHub Pages 上线后，将本节链接替换为正式文档站 URL。 -->
 
-> 当前里程碑：**Route A 真实模型全链路打通** — 已完成 M0–M5、后端 MVP，并落地
-> ADR-0009 的 Route A（Claude Code 大脑进沙箱），接入真实模型，Web 端对话与原生
-> 工具调用端到端可用。Go 控制面（admin-api）签发 / 吊销 cocola
-> 签发的令牌（即 Claude Agent SDK 的 `ANTHROPIC_API_KEY`），并按周期 token 配额
-> 限流。详见 `docs/adr/`。
->
-> 为员工签发令牌（令牌即 SDK 的 API Key）：
->
-> ```bash
-> export COCOLA_AUTH_SECRET=<gateway 与签发方共享的密钥>
-> python -m cocola_llm_gateway.issue_token --user emp-12345 --tenant team-platform --ttl-days 30
-> # 启用配额：COCOLA_QUOTA_USER_DAILY_TOKENS / COCOLA_QUOTA_TENANT_MONTHLY_TOKENS
-> ```
->
-> M5 起，同一套令牌也可由 Go 控制面（admin-api）通过 HTTP 签发 / 吊销，并管理动态配额覆盖与 Skill 目录：
->
-> ```bash
-> export COCOLA_AUTH_SECRET=<与 gateway 共享的密钥>  # 令牌签发；缺省则令牌端点 400
-> export COCOLA_ADMIN_KEY=<管理面访问密钥>            # 缺省则管理鉴权关闭（仅本地/CI）
-> export COCOLA_BOOTSTRAP_ADMIN_USERNAME=admin
-> export COCOLA_BOOTSTRAP_ADMIN_EMAIL=admin@example.com
-> export COCOLA_BOOTSTRAP_ADMIN_PASSWORD=<初始管理员密码>
-> go run ./apps/admin-api/cmd/admin-api               # 默认监听 :8090
-> # 跨语言互通校验（Go 签发 -> Python 校验）：
-> apps/llm-gateway/.venv/bin/python scripts/admin-m5-e2e.py
-> ```
->
-> Web 产品入口使用 Auth.js Credentials 登录。`admin-api` 是白名单、角色、密码哈希
-> 与审计事实源；浏览器只持有 Auth.js session/cookie，不保存 cocola runtime token。
-> `make dev` dev 模式默认 bootstrap 管理员为 `admin` 或 `admin@cocola.local`，
-> 密码 `cocola-admin`；会重置成这个固定密码，并在控制台 ready banner 中打印。可通过同名环境变量覆盖。
-> 生产部署必须同时配置
-> `AUTH_SECRET`、`COCOLA_ADMIN_KEY`、`COCOLA_AUTH_SECRET` 以及上述 bootstrap admin
-> 环境变量；初始账号已存在时默认不覆盖密码，只有 `COCOLA_BOOTSTRAP_ADMIN_RESET=true`
-> 才会重置。
->
-> **后端 MVP（端到端链路）**：前端 → gateway（BFF，HTTP/SSE + 令牌校验）→
-> agent-runtime（gRPC）→ llm-gateway / sandbox-manager → 事件流式回传。
-> agent-runtime 暴露 `AgentRuntimeService.Query` 服务端流式 RPC；gateway 作为
-> BFF 校验 cocola 令牌（复用 `packages/go-common/token` 同一套 HS256 编解码，
-> 与 admin-api 共享，不重复造轮子），并把 Agent 事件以 SSE 推给浏览器。
-> Gateway 在本进程后台执行 Agent Run，浏览器断线只中断订阅；重连会先收到完整
-> assistant snapshot。Stop 才会显式取消任务。Gateway/Agent Runtime 重启不会重放
-> 工具调用，而是把 Run 标记为 `interrupted` 并保留最近一次 partial answer。详见
-> [`docs/core-chat-reliability.md`](./docs/core-chat-reliability.md) 与 ADR-0019。
->
-> ```bash
-> # Gateway 和 Agent Runtime 共用持久化会话索引；官方 make dev/prod 会自动注入
-> export COCOLA_PG_DSN=postgres://cocola:cocola_dev_pw@127.0.0.1:5432/cocola?sslmode=disable
-> # 启动 agent-runtime gRPC 服务（缺省 :50061；real 模式要求配置 sandbox）
-> cd apps/agent-runtime && uv run python -m cocola_agent_runtime
-> # 启动 gateway BFF（缺省 :8080，转发至 127.0.0.1:50061）
-> export COCOLA_AUTH_SECRET=<与签发方共享的密钥>   # 缺省则鉴权关闭（仅本地）
-> go run ./apps/gateway/cmd/gateway
-> # 发起一次对话（SSE 流式返回）
-> curl -N -X POST localhost:8080/v1/chat \
->   -H "authorization: Bearer <令牌>" \
->   -H "content-type: application/json" \
->   -d '{"prompt":"hello","session_id":"s1"}'
-> ```
->
-> **真实 LLM 链路（Route A，ADR-0009）**：agent-runtime 必须通过
-> `COCOLA_SANDBOX_ADDR` 连接 sandbox-manager，并使用 `InSandboxShimProvider`。
-> Claude Code 或 Codex 整体运行在用户自己的沙箱里，Runtime 在对话首次运行时确定且
-> 不可中途切换；agent-runtime 只做控制面路由。沙箱 provisioning 注入模型地址和默认 route ID；用户 token
-> 由 Gateway 随每个 Run 的 gRPC metadata 下发，并在每次 sandbox exec 时通过 ENV
-> 注入，绝不进入 prompt，也不进入 Session Volume。
->
-> ```bash
-> # agent-runtime 绑定 sandbox-manager；沙箱内 claude/codex CLI 经注入的 ENV 回连 llm-gateway
-> export COCOLA_SANDBOX_ADDR=127.0.0.1:50051
-> export COCOLA_SANDBOX_IMAGE=cocola/sandbox-runtime:dev
-> export COCOLA_SANDBOX_LLM_BASE_URL=http://127.0.0.1:8080
-> export COCOLA_SANDBOX_MODEL_ALIAS=cocola-default   # 历史变量名；值是默认 route ID
-> cd apps/agent-runtime && uv run python -m cocola_agent_runtime
-> # llm-gateway 侧的真实上游在 Admin -> Models 中配置
-> ```
->
-> > 注：早期的中心化 SDK 路径（Route B，`ClaudeAgentSDKProvider` 在
-> > agent-runtime 进程内 spawn claude CLI，由 `COCOLA_LLM_BASE_URL` 驱动）已于
-> > 2026-07-02 下线，详见 ADR-0009。
->
-> 令牌透传契约由 `apps/llm-gateway/tests/test_token_passthrough_e2e.py` 无网络
-> 验证：真实 provider 用 `_build_env()` 注入的令牌驱动网关 ASGI（FakeUpstream），
-> 响应经 provider 映射回 `AgentEvent` 流回。
->
-> **绑定会话沙箱**：给 agent-runtime 设置 `COCOLA_SANDBOX_ADDR` 指向
-> sandbox-manager,`Query` 即在会话首次进入时 `Acquire` 一个沙箱(create-or-reuse
->
-> - 续租,M2 闭环),把真实 `sandbox_id` 注入会话并以 `sandbox` 事件流式回传供前端
->   观测。调用方显式传入 `sandbox_id` 时按原样尊重;绑定失败则以终止 `error` 事件
->   结束、Agent 不在缺沙箱时运行。未配置则会话不绑定沙箱(零配置启动)。
->
-> ```bash
-> export COCOLA_SANDBOX_ADDR=127.0.0.1:50051   # sandbox-manager gRPC 地址
-> ```
->
-> **让沙箱真正被用起来**:同一个 `COCOLA_SANDBOX_ADDR` 还会把 Agent 的
-> bash / 文件读写工具落到所绑定的沙箱里执行——通过 Claude Agent SDK 的进程内
-> MCP 机制(`create_sdk_mcp_server`,无子进程、无端口)注册 `bash`/`read_file`/
-> `write_file` 三个工具,handler 经 `SandboxExecutor`(anyio 桥接既有
-> `SandboxClient` 的 Exec/Read/WriteFile)在会话绑定的 `sandbox_id` 上运行。命令
-> 跑通但非零退出会把退出码与 stdout/stderr 交还模型自行决断(类真实 shell);
-> 仅沙箱级失败才算工具错误。仅在「有 executor 且会话已绑定沙箱」时挂载,避免
-> Agent 持有指向空的工具。
+## 参与贡献
 
-> **Web 产品入口**:`apps/web` 提供 Auth.js 登录、聊天、会话列表与后台页。页面经
-> 同源 Next.js route handler 反代到 gateway / admin-api；Web 服务端按当前 Auth.js
-> session 从 admin-api 换取短 TTL runtime token，再把 SSE 原样透传给浏览器。
->
-> ```bash
-> # 先起 agent-runtime 与 gateway(见上),再起前端
-> export COCOLA_GATEWAY_URL=http://127.0.0.1:8080   # route.ts 反代目标(缺省即此)
-> export COCOLA_ADMIN_URL=http://127.0.0.1:8090
-> export AUTH_SECRET=<Auth.js session 密钥>
-> export COCOLA_ADMIN_KEY=<与 admin-api 一致>
-> pnpm install
-> pnpm --filter @cocola/web dev                     # http://localhost:3000
-> ```
+欢迎提交 Issue 和 Pull Request。开始较大的功能或架构调整前，请先通过 [GitHub Issues](https://github.com/sakurs2/cocola/issues) 讨论范围，并阅读 [贡献指南](./CONTRIBUTING.md)。
 
-## 路线图
-
-| 里程碑  | 内容                                                                                                                                                                                                                                                                                                | 状态 |
-| ------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---- |
-| M0      | Monorepo 地基、本地开发依赖                                                                                                                                                                                                                                                                         | ✅   |
-| M1      | SandboxProvider 抽象 + Docker 实现                                                                                                                                                                                                                                                                  | ✅   |
-| M2      | 会话↔沙箱绑定 + 租约/两段式 GC（Agent Runtime 闭环）                                                                                                                                                                                                                                                | ✅   |
-| M3      | LLM Gateway：Anthropic 兼容代理（承接 Claude Agent SDK）+ 计费账本                                                                                                                                                                                                                                  | ✅   |
-| M4      | Auth + Token 配额：cocola 签发令牌即 SDK API Key（HS256 离线校验）+ 周期化 token 配额（按用户日 / 租户月，超额 429）                                                                                                                                                                                | ✅   |
-| M5      | Admin API + Skill Market：Go 控制面（令牌签发 / 吊销denylist + 动态 per-subject 配额覆盖 + Skill 目录 CRUD + 审计日志），令牌编解码与 Python 网关跨语言互通（HS256 字节级一致）                                                                                                                     | ✅   |
-| **MVP** | **后端端到端打通：agent-runtime gRPC 服务（`AgentRuntimeService.Query` 服务端流式）+ gateway BFF（HTTP/SSE + 令牌校验，复用 go-common/token 共享 HS256 编解码）**                                                                                                                                   | ✅   |
-| **R-A** | **Route A：Claude Code 大脑进沙箱（ADR-0009）+ 真实模型接入 + CLI 正式容器部署 + Web 对话 / 原生工具端到端**                                                                                                                                                                                        | ✅   |
-| M6      | K8s Provider:client-go 实现 8 方法 + 休眠(删 Pod 留 PVC)/恢复(凭 binding 重建)/Exec 自愈 + egress NetworkPolicy + 部署物(K8s 清单 / Helm Chart);默认 runc + 用户命名空间(零节点安装),gVisor 为可选增强;代码与单测就绪,真实集群端到端验收(Layer C)已在 k3d(本地)跑通,发行版无关(k3d/k3s/EKS/GKE/AKS) | ✅   |
-| M7      | 持久化数据分层：会话 `session_map`／计费账本／控制面元数据落 Postgres，重启不丢、可自托管、多副本可共享（Vault 密钥托管按 ADR-0008 留待后续）                                                                                                                                                       | ✅   |
-| M8      | 可观测性与压测：五服务统一 RED 指标(Prometheus)+ OTel 链路(默认关，Tempo)+ 部署观测栈(Grafana 看板)+ 压测套件(k6 SSE / ghz gRPC)与容量基线 runbook                                                                                                                                                  | ✅   |
-| SP      | 每个 Session 使用节点本地 PVC；Sandbox 回收后重新调度到原节点并挂载同一 Volume。原节点不可用时拒绝静默清空，仅在用户确认后重置 Workspace。MinIO 不再保存 Session checkpoint，见 ADR-0023。                                                                                                          | ✅   |
-| GV      | gVisor(runsc)兼容性 spike:Node + Claude Code 在 `RuntimeClass=runsc` 下跑通 Route A 的 pre-prod 验收门。Layer A/B 本机可做,Layer C(真集群 + gVisor 端到端)待目标集群                                                                                                                                | ⏳   |
-
-## 安全：沙箱出网模型（egress）
-
-沙箱里跑的是不可信的用户/Agent 代码,因此安全边界不是「工具白名单」,而是
-**网络出网管控**(ADR-0009)。为让远程 MCP、网页访问和包管理开箱即用，当前默认
-不下发 egress policy，允许访问公网：
-
-- **默认开放**:未配置 `COCOLA_SANDBOX_EGRESS_ALLOWLIST` 时不创建网络策略。
-- **生产收紧**:配置 `COCOLA_SANDBOX_EGRESS_ALLOWLIST` 后切换为 default-deny，
-  仅允许逗号分隔的域名/CIDR/IP；编排层自动并入
-  `COCOLA_SANDBOX_LLM_BASE_URL` 的 gateway host。
-- **按需控制**:例如 `mcp.amap.com,api.github.com`，无需使用 `*` 全量放行。
-
-当前内置 sandbox provider 只保留 OpenSandbox。cocola 把 egress allowlist 转成
-OpenSandbox 的 `networkPolicy`，由 OpenSandbox 所在 runtime 负责执行；本地 dev 默认
-使用 OpenSandbox Kubernetes runtime，正式 Docker 部署由 `cocola` CLI 管理专用的
-OpenSandbox server。
-
-**域名级精确放行**:OpenSandbox 的 DNS-aware egress sidecar 负责解析域名并维护
-nftables 动态 allow set，不需要在 Cocola 中固定供应商 IP。
-
-> 配置语义：`Networking.EgressAllowlist` 为 nil = 未配置策略、允许公网；非 nil
-> 且非空 = 防火墙生效、仅放行列表和模型网关、其余 DROP。
+安全问题请按照 [SECURITY.md](./SECURITY.md) 私密报告，不要创建公开 Issue。
 
 ## License
 
-Apache-2.0
+Cocola 使用 [Apache License 2.0](./LICENSE) 开源。

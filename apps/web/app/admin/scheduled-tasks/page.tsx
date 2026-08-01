@@ -249,10 +249,7 @@ export default function ScheduledTasksPage() {
                     <div className="admin-list-cell">
                       <TaskStatus status={task.status} />
                     </div>
-                    <div
-                      className="flex justify-end"
-                      onClick={(event) => event.stopPropagation()}
-                    >
+                    <div className="flex justify-end" onClick={(event) => event.stopPropagation()}>
                       <DropdownMenu>
                         <DropdownMenuTrigger asChild>
                           <Button

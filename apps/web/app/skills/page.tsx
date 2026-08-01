@@ -605,12 +605,7 @@ function SkillCard({
           </button>
         )}
         {onDelete ? (
-          <button
-            className="user-iconbtn"
-            disabled={working}
-            onClick={onDelete}
-            title="Remove"
-          >
+          <button className="user-iconbtn" disabled={working} onClick={onDelete} title="Remove">
             <Trash2 className="size-3.5" />
           </button>
         ) : null}

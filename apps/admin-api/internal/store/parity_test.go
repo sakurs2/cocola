@@ -310,7 +310,7 @@ func runStoreContract(t *testing.T, st Store) {
 
 	// ----- model routes -----
 	providers := []LLMProvider{
-		{ID: "provider-chat", Name: "Chat", Type: "anthropic", Enabled: true, CreatedAt: now, UpdatedAt: now},
+		{ID: "provider-chat", Name: "Chat", Type: "anthropic", IconType: "simple-icons", IconSlug: "anthropic", Enabled: true, CreatedAt: now, UpdatedAt: now},
 		{ID: "provider-responses", Name: "Responses", Type: "openai_responses", Enabled: true, CreatedAt: now, UpdatedAt: now},
 		{ID: "provider-embedding", Name: "Embedding", Type: "openai_embeddings", Enabled: true, CreatedAt: now, UpdatedAt: now},
 	}
@@ -318,6 +318,10 @@ func runStoreContract(t *testing.T, st Store) {
 		if err := st.CreateLLMProvider(ctx, provider); err != nil {
 			t.Fatalf("CreateLLMProvider(%s): %v", provider.ID, err)
 		}
+	}
+	gotProvider, err := st.GetLLMProvider(ctx, "provider-chat")
+	if err != nil || gotProvider.IconType != "simple-icons" || gotProvider.IconSlug != "anthropic" {
+		t.Fatalf("provider icon roundtrip: %+v %v", gotProvider, err)
 	}
 	routes := []LLMModelRoute{
 		{ID: "route-chat", Alias: "shared", ProviderID: "provider-chat", Protocol: "anthropic-messages", RealModel: "chat-model", Enabled: true, Visible: true, IsDefault: true, CreatedAt: now, UpdatedAt: now},

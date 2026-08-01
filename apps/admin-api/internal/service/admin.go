@@ -1417,13 +1417,16 @@ const (
 )
 
 type LLMProviderInput struct {
-	ID      string
-	Name    string
-	Type    string
-	BaseURL string
-	APIKey  *string
-	Enabled *bool
-	Actor   string
+	ID       string
+	Name     string
+	Type     string
+	BaseURL  string
+	APIKey   *string
+	IconType string
+	IconSlug string
+	IconURL  string
+	Enabled  *bool
+	Actor    string
 }
 
 type LLMModelInput struct {
@@ -1458,15 +1461,27 @@ func (a *Admin) CreateLLMProvider(ctx context.Context, in LLMProviderInput) (sto
 		Name:      strings.TrimSpace(in.Name),
 		Type:      ptype,
 		BaseURL:   strings.TrimSpace(in.BaseURL),
+		IconType:  strings.TrimSpace(in.IconType),
+		IconSlug:  strings.TrimSpace(in.IconSlug),
+		IconURL:   strings.TrimSpace(in.IconURL),
 		Enabled:   enabled,
 		CreatedAt: now,
 		UpdatedAt: now,
+	}
+	if provider.IconType == "" {
+		provider.IconType = IconSimpleIcons
+	}
+	if provider.IconType == IconSimpleIcons && provider.IconSlug == "" {
+		provider.IconSlug = defaultProviderIconSlug(ptype)
 	}
 	if err := a.applyProviderAPIKey(&provider, in.APIKey); err != nil {
 		return store.LLMProvider{}, err
 	}
 	if err := validateProviderReady(provider); err != nil {
 		return store.LLMProvider{}, err
+	}
+	if !validIconConfig(provider.IconType, provider.IconSlug, provider.IconURL) {
+		return store.LLMProvider{}, ErrInvalidArg
 	}
 	if err := a.store.CreateLLMProvider(ctx, provider); err != nil {
 		return store.LLMProvider{}, err
@@ -1507,6 +1522,15 @@ func (a *Admin) UpdateLLMProvider(ctx context.Context, id string, in LLMProvider
 	if in.BaseURL != "" {
 		provider.BaseURL = strings.TrimSpace(in.BaseURL)
 	}
+	if provider.IconType == "" {
+		provider.IconType = IconSimpleIcons
+		provider.IconSlug = defaultProviderIconSlug(provider.Type)
+	}
+	if in.IconType != "" {
+		provider.IconType = strings.TrimSpace(in.IconType)
+		provider.IconSlug = strings.TrimSpace(in.IconSlug)
+		provider.IconURL = strings.TrimSpace(in.IconURL)
+	}
 	if in.Enabled != nil {
 		provider.Enabled = *in.Enabled
 	}
@@ -1515,6 +1539,9 @@ func (a *Admin) UpdateLLMProvider(ctx context.Context, id string, in LLMProvider
 	}
 	if err := validateProviderReady(provider); err != nil {
 		return store.LLMProvider{}, err
+	}
+	if !validIconConfig(provider.IconType, provider.IconSlug, provider.IconURL) {
+		return store.LLMProvider{}, ErrInvalidArg
 	}
 	provider.UpdatedAt = a.now().UTC()
 	if err := a.store.UpdateLLMProvider(ctx, provider); err != nil {
@@ -1822,14 +1849,25 @@ func validProviderType(v string) bool {
 }
 
 func validIcon(route store.LLMModelRoute) bool {
-	switch route.IconType {
+	return validIconConfig(route.IconType, route.IconSlug, route.IconURL)
+}
+
+func validIconConfig(iconType, iconSlug, iconURL string) bool {
+	switch iconType {
 	case IconSimpleIcons:
-		return route.IconSlug != ""
+		return strings.TrimSpace(iconSlug) != ""
 	case IconImage:
-		return strings.HasPrefix(route.IconURL, "https://")
+		return strings.HasPrefix(strings.TrimSpace(iconURL), "https://")
 	default:
 		return false
 	}
+}
+
+func defaultProviderIconSlug(providerType string) string {
+	if providerType == ProviderAnthropic {
+		return "anthropic"
+	}
+	return "openai"
 }
 
 func publicModelSlug(v string) string {
@@ -2115,7 +2153,8 @@ func (a *Admin) CreateEmbeddingModel(
 	now := a.now().UTC()
 	provider := store.LLMProvider{
 		ID: "embedding-" + newID(), Name: model, Type: ProviderOpenAIEmbeddings,
-		BaseURL: baseURL, Enabled: true, CreatedAt: now, UpdatedAt: now,
+		BaseURL: baseURL, IconType: IconSimpleIcons, IconSlug: "openai",
+		Enabled: true, CreatedAt: now, UpdatedAt: now,
 	}
 	if err := a.applyProviderAPIKey(&provider, in.APIKey); err != nil {
 		return EmbeddingModelView{}, err

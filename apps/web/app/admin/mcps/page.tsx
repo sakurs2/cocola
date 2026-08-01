@@ -599,9 +599,7 @@ function MCPCard({
         </div>
         <div className="min-w-0 flex-1">
           <div className="flex flex-wrap items-center gap-2">
-            <h2 className="truncate text-sm font-semibold text-foreground">
-              {mcp.name || mcp.id}
-            </h2>
+            <h2 className="truncate text-sm font-semibold text-foreground">{mcp.name || mcp.id}</h2>
             <span className="admin-entity-tag">{transport === "http" ? "HTTP" : transport}</span>
           </div>
           <p className="mt-1 line-clamp-2 min-h-10 text-sm leading-5 text-muted-foreground">

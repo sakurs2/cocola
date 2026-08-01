@@ -1174,9 +1174,17 @@ func TestDeleteReferencedLLMProviderReturnsActionableConflict(t *testing.T) {
 	rec := do(t, router, http.MethodPost, "/admin/model-providers", "k", map[string]any{
 		"id": "deepseek", "name": "DeepSeek", "type": "anthropic",
 		"base_url": "https://api.deepseek.com/anthropic", "enabled": false,
+		"icon_type": "simple-icons", "icon_slug": "deepseek",
 	})
 	if rec.Code != http.StatusCreated {
 		t.Fatalf("create provider: want 201, got %d (%s)", rec.Code, rec.Body.String())
+	}
+	var provider store.LLMProvider
+	if err := json.Unmarshal(rec.Body.Bytes(), &provider); err != nil {
+		t.Fatalf("decode provider: %v", err)
+	}
+	if provider.IconType != "simple-icons" || provider.IconSlug != "deepseek" {
+		t.Fatalf("provider icon not returned: %+v", provider)
 	}
 	rec = do(t, router, http.MethodPost, "/admin/models", "k", map[string]any{
 		"alias": "deepseek-v4-pro", "provider_id": "deepseek",

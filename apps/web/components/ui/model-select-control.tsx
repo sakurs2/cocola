@@ -90,9 +90,7 @@ export function ModelSelectControl({
         )}
       >
         <span className="flex min-w-0 flex-1 items-center gap-2">
-          {active?.icon ? (
-            <ModelIcon icon={active.icon} className="size-4 shrink-0" bare />
-          ) : null}
+          {active?.icon ? <ModelIcon icon={active.icon} className="size-4 shrink-0" bare /> : null}
           <SelectPrimitive.Value placeholder={placeholder}>
             {active ? (
               <span className="flex min-w-0 items-center gap-1.5 truncate text-left">
@@ -103,9 +101,7 @@ export function ModelSelectControl({
                   </span>
                 ) : null}
                 {active.suffix ? (
-                  <span className="shrink-0 text-xs text-muted-foreground">
-                    · {active.suffix}
-                  </span>
+                  <span className="shrink-0 text-xs text-muted-foreground">· {active.suffix}</span>
                 ) : null}
               </span>
             ) : null}
@@ -156,9 +152,7 @@ export function ModelSelectControl({
                     </span>
                   ) : null}
                   {item.suffix ? (
-                    <span className="shrink-0 text-xs text-muted-foreground">
-                      · {item.suffix}
-                    </span>
+                    <span className="shrink-0 text-xs text-muted-foreground">· {item.suffix}</span>
                   ) : null}
                 </span>
                 <SelectPrimitive.ItemIndicator className="absolute right-2 inline-flex items-center">
