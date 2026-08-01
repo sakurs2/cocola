@@ -1,4 +1,4 @@
--- migrate:up
+-- +goose Up
 ALTER TABLE llm_providers
     ADD COLUMN IF NOT EXISTS icon_type TEXT NOT NULL DEFAULT 'simple-icons',
     ADD COLUMN IF NOT EXISTS icon_slug TEXT NOT NULL DEFAULT '',
@@ -11,7 +11,7 @@ SET icon_slug = CASE
 END
 WHERE icon_slug = '';
 
--- migrate:down
+-- +goose Down
 ALTER TABLE llm_providers
     DROP COLUMN IF EXISTS icon_url,
     DROP COLUMN IF EXISTS icon_slug,
