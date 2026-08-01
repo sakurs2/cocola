@@ -36,6 +36,7 @@ import {
   gitDiffGutterWidth,
 } from "@/lib/git-history.mjs";
 import { MaterialFileIcon } from "@/lib/material-file-icons";
+import { dockPageInstanceID, dockPageInstanceLabel } from "@/lib/workspace-dock-tabs.mjs";
 import { Diff as DiffView, Hunk, parseDiff, tokenize } from "react-diff-view";
 import { refractor } from "refractor";
 import refractorMarkup from "refractor/lang/markup.js";
@@ -90,8 +91,8 @@ import {
 //
 // The right-hand dock is a tabbed container: a strip of open sub-pages plus a
 // "+" menu to add and switch to another sub-page. Workspace files, Shell, and
-// Preview are registered base pages. Code and generated-file pages are created
-// dynamically from user actions, with one stable tab per resource.
+// Preview are registered base page templates. Each launcher/menu action creates
+// an independent page instance; generated-file previews remain stable per artifact.
 
 type DockPageContext = {
   sessionID: string;
@@ -105,6 +106,7 @@ type DockPageContext = {
 
 type DockPage = {
   id: string;
+  kind: "files" | "shell" | "preview" | "git" | "code" | "artifact";
   label: string;
   title?: string;
   icon: LucideIcon;
@@ -116,6 +118,7 @@ type DockPage = {
 const BASE_DOCK_PAGES: DockPage[] = [
   {
     id: "files",
+    kind: "files",
     label: "Workspace files",
     icon: FolderOpen,
     render: ({ sessionID, active, setHeaderActions, openCodeFolder, workspaceRoot }) => (
@@ -130,6 +133,7 @@ const BASE_DOCK_PAGES: DockPage[] = [
   },
   {
     id: "shell",
+    kind: "shell",
     label: "Shell",
     icon: SquareTerminal,
     render: ({ sessionID, active, setHeaderActions }) => (
@@ -143,6 +147,7 @@ const BASE_DOCK_PAGES: DockPage[] = [
   },
   {
     id: "preview",
+    kind: "preview",
     label: "Preview",
     icon: Globe,
     render: ({ sessionID, active, setHeaderActions }) => (
@@ -154,6 +159,7 @@ const BASE_DOCK_PAGES: DockPage[] = [
 function createGitPage(): DockPage {
   return {
     id: "git",
+    kind: "git",
     label: "Git",
     icon: GitBranch,
     render: ({ sessionID, active, setHeaderActions }) => (
@@ -174,6 +180,7 @@ function createCodePage(workspacePath: string, workspaceRoot = ""): DockPage {
       : normalizedPath.split("/").pop() || "Workspace";
   return {
     id: codeEditorTabID(normalizedPath),
+    kind: "code",
     label,
     title: folder,
     icon: Code2,
@@ -191,6 +198,7 @@ function createCodePage(workspacePath: string, workspaceRoot = ""): DockPage {
 function createArtifactPage(artifact: ArtifactPreview): DockPage {
   return {
     id: artifactPreviewTabID(artifact.sessionId, artifact.id),
+    kind: "artifact",
     label: artifact.filename,
     title: artifact.filename,
     icon: FileCode2,
@@ -223,6 +231,7 @@ export function WorkspaceDock({
   // exist after a directory action explicitly creates one.
   const [openPages, setOpenPages] = useState<DockPage[]>([]);
   const [activePageId, setActivePageId] = useState<string>("");
+  const pageInstanceOrdinalsRef = useRef<Record<string, number>>({});
   // The active page publishes its header controls here; keyed by page id so a
   // backgrounded page can never leak its actions into the header.
   const [headerActions, setHeaderActions] = useState<Record<string, ReactNode>>({});
@@ -233,32 +242,36 @@ export function WorkspaceDock({
     [projectTask],
   );
 
-  const addablePages = useMemo(
-    () => basePages.filter((page) => !openPages.some((open) => open.id === page.id)),
-    [basePages, openPages],
-  );
+  const addablePages = basePages;
+
+  const createPageInstance = useCallback((template: DockPage): DockPage => {
+    const ordinal = (pageInstanceOrdinalsRef.current[template.id] ?? 0) + 1;
+    pageInstanceOrdinalsRef.current[template.id] = ordinal;
+    return {
+      ...template,
+      id: dockPageInstanceID(template.id, ordinal),
+      label: dockPageInstanceLabel(template.label, ordinal),
+    };
+  }, []);
 
   const openPage = useCallback(
     (id: string) => {
       const page = basePages.find((candidate) => candidate.id === id);
       if (!page) return;
-      setOpenPages((current) =>
-        current.some((candidate) => candidate.id === id) ? current : [...current, page],
-      );
-      setActivePageId(id);
+      const instance = createPageInstance(page);
+      setOpenPages((current) => [...current, instance]);
+      setActivePageId(instance.id);
     },
-    [basePages],
+    [basePages, createPageInstance],
   );
 
   const openCodeFolder = useCallback(
     (workspacePath: string) => {
-      const page = createCodePage(workspacePath, workspaceRoot);
-      setOpenPages((current) =>
-        current.some((candidate) => candidate.id === page.id) ? current : [...current, page],
-      );
-      setActivePageId(page.id);
+      const instance = createPageInstance(createCodePage(workspacePath, workspaceRoot));
+      setOpenPages((current) => [...current, instance]);
+      setActivePageId(instance.id);
     },
-    [workspaceRoot],
+    [createPageInstance, workspaceRoot],
   );
 
   useEffect(() => {
@@ -288,10 +301,20 @@ export function WorkspaceDock({
 
   useEffect(() => {
     if (projectTask) return;
-    setOpenPages((current) => current.filter((page) => page.id !== "git"));
-    setActivePageId((current) => (current === "git" ? "" : current));
-    publishHeaderActions("git", null);
-  }, [projectTask, publishHeaderActions]);
+    const gitPages = openPages.filter((page) => page.kind === "git");
+    if (gitPages.length === 0) return;
+    const gitPageIDs = new Set(gitPages.map((page) => page.id));
+    const remainingPages = openPages.filter((page) => page.kind !== "git");
+    setOpenPages(remainingPages);
+    setActivePageId((current) =>
+      gitPageIDs.has(current) ? (remainingPages[remainingPages.length - 1]?.id ?? "") : current,
+    );
+    setHeaderActions((current) => {
+      const next = { ...current };
+      for (const id of gitPageIDs) delete next[id];
+      return next;
+    });
+  }, [openPages, projectTask]);
 
   const closePage = useCallback(
     (id: string) => {
@@ -299,7 +322,8 @@ export function WorkspaceDock({
       if (
         closingPage?.artifact &&
         artifact &&
-        artifactPreviewTabID(artifact.sessionId, artifact.id) === id
+        closingPage.artifact.sessionId === artifact.sessionId &&
+        closingPage.artifact.id === artifact.id
       ) {
         onArtifactClose();
       }
