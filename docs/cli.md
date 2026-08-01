@@ -116,5 +116,7 @@ cd apps/cli && go test ./...
 CLI 以及同版本全套服务镜像；镜像成功后才发布 CLI Release。正式版本必须使用
 `vMAJOR.MINOR.PATCH`（如 `v2.0.0`）并高于历史最新正式版本；预发布版本使用
 `vMAJOR.MINOR.PATCH-prerelease`（如 `v2.0.0-rc.1`）并按顺序递增。非法、回退或已经
-发布过的版本会在任何镜像构建前失败。安装脚本的归档文件名与 GoReleaser 固定为
-`cocola_<goos>_<goarch>.tar.gz`。
+发布过的版本会在任何镜像构建前失败。正式版本同时更新 `latest` 镜像，源码构建的开发版
+CLI 默认使用该通道；预发布版本只发布自己的版本 tag，不覆盖 `latest`。每个镜像必须通过
+匿名拉取检查后才会发布 CLI Release；首次创建的 GHCR Package 需要由维护者设置为 Public。
+安装脚本的归档文件名与 GoReleaser 固定为 `cocola_<goos>_<goarch>.tar.gz`。
