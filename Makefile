@@ -92,7 +92,7 @@ py-format: ## Format Python code (ruff format)
 web-install: ## Install web deps
 	cd apps/web && pnpm install
 
-web-dev: ## One command: full dev stack with HOT-RELOAD web (next dev). Same as make dev, web edits reflect on refresh.
+web-dev: ## One command: full dev stack with hot-reload web and workspace WebSockets. Same as make dev.
 	@COCOLA_WEB_DEV=1 bash scripts/run-stack-dev.sh; status=$$?; \
 		if [ "$$status" -eq 130 ] || [ "$$status" -eq 143 ]; then \
 			exit 0; \

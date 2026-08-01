@@ -14,6 +14,7 @@ import {
 } from "@/lib/terminal-protocol.mjs";
 
 const TERMINAL_PREPARE_LIMIT_MS = 4 * 60 * 1000;
+const TERMINAL_CONNECT_TIMEOUT_MS = 15 * 1000;
 const TERMINAL_RECONNECT_LIMIT = 5;
 const TERMINAL_STABLE_CONNECTION_MS = 10 * 1000;
 
@@ -57,6 +58,7 @@ export function ShellPage({
   const prepareAttemptRef = useRef(0);
   const reconnectAttemptRef = useRef(0);
   const retryTimerRef = useRef<number | null>(null);
+  const connectTimeoutRef = useRef<number | null>(null);
   const stableConnectionTimerRef = useRef<number | null>(null);
   const [xtermReady, setXtermReady] = useState(false);
   const [status, setStatus] = useState<ShellStatus>(hasMessages ? "connecting" : "not-started");
@@ -77,13 +79,21 @@ export function ShellPage({
     }
   }, []);
 
+  const clearConnectTimeout = useCallback(() => {
+    if (connectTimeoutRef.current != null) {
+      window.clearTimeout(connectTimeoutRef.current);
+      connectTimeoutRef.current = null;
+    }
+  }, []);
+
   const closeConnection = useCallback(() => {
+    clearConnectTimeout();
     clearStableConnectionTimer();
     connectionGenerationRef.current++;
     const socket = socketRef.current;
     socketRef.current = null;
     socket?.close();
-  }, [clearStableConnectionTimer]);
+  }, [clearConnectTimeout, clearStableConnectionTimer]);
 
   const deleteTerminal = useCallback(
     async (terminalID: string) => {
@@ -111,6 +121,7 @@ export function ShellPage({
   const connectWebSocket = useCallback(
     (terminalID: string, takeover: boolean) => {
       clearRetryTimer();
+      clearConnectTimeout();
       setStatus("connecting");
       setError(null);
 
@@ -127,6 +138,20 @@ export function ShellPage({
       );
       socket.binaryType = "arraybuffer";
       socketRef.current = socket;
+      connectTimeoutRef.current = window.setTimeout(() => {
+        connectTimeoutRef.current = null;
+        if (
+          !mountedRef.current ||
+          connectionGeneration !== connectionGenerationRef.current ||
+          socketRef.current !== socket
+        )
+          return;
+        socketRef.current = null;
+        connectionGenerationRef.current++;
+        socket.close();
+        setError("The terminal connection timed out");
+        setStatus("error");
+      }, TERMINAL_CONNECT_TIMEOUT_MS);
 
       socket.onmessage = (event) => {
         if (
@@ -152,6 +177,7 @@ export function ShellPage({
           return;
         }
         if (frame.type === "connected") {
+          clearConnectTimeout();
           setStatus("ready");
           sendResize();
           terminalRef.current?.focus();
@@ -168,11 +194,13 @@ export function ShellPage({
           return;
         }
         if (frame.type === "exit") {
+          clearConnectTimeout();
           clearStableConnectionTimer();
           connectionGenerationRef.current++;
           setExitCode(typeof frame.exit_code === "number" ? frame.exit_code : null);
           setStatus("exited");
         } else if (frame.type === "error") {
+          clearConnectTimeout();
           clearStableConnectionTimer();
           connectionGenerationRef.current++;
           if (frame.code === "SESSION_GONE") {
@@ -188,6 +216,7 @@ export function ShellPage({
       socket.onclose = () => {
         if (socketRef.current === socket) socketRef.current = null;
         if (!mountedRef.current || connectionGeneration !== connectionGenerationRef.current) return;
+        clearConnectTimeout();
         clearStableConnectionTimer();
         const attempt = reconnectAttemptRef.current;
         if (attempt >= TERMINAL_RECONNECT_LIMIT) {
@@ -203,7 +232,7 @@ export function ShellPage({
         );
       };
     },
-    [clearRetryTimer, clearStableConnectionTimer, sendResize, sessionID],
+    [clearConnectTimeout, clearRetryTimer, clearStableConnectionTimer, sendResize, sessionID],
   );
 
   useEffect(() => {

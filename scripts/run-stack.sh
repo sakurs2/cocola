@@ -584,11 +584,9 @@ free_port "$WEB_PORT" web
     export AUTH_SECRET="$AUTH_SECRET"
     export COCOLA_PUBLIC_ORIGINS="$COCOLA_PUBLIC_ORIGINS"
     if [ "${COCOLA_WEB_DEV:-0}" = "1" ]; then
-      echo "==> [dev] web running in HOT-RELOAD mode (next dev); frontend edits reflect on refresh, no rebuild/restart" >&2
-      $SETSID pnpm dev --port "$WEB_PORT"
-    else
-      $SETSID node server.mjs --port "$WEB_PORT"
+      echo "==> [dev] web running in HOT-RELOAD mode; frontend edits reflect on refresh, workspace WebSockets enabled" >&2
     fi
+    $SETSID node server.mjs --port "$WEB_PORT"
   ) >"$(log_redirect web)" 2>&1 &
   PIDS+=("$!")
 wait_port "127.0.0.1" "$WEB_PORT" "web" 240

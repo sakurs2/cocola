@@ -1,7 +1,13 @@
 import assert from "node:assert/strict";
+import { readFile } from "node:fs/promises";
 import test from "node:test";
 
 import { buildGatewayWebSocketPath, maskPreviewUpgradeFromNext } from "./preview-ws-routing.mjs";
+
+const runStackSource = await readFile(
+  new URL("../../../scripts/run-stack.sh", import.meta.url),
+  "utf8",
+);
 
 test("preview and terminal upgrades map to authenticated Gateway paths", () => {
   assert.equal(
@@ -35,4 +41,9 @@ test("claimed preview upgrades are hidden from Next's App Router", () => {
 
   assert.equal(request.url, "/api/__cocola_preview_ws_passthrough__");
   assert.doesNotMatch(request.url, /^\/api\/preview\//);
+});
+
+test("the dev stack keeps the custom server that owns workspace upgrades", () => {
+  assert.match(runStackSource, /\$SETSID node server\.mjs --port "\$WEB_PORT"/);
+  assert.doesNotMatch(runStackSource, /\$SETSID pnpm dev --port "\$WEB_PORT"/);
 });
