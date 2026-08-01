@@ -44,12 +44,12 @@ const PUBLIC_ORIGINS = parsePublicOrigins(process.env.COCOLA_PUBLIC_ORIGINS);
 
 if (PUBLIC_ORIGINS.size === 0) {
   console.warn(
-    "[web] COCOLA_PUBLIC_ORIGINS is empty; workspace WebSocket upgrades will fail closed",
+    "[web] COCOLA_PUBLIC_ORIGINS is empty; workspace WebSockets are limited to the request Host",
   );
 }
 
 const dev = process.env.NODE_ENV !== "production";
-const hostname = process.env.HOSTNAME || "0.0.0.0";
+const hostname = process.env.COCOLA_WEB_HOST || "0.0.0.0";
 const port = resolvePort();
 
 function resolvePort() {
@@ -274,10 +274,11 @@ app
       (async () => {
         // The browser-facing cookie boundary owns CSWSH protection. Validate the
         // full external Origin before reading the Auth.js cookie or minting a
-        // runtime token; code-server independently checks the same explicit host
-        // allowlist inside the sandbox. Preserve the accepted Origin downstream
-        // because arbitrary Preview dev servers may rely on it.
-        if (!isAllowedWebSocketOrigin(req.headers.origin, PUBLIC_ORIGINS)) {
+        // runtime token. A direct IP/domain deployment is accepted when Origin
+        // matches the request Host; explicit origins cover proxies that rewrite
+        // Host. Preserve the accepted Origin downstream because arbitrary
+        // Preview dev servers may rely on it.
+        if (!isAllowedWebSocketOrigin(req.headers.origin, PUBLIC_ORIGINS, req.headers.host)) {
           writeUpgradeError(socket, 403, "Forbidden");
           return;
         }

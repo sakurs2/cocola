@@ -12,25 +12,25 @@
   </p>
 
   <p>
-    <a href="https://github.com/sakurs2/cocola/actions/workflows/ci.yml"><img src="https://github.com/sakurs2/cocola/actions/workflows/ci.yml/badge.svg" alt="CI" /></a>
-    <a href="https://github.com/sakurs2/cocola/releases"><img src="https://img.shields.io/github/v/release/sakurs2/cocola?display_name=tag&sort=semver" alt="GitHub release" /></a>
-    <a href="./LICENSE"><img src="https://img.shields.io/github/license/sakurs2/cocola" alt="License" /></a>
-    <a href="./SECURITY.md"><img src="https://img.shields.io/badge/security-policy-2563eb?logo=github" alt="Security policy" /></a>
-    <a href="./CONTRIBUTING.md"><img src="https://img.shields.io/badge/contributions-welcome-22c55e" alt="Contributions welcome" /></a>
+    <a href="https://github.com/sakurs2/cocola/actions/workflows/ci.yml"><img src="https://img.shields.io/github/actions/workflow/status/sakurs2/cocola/ci.yml?branch=master&style=flat-square&label=CI" alt="CI" /></a>
+    <a href="https://github.com/sakurs2/cocola/releases"><img src="https://img.shields.io/github/v/release/sakurs2/cocola?display_name=tag&sort=semver&style=flat-square" alt="GitHub release" /></a>
+    <a href="./LICENSE"><img src="https://img.shields.io/github/license/sakurs2/cocola?style=flat-square" alt="License" /></a>
+    <a href="./SECURITY.md"><img src="https://img.shields.io/badge/security-policy-2563eb?style=flat-square&logo=github" alt="Security policy" /></a>
+    <a href="./CONTRIBUTING.md"><img src="https://img.shields.io/badge/contributions-welcome-22c55e?style=flat-square" alt="Contributions welcome" /></a>
   </p>
 
   <p>
-    <a href="./docs/cli.md"><img src="https://img.shields.io/badge/deployment-self--hosted-5b5bd6" alt="Self-hosted" /></a>
-    <a href="./docs/cli.md"><img src="https://img.shields.io/badge/Docker%20Compose-v2-2496ED?logo=docker&logoColor=white" alt="Docker Compose v2" /></a>
-    <a href="https://github.com/opensandbox-group/OpenSandbox"><img src="https://img.shields.io/badge/sandbox-OpenSandbox-0ea5e9" alt="OpenSandbox" /></a>
-    <a href="./docs/cli.md"><img src="https://img.shields.io/badge/platform-amd64%20%7C%20arm64-64748b" alt="amd64 and arm64" /></a>
+    <a href="./docs/cli.md"><img src="https://img.shields.io/badge/deployment-self--hosted-5b5bd6?style=flat-square" alt="Self-hosted" /></a>
+    <a href="./docs/cli.md"><img src="https://img.shields.io/badge/Docker%20Compose-2.23.1%2B-2496ED?style=flat-square&logo=docker&logoColor=white" alt="Docker Compose 2.23.1 or newer" /></a>
+    <a href="https://github.com/opensandbox-group/OpenSandbox"><img src="https://img.shields.io/badge/sandbox-OpenSandbox-0ea5e9?style=flat-square" alt="OpenSandbox" /></a>
+    <a href="./docs/cli.md"><img src="https://img.shields.io/badge/platform-amd64%20%7C%20arm64-64748b?style=flat-square" alt="amd64 and arm64" /></a>
   </p>
 
   <p>
-    <a href="./apps/web/package.json"><img src="https://img.shields.io/badge/Next.js-15-000000?logo=nextdotjs&logoColor=white" alt="Next.js 15" /></a>
-    <a href="./go.work"><img src="https://img.shields.io/badge/Go-1.24-00ADD8?logo=go&logoColor=white" alt="Go 1.24" /></a>
-    <a href="./apps/agent-runtime/pyproject.toml"><img src="https://img.shields.io/badge/Python-3.11%2B-3776AB?logo=python&logoColor=white" alt="Python 3.11 or newer" /></a>
-    <a href="./package.json"><img src="https://img.shields.io/badge/pnpm-9-F69220?logo=pnpm&logoColor=white" alt="pnpm 9" /></a>
+    <a href="./apps/web/package.json"><img src="https://img.shields.io/badge/Next.js-15-000000?style=flat-square&logo=nextdotjs&logoColor=white" alt="Next.js 15" /></a>
+    <a href="./go.work"><img src="https://img.shields.io/badge/Go-1.24-00ADD8?style=flat-square&logo=go&logoColor=white" alt="Go 1.24" /></a>
+    <a href="./apps/agent-runtime/pyproject.toml"><img src="https://img.shields.io/badge/Python-3.11%2B-3776AB?style=flat-square&logo=python&logoColor=white" alt="Python 3.11 or newer" /></a>
+    <a href="./package.json"><img src="https://img.shields.io/badge/pnpm-9-F69220?style=flat-square&logo=pnpm&logoColor=white" alt="pnpm 9" /></a>
   </p>
 </div>
 
@@ -57,7 +57,7 @@ Cocola 不只是一个模型聊天界面。每个会话都会获得独立、可�
 
 - Linux 或 macOS，`amd64` 或 `arm64`；
 - Docker Engine 或 Docker Desktop；
-- Docker Compose v2。
+- Docker Compose 2.23.1 或更高版本。
 
 **1. 安装**
 
@@ -67,12 +67,14 @@ Cocola 不只是一个模型聊天界面。每个会话都会获得独立、可�
 curl -fsSL https://raw.githubusercontent.com/sakurs2/cocola/master/scripts/install.sh | sh
 ```
 
-安装器会下载对应平台的 CLI、校验 SHA-256，并把部署配置写入 `~/.cocola`。请保存安装器仅展示一次的管理员密码。
+安装器会下载对应平台的 CLI、校验 SHA-256，并把部署配置写入 `~/.cocola`。Web 默认监听
+所有网卡，可直接通过 `http://<server-ip>:3000` 访问，无需额外填写访问地址。请保存安装器
+仅展示一次的管理员密码。
 
 **2. 启动**
 
 ```bash
-cocola up
+cocola start
 ```
 
 **3. 配置模型**
@@ -91,7 +93,7 @@ cocola up
 cocola status
 cocola logs -f
 cocola doctor
-cocola down
+cocola stop
 ```
 
 </details>

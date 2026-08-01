@@ -147,15 +147,49 @@ func main() {
 			log.Sugar().Fatalf("serve: %v", err)
 		}
 	case s := <-sig:
-		log.Sugar().Infow("signal received; draining before exit", "signal", s.String())
-		gs.GracefulStop()
+		log.Sugar().Infow("signal received; stopping new work", "signal", s.String())
+		gracefulDone := make(chan struct{})
+		go func() {
+			gs.GracefulStop()
+			close(gracefulDone)
+		}()
+		select {
+		case <-gracefulDone:
+		case <-time.After(10 * time.Second):
+			log.Warn("gRPC graceful stop timed out; cancelling active RPCs")
+			gs.Stop()
+			<-gracefulDone
+		}
+
+		// Stop the lease reaper before the one-shot shutdown drain so both do
+		// not compete for the same Session locks. Redis and the Provider remain
+		// available until their deferred closes after Drain returns.
 		cancel()
+		drainCtx, drainCancel := context.WithTimeout(context.Background(), sandboxDrainTimeout())
+		released, drainErr := binder.Drain(drainCtx)
+		drainCancel()
+		if drainErr != nil {
+			log.Sugar().Warnw("sandbox drain incomplete", "released", released, "err", drainErr)
+		} else {
+			log.Sugar().Infow("sandbox drain complete", "released", released)
+		}
 	}
 }
 
 // defaultMaxMessageBytes is 64 MiB -- above the 32 MiB frontend upload cap,
 // with headroom for base64/proto framing overhead.
 const defaultMaxMessageBytes = 64 * 1024 * 1024
+
+// sandboxDrainTimeout leaves headroom under Compose's 45-second stop grace
+// period after the gRPC server gets up to 10 seconds to finish active calls.
+func sandboxDrainTimeout() time.Duration {
+	if v := os.Getenv("COCOLA_SANDBOX_DRAIN_TIMEOUT"); v != "" {
+		if d, err := time.ParseDuration(v); err == nil && d > 0 {
+			return d
+		}
+	}
+	return 30 * time.Second
+}
 
 // maxMessageBytes resolves the configured gRPC single-message ceiling. A
 // non-positive/invalid COCOLA_GRPC_MAX_MESSAGE_BYTES falls back to the default.

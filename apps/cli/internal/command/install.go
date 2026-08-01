@@ -3,7 +3,6 @@ package command
 import (
 	"errors"
 	"fmt"
-	"net/url"
 	"strconv"
 	"strings"
 
@@ -18,6 +17,7 @@ import (
 type installResult struct {
 	Status        string `json:"status"`
 	Home          string `json:"home"`
+	ConfigFile    string `json:"config_file"`
 	WebURL        string `json:"web_url"`
 	GatewayURL    string `json:"gateway_url"`
 	AdminUsername string `json:"admin_username"`
@@ -30,7 +30,7 @@ func (a *application) installCommand() *cobra.Command {
 	var yes bool
 	command := &cobra.Command{
 		Use:   "install",
-		Short: "Configure Cocola",
+		Short: "Create the Cocola deployment configuration",
 		RunE: func(_ *cobra.Command, _ []string) error {
 			options.Home = a.home
 			if options.ExternalOpenSandboxURL != "" {
@@ -38,7 +38,7 @@ func (a *application) installCommand() *cobra.Command {
 			}
 			if !yes {
 				if !a.interactive() {
-					return errors.New("interactive terminal unavailable; pass --yes with explicit flags")
+					return errors.New("cocola install requires an interactive terminal")
 				}
 				a.printer().Banner()
 				if err := a.runInstallForm(&options); err != nil {
@@ -56,15 +56,20 @@ func (a *application) installCommand() *cobra.Command {
 			credentials, err := config.WriteInstallation(paths, options, assets.Compose)
 			if err != nil {
 				if errors.Is(err, config.ErrAlreadyInstalled) {
-					return fmt.Errorf("%w: %s; use cocola up", err, paths.Home)
+					return fmt.Errorf("%w: %s; use cocola start", err, paths.Home)
 				}
 				return err
 			}
 			printer := a.printer()
-			printer.Success("Configuration written to " + paths.Home)
+			publicURL, err := options.PublicOrigin()
+			if err != nil {
+				return err
+			}
 			result := installResult{
-				Status: "configured",
-				Home:   paths.Home, WebURL: fmt.Sprintf("http://localhost:%d", options.WebPort),
+				Status:        "configured",
+				Home:          paths.Home,
+				ConfigFile:    paths.Environment,
+				WebURL:        publicURL,
 				GatewayURL:    fmt.Sprintf("http://localhost:%d", options.GatewayPort),
 				AdminUsername: credentials.AdminUsername, AdminEmail: credentials.AdminEmail,
 				AdminPassword: credentials.AdminPassword,
@@ -72,20 +77,14 @@ func (a *application) installCommand() *cobra.Command {
 			if a.json {
 				return printer.Encode(result)
 			}
-			printer.Section("Installation")
-			printer.KeyValues([][2]string{
-				{"Web", result.WebURL}, {"Gateway", result.GatewayURL},
-				{"Admin", result.AdminUsername + " / " + result.AdminEmail},
-				{"Password", result.AdminPassword}, {"Config", paths.Environment},
-			})
-			printer.Warn("The admin password is shown once. Store it securely.")
-			printer.Info("Review the configuration, then run: cocola up")
+			printInstallSummary(printer, result)
 			return nil
 		},
 	}
 	flags := command.Flags()
 	flags.StringVar(&options.Version, "version", options.Version, "container image version")
 	flags.StringVar(&options.Registry, "registry", options.Registry, "container image registry")
+	flags.StringVar(&options.PublicURL, "public-url", options.PublicURL, "additional public URL for callbacks or a host-rewriting proxy")
 	flags.StringVar(&options.AdminUsername, "admin-username", options.AdminUsername, "bootstrap admin username")
 	flags.StringVar(&options.AdminEmail, "admin-email", options.AdminEmail, "bootstrap admin email")
 	flags.StringVar(&options.AdminPassword, "admin-password", "", "bootstrap admin password (prefer the interactive prompt)")
@@ -97,37 +96,64 @@ func (a *application) installCommand() *cobra.Command {
 	flags.StringVar(&options.SandboxLLMBaseURL, "sandbox-llm-base-url", "", "LLM Gateway URL reachable from external sandboxes")
 	flags.StringVar(&options.SessionVolumeSize, "session-volume-size", options.SessionVolumeSize, "soft capacity request for each new Session Volume")
 	flags.BoolVarP(&yes, "yes", "y", false, "accept flags/defaults without prompting")
+	if flag := flags.Lookup("yes"); flag != nil {
+		flag.Hidden = true
+	}
 	return command
 }
 
 func (a *application) runInstallForm(options *config.Options) error {
-	mode := "managed"
-	if !options.ManagedOpenSandbox {
-		mode = "external"
-	}
 	webPort := strconv.Itoa(options.WebPort)
 	gatewayPort := strconv.Itoa(options.GatewayPort)
 	llmPort := strconv.Itoa(options.LLMPort)
 	form := huh.NewForm(
 		huh.NewGroup(
-			huh.NewInput().Title("Installation directory").Value(&options.Home),
-			huh.NewInput().Title("Cocola version").Value(&options.Version),
-			huh.NewInput().Title("Image registry").Value(&options.Registry),
-		),
+			huh.NewNote().
+				Title("Welcome to Cocola").
+				Description("Set up your administrator account and service ports. Every field has a safe default, so you can press Enter to continue.").
+				Next(true).
+				NextLabel("Start setup"),
+		).Title("Quick setup"),
 		huh.NewGroup(
-			huh.NewInput().Title("Admin username").Value(&options.AdminUsername),
-			huh.NewInput().Title("Admin email").Value(&options.AdminEmail),
-			huh.NewInput().Title("Admin password").Description("Leave blank to generate one").EchoMode(huh.EchoModePassword).Value(&options.AdminPassword),
-		),
+			huh.NewInput().
+				Title("Admin username").
+				Description("Used to sign in to the Admin console.").
+				Value(&options.AdminUsername),
+			huh.NewInput().
+				Title("Admin email").
+				Description("Also accepted as a sign-in identifier.").
+				Value(&options.AdminEmail),
+			huh.NewInput().
+				Title("Admin password").
+				Description("Leave blank to generate a secure password automatically.").
+				Placeholder("Generated automatically").
+				EchoMode(huh.EchoModePassword).
+				Value(&options.AdminPassword),
+		).Title("Administrator account").Description("Press Enter to keep the suggested values."),
 		huh.NewGroup(
-			huh.NewInput().Title("Web port").Value(&webPort).Validate(validatePort),
-			huh.NewInput().Title("Gateway port").Value(&gatewayPort).Validate(validatePort),
-			huh.NewInput().Title("LLM Gateway port").Value(&llmPort).Validate(validatePort),
-			huh.NewSelect[string]().Title("OpenSandbox").Options(
-				huh.NewOption("Managed Docker server", "managed"),
-				huh.NewOption("External server", "external"),
-			).Value(&mode),
-		),
+			huh.NewInput().
+				Title("Web port").
+				Description("Cocola Web and Admin console.").
+				Value(&webPort).
+				Validate(validatePort),
+			huh.NewInput().
+				Title("Gateway port").
+				Description("Public API gateway.").
+				Value(&gatewayPort).
+				Validate(validatePort),
+			huh.NewInput().
+				Title("LLM Gateway port").
+				Description("Model gateway used by Agent sandboxes.").
+				Value(&llmPort).
+				Validate(validatePort),
+		).Title("Service ports").Description("The defaults work for a standard local installation."),
+		huh.NewGroup(
+			huh.NewNote().
+				Title("Security keys").
+				Description("Cocola will generate unique authentication, encryption, database, storage, and SCM secrets. They are stored with owner-only permissions in the generated configuration file.").
+				Next(true).
+				NextLabel("Create configuration"),
+		).Title("Security"),
 	).WithInput(a.io.In).WithOutput(a.io.Err).WithAccessible(a.accessible)
 	if !ui.AutoColor(a.io.Err, a.noColor || a.json) {
 		form = form.WithTheme(huh.ThemeBase())
@@ -147,40 +173,31 @@ func (a *application) runInstallForm(options *config.Options) error {
 	if options.LLMPort, err = strconv.Atoi(llmPort); err != nil {
 		return err
 	}
-	options.ManagedOpenSandbox = mode == "managed"
-	if !options.ManagedOpenSandbox {
-		external := options.ExternalOpenSandboxURL
-		sandboxLLMURL := options.SandboxLLMBaseURL
-		second := huh.NewForm(huh.NewGroup(
-			huh.NewInput().Title("External OpenSandbox URL").Placeholder("https://sandbox.example.com/v1").Value(&external).Validate(validateURL),
-			huh.NewInput().Title("Sandbox-accessible LLM Gateway URL").Description("Must be reachable from sandboxes created by the external server").Placeholder("https://llm.cocola.example.com").Value(&sandboxLLMURL).Validate(validateURL),
-		)).WithInput(a.io.In).WithOutput(a.io.Err).WithAccessible(a.accessible)
-		if !ui.AutoColor(a.io.Err, a.noColor || a.json) {
-			second = second.WithTheme(huh.ThemeBase())
-		} else {
-			second = second.WithTheme(ui.FormTheme())
-		}
-		if err := second.Run(); err != nil {
-			return fmt.Errorf("OpenSandbox form: %w", err)
-		}
-		options.ExternalOpenSandboxURL = external
-		options.SandboxLLMBaseURL = sandboxLLMURL
-	}
 	return nil
+}
+
+func printInstallSummary(printer ui.Printer, result installResult) {
+	printer.Success("Cocola configuration is ready.")
+	printer.Section("Installation summary")
+	printer.KeyValues([][2]string{
+		{"Web app", result.WebURL},
+		{"Gateway", result.GatewayURL},
+		{"Admin account", result.AdminUsername + " / " + result.AdminEmail},
+		{"Admin password", result.AdminPassword},
+		{"Configuration", result.ConfigFile},
+	})
+	printer.Warn("The admin password is shown only once. Store it securely.")
+	printer.Section("Next step")
+	printer.Info("Review the generated configuration file before starting Cocola:")
+	printer.Path(result.ConfigFile)
+	printer.Info("When you are ready, start all services with:")
+	printer.Command("cocola start")
 }
 
 func validatePort(value string) error {
 	port, err := strconv.Atoi(strings.TrimSpace(value))
 	if err != nil || port < 1 || port > 65535 {
 		return errors.New("enter a port between 1 and 65535")
-	}
-	return nil
-}
-
-func validateURL(value string) error {
-	parsed, err := url.ParseRequestURI(value)
-	if err != nil || parsed.Host == "" || (parsed.Scheme != "http" && parsed.Scheme != "https") {
-		return errors.New("enter an absolute http(s) URL")
 	}
 	return nil
 }

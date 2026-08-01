@@ -5,6 +5,7 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -68,6 +69,38 @@ func TestPreviewProxy_ForwardsToResolvedBackend(t *testing.T) {
 	}
 	if res.gotUser != auth.DevIdentity.UserID {
 		t.Fatalf("resolve user = %q, want verified identity %q", res.gotUser, auth.DevIdentity.UserID)
+	}
+}
+
+func TestPreviewProxy_RewritesOnlyCodeServerOrigin(t *testing.T) {
+	var gotOrigin string
+	backend := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotOrigin = r.Header.Get("Origin")
+		w.WriteHeader(http.StatusNoContent)
+	}))
+	defer backend.Close()
+
+	res := &fakeResolver{url: backend.URL}
+	h := New(&fakeStreamer{}, auth.NewVerifier(auth.Config{}), logger.Must()).
+		WithSandboxResolver(res).Handler()
+
+	for _, test := range []struct {
+		port int
+		want string
+	}{
+		{port: codeServerPort, want: codeServerProxyOrigin},
+		{port: 3000, want: "http://192.0.2.10:3000"},
+	} {
+		req := httptest.NewRequest(http.MethodGet, "/v1/preview/sess-1/"+strconv.Itoa(test.port)+"/", nil)
+		req.Header.Set("Origin", "http://192.0.2.10:3000")
+		rec := httptest.NewRecorder()
+		h.ServeHTTP(rec, req)
+		if rec.Code != http.StatusNoContent {
+			t.Fatalf("port %d status = %d", test.port, rec.Code)
+		}
+		if gotOrigin != test.want {
+			t.Fatalf("port %d Origin = %q, want %q", test.port, gotOrigin, test.want)
+		}
 	}
 }
 

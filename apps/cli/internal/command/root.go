@@ -56,14 +56,15 @@ func (a *application) rootCommand() *cobra.Command {
 			if a.json {
 				return printer.Encode(map[string]any{
 					"name":     "cocola",
-					"commands": []string{"install", "up", "down", "restart", "status", "logs", "doctor", "version"},
+					"commands": []string{"install", "start", "stop", "status", "logs", "doctor", "version"},
 				})
 			}
 			printer.Banner()
 			printer.Section("Common commands")
 			printer.KeyValues([][2]string{
 				{"cocola install", "Create the deployment configuration"},
-				{"cocola up", "Pull images and start Cocola"},
+				{"cocola start", "Create, update, or start Cocola"},
+				{"cocola stop", "Stop Cocola and preserve its containers"},
 				{"cocola status", "Show service status"},
 				{"cocola logs", "Follow service logs"},
 				{"cocola doctor", "Diagnose the host and installation"},
@@ -79,8 +80,8 @@ func (a *application) rootCommand() *cobra.Command {
 	flags.BoolVar(&a.accessible, "accessible", os.Getenv("ACCESSIBLE") != "", "use screen-reader friendly prompts")
 
 	root.AddCommand(
-		a.installCommand(), a.lifecycleCommand("up"), a.lifecycleCommand("down"),
-		a.lifecycleCommand("restart"), a.statusCommand(), a.logsCommand(),
+		a.installCommand(), a.lifecycleCommand("start"), a.lifecycleCommand("stop"),
+		a.statusCommand(), a.logsCommand(),
 		a.doctorCommand(), a.versionCommand(),
 	)
 	return root

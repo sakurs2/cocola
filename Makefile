@@ -88,16 +88,10 @@ py-format: ## Format Python code (ruff format)
 	ruff format apps/agent-runtime apps/llm-gateway packages/py-common scripts $(SANDBOX_PY)
 
 # -------------------------------------------------------------------- frontend
-.PHONY: web-install web-dev web-build web-lint
+.PHONY: web-install web-build web-lint
 web-install: ## Install web deps
 	cd apps/web && pnpm install
 
-web-dev: ## One command: full dev stack with hot-reload web and workspace WebSockets. Same as make dev.
-	@COCOLA_WEB_DEV=1 bash scripts/run-stack-dev.sh; status=$$?; \
-		if [ "$$status" -eq 130 ] || [ "$$status" -eq 143 ]; then \
-			exit 0; \
-		fi; \
-		exit "$$status"
 web-build: ## Build Next.js production bundle
 	cd apps/web && pnpm build
 

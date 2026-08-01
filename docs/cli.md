@@ -6,16 +6,18 @@
 
 ## 安装
 
-前置条件：Linux 或 macOS、Docker daemon、Docker Compose v2。支持 amd64 和 arm64。
+前置条件：Linux 或 macOS、Docker daemon、Docker Compose 2.23.1 或更高版本。支持
+amd64 和 arm64。
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/sakurs2/cocola/master/scripts/install.sh | sh
 ```
 
 脚本只负责引导安装：识别系统架构，从 GitHub Release 下载对应 CLI，校验
-`checksums.txt`，原子写入 `~/.local/bin/cocola`，再启动交互式配置。首次使用前请确保
-`~/.local/bin` 在 `PATH` 中。配置完成后可先检查 `~/.cocola/config.env`，确认无误再
-执行 `cocola up`。
+`checksums.txt`，原子写入 `~/.local/bin/cocola`，再启动默认的交互式配置向导。向导会
+展示 Cocola 艺术字 Logo，并依次配置管理员账号和服务端口；安全密钥
+会自动生成。所有项目都有默认值，标准安装可以直接逐步确认。首次使用前请确保
+`~/.local/bin` 在 `PATH` 中。
 
 安装指定 CLI 版本或目录：
 
@@ -24,32 +26,28 @@ curl -fsSL https://raw.githubusercontent.com/sakurs2/cocola/master/scripts/insta
   | sh -s -- --cli-version v0.1.0 --install-dir "$HOME/bin"
 ```
 
-安装脚本后面的 `--` 会把剩余参数传给 CLI。例如无交互生成配置：
-
-```bash
-curl -fsSL https://raw.githubusercontent.com/sakurs2/cocola/master/scripts/install.sh \
-  | sh -s -- -- install --yes
-```
-
 ## 常用命令
 
 ```text
 cocola install                 交互生成并校验部署配置
-cocola up                      拉取镜像并启动或更新服务
-cocola down                    停止服务
-cocola restart                 重启现有容器
+cocola start                   拉取镜像并创建、更新或启动服务
+cocola stop                    停止服务但保留容器和网络
 cocola status                  查看容器状态
 cocola logs [-f] [service]     查看全部或单个服务日志
 cocola doctor                  检查 Docker、Compose 和安装配置
 cocola version                 查看 CLI 构建版本
 ```
 
-`install` 支持管理员账号、镜像 Registry/版本、Web/Gateway/LLM 端口，以及内置或
-外部 OpenSandbox。使用外部 OpenSandbox 时，必须同时提供一个从远端 sandbox 可达的
-LLM Gateway URL，CLI 会拒绝会产生失联 sandbox 的不完整配置。
+`install` 默认进入英文交互式向导，主要配置管理员账号和 Web/Gateway/LLM 端口；内部认证、
+加密、数据库、对象存储和 SCM 密钥会自动生成并写入仅当前用户可读的配置文件。Web 默认监听
+`0.0.0.0`，浏览器可直接使用 `http://<server-ip>:<web-port>`，Workspace WebSocket 会按当前
+请求 Host 做同源校验，不需要额外配置。`--public-url https://cocola.example.com` 保留给会改写
+Host 的反向代理，以及 GitHub/飞书等需要生成固定外部回调或跳转地址的集成。
+镜像 Registry/版本以及外部 OpenSandbox 等高级场景仍可使用命令行参数覆盖。使用外部
+OpenSandbox 时，必须同时提供一个从远端 sandbox 可达的 LLM Gateway URL，CLI 会拒绝
+会产生失联 sandbox 的不完整配置。
 
-自动化环境使用 `--yes` 跳过表单，并用命令行参数显式覆盖默认值。支持结构化输出的
-命令可加 `--json`；`logs` 是原始字节流，不支持 JSON。设置 `NO_COLOR=1`、
+支持结构化输出的命令可加 `--json`；`logs` 是原始字节流，不支持 JSON。设置 `NO_COLOR=1`、
 `TERM=dumb` 或 `--no-color` 会关闭 ANSI 样式；非 TTY 输出也会自动关闭颜色。
 
 ## 安装数据
@@ -64,15 +62,20 @@ LLM Gateway URL，CLI 会拒绝会产生失联 sandbox 的不完整配置。
 └── sandboxes/      OpenSandbox Docker runtime 的宿主目录
 ```
 
-重复执行 `install` 不会覆盖现有配置或 Secret。`install` 不会拉取镜像或启动服务；
-用户检查配置后显式执行 `cocola up`。自定义安装目录后，后续命令需继续使用同一个
-`--home`，或设置 `COCOLA_HOME`。
+重复执行 `install` 不会覆盖现有配置或 Secret。安装完成页会明确显示生成的
+`config.env` 绝对路径、管理员登录信息和 `cocola start` 下一步命令。`install` 不会拉取
+镜像或启动服务；用户检查配置后显式执行 `cocola start`。自定义安装目录后，后续命令需
+继续使用同一个 `--home`，或设置 `COCOLA_HOME`。
 
-内置 OpenSandbox 模式下，`cocola down` 会先停止对话入口和 Agent Runtime，再清理
-本次安装产生的动态 sandbox，最后移除 Compose 服务。Compose 属于 legacy Docker
-部署，Session 文件直接保存在 `~/.cocola/sandboxes` 的宿主机目录；不使用
-checkpoint 或 Warm Pool。外部 OpenSandbox 由调用方管理，CLI 不会清理其中的
-sandbox。
+`cocola start` 是唯一启动入口：它会拉取当前版本镜像，并通过 Compose `up --wait` 创建缺失
+容器、重建配置或镜像发生变化的服务、恢复已停止容器，最后等待健康检查通过。
+
+`cocola stop` 会先停止 Web、Gateway 和 Agent Runtime，避免产生新任务；Sandbox Manager
+随后在 30 秒预算内通过 Provider API 销毁 Redis 已登记的运行中 sandbox，最后执行 Compose
+`stop`。服务容器、默认网络、镜像、具名数据卷和 `~/.cocola/sandboxes` 中的 Session 文件均
+保留。Kubernetes 模式下同一流程会删除对应的运行中 Sandbox Pod，保留 Session PVC。CLI
+不会仅凭镜像名扫描并强制删除宿主机容器；未登记或 Provider 超时的异常残留需要管理员根据
+日志核对后处理。
 
 ## 开发与发布
 

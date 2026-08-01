@@ -3,6 +3,7 @@ package service
 import (
 	"context"
 	"errors"
+	"fmt"
 	"strings"
 	"testing"
 	"time"
@@ -417,5 +418,25 @@ func TestChangeOwnPasswordRejectsBcryptOversizeDefectProbing(t *testing.T) {
 	})
 	if !errors.Is(err, ErrInvalidArg) {
 		t.Fatalf("73-byte password want ErrInvalidArg, got %v", err)
+	}
+}
+
+func TestPasswordValidationMatchesBootstrapConstraints(t *testing.T) {
+	for _, password := range []string{
+		"        ",
+		"short",
+		"密码密码密码",
+		strings.Repeat("x", 73),
+	} {
+		t.Run(fmt.Sprintf("%d-bytes", len([]byte(password))), func(t *testing.T) {
+			if _, err := hashPassword(password); !errors.Is(err, ErrInvalidArg) {
+				t.Fatalf("hashPassword(%q) error = %v, want ErrInvalidArg", password, err)
+			}
+		})
+	}
+	for _, password := range []string{"password", strings.Repeat("x", 72)} {
+		if _, err := hashPassword(password); err != nil {
+			t.Fatalf("hashPassword(%d bytes): %v", len([]byte(password)), err)
+		}
 	}
 }

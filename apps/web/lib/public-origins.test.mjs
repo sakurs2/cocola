@@ -40,3 +40,36 @@ test("isAllowedWebSocketOrigin is fail-closed and exact", () => {
   assert.equal(isAllowedWebSocketOrigin(undefined, allowed), false);
   assert.equal(isAllowedWebSocketOrigin("https://cocola.example.com", new Set()), false);
 });
+
+test("isAllowedWebSocketOrigin accepts the request Host for zero-config IP access", () => {
+  const allowed = parsePublicOrigins("http://localhost:3000");
+
+  assert.equal(
+    isAllowedWebSocketOrigin("http://192.0.2.10:3000", allowed, "192.0.2.10:3000"),
+    true,
+  );
+  assert.equal(
+    isAllowedWebSocketOrigin("https://cocola.example.com", allowed, "cocola.example.com"),
+    true,
+  );
+  assert.equal(
+    isAllowedWebSocketOrigin("https://cocola.example.com:443", new Set(), "cocola.example.com:443"),
+    true,
+  );
+  assert.equal(
+    isAllowedWebSocketOrigin("https://evil.example.com", allowed, "cocola.example.com"),
+    false,
+  );
+  assert.equal(
+    isAllowedWebSocketOrigin("https://cocola.example.com", allowed, "evil.example.com"),
+    false,
+  );
+  assert.equal(
+    isAllowedWebSocketOrigin("https://cocola.example.com", allowed, "user@cocola.example.com"),
+    false,
+  );
+  assert.equal(
+    isAllowedWebSocketOrigin("https://cocola.example.com", allowed, "cocola.example.com/path"),
+    false,
+  );
+});

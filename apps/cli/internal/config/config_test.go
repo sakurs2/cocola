@@ -40,6 +40,8 @@ func TestWriteInstallationCreatesPrivateConfigAndStableState(t *testing.T) {
 	text := string(contents)
 	for _, expected := range []string{
 		`COCOLA_VERSION="v0.1.0"`,
+		`COCOLA_WEB_HOST="0.0.0.0"`,
+		`COCOLA_PUBLIC_ORIGINS="http://127.0.0.1:3000,http://localhost:3000"`,
 		`COCOLA_BOOTSTRAP_ADMIN_PASSWORD="strong-password"`,
 		`COCOLA_AUTH_SECRET="`,
 		`COCOLA_SANDBOX_LLM_BASE_URL="http://host.docker.internal:18091"`,
@@ -104,6 +106,12 @@ func TestOptionsValidation(t *testing.T) {
 			o.ExternalOpenSandboxURL = "https://sandbox.example.com/v1"
 		}},
 		{"short password", func(o *Options) { o.AdminPassword = "short" }},
+		{"short unicode password", func(o *Options) { o.AdminPassword = "密码密码密码" }},
+		{"blank password", func(o *Options) { o.AdminPassword = "        " }},
+		{"oversized password", func(o *Options) { o.AdminPassword = strings.Repeat("x", 73) }},
+		{"public URL path", func(o *Options) { o.PublicURL = "https://cocola.example.com/app" }},
+		{"public URL wildcard", func(o *Options) { o.PublicURL = "https://*.example.com" }},
+		{"public URL bind address", func(o *Options) { o.PublicURL = "http://0.0.0.0:3000" }},
 		{"invalid session volume", func(o *Options) { o.SessionVolumeSize = "0Gi" }},
 	}
 	for _, test := range tests {
@@ -114,6 +122,25 @@ func TestOptionsValidation(t *testing.T) {
 				t.Fatal("expected validation error")
 			}
 		})
+	}
+}
+
+func TestPublicOriginDefaultsAndProductionConfiguration(t *testing.T) {
+	options := Defaults("v0.1.0")
+	if got, err := options.PublicOrigin(); err != nil || got != "http://localhost:3000" {
+		t.Fatalf("default PublicOrigin() = %q, %v", got, err)
+	}
+	options.PublicURL = "https://cocola.example.com/"
+	if got, err := options.PublicOrigin(); err != nil || got != "https://cocola.example.com" {
+		t.Fatalf("production PublicOrigin() = %q, %v", got, err)
+	}
+	options.Home = t.TempDir()
+	if err := options.Validate(); err != nil {
+		t.Fatalf("production options: %v", err)
+	}
+	text := renderEnvironment(Paths{Home: options.Home, SandboxRoot: filepath.Join(options.Home, "sandboxes")}, options, secrets{}, "password")
+	if !strings.Contains(text, `COCOLA_PUBLIC_ORIGINS="http://127.0.0.1:3000,http://localhost:3000,https://cocola.example.com"`) {
+		t.Fatalf("production origins missing: %s", text)
 	}
 }
 

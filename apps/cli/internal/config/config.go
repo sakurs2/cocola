@@ -12,6 +12,7 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"unicode/utf8"
 
 	"k8s.io/apimachinery/pkg/api/resource"
 )
@@ -41,6 +42,7 @@ type Options struct {
 	Home                   string
 	Version                string
 	Registry               string
+	PublicURL              string
 	AdminUsername          string
 	AdminEmail             string
 	AdminPassword          string
@@ -142,11 +144,19 @@ func (o Options) Validate() error {
 	if address.Address != o.AdminEmail {
 		return errors.New("admin email must not include a display name")
 	}
-	if o.AdminPassword != "" && len(o.AdminPassword) < 8 {
-		return errors.New("admin password must contain at least 8 characters")
-	}
-	if strings.ContainsAny(o.AdminPassword, "\r\n") {
-		return errors.New("admin password cannot contain newlines")
+	if o.AdminPassword != "" {
+		if strings.TrimSpace(o.AdminPassword) == "" {
+			return errors.New("admin password cannot be blank")
+		}
+		if utf8.RuneCountInString(o.AdminPassword) < 8 {
+			return errors.New("admin password must contain at least 8 characters")
+		}
+		if len([]byte(o.AdminPassword)) > 72 {
+			return errors.New("admin password cannot exceed 72 bytes")
+		}
+		if strings.ContainsAny(o.AdminPassword, "\r\n") {
+			return errors.New("admin password cannot contain newlines")
+		}
 	}
 	ports := map[string]int{"web": o.WebPort, "gateway": o.GatewayPort, "llm gateway": o.LLMPort}
 	seen := map[int]string{}
@@ -158,6 +168,9 @@ func (o Options) Validate() error {
 			return fmt.Errorf("%s and %s cannot use the same port %d", previous, name, port)
 		}
 		seen[port] = name
+	}
+	if _, err := o.PublicOrigin(); err != nil {
+		return err
 	}
 	if !o.ManagedOpenSandbox {
 		parsed, err := url.ParseRequestURI(o.ExternalOpenSandboxURL)
@@ -179,6 +192,29 @@ func (o Options) Validate() error {
 		return errors.New("session volume size must be a positive Kubernetes quantity")
 	}
 	return nil
+}
+
+func (o Options) PublicOrigin() (string, error) {
+	value := strings.TrimSpace(o.PublicURL)
+	if value == "" {
+		value = fmt.Sprintf("http://localhost:%d", o.WebPort)
+	}
+	return NormalizePublicURL(value)
+}
+
+func NormalizePublicURL(value string) (string, error) {
+	parsed, err := url.ParseRequestURI(strings.TrimSpace(value))
+	if err != nil {
+		return "", errors.New("public URL must be a browser-reachable http(s) origin without a path, query, credentials, wildcard, or bind-only host")
+	}
+	scheme := strings.ToLower(parsed.Scheme)
+	hostname := parsed.Hostname()
+	if parsed.Host == "" || (scheme != "http" && scheme != "https") ||
+		parsed.User != nil || (parsed.Path != "" && parsed.Path != "/") || parsed.RawQuery != "" ||
+		parsed.Fragment != "" || strings.Contains(hostname, "*") || hostname == "0.0.0.0" || hostname == "::" {
+		return "", errors.New("public URL must be a browser-reachable http(s) origin without a path, query, credentials, wildcard, or bind-only host")
+	}
+	return scheme + "://" + strings.ToLower(parsed.Host), nil
 }
 
 func validImagePart(value string) bool {
@@ -279,11 +315,20 @@ func renderEnvironment(paths Paths, o Options, s secrets, password string) strin
 	if sandboxLLMBaseURL == "" {
 		sandboxLLMBaseURL = fmt.Sprintf("http://host.docker.internal:%d", o.LLMPort)
 	}
+	publicOrigin, _ := o.PublicOrigin()
+	publicOrigins := []string{
+		fmt.Sprintf("http://127.0.0.1:%d", o.WebPort),
+		fmt.Sprintf("http://localhost:%d", o.WebPort),
+	}
+	if publicOrigin != publicOrigins[0] && publicOrigin != publicOrigins[1] {
+		publicOrigins = append(publicOrigins, publicOrigin)
+	}
 	values := [][2]string{
 		{"COCOLA_VERSION", o.Version}, {"COCOLA_IMAGE_REGISTRY", strings.TrimSuffix(o.Registry, "/")},
 		{"COCOLA_HOME", paths.Home}, {"COCOLA_SANDBOX_ROOT", paths.SandboxRoot},
-		{"COCOLA_WEB_HOST_PORT", strconv.Itoa(o.WebPort)}, {"COCOLA_GATEWAY_HOST_PORT", strconv.Itoa(o.GatewayPort)},
-		{"COCOLA_PUBLIC_ORIGINS", fmt.Sprintf("http://127.0.0.1:%d,http://localhost:%d", o.WebPort, o.WebPort)},
+		{"COCOLA_WEB_HOST", "0.0.0.0"}, {"COCOLA_WEB_HOST_PORT", strconv.Itoa(o.WebPort)},
+		{"COCOLA_GATEWAY_HOST_PORT", strconv.Itoa(o.GatewayPort)},
+		{"COCOLA_PUBLIC_ORIGINS", strings.Join(publicOrigins, ",")},
 		{"COCOLA_LLM_HOST_PORT", strconv.Itoa(o.LLMPort)}, {"COCOLA_OPENSANDBOX_MANAGED", managed},
 		{"COCOLA_OPENSANDBOX_URL", opensandboxURL}, {"COCOLA_SANDBOX_LLM_BASE_URL", sandboxLLMBaseURL},
 		{"COCOLA_AUTH_SECRET", s.auth},

@@ -8,29 +8,35 @@ import (
 )
 
 func (a *application) lifecycleCommand(action string) *cobra.Command {
+	short := map[string]string{
+		"start": "Create, update, or start Cocola",
+		"stop":  "Stop Cocola and preserve its containers",
+	}
 	return &cobra.Command{
 		Use:   action,
-		Short: map[string]string{"up": "Start Cocola", "down": "Stop Cocola", "restart": "Restart Cocola"}[action],
+		Short: short[action],
 		RunE: func(command *cobra.Command, _ []string) error {
 			runner, err := a.runner(false)
 			if err != nil {
 				return err
 			}
+			if action == "start" {
+				if err := compose.CheckDocker(command.Context()); err != nil {
+					return err
+				}
+			}
 			printer := a.printer()
 			switch action {
-			case "up":
+			case "start":
 				printer.Info("Pulling Cocola images")
 				if err := runner.Pull(command.Context()); err != nil {
 					return err
 				}
 				printer.Info("Starting Cocola")
-				err = runner.Up(command.Context())
-			case "down":
-				printer.Info("Stopping Cocola")
-				err = runner.Down(command.Context())
-			case "restart":
-				printer.Info("Restarting Cocola")
-				err = runner.Restart(command.Context())
+				err = runner.Start(command.Context())
+			case "stop":
+				printer.Info("Stopping Cocola and preserving its containers")
+				err = runner.Stop(command.Context())
 			default:
 				return errors.New("unsupported lifecycle action")
 			}

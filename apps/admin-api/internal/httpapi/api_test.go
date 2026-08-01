@@ -382,7 +382,7 @@ func TestAuthUsersLoginAndRuntimeToken(t *testing.T) {
 
 	// Public login misses until an admin creates the user.
 	rec := do(t, r, http.MethodPost, "/auth/login", "", map[string]any{
-		"email": "alice@example.com", "password": "pw",
+		"email": "alice@example.com", "password": "test-password",
 	})
 	if rec.Code != http.StatusUnauthorized {
 		t.Fatalf("unknown login: want 401, got %d", rec.Code)
@@ -390,14 +390,14 @@ func TestAuthUsersLoginAndRuntimeToken(t *testing.T) {
 
 	// User management is admin-key protected.
 	rec = do(t, r, http.MethodPost, "/admin/users", "", map[string]any{
-		"username": "alice", "email": "alice@example.com", "password": "pw", "role": "user",
+		"username": "alice", "email": "alice@example.com", "password": "test-password", "role": "user",
 	})
 	if rec.Code != http.StatusUnauthorized {
 		t.Fatalf("create user without key: want 401, got %d", rec.Code)
 	}
 
 	rec = do(t, r, http.MethodPost, "/admin/users", "k", map[string]any{
-		"username": "Alice", "email": "Alice@Example.COM", "password": "pw", "role": "user",
+		"username": "Alice", "email": "Alice@Example.COM", "password": "test-password", "role": "user",
 	})
 	if rec.Code != http.StatusCreated {
 		t.Fatalf("create auth user: want 201, got %d (%s)", rec.Code, rec.Body.String())
@@ -410,9 +410,9 @@ func TestAuthUsersLoginAndRuntimeToken(t *testing.T) {
 		t.Fatalf("public user JSON should be normalized and hide password hash: %+v", created)
 	}
 	for name, payload := range map[string]map[string]any{
-		"duplicate username":          {"username": "ALICE", "email": "alice2@example.com", "password": "pw", "role": "user"},
-		"duplicate email":             {"username": "alice2", "email": "ALICE@example.com", "password": "pw", "role": "user"},
-		"cross-kind duplicate handle": {"username": "ALICE@example.com", "email": "alice3@example.com", "password": "pw", "role": "user"},
+		"duplicate username":          {"username": "ALICE", "email": "alice2@example.com", "password": "test-password", "role": "user"},
+		"duplicate email":             {"username": "alice2", "email": "ALICE@example.com", "password": "test-password", "role": "user"},
+		"cross-kind duplicate handle": {"username": "ALICE@example.com", "email": "alice3@example.com", "password": "test-password", "role": "user"},
 	} {
 		rec = do(t, r, http.MethodPost, "/admin/users", "k", payload)
 		if rec.Code != http.StatusConflict {
@@ -432,7 +432,7 @@ func TestAuthUsersLoginAndRuntimeToken(t *testing.T) {
 	}
 
 	rec = do(t, r, http.MethodPost, "/auth/login", "", map[string]any{
-		"identifier": "ALICE@example.com", "password": "pw",
+		"identifier": "ALICE@example.com", "password": "test-password",
 	})
 	if rec.Code != http.StatusOK {
 		t.Fatalf("login: want 200, got %d (%s)", rec.Code, rec.Body.String())
@@ -445,7 +445,7 @@ func TestAuthUsersLoginAndRuntimeToken(t *testing.T) {
 		t.Fatalf("login user payload wrong: %+v", login.User)
 	}
 	rec = do(t, r, http.MethodPost, "/auth/login", "", map[string]any{
-		"identifier": "alice", "password": "pw",
+		"identifier": "alice", "password": "test-password",
 	})
 	if rec.Code != http.StatusOK {
 		t.Fatalf("username login: want 200, got %d (%s)", rec.Code, rec.Body.String())
@@ -473,7 +473,7 @@ func TestAuthUsersLoginAndRuntimeToken(t *testing.T) {
 		t.Fatalf("disable auth user: want 200, got %d (%s)", rec.Code, rec.Body.String())
 	}
 	rec = do(t, r, http.MethodPost, "/auth/login", "", map[string]any{
-		"email": "alice@example.com", "password": "pw",
+		"email": "alice@example.com", "password": "test-password",
 	})
 	if rec.Code != http.StatusForbidden {
 		t.Fatalf("disabled login: want 403, got %d", rec.Code)
@@ -512,13 +512,13 @@ func TestAuthUsersLoginAndRuntimeToken(t *testing.T) {
 		t.Fatalf("deleted user should be hidden from list: %+v", listed.Users)
 	}
 	rec = do(t, r, http.MethodPost, "/auth/login", "", map[string]any{
-		"identifier": "alice", "password": "pw",
+		"identifier": "alice", "password": "test-password",
 	})
 	if rec.Code != http.StatusForbidden {
 		t.Fatalf("deleted login: want 403, got %d (%s)", rec.Code, rec.Body.String())
 	}
 	rec = do(t, r, http.MethodPost, "/admin/users", "k", map[string]any{
-		"username": "alice-new", "email": "alice@example.com", "password": "pw", "role": "user",
+		"username": "alice-new", "email": "alice@example.com", "password": "test-password", "role": "user",
 	})
 	if rec.Code != http.StatusConflict {
 		t.Fatalf("deleted user email should still conflict: got %d (%s)", rec.Code, rec.Body.String())
@@ -647,7 +647,7 @@ func TestProtectedBootstrapAdminCannotBeDemotedDisabledOrDeleted(t *testing.T) {
 	if err := api.svc.BootstrapAdmin(context.Background(), service.BootstrapAdminInput{
 		Username: "admin",
 		Email:    "admin@example.com",
-		Password: "pw",
+		Password: "test-password",
 		Actor:    "bootstrap",
 	}); err != nil {
 		t.Fatalf("bootstrap admin: %v", err)
@@ -688,7 +688,7 @@ func TestAdminCannotChangeOwnPermissionsHTTP(t *testing.T) {
 	r := api.Router()
 
 	rec := doAs(t, r, http.MethodPost, "/admin/users", "k", "owner@example.com", map[string]any{
-		"username": "self-admin", "email": "self@example.com", "password": "pw", "role": "admin",
+		"username": "self-admin", "email": "self@example.com", "password": "test-password", "role": "admin",
 	})
 	if rec.Code != http.StatusCreated {
 		t.Fatalf("create admin user: want 201, got %d (%s)", rec.Code, rec.Body.String())

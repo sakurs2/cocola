@@ -8,7 +8,7 @@
 // where the runtime exposes it (http_req_waiting is a good proxy for TTFB on a
 // streamed body that flushes headers immediately).
 //
-// Usage (services up via `cocola up`; provide TOKEN when auth is enabled):
+// Usage (services up via `cocola start`; provide TOKEN when auth is enabled):
 //
 //   k6 run -e BASE_URL=http://localhost:8080 bench/k6/gateway_sse.js
 //

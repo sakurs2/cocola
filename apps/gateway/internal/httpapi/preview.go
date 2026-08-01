@@ -12,6 +12,11 @@ import (
 	"github.com/cocola-project/cocola/apps/gateway/internal/sandboxmgr"
 )
 
+const (
+	codeServerPort        = 39378
+	codeServerProxyOrigin = "http://cocola.internal"
+)
+
 // previewProxy reverse-proxies a request to a user-launched dev server running
 // on an in-sandbox port. This is cocola's Preview Proxy (inspired by AIO
 // Sandbox's /proxy/{port}/): a session's sandbox can run e.g. a Vite/Next dev
@@ -94,6 +99,14 @@ func (a *API) previewProxy(w http.ResponseWriter, r *http.Request) {
 			}
 			// Strip the caller's cocola auth so it never leaks into the sandbox.
 			req.Header.Del("Authorization")
+			// The Web BFF already validates the browser-facing Origin before a
+			// WebSocket reaches the Gateway. Give the resident code-server a stable
+			// internal Origin so direct IP/domain deployments do not need to predict
+			// their external host at install time. Other preview servers keep the
+			// browser Origin because their HMR implementations may depend on it.
+			if port == codeServerPort {
+				req.Header.Set("Origin", codeServerProxyOrigin)
+			}
 		},
 		ErrorHandler: func(rw http.ResponseWriter, _ *http.Request, e error) {
 			a.log.Warn("preview proxy error: " + e.Error())

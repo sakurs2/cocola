@@ -106,6 +106,7 @@ services:
   sandbox-manager:
     image: "${COCOLA_IMAGE_REGISTRY}/cocola-sandbox-manager:${COCOLA_VERSION}"
     restart: unless-stopped
+    stop_grace_period: 45s
     depends_on:
       redis:
         condition: service_healthy
@@ -296,6 +297,7 @@ services:
         condition: service_healthy
     environment:
       NODE_ENV: production
+      COCOLA_WEB_HOST: "${COCOLA_WEB_HOST:-0.0.0.0}"
       NEXT_PUBLIC_GATEWAY_URL: "http://localhost:${COCOLA_GATEWAY_HOST_PORT}"
       COCOLA_GATEWAY_URL: http://gateway:8080
       COCOLA_ADMIN_URL: http://admin-api:8090

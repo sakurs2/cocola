@@ -131,7 +131,7 @@ func TestParsePublicOriginHosts(t *testing.T) {
 	if err != nil {
 		t.Fatalf("parsePublicOriginHosts: %v", err)
 	}
-	if got, want := strings.Join(hosts, ","), "cocola.example.com,127.0.0.1:3000,localhost,[::1]"; got != want {
+	if got, want := strings.Join(hosts, ","), "cocola.internal,cocola.example.com,127.0.0.1:3000,localhost,[::1]"; got != want {
 		t.Fatalf("trusted hosts = %q, want %q", got, want)
 	}
 
@@ -289,7 +289,7 @@ func TestCreate_InjectsPlatformCodeServerTrustedOrigins(t *testing.T) {
 		t.Fatalf("Create: %v", err)
 	}
 
-	if got := body.Env[codeServerTrustedOriginsEnv]; got != "cocola.example.com,127.0.0.1:3000" {
+	if got := body.Env[codeServerTrustedOriginsEnv]; got != "cocola.internal,cocola.example.com,127.0.0.1:3000" {
 		t.Fatalf("trusted origins env = %q", got)
 	}
 	if got := body.Env["CALLER_VALUE"]; got != "kept" {

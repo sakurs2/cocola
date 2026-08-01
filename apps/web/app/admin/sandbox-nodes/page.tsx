@@ -16,7 +16,6 @@ import {
   Boxes,
   CheckCircle2,
   CircleDot,
-  Copy,
   FolderTree,
   LoaderCircle,
   Plus,
@@ -47,7 +46,6 @@ type SandboxNode = {
 };
 
 type NodeListResponse = { nodes: SandboxNode[] };
-type JoinCommand = { command: string; note: string };
 type OfflineNodeResult = {
   node: SandboxNode;
   pending_pods?: string[];
@@ -78,7 +76,6 @@ const LIST_COLS = "1.6fr 0.9fr 0.8fr 1.5fr 0.7fr 1.4fr 0.9fr 1.4fr 1.1fr 1.7fr";
 
 export default function SandboxNodesPage() {
   const [nodes, setNodes] = useState<SandboxNode[]>([]);
-  const [join, setJoin] = useState<JoinCommand | null>(null);
   const [loading, setLoading] = useState(true);
   const [actingNode, setActingNode] = useState<string | null>(null);
   const [savingCapacity, setSavingCapacity] = useState<string | null>(null);
@@ -94,15 +91,11 @@ export default function SandboxNodesPage() {
     setError("");
     setLoading(true);
     try {
-      const [nodesRes, joinRes] = await Promise.all([
-        fetch("/api/admin/sandbox-nodes", { cache: "no-store" }),
-        fetch("/api/admin/sandbox-nodes/join-command", { cache: "no-store" }),
-      ]);
+      const nodesRes = await fetch("/api/admin/sandbox-nodes", { cache: "no-store" });
       if (isAccountDisabledResponse(nodesRes)) return redirectAccountDisabled();
       if (await isUnsupportedResponse(nodesRes)) {
         setUnsupported(true);
         setNodes([]);
-        setJoin(null);
         return;
       }
       if (!nodesRes.ok) throw new Error(await responseError(nodesRes));
@@ -118,8 +111,6 @@ export default function SandboxNodesPage() {
           ]),
         ),
       );
-      if (isAccountDisabledResponse(joinRes)) return redirectAccountDisabled();
-      if (joinRes.ok) setJoin((await joinRes.json()) as JoinCommand);
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
     } finally {
@@ -181,17 +172,6 @@ export default function SandboxNodesPage() {
     } finally {
       setActingNode(null);
       if (force || action !== "offline") setOfflineTarget(null);
-    }
-  };
-
-  const copyJoinCommand = async () => {
-    if (!join?.command) return;
-    setError("");
-    try {
-      await navigator.clipboard.writeText(join.command);
-      setNotice("Join command copied");
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "Failed to copy join command");
     }
   };
 
@@ -482,13 +462,7 @@ export default function SandboxNodesPage() {
           onConfirm={() => void runNodeAction(offlineTarget.node, "offline", true)}
         />
       )}
-      {showAddNode && (
-        <AddNodeDialog
-          join={join}
-          onCancel={() => setShowAddNode(false)}
-          onCopy={() => void copyJoinCommand()}
-        />
-      )}
+      {showAddNode && <AddNodeDialog onClose={() => setShowAddNode(false)} />}
       {capacityTarget && (
         <CapacityDialog
           node={capacityTarget}
@@ -610,49 +584,32 @@ function OfflineDialog({
   );
 }
 
-function AddNodeDialog({
-  join,
-  onCancel,
-  onCopy,
-}: {
-  join: JoinCommand | null;
-  onCancel: () => void;
-  onCopy: () => void;
-}) {
+function AddNodeDialog({ onClose }: { onClose: () => void }) {
   return (
     <div className="fixed inset-0 z-[80] grid place-items-center bg-black/40 px-4">
       <div
         role="dialog"
         aria-modal="true"
-        className="w-full max-w-2xl rounded-lg border border-border bg-background p-4 shadow-xl"
+        aria-labelledby="add-node-dialog-title"
+        className="w-full max-w-md rounded-lg border border-border bg-background p-4 shadow-xl"
       >
         <div className="flex items-start gap-3">
           <div className="grid size-9 shrink-0 place-items-center rounded-md bg-muted">
             <Plus className="size-4 text-muted-foreground" />
           </div>
           <div className="min-w-0 flex-1">
-            <h2 className="text-sm font-semibold">Add node</h2>
+            <h2 id="add-node-dialog-title" className="text-sm font-semibold">
+              Node onboarding is coming soon
+            </h2>
             <p className="mt-1 text-sm text-muted-foreground">
-              Run the join command on the target machine. The node will appear here after k3s
-              registers it.
+              We&apos;re building a guided and secure way to add nodes to your Cocola cluster. This
+              feature is not available yet.
             </p>
           </div>
         </div>
-        <div className="mt-4 rounded-md border border-border bg-muted/50 px-3 py-2 text-sm text-muted-foreground">
-          {join?.note ?? "Join command is not configured."}
-        </div>
-        <div className="mt-3">
-          <code className="block max-h-48 overflow-auto whitespace-pre-wrap rounded-md border border-border bg-muted px-3 py-2 font-mono text-xs text-foreground">
-            {join?.command ?? "COCOLA_K3S_JOIN_COMMAND is not set"}
-          </code>
-        </div>
-        <div className="mt-4 flex justify-end gap-2">
-          <Button variant="ghost" size="sm" onClick={onCancel}>
+        <div className="mt-4 flex justify-end">
+          <Button variant="outline" size="sm" onClick={onClose}>
             Close
-          </Button>
-          <Button variant="outline" size="sm" disabled={!join?.command} onClick={onCopy}>
-            <Copy className="mr-2 size-4" />
-            Copy command
           </Button>
         </div>
       </div>

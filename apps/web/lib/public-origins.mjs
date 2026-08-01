@@ -39,8 +39,8 @@ export function parsePublicOrigins(raw) {
   return origins;
 }
 
-export function isAllowedWebSocketOrigin(rawOrigin, allowedOrigins) {
-  if (!rawOrigin || !(allowedOrigins instanceof Set) || allowedOrigins.size === 0) {
+export function isAllowedWebSocketOrigin(rawOrigin, allowedOrigins, rawRequestHost) {
+  if (!rawOrigin || !(allowedOrigins instanceof Set)) {
     return false;
   }
   try {
@@ -55,7 +55,26 @@ export function isAllowedWebSocketOrigin(rawOrigin, allowedOrigins) {
     ) {
       return false;
     }
-    return allowedOrigins.has(parsed.origin);
+    if (allowedOrigins.has(parsed.origin)) return true;
+
+    // A direct server-IP/domain deployment cannot know its browser-facing Host
+    // at install time. Accept the browser's own same-host Origin dynamically;
+    // reverse proxies that rewrite Host can still use COCOLA_PUBLIC_ORIGINS.
+    if (typeof rawRequestHost !== "string" || rawRequestHost !== rawRequestHost.trim()) {
+      return false;
+    }
+    const requestURL = new URL(`${parsed.protocol}//${rawRequestHost}`);
+    if (
+      !requestURL.hostname ||
+      requestURL.username ||
+      requestURL.password ||
+      requestURL.pathname !== "/" ||
+      requestURL.search ||
+      requestURL.hash
+    ) {
+      return false;
+    }
+    return requestURL.host === parsed.host;
   } catch {
     return false;
   }

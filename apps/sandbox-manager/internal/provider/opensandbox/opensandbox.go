@@ -143,6 +143,7 @@ const (
 	// codeServerTrustedOriginsEnv is owned by the platform. Agent/runtime callers
 	// must not override the browser origins trusted by the resident editor.
 	codeServerTrustedOriginsEnv = "COCOLA_CODE_SERVER_TRUSTED_ORIGINS"
+	codeServerProxyOriginHost   = "cocola.internal"
 	sandboxProfileEnv           = "COCOLA_SANDBOX_PROFILE"
 	codeServerEnabledEnv        = "COCOLA_CODE_SERVER_ENABLED"
 	browserEnabledEnv           = "COCOLA_BROWSER_ENABLED"
@@ -1144,13 +1145,14 @@ func execTimeoutFromEnv() time.Duration {
 }
 
 // parsePublicOriginHosts validates the external Cocola origins and returns the
-// host[:port] values code-server expects in --trusted-origins. The Web BFF uses
-// the same COCOLA_PUBLIC_ORIGINS list for full scheme+host validation before it
-// mints a runtime token. Empty configuration is allowed but fail-closed: no
-// trusted-origin env is injected and browser WebSocket upgrades remain blocked.
+// host[:port] values code-server expects in --trusted-origins. The fixed
+// internal proxy origin is always present: the Web BFF validates the external
+// browser Origin, then the Gateway rewrites only resident code-server requests
+// to this internal value. Explicit external hosts remain accepted for backward
+// compatibility and advanced proxy topologies.
 func parsePublicOriginHosts(raw string) ([]string, error) {
-	seen := make(map[string]struct{})
-	hosts := make([]string, 0)
+	seen := map[string]struct{}{codeServerProxyOriginHost: {}}
+	hosts := []string{codeServerProxyOriginHost}
 	for _, item := range strings.Split(raw, ",") {
 		origin := strings.TrimSpace(item)
 		if origin == "" {

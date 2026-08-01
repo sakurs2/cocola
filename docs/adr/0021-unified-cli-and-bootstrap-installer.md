@@ -21,7 +21,8 @@ Cocola 的开发启动由 `make dev` 和近千行本地编排脚本承担。这�
    不调用或包装开发脚本，不保留 Native/Container 模式分支。
 3. `install` 以一个强类型配置同时驱动 flags 与交互表单，原子写入 `~/.cocola`；
    重复安装 fail-closed，不覆盖 Secret，也不启动服务。用户检查配置后通过唯一启动
-   入口 `cocola up` 拉取镜像并启动。生命周期命令直接以参数数组调用 Docker，不经
+   入口 `cocola start` 拉取镜像并创建、更新或恢复服务；`cocola stop` 安全释放运行中
+   Sandbox 并保留 Compose 容器、网络和数据。生命周期命令直接以参数数组调用 Docker，不经
    shell 拼接。
 4. 公网 `install.sh` 只做最小引导：平台识别、固定 Release 下载、SHA-256 校验和
    CLI 原子安装。所有部署决策由 CLI 持有。

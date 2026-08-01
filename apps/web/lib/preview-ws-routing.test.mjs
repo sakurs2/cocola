@@ -8,6 +8,7 @@ const runStackSource = await readFile(
   new URL("../../../scripts/run-stack.sh", import.meta.url),
   "utf8",
 );
+const serverSource = await readFile(new URL("../server.mjs", import.meta.url), "utf8");
 
 test("preview and terminal upgrades map to authenticated Gateway paths", () => {
   assert.equal(
@@ -46,4 +47,7 @@ test("claimed preview upgrades are hidden from Next's App Router", () => {
 test("the dev stack keeps the custom server that owns workspace upgrades", () => {
   assert.match(runStackSource, /\$SETSID node server\.mjs --port "\$WEB_PORT"/);
   assert.doesNotMatch(runStackSource, /\$SETSID pnpm dev --port "\$WEB_PORT"/);
+  assert.match(runStackSource, /WEB_HOST="\$\{COCOLA_WEB_HOST:-0\.0\.0\.0\}"/);
+  assert.match(runStackSource, /export COCOLA_WEB_HOST="\$WEB_HOST"/);
+  assert.match(serverSource, /process\.env\.COCOLA_WEB_HOST \|\| "0\.0\.0\.0"/);
 });

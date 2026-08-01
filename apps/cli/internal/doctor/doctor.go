@@ -42,10 +42,13 @@ func Run(ctx context.Context, paths config.Paths) Report {
 	} else {
 		add(Check{Name: "docker daemon", OK: true, Message: "available"})
 	}
-	if err := run(ctx, docker, "compose", "version"); err != nil {
-		add(Check{Name: "docker compose", Message: "Compose v2 is unavailable"})
+	if version, err := compose.ComposeVersion(ctx, docker); err != nil {
+		add(Check{Name: "docker compose", Message: err.Error()})
 	} else {
-		add(Check{Name: "docker compose", OK: true, Message: "available"})
+		add(Check{
+			Name: "docker compose", OK: true,
+			Message: "version " + version + " (minimum " + compose.MinimumComposeVersion + ")",
+		})
 	}
 
 	if _, err := os.Stat(paths.Environment); err != nil {

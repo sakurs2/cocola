@@ -16,7 +16,7 @@
 
 ```bash
 # CLI 安装并启动正式栈；压测使用真实模型配置和登录 token
-cocola up
+cocola start
 # 叠加观测栈(贴主栈网络)
 docker compose -f deploy/docker-compose/docker-compose.observability.yml up -d
 
@@ -106,7 +106,7 @@ k6/ghz 经官方容器(`grafana/k6`、`ghcr.io/bojand/ghz`)接入 `cocola_defaul
 
 ### 3.3 复现步骤
 
-1. 起栈：`cocola up`（可选叠 `docker-compose.observability.yml`）；ghz 直压时按
+1. 起栈：`cocola start`（可选叠 `docker-compose.observability.yml`）；ghz 直压时按
    “前置”章节叠加 `docker-compose.bench.yml` 发布内部端口。
 2. 工具:本机无 k6/ghz 时用官方容器(见上),或 `brew install k6 ghz`。
 3. k6：

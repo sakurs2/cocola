@@ -111,6 +111,7 @@ LLM_HOST="${COCOLA_LLM_HOST:-$_llm_host_default}"
 LLM_PORT="${COCOLA_LLM_PORT:-8081}"   # NOT 8080: that is the gateway port.
 
 WEB_PORT="${COCOLA_WEB_PORT:-3000}"
+WEB_HOST="${COCOLA_WEB_HOST:-0.0.0.0}"
 # Single source of truth for browser-facing origins. The Web BFF validates the
 # full Origin before minting a runtime token; sandbox-manager derives the
 # host[:port] values passed to code-server. Explicit environment/.env values win.
@@ -405,7 +406,7 @@ dev_up() {
   if [[ -n "$_conflict" ]]; then
     echo "!! dev mode runs cocola services NATIVELY, but a containerized stack still holds their ports:$_conflict" >&2
     echo "   those app containers belong to a CLI-managed Cocola stack. Stop it first, then re-run dev mode:" >&2
-    echo "     cocola down" >&2
+    echo "     cocola stop" >&2
     echo "   (this mode then brings up ONLY the sandbox deps -- OpenSandbox server + redis/pg/minio -- itself)" >&2
     exit 1
   fi
@@ -583,9 +584,7 @@ free_port "$WEB_PORT" web
     export COCOLA_ADMIN_KEY="$COCOLA_ADMIN_KEY"
     export AUTH_SECRET="$AUTH_SECRET"
     export COCOLA_PUBLIC_ORIGINS="$COCOLA_PUBLIC_ORIGINS"
-    if [ "${COCOLA_WEB_DEV:-0}" = "1" ]; then
-      echo "==> [dev] web running in HOT-RELOAD mode; frontend edits reflect on refresh, workspace WebSockets enabled" >&2
-    fi
+    export COCOLA_WEB_HOST="$WEB_HOST"
     $SETSID node server.mjs --port "$WEB_PORT"
   ) >"$(log_redirect web)" 2>&1 &
   PIDS+=("$!")

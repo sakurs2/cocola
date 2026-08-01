@@ -293,7 +293,7 @@ func newID() string {
 }
 
 func hashPassword(password string) (string, error) {
-	if strings.TrimSpace(password) == "" {
+	if strings.TrimSpace(password) == "" || utf8.RuneCountInString(password) < 8 || len([]byte(password)) > 72 {
 		return "", ErrInvalidArg
 	}
 	b, err := bcrypt.GenerateFromPassword([]byte(password), bcrypt.DefaultCost)

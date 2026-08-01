@@ -46,9 +46,9 @@ func (p Printer) Banner() {
 		fmt.Fprintln(p.Out, line)
 	}
 	if p.Color {
-		fmt.Fprintln(p.Out, lipgloss.NewStyle().Foreground(lipgloss.Color("#7C8799")).Render("Simple, reliable agent infrastructure."))
+		fmt.Fprintln(p.Out, lipgloss.NewStyle().Foreground(lipgloss.Color("#7C8799")).Italic(true).Render("Your trusty & powerful agent platform"))
 	} else {
-		fmt.Fprintln(p.Out, "Simple, reliable agent infrastructure.")
+		fmt.Fprintln(p.Out, "Your trusty & powerful agent platform")
 	}
 }
 
@@ -94,6 +94,33 @@ func (p Printer) KeyValues(rows [][2]string) {
 		}
 		fmt.Fprintf(p.Out, "  %s  %s\n", key, row[1])
 	}
+}
+
+func (p Printer) Path(path string) {
+	if p.JSON {
+		return
+	}
+	value := path
+	if p.Color {
+		value = lipgloss.NewStyle().Foreground(lipgloss.Color("#43B8F5")).Render(path)
+	}
+	fmt.Fprintf(p.Out, "  %s\n", value)
+}
+
+func (p Printer) Command(command string) {
+	if p.JSON {
+		return
+	}
+	value := "$ " + command
+	if p.Color {
+		value = lipgloss.NewStyle().
+			Foreground(lipgloss.Color("#F5F7FF")).
+			Background(lipgloss.Color("#252A3A")).
+			Padding(0, 1).
+			Bold(true).
+			Render(value)
+	}
+	fmt.Fprintf(p.Out, "  %s\n", value)
 }
 
 func (p Printer) Encode(value any) error {

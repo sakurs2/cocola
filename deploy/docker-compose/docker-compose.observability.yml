@@ -1,10 +1,10 @@
 # cocola observability stack: Prometheus + Grafana + Tempo (+ optional OTel Collector).
 #
 # This is a SIDE-CAR compose that attaches to the network created by the main
-# stack (`cocola up`, project name `cocola` => network `cocola_default`).
+# stack (`cocola start`, project name `cocola` => network `cocola_default`).
 # Bring the app up first, then layer observability on top:
 #
-#   cocola up
+#   cocola start
 #   docker compose -f deploy/docker-compose/docker-compose.observability.yml up -d
 #
 # Prometheus scrapes each service over the shared network using its compose DNS
@@ -125,7 +125,7 @@ networks:
   # This compose's own network (Grafana <-> Prometheus <-> Tempo).
   default:
   # The main stack's network, joined as EXTERNAL so Prometheus can scrape the
-  # app services by their compose DNS names. Created by `cocola up` (project
+  # app services by their compose DNS names. Created by `cocola start` (project
   # `cocola` => `cocola_default`). Start the app stack first.
   cocola:
     external: true

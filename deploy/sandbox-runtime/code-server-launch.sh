@@ -66,9 +66,10 @@ if ! install -d -o "$CODE_SERVER_USER" -g "$CODE_SERVER_USER" -m 0750 \
   exit 1
 fi
 
-# sandbox-manager derives this host-only list from COCOLA_PUBLIC_ORIGINS and
-# owns the environment key, so an Agent request cannot weaken the policy. Keep
-# a second validation layer here because the image may also be run directly.
+# sandbox-manager owns this host-only list, including the fixed internal Origin
+# used by Gateway after it validates the browser-facing request. An Agent
+# request cannot weaken the policy. Keep a second validation layer here because
+# the image may also be run directly.
 trusted_origin_args=()
 IFS=',' read -r -a trusted_origins <<< "$CODE_SERVER_TRUSTED_ORIGINS"
 for origin in "${trusted_origins[@]}"; do

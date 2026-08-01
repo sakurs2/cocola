@@ -31,10 +31,10 @@ ENV NODE_ENV=production
 COPY --from=build /repo ./
 WORKDIR /repo/apps/web
 EXPOSE 3000
-ENV HOSTNAME=0.0.0.0 PORT=3000
+ENV COCOLA_WEB_HOST=0.0.0.0 PORT=3000
 # Custom Node server (server.mjs) instead of `next start`: it wraps Next but adds
 # an `upgrade` handler so the same-origin Preview Proxy can carry WebSockets
-# (code-server editor + dev-server HMR). It reads HOSTNAME/PORT from the env,
+# (code-server editor + dev-server HMR). It reads COCOLA_WEB_HOST/PORT from the env,
 # binding 0.0.0.0:3000, and uses the prebuilt .next (NODE_ENV=production -> dev
 # off). See apps/web/server.mjs for the ADR/auth rationale.
 ENTRYPOINT ["node", "server.mjs"]

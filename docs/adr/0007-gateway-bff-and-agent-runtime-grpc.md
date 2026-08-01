@@ -196,7 +196,7 @@ Route A:
   `.run-logs/`. Editing any cocola service just needs `Ctrl-C` + re-run -- zero
   image rebuilds; the sandbox/infra containers survive (stop them with
   `make dev-down` + `make opensandbox-down`).
-- **Formal deployment -- `cocola up`**: the standalone CLI renders its embedded
+- **Formal deployment -- `cocola start`**: the standalone CLI renders its embedded
   Compose definition and starts the complete versioned stack without requiring
   a source checkout.
 

@@ -1,18 +1,22 @@
 package compose
 
 import (
-	"bytes"
 	"context"
 	"errors"
 	"fmt"
 	"io"
 	"os"
 	"os/exec"
-	"strings"
+	"regexp"
+	"strconv"
 	"time"
 
 	"github.com/cocola-project/cocola/apps/cli/internal/config"
 )
+
+const MinimumComposeVersion = "2.23.1"
+
+var composeVersionPattern = regexp.MustCompile(`(?i)(?:^|\s)v?(\d+)\.(\d+)\.(\d+)(?:\D|$)`)
 
 type Runner struct {
 	Paths  config.Paths
@@ -31,10 +35,60 @@ func CheckDocker(ctx context.Context) error {
 	if err := runCheck(ctx, docker, "info"); err != nil {
 		return errors.New("docker daemon is unavailable")
 	}
-	if err := runCheck(ctx, docker, "compose", "version"); err != nil {
-		return errors.New("Docker Compose v2 is unavailable")
+	if _, err := ComposeVersion(ctx, docker); err != nil {
+		return err
 	}
 	return nil
+}
+
+func ComposeVersion(ctx context.Context, docker string) (string, error) {
+	checkContext, cancel := context.WithTimeout(ctx, 10*time.Second)
+	defer cancel()
+	output, err := exec.CommandContext(checkContext, docker, "compose", "version", "--short").Output()
+	if err != nil {
+		return "", errors.New("Docker Compose v2 is unavailable")
+	}
+	version, parts, err := parseComposeVersion(string(output))
+	if err != nil {
+		return "", err
+	}
+	minimum, minimumParts, _ := parseComposeVersion(MinimumComposeVersion)
+	if compareVersion(parts, minimumParts) < 0 {
+		return version, fmt.Errorf(
+			"Docker Compose %s is unsupported; version %s or newer is required",
+			version,
+			minimum,
+		)
+	}
+	return version, nil
+}
+
+func parseComposeVersion(raw string) (string, [3]int, error) {
+	match := composeVersionPattern.FindStringSubmatch(raw)
+	if len(match) != 4 {
+		return "", [3]int{}, fmt.Errorf("cannot parse Docker Compose version from %q", raw)
+	}
+	var parts [3]int
+	for index := range parts {
+		value, err := strconv.Atoi(match[index+1])
+		if err != nil {
+			return "", [3]int{}, fmt.Errorf("parse Docker Compose version: %w", err)
+		}
+		parts[index] = value
+	}
+	return fmt.Sprintf("%d.%d.%d", parts[0], parts[1], parts[2]), parts, nil
+}
+
+func compareVersion(left, right [3]int) int {
+	for index := range left {
+		if left[index] < right[index] {
+			return -1
+		}
+		if left[index] > right[index] {
+			return 1
+		}
+	}
+	return 0
 }
 
 func runCheck(ctx context.Context, command string, args ...string) error {
@@ -85,7 +139,10 @@ func (r *Runner) Pull(ctx context.Context) error {
 	return r.run(ctx, "pull")
 }
 
-func (r *Runner) Up(ctx context.Context) error {
+// Start is the single create/update/resume path. Compose reuses unchanged
+// containers, recreates services whose image or configuration changed, and
+// creates anything missing after the first installation.
+func (r *Runner) Start(ctx context.Context) error {
 	if r.State.ManagedOpenSandbox {
 		if err := r.run(ctx, "up", "-d", "--wait", "opensandbox-server"); err != nil {
 			return err
@@ -94,15 +151,17 @@ func (r *Runner) Up(ctx context.Context) error {
 	return r.run(ctx, "up", "-d", "--remove-orphans", "--wait")
 }
 
-func (r *Runner) Down(ctx context.Context) error {
-	if !r.State.ManagedOpenSandbox {
-		return r.run(ctx, "down", "--remove-orphans")
-	}
-
-	// Keep the dedicated OpenSandbox server alive until app workers have stopped:
+// stopForDrain stops request/execution entrypoints before sandbox-manager so
+// its SIGTERM handler can release registered compute while the OpenSandbox
+// provider is still reachable. Both managed and external providers use the
+// same ordering; only the managed profile changes the Compose service set.
+func (r *Runner) stopForDrain(ctx context.Context) []error {
+	// Keep the Sandbox Provider reachable until app workers have stopped:
 	// sandbox-manager still uses it to destroy active compute sandboxes during
-	// SIGTERM. Teardown is best-effort but exhaustive, so one failed
-	// phase cannot leave the rest of the stack in an avoidable intermediate state.
+	// SIGTERM. In managed mode the provider server is part of this Compose
+	// project; in external mode it remains outside the project. Teardown is
+	// best-effort but exhaustive, so one failed phase cannot leave the rest of
+	// the stack in an avoidable intermediate state.
 	var failures []error
 	if err := r.run(ctx, "stop", "--timeout", "30", "web", "gateway", "agent-runtime"); err != nil {
 		failures = append(failures, err)
@@ -110,44 +169,18 @@ func (r *Runner) Down(ctx context.Context) error {
 	if err := r.run(ctx, "stop", "--timeout", "45", "sandbox-manager"); err != nil {
 		failures = append(failures, err)
 	}
-	if err := r.cleanupSandboxes(ctx); err != nil {
-		failures = append(failures, err)
-	}
-	if err := r.run(ctx, "down", "--remove-orphans"); err != nil {
+	return failures
+}
+
+// Stop pauses the installed Compose topology. Service containers, the project
+// network, images and data remain; registered sandbox compute is drained by
+// sandbox-manager before the provider is stopped.
+func (r *Runner) Stop(ctx context.Context) error {
+	failures := r.stopForDrain(ctx)
+	if err := r.run(ctx, "stop", "--timeout", "30"); err != nil {
 		failures = append(failures, err)
 	}
 	return errors.Join(failures...)
-}
-
-func (r *Runner) cleanupSandboxes(ctx context.Context) error {
-	image := strings.TrimSpace(r.State.SandboxImage)
-	if image == "" {
-		return errors.New("sandbox image is missing from installation state")
-	}
-	var output bytes.Buffer
-	list := exec.CommandContext(ctx, r.docker, "ps", "-aq", "--filter", "ancestor="+image)
-	list.Stdout = &output
-	list.Stderr = r.Err
-	if err := list.Run(); err != nil {
-		return fmt.Errorf("list managed sandbox containers: %w", err)
-	}
-	ids := strings.Fields(output.String())
-	for len(ids) > 0 {
-		count := min(len(ids), 100)
-		args := append([]string{"rm", "-f"}, ids[:count]...)
-		remove := exec.CommandContext(ctx, r.docker, args...)
-		remove.Stdout = io.Discard
-		remove.Stderr = r.Err
-		if err := remove.Run(); err != nil {
-			return fmt.Errorf("remove managed sandbox containers: %w", err)
-		}
-		ids = ids[count:]
-	}
-	return nil
-}
-
-func (r *Runner) Restart(ctx context.Context) error {
-	return r.run(ctx, "restart")
 }
 
 func (r *Runner) Status(ctx context.Context, jsonOutput bool) error {

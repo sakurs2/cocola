@@ -7,6 +7,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/cocola-project/cocola/apps/cli/internal/ui"
 )
 
 func TestVersionJSON(t *testing.T) {
@@ -19,6 +21,25 @@ func TestVersionJSON(t *testing.T) {
 	}
 	if !strings.Contains(output.String(), `"version"`) || strings.Contains(output.String(), "\x1b[") {
 		t.Fatalf("output = %q", output.String())
+	}
+}
+
+func TestRootExposesOnlyStartAndStopLifecycleCommands(t *testing.T) {
+	app := &application{io: IO{In: &bytes.Buffer{}, Out: &bytes.Buffer{}, Err: &bytes.Buffer{}}}
+	root := app.rootCommand()
+	found := map[string]bool{}
+	for _, command := range root.Commands() {
+		found[command.Name()] = true
+	}
+	for _, name := range []string{"start", "stop"} {
+		if !found[name] {
+			t.Fatalf("missing lifecycle command %q", name)
+		}
+	}
+	for _, name := range []string{"up", "down", "restart"} {
+		if found[name] {
+			t.Fatalf("unexpected lifecycle command %q", name)
+		}
 	}
 }
 
@@ -59,8 +80,33 @@ func TestNonInteractiveInstallWritesEmbeddedRelease(t *testing.T) {
 	if strings.Contains(string(environment), `COCOLA_PUBLIC_ORIGINS="*"`) {
 		t.Fatal("generated environment must not trust wildcard origins")
 	}
-	if !strings.Contains(output.String(), "cocola up") {
+	if !strings.Contains(output.String(), "cocola start") {
 		t.Fatalf("install output must explain how to start Cocola: %q", output.String())
+	}
+	if !strings.Contains(output.String(), filepath.Join(home, "config.env")) {
+		t.Fatalf("install output must show the generated configuration path: %q", output.String())
+	}
+}
+
+func TestInstallPersistsPublicURLAndReportsIt(t *testing.T) {
+	home := filepath.Join(t.TempDir(), "cocola")
+	var output, errors bytes.Buffer
+	err := Execute(context.Background(), []string{
+		"install", "--home", home, "--yes", "--admin-password", "test-password",
+		"--public-url", "https://cocola.example.com",
+	}, IO{In: &bytes.Buffer{}, Out: &output, Err: &errors})
+	if err != nil {
+		t.Fatalf("install: %v, stderr=%s", err, errors.String())
+	}
+	environment, err := os.ReadFile(filepath.Join(home, "config.env"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(environment), `COCOLA_PUBLIC_ORIGINS="http://127.0.0.1:3000,http://localhost:3000,https://cocola.example.com"`) {
+		t.Fatalf("generated environment missing public URL: %s", environment)
+	}
+	if !strings.Contains(output.String(), "https://cocola.example.com") {
+		t.Fatalf("install output missing public URL: %q", output.String())
 	}
 }
 
@@ -69,7 +115,43 @@ func TestInteractiveCommandFailsClearlyWithoutTTY(t *testing.T) {
 	err := Execute(context.Background(), []string{"install"}, IO{
 		In: &bytes.Buffer{}, Out: &output, Err: &errors,
 	})
-	if err == nil || !strings.Contains(err.Error(), "--yes") {
+	if err == nil || !strings.Contains(err.Error(), "requires an interactive terminal") {
 		t.Fatalf("error = %v", err)
+	}
+}
+
+func TestInstallSummaryHighlightsConfigurationAndNextStep(t *testing.T) {
+	var output, errors bytes.Buffer
+	result := installResult{
+		WebURL:        "http://localhost:3000",
+		GatewayURL:    "http://localhost:8080",
+		AdminUsername: "admin",
+		AdminEmail:    "admin@cocola.local",
+		AdminPassword: "generated-password",
+		ConfigFile:    "/tmp/cocola/config.env",
+	}
+	printInstallSummary(ui.Printer{Out: &output, Err: &errors}, result)
+	for _, expected := range []string{
+		"Cocola configuration is ready",
+		"Installation summary",
+		"/tmp/cocola/config.env",
+		"Review the generated configuration file",
+		"$ cocola start",
+	} {
+		if !strings.Contains(output.String(), expected) {
+			t.Fatalf("install summary missing %q: %q", expected, output.String())
+		}
+	}
+	if !strings.Contains(errors.String(), "shown only once") {
+		t.Fatalf("install warning missing: %q", errors.String())
+	}
+}
+
+func TestInstallHelpKeepsInteractiveFlowPrimary(t *testing.T) {
+	app := &application{io: IO{In: &bytes.Buffer{}, Out: &bytes.Buffer{}, Err: &bytes.Buffer{}}}
+	command := app.installCommand()
+	flag := command.Flags().Lookup("yes")
+	if flag == nil || !flag.Hidden {
+		t.Fatal("the unattended compatibility flag must stay out of the default install help")
 	}
 }
