@@ -161,8 +161,6 @@ func main() {
 	svc := service.New(st, iss, time.Now).
 		WithUserEventBroker(pub).
 		WithModelSecretKey(modelSecret).
-		WithMemoryEmbeddingDimension(getenvInt("COCOLA_MEMORY_EMBEDDING_DIMENSION", 1024)).
-		WithMemoryOpenVikingURL(getenv("COCOLA_OPENVIKING_URL", "http://127.0.0.1:1933")).
 		WithConfigSecretKey(configSecret)
 	replayCtx, replayCancel := context.WithTimeout(context.Background(), 30*time.Second)
 	replayed, err := replayRevokedTokens(replayCtx, svc, pub)

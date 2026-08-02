@@ -49,7 +49,6 @@ import (
 	"github.com/cocola-project/cocola/apps/gateway/internal/chatrun"
 	"github.com/cocola-project/cocola/apps/gateway/internal/convo"
 	"github.com/cocola-project/cocola/apps/gateway/internal/httpapi"
-	"github.com/cocola-project/cocola/apps/gateway/internal/memory"
 	"github.com/cocola-project/cocola/apps/gateway/internal/objstore"
 	"github.com/cocola-project/cocola/apps/gateway/internal/project"
 	"github.com/cocola-project/cocola/apps/gateway/internal/sandboxmgr"
@@ -317,18 +316,10 @@ func main() {
 		log.Info("Projects enabled (local projects=" + strconv.FormatBool(projectService.LocalProjectsEnabled()) +
 			", github connector=" + strconv.FormatBool(projectService.GitHubConnectorEnabled()) +
 			", github agent write=" + strconv.FormatBool(projectService.GitHubAgentWriteEnabled()) + ")")
-		memoryService, memoryErr := memory.New(context.Background(), dsn, memory.Config{
-			OpenVikingURL:        env("COCOLA_OPENVIKING_URL", "http://127.0.0.1:1933"),
-			OpenVikingRootAPIKey: config.SecretFromEnv("COCOLA_OPENVIKING_ROOT_API_KEY"),
-			EmbeddingDimension:   mustBoundedEnvInt(log, "COCOLA_MEMORY_EMBEDDING_DIMENSION", 1024, 1, 100000),
-			Metrics:              reg.Registerer(),
-		}, logger.WithService(log, "gateway", "memory"))
-		if memoryErr != nil {
-			log.Fatal("memory service connect failed: " + memoryErr.Error())
-		}
-		defer memoryService.Close()
-		api = api.WithMemory(memoryService)
-		log.Info("OpenViking memory integration loaded (globally disabled until configured)")
+		// Keep Memory deliberately unwired until its product and deployment
+		// lifecycle is ready. A nil service keeps recall and capture dark even if
+		// an older database still contains enabled memory configuration.
+		log.Info("Memory is unavailable while the feature is under development")
 		runStore, runErr := chatrun.NewPostgres(context.Background(), dsn)
 		if runErr != nil {
 			log.Fatal("chat run store connect failed: " + runErr.Error())

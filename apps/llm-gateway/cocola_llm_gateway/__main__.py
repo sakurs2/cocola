@@ -20,7 +20,7 @@ import uvicorn
 from cocola_common import Registry, get_logger
 
 from cocola_llm_gateway.bootstrap import build_revocation, build_service, build_verifier
-from cocola_llm_gateway.config import gateway_config_from_env, read_secret_env
+from cocola_llm_gateway.config import gateway_config_from_env
 from cocola_llm_gateway.server import create_app
 
 
@@ -37,16 +37,15 @@ def main() -> None:
     # stopper; the FastAPI instrumentor is wired inside create_app.
     tracing_cfg = cocola_common.config_from_env("llm-gateway")
     cocola_common.init(tracing_cfg)
-    memory_service_token = read_secret_env("COCOLA_MEMORY_LLM_SERVICE_TOKEN").strip()
-    if not memory_service_token:
-        raise RuntimeError("COCOLA_MEMORY_LLM_SERVICE_TOKEN is required")
+    # User memory is intentionally unavailable while the product flow is under
+    # development. Keep the adapter code for later, but do not expose it from a
+    # production process until the capability is reintroduced deliberately.
     app = create_app(
         service,
         verifier=verifier,
         revocation=build_revocation(),
         metrics=metrics,
         tracing=tracing_cfg,
-        memory_service_token=memory_service_token,
     )
     log.info(
         "cocola-llm-gateway starting",

@@ -55,6 +55,7 @@ var (
 	ErrWorkspacePreviewUnsupported = errors.New("service: workspace preview unsupported")
 	ErrWorkspaceDirectoryTooLarge  = errors.New("service: workspace directory too large")
 	ErrTooManyRequests             = errors.New("service: too many requests")
+	ErrMemoryUnderDevelopment      = errors.New("service: memory is currently under development")
 	ErrNotFound                    = store.ErrNotFound
 	ErrConflict                    = store.ErrConflict
 )
@@ -64,23 +65,20 @@ type Clock func() time.Time
 
 // Admin is the admin-api service.
 type Admin struct {
-	store                    store.Store
-	issuer                   *token.Issuer
-	now                      Clock
-	skillBundles             SkillBundleStore
-	sandboxNodes             SandboxNodeManager
-	sandboxRuntimes          SandboxRuntimeManager
-	sessionStorage           SessionStorageMonitor
-	workspaceBrowser         WorkspaceBrowser
-	architectureChecker      ArchitectureHealthChecker
-	userEvents               UserEventBroker
-	modelSecretKey           string
-	memoryEmbeddingDimension int
-	memoryOpenVikingURL      string
-	memoryHTTPClient         *http.Client
-	embeddingHTTPClient      *http.Client
-	configSecretKey          string
-	schedulerStarted         atomic.Bool
+	store               store.Store
+	issuer              *token.Issuer
+	now                 Clock
+	skillBundles        SkillBundleStore
+	sandboxNodes        SandboxNodeManager
+	sandboxRuntimes     SandboxRuntimeManager
+	sessionStorage      SessionStorageMonitor
+	workspaceBrowser    WorkspaceBrowser
+	architectureChecker ArchitectureHealthChecker
+	userEvents          UserEventBroker
+	modelSecretKey      string
+	embeddingHTTPClient *http.Client
+	configSecretKey     string
+	schedulerStarted    atomic.Bool
 }
 
 // New builds the service. issuer may be nil if token minting is disabled (no
@@ -130,19 +128,6 @@ func (a *Admin) WithArchitectureHealthChecker(c ArchitectureHealthChecker) *Admi
 // providers. Without it, provider saves that include a plaintext API key fail.
 func (a *Admin) WithModelSecretKey(secret string) *Admin {
 	a.modelSecretKey = strings.TrimSpace(secret)
-	return a
-}
-
-// WithMemoryEmbeddingDimension installs the startup-locked OpenViking vector
-// dimension used to validate administrator model selections.
-func (a *Admin) WithMemoryEmbeddingDimension(dimension int) *Admin {
-	a.memoryEmbeddingDimension = dimension
-	return a
-}
-
-func (a *Admin) WithMemoryOpenVikingURL(rawURL string) *Admin {
-	a.memoryOpenVikingURL = strings.TrimRight(strings.TrimSpace(rawURL), "/")
-	a.memoryHTTPClient = &http.Client{Timeout: 2 * time.Second}
 	return a
 }
 
@@ -2008,102 +1993,24 @@ type EmbeddingModelView struct {
 	APIKeyHint string `json:"api_key_hint"`
 }
 
-func (a *Admin) GetMemoryConfig(ctx context.Context) (MemoryConfigView, error) {
-	config, err := a.store.GetMemoryConfig(ctx)
-	if err != nil {
-		return MemoryConfigView{}, err
-	}
-	return a.memoryConfigView(ctx, config, true), nil
+func (a *Admin) GetMemoryConfig(context.Context) (MemoryConfigView, error) {
+	return memoryUnderDevelopmentView(), nil
 }
 
-func (a *Admin) UpdateMemoryConfig(ctx context.Context, in MemoryConfigInput) (MemoryConfigView, error) {
-	current, err := a.store.GetMemoryConfig(ctx)
-	if err != nil {
-		return MemoryConfigView{}, err
-	}
-	config := store.MemoryConfig{
-		Enabled:                in.Enabled,
-		ExtractionModelRouteID: strings.TrimSpace(in.ExtractionModelRouteID),
-		EmbeddingModelRouteID:  strings.TrimSpace(in.EmbeddingModelRouteID),
-		UpdatedAt:              a.now().UTC(), UpdatedBy: in.Actor,
-	}
-	if config.Enabled {
-		view := a.memoryConfigView(ctx, config, true)
-		if view.Status != "ready" {
-			return MemoryConfigView{}, fmt.Errorf("%w: memory configuration is incomplete: %s", ErrInvalidArg, view.Error)
-		}
-		if err := a.store.LockMemoryIndex(ctx, a.memoryEmbeddingDimension); err != nil {
-			return MemoryConfigView{}, fmt.Errorf("%w: memory index dimension is locked", ErrInvalidArg)
-		}
-	}
-	updated, err := a.store.UpdateMemoryConfig(ctx, config, in.ExpectedVersion)
-	if err != nil {
-		return MemoryConfigView{}, err
-	}
-	// An enabled-to-disabled transition is the emergency stop path. Persist it
-	// without waiting for any downstream readiness probe; later GETs still probe
-	// normally so the Drawer can decide whether re-enabling is safe.
-	probeDownstream := !(current.Enabled && !updated.Enabled)
-	return a.memoryConfigView(ctx, updated, probeDownstream), nil
+func (a *Admin) UpdateMemoryConfig(context.Context, MemoryConfigInput) (MemoryConfigView, error) {
+	return memoryUnderDevelopmentView(), ErrMemoryUnderDevelopment
 }
 
-func (a *Admin) memoryConfigView(
-	ctx context.Context,
-	config store.MemoryConfig,
-	probeDownstream bool,
-) MemoryConfigView {
-	view := MemoryConfigView{
-		MemoryConfig: config, Status: "disabled", EmbeddingDimension: a.memoryEmbeddingDimension,
-		OpenVikingStatus: "not_ready", VLMStatus: "not_configured", EmbeddingStatus: "not_configured",
+func memoryUnderDevelopmentView() MemoryConfigView {
+	return MemoryConfigView{
+		MemoryConfig:     store.MemoryConfig{Enabled: false},
+		Status:           "development",
+		CanEnable:        false,
+		OpenVikingStatus: "not_available",
+		VLMStatus:        "not_available",
+		EmbeddingStatus:  "not_available",
+		Error:            "Memory is currently under development and is not available in this release.",
 	}
-	if !config.Enabled && config.ExtractionModelRouteID == "" && config.EmbeddingModelRouteID == "" {
-		return view
-	}
-	if config.ExtractionModelRouteID == "" || config.EmbeddingModelRouteID == "" || a.memoryEmbeddingDimension <= 0 {
-		view.Status, view.Error = "incomplete", "select extraction and embedding models"
-		if config.Enabled {
-			view.Status = "degraded"
-		}
-		return view
-	}
-	extraction, extractionErr := a.store.GetLLMModelRoute(ctx, config.ExtractionModelRouteID)
-	embedding, embeddingErr := a.store.GetLLMModelRoute(ctx, config.EmbeddingModelRouteID)
-	extractionProvider, extractionProviderErr := a.store.GetLLMProvider(ctx, extraction.ProviderID)
-	embeddingProvider, embeddingProviderErr := a.store.GetLLMProvider(ctx, embedding.ProviderID)
-	switch {
-	case extractionErr != nil || embeddingErr != nil:
-		view.Status, view.Error = "incomplete", "selected model route is unavailable"
-	case extractionProviderErr != nil || embeddingProviderErr != nil:
-		view.Status, view.Error = "incomplete", "selected model provider is unavailable"
-	case (extraction.Protocol != "anthropic-messages" && extraction.Protocol != "openai-responses") || !extraction.Enabled || !extractionProvider.Enabled:
-		view.Status, view.Error = "incomplete", "extraction model is not an enabled generation route"
-	case embedding.Protocol != "openai-embeddings" || !embedding.Enabled || !embeddingProvider.Enabled:
-		view.Status, view.Error = "incomplete", "embedding model is not an enabled embedding route"
-	case embedding.EmbeddingDimension != a.memoryEmbeddingDimension:
-		view.Status, view.Error = "incomplete", "embedding model dimension does not match the memory index"
-	default:
-		view.Status = "ready"
-		view.CanEnable = true
-		view.VLMStatus = "ready"
-		view.EmbeddingStatus = "ready"
-	}
-	if view.CanEnable {
-		if !probeDownstream {
-			view.CanEnable = false
-		} else if err := a.memoryOpenVikingReady(ctx); err != nil {
-			view.Status, view.CanEnable = "incomplete", false
-			view.Error = "OpenViking is not ready"
-		} else {
-			view.OpenVikingStatus = "ready"
-		}
-	}
-	if !config.Enabled && view.Status == "ready" {
-		view.Status = "disabled"
-	}
-	if config.Enabled && view.Status != "ready" {
-		view.Status = "degraded"
-	}
-	return view
 }
 
 func (a *Admin) TestEmbeddingModel(
@@ -2360,25 +2267,6 @@ func embeddingHTTPError(status int) (string, string) {
 	default:
 		return "provider_rejected", fmt.Sprintf("Provider rejected the request (HTTP %d)", status)
 	}
-}
-
-func (a *Admin) memoryOpenVikingReady(ctx context.Context) error {
-	if a.memoryOpenVikingURL == "" || a.memoryHTTPClient == nil {
-		return errors.New("OpenViking is not configured")
-	}
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, a.memoryOpenVikingURL+"/ready", nil)
-	if err != nil {
-		return err
-	}
-	response, err := a.memoryHTTPClient.Do(req)
-	if err != nil {
-		return err
-	}
-	defer response.Body.Close()
-	if response.StatusCode != http.StatusOK {
-		return fmt.Errorf("OpenViking readiness returned %d", response.StatusCode)
-	}
-	return nil
 }
 
 func (a *Admin) GetConversationRun(ctx context.Context, traceID string) (store.ConversationRun, error) {

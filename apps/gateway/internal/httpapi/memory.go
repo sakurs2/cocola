@@ -18,7 +18,7 @@ func (a *API) memorySettings(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if a.memory == nil {
-		writeJSON(w, http.StatusOK, memory.Settings{UseEnabled: true, LearnEnabled: true})
+		writeJSON(w, http.StatusOK, memory.Settings{UseEnabled: false, LearnEnabled: false})
 		return
 	}
 	settings, err := a.memory.GetSettings(r.Context(), memory.Identity{
