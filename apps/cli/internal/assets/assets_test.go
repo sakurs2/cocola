@@ -24,3 +24,14 @@ func TestComposeStopsMinIOSecretFlagParsing(t *testing.T) {
 		t.Fatal("production compose must terminate mc flags before positional credentials")
 	}
 }
+
+func TestComposeWaitsForAgentRuntimeReadiness(t *testing.T) {
+	for _, required := range [][]byte{
+		[]byte("socket.create_connection(('127.0.0.1', 50061), 2)"),
+		[]byte("agent-runtime:\n        condition: service_healthy"),
+	} {
+		if !bytes.Contains(Compose, required) {
+			t.Fatalf("production compose must wait for Agent Runtime readiness: missing %q", required)
+		}
+	}
+}

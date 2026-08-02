@@ -209,13 +209,24 @@ services:
       COCOLA_SANDBOX_SKILL_BROKER_URL: "${COCOLA_SANDBOX_SKILL_BROKER_URL}"
     extra_hosts:
       - host.docker.internal:host-gateway
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "python",
+          "-c",
+          "import socket; socket.create_connection(('127.0.0.1', 50061), 2).close()",
+        ]
+      interval: 2s
+      timeout: 3s
+      retries: 30
 
   gateway:
     image: "${COCOLA_IMAGE_REGISTRY}/cocola-gateway:${COCOLA_VERSION}"
     restart: unless-stopped
     depends_on:
       agent-runtime:
-        condition: service_started
+        condition: service_healthy
       postgres:
         condition: service_healthy
       minio-init:
