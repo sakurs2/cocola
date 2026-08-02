@@ -11,6 +11,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/cocola-project/cocola/apps/cli/internal/compose"
 	"github.com/cocola-project/cocola/apps/cli/internal/config"
 )
 
@@ -208,6 +209,7 @@ func TestFailedUpgradeRestoresPreviousDeploymentWithoutRestartingIt(t *testing.T
 	combined := output.String() + errors.String()
 	if !strings.Contains(combined, "was not restarted automatically") ||
 		!strings.Contains(combined, "cocola start") ||
+		!strings.Contains(combined, "cocola install --version v0.2.0") ||
 		!strings.Contains(combined, "never restored automatically") {
 		t.Fatalf("rollback output = %q", combined)
 	}
@@ -217,6 +219,59 @@ func TestFailedUpgradeRestoresPreviousDeploymentWithoutRestartingIt(t *testing.T
 	}
 	if count := strings.Count(string(dockerLog), "up -d --wait opensandbox-server"); count != 1 {
 		t.Fatalf("previous version was restarted automatically; start count = %d\n%s", count, dockerLog)
+	}
+}
+
+func TestFirstStartRejectsPostgresVolumeFromDifferentConfiguration(t *testing.T) {
+	home := filepath.Join(t.TempDir(), "cocola")
+	webPort, gatewayPort, llmPort := 33201, 33202, 33203
+	var output, stderr bytes.Buffer
+	if err := Execute(context.Background(), []string{
+		"install", "--home", home, "--yes", "--version", "v0.1.0",
+		"--admin-password", "test-password",
+		"--web-port", fmt.Sprint(webPort),
+		"--gateway-port", fmt.Sprint(gatewayPort),
+		"--llm-port", fmt.Sprint(llmPort),
+	}, IO{In: &bytes.Buffer{}, Out: &output, Err: &stderr}); err != nil {
+		t.Fatal(err)
+	}
+
+	directory := t.TempDir()
+	dockerPath := filepath.Join(directory, "docker")
+	script := strings.Join([]string{
+		"#!/bin/sh",
+		"if [ \"$1 $2 $3\" = \"compose version --short\" ]; then printf '2.23.1\\n'; exit 0; fi",
+		"if [ \"$1\" = \"info\" ]; then exit 0; fi",
+		"if [ \"$1\" = \"ps\" ]; then exit 0; fi",
+		"if [ \"$1 $2 $3\" = \"volume inspect cocola_pgdata\" ]; then exit 0; fi",
+		"if [ \"$1 $2\" = \"image pull\" ]; then exit 0; fi",
+		"case \"$*\" in",
+		"  *' config --quiet') exit 0 ;;",
+		"  *' pull') exit 0 ;;",
+		"  *' up -d postgres') exit 0 ;;",
+		"  *'exec -T postgres sh -ec'*) printf '%s\\n' 'password authentication failed for user \"cocola\"' >&2; exit 2 ;;",
+		"  *' ps') exit 0 ;;",
+		"esac",
+		"exit 1",
+		"",
+	}, "\n")
+	if err := os.WriteFile(dockerPath, []byte(script), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("COCOLA_DOCKER_BIN", dockerPath)
+	output.Reset()
+	stderr.Reset()
+	err := Execute(context.Background(), []string{"start", "--home", home}, IO{
+		In: &bytes.Buffer{}, Out: &output, Err: &stderr,
+	})
+	combined := output.String() + stderr.String()
+	if !errors.Is(err, compose.ErrPostgresCredentialsMismatch) {
+		t.Fatalf("start error = %v, output = %q", err, combined)
+	}
+	if !strings.Contains(combined, "different Cocola configuration") ||
+		!strings.Contains(combined, "docker volume rm cocola_pgdata") ||
+		strings.Contains(combined, "Cocola is ready") {
+		t.Fatalf("PostgreSQL mismatch output = %q", combined)
 	}
 }
 

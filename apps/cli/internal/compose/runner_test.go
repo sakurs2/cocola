@@ -3,6 +3,7 @@ package compose
 import (
 	"bytes"
 	"context"
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
@@ -181,6 +182,80 @@ esac
 	}
 }
 
+func TestPullIncludesManagedSandboxRuntimeImages(t *testing.T) {
+	runner, logPath, paths := newRecordingRunner(t, true)
+	if err := runner.Pull(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	prefix := "compose --project-name cocola --env-file " + paths.Environment +
+		" --file " + paths.Compose + " --profile managed "
+	assertRecordedCommands(t, logPath, []string{
+		prefix + "pull",
+		"image pull ghcr.io/sakurs2/cocola-sandbox-runtime:v1",
+		"image pull " + managedOpenSandboxExecdImage,
+		"image pull " + managedOpenSandboxEgressImage,
+	})
+}
+
+func TestExternalOpenSandboxDoesNotPullRuntimeImagesLocally(t *testing.T) {
+	runner, logPath, paths := newRecordingRunner(t, false)
+	if err := runner.Pull(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	prefix := "compose --project-name cocola --env-file " + paths.Environment +
+		" --file " + paths.Compose + " "
+	assertRecordedCommands(t, logPath, []string{prefix + "pull"})
+}
+
+func TestPrepareExistingPostgresRejectsCredentialMismatch(t *testing.T) {
+	directory := t.TempDir()
+	dockerPath := filepath.Join(directory, "docker")
+	script := `#!/bin/sh
+case "$*" in
+  *'up -d postgres') exit 0 ;;
+  *'exec -T postgres sh -ec'*) printf '%s\n' 'psql: error: password authentication failed for user "cocola"' >&2; exit 2 ;;
+esac
+exit 1
+`
+	if err := os.WriteFile(dockerPath, []byte(script), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("COCOLA_DOCKER_BIN", dockerPath)
+	paths := writeRunnerState(t, directory, false)
+	runner, err := New(paths, nil, &bytes.Buffer{}, &bytes.Buffer{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	err = runner.PrepareExistingPostgres(context.Background())
+	if !errors.Is(err, ErrPostgresCredentialsMismatch) {
+		t.Fatalf("PrepareExistingPostgres() error = %v", err)
+	}
+}
+
+func TestServiceStatusesAcceptsComposeJSONArray(t *testing.T) {
+	directory := t.TempDir()
+	dockerPath := filepath.Join(directory, "docker")
+	script := `#!/bin/sh
+case "$*" in
+  *'ps --all --format json'*) printf '%s\n' '[{"Service":"postgres","State":"running","Health":"healthy","Status":"Up"}]'; exit 0 ;;
+esac
+exit 1
+`
+	if err := os.WriteFile(dockerPath, []byte(script), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("COCOLA_DOCKER_BIN", dockerPath)
+	paths := writeRunnerState(t, directory, false)
+	runner, err := New(paths, nil, &bytes.Buffer{}, &bytes.Buffer{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	statuses, err := runner.ServiceStatuses(context.Background())
+	if err != nil || len(statuses) != 1 || statuses[0].Service != "postgres" || statuses[0].Health != "healthy" {
+		t.Fatalf("ServiceStatuses() = %+v, %v", statuses, err)
+	}
+}
+
 func TestBackupDatabaseIsAtomicAndPrivate(t *testing.T) {
 	directory := t.TempDir()
 	dockerPath := filepath.Join(directory, "docker")
@@ -297,9 +372,9 @@ func writeRunnerState(t *testing.T, directory string, managed bool) config.Paths
 		Home: directory, Environment: filepath.Join(directory, "config.env"),
 		Compose: filepath.Join(directory, "compose.yaml"), State: filepath.Join(directory, "state.json"),
 	}
-	state := `{"version":"v1","managed_opensandbox":false}`
+	state := `{"version":"v1","managed_opensandbox":false,"sandbox_image":"ghcr.io/sakurs2/cocola-sandbox-runtime:v1"}`
 	if managed {
-		state = `{"version":"v1","managed_opensandbox":true}`
+		state = `{"version":"v1","managed_opensandbox":true,"sandbox_image":"ghcr.io/sakurs2/cocola-sandbox-runtime:v1"}`
 	}
 	if err := os.WriteFile(paths.State, []byte(state), 0o600); err != nil {
 		t.Fatal(err)

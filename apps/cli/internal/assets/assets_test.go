@@ -35,3 +35,26 @@ func TestComposeWaitsForAgentRuntimeReadiness(t *testing.T) {
 		}
 	}
 }
+
+func TestComposeWaitsForSandboxManagerReadiness(t *testing.T) {
+	for _, required := range [][]byte{
+		[]byte("http://localhost:9092/healthz"),
+		[]byte("sandbox-manager:\n        condition: service_healthy"),
+	} {
+		if !bytes.Contains(Compose, required) {
+			t.Fatalf("production compose must wait for Sandbox Manager readiness: missing %q", required)
+		}
+	}
+}
+
+func TestComposeAuthenticatesPostgreSQLHealthChecks(t *testing.T) {
+	for _, required := range [][]byte{
+		[]byte("PGPASSWORD=$$POSTGRES_PASSWORD"),
+		[]byte("psql -h 127.0.0.1"),
+		[]byte("-tAc 'SELECT 1'"),
+	} {
+		if !bytes.Contains(Compose, required) {
+			t.Fatalf("production compose must authenticate PostgreSQL health checks: missing %q", required)
+		}
+	}
+}

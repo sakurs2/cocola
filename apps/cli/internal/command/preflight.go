@@ -5,15 +5,10 @@ import (
 	"errors"
 	"fmt"
 	"net"
-	"syscall"
 
 	"github.com/cocola-project/cocola/apps/cli/internal/compose"
 	"github.com/cocola-project/cocola/apps/cli/internal/config"
-)
-
-const (
-	minimumFreeDiskBytes = uint64(2 * 1024 * 1024 * 1024)
-	warnFreeDiskBytes    = uint64(10 * 1024 * 1024 * 1024)
+	"github.com/cocola-project/cocola/apps/cli/internal/host"
 )
 
 var listenTCP = net.Listen
@@ -45,17 +40,17 @@ func runStartPreflight(ctx context.Context, runner *compose.Runner) ([]string, e
 			}
 		}
 	}
-	available, err := availableDiskBytes(runner.Paths.Home)
+	available, err := host.AvailableDiskBytes(runner.Paths.Home)
 	if err != nil {
 		return []string{"Available disk space could not be determined: " + err.Error()}, nil
 	}
-	if available < minimumFreeDiskBytes {
+	if available < host.MinimumFreeDiskBytes {
 		return nil, fmt.Errorf(
 			"only %.1f GiB of disk space is available; free at least 2 GiB before starting Cocola",
 			float64(available)/(1024*1024*1024),
 		)
 	}
-	if available < warnFreeDiskBytes {
+	if available < host.WarnFreeDiskBytes {
 		return []string{fmt.Sprintf(
 			"Only %.1f GiB of disk space is available. Sandbox images and workspaces may require more space.",
 			float64(available)/(1024*1024*1024),
@@ -73,12 +68,4 @@ func checkPortAvailable(port int) error {
 		return err
 	}
 	return listener.Close()
-}
-
-func availableDiskBytes(path string) (uint64, error) {
-	var stats syscall.Statfs_t
-	if err := syscall.Statfs(path, &stats); err != nil {
-		return 0, err
-	}
-	return stats.Bavail * uint64(stats.Bsize), nil
 }

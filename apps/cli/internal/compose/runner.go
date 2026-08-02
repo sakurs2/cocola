@@ -3,6 +3,7 @@ package compose
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -21,6 +22,13 @@ import (
 // OpenSandbox configuration inside the Compose file.
 const MinimumComposeVersion = "2.23.1"
 
+const (
+	managedOpenSandboxExecdImage  = "sandbox-registry.cn-zhangjiakou.cr.aliyuncs.com/opensandbox/execd:v1.0.19"
+	managedOpenSandboxEgressImage = "opensandbox/egress:v1.1.2"
+)
+
+var ErrPostgresCredentialsMismatch = errors.New("the existing PostgreSQL volume does not match the current Cocola configuration")
+
 var composeVersionPattern = regexp.MustCompile(`(?i)(?:^|\s)v?(\d+)\.(\d+)\.(\d+)(?:\D|$)`)
 
 type Runner struct {
@@ -30,6 +38,16 @@ type Runner struct {
 	Out    io.Writer
 	Err    io.Writer
 	docker string
+}
+
+type ServiceStatus struct {
+	ID       string `json:"ID"`
+	Name     string `json:"Name"`
+	Service  string `json:"Service"`
+	State    string `json:"State"`
+	Health   string `json:"Health"`
+	Status   string `json:"Status"`
+	ExitCode int    `json:"ExitCode"`
 }
 
 func CheckDocker(ctx context.Context) error {
@@ -48,6 +66,18 @@ func CheckDocker(ctx context.Context) error {
 		return err
 	}
 	return nil
+}
+
+func DockerRootDir(ctx context.Context, docker string) (string, error) {
+	output, err := runCheck(ctx, docker, "info", "--format", "{{.DockerRootDir}}")
+	if err != nil {
+		return "", fmt.Errorf("inspect Docker storage directory: %w", err)
+	}
+	root := strings.TrimSpace(string(output))
+	if root == "" {
+		return "", errors.New("Docker did not report its storage directory")
+	}
+	return root, nil
 }
 
 func ComposeVersion(ctx context.Context, docker string) (string, error) {
@@ -163,20 +193,32 @@ func New(paths config.Paths, input io.Reader, output, errors io.Writer) (*Runner
 }
 
 func (r *Runner) Pull(ctx context.Context) error {
-	return r.run(ctx, "pull")
+	if err := r.run(ctx, "pull"); err != nil {
+		return err
+	}
+	for _, image := range r.runtimeImages() {
+		command := exec.CommandContext(ctx, r.docker, "image", "pull", image)
+		command.Stdout = r.Out
+		command.Stderr = r.Err
+		if err := command.Run(); err != nil {
+			return fmt.Errorf("pull runtime image %s: %w", image, err)
+		}
+	}
+	return nil
 }
 
-// ImagesPresent reports whether every image selected by the generated Compose
-// topology is already available locally. It is used only as a fallback after a
-// registry pull fails; it never treats an unreachable daemon as a cache miss.
-func (r *Runner) ImagesPresent(ctx context.Context) (bool, error) {
+func (r *Runner) RequiredImages(ctx context.Context) ([]string, error) {
 	output, err := r.capture(ctx, "config", "--images")
 	if err != nil {
-		return false, err
+		return nil, err
 	}
 	seen := make(map[string]struct{})
 	images := make([]string, 0)
-	for _, image := range strings.Fields(string(output)) {
+	for _, image := range append(strings.Fields(string(output)), r.runtimeImages()...) {
+		image = strings.TrimSpace(image)
+		if image == "" {
+			continue
+		}
 		if _, ok := seen[image]; ok {
 			continue
 		}
@@ -184,7 +226,18 @@ func (r *Runner) ImagesPresent(ctx context.Context) (bool, error) {
 		images = append(images, image)
 	}
 	if len(images) == 0 {
-		return false, errors.New("docker compose did not resolve any deployment images")
+		return nil, errors.New("docker compose did not resolve any deployment images")
+	}
+	return images, nil
+}
+
+// ImagesPresent reports whether every service and managed sandbox runtime
+// image is already available locally. It is used only as a fallback after a
+// registry pull fails; it never silently ignores a missing runtime sidecar.
+func (r *Runner) ImagesPresent(ctx context.Context) (bool, error) {
+	images, err := r.RequiredImages(ctx)
+	if err != nil {
+		return false, err
 	}
 	command := exec.CommandContext(ctx, r.docker, append([]string{"image", "inspect"}, images...)...)
 	command.Stdout = io.Discard
@@ -193,6 +246,37 @@ func (r *Runner) ImagesPresent(ctx context.Context) (bool, error) {
 		return false, nil
 	}
 	return true, nil
+}
+
+func (r *Runner) MissingImages(ctx context.Context) ([]string, error) {
+	images, err := r.RequiredImages(ctx)
+	if err != nil {
+		return nil, err
+	}
+	missing := make([]string, 0)
+	for _, image := range images {
+		command := exec.CommandContext(ctx, r.docker, "image", "inspect", image)
+		command.Stdout = io.Discard
+		command.Stderr = io.Discard
+		if err := command.Run(); err != nil {
+			if ctx.Err() != nil {
+				return nil, ctx.Err()
+			}
+			missing = append(missing, image)
+		}
+	}
+	return missing, nil
+}
+
+func (r *Runner) runtimeImages() []string {
+	if !r.State.ManagedOpenSandbox {
+		return nil
+	}
+	return []string{
+		r.State.SandboxImage,
+		managedOpenSandboxExecdImage,
+		managedOpenSandboxEgressImage,
+	}
 }
 
 func (r *Runner) ServiceRunning(ctx context.Context, service string) (bool, error) {
@@ -227,6 +311,58 @@ func (r *Runner) VolumePresent(ctx context.Context, name string) (bool, error) {
 
 func (r *Runner) StartService(ctx context.Context, service string) error {
 	return r.run(ctx, "up", "-d", "--wait", service)
+}
+
+// PrepareExistingPostgres starts an already-created PostgreSQL volume without
+// waiting on its healthcheck, then verifies that the current deployment secret
+// can authenticate. This distinguishes a resumable partial first start from a
+// stale volume created by a different Cocola configuration.
+func (r *Runner) PrepareExistingPostgres(ctx context.Context) error {
+	if err := r.run(ctx, "up", "-d", "postgres"); err != nil {
+		return fmt.Errorf("start existing PostgreSQL service: %w", err)
+	}
+	checkContext, cancel := context.WithTimeout(ctx, 30*time.Second)
+	defer cancel()
+	ticker := time.NewTicker(time.Second)
+	defer ticker.Stop()
+	var lastErr error
+	for {
+		err := r.CheckPostgresCredentials(checkContext)
+		if err == nil {
+			return nil
+		}
+		if errors.Is(err, ErrPostgresCredentialsMismatch) {
+			return err
+		}
+		lastErr = err
+		select {
+		case <-checkContext.Done():
+			return fmt.Errorf("verify existing PostgreSQL credentials: %w", errors.Join(lastErr, checkContext.Err()))
+		case <-ticker.C:
+		}
+	}
+}
+
+func (r *Runner) CheckPostgresCredentials(ctx context.Context) error {
+	command := r.command(
+		ctx,
+		"exec", "-T", "postgres", "sh", "-ec",
+		`PGPASSWORD="$POSTGRES_PASSWORD" psql -h 127.0.0.1 -U "$POSTGRES_USER" -d "$POSTGRES_DB" -tAc 'SELECT 1' >/dev/null`,
+	)
+	var diagnostic bytes.Buffer
+	command.Stdout = io.Discard
+	command.Stderr = &diagnostic
+	if err := command.Run(); err != nil {
+		detail := strings.TrimSpace(diagnostic.String())
+		if strings.Contains(strings.ToLower(detail), "password authentication failed") {
+			return fmt.Errorf("%w: %s", ErrPostgresCredentialsMismatch, detail)
+		}
+		if detail == "" {
+			detail = err.Error()
+		}
+		return fmt.Errorf("authenticate to PostgreSQL: %s", detail)
+	}
+	return nil
 }
 
 // BackupDatabase writes a compressed pg_dump from the existing PostgreSQL
@@ -312,6 +448,32 @@ func (r *Runner) Status(ctx context.Context, jsonOutput bool) error {
 		args = append(args, "--format", "json")
 	}
 	return r.run(ctx, args...)
+}
+
+func (r *Runner) ServiceStatuses(ctx context.Context) ([]ServiceStatus, error) {
+	output, err := r.capture(ctx, "ps", "--all", "--format", "json")
+	if err != nil {
+		return nil, err
+	}
+	trimmed := bytes.TrimSpace(output)
+	if len(trimmed) == 0 {
+		return nil, nil
+	}
+	var statuses []ServiceStatus
+	if trimmed[0] == '[' {
+		if err := json.Unmarshal(trimmed, &statuses); err != nil {
+			return nil, fmt.Errorf("decode Docker Compose service status: %w", err)
+		}
+		return statuses, nil
+	}
+	for _, line := range bytes.Split(trimmed, []byte{'\n'}) {
+		var status ServiceStatus
+		if err := json.Unmarshal(line, &status); err != nil {
+			return nil, fmt.Errorf("decode Docker Compose service status: %w", err)
+		}
+		statuses = append(statuses, status)
+	}
+	return statuses, nil
 }
 
 func (r *Runner) Logs(ctx context.Context, service string, follow bool, tail int) error {

@@ -26,10 +26,13 @@ func (a *application) doctorCommand() *cobra.Command {
 				printer.Section("Cocola doctor")
 				for _, check := range report.Checks {
 					message := check.Name + ": " + check.Message
-					if check.OK {
+					switch check.Status {
+					case doctor.StatusPass:
 						printer.Success(message)
-					} else {
+					case doctor.StatusWarning:
 						printer.Warn(message)
+					default:
+						printer.Error(message)
 					}
 				}
 			}

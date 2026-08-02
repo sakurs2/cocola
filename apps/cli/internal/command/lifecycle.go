@@ -22,33 +22,39 @@ func (a *application) lifecycleCommand(action string) *cobra.Command {
 		Use:   action,
 		Short: short[action],
 		RunE: func(command *cobra.Command, _ []string) error {
-			runner, err := a.runner(false)
+			paths, err := a.paths()
 			if err != nil {
 				return err
 			}
-			if action == "start" {
-				if err := compose.CheckDocker(command.Context()); err != nil {
+			return withOperationLock(paths, "cocola "+action, func() error {
+				runner, err := a.runnerAt(paths, false)
+				if err != nil {
 					return err
 				}
-			}
-			printer := a.printer()
-			switch action {
-			case "start":
-				return a.start(command.Context(), runner)
-			case "stop":
-				printer.Info("Stopping Cocola and preserving its containers")
-				err = runner.Stop(command.Context())
-			default:
-				return errors.New("unsupported lifecycle action")
-			}
-			if err != nil {
-				return err
-			}
-			if a.json {
-				return printer.Encode(map[string]string{"status": action + " complete"})
-			}
-			printer.Success("Cocola " + action + " complete")
-			return nil
+				if action == "start" {
+					if err := compose.CheckDocker(command.Context()); err != nil {
+						return err
+					}
+				}
+				printer := a.printer()
+				switch action {
+				case "start":
+					return a.start(command.Context(), runner)
+				case "stop":
+					printer.Info("Stopping Cocola and preserving its containers")
+					err = runner.Stop(command.Context())
+				default:
+					return errors.New("unsupported lifecycle action")
+				}
+				if err != nil {
+					return err
+				}
+				if a.json {
+					return printer.Encode(map[string]string{"status": action + " complete"})
+				}
+				printer.Success("Cocola " + action + " complete")
+				return nil
+			})
 		},
 	}
 }
@@ -102,6 +108,22 @@ func (a *application) start(ctx context.Context, runner *compose.Runner) error {
 		}
 	} else {
 		printer.Info("Using the installed Cocola images")
+	}
+	if runner.State.LastSuccessfulVersion == "" {
+		hasDatabase, inspectErr := runner.VolumePresent(ctx, "pgdata")
+		if inspectErr != nil {
+			return inspectErr
+		}
+		if hasDatabase {
+			printer.Info("Verifying the existing PostgreSQL volume against the current configuration")
+			if prepareErr := runner.PrepareExistingPostgres(ctx); prepareErr != nil {
+				if errors.Is(prepareErr, compose.ErrPostgresCredentialsMismatch) {
+					a.printPostgresMismatch()
+				}
+				a.printStartFailure(ctx, runner)
+				return prepareErr
+			}
+		}
 	}
 
 	printer.Info("Starting Cocola and waiting for service health checks")
@@ -180,7 +202,10 @@ func (a *application) restoreFailedUpgrade(
 		return errors.Join(cause, fmt.Errorf("restore previous deployment: %w", rollbackErr))
 	}
 	printer.Warn("The previous deployment configuration was restored. Cocola was not restarted automatically.")
-	printer.Info("Review the upgrade error, then recover the previous version with:")
+	printer.Info("Recover the previous version with:")
+	printer.Command("cocola start")
+	printer.Info("Retry the target upgrade after resolving the error with:")
+	printer.Command("cocola install --version " + pending.ToVersion)
 	printer.Command("cocola start")
 	printer.Info("Deployment and PostgreSQL backups are retained for manual recovery. The database dump is never restored automatically.")
 	printer.Path(backupDir)
@@ -190,6 +215,19 @@ func (a *application) restoreFailedUpgrade(
 	}
 	a.printStartFailure(ctx, restoredRunner)
 	return cause
+}
+
+func (a *application) printPostgresMismatch() {
+	if a.json {
+		return
+	}
+	printer := a.printer()
+	printer.Warn("The existing PostgreSQL data was created with credentials from a different Cocola configuration.")
+	printer.Info("If the data is important, restore the original Cocola configuration and run:")
+	printer.Command("cocola start")
+	printer.Info("If the data can be discarded, stop Cocola, remove the cocola_pgdata volume, and run:")
+	printer.Command("docker volume rm cocola_pgdata")
+	printer.Command("cocola start")
 }
 
 func (a *application) printStartFailure(ctx context.Context, runner *compose.Runner) {
@@ -279,6 +317,10 @@ func (a *application) runner(rawOutput bool) (*compose.Runner, error) {
 	if err != nil {
 		return nil, err
 	}
+	return a.runnerAt(paths, rawOutput)
+}
+
+func (a *application) runnerAt(paths config.Paths, rawOutput bool) (*compose.Runner, error) {
 	output := a.io.Out
 	if a.json && !rawOutput {
 		output = a.io.Err

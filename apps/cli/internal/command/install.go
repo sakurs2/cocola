@@ -39,19 +39,21 @@ func (a *application) installCommand() *cobra.Command {
 				return err
 			}
 			if _, err := os.Stat(paths.Environment); err == nil {
-				result, err := config.PrepareUpgrade(paths, options.Version, assets.Compose)
-				if err != nil {
-					return err
-				}
-				if a.json {
-					status := "up_to_date"
-					if result.Updated {
-						status = "upgrade_prepared"
+				return withOperationLock(paths, "cocola install", func() error {
+					result, err := config.PrepareUpgrade(paths, options.Version, assets.Compose)
+					if err != nil {
+						return err
 					}
-					return a.printer().Encode(map[string]any{"status": status, "upgrade": result})
-				}
-				printUpgradeSummary(a.printer(), result)
-				return nil
+					if a.json {
+						status := "up_to_date"
+						if result.Updated {
+							status = "upgrade_prepared"
+						}
+						return a.printer().Encode(map[string]any{"status": status, "upgrade": result})
+					}
+					printUpgradeSummary(a.printer(), result)
+					return nil
+				})
 			} else if !errors.Is(err, os.ErrNotExist) {
 				return fmt.Errorf("inspect existing installation: %w", err)
 			}
@@ -75,11 +77,16 @@ func (a *application) installCommand() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			credentials, err := config.WriteInstallation(paths, options, assets.Compose)
-			if err != nil {
-				if errors.Is(err, config.ErrAlreadyInstalled) {
-					return fmt.Errorf("%w: %s; use cocola start", err, paths.Home)
+			var credentials config.Credentials
+			err = withOperationLock(paths, "cocola install", func() error {
+				var writeErr error
+				credentials, writeErr = config.WriteInstallation(paths, options, assets.Compose)
+				if errors.Is(writeErr, config.ErrAlreadyInstalled) {
+					return fmt.Errorf("%w: %s; rerun cocola install to prepare an upgrade", writeErr, paths.Home)
 				}
+				return writeErr
+			})
+			if err != nil {
 				return err
 			}
 			printer := a.printer()

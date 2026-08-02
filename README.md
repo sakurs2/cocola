@@ -77,8 +77,9 @@ curl -fsSL https://raw.githubusercontent.com/sakurs2/cocola/master/scripts/insta
 cocola start
 ```
 
-首次启动会检查 Docker、Compose、端口和磁盘空间，拉取固定版本镜像并等待服务健康。正常的
-停止后恢复会直接复用本地镜像，不依赖 Registry 在线。
+首次启动会检查 Docker、Compose、端口和磁盘空间，提前拉取服务与沙箱运行时的固定版本镜像，
+并等待 Sandbox Manager、Agent Runtime 和 Web 等服务健康。正常停止后恢复会直接复用本地
+镜像，不依赖 Registry 在线。
 
 **3. 配置模型**
 
@@ -103,7 +104,9 @@ cocola stop
 
 安装指定版本、使用外部 OpenSandbox 或进行非交互部署，请查看 [Cocola CLI 文档](./docs/cli.md)。
 升级时重新执行同一条安装命令即可：CLI 会保留现有账号、端口、Secret 和自定义配置，生成
-升级备份并迁移部署文件；随后运行 `cocola start` 应用新版本，失败时自动恢复上一版配置。
+升级备份并迁移部署文件；随后运行 `cocola start` 应用新版本。失败时会自动恢复上一版配置，
+并分别提示如何恢复旧版或重新尝试升级。`cocola doctor` 可只读检查服务健康、磁盘、数据卷、
+PostgreSQL 凭据和必需镜像。
 
 ## 系统架构
 

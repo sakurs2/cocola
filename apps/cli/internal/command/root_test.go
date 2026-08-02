@@ -9,6 +9,7 @@ import (
 	"testing"
 
 	"github.com/cocola-project/cocola/apps/cli/internal/config"
+	"github.com/cocola-project/cocola/apps/cli/internal/operationlock"
 	"github.com/cocola-project/cocola/apps/cli/internal/ui"
 )
 
@@ -223,5 +224,31 @@ func TestInstallHelpKeepsInteractiveFlowPrimary(t *testing.T) {
 	flag := command.Flags().Lookup("yes")
 	if flag == nil || !flag.Hidden {
 		t.Fatal("the unattended compatibility flag must stay out of the default install help")
+	}
+}
+
+func TestMutatingCommandsRespectInstallationOperationLock(t *testing.T) {
+	home := filepath.Join(t.TempDir(), "cocola")
+	var output, errors bytes.Buffer
+	if err := Execute(context.Background(), []string{
+		"install", "--home", home, "--yes", "--admin-password", "test-password",
+	}, IO{In: &bytes.Buffer{}, Out: &output, Err: &errors}); err != nil {
+		t.Fatal(err)
+	}
+	lock, err := operationlock.Acquire(home, "cocola start")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer lock.Close()
+	for _, command := range []string{"install", "start", "stop"} {
+		output.Reset()
+		errors.Reset()
+		err := Execute(context.Background(), []string{command, "--home", home}, IO{
+			In: &bytes.Buffer{}, Out: &output, Err: &errors,
+		})
+		if err == nil || !strings.Contains(err.Error(), "another Cocola operation") ||
+			!strings.Contains(err.Error(), "cocola start") {
+			t.Fatalf("%s error = %v", command, err)
+		}
 	}
 }

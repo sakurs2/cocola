@@ -35,7 +35,7 @@ cocola start                   校验环境并创建、更新或恢复服务
 cocola stop                    停止服务但保留容器和网络
 cocola status                  查看容器状态
 cocola logs [-f] [service]     查看全部或单个服务日志
-cocola doctor                  检查 Docker、Compose 和安装配置
+cocola doctor                  检查服务、磁盘、数据卷、镜像和安装配置
 cocola version                 查看 CLI 构建版本
 ```
 
@@ -60,6 +60,7 @@ OpenSandbox 时，必须同时提供一个从远端 sandbox 可达的 LLM Gatewa
 ├── compose.yaml    CLI 内嵌的正式 Compose（含 OpenSandbox 配置），不依赖源码目录
 ├── config.env      0600，镜像、端口和生成的 Secret
 ├── state.json      0600，CLI 管理状态
+├── .operation.lock install/start/stop 的安装目录级操作锁
 ├── backups/        升级前的部署文件与 PostgreSQL 备份
 └── sandboxes/      OpenSandbox Docker runtime 的宿主目录
 ```
@@ -70,10 +71,18 @@ OpenSandbox 时，必须同时提供一个从远端 sandbox 可达的 LLM Gatewa
 继续使用同一个 `--home`，或设置 `COCOLA_HOME`。
 
 `cocola start` 是唯一启动入口：它会检查 Docker、Compose、部署配置、首次启动端口和基本
-磁盘空间。首次启动或待应用升级时会拉取目标镜像；Registry 不可用但所有目标镜像已缓存时
-继续启动。普通 `stop` 后恢复不会强制访问 Registry。随后通过 Compose `up --wait` 创建缺失
-容器、重建配置或镜像发生变化的服务、恢复已停止容器，并等待包含 Web HTTP 探针在内的健康
+磁盘空间。首次启动或待应用升级时会拉取 Compose 服务镜像，以及 Managed OpenSandbox 使用的
+Sandbox Runtime、execd 和 egress 镜像；Registry 不可用但所有目标镜像已缓存时继续启动。普通
+`stop` 后恢复不会强制访问 Registry。首次启动发现已有 PostgreSQL 数据卷时，会先验证当前配置
+能否通过密码认证：兼容的中途安装继续启动，不兼容的遗留卷会停止并给出保留或清理数据的明确
+指引，CLI 不会自动删除数据。随后通过 Compose `up --wait` 创建缺失容器、重建配置或镜像发生
+变化的服务、恢复已停止容器，并等待包含 Sandbox Manager、Agent Runtime 和 Web 在内的健康
 检查通过。成功页会显示 Web、Admin 和模型配置入口；失败页会展示当前容器状态及诊断命令。
+
+`install`、`start` 和 `stop` 在同一个安装目录上串行执行。如果另一个变更操作正在运行，CLI
+会显示其命令、PID 和开始时间并立即退出；`status`、`logs` 和只读的 `doctor` 仍可用于观察。
+`doctor` 会检查容器状态、数据卷、当前 PostgreSQL 凭据、本地镜像缓存、安装目录磁盘和可见的
+Docker Root Dir，不会启动容器、拉取镜像或删除资源。
 
 ## 升级
 
@@ -91,8 +100,9 @@ cocola start
 
 应用升级时，如果当前安装已有 PostgreSQL 数据卷，`start` 会先生成 owner-only 的
 `postgres.dump`，再拉取和启动目标版本。目标版本拉取或健康检查失败时，CLI 会恢复旧部署
-文件，但不会在失败处理过程中继续编排容器；检查报错后运行 `cocola start` 即可显式恢复上
-一版本。数据库 dump 不会被自动还原，数据库备份和部署备份始终保留，供人工恢复。第三方
+文件，但不会在失败处理过程中继续编排容器。失败输出会分别给出 `cocola start` 恢复上一版，
+以及重新执行 `cocola install --version <target>` 后再 `cocola start` 重试目标升级的命令。
+数据库 dump 不会被自动还原，数据库备份和部署备份始终保留，供人工恢复。第三方
 基础镜像使用固定版本，避免一次普通重启隐式升级 Redis、PostgreSQL、MinIO 或 OpenSandbox。
 
 `cocola stop` 会先停止 Web、Gateway 和 Agent Runtime，避免产生新任务；Sandbox Manager
