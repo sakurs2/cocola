@@ -58,6 +58,7 @@ async function refreshAuthenticatedUser(userID: string): Promise<CocolaLoginUser
 }
 
 export const { handlers, auth, signIn, signOut, unstable_update } = NextAuth({
+  trustHost: true,
   session: { strategy: "jwt" },
   pages: { signIn: "/login" },
   providers: [

@@ -14,6 +14,10 @@ test("auth policy invalidates legacy sessions and accepts only versioned user id
   assert.equal(authTokenUserID({ id: " user-1 ", authVersion: AUTH_SESSION_VERSION }), "user-1");
 });
 
+test("Auth.js trusts the browser-facing host in self-hosted deployments", () => {
+  assert.match(authSource, /NextAuth\(\{\s*trustHost: true,/);
+});
+
 test("Auth.js update refreshes from the trusted token id without reading client user fields", () => {
   const jwtCallback = authSource.slice(
     authSource.indexOf("async jwt("),
