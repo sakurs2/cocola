@@ -251,9 +251,6 @@ func githubManifest(origin, appName string) map[string]any {
 		"setup_on_update":          true,
 		"request_oauth_on_install": false,
 		"public":                   false,
-		"hook_attributes": map[string]any{
-			"url": origin + "/connectors/github/webhooks/disabled", "active": false,
-		},
 		"default_permissions": map[string]string{
 			"actions": "write", "administration": "write", "checks": "write",
 			"contents": "write", "deployments": "write", "environments": "write",
@@ -261,7 +258,7 @@ func githubManifest(origin, appName string) map[string]any {
 			"pages": "write", "pull_requests": "write", "repository_hooks": "write",
 			"secret_scanning_alerts": "write", "secrets": "write",
 			"security_events": "write", "statuses": "write", "vulnerability_alerts": "write",
-			"variables": "write", "workflows": "write",
+			"actions_variables": "write", "workflows": "write",
 		},
 	}
 }

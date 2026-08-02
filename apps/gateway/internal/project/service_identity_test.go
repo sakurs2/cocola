@@ -118,17 +118,22 @@ func TestPrepareTaskBaseReusesImmutableWorkspaceBase(t *testing.T) {
 	}
 }
 
-func TestGitHubManifestIncludesOAuthCallbackAndDisabledWebhookURL(t *testing.T) {
-	manifest := githubManifest("https://cocola.example", "Cocola Alice")
+func TestGitHubManifestIncludesOAuthCallbackAndSupportedPermissions(t *testing.T) {
+	manifest := githubManifest("http://localhost:3000", "Cocola Alice")
 	if got := manifest["callback_urls"]; !reflect.DeepEqual(got, []string{
-		"https://cocola.example/connectors/github/oauth/callback",
+		"http://localhost:3000/connectors/github/oauth/callback",
 	}) {
 		t.Fatalf("callback_urls = %#v", got)
 	}
-	hook, ok := manifest["hook_attributes"].(map[string]any)
-	if !ok || hook["active"] != false || hook["url"] !=
-		"https://cocola.example/connectors/github/webhooks/disabled" {
-		t.Fatalf("hook_attributes = %#v", manifest["hook_attributes"])
+	if _, ok := manifest["hook_attributes"]; ok {
+		t.Fatalf("hook_attributes must be omitted when Cocola does not consume GitHub App webhooks")
+	}
+	permissions, ok := manifest["default_permissions"].(map[string]string)
+	if !ok || permissions["actions_variables"] != "write" {
+		t.Fatalf("default_permissions = %#v", manifest["default_permissions"])
+	}
+	if _, ok := permissions["variables"]; ok {
+		t.Fatalf("default_permissions contains unsupported variables permission")
 	}
 }
 
