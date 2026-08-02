@@ -16,3 +16,11 @@ func TestComposeDoesNotDeployOpenViking(t *testing.T) {
 		}
 	}
 }
+
+func TestComposeStopsMinIOSecretFlagParsing(t *testing.T) {
+	// Generated URL-safe secrets may begin with a hyphen. The explicit argument
+	// terminator keeps mc from interpreting that secret as a command flag.
+	if !bytes.Contains(Compose, []byte("mc alias set -- local")) {
+		t.Fatal("production compose must terminate mc flags before positional credentials")
+	}
+}
