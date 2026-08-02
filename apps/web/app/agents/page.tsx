@@ -1,7 +1,7 @@
 "use client";
 
 import * as Dialog from "@radix-ui/react-dialog";
-import { ArrowRight, Blocks, Bot, CircleCheck, Loader2, Plus, X } from "lucide-react";
+import { ArrowRight, Blocks, Bot, Check, CircleCheck, Loader2, Plus, X } from "lucide-react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useEffect, useMemo, useState, type FormEvent } from "react";
@@ -11,6 +11,8 @@ import { Label } from "@/components/ui/label";
 import { ModelIcon } from "@/components/ui/model-icon";
 import { ModelSelectControl } from "@/components/ui/model-select-control";
 import {
+  AGENT_AVATAR_COLORS,
+  AGENT_AVATAR_KEYS,
   DEFAULT_AGENT_AVATAR_COLOR,
   DEFAULT_AGENT_AVATAR_KEY,
   agentResponseError,
@@ -22,6 +24,18 @@ import {
   type AgentProfile,
   type AgentSkillCatalogItem,
 } from "@/lib/agents";
+import { cn } from "@/lib/utils";
+
+const COLOR_SWATCHES: Record<string, string> = {
+  slate: "bg-slate-500",
+  blue: "bg-blue-500",
+  cyan: "bg-cyan-500",
+  emerald: "bg-emerald-500",
+  amber: "bg-amber-500",
+  orange: "bg-orange-500",
+  rose: "bg-rose-500",
+  violet: "bg-violet-500",
+};
 
 export default function AgentsPage() {
   const router = useRouter();
@@ -36,6 +50,8 @@ export default function AgentsPage() {
   const [name, setName] = useState("");
   const [description, setDescription] = useState("");
   const [modelID, setModelID] = useState("");
+  const [avatarKey, setAvatarKey] = useState<string>(DEFAULT_AGENT_AVATAR_KEY);
+  const [avatarColor, setAvatarColor] = useState<string>(DEFAULT_AGENT_AVATAR_COLOR);
   const [error, setError] = useState("");
 
   useEffect(() => {
@@ -136,8 +152,8 @@ export default function AgentsPage() {
           name: name.trim(),
           description: description.trim(),
           instructions: "",
-          avatar_key: DEFAULT_AGENT_AVATAR_KEY,
-          avatar_color: DEFAULT_AGENT_AVATAR_COLOR,
+          avatar_key: avatarKey,
+          avatar_color: avatarColor,
           runtime_id: runtimeID,
           model_route_id: selectedModel.id,
           model_alias: selectedModel.alias,
@@ -154,6 +170,16 @@ export default function AgentsPage() {
     } finally {
       setCreating(false);
     }
+  };
+
+  const openCreateDialog = () => {
+    setError("");
+    setName("");
+    setDescription("");
+    setAvatarKey(DEFAULT_AGENT_AVATAR_KEY);
+    setAvatarColor(DEFAULT_AGENT_AVATAR_COLOR);
+    setModelID(models.find((model) => model.isDefault)?.id ?? models[0]?.id ?? "");
+    setCreateOpen(true);
   };
 
   const hasAgents = !loading && agents.length > 0;
@@ -176,10 +202,7 @@ export default function AgentsPage() {
           </div>
           <button
             type="button"
-            onClick={() => {
-              setError("");
-              setCreateOpen(true);
-            }}
+            onClick={openCreateDialog}
             disabled={catalogLoading || !runtimeID || models.length === 0}
             className="user-accent-btn inline-flex h-11 items-center gap-2 rounded-xl px-4 text-sm font-semibold disabled:cursor-not-allowed disabled:opacity-50"
           >
@@ -235,10 +258,7 @@ export default function AgentsPage() {
             </p>
             <button
               type="button"
-              onClick={() => {
-                setError("");
-                setCreateOpen(true);
-              }}
+              onClick={openCreateDialog}
               disabled={catalogLoading || !runtimeID || models.length === 0}
               className="user-accent-btn mt-4 inline-flex h-11 items-center gap-2 rounded-xl px-4 text-sm font-semibold disabled:cursor-not-allowed disabled:opacity-50"
             >
@@ -325,14 +345,10 @@ export default function AgentsPage() {
       <Dialog.Root open={createOpen} onOpenChange={(next) => !creating && setCreateOpen(next)}>
         <Dialog.Portal>
           <Dialog.Overlay className="fixed inset-0 z-[70] bg-slate-950/30 backdrop-blur-[2px]" />
-          <Dialog.Content className="cocola-user-ui user-theme-cyan fixed left-1/2 top-1/2 z-[71] w-[calc(100%-2rem)] max-w-lg -translate-x-1/2 -translate-y-1/2 rounded-2xl border border-border bg-background p-5 text-foreground shadow-2xl outline-none">
+          <Dialog.Content className="cocola-user-ui user-theme-cyan fixed left-1/2 top-1/2 z-[71] max-h-[calc(100vh-2rem)] w-[calc(100%-2rem)] max-w-lg -translate-x-1/2 -translate-y-1/2 overflow-y-auto rounded-2xl border border-border bg-background p-5 text-foreground shadow-2xl outline-none">
             <form onSubmit={(event) => void createAgent(event)}>
               <div className="flex items-start gap-3">
-                <AgentAvatar
-                  avatarKey={DEFAULT_AGENT_AVATAR_KEY}
-                  avatarColor={DEFAULT_AGENT_AVATAR_COLOR}
-                  className="size-10"
-                />
+                <AgentAvatar avatarKey={avatarKey} avatarColor={avatarColor} className="size-10" />
                 <div className="min-w-0 flex-1">
                   <div className="user-eyebrow">New</div>
                   <Dialog.Title className="text-base font-semibold">Create an Agent</Dialog.Title>
@@ -373,6 +389,59 @@ export default function AgentsPage() {
                     onChange={(event) => setDescription(event.target.value)}
                     placeholder="Analyzes business data and explains findings clearly"
                   />
+                </div>
+                <div className="space-y-2">
+                  <Label>Icon</Label>
+                  <div className="flex flex-wrap gap-2">
+                    {AGENT_AVATAR_KEYS.map((key) => (
+                      <button
+                        key={key}
+                        type="button"
+                        aria-label={`Use ${key} icon`}
+                        aria-pressed={avatarKey === key}
+                        onClick={() => setAvatarKey(key)}
+                        style={
+                          avatarKey === key
+                            ? { boxShadow: "0 0 0 2px var(--page-accent-focus)" }
+                            : undefined
+                        }
+                        className="rounded-xl p-1.5 transition hover:bg-muted"
+                      >
+                        <AgentAvatar
+                          avatarKey={key}
+                          avatarColor={avatarColor}
+                          className="size-8 rounded-lg"
+                        />
+                      </button>
+                    ))}
+                  </div>
+                </div>
+                <div className="space-y-2">
+                  <Label>Color</Label>
+                  <div className="flex flex-wrap gap-2">
+                    {AGENT_AVATAR_COLORS.map((color) => (
+                      <button
+                        key={color}
+                        type="button"
+                        aria-label={`Use ${color} color`}
+                        aria-pressed={avatarColor === color}
+                        onClick={() => setAvatarColor(color)}
+                        className={cn(
+                          "grid size-8 place-items-center rounded-full ring-2 ring-transparent ring-offset-2 ring-offset-background transition",
+                          avatarColor === color && "ring-foreground/35",
+                        )}
+                      >
+                        <span
+                          className={cn(
+                            "grid size-6 place-items-center rounded-full",
+                            COLOR_SWATCHES[color],
+                          )}
+                        >
+                          {avatarColor === color ? <Check className="size-3.5 text-white" /> : null}
+                        </span>
+                      </button>
+                    ))}
+                  </div>
                 </div>
                 <div className="space-y-1.5">
                   <Label htmlFor="agent-model">Model</Label>

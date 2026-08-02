@@ -1,6 +1,6 @@
 "use client";
 
-import { Archive, ArrowLeft, Check, Loader2, Play, Save } from "lucide-react";
+import { Archive, ArrowLeft, Check, Loader2, Save } from "lucide-react";
 import Link from "next/link";
 import { useParams, useRouter } from "next/navigation";
 import { useEffect, useMemo, useState } from "react";
@@ -219,11 +219,6 @@ export default function AgentPage() {
     }
   };
 
-  const testAgent = () => {
-    if (!agent || dirty) return;
-    window.open(`/?agent=${encodeURIComponent(agent.id)}`, "_blank", "noopener,noreferrer");
-  };
-
   if (loading) {
     return (
       <main className="user-canvas user-page user-theme-cyan grid h-full min-w-0 flex-1 place-items-center text-muted-foreground">
@@ -274,16 +269,6 @@ export default function AgentPage() {
           <div className="flex items-center gap-2">
             <button
               type="button"
-              onClick={testAgent}
-              disabled={dirty}
-              title={dirty ? "Save changes before testing this Agent." : "Open a new Agent chat"}
-              className="inline-flex h-11 items-center gap-2 rounded-xl border border-border bg-background px-4 text-sm font-semibold transition hover:bg-muted/40 disabled:cursor-not-allowed disabled:opacity-50"
-            >
-              <Play className="size-4" />
-              Test Agent
-            </button>
-            <button
-              type="button"
               onClick={() => void save()}
               disabled={
                 saving ||
@@ -295,8 +280,14 @@ export default function AgentPage() {
               }
               className="user-accent-btn inline-flex h-11 items-center gap-2 rounded-xl px-4 text-sm font-semibold disabled:cursor-not-allowed disabled:opacity-50"
             >
-              {saving ? <Loader2 className="size-4 animate-spin" /> : <Save className="size-4" />}
-              {saving ? "Saving…" : "Save"}
+              {saving ? (
+                <Loader2 className="size-4 animate-spin" />
+              ) : dirty ? (
+                <Save className="size-4" />
+              ) : (
+                <Check className="size-4" />
+              )}
+              {saving ? "Saving…" : dirty ? "Save" : "Saved"}
             </button>
           </div>
         </header>

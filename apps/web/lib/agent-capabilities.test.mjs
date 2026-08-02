@@ -12,6 +12,7 @@ const agentPageSource = readFileSync(
   new URL("../app/agents/[id]/page.tsx", import.meta.url),
   "utf8",
 );
+const globalsSource = readFileSync(new URL("../app/globals.css", import.meta.url), "utf8");
 const chatPageSource = readFileSync(new URL("../app/page.tsx", import.meta.url), "utf8");
 const threadSource = readFileSync(
   new URL("../components/assistant-ui/thread.tsx", import.meta.url),
@@ -79,11 +80,28 @@ test("Agent selection hides global starters while global starters only fill the 
   assert.doesNotMatch(threadSource, /<ThreadPrimitive\.Suggestion/);
 });
 
-test("Test Agent opens a fresh preselected chat only for saved changes", () => {
-  assert.match(agentPageSource, /if \(!agent \|\| dirty\) return/);
-  assert.match(agentPageSource, /window\.open\(`\/\?agent=\$\{encodeURIComponent\(agent\.id\)\}`/);
-  assert.match(agentPageSource, /Save changes before testing this Agent\./);
+test("Agent editor omits the removed test action and identifies an already-saved default icon", () => {
+  assert.doesNotMatch(agentPageSource, /Test Agent|testAgent|window\.open/);
+  assert.match(agentPageSource, /dirty \? "Save" : "Saved"/);
   assert.match(chatPageSource, /get\("agent"\)/);
   assert.match(chatPageSource, /This Agent is unavailable\. Standard chat is ready instead\./);
-  assert.doesNotMatch(agentPageSource, /autoSend|sendMessage|composer\.send/);
+});
+
+test("Agent creation saves the selected icon and color, including the defaults", () => {
+  assert.match(agentListSource, /useState<string>\(DEFAULT_AGENT_AVATAR_KEY\)/);
+  assert.match(agentListSource, /useState<string>\(DEFAULT_AGENT_AVATAR_COLOR\)/);
+  assert.match(agentListSource, /AGENT_AVATAR_KEYS\.map/);
+  assert.match(agentListSource, /AGENT_AVATAR_COLORS\.map/);
+  assert.match(agentListSource, /avatar_key: avatarKey/);
+  assert.match(agentListSource, /avatar_color: avatarColor/);
+  assert.match(agentListSource, /max-h-\[calc\(100vh-2rem\)\].*overflow-y-auto/);
+});
+
+test("Agent list, create dialog, and editor use a flat primary button color", () => {
+  const cyanTheme = globalsSource.match(/\.cocola-user-ui \.user-theme-cyan,[\s\S]*?\n\}/)?.[0];
+  assert.ok(cyanTheme, "cyan user theme not found");
+  assert.match(cyanTheme, /--page-accent-grad:\s*#0891b2;/);
+  assert.doesNotMatch(cyanTheme, /linear-gradient/);
+  assert.match(agentListSource, /className="user-accent-btn/);
+  assert.match(agentPageSource, /className="user-accent-btn/);
 });

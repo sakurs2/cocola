@@ -2990,7 +2990,7 @@
 .cocola-user-ui.user-theme-cyan {
   --page-accent: #0891b2;
   --page-accent-2: #22d3ee;
-  --page-accent-grad: linear-gradient(135deg, #0891b2, #22d3ee);
+  --page-accent-grad: #0891b2;
   --page-accent-soft: #ecfeff;
   --page-accent-ink: #0e7490;
   --page-accent-border: #a5f0fc;
