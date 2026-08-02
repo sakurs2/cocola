@@ -263,6 +263,8 @@ services:
     image: "${COCOLA_IMAGE_REGISTRY}/cocola-gateway:${COCOLA_VERSION}"
     restart: unless-stopped
     depends_on:
+      sandbox-manager:
+        condition: service_healthy
       agent-runtime:
         condition: service_healthy
       postgres:
@@ -277,6 +279,7 @@ services:
       COCOLA_AGENT_MAX_TURNS: "${COCOLA_AGENT_MAX_TURNS:-200}"
       COCOLA_AGENT_TOOL_STEP_TIMEOUT_SECS: "${COCOLA_AGENT_TOOL_STEP_TIMEOUT_SECS:-600}"
       COCOLA_SANDBOX_TOKEN_TTL_SECONDS: "${COCOLA_SANDBOX_TOKEN_TTL_SECONDS:-604800}"
+      COCOLA_SANDBOX_ADDR: sandbox-manager:50051
       COCOLA_AUTH_SECRET: "${COCOLA_AUTH_SECRET}"
       COCOLA_ADMIN_URL: "http://admin-api:8090"
       COCOLA_PG_DSN: "postgres://cocola:${COCOLA_PG_PASSWORD}@postgres:5432/cocola?sslmode=disable"

@@ -47,6 +47,23 @@ func TestComposeWaitsForSandboxManagerReadiness(t *testing.T) {
 	}
 }
 
+func TestComposeConfiguresGatewayTerminalResolver(t *testing.T) {
+	start := bytes.Index(Compose, []byte("  gateway:\n"))
+	end := bytes.Index(Compose, []byte("  web:\n"))
+	if start < 0 || end <= start {
+		t.Fatal("production compose gateway service block is missing")
+	}
+	gateway := Compose[start:end]
+	for _, required := range [][]byte{
+		[]byte("sandbox-manager:\n        condition: service_healthy"),
+		[]byte("COCOLA_SANDBOX_ADDR: sandbox-manager:50051"),
+	} {
+		if !bytes.Contains(gateway, required) {
+			t.Fatalf("production gateway terminal resolver is not configured: missing %q", required)
+		}
+	}
+}
+
 func TestComposeAuthenticatesPostgreSQLHealthChecks(t *testing.T) {
 	for _, required := range [][]byte{
 		[]byte("PGPASSWORD=$$POSTGRES_PASSWORD"),
