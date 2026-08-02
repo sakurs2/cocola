@@ -274,9 +274,9 @@ func main() {
 		log.Sugar().Warnw("sandbox node manager disabled", "err", err)
 	} else if nodeMgr != nil {
 		svc.WithSandboxNodeManager(nodeMgr)
-		log.Info("sandbox node manager enabled (Kubernetes REST)")
+		log.Info("sandbox node manager enabled")
 	} else {
-		log.Warn("sandbox node manager DISABLED (no Kubernetes config)")
+		log.Warn("sandbox node manager DISABLED (no runtime data source)")
 	}
 	// The loop is always present; scheduler.enabled is the single hot-reloadable
 	// control for pausing and resuming due-task execution.

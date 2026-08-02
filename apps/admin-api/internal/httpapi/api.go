@@ -403,6 +403,8 @@ func mapErr(w http.ResponseWriter, err error) {
 		writeErr(w, http.StatusServiceUnavailable, "STORAGE_UNAVAILABLE", err.Error())
 	case errors.Is(err, service.ErrStorageUnsupported):
 		writeErr(w, http.StatusUnprocessableEntity, "STORAGE_UNSUPPORTED", err.Error())
+	case errors.Is(err, service.ErrNodeOperationUnsupported):
+		writeErr(w, http.StatusConflict, "NODE_OPERATION_UNAVAILABLE", "node operations are unavailable in single-node compose mode")
 	case errors.Is(err, service.ErrSandboxRuntimeNotConfigured):
 		writeErr(w, http.StatusNotImplemented, "NOT_CONFIGURED", err.Error())
 	default:

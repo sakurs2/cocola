@@ -80,3 +80,17 @@ func TestMapWorkspaceProbeError(t *testing.T) {
 		t.Fatalf("infrastructure error mapped to %v", got)
 	}
 }
+
+func TestHostSessionPathMatchesOpenSandboxVolumeContract(t *testing.T) {
+	got := hostSessionPath("User/1", "Sess..1")
+	want := "users/user-1-51cfd6db4a9e/sessions/sess-1-bd6d16b7bc05"
+	if got != want {
+		t.Fatalf("hostSessionPath() = %q, want %q", got, want)
+	}
+	if !validHostSessionPath(got) {
+		t.Fatalf("generated host Session path is invalid: %q", got)
+	}
+	if hostStorageID(got) == hostStorageID(got+"-other") {
+		t.Fatal("host storage IDs must be path-specific")
+	}
+}

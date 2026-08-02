@@ -119,7 +119,19 @@ type postgresSessionStorageMonitor struct {
 }
 
 func NewSessionStorageMonitorFromEnv(ctx context.Context) (SessionStorageMonitor, error) {
-	if strings.ToLower(strings.TrimSpace(os.Getenv("COCOLA_CLUSTER_MANAGER_MODE"))) != "k3s" {
+	mode := strings.ToLower(strings.TrimSpace(os.Getenv("COCOLA_CLUSTER_MANAGER_MODE")))
+	if mode == "compose" {
+		dsn := strings.TrimSpace(os.Getenv("COCOLA_PG_DSN"))
+		if dsn == "" {
+			return nil, errors.New("session storage monitor: COCOLA_PG_DSN is required")
+		}
+		host, ok := newHostAgentClientFromEnv()
+		if !ok {
+			return nil, errors.New("session storage monitor: COCOLA_HOST_AGENT_URL is required in compose mode")
+		}
+		return newHostSessionStorageMonitor(ctx, dsn, host)
+	}
+	if mode != "k3s" {
 		return nil, nil
 	}
 	dsn := strings.TrimSpace(os.Getenv("COCOLA_PG_DSN"))

@@ -1,7 +1,9 @@
 package main
 
 import (
+	"bytes"
 	"context"
+	"encoding/binary"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -13,6 +15,114 @@ import (
 	"testing"
 	"time"
 )
+
+type fakeDockerAPI struct {
+	info       dockerInfo
+	containers map[string]string
+	logs       map[string][]byte
+}
+
+func (f *fakeDockerAPI) Info(context.Context) (dockerInfo, error) { return f.info, nil }
+
+func (f *fakeDockerAPI) ContainerForService(_ context.Context, _, service string) (string, error) {
+	return f.containers[service], nil
+}
+
+func (f *fakeDockerAPI) Logs(_ context.Context, containerID string, _ int) ([]byte, error) {
+	return f.logs[containerID], nil
+}
+
+func TestHostAgentAuthSessionRootsAndDeletion(t *testing.T) {
+	root := t.TempDir()
+	session := filepath.Join(root, "users", "user-a", "sessions", "session-a")
+	if err := os.MkdirAll(session, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	probe, err := newProbeServer(root, "local", time.Second)
+	if err != nil {
+		t.Fatal(err)
+	}
+	probe.hostAgentKey = "secret"
+
+	unauthorized := httptest.NewRecorder()
+	probe.handler().ServeHTTP(unauthorized, httptest.NewRequest(http.MethodGet, "/v1/session-roots", nil))
+	if unauthorized.Code != http.StatusUnauthorized {
+		t.Fatalf("unauthorized status = %d", unauthorized.Code)
+	}
+
+	list := httptest.NewRecorder()
+	listRequest := httptest.NewRequest(http.MethodGet, "/v1/session-roots", nil)
+	listRequest.Header.Set(hostAgentKeyHeader, "secret")
+	probe.handler().ServeHTTP(list, listRequest)
+	if list.Code != http.StatusOK || !strings.Contains(list.Body.String(), "users/user-a/sessions/session-a") {
+		t.Fatalf("session roots = %d %s", list.Code, list.Body.String())
+	}
+
+	deleteRecorder := httptest.NewRecorder()
+	deleteRequest := httptest.NewRequest(http.MethodDelete, "/v1/session-root?path=users/user-a/sessions/session-a", nil)
+	deleteRequest.Header.Set(hostAgentKeyHeader, "secret")
+	probe.handler().ServeHTTP(deleteRecorder, deleteRequest)
+	if deleteRecorder.Code != http.StatusNoContent {
+		t.Fatalf("delete status = %d %s", deleteRecorder.Code, deleteRecorder.Body.String())
+	}
+	if _, err := os.Stat(session); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("session root still exists: %v", err)
+	}
+}
+
+func TestHostAgentNodeAndComponentLogs(t *testing.T) {
+	root := t.TempDir()
+	probe, err := newProbeServer(root, "local", time.Second)
+	if err != nil {
+		t.Fatal(err)
+	}
+	probe.composeProject = "cocola"
+	probe.docker = &fakeDockerAPI{
+		info:       dockerInfo{Name: "docker-host", NCPU: 8, MemTotal: 16 << 30, OperatingSystem: "Linux"},
+		containers: map[string]string{"web": "web-id", "gateway": "gateway-id"},
+		logs:       map[string][]byte{"web-id": []byte("first\nsecond\n"), "gateway-id": []byte("gateway\n")},
+	}
+
+	node := httptest.NewRecorder()
+	probe.handler().ServeHTTP(node, httptest.NewRequest(http.MethodGet, "/v1/node", nil))
+	if node.Code != http.StatusOK {
+		t.Fatalf("node status = %d %s", node.Code, node.Body.String())
+	}
+	var nodeBody nodeInfoResponse
+	if err := json.Unmarshal(node.Body.Bytes(), &nodeBody); err != nil {
+		t.Fatal(err)
+	}
+	if nodeBody.Name != "local" || nodeBody.CPUCapacity != "8" || nodeBody.MemoryCapacity == "" ||
+		nodeBody.Labels["cocola.dev/docker-host"] != "docker-host" {
+		t.Fatalf("node response = %+v", nodeBody)
+	}
+
+	logs := httptest.NewRecorder()
+	probe.handler().ServeHTTP(logs, httptest.NewRequest(http.MethodGet, "/v1/component-logs?file=web.log&lines=1", nil))
+	if logs.Code != http.StatusOK {
+		t.Fatalf("logs status = %d %s", logs.Code, logs.Body.String())
+	}
+	var logsBody componentLogsResponse
+	if err := json.Unmarshal(logs.Body.Bytes(), &logsBody); err != nil {
+		t.Fatal(err)
+	}
+	if len(logsBody.Files) != 2 || logsBody.Selected != "web.log" || len(logsBody.Lines) != 1 || logsBody.Lines[0] != "second" {
+		t.Fatalf("logs response = %+v", logsBody)
+	}
+}
+
+func TestDemuxDockerStream(t *testing.T) {
+	frame := func(stream byte, payload string) []byte {
+		header := make([]byte, 8)
+		header[0] = stream
+		binary.BigEndian.PutUint32(header[4:], uint32(len(payload)))
+		return append(header, payload...)
+	}
+	raw := append(frame(1, "stdout\n"), frame(2, "stderr\n")...)
+	if got := demuxDockerStream(raw); !bytes.Equal(got, []byte("stdout\nstderr\n")) {
+		t.Fatalf("demux = %q", got)
+	}
+}
 
 func TestProbeReportsFilesystemAndDirectoryUsage(t *testing.T) {
 	root := t.TempDir()

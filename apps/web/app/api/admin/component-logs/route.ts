@@ -27,6 +27,11 @@ export async function GET(req: NextRequest) {
   const authResult = await requireAdmin();
   if (isAuthFail(authResult)) return authResult.response;
 
+  const hostAgentURL = process.env.COCOLA_HOST_AGENT_URL?.trim();
+  if (hostAgentURL) {
+    return readHostAgentLogs(req, hostAgentURL);
+  }
+
   const logDir = componentLogDir();
   const files = (
     await Promise.all(
@@ -58,6 +63,31 @@ export async function GET(req: NextRequest) {
   }
 
   return Response.json({ files, selected, lines });
+}
+
+async function readHostAgentLogs(req: NextRequest, baseURL: string) {
+  const incoming = new URL(req.url);
+  const query = new URLSearchParams();
+  const file = incoming.searchParams.get("file");
+  const lines = incoming.searchParams.get("lines");
+  if (file) query.set("file", file);
+  if (lines) query.set("lines", lines);
+  const headers = new Headers();
+  const key = process.env.COCOLA_HOST_AGENT_KEY?.trim() || process.env.COCOLA_ADMIN_KEY?.trim();
+  if (key) headers.set("x-cocola-admin-key", key);
+  try {
+    const response = await fetch(
+      `${baseURL.replace(/\/$/, "")}/v1/component-logs?${query.toString()}`,
+      { cache: "no-store", headers, signal: AbortSignal.timeout(15_000) },
+    );
+    const body = await response.arrayBuffer();
+    return new Response(body, {
+      status: response.status,
+      headers: { "content-type": response.headers.get("content-type") ?? "application/json" },
+    });
+  } catch {
+    return Response.json({ error: "Service logs are temporarily unavailable" }, { status: 502 });
+  }
 }
 
 function componentLogDir() {

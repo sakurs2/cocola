@@ -2,7 +2,10 @@ package service
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
+	"net/http"
+	"net/http/httptest"
 	"testing"
 	"time"
 
@@ -28,6 +31,39 @@ func TestNewSandboxNodeManagerFromEnvRequiresK3SMode(t *testing.T) {
 	}
 	if mgr == nil {
 		t.Fatalf("with k3s mode and kube API server manager should be enabled")
+	}
+}
+
+func TestNewSandboxNodeManagerFromEnvComposeMode(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/v1/node" || r.Header.Get(hostAgentKeyHeader) != "key" {
+			http.Error(w, "bad request", http.StatusBadRequest)
+			return
+		}
+		_ = json.NewEncoder(w).Encode(hostAgentNode{
+			Name: "local", Ready: true, CPUCapacity: "8", CPUAllocatable: "8",
+			MemoryCapacity: "1024Ki", MemoryAllocatable: "1024Ki",
+			Labels: map[string]string{"cocola.dev/runtime-mode": "compose"},
+		})
+	}))
+	defer server.Close()
+	t.Setenv("COCOLA_CLUSTER_MANAGER_MODE", "compose")
+	t.Setenv("COCOLA_HOST_AGENT_URL", server.URL)
+	t.Setenv("COCOLA_HOST_AGENT_KEY", "key")
+
+	mgr, err := NewSandboxNodeManagerFromEnv()
+	if err != nil {
+		t.Fatal(err)
+	}
+	nodes, err := mgr.ListNodes(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(nodes.Nodes) != 1 || nodes.Nodes[0].Name != "local" || !nodes.Nodes[0].Ready {
+		t.Fatalf("compose nodes = %+v", nodes.Nodes)
+	}
+	if _, err := mgr.DisableNode(context.Background(), "local"); !errors.Is(err, ErrNodeOperationUnsupported) {
+		t.Fatalf("compose node operation error = %v", err)
 	}
 }
 

@@ -280,14 +280,14 @@ export default function StoragePage() {
             <Metric
               label="Physical available"
               value={formatBytes(totals.availableBytes)}
-              detail="Available to local-path storage"
+              detail="Available to Session storage"
               tone={metricTone(capacityTone(totals.availableBytes, totals.totalBytes))}
               icon={<HardDrive />}
             />
             <Metric
               label="Session requests"
               value={formatBytes(totals.requestedBytes)}
-              detail={`${volumeTotal} PVCs · soft requests`}
+              detail={`${volumeTotal} volumes · soft requests`}
               tone="violet"
               icon={<Database />}
             />
@@ -297,14 +297,14 @@ export default function StoragePage() {
             <div>
               <h2 className="text-sm font-semibold">Node filesystems</h2>
               <p className="mt-0.5 text-xs text-muted-foreground">
-                Physical usage is read from the filesystem backing /var/lib/cocola/storage. It can
+                Physical usage is read from the filesystem backing Cocola Session storage. It can
                 include non-Session data on the same filesystem.
               </p>
             </div>
             {loading && nodes.length === 0 ? (
               <div className="admin-list-empty">Loading storage…</div>
             ) : nodes.length === 0 ? (
-              <div className="admin-list-empty">No Kubernetes nodes found</div>
+              <div className="admin-list-empty">No storage nodes found</div>
             ) : (
               <div className="grid gap-4 lg:grid-cols-2">
                 {nodes.map((node) => (
@@ -319,8 +319,8 @@ export default function StoragePage() {
               <div>
                 <h2 className="text-sm font-semibold">Session Storage</h2>
                 <p className="mt-0.5 text-xs text-muted-foreground">
-                  PVC requests are soft limits. Actual disk usage is measured only when you request
-                  it.
+                  Volume requests are soft limits. Actual disk usage is measured only when you
+                  request it.
                 </p>
               </div>
               {orphanCount > 0 ? (
@@ -342,7 +342,7 @@ export default function StoragePage() {
                   <div className="admin-list-cols" style={{ gridTemplateColumns: LIST_COLS }}>
                     <div>Session / User</div>
                     <div>Node</div>
-                    <div>PVC</div>
+                    <div>Volume</div>
                     <div>Generation</div>
                     <div>Requested (soft)</div>
                     <div>Actual usage</div>
@@ -363,7 +363,7 @@ export default function StoragePage() {
                         >
                           <div className="min-w-0">
                             <div className="admin-list-primary admin-list-mono">
-                              {volume.session_id || "Detached PVC"}
+                              {volume.session_id || "Detached volume"}
                             </div>
                             <div className="admin-list-sub">
                               {volume.user_id || "No database binding"}
@@ -376,7 +376,7 @@ export default function StoragePage() {
                             <div className="admin-list-mono">{volume.pvc_name}</div>
                             <AdminStatusBadge
                               className="mt-1"
-                              tone={volume.pvc_phase === "Bound" ? "green" : "amber"}
+                              tone={isAttachedVolume(volume) ? "green" : "amber"}
                               dot
                             >
                               {volume.pvc_phase}
@@ -410,7 +410,7 @@ export default function StoragePage() {
                             <button
                               type="button"
                               className="admin-card-btn"
-                              disabled={measuring === key || volume.pvc_phase !== "Bound"}
+                              disabled={measuring === key || !isAttachedVolume(volume)}
                               onClick={() => void measureVolume(volume)}
                             >
                               {measuring === key ? (
@@ -560,6 +560,10 @@ function NodeStorageCard({ node }: { node: NodeFilesystem }) {
 
 function volumeKey(volume: Pick<SessionVolume, "storage_id" | "pvc_name">) {
   return `${volume.storage_id}:${volume.pvc_name}`;
+}
+
+function isAttachedVolume(volume: Pick<SessionVolume, "pvc_phase">) {
+  return volume.pvc_phase === "Bound" || volume.pvc_phase === "Mounted";
 }
 
 function capacityTone(available: number, total: number): "green" | "amber" | "red" {

@@ -11,6 +11,7 @@ import (
 )
 
 var ErrNotConfigured = errors.New("service: sandbox node manager not configured")
+var ErrNodeOperationUnsupported = errors.New("service: node operation is unavailable in single-node compose mode")
 
 // SandboxNodeManager is the small operations surface cocola needs for k3s node
 // management. It intentionally does not expose scheduling primitives.
@@ -78,6 +79,12 @@ func (a *Admin) ListSandboxNodes(ctx context.Context) (SandboxNodeList, error) {
 		out.Nodes[i].SessionCount = nodeUsage.SessionCount
 		out.Nodes[i].SessionRequestedBytes = nodeUsage.RequestedBytes
 		out.Nodes[i].WorkspaceResetCount = nodeUsage.ResetCount
+		if out.Nodes[i].Labels["cocola.dev/runtime-mode"] == "compose" && a.sandboxRuntimes != nil {
+			runtimes, runtimeErr := a.sandboxRuntimes.ListSandboxes(ctx)
+			if runtimeErr == nil {
+				out.Nodes[i].SandboxPods = len(runtimes.Sandboxes)
+			}
+		}
 	}
 	return out, nil
 }
@@ -181,7 +188,15 @@ func (a *Admin) SandboxNodeJoinCommand(ctx context.Context) (JoinCommand, error)
 // NewSandboxNodeManagerFromEnv returns nil when Kubernetes configuration is not
 // present. This keeps admin-api's existing zero-dependency dev mode intact.
 func NewSandboxNodeManagerFromEnv() (SandboxNodeManager, error) {
-	if strings.ToLower(strings.TrimSpace(os.Getenv("COCOLA_CLUSTER_MANAGER_MODE"))) != "k3s" {
+	mode := strings.ToLower(strings.TrimSpace(os.Getenv("COCOLA_CLUSTER_MANAGER_MODE")))
+	if mode == "compose" {
+		host, ok := newHostAgentClientFromEnv()
+		if !ok {
+			return nil, errors.New("sandbox node manager: COCOLA_HOST_AGENT_URL is required in compose mode")
+		}
+		return &ComposeSandboxNodeManager{host: host}, nil
+	}
+	if mode != "k3s" {
 		return nil, nil
 	}
 	cfg, ok, err := kubeConfigFromEnv()
@@ -189,6 +204,43 @@ func NewSandboxNodeManagerFromEnv() (SandboxNodeManager, error) {
 		return nil, err
 	}
 	return NewKubeSandboxNodeManager(cfg), nil
+}
+
+type ComposeSandboxNodeManager struct {
+	host *hostAgentClient
+}
+
+func (m *ComposeSandboxNodeManager) ListNodes(ctx context.Context) (SandboxNodeList, error) {
+	info, err := m.host.Node(ctx)
+	if err != nil {
+		return SandboxNodeList{}, err
+	}
+	return SandboxNodeList{Nodes: []SandboxNode{{
+		Name: info.Name, Status: "active", Ready: info.Ready, Schedulable: true,
+		DiskPressure: info.DiskPressure, CPUCapacity: info.CPUCapacity,
+		MemoryCapacity: info.MemoryCapacity, CPUAllocatable: info.CPUAllocatable,
+		MemoryAllocatable: info.MemoryAllocatable, Reason: info.Reason, Labels: info.Labels,
+	}}}, nil
+}
+
+func (*ComposeSandboxNodeManager) DisableNode(context.Context, string) (SandboxNode, error) {
+	return SandboxNode{}, ErrNodeOperationUnsupported
+}
+
+func (*ComposeSandboxNodeManager) RestoreNode(context.Context, string) (SandboxNode, error) {
+	return SandboxNode{}, ErrNodeOperationUnsupported
+}
+
+func (*ComposeSandboxNodeManager) SetMaxSandboxPods(context.Context, string, *int) (SandboxNode, error) {
+	return SandboxNode{}, ErrNodeOperationUnsupported
+}
+
+func (*ComposeSandboxNodeManager) OfflineNode(context.Context, string, bool) (OfflineNodeResult, error) {
+	return OfflineNodeResult{}, ErrNodeOperationUnsupported
+}
+
+func (*ComposeSandboxNodeManager) JoinCommand(context.Context) (JoinCommand, error) {
+	return JoinCommand{Note: "Node onboarding is currently under development."}, nil
 }
 
 type KubeSandboxNodeManager struct {

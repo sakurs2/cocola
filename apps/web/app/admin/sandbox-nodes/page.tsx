@@ -221,7 +221,7 @@ export default function SandboxNodesPage() {
       <AdminPageHeader
         icon={<SandboxNodesPageIcon className="size-5" />}
         title="Nodes"
-        description="k3s node operations for OpenSandbox Kubernetes runtime"
+        description="Runtime capacity and node health for Cocola sandboxes"
         actions={
           <AdminRefreshButton
             variant="outline"
@@ -328,6 +328,7 @@ export default function SandboxNodesPage() {
                   {nodes.map((node) => {
                     const offlining = actingNode === `${node.name}:offline`;
                     const alreadyOffline = ["offline", "offline_pending"].includes(node.status);
+                    const composeNode = node.labels?.["cocola.dev/runtime-mode"] === "compose";
                     return (
                       <div
                         key={node.name}
@@ -379,27 +380,33 @@ export default function SandboxNodesPage() {
                           </AdminStatusBadge>
                         </div>
                         <div className="admin-list-cell">
-                          <div className="flex items-center justify-center gap-2">
-                            <span
-                              className={cn(
-                                "admin-list-mono",
-                                node.max_sandbox_pods == null
-                                  ? "text-muted-foreground"
-                                  : "text-foreground",
-                              )}
-                            >
-                              {node.max_sandbox_pods == null ? "Unlimited" : node.max_sandbox_pods}
-                            </span>
-                            <button
-                              type="button"
-                              className="admin-card-btn"
-                              disabled={Boolean(savingCapacity)}
-                              onClick={() => openCapacityDialog(node)}
-                            >
-                              <SlidersHorizontal className="size-3.5" />
-                              Edit
-                            </button>
-                          </div>
+                          {composeNode ? (
+                            <span className="admin-list-muted">Managed by Compose</span>
+                          ) : (
+                            <div className="flex items-center justify-center gap-2">
+                              <span
+                                className={cn(
+                                  "admin-list-mono",
+                                  node.max_sandbox_pods == null
+                                    ? "text-muted-foreground"
+                                    : "text-foreground",
+                                )}
+                              >
+                                {node.max_sandbox_pods == null
+                                  ? "Unlimited"
+                                  : node.max_sandbox_pods}
+                              </span>
+                              <button
+                                type="button"
+                                className="admin-card-btn"
+                                disabled={Boolean(savingCapacity)}
+                                onClick={() => openCapacityDialog(node)}
+                              >
+                                <SlidersHorizontal className="size-3.5" />
+                                Edit
+                              </button>
+                            </div>
+                          )}
                         </div>
                         <div
                           className="admin-list-cell admin-list-muted truncate"
@@ -408,7 +415,9 @@ export default function SandboxNodesPage() {
                           {node.reason || "—"}
                         </div>
                         <div className="flex items-center justify-center gap-2">
-                          {node.schedulable ? (
+                          {composeNode ? (
+                            <span className="admin-list-muted">Single-node runtime</span>
+                          ) : node.schedulable ? (
                             <button
                               type="button"
                               className="admin-card-btn"
@@ -429,20 +438,22 @@ export default function SandboxNodesPage() {
                               Restore
                             </button>
                           )}
-                          <button
-                            type="button"
-                            className="admin-card-btn admin-card-btn--danger"
-                            disabled={Boolean(actingNode) || alreadyOffline}
-                            title={alreadyOffline ? "Node is already offline" : undefined}
-                            onClick={() => void runNodeAction(node, "offline", false)}
-                          >
-                            {offlining ? (
-                              <LoaderCircle className="size-3.5 animate-spin" />
-                            ) : (
-                              <Power className="size-3.5" />
-                            )}
-                            {alreadyOffline ? "Offline" : offlining ? "Offlining…" : "Offline"}
-                          </button>
+                          {!composeNode ? (
+                            <button
+                              type="button"
+                              className="admin-card-btn admin-card-btn--danger"
+                              disabled={Boolean(actingNode) || alreadyOffline}
+                              title={alreadyOffline ? "Node is already offline" : undefined}
+                              onClick={() => void runNodeAction(node, "offline", false)}
+                            >
+                              {offlining ? (
+                                <LoaderCircle className="size-3.5 animate-spin" />
+                              ) : (
+                                <Power className="size-3.5" />
+                              )}
+                              {alreadyOffline ? "Offline" : offlining ? "Offlining…" : "Offline"}
+                            </button>
+                          ) : null}
                         </div>
                       </div>
                     );

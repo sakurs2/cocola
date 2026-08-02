@@ -472,11 +472,9 @@ const ConversationComposerInner: FC<{
                 runtimeConfigError
                   ? runtimeConfigError
                   : noModel
-                    ? selectedRuntime?.model_protocol === "openai-responses"
-                      ? "Codex requires an OpenAI Responses model"
-                      : selectedRuntime
-                        ? `No ${selectedRuntime.label} compatible model configured`
-                        : "No Agent Runtime available"
+                    ? selectedRuntime
+                      ? "No compatible model configured"
+                      : "No Agent Runtime available"
                     : pendingQuestion
                       ? "Reply to Claude…"
                       : interactionMode === "plan"

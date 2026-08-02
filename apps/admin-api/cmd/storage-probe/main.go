@@ -48,6 +48,9 @@ type probeServer struct {
 	measureSlot    chan struct{}
 	workspaceSlot  chan struct{}
 	now            func() time.Time
+	hostAgentKey   string
+	docker         dockerAPI
+	composeProject string
 }
 
 type filesystemResponse struct {
@@ -98,6 +101,15 @@ func (h *workspaceRootHandle) Close() {
 }
 
 func main() {
+	if len(os.Args) > 1 && os.Args[1] == "healthcheck" {
+		client := &http.Client{Timeout: 2 * time.Second}
+		response, err := client.Get("http://127.0.0.1:8095/healthz")
+		if err != nil || response.StatusCode != http.StatusOK {
+			os.Exit(1)
+		}
+		_ = response.Body.Close()
+		return
+	}
 	root := strings.TrimSpace(os.Getenv("COCOLA_STORAGE_ROOT"))
 	if root == "" {
 		root = defaultStorageRoot
@@ -111,6 +123,13 @@ func main() {
 	probe, err := newProbeServer(root, strings.TrimSpace(os.Getenv("COCOLA_NODE_NAME")), measureTimeout)
 	if err != nil {
 		log.Fatal(err)
+	}
+	probe.hostAgentKey = strings.TrimSpace(os.Getenv("COCOLA_HOST_AGENT_KEY"))
+	probe.composeProject = envOr("COCOLA_COMPOSE_PROJECT", "cocola")
+	if docker, err := newDockerClient(envOr("COCOLA_DOCKER_SOCKET", "/var/run/docker.sock")); err == nil {
+		probe.docker = docker
+	} else if probe.hostAgentKey != "" {
+		log.Printf("docker API unavailable: %v", err)
 	}
 
 	server := &http.Server{
@@ -160,14 +179,16 @@ func newProbeServer(root, nodeName string, measureTimeout time.Duration) (*probe
 
 func (s *probeServer) handler() http.Handler {
 	mux := http.NewServeMux()
-	mux.HandleFunc("GET /healthz", func(w http.ResponseWriter, _ *http.Request) {
-		writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})
-	})
+	mux.HandleFunc("GET /healthz", s.health)
 	mux.HandleFunc("GET /v1/filesystem", s.filesystem)
 	mux.HandleFunc("GET /v1/usage", s.usage)
 	mux.HandleFunc("GET /v1/workspace/entries", s.workspaceEntries)
 	mux.HandleFunc("GET /v1/workspace/file", s.workspaceFile)
-	return mux
+	mux.HandleFunc("GET /v1/session-roots", s.sessionRoots)
+	mux.HandleFunc("DELETE /v1/session-root", s.deleteSessionRoot)
+	mux.HandleFunc("GET /v1/node", s.nodeInfo)
+	mux.HandleFunc("GET /v1/component-logs", s.componentLogs)
+	return s.requireHostAgentKey(mux)
 }
 
 func (s *probeServer) filesystem(w http.ResponseWriter, _ *http.Request) {

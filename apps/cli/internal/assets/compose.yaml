@@ -113,6 +113,27 @@ services:
       timeout: 3s
       retries: 30
 
+  host-agent:
+    image: "${COCOLA_IMAGE_REGISTRY}/cocola-storage-probe:${COCOLA_VERSION}"
+    restart: unless-stopped
+    read_only: true
+    environment:
+      COCOLA_STORAGE_ROOT: /storage
+      COCOLA_NODE_NAME: local
+      COCOLA_HOST_AGENT_KEY: "${COCOLA_ADMIN_KEY}"
+      COCOLA_COMPOSE_PROJECT: cocola
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+      - "${COCOLA_SANDBOX_ROOT}:/storage"
+    cap_drop: ["ALL"]
+    security_opt:
+      - no-new-privileges:true
+    healthcheck:
+      test: ["CMD", "/storage-probe", "healthcheck"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+
   llm-gateway:
     image: "${COCOLA_IMAGE_REGISTRY}/cocola-llm-gateway:${COCOLA_VERSION}"
     restart: unless-stopped
@@ -155,6 +176,8 @@ services:
         condition: service_healthy
       minio-init:
         condition: service_completed_successfully
+      host-agent:
+        condition: service_healthy
     environment:
       COCOLA_ADMIN_ADDR: ":8090"
       COCOLA_REDIS_ADDR: redis:6379
@@ -163,6 +186,10 @@ services:
       COCOLA_AUTH_SECRET: "${COCOLA_AUTH_SECRET}"
       COCOLA_AGENT_ADDR: agent-runtime:50061
       COCOLA_SANDBOX_ADDR: sandbox-manager:50051
+      COCOLA_CLUSTER_MANAGER_MODE: compose
+      COCOLA_HOST_AGENT_URL: http://host-agent:8095
+      COCOLA_HOST_AGENT_KEY: "${COCOLA_ADMIN_KEY}"
+      COCOLA_NODE_NAME: local
       COCOLA_OPENSANDBOX_URL: "${COCOLA_OPENSANDBOX_URL}"
       COCOLA_GATEWAY_URL: http://gateway:8080
       COCOLA_LLM_GATEWAY_URL: http://llm-gateway:8080
@@ -281,6 +308,8 @@ services:
         condition: service_healthy
       admin-api:
         condition: service_healthy
+      host-agent:
+        condition: service_healthy
     environment:
       NODE_ENV: production
       COCOLA_WEB_HOST: "${COCOLA_WEB_HOST:-0.0.0.0}"
@@ -288,6 +317,8 @@ services:
       COCOLA_GATEWAY_URL: http://gateway:8080
       COCOLA_ADMIN_URL: http://admin-api:8090
       COCOLA_ADMIN_KEY: "${COCOLA_ADMIN_KEY}"
+      COCOLA_HOST_AGENT_URL: http://host-agent:8095
+      COCOLA_HOST_AGENT_KEY: "${COCOLA_ADMIN_KEY}"
       AUTH_SECRET: "${AUTH_SECRET}"
       COCOLA_PUBLIC_ORIGINS: "${COCOLA_PUBLIC_ORIGINS}"
     ports:
