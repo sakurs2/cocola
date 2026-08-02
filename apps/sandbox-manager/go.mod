@@ -6,7 +6,7 @@ require (
 	github.com/cocola-project/cocola/packages/go-common v0.0.0
 	github.com/cocola-project/cocola/packages/proto/gen/go v0.0.0
 	github.com/google/uuid v1.6.0
-	github.com/jackc/pgx/v5 v5.7.2
+	github.com/jackc/pgx/v5 v5.9.2
 	github.com/prometheus/client_golang v1.20.5
 	google.golang.org/grpc v1.81.1
 	k8s.io/apimachinery v0.31.4
@@ -46,7 +46,6 @@ require (
 	go.opentelemetry.io/proto/otlp v1.10.0 // indirect
 	go.uber.org/multierr v1.10.0 // indirect
 	go.uber.org/zap v1.27.0 // indirect
-	golang.org/x/crypto v0.51.0 // indirect
 	golang.org/x/net v0.55.0 // indirect
 	golang.org/x/sync v0.20.0 // indirect
 	golang.org/x/sys v0.45.0 // indirect
