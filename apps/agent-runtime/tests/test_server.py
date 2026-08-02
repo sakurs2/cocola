@@ -1551,8 +1551,10 @@ async def test_plan_query_is_claude_read_only_and_skips_side_effect_integrations
     assert provider.seen_options.mcp_servers == {}
     assert provider.seen_options.project_credential is None
     assert provider.seen_options.system_prompt is not None
-    assert "cocola_submit_plan" in provider.seen_options.system_prompt
+    assert "cocola_submit_plan" not in provider.seen_options.system_prompt
     assert "cocola_request_user_input" in provider.seen_options.system_prompt
+    assert "native plan file" in provider.seen_options.system_prompt
+    assert "ExitPlanMode" in provider.seen_options.system_prompt
     assert "<cocola_plan>" not in provider.seen_options.system_prompt
     assert "Only changed regular files" not in provider.seen_options.system_prompt
     assert mcps.seen_user_id == ""

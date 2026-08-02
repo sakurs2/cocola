@@ -38,11 +38,13 @@ does not read credentials from the JSON request, so they never transit the
 prompt channel or logs.
 
 Execute runs use the full native Claude Code toolset inside the container.
-Plan runs keep Claude's native read-only permission mode, remove user MCP
-servers, disable write/subagent tools, and install one trusted in-process Cocola
-control server. permission_mode defaults to "bypassPermissions" because Execute
-runs have no interactive permission prompt; their security boundary is the
-container plus the network egress allowlist.
+Plan runs keep Claude Code's native Plan Mode, including its controlled plan
+file and ExitPlanMode completion tool, while removing user MCP servers. Cocola
+captures native plan completion for its own review UI and retains one trusted
+in-process control server for clarification and runtime metadata.
+permission_mode defaults to "bypassPermissions" because Execute runs have no
+interactive permission prompt; their security boundary is the container plus
+the network egress allowlist.
 """
 
 from __future__ import annotations
@@ -165,8 +167,6 @@ def _build_options(
         kwargs["hooks"] = control.sdk_hooks(claude_agent_sdk)
         if plan_mode:
             kwargs["allowed_tools"] = sorted(control.tool_names)
-            kwargs["disallowed_tools"] = list(_PLAN_DISALLOWED_TOOLS)
-            kwargs["can_use_tool"] = control.can_use_tool
     elif isinstance(req.get("mcp_servers"), dict) and req["mcp_servers"]:
         kwargs["mcp_servers"] = req["mcp_servers"]
         kwargs["strict_mcp_config"] = True
@@ -189,10 +189,10 @@ _PLAN_MAX_BYTES = 128 * 1024
 _PLAN_INVALID_ERROR = "Claude did not return a reviewable plan. Refine the request and try again."
 _PLAN_CONTROL_SERVER = "cocola_control"
 _PLAN_CONTROL_TOOLS = (
-    "cocola_submit_plan",
     "cocola_request_user_input",
     "cocola_get_runtime_info",
 )
+_NATIVE_PLAN_TOOL = "ExitPlanMode"
 _RESULT_CONTROL_TOOL = "cocola_submit_result"
 _BUILTIN_RESULT_TOOL_RENDERERS = {
     "cocola_present_summary": "summary",
@@ -227,20 +227,9 @@ _PLAN_CONTROL_TOOL_NAMES = tuple(
 )
 _TERMINAL_CONTROL_TOOL_NAMES = frozenset(
     {
-        f"mcp__{_PLAN_CONTROL_SERVER}__cocola_submit_plan",
         f"mcp__{_PLAN_CONTROL_SERVER}__cocola_request_user_input",
         *(f"mcp__{_PLAN_CONTROL_SERVER}__{tool_name}" for tool_name in _RESULT_CONTROL_TOOLS),
     }
-)
-_PLAN_DISALLOWED_TOOLS = (
-    "ExitPlanMode",
-    "AskUserQuestion",
-    "Write",
-    "Edit",
-    "MultiEdit",
-    "NotebookEdit",
-    "Agent",
-    "Task",
 )
 _MCP_STATUS_TIMEOUT_SECONDS = 8.0
 _MCP_STATUS_POLL_SECONDS = (0.5, 1.0, 2.0)
@@ -946,7 +935,7 @@ class _CocolaRunControl:
                 elif event_type == "question_required":
                     suffix = "cocola_request_user_input"
                 else:
-                    suffix = "cocola_submit_plan"
+                    suffix = _NATIVE_PLAN_TOOL
             self._terminal_reserved_name = f"mcp__{_PLAN_CONTROL_SERVER}__{suffix}"
         if self._terminal_event is not None or self._protocol_error is not None:
             self._record_protocol_error(self._terminal_reserved_name)
@@ -988,6 +977,38 @@ class _CocolaRunControl:
         self._record_protocol_error(tool_name)
         return self._tool_result(message, is_error=True)
 
+    def _capture_native_plan(self, tool_input: Any, identifier: str = "") -> bool:
+        """Convert Claude Code's native ExitPlanMode payload into a Cocola plan."""
+        if identifier:
+            self._internal_tool_ids.add(identifier)
+        if not self._plan_mode:
+            return False
+        if self._ordinary_tool_ids:
+            self._record_protocol_error(_NATIVE_PLAN_TOOL)
+            return True
+        if self._terminal_reserved_name not in ("", _NATIVE_PLAN_TOOL):
+            self._record_protocol_error(_NATIVE_PLAN_TOOL)
+            return True
+
+        self._terminal_reserved_name = _NATIVE_PLAN_TOOL
+        content = tool_input.get("plan") if isinstance(tool_input, dict) else None
+        if not isinstance(content, str):
+            self._record_protocol_error(_NATIVE_PLAN_TOOL)
+            return True
+        content = content.strip()
+        if not content or len(content.encode("utf-8")) > _PLAN_MAX_BYTES:
+            self._record_protocol_error(_NATIVE_PLAN_TOOL)
+            return True
+
+        # The SDK hook and AssistantMessage stream both expose this tool use.
+        # Replacing the payload makes the capture idempotent and preserves the
+        # latest native plan if Claude retries ExitPlanMode before interruption.
+        self._terminal_event = {
+            "type": "plan_ready",
+            "content_markdown": content,
+        }
+        return True
+
     @staticmethod
     def _pre_tool_decision(allow: bool, reason: str = "") -> dict[str, Any]:
         output: dict[str, Any] = {
@@ -1007,6 +1028,12 @@ class _CocolaRunControl:
         tool_name = str(hook_input.get("tool_name") or "")
         identifier = str(hook_input.get("tool_use_id") or tool_use_id or "")
         async with self._tool_gate_lock:
+            if self._plan_mode and tool_name == _NATIVE_PLAN_TOOL:
+                self._capture_native_plan(hook_input.get("tool_input"), identifier)
+                return self._pre_tool_decision(
+                    False,
+                    "Cocola captured this plan and will request approval in the conversation.",
+                )
             if tool_name in self._terminal_tool_names:
                 if (
                     self._ordinary_tool_ids
@@ -1053,26 +1080,6 @@ class _CocolaRunControl:
             "PostToolUse": [sdk.HookMatcher(matcher=None, hooks=[self.post_tool_use])],
             "PostToolUseFailure": [sdk.HookMatcher(matcher=None, hooks=[self.post_tool_use])],
         }
-
-    async def submit_plan(self, args: dict[str, Any]) -> dict[str, Any]:
-        content = args.get("content_markdown")
-        if not isinstance(content, str):
-            return self._reject_terminal(
-                f"mcp__{_PLAN_CONTROL_SERVER}__cocola_submit_plan",
-                "content_markdown must be a non-empty Markdown string.",
-            )
-        content = content.strip()
-        if not content or len(content.encode("utf-8")) > _PLAN_MAX_BYTES:
-            return self._reject_terminal(
-                f"mcp__{_PLAN_CONTROL_SERVER}__cocola_submit_plan",
-                _PLAN_INVALID_ERROR,
-            )
-        return self._set_terminal(
-            {
-                "type": "plan_ready",
-                "content_markdown": content,
-            }
-        )
 
     async def request_user_input(self, args: dict[str, Any]) -> dict[str, Any]:
         tool_name = f"mcp__{_PLAN_CONTROL_SERVER}__cocola_request_user_input"
@@ -1231,23 +1238,6 @@ class _CocolaRunControl:
         )
 
         tools: list[Any] = []
-        if self._plan_mode:
-
-            @sdk.tool(
-                "cocola_submit_plan",
-                "Submit one complete Markdown plan to Cocola for user review.",
-                {
-                    "type": "object",
-                    "properties": {"content_markdown": {"type": "string"}},
-                    "required": ["content_markdown"],
-                    "additionalProperties": False,
-                },
-                annotations=annotations,
-            )
-            async def submit_plan(args: dict[str, Any]) -> dict[str, Any]:
-                return await self.submit_plan(args)
-
-            tools.append(submit_plan)
 
         if self._user_input_enabled:
 
@@ -1319,23 +1309,6 @@ class _CocolaRunControl:
             tools=tools,
         )
 
-    async def can_use_tool(
-        self,
-        tool_name: str,
-        tool_input: dict[str, Any],
-        context: Any,
-    ) -> Any:
-        import claude_agent_sdk
-
-        if tool_name in self._tool_names:
-            return claude_agent_sdk.PermissionResultAllow(updated_input=tool_input)
-        tool_use_id = str(getattr(context, "tool_use_id", "") or "")
-        if tool_use_id:
-            self._tool_outcomes[tool_use_id] = "permission_denied"
-        return claude_agent_sdk.PermissionResultDeny(
-            message="This tool is not permitted in Cocola Plan Mode."
-        )
-
     def observe_tool_use(self, tool_use_id: Any, tool_name: Any) -> None:
         identifier = str(tool_use_id or "")
         name = str(tool_name or "")
@@ -1343,12 +1316,12 @@ class _CocolaRunControl:
             return
         if name in self._tool_names:
             self._internal_tool_ids.add(identifier)
-        elif name in _PLAN_DISALLOWED_TOOLS:
-            self._tool_outcomes[identifier] = "permission_denied"
 
     def is_internal_tool_use(self, block: Any) -> bool:
         name = str(getattr(block, "name", "") or "")
         identifier = str(getattr(block, "id", "") or "")
+        if self._plan_mode and name == _NATIVE_PLAN_TOOL:
+            return self._capture_native_plan(getattr(block, "input", None), identifier)
         if name not in self._tool_names:
             return False
         if identifier:

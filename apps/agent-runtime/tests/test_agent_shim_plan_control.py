@@ -58,7 +58,7 @@ def _fake_sdk(captured: dict[str, object]):
     )
 
 
-def test_plan_options_install_only_the_trusted_control_server(monkeypatch):
+def test_plan_options_preserve_native_plan_mode_and_install_trusted_controls(monkeypatch):
     captured: dict[str, object] = {}
     monkeypatch.setitem(sys.modules, "claude_agent_sdk", _fake_sdk(captured))
     module = _load_shim("cocola_agent_shim_structured_plan_options")
@@ -82,21 +82,14 @@ def test_plan_options_install_only_the_trusted_control_server(monkeypatch):
     assert set(options["mcp_servers"]) == {"cocola_control"}
     assert options["strict_mcp_config"] is True
     assert set(options["allowed_tools"]) == {
-        "mcp__cocola_control__cocola_submit_plan",
         "mcp__cocola_control__cocola_request_user_input",
         "mcp__cocola_control__cocola_get_runtime_info",
     }
-    assert set(options["disallowed_tools"]) >= {
-        "ExitPlanMode",
-        "AskUserQuestion",
-        "Write",
-        "Edit",
-        "MultiEdit",
-        "NotebookEdit",
-        "Agent",
-        "Task",
-    }
-    assert options["can_use_tool"] == control.can_use_tool
+    assert options["permission_mode"] == "plan"
+    assert options["disallowed_tools"] == ["AskUserQuestion"]
+    assert "ExitPlanMode" not in options["disallowed_tools"]
+    assert "Write" not in options["disallowed_tools"]
+    assert "can_use_tool" not in options
     assert set(options["hooks"]) == {
         "PreToolUse",
         "PostToolUse",
@@ -104,12 +97,21 @@ def test_plan_options_install_only_the_trusted_control_server(monkeypatch):
     }
 
 
-async def test_plan_control_emits_exactly_one_validated_terminal_event():
+async def test_native_exit_plan_mode_emits_exactly_one_validated_terminal_event():
     module = _load_shim("cocola_agent_shim_structured_plan_terminal")
     control = module._CocolaRunControl()
 
-    await control.submit_plan({"content_markdown": "## Plan\n\n- Inspect\n- Implement"})
+    decision = await control.pre_tool_use(
+        {
+            "tool_name": "ExitPlanMode",
+            "tool_use_id": "exit-1",
+            "tool_input": {"plan": "## Plan\n\n- Inspect\n- Implement"},
+        },
+        "exit-1",
+        {},
+    )
 
+    assert decision["hookSpecificOutput"]["permissionDecision"] == "deny"
     assert control.final_event() == {
         "type": "plan_ready",
         "content_markdown": "## Plan\n\n- Inspect\n- Implement",
@@ -117,6 +119,43 @@ async def test_plan_control_emits_exactly_one_validated_terminal_event():
     duplicate = await control.request_user_input({"question": "Which branch?"})
     assert duplicate["is_error"] is True
     assert control.final_event()["code"] == "PLAN_OUTPUT_INVALID"
+
+
+def test_native_exit_plan_mode_message_capture_is_idempotent_and_hidden():
+    module = _load_shim("cocola_agent_shim_native_plan_message")
+    control = module._CocolaRunControl()
+    assistant = type(
+        "AssistantMessage",
+        (),
+        {
+            "content": [
+                type(
+                    "ToolUseBlock",
+                    (),
+                    {
+                        "id": "exit-1",
+                        "name": "ExitPlanMode",
+                        "input": {"plan": "## Initial plan"},
+                    },
+                )(),
+                type(
+                    "ToolUseBlock",
+                    (),
+                    {
+                        "id": "exit-2",
+                        "name": "ExitPlanMode",
+                        "input": {"plan": "## Revised plan\n\n- Implement safely"},
+                    },
+                )(),
+            ]
+        },
+    )()
+
+    assert control.message_events(assistant, module._ClaudeTaskProgress()) == []
+    assert control.final_event() == {
+        "type": "plan_ready",
+        "content_markdown": "## Revised plan\n\n- Implement safely",
+    }
 
 
 async def test_terminal_control_tool_is_rejected_while_an_ordinary_tool_is_active():
@@ -217,20 +256,20 @@ async def test_plan_control_uses_structured_question_and_rejects_missing_termina
     }
 
 
-async def test_plan_permission_denial_has_a_structured_tool_outcome():
-    module = _load_shim("cocola_agent_shim_structured_tool_outcome")
+async def test_native_exit_plan_mode_rejects_oversized_plan():
+    module = _load_shim("cocola_agent_shim_native_plan_size_limit")
     control = module._CocolaRunControl()
-    context = types.SimpleNamespace(tool_use_id="tool-1")
+    await control.pre_tool_use(
+        {
+            "tool_name": "ExitPlanMode",
+            "tool_use_id": "exit-large",
+            "tool_input": {"plan": "x" * (128 * 1024 + 1)},
+        },
+        "exit-large",
+        {},
+    )
 
-    denial = await control.can_use_tool("Bash", {"command": "npm --version"}, context)
-    assert denial.message == "This tool is not permitted in Cocola Plan Mode."
-
-    block = type(
-        "ToolResultBlock",
-        (),
-        {"tool_use_id": "tool-1", "is_error": True, "content": denial.message},
-    )()
-    assert module._block_to_event(block, tool_outcomes=control)["outcome"] == "permission_denied"
+    assert control.final_event()["code"] == "PLAN_OUTPUT_INVALID"
 
 
 async def test_runtime_info_uses_only_fixed_argv_without_a_shell(monkeypatch):
@@ -403,13 +442,14 @@ async def test_runtime_is_not_accepted_before_the_sdk_init_message(monkeypatch):
     assert "run_accepted" not in [event["type"] for event in emitted]
 
 
-def test_plan_prompt_uses_only_cocola_control_tools():
+def test_plan_prompt_uses_claude_native_plan_completion():
     from cocola_agent_runtime.server import PLAN_SYSTEM_PROMPT
 
-    assert "cocola_submit_plan" in PLAN_SYSTEM_PROMPT
+    assert "cocola_submit_plan" not in PLAN_SYSTEM_PROMPT
     assert "cocola_request_user_input" in PLAN_SYSTEM_PROMPT
+    assert "native plan file" in PLAN_SYSTEM_PROMPT
     assert "<cocola_plan>" not in PLAN_SYSTEM_PROMPT
-    assert "ExitPlanMode" not in PLAN_SYSTEM_PROMPT
+    assert "ExitPlanMode" in PLAN_SYSTEM_PROMPT
     assert "AskUserQuestion" not in PLAN_SYSTEM_PROMPT
 
 

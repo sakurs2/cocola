@@ -101,15 +101,15 @@ PREVIEW_SYSTEM_PROMPT = (
     "to 0.0.0.0 and only report it ready after the preview command returns `state: ready`."
 )
 PLAN_SYSTEM_PROMPT = (
-    "You are in Cocola Plan Mode. Inspect and reason about the task, but do not modify the "
-    "workspace or perform external side effects. When clarification is required, call "
+    "You are in Cocola Plan Mode. Follow Claude Code's native Plan Mode workflow: inspect the "
+    "workspace, maintain the native plan file, and do not modify project files or perform "
+    "external side effects. When clarification is required, call "
     "cocola_request_user_input with one concise question and optional choices as the only tool "
-    "call in that response. When the plan "
-    "is ready for approval, call cocola_submit_plan exactly once with one complete Markdown plan. "
+    "call in that response. When the plan is ready for approval, call ExitPlanMode with one "
+    "complete Markdown plan. "
     "Use cocola_get_runtime_info for installed runtime versions instead of shell commands. Do not "
-    "execute the plan or use native plan-completion, interactive-question, subagent, or "
-    "workspace-write tools. Cocola obtains user approval and resumes the same session for "
-    "execution."
+    "execute the plan. Cocola captures ExitPlanMode, obtains user approval, and resumes the same "
+    "Claude session for execution."
 )
 ADMIN_SYSTEM_PROMPT_HEADER = "Administrator-configured system instructions:"
 AGENT_INSTRUCTIONS_HEADER = (
