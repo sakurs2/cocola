@@ -64,6 +64,11 @@ func Run(ctx context.Context, paths config.Paths) Report {
 	} else {
 		add("docker compose", StatusPass, "version "+version+" (minimum "+compose.MinimumComposeVersion+")")
 	}
+	if source, err := compose.DockerSocketSource(ctx, docker); err != nil {
+		add("docker endpoint", StatusFail, err.Error())
+	} else {
+		add("docker endpoint", StatusPass, source)
+	}
 
 	if _, err := os.Stat(paths.Environment); err != nil {
 		add("installation", StatusFail, "not installed in "+paths.Home)

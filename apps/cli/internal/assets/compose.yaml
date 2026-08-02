@@ -59,7 +59,7 @@ services:
     image: "${COCOLA_OPENSANDBOX_IMAGE:-opensandbox/server:v0.1.14}"
     restart: unless-stopped
     volumes:
-      - /var/run/docker.sock:/var/run/docker.sock
+      - "${COCOLA_DOCKER_SOCKET_SOURCE:-/var/run/docker.sock}:/var/run/docker.sock"
       - "${COCOLA_SANDBOX_ROOT}:${COCOLA_SANDBOX_ROOT}"
     configs:
       - source: opensandbox-config
@@ -105,6 +105,8 @@ services:
       COCOLA_SANDBOX_LLM_BASE_URL: "${COCOLA_SANDBOX_LLM_BASE_URL}"
       COCOLA_SANDBOX_MODEL_ALIAS: cocola-default
       COCOLA_PUBLIC_ORIGINS: "${COCOLA_PUBLIC_ORIGINS}"
+    volumes:
+      - "${COCOLA_SANDBOX_ROOT}:${COCOLA_SANDBOX_ROOT}"
     extra_hosts:
       - host.docker.internal:host-gateway
     healthcheck:
@@ -123,7 +125,7 @@ services:
       COCOLA_HOST_AGENT_KEY: "${COCOLA_ADMIN_KEY}"
       COCOLA_COMPOSE_PROJECT: cocola
     volumes:
-      - /var/run/docker.sock:/var/run/docker.sock
+      - "${COCOLA_DOCKER_SOCKET_SOURCE:-/var/run/docker.sock}:/var/run/docker.sock"
       - "${COCOLA_SANDBOX_ROOT}:/storage"
     cap_drop: ["ALL"]
     security_opt:

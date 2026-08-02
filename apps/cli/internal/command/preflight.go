@@ -5,6 +5,8 @@ import (
 	"errors"
 	"fmt"
 	"net"
+	"os"
+	"path/filepath"
 
 	"github.com/cocola-project/cocola/apps/cli/internal/compose"
 	"github.com/cocola-project/cocola/apps/cli/internal/config"
@@ -16,6 +18,9 @@ var listenTCP = net.Listen
 func runStartPreflight(ctx context.Context, runner *compose.Runner) ([]string, error) {
 	if runner.State.ConfigSchemaVersion != config.CurrentSchemaVersion {
 		return nil, errors.New("deployment configuration is outdated; run cocola install to migrate it before starting Cocola")
+	}
+	if err := prepareSandboxRoot(runner.Paths.SandboxRoot); err != nil {
+		return nil, err
 	}
 	if err := runner.Validate(ctx); err != nil {
 		return nil, fmt.Errorf("validate deployment configuration: %w", err)
@@ -57,6 +62,28 @@ func runStartPreflight(ctx context.Context, runner *compose.Runner) ([]string, e
 		)}, nil
 	}
 	return nil, nil
+}
+
+func prepareSandboxRoot(path string) error {
+	if !filepath.IsAbs(path) {
+		return fmt.Errorf("sandbox storage path must be absolute: %q", path)
+	}
+	if err := os.MkdirAll(path, 0o700); err != nil {
+		return fmt.Errorf("create sandbox storage directory: %w", err)
+	}
+	probe, err := os.CreateTemp(path, ".cocola-write-check-*")
+	if err != nil {
+		return fmt.Errorf("sandbox storage directory is not writable: %w", err)
+	}
+	probePath := probe.Name()
+	if err := probe.Close(); err != nil {
+		_ = os.Remove(probePath)
+		return fmt.Errorf("verify sandbox storage directory: %w", err)
+	}
+	if err := os.Remove(probePath); err != nil {
+		return fmt.Errorf("clean up sandbox storage write check: %w", err)
+	}
+	return nil
 }
 
 func checkPortAvailable(port int) error {

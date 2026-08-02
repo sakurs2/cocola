@@ -37,6 +37,7 @@ func TestStartPrintsActionableComposeUpgradeError(t *testing.T) {
 		t.Fatal(err)
 	}
 	t.Setenv("COCOLA_DOCKER_BIN", dockerPath)
+	t.Setenv("COCOLA_DOCKER_SOCKET_SOURCE", "/var/run/docker.sock")
 	output.Reset()
 	errors.Reset()
 	err := Execute(context.Background(), []string{"start", "--home", home}, IO{
@@ -84,6 +85,7 @@ func TestStartUsesCachedImagesWhenRegistryIsUnavailableAndSkipsPullOnResume(t *t
 		t.Fatal(err)
 	}
 	t.Setenv("COCOLA_DOCKER_BIN", dockerPath)
+	t.Setenv("COCOLA_DOCKER_SOCKET_SOURCE", "/var/run/docker.sock")
 	t.Setenv("DOCKER_ARGS_LOG", logPath)
 	t.Setenv("FAIL_PULL", "1")
 	t.Setenv("HAS_CONTAINERS", "1")
@@ -183,6 +185,7 @@ func TestFailedUpgradeRestoresPreviousDeploymentWithoutRestartingIt(t *testing.T
 		t.Fatal(err)
 	}
 	t.Setenv("COCOLA_DOCKER_BIN", dockerPath)
+	t.Setenv("COCOLA_DOCKER_SOCKET_SOURCE", "/var/run/docker.sock")
 	t.Setenv("DOCKER_ARGS_LOG", dockerLogPath)
 	output.Reset()
 	errors.Reset()
@@ -259,6 +262,7 @@ func TestFirstStartRejectsPostgresVolumeFromDifferentConfiguration(t *testing.T)
 		t.Fatal(err)
 	}
 	t.Setenv("COCOLA_DOCKER_BIN", dockerPath)
+	t.Setenv("COCOLA_DOCKER_SOCKET_SOURCE", "/var/run/docker.sock")
 	output.Reset()
 	stderr.Reset()
 	err := Execute(context.Background(), []string{"start", "--home", home}, IO{
@@ -283,5 +287,32 @@ func TestCheckPortAvailableReportsCollision(t *testing.T) {
 	defer func() { listenTCP = previous }()
 	if err := checkPortAvailable(33001); err == nil || !strings.Contains(err.Error(), "address already in use") {
 		t.Fatalf("port collision error = %v", err)
+	}
+}
+
+func TestPrepareSandboxRootCreatesWritableDirectory(t *testing.T) {
+	root := filepath.Join(t.TempDir(), "sandboxes")
+	if err := prepareSandboxRoot(root); err != nil {
+		t.Fatal(err)
+	}
+	info, err := os.Stat(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !info.IsDir() {
+		t.Fatalf("sandbox root is not a directory: %s", root)
+	}
+	entries, err := os.ReadDir(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(entries) != 0 {
+		t.Fatalf("sandbox root contains write-check artifacts: %v", entries)
+	}
+}
+
+func TestPrepareSandboxRootRejectsRelativePath(t *testing.T) {
+	if err := prepareSandboxRoot("relative/sandboxes"); err == nil || !strings.Contains(err.Error(), "must be absolute") {
+		t.Fatalf("prepareSandboxRoot() error = %v", err)
 	}
 }

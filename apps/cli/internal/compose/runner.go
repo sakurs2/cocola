@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"net/url"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -32,12 +33,13 @@ var ErrPostgresCredentialsMismatch = errors.New("the existing PostgreSQL volume 
 var composeVersionPattern = regexp.MustCompile(`(?i)(?:^|\s)v?(\d+)\.(\d+)\.(\d+)(?:\D|$)`)
 
 type Runner struct {
-	Paths  config.Paths
-	State  config.State
-	In     io.Reader
-	Out    io.Writer
-	Err    io.Writer
-	docker string
+	Paths              config.Paths
+	State              config.State
+	In                 io.Reader
+	Out                io.Writer
+	Err                io.Writer
+	docker             string
+	dockerSocketSource string
 }
 
 type ServiceStatus struct {
@@ -65,7 +67,64 @@ func CheckDocker(ctx context.Context) error {
 	if _, err := ComposeVersion(ctx, docker); err != nil {
 		return err
 	}
+	if _, err := DockerSocketSource(ctx, docker); err != nil {
+		return err
+	}
 	return nil
+}
+
+// DockerSocketSource resolves the local Unix socket used by the active Docker
+// endpoint. Compose bind mounts depend on a local daemon because Cocola session
+// storage is shared with sandboxes through host paths.
+func DockerSocketSource(ctx context.Context, docker string) (string, error) {
+	if source := strings.TrimSpace(os.Getenv("COCOLA_DOCKER_SOCKET_SOURCE")); source != "" {
+		return cleanDockerSocketPath(source)
+	}
+
+	endpoint := ""
+	contextName := strings.TrimSpace(os.Getenv("DOCKER_CONTEXT"))
+	if contextName == "" {
+		endpoint = strings.TrimSpace(os.Getenv("DOCKER_HOST"))
+	}
+	if endpoint == "" {
+		args := []string{"context", "inspect"}
+		if contextName != "" {
+			args = append(args, contextName)
+		}
+		args = append(args, "--format", "{{.Endpoints.docker.Host}}")
+		output, err := runCheck(ctx, docker, args...)
+		if err != nil {
+			detail := firstDiagnostic(output)
+			if detail == "" {
+				detail = err.Error()
+			}
+			return "", fmt.Errorf("inspect the active Docker endpoint: %s", detail)
+		}
+		endpoint = strings.TrimSpace(string(output))
+	}
+	if endpoint == "" {
+		return "", errors.New("the active Docker endpoint is empty")
+	}
+
+	parsed, err := url.Parse(endpoint)
+	if err != nil {
+		return "", fmt.Errorf("parse the active Docker endpoint: %w", err)
+	}
+	if parsed.Scheme != "unix" {
+		return "", fmt.Errorf(
+			"Cocola Compose deployment requires a local Unix Docker daemon because sandbox storage uses host bind mounts; active Docker endpoint uses %q. Switch to a local Docker context and retry",
+			parsed.Scheme,
+		)
+	}
+	return cleanDockerSocketPath(parsed.Path)
+}
+
+func cleanDockerSocketPath(path string) (string, error) {
+	path = strings.TrimSpace(path)
+	if path == "" || !filepath.IsAbs(path) {
+		return "", fmt.Errorf("Docker socket path must be absolute: %q", path)
+	}
+	return filepath.Clean(path), nil
 }
 
 func DockerRootDir(ctx context.Context, docker string) (string, error) {
@@ -344,11 +403,14 @@ func (r *Runner) PrepareExistingPostgres(ctx context.Context) error {
 }
 
 func (r *Runner) CheckPostgresCredentials(ctx context.Context) error {
-	command := r.command(
+	command, err := r.command(
 		ctx,
 		"exec", "-T", "postgres", "sh", "-ec",
 		`PGPASSWORD="$POSTGRES_PASSWORD" psql -h 127.0.0.1 -U "$POSTGRES_USER" -d "$POSTGRES_DB" -tAc 'SELECT 1' >/dev/null`,
 	)
+	if err != nil {
+		return err
+	}
 	var diagnostic bytes.Buffer
 	command.Stdout = io.Discard
 	command.Stderr = &diagnostic
@@ -378,7 +440,11 @@ func (r *Runner) BackupDatabase(ctx context.Context, destination string) error {
 		temporary.Close()
 		return fmt.Errorf("secure PostgreSQL backup: %w", err)
 	}
-	command := r.command(ctx, "exec", "-T", "postgres", "pg_dump", "-U", "cocola", "-d", "cocola", "--format=custom")
+	command, err := r.command(ctx, "exec", "-T", "postgres", "pg_dump", "-U", "cocola", "-d", "cocola", "--format=custom")
+	if err != nil {
+		temporary.Close()
+		return err
+	}
 	command.Stdout = temporary
 	command.Stderr = r.Err
 	if err := command.Run(); err != nil {
@@ -495,27 +561,37 @@ func (r *Runner) Validate(ctx context.Context) error {
 }
 
 func (r *Runner) run(ctx context.Context, args ...string) error {
-	command := r.command(ctx, args...)
+	command, err := r.command(ctx, args...)
+	if err != nil {
+		return err
+	}
 	command.Stdout = r.Out
 	command.Stderr = r.Err
-	if err := command.Run(); err != nil {
+	if err = command.Run(); err != nil {
 		return fmt.Errorf("docker compose %s: %w", args[0], err)
 	}
 	return nil
 }
 
 func (r *Runner) capture(ctx context.Context, args ...string) ([]byte, error) {
-	command := r.command(ctx, args...)
+	command, err := r.command(ctx, args...)
+	if err != nil {
+		return nil, err
+	}
 	var output bytes.Buffer
 	command.Stdout = &output
 	command.Stderr = r.Err
-	if err := command.Run(); err != nil {
+	if err = command.Run(); err != nil {
 		return nil, fmt.Errorf("docker compose %s: %w", args[0], err)
 	}
 	return output.Bytes(), nil
 }
 
-func (r *Runner) command(ctx context.Context, args ...string) *exec.Cmd {
+func (r *Runner) command(ctx context.Context, args ...string) (*exec.Cmd, error) {
+	socketSource, err := r.resolveDockerSocketSource(ctx)
+	if err != nil {
+		return nil, err
+	}
 	base := []string{
 		"compose", "--project-name", "cocola", "--env-file", r.Paths.Environment,
 		"--file", r.Paths.Compose,
@@ -525,5 +601,29 @@ func (r *Runner) command(ctx context.Context, args ...string) *exec.Cmd {
 	}
 	command := exec.CommandContext(ctx, r.docker, append(base, args...)...)
 	command.Stdin = r.In
-	return command
+	command.Env = environmentWith("COCOLA_DOCKER_SOCKET_SOURCE", socketSource)
+	return command, nil
+}
+
+func environmentWith(key, value string) []string {
+	prefix := key + "="
+	environment := make([]string, 0, len(os.Environ())+1)
+	for _, item := range os.Environ() {
+		if !strings.HasPrefix(item, prefix) {
+			environment = append(environment, item)
+		}
+	}
+	return append(environment, prefix+value)
+}
+
+func (r *Runner) resolveDockerSocketSource(ctx context.Context) (string, error) {
+	if r.dockerSocketSource != "" {
+		return r.dockerSocketSource, nil
+	}
+	source, err := DockerSocketSource(ctx, r.docker)
+	if err != nil {
+		return "", err
+	}
+	r.dockerSocketSource = source
+	return source, nil
 }

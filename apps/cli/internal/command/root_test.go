@@ -70,6 +70,12 @@ func TestNonInteractiveInstallWritesEmbeddedRelease(t *testing.T) {
 	if !strings.Contains(string(compose), `allowed_host_paths = ["${COCOLA_SANDBOX_ROOT}"]`) {
 		t.Fatal("embedded release compose does not configure the sandbox root")
 	}
+	if strings.Count(string(compose), `"${COCOLA_SANDBOX_ROOT}:${COCOLA_SANDBOX_ROOT}"`) != 2 {
+		t.Fatal("embedded release compose must mount the sandbox root path-isomorphically into sandbox-manager and OpenSandbox")
+	}
+	if strings.Count(string(compose), `"${COCOLA_DOCKER_SOCKET_SOURCE:-/var/run/docker.sock}:/var/run/docker.sock"`) != 2 {
+		t.Fatal("embedded release compose must use the resolved Docker socket for host-agent and OpenSandbox")
+	}
 	for _, floating := range []string{
 		"redis:7-alpine", "postgres:16-alpine", "minio/minio:latest",
 		"minio/mc:latest", "opensandbox/server:latest",

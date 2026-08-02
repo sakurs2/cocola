@@ -21,6 +21,7 @@ func TestStartUsesManagedProfileAndStartsOpenSandboxFirst(t *testing.T) {
 		t.Fatal(err)
 	}
 	t.Setenv("COCOLA_DOCKER_BIN", dockerPath)
+	t.Setenv("COCOLA_DOCKER_SOCKET_SOURCE", "/var/run/docker.sock")
 	t.Setenv("DOCKER_ARGS_LOG", logPath)
 	paths := config.Paths{
 		Home: directory, Environment: filepath.Join(directory, "config.env"),
@@ -331,6 +332,83 @@ func TestCheckDockerIncludesDaemonDiagnostic(t *testing.T) {
 	}
 }
 
+func TestDockerSocketSourceUsesDockerHost(t *testing.T) {
+	t.Setenv("COCOLA_DOCKER_SOCKET_SOURCE", "")
+	t.Setenv("DOCKER_CONTEXT", "")
+	t.Setenv("DOCKER_HOST", "unix:///run/user/1000/docker.sock")
+
+	got, err := DockerSocketSource(context.Background(), "docker")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got != "/run/user/1000/docker.sock" {
+		t.Fatalf("DockerSocketSource() = %q", got)
+	}
+}
+
+func TestDockerSocketSourcePrefersDockerContext(t *testing.T) {
+	directory := t.TempDir()
+	dockerPath := filepath.Join(directory, "docker")
+	script := `#!/bin/sh
+if [ "$1 $2 $3" = "context inspect rootless" ]; then
+  printf '%s\n' 'unix:///run/user/1000/docker.sock'
+  exit 0
+fi
+exit 1
+`
+	if err := os.WriteFile(dockerPath, []byte(script), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("COCOLA_DOCKER_SOCKET_SOURCE", "")
+	t.Setenv("DOCKER_CONTEXT", "rootless")
+	t.Setenv("DOCKER_HOST", "tcp://remote.example.com:2376")
+
+	got, err := DockerSocketSource(context.Background(), dockerPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got != "/run/user/1000/docker.sock" {
+		t.Fatalf("DockerSocketSource() = %q", got)
+	}
+}
+
+func TestDockerSocketSourceRejectsRemoteDocker(t *testing.T) {
+	t.Setenv("COCOLA_DOCKER_SOCKET_SOURCE", "")
+	t.Setenv("DOCKER_CONTEXT", "")
+	t.Setenv("DOCKER_HOST", "ssh://docker.example.com")
+
+	_, err := DockerSocketSource(context.Background(), "docker")
+	if err == nil || !strings.Contains(err.Error(), "requires a local Unix Docker daemon") ||
+		!strings.Contains(err.Error(), "Switch to a local Docker context") {
+		t.Fatalf("DockerSocketSource() error = %v", err)
+	}
+}
+
+func TestComposeCommandInjectsResolvedDockerSocket(t *testing.T) {
+	directory := t.TempDir()
+	dockerPath := filepath.Join(directory, "docker")
+	if err := os.WriteFile(dockerPath, []byte("#!/bin/sh\nexit 0\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("COCOLA_DOCKER_BIN", dockerPath)
+	paths := writeRunnerState(t, directory, false)
+	t.Setenv("COCOLA_DOCKER_SOCKET_SOURCE", "/run/user/1000/docker.sock")
+	runner, err := New(paths, nil, &bytes.Buffer{}, &bytes.Buffer{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	command, err := runner.command(context.Background(), "config", "--quiet")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, item := range command.Env {
+		if item == "COCOLA_DOCKER_SOCKET_SOURCE=/run/user/1000/docker.sock" {
+			return
+		}
+	}
+	t.Fatalf("resolved Docker socket missing from command environment: %q", command.Env)
+}
+
 func TestStopContinuesAfterAnEarlierPhaseFails(t *testing.T) {
 	runner, logPath, paths := newRecordingRunner(t, true)
 	t.Setenv("FAIL_FIRST_STOP", "1")
@@ -368,6 +446,7 @@ func newRecordingRunner(t *testing.T, managed bool) (*Runner, string, config.Pat
 
 func writeRunnerState(t *testing.T, directory string, managed bool) config.Paths {
 	t.Helper()
+	t.Setenv("COCOLA_DOCKER_SOCKET_SOURCE", "/var/run/docker.sock")
 	paths := config.Paths{
 		Home: directory, Environment: filepath.Join(directory, "config.env"),
 		Compose: filepath.Join(directory, "compose.yaml"), State: filepath.Join(directory, "state.json"),

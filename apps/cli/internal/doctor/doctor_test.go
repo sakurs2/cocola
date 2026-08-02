@@ -80,6 +80,7 @@ exit 1
 		t.Fatal(err)
 	}
 	t.Setenv("COCOLA_DOCKER_BIN", dockerPath)
+	t.Setenv("COCOLA_DOCKER_SOCKET_SOURCE", "/var/run/docker.sock")
 	t.Setenv("DOCKER_ROOT", directory)
 	if postgresMismatch {
 		t.Setenv("POSTGRES_MISMATCH", "1")
