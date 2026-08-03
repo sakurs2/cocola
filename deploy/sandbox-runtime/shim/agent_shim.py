@@ -41,7 +41,7 @@ Execute runs use the full native Claude Code toolset inside the container.
 Plan runs keep Claude Code's native Plan Mode, including its controlled plan
 file and ExitPlanMode completion tool, while removing user MCP servers. Cocola
 captures native plan completion for its own review UI and retains one trusted
-in-process control server for clarification and runtime metadata.
+in-process control server for clarification, plan persistence and runtime metadata.
 permission_mode defaults to "bypassPermissions" because Execute runs have no
 interactive permission prompt; their security boundary is the container plus
 the network egress allowlist.
@@ -109,11 +109,18 @@ def _build_options(
     permission_mode = req.get("permission_mode") or "bypassPermissions"
     plan_mode = permission_mode == "plan"
 
+    disallowed_tools = ["AskUserQuestion"]
+    if plan_mode:
+        # Plan content is persisted through Cocola's path-bound control tool.
+        # Removing the general mutation tools prevents a model from attempting
+        # implementation before the plan is approved.
+        disallowed_tools.extend(sorted(_PLAN_MUTATION_TOOLS))
+
     kwargs: dict[str, Any] = dict(
         max_turns=int(req.get("max_turns") or 20),
         cwd=cwd,
         permission_mode=permission_mode,
-        disallowed_tools=["AskUserQuestion"],
+        disallowed_tools=disallowed_tools,
     )
 
     # The renamed Claude *Agent* SDK (>=0.2) no longer enables Claude Code's
@@ -188,10 +195,15 @@ _TOOL_RESULT_MAX_CHARS = 4000
 _PLAN_MAX_BYTES = 128 * 1024
 _PLAN_INVALID_ERROR = "Claude did not return a reviewable plan. Refine the request and try again."
 _PLAN_CONTROL_SERVER = "cocola_control"
+_PLAN_UPDATE_TOOL = "cocola_update_plan"
 _PLAN_CONTROL_TOOLS = (
     "cocola_request_user_input",
     "cocola_get_runtime_info",
+    _PLAN_UPDATE_TOOL,
 )
+_PLAN_MUTATION_TOOLS = frozenset({"Write", "Edit", "NotebookEdit"})
+_NATIVE_PLAN_SESSION_CONFIG = "/session/runtime/claude"
+_PLAN_TRANSCRIPT_SCAN_CHUNK_BYTES = 64 * 1024
 _NATIVE_PLAN_TOOL = "ExitPlanMode"
 _RESULT_CONTROL_TOOL = "cocola_submit_result"
 _BUILTIN_RESULT_TOOL_RENDERERS = {
@@ -898,6 +910,7 @@ class _CocolaRunControl:
         self._runtime_failed = False
         self._internal_tool_ids: set[str] = set()
         self._tool_outcomes: dict[str, str] = {}
+        self._native_plan_file: Path | None = None
         names: set[str] = set()
         if plan_mode:
             names.update(_PLAN_CONTROL_TOOL_NAMES)
@@ -983,10 +996,9 @@ class _CocolaRunControl:
             self._internal_tool_ids.add(identifier)
         if not self._plan_mode:
             return False
-        # A native permission denial can leave its tool id tracked until the
-        # corresponding ToolResultBlock reaches the message stream. That must
-        # not invalidate ExitPlanMode: the denied tool never executed, and the
-        # native Plan permission layer remains the side-effect boundary.
+        if self._ordinary_tool_ids:
+            self._record_protocol_error(_NATIVE_PLAN_TOOL)
+            return True
         if self._terminal_reserved_name not in ("", _NATIVE_PLAN_TOOL):
             self._record_protocol_error(_NATIVE_PLAN_TOOL)
             return True
@@ -1028,6 +1040,132 @@ class _CocolaRunControl:
             output["permissionDecisionReason"] = reason
         return {"hookSpecificOutput": output}
 
+    @staticmethod
+    def _trusted_claude_config() -> tuple[Path, Path] | None:
+        configured_value = str(os.environ.get("CLAUDE_CONFIG_DIR") or "").strip()
+        if not configured_value:
+            return None
+        configured = Path(configured_value)
+        try:
+            trusted = Path(_NATIVE_PLAN_SESSION_CONFIG).resolve(strict=True)
+            if configured.resolve(strict=True) != trusted:
+                return None
+        except (OSError, RuntimeError, ValueError):
+            return None
+        return configured, trusted
+
+    @classmethod
+    def _native_plan_file_from_transcript(cls, transcript_value: Any) -> Path | None:
+        if not isinstance(transcript_value, str) or not transcript_value.strip():
+            return None
+        roots = cls._trusted_claude_config()
+        if roots is None:
+            return None
+        configured, trusted = roots
+        try:
+            transcript = Path(transcript_value).resolve(strict=True)
+            projects_path = trusted / "projects"
+            projects = projects_path.resolve(strict=True)
+            if projects_path.is_symlink() or projects != projects_path:
+                return None
+            if transcript.suffix != ".jsonl" or not transcript.is_relative_to(projects):
+                return None
+            with transcript.open("rb") as handle:
+                handle.seek(0, os.SEEK_END)
+                position = handle.tell()
+                pending = b""
+                while position > 0:
+                    chunk_size = min(position, _PLAN_TRANSCRIPT_SCAN_CHUNK_BYTES)
+                    position -= chunk_size
+                    handle.seek(position)
+                    pieces = (handle.read(chunk_size) + pending).split(b"\n")
+                    pending = pieces[0]
+                    for raw_line in reversed(pieces[1:]):
+                        found, candidate = cls._native_plan_file_from_entry(raw_line, configured)
+                        if found:
+                            return candidate
+                if pending:
+                    _found, candidate = cls._native_plan_file_from_entry(pending, configured)
+                    return candidate
+        except (OSError, RuntimeError, ValueError):
+            return None
+        return None
+
+    @staticmethod
+    def _native_plan_file_from_entry(raw_line: bytes, configured: Path) -> tuple[bool, Path | None]:
+        try:
+            entry = json.loads(raw_line)
+        except (json.JSONDecodeError, UnicodeDecodeError):
+            return False, None
+        if not isinstance(entry, dict) or entry.get("type") != "attachment":
+            return False, None
+        attachment = entry.get("attachment")
+        if not isinstance(attachment, dict) or attachment.get("type") != "plan_mode":
+            return False, None
+        plan_value = attachment.get("planFilePath")
+        if not isinstance(plan_value, str) or not plan_value.strip():
+            return True, None
+        candidate = Path(plan_value)
+        if (
+            not candidate.is_absolute()
+            or candidate.parent != configured / "plans"
+            or candidate.suffix.lower() != ".md"
+            or candidate.name in {"", ".", ".."}
+        ):
+            return True, None
+        return True, candidate
+
+    @classmethod
+    def _write_native_plan_file(cls, path: Path, content: str) -> None:
+        roots = cls._trusted_claude_config()
+        if roots is None:
+            raise OSError("Claude config root is unavailable")
+        configured, trusted = roots
+        plan_root = configured / "plans"
+        if path.parent != plan_root or path.suffix.lower() != ".md":
+            raise OSError("native plan path is invalid")
+        plan_root.mkdir(mode=0o700, parents=False, exist_ok=True)
+        try:
+            if plan_root.is_symlink() or plan_root.resolve(strict=True) != trusted / "plans":
+                raise OSError("native plan directory is invalid")
+        except (RuntimeError, ValueError) as error:
+            raise OSError("native plan directory is invalid") from error
+
+        directory_flags = os.O_RDONLY | getattr(os, "O_DIRECTORY", 0)
+        directory_flags |= getattr(os, "O_NOFOLLOW", 0)
+        directory_fd = os.open(plan_root, directory_flags)
+        temporary_name = f".cocola-plan-{os.getpid()}-{time.monotonic_ns()}.tmp"
+        file_fd = -1
+        try:
+            file_fd = os.open(
+                temporary_name,
+                os.O_WRONLY | os.O_CREAT | os.O_EXCL,
+                0o600,
+                dir_fd=directory_fd,
+            )
+            remaining = memoryview(content.encode("utf-8"))
+            while remaining:
+                written = os.write(file_fd, remaining)
+                if written <= 0:
+                    raise OSError("native plan write made no progress")
+                remaining = remaining[written:]
+            os.fsync(file_fd)
+            os.close(file_fd)
+            file_fd = -1
+            os.replace(
+                temporary_name,
+                path.name,
+                src_dir_fd=directory_fd,
+                dst_dir_fd=directory_fd,
+            )
+            os.fsync(directory_fd)
+        finally:
+            if file_fd >= 0:
+                os.close(file_fd)
+            with contextlib.suppress(FileNotFoundError):
+                os.unlink(temporary_name, dir_fd=directory_fd)
+            os.close(directory_fd)
+
     async def pre_tool_use(
         self,
         hook_input: dict[str, Any],
@@ -1067,6 +1205,29 @@ class _CocolaRunControl:
                     False,
                     "No tools may run after a terminal Cocola control tool.",
                 )
+            plan_update_name = f"mcp__{_PLAN_CONTROL_SERVER}__{_PLAN_UPDATE_TOOL}"
+            if self._plan_mode and tool_name == plan_update_name:
+                native_plan_file = self._native_plan_file_from_transcript(
+                    hook_input.get("transcript_path")
+                )
+                if native_plan_file is None:
+                    return self._pre_tool_decision(
+                        False,
+                        "Cocola could not verify Claude Code's native plan file for this turn.",
+                    )
+                self._native_plan_file = native_plan_file
+                if identifier:
+                    self._ordinary_tool_ids.add(identifier)
+                return self._pre_tool_decision(
+                    True,
+                    "Cocola verified the native plan file for this turn.",
+                )
+            if self._plan_mode and tool_name in _PLAN_MUTATION_TOOLS:
+                return self._pre_tool_decision(
+                    False,
+                    "Project mutation is unavailable in Plan Mode. Use cocola_update_plan "
+                    "for the complete Markdown plan, then call ExitPlanMode.",
+                )
             if identifier:
                 self._ordinary_tool_ids.add(identifier)
             # Tracking an ordinary tool must not grant it permission. In Plan
@@ -1105,8 +1266,9 @@ class _CocolaRunControl:
             return {
                 "decision": "block",
                 "reason": (
-                    "This Plan Mode turn is incomplete. Finish the native plan and call "
-                    "ExitPlanMode so Cocola can present it for approval. Do not execute the plan."
+                    "This Plan Mode turn is incomplete. Call cocola_update_plan with the complete "
+                    "Markdown plan, wait for it to succeed, then call ExitPlanMode so Cocola can "
+                    "present it for approval. Do not execute the plan."
                 ),
             }
 
@@ -1166,6 +1328,28 @@ class _CocolaRunControl:
                 "question": question,
                 "options": options,
             }
+        )
+
+    async def update_plan(self, args: dict[str, Any]) -> dict[str, Any]:
+        content = args.get("content_markdown")
+        if not self._plan_mode:
+            return self._tool_result("Plan updates are available only in Plan Mode.", is_error=True)
+        if not isinstance(content, str) or not content.strip():
+            return self._tool_result("content_markdown must be non-empty Markdown.", is_error=True)
+        content = content.strip()
+        if len(content.encode("utf-8")) > _PLAN_MAX_BYTES:
+            return self._tool_result("The plan exceeds Cocola's 128 KiB limit.", is_error=True)
+        if self._native_plan_file is None:
+            return self._tool_result(
+                "Claude Code's native plan file was not verified for this turn.",
+                is_error=True,
+            )
+        try:
+            self._write_native_plan_file(self._native_plan_file, content + "\n")
+        except OSError:
+            return self._tool_result("Cocola could not update the native plan file.", is_error=True)
+        return self._tool_result(
+            "The native plan file was updated. Call ExitPlanMode in the next response."
         )
 
     async def submit_result(
@@ -1302,6 +1486,29 @@ class _CocolaRunControl:
             tools.append(request_user_input)
 
         if self._plan_mode:
+            plan_annotations = sdk.ToolAnnotations(
+                readOnlyHint=False,
+                destructiveHint=False,
+                idempotentHint=True,
+                openWorldHint=False,
+            )
+
+            @sdk.tool(
+                _PLAN_UPDATE_TOOL,
+                "Replace this turn's native Claude Code plan file with complete Markdown. "
+                "After this succeeds, call ExitPlanMode in the next response.",
+                {
+                    "type": "object",
+                    "properties": {"content_markdown": {"type": "string"}},
+                    "required": ["content_markdown"],
+                    "additionalProperties": False,
+                },
+                annotations=plan_annotations,
+            )
+            async def update_plan(args: dict[str, Any]) -> dict[str, Any]:
+                return await self.update_plan(args)
+
+            tools.append(update_plan)
 
             @sdk.tool(
                 "cocola_get_runtime_info",

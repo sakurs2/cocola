@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import importlib.util
+import json
 import pathlib
 import sys
 import types
@@ -58,6 +59,34 @@ def _fake_sdk(captured: dict[str, object]):
     )
 
 
+def _native_plan_fixture(monkeypatch, tmp_path, module, *, plan_path=None):
+    session_config = tmp_path / "session" / "runtime" / "claude"
+    projects = session_config / "projects" / "-session-workspace"
+    projects.mkdir(parents=True)
+    configured = tmp_path / "home" / "cocola" / ".claude"
+    configured.parent.mkdir(parents=True)
+    configured.symlink_to(session_config, target_is_directory=True)
+    expected_plan = configured / "plans" / "trusted-plan.md"
+    transcript = projects / "session.jsonl"
+    transcript.write_text(
+        json.dumps(
+            {
+                "type": "attachment",
+                "attachment": {
+                    "type": "plan_mode",
+                    "planFilePath": str(plan_path or expected_plan),
+                    "planExists": False,
+                },
+            }
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    monkeypatch.setenv("CLAUDE_CONFIG_DIR", str(configured))
+    monkeypatch.setattr(module, "_NATIVE_PLAN_SESSION_CONFIG", str(session_config))
+    return transcript, expected_plan, session_config
+
+
 def test_plan_options_preserve_native_plan_mode_and_install_trusted_controls(monkeypatch):
     captured: dict[str, object] = {}
     monkeypatch.setitem(sys.modules, "claude_agent_sdk", _fake_sdk(captured))
@@ -84,11 +113,16 @@ def test_plan_options_preserve_native_plan_mode_and_install_trusted_controls(mon
     assert set(options["allowed_tools"]) == {
         "mcp__cocola_control__cocola_request_user_input",
         "mcp__cocola_control__cocola_get_runtime_info",
+        "mcp__cocola_control__cocola_update_plan",
     }
     assert options["permission_mode"] == "plan"
-    assert options["disallowed_tools"] == ["AskUserQuestion"]
+    assert options["disallowed_tools"] == [
+        "AskUserQuestion",
+        "Edit",
+        "NotebookEdit",
+        "Write",
+    ]
     assert "ExitPlanMode" not in options["disallowed_tools"]
-    assert "Write" not in options["disallowed_tools"]
     assert "can_use_tool" not in options
     assert set(options["hooks"]) == {
         "PreToolUse",
@@ -96,6 +130,17 @@ def test_plan_options_preserve_native_plan_mode_and_install_trusted_controls(mon
         "PostToolUseFailure",
         "Stop",
     }
+
+
+def test_plan_control_exposes_one_path_bound_plan_writer():
+    module = _load_shim("cocola_agent_shim_plan_writer_tool")
+    control = module._CocolaRunControl()
+    server = control.sdk_server(_fake_sdk({}))
+    tools = {tool.name: tool for tool in server["tools"]}
+
+    assert "cocola_update_plan" in tools
+    assert tools["cocola_update_plan"].annotations["readOnlyHint"] is False
+    assert tools["cocola_get_runtime_info"].annotations["readOnlyHint"] is True
 
 
 async def test_native_exit_plan_mode_emits_exactly_one_validated_terminal_event():
@@ -219,7 +264,7 @@ async def test_terminal_control_tool_is_rejected_while_an_ordinary_tool_is_activ
     assert control.should_interrupt() is True
 
 
-async def test_plan_hook_does_not_preapprove_workspace_writes():
+async def test_plan_hook_rejects_general_workspace_writes():
     module = _load_shim("cocola_agent_shim_native_plan_permissions")
     control = module._CocolaRunControl()
 
@@ -236,8 +281,147 @@ async def test_plan_hook_does_not_preapprove_workspace_writes():
         {},
     )
 
-    assert decision == {}
+    assert decision["hookSpecificOutput"]["permissionDecision"] == "deny"
+    assert "cocola_update_plan" in decision["hookSpecificOutput"]["permissionDecisionReason"]
     assert control.final_event()["code"] == "PLAN_OUTPUT_INVALID"
+
+
+async def test_plan_update_writes_native_file_then_preserves_exit_plan_mode(monkeypatch, tmp_path):
+    module = _load_shim("cocola_agent_shim_trusted_plan_update")
+    transcript, plan_path, _session_config = _native_plan_fixture(monkeypatch, tmp_path, module)
+    control = module._CocolaRunControl()
+    update_name = "mcp__cocola_control__cocola_update_plan"
+
+    decision = await control.pre_tool_use(
+        {
+            "tool_name": update_name,
+            "tool_use_id": "plan-update-1",
+            "transcript_path": str(transcript),
+            "tool_input": {"content_markdown": "## Plan\n\n- Inspect\n- Implement"},
+        },
+        "plan-update-1",
+        {},
+    )
+    result = await control.update_plan({"content_markdown": "## Plan\n\n- Inspect\n- Implement"})
+    await control.post_tool_use(
+        {"tool_use_id": "plan-update-1"},
+        "plan-update-1",
+        {},
+    )
+    terminal = await control.pre_tool_use(
+        {
+            "tool_name": "ExitPlanMode",
+            "tool_use_id": "exit-1",
+            "tool_input": {"plan": "## Plan\n\n- Inspect\n- Implement"},
+        },
+        "exit-1",
+        {},
+    )
+
+    assert decision["hookSpecificOutput"]["permissionDecision"] == "allow"
+    assert result["is_error"] is False
+    assert plan_path.read_text(encoding="utf-8") == "## Plan\n\n- Inspect\n- Implement\n"
+    assert terminal["hookSpecificOutput"]["permissionDecision"] == "deny"
+    assert control.final_event() == {
+        "type": "plan_ready",
+        "content_markdown": "## Plan\n\n- Inspect\n- Implement",
+    }
+
+
+async def test_plan_update_and_exit_cannot_run_in_parallel(monkeypatch, tmp_path):
+    module = _load_shim("cocola_agent_shim_parallel_plan_update")
+    transcript, _plan_path, _session_config = _native_plan_fixture(monkeypatch, tmp_path, module)
+    control = module._CocolaRunControl()
+
+    await control.pre_tool_use(
+        {
+            "tool_name": "mcp__cocola_control__cocola_update_plan",
+            "tool_use_id": "plan-update-1",
+            "transcript_path": str(transcript),
+            "tool_input": {"content_markdown": "## Plan"},
+        },
+        "plan-update-1",
+        {},
+    )
+    terminal = await control.pre_tool_use(
+        {
+            "tool_name": "ExitPlanMode",
+            "tool_use_id": "exit-1",
+            "tool_input": {"plan": "## Stale plan"},
+        },
+        "exit-1",
+        {},
+    )
+
+    assert terminal["hookSpecificOutput"]["permissionDecision"] == "deny"
+    assert control.final_event()["code"] == "PLAN_OUTPUT_INVALID"
+
+
+async def test_plan_update_rejects_missing_or_untrusted_native_path(monkeypatch, tmp_path):
+    module = _load_shim("cocola_agent_shim_untrusted_plan_update")
+    transcript, trusted_plan, _session_config = _native_plan_fixture(
+        monkeypatch,
+        tmp_path,
+        module,
+        plan_path=tmp_path / "workspace" / "forged.md",
+    )
+    invalid_attachment = transcript.read_text(encoding="utf-8")
+    transcript.write_text(
+        json.dumps(
+            {
+                "type": "attachment",
+                "attachment": {
+                    "type": "plan_mode",
+                    "planFilePath": str(trusted_plan),
+                },
+            }
+        )
+        + "\n"
+        + invalid_attachment,
+        encoding="utf-8",
+    )
+    control = module._CocolaRunControl()
+
+    decision = await control.pre_tool_use(
+        {
+            "tool_name": "mcp__cocola_control__cocola_update_plan",
+            "tool_use_id": "plan-update-1",
+            "transcript_path": str(transcript),
+            "tool_input": {"content_markdown": "## Forged"},
+        },
+        "plan-update-1",
+        {},
+    )
+    result = await control.update_plan({"content_markdown": "## Forged"})
+
+    assert decision["hookSpecificOutput"]["permissionDecision"] == "deny"
+    assert result["is_error"] is True
+    assert not (tmp_path / "workspace" / "forged.md").exists()
+
+
+async def test_plan_update_rejects_symlinked_plan_directory(monkeypatch, tmp_path):
+    module = _load_shim("cocola_agent_shim_symlinked_plan_update")
+    transcript, _plan_path, session_config = _native_plan_fixture(monkeypatch, tmp_path, module)
+    escaped = tmp_path / "escaped-plans"
+    escaped.mkdir()
+    (session_config / "plans").symlink_to(escaped, target_is_directory=True)
+    control = module._CocolaRunControl()
+
+    decision = await control.pre_tool_use(
+        {
+            "tool_name": "mcp__cocola_control__cocola_update_plan",
+            "tool_use_id": "plan-update-1",
+            "transcript_path": str(transcript),
+            "tool_input": {"content_markdown": "## Must stay contained"},
+        },
+        "plan-update-1",
+        {},
+    )
+    result = await control.update_plan({"content_markdown": "## Must stay contained"})
+
+    assert decision["hookSpecificOutput"]["permissionDecision"] == "allow"
+    assert result["is_error"] is True
+    assert list(escaped.iterdir()) == []
 
 
 async def test_denied_tool_result_releases_custom_terminal_gate():
@@ -621,10 +805,12 @@ def test_plan_prompt_uses_claude_native_plan_completion():
     from cocola_agent_runtime.server import PLAN_SYSTEM_PROMPT
 
     assert "cocola_submit_plan" not in PLAN_SYSTEM_PROMPT
+    assert "cocola_update_plan" in PLAN_SYSTEM_PROMPT
     assert "cocola_request_user_input" in PLAN_SYSTEM_PROMPT
     assert "native plan file" in PLAN_SYSTEM_PROMPT
     assert "<cocola_plan>" not in PLAN_SYSTEM_PROMPT
     assert "ExitPlanMode" in PLAN_SYSTEM_PROMPT
+    assert "never call Write" in PLAN_SYSTEM_PROMPT
     assert "AskUserQuestion" not in PLAN_SYSTEM_PROMPT
 
 
