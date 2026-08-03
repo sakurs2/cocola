@@ -983,9 +983,10 @@ class _CocolaRunControl:
             self._internal_tool_ids.add(identifier)
         if not self._plan_mode:
             return False
-        if self._ordinary_tool_ids:
-            self._record_protocol_error(_NATIVE_PLAN_TOOL)
-            return True
+        # A native permission denial can leave its tool id tracked until the
+        # corresponding ToolResultBlock reaches the message stream. That must
+        # not invalidate ExitPlanMode: the denied tool never executed, and the
+        # native Plan permission layer remains the side-effect boundary.
         if self._terminal_reserved_name not in ("", _NATIVE_PLAN_TOOL):
             self._record_protocol_error(_NATIVE_PLAN_TOOL)
             return True
@@ -993,10 +994,18 @@ class _CocolaRunControl:
         self._terminal_reserved_name = _NATIVE_PLAN_TOOL
         content = tool_input.get("plan") if isinstance(tool_input, dict) else None
         if not isinstance(content, str):
+            # Claude Code >=2.1 injects plan content into PreToolUse, while
+            # the later AssistantMessage retains the model's original (often
+            # empty) ExitPlanMode input. Preserve the plan already captured by
+            # the hook when that duplicate message arrives.
+            if self._terminal_event is not None:
+                return True
             self._record_protocol_error(_NATIVE_PLAN_TOOL)
             return True
         content = content.strip()
         if not content or len(content.encode("utf-8")) > _PLAN_MAX_BYTES:
+            if not content and self._terminal_event is not None:
+                return True
             self._record_protocol_error(_NATIVE_PLAN_TOOL)
             return True
 
@@ -1060,7 +1069,11 @@ class _CocolaRunControl:
                 )
             if identifier:
                 self._ordinary_tool_ids.add(identifier)
-            return self._pre_tool_decision(True)
+            # Tracking an ordinary tool must not grant it permission. In Plan
+            # Mode, an allow decision here would bypass Claude Code's native
+            # read-only policy and let Write/Edit execute. Returning no hook
+            # decision preserves the SDK's normal permission evaluation.
+            return {}
 
     async def post_tool_use(
         self,
@@ -1074,11 +1087,35 @@ class _CocolaRunControl:
                 self._ordinary_tool_ids.discard(identifier)
         return {}
 
+    async def stop(
+        self,
+        hook_input: dict[str, Any],
+        _tool_use_id: str | None,
+        _context: Any,
+    ) -> dict[str, Any]:
+        """Give an incomplete native Plan turn one chance to finalize correctly."""
+        async with self._tool_gate_lock:
+            if (
+                not self._plan_mode
+                or self._terminal_event is not None
+                or self._protocol_error is not None
+                or bool(hook_input.get("stop_hook_active"))
+            ):
+                return {}
+            return {
+                "decision": "block",
+                "reason": (
+                    "This Plan Mode turn is incomplete. Finish the native plan and call "
+                    "ExitPlanMode so Cocola can present it for approval. Do not execute the plan."
+                ),
+            }
+
     def sdk_hooks(self, sdk: Any) -> dict[str, list[Any]]:
         return {
             "PreToolUse": [sdk.HookMatcher(matcher=None, hooks=[self.pre_tool_use])],
             "PostToolUse": [sdk.HookMatcher(matcher=None, hooks=[self.post_tool_use])],
             "PostToolUseFailure": [sdk.HookMatcher(matcher=None, hooks=[self.post_tool_use])],
+            "Stop": [sdk.HookMatcher(matcher=None, hooks=[self.stop])],
         }
 
     async def request_user_input(self, args: dict[str, Any]) -> dict[str, Any]:
@@ -1350,6 +1387,13 @@ class _CocolaRunControl:
                 return events
             for block in content:
                 block_class = type(block).__name__
+                if block_class in ("ToolResultBlock", "ServerToolResultBlock"):
+                    # A permission denial produces a ToolResultBlock but is not
+                    # guaranteed to run PostToolUseFailure. Release the gate
+                    # from the authoritative message stream as well.
+                    identifier = str(getattr(block, "tool_use_id", "") or "")
+                    if identifier:
+                        self._ordinary_tool_ids.discard(identifier)
                 if (
                     self._plan_mode
                     and message_class == "AssistantMessage"

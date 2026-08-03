@@ -94,6 +94,7 @@ def test_plan_options_preserve_native_plan_mode_and_install_trusted_controls(mon
         "PreToolUse",
         "PostToolUse",
         "PostToolUseFailure",
+        "Stop",
     }
 
 
@@ -119,6 +120,42 @@ async def test_native_exit_plan_mode_emits_exactly_one_validated_terminal_event(
     duplicate = await control.request_user_input({"question": "Which branch?"})
     assert duplicate["is_error"] is True
     assert control.final_event()["code"] == "PLAN_OUTPUT_INVALID"
+
+
+async def test_native_plan_hook_survives_empty_exit_plan_message_input():
+    module = _load_shim("cocola_agent_shim_injected_native_plan")
+    control = module._CocolaRunControl()
+    await control.pre_tool_use(
+        {
+            "tool_name": "ExitPlanMode",
+            "tool_use_id": "exit-1",
+            "tool_input": {
+                "plan": "## Injected plan\n\n- Implement safely",
+                "planFilePath": "/home/cocola/.claude/plans/safe.md",
+            },
+        },
+        "exit-1",
+        {},
+    )
+    assistant = type(
+        "AssistantMessage",
+        (),
+        {
+            "content": [
+                type(
+                    "ToolUseBlock",
+                    (),
+                    {"id": "exit-1", "name": "ExitPlanMode", "input": {}},
+                )()
+            ]
+        },
+    )()
+
+    assert control.message_events(assistant, module._ClaudeTaskProgress()) == []
+    assert control.final_event() == {
+        "type": "plan_ready",
+        "content_markdown": "## Injected plan\n\n- Implement safely",
+    }
 
 
 def test_native_exit_plan_mode_message_capture_is_idempotent_and_hidden():
@@ -176,10 +213,148 @@ async def test_terminal_control_tool_is_rejected_while_an_ordinary_tool_is_activ
         {},
     )
 
-    assert ordinary["hookSpecificOutput"]["permissionDecision"] == "allow"
+    assert ordinary == {}
     assert terminal["hookSpecificOutput"]["permissionDecision"] == "deny"
     assert control.final_event()["code"] == "QUESTION_OUTPUT_INVALID"
     assert control.should_interrupt() is True
+
+
+async def test_plan_hook_does_not_preapprove_workspace_writes():
+    module = _load_shim("cocola_agent_shim_native_plan_permissions")
+    control = module._CocolaRunControl()
+
+    decision = await control.pre_tool_use(
+        {
+            "tool_name": "Write",
+            "tool_use_id": "write-1",
+            "tool_input": {
+                "file_path": "/session/workspace/todo.html",
+                "content": "must not run while planning",
+            },
+        },
+        "write-1",
+        {},
+    )
+
+    assert decision == {}
+    assert control.final_event()["code"] == "PLAN_OUTPUT_INVALID"
+
+
+async def test_denied_tool_result_releases_custom_terminal_gate():
+    module = _load_shim("cocola_agent_shim_denied_plan_tool")
+    control = module._CocolaRunControl()
+    await control.pre_tool_use(
+        {"tool_name": "Write", "tool_use_id": "write-1"},
+        "write-1",
+        {},
+    )
+    denied_result = type(
+        "UserMessage",
+        (),
+        {
+            "content": [
+                type(
+                    "ToolResultBlock",
+                    (),
+                    {
+                        "tool_use_id": "write-1",
+                        "content": "Permission denied",
+                        "is_error": True,
+                    },
+                )()
+            ]
+        },
+    )()
+
+    control.message_events(denied_result, module._ClaudeTaskProgress())
+    terminal = await control.pre_tool_use(
+        {
+            "tool_name": "mcp__cocola_control__cocola_request_user_input",
+            "tool_use_id": "question-1",
+        },
+        "question-1",
+        {},
+    )
+    await control.request_user_input({"question": "Which package?"})
+
+    assert terminal["hookSpecificOutput"]["permissionDecision"] == "allow"
+    assert control.final_event() == {
+        "type": "question_required",
+        "question": "Which package?",
+        "options": [],
+    }
+
+
+async def test_native_plan_completion_ignores_denied_write_still_in_hook_flight():
+    module = _load_shim("cocola_agent_shim_native_plan_after_denial")
+    control = module._CocolaRunControl()
+    await control.pre_tool_use(
+        {"tool_name": "Write", "tool_use_id": "write-1"},
+        "write-1",
+        {},
+    )
+
+    terminal = await control.pre_tool_use(
+        {
+            "tool_name": "ExitPlanMode",
+            "tool_use_id": "exit-1",
+            "tool_input": {"plan": "## Plan\n\n- Implement safely"},
+        },
+        "exit-1",
+        {},
+    )
+
+    assert terminal["hookSpecificOutput"]["permissionDecision"] == "deny"
+    assert control.final_event() == {
+        "type": "plan_ready",
+        "content_markdown": "## Plan\n\n- Implement safely",
+    }
+
+
+async def test_plan_stop_hook_reprompts_once_for_native_completion():
+    module = _load_shim("cocola_agent_shim_plan_stop_hook")
+    control = module._CocolaRunControl()
+
+    first_stop = await control.stop(
+        {"hook_event_name": "Stop", "stop_hook_active": False},
+        None,
+        {},
+    )
+    repeated_stop = await control.stop(
+        {"hook_event_name": "Stop", "stop_hook_active": True},
+        None,
+        {},
+    )
+
+    assert first_stop["decision"] == "block"
+    assert "ExitPlanMode" in first_stop["reason"]
+    assert repeated_stop == {}
+
+
+async def test_plan_stop_hook_allows_native_plan_or_question_terminal():
+    module = _load_shim("cocola_agent_shim_completed_plan_stop_hook")
+    plan = module._CocolaRunControl()
+    await plan.pre_tool_use(
+        {
+            "tool_name": "ExitPlanMode",
+            "tool_use_id": "exit-1",
+            "tool_input": {"plan": "## Plan\n\n- Ship it"},
+        },
+        "exit-1",
+        {},
+    )
+    question = module._CocolaRunControl()
+    await question.request_user_input({"question": "Which package?"})
+
+    assert await plan.stop({"stop_hook_active": False}, None, {}) == {}
+    assert await question.stop({"stop_hook_active": False}, None, {}) == {}
+
+
+async def test_execute_mode_stop_hook_never_reprompts():
+    module = _load_shim("cocola_agent_shim_execute_stop_hook")
+    control = module._CocolaRunControl(plan_mode=False)
+
+    assert await control.stop({"stop_hook_active": False}, None, {}) == {}
 
 
 async def test_ordinary_tools_are_rejected_after_a_terminal_tool_is_reserved():
