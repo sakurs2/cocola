@@ -89,6 +89,8 @@ jobs:
             context: deploy/sandbox-runtime
     steps:
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+        with:
+          fetch-depth: 0
       - uses: docker/setup-qemu-action@96fe6ef7f33517b61c61be40b68a1882f3264fb8 # v4
       - uses: docker/setup-buildx-action@bb05f3f5519dd87d3ba754cc423b652a5edd6d2c # v4
       - uses: docker/login-action@abd2ef45e78c5afb21d64d4ca52ee8550d9572c7 # v4
@@ -107,7 +109,41 @@ jobs:
             type=semver,pattern={{version}}
             type=semver,pattern={{major}}.{{minor}}
             type=raw,value=latest,enable=${{ !contains(github.ref_name, '-') }}
+      - name: Detect an unchanged sandbox runtime
+        id: sandbox_runtime
+        if: matrix.name == 'sandbox-runtime'
+        env:
+          IMAGE_NAME: ghcr.io/${{ github.repository_owner }}/cocola-sandbox-runtime
+          RELEASE_TAG: ${{ github.ref_name }}
+        run: |
+          reuse=false
+          previous_tag="$(git describe --tags --match 'v*' --abbrev=0 "${RELEASE_TAG}^{commit}^" 2>/dev/null || true)"
+          if [[ -n "$previous_tag" ]] && \
+             git diff --quiet "${previous_tag}^{commit}" "${RELEASE_TAG}^{commit}" -- deploy/sandbox-runtime && \
+             docker buildx imagetools inspect "${IMAGE_NAME}:${previous_tag}" >/dev/null 2>&1; then
+            reuse=true
+            echo "Sandbox runtime is unchanged since ${previous_tag}; reusing its image digest."
+            echo "source=${IMAGE_NAME}:${previous_tag}" >> "$GITHUB_OUTPUT"
+          else
+            echo "Sandbox runtime changed or no reusable release image exists; building it."
+          fi
+          echo "reuse=${reuse}" >> "$GITHUB_OUTPUT"
+      - name: Reuse unchanged sandbox runtime
+        if: matrix.name == 'sandbox-runtime' && steps.sandbox_runtime.outputs.reuse == 'true'
+        env:
+          SOURCE_IMAGE: ${{ steps.sandbox_runtime.outputs.source }}
+          TARGET_TAGS: ${{ steps.meta.outputs.tags }}
+        run: |
+          mapfile -t tags <<< "$TARGET_TAGS"
+          tag_args=()
+          for tag in "${tags[@]}"; do
+            if [[ -n "$tag" ]]; then
+              tag_args+=(--tag "$tag")
+            fi
+          done
+          docker buildx imagetools create "${tag_args[@]}" "$SOURCE_IMAGE"
       - id: build
+        if: matrix.name != 'sandbox-runtime' || steps.sandbox_runtime.outputs.reuse != 'true'
         uses: docker/build-push-action@53b7df96c91f9c12dcc8a07bcb9ccacbed38856a # v7
         with:
           context: ${{ matrix.context }}
@@ -137,7 +173,7 @@ jobs:
       - name: Verify sandbox runtime
         if: matrix.name == 'sandbox-runtime'
         env:
-          IMAGE: ghcr.io/${{ github.repository_owner }}/cocola-sandbox-runtime@${{ steps.build.outputs.digest }}
+          IMAGE: ghcr.io/${{ github.repository_owner }}/cocola-sandbox-runtime:${{ github.ref_name }}
         run: |
           output="$(docker run --rm --platform linux/amd64 "$IMAGE" /opt/cocola/shim/entrypoint.sh --selfcheck)"
           echo "$output"
