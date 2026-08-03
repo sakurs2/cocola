@@ -9,13 +9,21 @@ Proves the three things M3 dropped now survive:
      input) from passthrough frames.
 """
 
+from unittest.mock import Mock
+
 from cocola_llm_gateway.anthropic_codec import (
     collect_to_anthropic_response,
     stream_to_anthropic_sse,
     to_chat_request,
 )
 from cocola_llm_gateway.types import StreamEvent, StreamEventType, Usage
-from cocola_llm_gateway.upstream.anthropic import _build_payload, _tool_turn_violations
+from cocola_llm_gateway.upstream import anthropic
+from cocola_llm_gateway.upstream.anthropic import (
+    _TOOL_NAME_LOG_LIMIT,
+    _build_payload,
+    _log_upstream_tool_names,
+    _tool_turn_violations,
+)
 
 
 async def _events(seq):
@@ -94,6 +102,56 @@ def test_inbound_preserves_tools_and_tool_result_blocks():
     # plain text message still flattened, no spurious blocks
     assert req.messages[0].content == "weather in NYC?"
     assert req.messages[0].content_blocks is None
+
+
+def test_upstream_tool_diagnostic_logs_only_tool_names(monkeypatch):
+    info = Mock()
+    monkeypatch.setattr(anthropic.log, "info", info)
+    payload = {
+        "model": "secret-model-route",
+        "system": "secret system prompt",
+        "messages": [{"role": "user", "content": "secret user prompt"}],
+        "tools": [
+            {
+                "name": "ExitPlanMode",
+                "description": "secret tool description",
+                "input_schema": {"api_key": "secret-key"},
+            },
+            {
+                "name": "mcp__cocola_control__cocola_update_plan",
+                "description": "another secret description",
+            },
+        ],
+    }
+
+    _log_upstream_tool_names(payload)
+
+    info.assert_called_once_with(
+        "anthropic upstream tool surface",
+        tool_names=["ExitPlanMode", "mcp__cocola_control__cocola_update_plan"],
+        tool_count=2,
+        tool_names_truncated=False,
+    )
+    rendered_call = repr(info.call_args)
+    assert "secret" not in rendered_call
+    assert "api_key" not in rendered_call
+
+
+def test_upstream_tool_diagnostic_redacts_invalid_names_and_caps_output(monkeypatch):
+    info = Mock()
+    monkeypatch.setattr(anthropic.log, "info", info)
+    tools = [{"name": "valid_name"}, {"name": "unsafe\nsecret"}, "not-an-object"]
+    tools.extend({"name": f"tool_{index}"} for index in range(_TOOL_NAME_LOG_LIMIT))
+
+    _log_upstream_tool_names({"tools": tools})
+
+    fields = info.call_args.kwargs
+    assert fields["tool_names"][:3] == ["valid_name", "<invalid>", "<invalid>"]
+    assert len(fields["tool_names"]) == _TOOL_NAME_LOG_LIMIT
+    assert fields["tool_count"] == _TOOL_NAME_LOG_LIMIT + 3
+    assert fields["tool_names_truncated"] is True
+    assert "unsafe" not in repr(info.call_args)
+    assert "secret" not in repr(info.call_args)
 
 
 def test_anthropic_payload_promotes_tool_result_blocks_before_text():

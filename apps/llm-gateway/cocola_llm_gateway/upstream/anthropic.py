@@ -14,6 +14,7 @@ never to point at an internal inference endpoint.
 from __future__ import annotations
 
 import json
+import re
 from collections.abc import AsyncIterator
 from dataclasses import dataclass
 
@@ -24,6 +25,9 @@ from cocola_llm_gateway.types import ChatRequest, StreamEvent, StreamEventType, 
 from cocola_llm_gateway.upstream.errors import UpstreamError
 
 log = get_logger("cocola.llm-gateway.upstream.anthropic")
+
+_TOOL_NAME_LOG_LIMIT = 128
+_SAFE_TOOL_NAME = re.compile(r"^[A-Za-z0-9_-]{1,128}$")
 
 
 @dataclass
@@ -311,6 +315,30 @@ def _log_tool_payload_if_invalid(payload: dict) -> None:
     )
 
 
+def _log_upstream_tool_names(payload: dict) -> None:
+    """Log only the bounded tool-name surface sent to the upstream model.
+
+    Tool definitions may contain prompts, schemas, examples, or other sensitive
+    configuration. Keep the diagnostic deliberately narrow: valid Anthropic
+    tool names are logged verbatim, while malformed or suspicious names are
+    replaced with a fixed marker so callers cannot smuggle arbitrary log data
+    through this field.
+    """
+    raw_tools = payload.get("tools")
+    tools = raw_tools if isinstance(raw_tools, list) else []
+    tool_names: list[str] = []
+    for tool in tools[:_TOOL_NAME_LOG_LIMIT]:
+        raw_name = tool.get("name") if isinstance(tool, dict) else None
+        name = raw_name.strip() if isinstance(raw_name, str) else ""
+        tool_names.append(name if _SAFE_TOOL_NAME.fullmatch(name) else "<invalid>")
+    log.info(
+        "anthropic upstream tool surface",
+        tool_names=tool_names,
+        tool_count=len(tools),
+        tool_names_truncated=len(tools) > _TOOL_NAME_LOG_LIMIT,
+    )
+
+
 def _log_tool_payload_rejected(status_code: int, body: str, payload: dict) -> None:
     if "tool_use" not in body and "tool_result" not in body:
         return
@@ -371,6 +399,7 @@ class AnthropicUpstream:
                 yield ev
             return
         payload = _build_payload(req, stream=True)
+        _log_upstream_tool_names(payload)
         _log_tool_payload_if_invalid(payload)
         try:
             async with self._client.stream("POST", "/v1/messages", json=payload) as resp:
@@ -403,6 +432,7 @@ class AnthropicUpstream:
         through the identical reconstruction logic -- no codec change needed.
         """
         payload = _build_payload(req, stream=False)
+        _log_upstream_tool_names(payload)
         _log_tool_payload_if_invalid(payload)
         try:
             resp = await self._client.post("/v1/messages", json=payload)
