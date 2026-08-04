@@ -115,6 +115,11 @@ echo "$SELF" | grep -qv '"claude_agent_sdk":"missing' && ok "claude-agent-sdk im
 echo "$SELF" | grep -q '"codex_cli":"codex-cli [0-9]' && ok "codex CLI pre-baked" || bad "codex CLI missing"
 echo "$SELF" | grep -q '"codex_sdk":"0.144.1"' && ok "codex SDK pinned" || bad "codex SDK missing / wrong version"
 echo "$SELF" | grep -q '"openpyxl":"3.1.5"' && ok "openpyxl pinned in runtime venv" || bad "openpyxl missing / wrong version"
+CLAUDE_PLAN_DIR_METADATA="$(docker exec -i "$CTR" stat -c '%U:%G:%a' \
+  /home/cocola/.claude/plans 2>/dev/null || true)"
+[ "$CLAUDE_PLAN_DIR_METADATA" = "cocola:cocola:700" ] \
+  && ok "Claude native plan directory is pre-created with private ownership" \
+  || bad "Claude native plan directory metadata is ${CLAUDE_PLAN_DIR_METADATA:-missing} (want cocola:cocola:700)"
 if docker exec -i -u cocola "$CTR" sh -c \
   'test "$GOBIN" = /home/cocola/.local/bin &&
    test -w /home/cocola/.local/bin &&

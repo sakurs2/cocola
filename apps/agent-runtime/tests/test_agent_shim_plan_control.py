@@ -132,6 +132,8 @@ def test_plan_options_preserve_native_plan_mode_and_install_trusted_controls(mon
     assert "max_results 1" in plan_instructions
     assert "ExitPlanMode" in plan_instructions
     assert "Do not use Skill" in plan_instructions
+    assert "Never use Bash, mkdir, touch" in plan_instructions
+    assert "owns both directory creation and persistence" in plan_instructions
     assert set(options["hooks"]) == {
         "PreToolUse",
         "PostToolUse",
@@ -882,6 +884,8 @@ def test_plan_prompt_uses_claude_native_plan_completion():
     assert "<cocola_plan>" not in PLAN_SYSTEM_PROMPT
     assert "ExitPlanMode" in PLAN_SYSTEM_PROMPT
     assert "never call Write" in PLAN_SYSTEM_PROMPT
+    assert "Never use Bash, mkdir, touch" in PLAN_SYSTEM_PROMPT
+    assert "owns both directory creation and persistence" in PLAN_SYSTEM_PROMPT
     assert "AskUserQuestion" not in PLAN_SYSTEM_PROMPT
 
 

@@ -84,6 +84,23 @@ chown cocola:cocola \
 chown root:cocola /run/cocola
 chmod 0750 /run/cocola
 
+# Claude Code keeps native Plan Mode files in its hidden session config. Prepare
+# the directory before any Agent turn so models never need to create it through
+# Bash. Fail closed if persisted session state replaced the directory with a
+# symlink; the plan adapter applies the same containment rule when writing.
+claude_plan_dir=/home/cocola/.claude/plans
+if [ -L "$claude_plan_dir" ]; then
+  log "ERROR: Claude plan directory must not be a symbolic link" >&2
+  exit 65
+fi
+mkdir -p "$claude_plan_dir"
+if [ -L "$claude_plan_dir" ]; then
+  log "ERROR: Claude plan directory became a symbolic link during initialization" >&2
+  exit 65
+fi
+chown cocola:cocola "$claude_plan_dir"
+chmod 0700 "$claude_plan_dir"
+
 if [ -n "${COCOLA_EGRESS_ALLOWLIST+x}" ]; then
   if /opt/cocola/init-firewall.sh; then
     log "egress firewall installed"

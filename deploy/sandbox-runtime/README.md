@@ -267,7 +267,8 @@ Skill bundles are reconciled into the Session Volume's unified Skill Set;
 links to immutable image assets. Secrets, other rootfs files and the rest of
 `$HOME` are never copied into the Session Volume.
 
-Every start also guarantees `/workspace/outputs`,
+Every start also guarantees the private Claude Plan Mode directory
+`/home/cocola/.claude/plans`, plus `/workspace/outputs`,
 `/workspace/outputs/browser`, `/workspace/uploads`, `/workspace/downloads`, and
 `/workspace/skills`.
 Project runs create their Git worktree separately at `/workspace/project`.
