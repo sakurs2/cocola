@@ -123,12 +123,49 @@ def test_plan_options_preserve_native_plan_mode_and_install_trusted_controls(mon
         "Write",
     ]
     assert "ExitPlanMode" not in options["disallowed_tools"]
-    assert "can_use_tool" not in options
+    assert options["can_use_tool"] == control.can_use_tool
+    assert options["env"] == {"ENABLE_TOOL_SEARCH": "1"}
+    plan_instructions = options["extra_args"]["plan-mode-instructions"]
+    assert "cocola_update_plan" in plan_instructions
+    assert "ToolSearch" in plan_instructions
+    assert "select:ExitPlanMode" in plan_instructions
+    assert "max_results 1" in plan_instructions
+    assert "ExitPlanMode" in plan_instructions
+    assert "Do not use Skill" in plan_instructions
     assert set(options["hooks"]) == {
         "PreToolUse",
         "PostToolUse",
         "PostToolUseFailure",
         "Stop",
+    }
+
+
+async def test_plan_permission_callback_never_grants_additional_permissions():
+    module = _load_shim("cocola_agent_shim_plan_permission_callback")
+    control = module._CocolaRunControl()
+    context = types.SimpleNamespace(tool_use_id="bash-1")
+
+    denial = await control.can_use_tool("Bash", {"command": "git status"}, context)
+
+    assert denial.message == "Cocola Plan Mode does not grant interactive tool permissions."
+    assert denial.interrupt is False
+
+
+async def test_plan_permission_callback_captures_native_exit_before_denial():
+    module = _load_shim("cocola_agent_shim_plan_exit_permission_callback")
+    control = module._CocolaRunControl()
+    context = types.SimpleNamespace(tool_use_id="exit-1")
+
+    denial = await control.can_use_tool(
+        "ExitPlanMode",
+        {"plan": "## Plan\n\n- Implement safely"},
+        context,
+    )
+
+    assert denial.message == "Cocola Plan Mode does not grant interactive tool permissions."
+    assert control.final_event() == {
+        "type": "plan_ready",
+        "content_markdown": "## Plan\n\n- Implement safely",
     }
 
 
@@ -511,8 +548,40 @@ async def test_plan_stop_hook_reprompts_once_for_native_completion():
     )
 
     assert first_stop["decision"] == "block"
+    assert "cocola_update_plan" in first_stop["reason"]
+    assert "ToolSearch" in first_stop["reason"]
+    assert "select:ExitPlanMode" in first_stop["reason"]
     assert "ExitPlanMode" in first_stop["reason"]
     assert repeated_stop == {}
+
+
+async def test_plan_stop_hook_only_requests_native_exit_after_plan_persistence(
+    monkeypatch, tmp_path
+):
+    module = _load_shim("cocola_agent_shim_persisted_plan_stop_hook")
+    transcript, _plan_path, _session_config = _native_plan_fixture(monkeypatch, tmp_path, module)
+    control = module._CocolaRunControl()
+    await control.pre_tool_use(
+        {
+            "tool_name": "mcp__cocola_control__cocola_update_plan",
+            "tool_use_id": "plan-update-1",
+            "transcript_path": str(transcript),
+        },
+        "plan-update-1",
+        {},
+    )
+    result = await control.update_plan({"content_markdown": "## Plan\n\n- Implement"})
+    await control.post_tool_use({"tool_use_id": "plan-update-1"}, "plan-update-1", {})
+
+    stopped = await control.stop({"stop_hook_active": False}, None, {})
+
+    assert result["is_error"] is False
+    assert stopped["decision"] == "block"
+    assert "already persisted" in stopped["reason"]
+    assert "ToolSearch" in stopped["reason"]
+    assert "select:ExitPlanMode" in stopped["reason"]
+    assert "ExitPlanMode" in stopped["reason"]
+    assert "Call cocola_update_plan" not in stopped["reason"]
 
 
 async def test_plan_stop_hook_allows_native_plan_or_question_terminal():
@@ -808,6 +877,8 @@ def test_plan_prompt_uses_claude_native_plan_completion():
     assert "cocola_update_plan" in PLAN_SYSTEM_PROMPT
     assert "cocola_request_user_input" in PLAN_SYSTEM_PROMPT
     assert "native plan file" in PLAN_SYSTEM_PROMPT
+    assert "ToolSearch" in PLAN_SYSTEM_PROMPT
+    assert "Never use Skill" in PLAN_SYSTEM_PROMPT
     assert "<cocola_plan>" not in PLAN_SYSTEM_PROMPT
     assert "ExitPlanMode" in PLAN_SYSTEM_PROMPT
     assert "never call Write" in PLAN_SYSTEM_PROMPT
@@ -1081,3 +1152,6 @@ def test_execute_options_merge_control_with_user_mcps(monkeypatch):
     options = captured["options"]
     assert set(options["mcp_servers"]) == {"github", "cocola_control"}
     assert options["disallowed_tools"] == ["AskUserQuestion"]
+    assert "env" not in options
+    assert "extra_args" not in options
+    assert "can_use_tool" not in options

@@ -122,6 +122,15 @@ def _build_options(
         permission_mode=permission_mode,
         disallowed_tools=disallowed_tools,
     )
+    if plan_mode:
+        # ExitPlanMode is a deferred Claude Code built-in. With a custom
+        # ANTHROPIC_BASE_URL Claude Code exposes deferred built-ins only when
+        # tool search is enabled, otherwise the model sees the protocol footer
+        # but has no tool capable of loading ExitPlanMode.
+        kwargs["env"] = {"ENABLE_TOOL_SEARCH": "1"}
+        kwargs["extra_args"] = {
+            "plan-mode-instructions": _NATIVE_PLAN_MODE_INSTRUCTIONS,
+        }
 
     # The renamed Claude *Agent* SDK (>=0.2) no longer enables Claude Code's
     # default behaviour implicitly: when `tools`/`system_prompt` are left unset
@@ -174,6 +183,11 @@ def _build_options(
         kwargs["hooks"] = control.sdk_hooks(claude_agent_sdk)
         if plan_mode:
             kwargs["allowed_tools"] = sorted(control.tool_names)
+            # In SDK print mode Claude Code registers interactive built-ins
+            # such as ExitPlanMode only when the host provides a permission
+            # callback. The callback below never grants extra permission;
+            # native Plan Mode and the PreToolUse hooks remain authoritative.
+            kwargs["can_use_tool"] = control.can_use_tool
     elif isinstance(req.get("mcp_servers"), dict) and req["mcp_servers"]:
         kwargs["mcp_servers"] = req["mcp_servers"]
         kwargs["strict_mcp_config"] = True
@@ -205,6 +219,15 @@ _PLAN_MUTATION_TOOLS = frozenset({"Write", "Edit", "NotebookEdit"})
 _NATIVE_PLAN_SESSION_CONFIG = "/session/runtime/claude"
 _PLAN_TRANSCRIPT_SCAN_CHUNK_BYTES = 64 * 1024
 _NATIVE_PLAN_TOOL = "ExitPlanMode"
+_NATIVE_PLAN_MODE_INSTRUCTIONS = (
+    "Inspect the workspace with read-only tools and produce a complete implementation plan. "
+    "If clarification is required, call cocola_request_user_input as the only tool call in "
+    "that response. When the plan is final, call cocola_update_plan with the complete Markdown "
+    "plan as the only tool call and wait for it to succeed. Then call ToolSearch with query "
+    "select:ExitPlanMode and max_results 1 to load the native ExitPlanMode tool, and call "
+    "ExitPlanMode as the only tool call in the next response. Do not use Skill to look for "
+    "ExitPlanMode and do not execute the plan."
+)
 _RESULT_CONTROL_TOOL = "cocola_submit_result"
 _BUILTIN_RESULT_TOOL_RENDERERS = {
     "cocola_present_summary": "summary",
@@ -911,6 +934,7 @@ class _CocolaRunControl:
         self._internal_tool_ids: set[str] = set()
         self._tool_outcomes: dict[str, str] = {}
         self._native_plan_file: Path | None = None
+        self._plan_persisted = False
         names: set[str] = set()
         if plan_mode:
             names.update(_PLAN_CONTROL_TOOL_NAMES)
@@ -1263,13 +1287,24 @@ class _CocolaRunControl:
                 or bool(hook_input.get("stop_hook_active"))
             ):
                 return {}
+            if self._plan_persisted:
+                reason = (
+                    "The native plan file is already persisted. Call ToolSearch with query "
+                    "select:ExitPlanMode and max_results 1 to load ExitPlanMode, then call "
+                    "ExitPlanMode as the only tool call so Cocola can present the plan for "
+                    "approval. Do not call cocola_update_plan again and do not execute the plan."
+                )
+            else:
+                reason = (
+                    "This Plan Mode turn is incomplete. Call cocola_update_plan with the complete "
+                    "Markdown plan and wait for it to succeed. Then call ToolSearch with query "
+                    "select:ExitPlanMode and max_results 1 to load ExitPlanMode, and call "
+                    "ExitPlanMode so Cocola can present the plan for approval. Do not execute "
+                    "the plan."
+                )
             return {
                 "decision": "block",
-                "reason": (
-                    "This Plan Mode turn is incomplete. Call cocola_update_plan with the complete "
-                    "Markdown plan, wait for it to succeed, then call ExitPlanMode so Cocola can "
-                    "present it for approval. Do not execute the plan."
-                ),
+                "reason": reason,
             }
 
     def sdk_hooks(self, sdk: Any) -> dict[str, list[Any]]:
@@ -1279,6 +1314,23 @@ class _CocolaRunControl:
             "PostToolUseFailure": [sdk.HookMatcher(matcher=None, hooks=[self.post_tool_use])],
             "Stop": [sdk.HookMatcher(matcher=None, hooks=[self.stop])],
         }
+
+    async def can_use_tool(
+        self,
+        tool_name: str,
+        tool_input: dict[str, Any],
+        context: Any,
+    ) -> Any:
+        """Register SDK permission handling without granting new Plan permissions."""
+        import claude_agent_sdk
+
+        if self._plan_mode and tool_name == _NATIVE_PLAN_TOOL:
+            identifier = str(getattr(context, "tool_use_id", "") or "")
+            async with self._tool_gate_lock:
+                self._capture_native_plan(tool_input, identifier)
+        return claude_agent_sdk.PermissionResultDeny(
+            message="Cocola Plan Mode does not grant interactive tool permissions."
+        )
 
     async def request_user_input(self, args: dict[str, Any]) -> dict[str, Any]:
         tool_name = f"mcp__{_PLAN_CONTROL_SERVER}__cocola_request_user_input"
@@ -1348,8 +1400,11 @@ class _CocolaRunControl:
             self._write_native_plan_file(self._native_plan_file, content + "\n")
         except OSError:
             return self._tool_result("Cocola could not update the native plan file.", is_error=True)
+        self._plan_persisted = True
         return self._tool_result(
-            "The native plan file was updated. Call ExitPlanMode in the next response."
+            "The native plan file was updated. Call ToolSearch with query select:ExitPlanMode "
+            "and max_results 1 to load ExitPlanMode, then call ExitPlanMode as the only tool "
+            "call in the next response."
         )
 
     async def submit_result(
