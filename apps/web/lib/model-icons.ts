@@ -160,6 +160,47 @@ export const LOBE_ICON_SLUG_ALIASES: Record<string, string> = {
   xai: "xai",
 };
 
+const MODEL_ICON_HINTS: ReadonlyArray<readonly [string, string]> = [
+  ["deepseek", "deepseek"],
+  ["claude", "claude"],
+  ["anthropic", "anthropic"],
+  ["qwen", "qwen"],
+  ["gemini", "gemini"],
+  ["google", "google"],
+  ["codex", "codex"],
+  ["openai", "openai"],
+  ["gpt", "openai"],
+  ["grok", "grok"],
+  ["xai", "xai"],
+  ["mistral", "mistral"],
+  ["llama", "metaai"],
+  ["meta", "metaai"],
+  ["moonshot", "moonshot"],
+  ["kimi", "kimi"],
+  ["doubao", "doubao"],
+  ["volcengine", "volcengine"],
+  ["chatglm", "chatglm"],
+  ["zhipu", "zhipu"],
+  ["minimax", "minimax"],
+  ["stepfun", "stepfun"],
+  ["ernie", "wenxin"],
+  ["wenxin", "wenxin"],
+  ["cohere", "cohere"],
+  ["groq", "groq"],
+  ["perplexity", "perplexity"],
+  ["openrouter", "openrouter"],
+  ["ollama", "ollama"],
+];
+
+export function inferModelIconSlug(...values: Array<string | undefined>): string {
+  const haystack = values
+    .filter(Boolean)
+    .join(" ")
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, " ");
+  return MODEL_ICON_HINTS.find(([hint]) => haystack.includes(hint))?.[1] ?? "";
+}
+
 export function normalizeLobeIconSlug(slug: string | undefined): string {
   const normalized = (slug ?? "").trim().toLowerCase().replace(/_/g, "-");
   if (!/^[a-z0-9-]+$/.test(normalized)) return "";

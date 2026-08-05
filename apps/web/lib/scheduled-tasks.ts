@@ -1,5 +1,9 @@
 import { validateChatAttachments } from "@/lib/chat-attachment-limits.mjs";
-import { normalizeModelIconConfig, type ModelIconConfig } from "@/lib/model-icons";
+import {
+  inferModelIconSlug,
+  normalizeModelIconConfig,
+  type ModelIconConfig,
+} from "@/lib/model-icons";
 
 export type TaskStatus = "active" | "paused" | "completed" | "expired";
 export type TaskScheduleKind = "once" | "hourly" | "daily" | "weekly" | "monthly";
@@ -99,12 +103,22 @@ export function normalizeModelOptions(value: unknown): ModelOption[] {
     const family = typeof row.family === "string" ? row.family.trim() : "";
     const iconSlug = typeof row.icon_slug === "string" ? row.icon_slug.trim() : "";
     const icon = normalizeModelIconConfig(row.icon);
+    const inferredIconSlug = inferModelIconSlug(
+      icon?.slug,
+      iconSlug,
+      family,
+      provider,
+      alias,
+      label,
+    );
     const normalizedIcon: ModelIconConfig =
       icon?.type === "image" && icon.src
         ? icon
         : iconSlug
           ? { type: "lobe-icons", slug: iconSlug }
-          : (icon ?? { type: "lobe-icons", slug: family || provider || alias });
+          : inferredIconSlug
+            ? { type: "lobe-icons", slug: inferredIconSlug }
+            : (icon ?? { type: "lobe-icons", slug: family || provider || alias });
     return [
       {
         id,

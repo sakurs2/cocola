@@ -4,7 +4,7 @@ import { Button, Chip, Dropdown, Tooltip } from "@heroui/react";
 import { DataGrid, type DataGridColumn } from "@heroui-pro/react/data-grid";
 import { EmptyState } from "@heroui-pro/react/empty-state";
 import { Segment } from "@heroui-pro/react/segment";
-import { AlarmClock, CalendarClock, Clock, Ellipsis, LoaderCircle, Plus } from "lucide-react";
+import { AlarmClock, CalendarClock, Check, Clock, Copy, Ellipsis, LoaderCircle, Plus } from "lucide-react";
 import { useSession } from "next-auth/react";
 import { useRouter } from "next/navigation";
 import { useCallback, useEffect, useMemo, useState } from "react";
@@ -14,6 +14,7 @@ import {
   WorkspacePageHeader,
 } from "@/components/heroui-workspace/workspace-ui";
 import { TaskConfirmDialog, TaskDrawer } from "@/components/scheduled-tasks/task-drawer";
+import { Badge } from "@/components/ui/badge";
 import {
   formatDateTime,
   normalizeModelOptions,
@@ -29,6 +30,15 @@ import {
   readScheduledTaskPageCache,
   writeScheduledTaskPageCache,
 } from "@/lib/scheduled-task-page-cache.mjs";
+import { scheduledTaskResultView } from "@/lib/scheduled-task-result";
+
+const taskResultBadgeVariant = {
+  default: "default",
+  success: "success",
+  warning: "warning",
+  danger: "danger",
+  accent: "brand",
+} as const;
 
 type Tab = "today" | "all";
 
@@ -231,11 +241,7 @@ export default function TasksPage() {
         id: "lastResult",
         header: "Last result",
         minWidth: 190,
-        cell: (task) => (
-          <span className={task.last_error ? "text-danger block truncate text-sm" : "text-muted block truncate text-sm"}>
-            {task.last_error || task.last_status || (task.run_count ? "Completed" : "Not run yet")}
-          </span>
-        ),
+        cell: (task) => <TaskLastResult task={task} />,
       },
       {
         id: "status",
@@ -243,7 +249,7 @@ export default function TasksPage() {
         minWidth: 110,
         cell: (task) => (
           <Chip color={statusColor(task.status)} size="sm" variant="soft">
-            {task.status}
+            {statusLabel(task.status)}
           </Chip>
         ),
       },
@@ -390,9 +396,59 @@ export default function TasksPage() {
 }
 
 function statusColor(status: ScheduledTask["status"]) {
-  if (status === "active") return "success" as const;
+  if (status === "active" || status === "completed") return "success" as const;
   if (status === "paused") return "warning" as const;
-  return "default" as const;
+  return "danger" as const;
+}
+
+function statusLabel(status: ScheduledTask["status"]) {
+  return status.charAt(0).toUpperCase() + status.slice(1);
+}
+
+function TaskLastResult({ task }: { task: ScheduledTask }) {
+  const result = scheduledTaskResultView(task);
+  const hasAdditionalDetail = result.detail !== result.label;
+
+  return (
+    <span className="flex min-w-0 items-center gap-1">
+      <Tooltip delay={0}>
+        <span className="inline-flex min-w-0">
+          <Badge variant={taskResultBadgeVariant[result.tone]}>{result.label}</Badge>
+        </span>
+        <Tooltip.Content className="max-w-sm break-words">{result.detail}</Tooltip.Content>
+      </Tooltip>
+      {hasAdditionalDetail ? (
+        <TaskResultCopyButton detail={result.detail} />
+      ) : null}
+    </span>
+  );
+}
+
+function TaskResultCopyButton({ detail }: { detail: string }) {
+  const [copied, setCopied] = useState(false);
+
+  async function copyDetail() {
+    await navigator.clipboard.writeText(detail);
+    setCopied(true);
+    window.setTimeout(() => setCopied(false), 1600);
+  }
+
+  return (
+    <Tooltip delay={0}>
+      <Button
+        isIconOnly
+        aria-label={copied ? "Last result copied" : "Copy full last result"}
+        className="text-muted size-7 min-w-7 shrink-0"
+        size="sm"
+        variant="ghost"
+        onClick={(event) => event.stopPropagation()}
+        onPress={() => void copyDetail()}
+      >
+        {copied ? <Check className="text-success size-3.5" /> : <Copy className="size-3.5" />}
+      </Button>
+      <Tooltip.Content>{copied ? "Copied" : "Copy full result"}</Tooltip.Content>
+    </Tooltip>
+  );
 }
 
 async function responseError(response: Response): Promise<string> {

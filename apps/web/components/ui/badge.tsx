@@ -10,6 +10,8 @@ const badgeVariants = cva(
         default: "bg-surface-secondary text-muted",
         outline: "border border-border text-muted",
         success: "bg-success-soft text-success-soft-foreground",
+        warning: "bg-warning-soft text-warning-soft-foreground",
+        danger: "bg-danger-soft text-danger-soft-foreground",
         brand: "bg-accent-soft text-accent-soft-foreground",
       },
     },

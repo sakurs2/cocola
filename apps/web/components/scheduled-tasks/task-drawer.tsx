@@ -5,6 +5,7 @@ import { Sheet } from "@heroui-pro/react/sheet";
 import { CalendarClock, ChevronDown, ChevronRight, Paperclip, UserCircle } from "lucide-react";
 import { useEffect, useState } from "react";
 import { ModelIcon } from "@/components/ui/model-icon";
+import { inferModelIconSlug } from "@/lib/model-icons";
 import {
   emptyTaskForm,
   filesToAttachments,
@@ -78,6 +79,7 @@ export function TaskDrawer({
 
   const scheduleAgain = task?.status === "completed" || task?.status === "expired";
   const model = models.find((candidate) => candidate.id === form.modelRouteID);
+  const selectedModelIcon = taskModelIcon(model, form.modelAlias);
 
   return (
     <Sheet isOpen={open} placement="right" onOpenChange={(next) => !saving && onOpenChange(next)}>
@@ -130,9 +132,9 @@ export function TaskDrawer({
                     <Label>Model</Label>
                     <Dropdown>
                       <Dropdown.Trigger aria-label="Select task model" className="border-separator bg-surface-secondary hover:bg-default-hover mt-2 flex h-11 w-full items-center justify-between rounded-2xl border px-3 text-sm">
-                        <span className="flex min-w-0 items-center gap-2"><ModelIcon bare className="size-5 shrink-0" icon={model?.icon} /><span className="truncate font-medium">{model?.alias || form.modelAlias || "Model unavailable"}</span></span><ChevronDown className="text-muted size-4" />
+                        <span className="flex min-w-0 items-center gap-2"><ModelIcon bare className="size-5 shrink-0" icon={selectedModelIcon} /><span className="truncate font-medium">{model?.alias || form.modelAlias || "Model unavailable"}</span></span><ChevronDown className="text-muted size-4" />
                       </Dropdown.Trigger>
-                      <Dropdown.Popover placement="bottom start"><Dropdown.Menu aria-label="Task models" onAction={(key) => { const selected = models.find((candidate) => candidate.id === String(key)); if (selected) setForm({ ...form, modelRouteID: selected.id, modelAlias: selected.alias }); }}>{models.map((item) => <Dropdown.Item key={item.id} id={item.id} textValue={item.alias}><span className="flex items-center gap-2"><ModelIcon bare className="size-5" icon={item.icon} />{item.alias}</span></Dropdown.Item>)}</Dropdown.Menu></Dropdown.Popover>
+                      <Dropdown.Popover placement="bottom start"><Dropdown.Menu aria-label="Task models" onAction={(key) => { const selected = models.find((candidate) => candidate.id === String(key)); if (selected) setForm({ ...form, modelRouteID: selected.id, modelAlias: selected.alias }); }}>{models.map((item) => <Dropdown.Item key={item.id} id={item.id} textValue={item.alias}><span className="flex items-center gap-2"><ModelIcon bare className="size-5" icon={taskModelIcon(item)} />{item.alias}</span></Dropdown.Item>)}</Dropdown.Menu></Dropdown.Popover>
                     </Dropdown>
                   </div>
                   <div>
@@ -171,6 +173,14 @@ function ScheduleFields({ form, setForm }: { form: TaskFormState; setForm: (form
     <ChoiceDropdown label="Ends" value={form.ends === "never" ? "Never" : "On a date"} options={[{ id: "never", label: "Never" }, { id: "on", label: "On a date" }]} onChange={(ends) => setForm({ ...form, ends: ends as "never" | "on" })} />
     {form.ends === "on" ? <TextField value={form.expiresAt} variant="secondary" onChange={(expiresAt) => setForm({ ...form, expiresAt: boundedDateTime(expiresAt, form.expiresAt) })}><Label>End time</Label><Input type="datetime-local" min={minDateTime} max={maxDateTime} step={60} /></TextField> : null}
   </div>;
+}
+
+function taskModelIcon(model?: ModelOption, fallbackAlias = "") {
+  const alias = model?.alias || fallbackAlias;
+  return model?.icon ?? {
+    type: "lobe-icons" as const,
+    slug: inferModelIconSlug(alias, model?.provider) || alias,
+  };
 }
 
 function ChoiceDropdown({ label, value, options, onChange }: { label: string; value: string; options: Choice[]; onChange: (value: string) => void }) {

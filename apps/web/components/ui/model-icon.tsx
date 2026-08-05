@@ -6,6 +6,7 @@ import { useEffect, useState, type FC } from "react";
 import {
   LOCAL_SIMPLE_ICON_PATHS,
   SIMPLE_ICON_FALLBACK_BADGES,
+  inferModelIconSlug,
   lobeIconPath,
   normalizeLobeIconSlug,
   type ModelIconConfig,
@@ -18,7 +19,8 @@ export const ModelIcon: FC<{
   bare?: boolean;
 }> = ({ icon, className, bare = false }) => {
   const [lobeFailed, setLobeFailed] = useState(false);
-  const normalizedSlug = normalizeLobeIconSlug(icon?.slug);
+  const inferredSlug = inferModelIconSlug(icon?.slug);
+  const normalizedSlug = normalizeLobeIconSlug(inferredSlug || icon?.slug);
   const canUseLobeIcon =
     (icon?.type === "lobe-icons" || icon?.type === "simple-icons") && normalizedSlug !== "";
   const lobePath = canUseLobeIcon && !lobeFailed ? lobeIconPath(normalizedSlug) : "";
@@ -99,7 +101,10 @@ export const ModelIcon: FC<{
   }
   return (
     <span
-      className={cn(frame("bg-surface-secondary"), "text-[9px] font-bold leading-none text-foreground")}
+      className={cn(
+        frame("bg-surface-secondary"),
+        "text-[9px] font-bold leading-none text-foreground",
+      )}
       aria-hidden="true"
     >
       {fallbackBadge}
