@@ -13,6 +13,7 @@ const agentPageSource = readFileSync(
   "utf8",
 );
 const globalsSource = readFileSync(new URL("../app/globals.css", import.meta.url), "utf8");
+const demoStylesSource = readFileSync(new URL("../app/cocola-web-demo.css", import.meta.url), "utf8");
 const chatPageSource = readFileSync(new URL("../app/page.tsx", import.meta.url), "utf8");
 const threadSource = readFileSync(
   new URL("../components/assistant-ui/thread.tsx", import.meta.url),
@@ -20,27 +21,27 @@ const threadSource = readFileSync(
 );
 
 test("Agent Skills use fixed cards, paginate the catalog, and preserve unavailable selections", () => {
-  assert.match(capabilitiesSource, /Skills \(Optional\)/);
-  assert.match(capabilitiesSource, /Using default skills/);
-  assert.match(capabilitiesSource, /Using a custom skill set/);
-  assert.match(capabilitiesSource, />unavailable<\/Badge>/);
+  assert.match(capabilitiesSource, /<Card\.Title>Skills<\/Card\.Title>/);
+  assert.match(capabilitiesSource, /Using default Skills/);
+  assert.match(capabilitiesSource, /Using a custom Skill set/);
+  assert.match(capabilitiesSource, />\s*unavailable\s*<\/Chip>/);
   assert.match(capabilitiesSource, /<SkillIcon name=/);
-  assert.match(capabilitiesSource, /<Badge>.*personal.*shared/s);
+  assert.match(capabilitiesSource, /skill\.source === "personal" \? "personal" : "shared"/);
   assert.match(capabilitiesSource, /const SKILLS_PER_PAGE = 6/);
   assert.match(capabilitiesSource, /filteredSkills\.slice\(/);
-  assert.match(capabilitiesSource, /md:grid-cols-2 xl:grid-cols-3/);
-  assert.match(capabilitiesSource, /flex h-40 min-w-0 flex-col overflow-hidden/);
-  assert.match(capabilitiesSource, /Previous skills page/);
-  assert.match(capabilitiesSource, /Next skills page/);
+  assert.match(capabilitiesSource, /columns=\{2\} layout="grid"/);
+  assert.match(capabilitiesSource, /min-h-\[9\.5rem\] w-full overflow-hidden/);
+  assert.match(capabilitiesSource, /Previous Skills page/);
+  assert.match(capabilitiesSource, /Next Skills page/);
   assert.doesNotMatch(capabilitiesSource, /line-clamp-2 block/);
-  assert.match(agentListSource, /Default skills/);
+  assert.match(agentListSource, /Default Skills/);
   assert.match(agentListSource, /selectedSkills\.slice\(0, 2\)/);
   assert.match(agentListSource, /\+\{selectedSkills\.length - 2\}/);
 });
 
 test("Skill lists search by name only with consistent input copy", () => {
-  assert.match(capabilitiesSource, /placeholder="input skill name"/);
-  assert.match(skillsPageSource, /placeholder="input skill name"/);
+  assert.match(capabilitiesSource, /placeholder="Search Skills by name"/);
+  assert.match(skillsPageSource, /placeholder="Search skills by name"/);
   assert.match(
     capabilitiesSource,
     /displayedSkills\.filter\(\(skill\) => skill\.name\.toLowerCase\(\)\.includes\(query\)\)/,
@@ -60,14 +61,14 @@ test("Agent Knowledge can select Cocola Wiki files without requiring a Skill", (
   assert.match(capabilitiesSource, /cocola_wiki: \[\]/);
   assert.match(
     capabilitiesSource,
-    /Saved Knowledge changes apply from the next message, including in existing/,
+    /Saved changes apply from the next[\s\S]*message/,
   );
 });
 
 test("Agent Knowledge accepts Lark Office links and keeps feedback inside its section", () => {
   assert.match(capabilitiesSource, /"feishu\.cn", "larkoffice\.com", "larksuite\.com"/);
-  assert.match(capabilitiesSource, /active:scale-\[0\.97\]/);
-  assert.match(capabilitiesSource, /id="knowledge-input-feedback"/);
+  assert.match(capabilitiesSource, /className="cocola-web-page-primary-action" onPress=\{addKnowledge\}/);
+  assert.match(capabilitiesSource, /knowledgeNotice \? \(/);
   assert.doesNotMatch(capabilitiesSource, /capabilityMessage/);
   assert.doesNotMatch(capabilitiesSource, /Check access|Not checked/);
   assert.doesNotMatch(agentPageSource, /knowledge\/check|checkKnowledgeAccess/);
@@ -94,14 +95,14 @@ test("Agent creation saves the selected icon and color, including the defaults",
   assert.match(agentListSource, /AGENT_AVATAR_COLORS\.map/);
   assert.match(agentListSource, /avatar_key: avatarKey/);
   assert.match(agentListSource, /avatar_color: avatarColor/);
-  assert.match(agentListSource, /max-h-\[calc\(100vh-2rem\)\].*overflow-y-auto/);
+  assert.match(agentListSource, /<WorkspaceEntitySheet/);
 });
 
 test("Agent list, create dialog, and editor use a flat primary button color", () => {
   const cyanTheme = globalsSource.match(/\.cocola-user-ui \.user-theme-cyan,[\s\S]*?\n\}/)?.[0];
   assert.ok(cyanTheme, "cyan user theme not found");
-  assert.match(cyanTheme, /--page-accent-grad:\s*#0891b2;/);
-  assert.doesNotMatch(cyanTheme, /linear-gradient/);
-  assert.match(agentListSource, /className="user-accent-btn/);
-  assert.match(agentPageSource, /className="user-accent-btn/);
+  assert.match(cyanTheme, /--accent:/);
+  assert.match(demoStylesSource, /\.cocola-web-page-primary-action,[\s\S]*?color: white !important/);
+  assert.match(agentListSource, /<WorkspacePageAction/);
+  assert.match(agentPageSource, /className="cocola-web-page-primary-action"/);
 });

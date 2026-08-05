@@ -63,7 +63,10 @@ export default function AgentsPage() {
     const controller = new AbortController();
     void (async () => {
       try {
-        const response = await fetch("/api/agents", { cache: "no-store", signal: controller.signal });
+        const response = await fetch("/api/agents", {
+          cache: "no-store",
+          signal: controller.signal,
+        });
         if (!response.ok) throw new Error(await agentResponseError(response));
         const rows = (await response.json()) as AgentProfile[];
         if (!controller.signal.aborted) setAgents(Array.isArray(rows) ? rows : []);
@@ -82,13 +85,19 @@ export default function AgentsPage() {
     const controller = new AbortController();
     void (async () => {
       try {
-        const [modelsResponse, runtimesResponse, configResponse, skillsResponse] = await Promise.all([
-          fetch("/api/models", { cache: "no-store", signal: controller.signal }),
-          fetch("/api/agent-runtimes", { cache: "no-store", signal: controller.signal }),
-          fetch("/api/product-config", { cache: "no-store", signal: controller.signal }),
-          fetch("/api/skills/agent-catalog", { cache: "no-store", signal: controller.signal }),
-        ]);
-        if (!modelsResponse.ok || !runtimesResponse.ok || !configResponse.ok || !skillsResponse.ok) {
+        const [modelsResponse, runtimesResponse, configResponse, skillsResponse] =
+          await Promise.all([
+            fetch("/api/models", { cache: "no-store", signal: controller.signal }),
+            fetch("/api/agent-runtimes", { cache: "no-store", signal: controller.signal }),
+            fetch("/api/product-config", { cache: "no-store", signal: controller.signal }),
+            fetch("/api/skills/agent-catalog", { cache: "no-store", signal: controller.signal }),
+          ]);
+        if (
+          !modelsResponse.ok ||
+          !runtimesResponse.ok ||
+          !configResponse.ok ||
+          !skillsResponse.ok
+        ) {
           throw new Error("Agent capability configuration is temporarily unavailable.");
         }
         const modelRows = normalizeAgentModels(await modelsResponse.json());
@@ -99,7 +108,9 @@ export default function AgentsPage() {
           runtimes.find((item) => item.id === configuredRuntimeID) ??
           runtimes.find((item) => item.isDefault);
         if (!runtime) throw new Error("The default Agent runtime is not configured.");
-        const compatible = modelRows.filter((model) => model.protocols.includes(runtime.modelProtocol));
+        const compatible = modelRows.filter((model) =>
+          model.protocols.includes(runtime.modelProtocol),
+        );
         if (!controller.signal.aborted) {
           setRuntimeID(runtime.id);
           setModels(compatible);
@@ -233,18 +244,26 @@ export default function AgentsPage() {
                     </span>
                     <span className="mt-4 flex min-h-7 max-w-full flex-wrap gap-1.5">
                       {(agent.skill_ids ?? []).length === 0 ? (
-                        <Chip size="sm" variant="soft">Default Skills</Chip>
+                        <Chip size="sm" variant="soft">
+                          Default Skills
+                        </Chip>
                       ) : selectedSkills.length ? (
                         <>
                           {selectedSkills.slice(0, 2).map((skill) => (
-                            <Chip key={skill.id} size="sm" variant="soft">{skill.name}</Chip>
+                            <Chip key={skill.id} size="sm" variant="soft">
+                              {skill.name}
+                            </Chip>
                           ))}
                           {selectedSkills.length > 2 ? (
-                            <Chip size="sm" variant="soft">+{selectedSkills.length - 2}</Chip>
+                            <Chip size="sm" variant="soft">
+                              +{selectedSkills.length - 2}
+                            </Chip>
                           ) : null}
                         </>
                       ) : (
-                        <Chip color="warning" size="sm" variant="soft">Skills unavailable</Chip>
+                        <Chip color="warning" size="sm" variant="soft">
+                          Skills unavailable
+                        </Chip>
                       )}
                     </span>
                     <span className="mt-auto block w-full">
@@ -270,7 +289,9 @@ export default function AgentsPage() {
         <Card className="p-5">
           <EmptyState>
             <EmptyState.Header>
-              <EmptyState.Media variant="icon"><Bot className="text-cyan-500" /></EmptyState.Media>
+              <EmptyState.Media variant="icon">
+                <Bot className="text-cyan-500" />
+              </EmptyState.Media>
               <EmptyState.Title>No Agents yet</EmptyState.Title>
               <EmptyState.Description>
                 Create a focused profile, or continue using standard chat without an Agent.
@@ -295,7 +316,9 @@ export default function AgentsPage() {
           <div className="bg-surface-secondary flex items-center gap-3 rounded-2xl px-4 py-3">
             <AgentAvatar avatarColor={avatarColor} avatarKey={avatarKey} className="size-10" />
             <span className="min-w-0">
-              <span className="block truncate text-sm font-medium">{name.trim() || "New Agent"}</span>
+              <span className="block truncate text-sm font-medium">
+                {name.trim() || "New Agent"}
+              </span>
               <span className="text-muted mt-1 block text-xs">
                 Instructions, knowledge, and channels are configured after creation.
               </span>
@@ -324,7 +347,11 @@ export default function AgentsPage() {
                   variant="ghost"
                   onPress={() => setAvatarKey(key)}
                 >
-                  <AgentAvatar avatarColor={avatarColor} avatarKey={key} className="size-8 rounded-lg" />
+                  <AgentAvatar
+                    avatarColor={avatarColor}
+                    avatarKey={key}
+                    className="size-8 rounded-lg"
+                  />
                 </Button>
               ))}
             </div>
@@ -343,7 +370,9 @@ export default function AgentsPage() {
                   variant="ghost"
                   onPress={() => setAvatarColor(color)}
                 >
-                  <span className={`grid size-6 place-items-center rounded-full ${COLOR_SWATCHES[color]}`}>
+                  <span
+                    className={`grid size-6 place-items-center rounded-full ${COLOR_SWATCHES[color]}`}
+                  >
                     {avatarColor === color ? <Check className="size-3.5 text-white" /> : null}
                   </span>
                 </Button>
@@ -354,15 +383,13 @@ export default function AgentsPage() {
           <div>
             <Label>Model</Label>
             <div className="mt-2">
-              <HeroUIAgentModelSelect
-                models={models}
-                value={modelID}
-                onChange={setModelID}
-              />
+              <HeroUIAgentModelSelect models={models} value={modelID} onChange={setModelID} />
             </div>
           </div>
 
-          {error ? <div className="bg-danger/10 text-danger rounded-xl px-3 py-2 text-sm">{error}</div> : null}
+          {error ? (
+            <div className="bg-danger/10 text-danger rounded-xl px-3 py-2 text-sm">{error}</div>
+          ) : null}
 
           <div className="flex justify-end gap-2">
             <Button isDisabled={creating} variant="outline" onPress={() => setCreateOpen(false)}>

@@ -5,7 +5,12 @@ import { Loader2, RotateCcw, Save } from "lucide-react";
 import { AlertTriangle, Check } from "lucide-react";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { Button, Card, Chip, Input, Label, Switch, TextField, Tooltip } from "@heroui/react";
-import { AdminConfirmDialog, AdminPage, AdminPageHeader, AdminRefreshButton } from "@/components/admin/admin-ui";
+import {
+  AdminConfirmDialog,
+  AdminPage,
+  AdminPageHeader,
+  AdminRefreshButton,
+} from "@/components/admin/admin-ui";
 
 type SettingValue = boolean | number | string | null;
 
@@ -158,74 +163,113 @@ export default function AdminSettingsPage() {
             <Card key={group} className="overflow-hidden p-0">
               <Card.Header className="bg-surface-secondary flex-row items-center justify-between px-5 py-4">
                 <Card.Title>{group}</Card.Title>
-                <Chip size="sm" variant="soft">{rows.length} {rows.length === 1 ? "setting" : "settings"}</Chip>
+                <Chip size="sm" variant="soft">
+                  {rows.length} {rows.length === 1 ? "setting" : "settings"}
+                </Chip>
               </Card.Header>
               <Card.Content className="divide-y divide-separator p-0">
                 {rows.map((setting) => {
-                const draftValue = drafts[setting.key] ?? valueForDraft(setting);
-                const dirty = !sameValue(valueForDraft(setting), draftValue);
-                const busy = savingKey === setting.key;
-                return (
-                  <div key={setting.key} className="admin-setting-row grid gap-4 px-5 py-4 lg:grid-cols-[minmax(0,1fr)_minmax(220px,320px)_180px] lg:items-start">
-                    <div className="admin-setting-description min-w-0">
-                      <span className="flex flex-wrap items-center gap-2">
-                        <span className="font-medium">{setting.label}</span>
-                        <Chip color={setting.source === "db" ? "accent" : "default"} size="sm" variant="soft">{sourceLabel(setting.source)}</Chip>
-                      </span>
-                      <p className="text-muted mt-1 max-w-2xl text-xs leading-5">{setting.description}</p>
-                      <div className="text-muted mt-2 flex min-w-0 flex-wrap gap-2 font-mono text-[11px]">
-                        <code className="bg-surface-secondary max-w-full truncate rounded-lg px-2 py-1">{setting.key} · v{setting.version}</code>
-                        {setting.env ? <code className="bg-surface-secondary max-w-full truncate rounded-lg px-2 py-1">{setting.env}</code> : null}
+                  const draftValue = drafts[setting.key] ?? valueForDraft(setting);
+                  const dirty = !sameValue(valueForDraft(setting), draftValue);
+                  const busy = savingKey === setting.key;
+                  return (
+                    <div
+                      key={setting.key}
+                      className="admin-setting-row grid gap-4 px-5 py-4 lg:grid-cols-[minmax(0,1fr)_minmax(220px,320px)_180px] lg:items-start"
+                    >
+                      <div className="admin-setting-description min-w-0">
+                        <span className="flex flex-wrap items-center gap-2">
+                          <span className="font-medium">{setting.label}</span>
+                          <Chip
+                            color={setting.source === "db" ? "accent" : "default"}
+                            size="sm"
+                            variant="soft"
+                          >
+                            {sourceLabel(setting.source)}
+                          </Chip>
+                        </span>
+                        <p className="text-muted mt-1 max-w-2xl text-xs leading-5">
+                          {setting.description}
+                        </p>
+                        <div className="text-muted mt-2 flex min-w-0 flex-wrap gap-2 font-mono text-[11px]">
+                          <code className="bg-surface-secondary max-w-full truncate rounded-lg px-2 py-1">
+                            {setting.key} · v{setting.version}
+                          </code>
+                          {setting.env ? (
+                            <code className="bg-surface-secondary max-w-full truncate rounded-lg px-2 py-1">
+                              {setting.env}
+                            </code>
+                          ) : null}
+                        </div>
+                      </div>
+
+                      <div className="admin-setting-control min-w-0">
+                        <SettingControl
+                          setting={setting}
+                          value={draftValue}
+                          onChange={(value) =>
+                            setDrafts((prev) => ({ ...prev, [setting.key]: value }))
+                          }
+                        />
+                        <div className="text-muted mt-1 text-xs">{`Default: ${formatValue(setting.default)}`}</div>
+                      </div>
+
+                      <div className="admin-setting-actions flex items-center justify-end gap-2">
+                        {setting.editable ? (
+                          <>
+                            <Tooltip delay={0}>
+                              <Button
+                                aria-label={`Save ${setting.label}`}
+                                isDisabled={!dirty || busy}
+                                size="sm"
+                                variant={dirty ? "primary" : "outline"}
+                                onPress={() => void save(setting)}
+                              >
+                                {busy ? (
+                                  <Loader2 className="size-4 animate-spin" />
+                                ) : (
+                                  <Save className="size-4" />
+                                )}
+                                Save
+                              </Button>
+                              <Tooltip.Content>
+                                Save this value as a database override
+                              </Tooltip.Content>
+                            </Tooltip>
+                            <Tooltip delay={0}>
+                              <Button
+                                aria-label={`${dirty ? "Revert" : "Reset"} ${setting.label}`}
+                                isDisabled={(!dirty && setting.source !== "db") || busy}
+                                size="sm"
+                                variant="outline"
+                                onPress={() =>
+                                  dirty
+                                    ? setDrafts((current) => ({
+                                        ...current,
+                                        [setting.key]: valueForDraft(setting),
+                                      }))
+                                    : setResetTarget(setting)
+                                }
+                              >
+                                <RotateCcw className="size-4" />
+                                {dirty ? "Revert" : "Reset"}
+                              </Button>
+                              <Tooltip.Content>
+                                {dirty
+                                  ? "Discard the unsaved change"
+                                  : "Remove the database override"}
+                              </Tooltip.Content>
+                            </Tooltip>
+                          </>
+                        ) : (
+                          <Chip size="sm" variant="soft">
+                            Read only
+                          </Chip>
+                        )}
                       </div>
                     </div>
-
-                    <div className="admin-setting-control min-w-0">
-                      <SettingControl
-                        setting={setting}
-                        value={draftValue}
-                        onChange={(value) =>
-                          setDrafts((prev) => ({ ...prev, [setting.key]: value }))
-                        }
-                      />
-                      <div className="text-muted mt-1 text-xs">{`Default: ${formatValue(setting.default)}`}</div>
-                    </div>
-
-                    <div className="admin-setting-actions flex items-center justify-end gap-2">
-                      {setting.editable ? (
-                        <>
-                          <Tooltip delay={0}>
-                          <Button
-                            aria-label={`Save ${setting.label}`}
-                            isDisabled={!dirty || busy}
-                            size="sm"
-                            variant={dirty ? "primary" : "outline"}
-                            onPress={() => void save(setting)}
-                          >
-                            {busy ? <Loader2 className="size-4 animate-spin" /> : <Save className="size-4" />}Save
-                          </Button>
-                          <Tooltip.Content>Save this value as a database override</Tooltip.Content>
-                          </Tooltip>
-                          <Tooltip delay={0}>
-                          <Button
-                            aria-label={`${dirty ? "Revert" : "Reset"} ${setting.label}`}
-                            isDisabled={(!dirty && setting.source !== "db") || busy}
-                            size="sm"
-                            variant="outline"
-                            onPress={() => dirty ? setDrafts((current) => ({ ...current, [setting.key]: valueForDraft(setting) })) : setResetTarget(setting)}
-                          >
-                            <RotateCcw className="size-4" />
-                            {dirty ? "Revert" : "Reset"}
-                          </Button>
-                          <Tooltip.Content>{dirty ? "Discard the unsaved change" : "Remove the database override"}</Tooltip.Content>
-                          </Tooltip>
-                        </>
-                      ) : (
-                        <Chip size="sm" variant="soft">Read only</Chip>
-                      )}
-                    </div>
-                  </div>
-                );
-              })}
+                  );
+                })}
               </Card.Content>
             </Card>
           ))}
@@ -257,8 +301,18 @@ function SettingControl({
   if (setting.kind === "bool") {
     const checked = value === true;
     return (
-      <Switch aria-label={setting.label} isDisabled={!setting.editable} isSelected={checked} onChange={onChange}>
-        <Switch.Content><Switch.Control><Switch.Thumb /></Switch.Control>{checked ? "Enabled" : "Disabled"}</Switch.Content>
+      <Switch
+        aria-label={setting.label}
+        isDisabled={!setting.editable}
+        isSelected={checked}
+        onChange={onChange}
+      >
+        <Switch.Content>
+          <Switch.Control>
+            <Switch.Thumb />
+          </Switch.Control>
+          {checked ? "Enabled" : "Disabled"}
+        </Switch.Content>
       </Switch>
     );
   }
@@ -268,10 +322,16 @@ function SettingControl({
       isDisabled={!setting.editable}
       value={value == null ? "" : String(value)}
       variant="secondary"
-      onChange={(next) => onChange(setting.kind === "int" ? (next === "" ? null : Number(next)) : next)}
+      onChange={(next) =>
+        onChange(setting.kind === "int" ? (next === "" ? null : Number(next)) : next)
+      }
     >
       <Label className="sr-only">{setting.label}</Label>
-      <Input type={setting.kind === "int" ? "number" : "text"} min={setting.min} max={setting.max} />
+      <Input
+        type={setting.kind === "int" ? "number" : "text"}
+        min={setting.min}
+        max={setting.max}
+      />
     </TextField>
   );
 }

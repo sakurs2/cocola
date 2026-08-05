@@ -21,11 +21,11 @@ const globalStyles = readFileSync(new URL("../app/globals.css", import.meta.url)
 test("Admin Skill and MCP cards use HeroUI Switch controls", () => {
   assert.match(
     skillsSource,
-    /<Switch[\s\S]*?isSelected=\{skill\.enabled\}[\s\S]*?<Switch\.Content>[\s\S]*?<Switch\.Control><Switch\.Thumb className="admin-switch-thumb shadow-sm" \/><\/Switch\.Control>/,
+    /<Switch[\s\S]*?isSelected=\{skill\.enabled\}[\s\S]*?<Switch\.Content>[\s\S]*?<Switch\.Control>[\s\S]*?<Switch\.Thumb className="admin-switch-thumb shadow-sm" \/>[\s\S]*?<\/Switch\.Control>/,
   );
   assert.match(
     mcpsSource,
-    /<Switch[\s\S]*?isSelected=\{mcp\.enabled\}[\s\S]*?<Switch\.Content>[\s\S]*?<Switch\.Control><Switch\.Thumb className="admin-switch-thumb shadow-sm" \/><\/Switch\.Control>/,
+    /<Switch[\s\S]*?isSelected=\{mcp\.enabled\}[\s\S]*?<Switch\.Content>[\s\S]*?<Switch\.Control>[\s\S]*?<Switch\.Thumb className="admin-switch-thumb shadow-sm" \/>[\s\S]*?<\/Switch\.Control>/,
   );
   assert.match(globalStyles, /\.switch\[data-selected="true"\] \.admin-switch-thumb/);
   assert.doesNotMatch(skillsSource, /variant="outline" isDisabled=\{working\} onPress=\{onToggle\}/);

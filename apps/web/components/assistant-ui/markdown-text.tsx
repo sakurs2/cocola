@@ -384,9 +384,7 @@ const CodeHeader: FC<CodeHeaderProps> = ({ language, code }) => {
 
   return (
     <div className="mt-3 flex items-center justify-between gap-3 rounded-t-xl border-x border-t border-border/60 bg-surface-secondary/50 px-3 py-2">
-      <span className="min-w-0 truncate font-mono text-[11px] uppercase text-muted">
-        {label}
-      </span>
+      <span className="min-w-0 truncate font-mono text-[11px] uppercase text-muted">{label}</span>
       <button
         type="button"
         onClick={onCopy}

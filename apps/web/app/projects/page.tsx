@@ -3,15 +3,7 @@
 import { Button, Card, Chip } from "@heroui/react";
 import { EmptyState } from "@heroui-pro/react/empty-state";
 import { Segment } from "@heroui-pro/react/segment";
-import {
-  Folder,
-  FolderOpen,
-  GitBranch,
-  GitFork,
-  HardDrive,
-  Loader2,
-  Plus,
-} from "lucide-react";
+import { Folder, FolderOpen, GitBranch, GitFork, HardDrive, Loader2, Plus } from "lucide-react";
 import { useMemo, useState } from "react";
 import type { ProjectSummary } from "@/app/runtime-provider";
 import { useCocola } from "@/app/runtime-provider";
@@ -135,7 +127,11 @@ export default function ProjectsPage() {
                 metadata={
                   <>
                     <Chip size="sm" variant="soft">
-                      {isGithub ? <GitFork className="size-3.5" /> : <HardDrive className="size-3.5" />}
+                      {isGithub ? (
+                        <GitFork className="size-3.5" />
+                      ) : (
+                        <HardDrive className="size-3.5" />
+                      )}
                       {isGithub ? sourceLabel(project) : "Local"}
                     </Chip>
                     {project.default_branch ? (

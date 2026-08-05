@@ -43,7 +43,9 @@ function AdminSidebarContents({
             <CocolaCoreLogo className="size-10 max-w-none shrink-0" />
           </span>
           <div className="flex min-w-0 flex-col" data-sidebar="label">
-            <span className="text-foreground text-sm font-semibold leading-tight">cocola admin</span>
+            <span className="text-foreground text-sm font-semibold leading-tight">
+              cocola admin
+            </span>
             <span className="text-muted text-xs leading-tight">control plane</span>
           </div>
         </div>

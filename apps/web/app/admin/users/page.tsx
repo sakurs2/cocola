@@ -1,10 +1,26 @@
 "use client";
 
-import { Avatar, Button, Checkbox, Chip, Dropdown, Input, Label, SearchField, TextField } from "@heroui/react";
+import {
+  Avatar,
+  Button,
+  Checkbox,
+  Chip,
+  Dropdown,
+  Input,
+  Label,
+  SearchField,
+  TextField,
+} from "@heroui/react";
 import { DataGrid, type DataGridColumn } from "@heroui-pro/react/data-grid";
 import { EmptyState } from "@heroui-pro/react/empty-state";
 import { Segment } from "@heroui-pro/react/segment";
-import { AdminAlert, AdminConfirmDialog, AdminDrawer, AdminPage, AdminPageHeader } from "@/components/admin/admin-ui";
+import {
+  AdminAlert,
+  AdminConfirmDialog,
+  AdminDrawer,
+  AdminPage,
+  AdminPageHeader,
+} from "@/components/admin/admin-ui";
 import {
   CheckCircle2,
   Copy,
@@ -310,14 +326,35 @@ export default function AdminUsersPage() {
       minWidth: 320,
       cell: (user) => (
         <span className="flex min-w-0 items-center gap-3 py-1">
-          <Avatar className="size-10"><Avatar.Fallback>{avatarInitials(user)}</Avatar.Fallback></Avatar>
-          <span className="min-w-0"><span className="block truncate text-sm font-semibold">{user.name || user.username || user.email}</span><span className="text-muted mt-0.5 block truncate text-xs">{user.username} · {user.email}</span></span>
+          <Avatar className="size-10">
+            <Avatar.Fallback>{avatarInitials(user)}</Avatar.Fallback>
+          </Avatar>
+          <span className="min-w-0">
+            <span className="block truncate text-sm font-semibold">
+              {user.name || user.username || user.email}
+            </span>
+            <span className="text-muted mt-0.5 block truncate text-xs">
+              {user.username} · {user.email}
+            </span>
+          </span>
         </span>
       ),
     },
     { id: "role", header: "Role", width: 130, cell: (user) => <RolePill role={user.role} /> },
-    { id: "status", header: "Status", width: 130, cell: (user) => <StatusPill enabled={user.enabled} /> },
-    { id: "login", header: "Last login", minWidth: 180, cell: (user) => <span className="text-muted text-sm tabular-nums">{formatTime(user.last_login_at)}</span> },
+    {
+      id: "status",
+      header: "Status",
+      width: 130,
+      cell: (user) => <StatusPill enabled={user.enabled} />,
+    },
+    {
+      id: "login",
+      header: "Last login",
+      minWidth: 180,
+      cell: (user) => (
+        <span className="text-muted text-sm tabular-nums">{formatTime(user.last_login_at)}</span>
+      ),
+    },
     {
       id: "actions",
       header: "Actions",
@@ -331,30 +368,161 @@ export default function AdminUsersPage() {
         const roleLocked = selfUser || (protectedAdmin && user.role === "admin");
         const disableLocked = selfUser || (protectedAdmin && user.enabled);
         const deleteLocked = selfUser || protectedAdmin;
-        return <Dropdown><Dropdown.Trigger aria-label={`Actions for ${user.username}`} className="text-muted hover:bg-surface-secondary mx-auto grid size-9 place-items-center rounded-xl" isDisabled={busy}>{busy ? <LoaderCircle className="size-4 animate-spin" /> : <MoreHorizontal className="size-4" />}</Dropdown.Trigger><Dropdown.Popover placement="bottom end"><Dropdown.Menu aria-label={`Actions for ${user.username}`} onAction={(key) => {
-          if (key === "edit") openEdit(user);
-          if (key === "reset") openReset(user);
-          if (key === "role") void patchUser(user, { role: user.role === "admin" ? "user" : "admin" }, "User updated");
-          if (key === "toggle") void patchUser(user, { enabled: !user.enabled }, user.enabled ? "User disabled" : "User enabled");
-          if (key === "delete") setDeleteTarget(user);
-        }}><Dropdown.Item id="edit" textValue="Edit"><UserCog className="size-4" />Edit</Dropdown.Item><Dropdown.Item id="reset" textValue="Reset password"><KeyRound className="size-4" />Reset password</Dropdown.Item><Dropdown.Item id="role" isDisabled={roleLocked} textValue={user.role === "admin" ? "Make user" : "Make admin"}><ShieldCheck className="size-4" />{user.role === "admin" ? "Make user" : "Make admin"}</Dropdown.Item><Dropdown.Item id="toggle" isDisabled={disableLocked} textValue={user.enabled ? "Disable" : "Enable"}><Power className="size-4" />{user.enabled ? "Disable" : "Enable"}</Dropdown.Item><Dropdown.Item id="delete" isDisabled={deleteLocked} textValue="Delete"><Trash2 className="text-danger size-4" /><span className="text-danger">Delete</span></Dropdown.Item></Dropdown.Menu></Dropdown.Popover></Dropdown>;
+        return (
+          <Dropdown>
+            <Dropdown.Trigger
+              aria-label={`Actions for ${user.username}`}
+              className="text-muted hover:bg-surface-secondary mx-auto grid size-9 place-items-center rounded-xl"
+              isDisabled={busy}
+            >
+              {busy ? (
+                <LoaderCircle className="size-4 animate-spin" />
+              ) : (
+                <MoreHorizontal className="size-4" />
+              )}
+            </Dropdown.Trigger>
+            <Dropdown.Popover placement="bottom end">
+              <Dropdown.Menu
+                aria-label={`Actions for ${user.username}`}
+                onAction={(key) => {
+                  if (key === "edit") openEdit(user);
+                  if (key === "reset") openReset(user);
+                  if (key === "role")
+                    void patchUser(
+                      user,
+                      { role: user.role === "admin" ? "user" : "admin" },
+                      "User updated",
+                    );
+                  if (key === "toggle")
+                    void patchUser(
+                      user,
+                      { enabled: !user.enabled },
+                      user.enabled ? "User disabled" : "User enabled",
+                    );
+                  if (key === "delete") setDeleteTarget(user);
+                }}
+              >
+                <Dropdown.Item id="edit" textValue="Edit">
+                  <UserCog className="size-4" />
+                  Edit
+                </Dropdown.Item>
+                <Dropdown.Item id="reset" textValue="Reset password">
+                  <KeyRound className="size-4" />
+                  Reset password
+                </Dropdown.Item>
+                <Dropdown.Item
+                  id="role"
+                  isDisabled={roleLocked}
+                  textValue={user.role === "admin" ? "Make user" : "Make admin"}
+                >
+                  <ShieldCheck className="size-4" />
+                  {user.role === "admin" ? "Make user" : "Make admin"}
+                </Dropdown.Item>
+                <Dropdown.Item
+                  id="toggle"
+                  isDisabled={disableLocked}
+                  textValue={user.enabled ? "Disable" : "Enable"}
+                >
+                  <Power className="size-4" />
+                  {user.enabled ? "Disable" : "Enable"}
+                </Dropdown.Item>
+                <Dropdown.Item id="delete" isDisabled={deleteLocked} textValue="Delete">
+                  <Trash2 className="text-danger size-4" />
+                  <span className="text-danger">Delete</span>
+                </Dropdown.Item>
+              </Dropdown.Menu>
+            </Dropdown.Popover>
+          </Dropdown>
+        );
       },
     },
   ];
 
   return (
     <AdminPage>
-      <AdminPageHeader icon={<UsersPageIcon className="size-5" />} title="Users" description="Manage accounts, roles, and access status." actions={<Button onPress={openCreate}><UserPlus className="size-4" />New user</Button>} />
-        {error && <AdminAlert tone="error">{error}</AdminAlert>}
-        {notice && (
-          <AdminAlert tone="success" icon={<CheckCircle2 className="size-4" />}>
-            {notice}
-          </AdminAlert>
+      <AdminPageHeader
+        icon={<UsersPageIcon className="size-5" />}
+        title="Users"
+        description="Manage accounts, roles, and access status."
+        actions={
+          <Button onPress={openCreate}>
+            <UserPlus className="size-4" />
+            New user
+          </Button>
+        }
+      />
+      {error && <AdminAlert tone="error">{error}</AdminAlert>}
+      {notice && (
+        <AdminAlert tone="success" icon={<CheckCircle2 className="size-4" />}>
+          {notice}
+        </AdminAlert>
+      )}
+
+      <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
+        <SearchField
+          aria-label="Search users"
+          className="w-full lg:max-w-sm"
+          value={query}
+          onChange={setQuery}
+        >
+          <SearchField.Group>
+            <SearchField.SearchIcon />
+            <SearchField.Input placeholder="Search username or email" />
+            <SearchField.ClearButton />
+          </SearchField.Group>
+        </SearchField>
+        <div className="flex flex-wrap gap-2">
+          <Segment
+            aria-label="Role filter"
+            selectedKey={roleFilter}
+            onSelectionChange={(key) => setRoleFilter(String(key) as RoleFilter)}
+          >
+            <Segment.Item id="all">All roles</Segment.Item>
+            <Segment.Item id="user">Users</Segment.Item>
+            <Segment.Item id="admin">Admins</Segment.Item>
+          </Segment>
+          <Segment
+            aria-label="Status filter"
+            selectedKey={statusFilter}
+            onSelectionChange={(key) => setStatusFilter(String(key) as StatusFilter)}
+          >
+            <Segment.Item id="all">All</Segment.Item>
+            <Segment.Item id="enabled">Enabled</Segment.Item>
+            <Segment.Item id="disabled">Disabled</Segment.Item>
+          </Segment>
+        </div>
+      </div>
+
+      <DataGrid
+        aria-label="Users"
+        columns={columns}
+        contentClassName="min-w-[840px]"
+        data={filtered}
+        getRowId={(user) => user.id}
+        selectionMode="none"
+        variant="primary"
+        renderEmptyState={() => (
+          <EmptyState>
+            <EmptyState.Header>
+              <EmptyState.Media variant="icon">
+                <UsersPageIcon className="text-blue-500" />
+              </EmptyState.Media>
+              <EmptyState.Title>
+                {loading
+                  ? "Loading users"
+                  : users.length
+                    ? "No users match your filters"
+                    : "No users found"}
+              </EmptyState.Title>
+              <EmptyState.Description>
+                {loading
+                  ? "Fetching account records…"
+                  : "Create a user or adjust the current filters."}
+              </EmptyState.Description>
+            </EmptyState.Header>
+          </EmptyState>
         )}
-
-      <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between"><SearchField aria-label="Search users" className="w-full lg:max-w-sm" value={query} onChange={setQuery}><SearchField.Group><SearchField.SearchIcon /><SearchField.Input placeholder="Search username or email" /><SearchField.ClearButton /></SearchField.Group></SearchField><div className="flex flex-wrap gap-2"><Segment aria-label="Role filter" selectedKey={roleFilter} onSelectionChange={(key) => setRoleFilter(String(key) as RoleFilter)}><Segment.Item id="all">All roles</Segment.Item><Segment.Item id="user">Users</Segment.Item><Segment.Item id="admin">Admins</Segment.Item></Segment><Segment aria-label="Status filter" selectedKey={statusFilter} onSelectionChange={(key) => setStatusFilter(String(key) as StatusFilter)}><Segment.Item id="all">All</Segment.Item><Segment.Item id="enabled">Enabled</Segment.Item><Segment.Item id="disabled">Disabled</Segment.Item></Segment></div></div>
-
-      <DataGrid aria-label="Users" columns={columns} contentClassName="min-w-[840px]" data={filtered} getRowId={(user) => user.id} selectionMode="none" variant="primary" renderEmptyState={() => <EmptyState><EmptyState.Header><EmptyState.Media variant="icon"><UsersPageIcon className="text-blue-500" /></EmptyState.Media><EmptyState.Title>{loading ? "Loading users" : users.length ? "No users match your filters" : "No users found"}</EmptyState.Title><EmptyState.Description>{loading ? "Fetching account records…" : "Create a user or adjust the current filters."}</EmptyState.Description></EmptyState.Header></EmptyState>} />
+      />
 
       {/* Create / edit drawer */}
       <AdminDrawer
@@ -395,11 +563,26 @@ export default function AdminUsersPage() {
             onChange={(email) => setForm((p) => ({ ...p, email }))}
           />
 
-          <ChoiceDropdown label="Role" value={form.role} options={[{id:"user",label:"user"},{id:"admin",label:"admin"}]} onChange={(role) => setForm((current) => ({...current, role: role as Role}))} />
+          <ChoiceDropdown
+            label="Role"
+            value={form.role}
+            options={[
+              { id: "user", label: "user" },
+              { id: "admin", label: "admin" },
+            ]}
+            onChange={(role) => setForm((current) => ({ ...current, role: role as Role }))}
+          />
 
           {drawerMode === "create" ? (
             <div className="bg-surface-secondary space-y-2 rounded-2xl p-4">
-              <Checkbox isSelected={form.autoPassword} onChange={(selected) => setForm((current) => ({...current, autoPassword: selected}))}>Auto-generate initial password</Checkbox>
+              <Checkbox
+                isSelected={form.autoPassword}
+                onChange={(selected) =>
+                  setForm((current) => ({ ...current, autoPassword: selected }))
+                }
+              >
+                Auto-generate initial password
+              </Checkbox>
               {form.autoPassword ? (
                 <p className="text-xs text-muted">
                   A strong password is generated on create and shown once so you can copy it.
@@ -418,34 +601,85 @@ export default function AdminUsersPage() {
       </AdminDrawer>
 
       {/* Reset-password drawer */}
-      <AdminDrawer open={Boolean(resetTarget)} onOpenChange={(open) => {if (!open) setResetTarget(null)}} title="Reset password" description={resetTarget?.username || resetTarget?.email} footer={<div className="flex justify-end gap-2"><Button variant="outline" isDisabled={resetting} onPress={() => setResetTarget(null)}>Cancel</Button><Button isPending={resetting} onPress={() => void submitReset()}>Reset</Button></div>}>
-            <div className="space-y-3">
-              <Checkbox isSelected={resetAuto} onChange={setResetAuto}>Auto-generate new password</Checkbox>
-              {resetAuto ? (
-                <p className="text-xs text-muted">
-                  A strong password is generated and shown once so you can copy it.
-                </p>
-              ) : (
-                <FieldInput
-                  label="New password"
-                  type="password"
-                  value={resetPasswordValue}
-                  onChange={setResetPasswordValue}
-                />
-              )}
-            </div>
+      <AdminDrawer
+        open={Boolean(resetTarget)}
+        onOpenChange={(open) => {
+          if (!open) setResetTarget(null);
+        }}
+        title="Reset password"
+        description={resetTarget?.username || resetTarget?.email}
+        footer={
+          <div className="flex justify-end gap-2">
+            <Button variant="outline" isDisabled={resetting} onPress={() => setResetTarget(null)}>
+              Cancel
+            </Button>
+            <Button isPending={resetting} onPress={() => void submitReset()}>
+              Reset
+            </Button>
+          </div>
+        }
+      >
+        <div className="space-y-3">
+          <Checkbox isSelected={resetAuto} onChange={setResetAuto}>
+            Auto-generate new password
+          </Checkbox>
+          {resetAuto ? (
+            <p className="text-xs text-muted">
+              A strong password is generated and shown once so you can copy it.
+            </p>
+          ) : (
+            <FieldInput
+              label="New password"
+              type="password"
+              value={resetPasswordValue}
+              onChange={setResetPasswordValue}
+            />
+          )}
+        </div>
       </AdminDrawer>
 
       {/* One-time credential reveal */}
-      <AdminDrawer open={Boolean(credential)} onOpenChange={(open) => {if (!open) setCredential(null)}} title="Password ready" description="Copy this password now — it will not be shown again." footer={<div className="flex justify-end gap-2"><Button variant="outline" onPress={() => credential && void copyText(`${credential.email} / ${credential.password}`)}><Copy className="size-4" />Copy both</Button><Button onPress={() => setCredential(null)}>Done</Button></div>}>
-            <div className="space-y-2">
-              <CredentialRow label="Email" value={credential?.email || ""} />
-              <CredentialRow label="Password" value={credential?.password || ""} mono />
-            </div>
+      <AdminDrawer
+        open={Boolean(credential)}
+        onOpenChange={(open) => {
+          if (!open) setCredential(null);
+        }}
+        title="Password ready"
+        description="Copy this password now — it will not be shown again."
+        footer={
+          <div className="flex justify-end gap-2">
+            <Button
+              variant="outline"
+              onPress={() =>
+                credential && void copyText(`${credential.email} / ${credential.password}`)
+              }
+            >
+              <Copy className="size-4" />
+              Copy both
+            </Button>
+            <Button onPress={() => setCredential(null)}>Done</Button>
+          </div>
+        }
+      >
+        <div className="space-y-2">
+          <CredentialRow label="Email" value={credential?.email || ""} />
+          <CredentialRow label="Password" value={credential?.password || ""} mono />
+        </div>
       </AdminDrawer>
 
       {/* Delete confirm */}
-      <AdminConfirmDialog open={Boolean(deleteTarget)} onOpenChange={(open) => {if (!open) setDeleteTarget(null)}} title="Delete user" description={`Delete ${deleteTarget?.username || deleteTarget?.email || "this user"}? The username and email will remain reserved.`} confirmLabel="Delete" busy={deleting} destructive onConfirm={() => void deleteUser()} />
+      <AdminConfirmDialog
+        open={Boolean(deleteTarget)}
+        onOpenChange={(open) => {
+          if (!open) setDeleteTarget(null);
+        }}
+        title="Delete user"
+        description={`Delete ${deleteTarget?.username || deleteTarget?.email || "this user"}? The username and email will remain reserved.`}
+        confirmLabel="Delete"
+        busy={deleting}
+        destructive
+        onConfirm={() => void deleteUser()}
+      />
     </AdminPage>
   );
 }
@@ -461,7 +695,12 @@ function FieldInput({
   onChange: (value: string) => void;
   type?: string;
 }) {
-  return <TextField value={value} variant="secondary" onChange={onChange}><Label>{label}</Label><Input type={type} /></TextField>;
+  return (
+    <TextField value={value} variant="secondary" onChange={onChange}>
+      <Label>{label}</Label>
+      <Input type={type} />
+    </TextField>
+  );
 }
 
 function CredentialRow({
@@ -479,7 +718,9 @@ function CredentialRow({
       <div className="w-16 shrink-0 text-xs text-muted">{label}</div>
       <div className={`min-w-0 flex-1 truncate text-sm ${mono ? "font-mono" : ""}`}>{value}</div>
       <Button
-        variant="ghost" isIconOnly size="sm"
+        variant="ghost"
+        isIconOnly
+        size="sm"
         aria-label={`Copy ${label}`}
         onPress={async () => {
           await copyText(value);
@@ -497,7 +738,42 @@ function CredentialRow({
   );
 }
 
-function ChoiceDropdown({label, value, options, onChange}: {label:string; value:string; options:{id:string;label:string}[]; onChange:(value:string)=>void}) { return <div><Label>{label}</Label><Dropdown><Dropdown.Trigger aria-label={label} className="border-separator bg-default hover:bg-default-hover mt-2 flex h-11 w-full items-center justify-between rounded-2xl border px-3 text-sm" style={{ transform: "none" }}><span>{options.find((option) => option.id === value)?.label || value}</span><MoreHorizontal className="text-muted size-4" /></Dropdown.Trigger><Dropdown.Popover placement="bottom start"><Dropdown.Menu aria-label={label} onAction={(key) => onChange(String(key))}>{options.map((option) => <Dropdown.Item key={option.id} id={option.id} textValue={option.label}>{option.label}</Dropdown.Item>)}</Dropdown.Menu></Dropdown.Popover></Dropdown></div>; }
+function ChoiceDropdown({
+  label,
+  value,
+  options,
+  onChange,
+}: {
+  label: string;
+  value: string;
+  options: { id: string; label: string }[];
+  onChange: (value: string) => void;
+}) {
+  return (
+    <div>
+      <Label>{label}</Label>
+      <Dropdown>
+        <Dropdown.Trigger
+          aria-label={label}
+          className="border-separator bg-default hover:bg-default-hover mt-2 flex h-11 w-full items-center justify-between rounded-2xl border px-3 text-sm"
+          style={{ transform: "none" }}
+        >
+          <span>{options.find((option) => option.id === value)?.label || value}</span>
+          <MoreHorizontal className="text-muted size-4" />
+        </Dropdown.Trigger>
+        <Dropdown.Popover placement="bottom start">
+          <Dropdown.Menu aria-label={label} onAction={(key) => onChange(String(key))}>
+            {options.map((option) => (
+              <Dropdown.Item key={option.id} id={option.id} textValue={option.label}>
+                {option.label}
+              </Dropdown.Item>
+            ))}
+          </Dropdown.Menu>
+        </Dropdown.Popover>
+      </Dropdown>
+    </div>
+  );
+}
 
 function avatarInitials(user: AuthUser) {
   const source = (user.name || user.username || user.email || "?").trim();
@@ -511,11 +787,20 @@ function avatarInitials(user: AuthUser) {
 
 function RolePill({ role }: { role: Role }) {
   const Icon = role === "admin" ? ShieldCheck : Shield;
-  return <Chip color={role === "admin" ? "accent" : "default"} size="sm" variant="soft"><Icon className="size-3.5" />{role}</Chip>;
+  return (
+    <Chip color={role === "admin" ? "accent" : "default"} size="sm" variant="soft">
+      <Icon className="size-3.5" />
+      {role}
+    </Chip>
+  );
 }
 
 function StatusPill({ enabled }: { enabled: boolean }) {
-  return <Chip color={enabled ? "success" : "default"} size="sm" variant="soft">{enabled ? "Enabled" : "Disabled"}</Chip>;
+  return (
+    <Chip color={enabled ? "success" : "default"} size="sm" variant="soft">
+      {enabled ? "Enabled" : "Disabled"}
+    </Chip>
+  );
 }
 
 function formatTime(value?: string) {

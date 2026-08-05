@@ -228,9 +228,7 @@ function EnvironmentComponentRow({ component }: { component: EnvironmentComponen
       <div className="min-w-0 flex-1">
         <div className="flex items-center justify-between gap-3">
           <p className="truncate text-sm font-normal text-foreground">{component.label}</p>
-          <span className="shrink-0 text-[11px] text-muted">
-            {componentStatusLabel(component)}
-          </span>
+          <span className="shrink-0 text-[11px] text-muted">{componentStatusLabel(component)}</span>
         </div>
         {component.error ? (
           <p className="mt-1 break-words text-xs leading-5 text-amber-700">{component.error}</p>
@@ -243,9 +241,7 @@ function EnvironmentComponentRow({ component }: { component: EnvironmentComponen
               : "Connection verified"}
           </p>
         ) : component.kind === "mcp" && component.status === "configured" ? (
-          <p className="mt-1 text-xs text-muted">
-            Connection will be verified on first use
-          </p>
+          <p className="mt-1 text-xs text-muted">Connection will be verified on first use</p>
         ) : null}
       </div>
     </div>

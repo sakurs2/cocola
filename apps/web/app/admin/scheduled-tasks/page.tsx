@@ -115,25 +115,108 @@ export default function ScheduledTasksPage() {
       header: "Task",
       isRowHeader: true,
       minWidth: 300,
-      cell: (task) => <Button className="h-auto min-w-0 justify-start px-0 py-1 text-left" variant="ghost" onPress={() => view(task)}><span className="min-w-0"><span className="block truncate font-semibold">{task.name}</span><span className="text-muted mt-0.5 block truncate text-xs">{task.prompt}</span></span></Button>,
+      cell: (task) => (
+        <Button
+          className="h-auto min-w-0 justify-start px-0 py-1 text-left"
+          variant="ghost"
+          onPress={() => view(task)}
+        >
+          <span className="min-w-0">
+            <span className="block truncate font-semibold">{task.name}</span>
+            <span className="text-muted mt-0.5 block truncate text-xs">{task.prompt}</span>
+          </span>
+        </Button>
+      ),
     },
     {
       id: "owner",
       header: "Owner",
       minWidth: 190,
-      cell: (task) => task.owner_user_id ? <span className="min-w-0"><span className="block truncate text-sm font-medium">{task.owner?.name || task.owner?.email || task.owner_user_id}</span>{task.owner?.name && task.owner.email ? <span className="text-muted block truncate text-xs">{task.owner.email}</span> : null}</span> : <AdminStatusBadge tone="amber">Owner required</AdminStatusBadge>,
+      cell: (task) =>
+        task.owner_user_id ? (
+          <span className="min-w-0">
+            <span className="block truncate text-sm font-medium">
+              {task.owner?.name || task.owner?.email || task.owner_user_id}
+            </span>
+            {task.owner?.name && task.owner.email ? (
+              <span className="text-muted block truncate text-xs">{task.owner.email}</span>
+            ) : null}
+          </span>
+        ) : (
+          <AdminStatusBadge tone="amber">Owner required</AdminStatusBadge>
+        ),
     },
-    { id: "schedule", header: "Schedule", minWidth: 150, cell: (task) => <span className="text-muted text-sm">{scheduleLabel(task)}</span> },
-    { id: "next", header: "Next run", minWidth: 170, cell: (task) => <span className="text-muted text-sm tabular-nums">{formatDateTime(task.next_run_at)}</span> },
-    { id: "last", header: "Last result", minWidth: 170, cell: (task) => { const run = latestRun.get(task.id); return run ? <span><span className="block text-sm capitalize">{run.status}</span><span className="text-muted block text-xs tabular-nums">{formatDateTime(run.finished_at || run.created_at)}</span></span> : <span className="text-muted">—</span>; } },
-    { id: "status", header: "Status", width: 130, cell: (task) => <TaskStatus status={task.status} /> },
+    {
+      id: "schedule",
+      header: "Schedule",
+      minWidth: 150,
+      cell: (task) => <span className="text-muted text-sm">{scheduleLabel(task)}</span>,
+    },
+    {
+      id: "next",
+      header: "Next run",
+      minWidth: 170,
+      cell: (task) => (
+        <span className="text-muted text-sm tabular-nums">{formatDateTime(task.next_run_at)}</span>
+      ),
+    },
+    {
+      id: "last",
+      header: "Last result",
+      minWidth: 170,
+      cell: (task) => {
+        const run = latestRun.get(task.id);
+        return run ? (
+          <span>
+            <span className="block text-sm capitalize">{run.status}</span>
+            <span className="text-muted block text-xs tabular-nums">
+              {formatDateTime(run.finished_at || run.created_at)}
+            </span>
+          </span>
+        ) : (
+          <span className="text-muted">—</span>
+        );
+      },
+    },
+    {
+      id: "status",
+      header: "Status",
+      width: 130,
+      cell: (task) => <TaskStatus status={task.status} />,
+    },
     {
       id: "actions",
       header: "Actions",
       align: "center",
       pinned: "end",
       width: 80,
-      cell: (task) => <Dropdown><Dropdown.Trigger aria-label={`Actions for ${task.name}`} className="text-muted hover:bg-surface-secondary mx-auto grid size-9 place-items-center rounded-xl"><MoreHorizontal className="size-4" /></Dropdown.Trigger><Dropdown.Popover placement="bottom end"><Dropdown.Menu aria-label={`Actions for ${task.name}`} onAction={(key) => { if (key === "view") view(task); if (key === "delete") setDeleteTarget(task); }}><Dropdown.Item id="view" textValue="View">View details</Dropdown.Item><Dropdown.Item id="delete" textValue="Delete"><Trash2 className="text-danger size-4" /><span className="text-danger">Delete</span></Dropdown.Item></Dropdown.Menu></Dropdown.Popover></Dropdown>,
+      cell: (task) => (
+        <Dropdown>
+          <Dropdown.Trigger
+            aria-label={`Actions for ${task.name}`}
+            className="text-muted hover:bg-surface-secondary mx-auto grid size-9 place-items-center rounded-xl"
+          >
+            <MoreHorizontal className="size-4" />
+          </Dropdown.Trigger>
+          <Dropdown.Popover placement="bottom end">
+            <Dropdown.Menu
+              aria-label={`Actions for ${task.name}`}
+              onAction={(key) => {
+                if (key === "view") view(task);
+                if (key === "delete") setDeleteTarget(task);
+              }}
+            >
+              <Dropdown.Item id="view" textValue="View">
+                View details
+              </Dropdown.Item>
+              <Dropdown.Item id="delete" textValue="Delete">
+                <Trash2 className="text-danger size-4" />
+                <span className="text-danger">Delete</span>
+              </Dropdown.Item>
+            </Dropdown.Menu>
+          </Dropdown.Popover>
+        </Dropdown>
+      ),
     },
   ];
 
@@ -158,11 +241,64 @@ export default function ScheduledTasksPage() {
       {error ? <AdminAlert tone="error">{error}</AdminAlert> : null}
 
       <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
-        <SearchField aria-label="Search scheduled tasks" className="w-full lg:max-w-sm" value={query} onChange={setQuery}><SearchField.Group><SearchField.SearchIcon /><SearchField.Input placeholder="Search task, prompt, or owner" /><SearchField.ClearButton /></SearchField.Group></SearchField>
-        <Segment aria-label="Task status filter" selectedKey={status} onSelectionChange={(key) => setStatus(String(key) as StatusFilter)}><Segment.Item id="all">All</Segment.Item><Segment.Item id="active">Active</Segment.Item><Segment.Item id="paused">Paused</Segment.Item><Segment.Item id="completed">Completed</Segment.Item><Segment.Item id="expired">Expired</Segment.Item><Segment.Item id="owner-required">Owner required</Segment.Item></Segment>
+        <SearchField
+          aria-label="Search scheduled tasks"
+          className="w-full lg:max-w-sm"
+          value={query}
+          onChange={setQuery}
+        >
+          <SearchField.Group>
+            <SearchField.SearchIcon />
+            <SearchField.Input placeholder="Search task, prompt, or owner" />
+            <SearchField.ClearButton />
+          </SearchField.Group>
+        </SearchField>
+        <Segment
+          aria-label="Task status filter"
+          selectedKey={status}
+          onSelectionChange={(key) => setStatus(String(key) as StatusFilter)}
+        >
+          <Segment.Item id="all">All</Segment.Item>
+          <Segment.Item id="active">Active</Segment.Item>
+          <Segment.Item id="paused">Paused</Segment.Item>
+          <Segment.Item id="completed">Completed</Segment.Item>
+          <Segment.Item id="expired">Expired</Segment.Item>
+          <Segment.Item id="owner-required">Owner required</Segment.Item>
+        </Segment>
       </div>
 
-      <DataGrid aria-label="Scheduled tasks" columns={columns} contentClassName="min-w-[1060px]" data={visibleTasks} getRowId={(task) => task.id} selectionMode="none" variant="primary" renderEmptyState={() => <EmptyState><EmptyState.Header><EmptyState.Media variant="icon"><ClockCountdown className="text-green-500" /></EmptyState.Media><EmptyState.Title>{loading ? "Loading tasks" : tasks.length ? "No matching tasks" : "No scheduled tasks"}</EmptyState.Title><EmptyState.Description>{loading ? "Fetching scheduled work…" : tasks.length ? "Try a different search or status filter." : "Tasks created by users will appear here."}</EmptyState.Description></EmptyState.Header></EmptyState>} />
+      <DataGrid
+        aria-label="Scheduled tasks"
+        columns={columns}
+        contentClassName="min-w-[1060px]"
+        data={visibleTasks}
+        getRowId={(task) => task.id}
+        selectionMode="none"
+        variant="primary"
+        renderEmptyState={() => (
+          <EmptyState>
+            <EmptyState.Header>
+              <EmptyState.Media variant="icon">
+                <ClockCountdown className="text-green-500" />
+              </EmptyState.Media>
+              <EmptyState.Title>
+                {loading
+                  ? "Loading tasks"
+                  : tasks.length
+                    ? "No matching tasks"
+                    : "No scheduled tasks"}
+              </EmptyState.Title>
+              <EmptyState.Description>
+                {loading
+                  ? "Fetching scheduled work…"
+                  : tasks.length
+                    ? "Try a different search or status filter."
+                    : "Tasks created by users will appear here."}
+              </EmptyState.Description>
+            </EmptyState.Header>
+          </EmptyState>
+        )}
+      />
 
       <AdminDrawer
         open={drawerOpen}
@@ -227,31 +363,33 @@ function TaskStatus({ status }: { status: ScheduledTask["status"] }) {
 function TaskDetails({ task, runs }: { task: ScheduledTask; runs: TaskRun[] }) {
   return (
     <div className="space-y-5">
-      <Card className="p-4"><Card.Content className="grid gap-3 p-0 sm:grid-cols-2">
-        <Detail label="Owner">
-          {task.owner?.name || task.owner?.email || task.owner_user_id || "Owner required"}
-          {task.owner?.name && task.owner.email ? (
-            <span className="block text-xs text-muted">{task.owner.email}</span>
-          ) : null}
-        </Detail>
-        <Detail label="Status">
-          <TaskStatus status={task.status} />
-        </Detail>
-        <Detail label="Schedule">{scheduleLabel(task)}</Detail>
-        <Detail label="Timezone">{task.timezone || "—"}</Detail>
-        <Detail label="Next run">{formatDateTime(task.next_run_at)}</Detail>
-        <Detail label="Last run">{formatDateTime(task.last_run_at)}</Detail>
-        <Detail label="Last result">
-          <span className="capitalize">{task.last_status || "—"}</span>
-        </Detail>
-        <Detail label="Ends">{formatDateTime(task.expires_at)}</Detail>
-        <Detail label="Model">
-          <span className="font-mono text-xs">{task.model_alias || "—"}</span>
-        </Detail>
-        <Detail label="Runs">
-          <span className="tabular-nums">{task.run_count}</span>
-        </Detail>
-      </Card.Content></Card>
+      <Card className="p-4">
+        <Card.Content className="grid gap-3 p-0 sm:grid-cols-2">
+          <Detail label="Owner">
+            {task.owner?.name || task.owner?.email || task.owner_user_id || "Owner required"}
+            {task.owner?.name && task.owner.email ? (
+              <span className="block text-xs text-muted">{task.owner.email}</span>
+            ) : null}
+          </Detail>
+          <Detail label="Status">
+            <TaskStatus status={task.status} />
+          </Detail>
+          <Detail label="Schedule">{scheduleLabel(task)}</Detail>
+          <Detail label="Timezone">{task.timezone || "—"}</Detail>
+          <Detail label="Next run">{formatDateTime(task.next_run_at)}</Detail>
+          <Detail label="Last run">{formatDateTime(task.last_run_at)}</Detail>
+          <Detail label="Last result">
+            <span className="capitalize">{task.last_status || "—"}</span>
+          </Detail>
+          <Detail label="Ends">{formatDateTime(task.expires_at)}</Detail>
+          <Detail label="Model">
+            <span className="font-mono text-xs">{task.model_alias || "—"}</span>
+          </Detail>
+          <Detail label="Runs">
+            <span className="tabular-nums">{task.run_count}</span>
+          </Detail>
+        </Card.Content>
+      </Card>
 
       <section>
         <h3 className="text-xs font-medium text-muted">Prompt</h3>

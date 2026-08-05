@@ -113,7 +113,9 @@ export default function ConnectorsPage() {
         title="Connectors"
       />
 
-      {error ? <div className="bg-danger/10 text-danger rounded-2xl px-4 py-3 text-sm">{error}</div> : null}
+      {error ? (
+        <div className="bg-danger/10 text-danger rounded-2xl px-4 py-3 text-sm">{error}</div>
+      ) : null}
 
       <section className="max-w-[300px]">
         <Card className="cocola-web-connector-card p-4">
@@ -124,7 +126,9 @@ export default function ConnectorsPage() {
               </span>
               <span className="min-w-0">
                 <span className="text-foreground block font-semibold">GitHub</span>
-                <span className="text-muted mt-1 block truncate text-sm">Repositories and agent tools</span>
+                <span className="text-muted mt-1 block truncate text-sm">
+                  Repositories and agent tools
+                </span>
               </span>
             </div>
             <div className="mt-4 flex items-center gap-2 text-xs font-medium">
@@ -145,8 +149,42 @@ export default function ConnectorsPage() {
         </Card>
       </section>
 
-      <Sheet isOpen={disconnectOpen} placement="right" onOpenChange={(open) => !busy && setDisconnectOpen(open)}>
-        <Sheet.Backdrop><Sheet.Content className="w-full md:w-[440px]"><Sheet.Dialog><Sheet.CloseTrigger aria-label="Close GitHub disconnect confirmation" /><Sheet.Header><Sheet.Heading>Disconnect GitHub?</Sheet.Heading><p className="text-muted text-sm leading-6">Existing Projects remain available, but Cocola will no longer be able to access their GitHub repositories.</p></Sheet.Header><Sheet.Body><div className="bg-danger/10 text-danger rounded-2xl px-4 py-3 text-sm">You can reconnect the GitHub App later.</div></Sheet.Body><Sheet.Footer className="gap-2"><Button isDisabled={busy} variant="outline" onPress={() => setDisconnectOpen(false)}>Cancel</Button><Button isPending={busy} variant="danger" onPress={() => void disconnect()}>Disconnect GitHub</Button></Sheet.Footer></Sheet.Dialog></Sheet.Content></Sheet.Backdrop>
+      <Sheet
+        isOpen={disconnectOpen}
+        placement="right"
+        onOpenChange={(open) => !busy && setDisconnectOpen(open)}
+      >
+        <Sheet.Backdrop>
+          <Sheet.Content className="w-full md:w-[440px]">
+            <Sheet.Dialog>
+              <Sheet.CloseTrigger aria-label="Close GitHub disconnect confirmation" />
+              <Sheet.Header>
+                <Sheet.Heading>Disconnect GitHub?</Sheet.Heading>
+                <p className="text-muted text-sm leading-6">
+                  Existing Projects remain available, but Cocola will no longer be able to access
+                  their GitHub repositories.
+                </p>
+              </Sheet.Header>
+              <Sheet.Body>
+                <div className="bg-danger/10 text-danger rounded-2xl px-4 py-3 text-sm">
+                  You can reconnect the GitHub App later.
+                </div>
+              </Sheet.Body>
+              <Sheet.Footer className="gap-2">
+                <Button
+                  isDisabled={busy}
+                  variant="outline"
+                  onPress={() => setDisconnectOpen(false)}
+                >
+                  Cancel
+                </Button>
+                <Button isPending={busy} variant="danger" onPress={() => void disconnect()}>
+                  Disconnect GitHub
+                </Button>
+              </Sheet.Footer>
+            </Sheet.Dialog>
+          </Sheet.Content>
+        </Sheet.Backdrop>
       </Sheet>
     </WorkspacePageFrame>
   );
@@ -170,18 +208,42 @@ function connectorAction({
   setDisconnectOpen: (open: boolean) => void;
 }) {
   if (!connection && loadState === "checking") {
-    return { disabled: true, icon: <Loader2 className="size-4 animate-spin" />, label: "Checking…", onPress: undefined, outline: false };
+    return {
+      disabled: true,
+      icon: <Loader2 className="size-4 animate-spin" />,
+      label: "Checking…",
+      onPress: undefined,
+      outline: false,
+    };
   }
   if (!connection && loadState === "failed") {
-    return { disabled: false, icon: <RefreshCw className="size-4" />, label: "Retry", onPress: () => void load(), outline: true };
+    return {
+      disabled: false,
+      icon: <RefreshCw className="size-4" />,
+      label: "Retry",
+      onPress: () => void load(),
+      outline: true,
+    };
   }
   if (connection?.status === "disabled") {
     return { disabled: true, icon: null, label: "Unavailable", onPress: undefined, outline: false };
   }
   if (connection?.status === "installation_required") {
     return connection.installation_url
-      ? { disabled: false, icon: <ExternalLink className="size-4" />, label: "Continue on GitHub", onPress: () => window.location.assign(connection.installation_url!), outline: false }
-      : { disabled: true, icon: null, label: "Installation unavailable", onPress: undefined, outline: false };
+      ? {
+          disabled: false,
+          icon: <ExternalLink className="size-4" />,
+          label: "Continue on GitHub",
+          onPress: () => window.location.assign(connection.installation_url!),
+          outline: false,
+        }
+      : {
+          disabled: true,
+          icon: null,
+          label: "Installation unavailable",
+          onPress: undefined,
+          outline: false,
+        };
   }
   if (connection?.status === "ready") {
     return {
@@ -193,15 +255,36 @@ function connectorAction({
     };
   }
   if (connection?.status === "reauthorization_required") {
-    return { disabled: busy, icon: busy ? <Loader2 className="size-4 animate-spin" /> : <GitHubIcon className="size-4" />, label: "Reconnect", onPress: () => void register(), outline: false };
+    return {
+      disabled: busy,
+      icon: busy ? <Loader2 className="size-4 animate-spin" /> : <GitHubIcon className="size-4" />,
+      label: "Reconnect",
+      onPress: () => void register(),
+      outline: false,
+    };
   }
   if (connection?.status === "not_configured" || connection?.status === "error") {
-    return { disabled: busy, icon: busy ? <Loader2 className="size-4 animate-spin" /> : <GitHubIcon className="size-4" />, label: "Register on GitHub", onPress: () => void register(), outline: false };
+    return {
+      disabled: busy,
+      icon: busy ? <Loader2 className="size-4 animate-spin" /> : <GitHubIcon className="size-4" />,
+      label: "Register on GitHub",
+      onPress: () => void register(),
+      outline: false,
+    };
   }
-  return { disabled: busy, icon: <RefreshCw className="size-4" />, label: "Refresh", onPress: () => void load(), outline: true };
+  return {
+    disabled: busy,
+    icon: <RefreshCw className="size-4" />,
+    label: "Refresh",
+    onPress: () => void load(),
+    outline: true,
+  };
 }
 
-function githubConnectionState(connection: GitHubConnection | null, loadState: ConnectionLoadState) {
+function githubConnectionState(
+  connection: GitHubConnection | null,
+  loadState: ConnectionLoadState,
+) {
   if (!connection) {
     return loadState === "failed"
       ? { label: "Connection check failed", dot: "bg-danger", text: "text-danger" }
@@ -209,13 +292,27 @@ function githubConnectionState(connection: GitHubConnection | null, loadState: C
   }
   const states: Record<string, { label: string; dot: string; text: string }> = {
     disabled: { label: "Unavailable", dot: "bg-surface-secondary", text: "text-muted" },
-    not_configured: { label: "Not connected", dot: "bg-surface-secondary", text: "text-foreground" },
+    not_configured: {
+      label: "Not connected",
+      dot: "bg-surface-secondary",
+      text: "text-foreground",
+    },
     error: { label: "Connection error", dot: "bg-danger", text: "text-danger" },
     installation_required: { label: "Setup required", dot: "bg-warning", text: "text-foreground" },
     ready: { label: "Connected", dot: "bg-success", text: "text-success" },
-    reauthorization_required: { label: "Reconnect required", dot: "bg-warning", text: "text-foreground" },
+    reauthorization_required: {
+      label: "Reconnect required",
+      dot: "bg-warning",
+      text: "text-foreground",
+    },
   };
-  return states[connection.status] ?? { label: "Status unavailable", dot: "bg-surface-secondary", text: "text-muted" };
+  return (
+    states[connection.status] ?? {
+      label: "Status unavailable",
+      dot: "bg-surface-secondary",
+      text: "text-muted",
+    }
+  );
 }
 
 function GitHubIcon({ className }: { className?: string }) {

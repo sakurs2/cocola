@@ -263,6 +263,8 @@ type ComposerWikiInputHandle = {
 const ThreadWelcome: FC = () => {
   const composer = useComposerRuntime();
   const composerIsEmpty = useComposer((state) => state.isEmpty);
+  const { selectedAgent } = useCocola();
+  const visiblePromptStarters = selectedAgent ? [] : PROMPT_STARTERS;
   const [activePromptStarter, setActivePromptStarter] = useState<PromptStarter | null>(null);
   const [promptSlotBindings, setPromptSlotBindings] = useState<
     Record<string, PromptStarterSlotBinding | undefined>
@@ -326,7 +328,7 @@ const ThreadWelcome: FC = () => {
           <div className="mt-5 min-h-10 w-full">
             <PromptSuggestion variant="pill">
               <PromptSuggestion.Items className="mx-auto flex w-full max-w-3xl flex-wrap justify-center gap-2.5">
-                {PROMPT_STARTERS.map((starter) => {
+                {visiblePromptStarters.map((starter) => {
                   const { icon: Icon, label, iconClassName } = starter;
                   return (
                     <PromptSuggestion.Item

@@ -100,8 +100,22 @@ export default function ComponentLogsPage() {
             }
             contentClassName="cocola-admin-ui"
           />
-          <TextField value={String(lineCount)} variant="secondary" onChange={(value) => setLineCount(Math.max(1, Math.min(2000, Number(value) || 1)))}><Label>Lines</Label><Input className="h-10" type="number" min={1} max={2000} /></TextField>
-          <Button className="h-10" isDisabled={loading} isPending={loading} onPress={() => void load()}>Load</Button>
+          <TextField
+            value={String(lineCount)}
+            variant="secondary"
+            onChange={(value) => setLineCount(Math.max(1, Math.min(2000, Number(value) || 1)))}
+          >
+            <Label>Lines</Label>
+            <Input className="h-10" type="number" min={1} max={2000} />
+          </TextField>
+          <Button
+            className="h-10"
+            isDisabled={loading}
+            isPending={loading}
+            onPress={() => void load()}
+          >
+            Load
+          </Button>
         </Card.Content>
       </Card>
 
@@ -114,14 +128,37 @@ export default function ComponentLogsPage() {
 
       <Card className="overflow-hidden p-0">
         <Card.Header className="flex-row items-center justify-between p-4">
-          <span><Card.Title>{selectedFile?.label ?? "Logs"}</Card.Title><Card.Description>{lines.length} lines · {formatBytes(selectedFile?.size ?? 0)}</Card.Description></span>
+          <span>
+            <Card.Title>{selectedFile?.label ?? "Logs"}</Card.Title>
+            <Card.Description>
+              {lines.length} lines · {formatBytes(selectedFile?.size ?? 0)}
+            </Card.Description>
+          </span>
           {loading ? (
             <span className="text-muted inline-flex items-center text-xs">
               <Loader2 className="mr-2 size-3 animate-spin" />
               Loading
             </span>
           ) : (
-            <Tooltip delay={0}><Button isIconOnly aria-label="Copy loaded logs" variant="ghost" onPress={async () => { await navigator.clipboard.writeText(lines.join("\n")); setCopied(true); window.setTimeout(() => setCopied(false), 1600); }}>{copied ? <CheckCircle2 className="text-success size-4" /> : <Copy className="size-4" />}</Button><Tooltip.Content>{copied ? "Copied" : "Copy logs"}</Tooltip.Content></Tooltip>
+            <Tooltip delay={0}>
+              <Button
+                isIconOnly
+                aria-label="Copy loaded logs"
+                variant="ghost"
+                onPress={async () => {
+                  await navigator.clipboard.writeText(lines.join("\n"));
+                  setCopied(true);
+                  window.setTimeout(() => setCopied(false), 1600);
+                }}
+              >
+                {copied ? (
+                  <CheckCircle2 className="text-success size-4" />
+                ) : (
+                  <Copy className="size-4" />
+                )}
+              </Button>
+              <Tooltip.Content>{copied ? "Copied" : "Copy logs"}</Tooltip.Content>
+            </Tooltip>
           )}
         </Card.Header>
         <pre className="h-[560px] overflow-auto bg-zinc-950 p-4 font-mono text-xs leading-5 text-zinc-100">

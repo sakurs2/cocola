@@ -72,5 +72,7 @@ export function resolveSkillGlyphKey(name: string): SkillGlyphKey {
   for (const [pattern, glyph] of KEYWORD_GLYPHS) {
     if (pattern.test(name)) return glyph;
   }
-  return SKILL_GLYPH_KEYS[skillIdentityHash(name || "skill") % SKILL_GLYPH_KEYS.length] ?? "sparkles";
+  return (
+    SKILL_GLYPH_KEYS[skillIdentityHash(name || "skill") % SKILL_GLYPH_KEYS.length] ?? "sparkles"
+  );
 }

@@ -2,7 +2,10 @@
 
 import { Avatar, Card, Chip } from "@heroui/react";
 import { Mail, ShieldCheck, UserRound } from "lucide-react";
-import { WorkspacePageFrame, WorkspacePageHeader } from "@/components/heroui-workspace/workspace-ui";
+import {
+  WorkspacePageFrame,
+  WorkspacePageHeader,
+} from "@/components/heroui-workspace/workspace-ui";
 import { AccountSettingsPanel } from "@/components/profile/account-settings-panel";
 import { AgentInstructionsPanel } from "@/components/profile/agent-instructions-panel";
 import { MemoryPanel } from "@/components/profile/memory-panel";
@@ -41,7 +44,9 @@ export function ProfilePageContent({ user }: { user: SessionUser }) {
               {user.email || "-"}
             </p>
           </div>
-          <Chip color="success" size="sm" variant="soft">Active</Chip>
+          <Chip color="success" size="sm" variant="soft">
+            Active
+          </Chip>
         </Card.Content>
       </Card>
 

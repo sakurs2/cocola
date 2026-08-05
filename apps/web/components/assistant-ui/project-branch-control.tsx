@@ -174,9 +174,7 @@ export function ProjectBaseBranchPicker({
                   <GitBranch className="size-4 shrink-0 text-muted" />
                   <span className="min-w-0 flex-1 truncate font-medium">{branch.name}</span>
                   {branch.is_default ? (
-                    <span className="text-[10px] uppercase tracking-wide text-muted">
-                      Default
-                    </span>
+                    <span className="text-[10px] uppercase tracking-wide text-muted">Default</span>
                   ) : null}
                   {branch.name === value ? <Check className="size-4 shrink-0" /> : null}
                 </Command.Item>

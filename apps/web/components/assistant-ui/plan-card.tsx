@@ -200,7 +200,10 @@ export const PlanCardPart: FC<
   return (
     <section
       aria-labelledby={planTitleId}
-      className={cn("relative my-4 overflow-hidden rounded-2xl border bg-surface", statusView.frame)}
+      className={cn(
+        "relative my-4 overflow-hidden rounded-2xl border bg-surface",
+        statusView.frame,
+      )}
     >
       <div className={cn("absolute inset-y-0 left-0 w-1", statusView.accent)} aria-hidden="true" />
       <div

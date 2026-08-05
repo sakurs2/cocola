@@ -38,7 +38,6 @@ import { isAllowedWebSocketOrigin, parsePublicOrigins } from "./lib/public-origi
 
 const GATEWAY_URL = process.env.COCOLA_GATEWAY_URL ?? "http://127.0.0.1:8080";
 const ADMIN_URL = process.env.COCOLA_ADMIN_URL ?? "http://127.0.0.1:8092";
-const FRONTEND_ONLY_BACKEND = process.env.COCOLA_WEB_BACKEND_ORIGIN?.replace(/\/+$/, "");
 const AUTH_SECRET = process.env.AUTH_SECRET;
 const RUNTIME_TOKEN_TTL_SECONDS = 600;
 const PUBLIC_ORIGINS = parsePublicOrigins(process.env.COCOLA_PUBLIC_ORIGINS);
@@ -150,64 +149,6 @@ function writeUpgradeError(socket, status, message) {
     // socket may already be gone
   }
   socket.destroy();
-}
-
-// In frontend-only development the resident :3000 Cocola server remains the
-// owner of authentication and runtime-token minting. Forward only Cocola's
-// workspace upgrade paths to it; Next's own HMR upgrade stays on this process.
-function tunnelToWebBackend(req, clientSocket, head) {
-  const target = new URL(FRONTEND_ONLY_BACKEND);
-  const headers = { ...req.headers };
-  headers.host = target.host;
-  if (headers.origin) headers.origin = target.origin;
-
-  const proxyReq = httpRequest({
-    protocol: target.protocol,
-    hostname: target.hostname,
-    port: target.port || (target.protocol === "https:" ? 443 : 80),
-    method: req.method,
-    path: req.url,
-    headers,
-    agent: false,
-  });
-
-  let settled = false;
-  proxyReq.on("error", (err) => {
-    settled = true;
-    console.error("[web] frontend-only WS proxy error:", err.message);
-    clientSocket.destroy();
-  });
-  proxyReq.on("close", () => {
-    if (settled) return;
-    settled = true;
-    console.error("[web] frontend-only WS proxy closed before a response");
-    clientSocket.destroy();
-  });
-  proxyReq.on("upgrade", (proxyRes, proxySocket, proxyHead) => {
-    settled = true;
-    trackSocket(proxySocket);
-    proxySocket.on("error", () => clientSocket.destroy());
-    clientSocket.on("error", () => proxySocket.destroy());
-    if (proxyHead?.length) proxySocket.unshift(proxyHead);
-
-    let handshake = "HTTP/1.1 101 Switching Protocols\r\n";
-    for (let index = 0; index < proxyRes.rawHeaders.length; index += 2) {
-      handshake += `${proxyRes.rawHeaders[index]}: ${proxyRes.rawHeaders[index + 1]}\r\n`;
-    }
-    clientSocket.write(`${handshake}\r\n`);
-    proxySocket.pipe(clientSocket).pipe(proxySocket);
-  });
-  proxyReq.on("response", (proxyRes) => {
-    settled = true;
-    writeUpgradeError(
-      clientSocket,
-      proxyRes.statusCode || 502,
-      proxyRes.statusMessage || "Bad Gateway",
-    );
-  });
-
-  if (head?.length) clientSocket.unshift(head);
-  proxyReq.end();
 }
 
 // Raw TCP tunnel: reissue the WS handshake to the gateway with the runtime
@@ -329,11 +270,6 @@ app
       // Gateway path was already captured above.
       maskPreviewUpgradeFromNext(req);
       socket.pause();
-
-      if (FRONTEND_ONLY_BACKEND) {
-        tunnelToWebBackend(req, socket, head);
-        return;
-      }
 
       (async () => {
         // The browser-facing cookie boundary owns CSWSH protection. Validate the

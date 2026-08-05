@@ -166,9 +166,7 @@ export function WorkspaceCatalogCard({
             {status}
           </span>
           <span className="text-foreground font-semibold">{title}</span>
-          <span className="text-muted line-clamp-2 min-h-10 text-sm leading-5">
-            {description}
-          </span>
+          <span className="text-muted line-clamp-2 min-h-10 text-sm leading-5">{description}</span>
           {metadata ? (
             <span className="flex min-w-0 flex-wrap items-center gap-2">{metadata}</span>
           ) : null}

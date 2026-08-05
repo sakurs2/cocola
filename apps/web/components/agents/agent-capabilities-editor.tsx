@@ -280,14 +280,21 @@ export function AgentCapabilitiesEditor({
       <Card className="p-5">
         <Card.Header className="p-0">
           <Card.Title>Skills</Card.Title>
-          <Card.Description>Leave empty to inherit default Skills. Selecting one switches this Agent to a custom set.</Card.Description>
+          <Card.Description>
+            Leave empty to inherit default Skills. Selecting one switches this Agent to a custom
+            set.
+          </Card.Description>
         </Card.Header>
         <Card.Content className="p-0">
           <div className="bg-surface-secondary flex flex-wrap items-center justify-between gap-3 rounded-xl px-3 py-2.5">
             <span>
-              <span className="block text-sm font-medium">{skillIDs.length === 0 ? "Using default Skills" : "Using a custom Skill set"}</span>
+              <span className="block text-sm font-medium">
+                {skillIDs.length === 0 ? "Using default Skills" : "Using a custom Skill set"}
+              </span>
               <span className="text-muted mt-1 block text-xs">
-                {skillIDs.length === 0 ? "All Skills enabled by default remain available." : `Only ${skillIDs.length} selected Skill${skillIDs.length === 1 ? "" : "s"} will be available.`}
+                {skillIDs.length === 0
+                  ? "All Skills enabled by default remain available."
+                  : `Only ${skillIDs.length} selected Skill${skillIDs.length === 1 ? "" : "s"} will be available.`}
               </span>
             </span>
             <Chip color={skillIDs.length === 0 ? "accent" : "success"} size="sm" variant="soft">
@@ -299,10 +306,15 @@ export function AgentCapabilitiesEditor({
             className="mt-4 w-full"
             value={skillQuery}
             variant="secondary"
-            onChange={(value) => { setSkillQuery(value); setSkillPage(1); }}
+            onChange={(value) => {
+              setSkillQuery(value);
+              setSkillPage(1);
+            }}
           >
             <SearchField.Group>
-              <SearchField.SearchIcon><Search className="size-4" /></SearchField.SearchIcon>
+              <SearchField.SearchIcon>
+                <Search className="size-4" />
+              </SearchField.SearchIcon>
               <SearchField.Input placeholder="Search Skills by name" />
               <SearchField.ClearButton />
             </SearchField.Group>
@@ -312,28 +324,45 @@ export function AgentCapabilitiesEditor({
               const selected = selectedIDs.has(skill.id);
               const disabled = !skill.available && !selected;
               const description = skill.available
-                ? skill.description || `${skill.source === "personal" ? "Personal" : "Shared"} Skill`
+                ? skill.description ||
+                  `${skill.source === "personal" ? "Personal" : "Shared"} Skill`
                 : skill.unavailable_reason || "This Skill is no longer available.";
               return (
                 <ItemCard<"button">
                   key={skill.id}
                   className={`relative min-h-[9.5rem] w-full overflow-hidden ${selected ? "ring-accent bg-accent-soft ring-2" : ""} ${disabled ? "cursor-not-allowed opacity-55" : "cursor-pointer"}`}
                   render={(props) => (
-                    <button {...props} aria-pressed={selected} disabled={disabled} type="button" onClick={() => toggleSkill(skill)} />
+                    <button
+                      {...props}
+                      aria-pressed={selected}
+                      disabled={disabled}
+                      type="button"
+                      onClick={() => toggleSkill(skill)}
+                    />
                   )}
                 >
                   <PressableFeedback.Highlight />
-                  <ItemCard.Icon className="bg-transparent p-0"><SkillIcon name={skill.name || skill.runtime_id} /></ItemCard.Icon>
+                  <ItemCard.Icon className="bg-transparent p-0">
+                    <SkillIcon name={skill.name || skill.runtime_id} />
+                  </ItemCard.Icon>
                   <ItemCard.Content>
                     <ItemCard.Title>{skill.name}</ItemCard.Title>
                     <ItemCard.Description>{description}</ItemCard.Description>
                     <span className="mt-3 flex flex-wrap gap-1.5">
-                      <Chip size="sm" variant="soft">{skill.source === "personal" ? "personal" : "shared"}</Chip>
-                      {!skill.available ? <Chip color="warning" size="sm" variant="soft">unavailable</Chip> : null}
+                      <Chip size="sm" variant="soft">
+                        {skill.source === "personal" ? "personal" : "shared"}
+                      </Chip>
+                      {!skill.available ? (
+                        <Chip color="warning" size="sm" variant="soft">
+                          unavailable
+                        </Chip>
+                      ) : null}
                     </span>
                   </ItemCard.Content>
                   <ItemCard.Action>
-                    <span className={`grid size-6 place-items-center rounded-lg border ${selected ? "border-accent bg-accent text-white" : "border-separator text-transparent"}`}>
+                    <span
+                      className={`grid size-6 place-items-center rounded-lg border ${selected ? "border-accent bg-accent text-white" : "border-separator text-transparent"}`}
+                    >
                       <Check className="size-3.5" />
                     </span>
                   </ItemCard.Action>
@@ -349,16 +378,38 @@ export function AgentCapabilitiesEditor({
           ) : null}
           <div className="mt-4 flex flex-wrap items-center justify-between gap-3">
             <span className="text-muted text-xs tabular-nums">
-              Showing {filteredSkills.length === 0 ? 0 : skillPageStart + 1}–{Math.min(skillPageStart + SKILLS_PER_PAGE, filteredSkills.length)} of {filteredSkills.length}
+              Showing {filteredSkills.length === 0 ? 0 : skillPageStart + 1}–
+              {Math.min(skillPageStart + SKILLS_PER_PAGE, filteredSkills.length)} of{" "}
+              {filteredSkills.length}
             </span>
             <span className="flex items-center gap-2">
               <Tooltip delay={0}>
-                <Button isIconOnly aria-label="Previous Skills page" isDisabled={currentSkillPage === 1} size="sm" variant="outline" onPress={() => setSkillPage((page) => Math.max(1, page - 1))}><ChevronLeft className="size-4" /></Button>
+                <Button
+                  isIconOnly
+                  aria-label="Previous Skills page"
+                  isDisabled={currentSkillPage === 1}
+                  size="sm"
+                  variant="outline"
+                  onPress={() => setSkillPage((page) => Math.max(1, page - 1))}
+                >
+                  <ChevronLeft className="size-4" />
+                </Button>
                 <Tooltip.Content>Previous page</Tooltip.Content>
               </Tooltip>
-              <span className="text-muted min-w-14 text-center text-xs tabular-nums">{currentSkillPage} / {skillPageCount}</span>
+              <span className="text-muted min-w-14 text-center text-xs tabular-nums">
+                {currentSkillPage} / {skillPageCount}
+              </span>
               <Tooltip delay={0}>
-                <Button isIconOnly aria-label="Next Skills page" isDisabled={currentSkillPage === skillPageCount} size="sm" variant="outline" onPress={() => setSkillPage((page) => Math.min(skillPageCount, page + 1))}><ChevronRight className="size-4" /></Button>
+                <Button
+                  isIconOnly
+                  aria-label="Next Skills page"
+                  isDisabled={currentSkillPage === skillPageCount}
+                  size="sm"
+                  variant="outline"
+                  onPress={() => setSkillPage((page) => Math.min(skillPageCount, page + 1))}
+                >
+                  <ChevronRight className="size-4" />
+                </Button>
                 <Tooltip.Content>Next page</Tooltip.Content>
               </Tooltip>
             </span>
@@ -370,15 +421,32 @@ export function AgentCapabilitiesEditor({
       <Card className="p-5">
         <Card.Header className="p-0">
           <Card.Title>Knowledge</Card.Title>
-          <Card.Description>Add Cocola Wiki files or remote Feishu references. Saved changes apply from the next message.</Card.Description>
+          <Card.Description>
+            Add Cocola Wiki files or remote Feishu references. Saved changes apply from the next
+            message.
+          </Card.Description>
         </Card.Header>
         <Card.Content className="p-0">
           <div className="grid gap-3 lg:grid-cols-[minmax(0,1fr)_12rem_auto] lg:items-end">
-            <TextField value={knowledgeURL} variant="secondary" onChange={(value) => { setKnowledgeURL(value); setKnowledgeNotice(null); }}>
+            <TextField
+              value={knowledgeURL}
+              variant="secondary"
+              onChange={(value) => {
+                setKnowledgeURL(value);
+                setKnowledgeNotice(null);
+              }}
+            >
               <Label>Feishu or Lark URL</Label>
               <Input placeholder="https://example.feishu.cn/docx/..." />
             </TextField>
-            <TextField value={knowledgeLabel} variant="secondary" onChange={(value) => { setKnowledgeLabel(value); setKnowledgeNotice(null); }}>
+            <TextField
+              value={knowledgeLabel}
+              variant="secondary"
+              onChange={(value) => {
+                setKnowledgeLabel(value);
+                setKnowledgeNotice(null);
+              }}
+            >
               <Label>Label</Label>
               <Input maxLength={100} placeholder="Optional" />
             </TextField>
@@ -387,28 +455,57 @@ export function AgentCapabilitiesEditor({
               Add
             </Button>
           </div>
-          <Button className="mt-3" variant="outline" onPress={() => void openWikiPicker()}><BookOpenText className="size-4" />Add from Cocola Wiki</Button>
-          {knowledgeNotice ? <CapabilityFeedback text={knowledgeNotice.text} tone={knowledgeNotice.tone === "error" ? "danger" : "success"} /> : null}
+          <Button className="mt-3" variant="outline" onPress={() => void openWikiPicker()}>
+            <BookOpenText className="size-4" />
+            Add from Cocola Wiki
+          </Button>
+          {knowledgeNotice ? (
+            <CapabilityFeedback
+              text={knowledgeNotice.text}
+              tone={knowledgeNotice.tone === "error" ? "danger" : "success"}
+            />
+          ) : null}
           {knowledgeSources.length > 0 ? (
             <ListView
               aria-label="Agent Knowledge sources"
               className="mt-4"
-              items={knowledgeSources.map((source) => ({ ...source, key: agentKnowledgeSourceKey(source) }))}
+              items={knowledgeSources.map((source) => ({
+                ...source,
+                key: agentKnowledgeSourceKey(source),
+              }))}
               selectionMode="none"
               variant="primary"
             >
               {(source) => (
                 <ListView.Item id={source.key} textValue={source.label}>
                   <ListView.ItemContent>
-                    <span className="bg-blue-500/15 text-blue-600 flex size-9 shrink-0 items-center justify-center rounded-xl dark:text-blue-300"><BookOpenText className="size-4" /></span>
+                    <span className="bg-blue-500/15 text-blue-600 flex size-9 shrink-0 items-center justify-center rounded-xl dark:text-blue-300">
+                      <BookOpenText className="size-4" />
+                    </span>
                     <div className="flex min-w-0 flex-col">
                       <ListView.Title>{source.label}</ListView.Title>
-                      <ListView.Description>{source.type === "cocola_wiki" ? "Cocola Wiki" : source.url}</ListView.Description>
+                      <ListView.Description>
+                        {source.type === "cocola_wiki" ? "Cocola Wiki" : source.url}
+                      </ListView.Description>
                     </div>
                   </ListView.ItemContent>
                   <ListView.ItemAction>
                     <Tooltip delay={0}>
-                      <Button isIconOnly aria-label={`Remove ${source.label}`} size="sm" variant="ghost" onPress={() => onKnowledgeSourcesChange(knowledgeSources.filter((item) => agentKnowledgeSourceKey(item) !== source.key))}><Trash2 className="size-4" /></Button>
+                      <Button
+                        isIconOnly
+                        aria-label={`Remove ${source.label}`}
+                        size="sm"
+                        variant="ghost"
+                        onPress={() =>
+                          onKnowledgeSourcesChange(
+                            knowledgeSources.filter(
+                              (item) => agentKnowledgeSourceKey(item) !== source.key,
+                            ),
+                          )
+                        }
+                      >
+                        <Trash2 className="size-4" />
+                      </Button>
                       <Tooltip.Content>Remove source</Tooltip.Content>
                     </Tooltip>
                   </ListView.ItemAction>
@@ -422,42 +519,86 @@ export function AgentCapabilitiesEditor({
             {knowledgeSources.length === 0 ? (
               <span className="text-muted flex min-w-0 items-center gap-2 text-sm">
                 <BookOpenText className="size-4 shrink-0" />
-                No Knowledge sources yet. Add a Wiki file or Feishu link when this Agent needs fixed context.
+                No Knowledge sources yet. Add a Wiki file or Feishu link when this Agent needs fixed
+                context.
               </span>
             ) : null}
-            <p className="text-muted ml-auto text-xs tabular-nums">{knowledgeSources.length} / 10 sources</p>
+            <p className="text-muted ml-auto text-xs tabular-nums">
+              {knowledgeSources.length} / 10 sources
+            </p>
           </div>
         </Card.Content>
       </Card>
 
-      <Sheet isOpen={wikiPickerOpen} placement="right" onOpenChange={(open) => { if (!open) setWikiPickerOpen(false); }}>
+      <Sheet
+        isOpen={wikiPickerOpen}
+        placement="right"
+        onOpenChange={(open) => {
+          if (!open) setWikiPickerOpen(false);
+        }}
+      >
         <Sheet.Backdrop>
           <Sheet.Content className="w-full md:w-[460px]">
             <Sheet.Dialog>
               <Sheet.CloseTrigger aria-label="Close Cocola Wiki picker" />
               <Sheet.Header>
                 <Sheet.Heading>Add from Cocola Wiki</Sheet.Heading>
-                <p className="text-muted text-sm">Choose a file that this Agent may use as contextual Knowledge.</p>
+                <p className="text-muted text-sm">
+                  Choose a file that this Agent may use as contextual Knowledge.
+                </p>
               </Sheet.Header>
               <Sheet.Body>
-                <SearchField aria-label="Search Cocola Wiki files" value={wikiQuery} variant="secondary" onChange={setWikiQuery}>
+                <SearchField
+                  aria-label="Search Cocola Wiki files"
+                  value={wikiQuery}
+                  variant="secondary"
+                  onChange={setWikiQuery}
+                >
                   <SearchField.Group>
-                    <SearchField.SearchIcon><Search className="size-4" /></SearchField.SearchIcon>
+                    <SearchField.SearchIcon>
+                      <Search className="size-4" />
+                    </SearchField.SearchIcon>
                     <SearchField.Input placeholder="Search Wiki files" />
                     <SearchField.ClearButton />
                   </SearchField.Group>
                 </SearchField>
                 {wikiLoading ? <div className="text-muted mt-4 text-sm">Loading Wiki…</div> : null}
-                {wikiError ? <div className="bg-danger/10 text-danger mt-4 rounded-2xl px-4 py-3 text-sm">{wikiError}</div> : null}
+                {wikiError ? (
+                  <div className="bg-danger/10 text-danger mt-4 rounded-2xl px-4 py-3 text-sm">
+                    {wikiError}
+                  </div>
+                ) : null}
                 {!wikiLoading && !wikiError ? (
-                  <ListView aria-label="Cocola Wiki files" className="mt-4" items={filteredWikiFiles} selectionMode="none" variant="primary" onAction={(key) => { const node = filteredWikiFiles.find((item) => item.id === String(key)); if (node) addCocolaWikiKnowledge(node); }}>
+                  <ListView
+                    aria-label="Cocola Wiki files"
+                    className="mt-4"
+                    items={filteredWikiFiles}
+                    selectionMode="none"
+                    variant="primary"
+                    onAction={(key) => {
+                      const node = filteredWikiFiles.find((item) => item.id === String(key));
+                      if (node) addCocolaWikiKnowledge(node);
+                    }}
+                  >
                     {(node) => (
-                      <ListView.Item id={node.id} textValue={`${node.name} ${node.logical_path ?? ""}`}>
+                      <ListView.Item
+                        id={node.id}
+                        textValue={`${node.name} ${node.logical_path ?? ""}`}
+                      >
                         <ListView.ItemContent>
-                          <span className="bg-blue-500/15 text-blue-600 flex size-9 shrink-0 items-center justify-center rounded-xl dark:text-blue-300"><FileText className="size-4" /></span>
-                          <div className="flex min-w-0 flex-col"><ListView.Title>{node.name}</ListView.Title><ListView.Description>{node.logical_path || node.name}</ListView.Description></div>
+                          <span className="bg-blue-500/15 text-blue-600 flex size-9 shrink-0 items-center justify-center rounded-xl dark:text-blue-300">
+                            <FileText className="size-4" />
+                          </span>
+                          <div className="flex min-w-0 flex-col">
+                            <ListView.Title>{node.name}</ListView.Title>
+                            <ListView.Description>
+                              {node.logical_path || node.name}
+                            </ListView.Description>
+                          </div>
                         </ListView.ItemContent>
-                        <ListView.ItemAction><Plus className="text-muted size-4" /></ListView.ItemAction>
+                        <ListView.ItemAction>
+                          <Plus className="text-muted size-4" />
+                        </ListView.ItemAction>
                       </ListView.Item>
                     )}
                   </ListView>
@@ -471,14 +612,26 @@ export function AgentCapabilitiesEditor({
   );
 }
 
-function CapabilityFeedback({ text, tone }: { text: string; tone: "danger" | "success" | "warning" }) {
+function CapabilityFeedback({
+  text,
+  tone,
+}: {
+  text: string;
+  tone: "danger" | "success" | "warning";
+}) {
   const Icon = tone === "success" ? CircleCheck : AlertTriangle;
-  const className = tone === "success"
-    ? "bg-success/10 text-success"
-    : tone === "warning"
-      ? "bg-warning/10 text-warning"
-      : "bg-danger/10 text-danger";
-  return <div className={`${className} mt-4 flex items-start gap-2 rounded-2xl px-4 py-3 text-sm`}><Icon className="mt-0.5 size-4 shrink-0" /><span>{text}</span></div>;
+  const className =
+    tone === "success"
+      ? "bg-success/10 text-success"
+      : tone === "warning"
+        ? "bg-warning/10 text-warning"
+        : "bg-danger/10 text-danger";
+  return (
+    <div className={`${className} mt-4 flex items-start gap-2 rounded-2xl px-4 py-3 text-sm`}>
+      <Icon className="mt-0.5 size-4 shrink-0" />
+      <span>{text}</span>
+    </div>
+  );
 }
 
 function normalizeKnowledgeSource(rawURL: string, rawLabel: string): AgentKnowledgeSource | null {

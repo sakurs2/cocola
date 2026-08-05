@@ -243,12 +243,74 @@ export default function AdminTokenUsagePage() {
   const activeUser = selectedUser ?? users[0] ?? null;
 
   const columns: DataGridColumn<TokenUsageUser>[] = [
-    { id: "user", header: "User", isRowHeader: true, minWidth: 180, cell: (user) => <span className="block min-w-0 truncate text-sm font-semibold" title={`${displayUser(user)} · ${user.user_id}`}>{displayUser(user)}</span> },
-    { id: "total", header: "Total", width: 90, align: "end", cell: (user) => <span className="tabular-nums" title={formatNumber(user.total_tokens)}>{compactNumber(user.total_tokens)}</span> },
-    { id: "input", header: "Input", width: 90, align: "end", cell: (user) => <span className="tabular-nums" title={formatNumber(user.prompt_tokens)}>{compactNumber(user.prompt_tokens)}</span> },
-    { id: "output", header: "Output", width: 90, align: "end", cell: (user) => <span className="tabular-nums" title={formatNumber(user.completion_tokens)}>{compactNumber(user.completion_tokens)}</span> },
-    { id: "calls", header: "Calls", width: 80, align: "end", cell: (user) => <span className="tabular-nums" title={formatNumber(user.calls)}>{compactNumber(user.calls)}</span> },
-    { id: "last", header: "Last used", minWidth: 135, cell: (user) => <span className="text-muted text-xs tabular-nums">{user.last_used_at ? formatDateTime(user.last_used_at) : "—"}</span> },
+    {
+      id: "user",
+      header: "User",
+      isRowHeader: true,
+      minWidth: 180,
+      cell: (user) => (
+        <span
+          className="block min-w-0 truncate text-sm font-semibold"
+          title={`${displayUser(user)} · ${user.user_id}`}
+        >
+          {displayUser(user)}
+        </span>
+      ),
+    },
+    {
+      id: "total",
+      header: "Total",
+      width: 90,
+      align: "end",
+      cell: (user) => (
+        <span className="tabular-nums" title={formatNumber(user.total_tokens)}>
+          {compactNumber(user.total_tokens)}
+        </span>
+      ),
+    },
+    {
+      id: "input",
+      header: "Input",
+      width: 90,
+      align: "end",
+      cell: (user) => (
+        <span className="tabular-nums" title={formatNumber(user.prompt_tokens)}>
+          {compactNumber(user.prompt_tokens)}
+        </span>
+      ),
+    },
+    {
+      id: "output",
+      header: "Output",
+      width: 90,
+      align: "end",
+      cell: (user) => (
+        <span className="tabular-nums" title={formatNumber(user.completion_tokens)}>
+          {compactNumber(user.completion_tokens)}
+        </span>
+      ),
+    },
+    {
+      id: "calls",
+      header: "Calls",
+      width: 80,
+      align: "end",
+      cell: (user) => (
+        <span className="tabular-nums" title={formatNumber(user.calls)}>
+          {compactNumber(user.calls)}
+        </span>
+      ),
+    },
+    {
+      id: "last",
+      header: "Last used",
+      minWidth: 135,
+      cell: (user) => (
+        <span className="text-muted text-xs tabular-nums">
+          {user.last_used_at ? formatDateTime(user.last_used_at) : "—"}
+        </span>
+      ),
+    },
   ];
 
   return (
@@ -287,11 +349,32 @@ export default function AdminTokenUsagePage() {
 
       <div className="admin-token-usage-range flex flex-wrap items-center gap-2">
         <span className="text-sm font-medium text-muted">Range</span>
-        <Segment aria-label="Usage range" selectedKey={preset} onSelectionChange={(key) => setPreset(String(key) as RangePreset)}><Segment.Item id="24h">24h</Segment.Item><Segment.Item id="7d">7d</Segment.Item><Segment.Item id="30d">30d</Segment.Item><Segment.Item id="90d">90d</Segment.Item><Segment.Item id="custom">Custom</Segment.Item></Segment>
+        <Segment
+          aria-label="Usage range"
+          selectedKey={preset}
+          onSelectionChange={(key) => setPreset(String(key) as RangePreset)}
+        >
+          <Segment.Item id="24h">24h</Segment.Item>
+          <Segment.Item id="7d">7d</Segment.Item>
+          <Segment.Item id="30d">30d</Segment.Item>
+          <Segment.Item id="90d">90d</Segment.Item>
+          <Segment.Item id="custom">Custom</Segment.Item>
+        </Segment>
         {preset === "custom" ? (
           <>
-            <TextField className="w-40" value={customFrom} variant="secondary" onChange={setCustomFrom}><Label className="sr-only">From</Label><Input type="date" /></TextField>
-            <TextField className="w-40" value={customTo} variant="secondary" onChange={setCustomTo}><Label className="sr-only">To</Label><Input type="date" /></TextField>
+            <TextField
+              className="w-40"
+              value={customFrom}
+              variant="secondary"
+              onChange={setCustomFrom}
+            >
+              <Label className="sr-only">From</Label>
+              <Input type="date" />
+            </TextField>
+            <TextField className="w-40" value={customTo} variant="secondary" onChange={setCustomTo}>
+              <Label className="sr-only">To</Label>
+              <Input type="date" />
+            </TextField>
           </>
         ) : null}
         <div className="ml-auto rounded-xl bg-surface-secondary px-3 py-2 text-xs text-muted tabular-nums">
@@ -307,7 +390,12 @@ export default function AdminTokenUsagePage() {
 
       <Card className="p-0">
         <Card.Header className="flex-row items-center justify-between px-5 pb-0 pt-5">
-          <span className="flex items-center gap-2"><Card.Title>Usage trend</Card.Title><span className="rounded-full bg-surface-secondary px-2 py-1 text-xs text-muted">{report?.bucket === "hour" ? "Hourly" : report?.bucket === "day" ? "Daily" : "Auto"}</span></span>
+          <span className="flex items-center gap-2">
+            <Card.Title>Usage trend</Card.Title>
+            <span className="rounded-full bg-surface-secondary px-2 py-1 text-xs text-muted">
+              {report?.bucket === "hour" ? "Hourly" : report?.bucket === "day" ? "Daily" : "Auto"}
+            </span>
+          </span>
           {loading ? <Loader2 className="size-4 animate-spin text-muted" /> : null}
         </Card.Header>
         <div className="h-[300px] px-4 pb-4 pt-1">
@@ -320,7 +408,56 @@ export default function AdminTokenUsagePage() {
       </Card>
 
       <section className="grid items-start gap-5 xl:grid-cols-[minmax(0,1.15fr)_minmax(360px,0.85fr)]">
-        <Card className="min-w-0 overflow-hidden p-0"><Card.Header className="flex-row items-center justify-between gap-4 p-4"><span><Card.Title>Users</Card.Title><Card.Description>Sorted by total token usage</Card.Description></span><SearchField aria-label="Filter users" className="w-full max-w-60" value={filter} onChange={setFilter}><SearchField.Group><SearchField.SearchIcon /><SearchField.Input placeholder="Filter users" /><SearchField.ClearButton /></SearchField.Group></SearchField></Card.Header><Card.Content className="p-0"><DataGrid aria-label="Token usage by user" columns={columns} contentClassName="admin-token-usage-grid min-w-[700px]" data={users} getRowId={(user) => user.user_id} selectionMode="none" variant="primary" onRowAction={(key) => { const user = users.find((item) => item.user_id === String(key)); if (user) setSelectedUser(user); }} renderEmptyState={() => <EmptyState><EmptyState.Header><EmptyState.Media variant="icon"><UserRound className="text-rose-500" /></EmptyState.Media><EmptyState.Title>{loading ? "Loading users" : "No users in this range"}</EmptyState.Title><EmptyState.Description>Usage will appear after users complete model calls.</EmptyState.Description></EmptyState.Header></EmptyState>} /></Card.Content></Card>
+        <Card className="min-w-0 overflow-hidden p-0">
+          <Card.Header className="flex-row items-center justify-between gap-4 p-4">
+            <span>
+              <Card.Title>Users</Card.Title>
+              <Card.Description>Sorted by total token usage</Card.Description>
+            </span>
+            <SearchField
+              aria-label="Filter users"
+              className="w-full max-w-60"
+              value={filter}
+              onChange={setFilter}
+            >
+              <SearchField.Group>
+                <SearchField.SearchIcon />
+                <SearchField.Input placeholder="Filter users" />
+                <SearchField.ClearButton />
+              </SearchField.Group>
+            </SearchField>
+          </Card.Header>
+          <Card.Content className="p-0">
+            <DataGrid
+              aria-label="Token usage by user"
+              columns={columns}
+              contentClassName="admin-token-usage-grid min-w-[700px]"
+              data={users}
+              getRowId={(user) => user.user_id}
+              selectionMode="none"
+              variant="primary"
+              onRowAction={(key) => {
+                const user = users.find((item) => item.user_id === String(key));
+                if (user) setSelectedUser(user);
+              }}
+              renderEmptyState={() => (
+                <EmptyState>
+                  <EmptyState.Header>
+                    <EmptyState.Media variant="icon">
+                      <UserRound className="text-rose-500" />
+                    </EmptyState.Media>
+                    <EmptyState.Title>
+                      {loading ? "Loading users" : "No users in this range"}
+                    </EmptyState.Title>
+                    <EmptyState.Description>
+                      Usage will appear after users complete model calls.
+                    </EmptyState.Description>
+                  </EmptyState.Header>
+                </EmptyState>
+              )}
+            />
+          </Card.Content>
+        </Card>
 
         <Card className="p-0">
           <Card.Header className="flex-row items-center justify-between p-5">
@@ -340,7 +477,26 @@ export default function AdminTokenUsagePage() {
             {userLoading ? <Loader2 className="size-4 animate-spin text-muted" /> : null}
           </Card.Header>
           <Card.Content className="space-y-4 p-5 pt-0">
-            <div className="bg-surface-secondary flex items-center justify-between rounded-2xl px-4 py-3 text-sm"><span><span className="text-muted block text-xs">Tokens</span><strong className="tabular-nums" title={formatNumber(userReport?.summary.total_tokens ?? 0)}>{compactNumber(userReport?.summary.total_tokens ?? 0)}</strong></span><span className="text-right"><span className="text-muted block text-xs">Calls</span><strong className="tabular-nums" title={formatNumber(userReport?.summary.calls ?? 0)}>{compactNumber(userReport?.summary.calls ?? 0)}</strong></span></div>
+            <div className="bg-surface-secondary flex items-center justify-between rounded-2xl px-4 py-3 text-sm">
+              <span>
+                <span className="text-muted block text-xs">Tokens</span>
+                <strong
+                  className="tabular-nums"
+                  title={formatNumber(userReport?.summary.total_tokens ?? 0)}
+                >
+                  {compactNumber(userReport?.summary.total_tokens ?? 0)}
+                </strong>
+              </span>
+              <span className="text-right">
+                <span className="text-muted block text-xs">Calls</span>
+                <strong
+                  className="tabular-nums"
+                  title={formatNumber(userReport?.summary.calls ?? 0)}
+                >
+                  {compactNumber(userReport?.summary.calls ?? 0)}
+                </strong>
+              </span>
+            </div>
             <div className="h-[260px]">
               {userReport && userReport.trend.length > 0 ? (
                 <Line

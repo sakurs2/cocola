@@ -96,9 +96,7 @@ export function ModelSelectControl({
               <span className="flex min-w-0 items-center gap-1.5 truncate text-left">
                 <span className="truncate font-medium text-foreground">{active.label}</span>
                 {active.provider ? (
-                  <span className="shrink-0 text-xs text-muted">
-                    · {active.provider}
-                  </span>
+                  <span className="shrink-0 text-xs text-muted">· {active.provider}</span>
                 ) : null}
                 {active.suffix ? (
                   <span className="shrink-0 text-xs text-muted">· {active.suffix}</span>
@@ -147,9 +145,7 @@ export function ModelSelectControl({
                     <span className="truncate font-medium">{item.label}</span>
                   </SelectPrimitive.ItemText>
                   {item.provider ? (
-                    <span className="shrink-0 text-xs text-muted">
-                      · {item.provider}
-                    </span>
+                    <span className="shrink-0 text-xs text-muted">· {item.provider}</span>
                   ) : null}
                   {item.suffix ? (
                     <span className="shrink-0 text-xs text-muted">· {item.suffix}</span>

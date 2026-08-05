@@ -5,7 +5,6 @@
   "packageManager": "pnpm@9.0.0",
   "scripts": {
     "dev:web": "pnpm --filter @cocola/web dev",
-    "dev:web:frontend-only": "pnpm --filter @cocola/web dev:frontend-only",
     "build": "pnpm -r build",
     "lint": "pnpm -r lint"
   },

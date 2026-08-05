@@ -210,14 +210,26 @@ export default function AdminTracePage() {
                           setInspectorOpen(true);
                         }}
                       >
-                        <span className={cn("grid size-9 shrink-0 place-items-center rounded-xl", moduleTone(key))}>
+                        <span
+                          className={cn(
+                            "grid size-9 shrink-0 place-items-center rounded-xl",
+                            moduleTone(key),
+                          )}
+                        >
                           <Icon className="size-4" />
                         </span>
                         <span className="flex min-w-0 flex-1 items-start justify-between gap-4">
                           <span className="min-w-0">
                             <span className="flex items-center gap-2">
-                              <span className={cn("size-1.5 shrink-0 rounded-full", statusDot(span.status))} />
-                              <span className="truncate text-sm font-medium">{humanize(span.name)}</span>
+                              <span
+                                className={cn(
+                                  "size-1.5 shrink-0 rounded-full",
+                                  statusDot(span.status),
+                                )}
+                              />
+                              <span className="truncate text-sm font-medium">
+                                {humanize(span.name)}
+                              </span>
                             </span>
                             <span className="text-muted mt-1 block truncate font-mono text-[11px]">
                               {span.service} · {formatDurationUS(span.duration_us)}
@@ -246,13 +258,28 @@ export default function AdminTracePage() {
             <Card.Description>Execution summary from Cocola.</Card.Description>
           </Card.Header>
           <Card.Content className="mt-5 space-y-3 p-0">
-            <TraceContextRow label="Source" value={run?.source === "scheduled_task" ? "Scheduled task" : "Interactive"} />
+            <TraceContextRow
+              label="Source"
+              value={run?.source === "scheduled_task" ? "Scheduled task" : "Interactive"}
+            />
             <TraceContextRow label="Model" value={run?.model_alias || "Default model"} />
-            <TraceContextRow label="Duration" value={formatDurationMS(run?.duration_ms ?? timeline.totalMs)} />
+            <TraceContextRow
+              label="Duration"
+              value={formatDurationMS(run?.duration_ms ?? timeline.totalMs)}
+            />
             <TraceContextRow label="First token" value={formatDurationMS(run?.ttft_ms ?? 0)} />
-            <TraceContextRow label="Model calls" value={String(run?.llm_call_count ?? countCategory(spans, "model"))} />
-            <TraceContextRow label="Tool calls" value={String(run?.tool_call_count ?? countCategory(spans, "tool"))} />
-            <TraceContextRow label="Tokens" value={`${formatNumber(run?.input_tokens ?? 0)} in · ${formatNumber(run?.output_tokens ?? 0)} out`} />
+            <TraceContextRow
+              label="Model calls"
+              value={String(run?.llm_call_count ?? countCategory(spans, "model"))}
+            />
+            <TraceContextRow
+              label="Tool calls"
+              value={String(run?.tool_call_count ?? countCategory(spans, "tool"))}
+            />
+            <TraceContextRow
+              label="Tokens"
+              value={`${formatNumber(run?.input_tokens ?? 0)} in · ${formatNumber(run?.output_tokens ?? 0)} out`}
+            />
             <TraceContextRow label="Trace ID" value={traceId} mono />
           </Card.Content>
         </Card>
@@ -307,9 +334,7 @@ function SpanInspector({
                   {humanize(span.name)}
                 </h2>
               </div>
-              <p className="mt-1 truncate font-mono text-[11px] text-muted">
-                {span.span_id}
-              </p>
+              <p className="mt-1 truncate font-mono text-[11px] text-muted">{span.span_id}</p>
             </div>
             <RunBadge status={span.status} />
           </div>
@@ -364,7 +389,15 @@ function SpanInspector({
   );
 }
 
-function InspectorTab({ active, onClick, children }: { active: boolean; onClick: () => void; children: string }) {
+function InspectorTab({
+  active,
+  onClick,
+  children,
+}: {
+  active: boolean;
+  onClick: () => void;
+  children: string;
+}) {
   return (
     <Button
       variant="ghost"
@@ -380,11 +413,24 @@ function InspectorTab({ active, onClick, children }: { active: boolean; onClick:
   );
 }
 
-function TraceContextRow({ label, value, mono = false }: { label: string; value: string; mono?: boolean }) {
+function TraceContextRow({
+  label,
+  value,
+  mono = false,
+}: {
+  label: string;
+  value: string;
+  mono?: boolean;
+}) {
   return (
     <div className="bg-surface-secondary flex items-start justify-between gap-4 rounded-2xl px-4 py-3">
       <span className="text-muted text-xs">{label}</span>
-      <span className={cn("min-w-0 break-all text-right text-sm font-medium", mono && "font-mono text-xs")}>
+      <span
+        className={cn(
+          "min-w-0 break-all text-right text-sm font-medium",
+          mono && "font-mono text-xs",
+        )}
+      >
         {value || "—"}
       </span>
     </div>

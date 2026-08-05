@@ -79,23 +79,56 @@ function LoginForm() {
       </div>
 
       <Card className="w-full max-w-md p-6 sm:p-7">
-      <form className="grid gap-5" onSubmit={submit}>
-        <Card.Header className="p-0"><Card.Title>Sign in to Cocola</Card.Title><Card.Description>Use an account enabled by an administrator.</Card.Description></Card.Header>
-        <Card.Content className="grid gap-4 p-0">
-        <TextField isRequired value={identifier} variant="secondary" onChange={setIdentifier}>
-          <Label>Username or email</Label><Input autoComplete="username" autoFocus />
-        </TextField>
-        <TextField className="relative" isRequired value={password} variant="secondary" onChange={setPassword}>
-          <Label>Password</Label>
-          <Input autoComplete="current-password" className="pr-11" type={showPassword ? "text" : "password"} />
-          <Button isIconOnly aria-label={showPassword ? "Hide password" : "Show password"} className="absolute bottom-1.5 right-1.5" size="sm" variant="ghost" onPress={() => setShowPassword((value) => !value)}>{showPassword ? <EyeOff className="size-4" /> : <Eye className="size-4" />}</Button>
-        </TextField>
-        {error ? (
-          <div role="alert" aria-live="polite" className="bg-danger/10 text-danger rounded-2xl px-4 py-3 text-sm">{error}</div>
-        ) : null}
-        </Card.Content>
-        <Card.Footer className="p-0"><Button fullWidth isPending={pending} type="submit" variant="primary">{pending ? "Signing in..." : "Sign in"}</Button></Card.Footer>
-      </form>
+        <form className="grid gap-5" onSubmit={submit}>
+          <Card.Header className="p-0">
+            <Card.Title>Sign in to Cocola</Card.Title>
+            <Card.Description>Use an account enabled by an administrator.</Card.Description>
+          </Card.Header>
+          <Card.Content className="grid gap-4 p-0">
+            <TextField isRequired value={identifier} variant="secondary" onChange={setIdentifier}>
+              <Label>Username or email</Label>
+              <Input autoComplete="username" autoFocus />
+            </TextField>
+            <TextField
+              className="relative"
+              isRequired
+              value={password}
+              variant="secondary"
+              onChange={setPassword}
+            >
+              <Label>Password</Label>
+              <Input
+                autoComplete="current-password"
+                className="pr-11"
+                type={showPassword ? "text" : "password"}
+              />
+              <Button
+                isIconOnly
+                aria-label={showPassword ? "Hide password" : "Show password"}
+                className="absolute bottom-1.5 right-1.5"
+                size="sm"
+                variant="ghost"
+                onPress={() => setShowPassword((value) => !value)}
+              >
+                {showPassword ? <EyeOff className="size-4" /> : <Eye className="size-4" />}
+              </Button>
+            </TextField>
+            {error ? (
+              <div
+                role="alert"
+                aria-live="polite"
+                className="bg-danger/10 text-danger rounded-2xl px-4 py-3 text-sm"
+              >
+                {error}
+              </div>
+            ) : null}
+          </Card.Content>
+          <Card.Footer className="p-0">
+            <Button fullWidth isPending={pending} type="submit" variant="primary">
+              {pending ? "Signing in..." : "Sign in"}
+            </Button>
+          </Card.Footer>
+        </form>
       </Card>
     </main>
   );

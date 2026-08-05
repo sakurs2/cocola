@@ -54,8 +54,7 @@ const Button = React.forwardRef<HTMLButtonElement, ButtonProps>(
               : variant === "ghost" || variant === "link"
                 ? "ghost"
                 : "primary",
-      onPress: (event: unknown) =>
-        onClick?.(event as React.MouseEvent<HTMLButtonElement>),
+      onPress: (event: unknown) => onClick?.(event as React.MouseEvent<HTMLButtonElement>),
     } as unknown as React.ComponentProps<typeof HeroButton>;
     return <HeroButton {...heroProps}>{children}</HeroButton>;
   },

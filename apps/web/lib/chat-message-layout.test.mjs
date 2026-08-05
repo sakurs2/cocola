@@ -7,7 +7,11 @@ const threadSource = await readFile(
   "utf8",
 );
 const webPackage = JSON.parse(await readFile(new URL("../package.json", import.meta.url), "utf8"));
+const rootPackage = JSON.parse(
+  await readFile(new URL("../../../package.json", import.meta.url), "utf8"),
+);
 const serverSource = await readFile(new URL("../server.mjs", import.meta.url), "utf8");
+const nextConfigSource = await readFile(new URL("../next.config.mjs", import.meta.url), "utf8");
 const sidebarSource = await readFile(
   new URL("../components/assistant-ui/heroui-workspace-sidebar.tsx", import.meta.url),
   "utf8",
@@ -25,11 +29,6 @@ const demoStylesSource = await readFile(
   new URL("../app/cocola-web-demo.css", import.meta.url),
   "utf8",
 );
-const frontendOnlyScript = await readFile(
-  new URL("../../../scripts/run-web-frontend-only.sh", import.meta.url),
-  "utf8",
-);
-
 test("conversation messages use the HeroUI Pro message skeleton without replacing Cocola parts", () => {
   assert.match(threadSource, /from "@heroui-pro\/react\/chat-message"/);
   assert.match(threadSource, /<ChatMessage\.User/);
@@ -68,7 +67,7 @@ test("the empty thread preserves the HeroUI demo welcome composition", () => {
   assert.doesNotMatch(threadSource, /Auto · choose for me/);
   assert.match(threadSource, /mt-7 w-full max-w-3xl/);
   assert.match(threadSource, /mx-auto flex w-full max-w-3xl flex-wrap justify-center gap-2\.5/);
-  assert.match(threadSource, /\{PROMPT_STARTERS\.map\(\(starter\) => \{/);
+  assert.match(threadSource, /\{visiblePromptStarters\.map\(\(starter\) => \{/);
   assert.match(threadSource, /"cocola-web-composer w-full"/);
   assert.match(
     threadSource,
@@ -129,15 +128,10 @@ test("the real workspace uses the approved HeroUI demo shell treatment", () => {
   assert.match(themeToggleSource, /Switch to \$\{nextMode\} mode/);
 });
 
-test("frontend-only development keeps the licensed Pro dependency versioned", () => {
+test("formal Cocola keeps HeroUI Pro versioned without the worktree proxy", () => {
   assert.equal(webPackage.dependencies["@heroui-pro/react"], "1.0.0-beta.7");
-  assert.equal(
-    webPackage.scripts["dev:frontend-only"],
-    "bash ../../scripts/run-web-frontend-only.sh",
-  );
-  assert.match(frontendOnlyScript, /COCOLA_WEB_BACKEND_ORIGIN/);
-  assert.match(frontendOnlyScript, /PORT="\$\{PORT:-3006\}"/);
-  assert.match(frontendOnlyScript, /exec node server\.mjs/);
-  assert.match(serverSource, /if \(FRONTEND_ONLY_BACKEND\)/);
-  assert.match(serverSource, /tunnelToWebBackend\(req, socket, head\)/);
+  assert.equal(webPackage.scripts["dev:frontend-only"], undefined);
+  assert.equal(rootPackage.scripts["dev:web:frontend-only"], undefined);
+  assert.doesNotMatch(nextConfigSource, /COCOLA_WEB_BACKEND_ORIGIN|backendOrigin/);
+  assert.doesNotMatch(serverSource, /FRONTEND_ONLY_BACKEND|tunnelToWebBackend/);
 });

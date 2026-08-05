@@ -4,7 +4,6 @@
   "private": true,
   "scripts": {
     "dev": "next dev",
-    "dev:frontend-only": "bash ../../scripts/run-web-frontend-only.sh",
     "build": "next build",
     "start": "node server.mjs",
     "lint": "next lint",

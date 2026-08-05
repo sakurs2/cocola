@@ -213,15 +213,18 @@ export function ConversationReadOnly({ conversationId }: { conversationId: strin
             <h1 className="truncate text-sm font-semibold">Conversation</h1>
             <p className="truncate font-mono text-xs text-muted">{conversationId}</p>
           </div>
-          <Tooltip delay={0}><Button
-            isIconOnly
-            aria-label="Refresh"
-            className="text-muted size-8 min-w-8"
-            variant="ghost"
-            onPress={() => void load()}
-          >
-            <RefreshCw className={cn("size-4", refreshing && "animate-spin")} />
-          </Button><Tooltip.Content>{refreshing ? "Refreshing…" : "Refresh"}</Tooltip.Content></Tooltip>
+          <Tooltip delay={0}>
+            <Button
+              isIconOnly
+              aria-label="Refresh"
+              className="text-muted size-8 min-w-8"
+              variant="ghost"
+              onPress={() => void load()}
+            >
+              <RefreshCw className={cn("size-4", refreshing && "animate-spin")} />
+            </Button>
+            <Tooltip.Content>{refreshing ? "Refreshing…" : "Refresh"}</Tooltip.Content>
+          </Tooltip>
         </div>
       </header>
 
@@ -241,7 +244,19 @@ export function ConversationReadOnly({ conversationId }: { conversationId: strin
         ) : null}
 
         {state.status === "ready" && state.messages.length === 0 ? (
-          <Card className="p-6"><EmptyState><EmptyState.Header><EmptyState.Media variant="icon"><Bot className="size-5" /></EmptyState.Media><EmptyState.Title>No messages</EmptyState.Title><EmptyState.Description>This conversation does not contain any messages yet.</EmptyState.Description></EmptyState.Header></EmptyState></Card>
+          <Card className="p-6">
+            <EmptyState>
+              <EmptyState.Header>
+                <EmptyState.Media variant="icon">
+                  <Bot className="size-5" />
+                </EmptyState.Media>
+                <EmptyState.Title>No messages</EmptyState.Title>
+                <EmptyState.Description>
+                  This conversation does not contain any messages yet.
+                </EmptyState.Description>
+              </EmptyState.Header>
+            </EmptyState>
+          </Card>
         ) : null}
 
         <div
@@ -347,9 +362,7 @@ function AssistantHeader({ message }: { message: WireMessage }) {
         {label}
       </span>
       {message.created_at ? (
-        <span className="shrink-0 text-xs text-muted">
-          {formatDate(message.created_at)}
-        </span>
+        <span className="shrink-0 text-xs text-muted">{formatDate(message.created_at)}</span>
       ) : null}
     </div>
   );
@@ -397,9 +410,7 @@ function MessagePartView({ part, role }: { part: MessagePart; role: "user" | "as
             Execution plan
           </div>
           <h3 className="mt-0.5 text-base font-semibold">Plan v{part.version}</h3>
-          <p className="mt-1 text-xs capitalize text-muted">
-            {part.status.replaceAll("_", " ")}
-          </p>
+          <p className="mt-1 text-xs capitalize text-muted">{part.status.replaceAll("_", " ")}</p>
         </div>
         <div className="px-5 py-5">
           <MarkdownContent value={part.contentMarkdown} />
@@ -458,16 +469,19 @@ function CopyMessageButton({ message }: { message: WireMessage }) {
 
   return (
     <div className="col-start-1 row-start-2 -ml-1 flex gap-1 text-muted">
-      <Tooltip delay={0}><Button
-        isIconOnly
-        aria-label={copied ? "Copied" : "Copy"}
-        isDisabled={!text}
-        className="size-8 min-w-8"
-        variant="ghost"
-        onPress={() => void copy()}
-      >
-        {copied ? <Check className="size-4 text-emerald-400" /> : <CopyIcon className="size-4" />}
-      </Button><Tooltip.Content>{copied ? "Copied" : "Copy"}</Tooltip.Content></Tooltip>
+      <Tooltip delay={0}>
+        <Button
+          isIconOnly
+          aria-label={copied ? "Copied" : "Copy"}
+          isDisabled={!text}
+          className="size-8 min-w-8"
+          variant="ghost"
+          onPress={() => void copy()}
+        >
+          {copied ? <Check className="size-4 text-emerald-400" /> : <CopyIcon className="size-4" />}
+        </Button>
+        <Tooltip.Content>{copied ? "Copied" : "Copy"}</Tooltip.Content>
+      </Tooltip>
     </div>
   );
 }

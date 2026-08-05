@@ -39,7 +39,9 @@ export default function AdminPage() {
                           <span className="admin-overview-icon bg-accent-soft text-accent row-span-2 flex size-11 items-center justify-center rounded-2xl">
                             <Icon className="size-5" />
                           </span>
-                          <span className="text-foreground text-base font-semibold">{section.label}</span>
+                          <span className="text-foreground text-base font-semibold">
+                            {section.label}
+                          </span>
                           <span className="text-muted line-clamp-2 text-sm leading-5">
                             {section.description}
                           </span>

@@ -159,18 +159,39 @@ export function SystemPromptTool({
                     Saved content is injected server-side and is never copied into trace metadata.
                   </p>
                 </div>
-                <Switch isDisabled={saving || Boolean(loadError)} isSelected={enabled} onChange={setEnabled}><Switch.Content><Switch.Control><Switch.Thumb /></Switch.Control>{enabled ? "Enabled" : "Disabled"}</Switch.Content></Switch>
+                <Switch
+                  isDisabled={saving || Boolean(loadError)}
+                  isSelected={enabled}
+                  onChange={setEnabled}
+                >
+                  <Switch.Content>
+                    <Switch.Control>
+                      <Switch.Thumb />
+                    </Switch.Control>
+                    {enabled ? "Enabled" : "Disabled"}
+                  </Switch.Content>
+                </Switch>
               </div>
 
-              <TextField isDisabled={saving || Boolean(loadError)} value={draft} variant="secondary" onChange={setDraft}><Label className="sr-only">Global system prompt</Label><TextArea className="min-h-80 text-sm leading-6" placeholder="Write the global behavior policy for agents..." spellCheck={false} /></TextField>
+              <TextField
+                isDisabled={saving || Boolean(loadError)}
+                value={draft}
+                variant="secondary"
+                onChange={setDraft}
+              >
+                <Label className="sr-only">Global system prompt</Label>
+                <TextArea
+                  className="min-h-80 text-sm leading-6"
+                  placeholder="Write the global behavior policy for agents..."
+                  spellCheck={false}
+                />
+              </TextField>
 
               <div className="grid gap-3 sm:grid-cols-2">
                 <PromptMeta label="Version" value={prompt.version || 0} />
                 <PromptMeta label="Characters" value={draft.length} />
               </div>
-              <div className="text-xs text-muted">
-                {dirty ? "Unsaved changes" : "Up to date"}
-              </div>
+              <div className="text-xs text-muted">{dirty ? "Unsaved changes" : "Up to date"}</div>
             </>
           )}
         </div>

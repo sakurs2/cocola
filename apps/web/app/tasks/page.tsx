@@ -4,7 +4,16 @@ import { Button, Chip, Dropdown, Tooltip } from "@heroui/react";
 import { DataGrid, type DataGridColumn } from "@heroui-pro/react/data-grid";
 import { EmptyState } from "@heroui-pro/react/empty-state";
 import { Segment } from "@heroui-pro/react/segment";
-import { AlarmClock, CalendarClock, Check, Clock, Copy, Ellipsis, LoaderCircle, Plus } from "lucide-react";
+import {
+  AlarmClock,
+  CalendarClock,
+  Check,
+  Clock,
+  Copy,
+  Ellipsis,
+  LoaderCircle,
+  Plus,
+} from "lucide-react";
 import { useSession } from "next-auth/react";
 import { useRouter } from "next/navigation";
 import { useCallback, useEffect, useMemo, useState } from "react";
@@ -60,46 +69,56 @@ export default function TasksPage() {
   const [selectedTask, setSelectedTask] = useState<ScheduledTask | null>(null);
   const [deleteTarget, setDeleteTarget] = useState<ScheduledTask | null>(null);
 
-  const loadTasks = useCallback(async (options?: { foreground?: boolean; signal?: AbortSignal }) => {
-    if (!ownerID) return;
-    const foreground = options?.foreground ?? false;
-    if (foreground) setLoading(true);
-    setError("");
-    try {
-      const response = await fetch("/api/scheduled-tasks", { cache: "no-store", signal: options?.signal });
-      if (!response.ok) throw new Error(await responseError(response));
-      const body = (await response.json()) as { tasks?: ScheduledTask[] };
-      const nextTasks = Array.isArray(body.tasks) ? body.tasks : [];
-      if (options?.signal?.aborted) return;
-      setTasks(nextTasks);
-      writeScheduledTaskPageCache(ownerID, { tasks: nextTasks });
-    } catch (cause) {
-      if (!options?.signal?.aborted) setError(cause instanceof Error ? cause.message : String(cause));
-    } finally {
-      if (foreground && !options?.signal?.aborted) setLoading(false);
-    }
-  }, [ownerID]);
+  const loadTasks = useCallback(
+    async (options?: { foreground?: boolean; signal?: AbortSignal }) => {
+      if (!ownerID) return;
+      const foreground = options?.foreground ?? false;
+      if (foreground) setLoading(true);
+      setError("");
+      try {
+        const response = await fetch("/api/scheduled-tasks", {
+          cache: "no-store",
+          signal: options?.signal,
+        });
+        if (!response.ok) throw new Error(await responseError(response));
+        const body = (await response.json()) as { tasks?: ScheduledTask[] };
+        const nextTasks = Array.isArray(body.tasks) ? body.tasks : [];
+        if (options?.signal?.aborted) return;
+        setTasks(nextTasks);
+        writeScheduledTaskPageCache(ownerID, { tasks: nextTasks });
+      } catch (cause) {
+        if (!options?.signal?.aborted)
+          setError(cause instanceof Error ? cause.message : String(cause));
+      } finally {
+        if (foreground && !options?.signal?.aborted) setLoading(false);
+      }
+    },
+    [ownerID],
+  );
 
-  const loadModels = useCallback(async (signal?: AbortSignal) => {
-    if (!ownerID) return;
-    setModelError("");
-    try {
-      const response = await fetch("/api/models", { cache: "no-store", signal });
-      if (!response.ok) throw new Error(await responseError(response));
-      const availableModels = normalizeModelOptions(await response.json());
-      const nextModels = availableModels.filter(
-        (model) => !model.protocols || model.protocols.includes("anthropic-messages"),
-      );
-      if (signal?.aborted) return;
-      setModels(nextModels);
-      setModelsLoaded(true);
-      writeScheduledTaskPageCache(ownerID, { models: nextModels });
-    } catch (cause) {
-      if (signal?.aborted) return;
-      setModelsLoaded(readScheduledTaskPageCache(ownerID)?.models != null);
-      setModelError(cause instanceof Error ? cause.message : String(cause));
-    }
-  }, [ownerID]);
+  const loadModels = useCallback(
+    async (signal?: AbortSignal) => {
+      if (!ownerID) return;
+      setModelError("");
+      try {
+        const response = await fetch("/api/models", { cache: "no-store", signal });
+        if (!response.ok) throw new Error(await responseError(response));
+        const availableModels = normalizeModelOptions(await response.json());
+        const nextModels = availableModels.filter(
+          (model) => !model.protocols || model.protocols.includes("anthropic-messages"),
+        );
+        if (signal?.aborted) return;
+        setModels(nextModels);
+        setModelsLoaded(true);
+        writeScheduledTaskPageCache(ownerID, { models: nextModels });
+      } catch (cause) {
+        if (signal?.aborted) return;
+        setModelsLoaded(readScheduledTaskPageCache(ownerID)?.models != null);
+        setModelError(cause instanceof Error ? cause.message : String(cause));
+      }
+    },
+    [ownerID],
+  );
 
   useEffect(() => {
     if (sessionStatus === "loading") return;
@@ -153,7 +172,9 @@ export default function TasksPage() {
     try {
       const editing = selectedTask !== null;
       const response = await fetch(
-        editing ? `/api/scheduled-tasks/${encodeURIComponent(selectedTask.id)}` : "/api/scheduled-tasks",
+        editing
+          ? `/api/scheduled-tasks/${encodeURIComponent(selectedTask.id)}`
+          : "/api/scheduled-tasks",
         {
           method: editing ? "PATCH" : "POST",
           headers: { "content-type": "application/json" },
@@ -206,95 +227,106 @@ export default function TasksPage() {
   };
 
   const columns: DataGridColumn<ScheduledTask>[] = [
-      {
-        id: "task",
-        header: "Task",
-        isRowHeader: true,
-        minWidth: 300,
-        cell: (task) => (
-          <div className="flex min-w-0 items-center gap-3 py-1">
-            <span className="flex size-10 shrink-0 items-center justify-center rounded-2xl bg-blue-100 text-blue-600 dark:bg-blue-950 dark:text-blue-300">
-              <AlarmClock className="size-5" />
-            </span>
-            <span className="min-w-0">
-              <span className="text-foreground block truncate text-sm font-semibold">{task.name}</span>
-              <span className="text-muted mt-1 block truncate text-xs">{task.prompt}</span>
-            </span>
-          </div>
-        ),
-      },
-      {
-        id: "schedule",
-        header: "Schedule",
-        minWidth: 210,
-        cell: (task) => (
-          <span className="text-muted block min-w-0 text-sm">
-            <span className="flex items-center gap-2 truncate">
-              <CalendarClock className="size-4 shrink-0" />
-              {scheduleLabel(task)}
-            </span>
-            <span className="mt-1 block truncate pl-6 text-xs">Next: {formatDateTime(task.next_run_at)}</span>
+    {
+      id: "task",
+      header: "Task",
+      isRowHeader: true,
+      minWidth: 300,
+      cell: (task) => (
+        <div className="flex min-w-0 items-center gap-3 py-1">
+          <span className="flex size-10 shrink-0 items-center justify-center rounded-2xl bg-blue-100 text-blue-600 dark:bg-blue-950 dark:text-blue-300">
+            <AlarmClock className="size-5" />
           </span>
-        ),
-      },
-      {
-        id: "lastResult",
-        header: "Last result",
-        minWidth: 190,
-        cell: (task) => <TaskLastResult task={task} />,
-      },
-      {
-        id: "status",
-        header: "Status",
-        minWidth: 110,
-        cell: (task) => (
-          <Chip color={statusColor(task.status)} size="sm" variant="soft">
-            {statusLabel(task.status)}
-          </Chip>
-        ),
-      },
-      {
-        id: "actions",
-        header: "Actions",
-        align: "center",
-        pinned: "end",
-        width: 80,
-        cell: (task) => (
-          <Dropdown>
-            <Tooltip delay={0}>
-              <Dropdown.Trigger
-                aria-label={`Actions for ${task.name}`}
-                className="text-muted hover:bg-surface-secondary hover:text-foreground mx-auto grid size-9 place-items-center rounded-xl"
-              >
-                <Ellipsis className="size-4" />
-              </Dropdown.Trigger>
-              <Tooltip.Content>Task actions</Tooltip.Content>
-            </Tooltip>
-            <Dropdown.Popover placement="bottom end">
-              <Dropdown.Menu
-                aria-label={`Actions for ${task.name}`}
-                onAction={(key) => handleAction(task, String(key))}
-              >
-                <Dropdown.Item id="edit" textValue="Edit">Edit</Dropdown.Item>
-                {(task.status === "active" || task.status === "paused") ? (
-                  <Dropdown.Item id="toggle" textValue={task.status === "paused" ? "Resume" : "Pause"}>
-                    {task.status === "paused" ? "Resume" : "Pause"}
-                  </Dropdown.Item>
-                ) : null}
+          <span className="min-w-0">
+            <span className="text-foreground block truncate text-sm font-semibold">
+              {task.name}
+            </span>
+            <span className="text-muted mt-1 block truncate text-xs">{task.prompt}</span>
+          </span>
+        </div>
+      ),
+    },
+    {
+      id: "schedule",
+      header: "Schedule",
+      minWidth: 210,
+      cell: (task) => (
+        <span className="text-muted block min-w-0 text-sm">
+          <span className="flex items-center gap-2 truncate">
+            <CalendarClock className="size-4 shrink-0" />
+            {scheduleLabel(task)}
+          </span>
+          <span className="mt-1 block truncate pl-6 text-xs">
+            Next: {formatDateTime(task.next_run_at)}
+          </span>
+        </span>
+      ),
+    },
+    {
+      id: "lastResult",
+      header: "Last result",
+      minWidth: 190,
+      cell: (task) => <TaskLastResult task={task} />,
+    },
+    {
+      id: "status",
+      header: "Status",
+      minWidth: 110,
+      cell: (task) => (
+        <Chip color={statusColor(task.status)} size="sm" variant="soft">
+          {statusLabel(task.status)}
+        </Chip>
+      ),
+    },
+    {
+      id: "actions",
+      header: "Actions",
+      align: "center",
+      pinned: "end",
+      width: 80,
+      cell: (task) => (
+        <Dropdown>
+          <Tooltip delay={0}>
+            <Dropdown.Trigger
+              aria-label={`Actions for ${task.name}`}
+              className="text-muted hover:bg-surface-secondary hover:text-foreground mx-auto grid size-9 place-items-center rounded-xl"
+            >
+              <Ellipsis className="size-4" />
+            </Dropdown.Trigger>
+            <Tooltip.Content>Task actions</Tooltip.Content>
+          </Tooltip>
+          <Dropdown.Popover placement="bottom end">
+            <Dropdown.Menu
+              aria-label={`Actions for ${task.name}`}
+              onAction={(key) => handleAction(task, String(key))}
+            >
+              <Dropdown.Item id="edit" textValue="Edit">
+                Edit
+              </Dropdown.Item>
+              {task.status === "active" || task.status === "paused" ? (
                 <Dropdown.Item
-                  id="result"
-                  isDisabled={!task.conversation_id || task.run_count === 0}
-                  textValue="View latest result"
+                  id="toggle"
+                  textValue={task.status === "paused" ? "Resume" : "Pause"}
                 >
-                  View latest result
+                  {task.status === "paused" ? "Resume" : "Pause"}
                 </Dropdown.Item>
-                <Dropdown.Item id="delete" textValue="Delete">Delete</Dropdown.Item>
-              </Dropdown.Menu>
-            </Dropdown.Popover>
-          </Dropdown>
-        ),
-      },
-    ];
+              ) : null}
+              <Dropdown.Item
+                id="result"
+                isDisabled={!task.conversation_id || task.run_count === 0}
+                textValue="View latest result"
+              >
+                View latest result
+              </Dropdown.Item>
+              <Dropdown.Item id="delete" textValue="Delete">
+                Delete
+              </Dropdown.Item>
+            </Dropdown.Menu>
+          </Dropdown.Popover>
+        </Dropdown>
+      ),
+    },
+  ];
 
   return (
     <WorkspacePageFrame>
@@ -311,7 +343,9 @@ export default function TasksPage() {
       />
 
       {error || modelError ? (
-        <div className="bg-danger/10 text-danger rounded-2xl px-4 py-3 text-sm">{error || modelError}</div>
+        <div className="bg-danger/10 text-danger rounded-2xl px-4 py-3 text-sm">
+          {error || modelError}
+        </div>
       ) : null}
 
       <Segment
@@ -326,7 +360,9 @@ export default function TasksPage() {
 
       {loading ? (
         <div className="grid min-h-56 place-items-center" role="status">
-          {showLoadingIndicator ? <LoaderCircle className="text-muted size-5 animate-spin" /> : null}
+          {showLoadingIndicator ? (
+            <LoaderCircle className="text-muted size-5 animate-spin" />
+          ) : null}
           <span className="sr-only">Loading tasks</span>
         </div>
       ) : (
@@ -344,9 +380,13 @@ export default function TasksPage() {
           renderEmptyState={() => (
             <EmptyState>
               <EmptyState.Header>
-                <EmptyState.Media variant="icon"><Clock className="text-blue-500" /></EmptyState.Media>
+                <EmptyState.Media variant="icon">
+                  <Clock className="text-blue-500" />
+                </EmptyState.Media>
                 <EmptyState.Title>
-                  {tab === "today" && tasks.length ? "Nothing scheduled for today" : "Create your first task"}
+                  {tab === "today" && tasks.length
+                    ? "Nothing scheduled for today"
+                    : "Create your first task"}
                 </EmptyState.Title>
                 <EmptyState.Description>
                   {tab === "today" && tasks.length
@@ -356,9 +396,16 @@ export default function TasksPage() {
               </EmptyState.Header>
               <EmptyState.Content>
                 {tab === "today" && tasks.length ? (
-                  <Button size="sm" variant="outline" onPress={() => setTab("all")}>Show all tasks</Button>
+                  <Button size="sm" variant="outline" onPress={() => setTab("all")}>
+                    Show all tasks
+                  </Button>
                 ) : (
-                  <Button isDisabled={!modelsLoaded} size="sm" variant="outline" onPress={openCreate}>
+                  <Button
+                    isDisabled={!modelsLoaded}
+                    size="sm"
+                    variant="outline"
+                    onPress={openCreate}
+                  >
                     <Plus className="size-4" /> New task
                   </Button>
                 )}
@@ -417,9 +464,7 @@ function TaskLastResult({ task }: { task: ScheduledTask }) {
         </span>
         <Tooltip.Content className="max-w-sm break-words">{result.detail}</Tooltip.Content>
       </Tooltip>
-      {hasAdditionalDetail ? (
-        <TaskResultCopyButton detail={result.detail} />
-      ) : null}
+      {hasAdditionalDetail ? <TaskResultCopyButton detail={result.detail} /> : null}
     </span>
   );
 }

@@ -80,7 +80,9 @@ export default function MCPPage() {
         title="MCP"
       />
 
-      {error ? <div className="bg-danger/10 text-danger rounded-2xl px-4 py-3 text-sm">{error}</div> : null}
+      {error ? (
+        <div className="bg-danger/10 text-danger rounded-2xl px-4 py-3 text-sm">{error}</div>
+      ) : null}
 
       <WorkspaceSectionHeader
         description={`${mcps.length} server${mcps.length === 1 ? "" : "s"} available to this account.`}
@@ -99,17 +101,26 @@ export default function MCPPage() {
             return (
               <Card key={mcp.id} className="cocola-web-catalog-card cocola-web-mcp-card h-full p-4">
                 <Card.Content className="flex h-full min-w-0 flex-col p-0">
-                  <Link className="group min-w-0 no-underline" href={`/mcps/${encodeURIComponent(mcp.id)}`}>
+                  <Link
+                    className="group min-w-0 no-underline"
+                    href={`/mcps/${encodeURIComponent(mcp.id)}`}
+                  >
                     <span className="cocola-web-catalog-card-icon flex size-10 items-center justify-center rounded-2xl bg-orange-500/15 text-orange-500">
                       <Plug className="size-5" />
                     </span>
-                    <span className="text-foreground mt-3 block truncate font-semibold">{mcp.name || mcp.id}</span>
+                    <span className="text-foreground mt-3 block truncate font-semibold">
+                      {mcp.name || mcp.id}
+                    </span>
                     <span className="text-muted mt-1 line-clamp-2 text-sm leading-5">
                       {mcp.description || "No description"}
                     </span>
                     <span className="mt-3 flex flex-wrap gap-1.5">
-                      <Chip size="sm" variant="soft">{mcp.transport}</Chip>
-                      <Chip size="sm" variant="soft">{mcp.default_enabled ? "Default on" : "Default off"}</Chip>
+                      <Chip size="sm" variant="soft">
+                        {mcp.transport}
+                      </Chip>
+                      <Chip size="sm" variant="soft">
+                        {mcp.default_enabled ? "Default on" : "Default off"}
+                      </Chip>
                     </span>
                     {endpoint ? (
                       <code className="bg-surface-secondary text-muted mt-2 block truncate rounded-lg px-2.5 py-1.5 text-xs">
@@ -139,9 +150,13 @@ export default function MCPPage() {
       ) : (
         <EmptyState>
           <EmptyState.Header>
-            <EmptyState.Media variant="icon"><Plug className="text-orange-500" /></EmptyState.Media>
+            <EmptyState.Media variant="icon">
+              <Plug className="text-orange-500" />
+            </EmptyState.Media>
             <EmptyState.Title>No MCP servers</EmptyState.Title>
-            <EmptyState.Description>No MCP servers are published by administrators.</EmptyState.Description>
+            <EmptyState.Description>
+              No MCP servers are published by administrators.
+            </EmptyState.Description>
           </EmptyState.Header>
         </EmptyState>
       )}

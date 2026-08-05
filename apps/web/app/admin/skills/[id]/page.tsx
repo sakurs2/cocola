@@ -53,7 +53,12 @@ export default function AdminSkillDetailPage() {
     <main className="admin-theme-amber min-h-screen bg-background text-foreground">
       <div className="mx-auto flex w-full max-w-6xl flex-col gap-5 p-4 sm:p-6 lg:p-8">
         <header className="flex flex-wrap items-center gap-3">
-          <Button isIconOnly aria-label="Back to Skills" variant="ghost" onPress={() => router.push("/admin/skills")}>
+          <Button
+            isIconOnly
+            aria-label="Back to Skills"
+            variant="ghost"
+            onPress={() => router.push("/admin/skills")}
+          >
             <ArrowLeft className="size-4" />
           </Button>
           <span className="bg-accent-soft text-accent flex size-11 items-center justify-center rounded-2xl">
@@ -63,14 +68,14 @@ export default function AdminSkillDetailPage() {
             <h1 className="truncate text-2xl font-semibold tracking-[-0.03em]">
               {skill ? displaySkillName(skill) : "Skill"}
             </h1>
-            <p className="text-muted mt-1 truncate text-sm">{skill?.description || skill?.id || id}</p>
+            <p className="text-muted mt-1 truncate text-sm">
+              {skill?.description || skill?.id || id}
+            </p>
           </div>
         </header>
 
         {error ? (
-          <div className="bg-danger/10 text-danger rounded-2xl px-4 py-3 text-sm">
-            {error}
-          </div>
+          <div className="bg-danger/10 text-danger rounded-2xl px-4 py-3 text-sm">{error}</div>
         ) : null}
 
         {!skill && !error ? (
@@ -83,25 +88,51 @@ export default function AdminSkillDetailPage() {
         {skill ? (
           <>
             <div className="flex flex-wrap items-center gap-2">
-              <Chip size="sm" variant="soft">{skill.scope || "admin"}</Chip>
-              <Chip size="sm" variant="soft">{skill.source_type || "manual"}</Chip>
+              <Chip size="sm" variant="soft">
+                {skill.scope || "admin"}
+              </Chip>
+              <Chip size="sm" variant="soft">
+                {skill.source_type || "manual"}
+              </Chip>
               <Chip color={skill.enabled ? "success" : "warning"} size="sm" variant="soft">
                 {skill.enabled ? "Enabled" : "Disabled"}
               </Chip>
-              {skill.version ? <Chip size="sm" variant="soft">v{skill.version}</Chip> : null}
+              {skill.version ? (
+                <Chip size="sm" variant="soft">
+                  v{skill.version}
+                </Chip>
+              ) : null}
             </div>
 
             <section className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
-              <Info icon={<Folder className="size-4" />} label="Source path" value={skill.source_path || "—"} />
-              <Info icon={<FileText className="size-4" />} label="Files" value={String(skill.file_count ?? 0)} />
-              <Info icon={<FileText className="size-4" />} label="Size" value={formatBytes(skill.size_bytes ?? 0)} />
-              <Info icon={<Hash className="size-4" />} label="SHA256" value={skill.content_sha256 || "—"} />
+              <Info
+                icon={<Folder className="size-4" />}
+                label="Source path"
+                value={skill.source_path || "—"}
+              />
+              <Info
+                icon={<FileText className="size-4" />}
+                label="Files"
+                value={String(skill.file_count ?? 0)}
+              />
+              <Info
+                icon={<FileText className="size-4" />}
+                label="Size"
+                value={formatBytes(skill.size_bytes ?? 0)}
+              />
+              <Info
+                icon={<Hash className="size-4" />}
+                label="SHA256"
+                value={skill.content_sha256 || "—"}
+              />
             </section>
 
             <Card className="p-5">
               <Card.Header className="p-0">
                 <Card.Title>SKILL.md</Card.Title>
-                <Card.Description>Full instructions loaded when the Skill matches a request.</Card.Description>
+                <Card.Description>
+                  Full instructions loaded when the Skill matches a request.
+                </Card.Description>
               </Card.Header>
               <Card.Content className="mt-5 p-0">
                 <pre className="bg-surface-secondary max-h-[34rem] overflow-auto whitespace-pre-wrap rounded-2xl p-5 font-mono text-sm leading-7">
@@ -120,7 +151,9 @@ function Info({ icon, label, value }: { icon: React.ReactNode; label: string; va
   return (
     <Card className="p-4">
       <Card.Content className="flex min-w-0 items-start gap-3 p-0">
-        <span className="bg-surface-secondary text-accent grid size-9 shrink-0 place-items-center rounded-xl">{icon}</span>
+        <span className="bg-surface-secondary text-accent grid size-9 shrink-0 place-items-center rounded-xl">
+          {icon}
+        </span>
         <span className="min-w-0">
           <span className="text-muted block text-xs">{label}</span>
           <span className="mt-1 block break-all text-sm font-medium">{value}</span>

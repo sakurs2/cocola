@@ -35,7 +35,9 @@ export function ToolboxCard({
           >
             <Icon className="size-5" />
           </span>
-          <Chip size="sm" variant="soft">{status}</Chip>
+          <Chip size="sm" variant="soft">
+            {status}
+          </Chip>
         </span>
         <span className="mt-4 block min-w-0">
           <span className="block truncate font-semibold text-foreground">{title}</span>

@@ -204,7 +204,15 @@ export function AdminStatusBadge({
   );
 }
 
-export function AdminTruncatedValue({ value, copyLabel = "value", className }: { value: string; copyLabel?: string; className?: string }) {
+export function AdminTruncatedValue({
+  value,
+  copyLabel = "value",
+  className,
+}: {
+  value: string;
+  copyLabel?: string;
+  className?: string;
+}) {
   const ref = useRef<HTMLSpanElement>(null);
   const [truncated, setTruncated] = useState(false);
   const [copied, setCopied] = useState(false);
@@ -225,8 +233,41 @@ export function AdminTruncatedValue({ value, copyLabel = "value", className }: {
     window.setTimeout(() => setCopied(false), 1600);
   };
 
-  const text = <span ref={ref} className={cn("block min-w-0 flex-1 truncate", className)}>{value}</span>;
-  return <span className="group flex min-w-0 items-center gap-1">{truncated ? <Tooltip delay={0}><span className="min-w-0 flex-1">{text}</span><Tooltip.Content className="max-w-sm break-all">{value}</Tooltip.Content></Tooltip> : text}<Button isIconOnly aria-label={copied ? `${copyLabel} copied` : `Copy ${copyLabel}`} className={cn("size-7 min-w-7 shrink-0 opacity-0 transition-opacity group-hover:opacity-100", !truncated && "invisible")} isDisabled={!truncated} size="sm" variant="ghost" onPress={() => void copy()}>{copied ? <CheckCircle2 className="text-success size-3.5" /> : <Copy className="size-3.5" />}</Button></span>;
+  const text = (
+    <span ref={ref} className={cn("block min-w-0 flex-1 truncate", className)}>
+      {value}
+    </span>
+  );
+  return (
+    <span className="group flex min-w-0 items-center gap-1">
+      {truncated ? (
+        <Tooltip delay={0}>
+          <span className="min-w-0 flex-1">{text}</span>
+          <Tooltip.Content className="max-w-sm break-all">{value}</Tooltip.Content>
+        </Tooltip>
+      ) : (
+        text
+      )}
+      <Button
+        isIconOnly
+        aria-label={copied ? `${copyLabel} copied` : `Copy ${copyLabel}`}
+        className={cn(
+          "size-7 min-w-7 shrink-0 opacity-0 transition-opacity group-hover:opacity-100",
+          !truncated && "invisible",
+        )}
+        isDisabled={!truncated}
+        size="sm"
+        variant="ghost"
+        onPress={() => void copy()}
+      >
+        {copied ? (
+          <CheckCircle2 className="text-success size-3.5" />
+        ) : (
+          <Copy className="size-3.5" />
+        )}
+      </Button>
+    </span>
+  );
 }
 
 export function AdminAlert({
@@ -272,7 +313,14 @@ export function AdminEmptyState({
   action?: ReactNode;
 }) {
   return (
-    <EmptyState><EmptyState.Header>{icon ? <EmptyState.Media variant="icon">{icon}</EmptyState.Media> : null}<EmptyState.Title>{title}</EmptyState.Title>{description ? <EmptyState.Description>{description}</EmptyState.Description> : null}</EmptyState.Header>{action ? <EmptyState.Content>{action}</EmptyState.Content> : null}</EmptyState>
+    <EmptyState>
+      <EmptyState.Header>
+        {icon ? <EmptyState.Media variant="icon">{icon}</EmptyState.Media> : null}
+        <EmptyState.Title>{title}</EmptyState.Title>
+        {description ? <EmptyState.Description>{description}</EmptyState.Description> : null}
+      </EmptyState.Header>
+      {action ? <EmptyState.Content>{action}</EmptyState.Content> : null}
+    </EmptyState>
   );
 }
 
@@ -296,7 +344,23 @@ export function AdminDrawer({
   className?: string;
 }) {
   return (
-    <Sheet isOpen={open} placement="right" onOpenChange={onOpenChange}><Sheet.Backdrop><Sheet.Content className={cn(size === "lg" ? "w-full md:w-[672px]" : "w-full md:w-[480px]", className)}><Sheet.Dialog><Sheet.CloseTrigger aria-label="Close" /><Sheet.Header><Sheet.Heading>{title}</Sheet.Heading>{description ? <p className="text-muted text-sm leading-6">{description}</p> : null}</Sheet.Header><Sheet.Body>{children}</Sheet.Body>{footer ? <Sheet.Footer>{footer}</Sheet.Footer> : null}</Sheet.Dialog></Sheet.Content></Sheet.Backdrop></Sheet>
+    <Sheet isOpen={open} placement="right" onOpenChange={onOpenChange}>
+      <Sheet.Backdrop>
+        <Sheet.Content
+          className={cn(size === "lg" ? "w-full md:w-[672px]" : "w-full md:w-[480px]", className)}
+        >
+          <Sheet.Dialog>
+            <Sheet.CloseTrigger aria-label="Close" />
+            <Sheet.Header>
+              <Sheet.Heading>{title}</Sheet.Heading>
+              {description ? <p className="text-muted text-sm leading-6">{description}</p> : null}
+            </Sheet.Header>
+            <Sheet.Body>{children}</Sheet.Body>
+            {footer ? <Sheet.Footer>{footer}</Sheet.Footer> : null}
+          </Sheet.Dialog>
+        </Sheet.Content>
+      </Sheet.Backdrop>
+    </Sheet>
   );
 }
 
@@ -322,7 +386,44 @@ export function AdminConfirmDialog({
   className?: string;
 }) {
   return (
-    <Sheet isOpen={open} placement="right" onOpenChange={(nextOpen) => !busy && onOpenChange(nextOpen)}><Sheet.Backdrop><Sheet.Content className={cn("w-full md:w-[440px]", className)}><Sheet.Dialog><Sheet.CloseTrigger aria-label="Close confirmation" /><Sheet.Header><Sheet.Heading>{title}</Sheet.Heading><p className="text-muted text-sm leading-6">{description}</p></Sheet.Header><Sheet.Body><div className={`${destructive ? "bg-danger/10 text-danger" : "bg-accent-soft text-accent"} rounded-2xl px-4 py-3 text-sm`}>{destructive ? "This action cannot be undone." : "Confirm this operation to continue."}</div></Sheet.Body><Sheet.Footer className="gap-2"><Button isDisabled={busy} variant="outline" onPress={() => onOpenChange(false)}>Cancel</Button><Button isPending={busy} variant={destructive ? "danger" : "primary"} onPress={onConfirm}>{confirmLabel}</Button></Sheet.Footer></Sheet.Dialog></Sheet.Content></Sheet.Backdrop></Sheet>
+    <Sheet
+      isOpen={open}
+      placement="right"
+      onOpenChange={(nextOpen) => !busy && onOpenChange(nextOpen)}
+    >
+      <Sheet.Backdrop>
+        <Sheet.Content className={cn("w-full md:w-[440px]", className)}>
+          <Sheet.Dialog>
+            <Sheet.CloseTrigger aria-label="Close confirmation" />
+            <Sheet.Header>
+              <Sheet.Heading>{title}</Sheet.Heading>
+              <p className="text-muted text-sm leading-6">{description}</p>
+            </Sheet.Header>
+            <Sheet.Body>
+              <div
+                className={`${destructive ? "bg-danger/10 text-danger" : "bg-accent-soft text-accent"} rounded-2xl px-4 py-3 text-sm`}
+              >
+                {destructive
+                  ? "This action cannot be undone."
+                  : "Confirm this operation to continue."}
+              </div>
+            </Sheet.Body>
+            <Sheet.Footer className="gap-2">
+              <Button isDisabled={busy} variant="outline" onPress={() => onOpenChange(false)}>
+                Cancel
+              </Button>
+              <Button
+                isPending={busy}
+                variant={destructive ? "danger" : "primary"}
+                onPress={onConfirm}
+              >
+                {confirmLabel}
+              </Button>
+            </Sheet.Footer>
+          </Sheet.Dialog>
+        </Sheet.Content>
+      </Sheet.Backdrop>
+    </Sheet>
   );
 }
 

@@ -106,10 +106,7 @@ export function CocolaWordmark({ className }: { className?: string }) {
           <path d={CLIP_D} clipRule="evenodd" />
         </clipPath>
       </defs>
-      <g
-        clipPath={`url(#${clipId})`}
-        style={{ opacity: animationReady ? 1 : 0 }}
-      >
+      <g clipPath={`url(#${clipId})`} style={{ opacity: animationReady ? 1 : 0 }}>
         {PEN_PATHS.map((d, i) => (
           <path
             key={i}

@@ -67,7 +67,6 @@ const STATUS_TONES: Record<string, BadgeTone> = {
   unknown: "neutral",
 };
 
-
 export default function SandboxesPage() {
   const [sandboxes, setSandboxes] = useState<SandboxRuntime[]>([]);
   const [loading, setLoading] = useState(true);
@@ -126,14 +125,133 @@ export default function SandboxesPage() {
   }, [refresh]);
 
   const columns: DataGridColumn<SandboxRuntime>[] = [
-    { id: "sandbox", header: "Sandbox", isRowHeader: true, minWidth: 250, cell: (sandbox) => <span className="block min-w-0"><AdminTruncatedValue className="font-mono text-xs font-medium" copyLabel="sandbox ID" value={sandbox.sandbox_id} /><span className="text-muted block truncate text-xs">{sandbox.lifecycle_state || "unknown"}</span></span> },
-    { id: "status", header: "Status", width: 150, cell: (sandbox) => <AdminStatusBadge tone={STATUS_TONES[sandbox.status] ?? "neutral"} dot>{STATUS_LABELS[sandbox.status] ?? sandbox.status}</AdminStatusBadge> },
-    { id: "session", header: "Session", minWidth: 220, cell: (sandbox) => <AdminTruncatedValue className="font-mono text-xs" copyLabel="session ID" value={sandbox.session_id || "—"} /> },
-    { id: "user", header: "User", minWidth: 200, cell: (sandbox) => <span className="block min-w-0"><AdminTruncatedValue className="text-sm font-medium" copyLabel="username" value={sandbox.username || sandbox.user_id || "—"} />{sandbox.username ? <AdminTruncatedValue className="text-muted font-mono text-xs" copyLabel="user ID" value={sandbox.user_id} /> : null}</span> },
-    { id: "runtime", header: "Runtime", minWidth: 220, cell: (sandbox) => <AdminTruncatedValue className="font-mono text-xs" copyLabel="runtime image" value={sandbox.image || "—"} /> },
-    { id: "created", header: "Created", minWidth: 150, cell: (sandbox) => <span className="text-muted text-xs tabular-nums">{formatDate(sandbox.created_at)}</span> },
-    { id: "placement", header: "Node / Pod", minWidth: 240, cell: (sandbox) => <span className="block min-w-0"><AdminTruncatedValue className="text-xs" copyLabel="node name" value={sandbox.node_name || "—"} /><AdminTruncatedValue className="text-muted font-mono text-xs" copyLabel="pod ID" value={`${sandbox.pod_name || "—"}${sandbox.pod_phase ? ` / ${sandbox.pod_phase}` : ""}`} /></span> },
-    { id: "actions", header: "Actions", align: "center", pinned: "end", width: 100, cell: (sandbox) => sandbox.status === "ready" || sandbox.status === "orphan" ? <Button isIconOnly aria-label={`Delete sandbox ${sandbox.sandbox_id}`} isDisabled={Boolean(deletingId)} isPending={deletingId === sandbox.sandbox_id} size="sm" variant="danger-soft" onPress={() => setPendingDeleteId(sandbox.sandbox_id)}>{deletingId === sandbox.sandbox_id ? <LoaderCircle className="size-4 animate-spin" /> : <Trash2 className="size-4" />}</Button> : <span className="text-muted">—</span> },
+    {
+      id: "sandbox",
+      header: "Sandbox",
+      isRowHeader: true,
+      minWidth: 250,
+      cell: (sandbox) => (
+        <span className="block min-w-0">
+          <AdminTruncatedValue
+            className="font-mono text-xs font-medium"
+            copyLabel="sandbox ID"
+            value={sandbox.sandbox_id}
+          />
+          <span className="text-muted block truncate text-xs">
+            {sandbox.lifecycle_state || "unknown"}
+          </span>
+        </span>
+      ),
+    },
+    {
+      id: "status",
+      header: "Status",
+      width: 150,
+      cell: (sandbox) => (
+        <AdminStatusBadge tone={STATUS_TONES[sandbox.status] ?? "neutral"} dot>
+          {STATUS_LABELS[sandbox.status] ?? sandbox.status}
+        </AdminStatusBadge>
+      ),
+    },
+    {
+      id: "session",
+      header: "Session",
+      minWidth: 220,
+      cell: (sandbox) => (
+        <AdminTruncatedValue
+          className="font-mono text-xs"
+          copyLabel="session ID"
+          value={sandbox.session_id || "—"}
+        />
+      ),
+    },
+    {
+      id: "user",
+      header: "User",
+      minWidth: 200,
+      cell: (sandbox) => (
+        <span className="block min-w-0">
+          <AdminTruncatedValue
+            className="text-sm font-medium"
+            copyLabel="username"
+            value={sandbox.username || sandbox.user_id || "—"}
+          />
+          {sandbox.username ? (
+            <AdminTruncatedValue
+              className="text-muted font-mono text-xs"
+              copyLabel="user ID"
+              value={sandbox.user_id}
+            />
+          ) : null}
+        </span>
+      ),
+    },
+    {
+      id: "runtime",
+      header: "Runtime",
+      minWidth: 220,
+      cell: (sandbox) => (
+        <AdminTruncatedValue
+          className="font-mono text-xs"
+          copyLabel="runtime image"
+          value={sandbox.image || "—"}
+        />
+      ),
+    },
+    {
+      id: "created",
+      header: "Created",
+      minWidth: 150,
+      cell: (sandbox) => (
+        <span className="text-muted text-xs tabular-nums">{formatDate(sandbox.created_at)}</span>
+      ),
+    },
+    {
+      id: "placement",
+      header: "Node / Pod",
+      minWidth: 240,
+      cell: (sandbox) => (
+        <span className="block min-w-0">
+          <AdminTruncatedValue
+            className="text-xs"
+            copyLabel="node name"
+            value={sandbox.node_name || "—"}
+          />
+          <AdminTruncatedValue
+            className="text-muted font-mono text-xs"
+            copyLabel="pod ID"
+            value={`${sandbox.pod_name || "—"}${sandbox.pod_phase ? ` / ${sandbox.pod_phase}` : ""}`}
+          />
+        </span>
+      ),
+    },
+    {
+      id: "actions",
+      header: "Actions",
+      align: "center",
+      pinned: "end",
+      width: 100,
+      cell: (sandbox) =>
+        sandbox.status === "ready" || sandbox.status === "orphan" ? (
+          <Button
+            isIconOnly
+            aria-label={`Delete sandbox ${sandbox.sandbox_id}`}
+            isDisabled={Boolean(deletingId)}
+            isPending={deletingId === sandbox.sandbox_id}
+            size="sm"
+            variant="danger-soft"
+            onPress={() => setPendingDeleteId(sandbox.sandbox_id)}
+          >
+            {deletingId === sandbox.sandbox_id ? (
+              <LoaderCircle className="size-4 animate-spin" />
+            ) : (
+              <Trash2 className="size-4" />
+            )}
+          </Button>
+        ) : (
+          <span className="text-muted">—</span>
+        ),
+    },
   ];
 
   return (
@@ -169,7 +287,32 @@ export default function SandboxesPage() {
       {unsupported ? (
         <UnsupportedState />
       ) : (
-        <DataGrid aria-label="Sandboxes" columns={columns} contentClassName="min-w-[1380px]" data={sandboxes} getRowId={(sandbox) => sandbox.sandbox_id} selectionMode="none" variant="primary" renderEmptyState={() => <EmptyState><EmptyState.Header><EmptyState.Media variant="icon"><SandboxesPageIcon className="text-teal-500" /></EmptyState.Media><EmptyState.Title>{loading ? "Loading sandboxes" : "No sandboxes found"}</EmptyState.Title><EmptyState.Description>{loading ? "Fetching sandbox runtime state…" : "Session-bound sandboxes will appear here once they are provisioned."}</EmptyState.Description></EmptyState.Header></EmptyState>} />
+        <DataGrid
+          aria-label="Sandboxes"
+          columns={columns}
+          contentClassName="min-w-[1380px]"
+          data={sandboxes}
+          getRowId={(sandbox) => sandbox.sandbox_id}
+          selectionMode="none"
+          variant="primary"
+          renderEmptyState={() => (
+            <EmptyState>
+              <EmptyState.Header>
+                <EmptyState.Media variant="icon">
+                  <SandboxesPageIcon className="text-teal-500" />
+                </EmptyState.Media>
+                <EmptyState.Title>
+                  {loading ? "Loading sandboxes" : "No sandboxes found"}
+                </EmptyState.Title>
+                <EmptyState.Description>
+                  {loading
+                    ? "Fetching sandbox runtime state…"
+                    : "Session-bound sandboxes will appear here once they are provisioned."}
+                </EmptyState.Description>
+              </EmptyState.Header>
+            </EmptyState>
+          )}
+        />
       )}
 
       <AdminConfirmDialog

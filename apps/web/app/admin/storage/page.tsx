@@ -228,14 +228,166 @@ export default function StoragePage() {
   };
 
   const columns: DataGridColumn<SessionVolume>[] = [
-    { id: "session", header: "Session / User", isRowHeader: true, minWidth: 260, cell: (volume) => <span className="block min-w-0"><AdminTruncatedValue className="font-mono text-xs font-medium" copyLabel="session ID" value={volume.session_id || "Detached volume"} /><AdminTruncatedValue className="text-muted text-xs" copyLabel="user ID" value={volume.user_id || "No database binding"} /></span> },
-    { id: "node", header: "Node", minWidth: 150, cell: (volume) => <AdminTruncatedValue className="font-mono text-xs" copyLabel="node name" value={volume.node_name || "—"} /> },
-    { id: "volume", header: "Volume", minWidth: 220, cell: (volume) => <span className="block min-w-0"><AdminTruncatedValue className="font-mono text-xs" copyLabel="PVC name" value={volume.pvc_name} /><span className="mt-1 flex flex-wrap items-center gap-1"><AdminStatusBadge tone={isAttachedVolume(volume) ? "green" : "amber"} dot>{volume.pvc_phase}</AdminStatusBadge>{volume.delete_allowed ? <AdminStatusBadge tone="red">Orphan</AdminStatusBadge> : null}</span></span> },
-    { id: "generation", header: "Generation", width: 110, cell: (volume) => <span className="tabular-nums">{volume.generation}</span> },
-    { id: "requested", header: "Requested", minWidth: 130, cell: (volume) => <span className="font-mono text-xs tabular-nums">{formatBytes(volume.requested_bytes)}</span> },
-    { id: "usage", header: "Actual usage", minWidth: 170, cell: (volume) => { const measurement = measurements[volumeKey(volume)]; return measurement ? <span><span className="block font-mono text-xs font-medium tabular-nums">{formatBytes(measurement.allocated_bytes)}</span><span className="text-muted block text-xs">{measurement.file_count} files · {measurement.directory_count} dirs</span></span> : <span className="text-muted">Not measured</span>; } },
-    { id: "reset", header: "Last reset", minWidth: 190, cell: (volume) => <span className="text-muted block truncate text-xs" title={volume.last_reset_at ? `${new Date(volume.last_reset_at).toLocaleString()} · ${volume.last_reset_reason || "reset"}` : "—"}>{volume.last_reset_at ? `${new Date(volume.last_reset_at).toLocaleString()} · ${volume.last_reset_reason || "reset"}` : "—"}</span> },
-    { id: "actions", header: "Actions", align: "center", pinned: "end", width: 150, cell: (volume) => { const key = volumeKey(volume); return <span className="flex justify-center gap-1"><Tooltip delay={0}><Button isIconOnly aria-label={`Measure ${volume.pvc_name}`} isDisabled={measuring === key || !isAttachedVolume(volume)} isPending={measuring === key} size="sm" variant="outline" onPress={() => void measureVolume(volume)}>{measuring === key ? <LoaderCircle className="size-4 animate-spin" /> : <Gauge className="size-4" />}</Button><Tooltip.Content>{!isAttachedVolume(volume) ? "Measurement requires an attached volume" : measurements[key] ? "Measure again" : "Measure actual usage"}</Tooltip.Content></Tooltip>{volume.delete_allowed ? <Tooltip delay={0}><Button isIconOnly aria-label={`Delete orphan ${volume.pvc_name}`} isDisabled={deleting === key} size="sm" variant="danger-soft" onPress={() => setPendingDelete(volume)}><Trash2 className="size-4" /></Button><Tooltip.Content>Delete orphan volume</Tooltip.Content></Tooltip> : null}</span>; } },
+    {
+      id: "session",
+      header: "Session / User",
+      isRowHeader: true,
+      minWidth: 260,
+      cell: (volume) => (
+        <span className="block min-w-0">
+          <AdminTruncatedValue
+            className="font-mono text-xs font-medium"
+            copyLabel="session ID"
+            value={volume.session_id || "Detached volume"}
+          />
+          <AdminTruncatedValue
+            className="text-muted text-xs"
+            copyLabel="user ID"
+            value={volume.user_id || "No database binding"}
+          />
+        </span>
+      ),
+    },
+    {
+      id: "node",
+      header: "Node",
+      minWidth: 150,
+      cell: (volume) => (
+        <AdminTruncatedValue
+          className="font-mono text-xs"
+          copyLabel="node name"
+          value={volume.node_name || "—"}
+        />
+      ),
+    },
+    {
+      id: "volume",
+      header: "Volume",
+      minWidth: 220,
+      cell: (volume) => (
+        <span className="block min-w-0">
+          <AdminTruncatedValue
+            className="font-mono text-xs"
+            copyLabel="PVC name"
+            value={volume.pvc_name}
+          />
+          <span className="mt-1 flex flex-wrap items-center gap-1">
+            <AdminStatusBadge tone={isAttachedVolume(volume) ? "green" : "amber"} dot>
+              {volume.pvc_phase}
+            </AdminStatusBadge>
+            {volume.delete_allowed ? <AdminStatusBadge tone="red">Orphan</AdminStatusBadge> : null}
+          </span>
+        </span>
+      ),
+    },
+    {
+      id: "generation",
+      header: "Generation",
+      width: 110,
+      cell: (volume) => <span className="tabular-nums">{volume.generation}</span>,
+    },
+    {
+      id: "requested",
+      header: "Requested",
+      minWidth: 130,
+      cell: (volume) => (
+        <span className="font-mono text-xs tabular-nums">
+          {formatBytes(volume.requested_bytes)}
+        </span>
+      ),
+    },
+    {
+      id: "usage",
+      header: "Actual usage",
+      minWidth: 170,
+      cell: (volume) => {
+        const measurement = measurements[volumeKey(volume)];
+        return measurement ? (
+          <span>
+            <span className="block font-mono text-xs font-medium tabular-nums">
+              {formatBytes(measurement.allocated_bytes)}
+            </span>
+            <span className="text-muted block text-xs">
+              {measurement.file_count} files · {measurement.directory_count} dirs
+            </span>
+          </span>
+        ) : (
+          <span className="text-muted">Not measured</span>
+        );
+      },
+    },
+    {
+      id: "reset",
+      header: "Last reset",
+      minWidth: 190,
+      cell: (volume) => (
+        <span
+          className="text-muted block truncate text-xs"
+          title={
+            volume.last_reset_at
+              ? `${new Date(volume.last_reset_at).toLocaleString()} · ${volume.last_reset_reason || "reset"}`
+              : "—"
+          }
+        >
+          {volume.last_reset_at
+            ? `${new Date(volume.last_reset_at).toLocaleString()} · ${volume.last_reset_reason || "reset"}`
+            : "—"}
+        </span>
+      ),
+    },
+    {
+      id: "actions",
+      header: "Actions",
+      align: "center",
+      pinned: "end",
+      width: 150,
+      cell: (volume) => {
+        const key = volumeKey(volume);
+        return (
+          <span className="flex justify-center gap-1">
+            <Tooltip delay={0}>
+              <Button
+                isIconOnly
+                aria-label={`Measure ${volume.pvc_name}`}
+                isDisabled={measuring === key || !isAttachedVolume(volume)}
+                isPending={measuring === key}
+                size="sm"
+                variant="outline"
+                onPress={() => void measureVolume(volume)}
+              >
+                {measuring === key ? (
+                  <LoaderCircle className="size-4 animate-spin" />
+                ) : (
+                  <Gauge className="size-4" />
+                )}
+              </Button>
+              <Tooltip.Content>
+                {!isAttachedVolume(volume)
+                  ? "Measurement requires an attached volume"
+                  : measurements[key]
+                    ? "Measure again"
+                    : "Measure actual usage"}
+              </Tooltip.Content>
+            </Tooltip>
+            {volume.delete_allowed ? (
+              <Tooltip delay={0}>
+                <Button
+                  isIconOnly
+                  aria-label={`Delete orphan ${volume.pvc_name}`}
+                  isDisabled={deleting === key}
+                  size="sm"
+                  variant="danger-soft"
+                  onPress={() => setPendingDelete(volume)}
+                >
+                  <Trash2 className="size-4" />
+                </Button>
+                <Tooltip.Content>Delete orphan volume</Tooltip.Content>
+              </Tooltip>
+            ) : null}
+          </span>
+        );
+      },
+    },
   ];
 
   return (
@@ -267,9 +419,13 @@ export default function StoragePage() {
         <Card className="p-8">
           <EmptyState>
             <EmptyState.Header>
-              <EmptyState.Media variant="icon"><HardDrive className="text-purple-500" /></EmptyState.Media>
+              <EmptyState.Media variant="icon">
+                <HardDrive className="text-purple-500" />
+              </EmptyState.Media>
               <EmptyState.Title>Node-local storage is not configured</EmptyState.Title>
-              <EmptyState.Description>Start Cocola with the k3s runtime profile to enable storage visibility.</EmptyState.Description>
+              <EmptyState.Description>
+                Start Cocola with the k3s runtime profile to enable storage visibility.
+              </EmptyState.Description>
             </EmptyState.Header>
           </EmptyState>
         </Card>
@@ -284,9 +440,33 @@ export default function StoragePage() {
               </p>
             </div>
             {loading && nodes.length === 0 ? (
-              <Card className="p-6"><EmptyState><EmptyState.Header><EmptyState.Media variant="icon"><LoaderCircle className="animate-spin text-purple-500" /></EmptyState.Media><EmptyState.Title>Loading storage</EmptyState.Title><EmptyState.Description>Reading node filesystem capacity…</EmptyState.Description></EmptyState.Header></EmptyState></Card>
+              <Card className="p-6">
+                <EmptyState>
+                  <EmptyState.Header>
+                    <EmptyState.Media variant="icon">
+                      <LoaderCircle className="animate-spin text-purple-500" />
+                    </EmptyState.Media>
+                    <EmptyState.Title>Loading storage</EmptyState.Title>
+                    <EmptyState.Description>
+                      Reading node filesystem capacity…
+                    </EmptyState.Description>
+                  </EmptyState.Header>
+                </EmptyState>
+              </Card>
             ) : nodes.length === 0 ? (
-              <Card className="p-6"><EmptyState><EmptyState.Header><EmptyState.Media variant="icon"><HardDrive className="text-purple-500" /></EmptyState.Media><EmptyState.Title>No storage nodes found</EmptyState.Title><EmptyState.Description>Storage nodes will appear after the runtime is connected.</EmptyState.Description></EmptyState.Header></EmptyState></Card>
+              <Card className="p-6">
+                <EmptyState>
+                  <EmptyState.Header>
+                    <EmptyState.Media variant="icon">
+                      <HardDrive className="text-purple-500" />
+                    </EmptyState.Media>
+                    <EmptyState.Title>No storage nodes found</EmptyState.Title>
+                    <EmptyState.Description>
+                      Storage nodes will appear after the runtime is connected.
+                    </EmptyState.Description>
+                  </EmptyState.Header>
+                </EmptyState>
+              </Card>
             ) : (
               <div className="grid gap-4 lg:grid-cols-2">
                 {nodes.map((node) => (
@@ -324,7 +504,30 @@ export default function StoragePage() {
             </div>
 
             <div className="min-w-0">
-              <DataGrid aria-label="Session storage" columns={columns} contentClassName="min-w-[1240px]" data={volumes} getRowId={volumeKey} selectionMode="none" variant="primary" renderEmptyState={() => <EmptyState><EmptyState.Header><EmptyState.Media variant="icon"><HardDrive className="text-purple-500" /></EmptyState.Media><EmptyState.Title>{loading ? "Loading storage" : "No Session Volumes"}</EmptyState.Title><EmptyState.Description>Session storage will appear after a workspace is created.</EmptyState.Description></EmptyState.Header></EmptyState>} />
+              <DataGrid
+                aria-label="Session storage"
+                columns={columns}
+                contentClassName="min-w-[1240px]"
+                data={volumes}
+                getRowId={volumeKey}
+                selectionMode="none"
+                variant="primary"
+                renderEmptyState={() => (
+                  <EmptyState>
+                    <EmptyState.Header>
+                      <EmptyState.Media variant="icon">
+                        <HardDrive className="text-purple-500" />
+                      </EmptyState.Media>
+                      <EmptyState.Title>
+                        {loading ? "Loading storage" : "No Session Volumes"}
+                      </EmptyState.Title>
+                      <EmptyState.Description>
+                        Session storage will appear after a workspace is created.
+                      </EmptyState.Description>
+                    </EmptyState.Header>
+                  </EmptyState>
+                )}
+              />
               <AdminPagination
                 page={volumePage}
                 pageSize={SESSION_STORAGE_PAGE_SIZE}
@@ -374,15 +577,15 @@ function NodeStorageCard({ node }: { node: NodeFilesystem }) {
     return (
       <Card className="p-5">
         <Card.Content className="p-0">
-        <div className="flex items-center justify-between gap-3">
-          <div className="font-mono text-sm font-medium">{node.node_name}</div>
-          <AdminStatusBadge tone="amber" dot>
-            Probe unavailable
-          </AdminStatusBadge>
-        </div>
-        <p className="text-muted mt-3 text-xs">
-          {node.error || "Storage probe is not reporting from this node."}
-        </p>
+          <div className="flex items-center justify-between gap-3">
+            <div className="font-mono text-sm font-medium">{node.node_name}</div>
+            <AdminStatusBadge tone="amber" dot>
+              Probe unavailable
+            </AdminStatusBadge>
+          </div>
+          <p className="text-muted mt-3 text-xs">
+            {node.error || "Storage probe is not reporting from this node."}
+          </p>
         </Card.Content>
       </Card>
     );
@@ -393,32 +596,35 @@ function NodeStorageCard({ node }: { node: NodeFilesystem }) {
   return (
     <Card className="cocola-admin-module-card p-5">
       <Card.Content className="p-0">
-      <div className="flex items-start justify-between gap-3">
-        <div>
-          <div className="font-mono text-sm font-medium">{node.node_name}</div>
-          <div className="text-muted mt-1 text-xs">
-            {formatBytes(node.available_bytes)} available of {formatBytes(node.total_bytes)}
+        <div className="flex items-start justify-between gap-3">
+          <div>
+            <div className="font-mono text-sm font-medium">{node.node_name}</div>
+            <div className="text-muted mt-1 text-xs">
+              {formatBytes(node.available_bytes)} available of {formatBytes(node.total_bytes)}
+            </div>
           </div>
+          <AdminStatusBadge
+            tone={tone === "red" ? "red" : tone === "amber" ? "amber" : "green"}
+            dot
+          >
+            {formatPercent(availableRatio)} available
+          </AdminStatusBadge>
         </div>
-        <AdminStatusBadge tone={tone === "red" ? "red" : tone === "amber" ? "amber" : "green"} dot>
-          {formatPercent(availableRatio)} available
-        </AdminStatusBadge>
-      </div>
-      <div className="bg-surface-secondary mt-4 h-2 overflow-hidden rounded-full">
-        <div
-          className={cn(
-            "h-full rounded-full transition-[width]",
-            tone === "red" && "bg-danger",
-            tone === "amber" && "bg-amber-500",
-            tone === "green" && "bg-emerald-500",
-          )}
-          style={{ width: `${Math.min(Math.max(occupiedRatio * 100, 0), 100)}%` }}
-        />
-      </div>
-      <div className="text-muted mt-2 flex justify-between text-[11px]">
-        <span>{formatBytes(node.used_bytes)} filesystem used</span>
-        <span>{formatPercent(occupiedRatio)} unavailable</span>
-      </div>
+        <div className="bg-surface-secondary mt-4 h-2 overflow-hidden rounded-full">
+          <div
+            className={cn(
+              "h-full rounded-full transition-[width]",
+              tone === "red" && "bg-danger",
+              tone === "amber" && "bg-amber-500",
+              tone === "green" && "bg-emerald-500",
+            )}
+            style={{ width: `${Math.min(Math.max(occupiedRatio * 100, 0), 100)}%` }}
+          />
+        </div>
+        <div className="text-muted mt-2 flex justify-between text-[11px]">
+          <span>{formatBytes(node.used_bytes)} filesystem used</span>
+          <span>{formatPercent(occupiedRatio)} unavailable</span>
+        </div>
       </Card.Content>
     </Card>
   );

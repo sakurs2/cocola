@@ -1,7 +1,6 @@
 import { fileURLToPath } from "node:url";
 
 /** @type {import('next').NextConfig} */
-const backendOrigin = process.env.COCOLA_WEB_BACKEND_ORIGIN?.replace(/\/+$/, "");
 const workspaceRoot = fileURLToPath(new URL("../..", import.meta.url));
 
 const nextConfig = {
@@ -27,19 +26,5 @@ const nextConfig = {
   // up and drop the /{port}/ segment -> gateway 404. Skip that redirect so the
   // catch-all route keeps the slash and relative resolution stays correct.
   skipTrailingSlashRedirect: true,
-  async rewrites() {
-    if (!backendOrigin) return [];
-
-    return {
-      beforeFiles: [
-        {
-          source: "/api/:path*",
-          destination: `${backendOrigin}/api/:path*`,
-        },
-      ],
-      afterFiles: [],
-      fallback: [],
-    };
-  },
 };
 export default nextConfig;

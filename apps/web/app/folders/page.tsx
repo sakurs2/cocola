@@ -159,7 +159,11 @@ export default function FoldersPage() {
             <Label>Folder name</Label>
             <Input placeholder="e.g. Product launch" />
           </TextField>
-          {error ? <p className="text-danger text-sm" role="alert">{error}</p> : null}
+          {error ? (
+            <p className="text-danger text-sm" role="alert">
+              {error}
+            </p>
+          ) : null}
           <div className="flex justify-end gap-2">
             <Button isDisabled={busy} variant="ghost" onPress={() => changeOpen(false)}>
               Cancel

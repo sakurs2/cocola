@@ -299,7 +299,9 @@ export default function AdminMCPPage() {
   };
 
   const visibleMcps = mcps.filter((mcp) =>
-    `${mcp.name} ${mcp.description} ${mcp.transport}`.toLowerCase().includes(query.trim().toLowerCase()),
+    `${mcp.name} ${mcp.description} ${mcp.transport}`
+      .toLowerCase()
+      .includes(query.trim().toLowerCase()),
   );
 
   return (
@@ -331,7 +333,12 @@ export default function AdminMCPPage() {
         </AdminAlert>
       ) : null}
 
-      <SearchField aria-label="Search MCP servers" className="w-full sm:w-[320px]" value={query} onChange={setQuery}>
+      <SearchField
+        aria-label="Search MCP servers"
+        className="w-full sm:w-[320px]"
+        value={query}
+        onChange={setQuery}
+      >
         <SearchField.Group>
           <SearchField.SearchIcon />
           <SearchField.Input placeholder="Search MCP servers" />
@@ -361,8 +368,19 @@ export default function AdminMCPPage() {
         <AdminEmptyState
           icon={<McpPageIcon className="size-6" />}
           title={mcps.length ? "No matching MCP servers" : "No MCP servers configured"}
-          description={mcps.length ? "Try another search or clear the active query." : "Add a server now; Cocola checks the connection when an agent first uses it."}
-          action={!mcps.length ? <Button className="gap-2" onPress={openCreate}><Plus className="size-4" />Add server</Button> : undefined}
+          description={
+            mcps.length
+              ? "Try another search or clear the active query."
+              : "Add a server now; Cocola checks the connection when an agent first uses it."
+          }
+          action={
+            !mcps.length ? (
+              <Button className="gap-2" onPress={openCreate}>
+                <Plus className="size-4" />
+                Add server
+              </Button>
+            ) : undefined
+          }
         />
       )}
 
@@ -398,7 +416,11 @@ export default function AdminMCPPage() {
             </AdminAlert>
           ) : null}
           <div className="grid gap-4 sm:grid-cols-2">
-            <TextField value={form.name} variant="secondary" onChange={(name) => setForm({ ...form, name })}>
+            <TextField
+              value={form.name}
+              variant="secondary"
+              onChange={(name) => setForm({ ...form, name })}
+            >
               <Label>Name</Label>
               <Input autoFocus placeholder="GitHub" />
             </TextField>
@@ -425,20 +447,40 @@ export default function AdminMCPPage() {
               : `${form.transport === "http" ? "HTTP" : "SSE"} connects to a remote URL.`}
           </p>
 
-          <TextField value={form.description} variant="secondary" onChange={(description) => setForm({ ...form, description })}>
-            <Label>Description <span className="text-muted font-normal">· optional</span></Label>
+          <TextField
+            value={form.description}
+            variant="secondary"
+            onChange={(description) => setForm({ ...form, description })}
+          >
+            <Label>
+              Description <span className="text-muted font-normal">· optional</span>
+            </Label>
             <Input placeholder="Repository tools for agent sessions" />
           </TextField>
 
           {form.transport === "stdio" ? (
             <>
-              <TextField value={form.command} variant="secondary" onChange={(command) => setForm({ ...form, command })}>
+              <TextField
+                value={form.command}
+                variant="secondary"
+                onChange={(command) => setForm({ ...form, command })}
+              >
                 <Label>Command</Label>
                 <Input className="font-mono" placeholder="npx" />
               </TextField>
-              <TextField value={form.args} variant="secondary" onChange={(args) => setForm({ ...form, args })}>
-                <Label>Arguments <span className="text-muted font-normal">· optional · one per line</span></Label>
-                <TextArea className="min-h-24 font-mono" placeholder={"-y\n@modelcontextprotocol/server-github"} />
+              <TextField
+                value={form.args}
+                variant="secondary"
+                onChange={(args) => setForm({ ...form, args })}
+              >
+                <Label>
+                  Arguments{" "}
+                  <span className="text-muted font-normal">· optional · one per line</span>
+                </Label>
+                <TextArea
+                  className="min-h-24 font-mono"
+                  placeholder={"-y\n@modelcontextprotocol/server-github"}
+                />
               </TextField>
               <SecretPairsField
                 label="Env"
@@ -462,9 +504,16 @@ export default function AdminMCPPage() {
                     : "Paste the complete provider URL."
                 }
               >
-                <TextField className="relative" value={form.url} variant="secondary" onChange={(url) => setForm({ ...form, url })}>
+                <TextField
+                  className="relative"
+                  value={form.url}
+                  variant="secondary"
+                  onChange={(url) => setForm({ ...form, url })}
+                >
                   <Label className="sr-only">URL</Label>
-                  <Input type={showURL ? "text" : "password"} className="w-full pr-11 font-mono"
+                  <Input
+                    type={showURL ? "text" : "password"}
+                    className="w-full pr-11 font-mono"
                     placeholder={
                       editing
                         ? editing.url_hint || "Saved URL"
@@ -502,12 +551,15 @@ export default function AdminMCPPage() {
           )}
 
           <Card className="p-4">
-            <Checkbox isSelected={form.defaultEnabled} onChange={(defaultEnabled) => setForm({ ...form, defaultEnabled })}>
+            <Checkbox
+              isSelected={form.defaultEnabled}
+              onChange={(defaultEnabled) => setForm({ ...form, defaultEnabled })}
+            >
               <span>
-              <span className="block text-sm font-medium">Enabled for users by default</span>
-              <span className="text-muted mt-0.5 block text-xs leading-5">
-                Users can still turn this server off for their own agent sessions.
-              </span>
+                <span className="block text-sm font-medium">Enabled for users by default</span>
+                <span className="text-muted mt-0.5 block text-xs leading-5">
+                  Users can still turn this server off for their own agent sessions.
+                </span>
               </span>
             </Checkbox>
           </Card>
@@ -527,10 +579,18 @@ export default function AdminMCPPage() {
               </Button>
               {advancedOpen ? (
                 <div className="mt-3">
-                  <TextField value={form.id} variant="secondary" onChange={(id) => setForm({ ...form, id })}>
-                    <Label>ID <span className="text-muted font-normal">· optional</span></Label>
+                  <TextField
+                    value={form.id}
+                    variant="secondary"
+                    onChange={(id) => setForm({ ...form, id })}
+                  >
+                    <Label>
+                      ID <span className="text-muted font-normal">· optional</span>
+                    </Label>
                     <Input className="font-mono" placeholder={slugify(form.name) || "github"} />
-                    <span className="text-muted text-xs">Generated from the name when left blank.</span>
+                    <span className="text-muted text-xs">
+                      Generated from the name when left blank.
+                    </span>
                   </TextField>
                 </div>
               ) : null}
@@ -581,26 +641,42 @@ function MCPCard({
     <Card className="admin-mcp-card h-full p-5">
       <Card.Content className="flex h-full min-w-0 flex-col p-0">
         <div className="flex items-start gap-3">
-          <span className="admin-mcp-card-icon flex size-10 shrink-0 items-center justify-center rounded-2xl" style={{ ...style, background: "var(--glyph-soft)", color: "var(--glyph-ink)" }}>
+          <span
+            className="admin-mcp-card-icon flex size-10 shrink-0 items-center justify-center rounded-2xl"
+            style={{ ...style, background: "var(--glyph-soft)", color: "var(--glyph-ink)" }}
+          >
             <Icon className="size-[18px]" />
           </span>
           <div className="min-w-0 flex-1">
             <div className="flex flex-wrap items-center gap-2">
-              <h2 className="truncate text-sm font-semibold text-foreground">{mcp.name || mcp.id}</h2>
-              <Chip size="sm" variant="soft">{transport === "http" ? "HTTP" : transport}</Chip>
+              <h2 className="truncate text-sm font-semibold text-foreground">
+                {mcp.name || mcp.id}
+              </h2>
+              <Chip size="sm" variant="soft">
+                {transport === "http" ? "HTTP" : transport}
+              </Chip>
             </div>
-            <p className="text-muted mt-1 line-clamp-2 min-h-10 text-sm leading-5">{mcp.description || "No description"}</p>
+            <p className="text-muted mt-1 line-clamp-2 min-h-10 text-sm leading-5">
+              {mcp.description || "No description"}
+            </p>
           </div>
         </div>
 
         <div className="bg-surface-secondary mt-4 min-w-0 rounded-2xl p-3">
-          <div className="text-muted text-[10px] font-semibold uppercase tracking-[0.12em]">{remote ? "URL" : "Command"}</div>
-          <code className="mt-1 block truncate font-mono text-xs tabular-nums text-foreground/80">{endpoint || (remote ? "Remote URL saved" : "Command saved")}</code>
+          <div className="text-muted text-[10px] font-semibold uppercase tracking-[0.12em]">
+            {remote ? "URL" : "Command"}
+          </div>
+          <code className="mt-1 block truncate font-mono text-xs tabular-nums text-foreground/80">
+            {endpoint || (remote ? "Remote URL saved" : "Command saved")}
+          </code>
         </div>
 
         {mcp.default_enabled ? <div className="text-muted mt-3 text-xs">Default on</div> : null}
         <div className="mt-auto flex items-center justify-between gap-3 pt-4">
-          <Button isDisabled={busy} size="sm" variant="outline" onPress={onEdit}><Pencil className="size-4" />Edit</Button>
+          <Button isDisabled={busy} size="sm" variant="outline" onPress={onEdit}>
+            <Pencil className="size-4" />
+            Edit
+          </Button>
           <span className="flex items-center gap-2">
             <Switch
               aria-label={`${mcp.enabled ? "Disable" : "Enable"} ${mcp.name || mcp.id}`}
@@ -609,10 +685,15 @@ function MCPCard({
               onChange={onToggle}
             >
               <Switch.Content>
-                <Switch.Control><Switch.Thumb className="admin-switch-thumb shadow-sm" /></Switch.Control>
+                <Switch.Control>
+                  <Switch.Thumb className="admin-switch-thumb shadow-sm" />
+                </Switch.Control>
               </Switch.Content>
             </Switch>
-            <Button isDisabled={busy} size="sm" variant="danger-soft" onPress={onDelete}><Trash2 className="size-4" />Remove</Button>
+            <Button isDisabled={busy} size="sm" variant="danger-soft" onPress={onDelete}>
+              <Trash2 className="size-4" />
+              Remove
+            </Button>
           </span>
         </div>
       </Card.Content>

@@ -227,7 +227,12 @@ export default function AgentPage() {
   if (!agent) {
     return (
       <div className="cocola-web-page mx-auto flex w-full max-w-4xl flex-col gap-5 p-4 sm:p-6 lg:p-8">
-        <Button isIconOnly aria-label="Back to Agents" variant="ghost" onPress={() => router.push("/agents")}>
+        <Button
+          isIconOnly
+          aria-label="Back to Agents"
+          variant="ghost"
+          onPress={() => router.push("/agents")}
+        >
           <ArrowLeft className="size-4" />
         </Button>
         <div className="bg-danger/10 text-danger rounded-2xl p-5 text-sm">
@@ -241,19 +246,37 @@ export default function AgentPage() {
     <div className="cocola-agent-detail cocola-web-page mx-auto flex w-full max-w-4xl flex-col gap-5 p-4 sm:p-6 lg:p-8">
       <header className="flex flex-wrap items-start justify-between gap-4">
         <span className="flex min-w-0 items-start gap-3">
-          <Button isIconOnly aria-label="Back to Agents" variant="ghost" onPress={() => router.push("/agents")}>
+          <Button
+            isIconOnly
+            aria-label="Back to Agents"
+            variant="ghost"
+            onPress={() => router.push("/agents")}
+          >
             <ArrowLeft className="size-4" />
           </Button>
-          <AgentAvatar avatarColor={avatarColor} avatarKey={avatarKey} className="size-11 rounded-2xl" iconClassName="size-5" />
+          <AgentAvatar
+            avatarColor={avatarColor}
+            avatarKey={avatarKey}
+            className="size-11 rounded-2xl"
+            iconClassName="size-5"
+          />
           <span className="min-w-0">
-            <span className="text-accent block text-xs font-semibold tracking-[0.12em] uppercase">Assistants</span>
-            <h1 className="text-foreground mt-1 truncate text-2xl font-semibold tracking-[-0.03em]">{agent.name}</h1>
-            <span className="text-muted mt-1 block text-sm">Changes apply to new conversations.</span>
+            <span className="text-accent block text-xs font-semibold tracking-[0.12em] uppercase">
+              Assistants
+            </span>
+            <h1 className="text-foreground mt-1 truncate text-2xl font-semibold tracking-[-0.03em]">
+              {agent.name}
+            </h1>
+            <span className="text-muted mt-1 block text-sm">
+              Changes apply to new conversations.
+            </span>
           </span>
         </span>
         <Button
           className="cocola-web-page-primary-action"
-          isDisabled={!dirty || !name.trim() || !selectedModel || instructionsTooLarge || models.length === 0}
+          isDisabled={
+            !dirty || !name.trim() || !selectedModel || instructionsTooLarge || models.length === 0
+          }
           isPending={saving}
           onPress={() => void save()}
         >
@@ -262,7 +285,9 @@ export default function AgentPage() {
         </Button>
       </header>
 
-      {error ? <div className="bg-danger/10 text-danger rounded-2xl px-4 py-3 text-sm">{error}</div> : null}
+      {error ? (
+        <div className="bg-danger/10 text-danger rounded-2xl px-4 py-3 text-sm">{error}</div>
+      ) : null}
 
       <Card className="p-5">
         <Card.Header className="p-0">
@@ -293,7 +318,12 @@ export default function AgentPage() {
                     variant="ghost"
                     onPress={() => setAvatarKey(key)}
                   >
-                    <AgentAvatar avatarColor={avatarColor} avatarKey={key} className="size-9 rounded-xl" iconClassName="size-4" />
+                    <AgentAvatar
+                      avatarColor={avatarColor}
+                      avatarKey={key}
+                      className="size-9 rounded-xl"
+                      iconClassName="size-4"
+                    />
                   </Button>
                 ))}
               </div>
@@ -310,7 +340,9 @@ export default function AgentPage() {
                     variant="ghost"
                     onPress={() => setAvatarColor(color)}
                   >
-                    <span className={`grid size-7 place-items-center rounded-full ${COLOR_SWATCHES[color]}`}>
+                    <span
+                      className={`grid size-7 place-items-center rounded-full ${COLOR_SWATCHES[color]}`}
+                    >
                       {avatarColor === color ? <Check className="size-3.5 text-white" /> : null}
                     </span>
                   </Button>
@@ -325,7 +357,10 @@ export default function AgentPage() {
         <Card.Header className="flex-row items-start justify-between gap-4 p-0">
           <span>
             <Card.Title>Instructions</Card.Title>
-            <Card.Description>Define the Agent&apos;s role and working rules. Platform and administrator policies still take precedence.</Card.Description>
+            <Card.Description>
+              Define the Agent&apos;s role and working rules. Platform and administrator policies
+              still take precedence.
+            </Card.Description>
           </span>
           <Chip color={instructionsTooLarge ? "danger" : "accent"} size="sm" variant="soft">
             {instructionsBytes.toLocaleString()} / {MAX_INSTRUCTIONS_BYTES.toLocaleString()} bytes
@@ -341,17 +376,28 @@ export default function AgentPage() {
               onChange={(event) => setInstructions(event.target.value)}
             />
           </TextField>
-          {instructionsTooLarge ? <p className="text-danger mt-2 text-xs">Instructions exceed the 32KB limit and cannot be saved.</p> : null}
+          {instructionsTooLarge ? (
+            <p className="text-danger mt-2 text-xs">
+              Instructions exceed the 32KB limit and cannot be saved.
+            </p>
+          ) : null}
         </Card.Content>
       </Card>
 
       <Card className="p-5">
         <Card.Header className="p-0">
           <Card.Title>Model</Card.Title>
-          <Card.Description>Conversations using this Agent always use this compatible model.</Card.Description>
+          <Card.Description>
+            Conversations using this Agent always use this compatible model.
+          </Card.Description>
         </Card.Header>
         <Card.Content className="p-0">
-          <HeroUIAgentModelSelect fallbackLabel={agent.model_alias} models={models} value={modelID} onChange={setModelID} />
+          <HeroUIAgentModelSelect
+            fallbackLabel={agent.model_alias}
+            models={models}
+            value={modelID}
+            onChange={setModelID}
+          />
           <p className="text-muted mt-3 text-xs">Only compatible models are available.</p>
         </Card.Content>
       </Card>
@@ -370,15 +416,25 @@ export default function AgentPage() {
         <Card.Header className="flex-row items-center justify-between gap-4 p-0">
           <span>
             <Card.Title>Archive Agent</Card.Title>
-            <Card.Description>It will disappear from new chats. Existing conversation history remains.</Card.Description>
+            <Card.Description>
+              It will disappear from new chats. Existing conversation history remains.
+            </Card.Description>
           </span>
-          <Button variant="danger-soft" onPress={() => { setError(""); setArchiveOpen(true); }}>
+          <Button
+            variant="danger-soft"
+            onPress={() => {
+              setError("");
+              setArchiveOpen(true);
+            }}
+          >
             <Archive className="size-4" /> Archive
           </Button>
         </Card.Header>
       </Card>
 
-      <p className="text-muted text-right text-xs tabular-nums">Agent version {agent.version} · Knowledge revision {agent.knowledge_revision}</p>
+      <p className="text-muted text-right text-xs tabular-nums">
+        Agent version {agent.version} · Knowledge revision {agent.knowledge_revision}
+      </p>
 
       <Sheet isOpen={archiveOpen} placement="right" onOpenChange={setArchiveOpen}>
         <Sheet.Backdrop>
@@ -387,14 +443,30 @@ export default function AgentPage() {
               <Sheet.CloseTrigger aria-label="Close archive confirmation" />
               <Sheet.Header>
                 <Sheet.Heading>Archive this Agent?</Sheet.Heading>
-                <p className="text-muted text-sm">Disconnect its Feishu bot first. Existing conversations stay in history, but this Agent cannot start or continue turns after it is archived.</p>
+                <p className="text-muted text-sm">
+                  Disconnect its Feishu bot first. Existing conversations stay in history, but this
+                  Agent cannot start or continue turns after it is archived.
+                </p>
               </Sheet.Header>
               <Sheet.Body>
-                {error ? <div className="bg-danger/10 text-danger rounded-2xl px-4 py-3 text-sm">{error}</div> : <div className="bg-surface-secondary rounded-2xl px-4 py-3 text-sm">The Agent is ready to archive. This action cannot be reversed from the user workspace.</div>}
+                {error ? (
+                  <div className="bg-danger/10 text-danger rounded-2xl px-4 py-3 text-sm">
+                    {error}
+                  </div>
+                ) : (
+                  <div className="bg-surface-secondary rounded-2xl px-4 py-3 text-sm">
+                    The Agent is ready to archive. This action cannot be reversed from the user
+                    workspace.
+                  </div>
+                )}
               </Sheet.Body>
               <Sheet.Footer className="gap-2">
-                <Button variant="outline" onPress={() => setArchiveOpen(false)}>Cancel</Button>
-                <Button isPending={archiving} variant="danger-soft" onPress={() => void archive()}>Archive Agent</Button>
+                <Button variant="outline" onPress={() => setArchiveOpen(false)}>
+                  Cancel
+                </Button>
+                <Button isPending={archiving} variant="danger-soft" onPress={() => void archive()}>
+                  Archive Agent
+                </Button>
               </Sheet.Footer>
             </Sheet.Dialog>
           </Sheet.Content>

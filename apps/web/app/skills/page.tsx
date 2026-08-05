@@ -1,6 +1,16 @@
 "use client";
 
-import { Button, Card, Checkbox, Chip, Input, Label, Switch, TextField, Tooltip } from "@heroui/react";
+import {
+  Button,
+  Card,
+  Checkbox,
+  Chip,
+  Input,
+  Label,
+  Switch,
+  TextField,
+  Tooltip,
+} from "@heroui/react";
 import { EmptyState } from "@heroui-pro/react/empty-state";
 import {
   ChevronLeft,
@@ -65,9 +75,7 @@ export default function SkillsPage() {
   const filteredSkills = useMemo(() => {
     const query = skillQuery.trim().toLowerCase();
     return query
-      ? skills.filter((skill) =>
-          `${displaySkillName(skill)} ${skill.description}`.toLowerCase().includes(query),
-        )
+      ? skills.filter((skill) => displaySkillName(skill).toLowerCase().includes(query))
       : skills;
   }, [skillQuery, skills]);
   const sharedSkills = filteredSkills.filter((skill) => skill.scope !== "user");
@@ -79,7 +87,10 @@ export default function SkillsPage() {
   );
   const visibleSharedSkills = skillCatalogPage.items.filter((skill) => skill.scope !== "user");
   const visiblePersonalSkills = skillCatalogPage.items.filter((skill) => skill.scope === "user");
-  const validCandidates = useMemo(() => candidates.filter((candidate) => candidate.valid), [candidates]);
+  const validCandidates = useMemo(
+    () => candidates.filter((candidate) => candidate.valid),
+    [candidates],
+  );
   const allValidSelected =
     validCandidates.length > 0 && validCandidates.every((candidate) => selected[candidate.id]);
 
@@ -119,7 +130,11 @@ export default function SkillsPage() {
       const data = await response.json();
       const found: Candidate[] = data.skills ?? [];
       setCandidates(found);
-      setSelected(Object.fromEntries(found.filter((candidate) => candidate.valid).map((candidate) => [candidate.id, true])));
+      setSelected(
+        Object.fromEntries(
+          found.filter((candidate) => candidate.valid).map((candidate) => [candidate.id, true]),
+        ),
+      );
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : String(cause));
     } finally {
@@ -143,7 +158,11 @@ export default function SkillsPage() {
       const data = await response.json();
       const found: Candidate[] = data.skills ?? [];
       setCandidates(found);
-      setSelected(Object.fromEntries(found.filter((candidate) => candidate.valid).map((candidate) => [candidate.id, true])));
+      setSelected(
+        Object.fromEntries(
+          found.filter((candidate) => candidate.valid).map((candidate) => [candidate.id, true]),
+        ),
+      );
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : String(cause));
     } finally {
@@ -215,7 +234,9 @@ export default function SkillsPage() {
     setError(null);
     setSkills((current) => current.filter((item) => item.id !== skill.id));
     try {
-      const response = await fetch(`/api/skills/${encodeURIComponent(skill.id)}`, { method: "DELETE" });
+      const response = await fetch(`/api/skills/${encodeURIComponent(skill.id)}`, {
+        method: "DELETE",
+      });
       if (!response.ok) throw new Error(await readError(response));
     } catch (cause) {
       setSkills(previous);
@@ -246,7 +267,9 @@ export default function SkillsPage() {
         onChange={chooseFile}
       />
 
-      {error ? <div className="bg-danger/10 text-danger rounded-2xl px-4 py-3 text-sm">{error}</div> : null}
+      {error ? (
+        <div className="bg-danger/10 text-danger rounded-2xl px-4 py-3 text-sm">{error}</div>
+      ) : null}
 
       <Card className="p-4">
         <Card.Header className="p-0">
@@ -271,7 +294,11 @@ export default function SkillsPage() {
             variant="outline"
             onPress={scanGit}
           >
-            {gitScanning ? <LoaderCircle className="size-4 animate-spin" /> : <GitBranch className="size-4" />}
+            {gitScanning ? (
+              <LoaderCircle className="size-4 animate-spin" />
+            ) : (
+              <GitBranch className="size-4" />
+            )}
             {gitScanning ? "Scanning…" : "Scan repository"}
           </Button>
         </Card.Content>
@@ -292,7 +319,9 @@ export default function SkillsPage() {
                   setSelected(
                     allValidSelected
                       ? {}
-                      : Object.fromEntries(validCandidates.map((candidate) => [candidate.id, true])),
+                      : Object.fromEntries(
+                          validCandidates.map((candidate) => [candidate.id, true]),
+                        ),
                   )
                 }
               >
@@ -314,10 +343,19 @@ export default function SkillsPage() {
                 key={`${candidate.path}:${candidate.id}`}
                 className="border-separator bg-surface-secondary flex items-start gap-3 rounded-2xl border p-3"
               >
-                <Checkbox className="mt-2" isDisabled={!candidate.valid} isSelected={Boolean(selected[candidate.id])} onChange={(checked) => setSelected((current) => ({ ...current, [candidate.id]: checked }))} />
+                <Checkbox
+                  className="mt-2"
+                  isDisabled={!candidate.valid}
+                  isSelected={Boolean(selected[candidate.id])}
+                  onChange={(checked) =>
+                    setSelected((current) => ({ ...current, [candidate.id]: checked }))
+                  }
+                />
                 <SkillIcon name={displaySkillName(candidate) || candidate.id} size="sm" />
                 <span className="min-w-0 flex-1">
-                  <span className="block truncate text-sm font-semibold">{displaySkillName(candidate)}</span>
+                  <span className="block truncate text-sm font-semibold">
+                    {displaySkillName(candidate)}
+                  </span>
                   <span className="text-muted mt-1 line-clamp-2 text-xs">
                     {candidate.description || candidate.errors?.join("; ")}
                   </span>
@@ -325,7 +363,9 @@ export default function SkillsPage() {
                     <Chip color={candidate.valid ? "success" : "danger"} size="sm" variant="soft">
                       {candidate.valid ? "Valid" : "Invalid"}
                     </Chip>
-                    <Chip size="sm" variant="soft">{candidate.path}</Chip>
+                    <Chip size="sm" variant="soft">
+                      {candidate.path}
+                    </Chip>
                   </span>
                 </span>
               </div>
@@ -340,7 +380,7 @@ export default function SkillsPage() {
           title="Available skills"
         />
         <WorkspaceSearch
-          placeholder="Search skills"
+          placeholder="Search skills by name"
           value={skillQuery}
           onChange={(value) => {
             setSkillQuery(value);
@@ -387,11 +427,17 @@ export default function SkillsPage() {
         <EmptyState>
           <EmptyState.Header>
             <EmptyState.Media variant="icon">
-              {skillQuery ? <Search className="text-violet-500" /> : <Sparkles className="text-violet-500" />}
+              {skillQuery ? (
+                <Search className="text-violet-500" />
+              ) : (
+                <Sparkles className="text-violet-500" />
+              )}
             </EmptyState.Media>
             <EmptyState.Title>No skills found</EmptyState.Title>
             <EmptyState.Description>
-              {skillQuery ? "Try another name or clear the search." : "No skills are available yet."}
+              {skillQuery
+                ? "Try another name or clear the search."
+                : "No skills are available yet."}
             </EmptyState.Description>
           </EmptyState.Header>
           {skillQuery ? (
@@ -431,10 +477,7 @@ function SkillSection({
 }) {
   return (
     <section className="grid gap-3">
-      <WorkspaceSectionHeader
-        description={`${total} ${title.toLowerCase()}`}
-        title={title}
-      />
+      <WorkspaceSectionHeader description={`${total} ${title.toLowerCase()}`} title={title} />
       <div className="cocola-web-catalog-grid grid items-stretch gap-3 md:grid-cols-2 xl:grid-cols-4">
         {skills.map((skill) => (
           <SkillCard
@@ -522,12 +565,17 @@ function SkillCard({
   return (
     <Card className="cocola-web-catalog-card cocola-web-skill-card h-full min-h-[13rem] p-4">
       <Card.Content className="flex h-full min-w-0 flex-col p-0">
-        <Link className="group min-w-0 no-underline" href={`/skills/${encodeURIComponent(skill.id)}`}>
+        <Link
+          className="group min-w-0 no-underline"
+          href={`/skills/${encodeURIComponent(skill.id)}`}
+        >
           <SkillIcon
             className="cocola-web-catalog-card-icon"
             name={displaySkillName(skill) || skill.id}
           />
-          <span className="text-foreground mt-3 block truncate font-semibold">{displaySkillName(skill)}</span>
+          <span className="text-foreground mt-3 block truncate font-semibold">
+            {displaySkillName(skill)}
+          </span>
           <span className="text-muted mt-1 line-clamp-2 min-h-10 text-sm leading-5">
             {skill.description || "No description"}
           </span>
@@ -535,7 +583,11 @@ function SkillCard({
             <Chip color={skill.scope === "user" ? "accent" : "default"} size="sm" variant="soft">
               {skill.scope === "user" ? "Personal" : "Shared"}
             </Chip>
-            {skill.file_count ? <Chip size="sm" variant="soft">{skill.file_count} files</Chip> : null}
+            {skill.file_count ? (
+              <Chip size="sm" variant="soft">
+                {skill.file_count} files
+              </Chip>
+            ) : null}
           </span>
         </Link>
         <div className="border-separator mt-auto flex items-center justify-end gap-2 border-t pt-3">

@@ -22,7 +22,14 @@ import { DataGrid, type DataGridColumn } from "@heroui-pro/react/data-grid";
 import { EmptyState } from "@heroui-pro/react/empty-state";
 import { Segment } from "@heroui-pro/react/segment";
 import { useCallback, useEffect, useMemo, useState, type ReactNode } from "react";
-import { AdminAlert, AdminConfirmDialog, AdminDrawer, AdminPage, AdminPageHeader, AdminRefreshButton } from "@/components/admin/admin-ui";
+import {
+  AdminAlert,
+  AdminConfirmDialog,
+  AdminDrawer,
+  AdminPage,
+  AdminPageHeader,
+  AdminRefreshButton,
+} from "@/components/admin/admin-ui";
 import { SelectControl } from "@/components/ui/select-control";
 import {
   LOCAL_SIMPLE_ICON_PATHS,
@@ -489,594 +496,625 @@ export default function AdminModelsPage() {
 
   return (
     <AdminPage>
-        <AdminPageHeader icon={<ModelsPageIcon className="size-5" />} title="Models" description="Connect model providers and decide which routes are available to each Agent Runtime." actions={<AdminRefreshButton refreshing={loading} disabled={loading} onClick={() => { setRefreshTick((tick) => tick + 1); void load(); }}>Refresh</AdminRefreshButton>} />
-
-        {error ? <AdminAlert tone="error">{error}</AdminAlert> : null}
-
-        <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
-          <Segment aria-label="Model configuration" selectedKey={view} onSelectionChange={(key) => {setView(String(key) as View); setQuery("");}}><Segment.Item id="models"><Route className="size-4" />Model routes · {models.length}</Segment.Item><Segment.Item id="providers"><Boxes className="size-4" />Providers · {visibleProviders.length}</Segment.Item></Segment>
-          <Button
-            onClick={view === "models" ? createModel : createProvider}
+      <AdminPageHeader
+        icon={<ModelsPageIcon className="size-5" />}
+        title="Models"
+        description="Connect model providers and decide which routes are available to each Agent Runtime."
+        actions={
+          <AdminRefreshButton
+            refreshing={loading}
+            disabled={loading}
+            onClick={() => {
+              setRefreshTick((tick) => tick + 1);
+              void load();
+            }}
           >
-            <Plus className="size-4" />
-            {view === "models" ? "Add model" : "Add provider"}
-          </Button>
-        </div>
+            Refresh
+          </AdminRefreshButton>
+        }
+      />
 
-        <SearchField aria-label={view === "models" ? "Find a model route" : "Find a provider"} className="w-full max-w-sm" value={query} onChange={setQuery}><SearchField.Group><SearchField.SearchIcon /><SearchField.Input placeholder={view === "models" ? "Find a model route" : "Find a provider"} /><SearchField.ClearButton /></SearchField.Group></SearchField>
+      {error ? <AdminAlert tone="error">{error}</AdminAlert> : null}
 
-        {view === "models" ? (
-          <ModelsList
-            models={visibleModels}
-            providerByID={providerByID}
-            loading={loading}
-            saving={saving}
-            onEdit={editModel}
-            onDefault={(model) => void setDefault(model)}
-            onDelete={(model) =>
-              setDeleteTarget({ kind: "model", id: model.id, name: model.label || model.alias })
-            }
-          />
-        ) : (
-          <ProvidersList
-            providers={visibleProviders}
-            routeCountByProvider={routeCountByProvider}
-            loading={loading}
-            onEdit={editProvider}
-            onDelete={(provider) =>
-              setDeleteTarget({
-                kind: "provider",
-                id: provider.id,
-                name: provider.name || provider.id,
-              })
-            }
-          />
-        )}
-
-        <AdminDrawer
-          open={providerDrawerOpen}
-          onOpenChange={(open) => !saving && setProviderDrawerOpen(open)}
-          title={editingProvider ? "Edit provider" : "Add provider"}
-          description="Choose the wire protocol the upstream actually implements."
-          size="lg"
-          footer={
-            <DrawerFooter
-              saving={saving}
-              saveLabel={editingProvider ? "Save changes" : "Add provider"}
-              onCancel={() => setProviderDrawerOpen(false)}
-              onSave={() => void saveProvider()}
-            />
-          }
+      <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
+        <Segment
+          aria-label="Model configuration"
+          selectedKey={view}
+          onSelectionChange={(key) => {
+            setView(String(key) as View);
+            setQuery("");
+          }}
         >
-          <div className="grid gap-5">
-            {formError ? <AdminAlert tone="error">{formError}</AdminAlert> : null}
-            <FormGroup
-              label="Protocol"
-              hint={
-                editingProviderHasRoutes
-                  ? "Remove its model routes before changing protocol."
-                  : undefined
-              }
-            >
-              <div className="grid gap-2">
-                {PROVIDER_TYPES.map((type) => (
-                  <Button
-                    key={type.value}
-                    variant="ghost"
-                    isDisabled={editingProviderHasRoutes}
-                    onPress={() =>
-                      setProviderForm((current) => ({
-                        ...current,
-                        type: type.value,
-                        base_url:
-                          !current.base_url ||
-                          PROVIDER_TYPES.some((item) => item.defaultBaseURL === current.base_url)
-                            ? type.defaultBaseURL
-                            : current.base_url,
-                        icon_slug:
-                          current.icon_type === "simple-icons" &&
-                          (!current.icon_slug ||
-                            PROVIDER_TYPES.some(
-                              (item) => item.defaultIconSlug === current.icon_slug,
-                            ))
-                            ? type.defaultIconSlug
-                            : current.icon_slug,
-                      }))
-                    }
-                    className={cn(
-                      "rounded-2xl border p-3 text-left transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus/30 disabled:cursor-not-allowed disabled:opacity-65",
-                      providerForm.type === type.value
-                        ? "border-accent/45 bg-accent/5 shadow-sm"
-                        : "border-border bg-background hover:border-accent/25 hover:bg-surface-secondary/25",
-                    )}
-                  >
-                    <span className="flex items-center justify-between gap-3">
-                      <span className="text-sm font-semibold">{type.label}</span>
-                      {providerForm.type === type.value ? (
-                        <Check className="size-4 text-accent" />
-                      ) : null}
-                    </span>
-                    <span className="mt-1 block text-xs leading-5 text-muted">
-                      {type.description}
-                    </span>
-                  </Button>
-                ))}
-              </div>
-            </FormGroup>
+          <Segment.Item id="models">
+            <Route className="size-4" />
+            Model routes · {models.length}
+          </Segment.Item>
+          <Segment.Item id="providers">
+            <Boxes className="size-4" />
+            Providers · {visibleProviders.length}
+          </Segment.Item>
+        </Segment>
+        <Button onClick={view === "models" ? createModel : createProvider}>
+          <Plus className="size-4" />
+          {view === "models" ? "Add model" : "Add provider"}
+        </Button>
+      </div>
 
-            <div className="grid gap-4 sm:grid-cols-2">
-              <Field label="Name">
-                <Input
-                  className={inputClass}
-                  value={providerForm.name}
-                  onChange={(event) =>
-                    setProviderForm({ ...providerForm, name: event.target.value })
+      <SearchField
+        aria-label={view === "models" ? "Find a model route" : "Find a provider"}
+        className="w-full max-w-sm"
+        value={query}
+        onChange={setQuery}
+      >
+        <SearchField.Group>
+          <SearchField.SearchIcon />
+          <SearchField.Input
+            placeholder={view === "models" ? "Find a model route" : "Find a provider"}
+          />
+          <SearchField.ClearButton />
+        </SearchField.Group>
+      </SearchField>
+
+      {view === "models" ? (
+        <ModelsList
+          models={visibleModels}
+          providerByID={providerByID}
+          loading={loading}
+          saving={saving}
+          onEdit={editModel}
+          onDefault={(model) => void setDefault(model)}
+          onDelete={(model) =>
+            setDeleteTarget({ kind: "model", id: model.id, name: model.label || model.alias })
+          }
+        />
+      ) : (
+        <ProvidersList
+          providers={visibleProviders}
+          routeCountByProvider={routeCountByProvider}
+          loading={loading}
+          onEdit={editProvider}
+          onDelete={(provider) =>
+            setDeleteTarget({
+              kind: "provider",
+              id: provider.id,
+              name: provider.name || provider.id,
+            })
+          }
+        />
+      )}
+
+      <AdminDrawer
+        open={providerDrawerOpen}
+        onOpenChange={(open) => !saving && setProviderDrawerOpen(open)}
+        title={editingProvider ? "Edit provider" : "Add provider"}
+        description="Choose the wire protocol the upstream actually implements."
+        size="lg"
+        footer={
+          <DrawerFooter
+            saving={saving}
+            saveLabel={editingProvider ? "Save changes" : "Add provider"}
+            onCancel={() => setProviderDrawerOpen(false)}
+            onSave={() => void saveProvider()}
+          />
+        }
+      >
+        <div className="grid gap-5">
+          {formError ? <AdminAlert tone="error">{formError}</AdminAlert> : null}
+          <FormGroup
+            label="Protocol"
+            hint={
+              editingProviderHasRoutes
+                ? "Remove its model routes before changing protocol."
+                : undefined
+            }
+          >
+            <div className="grid gap-2">
+              {PROVIDER_TYPES.map((type) => (
+                <Button
+                  key={type.value}
+                  variant="ghost"
+                  isDisabled={editingProviderHasRoutes}
+                  onPress={() =>
+                    setProviderForm((current) => ({
+                      ...current,
+                      type: type.value,
+                      base_url:
+                        !current.base_url ||
+                        PROVIDER_TYPES.some((item) => item.defaultBaseURL === current.base_url)
+                          ? type.defaultBaseURL
+                          : current.base_url,
+                      icon_slug:
+                        current.icon_type === "simple-icons" &&
+                        (!current.icon_slug ||
+                          PROVIDER_TYPES.some((item) => item.defaultIconSlug === current.icon_slug))
+                          ? type.defaultIconSlug
+                          : current.icon_slug,
+                    }))
                   }
-                  placeholder="Production provider"
-                />
-              </Field>
-              <Field label="Status">
-                <Toggle
-                  checked={providerForm.enabled}
-                  onChange={(enabled) => setProviderForm({ ...providerForm, enabled })}
-                  label="Provider enabled"
-                />
-              </Field>
+                  className={cn(
+                    "rounded-2xl border p-3 text-left transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus/30 disabled:cursor-not-allowed disabled:opacity-65",
+                    providerForm.type === type.value
+                      ? "border-accent/45 bg-accent/5 shadow-sm"
+                      : "border-border bg-background hover:border-accent/25 hover:bg-surface-secondary/25",
+                  )}
+                >
+                  <span className="flex items-center justify-between gap-3">
+                    <span className="text-sm font-semibold">{type.label}</span>
+                    {providerForm.type === type.value ? (
+                      <Check className="size-4 text-accent" />
+                    ) : null}
+                  </span>
+                  <span className="mt-1 block text-xs leading-5 text-muted">
+                    {type.description}
+                  </span>
+                </Button>
+              ))}
             </div>
+          </FormGroup>
 
-            <Field label="Base URL">
+          <div className="grid gap-4 sm:grid-cols-2">
+            <Field label="Name">
               <Input
                 className={inputClass}
-                value={providerForm.base_url}
-                onChange={(event) =>
-                  setProviderForm({ ...providerForm, base_url: event.target.value })
-                }
-                placeholder={providerTypeMeta(providerForm.type).defaultBaseURL}
+                value={providerForm.name}
+                onChange={(event) => setProviderForm({ ...providerForm, name: event.target.value })}
+                placeholder="Production provider"
               />
             </Field>
-
-            <div className="rounded-2xl border border-[#7828c8]/20 bg-[#7828c8]/[0.06] p-3">
-              <div className="text-[11px] font-semibold uppercase tracking-[0.12em] text-[#7828c8]/80">
-                Request path
-              </div>
-              <code className="mt-1 block break-all text-xs text-foreground">
-                {providerEndpoint(providerForm.base_url, providerForm.type)}
-              </code>
-              <p className="mt-2 text-xs leading-5 text-muted">
-                {providerForm.type === "openai_responses"
-                  ? "The upstream must implement POST /responses with Codex-compatible tool events."
-                  : "This route uses the native Anthropic Messages API."}
-              </p>
-            </div>
-
-            <Field
-              label="API key"
-              hint={editingProvider ? "Leave blank to keep the current key." : undefined}
-            >
-              <div className="flex items-center gap-2 rounded-xl border border-separator bg-background px-3">
-                <KeyRound className="size-4 shrink-0 text-muted" />
-                <Input
-                  className="h-10 min-w-0 flex-1 bg-transparent text-sm outline-none placeholder:text-muted"
-                  value={providerForm.api_key}
-                  onChange={(event) =>
-                    setProviderForm({ ...providerForm, api_key: event.target.value })
-                  }
-                  placeholder={editingProvider ? "Keep current key" : "Enter API key"}
-                  type="password"
-                  autoComplete="new-password"
-                />
-              </div>
+            <Field label="Status">
+              <Toggle
+                checked={providerForm.enabled}
+                onChange={(enabled) => setProviderForm({ ...providerForm, enabled })}
+                label="Provider enabled"
+              />
             </Field>
-
-            <details
-              className="group rounded-2xl border border-border/70 p-3"
-              open={!editingProvider}
-            >
-              <summary className="cursor-pointer list-none text-sm font-medium [&::-webkit-details-marker]:hidden">
-                Appearance
-              </summary>
-              <div className="mt-4 grid gap-4 border-t border-border/70 pt-4 sm:grid-cols-2">
-                <Field label="Icon source">
-                  <SelectControl
-                    className={inputClass}
-                    value={providerForm.icon_type}
-                    onValueChange={(value) =>
-                      setProviderForm({
-                        ...providerForm,
-                        icon_type: value as ProviderForm["icon_type"],
-                      })
-                    }
-                    options={[
-                      { value: "simple-icons", label: "Brand icon" },
-                      { value: "image", label: "Image URL" },
-                    ]}
-                    contentClassName="cocola-admin-ui"
-                  />
-                </Field>
-                {providerForm.icon_type === "image" ? (
-                  <Field label="Image URL">
-                    <Input
-                      className={inputClass}
-                      value={providerForm.icon_url}
-                      onChange={(event) =>
-                        setProviderForm({ ...providerForm, icon_url: event.target.value })
-                      }
-                      placeholder="https://..."
-                    />
-                  </Field>
-                ) : (
-                  <Field label="Brand">
-                    <SelectControl
-                      className={inputClass}
-                      value={providerForm.icon_slug}
-                      onValueChange={(value) =>
-                        setProviderForm({ ...providerForm, icon_slug: value })
-                      }
-                      options={SIMPLE_ICON_SLUGS.map((slug) => ({
-                        value: slug,
-                        label: SIMPLE_ICON_LABELS[slug] ?? slug,
-                        icon: <BrandGlyph slug={slug} />,
-                      }))}
-                      contentClassName="cocola-admin-ui"
-                    />
-                  </Field>
-                )}
-              </div>
-            </details>
-
-            <details className="group rounded-2xl border border-border/70 p-3">
-              <summary className="cursor-pointer list-none text-sm font-medium [&::-webkit-details-marker]:hidden">
-                Advanced
-              </summary>
-              <div className="mt-4 border-t border-border/70 pt-4">
-                <Field
-                  label="Provider ID"
-                  hint="Generated from the provider name when left blank; it cannot be changed later."
-                >
-                  <Input
-                    className={cn(inputClass, "font-mono text-xs")}
-                    value={providerForm.id}
-                    disabled={Boolean(editingProvider)}
-                    onChange={(event) =>
-                      setProviderForm({ ...providerForm, id: event.target.value })
-                    }
-                    placeholder="openai-prod"
-                  />
-                </Field>
-              </div>
-            </details>
           </div>
-        </AdminDrawer>
 
-        <AdminDrawer
-          open={modelDrawerOpen}
-          onOpenChange={(open) => !saving && setModelDrawerOpen(open)}
-          title={
-            editingModel
-              ? modelKind === "embedding"
-                ? "Edit embedding model"
-                : "Edit model route"
-              : "Add model"
-          }
-          description={
-            modelKind === "embedding"
-              ? "Add an OpenAI-compatible embedding model for Memory and future knowledge sources."
-              : "Connect a user-visible model to one provider and upstream model ID."
-          }
-          size="lg"
-          footer={
-            <DrawerFooter
-              saving={saving}
-              saveLabel={editingModel ? "Save changes" : "Add model"}
-              onCancel={() => setModelDrawerOpen(false)}
-              onSave={() => void saveModel()}
+          <Field label="Base URL">
+            <Input
+              className={inputClass}
+              value={providerForm.base_url}
+              onChange={(event) =>
+                setProviderForm({ ...providerForm, base_url: event.target.value })
+              }
+              placeholder={providerTypeMeta(providerForm.type).defaultBaseURL}
             />
-          }
-        >
-          <div className="grid gap-5">
-            {formError ? <AdminAlert tone="error">{formError}</AdminAlert> : null}
-            {!editingModel ? (
-              <FormGroup label="Model type">
-                <div className="grid gap-2 sm:grid-cols-2">
-                  <Button
-                    variant="ghost"
-                    onPress={() => setModelKind("chat")}
-                    className={cn(
-                      "rounded-2xl border p-3 text-left transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus/30",
-                      modelKind === "chat"
-                        ? "border-accent/45 bg-accent/5 shadow-sm"
-                        : "border-border bg-background hover:border-accent/25 hover:bg-surface-secondary/25",
-                    )}
-                  >
-                    <span className="flex items-center justify-between gap-3 text-sm font-semibold">
-                      Chat model{" "}
-                      {modelKind === "chat" ? <Check className="size-4 text-accent" /> : null}
-                    </span>
-                    <span className="mt-1 block text-xs leading-5 text-muted">
-                      Used directly by Agent Runtimes.
-                    </span>
-                  </Button>
-                  <Button
-                    variant="ghost"
-                    onPress={() => setModelKind("embedding")}
-                    className={cn(
-                      "rounded-2xl border p-3 text-left transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus/30",
-                      modelKind === "embedding"
-                        ? "border-accent/45 bg-accent/5 shadow-sm"
-                        : "border-border bg-background hover:border-accent/25 hover:bg-surface-secondary/25",
-                    )}
-                  >
-                    <span className="flex items-center justify-between gap-3 text-sm font-semibold">
-                      Embedding model
-                      {modelKind === "embedding" ? <Check className="size-4 text-accent" /> : null}
-                    </span>
-                    <span className="mt-1 block text-xs leading-5 text-muted">
-                      Shared by Memory and knowledge features; never shown to users.
-                    </span>
-                  </Button>
-                </div>
-              </FormGroup>
-            ) : null}
+          </Field>
 
-            {modelKind === "embedding" ? (
-              <div className="grid gap-5">
-                <Field label="Model name">
+          <div className="rounded-2xl border border-[#7828c8]/20 bg-[#7828c8]/[0.06] p-3">
+            <div className="text-[11px] font-semibold uppercase tracking-[0.12em] text-[#7828c8]/80">
+              Request path
+            </div>
+            <code className="mt-1 block break-all text-xs text-foreground">
+              {providerEndpoint(providerForm.base_url, providerForm.type)}
+            </code>
+            <p className="mt-2 text-xs leading-5 text-muted">
+              {providerForm.type === "openai_responses"
+                ? "The upstream must implement POST /responses with Codex-compatible tool events."
+                : "This route uses the native Anthropic Messages API."}
+            </p>
+          </div>
+
+          <Field
+            label="API key"
+            hint={editingProvider ? "Leave blank to keep the current key." : undefined}
+          >
+            <div className="flex items-center gap-2 rounded-xl border border-separator bg-background px-3">
+              <KeyRound className="size-4 shrink-0 text-muted" />
+              <Input
+                className="h-10 min-w-0 flex-1 bg-transparent text-sm outline-none placeholder:text-muted"
+                value={providerForm.api_key}
+                onChange={(event) =>
+                  setProviderForm({ ...providerForm, api_key: event.target.value })
+                }
+                placeholder={editingProvider ? "Keep current key" : "Enter API key"}
+                type="password"
+                autoComplete="new-password"
+              />
+            </div>
+          </Field>
+
+          <details
+            className="group rounded-2xl border border-border/70 p-3"
+            open={!editingProvider}
+          >
+            <summary className="cursor-pointer list-none text-sm font-medium [&::-webkit-details-marker]:hidden">
+              Appearance
+            </summary>
+            <div className="mt-4 grid gap-4 border-t border-border/70 pt-4 sm:grid-cols-2">
+              <Field label="Icon source">
+                <SelectControl
+                  className={inputClass}
+                  value={providerForm.icon_type}
+                  onValueChange={(value) =>
+                    setProviderForm({
+                      ...providerForm,
+                      icon_type: value as ProviderForm["icon_type"],
+                    })
+                  }
+                  options={[
+                    { value: "simple-icons", label: "Brand icon" },
+                    { value: "image", label: "Image URL" },
+                  ]}
+                  contentClassName="cocola-admin-ui"
+                />
+              </Field>
+              {providerForm.icon_type === "image" ? (
+                <Field label="Image URL">
                   <Input
-                    className={cn(inputClass, "font-mono text-xs")}
-                    value={embeddingForm.model}
-                    onChange={(event) => {
-                      setEmbeddingForm({ ...embeddingForm, model: event.target.value });
-                      setEmbeddingTest(null);
-                    }}
-                    placeholder="text-embedding-3-large"
+                    className={inputClass}
+                    value={providerForm.icon_url}
+                    onChange={(event) =>
+                      setProviderForm({ ...providerForm, icon_url: event.target.value })
+                    }
+                    placeholder="https://..."
                   />
                 </Field>
-
-                <Field label="Base URL">
-                  <Input
-                    className={cn(inputClass, "font-mono text-xs")}
-                    value={embeddingForm.base_url}
-                    onChange={(event) => {
-                      setEmbeddingForm({ ...embeddingForm, base_url: event.target.value });
-                      setEmbeddingTest(null);
-                    }}
-                    placeholder="https://api.openai.com/v1"
-                    inputMode="url"
-                  />
-                </Field>
-
-                <Field
-                  label="API key"
-                  hint={editingModel ? "Leave blank to keep the current key." : undefined}
-                >
-                  <div className="flex items-center gap-2 rounded-xl border border-separator bg-background px-3">
-                    <KeyRound className="size-4 shrink-0 text-muted" />
-                    <Input
-                      className="h-10 min-w-0 flex-1 bg-transparent text-sm outline-none placeholder:text-muted"
-                      value={embeddingForm.api_key}
-                      onChange={(event) => {
-                        setEmbeddingForm({ ...embeddingForm, api_key: event.target.value });
-                        setEmbeddingTest(null);
-                      }}
-                      placeholder={
-                        editingModel && embeddingProvider?.api_key_hint
-                          ? `Keep current key (${embeddingProvider.api_key_hint})`
-                          : "Enter API key"
-                      }
-                      type="password"
-                      autoComplete="new-password"
-                    />
-                  </div>
-                </Field>
-
-                <div className="flex flex-wrap items-center justify-between gap-3 rounded-2xl border border-border/70 bg-surface-secondary/20 p-3">
-                  <div className="min-w-0">
-                    <div className="text-xs font-medium text-foreground">OpenAI Embeddings</div>
-                    <code className="mt-1 block break-all text-[11px] text-muted">
-                      {embeddingEndpoint(embeddingForm.base_url)}
-                    </code>
-                  </div>
-                  <Button
-                    type="button"
-                    variant="outline"
-                    isDisabled={!canTestEmbedding || testingEmbedding || saving}
-                    onPress={() => void testEmbeddingConnection()}
-                  >
-                    {testingEmbedding ? (
-                      <LoaderCircle className="mr-2 size-4 animate-spin" />
-                    ) : (
-                      <PlugZap className="mr-2 size-4" />
-                    )}
-                    Test connection
-                  </Button>
-                </div>
-
-                {embeddingTest ? (
-                  <AdminAlert tone={embeddingTest.ok ? "success" : "error"}>
-                    <span className="flex items-center gap-2">
-                      {embeddingTest.ok ? <CircleCheck className="size-4" /> : null}
-                      {embeddingTest.ok
-                        ? `Connected · ${embeddingTest.dimension} dimensions · ${embeddingTest.latency_ms} ms`
-                        : embeddingTest.error || "Embedding connection failed"}
-                    </span>
-                  </AdminAlert>
-                ) : null}
-              </div>
-            ) : (
-              <>
-                <Field label="Provider">
+              ) : (
+                <Field label="Brand">
                   <SelectControl
                     className={inputClass}
-                    value={modelForm.provider_id}
-                    onValueChange={(value) => {
-                      setModelForm({
-                        ...modelForm,
-                        provider_id: value,
-                      });
-                    }}
-                    options={[
-                      { value: "", label: "Select provider" },
-                      ...providers
-                        .filter((provider) => {
-                          if (provider.type === "openai_embeddings") return false;
-                          if (!editingModel) return true;
-                          const original = models.find((model) => model.id === editingModel);
-                          return !original || protocolForType(provider.type) === original.protocol;
-                        })
-                        .map((provider) => ({
-                          value: provider.id,
-                          label: `${provider.name || provider.id} · ${
-                            providerTypeMeta(provider.type).shortLabel
-                          }`,
-                        })),
-                    ]}
+                    value={providerForm.icon_slug}
+                    onValueChange={(value) =>
+                      setProviderForm({ ...providerForm, icon_slug: value })
+                    }
+                    options={SIMPLE_ICON_SLUGS.map((slug) => ({
+                      value: slug,
+                      label: SIMPLE_ICON_LABELS[slug] ?? slug,
+                      icon: <BrandGlyph slug={slug} />,
+                    }))}
                     contentClassName="cocola-admin-ui"
                   />
                 </Field>
+              )}
+            </div>
+          </details>
 
-                {selectedProvider ? (
-                  <div className="flex flex-wrap items-center gap-2 rounded-2xl border border-border/70 bg-surface-secondary/25 p-3">
-                    <ProviderProtocolBadge type={selectedProvider.type} />
-                    <span className="text-xs text-muted">
-                      Compatible with {runtimeCompatibilityForType(selectedProvider.type)}
-                    </span>
-                  </div>
-                ) : null}
+          <details className="group rounded-2xl border border-border/70 p-3">
+            <summary className="cursor-pointer list-none text-sm font-medium [&::-webkit-details-marker]:hidden">
+              Advanced
+            </summary>
+            <div className="mt-4 border-t border-border/70 pt-4">
+              <Field
+                label="Provider ID"
+                hint="Generated from the provider name when left blank; it cannot be changed later."
+              >
+                <Input
+                  className={cn(inputClass, "font-mono text-xs")}
+                  value={providerForm.id}
+                  disabled={Boolean(editingProvider)}
+                  onChange={(event) => setProviderForm({ ...providerForm, id: event.target.value })}
+                  placeholder="openai-prod"
+                />
+              </Field>
+            </div>
+          </details>
+        </div>
+      </AdminDrawer>
 
-                <div className="grid gap-4 sm:grid-cols-2">
-                  <Field label="Display name">
-                    <Input
-                      className={inputClass}
-                      value={modelForm.label}
-                      onChange={(event) =>
-                        setModelForm({ ...modelForm, label: event.target.value })
-                      }
-                      placeholder="GPT-5"
-                    />
-                  </Field>
-                  <Field label="Alias" hint="Unique only inside the selected provider.">
-                    <Input
-                      className={cn(inputClass, "font-mono text-xs")}
-                      value={modelForm.alias}
-                      disabled={Boolean(editingModel)}
-                      onChange={(event) =>
-                        setModelForm({ ...modelForm, alias: event.target.value })
-                      }
-                      placeholder="gpt-5"
-                    />
-                  </Field>
+      <AdminDrawer
+        open={modelDrawerOpen}
+        onOpenChange={(open) => !saving && setModelDrawerOpen(open)}
+        title={
+          editingModel
+            ? modelKind === "embedding"
+              ? "Edit embedding model"
+              : "Edit model route"
+            : "Add model"
+        }
+        description={
+          modelKind === "embedding"
+            ? "Add an OpenAI-compatible embedding model for Memory and future knowledge sources."
+            : "Connect a user-visible model to one provider and upstream model ID."
+        }
+        size="lg"
+        footer={
+          <DrawerFooter
+            saving={saving}
+            saveLabel={editingModel ? "Save changes" : "Add model"}
+            onCancel={() => setModelDrawerOpen(false)}
+            onSave={() => void saveModel()}
+          />
+        }
+      >
+        <div className="grid gap-5">
+          {formError ? <AdminAlert tone="error">{formError}</AdminAlert> : null}
+          {!editingModel ? (
+            <FormGroup label="Model type">
+              <div className="grid gap-2 sm:grid-cols-2">
+                <Button
+                  variant="ghost"
+                  onPress={() => setModelKind("chat")}
+                  className={cn(
+                    "rounded-2xl border p-3 text-left transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus/30",
+                    modelKind === "chat"
+                      ? "border-accent/45 bg-accent/5 shadow-sm"
+                      : "border-border bg-background hover:border-accent/25 hover:bg-surface-secondary/25",
+                  )}
+                >
+                  <span className="flex items-center justify-between gap-3 text-sm font-semibold">
+                    Chat model{" "}
+                    {modelKind === "chat" ? <Check className="size-4 text-accent" /> : null}
+                  </span>
+                  <span className="mt-1 block text-xs leading-5 text-muted">
+                    Used directly by Agent Runtimes.
+                  </span>
+                </Button>
+                <Button
+                  variant="ghost"
+                  onPress={() => setModelKind("embedding")}
+                  className={cn(
+                    "rounded-2xl border p-3 text-left transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus/30",
+                    modelKind === "embedding"
+                      ? "border-accent/45 bg-accent/5 shadow-sm"
+                      : "border-border bg-background hover:border-accent/25 hover:bg-surface-secondary/25",
+                  )}
+                >
+                  <span className="flex items-center justify-between gap-3 text-sm font-semibold">
+                    Embedding model
+                    {modelKind === "embedding" ? <Check className="size-4 text-accent" /> : null}
+                  </span>
+                  <span className="mt-1 block text-xs leading-5 text-muted">
+                    Shared by Memory and knowledge features; never shown to users.
+                  </span>
+                </Button>
+              </div>
+            </FormGroup>
+          ) : null}
+
+          {modelKind === "embedding" ? (
+            <div className="grid gap-5">
+              <Field label="Model name">
+                <Input
+                  className={cn(inputClass, "font-mono text-xs")}
+                  value={embeddingForm.model}
+                  onChange={(event) => {
+                    setEmbeddingForm({ ...embeddingForm, model: event.target.value });
+                    setEmbeddingTest(null);
+                  }}
+                  placeholder="text-embedding-3-large"
+                />
+              </Field>
+
+              <Field label="Base URL">
+                <Input
+                  className={cn(inputClass, "font-mono text-xs")}
+                  value={embeddingForm.base_url}
+                  onChange={(event) => {
+                    setEmbeddingForm({ ...embeddingForm, base_url: event.target.value });
+                    setEmbeddingTest(null);
+                  }}
+                  placeholder="https://api.openai.com/v1"
+                  inputMode="url"
+                />
+              </Field>
+
+              <Field
+                label="API key"
+                hint={editingModel ? "Leave blank to keep the current key." : undefined}
+              >
+                <div className="flex items-center gap-2 rounded-xl border border-separator bg-background px-3">
+                  <KeyRound className="size-4 shrink-0 text-muted" />
+                  <Input
+                    className="h-10 min-w-0 flex-1 bg-transparent text-sm outline-none placeholder:text-muted"
+                    value={embeddingForm.api_key}
+                    onChange={(event) => {
+                      setEmbeddingForm({ ...embeddingForm, api_key: event.target.value });
+                      setEmbeddingTest(null);
+                    }}
+                    placeholder={
+                      editingModel && embeddingProvider?.api_key_hint
+                        ? `Keep current key (${embeddingProvider.api_key_hint})`
+                        : "Enter API key"
+                    }
+                    type="password"
+                    autoComplete="new-password"
+                  />
                 </div>
+              </Field>
 
-                <Field label="Upstream model ID">
+              <div className="flex flex-wrap items-center justify-between gap-3 rounded-2xl border border-border/70 bg-surface-secondary/20 p-3">
+                <div className="min-w-0">
+                  <div className="text-xs font-medium text-foreground">OpenAI Embeddings</div>
+                  <code className="mt-1 block break-all text-[11px] text-muted">
+                    {embeddingEndpoint(embeddingForm.base_url)}
+                  </code>
+                </div>
+                <Button
+                  type="button"
+                  variant="outline"
+                  isDisabled={!canTestEmbedding || testingEmbedding || saving}
+                  onPress={() => void testEmbeddingConnection()}
+                >
+                  {testingEmbedding ? (
+                    <LoaderCircle className="mr-2 size-4 animate-spin" />
+                  ) : (
+                    <PlugZap className="mr-2 size-4" />
+                  )}
+                  Test connection
+                </Button>
+              </div>
+
+              {embeddingTest ? (
+                <AdminAlert tone={embeddingTest.ok ? "success" : "error"}>
+                  <span className="flex items-center gap-2">
+                    {embeddingTest.ok ? <CircleCheck className="size-4" /> : null}
+                    {embeddingTest.ok
+                      ? `Connected · ${embeddingTest.dimension} dimensions · ${embeddingTest.latency_ms} ms`
+                      : embeddingTest.error || "Embedding connection failed"}
+                  </span>
+                </AdminAlert>
+              ) : null}
+            </div>
+          ) : (
+            <>
+              <Field label="Provider">
+                <SelectControl
+                  className={inputClass}
+                  value={modelForm.provider_id}
+                  onValueChange={(value) => {
+                    setModelForm({
+                      ...modelForm,
+                      provider_id: value,
+                    });
+                  }}
+                  options={[
+                    { value: "", label: "Select provider" },
+                    ...providers
+                      .filter((provider) => {
+                        if (provider.type === "openai_embeddings") return false;
+                        if (!editingModel) return true;
+                        const original = models.find((model) => model.id === editingModel);
+                        return !original || protocolForType(provider.type) === original.protocol;
+                      })
+                      .map((provider) => ({
+                        value: provider.id,
+                        label: `${provider.name || provider.id} · ${
+                          providerTypeMeta(provider.type).shortLabel
+                        }`,
+                      })),
+                  ]}
+                  contentClassName="cocola-admin-ui"
+                />
+              </Field>
+
+              {selectedProvider ? (
+                <div className="flex flex-wrap items-center gap-2 rounded-2xl border border-border/70 bg-surface-secondary/25 p-3">
+                  <ProviderProtocolBadge type={selectedProvider.type} />
+                  <span className="text-xs text-muted">
+                    Compatible with {runtimeCompatibilityForType(selectedProvider.type)}
+                  </span>
+                </div>
+              ) : null}
+
+              <div className="grid gap-4 sm:grid-cols-2">
+                <Field label="Display name">
+                  <Input
+                    className={inputClass}
+                    value={modelForm.label}
+                    onChange={(event) => setModelForm({ ...modelForm, label: event.target.value })}
+                    placeholder="GPT-5"
+                  />
+                </Field>
+                <Field label="Alias" hint="Unique only inside the selected provider.">
                   <Input
                     className={cn(inputClass, "font-mono text-xs")}
-                    value={modelForm.real_model}
-                    onChange={(event) =>
-                      setModelForm({ ...modelForm, real_model: event.target.value })
-                    }
+                    value={modelForm.alias}
+                    disabled={Boolean(editingModel)}
+                    onChange={(event) => setModelForm({ ...modelForm, alias: event.target.value })}
                     placeholder="gpt-5"
                   />
                 </Field>
+              </div>
 
-                <div className="grid gap-3 rounded-2xl border border-border/70 p-3 sm:grid-cols-3">
-                  <Toggle
-                    checked={modelForm.enabled}
-                    onChange={(enabled) => setModelForm({ ...modelForm, enabled })}
-                    label="Enabled"
-                  />
-                  <Toggle
-                    checked={modelForm.visible}
-                    onChange={(visible) => setModelForm({ ...modelForm, visible })}
-                    label="Visible to users"
-                  />
-                  <Toggle
-                    checked={modelForm.is_default}
-                    onChange={(is_default) => setModelForm({ ...modelForm, is_default })}
-                    label="Protocol default"
-                  />
-                </div>
+              <Field label="Upstream model ID">
+                <Input
+                  className={cn(inputClass, "font-mono text-xs")}
+                  value={modelForm.real_model}
+                  onChange={(event) =>
+                    setModelForm({ ...modelForm, real_model: event.target.value })
+                  }
+                  placeholder="gpt-5"
+                />
+              </Field>
 
-                <details className="group rounded-2xl border border-border/70 p-3">
-                  <summary className="cursor-pointer list-none text-sm font-medium [&::-webkit-details-marker]:hidden">
-                    Appearance and order
-                  </summary>
-                  <div className="mt-4 grid gap-4 border-t border-border/70 pt-4 sm:grid-cols-2">
-                    <Field label="Icon source">
+              <div className="grid gap-3 rounded-2xl border border-border/70 p-3 sm:grid-cols-3">
+                <Toggle
+                  checked={modelForm.enabled}
+                  onChange={(enabled) => setModelForm({ ...modelForm, enabled })}
+                  label="Enabled"
+                />
+                <Toggle
+                  checked={modelForm.visible}
+                  onChange={(visible) => setModelForm({ ...modelForm, visible })}
+                  label="Visible to users"
+                />
+                <Toggle
+                  checked={modelForm.is_default}
+                  onChange={(is_default) => setModelForm({ ...modelForm, is_default })}
+                  label="Protocol default"
+                />
+              </div>
+
+              <details className="group rounded-2xl border border-border/70 p-3">
+                <summary className="cursor-pointer list-none text-sm font-medium [&::-webkit-details-marker]:hidden">
+                  Appearance and order
+                </summary>
+                <div className="mt-4 grid gap-4 border-t border-border/70 pt-4 sm:grid-cols-2">
+                  <Field label="Icon source">
+                    <SelectControl
+                      className={inputClass}
+                      value={modelForm.icon_type}
+                      onValueChange={(value) =>
+                        setModelForm({
+                          ...modelForm,
+                          icon_type: value as ModelForm["icon_type"],
+                        })
+                      }
+                      options={[
+                        { value: "simple-icons", label: "Brand icon" },
+                        { value: "image", label: "Image URL" },
+                      ]}
+                      contentClassName="cocola-admin-ui"
+                    />
+                  </Field>
+                  {modelForm.icon_type === "image" ? (
+                    <Field label="Image URL">
+                      <Input
+                        className={inputClass}
+                        value={modelForm.icon_url}
+                        onChange={(event) =>
+                          setModelForm({ ...modelForm, icon_url: event.target.value })
+                        }
+                        placeholder="https://..."
+                      />
+                    </Field>
+                  ) : (
+                    <Field label="Brand">
                       <SelectControl
                         className={inputClass}
-                        value={modelForm.icon_type}
-                        onValueChange={(value) =>
-                          setModelForm({
-                            ...modelForm,
-                            icon_type: value as ModelForm["icon_type"],
-                          })
-                        }
-                        options={[
-                          { value: "simple-icons", label: "Brand icon" },
-                          { value: "image", label: "Image URL" },
-                        ]}
+                        value={modelForm.icon_slug}
+                        onValueChange={(value) => setModelForm({ ...modelForm, icon_slug: value })}
+                        options={SIMPLE_ICON_SLUGS.map((slug) => ({
+                          value: slug,
+                          label: SIMPLE_ICON_LABELS[slug] ?? slug,
+                          icon: <BrandGlyph slug={slug} />,
+                        }))}
                         contentClassName="cocola-admin-ui"
                       />
                     </Field>
-                    {modelForm.icon_type === "image" ? (
-                      <Field label="Image URL">
-                        <Input
-                          className={inputClass}
-                          value={modelForm.icon_url}
-                          onChange={(event) =>
-                            setModelForm({ ...modelForm, icon_url: event.target.value })
-                          }
-                          placeholder="https://..."
-                        />
-                      </Field>
-                    ) : (
-                      <Field label="Brand">
-                        <SelectControl
-                          className={inputClass}
-                          value={modelForm.icon_slug}
-                          onValueChange={(value) =>
-                            setModelForm({ ...modelForm, icon_slug: value })
-                          }
-                          options={SIMPLE_ICON_SLUGS.map((slug) => ({
-                            value: slug,
-                            label: SIMPLE_ICON_LABELS[slug] ?? slug,
-                            icon: <BrandGlyph slug={slug} />,
-                          }))}
-                          contentClassName="cocola-admin-ui"
-                        />
-                      </Field>
-                    )}
-                    <Field label="Display priority" hint="Lower numbers appear first.">
-                      <Input
-                        className={inputClass}
-                        value={modelForm.sort_order}
-                        onChange={(event) =>
-                          setModelForm({ ...modelForm, sort_order: event.target.value })
-                        }
-                        inputMode="numeric"
-                      />
-                    </Field>
-                  </div>
-                </details>
-              </>
-            )}
-          </div>
-        </AdminDrawer>
+                  )}
+                  <Field label="Display priority" hint="Lower numbers appear first.">
+                    <Input
+                      className={inputClass}
+                      value={modelForm.sort_order}
+                      onChange={(event) =>
+                        setModelForm({ ...modelForm, sort_order: event.target.value })
+                      }
+                      inputMode="numeric"
+                    />
+                  </Field>
+                </div>
+              </details>
+            </>
+          )}
+        </div>
+      </AdminDrawer>
 
-        <AdminConfirmDialog
-          open={deleteTarget !== null}
-          onOpenChange={(open) => !open && setDeleteTarget(null)}
-          title={`Delete ${deleteTarget?.kind ?? "resource"}?`}
-          description={
-            deleteTarget?.kind === "provider"
-              ? `Delete ${deleteTarget.name}? Providers with model routes cannot be deleted.`
-              : `Delete ${deleteTarget?.name ?? "this model route"}? Historical run records will remain available.`
-          }
-          confirmLabel="Delete"
-          destructive
-          busy={saving}
-          onConfirm={() => void deleteResource()}
-        />
+      <AdminConfirmDialog
+        open={deleteTarget !== null}
+        onOpenChange={(open) => !open && setDeleteTarget(null)}
+        title={`Delete ${deleteTarget?.kind ?? "resource"}?`}
+        description={
+          deleteTarget?.kind === "provider"
+            ? `Delete ${deleteTarget.name}? Providers with model routes cannot be deleted.`
+            : `Delete ${deleteTarget?.name ?? "this model route"}? Historical run records will remain available.`
+        }
+        confirmLabel="Delete"
+        destructive
+        busy={saving}
+        onConfirm={() => void deleteResource()}
+      />
     </AdminPage>
   );
 }
@@ -1212,13 +1250,109 @@ function ModelsList({
   onDelete: (model: LLMModel) => void;
 }) {
   const columns: DataGridColumn<LLMModel>[] = [
-    { id: "model", header: "Model", isRowHeader: true, minWidth: 300, cell: (model) => <Button className="h-auto min-w-0 justify-start px-0 py-1" variant="ghost" onClick={() => onEdit(model)}><ModelIcon model={model} /><span className="min-w-0 truncate font-semibold">{model.label || model.alias}</span>{model.is_default ? <Star className="size-3.5 shrink-0 fill-amber-400 text-amber-400" /> : null}</Button> },
-    { id: "api", header: "Upstream API", minWidth: 160, cell: (model) => { const provider = providerByID.get(model.provider_id); return <Chip size="sm" variant="soft">{protoChipLabel(provider?.type, model.protocol)}</Chip>; } },
-    { id: "provider", header: "Provider", minWidth: 180, cell: (model) => <span className="block truncate text-sm">{providerByID.get(model.provider_id)?.name || model.provider_id}</span> },
-    { id: "availability", header: "Availability", minWidth: 190, cell: (model) => <span className="flex gap-2"><Chip color={model.enabled ? "success" : "default"} size="sm" variant="soft">{model.enabled ? "Enabled" : "Disabled"}</Chip><Chip color={model.visible ? "accent" : "default"} size="sm" variant="soft">{model.visible ? "Visible" : "Hidden"}</Chip></span> },
-    { id: "actions", header: "Actions", align: "center", pinned: "end", width: 80, cell: (model) => <ResourceMenu onEdit={() => onEdit(model)} onDefault={model.is_default || model.protocol === "openai-embeddings" ? undefined : () => onDefault(model)} onDelete={() => onDelete(model)} disabled={saving} /> },
+    {
+      id: "model",
+      header: "Model",
+      isRowHeader: true,
+      minWidth: 300,
+      cell: (model) => (
+        <Button
+          className="h-auto min-w-0 justify-start px-0 py-1"
+          variant="ghost"
+          onClick={() => onEdit(model)}
+        >
+          <ModelIcon model={model} />
+          <span className="min-w-0 truncate font-semibold">{model.label || model.alias}</span>
+          {model.is_default ? (
+            <Star className="size-3.5 shrink-0 fill-amber-400 text-amber-400" />
+          ) : null}
+        </Button>
+      ),
+    },
+    {
+      id: "api",
+      header: "Upstream API",
+      minWidth: 160,
+      cell: (model) => {
+        const provider = providerByID.get(model.provider_id);
+        return (
+          <Chip size="sm" variant="soft">
+            {protoChipLabel(provider?.type, model.protocol)}
+          </Chip>
+        );
+      },
+    },
+    {
+      id: "provider",
+      header: "Provider",
+      minWidth: 180,
+      cell: (model) => (
+        <span className="block truncate text-sm">
+          {providerByID.get(model.provider_id)?.name || model.provider_id}
+        </span>
+      ),
+    },
+    {
+      id: "availability",
+      header: "Availability",
+      minWidth: 190,
+      cell: (model) => (
+        <span className="flex gap-2">
+          <Chip color={model.enabled ? "success" : "default"} size="sm" variant="soft">
+            {model.enabled ? "Enabled" : "Disabled"}
+          </Chip>
+          <Chip color={model.visible ? "accent" : "default"} size="sm" variant="soft">
+            {model.visible ? "Visible" : "Hidden"}
+          </Chip>
+        </span>
+      ),
+    },
+    {
+      id: "actions",
+      header: "Actions",
+      align: "center",
+      pinned: "end",
+      width: 80,
+      cell: (model) => (
+        <ResourceMenu
+          onEdit={() => onEdit(model)}
+          onDefault={
+            model.is_default || model.protocol === "openai-embeddings"
+              ? undefined
+              : () => onDefault(model)
+          }
+          onDelete={() => onDelete(model)}
+          disabled={saving}
+        />
+      ),
+    },
   ];
-  return <DataGrid aria-label="Model routes" columns={columns} contentClassName="min-w-[880px]" data={models} getRowId={(model) => model.id} selectionMode="none" variant="primary" renderEmptyState={() => <EmptyState><EmptyState.Header><EmptyState.Media variant="icon"><Route className="text-violet-500" /></EmptyState.Media><EmptyState.Title>{loading ? "Loading model routes" : "No model routes"}</EmptyState.Title><EmptyState.Description>Add a route after connecting at least one provider.</EmptyState.Description></EmptyState.Header></EmptyState>} />;
+  return (
+    <DataGrid
+      aria-label="Model routes"
+      columns={columns}
+      contentClassName="min-w-[880px]"
+      data={models}
+      getRowId={(model) => model.id}
+      selectionMode="none"
+      variant="primary"
+      renderEmptyState={() => (
+        <EmptyState>
+          <EmptyState.Header>
+            <EmptyState.Media variant="icon">
+              <Route className="text-violet-500" />
+            </EmptyState.Media>
+            <EmptyState.Title>
+              {loading ? "Loading model routes" : "No model routes"}
+            </EmptyState.Title>
+            <EmptyState.Description>
+              Add a route after connecting at least one provider.
+            </EmptyState.Description>
+          </EmptyState.Header>
+        </EmptyState>
+      )}
+    />
+  );
 }
 
 function ProviderIcon({ provider }: { provider: LLMProvider }) {
@@ -1248,14 +1382,103 @@ function ProvidersList({
   onDelete: (provider: LLMProvider) => void;
 }) {
   const columns: DataGridColumn<LLMProvider>[] = [
-    { id: "provider", header: "Provider", isRowHeader: true, minWidth: 280, cell: (provider) => <Button className="h-auto min-w-0 justify-start px-0 py-1" variant="ghost" onClick={() => onEdit(provider)}><ProviderIcon provider={provider} /><span className="min-w-0 text-left"><span className="block truncate font-semibold">{provider.name || provider.id}</span><span className="text-muted block truncate font-mono text-xs">{provider.id}</span></span></Button> },
-    { id: "api", header: "Upstream API", minWidth: 160, cell: (provider) => <Chip size="sm" variant="soft">{providerTypeMeta(provider.type).shortLabel}</Chip> },
-    { id: "endpoint", header: "Endpoint", minWidth: 260, cell: (provider) => <span className="text-muted block max-w-64 truncate font-mono text-xs" title={provider.base_url}>{provider.base_url || "—"}</span> },
-    { id: "credential", header: "Credential", minWidth: 150, cell: (provider) => <span className="text-muted font-mono text-xs">{provider.api_key_hint || "—"}</span> },
-    { id: "models", header: "Models", width: 100, cell: (provider) => <Chip size="sm" variant="soft">{routeCountByProvider.get(provider.id) ?? 0}</Chip> },
-    { id: "actions", header: "Actions", align: "center", pinned: "end", width: 80, cell: (provider) => <ResourceMenu onEdit={() => onEdit(provider)} onDelete={() => onDelete(provider)} /> },
+    {
+      id: "provider",
+      header: "Provider",
+      isRowHeader: true,
+      minWidth: 280,
+      cell: (provider) => (
+        <Button
+          className="h-auto min-w-0 justify-start px-0 py-1"
+          variant="ghost"
+          onClick={() => onEdit(provider)}
+        >
+          <ProviderIcon provider={provider} />
+          <span className="min-w-0 text-left">
+            <span className="block truncate font-semibold">{provider.name || provider.id}</span>
+            <span className="text-muted block truncate font-mono text-xs">{provider.id}</span>
+          </span>
+        </Button>
+      ),
+    },
+    {
+      id: "api",
+      header: "Upstream API",
+      minWidth: 160,
+      cell: (provider) => (
+        <Chip size="sm" variant="soft">
+          {providerTypeMeta(provider.type).shortLabel}
+        </Chip>
+      ),
+    },
+    {
+      id: "endpoint",
+      header: "Endpoint",
+      minWidth: 260,
+      cell: (provider) => (
+        <span
+          className="text-muted block max-w-64 truncate font-mono text-xs"
+          title={provider.base_url}
+        >
+          {provider.base_url || "—"}
+        </span>
+      ),
+    },
+    {
+      id: "credential",
+      header: "Credential",
+      minWidth: 150,
+      cell: (provider) => (
+        <span className="text-muted font-mono text-xs">{provider.api_key_hint || "—"}</span>
+      ),
+    },
+    {
+      id: "models",
+      header: "Models",
+      width: 100,
+      cell: (provider) => (
+        <Chip size="sm" variant="soft">
+          {routeCountByProvider.get(provider.id) ?? 0}
+        </Chip>
+      ),
+    },
+    {
+      id: "actions",
+      header: "Actions",
+      align: "center",
+      pinned: "end",
+      width: 80,
+      cell: (provider) => (
+        <ResourceMenu onEdit={() => onEdit(provider)} onDelete={() => onDelete(provider)} />
+      ),
+    },
   ];
-  return <DataGrid aria-label="Model providers" columns={columns} contentClassName="min-w-[980px]" data={providers} getRowId={(provider) => provider.id} selectionMode="none" variant="primary" renderEmptyState={() => <EmptyState><EmptyState.Header><EmptyState.Media variant="icon"><Boxes className="text-blue-500" /></EmptyState.Media><EmptyState.Title>{loading ? "Loading providers" : "No providers connected"}</EmptyState.Title><EmptyState.Description>Connect the API endpoint that will serve your first model.</EmptyState.Description></EmptyState.Header></EmptyState>} />;
+  return (
+    <DataGrid
+      aria-label="Model providers"
+      columns={columns}
+      contentClassName="min-w-[980px]"
+      data={providers}
+      getRowId={(provider) => provider.id}
+      selectionMode="none"
+      variant="primary"
+      renderEmptyState={() => (
+        <EmptyState>
+          <EmptyState.Header>
+            <EmptyState.Media variant="icon">
+              <Boxes className="text-blue-500" />
+            </EmptyState.Media>
+            <EmptyState.Title>
+              {loading ? "Loading providers" : "No providers connected"}
+            </EmptyState.Title>
+            <EmptyState.Description>
+              Connect the API endpoint that will serve your first model.
+            </EmptyState.Description>
+          </EmptyState.Header>
+        </EmptyState>
+      )}
+    />
+  );
 }
 
 function ResourceMenu({
@@ -1270,7 +1493,39 @@ function ResourceMenu({
   disabled?: boolean;
 }) {
   return (
-    <Dropdown><Dropdown.Trigger aria-label="Open actions" className="text-muted hover:bg-surface-secondary mx-auto grid size-9 place-items-center rounded-xl" isDisabled={disabled}><MoreHorizontal className="size-4" /></Dropdown.Trigger><Dropdown.Popover placement="bottom end"><Dropdown.Menu aria-label="Resource actions" onAction={(key) => {if (key === "edit") onEdit(); if (key === "default") onDefault?.(); if (key === "delete") onDelete();}}><Dropdown.Item id="edit" textValue="Edit">Edit</Dropdown.Item>{onDefault ? <Dropdown.Item id="default" textValue="Set as protocol default"><Star className="size-4" />Set as protocol default</Dropdown.Item> : null}<Dropdown.Item id="delete" textValue="Delete"><Trash2 className="text-danger size-4" /><span className="text-danger">Delete</span></Dropdown.Item></Dropdown.Menu></Dropdown.Popover></Dropdown>
+    <Dropdown>
+      <Dropdown.Trigger
+        aria-label="Open actions"
+        className="text-muted hover:bg-surface-secondary mx-auto grid size-9 place-items-center rounded-xl"
+        isDisabled={disabled}
+      >
+        <MoreHorizontal className="size-4" />
+      </Dropdown.Trigger>
+      <Dropdown.Popover placement="bottom end">
+        <Dropdown.Menu
+          aria-label="Resource actions"
+          onAction={(key) => {
+            if (key === "edit") onEdit();
+            if (key === "default") onDefault?.();
+            if (key === "delete") onDelete();
+          }}
+        >
+          <Dropdown.Item id="edit" textValue="Edit">
+            Edit
+          </Dropdown.Item>
+          {onDefault ? (
+            <Dropdown.Item id="default" textValue="Set as protocol default">
+              <Star className="size-4" />
+              Set as protocol default
+            </Dropdown.Item>
+          ) : null}
+          <Dropdown.Item id="delete" textValue="Delete">
+            <Trash2 className="text-danger size-4" />
+            <span className="text-danger">Delete</span>
+          </Dropdown.Item>
+        </Dropdown.Menu>
+      </Dropdown.Popover>
+    </Dropdown>
   );
 }
 
@@ -1319,7 +1574,12 @@ function Toggle({
 }) {
   return (
     <Switch isDisabled={disabled} isSelected={checked} onChange={onChange}>
-      <Switch.Content><Switch.Control><Switch.Thumb /></Switch.Control>{label}</Switch.Content>
+      <Switch.Content>
+        <Switch.Control>
+          <Switch.Thumb />
+        </Switch.Control>
+        {label}
+      </Switch.Content>
     </Switch>
   );
 }

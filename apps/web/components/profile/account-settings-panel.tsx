@@ -59,7 +59,12 @@ export function AccountSettingsPanel({ initialAccount }: { initialAccount: Sessi
       if (!response.ok) throw new Error(accountError(body, "Could not save account details."));
       const next = body as SessionUser;
       setAccount(next);
-      setProfile({ name: next.name, username: next.username, email: next.email, currentPassword: "" });
+      setProfile({
+        name: next.name,
+        username: next.username,
+        email: next.email,
+        currentPassword: "",
+      });
       setProfileNotice({ tone: "success", message: "Account details updated." });
       router.refresh();
     } catch (cause) {
@@ -163,7 +168,9 @@ export function AccountSettingsPanel({ initialAccount }: { initialAccount: Sessi
             <Card.Footer className="mt-5 justify-between p-0">
               <span className="text-muted text-xs">ID · {account.id}</span>
               <Button
-                isDisabled={!profileChanged || savingProfile || (emailChanged && !profile.currentPassword)}
+                isDisabled={
+                  !profileChanged || savingProfile || (emailChanged && !profile.currentPassword)
+                }
                 isPending={savingProfile}
                 type="submit"
                 variant="primary"
@@ -189,11 +196,15 @@ export function AccountSettingsPanel({ initialAccount }: { initialAccount: Sessi
                 <span className="block text-sm font-semibold">Password</span>
                 <span className="text-muted mt-0.5 block text-xs">At least 8 characters</span>
               </span>
-              <Chip color="success" size="sm" variant="soft">Configured</Chip>
+              <Chip color="success" size="sm" variant="soft">
+                Configured
+              </Chip>
             </div>
           </Card.Content>
           <Card.Footer className="mt-4 justify-end p-0">
-            <Button variant="outline" onPress={() => setPasswordOpen(true)}>Change password</Button>
+            <Button variant="outline" onPress={() => setPasswordOpen(true)}>
+              Change password
+            </Button>
           </Card.Footer>
         </Card>
       </div>
@@ -239,7 +250,9 @@ export function AccountSettingsPanel({ initialAccount }: { initialAccount: Sessi
                 </form>
               </Sheet.Body>
               <Sheet.Footer className="gap-2">
-                <Button variant="outline" onPress={() => setPasswordOpen(false)}>Cancel</Button>
+                <Button variant="outline" onPress={() => setPasswordOpen(false)}>
+                  Cancel
+                </Button>
                 <Button
                   form="change-password-form"
                   isDisabled={!passwordValid || savingPassword}
@@ -277,7 +290,13 @@ function AccountField({
   onChange: (value: string) => void;
 }) {
   return (
-    <TextField className={className} isRequired value={value} variant="secondary" onChange={onChange}>
+    <TextField
+      className={className}
+      isRequired
+      value={value}
+      variant="secondary"
+      onChange={onChange}
+    >
       <Label>{label}</Label>
       <Input autoComplete={autoComplete} maxLength={maxLength} type={type} />
     </TextField>
@@ -289,7 +308,11 @@ function NoticeLine({ notice }: { notice: Notice }) {
   const Icon = notice.tone === "success" ? CheckCircle2 : AlertCircle;
   return (
     <div
-      className={notice.tone === "success" ? "text-success flex items-start gap-2 text-sm" : "text-danger flex items-start gap-2 text-sm"}
+      className={
+        notice.tone === "success"
+          ? "text-success flex items-start gap-2 text-sm"
+          : "text-danger flex items-start gap-2 text-sm"
+      }
       role={notice.tone === "error" ? "alert" : "status"}
     >
       <Icon className="mt-0.5 size-4 shrink-0" />

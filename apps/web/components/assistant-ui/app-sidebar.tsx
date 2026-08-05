@@ -297,12 +297,7 @@ export function AppSidebar({
                   active={active}
                   onClick={href ? () => navigateTo(href) : undefined}
                 >
-                  <Icon
-                    className={cn(
-                      "size-4 shrink-0",
-                      iconClassName ?? "text-foreground",
-                    )}
-                  />
+                  <Icon className={cn("size-4 shrink-0", iconClassName ?? "text-foreground")} />
                   <span className="truncate">{label}</span>
                 </SidebarExpandedRow>
               );
@@ -370,9 +365,7 @@ export function AppSidebar({
           <SidebarSectionPanel refSetter={setSectionRef("chats")}>
             <SectionLabel>Chats</SectionLabel>
             {regularConversations.length === 0 ? (
-              <div className="px-2.5 py-1 text-xs text-foreground/50">
-                No conversations yet
-              </div>
+              <div className="px-2.5 py-1 text-xs text-foreground/50">No conversations yet</div>
             ) : (
               <div className="flex flex-col gap-0.5">
                 {regularConversations.map((c) => (
@@ -412,9 +405,7 @@ export function AppSidebar({
               {userInitial}
             </div>
             <div className="min-w-0 flex-1">
-              <div className="truncate text-[15px] font-semibold text-foreground">
-                {userLabel}
-              </div>
+              <div className="truncate text-[15px] font-semibold text-foreground">{userLabel}</div>
               {userSubtitle && (
                 <div className="truncate text-xs font-medium text-foreground/70">
                   {userSubtitle}
@@ -602,8 +593,6 @@ function ChatTypeIcon({ type, isAgent }: { type: string; isAgent?: boolean }) {
 
 function SectionLabel({ children }: { children: React.ReactNode }) {
   return (
-    <div className="px-2.5 pb-1 pt-3 text-[13px] font-semibold text-foreground/70">
-      {children}
-    </div>
+    <div className="px-2.5 pb-1 pt-3 text-[13px] font-semibold text-foreground/70">{children}</div>
   );
 }

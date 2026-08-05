@@ -443,10 +443,7 @@ function TableResult({ data, title }: { data: unknown; title: string }) {
         <tbody>
           {rows.length === 0 ? (
             <tr>
-              <td
-                colSpan={columns.length}
-                className="px-5 py-8 text-center text-sm text-muted"
-              >
+              <td colSpan={columns.length} className="px-5 py-8 text-center text-sm text-muted">
                 No rows
               </td>
             </tr>
