@@ -1,9 +1,10 @@
 "use client";
 
-import { Button, Card, Checkbox, Chip, Input, Label, TextField } from "@heroui/react";
+import { Button, Card, Checkbox, Chip, Input, Label, TextField, Tooltip } from "@heroui/react";
 import { EmptyState } from "@heroui-pro/react/empty-state";
 import {
-  Check,
+  ChevronLeft,
+  ChevronRight,
   FileArchive,
   GitBranch,
   LoaderCircle,
@@ -23,6 +24,9 @@ import {
   WorkspaceSectionHeader,
 } from "@/components/heroui-workspace/workspace-ui";
 import { SkillIcon } from "@/components/ui/skill-icon";
+import { paginateCatalog } from "@/lib/catalog-pagination";
+
+const SKILLS_PER_PAGE = 9;
 
 type Skill = {
   id: string;
@@ -57,6 +61,7 @@ export default function SkillsPage() {
   const [actionSkillId, setActionSkillId] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [skillQuery, setSkillQuery] = useState("");
+  const [skillPage, setSkillPage] = useState(1);
 
   const filteredSkills = useMemo(() => {
     const query = skillQuery.trim().toLowerCase();
@@ -66,8 +71,15 @@ export default function SkillsPage() {
         )
       : skills;
   }, [skillQuery, skills]);
-  const shared = filteredSkills.filter((skill) => skill.scope !== "user");
-  const mine = filteredSkills.filter((skill) => skill.scope === "user");
+  const sharedSkills = filteredSkills.filter((skill) => skill.scope !== "user");
+  const personalSkills = filteredSkills.filter((skill) => skill.scope === "user");
+  const skillCatalogPage = paginateCatalog(
+    [...sharedSkills, ...personalSkills],
+    skillPage,
+    SKILLS_PER_PAGE,
+  );
+  const visibleSharedSkills = skillCatalogPage.items.filter((skill) => skill.scope !== "user");
+  const visiblePersonalSkills = skillCatalogPage.items.filter((skill) => skill.scope === "user");
   const validCandidates = useMemo(() => candidates.filter((candidate) => candidate.valid), [candidates]);
   const allValidSelected =
     validCandidates.length > 0 && validCandidates.every((candidate) => selected[candidate.id]);
@@ -180,7 +192,6 @@ export default function SkillsPage() {
   const setSkillEnabled = async (skill: Skill) => {
     const previous = skills;
     setActionSkillId(skill.id);
-    setWorking(true);
     setError(null);
     setSkills((current) =>
       current.map((item) => (item.id === skill.id ? { ...item, enabled: !skill.enabled } : item)),
@@ -196,14 +207,12 @@ export default function SkillsPage() {
       setError(cause instanceof Error ? cause.message : String(cause));
     } finally {
       setActionSkillId(null);
-      setWorking(false);
     }
   };
 
   const deleteSkill = async (skill: Skill) => {
     const previous = skills;
     setActionSkillId(skill.id);
-    setWorking(true);
     setError(null);
     setSkills((current) => current.filter((item) => item.id !== skill.id));
     try {
@@ -214,7 +223,6 @@ export default function SkillsPage() {
       setError(cause instanceof Error ? cause.message : String(cause));
     } finally {
       setActionSkillId(null);
-      setWorking(false);
     }
   };
 
@@ -332,7 +340,14 @@ export default function SkillsPage() {
           description={`${filteredSkills.length} workspace capabilities managed by the platform.`}
           title="Available skills"
         />
-        <WorkspaceSearch placeholder="Search skills" value={skillQuery} onChange={setSkillQuery} />
+        <WorkspaceSearch
+          placeholder="Search skills"
+          value={skillQuery}
+          onChange={(value) => {
+            setSkillQuery(value);
+            setSkillPage(1);
+          }}
+        />
       </div>
 
       {loading ? (
@@ -341,22 +356,32 @@ export default function SkillsPage() {
         </div>
       ) : filteredSkills.length ? (
         <div className="grid gap-5">
-          <SkillSection
-            actionSkillId={actionSkillId}
-            empty="No shared skills published by administrators."
-            skills={shared}
-            title="Shared skills"
-            working={working}
-            onToggle={setSkillEnabled}
-          />
-          <SkillSection
-            actionSkillId={actionSkillId}
-            empty="Upload a zip package to add your own skills."
-            skills={mine}
-            title="My skills"
-            working={working}
-            onDelete={deleteSkill}
-            onToggle={setSkillEnabled}
+          {visibleSharedSkills.length ? (
+            <SkillSection
+              actionSkillId={actionSkillId}
+              skills={visibleSharedSkills}
+              title="Shared skills"
+              total={sharedSkills.length}
+              onToggle={setSkillEnabled}
+            />
+          ) : null}
+          {visiblePersonalSkills.length ? (
+            <SkillSection
+              actionSkillId={actionSkillId}
+              skills={visiblePersonalSkills}
+              title="My skills"
+              total={personalSkills.length}
+              onDelete={deleteSkill}
+              onToggle={setSkillEnabled}
+            />
+          ) : null}
+          <SkillPagination
+            end={skillCatalogPage.end}
+            page={skillCatalogPage.page}
+            pageCount={skillCatalogPage.pageCount}
+            start={skillCatalogPage.start}
+            total={skillCatalogPage.total}
+            onPageChange={setSkillPage}
           />
         </div>
       ) : (
@@ -372,7 +397,16 @@ export default function SkillsPage() {
           </EmptyState.Header>
           {skillQuery ? (
             <EmptyState.Content>
-              <Button size="sm" variant="outline" onPress={() => setSkillQuery("")}>Clear search</Button>
+              <Button
+                size="sm"
+                variant="outline"
+                onPress={() => {
+                  setSkillQuery("");
+                  setSkillPage(1);
+                }}
+              >
+                Clear search
+              </Button>
             </EmptyState.Content>
           ) : null}
         </EmptyState>
@@ -383,43 +417,95 @@ export default function SkillsPage() {
 
 function SkillSection({
   actionSkillId,
-  empty,
   skills,
   title,
-  working,
+  total,
   onDelete,
   onToggle,
 }: {
   actionSkillId: string | null;
-  empty: string;
   skills: Skill[];
   title: string;
-  working: boolean;
+  total: number;
   onDelete?: (skill: Skill) => void;
   onToggle: (skill: Skill) => void;
 }) {
   return (
     <section className="grid gap-3">
       <WorkspaceSectionHeader
-        description={`${skills.length} ${title.toLowerCase()}`}
+        description={`${total} ${title.toLowerCase()}`}
         title={title}
       />
-      {skills.length ? (
-        <div className="cocola-web-catalog-grid grid items-stretch gap-3 md:grid-cols-2 xl:grid-cols-3">
-          {skills.map((skill) => (
-            <SkillCard
-              key={skill.id}
-              skill={skill}
-              working={working && actionSkillId === skill.id}
-              onDelete={onDelete ? () => onDelete(skill) : undefined}
-              onToggle={() => onToggle(skill)}
-            />
-          ))}
-        </div>
-      ) : (
-        <p className="text-muted rounded-2xl py-8 text-center text-sm">{empty}</p>
-      )}
+      <div className="cocola-web-catalog-grid grid items-stretch gap-3 md:grid-cols-2 xl:grid-cols-3">
+        {skills.map((skill) => (
+          <SkillCard
+            key={skill.id}
+            skill={skill}
+            working={actionSkillId === skill.id}
+            onDelete={onDelete ? () => onDelete(skill) : undefined}
+            onToggle={() => onToggle(skill)}
+          />
+        ))}
+      </div>
     </section>
+  );
+}
+
+function SkillPagination({
+  end,
+  page,
+  pageCount,
+  start,
+  total,
+  onPageChange,
+}: {
+  end: number;
+  page: number;
+  pageCount: number;
+  start: number;
+  total: number;
+  onPageChange: (page: number) => void;
+}) {
+  return (
+    <nav
+      aria-label="Skills pagination"
+      className="flex flex-wrap items-center justify-between gap-3 pt-1"
+    >
+      <span className="text-muted text-xs tabular-nums">
+        Showing {total === 0 ? 0 : start + 1}–{end} of {total}
+      </span>
+      <span className="flex items-center gap-2">
+        <Tooltip delay={0}>
+          <Button
+            isIconOnly
+            aria-label="Previous Skills page"
+            isDisabled={page === 1}
+            size="sm"
+            variant="outline"
+            onPress={() => onPageChange(Math.max(1, page - 1))}
+          >
+            <ChevronLeft className="size-4" />
+          </Button>
+          <Tooltip.Content>Previous page</Tooltip.Content>
+        </Tooltip>
+        <span className="text-muted min-w-14 text-center text-xs tabular-nums">
+          {page} / {pageCount}
+        </span>
+        <Tooltip delay={0}>
+          <Button
+            isIconOnly
+            aria-label="Next Skills page"
+            isDisabled={page === pageCount}
+            size="sm"
+            variant="outline"
+            onPress={() => onPageChange(Math.min(pageCount, page + 1))}
+          >
+            <ChevronRight className="size-4" />
+          </Button>
+          <Tooltip.Content>Next page</Tooltip.Content>
+        </Tooltip>
+      </span>
+    </nav>
   );
 }
 
@@ -435,15 +521,10 @@ function SkillCard({
   onToggle: () => void;
 }) {
   return (
-    <Card className="cocola-web-catalog-card h-full min-h-[15rem] p-5">
+    <Card className="cocola-web-catalog-card cocola-web-skill-card h-full min-h-[15rem] p-5">
       <Card.Content className="flex h-full min-w-0 flex-col p-0">
         <Link className="group min-w-0 no-underline" href={`/skills/${encodeURIComponent(skill.id)}`}>
-          <span className="flex items-start justify-between gap-3">
-            <SkillIcon name={displaySkillName(skill) || skill.id} />
-            <Chip color={skill.enabled ? "success" : "warning"} size="sm" variant="soft">
-              {skill.enabled ? "Enabled" : "Disabled"}
-            </Chip>
-          </span>
+          <SkillIcon name={displaySkillName(skill) || skill.id} />
           <span className="text-foreground mt-4 block truncate font-semibold">{displaySkillName(skill)}</span>
           <span className="text-muted mt-1 line-clamp-2 min-h-10 text-sm leading-5">
             {skill.description || "No description"}
@@ -457,20 +538,22 @@ function SkillCard({
         </Link>
         <div className="border-separator mt-auto flex items-center gap-2 border-t pt-4">
           <Button
-            className="flex-1"
+            className={`flex-1 ${
+              skill.enabled
+                ? "cocola-web-skill-disable-action"
+                : "cocola-web-skill-enable-action"
+            }`}
             isDisabled={working}
             size="sm"
-            variant={skill.enabled ? "outline" : "primary"}
+            variant={skill.enabled ? "danger" : "primary"}
             onPress={onToggle}
           >
             {working ? (
               <LoaderCircle className="size-3.5 animate-spin" />
-            ) : skill.enabled ? (
-              <Check className="text-success size-3.5" />
             ) : (
               <Power className="size-3.5" />
             )}
-            {skill.enabled ? "Enabled" : "Enable"}
+            {skill.enabled ? "Disable" : "Enable"}
           </Button>
           {onDelete ? (
             <Button

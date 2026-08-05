@@ -3562,6 +3562,12 @@
 }
 
 @media (hover: hover) and (pointer: fine) {
+  .cocola-user-ui .cocola-web-skill-card:hover,
+  .cocola-user-ui .cocola-web-skill-card:focus-within {
+    transform: translateY(-3px) scale(1.005);
+    box-shadow: 0 18px 40px -18px color-mix(in oklab, var(--accent) 32%, transparent);
+  }
+
   .cocola-user-ui .cocola-web-catalog-trigger:hover > .cocola-web-catalog-card {
     transform: translateY(-3px) scale(1.005);
     box-shadow: 0 18px 40px -18px color-mix(in oklab, var(--accent) 32%, transparent);

@@ -283,7 +283,7 @@ export function AgentCapabilitiesEditor({
           <Card.Description>Leave empty to inherit default Skills. Selecting one switches this Agent to a custom set.</Card.Description>
         </Card.Header>
         <Card.Content className="p-0">
-          <div className="bg-surface-secondary flex flex-wrap items-center justify-between gap-3 rounded-2xl px-4 py-3">
+          <div className="bg-surface-secondary flex flex-wrap items-center justify-between gap-3 rounded-xl px-3 py-2.5">
             <span>
               <span className="block text-sm font-medium">{skillIDs.length === 0 ? "Using default Skills" : "Using a custom Skill set"}</span>
               <span className="text-muted mt-1 block text-xs">
@@ -307,7 +307,7 @@ export function AgentCapabilitiesEditor({
               <SearchField.ClearButton />
             </SearchField.Group>
           </SearchField>
-          <ItemCardGroup className="cocola-web-agent-skill-grid mt-4" columns={3} layout="grid">
+          <ItemCardGroup className="cocola-web-agent-skill-grid mt-4" columns={2} layout="grid">
             {paginatedSkills.map((skill) => {
               const selected = selectedIDs.has(skill.id);
               const disabled = !skill.available && !selected;
@@ -317,7 +317,7 @@ export function AgentCapabilitiesEditor({
               return (
                 <ItemCard<"button">
                   key={skill.id}
-                  className={`relative min-h-[11rem] w-full overflow-hidden ${selected ? "ring-accent bg-accent-soft ring-2" : ""} ${disabled ? "cursor-not-allowed opacity-55" : "cursor-pointer"}`}
+                  className={`relative min-h-[9.5rem] w-full overflow-hidden ${selected ? "ring-accent bg-accent-soft ring-2" : ""} ${disabled ? "cursor-not-allowed opacity-55" : "cursor-pointer"}`}
                   render={(props) => (
                     <button {...props} aria-pressed={selected} disabled={disabled} type="button" onClick={() => toggleSkill(skill)} />
                   )}
@@ -333,7 +333,7 @@ export function AgentCapabilitiesEditor({
                     </span>
                   </ItemCard.Content>
                   <ItemCard.Action>
-                    <span className={`grid size-6 place-items-center rounded-lg border ${selected ? "border-accent bg-accent text-accent-foreground" : "border-separator text-transparent"}`}>
+                    <span className={`grid size-6 place-items-center rounded-lg border ${selected ? "border-accent bg-accent text-white" : "border-separator text-transparent"}`}>
                       <Check className="size-3.5" />
                     </span>
                   </ItemCard.Action>
@@ -382,7 +382,10 @@ export function AgentCapabilitiesEditor({
               <Label>Label</Label>
               <Input maxLength={100} placeholder="Optional" />
             </TextField>
-            <Button onPress={addKnowledge}><Plus className="size-4" />Add</Button>
+            <Button className="cocola-web-page-primary-action" onPress={addKnowledge}>
+              <Plus className="size-4" />
+              Add
+            </Button>
           </div>
           <Button className="mt-3" variant="outline" onPress={() => void openWikiPicker()}><BookOpenText className="size-4" />Add from Cocola Wiki</Button>
           {knowledgeNotice ? <CapabilityFeedback text={knowledgeNotice.text} tone={knowledgeNotice.tone === "error" ? "danger" : "success"} /> : null}
@@ -412,13 +415,18 @@ export function AgentCapabilitiesEditor({
                 </ListView.Item>
               )}
             </ListView>
-          ) : (
-            <div className="bg-surface-secondary text-muted mt-4 flex min-h-24 items-center gap-3 rounded-2xl px-4 py-3 text-sm">
-              <BookOpenText className="size-5 shrink-0" />
-              No Knowledge sources configured. The Agent will rely on its selected Skills and conversation context.
-            </div>
-          )}
-          <p className="text-muted mt-3 text-right text-xs tabular-nums">{knowledgeSources.length} / 10 sources</p>
+          ) : null}
+          <div
+            className={`mt-4 flex flex-wrap items-center justify-between gap-3 ${knowledgeSources.length === 0 ? "border-separator border-t pt-3" : ""}`}
+          >
+            {knowledgeSources.length === 0 ? (
+              <span className="text-muted flex min-w-0 items-center gap-2 text-sm">
+                <BookOpenText className="size-4 shrink-0" />
+                No Knowledge sources yet. Add a Wiki file or Feishu link when this Agent needs fixed context.
+              </span>
+            ) : null}
+            <p className="text-muted ml-auto text-xs tabular-nums">{knowledgeSources.length} / 10 sources</p>
+          </div>
         </Card.Content>
       </Card>
 

@@ -210,6 +210,78 @@
   scrollbar-gutter: stable;
 }
 
+.cocola-user-ui .cocola-web-page-primary-action,
+.cocola-user-ui .button--primary:not(.cocola-web-new-chat):not(.cocola-web-connector-action) {
+  background: color-mix(in oklab, var(--accent) 84%, black 16%) !important;
+  color: white !important;
+  box-shadow: 0 10px 22px -14px color-mix(in oklab, var(--accent) 62%, transparent);
+}
+
+.cocola-user-ui .cocola-web-page-primary-action:hover,
+.cocola-user-ui .button--primary:not(.cocola-web-new-chat):not(.cocola-web-connector-action):hover {
+  background: color-mix(in oklab, var(--accent) 76%, black 24%) !important;
+}
+
+.cocola-user-ui .cocola-web-skill-disable-action {
+  color: white !important;
+}
+
+.cocola-user-ui .cocola-web-skill-enable-action {
+  background: color-mix(in oklab, var(--success) 86%, black 14%) !important;
+  color: white !important;
+  box-shadow: 0 10px 22px -14px color-mix(in oklab, var(--success) 64%, transparent);
+}
+
+.cocola-user-ui .cocola-web-skill-enable-action:hover {
+  background: color-mix(in oklab, var(--success) 78%, black 22%) !important;
+}
+
+.cocola-user-ui .cocola-web-agent-skill-grid {
+  --item-card-group-columns: 1 !important;
+}
+
+.cocola-user-ui .cocola-web-agent-skill-grid .item-card {
+  align-items: flex-start;
+}
+
+.cocola-user-ui .cocola-web-page .item-card {
+  height: 100%;
+}
+
+.cocola-user-ui .cocola-web-page button.item-card {
+  text-align: start;
+}
+
+.cocola-user-ui .cocola-web-page .item-card__content {
+  min-width: 0;
+  width: 0;
+}
+
+.cocola-user-ui .cocola-web-page .item-card__title,
+.cocola-user-ui .cocola-web-page .item-card__description {
+  max-width: 100%;
+  width: 100%;
+}
+
+.cocola-user-ui .cocola-web-page .item-card__description {
+  display: -webkit-box;
+  overflow: hidden;
+  white-space: normal;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+}
+
+.cocola-user-ui .cocola-web-page .item-card__action {
+  align-items: center;
+  display: flex;
+}
+
+@media (min-width: 40rem) {
+  .cocola-user-ui .cocola-web-agent-skill-grid {
+    --item-card-group-columns: 2 !important;
+  }
+}
+
 .cocola-user-ui .cocola-web-select-trigger:active,
 .cocola-user-ui .cocola-web-select-trigger[data-pressed="true"] {
   transform: none;
