@@ -230,7 +230,7 @@ export default function StoragePage() {
   const columns: DataGridColumn<SessionVolume>[] = [
     { id: "session", header: "Session / User", isRowHeader: true, minWidth: 260, cell: (volume) => <span className="block min-w-0"><AdminTruncatedValue className="font-mono text-xs font-medium" copyLabel="session ID" value={volume.session_id || "Detached volume"} /><AdminTruncatedValue className="text-muted text-xs" copyLabel="user ID" value={volume.user_id || "No database binding"} /></span> },
     { id: "node", header: "Node", minWidth: 150, cell: (volume) => <AdminTruncatedValue className="font-mono text-xs" copyLabel="node name" value={volume.node_name || "—"} /> },
-    { id: "volume", header: "Volume", minWidth: 220, cell: (volume) => <span className="block min-w-0"><AdminTruncatedValue className="font-mono text-xs" copyLabel="PVC name" value={volume.pvc_name} /><AdminStatusBadge className="mt-1" tone={isAttachedVolume(volume) ? "green" : "amber"} dot>{volume.pvc_phase}</AdminStatusBadge></span> },
+    { id: "volume", header: "Volume", minWidth: 220, cell: (volume) => <span className="block min-w-0"><AdminTruncatedValue className="font-mono text-xs" copyLabel="PVC name" value={volume.pvc_name} /><span className="mt-1 flex flex-wrap items-center gap-1"><AdminStatusBadge tone={isAttachedVolume(volume) ? "green" : "amber"} dot>{volume.pvc_phase}</AdminStatusBadge>{volume.delete_allowed ? <AdminStatusBadge tone="red">Orphan</AdminStatusBadge> : null}</span></span> },
     { id: "generation", header: "Generation", width: 110, cell: (volume) => <span className="tabular-nums">{volume.generation}</span> },
     { id: "requested", header: "Requested", minWidth: 130, cell: (volume) => <span className="font-mono text-xs tabular-nums">{formatBytes(volume.requested_bytes)}</span> },
     { id: "usage", header: "Actual usage", minWidth: 170, cell: (volume) => { const measurement = measurements[volumeKey(volume)]; return measurement ? <span><span className="block font-mono text-xs font-medium tabular-nums">{formatBytes(measurement.allocated_bytes)}</span><span className="text-muted block text-xs">{measurement.file_count} files · {measurement.directory_count} dirs</span></span> : <span className="text-muted">Not measured</span>; } },
@@ -305,9 +305,14 @@ export default function StoragePage() {
                   request it.
                 </p>
               </div>
-              {orphanCount > 0 ? (
+              <div className="flex shrink-0 flex-wrap items-center justify-end gap-2">
+                <AdminStatusBadge tone={orphanCount > 0 ? "amber" : "green"} dot>
+                  {orphanCount === 0
+                    ? "No orphan volumes"
+                    : `${orphanCount} orphan ${orphanCount === 1 ? "volume" : "volumes"}`}
+                </AdminStatusBadge>
                 <Button
-                  isDisabled={loading || bulkDeleting || Boolean(deleting)}
+                  isDisabled={orphanCount === 0 || loading || bulkDeleting || Boolean(deleting)}
                   size="sm"
                   variant="danger-soft"
                   onPress={() => setBulkDeleteOpen(true)}
@@ -315,7 +320,7 @@ export default function StoragePage() {
                   <Trash2 className="size-3.5" />
                   Delete all orphans ({orphanCount})
                 </Button>
-              ) : null}
+              </div>
             </div>
 
             <div className="min-w-0">
