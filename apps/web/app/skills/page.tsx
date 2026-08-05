@@ -1,6 +1,6 @@
 "use client";
 
-import { Button, Card, Checkbox, Chip, Input, Label, TextField, Tooltip } from "@heroui/react";
+import { Button, Card, Checkbox, Chip, Input, Label, Switch, TextField, Tooltip } from "@heroui/react";
 import { EmptyState } from "@heroui-pro/react/empty-state";
 import {
   ChevronLeft,
@@ -8,7 +8,6 @@ import {
   FileArchive,
   GitBranch,
   LoaderCircle,
-  Power,
   Search,
   Sparkles,
   Trash2,
@@ -26,7 +25,7 @@ import {
 import { SkillIcon } from "@/components/ui/skill-icon";
 import { paginateCatalog } from "@/lib/catalog-pagination";
 
-const SKILLS_PER_PAGE = 9;
+const SKILLS_PER_PAGE = 12;
 
 type Skill = {
   id: string;
@@ -436,7 +435,7 @@ function SkillSection({
         description={`${total} ${title.toLowerCase()}`}
         title={title}
       />
-      <div className="cocola-web-catalog-grid grid items-stretch gap-3 md:grid-cols-2 xl:grid-cols-3">
+      <div className="cocola-web-catalog-grid grid items-stretch gap-3 md:grid-cols-2 xl:grid-cols-4">
         {skills.map((skill) => (
           <SkillCard
             key={skill.id}
@@ -521,40 +520,25 @@ function SkillCard({
   onToggle: () => void;
 }) {
   return (
-    <Card className="cocola-web-catalog-card cocola-web-skill-card h-full min-h-[15rem] p-5">
+    <Card className="cocola-web-catalog-card cocola-web-skill-card h-full min-h-[13rem] p-4">
       <Card.Content className="flex h-full min-w-0 flex-col p-0">
         <Link className="group min-w-0 no-underline" href={`/skills/${encodeURIComponent(skill.id)}`}>
-          <SkillIcon name={displaySkillName(skill) || skill.id} />
-          <span className="text-foreground mt-4 block truncate font-semibold">{displaySkillName(skill)}</span>
+          <SkillIcon
+            className="cocola-web-catalog-card-icon"
+            name={displaySkillName(skill) || skill.id}
+          />
+          <span className="text-foreground mt-3 block truncate font-semibold">{displaySkillName(skill)}</span>
           <span className="text-muted mt-1 line-clamp-2 min-h-10 text-sm leading-5">
             {skill.description || "No description"}
           </span>
-          <span className="mt-4 flex flex-wrap gap-1.5">
+          <span className="mt-3 flex flex-wrap gap-1.5">
             <Chip color={skill.scope === "user" ? "accent" : "default"} size="sm" variant="soft">
               {skill.scope === "user" ? "Personal" : "Shared"}
             </Chip>
             {skill.file_count ? <Chip size="sm" variant="soft">{skill.file_count} files</Chip> : null}
           </span>
         </Link>
-        <div className="border-separator mt-auto flex items-center gap-2 border-t pt-4">
-          <Button
-            className={`flex-1 ${
-              skill.enabled
-                ? "cocola-web-skill-disable-action"
-                : "cocola-web-skill-enable-action"
-            }`}
-            isDisabled={working}
-            size="sm"
-            variant={skill.enabled ? "danger" : "primary"}
-            onPress={onToggle}
-          >
-            {working ? (
-              <LoaderCircle className="size-3.5 animate-spin" />
-            ) : (
-              <Power className="size-3.5" />
-            )}
-            {skill.enabled ? "Disable" : "Enable"}
-          </Button>
+        <div className="border-separator mt-auto flex items-center justify-end gap-2 border-t pt-3">
           {onDelete ? (
             <Button
               isIconOnly
@@ -567,6 +551,18 @@ function SkillCard({
               <Trash2 className="size-3.5" />
             </Button>
           ) : null}
+          <Switch
+            aria-label={`${skill.enabled ? "Disable" : "Enable"} ${displaySkillName(skill)}`}
+            isDisabled={working}
+            isSelected={skill.enabled}
+            onChange={onToggle}
+          >
+            <Switch.Content>
+              <Switch.Control>
+                <Switch.Thumb />
+              </Switch.Control>
+            </Switch.Content>
+          </Switch>
         </div>
       </Card.Content>
     </Card>

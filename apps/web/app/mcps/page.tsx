@@ -1,8 +1,8 @@
 "use client";
 
-import { Button, Card, Chip } from "@heroui/react";
+import { Card, Chip, Switch } from "@heroui/react";
 import { EmptyState } from "@heroui-pro/react/empty-state";
-import { LoaderCircle, Plug, Power } from "lucide-react";
+import { LoaderCircle, Plug } from "lucide-react";
 import Link from "next/link";
 import { useCallback, useEffect, useState } from "react";
 import {
@@ -92,47 +92,44 @@ export default function MCPPage() {
           <LoaderCircle className="text-muted size-5 animate-spin" />
         </div>
       ) : mcps.length ? (
-        <section className="cocola-web-catalog-grid grid items-stretch gap-3 md:grid-cols-2 xl:grid-cols-3">
+        <section className="cocola-web-catalog-grid grid items-stretch gap-3 md:grid-cols-2 xl:grid-cols-4">
           {mcps.map((mcp) => {
             const working = workingId === mcp.id;
             const endpoint = mcp.transport === "stdio" ? mcp.command : mcp.url_hint;
             return (
-              <Card key={mcp.id} className="cocola-web-catalog-card h-full min-h-[15rem] p-5">
+              <Card key={mcp.id} className="cocola-web-catalog-card cocola-web-mcp-card h-full p-4">
                 <Card.Content className="flex h-full min-w-0 flex-col p-0">
                   <Link className="group min-w-0 no-underline" href={`/mcps/${encodeURIComponent(mcp.id)}`}>
-                    <span className="flex items-start justify-between gap-3">
-                      <span className="flex size-10 items-center justify-center rounded-2xl bg-orange-500/15 text-orange-500">
-                        <Plug className="size-5" />
-                      </span>
-                      <Chip color={mcp.effective_enabled ? "success" : "warning"} size="sm" variant="soft">
-                        {mcp.effective_enabled ? "Enabled" : "Disabled"}
-                      </Chip>
+                    <span className="cocola-web-catalog-card-icon flex size-10 items-center justify-center rounded-2xl bg-orange-500/15 text-orange-500">
+                      <Plug className="size-5" />
                     </span>
-                    <span className="text-foreground mt-4 block truncate font-semibold">{mcp.name || mcp.id}</span>
-                    <span className="text-muted mt-1 line-clamp-2 min-h-10 text-sm leading-5">
+                    <span className="text-foreground mt-3 block truncate font-semibold">{mcp.name || mcp.id}</span>
+                    <span className="text-muted mt-1 line-clamp-2 text-sm leading-5">
                       {mcp.description || "No description"}
                     </span>
-                    <span className="mt-4 flex flex-wrap gap-1.5">
+                    <span className="mt-3 flex flex-wrap gap-1.5">
                       <Chip size="sm" variant="soft">{mcp.transport}</Chip>
                       <Chip size="sm" variant="soft">{mcp.default_enabled ? "Default on" : "Default off"}</Chip>
                     </span>
                     {endpoint ? (
-                      <code className="bg-surface-secondary text-muted mt-3 block truncate rounded-lg px-2.5 py-1.5 text-xs">
+                      <code className="bg-surface-secondary text-muted mt-2 block truncate rounded-lg px-2.5 py-1.5 text-xs">
                         {endpoint}
                       </code>
                     ) : null}
                   </Link>
-                  <div className="border-separator mt-auto border-t pt-4">
-                    <Button
-                      fullWidth
+                  <div className="border-separator mt-3 flex items-center justify-end border-t pt-3">
+                    <Switch
+                      aria-label={`${mcp.effective_enabled ? "Disable" : "Enable"} ${mcp.name || mcp.id}`}
                       isDisabled={working}
-                      size="sm"
-                      variant={mcp.effective_enabled ? "outline" : "primary"}
-                      onPress={() => void toggle(mcp)}
+                      isSelected={mcp.effective_enabled}
+                      onChange={() => void toggle(mcp)}
                     >
-                      {working ? <LoaderCircle className="size-3.5 animate-spin" /> : <Power className="size-3.5" />}
-                      {mcp.effective_enabled ? "Disable" : "Enable"}
-                    </Button>
+                      <Switch.Content>
+                        <Switch.Control>
+                          <Switch.Thumb />
+                        </Switch.Control>
+                      </Switch.Content>
+                    </Switch>
                   </div>
                 </Card.Content>
               </Card>

@@ -222,20 +222,6 @@
   background: color-mix(in oklab, var(--accent) 76%, black 24%) !important;
 }
 
-.cocola-user-ui .cocola-web-skill-disable-action {
-  color: white !important;
-}
-
-.cocola-user-ui .cocola-web-skill-enable-action {
-  background: color-mix(in oklab, var(--success) 86%, black 14%) !important;
-  color: white !important;
-  box-shadow: 0 10px 22px -14px color-mix(in oklab, var(--success) 64%, transparent);
-}
-
-.cocola-user-ui .cocola-web-skill-enable-action:hover {
-  background: color-mix(in oklab, var(--success) 78%, black 22%) !important;
-}
-
 .cocola-user-ui .cocola-web-agent-skill-grid {
   --item-card-group-columns: 1 !important;
 }

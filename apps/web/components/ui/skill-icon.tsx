@@ -1,22 +1,41 @@
 import * as React from "react";
 import {
+  AppWindow,
+  BadgeCheck,
   BarChart3,
+  BookOpen,
   Boxes,
   Brain,
+  CalendarDays,
+  Clock3,
   Code2,
+  ContactRound,
   Database,
   FileText,
+  FlaskConical,
   Globe,
-  LineChart,
+  HardDrive,
+  ListChecks,
+  Mail,
+  MessageSquare,
   type LucideIcon,
-  Notebook,
+  Palette,
   Plug,
   Search,
+  ServerCog,
+  ShieldCheck,
   Sparkles,
+  Table2,
+  Video,
   Wand2,
   Wrench,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
+import {
+  resolveSkillGlyphKey,
+  skillIdentityHash,
+  type SkillGlyphKey,
+} from "@/lib/skill-icon-identity";
 
 // Shared skill icon: renders a stable, colored icon tile derived from the skill
 // name. Same name -> same color + glyph across the whole app (skills page, the
@@ -37,51 +56,36 @@ const PALETTE = [
   { bg: "bg-orange-50", text: "text-orange-600", ring: "ring-orange-100" },
 ] as const;
 
-const GLYPHS: LucideIcon[] = [
-  Sparkles,
-  BarChart3,
-  LineChart,
-  FileText,
-  Database,
-  Globe,
-  Search,
-  Notebook,
-  Code2,
-  Wrench,
-  Wand2,
-  Brain,
-  Boxes,
-  Plug,
-];
-
-// Keyword hints let common skills get a semantically fitting glyph while still
-// falling back to the stable hash for everything else.
-const KEYWORD_GLYPHS: Array<[RegExp, LucideIcon]> = [
-  [/chart|graph|plot|viz|visuali/i, BarChart3],
-  [/query|aeolus|dashboard|data|sql|table/i, Database],
-  [/doc|report|write|feishu|lark|text/i, FileText],
-  [/search|find|lookup/i, Search],
-  [/note|memo/i, Notebook],
-  [/code|dev|git|build/i, Code2],
-  [/web|http|browser|url/i, Globe],
-  [/mcp|plugin|connect/i, Plug],
-];
-
-function hashString(input: string): number {
-  let hash = 0;
-  for (let i = 0; i < input.length; i += 1) {
-    hash = (hash << 5) - hash + input.charCodeAt(i);
-    hash |= 0; // force 32-bit
-  }
-  return Math.abs(hash);
-}
-
-function pickGlyph(name: string, hash: number): LucideIcon {
-  for (const [pattern, glyph] of KEYWORD_GLYPHS) {
-    if (pattern.test(name)) return glyph;
-  }
-  return GLYPHS[hash % GLYPHS.length] ?? Sparkles;
-}
+const GLYPHS: Record<SkillGlyphKey, LucideIcon> = {
+  "app-window": AppWindow,
+  "badge-check": BadgeCheck,
+  "bar-chart": BarChart3,
+  "book-open": BookOpen,
+  boxes: Boxes,
+  brain: Brain,
+  calendar: CalendarDays,
+  clock: Clock3,
+  code: Code2,
+  contact: ContactRound,
+  database: Database,
+  "file-text": FileText,
+  flask: FlaskConical,
+  globe: Globe,
+  "hard-drive": HardDrive,
+  "list-checks": ListChecks,
+  mail: Mail,
+  message: MessageSquare,
+  palette: Palette,
+  plug: Plug,
+  search: Search,
+  "server-cog": ServerCog,
+  "shield-check": ShieldCheck,
+  sparkles: Sparkles,
+  table: Table2,
+  video: Video,
+  wand: Wand2,
+  wrench: Wrench,
+};
 
 const SIZES = {
   sm: { box: "size-8 rounded-lg", icon: "size-4" },
@@ -95,9 +99,9 @@ export interface SkillIconProps {
 }
 
 export function SkillIcon({ name, size = "md", className }: SkillIconProps) {
-  const hash = hashString(name || "skill");
+  const hash = skillIdentityHash(name || "skill");
   const palette = PALETTE[hash % PALETTE.length] ?? PALETTE[0];
-  const Glyph = pickGlyph(name || "", hash);
+  const Glyph = GLYPHS[resolveSkillGlyphKey(name || "")];
   const dims = SIZES[size];
 
   return (

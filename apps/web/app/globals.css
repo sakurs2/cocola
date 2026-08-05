@@ -3568,6 +3568,22 @@
     box-shadow: 0 18px 40px -18px color-mix(in oklab, var(--accent) 32%, transparent);
   }
 
+  .cocola-user-ui .cocola-web-skill-card:hover .cocola-web-catalog-card-icon,
+  .cocola-user-ui .cocola-web-skill-card:focus-within .cocola-web-catalog-card-icon {
+    transform: rotate(-2deg) scale(1.06);
+  }
+
+  .cocola-user-ui .cocola-web-mcp-card:hover,
+  .cocola-user-ui .cocola-web-mcp-card:focus-within {
+    transform: translateY(-3px) scale(1.005);
+    box-shadow: 0 18px 40px -18px color-mix(in oklab, var(--accent) 32%, transparent);
+  }
+
+  .cocola-user-ui .cocola-web-mcp-card:hover .cocola-web-catalog-card-icon,
+  .cocola-user-ui .cocola-web-mcp-card:focus-within .cocola-web-catalog-card-icon {
+    transform: rotate(-2deg) scale(1.06);
+  }
+
   .cocola-user-ui .cocola-web-catalog-trigger:hover > .cocola-web-catalog-card {
     transform: translateY(-3px) scale(1.005);
     box-shadow: 0 18px 40px -18px color-mix(in oklab, var(--accent) 32%, transparent);
