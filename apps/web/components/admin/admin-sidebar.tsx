@@ -38,8 +38,10 @@ function AdminSidebarContents({
   return (
     <>
       <Sidebar.Header>
-        <div className="flex items-center gap-3 px-1 py-1.5">
-          <CocolaCoreLogo className="size-10 shrink-0" />
+        <div className="grid grid-cols-[1.25rem_minmax(0,1fr)] items-center gap-3 px-1 py-1.5">
+          <span className="flex size-5 shrink-0 items-center justify-center">
+            <CocolaCoreLogo className="size-10 max-w-none shrink-0" />
+          </span>
           <div className="flex min-w-0 flex-col" data-sidebar="label">
             <span className="text-foreground text-sm font-semibold leading-tight">cocola admin</span>
             <span className="text-muted text-xs leading-tight">control plane</span>

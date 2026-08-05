@@ -66,6 +66,41 @@
   transition: transform 240ms cubic-bezier(0.22, 1, 0.36, 1);
 }
 
+.cocola-admin-ui .admin-skill-card,
+.cocola-admin-ui .admin-mcp-card,
+.cocola-admin-ui .admin-toolbox-card {
+  transition:
+    transform 200ms ease,
+    background-color 200ms ease,
+    box-shadow 200ms ease;
+  will-change: transform;
+}
+
+.cocola-admin-ui .admin-skill-card-icon,
+.cocola-admin-ui .admin-mcp-card-icon,
+.cocola-admin-ui .admin-toolbox-card-icon,
+.cocola-admin-ui .admin-toolbox-card-arrow {
+  transition: transform 200ms ease;
+}
+
+.cocola-admin-ui .admin-token-usage-grid .table__column {
+  padding: 8px 12px;
+}
+
+.cocola-admin-ui .admin-token-usage-grid .table__cell {
+  padding: 6px 12px;
+}
+
+.cocola-admin-ui .admin-token-usage-grid .table__row {
+  cursor: var(--cursor-interactive);
+}
+
+.cocola-admin-ui .admin-switch-thumb,
+.cocola-admin-ui .switch[data-selected="true"] .admin-switch-thumb {
+  background-color: #fff;
+  color: #111;
+}
+
 .cocola-admin-ui .cocola-sidebar-tab {
   border-radius: calc(var(--radius) * 2);
   transform-origin: center;
@@ -94,6 +129,36 @@
   .admin-architecture-node-card:active {
     transform: translateY(-0.5px) scale(0.997);
     transition-duration: 90ms;
+  }
+
+  .cocola-admin-ui .admin-skill-card:hover,
+  .cocola-admin-ui .admin-skill-card:focus-within,
+  .cocola-admin-ui .admin-mcp-card:hover,
+  .cocola-admin-ui .admin-mcp-card:focus-within,
+  .cocola-admin-ui .admin-toolbox-card:hover,
+  .cocola-admin-ui .admin-toolbox-card[data-hovered="true"] {
+    transform: translateY(-3px) scale(1.005);
+    box-shadow: 0 18px 40px -18px color-mix(in oklab, var(--accent) 32%, transparent);
+  }
+
+  .cocola-admin-ui .admin-skill-card:hover .admin-skill-card-icon,
+  .cocola-admin-ui .admin-skill-card:focus-within .admin-skill-card-icon,
+  .cocola-admin-ui .admin-mcp-card:hover .admin-mcp-card-icon,
+  .cocola-admin-ui .admin-mcp-card:focus-within .admin-mcp-card-icon,
+  .cocola-admin-ui .admin-toolbox-card:hover .admin-toolbox-card-icon,
+  .cocola-admin-ui .admin-toolbox-card[data-hovered="true"] .admin-toolbox-card-icon {
+    transform: rotate(-2deg) scale(1.06);
+  }
+
+  .cocola-admin-ui .admin-toolbox-card:hover .admin-toolbox-card-arrow,
+  .cocola-admin-ui .admin-toolbox-card[data-hovered="true"] .admin-toolbox-card-arrow {
+    transform: translateX(2px);
+  }
+
+  .cocola-admin-ui .admin-toolbox-card:active,
+  .cocola-admin-ui .admin-toolbox-card[data-pressed="true"] {
+    transform: translateY(-1px) scale(0.995);
+    transition-duration: 80ms;
   }
 
   .cocola-admin-ui .cocola-sidebar-tab:hover,
@@ -2245,7 +2310,14 @@
   .cocola-admin-ui .admin-overview-cta,
   .cocola-admin-ui .admin-overview-arrow,
   .admin-architecture-node-card,
-  .admin-architecture-node-icon {
+  .admin-architecture-node-icon,
+  .cocola-admin-ui .admin-skill-card,
+  .cocola-admin-ui .admin-skill-card-icon,
+  .cocola-admin-ui .admin-mcp-card,
+  .cocola-admin-ui .admin-mcp-card-icon,
+  .cocola-admin-ui .admin-toolbox-card,
+  .cocola-admin-ui .admin-toolbox-card-icon,
+  .cocola-admin-ui .admin-toolbox-card-arrow {
     transition: none;
   }
 
@@ -2259,7 +2331,17 @@
   .cocola-admin-ui a:hover .admin-overview-arrow,
   .admin-architecture-node-card:hover,
   .admin-architecture-node-card:active,
-  .admin-architecture-node-card:hover .admin-architecture-node-icon {
+  .admin-architecture-node-card:hover .admin-architecture-node-icon,
+  .cocola-admin-ui .admin-skill-card:hover,
+  .cocola-admin-ui .admin-skill-card:focus-within,
+  .cocola-admin-ui .admin-skill-card:hover .admin-skill-card-icon,
+  .cocola-admin-ui .admin-mcp-card:hover,
+  .cocola-admin-ui .admin-mcp-card:focus-within,
+  .cocola-admin-ui .admin-mcp-card:hover .admin-mcp-card-icon,
+  .cocola-admin-ui .admin-toolbox-card:hover,
+  .cocola-admin-ui .admin-toolbox-card:active,
+  .cocola-admin-ui .admin-toolbox-card:hover .admin-toolbox-card-icon,
+  .cocola-admin-ui .admin-toolbox-card:hover .admin-toolbox-card-arrow {
     transform: none;
   }
 }

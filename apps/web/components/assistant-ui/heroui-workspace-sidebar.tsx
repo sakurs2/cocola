@@ -4,19 +4,23 @@ import {
   ArrowRotateRight,
   BookOpen,
   Calendar,
+  Check,
   ChevronsLeft,
   CircleCheck,
   Comments,
   Ellipsis,
   FaceRobot,
   Folder,
+  FolderOpen,
   Folders,
   Gear,
   Link,
+  Pencil,
   PlugConnection,
   Plus,
   ShieldCheck,
   Sparkles,
+  TrashBin,
 } from "@gravity-ui/icons";
 import { Button, Dropdown, Tooltip } from "@heroui/react";
 import { Sheet } from "@heroui-pro/react/sheet";
@@ -472,7 +476,7 @@ function ConversationSidebarItem({
           <input
             autoFocus
             aria-label="Conversation title"
-            className="border-separator bg-surface min-w-0 flex-1 rounded-lg border px-2 py-1 text-sm outline-none focus:border-[var(--focus)]"
+            className="cocola-sidebar-rename-input border-separator bg-surface h-6 w-full min-w-0 rounded-md border px-1.5 py-0 text-sm leading-5 outline-none focus:border-[var(--focus)]"
             value={draftTitle}
             onBlur={onCommitRename}
             onChange={(event) => onDraftTitleChange(event.target.value)}
@@ -514,28 +518,58 @@ function ConversationSidebarItem({
                 aria-label={`Actions for ${title}`}
                 onAction={(key) => onAction(String(key))}
               >
-                <Dropdown.Item id="rename" textValue="Rename">
-                  Rename
-                </Dropdown.Item>
-                {conversation.chat_type !== "scheduled_task" ? (
-                  <Dropdown.Item id="move-root" textValue="Move to Chats">
-                    Move to Chats
+                <Dropdown.Section>
+                  <Dropdown.Item id="rename" textValue="Rename">
+                    <Pencil className="text-muted size-4 shrink-0" />
+                    <span data-slot="label">Rename</span>
                   </Dropdown.Item>
-                ) : null}
-                {conversation.chat_type !== "scheduled_task"
-                  ? folders.map((folder) => (
-                      <Dropdown.Item
-                        key={folder.id}
-                        id={`move:${folder.id}`}
-                        textValue={`Move to ${folder.name}`}
-                      >
-                        Move to {folder.name}
+                  {conversation.chat_type !== "scheduled_task" ? (
+                    <Dropdown.SubmenuTrigger>
+                      <Dropdown.Item id="move" textValue="Move to folder">
+                        <FolderOpen className="text-muted size-4 shrink-0" />
+                        <span data-slot="label">Move to folder</span>
+                        <Dropdown.SubmenuIndicator />
                       </Dropdown.Item>
-                    ))
-                  : null}
-                <Dropdown.Item id="delete" textValue="Delete">
-                  Delete
-                </Dropdown.Item>
+                      <Dropdown.Popover placement="right top">
+                        <Dropdown.Menu
+                          aria-label={`Move ${title} to folder`}
+                          onAction={(key) => onAction(String(key))}
+                        >
+                          <Dropdown.Item id="move-root" textValue="No folder">
+                            <Folder className="text-muted size-4 shrink-0" />
+                            <span className="min-w-0 flex-1 truncate" data-slot="label">
+                              No folder
+                            </span>
+                            {!conversation.folder_id ? (
+                              <Check className="text-accent size-4 shrink-0" />
+                            ) : null}
+                          </Dropdown.Item>
+                          {folders.map((folder) => (
+                            <Dropdown.Item
+                              key={folder.id}
+                              id={`move:${folder.id}`}
+                              textValue={folder.name}
+                            >
+                              <Folder className="text-muted size-4 shrink-0" />
+                              <span className="min-w-0 flex-1 truncate" data-slot="label">
+                                {folder.name}
+                              </span>
+                              {conversation.folder_id === folder.id ? (
+                                <Check className="text-accent size-4 shrink-0" />
+                              ) : null}
+                            </Dropdown.Item>
+                          ))}
+                        </Dropdown.Menu>
+                      </Dropdown.Popover>
+                    </Dropdown.SubmenuTrigger>
+                  ) : null}
+                </Dropdown.Section>
+                <Dropdown.Section className="border-separator mt-1 border-t pt-1">
+                  <Dropdown.Item id="delete" textValue="Delete" variant="danger">
+                    <TrashBin className="size-4 shrink-0" />
+                    <span data-slot="label">Delete</span>
+                  </Dropdown.Item>
+                </Dropdown.Section>
               </Dropdown.Menu>
             </Dropdown.Popover>
           </Dropdown>

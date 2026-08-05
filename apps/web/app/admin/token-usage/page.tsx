@@ -243,12 +243,12 @@ export default function AdminTokenUsagePage() {
   const activeUser = selectedUser ?? users[0] ?? null;
 
   const columns: DataGridColumn<TokenUsageUser>[] = [
-    { id: "user", header: "User", isRowHeader: true, minWidth: 260, cell: (user) => <Button className="h-auto min-w-0 justify-start px-0 py-1 text-left" variant="ghost" onPress={() => setSelectedUser(user)}><span className="min-w-0"><span className="block truncate font-semibold">{displayUser(user)}</span><span className="text-muted block truncate font-mono text-xs">{user.user_id}</span></span></Button> },
-    { id: "total", header: "Total", width: 120, align: "end", cell: (user) => <span className="tabular-nums" title={formatNumber(user.total_tokens)}>{compactNumber(user.total_tokens)}</span> },
-    { id: "input", header: "Input", width: 120, align: "end", cell: (user) => <span className="tabular-nums" title={formatNumber(user.prompt_tokens)}>{compactNumber(user.prompt_tokens)}</span> },
-    { id: "output", header: "Output", width: 120, align: "end", cell: (user) => <span className="tabular-nums" title={formatNumber(user.completion_tokens)}>{compactNumber(user.completion_tokens)}</span> },
-    { id: "calls", header: "Calls", width: 100, align: "end", cell: (user) => <span className="tabular-nums" title={formatNumber(user.calls)}>{compactNumber(user.calls)}</span> },
-    { id: "last", header: "Last used", minWidth: 160, cell: (user) => <span className="text-muted text-xs tabular-nums">{user.last_used_at ? formatDateTime(user.last_used_at) : "—"}</span> },
+    { id: "user", header: "User", isRowHeader: true, minWidth: 180, cell: (user) => <span className="block min-w-0 truncate text-sm font-semibold" title={`${displayUser(user)} · ${user.user_id}`}>{displayUser(user)}</span> },
+    { id: "total", header: "Total", width: 90, align: "end", cell: (user) => <span className="tabular-nums" title={formatNumber(user.total_tokens)}>{compactNumber(user.total_tokens)}</span> },
+    { id: "input", header: "Input", width: 90, align: "end", cell: (user) => <span className="tabular-nums" title={formatNumber(user.prompt_tokens)}>{compactNumber(user.prompt_tokens)}</span> },
+    { id: "output", header: "Output", width: 90, align: "end", cell: (user) => <span className="tabular-nums" title={formatNumber(user.completion_tokens)}>{compactNumber(user.completion_tokens)}</span> },
+    { id: "calls", header: "Calls", width: 80, align: "end", cell: (user) => <span className="tabular-nums" title={formatNumber(user.calls)}>{compactNumber(user.calls)}</span> },
+    { id: "last", header: "Last used", minWidth: 135, cell: (user) => <span className="text-muted text-xs tabular-nums">{user.last_used_at ? formatDateTime(user.last_used_at) : "—"}</span> },
   ];
 
   return (
@@ -285,18 +285,19 @@ export default function AdminTokenUsagePage() {
         }
       />
 
-      <Card className="p-4"><Card.Content className="flex flex-wrap items-end gap-3 p-0">
-        <div><Label className="mb-2 block text-sm">Range</Label><Segment aria-label="Usage range" selectedKey={preset} onSelectionChange={(key) => setPreset(String(key) as RangePreset)}><Segment.Item id="24h">24h</Segment.Item><Segment.Item id="7d">7d</Segment.Item><Segment.Item id="30d">30d</Segment.Item><Segment.Item id="90d">90d</Segment.Item><Segment.Item id="custom">Custom</Segment.Item></Segment></div>
+      <div className="admin-token-usage-range flex flex-wrap items-center gap-2">
+        <span className="text-sm font-medium text-muted">Range</span>
+        <Segment aria-label="Usage range" selectedKey={preset} onSelectionChange={(key) => setPreset(String(key) as RangePreset)}><Segment.Item id="24h">24h</Segment.Item><Segment.Item id="7d">7d</Segment.Item><Segment.Item id="30d">30d</Segment.Item><Segment.Item id="90d">90d</Segment.Item><Segment.Item id="custom">Custom</Segment.Item></Segment>
         {preset === "custom" ? (
           <>
-            <TextField value={customFrom} variant="secondary" onChange={setCustomFrom}><Label>From</Label><Input type="date" /></TextField>
-            <TextField value={customTo} variant="secondary" onChange={setCustomTo}><Label>To</Label><Input type="date" /></TextField>
+            <TextField className="w-40" value={customFrom} variant="secondary" onChange={setCustomFrom}><Label className="sr-only">From</Label><Input type="date" /></TextField>
+            <TextField className="w-40" value={customTo} variant="secondary" onChange={setCustomTo}><Label className="sr-only">To</Label><Input type="date" /></TextField>
           </>
         ) : null}
-        <div className="text-muted ml-auto text-xs">
-          {report ? `${formatDateTime(report.from)} - ${formatDateTime(report.to)}` : ""}
+        <div className="ml-auto rounded-xl bg-surface-secondary px-3 py-2 text-xs text-muted tabular-nums">
+          {report ? `${formatDateTime(report.from)} – ${formatDateTime(report.to)}` : ""}
         </div>
-      </Card.Content></Card>
+      </div>
 
       {error ? (
         <div className="rounded-md border border-danger/30 bg-danger/10 px-3 py-2 text-sm text-danger">
@@ -305,11 +306,11 @@ export default function AdminTokenUsagePage() {
       ) : null}
 
       <Card className="p-0">
-        <Card.Header className="flex-row items-center justify-between p-5">
-          <span><Card.Title>Usage trend</Card.Title><Card.Description>Bucket: {report?.bucket ?? "auto"}</Card.Description></span>
+        <Card.Header className="flex-row items-center justify-between px-5 pb-0 pt-5">
+          <span className="flex items-center gap-2"><Card.Title>Usage trend</Card.Title><span className="rounded-full bg-surface-secondary px-2 py-1 text-xs text-muted">{report?.bucket === "hour" ? "Hourly" : report?.bucket === "day" ? "Daily" : "Auto"}</span></span>
           {loading ? <Loader2 className="size-4 animate-spin text-muted" /> : null}
         </Card.Header>
-        <div className="h-[340px] p-4">
+        <div className="h-[300px] px-4 pb-4 pt-1">
           {report && report.trend.length > 0 ? (
             <Line data={chartData(report.trend, report.bucket)} options={chartOptions} />
           ) : (
@@ -318,8 +319,8 @@ export default function AdminTokenUsagePage() {
         </div>
       </Card>
 
-      <section className="grid gap-5 xl:grid-cols-[minmax(0,1.15fr)_minmax(360px,0.85fr)]">
-        <Card className="min-w-0 overflow-hidden p-0"><Card.Header className="flex-row items-center justify-between gap-4 p-5"><span><Card.Title>Users</Card.Title><Card.Description>Sorted by total token usage</Card.Description></span><SearchField aria-label="Filter users" className="w-full max-w-72" value={filter} onChange={setFilter}><SearchField.Group><SearchField.SearchIcon /><SearchField.Input placeholder="Filter users" /><SearchField.ClearButton /></SearchField.Group></SearchField></Card.Header><Card.Content className="p-0"><DataGrid aria-label="Token usage by user" columns={columns} contentClassName="min-w-[820px]" data={users} getRowId={(user) => user.user_id} selectionMode="none" variant="primary" renderEmptyState={() => <EmptyState><EmptyState.Header><EmptyState.Media variant="icon"><UserRound className="text-rose-500" /></EmptyState.Media><EmptyState.Title>{loading ? "Loading users" : "No users in this range"}</EmptyState.Title><EmptyState.Description>Usage will appear after users complete model calls.</EmptyState.Description></EmptyState.Header></EmptyState>} /></Card.Content></Card>
+      <section className="grid items-start gap-5 xl:grid-cols-[minmax(0,1.15fr)_minmax(360px,0.85fr)]">
+        <Card className="min-w-0 overflow-hidden p-0"><Card.Header className="flex-row items-center justify-between gap-4 p-4"><span><Card.Title>Users</Card.Title><Card.Description>Sorted by total token usage</Card.Description></span><SearchField aria-label="Filter users" className="w-full max-w-60" value={filter} onChange={setFilter}><SearchField.Group><SearchField.SearchIcon /><SearchField.Input placeholder="Filter users" /><SearchField.ClearButton /></SearchField.Group></SearchField></Card.Header><Card.Content className="p-0"><DataGrid aria-label="Token usage by user" columns={columns} contentClassName="admin-token-usage-grid min-w-[700px]" data={users} getRowId={(user) => user.user_id} selectionMode="none" variant="primary" onRowAction={(key) => { const user = users.find((item) => item.user_id === String(key)); if (user) setSelectedUser(user); }} renderEmptyState={() => <EmptyState><EmptyState.Header><EmptyState.Media variant="icon"><UserRound className="text-rose-500" /></EmptyState.Media><EmptyState.Title>{loading ? "Loading users" : "No users in this range"}</EmptyState.Title><EmptyState.Description>Usage will appear after users complete model calls.</EmptyState.Description></EmptyState.Header></EmptyState>} /></Card.Content></Card>
 
         <Card className="p-0">
           <Card.Header className="flex-row items-center justify-between p-5">

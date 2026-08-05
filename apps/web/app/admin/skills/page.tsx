@@ -11,7 +11,7 @@ import {
   type CSSProperties,
   type ComponentType,
 } from "react";
-import { Button, Card, Checkbox, Chip, Input, Label, SearchField, TextField } from "@heroui/react";
+import { Button, Card, Checkbox, Chip, Input, Label, SearchField, Switch, TextField } from "@heroui/react";
 import Link from "next/link";
 import {
   Blocks,
@@ -23,13 +23,10 @@ import {
   FileArchive,
   Gem,
   LoaderCircle,
-  Power,
   Search,
   Puzzle,
   Rocket,
   Sparkles,
-  ToggleLeft,
-  ToggleRight,
   Trash2,
   Upload,
   Wand2,
@@ -451,10 +448,10 @@ function SkillCard({
 }) {
   const { Icon, style } = glyphFor(skill.id);
   return (
-    <Card className="cocola-web-catalog-card h-full min-h-64 p-5">
+    <Card className="admin-skill-card h-full min-h-64 p-5">
       <Link href={href} className="block min-w-0">
         <div className="flex items-start gap-3">
-          <div className="admin-entity-glyph" style={style}>
+          <div className="admin-entity-glyph admin-skill-card-icon" style={style}>
             <Icon className="size-[18px]" />
           </div>
           <div className="min-w-0 flex-1">
@@ -465,20 +462,20 @@ function SkillCard({
           </div>
         </div>
         <div className="mt-4 flex flex-wrap gap-2">
-          <Chip size="sm" variant="soft">{skill.id}</Chip><Chip size="sm" variant="soft">{skill.source_type || "manual"}</Chip><Chip color={skill.enabled ? "success" : "default"} size="sm" variant="soft">{skill.enabled ? "enabled" : "disabled"}</Chip>
+          <Chip size="sm" variant="soft">{skill.id}</Chip><Chip size="sm" variant="soft">{skill.source_type || "manual"}</Chip>
         </div>
       </Link>
-      <div className="mt-auto flex gap-2 pt-4">
-        <Button size="sm" variant="outline" isDisabled={working} onPress={onToggle}>
-          {working ? (
-            <LoaderCircle className="size-4 animate-spin" />
-          ) : skill.enabled ? (
-            <ToggleRight className="size-4" />
-          ) : (
-            <ToggleLeft className="size-4" />
-          )}
-          {skill.enabled ? "Disable" : "Enable"}
-        </Button>
+      <div className="mt-auto flex items-center justify-between gap-3 pt-4">
+        <Switch
+          aria-label={`${skill.enabled ? "Disable" : "Enable"} ${displaySkillName(skill)}`}
+          isDisabled={working}
+          isSelected={skill.enabled}
+          onChange={onToggle}
+        >
+          <Switch.Content>
+            <Switch.Control><Switch.Thumb className="admin-switch-thumb shadow-sm" /></Switch.Control>
+          </Switch.Content>
+        </Switch>
         <Button size="sm" variant="danger-soft" isDisabled={working} onPress={onDelete}>
           <Trash2 className="size-4" />
           Remove

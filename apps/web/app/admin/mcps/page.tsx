@@ -24,8 +24,6 @@ import {
   Pencil,
   Plug2,
   Plus,
-  Power,
-  PowerOff,
   Radio,
   Save,
   Server,
@@ -41,6 +39,7 @@ import {
   Input,
   Label,
   SearchField,
+  Switch,
   TextArea,
   TextField,
 } from "@heroui/react";
@@ -579,10 +578,10 @@ function MCPCard({
     : mcp.url_hint;
   const { Icon, style } = glyphFor(mcp.id);
   return (
-    <Card className="cocola-admin-module-card h-full p-5">
+    <Card className="admin-mcp-card h-full p-5">
       <Card.Content className="flex h-full min-w-0 flex-col p-0">
         <div className="flex items-start gap-3">
-          <span className="flex size-10 shrink-0 items-center justify-center rounded-2xl" style={{ ...style, background: "var(--glyph-soft)", color: "var(--glyph-ink)" }}>
+          <span className="admin-mcp-card-icon flex size-10 shrink-0 items-center justify-center rounded-2xl" style={{ ...style, background: "var(--glyph-soft)", color: "var(--glyph-ink)" }}>
             <Icon className="size-[18px]" />
           </span>
           <div className="min-w-0 flex-1">
@@ -592,7 +591,6 @@ function MCPCard({
             </div>
             <p className="text-muted mt-1 line-clamp-2 min-h-10 text-sm leading-5">{mcp.description || "No description"}</p>
           </div>
-          <Chip color={mcp.enabled ? "success" : "default"} size="sm" variant="soft">{mcp.enabled ? "Enabled" : "Disabled"}</Chip>
         </div>
 
         <div className="bg-surface-secondary mt-4 min-w-0 rounded-2xl p-3">
@@ -601,10 +599,21 @@ function MCPCard({
         </div>
 
         {mcp.default_enabled ? <div className="text-muted mt-3 text-xs">Default on</div> : null}
-        <div className="mt-auto grid grid-cols-3 gap-2 pt-4">
+        <div className="mt-auto flex items-center justify-between gap-3 pt-4">
           <Button isDisabled={busy} size="sm" variant="outline" onPress={onEdit}><Pencil className="size-4" />Edit</Button>
-          <Button isDisabled={busy} size="sm" variant="outline" onPress={onToggle}>{busy ? <LoaderCircle className="size-4 animate-spin" /> : mcp.enabled ? <PowerOff className="size-4" /> : <Power className="size-4" />}{mcp.enabled ? "Disable" : "Enable"}</Button>
-          <Button isDisabled={busy} size="sm" variant="danger-soft" onPress={onDelete}><Trash2 className="size-4" />Remove</Button>
+          <span className="flex items-center gap-2">
+            <Switch
+              aria-label={`${mcp.enabled ? "Disable" : "Enable"} ${mcp.name || mcp.id}`}
+              isDisabled={busy}
+              isSelected={mcp.enabled}
+              onChange={onToggle}
+            >
+              <Switch.Content>
+                <Switch.Control><Switch.Thumb className="admin-switch-thumb shadow-sm" /></Switch.Control>
+              </Switch.Content>
+            </Switch>
+            <Button isDisabled={busy} size="sm" variant="danger-soft" onPress={onDelete}><Trash2 className="size-4" />Remove</Button>
+          </span>
         </div>
       </Card.Content>
     </Card>

@@ -23,6 +23,10 @@ const componentLogsSource = readFileSync(
   new URL("../app/admin/component-logs/page.tsx", import.meta.url),
   "utf8",
 );
+const settingsSource = readFileSync(
+  new URL("../app/admin/settings/page.tsx", import.meta.url),
+  "utf8",
+);
 const selectControlSource = readFileSync(
   new URL("../components/ui/select-control.tsx", import.meta.url),
   "utf8",
@@ -37,7 +41,10 @@ test("formal Admin uses the approved HeroUI Pro AppLayout and compound Sidebar",
   assert.doesNotMatch(shellSource, /admin-glass-sidebar|admin-glass-shell|<aside/);
   assert.match(sidebarSource, /<Sidebar>[\s\S]*?<Sidebar\.Header>[\s\S]*?<Sidebar\.Content>/);
   assert.match(sidebarSource, /<Sidebar\.Footer>/);
-  assert.match(sidebarSource, /<CocolaCoreLogo className="size-10 shrink-0" \/>/);
+  assert.match(
+    sidebarSource,
+    /grid-cols-\[1\.25rem_minmax\(0,1fr\)\][\s\S]*?<CocolaCoreLogo className="size-10 max-w-none shrink-0" \/>/,
+  );
   assert.match(layoutSource, /return <AdminShell>\{children\}<\/AdminShell>/);
   assert.doesNotMatch(layoutSource, /AdminHeroUIProvider/);
 });
@@ -84,4 +91,15 @@ test("Admin utility pages keep stable HeroUI controls and visible architecture c
   assert.match(architectureSource, /<button[\s\S]*?aria-pressed=\{selected\}/);
   assert.match(globalStyles, /\.admin-architecture-node-card:hover/);
   assert.match(globalStyles, /transform: translateY\(-2px\)/);
+});
+
+test("Admin Settings aligns controls and actions to the same row start", () => {
+  assert.match(
+    settingsSource,
+    /admin-setting-row[^\"]*lg:grid-cols-\[minmax\(0,1fr\)_minmax\(220px,320px\)_180px\][^\"]*lg:items-start/,
+  );
+  assert.match(settingsSource, /admin-setting-description min-w-0/);
+  assert.match(settingsSource, /admin-setting-control min-w-0/);
+  assert.match(settingsSource, /admin-setting-actions flex items-center justify-end gap-2/);
+  assert.doesNotMatch(settingsSource, /admin-setting-row[^\"]*lg:items-center/);
 });

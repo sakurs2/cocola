@@ -17,6 +17,10 @@ const themeToggleSource = await readFile(
   new URL("../components/assistant-ui/workspace-theme-toggle.tsx", import.meta.url),
   "utf8",
 );
+const wordmarkSource = await readFile(
+  new URL("../components/assistant-ui/cocola-wordmark.tsx", import.meta.url),
+  "utf8",
+);
 const demoStylesSource = await readFile(
   new URL("../app/cocola-web-demo.css", import.meta.url),
   "utf8",
@@ -57,6 +61,9 @@ test("the empty thread preserves the HeroUI demo welcome composition", () => {
     /<CocolaWordmark className="cocola-wordmark -my-4 h-32 w-auto max-w-\[min\(90vw,460px\)\] sm:h-36" \/>/,
   );
   assert.match(threadSource, /<CocolaTagline \/>/);
+  assert.match(wordmarkSource, /const \[animationReady, setAnimationReady\] = useState\(false\)/);
+  assert.match(wordmarkSource, /style=\{\{ opacity: animationReady \? 1 : 0 \}\}/);
+  assert.match(wordmarkSource, /instance\.reset\?\.\(\);[\s\S]*?setAnimationReady\(true\)/);
   assert.doesNotMatch(threadSource, /src="\/cocola-wordmark\.svg"/);
   assert.doesNotMatch(threadSource, /Auto · choose for me/);
   assert.match(threadSource, /mt-7 w-full max-w-3xl/);
@@ -94,6 +101,23 @@ test("the real workspace uses the approved HeroUI demo shell treatment", () => {
   assert.match(sidebarSource, /\{visibleWorkspaceNavigation\.map\(\(item\) => \(/);
   assert.match(sidebarSource, /<Sidebar\.MenuActions className="cocola-sidebar-create-actions">/);
   assert.match(sidebarSource, /className="size-7 min-h-7 min-w-7 p-0"/);
+  assert.match(sidebarSource, /cocola-sidebar-rename-input[^"]*h-6[^"]*py-0[^"]*leading-5/);
+  assert.doesNotMatch(sidebarSource, /aria-label="Conversation title"\s+className="[^"]*py-1/);
+  assert.match(
+    sidebarSource,
+    /<Dropdown\.Item id="rename"[\s\S]*?<Pencil[\s\S]*?<Dropdown\.SubmenuTrigger>[\s\S]*?Move to folder/,
+  );
+  assert.match(
+    sidebarSource,
+    /<Dropdown\.Popover placement="right top">[\s\S]*?id="move-root" textValue="No folder"[\s\S]*?folders\.map/,
+  );
+  assert.match(sidebarSource, /!conversation\.folder_id[\s\S]*?<Check/);
+  assert.match(sidebarSource, /conversation\.folder_id === folder\.id[\s\S]*?<Check/);
+  assert.match(
+    sidebarSource,
+    /<Dropdown\.Item id="delete" textValue="Delete" variant="danger">[\s\S]*?<TrashBin/,
+  );
+  assert.doesNotMatch(sidebarSource, />Move to \{folder\.name\}</);
   assert.match(
     demoStylesSource,
     /\.cocola-user-ui \.cocola-sidebar-create-actions \{[\s\S]*?display: flex;[\s\S]*?opacity: 0;/,

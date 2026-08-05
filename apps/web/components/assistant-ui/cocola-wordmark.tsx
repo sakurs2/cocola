@@ -23,7 +23,7 @@ const PEN_PATHS: readonly string[] = [
 
 const VIEW_BOX = "0 0 1600 854";
 const DURATION = 240; // fixed animation duration (frames)
-const START_DELAY = 450; // ms delay before the handwriting animation begins
+const START_DELAY = 120; // ms delay before the handwriting animation begins
 
 export function CocolaWordmark({ className }: { className?: string }) {
   const rawId = useId();
@@ -31,6 +31,7 @@ export function CocolaWordmark({ className }: { className?: string }) {
   const gradId = `cocola-ink-${rawId.replace(/[^a-zA-Z0-9_-]/g, "")}`;
   const svgRef = useRef<SVGSVGElement | null>(null);
   const [reduceMotion, setReduceMotion] = useState(false);
+  const [animationReady, setAnimationReady] = useState(false);
 
   useEffect(() => {
     setReduceMotion(
@@ -42,7 +43,10 @@ export function CocolaWordmark({ className }: { className?: string }) {
   useEffect(() => {
     const el = svgRef.current;
     if (!el) return;
-    if (reduceMotion) return; // respect reduced motion: leave strokes fully drawn
+    if (reduceMotion) {
+      setAnimationReady(true);
+      return;
+    }
 
     let instance: {
       reset?: () => void;
@@ -63,11 +67,13 @@ export function CocolaWordmark({ className }: { className?: string }) {
       // Keep the strokes hidden, then start after a short delay so the
       // handwriting kicks in a beat after the user lands on the page.
       instance.reset?.();
+      setAnimationReady(true);
       raf = requestAnimationFrame(() => {
         timer = window.setTimeout(() => instance?.play?.(), START_DELAY);
       });
     } catch {
       instance = null;
+      setAnimationReady(true);
     }
 
     return () => {
@@ -100,7 +106,10 @@ export function CocolaWordmark({ className }: { className?: string }) {
           <path d={CLIP_D} clipRule="evenodd" />
         </clipPath>
       </defs>
-      <g clipPath={`url(#${clipId})`}>
+      <g
+        clipPath={`url(#${clipId})`}
+        style={{ opacity: animationReady ? 1 : 0 }}
+      >
         {PEN_PATHS.map((d, i) => (
           <path
             key={i}

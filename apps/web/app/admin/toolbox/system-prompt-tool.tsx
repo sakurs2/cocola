@@ -1,12 +1,10 @@
 "use client";
 
-import { ScrollText } from "lucide-react";
-import { ArrowRight, CircleAlert, LoaderCircle, Save, ToggleLeft, ToggleRight } from "lucide-react";
+import { CircleAlert, LoaderCircle, Save, ScrollText } from "lucide-react";
 import { Button, Card, Label, Switch, TextArea, TextField } from "@heroui/react";
-import { ItemCard } from "@heroui-pro/react/item-card";
-import { PressableFeedback } from "@heroui-pro/react/pressable-feedback";
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { AdminAlert, AdminDrawer, AdminStatusBadge } from "@/components/admin/admin-ui";
+import { AdminAlert, AdminDrawer } from "@/components/admin/admin-ui";
+import { ToolboxCard } from "./toolbox-card";
 
 type AgentPrompt = {
   content: string;
@@ -94,22 +92,14 @@ export function SystemPromptTool({
 
   return (
     <>
-      <ItemCard<"button">
-        className="cocola-admin-module-card relative min-h-52 w-full cursor-pointer overflow-hidden"
-        render={(props) => <button type="button" {...props} onClick={() => setOpen(true)} />}
-      >
-        <PressableFeedback.Highlight />
-        <ItemCard.Icon className="bg-cyan-100 text-cyan-600 dark:bg-cyan-950 dark:text-cyan-300"><ScrollText className="size-5" /></ItemCard.Icon>
-        <ItemCard.Content><ItemCard.Title>System Prompt</ItemCard.Title><ItemCard.Description>Set the global behavior policy applied to new agent turns.</ItemCard.Description><span className="mt-4 flex flex-wrap items-center gap-2">
-          <PromptStatus loading={loading} error={Boolean(loadError)} enabled={prompt.enabled} />
-          {!loading && !loadError ? (
-            <span className="font-mono text-[10px] text-muted">
-              v{prompt.version || 0}
-            </span>
-          ) : null}
-        </span></ItemCard.Content>
-        <ItemCard.Action><span className="text-accent flex items-center gap-1 text-sm font-medium">Open<ArrowRight className="size-4" /></span></ItemCard.Action>
-      </ItemCard>
+      <ToolboxCard
+        icon={ScrollText}
+        iconClassName="bg-cyan-100 text-cyan-600 dark:bg-cyan-950 dark:text-cyan-300"
+        status={promptStatusLabel(loading, Boolean(loadError), prompt.enabled)}
+        summary="Set the global behavior policy applied to new agent turns."
+        title="System Prompt"
+        onPress={() => setOpen(true)}
+      />
 
       <AdminDrawer
         className="admin-theme-cyan"
@@ -189,22 +179,10 @@ export function SystemPromptTool({
   );
 }
 
-function PromptStatus({
-  loading,
-  error,
-  enabled,
-}: {
-  loading: boolean;
-  error: boolean;
-  enabled: boolean;
-}) {
-  if (loading) return <AdminStatusBadge>Loading</AdminStatusBadge>;
-  if (error) return <AdminStatusBadge tone="red">Unavailable</AdminStatusBadge>;
-  return (
-    <AdminStatusBadge tone={enabled ? "green" : "neutral"} dot={enabled}>
-      {enabled ? "Enabled" : "Disabled"}
-    </AdminStatusBadge>
-  );
+function promptStatusLabel(loading: boolean, error: boolean, enabled: boolean) {
+  if (loading) return "Loading";
+  if (error) return "Unavailable";
+  return enabled ? "Enabled" : "Disabled";
 }
 
 function PromptMeta({ label, value }: { label: string; value: string | number }) {

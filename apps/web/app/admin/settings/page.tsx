@@ -166,8 +166,8 @@ export default function AdminSettingsPage() {
                 const dirty = !sameValue(valueForDraft(setting), draftValue);
                 const busy = savingKey === setting.key;
                 return (
-                  <div key={setting.key} className="grid gap-4 px-5 py-4 lg:grid-cols-[minmax(0,1fr)_minmax(220px,320px)_180px] lg:items-center">
-                    <div className="min-w-0">
+                  <div key={setting.key} className="admin-setting-row grid gap-4 px-5 py-4 lg:grid-cols-[minmax(0,1fr)_minmax(220px,320px)_180px] lg:items-start">
+                    <div className="admin-setting-description min-w-0">
                       <span className="flex flex-wrap items-center gap-2">
                         <span className="font-medium">{setting.label}</span>
                         <Chip color={setting.source === "db" ? "accent" : "default"} size="sm" variant="soft">{sourceLabel(setting.source)}</Chip>
@@ -179,7 +179,7 @@ export default function AdminSettingsPage() {
                       </div>
                     </div>
 
-                    <div className="min-w-0">
+                    <div className="admin-setting-control min-w-0">
                       <SettingControl
                         setting={setting}
                         value={draftValue}
@@ -190,7 +190,7 @@ export default function AdminSettingsPage() {
                       <div className="text-muted mt-1 text-xs">{`Default: ${formatValue(setting.default)}`}</div>
                     </div>
 
-                    <div className="flex justify-end gap-2">
+                    <div className="admin-setting-actions flex items-center justify-end gap-2">
                       {setting.editable ? (
                         <>
                           <Tooltip delay={0}>
