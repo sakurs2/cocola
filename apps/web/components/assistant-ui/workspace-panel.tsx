@@ -358,7 +358,7 @@ export function WorkspaceDock({
 
   return (
     <div className="flex h-full min-h-0 flex-col bg-surface">
-      <header className="flex min-h-11 items-center gap-1 border-b border-border pl-2 pr-1">
+      <header className="flex min-h-12 items-center gap-1 border-b border-border pl-2 pr-1">
         <div role="tablist" className="flex min-w-0 flex-1 items-center gap-1 overflow-x-auto">
           {openPages.map((page) => {
             const Icon = page.icon;
@@ -367,29 +367,41 @@ export function WorkspaceDock({
               <div
                 key={page.id}
                 title={page.title}
-                className="group flex h-8 shrink-0 items-center gap-0.5"
+                className={cn(
+                  "group flex h-9 shrink-0 items-center rounded-xl transition-colors",
+                  active
+                    ? "bg-default"
+                    : "hover:bg-default/60 focus-within:bg-default/60",
+                )}
               >
                 <Button
                   aria-selected={active}
-                  className="h-8 rounded-xl px-2.5 text-xs"
+                  className="h-9 rounded-xl bg-transparent px-3 pr-2 text-sm hover:bg-transparent data-[hovered=true]:bg-transparent"
                   size="sm"
-                  variant={active ? "secondary" : "ghost"}
+                  variant="ghost"
                   onPress={() => setActivePageId(page.id)}
                 >
                   <Icon
                     className={cn("size-4 shrink-0", active ? "text-accent" : "text-accent/70")}
                   />
-                  <span className="max-w-32 truncate font-medium">{page.label}</span>
+                  <span
+                    className={cn(
+                      "max-w-32 truncate font-medium",
+                      active ? "text-accent" : "text-foreground",
+                    )}
+                  >
+                    {page.label}
+                  </span>
                 </Button>
                 <Button
                   isIconOnly
                   aria-label={`Close ${page.label}`}
-                  className="size-6 min-w-6 rounded-full text-muted/70 opacity-0 transition-opacity focus-visible:opacity-100 group-hover:opacity-100"
+                  className="mr-1 size-7 min-w-7 rounded-lg text-muted/70 opacity-60 transition-[color,background-color,opacity] hover:bg-background/70 hover:text-foreground hover:opacity-100 focus-visible:opacity-100 group-hover:opacity-100"
                   size="sm"
                   variant="ghost"
                   onPress={() => closePage(page.id)}
                 >
-                  <X className="size-3" />
+                  <X className="size-3.5" />
                 </Button>
               </div>
             );
@@ -401,7 +413,7 @@ export function WorkspaceDock({
                 <Button
                   isIconOnly
                   aria-label="Add a panel"
-                  className="shrink-0"
+                  className="size-9 min-w-9 shrink-0"
                   size="sm"
                   variant="ghost"
                 >
@@ -432,7 +444,7 @@ export function WorkspaceDock({
         <Button
           isIconOnly
           aria-label="Close side panel"
-          className="shrink-0"
+          className="size-9 min-w-9 shrink-0"
           size="sm"
           variant="ghost"
           onPress={onClose}
@@ -1366,7 +1378,7 @@ function ArtifactPreviewPage({
 function WorkspaceLauncher({ pages, onOpen }: { pages: DockPage[]; onOpen: (id: string) => void }) {
   return (
     <div className="flex h-full min-h-0 flex-col items-center justify-center px-6">
-      <EmptyState className="w-full max-w-sm" size="sm">
+      <EmptyState className="w-full max-w-md" size="md">
         <EmptyState.Header>
           <EmptyState.Media variant="icon">
             <SquareTerminal className="size-5 text-accent" />
