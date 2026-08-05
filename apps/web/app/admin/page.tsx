@@ -15,11 +15,10 @@ import {
   Users as UsersThree,
   type LucideIcon as PhosphorIcon,
 } from "lucide-react";
-import { motion } from "framer-motion";
 import { ArrowRight } from "lucide-react";
 import Link from "next/link";
-import type { CSSProperties } from "react";
-import { AdminPage as AdminPageLayout } from "@/components/admin/admin-ui";
+import { Card, Chip } from "@heroui/react";
+import { AdminPage as AdminPageLayout, AdminPageHeader } from "@/components/admin/admin-ui";
 
 type AdminModule = {
   title: string;
@@ -155,48 +154,38 @@ const MODULE_GROUPS: { label: string; modules: AdminModule[] }[] = [
 export default function AdminPage() {
   return (
     <AdminPageLayout>
-      <div className="grid gap-4 xl:grid-cols-2">
-        {MODULE_GROUPS.map((group, groupIndex) => (
-          <motion.section
-            key={group.label}
-            initial={{ opacity: 0, y: 8 }}
-            animate={{ opacity: 1, y: 0 }}
-            transition={{ duration: 0.2, delay: Math.min(groupIndex * 0.035, 0.14) }}
-            className="admin-domain-panel rounded-3xl border p-3 sm:p-4"
-          >
-            <div className="mb-3 px-1">
-              <h2 className="text-sm font-semibold text-foreground">{group.label}</h2>
-            </div>
-            <div className="grid gap-3 sm:grid-cols-2">
+      <AdminPageHeader icon={<Graph className="size-5" />} title="Overview" description="Open a control-plane area to manage configuration, operations, or infrastructure." />
+      <div className="grid gap-5 xl:grid-cols-2">
+        {MODULE_GROUPS.map((group) => (
+          <section key={group.label} className="grid content-start gap-3">
+            <div className="flex items-center justify-between px-1"><h2 className="text-sm font-semibold">{group.label}</h2><Chip size="sm" variant="soft">{group.modules.length}</Chip></div>
+            <div className="grid items-stretch gap-3 sm:grid-cols-2">
               {group.modules.map((module) => {
                 const Icon = module.icon;
-                const cardStyle = {
-                  "--card-from": module.from,
-                  "--card-to": module.to,
-                } as CSSProperties;
                 return (
                   <Link
                     key={module.href}
                     href={module.href}
-                    className="admin-module-card group"
-                    style={cardStyle}
+                    className="cocola-admin-module-trigger group rounded-2xl no-underline outline-none focus-visible:ring-2 focus-visible:ring-focus"
                   >
-                    <span className="admin-module-head">
-                      <span className="admin-module-icon">
+                    <Card className="cocola-admin-module-card h-full min-h-52 p-5">
+                    <Card.Content className="flex h-full min-w-0 flex-col items-start p-0">
+                      <span className="flex w-full items-start justify-between gap-3">
+                      <span className="cocola-admin-module-icon flex size-11 shrink-0 items-center justify-center rounded-2xl text-white" style={{background:`linear-gradient(135deg, ${module.from}, ${module.to})`}}>
                         <Icon className="size-6" strokeWidth={2} />
                       </span>
-                      <span className="admin-module-title">{module.title}</span>
-                    </span>
-                    <span className="admin-module-summary">{module.summary}</span>
-                    <span className="admin-module-cta">
-                      Open
-                      <ArrowRight className="size-3.5 transition-transform duration-200 group-hover:translate-x-0.5" />
-                    </span>
+                      <ArrowRight className="text-muted cocola-admin-module-arrow size-4" />
+                      </span>
+                      <span className="mt-4 font-semibold">{module.title}</span>
+                      <span className="text-muted mt-2 line-clamp-3 text-sm leading-6">{module.summary}</span>
+                      <span className="text-accent mt-auto flex items-center gap-1 pt-5 text-sm font-medium">Open<ArrowRight className="cocola-admin-module-arrow size-4" /></span>
+                    </Card.Content>
+                    </Card>
                   </Link>
                 );
               })}
             </div>
-          </motion.section>
+          </section>
         ))}
       </div>
     </AdminPageLayout>

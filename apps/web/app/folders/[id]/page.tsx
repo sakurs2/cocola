@@ -1,21 +1,19 @@
 "use client";
 
-import * as DropdownMenu from "@radix-ui/react-dropdown-menu";
-import { ArrowLeft, Folder, MessagesSquare, MoreHorizontal, Pencil, Trash2 } from "lucide-react";
-import Link from "next/link";
+import { Button, Card, Chip, Dropdown, Input, Label, TextField } from "@heroui/react";
+import { ListView } from "@heroui-pro/react/list-view";
+import { Sheet } from "@heroui-pro/react/sheet";
+import { ArrowLeft, Bot, CalendarDays, Ellipsis, Folder, FolderOpen, MessagesSquare, Pencil, Trash2 } from "lucide-react";
 import { useParams, useRouter } from "next/navigation";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useCocola, type ConversationSummary } from "@/app/runtime-provider";
-import { ConversationActionsMenu } from "@/components/assistant-ui/conversation-actions-menu";
-import { DeleteConfirmDialog } from "@/components/assistant-ui/delete-confirm-dialog";
 import { ConversationComposer } from "@/components/assistant-ui/thread";
 import { useWorkspaceToast } from "@/components/assistant-ui/workspace-toast";
 
 type DeleteTarget = { kind: "folder" | "conversation"; id: string; title: string };
 
 export default function FolderPage() {
-  const params = useParams<{ id: string }>();
-  const folderID = params.id;
+  const { id: folderID } = useParams<{ id: string }>();
   const router = useRouter();
   const { showSuccess } = useWorkspaceToast();
   const {
@@ -38,13 +36,7 @@ export default function FolderPage() {
   const folderInputRef = useRef<HTMLInputElement>(null);
   const folder = folders.find((item) => item.id === folderID);
   const folderConversations = useMemo(
-    () =>
-      conversations
-        .filter(
-          (conversation) =>
-            conversation.chat_type !== "scheduled_task" && conversation.folder_id === folderID,
-        )
-        .sort((a, b) => Date.parse(b.updated_at) - Date.parse(a.updated_at)),
+    () => conversations.filter((conversation) => conversation.chat_type !== "scheduled_task" && conversation.folder_id === folderID).sort((a, b) => Date.parse(b.updated_at) - Date.parse(a.updated_at)),
     [conversations, folderID],
   );
   const [editingConversationID, setEditingConversationID] = useState<string | null>(null);
@@ -62,27 +54,12 @@ export default function FolderPage() {
   }, [folder, newConversation]);
 
   useEffect(() => {
-    if (
-      preparedFolder.current === folderID &&
-      preparedSession.current === activeSessionId &&
-      runningSessionIds.has(activeSessionId)
-    ) {
-      router.push("/");
-    }
+    if (preparedFolder.current === folderID && preparedSession.current === activeSessionId && runningSessionIds.has(activeSessionId)) router.push("/");
   }, [activeSessionId, folderID, router, runningSessionIds]);
 
-  // Reliably place the cursor in the rename field once it mounts. Radix returns
-  // focus to its trigger after the menu closes, which defeats `autoFocus`, so we
-  // focus + select on the next frame instead.
   useEffect(() => {
     if (!editingFolder) return;
-    const frame = requestAnimationFrame(() => {
-      const input = folderInputRef.current;
-      if (input) {
-        input.focus();
-        input.select();
-      }
-    });
+    const frame = requestAnimationFrame(() => { folderInputRef.current?.focus(); folderInputRef.current?.select(); });
     return () => cancelAnimationFrame(frame);
   }, [editingFolder]);
 
@@ -98,24 +75,21 @@ export default function FolderPage() {
     try {
       await renameConversation(conversation.id, title);
       setError(null);
-    } catch (renameError) {
-      setError(renameError instanceof Error ? renameError.message : "Could not rename chat");
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : "Could not rename chat");
     }
   };
 
   const commitFolderRename = async () => {
     if (!folder) return;
     const name = folderDraft.trim();
-    if (!name) {
-      setEditingFolder(false);
-      return;
-    }
+    if (!name) { setEditingFolder(false); return; }
     try {
       await renameFolder(folder.id, name);
       setEditingFolder(false);
       setError(null);
-    } catch (renameError) {
-      setError(renameError instanceof Error ? renameError.message : "Could not rename folder");
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : "Could not rename folder");
     }
   };
 
@@ -123,12 +97,9 @@ export default function FolderPage() {
     try {
       await moveConversation(conversationID, destination);
       setError(null);
-      const destinationName = destination
-        ? folders.find((item) => item.id === destination)?.name || "folder"
-        : "Chats";
-      showSuccess(`Moved to ${destinationName}`);
-    } catch (moveError) {
-      setError(moveError instanceof Error ? moveError.message : "Could not move conversation");
+      showSuccess(`Moved to ${destination ? folders.find((item) => item.id === destination)?.name || "folder" : "Chats"}`);
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : "Could not move conversation");
     }
   };
 
@@ -144,244 +115,88 @@ export default function FolderPage() {
         await deleteConversation(deleteTarget.id);
       }
       setDeleteTarget(null);
-    } catch (deleteError) {
-      setError(deleteError instanceof Error ? deleteError.message : "Could not delete item");
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : "Could not delete item");
     } finally {
       setDeleting(false);
     }
   };
 
   if (!folder && foldersLoaded) {
-    return (
-      <div className="grid h-full place-items-center px-6 text-center">
-        <div>
-          <Folder className="mx-auto size-9 text-muted-foreground" />
-          <h1 className="mt-3 text-lg font-semibold">Folder not found</h1>
-          <p className="mt-1 text-sm text-muted-foreground">
-            It may have been deleted or belongs to another account.
-          </p>
-          <button
-            type="button"
-            onClick={() => router.push("/folders")}
-            className="mt-4 rounded-xl bg-primary px-4 py-2 text-sm font-medium text-primary-foreground focus:outline-none"
-          >
-            Back to folders
-          </button>
-        </div>
-      </div>
-    );
+    return <div className="cocola-web-page mx-auto grid min-h-72 max-w-4xl place-items-center p-8 text-center"><div><Folder className="text-muted mx-auto size-9" /><h1 className="mt-3 text-lg font-semibold">Folder not found</h1><p className="text-muted mt-1 text-sm">It may have been deleted or belongs to another account.</p><Button className="mt-4" onPress={() => router.push("/folders")}>Back to folders</Button></div></div>;
   }
-
-  if (!folder) return <div className="h-full" />;
+  if (!folder) return <div className="min-h-64" />;
 
   return (
-    <div className="user-page user-theme-amber h-full overflow-y-auto px-5 py-8 sm:px-8 lg:px-12">
-      <div className="mx-auto w-full max-w-4xl pb-16">
-        <button
-          type="button"
-          onClick={() => router.push("/folders")}
-          className="group inline-flex items-center gap-1.5 rounded-full border border-black/[0.06] bg-white px-4 py-2 text-[13px] font-medium text-muted-foreground shadow-[0_1px_2px_0_rgb(15_23_42/0.06),0_6px_16px_-10px_rgb(15_23_42/0.25)] transition-all duration-200 hover:-translate-y-0.5 hover:text-foreground hover:shadow-[0_2px_4px_0_rgb(15_23_42/0.08),0_12px_24px_-12px_rgb(15_23_42/0.35)] active:translate-y-0 active:shadow-[0_1px_2px_0_rgb(15_23_42/0.06)]"
-        >
-          <ArrowLeft className="size-4 transition-transform duration-200 group-hover:-translate-x-0.5" />
-          Back
-        </button>
-
-        <section className="relative mt-8 pl-8 sm:pl-11">
-          <div className="absolute bottom-[-2.5rem] left-[0.9rem] top-10 w-px bg-gradient-to-b from-amber-500/55 via-amber-500/20 to-transparent sm:left-[1.15rem]" />
-          <div className="absolute left-0 top-0 grid size-8 place-items-center rounded-xl border border-amber-500/20 bg-amber-500/10 text-amber-600 shadow-sm sm:size-9">
-            <Folder className="size-4 sm:size-[18px]" />
-          </div>
-          <div className="flex min-w-0 items-start justify-between gap-3">
-            <div className="min-w-0 flex-1">
-              {editingFolder ? (
-                <input
-                  ref={folderInputRef}
-                  value={folderDraft}
-                  onChange={(event) => setFolderDraft(event.target.value)}
-                  onBlur={() => void commitFolderRename()}
-                  onKeyDown={(event) => {
-                    if (event.key === "Enter") event.currentTarget.blur();
-                    if (event.key === "Escape") setEditingFolder(false);
-                  }}
-                  className="w-full bg-transparent text-3xl font-semibold tracking-tight outline-none"
-                />
-              ) : (
-                <h1 className="truncate text-3xl font-semibold tracking-tight text-foreground">
-                  {folder.name}
-                </h1>
-              )}
-              <p className="mt-2 text-sm text-muted-foreground">
-                Start something new or continue a conversation in this folder.
-              </p>
-            </div>
-            <DropdownMenu.Root>
-              <DropdownMenu.Trigger asChild>
-                <button
-                  type="button"
-                  aria-label="Folder actions"
-                  className="grid size-9 shrink-0 place-items-center rounded-xl text-muted-foreground transition hover:bg-muted hover:text-foreground focus:outline-none"
-                >
-                  <MoreHorizontal className="size-5" />
-                </button>
-              </DropdownMenu.Trigger>
-              <DropdownMenu.Portal>
-                <DropdownMenu.Content
-                  align="end"
-                  sideOffset={5}
-                  onCloseAutoFocus={(event) => {
-                    if (editingFolder) event.preventDefault();
-                  }}
-                  className="cocola-user-ui z-50 min-w-40 rounded-xl border border-border bg-popover p-1 text-foreground shadow-xl outline-none"
-                >
-                  <DropdownMenu.Item
-                    onSelect={() => {
-                      setFolderDraft(folder.name);
-                      setEditingFolder(true);
-                    }}
-                    className="flex cursor-default items-center gap-2 rounded-lg px-2 py-1.5 text-sm text-foreground outline-none focus:bg-accent focus:text-foreground data-[highlighted]:bg-accent data-[highlighted]:text-foreground"
-                  >
-                    <Pencil className="size-4" />
-                    Rename
-                  </DropdownMenu.Item>
-                  <DropdownMenu.Item
-                    onSelect={() =>
-                      setDeleteTarget({ kind: "folder", id: folder.id, title: folder.name })
-                    }
-                    className="flex cursor-default items-center gap-2 rounded-lg px-2 py-1.5 text-sm text-red-500 outline-none focus:bg-red-500/10 focus:text-red-600"
-                  >
-                    <Trash2 className="size-4" />
-                    Delete
-                  </DropdownMenu.Item>
-                </DropdownMenu.Content>
-              </DropdownMenu.Portal>
-            </DropdownMenu.Root>
-          </div>
-
-          <div className="mt-8">
-            <ConversationComposer placeholder={`Start a chat in ${folder.name}...`} />
-          </div>
-        </section>
-
-        <section className="mt-14">
-          <div className="flex items-end justify-between border-b border-border/80 pb-3">
-            <div>
-              <h2 className="text-sm font-semibold text-foreground">Recent chats</h2>
-              <p className="mt-0.5 text-xs text-muted-foreground">
-                {folderConversations.length} {folderConversations.length === 1 ? "chat" : "chats"}
-              </p>
-            </div>
-          </div>
-          {error ? (
-            <div className="mt-4 rounded-xl border border-red-500/20 bg-red-500/10 px-3 py-2 text-sm text-red-600">
-              {error}
-            </div>
-          ) : null}
-          {folderConversations.length === 0 ? (
-            <div className="mt-6 rounded-2xl border border-dashed border-border px-5 py-10 text-center">
-              <MessagesSquare className="mx-auto size-7 text-muted-foreground" />
-              <p className="mt-2 text-sm font-medium">No chats in this folder yet</p>
-              <p className="mt-1 text-xs text-muted-foreground">
-                Use the composer above to start the first one.
-              </p>
-            </div>
+    <div className="cocola-web-page mx-auto flex w-full max-w-5xl flex-col gap-5 p-4 sm:p-6 lg:p-8">
+      <header className="flex flex-wrap items-center gap-3">
+        <Button isIconOnly aria-label="Back to Folders" variant="ghost" onPress={() => router.push("/folders")}><ArrowLeft className="size-4" /></Button>
+        <span className="bg-amber-500/15 text-amber-600 flex size-11 items-center justify-center rounded-2xl dark:text-amber-300"><FolderOpen className="size-5" /></span>
+        <div className="flex h-11 min-w-0 flex-1 items-center">
+          {editingFolder ? (
+            <TextField className="h-11 w-full max-w-sm" value={folderDraft} onChange={setFolderDraft}>
+              <Label className="sr-only">Folder name</Label>
+              <Input ref={folderInputRef} aria-label="Folder name" className="h-11 py-0 text-2xl font-semibold leading-11 tracking-[-0.03em]" onBlur={() => void commitFolderRename()} onKeyDown={(event) => { if (event.key === "Enter") event.currentTarget.blur(); if (event.key === "Escape") setEditingFolder(false); }} />
+            </TextField>
           ) : (
-            <div className="mt-2 divide-y divide-border/70">
-              {folderConversations.map((conversation) => (
-                <div
-                  key={conversation.id}
-                  className="group flex min-h-16 items-center gap-3 rounded-xl px-3 py-3 transition hover:bg-muted"
-                >
-                  <div className="min-w-0 flex-1">
-                    {editingConversationID === conversation.id ? (
-                      <input
-                        autoFocus
-                        value={conversationDraft}
-                        onChange={(event) => setConversationDraft(event.target.value)}
-                        onBlur={() => void commitConversationRename(conversation)}
-                        onKeyDown={(event) => {
-                          if (event.key === "Enter") event.currentTarget.blur();
-                          if (event.key === "Escape") setEditingConversationID(null);
-                        }}
-                        className="w-full bg-transparent text-sm font-medium outline-none"
-                      />
-                    ) : (
-                      <button
-                        type="button"
-                        onClick={() => void openConversation(conversation.id)}
-                        className="block w-full truncate text-left text-sm font-medium text-foreground focus:outline-none"
-                      >
-                        {conversation.title || "Untitled"}
-                      </button>
-                    )}
-                    <span className="mt-1 block text-xs text-muted-foreground">
-                      {formatUpdatedAt(conversation.updated_at)} ·{" "}
-                      {runtimes.find((runtime) => runtime.id === conversation.runtime_id)?.label ||
-                        conversation.runtime_id}
-                    </span>
-                  </div>
-                  <ConversationActionsMenu
-                    conversation={conversation}
-                    folders={folders}
-                    onRename={() => {
-                      setEditingConversationID(conversation.id);
-                      setConversationDraft(conversation.title || "Untitled");
-                    }}
-                    onDelete={() =>
-                      setDeleteTarget({
-                        kind: "conversation",
-                        id: conversation.id,
-                        title: conversation.title || "Untitled",
-                      })
-                    }
-                    onMove={(destination) => void moveChat(conversation.id, destination)}
-                    triggerClassName="opacity-60 sm:opacity-0"
-                  />
-                </div>
-              ))}
-            </div>
+            <div className="min-w-0"><h1 className="truncate text-2xl font-semibold leading-9 tracking-[-0.03em]">{folder.name}</h1><p className="text-muted mt-1 text-sm">{folderConversations.length} conversation{folderConversations.length === 1 ? "" : "s"}</p></div>
           )}
-        </section>
-      </div>
+        </div>
+        <div className="flex shrink-0 gap-2">
+          {!editingFolder ? <Button size="sm" variant="outline" onPress={() => { setFolderDraft(folder.name); setEditingFolder(true); }}><Pencil className="size-3.5" />Rename</Button> : null}
+          <Button size="sm" variant="danger-soft" onPress={() => setDeleteTarget({ kind: "folder", id: folder.id, title: folder.name })}><Trash2 className="size-3.5" />Delete</Button>
+        </div>
+      </header>
 
-      <DeleteConfirmDialog
-        open={deleteTarget !== null}
-        title={
-          deleteTarget?.kind === "folder" ? "Delete folder and chats?" : "Delete conversation?"
-        }
-        description={
-          deleteTarget?.kind === "folder" ? (
-            <>
-              <span className="font-medium text-foreground">{deleteTarget.title}</span> and all
-              chats inside it will be permanently deleted. Stop any running answers first.
-            </>
-          ) : (
-            <>
-              <span className="font-medium text-foreground">{deleteTarget?.title}</span> will be
-              permanently deleted.
-            </>
-          )
-        }
-        busy={deleting}
-        error={error}
-        onOpenChange={(open) => {
-          if (!open) {
-            setDeleteTarget(null);
-            setError(null);
-          }
-        }}
-        onConfirm={() => void confirmDelete()}
-      />
+      {error ? <div className="bg-danger/10 text-danger rounded-2xl px-4 py-3 text-sm">{error}</div> : null}
+
+      <Card className="p-5">
+        <Card.Header className="p-0"><Card.Title>Start a chat in {folder.name}</Card.Title><Card.Description>New conversations are automatically filed here.</Card.Description></Card.Header>
+        <Card.Content className="mt-4 p-0"><ConversationComposer placeholder={`Start a chat in ${folder.name}...`} /></Card.Content>
+      </Card>
+
+      <div className="flex items-center justify-between"><div><h2 className="font-semibold">Recent chats</h2><p className="text-muted mt-1 text-sm">Scheduled tasks are excluded from folder chat counts.</p></div><Chip size="sm" variant="soft">{folderConversations.length}</Chip></div>
+
+      {folderConversations.length ? (
+        <ListView aria-label="Folder conversations" items={folderConversations} selectionMode="none" variant="primary" onAction={(key) => { if (String(key) !== editingConversationID) void openConversation(String(key)); }}>
+          {(conversation) => (
+            <ListView.Item id={conversation.id} textValue={conversation.title || "Untitled"}>
+              <ListView.ItemContent>
+                <ConversationIcon conversation={conversation} />
+                {editingConversationID === conversation.id ? (
+                  <TextField className="min-w-0 flex-1" value={conversationDraft} onChange={setConversationDraft}><Label className="sr-only">Chat name</Label><Input autoFocus aria-label="Chat name" className="h-9" onBlur={() => void commitConversationRename(conversation)} onKeyDown={(event) => { event.stopPropagation(); if (event.key === "Enter") event.currentTarget.blur(); if (event.key === "Escape") setEditingConversationID(null); }} onPointerDown={(event) => event.stopPropagation()} /></TextField>
+                ) : (
+                  <div className="flex min-w-0 flex-col"><ListView.Title>{conversation.title || "Untitled"}</ListView.Title><ListView.Description>{formatUpdatedAt(conversation.updated_at)} · {runtimes.find((runtime) => runtime.id === conversation.runtime_id)?.label || conversation.runtime_id}</ListView.Description></div>
+                )}
+              </ListView.ItemContent>
+              <ListView.ItemAction>
+                <Dropdown>
+                  <Dropdown.Trigger aria-label={`Actions for ${conversation.title || "Untitled"}`} className="text-muted grid size-8 place-items-center rounded-xl"><Ellipsis className="size-4" /></Dropdown.Trigger>
+                  <Dropdown.Popover placement="bottom end"><Dropdown.Menu aria-label="Conversation actions" onAction={(key) => { const action = String(key); if (action === "rename") { setEditingConversationID(conversation.id); setConversationDraft(conversation.title || "Untitled"); } else if (action === "delete") setDeleteTarget({ kind: "conversation", id: conversation.id, title: conversation.title || "Untitled" }); else if (action === "move-root") void moveChat(conversation.id, null); else if (action.startsWith("move:")) void moveChat(conversation.id, action.slice(5)); }}><Dropdown.Item id="rename" textValue="Rename">Rename</Dropdown.Item><Dropdown.Item id="move-root" textValue="Move to Chats">Move to Chats</Dropdown.Item>{folders.filter((item) => item.id !== folder.id).map((item) => <Dropdown.Item key={item.id} id={`move:${item.id}`} textValue={`Move to ${item.name}`}>Move to {item.name}</Dropdown.Item>)}<Dropdown.Item id="delete" textValue="Delete">Delete</Dropdown.Item></Dropdown.Menu></Dropdown.Popover>
+                </Dropdown>
+              </ListView.ItemAction>
+            </ListView.Item>
+          )}
+        </ListView>
+      ) : (
+        <Card className="border-separator min-h-40 border border-dashed p-6"><Card.Content className="text-muted flex flex-col items-center justify-center gap-2 p-0 text-center"><MessagesSquare className="size-6" /><span className="text-sm font-medium">No chats in this folder yet</span><span className="text-xs">Use the composer above to start the first one.</span></Card.Content></Card>
+      )}
+
+      <Sheet isOpen={deleteTarget !== null} placement="right" onOpenChange={(open) => { if (!open) { setDeleteTarget(null); setError(null); } }}>
+        <Sheet.Backdrop><Sheet.Content className="w-full md:w-[420px]"><Sheet.Dialog><Sheet.CloseTrigger aria-label="Close delete confirmation" /><Sheet.Header><Sheet.Heading>{deleteTarget?.kind === "folder" ? "Delete folder and chats?" : "Delete conversation?"}</Sheet.Heading><p className="text-muted text-sm">{deleteTarget?.kind === "folder" ? `${deleteTarget.title} and every chat inside it will be permanently deleted.` : `${deleteTarget?.title || "This conversation"} will be permanently deleted.`}</p></Sheet.Header><Sheet.Body>{error ? <div className="bg-danger/10 text-danger rounded-2xl px-4 py-3 text-sm">{error}</div> : null}</Sheet.Body><Sheet.Footer className="gap-2"><Button variant="outline" onPress={() => setDeleteTarget(null)}>Cancel</Button><Button isPending={deleting} variant="danger-soft" onPress={() => void confirmDelete()}>Delete</Button></Sheet.Footer></Sheet.Dialog></Sheet.Content></Sheet.Backdrop>
+      </Sheet>
     </div>
   );
+}
+
+function ConversationIcon({ conversation }: { conversation: ConversationSummary }) {
+  if (conversation.agent) return <span className="bg-cyan-500/15 text-cyan-600 flex size-9 shrink-0 items-center justify-center rounded-xl dark:text-cyan-300"><Bot className="size-4" /></span>;
+  if (conversation.chat_type === "scheduled_task") return <span className="bg-amber-500/15 text-amber-600 flex size-9 shrink-0 items-center justify-center rounded-xl dark:text-amber-300"><CalendarDays className="size-4" /></span>;
+  return <span className="bg-blue-500/15 text-blue-600 flex size-9 shrink-0 items-center justify-center rounded-xl dark:text-blue-300"><MessagesSquare className="size-4" /></span>;
 }
 
 function formatUpdatedAt(value: string) {
   const date = new Date(value);
   if (Number.isNaN(date.getTime())) return "Recently updated";
-  return new Intl.DateTimeFormat(undefined, {
-    month: "short",
-    day: "numeric",
-    hour: "2-digit",
-    minute: "2-digit",
-  }).format(date);
+  return new Intl.DateTimeFormat(undefined, { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" }).format(date);
 }

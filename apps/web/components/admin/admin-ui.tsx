@@ -1,12 +1,11 @@
 "use client";
 
-import * as Dialog from "@radix-ui/react-dialog";
 import { motion } from "framer-motion";
-import { ChevronLeft, ChevronRight, RefreshCw, X } from "lucide-react";
-import { type ReactNode, useState } from "react";
-import { Button, type ButtonProps } from "@/components/ui/button";
-import { Chip as HeroChip } from "@heroui/react";
-import { Card } from "@/components/ui/card";
+import { CheckCircle2, ChevronLeft, ChevronRight, Copy, RefreshCw } from "lucide-react";
+import { type ReactNode, useLayoutEffect, useRef, useState } from "react";
+import { Button, Card, Chip, Tooltip, type ButtonProps } from "@heroui/react";
+import { EmptyState } from "@heroui-pro/react/empty-state";
+import { Sheet } from "@heroui-pro/react/sheet";
 import { cn } from "@/lib/utils";
 
 export function AdminPage({
@@ -63,7 +62,7 @@ export function AdminPageHeader({
         {icon ? <div className="admin-page-icon">{icon}</div> : null}
         <div className="min-w-0">
           {eyebrow ? (
-            <div className="text-[11px] font-semibold uppercase tracking-[0.14em] text-primary/70">
+            <div className="text-[11px] font-semibold uppercase tracking-[0.14em] text-accent/70">
               {eyebrow}
             </div>
           ) : null}
@@ -71,7 +70,7 @@ export function AdminPageHeader({
             {title}
           </h1>
           {description ? (
-            <p className="mt-1 max-w-3xl text-sm leading-6 text-muted-foreground">{description}</p>
+            <p className="mt-1 max-w-3xl text-sm leading-6 text-muted">{description}</p>
           ) : null}
         </div>
       </div>
@@ -97,14 +96,14 @@ export function AdminMetric({
 }) {
   return (
     <Card className={cn("px-4 py-3.5", className)} data-tone={tone}>
-      <div className="flex items-center justify-between gap-3 text-xs text-muted-foreground">
+      <div className="flex items-center justify-between gap-3 text-xs text-muted">
         <span>{label}</span>
         {icon ? <span className="admin-metric-icon">{icon}</span> : null}
       </div>
       <div className="mt-2 truncate text-2xl font-semibold tabular-nums tracking-[-0.03em] text-foreground">
         {value}
       </div>
-      {detail ? <div className="mt-1 text-xs text-muted-foreground">{detail}</div> : null}
+      {detail ? <div className="mt-1 text-xs text-muted">{detail}</div> : null}
     </Card>
   );
 }
@@ -141,49 +140,49 @@ export function AdminPagination({
       className={cn(
         "flex min-h-14 flex-col gap-3 px-4 py-3 sm:flex-row sm:items-center sm:justify-between",
         variant === "card"
-          ? "rounded-xl border border-border/70 bg-card/80"
-          : "border-t border-border/70 bg-muted/15",
+          ? "rounded-xl border border-border/70 bg-surface/80"
+          : "border-t border-border/70 bg-surface-secondary/15",
       )}
     >
-      <div className="text-xs tabular-nums text-muted-foreground">
+      <div className="text-xs tabular-nums text-muted">
         {total === undefined ? `${start}–${end} ${label}` : `${start}–${end} of ${total} ${label}`}
       </div>
       <div className="flex items-center gap-2">
-        <span className="min-w-20 text-center text-xs tabular-nums text-muted-foreground">
+        <span className="min-w-20 text-center text-xs tabular-nums text-muted">
           Page {page + 1}
           {pageCount === undefined ? "" : ` of ${pageCount}`}
         </span>
-        <button
-          type="button"
-          className="inline-flex h-9 items-center gap-1.5 rounded-xl border border-border/80 bg-background px-3 text-xs font-medium text-foreground transition-colors hover:bg-muted disabled:pointer-events-none disabled:opacity-40"
+        <Button
+          size="sm"
+          variant="outline"
           aria-label={`Previous page of ${label}`}
-          disabled={page === 0 || loading}
-          onClick={() => onPageChange(Math.max(0, page - 1))}
+          isDisabled={page === 0 || loading}
+          onPress={() => onPageChange(Math.max(0, page - 1))}
         >
           <ChevronLeft className="size-4" />
           Previous
-        </button>
-        <button
-          type="button"
-          className="inline-flex h-9 items-center gap-1.5 rounded-xl border border-border/80 bg-background px-3 text-xs font-medium text-foreground transition-colors hover:bg-muted disabled:pointer-events-none disabled:opacity-40"
+        </Button>
+        <Button
+          size="sm"
+          variant="outline"
           aria-label={`Next page of ${label}`}
-          disabled={!canGoNext || loading}
-          onClick={() => onPageChange(page + 1)}
+          isDisabled={!canGoNext || loading}
+          onPress={() => onPageChange(page + 1)}
         >
           Next
           <ChevronRight className="size-4" />
-        </button>
+        </Button>
       </div>
     </div>
   );
 }
 
 const statusTone = {
-  neutral: "default",
-  sky: "primary",
-  green: "success",
-  amber: "warning",
-  red: "danger",
+  neutral: "border-border bg-surface-secondary text-muted",
+  sky: "border-blue-500/25 bg-blue-500/10 text-blue-700 dark:text-blue-300",
+  green: "border-emerald-500/25 bg-emerald-500/10 text-emerald-700 dark:text-emerald-300",
+  amber: "border-amber-500/25 bg-amber-500/10 text-amber-700 dark:text-amber-300",
+  red: "border-red-500/25 bg-red-500/10 text-red-700 dark:text-red-300",
 } as const;
 
 export function AdminStatusBadge({
@@ -198,20 +197,36 @@ export function AdminStatusBadge({
   className?: string;
 }) {
   return (
-    <HeroChip
-      size="sm"
-      radius="full"
-      variant="flat"
-      color={statusTone[tone]}
-      classNames={{
-        base: cn("min-h-6 border border-current/20 px-2.5", className),
-        content: "flex items-center gap-1.5 px-0 text-xs font-medium",
-      }}
-      startContent={dot ? <span className="ml-1 size-1.5 rounded-full bg-current" /> : undefined}
-    >
+    <Chip className={cn(statusTone[tone], className)} size="sm" variant="soft">
+      {dot ? <span className="size-1.5 rounded-full bg-current" /> : null}
       {children}
-    </HeroChip>
+    </Chip>
   );
+}
+
+export function AdminTruncatedValue({ value, copyLabel = "value", className }: { value: string; copyLabel?: string; className?: string }) {
+  const ref = useRef<HTMLSpanElement>(null);
+  const [truncated, setTruncated] = useState(false);
+  const [copied, setCopied] = useState(false);
+
+  useLayoutEffect(() => {
+    const node = ref.current;
+    if (!node) return;
+    const update = () => setTruncated(node.scrollWidth > node.clientWidth + 1);
+    update();
+    const observer = new ResizeObserver(update);
+    observer.observe(node);
+    return () => observer.disconnect();
+  }, [value]);
+
+  const copy = async () => {
+    await navigator.clipboard.writeText(value);
+    setCopied(true);
+    window.setTimeout(() => setCopied(false), 1600);
+  };
+
+  const text = <span ref={ref} className={cn("block min-w-0 flex-1 truncate", className)}>{value}</span>;
+  return <span className="group flex min-w-0 items-center gap-1">{truncated ? <Tooltip delay={0}><span className="min-w-0 flex-1">{text}</span><Tooltip.Content className="max-w-sm break-all">{value}</Tooltip.Content></Tooltip> : text}<Button isIconOnly aria-label={copied ? `${copyLabel} copied` : `Copy ${copyLabel}`} className={cn("size-7 min-w-7 shrink-0 opacity-0 transition-opacity group-hover:opacity-100", !truncated && "invisible")} isDisabled={!truncated} size="sm" variant="ghost" onPress={() => void copy()}>{copied ? <CheckCircle2 className="text-success size-3.5" /> : <Copy className="size-3.5" />}</Button></span>;
 }
 
 export function AdminAlert({
@@ -229,7 +244,7 @@ export function AdminAlert({
     info: "border-blue-500/25 bg-blue-500/10 text-blue-800",
     success: "border-emerald-500/25 bg-emerald-500/10 text-emerald-800",
     warning: "border-amber-500/25 bg-amber-500/10 text-amber-800",
-    error: "border-destructive/25 bg-destructive/10 text-destructive",
+    error: "border-danger/25 bg-danger/10 text-danger",
   };
   return (
     <div
@@ -257,14 +272,7 @@ export function AdminEmptyState({
   action?: ReactNode;
 }) {
   return (
-    <div className="flex min-h-44 flex-col items-center justify-center px-6 py-10 text-center">
-      {icon ? <div className="admin-empty-icon">{icon}</div> : null}
-      <div className="mt-3 text-sm font-semibold text-foreground">{title}</div>
-      {description ? (
-        <p className="mt-1 max-w-md text-sm text-muted-foreground">{description}</p>
-      ) : null}
-      {action ? <div className="mt-4">{action}</div> : null}
-    </div>
+    <EmptyState><EmptyState.Header>{icon ? <EmptyState.Media variant="icon">{icon}</EmptyState.Media> : null}<EmptyState.Title>{title}</EmptyState.Title>{description ? <EmptyState.Description>{description}</EmptyState.Description> : null}</EmptyState.Header>{action ? <EmptyState.Content>{action}</EmptyState.Content> : null}</EmptyState>
   );
 }
 
@@ -288,37 +296,7 @@ export function AdminDrawer({
   className?: string;
 }) {
   return (
-    <Dialog.Root open={open} onOpenChange={onOpenChange}>
-      <Dialog.Portal>
-        <Dialog.Overlay className="fixed inset-0 z-50 bg-slate-950/20 data-[state=closed]:animate-out data-[state=open]:animate-in data-[state=closed]:fade-out data-[state=open]:fade-in" />
-        <Dialog.Content
-          className={cn(
-            "cocola-admin-ui admin-drawer fixed inset-y-2 right-2 z-50 flex flex-col overflow-hidden rounded-3xl border text-foreground outline-none data-[state=closed]:animate-out data-[state=open]:animate-in data-[state=closed]:slide-out-to-right data-[state=open]:slide-in-from-right",
-            size === "lg" ? "w-[min(42rem,calc(100vw-1rem))]" : "w-[min(30rem,calc(100vw-1rem))]",
-            className,
-          )}
-        >
-          <div className="flex min-h-16 items-center gap-3 border-b border-border/70 px-5">
-            <div className="min-w-0 flex-1">
-              <Dialog.Title className="truncate text-base font-semibold">{title}</Dialog.Title>
-              <Dialog.Description
-                className={cn("text-xs text-muted-foreground", !description && "sr-only")}
-              >
-                {description || `${title} settings`}
-              </Dialog.Description>
-            </div>
-            <Dialog.Close
-              aria-label="Close"
-              className="inline-flex size-9 items-center justify-center rounded-xl text-muted-foreground transition-colors hover:bg-muted hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/40"
-            >
-              <X className="size-4" />
-            </Dialog.Close>
-          </div>
-          <div className="min-h-0 flex-1 overflow-y-auto p-5">{children}</div>
-          {footer ? <div className="border-t border-border/70 p-4">{footer}</div> : null}
-        </Dialog.Content>
-      </Dialog.Portal>
-    </Dialog.Root>
+    <Sheet isOpen={open} placement="right" onOpenChange={onOpenChange}><Sheet.Backdrop><Sheet.Content className={cn(size === "lg" ? "w-full md:w-[672px]" : "w-full md:w-[480px]", className)}><Sheet.Dialog><Sheet.CloseTrigger aria-label="Close" /><Sheet.Header><Sheet.Heading>{title}</Sheet.Heading>{description ? <p className="text-muted text-sm leading-6">{description}</p> : null}</Sheet.Header><Sheet.Body>{children}</Sheet.Body>{footer ? <Sheet.Footer>{footer}</Sheet.Footer> : null}</Sheet.Dialog></Sheet.Content></Sheet.Backdrop></Sheet>
   );
 }
 
@@ -344,36 +322,7 @@ export function AdminConfirmDialog({
   className?: string;
 }) {
   return (
-    <Dialog.Root open={open} onOpenChange={(nextOpen) => !busy && onOpenChange(nextOpen)}>
-      <Dialog.Portal>
-        <Dialog.Overlay className="fixed inset-0 z-50 bg-slate-950/20 data-[state=closed]:animate-out data-[state=open]:animate-in data-[state=closed]:fade-out data-[state=open]:fade-in" />
-        <Dialog.Content
-          className={cn(
-            "cocola-admin-ui admin-drawer fixed left-1/2 top-1/2 z-50 w-[min(28rem,calc(100vw-2rem))] -translate-x-1/2 -translate-y-1/2 rounded-3xl border p-5 text-foreground outline-none data-[state=closed]:animate-out data-[state=open]:animate-in data-[state=closed]:fade-out data-[state=open]:fade-in data-[state=closed]:zoom-out-95 data-[state=open]:zoom-in-95",
-            className,
-          )}
-        >
-          <Dialog.Title className="text-base font-semibold tracking-[-0.01em]">
-            {title}
-          </Dialog.Title>
-          <Dialog.Description className="mt-2 text-sm leading-6 text-muted-foreground">
-            {description}
-          </Dialog.Description>
-          <div className="mt-6 flex items-center justify-end gap-2">
-            <Button variant="outline" disabled={busy} onClick={() => onOpenChange(false)}>
-              Cancel
-            </Button>
-            <Button
-              variant={destructive ? "destructive" : "default"}
-              disabled={busy}
-              onClick={onConfirm}
-            >
-              {busy ? "Deleting…" : confirmLabel}
-            </Button>
-          </div>
-        </Dialog.Content>
-      </Dialog.Portal>
-    </Dialog.Root>
+    <Sheet isOpen={open} placement="right" onOpenChange={(nextOpen) => !busy && onOpenChange(nextOpen)}><Sheet.Backdrop><Sheet.Content className={cn("w-full md:w-[440px]", className)}><Sheet.Dialog><Sheet.CloseTrigger aria-label="Close confirmation" /><Sheet.Header><Sheet.Heading>{title}</Sheet.Heading><p className="text-muted text-sm leading-6">{description}</p></Sheet.Header><Sheet.Body><div className={`${destructive ? "bg-danger/10 text-danger" : "bg-accent-soft text-accent"} rounded-2xl px-4 py-3 text-sm`}>{destructive ? "This action cannot be undone." : "Confirm this operation to continue."}</div></Sheet.Body><Sheet.Footer className="gap-2"><Button isDisabled={busy} variant="outline" onPress={() => onOpenChange(false)}>Cancel</Button><Button isPending={busy} variant={destructive ? "danger" : "primary"} onPress={onConfirm}>{confirmLabel}</Button></Sheet.Footer></Sheet.Dialog></Sheet.Content></Sheet.Backdrop></Sheet>
   );
 }
 
@@ -382,9 +331,15 @@ export function AdminRefreshButton({
   iconClassName,
   className,
   children,
+  disabled,
+  title,
   onClick,
   ...props
-}: ButtonProps & {
+}: Omit<ButtonProps, "children" | "isDisabled" | "onPress"> & {
+  children?: ReactNode;
+  disabled?: boolean;
+  title?: string;
+  onClick?: () => void;
   refreshing?: boolean;
   iconClassName?: string;
 }) {
@@ -392,10 +347,12 @@ export function AdminRefreshButton({
 
   return (
     <Button
+      aria-label={props["aria-label"] || title}
       className={cn("gap-2", className)}
-      onClick={(event) => {
+      isDisabled={disabled}
+      onPress={() => {
         setRefreshCycle((cycle) => cycle + 1);
-        onClick?.(event);
+        onClick?.();
       }}
       {...props}
     >

@@ -1,9 +1,11 @@
 "use client";
 
+import { Button, Card, Chip, Input, Label, TextField } from "@heroui/react";
+import { Sheet } from "@heroui-pro/react/sheet";
 import type { SessionUser } from "@/lib/server-auth";
-import { AlertCircle, CheckCircle2, KeyRound, Save, UserRound } from "lucide-react";
+import { AlertCircle, CheckCircle2, KeyRound, Lock, Save } from "lucide-react";
 import { useRouter } from "next/navigation";
-import { FormEvent, useMemo, useState } from "react";
+import { useMemo, useState, type FormEvent } from "react";
 
 type Notice = { tone: "success" | "error"; message: string } | null;
 
@@ -17,6 +19,7 @@ export function AccountSettingsPanel({ initialAccount }: { initialAccount: Sessi
     currentPassword: "",
   });
   const [password, setPassword] = useState({ current: "", next: "", confirm: "" });
+  const [passwordSheetOpen, setPasswordSheetOpen] = useState(false);
   const [savingProfile, setSavingProfile] = useState(false);
   const [savingPassword, setSavingPassword] = useState(false);
   const [profileNotice, setProfileNotice] = useState<Notice>(null);
@@ -29,6 +32,8 @@ export function AccountSettingsPanel({ initialAccount }: { initialAccount: Sessi
       emailChanged,
     [account, emailChanged, profile],
   );
+  const passwordValid =
+    password.current.length > 0 && password.next.length >= 8 && password.next === password.confirm;
 
   async function saveProfile(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -54,18 +59,13 @@ export function AccountSettingsPanel({ initialAccount }: { initialAccount: Sessi
       if (!response.ok) throw new Error(accountError(body, "Could not save account details."));
       const next = body as SessionUser;
       setAccount(next);
-      setProfile({
-        name: next.name,
-        username: next.username,
-        email: next.email,
-        currentPassword: "",
-      });
+      setProfile({ name: next.name, username: next.username, email: next.email, currentPassword: "" });
       setProfileNotice({ tone: "success", message: "Account details updated." });
       router.refresh();
-    } catch (error) {
+    } catch (cause) {
       setProfileNotice({
         tone: "error",
-        message: error instanceof Error ? error.message : "Could not save account details.",
+        message: cause instanceof Error ? cause.message : "Could not save account details.",
       });
     } finally {
       setSavingProfile(false);
@@ -75,14 +75,7 @@ export function AccountSettingsPanel({ initialAccount }: { initialAccount: Sessi
   async function changePassword(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     setPasswordNotice(null);
-    if (password.next.length < 8) {
-      setPasswordNotice({ tone: "error", message: "New password must be at least 8 characters." });
-      return;
-    }
-    if (password.next !== password.confirm) {
-      setPasswordNotice({ tone: "error", message: "New passwords do not match." });
-      return;
-    }
+    if (!passwordValid) return;
     setSavingPassword(true);
     try {
       const response = await fetch("/api/account/password", {
@@ -98,163 +91,196 @@ export function AccountSettingsPanel({ initialAccount }: { initialAccount: Sessi
       if (!response.ok) throw new Error(accountError(body, "Could not change password."));
       setAccount(body as SessionUser);
       setPassword({ current: "", next: "", confirm: "" });
-      setPasswordNotice({ tone: "success", message: "Password changed." });
+      setPasswordSheetOpen(false);
+      setProfileNotice({ tone: "success", message: "Password changed." });
       router.refresh();
-    } catch (error) {
+    } catch (cause) {
       setPasswordNotice({
         tone: "error",
-        message: error instanceof Error ? error.message : "Could not change password.",
+        message: cause instanceof Error ? cause.message : "Could not change password.",
       });
     } finally {
       setSavingPassword(false);
     }
   }
 
-  return (
-    <div className="grid gap-6 lg:grid-cols-[minmax(0,1.25fr)_minmax(300px,0.75fr)]">
-      <section className="rounded-2xl border border-border bg-card shadow-card">
-        <div className="flex items-center gap-3 border-b border-border px-4 py-3">
-          <div className="grid size-8 place-items-center rounded-xl bg-sky-500/10">
-            <UserRound className="size-4 text-sky-600" />
-          </div>
-          <div>
-            <h2 className="text-sm font-semibold">Personal information</h2>
-            <p className="text-xs text-muted-foreground">Used for your account and Git commits.</p>
-          </div>
-        </div>
-        <form className="space-y-4 p-4" onSubmit={saveProfile}>
-          <AccountField
-            label="Display name"
-            value={profile.name}
-            onChange={(name) => setProfile((current) => ({ ...current, name }))}
-            autoComplete="name"
-            maxLength={128}
-          />
-          <AccountField
-            label="Username"
-            value={profile.username}
-            onChange={(username) => setProfile((current) => ({ ...current, username }))}
-            autoComplete="username"
-            maxLength={64}
-            hint="Your sign-in name. It must be unique."
-          />
-          <AccountField
-            label="Email"
-            type="email"
-            value={profile.email}
-            onChange={(email) => setProfile((current) => ({ ...current, email }))}
-            autoComplete="email"
-            maxLength={254}
-            hint="Used for sign-in and as git user.email."
-          />
-          {emailChanged ? (
-            <AccountField
-              label="Current password"
-              type="password"
-              value={profile.currentPassword}
-              onChange={(currentPassword) =>
-                setProfile((current) => ({ ...current, currentPassword }))
-              }
-              autoComplete="current-password"
-              hint="Required because your email is changing."
-            />
-          ) : null}
-          <NoticeLine notice={profileNotice} />
-          <div className="flex flex-wrap items-center justify-between gap-3 border-t border-border pt-4">
-            <span className="font-mono text-[11px] text-muted-foreground">ID {account.id}</span>
-            <button
-              type="submit"
-              disabled={!profileChanged || savingProfile}
-              className="inline-flex h-9 items-center gap-2 rounded-xl bg-primary px-3 text-sm font-medium text-primary-foreground hover:bg-primary/90 disabled:cursor-not-allowed disabled:opacity-50"
-            >
-              <Save className="size-4" />
-              {savingProfile ? "Saving…" : "Save changes"}
-            </button>
-          </div>
-        </form>
-      </section>
+  const setPasswordOpen = (open: boolean) => {
+    if (savingPassword) return;
+    setPasswordSheetOpen(open);
+    if (!open) {
+      setPassword({ current: "", next: "", confirm: "" });
+      setPasswordNotice(null);
+    }
+  };
 
-      <section className="rounded-2xl border border-border bg-card shadow-card">
-        <div className="flex items-center gap-3 border-b border-border px-4 py-3">
-          <div className="grid size-8 place-items-center rounded-xl bg-amber-500/10">
-            <KeyRound className="size-4 text-amber-600" />
-          </div>
-          <div>
-            <h2 className="text-sm font-semibold">Sign-in security</h2>
-            <p className="text-xs text-muted-foreground">Change the password for this account.</p>
-          </div>
-        </div>
-        <form className="space-y-4 p-4" onSubmit={changePassword}>
-          <AccountField
-            label="Current password"
-            type="password"
-            value={password.current}
-            onChange={(current) => setPassword((value) => ({ ...value, current }))}
-            autoComplete="current-password"
-          />
-          <AccountField
-            label="New password"
-            type="password"
-            value={password.next}
-            onChange={(next) => setPassword((value) => ({ ...value, next }))}
-            autoComplete="new-password"
-            hint="Use at least 8 characters."
-          />
-          <AccountField
-            label="Confirm new password"
-            type="password"
-            value={password.confirm}
-            onChange={(confirm) => setPassword((value) => ({ ...value, confirm }))}
-            autoComplete="new-password"
-          />
-          <NoticeLine notice={passwordNotice} />
-          <div className="flex justify-end border-t border-border pt-4">
-            <button
-              type="submit"
-              disabled={savingPassword || !password.current || !password.next || !password.confirm}
-              className="inline-flex h-9 items-center gap-2 rounded-xl border border-input bg-background px-3 text-sm font-medium hover:bg-accent disabled:cursor-not-allowed disabled:opacity-50"
-            >
-              <KeyRound className="size-4" />
-              {savingPassword ? "Changing…" : "Change password"}
-            </button>
-          </div>
-        </form>
-      </section>
-    </div>
+  return (
+    <>
+      <div className="grid gap-5 lg:grid-cols-[minmax(0,1.25fr)_minmax(300px,0.75fr)]">
+        <Card className="p-5">
+          <form onSubmit={saveProfile}>
+            <Card.Header className="p-0">
+              <Card.Title>Personal information</Card.Title>
+              <Card.Description>Update your display name and sign-in identity.</Card.Description>
+            </Card.Header>
+            <Card.Content className="mt-5 grid gap-4 p-0 sm:grid-cols-2">
+              <AccountField
+                autoComplete="name"
+                label="Display name"
+                maxLength={128}
+                value={profile.name}
+                onChange={(name) => setProfile((current) => ({ ...current, name }))}
+              />
+              <AccountField
+                autoComplete="username"
+                label="Username"
+                maxLength={64}
+                value={profile.username}
+                onChange={(username) => setProfile((current) => ({ ...current, username }))}
+              />
+              <AccountField
+                autoComplete="email"
+                className="sm:col-span-2"
+                label="Email"
+                maxLength={254}
+                type="email"
+                value={profile.email}
+                onChange={(email) => setProfile((current) => ({ ...current, email }))}
+              />
+              {emailChanged ? (
+                <AccountField
+                  autoComplete="current-password"
+                  className="sm:col-span-2"
+                  label="Current password"
+                  type="password"
+                  value={profile.currentPassword}
+                  onChange={(currentPassword) =>
+                    setProfile((current) => ({ ...current, currentPassword }))
+                  }
+                />
+              ) : null}
+              <NoticeLine notice={profileNotice} />
+            </Card.Content>
+            <Card.Footer className="mt-5 justify-between p-0">
+              <span className="text-muted text-xs">ID · {account.id}</span>
+              <Button
+                isDisabled={!profileChanged || savingProfile || (emailChanged && !profile.currentPassword)}
+                isPending={savingProfile}
+                type="submit"
+                variant="primary"
+              >
+                <Save className="size-4" />
+                {savingProfile ? "Saving…" : "Save changes"}
+              </Button>
+            </Card.Footer>
+          </form>
+        </Card>
+
+        <Card className="self-start p-5">
+          <Card.Header className="p-0">
+            <Card.Title>Sign-in security</Card.Title>
+            <Card.Description>Manage how you sign in to Cocola.</Card.Description>
+          </Card.Header>
+          <Card.Content className="mt-5 p-0">
+            <div className="bg-surface-secondary flex items-center gap-3 rounded-2xl p-4">
+              <span className="bg-accent-soft text-accent flex size-10 shrink-0 items-center justify-center rounded-2xl">
+                <Lock className="size-4" />
+              </span>
+              <span className="min-w-0 flex-1">
+                <span className="block text-sm font-semibold">Password</span>
+                <span className="text-muted mt-0.5 block text-xs">At least 8 characters</span>
+              </span>
+              <Chip color="success" size="sm" variant="soft">Configured</Chip>
+            </div>
+          </Card.Content>
+          <Card.Footer className="mt-4 justify-end p-0">
+            <Button variant="outline" onPress={() => setPasswordOpen(true)}>Change password</Button>
+          </Card.Footer>
+        </Card>
+      </div>
+
+      <Sheet isOpen={passwordSheetOpen} placement="right" onOpenChange={setPasswordOpen}>
+        <Sheet.Backdrop>
+          <Sheet.Content className="w-full md:w-[440px]">
+            <Sheet.Dialog>
+              <Sheet.CloseTrigger aria-label="Close password settings" />
+              <Sheet.Header>
+                <Sheet.Heading>Change password</Sheet.Heading>
+                <p className="text-muted text-sm leading-6">
+                  Use at least 8 characters and avoid reusing a password from another service.
+                </p>
+              </Sheet.Header>
+              <Sheet.Body>
+                <form className="grid gap-4" id="change-password-form" onSubmit={changePassword}>
+                  <AccountField
+                    autoComplete="current-password"
+                    label="Current password"
+                    type="password"
+                    value={password.current}
+                    onChange={(current) => setPassword((value) => ({ ...value, current }))}
+                  />
+                  <AccountField
+                    autoComplete="new-password"
+                    label="New password"
+                    type="password"
+                    value={password.next}
+                    onChange={(next) => setPassword((value) => ({ ...value, next }))}
+                  />
+                  <AccountField
+                    autoComplete="new-password"
+                    label="Confirm password"
+                    type="password"
+                    value={password.confirm}
+                    onChange={(confirm) => setPassword((value) => ({ ...value, confirm }))}
+                  />
+                  {password.confirm && password.next !== password.confirm ? (
+                    <p className="text-danger text-xs">The passwords do not match.</p>
+                  ) : null}
+                  <NoticeLine notice={passwordNotice} />
+                </form>
+              </Sheet.Body>
+              <Sheet.Footer className="gap-2">
+                <Button variant="outline" onPress={() => setPasswordOpen(false)}>Cancel</Button>
+                <Button
+                  form="change-password-form"
+                  isDisabled={!passwordValid || savingPassword}
+                  isPending={savingPassword}
+                  type="submit"
+                  variant="primary"
+                >
+                  <KeyRound className="size-4" />
+                  Change password
+                </Button>
+              </Sheet.Footer>
+            </Sheet.Dialog>
+          </Sheet.Content>
+        </Sheet.Backdrop>
+      </Sheet>
+    </>
   );
 }
 
 function AccountField({
+  autoComplete,
+  className,
   label,
+  maxLength,
+  type = "text",
   value,
   onChange,
-  hint,
-  type = "text",
-  autoComplete,
-  maxLength,
 }: {
+  autoComplete: string;
+  className?: string;
   label: string;
+  maxLength?: number;
+  type?: "text" | "email" | "password";
   value: string;
   onChange: (value: string) => void;
-  hint?: string;
-  type?: "text" | "email" | "password";
-  autoComplete: string;
-  maxLength?: number;
 }) {
   return (
-    <label className="block space-y-1.5">
-      <span className="text-sm font-medium">{label}</span>
-      <input
-        type={type}
-        value={value}
-        onChange={(event) => onChange(event.target.value)}
-        autoComplete={autoComplete}
-        maxLength={maxLength}
-        required
-        className="h-10 w-full rounded-xl border border-input bg-background px-3 text-sm outline-none transition-shadow placeholder:text-muted-foreground focus-visible:ring-2 focus-visible:ring-ring"
-      />
-      {hint ? <span className="block text-xs text-muted-foreground">{hint}</span> : null}
-    </label>
+    <TextField className={className} isRequired value={value} variant="secondary" onChange={onChange}>
+      <Label>{label}</Label>
+      <Input autoComplete={autoComplete} maxLength={maxLength} type={type} />
+    </TextField>
   );
 }
 
@@ -263,12 +289,8 @@ function NoticeLine({ notice }: { notice: Notice }) {
   const Icon = notice.tone === "success" ? CheckCircle2 : AlertCircle;
   return (
     <div
+      className={notice.tone === "success" ? "text-success flex items-start gap-2 text-sm" : "text-danger flex items-start gap-2 text-sm"}
       role={notice.tone === "error" ? "alert" : "status"}
-      className={
-        notice.tone === "success"
-          ? "flex items-start gap-2 text-sm text-emerald-600"
-          : "flex items-start gap-2 text-sm text-destructive"
-      }
     >
       <Icon className="mt-0.5 size-4 shrink-0" />
       <span>{notice.message}</span>

@@ -1,23 +1,10 @@
 "use client";
 
-// Product chat page.
-//
-// Composes the assistant-ui Thread on top of the cocola ExternalStore runtime
-// adapter, inside an Open WebUI style shell: a static left sidebar (chat
-// history / folders) and a main column with a slim status bar over the Thread.
-// The runtime owns message state and the SSE
-// plumbing (app/runtime-provider.tsx); this page only renders chrome. The raw
-// event-log debug tool lives at /raw.
-//
-// Identity is intentionally NOT configurable here: every request goes out
-// anonymous and the gateway resolves it to the shared dev-user (auth is a later
-// concern). There is no token input — changing a token in the page would amount
-// to silently switching users, which is not a real auth flow.
-//
-// The main column is a flex row so the shared context dock can sit beside the
-// Thread without overlaying the conversation.
+// The approved HeroUI Demo owns the chat layout; Cocola's runtime supplies the
+// real conversation state, streaming events, session panel, and workspace dock.
 
 import { useThread } from "@assistant-ui/react";
+import { Button, Tooltip } from "@heroui/react";
 import { useCocola, type EnvironmentStatus } from "@/app/runtime-provider";
 import {
   SessionStatusButton,
@@ -29,7 +16,7 @@ import { WorkspaceDock } from "@/components/assistant-ui/workspace-panel";
 import { useWorkspaceToast } from "@/components/assistant-ui/workspace-toast";
 import { cn } from "@/lib/utils";
 import { AnimatePresence, motion } from "framer-motion";
-import { Check, PanelRight, Share2 } from "lucide-react";
+import { PanelRight } from "lucide-react";
 import { useRouter } from "next/navigation";
 import {
   type Dispatch,
@@ -58,6 +45,7 @@ function Workspace() {
   } = useCocola();
   const { showError } = useWorkspaceToast();
   const router = useRouter();
+  const hasMessages = useThread((thread) => thread.messages.length > 0);
   const [workspaceWidth, setWorkspaceWidth] = useState(640);
   const [dockView, setDockView] = useState<"status" | "workspace">("status");
   const [statusOpen, setStatusOpen] = useState(false);
@@ -90,12 +78,12 @@ function Workspace() {
   }, [selectedArtifact]);
 
   useEffect(() => {
-    if (!environmentStatus || selectedArtifact) return;
+    if (!hasMessages || !activeSessionId || !environmentStatus || selectedArtifact) return;
     if (environmentStatus.phase === "preparing" || environmentStatus.phase === "degraded") {
       setDockView("status");
       setStatusOpen(true);
     }
-  }, [environmentStatus, selectedArtifact]);
+  }, [activeSessionId, environmentStatus, hasMessages, selectedArtifact]);
 
   const startWorkspaceResize = useCallback(
     (event: PointerEvent<HTMLDivElement>) => {
@@ -138,8 +126,8 @@ function Workspace() {
                 onPointerDown={startWorkspaceResize}
                 className="group relative z-10 hidden w-3 shrink-0 cursor-col-resize touch-none md:block"
               >
-                <div className="absolute inset-y-0 right-0 w-px bg-border transition-colors group-hover:bg-primary/70" />
-                <div className="absolute inset-y-0 right-0 w-1 bg-transparent transition-colors group-hover:bg-primary/20" />
+                <div className="absolute inset-y-0 right-0 w-px bg-border transition-colors group-hover:bg-accent/70" />
+                <div className="absolute inset-y-0 right-0 w-1 bg-transparent transition-colors group-hover:bg-accent/20" />
               </div>
               <motion.aside
                 key={`workspace-${activeSessionId}`}
@@ -147,7 +135,7 @@ function Workspace() {
                 animate={{ opacity: 1, x: 0 }}
                 exit={{ opacity: 0, x: 28 }}
                 transition={{ duration: 0.18, ease: "easeOut" }}
-                className="fixed inset-x-2 bottom-2 top-14 z-30 w-auto overflow-hidden bg-card md:static md:inset-auto md:z-auto md:w-[var(--workspace-width)] md:shrink-0"
+                className="fixed inset-x-2 bottom-2 top-14 z-30 w-auto overflow-hidden bg-surface md:static md:inset-auto md:z-auto md:w-[var(--workspace-width)] md:shrink-0"
                 style={{ ["--workspace-width" as string]: `${workspaceWidth}px` }}
               >
                 <WorkspaceDock
@@ -159,14 +147,18 @@ function Workspace() {
                 />
               </motion.aside>
             </>
-          ) : environmentStatus && statusOpen && dockView === "status" ? (
+          ) : hasMessages &&
+            activeSessionId &&
+            environmentStatus &&
+            statusOpen &&
+            dockView === "status" ? (
             <motion.aside
               key="session-status"
               initial={{ opacity: 0, x: 24 }}
               animate={{ opacity: 1, x: 0 }}
               exit={{ opacity: 0, x: 24 }}
               transition={{ duration: 0.18, ease: "easeOut" }}
-              className="fixed inset-x-2 bottom-2 top-14 z-30 overflow-hidden rounded-2xl border border-border bg-card/95 shadow-xl backdrop-blur-xl md:static md:inset-auto md:z-auto md:m-2 md:ml-0 md:min-h-0 md:w-80 md:shrink-0 md:self-stretch"
+              className="fixed inset-x-2 bottom-2 top-14 z-30 overflow-hidden rounded-2xl border border-border bg-surface/95 shadow-xl backdrop-blur-xl md:static md:inset-auto md:z-auto md:m-2 md:ml-0 md:min-h-0 md:w-80 md:shrink-0 md:self-stretch"
             >
               <SessionStatusPanel
                 status={environmentStatus}
@@ -234,23 +226,10 @@ function TopBar({
   workspaceOpen: boolean;
 }) {
   const { activeSessionId, conversations } = useCocola();
-  const [copied, setCopied] = useState(false);
   // The empty/welcome state is chrome-free (matches the reference): the status
   // bar and its Share control only appear once a conversation is under way.
   const hasMessages = useThread((t) => t.messages.length > 0);
   const canShare = conversations.some((conversation) => conversation.id === activeSessionId);
-
-  const copyShareLink = useCallback(async () => {
-    if (!activeSessionId || typeof window === "undefined") return;
-    const url = `${window.location.origin}/conversations/${encodeURIComponent(activeSessionId)}`;
-    try {
-      await navigator.clipboard.writeText(url);
-      setCopied(true);
-      window.setTimeout(() => setCopied(false), 1600);
-    } catch {
-      setCopied(false);
-    }
-  }, [activeSessionId]);
 
   if (!hasMessages) return null;
 
@@ -261,40 +240,31 @@ function TopBar({
           {environmentStatus ? (
             <SessionStatusButton status={environmentStatus} onClick={onOpenStatus} />
           ) : null}
-          <button
-            type="button"
-            title={canShare ? "Open workspace" : "Start a conversation to browse its workspace"}
-            aria-label={
-              canShare ? "Open workspace" : "Start a conversation to browse its workspace"
-            }
-            aria-pressed={workspaceOpen}
-            disabled={!canShare}
-            onClick={onOpenWorkspace}
-            className={cn(
-              "inline-flex size-8 items-center justify-center rounded-full transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring disabled:pointer-events-none disabled:opacity-40",
-              workspaceOpen
-                ? "bg-primary/10 text-primary"
-                : "text-muted-foreground hover:bg-muted hover:text-foreground",
-            )}
-          >
-            <PanelRight className="size-4" />
-          </button>
-          <button
-            type="button"
-            title={
-              canShare
-                ? copied
-                  ? "Link copied"
-                  : "Copy share link"
-                : "Start a conversation to share"
-            }
-            aria-label={canShare ? "Copy share link" : "Start a conversation to share"}
-            disabled={!canShare}
-            onClick={() => void copyShareLink()}
-            className="inline-flex size-8 items-center justify-center rounded-full text-muted-foreground transition-colors hover:bg-muted hover:text-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring disabled:pointer-events-none disabled:opacity-40"
-          >
-            {copied ? <Check className="size-4 text-emerald-600" /> : <Share2 className="size-4" />}
-          </button>
+          <Tooltip>
+            <Tooltip.Trigger>
+              <Button
+                isIconOnly
+                aria-label={
+                  canShare ? "Open workspace" : "Start a conversation to browse its workspace"
+                }
+                aria-pressed={workspaceOpen}
+                isDisabled={!canShare}
+                onPress={onOpenWorkspace}
+                variant="ghost"
+                className={cn(
+                  "size-8 min-w-8 rounded-full",
+                  workspaceOpen
+                    ? "bg-accent/10 text-accent"
+                    : "text-muted hover:bg-surface-secondary hover:text-foreground",
+                )}
+              >
+                <PanelRight className="size-4" />
+              </Button>
+            </Tooltip.Trigger>
+            <Tooltip.Content>
+              {canShare ? "Open workspace" : "Start a conversation to browse its workspace"}
+            </Tooltip.Content>
+          </Tooltip>
         </div>
       </div>
     </div>

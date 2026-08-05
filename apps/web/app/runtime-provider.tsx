@@ -18,6 +18,8 @@ import {
   useExternalStoreRuntime,
   type ThreadMessageLike,
 } from "@assistant-ui/react";
+import { Button } from "@heroui/react";
+import { Sheet } from "@heroui-pro/react/sheet";
 import {
   createContext,
   useCallback,
@@ -1375,6 +1377,10 @@ export function CocolaRuntimeProvider({ children }: { children: ReactNode }) {
   const deletedScheduledConversationsRef = useRef<Map<string, number>>(new Map());
   const workspaceResetAllowedRef = useRef<Set<string>>(new Set());
   const workspaceResetPromptedRef = useRef<Set<string>>(new Set());
+  const [workspaceResetRequest, setWorkspaceResetRequest] = useState<{
+    conversationId: string;
+    assistantId: string;
+  } | null>(null);
 
   const messages = useMemo(() => convMessages[sessionId] ?? [], [convMessages, sessionId]);
   const isRunning = runningIds.has(sessionId);
@@ -1946,20 +1952,10 @@ export function CocolaRuntimeProvider({ children }: { children: ReactNode }) {
                 !workspaceResetPromptedRef.current.has(cursor.conversationId)
               ) {
                 workspaceResetPromptedRef.current.add(cursor.conversationId);
-                const confirmed = window.confirm(
-                  "The node holding this Workspace is unavailable. Use an empty Workspace on another node for your next retry? This cannot recover files from the previous node.",
-                );
-                if (confirmed) {
-                  workspaceResetAllowedRef.current.add(cursor.conversationId);
-                  applyEvent(cursor.conversationId, cursor.assistantId, {
-                    kind: "error",
-                    data: {
-                      error: "Empty Workspace confirmed. Send the message again to continue.",
-                    },
-                  });
-                } else {
-                  workspaceResetPromptedRef.current.delete(cursor.conversationId);
-                }
+                setWorkspaceResetRequest({
+                  conversationId: cursor.conversationId,
+                  assistantId: cursor.assistantId,
+                });
               }
               if (isTerminalAgentEvent(event)) {
                 terminal = true;
@@ -3722,6 +3718,70 @@ export function CocolaRuntimeProvider({ children }: { children: ReactNode }) {
   return (
     <CocolaContext.Provider value={ctx}>
       <AssistantRuntimeProvider runtime={runtime}>{children}</AssistantRuntimeProvider>
+      <Sheet
+        isOpen={workspaceResetRequest !== null}
+        placement="right"
+        onOpenChange={(open) => {
+          if (open || !workspaceResetRequest) return;
+          workspaceResetPromptedRef.current.delete(workspaceResetRequest.conversationId);
+          setWorkspaceResetRequest(null);
+        }}
+      >
+        <Sheet.Backdrop>
+          <Sheet.Content className="w-full md:w-[440px]">
+            <Sheet.Dialog>
+              <Sheet.CloseTrigger aria-label="Close workspace recovery" />
+              <Sheet.Header>
+                <Sheet.Heading>Use an empty Workspace?</Sheet.Heading>
+                <p className="text-muted text-sm leading-6">
+                  The node holding this Workspace is unavailable. A new empty Workspace lets the
+                  next retry continue on another node, but cannot recover files from the previous
+                  node.
+                </p>
+              </Sheet.Header>
+              <Sheet.Body>
+                <div className="bg-warning/10 text-warning rounded-2xl px-4 py-3 text-sm">
+                  Existing workspace files will not be copied to the replacement node.
+                </div>
+              </Sheet.Body>
+              <Sheet.Footer className="gap-2">
+                <Button
+                  variant="outline"
+                  onPress={() => {
+                    if (workspaceResetRequest) {
+                      workspaceResetPromptedRef.current.delete(
+                        workspaceResetRequest.conversationId,
+                      );
+                    }
+                    setWorkspaceResetRequest(null);
+                  }}
+                >
+                  Keep current Workspace
+                </Button>
+                <Button
+                  onPress={() => {
+                    if (!workspaceResetRequest) return;
+                    workspaceResetAllowedRef.current.add(workspaceResetRequest.conversationId);
+                    applyEvent(
+                      workspaceResetRequest.conversationId,
+                      workspaceResetRequest.assistantId,
+                      {
+                        kind: "error",
+                        data: {
+                          error: "Empty Workspace confirmed. Send the message again to continue.",
+                        },
+                      },
+                    );
+                    setWorkspaceResetRequest(null);
+                  }}
+                >
+                  Use empty Workspace
+                </Button>
+              </Sheet.Footer>
+            </Sheet.Dialog>
+          </Sheet.Content>
+        </Sheet.Backdrop>
+      </Sheet>
     </CocolaContext.Provider>
   );
 }

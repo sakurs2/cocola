@@ -33,6 +33,17 @@ import {
   Trash2,
   Waypoints,
 } from "lucide-react";
+import {
+  Button,
+  Card,
+  Checkbox,
+  Chip,
+  Input,
+  Label,
+  SearchField,
+  TextArea,
+  TextField,
+} from "@heroui/react";
 import { SelectControl } from "@/components/ui/select-control";
 import {
   AdminAlert,
@@ -43,7 +54,6 @@ import {
   AdminPageHeader,
   AdminRefreshButton,
 } from "@/components/admin/admin-ui";
-import { Button } from "@/components/ui/button";
 
 type MCPServer = {
   id: string;
@@ -89,11 +99,6 @@ const EMPTY_FORM: FormState = {
   clearEnv: false,
   clearHeaders: false,
 };
-
-const controlClass =
-  "h-10 min-w-0 rounded-xl border border-input bg-background/85 px-3 text-sm text-foreground outline-none transition-[border-color,box-shadow] placeholder:text-muted-foreground focus:border-ring focus:ring-2 focus:ring-ring/20";
-const textAreaClass =
-  "min-h-24 min-w-0 resize-y rounded-xl border border-input bg-background/85 px-3 py-2.5 font-mono text-sm text-foreground outline-none transition-[border-color,box-shadow] placeholder:text-muted-foreground focus:border-ring focus:ring-2 focus:ring-ring/20";
 
 const GLYPH_ICONS: ComponentType<{ className?: string }>[] = [
   Server,
@@ -155,6 +160,7 @@ export default function AdminMCPPage() {
   const [deleteTarget, setDeleteTarget] = useState<MCPServer | null>(null);
   const [error, setError] = useState("");
   const [notice, setNotice] = useState("");
+  const [query, setQuery] = useState("");
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -293,6 +299,10 @@ export default function AdminMCPPage() {
     }
   };
 
+  const visibleMcps = mcps.filter((mcp) =>
+    `${mcp.name} ${mcp.description} ${mcp.transport}`.toLowerCase().includes(query.trim().toLowerCase()),
+  );
+
   return (
     <AdminPage className="admin-theme-orange">
       <AdminPageHeader
@@ -303,7 +313,7 @@ export default function AdminMCPPage() {
             <AdminRefreshButton refreshing={loading} onClick={() => void load()} variant="outline">
               Refresh
             </AdminRefreshButton>
-            <Button className="gap-2" onClick={openCreate}>
+            <Button className="gap-2" onPress={openCreate}>
               <Plus className="size-4" />
               Add server
             </Button>
@@ -322,14 +332,22 @@ export default function AdminMCPPage() {
         </AdminAlert>
       ) : null}
 
+      <SearchField aria-label="Search MCP servers" className="w-full sm:w-[320px]" value={query} onChange={setQuery}>
+        <SearchField.Group>
+          <SearchField.SearchIcon />
+          <SearchField.Input placeholder="Search MCP servers" />
+          <SearchField.ClearButton />
+        </SearchField.Group>
+      </SearchField>
+
       {loading && !mcps.length ? (
-        <div className="flex min-h-48 items-center justify-center text-sm text-muted-foreground">
+        <div className="flex min-h-48 items-center justify-center text-sm text-muted">
           <LoaderCircle className="mr-2 size-4 animate-spin" />
           Loading MCP servers
         </div>
-      ) : mcps.length ? (
-        <div className="admin-entity-grid md:grid-cols-2 xl:grid-cols-3">
-          {mcps.map((mcp) => (
+      ) : visibleMcps.length ? (
+        <div className="grid items-stretch gap-4 md:grid-cols-2 xl:grid-cols-3">
+          {visibleMcps.map((mcp) => (
             <MCPCard
               key={mcp.id}
               mcp={mcp}
@@ -341,19 +359,12 @@ export default function AdminMCPPage() {
           ))}
         </div>
       ) : (
-        <div className="admin-entity-card items-center py-12 text-center">
-          <AdminEmptyState
-            icon={<McpPageIcon className="size-6" />}
-            title="No MCP servers configured"
-            description="Add a server now; Cocola checks the connection when an agent first uses it."
-            action={
-              <Button className="gap-2" onClick={openCreate}>
-                <Plus className="size-4" />
-                Add server
-              </Button>
-            }
-          />
-        </div>
+        <AdminEmptyState
+          icon={<McpPageIcon className="size-6" />}
+          title={mcps.length ? "No matching MCP servers" : "No MCP servers configured"}
+          description={mcps.length ? "Try another search or clear the active query." : "Add a server now; Cocola checks the connection when an agent first uses it."}
+          action={!mcps.length ? <Button className="gap-2" onPress={openCreate}><Plus className="size-4" />Add server</Button> : undefined}
+        />
       )}
 
       <AdminDrawer
@@ -367,10 +378,10 @@ export default function AdminMCPPage() {
         size="lg"
         footer={
           <div className="flex items-center justify-end gap-2">
-            <Button variant="outline" disabled={saving} onClick={() => setDrawerOpen(false)}>
+            <Button variant="outline" isDisabled={saving} onPress={() => setDrawerOpen(false)}>
               Cancel
             </Button>
-            <Button disabled={saving} className="min-w-32 gap-2" onClick={() => void save()}>
+            <Button isDisabled={saving} className="min-w-32 gap-2" onPress={() => void save()}>
               {saving ? (
                 <LoaderCircle className="size-4 animate-spin" />
               ) : (
@@ -388,18 +399,13 @@ export default function AdminMCPPage() {
             </AdminAlert>
           ) : null}
           <div className="grid gap-4 sm:grid-cols-2">
-            <Field label="Name">
-              <input
-                className={controlClass}
-                value={form.name}
-                placeholder="GitHub"
-                autoFocus
-                onChange={(event) => setForm({ ...form, name: event.target.value })}
-              />
-            </Field>
+            <TextField value={form.name} variant="secondary" onChange={(name) => setForm({ ...form, name })}>
+              <Label>Name</Label>
+              <Input autoFocus placeholder="GitHub" />
+            </TextField>
             <Field label="Transport">
               <SelectControl
-                className={controlClass}
+                className="w-full"
                 value={form.transport}
                 onValueChange={(value) =>
                   setForm({ ...form, transport: value as FormState["transport"] })
@@ -414,39 +420,27 @@ export default function AdminMCPPage() {
             </Field>
           </div>
 
-          <p className="-mt-3 text-xs leading-5 text-muted-foreground">
+          <p className="-mt-3 text-xs leading-5 text-muted">
             {form.transport === "stdio"
               ? "stdio starts a local process, so it uses Command instead of URL."
               : `${form.transport === "http" ? "HTTP" : "SSE"} connects to a remote URL.`}
           </p>
 
-          <Field label="Description" optional>
-            <input
-              className={controlClass}
-              value={form.description}
-              placeholder="Repository tools for agent sessions"
-              onChange={(event) => setForm({ ...form, description: event.target.value })}
-            />
-          </Field>
+          <TextField value={form.description} variant="secondary" onChange={(description) => setForm({ ...form, description })}>
+            <Label>Description <span className="text-muted font-normal">· optional</span></Label>
+            <Input placeholder="Repository tools for agent sessions" />
+          </TextField>
 
           {form.transport === "stdio" ? (
             <>
-              <Field label="Command">
-                <input
-                  className={`${controlClass} font-mono`}
-                  value={form.command}
-                  placeholder="npx"
-                  onChange={(event) => setForm({ ...form, command: event.target.value })}
-                />
-              </Field>
-              <Field label="Arguments" optional hint="One argument per line.">
-                <textarea
-                  className={textAreaClass}
-                  value={form.args}
-                  placeholder={"-y\n@modelcontextprotocol/server-github"}
-                  onChange={(event) => setForm({ ...form, args: event.target.value })}
-                />
-              </Field>
+              <TextField value={form.command} variant="secondary" onChange={(command) => setForm({ ...form, command })}>
+                <Label>Command</Label>
+                <Input className="font-mono" placeholder="npx" />
+              </TextField>
+              <TextField value={form.args} variant="secondary" onChange={(args) => setForm({ ...form, args })}>
+                <Label>Arguments <span className="text-muted font-normal">· optional · one per line</span></Label>
+                <TextArea className="min-h-24 font-mono" placeholder={"-y\n@modelcontextprotocol/server-github"} />
+              </TextField>
               <SecretPairsField
                 label="Env"
                 value={form.env}
@@ -469,30 +463,29 @@ export default function AdminMCPPage() {
                     : "Paste the complete provider URL."
                 }
               >
-                <div className="relative">
-                  <input
-                    type={showURL ? "text" : "password"}
-                    className={`${controlClass} w-full pr-11 font-mono`}
-                    value={form.url}
+                <TextField className="relative" value={form.url} variant="secondary" onChange={(url) => setForm({ ...form, url })}>
+                  <Label className="sr-only">URL</Label>
+                  <Input type={showURL ? "text" : "password"} className="w-full pr-11 font-mono"
                     placeholder={
                       editing
                         ? editing.url_hint || "Saved URL"
                         : "https://mcp.example.com/api?token=..."
                     }
                     autoComplete="off"
-                    onChange={(event) => setForm({ ...form, url: event.target.value })}
                   />
-                  <button
-                    type="button"
+                  <Button
+                    isIconOnly
                     aria-label={showURL ? "Hide URL" : "Show URL"}
-                    className="absolute inset-y-0 right-1 grid w-9 place-items-center rounded-lg text-muted-foreground hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/30"
-                    onClick={() => setShowURL((show) => !show)}
+                    className="absolute bottom-1 right-1 size-9 min-w-9"
+                    size="sm"
+                    variant="ghost"
+                    onPress={() => setShowURL((show) => !show)}
                   >
                     {showURL ? <EyeOff className="size-4" /> : <Eye className="size-4" />}
-                  </button>
-                </div>
+                  </Button>
+                </TextField>
               </Field>
-              <p className="-mt-3 text-xs leading-5 text-muted-foreground">
+              <p className="-mt-3 text-xs leading-5 text-muted">
                 The complete URL is encrypted. Lists only show its scheme, host, and path.
               </p>
               <SecretPairsField
@@ -509,43 +502,37 @@ export default function AdminMCPPage() {
             </>
           )}
 
-          <label className="flex cursor-pointer items-start gap-3 rounded-xl border border-border/70 bg-muted/30 p-3.5">
-            <input
-              type="checkbox"
-              className="mt-0.5 size-4 rounded border-input accent-primary"
-              checked={form.defaultEnabled}
-              onChange={(event) => setForm({ ...form, defaultEnabled: event.target.checked })}
-            />
-            <span>
+          <Card className="p-4">
+            <Checkbox isSelected={form.defaultEnabled} onChange={(defaultEnabled) => setForm({ ...form, defaultEnabled })}>
+              <span>
               <span className="block text-sm font-medium">Enabled for users by default</span>
-              <span className="mt-0.5 block text-xs leading-5 text-muted-foreground">
+              <span className="text-muted mt-0.5 block text-xs leading-5">
                 Users can still turn this server off for their own agent sessions.
               </span>
-            </span>
-          </label>
+              </span>
+            </Checkbox>
+          </Card>
 
           {!editing ? (
             <div>
-              <button
-                type="button"
-                className="inline-flex h-9 items-center gap-2 rounded-xl px-2 text-sm font-medium text-muted-foreground hover:bg-muted hover:text-foreground"
-                onClick={() => setAdvancedOpen((open) => !open)}
+              <Button
+                className="gap-2"
+                size="sm"
+                variant="ghost"
+                onPress={() => setAdvancedOpen((open) => !open)}
               >
                 <ChevronDown
                   className={`size-4 transition-transform ${advancedOpen ? "rotate-180" : ""}`}
                 />
                 Advanced
-              </button>
+              </Button>
               {advancedOpen ? (
                 <div className="mt-3">
-                  <Field label="ID" optional hint="Generated from the name when left blank.">
-                    <input
-                      className={`${controlClass} w-full font-mono`}
-                      value={form.id}
-                      placeholder={slugify(form.name) || "github"}
-                      onChange={(event) => setForm({ ...form, id: event.target.value })}
-                    />
-                  </Field>
+                  <TextField value={form.id} variant="secondary" onChange={(id) => setForm({ ...form, id })}>
+                    <Label>ID <span className="text-muted font-normal">· optional</span></Label>
+                    <Input className="font-mono" placeholder={slugify(form.name) || "github"} />
+                    <span className="text-muted text-xs">Generated from the name when left blank.</span>
+                  </TextField>
                 </div>
               ) : null}
             </div>
@@ -592,70 +579,35 @@ function MCPCard({
     : mcp.url_hint;
   const { Icon, style } = glyphFor(mcp.id);
   return (
-    <div className="admin-entity-card admin-entity-card--hover">
-      <div className="flex items-start gap-3">
-        <div className="admin-entity-glyph" style={style}>
-          <Icon className="size-[18px]" />
-        </div>
-        <div className="min-w-0 flex-1">
-          <div className="flex flex-wrap items-center gap-2">
-            <h2 className="truncate text-sm font-semibold text-foreground">{mcp.name || mcp.id}</h2>
-            <span className="admin-entity-tag">{transport === "http" ? "HTTP" : transport}</span>
+    <Card className="cocola-admin-module-card h-full p-5">
+      <Card.Content className="flex h-full min-w-0 flex-col p-0">
+        <div className="flex items-start gap-3">
+          <span className="flex size-10 shrink-0 items-center justify-center rounded-2xl" style={{ ...style, background: "var(--glyph-soft)", color: "var(--glyph-ink)" }}>
+            <Icon className="size-[18px]" />
+          </span>
+          <div className="min-w-0 flex-1">
+            <div className="flex flex-wrap items-center gap-2">
+              <h2 className="truncate text-sm font-semibold text-foreground">{mcp.name || mcp.id}</h2>
+              <Chip size="sm" variant="soft">{transport === "http" ? "HTTP" : transport}</Chip>
+            </div>
+            <p className="text-muted mt-1 line-clamp-2 min-h-10 text-sm leading-5">{mcp.description || "No description"}</p>
           </div>
-          <p className="mt-1 line-clamp-2 min-h-10 text-sm leading-5 text-muted-foreground">
-            {mcp.description || "No description"}
-          </p>
+          <Chip color={mcp.enabled ? "success" : "default"} size="sm" variant="soft">{mcp.enabled ? "Enabled" : "Disabled"}</Chip>
         </div>
-        {mcp.enabled ? (
-          <span className="admin-chip admin-chip--ok">
-            <CircleCheck className="size-3.5" />
-            Enabled
-          </span>
-        ) : (
-          <span className="admin-chip admin-chip--off">
-            <span className="admin-chip-dot" />
-            Disabled
-          </span>
-        )}
-      </div>
 
-      <div className="admin-entity-mono mt-4">
-        <div className="text-[10px] font-semibold uppercase tracking-[0.12em] text-muted-foreground">
-          {remote ? "URL" : "Command"}
+        <div className="bg-surface-secondary mt-4 min-w-0 rounded-2xl p-3">
+          <div className="text-muted text-[10px] font-semibold uppercase tracking-[0.12em]">{remote ? "URL" : "Command"}</div>
+          <code className="mt-1 block truncate font-mono text-xs tabular-nums text-foreground/80">{endpoint || (remote ? "Remote URL saved" : "Command saved")}</code>
         </div>
-        <code className="mt-1 block truncate font-mono text-xs tabular-nums text-foreground/80">
-          {endpoint || (remote ? "Remote URL saved" : "Command saved")}
-        </code>
-      </div>
 
-      {mcp.default_enabled ? (
-        <div className="mt-3 text-xs text-muted-foreground">Default on</div>
-      ) : null}
-      <div className="mt-auto flex items-center gap-2 pt-4">
-        <button className="admin-card-btn flex-1 justify-center" disabled={busy} onClick={onEdit}>
-          <Pencil className="size-4" />
-          Edit
-        </button>
-        <button className="admin-card-btn flex-1 justify-center" disabled={busy} onClick={onToggle}>
-          {busy ? (
-            <LoaderCircle className="size-4 animate-spin" />
-          ) : mcp.enabled ? (
-            <PowerOff className="size-4" />
-          ) : (
-            <Power className="size-4" />
-          )}
-          {mcp.enabled ? "Disable" : "Enable"}
-        </button>
-        <button
-          className="admin-card-btn admin-card-btn--danger flex-1 justify-center"
-          disabled={busy}
-          onClick={onDelete}
-        >
-          <Trash2 className="size-4" />
-          Remove
-        </button>
-      </div>
-    </div>
+        {mcp.default_enabled ? <div className="text-muted mt-3 text-xs">Default on</div> : null}
+        <div className="mt-auto grid grid-cols-3 gap-2 pt-4">
+          <Button isDisabled={busy} size="sm" variant="outline" onPress={onEdit}><Pencil className="size-4" />Edit</Button>
+          <Button isDisabled={busy} size="sm" variant="outline" onPress={onToggle}>{busy ? <LoaderCircle className="size-4 animate-spin" /> : mcp.enabled ? <PowerOff className="size-4" /> : <Power className="size-4" />}{mcp.enabled ? "Disable" : "Enable"}</Button>
+          <Button isDisabled={busy} size="sm" variant="danger-soft" onPress={onDelete}><Trash2 className="size-4" />Remove</Button>
+        </div>
+      </Card.Content>
+    </Card>
   );
 }
 
@@ -672,7 +624,7 @@ function Field({
 }) {
   return (
     <label className="grid gap-1.5 text-sm">
-      <span className="flex items-baseline justify-between gap-3 text-xs font-medium text-muted-foreground">
+      <span className="flex items-baseline justify-between gap-3 text-xs font-medium text-muted">
         <span>
           {label}
           {optional ? <span className="font-normal"> · optional</span> : null}
@@ -704,26 +656,25 @@ function SecretPairsField({
   const savedKeys = Object.keys(savedHints ?? {});
   return (
     <Field label={label} optional hint="One KEY=value pair per line.">
-      <textarea
-        className={textAreaClass}
-        value={value}
-        placeholder={placeholder}
-        onChange={(event) => onChange(event.target.value)}
-      />
+      <TextField value={value} variant="secondary" onChange={onChange}>
+        <Label className="sr-only">{label}</Label>
+        <TextArea className="min-h-24 font-mono" placeholder={placeholder} />
+      </TextField>
       {savedKeys.length ? (
-        <div className="flex flex-wrap items-center justify-between gap-2 text-xs text-muted-foreground">
+        <div className="text-muted flex flex-wrap items-center justify-between gap-2 text-xs">
           <span>
             {clearSaved
               ? "Saved values will be cleared."
               : `Saved: ${savedKeys.join(", ")}. Blank keeps them.`}
           </span>
-          <button
-            type="button"
-            className="font-medium text-foreground underline-offset-4 hover:underline"
-            onClick={() => onClearSaved(!clearSaved)}
+          <Button
+            className="h-8 min-h-8 px-2"
+            size="sm"
+            variant="ghost"
+            onPress={() => onClearSaved(!clearSaved)}
           >
             {clearSaved ? "Keep saved values" : "Clear saved values"}
-          </button>
+          </Button>
         </div>
       ) : null}
     </Field>

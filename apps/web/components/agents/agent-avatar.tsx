@@ -23,14 +23,14 @@ const ICONS: Record<string, LucideIcon> = {
 };
 
 const COLORS: Record<string, string> = {
-  slate: "bg-white text-slate-600 ring-slate-200",
-  blue: "bg-white text-blue-600 ring-blue-200",
-  cyan: "bg-white text-cyan-600 ring-cyan-200",
-  emerald: "bg-white text-emerald-600 ring-emerald-200",
-  amber: "bg-white text-amber-600 ring-amber-200",
-  orange: "bg-white text-orange-600 ring-orange-200",
-  rose: "bg-white text-rose-600 ring-rose-200",
-  violet: "bg-white text-violet-600 ring-violet-200",
+  slate: "bg-slate-500/15 text-slate-600 dark:text-slate-300",
+  blue: "bg-blue-500/15 text-blue-600 dark:text-blue-300",
+  cyan: "bg-cyan-500/15 text-cyan-600 dark:text-cyan-300",
+  emerald: "bg-emerald-500/15 text-emerald-600 dark:text-emerald-300",
+  amber: "bg-amber-500/15 text-amber-600 dark:text-amber-300",
+  orange: "bg-orange-500/15 text-orange-600 dark:text-orange-300",
+  rose: "bg-rose-500/15 text-rose-600 dark:text-rose-300",
+  violet: "bg-violet-500/15 text-violet-600 dark:text-violet-300",
 };
 
 export function AgentAvatar({
@@ -48,7 +48,7 @@ export function AgentAvatar({
   return (
     <span
       className={cn(
-        "inline-grid size-9 shrink-0 place-items-center rounded-xl ring-1 ring-inset",
+        "inline-grid size-9 shrink-0 place-items-center rounded-xl",
         COLORS[avatarColor ?? ""] ?? COLORS.blue,
         className,
       )}

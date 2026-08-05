@@ -119,22 +119,22 @@ export function CommandPalette() {
     <Dialog.Root open={open} onOpenChange={setOpen}>
       <Dialog.Portal>
         <Dialog.Overlay className="fixed inset-0 z-50 bg-foreground/12 backdrop-blur-sm data-[state=open]:animate-in data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=open]:fade-in-0" />
-        <Dialog.Content className="fixed left-1/2 top-[14vh] z-50 w-[min(92vw,640px)] -translate-x-1/2 overflow-hidden rounded-2xl border border-border bg-popover text-popover-foreground shadow-2xl outline-none data-[state=open]:animate-in data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=open]:fade-in-0 data-[state=closed]:zoom-out-95 data-[state=open]:zoom-in-95">
+        <Dialog.Content className="fixed left-1/2 top-[14vh] z-50 w-[min(92vw,640px)] -translate-x-1/2 overflow-hidden rounded-2xl border border-border bg-overlay text-overlay-foreground shadow-2xl outline-none data-[state=open]:animate-in data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=open]:fade-in-0 data-[state=closed]:zoom-out-95 data-[state=open]:zoom-in-95">
           <Dialog.Title className="sr-only">Command menu</Dialog.Title>
           <Command shouldFilter className="bg-transparent">
             <div className="flex items-center gap-3 border-b border-border px-4">
-              <Search className="size-4 text-muted-foreground" />
+              <Search className="size-4 text-muted" />
               <Command.Input
                 autoFocus
                 placeholder="Search conversations or jump somewhere..."
-                className="h-12 min-w-0 flex-1 bg-transparent text-sm outline-none placeholder:text-muted-foreground"
+                className="h-12 min-w-0 flex-1 bg-transparent text-sm outline-none placeholder:text-muted"
               />
-              <kbd className="rounded-md border border-border bg-muted px-1.5 py-0.5 font-mono text-[10px] text-muted-foreground">
+              <kbd className="rounded-md border border-border bg-surface-secondary px-1.5 py-0.5 font-mono text-[10px] text-muted">
                 esc
               </kbd>
             </div>
             <Command.List className="max-h-[420px] overflow-y-auto p-2">
-              <Command.Empty className="px-3 py-10 text-center text-sm text-muted-foreground">
+              <Command.Empty className="px-3 py-10 text-center text-sm text-muted">
                 No matching command or conversation.
               </Command.Empty>
               <Command.Group heading="Actions" className={groupClassName}>
@@ -178,7 +178,7 @@ export function CommandPalette() {
 }
 
 const groupClassName =
-  "[&_[cmdk-group-heading]]:px-2 [&_[cmdk-group-heading]]:py-1.5 [&_[cmdk-group-heading]]:text-[11px] [&_[cmdk-group-heading]]:font-medium [&_[cmdk-group-heading]]:uppercase [&_[cmdk-group-heading]]:text-muted-foreground";
+  "[&_[cmdk-group-heading]]:px-2 [&_[cmdk-group-heading]]:py-1.5 [&_[cmdk-group-heading]]:text-[11px] [&_[cmdk-group-heading]]:font-medium [&_[cmdk-group-heading]]:uppercase [&_[cmdk-group-heading]]:text-muted";
 
 function PaletteItem({
   icon: Icon,
@@ -197,12 +197,12 @@ function PaletteItem({
       onSelect={onSelect}
       className="flex cursor-pointer items-center gap-3 rounded-xl px-3 py-2.5 text-sm outline-none data-[selected=true]:bg-accent data-[selected=true]:text-accent-foreground"
     >
-      <span className="grid size-8 shrink-0 place-items-center rounded-lg border border-border bg-card text-muted-foreground">
+      <span className="grid size-8 shrink-0 place-items-center rounded-lg border border-border bg-surface text-muted">
         <Icon className="size-4" />
       </span>
       <span className="min-w-0 flex-1">
         <span className="block truncate font-medium">{label}</span>
-        <span className="block truncate text-xs text-muted-foreground">{hint}</span>
+        <span className="block truncate text-xs text-muted">{hint}</span>
       </span>
     </Command.Item>
   );

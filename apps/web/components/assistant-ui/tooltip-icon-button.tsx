@@ -34,7 +34,7 @@ export const TooltipIconButton = React.forwardRef<HTMLButtonElement, TooltipIcon
           <Tooltip.Portal>
             <Tooltip.Content
               sideOffset={8}
-              className="z-50 rounded-md border border-border bg-popover px-2 py-1 text-xs text-popover-foreground shadow-lg"
+              className="z-50 rounded-md border border-border bg-overlay px-2 py-1 text-xs text-overlay-foreground shadow-lg"
             >
               {tooltip}
               <Tooltip.Arrow className="fill-popover" />

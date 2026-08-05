@@ -68,7 +68,7 @@ export const RailProcessSummary: FC<{
         type="button"
         aria-expanded={expanded}
         onClick={toggle}
-        className="group grid min-h-10 w-full grid-cols-[1.75rem_minmax(0,1fr)_auto] items-center gap-x-2.5 rounded-xl border border-border/60 bg-muted/35 py-2 pr-3.5 text-left text-sm font-medium text-muted-foreground transition-colors hover:bg-muted/60 hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
+        className="group grid min-h-10 w-full grid-cols-[1.75rem_minmax(0,1fr)_auto] items-center gap-x-2.5 rounded-xl border border-border/60 bg-surface-secondary/35 py-2 pr-3.5 text-left text-sm font-medium text-muted transition-colors hover:bg-surface-secondary/60 hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus focus-visible:ring-offset-2"
       >
         <span className="flex items-center justify-center">
           <CheckCircle2 className="size-4 shrink-0 text-emerald-500" aria-hidden="true" />
@@ -104,7 +104,7 @@ export const RailRow: FC<{
       <span
         className={cn(
           "relative z-[1] flex size-7 items-center justify-center",
-          tone === "error" ? "text-destructive" : (color ?? "text-muted-foreground"),
+          tone === "error" ? "text-danger" : (color ?? "text-muted"),
         )}
       >
         {running ? <SpinnerGap className="size-5 animate-spin" /> : <Icon className="size-5" />}
@@ -115,7 +115,7 @@ export const RailRow: FC<{
         <div
           className={cn(
             "mb-1 flex min-h-7 items-center text-[13px] font-medium leading-none",
-            tone === "error" ? "text-destructive" : "text-foreground",
+            tone === "error" ? "text-danger" : "text-foreground",
           )}
         >
           {label}
@@ -160,7 +160,7 @@ export const RailEnvironment: FC<{
       color={degraded ? "text-amber-500" : "text-sky-500"}
     >
       {summaries.length > 0 ? (
-        <p className="text-[13px] leading-5 text-muted-foreground">{summaries.join(" · ")}</p>
+        <p className="text-[13px] leading-5 text-muted">{summaries.join(" · ")}</p>
       ) : null}
     </RailRow>
   );
@@ -178,7 +178,7 @@ export const RailProgress: FC<{ items?: unknown[]; pinned?: boolean }> = ({ item
   const label = normalized.length ? (
     <span className="flex items-baseline gap-1.5">
       <span>Plan</span>
-      <span className="text-xs font-normal tabular-nums text-muted-foreground">
+      <span className="text-xs font-normal tabular-nums text-muted">
         {completed}/{normalized.length}
       </span>
     </span>
@@ -199,15 +199,15 @@ export const RailProgress: FC<{ items?: unknown[]; pinned?: boolean }> = ({ item
               ) : active ? (
                 <SpinnerGap className="size-3.5 animate-spin text-violet-500 motion-reduce:animate-none" />
               ) : (
-                <span className="size-3 rounded-full border border-muted-foreground/50" />
+                <span className="size-3 rounded-full border border-separator/50" />
               )}
             </span>
             <span
               className={cn(
                 "text-[13px] leading-5",
-                done && "text-muted-foreground/70 line-through decoration-muted-foreground/50",
+                done && "text-muted/70 line-through decoration-muted-foreground/50",
                 active && "font-medium text-foreground",
-                !done && !active && "text-muted-foreground",
+                !done && !active && "text-muted",
               )}
             >
               {item.text}
@@ -217,7 +217,7 @@ export const RailProgress: FC<{ items?: unknown[]; pinned?: boolean }> = ({ item
       })}
     </ol>
   ) : (
-    <p className="text-[13px] leading-5 text-muted-foreground">No plan items.</p>
+    <p className="text-[13px] leading-5 text-muted">No plan items.</p>
   );
 
   if (pinned) {
@@ -276,12 +276,12 @@ export const RailMemoryRecall: FC<{
       type="button"
       aria-expanded={expanded}
       onClick={() => setExpanded((value) => !value)}
-      className="group flex min-h-7 w-full items-center justify-between gap-2 rounded-md text-left outline-none hover:text-primary focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
+      className="group flex min-h-7 w-full items-center justify-between gap-2 rounded-md text-left outline-none hover:text-accent focus-visible:ring-2 focus-visible:ring-focus focus-visible:ring-offset-2"
     >
       <span>{label}</span>
       <ChevronRight
         className={cn(
-          "mr-1 size-3.5 shrink-0 text-muted-foreground transition-transform group-hover:text-foreground",
+          "mr-1 size-3.5 shrink-0 text-muted transition-transform group-hover:text-foreground",
           expanded && "rotate-90",
         )}
         aria-hidden="true"
@@ -300,14 +300,14 @@ export const RailMemoryRecall: FC<{
       color={degraded ? "text-amber-500" : "text-emerald-500"}
     >
       {unavailable || degraded ? (
-        <p className="text-[13px] leading-5 text-muted-foreground">
+        <p className="text-[13px] leading-5 text-muted">
           {unavailable
             ? "The answer continued without recalled memory."
             : "Some memory sources were unavailable; the answer used the memories that were returned."}
         </p>
       ) : null}
       {expanded && expandable ? (
-        <pre className="mt-1 max-h-72 overflow-auto whitespace-pre-wrap break-words border-l-2 border-emerald-500/30 bg-muted/25 py-2 pl-3 pr-2 font-mono text-[11px] leading-5 text-muted-foreground">
+        <pre className="mt-1 max-h-72 overflow-auto whitespace-pre-wrap break-words border-l-2 border-emerald-500/30 bg-surface-secondary/25 py-2 pl-3 pr-2 font-mono text-[11px] leading-5 text-muted">
           {content}
         </pre>
       ) : null}
@@ -335,10 +335,10 @@ export const RailSCMApproval: FC<{
     <RailRow
       icon={ShieldAlert}
       label={label}
-      color={status === "pending" ? "text-amber-500" : "text-muted-foreground"}
+      color={status === "pending" ? "text-amber-500" : "text-muted"}
     >
       <div className="space-y-2">
-        <p className="text-[13px] leading-5 text-muted-foreground">
+        <p className="text-[13px] leading-5 text-muted">
           {commandLabel ? `${commandLabel}. ` : ""}
           {category ? `Category: ${category}. ` : ""}
           Approval applies once to this exact command and expires after five minutes.
@@ -363,7 +363,7 @@ export const RailSCMApproval: FC<{
             </button>
           </div>
         ) : null}
-        {error ? <p className="text-xs text-destructive">{error}</p> : null}
+        {error ? <p className="text-xs text-danger">{error}</p> : null}
       </div>
     </RailRow>
   );
@@ -378,11 +378,11 @@ export const RailReasoning: FC<{ text: string; running?: boolean }> = ({ text, r
     color="text-purple-500"
   >
     <details className="aui-details group text-sm">
-      <summary className="flex w-fit cursor-pointer select-none items-center gap-1 py-0.5 text-[13px] text-muted-foreground transition-colors hover:text-foreground [&::-webkit-details-marker]:hidden">
+      <summary className="flex w-fit cursor-pointer select-none items-center gap-1 py-0.5 text-[13px] text-muted transition-colors hover:text-foreground [&::-webkit-details-marker]:hidden">
         <ChevronRight className="size-3 shrink-0 transition-transform group-open:rotate-90" />
         <span>Show reasoning</span>
       </summary>
-      <div className="aui-details-body mt-1 border-l-2 border-border/70 pl-3 text-sm leading-6 text-muted-foreground">
+      <div className="aui-details-body mt-1 border-l-2 border-border/70 pl-3 text-sm leading-6 text-muted">
         {text}
       </div>
     </details>
@@ -591,7 +591,7 @@ const SearchResultCard: FC<{ item: SearchResult }> = ({ item }) => (
     target="_blank"
     rel="noopener noreferrer"
     title={item.url}
-    className="inline-flex max-w-[20rem] items-center gap-1.5 rounded-full border border-border/70 bg-background px-2 py-1 text-xs text-foreground transition-colors hover:border-border hover:bg-muted"
+    className="inline-flex max-w-[20rem] items-center gap-1.5 rounded-full border border-border/70 bg-background px-2 py-1 text-xs text-foreground transition-colors hover:border-border hover:bg-surface-secondary"
   >
     <Image
       src={`https://www.google.com/s2/favicons?domain=${item.host}&sz=64`}
@@ -603,7 +603,7 @@ const SearchResultCard: FC<{ item: SearchResult }> = ({ item }) => (
       aria-hidden="true"
     />
     <span className="truncate">{item.title}</span>
-    <ExternalLink className="size-3 shrink-0 text-muted-foreground/60" />
+    <ExternalLink className="size-3 shrink-0 text-muted/60" />
   </a>
 );
 
@@ -651,7 +651,7 @@ export const RailTool: FC<{
           {chips.map((chip, i) => (
             <span
               key={i}
-              className="inline-block max-w-full break-words rounded-md bg-muted px-2 py-1 align-top font-mono text-[11px] leading-5 text-muted-foreground"
+              className="inline-block max-w-full break-words rounded-md bg-surface-secondary px-2 py-1 align-top font-mono text-[11px] leading-5 text-muted"
             >
               {chip}
             </span>
@@ -667,12 +667,12 @@ export const RailTool: FC<{
       ) : null}
       {failureOutput ? (
         <details className="aui-details group mt-1.5 text-sm">
-          <summary className="flex w-fit cursor-pointer select-none items-center gap-1 py-0.5 text-xs text-muted-foreground/70 transition-colors hover:text-foreground [&::-webkit-details-marker]:hidden">
+          <summary className="flex w-fit cursor-pointer select-none items-center gap-1 py-0.5 text-xs text-muted/70 transition-colors hover:text-foreground [&::-webkit-details-marker]:hidden">
             <ChevronRight className="size-3 shrink-0 transition-transform group-open:rotate-90" />
             <span>{commandFailure ? "View command output" : "View error details"}</span>
           </summary>
-          <div className="aui-details-body mt-1 border-l-2 border-destructive/30 pl-3">
-            <pre className="max-h-72 overflow-auto whitespace-pre-wrap break-words py-1 font-mono text-[11px] leading-5 text-muted-foreground">
+          <div className="aui-details-body mt-1 border-l-2 border-danger/30 pl-3">
+            <pre className="max-h-72 overflow-auto whitespace-pre-wrap break-words py-1 font-mono text-[11px] leading-5 text-muted">
               {failureOutput}
             </pre>
           </div>
@@ -680,12 +680,12 @@ export const RailTool: FC<{
       ) : null}
       {hasArgs ? (
         <details className="aui-details group mt-1.5 text-sm">
-          <summary className="flex w-fit cursor-pointer select-none items-center gap-1 py-0.5 text-xs text-muted-foreground/70 transition-colors hover:text-foreground [&::-webkit-details-marker]:hidden">
+          <summary className="flex w-fit cursor-pointer select-none items-center gap-1 py-0.5 text-xs text-muted/70 transition-colors hover:text-foreground [&::-webkit-details-marker]:hidden">
             <ChevronRight className="size-3 shrink-0 transition-transform group-open:rotate-90" />
             <span>View arguments</span>
           </summary>
           <div className="aui-details-body mt-1 border-l-2 border-border/70 pl-3">
-            <pre className="max-h-72 overflow-auto whitespace-pre-wrap break-words py-1 font-mono text-[11px] leading-5 text-muted-foreground">
+            <pre className="max-h-72 overflow-auto whitespace-pre-wrap break-words py-1 font-mono text-[11px] leading-5 text-muted">
               {formatPayload(argsText)}
             </pre>
           </div>
@@ -710,7 +710,7 @@ export const RailFile: FC<{
 
   return (
     <RailRow icon={FilePlus} label="Generated file" color="text-teal-500">
-      <div className="inline-flex w-fit max-w-full items-center gap-3 rounded-xl border border-border/60 bg-muted/40 p-3 text-sm">
+      <div className="inline-flex w-fit max-w-full items-center gap-3 rounded-xl border border-border/60 bg-surface-secondary/40 p-3 text-sm">
         <span className="flex size-9 shrink-0 items-center justify-center overflow-hidden rounded-lg bg-background">
           {showThumbnail ? (
             <Image
@@ -731,8 +731,8 @@ export const RailFile: FC<{
         </span>
         <div className="min-w-0 flex-1">
           <div className="truncate font-medium text-foreground">{filename}</div>
-          <div className="mt-0.5 flex items-center gap-1.5 truncate text-xs text-muted-foreground">
-            <span className="rounded bg-muted px-1.5 py-px font-medium tracking-wide text-muted-foreground/90">
+          <div className="mt-0.5 flex items-center gap-1.5 truncate text-xs text-muted">
+            <span className="rounded bg-surface-secondary px-1.5 py-px font-medium tracking-wide text-muted/90">
               {kind.badge}
             </span>
             <span aria-hidden>·</span>
@@ -756,7 +756,7 @@ export const RailFile: FC<{
               download={filename}
               title="Download"
               aria-label={`Download ${filename}`}
-              className="inline-flex size-8 items-center justify-center rounded-full text-muted-foreground transition-colors hover:bg-accent hover:text-accent-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+              className="inline-flex size-8 items-center justify-center rounded-full text-muted transition-colors hover:bg-accent hover:text-accent-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-focus"
             >
               <Download className="size-4" />
             </a>

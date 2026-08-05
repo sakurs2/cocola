@@ -1,101 +1,37 @@
 "use client";
 
-import { Button } from "@/components/ui/button";
-import { Gauge, LoaderCircle, Receipt, RefreshCw } from "lucide-react";
+import { Button, Card, ProgressBar } from "@heroui/react";
+import { ListView } from "@heroui-pro/react/list-view";
+import { LoaderCircle, RefreshCw } from "lucide-react";
 import { useCallback, useEffect, useState } from "react";
+import { ModelIcon } from "@/components/ui/model-icon";
 
-// Self-service usage + remaining quota. Reads are keyed to the caller's own
-// runtime token via the /api/me/* BFF routes, which proxy llm-gateway
-// /v1/quota + /v1/usage. A user can only ever see their own numbers.
-
-type QuotaScope = {
-  scope: string;
-  subject: string;
-  period: string;
-  used: number;
-  limit: number;
-  remaining: number;
-  exceeded: boolean;
-};
-
-type QuotaResponse = {
-  user_id: string;
-  tenant_id: string;
-  scopes: QuotaScope[];
-};
-
-type UsageAggregate = {
-  calls: number;
-  prompt_tokens: number;
-  completion_tokens: number;
-  total_tokens: number;
-  cost_usd: number;
-};
-
-type UsageRecord = {
-  request_id?: string;
-  id?: string;
-  // Backend serializes UsageRecord via asdict(): timestamp is `ts_unix`
-  // (epoch seconds), model comes as `alias` / `real_model`, and there is no
-  // `total_tokens` field (it is a computed @property). Older shapes kept as
-  // optional fallbacks.
-  ts_unix?: number;
-  ts?: string;
-  created_at?: string;
-  alias?: string;
-  real_model?: string;
-  model?: string;
-  session_id?: string;
-  prompt_tokens?: number;
-  completion_tokens?: number;
-  total_tokens?: number;
-  cost_usd?: number;
-};
-
-type UsageResponse = {
-  recent: UsageRecord[];
-  user_aggregate?: UsageAggregate;
-  session_aggregate?: UsageAggregate;
-};
+type QuotaScope = { scope: string; subject: string; period: string; used: number; limit: number; remaining: number; exceeded: boolean };
+type QuotaResponse = { user_id: string; tenant_id: string; scopes: QuotaScope[] };
+type UsageAggregate = { calls: number; prompt_tokens: number; completion_tokens: number; total_tokens: number; cost_usd: number };
+type UsageRecord = { request_id?: string; id?: string; ts_unix?: number; ts?: string; created_at?: string; alias?: string; real_model?: string; model?: string; session_id?: string; prompt_tokens?: number; completion_tokens?: number; total_tokens?: number; cost_usd?: number };
+type UsageResponse = { recent: UsageRecord[]; user_aggregate?: UsageAggregate; session_aggregate?: UsageAggregate };
 
 const nf = new Intl.NumberFormat();
+const fmtInt = (value: number | undefined | null) => value == null || Number.isNaN(value) ? "-" : nf.format(value);
+const scopeLabel = (scope: string) => scope === "user" ? "Personal" : scope === "tenant" ? "Team" : scope;
 
-function fmtInt(n: number | undefined | null): string {
-  if (n === undefined || n === null || Number.isNaN(n)) return "-";
-  return nf.format(n);
-}
-
-function scopeLabel(scope: string): string {
-  if (scope === "user") return "Personal (daily)";
-  if (scope === "tenant") return "Team (monthly)";
-  return scope;
-}
-
-function formatTs(rec: UsageRecord): string {
-  // Prefer epoch seconds (ts_unix); fall back to string timestamps.
-  if (typeof rec.ts_unix === "number" && !Number.isNaN(rec.ts_unix)) {
-    const d = new Date(rec.ts_unix * 1000);
-    if (!Number.isNaN(d.getTime())) return d.toLocaleString();
-  }
-  const raw = rec.ts ?? rec.created_at;
+function formatTs(record: UsageRecord) {
+  const raw = typeof record.ts_unix === "number" ? record.ts_unix * 1000 : record.ts ?? record.created_at;
   if (!raw) return "-";
-  const d = new Date(raw);
-  if (Number.isNaN(d.getTime())) return raw;
-  return d.toLocaleString();
+  const value = new Date(raw);
+  return Number.isNaN(value.getTime()) ? String(raw) : value.toLocaleString();
 }
 
-function recordModel(rec: UsageRecord): string {
-  return rec.alias || rec.model || rec.real_model || "-";
-}
-
-function recordTotal(rec: UsageRecord): number | undefined {
-  if (typeof rec.total_tokens === "number") return rec.total_tokens;
-  const p = rec.prompt_tokens;
-  const c = rec.completion_tokens;
-  if (typeof p === "number" || typeof c === "number") {
-    return (p ?? 0) + (c ?? 0);
-  }
-  return undefined;
+function recordModel(record: UsageRecord) { return record.alias || record.model || record.real_model || "Unknown model"; }
+function recordTotal(record: UsageRecord) { return record.total_tokens ?? (record.prompt_tokens ?? 0) + (record.completion_tokens ?? 0); }
+function modelSlug(record: UsageRecord) {
+  const value = recordModel(record).toLowerCase();
+  if (value.includes("deepseek")) return "deepseek";
+  if (value.includes("qwen")) return "qwen";
+  if (value.includes("claude")) return "claude";
+  if (value.includes("gemini")) return "gemini";
+  return "openai";
 }
 
 export function UsagePanel() {
@@ -106,212 +42,68 @@ export function UsagePanel() {
   const [error, setError] = useState<string | null>(null);
 
   const load = useCallback(async (showLoading = true) => {
-    if (showLoading) setLoading(true);
-    else setRefreshing(true);
+    if (showLoading) setLoading(true); else setRefreshing(true);
     setError(null);
-    // Local fetches resolve almost instantly, so the spinner would only flash
-    // for a frame. Hold the "refreshing" state for at least one full rotation
-    // (600ms) so the refresh gesture reads as a deliberate, complete animation.
     const startedAt = Date.now();
-    const MIN_SPIN_MS = 600;
     try {
-      const [qRes, uRes] = await Promise.all([
+      const [quotaResponse, usageResponse] = await Promise.all([
         fetch("/api/me/quota", { cache: "no-store" }),
         fetch("/api/me/usage?limit=20", { cache: "no-store" }),
       ]);
-      if (!qRes.ok) {
-        const t = await qRes.text();
-        throw new Error(`quota ${qRes.status}: ${t}`);
-      }
-      if (!uRes.ok) {
-        const t = await uRes.text();
-        throw new Error(`usage ${uRes.status}: ${t}`);
-      }
-      setQuota((await qRes.json()) as QuotaResponse);
-      setUsage((await uRes.json()) as UsageResponse);
-    } catch (err) {
-      setError(err instanceof Error ? err.message : String(err));
+      if (!quotaResponse.ok) throw new Error(`quota ${quotaResponse.status}: ${await quotaResponse.text()}`);
+      if (!usageResponse.ok) throw new Error(`usage ${usageResponse.status}: ${await usageResponse.text()}`);
+      setQuota((await quotaResponse.json()) as QuotaResponse);
+      setUsage((await usageResponse.json()) as UsageResponse);
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : String(cause));
     } finally {
       if (!showLoading) {
-        const elapsed = Date.now() - startedAt;
-        if (elapsed < MIN_SPIN_MS) {
-          await new Promise((r) => setTimeout(r, MIN_SPIN_MS - elapsed));
-        }
+        const remaining = 600 - (Date.now() - startedAt);
+        if (remaining > 0) await new Promise((resolve) => window.setTimeout(resolve, remaining));
       }
       setLoading(false);
       setRefreshing(false);
     }
   }, []);
 
-  useEffect(() => {
-    void load();
-  }, [load]);
+  useEffect(() => { void load(); }, [load]);
+  const aggregate = usage?.user_aggregate;
 
-  const agg = usage?.user_aggregate;
-
-  return (
-    <div className="space-y-5">
-      {error && (
-        <div className="rounded-xl border border-destructive/40 bg-destructive/10 px-4 py-3 text-sm text-destructive">
-          {error}
+  return <Card className="p-5">
+    <Card.Header className="flex-row items-start justify-between gap-4 p-0">
+      <span><Card.Title>Usage & quota</Card.Title><Card.Description>Token allowances and recent model activity.</Card.Description></span>
+      <Button isDisabled={loading || refreshing} size="sm" variant="outline" onPress={() => void load(false)}><RefreshCw className={`size-3.5 ${refreshing ? "animate-spin" : ""}`} />Refresh</Button>
+    </Card.Header>
+    <Card.Content className="mt-5 grid gap-5 p-0">
+      {error ? <div className="bg-danger/10 text-danger rounded-2xl px-4 py-3 text-sm">{error}</div> : null}
+      {loading ? <div className="text-muted flex min-h-32 items-center justify-center gap-2 text-sm"><LoaderCircle className="size-4 animate-spin" />Loading usage…</div> : <>
+        <div className="grid gap-3 md:grid-cols-2">
+          {(quota?.scopes.length ?? 0) === 0 ? <div className="bg-surface-secondary text-muted rounded-2xl p-4 text-sm">No quota policy applies — usage is unlimited.</div> : quota?.scopes.map((scope) => <QuotaTile key={`${scope.scope}:${scope.subject}:${scope.period}`} scope={scope} />)}
         </div>
-      )}
-
-      <section className="rounded-2xl border border-border bg-card shadow-card">
-        <div className="flex items-center gap-3 border-b border-border px-4 py-3">
-          <div className="grid size-8 place-items-center rounded-xl bg-violet-500/10">
-            <Gauge className="size-4 text-violet-600" />
+        <div>
+          <h3 className="text-sm font-semibold">Lifetime totals</h3>
+          <div className="mt-3 grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+            <StatTile label="Calls" value={fmtInt(aggregate?.calls)} />
+            <StatTile label="Prompt tokens" value={fmtInt(aggregate?.prompt_tokens)} />
+            <StatTile label="Completion" value={fmtInt(aggregate?.completion_tokens)} />
+            <StatTile label="Total tokens" value={fmtInt(aggregate?.total_tokens)} />
           </div>
-          <div className="min-w-0 flex-1">
-            <h2 className="text-sm font-semibold">Remaining Quota</h2>
-            <p className="truncate text-xs text-muted-foreground">
-              Token allowance across your active scopes
-            </p>
-          </div>
-          <Button
-            variant="outline"
-            size="sm"
-            onClick={() => void load(false)}
-            disabled={loading || refreshing}
-          >
-            <RefreshCw className={refreshing ? "mr-2 size-4 animate-spin" : "mr-2 size-4"} />
-            Refresh
-          </Button>
         </div>
-        {loading ? (
-          <div className="flex items-center gap-2 px-4 py-8 text-sm text-muted-foreground">
-            <LoaderCircle className="size-4 animate-spin" />
-            Loading usage…
-          </div>
-        ) : (
-          <div className="grid gap-3 p-4 sm:grid-cols-2">
-            {(quota?.scopes?.length ?? 0) === 0 && (
-              <div className="text-sm text-muted-foreground">
-                No quota policy applies — usage is unlimited.
-              </div>
-            )}
-            {quota?.scopes?.map((s) => (
-              <QuotaTile key={`${s.scope}:${s.subject}:${s.period}`} scope={s} />
-            ))}
-          </div>
-        )}
-      </section>
-
-      {!loading && (
-        <>
-          <section className="rounded-2xl border border-border bg-card shadow-card">
-            <div className="flex items-center gap-3 border-b border-border px-4 py-3">
-              <div className="grid size-8 place-items-center rounded-xl bg-amber-500/10">
-                <Receipt className="size-4 text-amber-600" />
-              </div>
-              <h2 className="text-sm font-semibold">Lifetime Totals</h2>
-            </div>
-            <div className="grid gap-3 p-4 sm:grid-cols-2 lg:grid-cols-4">
-              <StatTile label="Calls" value={fmtInt(agg?.calls)} />
-              <StatTile label="Total tokens" value={fmtInt(agg?.total_tokens)} />
-              <StatTile label="Prompt tokens" value={fmtInt(agg?.prompt_tokens)} />
-              <StatTile label="Completion tokens" value={fmtInt(agg?.completion_tokens)} />
-            </div>
-          </section>
-
-          <section className="rounded-2xl border border-border bg-card shadow-card">
-            <div className="flex items-center gap-3 border-b border-border px-4 py-3">
-              <div className="grid size-8 place-items-center rounded-xl bg-amber-500/10">
-                <Receipt className="size-4 text-amber-600" />
-              </div>
-              <h2 className="text-sm font-semibold">Recent Activity</h2>
-            </div>
-            {(usage?.recent?.length ?? 0) === 0 ? (
-              <div className="px-4 py-8 text-sm text-muted-foreground">No usage recorded yet.</div>
-            ) : (
-              <div className="overflow-x-auto">
-                <table className="w-full text-sm">
-                  <thead>
-                    <tr className="border-b border-border text-left text-xs text-muted-foreground">
-                      <th className="px-4 py-2 font-medium">Time</th>
-                      <th className="px-4 py-2 font-medium">Model</th>
-                      <th className="px-4 py-2 text-right font-medium">Prompt</th>
-                      <th className="px-4 py-2 text-right font-medium">Completion</th>
-                      <th className="px-4 py-2 text-right font-medium">Total</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {usage?.recent?.map((r, i) => (
-                      <tr
-                        key={r.request_id ?? r.id ?? i}
-                        className="border-b border-border/60 last:border-0"
-                      >
-                        <td className="whitespace-nowrap px-4 py-2 text-muted-foreground">
-                          {formatTs(r)}
-                        </td>
-                        <td className="px-4 py-2">{recordModel(r)}</td>
-                        <td className="px-4 py-2 text-right tabular-nums">
-                          {fmtInt(r.prompt_tokens)}
-                        </td>
-                        <td className="px-4 py-2 text-right tabular-nums">
-                          {fmtInt(r.completion_tokens)}
-                        </td>
-                        <td className="px-4 py-2 text-right font-medium tabular-nums">
-                          {fmtInt(recordTotal(r))}
-                        </td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-            )}
-          </section>
-        </>
-      )}
-    </div>
-  );
+        <div>
+          <h3 className="text-sm font-semibold">Recent activity</h3>
+          {(usage?.recent.length ?? 0) === 0 ? <p className="text-muted mt-3 text-sm">No usage recorded yet.</p> : <ListView aria-label="Recent model activity" className="mt-3" items={usage?.recent ?? []} selectionMode="none" variant="secondary">{(record) => <ListView.Item id={record.request_id ?? record.id ?? `${recordModel(record)}-${formatTs(record)}`} textValue={`${recordModel(record)} ${formatTs(record)}`}><ListView.ItemContent><span className="bg-surface-secondary flex size-9 shrink-0 items-center justify-center rounded-2xl"><ModelIcon bare className="size-6" icon={{ type: "lobe-icons", slug: modelSlug(record) }} /></span><span className="flex min-w-0 flex-col"><ListView.Title>{recordModel(record)}</ListView.Title><ListView.Description>{formatTs(record)}</ListView.Description></span></ListView.ItemContent><ListView.ItemAction className="gap-4 text-xs tabular-nums"><span className="text-muted hidden sm:block">{fmtInt(record.prompt_tokens)} prompt</span><span>{fmtInt(record.completion_tokens)} output</span><span className="font-medium">{fmtInt(recordTotal(record))} total</span></ListView.ItemAction></ListView.Item>}</ListView>}
+        </div>
+      </>}
+    </Card.Content>
+  </Card>;
 }
 
 function QuotaTile({ scope }: { scope: QuotaScope }) {
   const unlimited = scope.limit <= 0;
-  const pct = unlimited
-    ? 0
-    : Math.min(100, Math.round((scope.used / Math.max(1, scope.limit)) * 100));
-  const barColor = scope.exceeded
-    ? "bg-destructive"
-    : pct >= 80
-      ? "bg-amber-500"
-      : "bg-emerald-500";
-  return (
-    <div className="rounded-xl border border-border bg-background p-3">
-      <div className="flex items-center justify-between">
-        <div className="text-sm font-medium">{scopeLabel(scope.scope)}</div>
-        <div className="text-xs text-muted-foreground">{scope.period}</div>
-      </div>
-      <div className="mt-2 flex items-baseline gap-1">
-        <span className="text-lg font-semibold tabular-nums">{fmtInt(scope.used)}</span>
-        <span className="text-xs text-muted-foreground">
-          / {unlimited ? "∞" : fmtInt(scope.limit)} tokens
-        </span>
-      </div>
-      {!unlimited && (
-        <div className="mt-2 h-1.5 w-full overflow-hidden rounded-full bg-muted">
-          <div className={`h-full ${barColor}`} style={{ width: `${pct}%` }} />
-        </div>
-      )}
-      <div className="mt-2 text-xs">
-        {unlimited ? (
-          <span className="text-muted-foreground">Unlimited</span>
-        ) : scope.exceeded ? (
-          <span className="font-medium text-destructive">Limit reached</span>
-        ) : (
-          <span className="text-muted-foreground">{fmtInt(scope.remaining)} tokens remaining</span>
-        )}
-      </div>
-    </div>
-  );
+  const value = unlimited ? 0 : Math.min(100, Math.round((scope.used / Math.max(1, scope.limit)) * 100));
+  return <div className="bg-surface-secondary rounded-2xl p-4"><div className="flex items-start justify-between gap-3"><span><span className="text-sm font-semibold">{scopeLabel(scope.scope)}</span><span className="text-muted mt-0.5 block text-xs">{scope.period} allowance</span></span><span className="text-sm font-semibold tabular-nums">{unlimited ? "Unlimited" : `${fmtInt(scope.remaining)} left`}</span></div>{!unlimited ? <ProgressBar aria-label={`${scopeLabel(scope.scope)} quota used`} className="mt-4" value={value}><ProgressBar.Track><ProgressBar.Fill /></ProgressBar.Track></ProgressBar> : null}<p className={`mt-2 text-xs tabular-nums ${scope.exceeded ? "text-danger" : "text-muted"}`}>{scope.exceeded ? "Limit reached" : unlimited ? "No quota limit" : `${fmtInt(scope.used)} of ${fmtInt(scope.limit)} used`}</p></div>;
 }
 
 function StatTile({ label, value }: { label: string; value: string }) {
-  return (
-    <div className="rounded-xl border border-border bg-background px-3 py-2">
-      <div className="text-xs text-muted-foreground">{label}</div>
-      <div className="mt-1 text-sm font-medium tabular-nums">{value}</div>
-    </div>
-  );
+  return <div className="bg-surface-secondary rounded-2xl p-4"><span className="text-muted text-xs">{label}</span><span className="mt-1 block text-xl font-semibold tabular-nums">{value}</span></div>;
 }

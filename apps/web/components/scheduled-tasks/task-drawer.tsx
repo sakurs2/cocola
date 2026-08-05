@@ -1,10 +1,10 @@
 "use client";
 
-import * as Dialog from "@radix-ui/react-dialog";
-import { CalendarClock, ChevronRight, Paperclip, UserCircle, X } from "lucide-react";
+import { Button, Card, Chip, Dropdown, Input, Label, TextArea, TextField } from "@heroui/react";
+import { Sheet } from "@heroui-pro/react/sheet";
+import { CalendarClock, ChevronDown, ChevronRight, Paperclip, UserCircle } from "lucide-react";
 import { useEffect, useState } from "react";
-import { ModelSelectControl } from "@/components/ui/model-select-control";
-import { SelectControl } from "@/components/ui/select-control";
+import { ModelIcon } from "@/components/ui/model-icon";
 import {
   emptyTaskForm,
   filesToAttachments,
@@ -17,9 +17,9 @@ import {
   type TaskFormState,
   type TaskRun,
 } from "@/lib/scheduled-tasks";
-import { cn } from "@/lib/utils";
 
 type OwnerOption = { id: string; name?: string; email?: string };
+type Choice = { id: string; label: string };
 
 export function TaskDrawer({
   open,
@@ -47,7 +47,6 @@ export function TaskDrawer({
   const [form, setForm] = useState<TaskFormState>(() => emptyTaskForm());
   const [ownerUserID, setOwnerUserID] = useState("");
   const [error, setError] = useState("");
-  const selectContentClassName = admin ? "cocola-admin-ui admin-drawer" : "cocola-user-ui";
 
   useEffect(() => {
     if (!open) return;
@@ -78,366 +77,112 @@ export function TaskDrawer({
   }
 
   const scheduleAgain = task?.status === "completed" || task?.status === "expired";
+  const model = models.find((candidate) => candidate.id === form.modelRouteID);
 
   return (
-    <Dialog.Root open={open} onOpenChange={(next) => !saving && onOpenChange(next)}>
-      <Dialog.Portal>
-        <Dialog.Overlay className="fixed inset-0 z-50 bg-slate-950/20 backdrop-blur-sm data-[state=closed]:animate-out data-[state=open]:animate-in data-[state=closed]:fade-out data-[state=open]:fade-in" />
-        <Dialog.Content
-          className={cn(
-            "fixed inset-y-2 right-2 z-50 flex w-[min(32rem,calc(100vw-1rem))] flex-col overflow-hidden rounded-2xl border border-border bg-background text-foreground shadow-2xl outline-none",
-            "data-[state=closed]:animate-out data-[state=open]:animate-in data-[state=closed]:slide-out-to-right data-[state=open]:slide-in-from-right",
-            admin ? "cocola-admin-ui admin-drawer" : "cocola-user-ui user-theme-blue",
-          )}
-        >
-          <header className="flex min-h-16 items-center gap-3 border-b border-border/70 px-5">
-            <span className="user-card-glyph">
-              <CalendarClock className="size-[18px]" />
-            </span>
-            <div className="min-w-0 flex-1">
-              <Dialog.Title className="truncate text-base font-semibold">
-                {task ? "Edit task" : "New task"}
-              </Dialog.Title>
-              <Dialog.Description className="truncate text-xs text-muted-foreground">
-                Schedule Cocola to work automatically.
-              </Dialog.Description>
-            </div>
-            <Dialog.Close className="grid size-9 place-items-center rounded-xl text-muted-foreground transition-colors hover:bg-muted hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/40">
-              <X className="size-4" />
-              <span className="sr-only">Close</span>
-            </Dialog.Close>
-          </header>
-
-          <div className="min-h-0 flex-1 overflow-y-auto p-5">
-            <div className="grid gap-4">
+    <Sheet isOpen={open} placement="right" onOpenChange={(next) => !saving && onOpenChange(next)}>
+      <Sheet.Backdrop>
+        <Sheet.Content className="w-full md:w-[520px]">
+          <Sheet.Dialog>
+            <Sheet.CloseTrigger aria-label="Close task editor" />
+            <Sheet.Header>
+              <span className="flex items-center gap-3">
+                <span className="bg-accent-soft text-accent flex size-10 shrink-0 items-center justify-center rounded-2xl">
+                  <CalendarClock className="size-5" />
+                </span>
+                <span>
+                  <Sheet.Heading>{task ? "Edit task" : "New task"}</Sheet.Heading>
+                  <span className="text-muted mt-1 block text-sm">Schedule Cocola to work automatically.</span>
+                </span>
+              </span>
+            </Sheet.Header>
+            <Sheet.Body className="grid content-start gap-5">
               {admin && task ? (
-                <div className="rounded-2xl border border-border/70 bg-muted/30 p-3">
-                  <div className="flex items-center gap-2 text-xs font-medium text-muted-foreground">
-                    <UserCircle className="size-4" /> Owner
+                <Card className="p-4">
+                  <Card.Content className="p-0">
+                    <p className="text-muted flex items-center gap-2 text-xs font-medium"><UserCircle className="size-4" />Owner</p>
+                    {task.owner_user_id ? (
+                      <p className="mt-2 text-sm font-medium">{task.owner?.name || task.owner?.email || task.owner_user_id}{task.owner?.email && task.owner.name ? <span className="text-muted ml-2 font-normal">{task.owner.email}</span> : null}</p>
+                    ) : (
+                      <ChoiceDropdown label="Owner" value={ownerOptions.find((owner) => owner.id === ownerUserID)?.name || ownerOptions.find((owner) => owner.id === ownerUserID)?.email || "Choose an owner"} options={ownerOptions.map((owner) => ({ id: owner.id, label: owner.name || owner.email || owner.id }))} onChange={setOwnerUserID} />
+                    )}
+                  </Card.Content>
+                </Card>
+              ) : null}
+
+              {admin && task?.last_error ? <div className="bg-danger/10 text-danger rounded-2xl px-4 py-3 text-sm">Last error: {task.last_error}</div> : null}
+
+              <TextField value={form.name} variant="secondary" onChange={(name) => setForm({ ...form, name })}>
+                <Label>Task name</Label><Input autoFocus placeholder="Daily project summary" />
+              </TextField>
+              <TextField value={form.prompt} variant="secondary" onChange={(prompt) => setForm({ ...form, prompt })}>
+                <Label>What should Cocola do?</Label><TextArea rows={5} placeholder="Describe the result you want..." />
+              </TextField>
+              <ChoiceDropdown label="Repeat" value={scheduleOptions.find((option) => option.id === form.scheduleKind)?.label || form.scheduleKind} options={scheduleOptions} onChange={(scheduleKind) => setForm({ ...form, scheduleKind: scheduleKind as TaskFormState["scheduleKind"] })} />
+              <ScheduleFields form={form} setForm={setForm} />
+
+              <div className="bg-surface-secondary text-muted rounded-2xl px-4 py-3 text-xs">Times use <span className="text-foreground font-medium">{form.timezone}</span>.</div>
+
+              <details className="group border-separator bg-default rounded-2xl border p-4">
+                <summary className="flex cursor-pointer list-none items-center gap-2 text-sm font-semibold [&::-webkit-details-marker]:hidden"><ChevronRight className="size-4 transition-transform group-open:rotate-90" />Advanced</summary>
+                <div className="border-separator mt-4 grid gap-5 border-t pt-4">
+                  <div>
+                    <Label>Model</Label>
+                    <Dropdown>
+                      <Dropdown.Trigger aria-label="Select task model" className="border-separator bg-surface-secondary hover:bg-default-hover mt-2 flex h-11 w-full items-center justify-between rounded-2xl border px-3 text-sm">
+                        <span className="flex min-w-0 items-center gap-2"><ModelIcon bare className="size-5 shrink-0" icon={model?.icon} /><span className="truncate font-medium">{model?.alias || form.modelAlias || "Model unavailable"}</span></span><ChevronDown className="text-muted size-4" />
+                      </Dropdown.Trigger>
+                      <Dropdown.Popover placement="bottom start"><Dropdown.Menu aria-label="Task models" onAction={(key) => { const selected = models.find((candidate) => candidate.id === String(key)); if (selected) setForm({ ...form, modelRouteID: selected.id, modelAlias: selected.alias }); }}>{models.map((item) => <Dropdown.Item key={item.id} id={item.id} textValue={item.alias}><span className="flex items-center gap-2"><ModelIcon bare className="size-5" icon={item.icon} />{item.alias}</span></Dropdown.Item>)}</Dropdown.Menu></Dropdown.Popover>
+                    </Dropdown>
                   </div>
-                  {task.owner_user_id ? (
-                    <div className="mt-1 text-sm">
-                      {task.owner?.name || task.owner?.email || task.owner_user_id}
-                      {task.owner?.email && task.owner.name ? (
-                        <span className="ml-2 text-xs text-muted-foreground">
-                          {task.owner.email}
-                        </span>
-                      ) : null}
-                    </div>
-                  ) : (
-                    <SelectControl
-                      className={inputClass}
-                      value={ownerUserID}
-                      onValueChange={setOwnerUserID}
-                      options={[
-                        { value: "", label: "Choose an owner" },
-                        ...ownerOptions.map((owner) => ({
-                          value: owner.id,
-                          label: owner.name || owner.email || owner.id,
-                        })),
-                      ]}
-                      contentClassName={selectContentClassName}
-                    />
-                  )}
-                </div>
-              ) : null}
-
-              {admin && task?.last_error ? (
-                <div className="rounded-xl border border-destructive/25 bg-destructive/10 px-3 py-2 text-xs leading-5 text-destructive">
-                  Last error: {task.last_error}
-                </div>
-              ) : null}
-
-              <Field label="Task name">
-                <input
-                  autoFocus
-                  className={inputClass}
-                  value={form.name}
-                  onChange={(event) => setForm({ ...form, name: event.target.value })}
-                  placeholder="Daily project summary"
-                />
-              </Field>
-
-              <Field label="What should Cocola do?">
-                <textarea
-                  className="min-h-32 rounded-xl border border-input bg-background px-3 py-2.5 text-sm outline-none transition focus:border-ring focus:ring-2 focus:ring-ring/20"
-                  value={form.prompt}
-                  onChange={(event) => setForm({ ...form, prompt: event.target.value })}
-                  placeholder="Describe the result you want..."
-                />
-              </Field>
-
-              <Field label="Repeat">
-                <SelectControl
-                  className={inputClass}
-                  value={form.scheduleKind}
-                  onValueChange={(value) =>
-                    setForm({
-                      ...form,
-                      scheduleKind: value as TaskFormState["scheduleKind"],
-                    })
-                  }
-                  options={[
-                    { value: "once", label: "Does not repeat" },
-                    { value: "hourly", label: "Every hour" },
-                    { value: "daily", label: "Every day" },
-                    { value: "weekly", label: "Every week" },
-                    { value: "monthly", label: "Every month" },
-                  ]}
-                  contentClassName={selectContentClassName}
-                />
-              </Field>
-              <ScheduleFields
-                form={form}
-                setForm={setForm}
-                selectContentClassName={selectContentClassName}
-              />
-
-              <div className="rounded-2xl border border-border/70 bg-muted/25 px-3 py-2 text-xs text-muted-foreground">
-                Times use <span className="font-medium text-foreground">{form.timezone}</span>.
-              </div>
-
-              <details className="group rounded-2xl border border-border/70 bg-card/60 p-3">
-                <summary className="flex cursor-pointer list-none items-center gap-2 text-sm font-medium [&::-webkit-details-marker]:hidden">
-                  <ChevronRight className="size-4 transition-transform group-open:rotate-90" />
-                  Advanced
-                </summary>
-                <div className="mt-4 grid gap-4 border-t border-border/70 pt-4">
-                  <Field label="Model">
-                    <ModelSelectControl
-                      id="task-model"
-                      value={form.modelRouteID}
-                      onValueChange={(value) => {
-                        const model = models.find((candidate) => candidate.id === value);
-                        if (model)
-                          setForm({ ...form, modelRouteID: model.id, modelAlias: model.alias });
-                      }}
-                      models={models}
-                      fallback={{
-                        id: form.modelRouteID,
-                        label: form.modelAlias || "Model",
-                        suffix: "unavailable",
-                      }}
-                      contentClassName={selectContentClassName}
-                    />
-                  </Field>
-                  <Field label="Attachments">
-                    <label className="flex min-h-12 cursor-pointer items-center gap-2 rounded-xl border border-dashed border-border px-3 text-sm text-muted-foreground hover:bg-muted/40">
-                      <Paperclip className="size-4" />
-                      <span className="truncate">
-                        {form.files.length
-                          ? form.files.map((file) => file.filename).join(", ")
-                          : task?.attachments?.length
-                            ? `${task.attachments.length} saved file(s) · choose to replace`
-                            : "Choose files"}
-                      </span>
-                      <input
-                        type="file"
-                        multiple
-                        className="sr-only"
-                        onChange={async (event) =>
-                          setForm({ ...form, files: await filesToAttachments(event.target.files) })
-                        }
-                      />
-                    </label>
-                  </Field>
+                  <div>
+                    <Label>Attachments</Label>
+                    <label className="border-separator bg-surface-secondary hover:bg-default-hover text-muted mt-2 flex min-h-12 cursor-pointer items-center gap-2 rounded-2xl border border-dashed px-3 text-sm transition-colors"><Paperclip className="size-4" /><span className="truncate">{form.files.length ? form.files.map((file) => file.filename).join(", ") : task?.attachments?.length ? `${task.attachments.length} saved file(s) · choose to replace` : "Choose files"}</span><input type="file" multiple className="sr-only" onChange={async (event) => setForm({ ...form, files: await filesToAttachments(event.target.files) })} /></label>
+                  </div>
                 </div>
               </details>
 
               {admin && recentRuns.length ? (
-                <details className="group rounded-2xl border border-border/70 bg-card/60 p-3">
-                  <summary className="flex cursor-pointer list-none items-center gap-2 text-sm font-medium [&::-webkit-details-marker]:hidden">
-                    <ChevronRight className="size-4 transition-transform group-open:rotate-90" />
-                    Recent runs
-                  </summary>
-                  <div className="mt-3 divide-y divide-border/60 border-t border-border/70 pt-1">
-                    {recentRuns.slice(0, 8).map((run) => (
-                      <div key={run.id} className="py-2 text-xs">
-                        <div className="flex items-center justify-between gap-3">
-                          <span className="font-medium capitalize">{run.status}</span>
-                          <span className="text-muted-foreground">
-                            {formatDateTime(run.finished_at || run.started_at || run.created_at)}
-                          </span>
-                        </div>
-                        {run.error ? <p className="mt-1 text-destructive">{run.error}</p> : null}
-                      </div>
-                    ))}
-                  </div>
-                </details>
+                <Card className="p-4"><Card.Header className="p-0"><Card.Title>Recent runs</Card.Title></Card.Header><Card.Content className="mt-3 grid gap-2 p-0">{recentRuns.slice(0, 8).map((run) => <div key={run.id} className="bg-surface-secondary flex items-start justify-between gap-3 rounded-2xl px-3 py-2 text-xs"><span><span className="font-medium capitalize">{run.status}</span>{run.error ? <span className="text-danger mt-1 block">{run.error}</span> : null}</span><span className="text-muted shrink-0">{formatDateTime(run.finished_at || run.started_at || run.created_at)}</span></div>)}</Card.Content></Card>
               ) : null}
 
-              {error ? (
-                <div className="rounded-xl border border-destructive/25 bg-destructive/10 px-3 py-2 text-sm text-destructive">
-                  {error}
-                </div>
-              ) : null}
-            </div>
-          </div>
-
-          <footer className="flex items-center justify-end gap-2 border-t border-border/70 p-4">
-            <Dialog.Close className="h-10 rounded-xl border border-border bg-background px-4 text-sm font-medium hover:bg-muted">
-              Cancel
-            </Dialog.Close>
-            <button
-              type="button"
-              disabled={saving}
-              onClick={() => void submit()}
-              className="user-accent-btn h-10 rounded-xl px-4 text-sm font-semibold disabled:opacity-60"
-            >
-              {saving
-                ? "Saving…"
-                : scheduleAgain
-                  ? "Schedule again"
-                  : task
-                    ? "Save changes"
-                    : "Create task"}
-            </button>
-          </footer>
-        </Dialog.Content>
-      </Dialog.Portal>
-    </Dialog.Root>
+              {error ? <div className="bg-danger/10 text-danger rounded-2xl px-4 py-3 text-sm">{error}</div> : null}
+            </Sheet.Body>
+            <Sheet.Footer className="gap-2">
+              <Button variant="outline" onPress={() => onOpenChange(false)}>Cancel</Button>
+              <Button isPending={saving} onPress={() => void submit()}>{scheduleAgain ? "Schedule again" : task ? "Save changes" : "Create task"}</Button>
+            </Sheet.Footer>
+          </Sheet.Dialog>
+        </Sheet.Content>
+      </Sheet.Backdrop>
+    </Sheet>
   );
 }
 
-function ScheduleFields({
-  form,
-  setForm,
-  selectContentClassName,
-}: {
-  form: TaskFormState;
-  setForm: (form: TaskFormState) => void;
-  selectContentClassName: string;
-}) {
+function ScheduleFields({ form, setForm }: { form: TaskFormState; setForm: (form: TaskFormState) => void }) {
   const minDateTime = toLocalInput(new Date().toISOString(), form.timezone);
   if (form.scheduleKind === "once") {
-    return (
-      <Field label="Run at">
-        <input
-          type="datetime-local"
-          min={minDateTime}
-          max={maxDateTime}
-          step={60}
-          className={inputClass}
-          value={form.runAt}
-          onChange={(event) =>
-            setForm({ ...form, runAt: boundedDateTime(event.target.value, form.runAt) })
-          }
-        />
-      </Field>
-    );
+    return <TextField value={form.runAt} variant="secondary" onChange={(runAt) => setForm({ ...form, runAt: boundedDateTime(runAt, form.runAt) })}><Label>Run at</Label><Input type="datetime-local" min={minDateTime} max={maxDateTime} step={60} /></TextField>;
   }
-
-  return (
-    <div className="grid gap-4 sm:grid-cols-2">
-      {form.scheduleKind === "weekly" ? (
-        <Field label="Day">
-          <SelectControl
-            className={inputClass}
-            value={form.weekday}
-            onValueChange={(value) => setForm({ ...form, weekday: value })}
-            options={[
-              "Monday",
-              "Tuesday",
-              "Wednesday",
-              "Thursday",
-              "Friday",
-              "Saturday",
-              "Sunday",
-            ].map((label, index) => ({
-              value: String(index + 1),
-              label,
-            }))}
-            contentClassName={selectContentClassName}
-          />
-        </Field>
-      ) : null}
-      {form.scheduleKind === "monthly" ? (
-        <Field label="Day of month">
-          <span className="grid gap-1">
-            <input
-              type="number"
-              min={1}
-              max={31}
-              className={inputClass}
-              value={form.day}
-              onChange={(event) => setForm({ ...form, day: event.target.value })}
-            />
-            <span className="font-normal text-muted-foreground">
-              Short months use their last day.
-            </span>
-          </span>
-        </Field>
-      ) : null}
-      {form.scheduleKind === "hourly" ? (
-        <Field label="Minute of the hour">
-          <input
-            type="number"
-            min={0}
-            max={59}
-            className={inputClass}
-            value={form.minute}
-            onChange={(event) => setForm({ ...form, minute: event.target.value })}
-          />
-        </Field>
-      ) : (
-        <Field label="Time">
-          <input
-            type="time"
-            className={inputClass}
-            value={`${form.hour.padStart(2, "0")}:${form.minute.padStart(2, "0")}`}
-            onChange={(event) => {
-              const [hour = "0", minute = "0"] = event.target.value.split(":");
-              setForm({ ...form, hour: hour || "0", minute: minute || "0" });
-            }}
-          />
-        </Field>
-      )}
-      <Field label="Ends">
-        <SelectControl
-          className={inputClass}
-          value={form.ends}
-          onValueChange={(value) => setForm({ ...form, ends: value as "never" | "on" })}
-          options={[
-            { value: "never", label: "Never" },
-            { value: "on", label: "On a date" },
-          ]}
-          contentClassName={selectContentClassName}
-        />
-      </Field>
-      {form.ends === "on" ? (
-        <Field label="End time">
-          <input
-            type="datetime-local"
-            min={minDateTime}
-            max={maxDateTime}
-            step={60}
-            className={inputClass}
-            value={form.expiresAt}
-            onChange={(event) =>
-              setForm({
-                ...form,
-                expiresAt: boundedDateTime(event.target.value, form.expiresAt),
-              })
-            }
-          />
-        </Field>
-      ) : null}
-    </div>
-  );
+  return <div className="grid gap-4 sm:grid-cols-2">
+    {form.scheduleKind === "weekly" ? <ChoiceDropdown label="Day" value={weekdays.find((option) => option.id === form.weekday)?.label || "Monday"} options={weekdays} onChange={(weekday) => setForm({ ...form, weekday })} /> : null}
+    {form.scheduleKind === "monthly" ? <TextField value={form.day} variant="secondary" onChange={(day) => setForm({ ...form, day })}><Label>Day of month</Label><Input type="number" min={1} max={31} /><span className="text-muted text-xs">Short months use their last day.</span></TextField> : null}
+    {form.scheduleKind === "hourly" ? <TextField value={form.minute} variant="secondary" onChange={(minute) => setForm({ ...form, minute })}><Label>Minute of the hour</Label><Input type="number" min={0} max={59} /></TextField> : <TextField value={`${form.hour.padStart(2, "0")}:${form.minute.padStart(2, "0")}`} variant="secondary" onChange={(value) => { const [hour = "0", minute = "0"] = value.split(":"); setForm({ ...form, hour: hour || "0", minute: minute || "0" }); }}><Label>Time</Label><Input type="time" /></TextField>}
+    <ChoiceDropdown label="Ends" value={form.ends === "never" ? "Never" : "On a date"} options={[{ id: "never", label: "Never" }, { id: "on", label: "On a date" }]} onChange={(ends) => setForm({ ...form, ends: ends as "never" | "on" })} />
+    {form.ends === "on" ? <TextField value={form.expiresAt} variant="secondary" onChange={(expiresAt) => setForm({ ...form, expiresAt: boundedDateTime(expiresAt, form.expiresAt) })}><Label>End time</Label><Input type="datetime-local" min={minDateTime} max={maxDateTime} step={60} /></TextField> : null}
+  </div>;
 }
 
-function Field({ label, children }: { label: string; children: React.ReactNode }) {
-  return (
-    <label className="grid gap-1.5 text-xs font-medium text-muted-foreground">
-      {label}
-      {children}
-    </label>
-  );
+function ChoiceDropdown({ label, value, options, onChange }: { label: string; value: string; options: Choice[]; onChange: (value: string) => void }) {
+  return <div><Label>{label}</Label><Dropdown><Dropdown.Trigger aria-label={label} className="border-separator bg-default hover:bg-default-hover mt-2 flex h-11 w-full min-w-0 items-center justify-between rounded-2xl border px-3 text-sm"><span className="truncate">{value}</span><ChevronDown className="text-muted size-4" /></Dropdown.Trigger><Dropdown.Popover placement="bottom start"><Dropdown.Menu aria-label={label} onAction={(key) => onChange(String(key))}>{options.map((option) => <Dropdown.Item key={option.id} id={option.id} textValue={option.label}>{option.label}</Dropdown.Item>)}</Dropdown.Menu></Dropdown.Popover></Dropdown></div>;
 }
 
-const inputClass =
-  "h-10 min-w-0 rounded-xl border border-input bg-background px-3 text-sm text-foreground outline-none transition focus:border-ring focus:ring-2 focus:ring-ring/20 disabled:opacity-60";
-
+const scheduleOptions: Choice[] = [
+  { id: "once", label: "Does not repeat" }, { id: "hourly", label: "Every hour" },
+  { id: "daily", label: "Every day" }, { id: "weekly", label: "Every week" },
+  { id: "monthly", label: "Every month" },
+];
+const weekdays = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"].map((label, index) => ({ id: String(index + 1), label }));
 const maxDateTime = "9999-12-31T23:59";
 
 function boundedDateTime(next: string, current: string): string {
@@ -446,64 +191,6 @@ function boundedDateTime(next: string, current: string): string {
   return year.length === 4 ? next : current;
 }
 
-export function TaskConfirmDialog({
-  open,
-  onOpenChange,
-  title,
-  description,
-  confirmLabel,
-  busy,
-  destructive = false,
-  admin = false,
-  onConfirm,
-  className,
-}: {
-  open: boolean;
-  onOpenChange: (open: boolean) => void;
-  title: string;
-  description: string;
-  confirmLabel: string;
-  busy: boolean;
-  destructive?: boolean;
-  admin?: boolean;
-  onConfirm: () => void;
-  className?: string;
-}) {
-  return (
-    <Dialog.Root open={open} onOpenChange={(next) => !busy && onOpenChange(next)}>
-      <Dialog.Portal>
-        <Dialog.Overlay className="fixed inset-0 z-[60] bg-slate-950/25 backdrop-blur-sm" />
-        <Dialog.Content
-          className={cn(
-            "fixed left-1/2 top-1/2 z-[60] w-[min(28rem,calc(100vw-2rem))] -translate-x-1/2 -translate-y-1/2 rounded-2xl border border-border bg-background p-5 text-foreground shadow-2xl outline-none",
-            admin ? "cocola-admin-ui admin-drawer" : "cocola-user-ui user-theme-blue",
-            className,
-          )}
-        >
-          <Dialog.Title className="text-base font-semibold">{title}</Dialog.Title>
-          <Dialog.Description className="mt-2 text-sm leading-6 text-muted-foreground">
-            {description}
-          </Dialog.Description>
-          <div className="mt-6 flex justify-end gap-2">
-            <Dialog.Close className="h-9 rounded-xl border border-border px-3 text-sm font-medium hover:bg-muted">
-              Cancel
-            </Dialog.Close>
-            <button
-              type="button"
-              disabled={busy}
-              onClick={onConfirm}
-              className={cn(
-                "h-9 rounded-xl px-3 text-sm font-medium text-white disabled:opacity-60",
-                destructive
-                  ? "bg-destructive hover:bg-destructive/90"
-                  : "bg-primary hover:bg-primary/90",
-              )}
-            >
-              {busy ? "Working…" : confirmLabel}
-            </button>
-          </div>
-        </Dialog.Content>
-      </Dialog.Portal>
-    </Dialog.Root>
-  );
+export function TaskConfirmDialog({ open, onOpenChange, title, description, confirmLabel, busy, destructive = false, onConfirm }: { open: boolean; onOpenChange: (open: boolean) => void; title: string; description: string; confirmLabel: string; busy: boolean; destructive?: boolean; admin?: boolean; onConfirm: () => void; className?: string }) {
+  return <Sheet isOpen={open} placement="right" onOpenChange={(next) => !busy && onOpenChange(next)}><Sheet.Backdrop><Sheet.Content className="w-full md:w-[440px]"><Sheet.Dialog><Sheet.CloseTrigger aria-label="Close confirmation" /><Sheet.Header><Sheet.Heading>{title}</Sheet.Heading><p className="text-muted text-sm leading-6">{description}</p></Sheet.Header><Sheet.Body><div className={`${destructive ? "bg-danger/10 text-danger" : "bg-accent-soft text-accent"} rounded-2xl px-4 py-3 text-sm`}>{destructive ? "This action cannot be undone." : "Confirm this operation to continue."}</div></Sheet.Body><Sheet.Footer className="gap-2"><Button variant="outline" onPress={() => onOpenChange(false)}>Cancel</Button><Button isPending={busy} variant={destructive ? "danger" : "primary"} onPress={onConfirm}>{confirmLabel}</Button></Sheet.Footer></Sheet.Dialog></Sheet.Content></Sheet.Backdrop></Sheet>;
 }

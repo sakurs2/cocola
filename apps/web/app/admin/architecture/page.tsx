@@ -1,14 +1,9 @@
 "use client";
 
 import { Workflow as ArchitecturePageIcon } from "lucide-react";
-import {
-  Boxes,
-  CheckCircle2,
-  CircleHelp,
-  ExternalLink,
-  LoaderCircle,
-  TriangleAlert,
-} from "lucide-react";
+import { ExternalLink, LoaderCircle, Server } from "lucide-react";
+import { Button, Card } from "@heroui/react";
+import { Sheet } from "@heroui-pro/react/sheet";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import {
   AdminPage,
@@ -112,17 +107,6 @@ export default function AdminArchitecturePage() {
     void load();
   }, [load]);
 
-  const stats = useMemo(() => {
-    const source = graph?.nodes ?? [];
-    return {
-      total: source.length,
-      healthy: source.filter((node) => node.status === "healthy").length,
-      attention: source.filter((node) => node.status === "degraded" || node.status === "unhealthy")
-        .length,
-      unknown: source.filter((node) => node.status === "unknown").length,
-    };
-  }, [graph]);
-
   const columns = useMemo(() => {
     const grouped: ArchitectureNode[][] = LAYER_ORDER.map(() => []);
     const extras: ArchitectureNode[] = [];
@@ -138,6 +122,7 @@ export default function AdminArchitecturePage() {
     () => graph?.nodes.find((node) => node.id === selectedId) ?? null,
     [graph, selectedId],
   );
+  const rowCount = Math.max(1, ...columns.grouped.map((nodes) => nodes.length));
 
   return (
     <AdminPage className="admin-theme-fuchsia">
@@ -158,71 +143,29 @@ export default function AdminArchitecturePage() {
       />
 
       {error ? (
-        <div className="rounded-xl border border-destructive/30 bg-destructive/10 px-4 py-3 text-sm text-destructive">
+        <div className="rounded-xl border border-danger/30 bg-danger/10 px-4 py-3 text-sm text-danger">
           {error}
         </div>
       ) : null}
 
-      <section className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
-        <Metric label="Nodes" value={String(stats.total)} tone="fuchsia" icon={<Boxes />} />
-        <Metric
-          label="Healthy"
-          value={String(stats.healthy)}
-          tone="green"
-          icon={<CheckCircle2 />}
-        />
-        <Metric
-          label="Attention"
-          value={String(stats.attention)}
-          tone="amber"
-          icon={<TriangleAlert />}
-        />
-        <Metric label="Unknown" value={String(stats.unknown)} tone="slate" icon={<CircleHelp />} />
-      </section>
-
-      <section className="grid min-h-[620px] gap-4 xl:h-[calc(100vh-14rem)] xl:grid-cols-[minmax(0,1fr)_340px]">
-        <div className="architecture-flow relative h-[620px] overflow-auto rounded-2xl border border-border bg-card xl:h-full">
-          <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(circle_at_1px_1px,hsl(var(--border))_1px,transparent_0)] [background-size:32px_32px]" />
-          <div className="pointer-events-none absolute left-3 top-3 z-10 rounded-md border border-border bg-background/95 px-3 py-2 text-xs text-muted-foreground shadow-sm backdrop-blur">
+      <section className="min-w-0">
+        <Card className="architecture-flow relative min-h-[620px] w-full max-w-full min-w-0 overflow-auto p-5">
+          <Card.Content className="min-w-[920px] p-0">
+          <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(circle_at_1px_1px,var(--separator)_1px,transparent_0)] [background-size:32px_32px]" />
+          <div className="pointer-events-none absolute left-3 top-3 z-10 rounded-md border border-border bg-background/95 px-3 py-2 text-xs text-muted shadow-sm backdrop-blur">
             {graph?.generated_at
               ? `Generated ${formatDateTime(graph.generated_at)}`
               : "Loading graph"}
           </div>
 
           {graph ? (
-            <div className="relative min-w-max p-6 pt-14">
-              <div
-                className="grid items-start gap-x-6 gap-y-4"
-                style={{
-                  gridTemplateColumns: `repeat(${LAYER_ORDER.length}, minmax(168px, 1fr))`,
-                }}
-              >
-                {LAYER_ORDER.map((layer, ci) => (
-                  <div
-                    key={`band-${layer}`}
-                    className="pb-1 text-center font-mono text-[10px] font-semibold uppercase tracking-[0.09em] text-muted-foreground/70"
-                    style={{ gridColumn: ci + 1, gridRow: 1 }}
-                  >
-                    {layer}
-                  </div>
-                ))}
-
-                {columns.grouped.map((list, ci) =>
-                  list.map((node, ri) => (
-                    <NodeCard
-                      key={node.id}
-                      node={node}
-                      selected={node.id === selectedId}
-                      onSelect={() => setSelectedId(node.id)}
-                      style={{ gridColumn: ci + 1, gridRow: ri + 2 }}
-                    />
-                  )),
-                )}
-              </div>
+            <div className="relative min-w-max pt-10">
+              <div className="grid grid-cols-5 gap-4">{LAYER_ORDER.map((layer) => <p key={layer} className="text-muted px-1 text-center text-xs font-medium">{layer}</p>)}</div>
+              <div className="mt-3 grid grid-cols-5 auto-rows-[7rem] gap-4">{Array.from({ length: rowCount }, (_, rowIndex) => columns.grouped.map((nodes, layerIndex) => { const node = nodes[rowIndex]; return node ? <NodeCard key={node.id} node={node} selected={node.id === selectedId} onSelect={() => setSelectedId(node.id)} /> : <span key={`${LAYER_ORDER[layerIndex]}-${rowIndex}`} aria-hidden="true" className="h-28" />; }))}</div>
 
               {columns.extras.length > 0 ? (
                 <div className="mt-8 border-t border-border pt-4">
-                  <div className="mb-2 font-mono text-[10px] font-semibold uppercase tracking-[0.09em] text-muted-foreground/70">
+                  <div className="mb-2 font-mono text-[10px] font-semibold uppercase tracking-[0.09em] text-muted/70">
                     Other
                   </div>
                   <div className="flex flex-wrap gap-4">
@@ -243,47 +186,18 @@ export default function AdminArchitecturePage() {
 
           {loading && !graph ? (
             <div className="absolute inset-0 grid place-items-center bg-background/60">
-              <div className="flex items-center gap-2 rounded-md border border-border bg-card px-3 py-2 text-sm text-muted-foreground">
+              <div className="flex items-center gap-2 rounded-md border border-border bg-surface px-3 py-2 text-sm text-muted">
                 <LoaderCircle className="size-4 animate-spin" />
                 Loading architecture...
               </div>
             </div>
           ) : null}
-        </div>
-
-        <aside className="admin-surface min-h-0 overflow-y-auto p-4">
-          {selected ? (
-            <NodeDetail node={selected} />
-          ) : (
-            <div className="text-sm text-muted-foreground">
-              Select a node to inspect its layer, status, and endpoint.
-            </div>
-          )}
-        </aside>
+          </Card.Content>
+        </Card>
       </section>
-    </AdminPage>
-  );
-}
 
-function Metric({
-  label,
-  value,
-  tone,
-  icon,
-}: {
-  label: string;
-  value: string;
-  tone: string;
-  icon: React.ReactNode;
-}) {
-  return (
-    <div className="admin-metric-card" data-tone={tone}>
-      <div className="admin-metric-head">
-        <span className="admin-metric-glyph">{icon}</span>
-        <span className="admin-metric-key">{label}</span>
-      </div>
-      <div className="admin-metric-val truncate">{value}</div>
-    </div>
+      <Sheet isOpen={selected !== null} placement="right" onOpenChange={(open) => !open && setSelectedId(null)}><Sheet.Backdrop><Sheet.Content className="w-full md:w-[480px]"><Sheet.Dialog><Sheet.CloseTrigger aria-label="Close component details" /><Sheet.Header><Sheet.Heading>{selected?.label ?? "Component status"}</Sheet.Heading><p className="text-muted text-sm">{selected ? `${selected.layer} · ${selected.kind}` : ""}</p></Sheet.Header><Sheet.Body>{selected ? <NodeDetail node={selected} /> : null}</Sheet.Body><Sheet.Footer><Button variant="outline" onPress={() => setSelectedId(null)}>Close</Button></Sheet.Footer></Sheet.Dialog></Sheet.Content></Sheet.Backdrop></Sheet>
+    </AdminPage>
   );
 }
 
@@ -302,24 +216,16 @@ function NodeCard({
 }) {
   const s = statusStyle(node.status);
   return (
-    <button
-      type="button"
-      onClick={onSelect}
+    <Button
+      variant="ghost"
+      onPress={onSelect}
       style={style}
-      className={`group flex w-full items-center gap-3 rounded-xl border bg-background px-3.5 py-3 text-left transition-colors ${
-        selected ? "border-primary ring-1 ring-primary/40" : "border-border hover:border-primary/50"
+      className={`cocola-admin-module-card group h-28 w-full min-w-0 justify-start whitespace-normal rounded-2xl p-4 text-left ${
+        selected ? "ring-accent bg-accent-soft ring-2" : ""
       } ${className ?? ""}`}
     >
-      <span className={`grid size-4.5 shrink-0 place-items-center rounded-full ring-4 ${s.ring}`}>
-        <span className={`size-2 rounded-full ${s.dot}`} />
-      </span>
-      <span className="min-w-0">
-        <span className="block truncate text-sm font-semibold text-foreground">{node.label}</span>
-        <span className="block truncate font-mono text-[10px] text-muted-foreground">
-          {node.kind}
-        </span>
-      </span>
-    </button>
+      <span className="flex h-full w-full min-w-0 flex-col items-start"><span className="flex w-full items-center justify-between gap-2"><Server className={`size-5 ${s.tone === "green" ? "text-success" : s.tone === "amber" ? "text-warning" : s.tone === "red" ? "text-danger" : "text-muted"}`} /><AdminStatusBadge tone={s.tone}>{s.label}</AdminStatusBadge></span><span className="mt-auto min-w-0"><span className="block truncate text-sm font-semibold">{node.label}</span><span className="text-muted block truncate font-mono text-[10px]">{node.kind}</span></span></span>
+    </Button>
   );
 }
 
@@ -333,31 +239,24 @@ function NodeDetail({ node }: { node: ArchitectureNode }) {
           {s.label}
         </AdminStatusBadge>
       </div>
-      <div className="text-xs text-muted-foreground">
+      <div className="text-xs text-muted">
         {node.layer} · {node.kind}
       </div>
       {node.detail ? <p className="text-sm text-foreground">{node.detail}</p> : null}
       {node.endpoint ? (
-        <div className="rounded-md border border-border bg-background px-2.5 py-1.5 font-mono text-xs text-muted-foreground">
+        <div className="rounded-md border border-border bg-background px-2.5 py-1.5 font-mono text-xs text-muted">
           {node.endpoint}
         </div>
       ) : null}
       <div className="flex flex-col gap-2">
         {node.admin_href ? (
-          <a href={node.admin_href} className="admin-card-btn justify-center">
-            Open in admin
-          </a>
+          <Button className="w-full" onPress={() => window.location.assign(node.admin_href!)}>Open in admin</Button>
         ) : null}
         {node.external_href ? (
-          <a
-            href={node.external_href}
-            target="_blank"
-            rel="noreferrer"
-            className="admin-card-btn justify-center"
-          >
+          <Button className="w-full" variant="outline" onPress={() => window.open(node.external_href!, "_blank", "noopener,noreferrer")}>
             External console
             <ExternalLink className="size-3.5" />
-          </a>
+          </Button>
         ) : null}
       </div>
     </div>

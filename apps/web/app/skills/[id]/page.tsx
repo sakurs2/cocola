@@ -1,10 +1,10 @@
 "use client";
 
+import { Button, Card, Chip } from "@heroui/react";
+import { Sheet } from "@heroui-pro/react/sheet";
+import { ArrowLeft, FileText, Folder, Hash, LoaderCircle, Trash2 } from "lucide-react";
+import { useParams, useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
-import Link from "next/link";
-import { useParams } from "next/navigation";
-import { ArrowLeft, FileText, LoaderCircle } from "lucide-react";
-
 import { SkillIcon } from "@/components/ui/skill-icon";
 
 type Skill = {
@@ -23,138 +23,126 @@ type Skill = {
 
 export default function SkillDetailPage() {
   const { id } = useParams<{ id: string }>();
-  return <SkillDetail id={id} />;
-}
-
-function SkillDetail({ id }: { id: string }) {
+  const router = useRouter();
   const [skill, setSkill] = useState<Skill | null>(null);
-  const [error, setError] = useState<string | null>(null);
+  const [error, setError] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [removeOpen, setRemoveOpen] = useState(false);
 
   useEffect(() => {
-    let cancelled = false;
+    const controller = new AbortController();
     void (async () => {
       try {
-        const res = await fetch(`/api/skills/${encodeURIComponent(id)}`, { cache: "no-store" });
-        if (!res.ok) throw new Error(await readError(res));
-        const data = await res.json();
-        if (!cancelled) setSkill(data);
-      } catch (err) {
-        if (!cancelled) setError(err instanceof Error ? err.message : String(err));
+        const response = await fetch(`/api/skills/${encodeURIComponent(id)}`, { cache: "no-store", signal: controller.signal });
+        if (!response.ok) throw new Error(await readError(response));
+        const loaded = (await response.json()) as Skill;
+        if (!controller.signal.aborted) setSkill(loaded);
+      } catch (cause) {
+        if (!controller.signal.aborted) setError(cause instanceof Error ? cause.message : String(cause));
       }
     })();
-    return () => {
-      cancelled = true;
-    };
+    return () => controller.abort();
   }, [id]);
 
+  const toggle = async () => {
+    if (!skill) return;
+    const previous = skill;
+    const nextEnabled = !skill.enabled;
+    setSkill({ ...skill, enabled: nextEnabled });
+    setBusy(true);
+    setError("");
+    try {
+      const response = await fetch(`/api/skills/${encodeURIComponent(skill.id)}/${nextEnabled ? "enable" : "disable"}`, { method: "POST" });
+      if (!response.ok) throw new Error(await readError(response));
+    } catch (cause) {
+      setSkill(previous);
+      setError(cause instanceof Error ? cause.message : String(cause));
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const remove = async () => {
+    if (!skill) return;
+    setBusy(true);
+    setError("");
+    try {
+      const response = await fetch(`/api/skills/${encodeURIComponent(skill.id)}`, { method: "DELETE" });
+      if (!response.ok) throw new Error(await readError(response));
+      router.push("/skills");
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : String(cause));
+      setBusy(false);
+    }
+  };
+
+  if (!skill && !error) {
+    return <div className="cocola-web-page grid min-h-64 place-items-center p-8"><LoaderCircle className="text-muted size-5 animate-spin" /></div>;
+  }
+
   return (
-    <main className="user-canvas user-page user-theme-violet h-full min-w-0 flex-1 overflow-y-auto">
-      <div className="mx-auto max-w-5xl space-y-6 px-8 py-10">
-        <header className="flex items-center gap-3.5">
-          <Link href="/skills" className="user-back-btn" title="Back">
-            <ArrowLeft className="size-[17px]" />
-          </Link>
-          <div className="min-w-0 flex-1">
-            <div className="user-eyebrow">Extensions</div>
-            <h1 className="truncate text-2xl font-bold tracking-tight">
-              {skill ? displaySkillName(skill) : "Skill"}
-            </h1>
-            <p className="user-card-mono truncate">{skill?.id || id}</p>
-          </div>
-        </header>
+    <div className="cocola-web-page mx-auto flex w-full max-w-6xl flex-col gap-5 p-4 sm:p-6 lg:p-8">
+      <header className="flex flex-wrap items-center gap-3">
+        <Button isIconOnly aria-label="Back to Skills" variant="ghost" onPress={() => router.push("/skills")}><ArrowLeft className="size-4" /></Button>
+        <span className="bg-accent-soft text-accent flex size-11 items-center justify-center rounded-2xl"><SkillIcon name={skill?.name || id} size="sm" /></span>
+        <div className="min-w-0 flex-1">
+          <h1 className="text-2xl font-semibold tracking-[-0.03em]">{skill?.name || "Skill"}</h1>
+          <p className="text-muted mt-1 text-sm">{skill?.description || skill?.id || id}</p>
+        </div>
+      </header>
 
-        {error ? (
-          <div className="rounded-xl border border-red-500/30 bg-red-500/10 px-3.5 py-2.5 text-sm text-red-600">
-            {error}
-          </div>
-        ) : null}
+      {error ? <div className="bg-danger/10 text-danger rounded-2xl px-4 py-3 text-sm">{error}</div> : null}
 
-        {!skill && !error ? (
-          <div className="flex h-40 items-center justify-center text-muted-foreground">
-            <LoaderCircle className="mr-2 size-4 animate-spin" />
-            Loading skill
-          </div>
-        ) : null}
-
-        {skill ? (
-          <>
-            <div className="user-card">
-              <div className="flex items-start gap-4">
-                <div className="user-card-glyph lg">
-                  <SkillIcon name={displaySkillName(skill) || skill.id} />
-                </div>
-                <div className="min-w-0 flex-1">
-                  <div className="flex flex-wrap items-center gap-2">
-                    <h2 className="text-lg font-bold text-foreground">{displaySkillName(skill)}</h2>
-                    {skill.enabled ? (
-                      <span className="user-tag user-tag--ok">
-                        <span className="user-tag-dot" /> enabled
-                      </span>
-                    ) : (
-                      <span className="user-tag">disabled</span>
-                    )}
-                    <span
-                      className={`user-tag${skill.scope === "user" ? " user-tag--accent" : ""}`}
-                    >
-                      {skill.scope === "user" ? "personal" : "shared"}
-                    </span>
-                  </div>
-                  <p className="mt-2 text-sm text-muted-foreground">{skill.description}</p>
-                </div>
-              </div>
+      {skill ? (
+        <>
+          <div className="flex flex-wrap items-center gap-2">
+            <Chip size="sm" variant="soft">{skill.scope === "user" ? "Personal" : "Shared"}</Chip>
+            <Chip size="sm" variant="soft">{skill.source_type || "manual"}</Chip>
+            <Chip color={skill.enabled ? "success" : "warning"} size="sm" variant="soft">{skill.enabled ? "Enabled" : "Disabled"}</Chip>
+            <div className="ml-auto flex gap-2">
+              {skill.scope === "user" ? <Button size="sm" variant="danger-soft" onPress={() => setRemoveOpen(true)}><Trash2 className="size-3.5" />Remove</Button> : null}
+              <Button isPending={busy} size="sm" variant={skill.enabled ? "outline" : "primary"} onPress={() => void toggle()}>{skill.enabled ? "Disable" : "Enable"}</Button>
             </div>
+          </div>
 
-            <section className="grid gap-3 md:grid-cols-2">
-              <Info label="Source" value={skill.source_type || "manual"} />
-              <Info label="Source Path" value={skill.source_path || "-"} />
-              <Info label="Files" value={String(skill.file_count ?? 0)} />
-              <Info label="Size" value={`${skill.size_bytes ?? 0} bytes`} />
-              <Info label="SHA256" value={skill.content_sha256 || "-"} full />
-            </section>
+          <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+            <InfoCard icon={<Folder className="size-4" />} label="Source path" value={skill.source_path || "—"} />
+            <InfoCard icon={<FileText className="size-4" />} label="Files" value={String(skill.file_count ?? 0)} />
+            <InfoCard icon={<FileText className="size-4" />} label="Size" value={formatBytes(skill.size_bytes ?? 0)} />
+            <InfoCard icon={<Hash className="size-4" />} label="SHA256" value={skill.content_sha256 || "—"} />
+          </div>
 
-            <div className="user-doc-card">
-              <div className="flex items-center gap-2 border-b border-border/60 px-5 py-4">
-                <FileText className="size-4 text-muted-foreground" />
-                <h2 className="text-sm font-bold text-foreground">SKILL.md</h2>
-              </div>
-              <pre className="max-h-[520px] overflow-auto whitespace-pre-wrap p-5 text-xs leading-6 text-slate-600">
-                {skill.skill_md || "No SKILL.md captured."}
-              </pre>
-            </div>
-          </>
-        ) : null}
-      </div>
-    </main>
-  );
-}
+          <Card className="p-5">
+            <Card.Header className="p-0"><Card.Title>SKILL.md</Card.Title><Card.Description>Full instructions loaded when the Skill matches a request.</Card.Description></Card.Header>
+            <Card.Content className="mt-5 p-0"><pre className="bg-surface-secondary max-h-[34rem] overflow-auto whitespace-pre-wrap rounded-2xl p-5 font-mono text-sm leading-7">{skill.skill_md || "No SKILL.md captured."}</pre></Card.Content>
+          </Card>
+        </>
+      ) : null}
 
-function Info({ label, value, full }: { label: string; value: string; full?: boolean }) {
-  return (
-    <div className={`user-info-card${full ? " md:col-span-2" : ""}`}>
-      <div className="text-[11px] font-bold uppercase tracking-wide text-muted-foreground">
-        {label}
-      </div>
-      <div className="mt-1.5 break-all text-sm font-semibold text-foreground">{value}</div>
+      <Sheet isOpen={removeOpen} placement="right" onOpenChange={setRemoveOpen}>
+        <Sheet.Backdrop><Sheet.Content className="w-full md:w-[420px]"><Sheet.Dialog><Sheet.CloseTrigger aria-label="Close remove confirmation" /><Sheet.Header><Sheet.Heading>Remove this Skill?</Sheet.Heading><p className="text-muted text-sm">This personal Skill will no longer be available to Agents or new chats.</p></Sheet.Header><Sheet.Footer className="gap-2"><Button variant="outline" onPress={() => setRemoveOpen(false)}>Cancel</Button><Button isPending={busy} variant="danger-soft" onPress={() => void remove()}>Remove Skill</Button></Sheet.Footer></Sheet.Dialog></Sheet.Content></Sheet.Backdrop>
+      </Sheet>
     </div>
   );
 }
 
-async function readError(res: Response) {
-  const text = await res.text();
+function InfoCard({ icon, label, value }: { icon: React.ReactNode; label: string; value: string }) {
+  return <Card className="p-4"><Card.Content className="flex min-w-0 items-start gap-3 p-0"><span className="bg-surface-secondary text-accent grid size-9 shrink-0 place-items-center rounded-xl">{icon}</span><span className="min-w-0"><span className="text-muted block text-xs">{label}</span><span className="mt-1 block break-all text-sm font-medium">{value}</span></span></Card.Content></Card>;
+}
+
+function formatBytes(bytes: number) {
+  if (bytes < 1024) return `${bytes} B`;
+  return `${Math.round(bytes / 1024)} KB`;
+}
+
+async function readError(response: Response) {
+  const text = await response.text();
   try {
     const json = JSON.parse(text);
     if (typeof json.error === "string") return json.error;
-    if (json.error && typeof json.error === "object") {
-      const message = typeof json.error.message === "string" ? json.error.message : "";
-      const code = typeof json.error.code === "string" ? json.error.code : "";
-      return message || code || text;
-    }
+    if (json.error && typeof json.error === "object") return json.error.message || json.error.code || text;
     return json.message || text;
   } catch {
-    return text || res.statusText;
+    return text || response.statusText;
   }
-}
-
-function displaySkillName(skill: Pick<Skill, "id" | "name" | "source_path">) {
-  return skill.name?.trim() || "";
 }

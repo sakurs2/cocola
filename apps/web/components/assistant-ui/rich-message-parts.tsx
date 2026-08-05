@@ -125,7 +125,7 @@ export function QuestionCard({
   return (
     <section
       aria-labelledby={titleId}
-      className="my-4 overflow-hidden rounded-2xl border border-sky-500/25 bg-card shadow-[0_18px_45px_-36px_rgba(2,132,199,0.7)]"
+      className="my-4 overflow-hidden rounded-2xl border border-sky-500/25 bg-surface shadow-[0_18px_45px_-36px_rgba(2,132,199,0.7)]"
     >
       <div className="flex items-start gap-3 border-b border-sky-500/15 bg-sky-500/[0.045] px-5 py-4">
         <span className="grid size-9 shrink-0 place-items-center rounded-xl bg-sky-600 text-white shadow-sm">
@@ -147,7 +147,7 @@ export function QuestionCard({
             {QUESTION_STATUS_LABELS[question.status]}
           </h3>
           {question.status === "pending" ? (
-            <p className="mt-1 text-xs leading-5 text-muted-foreground">
+            <p className="mt-1 text-xs leading-5 text-muted">
               Choose an option or enter your own answer.
             </p>
           ) : null}
@@ -172,7 +172,7 @@ export function QuestionCard({
                     "flex min-h-11 items-center gap-3 rounded-xl border px-3.5 py-2.5 text-left text-sm transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sky-500",
                     selected
                       ? "border-sky-500 bg-sky-500/[0.07] text-foreground"
-                      : "border-border bg-background hover:bg-muted/50",
+                      : "border-border bg-background hover:bg-surface-secondary/50",
                   )}
                 >
                   <span
@@ -197,30 +197,30 @@ export function QuestionCard({
             rows={3}
             onChange={(event) => setCustomAnswer(event.target.value)}
             placeholder="Enter your own answer…"
-            className="w-full resize-y rounded-xl border border-border bg-background px-3.5 py-3 text-sm leading-5 outline-none placeholder:text-muted-foreground focus-visible:ring-2 focus-visible:ring-sky-500 disabled:opacity-60"
+            className="w-full resize-y rounded-xl border border-border bg-background px-3.5 py-3 text-sm leading-5 outline-none placeholder:text-muted focus-visible:ring-2 focus-visible:ring-sky-500 disabled:opacity-60"
           />
         ) : answeredLabel ? (
-          <div className="rounded-xl border border-border bg-muted/35 px-3.5 py-3 text-sm text-foreground">
+          <div className="rounded-xl border border-border bg-surface-secondary/35 px-3.5 py-3 text-sm text-foreground">
             {answeredLabel}
           </div>
         ) : null}
         {question.status === "cancelled" ? (
-          <p className="text-sm text-muted-foreground">This question is no longer current.</p>
+          <p className="text-sm text-muted">This question is no longer current.</p>
         ) : null}
         {error ? (
-          <p role="alert" className="text-xs text-destructive">
+          <p role="alert" className="text-xs text-danger">
             {error}
           </p>
         ) : null}
       </div>
 
       {interactive ? (
-        <div className="flex flex-col-reverse gap-2 border-t border-border/70 bg-muted/20 px-5 py-4 sm:flex-row sm:justify-end">
+        <div className="flex flex-col-reverse gap-2 border-t border-border/70 bg-surface-secondary/20 px-5 py-4 sm:flex-row sm:justify-end">
           <button
             type="button"
             disabled={busy}
             onClick={() => void cancel()}
-            className="inline-flex h-10 items-center justify-center rounded-xl border border-border bg-background px-4 text-sm font-semibold hover:bg-muted disabled:opacity-50"
+            className="inline-flex h-10 items-center justify-center rounded-xl border border-border bg-background px-4 text-sm font-semibold hover:bg-surface-secondary disabled:opacity-50"
           >
             {action === "cancel" ? (
               <LoaderCircle className="mr-2 size-4 animate-spin motion-reduce:animate-none" />
@@ -259,9 +259,9 @@ export const RunSummaryPart: FC<DataMessagePartProps<Omit<UiRunSummaryPart, "typ
 export function RunSummary({ summary }: { summary: UiRunSummaryPart }) {
   const actions = summary.toolCallCount;
   return (
-    <details className="group my-2 text-xs text-muted-foreground">
-      <summary className="grid cursor-pointer list-none grid-cols-[1.75rem_minmax(0,1fr)] items-center gap-x-2.5 rounded-lg py-1.5 outline-none focus-visible:ring-2 focus-visible:ring-ring">
-        <span className="flex items-center justify-center text-muted-foreground">
+    <details className="group my-2 text-xs text-muted">
+      <summary className="grid cursor-pointer list-none grid-cols-[1.75rem_minmax(0,1fr)] items-center gap-x-2.5 rounded-lg py-1.5 outline-none focus-visible:ring-2 focus-visible:ring-focus">
+        <span className="flex items-center justify-center text-muted">
           <Activity className="size-4 shrink-0" aria-hidden="true" />
         </span>
         <span className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1">
@@ -291,7 +291,7 @@ export const StructuredResultCardPart: FC<
 
 function GenericJSON({ data }: { data: unknown }) {
   return (
-    <pre className="max-h-96 overflow-auto whitespace-pre-wrap break-words rounded-xl border border-border/60 bg-muted/35 p-3 font-mono text-xs leading-5 text-foreground">
+    <pre className="max-h-96 overflow-auto whitespace-pre-wrap break-words rounded-xl border border-border/60 bg-surface-secondary/35 p-3 font-mono text-xs leading-5 text-foreground">
       {JSON.stringify(data, null, 2)}
     </pre>
   );
@@ -323,13 +323,13 @@ export function StructuredResultCard({ result }: { result: UiStructuredResultPar
   };
 
   return (
-    <section className="my-4 overflow-hidden rounded-2xl border border-border/80 bg-card shadow-sm">
-      <header className="flex items-center gap-3 border-b border-border/70 bg-muted/20 px-4 py-3.5 sm:px-5">
-        <span className="grid size-8 shrink-0 place-items-center rounded-lg border border-primary/15 bg-primary/[0.08] text-primary">
+    <section className="my-4 overflow-hidden rounded-2xl border border-border/80 bg-surface shadow-sm">
+      <header className="flex items-center gap-3 border-b border-border/70 bg-surface-secondary/20 px-4 py-3.5 sm:px-5">
+        <span className="grid size-8 shrink-0 place-items-center rounded-lg border border-accent/15 bg-accent/[0.08] text-accent">
           <ResultIcon className="size-4" />
         </span>
         <div className="min-w-0 flex-1">
-          <p className="text-[10px] font-semibold uppercase tracking-[0.12em] text-muted-foreground">
+          <p className="text-[10px] font-semibold uppercase tracking-[0.12em] text-muted">
             {meta.label}
           </p>
           <h3 className="mt-0.5 truncate text-sm font-semibold leading-5 text-foreground">
@@ -340,7 +340,7 @@ export function StructuredResultCard({ result }: { result: UiStructuredResultPar
           type="button"
           aria-label={copied ? "JSON copied" : "Copy result JSON"}
           onClick={() => void copy()}
-          className="inline-flex h-8 shrink-0 items-center gap-1.5 rounded-lg px-2.5 text-xs font-medium text-muted-foreground transition-colors hover:bg-muted hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/30"
+          className="inline-flex h-8 shrink-0 items-center gap-1.5 rounded-lg px-2.5 text-xs font-medium text-muted transition-colors hover:bg-surface-secondary hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus/30"
         >
           {copied ? <Check className="size-3.5" /> : <ClipboardCopy className="size-3.5" />}
           <span className="hidden sm:inline">{copied ? "Copied" : "Copy JSON"}</span>
@@ -349,7 +349,7 @@ export function StructuredResultCard({ result }: { result: UiStructuredResultPar
       <div className={cn(supported && result.renderer === "table" ? "p-0" : "p-4 sm:p-5")}>
         {!supported ? (
           <div className="space-y-3">
-            <p className="text-sm font-medium text-muted-foreground">Unsupported result format</p>
+            <p className="text-sm font-medium text-muted">Unsupported result format</p>
             <GenericJSON data={result.data} />
           </div>
         ) : result.renderer === "table" ? (
@@ -377,7 +377,7 @@ function SummaryResult({ data }: { data: unknown }) {
             <p className="max-w-3xl text-sm leading-6 text-foreground">{summary.lead}</p>
           ) : null}
           {summary.status ? (
-            <span className="shrink-0 rounded-full border border-primary/15 bg-primary/[0.07] px-2.5 py-1 text-xs font-medium text-primary sm:ml-auto">
+            <span className="shrink-0 rounded-full border border-accent/15 bg-accent/[0.07] px-2.5 py-1 text-xs font-medium text-accent sm:ml-auto">
               {summary.status}
             </span>
           ) : null}
@@ -395,7 +395,7 @@ function SummaryResult({ data }: { data: unknown }) {
               key={field.key}
               className="grid gap-1 py-3 sm:grid-cols-[minmax(8rem,0.35fr)_minmax(0,1fr)] sm:gap-5"
             >
-              <dt className="text-xs font-medium text-muted-foreground">{field.label}</dt>
+              <dt className="text-xs font-medium text-muted">{field.label}</dt>
               <dd className="break-words text-sm leading-5 text-foreground">
                 {formatResultValue(field.value)}
               </dd>
@@ -418,21 +418,21 @@ function TableResult({ data, title }: { data: unknown; title: string }) {
   }
   return (
     <div
-      className="overflow-x-auto focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring/30"
+      className="overflow-x-auto focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-focus/30"
       role="region"
       aria-label={`${title} table`}
       tabIndex={0}
     >
       <table className="w-max min-w-full border-collapse text-left text-sm">
         <caption className="sr-only">{title}</caption>
-        <thead className="bg-muted/40 text-xs text-muted-foreground">
+        <thead className="bg-surface-secondary/40 text-xs text-muted">
           <tr>
             {columns.map((column, columnIndex) => (
               <th
                 key={column.key}
                 className={cn(
                   "border-b border-border px-4 py-3 font-semibold sm:px-5",
-                  columnIndex === 0 && "sticky left-0 z-20 border-r bg-muted/70",
+                  columnIndex === 0 && "sticky left-0 z-20 border-r bg-surface-secondary/70",
                 )}
               >
                 {column.label}
@@ -445,7 +445,7 @@ function TableResult({ data, title }: { data: unknown; title: string }) {
             <tr>
               <td
                 colSpan={columns.length}
-                className="px-5 py-8 text-center text-sm text-muted-foreground"
+                className="px-5 py-8 text-center text-sm text-muted"
               >
                 No rows
               </td>
@@ -457,7 +457,7 @@ function TableResult({ data, title }: { data: unknown; title: string }) {
               return (
                 <tr
                   key={rowIndex}
-                  className="group border-b border-border/60 transition-colors last:border-0 hover:bg-muted/20"
+                  className="group border-b border-border/60 transition-colors last:border-0 hover:bg-surface-secondary/20"
                 >
                   {columns.map((column, columnIndex) => (
                     <td
@@ -465,7 +465,7 @@ function TableResult({ data, title }: { data: unknown; title: string }) {
                       className={cn(
                         "max-w-md px-4 py-3 align-top leading-5 sm:px-5",
                         columnIndex === 0 &&
-                          "sticky left-0 z-10 border-r bg-card font-medium group-hover:bg-muted/20",
+                          "sticky left-0 z-10 border-r bg-surface font-medium group-hover:bg-surface-secondary/20",
                       )}
                     >
                       {formatResultValue(values ? values[columnIndex] : record?.[column.dataKey])}
@@ -488,7 +488,7 @@ function ListResult({ data }: { data: unknown }) {
     <ol className="divide-y divide-border/70 border-y border-border/70">
       {items.map((item, index) => (
         <li key={item.key} className="grid grid-cols-[2rem_minmax(0,1fr)] gap-3 py-3.5 sm:gap-4">
-          <span className="pt-0.5 font-mono text-xs tabular-nums text-muted-foreground">
+          <span className="pt-0.5 font-mono text-xs tabular-nums text-muted">
             {String(index + 1).padStart(2, "0")}
           </span>
           <div className="min-w-0">
@@ -499,7 +499,7 @@ function ListResult({ data }: { data: unknown }) {
               <dl className="mt-2 grid gap-x-6 gap-y-1.5 sm:grid-cols-2">
                 {item.fields.map((field) => (
                   <div key={field.key} className="min-w-0 text-xs leading-5">
-                    <dt className="inline font-medium text-muted-foreground">{field.label}: </dt>
+                    <dt className="inline font-medium text-muted">{field.label}: </dt>
                     <dd className="inline break-words text-foreground">
                       {formatResultValue(field.value)}
                     </dd>
@@ -521,17 +521,17 @@ function MetricsResult({ data }: { data: unknown }) {
     <dl className="grid grid-cols-2 gap-x-5 gap-y-5 sm:grid-cols-3">
       {metrics.map((metric) => (
         <div key={metric.key} className="min-w-0 border-t border-border/80 pt-3">
-          <dt className="truncate text-xs font-medium text-muted-foreground">{metric.label}</dt>
+          <dt className="truncate text-xs font-medium text-muted">{metric.label}</dt>
           <dd className="mt-1.5 break-words text-2xl font-semibold tracking-tight text-foreground">
             {formatResultValue(metric.value)}
             {metric.unit ? (
-              <span className="ml-1.5 text-xs font-medium tracking-normal text-muted-foreground">
+              <span className="ml-1.5 text-xs font-medium tracking-normal text-muted">
                 {metric.unit}
               </span>
             ) : null}
           </dd>
           {metric.trend ? (
-            <p className="mt-1 text-xs font-medium text-primary">{metric.trend}</p>
+            <p className="mt-1 text-xs font-medium text-accent">{metric.trend}</p>
           ) : null}
         </div>
       ))}

@@ -1,10 +1,6 @@
 import * as React from "react";
 import { cn } from "@/lib/utils";
 
-// Lightweight accessible toggle switch skinned for the cocola user UI.
-// Implemented as a plain button (role=switch) to avoid adding a new Radix
-// dependency. Authored against the design tokens in app/globals.css.
-
 export interface SwitchProps extends Omit<
   React.ButtonHTMLAttributes<HTMLButtonElement>,
   "onChange"
@@ -24,9 +20,9 @@ const Switch = React.forwardRef<HTMLButtonElement, SwitchProps>(
       onClick={() => onCheckedChange?.(!checked)}
       className={cn(
         "peer inline-flex h-5 w-9 shrink-0 cursor-pointer items-center rounded-full border border-transparent transition-colors outline-none",
-        "focus-visible:ring-2 focus-visible:ring-blue-500/25",
+        "focus-visible:ring-2 focus-visible:ring-focus/25",
         "disabled:cursor-not-allowed disabled:opacity-50",
-        checked ? "brand-gradient" : "bg-input",
+        checked ? "bg-accent" : "bg-default",
         className,
       )}
       {...props}

@@ -6,19 +6,22 @@ import {
   Check,
   ChevronLeft,
   ChevronRight,
-  Loader2,
+  CircleCheck,
+  FileText,
   Plus,
   Search,
   Trash2,
 } from "lucide-react";
+import { Button, Card, Chip, Input, Label, SearchField, TextField, Tooltip } from "@heroui/react";
+import { ItemCard } from "@heroui-pro/react/item-card";
+import { ItemCardGroup } from "@heroui-pro/react/item-card-group";
+import { ListView } from "@heroui-pro/react/list-view";
+import { PressableFeedback } from "@heroui-pro/react/pressable-feedback";
+import { Sheet } from "@heroui-pro/react/sheet";
 import { useMemo, useState } from "react";
-import { Badge } from "@/components/ui/badge";
-import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
 import { SkillIcon } from "@/components/ui/skill-icon";
 import type { AgentKnowledgeSource, AgentSkillCatalogItem } from "@/lib/agents";
 import { agentKnowledgeSourceKey } from "@/lib/agents";
-import { cn } from "@/lib/utils";
 
 type Props = {
   skills: AgentSkillCatalogItem[];
@@ -274,298 +277,200 @@ export function AgentCapabilitiesEditor({
 
   return (
     <>
-      <section className="rounded-2xl border border-border bg-card p-5 shadow-sm">
-        <h2 className="text-sm font-semibold">Skills (Optional)</h2>
-        <p className="mt-1 text-sm leading-6 text-muted-foreground">
-          Leave empty to inherit your default skills. Selecting any skill switches this Agent to a
-          custom skill set.
-        </p>
-        <div className="mt-4 rounded-xl border border-border bg-muted/20 p-3">
-          <p className="text-sm font-medium">
-            {skillIDs.length === 0 ? "Using default skills" : "Using a custom skill set"}
-          </p>
-          <p className="mt-1 text-xs leading-5 text-muted-foreground">
-            {skillIDs.length === 0
-              ? "All skills enabled by default will be available to this Agent."
-              : `Only the ${skillIDs.length} selected skills will be available to this Agent.`}
-          </p>
-        </div>
-        <div className="relative mt-4">
-          <Label htmlFor="agent-skill-search" className="sr-only">
-            Search Skills by name
-          </Label>
-          <Search className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
-          <Input
-            type="search"
-            id="agent-skill-search"
+      <Card className="p-5">
+        <Card.Header className="p-0">
+          <Card.Title>Skills</Card.Title>
+          <Card.Description>Leave empty to inherit default Skills. Selecting one switches this Agent to a custom set.</Card.Description>
+        </Card.Header>
+        <Card.Content className="p-0">
+          <div className="bg-surface-secondary flex flex-wrap items-center justify-between gap-3 rounded-2xl px-4 py-3">
+            <span>
+              <span className="block text-sm font-medium">{skillIDs.length === 0 ? "Using default Skills" : "Using a custom Skill set"}</span>
+              <span className="text-muted mt-1 block text-xs">
+                {skillIDs.length === 0 ? "All Skills enabled by default remain available." : `Only ${skillIDs.length} selected Skill${skillIDs.length === 1 ? "" : "s"} will be available.`}
+              </span>
+            </span>
+            <Chip color={skillIDs.length === 0 ? "accent" : "success"} size="sm" variant="soft">
+              {skillIDs.length === 0 ? "Default" : `${skillIDs.length} selected`}
+            </Chip>
+          </div>
+          <SearchField
+            aria-label="Search Skills by name"
+            className="mt-4 w-full"
             value={skillQuery}
-            onChange={(event) => {
-              setSkillQuery(event.target.value);
-              setSkillPage(1);
-            }}
-            placeholder="input skill name"
-            className="pl-9"
-          />
-        </div>
-        <div className="mt-4 grid gap-4 md:grid-cols-2 xl:grid-cols-3">
-          {paginatedSkills.length > 0 ? (
-            paginatedSkills.map((skill) => {
+            variant="secondary"
+            onChange={(value) => { setSkillQuery(value); setSkillPage(1); }}
+          >
+            <SearchField.Group>
+              <SearchField.SearchIcon><Search className="size-4" /></SearchField.SearchIcon>
+              <SearchField.Input placeholder="Search Skills by name" />
+              <SearchField.ClearButton />
+            </SearchField.Group>
+          </SearchField>
+          <ItemCardGroup className="cocola-web-agent-skill-grid mt-4" columns={3} layout="grid">
+            {paginatedSkills.map((skill) => {
               const selected = selectedIDs.has(skill.id);
-              const description = !skill.available
-                ? "This skill was disabled by an administrator and will not be available to the Agent."
-                : skill.description ||
-                  `${skill.source === "personal" ? "Personal" : "Shared"} Skill`;
+              const disabled = !skill.available && !selected;
+              const description = skill.available
+                ? skill.description || `${skill.source === "personal" ? "Personal" : "Shared"} Skill`
+                : skill.unavailable_reason || "This Skill is no longer available.";
               return (
-                <button
+                <ItemCard<"button">
                   key={skill.id}
-                  type="button"
-                  aria-pressed={selected}
-                  disabled={!skill.available && !selected}
-                  onClick={() => toggleSkill(skill)}
-                  className={cn(
-                    "group flex h-40 min-w-0 flex-col overflow-hidden rounded-2xl border bg-card p-5 text-left shadow-card transition duration-200 hover:-translate-y-0.5 hover:shadow-lg focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/40",
-                    selected
-                      ? "border-primary/35 bg-primary/[0.025] ring-1 ring-primary/10"
-                      : "border-border",
-                    !skill.available && !selected && "cursor-not-allowed opacity-60",
+                  className={`relative min-h-[11rem] w-full overflow-hidden ${selected ? "ring-accent bg-accent-soft ring-2" : ""} ${disabled ? "cursor-not-allowed opacity-55" : "cursor-pointer"}`}
+                  render={(props) => (
+                    <button {...props} aria-pressed={selected} disabled={disabled} type="button" onClick={() => toggleSkill(skill)} />
                   )}
                 >
-                  <span className="flex min-w-0 items-start gap-3">
-                    <SkillIcon name={skill.name || skill.runtime_id} />
-                    <span className="min-w-0 flex-1">
-                      <span className="block truncate text-sm font-bold">{skill.name}</span>
-                      <span
-                        title={description}
-                        className="mt-1 line-clamp-2 min-h-10 text-sm leading-5 text-muted-foreground"
-                      >
-                        {description}
-                      </span>
+                  <PressableFeedback.Highlight />
+                  <ItemCard.Icon className="bg-transparent p-0"><SkillIcon name={skill.name || skill.runtime_id} /></ItemCard.Icon>
+                  <ItemCard.Content>
+                    <ItemCard.Title>{skill.name}</ItemCard.Title>
+                    <ItemCard.Description>{description}</ItemCard.Description>
+                    <span className="mt-3 flex flex-wrap gap-1.5">
+                      <Chip size="sm" variant="soft">{skill.source === "personal" ? "personal" : "shared"}</Chip>
+                      {!skill.available ? <Chip color="warning" size="sm" variant="soft">unavailable</Chip> : null}
                     </span>
-                    <span
-                      aria-hidden="true"
-                      className={cn(
-                        "grid size-5 shrink-0 place-items-center rounded-md border transition-colors",
-                        selected
-                          ? "border-primary bg-primary text-primary-foreground"
-                          : "border-input bg-background text-transparent",
-                      )}
-                    >
+                  </ItemCard.Content>
+                  <ItemCard.Action>
+                    <span className={`grid size-6 place-items-center rounded-lg border ${selected ? "border-accent bg-accent text-accent-foreground" : "border-separator text-transparent"}`}>
                       <Check className="size-3.5" />
                     </span>
-                  </span>
-                  <span className="mt-auto flex flex-wrap items-center gap-2 pt-4">
-                    <Badge>{skill.source === "personal" ? "personal" : "shared"}</Badge>
-                    {selected ? (
-                      <Badge variant="brand">
-                        <Check className="size-3" /> selected
-                      </Badge>
-                    ) : null}
-                    {!skill.available ? (
-                      <Badge className="bg-amber-500/10 text-amber-700">unavailable</Badge>
-                    ) : null}
-                  </span>
-                </button>
-              );
-            })
-          ) : (
-            <div className="col-span-full flex h-40 flex-col items-center justify-center gap-2 rounded-2xl border border-dashed border-border text-center">
-              <Search className="size-5 text-muted-foreground" />
-              <p className="text-sm text-muted-foreground">
-                {skillQuery.trim() ? "No skills match this name." : "No skills available."}
-              </p>
-            </div>
-          )}
-        </div>
-        {skillPageCount > 1 ? (
-          <div className="mt-4 flex flex-wrap items-center justify-between gap-3 border-t border-border pt-4">
-            <span className="text-xs text-muted-foreground">
-              Showing {skillPageStart + 1}–
-              {Math.min(skillPageStart + SKILLS_PER_PAGE, filteredSkills.length)} of{" "}
-              {filteredSkills.length} skills
-            </span>
-            <div className="flex items-center gap-2">
-              <button
-                type="button"
-                aria-label="Previous skills page"
-                disabled={currentSkillPage === 1}
-                onClick={() => setSkillPage(Math.max(1, currentSkillPage - 1))}
-                className="grid size-8 place-items-center rounded-lg border border-border text-muted-foreground transition-colors hover:bg-muted hover:text-foreground disabled:cursor-not-allowed disabled:opacity-40"
-              >
-                <ChevronLeft className="size-4" />
-              </button>
-              <span className="min-w-14 text-center text-xs font-medium text-muted-foreground">
-                {currentSkillPage} / {skillPageCount}
-              </span>
-              <button
-                type="button"
-                aria-label="Next skills page"
-                disabled={currentSkillPage === skillPageCount}
-                onClick={() => setSkillPage(Math.min(skillPageCount, currentSkillPage + 1))}
-                className="grid size-8 place-items-center rounded-lg border border-border text-muted-foreground transition-colors hover:bg-muted hover:text-foreground disabled:cursor-not-allowed disabled:opacity-40"
-              >
-                <ChevronRight className="size-4" />
-              </button>
-            </div>
-          </div>
-        ) : null}
-        {skillMessage ? (
-          <div className="mt-4 flex items-start gap-2 rounded-xl border border-amber-500/20 bg-amber-500/[0.06] px-3.5 py-2.5 text-sm text-amber-800">
-            <AlertTriangle className="mt-0.5 size-4 shrink-0" />
-            <span>{skillMessage}</span>
-          </div>
-        ) : null}
-      </section>
-
-      <section className="rounded-2xl border border-border bg-card p-5 shadow-sm">
-        <h2 className="text-sm font-semibold">Knowledge (Optional)</h2>
-        <p className="mt-1 text-sm leading-6 text-muted-foreground">
-          Add Cocola Wiki files or remote Feishu references. The Agent reads them only when
-          relevant.
-        </p>
-        <p className="mt-1 text-xs leading-5 text-muted-foreground">
-          Saved Knowledge changes apply from the next message, including in existing conversations.
-        </p>
-        <form
-          className="mt-4 grid gap-3 sm:grid-cols-[1fr_11rem_auto]"
-          onSubmit={(event) => {
-            event.preventDefault();
-            addKnowledge();
-          }}
-        >
-          <Input
-            value={knowledgeURL}
-            onChange={(event) => {
-              setKnowledgeURL(event.target.value);
-              setKnowledgeNotice(null);
-            }}
-            placeholder="https://example.feishu.cn/docx/..."
-            aria-invalid={knowledgeNotice?.tone === "error"}
-            aria-describedby={knowledgeNotice ? "knowledge-input-feedback" : undefined}
-            className={cn(
-              knowledgeNotice?.tone === "error" &&
-                "border-red-500/50 focus-visible:ring-red-500/20",
-            )}
-          />
-          <Input
-            value={knowledgeLabel}
-            onChange={(event) => {
-              setKnowledgeLabel(event.target.value);
-              setKnowledgeNotice(null);
-            }}
-            maxLength={100}
-            placeholder="Label (optional)"
-          />
-          <button
-            type="submit"
-            className="inline-flex h-9 items-center justify-center gap-1.5 rounded-xl bg-foreground px-3 text-sm font-medium text-background transition-[transform,opacity] hover:opacity-90 active:scale-[0.97]"
-          >
-            <Plus className="size-4" /> Add
-          </button>
-        </form>
-        {knowledgeNotice ? (
-          <div
-            id="knowledge-input-feedback"
-            role={knowledgeNotice.tone === "error" ? "alert" : "status"}
-            className={cn(
-              "mt-3 flex animate-in items-start gap-2 rounded-xl border px-3.5 py-2.5 text-sm fade-in slide-in-from-top-1 duration-200",
-              knowledgeNotice.tone === "error"
-                ? "border-red-500/20 bg-red-500/[0.06] text-red-700"
-                : "border-emerald-500/20 bg-emerald-500/[0.06] text-emerald-700",
-            )}
-          >
-            {knowledgeNotice.tone === "error" ? (
-              <AlertTriangle className="mt-0.5 size-4 shrink-0" />
-            ) : (
-              <Check className="mt-0.5 size-4 shrink-0" />
-            )}
-            <span>{knowledgeNotice.text}</span>
-          </div>
-        ) : null}
-        <div className="mt-3">
-          <button
-            type="button"
-            onClick={() => void openWikiPicker()}
-            className="inline-flex h-9 items-center gap-2 rounded-xl border border-border px-3 text-sm font-medium hover:bg-muted"
-          >
-            <BookOpenText className="size-4" />
-            Add from Cocola Wiki
-          </button>
-          {wikiPickerOpen ? (
-            <div className="mt-3 overflow-hidden rounded-xl border border-border bg-background">
-              <div className="relative border-b border-border p-3">
-                <Search className="pointer-events-none absolute left-6 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
-                <Input
-                  value={wikiQuery}
-                  onChange={(event) => setWikiQuery(event.target.value)}
-                  placeholder="Search Cocola Wiki files"
-                  className="pl-9"
-                />
-              </div>
-              <div className="max-h-56 overflow-y-auto p-2">
-                {wikiLoading ? (
-                  <div className="flex items-center gap-2 px-2 py-3 text-sm text-muted-foreground">
-                    <Loader2 className="size-4 animate-spin" /> Loading Wiki…
-                  </div>
-                ) : wikiError ? (
-                  <p className="px-2 py-3 text-sm text-red-600">{wikiError}</p>
-                ) : filteredWikiFiles.length === 0 ? (
-                  <p className="px-2 py-3 text-sm text-muted-foreground">No matching Wiki files.</p>
-                ) : (
-                  filteredWikiFiles.map((node) => (
-                    <button
-                      key={node.id}
-                      type="button"
-                      onClick={() => addCocolaWikiKnowledge(node)}
-                      className="flex w-full min-w-0 items-center gap-3 rounded-lg px-2.5 py-2 text-left hover:bg-muted"
-                    >
-                      <BookOpenText className="size-4 shrink-0 text-muted-foreground" />
-                      <span className="min-w-0">
-                        <span className="block truncate text-sm font-medium">{node.name}</span>
-                        <span className="block truncate text-xs text-muted-foreground">
-                          {node.logical_path || node.name}
-                        </span>
-                      </span>
-                    </button>
-                  ))
-                )}
-              </div>
-            </div>
-          ) : null}
-        </div>
-        {knowledgeSources.length > 0 ? (
-          <div className="mt-4 divide-y divide-border rounded-xl border border-border">
-            {knowledgeSources.map((source) => {
-              const sourceKey = agentKnowledgeSourceKey(source);
-              return (
-                <div key={sourceKey} className="flex min-w-0 items-center gap-3 p-3">
-                  <span className="min-w-0 flex-1">
-                    <span className="block truncate text-sm font-medium">{source.label}</span>
-                    <span className="block truncate text-xs text-muted-foreground">
-                      {source.type === "cocola_wiki" ? "Cocola Wiki" : source.url}
-                    </span>
-                  </span>
-                  <button
-                    type="button"
-                    aria-label={`Remove ${source.label}`}
-                    onClick={() =>
-                      onKnowledgeSourcesChange(
-                        knowledgeSources.filter(
-                          (item) => agentKnowledgeSourceKey(item) !== sourceKey,
-                        ),
-                      )
-                    }
-                    className="grid size-8 shrink-0 place-items-center rounded-lg text-muted-foreground hover:bg-muted hover:text-foreground"
-                  >
-                    <Trash2 className="size-4" />
-                  </button>
-                </div>
+                  </ItemCard.Action>
+                </ItemCard>
               );
             })}
+          </ItemCardGroup>
+          {paginatedSkills.length === 0 ? (
+            <div className="border-separator text-muted mt-4 flex min-h-40 flex-col items-center justify-center gap-2 rounded-2xl border border-dashed text-center">
+              <Search className="size-5" />
+              <span className="text-sm">No Skills match this search.</span>
+            </div>
+          ) : null}
+          <div className="mt-4 flex flex-wrap items-center justify-between gap-3">
+            <span className="text-muted text-xs tabular-nums">
+              Showing {filteredSkills.length === 0 ? 0 : skillPageStart + 1}–{Math.min(skillPageStart + SKILLS_PER_PAGE, filteredSkills.length)} of {filteredSkills.length}
+            </span>
+            <span className="flex items-center gap-2">
+              <Tooltip delay={0}>
+                <Button isIconOnly aria-label="Previous Skills page" isDisabled={currentSkillPage === 1} size="sm" variant="outline" onPress={() => setSkillPage((page) => Math.max(1, page - 1))}><ChevronLeft className="size-4" /></Button>
+                <Tooltip.Content>Previous page</Tooltip.Content>
+              </Tooltip>
+              <span className="text-muted min-w-14 text-center text-xs tabular-nums">{currentSkillPage} / {skillPageCount}</span>
+              <Tooltip delay={0}>
+                <Button isIconOnly aria-label="Next Skills page" isDisabled={currentSkillPage === skillPageCount} size="sm" variant="outline" onPress={() => setSkillPage((page) => Math.min(skillPageCount, page + 1))}><ChevronRight className="size-4" /></Button>
+                <Tooltip.Content>Next page</Tooltip.Content>
+              </Tooltip>
+            </span>
           </div>
-        ) : null}
-      </section>
+          {skillMessage ? <CapabilityFeedback text={skillMessage} tone="warning" /> : null}
+        </Card.Content>
+      </Card>
+
+      <Card className="p-5">
+        <Card.Header className="p-0">
+          <Card.Title>Knowledge</Card.Title>
+          <Card.Description>Add Cocola Wiki files or remote Feishu references. Saved changes apply from the next message.</Card.Description>
+        </Card.Header>
+        <Card.Content className="p-0">
+          <div className="grid gap-3 lg:grid-cols-[minmax(0,1fr)_12rem_auto] lg:items-end">
+            <TextField value={knowledgeURL} variant="secondary" onChange={(value) => { setKnowledgeURL(value); setKnowledgeNotice(null); }}>
+              <Label>Feishu or Lark URL</Label>
+              <Input placeholder="https://example.feishu.cn/docx/..." />
+            </TextField>
+            <TextField value={knowledgeLabel} variant="secondary" onChange={(value) => { setKnowledgeLabel(value); setKnowledgeNotice(null); }}>
+              <Label>Label</Label>
+              <Input maxLength={100} placeholder="Optional" />
+            </TextField>
+            <Button onPress={addKnowledge}><Plus className="size-4" />Add</Button>
+          </div>
+          <Button className="mt-3" variant="outline" onPress={() => void openWikiPicker()}><BookOpenText className="size-4" />Add from Cocola Wiki</Button>
+          {knowledgeNotice ? <CapabilityFeedback text={knowledgeNotice.text} tone={knowledgeNotice.tone === "error" ? "danger" : "success"} /> : null}
+          {knowledgeSources.length > 0 ? (
+            <ListView
+              aria-label="Agent Knowledge sources"
+              className="mt-4"
+              items={knowledgeSources.map((source) => ({ ...source, key: agentKnowledgeSourceKey(source) }))}
+              selectionMode="none"
+              variant="primary"
+            >
+              {(source) => (
+                <ListView.Item id={source.key} textValue={source.label}>
+                  <ListView.ItemContent>
+                    <span className="bg-blue-500/15 text-blue-600 flex size-9 shrink-0 items-center justify-center rounded-xl dark:text-blue-300"><BookOpenText className="size-4" /></span>
+                    <div className="flex min-w-0 flex-col">
+                      <ListView.Title>{source.label}</ListView.Title>
+                      <ListView.Description>{source.type === "cocola_wiki" ? "Cocola Wiki" : source.url}</ListView.Description>
+                    </div>
+                  </ListView.ItemContent>
+                  <ListView.ItemAction>
+                    <Tooltip delay={0}>
+                      <Button isIconOnly aria-label={`Remove ${source.label}`} size="sm" variant="ghost" onPress={() => onKnowledgeSourcesChange(knowledgeSources.filter((item) => agentKnowledgeSourceKey(item) !== source.key))}><Trash2 className="size-4" /></Button>
+                      <Tooltip.Content>Remove source</Tooltip.Content>
+                    </Tooltip>
+                  </ListView.ItemAction>
+                </ListView.Item>
+              )}
+            </ListView>
+          ) : (
+            <div className="bg-surface-secondary text-muted mt-4 flex min-h-24 items-center gap-3 rounded-2xl px-4 py-3 text-sm">
+              <BookOpenText className="size-5 shrink-0" />
+              No Knowledge sources configured. The Agent will rely on its selected Skills and conversation context.
+            </div>
+          )}
+          <p className="text-muted mt-3 text-right text-xs tabular-nums">{knowledgeSources.length} / 10 sources</p>
+        </Card.Content>
+      </Card>
+
+      <Sheet isOpen={wikiPickerOpen} placement="right" onOpenChange={(open) => { if (!open) setWikiPickerOpen(false); }}>
+        <Sheet.Backdrop>
+          <Sheet.Content className="w-full md:w-[460px]">
+            <Sheet.Dialog>
+              <Sheet.CloseTrigger aria-label="Close Cocola Wiki picker" />
+              <Sheet.Header>
+                <Sheet.Heading>Add from Cocola Wiki</Sheet.Heading>
+                <p className="text-muted text-sm">Choose a file that this Agent may use as contextual Knowledge.</p>
+              </Sheet.Header>
+              <Sheet.Body>
+                <SearchField aria-label="Search Cocola Wiki files" value={wikiQuery} variant="secondary" onChange={setWikiQuery}>
+                  <SearchField.Group>
+                    <SearchField.SearchIcon><Search className="size-4" /></SearchField.SearchIcon>
+                    <SearchField.Input placeholder="Search Wiki files" />
+                    <SearchField.ClearButton />
+                  </SearchField.Group>
+                </SearchField>
+                {wikiLoading ? <div className="text-muted mt-4 text-sm">Loading Wiki…</div> : null}
+                {wikiError ? <div className="bg-danger/10 text-danger mt-4 rounded-2xl px-4 py-3 text-sm">{wikiError}</div> : null}
+                {!wikiLoading && !wikiError ? (
+                  <ListView aria-label="Cocola Wiki files" className="mt-4" items={filteredWikiFiles} selectionMode="none" variant="primary" onAction={(key) => { const node = filteredWikiFiles.find((item) => item.id === String(key)); if (node) addCocolaWikiKnowledge(node); }}>
+                    {(node) => (
+                      <ListView.Item id={node.id} textValue={`${node.name} ${node.logical_path ?? ""}`}>
+                        <ListView.ItemContent>
+                          <span className="bg-blue-500/15 text-blue-600 flex size-9 shrink-0 items-center justify-center rounded-xl dark:text-blue-300"><FileText className="size-4" /></span>
+                          <div className="flex min-w-0 flex-col"><ListView.Title>{node.name}</ListView.Title><ListView.Description>{node.logical_path || node.name}</ListView.Description></div>
+                        </ListView.ItemContent>
+                        <ListView.ItemAction><Plus className="text-muted size-4" /></ListView.ItemAction>
+                      </ListView.Item>
+                    )}
+                  </ListView>
+                ) : null}
+              </Sheet.Body>
+            </Sheet.Dialog>
+          </Sheet.Content>
+        </Sheet.Backdrop>
+      </Sheet>
     </>
   );
+}
+
+function CapabilityFeedback({ text, tone }: { text: string; tone: "danger" | "success" | "warning" }) {
+  const Icon = tone === "success" ? CircleCheck : AlertTriangle;
+  const className = tone === "success"
+    ? "bg-success/10 text-success"
+    : tone === "warning"
+      ? "bg-warning/10 text-warning"
+      : "bg-danger/10 text-danger";
+  return <div className={`${className} mt-4 flex items-start gap-2 rounded-2xl px-4 py-3 text-sm`}><Icon className="mt-0.5 size-4 shrink-0" /><span>{text}</span></div>;
 }
 
 function normalizeKnowledgeSource(rawURL: string, rawLabel: string): AgentKnowledgeSource | null {

@@ -1,6 +1,7 @@
 "use client";
 
-import * as Dialog from "@radix-ui/react-dialog";
+import { Button } from "@heroui/react";
+import { Sheet } from "@heroui-pro/react/sheet";
 import {
   ArrowLeft,
   BarChart3 as ChartLineUp,
@@ -155,49 +156,11 @@ export function AdminShell({ children }: { children: ReactNode }) {
       <section className="flex min-w-0 flex-1 flex-col">
         <div className="admin-glass-shell flex h-full min-w-0 flex-col overflow-hidden">
           <header className="admin-topbar relative z-20 flex h-14 shrink-0 items-center gap-3 border-b px-3 sm:px-5">
-            <Dialog.Root open={mobileOpen} onOpenChange={setMobileOpen}>
-              <Dialog.Trigger asChild>
-                <button
-                  type="button"
-                  aria-label="Open admin navigation"
-                  className="inline-flex size-9 items-center justify-center rounded-xl text-muted-foreground transition-colors hover:bg-sidebar-accent hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/40 md:hidden"
-                >
-                  <List className="size-[18px]" />
-                </button>
-              </Dialog.Trigger>
-              <Dialog.Portal>
-                <Dialog.Overlay className="fixed inset-0 z-50 bg-slate-950/20 data-[state=closed]:animate-out data-[state=open]:animate-in data-[state=closed]:fade-out data-[state=open]:fade-in" />
-                <Dialog.Content className="cocola-admin-ui admin-mobile-nav fixed inset-y-2 left-2 z-50 flex w-[min(19rem,calc(100vw-1rem))] flex-col overflow-hidden rounded-3xl border text-foreground outline-none data-[state=closed]:animate-out data-[state=open]:animate-in data-[state=closed]:slide-out-to-left data-[state=open]:slide-in-from-left">
-                  <Dialog.Title className="sr-only">Admin navigation</Dialog.Title>
-                  <Dialog.Description className="sr-only">
-                    Navigate between control plane pages.
-                  </Dialog.Description>
-                  <div className="flex h-16 items-center gap-3 border-b border-border px-4">
-                    <div className="grid size-9 place-items-center rounded-2xl bg-primary text-primary-foreground shadow-lg shadow-primary/20">
-                      <CocolaLogo mono className="size-5" />
-                    </div>
-                    <div className="min-w-0 flex-1">
-                      <div className="truncate text-sm font-semibold">cocola admin</div>
-                      <div className="truncate text-[11px] text-muted-foreground">
-                        control plane
-                      </div>
-                    </div>
-                    <Dialog.Close className="inline-flex size-9 items-center justify-center rounded-xl text-muted-foreground hover:bg-muted hover:text-foreground">
-                      <X className="size-4" />
-                    </Dialog.Close>
-                  </div>
-                  <Dialog.Close asChild>
-                    <div className="min-h-0 flex-1 overflow-y-auto">
-                      <AdminNavigation pathname={pathname} mobile />
-                    </div>
-                  </Dialog.Close>
-                  <AdminSidebarFooter onNavigate={() => setMobileOpen(false)} />
-                </Dialog.Content>
-              </Dialog.Portal>
-            </Dialog.Root>
+            <Button isIconOnly aria-label="Open admin navigation" className="md:hidden" variant="ghost" onPress={() => setMobileOpen(true)}><List className="size-[18px]" /></Button>
+            <Sheet isOpen={mobileOpen} placement="left" onOpenChange={setMobileOpen}><Sheet.Backdrop><Sheet.Content className="cocola-admin-ui w-[min(19rem,calc(100vw-1rem))]"><Sheet.Dialog><Sheet.CloseTrigger aria-label="Close admin navigation" /><Sheet.Header><span className="flex items-center gap-3"><span className="bg-accent text-accent-foreground grid size-9 place-items-center rounded-2xl"><CocolaLogo mono className="size-5" /></span><span><Sheet.Heading>cocola admin</Sheet.Heading><span className="text-muted text-xs">control plane</span></span></span></Sheet.Header><Sheet.Body className="p-0"><div className="min-h-0 flex-1 overflow-y-auto" onClick={() => setMobileOpen(false)}><AdminNavigation pathname={pathname} mobile /></div></Sheet.Body><Sheet.Footer className="p-0"><AdminSidebarFooter onNavigate={() => setMobileOpen(false)} /></Sheet.Footer></Sheet.Dialog></Sheet.Content></Sheet.Backdrop></Sheet>
 
             <div className="min-w-0 flex-1">
-              <div className="truncate text-[11px] font-semibold uppercase tracking-[0.14em] text-primary/65">
+              <div className="truncate text-[11px] font-semibold uppercase tracking-[0.14em] text-accent/65">
                 Control plane
               </div>
               <div className="truncate text-sm font-medium text-foreground">
@@ -211,7 +174,7 @@ export function AdminShell({ children }: { children: ReactNode }) {
                 Self-hosted
               </span>
               <span className="admin-context-pill max-w-48 truncate">
-                <ShieldCheck className="size-3.5 text-primary" />
+                <ShieldCheck className="size-3.5 text-accent" />
                 {userLabel}
               </span>
             </div>
@@ -226,12 +189,12 @@ export function AdminShell({ children }: { children: ReactNode }) {
 function AdminBrand() {
   return (
     <div className="flex h-16 shrink-0 items-center gap-2 px-3">
-      <div className="grid size-9 shrink-0 place-items-center rounded-2xl bg-primary text-primary-foreground shadow-lg shadow-primary/20">
+      <div className="grid size-9 shrink-0 place-items-center rounded-2xl bg-accent text-accent-foreground shadow-lg shadow-accent/20">
         <CocolaLogo mono className="size-5" />
       </div>
       <div className="min-w-0 flex-1">
-        <div className="truncate text-[15px] font-bold text-sidebar-foreground">cocola admin</div>
-        <div className="truncate text-xs font-medium text-sidebar-foreground/70">control plane</div>
+        <div className="truncate text-[15px] font-bold text-foreground">cocola admin</div>
+        <div className="truncate text-xs font-medium text-foreground/70">control plane</div>
       </div>
     </div>
   );
@@ -245,7 +208,7 @@ function AdminNavigation({ pathname, mobile = false }: { pathname: string; mobil
       </div>
       {NAV_GROUPS.map((group) => (
         <div key={group.label} className="mb-3">
-          <div className="mb-1 px-2 text-[10px] font-semibold uppercase tracking-[0.14em] text-muted-foreground/75">
+          <div className="mb-1 px-2 text-[10px] font-semibold uppercase tracking-[0.14em] text-muted/75">
             {group.label}
           </div>
           <div className="space-y-1">
@@ -277,12 +240,12 @@ function AdminNavLink({
       className={cn(
         "admin-nav-item group flex h-9 items-center gap-2.5 rounded-xl px-2.5 text-[13.5px] font-medium",
         active
-          ? "bg-sidebar-accent text-sidebar-accent-foreground"
-          : "text-sidebar-foreground hover:bg-sidebar-accent hover:text-sidebar-accent-foreground",
+          ? "bg-default text-foreground"
+          : "text-foreground hover:bg-default hover:text-foreground",
       )}
     >
       <Icon
-        className={cn("size-4 shrink-0", item.iconClassName ?? "text-sidebar-accent-foreground")}
+        className={cn("size-4 shrink-0", item.iconClassName ?? "text-foreground")}
       />
       <span className="truncate">{item.label}</span>
     </Link>
@@ -291,13 +254,13 @@ function AdminNavLink({
 
 function AdminSidebarFooter({ onNavigate }: { onNavigate?: () => void }) {
   return (
-    <div className="border-t border-sidebar-border p-2.5">
+    <div className="border-t border-separator p-2.5">
       <Link
         href="/"
         onClick={onNavigate}
-        className="flex h-10 items-center gap-2 rounded-xl border border-sidebar-border bg-sidebar px-3 text-sm font-medium text-sidebar-foreground transition-colors hover:bg-sidebar-accent hover:text-sidebar-accent-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/40"
+        className="flex h-10 items-center gap-2 rounded-xl border border-separator bg-background px-3 text-sm font-medium text-foreground transition-colors hover:bg-default hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus/40"
       >
-        <ArrowLeft className="size-4 shrink-0 text-primary" />
+        <ArrowLeft className="size-4 shrink-0 text-accent" />
         <span className="truncate">Back to workspace</span>
       </Link>
     </div>

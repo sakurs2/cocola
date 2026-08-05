@@ -1,6 +1,11 @@
 "use client";
 
 import { useThread } from "@assistant-ui/react";
+import { Button, Chip, ScrollShadow, Tooltip } from "@heroui/react";
+import { EmptyState } from "@heroui-pro/react/empty-state";
+import { ListView } from "@heroui-pro/react/list-view";
+import { Segment } from "@heroui-pro/react/segment";
+import { Sheet } from "@heroui-pro/react/sheet";
 import type { ArtifactPreview } from "@/app/runtime-provider";
 import {
   ReadonlyFilePreview,
@@ -10,6 +15,15 @@ import {
 } from "@/components/assistant-ui/file-preview";
 import { TooltipIconButton } from "@/components/assistant-ui/tooltip-icon-button";
 import { ShellPage } from "@/components/assistant-ui/shell-page";
+import {
+  type GitChange,
+  type GitCommit,
+  type GitCommitDetail,
+  type GitCommitFile,
+  type GitDiff,
+  type GitSnapshot,
+  useGitWorkspace,
+} from "@/components/assistant-ui/use-git-workspace";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -343,7 +357,7 @@ export function WorkspaceDock({
   const hasOpenPages = openPages.length > 0;
 
   return (
-    <div className="flex h-full min-h-0 flex-col bg-card">
+    <div className="flex h-full min-h-0 flex-col bg-surface">
       <header className="flex min-h-11 items-center gap-1 border-b border-border pl-2 pr-1">
         <div role="tablist" className="flex min-w-0 flex-1 items-center gap-1 overflow-x-auto">
           {openPages.map((page) => {
@@ -353,34 +367,30 @@ export function WorkspaceDock({
               <div
                 key={page.id}
                 title={page.title}
-                className={cn(
-                  "group flex h-8 shrink-0 items-center gap-1.5 rounded-md pl-2.5 pr-1.5 text-xs transition-colors",
-                  active
-                    ? "bg-muted text-foreground"
-                    : "text-muted-foreground hover:bg-muted/60 hover:text-foreground",
-                )}
+                className="group flex h-8 shrink-0 items-center gap-0.5"
               >
-                <button
-                  type="button"
-                  role="tab"
+                <Button
                   aria-selected={active}
-                  onClick={() => setActivePageId(page.id)}
-                  className="flex items-center gap-1.5 focus-visible:outline-none"
+                  className="h-8 rounded-xl px-2.5 text-xs"
+                  size="sm"
+                  variant={active ? "secondary" : "ghost"}
+                  onPress={() => setActivePageId(page.id)}
                 >
                   <Icon
-                    className={cn("size-4 shrink-0", active ? "text-primary" : "text-primary/70")}
+                    className={cn("size-4 shrink-0", active ? "text-accent" : "text-accent/70")}
                   />
                   <span className="max-w-32 truncate font-medium">{page.label}</span>
-                </button>
-                <button
-                  type="button"
+                </Button>
+                <Button
+                  isIconOnly
                   aria-label={`Close ${page.label}`}
-                  title={`Close ${page.label}`}
-                  onClick={() => closePage(page.id)}
-                  className="inline-flex size-4 items-center justify-center rounded-full text-muted-foreground/70 opacity-0 transition hover:bg-background hover:text-foreground focus-visible:opacity-100 group-hover:opacity-100"
+                  className="size-6 min-w-6 rounded-full text-muted/70 opacity-0 transition-opacity focus-visible:opacity-100 group-hover:opacity-100"
+                  size="sm"
+                  variant="ghost"
+                  onPress={() => closePage(page.id)}
                 >
                   <X className="size-3" />
-                </button>
+                </Button>
               </div>
             );
           })}
@@ -388,28 +398,29 @@ export function WorkspaceDock({
           {hasOpenPages ? (
             <DropdownMenu>
               <DropdownMenuTrigger asChild>
-                <button
-                  type="button"
-                  title="Add a panel"
+                <Button
+                  isIconOnly
                   aria-label="Add a panel"
-                  className="inline-flex size-7 shrink-0 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-muted hover:text-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+                  className="shrink-0"
+                  size="sm"
+                  variant="ghost"
                 >
                   <Plus className="size-4" />
-                </button>
+                </Button>
               </DropdownMenuTrigger>
-              <DropdownMenuContent align="start" className="cocola-user-ui min-w-44 bg-popover">
+              <DropdownMenuContent align="start" className="cocola-user-ui min-w-44 bg-overlay">
                 {addablePages.length > 0 ? (
                   addablePages.map((page) => {
                     const Icon = page.icon;
                     return (
                       <DropdownMenuItem key={page.id} onSelect={() => openPage(page.id)}>
-                        <Icon className="size-4 text-primary/80" />
+                        <Icon className="size-4 text-accent/80" />
                         <span>{page.label}</span>
                       </DropdownMenuItem>
                     );
                   })
                 ) : (
-                  <div className="px-2 py-1.5 text-xs text-muted-foreground">empty</div>
+                  <div className="px-2 py-1.5 text-xs text-muted">empty</div>
                 )}
               </DropdownMenuContent>
             </DropdownMenu>
@@ -418,15 +429,16 @@ export function WorkspaceDock({
 
         {activePage ? (headerActions[activePage.id] ?? null) : null}
 
-        <button
-          type="button"
-          title="Close side panel"
+        <Button
+          isIconOnly
           aria-label="Close side panel"
-          onClick={onClose}
-          className="inline-flex size-8 shrink-0 items-center justify-center rounded-full text-muted-foreground transition-colors hover:bg-muted hover:text-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+          className="shrink-0"
+          size="sm"
+          variant="ghost"
+          onPress={onClose}
         >
           <X className="size-4" />
-        </button>
+        </Button>
       </header>
 
       <div className="min-h-0 flex-1">
@@ -487,61 +499,6 @@ function DockPagePanel({
   );
 }
 
-type GitChange = {
-  path: string;
-  old_path?: string;
-  status: string;
-  area: "staged" | "working" | "both" | "untracked" | string;
-};
-
-type GitCommit = {
-  sha: string;
-  parents?: string[];
-  subject: string;
-  body?: string;
-  author_name: string;
-  authored_at: string;
-  refs?: string[];
-  files_changed?: number;
-  additions?: number;
-  deletions?: number;
-};
-
-type GitCommitFile = {
-  path: string;
-  old_path?: string;
-  status: string;
-  binary?: boolean;
-};
-
-type GitSnapshot = {
-  branch?: string;
-  base_ref?: string;
-  base_sha?: string;
-  head_sha?: string;
-  ahead?: number;
-  dirty?: boolean;
-  changes?: GitChange[];
-  truncated?: boolean;
-  commits?: GitCommit[];
-  history_truncated?: boolean;
-  captured_at?: string;
-};
-
-type GitDiff = {
-  path: string;
-  text: string;
-  binary: boolean;
-  truncated: boolean;
-  commitSHA?: string;
-};
-
-type GitCommitDetail = {
-  commit: GitCommit;
-  files: GitCommitFile[];
-  truncated: boolean;
-};
-
 function GitPage({
   sessionID,
   active,
@@ -551,146 +508,26 @@ function GitPage({
   active: boolean;
   setHeaderActions: (node: ReactNode) => void;
 }) {
-  const [snapshot, setSnapshot] = useState<GitSnapshot | null>(null);
-  const [loading, setLoading] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-  const [view, setView] = useState<"history" | "commit">("history");
-  const [commitDetail, setCommitDetail] = useState<GitCommitDetail | null>(null);
-  const [diff, setDiff] = useState<GitDiff | null>(null);
-  const requestSequence = useRef(0);
-
-  const loadStored = useCallback(async () => {
-    const requestID = ++requestSequence.current;
-    setLoading(true);
-    setError(null);
-    try {
-      const response = await fetch(
-        `/api/conversations/${encodeURIComponent(sessionID)}/git/status`,
-        { cache: "no-store" },
-      );
-      if (!response.ok) throw new Error("Could not load the saved Git snapshot");
-      const body = (await response.json()) as {
-        workspace?: { git_snapshot?: GitSnapshot; branch_name?: string };
-        project?: { repository_provider?: string };
-      };
-      if (requestID === requestSequence.current) {
-        setSnapshot({
-          ...(body.workspace?.git_snapshot ?? {}),
-          branch: body.workspace?.git_snapshot?.branch || body.workspace?.branch_name,
-        });
-      }
-    } catch (loadError) {
-      if (requestID === requestSequence.current) {
-        setError(loadError instanceof Error ? loadError.message : "Could not load Git status");
-      }
-    } finally {
-      if (requestID === requestSequence.current) setLoading(false);
-    }
-  }, [sessionID]);
-
-  useEffect(() => {
-    if (active) void loadStored();
-  }, [active, loadStored]);
-
-  const inspect = useCallback(
-    async (
-      operation: "status" | "diff" | "commit",
-      options: { path?: string; diffTarget?: string; commitSHA?: string } = {},
-    ) => {
-      const requestID = ++requestSequence.current;
-      setLoading(true);
-      setError(null);
-      try {
-        const response = await fetch(
-          `/api/conversations/${encodeURIComponent(sessionID)}/git/inspect`,
-          {
-            method: "POST",
-            headers: { "content-type": "application/json" },
-            body: JSON.stringify({
-              operation,
-              path: options.path ?? "",
-              diff_target: options.diffTarget ?? "working",
-              commit_sha: options.commitSHA ?? "",
-            }),
-          },
-        );
-        const body = (await response.json().catch(() => ({}))) as {
-          snapshot?: GitSnapshot;
-          diff?: string;
-          binary?: boolean;
-          truncated?: boolean;
-          commit?: GitCommit;
-          commit_files?: GitCommitFile[];
-          error?: { message?: string };
-        };
-        if (!response.ok) {
-          throw new Error(
-            response.status === 409
-              ? "The Agent is running. Git status will update when it finishes."
-              : body.error?.message || "Could not inspect Git workspace",
-          );
-        }
-        if (requestID !== requestSequence.current) return;
-        if (body.snapshot) setSnapshot(body.snapshot);
-        if (operation === "diff") {
-          setDiff({
-            path: options.path ?? "",
-            text: body.diff ?? "",
-            binary: Boolean(body.binary),
-            truncated: Boolean(body.truncated),
-          });
-        } else if (operation === "commit" && body.commit) {
-          if (options.path) {
-            setDiff({
-              path: options.path,
-              text: body.diff ?? "",
-              binary: Boolean(body.binary),
-              truncated: Boolean(body.truncated),
-              commitSHA: body.commit.sha,
-            });
-          } else {
-            setCommitDetail({
-              commit: body.commit,
-              files: body.commit_files ?? [],
-              truncated: Boolean(body.truncated),
-            });
-            setView("commit");
-          }
-        }
-      } catch (inspectError) {
-        if (requestID === requestSequence.current) {
-          setError(
-            inspectError instanceof Error
-              ? inspectError.message
-              : "Could not inspect Git workspace",
-          );
-        }
-      } finally {
-        if (requestID === requestSequence.current) setLoading(false);
-      }
-    },
-    [sessionID],
-  );
+  const { closeCommit, closeDiff, commitDetail, diff, error, inspect, loading, snapshot } =
+    useGitWorkspace(sessionID, active);
+  const [refreshConfirmOpen, setRefreshConfirmOpen] = useState(false);
 
   useEffect(() => {
     if (!active) return;
     setHeaderActions(
-      <TooltipIconButton
-        tooltip="Refresh Git status (may restore the sandbox)"
-        aria-label="Refresh Git status"
-        disabled={loading}
-        onClick={() => {
-          if (
-            window.confirm(
-              "Refresh Git status? This may restore the project sandbox if it has been reclaimed.",
-            )
-          ) {
-            void inspect("status");
-          }
-        }}
-      >
-        <RefreshCw className={cn("size-4", loading && "animate-spin")} />
-      </TooltipIconButton>,
+      <Tooltip delay={0}>
+        <Button
+          isIconOnly
+          aria-label="Refresh Git status"
+          isDisabled={loading}
+          size="sm"
+          variant="ghost"
+          onPress={() => setRefreshConfirmOpen(true)}
+        >
+          <RefreshCw className={cn("size-4", loading && "animate-spin")} />
+        </Button>
+        <Tooltip.Content>Refresh Git status (may restore the sandbox)</Tooltip.Content>
+      </Tooltip>,
     );
     return () => setHeaderActions(null);
   }, [active, inspect, loading, setHeaderActions]);
@@ -701,93 +538,137 @@ function GitPage({
   const unstagedChanges = changes.filter((change) => change.area !== "staged");
 
   return (
-    <div className="cocola-git-panel flex h-full min-h-0 flex-col bg-background">
-      <GitSnapshotHeader snapshot={snapshot} />
-      {error ? (
-        <div className="m-3 rounded-xl border border-red-500/20 bg-red-500/10 px-3 py-2 text-sm text-red-600">
-          {error}
-        </div>
-      ) : null}
-      {loading && !snapshot ? (
-        <div className="flex items-center gap-2 px-4 py-5 text-sm text-muted-foreground">
-          <LoaderCircle className="size-4 animate-spin" /> Loading saved history…
-        </div>
-      ) : diff ? (
-        <GitDiffPanel diff={diff} onBack={() => setDiff(null)} />
-      ) : view === "commit" && commitDetail ? (
-        <GitCommitPanel
-          detail={commitDetail}
-          snapshot={snapshot}
-          onBack={() => {
-            setCommitDetail(null);
-            setView("history");
-          }}
-          onOpenDiff={(file) =>
-            void inspect("commit", { path: file.path, commitSHA: commitDetail.commit.sha })
-          }
-        />
-      ) : (
-        <div className="min-h-0 flex-1 overflow-y-auto">
-          {changes.length === 0 && snapshot ? (
-            <div className="flex items-center gap-2 border-b border-border/60 px-4 py-3 text-[12px] text-muted-foreground">
-              <span className="grid size-4 place-items-center rounded bg-emerald-500/10 text-[9px] font-bold text-emerald-600 dark:text-emerald-400">
-                ✓
-              </span>
-              Working tree clean · no uncommitted changes
-            </div>
-          ) : null}
-          <GitChangeSection
-            title="Staged Changes"
-            changes={stagedChanges}
-            onOpenDiff={(change) =>
-              void inspect("diff", { path: change.path, diffTarget: "staged" })
+    <>
+      <div className="cocola-git-panel flex h-full min-h-0 flex-col bg-background">
+        <GitSnapshotHeader snapshot={snapshot} />
+        {error ? (
+          <div className="border-danger/20 bg-danger-soft text-danger m-3 rounded-2xl border px-3 py-2 text-sm">
+            {error}
+          </div>
+        ) : null}
+        {loading && !snapshot ? (
+          <div className="flex items-center gap-2 px-4 py-5 text-sm text-muted">
+            <LoaderCircle className="size-4 animate-spin" /> Loading saved history…
+          </div>
+        ) : diff ? (
+          <GitDiffPanel diff={diff} onBack={closeDiff} />
+        ) : commitDetail ? (
+          <GitCommitPanel
+            detail={commitDetail}
+            snapshot={snapshot}
+            onBack={closeCommit}
+            onOpenDiff={(file) =>
+              void inspect("commit", { path: file.path, commitSHA: commitDetail.commit.sha })
             }
           />
-          <GitChangeSection
-            title="Changes"
-            changes={unstagedChanges}
-            onOpenDiff={(change) =>
-              void inspect("diff", {
-                path: change.path,
-                diffTarget: change.area === "staged" ? "staged" : "working",
-              })
-            }
-          />
-          {snapshot?.truncated ? (
-            <div className="px-4 py-1.5 text-[11px] text-amber-600 dark:text-amber-400">
-              Showing the first 500 changed paths.
-            </div>
-          ) : null}
-          <GitSectionHeader title="Commits" count={commits.length || undefined} />
-          {commits.length ? (
-            <div className="pb-2">
-              {commits.map((commit, index) => (
-                <GitCommitLogRow
-                  key={commit.sha}
-                  commit={commit}
-                  snapshot={snapshot}
-                  last={index === commits.length - 1}
-                  onClick={() => void inspect("commit", { commitSHA: commit.sha })}
-                />
-              ))}
-            </div>
-          ) : snapshot ? (
-            <div className="px-5 py-8 text-center text-sm text-muted-foreground">
-              No commit history was captured. Refresh Git status to load it.
-            </div>
-          ) : (
-            <div className="px-5 py-8 text-center text-sm text-muted-foreground">
-              Refresh to inspect this workspace.
-            </div>
-          )}
-          {snapshot?.history_truncated ? (
-            <div className="border-t border-border px-4 py-2 text-center text-xs text-muted-foreground">
-              Showing the latest 50 commits.
-            </div>
-          ) : null}
-        </div>
-      )}
-    </div>
+        ) : (
+          <ScrollShadow hideScrollBar className="min-h-0 flex-1 overflow-y-auto">
+            {changes.length === 0 && snapshot ? (
+              <div className="flex items-center gap-2 border-b border-border/60 px-4 py-3 text-[12px] text-muted">
+                <span className="grid size-4 place-items-center rounded bg-success/10 text-[9px] font-bold text-success">
+                  ✓
+                </span>
+                Working tree clean · no uncommitted changes
+              </div>
+            ) : null}
+            <GitChangeSection
+              title="Staged Changes"
+              changes={stagedChanges}
+              onOpenDiff={(change) =>
+                void inspect("diff", { path: change.path, diffTarget: "staged" })
+              }
+            />
+            <GitChangeSection
+              title="Changes"
+              changes={unstagedChanges}
+              onOpenDiff={(change) =>
+                void inspect("diff", {
+                  path: change.path,
+                  diffTarget: change.area === "staged" ? "staged" : "working",
+                })
+              }
+            />
+            {snapshot?.truncated ? (
+              <div className="px-4 py-1.5 text-[11px] text-warning">
+                Showing the first 500 changed paths.
+              </div>
+            ) : null}
+            <GitSectionHeader title="Commits" count={commits.length || undefined} />
+            {commits.length ? (
+              <ListView
+                aria-label="Git commit history"
+                className="rounded-none border-0 bg-transparent pb-2 shadow-none"
+                selectionMode="none"
+                variant="secondary"
+                onAction={(key) => void inspect("commit", { commitSHA: String(key) })}
+              >
+                {commits.map((commit, index) => (
+                  <GitCommitLogRow
+                    key={commit.sha}
+                    commit={commit}
+                    snapshot={snapshot}
+                    last={index === commits.length - 1}
+                  />
+                ))}
+              </ListView>
+            ) : snapshot ? (
+              <GitEmptyState
+                icon={<GitCommitHorizontal className="size-5 text-accent" />}
+                title="No commit history"
+                description="Refresh Git status to load the latest saved history."
+              />
+            ) : (
+              <GitEmptyState
+                icon={<GitBranch className="size-5 text-accent" />}
+                title="No Git snapshot"
+                description="Refresh to inspect this project workspace."
+              />
+            )}
+            {snapshot?.history_truncated ? (
+              <div className="border-t border-border px-4 py-2 text-center text-xs text-muted">
+                Showing the latest 50 commits.
+              </div>
+            ) : null}
+          </ScrollShadow>
+        )}
+      </div>
+
+      <Sheet
+        isOpen={refreshConfirmOpen}
+        placement="right"
+        onOpenChange={(open) => {
+          if (!loading) setRefreshConfirmOpen(open);
+        }}
+      >
+        <Sheet.Backdrop>
+          <Sheet.Content className="w-full md:w-[420px]">
+            <Sheet.Dialog>
+              <Sheet.CloseTrigger aria-label="Close Git refresh confirmation" />
+              <Sheet.Header>
+                <Sheet.Heading>Refresh Git status?</Sheet.Heading>
+                <p className="text-sm text-muted">
+                  Refreshing may restore the project sandbox if its workspace has been reclaimed.
+                </p>
+              </Sheet.Header>
+              <Sheet.Footer className="gap-2">
+                <Button variant="outline" onPress={() => setRefreshConfirmOpen(false)}>
+                  Cancel
+                </Button>
+                <Button
+                  isPending={loading}
+                  onPress={() => {
+                    setRefreshConfirmOpen(false);
+                    void inspect("status");
+                  }}
+                >
+                  Refresh
+                </Button>
+              </Sheet.Footer>
+            </Sheet.Dialog>
+          </Sheet.Content>
+        </Sheet.Backdrop>
+      </Sheet>
+    </>
   );
 }
 
@@ -801,15 +682,15 @@ function GitSnapshotHeader({ snapshot }: { snapshot: GitSnapshot | null }) {
       : "";
 
   return (
-    <div className="flex min-w-0 items-center gap-2 border-b border-border bg-muted/20 px-3 py-2">
-      <span className="grid size-6 shrink-0 place-items-center rounded-md bg-primary/10 text-primary">
+    <div className="flex min-w-0 items-center gap-2 border-b border-border bg-surface-secondary/20 px-3 py-2">
+      <span className="grid size-6 shrink-0 place-items-center rounded-md bg-accent/10 text-accent">
         <GitBranch className="size-3.5" />
       </span>
       <span className="shrink-0 truncate text-[13px] font-semibold">
         {snapshot?.branch || "Project branch"}
       </span>
       <span
-        className="min-w-0 flex-1 truncate text-[10.5px] text-muted-foreground"
+        className="min-w-0 flex-1 truncate text-[10.5px] text-muted"
         title={revisionLabel ? `${capturedLabel} · ${revisionLabel}` : capturedLabel}
       >
         {capturedLabel}
@@ -823,9 +704,9 @@ function GitSnapshotHeader({ snapshot }: { snapshot: GitSnapshot | null }) {
         ) : null}
       </span>
       {snapshot?.ahead ? (
-        <span className="shrink-0 rounded-full bg-emerald-500/10 px-2 py-0.5 text-[10.5px] font-bold text-emerald-600 dark:text-emerald-400">
+        <Chip color="success" size="sm" variant="soft">
           ↑ {snapshot.ahead} ahead
-        </span>
+        </Chip>
       ) : null}
     </div>
   );
@@ -833,12 +714,12 @@ function GitSnapshotHeader({ snapshot }: { snapshot: GitSnapshot | null }) {
 
 function GitSectionHeader({ title, count }: { title: string; count?: number }) {
   return (
-    <div className="sticky top-0 z-10 flex items-center gap-2 border-b border-border/60 bg-background/95 px-3 py-1.5 text-[11px] font-bold uppercase tracking-wide text-muted-foreground backdrop-blur">
+    <div className="sticky top-0 z-10 flex items-center gap-2 border-b border-border/60 bg-background/95 px-3 py-2 text-xs font-semibold text-foreground backdrop-blur">
       <span>{title}</span>
       {count != null ? (
-        <span className="ml-auto rounded-full bg-muted px-2 py-0.5 text-[10px] font-semibold tracking-normal text-muted-foreground">
+        <Chip className="ml-auto" size="sm" variant="soft">
           {count}
-        </span>
+        </Chip>
       ) : null}
     </div>
   );
@@ -850,11 +731,11 @@ function GitStatusLetter({ status }: { status: string }) {
     <span
       className={cn(
         "w-[15px] shrink-0 text-center font-mono text-[11px] font-bold",
-        code === "A" && "text-emerald-600 dark:text-emerald-400",
-        code === "D" && "text-red-600 dark:text-red-400",
-        code === "R" && "text-violet-600 dark:text-violet-400",
-        code === "U" && "text-blue-600 dark:text-blue-400",
-        !["A", "D", "R", "U"].includes(code) && "text-amber-600 dark:text-amber-400",
+        code === "A" && "text-success",
+        code === "D" && "text-danger",
+        code === "R" && "text-accent",
+        code === "U" && "text-accent",
+        !["A", "D", "R", "U"].includes(code) && "text-warning",
       )}
     >
       {code}
@@ -862,27 +743,35 @@ function GitStatusLetter({ status }: { status: string }) {
   );
 }
 
-function GitChangeRow({ change, onClick }: { change: GitChange; onClick: () => void }) {
+function gitChangeKey(change: GitChange) {
+  return `${change.area}:${change.path}`;
+}
+
+function GitChangeRow({ change }: { change: GitChange }) {
   const slash = change.path.lastIndexOf("/");
   const name = slash < 0 ? change.path : change.path.slice(slash + 1);
   const dir = slash < 0 ? "" : change.path.slice(0, slash);
   return (
-    <button
-      type="button"
-      title={change.old_path ? `${change.old_path} → ${change.path}` : change.path}
-      onClick={onClick}
-      className="group flex w-full items-center gap-2 py-[5px] pl-4 pr-3 text-left outline-none hover:bg-muted/60 focus-visible:bg-muted focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring"
+    <ListView.Item
+      id={gitChangeKey(change)}
+      textValue={change.old_path ? `${change.old_path} ${change.path}` : change.path}
+      className="group rounded-none px-4 py-2"
     >
-      <MaterialFileIcon
-        name={resolveFileType(name).icon}
-        className="flex size-4 shrink-0 items-center justify-center"
-      />
-      <span className="min-w-0 flex-1 truncate">
-        <span className="text-[12.5px] text-foreground">{name}</span>
-        {dir ? <span className="ml-1.5 text-[11px] text-muted-foreground/70">{dir}</span> : null}
-      </span>
-      <GitStatusLetter status={change.status} />
-    </button>
+      <ListView.ItemContent className="gap-2">
+        <MaterialFileIcon
+          name={resolveFileType(name).icon}
+          className="flex size-4 shrink-0 items-center justify-center"
+        />
+        <span className="flex min-w-0 flex-col">
+          <ListView.Title>{name}</ListView.Title>
+          {dir ? <ListView.Description>{dir}</ListView.Description> : null}
+        </span>
+      </ListView.ItemContent>
+      <ListView.ItemAction>
+        <GitStatusLetter status={change.status} />
+        <ChevronRight className="size-3.5 text-muted/60 transition-transform group-hover:translate-x-0.5 group-hover:text-foreground" />
+      </ListView.ItemAction>
+    </ListView.Item>
   );
 }
 
@@ -899,24 +788,51 @@ function GitChangeSection({
   return (
     <>
       <GitSectionHeader title={title} count={changes.length} />
-      {changes.map((change) => (
-        <GitChangeRow
-          key={`${change.area}:${change.path}`}
-          change={change}
-          onClick={() => onOpenDiff(change)}
-        />
-      ))}
+      <ListView
+        aria-label={title}
+        className="rounded-none border-0 bg-transparent shadow-none"
+        selectionMode="none"
+        variant="secondary"
+        onAction={(key) => {
+          const change = changes.find((candidate) => gitChangeKey(candidate) === String(key));
+          if (change) onOpenDiff(change);
+        }}
+      >
+        {changes.map((change) => (
+          <GitChangeRow key={gitChangeKey(change)} change={change} />
+        ))}
+      </ListView>
     </>
   );
 }
 
+function GitEmptyState({
+  icon,
+  title,
+  description,
+}: {
+  icon: ReactNode;
+  title: string;
+  description: string;
+}) {
+  return (
+    <EmptyState size="sm" className="mx-auto my-8 max-w-xs">
+      <EmptyState.Header>
+        <EmptyState.Media variant="icon">{icon}</EmptyState.Media>
+        <EmptyState.Title>{title}</EmptyState.Title>
+        <EmptyState.Description>{description}</EmptyState.Description>
+      </EmptyState.Header>
+    </EmptyState>
+  );
+}
+
 const GIT_AVATAR_COLORS = [
-  "bg-blue-500",
-  "bg-emerald-500",
-  "bg-violet-500",
-  "bg-amber-500",
-  "bg-pink-500",
-  "bg-cyan-500",
+  "bg-accent",
+  "bg-success",
+  "bg-warning",
+  "bg-danger",
+  "bg-foreground",
+  "bg-accent/70",
 ];
 
 function gitAuthorInitials(name: string) {
@@ -944,7 +860,7 @@ function GitAuthorAvatar({ name, merge = false }: { name: string; merge?: boolea
     <span
       className={cn(
         "grid size-[18px] shrink-0 place-items-center rounded-full text-[8.5px] font-bold text-white",
-        merge ? "bg-violet-500" : gitAuthorColor(name),
+        merge ? "bg-accent" : gitAuthorColor(name),
       )}
       title={name || "Unknown author"}
     >
@@ -963,10 +879,10 @@ function GitRefBadges({ commit, snapshot }: { commit: GitCommit; snapshot: GitSn
           key={`${badge.tone}:${badge.label}`}
           className={cn(
             "max-w-28 truncate rounded px-1.5 py-px text-[9px] font-bold",
-            badge.tone === "head" && "bg-blue-500/10 text-blue-600 dark:text-blue-400",
-            badge.tone === "base" && "bg-violet-500/10 text-violet-600 dark:text-violet-400",
-            badge.tone === "tag" && "bg-amber-500/10 text-amber-600 dark:text-amber-400",
-            badge.tone === "ref" && "bg-emerald-500/10 text-emerald-600 dark:text-emerald-400",
+            badge.tone === "head" && "bg-accent/10 text-accent",
+            badge.tone === "base" && "bg-foreground/10 text-foreground",
+            badge.tone === "tag" && "bg-warning/10 text-warning",
+            badge.tone === "ref" && "bg-success/10 text-success",
           )}
         >
           {badge.label}
@@ -980,20 +896,18 @@ function GitCommitLogRow({
   commit,
   snapshot,
   last,
-  onClick,
 }: {
   commit: GitCommit;
   snapshot: GitSnapshot | null;
   last: boolean;
-  onClick: () => void;
 }) {
   const merge = (commit.parents?.length ?? 0) > 1;
   const isBase = commit.sha === snapshot?.base_sha;
   return (
-    <button
-      type="button"
-      onClick={onClick}
-      className="group relative flex w-full items-center gap-2 py-1.5 pl-3.5 pr-3 text-left outline-none hover:bg-muted/60 focus-visible:bg-muted focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring"
+    <ListView.Item
+      id={commit.sha}
+      textValue={`${commit.subject} ${commit.author_name} ${commit.sha}`}
+      className="group relative rounded-none py-2 pl-3.5 pr-3"
     >
       {!last ? (
         <span
@@ -1005,35 +919,42 @@ function GitCommitLogRow({
         aria-hidden="true"
         className={cn(
           "relative z-[1] ml-[5px] size-[9px] shrink-0 rounded-full border-2 border-background",
-          isBase || merge ? "bg-violet-500" : "bg-blue-500",
+          isBase || merge ? "bg-foreground" : "bg-accent",
         )}
       />
-      <GitAuthorAvatar name={commit.author_name} merge={merge} />
-      <span className="min-w-0 flex-1 truncate text-[12px] text-foreground">
-        {commit.subject || "Untitled commit"}
-      </span>
-      <GitRefBadges commit={commit} snapshot={snapshot} />
-      <span className="shrink-0 text-[10px] text-muted-foreground">
-        {formatGitRelativeTime(commit.authored_at)}
-      </span>
-      <span className="shrink-0 font-mono text-[9.5px] text-muted-foreground/80">
-        {commit.sha.slice(0, 7)}
-      </span>
-    </button>
+      <ListView.ItemContent className="gap-2">
+        <GitAuthorAvatar name={commit.author_name} merge={merge} />
+        <span className="flex min-w-0 flex-col">
+          <ListView.Title>{commit.subject || "Untitled commit"}</ListView.Title>
+          <ListView.Description>{commit.author_name || "Unknown author"}</ListView.Description>
+        </span>
+      </ListView.ItemContent>
+      <ListView.ItemAction className="gap-2">
+        <GitRefBadges commit={commit} snapshot={snapshot} />
+        <span className="hidden shrink-0 text-[10px] text-muted sm:inline">
+          {formatGitRelativeTime(commit.authored_at)}
+        </span>
+        <span className="shrink-0 font-mono text-[9.5px] text-muted/80">
+          {commit.sha.slice(0, 7)}
+        </span>
+        <ChevronRight className="size-3.5 text-muted/60 transition-transform group-hover:translate-x-0.5 group-hover:text-foreground" />
+      </ListView.ItemAction>
+    </ListView.Item>
   );
 }
 
 function GitPanelBackHeader({ title, onBack }: { title: string; onBack: () => void }) {
   return (
-    <div className="flex min-h-10 shrink-0 items-center gap-2 border-b border-border px-2">
-      <button
-        type="button"
+    <div className="flex min-h-11 shrink-0 items-center gap-2 border-b border-border px-2">
+      <Button
+        isIconOnly
         aria-label="Back to Git history"
-        onClick={onBack}
-        className="grid size-7 place-items-center rounded-md text-muted-foreground outline-none hover:bg-muted hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring"
+        size="sm"
+        variant="ghost"
+        onPress={onBack}
       >
         <ArrowLeft className="size-4" />
-      </button>
+      </Button>
       <span className="min-w-0 flex-1 truncate text-xs font-semibold">{title}</span>
     </div>
   );
@@ -1056,10 +977,10 @@ function GitCommitPanel({
   return (
     <div className="flex min-h-0 flex-1 flex-col">
       <GitPanelBackHeader title={commit.subject || "Commit details"} onBack={onBack} />
-      <div className="min-h-0 flex-1 overflow-y-auto">
-        <div className="border-b border-border bg-muted/20 px-4 py-4">
+      <ScrollShadow hideScrollBar className="min-h-0 flex-1 overflow-y-auto">
+        <div className="border-b border-border bg-surface-secondary/20 px-4 py-4">
           <div className="flex items-start gap-3">
-            <span className="grid size-9 shrink-0 place-items-center rounded-xl border border-blue-500/20 bg-blue-500/10 text-blue-700">
+            <span className="border-accent/20 bg-accent-soft text-accent grid size-9 shrink-0 place-items-center rounded-xl border">
               {(commit.parents?.length ?? 0) > 1 ? (
                 <GitMerge className="size-4" />
               ) : (
@@ -1069,7 +990,7 @@ function GitCommitPanel({
             <div className="min-w-0 flex-1">
               <h3 className="text-sm font-semibold leading-5 text-foreground">{commit.subject}</h3>
               {description ? (
-                <p className="mt-1 whitespace-pre-wrap text-xs leading-5 text-muted-foreground">
+                <p className="mt-1 whitespace-pre-wrap text-xs leading-5 text-muted">
                   {description}
                 </p>
               ) : null}
@@ -1077,46 +998,51 @@ function GitCommitPanel({
           </div>
           <div className="mt-3 flex flex-wrap items-center gap-1.5 pl-12">
             {badges.map((badge) => (
-              <span
-                key={`${badge.tone}:${badge.label}`}
-                className="rounded bg-primary/10 px-1.5 py-0.5 text-[10px] font-semibold text-primary"
-              >
+              <Chip key={`${badge.tone}:${badge.label}`} size="sm" variant="soft">
                 {badge.label}
-              </span>
+              </Chip>
             ))}
-            <span className="rounded bg-muted px-1.5 py-0.5 font-mono text-[10px] text-muted-foreground">
-              {commit.sha.slice(0, 12)}
-            </span>
+            <Chip size="sm" variant="secondary">
+              <span className="font-mono">{commit.sha.slice(0, 12)}</span>
+            </Chip>
           </div>
-          <div className="mt-3 grid grid-cols-[1fr_auto] gap-x-3 gap-y-1 pl-12 text-[11px] text-muted-foreground">
+          <div className="mt-3 grid grid-cols-[1fr_auto] gap-x-3 gap-y-1 pl-12 text-[11px] text-muted">
             <span className="truncate">{commit.author_name || "Unknown author"}</span>
             <span>{formatGitRelativeTime(commit.authored_at)}</span>
             <span>{commit.files_changed ?? files.length} files changed</span>
             <span className="font-mono">
-              <span className="text-emerald-700">+{commit.additions ?? 0}</span>{" "}
-              <span className="text-red-600">−{commit.deletions ?? 0}</span>
+              <span className="text-success">+{commit.additions ?? 0}</span>{" "}
+              <span className="text-danger">−{commit.deletions ?? 0}</span>
             </span>
           </div>
         </div>
         {files.length ? (
-          files.map((file) => (
-            <GitFileRow
-              key={`${file.status}:${file.path}`}
-              path={file.path}
-              oldPath={file.old_path}
-              status={file.status}
-              meta={file.binary ? "binary" : undefined}
-              onClick={() => onOpenDiff(file)}
-            />
-          ))
+          <ListView
+            aria-label="Files changed in commit"
+            className="rounded-none border-0 bg-transparent shadow-none"
+            selectionMode="none"
+            variant="secondary"
+            onAction={(key) => {
+              const file = files.find(
+                (candidate) => `${candidate.status}:${candidate.path}` === String(key),
+              );
+              if (file) onOpenDiff(file);
+            }}
+          >
+            {files.map((file) => (
+              <GitFileRow key={`${file.status}:${file.path}`} file={file} />
+            ))}
+          </ListView>
         ) : (
-          <div className="px-4 py-8 text-center text-sm text-muted-foreground">
-            This commit has no file changes.
-          </div>
+          <GitEmptyState
+            icon={<File className="size-5 text-accent" />}
+            title="No file changes"
+            description="This commit does not contain any file changes."
+          />
         )}
-      </div>
+      </ScrollShadow>
       {detail.truncated ? (
-        <div className="border-t border-border px-3 py-2 text-xs text-amber-700">
+        <div className="border-t border-border px-3 py-2 text-xs text-warning">
           Showing the first 500 changed paths.
         </div>
       ) : null}
@@ -1124,42 +1050,35 @@ function GitCommitPanel({
   );
 }
 
-function GitFileRow({
-  path,
-  oldPath,
-  status,
-  meta,
-  onClick,
-}: {
-  path: string;
-  oldPath?: string;
-  status: string;
-  meta?: string;
-  onClick: () => void;
-}) {
+function GitFileRow({ file }: { file: GitCommitFile }) {
+  const { path, old_path: oldPath, status, binary } = file;
   const slash = path.lastIndexOf("/");
   const name = slash < 0 ? path : path.slice(slash + 1);
   return (
-    <button
-      type="button"
-      onClick={onClick}
-      className="group flex w-full items-center gap-2.5 border-b border-border/60 px-4 py-2.5 text-left outline-none hover:bg-muted/60 focus-visible:bg-muted focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring"
+    <ListView.Item
+      id={`${status}:${path}`}
+      textValue={`${path} ${oldPath ?? ""}`}
+      className="group rounded-none px-4 py-2.5"
     >
-      <MaterialFileIcon
-        name={resolveFileType(name).icon}
-        className="flex size-4 shrink-0 items-center justify-center"
-      />
-      <span className="min-w-0 flex-1">
-        <span className="block truncate text-xs font-medium">{path}</span>
-        {oldPath || meta ? (
-          <span className="mt-0.5 block truncate text-[10px] capitalize text-muted-foreground">
-            {oldPath ? `${oldPath} → ${path}` : meta}
-          </span>
-        ) : null}
-      </span>
-      <GitStatusLetter status={status} />
-      <ChevronRight className="size-3.5 text-muted-foreground/60 group-hover:text-foreground" />
-    </button>
+      <ListView.ItemContent className="gap-2.5">
+        <MaterialFileIcon
+          name={resolveFileType(name).icon}
+          className="flex size-4 shrink-0 items-center justify-center"
+        />
+        <span className="flex min-w-0 flex-col">
+          <ListView.Title>{path}</ListView.Title>
+          {oldPath || binary ? (
+            <ListView.Description>
+              {oldPath ? `${oldPath} → ${path}` : "Binary file"}
+            </ListView.Description>
+          ) : null}
+        </span>
+      </ListView.ItemContent>
+      <ListView.ItemAction>
+        <GitStatusLetter status={status} />
+        <ChevronRight className="size-3.5 text-muted/60 transition-transform group-hover:translate-x-0.5 group-hover:text-foreground" />
+      </ListView.ItemAction>
+    </ListView.Item>
   );
 }
 
@@ -1283,53 +1202,49 @@ function GitDiffPanel({ diff, onBack }: { diff: GitDiff; onBack: () => void }) {
 
   return (
     <div className="flex min-h-0 flex-1 flex-col">
-      <div className="flex min-h-10 shrink-0 items-center gap-2 border-b border-border px-2">
-        <button
-          type="button"
+      <div className="flex min-h-11 shrink-0 items-center gap-2 border-b border-border px-2">
+        <Button
+          isIconOnly
           aria-label="Back to changed files"
-          onClick={onBack}
-          className="grid size-7 place-items-center rounded-md text-muted-foreground outline-none hover:bg-muted hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring"
+          size="sm"
+          variant="ghost"
+          onPress={onBack}
         >
           <ArrowLeft className="size-4" />
-        </button>
+        </Button>
         {(() => {
           const s = diff.path.lastIndexOf("/");
           const fileName = s < 0 ? diff.path : diff.path.slice(s + 1);
           const fileDir = s < 0 ? "" : diff.path.slice(0, s + 1);
           return (
-            <span className="min-w-0 flex-1 truncate font-mono text-[12px] text-muted-foreground">
+            <span className="min-w-0 flex-1 truncate font-mono text-[12px] text-muted">
               {fileDir}
               <span className="font-semibold text-foreground">{fileName}</span>
             </span>
           );
         })()}
-        <div
-          className="flex rounded-md border border-border bg-muted/40 p-0.5 text-[10px]"
+        <Segment
           aria-label="Diff layout"
+          selectedKey={viewType}
+          size="sm"
+          onSelectionChange={(key) => setViewType(String(key) === "split" ? "split" : "unified")}
         >
-          {(["unified", "split"] as const).map((type) => (
-            <button
-              key={type}
-              type="button"
-              onClick={() => setViewType(type)}
-              className={cn(
-                "rounded px-2 py-1 capitalize text-muted-foreground outline-none focus-visible:ring-2 focus-visible:ring-ring",
-                viewType === type && "bg-background font-medium text-foreground shadow-sm",
-              )}
-            >
-              {type}
-            </button>
-          ))}
-        </div>
+          <Segment.Item id="unified">Unified</Segment.Item>
+          <Segment.Item id="split">Split</Segment.Item>
+        </Segment>
       </div>
       {diff.binary ? (
-        <div className="grid flex-1 place-items-center px-6 text-center text-sm text-muted-foreground">
-          Binary diff cannot be displayed.
-        </div>
+        <GitEmptyState
+          icon={<FileQuestion className="size-5 text-warning" />}
+          title="Binary file"
+          description="Binary differences cannot be displayed in the browser."
+        />
       ) : parsed.error ? (
-        <div className="grid flex-1 place-items-center px-6 text-center text-sm text-red-600">
-          {parsed.error}
-        </div>
+        <GitEmptyState
+          icon={<AlertTriangle className="size-5 text-danger" />}
+          title="Diff unavailable"
+          description={parsed.error}
+        />
       ) : parsed.files.length ? (
         <div
           className="cocola-git-diff min-h-0 flex-1 overflow-auto bg-background text-xs"
@@ -1356,12 +1271,14 @@ function GitDiffPanel({ diff, onBack }: { diff: GitDiff; onBack: () => void }) {
           ))}
         </div>
       ) : (
-        <div className="grid flex-1 place-items-center px-6 text-center text-sm text-muted-foreground">
-          No diff for this target.
-        </div>
+        <GitEmptyState
+          icon={<File className="size-5 text-accent" />}
+          title="No changes"
+          description="There is no diff for this target."
+        />
       )}
       {diff.truncated ? (
-        <div className="border-t border-border bg-amber-500/5 px-3 py-2 text-xs text-amber-700">
+        <div className="bg-warning-soft text-warning-soft-foreground border-t border-border px-3 py-2 text-xs">
           Diff truncated at 512 KiB.
         </div>
       ) : null}
@@ -1404,7 +1321,7 @@ function ArtifactPreviewPage({
             aria-label={htmlSourceMode ? "Preview HTML" : "View HTML source"}
             title={htmlSourceMode ? "Preview HTML" : "View source"}
             onClick={() => setHtmlSourceMode((value) => !value)}
-            className="inline-flex size-8 shrink-0 items-center justify-center rounded-full text-muted-foreground transition-colors hover:bg-muted hover:text-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+            className="inline-flex size-8 shrink-0 items-center justify-center rounded-full text-muted transition-colors hover:bg-surface-secondary hover:text-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-focus"
           >
             {htmlSourceMode ? <Eye className="size-4" /> : <Code2 className="size-4" />}
           </button>
@@ -1415,7 +1332,7 @@ function ArtifactPreviewPage({
             download={artifact.filename}
             title="Download"
             aria-label={`Download ${artifact.filename}`}
-            className="inline-flex size-8 shrink-0 items-center justify-center rounded-full text-muted-foreground transition-colors hover:bg-muted hover:text-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+            className="inline-flex size-8 shrink-0 items-center justify-center rounded-full text-muted transition-colors hover:bg-surface-secondary hover:text-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-focus"
           >
             <Download className="size-4" />
           </a>
@@ -1427,7 +1344,7 @@ function ArtifactPreviewPage({
 
   return (
     <div className="flex h-full min-h-0 flex-col bg-background">
-      <div className="flex min-h-9 items-center border-b border-border px-3 text-xs text-muted-foreground">
+      <div className="flex min-h-9 items-center border-b border-border px-3 text-xs text-muted">
         <span className="truncate">
           {formatBytes(artifact.size)} · {artifact.mimeType}
         </span>
@@ -1449,27 +1366,40 @@ function ArtifactPreviewPage({
 function WorkspaceLauncher({ pages, onOpen }: { pages: DockPage[]; onOpen: (id: string) => void }) {
   return (
     <div className="flex h-full min-h-0 flex-col items-center justify-center px-6">
-      <div className="w-full max-w-sm">
-        <p className="mb-3 px-3 text-xs font-medium uppercase tracking-wide text-muted-foreground">
-          Panels
-        </p>
-        <div className="flex flex-col">
-          {pages.map((page) => {
-            const Icon = page.icon;
-            return (
-              <button
-                key={page.id}
-                type="button"
-                onClick={() => onOpen(page.id)}
-                className="flex items-center gap-3 rounded-lg px-3 py-2.5 text-left text-sm text-foreground transition-colors hover:bg-muted focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
-              >
-                <Icon className="size-5 shrink-0 text-primary/80" />
-                <span className="font-medium">{page.label}</span>
-              </button>
-            );
-          })}
-        </div>
-      </div>
+      <EmptyState className="w-full max-w-sm" size="sm">
+        <EmptyState.Header>
+          <EmptyState.Media variant="icon">
+            <SquareTerminal className="size-5 text-accent" />
+          </EmptyState.Media>
+          <EmptyState.Title>Open a workspace panel</EmptyState.Title>
+          <EmptyState.Description>
+            Inspect files, use the shell, open previews, or review Git history.
+          </EmptyState.Description>
+        </EmptyState.Header>
+        <EmptyState.Content className="w-full">
+          <ListView
+            aria-label="Workspace panels"
+            selectionMode="none"
+            variant="secondary"
+            onAction={(key) => onOpen(String(key))}
+          >
+            {pages.map((page) => {
+              const Icon = page.icon;
+              return (
+                <ListView.Item key={page.id} id={page.id} textValue={page.label}>
+                  <ListView.ItemContent className="gap-3">
+                    <Icon className="size-5 shrink-0 text-accent" />
+                    <ListView.Title>{page.label}</ListView.Title>
+                  </ListView.ItemContent>
+                  <ListView.ItemAction>
+                    <ChevronRight className="size-4 text-muted" />
+                  </ListView.ItemAction>
+                </ListView.Item>
+              );
+            })}
+          </ListView>
+        </EmptyState.Content>
+      </EmptyState>
     </div>
   );
 }
@@ -1710,7 +1640,7 @@ function WorkspaceFilesPage({
           tooltip="Open in Code Server"
           disabled={!rootReady}
           onClick={() => onOpenCode(workspaceRoot)}
-          className="size-8 rounded-full text-muted-foreground"
+          className="size-8 rounded-full text-muted"
         >
           <Code2 className="size-4" />
         </TooltipIconButton>
@@ -1720,7 +1650,7 @@ function WorkspaceFilesPage({
           aria-label="Refresh workspace"
           disabled={refreshing}
           onClick={() => void refresh()}
-          className="inline-flex size-8 shrink-0 items-center justify-center rounded-full text-muted-foreground transition-colors hover:bg-muted hover:text-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring disabled:opacity-50"
+          className="inline-flex size-8 shrink-0 items-center justify-center rounded-full text-muted transition-colors hover:bg-surface-secondary hover:text-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-focus disabled:opacity-50"
         >
           <RefreshCw className={cn("size-4", refreshing && "animate-spin")} />
         </button>
@@ -1730,7 +1660,7 @@ function WorkspaceFilesPage({
   }, [active, onOpenCode, refreshing, refresh, rootReady, setHeaderActions, workspaceRoot]);
 
   return (
-    <div className="flex h-full min-h-0 flex-col bg-card">
+    <div className="flex h-full min-h-0 flex-col bg-surface">
       <div
         ref={layoutRef}
         className="grid min-h-0 flex-1 grid-cols-1 md:grid-cols-[var(--workspace-tree-width)_1px_minmax(0,1fr)]"
@@ -1751,11 +1681,11 @@ function WorkspaceFilesPage({
               />
             ) : root.entries.length === 0 ? (
               <div className="flex flex-col items-center gap-2 px-5 py-12 text-center">
-                <Folder className="size-7 text-muted-foreground/70" />
+                <Folder className="size-7 text-muted/70" />
                 <div className="text-sm font-medium text-foreground">
                   {workspaceRoot ? "Project is empty" : "Workspace is empty"}
                 </div>
-                <div className="text-xs text-muted-foreground">
+                <div className="text-xs text-muted">
                   Files created by the agent will appear here after refresh.
                 </div>
               </div>
@@ -1796,14 +1726,14 @@ function WorkspaceFilesPage({
         >
           <span
             className={cn(
-              "absolute inset-y-0 left-1/2 w-3 -translate-x-1/2 bg-transparent transition-colors group-hover:bg-primary/10 group-focus-visible:bg-primary/10",
-              resizingTree && "bg-primary/10",
+              "absolute inset-y-0 left-1/2 w-3 -translate-x-1/2 bg-transparent transition-colors group-hover:bg-accent/10 group-focus-visible:bg-accent/10",
+              resizingTree && "bg-accent/10",
             )}
           />
           <span
             className={cn(
-              "absolute inset-y-0 left-1/2 w-px -translate-x-1/2 bg-border transition-colors group-hover:bg-primary/80 group-focus-visible:bg-primary/80",
-              resizingTree && "bg-primary",
+              "absolute inset-y-0 left-1/2 w-px -translate-x-1/2 bg-border transition-colors group-hover:bg-accent/80 group-focus-visible:bg-accent/80",
+              resizingTree && "bg-accent",
             )}
           />
         </div>
@@ -1819,7 +1749,7 @@ function WorkspaceFilesPage({
               onBack={() => setSelected(null)}
             />
           ) : (
-            <div className="flex h-full flex-col items-center justify-center gap-3 p-8 text-center text-muted-foreground">
+            <div className="flex h-full flex-col items-center justify-center gap-3 p-8 text-center text-muted">
               <FileCode2 className="size-9 stroke-[1.4]" />
               <div>
                 <p className="text-sm font-medium text-foreground">Select a file to preview</p>
@@ -1874,11 +1804,11 @@ function WorkspaceTree({
                 aria-selected={selectedPath === entry.path}
                 onClick={() => (isDirectory ? onToggle(entry.path) : onSelect(entry))}
                 className={cn(
-                  "group flex h-8 w-full items-center gap-1.5 border-l-2 text-left text-xs transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-inset focus-visible:ring-ring",
+                  "group flex h-8 w-full items-center gap-1.5 border-l-2 text-left text-xs transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-inset focus-visible:ring-focus",
                   isDirectory ? "pr-9" : "pr-2",
                   selectedPath === entry.path
-                    ? "border-l-primary bg-primary/10 text-foreground"
-                    : "border-l-transparent text-muted-foreground hover:bg-muted/70 hover:text-foreground",
+                    ? "border-l-primary bg-accent/10 text-foreground"
+                    : "border-l-transparent text-muted hover:bg-surface-secondary/70 hover:text-foreground",
                 )}
                 style={{ paddingLeft: `${8 + depth * 14}px` }}
               >
@@ -1894,9 +1824,9 @@ function WorkspaceTree({
                 )}
                 {isDirectory ? (
                   isExpanded ? (
-                    <FolderOpen className="size-4 shrink-0 text-primary/80" />
+                    <FolderOpen className="size-4 shrink-0 text-accent/80" />
                   ) : (
-                    <Folder className="size-4 shrink-0 text-primary/70" />
+                    <Folder className="size-4 shrink-0 text-accent/70" />
                   )
                 ) : entry.kind === "file" ? (
                   <MaterialFileIcon
@@ -1913,7 +1843,7 @@ function WorkspaceTree({
                   type="button"
                   tooltip="Open in Code Server"
                   onClick={() => onOpenCode(entry.path)}
-                  className="absolute right-1 top-1/2 size-6 -translate-y-1/2 text-muted-foreground opacity-100 transition-opacity hover:text-foreground focus-visible:opacity-100 [@media(hover:hover)]:opacity-0 [@media(hover:hover)]:group-hover/tree-row:opacity-100 [@media(hover:hover)]:focus-visible:opacity-100"
+                  className="absolute right-1 top-1/2 size-6 -translate-y-1/2 text-muted opacity-100 transition-opacity hover:text-foreground focus-visible:opacity-100 [@media(hover:hover)]:opacity-0 [@media(hover:hover)]:group-hover/tree-row:opacity-100 [@media(hover:hover)]:focus-visible:opacity-100"
                 >
                   <Code2 className="size-3.5" />
                 </TooltipIconButton>
@@ -1922,7 +1852,7 @@ function WorkspaceTree({
             {isExpanded ? (
               child?.loading && child.entries.length === 0 ? (
                 <div
-                  className="flex h-8 items-center gap-2 text-xs text-muted-foreground"
+                  className="flex h-8 items-center gap-2 text-xs text-muted"
                   style={{ paddingLeft: `${32 + depth * 14}px` }}
                 >
                   <LoaderCircle className="size-3.5 animate-spin" /> Loading
@@ -1931,7 +1861,7 @@ function WorkspaceTree({
                 <button
                   type="button"
                   onClick={() => onReload(entry.path)}
-                  className="block w-full py-2 pr-2 text-left text-[11px] text-destructive"
+                  className="block w-full py-2 pr-2 text-left text-[11px] text-danger"
                   style={{ paddingLeft: `${32 + depth * 14}px` }}
                 >
                   {child.error} · retry
@@ -1959,7 +1889,7 @@ function WorkspaceTree({
           type="button"
           disabled={directory.loading}
           onClick={() => onLoadMore(path, directory.nextCursor)}
-          className="flex h-8 w-full items-center gap-2 pr-2 text-left text-[11px] font-medium text-primary hover:bg-primary/5 disabled:opacity-50"
+          className="flex h-8 w-full items-center gap-2 pr-2 text-left text-[11px] font-medium text-accent hover:bg-accent/5 disabled:opacity-50"
           style={{ paddingLeft: `${28 + depth * 14}px` }}
         >
           {directory.loading ? <LoaderCircle className="size-3.5 animate-spin" /> : null}
@@ -1998,7 +1928,7 @@ function WorkspaceFilePreview({
           onClick={onBack}
           aria-label="Back to workspace files"
           title="Back to workspace files"
-          className="inline-flex size-8 items-center justify-center rounded-full text-muted-foreground hover:bg-muted hover:text-foreground md:hidden"
+          className="inline-flex size-8 items-center justify-center rounded-full text-muted hover:bg-surface-secondary hover:text-foreground md:hidden"
         >
           <ArrowLeft className="size-4" />
         </button>
@@ -2010,7 +1940,7 @@ function WorkspaceFilePreview({
         {entry.previewable ? (
           <ReadonlyFilePreview file={previewFile} renderHtml={false} fetchBinary />
         ) : (
-          <div className="flex h-full flex-col items-center justify-center gap-3 p-8 text-center text-muted-foreground">
+          <div className="flex h-full flex-col items-center justify-center gap-3 p-8 text-center text-muted">
             <FileQuestion className="size-8" />
             <p className="text-sm font-medium text-foreground">Preview unavailable</p>
             <p className="max-w-64 text-xs">
@@ -2025,7 +1955,7 @@ function WorkspaceFilePreview({
 
 function WorkspaceLoading() {
   return (
-    <div className="flex items-center gap-2 px-4 py-5 text-xs text-muted-foreground">
+    <div className="flex items-center gap-2 px-4 py-5 text-xs text-muted">
       <LoaderCircle className="size-4 animate-spin" /> Loading workspace
     </div>
   );
@@ -2042,18 +1972,14 @@ function WorkspaceError({
 }) {
   return (
     <div className="flex flex-col items-center gap-3 px-5 py-10 text-center">
-      <AlertTriangle className="size-7 text-amber-500" />
+      <AlertTriangle className="size-7 text-warning" />
       <div>
         <p className="text-sm font-medium text-foreground">{workspaceErrorTitle(code)}</p>
-        <p className="mt-1 text-xs leading-5 text-muted-foreground">{message}</p>
+        <p className="mt-1 text-xs leading-5 text-muted">{message}</p>
       </div>
-      <button
-        type="button"
-        onClick={onRetry}
-        className="rounded-lg border border-border bg-background px-3 py-1.5 text-xs font-medium text-foreground hover:bg-muted focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
-      >
+      <Button size="sm" variant="outline" onPress={onRetry}>
         Retry
-      </button>
+      </Button>
     </div>
   );
 }
@@ -2210,7 +2136,7 @@ function PreviewPage({
           aria-label="Reload preview"
           disabled={committedPort == null}
           onClick={() => setReloadKey((k) => k + 1)}
-          className="inline-flex size-8 shrink-0 items-center justify-center rounded-full text-muted-foreground transition-colors hover:bg-muted hover:text-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring disabled:opacity-50"
+          className="inline-flex size-8 shrink-0 items-center justify-center rounded-full text-muted transition-colors hover:bg-surface-secondary hover:text-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-focus disabled:opacity-50"
         >
           <RefreshCw className="size-4" />
         </button>
@@ -2225,7 +2151,7 @@ function PreviewPage({
             if (readiness !== "ready") event.preventDefault();
           }}
           className={cn(
-            "inline-flex size-8 shrink-0 items-center justify-center rounded-full text-muted-foreground transition-colors hover:bg-muted hover:text-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring",
+            "inline-flex size-8 shrink-0 items-center justify-center rounded-full text-muted transition-colors hover:bg-surface-secondary hover:text-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-focus",
             readiness !== "ready" && "pointer-events-none opacity-50",
           )}
         >
@@ -2237,10 +2163,10 @@ function PreviewPage({
   }, [active, committedPort, readiness, src, setHeaderActions]);
 
   return (
-    <div className="flex h-full min-h-0 flex-col bg-card">
+    <div className="flex h-full min-h-0 flex-col bg-surface">
       <div className="flex items-center gap-2 border-b border-border px-3 py-2">
-        <div className="flex min-w-0 flex-1 items-center gap-1.5 rounded-md border border-input bg-background px-2 py-1 text-xs text-muted-foreground focus-within:ring-1 focus-within:ring-ring">
-          <Globe className="size-3.5 shrink-0 text-primary/70" />
+        <div className="flex min-w-0 flex-1 items-center gap-1.5 rounded-md border border-separator bg-background px-2 py-1 text-xs text-muted focus-within:ring-1 focus-within:ring-focus">
+          <Globe className="size-3.5 shrink-0 text-accent/70" />
           <span className="shrink-0 select-none">localhost:</span>
           <input
             type="text"
@@ -2252,13 +2178,13 @@ function PreviewPage({
             }}
             placeholder="3000"
             aria-label="Dev server port"
-            className="w-full min-w-0 bg-transparent text-foreground outline-none placeholder:text-muted-foreground/60"
+            className="w-full min-w-0 bg-transparent text-foreground outline-none placeholder:text-muted/60"
           />
         </div>
         <button
           type="button"
           onClick={commit}
-          className="inline-flex h-7 shrink-0 items-center rounded-md bg-primary px-3 text-xs font-medium text-primary-foreground transition-colors hover:bg-primary/90 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+          className="inline-flex h-7 shrink-0 items-center rounded-md bg-accent px-3 text-xs font-medium text-accent-foreground transition-colors hover:bg-accent/90 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-focus"
         >
           Preview
         </button>
@@ -2275,34 +2201,33 @@ function PreviewPage({
           />
         ) : committedPort != null && readiness === "checking" ? (
           <div className="flex h-full min-h-0 flex-col items-center justify-center px-6 text-center">
-            <LoaderCircle className="mb-3 size-7 animate-spin text-primary/70" />
+            <LoaderCircle className="mb-3 size-7 animate-spin text-accent/70" />
             <p className="text-sm font-medium text-foreground">Connecting to preview</p>
-            <p className="mt-1 text-xs text-muted-foreground">
-              Checking port {committedPort} in the sandbox…
-            </p>
+            <p className="mt-1 text-xs text-muted">Checking port {committedPort} in the sandbox…</p>
           </div>
         ) : committedPort != null && readiness === "unavailable" ? (
           <div className="flex h-full min-h-0 flex-col items-center justify-center px-6 text-center">
-            <AlertTriangle className="mb-3 size-8 text-amber-500" />
+            <AlertTriangle className="mb-3 size-8 text-warning" />
             <p className="text-sm font-medium text-foreground">Preview server unavailable</p>
-            <p className="mt-1 max-w-sm text-xs leading-5 text-muted-foreground">
+            <p className="mt-1 max-w-sm text-xs leading-5 text-muted">
               No server is reachable on port {committedPort}. Ask the Agent to start a managed
               preview server, then retry.
             </p>
-            <button
-              type="button"
-              onClick={() => setReloadKey((key) => key + 1)}
-              className="mt-4 inline-flex h-8 items-center gap-1.5 rounded-md border border-border bg-background px-3 text-xs font-medium text-foreground transition-colors hover:bg-muted focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+            <Button
+              className="mt-4"
+              size="sm"
+              variant="outline"
+              onPress={() => setReloadKey((key) => key + 1)}
             >
               <RefreshCw className="size-3.5" />
               Retry
-            </button>
+            </Button>
           </div>
         ) : (
           <div className="flex h-full min-h-0 flex-col items-center justify-center px-6 text-center">
-            <Globe className="mb-3 size-8 text-muted-foreground/50" />
+            <Globe className="mb-3 size-8 text-muted/50" />
             <p className="text-sm font-medium text-foreground">Preview a dev server</p>
-            <p className="mt-1 max-w-xs text-xs text-muted-foreground">
+            <p className="mt-1 max-w-xs text-xs text-muted">
               Enter the port your in-sandbox dev server listens on (e.g. 3000), then press Preview
               to load it here.
             </p>
@@ -2453,7 +2378,7 @@ function CodePage({
           title="Reload editor"
           aria-label="Reload editor"
           onClick={() => setReloadKey((k) => k + 1)}
-          className="inline-flex size-8 shrink-0 items-center justify-center rounded-full text-muted-foreground transition-colors hover:bg-muted hover:text-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+          className="inline-flex size-8 shrink-0 items-center justify-center rounded-full text-muted transition-colors hover:bg-surface-secondary hover:text-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-focus"
         >
           <RefreshCw className="size-4" />
         </button>
@@ -2463,7 +2388,7 @@ function CodePage({
           rel="noreferrer"
           title="Open editor in a new tab"
           aria-label="Open editor in a new tab"
-          className="inline-flex size-8 shrink-0 items-center justify-center rounded-full text-muted-foreground transition-colors hover:bg-muted hover:text-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+          className="inline-flex size-8 shrink-0 items-center justify-center rounded-full text-muted transition-colors hover:bg-surface-secondary hover:text-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-focus"
         >
           <ExternalLink className="size-4" />
         </a>
@@ -2473,7 +2398,7 @@ function CodePage({
   }, [active, readiness, src, setHeaderActions]);
 
   return (
-    <div className="flex h-full min-h-0 flex-col bg-card">
+    <div className="flex h-full min-h-0 flex-col bg-surface">
       <div className="min-h-0 flex-1">
         {readiness === "ready" ? (
           <iframe
@@ -2529,16 +2454,16 @@ function CodeEditorPlaceholder({
 
   return (
     <div className="flex h-full min-h-0 flex-col items-center justify-center px-6 text-center">
-      <div className="flex size-11 items-center justify-center rounded-xl bg-muted text-muted-foreground">
+      <div className="flex size-11 items-center justify-center rounded-xl bg-surface-secondary text-muted">
         <Icon className={cn("size-5", loading && "animate-spin")} />
       </div>
       <p className="mt-4 text-sm font-medium text-foreground">{content.title}</p>
-      <p className="mt-1 max-w-sm text-xs leading-5 text-muted-foreground">{content.description}</p>
+      <p className="mt-1 max-w-sm text-xs leading-5 text-muted">{content.description}</p>
       {onRetry ? (
         <button
           type="button"
           onClick={onRetry}
-          className="mt-4 inline-flex h-8 items-center gap-1.5 rounded-md border border-border bg-background px-3 text-xs font-medium text-foreground transition-colors hover:bg-muted focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+          className="mt-4 inline-flex h-8 items-center gap-1.5 rounded-md border border-border bg-background px-3 text-xs font-medium text-foreground transition-colors hover:bg-surface-secondary focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-focus"
         >
           <RefreshCw className="size-3.5" />
           Try again

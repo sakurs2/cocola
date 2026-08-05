@@ -1,0 +1,327 @@
+/*
+ * Cocola user workspace presentation copied from the approved HeroUI Demo.
+ * The .cocola-user-ui scope keeps these reference styles out of Admin while
+ * real Cocola data and actions are adapted by the React components.
+ */
+
+.cocola-user-ui .cocola-sidebar-tab {
+  border-radius: calc(var(--radius) * 2);
+  transform-origin: center;
+  transition:
+    transform 170ms cubic-bezier(0.22, 1, 0.36, 1),
+    box-shadow 170ms ease;
+  will-change: transform;
+}
+
+.cocola-user-ui .cocola-sidebar-tab-icon {
+  transition: transform 180ms cubic-bezier(0.22, 1, 0.36, 1);
+  will-change: transform;
+}
+
+.cocola-user-ui .cocola-sidebar-create-actions {
+  display: flex;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 140ms ease;
+}
+
+.cocola-user-ui
+  .cocola-sidebar-tab:is(:hover, :focus-within, [data-current="true"])
+  .cocola-sidebar-create-actions {
+  opacity: 1;
+  pointer-events: auto;
+}
+
+@media (hover: none) {
+  .cocola-user-ui .cocola-sidebar-create-actions {
+    opacity: 1;
+    pointer-events: auto;
+  }
+}
+
+.cocola-user-ui .cocola-web-composer {
+  background: transparent;
+}
+
+.cocola-user-ui .cocola-web-composer .prompt-input__shell {
+  border-color: color-mix(in oklab, var(--border) 88%, transparent);
+  border-radius: 1.5rem;
+  background: color-mix(in oklab, var(--surface) 98%, var(--background) 2%);
+  box-shadow: 0 14px 34px -26px color-mix(in oklab, var(--foreground) 34%, transparent);
+}
+
+.cocola-user-ui .cocola-web-composer:hover .prompt-input__shell {
+  border-color: color-mix(in oklab, var(--border) 72%, var(--foreground) 28%);
+}
+
+.cocola-user-ui .cocola-web-composer:focus-within .prompt-input__shell {
+  border-color: color-mix(in oklab, var(--accent) 44%, var(--border) 56%);
+  box-shadow:
+    0 18px 42px -28px color-mix(in oklab, var(--foreground) 38%, transparent),
+    0 0 0 3px color-mix(in oklab, var(--accent) 12%, transparent);
+}
+
+.cocola-user-ui .cocola-web-composer .prompt-input__textarea {
+  min-height: 5.75rem;
+  margin-bottom: 3.75rem;
+  padding-inline: 1rem;
+  padding-top: 1rem;
+  font-size: 0.9375rem;
+  line-height: 1.5rem;
+}
+
+.cocola-user-ui .cocola-web-composer .prompt-input__toolbar {
+  inset-inline: 0.75rem;
+  bottom: 0.75rem;
+}
+
+.cocola-user-ui .cocola-web-composer .prompt-input__toolbar-start {
+  gap: 0.5rem;
+}
+
+.cocola-user-ui .cocola-web-composer-selector {
+  border-color: transparent;
+  background: transparent;
+  transition:
+    transform 160ms ease,
+    border-color 160ms ease,
+    background-color 160ms ease,
+    box-shadow 160ms ease;
+}
+
+.cocola-user-ui .cocola-web-composer .cocola-web-composer-action {
+  border: 1px solid transparent;
+  background: transparent;
+  transition:
+    transform 160ms ease,
+    border-color 160ms ease,
+    background-color 160ms ease,
+    color 160ms ease;
+}
+
+.cocola-user-ui .cocola-web-composer .cocola-web-composer-action svg {
+  transition: transform 160ms ease;
+}
+
+.cocola-user-ui .cocola-web-plan-indicator {
+  background: oklch(0.51 0.23 277) !important;
+  color: white !important;
+  box-shadow: 0 8px 18px -12px oklch(0.51 0.23 277 / 0.72);
+  transition:
+    transform 160ms ease,
+    background-color 160ms ease,
+    box-shadow 160ms ease;
+}
+
+.cocola-user-ui .cocola-web-plan-indicator:hover {
+  background: oklch(0.45 0.22 277) !important;
+  transform: translateY(-1px);
+  box-shadow: 0 12px 22px -12px oklch(0.51 0.23 277 / 0.82);
+}
+
+.cocola-user-ui .cocola-web-composer-send {
+  transition:
+    transform 160ms ease,
+    filter 160ms ease,
+    box-shadow 160ms ease;
+}
+
+.cocola-user-ui .cocola-web-prompt-starter {
+  background: color-mix(in oklab, var(--surface) 88%, transparent);
+  box-shadow: none;
+  cursor: var(--cursor-interactive);
+  transition:
+    transform 180ms ease,
+    border-color 180ms ease,
+    background-color 180ms ease,
+    box-shadow 180ms ease;
+  will-change: transform;
+}
+
+.cocola-user-ui .cocola-web-prompt-starter .prompt-suggestion__item-label {
+  display: flex;
+  width: auto;
+  align-items: center;
+  gap: 0.625rem;
+}
+
+.cocola-user-ui .cocola-web-prompt-starter-icon {
+  transition: transform 180ms ease;
+}
+
+.cocola-user-ui .cocola-web-slash-menu {
+  box-shadow: 0 22px 52px -26px color-mix(in oklab, var(--foreground) 38%, transparent);
+}
+
+.cocola-user-ui .cocola-web-brand-lockup {
+  animation: cocola-web-brand-enter 360ms ease-out both;
+}
+
+.cocola-user-ui .cocola-web-core-logo {
+  animation: cocola-web-core-logo-enter 520ms cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+
+.cocola-user-ui .cocola-web-wordmark {
+  animation: cocola-web-wordmark-reveal 820ms 120ms cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+
+.cocola-user-ui .cocola-web-tagline {
+  font-family: Georgia, "Times New Roman", serif;
+  animation: cocola-web-tagline-enter 480ms 420ms ease-out both;
+}
+
+.cocola-user-ui .cocola-web-new-chat {
+  border: 1px solid color-mix(in oklab, var(--foreground) 84%, var(--background) 16%);
+  background: var(--foreground) !important;
+  color: var(--background) !important;
+  box-shadow: 0 12px 24px -16px color-mix(in oklab, var(--foreground) 65%, transparent);
+  transition:
+    transform 160ms ease,
+    background-color 160ms ease,
+    box-shadow 160ms ease;
+}
+
+.cocola-user-ui .cocola-web-new-chat:hover {
+  background: color-mix(in oklab, var(--foreground) 88%, var(--background) 12%) !important;
+  box-shadow: 0 16px 28px -16px color-mix(in oklab, var(--foreground) 72%, transparent);
+}
+
+.cocola-user-ui .cocola-web-new-chat:active {
+  box-shadow: 0 8px 18px -14px color-mix(in oklab, var(--foreground) 58%, transparent);
+  transform: translateY(0) scale(0.99);
+}
+
+.cocola-user-ui .cocola-web-new-chat-icon {
+  background: color-mix(in oklab, var(--background) 16%, transparent);
+  transition:
+    transform 180ms cubic-bezier(0.22, 1, 0.36, 1),
+    background-color 180ms ease;
+}
+
+.cocola-user-ui .cocola-web-new-chat > span:last-child {
+  transition: transform 180ms cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+.cocola-user-ui .cocola-web-suggestion-item[data-keyboard-active="true"] {
+  background: var(--default);
+}
+
+.cocola-user-ui.cocola-web-shell .app-layout__main {
+  scrollbar-gutter: stable;
+}
+
+.cocola-user-ui .cocola-web-select-trigger:active,
+.cocola-user-ui .cocola-web-select-trigger[data-pressed="true"] {
+  transform: none;
+}
+
+@media (hover: hover) and (pointer: fine) {
+  .cocola-user-ui .cocola-sidebar-tab:hover,
+  .cocola-user-ui .cocola-sidebar-tab[data-hovered="true"] {
+    z-index: 2;
+    transform: translateY(-2px) scale(1.015);
+    box-shadow: 0 10px 22px -16px color-mix(in oklab, var(--accent) 48%, transparent);
+  }
+
+  .cocola-user-ui .cocola-sidebar-tab:hover .cocola-sidebar-tab-icon,
+  .cocola-user-ui .cocola-sidebar-tab[data-hovered="true"] .cocola-sidebar-tab-icon {
+    transform: translate(2px, -1.5px) scale(1.08);
+  }
+
+  .cocola-user-ui .cocola-sidebar-tab:active,
+  .cocola-user-ui .cocola-sidebar-tab[data-pressed="true"] {
+    transform: translateY(-0.5px) scale(0.992);
+    transition-duration: 80ms;
+  }
+
+  .cocola-user-ui .cocola-sidebar-tab:active .cocola-sidebar-tab-icon,
+  .cocola-user-ui .cocola-sidebar-tab[data-pressed="true"] .cocola-sidebar-tab-icon {
+    transform: translate(1px, 0) scale(1.02);
+  }
+
+  .cocola-user-ui .cocola-web-prompt-starter:hover,
+  .cocola-user-ui .cocola-web-prompt-starter[data-hovered="true"] {
+    border-color: color-mix(in oklab, var(--accent) 34%, var(--border) 66%) !important;
+    background: color-mix(in oklab, var(--surface) 91%, var(--accent) 9%);
+    box-shadow: 0 8px 18px -16px color-mix(in oklab, var(--foreground) 50%, transparent);
+    transform: translateY(-1px);
+  }
+
+  .cocola-user-ui .cocola-web-prompt-starter:hover .cocola-web-prompt-starter-icon,
+  .cocola-user-ui .cocola-web-prompt-starter[data-hovered="true"] .cocola-web-prompt-starter-icon {
+    transform: scale(1.06) rotate(-2deg);
+  }
+
+  .cocola-user-ui .cocola-web-composer-selector:hover,
+  .cocola-user-ui .cocola-web-composer-selector[data-hovered="true"] {
+    border-color: transparent;
+    background: color-mix(in oklab, var(--surface-secondary) 82%, var(--accent) 18%);
+    box-shadow: none;
+    transform: translateY(-1px);
+  }
+
+  .cocola-user-ui .cocola-web-composer .cocola-web-composer-action:hover,
+  .cocola-user-ui .cocola-web-composer .cocola-web-composer-action[data-hovered="true"] {
+    border-color: transparent;
+    background: color-mix(in oklab, var(--surface-secondary) 78%, var(--accent) 22%);
+    color: var(--foreground);
+    transform: translateY(-1px);
+  }
+
+  .cocola-user-ui .cocola-web-composer .cocola-web-composer-action:hover svg,
+  .cocola-user-ui .cocola-web-composer .cocola-web-composer-action[data-hovered="true"] svg {
+    transform: rotate(-8deg);
+  }
+
+  .cocola-user-ui .cocola-web-composer-send:not(:disabled):hover,
+  .cocola-user-ui .cocola-web-composer-send[data-hovered="true"]:not([data-disabled="true"]) {
+    filter: brightness(1.06);
+    transform: translateY(-1px) scale(1.03);
+    box-shadow: 0 10px 20px -12px color-mix(in oklab, var(--accent) 76%, transparent);
+  }
+
+  .cocola-user-ui .cocola-web-new-chat:hover .cocola-web-new-chat-icon {
+    background: color-mix(in oklab, var(--background) 24%, transparent);
+    transform: scale(1.08) rotate(6deg);
+  }
+
+  .cocola-user-ui .cocola-web-new-chat:hover > span:last-child {
+    transform: translateX(2px);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .cocola-user-ui .cocola-sidebar-tab,
+  .cocola-user-ui .cocola-sidebar-tab-icon,
+  .cocola-user-ui .cocola-web-prompt-starter,
+  .cocola-user-ui .cocola-web-prompt-starter-icon,
+  .cocola-user-ui .cocola-web-composer-selector,
+  .cocola-user-ui .cocola-web-composer .cocola-web-composer-action,
+  .cocola-user-ui .cocola-web-composer .cocola-web-composer-action svg,
+  .cocola-user-ui .cocola-web-plan-indicator,
+  .cocola-user-ui .cocola-web-composer-send,
+  .cocola-user-ui .cocola-web-new-chat-icon,
+  .cocola-user-ui .cocola-web-new-chat > span:last-child {
+    transition: none;
+  }
+
+  .cocola-user-ui .cocola-sidebar-tab:hover,
+  .cocola-user-ui .cocola-sidebar-tab[data-hovered="true"],
+  .cocola-user-ui .cocola-sidebar-tab:active,
+  .cocola-user-ui .cocola-sidebar-tab[data-pressed="true"],
+  .cocola-user-ui .cocola-sidebar-tab:hover .cocola-sidebar-tab-icon,
+  .cocola-user-ui .cocola-sidebar-tab[data-hovered="true"] .cocola-sidebar-tab-icon,
+  .cocola-user-ui .cocola-web-prompt-starter:hover,
+  .cocola-user-ui .cocola-web-prompt-starter[data-hovered="true"],
+  .cocola-user-ui .cocola-web-composer-selector:hover,
+  .cocola-user-ui .cocola-web-composer-selector[data-hovered="true"],
+  .cocola-user-ui .cocola-web-composer .cocola-web-composer-action:hover,
+  .cocola-user-ui .cocola-web-composer .cocola-web-composer-action[data-hovered="true"],
+  .cocola-user-ui .cocola-web-plan-indicator:hover,
+  .cocola-user-ui .cocola-web-composer-send:not(:disabled):hover,
+  .cocola-user-ui .cocola-web-composer-send[data-hovered="true"]:not([data-disabled="true"]),
+  .cocola-user-ui .cocola-web-new-chat:hover .cocola-web-new-chat-icon,
+  .cocola-user-ui .cocola-web-new-chat:hover > span:last-child {
+    transform: none;
+  }
+}

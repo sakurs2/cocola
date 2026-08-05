@@ -27,7 +27,7 @@ export function SessionStatusButton({
       title={summary}
       aria-label={`Open session status: ${summary}`}
       onClick={onClick}
-      className="relative inline-flex size-8 items-center justify-center rounded-full text-muted-foreground transition-colors hover:bg-muted hover:text-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+      className="relative inline-flex size-8 items-center justify-center rounded-full text-muted transition-colors hover:bg-surface-secondary hover:text-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-focus"
     >
       <Activity className="size-4" />
       <span
@@ -66,11 +66,11 @@ export function SessionStatusPanel({
   ].filter(Boolean);
 
   return (
-    <div className="flex h-full flex-col font-system">
+    <div className="flex h-full flex-col font-sans">
       <header className="flex min-h-14 items-center gap-3 px-4">
         <div className="min-w-0 flex-1">
           <div className="text-sm font-medium text-foreground">Session status</div>
-          <div className="truncate text-xs text-muted-foreground">{environmentSummary(status)}</div>
+          <div className="truncate text-xs text-muted">{environmentSummary(status)}</div>
         </div>
         {artifactName ? (
           <button
@@ -78,7 +78,7 @@ export function SessionStatusPanel({
             title={`Open ${artifactName}`}
             aria-label={`Open artifact ${artifactName}`}
             onClick={onOpenArtifact}
-            className="inline-flex size-8 shrink-0 items-center justify-center rounded-full text-muted-foreground transition-colors hover:bg-muted hover:text-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+            className="inline-flex size-8 shrink-0 items-center justify-center rounded-full text-muted transition-colors hover:bg-surface-secondary hover:text-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-focus"
           >
             <FileText className="size-4" />
           </button>
@@ -88,7 +88,7 @@ export function SessionStatusPanel({
           title="Close status"
           aria-label="Close session status"
           onClick={onClose}
-          className="inline-flex size-8 shrink-0 items-center justify-center rounded-full text-muted-foreground transition-colors hover:bg-muted hover:text-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+          className="inline-flex size-8 shrink-0 items-center justify-center rounded-full text-muted transition-colors hover:bg-surface-secondary hover:text-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-focus"
         >
           <X className="size-4" />
         </button>
@@ -96,7 +96,7 @@ export function SessionStatusPanel({
 
       <div className="min-h-0 flex-1 overflow-auto px-4 pb-5">
         {status.components.length === 0 && status.phase !== "ready" ? (
-          <div className="flex items-start gap-3 text-sm text-muted-foreground">
+          <div className="flex items-start gap-3 text-sm text-muted">
             <EnvironmentPhaseIcon status={status} className="mt-0.5 size-4 shrink-0" />
             <div>
               <p className="font-medium text-foreground">
@@ -166,7 +166,7 @@ export function SessionStatusPanel({
         <div className="px-4 py-3">
           <Link
             href="/mcps"
-            className="text-xs font-medium text-primary transition-colors hover:text-primary/80 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+            className="text-xs font-medium text-accent transition-colors hover:text-accent/80 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-focus"
           >
             Open MCP settings
           </Link>
@@ -204,9 +204,9 @@ function EnvironmentGroup({
           <span className="text-[13px] font-semibold tracking-wide text-foreground">{title}</span>
         </span>
         <span className="flex min-w-0 items-center gap-2">
-          <span className="truncate text-xs text-muted-foreground/80">{summary}</span>
+          <span className="truncate text-xs text-muted/80">{summary}</span>
           <ChevronRight
-            className={`size-4 shrink-0 text-muted-foreground/70 transition-transform ${open ? "rotate-90" : ""}`}
+            className={`size-4 shrink-0 text-muted/70 transition-transform ${open ? "rotate-90" : ""}`}
           />
         </span>
       </button>
@@ -216,34 +216,34 @@ function EnvironmentGroup({
 }
 
 function EnvironmentEmptyState({ children }: { children: ReactNode }) {
-  return <p className="px-1 pb-2 text-xs leading-5 text-muted-foreground">{children}</p>;
+  return <p className="px-1 pb-2 text-xs leading-5 text-muted">{children}</p>;
 }
 
 function EnvironmentComponentRow({ component }: { component: EnvironmentComponent }) {
   return (
-    <div className="flex min-h-[42px] items-center gap-3 rounded-xl px-1 py-1.5 transition-colors hover:bg-muted/40">
-      <span className="grid size-6 shrink-0 place-items-center text-muted-foreground">
+    <div className="flex min-h-[42px] items-center gap-3 rounded-xl px-1 py-1.5 transition-colors hover:bg-surface-secondary/40">
+      <span className="grid size-6 shrink-0 place-items-center text-muted">
         <ComponentStatusIcon component={component} />
       </span>
       <div className="min-w-0 flex-1">
         <div className="flex items-center justify-between gap-3">
           <p className="truncate text-sm font-normal text-foreground">{component.label}</p>
-          <span className="shrink-0 text-[11px] text-muted-foreground">
+          <span className="shrink-0 text-[11px] text-muted">
             {componentStatusLabel(component)}
           </span>
         </div>
         {component.error ? (
           <p className="mt-1 break-words text-xs leading-5 text-amber-700">{component.error}</p>
         ) : component.kind === "skill" && component.version ? (
-          <p className="mt-1 text-xs text-muted-foreground">Version {component.version}</p>
+          <p className="mt-1 text-xs text-muted">Version {component.version}</p>
         ) : component.kind === "mcp" && component.status === "connected" ? (
-          <p className="mt-1 text-xs text-muted-foreground">
+          <p className="mt-1 text-xs text-muted">
             {component.toolCount > 0
               ? `${component.toolCount} tool${component.toolCount === 1 ? "" : "s"} available`
               : "Connection verified"}
           </p>
         ) : component.kind === "mcp" && component.status === "configured" ? (
-          <p className="mt-1 text-xs text-muted-foreground">
+          <p className="mt-1 text-xs text-muted">
             Connection will be verified on first use
           </p>
         ) : null}
@@ -276,7 +276,7 @@ function ComponentStatusIcon({ component }: { component: EnvironmentComponent })
     return <CheckCircle className="size-4 text-emerald-600" />;
   }
   if (component.status === "configured") {
-    return <PlugsConnected className="size-4 text-muted-foreground" />;
+    return <PlugsConnected className="size-4 text-muted" />;
   }
   return <WarningCircle className="size-4 text-amber-600" />;
 }

@@ -25,7 +25,7 @@ const answerMarkdownComponents = {
   },
   table: ({ node: _node, ...props }) => (
     <div
-      className="my-5 max-w-full overflow-x-auto rounded-xl border border-border/70 bg-card shadow-[0_1px_2px_hsl(var(--foreground)/0.03)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-inset"
+      className="my-5 max-w-full overflow-x-auto rounded-xl border border-border/70 bg-surface shadow-[0_1px_2px_oklch(from var(--foreground) l c h / 0.03)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus focus-visible:ring-inset"
       role="region"
       aria-label="Scrollable table"
       tabIndex={0}
@@ -120,23 +120,23 @@ const answerMarkdownClassName = cn(
   "[&_ul]:my-3.5 [&_ul]:max-w-[76ch] [&_ul]:list-disc [&_ul]:pl-5",
   "[&_ol]:my-3.5 [&_ol]:max-w-[76ch] [&_ol]:list-decimal [&_ol]:pl-5",
   "[&_li]:my-1.5 [&_li]:pl-1 [&_li>p]:my-1.5",
-  "[&_li::marker]:font-medium [&_li::marker]:text-muted-foreground/75",
+  "[&_li::marker]:font-medium [&_li::marker]:text-muted/75",
   "[&_ul_ul]:my-1.5 [&_ul_ol]:my-1.5 [&_ol_ul]:my-1.5 [&_ol_ol]:my-1.5",
   "[&_.task-list-item]:list-none [&_.task-list-item]:pl-0",
   "[&_.task-list-item>input]:mr-2 [&_.task-list-item>input]:size-3.5 [&_.task-list-item>input]:accent-primary",
   "[&_blockquote]:my-4 [&_blockquote]:max-w-[76ch] [&_blockquote]:rounded-r-xl [&_blockquote]:border-l-[3px] [&_blockquote]:border-indigo-500/55 [&_blockquote]:bg-indigo-500/[0.045] [&_blockquote]:px-4 [&_blockquote]:py-2.5 [&_blockquote]:text-foreground/80",
   "[&_blockquote_p]:my-1.5",
-  "[&_a]:font-medium [&_a]:text-primary [&_a]:underline [&_a]:decoration-primary/30 [&_a]:decoration-1 [&_a]:underline-offset-4 [&_a]:transition-colors [&_a]:[overflow-wrap:anywhere] [&_a:hover]:decoration-primary [&_a:focus-visible]:rounded-sm [&_a:focus-visible]:outline-none [&_a:focus-visible]:ring-2 [&_a:focus-visible]:ring-ring [&_a:focus-visible]:ring-offset-2",
-  "[&_code]:rounded-md [&_code]:border [&_code]:border-border/70 [&_code]:bg-muted/75 [&_code]:px-1.5 [&_code]:py-0.5 [&_code]:font-mono [&_code]:text-[0.86em] [&_code]:font-medium",
+  "[&_a]:font-medium [&_a]:text-accent [&_a]:underline [&_a]:decoration-primary/30 [&_a]:decoration-1 [&_a]:underline-offset-4 [&_a]:transition-colors [&_a]:[overflow-wrap:anywhere] [&_a:hover]:decoration-primary [&_a:focus-visible]:rounded-sm [&_a:focus-visible]:outline-none [&_a:focus-visible]:ring-2 [&_a:focus-visible]:ring-focus [&_a:focus-visible]:ring-offset-2",
+  "[&_code]:rounded-md [&_code]:border [&_code]:border-border/70 [&_code]:bg-surface-secondary/75 [&_code]:px-1.5 [&_code]:py-0.5 [&_code]:font-mono [&_code]:text-[0.86em] [&_code]:font-medium",
   "[&_pre_code]:border-0 [&_pre_code]:bg-transparent [&_pre_code]:p-0 [&_pre_code]:text-inherit",
-  "[&_thead]:bg-muted/45",
+  "[&_thead]:bg-surface-secondary/45",
   "[&_th]:whitespace-nowrap [&_th]:border-b [&_th]:border-border/70 [&_th]:px-3.5 [&_th]:py-2.5 [&_th]:font-semibold [&_th]:text-foreground",
   "[&_td]:border-b [&_td]:border-border/55 [&_td]:px-3.5 [&_td]:py-2.5 [&_td]:align-top",
   "[&_tbody_tr:last-child_td]:border-b-0",
-  "[&_tbody_tr]:transition-colors [&_tbody_tr:hover]:bg-muted/25",
+  "[&_tbody_tr]:transition-colors [&_tbody_tr:hover]:bg-surface-secondary/25",
   "[&_hr]:my-7 [&_hr]:border-border/70",
-  "[&_del]:text-muted-foreground [&_del]:decoration-muted-foreground/60",
-  "[&_img]:my-5 [&_img]:max-h-[32rem] [&_img]:max-w-full [&_img]:rounded-xl [&_img]:border [&_img]:border-border/70 [&_img]:bg-muted/20 [&_img]:object-contain",
+  "[&_del]:text-muted [&_del]:decoration-muted-foreground/60",
+  "[&_img]:my-5 [&_img]:max-h-[32rem] [&_img]:max-w-full [&_img]:rounded-xl [&_img]:border [&_img]:border-border/70 [&_img]:bg-surface-secondary/20 [&_img]:object-contain",
 );
 
 const contentMarkdownClassName = cn(
@@ -147,12 +147,12 @@ const contentMarkdownClassName = cn(
   "[&_h1]:mb-2.5 [&_h1]:mt-5 [&_h1]:text-xl [&_h1]:font-semibold [&_h1]:tracking-normal",
   "[&_h2]:mb-2 [&_h2]:mt-5 [&_h2]:border-b [&_h2]:border-border/70 [&_h2]:pb-1.5 [&_h2]:text-lg [&_h2]:font-semibold [&_h2]:tracking-normal",
   "[&_h3]:mb-1.5 [&_h3]:mt-4 [&_h3]:text-base [&_h3]:font-semibold [&_h3]:tracking-normal",
-  "[&_a]:font-medium [&_a]:text-primary [&_a]:underline [&_a]:decoration-border [&_a]:underline-offset-4 [&_a:hover]:decoration-primary",
-  "[&_code]:rounded-md [&_code]:border [&_code]:border-border/70 [&_code]:bg-muted/80 [&_code]:px-1.5 [&_code]:py-0.5 [&_code]:font-mono [&_code]:text-[0.85em]",
+  "[&_a]:font-medium [&_a]:text-accent [&_a]:underline [&_a]:decoration-border [&_a]:underline-offset-4 [&_a:hover]:decoration-primary",
+  "[&_code]:rounded-md [&_code]:border [&_code]:border-border/70 [&_code]:bg-surface-secondary/80 [&_code]:px-1.5 [&_code]:py-0.5 [&_code]:font-mono [&_code]:text-[0.85em]",
   "[&_pre_code]:border-0 [&_pre_code]:bg-transparent [&_pre_code]:p-0 [&_pre_code]:text-inherit",
-  "[&_blockquote]:my-3 [&_blockquote]:border-l-2 [&_blockquote]:border-primary/60 [&_blockquote]:bg-muted/30 [&_blockquote]:py-1 [&_blockquote]:pl-4 [&_blockquote]:text-muted-foreground",
+  "[&_blockquote]:my-3 [&_blockquote]:border-l-2 [&_blockquote]:border-accent/60 [&_blockquote]:bg-surface-secondary/30 [&_blockquote]:py-1 [&_blockquote]:pl-4 [&_blockquote]:text-muted",
   "[&_table]:my-3 [&_table]:w-full [&_table]:border-collapse [&_table]:text-sm",
-  "[&_th]:border [&_th]:border-border [&_th]:bg-muted/50 [&_th]:px-2.5 [&_th]:py-1.5 [&_th]:text-left [&_th]:font-medium",
+  "[&_th]:border [&_th]:border-border [&_th]:bg-surface-secondary/50 [&_th]:px-2.5 [&_th]:py-1.5 [&_th]:text-left [&_th]:font-medium",
   "[&_td]:border [&_td]:border-border [&_td]:px-2.5 [&_td]:py-1.5",
   "[&_hr]:my-5 [&_hr]:border-border",
 );
@@ -383,14 +383,14 @@ const CodeHeader: FC<CodeHeaderProps> = ({ language, code }) => {
   };
 
   return (
-    <div className="mt-3 flex items-center justify-between gap-3 rounded-t-xl border-x border-t border-border/60 bg-muted/50 px-3 py-2">
-      <span className="min-w-0 truncate font-mono text-[11px] uppercase text-muted-foreground">
+    <div className="mt-3 flex items-center justify-between gap-3 rounded-t-xl border-x border-t border-border/60 bg-surface-secondary/50 px-3 py-2">
+      <span className="min-w-0 truncate font-mono text-[11px] uppercase text-muted">
         {label}
       </span>
       <button
         type="button"
         onClick={onCopy}
-        className="aui-code-action inline-flex size-7 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-background hover:text-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+        className="aui-code-action inline-flex size-7 items-center justify-center rounded-md text-muted transition-colors hover:bg-background hover:text-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-focus"
         aria-label={copied ? "Copied code" : "Copy code"}
       >
         {copied ? <CheckIcon className="size-3.5" /> : <CopyIcon className="size-3.5" />}
@@ -499,7 +499,7 @@ const jsonClass = (token: string, line: string, index: number) => {
   }
   if (/^(true|false|null)$/i.test(token)) return "text-violet-200";
   if (/^-?\d/.test(token)) return "text-sky-200";
-  return "text-muted-foreground";
+  return "text-muted";
 };
 
 const shellPattern =

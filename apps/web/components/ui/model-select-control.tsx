@@ -83,8 +83,8 @@ export function ModelSelectControl({
         id={id}
         aria-label={ariaLabel}
         className={cn(
-          "flex h-10 w-full min-w-0 items-center justify-between gap-2 rounded-xl border border-input bg-background px-3 text-sm text-foreground shadow-sm outline-none transition-colors",
-          "hover:bg-muted/30 focus-visible:border-ring focus-visible:ring-2 focus-visible:ring-ring/20",
+          "flex h-10 w-full min-w-0 items-center justify-between gap-2 rounded-xl border border-separator bg-background px-3 text-sm text-foreground shadow-sm outline-none transition-colors",
+          "hover:bg-default-hover focus-visible:border-focus focus-visible:ring-2 focus-visible:ring-focus/20",
           "disabled:cursor-not-allowed disabled:opacity-50",
           className,
         )}
@@ -96,19 +96,19 @@ export function ModelSelectControl({
               <span className="flex min-w-0 items-center gap-1.5 truncate text-left">
                 <span className="truncate font-medium text-foreground">{active.label}</span>
                 {active.provider ? (
-                  <span className="shrink-0 text-xs text-muted-foreground">
+                  <span className="shrink-0 text-xs text-muted">
                     · {active.provider}
                   </span>
                 ) : null}
                 {active.suffix ? (
-                  <span className="shrink-0 text-xs text-muted-foreground">· {active.suffix}</span>
+                  <span className="shrink-0 text-xs text-muted">· {active.suffix}</span>
                 ) : null}
               </span>
             ) : null}
           </SelectPrimitive.Value>
         </span>
         <SelectPrimitive.Icon asChild>
-          <ChevronDown aria-hidden="true" className="size-4 shrink-0 text-muted-foreground" />
+          <ChevronDown aria-hidden="true" className="size-4 shrink-0 text-muted" />
         </SelectPrimitive.Icon>
       </SelectPrimitive.Trigger>
 
@@ -118,7 +118,7 @@ export function ModelSelectControl({
           align="start"
           sideOffset={4}
           className={cn(
-            "z-[100] max-h-[min(22rem,var(--radix-select-content-available-height))] w-[var(--radix-select-trigger-width)] overflow-hidden rounded-xl border border-border bg-popover text-popover-foreground shadow-xl",
+            "z-[100] max-h-[min(22rem,var(--radix-select-content-available-height))] w-[var(--radix-select-trigger-width)] overflow-hidden rounded-xl border border-border bg-overlay text-overlay-foreground shadow-xl",
             contentClassName,
           )}
         >
@@ -133,7 +133,7 @@ export function ModelSelectControl({
                 disabled={item.disabled}
                 className={cn(
                   "relative flex w-full cursor-default select-none items-center gap-2.5 rounded-lg py-2 pl-2.5 pr-8 text-sm outline-none",
-                  "focus:bg-accent focus:text-accent-foreground",
+                  "focus:bg-default-hover focus:text-foreground",
                   "data-[disabled]:pointer-events-none data-[disabled]:opacity-50",
                 )}
               >
@@ -147,12 +147,12 @@ export function ModelSelectControl({
                     <span className="truncate font-medium">{item.label}</span>
                   </SelectPrimitive.ItemText>
                   {item.provider ? (
-                    <span className="shrink-0 text-xs text-muted-foreground">
+                    <span className="shrink-0 text-xs text-muted">
                       · {item.provider}
                     </span>
                   ) : null}
                   {item.suffix ? (
-                    <span className="shrink-0 text-xs text-muted-foreground">· {item.suffix}</span>
+                    <span className="shrink-0 text-xs text-muted">· {item.suffix}</span>
                   ) : null}
                 </span>
                 <SelectPrimitive.ItemIndicator className="absolute right-2 inline-flex items-center">

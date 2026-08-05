@@ -1,27 +1,21 @@
 "use client";
 
 import { Timer as ClockCountdown } from "lucide-react";
-import { MoreHorizontal, Search, Trash2 } from "lucide-react";
+import { MoreHorizontal, Trash2 } from "lucide-react";
+import { Button, Card, Dropdown, SearchField } from "@heroui/react";
+import { DataGrid, type DataGridColumn } from "@heroui-pro/react/data-grid";
+import { EmptyState } from "@heroui-pro/react/empty-state";
+import { Segment } from "@heroui-pro/react/segment";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import {
   AdminAlert,
   AdminDrawer,
-  AdminEmptyState,
   AdminPage,
   AdminPageHeader,
   AdminRefreshButton,
   AdminStatusBadge,
 } from "@/components/admin/admin-ui";
 import { TaskConfirmDialog } from "@/components/scheduled-tasks/task-drawer";
-import { Button } from "@/components/ui/button";
-import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuSeparator,
-  DropdownMenuTrigger,
-} from "@/components/ui/dropdown-menu";
-import { SelectControl } from "@/components/ui/select-control";
 import {
   formatDateTime,
   scheduleLabel,
@@ -115,6 +109,34 @@ export default function ScheduledTasksPage() {
     }
   }
 
+  const columns: DataGridColumn<ScheduledTask>[] = [
+    {
+      id: "task",
+      header: "Task",
+      isRowHeader: true,
+      minWidth: 300,
+      cell: (task) => <Button className="h-auto min-w-0 justify-start px-0 py-1 text-left" variant="ghost" onPress={() => view(task)}><span className="min-w-0"><span className="block truncate font-semibold">{task.name}</span><span className="text-muted mt-0.5 block truncate text-xs">{task.prompt}</span></span></Button>,
+    },
+    {
+      id: "owner",
+      header: "Owner",
+      minWidth: 190,
+      cell: (task) => task.owner_user_id ? <span className="min-w-0"><span className="block truncate text-sm font-medium">{task.owner?.name || task.owner?.email || task.owner_user_id}</span>{task.owner?.name && task.owner.email ? <span className="text-muted block truncate text-xs">{task.owner.email}</span> : null}</span> : <AdminStatusBadge tone="amber">Owner required</AdminStatusBadge>,
+    },
+    { id: "schedule", header: "Schedule", minWidth: 150, cell: (task) => <span className="text-muted text-sm">{scheduleLabel(task)}</span> },
+    { id: "next", header: "Next run", minWidth: 170, cell: (task) => <span className="text-muted text-sm tabular-nums">{formatDateTime(task.next_run_at)}</span> },
+    { id: "last", header: "Last result", minWidth: 170, cell: (task) => { const run = latestRun.get(task.id); return run ? <span><span className="block text-sm capitalize">{run.status}</span><span className="text-muted block text-xs tabular-nums">{formatDateTime(run.finished_at || run.created_at)}</span></span> : <span className="text-muted">—</span>; } },
+    { id: "status", header: "Status", width: 130, cell: (task) => <TaskStatus status={task.status} /> },
+    {
+      id: "actions",
+      header: "Actions",
+      align: "center",
+      pinned: "end",
+      width: 80,
+      cell: (task) => <Dropdown><Dropdown.Trigger aria-label={`Actions for ${task.name}`} className="text-muted hover:bg-surface-secondary mx-auto grid size-9 place-items-center rounded-xl"><MoreHorizontal className="size-4" /></Dropdown.Trigger><Dropdown.Popover placement="bottom end"><Dropdown.Menu aria-label={`Actions for ${task.name}`} onAction={(key) => { if (key === "view") view(task); if (key === "delete") setDeleteTarget(task); }}><Dropdown.Item id="view" textValue="View">View details</Dropdown.Item><Dropdown.Item id="delete" textValue="Delete"><Trash2 className="text-danger size-4" /><span className="text-danger">Delete</span></Dropdown.Item></Dropdown.Menu></Dropdown.Popover></Dropdown>,
+    },
+  ];
+
   return (
     <AdminPage className="admin-theme-green">
       <AdminPageHeader
@@ -135,153 +157,12 @@ export default function ScheduledTasksPage() {
 
       {error ? <AdminAlert tone="error">{error}</AdminAlert> : null}
 
-      <div className="flex flex-col gap-3 sm:flex-row sm:items-center">
-        <label className="admin-entity-search">
-          <span className="sr-only">Search scheduled tasks</span>
-          <Search className="size-4" />
-          <input
-            value={query}
-            onChange={(event) => setQuery(event.target.value)}
-            placeholder="Search task, prompt, or owner"
-          />
-        </label>
-        <label>
-          <span className="sr-only">Filter by status</span>
-          <SelectControl
-            value={status}
-            onValueChange={(value) => setStatus(value as StatusFilter)}
-            className="h-10 w-auto min-w-44 rounded-xl border border-input bg-background px-3 text-sm text-foreground outline-none focus:border-ring focus:ring-2 focus:ring-ring/20"
-            options={[
-              { value: "all", label: "All statuses" },
-              { value: "active", label: "Active" },
-              { value: "paused", label: "Paused" },
-              { value: "completed", label: "Completed" },
-              { value: "expired", label: "Expired" },
-              { value: "owner-required", label: "Owner required" },
-            ]}
-            contentClassName="cocola-admin-ui"
-          />
-        </label>
+      <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
+        <SearchField aria-label="Search scheduled tasks" className="w-full lg:max-w-sm" value={query} onChange={setQuery}><SearchField.Group><SearchField.SearchIcon /><SearchField.Input placeholder="Search task, prompt, or owner" /><SearchField.ClearButton /></SearchField.Group></SearchField>
+        <Segment aria-label="Task status filter" selectedKey={status} onSelectionChange={(key) => setStatus(String(key) as StatusFilter)}><Segment.Item id="all">All</Segment.Item><Segment.Item id="active">Active</Segment.Item><Segment.Item id="paused">Paused</Segment.Item><Segment.Item id="completed">Completed</Segment.Item><Segment.Item id="expired">Expired</Segment.Item><Segment.Item id="owner-required">Owner required</Segment.Item></Segment>
       </div>
 
-      <div className="admin-list">
-        {loading ? (
-          <div className="admin-list-empty">Loading tasks…</div>
-        ) : visibleTasks.length === 0 ? (
-          <AdminEmptyState
-            icon={<ClockCountdown className="size-6" />}
-            title={tasks.length ? "No matching tasks" : "No scheduled tasks"}
-            description={
-              tasks.length
-                ? "Try a different search or status filter."
-                : "Tasks created by users will appear here."
-            }
-          />
-        ) : (
-          <div className="admin-list-scroll">
-            <div className="min-w-[960px] lg:min-w-0">
-              <div
-                className="admin-list-cols"
-                style={{
-                  gridTemplateColumns: "2.4fr 1.4fr 1.2fr 1.3fr 1.3fr 0.9fr 56px",
-                }}
-              >
-                <div>Task</div>
-                <div>Owner</div>
-                <div>Schedule</div>
-                <div>Next run</div>
-                <div>Last result</div>
-                <div>Status</div>
-                <div className="text-right">
-                  <span className="sr-only">Actions</span>
-                </div>
-              </div>
-              {visibleTasks.map((task) => {
-                const run = latestRun.get(task.id);
-                return (
-                  <div
-                    key={task.id}
-                    role="button"
-                    tabIndex={0}
-                    onClick={() => view(task)}
-                    onKeyDown={(event) =>
-                      event.target === event.currentTarget && event.key === "Enter" && view(task)
-                    }
-                    className="admin-list-row"
-                    style={{
-                      gridTemplateColumns: "2.4fr 1.4fr 1.2fr 1.3fr 1.3fr 0.9fr 56px",
-                    }}
-                  >
-                    <div className="min-w-0">
-                      <div className="admin-list-primary">{task.name}</div>
-                      <div className="admin-list-sub">{task.prompt}</div>
-                    </div>
-                    <div className="admin-list-cell">
-                      {task.owner_user_id ? (
-                        <>
-                          <div className="admin-list-primary">
-                            {task.owner?.name || task.owner?.email || task.owner_user_id}
-                          </div>
-                          {task.owner?.name && task.owner.email ? (
-                            <div className="admin-list-sub">{task.owner.email}</div>
-                          ) : null}
-                        </>
-                      ) : (
-                        <AdminStatusBadge tone="amber">Owner required</AdminStatusBadge>
-                      )}
-                    </div>
-                    <div className="admin-list-cell admin-list-muted">{scheduleLabel(task)}</div>
-                    <div className="admin-list-cell admin-list-mono">
-                      {formatDateTime(task.next_run_at)}
-                    </div>
-                    <div className="admin-list-cell">
-                      {run ? (
-                        <div>
-                          <span className="capitalize">{run.status}</span>
-                          <div className="admin-list-sub">
-                            {formatDateTime(run.finished_at || run.created_at)}
-                          </div>
-                        </div>
-                      ) : (
-                        <span className="admin-list-muted">—</span>
-                      )}
-                    </div>
-                    <div className="admin-list-cell">
-                      <TaskStatus status={task.status} />
-                    </div>
-                    <div className="flex justify-end" onClick={(event) => event.stopPropagation()}>
-                      <DropdownMenu>
-                        <DropdownMenuTrigger asChild>
-                          <Button
-                            variant="ghost"
-                            size="icon"
-                            aria-label={`Actions for ${task.name}`}
-                          >
-                            <MoreHorizontal className="size-4" />
-                          </Button>
-                        </DropdownMenuTrigger>
-                        <DropdownMenuContent
-                          align="end"
-                          className="cocola-admin-ui rounded-xl border-white/70 bg-popover/95 shadow-xl backdrop-blur-xl"
-                        >
-                          <DropdownMenuItem onSelect={() => view(task)}>View</DropdownMenuItem>
-                          <DropdownMenuSeparator />
-                          <DropdownMenuItem
-                            className="text-destructive focus:text-destructive"
-                            onSelect={() => setDeleteTarget(task)}
-                          >
-                            <Trash2 className="size-4" /> Delete
-                          </DropdownMenuItem>
-                        </DropdownMenuContent>
-                      </DropdownMenu>
-                    </div>
-                  </div>
-                );
-              })}
-            </div>
-          </div>
-        )}
-      </div>
+      <DataGrid aria-label="Scheduled tasks" columns={columns} contentClassName="min-w-[1060px]" data={visibleTasks} getRowId={(task) => task.id} selectionMode="none" variant="primary" renderEmptyState={() => <EmptyState><EmptyState.Header><EmptyState.Media variant="icon"><ClockCountdown className="text-green-500" /></EmptyState.Media><EmptyState.Title>{loading ? "Loading tasks" : tasks.length ? "No matching tasks" : "No scheduled tasks"}</EmptyState.Title><EmptyState.Description>{loading ? "Fetching scheduled work…" : tasks.length ? "Try a different search or status filter." : "Tasks created by users will appear here."}</EmptyState.Description></EmptyState.Header></EmptyState>} />
 
       <AdminDrawer
         open={drawerOpen}
@@ -292,10 +173,10 @@ export default function ScheduledTasksPage() {
         footer={
           selectedTask ? (
             <div className="flex items-center justify-between gap-2">
-              <Button variant="destructive" onClick={() => setDeleteTarget(selectedTask)}>
+              <Button variant="danger-soft" onPress={() => setDeleteTarget(selectedTask)}>
                 <Trash2 className="size-4" /> Delete
               </Button>
-              <Button variant="outline" onClick={() => setDrawerOpen(false)}>
+              <Button variant="outline" onPress={() => setDrawerOpen(false)}>
                 Close
               </Button>
             </div>
@@ -346,11 +227,11 @@ function TaskStatus({ status }: { status: ScheduledTask["status"] }) {
 function TaskDetails({ task, runs }: { task: ScheduledTask; runs: TaskRun[] }) {
   return (
     <div className="space-y-5">
-      <dl className="grid gap-3 rounded-2xl border border-border/70 bg-card/60 p-4 sm:grid-cols-2">
+      <Card className="p-4"><Card.Content className="grid gap-3 p-0 sm:grid-cols-2">
         <Detail label="Owner">
           {task.owner?.name || task.owner?.email || task.owner_user_id || "Owner required"}
           {task.owner?.name && task.owner.email ? (
-            <span className="block text-xs text-muted-foreground">{task.owner.email}</span>
+            <span className="block text-xs text-muted">{task.owner.email}</span>
           ) : null}
         </Detail>
         <Detail label="Status">
@@ -370,11 +251,11 @@ function TaskDetails({ task, runs }: { task: ScheduledTask; runs: TaskRun[] }) {
         <Detail label="Runs">
           <span className="tabular-nums">{task.run_count}</span>
         </Detail>
-      </dl>
+      </Card.Content></Card>
 
       <section>
-        <h3 className="text-xs font-medium text-muted-foreground">Prompt</h3>
-        <p className="mt-2 whitespace-pre-wrap rounded-2xl border border-border/70 bg-muted/25 p-4 text-sm leading-6">
+        <h3 className="text-xs font-medium text-muted">Prompt</h3>
+        <p className="bg-surface-secondary mt-2 whitespace-pre-wrap rounded-2xl p-4 text-sm leading-6">
           {task.prompt}
         </p>
       </section>
@@ -387,8 +268,8 @@ function TaskDetails({ task, runs }: { task: ScheduledTask; runs: TaskRun[] }) {
 
       {task.attachments?.length ? (
         <section>
-          <h3 className="text-xs font-medium text-muted-foreground">Attachments</h3>
-          <div className="mt-2 divide-y divide-border/60 rounded-2xl border border-border/70 bg-card/60 px-4">
+          <h3 className="text-xs font-medium text-muted">Attachments</h3>
+          <div className="mt-2 divide-y divide-border/60 rounded-2xl border border-border/70 bg-surface/60 px-4">
             {task.attachments.map((attachment) => (
               <div key={attachment.id || attachment.filename} className="py-2.5 text-sm">
                 {attachment.filename}
@@ -400,17 +281,17 @@ function TaskDetails({ task, runs }: { task: ScheduledTask; runs: TaskRun[] }) {
 
       {runs.length ? (
         <section>
-          <h3 className="text-xs font-medium text-muted-foreground">Recent runs</h3>
-          <div className="mt-2 divide-y divide-border/60 rounded-2xl border border-border/70 bg-card/60 px-4">
+          <h3 className="text-xs font-medium text-muted">Recent runs</h3>
+          <div className="mt-2 divide-y divide-border/60 rounded-2xl border border-border/70 bg-surface/60 px-4">
             {runs.slice(0, 8).map((run) => (
               <div key={run.id} className="py-3 text-xs">
                 <div className="flex items-center justify-between gap-3">
                   <span className="font-medium capitalize">{run.status}</span>
-                  <span className="text-muted-foreground">
+                  <span className="text-muted">
                     {formatDateTime(run.finished_at || run.started_at || run.created_at)}
                   </span>
                 </div>
-                {run.error ? <p className="mt-1 text-destructive">{run.error}</p> : null}
+                {run.error ? <p className="mt-1 text-danger">{run.error}</p> : null}
               </div>
             ))}
           </div>
@@ -423,7 +304,7 @@ function TaskDetails({ task, runs }: { task: ScheduledTask; runs: TaskRun[] }) {
 function Detail({ label, children }: { label: string; children: React.ReactNode }) {
   return (
     <div className="min-w-0">
-      <dt className="text-xs text-muted-foreground">{label}</dt>
+      <dt className="text-xs text-muted">{label}</dt>
       <dd className="mt-1 break-words text-sm font-medium text-foreground">{children}</dd>
     </div>
   );

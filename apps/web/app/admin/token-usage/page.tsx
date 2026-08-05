@@ -13,11 +13,14 @@ import {
   Tooltip,
   type ChartOptions,
 } from "chart.js";
-import { Download, Loader2, Search, UserRound } from "lucide-react";
+import { Download, Loader2, UserRound } from "lucide-react";
+import { Button, Card, Input, Label, SearchField, TextField } from "@heroui/react";
+import { DataGrid, type DataGridColumn } from "@heroui-pro/react/data-grid";
+import { EmptyState } from "@heroui-pro/react/empty-state";
+import { Segment } from "@heroui-pro/react/segment";
 import { Line } from "react-chartjs-2";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { AdminPage, AdminPageHeader, AdminRefreshButton } from "@/components/admin/admin-ui";
-import { SelectControl } from "@/components/ui/select-control";
 
 ChartJS.register(
   CategoryScale,
@@ -77,10 +80,6 @@ type TokenUsageReport = {
 
 type RangePreset = "24h" | "7d" | "30d" | "90d" | "custom";
 
-const input =
-  "h-9 min-w-0 rounded-md border border-input bg-background px-3 text-sm text-foreground outline-none transition-colors placeholder:text-muted-foreground focus:border-ring focus:ring-1 focus:ring-ring";
-const iconBtn =
-  "inline-flex h-9 items-center justify-center gap-2 rounded-md border border-border bg-background px-3 text-sm text-muted-foreground transition-colors hover:bg-accent hover:text-accent-foreground disabled:pointer-events-none disabled:opacity-50";
 const PAGE_LIMIT = 100;
 
 const chartOptions = {
@@ -241,8 +240,16 @@ export default function AdminTokenUsagePage() {
     }
   };
 
-  const summary = report?.summary ?? emptySummary();
   const activeUser = selectedUser ?? users[0] ?? null;
+
+  const columns: DataGridColumn<TokenUsageUser>[] = [
+    { id: "user", header: "User", isRowHeader: true, minWidth: 260, cell: (user) => <Button className="h-auto min-w-0 justify-start px-0 py-1 text-left" variant="ghost" onPress={() => setSelectedUser(user)}><span className="min-w-0"><span className="block truncate font-semibold">{displayUser(user)}</span><span className="text-muted block truncate font-mono text-xs">{user.user_id}</span></span></Button> },
+    { id: "total", header: "Total", width: 120, align: "end", cell: (user) => <span className="tabular-nums" title={formatNumber(user.total_tokens)}>{compactNumber(user.total_tokens)}</span> },
+    { id: "input", header: "Input", width: 120, align: "end", cell: (user) => <span className="tabular-nums" title={formatNumber(user.prompt_tokens)}>{compactNumber(user.prompt_tokens)}</span> },
+    { id: "output", header: "Output", width: 120, align: "end", cell: (user) => <span className="tabular-nums" title={formatNumber(user.completion_tokens)}>{compactNumber(user.completion_tokens)}</span> },
+    { id: "calls", header: "Calls", width: 100, align: "end", cell: (user) => <span className="tabular-nums" title={formatNumber(user.calls)}>{compactNumber(user.calls)}</span> },
+    { id: "last", header: "Last used", minWidth: 160, cell: (user) => <span className="text-muted text-xs tabular-nums">{user.last_used_at ? formatDateTime(user.last_used_at) : "—"}</span> },
+  ];
 
   return (
     <AdminPage className="admin-theme-rose">
@@ -260,11 +267,12 @@ export default function AdminTokenUsagePage() {
             >
               Refresh
             </AdminRefreshButton>
-            <button
-              className={iconBtn}
-              title="Export Excel"
-              onClick={() => void exportExcel()}
-              disabled={exporting || !report}
+            <Button
+              aria-label="Export Excel"
+              isDisabled={exporting || !report}
+              isPending={exporting}
+              variant="outline"
+              onPress={() => void exportExcel()}
             >
               {exporting ? (
                 <Loader2 className="size-4 animate-spin" />
@@ -272,217 +280,66 @@ export default function AdminTokenUsagePage() {
                 <Download className="size-4" />
               )}
               Export
-            </button>
+            </Button>
           </>
         }
       />
 
-      <section className="admin-surface flex flex-wrap items-end gap-3 p-4">
-        <label className="space-y-1">
-          <span className="text-xs text-muted-foreground">Range</span>
-          <SelectControl
-            className={`${input} w-36`}
-            value={preset}
-            onValueChange={(value) => setPreset(value as RangePreset)}
-            options={[
-              { value: "24h", label: "Last 24 hours" },
-              { value: "7d", label: "Last 7 days" },
-              { value: "30d", label: "Last 30 days" },
-              { value: "90d", label: "Last 90 days" },
-              { value: "custom", label: "Custom" },
-            ]}
-            contentClassName="cocola-admin-ui"
-          />
-        </label>
+      <Card className="p-4"><Card.Content className="flex flex-wrap items-end gap-3 p-0">
+        <div><Label className="mb-2 block text-sm">Range</Label><Segment aria-label="Usage range" selectedKey={preset} onSelectionChange={(key) => setPreset(String(key) as RangePreset)}><Segment.Item id="24h">24h</Segment.Item><Segment.Item id="7d">7d</Segment.Item><Segment.Item id="30d">30d</Segment.Item><Segment.Item id="90d">90d</Segment.Item><Segment.Item id="custom">Custom</Segment.Item></Segment></div>
         {preset === "custom" ? (
           <>
-            <label className="space-y-1">
-              <span className="text-xs text-muted-foreground">From</span>
-              <input
-                className={input}
-                type="date"
-                value={customFrom}
-                onChange={(event) => setCustomFrom(event.target.value)}
-              />
-            </label>
-            <label className="space-y-1">
-              <span className="text-xs text-muted-foreground">To</span>
-              <input
-                className={input}
-                type="date"
-                value={customTo}
-                onChange={(event) => setCustomTo(event.target.value)}
-              />
-            </label>
+            <TextField value={customFrom} variant="secondary" onChange={setCustomFrom}><Label>From</Label><Input type="date" /></TextField>
+            <TextField value={customTo} variant="secondary" onChange={setCustomTo}><Label>To</Label><Input type="date" /></TextField>
           </>
         ) : null}
-        <div className="ml-auto text-xs text-muted-foreground">
+        <div className="text-muted ml-auto text-xs">
           {report ? `${formatDateTime(report.from)} - ${formatDateTime(report.to)}` : ""}
         </div>
-      </section>
+      </Card.Content></Card>
 
       {error ? (
-        <div className="rounded-md border border-destructive/30 bg-destructive/10 px-3 py-2 text-sm text-destructive">
+        <div className="rounded-md border border-danger/30 bg-danger/10 px-3 py-2 text-sm text-danger">
           {error}
         </div>
       ) : null}
 
-      <section className="grid gap-3 md:grid-cols-5">
-        <Metric
-          label="Total Tokens"
-          value={compactNumber(summary.total_tokens)}
-          title={formatNumber(summary.total_tokens)}
-        />
-        <Metric
-          label="Input Tokens"
-          value={compactNumber(summary.prompt_tokens)}
-          title={formatNumber(summary.prompt_tokens)}
-        />
-        <Metric
-          label="Output Tokens"
-          value={compactNumber(summary.completion_tokens)}
-          title={formatNumber(summary.completion_tokens)}
-        />
-        <Metric
-          label="Calls"
-          value={compactNumber(summary.calls)}
-          title={formatNumber(summary.calls)}
-        />
-        <Metric label="Users" value={formatNumber(summary.user_count)} />
-      </section>
-
-      <section className="admin-surface">
-        <div className="admin-surface-head">
-          <div>
-            <div className="admin-surface-title">Usage Trend</div>
-            <div className="admin-surface-sub">Bucket: {report?.bucket ?? "auto"}</div>
-          </div>
-          {loading ? <Loader2 className="size-4 animate-spin text-muted-foreground" /> : null}
-        </div>
+      <Card className="p-0">
+        <Card.Header className="flex-row items-center justify-between p-5">
+          <span><Card.Title>Usage trend</Card.Title><Card.Description>Bucket: {report?.bucket ?? "auto"}</Card.Description></span>
+          {loading ? <Loader2 className="size-4 animate-spin text-muted" /> : null}
+        </Card.Header>
         <div className="h-[340px] p-4">
           {report && report.trend.length > 0 ? (
             <Line data={chartData(report.trend, report.bucket)} options={chartOptions} />
           ) : (
-            <EmptyState label={loading ? "Loading usage trend" : "No usage in this range"} />
+            <ChartEmptyState label={loading ? "Loading usage trend" : "No usage in this range"} />
           )}
         </div>
-      </section>
+      </Card>
 
       <section className="grid gap-5 xl:grid-cols-[minmax(0,1.15fr)_minmax(360px,0.85fr)]">
-        <div className="admin-surface">
-          <div className="admin-surface-head flex-col gap-3 md:flex-row md:items-center">
-            <div className="min-w-0 flex-1">
-              <div className="admin-surface-title">Users</div>
-              <div className="admin-surface-sub">Sorted by total token usage</div>
-            </div>
-            <label className="relative block w-full md:w-72">
-              <Search className="pointer-events-none absolute left-2 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
-              <input
-                className={`${input} w-full pl-8`}
-                placeholder="Filter users"
-                value={filter}
-                onChange={(event) => setFilter(event.target.value)}
-              />
-            </label>
-          </div>
-          <div className="overflow-x-auto">
-            <table className="w-full min-w-[760px] text-left text-sm">
-              <thead className="border-b border-border/60">
-                <tr>
-                  <th className="admin-surface-th">User</th>
-                  <th className="admin-surface-th text-right">Total</th>
-                  <th className="admin-surface-th text-right">Input</th>
-                  <th className="admin-surface-th text-right">Output</th>
-                  <th className="admin-surface-th text-right">Calls</th>
-                  <th className="admin-surface-th">Last Used</th>
-                </tr>
-              </thead>
-              <tbody>
-                {users.map((user) => {
-                  const active = activeUser?.user_id === user.user_id;
-                  return (
-                    <tr
-                      key={user.user_id}
-                      onClick={() => setSelectedUser(user)}
-                      className="admin-surface-row border-b border-border/50"
-                      data-active={active}
-                    >
-                      <td className="px-4 py-3">
-                        <div className="font-medium">{displayUser(user)}</div>
-                        <div className="text-xs text-muted-foreground">{user.user_id}</div>
-                      </td>
-                      <td
-                        className="px-4 py-3 text-right tabular-nums"
-                        title={formatNumber(user.total_tokens)}
-                      >
-                        {compactNumber(user.total_tokens)}
-                      </td>
-                      <td
-                        className="px-4 py-3 text-right tabular-nums"
-                        title={formatNumber(user.prompt_tokens)}
-                      >
-                        {compactNumber(user.prompt_tokens)}
-                      </td>
-                      <td
-                        className="px-4 py-3 text-right tabular-nums"
-                        title={formatNumber(user.completion_tokens)}
-                      >
-                        {compactNumber(user.completion_tokens)}
-                      </td>
-                      <td
-                        className="px-4 py-3 text-right tabular-nums"
-                        title={formatNumber(user.calls)}
-                      >
-                        {compactNumber(user.calls)}
-                      </td>
-                      <td className="px-4 py-3 text-xs text-muted-foreground">
-                        {user.last_used_at ? formatDateTime(user.last_used_at) : "-"}
-                      </td>
-                    </tr>
-                  );
-                })}
-                {users.length === 0 ? (
-                  <tr>
-                    <td className="px-4 py-8 text-center text-sm text-muted-foreground" colSpan={6}>
-                      {loading ? "Loading users" : "No users in this range"}
-                    </td>
-                  </tr>
-                ) : null}
-              </tbody>
-            </table>
-          </div>
-        </div>
+        <Card className="min-w-0 overflow-hidden p-0"><Card.Header className="flex-row items-center justify-between gap-4 p-5"><span><Card.Title>Users</Card.Title><Card.Description>Sorted by total token usage</Card.Description></span><SearchField aria-label="Filter users" className="w-full max-w-72" value={filter} onChange={setFilter}><SearchField.Group><SearchField.SearchIcon /><SearchField.Input placeholder="Filter users" /><SearchField.ClearButton /></SearchField.Group></SearchField></Card.Header><Card.Content className="p-0"><DataGrid aria-label="Token usage by user" columns={columns} contentClassName="min-w-[820px]" data={users} getRowId={(user) => user.user_id} selectionMode="none" variant="primary" renderEmptyState={() => <EmptyState><EmptyState.Header><EmptyState.Media variant="icon"><UserRound className="text-rose-500" /></EmptyState.Media><EmptyState.Title>{loading ? "Loading users" : "No users in this range"}</EmptyState.Title><EmptyState.Description>Usage will appear after users complete model calls.</EmptyState.Description></EmptyState.Header></EmptyState>} /></Card.Content></Card>
 
-        <aside className="admin-surface">
-          <div className="admin-surface-head">
+        <Card className="p-0">
+          <Card.Header className="flex-row items-center justify-between p-5">
             <div className="flex min-w-0 items-center gap-3">
               <div className="admin-page-icon">
                 <UserRound className="size-4" />
               </div>
               <div className="min-w-0">
-                <h2 className="admin-surface-title truncate">
+                <Card.Title className="truncate">
                   {activeUser ? displayUser(activeUser) : "No user selected"}
-                </h2>
-                <p className="admin-surface-sub truncate">
+                </Card.Title>
+                <Card.Description className="truncate">
                   {activeUser?.email || activeUser?.user_id || "Select a user"}
-                </p>
+                </Card.Description>
               </div>
             </div>
-            {userLoading ? <Loader2 className="size-4 animate-spin text-muted-foreground" /> : null}
-          </div>
-          <div className="space-y-4 p-4">
-            <div className="grid grid-cols-2 gap-3">
-              <Metric
-                label="User Tokens"
-                value={compactNumber(userReport?.summary.total_tokens ?? 0)}
-                title={formatNumber(userReport?.summary.total_tokens ?? 0)}
-              />
-              <Metric
-                label="User Calls"
-                value={compactNumber(userReport?.summary.calls ?? 0)}
-                title={formatNumber(userReport?.summary.calls ?? 0)}
-              />
-            </div>
+            {userLoading ? <Loader2 className="size-4 animate-spin text-muted" /> : null}
+          </Card.Header>
+          <Card.Content className="space-y-4 p-5 pt-0">
+            <div className="bg-surface-secondary flex items-center justify-between rounded-2xl px-4 py-3 text-sm"><span><span className="text-muted block text-xs">Tokens</span><strong className="tabular-nums" title={formatNumber(userReport?.summary.total_tokens ?? 0)}>{compactNumber(userReport?.summary.total_tokens ?? 0)}</strong></span><span className="text-right"><span className="text-muted block text-xs">Calls</span><strong className="tabular-nums" title={formatNumber(userReport?.summary.calls ?? 0)}>{compactNumber(userReport?.summary.calls ?? 0)}</strong></span></div>
             <div className="h-[260px]">
               {userReport && userReport.trend.length > 0 ? (
                 <Line
@@ -490,30 +347,19 @@ export default function AdminTokenUsagePage() {
                   options={chartOptions}
                 />
               ) : (
-                <EmptyState label={activeUser ? "No user trend data" : "Select a user"} />
+                <ChartEmptyState label={activeUser ? "No user trend data" : "Select a user"} />
               )}
             </div>
-          </div>
-        </aside>
+          </Card.Content>
+        </Card>
       </section>
     </AdminPage>
   );
 }
 
-function Metric({ label, value, title }: { label: string; value: string; title?: string }) {
+function ChartEmptyState({ label }: { label: string }) {
   return (
-    <div className="admin-metric-card" data-tone="rose">
-      <div className="admin-metric-key">{label}</div>
-      <div className="admin-metric-val truncate" title={title}>
-        {value}
-      </div>
-    </div>
-  );
-}
-
-function EmptyState({ label }: { label: string }) {
-  return (
-    <div className="grid h-full place-items-center rounded-md border border-dashed border-border text-sm text-muted-foreground">
+    <div className="grid h-full place-items-center rounded-md border border-dashed border-border text-sm text-muted">
       {label}
     </div>
   );
@@ -549,17 +395,6 @@ function chartData(points: TokenUsagePoint[], bucket: "hour" | "day") {
         pointRadius: 2,
       },
     ],
-  };
-}
-
-function emptySummary(): TokenUsageSummary {
-  return {
-    calls: 0,
-    user_count: 0,
-    prompt_tokens: 0,
-    completion_tokens: 0,
-    total_tokens: 0,
-    cost_usd: 0,
   };
 }
 

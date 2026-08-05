@@ -99,20 +99,20 @@ const PLAN_STATUS_VIEW: Record<
   },
   superseded: {
     icon: RotateCcw,
-    badge: "border-border bg-muted text-muted-foreground",
-    accent: "bg-muted-foreground/35",
+    badge: "border-border bg-surface-secondary text-muted",
+    accent: "bg-foreground/35",
     frame: "border-border",
-    header: "bg-muted/25",
-    iconFrame: "bg-muted text-muted-foreground",
+    header: "bg-surface-secondary/25",
+    iconFrame: "bg-surface-secondary text-muted",
     notice: PLAN_GATE_COPY.supersededNotice,
   },
   cancelled: {
     icon: Ban,
-    badge: "border-border bg-muted text-muted-foreground",
-    accent: "bg-muted-foreground/35",
+    badge: "border-border bg-surface-secondary text-muted",
+    accent: "bg-foreground/35",
     frame: "border-border",
-    header: "bg-muted/25",
-    iconFrame: "bg-muted text-muted-foreground",
+    header: "bg-surface-secondary/25",
+    iconFrame: "bg-surface-secondary text-muted",
     notice: PLAN_GATE_COPY.cancelledNotice,
   },
 };
@@ -200,7 +200,7 @@ export const PlanCardPart: FC<
   return (
     <section
       aria-labelledby={planTitleId}
-      className={cn("relative my-4 overflow-hidden rounded-2xl border bg-card", statusView.frame)}
+      className={cn("relative my-4 overflow-hidden rounded-2xl border bg-surface", statusView.frame)}
     >
       <div className={cn("absolute inset-y-0 left-0 w-1", statusView.accent)} aria-hidden="true" />
       <div
@@ -228,7 +228,7 @@ export const PlanCardPart: FC<
             >
               Plan v{data.version}
             </h3>
-            <p className="mt-1 text-xs leading-5 text-muted-foreground">{statusView.notice}</p>
+            <p className="mt-1 text-xs leading-5 text-muted">{statusView.notice}</p>
           </div>
         </div>
         <div className="flex shrink-0 items-center gap-1.5 self-start">
@@ -256,7 +256,7 @@ export const PlanCardPart: FC<
               onClick={() => setExpanded((value) => !value)}
               aria-label={expanded ? PLAN_GATE_COPY.hidePlan : PLAN_GATE_COPY.showPlan}
               aria-expanded={expanded}
-              className="size-8 rounded-full p-0 text-muted-foreground hover:bg-background/80 hover:text-foreground"
+              className="size-8 rounded-full p-0 text-muted hover:bg-background/80 hover:text-foreground"
             >
               {expanded ? <ChevronUp className="size-4" /> : <ChevronDown className="size-4" />}
             </TooltipIconButton>
@@ -275,7 +275,7 @@ export const PlanCardPart: FC<
                 aria-busy={pendingAction === "cancel"}
                 disabled={pendingAction === "cancel"}
                 className={cn(
-                  "grid size-8 place-items-center rounded-full text-muted-foreground transition-colors hover:bg-background/80 hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
+                  "grid size-8 place-items-center rounded-full text-muted transition-colors hover:bg-background/80 hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus",
                   copied && "text-emerald-600",
                 )}
               >
@@ -327,21 +327,21 @@ export const PlanCardPart: FC<
       {error ? (
         <div
           role="alert"
-          className="border-t border-destructive/15 bg-destructive/[0.045] px-5 py-3 text-xs text-destructive sm:px-6"
+          className="border-t border-danger/15 bg-danger/[0.045] px-5 py-3 text-xs text-danger sm:px-6"
         >
           {error}
         </div>
       ) : null}
       {hasDecisionFooter ? (
-        <div className="flex flex-col gap-3 border-t border-border/70 bg-muted/20 px-5 py-4 sm:flex-row sm:items-center sm:justify-between sm:px-6">
-          <p className="max-w-md text-xs leading-5 text-muted-foreground">{footerNotice}</p>
+        <div className="flex flex-col gap-3 border-t border-border/70 bg-surface-secondary/20 px-5 py-4 sm:flex-row sm:items-center sm:justify-between sm:px-6">
+          <p className="max-w-md text-xs leading-5 text-muted">{footerNotice}</p>
           <div className="flex w-full flex-col-reverse gap-2 sm:w-auto sm:flex-row">
             {status !== "failed" ? (
               <button
                 type="button"
                 disabled={busy || isRunning || isRevising || questionInputLocked}
                 onClick={revise}
-                className="inline-flex h-10 w-full items-center justify-center gap-2 rounded-xl border border-border bg-background px-4 text-sm font-semibold text-foreground transition-colors hover:bg-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:cursor-not-allowed disabled:opacity-50 sm:w-auto"
+                className="inline-flex h-10 w-full items-center justify-center gap-2 rounded-xl border border-border bg-background px-4 text-sm font-semibold text-foreground transition-colors hover:bg-surface-secondary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus disabled:cursor-not-allowed disabled:opacity-50 sm:w-auto"
               >
                 <RotateCcw className="size-4" aria-hidden="true" />
                 {status === "ready" ? PLAN_ACTION_LABELS.revise : PLAN_ACTION_LABELS.replan}

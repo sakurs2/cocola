@@ -8,7 +8,6 @@ import {
   Box,
   BrainCircuit,
   CheckCircle2,
-  ChevronRight,
   Clock3,
   Database,
   Hammer,
@@ -17,11 +16,11 @@ import {
 } from "lucide-react";
 import Link from "next/link";
 import { useParams } from "next/navigation";
-import { useCallback, useEffect, useMemo, useState, type ReactNode } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
+import { Button, Card } from "@heroui/react";
 import {
   AdminAlert,
   AdminDrawer,
-  AdminMetric,
   AdminPage,
   AdminPageHeader,
   AdminRefreshButton,
@@ -114,7 +113,13 @@ export default function AdminTracePage() {
   }, [load, run?.status]);
 
   const timeline = useMemo(() => timelineStats(run, spans), [run, spans]);
-  const traceTree = useMemo(() => buildSpanTree(spans), [spans]);
+  const orderedSpans = useMemo(() => {
+    const latest = new Map<string, TraceSpan>();
+    for (const span of spans) latest.set(span.span_id, span);
+    return [...latest.values()].sort(
+      (left, right) => Date.parse(left.started_at) - Date.parse(right.started_at),
+    );
+  }, [spans]);
 
   return (
     <AdminPage className="admin-theme-indigo">
@@ -133,7 +138,7 @@ export default function AdminTracePage() {
         }
       />
 
-      <div className="flex flex-wrap items-center gap-x-5 gap-y-2 text-sm text-muted-foreground">
+      <div className="flex flex-wrap items-center gap-x-5 gap-y-2 text-sm text-muted">
         <Link
           href="/admin/audit"
           className="inline-flex items-center gap-1.5 hover:text-foreground"
@@ -146,7 +151,7 @@ export default function AdminTracePage() {
         {run?.conversation_id ? (
           <Link
             href={`/conversations/${encodeURIComponent(run.conversation_id)}`}
-            className="font-mono text-xs text-primary hover:underline"
+            className="font-mono text-xs text-accent hover:underline"
           >
             Open conversation
           </Link>
@@ -169,81 +174,88 @@ export default function AdminTracePage() {
         </AdminAlert>
       ) : null}
 
-      <section className="grid gap-3 sm:grid-cols-2 xl:grid-cols-5">
-        <AdminMetric
-          icon={<TimerReset className="size-4" />}
-          label="Total"
-          value={formatDurationMS(run?.duration_ms ?? timeline.totalMs)}
-          tone="sky"
-        />
-        <AdminMetric
-          icon={<Clock3 className="size-4" />}
-          label="Time to first token"
-          value={formatDurationMS(run?.ttft_ms ?? 0)}
-        />
-        <AdminMetric
-          icon={<BrainCircuit className="size-4" />}
-          label="Model calls"
-          value={run?.llm_call_count ?? countCategory(spans, "model")}
-          tone="violet"
-        />
-        <AdminMetric
-          icon={<Hammer className="size-4" />}
-          label="Tool calls"
-          value={run?.tool_call_count ?? countCategory(spans, "tool")}
-          tone="amber"
-        />
-        <AdminMetric
-          icon={<Database className="size-4" />}
-          label="Tokens"
-          value={formatNumber((run?.input_tokens ?? 0) + (run?.output_tokens ?? 0))}
-          detail={`${formatNumber(run?.input_tokens ?? 0)} in · ${formatNumber(run?.output_tokens ?? 0)} out`}
-          tone="green"
-        />
-      </section>
-
-      <section className="grid min-h-[38rem] overflow-hidden rounded-2xl border border-border/80 bg-card/80 shadow-[0_18px_55px_-42px_rgba(37,99,235,0.45)] lg:grid-cols-[21rem_minmax(0,1fr)]">
-        <div className="min-w-0 border-border/70 lg:border-r">
-          <div className="flex min-h-14 items-center justify-between border-b border-border/70 px-4 sm:px-5">
+      <section className="grid items-start gap-4 lg:grid-cols-[minmax(0,1.65fr)_minmax(18rem,0.75fr)]">
+        <Card className="p-5 sm:p-6">
+          <Card.Header className="flex items-start justify-between gap-4 p-0">
             <div>
-              <h2 className="text-xs font-semibold uppercase tracking-[0.16em]">Trace</h2>
-              <p className="text-xs text-muted-foreground">{uniqueSpanCount(spans)} spans</p>
+              <Card.Title>Trace timeline</Card.Title>
+              <Card.Description>Ordered runtime events for this run.</Card.Description>
             </div>
             {run?.status === "running" ? (
-              <span className="inline-flex items-center gap-2 text-xs text-primary">
+              <span className="text-accent inline-flex items-center gap-2 text-xs">
                 <Loader2 className="size-3.5 animate-spin" /> Live
               </span>
             ) : (
-              <span className="inline-flex items-center gap-2 text-xs text-muted-foreground">
-                <CheckCircle2 className="size-3.5" /> Complete
+              <span className="text-muted inline-flex items-center gap-2 text-xs">
+                <CheckCircle2 className="size-3.5" /> {orderedSpans.length} events
               </span>
             )}
-          </div>
+          </Card.Header>
+          <Card.Content className="mt-6 p-0">
+            {orderedSpans.length ? (
+              <ol>
+                {orderedSpans.map((span, index) => {
+                  const key = moduleKey(span.category);
+                  const Icon = moduleIcon(key);
+                  return (
+                    <li key={span.span_id} className="relative flex gap-3 pb-1 last:pb-0">
+                      {index < orderedSpans.length - 1 ? (
+                        <span className="bg-separator absolute bottom-0 left-[1.25rem] top-10 w-px" />
+                      ) : null}
+                      <Button
+                        variant="ghost"
+                        className="hover:bg-surface-secondary relative z-10 h-auto w-full justify-start gap-3 rounded-2xl px-2 py-3 text-left"
+                        onPress={() => {
+                          setSelected(span);
+                          setInspectorOpen(true);
+                        }}
+                      >
+                        <span className={cn("grid size-9 shrink-0 place-items-center rounded-xl", moduleTone(key))}>
+                          <Icon className="size-4" />
+                        </span>
+                        <span className="flex min-w-0 flex-1 items-start justify-between gap-4">
+                          <span className="min-w-0">
+                            <span className="flex items-center gap-2">
+                              <span className={cn("size-1.5 shrink-0 rounded-full", statusDot(span.status))} />
+                              <span className="truncate text-sm font-medium">{humanize(span.name)}</span>
+                            </span>
+                            <span className="text-muted mt-1 block truncate font-mono text-[11px]">
+                              {span.service} · {formatDurationUS(span.duration_us)}
+                            </span>
+                          </span>
+                          <span className="text-muted shrink-0 text-xs tabular-nums">
+                            {formatTime(span.started_at)}
+                          </span>
+                        </span>
+                      </Button>
+                    </li>
+                  );
+                })}
+              </ol>
+            ) : (
+              <div className="text-muted flex min-h-52 items-center justify-center text-sm">
+                {loading ? "Loading trace…" : "No detailed spans were recorded."}
+              </div>
+            )}
+          </Card.Content>
+        </Card>
 
-          {traceTree.length ? (
-            <div className="max-h-[42rem] divide-y divide-border/60 overflow-y-auto">
-              {traceTree.map((node) => (
-                <TraceTreeNode
-                  key={node.span.span_id}
-                  node={node}
-                  selectedID={selected?.span_id}
-                  onSelect={(span) => {
-                    setSelected(span);
-                    if (!window.matchMedia("(min-width: 1024px)").matches) setInspectorOpen(true);
-                  }}
-                />
-              ))}
-            </div>
-          ) : (
-            <div className="flex min-h-72 items-center justify-center px-6 text-sm text-muted-foreground">
-              {loading ? "Loading trace…" : "No detailed spans were recorded."}
-            </div>
-          )}
-        </div>
-
-        <aside className="hidden min-w-0 bg-background/35 lg:block">
-          <SpanInspector span={selected} run={run} timeline={timeline} />
-        </aside>
+        <Card className="p-5 sm:p-6">
+          <Card.Header className="p-0">
+            <Card.Title>Run context</Card.Title>
+            <Card.Description>Execution summary from Cocola.</Card.Description>
+          </Card.Header>
+          <Card.Content className="mt-5 space-y-3 p-0">
+            <TraceContextRow label="Source" value={run?.source === "scheduled_task" ? "Scheduled task" : "Interactive"} />
+            <TraceContextRow label="Model" value={run?.model_alias || "Default model"} />
+            <TraceContextRow label="Duration" value={formatDurationMS(run?.duration_ms ?? timeline.totalMs)} />
+            <TraceContextRow label="First token" value={formatDurationMS(run?.ttft_ms ?? 0)} />
+            <TraceContextRow label="Model calls" value={String(run?.llm_call_count ?? countCategory(spans, "model"))} />
+            <TraceContextRow label="Tool calls" value={String(run?.tool_call_count ?? countCategory(spans, "tool"))} />
+            <TraceContextRow label="Tokens" value={`${formatNumber(run?.input_tokens ?? 0)} in · ${formatNumber(run?.output_tokens ?? 0)} out`} />
+            <TraceContextRow label="Trace ID" value={traceId} mono />
+          </Card.Content>
+        </Card>
       </section>
 
       <AdminDrawer
@@ -256,94 +268,6 @@ export default function AdminTracePage() {
         <SpanInspector span={selected} run={run} timeline={timeline} embedded />
       </AdminDrawer>
     </AdminPage>
-  );
-}
-
-type TraceNode = { span: TraceSpan; children: TraceNode[] };
-
-function TraceTreeNode({
-  node,
-  selectedID,
-  onSelect,
-  depth = 0,
-}: {
-  node: TraceNode;
-  selectedID?: string;
-  onSelect: (span: TraceSpan) => void;
-  depth?: number;
-}) {
-  const key = moduleKey(node.span.category);
-  const Icon = moduleIcon(key);
-  const hasChildren = node.children.length > 0;
-  const [expanded, setExpanded] = useState(true);
-  return (
-    <div
-      className={cn(
-        depth > 0 &&
-          "relative before:absolute before:bottom-0 before:left-0 before:top-0 before:w-px before:bg-border/70",
-      )}
-      style={depth > 0 ? { paddingLeft: 18, marginLeft: 18 } : undefined}
-    >
-      <div
-        className={cn(
-          "flex items-center py-2 pr-3 transition-colors hover:bg-muted/35",
-          selectedID === node.span.span_id && "bg-primary/[0.07]",
-        )}
-        style={{ paddingLeft: depth === 0 ? 12 : 2 }}
-      >
-        <button
-          type="button"
-          className="flex size-7 shrink-0 items-center justify-center rounded-md text-muted-foreground hover:bg-background disabled:opacity-25"
-          onClick={() => setExpanded((current) => !current)}
-          aria-label={
-            expanded ? `Collapse ${humanize(node.span.name)}` : `Expand ${humanize(node.span.name)}`
-          }
-          aria-expanded={expanded}
-          disabled={!hasChildren}
-        >
-          <ChevronRight className={cn("size-3.5 transition-transform", expanded && "rotate-90")} />
-        </button>
-        <button
-          type="button"
-          className="flex min-w-0 flex-1 items-center gap-2.5 text-left"
-          onClick={() => onSelect(node.span)}
-        >
-          <span
-            className={cn(
-              "flex size-8 shrink-0 items-center justify-center rounded-lg",
-              moduleTone(key),
-            )}
-          >
-            <Icon className="size-3.5" />
-          </span>
-          <span className="min-w-0 flex-1">
-            <span className="flex items-center gap-2">
-              <span className={cn("size-1.5 shrink-0 rounded-full", statusDot(node.span.status))} />
-              <span className="truncate text-sm font-medium">{humanize(node.span.name)}</span>
-            </span>
-            <span className="mt-0.5 block truncate font-mono text-[10px] text-muted-foreground">
-              {node.span.service}
-            </span>
-          </span>
-          <span className="ml-2 shrink-0 font-mono text-[11px] tabular-nums text-muted-foreground">
-            {formatDurationUS(node.span.duration_us)}
-          </span>
-        </button>
-      </div>
-      {expanded && hasChildren ? (
-        <div>
-          {node.children.map((child) => (
-            <TraceTreeNode
-              key={child.span.span_id}
-              node={child}
-              selectedID={selectedID}
-              onSelect={onSelect}
-              depth={depth + 1}
-            />
-          ))}
-        </div>
-      ) : null}
-    </div>
   );
 }
 
@@ -363,7 +287,7 @@ function SpanInspector({
     return (
       <div
         className={cn(
-          "flex min-h-72 items-center justify-center p-6 text-center text-sm text-muted-foreground",
+          "flex min-h-72 items-center justify-center p-6 text-center text-sm text-muted",
           !embedded && "sticky top-0",
         )}
       >
@@ -383,7 +307,7 @@ function SpanInspector({
                   {humanize(span.name)}
                 </h2>
               </div>
-              <p className="mt-1 truncate font-mono text-[11px] text-muted-foreground">
+              <p className="mt-1 truncate font-mono text-[11px] text-muted">
                 {span.span_id}
               </p>
             </div>
@@ -418,14 +342,14 @@ function SpanInspector({
               {run?.conversation_id ? (
                 <Link
                   href={`/conversations/${encodeURIComponent(run.conversation_id)}`}
-                  className="text-sm font-medium text-primary hover:underline"
+                  className="text-sm font-medium text-accent hover:underline"
                 >
                   Open conversation
                 </Link>
               ) : null}
               <Link
                 href={`/admin/logs?trace_id=${encodeURIComponent(span.trace_id)}`}
-                className="text-sm font-medium text-primary hover:underline"
+                className="text-sm font-medium text-accent hover:underline"
               >
                 View related component logs
               </Link>
@@ -440,34 +364,37 @@ function SpanInspector({
   );
 }
 
-function InspectorTab({
-  active,
-  onClick,
-  children,
-}: {
-  active: boolean;
-  onClick: () => void;
-  children: ReactNode;
-}) {
+function InspectorTab({ active, onClick, children }: { active: boolean; onClick: () => void; children: string }) {
   return (
-    <button
-      type="button"
-      onClick={onClick}
+    <Button
+      variant="ghost"
+      onPress={onClick}
       className={cn(
-        "relative pb-3 text-sm font-medium text-muted-foreground transition-colors hover:text-foreground",
+        "relative h-auto min-w-0 rounded-none px-0 pb-3 text-sm font-medium text-muted hover:bg-transparent hover:text-foreground",
         active &&
-          "text-primary after:absolute after:inset-x-0 after:-bottom-px after:h-0.5 after:bg-primary",
+          "text-accent after:absolute after:inset-x-0 after:-bottom-px after:h-0.5 after:bg-accent",
       )}
     >
       {children}
-    </button>
+    </Button>
+  );
+}
+
+function TraceContextRow({ label, value, mono = false }: { label: string; value: string; mono?: boolean }) {
+  return (
+    <div className="bg-surface-secondary flex items-start justify-between gap-4 rounded-2xl px-4 py-3">
+      <span className="text-muted text-xs">{label}</span>
+      <span className={cn("min-w-0 break-all text-right text-sm font-medium", mono && "font-mono text-xs")}>
+        {value || "—"}
+      </span>
+    </div>
   );
 }
 
 function InspectorMetric({ label, value }: { label: string; value: string }) {
   return (
-    <div className="rounded-xl border border-border/70 bg-card/75 px-4 py-3">
-      <div className="text-xs text-muted-foreground">{label}</div>
+    <div className="rounded-xl border border-border/70 bg-surface/75 px-4 py-3">
+      <div className="text-xs text-muted">{label}</div>
       <div className="mt-1 font-mono text-sm font-medium tabular-nums">{value}</div>
     </div>
   );
@@ -477,20 +404,20 @@ function SafeAttributes({ attributes }: { attributes?: Record<string, unknown> }
   const entries = Object.entries(attributes ?? {});
   if (!entries.length) {
     return (
-      <div className="rounded-xl border border-dashed border-border px-5 py-10 text-center text-sm text-muted-foreground">
+      <div className="rounded-xl border border-dashed border-border px-5 py-10 text-center text-sm text-muted">
         This span has no additional safe metadata.
       </div>
     );
   }
   return (
     <div>
-      <h3 className="text-xs font-semibold uppercase tracking-[0.12em] text-muted-foreground">
+      <h3 className="text-xs font-semibold uppercase tracking-[0.12em] text-muted">
         Safe metadata
       </h3>
       <dl className="mt-3 grid gap-3 xl:grid-cols-2">
         {entries.map(([key, value]) => (
-          <div key={key} className="rounded-xl border border-border/70 bg-card/75 px-4 py-3">
-            <dt className="font-mono text-[11px] text-muted-foreground">{key}</dt>
+          <div key={key} className="rounded-xl border border-border/70 bg-surface/75 px-4 py-3">
+            <dt className="font-mono text-[11px] text-muted">{key}</dt>
             <dd className="mt-1 break-words text-sm">{formatAttribute(value)}</dd>
           </div>
         ))}
@@ -510,7 +437,7 @@ function InspectorRow({
 }) {
   return (
     <>
-      <dt className="text-muted-foreground">{label}</dt>
+      <dt className="text-muted">{label}</dt>
       <dd className={cn("min-w-0 break-all", mono && "font-mono text-xs")}>{value || "—"}</dd>
     </>
   );
@@ -530,37 +457,6 @@ function RunBadge({ status }: { status: string }) {
       {status}
     </AdminStatusBadge>
   );
-}
-
-function buildSpanTree(spans: TraceSpan[]) {
-  const latest = new Map<string, TraceSpan>();
-  for (const span of spans) latest.set(span.span_id, span);
-  const nodes = new Map<string, TraceNode>();
-  for (const span of latest.values()) nodes.set(span.span_id, { span, children: [] });
-
-  const roots: TraceNode[] = [];
-  for (const node of nodes.values()) {
-    const parent = node.span.parent_span_id ? nodes.get(node.span.parent_span_id) : undefined;
-    if (parent && parent !== node) parent.children.push(node);
-    else roots.push(node);
-  }
-  const sortNodes = (rows: TraceNode[]) => {
-    rows.sort(
-      (left, right) => Date.parse(left.span.started_at) - Date.parse(right.span.started_at),
-    );
-    for (const row of rows) sortNodes(row.children);
-  };
-  sortNodes(roots);
-  roots.sort((left, right) => {
-    if (left.span.name === "conversation.run") return -1;
-    if (right.span.name === "conversation.run") return 1;
-    return Date.parse(left.span.started_at) - Date.parse(right.span.started_at);
-  });
-  return roots;
-}
-
-function uniqueSpanCount(spans: TraceSpan[]) {
-  return new Set(spans.map((span) => span.span_id)).size;
 }
 
 function moduleKey(category: string) {
@@ -614,9 +510,9 @@ function countCategory(spans: TraceSpan[], category: string) {
 }
 
 function statusDot(status: string) {
-  if (status === "error" || status === "interrupted") return "bg-destructive";
+  if (status === "error" || status === "interrupted") return "bg-danger";
   if (status === "cancelled") return "bg-amber-500";
-  if (status === "running") return "animate-pulse bg-primary";
+  if (status === "running") return "animate-pulse bg-accent";
   return "bg-emerald-500";
 }
 

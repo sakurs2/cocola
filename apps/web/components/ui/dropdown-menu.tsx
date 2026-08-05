@@ -4,7 +4,6 @@ import * as React from "react";
 import * as DropdownMenuPrimitive from "@radix-ui/react-dropdown-menu";
 import { cn } from "@/lib/utils";
 
-// shadcn-style dropdown menu, authored against the design tokens in app/globals.css.
 const DropdownMenu = DropdownMenuPrimitive.Root;
 const DropdownMenuTrigger = DropdownMenuPrimitive.Trigger;
 
@@ -17,7 +16,7 @@ const DropdownMenuContent = React.forwardRef<
       ref={ref}
       sideOffset={sideOffset}
       className={cn(
-        "z-50 min-w-[10rem] overflow-hidden rounded-md border border-border bg-popover p-1 text-popover-foreground shadow-md",
+        "z-50 min-w-[10rem] overflow-hidden rounded-md border border-border bg-overlay p-1 text-overlay-foreground shadow-md",
         "data-[state=open]:animate-in data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=open]:fade-in-0",
         className,
       )}
@@ -37,10 +36,10 @@ const DropdownMenuItem = React.forwardRef<
     ref={ref}
     className={cn(
       "relative flex cursor-pointer select-none items-center gap-2 rounded-sm px-2 py-1.5 text-sm outline-none transition-colors",
-      "focus:bg-accent focus:text-accent-foreground",
+      "focus:bg-default-hover focus:text-foreground",
       "data-[disabled]:pointer-events-none data-[disabled]:opacity-50",
       variant === "destructive" &&
-        "text-destructive focus:bg-destructive/10 focus:text-destructive",
+        "text-danger focus:bg-danger/10 focus:text-danger",
       className,
     )}
     {...props}
@@ -66,7 +65,7 @@ const DropdownMenuLabel = React.forwardRef<
 >(({ className, ...props }, ref) => (
   <DropdownMenuPrimitive.Label
     ref={ref}
-    className={cn("px-2 py-1.5 text-xs font-medium text-muted-foreground", className)}
+    className={cn("px-2 py-1.5 text-xs font-medium text-muted", className)}
     {...props}
   />
 ));

@@ -1,120 +1,13 @@
 "use client";
 
+import { Dropdown } from "@heroui/react";
+import { Check, ChevronDown } from "lucide-react";
 import type { ReactNode } from "react";
-import * as SelectPrimitive from "@radix-ui/react-select";
-import { Check, ChevronDown, ChevronUp } from "lucide-react";
 import { cn } from "@/lib/utils";
 
-export type SelectOption = {
-  value: string;
-  label: string;
-  disabled?: boolean;
-  icon?: ReactNode;
-};
+export type SelectOption = { value: string; label: string; disabled?: boolean; icon?: ReactNode };
 
-type SelectControlProps = {
-  value: string;
-  onValueChange: (value: string) => void;
-  options: readonly SelectOption[];
-  id?: string;
-  disabled?: boolean;
-  ariaLabel?: string;
-  placeholder?: string;
-  className?: string;
-  contentClassName?: string;
-};
-
-const VALUE_PREFIX = "cocola-select:";
-
-function toPrimitiveValue(value: string) {
-  return `${VALUE_PREFIX}${value}`;
-}
-
-function fromPrimitiveValue(value: string) {
-  return value.slice(VALUE_PREFIX.length);
-}
-
-export function SelectControl({
-  value,
-  onValueChange,
-  options,
-  id,
-  disabled,
-  ariaLabel,
-  placeholder = "Select an option",
-  className,
-  contentClassName,
-}: SelectControlProps) {
-  const selectedOption = options.find((option) => option.value === value);
-  return (
-    <SelectPrimitive.Root
-      value={toPrimitiveValue(value)}
-      onValueChange={(nextValue) => onValueChange(fromPrimitiveValue(nextValue))}
-      disabled={disabled}
-    >
-      <SelectPrimitive.Trigger
-        id={id}
-        aria-label={ariaLabel}
-        className={cn(
-          "flex h-10 w-full min-w-0 items-center justify-between gap-2 rounded-xl border border-input bg-background px-3 text-sm text-foreground shadow-sm outline-none transition-colors",
-          "hover:bg-muted/30 focus-visible:border-ring focus-visible:ring-2 focus-visible:ring-ring/20",
-          "disabled:cursor-not-allowed disabled:opacity-50",
-          className,
-        )}
-      >
-        <span className="flex min-w-0 flex-1 items-center gap-2 text-left">
-          {selectedOption?.icon ? (
-            <span className="flex shrink-0 items-center">{selectedOption.icon}</span>
-          ) : null}
-          <SelectPrimitive.Value placeholder={placeholder} className="min-w-0 flex-1 truncate" />
-        </span>
-        <SelectPrimitive.Icon asChild>
-          <ChevronDown aria-hidden="true" className="size-4 shrink-0 text-muted-foreground" />
-        </SelectPrimitive.Icon>
-      </SelectPrimitive.Trigger>
-
-      <SelectPrimitive.Portal>
-        <SelectPrimitive.Content
-          position="popper"
-          align="start"
-          sideOffset={4}
-          className={cn(
-            "z-[100] max-h-[min(20rem,var(--radix-select-content-available-height))] w-[var(--radix-select-trigger-width)] overflow-hidden rounded-xl border border-border bg-popover text-popover-foreground shadow-xl",
-            contentClassName,
-          )}
-        >
-          <SelectPrimitive.ScrollUpButton className="flex h-7 cursor-default items-center justify-center">
-            <ChevronUp aria-hidden="true" className="size-4" />
-          </SelectPrimitive.ScrollUpButton>
-          <SelectPrimitive.Viewport className="max-h-72 p-1">
-            {options.map((option) => (
-              <SelectPrimitive.Item
-                key={option.value}
-                value={toPrimitiveValue(option.value)}
-                disabled={option.disabled}
-                className={cn(
-                  "relative flex w-full cursor-default select-none items-center rounded-lg py-2 pl-2.5 pr-8 text-sm outline-none",
-                  "focus:bg-accent focus:text-accent-foreground",
-                  "data-[disabled]:pointer-events-none data-[disabled]:opacity-50",
-                )}
-              >
-                {option.icon ? (
-                  <span className="mr-2 flex shrink-0 items-center">{option.icon}</span>
-                ) : null}
-                <SelectPrimitive.ItemText className="block min-w-0 flex-1 truncate">
-                  {option.label}
-                </SelectPrimitive.ItemText>
-                <SelectPrimitive.ItemIndicator className="absolute right-2 inline-flex items-center">
-                  <Check aria-hidden="true" className="size-4" />
-                </SelectPrimitive.ItemIndicator>
-              </SelectPrimitive.Item>
-            ))}
-          </SelectPrimitive.Viewport>
-          <SelectPrimitive.ScrollDownButton className="flex h-7 cursor-default items-center justify-center">
-            <ChevronDown aria-hidden="true" className="size-4" />
-          </SelectPrimitive.ScrollDownButton>
-        </SelectPrimitive.Content>
-      </SelectPrimitive.Portal>
-    </SelectPrimitive.Root>
-  );
+export function SelectControl({ value, onValueChange, options, id, disabled, ariaLabel, placeholder = "Select an option", className, contentClassName }: { value: string; onValueChange: (value: string) => void; options: readonly SelectOption[]; id?: string; disabled?: boolean; ariaLabel?: string; placeholder?: string; className?: string; contentClassName?: string }) {
+  const selected = options.find((option) => option.value === value);
+  return <Dropdown><Dropdown.Trigger id={id} aria-label={ariaLabel || placeholder} className={cn("cocola-web-select-trigger border-separator bg-default hover:bg-default-hover flex h-11 w-full min-w-0 items-center justify-between gap-2 rounded-2xl border px-3 text-sm outline-none transition-colors", className)} isDisabled={disabled}><span className="flex min-w-0 flex-1 items-center gap-2 text-left">{selected?.icon ? <span className="shrink-0">{selected.icon}</span> : null}<span className="truncate">{selected?.label || placeholder}</span></span><ChevronDown className="text-muted size-4 shrink-0" /></Dropdown.Trigger><Dropdown.Popover className={contentClassName} placement="bottom start"><Dropdown.Menu aria-label={ariaLabel || placeholder} onAction={(key) => onValueChange(String(key))}>{options.map((option) => <Dropdown.Item key={option.value} id={option.value} isDisabled={option.disabled} textValue={option.label}><span className="flex min-w-0 items-center gap-2">{option.icon ? <span className="shrink-0">{option.icon}</span> : null}<span className="min-w-0 flex-1 truncate">{option.label}</span>{option.value === value ? <Check className="text-accent size-4" /> : null}</span></Dropdown.Item>)}</Dropdown.Menu></Dropdown.Popover></Dropdown>;
 }

@@ -1,27 +1,18 @@
 "use client";
 
-import {
-  CalendarCheck,
-  CalendarClock,
-  CalendarDays,
-  CircleCheck,
-  Clock,
-  LoaderCircle,
-  MoreHorizontal,
-  Plus,
-  AlarmClock,
-} from "lucide-react";
+import { Button, Chip, Dropdown, Tooltip } from "@heroui/react";
+import { DataGrid, type DataGridColumn } from "@heroui-pro/react/data-grid";
+import { EmptyState } from "@heroui-pro/react/empty-state";
+import { Segment } from "@heroui-pro/react/segment";
+import { AlarmClock, CalendarClock, Clock, Ellipsis, LoaderCircle, Plus } from "lucide-react";
 import { useSession } from "next-auth/react";
 import { useRouter } from "next/navigation";
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { Button } from "@/components/ui/button";
 import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuSeparator,
-  DropdownMenuTrigger,
-} from "@/components/ui/dropdown-menu";
+  WorkspacePageAction,
+  WorkspacePageFrame,
+  WorkspacePageHeader,
+} from "@/components/heroui-workspace/workspace-ui";
 import { TaskConfirmDialog, TaskDrawer } from "@/components/scheduled-tasks/task-drawer";
 import {
   formatDateTime,
@@ -38,7 +29,6 @@ import {
   readScheduledTaskPageCache,
   writeScheduledTaskPageCache,
 } from "@/lib/scheduled-task-page-cache.mjs";
-import { cn } from "@/lib/utils";
 
 type Tab = "today" | "all";
 
@@ -60,57 +50,46 @@ export default function TasksPage() {
   const [selectedTask, setSelectedTask] = useState<ScheduledTask | null>(null);
   const [deleteTarget, setDeleteTarget] = useState<ScheduledTask | null>(null);
 
-  const loadTasks = useCallback(
-    async (options?: { foreground?: boolean; signal?: AbortSignal }) => {
-      if (!ownerID) return;
-      const foreground = options?.foreground ?? false;
-      if (foreground) setLoading(true);
-      setError("");
-      try {
-        const tasksResponse = await fetch("/api/scheduled-tasks", {
-          cache: "no-store",
-          signal: options?.signal,
-        });
-        if (!tasksResponse.ok) throw new Error(await responseError(tasksResponse));
-        const taskBody = (await tasksResponse.json()) as { tasks?: ScheduledTask[] };
-        const nextTasks = Array.isArray(taskBody.tasks) ? taskBody.tasks : [];
-        if (options?.signal?.aborted) return;
-        setTasks(nextTasks);
-        writeScheduledTaskPageCache(ownerID, { tasks: nextTasks });
-      } catch (cause) {
-        if (options?.signal?.aborted) return;
-        setError(cause instanceof Error ? cause.message : String(cause));
-      } finally {
-        if (foreground && !options?.signal?.aborted) setLoading(false);
-      }
-    },
-    [ownerID],
-  );
+  const loadTasks = useCallback(async (options?: { foreground?: boolean; signal?: AbortSignal }) => {
+    if (!ownerID) return;
+    const foreground = options?.foreground ?? false;
+    if (foreground) setLoading(true);
+    setError("");
+    try {
+      const response = await fetch("/api/scheduled-tasks", { cache: "no-store", signal: options?.signal });
+      if (!response.ok) throw new Error(await responseError(response));
+      const body = (await response.json()) as { tasks?: ScheduledTask[] };
+      const nextTasks = Array.isArray(body.tasks) ? body.tasks : [];
+      if (options?.signal?.aborted) return;
+      setTasks(nextTasks);
+      writeScheduledTaskPageCache(ownerID, { tasks: nextTasks });
+    } catch (cause) {
+      if (!options?.signal?.aborted) setError(cause instanceof Error ? cause.message : String(cause));
+    } finally {
+      if (foreground && !options?.signal?.aborted) setLoading(false);
+    }
+  }, [ownerID]);
 
-  const loadModels = useCallback(
-    async (signal?: AbortSignal) => {
-      if (!ownerID) return;
-      setModelError("");
-      try {
-        const response = await fetch("/api/models", { cache: "no-store", signal });
-        if (!response.ok) throw new Error(await responseError(response));
-        const body = (await response.json()) as unknown;
-        const availableModels = normalizeModelOptions(body);
-        const nextModels = availableModels.filter(
-          (model) => !model.protocols || model.protocols.includes("anthropic-messages"),
-        );
-        if (signal?.aborted) return;
-        setModels(nextModels);
-        setModelsLoaded(true);
-        writeScheduledTaskPageCache(ownerID, { models: nextModels });
-      } catch (cause) {
-        if (signal?.aborted) return;
-        setModelsLoaded(readScheduledTaskPageCache(ownerID)?.models != null);
-        setModelError(cause instanceof Error ? cause.message : String(cause));
-      }
-    },
-    [ownerID],
-  );
+  const loadModels = useCallback(async (signal?: AbortSignal) => {
+    if (!ownerID) return;
+    setModelError("");
+    try {
+      const response = await fetch("/api/models", { cache: "no-store", signal });
+      if (!response.ok) throw new Error(await responseError(response));
+      const availableModels = normalizeModelOptions(await response.json());
+      const nextModels = availableModels.filter(
+        (model) => !model.protocols || model.protocols.includes("anthropic-messages"),
+      );
+      if (signal?.aborted) return;
+      setModels(nextModels);
+      setModelsLoaded(true);
+      writeScheduledTaskPageCache(ownerID, { models: nextModels });
+    } catch (cause) {
+      if (signal?.aborted) return;
+      setModelsLoaded(readScheduledTaskPageCache(ownerID)?.models != null);
+      setModelError(cause instanceof Error ? cause.message : String(cause));
+    }
+  }, [ownerID]);
 
   useEffect(() => {
     if (sessionStatus === "loading") return;
@@ -122,20 +101,10 @@ export default function TasksPage() {
       return;
     }
     const cached = readScheduledTaskPageCache(ownerID);
-    if (cached?.tasks != null) {
-      setTasks(cached.tasks);
-      setLoading(false);
-    } else {
-      setTasks([]);
-      setLoading(true);
-    }
-    if (cached?.models != null) {
-      setModels(cached.models);
-      setModelsLoaded(true);
-    } else {
-      setModels([]);
-      setModelsLoaded(false);
-    }
+    setTasks(cached?.tasks ?? []);
+    setModels(cached?.models ?? []);
+    setLoading(cached?.tasks == null);
+    setModelsLoaded(cached?.models != null);
     const controller = new AbortController();
     void loadTasks({ foreground: cached?.tasks == null, signal: controller.signal });
     void loadModels(controller.signal);
@@ -156,14 +125,6 @@ export default function TasksPage() {
     () => (tab === "today" ? sortedTasks.filter(taskIsToday) : sortedTasks),
     [tab, sortedTasks],
   );
-
-  const metrics = useMemo(() => {
-    const total = tasks.length;
-    const active = tasks.filter((task) => task.status === "active").length;
-    const dueToday = sortedTasks.filter(taskIsToday).length;
-    return { total, active, dueToday };
-  }, [tasks, sortedTasks]);
-
   const todayCount = useMemo(() => sortedTasks.filter(taskIsToday).length, [sortedTasks]);
 
   function openCreate() {
@@ -182,9 +143,7 @@ export default function TasksPage() {
     try {
       const editing = selectedTask !== null;
       const response = await fetch(
-        editing
-          ? `/api/scheduled-tasks/${encodeURIComponent(selectedTask.id)}`
-          : "/api/scheduled-tasks",
+        editing ? `/api/scheduled-tasks/${encodeURIComponent(selectedTask.id)}` : "/api/scheduled-tasks",
         {
           method: editing ? "PATCH" : "POST",
           headers: { "content-type": "application/json" },
@@ -227,307 +186,213 @@ export default function TasksPage() {
     }
   }
 
-  const hasTasks = !loading && tasks.length > 0;
+  const handleAction = (task: ScheduledTask, action: string) => {
+    if (action === "edit") openEdit(task);
+    if (action === "toggle") void mutate(task, task.status === "paused" ? "resume" : "pause");
+    if (action === "result" && task.conversation_id) {
+      router.push(`/?conversation=${encodeURIComponent(task.conversation_id)}`);
+    }
+    if (action === "delete") setDeleteTarget(task);
+  };
+
+  const columns: DataGridColumn<ScheduledTask>[] = [
+      {
+        id: "task",
+        header: "Task",
+        isRowHeader: true,
+        minWidth: 300,
+        cell: (task) => (
+          <div className="flex min-w-0 items-center gap-3 py-1">
+            <span className="flex size-10 shrink-0 items-center justify-center rounded-2xl bg-blue-100 text-blue-600 dark:bg-blue-950 dark:text-blue-300">
+              <AlarmClock className="size-5" />
+            </span>
+            <span className="min-w-0">
+              <span className="text-foreground block truncate text-sm font-semibold">{task.name}</span>
+              <span className="text-muted mt-1 block truncate text-xs">{task.prompt}</span>
+            </span>
+          </div>
+        ),
+      },
+      {
+        id: "schedule",
+        header: "Schedule",
+        minWidth: 210,
+        cell: (task) => (
+          <span className="text-muted block min-w-0 text-sm">
+            <span className="flex items-center gap-2 truncate">
+              <CalendarClock className="size-4 shrink-0" />
+              {scheduleLabel(task)}
+            </span>
+            <span className="mt-1 block truncate pl-6 text-xs">Next: {formatDateTime(task.next_run_at)}</span>
+          </span>
+        ),
+      },
+      {
+        id: "lastResult",
+        header: "Last result",
+        minWidth: 190,
+        cell: (task) => (
+          <span className={task.last_error ? "text-danger block truncate text-sm" : "text-muted block truncate text-sm"}>
+            {task.last_error || task.last_status || (task.run_count ? "Completed" : "Not run yet")}
+          </span>
+        ),
+      },
+      {
+        id: "status",
+        header: "Status",
+        minWidth: 110,
+        cell: (task) => (
+          <Chip color={statusColor(task.status)} size="sm" variant="soft">
+            {task.status}
+          </Chip>
+        ),
+      },
+      {
+        id: "actions",
+        header: "Actions",
+        align: "center",
+        pinned: "end",
+        width: 80,
+        cell: (task) => (
+          <Dropdown>
+            <Tooltip delay={0}>
+              <Dropdown.Trigger
+                aria-label={`Actions for ${task.name}`}
+                className="text-muted hover:bg-surface-secondary hover:text-foreground mx-auto grid size-9 place-items-center rounded-xl"
+              >
+                <Ellipsis className="size-4" />
+              </Dropdown.Trigger>
+              <Tooltip.Content>Task actions</Tooltip.Content>
+            </Tooltip>
+            <Dropdown.Popover placement="bottom end">
+              <Dropdown.Menu
+                aria-label={`Actions for ${task.name}`}
+                onAction={(key) => handleAction(task, String(key))}
+              >
+                <Dropdown.Item id="edit" textValue="Edit">Edit</Dropdown.Item>
+                {(task.status === "active" || task.status === "paused") ? (
+                  <Dropdown.Item id="toggle" textValue={task.status === "paused" ? "Resume" : "Pause"}>
+                    {task.status === "paused" ? "Resume" : "Pause"}
+                  </Dropdown.Item>
+                ) : null}
+                <Dropdown.Item
+                  id="result"
+                  isDisabled={!task.conversation_id || task.run_count === 0}
+                  textValue="View latest result"
+                >
+                  View latest result
+                </Dropdown.Item>
+                <Dropdown.Item id="delete" textValue="Delete">Delete</Dropdown.Item>
+              </Dropdown.Menu>
+            </Dropdown.Popover>
+          </Dropdown>
+        ),
+      },
+    ];
 
   return (
-    <div className="user-canvas user-page user-theme-blue h-full overflow-y-auto px-4 py-5 sm:px-6 sm:py-7">
-      <div className="mx-auto max-w-7xl">
-        <header className="flex flex-wrap items-start justify-between gap-4">
-          <div className="flex items-center gap-3.5">
-            <span className="user-page-icon">
-              <CalendarCheck className="size-6" />
-            </span>
-            <div className="space-y-1">
-              <div className="user-eyebrow">Automation</div>
-              <h1 className="text-2xl font-bold tracking-tight">Tasks</h1>
-              <p className="text-sm text-muted-foreground">
-                Schedule Cocola to work for you, even when you are away.
-              </p>
-            </div>
-          </div>
-          {hasTasks ? (
-            <button
-              type="button"
-              onClick={openCreate}
-              disabled={!modelsLoaded}
-              className="user-accent-btn inline-flex h-11 items-center gap-2 rounded-xl px-4 text-sm font-semibold disabled:cursor-not-allowed disabled:opacity-50"
-            >
-              <Plus className="size-4" /> New task
-            </button>
-          ) : null}
-        </header>
+    <WorkspacePageFrame>
+      <WorkspacePageHeader
+        action={
+          <WorkspacePageAction isDisabled={!modelsLoaded} onPress={openCreate}>
+            <Plus className="size-4" />
+            New task
+          </WorkspacePageAction>
+        }
+        description="Schedule prompts to run once or on a recurring cadence."
+        icon={<Clock className="size-5" />}
+        title="Tasks"
+      />
 
-        {error || modelError ? (
-          <div className="mt-5 rounded-2xl border border-destructive/25 bg-destructive/10 px-4 py-3 text-sm text-destructive">
-            {error || modelError}
-          </div>
-        ) : null}
+      {error || modelError ? (
+        <div className="bg-danger/10 text-danger rounded-2xl px-4 py-3 text-sm">{error || modelError}</div>
+      ) : null}
 
-        {hasTasks ? (
-          <div className="mt-7 grid gap-4 sm:grid-cols-3">
-            <MetricCard
-              tone="blue"
-              icon={<CalendarDays className="size-[22px]" />}
-              label="Total tasks"
-              value={metrics.total}
-              detail="Across all schedules"
-            />
-            <MetricCard
-              tone="emerald"
-              icon={<CircleCheck className="size-[22px]" />}
-              label="Active"
-              value={metrics.active}
-              detail="Running on schedule"
-            />
-            <MetricCard
-              tone="sky"
-              icon={<Clock className="size-[22px]" />}
-              label="Due today"
-              value={metrics.dueToday}
-              detail="Next run within 24h"
-            />
-          </div>
-        ) : null}
+      <Segment
+        aria-label="Task filter"
+        className="self-start"
+        selectedKey={tab}
+        onSelectionChange={(key) => setTab(String(key) as Tab)}
+      >
+        <Segment.Item id="today">Today · {todayCount}</Segment.Item>
+        <Segment.Item id="all">All · {tasks.length}</Segment.Item>
+      </Segment>
 
-        {hasTasks ? (
-          <div className="mt-7 flex gap-6 border-b border-border/60">
-            {(
-              [
-                ["today", todayCount],
-                ["all", tasks.length],
-              ] as const
-            ).map(([value, count]) => (
-              <button
-                key={value}
-                type="button"
-                onClick={() => setTab(value)}
-                className={cn(
-                  "relative flex items-center gap-2 pb-3 text-sm capitalize text-muted-foreground transition-colors hover:text-foreground",
-                  tab === value && "font-medium text-foreground",
+      {loading ? (
+        <div className="grid min-h-56 place-items-center" role="status">
+          {showLoadingIndicator ? <LoaderCircle className="text-muted size-5 animate-spin" /> : null}
+          <span className="sr-only">Loading tasks</span>
+        </div>
+      ) : (
+        <DataGrid
+          aria-label="Scheduled tasks"
+          className="cocola-web-task-grid"
+          columns={columns}
+          contentClassName="min-w-[880px]"
+          data={visibleTasks}
+          getRowId={(task) => task.id}
+          selectionMode="none"
+          scrollContainerClassName="overflow-x-auto"
+          verticalAlign="middle"
+          variant="primary"
+          renderEmptyState={() => (
+            <EmptyState>
+              <EmptyState.Header>
+                <EmptyState.Media variant="icon"><Clock className="text-blue-500" /></EmptyState.Media>
+                <EmptyState.Title>
+                  {tab === "today" && tasks.length ? "Nothing scheduled for today" : "Create your first task"}
+                </EmptyState.Title>
+                <EmptyState.Description>
+                  {tab === "today" && tasks.length
+                    ? "Your other tasks are available under All."
+                    : "Describe the work once, then let Cocola run it at the right time."}
+                </EmptyState.Description>
+              </EmptyState.Header>
+              <EmptyState.Content>
+                {tab === "today" && tasks.length ? (
+                  <Button size="sm" variant="outline" onPress={() => setTab("all")}>Show all tasks</Button>
+                ) : (
+                  <Button isDisabled={!modelsLoaded} size="sm" variant="outline" onPress={openCreate}>
+                    <Plus className="size-4" /> New task
+                  </Button>
                 )}
-              >
-                {value}
-                <span className="rounded-full border border-border bg-muted/60 px-1.5 py-px text-[11px] font-semibold tabular-nums text-muted-foreground">
-                  {count}
-                </span>
-                {tab === value ? (
-                  <span
-                    className="absolute inset-x-0 bottom-0 h-0.5 rounded-full"
-                    style={{ background: "var(--page-accent-grad)" }}
-                  />
-                ) : null}
-              </button>
-            ))}
-          </div>
-        ) : null}
-
-        {loading ? (
-          <div
-            className="flex min-h-[13.75rem] items-center justify-center py-7 text-muted-foreground"
-            role="status"
-            aria-live="polite"
-          >
-            {showLoadingIndicator ? <LoaderCircle className="size-5 animate-spin" /> : null}
-            <span className="sr-only">Loading tasks</span>
-          </div>
-        ) : visibleTasks.length ? (
-          <div className="grid gap-4 py-7 md:grid-cols-2 xl:grid-cols-3">
-            {visibleTasks.map((task) => (
-              <TaskCard
-                key={task.id}
-                task={task}
-                onEdit={() => openEdit(task)}
-                onToggle={() => void mutate(task, task.status === "paused" ? "resume" : "pause")}
-                onResult={() =>
-                  task.conversation_id &&
-                  router.push(`/?conversation=${encodeURIComponent(task.conversation_id)}`)
-                }
-                onDelete={() => setDeleteTarget(task)}
-              />
-            ))}
-          </div>
-        ) : (
-          <div className="flex min-h-[55vh] flex-col items-center justify-center text-center">
-            <span className="user-page-icon size-14 rounded-2xl">
-              <Clock className="size-7" />
-            </span>
-            <h2 className="mt-4 text-base font-semibold">
-              {tab === "today" && tasks.length
-                ? "Nothing scheduled for today"
-                : "Create your first task"}
-            </h2>
-            <p className="mt-1 max-w-sm text-sm leading-6 text-muted-foreground">
-              {tab === "today" && tasks.length
-                ? "Your other tasks are available under All."
-                : "Describe the work once, then let Cocola run it at the right time."}
-            </p>
-            {tab === "today" && tasks.length ? (
-              <Button variant="outline" className="mt-4 rounded-xl" onClick={() => setTab("all")}>
-                View all tasks
-              </Button>
-            ) : (
-              <button
-                type="button"
-                disabled={!modelsLoaded}
-                onClick={openCreate}
-                className="user-accent-btn mt-4 inline-flex h-11 items-center gap-2 rounded-xl px-4 text-sm font-semibold disabled:cursor-not-allowed disabled:opacity-50"
-              >
-                <Plus className="size-4" /> New task
-              </button>
-            )}
-          </div>
-        )}
-      </div>
+              </EmptyState.Content>
+            </EmptyState>
+          )}
+          onRowAction={(key) => {
+            const task = tasks.find((item) => item.id === String(key));
+            if (task) openEdit(task);
+          }}
+        />
+      )}
 
       <TaskDrawer
-        open={drawerOpen}
-        onOpenChange={setDrawerOpen}
-        task={selectedTask}
-        models={models}
         defaultModelID={models.find((model) => model.is_default)?.id ?? models[0]?.id}
+        models={models}
+        open={drawerOpen}
         saving={saving}
+        task={selectedTask}
+        onOpenChange={setDrawerOpen}
         onSave={save}
       />
       <TaskConfirmDialog
-        open={deleteTarget !== null}
-        onOpenChange={(open) => !open && setDeleteTarget(null)}
-        title="Delete task?"
-        description={`“${deleteTarget?.name ?? "This task"}” and its schedule will be removed. Its existing conversation history will remain.`}
-        confirmLabel="Delete task"
         busy={saving}
+        confirmLabel="Delete task"
+        description={`“${deleteTarget?.name ?? "This task"}” and its schedule will be removed. Its existing conversation history will remain.`}
         destructive
+        open={deleteTarget !== null}
+        title="Delete task?"
         onConfirm={() => deleteTarget && void mutate(deleteTarget, "delete")}
+        onOpenChange={(open) => !open && setDeleteTarget(null)}
       />
-    </div>
+    </WorkspacePageFrame>
   );
 }
 
-function MetricCard({
-  tone,
-  icon,
-  label,
-  value,
-  detail,
-}: {
-  tone: "blue" | "cyan" | "emerald" | "sky";
-  icon: React.ReactNode;
-  label: string;
-  value: number;
-  detail: string;
-}) {
-  return (
-    <div className="user-metric-card" data-tone={tone}>
-      <div className="user-metric-head">
-        <span className="user-metric-glyph">{icon}</span>
-        <span className="user-metric-key">{label}</span>
-      </div>
-      <div className="user-metric-val">{value}</div>
-      <div className="user-metric-detail">{detail}</div>
-    </div>
-  );
-}
-
-function TaskCard({
-  task,
-  onEdit,
-  onToggle,
-  onResult,
-  onDelete,
-}: {
-  task: ScheduledTask;
-  onEdit: () => void;
-  onToggle: () => void;
-  onResult: () => void;
-  onDelete: () => void;
-}) {
-  return (
-    <article
-      role="button"
-      tabIndex={0}
-      onClick={onEdit}
-      onKeyDown={(event) =>
-        event.target === event.currentTarget && event.key === "Enter" && onEdit()
-      }
-      className="user-card user-card--hover group relative min-h-44 cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/40"
-    >
-      <div className="flex items-start gap-3">
-        <span className="user-card-glyph mt-0.5">
-          <AlarmClock className="size-[18px]" />
-        </span>
-        <div className="min-w-0 flex-1 pr-7">
-          <div className="flex items-center gap-2">
-            <h2 className="user-card-name truncate">{task.name}</h2>
-            <StatusBadge status={task.status} />
-          </div>
-          <p className="user-card-desc mt-1 line-clamp-2 min-h-10">{task.prompt}</p>
-        </div>
-        <DropdownMenu>
-          <DropdownMenuTrigger asChild>
-            <button
-              type="button"
-              aria-label={`Actions for ${task.name}`}
-              onClick={(event) => event.stopPropagation()}
-              className="absolute right-3.5 top-3.5 grid size-8 shrink-0 place-items-center rounded-xl text-muted-foreground hover:bg-muted hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/40"
-            >
-              <MoreHorizontal className="size-5" />
-            </button>
-          </DropdownMenuTrigger>
-          <DropdownMenuContent
-            align="end"
-            onClick={(event) => event.stopPropagation()}
-            className="cocola-user-ui rounded-xl border-border bg-popover shadow-xl"
-          >
-            <DropdownMenuItem onSelect={onEdit}>Edit</DropdownMenuItem>
-            {(task.status === "active" || task.status === "paused") && (
-              <DropdownMenuItem onSelect={onToggle}>
-                {task.status === "paused" ? "Resume" : "Pause"}
-              </DropdownMenuItem>
-            )}
-            <DropdownMenuItem
-              disabled={!task.conversation_id || task.run_count === 0}
-              onSelect={onResult}
-            >
-              View latest result
-            </DropdownMenuItem>
-            <DropdownMenuSeparator />
-            <DropdownMenuItem
-              className="text-destructive focus:text-destructive"
-              onSelect={onDelete}
-            >
-              Delete
-            </DropdownMenuItem>
-          </DropdownMenuContent>
-        </DropdownMenu>
-      </div>
-      <div className="mt-4 border-t border-border/45 pt-3 text-xs text-muted-foreground">
-        <div className="flex items-center gap-2 text-foreground/80">
-          <CalendarClock className="size-4" style={{ color: "var(--page-accent)" }} />
-          <span className="truncate">{scheduleLabel(task)}</span>
-        </div>
-        <div className="mt-1.5 pl-6 tabular-nums">Next: {formatDateTime(task.next_run_at)}</div>
-      </div>
-    </article>
-  );
-}
-
-function StatusBadge({ status }: { status: ScheduledTask["status"] }) {
-  if (status === "active") {
-    return (
-      <span className="user-tag user-tag--ok shrink-0 text-[10px]">
-        <span className="user-tag-dot" />
-        active
-      </span>
-    );
-  }
-  if (status === "paused") {
-    return (
-      <span className="user-tag user-tag--warn shrink-0 text-[10px]">
-        <span className="user-tag-dot" />
-        paused
-      </span>
-    );
-  }
-  return <span className="user-tag user-tag--muted shrink-0 capitalize text-[10px]">{status}</span>;
+function statusColor(status: ScheduledTask["status"]) {
+  if (status === "active") return "success" as const;
+  if (status === "paused") return "warning" as const;
+  return "default" as const;
 }
 
 async function responseError(response: Response): Promise<string> {

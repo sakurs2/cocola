@@ -241,8 +241,19 @@ export function AppSidebar({
 
   return (
     <>
-      <aside className="sky-glass-sidebar flex h-full w-[17rem] shrink-0 flex-col overflow-hidden border-r border-sidebar-border text-sidebar-foreground max-sm:absolute max-sm:left-0 max-sm:top-0 max-sm:z-40">
-        <div className="flex h-16 items-center gap-1.5 px-3">
+      <aside className="cocola-web-sidebar sky-glass-sidebar flex h-full w-[17rem] shrink-0 flex-col overflow-hidden border-r border-separator text-foreground max-sm:absolute max-sm:left-0 max-sm:top-0 max-sm:z-40">
+        <div className="flex h-16 items-center gap-3 px-3">
+          <div className="flex min-w-0 flex-1 items-center gap-2">
+            <CocolaLogo className="size-10 shrink-0" />
+            <div className="min-w-0 flex-1">
+              <span className="block truncate text-[15px] font-semibold text-foreground">
+                cocola
+              </span>
+              <span className="block truncate text-xs font-medium text-foreground/70">
+                agent workspace
+              </span>
+            </div>
+          </div>
           {onToggleImmersive ? (
             <button
               type="button"
@@ -250,24 +261,11 @@ export function AppSidebar({
               title={immersive ? "Exit immersive mode" : "Enter immersive mode"}
               aria-label={immersive ? "Exit immersive mode" : "Enter immersive mode"}
               aria-pressed={immersive}
-              className="grid size-8 shrink-0 place-items-center rounded-lg text-sidebar-foreground/65 transition hover:bg-sidebar-accent hover:text-sidebar-accent-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/45"
+              className="grid size-8 shrink-0 place-items-center rounded-xl text-foreground/65 transition-colors hover:bg-default hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus/45"
             >
               <PanelLeftClose className="size-[18px]" />
             </button>
           ) : null}
-          <div className="flex min-w-0 flex-1 items-center gap-2">
-            <div className="flex size-9 shrink-0 items-center justify-center rounded-2xl bg-primary text-primary-foreground shadow-lg shadow-primary/20">
-              <CocolaLogo mono className="size-5" />
-            </div>
-            <div className="min-w-0 flex-1">
-              <span className="block truncate text-[15px] font-bold text-sidebar-foreground">
-                cocola
-              </span>
-              <span className="block truncate text-xs font-medium text-sidebar-foreground/70">
-                agent workspace
-              </span>
-            </div>
-          </div>
         </div>
 
         <nav className="flex-1 overflow-y-auto px-2 pb-2">
@@ -276,11 +274,12 @@ export function AppSidebar({
               type="button"
               title="New Chat"
               onClick={openNewChat}
-              className="flex w-full items-center justify-center gap-2 rounded-xl px-3 py-2.5 text-[13.5px] font-semibold text-white transition-opacity hover:opacity-90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/45"
-              style={{ background: "linear-gradient(135deg,#2563eb,#7c3aed)" }}
+              className="cocola-web-new-chat flex h-11 w-full items-center justify-start gap-2.5 rounded-2xl px-2.5 text-[13.5px] font-semibold focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus/45"
             >
-              <PlusCircle className="size-4 shrink-0" />
-              New Chat
+              <span className="cocola-web-new-chat-icon grid size-7 shrink-0 place-items-center rounded-xl">
+                <PlusCircle className="size-4" />
+              </span>
+              <span>New Chat</span>
             </button>
           </SidebarSectionPanel>
 
@@ -301,7 +300,7 @@ export function AppSidebar({
                   <Icon
                     className={cn(
                       "size-4 shrink-0",
-                      iconClassName ?? "text-sidebar-accent-foreground",
+                      iconClassName ?? "text-foreground",
                     )}
                   />
                   <span className="truncate">{label}</span>
@@ -313,9 +312,9 @@ export function AppSidebar({
           <SidebarSectionPanel refSetter={setSectionRef("projects")}>
             <div
               className={cn(
-                "flex h-9 items-center rounded-2xl px-2.5 text-[13.5px] font-medium text-sidebar-foreground transition-colors hover:bg-sidebar-accent hover:text-sidebar-accent-foreground",
+                "cocola-sidebar-tab flex h-9 items-center rounded-2xl px-2.5 text-[13.5px] font-medium text-foreground transition-colors hover:bg-default hover:text-foreground",
                 pathname === "/projects" || pathname?.startsWith("/projects/")
-                  ? "bg-sidebar-accent text-sidebar-accent-foreground"
+                  ? "bg-default text-foreground"
                   : "",
               )}
             >
@@ -332,7 +331,7 @@ export function AppSidebar({
                 onClick={guardLinkNavigation}
                 aria-label="Create or import project"
                 title="Create or import project"
-                className="grid size-7 place-items-center rounded-lg text-sidebar-foreground/65 transition hover:bg-sidebar-accent hover:text-sidebar-accent-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/45"
+                className="grid size-7 place-items-center rounded-lg text-foreground/65 transition hover:bg-default hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus/45"
               >
                 <PlusCircle className="size-4" />
               </Link>
@@ -342,9 +341,9 @@ export function AppSidebar({
           <SidebarSectionPanel refSetter={setSectionRef("folders")}>
             <div
               className={cn(
-                "flex h-9 items-center rounded-2xl px-2.5 text-[13.5px] font-medium text-sidebar-foreground transition-colors hover:bg-sidebar-accent hover:text-sidebar-accent-foreground",
+                "cocola-sidebar-tab flex h-9 items-center rounded-2xl px-2.5 text-[13.5px] font-medium text-foreground transition-colors hover:bg-default hover:text-foreground",
                 pathname === "/folders" || pathname?.startsWith("/folders/")
-                  ? "bg-sidebar-accent text-sidebar-accent-foreground"
+                  ? "bg-default text-foreground"
                   : "",
               )}
             >
@@ -361,7 +360,7 @@ export function AppSidebar({
                 onClick={guardLinkNavigation}
                 aria-label="Create folder"
                 title="Create folder"
-                className="grid size-7 place-items-center rounded-lg text-sidebar-foreground/65 transition hover:bg-sidebar-accent hover:text-sidebar-accent-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/45"
+                className="grid size-7 place-items-center rounded-lg text-foreground/65 transition hover:bg-default hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus/45"
               >
                 <PlusCircle className="size-4" />
               </Link>
@@ -371,7 +370,7 @@ export function AppSidebar({
           <SidebarSectionPanel refSetter={setSectionRef("chats")}>
             <SectionLabel>Chats</SectionLabel>
             {regularConversations.length === 0 ? (
-              <div className="px-2.5 py-1 text-xs text-sidebar-foreground/50">
+              <div className="px-2.5 py-1 text-xs text-foreground/50">
                 No conversations yet
               </div>
             ) : (
@@ -402,27 +401,27 @@ export function AppSidebar({
           </SidebarSectionPanel>
         </nav>
 
-        <div ref={setSectionRef("account")} className="border-t border-sidebar-border p-2">
+        <div ref={setSectionRef("account")} className="p-2">
           <Link
             href="/profile"
             onClick={guardLinkNavigation}
             title="Profile"
-            className="group flex min-w-0 items-center gap-2 rounded-2xl px-2 py-1.5 text-sidebar-foreground/90 transition-colors hover:bg-sidebar-accent hover:text-sidebar-accent-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/45"
+            className="group flex min-w-0 items-center gap-2 rounded-2xl px-2 py-1.5 text-foreground/90 transition-colors hover:bg-default hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus/45"
           >
-            <div className="grid size-8 shrink-0 place-items-center rounded-full bg-primary text-[11px] font-medium text-primary-foreground">
+            <div className="grid size-8 shrink-0 place-items-center rounded-full bg-accent text-[11px] font-medium text-accent-foreground">
               {userInitial}
             </div>
             <div className="min-w-0 flex-1">
-              <div className="truncate text-[15px] font-semibold text-sidebar-foreground">
+              <div className="truncate text-[15px] font-semibold text-foreground">
                 {userLabel}
               </div>
               {userSubtitle && (
-                <div className="truncate text-xs font-medium text-sidebar-foreground/70">
+                <div className="truncate text-xs font-medium text-foreground/70">
                   {userSubtitle}
                 </div>
               )}
             </div>
-            <Gear className="size-4 shrink-0 text-sidebar-foreground/45 transition-colors group-hover:text-sidebar-accent-foreground" />
+            <Gear className="size-4 shrink-0 text-foreground/45 transition-colors group-hover:text-foreground" />
           </Link>
         </div>
       </aside>
@@ -466,8 +465,8 @@ function SidebarExpandedRow({
       title={title}
       onClick={onClick}
       className={cn(
-        "flex w-full items-center gap-2.5 rounded-2xl px-2.5 py-2 text-[13.5px] font-medium text-sidebar-foreground transition-all hover:bg-sidebar-accent hover:text-sidebar-accent-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/45",
-        active && "bg-sidebar-accent text-sidebar-accent-foreground",
+        "cocola-sidebar-tab flex w-full items-center gap-2.5 rounded-2xl px-2.5 py-2 text-[13.5px] font-medium text-foreground transition-all hover:bg-default hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus/45",
+        active && "bg-default text-foreground",
       )}
     >
       {children}
@@ -524,8 +523,8 @@ function ChatHistoryItem({
   return (
     <div
       className={cn(
-        "group relative flex h-8 items-center gap-2 rounded-xl px-2.5 text-[13px] text-sidebar-foreground/70 transition-colors hover:bg-sidebar-accent hover:text-sidebar-accent-foreground",
-        active && "bg-sidebar-accent text-sidebar-accent-foreground shadow-sm",
+        "group relative flex h-8 items-center gap-2 rounded-xl px-2.5 text-[13px] text-foreground/70 transition-colors hover:bg-default hover:text-foreground",
+        active && "bg-default text-foreground shadow-sm",
       )}
       title={title}
     >
@@ -546,7 +545,7 @@ function ChatHistoryItem({
                 onCancelRename();
               }
             }}
-            className="min-w-0 flex-1 rounded border border-sidebar-border bg-sidebar px-1.5 py-0.5 text-sm outline-none focus:border-sidebar-foreground/30"
+            className="min-w-0 flex-1 rounded border border-separator bg-background px-1.5 py-0.5 text-sm outline-none focus:border-foreground/30"
           />
         </>
       ) : (
@@ -566,7 +565,7 @@ function ChatHistoryItem({
 
       {running ? (
         <SpinnerGap
-          className="size-3.5 shrink-0 animate-spin text-sidebar-accent-foreground/70"
+          className="size-3.5 shrink-0 animate-spin text-foreground/70"
           aria-label="Agent is answering"
         />
       ) : !editing ? (
@@ -583,7 +582,7 @@ function ChatHistoryItem({
             onRename={onRename}
             onDelete={onDelete}
             onMove={onMove}
-            triggerClassName="text-sidebar-foreground/60 hover:bg-sidebar-accent hover:text-sidebar-foreground"
+            triggerClassName="text-foreground/60 hover:bg-default hover:text-foreground"
           />
         </div>
       ) : null}
@@ -593,17 +592,17 @@ function ChatHistoryItem({
 
 function ChatTypeIcon({ type, isAgent }: { type: string; isAgent?: boolean }) {
   if (isAgent) {
-    return <Bot className="size-4 shrink-0 text-sidebar-accent-foreground" />;
+    return <Bot className="size-4 shrink-0 text-cyan-600 dark:text-cyan-300" />;
   }
   if (type === "scheduled_task") {
-    return <CalendarDots className="size-4 shrink-0 text-sidebar-accent-foreground" />;
+    return <CalendarDots className="size-4 shrink-0 text-amber-500 dark:text-amber-300" />;
   }
-  return <ChatsCircle className="size-4 shrink-0 text-sidebar-accent-foreground" />;
+  return <ChatsCircle className="size-4 shrink-0 text-blue-600 dark:text-blue-300" />;
 }
 
 function SectionLabel({ children }: { children: React.ReactNode }) {
   return (
-    <div className="px-2.5 pb-1 pt-3 text-[13px] font-semibold text-sidebar-foreground/70">
+    <div className="px-2.5 pb-1 pt-3 text-[13px] font-semibold text-foreground/70">
       {children}
     </div>
   );

@@ -61,14 +61,14 @@ export function GitHubCallbackPage({ step }: { step: "manifest" | "installation"
 
   return (
     <div className="grid h-full place-items-center px-5">
-      <div className="w-full max-w-md rounded-2xl border border-border bg-card p-7 text-center shadow-card">
+      <div className="w-full max-w-md rounded-2xl border border-border bg-surface p-7 text-center shadow-surface">
         <div className="mx-auto grid size-12 place-items-center rounded-2xl bg-foreground text-background">
           <GitFork className="size-5" />
         </div>
         <h1 className="mt-4 text-lg font-semibold">Connecting GitHub</h1>
         {error ? (
           <>
-            <p role="alert" className="mt-2 text-sm text-destructive">
+            <p role="alert" className="mt-2 text-sm text-danger">
               {error}
             </p>
             <a
@@ -79,7 +79,7 @@ export function GitHubCallbackPage({ step }: { step: "manifest" | "installation"
             </a>
           </>
         ) : (
-          <p className="mt-2 inline-flex items-center gap-2 text-sm text-muted-foreground">
+          <p className="mt-2 inline-flex items-center gap-2 text-sm text-muted">
             <Loader2 className="size-4 animate-spin" /> Completing the secure handoff…
           </p>
         )}

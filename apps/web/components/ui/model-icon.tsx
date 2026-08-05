@@ -42,7 +42,7 @@ export const ModelIcon: FC<{
 
   if (icon?.type === "image" && icon.src) {
     return (
-      <span className={cn(frame("bg-card"), "relative")}>
+      <span className={cn(frame("bg-surface"), "relative")}>
         <Image
           src={icon.src}
           alt=""
@@ -92,14 +92,14 @@ export const ModelIcon: FC<{
       : "";
   if (!fallbackBadge) {
     return (
-      <span className={cn(frame("bg-background"), "text-muted-foreground")}>
+      <span className={cn(frame("bg-background"), "text-muted")}>
         <BrainCircuit className={bare ? "size-full" : "size-[70%]"} />
       </span>
     );
   }
   return (
     <span
-      className={cn(frame("bg-muted"), "text-[9px] font-bold leading-none text-foreground")}
+      className={cn(frame("bg-surface-secondary"), "text-[9px] font-bold leading-none text-foreground")}
       aria-hidden="true"
     >
       {fallbackBadge}

@@ -133,11 +133,11 @@ export function ProjectBaseBranchPicker({
           disabled={disabled}
           aria-label="Select base branch"
           title="Select the branch this new task starts from"
-          className="flex max-w-[12rem] min-w-0 items-center gap-1.5 rounded-full border border-border px-2.5 py-1.5 text-[12.5px] font-medium text-foreground transition-colors hover:bg-muted focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring disabled:cursor-not-allowed disabled:opacity-70"
+          className="flex max-w-[12rem] min-w-0 items-center gap-1.5 rounded-full border border-border px-2.5 py-1.5 text-[12.5px] font-medium text-foreground transition-colors hover:bg-surface-secondary focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-focus disabled:cursor-not-allowed disabled:opacity-70"
         >
           <GitBranch className="size-4 shrink-0 text-indigo-600" />
           <span className="truncate">{value || "Select branch"}</span>
-          <ChevronDown className="size-3.5 shrink-0 text-muted-foreground" />
+          <ChevronDown className="size-3.5 shrink-0 text-muted" />
         </button>
       </Popover.Trigger>
       <Popover.Portal>
@@ -145,19 +145,19 @@ export function ProjectBaseBranchPicker({
           side="top"
           align="start"
           sideOffset={10}
-          className="cocola-user-ui z-50 w-72 overflow-hidden rounded-2xl border border-border bg-popover text-popover-foreground shadow-xl"
+          className="cocola-user-ui z-50 w-72 overflow-hidden rounded-2xl border border-border bg-overlay text-overlay-foreground shadow-xl"
         >
           <Command>
             <div className="flex items-center gap-2 border-b border-border px-3">
-              <Search className="size-4 text-muted-foreground" />
+              <Search className="size-4 text-muted" />
               <Command.Input
                 placeholder="Find a branch..."
-                className="h-10 min-w-0 flex-1 bg-transparent text-sm outline-none placeholder:text-muted-foreground"
+                className="h-10 min-w-0 flex-1 bg-transparent text-sm outline-none placeholder:text-muted"
               />
             </div>
             <Command.List className="max-h-64 overflow-auto p-1.5">
               {!loading && !error ? (
-                <Command.Empty className="px-3 py-8 text-center text-sm text-muted-foreground">
+                <Command.Empty className="px-3 py-8 text-center text-sm text-muted">
                   No branch found.
                 </Command.Empty>
               ) : null}
@@ -171,10 +171,10 @@ export function ProjectBaseBranchPicker({
                     setOpen(false);
                   }}
                 >
-                  <GitBranch className="size-4 shrink-0 text-muted-foreground" />
+                  <GitBranch className="size-4 shrink-0 text-muted" />
                   <span className="min-w-0 flex-1 truncate font-medium">{branch.name}</span>
                   {branch.is_default ? (
-                    <span className="text-[10px] uppercase tracking-wide text-muted-foreground">
+                    <span className="text-[10px] uppercase tracking-wide text-muted">
                       Default
                     </span>
                   ) : null}
@@ -182,7 +182,7 @@ export function ProjectBaseBranchPicker({
                 </Command.Item>
               ))}
               {loading ? (
-                <div className="flex items-center justify-center gap-2 px-3 py-5 text-xs text-muted-foreground">
+                <div className="flex items-center justify-center gap-2 px-3 py-5 text-xs text-muted">
                   <Loader2 className="size-3.5 animate-spin" />
                   Loading branches
                 </div>
@@ -206,7 +206,7 @@ export function ProjectBaseBranchPicker({
                   type="button"
                   disabled={loading}
                   onClick={() => void load(nextCursor)}
-                  className="w-full rounded-xl px-3 py-2 text-left text-xs font-medium text-muted-foreground hover:bg-accent hover:text-foreground disabled:opacity-60"
+                  className="w-full rounded-xl px-3 py-2 text-left text-xs font-medium text-muted hover:bg-accent hover:text-foreground disabled:opacity-60"
                 >
                   Load more branches
                 </button>

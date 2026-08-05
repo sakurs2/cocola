@@ -143,7 +143,7 @@ export function ReadonlyFilePreview({
 
   if (loading) {
     return (
-      <div className="flex h-full items-center justify-center gap-2 text-sm text-muted-foreground">
+      <div className="flex h-full items-center justify-center gap-2 text-sm text-muted">
         <LoaderCircle className="size-4 animate-spin" /> Loading preview
       </div>
     );
@@ -151,11 +151,11 @@ export function ReadonlyFilePreview({
   if (error) {
     return (
       <div className="flex h-full flex-col items-center justify-center gap-3 p-8 text-center">
-        <p className="max-w-80 text-xs leading-5 text-destructive">{error}</p>
+        <p className="max-w-80 text-xs leading-5 text-danger">{error}</p>
         <button
           type="button"
           onClick={() => setRetry((value) => value + 1)}
-          className="inline-flex items-center gap-2 rounded-lg border border-border px-3 py-1.5 text-xs font-medium text-foreground hover:bg-muted"
+          className="inline-flex items-center gap-2 rounded-lg border border-border px-3 py-1.5 text-xs font-medium text-foreground hover:bg-surface-secondary"
         >
           <RefreshCw className="size-3.5" /> Retry
         </button>
@@ -165,7 +165,7 @@ export function ReadonlyFilePreview({
 
   if (htmlPreviewTooLarge) {
     return (
-      <div className="flex h-full flex-col items-center justify-center gap-3 p-8 text-center text-muted-foreground">
+      <div className="flex h-full flex-col items-center justify-center gap-3 p-8 text-center text-muted">
         <FileQuestion className="size-8" />
         <p className="text-sm font-medium text-foreground">HTML preview is too large</p>
         <p className="max-w-80 text-xs">
@@ -182,7 +182,7 @@ export function ReadonlyFilePreview({
         <img
           src={fetchBinary ? binaryUrl : file.url}
           alt={file.filename}
-          className="max-h-full max-w-full rounded-xl border border-border bg-card object-contain shadow-sm"
+          className="max-h-full max-w-full rounded-xl border border-border bg-surface object-contain shadow-sm"
         />
       </div>
     );
@@ -211,7 +211,7 @@ export function ReadonlyFilePreview({
     return <TextFilePreview text={text} kind={previewKind} language={language} />;
   }
   return (
-    <div className="flex h-full flex-col items-center justify-center gap-3 p-8 text-center text-muted-foreground">
+    <div className="flex h-full flex-col items-center justify-center gap-3 p-8 text-center text-muted">
       <FileQuestion className="size-8" />
       <p className="text-sm font-medium text-foreground">Preview not supported</p>
       <p className="text-xs">{unsupportedMessage}</p>

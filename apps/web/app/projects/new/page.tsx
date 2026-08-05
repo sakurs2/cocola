@@ -1,11 +1,12 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import Link from "next/link";
 import { useRouter } from "next/navigation";
 import {
   ArrowLeft,
   Check,
+  ChevronDown,
+  CircleCheck,
   FolderGit2,
   GitFork,
   GitFork as GitHubIcon,
@@ -13,11 +14,13 @@ import {
   Lock,
   Plus,
   RefreshCw,
-  Search,
 } from "lucide-react";
+import { Button, Card, Chip, Dropdown, Input, Label, SearchField, TextArea, TextField } from "@heroui/react";
+import { ItemCard } from "@heroui-pro/react/item-card";
+import { ItemCardGroup } from "@heroui-pro/react/item-card-group";
+import { PressableFeedback } from "@heroui-pro/react/pressable-feedback";
 import { useCocola } from "@/app/runtime-provider";
-import { SelectControl } from "@/components/ui/select-control";
-import { cn } from "@/lib/utils";
+import { WorkspacePageFrame } from "@/components/heroui-workspace/workspace-ui";
 import { nextProjectCreateIntent } from "@/lib/project-task-intent.mjs";
 
 type Mode = "empty" | "github_create" | "github_import";
@@ -194,24 +197,26 @@ export default function NewProjectPage() {
   const githubReady = connection?.status === "ready";
 
   return (
-    <main className="user-canvas user-page user-theme-indigo h-full min-w-0 flex-1 overflow-y-auto px-4 py-5 sm:px-6 sm:py-7">
-      <div className="mx-auto w-full max-w-7xl pb-16">
-        <button
-          type="button"
-          onClick={() => router.back()}
-          className="group inline-flex items-center gap-1.5 rounded-full border border-black/[0.06] bg-white px-4 py-2 text-[13px] font-medium text-muted-foreground shadow-[0_1px_2px_0_rgb(15_23_42/0.06),0_6px_16px_-10px_rgb(15_23_42/0.25)] transition-all duration-200 hover:-translate-y-0.5 hover:text-foreground hover:shadow-[0_2px_4px_0_rgb(15_23_42/0.08),0_12px_24px_-12px_rgb(15_23_42/0.35)] active:translate-y-0 active:shadow-[0_1px_2px_0_rgb(15_23_42/0.06)]"
-        >
-          <ArrowLeft className="size-4 transition-transform duration-200 group-hover:-translate-x-0.5" />
-          Back
-        </button>
+    <WorkspacePageFrame>
+      <header className="flex items-center gap-3">
+        <Button isIconOnly aria-label="Back to Projects" variant="ghost" onPress={() => router.back()}>
+          <ArrowLeft className="size-4" />
+        </Button>
+        <span className="bg-accent-soft text-accent flex size-11 items-center justify-center rounded-2xl">
+          <Plus className="size-5" />
+        </span>
+        <div>
+          <h1 className="text-2xl font-semibold tracking-[-0.03em]">New Project</h1>
+          <p className="text-muted mt-1 text-sm">Choose a source and repository policy.</p>
+        </div>
+      </header>
 
-        <section className="mt-8 space-y-6">
-          <div className="grid gap-3 sm:grid-cols-3">
+      <ItemCardGroup className="cocola-web-item-grid" columns={3} layout="grid">
             <SourceCard
               active={mode === "empty"}
               icon={FolderGit2}
               title="Empty Project"
-              detail="Local workspace on main"
+              detail="Start from a clean local workspace."
               onClick={() => setMode("empty")}
             />
             <SourceCard
@@ -230,22 +235,23 @@ export default function NewProjectPage() {
               detail={githubReady ? "Choose an installed repository" : "Connector required"}
               onClick={() => setMode("github_import")}
             />
-          </div>
+      </ItemCardGroup>
 
           {mode !== "empty" && !githubReady ? (
-            <div className="group rounded-2xl border border-amber-500/25 bg-amber-500/5 p-5 transition-all duration-300 hover:border-amber-500/40 hover:bg-amber-500/10 hover:shadow-[0_10px_30px_-18px_rgba(217,119,6,0.6)]">
-              <h2 className="text-sm font-semibold">Connect your personal GitHub App first</h2>
-              <p className="mt-1 text-sm text-muted-foreground">
+            <Card className="border-warning/25 bg-warning/5 p-5">
+              <Card.Header className="p-0"><Card.Title>Connect your personal GitHub App first</Card.Title></Card.Header>
+              <Card.Content className="mt-2 p-0">
+              <p className="text-muted text-sm leading-6">
                 Empty Projects remain available without GitHub. GitHub create and import use your
                 own private App.
               </p>
-              <Link
-                href="/connectors"
-                className="mt-4 inline-flex h-9 items-center rounded-xl bg-foreground px-4 text-sm font-medium text-background transition-transform duration-200 hover:-translate-y-0.5 active:translate-y-0"
-              >
+              </Card.Content>
+              <Card.Footer className="mt-4 p-0">
+              <Button variant="outline" onPress={() => router.push("/connectors")}>
                 Open Connectors
-              </Link>
-            </div>
+              </Button>
+              </Card.Footer>
+            </Card>
           ) : null}
 
           {mode === "github_import" && githubReady ? (
@@ -265,15 +271,12 @@ export default function NewProjectPage() {
           ) : null}
 
           {(mode === "empty" || githubReady) && mode !== "github_import" ? (
-            <div className="user-panel grid gap-4 p-5 sm:grid-cols-2">
-              <Field
-                label="Project name"
-                value={name}
-                onChange={setName}
-                placeholder="My project"
-              />
+            <Card className="p-5">
+              <Card.Header className="p-0"><Card.Title>Project details</Card.Title><Card.Description>These settings are editable after provisioning.</Card.Description></Card.Header>
+              <Card.Content className="mt-5 grid gap-4 p-0 sm:grid-cols-2">
+              <ProjectField label="Project name" value={name} onChange={setName} placeholder="My project" />
               {mode === "github_create" ? (
-                <Field
+                <ProjectField
                   label="Repository name"
                   value={repositoryName}
                   onChange={(value) => {
@@ -283,7 +286,7 @@ export default function NewProjectPage() {
                   placeholder="my-project"
                 />
               ) : null}
-              <Field
+              <ProjectField
                 label="Description"
                 value={description}
                 onChange={setDescription}
@@ -291,79 +294,58 @@ export default function NewProjectPage() {
                 wide
               />
               {mode === "github_create" ? (
-                <label className="space-y-1.5">
-                  <span className="user-section-title text-sm font-medium">Visibility</span>
-                  <SelectControl
-                    value={visibility}
-                    onValueChange={(value) => setVisibility(value as "private" | "public")}
-                    options={[
-                      { value: "private", label: "Private (recommended)" },
-                      { value: "public", label: "Public" },
-                    ]}
-                    contentClassName="cocola-user-ui"
-                  />
-                </label>
+                <ChoiceDropdown label="Visibility" value={visibility === "private" ? "Private (recommended)" : "Public"} options={[{id:"private", label:"Private (recommended)"},{id:"public", label:"Public"}]} onChange={(value) => setVisibility(value as "private" | "public")} />
               ) : null}
-            </div>
+              </Card.Content>
+            </Card>
           ) : null}
 
           {mode === "github_import" && githubReady ? (
-            <div className="user-panel grid gap-4 p-5 sm:grid-cols-2">
-              <Field
+            <Card className="p-5">
+              <Card.Header className="p-0"><Card.Title>Project details</Card.Title><Card.Description>Name and describe the imported workspace.</Card.Description></Card.Header>
+              <Card.Content className="mt-5 grid gap-4 p-0 sm:grid-cols-2">
+              <ProjectField
                 label="Project name"
                 value={name}
                 onChange={setName}
                 placeholder={selectedRepository?.name || "Project name"}
               />
-              <Field
+              <ProjectField
                 label="Description"
                 value={description}
                 onChange={setDescription}
                 placeholder="Optional"
               />
-            </div>
+              </Card.Content>
+            </Card>
           ) : null}
 
           {mode === "empty" || githubReady ? (
-            <>
+            <Card className="p-5">
+              <Card.Header className="p-0"><Card.Title>Provisioning</Card.Title><Card.Description>Choose the runtime used when this Project starts work.</Card.Description></Card.Header>
+              <Card.Content className="mt-5 grid gap-4 p-0">
               {runtimePickerEnabled ? (
-                <label className="block space-y-1.5">
-                  <span className="user-section-title text-sm font-medium">
-                    Default Agent Runtime
-                  </span>
-                  <SelectControl
-                    value={runtimeID}
-                    onValueChange={setRuntimeID}
-                    options={runtimes.map((runtime) => ({
-                      value: runtime.id,
-                      label: runtime.label,
-                    }))}
-                    contentClassName="cocola-user-ui"
-                  />
-                </label>
+                <ChoiceDropdown label="Default Agent Runtime" value={runtimes.find((runtime) => runtime.id === runtimeID)?.label || "Choose a runtime"} options={runtimes.map((runtime) => ({id:runtime.id,label:runtime.label}))} onChange={setRuntimeID} />
               ) : null}
               {error ? (
                 <p
                   role="alert"
-                  className="rounded-xl bg-destructive/10 px-3 py-2 text-sm text-destructive"
+                  className="rounded-xl bg-danger/10 px-3 py-2 text-sm text-danger"
                 >
                   {error}
                 </p>
               ) : null}
-              <button
-                type="button"
-                disabled={busy || !runtimeID}
-                onClick={() => void submit()}
-                className="user-accent-btn inline-flex h-10 items-center gap-2 rounded-xl px-4 text-sm font-semibold disabled:opacity-50"
-              >
+              </Card.Content>
+              <Card.Footer className="mt-5 justify-end gap-2 p-0">
+              <Button variant="outline" onPress={() => router.back()}>Cancel</Button>
+              <Button isDisabled={busy || !runtimeID} isPending={busy} onPress={() => void submit()}>
                 {busy ? <Loader2 className="size-4 animate-spin" /> : <Plus className="size-4" />}
                 Create project
-              </button>
-            </>
+              </Button>
+              </Card.Footer>
+            </Card>
           ) : null}
-        </section>
-      </div>
-    </main>
+    </WorkspacePageFrame>
   );
 }
 
@@ -380,33 +362,7 @@ function SourceCard({
   detail: string;
   onClick: () => void;
 }) {
-  return (
-    <button
-      type="button"
-      onClick={onClick}
-      aria-pressed={active}
-      className="user-card user-card--hover group relative text-left"
-      style={
-        active
-          ? {
-              borderWidth: 2,
-              borderStyle: "solid",
-              borderColor: "var(--page-accent)",
-              background: "var(--page-accent-soft)",
-            }
-          : undefined
-      }
-    >
-      <span className="user-card-glyph size-[38px]">
-        <Icon className="size-[18px] transition-transform duration-300 group-hover:scale-110" />
-      </span>
-      <span className="user-card-name mt-2.5 block text-sm font-semibold">{title}</span>
-      <span className="user-card-desc mt-1 block text-xs">{detail}</span>
-      {active ? (
-        <Check className="absolute right-3.5 top-3.5 size-4 text-[color:var(--page-accent)]" />
-      ) : null}
-    </button>
-  );
+  return <ItemCard<"button"> className={`relative w-full cursor-pointer overflow-hidden ${active ? "ring-accent bg-accent-soft ring-2" : ""}`} render={(props) => <button type="button" {...props} onClick={onClick} />}><PressableFeedback.Highlight /><ItemCard.Icon className={title === "Empty Project" ? "bg-amber-100 text-amber-600 dark:bg-amber-950 dark:text-amber-300" : title === "Create on GitHub" ? "bg-zinc-950 text-white dark:bg-white dark:text-zinc-950" : "bg-indigo-100 text-indigo-600 dark:bg-indigo-950 dark:text-indigo-300"}><Icon className="size-5" /></ItemCard.Icon><ItemCard.Content><ItemCard.Title>{title}</ItemCard.Title><ItemCard.Description>{detail}</ItemCard.Description></ItemCard.Content><ItemCard.Action>{active ? <CircleCheck className="text-accent size-4" /> : null}</ItemCard.Action></ItemCard>;
 }
 
 function RepositoryPicker({
@@ -429,60 +385,30 @@ function RepositoryPicker({
   onLoadMore: () => void;
 }) {
   return (
-    <div className="user-panel p-4">
-      <div className="relative">
-        <Search className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
-        <input
-          value={filter}
-          onChange={(event) => onFilter(event.target.value)}
-          placeholder="Search repositories"
-          className="user-search-input user-field-input h-10 w-full rounded-xl pl-9 pr-3 text-sm"
-        />
-      </div>
-      <div className="mt-3 max-h-72 space-y-1.5 overflow-y-auto">
+    <Card className="p-5">
+      <Card.Header className="flex-row items-start justify-between gap-3 p-0"><span><Card.Title>GitHub repositories</Card.Title><Card.Description>Choose an installed repository to import.</Card.Description></span><Chip color="success" size="sm" variant="soft">Ready</Chip></Card.Header>
+      <Card.Content className="mt-5 p-0">
+      <SearchField aria-label="Search repositories" value={filter} onChange={onFilter}><SearchField.Group><SearchField.SearchIcon /><SearchField.Input placeholder="Search repositories" /><SearchField.ClearButton /></SearchField.Group></SearchField>
+      <ItemCardGroup className="mt-3 max-h-80 overflow-y-auto">
         {repositories.map((repository) => (
-          <button
-            type="button"
+          <ItemCard<"button">
             key={repository.id}
-            onClick={() => onSelect(repository)}
-            aria-pressed={selectedID === repository.id}
-            className={cn(
-              "user-card row group w-full text-left",
-              selectedID === repository.id && "is-active",
-            )}
+            className={`relative w-full cursor-pointer overflow-hidden ${selectedID === repository.id ? "ring-accent bg-accent-soft ring-2" : ""}`}
+            render={(props) => <button type="button" {...props} onClick={() => onSelect(repository)} />}
           >
-            <span className="user-card-glyph">
-              <Lock className="size-3.5 transition-transform duration-300 group-hover:scale-110" />
-            </span>
-            <span className="min-w-0 flex-1">
-              <span className="user-card-name block truncate text-sm font-medium">
-                {repository.full_name}
-              </span>
-              <span className="user-card-desc text-xs">
-                {repository.default_branch} · {Math.ceil(repository.size_kb / 1024)} MB
-              </span>
-            </span>
-            {selectedID === repository.id ? (
-              <Check className="size-4 text-[color:var(--page-accent)]" />
-            ) : null}
-          </button>
+            <PressableFeedback.Highlight /><ItemCard.Icon className="bg-zinc-950 text-white dark:bg-white dark:text-zinc-950"><Lock className="size-4" /></ItemCard.Icon><ItemCard.Content><ItemCard.Title>{repository.full_name}</ItemCard.Title><ItemCard.Description>{repository.default_branch} · {Math.ceil(repository.size_kb / 1024)} MB</ItemCard.Description></ItemCard.Content><ItemCard.Action>{selectedID === repository.id ? <Check className="text-accent size-4" /> : null}</ItemCard.Action>
+          </ItemCard>
         ))}
-      </div>
+      </ItemCardGroup>
       {nextCursor ? (
-        <button
-          type="button"
-          disabled={busy}
-          onClick={onLoadMore}
-          className="user-tbtn user-tbtn--ghost mt-3 disabled:opacity-50"
-        >
-          <RefreshCw className={cn("size-3.5", busy && "animate-spin")} /> Load more repositories
-        </button>
+        <Button className="mt-3" isDisabled={busy} size="sm" variant="outline" onPress={onLoadMore}><RefreshCw className={`size-3.5 ${busy ? "animate-spin" : ""}`} />Load more repositories</Button>
       ) : null}
-    </div>
+      </Card.Content>
+    </Card>
   );
 }
 
-function Field({
+function ProjectField({
   label,
   value,
   onChange,
@@ -495,15 +421,9 @@ function Field({
   placeholder: string;
   wide?: boolean;
 }) {
-  return (
-    <label className={cn("space-y-1.5", wide && "sm:col-span-2")}>
-      <span className="user-section-title text-sm font-medium">{label}</span>
-      <input
-        value={value}
-        onChange={(event) => onChange(event.target.value)}
-        placeholder={placeholder}
-        className="user-search-input user-field-input h-10 w-full rounded-xl px-3 text-sm"
-      />
-    </label>
-  );
+  return <TextField className={wide ? "sm:col-span-2" : ""} value={value} variant="secondary" onChange={onChange}><Label>{label}</Label>{wide ? <TextArea rows={4} placeholder={placeholder} /> : <Input placeholder={placeholder} />}</TextField>;
+}
+
+function ChoiceDropdown({label, value, options, onChange}: {label:string; value:string; options:{id:string;label:string}[]; onChange:(value:string)=>void}) {
+  return <div><Label>{label}</Label><Dropdown><Dropdown.Trigger aria-label={label} className="border-separator bg-default hover:bg-default-hover mt-2 flex h-11 w-full min-w-0 items-center justify-between rounded-2xl border px-3 text-sm"><span className="truncate">{value}</span><ChevronDown className="text-muted size-4" /></Dropdown.Trigger><Dropdown.Popover placement="bottom start"><Dropdown.Menu aria-label={label} onAction={(key) => onChange(String(key))}>{options.map((option) => <Dropdown.Item key={option.id} id={option.id} textValue={option.label}>{option.label}</Dropdown.Item>)}</Dropdown.Menu></Dropdown.Popover></Dropdown></div>;
 }

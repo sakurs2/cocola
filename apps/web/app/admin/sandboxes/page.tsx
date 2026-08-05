@@ -8,11 +8,14 @@ import {
   AdminPageHeader,
   AdminRefreshButton,
   AdminStatusBadge,
+  AdminTruncatedValue,
 } from "@/components/admin/admin-ui";
-import { cn } from "@/lib/utils";
-import { AlertTriangle, CircleDot, Flame, LoaderCircle, Play, Server, Trash2 } from "lucide-react";
+import { Button, Card } from "@heroui/react";
+import { DataGrid, type DataGridColumn } from "@heroui-pro/react/data-grid";
+import { EmptyState } from "@heroui-pro/react/empty-state";
+import { CircleDot, LoaderCircle, Server, Trash2 } from "lucide-react";
 import { signOut } from "next-auth/react";
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 
 type SandboxRuntime = {
   sandbox_id: string;
@@ -64,7 +67,6 @@ const STATUS_TONES: Record<string, BadgeTone> = {
   unknown: "neutral",
 };
 
-const LIST_COLS = "1.6fr 0.9fr 1.4fr 1fr 0.9fr 1fr 1.4fr 0.8fr";
 
 export default function SandboxesPage() {
   const [sandboxes, setSandboxes] = useState<SandboxRuntime[]>([]);
@@ -123,16 +125,16 @@ export default function SandboxesPage() {
     void refresh();
   }, [refresh]);
 
-  const totals = useMemo(
-    () => ({
-      total: sandboxes.length,
-      running: sandboxes.filter((s) => s.status === "running").length,
-      ready: sandboxes.filter((s) => s.status === "ready").length,
-      orphan: sandboxes.filter((s) => s.status === "orphan").length,
-      reclaiming: sandboxes.filter((s) => s.status === "pending_reclaim").length,
-    }),
-    [sandboxes],
-  );
+  const columns: DataGridColumn<SandboxRuntime>[] = [
+    { id: "sandbox", header: "Sandbox", isRowHeader: true, minWidth: 250, cell: (sandbox) => <span className="block min-w-0"><AdminTruncatedValue className="font-mono text-xs font-medium" copyLabel="sandbox ID" value={sandbox.sandbox_id} /><span className="text-muted block truncate text-xs">{sandbox.lifecycle_state || "unknown"}</span></span> },
+    { id: "status", header: "Status", width: 150, cell: (sandbox) => <AdminStatusBadge tone={STATUS_TONES[sandbox.status] ?? "neutral"} dot>{STATUS_LABELS[sandbox.status] ?? sandbox.status}</AdminStatusBadge> },
+    { id: "session", header: "Session", minWidth: 220, cell: (sandbox) => <AdminTruncatedValue className="font-mono text-xs" copyLabel="session ID" value={sandbox.session_id || "—"} /> },
+    { id: "user", header: "User", minWidth: 200, cell: (sandbox) => <span className="block min-w-0"><AdminTruncatedValue className="text-sm font-medium" copyLabel="username" value={sandbox.username || sandbox.user_id || "—"} />{sandbox.username ? <AdminTruncatedValue className="text-muted font-mono text-xs" copyLabel="user ID" value={sandbox.user_id} /> : null}</span> },
+    { id: "runtime", header: "Runtime", minWidth: 220, cell: (sandbox) => <AdminTruncatedValue className="font-mono text-xs" copyLabel="runtime image" value={sandbox.image || "—"} /> },
+    { id: "created", header: "Created", minWidth: 150, cell: (sandbox) => <span className="text-muted text-xs tabular-nums">{formatDate(sandbox.created_at)}</span> },
+    { id: "placement", header: "Node / Pod", minWidth: 240, cell: (sandbox) => <span className="block min-w-0"><AdminTruncatedValue className="text-xs" copyLabel="node name" value={sandbox.node_name || "—"} /><AdminTruncatedValue className="text-muted font-mono text-xs" copyLabel="pod ID" value={`${sandbox.pod_name || "—"}${sandbox.pod_phase ? ` / ${sandbox.pod_phase}` : ""}`} /></span> },
+    { id: "actions", header: "Actions", align: "center", pinned: "end", width: 100, cell: (sandbox) => sandbox.status === "ready" || sandbox.status === "orphan" ? <Button isIconOnly aria-label={`Delete sandbox ${sandbox.sandbox_id}`} isDisabled={Boolean(deletingId)} isPending={deletingId === sandbox.sandbox_id} size="sm" variant="danger-soft" onPress={() => setPendingDeleteId(sandbox.sandbox_id)}>{deletingId === sandbox.sandbox_id ? <LoaderCircle className="size-4 animate-spin" /> : <Trash2 className="size-4" />}</Button> : <span className="text-muted">—</span> },
+  ];
 
   return (
     <AdminPage className="admin-theme-teal">
@@ -153,7 +155,7 @@ export default function SandboxesPage() {
       />
 
       {error ? (
-        <div className="rounded-xl border border-destructive/30 bg-destructive/10 px-4 py-3 text-sm text-destructive">
+        <div className="rounded-xl border border-danger/30 bg-danger/10 px-4 py-3 text-sm text-danger">
           {error}
         </div>
       ) : null}
@@ -167,142 +169,7 @@ export default function SandboxesPage() {
       {unsupported ? (
         <UnsupportedState />
       ) : (
-        <>
-          <section className="grid gap-4 md:grid-cols-2 xl:grid-cols-5">
-            <Metric label="Sandboxes" value={String(totals.total)} tone="teal" icon={<Server />} />
-            <Metric label="Running" value={String(totals.running)} tone="green" icon={<Play />} />
-            <Metric
-              label="Ready (warm)"
-              value={String(totals.ready)}
-              tone="sky"
-              icon={<CircleDot />}
-            />
-            <Metric
-              label="Orphan"
-              value={String(totals.orphan)}
-              tone="amber"
-              icon={<AlertTriangle />}
-            />
-            <Metric
-              label="To Reclaim"
-              value={String(totals.reclaiming)}
-              tone="rose"
-              icon={<Flame />}
-            />
-          </section>
-
-          <div className="admin-list">
-            {loading && sandboxes.length === 0 ? (
-              <div className="admin-list-empty">Loading sandboxes…</div>
-            ) : sandboxes.length === 0 ? (
-              <AdminEmptyState
-                icon={<SandboxesPageIcon className="size-6" />}
-                title="No sandboxes found"
-                description="Session-bound sandboxes will appear here once they are provisioned."
-              />
-            ) : (
-              <div className="admin-list-scroll">
-                <div className="min-w-[1180px]">
-                  <div className="admin-list-cols" style={{ gridTemplateColumns: LIST_COLS }}>
-                    <div>Sandbox ID</div>
-                    <div>Status</div>
-                    <div>Session ID</div>
-                    <div>User</div>
-                    <div>Runtime</div>
-                    <div>Created</div>
-                    <div>Node / Pod ID</div>
-                    <div className="text-right">Actions</div>
-                  </div>
-                  {sandboxes.map((sandbox) => (
-                    <div
-                      key={sandbox.sandbox_id}
-                      className="admin-list-row"
-                      style={{ gridTemplateColumns: LIST_COLS }}
-                    >
-                      <div className="min-w-0">
-                        <TruncatedValue
-                          value={sandbox.sandbox_id}
-                          className="admin-list-primary admin-list-mono"
-                        />
-                        <TruncatedValue
-                          value={sandbox.lifecycle_state || "unknown"}
-                          className="admin-list-sub"
-                        />
-                      </div>
-                      <div className="admin-list-cell">
-                        <AdminStatusBadge tone={STATUS_TONES[sandbox.status] ?? "neutral"} dot>
-                          {STATUS_LABELS[sandbox.status] ?? sandbox.status}
-                        </AdminStatusBadge>
-                      </div>
-                      <div className="admin-list-cell">
-                        <TruncatedValue
-                          value={sandbox.session_id || "—"}
-                          tooltip={sandbox.session_id}
-                          className="admin-list-mono"
-                        />
-                      </div>
-                      <div className="admin-list-cell">
-                        <TruncatedValue
-                          value={sandbox.username || sandbox.user_id || "—"}
-                          tooltip={userTitle(sandbox)}
-                          className="admin-list-primary"
-                        />
-                        {sandbox.username ? (
-                          <TruncatedValue
-                            value={sandbox.user_id}
-                            className="admin-list-sub admin-list-mono"
-                          />
-                        ) : null}
-                      </div>
-                      <div className="admin-list-cell">
-                        <TruncatedValue
-                          value={sandbox.image || "—"}
-                          tooltip={sandbox.image}
-                          className="admin-list-mono"
-                        />
-                      </div>
-                      <div className="admin-list-cell admin-list-muted">
-                        {formatDate(sandbox.created_at)}
-                      </div>
-                      <div className="admin-list-cell">
-                        <TruncatedValue
-                          value={sandbox.node_name || "—"}
-                          tooltip={sandbox.node_name}
-                        />
-                        <TruncatedValue
-                          value={`${sandbox.pod_name || "—"}${
-                            sandbox.pod_phase ? ` / ${sandbox.pod_phase}` : ""
-                          }`}
-                          tooltip={podTitle(sandbox)}
-                          className="admin-list-sub admin-list-mono"
-                        />
-                      </div>
-                      <div className="flex justify-end">
-                        {sandbox.status === "ready" || sandbox.status === "orphan" ? (
-                          <button
-                            type="button"
-                            className="admin-card-btn admin-card-btn--danger"
-                            disabled={Boolean(deletingId)}
-                            onClick={() => setPendingDeleteId(sandbox.sandbox_id)}
-                          >
-                            {deletingId === sandbox.sandbox_id ? (
-                              <LoaderCircle className="size-3.5 animate-spin" />
-                            ) : (
-                              <Trash2 className="size-3.5" />
-                            )}
-                            Delete
-                          </button>
-                        ) : (
-                          <span className="admin-list-muted">—</span>
-                        )}
-                      </div>
-                    </div>
-                  ))}
-                </div>
-              </div>
-            )}
-          </div>
-        </>
+        <DataGrid aria-label="Sandboxes" columns={columns} contentClassName="min-w-[1380px]" data={sandboxes} getRowId={(sandbox) => sandbox.sandbox_id} selectionMode="none" variant="primary" renderEmptyState={() => <EmptyState><EmptyState.Header><EmptyState.Media variant="icon"><SandboxesPageIcon className="text-teal-500" /></EmptyState.Media><EmptyState.Title>{loading ? "Loading sandboxes" : "No sandboxes found"}</EmptyState.Title><EmptyState.Description>{loading ? "Fetching sandbox runtime state…" : "Session-bound sandboxes will appear here once they are provisioned."}</EmptyState.Description></EmptyState.Header></EmptyState>} />
       )}
 
       <AdminConfirmDialog
@@ -321,112 +188,15 @@ export default function SandboxesPage() {
   );
 }
 
-function Metric({
-  label,
-  value,
-  tone,
-  icon,
-}: {
-  label: string;
-  value: string;
-  tone: string;
-  icon: React.ReactNode;
-}) {
-  return (
-    <div className="admin-metric-card" data-tone={tone}>
-      <div className="admin-metric-head">
-        <span className="admin-metric-glyph">{icon}</span>
-        <span className="admin-metric-key">{label}</span>
-      </div>
-      <div className="admin-metric-val truncate">{value}</div>
-    </div>
-  );
-}
-
-function TruncatedValue({
-  value,
-  tooltip,
-  className,
-}: {
-  value: string;
-  tooltip?: string;
-  className?: string;
-}) {
-  const ref = useRef<HTMLDivElement | null>(null);
-  const hideTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const [position, setPosition] = useState<{ left: number; top: number } | null>(null);
-  const fullValue = tooltip || value;
-  const hasTooltip = Boolean(fullValue && fullValue !== "—" && fullValue !== "-");
-
-  const clearHideTimer = useCallback(() => {
-    if (hideTimer.current) {
-      clearTimeout(hideTimer.current);
-      hideTimer.current = null;
-    }
-  }, []);
-
-  const showTooltip = useCallback(() => {
-    if (!hasTooltip || !ref.current) return;
-    clearHideTimer();
-    const rect = ref.current.getBoundingClientRect();
-    const maxWidth = Math.min(520, window.innerWidth - 24);
-    setPosition({
-      left: Math.min(Math.max(rect.left, 12), Math.max(12, window.innerWidth - maxWidth - 12)),
-      top: rect.bottom + 8,
-    });
-  }, [clearHideTimer, hasTooltip]);
-
-  const scheduleHide = useCallback(() => {
-    clearHideTimer();
-    hideTimer.current = setTimeout(() => setPosition(null), 140);
-  }, [clearHideTimer]);
-
-  useEffect(() => {
-    return () => clearHideTimer();
-  }, [clearHideTimer]);
-
-  return (
-    <>
-      <div
-        ref={ref}
-        tabIndex={hasTooltip ? 0 : undefined}
-        className={cn("truncate outline-none", hasTooltip && "cursor-default", className)}
-        onFocus={showTooltip}
-        onBlur={scheduleHide}
-        onMouseEnter={showTooltip}
-        onMouseLeave={scheduleHide}
-      >
-        {value}
-      </div>
-      {position && hasTooltip ? (
-        <div
-          className="fixed z-50 select-text break-all rounded-md border border-border bg-popover px-3 py-2 font-mono text-xs leading-relaxed text-popover-foreground shadow-lg"
-          style={{
-            left: position.left,
-            top: position.top,
-            maxWidth: "min(520px, calc(100vw - 24px))",
-          }}
-          onMouseEnter={clearHideTimer}
-          onMouseLeave={scheduleHide}
-        >
-          {fullValue}
-        </div>
-      ) : null}
-    </>
-  );
-}
-
 function UnsupportedState() {
   return (
-    <section className="admin-surface px-4 py-10 text-center">
-      <div className="mx-auto grid size-10 place-items-center rounded-md bg-muted">
-        <Server className="size-5 text-muted-foreground" />
-      </div>
-      <h2 className="mt-4 text-sm font-semibold">Sandbox runtime monitoring is not configured.</h2>
-      <p className="mx-auto mt-2 max-w-xl text-sm text-muted-foreground">
-        Start admin-api with shared Redis access to read sandbox-manager binding metadata.
-      </p>
-    </section>
+    <Card className="p-8">
+      <AdminEmptyState
+        icon={<Server className="text-teal-500" />}
+        title="Sandbox runtime monitoring is not configured"
+        description="Start admin-api with shared Redis access to read sandbox-manager binding metadata."
+      />
+    </Card>
   );
 }
 

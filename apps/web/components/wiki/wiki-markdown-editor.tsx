@@ -1,6 +1,7 @@
 "use client";
 
 import Highlight from "@tiptap/extension-highlight";
+import { Button, Separator, Tooltip } from "@heroui/react";
 import Image from "@tiptap/extension-image";
 import Placeholder from "@tiptap/extension-placeholder";
 import { TableKit } from "@tiptap/extension-table";
@@ -430,7 +431,7 @@ function ToolbarGroup({ children }: { children: ReactNode }) {
 }
 
 function ToolbarSeparator() {
-  return <span className={styles.toolbarSeparator} aria-hidden="true" />;
+  return <Separator className={styles.toolbarSeparator} orientation="vertical" />;
 }
 
 function ToolbarButton({
@@ -451,18 +452,22 @@ function ToolbarButton({
   };
 
   return (
-    <button
-      type="button"
-      className={cn(styles.toolbarButton, active && styles.toolbarButtonActive)}
-      title={label}
-      aria-label={label}
-      aria-pressed={active === undefined ? undefined : active}
-      disabled={disabled}
-      onMouseDown={keepSelection}
-      onClick={onClick}
-    >
-      {children}
-    </button>
+    <Tooltip delay={0}>
+      <Button
+        isIconOnly
+        aria-label={label}
+        aria-pressed={active === undefined ? undefined : active}
+        className={cn(styles.toolbarButton, active && styles.toolbarButtonActive)}
+        isDisabled={disabled}
+        size="sm"
+        variant={active ? "secondary" : "ghost"}
+        onMouseDown={keepSelection}
+        onPress={onClick}
+      >
+        {children}
+      </Button>
+      <Tooltip.Content>{label}</Tooltip.Content>
+    </Tooltip>
   );
 }
 

@@ -2,9 +2,11 @@
 
 import { ScrollText } from "lucide-react";
 import { ArrowRight, CircleAlert, LoaderCircle, Save, ToggleLeft, ToggleRight } from "lucide-react";
+import { Button, Card, Label, Switch, TextArea, TextField } from "@heroui/react";
+import { ItemCard } from "@heroui-pro/react/item-card";
+import { PressableFeedback } from "@heroui-pro/react/pressable-feedback";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { AdminAlert, AdminDrawer, AdminStatusBadge } from "@/components/admin/admin-ui";
-import { Button } from "@/components/ui/button";
 
 type AgentPrompt = {
   content: string;
@@ -17,9 +19,6 @@ const EMPTY_PROMPT: AgentPrompt = {
   enabled: false,
   version: 0,
 };
-
-const textarea =
-  "min-h-80 w-full resize-y rounded-xl border border-input bg-background px-3 py-2.5 text-sm leading-6 text-foreground outline-none transition-colors placeholder:text-muted-foreground focus:border-ring focus:ring-1 focus:ring-ring";
 
 export function SystemPromptTool({
   open,
@@ -95,33 +94,22 @@ export function SystemPromptTool({
 
   return (
     <>
-      <button
-        type="button"
-        className="admin-module-card group w-full text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/40"
-        onClick={() => setOpen(true)}
+      <ItemCard<"button">
+        className="cocola-admin-module-card relative min-h-52 w-full cursor-pointer overflow-hidden"
+        render={(props) => <button type="button" {...props} onClick={() => setOpen(true)} />}
       >
-        <span className="admin-module-head">
-          <span className="admin-module-icon">
-            <ScrollText className="size-6" strokeWidth={2} />
-          </span>
-          <span className="admin-module-title">System Prompt</span>
-        </span>
-        <span className="admin-module-summary">
-          Set the global behavior policy applied to new agent turns.
-        </span>
-        <span className="flex flex-wrap items-center gap-2">
+        <PressableFeedback.Highlight />
+        <ItemCard.Icon className="bg-cyan-100 text-cyan-600 dark:bg-cyan-950 dark:text-cyan-300"><ScrollText className="size-5" /></ItemCard.Icon>
+        <ItemCard.Content><ItemCard.Title>System Prompt</ItemCard.Title><ItemCard.Description>Set the global behavior policy applied to new agent turns.</ItemCard.Description><span className="mt-4 flex flex-wrap items-center gap-2">
           <PromptStatus loading={loading} error={Boolean(loadError)} enabled={prompt.enabled} />
           {!loading && !loadError ? (
-            <span className="font-mono text-[10px] text-muted-foreground">
+            <span className="font-mono text-[10px] text-muted">
               v{prompt.version || 0}
             </span>
           ) : null}
-        </span>
-        <span className="admin-module-cta">
-          Open
-          <ArrowRight className="size-3.5 transition-transform duration-200 group-hover:translate-x-0.5" />
-        </span>
-      </button>
+        </span></ItemCard.Content>
+        <ItemCard.Action><span className="text-accent flex items-center gap-1 text-sm font-medium">Open<ArrowRight className="size-4" /></span></ItemCard.Action>
+      </ItemCard>
 
       <AdminDrawer
         className="admin-theme-cyan"
@@ -132,13 +120,13 @@ export function SystemPromptTool({
         size="lg"
         footer={
           <div className="flex items-center justify-end gap-2">
-            <Button variant="outline" disabled={saving} onClick={() => setOpen(false)}>
+            <Button variant="outline" isDisabled={saving} onPress={() => setOpen(false)}>
               Cancel
             </Button>
             <Button
               className="min-w-32 gap-2"
-              disabled={saving || loading || !dirty}
-              onClick={() => void save()}
+              isDisabled={saving || loading || !dirty}
+              onPress={() => void save()}
             >
               {saving ? (
                 <LoaderCircle className="size-4 animate-spin" />
@@ -152,7 +140,7 @@ export function SystemPromptTool({
       >
         <div className="space-y-5">
           {loading ? (
-            <div className="flex min-h-48 items-center justify-center text-sm text-muted-foreground">
+            <div className="flex min-h-48 items-center justify-center text-sm text-muted">
               <LoaderCircle className="mr-2 size-4 animate-spin" />
               Loading system prompt
             </div>
@@ -162,7 +150,7 @@ export function SystemPromptTool({
                 <AdminAlert tone="error" icon={<CircleAlert className="size-4" />}>
                   <div className="flex flex-wrap items-center justify-between gap-3">
                     <span>{loadError}</span>
-                    <Button variant="outline" size="sm" onClick={() => void load()}>
+                    <Button variant="outline" size="sm" onPress={() => void load()}>
                       Retry
                     </Button>
                   </div>
@@ -177,36 +165,20 @@ export function SystemPromptTool({
               <div className="flex flex-wrap items-start justify-between gap-3">
                 <div>
                   <div className="text-sm font-semibold text-foreground">Global system prompt</div>
-                  <p className="mt-1 max-w-xl text-xs leading-5 text-muted-foreground">
+                  <p className="mt-1 max-w-xl text-xs leading-5 text-muted">
                     Saved content is injected server-side and is never copied into trace metadata.
                   </p>
                 </div>
-                <Button
-                  type="button"
-                  variant="outline"
-                  className="gap-2"
-                  onClick={() => setEnabled((value) => !value)}
-                  disabled={saving || Boolean(loadError)}
-                >
-                  {enabled ? <ToggleRight className="size-4" /> : <ToggleLeft className="size-4" />}
-                  {enabled ? "Enabled" : "Disabled"}
-                </Button>
+                <Switch isDisabled={saving || Boolean(loadError)} isSelected={enabled} onChange={setEnabled}><Switch.Content><Switch.Control><Switch.Thumb /></Switch.Control>{enabled ? "Enabled" : "Disabled"}</Switch.Content></Switch>
               </div>
 
-              <textarea
-                className={textarea}
-                value={draft}
-                onChange={(event) => setDraft(event.target.value)}
-                placeholder="Write the global behavior policy for agents..."
-                spellCheck={false}
-                disabled={saving || Boolean(loadError)}
-              />
+              <TextField isDisabled={saving || Boolean(loadError)} value={draft} variant="secondary" onChange={setDraft}><Label className="sr-only">Global system prompt</Label><TextArea className="min-h-80 text-sm leading-6" placeholder="Write the global behavior policy for agents..." spellCheck={false} /></TextField>
 
               <div className="grid gap-3 sm:grid-cols-2">
                 <PromptMeta label="Version" value={prompt.version || 0} />
                 <PromptMeta label="Characters" value={draft.length} />
               </div>
-              <div className="text-xs text-muted-foreground">
+              <div className="text-xs text-muted">
                 {dirty ? "Unsaved changes" : "Up to date"}
               </div>
             </>
@@ -237,12 +209,12 @@ function PromptStatus({
 
 function PromptMeta({ label, value }: { label: string; value: string | number }) {
   return (
-    <div className="rounded-xl border border-border/70 bg-muted/35 px-3 py-2.5">
-      <div className="text-xs text-muted-foreground">{label}</div>
+    <Card className="p-3">
+      <div className="text-muted text-xs">{label}</div>
       <div className="mt-1 font-mono text-sm font-semibold tabular-nums text-foreground">
         {value}
       </div>
-    </div>
+    </Card>
   );
 }
 

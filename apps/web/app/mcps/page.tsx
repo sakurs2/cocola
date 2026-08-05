@@ -1,8 +1,15 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
-import { LayoutGrid, LoaderCircle, Plug, Power, Table2, Zap } from "lucide-react";
+import { Button, Card, Chip } from "@heroui/react";
+import { EmptyState } from "@heroui-pro/react/empty-state";
+import { LoaderCircle, Plug, Power } from "lucide-react";
 import Link from "next/link";
+import { useCallback, useEffect, useState } from "react";
+import {
+  WorkspacePageFrame,
+  WorkspacePageHeader,
+  WorkspaceSectionHeader,
+} from "@/components/heroui-workspace/workspace-ui";
 
 type MCPServer = {
   id: string;
@@ -17,15 +24,8 @@ type MCPServer = {
   effective_enabled: boolean;
 };
 
-type MCPHub = {
-  total_published: number;
-  total_effective: number;
-  transports: Record<string, number>;
-};
-
 export default function MCPPage() {
   const [mcps, setMcps] = useState<MCPServer[]>([]);
-  const [hub, setHub] = useState<MCPHub | null>(null);
   const [loading, setLoading] = useState(true);
   const [workingId, setWorkingId] = useState<string | null>(null);
   const [error, setError] = useState("");
@@ -34,32 +34,14 @@ export default function MCPPage() {
     setLoading(true);
     setError("");
     try {
-      const [res, hubRes] = await Promise.all([
-        fetch("/api/mcps", { cache: "no-store" }),
-        fetch("/api/mcps/hub", { cache: "no-store" }),
-      ]);
-      if (!res.ok) throw new Error(await readError(res));
-      const data = (await res.json()) as { mcps?: MCPServer[] };
+      const response = await fetch("/api/mcps", { cache: "no-store" });
+      if (!response.ok) throw new Error(await readError(response));
+      const data = (await response.json()) as { mcps?: MCPServer[] };
       setMcps(data.mcps ?? []);
-      // The hub rollup is supplementary; a failure here must not blank the page.
-      if (hubRes.ok) {
-        setHub((await hubRes.json()) as MCPHub);
-      } else {
-        setHub(null);
-      }
-    } catch (err) {
-      setError(err instanceof Error ? err.message : String(err));
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : String(cause));
     } finally {
       setLoading(false);
-    }
-  }, []);
-
-  const refreshHub = useCallback(async () => {
-    try {
-      const res = await fetch("/api/mcps/hub", { cache: "no-store" });
-      setHub(res.ok ? ((await res.json()) as MCPHub) : null);
-    } catch {
-      setHub(null);
     }
   }, []);
 
@@ -77,190 +59,101 @@ export default function MCPPage() {
       ),
     );
     try {
-      const res = await fetch(
+      const response = await fetch(
         `/api/mcps/${encodeURIComponent(mcp.id)}/${mcp.effective_enabled ? "disable" : "enable"}`,
         { method: "POST" },
       );
-      if (!res.ok) throw new Error(await readError(res));
-    } catch (err) {
+      if (!response.ok) throw new Error(await readError(response));
+    } catch (cause) {
       setMcps(previous);
-      setError(err instanceof Error ? err.message : String(err));
+      setError(cause instanceof Error ? cause.message : String(cause));
     } finally {
       setWorkingId(null);
-      // Refresh the aggregated rollup so effective counts track the toggle.
-      void refreshHub();
     }
   };
 
   return (
-    <main className="user-canvas user-page user-theme-orange h-full min-w-0 flex-1 overflow-y-auto px-4 sm:px-6">
-      <div className="mx-auto w-full max-w-6xl space-y-6 py-10">
-        <header className="flex items-center gap-3.5">
-          <span className="user-page-icon">
-            <Plug className="size-6" />
-          </span>
-          <div className="space-y-1">
-            <div className="user-eyebrow">Connectors</div>
-            <h1 className="text-2xl font-bold tracking-tight">MCP</h1>
-            <p className="text-sm text-muted-foreground">
-              Choose which administrator-published MCP servers are available in your agent sessions.
-            </p>
-          </div>
-        </header>
+    <WorkspacePageFrame>
+      <WorkspacePageHeader
+        description="External tool servers published to the current user."
+        icon={<Plug className="size-5" />}
+        title="MCP"
+      />
 
-        {hub ? (
-          <section className="grid gap-4 sm:grid-cols-3">
-            <div className="user-metric-card" data-tone="orange">
-              <div className="user-metric-head">
-                <span className="user-metric-glyph">
-                  <LayoutGrid className="size-[22px]" />
-                </span>
-                <span className="user-metric-key">Published servers</span>
-              </div>
-              <div className="user-metric-val">{hub.total_published}</div>
-              <div className="user-metric-detail">Available from administrators</div>
-            </div>
-            <div className="user-metric-card" data-tone="emerald">
-              <div className="user-metric-head">
-                <span className="user-metric-glyph">
-                  <Zap className="size-[22px]" />
-                </span>
-                <span className="user-metric-key">Active in your sessions</span>
-              </div>
-              <div className="user-metric-val">{hub.total_effective}</div>
-              <div className="user-metric-detail">Enabled effective connectors</div>
-            </div>
-            <div className="user-metric-card" data-tone="amber">
-              <div className="user-metric-head">
-                <span className="user-metric-glyph">
-                  <Table2 className="size-[22px]" />
-                </span>
-                <span className="user-metric-key">By transport</span>
-              </div>
-              <div className="mt-1 flex flex-wrap gap-1.5">
-                {Object.keys(hub.transports).length ? (
-                  Object.entries(hub.transports).map(([transport, count]) => (
-                    <span key={transport} className="user-metric-chip">
-                      {transport} · {count}
-                    </span>
-                  ))
-                ) : (
-                  <span className="text-xs text-muted-foreground">None active</span>
-                )}
-              </div>
-            </div>
-          </section>
-        ) : null}
+      {error ? <div className="bg-danger/10 text-danger rounded-2xl px-4 py-3 text-sm">{error}</div> : null}
 
-        {error ? (
-          <div className="rounded-xl border border-red-500/30 bg-red-500/10 px-3.5 py-2.5 text-sm text-red-600">
-            {error}
-          </div>
-        ) : null}
+      <WorkspaceSectionHeader
+        description={`${mcps.length} server${mcps.length === 1 ? "" : "s"} available to this account.`}
+        title="Published servers"
+      />
 
-        {loading ? (
-          <div className="flex h-40 items-center justify-center text-muted-foreground">
-            <LoaderCircle className="mr-2 size-4 animate-spin" />
-            Loading MCP servers
-          </div>
-        ) : mcps.length ? (
-          <section className="space-y-4">
-            <div className="flex items-center gap-2.5">
-              <h2 className="user-section-title">Published Servers</h2>
-              <span className="user-count-badge">{mcps.length}</span>
-            </div>
-            <div className="grid gap-4 md:grid-cols-2">
-              {mcps.map((mcp) => {
-                const working = workingId === mcp.id;
-                return (
-                  <div key={mcp.id} className="user-card user-card--hover">
-                    <div className="flex items-start gap-3">
-                      <span className="user-card-glyph">
+      {loading ? (
+        <div className="grid min-h-48 place-items-center">
+          <LoaderCircle className="text-muted size-5 animate-spin" />
+        </div>
+      ) : mcps.length ? (
+        <section className="cocola-web-catalog-grid grid items-stretch gap-3 md:grid-cols-2 xl:grid-cols-3">
+          {mcps.map((mcp) => {
+            const working = workingId === mcp.id;
+            const endpoint = mcp.transport === "stdio" ? mcp.command : mcp.url_hint;
+            return (
+              <Card key={mcp.id} className="cocola-web-catalog-card h-full min-h-[15rem] p-5">
+                <Card.Content className="flex h-full min-w-0 flex-col p-0">
+                  <Link className="group min-w-0 no-underline" href={`/mcps/${encodeURIComponent(mcp.id)}`}>
+                    <span className="flex items-start justify-between gap-3">
+                      <span className="flex size-10 items-center justify-center rounded-2xl bg-orange-500/15 text-orange-500">
                         <Plug className="size-5" />
                       </span>
-                      <div className="min-w-0 flex-1">
-                        <div className="flex flex-wrap items-center gap-2">
-                          <Link
-                            href={`/mcps/${encodeURIComponent(mcp.id)}`}
-                            className="user-card-name truncate hover:underline"
-                          >
-                            {mcp.name || mcp.id}
-                          </Link>
-                          <span className="user-tag user-tag--accent">{mcp.transport}</span>
-                        </div>
-                        <p className="user-card-desc mt-1 line-clamp-2">
-                          {mcp.description || "No description"}
-                        </p>
-                        <div className="user-card-mono mt-2.5 truncate">
-                          {mcp.transport === "stdio" ? mcp.command : mcp.url_hint}
-                        </div>
-                      </div>
-                    </div>
-                    <div className="mt-3 flex flex-wrap items-center gap-1.5">
-                      {mcp.effective_enabled ? (
-                        <span className="user-tag user-tag--ok">
-                          <span className="user-tag-dot" /> enabled
-                        </span>
-                      ) : (
-                        <span className="user-tag">disabled</span>
-                      )}
-                      <span className="user-tag">
-                        {mcp.default_enabled ? "default on" : "default off"}
-                      </span>
-                    </div>
-                    <div className="mt-4 flex items-center gap-2 border-t border-border/60 pt-4">
-                      {mcp.effective_enabled ? (
-                        <button
-                          type="button"
-                          className="user-tbtn user-tbtn--ghost flex-1"
-                          disabled={working}
-                          onClick={() => void toggle(mcp)}
-                        >
-                          {working ? (
-                            <LoaderCircle className="size-3.5 animate-spin" />
-                          ) : (
-                            <Power className="size-3.5 text-emerald-600" />
-                          )}
-                          Disable
-                        </button>
-                      ) : (
-                        <button
-                          type="button"
-                          className="user-tbtn user-tbtn--fill flex-1"
-                          disabled={working}
-                          onClick={() => void toggle(mcp)}
-                        >
-                          {working ? (
-                            <LoaderCircle className="size-3.5 animate-spin" />
-                          ) : (
-                            <Power className="size-3.5" />
-                          )}
-                          Enable
-                        </button>
-                      )}
-                    </div>
+                      <Chip color={mcp.effective_enabled ? "success" : "warning"} size="sm" variant="soft">
+                        {mcp.effective_enabled ? "Enabled" : "Disabled"}
+                      </Chip>
+                    </span>
+                    <span className="text-foreground mt-4 block truncate font-semibold">{mcp.name || mcp.id}</span>
+                    <span className="text-muted mt-1 line-clamp-2 min-h-10 text-sm leading-5">
+                      {mcp.description || "No description"}
+                    </span>
+                    <span className="mt-4 flex flex-wrap gap-1.5">
+                      <Chip size="sm" variant="soft">{mcp.transport}</Chip>
+                      <Chip size="sm" variant="soft">{mcp.default_enabled ? "Default on" : "Default off"}</Chip>
+                    </span>
+                    {endpoint ? (
+                      <code className="bg-surface-secondary text-muted mt-3 block truncate rounded-lg px-2.5 py-1.5 text-xs">
+                        {endpoint}
+                      </code>
+                    ) : null}
+                  </Link>
+                  <div className="border-separator mt-auto border-t pt-4">
+                    <Button
+                      fullWidth
+                      isDisabled={working}
+                      size="sm"
+                      variant={mcp.effective_enabled ? "outline" : "primary"}
+                      onPress={() => void toggle(mcp)}
+                    >
+                      {working ? <LoaderCircle className="size-3.5 animate-spin" /> : <Power className="size-3.5" />}
+                      {mcp.effective_enabled ? "Disable" : "Enable"}
+                    </Button>
                   </div>
-                );
-              })}
-            </div>
-          </section>
-        ) : (
-          <div className="user-empty">
-            <div className="grid size-10 place-items-center rounded-xl bg-muted">
-              <Plug className="size-4 text-muted-foreground" />
-            </div>
-            <p className="text-sm text-muted-foreground">
-              No MCP servers published by administrators.
-            </p>
-          </div>
-        )}
-      </div>
-    </main>
+                </Card.Content>
+              </Card>
+            );
+          })}
+        </section>
+      ) : (
+        <EmptyState>
+          <EmptyState.Header>
+            <EmptyState.Media variant="icon"><Plug className="text-orange-500" /></EmptyState.Media>
+            <EmptyState.Title>No MCP servers</EmptyState.Title>
+            <EmptyState.Description>No MCP servers are published by administrators.</EmptyState.Description>
+          </EmptyState.Header>
+        </EmptyState>
+      )}
+    </WorkspacePageFrame>
   );
 }
 
-async function readError(res: Response) {
-  const text = await res.text();
+async function readError(response: Response) {
+  const text = await response.text();
   try {
     const json = JSON.parse(text);
     if (typeof json.error === "string") return json.error;
@@ -269,6 +162,6 @@ async function readError(res: Response) {
     }
     return json.message || text;
   } catch {
-    return text || res.statusText;
+    return text || response.statusText;
   }
 }

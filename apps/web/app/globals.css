@@ -2,160 +2,56 @@
 @import "@xterm/xterm/css/xterm.css";
 
 @import "tailwindcss";
+@import "@heroui/styles";
+@import "@heroui-pro/react/css";
 @config "../tailwind.config.ts";
 
-/*
- * shadcn-style design tokens. User and admin surfaces opt into scoped cocola
- * palettes so route-specific workspaces can evolve without fighting each other.
- */
 @layer base {
   :root {
-    --background: 0 0% 100%;
-    --foreground: 222.2 84% 4.9%;
-    --card: 0 0% 100%;
-    --card-foreground: 222.2 84% 4.9%;
-    --popover: 0 0% 100%;
-    --popover-foreground: 222.2 84% 4.9%;
-    --primary: 222.2 47.4% 11.2%;
-    --primary-foreground: 210 40% 98%;
-    --secondary: 210 40% 96.1%;
-    --secondary-foreground: 222.2 47.4% 11.2%;
-    --muted: 210 40% 96.1%;
-    --muted-foreground: 215.4 16.3% 46.9%;
-    --accent: 210 40% 96.1%;
-    --accent-foreground: 222.2 47.4% 11.2%;
-    --destructive: 0 84.2% 60.2%;
-    --destructive-foreground: 210 40% 98%;
-    --border: 214.3 31.8% 91.4%;
-    --input: 214.3 31.8% 91.4%;
-    --ring: 222.2 84% 4.9%;
-    --radius: 0.5rem;
+    --font-sans:
+      "Inter Variable", "PingFang SC", "Microsoft YaHei", ui-sans-serif, system-ui, sans-serif;
+  }
+}
 
-    --sidebar: 0 0% 98%;
-    --sidebar-foreground: 222.2 84% 4.9%;
-    --sidebar-border: 214.3 31.8% 91.4%;
-    --sidebar-accent: 210 40% 96.1%;
-    --sidebar-accent-foreground: 222.2 47.4% 11.2%;
+.cocola-admin-module-card {
+  transition:
+    transform 220ms ease,
+    box-shadow 220ms ease,
+    border-color 220ms ease;
+}
+
+.cocola-admin-module-icon,
+.cocola-admin-module-arrow {
+  transition: transform 220ms ease;
+}
+
+@media (hover: hover) {
+  .cocola-admin-module-trigger:hover .cocola-admin-module-card {
+    transform: translateY(-4px) scale(1.01);
+    border-color: color-mix(in srgb, var(--accent) 28%, var(--separator));
+    box-shadow: 0 18px 44px -28px color-mix(in srgb, var(--accent) 55%, transparent);
   }
 
-  .dark {
-    /* Open WebUI near-black palette: bg #141414, surface #212121, border #2a2a2a */
-    --background: 0 0% 8%;
-    --foreground: 0 0% 98%;
-    --card: 0 0% 13%;
-    --card-foreground: 0 0% 98%;
-    --popover: 0 0% 13%;
-    --popover-foreground: 0 0% 98%;
-    --primary: 0 0% 98%;
-    --primary-foreground: 0 0% 9%;
-    --secondary: 0 0% 16%;
-    --secondary-foreground: 0 0% 98%;
-    --muted: 0 0% 16%;
-    --muted-foreground: 0 0% 60%;
-    --accent: 0 0% 16%;
-    --accent-foreground: 0 0% 98%;
-    --destructive: 0 62.8% 45%;
-    --destructive-foreground: 0 0% 98%;
-    --border: 0 0% 16%;
-    --input: 0 0% 13%;
-    --ring: 0 0% 45%;
-
-    --sidebar: 0 0% 6%;
-    --sidebar-foreground: 0 0% 88%;
-    --sidebar-border: 0 0% 14%;
-    --sidebar-accent: 0 0% 16%;
-    --sidebar-accent-foreground: 0 0% 98%;
+  .cocola-admin-module-trigger:hover .cocola-admin-module-icon {
+    transform: translateX(2px) translateY(-2px) rotate(-3deg) scale(1.06);
   }
 
-  .cocola-user-ui {
-    --background: 0 0% 100%;
-    --foreground: 222 47% 11%;
-    --card: 0 0% 100%;
-    --card-foreground: 222 47% 11%;
-    --popover: 0 0% 100%;
-    --popover-foreground: 222 47% 11%;
-    --primary: 221 83% 45%;
-    --primary-foreground: 0 0% 100%;
-    --secondary: 214 32% 91%;
-    --secondary-foreground: 222 47% 11%;
-    --muted: 214 32% 94%;
-    --muted-foreground: 215 16% 44%;
-    --accent: 213 94% 95%;
-    --accent-foreground: 221 83% 33%;
-    --destructive: 0 72% 51%;
-    --destructive-foreground: 0 0% 100%;
-    --border: 214 32% 88%;
-    --input: 214 32% 86%;
-    --ring: 221 83% 53%;
-
-    --sidebar: 0 0% 100%;
-    --sidebar-foreground: 222 47% 16%;
-    --sidebar-border: 214 32% 90%;
-    --sidebar-accent: 210 40% 96%;
-    --sidebar-accent-foreground: 221 83% 35%;
-  }
-
-  .cocola-admin-ui {
-    --background: 0 0% 100%;
-    --foreground: 222 47% 11%;
-    --card: 0 0% 100%;
-    --card-foreground: 222 47% 11%;
-    --popover: 0 0% 100%;
-    --popover-foreground: 222 47% 11%;
-    --primary: 221 83% 45%;
-    --primary-foreground: 0 0% 100%;
-    --secondary: 214 32% 91%;
-    --secondary-foreground: 222 47% 11%;
-    --muted: 214 32% 94%;
-    --muted-foreground: 215 16% 44%;
-    --accent: 213 94% 95%;
-    --accent-foreground: 221 83% 33%;
-    --destructive: 0 72% 51%;
-    --destructive-foreground: 0 0% 100%;
-    --border: 214 32% 88%;
-    --input: 214 32% 86%;
-    --ring: 221 83% 53%;
-
-    --sidebar: 0 0% 100%;
-    --sidebar-foreground: 222 47% 16%;
-    --sidebar-border: 214 32% 90%;
-    --sidebar-accent: 210 40% 96%;
-    --sidebar-accent-foreground: 221 83% 35%;
-
-    --admin-cloud: #ffffff;
-    --admin-frost: #ffffff;
-    --admin-ink: #142033;
-    --admin-sky: #2563eb;
-    --admin-violet: #7c3aed;
-    --admin-signal: #10b981;
-
-    /* ---- per-page accent (default: purple/violet). Individual admin sub-pages
-       override these via an .admin-theme-* class on their page root so each
-       page's theme color matches its sidebar nav-icon color. ---- */
-    --page-accent: #7828c8;
-    --page-accent-2: #9353d3;
-    --page-accent-grad: linear-gradient(135deg, #7828c8, #9353d3);
-    --page-accent-soft: #faf5ff;
-    --page-accent-ink: #6b21a8;
-    --page-accent-border: #d8b4fe;
-    --page-accent-focus: #a855f7;
-    --page-accent-focus-ring: rgba(168, 85, 247, 0.18);
-    --page-accent-shadow: rgba(120, 40, 200, 0.6);
-    --page-accent-shadow-soft: rgba(120, 40, 200, 0.35);
+  .cocola-admin-module-trigger:hover .cocola-admin-module-arrow {
+    transform: translateX(3px);
   }
 }
 
 @layer base {
   * {
-    border-color: hsl(var(--border));
+    border-color: var(--separator);
   }
   html,
   body {
     height: 100%;
   }
   body {
-    background-color: hsl(var(--background));
-    color: hsl(var(--foreground));
+    background-color: var(--background);
+    color: var(--foreground);
   }
   /*
    * Tailwind v4 Preflight no longer sets cursor:pointer on buttons/links the
@@ -178,7 +74,7 @@
    */
   * {
     scrollbar-width: thin;
-    scrollbar-color: hsl(var(--muted-foreground) / 0.28) transparent;
+    scrollbar-color: oklch(from var(--muted) l c h / 0.28) transparent;
   }
 
   *::-webkit-scrollbar {
@@ -192,19 +88,19 @@
 
   *::-webkit-scrollbar-thumb {
     border-radius: 9999px;
-    background: hsl(var(--muted-foreground) / 0.28);
+    background: oklch(from var(--muted) l c h / 0.28);
     border: 2px solid transparent;
     background-clip: padding-box;
     transition: background 160ms ease;
   }
 
   *:hover::-webkit-scrollbar-thumb {
-    background: hsl(var(--muted-foreground) / 0.42);
+    background: oklch(from var(--muted) l c h / 0.42);
     background-clip: padding-box;
   }
 
   *::-webkit-scrollbar-thumb:hover {
-    background: hsl(var(--muted-foreground) / 0.6);
+    background: oklch(from var(--muted) l c h / 0.6);
     background-clip: padding-box;
   }
 
@@ -233,24 +129,42 @@
     isolation: isolate;
     overflow: hidden;
     max-width: 100vw;
-    background: hsl(var(--background));
+    background: var(--background);
   }
 
   .cocola-user-ui .glass-panel {
-    background: hsl(var(--card));
+    background: var(--surface);
     box-shadow: 0 1px 2px hsl(222 47% 11% / 0.04);
   }
 
   .cocola-user-ui .sky-glass-sidebar {
     position: relative;
-    border-color: hsl(var(--sidebar-border));
-    background: hsl(var(--sidebar));
+    border-color: var(--separator);
+    background: var(--background);
     box-shadow: none;
   }
 
   .cocola-user-ui .sky-glass-sidebar > * {
     position: relative;
     z-index: 1;
+  }
+
+  .cocola-user-ui .cocola-web-sidebar {
+    background: var(--background);
+  }
+
+  .cocola-user-ui .cocola-chat-user-bubble {
+    border: 1px solid oklch(from var(--separator) l c h / 0.84);
+    background: oklch(from var(--default) l c h / 0.78);
+    box-shadow: 0 8px 20px -18px oklch(from var(--foreground) l c h / 0.32);
+  }
+
+  .cocola-user-ui .cocola-chat-assistant {
+    width: 100%;
+  }
+
+  .cocola-user-ui .cocola-chat-model-header {
+    min-height: 2rem;
   }
 
   /* Slim translucent scrollbar for the sidebar nav */
@@ -331,8 +245,8 @@
   }
 
   .cocola-user-ui .composer-lift {
-    border-color: hsl(var(--border));
-    background: hsl(var(--card));
+    border-color: var(--separator);
+    background: var(--surface);
     box-shadow: 0 2px 10px -6px hsl(222 47% 11% / 0.12);
     transition:
       box-shadow 150ms ease,
@@ -340,31 +254,14 @@
   }
 
   .cocola-user-ui .composer-lift:focus-within {
-    border-color: hsl(var(--border));
+    border-color: var(--separator);
     box-shadow: 0 6px 24px -10px hsl(222 47% 11% / 0.18);
-  }
-
-  /* Reusable skin utilities for the cocola user UI refactor (shadcn skeleton
-     + cocola skin): brand gradient for primary actions and soft card shadows.
-     Defined globally so the shared ui/ components can consume them anywhere. */
-  .brand-gradient {
-    background-image: linear-gradient(135deg, #2563eb, #7c3aed);
-  }
-
-  .shadow-xs {
-    box-shadow: 0 1px 2px 0 hsl(222 47% 11% / 0.05);
-  }
-
-  .shadow-card {
-    box-shadow:
-      0 1px 3px 0 hsl(222 47% 11% / 0.06),
-      0 1px 2px -1px hsl(222 47% 11% / 0.04);
   }
 
   .cocola-user-ui .cocola-main-glass {
     position: relative;
-    border-color: hsl(var(--border));
-    background: hsl(var(--card));
+    border-color: var(--separator);
+    background: var(--surface);
     box-shadow: none;
   }
 
@@ -383,8 +280,8 @@
   }
 
   .cocola-user-ui .cocola-suggest-card {
-    border-color: hsl(var(--border));
-    background: hsl(var(--card));
+    border-color: var(--separator);
+    background: var(--surface);
     box-shadow: 0 1px 2px hsl(222 47% 11% / 0.04);
   }
 
@@ -465,8 +362,8 @@
   }
 
   .cocola-user-ui .cocola-prompt-card {
-    border-color: hsl(var(--border));
-    background: hsl(var(--card));
+    border-color: var(--separator);
+    background: var(--surface);
     box-shadow: 0 1px 2px hsl(222 47% 11% / 0.04);
     transition:
       transform 200ms cubic-bezier(0.22, 1, 0.36, 1),
@@ -491,20 +388,20 @@
   .cocola-user-ui .cocola-prompt-card:hover .cocola-prompt-arrow {
     opacity: 1;
     transform: translateX(0);
-    color: hsl(var(--primary));
+    color: var(--accent);
   }
 
   .cocola-user-ui .cocola-admin-ui.admin-ops-bg,
   .cocola-admin-ui.admin-ops-bg {
     position: relative;
     isolation: isolate;
-    background: hsl(var(--background));
+    background: var(--background);
   }
 
   .cocola-admin-ui .admin-glass-sidebar {
     position: relative;
-    border-color: hsl(var(--sidebar-border));
-    background: hsl(var(--sidebar));
+    border-color: var(--separator);
+    background: var(--background);
     box-shadow: none;
   }
 
@@ -514,7 +411,7 @@
   }
 
   .cocola-admin-ui .admin-glass-shell {
-    border-color: hsl(var(--border));
+    border-color: var(--separator);
     background: #f8fafc;
     box-shadow: none;
   }
@@ -523,14 +420,14 @@
   .cocola-admin-ui.admin-mobile-nav,
   .cocola-admin-ui .admin-drawer,
   .cocola-admin-ui.admin-drawer {
-    border-color: hsl(var(--border));
-    background: hsl(var(--background));
+    border-color: var(--separator);
+    background: var(--background);
     box-shadow: 0 12px 32px hsl(215 40% 20% / 0.12);
   }
 
   .cocola-admin-ui .admin-topbar {
-    border-color: hsl(var(--border));
-    background: hsl(var(--background));
+    border-color: var(--separator);
+    background: var(--background);
   }
 
   .cocola-admin-ui .admin-context-pill {
@@ -556,20 +453,20 @@
     align-items: center;
     justify-content: center;
     border-radius: 0.75rem;
-    color: hsl(var(--muted-foreground));
+    color: var(--muted);
     transition:
       color 160ms ease,
       background-color 160ms ease;
   }
 
   .cocola-admin-ui .admin-rail-button:hover {
-    color: hsl(var(--primary));
-    background: hsl(var(--sidebar-accent));
+    color: var(--accent);
+    background: var(--default);
   }
 
   .cocola-admin-ui .admin-rail-button:focus-visible,
   .cocola-admin-ui .admin-nav-item:focus-visible {
-    outline: 2px solid hsl(var(--ring) / 0.42);
+    outline: 2px solid oklch(from var(--focus) l c h / 0.42);
     outline-offset: 2px;
   }
 
@@ -580,13 +477,12 @@
   }
 
   .cocola-admin-ui .admin-nav-item:hover {
-    background: hsl(var(--sidebar-accent));
+    background: var(--default);
   }
 
-  .cocola-admin-ui .admin-glass-panel,
-  .cocola-admin-ui .bg-card {
-    border-color: hsl(var(--border));
-    background: hsl(var(--card));
+  .cocola-admin-ui .admin-glass-panel {
+    border-color: var(--separator);
+    background: var(--surface);
     box-shadow: 0 1px 2px hsl(222 47% 11% / 0.04);
   }
 
@@ -607,9 +503,10 @@
     flex: 0 0 auto;
     place-items: center;
     border-radius: 1rem;
-    color: var(--glyph-ink, var(--page-accent));
-    background: linear-gradient(135deg, var(--glyph-soft, var(--page-accent-soft)), #ffffff);
-    box-shadow: inset 0 0 0 1px var(--glyph-ring, var(--page-accent-border));
+    color: var(--glyph-ink, var(--accent));
+    background: linear-gradient(135deg, var(--glyph-soft, var(--accent-soft)), #ffffff);
+    box-shadow: inset 0 0 0 1px
+      var(--glyph-ring, color-mix(in oklab, var(--accent) 36%, var(--separator)));
   }
 
   .cocola-admin-ui .admin-domain-panel {
@@ -660,8 +557,8 @@
     font-size: 13px;
     font-weight: 600;
     color: #fff;
-    background: var(--card-to, var(--page-accent));
-    box-shadow: 0 8px 18px -8px var(--page-accent-shadow);
+    background: var(--card-to, var(--accent));
+    box-shadow: 0 8px 18px -8px color-mix(in oklab, var(--accent) 50%, transparent);
     transition:
       opacity 200ms ease,
       box-shadow 200ms ease;
@@ -673,7 +570,7 @@
 
   .cocola-admin-ui .admin-module-card:hover {
     transform: translateY(-3px) scale(1.005);
-    box-shadow: 0 18px 40px -18px var(--page-accent-shadow-soft);
+    box-shadow: 0 18px 40px -18px color-mix(in oklab, var(--accent) 32%, transparent);
   }
 
   .cocola-admin-ui .admin-empty-icon {
@@ -696,7 +593,7 @@
     display: grid;
     flex: 0 0 auto;
     place-items: center;
-    color: var(--card-to, var(--page-accent));
+    color: var(--card-to, var(--accent));
     background: none;
     transition: transform 200ms ease;
   }
@@ -705,245 +602,111 @@
     transform: scale(1.04);
   }
 
-  /* ---- per-page theme classes: override --page-accent* on the page root so
-     each admin sub-page tints to its sidebar nav-icon color ---- */
-  .cocola-admin-ui .admin-theme-blue,
-  .cocola-admin-ui.admin-theme-blue {
-    --primary: 221 83% 45%;
-    --primary-foreground: 0 0% 100%;
-    --ring: 221 83% 53%;
-    --accent: 213 94% 95%;
-    --accent-foreground: 221 83% 33%;
-    --page-accent: #2563eb;
-    --page-accent-2: #3b82f6;
-    --page-accent-grad: linear-gradient(135deg, #2563eb, #3b82f6);
-    --page-accent-soft: #eff6ff;
-    --page-accent-ink: #1d4ed8;
-    --page-accent-border: #93c5fd;
-    --page-accent-focus: #3b82f6;
-    --page-accent-focus-ring: rgba(59, 130, 246, 0.18);
-    --page-accent-shadow: rgba(37, 99, 235, 0.5);
-    --page-accent-shadow-soft: rgba(37, 99, 235, 0.32);
+  /* HeroUI Demo page themes override native tokens directly. */
+  .cocola-admin-ui
+    :is(
+      .admin-theme-amber,
+      .admin-theme-blue,
+      .admin-theme-cyan,
+      .admin-theme-fuchsia,
+      .admin-theme-green,
+      .admin-theme-indigo,
+      .admin-theme-orange,
+      .admin-theme-purple,
+      .admin-theme-rose,
+      .admin-theme-sky,
+      .admin-theme-slate,
+      .admin-theme-teal,
+      .admin-theme-violet
+    ),
+  .cocola-admin-ui:is(
+    .admin-theme-amber,
+    .admin-theme-blue,
+    .admin-theme-cyan,
+    .admin-theme-fuchsia,
+    .admin-theme-green,
+    .admin-theme-indigo,
+    .admin-theme-orange,
+    .admin-theme-purple,
+    .admin-theme-rose,
+    .admin-theme-sky,
+    .admin-theme-slate,
+    .admin-theme-teal,
+    .admin-theme-violet
+  ) {
+    --accent-hover: color-mix(in oklab, var(--accent) 90%, var(--accent-foreground) 10%);
+    --accent-soft: color-mix(in oklab, var(--accent) 15%, transparent);
+    --accent-soft-foreground: var(--accent);
+    --focus: var(--accent);
   }
-  .cocola-admin-ui .admin-theme-violet,
-  .cocola-admin-ui.admin-theme-violet {
-    --primary: 273 66% 47%;
-    --primary-foreground: 0 0% 100%;
-    --ring: 273 66% 55%;
-    --accent: 270 60% 96%;
-    --accent-foreground: 273 66% 40%;
-    --page-accent: #7828c8;
-    --page-accent-2: #9353d3;
-    --page-accent-grad: linear-gradient(135deg, #7828c8, #9353d3);
-    --page-accent-soft: #faf5ff;
-    --page-accent-ink: #6b21a8;
-    --page-accent-border: #d8b4fe;
-    --page-accent-focus: #a855f7;
-    --page-accent-focus-ring: rgba(168, 85, 247, 0.18);
-    --page-accent-shadow: rgba(120, 40, 200, 0.6);
-    --page-accent-shadow-soft: rgba(120, 40, 200, 0.35);
-  }
+
   .cocola-admin-ui .admin-theme-amber,
   .cocola-admin-ui.admin-theme-amber {
-    --primary: 38 92% 45%;
-    --primary-foreground: 0 0% 100%;
-    --ring: 38 92% 50%;
-    --accent: 48 96% 92%;
-    --accent-foreground: 32 81% 33%;
-    --page-accent: #f59e0b;
-    --page-accent-2: #fbbf24;
-    --page-accent-grad: linear-gradient(135deg, #d97706, #f59e0b);
-    --page-accent-soft: #fffbeb;
-    --page-accent-ink: #b45309;
-    --page-accent-border: #fcd34d;
-    --page-accent-focus: #f59e0b;
-    --page-accent-focus-ring: rgba(245, 158, 11, 0.2);
-    --page-accent-shadow: rgba(217, 119, 6, 0.5);
-    --page-accent-shadow-soft: rgba(217, 119, 6, 0.3);
+    --accent: oklch(76% 0.17 70);
+    --accent-foreground: var(--eclipse);
   }
-  .cocola-admin-ui .admin-theme-orange,
-  .cocola-admin-ui.admin-theme-orange {
-    --primary: 21 90% 48%;
-    --primary-foreground: 0 0% 100%;
-    --ring: 21 90% 52%;
-    --accent: 34 100% 92%;
-    --accent-foreground: 15 79% 34%;
-    --page-accent: #ea580c;
-    --page-accent-2: #fb923c;
-    --page-accent-grad: linear-gradient(135deg, #ea580c, #fb923c);
-    --page-accent-soft: #fff7ed;
-    --page-accent-ink: #c2410c;
-    --page-accent-border: #fdba74;
-    --page-accent-focus: #fb923c;
-    --page-accent-focus-ring: rgba(251, 146, 60, 0.2);
-    --page-accent-shadow: rgba(234, 88, 12, 0.5);
-    --page-accent-shadow-soft: rgba(234, 88, 12, 0.3);
+  .cocola-admin-ui .admin-theme-blue,
+  .cocola-admin-ui.admin-theme-blue {
+    --accent: oklch(62.04% 0.195 253.83);
+    --accent-foreground: var(--snow);
   }
   .cocola-admin-ui .admin-theme-cyan,
   .cocola-admin-ui.admin-theme-cyan {
-    --primary: 192 91% 36%;
-    --primary-foreground: 0 0% 100%;
-    --ring: 192 91% 42%;
-    --accent: 185 96% 90%;
-    --accent-foreground: 192 91% 27%;
-    --page-accent: #0891b2;
-    --page-accent-2: #22d3ee;
-    --page-accent-grad: linear-gradient(135deg, #0891b2, #22d3ee);
-    --page-accent-soft: #ecfeff;
-    --page-accent-ink: #0e7490;
-    --page-accent-border: #67e8f9;
-    --page-accent-focus: #22d3ee;
-    --page-accent-focus-ring: rgba(34, 211, 238, 0.2);
-    --page-accent-shadow: rgba(8, 145, 178, 0.5);
-    --page-accent-shadow-soft: rgba(8, 145, 178, 0.3);
-  }
-  .cocola-admin-ui .admin-theme-green,
-  .cocola-admin-ui.admin-theme-green {
-    --primary: 142 71% 36%;
-    --primary-foreground: 0 0% 100%;
-    --ring: 142 71% 42%;
-    --accent: 141 79% 91%;
-    --accent-foreground: 143 64% 24%;
-    --page-accent: #16a34a;
-    --page-accent-2: #4ade80;
-    --page-accent-grad: linear-gradient(135deg, #16a34a, #4ade80);
-    --page-accent-soft: #f0fdf4;
-    --page-accent-ink: #15803d;
-    --page-accent-border: #86efac;
-    --page-accent-focus: #22c55e;
-    --page-accent-focus-ring: rgba(34, 197, 94, 0.18);
-    --page-accent-shadow: rgba(22, 163, 74, 0.5);
-    --page-accent-shadow-soft: rgba(22, 163, 74, 0.32);
-  }
-  .cocola-admin-ui .admin-theme-indigo,
-  .cocola-admin-ui.admin-theme-indigo {
-    --primary: 243 75% 59%;
-    --primary-foreground: 0 0% 100%;
-    --ring: 243 75% 63%;
-    --accent: 226 100% 94%;
-    --accent-foreground: 244 55% 41%;
-    --page-accent: #4f46e5;
-    --page-accent-2: #818cf8;
-    --page-accent-grad: linear-gradient(135deg, #4f46e5, #818cf8);
-    --page-accent-soft: #eef2ff;
-    --page-accent-ink: #4338ca;
-    --page-accent-border: #c7d2fe;
-    --page-accent-focus: #6366f1;
-    --page-accent-focus-ring: rgba(99, 102, 241, 0.18);
-    --page-accent-shadow: rgba(79, 70, 229, 0.5);
-    --page-accent-shadow-soft: rgba(79, 70, 229, 0.32);
-  }
-  .cocola-admin-ui .admin-theme-rose,
-  .cocola-admin-ui.admin-theme-rose {
-    --primary: 347 77% 46%;
-    --primary-foreground: 0 0% 100%;
-    --ring: 347 77% 52%;
-    --accent: 356 100% 94%;
-    --accent-foreground: 344 73% 33%;
-    --page-accent: #e11d48;
-    --page-accent-2: #fb7185;
-    --page-accent-grad: linear-gradient(135deg, #e11d48, #fb7185);
-    --page-accent-soft: #fff1f2;
-    --page-accent-ink: #be123c;
-    --page-accent-border: #fda4af;
-    --page-accent-focus: #f43f5e;
-    --page-accent-focus-ring: rgba(244, 63, 94, 0.18);
-    --page-accent-shadow: rgba(225, 29, 72, 0.5);
-    --page-accent-shadow-soft: rgba(225, 29, 72, 0.32);
-  }
-
-  .cocola-admin-ui .admin-theme-teal,
-  .cocola-admin-ui.admin-theme-teal {
-    --primary: 174 80% 32%;
-    --primary-foreground: 0 0% 100%;
-    --ring: 174 62% 42%;
-    --accent: 168 76% 90%;
-    --accent-foreground: 175 84% 22%;
-    --page-accent: #0d9488;
-    --page-accent-2: #2dd4bf;
-    --page-accent-grad: linear-gradient(135deg, #0d9488, #2dd4bf);
-    --page-accent-soft: #f0fdfa;
-    --page-accent-ink: #0f766e;
-    --page-accent-border: #5eead4;
-    --page-accent-focus: #14b8a6;
-    --page-accent-focus-ring: rgba(20, 184, 166, 0.18);
-    --page-accent-shadow: rgba(13, 148, 136, 0.5);
-    --page-accent-shadow-soft: rgba(13, 148, 136, 0.32);
-  }
-  .cocola-admin-ui .admin-theme-sky,
-  .cocola-admin-ui.admin-theme-sky {
-    --primary: 200 98% 39%;
-    --primary-foreground: 0 0% 100%;
-    --ring: 199 89% 48%;
-    --accent: 204 94% 92%;
-    --accent-foreground: 202 80% 24%;
-    --page-accent: #0284c7;
-    --page-accent-2: #38bdf8;
-    --page-accent-grad: linear-gradient(135deg, #0284c7, #38bdf8);
-    --page-accent-soft: #f0f9ff;
-    --page-accent-ink: #0369a1;
-    --page-accent-border: #7dd3fc;
-    --page-accent-focus: #0ea5e9;
-    --page-accent-focus-ring: rgba(14, 165, 233, 0.18);
-    --page-accent-shadow: rgba(2, 132, 199, 0.5);
-    --page-accent-shadow-soft: rgba(2, 132, 199, 0.32);
-  }
-  .cocola-admin-ui .admin-theme-purple,
-  .cocola-admin-ui.admin-theme-purple {
-    --primary: 271 81% 56%;
-    --primary-foreground: 0 0% 100%;
-    --ring: 272 79% 63%;
-    --accent: 269 100% 95%;
-    --accent-foreground: 273 72% 40%;
-    --page-accent: #9333ea;
-    --page-accent-2: #c084fc;
-    --page-accent-grad: linear-gradient(135deg, #9333ea, #c084fc);
-    --page-accent-soft: #faf5ff;
-    --page-accent-ink: #7e22ce;
-    --page-accent-border: #e9d5ff;
-    --page-accent-focus: #a855f7;
-    --page-accent-focus-ring: rgba(168, 85, 247, 0.18);
-    --page-accent-shadow: rgba(147, 51, 234, 0.5);
-    --page-accent-shadow-soft: rgba(147, 51, 234, 0.32);
+    --accent: oklch(68% 0.14 215);
+    --accent-foreground: var(--eclipse);
   }
   .cocola-admin-ui .admin-theme-fuchsia,
   .cocola-admin-ui.admin-theme-fuchsia {
-    --primary: 294 72% 49%;
-    --primary-foreground: 0 0% 100%;
-    --ring: 293 69% 58%;
-    --accent: 289 100% 95%;
-    --accent-foreground: 295 70% 37%;
-    --page-accent: #c026d3;
-    --page-accent-2: #e879f9;
-    --page-accent-grad: linear-gradient(135deg, #c026d3, #e879f9);
-    --page-accent-soft: #fdf4ff;
-    --page-accent-ink: #a21caf;
-    --page-accent-border: #f5d0fe;
-    --page-accent-focus: #d946ef;
-    --page-accent-focus-ring: rgba(217, 70, 239, 0.18);
-    --page-accent-shadow: rgba(192, 38, 211, 0.5);
-    --page-accent-shadow-soft: rgba(192, 38, 211, 0.32);
+    --accent: oklch(62% 0.22 330);
+    --accent-foreground: var(--snow);
+  }
+  .cocola-admin-ui .admin-theme-green,
+  .cocola-admin-ui.admin-theme-green {
+    --accent: oklch(64% 0.17 150);
+    --accent-foreground: var(--eclipse);
+  }
+  .cocola-admin-ui .admin-theme-indigo,
+  .cocola-admin-ui.admin-theme-indigo {
+    --accent: oklch(56% 0.22 275);
+    --accent-foreground: var(--snow);
+  }
+  .cocola-admin-ui .admin-theme-orange,
+  .cocola-admin-ui.admin-theme-orange {
+    --accent: oklch(67% 0.19 45);
+    --accent-foreground: var(--snow);
+  }
+  .cocola-admin-ui .admin-theme-purple,
+  .cocola-admin-ui.admin-theme-purple {
+    --accent: oklch(58% 0.22 305);
+    --accent-foreground: var(--snow);
+  }
+  .cocola-admin-ui .admin-theme-rose,
+  .cocola-admin-ui.admin-theme-rose {
+    --accent: oklch(61% 0.22 16);
+    --accent-foreground: var(--snow);
+  }
+  .cocola-admin-ui .admin-theme-sky,
+  .cocola-admin-ui.admin-theme-sky {
+    --accent: oklch(68% 0.15 235);
+    --accent-foreground: var(--eclipse);
   }
   .cocola-admin-ui .admin-theme-slate,
   .cocola-admin-ui.admin-theme-slate {
-    --primary: 215 25% 34%;
-    --primary-foreground: 0 0% 100%;
-    --ring: 215 20% 47%;
-    --accent: 210 40% 96%;
-    --accent-foreground: 215 25% 27%;
-    --page-accent: #475569;
-    --page-accent-2: #94a3b8;
-    --page-accent-grad: linear-gradient(135deg, #475569, #94a3b8);
-    --page-accent-soft: #f8fafc;
-    --page-accent-ink: #334155;
-    --page-accent-border: #cbd5e1;
-    --page-accent-focus: #64748b;
-    --page-accent-focus-ring: rgba(100, 116, 139, 0.18);
-    --page-accent-shadow: rgba(71, 85, 105, 0.5);
-    --page-accent-shadow-soft: rgba(71, 85, 105, 0.32);
+    --accent: oklch(53% 0.03 258);
+    --accent-foreground: var(--snow);
+  }
+  .cocola-admin-ui .admin-theme-teal,
+  .cocola-admin-ui.admin-theme-teal {
+    --accent: oklch(62% 0.14 180);
+    --accent-foreground: var(--eclipse);
+  }
+  .cocola-admin-ui .admin-theme-violet,
+  .cocola-admin-ui.admin-theme-violet {
+    --accent: oklch(60% 0.22 292);
+    --accent-foreground: var(--snow);
   }
 
-  /* ===== shared entity cards (skills / mcps grids), page-accent driven ===== */
+  /* ===== shared entity cards (skills / mcps grids), HeroUI-token driven ===== */
   .cocola-admin-ui .admin-entity-grid {
     display: grid;
     gap: 16px;
@@ -963,15 +726,15 @@
     transition: all 160ms ease;
   }
   .cocola-admin-ui .admin-entity-search:focus-within {
-    border-color: var(--page-accent);
-    box-shadow: 0 0 0 3px var(--page-accent-soft);
+    border-color: var(--accent);
+    box-shadow: 0 0 0 3px var(--accent-soft);
   }
   .cocola-admin-ui .admin-entity-search svg {
     color: #a1a1aa;
     flex: 0 0 auto;
   }
   .cocola-admin-ui .admin-entity-search:focus-within svg {
-    color: var(--page-accent);
+    color: var(--accent);
   }
   .cocola-admin-ui .admin-entity-search input {
     border: none;
@@ -1004,7 +767,7 @@
   /* interactive grid cards opt into the overview hover lift */
   .cocola-admin-ui .admin-entity-card--hover:hover {
     transform: translateY(-3px) scale(1.005);
-    box-shadow: 0 18px 40px -18px var(--page-accent-shadow-soft);
+    box-shadow: 0 18px 40px -18px color-mix(in oklab, var(--accent) 32%, transparent);
   }
   /* pill action buttons used on entity cards */
   .cocola-admin-ui .admin-card-btn {
@@ -1016,9 +779,9 @@
     border-radius: 999px;
     font-size: 13px;
     font-weight: 600;
-    color: var(--page-accent-ink);
-    border: 1px solid var(--page-accent-border);
-    background: var(--page-accent-soft);
+    color: var(--accent);
+    border: 1px solid color-mix(in oklab, var(--accent) 36%, var(--separator));
+    background: var(--accent-soft);
     transition:
       border-color 160ms ease,
       color 160ms ease,
@@ -1026,10 +789,10 @@
       box-shadow 160ms ease;
   }
   .cocola-admin-ui .admin-card-btn:hover {
-    border-color: var(--page-accent);
+    border-color: var(--accent);
     color: #fff;
-    background: var(--page-accent);
-    box-shadow: 0 8px 18px -10px var(--page-accent-shadow);
+    background: var(--accent);
+    box-shadow: 0 8px 18px -10px color-mix(in oklab, var(--accent) 50%, transparent);
   }
   .cocola-admin-ui .admin-card-btn:disabled {
     opacity: 0.5;
@@ -1048,13 +811,13 @@
   }
   .cocola-admin-ui .admin-card-btn--accent {
     color: #fff;
-    border-color: var(--page-accent);
-    background: var(--page-accent);
+    border-color: var(--accent);
+    background: var(--accent);
   }
   .cocola-admin-ui .admin-card-btn--accent:hover {
-    border-color: var(--page-accent-focus);
-    background: var(--page-accent-focus);
-    box-shadow: 0 8px 18px -10px var(--page-accent-shadow);
+    border-color: var(--focus);
+    background: var(--focus);
+    box-shadow: 0 8px 18px -10px color-mix(in oklab, var(--accent) 50%, transparent);
   }
   .cocola-admin-ui .admin-entity-glyph {
     display: grid;
@@ -1063,9 +826,10 @@
     width: 40px;
     height: 40px;
     border-radius: 12px;
-    color: var(--glyph-ink, var(--page-accent));
-    background: linear-gradient(135deg, var(--glyph-soft, var(--page-accent-soft)), #ffffff);
-    box-shadow: inset 0 0 0 1px var(--glyph-ring, var(--page-accent-border));
+    color: var(--glyph-ink, var(--accent));
+    background: linear-gradient(135deg, var(--glyph-soft, var(--accent-soft)), #ffffff);
+    box-shadow: inset 0 0 0 1px
+      var(--glyph-ring, color-mix(in oklab, var(--accent) 36%, var(--separator)));
     transition: transform 200ms ease;
   }
   .cocola-admin-ui .admin-entity-card--hover:hover .admin-entity-glyph {
@@ -1079,20 +843,20 @@
     font-weight: 600;
     padding: 3px 9px;
     border-radius: 999px;
-    border: 1px solid hsl(var(--border));
+    border: 1px solid var(--separator);
     color: #52525b;
     background: #fff;
   }
   .cocola-admin-ui .admin-entity-mono {
     border-radius: 12px;
     border: 1px solid rgba(0, 0, 0, 0.06);
-    background: var(--page-accent-soft);
+    background: var(--accent-soft);
     padding: 10px 12px;
   }
 
   /* ===== users page: metric cards (overview language) ===== */
   .cocola-admin-ui .admin-metric-card {
-    --card-to: var(--page-accent);
+    --card-to: var(--accent);
     display: flex;
     flex-direction: column;
     gap: 0.65rem;
@@ -1110,7 +874,7 @@
   }
   .cocola-admin-ui .admin-metric-card:hover {
     transform: translateY(-3px) scale(1.005);
-    box-shadow: 0 18px 40px -18px var(--page-accent-shadow-soft);
+    box-shadow: 0 18px 40px -18px color-mix(in oklab, var(--accent) 32%, transparent);
   }
   .cocola-admin-ui .admin-metric-card[data-tone="blue"] {
     --card-to: #2563eb;
@@ -1122,7 +886,7 @@
     --card-to: #7c3aed;
   }
   .cocola-admin-ui .admin-metric-card[data-tone="amber"] {
-    --card-to: var(--page-accent);
+    --card-to: var(--accent);
   }
   .cocola-admin-ui .admin-metric-card[data-tone="slate"] {
     --card-to: #64748b;
@@ -1193,7 +957,7 @@
     display: grid;
     place-items: center;
     flex: 0 0 auto;
-    color: var(--page-accent);
+    color: var(--accent);
   }
   .cocola-admin-ui .admin-set-glyph svg {
     width: 19px;
@@ -1239,7 +1003,7 @@
       transform 180ms ease;
   }
   .cocola-admin-ui .admin-set-row:hover {
-    background: var(--page-accent-soft);
+    background: var(--accent-soft);
     transform: scale(1.004);
   }
   .cocola-admin-ui .admin-set-meta {
@@ -1321,8 +1085,8 @@
       box-shadow 150ms ease;
   }
   .cocola-admin-ui .admin-set-ctrl-input:focus {
-    border-color: var(--page-accent-focus);
-    box-shadow: 0 0 0 4px var(--page-accent-focus-ring);
+    border-color: var(--focus);
+    box-shadow: 0 0 0 4px var(--accent-soft);
   }
   .cocola-admin-ui .admin-set-ctrl-input:disabled {
     background: #f8fafc;
@@ -1367,7 +1131,7 @@
     transition: transform 160ms ease;
   }
   .cocola-admin-ui .admin-set-toggle input:checked + .admin-set-track {
-    background: var(--page-accent);
+    background: var(--accent);
   }
   .cocola-admin-ui .admin-set-toggle input:checked + .admin-set-track::after {
     transform: translateX(18px);
@@ -1409,20 +1173,20 @@
     height: 16px;
   }
   .cocola-admin-ui .admin-set-iconbtn:hover {
-    color: var(--page-accent);
-    border-color: var(--page-accent-border);
-    background: var(--page-accent-soft);
+    color: var(--accent);
+    border-color: color-mix(in oklab, var(--accent) 36%, var(--separator));
+    background: var(--accent-soft);
   }
   .cocola-admin-ui .admin-set-iconbtn--primary {
     color: #fff;
     border: 0;
-    background: var(--page-accent-grad);
-    box-shadow: 0 10px 20px -12px var(--page-accent-shadow);
+    background: linear-gradient(135deg, var(--accent), var(--accent-hover));
+    box-shadow: 0 10px 20px -12px color-mix(in oklab, var(--accent) 50%, transparent);
   }
   .cocola-admin-ui .admin-set-iconbtn--primary:hover {
     color: #fff;
     opacity: 0.9;
-    background: var(--page-accent-grad);
+    background: linear-gradient(135deg, var(--accent), var(--accent-hover));
   }
   .cocola-admin-ui .admin-set-iconbtn:disabled {
     opacity: 0.4;
@@ -1484,7 +1248,7 @@
       transform 180ms ease;
   }
   .cocola-admin-ui .admin-user-row:hover {
-    background: var(--page-accent-soft);
+    background: var(--accent-soft);
     transform: scale(1.006);
   }
   .cocola-admin-ui .admin-user-cell {
@@ -1504,10 +1268,10 @@
     font-size: 15px;
     font-weight: 700;
     color: #fff;
-    background: var(--page-accent-grad);
+    background: linear-gradient(135deg, var(--accent), var(--accent-hover));
   }
   .cocola-admin-ui .admin-user-avatar.is-purple {
-    background: var(--page-accent-grad);
+    background: linear-gradient(135deg, var(--accent), var(--accent-hover));
   }
   .cocola-admin-ui .admin-user-avatar.is-blue {
     background: linear-gradient(135deg, #0072f5, #00b7fa);
@@ -1582,14 +1346,14 @@
       box-shadow 180ms ease;
   }
   .cocola-admin-ui .admin-list-row:hover {
-    background: var(--page-accent-soft);
+    background: var(--accent-soft);
     transform: scale(1.006);
-    box-shadow: 0 10px 26px -18px var(--page-accent-shadow-soft);
+    box-shadow: 0 10px 26px -18px color-mix(in oklab, var(--accent) 32%, transparent);
   }
   .cocola-admin-ui .admin-list-row:focus-visible {
     outline: none;
-    background: var(--page-accent-soft);
-    box-shadow: inset 0 0 0 2px var(--page-accent-border);
+    background: var(--accent-soft);
+    box-shadow: inset 0 0 0 2px color-mix(in oklab, var(--accent) 36%, var(--separator));
   }
   .cocola-admin-ui .admin-list-primary {
     font-size: 14.5px;
@@ -1677,10 +1441,10 @@
     transition: background 160ms ease;
   }
   .cocola-admin-ui .admin-surface-row:hover {
-    background: var(--page-accent-soft);
+    background: var(--accent-soft);
   }
   .cocola-admin-ui .admin-surface-row[data-active="true"] {
-    background: var(--page-accent-soft);
+    background: var(--accent-soft);
   }
 
   /* center-align non-user columns (Role / Status / Last login / Actions) */
@@ -1716,8 +1480,8 @@
     background: currentColor;
   }
   .cocola-admin-ui .admin-chip--admin {
-    background: var(--page-accent-soft);
-    color: var(--page-accent-ink);
+    background: var(--accent-soft);
+    color: var(--accent);
   }
   .cocola-admin-ui .admin-chip--member {
     background: #e6f0ff;
@@ -1754,7 +1518,7 @@
     height: 40px;
     padding: 0 16px;
     border-radius: 12px;
-    border: 1px solid hsl(var(--border));
+    border: 1px solid var(--separator);
     background: #fff;
     font-size: 13.5px;
     font-weight: 600;
@@ -1765,9 +1529,9 @@
       transform 160ms ease;
   }
   .cocola-admin-ui .admin-user-refresh:hover {
-    background: var(--page-accent-soft);
-    border-color: var(--page-accent-border);
-    color: var(--page-accent-ink);
+    background: var(--accent-soft);
+    border-color: color-mix(in oklab, var(--accent) 36%, var(--separator));
+    color: var(--accent);
   }
   .cocola-admin-ui .admin-user-refresh:active {
     transform: scale(0.98);
@@ -1779,10 +1543,10 @@
 
   /* purple primary buttons (page-local, does not touch shared Button) */
   .cocola-admin-ui .admin-primary-btn {
-    background: var(--page-accent-grad) !important;
-    color: #fff !important;
+    background: linear-gradient(135deg, var(--accent), var(--accent-hover)) !important;
+    color: var(--accent-foreground) !important;
     border: none !important;
-    box-shadow: 0 8px 20px -10px var(--page-accent-shadow);
+    box-shadow: 0 8px 20px -10px color-mix(in oklab, var(--accent) 50%, transparent);
     transition:
       transform 160ms ease,
       box-shadow 160ms ease,
@@ -1791,7 +1555,7 @@
   .cocola-admin-ui .admin-primary-btn:hover {
     filter: brightness(1.05);
     transform: translateY(-1px);
-    box-shadow: 0 14px 28px -12px var(--page-accent-shadow);
+    box-shadow: 0 14px 28px -12px color-mix(in oklab, var(--accent) 50%, transparent);
   }
   .cocola-admin-ui .admin-primary-btn:disabled {
     filter: grayscale(0.2);
@@ -1800,33 +1564,33 @@
     transform: none;
   }
 
-  /* actions dropdown -> force light popover (portaled outside scope) */
+  /* Portaled actions menu follows the active HeroUI light/dark palette. */
   .admin-actions-menu {
-    background: #fff !important;
-    color: #0f172a !important;
-    border: 1px solid #ececf1 !important;
+    background: var(--overlay) !important;
+    color: var(--overlay-foreground) !important;
+    border: 1px solid var(--separator) !important;
     border-radius: 14px !important;
     padding: 6px !important;
-    box-shadow: 0 12px 30px -12px rgba(0, 0, 0, 0.25) !important;
+    box-shadow: var(--shadow-overlay) !important;
   }
   .admin-actions-menu [role="menuitem"] {
     border-radius: 10px;
     font-size: 13px;
-    color: #27272a;
+    color: var(--overlay-foreground);
   }
   .admin-actions-menu [role="menuitem"]:hover,
   .admin-actions-menu [role="menuitem"][data-highlighted] {
-    background: #faf5ff;
-    color: #6b21a8;
+    background: var(--default-hover);
+    color: var(--foreground);
   }
   .admin-actions-menu [role="menuitem"][data-variant="destructive"],
-  .admin-actions-menu [role="menuitem"].text-destructive {
-    color: #dc2626;
+  .admin-actions-menu [role="menuitem"].text-danger {
+    color: var(--danger);
   }
   .admin-actions-menu [role="menuitem"][data-variant="destructive"]:hover,
   .admin-actions-menu [role="menuitem"][data-variant="destructive"][data-highlighted] {
-    background: #fef2f2;
-    color: #b91c1c;
+    background: var(--danger-soft);
+    color: var(--danger-soft-foreground);
   }
 
   /* new-user drawer form polish */
@@ -1834,8 +1598,8 @@
     border-radius: 12px;
   }
   .cocola-admin-ui .admin-drawer-form input:focus {
-    border-color: var(--page-accent-focus);
-    box-shadow: 0 0 0 3px var(--page-accent-focus-ring);
+    border-color: var(--focus);
+    box-shadow: 0 0 0 3px var(--accent-soft);
     outline: none;
   }
 
@@ -1843,40 +1607,41 @@
      Themed drawers (carrying an .admin-theme-* class) opt out so their own accent wins. ---- */
   .cocola-admin-ui.admin-drawer:not([class*="admin-theme-"]),
   .cocola-admin-ui .admin-drawer:not([class*="admin-theme-"]) {
-    --primary: 273 66% 47%;
-    --primary-foreground: 0 0% 100%;
-    --ring: 273 66% 55%;
-    --accent: 270 60% 96%;
-    --accent-foreground: 273 66% 40%;
+    --accent: oklch(60% 0.22 292);
+    --accent-foreground: var(--snow);
+    --accent-hover: color-mix(in oklab, var(--accent) 90%, var(--accent-foreground) 10%);
+    --accent-soft: color-mix(in oklab, var(--accent) 15%, transparent);
+    --accent-soft-foreground: var(--accent);
+    --focus: var(--accent);
   }
   /* gradient primary buttons (Save / Add) to match the list-page Add button */
-  .cocola-admin-ui.admin-drawer button.bg-primary,
-  .cocola-admin-ui .admin-drawer button.bg-primary {
-    background-image: var(--page-accent-grad);
+  .cocola-admin-ui.admin-drawer button.bg-accent,
+  .cocola-admin-ui .admin-drawer button.bg-accent {
+    background-image: linear-gradient(135deg, var(--accent), var(--accent-hover));
     border: none;
-    box-shadow: 0 6px 16px var(--page-accent-shadow-soft);
+    box-shadow: 0 6px 16px color-mix(in oklab, var(--accent) 32%, transparent);
   }
-  .cocola-admin-ui.admin-drawer button.bg-primary:hover,
-  .cocola-admin-ui .admin-drawer button.bg-primary:hover {
+  .cocola-admin-ui.admin-drawer button.bg-accent:hover,
+  .cocola-admin-ui .admin-drawer button.bg-accent:hover {
     filter: brightness(1.04);
   }
   /* purple focus ring on every text input inside the drawer */
   .cocola-admin-ui.admin-drawer input:focus,
   .cocola-admin-ui .admin-drawer input:focus {
-    border-color: var(--page-accent-focus);
-    box-shadow: 0 0 0 3px var(--page-accent-focus-ring);
+    border-color: var(--focus);
+    box-shadow: 0 0 0 3px var(--accent-soft);
     outline: none;
   }
 
   .cocola-admin-ui .admin-empty-icon {
-    color: hsl(var(--primary));
-    background: hsl(var(--accent));
+    color: var(--accent);
+    background: var(--default);
   }
 
   .cocola-admin-ui .admin-metric,
   .cocola-admin-ui .admin-toolbar {
-    border-color: hsl(var(--border));
-    background: hsl(var(--card));
+    border-color: var(--separator);
+    background: var(--surface);
     box-shadow: 0 1px 2px hsl(222 47% 11% / 0.04);
   }
 
@@ -1886,13 +1651,13 @@
     height: 1.75rem;
     place-items: center;
     border-radius: 0.625rem;
-    color: hsl(var(--primary));
-    background: hsl(var(--accent));
+    color: var(--accent);
+    background: var(--default);
   }
 
   .cocola-admin-ui .admin-table-surface {
-    border-color: hsl(var(--border));
-    background: hsl(var(--card));
+    border-color: var(--separator);
+    background: var(--surface);
     box-shadow: 0 1px 2px hsl(222 47% 11% / 0.04);
   }
 
@@ -1900,8 +1665,8 @@
   .cocola-admin-ui input.bg-background,
   .cocola-admin-ui textarea.bg-background,
   .cocola-admin-ui select.bg-background {
-    border-color: hsl(var(--input));
-    background: hsl(var(--card));
+    border-color: var(--separator);
+    background: var(--surface);
   }
 
   .cocola-admin-ui input,
@@ -1921,7 +1686,7 @@
 
   .cocola-admin-ui button:focus-visible,
   .cocola-admin-ui a:focus-visible {
-    outline: 2px solid hsl(var(--ring) / 0.4);
+    outline: 2px solid oklch(from var(--focus) l c h / 0.4);
     outline-offset: 2px;
   }
 
@@ -1934,8 +1699,8 @@
   }
 
   .cocola-admin-ui main > header.border-b {
-    border-color: hsl(var(--border));
-    background: hsl(var(--background));
+    border-color: var(--separator);
+    background: var(--background);
   }
 
   .cocola-admin-ui main > header.border-b > div {
@@ -1959,18 +1724,13 @@
     z-index: 2;
   }
 
-  .cocola-admin-ui .bg-muted,
-  .cocola-admin-ui .bg-muted\/50 {
-    background-color: hsl(var(--muted));
-  }
-
   .cocola-admin-ui thead,
-  .cocola-admin-ui thead.bg-muted\/50 {
-    background: hsl(var(--secondary));
+  .cocola-admin-ui thead.bg-surface-secondary\/50 {
+    background: var(--default);
   }
 
   .cocola-admin-ui tbody tr:hover {
-    background-color: hsl(var(--sidebar-accent));
+    background-color: var(--default);
   }
 
   .cocola-admin-ui tbody tr {
@@ -2023,6 +1783,16 @@
     font-weight: 500;
     font-size: 31px;
     line-height: 1.3;
+  }
+
+  .cocola-user-ui .cocola-web-brand-lockup .cocola-tagline {
+    font-size: 1.125rem;
+  }
+
+  @media (min-width: 640px) {
+    .cocola-user-ui .cocola-web-brand-lockup .cocola-tagline {
+      font-size: 1.5rem;
+    }
   }
 
   .cocola-user-ui .cocola-tagline-base,
@@ -2104,8 +1874,8 @@
     gap: 16px;
     padding: 30px 28px;
     border-radius: 16px;
-    border: 1px solid hsl(var(--border));
-    background: hsl(var(--card));
+    border: 1px solid var(--separator);
+    background: var(--surface);
     box-shadow:
       0 1px 3px 0 hsl(222 47% 11% / 0.06),
       0 1px 2px -1px hsl(222 47% 11% / 0.04);
@@ -2144,8 +1914,8 @@
     height: 44px;
     flex: 0 0 auto;
     border-radius: 14px;
-    color: var(--page-accent);
-    background: var(--page-accent-soft);
+    color: var(--accent);
+    background: var(--accent-soft);
   }
   .cocola-admin-ui .admin-models-title {
     font-size: 22px;
@@ -2201,12 +1971,12 @@
     flex: 0 0 auto;
   }
   .cocola-admin-ui .admin-models-tab:hover {
-    color: var(--page-accent-ink);
+    color: var(--accent);
   }
   .cocola-admin-ui .admin-models-tab.is-active {
-    background: var(--page-accent-grad);
+    background: linear-gradient(135deg, var(--accent), var(--accent-hover));
     color: #fff;
-    box-shadow: 0 6px 16px -8px var(--page-accent-shadow);
+    box-shadow: 0 6px 16px -8px color-mix(in oklab, var(--accent) 50%, transparent);
   }
   .cocola-admin-ui .admin-models-count {
     font-size: 11px;
@@ -2294,7 +2064,7 @@
   }
   .cocola-admin-ui .admin-model-row:hover,
   .cocola-admin-ui .admin-prov-row:hover {
-    background: var(--page-accent-soft);
+    background: var(--accent-soft);
     transform: scale(1.006);
   }
   /* center non-first columns */
@@ -2408,8 +2178,8 @@
     color: #3f3f46;
   }
   .cocola-admin-ui .admin-chip--proto {
-    background: var(--page-accent-soft);
-    color: var(--page-accent-ink);
+    background: var(--accent-soft);
+    color: var(--accent);
   }
   .cocola-admin-ui .admin-chip--visible {
     background: #e6f4ff;
@@ -2546,27 +2316,27 @@
 
 .cocola-git-diff {
   --cocola-diff-gutter-width: 4.5ch;
-  --diff-background-color: hsl(var(--background));
-  --diff-text-color: hsl(var(--foreground));
+  --diff-background-color: var(--background);
+  --diff-text-color: var(--foreground);
   --diff-font-family:
     "SF Mono", "JetBrains Mono", ui-monospace, "Cascadia Code", Menlo, Consolas, monospace;
-  --diff-selection-background-color: hsl(var(--primary) / 0.18);
-  --diff-selection-text-color: hsl(var(--foreground));
+  --diff-selection-background-color: oklch(from var(--accent) l c h / 0.18);
+  --diff-selection-text-color: var(--foreground);
   --diff-gutter-insert-background-color: transparent;
   --diff-gutter-insert-text-color: rgb(26 127 55);
   --diff-gutter-delete-background-color: transparent;
   --diff-gutter-delete-text-color: rgb(207 34 46);
   --diff-code-insert-background-color: rgb(230 255 236);
-  --diff-code-insert-text-color: hsl(var(--foreground));
+  --diff-code-insert-text-color: var(--foreground);
   --diff-code-delete-background-color: rgb(255 235 233);
-  --diff-code-delete-text-color: hsl(var(--foreground));
+  --diff-code-delete-text-color: var(--foreground);
   --diff-code-insert-edit-background-color: rgb(171 242 188);
   --diff-code-delete-edit-background-color: rgb(255 129 130);
-  --diff-gutter-selected-background-color: hsl(var(--primary) / 0.1);
-  --diff-code-selected-background-color: hsl(var(--primary) / 0.08);
-  --diff-omit-gutter-line-color: hsl(var(--primary) / 0.5);
+  --diff-gutter-selected-background-color: oklch(from var(--accent) l c h / 0.1);
+  --diff-code-selected-background-color: oklch(from var(--accent) l c h / 0.08);
+  --diff-omit-gutter-line-color: oklch(from var(--accent) l c h / 0.5);
   overscroll-behavior: contain;
-  scrollbar-color: hsl(var(--muted-foreground) / 0.28) transparent;
+  scrollbar-color: oklch(from var(--muted) l c h / 0.28) transparent;
   scrollbar-width: thin;
 }
 
@@ -2584,12 +2354,12 @@
   min-width: 48px;
   border: 3px solid transparent;
   border-radius: 999px;
-  background: hsl(var(--muted-foreground) / 0.28);
+  background: oklch(from var(--muted) l c h / 0.28);
   background-clip: padding-box;
 }
 
 .cocola-git-diff::-webkit-scrollbar-thumb:hover {
-  background-color: hsl(var(--muted-foreground) / 0.42);
+  background-color: oklch(from var(--muted) l c h / 0.42);
 }
 
 .cocola-git-diff .diff {
@@ -2946,112 +2716,71 @@
    .cocola-user-ui so it never leaks into chat / sidebar / other pages.
    =================================================================== */
 
-/* per-page accent (default violet) — overridden by .user-theme-* on <main> */
-.cocola-user-ui .user-page,
-.cocola-user-ui.user-page {
-  --page-accent: #7828c8;
-  --page-accent-2: #9353d3;
-  --page-accent-grad: linear-gradient(135deg, #7828c8, #9353d3);
-  --page-accent-soft: #faf5ff;
-  --page-accent-ink: #6b21a8;
-  --page-accent-border: #d8b4fe;
-  --page-accent-focus: #a855f7;
-  --page-accent-focus-ring: rgba(168, 85, 247, 0.18);
-  --page-accent-shadow: rgba(120, 40, 200, 0.6);
-  --page-accent-shadow-soft: rgba(120, 40, 200, 0.35);
+/* User page themes use the same native HeroUI tokens as the Demo. */
+.cocola-user-ui
+  :is(
+    .user-page,
+    .user-theme-amber,
+    .user-theme-blue,
+    .user-theme-cyan,
+    .user-theme-emerald,
+    .user-theme-indigo,
+    .user-theme-orange,
+    .user-theme-violet
+  ),
+.cocola-user-ui:is(
+  .user-page,
+  .user-theme-amber,
+  .user-theme-blue,
+  .user-theme-cyan,
+  .user-theme-emerald,
+  .user-theme-indigo,
+  .user-theme-orange,
+  .user-theme-violet
+) {
+  --accent-hover: color-mix(in oklab, var(--accent) 90%, var(--accent-foreground) 10%);
+  --accent-soft: color-mix(in oklab, var(--accent) 15%, transparent);
+  --accent-soft-foreground: var(--accent);
+  --focus: var(--accent);
 }
+.cocola-user-ui .user-page,
+.cocola-user-ui.user-page,
 .cocola-user-ui .user-theme-violet,
 .cocola-user-ui.user-theme-violet {
-  --page-accent: #7c3aed;
-  --page-accent-2: #a855f7;
-  --page-accent-grad: linear-gradient(135deg, #7c3aed, #a855f7);
-  --page-accent-soft: #f5f3ff;
-  --page-accent-ink: #6b21a8;
-  --page-accent-border: #ddd6fe;
-  --page-accent-focus: #a855f7;
-  --page-accent-focus-ring: rgba(124, 58, 237, 0.18);
-  --page-accent-shadow: rgba(124, 58, 237, 0.55);
-  --page-accent-shadow-soft: rgba(124, 58, 237, 0.32);
+  --accent: oklch(60% 0.22 292);
+  --accent-foreground: var(--snow);
 }
 .cocola-user-ui .user-theme-orange,
 .cocola-user-ui.user-theme-orange {
-  --page-accent: #ea580c;
-  --page-accent-2: #fb923c;
-  --page-accent-grad: linear-gradient(135deg, #ea580c, #fb923c);
-  --page-accent-soft: #fff7ed;
-  --page-accent-ink: #c2410c;
-  --page-accent-border: #fed7aa;
-  --page-accent-focus: #fb923c;
-  --page-accent-focus-ring: rgba(234, 88, 12, 0.2);
-  --page-accent-shadow: rgba(234, 88, 12, 0.5);
-  --page-accent-shadow-soft: rgba(234, 88, 12, 0.3);
+  --accent: oklch(67% 0.19 45);
+  --accent-foreground: var(--snow);
 }
 .cocola-user-ui .user-theme-cyan,
 .cocola-user-ui.user-theme-cyan {
-  --page-accent: #0891b2;
-  --page-accent-2: #22d3ee;
-  --page-accent-grad: #0891b2;
-  --page-accent-soft: #ecfeff;
-  --page-accent-ink: #0e7490;
-  --page-accent-border: #a5f0fc;
-  --page-accent-focus: #22d3ee;
-  --page-accent-focus-ring: rgba(8, 145, 178, 0.18);
-  --page-accent-shadow: rgba(8, 145, 178, 0.6);
-  --page-accent-shadow-soft: rgba(8, 145, 178, 0.35);
+  --accent: oklch(68% 0.14 215);
+  --accent-foreground: var(--eclipse);
 }
 .cocola-user-ui .user-theme-indigo,
 .cocola-user-ui.user-theme-indigo {
-  --page-accent: #4f46e5;
-  --page-accent-2: #818cf8;
-  --page-accent-grad: #4f46e5;
-  --page-accent-soft: #eef2ff;
-  --page-accent-ink: #4338ca;
-  --page-accent-border: #c7d2fe;
-  --page-accent-focus: #818cf8;
-  --page-accent-focus-ring: rgba(79, 70, 229, 0.18);
-  --page-accent-shadow: rgba(79, 70, 229, 0.6);
-  --page-accent-shadow-soft: rgba(79, 70, 229, 0.35);
+  --accent: oklch(56% 0.22 275);
+  --accent-foreground: var(--snow);
 }
 .cocola-user-ui .user-theme-blue,
 .cocola-user-ui.user-theme-blue {
-  --page-accent: #2563eb;
-  --page-accent-2: #60a5fa;
-  --page-accent-grad: linear-gradient(135deg, #2563eb, #60a5fa);
-  --page-accent-soft: #eff6ff;
-  --page-accent-ink: #1d4ed8;
-  --page-accent-border: #bfdbfe;
-  --page-accent-focus: #60a5fa;
-  --page-accent-focus-ring: rgba(37, 99, 235, 0.18);
-  --page-accent-shadow: rgba(37, 99, 235, 0.6);
-  --page-accent-shadow-soft: rgba(37, 99, 235, 0.35);
+  --accent: oklch(62.04% 0.195 253.83);
+  --accent-foreground: var(--snow);
 }
 
 .cocola-user-ui .user-theme-emerald,
 .cocola-user-ui.user-theme-emerald {
-  --page-accent: #059669;
-  --page-accent-2: #10b981;
-  --page-accent-grad: linear-gradient(135deg, #059669, #10b981);
-  --page-accent-soft: #ecfdf5;
-  --page-accent-ink: #047857;
-  --page-accent-border: #a7f3d0;
-  --page-accent-focus: #10b981;
-  --page-accent-focus-ring: rgba(16, 185, 129, 0.18);
-  --page-accent-shadow: rgba(5, 150, 105, 0.6);
-  --page-accent-shadow-soft: rgba(5, 150, 105, 0.35);
+  --accent: oklch(64% 0.17 150);
+  --accent-foreground: var(--eclipse);
 }
 
 .cocola-user-ui .user-theme-amber,
 .cocola-user-ui.user-theme-amber {
-  --page-accent: #d97706;
-  --page-accent-2: #f59e0b;
-  --page-accent-grad: #d97706;
-  --page-accent-soft: #fffbeb;
-  --page-accent-ink: #b45309;
-  --page-accent-border: #fcd34d;
-  --page-accent-focus: #f59e0b;
-  --page-accent-focus-ring: rgba(217, 119, 6, 0.2);
-  --page-accent-shadow: rgba(217, 119, 6, 0.6);
-  --page-accent-shadow-soft: rgba(217, 119, 6, 0.35);
+  --accent: oklch(76% 0.17 70);
+  --accent-foreground: var(--eclipse);
 }
 
 /* cool-gray canvas — matches admin sub-page (.admin-glass-shell #f8fafc) */
@@ -3067,38 +2796,38 @@
   flex: 0 0 auto;
   place-items: center;
   border-radius: 1rem;
-  color: var(--page-accent);
-  background: linear-gradient(135deg, var(--page-accent-soft), #ffffff);
-  box-shadow: inset 0 0 0 1px var(--page-accent-border);
+  color: var(--accent);
+  background: var(--accent-soft);
+  box-shadow: inset 0 0 0 1px color-mix(in oklab, var(--accent) 36%, var(--separator));
 }
 .cocola-user-ui .user-eyebrow {
   font-size: 11px;
   font-weight: 700;
   letter-spacing: 0.14em;
   text-transform: uppercase;
-  color: var(--page-accent);
+  color: var(--accent);
 }
 
 /* ---- search box ---- */
 .cocola-user-ui .user-search-input {
-  background: #ffffff;
-  border: 1px solid var(--page-accent-border, hsl(var(--border)));
-  box-shadow: 0 1px 2px 0 rgb(15 23 42 / 0.04);
-  color: hsl(var(--foreground));
+  background: var(--field-background);
+  border: 1px solid color-mix(in oklab, var(--accent) 36%, var(--separator));
+  box-shadow: var(--field-shadow);
+  color: var(--foreground);
 }
 .cocola-user-ui .user-search-input::placeholder {
-  color: hsl(var(--muted-foreground));
+  color: var(--muted);
 }
 .cocola-user-ui .user-search-input:focus {
-  border-color: var(--page-accent-focus);
-  box-shadow: 0 0 0 4px var(--page-accent-focus-ring);
+  border-color: var(--focus);
+  box-shadow: 0 0 0 4px var(--accent-soft);
 }
 
 /* ---- primary gradient button / pill ---- */
 .cocola-user-ui .user-accent-btn {
-  color: #fff;
-  background: var(--page-accent-grad);
-  box-shadow: 0 10px 20px -12px var(--page-accent-shadow);
+  color: var(--accent-foreground);
+  background: linear-gradient(135deg, var(--accent), var(--accent-hover));
+  box-shadow: 0 10px 20px -12px color-mix(in oklab, var(--accent) 50%, transparent);
   transition: opacity 160ms ease;
 }
 .cocola-user-ui .user-accent-btn:hover {
@@ -3107,14 +2836,14 @@
 
 /* ---- metric cards (overview language) ---- */
 .cocola-user-ui .user-metric-card {
-  --card-to: var(--page-accent);
+  --card-to: var(--accent);
   display: flex;
   flex-direction: column;
   gap: 0.65rem;
   align-items: flex-start;
   border: none;
   border-radius: 16px;
-  background: #fff;
+  background: var(--surface);
   padding: 20px 22px;
   box-shadow:
     0 1px 0 0 rgba(0, 0, 0, 0.02),
@@ -3125,7 +2854,7 @@
 }
 .cocola-user-ui .user-metric-card:hover {
   transform: translateY(-3px) scale(1.005);
-  box-shadow: 0 18px 40px -18px var(--page-accent-shadow-soft);
+  box-shadow: 0 18px 40px -18px color-mix(in oklab, var(--accent) 32%, transparent);
 }
 .cocola-user-ui .user-metric-card[data-tone="violet"] {
   --card-to: #7c3aed;
@@ -3205,9 +2934,9 @@
 .cocola-user-ui .user-count-badge {
   font-size: 11px;
   font-weight: 700;
-  color: var(--page-accent-ink);
-  background: var(--page-accent-soft);
-  border: 1px solid var(--page-accent-border);
+  color: var(--accent);
+  background: var(--accent-soft);
+  border: 1px solid color-mix(in oklab, var(--accent) 36%, var(--separator));
   padding: 2px 9px;
   border-radius: 999px;
 }
@@ -3227,12 +2956,12 @@
   width: 36px;
   height: 36px;
   border-radius: 11px;
-  color: var(--page-accent);
-  background: var(--page-accent-soft);
+  color: var(--accent);
+  background: var(--accent-soft);
 }
 .cocola-user-ui .user-field-input:focus {
-  border-color: var(--page-accent-focus);
-  box-shadow: 0 0 0 4px var(--page-accent-focus-ring);
+  border-color: var(--focus);
+  box-shadow: 0 0 0 4px var(--accent-soft);
 }
 
 /* projects (indigo) — HeroUI-style focus: kill default outline, soft 3px glow ring */
@@ -3246,8 +2975,8 @@
 .cocola-user-ui .user-theme-indigo .user-field-input:focus,
 .cocola-user-ui .user-theme-indigo .user-field-input:focus-visible {
   outline: none;
-  border-color: var(--page-accent-focus);
-  box-shadow: 0 0 0 3px var(--page-accent-focus-ring);
+  border-color: var(--focus);
+  box-shadow: 0 0 0 3px var(--accent-soft);
 }
 /* folders (amber) — HeroUI-style focus: kill default outline, soft 3px glow ring.
    Scoped to .user-theme-amber only (not ".cocola-user-ui .user-theme-amber"),
@@ -3263,8 +2992,8 @@
 .user-theme-amber .user-field-input:focus,
 .user-theme-amber .user-field-input:focus-visible {
   outline: none;
-  border-color: var(--page-accent-focus);
-  box-shadow: 0 0 0 3px var(--page-accent-focus-ring);
+  border-color: var(--focus);
+  box-shadow: 0 0 0 3px var(--accent-soft);
 }
 
 /* ---- entity card (skill / mcp) ---- */
@@ -3317,9 +3046,9 @@
   width: 2.5rem;
   height: 2.5rem;
   border-radius: 0.85rem;
-  color: var(--page-accent);
-  background: linear-gradient(135deg, var(--page-accent-soft), #ffffff);
-  box-shadow: inset 0 0 0 1px var(--page-accent-border);
+  color: var(--accent);
+  background: linear-gradient(135deg, var(--accent-soft), #ffffff);
+  box-shadow: inset 0 0 0 1px color-mix(in oklab, var(--accent) 36%, var(--separator));
 }
 .cocola-user-ui .user-card-glyph.lg {
   width: 3.25rem;
@@ -3351,14 +3080,14 @@
   font-weight: 600;
   padding: 3px 10px;
   border-radius: 999px;
-  border: 1px solid hsl(var(--border));
+  border: 1px solid var(--separator);
   color: #52525b;
   background: #fafafa;
 }
 .cocola-user-ui .user-tag--accent {
-  color: var(--page-accent-ink);
-  background: var(--page-accent-soft);
-  border-color: var(--page-accent-border);
+  color: var(--accent);
+  background: var(--accent-soft);
+  border-color: color-mix(in oklab, var(--accent) 36%, var(--separator));
 }
 .cocola-user-ui .user-tag--ok {
   color: #059669;
@@ -3402,9 +3131,9 @@
   transition: all 150ms ease;
 }
 .cocola-user-ui .user-tbtn--ghost {
-  border: 1px solid hsl(var(--border));
+  border: 1px solid var(--separator);
   background: #fff;
-  color: hsl(var(--foreground));
+  color: var(--foreground);
 }
 .cocola-user-ui .user-tbtn--ghost:hover {
   background: #f8fafc;
@@ -3413,8 +3142,8 @@
 .cocola-user-ui .user-tbtn--fill {
   border: 0;
   color: #fff;
-  background: var(--page-accent-grad);
-  box-shadow: 0 8px 18px -10px var(--page-accent-shadow);
+  background: linear-gradient(135deg, var(--accent), var(--accent-hover));
+  box-shadow: 0 8px 18px -10px color-mix(in oklab, var(--accent) 50%, transparent);
 }
 .cocola-user-ui .user-tbtn--fill:hover {
   opacity: 0.92;
@@ -3429,7 +3158,7 @@
   width: 34px;
   height: 34px;
   border-radius: 10px;
-  border: 1px solid hsl(var(--border));
+  border: 1px solid var(--separator);
   background: #fff;
   color: #94a3b8;
   cursor: pointer;
@@ -3449,16 +3178,16 @@
   width: 40px;
   height: 40px;
   border-radius: 12px;
-  border: 1px solid hsl(var(--border));
+  border: 1px solid var(--separator);
   background: #fff;
-  color: hsl(var(--muted-foreground));
+  color: var(--muted);
   cursor: pointer;
   flex: 0 0 auto;
   transition: all 150ms ease;
 }
 .cocola-user-ui .user-back-btn:hover {
   background: #f8fafc;
-  color: hsl(var(--foreground));
+  color: var(--foreground);
 }
 
 /* ---- detail info cards + doc block ---- */
@@ -3481,7 +3210,7 @@
     0 8px 30px -14px rgba(0, 0, 0, 0.16);
 }
 .cocola-user-ui .user-mono-box {
-  border: 1px solid hsl(var(--border));
+  border: 1px solid var(--separator);
   background: #f8fafc;
   border-radius: 12px;
   padding: 14px 16px;
@@ -3499,7 +3228,7 @@
   justify-content: center;
   gap: 10px;
   min-height: 150px;
-  border: 1px dashed hsl(var(--border));
+  border: 1px dashed var(--separator);
   border-radius: 16px;
   padding: 28px;
   text-align: center;
@@ -3514,7 +3243,7 @@
 /* solid icon backgrounds (demo replaced gradients with flat soft fill) */
 .cocola-user-ui .user-theme-indigo .user-page-icon,
 .cocola-user-ui .user-theme-indigo .user-card-glyph {
-  background: var(--page-accent-soft);
+  background: var(--accent-soft);
 }
 
 /* primary accent button — solid fill + springy hover/press + icon pop */
@@ -3527,11 +3256,11 @@
 .cocola-user-ui .user-theme-indigo .user-accent-btn:hover {
   opacity: 0.97;
   transform: translateY(-2px);
-  box-shadow: 0 16px 28px -12px var(--page-accent-shadow);
+  box-shadow: 0 16px 28px -12px color-mix(in oklab, var(--accent) 50%, transparent);
 }
 .cocola-user-ui .user-theme-indigo .user-accent-btn:active {
   transform: translateY(0) scale(0.96);
-  box-shadow: 0 6px 14px -10px var(--page-accent-shadow);
+  box-shadow: 0 6px 14px -10px color-mix(in oklab, var(--accent) 50%, transparent);
 }
 .cocola-user-ui .user-theme-indigo .user-accent-btn svg {
   transition: transform 240ms cubic-bezier(0.34, 1.56, 0.64, 1);
@@ -3558,7 +3287,7 @@
 .cocola-user-ui .user-theme-indigo .user-tbtn--fill:hover {
   opacity: 0.94;
   transform: translateY(-1px);
-  box-shadow: 0 12px 22px -10px var(--page-accent-shadow);
+  box-shadow: 0 12px 22px -10px color-mix(in oklab, var(--accent) 50%, transparent);
 }
 .cocola-user-ui .user-theme-indigo .user-tbtn--fill:active {
   transform: translateY(0) scale(0.97);
@@ -3568,7 +3297,7 @@
 .cocola-user-ui .user-theme-indigo button:focus-visible,
 .cocola-user-ui .user-theme-indigo [role="button"]:focus-visible,
 .cocola-user-ui .user-theme-indigo a[href]:focus-visible {
-  outline: 2px solid var(--page-accent-focus);
+  outline: 2px solid var(--focus);
   outline-offset: 2px;
 }
 /* text inputs get their focus feedback from the field/search glow ring,
@@ -3592,15 +3321,15 @@
   color: #fff;
   font-weight: 800;
   letter-spacing: -0.02em;
-  background: var(--page-accent-grad);
-  box-shadow: 0 8px 18px -10px var(--page-accent-shadow);
+  background: linear-gradient(135deg, var(--accent), var(--accent-hover));
+  box-shadow: 0 8px 18px -10px color-mix(in oklab, var(--accent) 50%, transparent);
   transition:
     transform 220ms ease,
     box-shadow 220ms ease;
 }
 .cocola-user-ui .group:hover .proj-mono {
   transform: scale(1.06) rotate(-3deg);
-  box-shadow: 0 12px 24px -8px var(--page-accent-shadow);
+  box-shadow: 0 12px 24px -8px color-mix(in oklab, var(--accent) 50%, transparent);
 }
 
 /* ==================================================================
@@ -3611,7 +3340,7 @@
 /* solid icon backgrounds */
 .cocola-user-ui .user-theme-amber .user-page-icon,
 .cocola-user-ui .user-theme-amber .user-card-glyph {
-  background: var(--page-accent-soft);
+  background: var(--accent-soft);
 }
 
 /* primary accent button — solid fill + springy hover/press + icon pop */
@@ -3624,11 +3353,11 @@
 .cocola-user-ui .user-theme-amber .user-accent-btn:hover {
   opacity: 0.97;
   transform: translateY(-2px);
-  box-shadow: 0 16px 28px -12px var(--page-accent-shadow);
+  box-shadow: 0 16px 28px -12px color-mix(in oklab, var(--accent) 50%, transparent);
 }
 .cocola-user-ui .user-theme-amber .user-accent-btn:active {
   transform: translateY(0) scale(0.96);
-  box-shadow: 0 6px 14px -10px var(--page-accent-shadow);
+  box-shadow: 0 6px 14px -10px color-mix(in oklab, var(--accent) 50%, transparent);
 }
 .cocola-user-ui .user-theme-amber .user-accent-btn svg {
   transition: transform 240ms cubic-bezier(0.34, 1.56, 0.64, 1);
@@ -3655,7 +3384,7 @@
 .cocola-user-ui .user-theme-amber .user-tbtn--fill:hover {
   opacity: 0.94;
   transform: translateY(-1px);
-  box-shadow: 0 12px 22px -10px var(--page-accent-shadow);
+  box-shadow: 0 12px 22px -10px color-mix(in oklab, var(--accent) 50%, transparent);
 }
 .cocola-user-ui .user-theme-amber .user-tbtn--fill:active {
   transform: translateY(0) scale(0.97);
@@ -3665,7 +3394,7 @@
 .cocola-user-ui .user-theme-amber button:focus-visible,
 .cocola-user-ui .user-theme-amber [role="button"]:focus-visible,
 .cocola-user-ui .user-theme-amber a[href]:focus-visible {
-  outline: 2px solid var(--page-accent-focus);
+  outline: 2px solid var(--focus);
   outline-offset: 2px;
 }
 /* text inputs get their focus feedback from the field/search glow ring,
@@ -3695,7 +3424,7 @@
 }
 .cocola-user-ui .task-card:hover {
   transform: translateY(-3px) scale(1.005);
-  box-shadow: 0 18px 40px -18px var(--page-accent-shadow-soft);
+  box-shadow: 0 18px 40px -18px color-mix(in oklab, var(--accent) 32%, transparent);
 }
 .cocola-user-ui .task-card-head {
   display: flex;
@@ -3711,8 +3440,8 @@
   height: 2.25rem;
   border-radius: 0.75rem;
   color: #fff;
-  background: var(--page-accent-grad);
-  box-shadow: 0 8px 18px -10px var(--page-accent-shadow);
+  background: linear-gradient(135deg, var(--accent), var(--accent-hover));
+  box-shadow: 0 8px 18px -10px color-mix(in oklab, var(--accent) 50%, transparent);
   transition: transform 200ms ease;
 }
 .cocola-user-ui .task-card:hover .task-card-icon {
@@ -3749,8 +3478,8 @@
   font-size: 12px;
   font-weight: 600;
   color: #fff;
-  background: var(--page-accent-grad);
-  box-shadow: 0 8px 18px -8px var(--page-accent-shadow);
+  background: linear-gradient(135deg, var(--accent), var(--accent-hover));
+  box-shadow: 0 8px 18px -8px color-mix(in oklab, var(--accent) 50%, transparent);
   transition: opacity 200ms ease;
 }
 .cocola-user-ui .task-card:hover .task-card-cta {
@@ -3761,4 +3490,168 @@
 }
 .cocola-user-ui .task-card:hover .task-card-cta svg {
   transform: translateX(2px);
+}
+
+/* HeroUI demo source-of-truth interactions. These selectors intentionally sit
+ * after the legacy compatibility layer so transplanted HeroUI components keep
+ * the exact motion and surface treatment from heroui-demo. */
+@keyframes cocola-web-catalog-enter {
+  from {
+    opacity: 0;
+    transform: translateY(8px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.cocola-user-ui .cocola-web-catalog-card {
+  transition:
+    transform 200ms ease,
+    background-color 200ms ease,
+    box-shadow 200ms ease;
+  will-change: transform;
+}
+
+.cocola-user-ui .cocola-web-catalog-trigger {
+  animation: cocola-web-catalog-enter 200ms ease-out both;
+}
+
+.cocola-user-ui .cocola-web-connector-card {
+  animation: cocola-web-catalog-enter 200ms ease-out backwards;
+  transition:
+    transform 200ms ease,
+    box-shadow 200ms ease;
+}
+
+.cocola-user-ui .cocola-web-catalog-grid > :nth-child(2) {
+  animation-delay: 35ms;
+}
+.cocola-user-ui .cocola-web-catalog-grid > :nth-child(3) {
+  animation-delay: 70ms;
+}
+.cocola-user-ui .cocola-web-catalog-grid > :nth-child(4) {
+  animation-delay: 105ms;
+}
+.cocola-user-ui .cocola-web-catalog-grid > :nth-child(5) {
+  animation-delay: 140ms;
+}
+.cocola-user-ui .cocola-web-catalog-grid > :nth-child(6) {
+  animation-delay: 175ms;
+}
+
+.cocola-user-ui .cocola-web-catalog-card-icon,
+.cocola-user-ui .cocola-web-catalog-card-arrow,
+.cocola-user-ui .cocola-web-connector-icon {
+  transition:
+    transform 200ms ease,
+    box-shadow 200ms ease;
+}
+
+.cocola-user-ui .cocola-chat-user-bubble {
+  max-width: min(82%, 42rem);
+  border: 1px solid color-mix(in oklab, var(--separator) 84%, transparent);
+  background: color-mix(in oklab, var(--surface-secondary) 88%, var(--surface) 12%);
+  box-shadow: 0 8px 20px -18px color-mix(in oklab, var(--foreground) 32%, transparent);
+}
+
+.cocola-user-ui .cocola-chat-model-header {
+  min-height: 2rem;
+  margin-bottom: 0.25rem;
+}
+
+@media (hover: hover) and (pointer: fine) {
+  .cocola-user-ui .cocola-web-catalog-trigger:hover > .cocola-web-catalog-card {
+    transform: translateY(-3px) scale(1.005);
+    box-shadow: 0 18px 40px -18px color-mix(in oklab, var(--accent) 32%, transparent);
+  }
+
+  .cocola-user-ui .cocola-web-catalog-trigger:hover .cocola-web-catalog-card-icon {
+    transform: rotate(-2deg) scale(1.06);
+  }
+
+  .cocola-user-ui .cocola-web-catalog-trigger:hover .cocola-web-catalog-card-arrow {
+    transform: translateX(2px);
+  }
+
+  .cocola-user-ui .cocola-web-catalog-trigger:active > .cocola-web-catalog-card {
+    transform: translateY(-1px) scale(0.995);
+    transition-duration: 80ms;
+  }
+
+  .cocola-user-ui .cocola-web-connector-card:hover,
+  .cocola-user-ui .cocola-web-connector-card:focus-within {
+    transform: translateY(-3px);
+    box-shadow: 0 20px 40px -18px color-mix(in oklab, var(--foreground) 30%, transparent);
+  }
+
+  .cocola-user-ui .cocola-web-connector-card:hover .cocola-web-connector-icon,
+  .cocola-user-ui .cocola-web-connector-card:focus-within .cocola-web-connector-icon {
+    transform: scale(1.06) rotate(-3deg);
+    box-shadow: 0 10px 20px -8px color-mix(in oklab, var(--foreground) 50%, transparent);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .cocola-user-ui .cocola-web-catalog-card,
+  .cocola-user-ui .cocola-web-catalog-card-icon,
+  .cocola-user-ui .cocola-web-catalog-card-arrow,
+  .cocola-user-ui .cocola-web-connector-card,
+  .cocola-user-ui .cocola-web-connector-icon {
+    animation: none;
+    transition: none;
+  }
+}
+
+@keyframes cocola-web-brand-enter {
+  from {
+    opacity: 0;
+    transform: translateY(8px);
+  }
+
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@keyframes cocola-web-core-logo-enter {
+  from {
+    opacity: 0;
+    transform: scale(0.86) rotate(-5deg);
+  }
+
+  to {
+    opacity: 1;
+    transform: scale(1) rotate(0);
+  }
+}
+
+@keyframes cocola-web-wordmark-reveal {
+  from {
+    clip-path: inset(0 100% 0 0);
+    opacity: 0;
+    transform: translateX(-8px);
+  }
+
+  to {
+    clip-path: inset(0 0 0 0);
+    opacity: 1;
+    transform: translateX(0);
+  }
+}
+
+@keyframes cocola-web-tagline-enter {
+  from {
+    filter: blur(5px);
+    opacity: 0;
+    transform: translateY(4px);
+  }
+
+  to {
+    filter: blur(0);
+    opacity: 1;
+    transform: translateY(0);
+  }
 }

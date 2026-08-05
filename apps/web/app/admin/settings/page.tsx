@@ -1,10 +1,11 @@
 "use client";
 
 import { Settings as SettingsPageIcon } from "lucide-react";
-import { Database, Layers, Loader2, RotateCcw, Save, SlidersHorizontal } from "lucide-react";
+import { Loader2, RotateCcw, Save } from "lucide-react";
 import { AlertTriangle, Check } from "lucide-react";
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { AdminPage, AdminPageHeader, AdminRefreshButton } from "@/components/admin/admin-ui";
+import { Button, Card, Chip, Input, Label, Switch, TextField, Tooltip } from "@heroui/react";
+import { AdminConfirmDialog, AdminPage, AdminPageHeader, AdminRefreshButton } from "@/components/admin/admin-ui";
 
 type SettingValue = boolean | number | string | null;
 
@@ -36,6 +37,7 @@ export default function AdminSettingsPage() {
   const [savingKey, setSavingKey] = useState("");
   const [error, setError] = useState("");
   const [notice, setNotice] = useState("");
+  const [resetTarget, setResetTarget] = useState<SystemSetting | null>(null);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -68,15 +70,6 @@ export default function AdminSettingsPage() {
     return Array.from(groups.entries());
   }, [settings]);
 
-  const stats = useMemo(
-    () => ({
-      total: settings.length,
-      overrides: settings.filter((setting) => setting.source === "db").length,
-      groups: grouped.length,
-    }),
-    [grouped.length, settings],
-  );
-
   async function save(setting: SystemSetting) {
     setSavingKey(setting.key);
     setError("");
@@ -100,17 +93,19 @@ export default function AdminSettingsPage() {
     }
   }
 
-  async function reset(setting: SystemSetting) {
-    setSavingKey(setting.key);
+  async function reset() {
+    if (!resetTarget) return;
+    setSavingKey(resetTarget.key);
     setError("");
     setNotice("");
     try {
       const res = await fetch(
-        `/api/admin/settings/${encodeURIComponent(setting.key)}?expected_version=${setting.version}`,
+        `/api/admin/settings/${encodeURIComponent(resetTarget.key)}?expected_version=${resetTarget.version}`,
         { method: "DELETE" },
       );
       if (!res.ok) throw new Error(await errorText(res));
-      setNotice(`${setting.label} reset to startup default`);
+      setNotice(`${resetTarget.label} reset to startup default`);
+      setResetTarget(null);
       await load();
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
@@ -139,32 +134,8 @@ export default function AdminSettingsPage() {
         }
       />
 
-      <section className="grid gap-4 md:grid-cols-3">
-        <Metric
-          label="Settings"
-          value={String(stats.total)}
-          detail="Across all runtime groups"
-          tone="slate"
-          icon={<SlidersHorizontal />}
-        />
-        <Metric
-          label="DB Overrides"
-          value={String(stats.overrides)}
-          detail="Persisted to database"
-          tone="green"
-          icon={<Database />}
-        />
-        <Metric
-          label="Groups"
-          value={String(stats.groups)}
-          detail="Logical config sections"
-          tone="indigo"
-          icon={<Layers />}
-        />
-      </section>
-
       {error ? (
-        <div className="flex items-center gap-2 rounded-xl border border-destructive/30 bg-destructive/10 px-4 py-3 text-sm text-destructive">
+        <div className="flex items-center gap-2 rounded-xl border border-danger/30 bg-danger/10 px-4 py-3 text-sm text-danger">
           <AlertTriangle className="size-4 shrink-0" />
           <span className="min-w-0">{error}</span>
         </div>
@@ -177,49 +148,34 @@ export default function AdminSettingsPage() {
       ) : null}
 
       {loading ? (
-        <div className="flex h-40 items-center justify-center text-sm text-muted-foreground">
+        <div className="text-muted flex h-40 items-center justify-center text-sm">
           <Loader2 className="mr-2 size-4 animate-spin" />
           Loading settings
         </div>
       ) : (
-        <section className="space-y-5">
+        <section className="grid gap-5">
           {grouped.map(([group, rows]) => (
-            <div key={group} className="admin-set-group">
-              <div className="admin-set-group-head">
-                <span className="admin-set-glyph">
-                  <SlidersHorizontal className="size-[19px]" />
-                </span>
-                <span className="admin-set-title">{group}</span>
-                <span className="admin-set-count">
-                  {rows.length} {rows.length === 1 ? "setting" : "settings"}
-                </span>
-              </div>
-              <div className="admin-set-cols">
-                <div>Setting</div>
-                <div>Value</div>
-                <div className="r">Actions</div>
-              </div>
-
-              {rows.map((setting) => {
+            <Card key={group} className="overflow-hidden p-0">
+              <Card.Header className="bg-surface-secondary flex-row items-center justify-between px-5 py-4">
+                <Card.Title>{group}</Card.Title>
+                <Chip size="sm" variant="soft">{rows.length} {rows.length === 1 ? "setting" : "settings"}</Chip>
+              </Card.Header>
+              <Card.Content className="divide-y divide-separator p-0">
+                {rows.map((setting) => {
                 const draftValue = drafts[setting.key] ?? valueForDraft(setting);
                 const dirty = !sameValue(valueForDraft(setting), draftValue);
                 const busy = savingKey === setting.key;
                 return (
-                  <div key={setting.key} className="admin-set-row">
-                    <div className="admin-set-meta">
-                      <div className="admin-set-name">
-                        <span className="admin-set-label">{setting.label}</span>
-                        <span className="admin-set-src" data-src={setting.source}>
-                          <span className="admin-set-sdot" />
-                          {setting.source}
-                        </span>
-                      </div>
-                      <div className="admin-set-desc">{setting.description}</div>
-                      <div className="admin-set-keys">
-                        <span className="admin-set-keychip">{setting.key}</span>
-                        {setting.env ? (
-                          <span className="admin-set-keychip">{setting.env}</span>
-                        ) : null}
+                  <div key={setting.key} className="grid gap-4 px-5 py-4 lg:grid-cols-[minmax(0,1fr)_minmax(220px,320px)_180px] lg:items-center">
+                    <div className="min-w-0">
+                      <span className="flex flex-wrap items-center gap-2">
+                        <span className="font-medium">{setting.label}</span>
+                        <Chip color={setting.source === "db" ? "accent" : "default"} size="sm" variant="soft">{sourceLabel(setting.source)}</Chip>
+                      </span>
+                      <p className="text-muted mt-1 max-w-2xl text-xs leading-5">{setting.description}</p>
+                      <div className="text-muted mt-2 flex min-w-0 flex-wrap gap-2 font-mono text-[11px]">
+                        <code className="bg-surface-secondary max-w-full truncate rounded-lg px-2 py-1">{setting.key} · v{setting.version}</code>
+                        {setting.env ? <code className="bg-surface-secondary max-w-full truncate rounded-lg px-2 py-1">{setting.env}</code> : null}
                       </div>
                     </div>
 
@@ -231,48 +187,60 @@ export default function AdminSettingsPage() {
                           setDrafts((prev) => ({ ...prev, [setting.key]: value }))
                         }
                       />
-                      <div className="admin-set-ctrl-def">{`Default: ${formatValue(setting.default)}`}</div>
+                      <div className="text-muted mt-1 text-xs">{`Default: ${formatValue(setting.default)}`}</div>
                     </div>
 
-                    <div className="admin-set-actions">
+                    <div className="flex justify-end gap-2">
                       {setting.editable ? (
                         <>
-                          <button
-                            type="button"
-                            className="admin-set-iconbtn admin-set-iconbtn--primary"
-                            title="Save override"
-                            aria-label="Save override"
-                            disabled={!dirty || busy}
-                            onClick={() => void save(setting)}
+                          <Tooltip delay={0}>
+                          <Button
+                            aria-label={`Save ${setting.label}`}
+                            isDisabled={!dirty || busy}
+                            size="sm"
+                            variant={dirty ? "primary" : "outline"}
+                            onPress={() => void save(setting)}
                           >
-                            {busy ? (
-                              <Loader2 className="size-4 animate-spin" />
-                            ) : (
-                              <Save className="size-4" />
-                            )}
-                          </button>
-                          <button
-                            type="button"
-                            className="admin-set-iconbtn"
-                            title="Reset override"
-                            aria-label="Reset override"
-                            disabled={setting.source !== "db" || busy}
-                            onClick={() => void reset(setting)}
+                            {busy ? <Loader2 className="size-4 animate-spin" /> : <Save className="size-4" />}Save
+                          </Button>
+                          <Tooltip.Content>Save this value as a database override</Tooltip.Content>
+                          </Tooltip>
+                          <Tooltip delay={0}>
+                          <Button
+                            aria-label={`${dirty ? "Revert" : "Reset"} ${setting.label}`}
+                            isDisabled={(!dirty && setting.source !== "db") || busy}
+                            size="sm"
+                            variant="outline"
+                            onPress={() => dirty ? setDrafts((current) => ({ ...current, [setting.key]: valueForDraft(setting) })) : setResetTarget(setting)}
                           >
                             <RotateCcw className="size-4" />
-                          </button>
+                            {dirty ? "Revert" : "Reset"}
+                          </Button>
+                          <Tooltip.Content>{dirty ? "Discard the unsaved change" : "Remove the database override"}</Tooltip.Content>
+                          </Tooltip>
                         </>
                       ) : (
-                        <span className="admin-set-ro">read only</span>
+                        <Chip size="sm" variant="soft">Read only</Chip>
                       )}
                     </div>
                   </div>
                 );
               })}
-            </div>
+              </Card.Content>
+            </Card>
           ))}
         </section>
       )}
+
+      <AdminConfirmDialog
+        open={resetTarget !== null}
+        onOpenChange={(open) => !open && setResetTarget(null)}
+        title="Reset override?"
+        description={`${resetTarget?.label ?? "This setting"} will return to its startup default. The expected version is checked before reset.`}
+        confirmLabel="Reset override"
+        busy={Boolean(resetTarget && savingKey === resetTarget.key)}
+        onConfirm={() => void reset()}
+      />
     </AdminPage>
   );
 }
@@ -289,70 +257,22 @@ function SettingControl({
   if (setting.kind === "bool") {
     const checked = value === true;
     return (
-      <label className="admin-set-toggle">
-        <input
-          aria-label={setting.label}
-          type="checkbox"
-          checked={checked}
-          disabled={!setting.editable}
-          onChange={(event) => onChange(event.target.checked)}
-        />
-        <span className="admin-set-track" />
-        <span className="admin-set-toggle-text">{checked ? "Enabled" : "Disabled"}</span>
-      </label>
-    );
-  }
-
-  if (setting.kind === "int") {
-    return (
-      <input
-        aria-label={setting.label}
-        className="admin-set-ctrl-input"
-        type="number"
-        min={setting.min}
-        max={setting.max}
-        value={typeof value === "number" ? String(value) : ""}
-        disabled={!setting.editable}
-        onChange={(event) =>
-          onChange(event.target.value === "" ? null : Number(event.target.value))
-        }
-      />
+      <Switch aria-label={setting.label} isDisabled={!setting.editable} isSelected={checked} onChange={onChange}>
+        <Switch.Content><Switch.Control><Switch.Thumb /></Switch.Control>{checked ? "Enabled" : "Disabled"}</Switch.Content>
+      </Switch>
     );
   }
 
   return (
-    <input
-      aria-label={setting.label}
-      className="admin-set-ctrl-input"
-      value={typeof value === "string" ? value : ""}
-      disabled={!setting.editable}
-      onChange={(event) => onChange(event.target.value)}
-    />
-  );
-}
-
-function Metric({
-  label,
-  value,
-  detail,
-  tone,
-  icon,
-}: {
-  label: string;
-  value: string;
-  detail: string;
-  tone: string;
-  icon: React.ReactNode;
-}) {
-  return (
-    <div className="admin-metric-card" data-tone={tone}>
-      <div className="admin-metric-head">
-        <span className="admin-metric-glyph">{icon}</span>
-        <span className="admin-metric-key">{label}</span>
-      </div>
-      <div className="admin-metric-val truncate">{value}</div>
-      <div className="admin-metric-detail">{detail}</div>
-    </div>
+    <TextField
+      isDisabled={!setting.editable}
+      value={value == null ? "" : String(value)}
+      variant="secondary"
+      onChange={(next) => onChange(setting.kind === "int" ? (next === "" ? null : Number(next)) : next)}
+    >
+      <Label className="sr-only">{setting.label}</Label>
+      <Input type={setting.kind === "int" ? "number" : "text"} min={setting.min} max={setting.max} />
+    </TextField>
   );
 }
 
@@ -373,6 +293,10 @@ function sameValue(a: SettingValue, b: SettingValue) {
 function formatValue(value: SettingValue | undefined) {
   if (value === undefined || value === null || value === "") return "-";
   return String(value);
+}
+
+function sourceLabel(source: SystemSetting["source"]) {
+  return source === "db" ? "DB override" : source === "env" ? "Environment" : "Default";
 }
 
 async function errorText(res: Response) {

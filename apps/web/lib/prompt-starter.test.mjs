@@ -34,8 +34,8 @@ const threadSource = readFileSync(
 test("Prompt Starters fill the composer instead of sending a suggestion", () => {
   assert.match(threadSource, /composer\.setText\(starter\.prompt\)/);
   assert.doesNotMatch(threadSource, /<ThreadPrimitive\.Suggestion/);
-  assert.match(threadSource, /aria-hidden=\{!composerIsEmpty\}/);
-  assert.match(threadSource, /!composerIsEmpty && "invisible pointer-events-none"/);
+  assert.doesNotMatch(threadSource, /aria-hidden=\{!composerIsEmpty\}/);
+  assert.doesNotMatch(threadSource, /!composerIsEmpty && "invisible pointer-events-none"/);
   assert.doesNotMatch(threadSource, /\{composerIsEmpty \? \(/);
 });
 

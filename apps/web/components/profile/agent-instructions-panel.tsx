@@ -1,15 +1,11 @@
 "use client";
 
-import { AlertCircle, CheckCircle2, FileCode2, RotateCcw, Save } from "lucide-react";
-import { FormEvent, useEffect, useMemo, useState } from "react";
+import { Button, Card, Chip, Label, TextArea, TextField } from "@heroui/react";
+import { AlertCircle, BookOpen, CheckCircle2, RotateCcw } from "lucide-react";
+import { type FormEvent, useEffect, useMemo, useState } from "react";
 
 const MAX_CONTENT_BYTES = 32 * 1024;
-
-type AgentInstructionsRecord = {
-  content: string;
-  version: number;
-};
-
+type AgentInstructionsRecord = { content: string; version: number };
 type Notice = { tone: "success" | "error"; message: string } | null;
 
 export function AgentInstructionsPanel() {
@@ -24,174 +20,32 @@ export function AgentInstructionsPanel() {
 
   useEffect(() => {
     const controller = new AbortController();
-    async function load() {
-      try {
-        const response = await fetch("/api/account/agent-instructions", {
-          cache: "no-store",
-          signal: controller.signal,
-        });
-        const body = await response.json();
-        if (!response.ok) {
-          throw new Error(instructionsError(body, "Could not load AGENTS.md."));
-        }
-        const record = body as AgentInstructionsRecord;
-        setContent(record.content || "");
-        setSavedContent(record.content || "");
-      } catch (error) {
-        if (controller.signal.aborted) return;
-        setNotice({
-          tone: "error",
-          message: error instanceof Error ? error.message : "Could not load AGENTS.md.",
-        });
-      } finally {
-        if (!controller.signal.aborted) setLoading(false);
-      }
-    }
-    void load();
+    void fetch("/api/account/agent-instructions", { cache: "no-store", signal: controller.signal }).then(async (response) => {
+      const body = await response.json();
+      if (!response.ok) throw new Error(instructionsError(body, "Could not load AGENTS.md."));
+      const record = body as AgentInstructionsRecord;
+      setContent(record.content || ""); setSavedContent(record.content || "");
+    }).catch((error) => { if (!controller.signal.aborted) setNotice({ tone: "error", message: error instanceof Error ? error.message : "Could not load AGENTS.md." }); }).finally(() => { if (!controller.signal.aborted) setLoading(false); });
     return () => controller.abort();
   }, []);
 
   async function save(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     if (!changed || tooLarge || saving) return;
-    setNotice(null);
-    setSaving(true);
+    setNotice(null); setSaving(true);
     try {
-      const response = await fetch("/api/account/agent-instructions", {
-        method: "PUT",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({ content }),
-      });
+      const response = await fetch("/api/account/agent-instructions", { method: "PUT", headers: { "content-type": "application/json" }, body: JSON.stringify({ content }) });
       const body = await response.json();
-      if (!response.ok) {
-        throw new Error(instructionsError(body, "Could not save AGENTS.md."));
-      }
+      if (!response.ok) throw new Error(instructionsError(body, "Could not save AGENTS.md."));
       const record = body as AgentInstructionsRecord;
-      setContent(record.content || "");
-      setSavedContent(record.content || "");
-      setNotice({ tone: "success", message: "AGENTS.md saved." });
-    } catch (error) {
-      setNotice({
-        tone: "error",
-        message: error instanceof Error ? error.message : "Could not save AGENTS.md.",
-      });
-    } finally {
-      setSaving(false);
-    }
+      setContent(record.content || ""); setSavedContent(record.content || ""); setNotice({ tone: "success", message: "AGENTS.md saved." });
+    } catch (error) { setNotice({ tone: "error", message: error instanceof Error ? error.message : "Could not save AGENTS.md." }); }
+    finally { setSaving(false); }
   }
 
-  return (
-    <section className="overflow-hidden rounded-2xl border border-border bg-card shadow-card">
-      <div className="flex items-center gap-3 border-b border-border px-4 py-3">
-        <div className="grid size-8 place-items-center rounded-xl bg-violet-500/10">
-          <FileCode2 className="size-4 text-violet-600" />
-        </div>
-        <div className="min-w-0">
-          <h2 className="text-sm font-semibold">Agent instructions</h2>
-          <p className="text-xs text-muted-foreground">
-            Persistent preferences applied to each agent turn.
-          </p>
-        </div>
-      </div>
-
-      <form className="space-y-4 p-4" onSubmit={save}>
-        <div className="overflow-hidden rounded-xl border border-input bg-background">
-          <div className="flex items-center justify-between border-b border-input bg-muted/50 px-3 py-2">
-            <div className="flex items-center gap-2 font-mono text-xs font-medium">
-              <span className="size-2 rounded-full bg-violet-500" aria-hidden />
-              AGENTS.md
-            </div>
-            <span
-              className={
-                tooLarge
-                  ? "font-mono text-[11px] text-destructive"
-                  : "font-mono text-[11px] text-muted-foreground"
-              }
-            >
-              {formatBytes(contentBytes)} / 32 KB
-            </span>
-          </div>
-          <textarea
-            aria-label="AGENTS.md content"
-            value={content}
-            onChange={(event) => {
-              setContent(event.target.value);
-              setNotice(null);
-            }}
-            disabled={loading || saving}
-            spellCheck={false}
-            placeholder={
-              loading
-                ? "Loading AGENTS.md…"
-                : "# Working preferences\n- Answer in Chinese.\n- Keep code changes small and reviewable."
-            }
-            className="min-h-56 w-full resize-y bg-transparent px-4 py-3 font-mono text-[13px] leading-6 outline-none placeholder:text-muted-foreground/70 focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring disabled:cursor-wait disabled:opacity-60"
-          />
-        </div>
-
-        <p className="text-xs leading-5 text-muted-foreground">
-          Your current request and repository-specific instructions can override these preferences.
-          Administrator and safety policies always take priority.
-        </p>
-
-        {tooLarge ? (
-          <div role="alert" className="flex items-start gap-2 text-sm text-destructive">
-            <AlertCircle className="mt-0.5 size-4 shrink-0" />
-            <span>AGENTS.md must be 32 KB or smaller.</span>
-          </div>
-        ) : null}
-        {notice ? <NoticeLine notice={notice} /> : null}
-
-        <div className="flex flex-wrap items-center justify-between gap-3 border-t border-border pt-4">
-          <button
-            type="button"
-            onClick={() => {
-              setContent("");
-              setNotice(null);
-            }}
-            disabled={loading || saving || content.length === 0}
-            className="inline-flex h-9 items-center gap-2 rounded-xl border border-input bg-background px-3 text-sm font-medium hover:bg-accent disabled:cursor-not-allowed disabled:opacity-50"
-          >
-            <RotateCcw className="size-4" />
-            Clear editor
-          </button>
-          <button
-            type="submit"
-            disabled={loading || saving || !changed || tooLarge}
-            className="inline-flex h-9 items-center gap-2 rounded-xl bg-primary px-3 text-sm font-medium text-primary-foreground hover:bg-primary/90 disabled:cursor-not-allowed disabled:opacity-50"
-          >
-            <Save className="size-4" />
-            {saving ? "Saving…" : "Save AGENTS.md"}
-          </button>
-        </div>
-      </form>
-    </section>
-  );
+  return <Card className="p-5"><form onSubmit={save}><Card.Header className="flex-row items-start justify-between gap-4 p-0"><span><Card.Title>Agent instructions</Card.Title><Card.Description>AGENTS.md preferences applied to your sessions.</Card.Description></span><Chip color={tooLarge ? "danger" : "accent"} size="sm" variant="soft">{formatBytes(contentBytes)} / 32 KB</Chip></Card.Header><Card.Content className="mt-5 grid gap-4 p-0"><TextField isDisabled={loading || saving} value={content} variant="secondary" onChange={(value) => { setContent(value); setNotice(null); }}><Label className="sr-only">AGENTS.md</Label><TextArea className="min-h-56 font-mono text-sm" placeholder={loading ? "Loading AGENTS.md…" : "# Working preferences\n- Answer in Chinese.\n- Keep code changes small and reviewable."} spellCheck={false} /></TextField><p className="text-muted text-xs leading-5">Your current request and repository-specific instructions can override these preferences. Administrator and safety policies always take priority.</p>{tooLarge ? <div className="text-danger flex items-start gap-2 text-sm"><AlertCircle className="mt-0.5 size-4" />AGENTS.md must be 32 KB or smaller.</div> : null}{notice ? <NoticeLine notice={notice} /> : null}</Card.Content><Card.Footer className="mt-4 justify-end gap-2 p-0"><Button isDisabled={loading || saving || !content} variant="outline" onPress={() => { setContent(""); setNotice(null); }}><RotateCcw className="size-4" />Clear editor</Button><Button isDisabled={loading || saving || !changed || tooLarge} isPending={saving} type="submit"><BookOpen className="size-4" />Save</Button></Card.Footer></form></Card>;
 }
 
-function NoticeLine({ notice }: { notice: Exclude<Notice, null> }) {
-  const Icon = notice.tone === "success" ? CheckCircle2 : AlertCircle;
-  return (
-    <div
-      role={notice.tone === "error" ? "alert" : "status"}
-      className={
-        notice.tone === "success"
-          ? "flex items-start gap-2 text-sm text-emerald-600"
-          : "flex items-start gap-2 text-sm text-destructive"
-      }
-    >
-      <Icon className="mt-0.5 size-4 shrink-0" />
-      <span>{notice.message}</span>
-    </div>
-  );
-}
-
-function instructionsError(body: unknown, fallback: string): string {
-  const envelope = body as { error?: { message?: string } };
-  return envelope?.error?.message || fallback;
-}
-
-function formatBytes(value: number): string {
-  if (value < 1024) return `${value} B`;
-  return `${(value / 1024).toFixed(value < 10 * 1024 ? 1 : 0)} KB`;
-}
+function NoticeLine({ notice }: { notice: Exclude<Notice, null> }) { const Icon = notice.tone === "success" ? CheckCircle2 : AlertCircle; return <div role={notice.tone === "error" ? "alert" : "status"} className={`${notice.tone === "success" ? "text-success" : "text-danger"} flex items-start gap-2 text-sm`}><Icon className="mt-0.5 size-4" /><span>{notice.message}</span></div>; }
+function instructionsError(body: unknown, fallback: string) { return (body as { error?: { message?: string } })?.error?.message || fallback; }
+function formatBytes(value: number) { return value < 1024 ? `${value} B` : `${(value / 1024).toFixed(value < 10 * 1024 ? 1 : 0)} KB`; }

@@ -1,17 +1,10 @@
 "use client";
 
-import { Users as UsersPageIcon } from "lucide-react";
-import { Button } from "@/components/ui/button";
-import { AdminAlert, AdminDrawer } from "@/components/admin/admin-ui";
-import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuSeparator,
-  DropdownMenuTrigger,
-} from "@/components/ui/dropdown-menu";
-import { SelectControl } from "@/components/ui/select-control";
-import { cn } from "@/lib/utils";
+import { Avatar, Button, Checkbox, Chip, Dropdown, Input, Label, SearchField, TextField } from "@heroui/react";
+import { DataGrid, type DataGridColumn } from "@heroui-pro/react/data-grid";
+import { EmptyState } from "@heroui-pro/react/empty-state";
+import { Segment } from "@heroui-pro/react/segment";
+import { AdminAlert, AdminConfirmDialog, AdminDrawer, AdminPage, AdminPageHeader } from "@/components/admin/admin-ui";
 import {
   CheckCircle2,
   Copy,
@@ -19,15 +12,15 @@ import {
   LoaderCircle,
   MoreHorizontal,
   Power,
-  Search,
   Shield,
   ShieldCheck,
   Trash2,
   UserCog,
   UserPlus,
+  Users as UsersPageIcon,
 } from "lucide-react";
 import { signOut, useSession } from "next-auth/react";
-import { useCallback, useEffect, useMemo, useState, type ReactNode } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 
 type Role = "user" | "admin";
 
@@ -309,9 +302,49 @@ export default function AdminUsersPage() {
     Boolean(form.email.trim()) &&
     (drawerMode === "edit" || form.autoPassword || Boolean(form.password));
 
+  const columns: DataGridColumn<AuthUser>[] = [
+    {
+      id: "user",
+      header: "User",
+      isRowHeader: true,
+      minWidth: 320,
+      cell: (user) => (
+        <span className="flex min-w-0 items-center gap-3 py-1">
+          <Avatar className="size-10"><Avatar.Fallback>{avatarInitials(user)}</Avatar.Fallback></Avatar>
+          <span className="min-w-0"><span className="block truncate text-sm font-semibold">{user.name || user.username || user.email}</span><span className="text-muted mt-0.5 block truncate text-xs">{user.username} · {user.email}</span></span>
+        </span>
+      ),
+    },
+    { id: "role", header: "Role", width: 130, cell: (user) => <RolePill role={user.role} /> },
+    { id: "status", header: "Status", width: 130, cell: (user) => <StatusPill enabled={user.enabled} /> },
+    { id: "login", header: "Last login", minWidth: 180, cell: (user) => <span className="text-muted text-sm tabular-nums">{formatTime(user.last_login_at)}</span> },
+    {
+      id: "actions",
+      header: "Actions",
+      align: "center",
+      pinned: "end",
+      width: 80,
+      cell: (user) => {
+        const busy = actingId === user.id;
+        const protectedAdmin = isProtectedAdmin(user);
+        const selfUser = isCurrentUser(user, currentUserEmail);
+        const roleLocked = selfUser || (protectedAdmin && user.role === "admin");
+        const disableLocked = selfUser || (protectedAdmin && user.enabled);
+        const deleteLocked = selfUser || protectedAdmin;
+        return <Dropdown><Dropdown.Trigger aria-label={`Actions for ${user.username}`} className="text-muted hover:bg-surface-secondary mx-auto grid size-9 place-items-center rounded-xl" isDisabled={busy}>{busy ? <LoaderCircle className="size-4 animate-spin" /> : <MoreHorizontal className="size-4" />}</Dropdown.Trigger><Dropdown.Popover placement="bottom end"><Dropdown.Menu aria-label={`Actions for ${user.username}`} onAction={(key) => {
+          if (key === "edit") openEdit(user);
+          if (key === "reset") openReset(user);
+          if (key === "role") void patchUser(user, { role: user.role === "admin" ? "user" : "admin" }, "User updated");
+          if (key === "toggle") void patchUser(user, { enabled: !user.enabled }, user.enabled ? "User disabled" : "User enabled");
+          if (key === "delete") setDeleteTarget(user);
+        }}><Dropdown.Item id="edit" textValue="Edit"><UserCog className="size-4" />Edit</Dropdown.Item><Dropdown.Item id="reset" textValue="Reset password"><KeyRound className="size-4" />Reset password</Dropdown.Item><Dropdown.Item id="role" isDisabled={roleLocked} textValue={user.role === "admin" ? "Make user" : "Make admin"}><ShieldCheck className="size-4" />{user.role === "admin" ? "Make user" : "Make admin"}</Dropdown.Item><Dropdown.Item id="toggle" isDisabled={disableLocked} textValue={user.enabled ? "Disable" : "Enable"}><Power className="size-4" />{user.enabled ? "Disable" : "Enable"}</Dropdown.Item><Dropdown.Item id="delete" isDisabled={deleteLocked} textValue="Delete"><Trash2 className="text-danger size-4" /><span className="text-danger">Delete</span></Dropdown.Item></Dropdown.Menu></Dropdown.Popover></Dropdown>;
+      },
+    },
+  ];
+
   return (
-    <main className="admin-theme-blue min-h-screen bg-background text-foreground">
-      <div className="mx-auto w-full max-w-[100rem] space-y-6 px-4 py-5 sm:px-6 sm:py-6">
+    <AdminPage>
+      <AdminPageHeader icon={<UsersPageIcon className="size-5" />} title="Users" description="Manage accounts, roles, and access status." actions={<Button onPress={openCreate}><UserPlus className="size-4" />New user</Button>} />
         {error && <AdminAlert tone="error">{error}</AdminAlert>}
         {notice && (
           <AdminAlert tone="success" icon={<CheckCircle2 className="size-4" />}>
@@ -319,183 +352,9 @@ export default function AdminUsersPage() {
           </AdminAlert>
         )}
 
-        <section className="grid gap-4 md:grid-cols-3">
-          <MetricCard
-            tone="blue"
-            label="Users"
-            value={stats.total}
-            icon={<UsersPageIcon className="size-[22px]" />}
-          />
-          <MetricCard
-            tone="green"
-            label="Enabled"
-            value={stats.enabled}
-            icon={<CheckCircle2 className="size-[22px]" />}
-          />
-          <MetricCard
-            tone="violet"
-            label="Admins"
-            value={stats.admins}
-            icon={<ShieldCheck className="size-[22px]" />}
-          />
-        </section>
+      <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between"><SearchField aria-label="Search users" className="w-full lg:max-w-sm" value={query} onChange={setQuery}><SearchField.Group><SearchField.SearchIcon /><SearchField.Input placeholder="Search username or email" /><SearchField.ClearButton /></SearchField.Group></SearchField><div className="flex flex-wrap gap-2"><Segment aria-label="Role filter" selectedKey={roleFilter} onSelectionChange={(key) => setRoleFilter(String(key) as RoleFilter)}><Segment.Item id="all">All roles</Segment.Item><Segment.Item id="user">Users</Segment.Item><Segment.Item id="admin">Admins</Segment.Item></Segment><Segment aria-label="Status filter" selectedKey={statusFilter} onSelectionChange={(key) => setStatusFilter(String(key) as StatusFilter)}><Segment.Item id="all">All</Segment.Item><Segment.Item id="enabled">Enabled</Segment.Item><Segment.Item id="disabled">Disabled</Segment.Item></Segment></div></div>
 
-        {/* Toolbar: search + filters + create */}
-        <div className="admin-user-toolbar">
-          <div className="relative min-w-[240px] flex-1">
-            <Search className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
-            <input
-              value={query}
-              onChange={(e) => setQuery(e.target.value)}
-              placeholder="Search username or email"
-              className="h-10 w-full rounded-md border border-input bg-background pl-9 pr-3 text-sm outline-none focus:border-ring"
-            />
-          </div>
-          <SelectControl
-            value={roleFilter}
-            onValueChange={(value) => setRoleFilter(value as RoleFilter)}
-            className="h-10 w-auto min-w-32 rounded-md border border-input bg-background px-3 text-sm outline-none focus:border-ring"
-            options={[
-              { value: "all", label: "All roles" },
-              { value: "user", label: "user" },
-              { value: "admin", label: "admin" },
-            ]}
-            contentClassName="cocola-admin-ui"
-          />
-          <SelectControl
-            value={statusFilter}
-            onValueChange={(value) => setStatusFilter(value as StatusFilter)}
-            className="h-10 w-auto min-w-36 rounded-md border border-input bg-background px-3 text-sm outline-none focus:border-ring"
-            options={[
-              { value: "all", label: "All statuses" },
-              { value: "enabled", label: "Enabled" },
-              { value: "disabled", label: "Disabled" },
-            ]}
-            contentClassName="cocola-admin-ui"
-          />
-          <Button onClick={openCreate} className="admin-primary-btn">
-            <UserPlus className="mr-2 size-4" />
-            New user
-          </Button>
-        </div>
-
-        <div className="admin-user-list">
-          <div className="admin-user-cols">
-            <div>User</div>
-            <div>Role</div>
-            <div>Status</div>
-            <div>Last login</div>
-            <div className="admin-user-actions">Actions</div>
-          </div>
-          {loading && users.length === 0 ? (
-            <div className="admin-user-state">Loading users...</div>
-          ) : filtered.length === 0 ? (
-            <div className="admin-user-state">
-              {users.length === 0 ? "No users found" : "No users match your filters"}
-            </div>
-          ) : (
-            filtered.map((user) => {
-              const busy = actingId === user.id;
-              const protectedAdmin = isProtectedAdmin(user);
-              const selfUser = isCurrentUser(user, currentUserEmail);
-              const roleLocked = selfUser || (protectedAdmin && user.role === "admin");
-              const disableLocked = selfUser || (protectedAdmin && user.enabled);
-              const deleteLocked = selfUser || protectedAdmin;
-              return (
-                <div key={user.id} className="admin-user-row">
-                  <div className="admin-user-cell">
-                    <span className={cn("admin-user-avatar", avatarTone(user))}>
-                      {avatarInitials(user)}
-                    </span>
-                    <div className="min-w-0">
-                      <div className="admin-user-name">{user.username || user.email}</div>
-                      <div className="admin-user-sub">
-                        {user.username} / {user.email}
-                      </div>
-                    </div>
-                  </div>
-                  <div>
-                    <RolePill role={user.role} />
-                  </div>
-                  <div>
-                    <StatusPill enabled={user.enabled} />
-                  </div>
-                  <div className="admin-user-last">{formatTime(user.last_login_at)}</div>
-                  <div className="admin-user-actions">
-                    <div className="flex justify-center">
-                      <DropdownMenu>
-                        <DropdownMenuTrigger asChild>
-                          <Button
-                            variant="ghost"
-                            size="icon"
-                            className="size-9"
-                            disabled={busy}
-                            aria-label="Actions"
-                          >
-                            {busy ? (
-                              <LoaderCircle className="size-4 animate-spin" />
-                            ) : (
-                              <MoreHorizontal className="size-4" />
-                            )}
-                          </Button>
-                        </DropdownMenuTrigger>
-                        <DropdownMenuContent
-                          align="end"
-                          className="cocola-admin-ui admin-actions-menu"
-                        >
-                          <DropdownMenuItem onSelect={() => openEdit(user)}>
-                            <UserCog className="size-4" />
-                            Edit
-                          </DropdownMenuItem>
-                          <DropdownMenuItem onSelect={() => openReset(user)}>
-                            <KeyRound className="size-4" />
-                            Reset password
-                          </DropdownMenuItem>
-                          <DropdownMenuItem
-                            disabled={roleLocked}
-                            onSelect={() =>
-                              void patchUser(
-                                user,
-                                { role: user.role === "admin" ? "user" : "admin" },
-                                "User updated",
-                              )
-                            }
-                          >
-                            <ShieldCheck className="size-4" />
-                            {user.role === "admin" ? "Make user" : "Make admin"}
-                          </DropdownMenuItem>
-                          <DropdownMenuItem
-                            disabled={disableLocked}
-                            onSelect={() =>
-                              void patchUser(
-                                user,
-                                { enabled: !user.enabled },
-                                user.enabled ? "User disabled" : "User enabled",
-                              )
-                            }
-                          >
-                            <Power className="size-4" />
-                            {user.enabled ? "Disable" : "Enable"}
-                          </DropdownMenuItem>
-                          <DropdownMenuSeparator />
-                          <DropdownMenuItem
-                            variant="destructive"
-                            disabled={deleteLocked}
-                            onSelect={() => setDeleteTarget(user)}
-                          >
-                            <Trash2 className="size-4" />
-                            Delete
-                          </DropdownMenuItem>
-                        </DropdownMenuContent>
-                      </DropdownMenu>
-                    </div>
-                  </div>
-                </div>
-              );
-            })
-          )}
-        </div>
-      </div>
+      <DataGrid aria-label="Users" columns={columns} contentClassName="min-w-[840px]" data={filtered} getRowId={(user) => user.id} selectionMode="none" variant="primary" renderEmptyState={() => <EmptyState><EmptyState.Header><EmptyState.Media variant="icon"><UsersPageIcon className="text-blue-500" /></EmptyState.Media><EmptyState.Title>{loading ? "Loading users" : users.length ? "No users match your filters" : "No users found"}</EmptyState.Title><EmptyState.Description>{loading ? "Fetching account records…" : "Create a user or adjust the current filters."}</EmptyState.Description></EmptyState.Header></EmptyState>} />
 
       {/* Create / edit drawer */}
       <AdminDrawer
@@ -509,13 +368,13 @@ export default function AdminUsersPage() {
         }
         footer={
           <div className="admin-theme-blue flex justify-end gap-2">
-            <Button variant="outline" disabled={saving} onClick={closeDrawer}>
+            <Button variant="outline" isDisabled={saving} onPress={closeDrawer}>
               Cancel
             </Button>
             <Button
-              disabled={saving || !canSubmitDrawer}
-              onClick={() => void submitDrawer()}
-              className="admin-primary-btn"
+              isDisabled={saving || !canSubmitDrawer}
+              isPending={saving}
+              onPress={() => void submitDrawer()}
             >
               {saving ? <LoaderCircle className="mr-2 size-4 animate-spin" /> : null}
               {drawerMode === "create" ? "Create" : "Save"}
@@ -536,33 +395,13 @@ export default function AdminUsersPage() {
             onChange={(email) => setForm((p) => ({ ...p, email }))}
           />
 
-          <label className="grid gap-1 text-xs text-muted-foreground">
-            Role
-            <SelectControl
-              value={form.role}
-              onValueChange={(value) => setForm((p) => ({ ...p, role: value as Role }))}
-              className="h-10 rounded-md border border-input bg-background px-3 text-sm text-foreground outline-none focus:border-ring"
-              options={[
-                { value: "user", label: "user" },
-                { value: "admin", label: "admin" },
-              ]}
-              contentClassName="cocola-admin-ui"
-            />
-          </label>
+          <ChoiceDropdown label="Role" value={form.role} options={[{id:"user",label:"user"},{id:"admin",label:"admin"}]} onChange={(role) => setForm((current) => ({...current, role: role as Role}))} />
 
           {drawerMode === "create" ? (
-            <div className="space-y-2 rounded-md border border-border bg-muted/30 p-3">
-              <label className="flex items-center gap-2 text-sm">
-                <input
-                  type="checkbox"
-                  checked={form.autoPassword}
-                  onChange={(e) => setForm((p) => ({ ...p, autoPassword: e.target.checked }))}
-                  className="size-4 rounded border-input"
-                />
-                Auto-generate initial password
-              </label>
+            <div className="bg-surface-secondary space-y-2 rounded-2xl p-4">
+              <Checkbox isSelected={form.autoPassword} onChange={(selected) => setForm((current) => ({...current, autoPassword: selected}))}>Auto-generate initial password</Checkbox>
               {form.autoPassword ? (
-                <p className="text-xs text-muted-foreground">
+                <p className="text-xs text-muted">
                   A strong password is generated on create and shown once so you can copy it.
                 </p>
               ) : (
@@ -579,25 +418,11 @@ export default function AdminUsersPage() {
       </AdminDrawer>
 
       {/* Reset-password drawer */}
-      {resetTarget ? (
-        <div className="fixed inset-0 z-50 grid place-items-center bg-background/80 px-4 backdrop-blur-sm">
-          <div className="w-full max-w-md rounded-lg border border-border bg-card p-5 shadow-xl">
-            <div className="text-base font-semibold">Reset password</div>
-            <p className="mt-1 text-sm text-muted-foreground">
-              {resetTarget.username || resetTarget.email}
-            </p>
-            <div className="mt-4 space-y-3">
-              <label className="flex items-center gap-2 text-sm">
-                <input
-                  type="checkbox"
-                  checked={resetAuto}
-                  onChange={(e) => setResetAuto(e.target.checked)}
-                  className="size-4 rounded border-input"
-                />
-                Auto-generate new password
-              </label>
+      <AdminDrawer open={Boolean(resetTarget)} onOpenChange={(open) => {if (!open) setResetTarget(null)}} title="Reset password" description={resetTarget?.username || resetTarget?.email} footer={<div className="flex justify-end gap-2"><Button variant="outline" isDisabled={resetting} onPress={() => setResetTarget(null)}>Cancel</Button><Button isPending={resetting} onPress={() => void submitReset()}>Reset</Button></div>}>
+            <div className="space-y-3">
+              <Checkbox isSelected={resetAuto} onChange={setResetAuto}>Auto-generate new password</Checkbox>
               {resetAuto ? (
-                <p className="text-xs text-muted-foreground">
+                <p className="text-xs text-muted">
                   A strong password is generated and shown once so you can copy it.
                 </p>
               ) : (
@@ -609,70 +434,19 @@ export default function AdminUsersPage() {
                 />
               )}
             </div>
-            <div className="mt-5 flex justify-end gap-2">
-              <Button variant="outline" disabled={resetting} onClick={() => setResetTarget(null)}>
-                Cancel
-              </Button>
-              <Button disabled={resetting} onClick={() => void submitReset()}>
-                {resetting ? <LoaderCircle className="mr-2 size-4 animate-spin" /> : null}
-                Reset
-              </Button>
-            </div>
-          </div>
-        </div>
-      ) : null}
+      </AdminDrawer>
 
       {/* One-time credential reveal */}
-      {credential ? (
-        <div className="fixed inset-0 z-[60] grid place-items-center bg-background/80 px-4 backdrop-blur-sm">
-          <div className="w-full max-w-md rounded-lg border border-border bg-card p-5 shadow-xl">
-            <div className="flex items-center gap-2 text-base font-semibold">
-              <CheckCircle2 className="size-5 text-emerald-500" />
-              Password ready
+      <AdminDrawer open={Boolean(credential)} onOpenChange={(open) => {if (!open) setCredential(null)}} title="Password ready" description="Copy this password now — it will not be shown again." footer={<div className="flex justify-end gap-2"><Button variant="outline" onPress={() => credential && void copyText(`${credential.email} / ${credential.password}`)}><Copy className="size-4" />Copy both</Button><Button onPress={() => setCredential(null)}>Done</Button></div>}>
+            <div className="space-y-2">
+              <CredentialRow label="Email" value={credential?.email || ""} />
+              <CredentialRow label="Password" value={credential?.password || ""} mono />
             </div>
-            <p className="mt-2 text-sm text-muted-foreground">
-              Copy this password now — it will not be shown again.
-            </p>
-            <div className="mt-4 space-y-2">
-              <CredentialRow label="Email" value={credential.email} />
-              <CredentialRow label="Password" value={credential.password} mono />
-            </div>
-            <div className="mt-5 flex justify-end gap-2">
-              <Button
-                variant="outline"
-                onClick={() => void copyText(`${credential.email} / ${credential.password}`)}
-              >
-                <Copy className="mr-2 size-4" />
-                Copy both
-              </Button>
-              <Button onClick={() => setCredential(null)}>Done</Button>
-            </div>
-          </div>
-        </div>
-      ) : null}
+      </AdminDrawer>
 
       {/* Delete confirm */}
-      {deleteTarget ? (
-        <div className="fixed inset-0 z-50 grid place-items-center bg-background/80 px-4 backdrop-blur-sm">
-          <div className="w-full max-w-md rounded-lg border border-border bg-card p-5 shadow-xl">
-            <div className="text-base font-semibold">Delete user</div>
-            <p className="mt-2 text-sm text-muted-foreground">
-              Delete {deleteTarget.username || deleteTarget.email}? This action cannot be restored,
-              and the username and email will remain reserved.
-            </p>
-            <div className="mt-5 flex justify-end gap-2">
-              <Button variant="outline" disabled={deleting} onClick={() => setDeleteTarget(null)}>
-                Cancel
-              </Button>
-              <Button variant="destructive" disabled={deleting} onClick={() => void deleteUser()}>
-                {deleting ? <LoaderCircle className="mr-2 size-4 animate-spin" /> : null}
-                Delete
-              </Button>
-            </div>
-          </div>
-        </div>
-      ) : null}
-    </main>
+      <AdminConfirmDialog open={Boolean(deleteTarget)} onOpenChange={(open) => {if (!open) setDeleteTarget(null)}} title="Delete user" description={`Delete ${deleteTarget?.username || deleteTarget?.email || "this user"}? The username and email will remain reserved.`} confirmLabel="Delete" busy={deleting} destructive onConfirm={() => void deleteUser()} />
+    </AdminPage>
   );
 }
 
@@ -687,17 +461,7 @@ function FieldInput({
   onChange: (value: string) => void;
   type?: string;
 }) {
-  return (
-    <label className="grid gap-1 text-xs text-muted-foreground">
-      {label}
-      <input
-        type={type}
-        value={value}
-        onChange={(e) => onChange(e.target.value)}
-        className="h-10 rounded-md border border-input bg-background px-3 text-sm text-foreground outline-none focus:border-ring"
-      />
-    </label>
-  );
+  return <TextField value={value} variant="secondary" onChange={onChange}><Label>{label}</Label><Input type={type} /></TextField>;
 }
 
 function CredentialRow({
@@ -711,15 +475,13 @@ function CredentialRow({
 }) {
   const [copied, setCopied] = useState(false);
   return (
-    <div className="flex items-center gap-2 rounded-md border border-border bg-muted/30 px-3 py-2">
-      <div className="w-16 shrink-0 text-xs text-muted-foreground">{label}</div>
-      <div className={cn("min-w-0 flex-1 truncate text-sm", mono && "font-mono")}>{value}</div>
+    <div className="bg-surface-secondary flex items-center gap-2 rounded-2xl px-3 py-2">
+      <div className="w-16 shrink-0 text-xs text-muted">{label}</div>
+      <div className={`min-w-0 flex-1 truncate text-sm ${mono ? "font-mono" : ""}`}>{value}</div>
       <Button
-        variant="ghost"
-        size="icon"
-        className="size-8"
+        variant="ghost" isIconOnly size="sm"
         aria-label={`Copy ${label}`}
-        onClick={async () => {
+        onPress={async () => {
           await copyText(value);
           setCopied(true);
           window.setTimeout(() => setCopied(false), 1500);
@@ -735,37 +497,7 @@ function CredentialRow({
   );
 }
 
-function MetricCard({
-  tone,
-  label,
-  value,
-  icon,
-}: {
-  tone: "blue" | "green" | "violet";
-  label: string;
-  value: number;
-  icon: ReactNode;
-}) {
-  return (
-    <div className="admin-metric-card" data-tone={tone}>
-      <div className="admin-metric-head">
-        <span className="admin-metric-glyph">{icon}</span>
-        <span className="admin-metric-key">{label}</span>
-      </div>
-      <div className="admin-metric-val">{value}</div>
-    </div>
-  );
-}
-
-const AVATAR_TONES = ["is-purple", "is-blue", "is-pink", "is-green"] as const;
-
-function avatarTone(user: AuthUser) {
-  if (user.role === "admin") return "is-purple";
-  const key = user.id || user.email || user.username || "";
-  let h = 0;
-  for (let i = 0; i < key.length; i++) h = (h * 31 + key.charCodeAt(i)) >>> 0;
-  return AVATAR_TONES[(h % 3) + 1] ?? "is-blue";
-}
+function ChoiceDropdown({label, value, options, onChange}: {label:string; value:string; options:{id:string;label:string}[]; onChange:(value:string)=>void}) { return <div><Label>{label}</Label><Dropdown><Dropdown.Trigger aria-label={label} className="border-separator bg-default hover:bg-default-hover mt-2 flex h-11 w-full items-center justify-between rounded-2xl border px-3 text-sm"><span>{options.find((option) => option.id === value)?.label || value}</span><MoreHorizontal className="text-muted size-4" /></Dropdown.Trigger><Dropdown.Popover placement="bottom start"><Dropdown.Menu aria-label={label} onAction={(key) => onChange(String(key))}>{options.map((option) => <Dropdown.Item key={option.id} id={option.id} textValue={option.label}>{option.label}</Dropdown.Item>)}</Dropdown.Menu></Dropdown.Popover></Dropdown></div>; }
 
 function avatarInitials(user: AuthUser) {
   const source = (user.name || user.username || user.email || "?").trim();
@@ -779,23 +511,11 @@ function avatarInitials(user: AuthUser) {
 
 function RolePill({ role }: { role: Role }) {
   const Icon = role === "admin" ? ShieldCheck : Shield;
-  return (
-    <span
-      className={cn("admin-chip", role === "admin" ? "admin-chip--admin" : "admin-chip--member")}
-    >
-      <Icon />
-      {role}
-    </span>
-  );
+  return <Chip color={role === "admin" ? "accent" : "default"} size="sm" variant="soft"><Icon className="size-3.5" />{role}</Chip>;
 }
 
 function StatusPill({ enabled }: { enabled: boolean }) {
-  return (
-    <span className={cn("admin-chip", enabled ? "admin-chip--ok" : "admin-chip--off")}>
-      <span className="admin-chip-dot" />
-      {enabled ? "Enabled" : "Disabled"}
-    </span>
-  );
+  return <Chip color={enabled ? "success" : "default"} size="sm" variant="soft">{enabled ? "Enabled" : "Disabled"}</Chip>;
 }
 
 function formatTime(value?: string) {

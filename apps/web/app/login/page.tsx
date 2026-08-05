@@ -1,6 +1,7 @@
 "use client";
 
 import { Eye, EyeOff } from "lucide-react";
+import { Button, Card, Input, Label, TextField } from "@heroui/react";
 import { signIn } from "next-auth/react";
 import { useSearchParams } from "next/navigation";
 import { FormEvent, Suspense, useState } from "react";
@@ -66,9 +67,8 @@ function LoginForm() {
   };
 
   return (
-    <main className="cocola-user-ui workspace-grain cocola-login min-h-screen bg-background text-foreground">
-      {/* Brand hero: logo + handwriting wordmark + shimmer tagline (same as home) */}
-      <div className="cocola-login-brand">
+    <main className="cocola-user-ui workspace-grain bg-surface-secondary flex min-h-screen flex-col items-center justify-center gap-8 p-5 text-foreground">
+      <div className="flex items-center">
         <div className="flex items-center">
           <CocolaLogo className="h-28 w-28 shrink-0 sm:h-32 sm:w-32" />
           <div className="-ml-6 flex flex-col items-center text-center">
@@ -78,62 +78,25 @@ function LoginForm() {
         </div>
       </div>
 
-      {/* Login card */}
-      <form onSubmit={submit} className="cocola-login-card">
-        <div className="space-y-1">
-          <h1 className="text-lg font-semibold">Sign in to cocola</h1>
-          <p className="text-sm text-muted-foreground">Use an account enabled by an admin.</p>
-        </div>
-        <label className="space-y-1.5 text-sm">
-          <span className="text-muted-foreground">Username or email</span>
-          <input
-            type="text"
-            autoComplete="username"
-            value={identifier}
-            onChange={(event) => setIdentifier(event.target.value)}
-            className="h-10 w-full rounded-xl border border-input bg-background px-3 text-sm outline-none focus:border-ring"
-            required
-          />
-        </label>
-        <label className="space-y-1.5 text-sm">
-          <span className="text-muted-foreground">Password</span>
-          <span className="relative block">
-            <input
-              type={showPassword ? "text" : "password"}
-              autoComplete="current-password"
-              value={password}
-              onChange={(event) => setPassword(event.target.value)}
-              className="h-10 w-full rounded-xl border border-input bg-background px-3 pr-10 text-sm outline-none focus:border-ring"
-              required
-            />
-            <button
-              type="button"
-              aria-label={showPassword ? "Hide password" : "Show password"}
-              title={showPassword ? "Hide password" : "Show password"}
-              onClick={() => setShowPassword((v) => !v)}
-              className="absolute right-2 top-1/2 grid size-7 -translate-y-1/2 place-items-center rounded-xl text-muted-foreground hover:bg-muted hover:text-foreground"
-            >
-              {showPassword ? <EyeOff className="size-4" /> : <Eye className="size-4" />}
-            </button>
-          </span>
-        </label>
+      <Card className="w-full max-w-md p-6 sm:p-7">
+      <form className="grid gap-5" onSubmit={submit}>
+        <Card.Header className="p-0"><Card.Title>Sign in to Cocola</Card.Title><Card.Description>Use an account enabled by an administrator.</Card.Description></Card.Header>
+        <Card.Content className="grid gap-4 p-0">
+        <TextField isRequired value={identifier} variant="secondary" onChange={setIdentifier}>
+          <Label>Username or email</Label><Input autoComplete="username" autoFocus />
+        </TextField>
+        <TextField className="relative" isRequired value={password} variant="secondary" onChange={setPassword}>
+          <Label>Password</Label>
+          <Input autoComplete="current-password" className="pr-11" type={showPassword ? "text" : "password"} />
+          <Button isIconOnly aria-label={showPassword ? "Hide password" : "Show password"} className="absolute bottom-1.5 right-1.5" size="sm" variant="ghost" onPress={() => setShowPassword((value) => !value)}>{showPassword ? <EyeOff className="size-4" /> : <Eye className="size-4" />}</Button>
+        </TextField>
         {error ? (
-          <div
-            role="alert"
-            aria-live="polite"
-            className="rounded-xl border border-destructive/30 bg-destructive/10 px-3 py-2 text-sm text-destructive"
-          >
-            {error}
-          </div>
+          <div role="alert" aria-live="polite" className="bg-danger/10 text-danger rounded-2xl px-4 py-3 text-sm">{error}</div>
         ) : null}
-        <button
-          type="submit"
-          disabled={pending}
-          className="cocola-login-signin h-10 rounded-xl px-4 text-sm font-medium text-primary-foreground transition-opacity disabled:opacity-60"
-        >
-          {pending ? "Signing in..." : "Sign in"}
-        </button>
+        </Card.Content>
+        <Card.Footer className="p-0"><Button fullWidth isPending={pending} type="submit" variant="primary">{pending ? "Signing in..." : "Sign in"}</Button></Card.Footer>
       </form>
+      </Card>
     </main>
   );
 }

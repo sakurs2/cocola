@@ -35,7 +35,7 @@ export function ConversationActionsMenu({
           type="button"
           aria-label={`Actions for ${conversation.title || "Untitled"}`}
           className={cn(
-            "grid size-7 shrink-0 place-items-center rounded-lg text-muted-foreground opacity-0 transition hover:bg-black/5 hover:text-foreground focus:opacity-100 focus:outline-none group-hover:opacity-100 data-[state=open]:opacity-100",
+            "grid size-7 shrink-0 place-items-center rounded-lg text-muted opacity-0 transition hover:bg-black/5 hover:text-foreground focus:opacity-100 focus:outline-none group-hover:opacity-100 data-[state=open]:opacity-100",
             triggerClassName,
           )}
         >
@@ -46,7 +46,7 @@ export function ConversationActionsMenu({
         <DropdownMenu.Content
           align="end"
           sideOffset={5}
-          className="cocola-user-ui z-50 min-w-44 rounded-xl border border-border bg-popover p-1 text-foreground shadow-xl outline-none"
+          className="cocola-user-ui z-50 min-w-44 rounded-xl border border-border bg-overlay p-1 text-foreground shadow-xl outline-none"
         >
           <MenuItem onSelect={onRename}>
             <PencilSimple className="size-4" />
@@ -63,7 +63,7 @@ export function ConversationActionsMenu({
                 <DropdownMenu.SubContent
                   sideOffset={6}
                   alignOffset={-5}
-                  className="cocola-user-ui z-[51] min-w-48 rounded-xl border border-border bg-popover p-1 text-popover-foreground shadow-xl outline-none"
+                  className="cocola-user-ui z-[51] min-w-48 rounded-xl border border-border bg-overlay p-1 text-overlay-foreground shadow-xl outline-none"
                 >
                   <MenuItem onSelect={() => onMove(null)}>
                     <Folder className="size-4" />

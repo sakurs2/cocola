@@ -1,13 +1,14 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
-import { useParams, useRouter } from "next/navigation";
-import * as Dialog from "@radix-ui/react-dialog";
+import { Button, Card, Chip, Dropdown, Input, Label, TextArea, TextField } from "@heroui/react";
+import { Segment } from "@heroui-pro/react/segment";
+import { Sheet } from "@heroui-pro/react/sheet";
 import {
   AlertTriangle,
   Archive,
   ArrowLeft,
   ArrowRight,
+  ChevronDown,
   ExternalLink,
   FolderGit2,
   GitBranch,
@@ -16,15 +17,12 @@ import {
   Pencil,
   Plus,
   RefreshCw,
-  X,
 } from "lucide-react";
+import { useParams, useRouter } from "next/navigation";
+import { useEffect, useRef, useState } from "react";
 import { useCocola, type ProjectSummary } from "@/app/runtime-provider";
-import {
-  ProjectBaseBranchPicker,
-  ProjectBranchBadge,
-} from "@/components/assistant-ui/project-branch-control";
+import { ProjectBaseBranchPicker, ProjectBranchBadge } from "@/components/assistant-ui/project-branch-control";
 import { ConversationComposer } from "@/components/assistant-ui/thread";
-import { SelectControl } from "@/components/ui/select-control";
 import { shouldOpenProjectTask } from "@/lib/project-task-intent.mjs";
 
 type ProjectTask = {
@@ -40,22 +38,15 @@ type ProjectTask = {
   };
 };
 
-const STATUS_META: Record<ProjectSummary["status"], { label: string; color: string }> = {
-  ready: { label: "Ready", color: "#16a34a" },
-  provisioning: { label: "Provisioning", color: "#d97706" },
-  failed: { label: "Failed", color: "#dc2626" },
-  archived: { label: "Archived", color: "#6b7280" },
+const STATUS_LABEL: Record<ProjectSummary["status"], string> = {
+  ready: "Ready",
+  provisioning: "Provisioning",
+  failed: "Failed",
+  archived: "Archived",
 };
 
-function initials(name: string) {
-  const parts = name.replace(/[_/-]/g, " ").split(/\s+/).filter(Boolean);
-  const raw = parts.length > 1 ? `${parts[0]![0]}${parts[1]![0]}` : name.slice(0, 2);
-  return raw.toUpperCase();
-}
-
 export default function ProjectPage() {
-  const params = useParams<{ id: string }>();
-  const projectID = params.id;
+  const { id: projectID } = useParams<{ id: string }>();
   const router = useRouter();
   const {
     projects,
@@ -69,15 +60,14 @@ export default function ProjectPage() {
     runtimes,
     runtimePickerEnabled,
   } = useCocola();
-  const [project, setProject] = useState<ProjectSummary | null>(
-    projects.find((item) => item.id === projectID) ?? null,
-  );
+  const [project, setProject] = useState<ProjectSummary | null>(projects.find((item) => item.id === projectID) ?? null);
   const [tasks, setTasks] = useState<ProjectTask[]>([]);
   const [tasksLoaded, setTasksLoaded] = useState(false);
   const [composerReady, setComposerReady] = useState(false);
-  const [error, setError] = useState<string | null>(null);
+  const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
   const [editing, setEditing] = useState(false);
+  const [archiveOpen, setArchiveOpen] = useState(false);
   const [draftName, setDraftName] = useState("");
   const [draftDescription, setDraftDescription] = useState("");
   const [draftRuntime, setDraftRuntime] = useState("");
@@ -101,106 +91,65 @@ export default function ProjectPage() {
   }, [project]);
 
   useEffect(() => {
-    let cancelled = false;
-    setProject((current) => (current?.id === projectID ? current : null));
+    const controller = new AbortController();
     setTasks([]);
     setTasksLoaded(false);
     setComposerReady(false);
+    setError("");
     void Promise.all([
-      fetch(`/api/projects/${encodeURIComponent(projectID)}`, { cache: "no-store" }).then(
-        async (response) => {
-          if (!response.ok) throw new Error("Project not found");
-          const loaded = (await response.json()) as ProjectSummary;
-          if (!cancelled) setProject(loaded);
-        },
-      ),
-      fetch(`/api/projects/${encodeURIComponent(projectID)}/tasks`, { cache: "no-store" }).then(
-        async (response) => {
-          if (!response.ok) throw new Error("Could not load project tasks");
-          const loaded = (await response.json()) as ProjectTask[];
-          if (!cancelled) {
-            setTasks(loaded);
-            setTasksLoaded(true);
-          }
-        },
-      ),
-    ]).catch((loadError) => {
-      if (!cancelled) {
-        setError(loadError instanceof Error ? loadError.message : "Could not load project");
-      }
+      fetch(`/api/projects/${encodeURIComponent(projectID)}`, { cache: "no-store", signal: controller.signal }).then(async (response) => {
+        if (!response.ok) throw new Error("Project not found");
+        return (await response.json()) as ProjectSummary;
+      }),
+      fetch(`/api/projects/${encodeURIComponent(projectID)}/tasks`, { cache: "no-store", signal: controller.signal }).then(async (response) => {
+        if (!response.ok) throw new Error("Could not load project tasks");
+        return (await response.json()) as ProjectTask[];
+      }),
+    ]).then(([loadedProject, loadedTasks]) => {
+      if (controller.signal.aborted) return;
+      setProject(loadedProject);
+      setTasks(loadedTasks);
+      setTasksLoaded(true);
+    }).catch((cause) => {
+      if (!controller.signal.aborted) setError(cause instanceof Error ? cause.message : "Could not load project");
     });
-    return () => {
-      cancelled = true;
-    };
+    return () => controller.abort();
   }, [projectID]);
 
   useEffect(() => {
-    if (
-      !project ||
-      !tasksLoaded ||
-      project.status !== "ready" ||
-      !selectedBaseRef ||
-      preparedProject.current === project.id ||
-      (project.repository_provider === "local" && tasks.length > 0)
-    )
-      return;
+    if (!project || !tasksLoaded || project.status !== "ready" || !selectedBaseRef || preparedProject.current === project.id || (project.repository_provider === "local" && tasks.length > 0)) return;
     preparedProject.current = project.id;
     preparedSession.current = newProjectTask(project.id, project.runtime_id, selectedBaseRef);
     setComposerReady(true);
   }, [newProjectTask, project, selectedBaseRef, tasks.length, tasksLoaded]);
 
-  useEffect(
-    () => () => {
-      if (preparedSession.current) {
-        discardPendingProjectTask(preparedSession.current);
-      }
-      preparedProject.current = null;
-      preparedSession.current = null;
-    },
-    [discardPendingProjectTask, projectID],
-  );
-
-  const selectBaseRef = (branch: string) => {
-    if (
-      preparedSession.current &&
-      !updatePendingProjectTaskBaseRef(preparedSession.current, branch)
-    ) {
-      return;
-    }
-    setSelectedBaseRef(branch);
-  };
+  useEffect(() => () => {
+    if (preparedSession.current) discardPendingProjectTask(preparedSession.current);
+    preparedProject.current = null;
+    preparedSession.current = null;
+  }, [discardPendingProjectTask, projectID]);
 
   useEffect(() => {
-    if (
-      shouldOpenProjectTask({
-        projectId: projectID,
-        preparedProjectId: preparedProject.current,
-        activeSessionId,
-        preparedSessionId: preparedSession.current,
-        serverAccepted: serverAcceptedSessionIds.has(activeSessionId),
-      })
-    ) {
-      router.push(
-        `/projects/${encodeURIComponent(projectID)}/tasks/${encodeURIComponent(activeSessionId)}`,
-      );
+    if (shouldOpenProjectTask({ projectId: projectID, preparedProjectId: preparedProject.current, activeSessionId, preparedSessionId: preparedSession.current, serverAccepted: serverAcceptedSessionIds.has(activeSessionId) })) {
+      router.push(`/projects/${encodeURIComponent(projectID)}/tasks/${encodeURIComponent(activeSessionId)}`);
     }
   }, [activeSessionId, projectID, router, serverAcceptedSessionIds]);
 
+  const selectBaseRef = (branch: string) => {
+    if (preparedSession.current && !updatePendingProjectTaskBaseRef(preparedSession.current, branch)) return;
+    setSelectedBaseRef(branch);
+  };
+
   const retry = async () => {
     setBusy(true);
-    setError(null);
+    setError("");
     try {
-      const response = await fetch(`/api/projects/${encodeURIComponent(projectID)}/retry`, {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: "{}",
-      });
+      const response = await fetch(`/api/projects/${encodeURIComponent(projectID)}/retry`, { method: "POST", headers: { "content-type": "application/json" }, body: "{}" });
       if (!response.ok) throw new Error("Could not reconcile the GitHub repository");
-      const value = (await response.json()) as ProjectSummary;
-      setProject(value);
+      setProject((await response.json()) as ProjectSummary);
       refreshProjects();
-    } catch (retryError) {
-      setError(retryError instanceof Error ? retryError.message : "Retry failed");
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : "Retry failed");
     } finally {
       setBusy(false);
     }
@@ -214,14 +163,26 @@ export default function ProjectPage() {
     setEditing(true);
   };
 
+  const saveSettings = async () => {
+    if (!project || !draftName.trim()) return;
+    setBusy(true);
+    setError("");
+    try {
+      const response = await fetch(`/api/projects/${encodeURIComponent(project.id)}`, { method: "PATCH", headers: { "content-type": "application/json" }, body: JSON.stringify({ expected_version: project.version, name: draftName.trim(), description: draftDescription.trim(), runtime_id: draftRuntime || project.runtime_id }) });
+      if (!response.ok) throw new Error("Could not save Project settings");
+      setProject((await response.json()) as ProjectSummary);
+      setEditing(false);
+      refreshProjects();
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : "Could not save Project");
+    } finally {
+      setBusy(false);
+    }
+  };
+
   const startPublishing = () => {
     if (!project) return;
-    const fallback = project.name
-      .trim()
-      .toLowerCase()
-      .replace(/[^a-z0-9._-]+/g, "-")
-      .replace(/^-+|-+$/g, "")
-      .slice(0, 100);
+    const fallback = project.name.trim().toLowerCase().replace(/[^a-z0-9._-]+/g, "-").replace(/^-+|-+$/g, "").slice(0, 100);
     setPublishRepository(project.repository_name || fallback || "cocola-project");
     setPublishVisibility(project.visibility === "public" ? "public" : "private");
     setShowPublish(true);
@@ -230,66 +191,19 @@ export default function ProjectPage() {
   const publish = async () => {
     if (!project || !publishRepository.trim()) return;
     setBusy(true);
-    setError(null);
+    setError("");
     try {
-      const response = await fetch(`/api/projects/${encodeURIComponent(project.id)}/publish`, {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({
-          expected_version: project.version,
-          repository_name: publishRepository.trim(),
-          visibility: publishVisibility,
-        }),
-      });
-      const body = (await response.json().catch(() => ({}))) as ProjectSummary & {
-        error?: { code?: string; message?: string };
-      };
+      const response = await fetch(`/api/projects/${encodeURIComponent(project.id)}/publish`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ expected_version: project.version, repository_name: publishRepository.trim(), visibility: publishVisibility }) });
+      const body = (await response.json().catch(() => ({}))) as ProjectSummary & { error?: { code?: string; message?: string } };
       if (!response.ok) {
-        const message =
-          body.error?.code === "GITHUB_CONNECTION_REQUIRED"
-            ? "Connect GitHub in Connectors before publishing."
-            : body.error?.code === "REPOSITORY_NOT_INSTALLED"
-              ? "Grant your GitHub App access to the new repository, then retry publishing."
-              : body.error?.message || "Could not publish this Project";
+        const message = body.error?.code === "GITHUB_CONNECTION_REQUIRED" ? "Connect GitHub in Connectors before publishing." : body.error?.code === "REPOSITORY_NOT_INSTALLED" ? "Grant the GitHub App access to the repository, then retry." : body.error?.message || "Could not publish this Project";
         throw new Error(message);
       }
       setProject(body);
       setShowPublish(false);
       refreshProjects();
-    } catch (publishError) {
-      const latest = await fetch(`/api/projects/${encodeURIComponent(project.id)}`, {
-        cache: "no-store",
-      }).catch(() => null);
-      if (latest?.ok) setProject((await latest.json()) as ProjectSummary);
-      setError(
-        publishError instanceof Error ? publishError.message : "Could not publish this Project",
-      );
-    } finally {
-      setBusy(false);
-    }
-  };
-
-  const saveSettings = async () => {
-    if (!project) return;
-    setBusy(true);
-    setError(null);
-    try {
-      const response = await fetch(`/api/projects/${encodeURIComponent(project.id)}`, {
-        method: "PATCH",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({
-          expected_version: project.version,
-          name: draftName.trim(),
-          description: draftDescription.trim(),
-          runtime_id: draftRuntime || project.runtime_id,
-        }),
-      });
-      if (!response.ok) throw new Error("Could not save project settings");
-      setProject((await response.json()) as ProjectSummary);
-      setEditing(false);
-      refreshProjects();
-    } catch (saveError) {
-      setError(saveError instanceof Error ? saveError.message : "Could not save project");
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : "Could not publish this Project");
     } finally {
       setBusy(false);
     }
@@ -297,430 +211,74 @@ export default function ProjectPage() {
 
   const archive = async () => {
     if (!project) return;
-    const message =
-      project.repository_provider === "github"
-        ? "Archive this Cocola project? The GitHub repository will not be deleted."
-        : "Archive this local project? Its existing workspace remains available for review.";
-    if (!window.confirm(message)) return;
     setBusy(true);
+    setError("");
     try {
-      const response = await fetch(`/api/projects/${encodeURIComponent(project.id)}`, {
-        method: "DELETE",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({ expected_version: project.version }),
-      });
-      if (!response.ok) throw new Error("Could not archive project");
+      const response = await fetch(`/api/projects/${encodeURIComponent(project.id)}`, { method: "DELETE", headers: { "content-type": "application/json" }, body: JSON.stringify({ expected_version: project.version }) });
+      if (!response.ok) throw new Error("Could not archive Project");
       refreshProjects();
-      router.push("/");
-    } catch (archiveError) {
-      setError(archiveError instanceof Error ? archiveError.message : "Could not archive project");
+      router.push("/projects");
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : "Could not archive Project");
       setBusy(false);
     }
   };
 
-  if (!project && !projectsLoaded && !error)
-    return (
-      <div className="grid h-full place-items-center">
-        <Loader2 className="size-5 animate-spin text-muted-foreground" />
-      </div>
-    );
-  if (!project)
-    return (
-      <div className="grid h-full place-items-center px-6 text-center">
-        <div>
-          <FolderGit2 className="mx-auto size-9 text-muted-foreground" />
-          <h1 className="mt-3 text-lg font-semibold">Project not found</h1>
-          <p className="mt-1 text-sm text-muted-foreground">
-            {error || "It may have been archived or belongs to another account."}
-          </p>
-        </div>
-      </div>
-    );
+  if (!project && !projectsLoaded && !error) return <div className="cocola-web-page grid min-h-64 place-items-center p-8"><Loader2 className="text-muted size-5 animate-spin" /></div>;
+  if (!project) return <div className="cocola-web-page mx-auto grid min-h-72 max-w-5xl place-items-center p-8 text-center"><div><FolderGit2 className="text-muted mx-auto size-9" /><h1 className="mt-3 text-lg font-semibold">Project not found</h1><p className="text-muted mt-1 text-sm">{error || "It may have been archived or belongs to another account."}</p><Button className="mt-4" onPress={() => router.push("/projects")}>Back to Projects</Button></div></div>;
 
-  const status = STATUS_META[project.status];
   const isGithub = project.repository_provider === "github" || Boolean(project.repository_html_url);
+  const statusColor = project.status === "ready" ? "success" : project.status === "failed" ? "danger" : "warning";
+  const repositoryLabel = isGithub ? `${project.repository_owner}/${project.repository_name}` : "Local workspace";
 
   return (
-    <main className="user-canvas user-page user-theme-indigo h-full min-w-0 flex-1 overflow-y-auto px-4 py-5 sm:px-6 sm:py-7">
-      <div className="mx-auto w-full max-w-7xl pb-16">
-        {/* Back */}
-        <button
-          type="button"
-          onClick={() => router.push("/projects")}
-          className="group inline-flex items-center gap-1.5 rounded-full border border-black/[0.06] bg-white px-4 py-2 text-[13px] font-medium text-muted-foreground shadow-[0_1px_2px_0_rgb(15_23_42/0.06),0_6px_16px_-10px_rgb(15_23_42/0.25)] transition-all duration-200 hover:-translate-y-0.5 hover:text-foreground hover:shadow-[0_2px_4px_0_rgb(15_23_42/0.08),0_12px_24px_-12px_rgb(15_23_42/0.35)] active:translate-y-0 active:shadow-[0_1px_2px_0_rgb(15_23_42/0.06)]"
-        >
-          <ArrowLeft className="size-4 transition-transform duration-200 group-hover:-translate-x-0.5" />
-          Back
-        </button>
+    <div className="cocola-web-page mx-auto flex w-full max-w-6xl flex-col gap-5 p-4 sm:p-6 lg:p-8">
+      <header className="flex flex-wrap items-center gap-3">
+        <Button isIconOnly aria-label="Back to Projects" variant="ghost" onPress={() => router.push("/projects")}><ArrowLeft className="size-4" /></Button>
+        <span className={`${isGithub ? "bg-zinc-950 text-white dark:bg-white dark:text-zinc-950" : "bg-amber-500/15 text-amber-600 dark:text-amber-300"} flex size-11 items-center justify-center rounded-2xl`}>{isGithub ? <GitFork className="size-5" /> : <FolderGit2 className="size-5" />}</span>
+        <div className="min-w-0 flex-1"><h1 className="truncate text-2xl font-semibold tracking-[-0.03em]">{project.name}</h1><p className="text-muted mt-1 text-sm">{project.description || "No description"}</p></div>
+        {project.status !== "archived" ? <div className="flex shrink-0 gap-2">{project.repository_provider === "local" && project.github_publish_status !== "published" && project.primary_conversation_id ? <Button size="sm" variant="outline" onPress={startPublishing}><GitFork className="size-4" />{project.github_publish_status === "pending" ? "Retry publish" : "Publish"}</Button> : null}<Button isIconOnly aria-label="Project settings" size="sm" variant="outline" onPress={startEditing}><Pencil className="size-4" /></Button></div> : null}
+      </header>
 
-        {/* Header */}
-        <header className="mt-4 flex flex-wrap items-start gap-4">
-          <div className="proj-mono group size-[58px] text-2xl">{initials(project.name)}</div>
-          <div className="min-w-0 flex-1">
-            <div className="flex items-center gap-2.5">
-              <h1 className="truncate text-[26px] font-semibold tracking-tight">{project.name}</h1>
-              {isGithub ? (
-                <span className="user-tag user-tag--muted shrink-0 font-mono text-[10px] uppercase">
-                  {project.visibility}
-                </span>
-              ) : null}
-            </div>
-            <p className={"user-card-desc mt-1.5" + (project.description ? "" : " opacity-50")}>
-              {project.description || "No description"}
-            </p>
-            {/* meta row */}
-            <div className="mt-3 flex flex-wrap items-center gap-x-4 gap-y-1.5 text-[12.5px] text-muted-foreground">
-              {isGithub ? (
-                <a
-                  href={project.repository_html_url}
-                  target="_blank"
-                  rel="noreferrer"
-                  className="inline-flex items-center gap-1.5 transition-colors hover:text-[color:var(--page-accent)]"
-                >
-                  <GitFork className="size-3.5" />
-                  {project.repository_owner}/{project.repository_name}
-                  <ExternalLink className="size-3" />
-                </a>
-              ) : (
-                <span className="inline-flex items-center gap-1.5">
-                  <FolderGit2 className="size-3.5" />
-                  Local only
-                </span>
-              )}
-              <span className="inline-flex items-center gap-1.5">
-                <GitBranch className="size-3.5" />
-                {project.default_branch || "Preparing"}
-              </span>
-              <span className="inline-flex items-center gap-1.5" style={{ color: status.color }}>
-                <span className="size-[7px] rounded-full" style={{ background: status.color }} />
-                {status.label}
-              </span>
-            </div>
-          </div>
-          {project.status !== "archived" ? (
-            <div className="flex shrink-0 items-center gap-2">
-              {project.repository_provider === "local" &&
-              project.github_publish_status !== "published" &&
-              project.primary_conversation_id ? (
-                <button
-                  type="button"
-                  onClick={startPublishing}
-                  className="user-tbtn user-tbtn--ghost px-3.5"
-                >
-                  <GitFork className="size-4" />
-                  {project.github_publish_status === "pending" ? "Retry publish" : "Publish"}
-                </button>
-              ) : null}
-              <button
-                type="button"
-                onClick={startEditing}
-                aria-label="Edit project"
-                className="user-iconbtn"
-              >
-                <Pencil className="size-4" />
-              </button>
-            </div>
-          ) : null}
-        </header>
+      {error ? <div className="bg-danger/10 text-danger rounded-2xl px-4 py-3 text-sm">{error}</div> : null}
 
-        {showPublish ? (
-          <section className="user-panel mt-6">
-            <div className="flex items-start justify-between gap-4">
-              <div>
-                <h2 className="user-section-title">Publish to GitHub</h2>
-                <p className="user-card-desc mt-1">
-                  Cocola will push the committed main branch using a short-lived repository token.
-                </p>
-              </div>
-              <button
-                type="button"
-                onClick={() => setShowPublish(false)}
-                className="text-xs text-muted-foreground transition-colors hover:text-foreground"
-              >
-                Cancel
-              </button>
-            </div>
-            <div className="mt-4 grid gap-4 sm:grid-cols-2">
-              <label className="space-y-1.5">
-                <span className="text-xs font-medium">Repository name</span>
-                <input
-                  value={publishRepository}
-                  disabled={project.github_publish_status === "pending"}
-                  onChange={(event) => setPublishRepository(event.target.value)}
-                  className="user-search-input user-field-input h-10 w-full rounded-xl px-3 text-sm disabled:opacity-60"
-                />
-              </label>
-              <label className="space-y-1.5">
-                <span className="text-xs font-medium">Visibility</span>
-                <SelectControl
-                  value={publishVisibility}
-                  disabled={project.github_publish_status === "pending"}
-                  onValueChange={(value) =>
-                    setPublishVisibility(value === "public" ? "public" : "private")
-                  }
-                  options={[
-                    { value: "private", label: "Private" },
-                    { value: "public", label: "Public" },
-                  ]}
-                  className="focus-visible:border-primary disabled:opacity-60"
-                  contentClassName="cocola-user-ui"
-                />
-              </label>
-            </div>
-            <div className="mt-4 flex items-center justify-between gap-3">
-              <p className="text-xs text-muted-foreground">
-                Uncommitted changes must be committed before publishing.
-              </p>
-              <button
-                type="button"
-                disabled={busy || !publishRepository.trim()}
-                onClick={() => void publish()}
-                className="user-accent-btn inline-flex h-9 items-center gap-2 rounded-xl px-4 text-sm font-semibold disabled:opacity-50"
-              >
-                {busy ? (
-                  <Loader2 className="size-4 animate-spin" />
-                ) : (
-                  <GitFork className="size-4" />
-                )}
-                Publish
-              </button>
-            </div>
-          </section>
-        ) : null}
-
-        {project.repository_has_lfs || project.repository_has_submodules ? (
-          <section className="mt-6 flex items-start gap-3 rounded-2xl border border-amber-500/25 bg-amber-500/5 px-5 py-4 text-sm">
-            <span className="mt-1.5 size-[7px] shrink-0 rounded-full bg-amber-500" />
-            <p>
-              <span className="font-semibold">Repository notice</span>
-              <span className="ml-2 text-muted-foreground">
-                {project.repository_has_lfs && project.repository_has_submodules
-                  ? "Git LFS objects and submodules are not downloaded in phase one."
-                  : project.repository_has_lfs
-                    ? "Git LFS objects are kept as pointer files in phase one."
-                    : "Git submodules are not initialized in phase one."}
-              </span>
-            </p>
-          </section>
-        ) : null}
-
-        {project.status === "archived" ? (
-          <section className="user-panel mt-6">
-            <h2 className="user-section-title">Project archived</h2>
-            <p className="user-card-desc mt-1">
-              New tasks are disabled. Existing tasks and saved Git snapshots remain available.
-            </p>
-          </section>
-        ) : project.status !== "ready" ? (
-          <section className="mt-6 rounded-2xl border border-amber-500/25 bg-amber-500/5 p-5">
-            <div className="flex items-center gap-2">
-              <span
-                className="size-[7px] shrink-0 rounded-full"
-                style={{ background: status.color }}
-              />
-              <h2 className="font-semibold capitalize">Project {project.status}</h2>
-            </div>
-            <p className="mt-1 text-sm text-muted-foreground">
-              {project.provision_error_code || "GitHub repository provisioning has not completed."}
-            </p>
-            <button
-              type="button"
-              disabled={busy}
-              onClick={() => void retry()}
-              className="user-tbtn user-tbtn--ghost mt-4 px-4"
-            >
-              <RefreshCw className="size-4" /> Retry reconciliation
-            </button>
-          </section>
-        ) : project.repository_provider === "local" && tasks.length > 0 ? (
-          <section className="mt-8 flex items-center gap-3 rounded-2xl border border-amber-500/25 bg-amber-500/5 px-5 py-4 text-sm">
-            <AlertTriangle className="size-4 shrink-0 text-amber-500" />
-            <p className="text-muted-foreground">
-              Non-GitHub projects support only a single workspace.
-            </p>
-          </section>
-        ) : !tasksLoaded || !composerReady ? (
-          <section className="user-panel mt-8">
-            <h2 className="user-section-title">Preparing Project workspace</h2>
-            <p className="user-card-desc mt-1">
-              Loading Project tasks and preparing a conversation workspace…
-            </p>
-          </section>
-        ) : (
-          <section className="user-panel mt-8">
-            <div className="flex items-center gap-3">
-              <div className="user-panel-glyph">
-                <Plus className="size-[18px]" />
-              </div>
-              <div className="min-w-0 flex-1">
-                <div className="user-section-title">
-                  {project.repository_provider === "local" ? "Start new workspace" : "New task"}
-                </div>
-                {project.repository_provider === "local" ? null : (
-                  <p className="user-card-desc mt-0.5">
-                    Choose a base branch. Cocola locks its current revision when you send the first
-                    message.
-                  </p>
-                )}
-              </div>
-            </div>
-            <div className="mt-4">
-              <ConversationComposer
-                placeholder={`Ask Cocola to work on ${project.name}…`}
-                branchControl={
-                  project.repository_provider === "github" ? (
-                    <ProjectBaseBranchPicker
-                      projectID={project.id}
-                      value={selectedBaseRef}
-                      onChange={selectBaseRef}
-                    />
-                  ) : (
-                    <ProjectBranchBadge branch="main" baseRef="main" />
-                  )
-                }
-              />
-            </div>
-          </section>
-        )}
-
-        <Dialog.Root open={editing} onOpenChange={(next) => !busy && setEditing(next)}>
-          <Dialog.Portal>
-            <Dialog.Overlay className="fixed inset-0 z-50 bg-slate-950/20 backdrop-blur-sm data-[state=closed]:animate-out data-[state=open]:animate-in data-[state=closed]:fade-out data-[state=open]:fade-in" />
-            <Dialog.Content className="cocola-user-ui user-theme-indigo fixed inset-y-2 right-2 z-50 flex w-[min(30rem,calc(100vw-1rem))] flex-col overflow-hidden rounded-2xl border border-border bg-background text-foreground shadow-2xl outline-none data-[state=closed]:animate-out data-[state=open]:animate-in data-[state=closed]:slide-out-to-right data-[state=open]:slide-in-from-right">
-              <header className="flex min-h-16 items-center gap-3 border-b border-border/70 px-5">
-                <span className="user-panel-glyph">
-                  <Pencil className="size-[18px]" />
-                </span>
-                <div className="min-w-0 flex-1">
-                  <Dialog.Title className="truncate text-base font-semibold">
-                    Project settings
-                  </Dialog.Title>
-                  <Dialog.Description className="truncate text-xs text-muted-foreground">
-                    Update this Project’s name, runtime, and description.
-                  </Dialog.Description>
-                </div>
-                <Dialog.Close
-                  aria-label="Close"
-                  className="grid size-9 place-items-center rounded-xl text-muted-foreground transition-colors hover:bg-muted hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/40"
-                >
-                  <X className="size-4" />
-                </Dialog.Close>
-              </header>
-              <div className="min-h-0 flex-1 overflow-y-auto p-5">
-                <div className="grid gap-4">
-                  <label className="space-y-1.5">
-                    <span className="text-sm font-medium">Name</span>
-                    <input
-                      value={draftName}
-                      onChange={(event) => setDraftName(event.target.value)}
-                      className="user-search-input user-field-input h-10 w-full rounded-xl px-3 text-sm"
-                    />
-                  </label>
-                  {runtimePickerEnabled ? (
-                    <label className="space-y-1.5">
-                      <span className="text-sm font-medium">Default runtime</span>
-                      <SelectControl
-                        value={draftRuntime}
-                        onValueChange={setDraftRuntime}
-                        options={runtimes.map((runtime) => ({
-                          value: runtime.id,
-                          label: runtime.label,
-                        }))}
-                        className="focus-visible:border-primary"
-                        contentClassName="cocola-user-ui"
-                      />
-                    </label>
-                  ) : null}
-                  <label className="space-y-1.5">
-                    <span className="text-sm font-medium">Description</span>
-                    <input
-                      value={draftDescription}
-                      onChange={(event) => setDraftDescription(event.target.value)}
-                      className="user-search-input user-field-input h-10 w-full rounded-xl px-3 text-sm"
-                    />
-                  </label>
-                </div>
-              </div>
-              <div className="flex items-center justify-between border-t border-border/70 p-4">
-                <button
-                  type="button"
-                  disabled={busy}
-                  onClick={() => void archive()}
-                  className="inline-flex items-center gap-2 text-sm font-medium text-red-600 transition-opacity hover:opacity-80"
-                >
-                  <Archive className="size-4" /> Archive
-                </button>
-                <button
-                  type="button"
-                  disabled={busy}
-                  onClick={() => void saveSettings()}
-                  className="user-accent-btn inline-flex h-9 items-center rounded-xl px-5 text-sm font-semibold disabled:opacity-50"
-                >
-                  Save
-                </button>
-              </div>
-            </Dialog.Content>
-          </Dialog.Portal>
-        </Dialog.Root>
-
-        {/* Tasks */}
-        <section className="mt-12">
-          <div className="mb-3 flex items-center gap-2">
-            <span className="user-section-title">
-              {project.repository_provider === "local" ? "Workspace" : "Tasks"}
-            </span>
-            <span className="user-count-badge">{tasks.length}</span>
-          </div>
-          {tasks.length === 0 ? (
-            <div className="user-empty">
-              <p className="text-sm text-muted-foreground">No project tasks yet.</p>
-            </div>
-          ) : (
-            <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
-              {tasks.map((task) => (
-                <button
-                  type="button"
-                  key={task.id}
-                  onClick={() =>
-                    router.push(
-                      `/projects/${encodeURIComponent(project.id)}/tasks/${encodeURIComponent(task.id)}`,
-                    )
-                  }
-                  className="task-card w-full text-left"
-                >
-                  <div className="task-card-head">
-                    <span className="task-card-icon">
-                      <GitFork className="size-[18px]" />
-                    </span>
-                    <span className="task-card-title truncate">
-                      {task.title || "Untitled task"}
-                    </span>
-                    {task.workspace.git_snapshot?.dirty ? (
-                      <span className="user-tag user-tag--warn shrink-0">
-                        <span className="user-tag-dot" />
-                        Modified
-                      </span>
-                    ) : null}
-                  </div>
-                  <span className="task-card-summary inline-flex items-center gap-1.5">
-                    <GitBranch className="size-3.5 shrink-0" />
-                    {task.workspace.branch_name}
-                  </span>
-                  <div className="mt-auto flex w-full justify-end">
-                    <span className="task-card-cta">
-                      Open
-                      <ArrowRight className="size-3.5" />
-                    </span>
-                  </div>
-                </button>
-              ))}
-            </div>
-          )}
-        </section>
-        {error ? (
-          <p className="mt-6 rounded-xl bg-red-500/10 px-3 py-2 text-sm text-red-600">{error}</p>
-        ) : null}
+      <div className="flex flex-wrap items-center gap-2">
+        <Chip color={statusColor} size="sm" variant="soft">{STATUS_LABEL[project.status]}</Chip>
+        <Chip size="sm" variant="soft">{project.repository_provider === "github" ? "GitHub" : "Local"}</Chip>
+        {isGithub ? <Chip size="sm" variant="soft">{project.visibility}</Chip> : null}
+        <Chip size="sm" variant="soft"><GitBranch className="size-3" />{project.default_branch || "Preparing"}</Chip>
+        {project.repository_html_url ? <Button className="ml-auto" size="sm" variant="ghost" onPress={() => window.open(project.repository_html_url, "_blank", "noopener,noreferrer")}>{repositoryLabel}<ExternalLink className="size-3.5" /></Button> : null}
       </div>
-    </main>
+
+      {showPublish ? (
+        <Card className="p-5"><Card.Header className="p-0"><Card.Title>Publish to GitHub</Card.Title><Card.Description>Cocola will push the committed main branch using a short-lived repository token.</Card.Description></Card.Header><Card.Content className="mt-5 grid gap-4 p-0 sm:grid-cols-2"><TextField value={publishRepository} variant="secondary" onChange={setPublishRepository}><Label>Repository name</Label><Input disabled={project.github_publish_status === "pending"} /></TextField><div><Label>Visibility</Label><Segment aria-label="Repository visibility" className="mt-2" selectedKey={publishVisibility} onSelectionChange={(key) => setPublishVisibility(String(key) === "public" ? "public" : "private")}><Segment.Item id="private">Private</Segment.Item><Segment.Item id="public">Public</Segment.Item></Segment></div></Card.Content><Card.Footer className="mt-5 justify-end gap-2 p-0"><Button variant="outline" onPress={() => setShowPublish(false)}>Cancel</Button><Button isDisabled={!publishRepository.trim()} isPending={busy} onPress={() => void publish()}><GitFork className="size-4" />Publish</Button></Card.Footer></Card>
+      ) : null}
+
+      {project.repository_has_lfs || project.repository_has_submodules ? <div className="bg-warning/10 text-warning flex items-start gap-2 rounded-2xl px-4 py-3 text-sm"><AlertTriangle className="mt-0.5 size-4 shrink-0" />{project.repository_has_lfs && project.repository_has_submodules ? "Git LFS objects and submodules are not downloaded in phase one." : project.repository_has_lfs ? "Git LFS objects are kept as pointer files in phase one." : "Git submodules are not initialized in phase one."}</div> : null}
+
+      {project.status === "archived" ? <Card className="p-5"><Card.Header className="p-0"><Card.Title>Project archived</Card.Title><Card.Description>New tasks are disabled. Existing tasks and saved Git snapshots remain available.</Card.Description></Card.Header></Card> : project.status !== "ready" ? <Card className="border-warning/30 bg-warning/10 p-5"><Card.Content className="flex-row items-center justify-between gap-4 p-0"><span><span className="font-medium">Project {project.status}</span><span className="text-muted mt-1 block text-sm">{project.provision_error_code || "Repository provisioning has not completed."}</span></span><Button isPending={busy} size="sm" variant="outline" onPress={() => void retry()}><RefreshCw className="size-4" />Retry reconciliation</Button></Card.Content></Card> : null}
+
+      <div className="grid gap-4 lg:grid-cols-2">
+        <Card className="p-5"><Card.Header className="p-0"><Card.Title>Repository</Card.Title><Card.Description>{repositoryLabel}</Card.Description></Card.Header><Card.Content className="mt-5 grid gap-3 p-0"><Info label="Provider" value={project.repository_provider === "github" ? "GitHub" : "Local"} /><Info label="Default branch" value={project.default_branch || "Preparing"} /><Info label="Visibility" value={isGithub ? project.visibility : "Local only"} /></Card.Content></Card>
+        <Card className="p-5"><Card.Header className="p-0"><Card.Title>Workspace</Card.Title><Card.Description>Runtime and repository state for new Project tasks.</Card.Description></Card.Header><Card.Content className="mt-5 grid gap-3 p-0"><Info label="Runtime" value={runtimes.find((runtime) => runtime.id === project.runtime_id)?.label || project.runtime_id} /><Info label="Status" value={STATUS_LABEL[project.status]} /><Info label="Tasks" value={String(tasks.length)} /></Card.Content></Card>
+      </div>
+
+      {project.status === "ready" ? project.repository_provider === "local" && tasks.length > 0 ? <div className="bg-warning/10 text-warning flex items-start gap-2 rounded-2xl px-4 py-3 text-sm"><AlertTriangle className="mt-0.5 size-4" />Non-GitHub Projects support only a single workspace.</div> : !tasksLoaded || !composerReady ? <Card className="p-5"><Card.Header className="p-0"><Card.Title>Preparing Project workspace</Card.Title><Card.Description>Loading tasks and preparing a conversation workspace…</Card.Description></Card.Header></Card> : <Card className="p-5"><Card.Header className="p-0"><Card.Title>{project.repository_provider === "local" ? "Start new workspace" : "Start project work"}</Card.Title><Card.Description>{project.repository_provider === "local" ? "Create the first conversation in this local workspace." : "Choose a base branch. Cocola locks its current revision when you send the first message."}</Card.Description></Card.Header><Card.Content className="mt-4 p-0"><ConversationComposer placeholder={`Ask Cocola to work on ${project.name}…`} branchControl={project.repository_provider === "github" ? <ProjectBaseBranchPicker projectID={project.id} value={selectedBaseRef} onChange={selectBaseRef} /> : <ProjectBranchBadge branch="main" baseRef="main" />} /></Card.Content></Card> : null}
+
+      <div className="flex items-center justify-between"><div><h2 className="font-semibold">{project.repository_provider === "local" ? "Workspace" : "Project tasks"}</h2><p className="text-muted mt-1 text-sm">Project conversations stay separate from the global Chats list.</p></div><Chip size="sm" variant="soft">{tasks.length}</Chip></div>
+      {tasks.length ? <section className="cocola-web-catalog-grid grid items-stretch gap-3 sm:grid-cols-2 lg:grid-cols-3">{tasks.map((task) => <button key={task.id} className="cocola-web-catalog-trigger group rounded-2xl text-left outline-none focus-visible:ring-2 focus-visible:ring-focus" type="button" onClick={() => router.push(`/projects/${encodeURIComponent(project.id)}/tasks/${encodeURIComponent(task.id)}`)}><Card className="cocola-web-catalog-card h-full min-h-44 p-5"><Card.Content className="flex h-full min-w-0 flex-col items-start p-0"><span className="flex w-full items-start justify-between gap-3"><span className="bg-indigo-500/15 text-indigo-600 grid size-10 place-items-center rounded-2xl dark:text-indigo-300"><GitFork className="size-5" /></span>{task.workspace.git_snapshot?.dirty ? <Chip color="warning" size="sm" variant="soft">Modified</Chip> : null}</span><span className="mt-4 block max-w-full truncate font-semibold">{task.title || "Untitled task"}</span><span className="text-muted mt-2 flex items-center gap-1.5 text-sm"><GitBranch className="size-3.5" />{task.workspace.branch_name}</span><span className="text-accent mt-auto flex w-full items-center justify-end gap-1 pt-5 text-sm font-medium">Open<ArrowRight className="cocola-web-catalog-card-arrow size-4" /></span></Card.Content></Card></button>)}</section> : <Card className="border-separator min-h-32 border border-dashed p-6"><Card.Content className="text-muted flex items-center justify-center p-0 text-sm">No Project tasks yet.</Card.Content></Card>}
+
+      <Sheet isOpen={editing} placement="right" onOpenChange={(open) => { if (!busy) setEditing(open); }}>
+        <Sheet.Backdrop><Sheet.Content className="w-full md:w-[460px]"><Sheet.Dialog><Sheet.CloseTrigger aria-label="Close Project settings" /><Sheet.Header><Sheet.Heading>Project settings</Sheet.Heading><p className="text-muted text-sm">Update this Project’s name, runtime, and description.</p></Sheet.Header><Sheet.Body className="grid content-start gap-4"><TextField value={draftName} variant="secondary" onChange={setDraftName}><Label>Name</Label><Input /></TextField>{runtimePickerEnabled ? <div><Label>Default runtime</Label><Dropdown><Dropdown.Trigger aria-label="Select runtime" className="border-separator bg-default hover:bg-default-hover mt-2 flex h-11 w-full items-center justify-between rounded-2xl border px-3 text-sm"><span className="truncate">{runtimes.find((runtime) => runtime.id === draftRuntime)?.label || draftRuntime}</span><ChevronDown className="text-muted size-4" /></Dropdown.Trigger><Dropdown.Popover placement="bottom start"><Dropdown.Menu aria-label="Project runtimes" onAction={(key) => setDraftRuntime(String(key))}>{runtimes.map((runtime) => <Dropdown.Item key={runtime.id} id={runtime.id} textValue={runtime.label}>{runtime.label}</Dropdown.Item>)}</Dropdown.Menu></Dropdown.Popover></Dropdown></div> : null}<TextField value={draftDescription} variant="secondary" onChange={setDraftDescription}><Label>Description</Label><TextArea rows={5} /></TextField>{error ? <div className="bg-danger/10 text-danger rounded-2xl px-4 py-3 text-sm">{error}</div> : null}</Sheet.Body><Sheet.Footer className="flex-col gap-2"><Button className="w-full" isDisabled={!draftName.trim()} isPending={busy} onPress={() => void saveSettings()}>Save changes</Button><Button className="w-full" variant="danger-soft" onPress={() => setArchiveOpen(true)}><Archive className="size-4" />Archive Project</Button></Sheet.Footer></Sheet.Dialog></Sheet.Content></Sheet.Backdrop>
+      </Sheet>
+
+      <Sheet isOpen={archiveOpen} placement="right" onOpenChange={setArchiveOpen}>
+        <Sheet.Backdrop><Sheet.Content className="w-full md:w-[420px]"><Sheet.Dialog><Sheet.CloseTrigger aria-label="Close archive confirmation" /><Sheet.Header><Sheet.Heading>Archive this Project?</Sheet.Heading><p className="text-muted text-sm">{project.repository_provider === "github" ? "The GitHub repository will not be deleted." : "Its existing local workspace remains available for review."}</p></Sheet.Header><Sheet.Footer className="gap-2"><Button variant="outline" onPress={() => setArchiveOpen(false)}>Cancel</Button><Button isPending={busy} variant="danger-soft" onPress={() => void archive()}>Archive Project</Button></Sheet.Footer></Sheet.Dialog></Sheet.Content></Sheet.Backdrop>
+      </Sheet>
+    </div>
   );
+}
+
+function Info({ label, value }: { label: string; value: string }) {
+  return <div className="bg-surface-secondary min-w-0 rounded-2xl px-4 py-3"><span className="text-muted block text-xs">{label}</span><span className="mt-1 block truncate text-sm font-medium">{value}</span></div>;
 }

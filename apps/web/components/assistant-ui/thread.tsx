@@ -20,28 +20,32 @@ import {
   useThread,
   useThreadComposerAttachment,
 } from "@assistant-ui/react";
-import * as Popover from "@radix-ui/react-popover";
-import { Command } from "cmdk";
+import { ChatMessage } from "@heroui-pro/react/chat-message";
+import { ChatConversation } from "@heroui-pro/react/chat-conversation";
+import { PromptInput } from "@heroui-pro/react/prompt-input";
+import { PromptSuggestion } from "@heroui-pro/react/prompt-suggestion";
+import { Button, Dropdown, Label } from "@heroui/react";
+import {
+  BookOpen as GravityBookOpen,
+  Bulb,
+  ChartColumn,
+  ChevronDown as GravityChevronDown,
+  Code,
+  FaceRobot,
+  Paperclip as GravityPaperclip,
+  Pencil,
+  Xmark,
+} from "@gravity-ui/icons";
 import { motion } from "framer-motion";
 import {
   ArrowDownIcon,
   Check,
-  ChevronDown,
   CopyIcon,
   PaperclipIcon,
-  Search,
   SendHorizontalIcon,
-  Square,
   XIcon,
   ArrowUp as ArrowUpIcon,
-  BarChart3,
-  BookOpenText,
-  Bot,
-  Code2,
-  FileText,
-  Lightbulb,
   Map as PlanModeIcon,
-  Pencil,
   Sparkles,
 } from "lucide-react";
 import {
@@ -61,10 +65,9 @@ import {
   type ReactNode,
 } from "react";
 import { useCocola, type UiMessageMetadata } from "@/app/runtime-provider";
-import { CocolaWordmark } from "@/components/assistant-ui/cocola-wordmark";
-import { CocolaLogo } from "@/components/cocola-logo";
 import { AgentAvatar } from "@/components/agents/agent-avatar";
 import { CocolaTagline } from "@/components/assistant-ui/cocola-tagline";
+import { CocolaWordmark } from "@/components/assistant-ui/cocola-wordmark";
 import { PlanCardPart } from "@/components/assistant-ui/plan-card";
 import {
   QuestionCardPart,
@@ -73,6 +76,7 @@ import {
 } from "@/components/assistant-ui/rich-message-parts";
 import { TooltipIconButton } from "@/components/assistant-ui/tooltip-icon-button";
 import { MarkdownText } from "@/components/assistant-ui/markdown-text";
+import { CocolaLogo } from "@/components/cocola-logo";
 import { ModelIcon } from "@/components/ui/model-icon";
 import {
   RailEnvironment,
@@ -119,49 +123,50 @@ import {
   type PromptStarterSlotBindings,
 } from "@/lib/prompt-starter";
 import { findLatestProgressItems, normalizeProgressItems } from "@/lib/progress-items.mjs";
-import { type ModelIconConfig } from "@/lib/model-icons";
 import { cn } from "@/lib/utils";
 import { SkillIcon } from "@/components/ui/skill-icon";
 import { useProjectComposerBranchControl } from "@/components/assistant-ui/project-branch-control";
 
-// Product Thread for cocola, authored against the white workspace design tokens.
-// assistant-ui owns chat semantics; this file owns the composed product chrome.
+// HeroUI Demo owns the presentation; assistant-ui and Cocola retain the live
+// message semantics, streaming lifecycle, attachments, Skills, Wiki, and Plan Mode.
 
 export const Thread: FC = () => {
   return (
     <WikiMentionCatalogProvider>
       <ThreadPrimitive.Root
         className="relative flex h-full flex-col overflow-hidden bg-transparent"
-        style={{ ["--thread-max-width" as string]: "52rem" }}
+        style={{ ["--thread-max-width" as string]: "72rem" }}
       >
         <ThreadPrimitive.If empty>
-          <div className="cocola-cloud-field" aria-hidden="true" />
+          <ThreadPrimitive.Viewport className="h-full overflow-y-auto">
+            <ThreadWelcome />
+          </ThreadPrimitive.Viewport>
         </ThreadPrimitive.If>
-        <ThreadPrimitive.Viewport className="relative z-10 flex flex-1 flex-col items-center overflow-y-auto scroll-smooth px-5 pt-8 [scrollbar-gutter:stable_both-edges]">
-          <ThreadWelcome />
+        <ThreadPrimitive.If empty={false}>
+          <ChatConversation className="relative z-10 min-h-0 flex-1 overflow-hidden">
+            <ThreadPrimitive.Viewport className="flex h-full flex-1 flex-col items-center overflow-y-auto scroll-smooth px-4 sm:px-6 [scrollbar-gutter:stable_both-edges]">
+              <ChatConversation.Content className="flex min-h-full w-full max-w-[var(--thread-max-width)] flex-col gap-0 px-0 pb-0 pt-4">
+                <div className="h-6 w-full shrink-0" aria-hidden="true" />
 
-          <ActiveExecutionDock />
+                <ActiveExecutionDock />
 
-          <ThreadPrimitive.Messages
-            components={{
-              UserMessage,
-              AssistantMessage,
-            }}
-          />
+                <ThreadPrimitive.Messages
+                  components={{
+                    UserMessage,
+                    AssistantMessage,
+                  }}
+                />
 
-          <ThreadPrimitive.If empty={false}>
-            <div className="min-h-8 flex-grow" />
-          </ThreadPrimitive.If>
+                <div className="min-h-8 flex-grow" />
 
-          {/* Docked composer, only while a conversation is in progress. On the
-            empty state the composer lives centered inside ThreadWelcome. */}
-          <ThreadPrimitive.If empty={false}>
-            <div className="sticky bottom-0 z-30 mt-3 flex w-full max-w-[var(--thread-max-width)] flex-col items-center justify-end bg-gradient-to-t from-background via-background to-background/0 pt-4 pb-5">
-              <ScrollToBottom />
-              <ConversationComposer />
-            </div>
-          </ThreadPrimitive.If>
-        </ThreadPrimitive.Viewport>
+                <div className="sticky bottom-0 z-30 mt-3 flex w-full flex-col items-center justify-end bg-gradient-to-t from-background via-background to-transparent pb-5 pt-4">
+                  <ScrollToBottom />
+                  <ConversationComposer />
+                </div>
+              </ChatConversation.Content>
+            </ThreadPrimitive.Viewport>
+          </ChatConversation>
+        </ThreadPrimitive.If>
       </ThreadPrimitive.Root>
     </WikiMentionCatalogProvider>
   );
@@ -203,9 +208,9 @@ const ScrollToBottom: FC = () => (
 );
 
 type PromptStarter = {
-  icon: typeof BarChart3;
+  icon: typeof ChartColumn;
   label: string;
-  color: string;
+  iconClassName: string;
   prompt: string;
   fileSlots?: readonly PromptStarterFileSlot[];
 };
@@ -219,9 +224,9 @@ const SPREADSHEET_FILE_SLOT: PromptStarterFileSlot = {
 
 const PROMPT_STARTERS: PromptStarter[] = [
   {
-    icon: BarChart3,
+    icon: ChartColumn,
     label: "Excel analysis",
-    color: "text-green-600",
+    iconClassName: "bg-emerald-500/10 text-emerald-600 dark:text-emerald-300",
     prompt: `Analyze ${promptStarterSlotMarker(
       SPREADSHEET_FILE_SLOT,
     )} and summarize key trends, anomalies, and actionable insights.`,
@@ -230,20 +235,20 @@ const PROMPT_STARTERS: PromptStarter[] = [
   {
     icon: Pencil,
     label: "Write a draft",
-    color: "text-blue-600",
-    prompt: "Draft a project plan for a new product",
+    iconClassName: "bg-blue-500/10 text-blue-600 dark:text-blue-300",
+    prompt: "Draft a project plan for a new product.",
   },
   {
-    icon: Code2,
+    icon: Code,
     label: "Write code",
-    color: "text-violet-600",
-    prompt: "Write a Python script to automate this task",
+    iconClassName: "bg-violet-500/10 text-violet-600 dark:text-violet-300",
+    prompt: "Write a Python script to automate this task.",
   },
   {
-    icon: Lightbulb,
+    icon: Bulb,
     label: "Brainstorm",
-    color: "text-pink-600",
-    prompt: "Brainstorm creative ideas for a campaign",
+    iconClassName: "bg-pink-500/10 text-pink-600 dark:text-pink-300",
+    prompt: "Brainstorm creative ideas for a campaign.",
   },
 ];
 
@@ -255,28 +260,13 @@ type ComposerWikiInputHandle = {
   openFileSlot: (slotKey: string) => void;
 };
 
-const RUNTIME_ICONS: Record<string, ModelIconConfig> = {
-  "claude-code": { type: "lobe-icons", slug: "claudecode" },
-  codex: { type: "lobe-icons", slug: "codex" },
-};
-
 const ThreadWelcome: FC = () => {
-  // Time-aware greeting resolved after mount so SSR/client markup agree.
-  const [greeting, setGreeting] = useState("Welcome back");
   const composer = useComposerRuntime();
   const composerIsEmpty = useComposer((state) => state.isEmpty);
-  const { selectedAgent } = useCocola();
   const [activePromptStarter, setActivePromptStarter] = useState<PromptStarter | null>(null);
   const [promptSlotBindings, setPromptSlotBindings] = useState<
     Record<string, PromptStarterSlotBinding | undefined>
   >({});
-  const visiblePromptStarters = selectedAgent ? [] : PROMPT_STARTERS;
-
-  useEffect(() => {
-    const h = new Date().getHours();
-    setGreeting(h < 12 ? "Good morning" : h < 18 ? "Good afternoon" : "Good evening");
-  }, []);
-
   useEffect(() => {
     if (!composerIsEmpty) return;
     setActivePromptStarter(null);
@@ -314,53 +304,54 @@ const ThreadWelcome: FC = () => {
 
   return (
     <ThreadPrimitive.Empty>
-      <motion.div
-        initial={{ opacity: 0, y: 8 }}
-        animate={{ opacity: 1, y: 0 }}
-        transition={{ duration: 0.22, ease: "easeOut" }}
-        className="flex w-full max-w-[700px] flex-grow flex-col items-center justify-center"
-      >
-        <div className="flex flex-col items-center gap-2 sm:flex-row sm:items-center sm:justify-center sm:gap-3">
-          <h1 className="sr-only">{greeting}</h1>
-          <CocolaLogo className="h-28 w-28 shrink-0 sm:h-32 sm:w-32" />
-          <div className="flex flex-col items-center text-center sm:-ml-6">
-            <CocolaWordmark className="cocola-wordmark -my-4 h-32 w-auto max-w-[min(90vw,460px)] sm:h-36" />
-            <CocolaTagline />
+      <div className="mx-auto flex h-[calc(100svh-3.5rem)] min-h-0 w-full max-w-5xl flex-col px-4 py-4 sm:px-6 lg:px-8">
+        <div className="flex flex-1 flex-col items-center justify-center py-10 text-center">
+          <h1 className="sr-only">cocola — Your trusty and powerful agent platform</h1>
+          <div className="flex flex-col items-center gap-2 sm:flex-row sm:items-center sm:justify-center sm:gap-3">
+            <CocolaLogo className="h-28 w-28 shrink-0 sm:h-32 sm:w-32" />
+            <div className="flex flex-col items-center text-center sm:-ml-6">
+              <CocolaWordmark className="cocola-wordmark -my-4 h-32 w-auto max-w-[min(90vw,460px)] sm:h-36" />
+              <CocolaTagline />
+            </div>
+          </div>
+          <div className="mt-7 w-full max-w-3xl">
+            <ConversationComposer
+              promptStarter={activePromptStarter}
+              promptSlotBindings={promptSlotBindings}
+              onPromptSlotBindingChange={handlePromptSlotBindingChange}
+              onPromptSlotBindingRemove={handlePromptSlotBindingRemove}
+              onPromptStarterDetach={handlePromptStarterDetach}
+            />
+          </div>
+          <div className="mt-5 min-h-10 w-full">
+            <PromptSuggestion variant="pill">
+              <PromptSuggestion.Items className="mx-auto flex w-full max-w-3xl flex-wrap justify-center gap-2.5">
+                {PROMPT_STARTERS.map((starter) => {
+                  const { icon: Icon, label, iconClassName } = starter;
+                  return (
+                    <PromptSuggestion.Item
+                      key={label}
+                      className="cocola-web-prompt-starter group !min-h-11 !w-auto !items-center !justify-start !rounded-full !border !border-border !px-3.5 !py-2 whitespace-nowrap"
+                      showEndIcon={false}
+                      onPress={() => handlePromptStarterClick(starter)}
+                    >
+                      <span
+                        className={cn(
+                          "cocola-web-prompt-starter-icon flex size-8 shrink-0 items-center justify-center rounded-full",
+                          iconClassName,
+                        )}
+                      >
+                        <Icon className="size-4" />
+                      </span>
+                      <span className="text-sm font-medium leading-tight">{label}</span>
+                    </PromptSuggestion.Item>
+                  );
+                })}
+              </PromptSuggestion.Items>
+            </PromptSuggestion>
           </div>
         </div>
-        <div className="mt-7 w-full">
-          <ConversationComposer
-            promptStarter={activePromptStarter}
-            promptSlotBindings={promptSlotBindings}
-            onPromptSlotBindingChange={handlePromptSlotBindingChange}
-            onPromptSlotBindingRemove={handlePromptSlotBindingRemove}
-            onPromptStarterDetach={handlePromptStarterDetach}
-          />
-        </div>
-
-        <div
-          aria-hidden={!composerIsEmpty}
-          className={cn(
-            "mt-5 flex w-full flex-wrap justify-center gap-2.5",
-            !composerIsEmpty && "invisible pointer-events-none",
-          )}
-        >
-          {visiblePromptStarters.map((starter) => {
-            const { icon: Icon, label, color } = starter;
-            return (
-              <button
-                key={label}
-                type="button"
-                onClick={() => handlePromptStarterClick(starter)}
-                className="cocola-prompt-chip flex items-center gap-2 rounded-full border border-border bg-card px-3.5 py-2 text-[13px] font-medium text-foreground transition-colors hover:bg-accent"
-              >
-                <Icon className={cn("size-4", color)} />
-                {label}
-              </button>
-            );
-          })}
-        </div>
-      </motion.div>
+      </div>
     </ThreadPrimitive.Empty>
   );
 };
@@ -387,7 +378,6 @@ const ConversationComposerInner: FC<{
     selectedRuntime,
     selectedSkill,
     modelsLoaded,
-    runtimePickerEnabled,
     runtimeConfigError,
     interactionMode,
     revisingPlanId,
@@ -423,11 +413,12 @@ const ConversationComposerInner: FC<{
     }
     return null;
   });
-  const [skillChipWidth, setSkillChipWidth] = useState(0);
   const noModel = !modelsLoaded || !selectedModel;
   const effectiveBranchControl = branchControl ?? contextualBranchControl;
   const promptInputRef = useRef<ComposerWikiInputHandle>(null);
   const composerAttachments = useComposer((state) => state.attachments);
+  const composerText = useComposer((state) => state.text);
+  const isRunning = useThread((thread) => thread.isRunning);
   const promptFileSlots = promptStarter?.fileSlots ?? EMPTY_PROMPT_FILE_SLOTS;
   const missingPromptFileSlot = firstMissingPromptStarterSlot(
     promptFileSlots,
@@ -441,88 +432,99 @@ const ConversationComposerInner: FC<{
   }, [promptStarter]);
 
   return (
-    <motion.div
-      className="relative w-full"
-      whileFocus={{ y: -1 }}
-      transition={{ type: "spring", stiffness: 420, damping: 32 }}
-    >
+    <div className="relative w-full">
       <ComposerPrimitive.Unstable_TriggerPopoverRoot>
         <ComposerSlashMenu />
         <ComposerWikiMentionMenu />
-        <ComposerPrimitive.Root
+        <PromptInput
           className={cn(
-            "composer-lift relative z-10 flex w-full flex-col rounded-2xl border p-3",
+            "cocola-web-composer w-full",
             interactionMode === "plan" &&
-              "border-indigo-500/30 bg-indigo-500/[0.025] shadow-[0_12px_36px_-24px_rgba(79,70,229,0.65)]",
+              "[&_[data-slot=prompt-input-shell]]:border-indigo-500/30 [&_[data-slot=prompt-input-shell]]:bg-indigo-500/[0.025] [&_[data-slot=prompt-input-shell]]:shadow-[0_12px_36px_-24px_rgba(79,70,229,0.65)]",
           )}
+          maxHeight={220}
+          status={isRunning ? "streaming" : "ready"}
+          value={composerText}
+          variant="primary"
         >
-          {selectedRuntime?.id === "claude-code" && interactionMode === "plan" ? (
-            <PlanModeContextStrip revisingPlanVersion={revisingPlanVersion} />
-          ) : null}
-          <div className="relative min-w-0">
-            <SelectedSkillChip onWidthChange={setSkillChipWidth} />
-            <ComposerWikiInput
-              ref={promptInputRef}
-              autoFocus={!noModel}
-              disabled={noModel}
-              textIndent={
-                selectedSkill && skillChipWidth > 0 ? `${skillChipWidth + 8}px` : undefined
-              }
-              placeholder={
-                runtimeConfigError
-                  ? runtimeConfigError
-                  : noModel
-                    ? selectedRuntime
-                      ? "No compatible model configured"
-                      : "No Agent Runtime available"
-                    : pendingQuestion
-                      ? "Reply to Claude…"
-                      : interactionMode === "plan"
-                        ? hasCurrentPlan
-                          ? PLAN_MODE_COPY.revisionPlaceholder
-                          : PLAN_MODE_COPY.initialPlaceholder
-                        : placeholder || COMPOSER_SLASH_COPY.defaultPlaceholder
-              }
-              promptStarter={promptStarter}
-              promptSlotBindings={promptSlotBindings}
-              onPromptSlotBindingChange={onPromptSlotBindingChange}
-              onPromptSlotBindingRemove={onPromptSlotBindingRemove}
-              onPromptStarterDetach={onPromptStarterDetach}
-            />
-          </div>
-          <ComposerAttachments />
-          <div className="flex w-full items-center justify-between gap-2">
-            <div className="flex min-w-0 items-center gap-1.5">
-              <ComposerPrimitive.AddAttachment asChild>
-                <TooltipIconButton
-                  tooltip={noModel ? "No model configured" : "Attach file"}
-                  variant="ghost"
-                  disabled={noModel || questionInputLocked}
-                  className="size-8 shrink-0 rounded-full p-2 text-muted-foreground"
-                >
-                  <PaperclipIcon className="size-4" />
-                </TooltipIconButton>
-              </ComposerPrimitive.AddAttachment>
-              {runtimePickerEnabled ? <RuntimePicker /> : null}
-              <ModelPicker />
-              <AgentPicker />
+          <PromptInput.Shell>
+            <ComposerPrimitive.Root className="contents">
               {selectedRuntime?.id === "claude-code" && interactionMode === "plan" ? (
-                <PlanModeIndicator />
+                <PlanModeContextStrip revisingPlanVersion={revisingPlanVersion} />
               ) : null}
-              {effectiveBranchControl}
-            </div>
-            <ComposerAction
-              missingPromptFileSlot={missingPromptFileSlot}
-              onResolveMissingPromptFileSlot={() =>
-                missingPromptFileSlot
-                  ? promptInputRef.current?.openFileSlot(missingPromptFileSlot.key)
-                  : undefined
-              }
-            />
-          </div>
-        </ComposerPrimitive.Root>
+              {selectedSkill ||
+              composerAttachments.some((attachment) => !isWikiComposerAttachment(attachment)) ? (
+                <PromptInput.Attachments className="flex items-center gap-2 px-4 pt-3">
+                  <SelectedSkillChip />
+                  <ComposerAttachments />
+                </PromptInput.Attachments>
+              ) : null}
+              <PromptInput.Content>
+                <div className="relative min-w-0">
+                  <ComposerWikiInput
+                    ref={promptInputRef}
+                    autoFocus={!noModel}
+                    disabled={noModel}
+                    placeholder={
+                      runtimeConfigError
+                        ? runtimeConfigError
+                        : noModel
+                          ? selectedRuntime
+                            ? "No compatible model configured"
+                            : "No Agent Runtime available"
+                          : pendingQuestion
+                            ? "Reply to Cocola…"
+                            : interactionMode === "plan"
+                              ? hasCurrentPlan
+                                ? PLAN_MODE_COPY.revisionPlaceholder
+                                : PLAN_MODE_COPY.initialPlaceholder
+                              : placeholder || COMPOSER_SLASH_COPY.defaultPlaceholder
+                    }
+                    promptStarter={promptStarter}
+                    promptSlotBindings={promptSlotBindings}
+                    onPromptSlotBindingChange={onPromptSlotBindingChange}
+                    onPromptSlotBindingRemove={onPromptSlotBindingRemove}
+                    onPromptStarterDetach={onPromptStarterDetach}
+                  />
+                </div>
+              </PromptInput.Content>
+              <PromptInput.Toolbar>
+                <PromptInput.ToolbarStart className="min-w-0 flex-1 overflow-x-auto">
+                  <ComposerPrimitive.AddAttachment asChild>
+                    <PromptInput.Action
+                      isIconOnly
+                      aria-label="Attach file"
+                      tooltip={noModel ? "No model configured" : "Attach file"}
+                      variant="ghost"
+                      isDisabled={noModel || questionInputLocked}
+                      className="cocola-web-composer-action shrink-0 rounded-xl"
+                    >
+                      <GravityPaperclip className="size-4" />
+                    </PromptInput.Action>
+                  </ComposerPrimitive.AddAttachment>
+                  <ModelPicker />
+                  <AgentPicker />
+                  {selectedRuntime?.id === "claude-code" && interactionMode === "plan" ? (
+                    <PlanModeIndicator />
+                  ) : null}
+                  {effectiveBranchControl}
+                </PromptInput.ToolbarStart>
+                <PromptInput.ToolbarEnd>
+                  <ComposerAction
+                    missingPromptFileSlot={missingPromptFileSlot}
+                    onResolveMissingPromptFileSlot={() =>
+                      missingPromptFileSlot
+                        ? promptInputRef.current?.openFileSlot(missingPromptFileSlot.key)
+                        : undefined
+                    }
+                  />
+                </PromptInput.ToolbarEnd>
+              </PromptInput.Toolbar>
+            </ComposerPrimitive.Root>
+          </PromptInput.Shell>
+        </PromptInput>
       </ComposerPrimitive.Unstable_TriggerPopoverRoot>
-    </motion.div>
+    </div>
   );
 };
 
@@ -676,7 +678,7 @@ const ComposerWikiMentionMenu: FC = () => {
       adapter={mention.adapter}
       isLoading={loading}
       aria-label="Reference a Wiki file"
-      className="absolute bottom-[calc(100%+0.625rem)] left-0 z-50 w-full max-w-2xl overflow-hidden rounded-2xl border border-border bg-popover text-popover-foreground shadow-xl"
+      className="absolute bottom-[calc(100%+0.625rem)] left-0 z-50 w-full max-w-2xl overflow-hidden rounded-2xl border border-border bg-overlay text-overlay-foreground shadow-xl"
     >
       <WikiMentionLoadOnOpen />
       <ComposerPrimitive.Unstable_TriggerPopover.Action
@@ -697,13 +699,13 @@ const ComposerWikiMentionMenu: FC = () => {
       <ComposerPrimitive.Unstable_TriggerPopoverItems>
         {(results) => (
           <div className="p-1.5">
-            <div className="flex items-center gap-2 border-b border-border px-2.5 pb-2 pt-1 text-xs font-medium text-muted-foreground">
-              <BookOpenText className="size-3.5 text-blue-600" />
+            <div className="flex items-center gap-2 border-b border-border px-2.5 pb-2 pt-1 text-xs font-medium text-muted">
+              <GravityBookOpen className="size-3.5 text-blue-600" />
               Wiki files
             </div>
             <div className="max-h-72 overflow-y-auto pt-1">
               {results.length === 0 ? (
-                <div className="px-3 py-8 text-center text-xs text-muted-foreground">
+                <div className="px-3 py-8 text-center text-xs text-muted">
                   No Wiki files found. Create or upload one from the Wiki tab.
                 </div>
               ) : (
@@ -712,17 +714,14 @@ const ComposerWikiMentionMenu: FC = () => {
                     key={item.id}
                     item={item}
                     index={index}
-                    className="flex w-full items-center gap-2.5 rounded-xl px-2.5 py-2 text-left outline-none transition-colors hover:bg-muted/80 data-[highlighted]:bg-muted"
+                    className="flex w-full items-center gap-2.5 rounded-xl px-2.5 py-2 text-left outline-none transition-colors hover:bg-surface-secondary/80 data-[highlighted]:bg-surface-secondary"
                   >
                     <span className="grid size-8 shrink-0 place-items-center rounded-lg bg-blue-50 text-blue-600">
-                      <FileText className="size-4" />
+                      <GravityBookOpen className="size-4" />
                     </span>
                     <span className="min-w-0 flex-1">
                       <span className="block truncate text-sm font-medium text-foreground">
                         {item.label}
-                      </span>
-                      <span className="block truncate text-xs text-muted-foreground">
-                        {item.description}
                       </span>
                     </span>
                   </ComposerPrimitive.Unstable_TriggerPopoverItem>
@@ -1006,7 +1005,7 @@ const ComposerWikiInput = forwardRef<
             overlayRef.current.scrollLeft = event.currentTarget.scrollLeft;
           }}
           className={cn(
-            "relative z-[1] max-h-40 min-h-12 w-full resize-none border-none bg-transparent px-2 py-2.5 text-[15px] leading-6 outline-none placeholder:text-muted-foreground focus:ring-0 disabled:cursor-not-allowed",
+            "prompt-input__textarea relative z-[1] block max-h-40 w-full resize-none border-none bg-transparent pb-2 text-[15px] leading-6 outline-none placeholder:text-muted focus:ring-0 disabled:cursor-not-allowed",
             hasInlineMentions &&
               "text-transparent caret-foreground selection:bg-blue-200/60 selection:text-transparent",
           )}
@@ -1020,7 +1019,7 @@ const ComposerWikiInput = forwardRef<
           onChange={handleFileChange}
         />
         {slotError ? (
-          <p className="px-2 pb-1 text-xs text-destructive" role="alert">
+          <p className="px-2 pb-1 text-xs text-danger" role="alert">
             {slotError}
           </p>
         ) : null}
@@ -1042,7 +1041,7 @@ const ComposerWikiMentionOverlay = forwardRef<
   <div
     ref={ref}
     style={textIndent ? { textIndent } : undefined}
-    className="pointer-events-none absolute inset-0 z-[2] max-h-40 min-h-12 overflow-hidden whitespace-pre-wrap break-words px-2 py-2.5 text-[15px] leading-6 text-foreground"
+    className="pointer-events-none absolute inset-0 z-[2] max-h-40 min-h-[5.75rem] overflow-hidden whitespace-pre-wrap break-words px-4 pb-2 pt-4 text-[15px] leading-6 text-foreground"
   >
     {segments.map((segment, index) => {
       if (segment.promptSlot) {
@@ -1168,7 +1167,7 @@ const ComposerSlashMenu: FC = () => {
       char="/"
       adapter={slash.adapter}
       aria-label={COMPOSER_SLASH_COPY.menuAriaLabel}
-      className="absolute bottom-[calc(100%+0.625rem)] left-0 z-50 w-full max-w-2xl overflow-hidden rounded-2xl border border-border bg-popover text-popover-foreground shadow-xl"
+      className="absolute bottom-[calc(100%+0.625rem)] left-0 z-50 w-full max-w-2xl overflow-hidden rounded-2xl border border-border bg-overlay text-overlay-foreground shadow-xl"
     >
       <ComposerPrimitive.Unstable_TriggerPopover.Action {...slash.action} />
       {/* Items stays unmounted while the trigger is closed, so the always-registered
@@ -1218,9 +1217,9 @@ const ComposerSlashMenu: FC = () => {
                     aria-selected={activeTab === tab.id}
                     onClick={() => setActiveTab(tab.id)}
                     className={cn(
-                      "relative px-3 py-2 text-sm font-medium text-muted-foreground outline-none transition-colors hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-1",
+                      "relative px-3 py-2 text-sm font-medium text-muted outline-none transition-colors hover:text-foreground focus-visible:ring-2 focus-visible:ring-focus focus-visible:ring-offset-1",
                       activeTab === tab.id &&
-                        "text-foreground after:absolute after:inset-x-2 after:bottom-0 after:h-0.5 after:rounded-full after:bg-primary",
+                        "text-foreground after:absolute after:inset-x-2 after:bottom-0 after:h-0.5 after:rounded-full after:bg-accent",
                     )}
                   >
                     {tab.label}
@@ -1234,7 +1233,7 @@ const ComposerSlashMenu: FC = () => {
                 className="max-h-72 overflow-y-auto p-1.5"
               >
                 {visibleItemCount === 0 ? (
-                  <div className="px-3 py-8 text-center text-xs text-muted-foreground">
+                  <div className="px-3 py-8 text-center text-xs text-muted">
                     {activeTab === "commands"
                       ? COMPOSER_SLASH_COPY.noCommands
                       : skillsLoaded
@@ -1248,14 +1247,14 @@ const ComposerSlashMenu: FC = () => {
                     return (
                       <Fragment key={item.id}>
                         {groupLabel ? (
-                          <div className="px-2.5 pt-2 pb-1 text-xs font-medium text-muted-foreground">
+                          <div className="px-2.5 pt-2 pb-1 text-xs font-medium text-muted">
                             {groupLabel}
                           </div>
                         ) : null}
                         <ComposerPrimitive.Unstable_TriggerPopoverItem
                           item={item}
                           index={index}
-                          className="flex w-full items-center gap-2.5 rounded-xl px-2.5 py-2 text-left outline-none transition-colors hover:bg-muted/80 data-[highlighted]:bg-muted"
+                          className="flex w-full items-center gap-2.5 rounded-xl px-2.5 py-2 text-left outline-none transition-colors hover:bg-surface-secondary/80 data-[highlighted]:bg-surface-secondary"
                         >
                           {isPlanModeCommand ? (
                             <span className="grid size-7 shrink-0 place-items-center rounded-lg bg-indigo-500/10 text-indigo-600">
@@ -1271,7 +1270,7 @@ const ComposerSlashMenu: FC = () => {
                             {skill?.name || item.label}
                           </span>
                           <span
-                            className="min-w-0 flex-1 truncate text-sm text-muted-foreground"
+                            className="min-w-0 flex-1 truncate text-sm text-muted"
                             title={
                               isPlanModeCommand ? PLAN_MODE_COMMAND.description : skill?.description
                             }
@@ -1294,89 +1293,26 @@ const ComposerSlashMenu: FC = () => {
   );
 };
 
-const SelectedSkillChip: FC<{ onWidthChange: (width: number) => void }> = ({ onWidthChange }) => {
+const SelectedSkillChip: FC = () => {
   const { selectedSkill, setSelectedSkillId, questionInputLocked } = useCocola();
-  const ref = useRef<HTMLDivElement>(null);
-
-  useEffect(() => {
-    const element = ref.current;
-    if (!selectedSkill || !element) {
-      onWidthChange(0);
-      return;
-    }
-    const reportWidth = () => onWidthChange(element.getBoundingClientRect().width);
-    reportWidth();
-    const observer = new ResizeObserver(reportWidth);
-    observer.observe(element);
-    return () => observer.disconnect();
-  }, [onWidthChange, selectedSkill]);
 
   if (!selectedSkill) return null;
   return (
-    <div ref={ref} className="absolute top-2.5 left-2 z-10 flex max-w-[45%]">
-      <span className="inline-flex h-6 max-w-full items-center gap-1 rounded-full border border-primary/20 bg-primary/10 pr-1 pl-2 text-xs font-medium text-primary">
-        <Sparkles className="size-3 shrink-0" />
-        <span className="truncate">{selectedSkill.name}</span>
-        <button
-          type="button"
-          disabled={questionInputLocked}
-          onClick={() => setSelectedSkillId(null)}
-          aria-label={`Remove ${selectedSkill.name} skill`}
-          className="grid size-4 shrink-0 place-items-center rounded-full text-primary/70 transition-colors hover:bg-primary/10 hover:text-primary"
-        >
-          <XIcon className="size-2.5" />
-        </button>
-      </span>
-    </div>
-  );
-};
-
-const RuntimePicker: FC = () => {
-  const { runtimes, selectedRuntime, runtimeLocked, setSelectedRuntimeId } = useCocola();
-  const [open, setOpen] = useState(false);
-
-  return (
-    <Popover.Root open={open} onOpenChange={setOpen}>
-      <Popover.Trigger asChild>
-        <button
-          type="button"
-          className="flex max-w-[11rem] min-w-0 items-center gap-1.5 rounded-full border border-border px-2.5 py-1.5 text-[12.5px] font-medium text-foreground transition-colors hover:bg-muted disabled:cursor-not-allowed disabled:opacity-70"
-          aria-label="Select Agent Runtime"
-          disabled={runtimeLocked || runtimes.length === 0}
-          title={runtimeLocked ? "Runtime is fixed for this conversation" : "Select Agent Runtime"}
-        >
-          <ModelIcon icon={RUNTIME_ICONS[selectedRuntime?.id ?? ""]} className="size-4" bare />
-          <span className="truncate">{selectedRuntime?.label ?? "No runtime"}</span>
-          {runtimeLocked || runtimes.length === 0 ? null : (
-            <ChevronDown className="size-3.5 shrink-0 text-muted-foreground" />
-          )}
-        </button>
-      </Popover.Trigger>
-      <Popover.Portal>
-        <Popover.Content
-          side="top"
-          align="start"
-          sideOffset={10}
-          className="cocola-user-ui z-50 w-56 overflow-hidden rounded-2xl border border-border bg-popover p-1.5 text-popover-foreground shadow-xl"
-        >
-          {runtimes.map((runtime) => (
-            <button
-              key={runtime.id}
-              type="button"
-              className="flex w-full items-center gap-2 rounded-xl px-2 py-2 text-left text-sm hover:bg-accent"
-              onClick={() => {
-                setSelectedRuntimeId(runtime.id);
-                setOpen(false);
-              }}
-            >
-              <ModelIcon icon={RUNTIME_ICONS[runtime.id]} className="size-6" />
-              <span className="min-w-0 flex-1 truncate font-medium">{runtime.label}</span>
-              {runtime.id === selectedRuntime?.id ? <Check className="size-4" /> : null}
-            </button>
-          ))}
-        </Popover.Content>
-      </Popover.Portal>
-    </Popover.Root>
+    <span className="bg-accent-soft text-accent inline-flex h-7 max-w-52 items-center gap-1 rounded-full pr-1 pl-2.5 text-xs font-medium">
+      <Sparkles className="size-3 shrink-0" />
+      <span className="truncate">{selectedSkill.name}</span>
+      <Button
+        isIconOnly
+        aria-label={`Remove ${selectedSkill.name} skill`}
+        className="size-5 min-h-5 min-w-5 rounded-full"
+        isDisabled={questionInputLocked}
+        size="sm"
+        variant="ghost"
+        onPress={() => setSelectedSkillId(null)}
+      >
+        <Xmark className="size-3" />
+      </Button>
+    </span>
   );
 };
 
@@ -1385,20 +1321,17 @@ const PlanModeIndicator: FC = () => {
   const isRunning = useThread((thread) => thread.isRunning);
 
   return (
-    <span className="inline-flex min-w-0 items-center gap-1 rounded-full border border-indigo-600 bg-indigo-600 py-1 pr-1 pl-2.5 text-[12.5px] font-semibold text-white shadow-sm">
-      <PlanModeIcon className="size-3.5 shrink-0" />
-      <span>{PLAN_MODE_COPY.activeLabel}</span>
-      <TooltipIconButton
-        tooltip={isRunning ? PLAN_MODE_COPY.lockedLabel : PLAN_MODE_COPY.cancelLabel}
-        variant="ghost"
-        disabled={isRunning || questionInputLocked}
-        onClick={() => setInteractionMode("execute")}
-        aria-label={PLAN_MODE_COPY.cancelLabel}
-        className="size-5 shrink-0 rounded-full p-0 text-white/75 hover:bg-white/15 hover:text-white disabled:cursor-not-allowed disabled:opacity-50"
-      >
-        <XIcon className="size-3" />
-      </TooltipIconButton>
-    </span>
+    <Button
+      aria-label="Exit Plan mode"
+      className="cocola-web-plan-indicator h-9 shrink-0 rounded-full px-3"
+      isDisabled={isRunning || questionInputLocked}
+      size="sm"
+      onPress={() => setInteractionMode("execute")}
+    >
+      <GravityBookOpen className="size-3.5" />
+      {PLAN_MODE_COPY.activeLabel}
+      <Xmark className="size-3" />
+    </Button>
   );
 };
 
@@ -1412,177 +1345,99 @@ const ModelPicker: FC = () => {
     questionInputLocked,
     selectedAgent,
   } = useCocola();
-  const [open, setOpen] = useState(false);
   const noModel = !modelsLoaded || !selectedModel;
+  const pickerDisabled = noModel || questionInputLocked || Boolean(selectedAgent);
 
   return (
-    <Popover.Root open={open} onOpenChange={setOpen}>
-      {selectedAgent ? (
-        <span
-          className="inline-flex"
-          title="This model is configured by the selected agent and can't be changed here."
+    <Dropdown>
+      <Dropdown.Trigger
+        aria-label={
+          selectedAgent ? "Agent model" : noModel ? "No model configured" : "Select model"
+        }
+        className="cocola-web-composer-selector cocola-web-select-trigger inline-flex h-9 max-w-[14rem] min-w-0 items-center gap-2 rounded-xl border border-transparent px-2.5 text-xs font-medium"
+        isDisabled={pickerDisabled}
+      >
+        <ModelIcon icon={selectedModel?.icon} className="size-4" bare />
+        <span className="truncate">{selectedModel?.label ?? "No model"}</span>
+        {pickerDisabled ? null : <GravityChevronDown className="text-muted size-3 shrink-0" />}
+      </Dropdown.Trigger>
+      <Dropdown.Popover className="min-w-60" placement="top start">
+        <Dropdown.Menu
+          aria-label="Select model"
+          selectedKeys={selectedModelID ? [selectedModelID] : []}
+          selectionMode="single"
+          onAction={(key) => setSelectedModelID(String(key))}
         >
-          <button
-            type="button"
-            className="flex max-w-[14rem] min-w-0 items-center gap-1.5 rounded-full border border-border px-2.5 py-1.5 text-[12.5px] font-medium text-foreground opacity-70"
-            aria-label="Agent model"
-            disabled
-          >
-            <ModelIcon icon={selectedModel?.icon} className="size-4" bare />
-            <span className="truncate">{selectedModel?.label ?? "Model unavailable"}</span>
-          </button>
-        </span>
-      ) : (
-        <Popover.Trigger asChild>
-          <button
-            type="button"
-            className="flex max-w-[14rem] min-w-0 items-center gap-1.5 rounded-full border border-border px-2.5 py-1.5 text-[12.5px] font-medium text-foreground transition-colors hover:bg-muted focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
-            aria-label={noModel ? "No model configured" : "Select model"}
-            disabled={noModel || questionInputLocked}
-          >
-            <ModelIcon icon={selectedModel?.icon} className="size-4" bare />
-            <span className="truncate">{selectedModel?.label ?? "No model"}</span>
-            {noModel ? null : <ChevronDown className="size-3.5 shrink-0 text-muted-foreground" />}
-          </button>
-        </Popover.Trigger>
-      )}
-      <Popover.Portal>
-        <Popover.Content
-          side="top"
-          align="start"
-          sideOffset={10}
-          // Popover.Portal mounts to <body>, which sits under <html class="dark">
-          // and outside the .cocola-user-ui wrapper — so it would inherit the dark
-          // --popover token (near-black). Re-declare the user theme on the content
-          // itself so its tokens (bg-popover, border, accent, ...) resolve light.
-          className="cocola-user-ui z-50 w-72 overflow-hidden rounded-2xl border border-border bg-popover text-popover-foreground shadow-xl"
-        >
-          <Command>
-            <div className="flex items-center gap-2 border-b border-border px-3">
-              <Search className="size-4 text-muted-foreground" />
-              <Command.Input
-                placeholder="Find a model..."
-                className="h-10 min-w-0 flex-1 bg-transparent text-sm outline-none placeholder:text-muted-foreground"
-              />
-            </div>
-            <Command.List className="max-h-72 overflow-auto p-1.5">
-              <Command.Empty className="px-3 py-8 text-center text-sm text-muted-foreground">
-                No model found.
-              </Command.Empty>
-              {models.map((model) => (
-                <Command.Item
-                  key={model.id}
-                  value={`${model.label} ${model.alias} ${model.provider ?? ""}`}
-                  className="flex cursor-pointer items-center gap-2 rounded-xl px-2 py-2 text-sm outline-none data-[selected=true]:bg-accent data-[selected=true]:text-accent-foreground"
-                  onSelect={() => {
-                    setSelectedModelID(model.id);
-                    setOpen(false);
-                  }}
-                >
-                  <ModelIcon icon={model.icon} className="size-6" />
-                  <span className="min-w-0 flex-1">
-                    <span className="block truncate font-medium">{model.label}</span>
-                    <span className="block truncate text-xs text-muted-foreground">
-                      {model.alias}
-                      {model.provider ? ` · ${model.provider}` : ""}
-                    </span>
-                  </span>
-                  {model.id === selectedModelID ? <Check className="size-4" /> : null}
-                </Command.Item>
-              ))}
-            </Command.List>
-          </Command>
-        </Popover.Content>
-      </Popover.Portal>
-    </Popover.Root>
+          {models.map((model) => (
+            <Dropdown.Item key={model.id} id={model.id} textValue={model.label}>
+              <Label className="flex min-w-0 items-center gap-2">
+                <ModelIcon icon={model.icon} className="size-5" bare />
+                <span className="truncate">{model.label}</span>
+              </Label>
+            </Dropdown.Item>
+          ))}
+        </Dropdown.Menu>
+      </Dropdown.Popover>
+    </Dropdown>
   );
 };
 
 const AgentPicker: FC = () => {
   const { agents, agentsLoaded, selectedAgent, selectedAgentID, agentLocked, setSelectedAgentID } =
     useCocola();
-  const [open, setOpen] = useState(false);
-
   return (
-    <Popover.Root open={open} onOpenChange={setOpen}>
-      <Popover.Trigger asChild>
-        <button
-          type="button"
-          className="flex max-w-[12rem] min-w-0 items-center gap-1.5 rounded-full border border-border px-2.5 py-1.5 text-[12.5px] font-medium text-foreground transition-colors hover:bg-muted focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring disabled:cursor-not-allowed disabled:opacity-70"
+    <Dropdown>
+      <Dropdown.Trigger
+        aria-label="Select agent"
+        className="cocola-web-composer-selector cocola-web-select-trigger inline-flex h-9 max-w-[12rem] min-w-0 shrink-0 items-center gap-2 rounded-xl border border-transparent px-2.5 text-xs font-medium"
+        isDisabled={!agentsLoaded || agentLocked}
+      >
+        {selectedAgent ? (
+          <AgentAvatar
+            avatarKey={selectedAgent.avatar_key}
+            avatarColor={selectedAgent.avatar_color}
+            className="size-4 rounded-md ring-0"
+            iconClassName="size-2.5"
+          />
+        ) : (
+          <FaceRobot className="size-3.5 text-cyan-600" />
+        )}
+        <span className="truncate">{selectedAgent?.name ?? "None"}</span>
+        {!agentsLoaded || agentLocked ? null : (
+          <GravityChevronDown className="text-muted size-3 shrink-0" />
+        )}
+      </Dropdown.Trigger>
+      <Dropdown.Popover placement="top start">
+        <Dropdown.Menu
           aria-label="Select agent"
-          disabled={!agentsLoaded || agentLocked}
-          title={agentLocked ? "Agent is fixed for this conversation" : "Select agent"}
+          selectedKeys={selectedAgentID ? [selectedAgentID] : ["none"]}
+          selectionMode="single"
+          onAction={(key) => setSelectedAgentID(String(key) === "none" ? null : String(key))}
         >
-          {selectedAgent ? (
-            <AgentAvatar
-              avatarKey={selectedAgent.avatar_key}
-              avatarColor={selectedAgent.avatar_color}
-              className="size-4 rounded-md ring-0"
-              iconClassName="size-2.5"
-            />
-          ) : (
-            <Bot className="size-4 text-muted-foreground" />
-          )}
-          <span className="truncate">{selectedAgent?.name ?? "None"}</span>
-          {!agentsLoaded || agentLocked ? null : (
-            <ChevronDown className="size-3.5 shrink-0 text-muted-foreground" />
-          )}
-        </button>
-      </Popover.Trigger>
-      <Popover.Portal>
-        <Popover.Content
-          side="top"
-          align="start"
-          sideOffset={10}
-          className="cocola-user-ui z-50 w-64 overflow-hidden rounded-2xl border border-border bg-popover p-1.5 text-popover-foreground shadow-xl"
-        >
-          <button
-            type="button"
-            className="flex w-full items-center gap-2 rounded-xl px-2 py-2 text-left text-sm hover:bg-accent"
-            onClick={() => {
-              setSelectedAgentID(null);
-              setOpen(false);
-            }}
-          >
-            <span className="grid size-7 shrink-0 place-items-center rounded-lg bg-muted text-muted-foreground">
-              <Bot className="size-4" />
-            </span>
-            <span className="min-w-0 flex-1">
-              <span className="block font-medium">None</span>
-              <span className="block text-xs text-muted-foreground">Use the standard chat</span>
-            </span>
-            {!selectedAgentID ? <Check className="size-4" /> : null}
-          </button>
-          {agents.length > 0 ? <div className="my-1 h-px bg-border" /> : null}
-          <div className="max-h-64 overflow-auto">
-            {agents.map((agent) => (
-              <button
-                key={agent.id}
-                type="button"
-                className="flex w-full items-center gap-2 rounded-xl px-2 py-2 text-left text-sm hover:bg-accent"
-                onClick={() => {
-                  setSelectedAgentID(agent.id);
-                  setOpen(false);
-                }}
-              >
+          <Dropdown.Item id="none" textValue="None">
+            <Label className="flex min-w-0 items-center gap-2">
+              <span className="bg-surface-secondary text-muted grid size-5 shrink-0 place-items-center rounded-md">
+                <FaceRobot className="size-3" />
+              </span>
+              <span>None</span>
+            </Label>
+          </Dropdown.Item>
+          {agents.map((agent) => (
+            <Dropdown.Item key={agent.id} id={agent.id} textValue={agent.name}>
+              <Label className="flex min-w-0 items-center gap-2">
                 <AgentAvatar
                   avatarKey={agent.avatar_key}
                   avatarColor={agent.avatar_color}
-                  className="size-7 rounded-lg"
+                  className="size-5 rounded-md ring-0"
+                  iconClassName="size-3"
                 />
-                <span className="min-w-0 flex-1">
-                  <span className="block truncate font-medium">{agent.name}</span>
-                  <span className="block truncate text-xs text-muted-foreground">
-                    {agent.description || agent.model_alias}
-                  </span>
-                </span>
-                {agent.id === selectedAgentID ? <Check className="size-4" /> : null}
-              </button>
-            ))}
-          </div>
-        </Popover.Content>
-      </Popover.Portal>
-    </Popover.Root>
+                <span className="truncate">{agent.name}</span>
+              </Label>
+            </Dropdown.Item>
+          ))}
+        </Dropdown.Menu>
+      </Dropdown.Popover>
+    </Dropdown>
   );
 };
 
@@ -1605,8 +1460,8 @@ const ComposerAttachmentChip: FC = () => {
   if (isWiki) return null;
 
   return (
-    <AttachmentPrimitive.Root className="relative flex w-fit max-w-full self-start items-center gap-2 rounded-lg border border-border bg-muted px-3 py-1.5 text-xs text-foreground">
-      <PaperclipIcon className="size-3.5 shrink-0 text-muted-foreground" />
+    <AttachmentPrimitive.Root className="relative flex w-fit max-w-full self-start items-center gap-2 rounded-lg border border-border bg-surface-secondary px-3 py-1.5 text-xs text-foreground">
+      <PaperclipIcon className="size-3.5 shrink-0 text-muted" />
       <span className="max-w-[16rem] truncate">
         <AttachmentPrimitive.Name />
       </span>
@@ -1614,7 +1469,7 @@ const ComposerAttachmentChip: FC = () => {
         <button
           type="button"
           aria-label={`Remove attachment ${name}`}
-          className="ml-1 rounded-full p-0.5 text-muted-foreground transition-colors hover:bg-background hover:text-foreground"
+          className="ml-1 rounded-full p-0.5 text-muted transition-colors hover:bg-background hover:text-foreground"
         >
           <XIcon className="size-3.5" />
         </button>
@@ -1634,40 +1489,33 @@ const ComposerAction: FC<{
     <>
       <ThreadPrimitive.If running={false}>
         {missingPromptFileSlot ? (
-          <TooltipIconButton
-            tooltip={
-              noModel ? "No model configured" : `${missingPromptFileSlot.label} before sending`
-            }
-            variant="default"
-            type="button"
-            disabled={noModel}
-            onClick={onResolveMissingPromptFileSlot}
-            className="cocola-send-btn my-1 size-9 rounded-full p-2"
+          <Button
+            isIconOnly
+            aria-label={`${missingPromptFileSlot.label} before sending`}
+            className="cocola-web-composer-send"
+            isDisabled={noModel}
+            onPress={onResolveMissingPromptFileSlot}
           >
             <ArrowUpIcon className="h-4 w-4" />
-          </TooltipIconButton>
+          </Button>
         ) : (
           <ComposerPrimitive.Send asChild>
-            <TooltipIconButton
-              tooltip={noModel ? "No model configured" : "Send"}
-              variant="default"
-              disabled={noModel}
-              className="cocola-send-btn my-1 size-9 rounded-full p-2"
-            >
-              <ArrowUpIcon className="h-4 w-4" />
-            </TooltipIconButton>
+            <PromptInput.Send
+              aria-label="Send"
+              className="cocola-web-composer-send"
+              isDisabled={noModel}
+              status="ready"
+            />
           </ComposerPrimitive.Send>
         )}
       </ThreadPrimitive.If>
       <ThreadPrimitive.If running>
         <ComposerPrimitive.Cancel asChild>
-          <TooltipIconButton
-            tooltip="Stop"
-            variant="outline"
-            className="my-1 size-8 rounded-full p-2"
-          >
-            <Square className="h-3.5 w-3.5 fill-current" />
-          </TooltipIconButton>
+          <PromptInput.Send
+            aria-label="Stop"
+            className="cocola-web-composer-send"
+            status="streaming"
+          />
         </ComposerPrimitive.Cancel>
       </ThreadPrimitive.If>
     </>
@@ -1679,16 +1527,16 @@ const UserMessage: FC = () => {
   return (
     <MessagePrimitive.Root
       data-message-id={id}
-      className="message-enter grid w-full max-w-[var(--thread-max-width)] auto-rows-auto grid-cols-[minmax(72px,1fr)_auto] gap-y-1 py-3"
+      className="message-enter w-full max-w-[var(--thread-max-width)] py-3"
     >
-      <div className="col-start-2 row-start-1 flex flex-col items-end gap-1.5">
+      <ChatMessage.User className="gap-1.5">
         <UserSkillBadge />
         <div className="flex flex-wrap justify-end gap-1.5 empty:hidden">
           <MessagePrimitive.Attachments
             components={{
               Attachment: () => (
-                <AttachmentPrimitive.Root className="flex w-fit max-w-full items-center gap-2 rounded-lg border border-border bg-muted/60 px-3 py-1.5 text-xs text-foreground">
-                  <PaperclipIcon className="size-3.5 shrink-0 text-muted-foreground" />
+                <AttachmentPrimitive.Root className="flex w-fit max-w-full items-center gap-2 rounded-lg border border-border bg-surface-secondary/60 px-3 py-1.5 text-xs text-foreground">
+                  <PaperclipIcon className="size-3.5 shrink-0 text-muted" />
                   <span className="max-w-[16rem] truncate">
                     <AttachmentPrimitive.Name />
                   </span>
@@ -1698,11 +1546,11 @@ const UserMessage: FC = () => {
           />
         </div>
         <MessagePrimitive.If hasContent>
-          <div className="max-w-[calc(var(--thread-max-width)*0.8)] whitespace-pre-wrap break-words rounded-2xl bg-muted px-4 py-2.5 text-[15px] leading-6 text-foreground">
+          <ChatMessage.Bubble className="cocola-chat-user-bubble max-w-[min(80%,48rem)] whitespace-pre-wrap break-words rounded-2xl px-4 py-2.5 text-[15px] leading-6 text-foreground">
             <MessagePrimitive.Parts components={USER_PART_COMPONENTS} />
-          </div>
+          </ChatMessage.Bubble>
         </MessagePrimitive.If>
-      </div>
+      </ChatMessage.User>
     </MessagePrimitive.Root>
   );
 };
@@ -1723,11 +1571,11 @@ const WikiFilePart: FC<
     className="my-1 flex max-w-sm items-center gap-2 rounded-xl border border-blue-200 bg-white/75 px-3 py-2 text-left shadow-sm transition hover:border-blue-300"
   >
     <span className="grid size-8 shrink-0 place-items-center rounded-lg bg-blue-50 text-blue-600">
-      <BookOpenText className="size-4" />
+      <GravityBookOpen className="size-4" />
     </span>
     <span className="min-w-0">
       <span className="block truncate text-xs font-semibold">{data.filename}</span>
-      <span className="block truncate text-[10px] text-muted-foreground">{data.logicalPath}</span>
+      <span className="block truncate text-[10px] text-muted">{data.logicalPath}</span>
     </span>
   </a>
 );
@@ -1749,7 +1597,7 @@ const UserSkillBadge: FC = () => {
   if (!skillID) return null;
   const label = skills.find((skill) => skill.id === skillID)?.name || skillID;
   return (
-    <span className="inline-flex max-w-full items-center gap-1.5 rounded-full border border-primary/15 bg-primary/10 px-2.5 py-1 text-[11px] font-medium text-primary">
+    <span className="inline-flex max-w-full items-center gap-1.5 rounded-full border border-accent/15 bg-accent/10 px-2.5 py-1 text-[11px] font-medium text-accent">
       <Sparkles className="size-3 shrink-0" />
       <span className="truncate">{label}</span>
     </span>
@@ -1757,20 +1605,22 @@ const UserSkillBadge: FC = () => {
 };
 
 const AssistantMessage: FC = () => (
-  <MessagePrimitive.Root className="message-enter relative grid w-full max-w-[var(--thread-max-width)] grid-cols-[auto_1fr] grid-rows-[auto_1fr] py-3">
-    <div className="col-span-2 col-start-1 row-start-1 max-w-full break-words px-0.5 py-1 leading-7 text-foreground">
-      <div className="relative">
-        <div className="relative z-[1]">
-          <AssistantMessageHeader />
-          {/* Vertical timeline rail: one continuous line (the ::before pseudo)
+  <MessagePrimitive.Root className="message-enter relative w-full max-w-[var(--thread-max-width)] py-3">
+    <ChatMessage.Assistant className="cocola-chat-assistant gap-0 py-0">
+      <ChatMessage.Body className="gap-0 pe-0">
+        <div className="relative max-w-full break-words px-0.5 py-1 leading-7 text-foreground">
+          <div className="relative z-[1]">
+            <AssistantMessageHeader />
+            {/* Vertical timeline rail: one continuous line (the ::before pseudo)
               runs at x=0.875rem — exactly the center of each RailRow icon column
               (1.75rem wide) — so every node's badge sits centered on the line.
               Badges carry bg-background + z-[1] to punch through it. */}
-          <AssistantMessageParts />
+            <AssistantMessageParts />
+          </div>
         </div>
-      </div>
-    </div>
-    <AssistantActionBar />
+        <AssistantActionBar />
+      </ChatMessage.Body>
+    </ChatMessage.Assistant>
   </MessagePrimitive.Root>
 );
 
@@ -1841,17 +1691,19 @@ const AssistantMessageHeader: FC = () => {
   const isPlanMode = metadata?.interaction_mode === "plan";
 
   return (
-    <div className="mb-2 flex flex-wrap items-center gap-x-2.5 gap-y-1.5">
+    <div className="cocola-chat-model-header mb-3 grid grid-cols-[1.75rem_minmax(0,1fr)] items-center gap-x-2.5">
       <ModelIcon icon={icon} className="size-7 shrink-0" bare />
-      <span className="min-w-0 truncate text-base font-bold leading-none text-foreground">
-        {label}
-      </span>
-      {isPlanMode ? (
-        <span className="inline-flex items-center gap-1.5 rounded-full border border-indigo-600 bg-indigo-600 px-2.5 py-1.5 text-[11px] font-semibold leading-none text-white shadow-sm">
-          <PlanModeIcon className="size-3.5 shrink-0" aria-hidden="true" />
-          {PLAN_MODE_COPY.responseLabel}
+      <div className="flex min-w-0 flex-wrap items-center gap-2">
+        <span className="min-w-0 truncate text-[15px] font-semibold leading-none text-foreground">
+          {label}
         </span>
-      ) : null}
+        {isPlanMode ? (
+          <span className="inline-flex items-center gap-1.5 rounded-full bg-indigo-600 px-2.5 py-1 text-[11px] font-semibold leading-none text-white">
+            <PlanModeIcon className="size-3.5 shrink-0" aria-hidden="true" />
+            {PLAN_MODE_COPY.responseLabel}
+          </span>
+        ) : null}
+      </div>
     </div>
   );
 };
@@ -2066,10 +1918,7 @@ const AssistantActionBar: FC = () => {
   };
 
   return (
-    <ActionBarPrimitive.Root
-      autohide="never"
-      className="col-start-1 row-start-2 ml-1 flex gap-1 text-muted-foreground"
-    >
+    <ActionBarPrimitive.Root autohide="never" className="ml-8.5 flex gap-1 text-muted">
       <TooltipIconButton tooltip={copied ? "Copied" : "Copy"} disabled={!text} onClick={copy}>
         {copied ? <Check className="h-4 w-4 text-emerald-500" /> : <CopyIcon className="h-4 w-4" />}
       </TooltipIconButton>

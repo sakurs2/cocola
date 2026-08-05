@@ -18,6 +18,8 @@ import {
   Trash2,
   Upload,
 } from "lucide-react";
+import { Button, Card, Chip, Input, Label, SearchField, TextField, Tooltip } from "@heroui/react";
+import { Sheet } from "@heroui-pro/react/sheet";
 import {
   Fragment,
   useCallback,
@@ -31,10 +33,7 @@ import {
   type ReactNode,
 } from "react";
 import { ReadonlyFilePreview } from "@/components/assistant-ui/file-preview";
-import { DeleteConfirmDialog } from "@/components/assistant-ui/delete-confirm-dialog";
 import { useWorkspaceUnsavedChanges } from "@/components/assistant-ui/workspace-unsaved-changes";
-import { ActionConfirmDialog, TextInputDialog } from "@/components/ui/action-dialog";
-import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import { WikiMarkdownEditor } from "@/components/wiki/wiki-markdown-editor";
 
@@ -123,6 +122,7 @@ export function WikiWorkspace() {
   const [maxFileBytes, setMaxFileBytes] = useState(DEFAULT_MAX_FILE_BYTES);
   const [unsavedFileID, setUnsavedFileID] = useState("");
   const [nameDialog, setNameDialog] = useState<WikiNameDialogState | null>(null);
+  const [nameDraft, setNameDraft] = useState("");
   const [nameDialogError, setNameDialogError] = useState("");
   const [deleteTarget, setDeleteTarget] = useState<WikiNode | null>(null);
   const [deleteError, setDeleteError] = useState<string | null>(null);
@@ -248,6 +248,7 @@ export function WikiWorkspace() {
   const createFolder = () => {
     runAfterDiscardCheck(() => {
       setNameDialogError("");
+      setNameDraft("");
       setNameDialog({ kind: "folder" });
     });
   };
@@ -255,6 +256,7 @@ export function WikiWorkspace() {
   const createMarkdown = () => {
     runAfterDiscardCheck(() => {
       setNameDialogError("");
+      setNameDraft("Untitled.md");
       setNameDialog({ kind: "markdown" });
     });
   };
@@ -345,6 +347,7 @@ export function WikiWorkspace() {
 
   const rename = (node: WikiNode) => {
     setNameDialogError("");
+    setNameDraft(node.name);
     setNameDialog({ kind: "rename", node });
   };
 
@@ -470,86 +473,84 @@ export function WikiWorkspace() {
   return (
     <div
       className={cn(
-        "relative flex h-full min-h-0 bg-[#fff] text-[#142033]",
+        "cocola-web-wiki-workspace relative flex h-full min-h-0 w-full min-w-0 overflow-hidden",
         resizingSidebar && "cursor-col-resize select-none",
       )}
     >
-      <div
-        className="pointer-events-none absolute inset-y-0 left-0 w-1 bg-gradient-to-b from-[#2563EB] via-[#7C3AED] to-[#10B981]"
-        aria-hidden="true"
-      />
       <aside
-        className="flex shrink-0 flex-col border-r border-slate-200 bg-[#F8FAFD]"
+        className={`${selected ? "hidden lg:flex" : "flex"} bg-surface-secondary border-separator w-full shrink-0 flex-col border-r lg:flex`}
         style={{ width: sidebarWidth }}
       >
-        <header className="border-b border-slate-200 px-4 pb-3 pt-5">
+        <header className="border-separator border-b px-4 pb-3 pt-5">
           <div className="flex items-center justify-between gap-3">
-            <div>
-              <div className="flex items-center gap-2">
-                <span className="grid size-8 place-items-center rounded-xl bg-gradient-to-br from-blue-600 to-violet-600 text-white shadow-sm">
-                  <BookOpenText className="size-4" />
-                </span>
-                <h1 className="text-lg font-semibold tracking-tight">Wiki</h1>
-              </div>
+            <div className="flex items-center gap-2.5">
+              <span className="bg-accent text-accent-foreground grid size-9 place-items-center rounded-2xl">
+                <BookOpenText className="size-4.5" />
+              </span>
+              <h1 className="text-lg font-semibold tracking-[-0.02em]">Wiki</h1>
             </div>
-            <button
-              type="button"
-              onClick={() => void loadTree()}
-              aria-label="Refresh Wiki"
-              className="grid size-8 place-items-center rounded-lg text-slate-500 hover:bg-white hover:text-slate-900"
-            >
-              <RefreshCw className={cn("size-4", loading && "animate-spin")} />
-            </button>
+            <Tooltip delay={0}>
+              <Button
+                isIconOnly
+                aria-label="Refresh Wiki"
+                size="sm"
+                variant="ghost"
+                onPress={() => void loadTree()}
+              >
+                <RefreshCw className={cn("size-4", loading && "animate-spin")} />
+              </Button>
+              <Tooltip.Content>Refresh Wiki</Tooltip.Content>
+            </Tooltip>
           </div>
-          <div className="relative mt-4">
-            <Search className="pointer-events-none absolute left-3 top-2.5 size-4 text-slate-400" />
-            <input
-              value={query}
-              onChange={(event) => setQuery(event.target.value)}
-              placeholder="Search this Wiki"
-              className="h-9 w-full rounded-xl border border-slate-200 bg-white pl-9 pr-3 text-sm outline-none transition focus:border-blue-400 focus:ring-2 focus:ring-blue-100"
-            />
-          </div>
+          <SearchField
+            aria-label="Search this Wiki"
+            className="mt-4 w-full"
+            value={query}
+            onChange={setQuery}
+          >
+            <SearchField.Group>
+              <SearchField.SearchIcon>
+                <Search className="size-4" />
+              </SearchField.SearchIcon>
+              <SearchField.Input placeholder="Search this Wiki" />
+              <SearchField.ClearButton />
+            </SearchField.Group>
+          </SearchField>
           <div className="mt-3 flex min-w-0 items-center gap-1.5">
-            <button
-              type="button"
-              disabled={!currentFolder}
-              onClick={() => navigateToFolder(currentFolder?.parent_id ?? "")}
-              aria-label="Go to parent folder"
-              className="grid size-7 shrink-0 place-items-center rounded-lg text-slate-500 transition hover:bg-white hover:text-slate-900 disabled:cursor-default disabled:opacity-35"
-            >
-              <ArrowLeft className="size-3.5" />
-            </button>
+            <Tooltip delay={0}>
+              <Button
+                isIconOnly
+                aria-label="Go to parent folder"
+                isDisabled={!currentFolder}
+                size="sm"
+                variant="ghost"
+                onPress={() => navigateToFolder(currentFolder?.parent_id ?? "")}
+              >
+                <ArrowLeft className="size-3.5" />
+              </Button>
+              <Tooltip.Content>Parent folder</Tooltip.Content>
+            </Tooltip>
             <nav
               aria-label="Wiki folder path"
               className="flex min-w-0 flex-1 items-center overflow-hidden text-xs"
             >
-              <button
-                type="button"
-                onClick={() => navigateToFolder("")}
-                className={cn(
-                  "shrink-0 rounded-md px-1.5 py-1 font-medium transition hover:bg-white hover:text-slate-950",
-                  currentFolderID ? "text-slate-500" : "text-slate-950",
-                )}
+              <Button
+                className="h-7 min-w-0 shrink-0 px-2 text-xs"
+                variant="ghost"
+                onPress={() => navigateToFolder("")}
               >
                 All files
-              </button>
+              </Button>
               {folderTrail.map((folder, index) => (
                 <Fragment key={folder.id}>
-                  <ChevronRight className="size-3 shrink-0 text-slate-300" />
-                  <button
-                    type="button"
-                    onClick={() => navigateToFolder(folder.id)}
-                    title={folder.logical_path || folder.name}
-                    className={cn(
-                      "min-w-0 truncate rounded-md px-1.5 py-1 transition hover:bg-white hover:text-slate-950",
-                      index === folderTrail.length - 1
-                        ? "font-semibold text-slate-950"
-                        : "text-slate-500",
-                    )}
+                  <ChevronRight className="text-muted size-3 shrink-0" />
+                  <Button
+                    className={`h-7 min-w-0 px-1.5 text-xs ${index === folderTrail.length - 1 ? "font-semibold" : "text-muted"}`}
+                    variant="ghost"
+                    onPress={() => navigateToFolder(folder.id)}
                   >
                     {folder.name}
-                  </button>
+                  </Button>
                 </Fragment>
               ))}
             </nav>
@@ -590,7 +591,7 @@ export function WikiWorkspace() {
             <EmptyTree label="Create your first page or upload a file." />
           )}
         </div>
-        <footer className="border-t border-slate-200 p-3">
+        <footer className="border-separator border-t p-3">
           <div className="grid grid-cols-3 gap-1.5">
             <QuickAction icon={Folder} label="Folder" disabled={busy} onClick={createFolder} />
             <QuickAction icon={Plus} label="Page" disabled={busy} onClick={createMarkdown} />
@@ -604,7 +605,7 @@ export function WikiWorkspace() {
             className="hidden"
             onChange={upload}
           />
-          <p className="mt-2 text-center text-[10px] text-slate-400">
+          <p className="text-muted mt-2 text-center text-[10px]">
             {formatBytes(maxFileBytes)} max per file
           </p>
         </footer>
@@ -633,22 +634,20 @@ export function WikiWorkspace() {
         <span className="absolute inset-y-0 -left-1.5 w-3">
           <span
             className={cn(
-              "absolute inset-y-0 left-1/2 w-px -translate-x-1/2 bg-transparent transition-colors group-hover:bg-blue-400 group-focus-visible:bg-blue-500",
-              resizingSidebar && "bg-blue-500",
+              "absolute inset-y-0 left-1/2 w-px -translate-x-1/2 bg-transparent transition-colors group-hover:bg-accent group-focus-visible:bg-accent",
+              resizingSidebar && "bg-accent",
             )}
           />
         </span>
       </div>
 
-      <main className="min-w-0 flex-1">
+      <main
+        className={`${selected ? "flex" : "hidden lg:flex"} min-w-0 flex-1 flex-col overflow-y-auto`}
+      >
         {error ? (
-          <div className="absolute right-5 top-4 z-30 max-w-lg rounded-xl border border-red-200 bg-red-50 px-4 py-2 text-sm text-red-700 shadow-lg">
+          <div className="bg-danger/10 text-danger absolute right-5 top-4 z-30 max-w-lg rounded-2xl px-4 py-3 text-sm shadow-lg">
             {error}
-            <button
-              type="button"
-              onClick={() => setError("")}
-              className="ml-3 font-semibold text-red-900"
-            >
+            <button type="button" onClick={() => setError("")} className="ml-3 font-semibold">
               Dismiss
             </button>
           </div>
@@ -682,99 +681,156 @@ export function WikiWorkspace() {
         )}
       </main>
 
-      <TextInputDialog
-        open={nameDialog !== null}
-        title={
-          nameDialog?.kind === "folder"
-            ? "Create folder"
-            : nameDialog?.kind === "markdown"
-              ? "Create Markdown page"
-              : "Rename item"
-        }
-        description={
-          nameDialog?.kind === "folder"
-            ? "Add a folder to the current Wiki location."
-            : nameDialog?.kind === "markdown"
-              ? "Create an editable Markdown page in the current Wiki location."
-              : "Choose a new name. The file type must stay supported by Wiki."
-        }
-        label={
-          nameDialog?.kind === "folder"
-            ? "Folder name"
-            : nameDialog?.kind === "markdown"
-              ? "Filename"
-              : "New name"
-        }
-        initialValue={
-          nameDialog?.kind === "markdown"
-            ? "Untitled.md"
-            : nameDialog?.kind === "rename"
-              ? (nameDialog.node?.name ?? "")
-              : ""
-        }
-        placeholder={nameDialog?.kind === "markdown" ? "Notes.md" : "Name"}
-        submitLabel={nameDialog?.kind === "rename" ? "Rename" : "Create"}
-        busy={busy}
-        error={nameDialogError}
-        icon={
-          nameDialog?.kind === "folder"
-            ? Folder
-            : nameDialog?.kind === "markdown"
-              ? FileText
-              : Pencil
-        }
+      <Sheet
+        isOpen={nameDialog !== null}
+        placement="right"
         onOpenChange={(open) => {
-          if (open) return;
-          setNameDialog(null);
-          setNameDialogError("");
+          if (!open && !busy) {
+            setNameDialog(null);
+            setNameDialogError("");
+          }
         }}
-        onSubmit={(name) => void submitNameDialog(name)}
-      />
+      >
+        <Sheet.Backdrop>
+          <Sheet.Content className="w-full md:w-[430px]">
+            <Sheet.Dialog>
+              <Sheet.CloseTrigger aria-label="Close Wiki action" />
+              <Sheet.Header>
+                <Sheet.Heading>
+                  {nameDialog?.kind === "folder"
+                    ? "Create folder"
+                    : nameDialog?.kind === "markdown"
+                      ? "Create Markdown page"
+                      : "Rename item"}
+                </Sheet.Heading>
+                <p className="text-muted text-sm">
+                  {nameDialog?.kind === "folder"
+                    ? "Add a folder to the current Wiki location."
+                    : nameDialog?.kind === "markdown"
+                      ? "Create an editable Markdown page in the current Wiki location."
+                      : "Choose a new name. The file type must stay supported by Wiki."}
+                </p>
+              </Sheet.Header>
+              <Sheet.Body className="grid content-start gap-4">
+                <TextField value={nameDraft} variant="secondary" onChange={setNameDraft}>
+                  <Label>
+                    {nameDialog?.kind === "folder"
+                      ? "Folder name"
+                      : nameDialog?.kind === "markdown"
+                        ? "Filename"
+                        : "New name"}
+                  </Label>
+                  <Input
+                    autoFocus
+                    placeholder={nameDialog?.kind === "markdown" ? "Notes.md" : "Name"}
+                  />
+                </TextField>
+                {nameDialogError ? (
+                  <div className="bg-danger/10 text-danger rounded-2xl px-4 py-3 text-sm">
+                    {nameDialogError}
+                  </div>
+                ) : null}
+              </Sheet.Body>
+              <Sheet.Footer className="gap-2">
+                <Button variant="outline" onPress={() => setNameDialog(null)}>
+                  Cancel
+                </Button>
+                <Button
+                  isDisabled={!nameDraft.trim()}
+                  isPending={busy}
+                  onPress={() => void submitNameDialog(nameDraft)}
+                >
+                  {nameDialog?.kind === "rename" ? "Rename" : "Create"}
+                </Button>
+              </Sheet.Footer>
+            </Sheet.Dialog>
+          </Sheet.Content>
+        </Sheet.Backdrop>
+      </Sheet>
 
-      <DeleteConfirmDialog
-        open={deleteTarget !== null}
-        title={deleteTarget?.kind === "folder" ? "Delete folder?" : "Delete file?"}
-        description={
-          deleteTarget?.kind === "folder" ? (
-            <>
-              <span className="font-medium text-foreground">{deleteTarget.name}</span> and
-              everything inside it will be permanently deleted.
-            </>
-          ) : (
-            <>
-              <span className="font-medium text-foreground">{deleteTarget?.name}</span> will be
-              permanently deleted.
-            </>
-          )
-        }
-        busy={busy}
-        error={deleteError}
+      <Sheet
+        isOpen={deleteTarget !== null}
+        placement="right"
         onOpenChange={(open) => {
-          if (open) return;
-          setDeleteTarget(null);
-          setDeleteError(null);
+          if (!open && !busy) {
+            setDeleteTarget(null);
+            setDeleteError(null);
+          }
         }}
-        onConfirm={() => void confirmDelete()}
-      />
+      >
+        <Sheet.Backdrop>
+          <Sheet.Content className="w-full md:w-[420px]">
+            <Sheet.Dialog>
+              <Sheet.CloseTrigger aria-label="Close delete confirmation" />
+              <Sheet.Header>
+                <Sheet.Heading>
+                  {deleteTarget?.kind === "folder" ? "Delete folder?" : "Delete file?"}
+                </Sheet.Heading>
+                <p className="text-muted text-sm">
+                  {deleteTarget?.kind === "folder"
+                    ? `${deleteTarget.name} and everything inside it will be permanently deleted.`
+                    : `${deleteTarget?.name || "This file"} will be permanently deleted.`}
+                </p>
+              </Sheet.Header>
+              <Sheet.Body>
+                {deleteError ? (
+                  <div className="bg-danger/10 text-danger rounded-2xl px-4 py-3 text-sm">
+                    {deleteError}
+                  </div>
+                ) : null}
+              </Sheet.Body>
+              <Sheet.Footer className="gap-2">
+                <Button variant="outline" onPress={() => setDeleteTarget(null)}>
+                  Cancel
+                </Button>
+                <Button isPending={busy} variant="danger-soft" onPress={() => void confirmDelete()}>
+                  Delete
+                </Button>
+              </Sheet.Footer>
+            </Sheet.Dialog>
+          </Sheet.Content>
+        </Sheet.Backdrop>
+      </Sheet>
 
-      <ActionConfirmDialog
-        open={discardDialogOpen}
-        title="Discard unsaved changes?"
-        description="This page has changes that have not been saved. Continue only if you do not need them."
-        confirmLabel="Discard and continue"
-        cancelLabel="Keep editing"
-        tone="warning"
+      <Sheet
+        isOpen={discardDialogOpen}
+        placement="right"
         onOpenChange={(open) => {
           setDiscardDialogOpen(open);
           if (!open) pendingDiscardAction.current = null;
         }}
-        onConfirm={() => {
-          const action = pendingDiscardAction.current;
-          pendingDiscardAction.current = null;
-          setDiscardDialogOpen(false);
-          action?.();
-        }}
-      />
+      >
+        <Sheet.Backdrop>
+          <Sheet.Content className="w-full md:w-[420px]">
+            <Sheet.Dialog>
+              <Sheet.CloseTrigger aria-label="Close unsaved changes confirmation" />
+              <Sheet.Header>
+                <Sheet.Heading>Discard unsaved changes?</Sheet.Heading>
+                <p className="text-muted text-sm">
+                  This page has changes that have not been saved. Continue only if you do not need
+                  them.
+                </p>
+              </Sheet.Header>
+              <Sheet.Footer className="gap-2">
+                <Button variant="outline" onPress={() => setDiscardDialogOpen(false)}>
+                  Keep editing
+                </Button>
+                <Button
+                  variant="danger-soft"
+                  onPress={() => {
+                    const action = pendingDiscardAction.current;
+                    pendingDiscardAction.current = null;
+                    setDiscardDialogOpen(false);
+                    action?.();
+                  }}
+                >
+                  Discard and continue
+                </Button>
+              </Sheet.Footer>
+            </Sheet.Dialog>
+          </Sheet.Content>
+        </Sheet.Backdrop>
+      </Sheet>
     </div>
   );
 }
@@ -810,25 +866,25 @@ function WikiNavigationRow({
       }}
       onClick={() => onSelect(node)}
       className={cn(
-        "group mb-0.5 flex h-9 w-full items-center rounded-lg px-2 text-left text-[13px] transition",
+        "cocola-web-wiki-nav-row group mb-0.5 flex h-9 w-full items-center rounded-xl px-2 text-left text-[13px] outline-none transition focus-visible:ring-2 focus-visible:ring-focus",
         selectedID === node.id
-          ? "bg-white text-slate-950 shadow-sm ring-1 ring-slate-200"
-          : "text-slate-600 hover:bg-white/80 hover:text-slate-950",
+          ? "bg-surface text-foreground shadow-surface"
+          : "text-muted hover:bg-surface/80 hover:text-foreground",
       )}
     >
       <Icon
         className={cn(
           "mr-2 size-4 shrink-0",
           node.kind === "folder"
-            ? "fill-blue-100 text-blue-600"
+            ? "fill-accent/15 text-accent"
             : node.extension === ".md"
-              ? "text-violet-600"
-              : "text-slate-400",
+              ? "text-accent"
+              : "text-muted",
         )}
       />
       <span className="min-w-0 flex-1 truncate">{node.name}</span>
       {node.kind === "folder" ? (
-        <ChevronRight className="size-3.5 shrink-0 text-slate-300 transition group-hover:translate-x-0.5 group-hover:text-slate-500" />
+        <ChevronRight className="text-muted size-3.5 shrink-0 transition group-hover:translate-x-0.5" />
       ) : null}
     </button>
   );
@@ -840,19 +896,19 @@ function SearchResult({ node, onSelect }: { node: WikiNode; onSelect: () => void
     <button
       type="button"
       onClick={onSelect}
-      className="mb-1 flex w-full items-center gap-2 rounded-lg px-2.5 py-2 text-left hover:bg-white"
+      className="hover:bg-surface mb-1 flex w-full items-center gap-2 rounded-xl px-2.5 py-2 text-left"
     >
-      <Icon className="size-4 shrink-0 text-blue-600" />
+      <Icon className="size-4 shrink-0 text-accent" />
       <span className="min-w-0">
         <span className="block truncate text-sm font-medium">{node.name}</span>
-        <span className="block truncate text-[11px] text-slate-400">{node.logical_path}</span>
+        <span className="text-muted block truncate text-[11px]">{node.logical_path}</span>
       </span>
     </button>
   );
 }
 
 function EmptyTree({ label }: { label: string }) {
-  return <p className="px-3 py-8 text-center text-xs leading-5 text-slate-400">{label}</p>;
+  return <p className="text-muted px-3 py-8 text-center text-xs leading-5">{label}</p>;
 }
 
 function QuickAction({
@@ -867,15 +923,10 @@ function QuickAction({
   onClick: () => void;
 }) {
   return (
-    <button
-      type="button"
-      disabled={disabled}
-      onClick={onClick}
-      className="flex h-9 items-center justify-center gap-1.5 rounded-xl border border-slate-200 bg-white text-xs font-medium text-slate-600 transition hover:border-blue-200 hover:text-blue-700 disabled:opacity-50"
-    >
+    <Button className="h-9 px-2 text-xs" isDisabled={disabled} variant="outline" onPress={onClick}>
       <Icon className="size-3.5" />
       {label}
-    </button>
+    </Button>
   );
 }
 
@@ -891,30 +942,32 @@ function PageActions({
   return (
     <div className="flex items-center gap-1">
       {node.kind === "file" ? (
-        <a
-          href={`/api/wiki/files/${encodeURIComponent(node.id)}/download`}
-          className="grid size-9 place-items-center rounded-xl text-slate-500 hover:bg-slate-100 hover:text-slate-900"
-          title="Download"
-        >
-          <Download className="size-4" />
-        </a>
+        <Tooltip delay={0}>
+          <Button
+            isIconOnly
+            aria-label={`Download ${node.name}`}
+            variant="ghost"
+            onPress={() =>
+              window.location.assign(`/api/wiki/files/${encodeURIComponent(node.id)}/download`)
+            }
+          >
+            <Download className="size-4" />
+          </Button>
+          <Tooltip.Content>Download</Tooltip.Content>
+        </Tooltip>
       ) : null}
-      <button
-        type="button"
-        onClick={onRename}
-        className="grid size-9 place-items-center rounded-xl text-slate-500 hover:bg-slate-100 hover:text-slate-900"
-        title="Rename"
-      >
-        <Pencil className="size-4" />
-      </button>
-      <button
-        type="button"
-        onClick={onDelete}
-        className="grid size-9 place-items-center rounded-xl text-slate-500 hover:bg-red-50 hover:text-red-600"
-        title="Delete"
-      >
-        <Trash2 className="size-4" />
-      </button>
+      <Tooltip delay={0}>
+        <Button isIconOnly aria-label={`Rename ${node.name}`} variant="ghost" onPress={onRename}>
+          <Pencil className="size-4" />
+        </Button>
+        <Tooltip.Content>Rename</Tooltip.Content>
+      </Tooltip>
+      <Tooltip delay={0}>
+        <Button isIconOnly aria-label={`Delete ${node.name}`} variant="ghost" onPress={onDelete}>
+          <Trash2 className="text-danger size-4" />
+        </Button>
+        <Tooltip.Content>Delete</Tooltip.Content>
+      </Tooltip>
     </div>
   );
 }
@@ -934,16 +987,18 @@ function FolderView({
 }) {
   return (
     <div className="h-full overflow-y-auto">
-      <div className="mx-auto max-w-5xl px-8 py-9">
-        <header className="flex items-start justify-between gap-5 border-b border-slate-200 pb-6">
-          <div>
-            <div className="mb-4 grid size-12 place-items-center rounded-2xl bg-blue-50 text-blue-600">
-              <FolderOpen className="size-6" />
+      <div className="mx-auto flex w-full max-w-5xl flex-col px-4 py-6 sm:px-6 lg:px-8 lg:py-9">
+        <header className="border-separator flex items-start justify-between gap-5 border-b pb-6">
+          <div className="flex min-w-0 items-start gap-3">
+            <span className="bg-accent-soft text-accent grid size-11 shrink-0 place-items-center rounded-2xl">
+              <FolderOpen className="size-5" />
+            </span>
+            <div className="min-w-0">
+              <h2 className="truncate text-2xl font-semibold tracking-[-0.03em]">{folder.name}</h2>
+              <p className="text-muted mt-1 truncate text-sm">
+                {nodes.length} {nodes.length === 1 ? "item" : "items"} · {folder.logical_path}
+              </p>
             </div>
-            <h2 className="text-3xl font-semibold tracking-tight">{folder.name}</h2>
-            <p className="mt-2 text-sm text-slate-500">
-              {nodes.length} {nodes.length === 1 ? "item" : "items"} · {folder.logical_path}
-            </p>
           </div>
           <PageActions node={folder} onRename={onRename} onDelete={onDelete} />
         </header>
@@ -956,23 +1011,25 @@ function FolderView({
                   key={node.id}
                   type="button"
                   onClick={() => onSelect(node)}
-                  className="group rounded-2xl border border-slate-200 bg-white p-4 text-left shadow-sm transition hover:-translate-y-0.5 hover:border-blue-200 hover:shadow-md"
+                  className="rounded-2xl text-left outline-none focus-visible:ring-2 focus-visible:ring-focus"
                 >
-                  <div className="flex items-start">
-                    <span className="grid size-10 place-items-center rounded-xl bg-slate-50 text-blue-600 group-hover:bg-blue-50">
-                      <Icon className="size-5" />
-                    </span>
-                  </div>
-                  <p className="mt-4 truncate text-sm font-semibold">{node.name}</p>
-                  <p className="mt-1 text-xs text-slate-400">
-                    {node.kind === "folder" ? "Folder" : formatBytes(node.size_bytes)}
-                  </p>
+                  <Card className="cocola-web-wiki-node-card h-full p-4">
+                    <Card.Content className="p-0">
+                      <span className="bg-surface-secondary text-accent grid size-10 place-items-center rounded-2xl">
+                        <Icon className="size-5" />
+                      </span>
+                      <p className="mt-4 truncate text-sm font-semibold">{node.name}</p>
+                      <p className="text-muted mt-1 text-xs">
+                        {node.kind === "folder" ? "Folder" : formatBytes(node.size_bytes)}
+                      </p>
+                    </Card.Content>
+                  </Card>
                 </button>
               );
             })}
           </div>
         ) : (
-          <div className="mt-20 text-center text-sm text-slate-400">This folder is empty.</div>
+          <div className="text-muted mt-20 text-center text-sm">This folder is empty.</div>
         )}
       </div>
     </div>
@@ -1084,9 +1141,9 @@ function FileView({
         <FileHeader node={node} state="saved" onRename={onRename} onDelete={onDelete} />
         <div className="min-h-0 flex-1 p-6">
           {office ? (
-            <div className="flex h-full items-center justify-center rounded-3xl border border-dashed border-slate-300 bg-slate-50">
+            <Card className="border-separator flex h-full items-center justify-center border border-dashed p-8">
               <div className="max-w-md px-8 text-center">
-                <span className="mx-auto grid size-16 place-items-center rounded-2xl bg-gradient-to-br from-blue-50 to-violet-50 text-violet-600">
+                <span className="bg-accent-soft text-accent mx-auto grid size-16 place-items-center rounded-2xl">
                   {node.extension === ".xlsx" ? (
                     <FileSpreadsheet className="size-8" />
                   ) : (
@@ -1094,22 +1151,26 @@ function FileView({
                   )}
                 </span>
                 <h3 className="mt-5 text-lg font-semibold">Ready for Agent reading</h3>
-                <p className="mt-2 text-sm leading-6 text-slate-500">
+                <p className="text-muted mt-2 text-sm leading-6">
                   Cocola preserves the original Office file. Reference it with @ in a chat and the
                   Agent can extract its document, slide, or spreadsheet content. Web preview and
                   online Office editing are not included.
                 </p>
-                <a
-                  href={`/api/wiki/files/${encodeURIComponent(node.id)}/download`}
-                  className="mt-5 inline-flex h-10 items-center justify-center rounded-full bg-primary px-4 py-2 text-sm font-medium text-primary-foreground transition hover:bg-primary/90"
+                <Button
+                  className="mt-5"
+                  onPress={() =>
+                    window.location.assign(
+                      `/api/wiki/files/${encodeURIComponent(node.id)}/download`,
+                    )
+                  }
                 >
-                  <Download className="mr-2 size-4" />
+                  <Download className="size-4" />
                   Download original
-                </a>
+                </Button>
               </div>
-            </div>
+            </Card>
           ) : (
-            <div className="h-full overflow-hidden rounded-2xl border border-slate-200 bg-white">
+            <Card className="h-full overflow-hidden p-0">
               <ReadonlyFilePreview
                 file={{
                   filename: node.name,
@@ -1120,7 +1181,7 @@ function FileView({
                 }}
                 fetchBinary
               />
-            </div>
+            </Card>
           )}
         </div>
       </div>
@@ -1132,7 +1193,7 @@ function FileView({
       <FileHeader node={node} state={state} onRename={onRename} onDelete={onDelete}>
         <Button
           size="sm"
-          disabled={
+          isDisabled={
             !contentLoaded ||
             state === "loading" ||
             state === "load-error" ||
@@ -1140,33 +1201,31 @@ function FileView({
             state === "saving" ||
             state === "conflict"
           }
-          onClick={() => void save()}
+          onPress={() => void save()}
         >
           {state === "saving" ? "Saving…" : "Save"}
         </Button>
       </FileHeader>
-      <div className="min-h-0 flex-1 overflow-y-auto bg-slate-50/80 p-4 sm:p-5">
+      <div className="bg-surface-secondary min-h-0 flex-1 overflow-y-auto p-4 sm:p-5">
         {state === "loading" && !contentLoaded ? (
-          <div className="grid h-full min-h-72 place-items-center rounded-3xl border border-slate-200 bg-white">
-            <div className="text-center text-sm text-slate-500">
-              <RefreshCw className="mx-auto mb-3 size-5 animate-spin text-blue-600" />
+          <Card className="grid h-full min-h-72 place-items-center p-6">
+            <div className="text-muted text-center text-sm">
+              <RefreshCw className="mx-auto mb-3 size-5 animate-spin text-accent" />
               Loading page…
             </div>
-          </div>
+          </Card>
         ) : loadError ? (
           <div
             role="alert"
-            className="grid h-full min-h-72 place-items-center rounded-3xl border border-red-200 bg-white"
+            className="border-danger/20 bg-danger/[0.025] grid h-full min-h-72 place-items-center rounded-3xl border"
           >
             <div className="max-w-md px-8 text-center">
-              <span className="mx-auto grid size-11 place-items-center rounded-2xl bg-red-50 text-red-600">
+              <span className="bg-danger-soft text-danger mx-auto grid size-11 place-items-center rounded-2xl">
                 <FileText className="size-5" />
               </span>
-              <h3 className="mt-4 text-base font-semibold text-slate-950">
-                Couldn&apos;t open this page
-              </h3>
-              <p className="mt-2 text-sm leading-6 text-slate-500">{loadError}</p>
-              <Button size="sm" variant="outline" className="mt-5" onClick={loadMarkdown}>
+              <h3 className="mt-4 text-base font-semibold">Couldn&apos;t open this page</h3>
+              <p className="text-muted mt-2 text-sm leading-6">{loadError}</p>
+              <Button className="mt-5" size="sm" variant="outline" onPress={loadMarkdown}>
                 <RefreshCw className="mr-2 size-3.5" />
                 Try again
               </Button>
@@ -1185,11 +1244,11 @@ function FileView({
         )}
       </div>
       {state === "conflict" ? (
-        <div className="flex items-center justify-between border-t border-amber-200 bg-amber-50 px-5 py-3 text-sm text-amber-900">
+        <div className="border-warning/25 bg-warning-soft text-warning-soft-foreground flex items-center justify-between border-t px-5 py-3 text-sm">
           <span>
             This page changed in another tab. Reload before continuing to avoid overwriting it.
           </span>
-          <Button size="sm" variant="outline" onClick={() => window.location.reload()}>
+          <Button size="sm" variant="outline" onPress={() => window.location.reload()}>
             Reload
           </Button>
         </div>
@@ -1221,17 +1280,17 @@ function FileHeader({
     error: "Save failed",
   }[state];
   return (
-    <header className="flex h-[4.75rem] shrink-0 items-center justify-between gap-4 border-b border-slate-200 px-6">
+    <header className="border-separator flex h-[4.75rem] shrink-0 items-center justify-between gap-4 border-b px-6">
       <div className="min-w-0">
-        <p className="truncate text-[11px] text-slate-400">{node.logical_path}</p>
+        <p className="text-muted truncate text-[11px]">{node.logical_path}</p>
         <div className="mt-1 flex items-center gap-2">
           <h2 className="truncate text-lg font-semibold">{node.name}</h2>
           <span
             className={cn(
               "text-[11px]",
               state === "load-error" || state === "error" || state === "conflict"
-                ? "text-red-600"
-                : "text-slate-400",
+                ? "text-danger"
+                : "text-muted",
             )}
           >
             {status}
@@ -1250,24 +1309,21 @@ function WikiWelcome({ onCreate, onUpload }: { onCreate: () => void; onUpload: (
   return (
     <div className="flex h-full items-center justify-center p-8">
       <div className="max-w-xl text-center">
-        <div className="relative mx-auto grid size-24 place-items-center">
-          <span className="absolute inset-0 rounded-[2rem] bg-gradient-to-br from-blue-100 via-violet-100 to-emerald-100 blur-lg" />
-          <span className="relative grid size-20 place-items-center rounded-[1.75rem] border border-white bg-white text-violet-600 shadow-xl shadow-blue-100">
-            <BookOpenText className="size-9" />
-          </span>
-        </div>
-        <h2 className="mt-7 text-3xl font-semibold tracking-tight">Build your working Wiki</h2>
-        <p className="mx-auto mt-3 max-w-lg text-sm leading-6 text-slate-500">
+        <Card className="mx-auto grid size-20 place-items-center p-0">
+          <BookOpenText className="text-accent size-8" />
+        </Card>
+        <h2 className="mt-8 text-3xl font-semibold tracking-[-0.04em]">Build your working Wiki</h2>
+        <p className="text-muted mx-auto mt-4 max-w-lg text-sm leading-6">
           Organize durable context in folders, write Markdown with source fidelity, and reference
           exact files in any Agent conversation with @.
         </p>
         <div className="mt-7 flex justify-center gap-3">
-          <Button onClick={onCreate} className="rounded-full px-5">
-            <Plus className="mr-2 size-4" />
+          <Button className="cocola-web-page-primary-action" onPress={onCreate}>
+            <Plus className="size-4" />
             New Markdown
           </Button>
-          <Button variant="outline" onClick={onUpload} className="rounded-full px-5">
-            <Upload className="mr-2 size-4" />
+          <Button variant="outline" onPress={onUpload}>
+            <Upload className="size-4" />
             Upload files
           </Button>
         </div>

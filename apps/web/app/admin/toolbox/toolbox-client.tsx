@@ -45,7 +45,7 @@ export function ToolboxClient({ initialTool }: { initialTool: ToolboxToolId | nu
         description="Open lightweight controls that shape how Cocola operates."
       />
 
-      <section className="admin-entity-grid md:grid-cols-2 xl:grid-cols-3">
+      <section className="grid items-stretch gap-4 md:grid-cols-2 xl:grid-cols-3">
         {TOOLBOX_ITEMS.map((item) => {
           const Tool = item.component;
           return (

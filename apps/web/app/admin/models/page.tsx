@@ -7,29 +7,22 @@ import {
   Boxes,
   Check,
   CircleCheck,
-  CircleCheckBig,
   KeyRound,
   LoaderCircle,
   MoreHorizontal,
   PlugZap,
   Plus,
-  RefreshCw,
   Route,
-  Search,
   Star,
   Trash2,
 } from "lucide-react";
 import Image from "next/image";
+import { Button, Chip, Dropdown, Input, SearchField, Switch } from "@heroui/react";
+import { DataGrid, type DataGridColumn } from "@heroui-pro/react/data-grid";
+import { EmptyState } from "@heroui-pro/react/empty-state";
+import { Segment } from "@heroui-pro/react/segment";
 import { useCallback, useEffect, useMemo, useState, type ReactNode } from "react";
-import { AdminAlert, AdminConfirmDialog, AdminDrawer } from "@/components/admin/admin-ui";
-import { Button } from "@/components/ui/button";
-import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuSeparator,
-  DropdownMenuTrigger,
-} from "@/components/ui/dropdown-menu";
+import { AdminAlert, AdminConfirmDialog, AdminDrawer, AdminPage, AdminPageHeader, AdminRefreshButton } from "@/components/admin/admin-ui";
 import { SelectControl } from "@/components/ui/select-control";
 import {
   LOCAL_SIMPLE_ICON_PATHS,
@@ -184,7 +177,7 @@ const PROVIDER_TYPES: Array<{
 ];
 
 const inputClass =
-  "h-10 w-full min-w-0 rounded-xl border border-input bg-background px-3 text-sm text-foreground outline-none transition disabled:cursor-not-allowed disabled:bg-muted/50 disabled:text-muted-foreground";
+  "h-10 w-full min-w-0 rounded-xl border border-separator bg-background px-3 text-sm text-foreground outline-none transition disabled:cursor-not-allowed disabled:bg-surface-secondary/50 disabled:text-muted";
 
 export default function AdminModelsPage() {
   const [providers, setProviders] = useState<LLMProvider[]>([]);
@@ -495,95 +488,14 @@ export default function AdminModelsPage() {
     : false;
 
   return (
-    <main className="admin-theme-violet min-h-screen bg-background text-foreground">
-      <div className="mx-auto w-full max-w-[100rem] space-y-6 px-4 py-5 sm:px-6 sm:py-6">
-        <div className="admin-models-head">
-          <span className="admin-models-icon">
-            <ModelsPageIcon className="size-[22px]" />
-          </span>
-          <div>
-            <div className="admin-models-title">Models</div>
-            <div className="admin-models-sub">
-              Connect model providers and decide which routes are available to each Agent Runtime.
-            </div>
-          </div>
-          <div className="flex-1" />
-          <button
-            type="button"
-            className="admin-user-refresh"
-            disabled={loading}
-            onClick={() => {
-              setRefreshTick((tick) => tick + 1);
-              void load();
-            }}
-          >
-            <RefreshCw key={refreshTick} className="admin-refresh-icon size-4" />
-            Refresh
-          </button>
-        </div>
+    <AdminPage>
+        <AdminPageHeader icon={<ModelsPageIcon className="size-5" />} title="Models" description="Connect model providers and decide which routes are available to each Agent Runtime." actions={<AdminRefreshButton refreshing={loading} disabled={loading} onClick={() => { setRefreshTick((tick) => tick + 1); void load(); }}>Refresh</AdminRefreshButton>} />
 
         {error ? <AdminAlert tone="error">{error}</AdminAlert> : null}
 
-        <section className="grid gap-4 md:grid-cols-4">
-          <MetricCard
-            tone="violet"
-            label="Model routes"
-            value={models.length}
-            icon={<Route className="size-[22px]" />}
-          />
-          <MetricCard
-            tone="blue"
-            label="Providers"
-            value={providers.filter((provider) => provider.type !== "openai_embeddings").length}
-            icon={<Boxes className="ic-boxes size-[22px]" />}
-          />
-          <MetricCard
-            tone="green"
-            label="Enabled"
-            value={models.filter((model) => model.enabled).length}
-            icon={<CircleCheckBig className="size-[22px]" />}
-          />
-          <MetricCard
-            tone="amber"
-            label="Default set"
-            value={models.filter((model) => model.is_default).length}
-            icon={<Star className="size-[22px]" />}
-          />
-        </section>
-
-        <div className="admin-models-tabbar">
-          <div className="admin-models-tabs" role="tablist" aria-label="Model configuration">
-            <button
-              type="button"
-              role="tab"
-              aria-selected={view === "models"}
-              className={cn("admin-models-tab", view === "models" && "is-active")}
-              onClick={() => {
-                setView("models");
-                setQuery("");
-              }}
-            >
-              <Route className="size-[15px]" />
-              <span>Model routes</span>
-              <span className="admin-models-count">{models.length}</span>
-            </button>
-            <button
-              type="button"
-              role="tab"
-              aria-selected={view === "providers"}
-              className={cn("admin-models-tab", view === "providers" && "is-active")}
-              onClick={() => {
-                setView("providers");
-                setQuery("");
-              }}
-            >
-              <Boxes className="ic-boxes size-[15px]" />
-              <span>Providers</span>
-              <span className="admin-models-count">{visibleProviders.length}</span>
-            </button>
-          </div>
+        <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
+          <Segment aria-label="Model configuration" selectedKey={view} onSelectionChange={(key) => {setView(String(key) as View); setQuery("");}}><Segment.Item id="models"><Route className="size-4" />Model routes · {models.length}</Segment.Item><Segment.Item id="providers"><Boxes className="size-4" />Providers · {visibleProviders.length}</Segment.Item></Segment>
           <Button
-            className="admin-primary-btn gap-2"
             onClick={view === "models" ? createModel : createProvider}
           >
             <Plus className="size-4" />
@@ -591,16 +503,7 @@ export default function AdminModelsPage() {
           </Button>
         </div>
 
-        <div className="admin-user-toolbar">
-          <label className="admin-models-search">
-            <Search className="size-4" />
-            <input
-              value={query}
-              onChange={(event) => setQuery(event.target.value)}
-              placeholder={view === "models" ? "Find a model route" : "Find a provider"}
-            />
-          </label>
-        </div>
+        <SearchField aria-label={view === "models" ? "Find a model route" : "Find a provider"} className="w-full max-w-sm" value={query} onChange={setQuery}><SearchField.Group><SearchField.SearchIcon /><SearchField.Input placeholder={view === "models" ? "Find a model route" : "Find a provider"} /><SearchField.ClearButton /></SearchField.Group></SearchField>
 
         {view === "models" ? (
           <ModelsList
@@ -657,11 +560,11 @@ export default function AdminModelsPage() {
             >
               <div className="grid gap-2">
                 {PROVIDER_TYPES.map((type) => (
-                  <button
+                  <Button
                     key={type.value}
-                    type="button"
-                    disabled={editingProviderHasRoutes}
-                    onClick={() =>
+                    variant="ghost"
+                    isDisabled={editingProviderHasRoutes}
+                    onPress={() =>
                       setProviderForm((current) => ({
                         ...current,
                         type: type.value,
@@ -681,29 +584,29 @@ export default function AdminModelsPage() {
                       }))
                     }
                     className={cn(
-                      "rounded-2xl border p-3 text-left transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/30 disabled:cursor-not-allowed disabled:opacity-65",
+                      "rounded-2xl border p-3 text-left transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus/30 disabled:cursor-not-allowed disabled:opacity-65",
                       providerForm.type === type.value
-                        ? "border-primary/45 bg-primary/5 shadow-sm"
-                        : "border-border bg-background hover:border-primary/25 hover:bg-muted/25",
+                        ? "border-accent/45 bg-accent/5 shadow-sm"
+                        : "border-border bg-background hover:border-accent/25 hover:bg-surface-secondary/25",
                     )}
                   >
                     <span className="flex items-center justify-between gap-3">
                       <span className="text-sm font-semibold">{type.label}</span>
                       {providerForm.type === type.value ? (
-                        <Check className="size-4 text-primary" />
+                        <Check className="size-4 text-accent" />
                       ) : null}
                     </span>
-                    <span className="mt-1 block text-xs leading-5 text-muted-foreground">
+                    <span className="mt-1 block text-xs leading-5 text-muted">
                       {type.description}
                     </span>
-                  </button>
+                  </Button>
                 ))}
               </div>
             </FormGroup>
 
             <div className="grid gap-4 sm:grid-cols-2">
               <Field label="Name">
-                <input
+                <Input
                   className={inputClass}
                   value={providerForm.name}
                   onChange={(event) =>
@@ -722,7 +625,7 @@ export default function AdminModelsPage() {
             </div>
 
             <Field label="Base URL">
-              <input
+              <Input
                 className={inputClass}
                 value={providerForm.base_url}
                 onChange={(event) =>
@@ -739,7 +642,7 @@ export default function AdminModelsPage() {
               <code className="mt-1 block break-all text-xs text-foreground">
                 {providerEndpoint(providerForm.base_url, providerForm.type)}
               </code>
-              <p className="mt-2 text-xs leading-5 text-muted-foreground">
+              <p className="mt-2 text-xs leading-5 text-muted">
                 {providerForm.type === "openai_responses"
                   ? "The upstream must implement POST /responses with Codex-compatible tool events."
                   : "This route uses the native Anthropic Messages API."}
@@ -750,10 +653,10 @@ export default function AdminModelsPage() {
               label="API key"
               hint={editingProvider ? "Leave blank to keep the current key." : undefined}
             >
-              <div className="flex items-center gap-2 rounded-xl border border-input bg-background px-3">
-                <KeyRound className="size-4 shrink-0 text-muted-foreground" />
-                <input
-                  className="h-10 min-w-0 flex-1 bg-transparent text-sm outline-none placeholder:text-muted-foreground"
+              <div className="flex items-center gap-2 rounded-xl border border-separator bg-background px-3">
+                <KeyRound className="size-4 shrink-0 text-muted" />
+                <Input
+                  className="h-10 min-w-0 flex-1 bg-transparent text-sm outline-none placeholder:text-muted"
                   value={providerForm.api_key}
                   onChange={(event) =>
                     setProviderForm({ ...providerForm, api_key: event.target.value })
@@ -792,7 +695,7 @@ export default function AdminModelsPage() {
                 </Field>
                 {providerForm.icon_type === "image" ? (
                   <Field label="Image URL">
-                    <input
+                    <Input
                       className={inputClass}
                       value={providerForm.icon_url}
                       onChange={(event) =>
@@ -830,7 +733,7 @@ export default function AdminModelsPage() {
                   label="Provider ID"
                   hint="Generated from the provider name when left blank; it cannot be changed later."
                 >
-                  <input
+                  <Input
                     className={cn(inputClass, "font-mono text-xs")}
                     value={providerForm.id}
                     disabled={Boolean(editingProvider)}
@@ -875,42 +778,42 @@ export default function AdminModelsPage() {
             {!editingModel ? (
               <FormGroup label="Model type">
                 <div className="grid gap-2 sm:grid-cols-2">
-                  <button
-                    type="button"
-                    onClick={() => setModelKind("chat")}
+                  <Button
+                    variant="ghost"
+                    onPress={() => setModelKind("chat")}
                     className={cn(
-                      "rounded-2xl border p-3 text-left transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/30",
+                      "rounded-2xl border p-3 text-left transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus/30",
                       modelKind === "chat"
-                        ? "border-primary/45 bg-primary/5 shadow-sm"
-                        : "border-border bg-background hover:border-primary/25 hover:bg-muted/25",
+                        ? "border-accent/45 bg-accent/5 shadow-sm"
+                        : "border-border bg-background hover:border-accent/25 hover:bg-surface-secondary/25",
                     )}
                   >
                     <span className="flex items-center justify-between gap-3 text-sm font-semibold">
                       Chat model{" "}
-                      {modelKind === "chat" ? <Check className="size-4 text-primary" /> : null}
+                      {modelKind === "chat" ? <Check className="size-4 text-accent" /> : null}
                     </span>
-                    <span className="mt-1 block text-xs leading-5 text-muted-foreground">
+                    <span className="mt-1 block text-xs leading-5 text-muted">
                       Used directly by Agent Runtimes.
                     </span>
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => setModelKind("embedding")}
+                  </Button>
+                  <Button
+                    variant="ghost"
+                    onPress={() => setModelKind("embedding")}
                     className={cn(
-                      "rounded-2xl border p-3 text-left transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/30",
+                      "rounded-2xl border p-3 text-left transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus/30",
                       modelKind === "embedding"
-                        ? "border-primary/45 bg-primary/5 shadow-sm"
-                        : "border-border bg-background hover:border-primary/25 hover:bg-muted/25",
+                        ? "border-accent/45 bg-accent/5 shadow-sm"
+                        : "border-border bg-background hover:border-accent/25 hover:bg-surface-secondary/25",
                     )}
                   >
                     <span className="flex items-center justify-between gap-3 text-sm font-semibold">
                       Embedding model
-                      {modelKind === "embedding" ? <Check className="size-4 text-primary" /> : null}
+                      {modelKind === "embedding" ? <Check className="size-4 text-accent" /> : null}
                     </span>
-                    <span className="mt-1 block text-xs leading-5 text-muted-foreground">
+                    <span className="mt-1 block text-xs leading-5 text-muted">
                       Shared by Memory and knowledge features; never shown to users.
                     </span>
-                  </button>
+                  </Button>
                 </div>
               </FormGroup>
             ) : null}
@@ -918,7 +821,7 @@ export default function AdminModelsPage() {
             {modelKind === "embedding" ? (
               <div className="grid gap-5">
                 <Field label="Model name">
-                  <input
+                  <Input
                     className={cn(inputClass, "font-mono text-xs")}
                     value={embeddingForm.model}
                     onChange={(event) => {
@@ -930,7 +833,7 @@ export default function AdminModelsPage() {
                 </Field>
 
                 <Field label="Base URL">
-                  <input
+                  <Input
                     className={cn(inputClass, "font-mono text-xs")}
                     value={embeddingForm.base_url}
                     onChange={(event) => {
@@ -946,10 +849,10 @@ export default function AdminModelsPage() {
                   label="API key"
                   hint={editingModel ? "Leave blank to keep the current key." : undefined}
                 >
-                  <div className="flex items-center gap-2 rounded-xl border border-input bg-background px-3">
-                    <KeyRound className="size-4 shrink-0 text-muted-foreground" />
-                    <input
-                      className="h-10 min-w-0 flex-1 bg-transparent text-sm outline-none placeholder:text-muted-foreground"
+                  <div className="flex items-center gap-2 rounded-xl border border-separator bg-background px-3">
+                    <KeyRound className="size-4 shrink-0 text-muted" />
+                    <Input
+                      className="h-10 min-w-0 flex-1 bg-transparent text-sm outline-none placeholder:text-muted"
                       value={embeddingForm.api_key}
                       onChange={(event) => {
                         setEmbeddingForm({ ...embeddingForm, api_key: event.target.value });
@@ -966,18 +869,18 @@ export default function AdminModelsPage() {
                   </div>
                 </Field>
 
-                <div className="flex flex-wrap items-center justify-between gap-3 rounded-2xl border border-border/70 bg-muted/20 p-3">
+                <div className="flex flex-wrap items-center justify-between gap-3 rounded-2xl border border-border/70 bg-surface-secondary/20 p-3">
                   <div className="min-w-0">
                     <div className="text-xs font-medium text-foreground">OpenAI Embeddings</div>
-                    <code className="mt-1 block break-all text-[11px] text-muted-foreground">
+                    <code className="mt-1 block break-all text-[11px] text-muted">
                       {embeddingEndpoint(embeddingForm.base_url)}
                     </code>
                   </div>
                   <Button
                     type="button"
                     variant="outline"
-                    disabled={!canTestEmbedding || testingEmbedding || saving}
-                    onClick={() => void testEmbeddingConnection()}
+                    isDisabled={!canTestEmbedding || testingEmbedding || saving}
+                    onPress={() => void testEmbeddingConnection()}
                   >
                     {testingEmbedding ? (
                       <LoaderCircle className="mr-2 size-4 animate-spin" />
@@ -1032,9 +935,9 @@ export default function AdminModelsPage() {
                 </Field>
 
                 {selectedProvider ? (
-                  <div className="flex flex-wrap items-center gap-2 rounded-2xl border border-border/70 bg-muted/25 p-3">
+                  <div className="flex flex-wrap items-center gap-2 rounded-2xl border border-border/70 bg-surface-secondary/25 p-3">
                     <ProviderProtocolBadge type={selectedProvider.type} />
-                    <span className="text-xs text-muted-foreground">
+                    <span className="text-xs text-muted">
                       Compatible with {runtimeCompatibilityForType(selectedProvider.type)}
                     </span>
                   </div>
@@ -1042,7 +945,7 @@ export default function AdminModelsPage() {
 
                 <div className="grid gap-4 sm:grid-cols-2">
                   <Field label="Display name">
-                    <input
+                    <Input
                       className={inputClass}
                       value={modelForm.label}
                       onChange={(event) =>
@@ -1052,7 +955,7 @@ export default function AdminModelsPage() {
                     />
                   </Field>
                   <Field label="Alias" hint="Unique only inside the selected provider.">
-                    <input
+                    <Input
                       className={cn(inputClass, "font-mono text-xs")}
                       value={modelForm.alias}
                       disabled={Boolean(editingModel)}
@@ -1065,7 +968,7 @@ export default function AdminModelsPage() {
                 </div>
 
                 <Field label="Upstream model ID">
-                  <input
+                  <Input
                     className={cn(inputClass, "font-mono text-xs")}
                     value={modelForm.real_model}
                     onChange={(event) =>
@@ -1117,7 +1020,7 @@ export default function AdminModelsPage() {
                     </Field>
                     {modelForm.icon_type === "image" ? (
                       <Field label="Image URL">
-                        <input
+                        <Input
                           className={inputClass}
                           value={modelForm.icon_url}
                           onChange={(event) =>
@@ -1144,7 +1047,7 @@ export default function AdminModelsPage() {
                       </Field>
                     )}
                     <Field label="Display priority" hint="Lower numbers appear first.">
-                      <input
+                      <Input
                         className={inputClass}
                         value={modelForm.sort_order}
                         onChange={(event) =>
@@ -1174,30 +1077,7 @@ export default function AdminModelsPage() {
           busy={saving}
           onConfirm={() => void deleteResource()}
         />
-      </div>
-    </main>
-  );
-}
-
-function MetricCard({
-  tone,
-  label,
-  value,
-  icon,
-}: {
-  tone: "blue" | "green" | "violet" | "amber";
-  label: string;
-  value: number;
-  icon: ReactNode;
-}) {
-  return (
-    <div className="admin-metric-card" data-tone={tone}>
-      <div className="admin-metric-head">
-        <span className="admin-metric-glyph">{icon}</span>
-        <span className="admin-metric-key">{label}</span>
-      </div>
-      <div className="admin-metric-val">{value}</div>
-    </div>
+    </AdminPage>
   );
 }
 
@@ -1331,94 +1211,14 @@ function ModelsList({
   onDefault: (model: LLMModel) => void;
   onDelete: (model: LLMModel) => void;
 }) {
-  if (!loading && models.length === 0) {
-    return (
-      <div className="admin-user-list">
-        <div className="admin-user-state">
-          No model routes — add one after connecting at least one provider.
-        </div>
-      </div>
-    );
-  }
-  return (
-    <div className="admin-user-list">
-      <div className="admin-model-cols">
-        <div>Model</div>
-        <div>Upstream API</div>
-        <div>Provider</div>
-        <div>Availability</div>
-        <div>Actions</div>
-      </div>
-      {models.map((model) => {
-        const provider = providerByID.get(model.provider_id);
-        return (
-          <div className="admin-model-row" key={model.id}>
-            <button
-              type="button"
-              onClick={() => onEdit(model)}
-              className="admin-user-cell admin-model-namebtn"
-            >
-              <ModelIcon model={model} />
-              <span className="min-w-0">
-                <span className="admin-user-name flex items-center gap-1.5">
-                  <span className="admin-model-cell-text" title={model.label || model.alias}>
-                    {model.label || model.alias}
-                  </span>
-                  {model.is_default ? (
-                    <Star className="size-3.5 shrink-0 fill-[#f5a623] text-[#f5a623]" />
-                  ) : null}
-                </span>
-              </span>
-            </button>
-            <div className="admin-model-apicell">
-              <span
-                className="admin-chip admin-chip--proto admin-model-cell-text"
-                title={protoChipLabel(provider?.type, model.protocol)}
-              >
-                {protoChipLabel(provider?.type, model.protocol)}
-              </span>
-            </div>
-            <div>
-              <div
-                className="admin-model-provname admin-model-cell-text"
-                title={provider?.name || model.provider_id}
-              >
-                {provider?.name || model.provider_id}
-              </div>
-            </div>
-            <div className="admin-model-chipstack">
-              <span
-                className={cn("admin-chip", model.enabled ? "admin-chip--ok" : "admin-chip--off")}
-              >
-                {model.enabled ? <span className="admin-chip-dot" /> : null}
-                {model.enabled ? "Enabled" : "Disabled"}
-              </span>
-              <span
-                className={cn(
-                  "admin-chip",
-                  model.visible ? "admin-chip--visible" : "admin-chip--off",
-                )}
-              >
-                {model.visible ? "Visible" : "Hidden"}
-              </span>
-            </div>
-            <div className="admin-user-actions">
-              <ResourceMenu
-                onEdit={() => onEdit(model)}
-                onDefault={
-                  model.is_default || model.protocol === "openai-embeddings"
-                    ? undefined
-                    : () => onDefault(model)
-                }
-                onDelete={() => onDelete(model)}
-                disabled={saving}
-              />
-            </div>
-          </div>
-        );
-      })}
-    </div>
-  );
+  const columns: DataGridColumn<LLMModel>[] = [
+    { id: "model", header: "Model", isRowHeader: true, minWidth: 300, cell: (model) => <Button className="h-auto min-w-0 justify-start px-0 py-1" variant="ghost" onClick={() => onEdit(model)}><ModelIcon model={model} /><span className="min-w-0 truncate font-semibold">{model.label || model.alias}</span>{model.is_default ? <Star className="size-3.5 shrink-0 fill-amber-400 text-amber-400" /> : null}</Button> },
+    { id: "api", header: "Upstream API", minWidth: 160, cell: (model) => { const provider = providerByID.get(model.provider_id); return <Chip size="sm" variant="soft">{protoChipLabel(provider?.type, model.protocol)}</Chip>; } },
+    { id: "provider", header: "Provider", minWidth: 180, cell: (model) => <span className="block truncate text-sm">{providerByID.get(model.provider_id)?.name || model.provider_id}</span> },
+    { id: "availability", header: "Availability", minWidth: 190, cell: (model) => <span className="flex gap-2"><Chip color={model.enabled ? "success" : "default"} size="sm" variant="soft">{model.enabled ? "Enabled" : "Disabled"}</Chip><Chip color={model.visible ? "accent" : "default"} size="sm" variant="soft">{model.visible ? "Visible" : "Hidden"}</Chip></span> },
+    { id: "actions", header: "Actions", align: "center", pinned: "end", width: 80, cell: (model) => <ResourceMenu onEdit={() => onEdit(model)} onDefault={model.is_default || model.protocol === "openai-embeddings" ? undefined : () => onDefault(model)} onDelete={() => onDelete(model)} disabled={saving} /> },
+  ];
+  return <DataGrid aria-label="Model routes" columns={columns} contentClassName="min-w-[880px]" data={models} getRowId={(model) => model.id} selectionMode="none" variant="primary" renderEmptyState={() => <EmptyState><EmptyState.Header><EmptyState.Media variant="icon"><Route className="text-violet-500" /></EmptyState.Media><EmptyState.Title>{loading ? "Loading model routes" : "No model routes"}</EmptyState.Title><EmptyState.Description>Add a route after connecting at least one provider.</EmptyState.Description></EmptyState.Header></EmptyState>} />;
 }
 
 function ProviderIcon({ provider }: { provider: LLMProvider }) {
@@ -1447,55 +1247,15 @@ function ProvidersList({
   onEdit: (provider: LLMProvider) => void;
   onDelete: (provider: LLMProvider) => void;
 }) {
-  if (!loading && providers.length === 0) {
-    return (
-      <div className="admin-user-list">
-        <div className="admin-user-state">
-          No providers connected — connect the API endpoint that will serve your first model.
-        </div>
-      </div>
-    );
-  }
-  return (
-    <div className="admin-user-list">
-      <div className="admin-prov-cols">
-        <div>Provider</div>
-        <div>Upstream API</div>
-        <div>Endpoint</div>
-        <div>Credential</div>
-        <div>Models</div>
-        <div>Actions</div>
-      </div>
-      {providers.map((provider) => (
-        <div className="admin-prov-row" key={provider.id}>
-          <button
-            type="button"
-            onClick={() => onEdit(provider)}
-            className="admin-user-cell admin-model-namebtn"
-          >
-            <ProviderIcon provider={provider} />
-            <span className="min-w-0">
-              <span className="admin-user-name block truncate">{provider.name || provider.id}</span>
-              <span className="admin-user-sub block font-mono">{provider.id}</span>
-            </span>
-          </button>
-          <div>
-            <span className="admin-chip admin-chip--proto">
-              {providerTypeMeta(provider.type).shortLabel}
-            </span>
-          </div>
-          <div className="admin-model-endpoint font-mono" title={provider.base_url}>
-            {provider.base_url || "—"}
-          </div>
-          <div className="admin-model-cred font-mono">{provider.api_key_hint || "—"}</div>
-          <div className="admin-model-num">{routeCountByProvider.get(provider.id) ?? 0}</div>
-          <div className="admin-user-actions">
-            <ResourceMenu onEdit={() => onEdit(provider)} onDelete={() => onDelete(provider)} />
-          </div>
-        </div>
-      ))}
-    </div>
-  );
+  const columns: DataGridColumn<LLMProvider>[] = [
+    { id: "provider", header: "Provider", isRowHeader: true, minWidth: 280, cell: (provider) => <Button className="h-auto min-w-0 justify-start px-0 py-1" variant="ghost" onClick={() => onEdit(provider)}><ProviderIcon provider={provider} /><span className="min-w-0 text-left"><span className="block truncate font-semibold">{provider.name || provider.id}</span><span className="text-muted block truncate font-mono text-xs">{provider.id}</span></span></Button> },
+    { id: "api", header: "Upstream API", minWidth: 160, cell: (provider) => <Chip size="sm" variant="soft">{providerTypeMeta(provider.type).shortLabel}</Chip> },
+    { id: "endpoint", header: "Endpoint", minWidth: 260, cell: (provider) => <span className="text-muted block max-w-64 truncate font-mono text-xs" title={provider.base_url}>{provider.base_url || "—"}</span> },
+    { id: "credential", header: "Credential", minWidth: 150, cell: (provider) => <span className="text-muted font-mono text-xs">{provider.api_key_hint || "—"}</span> },
+    { id: "models", header: "Models", width: 100, cell: (provider) => <Chip size="sm" variant="soft">{routeCountByProvider.get(provider.id) ?? 0}</Chip> },
+    { id: "actions", header: "Actions", align: "center", pinned: "end", width: 80, cell: (provider) => <ResourceMenu onEdit={() => onEdit(provider)} onDelete={() => onDelete(provider)} /> },
+  ];
+  return <DataGrid aria-label="Model providers" columns={columns} contentClassName="min-w-[980px]" data={providers} getRowId={(provider) => provider.id} selectionMode="none" variant="primary" renderEmptyState={() => <EmptyState><EmptyState.Header><EmptyState.Media variant="icon"><Boxes className="text-blue-500" /></EmptyState.Media><EmptyState.Title>{loading ? "Loading providers" : "No providers connected"}</EmptyState.Title><EmptyState.Description>Connect the API endpoint that will serve your first model.</EmptyState.Description></EmptyState.Header></EmptyState>} />;
 }
 
 function ResourceMenu({
@@ -1510,25 +1270,7 @@ function ResourceMenu({
   disabled?: boolean;
 }) {
   return (
-    <DropdownMenu>
-      <DropdownMenuTrigger asChild>
-        <Button variant="ghost" size="icon" disabled={disabled} aria-label="Open actions">
-          <MoreHorizontal className="size-4" />
-        </Button>
-      </DropdownMenuTrigger>
-      <DropdownMenuContent align="end" className="cocola-admin-ui admin-actions-menu">
-        <DropdownMenuItem onSelect={onEdit}>Edit</DropdownMenuItem>
-        {onDefault ? (
-          <DropdownMenuItem onSelect={onDefault}>
-            <Star className="mr-2 size-4" /> Set as protocol default
-          </DropdownMenuItem>
-        ) : null}
-        <DropdownMenuSeparator />
-        <DropdownMenuItem className="text-destructive focus:text-destructive" onSelect={onDelete}>
-          <Trash2 className="mr-2 size-4" /> Delete
-        </DropdownMenuItem>
-      </DropdownMenuContent>
-    </DropdownMenu>
+    <Dropdown><Dropdown.Trigger aria-label="Open actions" className="text-muted hover:bg-surface-secondary mx-auto grid size-9 place-items-center rounded-xl" isDisabled={disabled}><MoreHorizontal className="size-4" /></Dropdown.Trigger><Dropdown.Popover placement="bottom end"><Dropdown.Menu aria-label="Resource actions" onAction={(key) => {if (key === "edit") onEdit(); if (key === "default") onDefault?.(); if (key === "delete") onDelete();}}><Dropdown.Item id="edit" textValue="Edit">Edit</Dropdown.Item>{onDefault ? <Dropdown.Item id="default" textValue="Set as protocol default"><Star className="size-4" />Set as protocol default</Dropdown.Item> : null}<Dropdown.Item id="delete" textValue="Delete"><Trash2 className="text-danger size-4" /><span className="text-danger">Delete</span></Dropdown.Item></Dropdown.Menu></Dropdown.Popover></Dropdown>
   );
 }
 
@@ -1537,7 +1279,7 @@ function Field({ label, hint, children }: { label: string; hint?: string; childr
     <label className="grid gap-1.5 text-sm font-medium text-foreground">
       <span className="flex flex-wrap items-baseline justify-between gap-2">
         <span>{label}</span>
-        {hint ? <span className="text-xs font-normal text-muted-foreground">{hint}</span> : null}
+        {hint ? <span className="text-xs font-normal text-muted">{hint}</span> : null}
       </span>
       {children}
     </label>
@@ -1557,7 +1299,7 @@ function FormGroup({
     <div className="grid gap-1.5 text-sm font-medium text-foreground">
       <div className="flex flex-wrap items-baseline justify-between gap-2">
         <span>{label}</span>
-        {hint ? <span className="text-xs font-normal text-muted-foreground">{hint}</span> : null}
+        {hint ? <span className="text-xs font-normal text-muted">{hint}</span> : null}
       </div>
       {children}
     </div>
@@ -1576,20 +1318,9 @@ function Toggle({
   disabled?: boolean;
 }) {
   return (
-    <label
-      className={cn(
-        "flex min-h-10 items-center gap-2 rounded-xl border border-border/70 px-3 text-sm font-medium",
-        disabled ? "cursor-not-allowed opacity-60" : "cursor-pointer",
-      )}
-    >
-      <input
-        type="checkbox"
-        checked={checked}
-        disabled={disabled}
-        onChange={(event) => onChange(event.target.checked)}
-      />
-      {label}
-    </label>
+    <Switch isDisabled={disabled} isSelected={checked} onChange={onChange}>
+      <Switch.Content><Switch.Control><Switch.Thumb /></Switch.Control>{label}</Switch.Content>
+    </Switch>
   );
 }
 
@@ -1606,10 +1337,10 @@ function DrawerFooter({
 }) {
   return (
     <div className="flex items-center justify-end gap-2">
-      <Button variant="outline" disabled={saving} onClick={onCancel}>
+      <Button variant="outline" isDisabled={saving} onPress={onCancel}>
         Cancel
       </Button>
-      <Button disabled={saving} onClick={onSave}>
+      <Button isDisabled={saving} onPress={onSave}>
         {saving ? "Saving…" : saveLabel}
       </Button>
     </div>

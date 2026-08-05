@@ -1,6 +1,8 @@
 "use client";
 
 import { AlertTriangle, Bot, Check, CopyIcon, Loader2, RefreshCw } from "lucide-react";
+import { Button, Card, Tooltip } from "@heroui/react";
+import { EmptyState } from "@heroui-pro/react/empty-state";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { AnswerMarkdownContent, MarkdownContent } from "@/components/assistant-ui/markdown-text";
 import {
@@ -204,49 +206,47 @@ export function ConversationReadOnly({ conversationId }: { conversationId: strin
     <main className="min-h-screen bg-background text-foreground">
       <header className="sticky top-0 z-20 border-b border-border bg-background/95 backdrop-blur">
         <div className="mx-auto flex h-14 max-w-4xl items-center gap-3 px-4">
-          <div className="grid size-8 place-items-center rounded-md bg-primary text-primary-foreground">
+          <div className="grid size-8 place-items-center rounded-md bg-accent text-accent-foreground">
             <Bot className="size-4" />
           </div>
           <div className="min-w-0 flex-1">
             <h1 className="truncate text-sm font-semibold">Conversation</h1>
-            <p className="truncate font-mono text-xs text-muted-foreground">{conversationId}</p>
+            <p className="truncate font-mono text-xs text-muted">{conversationId}</p>
           </div>
-          <button
-            type="button"
-            title="Refresh"
+          <Tooltip delay={0}><Button
+            isIconOnly
             aria-label="Refresh"
-            onClick={() => void load()}
-            className="inline-flex size-8 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-muted hover:text-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+            className="text-muted size-8 min-w-8"
+            variant="ghost"
+            onPress={() => void load()}
           >
             <RefreshCw className={cn("size-4", refreshing && "animate-spin")} />
-          </button>
+          </Button><Tooltip.Content>{refreshing ? "Refreshing…" : "Refresh"}</Tooltip.Content></Tooltip>
         </div>
       </header>
 
       <div className="mx-auto flex max-w-4xl flex-col gap-4 px-4 py-6">
         {state.status === "loading" && state.messages.length === 0 ? (
-          <div className="flex items-center justify-center gap-2 py-16 text-sm text-muted-foreground">
+          <div className="flex items-center justify-center gap-2 py-16 text-sm text-muted">
             <Loader2 className="size-4 animate-spin" />
             Loading conversation
           </div>
         ) : null}
 
         {state.status === "error" ? (
-          <div className="flex items-start gap-2 rounded-md border border-destructive/30 bg-destructive/10 px-3 py-2 text-sm text-destructive">
+          <div className="flex items-start gap-2 rounded-md border border-danger/30 bg-danger/10 px-3 py-2 text-sm text-danger">
             <AlertTriangle className="mt-0.5 size-4 shrink-0" />
             <span className="min-w-0">{state.error}</span>
           </div>
         ) : null}
 
         {state.status === "ready" && state.messages.length === 0 ? (
-          <div className="rounded-lg border border-border bg-card px-4 py-10 text-center text-sm text-muted-foreground">
-            No messages in this conversation.
-          </div>
+          <Card className="p-6"><EmptyState><EmptyState.Header><EmptyState.Media variant="icon"><Bot className="size-5" /></EmptyState.Media><EmptyState.Title>No messages</EmptyState.Title><EmptyState.Description>This conversation does not contain any messages yet.</EmptyState.Description></EmptyState.Header></EmptyState></Card>
         ) : null}
 
         <div
           className="flex flex-col items-center"
-          style={{ ["--thread-max-width" as string]: "52rem" }}
+          style={{ ["--thread-max-width" as string]: "72rem" }}
         >
           {state.messages.map((message, index) => (
             <MessageBubble
@@ -279,13 +279,13 @@ function MessageBubble({
     return (
       <article className="grid w-full max-w-[var(--thread-max-width)] auto-rows-auto grid-cols-[minmax(72px,1fr)_auto] gap-y-1 py-3">
         <div className="col-start-2 row-start-1 flex flex-col items-end gap-1.5">
-          <div className="max-w-[calc(var(--thread-max-width)*0.8)] whitespace-pre-wrap break-words rounded-2xl bg-muted px-4 py-2 text-sm text-foreground">
+          <div className="max-w-[calc(var(--thread-max-width)*0.8)] whitespace-pre-wrap break-words rounded-2xl bg-surface-secondary px-4 py-2 text-sm text-foreground">
             {parts.length > 0 ? (
               parts.map((part, index) => (
                 <MessagePartView key={`${message.id}-${index}`} part={part} role={message.role} />
               ))
             ) : (
-              <span className="text-muted-foreground">No content</span>
+              <span className="text-muted">No content</span>
             )}
           </div>
         </div>
@@ -347,7 +347,7 @@ function AssistantHeader({ message }: { message: WireMessage }) {
         {label}
       </span>
       {message.created_at ? (
-        <span className="shrink-0 text-xs text-muted-foreground">
+        <span className="shrink-0 text-xs text-muted">
           {formatDate(message.created_at)}
         </span>
       ) : null}
@@ -391,13 +391,13 @@ function MessagePartView({ part, role }: { part: MessagePart; role: "user" | "as
   }
   if (part.type === "plan") {
     return (
-      <section className="my-4 overflow-hidden rounded-2xl border border-indigo-500/25 bg-card">
+      <section className="my-4 overflow-hidden rounded-2xl border border-indigo-500/25 bg-surface">
         <div className="border-b border-indigo-500/15 bg-indigo-500/[0.045] px-5 py-3.5">
           <div className="text-[10px] font-bold tracking-[0.16em] text-indigo-700 uppercase">
             Execution plan
           </div>
           <h3 className="mt-0.5 text-base font-semibold">Plan v{part.version}</h3>
-          <p className="mt-1 text-xs capitalize text-muted-foreground">
+          <p className="mt-1 text-xs capitalize text-muted">
             {part.status.replaceAll("_", " ")}
           </p>
         </div>
@@ -457,17 +457,17 @@ function CopyMessageButton({ message }: { message: WireMessage }) {
   };
 
   return (
-    <div className="col-start-1 row-start-2 -ml-1 flex gap-1 text-muted-foreground">
-      <button
-        type="button"
-        title={copied ? "Copied" : "Copy"}
+    <div className="col-start-1 row-start-2 -ml-1 flex gap-1 text-muted">
+      <Tooltip delay={0}><Button
+        isIconOnly
         aria-label={copied ? "Copied" : "Copy"}
-        disabled={!text}
-        onClick={() => void copy()}
-        className="inline-flex size-8 items-center justify-center rounded-md transition-colors hover:bg-muted hover:text-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring disabled:pointer-events-none disabled:opacity-40"
+        isDisabled={!text}
+        className="size-8 min-w-8"
+        variant="ghost"
+        onPress={() => void copy()}
       >
         {copied ? <Check className="size-4 text-emerald-400" /> : <CopyIcon className="size-4" />}
-      </button>
+      </Button><Tooltip.Content>{copied ? "Copied" : "Copy"}</Tooltip.Content></Tooltip>
     </div>
   );
 }
@@ -475,9 +475,9 @@ function CopyMessageButton({ message }: { message: WireMessage }) {
 function TypingDots() {
   return (
     <div className="flex items-center gap-1 py-1" role="status" aria-label="Assistant is typing">
-      <span className="size-2 animate-bounce rounded-full bg-muted-foreground/60 [animation-delay:-0.3s]" />
-      <span className="size-2 animate-bounce rounded-full bg-muted-foreground/60 [animation-delay:-0.15s]" />
-      <span className="size-2 animate-bounce rounded-full bg-muted-foreground/60" />
+      <span className="size-2 animate-bounce rounded-full bg-foreground/60 [animation-delay:-0.3s]" />
+      <span className="size-2 animate-bounce rounded-full bg-foreground/60 [animation-delay:-0.15s]" />
+      <span className="size-2 animate-bounce rounded-full bg-foreground/60" />
     </div>
   );
 }

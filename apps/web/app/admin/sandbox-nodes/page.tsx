@@ -1,22 +1,23 @@
 "use client";
 
 import { Cpu as SandboxNodesPageIcon } from "lucide-react";
-import { Button } from "@/components/ui/button";
+import { Button, Card, Chip, Input, Label, TextField, Tooltip } from "@heroui/react";
+import { DataGrid, type DataGridColumn } from "@heroui-pro/react/data-grid";
+import { EmptyState } from "@heroui-pro/react/empty-state";
+import { Sheet } from "@heroui-pro/react/sheet";
 import {
   AdminEmptyState,
   AdminPage,
   AdminPageHeader,
   AdminRefreshButton,
   AdminStatusBadge,
+  AdminTruncatedValue,
 } from "@/components/admin/admin-ui";
 import { cn } from "@/lib/utils";
 import {
   AlertTriangle,
   Ban,
-  Boxes,
   CheckCircle2,
-  CircleDot,
-  FolderTree,
   LoaderCircle,
   Plus,
   Power,
@@ -24,7 +25,7 @@ import {
   SlidersHorizontal,
 } from "lucide-react";
 import { signOut } from "next-auth/react";
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 
 type SandboxNode = {
   name: string;
@@ -72,7 +73,6 @@ const STATUS_TONES: Record<string, BadgeTone> = {
   unhealthy: "red",
 };
 
-const LIST_COLS = "1.6fr 0.9fr 0.8fr 1.5fr 0.7fr 1.4fr 0.9fr 1.4fr 1.1fr 1.7fr";
 
 export default function SandboxNodesPage() {
   const [nodes, setNodes] = useState<SandboxNode[]>([]);
@@ -121,20 +121,6 @@ export default function SandboxNodesPage() {
   useEffect(() => {
     void refresh();
   }, [refresh]);
-
-  const totals = useMemo(
-    () => ({
-      nodes: nodes.length,
-      active: nodes.filter((n) => n.status === "active").length,
-      unavailable: nodes.filter((n) =>
-        ["disabled", "offline_pending", "offline"].includes(n.status),
-      ).length,
-      unhealthy: nodes.filter((n) => n.status === "unhealthy").length,
-      sandboxPods: nodes.reduce((sum, n) => sum + n.sandbox_pods, 0),
-      sessions: nodes.reduce((sum, n) => sum + n.session_count, 0),
-    }),
-    [nodes],
-  );
 
   const runNodeAction = async (
     node: SandboxNode,
@@ -216,6 +202,17 @@ export default function SandboxNodesPage() {
     }
   };
 
+  const columns: DataGridColumn<SandboxNode>[] = [
+    { id: "node", header: "Node", isRowHeader: true, minWidth: 240, cell: (node) => <span className="block min-w-0"><AdminTruncatedValue className="font-mono text-xs font-semibold" copyLabel="node name" value={node.name} /><span className="mt-1 flex flex-wrap gap-1">{Object.entries(node.labels ?? {}).filter(([key]) => key.startsWith("node-role.kubernetes.io/") || key === "kubernetes.io/arch").slice(0, 3).map(([key, value]) => <Chip key={key} size="sm" variant="soft">{labelName(key, value)}</Chip>)}</span></span> },
+    { id: "status", header: "Status", width: 150, cell: (node) => <AdminStatusBadge tone={STATUS_TONES[node.status] ?? "neutral"} dot>{STATUS_LABELS[node.status] ?? node.status}</AdminStatusBadge> },
+    { id: "resources", header: "Resources", minWidth: 190, cell: (node) => <span className="text-xs"><span className="block"><span className="text-muted">CPU</span> {node.cpu_allocatable || "—"} / {node.cpu_capacity || "—"}</span><span className="mt-1 block"><span className="text-muted">Memory</span> {node.memory_allocatable || "—"} / {node.memory_capacity || "—"}</span></span> },
+    { id: "workload", header: "Workload", minWidth: 180, cell: (node) => <span className="text-xs"><span className="block">{node.sandbox_pods} sandbox pods</span><span className="text-muted mt-1 block">{node.session_count} workspaces · {formatBytes(node.session_requested_bytes)}</span></span> },
+    { id: "disk", header: "Disk", width: 120, cell: (node) => <AdminStatusBadge tone={node.disk_pressure ? "red" : "green"} dot>{node.disk_pressure ? "Pressure" : "Normal"}</AdminStatusBadge> },
+    { id: "capacity", header: "Max pods", minWidth: 150, cell: (node) => node.labels?.["cocola.dev/runtime-mode"] === "compose" ? <span className="text-muted text-xs">Managed by Compose</span> : <span className="flex items-center gap-2"><span className="font-mono text-xs">{node.max_sandbox_pods == null ? "Unlimited" : node.max_sandbox_pods}</span><Tooltip delay={0}><Button isIconOnly aria-label={`Edit capacity for ${node.name}`} isDisabled={Boolean(savingCapacity)} size="sm" variant="outline" onPress={() => openCapacityDialog(node)}><SlidersHorizontal className="size-4" /></Button><Tooltip.Content>Edit sandbox capacity</Tooltip.Content></Tooltip></span> },
+    { id: "reason", header: "Reason", minWidth: 190, cell: (node) => <AdminTruncatedValue className="text-muted text-xs" copyLabel="node reason" value={node.reason || "—"} /> },
+    { id: "actions", header: "Actions", align: "center", pinned: "end", width: 220, cell: (node) => { const composeNode = node.labels?.["cocola.dev/runtime-mode"] === "compose"; const alreadyOffline = ["offline", "offline_pending"].includes(node.status); const offlining = actingNode === `${node.name}:offline`; return composeNode ? <span className="text-muted text-xs">Single-node runtime</span> : <span className="flex justify-center gap-1">{node.schedulable ? <Button isDisabled={Boolean(actingNode)} size="sm" variant="outline" onPress={() => void runNodeAction(node, "disable")}><Ban className="size-4" />Disable</Button> : <Button isDisabled={Boolean(actingNode)} size="sm" variant="outline" onPress={() => void runNodeAction(node, "restore")}><CheckCircle2 className="size-4" />Restore</Button>}<Button isDisabled={Boolean(actingNode) || alreadyOffline} isPending={offlining} size="sm" variant="danger-soft" onPress={() => void runNodeAction(node, "offline", false)}><Power className="size-4" />{alreadyOffline ? "Offline" : "Offline"}</Button></span>; } },
+  ];
+
   return (
     <AdminPage className="admin-theme-sky">
       <AdminPageHeader
@@ -223,19 +220,19 @@ export default function SandboxNodesPage() {
         title="Nodes"
         description="Runtime capacity and node health for Cocola sandboxes"
         actions={
-          <AdminRefreshButton
+          <><AdminRefreshButton
             variant="outline"
             refreshing={loading}
             disabled={loading}
             onClick={() => void refresh()}
           >
             Refresh
-          </AdminRefreshButton>
+          </AdminRefreshButton><Button onPress={() => setShowAddNode(true)}><Plus className="size-4" />Add node</Button></>
         }
       />
 
       {error ? (
-        <div className="rounded-xl border border-destructive/30 bg-destructive/10 px-4 py-3 text-sm text-destructive">
+        <div className="rounded-xl border border-danger/30 bg-danger/10 px-4 py-3 text-sm text-danger">
           {error}
         </div>
       ) : null}
@@ -249,220 +246,7 @@ export default function SandboxNodesPage() {
       {unsupported ? (
         <UnsupportedState />
       ) : (
-        <>
-          <section className="grid gap-4 md:grid-cols-2 xl:grid-cols-6">
-            <Metric label="Nodes" value={String(totals.nodes)} tone="sky" icon={<Server />} />
-            <Metric
-              label="Active"
-              value={String(totals.active)}
-              tone="green"
-              icon={<CheckCircle2 />}
-            />
-            <Metric
-              label="Disabled/Offline"
-              value={String(totals.unavailable)}
-              tone="amber"
-              icon={<Power />}
-            />
-            <Metric
-              label="Unhealthy"
-              value={String(totals.unhealthy)}
-              tone="rose"
-              icon={<AlertTriangle />}
-            />
-            <Metric
-              label="Sandbox Pods"
-              value={String(totals.sandboxPods)}
-              tone="violet"
-              icon={<Boxes />}
-            />
-            <Metric
-              label="Session Workspaces"
-              value={String(totals.sessions)}
-              tone="slate"
-              icon={<FolderTree />}
-            />
-          </section>
-
-          <div className="admin-entity-card flex flex-row items-center gap-4">
-            <span className="admin-entity-glyph">
-              <Plus className="size-5" />
-            </span>
-            <div className="min-w-0 flex-1">
-              <div className="admin-list-primary">Add node</div>
-              <div className="admin-list-sub">Join an existing machine to this k3s cluster.</div>
-            </div>
-            <button type="button" className="admin-card-btn" onClick={() => setShowAddNode(true)}>
-              <Plus className="size-3.5" />
-              Add node
-            </button>
-          </div>
-
-          <div className="admin-list">
-            {loading && nodes.length === 0 ? (
-              <div className="admin-list-empty">Loading nodes…</div>
-            ) : nodes.length === 0 ? (
-              <AdminEmptyState
-                icon={<SandboxNodesPageIcon className="size-6" />}
-                title="No nodes found"
-                description="Nodes will appear here once they join the k3s cluster."
-              />
-            ) : (
-              <div className="admin-list-scroll">
-                <div className="min-w-[1600px]">
-                  <div
-                    className="admin-list-cols admin-nodes-center"
-                    style={{ gridTemplateColumns: LIST_COLS }}
-                  >
-                    <div>Node</div>
-                    <div>Status</div>
-                    <div>CPU</div>
-                    <div>Memory</div>
-                    <div>Sandbox Pods</div>
-                    <div>Local Workspaces</div>
-                    <div>Disk</div>
-                    <div>Max Sandbox Pods</div>
-                    <div>Reason</div>
-                    <div>Actions</div>
-                  </div>
-                  {nodes.map((node) => {
-                    const offlining = actingNode === `${node.name}:offline`;
-                    const alreadyOffline = ["offline", "offline_pending"].includes(node.status);
-                    const composeNode = node.labels?.["cocola.dev/runtime-mode"] === "compose";
-                    return (
-                      <div
-                        key={node.name}
-                        className="admin-list-row admin-nodes-center"
-                        style={{ gridTemplateColumns: LIST_COLS }}
-                      >
-                        <div className="min-w-0">
-                          <div className="admin-list-primary admin-list-mono">{node.name}</div>
-                          <div className="mt-1 flex flex-wrap gap-1">
-                            {Object.entries(node.labels ?? {})
-                              .filter(
-                                ([key]) =>
-                                  key.startsWith("node-role.kubernetes.io/") ||
-                                  key === "kubernetes.io/arch",
-                              )
-                              .slice(0, 3)
-                              .map(([key, value]) => (
-                                <span
-                                  key={key}
-                                  className="rounded bg-muted px-1.5 py-0.5 text-[10px] text-muted-foreground"
-                                >
-                                  {labelName(key, value)}
-                                </span>
-                              ))}
-                          </div>
-                        </div>
-                        <div className="admin-list-cell">
-                          <AdminStatusBadge tone={STATUS_TONES[node.status] ?? "neutral"} dot>
-                            {STATUS_LABELS[node.status] ?? node.status}
-                          </AdminStatusBadge>
-                        </div>
-                        <div className="admin-list-cell admin-list-mono">
-                          {node.cpu_allocatable || "—"} / {node.cpu_capacity || "—"}
-                        </div>
-                        <div className="admin-list-cell admin-list-mono">
-                          {node.memory_allocatable || "—"} / {node.memory_capacity || "—"}
-                        </div>
-                        <div className="admin-list-cell">{node.sandbox_pods}</div>
-                        <div className="admin-list-cell">
-                          <div>{node.session_count}</div>
-                          <div className="admin-list-sub">
-                            {formatBytes(node.session_requested_bytes)} requested ·{" "}
-                            {node.workspace_reset_count} resets
-                          </div>
-                        </div>
-                        <div className="admin-list-cell">
-                          <AdminStatusBadge tone={node.disk_pressure ? "red" : "green"} dot>
-                            {node.disk_pressure ? "Pressure" : "Normal"}
-                          </AdminStatusBadge>
-                        </div>
-                        <div className="admin-list-cell">
-                          {composeNode ? (
-                            <span className="admin-list-muted">Managed by Compose</span>
-                          ) : (
-                            <div className="flex items-center justify-center gap-2">
-                              <span
-                                className={cn(
-                                  "admin-list-mono",
-                                  node.max_sandbox_pods == null
-                                    ? "text-muted-foreground"
-                                    : "text-foreground",
-                                )}
-                              >
-                                {node.max_sandbox_pods == null
-                                  ? "Unlimited"
-                                  : node.max_sandbox_pods}
-                              </span>
-                              <button
-                                type="button"
-                                className="admin-card-btn"
-                                disabled={Boolean(savingCapacity)}
-                                onClick={() => openCapacityDialog(node)}
-                              >
-                                <SlidersHorizontal className="size-3.5" />
-                                Edit
-                              </button>
-                            </div>
-                          )}
-                        </div>
-                        <div
-                          className="admin-list-cell admin-list-muted truncate"
-                          title={node.reason}
-                        >
-                          {node.reason || "—"}
-                        </div>
-                        <div className="flex items-center justify-center gap-2">
-                          {composeNode ? (
-                            <span className="admin-list-muted">Single-node runtime</span>
-                          ) : node.schedulable ? (
-                            <button
-                              type="button"
-                              className="admin-card-btn"
-                              disabled={Boolean(actingNode)}
-                              onClick={() => void runNodeAction(node, "disable")}
-                            >
-                              <Ban className="size-3.5" />
-                              Disable
-                            </button>
-                          ) : (
-                            <button
-                              type="button"
-                              className="admin-card-btn"
-                              disabled={Boolean(actingNode)}
-                              onClick={() => void runNodeAction(node, "restore")}
-                            >
-                              <CheckCircle2 className="size-3.5" />
-                              Restore
-                            </button>
-                          )}
-                          {!composeNode ? (
-                            <button
-                              type="button"
-                              className="admin-card-btn admin-card-btn--danger"
-                              disabled={Boolean(actingNode) || alreadyOffline}
-                              title={alreadyOffline ? "Node is already offline" : undefined}
-                              onClick={() => void runNodeAction(node, "offline", false)}
-                            >
-                              {offlining ? (
-                                <LoaderCircle className="size-3.5 animate-spin" />
-                              ) : (
-                                <Power className="size-3.5" />
-                              )}
-                              {alreadyOffline ? "Offline" : offlining ? "Offlining…" : "Offline"}
-                            </button>
-                          ) : null}
-                        </div>
-                      </div>
-                    );
-                  })}
-                </div>
-              </div>
-            )}
-          </div>
-        </>
+        <DataGrid aria-label="Sandbox nodes" columns={columns} contentClassName="min-w-[1320px]" data={nodes} getRowId={(node) => node.name} selectionMode="none" variant="primary" renderEmptyState={() => <EmptyState><EmptyState.Header><EmptyState.Media variant="icon"><SandboxNodesPageIcon className="text-sky-500" /></EmptyState.Media><EmptyState.Title>{loading ? "Loading nodes" : "No nodes found"}</EmptyState.Title><EmptyState.Description>{loading ? "Fetching cluster capacity…" : "Nodes will appear here once they join the k3s cluster."}</EmptyState.Description></EmptyState.Header></EmptyState>} />
       )}
 
       {offlineTarget && (
@@ -492,41 +276,15 @@ export default function SandboxNodesPage() {
   );
 }
 
-function Metric({
-  label,
-  value,
-  tone,
-  icon,
-}: {
-  label: string;
-  value: string;
-  tone: string;
-  icon: React.ReactNode;
-}) {
-  return (
-    <div className="admin-metric-card" data-tone={tone}>
-      <div className="admin-metric-head">
-        <span className="admin-metric-glyph">{icon}</span>
-        <span className="admin-metric-key">{label}</span>
-      </div>
-      <div className="admin-metric-val truncate">{value}</div>
-    </div>
-  );
-}
-
 function UnsupportedState() {
   return (
-    <section className="admin-surface px-4 py-10 text-center">
-      <div className="mx-auto grid size-10 place-items-center rounded-md bg-muted">
-        <Server className="size-5 text-muted-foreground" />
-      </div>
-      <h2 className="mt-4 text-sm font-semibold">
-        Cluster management is not supported in the current runtime mode.
-      </h2>
-      <p className="mx-auto mt-2 max-w-xl text-sm text-muted-foreground">
-        Start cocola with the k3s runtime profile to enable node operations.
-      </p>
-    </section>
+    <Card className="p-8">
+      <AdminEmptyState
+        icon={<Server className="text-sky-500" />}
+        title="Cluster management is unavailable"
+        description="Start Cocola with the k3s runtime profile to enable node operations."
+      />
+    </Card>
   );
 }
 
@@ -542,89 +300,40 @@ function OfflineDialog({
   onConfirm: () => void;
 }) {
   return (
-    <div className="fixed inset-0 z-[80] grid place-items-center bg-black/40 px-4">
-      <div
-        role="dialog"
-        aria-modal="true"
-        className="w-full max-w-md rounded-lg border border-border bg-background p-4 shadow-xl"
-      >
-        <div className="flex items-start gap-3">
-          <div className="grid size-9 shrink-0 place-items-center rounded-md bg-destructive/10 text-destructive">
-            <AlertTriangle className="size-4" />
-          </div>
-          <div className="min-w-0 flex-1">
-            <h2 className="text-sm font-semibold">Offline {target.node.name}</h2>
-            <p className="mt-1 text-sm text-muted-foreground">
-              This node holds {target.affectedSessions} local Workspace
-              {target.affectedSessions === 1 ? "" : "s"} and runs {target.pendingPods.length}{" "}
-              sandbox pod{target.pendingPods.length === 1 ? "" : "s"}.
-            </p>
-          </div>
-        </div>
+    <Sheet isOpen placement="right" onOpenChange={(open) => !open && onCancel()}><Sheet.Backdrop><Sheet.Content className="w-full md:w-[460px]"><Sheet.Dialog><Sheet.CloseTrigger aria-label="Close offline confirmation" /><Sheet.Header><span className="flex items-start gap-3"><span className="bg-danger/10 text-danger grid size-10 shrink-0 place-items-center rounded-2xl"><AlertTriangle className="size-5" /></span><span><Sheet.Heading>Offline {target.node.name}</Sheet.Heading><span className="text-muted mt-1 block text-sm">This node holds {target.affectedSessions} local Workspace{target.affectedSessions === 1 ? "" : "s"} and runs {target.pendingPods.length} sandbox pod{target.pendingPods.length === 1 ? "" : "s"}.</span></span></span></Sheet.Header><Sheet.Body className="grid content-start gap-3">
         {target.affectedSessions > 0 && (
-          <div className="mt-3 rounded-md border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-sm text-amber-300">
+          <div className="bg-warning/10 text-warning rounded-2xl px-4 py-3 text-sm">
             Existing conversations cannot resume while this node is offline. No Workspace will be
             cleared automatically.
           </div>
         )}
         {target.pendingPods.length > 0 && (
-          <div className="mt-3 rounded-md border border-border bg-muted px-3 py-2">
-            <p className="mb-2 text-xs text-muted-foreground">
+          <div className="bg-surface-secondary rounded-2xl p-4">
+            <p className="text-muted mb-2 text-xs">
               Offlining cordons the node. Running sandboxes are not evicted and remain until they
               stop or are reclaimed.
             </p>
             <div className="max-h-24 overflow-y-auto">
               {target.pendingPods.map((pod) => (
-                <div key={pod} className="truncate font-mono text-xs text-muted-foreground">
-                  {pod}
-                </div>
+                <AdminTruncatedValue key={pod} className="text-muted font-mono text-xs" copyLabel="pod name" value={pod} />
               ))}
             </div>
           </div>
         )}
-        <div className="mt-4 flex justify-end gap-2">
-          <Button variant="ghost" size="sm" disabled={acting} onClick={onCancel}>
+        </Sheet.Body><Sheet.Footer className="gap-2">
+          <Button variant="outline" isDisabled={acting} onPress={onCancel}>
             Cancel
           </Button>
-          <Button variant="destructive" size="sm" disabled={acting} onClick={onConfirm}>
+          <Button variant="danger" isDisabled={acting} isPending={acting} onPress={onConfirm}>
             {acting ? "Offlining..." : "Cordon node"}
           </Button>
-        </div>
-      </div>
-    </div>
+        </Sheet.Footer></Sheet.Dialog></Sheet.Content></Sheet.Backdrop></Sheet>
   );
 }
 
 function AddNodeDialog({ onClose }: { onClose: () => void }) {
   return (
-    <div className="fixed inset-0 z-[80] grid place-items-center bg-black/40 px-4">
-      <div
-        role="dialog"
-        aria-modal="true"
-        aria-labelledby="add-node-dialog-title"
-        className="w-full max-w-md rounded-lg border border-border bg-background p-4 shadow-xl"
-      >
-        <div className="flex items-start gap-3">
-          <div className="grid size-9 shrink-0 place-items-center rounded-md bg-muted">
-            <Plus className="size-4 text-muted-foreground" />
-          </div>
-          <div className="min-w-0 flex-1">
-            <h2 id="add-node-dialog-title" className="text-sm font-semibold">
-              Node onboarding is coming soon
-            </h2>
-            <p className="mt-1 text-sm text-muted-foreground">
-              We&apos;re building a guided and secure way to add nodes to your Cocola cluster. This
-              feature is not available yet.
-            </p>
-          </div>
-        </div>
-        <div className="mt-4 flex justify-end">
-          <Button variant="outline" size="sm" onClick={onClose}>
-            Close
-          </Button>
-        </div>
-      </div>
-    </div>
+    <Sheet isOpen placement="right" onOpenChange={(open) => !open && onClose()}><Sheet.Backdrop><Sheet.Content className="w-full md:w-[440px]"><Sheet.Dialog><Sheet.CloseTrigger aria-label="Close add node" /><Sheet.Header><span className="flex items-center gap-3"><span className="bg-accent-soft text-accent grid size-10 place-items-center rounded-2xl"><Plus className="size-5" /></span><Sheet.Heading>Node onboarding is coming soon</Sheet.Heading></span></Sheet.Header><Sheet.Body><p className="text-muted text-sm leading-6">We&apos;re building a guided and secure way to add nodes to your Cocola cluster. This feature is not available yet.</p></Sheet.Body><Sheet.Footer><Button variant="outline" onPress={onClose}>Close</Button></Sheet.Footer></Sheet.Dialog></Sheet.Content></Sheet.Backdrop></Sheet>
   );
 }
 
@@ -663,101 +372,7 @@ function CapacityDialog({
     setPhase("confirm");
   };
 
-  if (phase === "confirm") {
-    return (
-      <div className="fixed inset-0 z-[80] grid place-items-center bg-black/40 px-4">
-        <div
-          role="dialog"
-          aria-modal="true"
-          className="w-full max-w-lg rounded-lg border border-border bg-background p-4 shadow-xl"
-        >
-          <div className="flex items-start gap-3">
-            <div className="grid size-9 shrink-0 place-items-center rounded-md bg-amber-500/10 text-amber-500">
-              <AlertTriangle className="size-4" />
-            </div>
-            <div className="min-w-0 flex-1">
-              <h2 className="text-sm font-semibold">Confirm sandbox capacity</h2>
-              <p className="mt-1 text-sm text-muted-foreground">
-                Review the expected effect before applying this change to {node.name}.
-              </p>
-            </div>
-          </div>
-          <div className="mt-4 rounded-md border border-border bg-muted/50 px-3 py-2">
-            <div className="text-xs font-medium uppercase text-muted-foreground">New limit</div>
-            <div className="mt-1 font-mono text-sm">
-              {trimmedValue === "" ? "Unlimited" : trimmedValue}
-            </div>
-          </div>
-          <div className="mt-3 rounded-md border border-border px-3 py-2 text-sm">
-            <div className="font-medium">{effect.title}</div>
-            <p className="mt-1 text-muted-foreground">{effect.description}</p>
-          </div>
-          <div className="mt-4 flex justify-end gap-2">
-            <Button variant="ghost" size="sm" disabled={saving} onClick={() => setPhase("edit")}>
-              Cancel
-            </Button>
-            <Button variant="outline" size="sm" disabled={saving} onClick={onSave}>
-              {saving ? "Saving..." : "Confirm"}
-            </Button>
-          </div>
-        </div>
-      </div>
-    );
-  }
-
-  return (
-    <div className="fixed inset-0 z-[80] grid place-items-center bg-black/40 px-4">
-      <div
-        role="dialog"
-        aria-modal="true"
-        className="w-full max-w-lg rounded-lg border border-border bg-background p-4 shadow-xl"
-      >
-        <div className="flex items-start gap-3">
-          <div className="grid size-9 shrink-0 place-items-center rounded-md bg-muted">
-            <SlidersHorizontal className="size-4 text-muted-foreground" />
-          </div>
-          <div className="min-w-0 flex-1">
-            <h2 className="text-sm font-semibold">Edit sandbox capacity</h2>
-            <p className="mt-1 text-sm text-muted-foreground">
-              Configure the maximum number of running sandbox pods allowed on {node.name}.
-            </p>
-          </div>
-        </div>
-        <div className="mt-4 space-y-2 rounded-md border border-border bg-muted/50 px-3 py-2 text-sm text-muted-foreground">
-          <p>Leave the value empty to allow unlimited sandbox pods on this node.</p>
-          <p>Set 0 to make this node contribute no sandbox capacity.</p>
-          <p>Set a positive integer to cap concurrent running sandbox pods.</p>
-        </div>
-        <label className="mt-4 block text-sm font-medium" htmlFor="sandbox-capacity-input">
-          Max sandbox pods
-        </label>
-        <input
-          id="sandbox-capacity-input"
-          type="number"
-          min={0}
-          step={1}
-          inputMode="numeric"
-          value={value}
-          placeholder="Unlimited"
-          disabled={saving}
-          onChange={(event) => {
-            setInputError("");
-            onChange(event.target.value);
-          }}
-          className="mt-2 h-10 w-full rounded-md border border-border bg-background px-3 text-sm outline-none transition-colors placeholder:text-muted-foreground focus:border-ring"
-        />
-        {inputError && <p className="mt-2 text-sm text-destructive">{inputError}</p>}
-        <div className="mt-4 flex justify-end gap-2">
-          <Button variant="ghost" size="sm" disabled={saving} onClick={onCancel}>
-            Cancel
-          </Button>
-          <Button variant="outline" size="sm" disabled={saving} onClick={reviewChange}>
-            Continue
-          </Button>
-        </div>
-      </div>
-    </div>
-  );
+  return <Sheet isOpen placement="right" onOpenChange={(open) => !open && onCancel()}><Sheet.Backdrop><Sheet.Content className="w-full md:w-[500px]"><Sheet.Dialog><Sheet.CloseTrigger aria-label="Close capacity editor" /><Sheet.Header><span className="flex items-center gap-3"><span className="bg-accent-soft text-accent grid size-10 place-items-center rounded-2xl">{phase === "confirm" ? <AlertTriangle className="size-5" /> : <SlidersHorizontal className="size-5" />}</span><span><Sheet.Heading>{phase === "confirm" ? "Confirm sandbox capacity" : "Edit sandbox capacity"}</Sheet.Heading><span className="text-muted mt-1 block text-sm">{phase === "confirm" ? `Review the expected effect before applying this change to ${node.name}.` : `Configure the maximum number of running sandbox pods allowed on ${node.name}.`}</span></span></span></Sheet.Header><Sheet.Body className="grid content-start gap-4">{phase === "confirm" ? <><div className="bg-surface-secondary rounded-2xl p-4"><span className="text-muted block text-xs font-medium uppercase">New limit</span><span className="mt-1 block font-mono text-sm">{trimmedValue === "" ? "Unlimited" : trimmedValue}</span></div><div className="border-separator rounded-2xl border p-4 text-sm"><div className="font-medium">{effect.title}</div><p className="text-muted mt-1 leading-6">{effect.description}</p></div></> : <><div className="bg-surface-secondary text-muted space-y-2 rounded-2xl p-4 text-sm"><p>Leave the value empty to allow unlimited sandbox pods.</p><p>Set 0 to contribute no new sandbox capacity.</p><p>Set a positive integer to cap concurrent running sandbox pods.</p></div><TextField isDisabled={saving} value={value} variant="secondary" onChange={(next) => { setInputError(""); onChange(next); }}><Label>Max sandbox pods</Label><Input type="number" min={0} step={1} inputMode="numeric" placeholder="Unlimited" /></TextField>{inputError ? <p className="text-danger text-sm">{inputError}</p> : null}</>}</Sheet.Body><Sheet.Footer className="gap-2">{phase === "confirm" ? <><Button isDisabled={saving} variant="outline" onPress={() => setPhase("edit")}>Back</Button><Button isDisabled={saving} isPending={saving} onPress={onSave}>Confirm</Button></> : <><Button isDisabled={saving} variant="outline" onPress={onCancel}>Cancel</Button><Button isDisabled={saving} onPress={reviewChange}>Continue</Button></>}</Sheet.Footer></Sheet.Dialog></Sheet.Content></Sheet.Backdrop></Sheet>;
 }
 
 function capacityInputError(raw: string) {

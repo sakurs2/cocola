@@ -1,6 +1,5 @@
 "use client";
 
-import * as Dialog from "@radix-ui/react-dialog";
 import {
   AlertTriangle,
   Clock3,
@@ -13,22 +12,20 @@ import {
   RefreshCw,
   Settings2,
   Trash2,
-  X,
   type LucideIcon,
 } from "lucide-react";
+import { Button, Card, Chip, Input, Label, TextField } from "@heroui/react";
+import { Segment } from "@heroui-pro/react/segment";
+import { Sheet } from "@heroui-pro/react/sheet";
 import {
   useCallback,
   useEffect,
-  useId,
   useMemo,
   useState,
   type FormEvent,
   type ReactNode,
 } from "react";
 import { useWorkspaceToast } from "@/components/assistant-ui/workspace-toast";
-import { ActionConfirmDialog } from "@/components/ui/action-dialog";
-import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
 import { connectorResponseError } from "@/lib/connector-response-error.mjs";
 
 type FeishuConnection = {
@@ -276,6 +273,7 @@ export function FeishuConnectorCard({ agentId }: { agentId: string }) {
     ? Math.max(0, Math.floor((new Date(flow.expires_at).getTime() - clock) / 1000))
     : 0;
   const state = connectionState(connection, loadState);
+  const stateColor = state.label === "Ready" ? "success" : state.label === "Unavailable" || state.label === "Needs attention" ? "danger" : "warning";
   const copyValue = async (value: string, successMessage: string) => {
     try {
       await navigator.clipboard.writeText(value);
@@ -287,70 +285,43 @@ export function FeishuConnectorCard({ agentId }: { agentId: string }) {
 
   return (
     <>
-      <section className="rounded-2xl border border-border bg-card p-5 shadow-sm">
-        <div className="flex flex-wrap items-start justify-between gap-4">
-          <div className="flex min-w-0 items-start gap-3">
-            <span className="grid size-10 shrink-0 place-items-center rounded-xl bg-blue-50 text-blue-600 ring-1 ring-inset ring-blue-100">
+      <Card className="p-5">
+        <Card.Header className="flex-row items-start justify-between gap-4 p-0">
+          <span className="flex min-w-0 items-start gap-3">
+            <span className="bg-blue-500/15 text-blue-600 flex size-10 shrink-0 items-center justify-center rounded-2xl dark:text-blue-300">
               <MessageCircleMore className="size-5" />
             </span>
-            <div className="min-w-0">
-              <h2 className="text-sm font-semibold">Feishu bot</h2>
-              <p className="mt-1 text-sm leading-6 text-muted-foreground">
-                Give this Agent its own Feishu entry point. One Agent can have one bot.
-              </p>
-            </div>
-          </div>
-          <span
-            className={`inline-flex items-center rounded-full px-2.5 py-1 text-xs font-medium ${state.className}`}
-          >
-            {state.label}
+            <span className="min-w-0">
+              <Card.Title>Feishu Bot</Card.Title>
+              <Card.Description>Give this Agent its own Feishu entry point. One Agent can have one Bot.</Card.Description>
+            </span>
           </span>
-        </div>
+          <Chip color={stateColor} size="sm" variant="soft">{state.label}</Chip>
+        </Card.Header>
+        <Card.Content className="p-0">
 
         {connection?.bot_name ? (
-          <div className="mt-4 flex items-center justify-between gap-3 rounded-xl bg-muted/60 px-3 py-2 text-sm">
-            <span className="text-muted-foreground">Bot</span>
+          <div className="bg-surface-secondary flex items-center justify-between gap-3 rounded-2xl px-4 py-3 text-sm">
+            <span className="text-muted">Bot</span>
             <span className="truncate font-medium">{connection.bot_name}</span>
           </div>
         ) : null}
 
         {flow && ACTIVE_FLOW_STATES.has(flow.status) ? (
-          <div className="mt-4 rounded-2xl border border-blue-500/20 bg-blue-500/5 p-3">
-            <div className="flex items-center gap-2 text-xs font-medium text-blue-700">
+          <div className="bg-accent-soft mt-4 rounded-2xl p-4">
+            <div className="text-accent flex items-center gap-2 text-sm font-medium">
               <Clock3 className="size-3.5" />
               {flow.status === "awaiting_user"
                 ? `Authorization expires in ${formatDuration(remainingSeconds)}`
                 : "Preparing authorization…"}
             </div>
             {flow.verification_url ? (
-              <div className="mt-3 space-y-2">
-                <a
-                  href={flow.verification_url}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="inline-flex h-9 w-full items-center justify-center gap-2 rounded-xl bg-blue-600 px-3 text-sm font-medium text-white transition hover:bg-blue-700"
-                >
-                  Continue in Feishu <ExternalLink className="size-4" />
-                </a>
-                <button
-                  type="button"
-                  onClick={() =>
-                    void copyValue(flow.verification_url!, "Authorization link copied")
-                  }
-                  className="inline-flex h-8 w-full items-center justify-center gap-2 rounded-xl text-xs text-muted-foreground transition hover:bg-muted hover:text-foreground"
-                >
-                  <Copy className="size-3.5" /> Copy link
-                </button>
+              <div className="mt-3 grid gap-2">
+                <Button className="w-full" onPress={() => window.open(flow.verification_url, "_blank", "noopener,noreferrer")}>Continue in Feishu <ExternalLink className="size-4" /></Button>
+                <Button className="w-full" variant="ghost" onPress={() => void copyValue(flow.verification_url!, "Authorization link copied")}><Copy className="size-4" />Copy authorization link</Button>
               </div>
             ) : null}
-            <button
-              type="button"
-              disabled={busy === "cancel"}
-              onClick={() => void cancelRegistration()}
-              className="mt-2 w-full text-center text-xs text-muted-foreground transition hover:text-foreground disabled:opacity-50"
-            >
-              {busy === "cancel" ? "Cancelling…" : "Cancel authorization"}
-            </button>
+            <Button className="mt-1 w-full" isDisabled={busy === "cancel"} variant="ghost" onPress={() => void cancelRegistration()}>{busy === "cancel" ? "Cancelling…" : "Cancel authorization"}</Button>
           </div>
         ) : null}
 
@@ -365,14 +336,10 @@ export function FeishuConnectorCard({ agentId }: { agentId: string }) {
             <p className="text-xs leading-5 text-amber-800">
               Send this once to the bot before the code expires:
             </p>
-            <button
-              type="button"
-              onClick={() => void copyValue(`/bind ${bind.code}`, "Binding command copied")}
-              className="mt-2 flex w-full items-center justify-between rounded-xl bg-background px-3 py-2 font-mono text-sm shadow-sm"
-            >
+            <Button className="bg-surface mt-2 w-full justify-between font-mono" variant="outline" onPress={() => void copyValue(`/bind ${bind.code}`, "Binding command copied")}>
               <span>/bind {bind.code}</span>
-              <Copy className="size-3.5 text-muted-foreground" />
-            </button>
+              <Copy className="text-muted size-3.5" />
+            </Button>
             <p className="mt-2 text-[11px] text-amber-700">Expires {formatDate(bind.expiresAt)}</p>
           </div>
         ) : null}
@@ -407,7 +374,7 @@ export function FeishuConnectorCard({ agentId }: { agentId: string }) {
         {error ? (
           <div
             role="alert"
-            className="mt-4 rounded-xl bg-destructive/10 px-3 py-2 text-xs text-destructive"
+            className="mt-4 rounded-xl bg-danger/10 px-3 py-2 text-xs text-danger"
           >
             {error}
           </div>
@@ -415,115 +382,41 @@ export function FeishuConnectorCard({ agentId }: { agentId: string }) {
 
         <div className="mt-5 flex flex-wrap gap-2">
           {loadState === "checking" && !connection ? (
-            <ConnectorButton disabled icon={<Loader2 className="size-4 animate-spin" />}>
-              Checking…
-            </ConnectorButton>
+            <Button isDisabled isPending>Checking…</Button>
           ) : null}
           {loadState === "failed" ? (
-            <ConnectorButton
-              onClick={() => void load()}
-              variant="outline"
-              icon={<RefreshCw className="size-4" />}
-            >
-              Retry
-            </ConnectorButton>
+            <Button variant="outline" onPress={() => void load()}><RefreshCw className="size-4" />Retry</Button>
           ) : null}
           {connection?.status === "not_configured" && !flow ? (
             <>
-              <ConnectorButton
-                onClick={() => void startRegistration()}
-                disabled={busy !== ""}
-                icon={
-                  busy === "register" ? (
-                    <Loader2 className="size-4 animate-spin" />
-                  ) : (
-                    <MessageCircleMore className="size-4" />
-                  )
-                }
-              >
-                Connect Feishu
-              </ConnectorButton>
-              <ConnectorButton
-                onClick={() => setManualOpen(true)}
-                disabled={busy !== ""}
-                variant="outline"
-                icon={<Settings2 className="size-4" />}
-              >
-                Use existing app
-              </ConnectorButton>
+              <Button isDisabled={busy !== ""} isPending={busy === "register"} onPress={() => void startRegistration()}><MessageCircleMore className="size-4" />Connect Feishu</Button>
+              <Button isDisabled={busy !== ""} variant="outline" onPress={() => setManualOpen(true)}><Settings2 className="size-4" />Use existing App</Button>
             </>
           ) : null}
           {connection?.status === "awaiting_bind" && !bind ? (
-            <ConnectorButton
-              onClick={() => setManualOpen(true)}
-              disabled={busy !== ""}
-              variant="outline"
-              icon={<Settings2 className="size-4" />}
-            >
-              Use existing app
-            </ConnectorButton>
+            <Button isDisabled={busy !== ""} variant="outline" onPress={() => setManualOpen(true)}><Settings2 className="size-4" />Use existing App</Button>
           ) : null}
           {connection?.connected && !connection.enabled ? (
-            <ConnectorButton
-              onClick={() => void toggle(true)}
-              disabled={busy !== ""}
-              icon={
-                busy === "enable" ? (
-                  <Loader2 className="size-4 animate-spin" />
-                ) : (
-                  <Play className="size-4" />
-                )
-              }
-            >
-              Enable
-            </ConnectorButton>
+            <Button isDisabled={busy !== ""} isPending={busy === "enable"} onPress={() => void toggle(true)}><Play className="size-4" />Enable</Button>
           ) : null}
           {connection?.connected && connection.enabled ? (
-            <ConnectorButton
-              onClick={() => void toggle(false)}
-              disabled={busy !== ""}
-              variant="outline"
-              icon={
-                busy === "disable" ? (
-                  <Loader2 className="size-4 animate-spin" />
-                ) : (
-                  <Pause className="size-4" />
-                )
-              }
-            >
-              Pause
-            </ConnectorButton>
+            <Button isDisabled={busy !== ""} isPending={busy === "disable"} variant="outline" onPress={() => void toggle(false)}><Pause className="size-4" />Pause</Button>
           ) : null}
           {connection?.connected ? (
-            <ConnectorButton
-              onClick={() => setDisconnectOpen(true)}
-              disabled={busy !== ""}
-              variant="ghost"
-              icon={<Trash2 className="size-4" />}
-            >
-              Disconnect
-            </ConnectorButton>
+            <Button isDisabled={busy !== ""} variant="ghost" onPress={() => setDisconnectOpen(true)}><Trash2 className="size-4" />Disconnect</Button>
           ) : null}
           {flow && TERMINAL_FLOW_STATES.has(flow.status) && flow.status !== "ready" ? (
-            <ConnectorButton
-              onClick={() => {
-                setFlow(null);
-                void startRegistration();
-              }}
-              disabled={busy !== ""}
-              icon={<RefreshCw className="size-4" />}
-            >
-              Try again
-            </ConnectorButton>
+            <Button isDisabled={busy !== ""} onPress={() => { setFlow(null); void startRegistration(); }}><RefreshCw className="size-4" />Try again</Button>
           ) : null}
         </div>
 
         {connection?.last_connected_at ? (
-          <p className="mt-4 text-[11px] text-muted-foreground">
+          <p className="text-muted mt-4 text-xs">
             Last connected {formatDate(connection.last_connected_at)}
           </p>
         ) : null}
-      </section>
+        </Card.Content>
+      </Card>
 
       <ManualAppDialog
         open={manualOpen}
@@ -559,18 +452,23 @@ export function FeishuConnectorCard({ agentId }: { agentId: string }) {
         }}
       />
 
-      <ActionConfirmDialog
-        open={disconnectOpen}
-        title="Disconnect Feishu?"
-        description="Cocola will delete the encrypted app credential and owner binding. Conversation history remains."
-        confirmLabel="Disconnect"
-        busy={busy === "disconnect"}
-        error={busy === "disconnect" ? null : error || null}
-        tone="danger"
-        icon={Trash2}
-        onOpenChange={setDisconnectOpen}
-        onConfirm={() => void disconnect()}
-      />
+      <Sheet isOpen={disconnectOpen} placement="right" onOpenChange={setDisconnectOpen}>
+        <Sheet.Backdrop>
+          <Sheet.Content className="w-full md:w-[420px]">
+            <Sheet.Dialog>
+              <Sheet.CloseTrigger aria-label="Close disconnect confirmation" />
+              <Sheet.Header>
+                <Sheet.Heading>Disconnect Feishu Bot?</Sheet.Heading>
+                <p className="text-muted text-sm">Cocola will delete the encrypted app credential and owner binding. Conversation history remains.</p>
+              </Sheet.Header>
+              <Sheet.Footer className="gap-2">
+                <Button variant="outline" onPress={() => setDisconnectOpen(false)}>Cancel</Button>
+                <Button isPending={busy === "disconnect"} variant="danger-soft" onPress={() => void disconnect()}>Disconnect</Button>
+              </Sheet.Footer>
+            </Sheet.Dialog>
+          </Sheet.Content>
+        </Sheet.Backdrop>
+      </Sheet>
     </>
   );
 }
@@ -586,8 +484,6 @@ function ManualAppDialog({
   onOpenChange: (open: boolean) => void;
   onSubmit: (domain: "feishu" | "lark", appID: string, appSecret: string) => Promise<void>;
 }) {
-  const appIDInput = useId();
-  const secretInput = useId();
   const [domain, setDomain] = useState<"feishu" | "lark">("feishu");
   const [appID, setAppID] = useState("");
   const [appSecret, setAppSecret] = useState("");
@@ -613,104 +509,43 @@ function ManualAppDialog({
   };
 
   return (
-    <Dialog.Root open={open} onOpenChange={(next) => !busy && onOpenChange(next)}>
-      <Dialog.Portal>
-        <Dialog.Overlay className="fixed inset-0 z-[70] bg-slate-950/30 backdrop-blur-[2px]" />
-        <Dialog.Content className="cocola-user-ui fixed left-1/2 top-1/2 z-[71] w-[calc(100%-2rem)] max-w-md -translate-x-1/2 -translate-y-1/2 rounded-2xl border border-border bg-background p-5 text-foreground shadow-2xl outline-none">
-          <form onSubmit={(event) => void submit(event)}>
-            <div className="flex items-start gap-3">
-              <span className="grid size-10 shrink-0 place-items-center rounded-xl bg-blue-500/10 text-blue-600">
-                <Settings2 className="size-5" />
-              </span>
-              <div className="min-w-0 flex-1">
-                <Dialog.Title className="text-base font-semibold">Use an existing app</Dialog.Title>
-                <Dialog.Description className="mt-1.5 text-sm leading-6 text-muted-foreground">
-                  Cocola encrypts the app secret and returns a one-time command to bind the bot
-                  owner.
-                </Dialog.Description>
-              </div>
-              <Dialog.Close asChild>
-                <button
-                  type="button"
-                  disabled={busy}
-                  aria-label="Close"
-                  className="grid size-8 place-items-center rounded-lg text-muted-foreground hover:bg-muted"
-                >
-                  <X className="size-4" />
-                </button>
-              </Dialog.Close>
-            </div>
-
-            <div className="mt-5 space-y-4">
-              <div className="space-y-1.5">
-                <Label>Platform</Label>
-                <div className="grid grid-cols-2 gap-2">
-                  {(["feishu", "lark"] as const).map((value) => (
-                    <button
-                      key={value}
-                      type="button"
-                      onClick={() => setDomain(value)}
-                      className={`h-9 rounded-xl border text-sm font-medium ${
-                        domain === value
-                          ? "border-blue-500 bg-blue-500/10 text-blue-700"
-                          : "border-border text-muted-foreground hover:bg-muted"
-                      }`}
-                    >
-                      {value === "feishu" ? "Feishu" : "Lark"}
-                    </button>
-                  ))}
+    <Sheet isOpen={open} placement="right" onOpenChange={(next) => { if (!busy) onOpenChange(next); }}>
+      <Sheet.Backdrop>
+        <Sheet.Content className="w-full md:w-[460px]">
+          <Sheet.Dialog>
+            <Sheet.CloseTrigger aria-label="Close existing Feishu App settings" />
+            <Sheet.Header>
+              <Sheet.Heading>Use Existing App</Sheet.Heading>
+              <p className="text-muted text-sm">Cocola encrypts the App Secret and returns a one-time command to bind the Bot owner.</p>
+            </Sheet.Header>
+            <form className="contents" onSubmit={(event) => void submit(event)}>
+              <Sheet.Body className="grid content-start gap-4">
+                <div>
+                  <Label>Platform</Label>
+                  <Segment aria-label="Feishu platform" className="mt-2" selectedKey={domain} onSelectionChange={(key) => setDomain(String(key) as "feishu" | "lark")}>
+                    <Segment.Item id="feishu">Feishu</Segment.Item>
+                    <Segment.Item id="lark">Lark</Segment.Item>
+                  </Segment>
                 </div>
-              </div>
-              <div className="space-y-1.5">
-                <Label htmlFor={appIDInput}>App ID</Label>
-                <Input
-                  id={appIDInput}
-                  autoComplete="off"
-                  value={appID}
-                  onChange={(event) => setAppID(event.target.value)}
-                  placeholder="cli_..."
-                />
-              </div>
-              <div className="space-y-1.5">
-                <Label htmlFor={secretInput}>App secret</Label>
-                <Input
-                  id={secretInput}
-                  type="password"
-                  autoComplete="new-password"
-                  value={appSecret}
-                  onChange={(event) => setAppSecret(event.target.value)}
-                />
-              </div>
-            </div>
-
-            {error ? (
-              <div className="mt-4 rounded-xl bg-destructive/10 px-3 py-2 text-sm text-destructive">
-                {error}
-              </div>
-            ) : null}
-
-            <div className="mt-5 flex justify-end gap-2">
-              <Dialog.Close asChild>
-                <button
-                  type="button"
-                  disabled={busy}
-                  className="h-9 rounded-xl px-3 text-sm text-muted-foreground hover:bg-muted"
-                >
-                  Cancel
-                </button>
-              </Dialog.Close>
-              <button
-                type="submit"
-                disabled={busy || !appID.trim() || !appSecret.trim()}
-                className="h-9 rounded-xl bg-blue-600 px-4 text-sm font-medium text-white hover:bg-blue-700 disabled:opacity-50"
-              >
-                {busy ? "Connecting…" : "Connect"}
-              </button>
-            </div>
-          </form>
-        </Dialog.Content>
-      </Dialog.Portal>
-    </Dialog.Root>
+                <TextField value={appID} variant="secondary" onChange={setAppID}>
+                  <Label>App ID</Label>
+                  <Input autoComplete="off" placeholder="cli_xxxxxxxxxxxxxxxx" />
+                </TextField>
+                <TextField value={appSecret} variant="secondary" onChange={setAppSecret}>
+                  <Label>App Secret</Label>
+                  <Input autoComplete="new-password" type="password" />
+                </TextField>
+                {error ? <div className="bg-danger/10 text-danger rounded-2xl px-4 py-3 text-sm">{error}</div> : null}
+              </Sheet.Body>
+              <Sheet.Footer className="gap-2">
+                <Button isDisabled={busy} variant="outline" onPress={() => onOpenChange(false)}>Cancel</Button>
+                <Button isDisabled={!appID.trim() || !appSecret.trim()} isPending={busy} type="submit">Connect App</Button>
+              </Sheet.Footer>
+            </form>
+          </Sheet.Dialog>
+        </Sheet.Content>
+      </Sheet.Backdrop>
+    </Sheet>
   );
 }
 
@@ -754,8 +589,8 @@ function ConnectorButton({
         variant === "primary"
           ? "bg-blue-600 text-white hover:bg-blue-700"
           : variant === "outline"
-            ? "border border-border bg-background text-foreground hover:bg-muted"
-            : "text-muted-foreground hover:bg-muted hover:text-foreground"
+            ? "border border-border bg-background text-foreground hover:bg-surface-secondary"
+            : "text-muted hover:bg-surface-secondary hover:text-foreground"
       }`}
       {...props}
     >
@@ -770,13 +605,13 @@ function connectionState(
   loadState: ConnectionLoadState,
 ): { label: string; className: string } {
   if (loadState === "checking") {
-    return { label: "Checking", className: "bg-muted text-muted-foreground" };
+    return { label: "Checking", className: "bg-surface-secondary text-muted" };
   }
   if (loadState === "failed") {
     return { label: "Unavailable", className: "bg-red-500/10 text-red-700" };
   }
   if (!connection || connection.status === "not_configured") {
-    return { label: "Not connected", className: "bg-muted text-muted-foreground" };
+    return { label: "Not connected", className: "bg-surface-secondary text-muted" };
   }
   if (connection.status === "ready") {
     return { label: "Ready", className: "bg-emerald-500/10 text-emerald-700" };

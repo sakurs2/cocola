@@ -1,30 +1,20 @@
 "use client";
 
 import { BrainCircuit, Construction } from "lucide-react";
+import { ItemCard } from "@heroui-pro/react/item-card";
 import { AdminStatusBadge } from "@/components/admin/admin-ui";
 
 export function MemoryTool() {
   return (
-    <div
-      className="admin-module-card w-full cursor-not-allowed text-left opacity-80"
+    <ItemCard
+      className="min-h-52 w-full cursor-not-allowed opacity-70"
       aria-disabled="true"
     >
-      <span className="admin-module-head">
-        <span className="admin-module-icon">
-          <BrainCircuit className="size-6" strokeWidth={2} />
-        </span>
-        <span className="admin-module-title">Memory</span>
-      </span>
-      <span className="admin-module-summary">
-        Memory is currently under development and is not available in this release.
-      </span>
-      <span className="flex items-center gap-2">
+      <ItemCard.Icon className="bg-violet-100 text-violet-600 dark:bg-violet-950 dark:text-violet-300"><BrainCircuit className="size-5" /></ItemCard.Icon>
+      <ItemCard.Content><ItemCard.Title>Memory</ItemCard.Title><ItemCard.Description>Memory is currently under development and is not available in this release.</ItemCard.Description><span className="mt-4 flex items-center gap-2">
         <AdminStatusBadge tone="amber">In development</AdminStatusBadge>
-      </span>
-      <span className="admin-module-cta text-muted-foreground">
-        <Construction className="size-3.5" />
-        Unavailable
-      </span>
-    </div>
+      </span></ItemCard.Content>
+      <ItemCard.Action><span className="text-muted flex items-center gap-1 text-sm"><Construction className="size-4" />Unavailable</span></ItemCard.Action>
+    </ItemCard>
   );
 }

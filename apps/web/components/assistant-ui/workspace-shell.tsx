@@ -1,150 +1,227 @@
 "use client";
 
-import { type ReactNode, useCallback, useEffect, useState } from "react";
-import { usePathname } from "next/navigation";
-import { PanelLeftOpen } from "lucide-react";
+import { ChevronsRight } from "@gravity-ui/icons";
+import { Button, Tooltip } from "@heroui/react";
+import { AppLayout } from "@heroui-pro/react/app-layout";
+import { usePathname, useRouter } from "next/navigation";
+import { type CSSProperties, type ReactNode, useCallback, useEffect, useState } from "react";
+
 import { CocolaRuntimeProvider } from "@/app/runtime-provider";
-import { AppSidebar } from "@/components/assistant-ui/app-sidebar";
 import { CommandPalette } from "@/components/assistant-ui/command-palette";
+import { HeroUIWorkspaceSidebar } from "@/components/assistant-ui/heroui-workspace-sidebar";
+import { WorkspaceThemeToggle } from "@/components/assistant-ui/workspace-theme-toggle";
 import { WorkspaceUnsavedChangesProvider } from "@/components/assistant-ui/workspace-unsaved-changes";
+import { useWorkspaceUnsavedChanges } from "@/components/assistant-ui/workspace-unsaved-changes";
 import { WorkspaceToastProvider } from "@/components/assistant-ui/workspace-toast";
-import { cn } from "@/lib/utils";
 
 const IMMERSIVE_KEY = "cocola:immersive";
 
+const WORKSPACE_PATHS = [
+  "/",
+  "/wiki",
+  "/agents",
+  "/skills",
+  "/mcps",
+  "/tasks",
+  "/connectors",
+  "/folders",
+  "/projects",
+  "/profile",
+] as const;
+
+const PAGE_LABELS: Record<string, string> = {
+  "/agents": "Agents",
+  "/connectors": "Connectors",
+  "/folders": "Folders",
+  "/mcps": "MCP",
+  "/profile": "Profile",
+  "/projects": "Projects",
+  "/skills": "Skills",
+  "/tasks": "Tasks",
+  "/wiki": "Wiki",
+};
+
+const PAGE_ACCENTS: Record<string, { accent: string; foreground: string }> = {
+  "/agents": { accent: "oklch(68% 0.14 215)", foreground: "var(--eclipse)" },
+  "/connectors": { accent: "oklch(65% 0.17 160)", foreground: "var(--eclipse)" },
+  "/folders": { accent: "oklch(76% 0.17 70)", foreground: "var(--eclipse)" },
+  "/mcps": { accent: "oklch(67% 0.19 45)", foreground: "var(--snow)" },
+  "/profile": { accent: "oklch(62.04% 0.195 253.83)", foreground: "var(--snow)" },
+  "/projects": { accent: "oklch(56% 0.22 275)", foreground: "var(--snow)" },
+  "/skills": { accent: "oklch(60% 0.22 292)", foreground: "var(--snow)" },
+  "/tasks": { accent: "oklch(62.04% 0.195 253.83)", foreground: "var(--snow)" },
+  "/wiki": { accent: "oklch(62.04% 0.195 253.83)", foreground: "var(--snow)" },
+  "/": { accent: "oklch(62.04% 0.195 253.83)", foreground: "var(--snow)" },
+};
+
 function isWorkspacePath(pathname: string | null) {
-  return (
-    pathname === "/" ||
-    pathname === "/wiki" ||
-    pathname?.startsWith("/wiki/") ||
-    pathname === "/agents" ||
-    pathname?.startsWith("/agents/") ||
-    pathname === "/skills" ||
-    pathname?.startsWith("/skills/") ||
-    pathname === "/mcps" ||
-    pathname?.startsWith("/mcps/") ||
-    pathname === "/tasks" ||
-    pathname?.startsWith("/tasks/") ||
-    pathname === "/connectors" ||
-    pathname?.startsWith("/connectors/") ||
-    pathname === "/folders" ||
-    pathname?.startsWith("/folders/") ||
-    pathname === "/projects" ||
-    pathname?.startsWith("/projects/")
+  if (!pathname) return false;
+  return WORKSPACE_PATHS.some((path) =>
+    path === "/" ? pathname === "/" : pathname === path || pathname.startsWith(`${path}/`),
   );
+}
+
+function workspaceLabel(pathname: string) {
+  const basePath = Object.keys(PAGE_LABELS).find(
+    (path) => pathname === path || pathname.startsWith(`${path}/`),
+  );
+  return basePath ? (PAGE_LABELS[basePath] ?? "Workspace") : "New chat";
+}
+
+function workspaceTheme(pathname: string): CSSProperties {
+  const basePath = Object.keys(PAGE_ACCENTS).find((path) =>
+    path === "/" ? pathname === "/" : pathname === path || pathname.startsWith(`${path}/`),
+  );
+  const theme = PAGE_ACCENTS[basePath ?? "/"] ?? PAGE_ACCENTS["/"]!;
+  return {
+    "--accent": theme.accent,
+    "--accent-foreground": theme.foreground,
+    "--accent-hover": "color-mix(in oklab, var(--accent) 90%, var(--accent-foreground) 10%)",
+    "--accent-soft": "color-mix(in oklab, var(--accent) 15%, transparent)",
+    "--accent-soft-foreground": "var(--accent)",
+    "--focus": "var(--accent)",
+  } as CSSProperties;
 }
 
 export function WorkspaceShell({ children }: { children: ReactNode }) {
   const pathname = usePathname();
-  // Immersive mode: sidebar folds away and content centers; hovering the left
-  // edge slides the sidebar back over the content without shifting it.
-  const [immersive, setImmersive] = useState(false);
-  const [peek, setPeek] = useState(false);
 
-  // Restore the persisted preference after mount (avoids hydration mismatch).
-  useEffect(() => {
-    try {
-      setImmersive(window.localStorage.getItem(IMMERSIVE_KEY) === "1");
-    } catch {
-      /* ignore */
-    }
-  }, []);
-
-  const toggleImmersive = useCallback(() => {
-    setImmersive((prev) => {
-      const next = !prev;
-      try {
-        window.localStorage.setItem(IMMERSIVE_KEY, next ? "1" : "0");
-      } catch {
-        /* ignore */
-      }
-      if (!next) setPeek(false);
-      return next;
-    });
-  }, []);
-
-  // Esc exits immersive mode.
-  useEffect(() => {
-    if (!immersive) return;
-    const onKey = (event: KeyboardEvent) => {
-      if (event.key === "Escape") {
-        setPeek(false);
-        setImmersive(false);
-        try {
-          window.localStorage.setItem(IMMERSIVE_KEY, "0");
-        } catch {
-          /* ignore */
-        }
-      }
-    };
-    window.addEventListener("keydown", onKey);
-    return () => window.removeEventListener("keydown", onKey);
-  }, [immersive]);
-
-  if (!isWorkspacePath(pathname)) {
-    return <>{children}</>;
-  }
-
-  const sidebarVisible = !immersive || peek;
-  const easing = "cubic-bezier(0.22,1,0.36,1)";
+  if (!isWorkspacePath(pathname)) return <>{children}</>;
 
   return (
     <WorkspaceUnsavedChangesProvider>
       <CocolaRuntimeProvider>
         <WorkspaceToastProvider>
-          <div className="cocola-user-ui workspace-grain relative flex h-screen overflow-hidden bg-background text-foreground">
-            {/* Sidebar spacer — collapses to 0 in immersive mode so the main
-              content smoothly recenters. The actual panel is absolutely
-              positioned on top so peeking never shifts the layout. */}
-            <div
-              className="relative h-full shrink-0 transition-[width] duration-500"
-              style={{ width: immersive ? 0 : "17rem", transitionTimingFunction: easing }}
-            >
-              <div
-                onMouseEnter={() => immersive && setPeek(true)}
-                onMouseLeave={() => immersive && setPeek(false)}
-                className={cn(
-                  "absolute left-0 top-0 z-40 h-full w-[17rem] transition-transform duration-500 will-change-transform",
-                  sidebarVisible ? "translate-x-0" : "-translate-x-full",
-                  immersive && peek ? "shadow-2xl shadow-black/25" : "",
-                )}
-                style={{ transitionTimingFunction: easing }}
-              >
-                <AppSidebar immersive={immersive} onToggleImmersive={toggleImmersive} />
-              </div>
-            </div>
-
-            {/* Left-edge hover trigger — only in immersive mode. */}
-            {immersive ? (
-              <div
-                aria-hidden
-                onMouseEnter={() => setPeek(true)}
-                className="fixed left-0 top-0 z-30 h-full w-3"
-              />
-            ) : null}
-
-            {/* Floating toggle pinned to the same top-left coordinate as the
-              sidebar's own toggle, shown only while the sidebar is hidden so the
-              icon appears to stay in place. */}
-            <button
-              type="button"
-              onClick={toggleImmersive}
-              title="Exit immersive mode"
-              aria-label="Exit immersive mode"
-              aria-pressed={immersive}
-              className={cn(
-                "fixed left-3 top-4 z-50 grid size-8 place-items-center rounded-lg text-foreground/70 transition hover:bg-muted hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/45",
-                sidebarVisible ? "pointer-events-none opacity-0" : "opacity-100",
-              )}
-            >
-              <PanelLeftOpen className="size-[18px]" />
-            </button>
-
-            <main className="min-w-0 flex-1 overflow-hidden bg-transparent">{children}</main>
-            <CommandPalette />
-          </div>
+          <HeroUIWorkspaceLayout pathname={pathname || "/"}>{children}</HeroUIWorkspaceLayout>
         </WorkspaceToastProvider>
       </CocolaRuntimeProvider>
     </WorkspaceUnsavedChangesProvider>
+  );
+}
+
+function HeroUIWorkspaceLayout({ children, pathname }: { children: ReactNode; pathname: string }) {
+  const router = useRouter();
+  const { runWithNavigationGuard } = useWorkspaceUnsavedChanges();
+  const [immersive, setImmersive] = useState(false);
+  const [peeked, setPeeked] = useState(false);
+
+  useEffect(() => {
+    try {
+      setImmersive(window.localStorage.getItem(IMMERSIVE_KEY) === "1");
+    } catch {
+      // The current session can still use immersive mode without persistence.
+    }
+  }, []);
+
+  const updateImmersive = useCallback((nextValue: boolean) => {
+    setPeeked(false);
+    setImmersive(nextValue);
+    try {
+      window.localStorage.setItem(IMMERSIVE_KEY, nextValue ? "1" : "0");
+    } catch {
+      // The current session still reflects the requested mode.
+    }
+  }, []);
+
+  useEffect(() => {
+    if (!immersive) return;
+    const exitOnEscape = (event: KeyboardEvent) => {
+      if (event.key === "Escape") updateImmersive(false);
+    };
+    window.addEventListener("keydown", exitOnEscape);
+    return () => window.removeEventListener("keydown", exitOnEscape);
+  }, [immersive, updateImmersive]);
+
+  const navigate = useCallback(
+    (href: string) => {
+      runWithNavigationGuard(() => router.push(href));
+    },
+    [router, runWithNavigationGuard],
+  );
+
+  return (
+    <>
+      <AppLayout
+        className={`cocola-user-ui cocola-web-shell h-svh ${immersive ? "cocola-web-immersive" : ""}`}
+        navigate={navigate}
+        navbar={
+          <WorkspaceTopbar
+            immersive={immersive}
+            label={workspaceLabel(pathname)}
+            pathname={pathname}
+            onExitImmersive={() => updateImmersive(false)}
+          />
+        }
+        onSidebarOpenChange={(isOpen) => updateImmersive(!isOpen)}
+        scrollMode="content"
+        sidebar={
+          <HeroUIWorkspaceSidebar
+            immersive={immersive}
+            onPeekChange={setPeeked}
+            onToggleImmersive={() => updateImmersive(!immersive)}
+          />
+        }
+        sidebarCollapsible="offcanvas"
+        sidebarDefaultSize="17rem"
+        sidebarOpen={!immersive || peeked}
+        style={workspaceTheme(pathname)}
+      >
+        {children}
+      </AppLayout>
+      {immersive && !peeked ? (
+        <div
+          aria-hidden="true"
+          className="fixed inset-y-0 left-0 z-40 hidden w-3 md:block"
+          onMouseEnter={() => setPeeked(true)}
+        />
+      ) : null}
+      <CommandPalette />
+    </>
+  );
+}
+
+function WorkspaceTopbar({
+  immersive,
+  label,
+  pathname,
+  onExitImmersive,
+}: {
+  immersive: boolean;
+  label: string;
+  pathname: string;
+  onExitImmersive: () => void;
+}) {
+  const isChat = pathname === "/";
+  return (
+    <div className="mx-auto flex h-14 w-full max-w-7xl items-center gap-3 px-4 sm:px-6 lg:px-8">
+      {immersive ? (
+        <Tooltip delay={0}>
+          <Button
+            isIconOnly
+            aria-label="Exit immersive mode"
+            aria-pressed="true"
+            size="sm"
+            variant="ghost"
+            onPress={onExitImmersive}
+          >
+            <ChevronsRight className="size-4" />
+          </Button>
+          <Tooltip.Content>Exit immersive mode · Esc</Tooltip.Content>
+        </Tooltip>
+      ) : (
+        <AppLayout.MenuToggle />
+      )}
+      {isChat ? (
+        <div className="min-w-0 flex-1" />
+      ) : (
+        <div className="min-w-0 flex-1">
+          <p className="text-accent truncate text-[11px] font-semibold tracking-[0.14em] uppercase">
+            Agent workspace
+          </p>
+          <p className="text-foreground truncate text-sm font-medium">{label}</p>
+        </div>
+      )}
+      <WorkspaceThemeToggle />
+    </div>
   );
 }

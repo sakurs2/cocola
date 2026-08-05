@@ -56,8 +56,7 @@ test("Plan Mode product copy is stable and English", () => {
     description: "Review a plan before changes",
   });
   assert.deepEqual(COMPOSER_SLASH_COPY, {
-    defaultPlaceholder:
-      'Ask anything, use "/" to select a skill or command; use @ to select files from Wiki',
+    defaultPlaceholder: "Ask Cocola anything · use / for Skills or Plan mode, @ for Wiki",
     menuAriaLabel: "Choose a skill or command",
     commandsTab: "Commands",
     skillsTab: "Skills",

@@ -1,17 +1,15 @@
 "use client";
 
 import { Archive, ArrowLeft, Check, Loader2, Save } from "lucide-react";
-import Link from "next/link";
+import { Button, Card, Chip, Input, Label, TextArea, TextField } from "@heroui/react";
+import { Sheet } from "@heroui-pro/react/sheet";
 import { useParams, useRouter } from "next/navigation";
 import { useEffect, useMemo, useState } from "react";
 import { AgentAvatar } from "@/components/agents/agent-avatar";
 import { AgentCapabilitiesEditor } from "@/components/agents/agent-capabilities-editor";
+import { HeroUIAgentModelSelect } from "@/components/agents/heroui-agent-model-select";
 import { useWorkspaceToast } from "@/components/assistant-ui/workspace-toast";
 import { FeishuConnectorCard } from "@/components/connectors/feishu-connector-card";
-import { ActionConfirmDialog } from "@/components/ui/action-dialog";
-import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
-import { ModelSelectControl } from "@/components/ui/model-select-control";
 import {
   AGENT_AVATAR_COLORS,
   AGENT_AVATAR_KEYS,
@@ -24,7 +22,6 @@ import {
   type AgentProfile,
   type AgentSkillCatalogItem,
 } from "@/lib/agents";
-import { cn } from "@/lib/utils";
 
 const MAX_INSTRUCTIONS_BYTES = 32 * 1024;
 
@@ -221,254 +218,188 @@ export default function AgentPage() {
 
   if (loading) {
     return (
-      <main className="user-canvas user-page user-theme-cyan grid h-full min-w-0 flex-1 place-items-center text-muted-foreground">
-        <Loader2 className="size-5 animate-spin" />
-      </main>
+      <div className="cocola-web-page grid min-h-64 w-full place-items-center p-8">
+        <Loader2 className="text-muted size-5 animate-spin" />
+      </div>
     );
   }
 
   if (!agent) {
     return (
-      <main className="user-canvas user-page user-theme-cyan h-full min-w-0 flex-1 overflow-y-auto">
-        <div className="mx-auto max-w-3xl px-4 py-8 sm:px-8 sm:py-10">
-          <Link href="/agents" className="user-back-btn inline-grid">
-            <ArrowLeft className="size-4" />
-          </Link>
-          <div className="mt-8 rounded-2xl border border-destructive/25 bg-destructive/10 p-5 text-sm text-destructive">
-            {error || "Agent not found"}
-          </div>
+      <div className="cocola-web-page mx-auto flex w-full max-w-4xl flex-col gap-5 p-4 sm:p-6 lg:p-8">
+        <Button isIconOnly aria-label="Back to Agents" variant="ghost" onPress={() => router.push("/agents")}>
+          <ArrowLeft className="size-4" />
+        </Button>
+        <div className="bg-danger/10 text-danger rounded-2xl p-5 text-sm">
+          {error || "Agent not found"}
         </div>
-      </main>
+      </div>
     );
   }
 
   return (
-    <main className="user-canvas user-page user-theme-cyan h-full min-w-0 flex-1 overflow-y-auto px-4 py-5 sm:px-7 sm:py-7 lg:px-10">
-      <div className="mx-auto max-w-3xl">
-        <header className="flex flex-wrap items-start justify-between gap-4">
-          <div className="flex items-start gap-3.5">
-            <Link href="/agents" aria-label="Back to Agents" className="user-back-btn mt-0.5">
-              <ArrowLeft className="size-4" />
-            </Link>
-            <div className="flex items-center gap-3">
-              <AgentAvatar
-                avatarKey={avatarKey}
-                avatarColor={avatarColor}
-                className="size-11 rounded-2xl"
-                iconClassName="size-5"
-              />
-              <div className="min-w-0">
-                <div className="user-eyebrow">Assistants</div>
-                <h1 className="truncate text-2xl font-bold tracking-tight">{agent.name}</h1>
-                <p className="mt-0.5 text-sm text-muted-foreground">
-                  Changes apply to new conversations.
-                </p>
-              </div>
-            </div>
-          </div>
-          <div className="flex items-center gap-2">
-            <button
-              type="button"
-              onClick={() => void save()}
-              disabled={
-                saving ||
-                !dirty ||
-                !name.trim() ||
-                !selectedModel ||
-                instructionsTooLarge ||
-                models.length === 0
-              }
-              className="user-accent-btn inline-flex h-11 items-center gap-2 rounded-xl px-4 text-sm font-semibold disabled:cursor-not-allowed disabled:opacity-50"
-            >
-              {saving ? (
-                <Loader2 className="size-4 animate-spin" />
-              ) : dirty ? (
-                <Save className="size-4" />
-              ) : (
-                <Check className="size-4" />
-              )}
-              {saving ? "Saving…" : dirty ? "Save" : "Saved"}
-            </button>
-          </div>
-        </header>
+    <div className="cocola-agent-detail cocola-web-page mx-auto flex w-full max-w-4xl flex-col gap-5 p-4 sm:p-6 lg:p-8">
+      <header className="flex flex-wrap items-start justify-between gap-4">
+        <span className="flex min-w-0 items-start gap-3">
+          <Button isIconOnly aria-label="Back to Agents" variant="ghost" onPress={() => router.push("/agents")}>
+            <ArrowLeft className="size-4" />
+          </Button>
+          <AgentAvatar avatarColor={avatarColor} avatarKey={avatarKey} className="size-11 rounded-2xl" iconClassName="size-5" />
+          <span className="min-w-0">
+            <span className="text-accent block text-xs font-semibold tracking-[0.12em] uppercase">Assistants</span>
+            <h1 className="text-foreground mt-1 truncate text-2xl font-semibold tracking-[-0.03em]">{agent.name}</h1>
+            <span className="text-muted mt-1 block text-sm">Changes apply to new conversations.</span>
+          </span>
+        </span>
+        <Button
+          className="cocola-web-page-primary-action"
+          isDisabled={!dirty || !name.trim() || !selectedModel || instructionsTooLarge || models.length === 0}
+          isPending={saving}
+          onPress={() => void save()}
+        >
+          {saving ? null : dirty ? <Save className="size-4" /> : <Check className="size-4" />}
+          {saving ? "Saving…" : dirty ? "Save" : "Saved"}
+        </Button>
+      </header>
 
-        {error ? (
-          <div className="mt-6 rounded-2xl border border-destructive/25 bg-destructive/10 px-4 py-3 text-sm text-destructive">
-            {error}
-          </div>
-        ) : null}
+      {error ? <div className="bg-danger/10 text-danger rounded-2xl px-4 py-3 text-sm">{error}</div> : null}
 
-        <div className="mt-8 space-y-5">
-          <section className="user-panel">
+      <Card className="p-5">
+        <Card.Header className="p-0">
+          <Card.Title>Identity</Card.Title>
+          <Card.Description>How this Agent appears throughout Cocola and Feishu.</Card.Description>
+        </Card.Header>
+        <Card.Content className="grid gap-5 p-0">
+          <div className="grid gap-4 sm:grid-cols-2">
+            <TextField isRequired value={name} variant="secondary" onChange={setName}>
+              <Label>Name</Label>
+              <Input maxLength={100} />
+            </TextField>
+            <TextField value={description} variant="secondary" onChange={setDescription}>
+              <Label>Description</Label>
+              <Input maxLength={500} placeholder="What this Agent is best at" />
+            </TextField>
+          </div>
+          <div className="grid gap-5">
             <div>
-              <h2 className="text-sm font-semibold">Identity</h2>
-              <p className="mt-1 text-sm text-muted-foreground">
-                How this Agent appears in Cocola and Feishu.
-              </p>
-            </div>
-            <div className="mt-5 grid gap-4">
-              <div className="space-y-1.5">
-                <Label htmlFor="agent-name">Name</Label>
-                <Input
-                  id="agent-name"
-                  maxLength={100}
-                  value={name}
-                  onChange={(event) => setName(event.target.value)}
-                />
-              </div>
-              <div className="space-y-1.5">
-                <Label htmlFor="agent-description">Description</Label>
-                <Input
-                  id="agent-description"
-                  maxLength={500}
-                  value={description}
-                  onChange={(event) => setDescription(event.target.value)}
-                  placeholder="What this Agent is best at"
-                />
-              </div>
-              <div className="space-y-2">
-                <Label>Icon</Label>
-                <div className="flex flex-wrap gap-2">
-                  {AGENT_AVATAR_KEYS.map((key) => (
-                    <button
-                      key={key}
-                      type="button"
-                      aria-label={`Use ${key} icon`}
-                      aria-pressed={avatarKey === key}
-                      onClick={() => setAvatarKey(key)}
-                      style={
-                        avatarKey === key
-                          ? { boxShadow: "0 0 0 2px var(--page-accent-focus)" }
-                          : undefined
-                      }
-                      className="rounded-xl p-1.5 transition hover:bg-muted"
-                    >
-                      <AgentAvatar
-                        avatarKey={key}
-                        avatarColor={avatarColor}
-                        className="size-8 rounded-lg"
-                      />
-                    </button>
-                  ))}
-                </div>
-              </div>
-              <div className="space-y-2">
-                <Label>Color</Label>
-                <div className="flex flex-wrap gap-2">
-                  {AGENT_AVATAR_COLORS.map((color) => (
-                    <button
-                      key={color}
-                      type="button"
-                      aria-label={`Use ${color} color`}
-                      aria-pressed={avatarColor === color}
-                      onClick={() => setAvatarColor(color)}
-                      className={cn(
-                        "grid size-8 place-items-center rounded-full ring-2 ring-transparent ring-offset-2 ring-offset-background transition",
-                        avatarColor === color && "ring-foreground/35",
-                      )}
-                    >
-                      <span
-                        className={cn(
-                          "grid size-6 place-items-center rounded-full",
-                          COLOR_SWATCHES[color],
-                        )}
-                      >
-                        {avatarColor === color ? <Check className="size-3.5 text-white" /> : null}
-                      </span>
-                    </button>
-                  ))}
-                </div>
+              <Label>Icon</Label>
+              <div aria-label="Agent icon" className="mt-2 flex flex-wrap gap-2" role="group">
+                {AGENT_AVATAR_KEYS.map((key) => (
+                  <Button
+                    key={key}
+                    aria-label={`Use ${key} icon`}
+                    aria-pressed={avatarKey === key}
+                    className={`h-auto min-h-0 min-w-0 rounded-2xl p-1.5 ${avatarKey === key ? "bg-accent-soft ring-accent/30 ring-1" : ""}`}
+                    variant="ghost"
+                    onPress={() => setAvatarKey(key)}
+                  >
+                    <AgentAvatar avatarColor={avatarColor} avatarKey={key} className="size-9 rounded-xl" iconClassName="size-4" />
+                  </Button>
+                ))}
               </div>
             </div>
-          </section>
+            <div>
+              <Label>Color</Label>
+              <div aria-label="Agent color" className="mt-2 flex flex-wrap gap-2" role="group">
+                {AGENT_AVATAR_COLORS.map((color) => (
+                  <Button
+                    key={color}
+                    aria-label={`Use ${color} color`}
+                    aria-pressed={avatarColor === color}
+                    className={`grid size-9 min-w-9 place-items-center rounded-full p-0 ring-2 ring-transparent ring-offset-2 ring-offset-background ${avatarColor === color ? "ring-foreground/30" : ""}`}
+                    variant="ghost"
+                    onPress={() => setAvatarColor(color)}
+                  >
+                    <span className={`grid size-7 place-items-center rounded-full ${COLOR_SWATCHES[color]}`}>
+                      {avatarColor === color ? <Check className="size-3.5 text-white" /> : null}
+                    </span>
+                  </Button>
+                ))}
+              </div>
+            </div>
+          </div>
+        </Card.Content>
+      </Card>
 
-          <section className="user-panel">
-            <h2 className="text-sm font-semibold">Instructions</h2>
-            <p className="mt-1 text-sm leading-6 text-muted-foreground">
-              Define the Agent&apos;s role and working rules. Platform and admin policies still take
-              precedence; personal AGENTS.md rules are applied after these instructions.
-            </p>
-            <textarea
+      <Card className="p-5">
+        <Card.Header className="flex-row items-start justify-between gap-4 p-0">
+          <span>
+            <Card.Title>Instructions</Card.Title>
+            <Card.Description>Define the Agent&apos;s role and working rules. Platform and administrator policies still take precedence.</Card.Description>
+          </span>
+          <Chip color={instructionsTooLarge ? "danger" : "accent"} size="sm" variant="soft">
+            {instructionsBytes.toLocaleString()} / {MAX_INSTRUCTIONS_BYTES.toLocaleString()} bytes
+          </Chip>
+        </Card.Header>
+        <Card.Content className="p-0">
+          <TextField variant="secondary">
+            <Label className="sr-only">Agent Instructions</Label>
+            <TextArea
+              className="min-h-64 resize-y font-mono text-sm leading-6"
+              placeholder="Describe the Agent's role and working rules…"
               value={instructions}
               onChange={(event) => setInstructions(event.target.value)}
-              placeholder="You are a data analyst. Be concise, verify assumptions, and explain calculations..."
-              className="user-field-input mt-4 min-h-64 w-full resize-y rounded-xl border border-input bg-background px-3 py-2.5 font-mono text-sm leading-6 outline-none placeholder:text-muted-foreground"
             />
-            <div
-              className={cn(
-                "mt-2 text-right text-xs text-muted-foreground",
-                instructionsTooLarge && "text-destructive",
-              )}
-            >
-              {instructionsBytes.toLocaleString()} / {MAX_INSTRUCTIONS_BYTES.toLocaleString()} bytes
-            </div>
-          </section>
+          </TextField>
+          {instructionsTooLarge ? <p className="text-danger mt-2 text-xs">Instructions exceed the 32KB limit and cannot be saved.</p> : null}
+        </Card.Content>
+      </Card>
 
-          <section className="user-panel">
-            <h2 className="text-sm font-semibold">Model</h2>
-            <p className="mt-1 text-sm leading-6 text-muted-foreground">
-              Conversations using this Agent always use this model.
-            </p>
-            <div className="mt-4 space-y-1.5">
-              <Label htmlFor="agent-model">Fixed model</Label>
-              <ModelSelectControl
-                id="agent-model"
-                value={modelID}
-                onValueChange={setModelID}
-                models={models}
-                fallback={{ id: modelID, label: agent.model_alias, suffix: "unavailable" }}
-                className="h-9 shadow-none focus-visible:border-foreground/30 focus-visible:ring-blue-500/20"
-                contentClassName="cocola-user-ui"
-              />
-            </div>
-          </section>
+      <Card className="p-5">
+        <Card.Header className="p-0">
+          <Card.Title>Model</Card.Title>
+          <Card.Description>Conversations using this Agent always use this compatible model.</Card.Description>
+        </Card.Header>
+        <Card.Content className="p-0">
+          <HeroUIAgentModelSelect fallbackLabel={agent.model_alias} models={models} value={modelID} onChange={setModelID} />
+          <p className="text-muted mt-3 text-xs">Only compatible models are available.</p>
+        </Card.Content>
+      </Card>
 
-          <AgentCapabilitiesEditor
-            skills={skillCatalog}
-            skillIDs={skillIDs}
-            onSkillIDsChange={setSkillIDs}
-            knowledgeSources={knowledgeSources}
-            onKnowledgeSourcesChange={setKnowledgeSources}
-          />
-
-          <FeishuConnectorCard agentId={agent.id} />
-
-          <section className="user-panel border border-destructive/20 !bg-destructive/[0.025]">
-            <div className="flex flex-wrap items-center justify-between gap-4">
-              <div>
-                <h2 className="text-sm font-semibold">Archive Agent</h2>
-                <p className="mt-1 text-sm leading-6 text-muted-foreground">
-                  It will disappear from new chats. Existing conversation history remains.
-                </p>
-              </div>
-              <button
-                type="button"
-                onClick={() => {
-                  setError("");
-                  setArchiveOpen(true);
-                }}
-                className="inline-flex h-9 items-center gap-2 rounded-xl border border-destructive/25 px-3 text-sm font-medium text-destructive hover:bg-destructive/10"
-              >
-                <Archive className="size-4" />
-                Archive
-              </button>
-            </div>
-          </section>
-        </div>
-      </div>
-
-      <ActionConfirmDialog
-        open={archiveOpen}
-        title="Archive this Agent?"
-        description="Disconnect its Feishu bot first. Existing conversations stay in history, but this Agent cannot start or continue turns after it is archived."
-        confirmLabel="Archive"
-        busy={archiving}
-        error={archiving ? null : error || null}
-        tone="danger"
-        icon={Archive}
-        onOpenChange={setArchiveOpen}
-        onConfirm={() => void archive()}
+      <AgentCapabilitiesEditor
+        skills={skillCatalog}
+        skillIDs={skillIDs}
+        onSkillIDsChange={setSkillIDs}
+        knowledgeSources={knowledgeSources}
+        onKnowledgeSourcesChange={setKnowledgeSources}
       />
-    </main>
+
+      <FeishuConnectorCard agentId={agent.id} />
+
+      <Card className="border-danger/20 bg-danger/[0.025] p-5">
+        <Card.Header className="flex-row items-center justify-between gap-4 p-0">
+          <span>
+            <Card.Title>Archive Agent</Card.Title>
+            <Card.Description>It will disappear from new chats. Existing conversation history remains.</Card.Description>
+          </span>
+          <Button variant="danger-soft" onPress={() => { setError(""); setArchiveOpen(true); }}>
+            <Archive className="size-4" /> Archive
+          </Button>
+        </Card.Header>
+      </Card>
+
+      <p className="text-muted text-right text-xs tabular-nums">Agent version {agent.version} · Knowledge revision {agent.knowledge_revision}</p>
+
+      <Sheet isOpen={archiveOpen} placement="right" onOpenChange={setArchiveOpen}>
+        <Sheet.Backdrop>
+          <Sheet.Content className="w-full md:w-[440px]">
+            <Sheet.Dialog>
+              <Sheet.CloseTrigger aria-label="Close archive confirmation" />
+              <Sheet.Header>
+                <Sheet.Heading>Archive this Agent?</Sheet.Heading>
+                <p className="text-muted text-sm">Disconnect its Feishu bot first. Existing conversations stay in history, but this Agent cannot start or continue turns after it is archived.</p>
+              </Sheet.Header>
+              <Sheet.Body>
+                {error ? <div className="bg-danger/10 text-danger rounded-2xl px-4 py-3 text-sm">{error}</div> : <div className="bg-surface-secondary rounded-2xl px-4 py-3 text-sm">The Agent is ready to archive. This action cannot be reversed from the user workspace.</div>}
+              </Sheet.Body>
+              <Sheet.Footer className="gap-2">
+                <Button variant="outline" onPress={() => setArchiveOpen(false)}>Cancel</Button>
+                <Button isPending={archiving} variant="danger-soft" onPress={() => void archive()}>Archive Agent</Button>
+              </Sheet.Footer>
+            </Sheet.Dialog>
+          </Sheet.Content>
+        </Sheet.Backdrop>
+      </Sheet>
+    </div>
   );
 }

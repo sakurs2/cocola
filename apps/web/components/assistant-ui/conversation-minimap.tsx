@@ -122,8 +122,8 @@ export function ConversationMinimap() {
                 >
                   <span
                     className={cn(
-                      "h-1.5 rounded-full bg-muted-foreground/40 transition-all duration-150 group-hover/minimap:w-4",
-                      active ? "w-4 bg-primary" : "w-2.5 hover:w-4 hover:bg-muted-foreground/70",
+                      "h-1.5 rounded-full bg-foreground/40 transition-all duration-150 group-hover/minimap:w-4",
+                      active ? "w-4 bg-accent" : "w-2.5 hover:w-4 hover:bg-foreground/70",
                     )}
                   />
                 </button>

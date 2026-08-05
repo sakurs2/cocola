@@ -6,11 +6,12 @@ import {
   useCallback,
   useEffect,
   useMemo,
+  useRef,
   useState,
   type CSSProperties,
   type ComponentType,
-  type ReactNode,
 } from "react";
+import { Button, Card, Checkbox, Chip, Input, Label, SearchField, TextField } from "@heroui/react";
 import Link from "next/link";
 import {
   Blocks,
@@ -34,8 +35,7 @@ import {
   Wand2,
   Zap,
 } from "lucide-react";
-import { cn } from "@/lib/utils";
-import { AdminPagination } from "@/components/admin/admin-ui";
+import { AdminPage, AdminPageHeader, AdminPagination } from "@/components/admin/admin-ui";
 
 type Skill = {
   id: string;
@@ -128,6 +128,7 @@ export default function AdminSkillsPage() {
   const [actionSkillId, setActionSkillId] = useState<string | null>(null);
   const [search, setSearch] = useState("");
   const [error, setError] = useState<string | null>(null);
+  const uploadInputRef = useRef<HTMLInputElement>(null);
 
   const validCandidates = useMemo(() => candidates.filter((c) => c.valid), [candidates]);
 
@@ -318,108 +319,28 @@ export default function AdminSkillsPage() {
   };
 
   return (
-    <main className="admin-theme-amber min-h-screen bg-background text-foreground">
-      <div className="mx-auto w-full max-w-[100rem] space-y-6 px-4 py-5 sm:px-6 sm:py-6">
-        {/* Header */}
-        <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
-          <div className="flex items-center gap-3">
-            <span className="admin-entity-glyph">
-              <SkillsPageIcon className="size-[20px]" />
-            </span>
-            <div>
-              <h1 className="text-xl font-semibold tracking-[-0.02em] text-foreground sm:text-2xl">
-                Skills
-              </h1>
-              <p className="mt-0.5 text-sm text-muted-foreground">
-                Publish shared skills for every user sandbox.
-              </p>
-            </div>
-          </div>
-          <label className="admin-primary-btn inline-flex h-10 cursor-pointer items-center gap-2 rounded-xl px-4 text-sm font-medium">
-            <Upload className="size-4" />
-            Upload zip
-            <input
-              type="file"
-              accept=".zip,application/zip"
-              className="hidden"
-              onChange={chooseFile}
-            />
-          </label>
-        </div>
+    <AdminPage>
+        <AdminPageHeader icon={<SkillsPageIcon className="size-5" />} title="Skills" description="Publish shared skills for every user sandbox." actions={<Button isDisabled={working} onPress={() => uploadInputRef.current?.click()}><Upload className="size-4" />Upload zip</Button>} />
+        <input ref={uploadInputRef} type="file" accept=".zip,application/zip" className="sr-only" onChange={chooseFile} />
 
         {error ? (
-          <div className="rounded-md border border-red-500/30 bg-red-500/10 px-3 py-2 text-sm text-red-600">
+          <div className="bg-danger/10 text-danger rounded-2xl px-4 py-3 text-sm">
             {error}
           </div>
         ) : null}
 
-        {/* Metric cards */}
-        <section className="grid gap-4 md:grid-cols-3">
-          <MetricCard
-            tone="amber"
-            label="Skills"
-            value={stats.total}
-            icon={<Sparkles className="size-[22px]" />}
-          />
-          <MetricCard
-            tone="green"
-            label="Enabled"
-            value={stats.enabled}
-            icon={<CheckCircle2 className="size-[22px]" />}
-          />
-          <MetricCard
-            tone="slate"
-            label="Disabled"
-            value={stats.disabled}
-            icon={<Power className="size-[22px]" />}
-          />
-        </section>
-
-        {/* Import from Git */}
-        <section className="admin-entity-card">
-          <div className="mb-3 text-sm font-semibold">Import from Git</div>
-          <div className="grid gap-3 md:grid-cols-[1fr_160px_160px_auto]">
-            <input
-              className="admin-drawer-form h-10 rounded-xl border border-input bg-background px-3 text-sm outline-none focus:border-ring"
-              placeholder="https://github.com/org/repo.git"
-              value={gitRepo}
-              onChange={(event) => setGitRepo(event.target.value)}
-            />
-            <input
-              className="admin-drawer-form h-10 rounded-xl border border-input bg-background px-3 text-sm outline-none focus:border-ring"
-              placeholder="branch/tag"
-              value={gitRef}
-              onChange={(event) => setGitRef(event.target.value)}
-            />
-            <input
-              className="admin-drawer-form h-10 rounded-xl border border-input bg-background px-3 text-sm outline-none focus:border-ring"
-              placeholder="skills"
-              value={gitPath}
-              onChange={(event) => setGitPath(event.target.value)}
-            />
-            <button
-              className="admin-primary-btn inline-flex h-10 items-center justify-center gap-2 rounded-xl px-4 text-sm font-medium disabled:opacity-50"
-              disabled={gitScanning || working || !gitRepo.trim()}
-              onClick={scanGit}
-            >
-              {gitScanning ? <LoaderCircle className="size-4 animate-spin" /> : null}
-              {gitScanning ? "Scanning" : "Scan"}
-            </button>
-          </div>
-        </section>
+        <Card className="p-5"><Card.Header className="p-0"><Card.Title>Import from Git</Card.Title><Card.Description>Scan a repository for SKILL.md packages.</Card.Description></Card.Header><Card.Content className="mt-5 grid gap-3 p-0 lg:grid-cols-[minmax(0,1fr)_160px_180px_auto] lg:items-end"><TextField value={gitRepo} variant="secondary" onChange={setGitRepo}><Label>Repository</Label><Input placeholder="owner/repository or Git URL" /></TextField><TextField value={gitRef} variant="secondary" onChange={setGitRef}><Label>Ref</Label><Input placeholder="main" /></TextField><TextField value={gitPath} variant="secondary" onChange={setGitPath}><Label>Path</Label><Input placeholder="skills/example" /></TextField><Button isDisabled={gitScanning || working || !gitRepo.trim()} variant="outline" onPress={() => void scanGit()}>{gitScanning ? <LoaderCircle className="size-4 animate-spin" /> : null}{gitScanning ? "Scanning…" : "Scan repository"}</Button></Card.Content></Card>
 
         {candidates.length ? (
-          <section className="admin-entity-card p-0">
-            <div className="flex flex-wrap items-center justify-between gap-3 border-b border-border/60 px-4 py-3">
+          <Card className="p-5">
+            <Card.Header className="flex-row flex-wrap items-center justify-between gap-3 p-0">
               <div className="flex items-center gap-2">
-                <FileArchive className="size-4 text-muted-foreground" />
+                <FileArchive className="size-4 text-muted" />
                 <div className="text-sm font-semibold">Archive candidates</div>
-                <div className="text-xs text-muted-foreground">{validCandidates.length} valid</div>
+                <div className="text-xs text-muted">{validCandidates.length} valid</div>
               </div>
               <div className="flex gap-2">
-                <button
-                  className="admin-card-btn"
-                  onClick={() =>
+                <Button size="sm" variant="outline" onPress={() =>
                     setSelected(
                       allValidSelected
                         ? {}
@@ -428,38 +349,21 @@ export default function AdminSkillsPage() {
                   }
                 >
                   {allValidSelected ? "Clear all" : "Select all"}
-                </button>
-                <button
-                  className="admin-primary-btn rounded-full px-4 py-1.5 text-sm font-medium disabled:opacity-50"
-                  disabled={working || !Object.values(selected).some(Boolean)}
-                  onClick={importSelected}
-                >
+                </Button>
+                <Button size="sm" isDisabled={working || !Object.values(selected).some(Boolean)} onPress={() => void importSelected()}>
                   Import selected
-                </button>
+                </Button>
               </div>
-            </div>
-            <div className="grid gap-3 p-4 md:grid-cols-2">
+            </Card.Header>
+            <Card.Content className="mt-4 grid gap-3 p-0 md:grid-cols-2">
               {candidates.map((candidate) => {
                 const { Icon, style } = glyphFor(candidate.id);
                 return (
                   <label
                     key={`${candidate.path}:${candidate.id}`}
-                    className={cn(
-                      "flex cursor-pointer gap-3 rounded-2xl p-4 transition-shadow",
-                      candidate.valid
-                        ? "bg-white shadow-[0_1px_0_0_rgba(0,0,0,0.02),0_8px_24px_-14px_rgba(0,0,0,0.16)] hover:shadow-[0_12px_30px_-16px_rgba(0,0,0,0.22)]"
-                        : "border border-red-500/30 bg-red-500/5",
-                    )}
+                    className={`flex cursor-pointer gap-3 rounded-2xl p-4 transition-shadow ${candidate.valid ? "bg-surface-secondary hover:shadow-lg" : "border-danger/30 bg-danger/5 border"}`}
                   >
-                    <input
-                      type="checkbox"
-                      className="mt-1 size-4 accent-primary"
-                      checked={!!selected[candidate.id]}
-                      disabled={!candidate.valid}
-                      onChange={(event) =>
-                        setSelected((prev) => ({ ...prev, [candidate.id]: event.target.checked }))
-                      }
-                    />
+                    <Checkbox className="mt-1" isDisabled={!candidate.valid} isSelected={Boolean(selected[candidate.id])} onChange={(checked) => setSelected((current) => ({...current, [candidate.id]: checked}))} />
                     <div className="admin-entity-glyph" style={style}>
                       <Icon className="size-[18px]" />
                     </div>
@@ -467,10 +371,10 @@ export default function AdminSkillsPage() {
                       <div className="truncate text-sm font-semibold">
                         {displaySkillName(candidate)}
                       </div>
-                      <div className="mt-1 line-clamp-2 text-sm text-muted-foreground">
+                      <div className="mt-1 line-clamp-2 text-sm text-muted">
                         {candidate.description || candidate.errors?.join("; ")}
                       </div>
-                      <div className="mt-3 flex flex-wrap gap-2 text-xs text-muted-foreground">
+                      <div className="mt-3 flex flex-wrap gap-2 text-xs text-muted">
                         <span>{candidate.path || "."}</span>
                         <span>{candidate.file_count ?? 0} files</span>
                       </div>
@@ -478,32 +382,25 @@ export default function AdminSkillsPage() {
                   </label>
                 );
               })}
-            </div>
-          </section>
+            </Card.Content>
+          </Card>
         ) : null}
 
         <div className="flex items-center justify-between gap-3">
-          <label className="admin-entity-search">
-            <Search className="size-4" />
-            <input
-              value={search}
-              onChange={(event) => {
-                setSearch(event.target.value);
+          <SearchField aria-label="Search skills" className="w-full max-w-sm" value={search} onChange={(value) => {
+                setSearch(value);
                 setPage(0);
-              }}
-              placeholder="Search skills by name"
-            />
-          </label>
+              }}><SearchField.Group><SearchField.SearchIcon /><SearchField.Input placeholder="Search skills by name" /><SearchField.ClearButton /></SearchField.Group></SearchField>
           {searching ? (
-            <span className="text-xs text-muted-foreground">
+            <span className="text-xs text-muted">
               {visibleSkills.length} match{visibleSkills.length === 1 ? "" : "es"}
             </span>
           ) : null}
         </div>
 
-        <section className="admin-entity-grid md:grid-cols-2 xl:grid-cols-3">
+        <section className="grid items-stretch gap-3 md:grid-cols-2 xl:grid-cols-3">
           {loading ? (
-            <div className="col-span-full flex h-28 items-center justify-center text-muted-foreground">
+            <div className="col-span-full flex h-28 items-center justify-center text-muted">
               <LoaderCircle className="mr-2 size-4 animate-spin" />
               Loading skills
             </div>
@@ -519,9 +416,9 @@ export default function AdminSkillsPage() {
               />
             ))
           ) : (
-            <div className="col-span-full rounded-2xl border border-dashed border-border p-8 text-center text-sm text-muted-foreground">
+            <Card className="border-separator col-span-full border border-dashed p-8 text-center text-sm text-muted">
               {searching ? `No skills match "${search.trim()}".` : "No skills imported yet."}
-            </div>
+            </Card>
           )}
         </section>
         {searching ? null : (
@@ -535,30 +432,7 @@ export default function AdminSkillsPage() {
             onPageChange={setPage}
           />
         )}
-      </div>
-    </main>
-  );
-}
-
-function MetricCard({
-  tone,
-  label,
-  value,
-  icon,
-}: {
-  tone: "amber" | "green" | "slate";
-  label: string;
-  value: number;
-  icon: ReactNode;
-}) {
-  return (
-    <div className="admin-metric-card" data-tone={tone}>
-      <div className="admin-metric-head">
-        <span className="admin-metric-glyph">{icon}</span>
-        <span className="admin-metric-key">{label}</span>
-      </div>
-      <div className="admin-metric-val">{value}</div>
-    </div>
+    </AdminPage>
   );
 }
 
@@ -577,37 +451,25 @@ function SkillCard({
 }) {
   const { Icon, style } = glyphFor(skill.id);
   return (
-    <div className="admin-entity-card admin-entity-card--hover">
-      <Link href={href} className="block">
+    <Card className="cocola-web-catalog-card h-full min-h-64 p-5">
+      <Link href={href} className="block min-w-0">
         <div className="flex items-start gap-3">
           <div className="admin-entity-glyph" style={style}>
             <Icon className="size-[18px]" />
           </div>
           <div className="min-w-0 flex-1">
             <div className="truncate text-sm font-semibold">{displaySkillName(skill)}</div>
-            <p className="mt-1 line-clamp-2 min-h-10 text-sm text-muted-foreground">
+            <p className="mt-1 line-clamp-2 min-h-10 text-sm text-muted">
               {skill.description || "No description"}
             </p>
           </div>
         </div>
         <div className="mt-4 flex flex-wrap gap-2">
-          <span className="admin-entity-tag">{skill.id}</span>
-          <span className="admin-entity-tag">{skill.source_type || "manual"}</span>
-          {skill.enabled ? (
-            <span className="admin-chip admin-chip--ok">
-              <CheckCircle2 />
-              enabled
-            </span>
-          ) : (
-            <span className="admin-chip admin-chip--off">
-              <span className="admin-chip-dot" />
-              disabled
-            </span>
-          )}
+          <Chip size="sm" variant="soft">{skill.id}</Chip><Chip size="sm" variant="soft">{skill.source_type || "manual"}</Chip><Chip color={skill.enabled ? "success" : "default"} size="sm" variant="soft">{skill.enabled ? "enabled" : "disabled"}</Chip>
         </div>
       </Link>
       <div className="mt-auto flex gap-2 pt-4">
-        <button className="admin-card-btn" disabled={working} onClick={onToggle}>
+        <Button size="sm" variant="outline" isDisabled={working} onPress={onToggle}>
           {working ? (
             <LoaderCircle className="size-4 animate-spin" />
           ) : skill.enabled ? (
@@ -616,17 +478,13 @@ function SkillCard({
             <ToggleLeft className="size-4" />
           )}
           {skill.enabled ? "Disable" : "Enable"}
-        </button>
-        <button
-          className="admin-card-btn admin-card-btn--danger"
-          disabled={working}
-          onClick={onDelete}
-        >
+        </Button>
+        <Button size="sm" variant="danger-soft" isDisabled={working} onPress={onDelete}>
           <Trash2 className="size-4" />
           Remove
-        </button>
+        </Button>
       </div>
-    </div>
+    </Card>
   );
 }
 

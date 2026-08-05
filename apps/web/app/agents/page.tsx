@@ -1,15 +1,21 @@
 "use client";
 
-import * as Dialog from "@radix-ui/react-dialog";
-import { ArrowRight, Blocks, Bot, Check, CircleCheck, Loader2, Plus, X } from "lucide-react";
+import { Button, Card, Chip, Input, Label, Separator, TextField } from "@heroui/react";
+import { EmptyState } from "@heroui-pro/react/empty-state";
+import { ArrowRight, Bot, Check, Loader2, Plus } from "lucide-react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useEffect, useMemo, useState, type FormEvent } from "react";
 import { AgentAvatar } from "@/components/agents/agent-avatar";
-import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
+import { HeroUIAgentModelSelect } from "@/components/agents/heroui-agent-model-select";
+import {
+  WorkspaceEntitySheet,
+  WorkspacePageAction,
+  WorkspacePageFrame,
+  WorkspacePageHeader,
+  WorkspaceSectionHeader,
+} from "@/components/heroui-workspace/workspace-ui";
 import { ModelIcon } from "@/components/ui/model-icon";
-import { ModelSelectControl } from "@/components/ui/model-select-control";
 import {
   AGENT_AVATAR_COLORS,
   AGENT_AVATAR_KEYS,
@@ -24,7 +30,6 @@ import {
   type AgentProfile,
   type AgentSkillCatalogItem,
 } from "@/lib/agents";
-import { cn } from "@/lib/utils";
 
 const COLOR_SWATCHES: Record<string, string> = {
   slate: "bg-slate-500",
@@ -58,10 +63,7 @@ export default function AgentsPage() {
     const controller = new AbortController();
     void (async () => {
       try {
-        const response = await fetch("/api/agents", {
-          cache: "no-store",
-          signal: controller.signal,
-        });
+        const response = await fetch("/api/agents", { cache: "no-store", signal: controller.signal });
         if (!response.ok) throw new Error(await agentResponseError(response));
         const rows = (await response.json()) as AgentProfile[];
         if (!controller.signal.aborted) setAgents(Array.isArray(rows) ? rows : []);
@@ -80,22 +82,13 @@ export default function AgentsPage() {
     const controller = new AbortController();
     void (async () => {
       try {
-        const [modelsResponse, runtimesResponse, configResponse, skillsResponse] =
-          await Promise.all([
-            fetch("/api/models", { cache: "no-store", signal: controller.signal }),
-            fetch("/api/agent-runtimes", { cache: "no-store", signal: controller.signal }),
-            fetch("/api/product-config", { cache: "no-store", signal: controller.signal }),
-            fetch("/api/skills/agent-catalog", {
-              cache: "no-store",
-              signal: controller.signal,
-            }),
-          ]);
-        if (
-          !modelsResponse.ok ||
-          !runtimesResponse.ok ||
-          !configResponse.ok ||
-          !skillsResponse.ok
-        ) {
+        const [modelsResponse, runtimesResponse, configResponse, skillsResponse] = await Promise.all([
+          fetch("/api/models", { cache: "no-store", signal: controller.signal }),
+          fetch("/api/agent-runtimes", { cache: "no-store", signal: controller.signal }),
+          fetch("/api/product-config", { cache: "no-store", signal: controller.signal }),
+          fetch("/api/skills/agent-catalog", { cache: "no-store", signal: controller.signal }),
+        ]);
+        if (!modelsResponse.ok || !runtimesResponse.ok || !configResponse.ok || !skillsResponse.ok) {
           throw new Error("Agent capability configuration is temporarily unavailable.");
         }
         const modelRows = normalizeAgentModels(await modelsResponse.json());
@@ -106,9 +99,7 @@ export default function AgentsPage() {
           runtimes.find((item) => item.id === configuredRuntimeID) ??
           runtimes.find((item) => item.isDefault);
         if (!runtime) throw new Error("The default Agent runtime is not configured.");
-        const compatible = modelRows.filter((model) =>
-          model.protocols.includes(runtime.modelProtocol),
-        );
+        const compatible = modelRows.filter((model) => model.protocols.includes(runtime.modelProtocol));
         if (!controller.signal.aborted) {
           setRuntimeID(runtime.id);
           setModels(compatible);
@@ -132,12 +123,15 @@ export default function AgentsPage() {
   );
   const modelsByID = useMemo(() => new Map(models.map((model) => [model.id, model])), [models]);
 
-  const metrics = useMemo(() => {
-    const total = agents.length;
-    const active = agents.filter((agent) => agent.status === "active").length;
-    const skillsWired = agents.reduce((sum, agent) => sum + (agent.skill_ids?.length ?? 0), 0);
-    return { total, active, skillsWired };
-  }, [agents]);
+  const openCreateSheet = () => {
+    setError("");
+    setName("");
+    setDescription("");
+    setAvatarKey(DEFAULT_AGENT_AVATAR_KEY);
+    setAvatarColor(DEFAULT_AGENT_AVATAR_COLOR);
+    setModelID(models.find((model) => model.isDefault)?.id ?? models[0]?.id ?? "");
+    setCreateOpen(true);
+  };
 
   const createAgent = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
@@ -172,344 +166,219 @@ export default function AgentsPage() {
     }
   };
 
-  const openCreateDialog = () => {
-    setError("");
-    setName("");
-    setDescription("");
-    setAvatarKey(DEFAULT_AGENT_AVATAR_KEY);
-    setAvatarColor(DEFAULT_AGENT_AVATAR_COLOR);
-    setModelID(models.find((model) => model.isDefault)?.id ?? models[0]?.id ?? "");
-    setCreateOpen(true);
-  };
-
-  const hasAgents = !loading && agents.length > 0;
-
   return (
-    <main className="user-canvas user-page user-theme-cyan h-full min-w-0 flex-1 overflow-y-auto px-4 py-5 sm:px-6 sm:py-7">
-      <div className="mx-auto max-w-7xl">
-        <header className="flex flex-wrap items-start justify-between gap-4">
-          <div className="flex items-center gap-3.5">
-            <span className="user-page-icon">
-              <Bot className="size-6" />
-            </span>
-            <div className="space-y-1">
-              <div className="user-eyebrow">Assistants</div>
-              <h1 className="text-2xl font-bold tracking-tight">Agents</h1>
-              <p className="text-sm text-muted-foreground">
-                Create focused assistants with their own instructions, model, and Feishu bot.
-              </p>
-            </div>
-          </div>
-          <button
-            type="button"
-            onClick={openCreateDialog}
-            disabled={catalogLoading || !runtimeID || models.length === 0}
-            className="user-accent-btn inline-flex h-11 items-center gap-2 rounded-xl px-4 text-sm font-semibold disabled:cursor-not-allowed disabled:opacity-50"
+    <WorkspacePageFrame>
+      <WorkspacePageHeader
+        action={
+          <WorkspacePageAction
+            isDisabled={catalogLoading || !runtimeID || models.length === 0}
+            onPress={openCreateSheet}
           >
             <Plus className="size-4" />
-            New Agent
-          </button>
-        </header>
+            New agent
+          </WorkspacePageAction>
+        }
+        description="Reusable profiles that bind a model, prompt, skills, knowledge, and channels."
+        icon={<Bot className="size-5" />}
+        title="Agents"
+      />
 
-        {error && !createOpen ? (
-          <div className="mt-5 rounded-2xl border border-destructive/25 bg-destructive/10 px-4 py-3 text-sm text-destructive">
-            {error}
-          </div>
-        ) : null}
+      {error && !createOpen ? (
+        <div className="bg-danger/10 text-danger rounded-2xl px-4 py-3 text-sm">{error}</div>
+      ) : null}
 
-        {hasAgents ? (
-          <div className="mt-7 grid gap-4 sm:grid-cols-3">
-            <MetricCard
-              tone="cyan"
-              icon={<Bot className="size-[22px]" />}
-              label="Total Agents"
-              value={metrics.total}
-              detail="Configured assistants"
-            />
-            <MetricCard
-              tone="emerald"
-              icon={<CircleCheck className="size-[22px]" />}
-              label="Active"
-              value={metrics.active}
-              detail="Ready to run"
-            />
-            <MetricCard
-              tone="amber"
-              icon={<Blocks className="size-[22px]" />}
-              label="Skills wired"
-              value={metrics.skillsWired}
-              detail="Across all Agents"
-            />
-          </div>
-        ) : null}
+      <WorkspaceSectionHeader
+        description={`${agents.length} reusable profile${agents.length === 1 ? "" : "s"} available for new chats.`}
+        title="Your agents"
+      />
 
-        {loading ? (
-          <div className="grid min-h-64 place-items-center text-muted-foreground">
-            <Loader2 className="size-5 animate-spin" />
-          </div>
-        ) : agents.length === 0 ? (
-          <div className="mt-8 flex min-h-[55vh] flex-col items-center justify-center text-center">
-            <span className="user-page-icon size-14 rounded-2xl">
-              <Bot className="size-7" />
-            </span>
-            <h2 className="mt-4 text-base font-semibold">No Agents yet</h2>
-            <p className="mt-1 max-w-sm text-sm leading-6 text-muted-foreground">
-              Start with one clear role. You can still use standard chat without selecting an Agent.
-            </p>
-            <button
-              type="button"
-              onClick={openCreateDialog}
-              disabled={catalogLoading || !runtimeID || models.length === 0}
-              className="user-accent-btn mt-4 inline-flex h-11 items-center gap-2 rounded-xl px-4 text-sm font-semibold disabled:cursor-not-allowed disabled:opacity-50"
-            >
-              <Plus className="size-4" /> New Agent
-            </button>
-          </div>
-        ) : (
-          <>
-            <div className="mt-8 flex items-center gap-2.5">
-              <span className="user-section-title">Your Agents</span>
-              <span className="user-count-badge">{agents.length}</span>
-            </div>
-
-            <div className="mt-4 grid gap-4 md:grid-cols-2 xl:grid-cols-3">
-              {agents.map((agent) => {
-                const model = modelsByID.get(agent.model_route_id);
-                const selectedSkills = (agent.skill_ids ?? [])
-                  .map((id) => skillCatalog.find((skill) => skill.id === id))
-                  .filter((skill): skill is AgentSkillCatalogItem => Boolean(skill?.available));
-                return (
-                  <Link
-                    key={agent.id}
-                    href={`/agents/${encodeURIComponent(agent.id)}`}
-                    className="user-card user-card--hover group relative min-h-[15.5rem] cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/40"
-                  >
-                    <span className="absolute right-4 top-4 grid size-9 place-items-center rounded-xl bg-foreground text-background opacity-0 transition-opacity duration-200 group-hover:opacity-100 group-focus-visible:opacity-100">
-                      <ArrowRight className="size-[18px]" />
-                    </span>
-                    <div className="flex items-start gap-3">
+      {loading ? (
+        <div className="grid min-h-64 place-items-center">
+          <Loader2 className="text-muted size-5 animate-spin" />
+        </div>
+      ) : agents.length ? (
+        <section className="cocola-web-catalog-grid grid items-stretch gap-3 md:grid-cols-2 xl:grid-cols-3">
+          {agents.map((agent) => {
+            const model = modelsByID.get(agent.model_route_id);
+            const selectedSkills = (agent.skill_ids ?? [])
+              .map((id) => skillCatalog.find((skill) => skill.id === id))
+              .filter((skill): skill is AgentSkillCatalogItem => Boolean(skill?.available));
+            return (
+              <Link
+                key={agent.id}
+                className="cocola-web-catalog-trigger group rounded-2xl no-underline outline-none focus-visible:ring-2 focus-visible:ring-focus focus-visible:ring-offset-2 focus-visible:ring-offset-background"
+                href={`/agents/${encodeURIComponent(agent.id)}`}
+              >
+                <Card className="cocola-web-catalog-card h-full min-h-[15.5rem] p-5">
+                  <Card.Content className="flex h-full min-w-0 flex-col items-start p-0">
+                    <span className="flex w-full items-start justify-between gap-3">
                       <AgentAvatar
-                        avatarKey={agent.avatar_key}
                         avatarColor={agent.avatar_color}
-                        className="size-11 rounded-xl"
-                        iconClassName="size-[1.2rem]"
+                        avatarKey={agent.avatar_key}
+                        className="size-11 rounded-2xl"
                       />
-                      <div className="min-w-0 flex-1 pr-8">
-                        <h2 className="user-card-name truncate">{agent.name}</h2>
-                        <p className="user-card-desc mt-1 line-clamp-2 min-h-9">
-                          {agent.description || "No description"}
-                        </p>
-                      </div>
-                    </div>
-
-                    <div className="mt-4 flex min-h-7 flex-wrap items-start gap-1.5">
+                      <Chip
+                        color={agent.status === "active" ? "success" : "warning"}
+                        size="sm"
+                        variant="soft"
+                      >
+                        {agent.status === "active" ? "Active" : "Archived"}
+                      </Chip>
+                    </span>
+                    <span className="text-foreground mt-4 block max-w-full truncate font-semibold">
+                      {agent.name}
+                    </span>
+                    <span className="text-muted mt-1 line-clamp-2 min-h-10 text-sm leading-5">
+                      {agent.description || "No description"}
+                    </span>
+                    <span className="mt-4 flex min-h-7 max-w-full flex-wrap gap-1.5">
                       {(agent.skill_ids ?? []).length === 0 ? (
-                        <span className="user-tag user-tag--muted text-[10px]">Default skills</span>
-                      ) : selectedSkills.length === 0 ? (
-                        <span className="user-tag user-tag--warn text-[10px]">
-                          Custom skills unavailable
-                        </span>
-                      ) : (
+                        <Chip size="sm" variant="soft">Default Skills</Chip>
+                      ) : selectedSkills.length ? (
                         <>
                           {selectedSkills.slice(0, 2).map((skill) => (
-                            <span
-                              key={skill.id}
-                              className="user-tag user-tag--accent max-w-28 truncate text-[10px]"
-                            >
-                              {skill.name}
-                            </span>
+                            <Chip key={skill.id} size="sm" variant="soft">{skill.name}</Chip>
                           ))}
                           {selectedSkills.length > 2 ? (
-                            <span className="user-tag user-tag--muted text-[10px]">
-                              +{selectedSkills.length - 2}
-                            </span>
+                            <Chip size="sm" variant="soft">+{selectedSkills.length - 2}</Chip>
                           ) : null}
                         </>
+                      ) : (
+                        <Chip color="warning" size="sm" variant="soft">Skills unavailable</Chip>
                       )}
-                    </div>
-
-                    <div className="mt-auto border-t border-border/45 pt-3">
-                      <span className="inline-flex max-w-full items-center rounded-lg bg-muted/70 px-2.5 py-1.5 text-xs font-medium text-muted-foreground">
-                        <ModelIcon icon={model?.icon} className="mr-1.5 size-4" bare />
-                        <span className="truncate">{agent.model_alias}</span>
-                      </span>
-                    </div>
-                  </Link>
-                );
-              })}
-            </div>
-          </>
-        )}
-      </div>
-
-      <Dialog.Root open={createOpen} onOpenChange={(next) => !creating && setCreateOpen(next)}>
-        <Dialog.Portal>
-          <Dialog.Overlay className="fixed inset-0 z-[70] bg-slate-950/30 backdrop-blur-[2px]" />
-          <Dialog.Content className="cocola-user-ui user-theme-cyan fixed left-1/2 top-1/2 z-[71] max-h-[calc(100vh-2rem)] w-[calc(100%-2rem)] max-w-lg -translate-x-1/2 -translate-y-1/2 overflow-y-auto rounded-2xl border border-border bg-background p-5 text-foreground shadow-2xl outline-none">
-            <form onSubmit={(event) => void createAgent(event)}>
-              <div className="flex items-start gap-3">
-                <AgentAvatar avatarKey={avatarKey} avatarColor={avatarColor} className="size-10" />
-                <div className="min-w-0 flex-1">
-                  <div className="user-eyebrow">New</div>
-                  <Dialog.Title className="text-base font-semibold">Create an Agent</Dialog.Title>
-                  <Dialog.Description className="mt-1.5 text-sm leading-6 text-muted-foreground">
-                    Give it a focused role. Instructions and Feishu can be configured next.
-                  </Dialog.Description>
-                </div>
-                <Dialog.Close asChild>
-                  <button
-                    type="button"
-                    disabled={creating}
-                    aria-label="Close"
-                    className="grid size-8 place-items-center rounded-lg text-muted-foreground hover:bg-muted"
-                  >
-                    <X className="size-4" />
-                  </button>
-                </Dialog.Close>
-              </div>
-
-              <div className="mt-5 space-y-4">
-                <div className="space-y-1.5">
-                  <Label htmlFor="agent-name">Name</Label>
-                  <Input
-                    id="agent-name"
-                    autoFocus
-                    maxLength={100}
-                    value={name}
-                    onChange={(event) => setName(event.target.value)}
-                    placeholder="Data analyst"
-                  />
-                </div>
-                <div className="space-y-1.5">
-                  <Label htmlFor="agent-description">Description</Label>
-                  <Input
-                    id="agent-description"
-                    maxLength={500}
-                    value={description}
-                    onChange={(event) => setDescription(event.target.value)}
-                    placeholder="Analyzes business data and explains findings clearly"
-                  />
-                </div>
-                <div className="space-y-2">
-                  <Label>Icon</Label>
-                  <div className="flex flex-wrap gap-2">
-                    {AGENT_AVATAR_KEYS.map((key) => (
-                      <button
-                        key={key}
-                        type="button"
-                        aria-label={`Use ${key} icon`}
-                        aria-pressed={avatarKey === key}
-                        onClick={() => setAvatarKey(key)}
-                        style={
-                          avatarKey === key
-                            ? { boxShadow: "0 0 0 2px var(--page-accent-focus)" }
-                            : undefined
-                        }
-                        className="rounded-xl p-1.5 transition hover:bg-muted"
-                      >
-                        <AgentAvatar
-                          avatarKey={key}
-                          avatarColor={avatarColor}
-                          className="size-8 rounded-lg"
-                        />
-                      </button>
-                    ))}
-                  </div>
-                </div>
-                <div className="space-y-2">
-                  <Label>Color</Label>
-                  <div className="flex flex-wrap gap-2">
-                    {AGENT_AVATAR_COLORS.map((color) => (
-                      <button
-                        key={color}
-                        type="button"
-                        aria-label={`Use ${color} color`}
-                        aria-pressed={avatarColor === color}
-                        onClick={() => setAvatarColor(color)}
-                        className={cn(
-                          "grid size-8 place-items-center rounded-full ring-2 ring-transparent ring-offset-2 ring-offset-background transition",
-                          avatarColor === color && "ring-foreground/35",
-                        )}
-                      >
-                        <span
-                          className={cn(
-                            "grid size-6 place-items-center rounded-full",
-                            COLOR_SWATCHES[color],
-                          )}
-                        >
-                          {avatarColor === color ? <Check className="size-3.5 text-white" /> : null}
+                    </span>
+                    <span className="mt-auto block w-full">
+                      <Separator className="mb-4 mt-3" />
+                      <span className="text-muted flex w-full min-w-0 items-center justify-between gap-3 text-xs">
+                        <span className="bg-surface-secondary flex min-w-0 items-center gap-2 rounded-xl px-2.5 py-1.5">
+                          <ModelIcon className="size-4 shrink-0" icon={model?.icon} bare />
+                          <span className="truncate">{agent.model_alias}</span>
                         </span>
-                      </button>
-                    ))}
-                  </div>
-                </div>
-                <div className="space-y-1.5">
-                  <Label htmlFor="agent-model">Model</Label>
-                  <ModelSelectControl
-                    id="agent-model"
-                    value={modelID}
-                    onValueChange={setModelID}
-                    models={models}
-                    className="h-9 shadow-none focus-visible:border-foreground/30 focus-visible:ring-blue-500/20"
-                    contentClassName="cocola-user-ui"
-                  />
-                </div>
-              </div>
+                        <span className="text-accent flex shrink-0 items-center gap-1 font-medium">
+                          Open Agent
+                          <ArrowRight className="cocola-web-catalog-card-arrow size-3.5" />
+                        </span>
+                      </span>
+                    </span>
+                  </Card.Content>
+                </Card>
+              </Link>
+            );
+          })}
+        </section>
+      ) : (
+        <Card className="p-5">
+          <EmptyState>
+            <EmptyState.Header>
+              <EmptyState.Media variant="icon"><Bot className="text-cyan-500" /></EmptyState.Media>
+              <EmptyState.Title>No Agents yet</EmptyState.Title>
+              <EmptyState.Description>
+                Create a focused profile, or continue using standard chat without an Agent.
+              </EmptyState.Description>
+            </EmptyState.Header>
+            <EmptyState.Content>
+              <Button size="sm" variant="outline" onPress={openCreateSheet}>
+                <Plus className="size-4" /> New agent
+              </Button>
+            </EmptyState.Content>
+          </EmptyState>
+        </Card>
+      )}
 
-              {error ? (
-                <div className="mt-4 rounded-xl bg-destructive/10 px-3 py-2 text-sm text-destructive">
-                  {error}
-                </div>
-              ) : null}
+      <WorkspaceEntitySheet
+        description="Create a focused identity and choose its compatible model. Configure capabilities and channels next."
+        isOpen={createOpen}
+        title="New Agent"
+        onOpenChange={(next) => !creating && setCreateOpen(next)}
+      >
+        <form className="grid gap-5" onSubmit={createAgent}>
+          <div className="bg-surface-secondary flex items-center gap-3 rounded-2xl px-4 py-3">
+            <AgentAvatar avatarColor={avatarColor} avatarKey={avatarKey} className="size-10" />
+            <span className="min-w-0">
+              <span className="block truncate text-sm font-medium">{name.trim() || "New Agent"}</span>
+              <span className="text-muted mt-1 block text-xs">
+                Instructions, knowledge, and channels are configured after creation.
+              </span>
+            </span>
+          </div>
 
-              <div className="mt-5 flex justify-end gap-2">
-                <Dialog.Close asChild>
-                  <button
-                    type="button"
-                    disabled={creating}
-                    className="h-9 rounded-xl px-3 text-sm text-muted-foreground hover:bg-muted"
-                  >
-                    Cancel
-                  </button>
-                </Dialog.Close>
-                <button
-                  type="submit"
-                  disabled={creating || !name.trim() || !selectedModel}
-                  className="user-accent-btn inline-flex h-9 items-center gap-2 rounded-xl px-4 text-sm font-semibold disabled:cursor-not-allowed disabled:opacity-50"
+          <TextField isRequired value={name} onChange={setName}>
+            <Label>Name</Label>
+            <Input autoFocus maxLength={100} placeholder="Data analyst" />
+          </TextField>
+          <TextField value={description} onChange={setDescription}>
+            <Label>Description</Label>
+            <Input maxLength={500} placeholder="What this Agent is best at" />
+          </TextField>
+
+          <div>
+            <Label>Icon</Label>
+            <div className="mt-2 flex flex-wrap gap-2">
+              {AGENT_AVATAR_KEYS.map((key) => (
+                <Button
+                  key={key}
+                  isIconOnly
+                  aria-label={`Use ${key} icon`}
+                  className={avatarKey === key ? "ring-2 ring-accent" : ""}
+                  size="sm"
+                  variant="ghost"
+                  onPress={() => setAvatarKey(key)}
                 >
-                  {creating ? <Loader2 className="size-4 animate-spin" /> : null}
-                  {creating ? "Creating…" : "Create Agent"}
-                </button>
-              </div>
-            </form>
-          </Dialog.Content>
-        </Dialog.Portal>
-      </Dialog.Root>
-    </main>
-  );
-}
+                  <AgentAvatar avatarColor={avatarColor} avatarKey={key} className="size-8 rounded-lg" />
+                </Button>
+              ))}
+            </div>
+          </div>
 
-function MetricCard({
-  tone,
-  icon,
-  label,
-  value,
-  detail,
-}: {
-  tone: "cyan" | "indigo" | "emerald" | "amber";
-  icon: React.ReactNode;
-  label: string;
-  value: number;
-  detail: string;
-}) {
-  return (
-    <div className="user-metric-card" data-tone={tone}>
-      <div className="user-metric-head">
-        <span className="user-metric-glyph">{icon}</span>
-        <span className="user-metric-key">{label}</span>
-      </div>
-      <div className="user-metric-val">{value}</div>
-      <div className="user-metric-detail">{detail}</div>
-    </div>
+          <div>
+            <Label>Color</Label>
+            <div className="mt-2 flex flex-wrap gap-2">
+              {AGENT_AVATAR_COLORS.map((color) => (
+                <Button
+                  key={color}
+                  isIconOnly
+                  aria-label={`Use ${color} color`}
+                  className={avatarColor === color ? "ring-2 ring-foreground/30" : ""}
+                  size="sm"
+                  variant="ghost"
+                  onPress={() => setAvatarColor(color)}
+                >
+                  <span className={`grid size-6 place-items-center rounded-full ${COLOR_SWATCHES[color]}`}>
+                    {avatarColor === color ? <Check className="size-3.5 text-white" /> : null}
+                  </span>
+                </Button>
+              ))}
+            </div>
+          </div>
+
+          <div>
+            <Label>Model</Label>
+            <div className="mt-2">
+              <HeroUIAgentModelSelect
+                models={models}
+                value={modelID}
+                onChange={setModelID}
+              />
+            </div>
+          </div>
+
+          {error ? <div className="bg-danger/10 text-danger rounded-xl px-3 py-2 text-sm">{error}</div> : null}
+
+          <div className="flex justify-end gap-2">
+            <Button isDisabled={creating} variant="outline" onPress={() => setCreateOpen(false)}>
+              Cancel
+            </Button>
+            <Button
+              isDisabled={creating || !name.trim() || !selectedModel}
+              isPending={creating}
+              type="submit"
+              variant="primary"
+            >
+              {creating ? "Creating…" : "Create Agent"}
+            </Button>
+          </div>
+        </form>
+      </WorkspaceEntitySheet>
+    </WorkspacePageFrame>
   );
 }

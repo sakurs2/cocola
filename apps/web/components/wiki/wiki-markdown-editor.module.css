@@ -1,33 +1,29 @@
 .editorShell {
-  --wiki-editor-ink: #292824;
-  --wiki-editor-soft: #706d65;
-  --wiki-editor-faint: #9a978f;
-  --wiki-editor-line: #e8e6e1;
-  --wiki-editor-hover: #f1f0ed;
-  --wiki-editor-active: #e8efff;
-  --wiki-editor-accent: #2563eb;
+  --wiki-editor-ink: var(--foreground);
+  --wiki-editor-soft: var(--muted);
+  --wiki-editor-faint: color-mix(in oklab, var(--muted) 72%, transparent);
+  --wiki-editor-line: var(--separator);
+  --wiki-editor-active: var(--accent-soft);
+  --wiki-editor-accent: var(--accent);
   display: flex;
   min-height: 100%;
   flex-direction: column;
   overflow: hidden;
   border: 1px solid var(--wiki-editor-line);
   border-radius: 18px;
-  background: #fff;
+  background: var(--surface);
   color: var(--wiki-editor-ink);
-  box-shadow:
-    0 1px 2px rgb(15 23 42 / 4%),
-    0 12px 34px rgb(15 23 42 / 6%);
+  box-shadow: var(--shadow-surface);
   transition:
     border-color 140ms ease,
     box-shadow 140ms ease;
 }
 
 .editorShell:focus-within {
-  border-color: rgb(37 99 235 / 35%);
+  border-color: color-mix(in oklab, var(--accent) 40%, var(--separator));
   box-shadow:
-    0 1px 2px rgb(15 23 42 / 4%),
-    0 12px 34px rgb(15 23 42 / 7%),
-    0 0 0 3px rgb(37 99 235 / 7%);
+    var(--shadow-surface),
+    0 0 0 3px var(--accent-soft);
 }
 
 .toolbar {
@@ -41,7 +37,7 @@
   min-height: 52px;
   padding: 9px 12px;
   border-bottom: 1px solid var(--wiki-editor-line);
-  background: rgb(252 252 251 / 94%);
+  background: color-mix(in oklab, var(--surface) 94%, transparent);
   backdrop-filter: saturate(1.35) blur(10px);
 }
 
@@ -60,43 +56,11 @@
 }
 
 .toolbarButton {
-  display: inline-flex;
-  width: 34px;
-  height: 34px;
-  align-items: center;
-  justify-content: center;
-  border: 1px solid transparent;
-  border-radius: 9px;
-  background: transparent;
-  color: var(--wiki-editor-soft);
-  transition:
-    background 120ms ease,
-    color 120ms ease,
-    box-shadow 120ms ease;
-}
-
-.toolbarButton:hover:not(:disabled) {
-  background: var(--wiki-editor-hover);
-  color: var(--wiki-editor-ink);
-}
-
-.toolbarButton:active:not(:disabled) {
-  background: #e8e6e2;
+  flex: 0 0 auto;
 }
 
 .toolbarButtonActive {
-  background: var(--wiki-editor-active);
   color: var(--wiki-editor-accent);
-}
-
-.toolbarButton:focus-visible {
-  outline: 2px solid rgb(37 99 235 / 65%);
-  outline-offset: 1px;
-}
-
-.toolbarButton:disabled {
-  cursor: not-allowed;
-  opacity: 0.32;
 }
 
 .toolbarButton svg {
@@ -119,10 +83,10 @@
 }
 
 .sourceWarning {
-  border-bottom: 1px solid #fde68a;
-  background: #fffbeb;
+  border-bottom: 1px solid color-mix(in oklab, var(--warning) 32%, var(--separator));
+  background: var(--warning-soft);
   padding: 12px 16px;
-  color: #92400e;
+  color: var(--warning-soft-foreground);
   font-size: 13px;
   line-height: 1.5;
 }
@@ -132,7 +96,7 @@
   width: 100%;
   resize: none;
   border: 0;
-  background: #fff;
+  background: var(--surface);
   padding: 2rem;
   outline: none;
   color: var(--wiki-editor-ink);
@@ -144,7 +108,7 @@
 }
 
 .sourceEditor:read-only {
-  background: #fafafa;
+  background: var(--surface-secondary);
   color: var(--wiki-editor-soft);
 }
 
@@ -182,7 +146,7 @@
 .proseMirror h1,
 .proseMirror h2,
 .proseMirror h3 {
-  color: #191816;
+  color: var(--foreground);
   font-weight: 720;
   line-height: 1.28;
   letter-spacing: -0.025em;
@@ -235,26 +199,26 @@
 .proseMirror blockquote {
   margin: 0.8rem 0;
   padding: 0.2rem 0 0.2rem 1rem;
-  border-left: 3px solid #383632;
-  color: #3c3a35;
+  border-left: 3px solid color-mix(in oklab, var(--accent) 62%, var(--separator));
+  color: var(--foreground);
 }
 
 .proseMirror strong {
-  color: #191816;
+  color: var(--foreground);
   font-weight: 720;
 }
 
 .proseMirror mark {
   border-radius: 4px;
-  background: #fde9ad;
+  background: var(--warning-soft);
   padding: 0.08em 0.16em;
   box-decoration-break: clone;
 }
 
 .proseMirror a {
-  color: #2257b8;
+  color: var(--accent);
   text-decoration: underline;
-  text-decoration-color: rgb(34 87 184 / 34%);
+  text-decoration-color: color-mix(in oklab, var(--accent) 34%, transparent);
   text-underline-offset: 3px;
 }
 
@@ -264,8 +228,8 @@
 
 .proseMirror code {
   border-radius: 5px;
-  background: rgb(135 131 120 / 14%);
-  color: #c24152;
+  background: var(--surface-secondary);
+  color: var(--accent);
   padding: 0.16em 0.38em;
   font-family: "SFMono-Regular", Consolas, "Liberation Mono", monospace;
   font-size: 0.86em;
@@ -276,9 +240,9 @@
   overflow-x: auto;
   border: 1px solid var(--wiki-editor-line);
   border-radius: 11px;
-  background: #f7f6f3;
+  background: var(--surface-secondary);
   padding: 1rem 1.1rem;
-  color: #37352f;
+  color: var(--foreground);
   font-size: 0.88em;
   line-height: 1.65;
 }
@@ -319,14 +283,14 @@
 }
 
 .proseMirror th {
-  background: #f7f6f3;
-  color: #292824;
+  background: var(--surface-secondary);
+  color: var(--foreground);
   font-weight: 650;
   text-align: left;
 }
 
 .proseMirror :global(.selectedCell) {
-  background: rgb(37 99 235 / 9%);
+  background: var(--accent-soft);
 }
 
 .proseMirror ul[data-type="taskList"] {
@@ -383,7 +347,7 @@
 }
 
 .proseMirror ::selection {
-  background: rgb(37 99 235 / 18%);
+  background: color-mix(in oklab, var(--accent) 20%, transparent);
 }
 
 @media (max-width: 760px) {
