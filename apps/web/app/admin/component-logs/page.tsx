@@ -86,7 +86,8 @@ export default function ComponentLogsPage() {
       <Card className="p-4">
         <Card.Content className="grid gap-3 p-0 md:grid-cols-[minmax(240px,1fr)_160px_120px] md:items-end">
           <SelectControl
-            className="w-full"
+            ariaLabel="Service"
+            className="h-10 w-full rounded-xl"
             value={selected}
             onValueChange={(value) => {
               setSelected(value);
@@ -99,8 +100,8 @@ export default function ComponentLogsPage() {
             }
             contentClassName="cocola-admin-ui"
           />
-          <TextField value={String(lineCount)} variant="secondary" onChange={(value) => setLineCount(Math.max(1, Math.min(2000, Number(value) || 1)))}><Label>Lines</Label><Input type="number" min={1} max={2000} /></TextField>
-          <Button isDisabled={loading} isPending={loading} onPress={() => void load()}>Load</Button>
+          <TextField value={String(lineCount)} variant="secondary" onChange={(value) => setLineCount(Math.max(1, Math.min(2000, Number(value) || 1)))}><Label>Lines</Label><Input className="h-10" type="number" min={1} max={2000} /></TextField>
+          <Button className="h-10" isDisabled={loading} isPending={loading} onPress={() => void load()}>Load</Button>
         </Card.Content>
       </Card>
 

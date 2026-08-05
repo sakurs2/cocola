@@ -15,6 +15,7 @@ import {
   Link,
   PlugConnection,
   Plus,
+  ShieldCheck,
   Sparkles,
 } from "@gravity-ui/icons";
 import { Button, Dropdown, Tooltip } from "@heroui/react";
@@ -35,6 +36,7 @@ import { useWorkspaceUnsavedChanges } from "@/components/assistant-ui/workspace-
 import { useWorkspaceToast } from "@/components/assistant-ui/workspace-toast";
 
 type WorkspaceNavigationItem = {
+  adminOnly?: boolean;
   href: string;
   icon: ComponentType<{ className?: string }>;
   iconClassName: string;
@@ -48,6 +50,13 @@ const WORKSPACE_NAVIGATION: WorkspaceNavigationItem[] = [
   { href: "/mcps", icon: PlugConnection, iconClassName: "text-orange-600", label: "MCP" },
   { href: "/wiki", icon: BookOpen, iconClassName: "text-blue-600", label: "Wiki" },
   { href: "/connectors", icon: Link, iconClassName: "text-emerald-600", label: "Connectors" },
+  {
+    adminOnly: true,
+    href: "/admin",
+    icon: ShieldCheck,
+    iconClassName: "text-slate-500",
+    label: "Admin",
+  },
 ];
 
 type WorkspaceResourceItem = WorkspaceNavigationItem & { createHref: string };
@@ -129,9 +138,13 @@ function HeroUIWorkspaceSidebarContents({
   const [deleteError, setDeleteError] = useState<string | null>(null);
   const [taskCount, setTaskCount] = useState<number | null>(null);
 
+  const isAdmin = session?.user?.role === "admin";
   const userLabel = session?.user?.name || session?.user?.email || "User";
   const userSubtitle = session?.user?.email || session?.user?.role || "Workspace member";
   const userInitial = userLabel.trim().slice(0, 1).toUpperCase() || "U";
+  const visibleWorkspaceNavigation = WORKSPACE_NAVIGATION.filter(
+    (item) => !item.adminOnly || isAdmin,
+  );
   const regularConversations = conversations.filter((conversation) => !conversation.project_id);
 
   useEffect(() => {
@@ -265,7 +278,7 @@ function HeroUIWorkspaceSidebarContents({
 
         <Sidebar.Group>
           <Sidebar.Menu aria-label="Workspace tools">
-            {WORKSPACE_NAVIGATION.map((item) => (
+            {visibleWorkspaceNavigation.map((item) => (
               <WorkspaceSidebarItem
                 key={item.href}
                 id={`${idPrefix}${item.label.toLowerCase()}`}

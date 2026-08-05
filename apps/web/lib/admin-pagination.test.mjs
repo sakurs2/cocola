@@ -36,7 +36,7 @@ test("admin Skills and Session Storage request bounded server pages", () => {
   assert.match(storageSource, /const SESSION_STORAGE_PAGE_SIZE = 25/);
   assert.match(storageSource, /offset: String\(volumePage \* SESSION_STORAGE_PAGE_SIZE\)/);
   assert.match(storageSource, /requested_bytes/);
-  assert.match(storageSource, /detail=\{`\$\{volumeTotal\} volumes/);
+  assert.match(storageSource, /<AdminPagination[\s\S]*total=\{volumeTotal\}[\s\S]*label="volumes"/);
 });
 
 test("Agent Runs fetch one lookahead row so exact full pages cannot open an empty next page", () => {

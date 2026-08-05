@@ -216,16 +216,28 @@ function NodeCard({
 }) {
   const s = statusStyle(node.status);
   return (
-    <Button
-      variant="ghost"
-      onPress={onSelect}
+    <Card
       style={style}
-      className={`cocola-admin-module-card group h-28 w-full min-w-0 justify-start whitespace-normal rounded-2xl p-4 text-left ${
-        selected ? "ring-accent bg-accent-soft ring-2" : ""
+      className={`group h-28 w-full min-w-0 overflow-hidden border p-0 transition-[transform,box-shadow,border-color] duration-200 hover:-translate-y-1 hover:shadow-lg ${
+        selected ? "border-accent ring-accent ring-2" : "border-separator/70"
       } ${className ?? ""}`}
     >
-      <span className="flex h-full w-full min-w-0 flex-col items-start"><span className="flex w-full items-center justify-between gap-2"><Server className={`size-5 ${s.tone === "green" ? "text-success" : s.tone === "amber" ? "text-warning" : s.tone === "red" ? "text-danger" : "text-muted"}`} /><AdminStatusBadge tone={s.tone}>{s.label}</AdminStatusBadge></span><span className="mt-auto min-w-0"><span className="block truncate text-sm font-semibold">{node.label}</span><span className="text-muted block truncate font-mono text-[10px]">{node.kind}</span></span></span>
-    </Button>
+      <button
+        type="button"
+        aria-pressed={selected}
+        onClick={onSelect}
+        className="flex h-full w-full min-w-0 flex-col items-start p-4 text-left outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-focus"
+      >
+        <span className="flex w-full items-center justify-between gap-2">
+          <Server className={`size-5 transition-transform duration-200 group-hover:-translate-y-0.5 group-hover:scale-105 ${s.tone === "green" ? "text-success" : s.tone === "amber" ? "text-warning" : s.tone === "red" ? "text-danger" : "text-muted"}`} />
+          <AdminStatusBadge tone={s.tone}>{s.label}</AdminStatusBadge>
+        </span>
+        <span className="mt-auto min-w-0">
+          <span className="block truncate text-sm font-semibold">{node.label}</span>
+          <span className="text-muted block truncate font-mono text-[10px]">{node.kind}</span>
+        </span>
+      </button>
+    </Card>
   );
 }
 

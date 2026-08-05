@@ -85,6 +85,13 @@ test("the empty thread preserves the HeroUI demo welcome composition", () => {
 test("the real workspace uses the approved HeroUI demo shell treatment", () => {
   assert.match(sidebarSource, /cocola-web-new-chat/);
   assert.match(sidebarSource, /cocola-sidebar-tab/);
+  assert.match(sidebarSource, /adminOnly: true,[\s\S]*?href: "\/admin"/);
+  assert.match(sidebarSource, /const isAdmin = session\?\.user\?\.role === "admin"/);
+  assert.match(
+    sidebarSource,
+    /const visibleWorkspaceNavigation = WORKSPACE_NAVIGATION\.filter\([\s\S]*?!item\.adminOnly \|\| isAdmin/,
+  );
+  assert.match(sidebarSource, /\{visibleWorkspaceNavigation\.map\(\(item\) => \(/);
   assert.match(sidebarSource, /<Sidebar\.MenuActions className="cocola-sidebar-create-actions">/);
   assert.match(sidebarSource, /className="size-7 min-h-7 min-w-7 p-0"/);
   assert.match(
