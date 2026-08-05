@@ -13,6 +13,7 @@ import {
 import { Thread } from "@/components/assistant-ui/thread";
 import { ConversationMinimap } from "@/components/assistant-ui/conversation-minimap";
 import { WorkspaceDock } from "@/components/assistant-ui/workspace-panel";
+import { WorkspaceThemeToggle } from "@/components/assistant-ui/workspace-theme-toggle";
 import { useWorkspaceToast } from "@/components/assistant-ui/workspace-toast";
 import { cn } from "@/lib/utils";
 import { AnimatePresence, motion } from "framer-motion";
@@ -231,40 +232,41 @@ function TopBar({
   const hasMessages = useThread((t) => t.messages.length > 0);
   const canShare = conversations.some((conversation) => conversation.id === activeSessionId);
 
-  if (!hasMessages) return null;
-
   return (
     <div className="pointer-events-none absolute right-0 top-0 z-20">
       <div className="flex items-center gap-3 px-4 py-2">
         <div className="pointer-events-auto ml-auto flex items-center gap-2">
-          {environmentStatus ? (
+          {hasMessages && environmentStatus ? (
             <SessionStatusButton status={environmentStatus} onClick={onOpenStatus} />
           ) : null}
-          <Tooltip>
-            <Tooltip.Trigger>
-              <Button
-                isIconOnly
-                aria-label={
-                  canShare ? "Open workspace" : "Start a conversation to browse its workspace"
-                }
-                aria-pressed={workspaceOpen}
-                isDisabled={!canShare}
-                onPress={onOpenWorkspace}
-                variant="ghost"
-                className={cn(
-                  "size-8 min-w-8 rounded-full",
-                  workspaceOpen
-                    ? "bg-accent/10 text-accent"
-                    : "text-muted hover:bg-surface-secondary hover:text-foreground",
-                )}
-              >
-                <PanelRight className="size-4" />
-              </Button>
-            </Tooltip.Trigger>
-            <Tooltip.Content>
-              {canShare ? "Open workspace" : "Start a conversation to browse its workspace"}
-            </Tooltip.Content>
-          </Tooltip>
+          {hasMessages ? (
+            <Tooltip>
+              <Tooltip.Trigger>
+                <Button
+                  isIconOnly
+                  aria-label={
+                    canShare ? "Open workspace" : "Start a conversation to browse its workspace"
+                  }
+                  aria-pressed={workspaceOpen}
+                  isDisabled={!canShare}
+                  onPress={onOpenWorkspace}
+                  variant="ghost"
+                  className={cn(
+                    "size-8 min-w-8 rounded-full",
+                    workspaceOpen
+                      ? "bg-accent/10 text-accent"
+                      : "text-muted hover:bg-surface-secondary hover:text-foreground",
+                  )}
+                >
+                  <PanelRight className="size-4" />
+                </Button>
+              </Tooltip.Trigger>
+              <Tooltip.Content>
+                {canShare ? "Open workspace" : "Start a conversation to browse its workspace"}
+              </Tooltip.Content>
+            </Tooltip>
+          ) : null}
+          <WorkspaceThemeToggle />
         </div>
       </div>
     </div>

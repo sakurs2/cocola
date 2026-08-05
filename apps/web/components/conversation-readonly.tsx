@@ -261,7 +261,7 @@ export function ConversationReadOnly({ conversationId }: { conversationId: strin
 
         <div
           className="flex flex-col items-center"
-          style={{ ["--thread-max-width" as string]: "72rem" }}
+          style={{ ["--thread-max-width" as string]: "58rem" }}
         >
           {state.messages.map((message, index) => (
             <MessageBubble
@@ -294,7 +294,7 @@ function MessageBubble({
     return (
       <article className="grid w-full max-w-[var(--thread-max-width)] auto-rows-auto grid-cols-[minmax(72px,1fr)_auto] gap-y-1 py-3">
         <div className="col-start-2 row-start-1 flex flex-col items-end gap-1.5">
-          <div className="max-w-[calc(var(--thread-max-width)*0.8)] whitespace-pre-wrap break-words rounded-2xl bg-surface-secondary px-4 py-2 text-sm text-foreground">
+          <div className="max-w-[min(calc(var(--thread-max-width)*0.72),42rem)] whitespace-pre-wrap break-words rounded-xl bg-surface-secondary px-3 py-1.5 text-sm text-foreground">
             {parts.length > 0 ? (
               parts.map((part, index) => (
                 <MessagePartView key={`${message.id}-${index}`} part={part} role={message.role} />

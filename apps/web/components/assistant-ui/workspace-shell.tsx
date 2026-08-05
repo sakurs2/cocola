@@ -104,6 +104,7 @@ function HeroUIWorkspaceLayout({ children, pathname }: { children: ReactNode; pa
   const { runWithNavigationGuard } = useWorkspaceUnsavedChanges();
   const [immersive, setImmersive] = useState(false);
   const [peeked, setPeeked] = useState(false);
+  const isChat = pathname === "/";
 
   useEffect(() => {
     try {
@@ -145,12 +146,14 @@ function HeroUIWorkspaceLayout({ children, pathname }: { children: ReactNode; pa
         className={`cocola-user-ui cocola-web-shell h-svh ${immersive ? "cocola-web-immersive" : ""}`}
         navigate={navigate}
         navbar={
-          <WorkspaceTopbar
-            immersive={immersive}
-            label={workspaceLabel(pathname)}
-            pathname={pathname}
-            onExitImmersive={() => updateImmersive(false)}
-          />
+          isChat ? undefined : (
+            <WorkspaceTopbar
+              immersive={immersive}
+              label={workspaceLabel(pathname)}
+              pathname={pathname}
+              onExitImmersive={() => updateImmersive(false)}
+            />
+          )
         }
         onSidebarOpenChange={(isOpen) => updateImmersive(!isOpen)}
         scrollMode="content"
@@ -168,6 +171,22 @@ function HeroUIWorkspaceLayout({ children, pathname }: { children: ReactNode; pa
       >
         {children}
       </AppLayout>
+      {isChat && immersive ? (
+        <Tooltip delay={0}>
+          <Button
+            isIconOnly
+            aria-label="Exit immersive mode"
+            aria-pressed="true"
+            className="fixed left-1 top-2 z-50"
+            size="sm"
+            variant="ghost"
+            onPress={() => updateImmersive(false)}
+          >
+            <ChevronsRight className="size-4" />
+          </Button>
+          <Tooltip.Content>Exit immersive mode · Esc</Tooltip.Content>
+        </Tooltip>
+      ) : null}
       {immersive && !peeked ? (
         <div
           aria-hidden="true"

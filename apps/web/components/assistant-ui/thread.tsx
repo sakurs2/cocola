@@ -135,7 +135,7 @@ export const Thread: FC = () => {
     <WikiMentionCatalogProvider>
       <ThreadPrimitive.Root
         className="relative flex h-full flex-col overflow-hidden bg-transparent"
-        style={{ ["--thread-max-width" as string]: "72rem" }}
+        style={{ ["--thread-max-width" as string]: "58rem" }}
       >
         <ThreadPrimitive.If empty>
           <ThreadPrimitive.Viewport className="h-full overflow-y-auto">
@@ -1529,7 +1529,7 @@ const UserMessage: FC = () => {
   return (
     <MessagePrimitive.Root
       data-message-id={id}
-      className="message-enter w-full max-w-[var(--thread-max-width)] py-3"
+      className="message-enter w-full max-w-[var(--thread-max-width)] pb-1 pt-3"
     >
       <ChatMessage.User className="gap-1.5">
         <UserSkillBadge />
@@ -1548,7 +1548,7 @@ const UserMessage: FC = () => {
           />
         </div>
         <MessagePrimitive.If hasContent>
-          <ChatMessage.Bubble className="cocola-chat-user-bubble max-w-[min(80%,48rem)] whitespace-pre-wrap break-words rounded-2xl px-4 py-2.5 text-[15px] leading-6 text-foreground">
+          <ChatMessage.Bubble className="cocola-chat-user-bubble max-w-[min(72%,42rem)] whitespace-pre-wrap break-words rounded-xl px-3 py-1.5 text-[15px] leading-6 text-foreground">
             <MessagePrimitive.Parts components={USER_PART_COMPONENTS} />
           </ChatMessage.Bubble>
         </MessagePrimitive.If>
@@ -1607,7 +1607,7 @@ const UserSkillBadge: FC = () => {
 };
 
 const AssistantMessage: FC = () => (
-  <MessagePrimitive.Root className="message-enter relative w-full max-w-[var(--thread-max-width)] py-3">
+  <MessagePrimitive.Root className="message-enter relative w-full max-w-[var(--thread-max-width)] pb-4 pt-1">
     <ChatMessage.Assistant className="cocola-chat-assistant gap-0 py-0">
       <ChatMessage.Body className="gap-0 pe-0">
         <div className="relative max-w-full break-words px-0.5 py-1 leading-7 text-foreground">
