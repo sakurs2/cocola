@@ -1,7 +1,7 @@
 "use client";
 
 import { Button, Card, ProgressBar } from "@heroui/react";
-import { ListView } from "@heroui-pro/react/list-view";
+import { ListView } from "@cocola/ui-compat/list-view";
 import { LoaderCircle, RefreshCw } from "lucide-react";
 import { useCallback, useEffect, useState } from "react";
 import { ModelIcon } from "@/components/ui/model-icon";

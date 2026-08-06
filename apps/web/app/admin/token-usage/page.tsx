@@ -15,9 +15,9 @@ import {
 } from "chart.js";
 import { Download, Loader2, UserRound } from "lucide-react";
 import { Button, Card, Input, Label, SearchField, TextField } from "@heroui/react";
-import { DataGrid, type DataGridColumn } from "@heroui-pro/react/data-grid";
-import { EmptyState } from "@heroui-pro/react/empty-state";
-import { Segment } from "@heroui-pro/react/segment";
+import { DataGrid, type DataGridColumn } from "@cocola/ui-compat/data-grid";
+import { EmptyState } from "@cocola/ui-compat/empty-state";
+import { Segment } from "@cocola/ui-compat/segment";
 import { Line } from "react-chartjs-2";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { AdminPage, AdminPageHeader, AdminRefreshButton } from "@/components/admin/admin-ui";

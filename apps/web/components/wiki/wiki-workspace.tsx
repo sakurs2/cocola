@@ -19,7 +19,7 @@ import {
   Upload,
 } from "lucide-react";
 import { Button, Card, Chip, Input, Label, SearchField, TextField, Tooltip } from "@heroui/react";
-import { Sheet } from "@heroui-pro/react/sheet";
+import { Sheet } from "@cocola/ui-compat/sheet";
 import {
   Fragment,
   useCallback,

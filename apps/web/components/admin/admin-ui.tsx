@@ -4,8 +4,8 @@ import { motion } from "framer-motion";
 import { CheckCircle2, ChevronLeft, ChevronRight, Copy, RefreshCw } from "lucide-react";
 import { type ReactNode, useLayoutEffect, useRef, useState } from "react";
 import { Button, Card, Chip, Tooltip, type ButtonProps } from "@heroui/react";
-import { EmptyState } from "@heroui-pro/react/empty-state";
-import { Sheet } from "@heroui-pro/react/sheet";
+import { EmptyState } from "@cocola/ui-compat/empty-state";
+import { Sheet } from "@cocola/ui-compat/sheet";
 import { cn } from "@/lib/utils";
 
 export function AdminPage({

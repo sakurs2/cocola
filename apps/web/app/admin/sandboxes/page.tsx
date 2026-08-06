@@ -11,8 +11,8 @@ import {
   AdminTruncatedValue,
 } from "@/components/admin/admin-ui";
 import { Button, Card } from "@heroui/react";
-import { DataGrid, type DataGridColumn } from "@heroui-pro/react/data-grid";
-import { EmptyState } from "@heroui-pro/react/empty-state";
+import { DataGrid, type DataGridColumn } from "@cocola/ui-compat/data-grid";
+import { EmptyState } from "@cocola/ui-compat/empty-state";
 import { CircleDot, LoaderCircle, Server, Trash2 } from "lucide-react";
 import { signOut } from "next-auth/react";
 import { useCallback, useEffect, useState } from "react";

@@ -1,8 +1,8 @@
 "use client";
 
 import { Button, Card, Chip } from "@heroui/react";
-import { EmptyState } from "@heroui-pro/react/empty-state";
-import { Segment } from "@heroui-pro/react/segment";
+import { EmptyState } from "@cocola/ui-compat/empty-state";
+import { Segment } from "@cocola/ui-compat/segment";
 import { Folder, FolderOpen, GitBranch, GitFork, HardDrive, Loader2, Plus } from "lucide-react";
 import { useMemo, useState } from "react";
 import type { ProjectSummary } from "@/app/runtime-provider";

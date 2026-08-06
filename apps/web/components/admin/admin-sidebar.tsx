@@ -1,8 +1,8 @@
 "use client";
 
 import { ArrowLeft } from "lucide-react";
-import { Sheet } from "@heroui-pro/react/sheet";
-import { Sidebar } from "@heroui-pro/react/sidebar";
+import { Sheet } from "@cocola/ui-compat/sheet";
+import { Sidebar } from "@cocola/ui-compat/sidebar";
 import { CocolaCoreLogo } from "@/components/cocola-core-logo";
 import {
   ADMIN_GROUPS,

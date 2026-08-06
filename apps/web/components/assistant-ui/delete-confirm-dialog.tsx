@@ -1,7 +1,7 @@
 "use client";
 
 import { Button } from "@heroui/react";
-import { Sheet } from "@heroui-pro/react/sheet";
+import { Sheet } from "@cocola/ui-compat/sheet";
 import { Trash2 } from "lucide-react";
 
 export function DeleteConfirmDialog({

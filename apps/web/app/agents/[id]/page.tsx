@@ -2,7 +2,7 @@
 
 import { Archive, ArrowLeft, Check, Loader2, Save } from "lucide-react";
 import { Button, Card, Chip, Input, Label, TextArea, TextField } from "@heroui/react";
-import { Sheet } from "@heroui-pro/react/sheet";
+import { Sheet } from "@cocola/ui-compat/sheet";
 import { useParams, useRouter } from "next/navigation";
 import { useEffect, useMemo, useState } from "react";
 import { AgentAvatar } from "@/components/agents/agent-avatar";

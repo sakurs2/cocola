@@ -1,7 +1,7 @@
 "use client";
 
 import { Button, Input, Label, TextField } from "@heroui/react";
-import { Sheet } from "@heroui-pro/react/sheet";
+import { Sheet } from "@cocola/ui-compat/sheet";
 import { AlertTriangle, type LucideIcon } from "lucide-react";
 import { useEffect, useState, type FormEvent, type ReactNode } from "react";
 

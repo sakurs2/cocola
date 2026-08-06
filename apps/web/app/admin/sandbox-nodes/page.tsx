@@ -2,9 +2,9 @@
 
 import { Cpu as SandboxNodesPageIcon } from "lucide-react";
 import { Button, Card, Chip, Input, Label, TextField, Tooltip } from "@heroui/react";
-import { DataGrid, type DataGridColumn } from "@heroui-pro/react/data-grid";
-import { EmptyState } from "@heroui-pro/react/empty-state";
-import { Sheet } from "@heroui-pro/react/sheet";
+import { DataGrid, type DataGridColumn } from "@cocola/ui-compat/data-grid";
+import { EmptyState } from "@cocola/ui-compat/empty-state";
+import { Sheet } from "@cocola/ui-compat/sheet";
 import {
   AdminEmptyState,
   AdminPage,

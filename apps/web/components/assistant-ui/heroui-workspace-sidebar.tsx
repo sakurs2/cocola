@@ -23,8 +23,8 @@ import {
   TrashBin,
 } from "@gravity-ui/icons";
 import { Button, Dropdown, Tooltip } from "@heroui/react";
-import { Sheet } from "@heroui-pro/react/sheet";
-import { Sidebar } from "@heroui-pro/react/sidebar";
+import { Sheet } from "@cocola/ui-compat/sheet";
+import { Sidebar } from "@cocola/ui-compat/sidebar";
 import { useSession } from "next-auth/react";
 import { usePathname, useRouter } from "next/navigation";
 import { type ComponentType, useCallback, useEffect, useState } from "react";

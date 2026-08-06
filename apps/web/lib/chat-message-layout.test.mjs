@@ -29,8 +29,9 @@ const demoStylesSource = await readFile(
   new URL("../app/cocola-web-demo.css", import.meta.url),
   "utf8",
 );
-test("conversation messages use the HeroUI Pro message skeleton without replacing Cocola parts", () => {
-  assert.match(threadSource, /from "@heroui-pro\/react\/chat-message"/);
+const globalStylesSource = await readFile(new URL("../app/globals.css", import.meta.url), "utf8");
+test("conversation messages use the Cocola compatibility skeleton without replacing Cocola parts", () => {
+  assert.match(threadSource, /from "@cocola\/ui-compat\/chat-message"/);
   assert.match(threadSource, /<ChatMessage\.User/);
   assert.match(threadSource, /<ChatMessage\.Assistant/);
   assert.match(threadSource, /<MessagePrimitive\.Parts components=\{ASSISTANT_PART_COMPONENTS\}/);
@@ -38,8 +39,8 @@ test("conversation messages use the HeroUI Pro message skeleton without replacin
   assert.match(threadSource, /"structured-result": StructuredResultCardPart/);
 });
 
-test("assistant identity remains model-aware and the thread uses the wider product layout", () => {
-  assert.match(threadSource, /\["--thread-max-width" as string\]: "72rem"/);
+test("assistant identity remains model-aware and the thread uses the bounded product layout", () => {
+  assert.match(threadSource, /\["--thread-max-width" as string\]: "58rem"/);
   assert.match(threadSource, /<ModelIcon icon=\{icon\}/);
   assert.match(threadSource, /metadata\?\.model_label \|\| selectedModel\?\.label/);
   assert.match(threadSource, /metadata\?\.interaction_mode === "plan"/);
@@ -128,8 +129,12 @@ test("the real workspace uses the approved HeroUI demo shell treatment", () => {
   assert.match(themeToggleSource, /Switch to \$\{nextMode\} mode/);
 });
 
-test("formal Cocola keeps HeroUI Pro versioned without the worktree proxy", () => {
-  assert.equal(webPackage.dependencies["@heroui-pro/react"], "1.0.0-beta.7");
+test("formal Cocola has no production HeroUI Pro dependency or worktree proxy", () => {
+  assert.equal(webPackage.dependencies["@heroui-pro/react"], undefined);
+  assert.equal(webPackage.dependencies["@cocola/ui-compat"], "workspace:*");
+  assert.doesNotMatch(globalStylesSource, /@heroui-pro\/react/);
+  assert.match(globalStylesSource, /@cocola\/ui-compat\/styles\.css/);
+  assert.doesNotMatch(nextConfigSource, /motion\/react|HeroUI Pro/);
   assert.equal(webPackage.scripts["dev:frontend-only"], undefined);
   assert.equal(rootPackage.scripts["dev:web:frontend-only"], undefined);
   assert.doesNotMatch(nextConfigSource, /COCOLA_WEB_BACKEND_ORIGIN|backendOrigin/);

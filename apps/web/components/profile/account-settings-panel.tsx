@@ -1,7 +1,7 @@
 "use client";
 
 import { Button, Card, Chip, Input, Label, TextField } from "@heroui/react";
-import { Sheet } from "@heroui-pro/react/sheet";
+import { Sheet } from "@cocola/ui-compat/sheet";
 import type { SessionUser } from "@/lib/server-auth";
 import { AlertCircle, CheckCircle2, KeyRound, Lock, Save } from "lucide-react";
 import { useRouter } from "next/navigation";

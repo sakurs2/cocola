@@ -5,6 +5,7 @@
   "packageManager": "pnpm@9.0.0",
   "scripts": {
     "dev:web": "pnpm --filter @cocola/web dev",
+    "typecheck:ui-compat": "pnpm --filter @cocola/ui-compat exec tsc --noEmit",
     "build": "pnpm -r build",
     "lint": "pnpm -r lint"
   },

@@ -13,11 +13,11 @@ import {
   Trash2,
 } from "lucide-react";
 import { Button, Card, Chip, Input, Label, SearchField, TextField, Tooltip } from "@heroui/react";
-import { ItemCard } from "@heroui-pro/react/item-card";
-import { ItemCardGroup } from "@heroui-pro/react/item-card-group";
-import { ListView } from "@heroui-pro/react/list-view";
-import { PressableFeedback } from "@heroui-pro/react/pressable-feedback";
-import { Sheet } from "@heroui-pro/react/sheet";
+import { ItemCard } from "@cocola/ui-compat/item-card";
+import { ItemCardGroup } from "@cocola/ui-compat/item-card-group";
+import { ListView } from "@cocola/ui-compat/list-view";
+import { PressableFeedback } from "@cocola/ui-compat/pressable-feedback";
+import { Sheet } from "@cocola/ui-compat/sheet";
 import { useMemo, useState } from "react";
 import { SkillIcon } from "@/components/ui/skill-icon";
 import type { AgentKnowledgeSource, AgentSkillCatalogItem } from "@/lib/agents";

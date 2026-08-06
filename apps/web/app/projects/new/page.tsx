@@ -26,9 +26,9 @@ import {
   TextArea,
   TextField,
 } from "@heroui/react";
-import { ItemCard } from "@heroui-pro/react/item-card";
-import { ItemCardGroup } from "@heroui-pro/react/item-card-group";
-import { PressableFeedback } from "@heroui-pro/react/pressable-feedback";
+import { ItemCard } from "@cocola/ui-compat/item-card";
+import { ItemCardGroup } from "@cocola/ui-compat/item-card-group";
+import { PressableFeedback } from "@cocola/ui-compat/pressable-feedback";
 import { useCocola } from "@/app/runtime-provider";
 import { WorkspacePageFrame } from "@/components/heroui-workspace/workspace-ui";
 import { nextProjectCreateIntent } from "@/lib/project-task-intent.mjs";

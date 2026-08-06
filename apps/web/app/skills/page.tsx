@@ -11,7 +11,7 @@ import {
   TextField,
   Tooltip,
 } from "@heroui/react";
-import { EmptyState } from "@heroui-pro/react/empty-state";
+import { EmptyState } from "@cocola/ui-compat/empty-state";
 import {
   ChevronLeft,
   ChevronRight,

@@ -21,15 +21,13 @@ The repository uses:
 Install dependencies with:
 
 ```sh
-npx heroui-pro login
 pnpm install --frozen-lockfile
-npx heroui-pro install --yes
 make py-install
 ```
 
-The Web workspace uses licensed HeroUI Pro packages. Local development requires an authenticated
-HeroUI Pro CLI session. CI should provide `HEROUI_AUTH_TOKEN` through its secret store before
-installing dependencies; never commit the token to the repository.
+The Web workspace uses HeroUI OSS plus Cocola-owned compatibility components. HeroUI Pro may be
+used as a visual reference, but Cocola must not import its packages, styles, or require its tokens
+for local development, CI, or deployment.
 
 See [README.md](./README.md) for the development stack and service layout.
 

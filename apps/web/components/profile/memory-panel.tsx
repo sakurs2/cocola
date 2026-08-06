@@ -1,8 +1,8 @@
 "use client";
 
 import { Chip } from "@heroui/react";
-import { ItemCard } from "@heroui-pro/react/item-card";
-import { ItemCardGroup } from "@heroui-pro/react/item-card-group";
+import { ItemCard } from "@cocola/ui-compat/item-card";
+import { ItemCardGroup } from "@cocola/ui-compat/item-card-group";
 import { Database } from "lucide-react";
 
 export function MemoryPanel() {

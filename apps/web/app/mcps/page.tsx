@@ -1,7 +1,7 @@
 "use client";
 
 import { Card, Chip, Switch } from "@heroui/react";
-import { EmptyState } from "@heroui-pro/react/empty-state";
+import { EmptyState } from "@cocola/ui-compat/empty-state";
 import { LoaderCircle, Plug } from "lucide-react";
 import Link from "next/link";
 import { useCallback, useEffect, useState } from "react";

@@ -2,7 +2,7 @@
 
 import { ChevronsRight } from "@gravity-ui/icons";
 import { Button, Tooltip } from "@heroui/react";
-import { AppLayout } from "@heroui-pro/react/app-layout";
+import { AppLayout } from "@cocola/ui-compat/app-layout";
 import { usePathname, useRouter } from "next/navigation";
 import { type CSSProperties, type ReactNode, useCallback, useEffect, useState } from "react";
 

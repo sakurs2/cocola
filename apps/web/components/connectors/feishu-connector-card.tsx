@@ -15,8 +15,8 @@ import {
   type LucideIcon,
 } from "lucide-react";
 import { Button, Card, Chip, Input, Label, TextField } from "@heroui/react";
-import { Segment } from "@heroui-pro/react/segment";
-import { Sheet } from "@heroui-pro/react/sheet";
+import { Segment } from "@cocola/ui-compat/segment";
+import { Sheet } from "@cocola/ui-compat/sheet";
 import { useCallback, useEffect, useMemo, useState, type FormEvent, type ReactNode } from "react";
 import { useWorkspaceToast } from "@/components/assistant-ui/workspace-toast";
 import { connectorResponseError } from "@/lib/connector-response-error.mjs";

@@ -19,7 +19,7 @@ import {
   type ThreadMessageLike,
 } from "@assistant-ui/react";
 import { Button } from "@heroui/react";
-import { Sheet } from "@heroui-pro/react/sheet";
+import { Sheet } from "@cocola/ui-compat/sheet";
 import {
   createContext,
   useCallback,

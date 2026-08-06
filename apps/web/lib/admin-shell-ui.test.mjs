@@ -34,8 +34,9 @@ const selectControlSource = readFileSync(
 const layoutSource = readFileSync(new URL("../app/admin/layout.tsx", import.meta.url), "utf8");
 const globalStyles = readFileSync(new URL("../app/globals.css", import.meta.url), "utf8");
 
-test("formal Admin uses the approved HeroUI Pro AppLayout and compound Sidebar", () => {
-  assert.match(shellSource, /import \{ AppLayout \} from "@heroui-pro\/react\/app-layout"/);
+test("formal Admin uses the Cocola AppLayout compatibility layer and compound Sidebar", () => {
+  assert.match(shellSource, /import \{ AppLayout \} from "@cocola\/ui-compat\/app-layout"/);
+  assert.match(sidebarSource, /import \{ Sidebar \} from "@cocola\/ui-compat\/sidebar"/);
   assert.match(shellSource, /sidebar=\{<AdminSidebar activeSectionId=\{section\.id\} \/>\}/);
   assert.match(shellSource, /style=\{getAdminThemeStyle\(section\.theme\)\}/);
   assert.doesNotMatch(shellSource, /admin-glass-sidebar|admin-glass-shell|<aside/);

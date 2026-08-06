@@ -20,10 +20,10 @@ import {
   useThread,
   useThreadComposerAttachment,
 } from "@assistant-ui/react";
-import { ChatMessage } from "@heroui-pro/react/chat-message";
-import { ChatConversation } from "@heroui-pro/react/chat-conversation";
-import { PromptInput } from "@heroui-pro/react/prompt-input";
-import { PromptSuggestion } from "@heroui-pro/react/prompt-suggestion";
+import { ChatConversation } from "@cocola/ui-compat/chat-conversation";
+import { ChatMessage } from "@cocola/ui-compat/chat-message";
+import { PromptInput } from "@cocola/ui-compat/prompt-input";
+import { PromptSuggestion } from "@cocola/ui-compat/prompt-suggestion";
 import { Button, Dropdown, Label } from "@heroui/react";
 import {
   BookOpen as GravityBookOpen,

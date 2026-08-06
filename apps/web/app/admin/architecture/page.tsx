@@ -3,7 +3,7 @@
 import { Workflow as ArchitecturePageIcon } from "lucide-react";
 import { ExternalLink, LoaderCircle, Server } from "lucide-react";
 import { Button, Card } from "@heroui/react";
-import { Sheet } from "@heroui-pro/react/sheet";
+import { Sheet } from "@cocola/ui-compat/sheet";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import {
   AdminPage,

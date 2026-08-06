@@ -2,7 +2,7 @@
 
 import { ShieldCheck } from "lucide-react";
 import { Chip } from "@heroui/react";
-import { AppLayout } from "@heroui-pro/react/app-layout";
+import { AppLayout } from "@cocola/ui-compat/app-layout";
 import { useSession } from "next-auth/react";
 import { usePathname, useRouter } from "next/navigation";
 import { useCallback, type ReactNode } from "react";

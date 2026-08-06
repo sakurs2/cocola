@@ -2,7 +2,7 @@
 
 import { AlertTriangle, Bot, Check, CopyIcon, Loader2, RefreshCw } from "lucide-react";
 import { Button, Card, Tooltip } from "@heroui/react";
-import { EmptyState } from "@heroui-pro/react/empty-state";
+import { EmptyState } from "@cocola/ui-compat/empty-state";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { AnswerMarkdownContent, MarkdownContent } from "@/components/assistant-ui/markdown-text";
 import {

@@ -2,10 +2,10 @@
 
 import { useThread } from "@assistant-ui/react";
 import { Button, Chip, ScrollShadow, Tooltip } from "@heroui/react";
-import { EmptyState } from "@heroui-pro/react/empty-state";
-import { ListView } from "@heroui-pro/react/list-view";
-import { Segment } from "@heroui-pro/react/segment";
-import { Sheet } from "@heroui-pro/react/sheet";
+import { EmptyState } from "@cocola/ui-compat/empty-state";
+import { ListView } from "@cocola/ui-compat/list-view";
+import { Segment } from "@cocola/ui-compat/segment";
+import { Sheet } from "@cocola/ui-compat/sheet";
 import type { ArtifactPreview } from "@/app/runtime-provider";
 import {
   ReadonlyFilePreview,
@@ -369,9 +369,7 @@ export function WorkspaceDock({
                 title={page.title}
                 className={cn(
                   "group flex h-9 shrink-0 items-center rounded-xl transition-colors",
-                  active
-                    ? "bg-default"
-                    : "hover:bg-default/60 focus-within:bg-default/60",
+                  active ? "bg-default" : "hover:bg-default/60 focus-within:bg-default/60",
                 )}
               >
                 <Button

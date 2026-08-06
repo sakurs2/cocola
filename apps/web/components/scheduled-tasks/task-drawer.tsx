@@ -1,7 +1,7 @@
 "use client";
 
 import { Button, Card, Chip, Dropdown, Input, Label, TextArea, TextField } from "@heroui/react";
-import { Sheet } from "@heroui-pro/react/sheet";
+import { Sheet } from "@cocola/ui-compat/sheet";
 import { CalendarClock, ChevronDown, ChevronRight, Paperclip, UserCircle } from "lucide-react";
 import { useEffect, useState } from "react";
 import { ModelIcon } from "@/components/ui/model-icon";

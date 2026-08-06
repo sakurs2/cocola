@@ -3,8 +3,8 @@
 import { HardDrive as StoragePageIcon } from "lucide-react";
 import { AlertTriangle, Gauge, HardDrive, LoaderCircle, Trash2 } from "lucide-react";
 import { Button, Card, Tooltip } from "@heroui/react";
-import { DataGrid, type DataGridColumn } from "@heroui-pro/react/data-grid";
-import { EmptyState } from "@heroui-pro/react/empty-state";
+import { DataGrid, type DataGridColumn } from "@cocola/ui-compat/data-grid";
+import { EmptyState } from "@cocola/ui-compat/empty-state";
 import { signOut } from "next-auth/react";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import {

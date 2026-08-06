@@ -1,0 +1,44 @@
+{
+  "name": "@cocola/ui-compat",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    "./app-layout": "./src/app-layout.tsx",
+    "./chat-conversation": "./src/chat-conversation.tsx",
+    "./chat-message": "./src/chat-message.tsx",
+    "./data-grid": "./src/data-grid.tsx",
+    "./empty-state": "./src/empty-state.tsx",
+    "./item-card": "./src/item-card.tsx",
+    "./item-card-group": "./src/item-card-group.tsx",
+    "./list-view": "./src/list-view.tsx",
+    "./pressable-feedback": "./src/pressable-feedback.tsx",
+    "./prompt-input": "./src/prompt-input.tsx",
+    "./prompt-suggestion": "./src/prompt-suggestion.tsx",
+    "./segment": "./src/segment.tsx",
+    "./sheet": "./src/sheet.tsx",
+    "./sidebar": "./src/sidebar.tsx",
+    "./styles.css": "./src/styles.css"
+  },
+  "peerDependencies": {
+    "@heroui/react": "3.2.3",
+    "react": "19.2.6",
+    "react-aria-components": "1.20.0",
+    "react-dom": "19.2.6"
+  },
+  "devDependencies": {
+    "@heroui/react": "3.2.3",
+    "@react-aria/i18n": "3.13.1",
+    "@react-aria/ssr": "3.10.1",
+    "@react-aria/utils": "3.34.1",
+    "@types/react": "19.2.14",
+    "@types/react-dom": "19.2.3",
+    "react": "19.2.6",
+    "react-aria": "3.50.0",
+    "react-aria-components": "1.20.0",
+    "react-dom": "19.2.6",
+    "tailwind-merge": "3.6.0",
+    "tailwindcss": "4.3.3",
+    "typescript": "5.9.3"
+  }
+}

@@ -1,8 +1,8 @@
 "use client";
 
 import { Button, Card, Chip, Dropdown, Input, Label, TextArea, TextField } from "@heroui/react";
-import { Segment } from "@heroui-pro/react/segment";
-import { Sheet } from "@heroui-pro/react/sheet";
+import { Segment } from "@cocola/ui-compat/segment";
+import { Sheet } from "@cocola/ui-compat/sheet";
 import {
   AlertTriangle,
   Archive,

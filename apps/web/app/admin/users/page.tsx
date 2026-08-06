@@ -11,9 +11,9 @@ import {
   SearchField,
   TextField,
 } from "@heroui/react";
-import { DataGrid, type DataGridColumn } from "@heroui-pro/react/data-grid";
-import { EmptyState } from "@heroui-pro/react/empty-state";
-import { Segment } from "@heroui-pro/react/segment";
+import { DataGrid, type DataGridColumn } from "@cocola/ui-compat/data-grid";
+import { EmptyState } from "@cocola/ui-compat/empty-state";
+import { Segment } from "@cocola/ui-compat/segment";
 import {
   AdminAlert,
   AdminConfirmDialog,

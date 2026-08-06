@@ -1,7 +1,7 @@
 "use client";
 
 import { Button, Card, Chip, Input, Label, Separator, TextField } from "@heroui/react";
-import { EmptyState } from "@heroui-pro/react/empty-state";
+import { EmptyState } from "@cocola/ui-compat/empty-state";
 import { ArrowRight, Bot, Check, Loader2, Plus } from "lucide-react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";

@@ -1,7 +1,7 @@
 "use client";
 
 import { Button, Card, Chip, Input, Label, TextField } from "@heroui/react";
-import { EmptyState } from "@heroui-pro/react/empty-state";
+import { EmptyState } from "@cocola/ui-compat/empty-state";
 import { FolderOpen, Folders, Loader2, MessagesSquare, Plus } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { useEffect, useMemo, useState, type FormEvent } from "react";

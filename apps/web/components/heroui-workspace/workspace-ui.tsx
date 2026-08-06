@@ -2,7 +2,7 @@
 
 import { ArrowRight, Search } from "lucide-react";
 import { Button, Card, SearchField } from "@heroui/react";
-import { Sheet } from "@heroui-pro/react/sheet";
+import { Sheet } from "@cocola/ui-compat/sheet";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import type { ReactNode } from "react";

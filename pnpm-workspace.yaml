@@ -1,6 +1,4 @@
 packages:
   - "apps/web"
   - "packages/ts-common"
-
-allowBuilds:
-  "@heroui-pro/react": true
+  - "packages/ui-compat"

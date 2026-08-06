@@ -1,8 +1,8 @@
 "use client";
 
 import { Button, Card, Chip, Dropdown, Input, Label, TextField } from "@heroui/react";
-import { ListView } from "@heroui-pro/react/list-view";
-import { Sheet } from "@heroui-pro/react/sheet";
+import { ListView } from "@cocola/ui-compat/list-view";
+import { Sheet } from "@cocola/ui-compat/sheet";
 import {
   ArrowLeft,
   Bot,

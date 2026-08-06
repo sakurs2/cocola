@@ -3,9 +3,9 @@
 import { Timer as ClockCountdown } from "lucide-react";
 import { MoreHorizontal, Trash2 } from "lucide-react";
 import { Button, Card, Dropdown, SearchField } from "@heroui/react";
-import { DataGrid, type DataGridColumn } from "@heroui-pro/react/data-grid";
-import { EmptyState } from "@heroui-pro/react/empty-state";
-import { Segment } from "@heroui-pro/react/segment";
+import { DataGrid, type DataGridColumn } from "@cocola/ui-compat/data-grid";
+import { EmptyState } from "@cocola/ui-compat/empty-state";
+import { Segment } from "@cocola/ui-compat/segment";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import {
   AdminAlert,
